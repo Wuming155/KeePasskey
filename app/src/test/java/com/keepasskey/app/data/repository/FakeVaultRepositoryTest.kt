@@ -68,7 +68,7 @@ class FakeVaultRepositoryTest {
     @Test
     fun `saveEntry 新增与更新条目`() = runTest {
         val repository = newRepository()
-        val newEntry = repository.getEntry("1").first()!!.copy(id = "new_1", title = "新条目")
+        val newEntry = repository.getEntry("1").first()!!.copy(id = "new_1", title = "新条目", revisions = emptyList())
 
         repository.saveEntry(newEntry)
         var stored = repository.getEntries().first()
