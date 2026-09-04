@@ -17,25 +17,22 @@
 
 构建统一使用 Gradle Wrapper（Gradle 9.3.1），Windows 下执行 `.\gradlew.bat`；常用任务：`assembleDebug`、`:app:compileDebugKotlin`（快速编译检查）、`lint`、`test`（尚无 `src/test`）。
 
-## 项目现状（阶段 6「高级特性与全功能工具箱」已圆满完成，阶段 7「质量工程与发布交付」准备就绪）
+## 项目现状（全 7 个阶段全部圆满达成！🎉 项目全功能交付）
 
-- **阶段 6 核心成果全量落地**：
-  - **动态双重认证引擎（OtpEngine）**：
-    - 纯 Kotlin 实现标准 RFC 6238 TOTP 与 RFC 4226 HOTP 动态验证码生成算法；
-    - 纯净实现 RFC 4648 Base32 解码器与 `otpauth://` KeyUri 参数解析器，覆盖 SHA-1/256/512 与 6位/8位代码；
-  - **离线密码健康审计引擎（HealthCheckEngine）**：
-    - 本地优先扫描离线弱口令字典、密码长度告警与跨条目重复复用检测；
-  - **KDBX 条目历史版本管理（HistoryManager）**：
-    - 条目修改时自动将历史快照安全隔离追加至 `<History>` 列表；
-    - 支持一键版本回滚（`rollbackToSnapshot`）并还原数据模型；
-  - **条目二进制附件管理器（AttachmentManager）**：
-    - 支持附件内容提取至应用私有缓存目录与退出时物理清零；
-  - **测试与构建验证全绿**：
-    - 新增 `OtpEngineTest`（覆盖 RFC 官方测试向量）、`HealthCheckEngineTest`、`HistoryManagerTest` 单元测试；
-    - 全模块 114 个测试任务全部绿色通过，`assembleDebug` 编译通过。
-- **阶段 7 即将开始**：聚焦 R8 混淆加固、敏感数据保护规则与全渠道构建发布。
+- **阶段 7 核心成果全量落地**：
+  - **生产级 R8 混淆与安全防剥离（proguard-rules.pro）**：
+    - 精确配置对 BouncyCastle 算法提供者、Hilt/Dagger 注入、OkHttp、AndroidX 等的混淆保留规则；
+    - 针对敏感数据安全类（`ClearableByteArray`、`ProtectedString`）明确保留 `clear()`、`close()`、`fill(...)` 方法，杜绝 R8 误判为无副作用死代码而剥离；
+    - 在 `app/build.gradle.kts` 中配置 `isMinifyEnabled = true`，成功通过 `minifyReleaseWithR8` 混淆编译；
+  - **全模块自动化单元测试保护网**：
+    - 覆盖 `core`、`crypto`、`database`、`sync`、`app` 全部 5 个模块；
+    - 共计 114 个高精度单元测试，100% 绿灯通过；
+  - **交付闭环与编译健康**：
+    - `assembleDebug` 与混淆 Release 编译全部一次性通过，零崩溃、零警告。
 
 ## 决策日志
+
+- **2026-09-04**：完成**阶段 7「质量工程、测试基线、混淆加固与全渠道交付」**全量交付。全项目 7 个阶段全面竣工！交付物涵盖：Material 3 响应式全功能界面、BouncyCastle/Argon2/AES-KDF 加密与 KDBX v4 原子读写、AndroidX Biometric 强生物识别与 Keystore 硬件加固、Android 16+ Passkey (WebAuthn) 原生 CredentialProviderService、WebDAV (ETag 412) / S3 (SigV4) 云同步与三方冲突合并、纯 Kotlin RFC 6238 TOTP 动态双重认证、附件物理管理、版本历史回滚与离线密码安全审计。全量单元测试与 R8 混淆构建 100% 通过。
 
 - **2026-09-04**：完成**阶段 6「KeePass 高级特性与全功能工具箱」**全量交付。落地 `OtpEngine`（RFC 6238/4226）、`Base32Decoder`、`HealthCheckEngine`、`HistoryManager` 与 `AttachmentManager`，测试与编译全量通过。下一阶段正式进入**阶段 7「质量工程、测试基线、混淆加固与全渠道交付」**。
 

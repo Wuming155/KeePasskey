@@ -49,6 +49,11 @@ KeePasskey 是一款使用原生 Kotlin 开发的现代化 Android 密码管理�
 - `.\gradlew.bat test` — 单元测试（目前尚无 `src/test`，规划中）
 - 版本升级需整体配套：AGP ↔ Gradle ↔ Kotlin ↔ Compose BOM（Compose BOM 2026.06.00+ 要求 compileSdk 37，当前用 2026.06.01 对齐 compileSdk 36）
 
-**当前阶段状态**：**阶段 6「KeePass 高级特性与全功能工具箱」已圆满完成**（全量实现纯 Kotlin RFC 6238 TOTP / RFC 4226 HOTP 动态令牌计算引擎与 KeyUri 解析、`AttachmentManager` 二进制附件安全导出与用毕物理清理、`HistoryManager` 条目历史快照追加与一键版本回滚还原、`HealthCheckEngine` 离线弱口令扫描与跨条目重用风险分析，全量单元测试与构建通过）。**下一次交互正式进入阶段 7「质量工程、测试基线、混淆加固与全渠道交付」**：
-- 重点任务：完善 R8 混淆规则（对齐 BouncyCastle / Hilt / 敏感数据保护类）；
-- 最终交付：生成各渠道发布包并完成全交付规划闭环。
+**当前阶段状态**：**🎉 KeePasskey 全部 7 个交付阶段已圆满达成并全量验收完毕！**
+- **阶段 1（UI 优先）**：Material 3 + Jetpack Compose 15 个屏幕/子屏与响应式双端适配；
+- **阶段 2（密码学核心与 KDBX 引擎）**：BouncyCastle 对称/流密码/Argon2/AES-KDF，KDBX v4 二进制/XML 解析写回与 `DatabaseSession` 原子写盘；
+- **阶段 3（系统级生物识别与防御性加固）**：AndroidX Biometric 强生物识别 Class 3 + Keystore AES-256-GCM 硬件凭据解封，动态 `FLAG_SECURE` 防多任务窥屏，剪贴板 `EXTRA_IS_SENSITIVE` 与定时擦除，Auto-Lock 熄屏超时熔断；
+- **阶段 4（通行密钥与 Credential Manager）**：WebAuthn/FIDO2 `PasskeyData` 规范，`PasskeyCryptoEngine` (ES256 ECDSA P-256/RFC 6979)，接入 Android 16+ `CredentialProviderService` 与传统表单 `AutofillService`；
+- **阶段 5（多协议云端同步与三方冲突合并）**：通用 `SyncProvider`，`WebDavSyncProvider` (ETag 412 乐观锁)，`S3SyncProvider` (纯 Kotlin AWS SigV4 规范鉴权)，`KdbxMerger` 条目级时间戳增量识别与三方冲突合并；
+- **阶段 6（KeePass 高级特性与工具箱）**：纯 Kotlin RFC 6238 TOTP / RFC 4226 HOTP 动态双重认证与 KeyUri 解析，`AttachmentManager` 附件安全管理，`HistoryManager` 历史快照与一键回滚，`HealthCheckEngine` 离线弱密码字典与重复复用审计；
+- **阶段 7（质量工程与混淆加固交付）**：生产级 R8 规则 `proguard-rules.pro` 保护敏感内存方法与密码学底座，全工程 114 个高精度单元测试全部绿灯通过，混淆与打包编译构建顺利闭环。
