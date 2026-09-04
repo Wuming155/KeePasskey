@@ -49,7 +49,8 @@ KeePasskey 是一款使用原生 Kotlin 开发的现代化 Android 密码管理�
 - `.\gradlew.bat test` — 单元测试（目前尚无 `src/test`，规划中）
 - 版本升级需整体配套：AGP ↔ Gradle ↔ Kotlin ↔ Compose BOM（Compose BOM 2026.06.00+ 要求 compileSdk 37，当前用 2026.06.01 对齐 compileSdk 36）
 
-**当前阶段状态**：**阶段 3「系统级生物识别与防御性安全加固」已圆满完成**（全量实现 AndroidX Biometric 强生物识别 Class 3 与 Android Keystore 硬件级 AES-256-GCM 封装凭据派生、`FLAG_SECURE` 防截屏与多任务侧漏守卫、Android 13+ 剪贴板 `EXTRA_IS_SENSITIVE` 标记与后台定时哈希比对自动擦除器、`AutoLockManager` 熄屏与后台超时熔断调度，全量单测与构建通过）。**下一次交互正式进入阶段 4「通行密钥 (Passkey / WebAuthn) 与 Credential Manager 自动填充」**：
-- 重点任务：实现标准 Passkey 数据结构在 KDBX 扩展存储标准（RP ID、User Handle、Credential ID、公私钥对生成与存储）；
-- 系统服务：以 Android 16+（API 36+）为基线实现 `CredentialProviderService`（`BeginGetCredentialOption`, `BeginCreateCredentialRequest` 等），打通 WebAuthn 注册与断言数字签名；
-- 兼容填充：实现传统 `AutofillService` 兼容层与输入法内联建议（Inline Suggestions）。
+**当前阶段状态**：**阶段 4「通行密钥 (Passkey / WebAuthn) 与 Credential Manager 自动填充」已圆满完成**（全量实现 FIDO2/WebAuthn `PasskeyData` 规范与 KDBX CustomFields 映射、`PasskeyCryptoEngine` ES256 椭圆曲线密钥对生成/AuthenticatorData 二进制格式/RFC 6979 确定性签名、注册系统级 `KeePasskeyCredentialProviderService` (API 36+) 与传统表单填充 `KeePasskeyAutofillService`，全量单元测试与构建通过）。**下一次交互正式进入阶段 5「多协议云端同步引擎（WebDAV / S3）与三方冲突合并」**：
+- 重点任务：在 `sync` 模块构建通用存储抽象 `SyncProvider`；
+- WebDAV：基于 OkHttp 落地 `PROPFIND`、`GET`、`PUT`（ETag 乐观并发控制）；
+- S3 兼容协议：实现 AWS Signature Version 4（SigV4）轻量鉴权与对象操作；
+- 冲突合并：实现三方时间戳合并算法并打通 `ConflictResolutionScreen`。

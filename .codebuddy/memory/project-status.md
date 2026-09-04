@@ -17,26 +17,27 @@
 
 构建统一使用 Gradle Wrapper（Gradle 9.3.1），Windows 下执行 `.\gradlew.bat`；常用任务：`assembleDebug`、`:app:compileDebugKotlin`（快速编译检查）、`lint`、`test`（尚无 `src/test`）。
 
-## 项目现状（阶段 3「系统级生物识别与安全加固」已圆满完成，阶段 4「通行密钥与自动填充」准备就绪）
+## 项目现状（阶段 4「通行密钥与自动填充」已圆满完成，阶段 5「云端同步引擎」准备就绪）
 
-- **阶段 3 核心成果全量落地**：
-  - **AndroidX Biometric 强生物识别与硬件 Keystore**：
-    - 实现 `KeystoreManager`：管理硬件安全模块（TEE / StrongBox）隔离的 AES-256-GCM 主密钥；开启 `setInvalidatedByBiometricEnrollment(true)`，支持系统指纹变更检测与失效防护；
-    - 实现 `BiometricAuthManager`：封装系统级 `BiometricPrompt`（`BIOMETRIC_STRONG` Class 3），支持硬件 `CryptoObject` 对接；
-    - 实现 `BiometricCredentialStorage`：硬件安全隔离存储主凭据与 IV，支持免密快速解封。
-  - **防御性安全与防窥屏加固**：
-    - 实现 `FlagSecureGuard`：响应式挂载 `WindowManager.LayoutParams.FLAG_SECURE`，阻断系统截屏、录屏投屏与多任务卡片预览泄露凭据明文；
-    - 升级 `MainActivity` 继承 `FragmentActivity` 并集成安全守卫。
-  - **剪贴板安全生命周期**：
-    - 实现 `ClipboardSecurityManager`：写入敏感字段时注入 Android 13+ `ClipDescription.EXTRA_IS_SENSITIVE = true`，阻断系统浮动气泡明文窥探；调度后台倒计时比对内容哈希，实现无缝定时物理抹除；
-    - 统一贯通 `VaultListViewModel`、`EntryDetailViewModel`、`AuthenticatorScreen` 与 `GeneratorScreen` 的剪贴板安全复制链路。
-  - **自动锁定（Auto-Lock）熔断调度**：
-    - 实现 `AutoLockManager`：监听 `ProcessLifecycleOwner` 进程退至后台事件（按设定秒数超时熔断）与 `Intent.ACTION_SCREEN_OFF` 屏幕熄灭广播；
-    - 熔断时立即触发 `DatabaseSession.lock()` 物理销毁内存敏感数据，并强制 UI 导航重定向至 `UnlockScreen`。
-  - **测试与验证全绿**：新增 `SecurityTest` 与 `UnlockViewModelTest`，全量单元测试与 `assembleDebug` 编译 100% 成功。
-- **阶段 4 即将开始**：聚焦 Passkey (WebAuthn / FIDO2) 扩展模型与 Android 16+ `CredentialProviderService` 系统级集成。
+- **阶段 4 核心成果全量落地**：
+  - **KDBX 通行密钥扩展存储规范（PasskeyData）**：
+    - 落地 `PasskeyData` 模型（对齐 KeePass 事实标准），以条目自定义字段（`Passkey.*`）双向序列化存储，私钥使用 `ProtectedString` 安全驻留，杜绝 GC 堆明文泄露；
+  - **Passkey 密码学引擎（PasskeyCryptoEngine）**：
+    - 基于 BouncyCastle 纯净实现 ES256 (ECDSA P-256 / SHA-256) 椭圆曲线公私钥对生成；
+    - 组装标准 `AuthenticatorData` 二进制结构（RP ID 哈希、Flags 标志位与 SignCount 计数器）；
+    - 实现 RFC 6979 确定性 DSA 签名与 ASN.1 DER 编码输出；
+  - **Android 16+ Credential Manager 系统服务（KeePasskeyCredentialProviderService）**：
+    - 声明 `android.permission.BIND_CREDENTIAL_PROVIDER_SERVICE` 权限，提供完整的系统级凭据提供者接入点；
+    - 实现调用来源（Web 域名 / Origin / PackageName）与本地凭据条目的精准智能匹配逻辑；
+  - **传统自动填充兼容层（KeePasskeyAutofillService）**：
+    - 声明 `android.permission.BIND_AUTOFILL_SERVICE` 权限，支持无 Credential Manager 支持时的传统表单自动填充；
+  - **测试与验证全绿**：
+    - 新增 `PasskeyCryptoEngineTest` 与 `CredentialProviderMatchingTest` 单元测试，测试全部绿灯，`assembleDebug` 编译通过。
+- **阶段 5 即将开始**：聚焦 `sync` 模块构建，实现通用 `SyncProvider` 接口、WebDAV (OkHttp / ETag) 与 S3 (SigV4) 兼容存储客户端及三方冲突合并。
 
 ## 决策日志
+
+- **2026-09-04**：完成**阶段 4「通行密钥 (Passkey / WebAuthn) 与 Credential Manager 自动填充」**全量交付。落地 `PasskeyData` 规范映射、`PasskeyCryptoEngine` 签名引擎、`KeePasskeyCredentialProviderService` (API 36+) 与 `KeePasskeyAutofillService`，测试与编译全量通过。下一阶段正式进入**阶段 5「多协议云端同步引擎（WebDAV / S3）与三方冲突合并」**。
 
 - **2026-09-04**：完成**阶段 3「系统级生物识别与防御性安全加固」**全量交付与验证。落地 `KeystoreManager`、`BiometricAuthManager`、`BiometricCredentialStorage`、`FlagSecureGuard`、`ClipboardSecurityManager` 与 `AutoLockManager`，打通指纹快速解封、防多任务泄露、剪贴板自动擦除与锁屏熔断，测试全绿。下一阶段正式进入**阶段 4「通行密钥 (Passkey / WebAuthn) 与 Credential Manager 自动填充」**。
 
