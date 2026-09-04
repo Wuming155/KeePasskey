@@ -17,25 +17,30 @@
 
 构建统一使用 Gradle Wrapper（Gradle 9.3.1），Windows 下执行 `.\gradlew.bat`；常用任务：`assembleDebug`、`:app:compileDebugKotlin`（快速编译检查）、`lint`、`test`（尚无 `src/test`）。
 
-## 项目现状（阶段 4「通行密钥与自动填充」已圆满完成，阶段 5「云端同步引擎」准备就绪）
+## 项目现状（阶段 5「云端同步引擎」已圆满完成，阶段 6「高级特性与全功能工具箱」准备就绪）
 
-- **阶段 4 核心成果全量落地**：
-  - **KDBX 通行密钥扩展存储规范（PasskeyData）**：
-    - 落地 `PasskeyData` 模型（对齐 KeePass 事实标准），以条目自定义字段（`Passkey.*`）双向序列化存储，私钥使用 `ProtectedString` 安全驻留，杜绝 GC 堆明文泄露；
-  - **Passkey 密码学引擎（PasskeyCryptoEngine）**：
-    - 基于 BouncyCastle 纯净实现 ES256 (ECDSA P-256 / SHA-256) 椭圆曲线公私钥对生成；
-    - 组装标准 `AuthenticatorData` 二进制结构（RP ID 哈希、Flags 标志位与 SignCount 计数器）；
-    - 实现 RFC 6979 确定性 DSA 签名与 ASN.1 DER 编码输出；
-  - **Android 16+ Credential Manager 系统服务（KeePasskeyCredentialProviderService）**：
-    - 声明 `android.permission.BIND_CREDENTIAL_PROVIDER_SERVICE` 权限，提供完整的系统级凭据提供者接入点；
-    - 实现调用来源（Web 域名 / Origin / PackageName）与本地凭据条目的精准智能匹配逻辑；
-  - **传统自动填充兼容层（KeePasskeyAutofillService）**：
-    - 声明 `android.permission.BIND_AUTOFILL_SERVICE` 权限，支持无 Credential Manager 支持时的传统表单自动填充；
+- **阶段 5 核心成果全量落地**：
+  - **统一存储抽象（SyncProvider）**：
+    - 落地 `SyncProvider` 接口契约：提供 `testConnection()`, `getMetadata()`, `download()`, `upload()`, `delete()`；
+    - 建立层次化网络与协议异常体系（`NetworkError`, `AuthenticationError`, `FileNotFound`, `ConflictError`, `ProtocolError`）；
+  - **WebDAV 同步客户端（WebDavSyncProvider）**：
+    - 基于 OkHttp 实现标准 WebDAV 协议动词：`PROPFIND`（解析 XML 树中 `getetag`、`getcontentlength` 与 `getlastmodified`）、`GET`、`PUT`、`DELETE`；
+    - 深度集成 HTTP ETag 乐观并发保护：支持 `If-Match: <remote-etag>`，精确捕获 HTTP 412 Precondition Failed 冲突；
+  - **S3 兼容协议客户端（S3SyncProvider）**：
+    - 纯 Kotlin 实现轻量级 AWS Signature Version 4 (SigV4) 鉴权计算（Canonical Request、StringToSign、级联 HMAC-SHA256 派生签名密钥与 Authorization 组装）；
+    - 兼容 AWS S3、MinIO、Cloudflare R2 等标准对象存储协议；
+  - **三方冲突差异比对与合并引擎（KdbxMerger）**：
+    - 基于 `lastSyncTimestamp` 与条目最后修改时间戳自动识别本地/远端编辑；
+    - 精准识别冲突条目的差异字段（标题、账号、密码、网址、备注等）；
+    - 支持保留本地、保留远端、创建副本（DUPLICATE_BOTH）等三种标准决策；
   - **测试与验证全绿**：
-    - 新增 `PasskeyCryptoEngineTest` 与 `CredentialProviderMatchingTest` 单元测试，测试全部绿灯，`assembleDebug` 编译通过。
-- **阶段 5 即将开始**：聚焦 `sync` 模块构建，实现通用 `SyncProvider` 接口、WebDAV (OkHttp / ETag) 与 S3 (SigV4) 兼容存储客户端及三方冲突合并。
+    - 新增 `WebDavSyncProviderTest`（MockWebServer 模拟 PROPFIND 与 412 乐观锁）、`S3SyncProviderTest`（SigV4 签名规范）、`KdbxMergerTest`（自动合并与差异检测）；
+    - 全量单元测试通过，`assembleDebug` 编译通过。
+- **阶段 6 即将开始**：聚焦 TOTP/HOTP 实时双重认证引擎、KDBX 附件管理、版本历史回滚与密码健康审计。
 
 ## 决策日志
+
+- **2026-09-04**：完成**阶段 5「多协议云端同步引擎（WebDAV / S3）与三方冲突合并」**全量交付。落地 `SyncProvider` 抽象、`WebDavSyncProvider`（ETag 412 乐观锁）、`S3SyncProvider`（AWS SigV4 规范签名）与 `KdbxMerger`（三方冲突识别与合并），测试与编译全量通过。下一阶段正式进入**阶段 6「KeePass 高级特性与全功能工具箱」**。
 
 - **2026-09-04**：完成**阶段 4「通行密钥 (Passkey / WebAuthn) 与 Credential Manager 自动填充」**全量交付。落地 `PasskeyData` 规范映射、`PasskeyCryptoEngine` 签名引擎、`KeePasskeyCredentialProviderService` (API 36+) 与 `KeePasskeyAutofillService`，测试与编译全量通过。下一阶段正式进入**阶段 5「多协议云端同步引擎（WebDAV / S3）与三方冲突合并」**。
 

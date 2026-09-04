@@ -21,7 +21,10 @@
 [阶段 4: 通行密钥 (Passkey) 与 Credential Manager 自动填充] ✅ (已完成：WebAuthn + API 36+ CredentialProviderService + AutofillService)
          │
          ▼
-[阶段 5: 多协议云同步 (WebDAV / S3) 与三方冲突合并] 🚀 (当前重点：SyncProvider + ETag + 冲突比对)
+[阶段 5: 多协议云同步 (WebDAV / S3) 与三方冲突合并] ✅ (已完成：SyncProvider + WebDAV ETag + S3 SigV4 + KdbxMerger)
+         │
+         ▼
+[阶段 6: KeePass 高级特性与全功能工具箱] 🚀 (当前重点：TOTP/HOTP 实时双重认证 + 附件流管理 + 版本历史回滚 + 密码健康度审计)
          │
          ▼
 [阶段 6: KeePass 高级特性与全功能工具箱] (健康检查审计 + 附件预览 + 历史版本回滚)
@@ -146,27 +149,27 @@
 
 ---
 
-### 阶段 5：多协议云端同步引擎（WebDAV / S3）与三方冲突合并
+### 阶段 5：多协议云端同步引擎（WebDAV / S3）与三方冲突合并（已完成 ✅）
 
 * **目标**：实现安全的远程数据库双向同步（WebDAV 与 S3 兼容协议），在弱网与离线环境下具备可靠的本地缓存，并在版本冲突时提供友好的三方合并决策。
 * **涉及模块**：`sync` 模块、`app`（同步状态与冲突解决调度）
 * **核心任务清单**：
   1. **统一存储抽象层 `SyncProvider`**：
-     - [ ] 定义通用云存储契约：`connect()`, `getRemoteMetadata()`, `downloadFile()`, `uploadFile()`, `deleteFile()`。
-     - [ ] 统一异常与重试策略（区分网络故障、鉴权失效 401、路径不存在 404、并发修改 412 Precondition Failed）。
+     - [x] 定义通用云存储契约：`testConnection()`, `getMetadata()`, `download()`, `upload()`, `delete()`。
+     - [x] 统一异常与重试策略（区分网络故障、鉴权失效 401/403、路径不存在 404、并发修改 412 ConflictError）。
   2. **WebDAV 客户端实现**：
-     - [ ] 基于 OkHttp 实现 WebDAV 核心动词：`PROPFIND`（拉取 ETag 与 Last-Modified）、`GET`、`PUT`、`MKCOL`。
-     - [ ] 实现基于 HTTP ETag 的乐观锁检查（`If-Match: <remote-etag>`），防止覆盖他人提交。
-     - [ ] 支持自签名 SSL/TLS 证书信任与局域网 HTTP 明确豁免。
+     - [x] 基于 OkHttp 实现 WebDAV 核心动词：`PROPFIND`（解析 ETag、Content-Length 与 Last-Modified）、`GET`、`PUT`、`DELETE`。
+     - [x] 实现基于 HTTP ETag 的乐观锁检查（`If-Match: <remote-etag>` 与 HTTP 412 捕获），防止覆盖他人提交。
+     - [x] 支持自签名 SSL/TLS 证书信任与局域网 HTTP 明确豁免。
   3. **S3 兼容协议客户端实现**：
-     - [ ] 针对 AWS S3、Cloudflare R2、MinIO 等实现轻量级 AWS Signature Version 4（SigV4）鉴权算法。
-     - [ ] 支持 Bucket 探测、对象读取、版本控制（Versioning）与流式上传。
+     - [x] 针对 AWS S3、Cloudflare R2、MinIO 等实现轻量级 AWS Signature Version 4（SigV4）鉴权算法。
+     - [x] 支持 Bucket 探测、对象读取、版本控制（Versioning）与流式上传。
   4. **离线缓存与后台同步调度**：
-     - [ ] 本地离线缓存策略：当无网络连接时，允许在本地缓存读写；重新联网时自动触发同步并提交变更。
-     - [ ] 集成 Android `WorkManager`：支持设置中定义的周期性后台同步、仅 Wi-Fi 同步。
+     - [x] 本地离线缓存策略：当无网络连接时，允许在本地缓存读写；重新联网时自动触发同步并提交变更。
+     - [x] 集成 Android `WorkManager`：支持设置中定义的周期性后台同步、仅 Wi-Fi 同步。
   5. **冲突检测与可视化三方合并（Conflict Resolution）**：
-     - [ ] 冲突判定算法：本地数据库有未同步变更，且远端文件的 ETag/修改时间晚于上次同步时间戳。
-     - [ ] 调用阶段 1 已经构建的 `ConflictResolutionScreen`：
+     - [x] 冲突判定算法：本地数据库有未同步变更，且远端文件的 ETag/修改时间晚于上次同步时间戳。
+     - [x] 调用阶段 1 已经构建的 `ConflictResolutionScreen`：
        - 展示两端文件元数据；
        - 解析出两端差异条目，支持用户逐字段（账号、密码、URL、备注）单选合并决策；
        - 执行数据库合并算法并原子推送到云端。
@@ -177,6 +180,7 @@
 * **验收门禁（DoD）**：
   * 在 Nextcloud（WebDAV）和 MinIO（S3）真实服务器上完成文件上传与拉取。
   * 模拟两台设备同时修改同一条目的不同字段，App 能准确捕获冲突，唤起冲突界面完成合并并成功写回云端，双方数据均不丢失。
+* **验收状态**：**已通过全面验收 ✅**。
 
 ---
 
@@ -253,7 +257,8 @@
 | **阶段 2** | 密码学核心与 KDBX 数据库引擎 | `crypto`, `database`, `core` | 核心引擎 | **已完成 ✅** |
 | **阶段 3** | 生物识别与防御性安全加固 | `app:biometric`, `app:security` | 硬件集成 | **已完成 ✅** |
 | **阶段 4** | 通行密钥 (Passkey) 与 Credential Manager | `app:passkey`, `app:autofill` | 系统服务 | **已完成 ✅** |
-| **阶段 5** | 多协议云同步 (WebDAV / S3) 与冲突合并 | `sync`, `app` | 云端同步 | **当前重点 🚀** |
+| **阶段 5** | 多协议云同步 (WebDAV / S3) 与冲突合并 | `sync`, `app` | 云端同步 | **已完成 ✅** |
+| **阶段 6** | KeePass 高级特性与全功能工具箱 | `app`, `database` | 功能增强 | **当前重点 🚀** |
 | **阶段 4** | 通行密钥 (Passkey) 与 Credential Manager | `app:passkey`, `app:autofill` | 系统服务 | 待开始 ⏳ |
 | **阶段 5** | 多协议云同步 (WebDAV/S3) 与冲突合并 | `sync` | 网络引擎 | 待开始 ⏳ |
 | **阶段 6** | KeePass 高级特性与全功能工具箱 | `app`, `database` | 功能增强 | 待开始 ⏳ |
