@@ -11,6 +11,17 @@
 | **keepass2android-main** | Android / C# (Xamarin) + Java 绑定 | 功能最全的 Android KeePass 客户端之一，内置多网盘同步（Dropbox / OneDrive / WebDAV / SFTP 等）、键盘与 Autofill 填充 | [keepass2android-架构分析.md](keepass2android-架构分析.md) |
 | **Monica-main** | Android (Kotlin) + Rust | 现代 Android 密码管理器，Material 3 + Compose 风格 UI；附带的 `mdbx` 是其 Rust 实现的本地优先加密 vault 格式（含类 Git 历史、同步冲突处理、快照恢复） | [Monica-架构分析.md](Monica-架构分析.md) |
 
+## 参考优先级层级（严格执行）
+
+1. 🥇 **第 1 优先级（核心参考）**：**KeePassDX**
+   - 原生 Android Kotlin 实现，模块边界（`app` / `database` / `crypto`）完全同构。重点参考数据模型、`DatabaseSession` 生命周期管理、Argon2 策略与 Passkey。
+2. 🥈 **第 2 优先级（次核心参考）**：**keepass2android**
+   - 重点参考其在 Android 上沉淀的工业级同步能力：`IFileStorage` 插件化抽象、WebDAV/S3 适配、本地离线缓存、ETag 与三方冲突检测机制、Quick Unlock 快速解锁。
+3. ⚖️ **标准实现参考（格式裁决者）**：**KeePass-2.61.1 (官方 C#)**
+   - `.kdbx`（v3/v4）格式事实标准。不参考其 UI，仅在格式解析、二进制头字段、Inner Random Stream 或 XML 节点规范出现歧义时作为权威终审标准。
+4. 🥉 **辅助参考（不做重点）**：**Monica**
+   - 辅助参考，不做重点。仅用于拓宽现代 Compose UI 动效与本地优先数据流的设计思路。
+
 ## 各项目对 KeePasskey 的参考价值
 
 - **KeePass（C#）**：理解 .kdbx v4 文件格式、加密管线（AES-KDF / Argon2 KDF、内层流加密、Header/HMAC 校验）的最权威来源；KeePasskey 的 `crypto` 模块以其 `KeePassLib` 为主要参照。
