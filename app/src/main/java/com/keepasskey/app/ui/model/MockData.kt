@@ -85,6 +85,10 @@ data class UiVaultEntry(
     val orderIndex: Int = 0,
     val groupId: String? = null,
     val iconName: String = "key",
+    val cardNumberMasked: String? = null,
+    val cardHolder: String? = null,
+    val cardExpiry: String? = null,
+    val cardCvv: String? = null,
     val customFields: List<UiCustomField> = emptyList(),
     val attachments: List<UiAttachment> = emptyList(),
     val revisions: List<UiEntryRevision> = emptyList()
@@ -93,5 +97,7 @@ data class UiVaultEntry(
 enum class EntryCategory(val label: String) {
     ALL("全部"),
     LOGIN("密码凭据"),
-    PASSKEY("通行密钥")
+    PASSKEY("通行密钥"),
+    CARD("银行卡"),
+    NOTE("安全便签")
 }

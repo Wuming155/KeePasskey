@@ -17,6 +17,7 @@ enum class AppLanguage(val label: String, val code: String) {
  */
 data class UserSettings(
     val themeMode: AppThemeMode = AppThemeMode.SYSTEM,
+    val themePalette: com.keepasskey.app.ui.theme.AppThemePalette = com.keepasskey.app.ui.theme.AppThemePalette.SAPPHIRE,
     val oledBlackOptimization: Boolean = false,
     val appLanguage: AppLanguage = AppLanguage.SYSTEM,
     val biometricEnabled: Boolean = true,
@@ -27,8 +28,16 @@ data class UserSettings(
     val showUsernameInList: Boolean = true,
     val showOtpInList: Boolean = true,
     val showPasskeyBadge: Boolean = true,
+    val showUrlInList: Boolean = true,
+    val hideFabOnScroll: Boolean = false,
+    val hapticFeedbackEnabled: Boolean = true,
     // 剪贴板自动清空超时（秒，-1 = 从不清空）
-    val clipboardTimeoutSeconds: Int = 30
+    val clipboardTimeoutSeconds: Int = 30,
+    // 冷启动自动与云端同步 (杀死进程重新启动时自动触发)
+    val syncOnColdStart: Boolean = true,
+    // 底部导航项可见性配置
+    val showAuthenticatorTab: Boolean = true,
+    val showGeneratorTab: Boolean = true
 )
 
 /**
@@ -37,6 +46,7 @@ data class UserSettings(
 interface SettingsRepository {
     fun getSettings(): Flow<UserSettings>
     suspend fun setThemeMode(themeMode: AppThemeMode)
+    suspend fun setThemePalette(themePalette: com.keepasskey.app.ui.theme.AppThemePalette)
     suspend fun setOledBlackOptimization(enabled: Boolean)
     suspend fun setAppLanguage(language: AppLanguage)
     suspend fun setBiometricEnabled(enabled: Boolean)
@@ -46,5 +56,11 @@ interface SettingsRepository {
     suspend fun setShowUsernameInList(enabled: Boolean)
     suspend fun setShowOtpInList(enabled: Boolean)
     suspend fun setShowPasskeyBadge(enabled: Boolean)
+    suspend fun setShowUrlInList(enabled: Boolean)
+    suspend fun setHideFabOnScroll(enabled: Boolean)
+    suspend fun setHapticFeedbackEnabled(enabled: Boolean)
     suspend fun setClipboardTimeout(seconds: Int)
+    suspend fun setSyncOnColdStart(enabled: Boolean)
+    suspend fun setShowAuthenticatorTab(enabled: Boolean)
+    suspend fun setShowGeneratorTab(enabled: Boolean)
 }

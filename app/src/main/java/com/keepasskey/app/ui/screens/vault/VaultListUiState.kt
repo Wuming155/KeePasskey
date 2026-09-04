@@ -1,17 +1,40 @@
 package com.keepasskey.app.ui.screens.vault
 
+import androidx.annotation.StringRes
+import com.keepasskey.app.R
+import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.model.UiVaultEntry
 import com.keepasskey.app.ui.model.VaultGroup
 
 /**
- * 密码库排序选项（支持默认顺序、按名称、按日期、按修改日期、按创建日期）
+ * 排序方向：升序 / 降序
  */
-enum class VaultSortOption(val label: String) {
-    DEFAULT("默认顺序"),
-    NAME("按名称排序"),
-    DATE("按日期排序"),
-    MODIFIED_DATE("按修改日期排序"),
-    CREATED_DATE("按创建日期排序")
+enum class SortOrder(@StringRes val labelRes: Int) {
+    ASCENDING(R.string.sort_order_ascending),
+    DESCENDING(R.string.sort_order_descending)
+}
+
+/**
+ * 密码库排序字段选项
+ */
+enum class VaultSortOption(@StringRes val labelRes: Int) {
+    DEFAULT(R.string.sort_option_default),
+    NAME_ASC(R.string.sort_option_name_asc),
+    NAME_DESC(R.string.sort_option_name_desc),
+    MODIFIED_DESC(R.string.sort_option_modified_desc),
+    MODIFIED_ASC(R.string.sort_option_modified_asc),
+    CREATED_DESC(R.string.sort_option_created_desc),
+    CREATED_ASC(R.string.sort_option_created_asc)
+}
+
+/**
+ * 云端同步状态指示
+ */
+enum class VaultSyncStatus(@StringRes val labelRes: Int) {
+    SYNCED(R.string.sync_status_synced),
+    SYNCING(R.string.sync_status_syncing),
+    OFFLINE(R.string.sync_status_offline),
+    CONFLICT(R.string.sync_status_conflict)
 }
 
 /**
@@ -25,12 +48,21 @@ data class VaultListUiState(
     val isInsideRecycleBin: Boolean = false,
     val breadcrumbs: List<VaultGroup> = emptyList(),
     val currentGroups: List<VaultGroup> = emptyList(),
+    val allGroups: List<VaultGroup> = emptyList(),
     val entries: List<UiVaultEntry> = emptyList(),
     val totalEntriesCount: Int = 0,
-    val databaseName: String = "keepasskey.kdbx",
-    val userMessage: String? = null,
-    // 列表视图显示偏好（来自设置仓库，设置页外观项可调）
+    val databaseName: String = "personal-vault.kdbx",
+    val syncStatus: VaultSyncStatus = VaultSyncStatus.SYNCED,
+    val isSyncing: Boolean = false,
+    // 上次同步完成时间的展示文案（如下拉指示区显示「今天 10:25」）
+    val lastSyncTimeText: String = "今天 10:25",
+    val isLocked: Boolean = false,
+    val isBatchMode: Boolean = false,
+    val selectedEntryIds: Set<String> = emptySet(),
+    val userMessage: UiMessage? = null,
     val showUsernameInList: Boolean = true,
     val showOtpInList: Boolean = true,
-    val showPasskeyBadge: Boolean = true
+    val showPasskeyBadge: Boolean = true,
+    val showUrlInList: Boolean = true,
+    val hideFabOnScroll: Boolean = false
 )

@@ -89,7 +89,7 @@ fun AutofillSettingsScreen(
             TopAppBar(
                 title = {
                     Text(
-                        text = "自动填充与 Passkey",
+                        text = stringResource(R.string.settings_autofill),
                         style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
                     )
                 },
@@ -118,7 +118,7 @@ fun AutofillSettingsScreen(
             // 1. Android 系统级凭据提供程序 (Credential Provider)
             item {
                 Text(
-                    text = "系统凭据服务与 Passkey",
+                    text = stringResource(R.string.autofill_section_provider),
                     style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.padding(start = 4.dp)
@@ -133,24 +133,24 @@ fun AutofillSettingsScreen(
                     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                         AutofillSwitchRow(
                             icon = Icons.Default.VpnKey,
-                            title = "Credential Manager 凭据提供程序",
-                            subtitle = "允许系统在浏览器与原生 App 登录时直接拉起本密码库进行身份认证",
+                            title = stringResource(R.string.autofill_cm_title),
+                            subtitle = stringResource(R.string.autofill_cm_sub),
                             checked = uiState.credentialProviderEnabled,
                             onCheckedChange = onCredentialProviderToggle
                         )
 
                         AutofillSwitchRow(
                             icon = Icons.Default.Key,
-                            title = "Passkey 通行密钥管理 (FIDO2 / WebAuthn)",
-                            subtitle = "支持生成并同步存储 Passkey 公私钥，免密码免动态码一触即登",
+                            title = stringResource(R.string.autofill_passkey_title),
+                            subtitle = stringResource(R.string.autofill_passkey_sub),
                             checked = uiState.passkeySupportEnabled,
                             onCheckedChange = onPasskeySupportToggle
                         )
 
                         AutofillSwitchRow(
                             icon = Icons.Default.Password,
-                            title = "传统 Android 自动填充服务 (Framework)",
-                            subtitle = "兼容 Android 8 ~ 13 传统登录表单的自动捕获与注入",
+                            title = stringResource(R.string.autofill_legacy_title),
+                            subtitle = stringResource(R.string.autofill_legacy_sub),
                             checked = uiState.autofillServiceEnabled,
                             onCheckedChange = onAutofillServiceToggle
                         )
@@ -161,7 +161,7 @@ fun AutofillSettingsScreen(
             // 2. 体验与输入法协同 (KP2A 特性)
             item {
                 Text(
-                    text = "交互体验与输入协同 (KP2A 特性)",
+                    text = stringResource(R.string.autofill_section_ux),
                     style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.padding(start = 4.dp)
@@ -176,24 +176,24 @@ fun AutofillSettingsScreen(
                     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                         AutofillSwitchRow(
                             icon = Icons.Default.Keyboard,
-                            title = "键盘上方内联候选建议 (Inline Suggestions)",
-                            subtitle = "在支持的输入法 (如 Gboard) 候选字栏上方直接显示匹配的账号与 Passkey 胶囊",
+                            title = stringResource(R.string.autofill_inline_title),
+                            subtitle = stringResource(R.string.autofill_inline_sub),
                             checked = uiState.inlineSuggestionsEnabled,
                             onCheckedChange = onInlineSuggestionsToggle
                         )
 
                         AutofillSwitchRow(
                             icon = Icons.AutoMirrored.Filled.Undo,
-                            title = "选定条目后自动返回原请求应用",
-                            subtitle = "在手动选择或搜索匹配凭据后，立即自动返回并填入原应用，无需手动按返回键",
+                            title = stringResource(R.string.autofill_auto_return_title),
+                            subtitle = stringResource(R.string.autofill_auto_return_sub),
                             checked = uiState.autoReturnFromQuery,
                             onCheckedChange = onAutoReturnFromQueryToggle
                         )
 
                         AutofillSwitchRow(
                             icon = Icons.Default.ContentPasteGo,
-                            title = "自动清空填充剪贴板",
-                            subtitle = "若自动填充降级使用剪贴板中转，填充完毕后立即清空内存暂存",
+                            title = stringResource(R.string.autofill_clear_clipboard_title),
+                            subtitle = stringResource(R.string.autofill_clear_clipboard_sub),
                             checked = uiState.autoClearClipboard,
                             onCheckedChange = onAutoClearClipboardToggle
                         )
@@ -204,7 +204,7 @@ fun AutofillSettingsScreen(
             // 3. 两步验证与 TOTP 联动 (KP2A 特性)
             item {
                 Text(
-                    text = "两步验证 (TOTP) 联动动作 (KP2A 特性)",
+                    text = stringResource(R.string.autofill_section_totp),
                     style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.padding(start = 4.dp)
@@ -219,16 +219,16 @@ fun AutofillSettingsScreen(
                     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                         AutofillSwitchRow(
                             icon = Icons.Default.ContentPasteGo,
-                            title = "自动填充后将 TOTP 复制到剪贴板",
-                            subtitle = "填入用户名和密码后，自动将条目的 6 位动态验证码暂存至剪贴板供二次粘贴",
+                            title = stringResource(R.string.autofill_copy_totp_title),
+                            subtitle = stringResource(R.string.autofill_copy_totp_sub),
                             checked = uiState.autofillCopyTotp,
                             onCheckedChange = onAutofillCopyTotpToggle
                         )
 
                         AutofillSwitchRow(
                             icon = Icons.Default.NotificationsActive,
-                            title = "自动填充后在通知栏显示 TOTP 验证码",
-                            subtitle = "在系统通知抽屉常驻显示当前账号的 TOTP 动态码，方便多步验证确认",
+                            title = stringResource(R.string.autofill_totp_notif_title),
+                            subtitle = stringResource(R.string.autofill_totp_notif_sub),
                             checked = uiState.autofillShowTotpNotification,
                             onCheckedChange = onAutofillShowTotpNotificationToggle
                         )
@@ -239,7 +239,7 @@ fun AutofillSettingsScreen(
             // 4. 智能识别、凭证保存与兼容策略 (KP2A 特性)
             item {
                 Text(
-                    text = "智能识别与凭证捕获 (KP2A 特性)",
+                    text = stringResource(R.string.autofill_section_capture),
                     style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.padding(start = 4.dp)
@@ -254,24 +254,24 @@ fun AutofillSettingsScreen(
                     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                         AutofillSwitchRow(
                             icon = Icons.Default.Save,
-                            title = "提示保存新登录凭证 (Offer to Save)",
-                            subtitle = "在外部网页或应用提交新注册/修改的账号密码时，主动弹出保存到密码库的浮窗",
+                            title = stringResource(R.string.autofill_save_prompt_title),
+                            subtitle = stringResource(R.string.autofill_save_prompt_sub),
                             checked = uiState.offerSaveCredentials,
                             onCheckedChange = onOfferSaveCredentialsToggle
                         )
 
                         AutofillSwitchRow(
                             icon = Icons.Default.Security,
-                            title = "强制识别被禁止自动填充的字段",
-                            subtitle = "忽略部分银行/政务应用恶意的 NOT_IMPORTANT_FOR_AUTOFILL 限制标记",
+                            title = stringResource(R.string.autofill_override_title),
+                            subtitle = stringResource(R.string.autofill_override_sub),
                             checked = uiState.overrideNoAutofill,
                             onCheckedChange = onOverrideNoAutofillToggle
                         )
 
                         AutofillSwitchRow(
                             icon = Icons.Default.Block,
-                            title = "跳过数字资产链接 (DAL) 严格校验",
-                            subtitle = "解决国内网络或私有域名无法访问 Google 关联验证服务器导致匹配失败的问题",
+                            title = stringResource(R.string.autofill_skip_dal_title),
+                            subtitle = stringResource(R.string.autofill_skip_dal_sub),
                             checked = uiState.skipDalVerification,
                             onCheckedChange = onSkipDalVerificationToggle
                         )
@@ -289,12 +289,16 @@ fun AutofillSettingsScreen(
                                 Spacer(modifier = Modifier.width(12.dp))
                                 Column {
                                     Text(
-                                        text = "已禁用的自动填充黑名单管理",
+                                        text = stringResource(R.string.autofill_blacklist_row_title),
                                         style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
                                         color = MaterialTheme.colorScheme.onSurface
                                     )
                                     Text(
-                                        text = if (uiState.disabledAutofillQueriesCount > 0) "已排除 ${uiState.disabledAutofillQueriesCount} 个域名/应用" else "暂无已排除黑名单，点击查看与管理",
+                                        text = if (uiState.disabledAutofillQueriesCount > 0) {
+                                            stringResource(R.string.autofill_blacklist_count, uiState.disabledAutofillQueriesCount)
+                                        } else {
+                                            stringResource(R.string.autofill_blacklist_empty)
+                                        },
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
@@ -316,15 +320,18 @@ fun AutofillSettingsScreen(
     if (showBlacklistDialog) {
         AlertDialog(
             onDismissRequest = { showBlacklistDialog = false },
-            title = { Text("自动填充黑名单管理") },
+            title = { Text(stringResource(R.string.autofill_blacklist_dialog_title)) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        text = "以下应用或域名曾在自动填充弹窗中被标记为“从不对此应用/网址进行填充”：",
+                        text = stringResource(R.string.autofill_blacklist_dialog_desc),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    listOf("com.example.bankapp (示例银行)", "internal-portal.local (内部局域网)").forEach { item ->
+                    listOf(
+                        stringResource(R.string.autofill_blacklist_item_bank),
+                        stringResource(R.string.autofill_blacklist_item_portal)
+                    ).forEach { item ->
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -334,7 +341,7 @@ fun AutofillSettingsScreen(
                         ) {
                             Text(item, style = MaterialTheme.typography.bodySmall)
                             IconButton(onClick = { }, modifier = Modifier.size(28.dp)) {
-                                Icon(Icons.Default.Delete, contentDescription = "解除", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(18.dp))
+                                Icon(Icons.Default.Delete, contentDescription = stringResource(R.string.edit_passkey_unbind), tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(18.dp))
                             }
                         }
                     }
@@ -342,7 +349,7 @@ fun AutofillSettingsScreen(
             },
             confirmButton = {
                 TextButton(onClick = { showBlacklistDialog = false }) {
-                    Text("关闭")
+                    Text(stringResource(R.string.btn_close))
                 }
             }
         )

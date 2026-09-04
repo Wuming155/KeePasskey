@@ -57,7 +57,7 @@ fun AboutSettingsScreen(
             TopAppBar(
                 title = {
                     Text(
-                        text = "关于 KeePasskey",
+                        text = stringResource(R.string.settings_about),
                         style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
                     )
                 },
@@ -137,7 +137,7 @@ fun AboutSettingsScreen(
 
             item {
                 Text(
-                    text = "技术规范与加密协议",
+                    text = stringResource(R.string.about_section_spec),
                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                     color = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier.padding(start = 4.dp)
@@ -152,20 +152,20 @@ fun AboutSettingsScreen(
                     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                         AboutSpecRow(
                             icon = Icons.Default.Lock,
-                            title = "数据库加密标准",
-                            description = "KDBX 4.1 二进制格式 · Argon2id 内存抗暴力破解 KDF · ChaCha20-Poly1305 / AES-256 GCM 认证加密"
+                            title = stringResource(R.string.about_spec_enc_title),
+                            description = stringResource(R.string.about_spec_enc_desc)
                         )
 
                         AboutSpecRow(
                             icon = Icons.Default.VerifiedUser,
                             title = "FIDO2 / WebAuthn Passkey",
-                            description = "完整支持通行密钥（Passkey）生成、硬件级安全芯片私钥派生与凭据全生命周期管理"
+                            description = stringResource(R.string.about_spec_passkey_desc)
                         )
 
                         AboutSpecRow(
                             icon = Icons.Default.Code,
-                            title = "纯原生现代工程架构",
-                            description = "Kotlin 100% 原生构建 · Jetpack Compose 响应式渲染 · Hilt 依赖注入 · Flow 全异步数据流"
+                            title = stringResource(R.string.about_spec_arch_title),
+                            description = stringResource(R.string.about_spec_arch_desc)
                         )
                     }
                 }
@@ -178,12 +178,12 @@ fun AboutSettingsScreen(
                 ) {
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text(
-                            text = "开源声明与隐私承诺",
+                            text = stringResource(R.string.about_privacy_title),
                             style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
-                            text = "本应用为本地零知识架构，无任何商业追踪 SDK，不收集、不出售任何用户数据。全部凭据在离开您的设备前均已完成本地硬件级加密。",
+                            text = stringResource(R.string.about_privacy_desc),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             lineHeight = 18.sp

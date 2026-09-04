@@ -77,7 +77,9 @@ import com.keepasskey.app.ui.components.getVaultIcon
 import com.keepasskey.app.ui.model.UiAttachment
 import com.keepasskey.app.ui.model.UiCustomField
 import com.keepasskey.app.ui.model.UiEntryRevision
+import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.model.UiVaultEntry
+import com.keepasskey.app.ui.model.resolveText
 import com.keepasskey.app.ui.theme.CapsuleShape
 import com.keepasskey.app.ui.theme.KeePasskeyTheme
 import com.keepasskey.app.ui.theme.LocalSecurityColors
@@ -89,7 +91,7 @@ import com.keepasskey.app.ui.theme.MonospaceTotpStyle
  */
 @Composable
 fun EntryDetailScreen(
-    entryId: String,
+    entryId: String?,
     onBackClick: () -> Unit,
     onEditClick: (String) -> Unit,
     modifier: Modifier = Modifier,
@@ -102,9 +104,10 @@ fun EntryDetailScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
 
-    LaunchedEffect(uiState.userMessage) {
-        uiState.userMessage?.let { msg ->
-            snackbarHostState.showSnackbar(msg)
+    uiState.userMessage?.let { message ->
+        val text = message.resolveText()
+        LaunchedEffect(message, text) {
+            snackbarHostState.showSnackbar(text)
             viewModel.clearUserMessage()
         }
     }
@@ -139,12 +142,14 @@ fun EntryDetailContent(
     onToggleCustomFieldVisibility: (String) -> Unit,
     onExportAttachment: (UiAttachment) -> Unit,
     onRollbackRevision: (UiEntryRevision) -> Unit,
-    onShowMessage: (String) -> Unit,
+    onShowMessage: (UiMessage) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val entry = uiState.entry
     val securityColors = LocalSecurityColors.current
     var revisionToRollback by remember { mutableStateOf<UiEntryRevision?>(null) }
+    var revisionToDiff by remember { mutableStateOf<UiEntryRevision?>(null) }
+    var attachmentToPreview by remember { mutableStateOf<UiAttachment?>(null) }
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -191,7 +196,7 @@ fun EntryDetailContent(
                     .padding(innerPadding),
                 contentAlignment = Alignment.Center
             ) {
-                Text(text = "未找到凭据", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(text = stringResource(R.string.detail_entry_not_found), color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         } else {
             Column(
@@ -254,13 +259,13 @@ fun EntryDetailContent(
                         icon = Icons.AutoMirrored.Filled.OpenInNew,
                         label = stringResource(R.string.detail_btn_open_url),
                         modifier = Modifier.weight(1f),
-                        onClick = { onShowMessage("正在呼起浏览器并准备自动填充...") }
+                        onClick = { onShowMessage(UiMessage(R.string.detail_opening_browser)) }
                     )
                     QuickActionTile(
                         icon = Icons.Default.ContentCopy,
                         label = stringResource(R.string.detail_btn_copy_user),
                         modifier = Modifier.weight(1f),
-                        onClick = { onShowMessage("账号已复制到安全剪贴板") }
+                        onClick = { onShowMessage(UiMessage(R.string.detail_username_copied)) }
                     )
                     QuickActionTile(
                         icon = Icons.Default.Key,
@@ -300,7 +305,7 @@ fun EntryDetailContent(
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
                             }
-                            IconButton(onClick = { onShowMessage("账号已复制") }) {
+                            IconButton(onClick = { onShowMessage(UiMessage(R.string.detail_username_copied_short)) }) {
                                 Icon(
                                     imageVector = Icons.Default.ContentCopy,
                                     contentDescription = stringResource(R.string.cd_copy_username),
@@ -403,7 +408,7 @@ fun EntryDetailContent(
                                     modifier = Modifier.size(34.dp)
                                 )
                                 Spacer(modifier = Modifier.width(12.dp))
-                                IconButton(onClick = { onShowMessage("动态验证码已复制") }) {
+                                IconButton(onClick = { onShowMessage(UiMessage(R.string.detail_totp_copied)) }) {
                                     Icon(
                                         imageVector = Icons.Default.ContentCopy,
                                         contentDescription = stringResource(R.string.cd_copy_totp),
@@ -505,7 +510,7 @@ fun EntryDetailContent(
                                                 )
                                             }
                                         }
-                                        IconButton(onClick = { onShowMessage("已复制 ${field.key}") }) {
+                                        IconButton(onClick = { onShowMessage(UiMessage(R.string.detail_field_copied, listOf(field.key))) }) {
                                             Icon(
                                                 imageVector = Icons.Default.ContentCopy,
                                                 contentDescription = null,
@@ -548,7 +553,14 @@ fun EntryDetailContent(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
-                                    Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                                    Row(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .clickable { attachmentToPreview = att }
+                                            .padding(4.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
                                         Icon(
                                             imageVector = Icons.AutoMirrored.Filled.InsertDriveFile,
                                             contentDescription = null,
@@ -563,9 +575,9 @@ fun EntryDetailContent(
                                                 color = MaterialTheme.colorScheme.onSurface
                                             )
                                             Text(
-                                                text = "${att.fileSizeFormatted} • 添加于 ${att.addedAt}",
+                                                text = stringResource(R.string.detail_attachment_tap_preview, att.fileSizeFormatted),
                                                 style = MaterialTheme.typography.labelSmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                color = MaterialTheme.colorScheme.primary
                                             )
                                         }
                                     }
@@ -618,17 +630,22 @@ fun EntryDetailContent(
                                                 color = MaterialTheme.colorScheme.onSurface
                                             )
                                             Text(
-                                                text = "时间: ${rev.modifiedAt} • 历史密码: ${rev.passwordPlain.take(3)}***",
+                                                text = stringResource(R.string.detail_revision_meta, rev.modifiedAt, rev.passwordPlain.take(3)),
                                                 style = MaterialTheme.typography.labelSmall,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                                             )
                                         }
                                     }
 
-                                    TextButton(onClick = { revisionToRollback = rev }) {
-                                        Icon(Icons.Default.Restore, contentDescription = null, modifier = Modifier.size(16.dp))
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Text(stringResource(R.string.detail_history_rollback), fontSize = 12.sp)
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        TextButton(onClick = { revisionToDiff = rev }) {
+                                            Text(stringResource(R.string.detail_diff_compare), fontSize = 12.sp)
+                                        }
+                                        TextButton(onClick = { revisionToRollback = rev }) {
+                                            Icon(Icons.Default.Restore, contentDescription = null, modifier = Modifier.size(16.dp))
+                                            Spacer(modifier = Modifier.width(2.dp))
+                                            Text(stringResource(R.string.detail_history_rollback), fontSize = 12.sp)
+                                        }
                                     }
                                 }
                             }
@@ -656,7 +673,7 @@ fun EntryDetailContent(
                             )
                             Spacer(modifier = Modifier.height(10.dp))
                             Text(
-                                text = "更新时间: ${entry.updatedAt} • 加密存储于 KDBX",
+                                text = stringResource(R.string.detail_updated_meta, entry.updatedAt),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.outline
                             )
@@ -692,6 +709,33 @@ fun EntryDetailContent(
                 }
             },
             shape = RoundedCornerShape(18.dp)
+        )
+    }
+
+    // 版本历史差异对比对话框 (Visual Diff)
+    revisionToDiff?.let { rev ->
+        entry?.let { current ->
+            RevisionVisualDiffDialog(
+                currentEntry = current,
+                revision = rev,
+                onDismiss = { revisionToDiff = null },
+                onRollback = {
+                    onRollbackRevision(rev)
+                    revisionToDiff = null
+                }
+            )
+        }
+    }
+
+    // 安全附件预览对话框 (Safe Attachment Previewer)
+    attachmentToPreview?.let { att ->
+        SafeAttachmentPreviewDialog(
+            attachment = att,
+            onDismiss = { attachmentToPreview = null },
+            onExport = {
+                onExportAttachment(att)
+                attachmentToPreview = null
+            }
         )
     }
 }

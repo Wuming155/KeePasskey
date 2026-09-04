@@ -2,8 +2,10 @@ package com.keepasskey.app.ui.screens.edit
 
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
+import com.keepasskey.app.R
 import androidx.lifecycle.viewModelScope
 import com.keepasskey.app.data.repository.VaultRepository
+import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.model.EntryCategory
 import com.keepasskey.app.ui.model.UiAttachment
 import com.keepasskey.app.ui.model.UiCustomField
@@ -75,7 +77,6 @@ class EntryEditViewModel @Inject constructor(
                         url = entry.url,
                         notes = entry.notes,
                         isPasskey = entry.isPasskey,
-                        selectedCategory = entry.category,
                         customFields = entry.customFields,
                         attachments = entry.attachments,
                         isDirty = false
@@ -93,27 +94,13 @@ class EntryEditViewModel @Inject constructor(
     fun onNotesChange(notes: String) = _uiState.update { it.copy(notes = notes, isDirty = true) }
 
     fun onTogglePasskey() = _uiState.update {
-        val nextBound = !it.isPasskey
         it.copy(
-            isPasskey = nextBound,
-            selectedCategory = if (!nextBound && it.selectedCategory == EntryCategory.PASSKEY) {
-                EntryCategory.LOGIN
-            } else {
-                it.selectedCategory
-            },
+            isPasskey = !it.isPasskey,
             isDirty = true
         )
     }
 
     fun onTotpSecretChange(secret: String) = _uiState.update { it.copy(totpSecret = secret, isDirty = true) }
-
-    fun onCategoryChange(category: EntryCategory) = _uiState.update {
-        if (category == EntryCategory.PASSKEY) {
-            it.copy(selectedCategory = category, isPasskey = true, isDirty = true)
-        } else {
-            it.copy(selectedCategory = category, isPasskey = false, isDirty = true)
-        }
-    }
 
     fun onTogglePasswordVisibility() = _uiState.update { it.copy(isPasswordVisible = !it.isPasswordVisible) }
     fun onToggleGenerator() = _uiState.update { it.copy(showGenerator = !it.showGenerator) }
@@ -211,7 +198,7 @@ class EntryEditViewModel @Inject constructor(
     fun saveEntry() {
         val state = _uiState.value
         if (state.title.isBlank()) {
-            _uiState.update { it.copy(userMessage = "请输入凭据标题") }
+            _uiState.update { it.copy(userMessage = UiMessage(R.string.edit_title_required)) }
             return
         }
 
@@ -225,7 +212,7 @@ class EntryEditViewModel @Inject constructor(
                 url = state.url.trim(),
                 notes = state.notes.trim(),
                 isPasskey = state.isPasskey,
-                category = state.selectedCategory,
+                category = if (state.isPasskey) EntryCategory.PASSKEY else EntryCategory.LOGIN,
                 updatedAt = "刚刚",
                 groupId = state.groupId,
                 iconName = state.iconName,
@@ -237,7 +224,7 @@ class EntryEditViewModel @Inject constructor(
         }
     }
 
-    fun showMessage(msg: String) {
+    fun showMessage(msg: UiMessage) {
         _uiState.update { it.copy(userMessage = msg) }
     }
 

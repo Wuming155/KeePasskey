@@ -76,6 +76,9 @@ fun DebugSettingsScreen(
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
     val coroutineScope = rememberCoroutineScope()
+    val logRefreshedMsg = stringResource(R.string.debug_log_refreshed)
+    val logClearedMsg = stringResource(R.string.debug_log_cleared)
+    val logExportedMsg = stringResource(R.string.debug_export_done)
     var showExportConfirmDialog by remember { mutableStateOf(false) }
 
     val mockLogLines = remember {
@@ -98,7 +101,7 @@ fun DebugSettingsScreen(
             TopAppBar(
                 title = {
                     Text(
-                        text = "系统诊断与调试日志",
+                        text = stringResource(R.string.debug_title),
                         style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
                     )
                 },
@@ -127,7 +130,7 @@ fun DebugSettingsScreen(
             // 1. 日志记录总开关
             item {
                 Text(
-                    text = "调试日志记录选项 (KP2A 特性)",
+                    text = stringResource(R.string.debug_section_options),
                     style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.padding(start = 4.dp)
@@ -142,16 +145,16 @@ fun DebugSettingsScreen(
                     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                         DebugSwitchRow(
                             icon = Icons.Default.BugReport,
-                            title = "启用本地运行调试日志",
-                            subtitle = "开启后在私有应用沙箱记录非敏感的运行与交互日志，用于诊断报错",
+                            title = stringResource(R.string.debug_log_title),
+                            subtitle = stringResource(R.string.debug_log_sub),
                             checked = uiState.debugLogEnabled,
                             onCheckedChange = onDebugLogToggle
                         )
 
                         DebugSwitchRow(
                             icon = Icons.Default.CloudSync,
-                            title = "记录详细云同步与网络报文日志",
-                            subtitle = "记录 WebDAV / S3 请求头与状态码 (所有密码与授权 Token 均自动脱敏)",
+                            title = stringResource(R.string.debug_verbose_title),
+                            subtitle = stringResource(R.string.debug_verbose_sub),
                             checked = uiState.verboseSyncLog,
                             onCheckedChange = onVerboseSyncLogToggle
                         )
@@ -167,7 +170,7 @@ fun DebugSettingsScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "实时日志预览 (最近 7 条)",
+                        text = stringResource(R.string.debug_preview_title),
                         style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.padding(start = 4.dp)
@@ -175,12 +178,12 @@ fun DebugSettingsScreen(
                     IconButton(
                         onClick = {
                             coroutineScope.launch {
-                                snackbarHostState.showSnackbar("日志视图已刷新")
+                                snackbarHostState.showSnackbar(logRefreshedMsg)
                             }
                         },
                         modifier = Modifier.size(28.dp)
                     ) {
-                        Icon(Icons.Default.Refresh, contentDescription = "刷新", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                        Icon(Icons.Default.Refresh, contentDescription = stringResource(R.string.debug_cd_refresh), tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
                     }
                 }
             }
@@ -229,13 +232,13 @@ fun DebugSettingsScreen(
                         ) {
                             Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("导出 / 分享调试日志 (Send Debug Log)")
+                            Text(stringResource(R.string.debug_export_btn))
                         }
 
                         OutlinedButton(
                             onClick = {
                                 coroutineScope.launch {
-                                    snackbarHostState.showSnackbar("本地调试日志缓存已清空")
+                                    snackbarHostState.showSnackbar(logClearedMsg)
                                 }
                             },
                             shape = RoundedCornerShape(12.dp),
@@ -243,7 +246,7 @@ fun DebugSettingsScreen(
                         ) {
                             Icon(Icons.Default.CleaningServices, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("清空当前所有日志缓存")
+                            Text(stringResource(R.string.debug_clear_btn))
                         }
                     }
                 }
@@ -264,7 +267,7 @@ fun DebugSettingsScreen(
                         )
                         Spacer(modifier = Modifier.width(10.dp))
                         Text(
-                            text = "安全脱敏保证：调试日志过滤器会对所有数据库密码、Passkey 私钥、TOTP 密钥种子以及网络 Bearer Token 执行前置掩码屏蔽（*REDACTED*），确保导出的日志仅包含诊断调用栈，绝不泄露敏感信息。",
+                            text = stringResource(R.string.debug_privacy_desc),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             lineHeight = 18.sp
@@ -282,10 +285,10 @@ fun DebugSettingsScreen(
     if (showExportConfirmDialog) {
         AlertDialog(
             onDismissRequest = { showExportConfirmDialog = false },
-            title = { Text("确认导出脱敏日志") },
+            title = { Text(stringResource(R.string.debug_export_dialog_title)) },
             text = {
                 Text(
-                    text = "即将生成脱敏日志并调用系统分享。日志包含设备型号、Android 版本以及近期同步与解密流水。请仅将日志发送给信任的开发者以排查问题。",
+                    text = stringResource(R.string.debug_export_dialog_desc),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -294,15 +297,15 @@ fun DebugSettingsScreen(
                 Button(onClick = {
                     showExportConfirmDialog = false
                     coroutineScope.launch {
-                        snackbarHostState.showSnackbar("已生成日志包并复制到剪贴板，可前往 GitHub 或邮箱粘贴")
+                        snackbarHostState.showSnackbar(logExportedMsg)
                     }
                 }) {
-                    Text("继续导出")
+                    Text(stringResource(R.string.debug_export_confirm_btn))
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showExportConfirmDialog = false }) {
-                    Text("取消")
+                    Text(stringResource(R.string.btn_cancel))
                 }
             }
         )

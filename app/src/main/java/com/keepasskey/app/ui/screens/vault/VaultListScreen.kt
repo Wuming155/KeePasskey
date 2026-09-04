@@ -1,7 +1,9 @@
 package com.keepasskey.app.ui.screens.vault
 
-import android.content.res.Configuration
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -20,47 +22,37 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
+import androidx.compose.material.icons.automirrored.filled.DriveFileMove
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Clear
-import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.CreditCard
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.DeleteSweep
-import androidx.compose.material.icons.filled.Description
-import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.FolderOpen
-import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Key
-import androidx.compose.material.icons.filled.Language
-import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.PersonOutline
-import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SearchOff
+import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -70,36 +62,44 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.PullToRefreshState
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.keepasskey.app.R
 import com.keepasskey.app.ui.components.IconPickerDialog
-import com.keepasskey.app.ui.components.PasskeyBadge
-import com.keepasskey.app.ui.components.TotpMiniGauge
 import com.keepasskey.app.ui.components.getVaultIcon
-import com.keepasskey.app.ui.model.EntryCategory
+import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.model.UiVaultEntry
+import com.keepasskey.app.ui.model.resolveText
 import com.keepasskey.app.ui.model.VaultGroup
 import com.keepasskey.app.ui.theme.AppThemeMode
 import com.keepasskey.app.ui.theme.CapsuleShape
-import com.keepasskey.app.ui.theme.KeePasskeyTheme
+import kotlinx.coroutines.launch
 
+/** 下拉指示组件随手势下移的最大距离 */
+private val INDICATOR_TRAVEL_Y = 36.dp
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun VaultListScreen(
     currentTheme: AppThemeMode = AppThemeMode.SYSTEM,
@@ -107,16 +107,35 @@ fun VaultListScreen(
     onEntryClick: (String) -> Unit,
     onAddEntryClick: (String?) -> Unit,
     onLockClick: () -> Unit = {},
+    onNavigateToConflictResolver: () -> Unit = {},
     modifier: Modifier = Modifier,
     viewModel: VaultListViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
 
-    LaunchedEffect(uiState.userMessage) {
-        uiState.userMessage?.let { message ->
-            snackbarHostState.showSnackbar(message)
+    uiState.userMessage?.let { message ->
+        val text = message.resolveText()
+        LaunchedEffect(message, text) {
+            snackbarHostState.showSnackbar(text)
             viewModel.clearUserMessage()
+        }
+    }
+
+    // 优雅的返回键处理：
+    // 1. 处于批量选择模式时：取消批量选择
+    // 2. 搜索框有输入内容时：清空搜索
+    // 3. 处于子分组目录时：返回上一级目录
+    // 4. 处于根目录时：不拦截，交由系统默认退出/返回
+    BackHandler(
+        enabled = uiState.isBatchMode ||
+                uiState.searchQuery.isNotEmpty() ||
+                uiState.currentGroupId != null
+    ) {
+        when {
+            uiState.isBatchMode -> viewModel.clearBatchSelection()
+            uiState.searchQuery.isNotEmpty() -> viewModel.onSearchQueryChange("")
+            uiState.currentGroupId != null -> viewModel.navigateUp()
         }
     }
 
@@ -128,7 +147,20 @@ fun VaultListScreen(
         onGroupClick = viewModel::enterGroup,
         onNavigateUp = viewModel::navigateUp,
         onNavigateToBreadcrumb = viewModel::navigateToBreadcrumb,
-        onEntryClick = onEntryClick,
+        onEntryClick = { entryId ->
+            if (uiState.isBatchMode) {
+                viewModel.toggleEntrySelection(entryId)
+            } else {
+                onEntryClick(entryId)
+            }
+        },
+        onEntryLongClick = { entryId ->
+            if (!uiState.isBatchMode) {
+                viewModel.startBatchMode(entryId)
+            } else {
+                viewModel.toggleEntrySelection(entryId)
+            }
+        },
         onCopyPassword = viewModel::copyPassword,
         onCopyUsername = viewModel::copyUsername,
         onAddEntryClick = { onAddEntryClick(uiState.currentGroupId) },
@@ -139,6 +171,11 @@ fun VaultListScreen(
         onRestoreEntry = viewModel::restoreEntry,
         onPurgeEntry = viewModel::purgeEntry,
         onEmptyRecycleBin = viewModel::emptyRecycleBin,
+        onTriggerSync = viewModel::triggerPullRefresh,
+        onSelectAllBatch = viewModel::selectAllEntries,
+        onClearBatch = viewModel::clearBatchSelection,
+        onBatchDelete = viewModel::batchDeleteSelected,
+        onBatchMove = viewModel::batchMoveSelected,
         modifier = modifier
     )
 }
@@ -154,6 +191,7 @@ fun VaultListContent(
     onNavigateUp: () -> Unit,
     onNavigateToBreadcrumb: (String?) -> Unit,
     onEntryClick: (String) -> Unit,
+    onEntryLongClick: (String) -> Unit,
     onCopyPassword: (UiVaultEntry) -> Unit,
     onCopyUsername: (UiVaultEntry) -> Unit,
     onAddEntryClick: () -> Unit,
@@ -164,12 +202,20 @@ fun VaultListContent(
     onRestoreEntry: (String) -> Unit,
     onPurgeEntry: (String) -> Unit,
     onEmptyRecycleBin: () -> Unit,
+    onTriggerSync: () -> Unit,
+    onSelectAllBatch: () -> Unit,
+    onClearBatch: () -> Unit,
+    onBatchDelete: () -> Unit,
+    onBatchMove: (String?) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var showSortDialog by remember { mutableStateOf(false) }
-    var showCreateTypeSheet by remember { mutableStateOf(false) }
+    var showCreateTypeDialog by remember { mutableStateOf(false) }
+    val listState = rememberLazyListState()
     var showCreateGroupDialog by remember { mutableStateOf(false) }
     var showEmptyRecycleBinDialog by remember { mutableStateOf(false) }
+    var showBatchMoveDialog by remember { mutableStateOf(false) }
+    val pullRefreshState = rememberPullToRefreshState()
 
     // 文件夹上下文操作状态
     var groupToRename by remember { mutableStateOf<VaultGroup?>(null) }
@@ -181,77 +227,126 @@ fun VaultListContent(
         containerColor = MaterialTheme.colorScheme.background,
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         topBar = {
-            TopAppBar(
-                title = {
-                    OutlinedTextField(
-                        value = uiState.searchQuery,
-                        onValueChange = onSearchQueryChange,
-                        placeholder = {
-                            Text(
-                                text = stringResource(R.string.vault_search_hint),
-                                style = MaterialTheme.typography.bodyMedium
-                            )
-                        },
-                        leadingIcon = {
-                            Icon(
-                                imageVector = Icons.Default.Search,
-                                contentDescription = stringResource(R.string.cd_search),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        },
-                        trailingIcon = {
-                            if (uiState.searchQuery.isNotEmpty()) {
-                                IconButton(onClick = { onSearchQueryChange("") }) {
-                                    Icon(
-                                        imageVector = Icons.Default.Clear,
-                                        contentDescription = stringResource(R.string.cd_clear_search),
-                                        modifier = Modifier.size(18.dp)
+            if (uiState.isBatchMode) {
+                // 批量选择操作顶栏
+                TopAppBar(
+                    title = {
+                        Text(
+                            text = stringResource(R.string.vault_batch_selected_count, uiState.selectedEntryIds.size),
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                        )
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = onClearBatch) {
+                            Icon(Icons.Default.Clear, contentDescription = stringResource(R.string.cd_cancel_batch))
+                        }
+                    },
+                    actions = {
+                        IconButton(onClick = onSelectAllBatch) {
+                            Icon(Icons.Default.SelectAll, contentDescription = stringResource(R.string.cd_select_all))
+                        }
+                        IconButton(onClick = { showBatchMoveDialog = true }) {
+                            Icon(Icons.AutoMirrored.Filled.DriveFileMove, contentDescription = stringResource(R.string.cd_batch_move))
+                        }
+                        IconButton(onClick = onBatchDelete) {
+                            Icon(Icons.Default.Delete, contentDescription = stringResource(R.string.cd_batch_delete), tint = MaterialTheme.colorScheme.error)
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)
+                )
+            } else {
+                TopAppBar(
+                    title = {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(42.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.surfaceContainerLowest)
+                                .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f), CircleShape)
+                                .padding(horizontal = 10.dp),
+                            contentAlignment = Alignment.CenterStart
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Search,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+                                    if (uiState.searchQuery.isEmpty()) {
+                                        Text(
+                                            text = stringResource(R.string.vault_search_hint),
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                    BasicTextField(
+                                        value = uiState.searchQuery,
+                                        onValueChange = onSearchQueryChange,
+                                        singleLine = true,
+                                        textStyle = MaterialTheme.typography.bodyMedium.copy(
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        ),
+                                        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                                        modifier = Modifier.fillMaxWidth()
                                     )
                                 }
+                                if (uiState.searchQuery.isNotEmpty()) {
+                                    IconButton(
+                                        onClick = { onSearchQueryChange("") },
+                                        modifier = Modifier.size(24.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Clear,
+                                            contentDescription = stringResource(R.string.cd_clear_search),
+                                            modifier = Modifier.size(16.dp),
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
                             }
-                        },
-                        singleLine = true,
-                        shape = CircleShape,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = MaterialTheme.colorScheme.primary,
-                            unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f),
-                            focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
-                            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest
-                        ),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(48.dp)
-                    )
-                },
-                actions = {
-                    if (uiState.isInsideRecycleBin) {
-                        IconButton(onClick = { showEmptyRecycleBinDialog = true }) {
-                            Icon(
-                                imageVector = Icons.Default.DeleteSweep,
-                                contentDescription = stringResource(R.string.vault_empty_recycle_bin),
-                                tint = MaterialTheme.colorScheme.error
-                            )
                         }
-                    } else {
-                        IconButton(onClick = { showSortDialog = true }) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.Sort,
-                                contentDescription = stringResource(R.string.cd_sort),
-                                tint = if (uiState.sortOption != VaultSortOption.DEFAULT) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                    },
+                    actions = {
+                        if (uiState.isInsideRecycleBin) {
+                            IconButton(onClick = { showEmptyRecycleBinDialog = true }) {
+                                Icon(
+                                    imageVector = Icons.Default.DeleteSweep,
+                                    contentDescription = stringResource(R.string.vault_empty_recycle_bin),
+                                    tint = MaterialTheme.colorScheme.error
+                                )
+                            }
+                        } else {
+                            IconButton(onClick = { showSortDialog = true }) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.Sort,
+                                    contentDescription = stringResource(R.string.cd_sort),
+                                    tint = if (uiState.sortOption != VaultSortOption.DEFAULT) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
                         }
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
                 )
-            )
+            }
         },
         floatingActionButton = {
-            if (!uiState.isInsideRecycleBin) {
+            val showFab = !uiState.isBatchMode && !uiState.isInsideRecycleBin && (!uiState.hideFabOnScroll || !listState.isScrollInProgress)
+            AnimatedVisibility(
+                visible = showFab,
+                enter = androidx.compose.animation.fadeIn() + androidx.compose.animation.scaleIn(),
+                exit = androidx.compose.animation.fadeOut() + androidx.compose.animation.scaleOut()
+            ) {
                 ExtendedFloatingActionButton(
-                    onClick = { showCreateTypeSheet = true },
+                    onClick = { showCreateTypeDialog = true },
                     containerColor = MaterialTheme.colorScheme.primary,
                     contentColor = MaterialTheme.colorScheme.onPrimary,
                     shape = CapsuleShape,
@@ -261,10 +356,24 @@ fun VaultListContent(
             }
         }
     ) { innerPadding ->
-        LazyColumn(
+        PullToRefreshBox(
+            isRefreshing = uiState.isSyncing,
+            onRefresh = onTriggerSync,
+            state = pullRefreshState,
+            indicator = {
+                LastSyncPullIndicator(
+                    distanceFraction = pullRefreshState.distanceFraction,
+                    isSyncing = uiState.isSyncing,
+                    lastSyncTimeText = uiState.lastSyncTimeText
+                )
+            },
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding),
+                .padding(innerPadding)
+        ) {
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
@@ -303,7 +412,7 @@ fun VaultListContent(
                                         modifier = Modifier
                                             .clip(CircleShape)
                                             .clickable { onNavigateToBreadcrumb(null) }
-                                            .padding(horizontal = 8.dp, vertical = 12.dp)
+                                            .padding(horizontal = 8.dp, vertical = 8.dp)
                                     )
                                 }
                                 items(uiState.breadcrumbs) { grp ->
@@ -323,7 +432,7 @@ fun VaultListContent(
                                         modifier = Modifier
                                             .clip(CircleShape)
                                             .clickable { onNavigateToBreadcrumb(grp.id) }
-                                            .padding(horizontal = 8.dp, vertical = 12.dp)
+                                            .padding(horizontal = 8.dp, vertical = 8.dp)
                                     )
                                 }
                             }
@@ -332,7 +441,7 @@ fun VaultListContent(
                 }
             }
 
-            // 回收站专属警示横幅
+            // 回收站模式警示
             if (uiState.isInsideRecycleBin) {
                 item {
                     Surface(
@@ -340,27 +449,16 @@ fun VaultListContent(
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Row(
-                            modifier = Modifier.padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Delete,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.error
-                            )
+                        Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error)
                             Spacer(modifier = Modifier.width(10.dp))
-                            Text(
-                                text = stringResource(R.string.vault_recycle_bin_banner),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onErrorContainer
-                            )
+                            Text(stringResource(R.string.vault_recycle_bin_banner), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onErrorContainer)
                         }
                     }
                 }
             }
 
-            // 2. 当前非默认排序状态轻量提示
+            // 3. 当前非默认排序状态轻量提示
             if (uiState.sortOption != VaultSortOption.DEFAULT && !uiState.isInsideRecycleBin) {
                 item {
                     Row(
@@ -373,7 +471,7 @@ fun VaultListContent(
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Text(
-                            text = stringResource(R.string.vault_current_sort, uiState.sortOption.label),
+                            text = stringResource(R.string.vault_current_sort, stringResource(uiState.sortOption.labelRes)),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.primary
                         )
@@ -389,7 +487,7 @@ fun VaultListContent(
                 }
             }
 
-            // 3. 文件夹列表
+            // 4. 文件夹列表
             items(uiState.currentGroups, key = { "group_${it.id}" }) { group ->
                 KeePassGroupRow(
                     group = group,
@@ -400,15 +498,20 @@ fun VaultListContent(
                 )
             }
 
-            // 4. 凭据列表
+            // 5. 现代化多形态条目列表 (支持长按批量选择、信用卡拟真、安全便签)
             items(uiState.entries, key = { it.id }) { entry ->
-                KeePassEntryRow(
+                val isSelected = entry.id in uiState.selectedEntryIds
+                UnifiedVaultEntryRow(
                     entry = entry,
                     isRecycled = uiState.isInsideRecycleBin,
+                    isBatchMode = uiState.isBatchMode,
+                    isSelected = isSelected,
                     showUsername = uiState.showUsernameInList,
                     showOtp = uiState.showOtpInList,
                     showPasskeyBadge = uiState.showPasskeyBadge,
+                    showUrl = uiState.showUrlInList,
                     onClick = { onEntryClick(entry.id) },
+                    onLongClick = { onEntryLongClick(entry.id) },
                     onCopyPassword = { onCopyPassword(entry) },
                     onCopyUsername = { onCopyUsername(entry) },
                     onRestore = { onRestoreEntry(entry.id) },
@@ -416,7 +519,7 @@ fun VaultListContent(
                 )
             }
 
-            // 5. 空状态
+            // 6. 空状态
             if (uiState.currentGroups.isEmpty() && uiState.entries.isEmpty()) {
                 item {
                     Box(
@@ -444,26 +547,19 @@ fun VaultListContent(
                 }
             }
 
-            item {
-                Spacer(modifier = Modifier.height(72.dp))
-            }
+            item { Spacer(modifier = Modifier.height(72.dp)) }
+        }
         }
     }
 
-    // 模态排序窗口
+    // 排序选择对话框
     if (showSortDialog) {
         AlertDialog(
             onDismissRequest = { showSortDialog = false },
-            title = {
-                Text(
-                    text = stringResource(R.string.cd_sort),
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-                )
-            },
+            title = { Text(stringResource(R.string.cd_sort)) },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Column {
                     VaultSortOption.entries.forEach { option ->
-                        val isSelected = uiState.sortOption == option
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -472,114 +568,129 @@ fun VaultListContent(
                                     onSortOptionSelect(option)
                                     showSortDialog = false
                                 }
-                                .padding(vertical = 8.dp, horizontal = 4.dp),
+                                .padding(vertical = 10.dp, horizontal = 4.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             RadioButton(
-                                selected = isSelected,
+                                selected = uiState.sortOption == option,
                                 onClick = {
                                     onSortOptionSelect(option)
                                     showSortDialog = false
                                 }
                             )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = option.label,
-                                style = MaterialTheme.typography.bodyMedium.copy(
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
-                                ),
-                                color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
-                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text(text = stringResource(option.labelRes), style = MaterialTheme.typography.bodyMedium)
                         }
                     }
                 }
             },
             confirmButton = {
                 TextButton(onClick = { showSortDialog = false }) {
-                    Text(stringResource(R.string.btn_cancel))
+                    Text(stringResource(R.string.btn_close))
                 }
             }
         )
     }
 
-    // 底部浮层：选择新建类型
-    if (showCreateTypeSheet) {
-        ModalBottomSheet(
-            onDismissRequest = { showCreateTypeSheet = false },
-            containerColor = MaterialTheme.colorScheme.surface,
-            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp)
-                    .padding(bottom = 32.dp, top = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(
-                        text = stringResource(R.string.cd_create),
-                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Text(
-                        text = if (uiState.breadcrumbs.isNotEmpty()) "当前位置：${uiState.breadcrumbs.last().name}" else "当前位置：根目录",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-
-                // 选项 1：新建条目
-                Card(
-                    onClick = {
-                        showCreateTypeSheet = false
-                        onAddEntryClick()
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
-                ) {
-                    Row(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier.size(44.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primaryContainer),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(Icons.Default.Key, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
+    // 新建分类选择对话框
+    if (showCreateTypeDialog) {
+        AlertDialog(
+            onDismissRequest = { showCreateTypeDialog = false },
+            title = { Text(stringResource(R.string.cd_create)) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Surface(
+                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable {
+                            showCreateTypeDialog = false
+                            onAddEntryClick()
+                        },
+                        color = MaterialTheme.colorScheme.surfaceContainerLow
+                    ) {
+                        Row(modifier = Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Box(modifier = Modifier.size(36.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primaryContainer), contentAlignment = Alignment.Center) {
+                                Icon(Icons.Default.Key, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                            }
+                            Spacer(modifier = Modifier.width(14.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(stringResource(R.string.vault_new_entry), style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, fontSize = 15.sp))
+                                Text(stringResource(R.string.vault_new_entry_desc), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
                         }
-                        Spacer(modifier = Modifier.width(16.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(stringResource(R.string.vault_new_entry), style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
-                            Text("账号密码、Passkey 通行密钥等凭据", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+
+                    Surface(
+                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable {
+                            showCreateTypeDialog = false
+                            showCreateGroupDialog = true
+                        },
+                        color = MaterialTheme.colorScheme.surfaceContainerLow
+                    ) {
+                        Row(modifier = Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Box(modifier = Modifier.size(36.dp).clip(CircleShape).background(MaterialTheme.colorScheme.secondaryContainer), contentAlignment = Alignment.Center) {
+                                Icon(Icons.Default.CreateNewFolder, contentDescription = null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(20.dp))
+                            }
+                            Spacer(modifier = Modifier.width(14.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(stringResource(R.string.vault_new_folder), style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, fontSize = 15.sp))
+                                Text(stringResource(R.string.vault_new_folder_desc), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
                         }
                     }
                 }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { showCreateTypeDialog = false }) { Text(stringResource(R.string.btn_cancel)) }
+            },
+            shape = RoundedCornerShape(20.dp)
+        )
+    }
 
-                // 选项 2：新建群组/文件夹
-                Card(
-                    onClick = {
-                        showCreateTypeSheet = false
-                        showCreateGroupDialog = true
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
-                ) {
-                    Row(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier.size(44.dp).clip(CircleShape).background(MaterialTheme.colorScheme.secondaryContainer),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(Icons.Default.CreateNewFolder, contentDescription = null, tint = MaterialTheme.colorScheme.onSecondaryContainer, modifier = Modifier.size(24.dp))
+    // 批量移动文件夹选择对话框
+    if (showBatchMoveDialog) {
+        AlertDialog(
+            onDismissRequest = { showBatchMoveDialog = false },
+            title = { Text(stringResource(R.string.vault_batch_move_title)) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceContainerLow,
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth().clickable {
+                            onBatchMove(null)
+                            showBatchMoveDialog = false
                         }
-                        Spacer(modifier = Modifier.width(16.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(stringResource(R.string.vault_new_folder), style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
-                            Text("创建分类文件夹，层级化整理密码条目", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    ) {
+                        Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.FolderOpen, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text(stringResource(R.string.vault_move_to_root), style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold))
+                        }
+                    }
+
+                    uiState.allGroups.filter { !it.isRecycleBin }.forEach { grp ->
+                        Surface(
+                            color = MaterialTheme.colorScheme.surfaceContainerLow,
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth().clickable {
+                                onBatchMove(grp.id)
+                                showBatchMoveDialog = false
+                            }
+                        ) {
+                            Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Icon(getVaultIcon(grp.iconName), contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Text(grp.name, style = MaterialTheme.typography.bodyMedium)
+                            }
                         }
                     }
                 }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { showBatchMoveDialog = false }) { Text(stringResource(R.string.btn_cancel)) }
             }
-        }
+        )
     }
 
     // 新建群组对话框
@@ -618,14 +729,10 @@ fun VaultListContent(
                         }
                     },
                     shape = CapsuleShape
-                ) {
-                    Text(stringResource(R.string.btn_save))
-                }
+                ) { Text(stringResource(R.string.btn_save)) }
             },
             dismissButton = {
-                TextButton(onClick = { groupToRename = null }) {
-                    Text(stringResource(R.string.btn_cancel))
-                }
+                TextButton(onClick = { groupToRename = null }) { Text(stringResource(R.string.btn_cancel)) }
             }
         )
     }
@@ -655,14 +762,10 @@ fun VaultListContent(
                         groupToDelete = null
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
-                ) {
-                    Text(stringResource(R.string.btn_delete))
-                }
+                ) { Text(stringResource(R.string.btn_delete)) }
             },
             dismissButton = {
-                TextButton(onClick = { groupToDelete = null }) {
-                    Text(stringResource(R.string.btn_cancel))
-                }
+                TextButton(onClick = { groupToDelete = null }) { Text(stringResource(R.string.btn_cancel)) }
             }
         )
     }
@@ -680,16 +783,75 @@ fun VaultListContent(
                         showEmptyRecycleBinDialog = false
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
-                ) {
-                    Text(stringResource(R.string.btn_empty))
-                }
+                ) { Text(stringResource(R.string.btn_empty)) }
             },
             dismissButton = {
-                TextButton(onClick = { showEmptyRecycleBinDialog = false }) {
-                    Text(stringResource(R.string.btn_cancel))
-                }
+                TextButton(onClick = { showEmptyRecycleBinDialog = false }) { Text(stringResource(R.string.btn_cancel)) }
             }
         )
+    }
+}
+
+/**
+ * 下拉刷新指示组件：随下拉进度淡入下移，在指示区展示上次同步时间；同步进行中切换为进度环
+ */
+@Composable
+private fun LastSyncPullIndicator(
+    distanceFraction: Float,
+    isSyncing: Boolean,
+    lastSyncTimeText: String,
+    modifier: Modifier = Modifier
+) {
+    if (distanceFraction <= 0f && !isSyncing) return
+    val progress = distanceFraction.coerceIn(0f, 1f)
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .graphicsLayer {
+                // 下拉过程中保持手势跟手，仅在指示区范围内生效
+                alpha = if (isSyncing) 1f else progress
+            },
+        contentAlignment = Alignment.TopCenter
+    ) {
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceContainerLowest,
+            shape = CapsuleShape,
+            border = androidx.compose.foundation.BorderStroke(
+                1.dp,
+                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)
+            ),
+            shadowElevation = if (isSyncing) 3.dp else 0.dp,
+            modifier = Modifier
+                .padding(top = 10.dp)
+                .graphicsLayer {
+                    translationY = INDICATOR_TRAVEL_Y.toPx() * progress
+                }
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (isSyncing) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(14.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = stringResource(R.string.vault_sync_verifying),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                } else {
+                    Text(
+                        text = stringResource(R.string.vault_last_sync_time, lastSyncTimeText),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -712,7 +874,8 @@ private fun CreateGroupDialog(
                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                 )
                 Text(
-                    text = if (parentGroupName != null) "位置：$parentGroupName" else "位置：根目录",
+                    text = if (parentGroupName != null) stringResource(R.string.vault_create_location_with, parentGroupName)
+                    else stringResource(R.string.vault_create_location_root),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -750,14 +913,10 @@ private fun CreateGroupDialog(
                 },
                 enabled = groupName.isNotBlank(),
                 shape = CapsuleShape
-            ) {
-                Text(stringResource(R.string.btn_create))
-            }
+            ) { Text(stringResource(R.string.btn_create)) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text(stringResource(R.string.btn_cancel))
-            }
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.btn_cancel)) }
         }
     )
 
@@ -770,273 +929,5 @@ private fun CreateGroupDialog(
             },
             onDismiss = { showIconPicker = false }
         )
-    }
-}
-
-@Composable
-private fun KeePassGroupRow(
-    group: VaultGroup,
-    onClick: () -> Unit,
-    onRename: () -> Unit,
-    onChangeIcon: () -> Unit,
-    onDelete: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    var showMenu by remember { mutableStateOf(false) }
-
-    Card(
-        onClick = onClick,
-        modifier = modifier
-            .fillMaxWidth()
-            .border(
-                width = 1.dp,
-                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.8f),
-                shape = RoundedCornerShape(12.dp)
-            ),
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = if (group.isRecycleBin) MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.2f)
-            else MaterialTheme.colorScheme.surfaceContainerLowest
-        )
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(38.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(
-                        if (group.isRecycleBin) MaterialTheme.colorScheme.errorContainer
-                        else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = getVaultIcon(group.iconName),
-                    contentDescription = null,
-                    tint = if (group.isRecycleBin) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(22.dp)
-                )
-            }
-
-            Spacer(modifier = Modifier.width(12.dp))
-
-            Text(
-                text = group.name,
-                style = MaterialTheme.typography.titleMedium.copy(
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 15.sp
-                ),
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f)
-            )
-
-            if (!group.isRecycleBin) {
-                Box {
-                    IconButton(onClick = { showMenu = true }) {
-                        Icon(
-                            imageVector = Icons.Default.MoreVert,
-                            contentDescription = stringResource(R.string.btn_more),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-
-                    DropdownMenu(
-                        expanded = showMenu,
-                        onDismissRequest = { showMenu = false }
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.vault_folder_rename)) },
-                            leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
-                            onClick = {
-                                showMenu = false
-                                onRename()
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.vault_folder_change_icon)) },
-                            leadingIcon = { Icon(Icons.Default.Image, contentDescription = null) },
-                            onClick = {
-                                showMenu = false
-                                onChangeIcon()
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.vault_folder_delete), color = MaterialTheme.colorScheme.error) },
-                            leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
-                            onClick = {
-                                showMenu = false
-                                onDelete()
-                            }
-                        )
-                    }
-                }
-            }
-
-            Icon(
-                imageVector = Icons.AutoMirrored.Filled.ArrowForwardIos,
-                contentDescription = stringResource(R.string.cd_enter_group),
-                tint = MaterialTheme.colorScheme.outlineVariant,
-                modifier = Modifier.size(14.dp)
-            )
-        }
-    }
-}
-
-@Composable
-private fun KeePassEntryRow(
-    entry: UiVaultEntry,
-    isRecycled: Boolean,
-    showUsername: Boolean,
-    showOtp: Boolean,
-    showPasskeyBadge: Boolean,
-    onClick: () -> Unit,
-    onCopyPassword: () -> Unit,
-    onCopyUsername: () -> Unit,
-    onRestore: () -> Unit,
-    onPurge: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Card(
-        onClick = onClick,
-        modifier = modifier
-            .fillMaxWidth()
-            .border(
-                width = 1.dp,
-                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.8f),
-                shape = RoundedCornerShape(12.dp)
-            ),
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLowest
-        )
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            val (icon, iconTint, containerColor) = when {
-                entry.isPasskey || entry.category == EntryCategory.PASSKEY -> Triple(Icons.Default.Key, MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.primaryContainer)
-                entry.category == EntryCategory.LOGIN -> Triple(getVaultIcon(entry.iconName), MaterialTheme.colorScheme.tertiary, MaterialTheme.colorScheme.tertiaryContainer)
-                else -> Triple(getVaultIcon(entry.iconName), MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.primaryContainer)
-            }
-
-            Box(
-                modifier = Modifier
-                    .size(38.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(containerColor),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    tint = iconTint,
-                    modifier = Modifier.size(20.dp)
-                )
-            }
-
-            Spacer(modifier = Modifier.width(12.dp))
-
-            Column(modifier = Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = entry.title,
-                        style = MaterialTheme.typography.titleMedium.copy(
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 15.sp
-                        ),
-                        color = MaterialTheme.colorScheme.onSurface,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    if (entry.isPasskey && showPasskeyBadge) {
-                        Spacer(modifier = Modifier.width(6.dp))
-                        PasskeyBadge()
-                    }
-                }
-
-                if (showUsername) {
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        text = if (entry.username.isNotBlank()) entry.username else "无用户名",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-
-                if (showOtp && entry.totpCode != null) {
-                    Spacer(modifier = Modifier.height(3.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = entry.totpCode,
-                            style = MaterialTheme.typography.labelSmall.copy(
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.primary,
-                                letterSpacing = 1.sp
-                            )
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        TotpMiniGauge(remainingSeconds = entry.totpRemainingSeconds)
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.width(6.dp))
-
-            if (isRecycled) {
-                // 回收站模式：还原和彻底粉碎按钮
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = onRestore) {
-                        Icon(
-                            imageVector = Icons.Default.Restore,
-                            contentDescription = stringResource(R.string.btn_restore),
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-                    IconButton(onClick = onPurge) {
-                        Icon(
-                            imageVector = Icons.Default.DeleteForever,
-                            contentDescription = stringResource(R.string.btn_delete),
-                            tint = MaterialTheme.colorScheme.error,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-                }
-            } else {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (entry.username.isNotBlank()) {
-                        IconButton(onClick = onCopyUsername) {
-                            Icon(
-                                imageVector = Icons.Default.PersonOutline,
-                                contentDescription = stringResource(R.string.cd_copy_username),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                    }
-                    IconButton(onClick = onCopyPassword) {
-                        Icon(
-                            imageVector = Icons.Default.ContentCopy,
-                            contentDescription = stringResource(R.string.cd_copy_password),
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-                }
-            }
-        }
     }
 }

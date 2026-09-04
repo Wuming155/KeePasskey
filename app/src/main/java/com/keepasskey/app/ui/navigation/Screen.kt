@@ -7,6 +7,9 @@ sealed class Screen(val route: String) {
     data object Unlock : Screen("unlock")
     data object DatabasePicker : Screen("database_picker")
     data object VaultList : Screen("vault_list")
+    data object Authenticator : Screen("authenticator")
+    data object Generator : Screen("generator")
+    data object ConflictResolver : Screen("conflict_resolver")
     data object EntryDetail : Screen("entry_detail/{entryId}") {
         fun createRoute(entryId: String): String = "entry_detail/$entryId"
     }

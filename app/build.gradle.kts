@@ -72,4 +72,8 @@ dependencies {
     implementation("androidx.hilt:hilt-navigation-compose:1.3.0")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
+
+    // 单元测试
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
 }

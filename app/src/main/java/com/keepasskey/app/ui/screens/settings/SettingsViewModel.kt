@@ -2,7 +2,9 @@ package com.keepasskey.app.ui.screens.settings
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.SettingsRepository
+import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.theme.AppThemeMode
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.delay
@@ -10,6 +12,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -22,6 +25,31 @@ import javax.inject.Inject
 class SettingsViewModel @Inject constructor(
     private val settingsRepository: SettingsRepository
 ) : ViewModel() {
+
+    companion object {
+        // 标记当前应用进程生命周期内是否已执行过冷启动同步检测
+        // 当软件被彻底杀死重启时，该静态字段重新变为 false，从而再次自动触发云端同步
+        @Volatile
+        private var hasCheckedColdStartSync = false
+    }
+
+    init {
+        checkAndTriggerColdStartSync()
+    }
+
+    private fun checkAndTriggerColdStartSync() {
+        if (hasCheckedColdStartSync) return
+        hasCheckedColdStartSync = true
+        viewModelScope.launch {
+            try {
+                val currentSettings = settingsRepository.getSettings().first()
+                if (currentSettings.syncOnColdStart) {
+                    triggerSync()
+                }
+            } catch (_: Exception) {
+            }
+        }
+    }
 
     private val syncStateFlow = MutableStateFlow(
         SyncUiState(
@@ -72,9 +100,7 @@ class SettingsViewModel @Inject constructor(
 
     private val securityTimeoutStateFlow = MutableStateFlow(
         SecurityTimeoutUiState(
-            autoLockTimeoutSeconds = 0,
-            autoLockTimeoutLabel = "立即锁定",
-            clipboardTimeoutLabel = "30 秒"
+            autoLockTimeoutSeconds = 0
         )
     )
 
@@ -97,13 +123,7 @@ class SettingsViewModel @Inject constructor(
         val webdavChunkSizeMb: Int = 10,
         val preloadDatabaseEnabled: Boolean = true,
 
-        // 快速解锁与安全增强
-        val quickUnlockEnabled: Boolean = true,
-        val quickUnlockLength: Int = 3,
-        val quickUnlockObscureInput: Boolean = true,
-        val quickUnlockHideLength: Boolean = false,
-        val quickUnlockRequireDeviceLock: Boolean = true,
-        val quickUnlockUseDedicatedKey: Boolean = false,
+        // 安全锁定规则与环境
         val lockWhenScreenOff: Boolean = true,
         val lockWhenNavigateBack: Boolean = false,
         val clearPasswordOnLeave: Boolean = false,
@@ -157,7 +177,7 @@ class SettingsViewModel @Inject constructor(
         val autoSyncEnabled: Boolean = true,
         val wifiOnlySync: Boolean = true,
         val isSyncing: Boolean = false,
-        val syncFeedbackMessage: String? = null
+        val syncFeedbackMessage: UiMessage? = null
     )
 
     private data class HealthCheckUiState(
@@ -192,9 +212,7 @@ class SettingsViewModel @Inject constructor(
     )
 
     private data class SecurityTimeoutUiState(
-        val autoLockTimeoutSeconds: Int,
-        val autoLockTimeoutLabel: String,
-        val clipboardTimeoutLabel: String
+        val autoLockTimeoutSeconds: Int
     )
 
     val uiState: StateFlow<SettingsUiState> = combine(
@@ -237,6 +255,7 @@ class SettingsViewModel @Inject constructor(
             isSyncing = syncState.isSyncing,
             syncFeedbackMessage = syncState.syncFeedbackMessage,
             useOfflineCache = extState.useOfflineCache,
+            syncOnColdStart = userSettings.syncOnColdStart,
             periodicBackgroundSyncEnabled = extState.periodicBackgroundSyncEnabled,
             periodicBackgroundSyncIntervalMinutes = extState.periodicBackgroundSyncIntervalMinutes,
             allowedWifiSsids = extState.allowedWifiSsids,
@@ -263,24 +282,13 @@ class SettingsViewModel @Inject constructor(
             overrideNoAutofill = extState.overrideNoAutofill,
             disabledAutofillQueriesCount = extState.disabledAutofillQueriesCount,
 
-            // 4. 设备解锁与安全
-            themeMode = userSettings.themeMode,
-            appLanguage = userSettings.appLanguage,
-            oledBlackOptimization = userSettings.oledBlackOptimization,
+            // 4. 设备解锁与安全 (指纹识别与锁定规则)
             biometricEnabled = userSettings.biometricEnabled,
             autoLockBackground = userSettings.autoLockBackground,
             flagSecureEnabled = userSettings.flagSecureEnabled,
             autoClearClipboard = userSettings.autoClearClipboard,
             autoLockTimeoutSeconds = secState.autoLockTimeoutSeconds,
-            autoLockTimeoutLabel = secState.autoLockTimeoutLabel,
             clipboardTimeoutSeconds = userSettings.clipboardTimeoutSeconds,
-            clipboardTimeoutLabel = secState.clipboardTimeoutLabel,
-            quickUnlockEnabled = extState.quickUnlockEnabled,
-            quickUnlockLength = extState.quickUnlockLength,
-            quickUnlockObscureInput = extState.quickUnlockObscureInput,
-            quickUnlockHideLength = extState.quickUnlockHideLength,
-            quickUnlockRequireDeviceLock = extState.quickUnlockRequireDeviceLock,
-            quickUnlockUseDedicatedKey = extState.quickUnlockUseDedicatedKey,
             lockWhenScreenOff = extState.lockWhenScreenOff,
             lockWhenNavigateBack = extState.lockWhenNavigateBack,
             clearPasswordOnLeave = extState.clearPasswordOnLeave,
@@ -289,9 +297,16 @@ class SettingsViewModel @Inject constructor(
             showKillAppOption = extState.showKillAppOption,
 
             // 5. 外观与显示偏好
+            themeMode = userSettings.themeMode,
+            themePalette = userSettings.themePalette,
+            appLanguage = userSettings.appLanguage,
+            oledBlackOptimization = userSettings.oledBlackOptimization,
             showUsernameInList = userSettings.showUsernameInList,
             showOtpInList = userSettings.showOtpInList,
             showPasskeyBadge = userSettings.showPasskeyBadge,
+            showUrlInList = userSettings.showUrlInList,
+            hideFabOnScroll = userSettings.hideFabOnScroll,
+            hapticFeedbackEnabled = userSettings.hapticFeedbackEnabled,
             maskPasswordsDefault = extState.maskPasswordsDefault,
             maskTotpDefault = extState.maskTotpDefault,
             showUnlockedNotification = extState.showUnlockedNotification,
@@ -300,6 +315,8 @@ class SettingsViewModel @Inject constructor(
             listDensity = extState.listDensity,
             autoActivateSearchOnOpen = extState.autoActivateSearchOnOpen,
             iconSet = extState.iconSet,
+            showAuthenticatorTab = userSettings.showAuthenticatorTab,
+            showGeneratorTab = userSettings.showGeneratorTab,
 
             // 6. TOTP 规范字段映射
             totpSeedFieldName = extState.totpSeedFieldName,
@@ -336,6 +353,12 @@ class SettingsViewModel @Inject constructor(
     fun setThemeMode(themeMode: AppThemeMode) {
         viewModelScope.launch {
             settingsRepository.setThemeMode(themeMode)
+        }
+    }
+
+    fun setThemePalette(themePalette: com.keepasskey.app.ui.theme.AppThemePalette) {
+        viewModelScope.launch {
+            settingsRepository.setThemePalette(themePalette)
         }
     }
 
@@ -427,14 +450,13 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    fun setAutoLockTimeout(seconds: Int, label: String) {
+    fun setAutoLockTimeout(seconds: Int) {
         securityTimeoutStateFlow.update {
-            it.copy(autoLockTimeoutSeconds = seconds, autoLockTimeoutLabel = label)
+            it.copy(autoLockTimeoutSeconds = seconds)
         }
     }
 
-    fun setClipboardTimeout(seconds: Int, label: String) {
-        securityTimeoutStateFlow.update { it.copy(clipboardTimeoutLabel = label) }
+    fun setClipboardTimeout(seconds: Int) {
         viewModelScope.launch {
             settingsRepository.setClipboardTimeout(seconds)
         }
@@ -490,31 +512,31 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    // ========== KP2A 扩展：安全与快速解锁控制 ==========
-    fun setQuickUnlockEnabled(enabled: Boolean) {
-        extendedSettingsFlow.update { it.copy(quickUnlockEnabled = enabled) }
+    fun setShowUrlInList(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.setShowUrlInList(enabled)
+        }
     }
 
-    fun setQuickUnlockLength(length: Int) {
-        extendedSettingsFlow.update { it.copy(quickUnlockLength = length) }
+    fun setHideFabOnScroll(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.setHideFabOnScroll(enabled)
+        }
     }
 
-    fun setQuickUnlockObscureInput(enabled: Boolean) {
-        extendedSettingsFlow.update { it.copy(quickUnlockObscureInput = enabled) }
+    fun setHapticFeedbackEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.setHapticFeedbackEnabled(enabled)
+        }
     }
 
-    fun setQuickUnlockHideLength(enabled: Boolean) {
-        extendedSettingsFlow.update { it.copy(quickUnlockHideLength = enabled) }
+    fun setSyncOnColdStart(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.setSyncOnColdStart(enabled)
+        }
     }
 
-    fun setQuickUnlockRequireDeviceLock(enabled: Boolean) {
-        extendedSettingsFlow.update { it.copy(quickUnlockRequireDeviceLock = enabled) }
-    }
-
-    fun setQuickUnlockUseDedicatedKey(enabled: Boolean) {
-        extendedSettingsFlow.update { it.copy(quickUnlockUseDedicatedKey = enabled) }
-    }
-
+    // ========== 安全锁定规则控制 ==========
     fun setLockWhenScreenOff(enabled: Boolean) {
         extendedSettingsFlow.update { it.copy(lockWhenScreenOff = enabled) }
     }
@@ -601,6 +623,18 @@ class SettingsViewModel @Inject constructor(
         extendedSettingsFlow.update { it.copy(iconSet = iconSet) }
     }
 
+    fun setShowAuthenticatorTab(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.setShowAuthenticatorTab(enabled)
+        }
+    }
+
+    fun setShowGeneratorTab(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.setShowGeneratorTab(enabled)
+        }
+    }
+
     // ========== KP2A 扩展：文件处理与高级同步策略 ==========
     fun setUseOfflineCache(enabled: Boolean) {
         extendedSettingsFlow.update { it.copy(useOfflineCache = enabled) }
@@ -677,14 +711,19 @@ class SettingsViewModel @Inject constructor(
 
     fun triggerSync() {
         if (syncStateFlow.value.isSyncing) return
-        val providerName = syncStateFlow.value.provider.label
+        val provider = syncStateFlow.value.provider
         viewModelScope.launch {
-            syncStateFlow.update { it.copy(isSyncing = true, syncFeedbackMessage = "正在连接 $providerName 服务同步...") }
+            syncStateFlow.update {
+                it.copy(
+                    isSyncing = true,
+                    syncFeedbackMessage = UiMessage(R.string.sync_feedback_connecting, listOf(provider.protocol))
+                )
+            }
             delay(1200)
             syncStateFlow.update {
                 it.copy(
                     isSyncing = false,
-                    syncFeedbackMessage = "$providerName 同步完成：已验证云端原子哈希一致"
+                    syncFeedbackMessage = UiMessage(R.string.sync_feedback_done, listOf(provider.protocol))
                 )
             }
         }

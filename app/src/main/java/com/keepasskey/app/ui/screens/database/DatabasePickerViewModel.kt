@@ -2,6 +2,8 @@ package com.keepasskey.app.ui.screens.database
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.keepasskey.app.R
+import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.data.repository.VaultRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -25,8 +27,9 @@ class DatabasePickerViewModel @Inject constructor(
     private val vaultRepository: VaultRepository
 ) : ViewModel() {
 
-    private val userMessageFlow = MutableStateFlow<String?>(null)
+    private val userMessageFlow = MutableStateFlow<UiMessage?>(null)
     private val showCreateDialogFlow = MutableStateFlow(false)
+    private val showOpenSourceDialogFlow = MutableStateFlow(false)
 
     private val _events = MutableSharedFlow<DatabasePickerEvent>()
     val events: SharedFlow<DatabasePickerEvent> = _events.asSharedFlow()
@@ -34,12 +37,13 @@ class DatabasePickerViewModel @Inject constructor(
     val uiState: StateFlow<DatabasePickerUiState> = combine(
         vaultRepository.getDatabases(),
         userMessageFlow,
-        showCreateDialogFlow
-    ) { databases, userMessage, showCreateDialog ->
+        combine(showCreateDialogFlow, showOpenSourceDialogFlow) { c, o -> Pair(c, o) }
+    ) { databases, userMessage, (showCreateDialog, showOpenSourceDialog) ->
         DatabasePickerUiState(
             databases = databases,
             userMessage = userMessage,
-            showCreateDialog = showCreateDialog
+            showCreateDialog = showCreateDialog,
+            showOpenSourceDialog = showOpenSourceDialog
         )
     }.stateIn(
         scope = viewModelScope,
@@ -62,25 +66,34 @@ class DatabasePickerViewModel @Inject constructor(
         showCreateDialogFlow.value = false
     }
 
+    fun openOpenSourceDialog() {
+        showOpenSourceDialogFlow.value = true
+    }
+
+    fun closeOpenSourceDialog() {
+        showOpenSourceDialogFlow.value = false
+    }
+
     fun createDatabase(name: String, masterPassword: String, keyFile: Boolean, preset: String) {
         viewModelScope.launch {
             vaultRepository.createDatabase(name, masterPassword, keyFile, preset)
             showCreateDialogFlow.value = false
-            userMessageFlow.value = "新密码库已成功创建"
+            userMessageFlow.value = UiMessage(R.string.db_picker_msg_created)
         }
     }
 
-    fun importExternalDatabase() {
+    fun importDatabaseFromSource(source: OpenVaultSourceType, name: String, path: String) {
         viewModelScope.launch {
-            vaultRepository.importExternalDatabase("imported-vault.kdbx", "/storage/emulated/0/Download/imported-vault.kdbx")
-            userMessageFlow.value = "已成功导入外部 KDBX 密码库"
+            vaultRepository.importExternalDatabase(name, path, syncType = source.label)
+            showOpenSourceDialogFlow.value = false
+            userMessageFlow.value = UiMessage(R.string.db_picker_msg_opened)
         }
     }
 
     fun removeDatabase(id: String) {
         viewModelScope.launch {
             vaultRepository.removeDatabase(id)
-            userMessageFlow.value = "已从切换列表中移除该密码库关联"
+            userMessageFlow.value = UiMessage(R.string.db_picker_msg_removed)
         }
     }
 

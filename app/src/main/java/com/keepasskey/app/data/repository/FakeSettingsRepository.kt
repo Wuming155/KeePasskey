@@ -22,6 +22,10 @@ class FakeSettingsRepository @Inject constructor() : SettingsRepository {
         settingsFlow.update { it.copy(themeMode = themeMode) }
     }
 
+    override suspend fun setThemePalette(themePalette: com.keepasskey.app.ui.theme.AppThemePalette) {
+        settingsFlow.update { it.copy(themePalette = themePalette) }
+    }
+
     override suspend fun setOledBlackOptimization(enabled: Boolean) {
         settingsFlow.update { it.copy(oledBlackOptimization = enabled) }
     }
@@ -58,7 +62,31 @@ class FakeSettingsRepository @Inject constructor() : SettingsRepository {
         settingsFlow.update { it.copy(showPasskeyBadge = enabled) }
     }
 
+    override suspend fun setShowUrlInList(enabled: Boolean) {
+        settingsFlow.update { it.copy(showUrlInList = enabled) }
+    }
+
+    override suspend fun setHideFabOnScroll(enabled: Boolean) {
+        settingsFlow.update { it.copy(hideFabOnScroll = enabled) }
+    }
+
+    override suspend fun setHapticFeedbackEnabled(enabled: Boolean) {
+        settingsFlow.update { it.copy(hapticFeedbackEnabled = enabled) }
+    }
+
     override suspend fun setClipboardTimeout(seconds: Int) {
         settingsFlow.update { it.copy(clipboardTimeoutSeconds = seconds) }
+    }
+
+    override suspend fun setSyncOnColdStart(enabled: Boolean) {
+        settingsFlow.update { it.copy(syncOnColdStart = enabled) }
+    }
+
+    override suspend fun setShowAuthenticatorTab(enabled: Boolean) {
+        settingsFlow.update { it.copy(showAuthenticatorTab = enabled) }
+    }
+
+    override suspend fun setShowGeneratorTab(enabled: Boolean) {
+        settingsFlow.update { it.copy(showGeneratorTab = enabled) }
     }
 }

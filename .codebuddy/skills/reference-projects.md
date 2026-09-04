@@ -1,6 +1,6 @@
 # 参考项目地图（Reference Projects Skill）
 
-> 由 `CODEBUDDY.md` 索引。实现 `database` / `crypto` / `sync` / `passkey` 相关功能前，先查此文件定位参考实现。
+> 由 `AGENTS.md` 索引。实现 `database` / `crypto` / `sync` / `passkey` 相关功能前，先查此文件定位参考实现。
 
 `参考项目/` 包含四个成熟项目的完整源码，**仅作只读借鉴，严禁修改或复制代码入库**（许可证约束）。
 

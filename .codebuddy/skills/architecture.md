@@ -1,6 +1,6 @@
 # 架构指南（Architecture Skill）
 
-> 由 `CODEBUDDY.md` 索引。跨模块改动、新增功能落位前阅读。`ARCHITECTURE.md` 是方向的权威来源。
+> 由 `AGENTS.md` 索引。跨模块改动、新增功能落位前阅读。`ARCHITECTURE.md` 是方向的权威来源。
 
 ## 多模块架构（5 个模块）
 

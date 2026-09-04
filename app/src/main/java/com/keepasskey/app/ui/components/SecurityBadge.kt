@@ -70,9 +70,9 @@ fun PasswordStrengthBar(
 ) {
     val securityColors = LocalSecurityColors.current
     val (color, label, progress) = when {
-        entropyBits >= 100 -> Triple(securityColors.success, "极强 ($entropyBits bits)", 1.0f)
-        entropyBits >= 64 -> Triple(securityColors.warning, "中等 ($entropyBits bits)", 0.65f)
-        else -> Triple(securityColors.danger, "较弱 ($entropyBits bits)", 0.35f)
+        entropyBits >= 100 -> Triple(securityColors.success, stringResource(R.string.generator_strength_extreme, entropyBits), 1.0f)
+        entropyBits >= 64 -> Triple(securityColors.warning, stringResource(R.string.generator_strength_medium, entropyBits), 0.65f)
+        else -> Triple(securityColors.danger, stringResource(R.string.generator_strength_weak, entropyBits), 0.35f)
     }
     // 与页面内其他动效（如 TOTP 进度环）保持一致的平滑过渡
     val animatedProgress by animateFloatAsState(

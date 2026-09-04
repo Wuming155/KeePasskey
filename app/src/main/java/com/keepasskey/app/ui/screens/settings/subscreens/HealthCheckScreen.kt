@@ -67,7 +67,7 @@ fun HealthCheckScreen(
             TopAppBar(
                 title = {
                     Text(
-                        text = "健康度检查",
+                        text = stringResource(R.string.health_screen_title),
                         style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
                     )
                 },
@@ -120,7 +120,7 @@ fun HealthCheckScreen(
                                     color = MaterialTheme.colorScheme.onPrimaryContainer
                                 )
                                 Text(
-                                    text = "总体评分",
+                                    text = stringResource(R.string.health_total_score),
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
                                 )
@@ -130,7 +130,7 @@ fun HealthCheckScreen(
                         Spacer(modifier = Modifier.height(12.dp))
 
                         Text(
-                            text = "安全评级：${uiState.healthStatus}",
+                            text = stringResource(R.string.health_rating, uiState.healthStatus),
                             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                             color = MaterialTheme.colorScheme.onSurface
                         )
@@ -146,7 +146,7 @@ fun HealthCheckScreen(
                         Spacer(modifier = Modifier.height(8.dp))
 
                         Text(
-                            text = "上次评估时间：${uiState.lastHealthScanTime}",
+                            text = stringResource(R.string.health_last_scan, uiState.lastHealthScanTime),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.outline
                         )
@@ -170,15 +170,15 @@ fun HealthCheckScreen(
                                     color = MaterialTheme.colorScheme.onPrimary
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
-                                Text("正在扫描密码库...")
+                                Text(stringResource(R.string.health_scanning))
                             } else {
                                 Icon(
                                     imageVector = Icons.Default.Refresh,
-                                    contentDescription = "重新评估",
+                                    contentDescription = stringResource(R.string.health_cd_rescan),
                                     modifier = Modifier.size(18.dp)
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
-                                Text("重新扫描与安全评估")
+                                Text(stringResource(R.string.health_rescan_btn))
                             }
                         }
                     }
@@ -188,7 +188,7 @@ fun HealthCheckScreen(
             // 检查项目明细
             item {
                 Text(
-                    text = "审计检测明细",
+                    text = stringResource(R.string.health_section_audit),
                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                     color = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier.padding(start = 4.dp, top = 4.dp)
@@ -199,9 +199,9 @@ fun HealthCheckScreen(
                 HealthAuditRowItem(
                     icon = Icons.Default.CheckCircle,
                     iconTint = securityColors.success,
-                    title = "弱密码检测",
-                    subtitle = "0 个弱密码 · 所有凭据均达到强度标准",
-                    statusText = "通过",
+                    title = stringResource(R.string.health_weak_title),
+                    subtitle = stringResource(R.string.health_weak_sub),
+                    statusText = stringResource(R.string.health_status_pass),
                     isWarning = false
                 )
             }
@@ -210,9 +210,9 @@ fun HealthCheckScreen(
                 HealthAuditRowItem(
                     icon = Icons.Default.WarningAmber,
                     iconTint = securityColors.warning,
-                    title = "密码复用检测",
-                    subtitle = "发现 ${uiState.reusedPasswordCount} 个凭据存在密码重复使用，容易引发撞库风险",
-                    statusText = "需处理",
+                    title = stringResource(R.string.health_reuse_title),
+                    subtitle = stringResource(R.string.health_reuse_sub, uiState.reusedPasswordCount),
+                    statusText = stringResource(R.string.health_status_warn),
                     isWarning = true
                 )
             }
@@ -221,9 +221,9 @@ fun HealthCheckScreen(
                 HealthAuditRowItem(
                     icon = Icons.Default.CheckCircle,
                     iconTint = securityColors.success,
-                    title = "数据泄漏检索 (Have I Been Pwned)",
-                    subtitle = "0 个已知公开泄露 · 基于 SHA-1 前缀 k-匿名本地散列比对",
-                    statusText = "安全",
+                    title = stringResource(R.string.health_leak_title),
+                    subtitle = stringResource(R.string.health_leak_sub),
+                    statusText = stringResource(R.string.health_status_safe),
                     isWarning = false
                 )
             }
@@ -244,13 +244,13 @@ fun HealthCheckScreen(
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "安全加固建议",
+                                text = stringResource(R.string.health_tips_title),
                                 style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                         }
                         Text(
-                            text = "1. 为检测到重复密码的账户生成高强度的唯一主密码。\n2. 尽量优先为支持 Passkey (FIDO2) 的网站替换为 WebAuthn 密钥认证。\n3. 保持定期云端 WebDAV 原子备份，避免单点数据丢失。",
+                            text = stringResource(R.string.health_tips_desc),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             lineHeight = 20.sp

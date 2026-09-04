@@ -56,32 +56,61 @@ import com.keepasskey.app.R
 
 data class VaultIconItem(
     val id: String,
-    val label: String,
     val icon: ImageVector
 )
 
 val availableVaultIcons = listOf(
-    VaultIconItem("folder", "文件夹", Icons.Default.Folder),
-    VaultIconItem("key", "钥匙凭据", Icons.Default.Key),
-    VaultIconItem("lock", "安全锁", Icons.Default.Lock),
-    VaultIconItem("vpn_key", "通行密钥", Icons.Default.VpnKey),
-    VaultIconItem("public", "网站/域名", Icons.Default.Public),
-    VaultIconItem("email", "电子邮箱", Icons.Default.Email),
-    VaultIconItem("credit_card", "信用卡/支付", Icons.Default.CreditCard),
-    VaultIconItem("cloud", "云端存储", Icons.Default.Cloud),
-    VaultIconItem("dns", "基础设施", Icons.Default.Dns),
-    VaultIconItem("terminal", "终端指令", Icons.Default.Terminal),
-    VaultIconItem("database", "数据库", Icons.Default.Storage),
-    VaultIconItem("security", "盾牌安全", Icons.Default.Security),
-    VaultIconItem("wifi", "无线网络", Icons.Default.Wifi),
-    VaultIconItem("phone", "移动设备", Icons.Default.PhoneAndroid),
-    VaultIconItem("description", "安全便签", Icons.Default.Description),
-    VaultIconItem("work", "工作生产力", Icons.Default.Work),
-    VaultIconItem("code", "研发代码", Icons.Default.Code),
-    VaultIconItem("account_balance", "银行金融", Icons.Default.AccountBalance),
-    VaultIconItem("forum", "通讯社交", Icons.Default.Forum),
-    VaultIconItem("delete", "回收归档", Icons.Default.Delete)
+    VaultIconItem("folder", Icons.Default.Folder),
+    VaultIconItem("key", Icons.Default.Key),
+    VaultIconItem("lock", Icons.Default.Lock),
+    VaultIconItem("vpn_key", Icons.Default.VpnKey),
+    VaultIconItem("public", Icons.Default.Public),
+    VaultIconItem("email", Icons.Default.Email),
+    VaultIconItem("credit_card", Icons.Default.CreditCard),
+    VaultIconItem("cloud", Icons.Default.Cloud),
+    VaultIconItem("dns", Icons.Default.Dns),
+    VaultIconItem("terminal", Icons.Default.Terminal),
+    VaultIconItem("database", Icons.Default.Storage),
+    VaultIconItem("security", Icons.Default.Security),
+    VaultIconItem("wifi", Icons.Default.Wifi),
+    VaultIconItem("phone", Icons.Default.PhoneAndroid),
+    VaultIconItem("description", Icons.Default.Description),
+    VaultIconItem("work", Icons.Default.Work),
+    VaultIconItem("code", Icons.Default.Code),
+    VaultIconItem("account_balance", Icons.Default.AccountBalance),
+    VaultIconItem("forum", Icons.Default.Forum),
+    VaultIconItem("delete", Icons.Default.Delete)
 )
+
+/**
+ * 图标 id 到本地化无障碍标签资源的映射，
+ * 展示时经 stringResource 解析，避免硬编码单一语言文案
+ */
+private val iconLabelResMap: Map<String, Int> = mapOf(
+    "folder" to R.string.icon_label_folder,
+    "key" to R.string.icon_label_key,
+    "lock" to R.string.icon_label_lock,
+    "vpn_key" to R.string.icon_label_passkey,
+    "public" to R.string.icon_label_website,
+    "email" to R.string.icon_label_email,
+    "credit_card" to R.string.icon_label_credit_card,
+    "cloud" to R.string.icon_label_cloud,
+    "dns" to R.string.icon_label_infra,
+    "terminal" to R.string.icon_label_terminal,
+    "database" to R.string.icon_label_database,
+    "security" to R.string.icon_label_security,
+    "wifi" to R.string.icon_label_wifi,
+    "phone" to R.string.icon_label_phone,
+    "description" to R.string.icon_label_note,
+    "work" to R.string.icon_label_work,
+    "code" to R.string.icon_label_code,
+    "account_balance" to R.string.icon_label_bank,
+    "forum" to R.string.icon_label_social,
+    "delete" to R.string.icon_label_recycle
+)
+
+/** 按图标 id 取标签资源，未匹配时回退到钥匙凭据 */
+private fun iconLabelResOf(id: String): Int = iconLabelResMap[id] ?: R.string.icon_label_key
 
 fun getVaultIcon(name: String): ImageVector {
     return availableVaultIcons.find { it.id == name }?.icon ?: Icons.Default.Key
@@ -134,7 +163,7 @@ fun IconPickerDialog(
                         ) {
                             Icon(
                                 imageVector = item.icon,
-                                contentDescription = item.label,
+                                contentDescription = stringResource(iconLabelResOf(item.id)),
                                 tint = if (isSelected) MaterialTheme.colorScheme.primary
                                 else MaterialTheme.colorScheme.onSurface,
                                 modifier = Modifier.size(24.dp)

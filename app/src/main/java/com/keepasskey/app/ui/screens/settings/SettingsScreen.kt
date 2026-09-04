@@ -142,6 +142,7 @@ fun SettingsContent(
     val snackbarHostState = remember { SnackbarHostState() }
     val coroutineScope = rememberCoroutineScope()
     val securityColors = LocalSecurityColors.current
+    val masterKeyUpdatedMsg = stringResource(R.string.set_master_key_updated)
     var showMasterKeyDialog by remember { mutableStateOf(false) }
 
     Scaffold(
@@ -200,8 +201,7 @@ fun SettingsContent(
                     iconTint = MaterialTheme.colorScheme.tertiary,
                     title = stringResource(R.string.settings_sync),
                     subtitle = stringResource(R.string.settings_sync_sub),
-                    onClick = onNavigateToSync,
-                    trailingBadge = uiState.syncProvider.label
+                    onClick = onNavigateToSync
                 )
                 SettingsItemDivider()
                 ModernSettingsRow(
@@ -213,7 +213,7 @@ fun SettingsContent(
                 )
             }
 
-            // 分类 2: 安全与审计 (Security & Audit)
+            // 分类 2: 设备安全与两步验证 (Security & Authentication)
             ModernSectionHeader(title = stringResource(R.string.settings_cat_security))
             SettingsGroupCard {
                 ModernSettingsRow(
@@ -225,16 +225,23 @@ fun SettingsContent(
                 )
                 SettingsItemDivider()
                 ModernSettingsRow(
+                    icon = Icons.Default.Password,
+                    iconTint = MaterialTheme.colorScheme.primary,
+                    title = stringResource(R.string.set_totp_entry_title),
+                    subtitle = stringResource(R.string.set_totp_entry_sub),
+                    onClick = onNavigateToTotp
+                )
+                SettingsItemDivider()
+                ModernSettingsRow(
                     icon = Icons.Default.HealthAndSafety,
                     iconTint = securityColors.success,
                     title = stringResource(R.string.settings_health),
                     subtitle = stringResource(R.string.settings_health_sub),
-                    onClick = onNavigateToHealth,
-                    trailingBadge = "${uiState.healthScore}分 · ${uiState.healthStatus}"
+                    onClick = onNavigateToHealth
                 )
             }
 
-            // 分类 3: 体验与集成 (Preferences & Integration)
+            // 分类 3: 自动填充与个性化偏好 (Autofill & Preferences)
             ModernSectionHeader(title = stringResource(R.string.settings_cat_preferences))
             SettingsGroupCard {
                 ModernSettingsRow(
@@ -252,26 +259,18 @@ fun SettingsContent(
                     subtitle = stringResource(R.string.settings_theme_sub),
                     onClick = onNavigateToTheme
                 )
-                SettingsItemDivider()
-                ModernSettingsRow(
-                    icon = Icons.Default.Password,
-                    iconTint = MaterialTheme.colorScheme.primary,
-                    title = "两步验证与 TOTP 映射",
-                    subtitle = "TrayTOTP / KeeOtp 字段兼容与时间步长预设",
-                    onClick = onNavigateToTotp
-                )
             }
 
             Spacer(modifier = Modifier.height(6.dp))
 
             // 分类 4: 系统维护与关于 (System, Maintenance & About)
-            ModernSectionHeader(title = "系统与维护")
+            ModernSectionHeader(title = stringResource(R.string.set_section_system))
             SettingsGroupCard {
                 ModernSettingsRow(
                     icon = Icons.Default.BugReport,
                     iconTint = securityColors.warning,
-                    title = "系统诊断与调试日志",
-                    subtitle = "本地运行流水、同步报文与故障脱敏日志",
+                    title = stringResource(R.string.debug_title),
+                    subtitle = stringResource(R.string.set_debug_entry_sub),
                     onClick = onNavigateToDebug
                 )
                 SettingsItemDivider()
@@ -279,9 +278,8 @@ fun SettingsContent(
                     icon = Icons.Default.Info,
                     iconTint = MaterialTheme.colorScheme.primary,
                     title = stringResource(R.string.settings_about),
-                    subtitle = "${uiState.appVersion} · 开源架构与技术规范",
-                    onClick = onNavigateToAbout,
-                    trailingBadge = "2026 Edition"
+                    subtitle = stringResource(R.string.set_about_entry_sub, uiState.appVersion),
+                    onClick = onNavigateToAbout
                 )
             }
 
@@ -301,14 +299,14 @@ fun SettingsContent(
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
             title = {
                 Text(
-                    text = "更改主密钥",
+                    text = stringResource(R.string.settings_change_master_key),
                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                 )
             },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text(
-                        text = "设置新的密码库主密码。修改后将使用当前配置的 ${uiState.kdfAlgorithm} 重新计算密钥派生并重新加密整个密码库。",
+                        text = stringResource(R.string.set_master_key_dialog_desc, uiState.kdfAlgorithm),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -316,7 +314,7 @@ fun SettingsContent(
                     OutlinedTextField(
                         value = newPassword,
                         onValueChange = { newPassword = it },
-                        label = { Text("新主密码") },
+                        label = { Text(stringResource(R.string.set_new_master_password)) },
                         leadingIcon = {
                             Icon(Icons.Default.Lock, contentDescription = null, modifier = Modifier.size(20.dp))
                         },
@@ -337,7 +335,7 @@ fun SettingsContent(
                     OutlinedTextField(
                         value = confirmPassword,
                         onValueChange = { confirmPassword = it },
-                        label = { Text("确认新主密码") },
+                        label = { Text(stringResource(R.string.set_confirm_master_password)) },
                         leadingIcon = {
                             Icon(Icons.Default.Lock, contentDescription = null, modifier = Modifier.size(20.dp))
                         },
@@ -354,19 +352,19 @@ fun SettingsContent(
                         if (newPassword.isNotEmpty() && newPassword == confirmPassword) {
                             showMasterKeyDialog = false
                             coroutineScope.launch {
-                                snackbarHostState.showSnackbar("主密钥已成功更新")
+                                snackbarHostState.showSnackbar(masterKeyUpdatedMsg)
                             }
                         }
                     },
                     enabled = newPassword.isNotEmpty() && newPassword == confirmPassword,
                     shape = CapsuleShape
                 ) {
-                    Text("保存更改")
+                    Text(stringResource(R.string.set_save_changes))
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showMasterKeyDialog = false }) {
-                    Text("取消")
+                    Text(stringResource(R.string.btn_cancel))
                 }
             }
         )

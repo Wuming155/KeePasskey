@@ -4,11 +4,15 @@ import android.content.res.Configuration
 import androidx.activity.ComponentActivity
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -25,11 +29,15 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.keepasskey.app.data.repository.AppLanguage
 import com.keepasskey.app.ui.components.AppBottomBar
+import com.keepasskey.app.ui.components.AppNavigationRail
 import com.keepasskey.app.ui.components.BottomNavItem
 import com.keepasskey.app.ui.navigation.Screen
+import com.keepasskey.app.ui.screens.authenticator.AuthenticatorScreen
+import com.keepasskey.app.ui.screens.conflict.ConflictResolutionScreen
 import com.keepasskey.app.ui.screens.database.DatabasePickerScreen
 import com.keepasskey.app.ui.screens.detail.EntryDetailScreen
 import com.keepasskey.app.ui.screens.edit.EntryEditScreen
+import com.keepasskey.app.ui.screens.generator.GeneratorScreen
 import com.keepasskey.app.ui.screens.settings.SettingsScreen
 import com.keepasskey.app.ui.screens.settings.SettingsViewModel
 import com.keepasskey.app.ui.screens.settings.subscreens.AboutSettingsScreen
@@ -102,40 +110,85 @@ fun KeePasskeyApp() {
         LocalContext provides localizedContext,
         LocalConfiguration provides localizedConfiguration
     ) {
-        KeePasskeyTheme(themeMode = appSettings.themeMode, oledBlack = appSettings.oledBlackOptimization) {
+        KeePasskeyTheme(
+            themeMode = appSettings.themeMode,
+            themePalette = appSettings.themePalette,
+            oledBlack = appSettings.oledBlackOptimization
+        ) {
             val navController = rememberNavController()
             val navBackStackEntry by navController.currentBackStackEntryAsState()
             val currentRoute = navBackStackEntry?.destination?.route
             val showBottomBar = BottomNavItem.isTopLevelRoute(currentRoute)
 
+            val visibleNavItems = remember(appSettings.showAuthenticatorTab, appSettings.showGeneratorTab) {
+                BottomNavItem.getVisibleItems(
+                    showAuthenticator = appSettings.showAuthenticatorTab,
+                    showGenerator = appSettings.showGeneratorTab
+                )
+            }
+
+            // 若用户在设置中关闭了当前正在浏览的 Tab，平滑重定向回密码库
+            LaunchedEffect(currentRoute, appSettings.showAuthenticatorTab, appSettings.showGeneratorTab) {
+                if (currentRoute == Screen.Authenticator.route && !appSettings.showAuthenticatorTab) {
+                    navController.navigate(Screen.VaultList.route) {
+                        popUpTo(navController.graph.findStartDestination().id) { inclusive = false }
+                        launchSingleTop = true
+                    }
+                } else if (currentRoute == Screen.Generator.route && !appSettings.showGeneratorTab) {
+                    navController.navigate(Screen.VaultList.route) {
+                        popUpTo(navController.graph.findStartDestination().id) { inclusive = false }
+                        launchSingleTop = true
+                    }
+                }
+            }
+
+            val configuration = LocalConfiguration.current
+            val isWideScreen = configuration.screenWidthDp >= 600
+
+            val navigateToTopLevel: (String) -> Unit = { targetRoute ->
+                if (targetRoute != currentRoute) {
+                    navController.navigate(targetRoute) {
+                        popUpTo(navController.graph.findStartDestination().id) {
+                            saveState = true
+                        }
+                        launchSingleTop = true
+                        restoreState = true
+                    }
+                }
+            }
+
             Scaffold(
                 bottomBar = {
-                    if (showBottomBar) {
+                    if (showBottomBar && !isWideScreen) {
                         AppBottomBar(
                             currentRoute = currentRoute,
-                            onNavigateToRoute = { targetRoute ->
-                                if (targetRoute != currentRoute) {
-                                navController.navigate(targetRoute) {
-                                    popUpTo(navController.graph.findStartDestination().id) {
-                                        saveState = true
-                                    }
-                                    launchSingleTop = true
-                                    restoreState = true
-                                }
-                            }
-                        }
-                    )
-                }
-            },
-            contentWindowInsets = WindowInsets(0, 0, 0, 0)
-        ) { innerPadding ->
-            NavHost(
-                navController = navController,
-                startDestination = Screen.Unlock.route,
-                modifier = Modifier.padding(bottom = innerPadding.calculateBottomPadding()),
-                enterTransition = { fadeIn() },
-                exitTransition = { fadeOut() }
-            ) {
+                            visibleItems = visibleNavItems,
+                            onNavigateToRoute = navigateToTopLevel
+                        )
+                    }
+                },
+                contentWindowInsets = WindowInsets(0, 0, 0, 0)
+            ) { innerPadding ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(bottom = innerPadding.calculateBottomPadding())
+                ) {
+                    if (showBottomBar && isWideScreen) {
+                        AppNavigationRail(
+                            currentRoute = currentRoute,
+                            visibleItems = visibleNavItems,
+                            onNavigateToRoute = navigateToTopLevel
+                        )
+                    }
+                    Box(modifier = Modifier.weight(1f).fillMaxSize()) {
+                        NavHost(
+                            navController = navController,
+                            startDestination = Screen.Unlock.route,
+                            modifier = Modifier.fillMaxSize(),
+                            enterTransition = { fadeIn() },
+                            exitTransition = { fadeOut() }
+                        ) {
                 // 1. 登录与解锁页
                 composable(Screen.Unlock.route) {
                     UnlockScreen(
@@ -181,12 +234,41 @@ fun KeePasskeyApp() {
                     )
                 }
 
+                // 3.1 独立双重认证验证码 (TOTP) 管理页
+                composable(Screen.Authenticator.route) {
+                    AuthenticatorScreen(
+                        onEntryClick = { entryId ->
+                            navController.navigate(Screen.EntryDetail.createRoute(entryId))
+                        }
+                    )
+                }
+
+                // 3.2 独立全功能密码生成器页
+                composable(Screen.Generator.route) {
+                    GeneratorScreen()
+                }
+
+                // 3.3 云端同步冲突解决双栏合并页
+                composable(Screen.ConflictResolver.route) {
+                    ConflictResolutionScreen(
+                        onBackClick = { navController.popBackStack() },
+                        onResolveSuccess = { navController.popBackStack() }
+                    )
+                }
+
                 // 4. 密码详情页
                 composable(
                     route = Screen.EntryDetail.route,
-                    arguments = listOf(navArgument("entryId") { type = NavType.StringType })
+                    arguments = listOf(
+                        navArgument("entryId") {
+                            type = NavType.StringType
+                            nullable = true
+                            defaultValue = null
+                        }
+                    )
                 ) { backStackEntry ->
-                    val entryId = backStackEntry.arguments?.getString("entryId") ?: "1"
+                    val entryId = backStackEntry.arguments?.getString("entryId")
+                    // entryId 可能为空或无效，由详情页展示"未找到凭据"空状态
                     EntryDetailScreen(
                         entryId = entryId,
                         onBackClick = { navController.popBackStack() },
@@ -266,6 +348,7 @@ fun KeePasskeyApp() {
                         onUpdateWebDav = settingsViewModel::updateWebDavConfig,
                         onUpdateS3 = settingsViewModel::updateS3Config,
                         onUseOfflineCacheToggle = settingsViewModel::setUseOfflineCache,
+                        onSyncOnColdStartToggle = settingsViewModel::setSyncOnColdStart,
                         onPeriodicBackgroundSyncToggle = settingsViewModel::setPeriodicBackgroundSyncEnabled,
                         onPeriodicIntervalChange = settingsViewModel::setPeriodicBackgroundSyncInterval,
                         onAllowedWifiSsidsChange = settingsViewModel::setAllowedWifiSsids,
@@ -301,7 +384,7 @@ fun KeePasskeyApp() {
                     )
                 }
 
-                // 10. 二级设置页面：设备解锁与安全 (含快速解锁 QuickUnlock)
+                // 10. 二级设置页面：设备解锁与安全 (指纹识别与严苛锁定策略)
                 composable(Screen.SettingsSecurity.route) {
                     val settingsViewModel: SettingsViewModel = hiltViewModel()
                     val settingsState by settingsViewModel.uiState.collectAsStateWithLifecycle()
@@ -314,12 +397,6 @@ fun KeePasskeyApp() {
                         onAutoClearClipboardToggle = settingsViewModel::setAutoClearClipboard,
                         onAutoLockTimeoutChange = settingsViewModel::setAutoLockTimeout,
                         onClipboardTimeoutChange = settingsViewModel::setClipboardTimeout,
-                        onQuickUnlockToggle = settingsViewModel::setQuickUnlockEnabled,
-                        onQuickUnlockLengthChange = settingsViewModel::setQuickUnlockLength,
-                        onQuickUnlockObscureInputToggle = settingsViewModel::setQuickUnlockObscureInput,
-                        onQuickUnlockHideLengthToggle = settingsViewModel::setQuickUnlockHideLength,
-                        onQuickUnlockRequireDeviceLockToggle = settingsViewModel::setQuickUnlockRequireDeviceLock,
-                        onQuickUnlockUseDedicatedKeyToggle = settingsViewModel::setQuickUnlockUseDedicatedKey,
                         onLockWhenScreenOffToggle = settingsViewModel::setLockWhenScreenOff,
                         onLockWhenNavigateBackToggle = settingsViewModel::setLockWhenNavigateBack,
                         onClearPasswordOnLeaveToggle = settingsViewModel::setClearPasswordOnLeave,
@@ -337,11 +414,15 @@ fun KeePasskeyApp() {
                         uiState = settingsState,
                         onBackClick = { navController.popBackStack() },
                         onThemeSelected = settingsViewModel::setThemeMode,
+                        onPaletteSelected = settingsViewModel::setThemePalette,
                         onLanguageSelected = settingsViewModel::setAppLanguage,
                         onOledOptimizationToggle = settingsViewModel::setOledBlackOptimization,
                         onShowUsernameInList = settingsViewModel::setShowUsernameInList,
                         onShowOtpInList = settingsViewModel::setShowOtpInList,
                         onShowPasskeyBadge = settingsViewModel::setShowPasskeyBadge,
+                        onShowUrlInList = settingsViewModel::setShowUrlInList,
+                        onHideFabOnScrollToggle = settingsViewModel::setHideFabOnScroll,
+                        onHapticFeedbackToggle = settingsViewModel::setHapticFeedbackEnabled,
                         onMaskPasswordsDefaultToggle = settingsViewModel::setMaskPasswordsDefault,
                         onMaskTotpDefaultToggle = settingsViewModel::setMaskTotpDefault,
                         onShowUnlockedNotificationToggle = settingsViewModel::setShowUnlockedNotification,
@@ -349,7 +430,9 @@ fun KeePasskeyApp() {
                         onShowGroupInEntryToggle = settingsViewModel::setShowGroupInEntry,
                         onListDensitySelected = settingsViewModel::setListDensity,
                         onAutoActivateSearchOnOpenToggle = settingsViewModel::setAutoActivateSearchOnOpen,
-                        onIconSetSelected = settingsViewModel::setIconSet
+                        onIconSetSelected = settingsViewModel::setIconSet,
+                        onShowAuthenticatorTabToggle = settingsViewModel::setShowAuthenticatorTab,
+                        onShowGeneratorTabToggle = settingsViewModel::setShowGeneratorTab
                     )
                 }
 
@@ -399,5 +482,7 @@ fun KeePasskeyApp() {
             }
         }
     }
+}
+}
 }
 }

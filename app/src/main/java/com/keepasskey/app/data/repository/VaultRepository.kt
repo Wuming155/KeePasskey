@@ -36,9 +36,9 @@ interface VaultRepository {
     suspend fun removeDatabase(id: String)
 
     /**
-     * 导入外部 KDBX 数据库
+     * 导入并打开已有 KDBX 数据库 (支持本地、WebDAV、S3 来源)
      */
-    suspend fun importExternalDatabase(name: String, path: String)
+    suspend fun importExternalDatabase(name: String, path: String, syncType: String = "本地设备存储")
 
     /**
      * 获取全部群组/文件夹的实时响应式流
@@ -84,4 +84,14 @@ interface VaultRepository {
      * 清空回收站
      */
     suspend fun emptyRecycleBin()
+
+    /**
+     * 批量移动凭据条目至目标分组
+     */
+    suspend fun batchMoveEntries(entryIds: Set<String>, targetGroupId: String?)
+
+    /**
+     * 批量删除凭据条目（移至回收站）
+     */
+    suspend fun batchDeleteEntries(entryIds: Set<String>)
 }

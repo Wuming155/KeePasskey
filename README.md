@@ -21,14 +21,15 @@
 | 领域 | 选型 |
 |------|------|
 | 系统基准 | **Android API 36+**（`minSdk 36`, `compileSdk 36`, `targetSdk 36`），仅针对 Android 16+ 深度优化，无需向下兼容负担 |
-| 语言 | **Kotlin** |
+| 语言 | **Kotlin 2.4.10**（Compose 编译器随 Kotlin 一同发布） |
+| 构建 | Gradle 9.3.1（Wrapper）+ AGP 9.1.0 |
 | UI | **Jetpack Compose**（Material 3），优先声明式、可预览的 Compose 方案 |
 | 异步 | **Kotlin Coroutines + Flow** |
-| 依赖注入 | **Hilt**（或 Koin） |
-| 本地缓存 | **Room**（同步状态、最近文件、UI 元数据，不存明文） |
+| 依赖注入 | **Hilt 2.60.1**（当前 kapt，后续评估迁移 KSP） |
+| 本地缓存 | **Room**（规划中：同步状态、最近文件、UI 元数据，不存明文） |
 | 数据库解析 | 自研或封装 KeePass 解析（参考 KeePassDX 的 `database` 模块） |
 | 加密 | AES / Twofish / ChaCha20 分组加密，Argon2 / SHA-256 KDF（参考 KeePassDX `crypto` 模块） |
-| 网络 | **OkHttp + ktor**，WebDAV 走 HTTP/XML，S3 走 AWS SDK / MinIO SDK |
+| 网络 | **OkHttp + ktor**（规划中），WebDAV 走 HTTP/XML，S3 走 AWS SDK / MinIO SDK |
 | 生物识别 | AndroidX Biometric |
 | 自动填充 | Android Autofill Framework + 自定义键盘 |
 | 通行密钥 | Android Credential Manager / FIDO2 API |
@@ -101,32 +102,35 @@ sync/                # 同步层：文件存储抽象 + WebDAV / S3 兼容实现
 > 核心原则：**先 UI，后功能**。先把界面与交互流程搭好并确认合适，再逐层接入真实数据。
 
 ### 阶段 0：工程脚手架
-- [ ] 初始化 Android 工程（Gradle Kotlin DSL）
-- [ ] 接入 Compose、Hilt、Coroutines、Room、OkHttp 等依赖
-- [ ] 配置 Material 3 主题（浅色 / 深色 / 动态配色）
-- [ ] 确定包结构与模块划分
+- [x] 初始化 Android 工程（Gradle Kotlin DSL）
+- [x] 接入 Compose、Hilt、Coroutines 等依赖（Room、OkHttp 待实际接入）
+- [x] 配置 Material 3 主题（浅色 / 深色 / 动态配色，另含 5 套品牌配色与 OLED 纯黑优化）
+- [x] 确定包结构与模块划分（5 模块架构）
 
-### 阶段 1：UI 优先（当前第一步）⭐
+### 阶段 1：UI 优先（已完成）
 目标：用**静态 / 假数据**搭建全部界面与导航，确认交互与视觉。
 
-- [ ] **导航骨架**：启动页 → 数据库列表 → 解锁 → 主界面（分组/条目）
-- [ ] **数据库列表页**：已添加数据库卡片、添加数据库入口
-- [ ] **解锁页**：主密码输入框、密钥文件选择、生物识别按钮
-- [ ] **主列表页**：分组树 + 条目列表 + 搜索栏 + 排序/过滤
-- [ ] **条目详情页**：字段展示、复制、显示/隐藏密码、附件、历史
-- [ ] **条目编辑页**：各字段输入、图标选择、自定义字段增删
-- [ ] **分组页**：分组创建/重命名/移动
-- [ ] **设置页**：主题、默认打开、同步管理入口
-- [ ] **同步配置页**：WebDAV / S3 表单（仅 UI）
-- [ ] **通行密钥页**：通行密钥列表与添加（仅 UI）
-- [ ] 统一组件库：密码可见切换、复制按钮、空状态、加载态、对话框
-- [ ] 在设备/模拟器上走查完整流程，确认 UI 合适
+- [x] **导航骨架**：启动页 → 数据库列表 → 解锁 → 主界面（分组/条目）
+- [x] **数据库列表页**：已添加数据库卡片、添加数据库入口（多密码库管理：创建 / 移除 / 导入外部库）
+- [x] **解锁页**：主密码输入框、密钥文件选择、生物识别按钮、快速解锁（Quick Unlock）
+- [x] **主列表页**：分组树 + 条目列表 + 搜索栏 + 排序/过滤 + 批量操作
+- [x] **条目详情页**：字段展示、复制、显示/隐藏密码、附件、历史、Visual Diff 差异比对与回滚
+- [x] **条目编辑页**：各字段输入、图标选择、自定义字段增删
+- [x] **分组页**：分组创建/重命名/移动/图标更换
+- [x] **设置页**：主题、默认打开、同步管理入口（含 9 个子页：主题 / 安全 / WebDAV与S3 / 自动填充 / 数据库 / 健康检查 / TOTP / 调试 / 关于）
+- [x] **同步配置页**：WebDAV / S3 表单（仅 UI）
+- [x] **独立模块页**：独立双重认证（Authenticator）、全功能密码生成器（Generator）、云同步双栏冲突合并（Conflict Resolver）
+- [x] 统一组件库：密码可见切换、复制按钮、空状态、加载态、对话框（`AppBottomBar`、`AppNavigationRail`、`BentoCard`、`IconPickerDialog`、`SecurityBadge` 等）
+- [x] 中英双语字符串资源（`values` / `values-en` 均各 772 行，完全对齐）
+- [x] 在设备/模拟器与代码层走查完整流程，确认 UI 完备可用
 
-### 阶段 2：数据库核心
-- [ ] kdbx 解析与写入（接入 `database` 模块）
-- [ ] 主密码 / 密钥文件 / KDF 校验解锁
-- [ ] 条目与分组的增删改查（接真实模型）
-- [ ] 附件、历史、模板、搜索
+### 阶段 2：数据库核心（当前重点）⭐
+- [ ] `crypto` 模块：引入 BouncyCastle，实现 AES-256 / ChaCha20 / Twofish 分组加密
+- [ ] `crypto` 模块：实现 Argon2d/id 与 SHA-256 KDF 派生，严格遵守敏感数据显式清零规范
+- [ ] `database` 模块：标准 `.kdbx`（v4/v3）二进制格式头解析与 Payload 解密/加密
+- [ ] `database` 模块：XML 树解析与序列化，映射分组（Group）与条目（Entry）领域模型
+- [ ] `database` 模块：内存模型 `DatabaseSession` 维护与增删改查
+- [ ] 数据层替换：实现真实 `VaultRepository` 替换 `FakeVaultRepository`，连接 UI 与真实文件
 
 ### 阶段 3：生物识别与自动填充
 - [ ] 生物识别解锁（AndroidX Biometric）
@@ -158,9 +162,10 @@ sync/                # 同步层：文件存储抽象 + WebDAV / S3 兼容实现
 
 - **KeePassDX**（`参考项目/KeePassDX-master`）：Kotlin 实现的 Android KeePass 应用，包含 `database`、`crypto` 模块，最贴近本项目。
 - **keepass2android**（`参考项目/keepass2android-main`）：功能丰富的 Java 实现，可参考同步与自动填充方案。
+- **KeePass 官方**（`参考项目/KeePass-2.61.1-Source`）：官方 C# 实现，kdbx 二进制 / XML 格式的权威参照。
 - **Monica**（`参考项目/Monica-main`）：Kotlin 项目，可参考通用工程结构与 Compose 实践。
 
-> 仅作为学习与架构参考，注意各自的开源许可证约束。
+> 仅作为学习与架构参考，注意各自的开源许可证约束；本仓库代码独立编写，严禁复制其代码入库。各功能的参考定位详见 `.codebuddy/skills/reference-projects.md`。
 
 ---
 

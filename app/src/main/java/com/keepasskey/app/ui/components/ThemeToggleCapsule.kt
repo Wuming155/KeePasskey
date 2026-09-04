@@ -23,7 +23,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.keepasskey.app.R
 import com.keepasskey.app.ui.theme.AppThemeMode
 import com.keepasskey.app.ui.theme.CapsuleShape
 
@@ -55,6 +57,12 @@ fun ThemeToggleCapsule(
             transitionSpec = { fadeIn() togetherWith fadeOut() },
             label = "ThemeIconAnimation"
         ) { theme ->
+            // 主题名称按当前语言动态解析，替代枚举内置的硬编码文案
+            val themeLabel = when (theme) {
+                AppThemeMode.LIGHT -> stringResource(R.string.capsule_theme_light)
+                AppThemeMode.DARK -> stringResource(R.string.capsule_theme_dark)
+                AppThemeMode.SYSTEM -> stringResource(R.string.capsule_theme_system)
+            }
             val icon = when (theme) {
                 AppThemeMode.LIGHT -> Icons.Default.LightMode
                 AppThemeMode.DARK -> Icons.Default.DarkMode
@@ -67,14 +75,18 @@ fun ThemeToggleCapsule(
             }
             Icon(
                 imageVector = icon,
-                contentDescription = theme.displayName,
+                contentDescription = themeLabel,
                 tint = tint,
                 modifier = Modifier.size(16.dp)
             )
         }
         Spacer(modifier = Modifier.width(6.dp))
         Text(
-            text = currentTheme.displayName,
+            text = when (currentTheme) {
+                AppThemeMode.LIGHT -> stringResource(R.string.capsule_theme_light)
+                AppThemeMode.DARK -> stringResource(R.string.capsule_theme_dark)
+                AppThemeMode.SYSTEM -> stringResource(R.string.capsule_theme_system)
+            },
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurface
         )

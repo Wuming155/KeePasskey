@@ -71,6 +71,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.keepasskey.app.R
 import com.keepasskey.app.ui.components.BentoCard
+import com.keepasskey.app.ui.model.UiMessage
+import com.keepasskey.app.ui.model.resolveText
 import com.keepasskey.app.ui.screens.settings.SettingsUiState
 
 /**
@@ -96,8 +98,8 @@ fun DatabaseSettingsScreen(
     var showChildDbDialog by remember { mutableStateOf(false) }
     var showExportDialog by remember { mutableStateOf(false) }
     var showImportDialog by remember { mutableStateOf(false) }
-    var benchmarkMessage by remember { mutableStateOf<String?>(null) }
-    var operationFeedback by remember { mutableStateOf<String?>(null) }
+    var benchmarkMessage by remember { mutableStateOf<UiMessage?>(null) }
+    var operationFeedback by remember { mutableStateOf<UiMessage?>(null) }
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -106,7 +108,7 @@ fun DatabaseSettingsScreen(
             TopAppBar(
                 title = {
                     Text(
-                        text = "密码库与加密",
+                        text = stringResource(R.string.settings_database),
                         style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
                     )
                 },
@@ -135,7 +137,7 @@ fun DatabaseSettingsScreen(
             // 1. 常规与基础属性
             item {
                 Text(
-                    text = "常规与基础属性",
+                    text = stringResource(R.string.dbset_section_basic),
                     style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.padding(start = 4.dp)
@@ -148,10 +150,10 @@ fun DatabaseSettingsScreen(
                     backgroundColor = MaterialTheme.colorScheme.surfaceContainerLowest
                 ) {
                     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        DatabaseFieldRow(label = "数据库名称", value = uiState.databaseName)
-                        DatabaseFieldRow(label = "本地存储路径", value = uiState.databasePath)
-                        DatabaseFieldRow(label = "新建条目默认用户名", value = uiState.databaseDefaultUsername)
-                        DatabaseFieldRow(label = "数据内嵌压缩算法", value = uiState.compressionAlgorithm)
+                        DatabaseFieldRow(label = stringResource(R.string.dbset_field_db_name), value = uiState.databaseName)
+                        DatabaseFieldRow(label = stringResource(R.string.dbset_field_db_path), value = uiState.databasePath)
+                        DatabaseFieldRow(label = stringResource(R.string.dbset_field_default_user), value = uiState.databaseDefaultUsername)
+                        DatabaseFieldRow(label = stringResource(R.string.dbset_field_compression), value = uiState.compressionAlgorithm)
 
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -160,12 +162,12 @@ fun DatabaseSettingsScreen(
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = "启用密码库回收站",
+                                    text = stringResource(R.string.dbset_recycle_bin_title),
                                     style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
                                 Text(
-                                    text = "删除条目时先移动至回收站分组，防止意外误删数据",
+                                    text = stringResource(R.string.dbset_recycle_bin_desc),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -186,7 +188,7 @@ fun DatabaseSettingsScreen(
             // 2. 密码学与 KDF 派生
             item {
                 Text(
-                    text = "加密与密钥推导函数 (点击条目可调节参数)",
+                    text = stringResource(R.string.dbset_section_crypto),
                     style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.padding(start = 4.dp)
@@ -200,18 +202,23 @@ fun DatabaseSettingsScreen(
                 ) {
                     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         DatabaseFieldRow(
-                            label = "底层对称加密算法",
+                            label = stringResource(R.string.dbset_field_cipher),
                             value = uiState.encryptionAlgorithm,
                             onClick = { showCipherDialog = true }
                         )
                         DatabaseFieldRow(
-                            label = "密钥派生算法 (KDF)",
+                            label = stringResource(R.string.dbset_field_kdf),
                             value = uiState.kdfAlgorithm,
                             onClick = { showKdfDialog = true }
                         )
                         DatabaseFieldRow(
-                            label = "Argon2 派生计算参数 (内存/轮数/线程)",
-                            value = "${uiState.argon2MemoryMb} MB · ${uiState.argon2Iterations} 轮迭代 · ${uiState.argon2Parallelism} 线程",
+                            label = stringResource(R.string.dbset_field_argon2),
+                            value = stringResource(
+                                R.string.dbset_argon2_value,
+                                uiState.argon2MemoryMb,
+                                uiState.argon2Iterations,
+                                uiState.argon2Parallelism
+                            ),
                             onClick = { showArgon2Dialog = true }
                         )
                     }
@@ -221,7 +228,7 @@ fun DatabaseSettingsScreen(
             // 3. 条目模板库与子数据库配置 (KP2A 特性)
             item {
                 Text(
-                    text = "数据库扩展与组织架构 (KP2A 特性)",
+                    text = stringResource(R.string.dbset_section_extensions),
                     style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.padding(start = 4.dp)
@@ -236,15 +243,19 @@ fun DatabaseSettingsScreen(
                     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         DatabaseActionRow(
                             icon = Icons.AutoMirrored.Filled.Notes,
-                            title = "预置条目模板库 (Templates)",
-                            subtitle = "一键为当前库初始化信用卡、Wi-Fi、服务器等专业条目模板",
+                            title = stringResource(R.string.dbset_templates_title),
+                            subtitle = stringResource(R.string.dbset_templates_sub),
                             onClick = { showTemplatesDialog = true }
                         )
 
                         DatabaseActionRow(
                             icon = Icons.Default.FolderShared,
-                            title = "挂载子数据库 (Child Databases)",
-                            subtitle = if (uiState.childDatabasesCount > 0) "已关联 ${uiState.childDatabasesCount} 个子数据库" else "尚未挂载外部子库，点击配置联合访问",
+                            title = stringResource(R.string.dbset_child_db_title),
+                            subtitle = if (uiState.childDatabasesCount > 0) {
+                                stringResource(R.string.dbset_child_db_linked, uiState.childDatabasesCount)
+                            } else {
+                                stringResource(R.string.dbset_child_db_none)
+                            },
                             onClick = { showChildDbDialog = true }
                         )
                     }
@@ -254,7 +265,7 @@ fun DatabaseSettingsScreen(
             // 4. 数据导入与导出 (KP2A 特性)
             item {
                 Text(
-                    text = "导入与导出 (Import & Export)",
+                    text = stringResource(R.string.dbset_section_import_export),
                     style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.padding(start = 4.dp)
@@ -269,23 +280,23 @@ fun DatabaseSettingsScreen(
                     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         DatabaseActionRow(
                             icon = Icons.Default.Download,
-                            title = "导入外部数据源 (Import)",
-                            subtitle = "支持从 1Password, Bitwarden, KeePass XML, CSV 导入",
+                            title = stringResource(R.string.dbset_import_title),
+                            subtitle = stringResource(R.string.dbset_import_sub),
                             onClick = { showImportDialog = true }
                         )
 
                         DatabaseActionRow(
                             icon = Icons.Default.Upload,
-                            title = "导出数据库 (Export)",
-                            subtitle = "导出为标准 KDBX 4.1 或明文 KeePass XML (带安全防泄露提示)",
+                            title = stringResource(R.string.dbset_export_title),
+                            subtitle = stringResource(R.string.dbset_export_sub),
                             onClick = { showExportDialog = true }
                         )
 
                         DatabaseActionRow(
                             icon = Icons.Default.VpnKey,
-                            title = "导出 / 备份密钥文件 (KeyFile)",
-                            subtitle = "将当前关联的密钥文件单独导出并保存在安全脱机介质",
-                            onClick = { operationFeedback = "密钥文件已安全导出至受保护的脱机下载目录" }
+                            title = stringResource(R.string.dbset_keyfile_export_title),
+                            subtitle = stringResource(R.string.dbset_keyfile_export_sub),
+                            onClick = { operationFeedback = UiMessage(R.string.dbset_keyfile_exported) }
                         )
                     }
                 }
@@ -294,7 +305,7 @@ fun DatabaseSettingsScreen(
             // 5. 完整性与高级规则 (KP2A 特性)
             item {
                 Text(
-                    text = "条目完整性与凭据规则",
+                    text = stringResource(R.string.dbset_section_integrity),
                     style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.padding(start = 4.dp)
@@ -314,12 +325,12 @@ fun DatabaseSettingsScreen(
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = "TAN 一次性凭证使用后自动作废",
+                                    text = stringResource(R.string.dbset_tan_title),
                                     style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
                                 Text(
-                                    text = "自动填充或复制交易验证码后，自动将其标记为失效并归档",
+                                    text = stringResource(R.string.dbset_tan_desc),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -341,12 +352,12 @@ fun DatabaseSettingsScreen(
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = "检查并自动修复重复 UUID",
+                                    text = stringResource(R.string.dbset_uuid_title),
                                     style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
                                 Text(
-                                    text = "保存或同步合并时，检测多端误操作可能引入的重复 UUID 并重新生成",
+                                    text = stringResource(R.string.dbset_uuid_desc),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -367,7 +378,7 @@ fun DatabaseSettingsScreen(
             if (operationFeedback != null) {
                 item {
                     Text(
-                        text = operationFeedback!!,
+                        text = operationFeedback!!.resolveText(),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.padding(start = 4.dp)
@@ -384,13 +395,13 @@ fun DatabaseSettingsScreen(
     // 对话框 1：加密算法选择
     if (showCipherDialog) {
         val cipherOptions = listOf(
-            "ChaCha20-Poly1305 (256-bit)" to "KDBX 4 规范原生推荐，抗侧信道高吞吐",
-            "AES-256 (KDBX 4.1)" to "FIPS 国际密码规范，支持硬件 AES-NI 加速",
-            "Twofish (256-bit)" to "经典高强度分组密码，备选独立算法"
+            "ChaCha20-Poly1305 (256-bit)" to R.string.dbset_cipher_chacha_desc,
+            "AES-256 (KDBX 4.1)" to R.string.dbset_cipher_aes_desc,
+            "Twofish (256-bit)" to R.string.dbset_cipher_twofish_desc
         )
         AlertDialog(
             onDismissRequest = { showCipherDialog = false },
-            title = { Text("选择底层对称加密算法") },
+            title = { Text(stringResource(R.string.dbset_cipher_dialog_title)) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     cipherOptions.forEach { (name, desc) ->
@@ -421,7 +432,7 @@ fun DatabaseSettingsScreen(
                                     color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
                                 )
                                 Text(
-                                    text = desc,
+                                    text = stringResource(desc),
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -432,7 +443,7 @@ fun DatabaseSettingsScreen(
             },
             confirmButton = {
                 TextButton(onClick = { showCipherDialog = false }) {
-                    Text("关闭")
+                    Text(stringResource(R.string.btn_close))
                 }
             }
         )
@@ -441,13 +452,13 @@ fun DatabaseSettingsScreen(
     // 对话框 2：KDF 密钥派生算法选择
     if (showKdfDialog) {
         val kdfOptions = listOf(
-            "Argon2id" to "当前最高安全推荐，混合抵御 GPU 暴力穷举与侧信道攻击",
-            "Argon2d" to "最大化数据依赖与内存硬度，极端抗 ASIC 专用芯片",
-            "AES-KDF" to "传统 256 位 AES 重复迭代派生，兼顾旧版客户端兼容"
+            "Argon2id" to R.string.dbset_kdf_argon2id_desc,
+            "Argon2d" to R.string.dbset_kdf_argon2d_desc,
+            "AES-KDF" to R.string.dbset_kdf_aeskdf_desc
         )
         AlertDialog(
             onDismissRequest = { showKdfDialog = false },
-            title = { Text("选择密钥派生函数 (KDF)") },
+            title = { Text(stringResource(R.string.dbset_kdf_dialog_title)) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     kdfOptions.forEach { (name, desc) ->
@@ -478,7 +489,7 @@ fun DatabaseSettingsScreen(
                                     color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
                                 )
                                 Text(
-                                    text = desc,
+                                    text = stringResource(desc),
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -489,7 +500,7 @@ fun DatabaseSettingsScreen(
             },
             confirmButton = {
                 TextButton(onClick = { showKdfDialog = false }) {
-                    Text("关闭")
+                    Text(stringResource(R.string.btn_close))
                 }
             }
         )
@@ -512,7 +523,7 @@ fun DatabaseSettingsScreen(
                         modifier = Modifier.size(22.dp)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Argon2 派生计算参数调节")
+                    Text(stringResource(R.string.dbset_argon2_dialog_title))
                 }
             },
             text = {
@@ -523,8 +534,8 @@ fun DatabaseSettingsScreen(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text("迭代轮数 (Iterations):", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium))
-                            Text("$tempIterations 轮", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary))
+                            Text(stringResource(R.string.dbset_argon2_iterations_label), style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium))
+                            Text(stringResource(R.string.dbset_argon2_rounds_value, tempIterations), style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary))
                         }
                         Spacer(modifier = Modifier.height(4.dp))
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -532,11 +543,11 @@ fun DatabaseSettingsScreen(
                                 onClick = { if (tempIterations > 1) tempIterations-- },
                                 modifier = Modifier.size(32.dp)
                             ) {
-                                Icon(Icons.Default.Remove, contentDescription = "减少轮数")
+                                Icon(Icons.Default.Remove, contentDescription = stringResource(R.string.dbset_cd_decrease_rounds))
                             }
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "推荐 2 ~ 10 轮",
+                                text = stringResource(R.string.dbset_argon2_rounds_hint),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -545,20 +556,20 @@ fun DatabaseSettingsScreen(
                                 onClick = { if (tempIterations < 50) tempIterations++ },
                                 modifier = Modifier.size(32.dp)
                             ) {
-                                Icon(Icons.Default.Add, contentDescription = "增加轮数")
+                                Icon(Icons.Default.Add, contentDescription = stringResource(R.string.dbset_cd_increase_rounds))
                             }
                         }
                     }
 
                     Column {
-                        Text("内存消耗 (Memory Cost): $tempMemoryMb MB", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium))
+                        Text(stringResource(R.string.dbset_argon2_memory_label, tempMemoryMb), style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium))
                         Spacer(modifier = Modifier.height(6.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             listOf(16L, 32L, 64L, 128L, 256L).forEach { mb ->
                                 FilterChip(
                                     selected = tempMemoryMb == mb,
                                     onClick = { tempMemoryMb = mb },
-                                    label = { Text("${mb}M") },
+                                    label = { Text(stringResource(R.string.dbset_argon2_memory_chip, mb)) },
                                     colors = FilterChipDefaults.filterChipColors(
                                         selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
                                         selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
@@ -569,14 +580,14 @@ fun DatabaseSettingsScreen(
                     }
 
                     Column {
-                        Text("并行线程 (Parallelism): $tempParallelism 核心", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium))
+                        Text(stringResource(R.string.dbset_argon2_parallelism_label, tempParallelism), style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium))
                         Spacer(modifier = Modifier.height(6.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             listOf(1, 2, 4, 8).forEach { threads ->
                                 FilterChip(
                                     selected = tempParallelism == threads,
                                     onClick = { tempParallelism = threads },
-                                    label = { Text("$threads 线程") },
+                                    label = { Text(stringResource(R.string.dbset_argon2_threads_chip, threads)) },
                                     colors = FilterChipDefaults.filterChipColors(
                                         selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
                                         selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
@@ -588,18 +599,18 @@ fun DatabaseSettingsScreen(
 
                     OutlinedButton(
                         onClick = {
-                            benchmarkMessage = "基准测试完成：本机运行 64MB / 3轮 / 4线程 耗时约 920ms，防御强度充足"
+                            benchmarkMessage = UiMessage(R.string.dbset_benchmark_done)
                         },
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Icon(Icons.Default.Speed, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("测试基准 1 秒推荐参数")
+                        Text(stringResource(R.string.dbset_benchmark_btn))
                     }
 
                     if (benchmarkMessage != null) {
                         Text(
-                            text = benchmarkMessage!!,
+                            text = benchmarkMessage!!.resolveText(),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.primary
                         )
@@ -611,12 +622,12 @@ fun DatabaseSettingsScreen(
                     onArgon2ParametersChange(tempIterations, tempMemoryMb, tempParallelism)
                     showArgon2Dialog = false
                 }) {
-                    Text("应用新参数")
+                    Text(stringResource(R.string.dbset_apply_params))
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showArgon2Dialog = false }) {
-                    Text("取消")
+                    Text(stringResource(R.string.btn_cancel))
                 }
             }
         )
@@ -625,19 +636,19 @@ fun DatabaseSettingsScreen(
     // 对话框 4：模板库管理对话框
     if (showTemplatesDialog) {
         val templates = listOf(
-            "标准网络登录 (Web & App Login)" to Icons.Default.Lock,
-            "信用卡与金融账户 (Credit Card)" to Icons.Default.CreditCard,
-            "无线局域网凭证 (Wi-Fi Key)" to Icons.Default.Wifi,
-            "安全备忘录 (Secure Note)" to Icons.AutoMirrored.Filled.Notes,
-            "SSH 密钥与服务器凭据" to Icons.Default.Terminal
+            stringResource(R.string.dbset_tpl_web) to Icons.Default.Lock,
+            stringResource(R.string.dbset_tpl_credit_card) to Icons.Default.CreditCard,
+            stringResource(R.string.dbset_tpl_wifi) to Icons.Default.Wifi,
+            stringResource(R.string.dbset_tpl_note) to Icons.AutoMirrored.Filled.Notes,
+            stringResource(R.string.dbset_tpl_ssh) to Icons.Default.Terminal
         )
         AlertDialog(
             onDismissRequest = { showTemplatesDialog = false },
-            title = { Text("预置条目模板库") },
+            title = { Text(stringResource(R.string.dbset_templates_dialog_title)) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(
-                        text = "选择要注入到当前数据库模板组的预置格式：",
+                        text = stringResource(R.string.dbset_templates_dialog_desc),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -660,14 +671,14 @@ fun DatabaseSettingsScreen(
             confirmButton = {
                 Button(onClick = {
                     showTemplatesDialog = false
-                    operationFeedback = "已成功向当前密码库追加标准模板分组 (Templates)"
+                    operationFeedback = UiMessage(R.string.dbset_templates_installed)
                 }) {
-                    Text("安装选定模板")
+                    Text(stringResource(R.string.dbset_install_templates))
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showTemplatesDialog = false }) {
-                    Text("关闭")
+                    Text(stringResource(R.string.btn_close))
                 }
             }
         )
@@ -677,30 +688,30 @@ fun DatabaseSettingsScreen(
     if (showChildDbDialog) {
         AlertDialog(
             onDismissRequest = { showChildDbDialog = false },
-            title = { Text("挂载子数据库 (Child Databases)") },
+            title = { Text(stringResource(R.string.dbset_child_db_title)) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        text = "将团队共享库或个人副库挂载到当前主库，可在主库解锁后联合检索，免去重复切换：",
+                        text = stringResource(R.string.dbset_child_db_dialog_desc),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     OutlinedButton(
                         onClick = {
                             showChildDbDialog = false
-                            operationFeedback = "已挂载外部团队只读子库：team_shared.kdbx"
+                            operationFeedback = UiMessage(R.string.dbset_child_db_mounted)
                         },
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("选择外部 .kdbx 文件进行关联")
+                        Text(stringResource(R.string.dbset_child_db_select_file))
                     }
                 }
             },
             confirmButton = {
                 TextButton(onClick = { showChildDbDialog = false }) {
-                    Text("完成")
+                    Text(stringResource(R.string.dbset_btn_done))
                 }
             }
         )
@@ -710,37 +721,37 @@ fun DatabaseSettingsScreen(
     if (showExportDialog) {
         AlertDialog(
             onDismissRequest = { showExportDialog = false },
-            title = { Text("导出当前密码库") },
+            title = { Text(stringResource(R.string.dbset_export_dialog_title)) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(
-                        text = "安全警告：明文导出 (XML / CSV) 会将所有密码和 Passkey 私钥明文输出至磁盘，极易被其他应用读取。建议优先选择带有 Argon2id 加密的 KDBX 4.1 副本。",
+                        text = stringResource(R.string.dbset_export_dialog_warning),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error
                     )
                     Button(
                         onClick = {
                             showExportDialog = false
-                            operationFeedback = "已导出已加密副本：master_vault_export.kdbx"
+                            operationFeedback = UiMessage(R.string.dbset_export_kdbx_done)
                         },
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("导出为加密 KDBX 4.1 文件 (推荐)")
+                        Text(stringResource(R.string.dbset_export_kdbx_btn))
                     }
                     OutlinedButton(
                         onClick = {
                             showExportDialog = false
-                            operationFeedback = "已导出 KeePass 2.x 标准 XML 文件"
+                            operationFeedback = UiMessage(R.string.dbset_export_xml_done)
                         },
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("导出为 KeePass XML (纯文本)")
+                        Text(stringResource(R.string.dbset_export_xml_btn))
                     }
                 }
             },
             confirmButton = {
                 TextButton(onClick = { showExportDialog = false }) {
-                    Text("取消")
+                    Text(stringResource(R.string.btn_cancel))
                 }
             }
         )
@@ -750,17 +761,22 @@ fun DatabaseSettingsScreen(
     if (showImportDialog) {
         AlertDialog(
             onDismissRequest = { showImportDialog = false },
-            title = { Text("导入外部凭据") },
+            title = { Text(stringResource(R.string.dbset_import_dialog_title)) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf("1Password 1PUX / 导出文件", "Bitwarden JSON (加密或未加密)", "KeePass XML / CSV", "Chrome / Edge 密码 CSV").forEach { source ->
+                    listOf(
+                        stringResource(R.string.dbset_src_1pux),
+                        stringResource(R.string.dbset_src_bitwarden),
+                        stringResource(R.string.dbset_src_keepass),
+                        stringResource(R.string.dbset_src_browser)
+                    ).forEach { source ->
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(8.dp))
                                 .clickable {
                                     showImportDialog = false
-                                    operationFeedback = "已准备从 $source 导入，正在解析数据字段..."
+                                    operationFeedback = UiMessage(R.string.dbset_import_preparing, listOf(source))
                                 }
                                 .padding(vertical = 8.dp, horizontal = 4.dp),
                             verticalAlignment = Alignment.CenterVertically
@@ -774,7 +790,7 @@ fun DatabaseSettingsScreen(
             },
             confirmButton = {
                 TextButton(onClick = { showImportDialog = false }) {
-                    Text("取消")
+                    Text(stringResource(R.string.btn_cancel))
                 }
             }
         )
@@ -819,7 +835,7 @@ private fun DatabaseFieldRow(
         if (onClick != null) {
             Icon(
                 imageVector = Icons.AutoMirrored.Filled.ArrowForwardIos,
-                contentDescription = "修改",
+                contentDescription = stringResource(R.string.dbset_cd_modify),
                 tint = MaterialTheme.colorScheme.outlineVariant,
                 modifier = Modifier.size(14.dp)
             )

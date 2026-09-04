@@ -87,6 +87,8 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.keepasskey.app.R
+import com.keepasskey.app.ui.model.UiMessage
+import com.keepasskey.app.ui.model.resolveText
 import com.keepasskey.app.ui.screens.settings.CloudSyncProvider
 import com.keepasskey.app.ui.screens.settings.ConflictResolution
 import com.keepasskey.app.ui.screens.settings.SettingsUiState
@@ -109,6 +111,7 @@ fun CloudSyncScreen(
     onUpdateS3: (endpoint: String, bucket: String, region: String, accessKey: String, secretKey: String, objectKey: String) -> Unit = { _, _, _, _, _, _ -> },
     // KP2A 扩展文件处理操作
     onUseOfflineCacheToggle: (Boolean) -> Unit = {},
+    onSyncOnColdStartToggle: (Boolean) -> Unit = {},
     onPeriodicBackgroundSyncToggle: (Boolean) -> Unit = {},
     onPeriodicIntervalChange: (Int) -> Unit = {},
     onAllowedWifiSsidsChange: (String) -> Unit = {},
@@ -144,12 +147,13 @@ fun CloudSyncScreen(
 
     var showIntervalDialog by remember { mutableStateOf(false) }
     var showConflictDialog by remember { mutableStateOf(false) }
-    var saveFeedbackText by remember { mutableStateOf<String?>(null) }
+    var saveFeedbackMessage by remember { mutableStateOf<UiMessage?>(null) }
+    val saveFeedbackText = saveFeedbackMessage?.resolveText()
 
     LaunchedEffect(saveFeedbackText) {
         if (saveFeedbackText != null) {
             coroutineScope.launch {
-                snackbarHostState.showSnackbar(saveFeedbackText ?: "配置已保存")
+                snackbarHostState.showSnackbar(saveFeedbackText)
             }
         }
     }
@@ -162,7 +166,7 @@ fun CloudSyncScreen(
             TopAppBar(
                 title = {
                     Text(
-                        text = "云端同步与文件处理",
+                        text = stringResource(R.string.sync_screen_title),
                         style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
                     )
                 },
@@ -192,7 +196,7 @@ fun CloudSyncScreen(
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        text = "同步服务类型",
+                        text = stringResource(R.string.sync_section_provider),
                         style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.padding(start = 2.dp)
@@ -204,10 +208,10 @@ fun CloudSyncScreen(
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         OutlinedTextField(
-                            value = uiState.syncProvider.label,
+                            value = stringResource(uiState.syncProvider.labelRes),
                             onValueChange = {},
                             readOnly = true,
-                            label = { Text("选择云同步协议") },
+                            label = { Text(stringResource(R.string.sync_provider_field_label)) },
                             trailingIcon = {
                                 ExposedDropdownMenuDefaults.TrailingIcon(expanded = dropdownExpanded)
                             },
@@ -230,11 +234,11 @@ fun CloudSyncScreen(
                                     text = {
                                         Column {
                                             Text(
-                                                text = provider.label,
+                                                text = stringResource(provider.labelRes),
                                                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
                                             )
                                             Text(
-                                                text = provider.desc,
+                                                text = stringResource(provider.descRes),
                                                 style = MaterialTheme.typography.labelSmall,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                                             )
@@ -255,7 +259,11 @@ fun CloudSyncScreen(
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        text = if (uiState.syncProvider == CloudSyncProvider.WEBDAV) "WebDAV 节点连接配置" else "S3 兼容对象存储配置",
+                        text = if (uiState.syncProvider == CloudSyncProvider.WEBDAV) {
+                            stringResource(R.string.sync_section_webdav)
+                        } else {
+                            stringResource(R.string.sync_section_s3)
+                        },
                         style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.padding(start = 2.dp)
@@ -274,7 +282,7 @@ fun CloudSyncScreen(
                             OutlinedTextField(
                                 value = webdavUrl,
                                 onValueChange = { webdavUrl = it },
-                                label = { Text("WebDAV 服务器完整 URL") },
+                                label = { Text(stringResource(R.string.sync_webdav_url_label)) },
                                 placeholder = { Text("https://cloud.example.com/remote.php/dav/files/user/") },
                                 leadingIcon = { Icon(Icons.Default.Public, contentDescription = null, modifier = Modifier.size(20.dp)) },
                                 singleLine = true,
@@ -285,7 +293,7 @@ fun CloudSyncScreen(
                             OutlinedTextField(
                                 value = webdavUsername,
                                 onValueChange = { webdavUsername = it },
-                                label = { Text("用户名 / 账号") },
+                                label = { Text(stringResource(R.string.sync_webdav_username_label)) },
                                 leadingIcon = { Icon(Icons.Default.Person, contentDescription = null, modifier = Modifier.size(20.dp)) },
                                 singleLine = true,
                                 shape = RoundedCornerShape(12.dp),
@@ -295,7 +303,7 @@ fun CloudSyncScreen(
                             OutlinedTextField(
                                 value = webdavPassword,
                                 onValueChange = { webdavPassword = it },
-                                label = { Text("应用密码 / 凭据 Token") },
+                                label = { Text(stringResource(R.string.sync_webdav_password_label)) },
                                 leadingIcon = { Icon(Icons.Default.Lock, contentDescription = null, modifier = Modifier.size(20.dp)) },
                                 trailingIcon = {
                                     IconButton(onClick = { webdavPasswordVisible = !webdavPasswordVisible }) {
@@ -314,7 +322,7 @@ fun CloudSyncScreen(
                             OutlinedTextField(
                                 value = webdavRemotePath,
                                 onValueChange = { webdavRemotePath = it },
-                                label = { Text("远程数据库文件路径") },
+                                label = { Text(stringResource(R.string.sync_webdav_path_label)) },
                                 placeholder = { Text("/Passkeys/keepasskey.kdbx") },
                                 leadingIcon = { Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(20.dp)) },
                                 singleLine = true,
@@ -325,7 +333,7 @@ fun CloudSyncScreen(
                             OutlinedTextField(
                                 value = s3Endpoint,
                                 onValueChange = { s3Endpoint = it },
-                                label = { Text("S3 Endpoint (端点 URL)") },
+                                label = { Text(stringResource(R.string.sync_s3_endpoint_label)) },
                                 placeholder = { Text("https://<account_id>.r2.cloudflarestorage.com") },
                                 leadingIcon = { Icon(Icons.Default.CloudQueue, contentDescription = null, modifier = Modifier.size(20.dp)) },
                                 singleLine = true,
@@ -340,7 +348,7 @@ fun CloudSyncScreen(
                                 OutlinedTextField(
                                     value = s3Bucket,
                                     onValueChange = { s3Bucket = it },
-                                    label = { Text("存储桶 Bucket") },
+                                    label = { Text(stringResource(R.string.sync_s3_bucket_label)) },
                                     singleLine = true,
                                     shape = RoundedCornerShape(12.dp),
                                     modifier = Modifier.weight(1f)
@@ -349,7 +357,7 @@ fun CloudSyncScreen(
                                 OutlinedTextField(
                                     value = s3Region,
                                     onValueChange = { s3Region = it },
-                                    label = { Text("区域 Region") },
+                                    label = { Text(stringResource(R.string.sync_s3_region_label)) },
                                     singleLine = true,
                                     shape = RoundedCornerShape(12.dp),
                                     modifier = Modifier.weight(1f)
@@ -388,7 +396,7 @@ fun CloudSyncScreen(
                             OutlinedTextField(
                                 value = s3ObjectKey,
                                 onValueChange = { s3ObjectKey = it },
-                                label = { Text("对象存储文件 Key 路径") },
+                                label = { Text(stringResource(R.string.sync_s3_objectkey_label)) },
                                 placeholder = { Text("passwords/master_vault.kdbx") },
                                 leadingIcon = { Icon(Icons.AutoMirrored.Filled.InsertDriveFile, contentDescription = null, modifier = Modifier.size(20.dp)) },
                                 singleLine = true,
@@ -401,10 +409,10 @@ fun CloudSyncScreen(
                             onClick = {
                                 if (uiState.syncProvider == CloudSyncProvider.WEBDAV) {
                                     onUpdateWebDav(webdavUrl, webdavUsername, webdavPassword, webdavRemotePath)
-                                    saveFeedbackText = "WebDAV 配置已保存在本地安全区"
+                                    saveFeedbackMessage = UiMessage(R.string.sync_webdav_saved)
                                 } else {
                                     onUpdateS3(s3Endpoint, s3Bucket, s3Region, s3AccessKey, s3SecretKey, s3ObjectKey)
-                                    saveFeedbackText = "S3 存储配置已保存在本地安全区"
+                                    saveFeedbackMessage = UiMessage(R.string.sync_s3_saved)
                                 }
                             },
                             shape = RoundedCornerShape(12.dp),
@@ -412,7 +420,7 @@ fun CloudSyncScreen(
                         ) {
                             Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("保存当前连接配置")
+                            Text(stringResource(R.string.sync_save_config_btn))
                         }
                     }
                 }
@@ -435,7 +443,7 @@ fun CloudSyncScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "远端连接状态",
+                            text = stringResource(R.string.sync_connection_status),
                             style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
                         )
                         Box(
@@ -475,7 +483,7 @@ fun CloudSyncScreen(
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    text = uiState.syncFeedbackMessage,
+                                    text = uiState.syncFeedbackMessage?.resolveText() ?: "",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.primary
                                 )
@@ -500,11 +508,11 @@ fun CloudSyncScreen(
                                     color = MaterialTheme.colorScheme.onPrimary
                                 )
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text("同步中...")
+                                Text(stringResource(R.string.sync_btn_syncing))
                             } else {
-                                Icon(Icons.Default.Sync, contentDescription = "立即同步", modifier = Modifier.size(18.dp))
+                                Icon(Icons.Default.Sync, contentDescription = stringResource(R.string.sync_cd_sync_now), modifier = Modifier.size(18.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text("立即同步")
+                                Text(stringResource(R.string.sync_sync_now_btn))
                             }
                         }
 
@@ -513,9 +521,9 @@ fun CloudSyncScreen(
                             shape = RoundedCornerShape(12.dp),
                             modifier = Modifier.weight(1f)
                         ) {
-                            Icon(Icons.Default.NetworkCheck, contentDescription = "测试连接", modifier = Modifier.size(18.dp))
+                            Icon(Icons.Default.NetworkCheck, contentDescription = stringResource(R.string.sync_cd_test_connection), modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("测试连接")
+                            Text(stringResource(R.string.sync_test_connection_btn))
                         }
                     }
                 }
@@ -525,7 +533,7 @@ fun CloudSyncScreen(
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        text = "离线缓存与定时调度 (KP2A 特性)",
+                        text = stringResource(R.string.sync_section_offline),
                         style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.padding(start = 2.dp, top = 4.dp)
@@ -542,24 +550,32 @@ fun CloudSyncScreen(
                     ) {
                         SyncSwitchItem(
                             icon = Icons.Default.Cached,
-                            title = "启用本地离线安全缓存副本",
-                            subtitle = "无网络时直接基于本地加密缓存打开和编辑，连网后自动合并",
+                            title = stringResource(R.string.sync_offline_cache_title),
+                            subtitle = stringResource(R.string.sync_offline_cache_sub),
                             checked = uiState.useOfflineCache,
                             onCheckedChange = onUseOfflineCacheToggle
                         )
 
                         SyncSwitchItem(
+                            icon = Icons.Default.Sync,
+                            title = stringResource(R.string.sync_cold_start_title),
+                            subtitle = stringResource(R.string.sync_cold_start_sub),
+                            checked = uiState.syncOnColdStart,
+                            onCheckedChange = onSyncOnColdStartToggle
+                        )
+
+                        SyncSwitchItem(
                             icon = Icons.Default.CloudSync,
-                            title = "变更自动实时同步",
-                            subtitle = "每次添加、修改或删除凭据后自动推送到云端",
+                            title = stringResource(R.string.sync_auto_sync_title),
+                            subtitle = stringResource(R.string.sync_auto_sync_sub),
                             checked = uiState.autoSyncEnabled,
                             onCheckedChange = onAutoSyncToggle
                         )
 
                         SyncSwitchItem(
                             icon = Icons.Default.Schedule,
-                            title = "启用周期性定时后台同步",
-                            subtitle = "在后台静默定期检查远端是否有新变更并自动同步拉取",
+                            title = stringResource(R.string.sync_periodic_title),
+                            subtitle = stringResource(R.string.sync_periodic_sub),
                             checked = uiState.periodicBackgroundSyncEnabled,
                             onCheckedChange = onPeriodicBackgroundSyncToggle
                         )
@@ -577,8 +593,12 @@ fun CloudSyncScreen(
                                     Icon(Icons.Default.Schedule, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
                                     Spacer(modifier = Modifier.width(12.dp))
                                     Column {
-                                        Text("后台定时同步频率", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium))
-                                        Text("当前：每 ${uiState.periodicBackgroundSyncIntervalMinutes} 分钟执行一次", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        Text(stringResource(R.string.sync_interval_title), style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium))
+                                        Text(
+                                            stringResource(R.string.sync_interval_current, uiState.periodicBackgroundSyncIntervalMinutes),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
                                     }
                                 }
                                 Icon(Icons.AutoMirrored.Filled.ArrowForwardIos, contentDescription = null, tint = MaterialTheme.colorScheme.outlineVariant, modifier = Modifier.size(14.dp))
@@ -587,8 +607,8 @@ fun CloudSyncScreen(
 
                         SyncSwitchItem(
                             icon = Icons.Default.Wifi,
-                            title = "仅在 Wi-Fi 网络下执行同步",
-                            subtitle = "避免移动蜂窝网络下消耗流量与后台请求",
+                            title = stringResource(R.string.sync_wifi_only_title),
+                            subtitle = stringResource(R.string.sync_wifi_only_sub),
                             checked = uiState.wifiOnlySync,
                             onCheckedChange = onWifiOnlyToggle
                         )
@@ -600,7 +620,7 @@ fun CloudSyncScreen(
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        text = "文件安全与冲突解决 (KP2A 特性)",
+                        text = stringResource(R.string.sync_section_file_safety),
                         style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.padding(start = 2.dp, top = 4.dp)
@@ -617,16 +637,16 @@ fun CloudSyncScreen(
                     ) {
                         SyncSwitchItem(
                             icon = Icons.Default.Backup,
-                            title = "覆盖保存前自动创建备份副本 (.bak)",
-                            subtitle = "每次将修改写入磁盘前，在安全目录创建带时间戳的历史备份",
+                            title = stringResource(R.string.sync_backup_title),
+                            subtitle = stringResource(R.string.sync_backup_sub),
                             checked = uiState.createBackupBeforeSave,
                             onCheckedChange = onCreateBackupBeforeSaveToggle
                         )
 
                         SyncSwitchItem(
                             icon = Icons.Default.Security,
-                            title = "保存前检查远端文件变更",
-                            subtitle = "写入前校验远端 Hash/ETag，防止覆盖其他设备刚提交的新修改",
+                            title = stringResource(R.string.sync_check_remote_title),
+                            subtitle = stringResource(R.string.sync_check_remote_sub),
                             checked = uiState.checkRemoteChangesBeforeSave,
                             onCheckedChange = onCheckRemoteChangesToggle
                         )
@@ -643,8 +663,12 @@ fun CloudSyncScreen(
                                 Icon(Icons.Default.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
                                 Spacer(modifier = Modifier.width(12.dp))
                                 Column {
-                                    Text("并发冲突解决策略", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium))
-                                    Text("当前：${uiState.conflictResolution.label}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text(stringResource(R.string.sync_conflict_title), style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium))
+                                    Text(
+                                        stringResource(R.string.sync_conflict_current, stringResource(uiState.conflictResolution.labelRes)),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
                                 }
                             }
                             Icon(Icons.AutoMirrored.Filled.ArrowForwardIos, contentDescription = null, tint = MaterialTheme.colorScheme.outlineVariant, modifier = Modifier.size(14.dp))
@@ -652,8 +676,8 @@ fun CloudSyncScreen(
 
                         SyncSwitchItem(
                             icon = Icons.Default.Save,
-                            title = "使用文件原子事务写入 (File Transactions)",
-                            subtitle = "通过临时文件完成完整落盘后再原子重命名，杜绝断电损坏库文件",
+                            title = stringResource(R.string.sync_file_tx_title),
+                            subtitle = stringResource(R.string.sync_file_tx_sub),
                             checked = uiState.useFileTransactions,
                             onCheckedChange = onUseFileTransactionsToggle
                         )
@@ -665,7 +689,7 @@ fun CloudSyncScreen(
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        text = "网络连接兼容性 (KP2A 特性)",
+                        text = stringResource(R.string.sync_section_network),
                         style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.padding(start = 2.dp, top = 4.dp)
@@ -682,32 +706,32 @@ fun CloudSyncScreen(
                     ) {
                         SyncSwitchItem(
                             icon = Icons.Default.Lock,
-                            title = "接受自签名 SSL/TLS 证书",
-                            subtitle = "针对家庭 NAS 或自建 WebDAV 服务器的非权威机构自签证书放行",
+                            title = stringResource(R.string.sync_accept_certs_title),
+                            subtitle = stringResource(R.string.sync_accept_certs_sub),
                             checked = uiState.acceptAllCertificates,
                             onCheckedChange = onAcceptAllCertificatesToggle
                         )
 
                         SyncSwitchItem(
                             icon = Icons.Default.Public,
-                            title = "允许明文 HTTP 网络传输",
-                            subtitle = "允许连接内网未经 HTTPS 加密的纯 http:// 局域网主机",
+                            title = stringResource(R.string.sync_cleartext_title),
+                            subtitle = stringResource(R.string.sync_cleartext_sub),
                             checked = uiState.cleartextTrafficPermitted,
                             onCheckedChange = onCleartextTrafficPermittedToggle
                         )
 
                         SyncSwitchItem(
                             icon = Icons.Default.CloudQueue,
-                            title = "WebDAV 分块切片上传 (Chunked Upload)",
-                            subtitle = "针对某些网盘大文件传输限制，以 10MB 分块分段上传",
+                            title = stringResource(R.string.sync_chunked_title),
+                            subtitle = stringResource(R.string.sync_chunked_sub),
                             checked = uiState.webdavChunkedUpload,
                             onCheckedChange = onWebdavChunkedUploadToggle
                         )
 
                         SyncSwitchItem(
                             icon = Icons.Default.Cached,
-                            title = "预加载数据库加速解锁 (Preload)",
-                            subtitle = "进入应用时提前读取 KDBX 文件头元数据，缩短输密码后的等待",
+                            title = stringResource(R.string.sync_preload_title),
+                            subtitle = stringResource(R.string.sync_preload_sub),
                             checked = uiState.preloadDatabaseEnabled,
                             onCheckedChange = onPreloadDatabaseEnabledToggle
                         )
@@ -734,13 +758,13 @@ fun CloudSyncScreen(
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = "零知识端到端保护机制",
+                            text = stringResource(R.string.sync_zeroknowledge_title),
                             style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                             color = MaterialTheme.colorScheme.onSurface
                         )
                     }
                     Text(
-                        text = "无论是 WebDAV 还是兼容 S3 对象存储节点，远端仅接收并存储被 Argon2id 和 ChaCha20-Poly1305 高度加密的 .kdbx 二进制包。任何云厂商与服务器管理员均无权读取或解析您的任何明文密码与 Passkey 私钥。",
+                        text = stringResource(R.string.sync_zeroknowledge_desc),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         lineHeight = 18.sp
@@ -756,10 +780,16 @@ fun CloudSyncScreen(
 
     // 后台定时同步间隔弹窗
     if (showIntervalDialog) {
-        val intervalOptions = listOf(15 to "每 15 分钟", 30 to "每 30 分钟 (推荐)", 60 to "每 1 小时", 120 to "每 2 小时", 360 to "每 6 小时")
+        val intervalOptions = listOf(
+            15 to R.string.sync_interval_15,
+            30 to R.string.sync_interval_30,
+            60 to R.string.sync_interval_60,
+            120 to R.string.sync_interval_120,
+            360 to R.string.sync_interval_360
+        )
         AlertDialog(
             onDismissRequest = { showIntervalDialog = false },
-            title = { Text("后台定时同步频率") },
+            title = { Text(stringResource(R.string.sync_interval_title)) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     intervalOptions.forEach { (mins, label) ->
@@ -779,13 +809,13 @@ fun CloudSyncScreen(
                                 showIntervalDialog = false
                             })
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text(text = label, style = MaterialTheme.typography.bodyMedium)
+                            Text(text = stringResource(label), style = MaterialTheme.typography.bodyMedium)
                         }
                     }
                 }
             },
             confirmButton = {
-                TextButton(onClick = { showIntervalDialog = false }) { Text("关闭") }
+                TextButton(onClick = { showIntervalDialog = false }) { Text(stringResource(R.string.btn_close)) }
             }
         )
     }
@@ -794,7 +824,7 @@ fun CloudSyncScreen(
     if (showConflictDialog) {
         AlertDialog(
             onDismissRequest = { showConflictDialog = false },
-            title = { Text("冲突解决策略") },
+            title = { Text(stringResource(R.string.sync_conflict_dialog_title)) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     ConflictResolution.entries.forEach { res ->
@@ -815,15 +845,15 @@ fun CloudSyncScreen(
                             })
                             Spacer(modifier = Modifier.width(8.dp))
                             Column {
-                                Text(res.label, style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold))
-                                Text(res.desc, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(stringResource(res.labelRes), style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold))
+                                Text(stringResource(res.descRes), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
                     }
                 }
             },
             confirmButton = {
-                TextButton(onClick = { showConflictDialog = false }) { Text("关闭") }
+                TextButton(onClick = { showConflictDialog = false }) { Text(stringResource(R.string.btn_close)) }
             }
         )
     }
@@ -843,6 +873,7 @@ fun WebDavSyncScreen(
     onUpdateWebDav: (url: String, username: String, password: String, remotePath: String) -> Unit = { _, _, _, _ -> },
     onUpdateS3: (endpoint: String, bucket: String, region: String, accessKey: String, secretKey: String, objectKey: String) -> Unit = { _, _, _, _, _, _ -> },
     onUseOfflineCacheToggle: (Boolean) -> Unit = {},
+    onSyncOnColdStartToggle: (Boolean) -> Unit = {},
     onPeriodicBackgroundSyncToggle: (Boolean) -> Unit = {},
     onPeriodicIntervalChange: (Int) -> Unit = {},
     onAllowedWifiSsidsChange: (String) -> Unit = {},
@@ -866,6 +897,7 @@ fun WebDavSyncScreen(
         onUpdateWebDav = onUpdateWebDav,
         onUpdateS3 = onUpdateS3,
         onUseOfflineCacheToggle = onUseOfflineCacheToggle,
+        onSyncOnColdStartToggle = onSyncOnColdStartToggle,
         onPeriodicBackgroundSyncToggle = onPeriodicBackgroundSyncToggle,
         onPeriodicIntervalChange = onPeriodicIntervalChange,
         onAllowedWifiSsidsChange = onAllowedWifiSsidsChange,

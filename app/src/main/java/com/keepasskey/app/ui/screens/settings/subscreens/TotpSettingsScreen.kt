@@ -65,6 +65,7 @@ fun TotpSettingsScreen(
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
     val coroutineScope = rememberCoroutineScope()
+    val totpMappingSavedMsg = stringResource(R.string.totp_mapping_saved)
 
     var seedField by remember(uiState.totpSeedFieldName) { mutableStateOf(uiState.totpSeedFieldName) }
     var settingsField by remember(uiState.totpSettingsFieldName) { mutableStateOf(uiState.totpSettingsFieldName) }
@@ -79,7 +80,7 @@ fun TotpSettingsScreen(
             TopAppBar(
                 title = {
                     Text(
-                        text = "两步验证与 TOTP 映射",
+                        text = stringResource(R.string.set_totp_entry_title),
                         style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
                     )
                 },
@@ -108,7 +109,7 @@ fun TotpSettingsScreen(
             // 1. 快速插件兼容方案
             item {
                 Text(
-                    text = "桌面插件兼容预设 (KP2A / TrayTOTP / KeeOtp)",
+                    text = stringResource(R.string.totp_section_presets),
                     style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.padding(start = 4.dp)
@@ -122,7 +123,7 @@ fun TotpSettingsScreen(
                 ) {
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Text(
-                            text = "快速载入桌面端常用 KeePass 插件的自定义字段命名规范，无缝跨平台读取：",
+                            text = stringResource(R.string.totp_presets_desc),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -137,7 +138,7 @@ fun TotpSettingsScreen(
                                     seedField = "TOTP Seed"
                                     settingsField = "TOTP Settings"
                                 },
-                                label = { Text("TrayTOTP 规范 (KP2A)") },
+                                label = { Text(stringResource(R.string.totp_preset_traytotp)) },
                                 colors = FilterChipDefaults.filterChipColors(
                                     selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
                                     selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
@@ -150,7 +151,7 @@ fun TotpSettingsScreen(
                                     seedField = "otp"
                                     settingsField = "otp_settings"
                                 },
-                                label = { Text("KeeOtp2 / RFC 6238") },
+                                label = { Text(stringResource(R.string.totp_preset_keeotp)) },
                                 colors = FilterChipDefaults.filterChipColors(
                                     selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
                                     selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
@@ -164,7 +165,7 @@ fun TotpSettingsScreen(
             // 2. 自定义字段名映射
             item {
                 Text(
-                    text = "条目自定义属性字段名映射",
+                    text = stringResource(R.string.totp_section_fields),
                     style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.padding(start = 4.dp)
@@ -180,7 +181,7 @@ fun TotpSettingsScreen(
                         OutlinedTextField(
                             value = seedField,
                             onValueChange = { seedField = it },
-                            label = { Text("TOTP 密钥种子属性名 (Seed Field)") },
+                            label = { Text(stringResource(R.string.totp_seed_label)) },
                             placeholder = { Text("TOTP Seed") },
                             leadingIcon = { Icon(Icons.Default.Password, contentDescription = null, modifier = Modifier.size(20.dp)) },
                             singleLine = true,
@@ -191,7 +192,7 @@ fun TotpSettingsScreen(
                         OutlinedTextField(
                             value = settingsField,
                             onValueChange = { settingsField = it },
-                            label = { Text("TOTP 参数配置属性名 (Settings Field)") },
+                            label = { Text(stringResource(R.string.totp_settings_label)) },
                             placeholder = { Text("TOTP Settings") },
                             leadingIcon = { Icon(Icons.Default.Tune, contentDescription = null, modifier = Modifier.size(20.dp)) },
                             singleLine = true,
@@ -205,7 +206,7 @@ fun TotpSettingsScreen(
             // 3. 算法参数预设
             item {
                 Text(
-                    text = "新建条目默认计算参数",
+                    text = stringResource(R.string.totp_section_defaults),
                     style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.padding(start = 4.dp)
@@ -220,16 +221,16 @@ fun TotpSettingsScreen(
                     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                         Column {
                             Text(
-                                text = "时间步长周期 (Time Step)",
+                                text = stringResource(R.string.totp_step_label),
                                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
                             )
                             Spacer(modifier = Modifier.height(6.dp))
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                listOf(15 to "15 秒", 30 to "30 秒 (标准)", 60 to "60 秒").forEach { (sec, label) ->
+                                listOf(15 to R.string.totp_step_15, 30 to R.string.totp_step_30, 60 to R.string.totp_step_60).forEach { (sec, label) ->
                                     FilterChip(
                                         selected = stepSeconds == sec,
                                         onClick = { stepSeconds = sec },
-                                        label = { Text(label) },
+                                        label = { Text(stringResource(label)) },
                                         colors = FilterChipDefaults.filterChipColors(
                                             selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
                                             selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
@@ -241,16 +242,16 @@ fun TotpSettingsScreen(
 
                         Column {
                             Text(
-                                text = "验证码位数 (Digits)",
+                                text = stringResource(R.string.totp_digits_label),
                                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
                             )
                             Spacer(modifier = Modifier.height(6.dp))
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                listOf(6 to "6 位动态码 (通用)", 8 to "8 位动态码 (部分企业)").forEach { (d, label) ->
+                                listOf(6 to R.string.totp_digits_6, 8 to R.string.totp_digits_8).forEach { (d, label) ->
                                     FilterChip(
                                         selected = digits == d,
                                         onClick = { digits = d },
-                                        label = { Text(label) },
+                                        label = { Text(stringResource(label)) },
                                         colors = FilterChipDefaults.filterChipColors(
                                             selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
                                             selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
@@ -264,7 +265,7 @@ fun TotpSettingsScreen(
                             onClick = {
                                 onUpdateTotpFieldMapping(seedField, settingsField, stepSeconds, digits)
                                 coroutineScope.launch {
-                                    snackbarHostState.showSnackbar("TOTP 字段映射规则已更新并保存")
+                                    snackbarHostState.showSnackbar(totpMappingSavedMsg)
                                 }
                             },
                             shape = RoundedCornerShape(12.dp),
@@ -272,7 +273,7 @@ fun TotpSettingsScreen(
                         ) {
                             Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("保存 TOTP 映射规则")
+                            Text(stringResource(R.string.totp_save_btn))
                         }
                     }
                 }
@@ -293,7 +294,7 @@ fun TotpSettingsScreen(
                         )
                         Spacer(modifier = Modifier.width(10.dp))
                         Text(
-                            text = "KeePasskey 内部计算引擎完全兼容 RFC 6238 HMAC-SHA1/SHA256 标准，并自动纠偏系统时钟漂移。自定义属性字段名主要用于双向兼容第三方桌面 KeePass 插件生成的数据结构。",
+                            text = stringResource(R.string.totp_info_desc),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             lineHeight = 18.sp

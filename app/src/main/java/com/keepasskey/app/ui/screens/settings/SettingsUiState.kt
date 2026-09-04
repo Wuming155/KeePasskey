@@ -1,41 +1,57 @@
 package com.keepasskey.app.ui.screens.settings
 
+import androidx.annotation.StringRes
+import com.keepasskey.app.R
+import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.theme.AppThemeMode
 
 /**
  * 云端同步协议提供商类型
  */
-enum class CloudSyncProvider(val label: String, val desc: String) {
-    WEBDAV("WebDAV", "标准 WebDAV 协议 (Nextcloud / ownCloud / 坚果云 / 群晖 NAS)"),
-    S3_COMPATIBLE("兼容 S3 存储", "兼容 AWS S3 协议对象存储 (Cloudflare R2 / AWS / MinIO / 阿里云 OSS)")
+enum class CloudSyncProvider(
+    @StringRes val labelRes: Int,
+    @StringRes val descRes: Int,
+    val protocol: String
+) {
+    WEBDAV(R.string.sync_provider_webdav, R.string.sync_provider_webdav_desc, "WebDAV"),
+    S3_COMPATIBLE(R.string.sync_provider_s3, R.string.sync_provider_s3_desc, "S3")
 }
 
 /**
  * 列表视图展示密度
  */
-enum class ListDensity(val label: String, val desc: String) {
-    COMPACT("紧凑", "缩小行高与间距，单屏展示更多条目"),
-    NORMAL("标准", "平衡的可读性与触控舒适度"),
-    COMFORTABLE("宽松", "更大间距与字号，适合大屏与长文本")
+enum class ListDensity(
+    @StringRes val labelRes: Int,
+    @StringRes val descRes: Int
+) {
+    COMPACT(R.string.theme_density_compact, R.string.theme_density_compact_desc),
+    NORMAL(R.string.theme_density_normal, R.string.theme_density_normal_desc),
+    COMFORTABLE(R.string.theme_density_comfortable, R.string.theme_density_comfortable_desc)
 }
 
 /**
  * 图标集风格
  */
-enum class IconSetOption(val label: String, val desc: String) {
-    MATERIAL("Material 3 现代矢量", "贴合现代 Material You 设计语言的矢量图标"),
-    KEEPASS_CLASSIC("KeePass 经典", "KeePass 2.x 经典 16x16 拟物图标集"),
-    MINIMAL_MONOCHROME("极简单色", "高对比度单色线条图标")
+enum class IconSetOption(
+    @StringRes val labelRes: Int,
+    @StringRes val descRes: Int
+) {
+    MATERIAL(R.string.theme_iconset_material, R.string.theme_iconset_material_desc),
+    KEEPASS_CLASSIC(R.string.theme_iconset_classic, R.string.theme_iconset_classic_desc),
+    MINIMAL_MONOCHROME(R.string.theme_iconset_mono, R.string.theme_iconset_mono_desc)
 }
 
 /**
  * 冲突解决策略
  */
-enum class ConflictResolution(val label: String, val desc: String) {
-    AUTO_MERGE("自动三方合并", "优先自动保留最新字段，不中断流程 (推荐)"),
-    PROMPT_USER("询问用户", "检测到冲突时弹出合并/另存对比对话框"),
-    KEEP_REMOTE("以云端版本为准", "放弃本地未同步修改，拉取云端副本"),
-    KEEP_LOCAL("以本地版本为准", "强制将本地数据库覆盖到云端")
+enum class ConflictResolution(
+    @StringRes val labelRes: Int,
+    @StringRes val descRes: Int
+) {
+    AUTO_MERGE(R.string.sync_conflict_auto_merge, R.string.sync_conflict_auto_merge_desc),
+    PROMPT_USER(R.string.sync_conflict_prompt, R.string.sync_conflict_prompt_desc),
+    KEEP_REMOTE(R.string.sync_conflict_keep_remote, R.string.sync_conflict_keep_remote_desc),
+    KEEP_LOCAL(R.string.sync_conflict_keep_local, R.string.sync_conflict_keep_local_desc)
 }
 
 /**
@@ -79,9 +95,10 @@ data class SettingsUiState(
     val autoSyncEnabled: Boolean = true,
     val wifiOnlySync: Boolean = true,
     val isSyncing: Boolean = false,
-    val syncFeedbackMessage: String? = null,
+    val syncFeedbackMessage: UiMessage? = null,
     // KP2A 进阶文件与同步机制
     val useOfflineCache: Boolean = true, // KP2A: 离线本地安全缓存副本
+    val syncOnColdStart: Boolean = true, // 软件杀死后重新启动时自动与云端同步 (冷启动自动同步)
     val periodicBackgroundSyncEnabled: Boolean = false, // KP2A: 周期性定时后台同步
     val periodicBackgroundSyncIntervalMinutes: Int = 30, // KP2A: 定时同步周期 (分钟)
     val allowedWifiSsids: String = "", // KP2A: 仅在指定 SSID Wi-Fi 下允许同步
@@ -108,36 +125,32 @@ data class SettingsUiState(
     val overrideNoAutofill: Boolean = false, // KP2A: 强制忽略应用的禁止自动填充标记
     val disabledAutofillQueriesCount: Int = 0, // KP2A: 已禁用的自动填充黑名单数量
 
-    // 4. 设备解锁与安全策略 (Device Unlock & Security) - 完全可调
-    val biometricEnabled: Boolean = true,
+    // 4. 设备解锁与安全策略 (Device Unlock & Security) - 生物识别与锁定策略
+    val biometricEnabled: Boolean = true, // 生物识别 / 指纹验证
     val autoLockBackground: Boolean = true,
     val flagSecureEnabled: Boolean = true,
     val autoClearClipboard: Boolean = true,
     val autoLockTimeoutSeconds: Int = 0, // 0 = 立即, 30, 60, 300, 900, -1 = 永不
-    val autoLockTimeoutLabel: String = "立即锁定",
     val clipboardTimeoutSeconds: Int = 30, // 15, 30, 60, 120, -1 = 不清空
-    val clipboardTimeoutLabel: String = "30 秒",
-    // KP2A 核心安全机制
-    val quickUnlockEnabled: Boolean = true, // KP2A: 快速解锁主开关
-    val quickUnlockLength: Int = 3, // KP2A: 快速解锁 PIN 截取长度 (默认3位)
-    val quickUnlockObscureInput: Boolean = true, // KP2A: 隐蔽输入模式 (无点号/字符回显防旁窥)
-    val quickUnlockHideLength: Boolean = false, // KP2A: 隐藏所需 PIN 位数
-    val quickUnlockRequireDeviceLock: Boolean = true, // KP2A: 设备未设锁屏密码时禁用快速解锁
-    val quickUnlockUseDedicatedKey: Boolean = false, // KP2A: 使用库内专用 PIN 而非主密码后缀
-    val lockWhenScreenOff: Boolean = true, // KP2A: 熄屏时立即锁定
-    val lockWhenNavigateBack: Boolean = false, // KP2A: 返回退出应用时锁定
-    val clearPasswordOnLeave: Boolean = false, // KP2A: 离开密码页清空已输入字符
-    val rememberRecentFiles: Boolean = true, // KP2A: 记住最近打开的数据库
-    val rememberKeyFileLocation: Boolean = true, // KP2A: 记住密钥文件关联位置
-    val showKillAppOption: Boolean = false, // KP2A: 提供彻底杀死/终止应用进程入口
+    // 核心安全锁定规则
+    val lockWhenScreenOff: Boolean = true, // 熄屏时立即锁定
+    val lockWhenNavigateBack: Boolean = false, // 返回退出应用时锁定
+    val clearPasswordOnLeave: Boolean = false, // 离开密码页清空已输入字符
+    val rememberRecentFiles: Boolean = true, // 记住最近打开的数据库
+    val rememberKeyFileLocation: Boolean = true, // 记住密钥文件关联位置
+    val showKillAppOption: Boolean = false, // 提供彻底杀死/终止应用进程入口
 
     // 5. 外观与显示偏好 (Appearance & Display)
     val themeMode: AppThemeMode = AppThemeMode.SYSTEM,
+    val themePalette: com.keepasskey.app.ui.theme.AppThemePalette = com.keepasskey.app.ui.theme.AppThemePalette.SAPPHIRE,
     val appLanguage: com.keepasskey.app.data.repository.AppLanguage = com.keepasskey.app.data.repository.AppLanguage.SYSTEM,
     val oledBlackOptimization: Boolean = false,
     val showUsernameInList: Boolean = true,
     val showOtpInList: Boolean = true,
     val showPasskeyBadge: Boolean = true,
+    val showUrlInList: Boolean = true, // Monica 灵感: 列表中展示条目关联网址/域名
+    val hideFabOnScroll: Boolean = false, // Monica 灵感: 列表滚动时自动隐藏新建悬浮按钮
+    val hapticFeedbackEnabled: Boolean = true, // Monica 灵感: 复制与安全操作触觉震动反馈
     val maskPasswordsDefault: Boolean = true, // KP2A: 详情页默认遮掩密码
     val maskTotpDefault: Boolean = false, // KP2A: 默认遮掩 TOTP 动态码
     val showUnlockedNotification: Boolean = true, // KP2A: 通知栏已解锁常驻快捷方式
@@ -146,6 +159,8 @@ data class SettingsUiState(
     val listDensity: ListDensity = ListDensity.NORMAL, // KP2A: 列表显示紧凑度
     val autoActivateSearchOnOpen: Boolean = false, // KP2A: 打开数据库后自动聚焦搜索栏
     val iconSet: IconSetOption = IconSetOption.MATERIAL, // KP2A: 图标集风格
+    val showAuthenticatorTab: Boolean = true, // 是否在底部导航栏显示「验证码」
+    val showGeneratorTab: Boolean = true, // 是否在底部导航栏显示「密码生成器」
 
     // 6. 两步验证与 TOTP 高级规范映射 (Tray TOTP / Custom Fields)
     val totpSeedFieldName: String = "TOTP Seed", // KP2A: 密钥种子字段名

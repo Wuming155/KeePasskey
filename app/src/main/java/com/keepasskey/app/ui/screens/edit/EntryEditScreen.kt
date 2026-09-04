@@ -75,11 +75,12 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.keepasskey.app.R
+import com.keepasskey.app.ui.model.UiMessage
+import com.keepasskey.app.ui.model.resolveText
 import com.keepasskey.app.ui.components.BentoCard
 import com.keepasskey.app.ui.components.IconPickerDialog
 import com.keepasskey.app.ui.components.PasswordStrengthBar
 import com.keepasskey.app.ui.components.getVaultIcon
-import com.keepasskey.app.ui.model.EntryCategory
 import com.keepasskey.app.ui.theme.CapsuleShape
 import com.keepasskey.app.ui.theme.LocalSecurityColors
 import com.keepasskey.app.ui.theme.MonospacePasswordStyle
@@ -112,9 +113,10 @@ fun EntryEditScreen(
         }
     }
 
-    LaunchedEffect(uiState.userMessage) {
-        uiState.userMessage?.let { msg ->
-            snackbarHostState.showSnackbar(msg)
+    uiState.userMessage?.let { message ->
+        val text = message.resolveText()
+        LaunchedEffect(message, text) {
+            snackbarHostState.showSnackbar(text)
             viewModel.clearUserMessage()
         }
     }
@@ -134,7 +136,6 @@ fun EntryEditScreen(
         onNotesChange = viewModel::onNotesChange,
         onTogglePasskey = viewModel::onTogglePasskey,
         onTotpSecretChange = viewModel::onTotpSecretChange,
-        onCategoryChange = viewModel::onCategoryChange,
         onAddCustomField = viewModel::addCustomField,
         onUpdateCustomField = viewModel::updateCustomField,
         onRemoveCustomField = viewModel::removeCustomField,
@@ -173,7 +174,6 @@ fun EntryEditContent(
     onNotesChange: (String) -> Unit,
     onTogglePasskey: () -> Unit,
     onTotpSecretChange: (String) -> Unit,
-    onCategoryChange: (EntryCategory) -> Unit,
     onAddCustomField: () -> Unit,
     onUpdateCustomField: (String, String, String, Boolean) -> Unit,
     onRemoveCustomField: (String) -> Unit,
@@ -187,7 +187,7 @@ fun EntryEditContent(
     onToggleLower: () -> Unit,
     onToggleDigits: () -> Unit,
     onToggleSymbols: () -> Unit,
-    onShowMessage: (String) -> Unit,
+    onShowMessage: (UiMessage) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val securityColors = LocalSecurityColors.current
@@ -242,28 +242,6 @@ fun EntryEditContent(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // 分类选择
-            Text(
-                text = stringResource(R.string.edit_category_label),
-                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
-                color = MaterialTheme.colorScheme.onSurface
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf(EntryCategory.LOGIN, EntryCategory.PASSKEY).forEach { cat ->
-                    val selected = uiState.selectedCategory == cat
-                    FilterChip(
-                        selected = selected,
-                        onClick = { onCategoryChange(cat) },
-                        label = { Text(cat.label) },
-                        shape = CapsuleShape,
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                            selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
-                        )
-                    )
-                }
-            }
-
             // 所属群组 / 文件夹选择
             if (uiState.availableGroups.isNotEmpty()) {
                 Text(
@@ -456,7 +434,7 @@ fun EntryEditContent(
                     onValueChange = onTotpSecretChange,
                     label = { Text(stringResource(R.string.edit_totp_hint)) },
                     trailingIcon = {
-                        IconButton(onClick = { onShowMessage("呼起相机扫描 TOTP 二维码") }) {
+                        IconButton(onClick = { onShowMessage(UiMessage(R.string.edit_scan_totp_qr)) }) {
                             Icon(
                                 imageVector = Icons.Default.QrCodeScanner,
                                 contentDescription = stringResource(R.string.cd_scan_qr),

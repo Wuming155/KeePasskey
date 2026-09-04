@@ -61,17 +61,17 @@ class FakeVaultRepository @Inject constructor() : VaultRepository {
         databasesFlow.value = databasesFlow.value.filter { it.id != id }
     }
 
-    override suspend fun importExternalDatabase(name: String, path: String) {
+    override suspend fun importExternalDatabase(name: String, path: String, syncType: String) {
         val newDb = VaultDatabaseInfo(
             id = "db_${System.currentTimeMillis()}",
             name = name,
             path = path,
-            isRemote = false,
-            syncType = "外部 SAF 导入",
+            isRemote = syncType != "本地设备存储",
+            syncType = syncType,
             lastOpenedAt = "刚刚",
             fileSizeFormatted = "186 KB",
             isActive = true,
-            encryptionPreset = "AES-256 + Argon2d"
+            encryptionPreset = "ChaCha20 + Argon2id"
         )
         val current = databasesFlow.value.map { it.copy(isActive = false) }.toMutableList()
         current.add(0, newDb)
@@ -154,6 +154,20 @@ class FakeVaultRepository @Inject constructor() : VaultRepository {
 
     override suspend fun emptyRecycleBin() {
         entriesFlow.value = entriesFlow.value.filter { it.groupId != "group_recycle_bin" }
+    }
+
+    override suspend fun batchMoveEntries(entryIds: Set<String>, targetGroupId: String?) {
+        val current = entriesFlow.value.map { entry ->
+            if (entry.id in entryIds) entry.copy(groupId = targetGroupId) else entry
+        }
+        entriesFlow.value = current
+    }
+
+    override suspend fun batchDeleteEntries(entryIds: Set<String>) {
+        val current = entriesFlow.value.map { entry ->
+            if (entry.id in entryIds) entry.copy(groupId = "group_recycle_bin") else entry
+        }
+        entriesFlow.value = current
     }
 
     companion object {
@@ -356,6 +370,36 @@ class FakeVaultRepository @Inject constructor() : VaultRepository {
                 orderIndex = 4,
                 groupId = "group_dev",
                 iconName = "cloud"
+            ),
+            UiVaultEntry(
+                id = "5",
+                title = "招商银行经典白金信用卡",
+                username = "ZHANG SAN",
+                url = "https://www.cmbchina.com",
+                category = EntryCategory.CARD,
+                cardNumberMasked = "**** **** **** 8826",
+                cardHolder = "ZHANG SAN",
+                cardExpiry = "08/29",
+                cardCvv = "639",
+                notes = "主刷卡，账单日每月 7 号，还款日每月 25 号",
+                updatedAt = "2026-09-01 12:00",
+                createdAt = "2026-08-05 10:00",
+                orderIndex = 5,
+                groupId = "group_finance",
+                iconName = "credit_card"
+            ),
+            UiVaultEntry(
+                id = "6",
+                title = "机房应急恢复指南与服务器密码",
+                username = "Server Room Memo",
+                url = "",
+                category = EntryCategory.NOTE,
+                notes = "机柜 A-12-04 物理钥匙存放于保险柜 #2\n门禁 PIN: 991204\n主备路由网段: 10.0.100.1/24\n紧急技术联系人: 138-0000-0000",
+                updatedAt = "2026-09-02 15:30",
+                createdAt = "2026-08-06 09:00",
+                orderIndex = 6,
+                groupId = "group_dev",
+                iconName = "description"
             ),
             UiVaultEntry(
                 id = "entry_recycled_1",
