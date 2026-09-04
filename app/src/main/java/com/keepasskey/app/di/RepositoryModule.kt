@@ -1,7 +1,7 @@
 package com.keepasskey.app.di
 
 import com.keepasskey.app.data.repository.FakeSettingsRepository
-import com.keepasskey.app.data.repository.FakeVaultRepository
+import com.keepasskey.app.data.repository.RealVaultRepository
 import com.keepasskey.app.data.repository.SettingsRepository
 import com.keepasskey.app.data.repository.VaultRepository
 import dagger.Binds
@@ -20,7 +20,7 @@ abstract class RepositoryModule {
     @Binds
     @Singleton
     abstract fun bindVaultRepository(
-        fakeVaultRepository: FakeVaultRepository
+        realVaultRepository: RealVaultRepository
     ): VaultRepository
 
     @Binds

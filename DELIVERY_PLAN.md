@@ -12,10 +12,10 @@
 [阶段 1: UI 优先与交互原型]  ✅ (已完成，15个页面/全交互闭环/中英文对齐)
          │
          ▼
-[阶段 2: 密码学核心与 KDBX 数据库引擎] 🚀 (当前重点：crypto + database + session)
+[阶段 2: 密码学核心与 KDBX 数据库引擎] ✅ (已完成：crypto + database + session + 真实Repository打通)
          │
          ▼
-[阶段 3: 生物识别与防御性安全加固] (AndroidX Biometric + Keystore + FLAG_SECURE)
+[阶段 3: 生物识别与防御性安全加固] 🚀 (当前重点：AndroidX Biometric + Keystore + FLAG_SECURE)
          │
          ▼
 [阶段 4: 通行密钥 (Passkey) 与 Credential Manager 自动填充] (WebAuthn + API 36+ 专属适配)
@@ -48,39 +48,40 @@
 
 ---
 
-### 阶段 2：密码学核心与 KDBX 数据库引擎（当前重点 🚀）
+### 阶段 2：密码学核心与 KDBX 数据库引擎（已完成 ✅）
 
 * **目标**：构建独立、安全、可复用的 `crypto` 与 `database` 核心，实现对标准 `.kdbx`（重点 v4，向下兼容 v3）的无损读取、解析、修改与原子写入，并替换 `FakeVaultRepository`。
 * **涉及模块**：`core`, `crypto`, `database`, `app` (数据层注入)
 * **核心任务清单**：
   1. **`core` 基础领域模型与安全内存设计**：
-     - [ ] 定义不可变条目模型 `KdbxEntry`、分组树模型 `KdbxGroup`、自定义字段 `KdbxCustomField`、历史快照 `KdbxHistory`、附件元数据 `KdbxAttachment`。
-     - [ ] 封装敏感内存擦除抽象：`ProtectedString` 与 `ClearableByteArray`，杜绝敏感密码常驻 GC 堆。
+     - [x] 定义不可变条目模型 `KdbxEntry`、分组树模型 `KdbxGroup`、自定义字段 `KdbxCustomField`、历史快照 `KdbxHistory`、附件元数据 `KdbxAttachment`。
+     - [x] 封装敏感内存擦除抽象：`ProtectedString` 与 `ClearableByteArray`，杜绝敏感密码常驻 GC 堆。
   2. **`crypto` 密码学驱动器**：
-     - [ ] 引入 `BouncyCastle` 密码学库（或 Android 原生实现评估）。
-     - [ ] 对称分组加解密：AES-256 (CBC/GCM)、ChaCha20-Poly1305、Twofish。
-     - [ ] 密钥派生函数（KDF）：Argon2d / Argon2id（内存、迭代次数、并行度可调）、AES-KDF（SHA-256 rounds）。
-     - [ ] Inner Random Stream（内部内存流加密）：Salsa20 / ChaCha20 Protected Stream Cipher，用于保护内存中的自定义密码字段。
-     - [ ] HMAC-SHA256 块签名与校验引擎。
+     - [x] 引入 `BouncyCastle` 密码学库（或 Android 原生实现评估）。
+     - [x] 对称分组加解密：AES-256 (CBC/GCM)、ChaCha20-Poly1305、Twofish。
+     - [x] 密钥派生函数（KDF）：Argon2d / Argon2id（内存、迭代次数、并行度可调）、AES-KDF（SHA-256 rounds）。
+     - [x] Inner Random Stream（内部内存流加密）：Salsa20 / ChaCha20 Protected Stream Cipher，用于保护内存中的自定义密码字段。
+     - [x] HMAC-SHA256 块签名与校验引擎。
   3. **`database` KDBX 格式解析与序列化**：
-     - [ ] **KDBX v4 解析器**：文件魔数签名校验（`0x9AA2D903`, `0xB54BFB67`）、外层 Header 动态字典解析（Cipher ID、KDF 参数、主种子 Master Seed、转换种子 Transform Seed、加密 IV 等）。
-     - [ ] **Payload 解密与解压缩**：GZip 解压缩、Inner Stream 解密、HMAC 块流校验（Block Stream Validation）。
-     - [ ] **XML 数据树反序列化**：解析 `<KeePassFile>` 节点树，映射 Group/Entry/Times/Binary 等元数据，支持 KeePass 官方和 KeePassXC 导出的标注文档。
-     - [ ] **KDBX 序列化与写回**：将内存树完整写回标准二进制 KDBX 格式，计算 Header HMAC 与数据块校验和。
+     - [x] **KDBX v4 解析器**：文件魔数签名校验（`0x9AA2D903`, `0xB54BFB67`）、外层 Header 动态字典解析（Cipher ID、KDF 参数、主种子 Master Seed、转换种子 Transform Seed、加密 IV 等）。
+     - [x] **Payload 解密与解压缩**：GZip 解压缩、Inner Stream 解密、HMAC 块流校验（Block Stream Validation）。
+     - [x] **XML 数据树反序列化**：解析 `<KeePassFile>` 节点树，映射 Group/Entry/Times/Binary 等元数据，支持 KeePass 官方和 KeePassXC 导出的标注文档。
+     - [x] **KDBX 序列化与写回**：将内存树完整写回标准二进制 KDBX 格式，计算 Header HMAC 与数据块校验和。
   4. **会话层 `DatabaseSession` 与持久化调度**：
-     - [ ] 内存中维护活动数据库状态机（`CLOSED`, `LOCKED`, `OPENED`, `DIRTY`）。
-     - [ ] **原子写盘机制（Atomic File Write）**：严格遵循 `tmp -> sync -> atomic rename + .bak 滚动备份` 策略，杜绝因掉电、崩溃导致主数据库损坏。
+     - [x] 内存中维护活动数据库状态机（`CLOSED`, `LOCKED`, `OPENED`, `DIRTY`）。
+     - [x] **原子写盘机制（Atomic File Write）**：严格遵循 `tmp -> sync -> atomic rename + .bak 滚动备份` 策略，杜绝因掉电、崩溃导致主数据库损坏。
   5. **`app` 数据层接入**：
-     - [ ] 实现 `RealVaultRepository`，对接 `DatabaseSession`。
-     - [ ] 在 Hilt `RepositoryModule` 中无缝替换，完成全套 UI 对物理 `.kdbx` 文件的读取与增删改查。
+     - [x] 实现 `RealVaultRepository`，对接 `DatabaseSession`。
+     - [x] 在 Hilt `RepositoryModule` 中无缝替换，完成全套 UI 对物理 `.kdbx` 文件的读取与增删改查。
 * **交付物**：
   * `crypto` 独立模块（单元测试覆盖 AES/ChaCha20/Argon2 标准向量）。
-  * `database` 独立模块（能正确解密 KeePassXC 生成的标准测试库）。
+  * `database` 独立模块（标准测试库解密、双向序列化与原子写盘测试全绿）。
   * `RealVaultRepository` 驱动的真实打开与保存功能。
 * **验收门禁（DoD）**：
   * 使用 KeePass 2.x / KeePassXC 创建的含有 AES/Argon2/ChaCha20 的 `.kdbx` 文件可在本 App 中成功解锁并展示全部条目。
   * 在 App 中新增/修改条目并保存后，该文件重新在 PC 端 KeePassXC 中打开无报错、校验通过。
   * 关键内存敏感变量（Master Password、Master Key）在解密完成后立即执行 `.fill(0)`。
+* **验收状态**：**已通过全面验收 ✅**。
 
 ---
 
@@ -249,8 +250,8 @@
 | 阶段编号 | 阶段名称 | 关键责任模块 | 预计规模 | 状态 |
 | :---: | :--- | :--- | :---: | :---: |
 | **阶段 1** | UI 优先与交互原型 | `app:ui` | 47+ 文件 | **已完成 ✅** |
-| **阶段 2** | 密码学核心与 KDBX 数据库引擎 | `crypto`, `database`, `core` | 核心引擎 | **当前重点 🚀** |
-| **阶段 3** | 生物识别与防御性安全加固 | `app:biometric`, `app:security` | 硬件集成 | 待开始 ⏳ |
+| **阶段 2** | 密码学核心与 KDBX 数据库引擎 | `crypto`, `database`, `core` | 核心引擎 | **已完成 ✅** |
+| **阶段 3** | 生物识别与防御性安全加固 | `app:biometric`, `app:security` | 硬件集成 | **当前重点 🚀** |
 | **阶段 4** | 通行密钥 (Passkey) 与 Credential Manager | `app:passkey`, `app:autofill` | 系统服务 | 待开始 ⏳ |
 | **阶段 5** | 多协议云同步 (WebDAV/S3) 与冲突合并 | `sync` | 网络引擎 | 待开始 ⏳ |
 | **阶段 6** | KeePass 高级特性与全功能工具箱 | `app`, `database` | 功能增强 | 待开始 ⏳ |

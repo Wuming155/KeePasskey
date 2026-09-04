@@ -49,6 +49,6 @@ KeePasskey 是一款使用原生 Kotlin 开发的现代化 Android 密码管理�
 - `.\gradlew.bat test` — 单元测试（目前尚无 `src/test`，规划中）
 - 版本升级需整体配套：AGP ↔ Gradle ↔ Kotlin ↔ Compose BOM（Compose BOM 2026.06.00+ 要求 compileSdk 37，当前用 2026.06.01 对齐 compileSdk 36）
 
-**当前阶段状态**：**阶段 1「UI 优先」已圆满完成**（全量 15 个屏幕/子屏及组件均已落地并实现内存交互闭环，中英文 1:1 对齐）。**下一次交互正式进入阶段 2「数据库核心」**：
-- 重点任务：实现 `crypto`（AES/ChaCha20/Twofish 分组加密与 Argon2/SHA-256 KDF，严守 `CharArray`/`ByteArray` 清零铁律）与 `database`（KDBX v4 二进制解析/序列化、数据模型与 `DatabaseSession`）；
-- 最终目标：实现真实的 `VaultRepository` 替换 `FakeVaultRepository`，使全套 UI 与真实 KDBX 文件打通。
+**当前阶段状态**：**阶段 2「密码学核心与 KDBX 数据库引擎」已圆满完成**（全量实现 `core` 领域模型与安全内存、`crypto` 对称加密/Argon2/AES-KDF/流加密、`database` KDBX v4 二进制/XML 解析写回、`DatabaseSession` 状态机与原子写盘，并通过 `RealVaultRepository` 对接 Hilt，模块单元测试全量通过）。**下一次交互正式进入阶段 3「系统级生物识别与防御性安全加固」**：
+- 重点任务：实现 AndroidX Biometric 指纹/面容快速解锁，结合 Android Keystore 硬件安全密钥管理主密码派生；
+- 防御性加固：落地主界面与凭据页 `FLAG_SECURE` 防截屏与多任务侧漏守卫、系统剪贴板 `EXTRA_IS_SENSITIVE` 标记与后台倒计时自动抹除、Auto-Lock 后台超时熔断。

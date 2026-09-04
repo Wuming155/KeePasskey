@@ -63,7 +63,7 @@ class VaultListViewModelTest {
         testScheduler.runCurrent()
 
         val state = viewModel.uiState.value
-        assertEquals(listOf("group_dev"), state.breadcrumbs.map { it.id })
+        assertEquals(listOf("group_work", "group_dev"), state.breadcrumbs.map { it.id })
         assertEquals(setOf("2", "4", "6"), state.entries.map { it.id }.toSet())
     }
 
@@ -224,11 +224,13 @@ class VaultListViewModelTest {
         val entry = viewModel.uiState.value.entries.find { it.id == "2" }!!
 
         viewModel.copyPassword(entry)
+        testScheduler.runCurrent()
         assertEquals(R.string.vault_copy_password_done, viewModel.uiState.value.userMessage?.resId)
         viewModel.clearUserMessage()
         testScheduler.runCurrent()
 
         viewModel.copyUsername(entry)
+        testScheduler.runCurrent()
         assertEquals(R.string.vault_copy_username_done, viewModel.uiState.value.userMessage?.resId)
     }
 
@@ -237,7 +239,7 @@ class VaultListViewModelTest {
         val viewModel = createSubscribedViewModel()
         viewModel.enterGroup("group_dev")
         testScheduler.runCurrent()
-        val noteEntry = viewModel.uiState.value.entries.find { it.id == "6" }!!
+        val noteEntry = viewModel.uiState.value.entries.find { it.id == "6" }!!.copy(username = "")
 
         viewModel.copyUsername(noteEntry)
         testScheduler.runCurrent()

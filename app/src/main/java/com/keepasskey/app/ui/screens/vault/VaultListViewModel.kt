@@ -9,6 +9,7 @@ import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.model.UiVaultEntry
 import com.keepasskey.app.ui.model.VaultGroup
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -54,7 +55,7 @@ class VaultListViewModel @Inject constructor(
 
     init {
         // 每秒刷新 TOTP 剩余秒数，驱动列表内验证码环形倒计时实时跳动
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.Default) {
             while (isActive) {
                 delay(TOTP_TICK_INTERVAL_MS)
                 totpRemainingSecondsFlow.value = calculateCurrentRemainingSeconds()

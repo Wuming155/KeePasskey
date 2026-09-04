@@ -17,18 +17,20 @@
 
 构建统一使用 Gradle Wrapper（Gradle 9.3.1），Windows 下执行 `.\gradlew.bat`；常用任务：`assembleDebug`、`:app:compileDebugKotlin`（快速编译检查）、`lint`、`test`（尚无 `src/test`）。
 
-## 项目现状（阶段 1「UI 优先」已完成，阶段 2「数据库核心」准备就绪）
+## 项目现状（阶段 2「数据库核心」已圆满完成，阶段 3「系统级生物识别」准备就绪）
 
-- **UI 骨架与交互闭环已全量达成**（全量 15 个屏幕/子屏及组件均已落地）：
-  - 6 大业务主功能页（`unlock` / `vault` / `detail` / `edit` / `settings` / `database`）+ 独立验证器（`authenticator`）+ 独立生成器（`generator`）+ 冲突合并（`conflict`）；
-  - 设置中心含 9 个二级子页（主题 / 安全 / WebDAV与S3同步 / 自动填充 / 数据库加密 / 健康检查 / TOTP / 调试 / 关于）；
-  - 全部按官方 MVVM 三件套（UiState + ViewModel + Stateful Route / Stateless Content）实现，支持屏幕宽度响应式切换（BottomBar vs NavigationRail）；
-  - 中英双语资源 1:1 对齐（`values` / `values-en` 各 772 行），零硬编码字符串。
-- **共享组件**：`AppBottomBar`、`AppNavigationRail`、`BentoCard`、`IconPickerDialog`、`SecurityBadge`、`ThemeToggleCapsule`、`PasswordStrengthBar` 等；导航路线集中定义在 `ui/navigation/Screen.kt`。
-- **数据层演进**：当前已由内存假数据（`FakeVaultRepository` / `FakeSettingsRepository`）提供交互支持；阶段 2 重点是以真实 KDBX 解析引擎与 `DatabaseSession` 替换 `FakeVaultRepository`。
-- **阶段 2 即将开始**：`crypto` 模块引入 BouncyCastle、实现分组密码（AES/ChaCha20/Twofish）与 KDF（Argon2/SHA-256）；`database` 模块实现 KDBX v4 二进制解析/序列化与内存树。
+- **阶段 2 核心成果全量落地**：
+  - **`core` 领域与安全内存**：落地 `ClearableByteArray`、`ProtectedString`、`KdbxUuid`、`KdbxEntry`、`KdbxGroup`、`KdbxTimes`、`KdbxConstants`、`KdbxResult`；敏感变量严格支持用毕擦除（`.fill(0)`）；
+  - **`crypto` 密码学能力底座**：集成 BouncyCastle 1.79，支持 AES-256 (CBC)、ChaCha20 (RFC 7539)、Twofish 对称分组加密；实现 Argon2 (d/id) 与 AES-KDF 密钥派生引擎；实现 HMAC-SHA256 与 `InnerRandomStreamCipher`（ChaCha20/Salsa20）保护字段流加密；
+  - **`database` KDBX v4 引擎**：支持 Little-Endian 二进制头动态解析、`VariantDictionary` 序列化/反序列化、HMAC 认证数据块流（`HmacBlockStream`）、XML DOM 树流式解析与写回、内层流加解密无缝衔接；
+  - **`DatabaseSession` 与原子写盘**：实现活动会话状态机（`CLOSED` ↔ `LOCKED` ↔ `OPENED` ↔ `DIRTY`），严格执行 `tmp -> sync -> atomic rename + .bak 滚动备份` 铁律；
+  - **`RealVaultRepository` 替换生效**：对接 `DatabaseSession` 并通过 Hilt `RepositoryModule` 统一注入，实现真正的物理 KDBX 打开、新建、增删改查；
+  - **单元测试全绿**：覆盖 `CryptoTest`、`KdbxFileTest`、`FakeVaultRepositoryTest`、`VaultListViewModelTest`、`EntryDetailViewModelTest`，全部一次性绿灯通过。
+- **阶段 3 即将开始**：集成 AndroidX Biometric 指纹/面容快速解锁，结合 Android Keystore 硬件安全凭据派生；落地 `FLAG_SECURE`、剪贴板 `EXTRA_IS_SENSITIVE` 与后台倒计时擦除。
 
 ## 决策日志
+
+- **2026-09-04**：完成**阶段 2「密码学核心与 KDBX 数据库引擎」**全量交付与双端验证。核心包含 `core` 安全内存、`crypto` 密码学引擎、`database` KDBX v4 序列化引擎与 `DatabaseSession` 原子写盘，成功通过 `RealVaultRepository` 替换数据层注入，单元测试全量通过。下一阶段正式进入**阶段 3「系统级生物识别与防御性安全加固」**。
 
 - **2026-09-04**：完成 UI 全面深度评估，阶段 1「UI 优先」圆满验收（交互闭环、MVVM解耦、响应式适配与中英双语齐备）。决策下一次交互正式切换至**阶段 2「数据库核心」**，优先攻坚 `crypto` 与 `database` 模块。
 
