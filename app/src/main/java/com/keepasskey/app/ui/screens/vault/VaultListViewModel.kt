@@ -31,7 +31,8 @@ import javax.inject.Inject
 @HiltViewModel
 class VaultListViewModel @Inject constructor(
     private val vaultRepository: VaultRepository,
-    private val settingsRepository: SettingsRepository
+    private val settingsRepository: SettingsRepository,
+    private val clipboardSecurityManager: com.keepasskey.app.security.ClipboardSecurityManager? = null
 ) : ViewModel() {
 
     private val currentGroupIdFlow = MutableStateFlow<String?>(null)
@@ -231,11 +232,13 @@ class VaultListViewModel @Inject constructor(
     }
 
     fun copyPassword(entry: UiVaultEntry) {
+        clipboardSecurityManager?.copySensitiveText(entry.title, entry.passwordPlain)
         userMessageFlow.update { UiMessage(R.string.vault_copy_password_done, listOf(entry.title)) }
     }
 
     fun copyUsername(entry: UiVaultEntry) {
         if (entry.username.isNotBlank()) {
+            clipboardSecurityManager?.copyPlainText(entry.title, entry.username)
             userMessageFlow.update { UiMessage(R.string.vault_copy_username_done, listOf(entry.username)) }
         } else {
             userMessageFlow.update { UiMessage(R.string.vault_copy_username_missing) }

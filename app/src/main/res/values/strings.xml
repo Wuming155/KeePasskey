@@ -277,6 +277,12 @@
     <string name="edit_title_required">请输入凭据标题</string>
     <string name="conflict_resolved_msg">冲突解决完毕，已完成本地与云端三方合并</string>
     <string name="unlock_error_empty_password">请输入主密码以解锁</string>
+    <string name="unlock_error_invalid_password">主密码错误或密钥不匹配，解锁失败</string>
+    <string name="unlock_biometric_title">生物识别解锁</string>
+    <string name="unlock_biometric_subtitle">请验证指纹或面容以解锁密码库</string>
+    <string name="unlock_biometric_negative">使用主密码</string>
+    <string name="sec_biometric_auth_failed">生物识别验证未通过或已取消</string>
+    <string name="sec_biometric_key_invalidated">系统生物特征发生变更，安全密钥已失效，请使用主密码重新登录</string>
 <string name="edit_scan_totp_qr">呼起相机扫描 TOTP 二维码</string>
 
     <!-- 解锁页 QuickUnlock -->

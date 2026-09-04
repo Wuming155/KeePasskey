@@ -21,6 +21,21 @@ interface VaultRepository {
     suspend fun selectDatabase(id: String)
 
     /**
+     * 解锁当前选中的活动密码库
+     */
+    suspend fun unlockActiveDatabase(passwordChars: CharArray): com.keepasskey.core.result.KdbxResult<Unit>
+
+    /**
+     * 锁定当前密码库，清空内存凭据与活动树
+     */
+    suspend fun lockDatabase()
+
+    /**
+     * 检查当前密码库是否处于锁定状态
+     */
+    fun isLocked(): Boolean
+
+    /**
      * 创建新密码库
      */
     suspend fun createDatabase(

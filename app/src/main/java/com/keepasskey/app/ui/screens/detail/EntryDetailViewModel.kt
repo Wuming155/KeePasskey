@@ -28,7 +28,8 @@ import javax.inject.Inject
 class EntryDetailViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val vaultRepository: VaultRepository,
-    private val settingsRepository: SettingsRepository
+    private val settingsRepository: SettingsRepository,
+    private val clipboardSecurityManager: com.keepasskey.app.security.ClipboardSecurityManager? = null
 ) : ViewModel() {
 
     private val entryIdFlow = MutableStateFlow<String?>(savedStateHandle.get<String>("entryId"))
@@ -112,6 +113,16 @@ class EntryDetailViewModel @Inject constructor(
 
     fun showMessage(message: UiMessage) {
         userMessageFlow.value = message
+    }
+
+    fun copyPassword(title: String, password: String) {
+        clipboardSecurityManager?.copySensitiveText(title, password)
+        userMessageFlow.value = uiState.value.passwordCopyMessage
+    }
+
+    fun copyUsername(title: String, username: String) {
+        clipboardSecurityManager?.copyPlainText(title, username)
+        userMessageFlow.value = UiMessage(R.string.detail_username_copied_short)
     }
 
     fun clearUserMessage() {

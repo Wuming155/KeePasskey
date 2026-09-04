@@ -88,6 +88,8 @@ fun UnlockScreen(
     viewModel: UnlockViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val activity = androidx.compose.runtime.remember(context) { context as? androidx.fragment.app.FragmentActivity }
 
     LaunchedEffect(viewModel) {
         viewModel.events.collect { event ->
@@ -102,7 +104,7 @@ fun UnlockScreen(
         if (uiState.isBiometricEnabled && uiState.isQuickUnlockAvailable &&
             uiState.unlockMode == UnlockMode.QUICK_UNLOCK
         ) {
-            viewModel.unlockWithBiometric()
+            viewModel.unlockWithBiometric(activity)
         }
     }
 
@@ -117,7 +119,7 @@ fun UnlockScreen(
         onSwitchMode = viewModel::switchUnlockMode,
         onUnlock = viewModel::unlock,
         onQuickUnlock = viewModel::unlockWithQuickUnlock,
-        onBiometricUnlock = viewModel::unlockWithBiometric,
+        onBiometricUnlock = { viewModel.unlockWithBiometric(activity) },
         onNavigateToDatabasePicker = onNavigateToDatabasePicker,
         modifier = modifier
     )

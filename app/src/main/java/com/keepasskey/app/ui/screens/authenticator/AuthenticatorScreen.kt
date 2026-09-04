@@ -94,6 +94,9 @@ fun AuthenticatorScreen(
     val copyCode: (String) -> Unit = { rawCode ->
         val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         val clip = ClipData.newPlainText("TOTP Token", rawCode)
+        clip.description.extras = android.os.PersistableBundle().apply {
+            putBoolean(android.content.ClipDescription.EXTRA_IS_SENSITIVE, true)
+        }
         cm.setPrimaryClip(clip)
         viewModel.copyTotpCode(rawCode)
     }

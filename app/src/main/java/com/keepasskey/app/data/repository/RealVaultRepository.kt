@@ -115,6 +115,47 @@ class RealVaultRepository @Inject constructor(
         }
     }
 
+    override suspend fun unlockActiveDatabase(passwordChars: CharArray): com.keepasskey.core.result.KdbxResult<Unit> {
+        val filesDir = context.filesDir ?: return com.keepasskey.core.result.KdbxResult.Failure(
+            IllegalStateException("No filesDir"),
+            "内部存储目录不可用"
+        )
+        val activeDb = databasesFlow.value.firstOrNull { it.isActive }
+            ?: databasesFlow.value.firstOrNull()
+            ?: return com.keepasskey.core.result.KdbxResult.Failure(
+                IllegalStateException("无活动数据库"),
+                "请先选择或创建密码库"
+            )
+
+        val targetFile = File(activeDb.path)
+        if (!targetFile.exists()) {
+            // 文件尚不存在时初始化创建
+            val createResult = databaseSession.create(
+                file = targetFile,
+                name = activeDb.name.removeSuffix(".kdbx"),
+                passwordChars = passwordChars,
+                useArgon2 = true
+            )
+            refreshDatabases()
+            return createResult
+        }
+
+        val result = databaseSession.open(targetFile, passwordChars)
+        if (result is com.keepasskey.core.result.KdbxResult.Success) {
+            refreshDatabases()
+        }
+        return result
+    }
+
+    override suspend fun lockDatabase() {
+        databaseSession.lock()
+        refreshDatabases()
+    }
+
+    override fun isLocked(): Boolean {
+        return databaseSession.state.value != DatabaseSession.SessionState.OPENED
+    }
+
     override suspend fun createDatabase(
         name: String,
         masterPassword: String,

@@ -105,6 +105,9 @@ fun GeneratorScreen(
     val onCopy: (String) -> Unit = { text ->
         val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         val clip = ClipData.newPlainText("Generated Password", text)
+        clip.description.extras = android.os.PersistableBundle().apply {
+            putBoolean(android.content.ClipDescription.EXTRA_IS_SENSITIVE, true)
+        }
         cm.setPrimaryClip(clip)
         viewModel.notifyCopied()
     }

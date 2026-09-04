@@ -49,6 +49,7 @@ KeePasskey 是一款使用原生 Kotlin 开发的现代化 Android 密码管理�
 - `.\gradlew.bat test` — 单元测试（目前尚无 `src/test`，规划中）
 - 版本升级需整体配套：AGP ↔ Gradle ↔ Kotlin ↔ Compose BOM（Compose BOM 2026.06.00+ 要求 compileSdk 37，当前用 2026.06.01 对齐 compileSdk 36）
 
-**当前阶段状态**：**阶段 2「密码学核心与 KDBX 数据库引擎」已圆满完成**（全量实现 `core` 领域模型与安全内存、`crypto` 对称加密/Argon2/AES-KDF/流加密、`database` KDBX v4 二进制/XML 解析写回、`DatabaseSession` 状态机与原子写盘，并通过 `RealVaultRepository` 对接 Hilt，模块单元测试全量通过）。**下一次交互正式进入阶段 3「系统级生物识别与防御性安全加固」**：
-- 重点任务：实现 AndroidX Biometric 指纹/面容快速解锁，结合 Android Keystore 硬件安全密钥管理主密码派生；
-- 防御性加固：落地主界面与凭据页 `FLAG_SECURE` 防截屏与多任务侧漏守卫、系统剪贴板 `EXTRA_IS_SENSITIVE` 标记与后台倒计时自动抹除、Auto-Lock 后台超时熔断。
+**当前阶段状态**：**阶段 3「系统级生物识别与防御性安全加固」已圆满完成**（全量实现 AndroidX Biometric 强生物识别 Class 3 与 Android Keystore 硬件级 AES-256-GCM 封装凭据派生、`FLAG_SECURE` 防截屏与多任务侧漏守卫、Android 13+ 剪贴板 `EXTRA_IS_SENSITIVE` 标记与后台定时哈希比对自动擦除器、`AutoLockManager` 熄屏与后台超时熔断调度，全量单测与构建通过）。**下一次交互正式进入阶段 4「通行密钥 (Passkey / WebAuthn) 与 Credential Manager 自动填充」**：
+- 重点任务：实现标准 Passkey 数据结构在 KDBX 扩展存储标准（RP ID、User Handle、Credential ID、公私钥对生成与存储）；
+- 系统服务：以 Android 16+（API 36+）为基线实现 `CredentialProviderService`（`BeginGetCredentialOption`, `BeginCreateCredentialRequest` 等），打通 WebAuthn 注册与断言数字签名；
+- 兼容填充：实现传统 `AutofillService` 兼容层与输入法内联建议（Inline Suggestions）。

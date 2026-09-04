@@ -238,6 +238,14 @@ class DatabaseSession {
     }
 
     /**
+     * 仅供测试使用：直接注入内存数据库模型
+     */
+    fun setDatabaseForTesting(db: KdbxDatabase) {
+        _database.value = db
+        _state.value = SessionState.OPENED
+    }
+
+    /**
      * 锁定当前数据库：保留文件路径引用，但物理销毁内存中的敏感主密码与数据库明文树
      */
     suspend fun lock() = mutex.withLock {

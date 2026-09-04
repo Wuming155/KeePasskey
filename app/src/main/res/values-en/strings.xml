@@ -277,6 +277,12 @@
     <string name="edit_title_required">Please enter an entry title</string>
     <string name="conflict_resolved_msg">Conflict resolved, local and cloud merged successfully</string>
     <string name="unlock_error_empty_password">Enter master password to unlock</string>
+    <string name="unlock_error_invalid_password">Incorrect master password or key mismatch</string>
+    <string name="unlock_biometric_title">Biometric Unlock</string>
+    <string name="unlock_biometric_subtitle">Verify your fingerprint or face to unlock</string>
+    <string name="unlock_biometric_negative">Use Master Password</string>
+    <string name="sec_biometric_auth_failed">Biometric authentication failed or was cancelled</string>
+    <string name="sec_biometric_key_invalidated">Biometric credentials changed, security key invalidated. Please use master password.</string>
 <string name="edit_scan_totp_qr">Open camera to scan TOTP QR code</string>
 
     <!-- Unlock QuickUnlock -->

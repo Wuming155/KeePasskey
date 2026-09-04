@@ -454,6 +454,9 @@ class SettingsViewModel @Inject constructor(
         securityTimeoutStateFlow.update {
             it.copy(autoLockTimeoutSeconds = seconds)
         }
+        viewModelScope.launch {
+            settingsRepository.setAutoLockTimeoutSeconds(seconds)
+        }
     }
 
     fun setClipboardTimeout(seconds: Int) {
@@ -539,6 +542,9 @@ class SettingsViewModel @Inject constructor(
     // ========== 安全锁定规则控制 ==========
     fun setLockWhenScreenOff(enabled: Boolean) {
         extendedSettingsFlow.update { it.copy(lockWhenScreenOff = enabled) }
+        viewModelScope.launch {
+            settingsRepository.setLockWhenScreenOff(enabled)
+        }
     }
 
     fun setLockWhenNavigateBack(enabled: Boolean) {

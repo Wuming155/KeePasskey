@@ -34,6 +34,20 @@ class FakeVaultRepository @Inject constructor() : VaultRepository {
         databasesFlow.value = current
     }
 
+    override suspend fun unlockActiveDatabase(passwordChars: CharArray): com.keepasskey.core.result.KdbxResult<Unit> {
+        return if (passwordChars.isNotEmpty()) {
+            com.keepasskey.core.result.KdbxResult.Success(Unit)
+        } else {
+            com.keepasskey.core.result.KdbxResult.Failure(IllegalArgumentException("密码为空"), "密码不能为空")
+        }
+    }
+
+    override suspend fun lockDatabase() {
+        // 假数据仓库内存模拟无操作
+    }
+
+    override fun isLocked(): Boolean = false
+
     override suspend fun createDatabase(
         name: String,
         masterPassword: String,

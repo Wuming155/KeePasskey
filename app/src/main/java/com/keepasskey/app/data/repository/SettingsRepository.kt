@@ -22,6 +22,8 @@ data class UserSettings(
     val appLanguage: AppLanguage = AppLanguage.SYSTEM,
     val biometricEnabled: Boolean = true,
     val autoLockBackground: Boolean = true,
+    val autoLockTimeoutSeconds: Int = 60,
+    val lockWhenScreenOff: Boolean = true,
     val flagSecureEnabled: Boolean = true,
     val autoClearClipboard: Boolean = true,
     // 列表视图显示偏好（由密码库列表消费，设置页外观项可调）
@@ -51,6 +53,8 @@ interface SettingsRepository {
     suspend fun setAppLanguage(language: AppLanguage)
     suspend fun setBiometricEnabled(enabled: Boolean)
     suspend fun setAutoLockBackground(enabled: Boolean)
+    suspend fun setAutoLockTimeoutSeconds(seconds: Int)
+    suspend fun setLockWhenScreenOff(enabled: Boolean)
     suspend fun setFlagSecureEnabled(enabled: Boolean)
     suspend fun setAutoClearClipboard(enabled: Boolean)
     suspend fun setShowUsernameInList(enabled: Boolean)

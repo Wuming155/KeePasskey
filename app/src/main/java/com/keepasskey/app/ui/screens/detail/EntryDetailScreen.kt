@@ -123,6 +123,8 @@ fun EntryDetailScreen(
         onExportAttachment = viewModel::exportAttachment,
         onRollbackRevision = viewModel::rollbackToRevision,
         onShowMessage = viewModel::showMessage,
+        onCopyPassword = viewModel::copyPassword,
+        onCopyUsername = viewModel::copyUsername,
         modifier = modifier
     )
 }
@@ -143,6 +145,8 @@ fun EntryDetailContent(
     onExportAttachment: (UiAttachment) -> Unit,
     onRollbackRevision: (UiEntryRevision) -> Unit,
     onShowMessage: (UiMessage) -> Unit,
+    onCopyPassword: (String, String) -> Unit = { _, _ -> },
+    onCopyUsername: (String, String) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier
 ) {
     val entry = uiState.entry
@@ -265,13 +269,13 @@ fun EntryDetailContent(
                         icon = Icons.Default.ContentCopy,
                         label = stringResource(R.string.detail_btn_copy_user),
                         modifier = Modifier.weight(1f),
-                        onClick = { onShowMessage(UiMessage(R.string.detail_username_copied)) }
+                        onClick = { onCopyUsername(entry.title, entry.username) }
                     )
                     QuickActionTile(
                         icon = Icons.Default.Key,
                         label = stringResource(R.string.detail_btn_copy_pwd),
                         modifier = Modifier.weight(1f),
-                        onClick = { onShowMessage(uiState.passwordCopyMessage) }
+                        onClick = { onCopyPassword(entry.title, entry.passwordPlain) }
                     )
                 }
 
@@ -305,7 +309,7 @@ fun EntryDetailContent(
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
                             }
-                            IconButton(onClick = { onShowMessage(UiMessage(R.string.detail_username_copied_short)) }) {
+                            IconButton(onClick = { onCopyUsername(entry.title, entry.username) }) {
                                 Icon(
                                     imageVector = Icons.Default.ContentCopy,
                                     contentDescription = stringResource(R.string.cd_copy_username),
@@ -352,7 +356,7 @@ fun EntryDetailContent(
                                             modifier = Modifier.size(20.dp)
                                         )
                                     }
-                                    IconButton(onClick = { onShowMessage(uiState.passwordCopyMessage) }) {
+                                    IconButton(onClick = { onCopyPassword(entry.title, entry.passwordPlain) }) {
                                         Icon(
                                             imageVector = Icons.Default.ContentCopy,
                                             contentDescription = stringResource(R.string.cd_copy_password),

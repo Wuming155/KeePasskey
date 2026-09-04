@@ -17,18 +17,28 @@
 
 构建统一使用 Gradle Wrapper（Gradle 9.3.1），Windows 下执行 `.\gradlew.bat`；常用任务：`assembleDebug`、`:app:compileDebugKotlin`（快速编译检查）、`lint`、`test`（尚无 `src/test`）。
 
-## 项目现状（阶段 2「数据库核心」已圆满完成，阶段 3「系统级生物识别」准备就绪）
+## 项目现状（阶段 3「系统级生物识别与安全加固」已圆满完成，阶段 4「通行密钥与自动填充」准备就绪）
 
-- **阶段 2 核心成果全量落地**：
-  - **`core` 领域与安全内存**：落地 `ClearableByteArray`、`ProtectedString`、`KdbxUuid`、`KdbxEntry`、`KdbxGroup`、`KdbxTimes`、`KdbxConstants`、`KdbxResult`；敏感变量严格支持用毕擦除（`.fill(0)`）；
-  - **`crypto` 密码学能力底座**：集成 BouncyCastle 1.79，支持 AES-256 (CBC)、ChaCha20 (RFC 7539)、Twofish 对称分组加密；实现 Argon2 (d/id) 与 AES-KDF 密钥派生引擎；实现 HMAC-SHA256 与 `InnerRandomStreamCipher`（ChaCha20/Salsa20）保护字段流加密；
-  - **`database` KDBX v4 引擎**：支持 Little-Endian 二进制头动态解析、`VariantDictionary` 序列化/反序列化、HMAC 认证数据块流（`HmacBlockStream`）、XML DOM 树流式解析与写回、内层流加解密无缝衔接；
-  - **`DatabaseSession` 与原子写盘**：实现活动会话状态机（`CLOSED` ↔ `LOCKED` ↔ `OPENED` ↔ `DIRTY`），严格执行 `tmp -> sync -> atomic rename + .bak 滚动备份` 铁律；
-  - **`RealVaultRepository` 替换生效**：对接 `DatabaseSession` 并通过 Hilt `RepositoryModule` 统一注入，实现真正的物理 KDBX 打开、新建、增删改查；
-  - **单元测试全绿**：覆盖 `CryptoTest`、`KdbxFileTest`、`FakeVaultRepositoryTest`、`VaultListViewModelTest`、`EntryDetailViewModelTest`，全部一次性绿灯通过。
-- **阶段 3 即将开始**：集成 AndroidX Biometric 指纹/面容快速解锁，结合 Android Keystore 硬件安全凭据派生；落地 `FLAG_SECURE`、剪贴板 `EXTRA_IS_SENSITIVE` 与后台倒计时擦除。
+- **阶段 3 核心成果全量落地**：
+  - **AndroidX Biometric 强生物识别与硬件 Keystore**：
+    - 实现 `KeystoreManager`：管理硬件安全模块（TEE / StrongBox）隔离的 AES-256-GCM 主密钥；开启 `setInvalidatedByBiometricEnrollment(true)`，支持系统指纹变更检测与失效防护；
+    - 实现 `BiometricAuthManager`：封装系统级 `BiometricPrompt`（`BIOMETRIC_STRONG` Class 3），支持硬件 `CryptoObject` 对接；
+    - 实现 `BiometricCredentialStorage`：硬件安全隔离存储主凭据与 IV，支持免密快速解封。
+  - **防御性安全与防窥屏加固**：
+    - 实现 `FlagSecureGuard`：响应式挂载 `WindowManager.LayoutParams.FLAG_SECURE`，阻断系统截屏、录屏投屏与多任务卡片预览泄露凭据明文；
+    - 升级 `MainActivity` 继承 `FragmentActivity` 并集成安全守卫。
+  - **剪贴板安全生命周期**：
+    - 实现 `ClipboardSecurityManager`：写入敏感字段时注入 Android 13+ `ClipDescription.EXTRA_IS_SENSITIVE = true`，阻断系统浮动气泡明文窥探；调度后台倒计时比对内容哈希，实现无缝定时物理抹除；
+    - 统一贯通 `VaultListViewModel`、`EntryDetailViewModel`、`AuthenticatorScreen` 与 `GeneratorScreen` 的剪贴板安全复制链路。
+  - **自动锁定（Auto-Lock）熔断调度**：
+    - 实现 `AutoLockManager`：监听 `ProcessLifecycleOwner` 进程退至后台事件（按设定秒数超时熔断）与 `Intent.ACTION_SCREEN_OFF` 屏幕熄灭广播；
+    - 熔断时立即触发 `DatabaseSession.lock()` 物理销毁内存敏感数据，并强制 UI 导航重定向至 `UnlockScreen`。
+  - **测试与验证全绿**：新增 `SecurityTest` 与 `UnlockViewModelTest`，全量单元测试与 `assembleDebug` 编译 100% 成功。
+- **阶段 4 即将开始**：聚焦 Passkey (WebAuthn / FIDO2) 扩展模型与 Android 16+ `CredentialProviderService` 系统级集成。
 
 ## 决策日志
+
+- **2026-09-04**：完成**阶段 3「系统级生物识别与防御性安全加固」**全量交付与验证。落地 `KeystoreManager`、`BiometricAuthManager`、`BiometricCredentialStorage`、`FlagSecureGuard`、`ClipboardSecurityManager` 与 `AutoLockManager`，打通指纹快速解封、防多任务泄露、剪贴板自动擦除与锁屏熔断，测试全绿。下一阶段正式进入**阶段 4「通行密钥 (Passkey / WebAuthn) 与 Credential Manager 自动填充」**。
 
 - **2026-09-04**：完成**阶段 2「密码学核心与 KDBX 数据库引擎」**全量交付与双端验证。核心包含 `core` 安全内存、`crypto` 密码学引擎、`database` KDBX v4 序列化引擎与 `DatabaseSession` 原子写盘，成功通过 `RealVaultRepository` 替换数据层注入，单元测试全量通过。下一阶段正式进入**阶段 3「系统级生物识别与防御性安全加固」**。
 

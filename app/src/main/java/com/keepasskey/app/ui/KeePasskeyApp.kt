@@ -144,6 +144,17 @@ fun KeePasskeyApp() {
 
             val configuration = LocalConfiguration.current
             val isWideScreen = configuration.screenWidthDp >= 600
+            val autoLockManager = (context as? com.keepasskey.app.MainActivity)?.autoLockManager
+
+            LaunchedEffect(autoLockManager) {
+                autoLockManager?.lockEvents?.collect {
+                    if (currentRoute != Screen.Unlock.route) {
+                        navController.navigate(Screen.Unlock.route) {
+                            popUpTo(0) { inclusive = true }
+                        }
+                    }
+                }
+            }
 
             val navigateToTopLevel: (String) -> Unit = { targetRoute ->
                 if (targetRoute != currentRoute) {
@@ -195,6 +206,7 @@ fun KeePasskeyApp() {
                         currentTheme = appSettings.themeMode,
                         onThemeToggle = toggleTheme,
                         onUnlockSuccess = {
+                            autoLockManager?.onUnlockSuccess()
                             navController.navigate(Screen.VaultList.route) {
                                 popUpTo(Screen.Unlock.route) { inclusive = true }
                             }
@@ -227,6 +239,7 @@ fun KeePasskeyApp() {
                             navController.navigate(Screen.EntryEdit.createRoute(groupId = groupId))
                         },
                         onLockClick = {
+                            autoLockManager?.triggerLock("用户手动点击锁定")
                             navController.navigate(Screen.Unlock.route) {
                                 popUpTo(0) { inclusive = true }
                             }

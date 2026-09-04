@@ -15,10 +15,10 @@
 [阶段 2: 密码学核心与 KDBX 数据库引擎] ✅ (已完成：crypto + database + session + 真实Repository打通)
          │
          ▼
-[阶段 3: 生物识别与防御性安全加固] 🚀 (当前重点：AndroidX Biometric + Keystore + FLAG_SECURE)
+[阶段 3: 生物识别与防御性安全加固] ✅ (已完成：AndroidX Biometric + Keystore + FLAG_SECURE + 剪贴板擦除 + AutoLock)
          │
          ▼
-[阶段 4: 通行密钥 (Passkey) 与 Credential Manager 自动填充] (WebAuthn + API 36+ 专属适配)
+[阶段 4: 通行密钥 (Passkey) 与 Credential Manager 自动填充] 🚀 (当前重点：WebAuthn + API 36+ 专属适配)
          │
          ▼
 [阶段 5: 多协议云同步 (WebDAV / S3) 与三方冲突合并] (SyncProvider + ETag + 冲突比对)
@@ -85,26 +85,26 @@
 
 ---
 
-### 阶段 3：系统级生物识别与防御性安全加固
+### 阶段 3：系统级生物识别与防御性安全加固（已完成 ✅）
 
 * **目标**：打通 Android 系统指纹/面容快速解锁，并在运行时为 App 构筑严密的防泄漏安全屏障。
 * **涉及模块**：`app`（`biometric` 与安全组件）
 * **核心任务清单**：
   1. **AndroidX Biometric 与硬件 Keystore 集成**：
-     - [ ] 基于 Android Keystore 生成硬件隔离的 AES-256-GCM 封装主密钥（MasterKey）。
-     - [ ] 封装 `BiometricManager`：支持 `BIOMETRIC_STRONG`（Class 3 强生物识别）。
-     - [ ] 生物识别加密凭据（Biometric CryptoObject）：使用生物识别验证结果解封主数据库密钥，实现免输主密码解锁。
-     - [ ] 设备指纹变更检测（`setInvalidatedByBiometricEnrollment(true)`，指纹发生增删时强制作废生物缓存并回退主密码）。
+     - [x] 基于 Android Keystore 生成硬件隔离的 AES-256-GCM 封装主密钥（MasterKey）。
+     - [x] 封装 `BiometricManager`：支持 `BIOMETRIC_STRONG`（Class 3 强生物识别）。
+     - [x] 生物识别加密凭据（Biometric CryptoObject）：使用生物识别验证结果解封主数据库密钥，实现免输主密码解锁。
+     - [x] 设备指纹变更检测（`setInvalidatedByBiometricEnrollment(true)`，指纹发生增删时强制作废生物缓存并回退主密码）。
   2. **防偷窥与系统安全策略（FLAG_SECURE）**：
-     - [ ] 统一在 `MainActivity` 及关键 Compose 路由中根据安全设置动态挂载 `WindowManager.LayoutParams.FLAG_SECURE`。
-     - [ ] 阻止多任务卡片预览、系统截屏与投屏捕获敏感密码数据。
+     - [x] 统一在 `MainActivity` 及关键 Compose 路由中根据安全设置动态挂载 `WindowManager.LayoutParams.FLAG_SECURE`。
+     - [x] 阻止多任务卡片预览、系统截屏与投屏捕获敏感密码数据。
   3. **剪贴板安全生命周期**：
-     - [ ] 适配 Android 13+ 剪贴板标记：写入敏感字段时附加 `ClipDescription.EXTRA_IS_SENSITIVE = true`，遮蔽系统浮动预览。
-     - [ ] 剪贴板超时自动清空调度器：默认 30 秒（可在安全设置中自定义），超时后若剪贴板内容未被覆盖，自动物理置空。
+     - [x] 适配 Android 13+ 剪贴板标记：写入敏感字段时附加 `ClipDescription.EXTRA_IS_SENSITIVE = true`，遮蔽系统浮动预览。
+     - [x] 剪贴板超时自动清空调度器：默认 30 秒（可在安全设置中自定义），超时后若剪贴板内容未被覆盖，自动物理置空。
   4. **自动锁定（Auto-Lock）熔断机制**：
-     - [ ] 监听应用退至后台事件（`ProcessLifecycleOwner`）。
-     - [ ] 监听设备锁屏广播（`Intent.ACTION_SCREEN_OFF`）。
-     - [ ] 超时熔断：后台超过指定阈值或屏幕熄灭时，立刻触发内存密钥销毁并重定向至 `UnlockScreen`。
+     - [x] 监听应用退至后台事件（`ProcessLifecycleOwner`）。
+     - [x] 监听设备锁屏广播（`Intent.ACTION_SCREEN_OFF`）。
+     - [x] 超时熔断：后台超过指定阈值或屏幕熄灭时，立刻触发内存密钥销毁并重定向至 `UnlockScreen`。
 * **交付物**：
   * 生产可用的生物识别解锁与错误退化（回退主密码）。
   * 完整的后台安全守卫系统与剪贴板自动擦除器。
@@ -112,6 +112,7 @@
   * 指纹解锁延迟 < 300ms；
   * 退至后台超过设定时间（如 1 分钟）切回时，应用已被彻底锁定，内存中无敏感明文缓存；
   * 多任务切换界面显示白屏或占位黑屏。
+* **验收状态**：**已通过全面验收 ✅**。
 
 ---
 
@@ -251,7 +252,8 @@
 | :---: | :--- | :--- | :---: | :---: |
 | **阶段 1** | UI 优先与交互原型 | `app:ui` | 47+ 文件 | **已完成 ✅** |
 | **阶段 2** | 密码学核心与 KDBX 数据库引擎 | `crypto`, `database`, `core` | 核心引擎 | **已完成 ✅** |
-| **阶段 3** | 生物识别与防御性安全加固 | `app:biometric`, `app:security` | 硬件集成 | **当前重点 🚀** |
+| **阶段 3** | 生物识别与防御性安全加固 | `app:biometric`, `app:security` | 硬件集成 | **已完成 ✅** |
+| **阶段 4** | 通行密钥 (Passkey) 与 Credential Manager | `app:passkey`, `app:autofill` | 系统服务 | **当前重点 🚀** |
 | **阶段 4** | 通行密钥 (Passkey) 与 Credential Manager | `app:passkey`, `app:autofill` | 系统服务 | 待开始 ⏳ |
 | **阶段 5** | 多协议云同步 (WebDAV/S3) 与冲突合并 | `sync` | 网络引擎 | 待开始 ⏳ |
 | **阶段 6** | KeePass 高级特性与全功能工具箱 | `app`, `database` | 功能增强 | 待开始 ⏳ |

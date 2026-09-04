@@ -42,6 +42,14 @@ class FakeSettingsRepository @Inject constructor() : SettingsRepository {
         settingsFlow.update { it.copy(autoLockBackground = enabled) }
     }
 
+    override suspend fun setAutoLockTimeoutSeconds(seconds: Int) {
+        settingsFlow.update { it.copy(autoLockTimeoutSeconds = seconds) }
+    }
+
+    override suspend fun setLockWhenScreenOff(enabled: Boolean) {
+        settingsFlow.update { it.copy(lockWhenScreenOff = enabled) }
+    }
+
     override suspend fun setFlagSecureEnabled(enabled: Boolean) {
         settingsFlow.update { it.copy(flagSecureEnabled = enabled) }
     }
