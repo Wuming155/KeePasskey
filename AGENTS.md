@@ -17,12 +17,14 @@ KeePasskey 是一款使用原生 Kotlin 开发的现代化 Android 密码管理�
 2. **敏感数据铁律**：主密码、密钥用 `CharArray`/`ByteArray` 并显式清零，绝不落地为 `String`，日志严禁敏感明文。
 3. **`参考项目/` 目录只读**：仅作实现思路借鉴，严禁修改或复制其代码入库（许可证约束）。
 4. **工程规则**（单一职责、禁止魔法数字、依赖倒置、错误处理等）详见下方规则文件，写代码前必须遵守。
+5. **阶段交付与版本归档纪律**：严格遵照 `DELIVERY_PLAN.md` 推进；**每完成一个阶段，必须同步更新 `AGENTS.md`（刷新当前状态、已完成内容与下一阶段目标），并立即将阶段成果全部暂存并提交 Git 到本地仓库（`git add` + 语义化 `git commit`）**，确保每个阶段里程碑均具备独立、清晰、可回退的本地 Git 提交历史。
 
 ## 详细文档索引（按需阅读）
 
 | 文件 | 内容 | 何时阅读 |
 |------|------|----------|
 | `.codebuddy/rules/engineering-rules.md` | 工程规则：单一职责与巨型类阈值、魔法数字、依赖倒置与 Hilt 注入、Result 错误处理、敏感数据、Compose 规范、**原子写盘、协程调度约束、Credential Provider 隔离、防御性安全（FLAG_SECURE / 剪贴板 / 混淆）** | **写 / 改任何代码前** |
+| `DELIVERY_PLAN.md` | **完整项目交付规划**：7 大阶段任务、阶段交付物清单、验收门禁（DoD）与全渠道发布标准 | **规划任务、核对阶段与交付时** |
 | `.codebuddy/skills/architecture.md` | 5 模块职责与依赖规则、7 条关键架构决策（加密分离、kdbx 兼容、DatabaseSession、同步模型、passkey 路线、UI 优先），另见 `ARCHITECTURE.md` | 跨模块改动、新增功能落位前 |
 | `.codebuddy/skills/reference-projects.md` | 参考项目地图：各功能应参照哪个项目的哪些文件 | 实现 database / crypto / sync / passkey 功能时 |
 | `.codebuddy/memory/project-status.md` | 版本配套表、项目现状、决策日志、待办 | 升级依赖、了解进度与历史决策时 |
