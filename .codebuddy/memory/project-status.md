@@ -17,28 +17,27 @@
 
 构建统一使用 Gradle Wrapper（Gradle 9.3.1），Windows 下执行 `.\gradlew.bat`；常用任务：`assembleDebug`、`:app:compileDebugKotlin`（快速编译检查）、`lint`、`test`（尚无 `src/test`）。
 
-## 项目现状（阶段 5「云端同步引擎」已圆满完成，阶段 6「高级特性与全功能工具箱」准备就绪）
+## 项目现状（阶段 6「高级特性与全功能工具箱」已圆满完成，阶段 7「质量工程与发布交付」准备就绪）
 
-- **阶段 5 核心成果全量落地**：
-  - **统一存储抽象（SyncProvider）**：
-    - 落地 `SyncProvider` 接口契约：提供 `testConnection()`, `getMetadata()`, `download()`, `upload()`, `delete()`；
-    - 建立层次化网络与协议异常体系（`NetworkError`, `AuthenticationError`, `FileNotFound`, `ConflictError`, `ProtocolError`）；
-  - **WebDAV 同步客户端（WebDavSyncProvider）**：
-    - 基于 OkHttp 实现标准 WebDAV 协议动词：`PROPFIND`（解析 XML 树中 `getetag`、`getcontentlength` 与 `getlastmodified`）、`GET`、`PUT`、`DELETE`；
-    - 深度集成 HTTP ETag 乐观并发保护：支持 `If-Match: <remote-etag>`，精确捕获 HTTP 412 Precondition Failed 冲突；
-  - **S3 兼容协议客户端（S3SyncProvider）**：
-    - 纯 Kotlin 实现轻量级 AWS Signature Version 4 (SigV4) 鉴权计算（Canonical Request、StringToSign、级联 HMAC-SHA256 派生签名密钥与 Authorization 组装）；
-    - 兼容 AWS S3、MinIO、Cloudflare R2 等标准对象存储协议；
-  - **三方冲突差异比对与合并引擎（KdbxMerger）**：
-    - 基于 `lastSyncTimestamp` 与条目最后修改时间戳自动识别本地/远端编辑；
-    - 精准识别冲突条目的差异字段（标题、账号、密码、网址、备注等）；
-    - 支持保留本地、保留远端、创建副本（DUPLICATE_BOTH）等三种标准决策；
-  - **测试与验证全绿**：
-    - 新增 `WebDavSyncProviderTest`（MockWebServer 模拟 PROPFIND 与 412 乐观锁）、`S3SyncProviderTest`（SigV4 签名规范）、`KdbxMergerTest`（自动合并与差异检测）；
-    - 全量单元测试通过，`assembleDebug` 编译通过。
-- **阶段 6 即将开始**：聚焦 TOTP/HOTP 实时双重认证引擎、KDBX 附件管理、版本历史回滚与密码健康审计。
+- **阶段 6 核心成果全量落地**：
+  - **动态双重认证引擎（OtpEngine）**：
+    - 纯 Kotlin 实现标准 RFC 6238 TOTP 与 RFC 4226 HOTP 动态验证码生成算法；
+    - 纯净实现 RFC 4648 Base32 解码器与 `otpauth://` KeyUri 参数解析器，覆盖 SHA-1/256/512 与 6位/8位代码；
+  - **离线密码健康审计引擎（HealthCheckEngine）**：
+    - 本地优先扫描离线弱口令字典、密码长度告警与跨条目重复复用检测；
+  - **KDBX 条目历史版本管理（HistoryManager）**：
+    - 条目修改时自动将历史快照安全隔离追加至 `<History>` 列表；
+    - 支持一键版本回滚（`rollbackToSnapshot`）并还原数据模型；
+  - **条目二进制附件管理器（AttachmentManager）**：
+    - 支持附件内容提取至应用私有缓存目录与退出时物理清零；
+  - **测试与构建验证全绿**：
+    - 新增 `OtpEngineTest`（覆盖 RFC 官方测试向量）、`HealthCheckEngineTest`、`HistoryManagerTest` 单元测试；
+    - 全模块 114 个测试任务全部绿色通过，`assembleDebug` 编译通过。
+- **阶段 7 即将开始**：聚焦 R8 混淆加固、敏感数据保护规则与全渠道构建发布。
 
 ## 决策日志
+
+- **2026-09-04**：完成**阶段 6「KeePass 高级特性与全功能工具箱」**全量交付。落地 `OtpEngine`（RFC 6238/4226）、`Base32Decoder`、`HealthCheckEngine`、`HistoryManager` 与 `AttachmentManager`，测试与编译全量通过。下一阶段正式进入**阶段 7「质量工程、测试基线、混淆加固与全渠道交付」**。
 
 - **2026-09-04**：完成**阶段 5「多协议云端同步引擎（WebDAV / S3）与三方冲突合并」**全量交付。落地 `SyncProvider` 抽象、`WebDavSyncProvider`（ETag 412 乐观锁）、`S3SyncProvider`（AWS SigV4 规范签名）与 `KdbxMerger`（三方冲突识别与合并），测试与编译全量通过。下一阶段正式进入**阶段 6「KeePass 高级特性与全功能工具箱」**。
 

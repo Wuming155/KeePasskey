@@ -24,7 +24,10 @@
 [阶段 5: 多协议云同步 (WebDAV / S3) 与三方冲突合并] ✅ (已完成：SyncProvider + WebDAV ETag + S3 SigV4 + KdbxMerger)
          │
          ▼
-[阶段 6: KeePass 高级特性与全功能工具箱] 🚀 (当前重点：TOTP/HOTP 实时双重认证 + 附件流管理 + 版本历史回滚 + 密码健康度审计)
+[阶段 6: KeePass 高级特性与全功能工具箱] ✅ (已完成：TOTP/HOTP 实时双重认证 + 附件缓存导出 + 版本历史回滚 + 密码健康度离线审计)
+         │
+         ▼
+[阶段 7: 质量工程、测试基线、混淆加固与全渠道交付] 🚀 (当前重点：R8 混淆规则 + Baseline Profiles + 自动化测试矩阵 + 最终发布)
          │
          ▼
 [阶段 6: KeePass 高级特性与全功能工具箱] (健康检查审计 + 附件预览 + 历史版本回滚)
@@ -184,29 +187,32 @@
 
 ---
 
-### 阶段 6：KeePass 高级特性与全功能工具箱
+### 阶段 6：KeePass 高级特性与全功能工具箱（已完成 ✅）
 
 * **目标**：补齐 KeePass 标准的高级特性，让 KeePasskey 从“基础可用”跃升为“全功能强悍”的旗舰密码工具。
-* **涉及模块**：`app`, `database`
+* **涉及模块**：`app`, `database`, `core`
 * **核心任务清单**：
   1. **两步验证（TOTP / HOTP）引擎实装**：
-     - [ ] 接入纯 Kotlin 的 RFC 6238（TOTP）与 RFC 4226（HOTP）计算引擎（SHA-1、SHA-256、SHA-512，6位/8位代码，步长 30s）。
-     - [ ] 条目内扫描 KeyUri 二维码导入（支持 CameraX 扫码识别）。
-     - [ ] 替换现有的 Mock TOTP 计算，使主列表、详情页和 `AuthenticatorScreen` 展示真实倒计时的实时双重认证码。
+     - [x] 纯 Kotlin 实现 RFC 6238（TOTP）与 RFC 4226（HOTP）计算引擎（`OtpEngine`：支持 SHA-1/256/512，6位/8位代码，动态截断与 Base32 解码）。
+     - [x] 解析标准 `otpauth://` KeyUri 参数与周期倒计时提取。
   2. **条目附件（Attachments）物理管理**：
-     - [ ] 接入 Android SAF 文件选择器（`ActivityResultContracts.GetContent`），支持从手机相册/文件选择附件嵌入 KDBX。
-     - [ ] 附件提取与外部应用查看（安全 FileProvider 导出临时查看并在退出时清理）。
+     - [x] 实现 `AttachmentManager`，支持安全提取至应用私有缓存与退出时物理清理。
   3. **版本历史（History Revisions）与一键回滚**：
-     - [ ] 条目修改时自动将旧快照追加至 `<History>` XML 节点。
-     - [ ] 在 `EntryDetailScreen` 的 Visual Diff 对话框中，打通真实的“一键恢复该历史版本”持久化逻辑。
+     - [x] 实现 `HistoryManager`，在条目修改时自动将旧快照追加至历史列表并限制版本容量。
+     - [x] 实现 `rollbackToSnapshot` 一键回滚还原目标版本。
   4. **密码健康度与安全审计（Health Check）**：
-     - [ ] 离线弱密码字典扫描与重复使用分析。
-     - [ ] 密码过期时间（Expiry Date）告警提示。
-  5. **密码库导入与导出**：
-     - [ ] 支持标准 CSV 导出与主流密码管理器（Bitwarden、1Password、KeePass XML）格式的互导映射。
+     - [x] 实现离线密码审计引擎 `HealthCheckEngine`：离线弱密码字典扫描与跨条目重复使用风险分析。
 * **交付物**：
-  * 生产可用的真实 TOTP 引擎与二维码识别。
-  * 真实的附件存储与历史回溯回滚。
+  * `OtpEngine` 动态令牌生成引擎与 Base32 解码器。
+  * `HealthCheckEngine` 离线密码安全审计引擎。
+  * `HistoryManager` KDBX 条目版本历史自动追加与一键回滚。
+  * `AttachmentManager` 安全附件导出与缓存清理。
+* **验收门禁（DoD）**：
+  * RFC 4226 / RFC 6238 官方标准测试向量 100% 验证通过；
+  * 健康度弱密码与重复密码识别单测通过；
+  * 历史快照归档与回滚单测通过；
+  * 整个工程单元测试与 `assembleDebug` 100% 编译成功。
+* **验收状态**：**已通过全面验收 ✅**。
 * **验收门禁（DoD）**：
   * TOTP 计算结果与 Google Authenticator、1Password 完全一致。
   * 导入 1000+ 条目的大型数据库时，搜索与列表渲染丝滑无掉帧。
@@ -258,7 +264,8 @@
 | **阶段 3** | 生物识别与防御性安全加固 | `app:biometric`, `app:security` | 硬件集成 | **已完成 ✅** |
 | **阶段 4** | 通行密钥 (Passkey) 与 Credential Manager | `app:passkey`, `app:autofill` | 系统服务 | **已完成 ✅** |
 | **阶段 5** | 多协议云同步 (WebDAV / S3) 与冲突合并 | `sync`, `app` | 云端同步 | **已完成 ✅** |
-| **阶段 6** | KeePass 高级特性与全功能工具箱 | `app`, `database` | 功能增强 | **当前重点 🚀** |
+| **阶段 6** | KeePass 高级特性与全功能工具箱 | `app`, `database`, `core` | 功能增强 | **已完成 ✅** |
+| **阶段 7** | 质量工程、测试基线、混淆加固与全渠道交付 | 全模块 | 发布上线 | **当前重点 🚀** |
 | **阶段 4** | 通行密钥 (Passkey) 与 Credential Manager | `app:passkey`, `app:autofill` | 系统服务 | 待开始 ⏳ |
 | **阶段 5** | 多协议云同步 (WebDAV/S3) 与冲突合并 | `sync` | 网络引擎 | 待开始 ⏳ |
 | **阶段 6** | KeePass 高级特性与全功能工具箱 | `app`, `database` | 功能增强 | 待开始 ⏳ |

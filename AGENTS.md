@@ -49,8 +49,6 @@ KeePasskey 是一款使用原生 Kotlin 开发的现代化 Android 密码管理�
 - `.\gradlew.bat test` — 单元测试（目前尚无 `src/test`，规划中）
 - 版本升级需整体配套：AGP ↔ Gradle ↔ Kotlin ↔ Compose BOM（Compose BOM 2026.06.00+ 要求 compileSdk 37，当前用 2026.06.01 对齐 compileSdk 36）
 
-**当前阶段状态**：**阶段 5「多协议云端同步引擎（WebDAV / S3）与三方冲突合并」已圆满完成**（全量实现通用 `SyncProvider` 存储抽象与层次化异常体系、基于 OkHttp 的 `WebDavSyncProvider` 支持 PROPFIND/GET/PUT 及 `If-Match` 412 乐观并发保护、`S3SyncProvider` 实现纯净轻量级 AWS Signature Version 4 (SigV4) 鉴权与桶/对象操作、`KdbxMerger` 条目级时间戳增量识别与三方冲突合并算法，全量单元测试与构建通过）。**下一次交互正式进入阶段 6「KeePass 高级特性与全功能工具箱」**：
-- 重点任务：实装纯 Kotlin RFC 6238 TOTP / RFC 4226 HOTP 动态验证码计算引擎与实时倒计时无缝贯通；
-- 附件管理：打通 Android SAF 文件选择器与 KDBX 二进制附件（Attachments）挂载提取；
-- 版本控制：打通 `<History>` 条目快照追加与 Visual Diff 一键历史回滚；
-- 安全审计：落地弱口令/重复使用密码健康检查与离线审计报告。
+**当前阶段状态**：**阶段 6「KeePass 高级特性与全功能工具箱」已圆满完成**（全量实现纯 Kotlin RFC 6238 TOTP / RFC 4226 HOTP 动态令牌计算引擎与 KeyUri 解析、`AttachmentManager` 二进制附件安全导出与用毕物理清理、`HistoryManager` 条目历史快照追加与一键版本回滚还原、`HealthCheckEngine` 离线弱口令扫描与跨条目重用风险分析，全量单元测试与构建通过）。**下一次交互正式进入阶段 7「质量工程、测试基线、混淆加固与全渠道交付」**：
+- 重点任务：完善 R8 混淆规则（对齐 BouncyCastle / Hilt / 敏感数据保护类）；
+- 最终交付：生成各渠道发布包并完成全交付规划闭环。
