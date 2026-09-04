@@ -1,4 +1,199 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">KeePasskey</string>
+
+    <!-- 通用按钮与动作 -->
+    <string name="btn_cancel">取消</string>
+    <string name="btn_confirm">确定</string>
+    <string name="btn_save">保存</string>
+    <string name="btn_delete">删除</string>
+    <string name="btn_edit">编辑</string>
+    <string name="btn_close">关闭</string>
+    <string name="btn_discard">丢弃</string>
+    <string name="btn_continue_edit">继续编辑</string>
+    <string name="btn_copy">复制</string>
+    <string name="btn_restore">还原</string>
+    <string name="btn_empty">清空</string>
+    <string name="btn_select">选择</string>
+    <string name="btn_create">创建</string>
+    <string name="btn_add">添加</string>
+    <string name="btn_open">打开</string>
+    <string name="btn_back">返回</string>
+    <string name="btn_more">更多</string>
+
+    <!-- 底部导航 -->
+    <string name="nav_vault">密码库</string>
+    <string name="nav_settings">设置</string>
+
+    <!-- 无障碍描述 -->
+    <string name="cd_back">返回</string>
+    <string name="cd_save">保存</string>
+    <string name="cd_edit">编辑</string>
+    <string name="cd_favorite">收藏</string>
+    <string name="cd_hide_password">隐藏密码</string>
+    <string name="cd_show_password">显示密码</string>
+    <string name="cd_toggle_password_visibility">密码显示与隐藏</string>
+    <string name="cd_copy_username">复制用户名</string>
+    <string name="cd_copy_password">复制密码</string>
+    <string name="cd_vault_locked">密码库已锁定</string>
+    <string name="cd_active_database">当前数据库状态</string>
+    <string name="cd_keyfile">密钥文件</string>
+    <string name="cd_biometric">生物识别解锁</string>
+    <string name="cd_search">搜索</string>
+    <string name="cd_clear_search">清空搜索</string>
+    <string name="cd_sort">排序</string>
+    <string name="cd_create">新建</string>
+    <string name="cd_navigate_up">返回上一级</string>
+    <string name="cd_enter_group">进入文件夹</string>
+    <string name="cd_copy_totp">复制动态验证码</string>
+    <string name="cd_passkey">通行密钥</string>
+    <string name="cd_password_generator">密码生成器</string>
+    <string name="cd_scan_qr">扫码</string>
+    <string name="cd_regenerate">重新生成</string>
+
+    <!-- 解锁页面 -->
+    <string name="unlock_title">KeePasskey</string>
+    <string name="unlock_subtitle">密码库已锁定 • KDBX v4 (Argon2d + AES-256)</string>
+    <string name="unlock_master_password">主密码 (Master Password)</string>
+    <string name="unlock_master_password_hint">输入主密码以解锁</string>
+    <string name="unlock_keyfile">密钥文件</string>
+    <string name="unlock_keyfile_selected">已加载密钥文件: %1$s</string>
+    <string name="unlock_keyfile_none">未关联密钥文件 (可选)</string>
+    <string name="unlock_btn_unlock">解 锁 密 码 库</string>
+    <string name="unlock_btn_biometric">使用系统指纹或面容快速解锁</string>
+    <string name="unlock_switch_vault">切换密码库</string>
+    <string name="unlock_status_local">本地已加密存储 • 关联 WebDAV 云端备份</string>
+
+    <!-- 密码库管理器 / 选择器 -->
+    <string name="db_picker_title">密码库管理</string>
+    <string name="db_picker_subtitle">管理并切换本地存储或云端同步的 KDBX 密码库</string>
+    <string name="db_picker_current_active">当前激活</string>
+    <string name="db_picker_open_external">打开外部 KDBX 文件</string>
+    <string name="db_picker_create_new">新建密码库</string>
+    <string name="db_picker_create_title">新建密码库向导</string>
+    <string name="db_picker_vault_name">密码库名称</string>
+    <string name="db_picker_vault_name_hint">例如：my_passwords.kdbx</string>
+    <string name="db_picker_new_pwd">设置主密码</string>
+    <string name="db_picker_confirm_pwd">确认主密码</string>
+    <string name="db_picker_pwd_mismatch">两次输入的密码不一致</string>
+    <string name="db_picker_use_keyfile">同时生成附属密钥文件 (.key)</string>
+    <string name="db_picker_encryption_preset">加密算法与 KDF</string>
+    <string name="db_picker_delete_confirm_title">移除密码库关联？</string>
+    <string name="db_picker_delete_confirm_desc">这只会从本机的密码库切换列表中移除该条目，不会删除物理文件。</string>
+    <string name="db_picker_opened_external_toast">已成功导入并载入外部数据库</string>
+    <string name="db_picker_created_toast">新密码库已成功创建并设为当前活动库</string>
+
+    <!-- 密码库列表页面 -->
+    <string name="vault_search_hint">搜索凭据、通行密钥或文件夹...</string>
+    <string name="vault_sort_default">默认顺序</string>
+    <string name="vault_sort_name">按名称排序</string>
+    <string name="vault_sort_date">按日期排序</string>
+    <string name="vault_sort_modified">按修改日期排序</string>
+    <string name="vault_sort_created">按创建日期排序</string>
+    <string name="vault_current_sort">当前排序：%1$s</string>
+    <string name="vault_reset_sort">恢复默认</string>
+    <string name="vault_root_dir">根目录</string>
+    <string name="vault_empty_title">暂无内容</string>
+    <string name="vault_empty_desc">当前目录下没有凭据或文件夹，点击下方新建</string>
+    <string name="vault_new_entry">新建凭据条目</string>
+    <string name="vault_new_folder">新建文件夹</string>
+    <string name="vault_folder_name">文件夹名称</string>
+    <string name="vault_folder_name_hint">例如：工作与生产力</string>
+    <string name="vault_folder_rename">重命名文件夹</string>
+    <string name="vault_folder_change_icon">更换文件夹图标</string>
+    <string name="vault_folder_delete">删除文件夹</string>
+    <string name="vault_folder_delete_desc">删除该文件夹将会一并移除其包含的子项目，确定继续吗？</string>
+    <string name="vault_recycle_bin_title">回收站</string>
+    <string name="vault_recycle_bin_banner">当前处于回收站目录。条目处于归档待清理状态，可随时还原或彻底永久删除。</string>
+    <string name="vault_empty_recycle_bin">清空回收站</string>
+    <string name="vault_empty_recycle_bin_confirm">确定彻底清空回收站内的所有条目吗？此操作不可逆！</string>
+    <string name="vault_entry_restored">凭据条目已成功还原至原目录</string>
+    <string name="vault_entry_purged">条目已从回收站彻底粉碎删除</string>
+
+    <!-- 凭据详情页面 -->
+    <string name="detail_title">凭据详情</string>
+    <string name="detail_btn_open_url">打开网址</string>
+    <string name="detail_btn_copy_user">复制账号</string>
+    <string name="detail_btn_copy_pwd">复制密码</string>
+    <string name="detail_basic_section">基础凭据</string>
+    <string name="detail_username_label">用户名 / 登录邮箱</string>
+    <string name="detail_password_label">密码 (%1$d 字符)</string>
+    <string name="detail_totp_section">二次验证令牌 (TOTP)</string>
+    <string name="detail_totp_code">实时动态验证码</string>
+    <string name="detail_passkey_section">通行密钥凭据 (WebAuthn)</string>
+    <string name="detail_passkey_chip">FIDO2 硬件芯片保护</string>
+    <string name="detail_passkey_rp">关联域名 (RP ID): %1$s</string>
+    <string name="detail_passkey_desc">支持 Android 14+ Credential Manager 免密码生物识别自动校验</string>
+    <string name="detail_custom_fields_section">自定义安全字段</string>
+    <string name="detail_attachments_section">附件与证书文件</string>
+    <string name="detail_attachment_preview">预览</string>
+    <string name="detail_attachment_export">导出到存储</string>
+    <string name="detail_attachment_export_toast">附件 %1$s 已成功导出到系统下载文件夹</string>
+    <string name="detail_history_section">版本修改历史</string>
+    <string name="detail_history_rollback">还原此版本</string>
+    <string name="detail_history_rollback_confirm">确定将当前条目回滚至此历史快照版本吗？</string>
+    <string name="detail_history_rolled_back">已成功还原至历史快照版本</string>
+    <string name="detail_notes_section">备注与元数据</string>
+
+    <!-- 凭据编辑页面 -->
+    <string name="edit_title_new">新建条目</string>
+    <string name="edit_title_edit">编辑条目</string>
+    <string name="edit_category_label">凭据类型</string>
+    <string name="edit_group_label">所属群组 (文件夹)</string>
+    <string name="edit_group_root">根目录 (未分类)</string>
+    <string name="edit_basic_info">基本信息</string>
+    <string name="edit_title_hint">标题 (例如 Google / GitHub)</string>
+    <string name="edit_url_hint">网址 URL (https://...)</string>
+    <string name="edit_account_pwd">账户与密码</string>
+    <string name="edit_username_hint">用户名 / 邮箱 / 账号</string>
+    <string name="edit_password_hint">密码</string>
+    <string name="edit_generator_title">密码生成器 (长度: %1$d)</string>
+    <string name="edit_totp_section">二次验证令牌 (TOTP)</string>
+    <string name="edit_totp_hint">TOTP 密钥 (Secret Key / Base32)</string>
+    <string name="edit_passkey_section">通行密钥 (Passkey / WebAuthn)</string>
+    <string name="edit_passkey_bind">绑定</string>
+    <string name="edit_passkey_unbind">解除</string>
+    <string name="edit_passkey_has_bound">已绑定 Passkey 硬件凭据</string>
+    <string name="edit_passkey_create">为此网站创建 Passkey</string>
+    <string name="edit_passkey_desc">基于 Android 14+ 凭据管理器，支持端到端公私钥验证</string>
+    <string name="edit_custom_fields">自定义字段 (键值对)</string>
+    <string name="edit_add_field">+ 添加自定义字段</string>
+    <string name="edit_field_key">字段名称 (如 PIN码、安全问题)</string>
+    <string name="edit_field_value">字段内容</string>
+    <string name="edit_field_protected">受密码保护 (掩码遮蔽)</string>
+    <string name="edit_attachments">附件文件管理</string>
+    <string name="edit_add_attachment">+ 添加附件文件</string>
+    <string name="edit_notes">备注与自定义字段</string>
+    <string name="edit_notes_hint">条目备注信息 (可选)</string>
+    <string name="edit_save_btn">保 存 凭 据</string>
+    <string name="edit_discard_title">丢弃未保存的更改？</string>
+    <string name="edit_discard_desc">当前条目的修改尚未保存，离开后本次输入将全部丢失。</string>
+
+    <!-- 图标选择器 -->
+    <string name="icon_picker_title">选择图标</string>
+
+    <!-- 设置相关 -->
+    <string name="settings_title">设置</string>
+    <string name="settings_cat_storage">密码库与存储</string>
+    <string name="settings_database">密码库与加密</string>
+    <string name="settings_database_sub">KDBX 4.1 · Argon2id · 加密参数与回收站</string>
+    <string name="settings_sync">云端同步</string>
+    <string name="settings_sync_sub">WebDAV、兼容 S3 存储多协议自动同步</string>
+    <string name="settings_change_master_key">更改主密钥</string>
+    <string name="settings_change_master_key_sub">重设密码库主密码与安全派生凭据</string>
+    <string name="settings_cat_security">安全与审计</string>
+    <string name="settings_security">设备解锁与安全策略</string>
+    <string name="settings_security_sub">生物识别、后台自动锁定、防截屏录屏</string>
+    <string name="settings_health">健康度检查与审计</string>
+    <string name="settings_health_sub">弱密码、密码复用、数据泄露比对</string>
+    <string name="settings_cat_preferences">体验与集成</string>
+    <string name="settings_autofill">自动填充与 Passkey</string>
+    <string name="settings_autofill_sub">系统凭据提供者、通行密钥、剪贴板保护</string>
+    <string name="settings_theme">外观与主题</string>
+    <string name="settings_theme_sub">深浅色主题、语言偏好、列表视图设置</string>
+    <string name="settings_about">关于 KeePasskey</string>
+    <string name="settings_language">界面语言</string>
+    <string name="settings_lang_system">跟随系统</string>
+    <string name="settings_lang_zh">简体中文</string>
+    <string name="settings_lang_en">English</string>
 </resources>

@@ -36,6 +36,7 @@ val LocalThemeMode = compositionLocalOf { AppThemeMode.SYSTEM }
 @Composable
 fun KeePasskeyTheme(
     themeMode: AppThemeMode = AppThemeMode.SYSTEM,
+    oledBlack: Boolean = false,
     content: @Composable () -> Unit
 ) {
     val darkTheme = when (themeMode) {
@@ -44,7 +45,11 @@ fun KeePasskeyTheme(
         AppThemeMode.SYSTEM -> isSystemInDarkTheme()
     }
 
-    val colorScheme = if (darkTheme) DarkColorScheme else LightColorScheme
+    val colorScheme = if (darkTheme) {
+        if (oledBlack) OledDarkColorScheme else DarkColorScheme
+    } else {
+        LightColorScheme
+    }
 
     val securityColors = if (darkTheme) {
         SecurityColors(

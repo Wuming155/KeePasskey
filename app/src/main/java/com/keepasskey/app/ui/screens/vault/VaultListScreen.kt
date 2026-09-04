@@ -2,8 +2,6 @@ package com.keepasskey.app.ui.screens.vault
 
 import android.content.res.Configuration
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -33,18 +31,28 @@ import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.CreditCard
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DeleteForever
+import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PersonOutline
+import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SearchOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
@@ -72,6 +80,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
@@ -79,9 +88,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.keepasskey.app.data.repository.FakeVaultRepository
+import com.keepasskey.app.R
+import com.keepasskey.app.ui.components.IconPickerDialog
 import com.keepasskey.app.ui.components.PasskeyBadge
 import com.keepasskey.app.ui.components.TotpMiniGauge
+import com.keepasskey.app.ui.components.getVaultIcon
 import com.keepasskey.app.ui.model.EntryCategory
 import com.keepasskey.app.ui.model.UiVaultEntry
 import com.keepasskey.app.ui.model.VaultGroup
@@ -89,9 +100,6 @@ import com.keepasskey.app.ui.theme.AppThemeMode
 import com.keepasskey.app.ui.theme.CapsuleShape
 import com.keepasskey.app.ui.theme.KeePasskeyTheme
 
-/**
- * 有状态主密码库列表路由（Route），遵循谷歌 MVVM 架构
- */
 @Composable
 fun VaultListScreen(
     currentTheme: AppThemeMode = AppThemeMode.SYSTEM,
@@ -125,13 +133,16 @@ fun VaultListScreen(
         onCopyUsername = viewModel::copyUsername,
         onAddEntryClick = { onAddEntryClick(uiState.currentGroupId) },
         onCreateGroup = viewModel::createGroup,
+        onRenameGroup = viewModel::renameGroup,
+        onChangeGroupIcon = viewModel::changeGroupIcon,
+        onDeleteGroup = viewModel::deleteGroup,
+        onRestoreEntry = viewModel::restoreEntry,
+        onPurgeEntry = viewModel::purgeEntry,
+        onEmptyRecycleBin = viewModel::emptyRecycleBin,
         modifier = modifier
     )
 }
 
-/**
- * 无状态主密码库展示组件
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun VaultListContent(
@@ -146,12 +157,24 @@ fun VaultListContent(
     onCopyPassword: (UiVaultEntry) -> Unit,
     onCopyUsername: (UiVaultEntry) -> Unit,
     onAddEntryClick: () -> Unit,
-    onCreateGroup: (name: String) -> Unit,
+    onCreateGroup: (name: String, icon: String) -> Unit,
+    onRenameGroup: (VaultGroup, String) -> Unit,
+    onChangeGroupIcon: (VaultGroup, String) -> Unit,
+    onDeleteGroup: (String) -> Unit,
+    onRestoreEntry: (String) -> Unit,
+    onPurgeEntry: (String) -> Unit,
+    onEmptyRecycleBin: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     var showSortDialog by remember { mutableStateOf(false) }
     var showCreateTypeSheet by remember { mutableStateOf(false) }
     var showCreateGroupDialog by remember { mutableStateOf(false) }
+    var showEmptyRecycleBinDialog by remember { mutableStateOf(false) }
+
+    // 文件夹上下文操作状态
+    var groupToRename by remember { mutableStateOf<VaultGroup?>(null) }
+    var groupToChangeIcon by remember { mutableStateOf<VaultGroup?>(null) }
+    var groupToDelete by remember { mutableStateOf<VaultGroup?>(null) }
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -165,14 +188,14 @@ fun VaultListContent(
                         onValueChange = onSearchQueryChange,
                         placeholder = {
                             Text(
-                                text = "搜索凭据、通行密钥或文件夹...",
+                                text = stringResource(R.string.vault_search_hint),
                                 style = MaterialTheme.typography.bodyMedium
                             )
                         },
                         leadingIcon = {
                             Icon(
                                 imageVector = Icons.Default.Search,
-                                contentDescription = "搜索",
+                                contentDescription = stringResource(R.string.cd_search),
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.size(20.dp)
                             )
@@ -182,7 +205,7 @@ fun VaultListContent(
                                 IconButton(onClick = { onSearchQueryChange("") }) {
                                     Icon(
                                         imageVector = Icons.Default.Clear,
-                                        contentDescription = "清空搜索",
+                                        contentDescription = stringResource(R.string.cd_clear_search),
                                         modifier = Modifier.size(18.dp)
                                     )
                                 }
@@ -202,12 +225,22 @@ fun VaultListContent(
                     )
                 },
                 actions = {
-                    IconButton(onClick = { showSortDialog = true }) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.Sort,
-                            contentDescription = "排序",
-                            tint = if (uiState.sortOption != VaultSortOption.DEFAULT) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                    if (uiState.isInsideRecycleBin) {
+                        IconButton(onClick = { showEmptyRecycleBinDialog = true }) {
+                            Icon(
+                                imageVector = Icons.Default.DeleteSweep,
+                                contentDescription = stringResource(R.string.vault_empty_recycle_bin),
+                                tint = MaterialTheme.colorScheme.error
+                            )
+                        }
+                    } else {
+                        IconButton(onClick = { showSortDialog = true }) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.Sort,
+                                contentDescription = stringResource(R.string.cd_sort),
+                                tint = if (uiState.sortOption != VaultSortOption.DEFAULT) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -216,14 +249,16 @@ fun VaultListContent(
             )
         },
         floatingActionButton = {
-            ExtendedFloatingActionButton(
-                onClick = { showCreateTypeSheet = true },
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary,
-                shape = CapsuleShape,
-                icon = { Icon(Icons.Default.Add, contentDescription = "新建") },
-                text = { Text("新建", fontWeight = FontWeight.SemiBold) }
-            )
+            if (!uiState.isInsideRecycleBin) {
+                ExtendedFloatingActionButton(
+                    onClick = { showCreateTypeSheet = true },
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                    shape = CapsuleShape,
+                    icon = { Icon(Icons.Default.Add, contentDescription = stringResource(R.string.cd_create)) },
+                    text = { Text(stringResource(R.string.btn_create), fontWeight = FontWeight.SemiBold) }
+                )
+            }
         }
     ) { innerPadding ->
         LazyColumn(
@@ -233,7 +268,7 @@ fun VaultListContent(
             contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            // 1. 面包屑路径导航（进入子文件夹时展示）
+            // 1. 面包屑路径导航
             if (uiState.breadcrumbs.isNotEmpty() && uiState.searchQuery.isBlank()) {
                 item {
                     Surface(
@@ -247,13 +282,10 @@ fun VaultListContent(
                                 .padding(horizontal = 8.dp, vertical = 6.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            IconButton(
-                                onClick = onNavigateUp,
-                                modifier = Modifier.size(32.dp)
-                            ) {
+                            IconButton(onClick = onNavigateUp) {
                                 Icon(
                                     imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                    contentDescription = "返回上一级",
+                                    contentDescription = stringResource(R.string.cd_navigate_up),
                                     tint = MaterialTheme.colorScheme.primary,
                                     modifier = Modifier.size(18.dp)
                                 )
@@ -265,13 +297,13 @@ fun VaultListContent(
                             ) {
                                 item {
                                     Text(
-                                        text = "根目录",
+                                        text = stringResource(R.string.vault_root_dir),
                                         style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Medium),
                                         color = MaterialTheme.colorScheme.primary,
                                         modifier = Modifier
                                             .clip(CircleShape)
                                             .clickable { onNavigateToBreadcrumb(null) }
-                                            .padding(horizontal = 6.dp, vertical = 4.dp)
+                                            .padding(horizontal = 8.dp, vertical = 12.dp)
                                     )
                                 }
                                 items(uiState.breadcrumbs) { grp ->
@@ -291,7 +323,7 @@ fun VaultListContent(
                                         modifier = Modifier
                                             .clip(CircleShape)
                                             .clickable { onNavigateToBreadcrumb(grp.id) }
-                                            .padding(horizontal = 6.dp, vertical = 4.dp)
+                                            .padding(horizontal = 8.dp, vertical = 12.dp)
                                     )
                                 }
                             }
@@ -300,50 +332,87 @@ fun VaultListContent(
                 }
             }
 
+            // 回收站专属警示横幅
+            if (uiState.isInsideRecycleBin) {
+                item {
+                    Surface(
+                        color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Delete,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.error
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text(
+                                text = stringResource(R.string.vault_recycle_bin_banner),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                        }
+                    }
+                }
+            }
+
             // 2. 当前非默认排序状态轻量提示
-            if (uiState.sortOption != VaultSortOption.DEFAULT) {
+            if (uiState.sortOption != VaultSortOption.DEFAULT && !uiState.isInsideRecycleBin) {
                 item {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(8.dp))
                             .background(MaterialTheme.colorScheme.surfaceContainerLow)
-                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                            .padding(horizontal = 12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Text(
-                            text = "当前排序：${uiState.sortOption.label}",
+                            text = stringResource(R.string.vault_current_sort, uiState.sortOption.label),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.primary
                         )
                         Text(
-                            text = "恢复默认",
+                            text = stringResource(R.string.vault_reset_sort),
                             style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
                             color = MaterialTheme.colorScheme.primary,
                             modifier = Modifier
                                 .clickable { onSortOptionSelect(VaultSortOption.DEFAULT) }
-                                .padding(4.dp)
+                                .padding(horizontal = 12.dp, vertical = 12.dp)
                         )
                     }
                 }
             }
 
-            // 3. 文件夹列表（默认不显示“文件夹”标签，文件夹始终排在条目之前）
+            // 3. 文件夹列表
             items(uiState.currentGroups, key = { "group_${it.id}" }) { group ->
                 KeePassGroupRow(
                     group = group,
-                    onClick = { onGroupClick(group.id) }
+                    onClick = { onGroupClick(group.id) },
+                    onRename = { groupToRename = group },
+                    onChangeIcon = { groupToChangeIcon = group },
+                    onDelete = { groupToDelete = group }
                 )
             }
 
-            // 4. 凭据列表（默认不显示“凭据”标签）
+            // 4. 凭据列表
             items(uiState.entries, key = { it.id }) { entry ->
                 KeePassEntryRow(
                     entry = entry,
+                    isRecycled = uiState.isInsideRecycleBin,
+                    showUsername = uiState.showUsernameInList,
+                    showOtp = uiState.showOtpInList,
+                    showPasskeyBadge = uiState.showPasskeyBadge,
                     onClick = { onEntryClick(entry.id) },
                     onCopyPassword = { onCopyPassword(entry) },
-                    onCopyUsername = { onCopyUsername(entry) }
+                    onCopyUsername = { onCopyUsername(entry) },
+                    onRestore = { onRestoreEntry(entry.id) },
+                    onPurge = { onPurgeEntry(entry.id) }
                 )
             }
 
@@ -365,7 +434,8 @@ fun VaultListContent(
                             )
                             Spacer(modifier = Modifier.height(12.dp))
                             Text(
-                                text = if (uiState.searchQuery.isNotBlank()) "未找到匹配凭据或文件夹" else "当前文件夹为空",
+                                text = if (uiState.searchQuery.isNotBlank()) stringResource(R.string.vault_empty_title)
+                                else stringResource(R.string.vault_empty_desc),
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -380,13 +450,13 @@ fun VaultListContent(
         }
     }
 
-    // 屏幕中央弹出的模态排序窗口
+    // 模态排序窗口
     if (showSortDialog) {
         AlertDialog(
             onDismissRequest = { showSortDialog = false },
             title = {
                 Text(
-                    text = "排序方式",
+                    text = stringResource(R.string.cd_sort),
                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                 )
             },
@@ -426,13 +496,13 @@ fun VaultListContent(
             },
             confirmButton = {
                 TextButton(onClick = { showSortDialog = false }) {
-                    Text("取消")
+                    Text(stringResource(R.string.btn_cancel))
                 }
             }
         )
     }
 
-    // 底部浮层：选择新建类型（条目 vs 群组/文件夹）
+    // 底部浮层：选择新建类型
     if (showCreateTypeSheet) {
         ModalBottomSheet(
             onDismissRequest = { showCreateTypeSheet = false },
@@ -448,15 +518,12 @@ fun VaultListContent(
             ) {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(
-                        text = "新建",
+                        text = stringResource(R.string.cd_create),
                         style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
-                        text = if (uiState.breadcrumbs.isNotEmpty())
-                            "当前位置：${uiState.breadcrumbs.last().name}"
-                        else
-                            "当前位置：根目录",
+                        text = if (uiState.breadcrumbs.isNotEmpty()) "当前位置：${uiState.breadcrumbs.last().name}" else "当前位置：根目录",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -470,48 +537,24 @@ fun VaultListContent(
                     },
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceContainerLow
-                    )
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
                 ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
+                    Row(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                         Box(
-                            modifier = Modifier
-                                .size(44.dp)
-                                .clip(CircleShape)
-                                .background(MaterialTheme.colorScheme.primaryContainer),
+                            modifier = Modifier.size(44.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primaryContainer),
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Key,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                modifier = Modifier.size(24.dp)
-                            )
+                            Icon(Icons.Default.Key, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
                         }
                         Spacer(modifier = Modifier.width(16.dp))
                         Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "条目",
-                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(
-                                text = "账号密码、Passkey 通行密钥、安全笔记等凭据",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                            Text(stringResource(R.string.vault_new_entry), style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
+                            Text("账号密码、Passkey 通行密钥等凭据", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                 }
 
-                // 选项 2：新建群组
+                // 选项 2：新建群组/文件夹
                 Card(
                     onClick = {
                         showCreateTypeSheet = false
@@ -519,43 +562,19 @@ fun VaultListContent(
                     },
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceContainerLow
-                    )
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
                 ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
+                    Row(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                         Box(
-                            modifier = Modifier
-                                .size(44.dp)
-                                .clip(CircleShape)
-                                .background(MaterialTheme.colorScheme.secondaryContainer),
+                            modifier = Modifier.size(44.dp).clip(CircleShape).background(MaterialTheme.colorScheme.secondaryContainer),
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.CreateNewFolder,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSecondaryContainer,
-                                modifier = Modifier.size(24.dp)
-                            )
+                            Icon(Icons.Default.CreateNewFolder, contentDescription = null, tint = MaterialTheme.colorScheme.onSecondaryContainer, modifier = Modifier.size(24.dp))
                         }
                         Spacer(modifier = Modifier.width(16.dp))
                         Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "群组 (文件夹)",
-                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(
-                                text = "创建分类文件夹，层级化整理与管理密码条目",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                            Text(stringResource(R.string.vault_new_folder), style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
+                            Text("创建分类文件夹，层级化整理密码条目", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                 }
@@ -563,36 +582,133 @@ fun VaultListContent(
         }
     }
 
-    // 新建群组 (文件夹) 弹窗
+    // 新建群组对话框
     if (showCreateGroupDialog) {
         CreateGroupDialog(
             parentGroupName = uiState.breadcrumbs.lastOrNull()?.name,
             onDismiss = { showCreateGroupDialog = false },
-            onConfirm = { name ->
-                onCreateGroup(name)
+            onConfirm = { name, icon ->
+                onCreateGroup(name, icon)
                 showCreateGroupDialog = false
+            }
+        )
+    }
+
+    // 重命名文件夹对话框
+    groupToRename?.let { grp ->
+        var newName by remember { mutableStateOf(grp.name) }
+        AlertDialog(
+            onDismissRequest = { groupToRename = null },
+            title = { Text(stringResource(R.string.vault_folder_rename)) },
+            text = {
+                OutlinedTextField(
+                    value = newName,
+                    onValueChange = { newName = it },
+                    label = { Text(stringResource(R.string.vault_folder_name)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (newName.isNotBlank()) {
+                            onRenameGroup(grp, newName)
+                            groupToRename = null
+                        }
+                    },
+                    shape = CapsuleShape
+                ) {
+                    Text(stringResource(R.string.btn_save))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { groupToRename = null }) {
+                    Text(stringResource(R.string.btn_cancel))
+                }
+            }
+        )
+    }
+
+    // 更换文件夹图标对话框
+    groupToChangeIcon?.let { grp ->
+        IconPickerDialog(
+            selectedIconName = grp.iconName,
+            onSelectIcon = { newIcon ->
+                onChangeGroupIcon(grp, newIcon)
+                groupToChangeIcon = null
+            },
+            onDismiss = { groupToChangeIcon = null }
+        )
+    }
+
+    // 删除文件夹确认对话框
+    groupToDelete?.let { grp ->
+        AlertDialog(
+            onDismissRequest = { groupToDelete = null },
+            title = { Text(stringResource(R.string.vault_folder_delete)) },
+            text = { Text(stringResource(R.string.vault_folder_delete_desc)) },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        onDeleteGroup(grp.id)
+                        groupToDelete = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text(stringResource(R.string.btn_delete))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { groupToDelete = null }) {
+                    Text(stringResource(R.string.btn_cancel))
+                }
+            }
+        )
+    }
+
+    // 清空回收站确认对话框
+    if (showEmptyRecycleBinDialog) {
+        AlertDialog(
+            onDismissRequest = { showEmptyRecycleBinDialog = false },
+            title = { Text(stringResource(R.string.vault_empty_recycle_bin)) },
+            text = { Text(stringResource(R.string.vault_empty_recycle_bin_confirm)) },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        onEmptyRecycleBin()
+                        showEmptyRecycleBinDialog = false
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text(stringResource(R.string.btn_empty))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showEmptyRecycleBinDialog = false }) {
+                    Text(stringResource(R.string.btn_cancel))
+                }
             }
         )
     }
 }
 
-/**
- * 新建群组 (文件夹) 弹窗
- */
 @Composable
 private fun CreateGroupDialog(
     parentGroupName: String?,
     onDismiss: () -> Unit,
-    onConfirm: (name: String) -> Unit
+    onConfirm: (name: String, icon: String) -> Unit
 ) {
     var groupName by remember { mutableStateOf("") }
+    var selectedIcon by remember { mutableStateOf("folder") }
+    var showIconPicker by remember { mutableStateOf(false) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
             Column {
                 Text(
-                    text = "新建群组 (文件夹)",
+                    text = stringResource(R.string.vault_new_folder),
                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                 )
                 Text(
@@ -603,54 +719,71 @@ private fun CreateGroupDialog(
             }
         },
         text = {
-            OutlinedTextField(
-                value = groupName,
-                onValueChange = { groupName = it },
-                label = { Text("群组名称") },
-                placeholder = { Text("例如：工作、金融、社交、服务器...") },
-                leadingIcon = {
-                    Icon(
-                        imageVector = Icons.Default.Folder,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(20.dp)
-                    )
-                },
-                singleLine = true,
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier.fillMaxWidth()
-            )
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedTextField(
+                    value = groupName,
+                    onValueChange = { groupName = it },
+                    label = { Text(stringResource(R.string.vault_folder_name)) },
+                    placeholder = { Text(stringResource(R.string.vault_folder_name_hint)) },
+                    leadingIcon = {
+                        IconButton(onClick = { showIconPicker = true }) {
+                            Icon(
+                                imageVector = getVaultIcon(selectedIcon),
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+                    },
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
         },
         confirmButton = {
             Button(
                 onClick = {
                     if (groupName.isNotBlank()) {
-                        onConfirm(groupName.trim())
+                        onConfirm(groupName.trim(), selectedIcon)
                     }
                 },
                 enabled = groupName.isNotBlank(),
                 shape = CapsuleShape
             ) {
-                Text("创建")
+                Text(stringResource(R.string.btn_create))
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("取消")
+                Text(stringResource(R.string.btn_cancel))
             }
         }
     )
+
+    if (showIconPicker) {
+        IconPickerDialog(
+            selectedIconName = selectedIcon,
+            onSelectIcon = {
+                selectedIcon = it
+                showIconPicker = false
+            },
+            onDismiss = { showIconPicker = false }
+        )
+    }
 }
 
-/**
- * 经典 KeePassDX / KeePass2Android 文件夹条目组件（纯净无多余标签）
- */
 @Composable
 private fun KeePassGroupRow(
     group: VaultGroup,
     onClick: () -> Unit,
+    onRename: () -> Unit,
+    onChangeIcon: () -> Unit,
+    onDelete: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    var showMenu by remember { mutableStateOf(false) }
+
     Card(
         onClick = onClick,
         modifier = modifier
@@ -662,26 +795,30 @@ private fun KeePassGroupRow(
             ),
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLowest
+            containerColor = if (group.isRecycleBin) MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.2f)
+            else MaterialTheme.colorScheme.surfaceContainerLowest
         )
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 12.dp),
+                .padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Box(
                 modifier = Modifier
                     .size(38.dp)
                     .clip(RoundedCornerShape(10.dp))
-                    .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)),
+                    .background(
+                        if (group.isRecycleBin) MaterialTheme.colorScheme.errorContainer
+                        else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
+                    ),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
-                    imageVector = Icons.Default.Folder,
+                    imageVector = getVaultIcon(group.iconName),
                     contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
+                    tint = if (group.isRecycleBin) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(22.dp)
                 )
             }
@@ -700,25 +837,71 @@ private fun KeePassGroupRow(
                 modifier = Modifier.weight(1f)
             )
 
+            if (!group.isRecycleBin) {
+                Box {
+                    IconButton(onClick = { showMenu = true }) {
+                        Icon(
+                            imageVector = Icons.Default.MoreVert,
+                            contentDescription = stringResource(R.string.btn_more),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+
+                    DropdownMenu(
+                        expanded = showMenu,
+                        onDismissRequest = { showMenu = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.vault_folder_rename)) },
+                            leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
+                            onClick = {
+                                showMenu = false
+                                onRename()
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.vault_folder_change_icon)) },
+                            leadingIcon = { Icon(Icons.Default.Image, contentDescription = null) },
+                            onClick = {
+                                showMenu = false
+                                onChangeIcon()
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.vault_folder_delete), color = MaterialTheme.colorScheme.error) },
+                            leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
+                            onClick = {
+                                showMenu = false
+                                onDelete()
+                            }
+                        )
+                    }
+                }
+            }
+
             Icon(
                 imageVector = Icons.AutoMirrored.Filled.ArrowForwardIos,
-                contentDescription = "进入文件夹",
+                contentDescription = stringResource(R.string.cd_enter_group),
                 tint = MaterialTheme.colorScheme.outlineVariant,
-                modifier = Modifier.size(15.dp)
+                modifier = Modifier.size(14.dp)
             )
         }
     }
 }
 
-/**
- * 经典 KeePassDX / KeePass2Android 紧凑条目样式（纯净无多余标签）
- */
 @Composable
 private fun KeePassEntryRow(
     entry: UiVaultEntry,
+    isRecycled: Boolean,
+    showUsername: Boolean,
+    showOtp: Boolean,
+    showPasskeyBadge: Boolean,
     onClick: () -> Unit,
     onCopyPassword: () -> Unit,
     onCopyUsername: () -> Unit,
+    onRestore: () -> Unit,
+    onPurge: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Card(
@@ -741,13 +924,10 @@ private fun KeePassEntryRow(
                 .padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // 左侧：经典分类图标容器
             val (icon, iconTint, containerColor) = when {
-                entry.isPasskey -> Triple(Icons.Default.Key, MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.primaryContainer)
-                entry.category == EntryCategory.LOGIN -> Triple(Icons.Default.Language, MaterialTheme.colorScheme.tertiary, MaterialTheme.colorScheme.tertiaryContainer)
-                entry.category == EntryCategory.NOTE -> Triple(Icons.Default.Description, MaterialTheme.colorScheme.secondary, MaterialTheme.colorScheme.secondaryContainer)
-                entry.category == EntryCategory.CARD -> Triple(Icons.Default.CreditCard, MaterialTheme.colorScheme.error, MaterialTheme.colorScheme.errorContainer)
-                else -> Triple(Icons.Default.Description, MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.primaryContainer)
+                entry.isPasskey || entry.category == EntryCategory.PASSKEY -> Triple(Icons.Default.Key, MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.primaryContainer)
+                entry.category == EntryCategory.LOGIN -> Triple(getVaultIcon(entry.iconName), MaterialTheme.colorScheme.tertiary, MaterialTheme.colorScheme.tertiaryContainer)
+                else -> Triple(getVaultIcon(entry.iconName), MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.primaryContainer)
             }
 
             Box(
@@ -767,7 +947,6 @@ private fun KeePassEntryRow(
 
             Spacer(modifier = Modifier.width(12.dp))
 
-            // 中间信息区
             Column(modifier = Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
@@ -780,23 +959,24 @@ private fun KeePassEntryRow(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-                    if (entry.isPasskey) {
+                    if (entry.isPasskey && showPasskeyBadge) {
                         Spacer(modifier = Modifier.width(6.dp))
                         PasskeyBadge()
                     }
                 }
 
-                Spacer(modifier = Modifier.height(2.dp))
+                if (showUsername) {
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = if (entry.username.isNotBlank()) entry.username else "无用户名",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
 
-                Text(
-                    text = if (entry.username.isNotBlank()) entry.username else "无用户名",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-
-                if (entry.totpCode != null) {
+                if (showOtp && entry.totpCode != null) {
                     Spacer(modifier = Modifier.height(3.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
@@ -815,64 +995,48 @@ private fun KeePassEntryRow(
 
             Spacer(modifier = Modifier.width(6.dp))
 
-            // 右侧双快捷按钮：复制用户名与复制密码（KeePassDX / KeePass2Android 标志性功能）
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (entry.username.isNotBlank()) {
-                    IconButton(
-                        onClick = onCopyUsername,
-                        modifier = Modifier
-                            .size(34.dp)
-                            .clip(CircleShape)
-                    ) {
+            if (isRecycled) {
+                // 回收站模式：还原和彻底粉碎按钮
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = onRestore) {
                         Icon(
-                            imageVector = Icons.Default.PersonOutline,
-                            contentDescription = "复制用户名",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(18.dp)
+                            imageVector = Icons.Default.Restore,
+                            contentDescription = stringResource(R.string.btn_restore),
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    IconButton(onClick = onPurge) {
+                        Icon(
+                            imageVector = Icons.Default.DeleteForever,
+                            contentDescription = stringResource(R.string.btn_delete),
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(20.dp)
                         )
                     }
                 }
-
-                IconButton(
-                    onClick = onCopyPassword,
-                    modifier = Modifier
-                        .size(34.dp)
-                        .clip(CircleShape)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.ContentCopy,
-                        contentDescription = "复制密码",
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(18.dp)
-                    )
+            } else {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (entry.username.isNotBlank()) {
+                        IconButton(onClick = onCopyUsername) {
+                            Icon(
+                                imageVector = Icons.Default.PersonOutline,
+                                contentDescription = stringResource(R.string.cd_copy_username),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+                    IconButton(onClick = onCopyPassword) {
+                        Icon(
+                            imageVector = Icons.Default.ContentCopy,
+                            contentDescription = stringResource(R.string.cd_copy_password),
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
                 }
             }
         }
-    }
-}
-
-@Preview(name = "浅色模式", showBackground = true)
-@Preview(name = "深色模式", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
-@Composable
-private fun VaultListContentPreview() {
-    KeePasskeyTheme {
-        VaultListContent(
-            uiState = VaultListUiState(
-                currentGroups = FakeVaultRepository.initialMockGroups.take(3),
-                entries = FakeVaultRepository.initialMockEntries,
-                totalEntriesCount = FakeVaultRepository.initialMockEntries.size
-            ),
-            snackbarHostState = remember { SnackbarHostState() },
-            onSearchQueryChange = {},
-            onSortOptionSelect = {},
-            onGroupClick = {},
-            onNavigateUp = {},
-            onNavigateToBreadcrumb = {},
-            onEntryClick = {},
-            onCopyPassword = {},
-            onCopyUsername = {},
-            onAddEntryClick = {},
-            onCreateGroup = {}
-        )
     }
 }

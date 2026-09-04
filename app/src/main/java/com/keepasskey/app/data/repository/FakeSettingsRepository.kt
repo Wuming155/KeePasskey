@@ -26,6 +26,10 @@ class FakeSettingsRepository @Inject constructor() : SettingsRepository {
         settingsFlow.update { it.copy(oledBlackOptimization = enabled) }
     }
 
+    override suspend fun setAppLanguage(language: AppLanguage) {
+        settingsFlow.update { it.copy(appLanguage = language) }
+    }
+
     override suspend fun setBiometricEnabled(enabled: Boolean) {
         settingsFlow.update { it.copy(biometricEnabled = enabled) }
     }
@@ -40,5 +44,21 @@ class FakeSettingsRepository @Inject constructor() : SettingsRepository {
 
     override suspend fun setAutoClearClipboard(enabled: Boolean) {
         settingsFlow.update { it.copy(autoClearClipboard = enabled) }
+    }
+
+    override suspend fun setShowUsernameInList(enabled: Boolean) {
+        settingsFlow.update { it.copy(showUsernameInList = enabled) }
+    }
+
+    override suspend fun setShowOtpInList(enabled: Boolean) {
+        settingsFlow.update { it.copy(showOtpInList = enabled) }
+    }
+
+    override suspend fun setShowPasskeyBadge(enabled: Boolean) {
+        settingsFlow.update { it.copy(showPasskeyBadge = enabled) }
+    }
+
+    override suspend fun setClipboardTimeout(seconds: Int) {
+        settingsFlow.update { it.copy(clipboardTimeoutSeconds = seconds) }
     }
 }

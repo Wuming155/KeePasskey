@@ -99,3 +99,14 @@ val DarkColorScheme = darkColorScheme(
     error = SecurityDangerDark,
     onError = Color(0xFF690005)
 )
+
+// OLED 极黑优化配色：在标准深色配色基础上，将背景与最底层容器压至纯黑，
+// 仅保留必要的容器层次以维持组件可辨识度（OLED 屏幕发光功耗最低）
+val OledDarkColorScheme = DarkColorScheme.copy(
+    background = Color.Black,
+    surface = Color.Black,
+    surfaceContainerLowest = Color.Black,
+    surfaceContainerLow = Color(0xFF0A0C0F),
+    surfaceContainer = Color(0xFF12151A),
+    surfaceContainerHigh = Color(0xFF1C2026)
+)

@@ -17,6 +17,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
+import com.keepasskey.app.R
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -87,12 +89,12 @@ fun AppBottomBar(
                 icon = {
                     Icon(
                         imageVector = if (isSelected) item.selectedIcon else item.unselectedIcon,
-                        contentDescription = item.label
+                        contentDescription = if (item == BottomNavItem.VAULT) stringResource(R.string.nav_vault) else stringResource(R.string.nav_settings)
                     )
                 },
                 label = {
                     Text(
-                        text = item.label,
+                        text = if (item == BottomNavItem.VAULT) stringResource(R.string.nav_vault) else stringResource(R.string.nav_settings),
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
                     )

@@ -1,8 +1,12 @@
 package com.keepasskey.app.ui.screens.edit
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -12,13 +16,19 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.ElectricBolt
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.FolderOpen
@@ -26,14 +36,17 @@ import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
@@ -41,15 +54,19 @@ import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -57,13 +74,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import android.content.res.Configuration
-import androidx.compose.ui.tooling.preview.Preview
+import com.keepasskey.app.R
 import com.keepasskey.app.ui.components.BentoCard
+import com.keepasskey.app.ui.components.IconPickerDialog
 import com.keepasskey.app.ui.components.PasswordStrengthBar
+import com.keepasskey.app.ui.components.getVaultIcon
 import com.keepasskey.app.ui.model.EntryCategory
 import com.keepasskey.app.ui.theme.CapsuleShape
-import com.keepasskey.app.ui.theme.KeePasskeyTheme
 import com.keepasskey.app.ui.theme.LocalSecurityColors
 import com.keepasskey.app.ui.theme.MonospacePasswordStyle
 
@@ -104,10 +121,12 @@ fun EntryEditScreen(
 
     EntryEditContent(
         uiState = uiState,
+        isDirty = uiState.isDirty,
         snackbarHostState = snackbarHostState,
         onBackClick = onBackClick,
         onSaveClick = viewModel::saveEntry,
         onGroupChange = viewModel::onGroupChange,
+        onIconChange = viewModel::onIconChange,
         onTitleChange = viewModel::onTitleChange,
         onUsernameChange = viewModel::onUsernameChange,
         onPasswordChange = viewModel::onPasswordChange,
@@ -116,6 +135,11 @@ fun EntryEditScreen(
         onTogglePasskey = viewModel::onTogglePasskey,
         onTotpSecretChange = viewModel::onTotpSecretChange,
         onCategoryChange = viewModel::onCategoryChange,
+        onAddCustomField = viewModel::addCustomField,
+        onUpdateCustomField = viewModel::updateCustomField,
+        onRemoveCustomField = viewModel::removeCustomField,
+        onAddAttachment = viewModel::addAttachment,
+        onRemoveAttachment = viewModel::removeAttachment,
         onTogglePasswordVisibility = viewModel::onTogglePasswordVisibility,
         onToggleGenerator = viewModel::onToggleGenerator,
         onPassLengthChange = viewModel::onPassLengthChange,
@@ -136,10 +160,12 @@ fun EntryEditScreen(
 @Composable
 fun EntryEditContent(
     uiState: EntryEditUiState,
+    isDirty: Boolean,
     snackbarHostState: SnackbarHostState,
     onBackClick: () -> Unit,
     onSaveClick: () -> Unit,
     onGroupChange: (String?) -> Unit,
+    onIconChange: (String) -> Unit,
     onTitleChange: (String) -> Unit,
     onUsernameChange: (String) -> Unit,
     onPasswordChange: (String) -> Unit,
@@ -148,6 +174,11 @@ fun EntryEditContent(
     onTogglePasskey: () -> Unit,
     onTotpSecretChange: (String) -> Unit,
     onCategoryChange: (EntryCategory) -> Unit,
+    onAddCustomField: () -> Unit,
+    onUpdateCustomField: (String, String, String, Boolean) -> Unit,
+    onRemoveCustomField: (String) -> Unit,
+    onAddAttachment: (String, String) -> Unit,
+    onRemoveAttachment: (String) -> Unit,
     onTogglePasswordVisibility: () -> Unit,
     onToggleGenerator: () -> Unit,
     onPassLengthChange: (Float) -> Unit,
@@ -160,6 +191,11 @@ fun EntryEditContent(
     modifier: Modifier = Modifier
 ) {
     val securityColors = LocalSecurityColors.current
+    var showDiscardDialog by remember { mutableStateOf(false) }
+    var showIconPicker by remember { mutableStateOf(false) }
+
+    val requestBack: () -> Unit = { if (isDirty) showDiscardDialog = true else onBackClick() }
+    BackHandler(onBack = requestBack)
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -169,15 +205,15 @@ fun EntryEditContent(
             TopAppBar(
                 title = {
                     Text(
-                        text = if (uiState.entryId != null) "编辑条目" else "新建条目",
+                        text = if (uiState.entryId != null) stringResource(R.string.edit_title_edit) else stringResource(R.string.edit_title_new),
                         style = MaterialTheme.typography.titleLarge
                     )
                 },
                 navigationIcon = {
-                    IconButton(onClick = onBackClick) {
+                    IconButton(onClick = requestBack) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "取消"
+                            contentDescription = stringResource(R.string.cd_back)
                         )
                     }
                 },
@@ -185,7 +221,7 @@ fun EntryEditContent(
                     IconButton(onClick = onSaveClick) {
                         Icon(
                             imageVector = Icons.Default.Check,
-                            contentDescription = "保存",
+                            contentDescription = stringResource(R.string.cd_save),
                             tint = MaterialTheme.colorScheme.primary
                         )
                     }
@@ -208,12 +244,12 @@ fun EntryEditContent(
         ) {
             // 分类选择
             Text(
-                text = "凭据分类",
+                text = stringResource(R.string.edit_category_label),
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
                 color = MaterialTheme.colorScheme.onSurface
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf(EntryCategory.LOGIN, EntryCategory.PASSKEY, EntryCategory.NOTE, EntryCategory.CARD).forEach { cat ->
+                listOf(EntryCategory.LOGIN, EntryCategory.PASSKEY).forEach { cat ->
                     val selected = uiState.selectedCategory == cat
                     FilterChip(
                         selected = selected,
@@ -231,7 +267,7 @@ fun EntryEditContent(
             // 所属群组 / 文件夹选择
             if (uiState.availableGroups.isNotEmpty()) {
                 Text(
-                    text = "所属群组 (文件夹)",
+                    text = stringResource(R.string.edit_group_label),
                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
                     color = MaterialTheme.colorScheme.onSurface
                 )
@@ -240,7 +276,7 @@ fun EntryEditContent(
                         FilterChip(
                             selected = uiState.groupId == null,
                             onClick = { onGroupChange(null) },
-                            label = { Text("根目录 (未分类)") },
+                            label = { Text(stringResource(R.string.edit_group_root)) },
                             shape = CapsuleShape,
                             leadingIcon = {
                                 Icon(
@@ -251,7 +287,7 @@ fun EntryEditContent(
                             }
                         )
                     }
-                    items(uiState.availableGroups) { grp ->
+                    items(uiState.availableGroups.filter { !it.isRecycleBin }) { grp ->
                         val selected = uiState.groupId == grp.id
                         FilterChip(
                             selected = selected,
@@ -260,7 +296,7 @@ fun EntryEditContent(
                             shape = CapsuleShape,
                             leadingIcon = {
                                 Icon(
-                                    imageVector = Icons.Default.Folder,
+                                    imageVector = getVaultIcon(grp.iconName),
                                     contentDescription = null,
                                     modifier = Modifier.size(16.dp)
                                 )
@@ -270,9 +306,9 @@ fun EntryEditContent(
                 }
             }
 
-            // 基本信息
+            // 基本信息（带图标选择器）
             Text(
-                text = "基本信息",
+                text = stringResource(R.string.edit_basic_info),
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
                 color = MaterialTheme.colorScheme.onSurface
             )
@@ -282,19 +318,42 @@ fun EntryEditContent(
                 backgroundColor = MaterialTheme.colorScheme.surfaceContainerLowest
             ) {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    OutlinedTextField(
-                        value = uiState.title,
-                        onValueChange = onTitleChange,
-                        label = { Text("标题 (例如 Google / GitHub)") },
-                        singleLine = true,
-                        shape = MaterialTheme.shapes.medium,
-                        modifier = Modifier.fillMaxWidth()
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(54.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(MaterialTheme.colorScheme.primaryContainer)
+                                .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
+                                .clickable { showIconPicker = true },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = getVaultIcon(uiState.iconName),
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                modifier = Modifier.size(28.dp)
+                            )
+                        }
+
+                        OutlinedTextField(
+                            value = uiState.title,
+                            onValueChange = onTitleChange,
+                            label = { Text(stringResource(R.string.edit_title_hint)) },
+                            singleLine = true,
+                            shape = MaterialTheme.shapes.medium,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
 
                     OutlinedTextField(
                         value = uiState.url,
                         onValueChange = onUrlChange,
-                        label = { Text("网址 URL (https://...)") },
+                        label = { Text(stringResource(R.string.edit_url_hint)) },
                         singleLine = true,
                         shape = MaterialTheme.shapes.medium,
                         modifier = Modifier.fillMaxWidth()
@@ -304,7 +363,7 @@ fun EntryEditContent(
 
             // 账户与密码
             Text(
-                text = "账户与密码",
+                text = stringResource(R.string.edit_account_pwd),
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
                 color = MaterialTheme.colorScheme.onSurface
             )
@@ -317,7 +376,7 @@ fun EntryEditContent(
                     OutlinedTextField(
                         value = uiState.username,
                         onValueChange = onUsernameChange,
-                        label = { Text("用户名 / 邮箱 / 账号") },
+                        label = { Text(stringResource(R.string.edit_username_hint)) },
                         singleLine = true,
                         shape = MaterialTheme.shapes.medium,
                         modifier = Modifier.fillMaxWidth()
@@ -326,7 +385,7 @@ fun EntryEditContent(
                     OutlinedTextField(
                         value = uiState.password,
                         onValueChange = onPasswordChange,
-                        label = { Text("密码") },
+                        label = { Text(stringResource(R.string.edit_password_hint)) },
                         singleLine = true,
                         visualTransformation = if (uiState.isPasswordVisible) VisualTransformation.None else PasswordVisualTransformation('●'),
                         trailingIcon = {
@@ -334,14 +393,14 @@ fun EntryEditContent(
                                 IconButton(onClick = onTogglePasswordVisibility) {
                                     Icon(
                                         imageVector = if (uiState.isPasswordVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                                        contentDescription = "显隐",
+                                        contentDescription = stringResource(R.string.cd_toggle_password_visibility),
                                         tint = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
                                 IconButton(onClick = onToggleGenerator) {
                                     Icon(
                                         imageVector = Icons.Default.ElectricBolt,
-                                        contentDescription = "密码生成器",
+                                        contentDescription = stringResource(R.string.cd_password_generator),
                                         tint = MaterialTheme.colorScheme.primary
                                     )
                                 }
@@ -383,7 +442,7 @@ fun EntryEditContent(
 
             // TOTP 配置
             Text(
-                text = "二次验证令牌 (TOTP)",
+                text = stringResource(R.string.edit_totp_section),
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
                 color = MaterialTheme.colorScheme.onSurface
             )
@@ -395,12 +454,12 @@ fun EntryEditContent(
                 OutlinedTextField(
                     value = uiState.totpSecret,
                     onValueChange = onTotpSecretChange,
-                    label = { Text("TOTP 密钥 (Secret Key / Base32)") },
+                    label = { Text(stringResource(R.string.edit_totp_hint)) },
                     trailingIcon = {
                         IconButton(onClick = { onShowMessage("呼起相机扫描 TOTP 二维码") }) {
                             Icon(
                                 imageVector = Icons.Default.QrCodeScanner,
-                                contentDescription = "扫码",
+                                contentDescription = stringResource(R.string.cd_scan_qr),
                                 tint = MaterialTheme.colorScheme.primary
                             )
                         }
@@ -413,7 +472,7 @@ fun EntryEditContent(
 
             // 通行密钥 Passkey 注册绑定
             Text(
-                text = "通行密钥 (Passkey / WebAuthn)",
+                text = stringResource(R.string.edit_passkey_section),
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
                 color = MaterialTheme.colorScheme.onSurface
             )
@@ -430,12 +489,12 @@ fun EntryEditContent(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = if (uiState.isPasskey) "已绑定 Passkey 硬件凭据" else "为此网站创建 Passkey",
+                            text = if (uiState.isPasskey) stringResource(R.string.edit_passkey_has_bound) else stringResource(R.string.edit_passkey_create),
                             style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
-                            text = "基于 Android 14+ 凭据管理器，支持端到端公私钥验证",
+                            text = stringResource(R.string.edit_passkey_desc),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -447,14 +506,157 @@ fun EntryEditContent(
                             containerColor = if (uiState.isPasskey) securityColors.passkey else MaterialTheme.colorScheme.primary
                         )
                     ) {
-                        Text(if (uiState.isPasskey) "解除" else "绑定")
+                        Text(if (uiState.isPasskey) stringResource(R.string.edit_passkey_unbind) else stringResource(R.string.edit_passkey_bind))
+                    }
+                }
+            }
+
+            // 自定义字段编辑区 (动态添加/修改/删除)
+            Text(
+                text = stringResource(R.string.edit_custom_fields),
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                color = MaterialTheme.colorScheme.onSurface
+            )
+
+            BentoCard(
+                modifier = Modifier.fillMaxWidth(),
+                backgroundColor = MaterialTheme.colorScheme.surfaceContainerLowest
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    uiState.customFields.forEach { field ->
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(MaterialTheme.colorScheme.surfaceContainerLow)
+                                .padding(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                OutlinedTextField(
+                                    value = field.key,
+                                    onValueChange = { onUpdateCustomField(field.id, it, field.value, field.isProtected) },
+                                    label = { Text(stringResource(R.string.edit_field_key)) },
+                                    singleLine = true,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                IconButton(onClick = { onRemoveCustomField(field.id) }) {
+                                    Icon(
+                                        imageVector = Icons.Default.Delete,
+                                        contentDescription = stringResource(R.string.btn_delete),
+                                        tint = MaterialTheme.colorScheme.error,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
+
+                            OutlinedTextField(
+                                value = field.value,
+                                onValueChange = { onUpdateCustomField(field.id, field.key, it, field.isProtected) },
+                                label = { Text(stringResource(R.string.edit_field_value)) },
+                                visualTransformation = if (field.isProtected) PasswordVisualTransformation() else VisualTransformation.None,
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.clickable {
+                                    onUpdateCustomField(field.id, field.key, field.value, !field.isProtected)
+                                }
+                            ) {
+                                Checkbox(
+                                    checked = field.isProtected,
+                                    onCheckedChange = { onUpdateCustomField(field.id, field.key, field.value, it) }
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = stringResource(R.string.edit_field_protected),
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
+                        }
+                    }
+
+                    OutlinedButton(
+                        onClick = onAddCustomField,
+                        shape = CapsuleShape,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(stringResource(R.string.edit_add_field))
+                    }
+                }
+            }
+
+            // 附件文件管理区
+            Text(
+                text = stringResource(R.string.edit_attachments),
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                color = MaterialTheme.colorScheme.onSurface
+            )
+
+            BentoCard(
+                modifier = Modifier.fillMaxWidth(),
+                backgroundColor = MaterialTheme.colorScheme.surfaceContainerLowest
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    uiState.attachments.forEach { att ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(MaterialTheme.colorScheme.surfaceContainerLow)
+                                .padding(horizontal = 10.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.InsertDriveFile,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "${att.fileName} (${att.fileSizeFormatted})",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+
+                            IconButton(onClick = { onRemoveAttachment(att.id) }) {
+                                Icon(
+                                    imageVector = Icons.Default.Delete,
+                                    contentDescription = stringResource(R.string.btn_delete),
+                                    tint = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    OutlinedButton(
+                        onClick = { onAddAttachment("recovery_key_${System.currentTimeMillis() % 1000}.pem", "4.2 KB") },
+                        shape = CapsuleShape,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.AttachFile, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(stringResource(R.string.edit_add_attachment))
                     }
                 }
             }
 
             // 安全备注
             Text(
-                text = "安全笔记与自定义字段",
+                text = stringResource(R.string.edit_notes),
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
                 color = MaterialTheme.colorScheme.onSurface
             )
@@ -466,7 +668,7 @@ fun EntryEditContent(
                 OutlinedTextField(
                     value = uiState.notes,
                     onValueChange = onNotesChange,
-                    label = { Text("加密安全备注 (可选)") },
+                    label = { Text(stringResource(R.string.edit_notes_hint)) },
                     minLines = 3,
                     shape = MaterialTheme.shapes.medium,
                     modifier = Modifier.fillMaxWidth()
@@ -484,13 +686,43 @@ fun EntryEditContent(
                 shape = CapsuleShape
             ) {
                 Text(
-                    text = "保 存 凭 据",
+                    text = stringResource(R.string.edit_save_btn),
                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold)
                 )
             }
 
             Spacer(modifier = Modifier.height(30.dp))
         }
+    }
+
+    if (showIconPicker) {
+        IconPickerDialog(
+            selectedIconName = uiState.iconName,
+            onSelectIcon = {
+                onIconChange(it)
+                showIconPicker = false
+            },
+            onDismiss = { showIconPicker = false }
+        )
+    }
+
+    // 丢弃未保存更改确认弹窗
+    if (showDiscardDialog) {
+        AlertDialog(
+            onDismissRequest = { showDiscardDialog = false },
+            title = { Text(stringResource(R.string.edit_discard_title)) },
+            text = { Text(stringResource(R.string.edit_discard_desc)) },
+            confirmButton = {
+                TextButton(onClick = onBackClick) {
+                    Text(stringResource(R.string.btn_discard))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDiscardDialog = false }) {
+                    Text(stringResource(R.string.btn_continue_edit))
+                }
+            }
+        )
     }
 }
 
@@ -525,14 +757,14 @@ private fun PasswordGeneratorWidget(
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Text(
-                text = "密码生成器 (长度: ${passLength.toInt()})",
+                text = stringResource(R.string.edit_generator_title, passLength.toInt()),
                 style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                 color = MaterialTheme.colorScheme.onSurface
             )
             IconButton(onClick = onRegenerate) {
                 Icon(
                     imageVector = Icons.Default.Refresh,
-                    contentDescription = "重新生成",
+                    contentDescription = stringResource(R.string.cd_regenerate),
                     tint = MaterialTheme.colorScheme.primary
                 )
             }
@@ -571,47 +803,8 @@ private fun PasswordGeneratorWidget(
             FilterChip(
                 selected = useSymbols,
                 onClick = onToggleSymbols,
-                label = { Text("!@#") }
+                label = { Text("#$%") }
             )
         }
-    }
-}
-
-@Preview(name = "浅色模式 - 编辑", showBackground = true)
-@Preview(name = "深色模式 - 编辑", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
-@Composable
-private fun EntryEditContentPreview() {
-    KeePasskeyTheme {
-        EntryEditContent(
-            uiState = EntryEditUiState(
-                entryId = "1",
-                title = "Google Workspace",
-                username = "alex.developer@gmail.com",
-                password = "SuperSecretPassword123!",
-                isPasskey = true,
-                showGenerator = true
-            ),
-            snackbarHostState = remember { SnackbarHostState() },
-            onBackClick = {},
-            onSaveClick = {},
-            onGroupChange = {},
-            onTitleChange = {},
-            onUsernameChange = {},
-            onPasswordChange = {},
-            onUrlChange = {},
-            onNotesChange = {},
-            onTogglePasskey = {},
-            onTotpSecretChange = {},
-            onCategoryChange = {},
-            onTogglePasswordVisibility = {},
-            onToggleGenerator = {},
-            onPassLengthChange = {},
-            onGeneratePassword = {},
-            onToggleUpper = {},
-            onToggleLower = {},
-            onToggleDigits = {},
-            onToggleSymbols = {},
-            onShowMessage = {}
-        )
     }
 }

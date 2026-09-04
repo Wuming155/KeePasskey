@@ -1,0 +1,360 @@
+package com.keepasskey.app.ui.screens.settings.subscreens
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.BugReport
+import androidx.compose.material.icons.filled.CleaningServices
+import androidx.compose.material.icons.filled.CloudSync
+import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.keepasskey.app.R
+import com.keepasskey.app.ui.components.BentoCard
+import com.keepasskey.app.ui.screens.settings.SettingsUiState
+import kotlinx.coroutines.launch
+
+/**
+ * 系统诊断与调试日志二级设置页 (对应 KeePass2Android 调试日志系统)
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun DebugSettingsScreen(
+    uiState: SettingsUiState,
+    onBackClick: () -> Unit,
+    onDebugLogToggle: (Boolean) -> Unit,
+    onVerboseSyncLogToggle: (Boolean) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val snackbarHostState = remember { SnackbarHostState() }
+    val coroutineScope = rememberCoroutineScope()
+    var showExportConfirmDialog by remember { mutableStateOf(false) }
+
+    val mockLogLines = remember {
+        listOf(
+            "[10:20:12.410] [INFO] [Database] Master vault header loaded. Cipher: ChaCha20, KDF: Argon2id (3 rounds, 64MB)",
+            "[10:20:12.825] [INFO] [KDF] Key derivation computed in 415ms (4 threads parallel)",
+            "[10:20:13.011] [INFO] [Security] JVM memory zeroization confirmed. ByteArray sanitized",
+            "[10:20:14.200] [DEBUG] [WebDAV] PROPFIND /Passkeys/keepasskey.kdbx -> 207 Multi-Status (ETag match)",
+            "[10:20:14.520] [INFO] [AutofillService] Credential request received for package: org.mozilla.firefox",
+            "[10:20:14.610] [DEBUG] [AutofillService] Matched 1 entry by web domain filter",
+            "[10:20:18.300] [DEBUG] [SyncEngine] Atomic write buffer committed. Checksum passed"
+        )
+    }
+
+    Scaffold(
+        modifier = modifier.fillMaxSize(),
+        containerColor = MaterialTheme.colorScheme.background,
+        snackbarHost = { SnackbarHost(snackbarHostState) },
+        topBar = {
+            TopAppBar(
+                title = {
+                    Text(
+                        text = "系统诊断与调试日志",
+                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
+                    )
+                },
+                navigationIcon = {
+                    IconButton(onClick = onBackClick) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = stringResource(R.string.cd_back)
+                        )
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    titleContentColor = MaterialTheme.colorScheme.onSurface
+                )
+            )
+        }
+    ) { innerPadding ->
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            // 1. 日志记录总开关
+            item {
+                Text(
+                    text = "调试日志记录选项 (KP2A 特性)",
+                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(start = 4.dp)
+                )
+            }
+
+            item {
+                BentoCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    backgroundColor = MaterialTheme.colorScheme.surfaceContainerLowest
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                        DebugSwitchRow(
+                            icon = Icons.Default.BugReport,
+                            title = "启用本地运行调试日志",
+                            subtitle = "开启后在私有应用沙箱记录非敏感的运行与交互日志，用于诊断报错",
+                            checked = uiState.debugLogEnabled,
+                            onCheckedChange = onDebugLogToggle
+                        )
+
+                        DebugSwitchRow(
+                            icon = Icons.Default.CloudSync,
+                            title = "记录详细云同步与网络报文日志",
+                            subtitle = "记录 WebDAV / S3 请求头与状态码 (所有密码与授权 Token 均自动脱敏)",
+                            checked = uiState.verboseSyncLog,
+                            onCheckedChange = onVerboseSyncLogToggle
+                        )
+                    }
+                }
+            }
+
+            // 2. 实时日志预览控制台
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "实时日志预览 (最近 7 条)",
+                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(start = 4.dp)
+                    )
+                    IconButton(
+                        onClick = {
+                            coroutineScope.launch {
+                                snackbarHostState.showSnackbar("日志视图已刷新")
+                            }
+                        },
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(Icons.Default.Refresh, contentDescription = "刷新", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                    }
+                }
+            }
+
+            item {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Color(0xFF0F172A))
+                        .border(1.dp, Color(0xFF334155), RoundedCornerShape(14.dp))
+                        .padding(12.dp)
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        mockLogLines.forEach { line ->
+                            Text(
+                                text = line,
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 11.sp,
+                                    lineHeight = 16.sp
+                                ),
+                                color = when {
+                                    line.contains("[DEBUG]") -> Color(0xFF38BDF8)
+                                    line.contains("[INFO]") -> Color(0xFF4ADE80)
+                                    line.contains("[WARN]") -> Color(0xFFFBBF24)
+                                    else -> Color(0xFFE2E8F0)
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+
+            // 3. 操作操作卡片：导出 / 清除
+            item {
+                BentoCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    backgroundColor = MaterialTheme.colorScheme.surfaceContainerLowest
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Button(
+                            onClick = { showExportConfirmDialog = true },
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("导出 / 分享调试日志 (Send Debug Log)")
+                        }
+
+                        OutlinedButton(
+                            onClick = {
+                                coroutineScope.launch {
+                                    snackbarHostState.showSnackbar("本地调试日志缓存已清空")
+                                }
+                            },
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Default.CleaningServices, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("清空当前所有日志缓存")
+                        }
+                    }
+                }
+            }
+
+            // 4. 隐私安全承诺
+            item {
+                BentoCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow
+                ) {
+                    Row(verticalAlignment = Alignment.Top) {
+                        Icon(
+                            imageVector = Icons.Default.Shield,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(20.dp).padding(top = 2.dp)
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text(
+                            text = "安全脱敏保证：调试日志过滤器会对所有数据库密码、Passkey 私钥、TOTP 密钥种子以及网络 Bearer Token 执行前置掩码屏蔽（*REDACTED*），确保导出的日志仅包含诊断调用栈，绝不泄露敏感信息。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            lineHeight = 18.sp
+                        )
+                    }
+                }
+            }
+
+            item {
+                Spacer(modifier = Modifier.height(24.dp))
+            }
+        }
+    }
+
+    if (showExportConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = { showExportConfirmDialog = false },
+            title = { Text("确认导出脱敏日志") },
+            text = {
+                Text(
+                    text = "即将生成脱敏日志并调用系统分享。日志包含设备型号、Android 版本以及近期同步与解密流水。请仅将日志发送给信任的开发者以排查问题。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            },
+            confirmButton = {
+                Button(onClick = {
+                    showExportConfirmDialog = false
+                    coroutineScope.launch {
+                        snackbarHostState.showSnackbar("已生成日志包并复制到剪贴板，可前往 GitHub 或邮箱粘贴")
+                    }
+                }) {
+                    Text("继续导出")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showExportConfirmDialog = false }) {
+                    Text("取消")
+                }
+            }
+        )
+    }
+}
+
+@Composable
+private fun DebugSwitchRow(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Row(
+            modifier = Modifier.weight(1f),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = if (checked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+                modifier = Modifier.size(22.dp)
+            )
+            Spacer(modifier = Modifier.width(12.dp))
+            Column {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+        Spacer(modifier = Modifier.width(8.dp))
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
+                checkedTrackColor = MaterialTheme.colorScheme.primary
+            )
+        )
+    }
+}

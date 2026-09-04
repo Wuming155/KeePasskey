@@ -1,0 +1,199 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">KeePasskey</string>
+
+    <!-- General Buttons & Actions -->
+    <string name="btn_cancel">Cancel</string>
+    <string name="btn_confirm">Confirm</string>
+    <string name="btn_save">Save</string>
+    <string name="btn_delete">Delete</string>
+    <string name="btn_edit">Edit</string>
+    <string name="btn_close">Close</string>
+    <string name="btn_discard">Discard</string>
+    <string name="btn_continue_edit">Keep Editing</string>
+    <string name="btn_copy">Copy</string>
+    <string name="btn_restore">Restore</string>
+    <string name="btn_empty">Empty</string>
+    <string name="btn_select">Select</string>
+    <string name="btn_create">Create</string>
+    <string name="btn_add">Add</string>
+    <string name="btn_open">Open</string>
+    <string name="btn_back">Back</string>
+    <string name="btn_more">More</string>
+
+    <!-- Bottom Navigation -->
+    <string name="nav_vault">Vault</string>
+    <string name="nav_settings">Settings</string>
+
+    <!-- Accessibility Descriptions -->
+    <string name="cd_back">Back</string>
+    <string name="cd_save">Save</string>
+    <string name="cd_edit">Edit</string>
+    <string name="cd_favorite">Favorite</string>
+    <string name="cd_hide_password">Hide password</string>
+    <string name="cd_show_password">Show password</string>
+    <string name="cd_toggle_password_visibility">Toggle password visibility</string>
+    <string name="cd_copy_username">Copy username</string>
+    <string name="cd_copy_password">Copy password</string>
+    <string name="cd_vault_locked">Vault locked</string>
+    <string name="cd_active_database">Active database status</string>
+    <string name="cd_keyfile">Key file</string>
+    <string name="cd_biometric">Biometric unlock</string>
+    <string name="cd_search">Search</string>
+    <string name="cd_clear_search">Clear search</string>
+    <string name="cd_sort">Sort</string>
+    <string name="cd_create">Create</string>
+    <string name="cd_navigate_up">Navigate up</string>
+    <string name="cd_enter_group">Enter folder</string>
+    <string name="cd_copy_totp">Copy TOTP token</string>
+    <string name="cd_passkey">Passkey</string>
+    <string name="cd_password_generator">Password generator</string>
+    <string name="cd_scan_qr">Scan QR</string>
+    <string name="cd_regenerate">Regenerate</string>
+
+    <!-- Unlock Screen -->
+    <string name="unlock_title">KeePasskey</string>
+    <string name="unlock_subtitle">Vault Locked • KDBX v4 (Argon2d + AES-256)</string>
+    <string name="unlock_master_password">Master Password</string>
+    <string name="unlock_master_password_hint">Enter master password to unlock</string>
+    <string name="unlock_keyfile">Key File</string>
+    <string name="unlock_keyfile_selected">Key file loaded: %1$s</string>
+    <string name="unlock_keyfile_none">No key file selected (Optional)</string>
+    <string name="unlock_btn_unlock">U N L O C K   V A U L T</string>
+    <string name="unlock_btn_biometric">Quick unlock with Fingerprint or Face</string>
+    <string name="unlock_switch_vault">Switch Vault</string>
+    <string name="unlock_status_local">Locally encrypted • Synced with WebDAV cloud</string>
+
+    <!-- Database Picker & Manager -->
+    <string name="db_picker_title">Vault Manager</string>
+    <string name="db_picker_subtitle">Manage and switch local &amp; cloud synchronized KDBX vaults</string>
+    <string name="db_picker_current_active">Active</string>
+    <string name="db_picker_open_external">Open External KDBX</string>
+    <string name="db_picker_create_new">New Vault</string>
+    <string name="db_picker_create_title">New Vault Wizard</string>
+    <string name="db_picker_vault_name">Vault Name</string>
+    <string name="db_picker_vault_name_hint">e.g. personal_vault.kdbx</string>
+    <string name="db_picker_new_pwd">Master Password</string>
+    <string name="db_picker_confirm_pwd">Confirm Password</string>
+    <string name="db_picker_pwd_mismatch">Passwords do not match</string>
+    <string name="db_picker_use_keyfile">Generate auxiliary key file (.key)</string>
+    <string name="db_picker_encryption_preset">Encryption &amp; KDF</string>
+    <string name="db_picker_delete_confirm_title">Remove vault connection?</string>
+    <string name="db_picker_delete_confirm_desc">This will only remove the vault from the quick switch list. The original physical file will not be deleted.</string>
+    <string name="db_picker_opened_external_toast">External database imported successfully</string>
+    <string name="db_picker_created_toast">New vault created and activated successfully</string>
+
+    <!-- Vault List Screen -->
+    <string name="vault_search_hint">Search entries, passkeys, or folders...</string>
+    <string name="vault_sort_default">Default</string>
+    <string name="vault_sort_name">Sort by Name</string>
+    <string name="vault_sort_date">Sort by Date</string>
+    <string name="vault_sort_modified">Sort by Modified</string>
+    <string name="vault_sort_created">Sort by Created</string>
+    <string name="vault_current_sort">Sorted by: %1$s</string>
+    <string name="vault_reset_sort">Reset</string>
+    <string name="vault_root_dir">Root</string>
+    <string name="vault_empty_title">Empty Directory</string>
+    <string name="vault_empty_desc">No entries or folders found here. Tap the plus button below to add one</string>
+    <string name="vault_new_entry">New Entry</string>
+    <string name="vault_new_folder">New Folder</string>
+    <string name="vault_folder_name">Folder Name</string>
+    <string name="vault_folder_name_hint">e.g. Work &amp; Productivity</string>
+    <string name="vault_folder_rename">Rename Folder</string>
+    <string name="vault_folder_change_icon">Change Icon</string>
+    <string name="vault_folder_delete">Delete Folder</string>
+    <string name="vault_folder_delete_desc">Deleting this folder will remove all child items inside. Continue?</string>
+    <string name="vault_recycle_bin_title">Recycle Bin</string>
+    <string name="vault_recycle_bin_banner">Currently in the Recycle Bin. Items can be restored or purged permanently.</string>
+    <string name="vault_empty_recycle_bin">Empty Recycle Bin</string>
+    <string name="vault_empty_recycle_bin_confirm">Are you sure you want to permanently delete all items in the Recycle Bin? This cannot be undone!</string>
+    <string name="vault_entry_restored">Entry restored to original folder successfully</string>
+    <string name="vault_entry_purged">Entry permanently deleted from Recycle Bin</string>
+
+    <!-- Entry Detail Screen -->
+    <string name="detail_title">Entry Details</string>
+    <string name="detail_btn_open_url">Open URL</string>
+    <string name="detail_btn_copy_user">Copy User</string>
+    <string name="detail_btn_copy_pwd">Copy Password</string>
+    <string name="detail_basic_section">Credentials</string>
+    <string name="detail_username_label">Username / Email</string>
+    <string name="detail_password_label">Password (%1$d chars)</string>
+    <string name="detail_totp_section">Two-Factor Token (TOTP)</string>
+    <string name="detail_totp_code">Real-time TOTP Token</string>
+    <string name="detail_passkey_section">Passkey Credential (WebAuthn)</string>
+    <string name="detail_passkey_chip">FIDO2 Hardware Security</string>
+    <string name="detail_passkey_rp">Relying Party (RP ID): %1$s</string>
+    <string name="detail_passkey_desc">Supports Android 14+ Credential Manager passwordless authentication</string>
+    <string name="detail_custom_fields_section">Custom Secure Fields</string>
+    <string name="detail_attachments_section">Attachments &amp; Certificates</string>
+    <string name="detail_attachment_preview">Preview</string>
+    <string name="detail_attachment_export">Export to Storage</string>
+    <string name="detail_attachment_export_toast">Attachment %1$s exported to Downloads</string>
+    <string name="detail_history_section">Revision History</string>
+    <string name="detail_history_rollback">Rollback to this</string>
+    <string name="detail_history_rollback_confirm">Are you sure you want to rollback this entry to this historical snapshot?</string>
+    <string name="detail_history_rolled_back">Entry successfully restored to historical version</string>
+    <string name="detail_notes_section">Notes &amp; Metadata</string>
+
+    <!-- Entry Edit Screen -->
+    <string name="edit_title_new">New Entry</string>
+    <string name="edit_title_edit">Edit Entry</string>
+    <string name="edit_category_label">Credential Type</string>
+    <string name="edit_group_label">Folder / Group</string>
+    <string name="edit_group_root">Root (Uncategorized)</string>
+    <string name="edit_basic_info">Basic Info</string>
+    <string name="edit_title_hint">Title (e.g. Google / GitHub)</string>
+    <string name="edit_url_hint">URL (https://...)</string>
+    <string name="edit_account_pwd">Account &amp; Password</string>
+    <string name="edit_username_hint">Username / Email / Account</string>
+    <string name="edit_password_hint">Password</string>
+    <string name="edit_generator_title">Password Generator (Length: %1$d)</string>
+    <string name="edit_totp_section">Two-Factor Token (TOTP)</string>
+    <string name="edit_totp_hint">TOTP Secret Key (Base32)</string>
+    <string name="edit_passkey_section">Passkey (WebAuthn)</string>
+    <string name="edit_passkey_bind">Bind</string>
+    <string name="edit_passkey_unbind">Unbind</string>
+    <string name="edit_passkey_has_bound">Passkey hardware credential bound</string>
+    <string name="edit_passkey_create">Create Passkey for this website</string>
+    <string name="edit_passkey_desc">Powered by Android 14+ Credential Manager with end-to-end asymmetric keys</string>
+    <string name="edit_custom_fields">Custom Fields (Key-Value)</string>
+    <string name="edit_add_field">+ Add Custom Field</string>
+    <string name="edit_field_key">Field Name (e.g. PIN, Recovery Code)</string>
+    <string name="edit_field_value">Field Value</string>
+    <string name="edit_field_protected">Protect as password (Masked)</string>
+    <string name="edit_attachments">Attachments Management</string>
+    <string name="edit_add_attachment">+ Add Attachment File</string>
+    <string name="edit_notes">Notes &amp; Custom Fields</string>
+    <string name="edit_notes_hint">Entry notes (Optional)</string>
+    <string name="edit_save_btn">S A V E   E N T R Y</string>
+    <string name="edit_discard_title">Discard unsaved changes?</string>
+    <string name="edit_discard_desc">Modifications made to this entry are unsaved. Leaving now will discard all inputs.</string>
+
+    <!-- Icon Picker -->
+    <string name="icon_picker_title">Select Icon</string>
+
+    <!-- Settings -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_cat_storage">Vault &amp; Storage</string>
+    <string name="settings_database">Database &amp; Encryption</string>
+    <string name="settings_database_sub">KDBX 4.1 · Argon2id · Encryption parameters &amp; Recycle Bin</string>
+    <string name="settings_sync">Cloud Synchronization</string>
+    <string name="settings_sync_sub">WebDAV &amp; S3 compatible multi-protocol sync</string>
+    <string name="settings_change_master_key">Change Master Key</string>
+    <string name="settings_change_master_key_sub">Reset master password and key derivation settings</string>
+    <string name="settings_cat_security">Security &amp; Audit</string>
+    <string name="settings_security">Device Unlock &amp; Security</string>
+    <string name="settings_security_sub">Biometrics, background auto-lock, screenshot protection</string>
+    <string name="settings_health">Health Check &amp; Audit</string>
+    <string name="settings_health_sub">Weak passwords, reuse detection, breach checking</string>
+    <string name="settings_cat_preferences">Preferences &amp; Integration</string>
+    <string name="settings_autofill">Autofill &amp; Passkey</string>
+    <string name="settings_autofill_sub">System credential provider, Passkeys, clipboard protection</string>
+    <string name="settings_theme">Appearance &amp; Theme</string>
+    <string name="settings_theme_sub">Theme mode, language preference, list display options</string>
+    <string name="settings_about">About KeePasskey</string>
+    <string name="settings_language">Language</string>
+    <string name="settings_lang_system">Follow System</string>
+    <string name="settings_lang_zh">简体中文 (Simplified Chinese)</string>
+    <string name="settings_lang_en">English</string>
+</resources>

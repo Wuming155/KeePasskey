@@ -1,6 +1,8 @@
 package com.keepasskey.app.ui.screens.edit
 
 import com.keepasskey.app.ui.model.EntryCategory
+import com.keepasskey.app.ui.model.UiAttachment
+import com.keepasskey.app.ui.model.UiCustomField
 import com.keepasskey.app.ui.model.VaultGroup
 
 /**
@@ -10,6 +12,7 @@ data class EntryEditUiState(
     val entryId: String? = null,
     val groupId: String? = null,
     val availableGroups: List<VaultGroup> = emptyList(),
+    val iconName: String = "key",
     val title: String = "",
     val username: String = "",
     val password: String = "",
@@ -18,6 +21,8 @@ data class EntryEditUiState(
     val isPasskey: Boolean = false,
     val totpSecret: String = "",
     val selectedCategory: EntryCategory = EntryCategory.LOGIN,
+    val customFields: List<UiCustomField> = emptyList(),
+    val attachments: List<UiAttachment> = emptyList(),
     val isPasswordVisible: Boolean = false,
     val showGenerator: Boolean = false,
     val passLength: Float = 20f,
@@ -27,5 +32,7 @@ data class EntryEditUiState(
     val useSymbols: Boolean = true,
     val excludeConfusing: Boolean = true,
     val userMessage: String? = null,
-    val isSaved: Boolean = false
+    val isSaved: Boolean = false,
+    // 表单脏标记：发生任何未保存修改后为 true，驱动返回前的丢弃确认
+    val isDirty: Boolean = false
 )

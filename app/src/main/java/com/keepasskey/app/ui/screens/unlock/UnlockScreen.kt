@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -25,10 +26,12 @@ import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -36,6 +39,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -44,6 +48,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -53,13 +58,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import android.content.res.Configuration
-import androidx.compose.ui.tooling.preview.Preview
+import com.keepasskey.app.R
 import com.keepasskey.app.ui.components.BentoCard
 import com.keepasskey.app.ui.components.ThemeToggleCapsule
 import com.keepasskey.app.ui.theme.AppThemeMode
 import com.keepasskey.app.ui.theme.CapsuleShape
-import com.keepasskey.app.ui.theme.KeePasskeyTheme
 import com.keepasskey.app.ui.theme.MonospacePasswordStyle
 
 /**
@@ -70,6 +73,7 @@ fun UnlockScreen(
     currentTheme: AppThemeMode,
     onThemeToggle: () -> Unit,
     onUnlockSuccess: () -> Unit,
+    onNavigateToDatabasePicker: () -> Unit = {},
     modifier: Modifier = Modifier,
     viewModel: UnlockViewModel = hiltViewModel()
 ) {
@@ -79,7 +83,6 @@ fun UnlockScreen(
         viewModel.events.collect { event ->
             when (event) {
                 is UnlockEvent.UnlockSuccess -> onUnlockSuccess()
-                is UnlockEvent.ShowMessage -> { /* 预留错误弹窗 */ }
             }
         }
     }
@@ -93,6 +96,7 @@ fun UnlockScreen(
         onToggleKeyFile = viewModel::onToggleKeyFile,
         onUnlock = viewModel::unlock,
         onBiometricUnlock = viewModel::unlockWithBiometric,
+        onNavigateToDatabasePicker = onNavigateToDatabasePicker,
         modifier = modifier
     )
 }
@@ -110,6 +114,7 @@ fun UnlockContent(
     onToggleKeyFile: () -> Unit,
     onUnlock: () -> Unit,
     onBiometricUnlock: () -> Unit,
+    onNavigateToDatabasePicker: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val scrollState = rememberScrollState()
@@ -117,6 +122,7 @@ fun UnlockContent(
     Box(
         modifier = modifier
             .fillMaxSize()
+            .statusBarsPadding()
             .background(MaterialTheme.colorScheme.background)
     ) {
         // 右上角快速主题切换
@@ -168,7 +174,7 @@ fun UnlockContent(
                 ) {
                     Icon(
                         imageVector = Icons.Default.Lock,
-                        contentDescription = "Vault Locked",
+                        contentDescription = stringResource(R.string.cd_vault_locked),
                         tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(34.dp)
                     )
@@ -178,7 +184,7 @@ fun UnlockContent(
             Spacer(modifier = Modifier.height(20.dp))
 
             Text(
-                text = "KeePasskey",
+                text = stringResource(R.string.unlock_title),
                 style = MaterialTheme.typography.displayLarge.copy(fontWeight = FontWeight.Bold),
                 color = MaterialTheme.colorScheme.onBackground
             )
@@ -186,7 +192,7 @@ fun UnlockContent(
             Spacer(modifier = Modifier.height(6.dp))
 
             Text(
-                text = "密码库已锁定 • KDBX v4 (Argon2d + AES-256)",
+                text = stringResource(R.string.unlock_subtitle),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -195,32 +201,47 @@ fun UnlockContent(
 
             // 当前数据库概要条目
             BentoCard(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(MaterialTheme.shapes.medium)
+                    .clickable { onNavigateToDatabasePicker() },
                 backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow,
                 shape = MaterialTheme.shapes.medium
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.CheckCircle,
-                        contentDescription = "Active DB",
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Column {
-                        Text(
-                            text = uiState.databaseName,
-                            style = MaterialTheme.typography.titleMedium,
-                            color = MaterialTheme.colorScheme.onSurface
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.CheckCircle,
+                            contentDescription = stringResource(R.string.cd_active_database),
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(18.dp)
                         )
-                        Text(
-                            text = uiState.databaseStatus,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column {
+                            Text(
+                                text = uiState.databaseName,
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = uiState.databaseStatus,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    TextButton(onClick = onNavigateToDatabasePicker) {
+                        Icon(Icons.Default.SwapHoriz, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(stringResource(R.string.unlock_switch_vault), fontSize = 12.sp)
                     }
                 }
             }
@@ -231,8 +252,18 @@ fun UnlockContent(
             OutlinedTextField(
                 value = uiState.password,
                 onValueChange = onPasswordChange,
-                label = { Text("主密码 (Master Password)") },
-                placeholder = { Text("输入主密码以解锁") },
+                label = { Text(stringResource(R.string.unlock_master_password)) },
+                placeholder = { Text(stringResource(R.string.unlock_master_password_hint)) },
+                isError = uiState.errorMessage != null,
+                supportingText = {
+                    uiState.errorMessage?.let { message ->
+                        Text(
+                            text = message,
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                },
                 singleLine = true,
                 visualTransformation = if (uiState.isPasswordVisible) VisualTransformation.None else PasswordVisualTransformation('●'),
                 keyboardOptions = KeyboardOptions(
@@ -244,7 +275,7 @@ fun UnlockContent(
                     IconButton(onClick = onTogglePasswordVisibility) {
                         Icon(
                             imageVector = if (uiState.isPasswordVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                            contentDescription = if (uiState.isPasswordVisible) "隐藏密码" else "显示密码",
+                            contentDescription = if (uiState.isPasswordVisible) stringResource(R.string.cd_hide_password) else stringResource(R.string.cd_show_password),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
@@ -276,13 +307,14 @@ fun UnlockContent(
             ) {
                 Icon(
                     imageVector = Icons.Default.AttachFile,
-                    contentDescription = "Keyfile",
+                    contentDescription = stringResource(R.string.cd_keyfile),
                     tint = if (uiState.hasKeyFile) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(18.dp)
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = if (uiState.hasKeyFile) "已载入密钥文件: ${uiState.keyFileName}" else "附加密钥文件 (.key) [可选]",
+                    text = if (uiState.hasKeyFile) stringResource(R.string.unlock_keyfile_selected, uiState.keyFileName)
+                    else stringResource(R.string.unlock_keyfile_none),
                     style = MaterialTheme.typography.bodyMedium,
                     color = if (uiState.hasKeyFile) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -293,6 +325,7 @@ fun UnlockContent(
             // 主操作：解锁密码库
             Button(
                 onClick = onUnlock,
+                enabled = !uiState.isLoading,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(52.dp),
@@ -302,10 +335,23 @@ fun UnlockContent(
                     contentColor = MaterialTheme.colorScheme.onPrimary
                 )
             ) {
-                Text(
-                    text = "解 锁 密 码 库",
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold)
-                )
+                if (uiState.isLoading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.onPrimary
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text(
+                        text = "正在验证主密码...",
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold)
+                    )
+                } else {
+                    Text(
+                        text = stringResource(R.string.unlock_btn_unlock),
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold)
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(14.dp))
@@ -328,13 +374,13 @@ fun UnlockContent(
             ) {
                 Icon(
                     imageVector = Icons.Default.Fingerprint,
-                    contentDescription = "Biometric",
+                    contentDescription = stringResource(R.string.cd_biometric),
                     tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(22.dp)
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "使用指纹 / 面容快速解锁",
+                    text = stringResource(R.string.unlock_btn_biometric),
                     style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium)
                 )
             }
@@ -347,51 +393,15 @@ fun UnlockContent(
                 horizontalArrangement = Arrangement.Center
             ) {
                 Text(
-                    text = "切换数据库",
+                    text = stringResource(R.string.unlock_switch_vault),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier
                         .clip(CapsuleShape)
-                        .clickable { }
-                        .padding(horizontal = 12.dp, vertical = 6.dp)
-                )
-                Text(
-                    text = "•",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.outline,
-                    modifier = Modifier.padding(vertical = 6.dp)
-                )
-                Text(
-                    text = "新建密码库",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier
-                        .clip(CapsuleShape)
-                        .clickable { }
+                        .clickable { onNavigateToDatabasePicker() }
                         .padding(horizontal = 12.dp, vertical = 6.dp)
                 )
             }
         }
-    }
-}
-
-@Preview(name = "浅色模式", showBackground = true)
-@Preview(name = "深色模式", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
-@Composable
-private fun UnlockContentPreview() {
-    KeePasskeyTheme {
-        UnlockContent(
-            uiState = UnlockUiState(
-                password = "SamplePassword123",
-                hasKeyFile = true
-            ),
-            currentTheme = AppThemeMode.SYSTEM,
-            onThemeToggle = {},
-            onPasswordChange = {},
-            onTogglePasswordVisibility = {},
-            onToggleKeyFile = {},
-            onUnlock = {},
-            onBiometricUnlock = {}
-        )
     }
 }

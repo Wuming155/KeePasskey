@@ -16,7 +16,7 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 /**
- * 设置页面状态容器 ViewModel
+ * 设置页面状态容器 ViewModel (涵盖 KeePass2Android 与 KeePassDX 2026 高保真全量偏好)
  */
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
@@ -63,7 +63,10 @@ class SettingsViewModel @Inject constructor(
             argon2Iterations = 3L,
             argon2MemoryMb = 64L,
             argon2Parallelism = 4,
-            recycleBinEnabled = true
+            recycleBinEnabled = true,
+            tanExpiresOnUse = true,
+            checkForDuplicateUuids = true,
+            childDatabasesCount = 0
         )
     )
 
@@ -71,17 +74,72 @@ class SettingsViewModel @Inject constructor(
         SecurityTimeoutUiState(
             autoLockTimeoutSeconds = 0,
             autoLockTimeoutLabel = "立即锁定",
-            clipboardTimeoutSeconds = 30,
             clipboardTimeoutLabel = "30 秒"
         )
     )
 
-    private val displayConfigStateFlow = MutableStateFlow(
-        DisplayConfigUiState(
-            showUsernameInList = true,
-            showOtpInList = true,
-            showPasskeyBadge = true
-        )
+    // KP2A 进阶特性与文件处理、快速解锁、显示、TOTP、调试日志状态集
+    private val extendedSettingsFlow = MutableStateFlow(ExtendedSettings())
+
+    private data class ExtendedSettings(
+        // 文件处理与进阶同步
+        val useOfflineCache: Boolean = true,
+        val periodicBackgroundSyncEnabled: Boolean = false,
+        val periodicBackgroundSyncIntervalMinutes: Int = 30,
+        val allowedWifiSsids: String = "",
+        val createBackupBeforeSave: Boolean = true,
+        val checkRemoteChangesBeforeSave: Boolean = true,
+        val conflictResolution: ConflictResolution = ConflictResolution.AUTO_MERGE,
+        val useFileTransactions: Boolean = true,
+        val acceptAllCertificates: Boolean = false,
+        val cleartextTrafficPermitted: Boolean = false,
+        val webdavChunkedUpload: Boolean = false,
+        val webdavChunkSizeMb: Int = 10,
+        val preloadDatabaseEnabled: Boolean = true,
+
+        // 快速解锁与安全增强
+        val quickUnlockEnabled: Boolean = true,
+        val quickUnlockLength: Int = 3,
+        val quickUnlockObscureInput: Boolean = true,
+        val quickUnlockHideLength: Boolean = false,
+        val quickUnlockRequireDeviceLock: Boolean = true,
+        val quickUnlockUseDedicatedKey: Boolean = false,
+        val lockWhenScreenOff: Boolean = true,
+        val lockWhenNavigateBack: Boolean = false,
+        val clearPasswordOnLeave: Boolean = false,
+        val rememberRecentFiles: Boolean = true,
+        val rememberKeyFileLocation: Boolean = true,
+        val showKillAppOption: Boolean = false,
+
+        // 自动填充进阶
+        val offerSaveCredentials: Boolean = true,
+        val inlineSuggestionsEnabled: Boolean = true,
+        val autoReturnFromQuery: Boolean = true,
+        val autofillCopyTotp: Boolean = true,
+        val autofillShowTotpNotification: Boolean = false,
+        val skipDalVerification: Boolean = false,
+        val overrideNoAutofill: Boolean = false,
+        val disabledAutofillQueriesCount: Int = 0,
+
+        // 显示与视觉进阶
+        val maskPasswordsDefault: Boolean = true,
+        val maskTotpDefault: Boolean = false,
+        val showUnlockedNotification: Boolean = true,
+        val showGroupInSearchResult: Boolean = true,
+        val showGroupInEntry: Boolean = false,
+        val listDensity: ListDensity = ListDensity.NORMAL,
+        val autoActivateSearchOnOpen: Boolean = false,
+        val iconSet: IconSetOption = IconSetOption.MATERIAL,
+
+        // TOTP 规范字段映射
+        val totpSeedFieldName: String = "TOTP Seed",
+        val totpSettingsFieldName: String = "TOTP Settings",
+        val defaultTotpStepSeconds: Int = 30,
+        val defaultTotpDigits: Int = 6,
+
+        // 调试日志
+        val debugLogEnabled: Boolean = false,
+        val verboseSyncLog: Boolean = false
     )
 
     private data class SyncUiState(
@@ -127,20 +185,16 @@ class SettingsViewModel @Inject constructor(
         val argon2Iterations: Long,
         val argon2MemoryMb: Long,
         val argon2Parallelism: Int,
-        val recycleBinEnabled: Boolean
+        val recycleBinEnabled: Boolean,
+        val tanExpiresOnUse: Boolean,
+        val checkForDuplicateUuids: Boolean,
+        val childDatabasesCount: Int
     )
 
     private data class SecurityTimeoutUiState(
         val autoLockTimeoutSeconds: Int,
         val autoLockTimeoutLabel: String,
-        val clipboardTimeoutSeconds: Int,
         val clipboardTimeoutLabel: String
-    )
-
-    private data class DisplayConfigUiState(
-        val showUsernameInList: Boolean,
-        val showOtpInList: Boolean,
-        val showPasskeyBadge: Boolean
     )
 
     val uiState: StateFlow<SettingsUiState> = combine(
@@ -148,8 +202,8 @@ class SettingsViewModel @Inject constructor(
         syncStateFlow,
         healthStateFlow,
         combine(autofillStateFlow, databaseConfigStateFlow) { af, db -> Pair(af, db) },
-        combine(securityTimeoutStateFlow, displayConfigStateFlow) { sec, disp -> Pair(sec, disp) }
-    ) { userSettings, syncState, healthState, (autofillState, dbState), (secState, displayState) ->
+        combine(securityTimeoutStateFlow, extendedSettingsFlow) { sec, ext -> Pair(sec, ext) }
+    ) { userSettings, syncState, healthState, (autofillState, dbState), (secState, extState) ->
         SettingsUiState(
             // 1. 密码库与加密设置
             databaseName = dbState.databaseName,
@@ -160,8 +214,11 @@ class SettingsViewModel @Inject constructor(
             argon2MemoryMb = dbState.argon2MemoryMb,
             argon2Parallelism = dbState.argon2Parallelism,
             recycleBinEnabled = dbState.recycleBinEnabled,
+            tanExpiresOnUse = dbState.tanExpiresOnUse,
+            checkForDuplicateUuids = dbState.checkForDuplicateUuids,
+            childDatabasesCount = dbState.childDatabasesCount,
 
-            // 2. 云端多协议同步
+            // 2. 云端多协议同步与文件处理
             syncProvider = syncState.provider,
             webdavUrl = syncState.webdavUrl,
             webdavUsername = syncState.webdavUsername,
@@ -179,14 +236,36 @@ class SettingsViewModel @Inject constructor(
             wifiOnlySync = syncState.wifiOnlySync,
             isSyncing = syncState.isSyncing,
             syncFeedbackMessage = syncState.syncFeedbackMessage,
+            useOfflineCache = extState.useOfflineCache,
+            periodicBackgroundSyncEnabled = extState.periodicBackgroundSyncEnabled,
+            periodicBackgroundSyncIntervalMinutes = extState.periodicBackgroundSyncIntervalMinutes,
+            allowedWifiSsids = extState.allowedWifiSsids,
+            createBackupBeforeSave = extState.createBackupBeforeSave,
+            checkRemoteChangesBeforeSave = extState.checkRemoteChangesBeforeSave,
+            conflictResolution = extState.conflictResolution,
+            useFileTransactions = extState.useFileTransactions,
+            acceptAllCertificates = extState.acceptAllCertificates,
+            cleartextTrafficPermitted = extState.cleartextTrafficPermitted,
+            webdavChunkedUpload = extState.webdavChunkedUpload,
+            webdavChunkSizeMb = extState.webdavChunkSizeMb,
+            preloadDatabaseEnabled = extState.preloadDatabaseEnabled,
 
             // 3. 表单自动填充与 Passkey
             credentialProviderEnabled = autofillState.credentialProviderEnabled,
             passkeySupportEnabled = autofillState.passkeySupportEnabled,
             autofillServiceEnabled = autofillState.autofillServiceEnabled,
+            offerSaveCredentials = extState.offerSaveCredentials,
+            inlineSuggestionsEnabled = extState.inlineSuggestionsEnabled,
+            autoReturnFromQuery = extState.autoReturnFromQuery,
+            autofillCopyTotp = extState.autofillCopyTotp,
+            autofillShowTotpNotification = extState.autofillShowTotpNotification,
+            skipDalVerification = extState.skipDalVerification,
+            overrideNoAutofill = extState.overrideNoAutofill,
+            disabledAutofillQueriesCount = extState.disabledAutofillQueriesCount,
 
             // 4. 设备解锁与安全
             themeMode = userSettings.themeMode,
+            appLanguage = userSettings.appLanguage,
             oledBlackOptimization = userSettings.oledBlackOptimization,
             biometricEnabled = userSettings.biometricEnabled,
             autoLockBackground = userSettings.autoLockBackground,
@@ -194,15 +273,41 @@ class SettingsViewModel @Inject constructor(
             autoClearClipboard = userSettings.autoClearClipboard,
             autoLockTimeoutSeconds = secState.autoLockTimeoutSeconds,
             autoLockTimeoutLabel = secState.autoLockTimeoutLabel,
-            clipboardTimeoutSeconds = secState.clipboardTimeoutSeconds,
+            clipboardTimeoutSeconds = userSettings.clipboardTimeoutSeconds,
             clipboardTimeoutLabel = secState.clipboardTimeoutLabel,
+            quickUnlockEnabled = extState.quickUnlockEnabled,
+            quickUnlockLength = extState.quickUnlockLength,
+            quickUnlockObscureInput = extState.quickUnlockObscureInput,
+            quickUnlockHideLength = extState.quickUnlockHideLength,
+            quickUnlockRequireDeviceLock = extState.quickUnlockRequireDeviceLock,
+            quickUnlockUseDedicatedKey = extState.quickUnlockUseDedicatedKey,
+            lockWhenScreenOff = extState.lockWhenScreenOff,
+            lockWhenNavigateBack = extState.lockWhenNavigateBack,
+            clearPasswordOnLeave = extState.clearPasswordOnLeave,
+            rememberRecentFiles = extState.rememberRecentFiles,
+            rememberKeyFileLocation = extState.rememberKeyFileLocation,
+            showKillAppOption = extState.showKillAppOption,
 
             // 5. 外观与显示偏好
-            showUsernameInList = displayState.showUsernameInList,
-            showOtpInList = displayState.showOtpInList,
-            showPasskeyBadge = displayState.showPasskeyBadge,
+            showUsernameInList = userSettings.showUsernameInList,
+            showOtpInList = userSettings.showOtpInList,
+            showPasskeyBadge = userSettings.showPasskeyBadge,
+            maskPasswordsDefault = extState.maskPasswordsDefault,
+            maskTotpDefault = extState.maskTotpDefault,
+            showUnlockedNotification = extState.showUnlockedNotification,
+            showGroupInSearchResult = extState.showGroupInSearchResult,
+            showGroupInEntry = extState.showGroupInEntry,
+            listDensity = extState.listDensity,
+            autoActivateSearchOnOpen = extState.autoActivateSearchOnOpen,
+            iconSet = extState.iconSet,
 
-            // 6. 密码库健康度检查
+            // 6. TOTP 规范字段映射
+            totpSeedFieldName = extState.totpSeedFieldName,
+            totpSettingsFieldName = extState.totpSettingsFieldName,
+            defaultTotpStepSeconds = extState.defaultTotpStepSeconds,
+            defaultTotpDigits = extState.defaultTotpDigits,
+
+            // 7. 密码库健康度检查
             healthScore = healthState.healthScore,
             healthStatus = healthState.healthStatus,
             healthMessage = healthState.healthMessage,
@@ -210,13 +315,23 @@ class SettingsViewModel @Inject constructor(
             reusedPasswordCount = healthState.reusedPasswordCount,
             compromisedPasswordCount = healthState.compromisedPasswordCount,
             lastHealthScanTime = healthState.lastHealthScanTime,
-            isHealthScanning = healthState.isHealthScanning
+            isHealthScanning = healthState.isHealthScanning,
+
+            // 8. 调试日志
+            debugLogEnabled = extState.debugLogEnabled,
+            verboseSyncLog = extState.verboseSyncLog
         )
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5000),
         initialValue = SettingsUiState()
     )
+
+    fun setAppLanguage(language: com.keepasskey.app.data.repository.AppLanguage) {
+        viewModelScope.launch {
+            settingsRepository.setAppLanguage(language)
+        }
+    }
 
     fun setThemeMode(themeMode: AppThemeMode) {
         viewModelScope.launch {
@@ -319,8 +434,9 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun setClipboardTimeout(seconds: Int, label: String) {
-        securityTimeoutStateFlow.update {
-            it.copy(clipboardTimeoutSeconds = seconds, clipboardTimeoutLabel = label)
+        securityTimeoutStateFlow.update { it.copy(clipboardTimeoutLabel = label) }
+        viewModelScope.launch {
+            settingsRepository.setClipboardTimeout(seconds)
         }
     }
 
@@ -348,12 +464,215 @@ class SettingsViewModel @Inject constructor(
         databaseConfigStateFlow.update { it.copy(recycleBinEnabled = enabled) }
     }
 
+    fun setTanExpiresOnUse(enabled: Boolean) {
+        databaseConfigStateFlow.update { it.copy(tanExpiresOnUse = enabled) }
+    }
+
+    fun setCheckForDuplicateUuids(enabled: Boolean) {
+        databaseConfigStateFlow.update { it.copy(checkForDuplicateUuids = enabled) }
+    }
+
     fun setShowUsernameInList(enabled: Boolean) {
-        displayConfigStateFlow.update { it.copy(showUsernameInList = enabled) }
+        viewModelScope.launch {
+            settingsRepository.setShowUsernameInList(enabled)
+        }
     }
 
     fun setShowOtpInList(enabled: Boolean) {
-        displayConfigStateFlow.update { it.copy(showOtpInList = enabled) }
+        viewModelScope.launch {
+            settingsRepository.setShowOtpInList(enabled)
+        }
+    }
+
+    fun setShowPasskeyBadge(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.setShowPasskeyBadge(enabled)
+        }
+    }
+
+    // ========== KP2A 扩展：安全与快速解锁控制 ==========
+    fun setQuickUnlockEnabled(enabled: Boolean) {
+        extendedSettingsFlow.update { it.copy(quickUnlockEnabled = enabled) }
+    }
+
+    fun setQuickUnlockLength(length: Int) {
+        extendedSettingsFlow.update { it.copy(quickUnlockLength = length) }
+    }
+
+    fun setQuickUnlockObscureInput(enabled: Boolean) {
+        extendedSettingsFlow.update { it.copy(quickUnlockObscureInput = enabled) }
+    }
+
+    fun setQuickUnlockHideLength(enabled: Boolean) {
+        extendedSettingsFlow.update { it.copy(quickUnlockHideLength = enabled) }
+    }
+
+    fun setQuickUnlockRequireDeviceLock(enabled: Boolean) {
+        extendedSettingsFlow.update { it.copy(quickUnlockRequireDeviceLock = enabled) }
+    }
+
+    fun setQuickUnlockUseDedicatedKey(enabled: Boolean) {
+        extendedSettingsFlow.update { it.copy(quickUnlockUseDedicatedKey = enabled) }
+    }
+
+    fun setLockWhenScreenOff(enabled: Boolean) {
+        extendedSettingsFlow.update { it.copy(lockWhenScreenOff = enabled) }
+    }
+
+    fun setLockWhenNavigateBack(enabled: Boolean) {
+        extendedSettingsFlow.update { it.copy(lockWhenNavigateBack = enabled) }
+    }
+
+    fun setClearPasswordOnLeave(enabled: Boolean) {
+        extendedSettingsFlow.update { it.copy(clearPasswordOnLeave = enabled) }
+    }
+
+    fun setRememberRecentFiles(enabled: Boolean) {
+        extendedSettingsFlow.update { it.copy(rememberRecentFiles = enabled) }
+    }
+
+    fun setRememberKeyFileLocation(enabled: Boolean) {
+        extendedSettingsFlow.update { it.copy(rememberKeyFileLocation = enabled) }
+    }
+
+    fun setShowKillAppOption(enabled: Boolean) {
+        extendedSettingsFlow.update { it.copy(showKillAppOption = enabled) }
+    }
+
+    // ========== KP2A 扩展：表单自动填充与体验 ==========
+    fun setOfferSaveCredentials(enabled: Boolean) {
+        extendedSettingsFlow.update { it.copy(offerSaveCredentials = enabled) }
+    }
+
+    fun setInlineSuggestionsEnabled(enabled: Boolean) {
+        extendedSettingsFlow.update { it.copy(inlineSuggestionsEnabled = enabled) }
+    }
+
+    fun setAutoReturnFromQuery(enabled: Boolean) {
+        extendedSettingsFlow.update { it.copy(autoReturnFromQuery = enabled) }
+    }
+
+    fun setAutofillCopyTotp(enabled: Boolean) {
+        extendedSettingsFlow.update { it.copy(autofillCopyTotp = enabled) }
+    }
+
+    fun setAutofillShowTotpNotification(enabled: Boolean) {
+        extendedSettingsFlow.update { it.copy(autofillShowTotpNotification = enabled) }
+    }
+
+    fun setSkipDalVerification(enabled: Boolean) {
+        extendedSettingsFlow.update { it.copy(skipDalVerification = enabled) }
+    }
+
+    fun setOverrideNoAutofill(enabled: Boolean) {
+        extendedSettingsFlow.update { it.copy(overrideNoAutofill = enabled) }
+    }
+
+    // ========== KP2A 扩展：显示与外观交互 ==========
+    fun setMaskPasswordsDefault(enabled: Boolean) {
+        extendedSettingsFlow.update { it.copy(maskPasswordsDefault = enabled) }
+    }
+
+    fun setMaskTotpDefault(enabled: Boolean) {
+        extendedSettingsFlow.update { it.copy(maskTotpDefault = enabled) }
+    }
+
+    fun setShowUnlockedNotification(enabled: Boolean) {
+        extendedSettingsFlow.update { it.copy(showUnlockedNotification = enabled) }
+    }
+
+    fun setShowGroupInSearchResult(enabled: Boolean) {
+        extendedSettingsFlow.update { it.copy(showGroupInSearchResult = enabled) }
+    }
+
+    fun setShowGroupInEntry(enabled: Boolean) {
+        extendedSettingsFlow.update { it.copy(showGroupInEntry = enabled) }
+    }
+
+    fun setListDensity(density: ListDensity) {
+        extendedSettingsFlow.update { it.copy(listDensity = density) }
+    }
+
+    fun setAutoActivateSearchOnOpen(enabled: Boolean) {
+        extendedSettingsFlow.update { it.copy(autoActivateSearchOnOpen = enabled) }
+    }
+
+    fun setIconSet(iconSet: IconSetOption) {
+        extendedSettingsFlow.update { it.copy(iconSet = iconSet) }
+    }
+
+    // ========== KP2A 扩展：文件处理与高级同步策略 ==========
+    fun setUseOfflineCache(enabled: Boolean) {
+        extendedSettingsFlow.update { it.copy(useOfflineCache = enabled) }
+    }
+
+    fun setPeriodicBackgroundSyncEnabled(enabled: Boolean) {
+        extendedSettingsFlow.update { it.copy(periodicBackgroundSyncEnabled = enabled) }
+    }
+
+    fun setPeriodicBackgroundSyncInterval(minutes: Int) {
+        extendedSettingsFlow.update { it.copy(periodicBackgroundSyncIntervalMinutes = minutes) }
+    }
+
+    fun setAllowedWifiSsids(ssids: String) {
+        extendedSettingsFlow.update { it.copy(allowedWifiSsids = ssids) }
+    }
+
+    fun setCreateBackupBeforeSave(enabled: Boolean) {
+        extendedSettingsFlow.update { it.copy(createBackupBeforeSave = enabled) }
+    }
+
+    fun setCheckRemoteChangesBeforeSave(enabled: Boolean) {
+        extendedSettingsFlow.update { it.copy(checkRemoteChangesBeforeSave = enabled) }
+    }
+
+    fun setConflictResolution(resolution: ConflictResolution) {
+        extendedSettingsFlow.update { it.copy(conflictResolution = resolution) }
+    }
+
+    fun setUseFileTransactions(enabled: Boolean) {
+        extendedSettingsFlow.update { it.copy(useFileTransactions = enabled) }
+    }
+
+    fun setAcceptAllCertificates(enabled: Boolean) {
+        extendedSettingsFlow.update { it.copy(acceptAllCertificates = enabled) }
+    }
+
+    fun setCleartextTrafficPermitted(enabled: Boolean) {
+        extendedSettingsFlow.update { it.copy(cleartextTrafficPermitted = enabled) }
+    }
+
+    fun setWebdavChunkedUpload(enabled: Boolean) {
+        extendedSettingsFlow.update { it.copy(webdavChunkedUpload = enabled) }
+    }
+
+    fun setWebdavChunkSizeMb(sizeMb: Int) {
+        extendedSettingsFlow.update { it.copy(webdavChunkSizeMb = sizeMb) }
+    }
+
+    fun setPreloadDatabaseEnabled(enabled: Boolean) {
+        extendedSettingsFlow.update { it.copy(preloadDatabaseEnabled = enabled) }
+    }
+
+    // ========== KP2A 扩展：TOTP 规范映射 ==========
+    fun updateTotpFieldMapping(seedField: String, settingsField: String, stepSeconds: Int, digits: Int) {
+        extendedSettingsFlow.update {
+            it.copy(
+                totpSeedFieldName = seedField,
+                totpSettingsFieldName = settingsField,
+                defaultTotpStepSeconds = stepSeconds,
+                defaultTotpDigits = digits
+            )
+        }
+    }
+
+    // ========== KP2A 扩展：调试日志 ==========
+    fun setDebugLogEnabled(enabled: Boolean) {
+        extendedSettingsFlow.update { it.copy(debugLogEnabled = enabled) }
+    }
+
+    fun setVerboseSyncLog(enabled: Boolean) {
+        extendedSettingsFlow.update { it.copy(verboseSyncLog = enabled) }
     }
 
     fun triggerSync() {

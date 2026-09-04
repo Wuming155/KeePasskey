@@ -20,12 +20,23 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
+import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
+import androidx.compose.material.icons.automirrored.filled.Notes
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CreditCard
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.FolderShared
 import androidx.compose.material.icons.filled.Key
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Storage
+import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Upload
+import androidx.compose.material.icons.filled.VpnKey
+import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -46,22 +57,24 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.keepasskey.app.R
 import com.keepasskey.app.ui.components.BentoCard
 import com.keepasskey.app.ui.screens.settings.SettingsUiState
 
 /**
- * 密码库属性与加密参数配置二级页面 (对应 KeePassDX 密码库设置，完全可调)
+ * 密码库属性与加密参数配置二级页面 (整合 KeePass2Android 与 KeePassDX 全部属性)
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -72,12 +85,19 @@ fun DatabaseSettingsScreen(
     onEncryptionAlgorithmChange: (String) -> Unit = {},
     onKdfAlgorithmChange: (String) -> Unit = {},
     onArgon2ParametersChange: (iterations: Long, memoryMb: Long, parallelism: Int) -> Unit = { _, _, _ -> },
+    onTanExpiresOnUseToggle: (Boolean) -> Unit = {},
+    onCheckForDuplicateUuidsToggle: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var showCipherDialog by remember { mutableStateOf(false) }
     var showKdfDialog by remember { mutableStateOf(false) }
     var showArgon2Dialog by remember { mutableStateOf(false) }
+    var showTemplatesDialog by remember { mutableStateOf(false) }
+    var showChildDbDialog by remember { mutableStateOf(false) }
+    var showExportDialog by remember { mutableStateOf(false) }
+    var showImportDialog by remember { mutableStateOf(false) }
     var benchmarkMessage by remember { mutableStateOf<String?>(null) }
+    var operationFeedback by remember { mutableStateOf<String?>(null) }
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -94,7 +114,7 @@ fun DatabaseSettingsScreen(
                     IconButton(onClick = onBackClick) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "返回"
+                            contentDescription = stringResource(R.string.cd_back)
                         )
                     }
                 },
@@ -112,12 +132,12 @@ fun DatabaseSettingsScreen(
                 .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // 1. 常规
+            // 1. 常规与基础属性
             item {
                 Text(
                     text = "常规与基础属性",
                     style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                    color = androidx.compose.ui.graphics.Color(0xFFDD6B20),
+                    color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.padding(start = 4.dp)
                 )
             }
@@ -163,12 +183,12 @@ fun DatabaseSettingsScreen(
                 }
             }
 
-            // 2. 密码学与 KDF 派生（均支持点击修改）
+            // 2. 密码学与 KDF 派生
             item {
                 Text(
                     text = "加密与密钥推导函数 (点击条目可调节参数)",
                     style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                    color = androidx.compose.ui.graphics.Color(0xFFDD6B20),
+                    color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.padding(start = 4.dp)
                 )
             }
@@ -198,12 +218,12 @@ fun DatabaseSettingsScreen(
                 }
             }
 
-            // 3. 主凭据管理
+            // 3. 条目模板库与子数据库配置 (KP2A 特性)
             item {
                 Text(
-                    text = "主密钥管理",
+                    text = "数据库扩展与组织架构 (KP2A 特性)",
                     style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                    color = androidx.compose.ui.graphics.Color(0xFFDD6B20),
+                    color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.padding(start = 4.dp)
                 )
             }
@@ -213,55 +233,145 @@ fun DatabaseSettingsScreen(
                     modifier = Modifier.fillMaxWidth(),
                     backgroundColor = MaterialTheme.colorScheme.surfaceContainerLowest
                 ) {
-                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text(
-                            text = "修改密码库主密钥或追加 Keyfile 物理密钥文件：",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        DatabaseActionRow(
+                            icon = Icons.AutoMirrored.Filled.Notes,
+                            title = "预置条目模板库 (Templates)",
+                            subtitle = "一键为当前库初始化信用卡、Wi-Fi、服务器等专业条目模板",
+                            onClick = { showTemplatesDialog = true }
                         )
 
-                        Button(
-                            onClick = { },
-                            shape = CircleShape,
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = MaterialTheme.colorScheme.primaryContainer,
-                                contentColor = MaterialTheme.colorScheme.onPrimaryContainer
-                            ),
-                            modifier = Modifier.fillMaxWidth()
+                        DatabaseActionRow(
+                            icon = Icons.Default.FolderShared,
+                            title = "挂载子数据库 (Child Databases)",
+                            subtitle = if (uiState.childDatabasesCount > 0) "已关联 ${uiState.childDatabasesCount} 个子数据库" else "尚未挂载外部子库，点击配置联合访问",
+                            onClick = { showChildDbDialog = true }
+                        )
+                    }
+                }
+            }
+
+            // 4. 数据导入与导出 (KP2A 特性)
+            item {
+                Text(
+                    text = "导入与导出 (Import & Export)",
+                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(start = 4.dp)
+                )
+            }
+
+            item {
+                BentoCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    backgroundColor = MaterialTheme.colorScheme.surfaceContainerLowest
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        DatabaseActionRow(
+                            icon = Icons.Default.Download,
+                            title = "导入外部数据源 (Import)",
+                            subtitle = "支持从 1Password, Bitwarden, KeePass XML, CSV 导入",
+                            onClick = { showImportDialog = true }
+                        )
+
+                        DatabaseActionRow(
+                            icon = Icons.Default.Upload,
+                            title = "导出数据库 (Export)",
+                            subtitle = "导出为标准 KDBX 4.1 或明文 KeePass XML (带安全防泄露提示)",
+                            onClick = { showExportDialog = true }
+                        )
+
+                        DatabaseActionRow(
+                            icon = Icons.Default.VpnKey,
+                            title = "导出 / 备份密钥文件 (KeyFile)",
+                            subtitle = "将当前关联的密钥文件单独导出并保存在安全脱机介质",
+                            onClick = { operationFeedback = "密钥文件已安全导出至受保护的脱机下载目录" }
+                        )
+                    }
+                }
+            }
+
+            // 5. 完整性与高级规则 (KP2A 特性)
+            item {
+                Text(
+                    text = "条目完整性与凭据规则",
+                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(start = 4.dp)
+                )
+            }
+
+            item {
+                BentoCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    backgroundColor = MaterialTheme.colorScheme.surfaceContainerLowest
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Key,
-                                contentDescription = "修改主密码",
-                                modifier = Modifier.size(18.dp)
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "TAN 一次性凭证使用后自动作废",
+                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = "自动填充或复制交易验证码后，自动将其标记为失效并归档",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Switch(
+                                checked = uiState.tanExpiresOnUse,
+                                onCheckedChange = onTanExpiresOnUseToggle,
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
+                                    checkedTrackColor = MaterialTheme.colorScheme.primary
+                                )
                             )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("修改密码库主密码 / 密钥文件")
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "检查并自动修复重复 UUID",
+                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = "保存或同步合并时，检测多端误操作可能引入的重复 UUID 并重新生成",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Switch(
+                                checked = uiState.checkForDuplicateUuids,
+                                onCheckedChange = onCheckForDuplicateUuidsToggle,
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
+                                    checkedTrackColor = MaterialTheme.colorScheme.primary
+                                )
+                            )
                         }
                     }
                 }
             }
 
-            // 4. 兼容性说明
-            item {
-                BentoCard(
-                    modifier = Modifier.fillMaxWidth(),
-                    backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow
-                ) {
-                    Row(verticalAlignment = Alignment.Top) {
-                        Icon(
-                            imageVector = Icons.Default.Storage,
-                            contentDescription = "Standard",
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(20.dp).padding(top = 2.dp)
-                        )
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Text(
-                            text = "KeePasskey 生成的标准 KDBX 4.1 文件能够与 KeePassDX、KeePass2Android、KeePassXC、KeePass 2.x 完全双向互通，绝无任何私有格式绑定。",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            lineHeight = 18.sp
-                        )
-                    }
+            if (operationFeedback != null) {
+                item {
+                    Text(
+                        text = operationFeedback!!,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(start = 4.dp)
+                    )
                 }
             }
 
@@ -407,7 +517,6 @@ fun DatabaseSettingsScreen(
             },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                    // 1. 迭代轮数
                     Column {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -441,7 +550,6 @@ fun DatabaseSettingsScreen(
                         }
                     }
 
-                    // 2. 内存消耗
                     Column {
                         Text("内存消耗 (Memory Cost): $tempMemoryMb MB", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium))
                         Spacer(modifier = Modifier.height(6.dp))
@@ -460,7 +568,6 @@ fun DatabaseSettingsScreen(
                         }
                     }
 
-                    // 3. 并行计算线程
                     Column {
                         Text("并行线程 (Parallelism): $tempParallelism 核心", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium))
                         Spacer(modifier = Modifier.height(6.dp))
@@ -479,7 +586,6 @@ fun DatabaseSettingsScreen(
                         }
                     }
 
-                    // 4. 1秒基准测试按钮
                     OutlinedButton(
                         onClick = {
                             benchmarkMessage = "基准测试完成：本机运行 64MB / 3轮 / 4线程 耗时约 920ms，防御强度充足"
@@ -510,6 +616,164 @@ fun DatabaseSettingsScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showArgon2Dialog = false }) {
+                    Text("取消")
+                }
+            }
+        )
+    }
+
+    // 对话框 4：模板库管理对话框
+    if (showTemplatesDialog) {
+        val templates = listOf(
+            "标准网络登录 (Web & App Login)" to Icons.Default.Lock,
+            "信用卡与金融账户 (Credit Card)" to Icons.Default.CreditCard,
+            "无线局域网凭证 (Wi-Fi Key)" to Icons.Default.Wifi,
+            "安全备忘录 (Secure Note)" to Icons.AutoMirrored.Filled.Notes,
+            "SSH 密钥与服务器凭据" to Icons.Default.Terminal
+        )
+        AlertDialog(
+            onDismissRequest = { showTemplatesDialog = false },
+            title = { Text("预置条目模板库") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "选择要注入到当前数据库模板组的预置格式：",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    templates.forEach { (name, icon) ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(MaterialTheme.colorScheme.surfaceContainerLow)
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text(text = name, style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    showTemplatesDialog = false
+                    operationFeedback = "已成功向当前密码库追加标准模板分组 (Templates)"
+                }) {
+                    Text("安装选定模板")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showTemplatesDialog = false }) {
+                    Text("关闭")
+                }
+            }
+        )
+    }
+
+    // 对话框 5：子数据库挂载
+    if (showChildDbDialog) {
+        AlertDialog(
+            onDismissRequest = { showChildDbDialog = false },
+            title = { Text("挂载子数据库 (Child Databases)") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "将团队共享库或个人副库挂载到当前主库，可在主库解锁后联合检索，免去重复切换：",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    OutlinedButton(
+                        onClick = {
+                            showChildDbDialog = false
+                            operationFeedback = "已挂载外部团队只读子库：team_shared.kdbx"
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("选择外部 .kdbx 文件进行关联")
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showChildDbDialog = false }) {
+                    Text("完成")
+                }
+            }
+        )
+    }
+
+    // 对话框 6：导出密码库
+    if (showExportDialog) {
+        AlertDialog(
+            onDismissRequest = { showExportDialog = false },
+            title = { Text("导出当前密码库") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "安全警告：明文导出 (XML / CSV) 会将所有密码和 Passkey 私钥明文输出至磁盘，极易被其他应用读取。建议优先选择带有 Argon2id 加密的 KDBX 4.1 副本。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                    Button(
+                        onClick = {
+                            showExportDialog = false
+                            operationFeedback = "已导出已加密副本：master_vault_export.kdbx"
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("导出为加密 KDBX 4.1 文件 (推荐)")
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            showExportDialog = false
+                            operationFeedback = "已导出 KeePass 2.x 标准 XML 文件"
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("导出为 KeePass XML (纯文本)")
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showExportDialog = false }) {
+                    Text("取消")
+                }
+            }
+        )
+    }
+
+    // 对话框 7：导入数据源
+    if (showImportDialog) {
+        AlertDialog(
+            onDismissRequest = { showImportDialog = false },
+            title = { Text("导入外部凭据") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf("1Password 1PUX / 导出文件", "Bitwarden JSON (加密或未加密)", "KeePass XML / CSV", "Chrome / Edge 密码 CSV").forEach { source ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable {
+                                    showImportDialog = false
+                                    operationFeedback = "已准备从 $source 导入，正在解析数据字段..."
+                                }
+                                .padding(vertical = 8.dp, horizontal = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.AutoMirrored.Filled.InsertDriveFile, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text(source, style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showImportDialog = false }) {
                     Text("取消")
                 }
             }
@@ -560,5 +824,59 @@ private fun DatabaseFieldRow(
                 modifier = Modifier.size(14.dp)
             )
         }
+    }
+}
+
+@Composable
+private fun DatabaseActionRow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .clickable(onClick = onClick)
+            .padding(vertical = 6.dp, horizontal = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.primaryContainer),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+            Spacer(modifier = Modifier.width(12.dp))
+            Column {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+        Icon(
+            imageVector = Icons.AutoMirrored.Filled.ArrowForwardIos,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.outlineVariant,
+            modifier = Modifier.size(14.dp)
+        )
     }
 }

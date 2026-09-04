@@ -38,11 +38,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.keepasskey.app.R
 import com.keepasskey.app.ui.components.BentoCard
 import com.keepasskey.app.ui.screens.settings.SettingsUiState
+import com.keepasskey.app.ui.theme.LocalSecurityColors
 
 /**
  * 密码库健康度检查二级详情页
@@ -55,6 +58,8 @@ fun HealthCheckScreen(
     onRescanClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val securityColors = LocalSecurityColors.current
+
     Scaffold(
         modifier = modifier.fillMaxSize(),
         containerColor = MaterialTheme.colorScheme.background,
@@ -70,7 +75,7 @@ fun HealthCheckScreen(
                     IconButton(onClick = onBackClick) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "返回"
+                            contentDescription = stringResource(R.string.cd_back)
                         )
                     }
                 },
@@ -193,7 +198,7 @@ fun HealthCheckScreen(
             item {
                 HealthAuditRowItem(
                     icon = Icons.Default.CheckCircle,
-                    iconTint = Color(0xFF2E7D32),
+                    iconTint = securityColors.success,
                     title = "弱密码检测",
                     subtitle = "0 个弱密码 · 所有凭据均达到强度标准",
                     statusText = "通过",
@@ -204,7 +209,7 @@ fun HealthCheckScreen(
             item {
                 HealthAuditRowItem(
                     icon = Icons.Default.WarningAmber,
-                    iconTint = Color(0xFFED6C02),
+                    iconTint = securityColors.warning,
                     title = "密码复用检测",
                     subtitle = "发现 ${uiState.reusedPasswordCount} 个凭据存在密码重复使用，容易引发撞库风险",
                     statusText = "需处理",
@@ -215,7 +220,7 @@ fun HealthCheckScreen(
             item {
                 HealthAuditRowItem(
                     icon = Icons.Default.CheckCircle,
-                    iconTint = Color(0xFF2E7D32),
+                    iconTint = securityColors.success,
                     title = "数据泄漏检索 (Have I Been Pwned)",
                     subtitle = "0 个已知公开泄露 · 基于 SHA-1 前缀 k-匿名本地散列比对",
                     statusText = "安全",

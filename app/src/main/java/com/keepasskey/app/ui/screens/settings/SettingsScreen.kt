@@ -24,12 +24,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
 import androidx.compose.material.icons.automirrored.filled.Assignment
+import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.HealthAndSafety
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.Password
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
@@ -63,6 +65,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -71,8 +74,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.keepasskey.app.R
 import com.keepasskey.app.ui.theme.CapsuleShape
 import com.keepasskey.app.ui.theme.KeePasskeyTheme
+import com.keepasskey.app.ui.theme.LocalSecurityColors
 import kotlinx.coroutines.launch
 
 /**
@@ -87,6 +92,8 @@ fun SettingsScreen(
     onNavigateToSecurity: () -> Unit,
     onNavigateToTheme: () -> Unit,
     onNavigateToHealth: () -> Unit,
+    onNavigateToTotp: () -> Unit = {},
+    onNavigateToDebug: () -> Unit = {},
     onNavigateToAbout: () -> Unit,
     onBackClick: () -> Unit = {},
     showBackButton: Boolean = false,
@@ -103,6 +110,8 @@ fun SettingsScreen(
         onNavigateToSecurity = onNavigateToSecurity,
         onNavigateToTheme = onNavigateToTheme,
         onNavigateToHealth = onNavigateToHealth,
+        onNavigateToTotp = onNavigateToTotp,
+        onNavigateToDebug = onNavigateToDebug,
         onNavigateToAbout = onNavigateToAbout,
         onBackClick = onBackClick,
         showBackButton = showBackButton,
@@ -123,6 +132,8 @@ fun SettingsContent(
     onNavigateToSecurity: () -> Unit,
     onNavigateToTheme: () -> Unit,
     onNavigateToHealth: () -> Unit,
+    onNavigateToTotp: () -> Unit = {},
+    onNavigateToDebug: () -> Unit = {},
     onNavigateToAbout: () -> Unit,
     onBackClick: () -> Unit = {},
     showBackButton: Boolean = false,
@@ -130,6 +141,7 @@ fun SettingsContent(
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
     val coroutineScope = rememberCoroutineScope()
+    val securityColors = LocalSecurityColors.current
     var showMasterKeyDialog by remember { mutableStateOf(false) }
 
     Scaffold(
@@ -140,7 +152,7 @@ fun SettingsContent(
             TopAppBar(
                 title = {
                     Text(
-                        text = "设置",
+                        text = stringResource(R.string.settings_title),
                         style = MaterialTheme.typography.titleLarge.copy(
                             fontWeight = FontWeight.Bold,
                             fontSize = 20.sp
@@ -152,7 +164,7 @@ fun SettingsContent(
                         IconButton(onClick = onBackClick) {
                             Icon(
                                 imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                contentDescription = "返回"
+                                contentDescription = stringResource(R.string.cd_back)
                             )
                         }
                     }
@@ -173,83 +185,100 @@ fun SettingsContent(
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             // 分类 1: 密码库与存储 (Vault & Storage)
-            ModernSectionHeader(title = "密码库与存储")
+            ModernSectionHeader(title = stringResource(R.string.settings_cat_storage))
             SettingsGroupCard {
                 ModernSettingsRow(
                     icon = Icons.Default.Storage,
-                    iconTint = Color(0xFF00897B),
-                    title = "密码库与加密",
-                    subtitle = "KDBX 4.1 · Argon2id · 加密参数与回收站",
+                    iconTint = MaterialTheme.colorScheme.primary,
+                    title = stringResource(R.string.settings_database),
+                    subtitle = stringResource(R.string.settings_database_sub),
                     onClick = onNavigateToDatabase
                 )
                 SettingsItemDivider()
                 ModernSettingsRow(
                     icon = Icons.Default.CloudSync,
-                    iconTint = Color(0xFF0288D1),
-                    title = "云端同步",
-                    subtitle = "WebDAV、兼容 S3 存储多协议自动同步",
+                    iconTint = MaterialTheme.colorScheme.tertiary,
+                    title = stringResource(R.string.settings_sync),
+                    subtitle = stringResource(R.string.settings_sync_sub),
                     onClick = onNavigateToSync,
                     trailingBadge = uiState.syncProvider.label
                 )
                 SettingsItemDivider()
                 ModernSettingsRow(
                     icon = Icons.Default.VpnKey,
-                    iconTint = Color(0xFFE65100),
-                    title = "更改主密钥",
-                    subtitle = "重设密码库主密码与安全派生凭据",
+                    iconTint = securityColors.warning,
+                    title = stringResource(R.string.settings_change_master_key),
+                    subtitle = stringResource(R.string.settings_change_master_key_sub),
                     onClick = { showMasterKeyDialog = true }
                 )
             }
 
             // 分类 2: 安全与审计 (Security & Audit)
-            ModernSectionHeader(title = "安全与审计")
+            ModernSectionHeader(title = stringResource(R.string.settings_cat_security))
             SettingsGroupCard {
                 ModernSettingsRow(
                     icon = Icons.Default.Fingerprint,
-                    iconTint = Color(0xFF5E35B1),
-                    title = "设备解锁与安全策略",
-                    subtitle = "生物识别、后台自动锁定、防截屏录屏",
+                    iconTint = securityColors.passkey,
+                    title = stringResource(R.string.settings_security),
+                    subtitle = stringResource(R.string.settings_security_sub),
                     onClick = onNavigateToSecurity
                 )
                 SettingsItemDivider()
                 ModernSettingsRow(
                     icon = Icons.Default.HealthAndSafety,
-                    iconTint = Color(0xFF2E7D32),
-                    title = "健康度检查与审计",
-                    subtitle = "弱密码、密码复用、数据泄露比对",
+                    iconTint = securityColors.success,
+                    title = stringResource(R.string.settings_health),
+                    subtitle = stringResource(R.string.settings_health_sub),
                     onClick = onNavigateToHealth,
                     trailingBadge = "${uiState.healthScore}分 · ${uiState.healthStatus}"
                 )
             }
 
             // 分类 3: 体验与集成 (Preferences & Integration)
-            ModernSectionHeader(title = "体验与集成")
+            ModernSectionHeader(title = stringResource(R.string.settings_cat_preferences))
             SettingsGroupCard {
                 ModernSettingsRow(
                     icon = Icons.AutoMirrored.Filled.Assignment,
-                    iconTint = Color(0xFF1E88E5),
-                    title = "自动填充与 Passkey",
-                    subtitle = "系统凭据提供者、通行密钥、剪贴板保护",
+                    iconTint = MaterialTheme.colorScheme.secondary,
+                    title = stringResource(R.string.settings_autofill),
+                    subtitle = stringResource(R.string.settings_autofill_sub),
                     onClick = onNavigateToAutofill
                 )
                 SettingsItemDivider()
                 ModernSettingsRow(
                     icon = Icons.Default.Palette,
-                    iconTint = Color(0xFFC2185B),
-                    title = "外观与主题",
-                    subtitle = "深浅色主题、OLED 纯黑优化、列表视图偏好",
+                    iconTint = MaterialTheme.colorScheme.tertiary,
+                    title = stringResource(R.string.settings_theme),
+                    subtitle = stringResource(R.string.settings_theme_sub),
                     onClick = onNavigateToTheme
+                )
+                SettingsItemDivider()
+                ModernSettingsRow(
+                    icon = Icons.Default.Password,
+                    iconTint = MaterialTheme.colorScheme.primary,
+                    title = "两步验证与 TOTP 映射",
+                    subtitle = "TrayTOTP / KeeOtp 字段兼容与时间步长预设",
+                    onClick = onNavigateToTotp
                 )
             }
 
             Spacer(modifier = Modifier.height(6.dp))
 
-            // 独立展示项: 关于 KeePasskey (不隶属于任何分类，独立单行展示)
+            // 分类 4: 系统维护与关于 (System, Maintenance & About)
+            ModernSectionHeader(title = "系统与维护")
             SettingsGroupCard {
+                ModernSettingsRow(
+                    icon = Icons.Default.BugReport,
+                    iconTint = securityColors.warning,
+                    title = "系统诊断与调试日志",
+                    subtitle = "本地运行流水、同步报文与故障脱敏日志",
+                    onClick = onNavigateToDebug
+                )
+                SettingsItemDivider()
                 ModernSettingsRow(
                     icon = Icons.Default.Info,
                     iconTint = MaterialTheme.colorScheme.primary,
-                    title = "关于 KeePasskey",
+                    title = stringResource(R.string.settings_about),
                     subtitle = "${uiState.appVersion} · 开源架构与技术规范",
                     onClick = onNavigateToAbout,
                     trailingBadge = "2026 Edition"
@@ -502,6 +531,8 @@ private fun SettingsContentPreview() {
             onNavigateToSecurity = {},
             onNavigateToTheme = {},
             onNavigateToHealth = {},
+            onNavigateToTotp = {},
+            onNavigateToDebug = {},
             onNavigateToAbout = {}
         )
     }

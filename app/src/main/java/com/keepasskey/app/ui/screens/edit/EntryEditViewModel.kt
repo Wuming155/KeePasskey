@@ -5,6 +5,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.ui.model.EntryCategory
+import com.keepasskey.app.ui.model.UiAttachment
+import com.keepasskey.app.ui.model.UiCustomField
 import com.keepasskey.app.ui.model.UiVaultEntry
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -66,27 +68,53 @@ class EntryEditViewModel @Inject constructor(
                     it.copy(
                         entryId = entry.id,
                         groupId = entry.groupId,
+                        iconName = entry.iconName,
                         title = entry.title,
                         username = entry.username,
                         password = entry.passwordPlain,
                         url = entry.url,
                         notes = entry.notes,
                         isPasskey = entry.isPasskey,
-                        selectedCategory = entry.category
+                        selectedCategory = entry.category,
+                        customFields = entry.customFields,
+                        attachments = entry.attachments,
+                        isDirty = false
                     )
                 }
             }
         }
     }
 
-    fun onTitleChange(title: String) = _uiState.update { it.copy(title = title) }
-    fun onUsernameChange(username: String) = _uiState.update { it.copy(username = username) }
-    fun onPasswordChange(password: String) = _uiState.update { it.copy(password = password) }
-    fun onUrlChange(url: String) = _uiState.update { it.copy(url = url) }
-    fun onNotesChange(notes: String) = _uiState.update { it.copy(notes = notes) }
-    fun onTogglePasskey() = _uiState.update { it.copy(isPasskey = !it.isPasskey) }
-    fun onTotpSecretChange(secret: String) = _uiState.update { it.copy(totpSecret = secret) }
-    fun onCategoryChange(category: EntryCategory) = _uiState.update { it.copy(selectedCategory = category) }
+    fun onIconChange(icon: String) = _uiState.update { it.copy(iconName = icon, isDirty = true) }
+    fun onTitleChange(title: String) = _uiState.update { it.copy(title = title, isDirty = true) }
+    fun onUsernameChange(username: String) = _uiState.update { it.copy(username = username, isDirty = true) }
+    fun onPasswordChange(password: String) = _uiState.update { it.copy(password = password, isDirty = true) }
+    fun onUrlChange(url: String) = _uiState.update { it.copy(url = url, isDirty = true) }
+    fun onNotesChange(notes: String) = _uiState.update { it.copy(notes = notes, isDirty = true) }
+
+    fun onTogglePasskey() = _uiState.update {
+        val nextBound = !it.isPasskey
+        it.copy(
+            isPasskey = nextBound,
+            selectedCategory = if (!nextBound && it.selectedCategory == EntryCategory.PASSKEY) {
+                EntryCategory.LOGIN
+            } else {
+                it.selectedCategory
+            },
+            isDirty = true
+        )
+    }
+
+    fun onTotpSecretChange(secret: String) = _uiState.update { it.copy(totpSecret = secret, isDirty = true) }
+
+    fun onCategoryChange(category: EntryCategory) = _uiState.update {
+        if (category == EntryCategory.PASSKEY) {
+            it.copy(selectedCategory = category, isPasskey = true, isDirty = true)
+        } else {
+            it.copy(selectedCategory = category, isPasskey = false, isDirty = true)
+        }
+    }
+
     fun onTogglePasswordVisibility() = _uiState.update { it.copy(isPasswordVisible = !it.isPasswordVisible) }
     fun onToggleGenerator() = _uiState.update { it.copy(showGenerator = !it.showGenerator) }
 
@@ -133,10 +161,52 @@ class EntryEditViewModel @Inject constructor(
             .map { pool[Random.nextInt(pool.length)] }
             .joinToString("")
 
-        _uiState.update { it.copy(password = newPassword) }
+        _uiState.update { it.copy(password = newPassword, isDirty = true) }
     }
 
-    fun onGroupChange(groupId: String?) = _uiState.update { it.copy(groupId = groupId) }
+    fun onGroupChange(groupId: String?) = _uiState.update { it.copy(groupId = groupId, isDirty = true) }
+
+    fun addCustomField() {
+        val newField = UiCustomField(
+            id = "field_${System.currentTimeMillis()}",
+            key = "",
+            value = "",
+            isProtected = false
+        )
+        _uiState.update { it.copy(customFields = it.customFields + newField, isDirty = true) }
+    }
+
+    fun updateCustomField(id: String, key: String, value: String, isProtected: Boolean) {
+        _uiState.update { state ->
+            val updated = state.customFields.map { f ->
+                if (f.id == id) f.copy(key = key, value = value, isProtected = isProtected) else f
+            }
+            state.copy(customFields = updated, isDirty = true)
+        }
+    }
+
+    fun removeCustomField(id: String) {
+        _uiState.update { state ->
+            state.copy(customFields = state.customFields.filter { it.id != id }, isDirty = true)
+        }
+    }
+
+    fun addAttachment(fileName: String, fileSizeFormatted: String) {
+        val newAtt = UiAttachment(
+            id = "att_${System.currentTimeMillis()}",
+            fileName = fileName,
+            fileSizeFormatted = fileSizeFormatted,
+            mimeType = "application/octet-stream",
+            addedAt = "刚刚"
+        )
+        _uiState.update { it.copy(attachments = it.attachments + newAtt, isDirty = true) }
+    }
+
+    fun removeAttachment(id: String) {
+        _uiState.update { state ->
+            state.copy(attachments = state.attachments.filter { it.id != id }, isDirty = true)
+        }
+    }
 
     fun saveEntry() {
         val state = _uiState.value
@@ -157,7 +227,10 @@ class EntryEditViewModel @Inject constructor(
                 isPasskey = state.isPasskey,
                 category = state.selectedCategory,
                 updatedAt = "刚刚",
-                groupId = state.groupId
+                groupId = state.groupId,
+                iconName = state.iconName,
+                customFields = state.customFields.filter { it.key.isNotBlank() },
+                attachments = state.attachments
             )
             vaultRepository.saveEntry(entry)
             _events.emit(EntryEditEvent.SaveSuccess)

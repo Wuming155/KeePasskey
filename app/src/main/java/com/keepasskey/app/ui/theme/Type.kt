@@ -38,7 +38,15 @@ val Typography = Typography(
         fontSize = 15.sp,
         lineHeight = 22.sp
     ),
+    // 回归 M3 默认 14sp：原 13sp 在低端机型上正文可读性不足
     bodyMedium = TextStyle(
+        fontFamily = FontFamily.Default,
+        fontWeight = FontWeight.Normal,
+        fontSize = 14.sp,
+        lineHeight = 20.sp
+    ),
+    // 密码列表副文案等次级正文：显式提升至 13sp，兼顾信息密度与可读性
+    bodySmall = TextStyle(
         fontFamily = FontFamily.Default,
         fontWeight = FontWeight.Normal,
         fontSize = 13.sp,

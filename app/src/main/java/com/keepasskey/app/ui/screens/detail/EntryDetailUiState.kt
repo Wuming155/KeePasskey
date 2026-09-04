@@ -10,5 +10,8 @@ data class EntryDetailUiState(
     val isLoading: Boolean = false,
     val isPasswordVisible: Boolean = false,
     val isFavorite: Boolean = false,
-    val userMessage: String? = null
+    val protectedFieldsVisibility: Map<String, Boolean> = emptyMap(),
+    val userMessage: String? = null,
+    // 复制密码提示文案（按设置中的剪贴板超时时长动态生成，避免写死时长）
+    val passwordCopyMessage: String = "密码已复制到剪贴板"
 )

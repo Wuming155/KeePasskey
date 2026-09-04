@@ -1,6 +1,7 @@
 package com.keepasskey.app.data.repository
 
 import com.keepasskey.app.ui.model.UiVaultEntry
+import com.keepasskey.app.ui.model.VaultDatabaseInfo
 import com.keepasskey.app.ui.model.VaultGroup
 import kotlinx.coroutines.flow.Flow
 
@@ -9,6 +10,36 @@ import kotlinx.coroutines.flow.Flow
  * 屏蔽上层 UI/ViewModel 对具体存储技术（KDBX / 内存 / Room）的依赖。
  */
 interface VaultRepository {
+    /**
+     * 获取所有已知密码库列表
+     */
+    fun getDatabases(): Flow<List<VaultDatabaseInfo>>
+
+    /**
+     * 切换当前选中的活动密码库
+     */
+    suspend fun selectDatabase(id: String)
+
+    /**
+     * 创建新密码库
+     */
+    suspend fun createDatabase(
+        name: String,
+        masterPassword: String,
+        keyFile: Boolean,
+        preset: String
+    )
+
+    /**
+     * 移除密码库关联
+     */
+    suspend fun removeDatabase(id: String)
+
+    /**
+     * 导入外部 KDBX 数据库
+     */
+    suspend fun importExternalDatabase(name: String, path: String)
+
     /**
      * 获取全部群组/文件夹的实时响应式流
      */
@@ -40,7 +71,17 @@ interface VaultRepository {
     suspend fun saveEntry(entry: UiVaultEntry)
 
     /**
-     * 删除凭据条目
+     * 删除凭据条目（移至回收站或彻底删除）
      */
     suspend fun deleteEntry(id: String)
+
+    /**
+     * 还原处于回收站中的凭据条目
+     */
+    suspend fun restoreEntry(id: String)
+
+    /**
+     * 清空回收站
+     */
+    suspend fun emptyRecycleBin()
 }

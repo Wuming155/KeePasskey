@@ -22,10 +22,15 @@ data class VaultListUiState(
     val isSearchActive: Boolean = false,
     val sortOption: VaultSortOption = VaultSortOption.DEFAULT,
     val currentGroupId: String? = null,
+    val isInsideRecycleBin: Boolean = false,
     val breadcrumbs: List<VaultGroup> = emptyList(),
     val currentGroups: List<VaultGroup> = emptyList(),
     val entries: List<UiVaultEntry> = emptyList(),
     val totalEntriesCount: Int = 0,
     val databaseName: String = "keepasskey.kdbx",
-    val userMessage: String? = null
+    val userMessage: String? = null,
+    // 列表视图显示偏好（来自设置仓库，设置页外观项可调）
+    val showUsernameInList: Boolean = true,
+    val showOtpInList: Boolean = true,
+    val showPasskeyBadge: Boolean = true
 )

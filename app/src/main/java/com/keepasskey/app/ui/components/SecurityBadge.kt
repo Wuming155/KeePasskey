@@ -24,7 +24,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.keepasskey.app.R
 import com.keepasskey.app.ui.theme.CapsuleShape
 import com.keepasskey.app.ui.theme.LocalSecurityColors
 
@@ -45,7 +47,7 @@ fun PasskeyBadge(
     ) {
         Icon(
             imageVector = Icons.Default.Key,
-            contentDescription = "Passkey",
+            contentDescription = stringResource(R.string.cd_passkey),
             tint = securityColors.passkey,
             modifier = Modifier.size(12.dp)
         )
@@ -72,6 +74,11 @@ fun PasswordStrengthBar(
         entropyBits >= 64 -> Triple(securityColors.warning, "中等 ($entropyBits bits)", 0.65f)
         else -> Triple(securityColors.danger, "较弱 ($entropyBits bits)", 0.35f)
     }
+    // 与页面内其他动效（如 TOTP 进度环）保持一致的平滑过渡
+    val animatedProgress by animateFloatAsState(
+        targetValue = progress,
+        label = "PasswordStrengthProgress"
+    )
 
     Row(
         modifier = modifier,
@@ -87,7 +94,7 @@ fun PasswordStrengthBar(
             Box(
                 modifier = Modifier
                     .fillMaxHeight()
-                    .fillMaxWidth(progress)
+                    .fillMaxWidth(animatedProgress)
                     .clip(CapsuleShape)
                     .background(color)
             )

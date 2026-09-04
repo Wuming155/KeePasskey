@@ -2,6 +2,7 @@ package com.keepasskey.app.ui.screens.vault
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.keepasskey.app.data.repository.SettingsRepository
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.ui.model.UiVaultEntry
 import com.keepasskey.app.ui.model.VaultGroup
@@ -20,7 +21,8 @@ import javax.inject.Inject
  */
 @HiltViewModel
 class VaultListViewModel @Inject constructor(
-    private val vaultRepository: VaultRepository
+    private val vaultRepository: VaultRepository,
+    private val settingsRepository: SettingsRepository
 ) : ViewModel() {
 
     private val currentGroupIdFlow = MutableStateFlow<String?>(null)
@@ -46,10 +48,11 @@ class VaultListViewModel @Inject constructor(
     val uiState: StateFlow<VaultListUiState> = combine(
         vaultRepository.getGroups(),
         vaultRepository.getEntries(),
-        currentGroupIdFlow,
-        filterParamsFlow,
-        userMessageFlow
-    ) { allGroups, allEntries, currentGroupId, params, message ->
+        settingsRepository.getSettings(),
+        combine(currentGroupIdFlow, filterParamsFlow, userMessageFlow) { groupId, params, message ->
+            Triple(groupId, params, message)
+        }
+    ) { allGroups, allEntries, settings, (currentGroupId, params, message) ->
         val isSearching = params.query.isNotBlank()
 
         // 计算当前面包屑路径
@@ -61,9 +64,11 @@ class VaultListViewModel @Inject constructor(
             curId = grp.parentId
         }
 
-        // 1. 过滤条目：搜索时全局匹配，正常时只展示当前文件夹下的条目
+        val isInsideRecycleBin = currentGroupId == "group_recycle_bin" || breadcrumbs.any { it.isRecycleBin }
+
+        // 1. 过滤条目：搜索时全局匹配，正常时只展示当前文件夹下的条目（回收站除外）
         val targetEntries = if (isSearching) {
-            allEntries
+            allEntries.filter { if (!isInsideRecycleBin) it.groupId != "group_recycle_bin" else true }
         } else {
             allEntries.filter { it.groupId == currentGroupId }
         }
@@ -104,12 +109,16 @@ class VaultListViewModel @Inject constructor(
             isSearchActive = params.isSearchActive,
             sortOption = params.sortOption,
             currentGroupId = currentGroupId,
+            isInsideRecycleBin = isInsideRecycleBin,
             breadcrumbs = breadcrumbs,
             currentGroups = sortedGroups,
             entries = sortedEntries,
             totalEntriesCount = allEntries.size,
             databaseName = "keepasskey.kdbx",
-            userMessage = message
+            userMessage = message,
+            showUsernameInList = settings.showUsernameInList,
+            showOtpInList = settings.showOtpInList,
+            showPasskeyBadge = settings.showPasskeyBadge
         )
     }.stateIn(
         scope = viewModelScope,
@@ -166,27 +175,63 @@ class VaultListViewModel @Inject constructor(
         userMessageFlow.value = null
     }
 
-    fun createGroup(name: String) {
+    fun createGroup(name: String, iconName: String = "folder") {
         if (name.isBlank()) return
         viewModelScope.launch {
             val newGroup = VaultGroup(
                 id = "group_${System.currentTimeMillis()}",
                 name = name.trim(),
                 parentId = currentGroupIdFlow.value,
-                iconName = "folder",
+                iconName = iconName,
                 orderIndex = (uiState.value.currentGroups.maxOfOrNull { it.orderIndex } ?: 0) + 1,
                 updatedAt = "刚刚",
                 createdAt = "刚刚"
             )
             vaultRepository.saveGroup(newGroup)
-            userMessageFlow.update { "已创建群组「$name」" }
+            userMessageFlow.update { "已创建文件夹「$name」" }
+        }
+    }
+
+    fun renameGroup(group: VaultGroup, newName: String) {
+        if (newName.isBlank()) return
+        viewModelScope.launch {
+            vaultRepository.saveGroup(group.copy(name = newName.trim(), updatedAt = "刚刚"))
+            userMessageFlow.update { "已重命名为「$newName」" }
+        }
+    }
+
+    fun changeGroupIcon(group: VaultGroup, newIcon: String) {
+        viewModelScope.launch {
+            vaultRepository.saveGroup(group.copy(iconName = newIcon, updatedAt = "刚刚"))
+            userMessageFlow.update { "已更新文件夹图标" }
         }
     }
 
     fun deleteGroup(groupId: String) {
         viewModelScope.launch {
             vaultRepository.deleteGroup(groupId)
-            userMessageFlow.update { "已删除群组" }
+            userMessageFlow.update { "已删除文件夹" }
+        }
+    }
+
+    fun restoreEntry(entryId: String) {
+        viewModelScope.launch {
+            vaultRepository.restoreEntry(entryId)
+            userMessageFlow.update { "凭据条目已成功还原至根目录" }
+        }
+    }
+
+    fun purgeEntry(entryId: String) {
+        viewModelScope.launch {
+            vaultRepository.deleteEntry(entryId)
+            userMessageFlow.update { "凭据已从回收站彻底删除" }
+        }
+    }
+
+    fun emptyRecycleBin() {
+        viewModelScope.launch {
+            vaultRepository.emptyRecycleBin()
+            userMessageFlow.update { "回收站已清空" }
         }
     }
 }
