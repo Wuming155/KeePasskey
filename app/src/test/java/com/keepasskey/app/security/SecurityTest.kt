@@ -118,4 +118,20 @@ class SecurityTest {
         val elapsedShort = now - recentBackground
         assertFalse(elapsedShort >= timeoutMillis)
     }
+
+    @Test
+    fun `测试 QuickUnlock PIN 熔断时长指数退避与封顶`() {
+        // 未达失败阈值 -> 不熔断
+        assertEquals(0L, QuickUnlockPinStore.computeLockoutMs(0))
+        assertEquals(0L, QuickUnlockPinStore.computeLockoutMs(4))
+
+        // 达阈值后按 30s 基数指数退避
+        assertEquals(30_000L, QuickUnlockPinStore.computeLockoutMs(5))
+        assertEquals(60_000L, QuickUnlockPinStore.computeLockoutMs(6))
+        assertEquals(120_000L, QuickUnlockPinStore.computeLockoutMs(7))
+
+        // 长尾封顶 15 分钟，且不因超大失败次数溢出
+        assertEquals(15 * 60_000L, QuickUnlockPinStore.computeLockoutMs(12))
+        assertEquals(15 * 60_000L, QuickUnlockPinStore.computeLockoutMs(1000))
+    }
 }

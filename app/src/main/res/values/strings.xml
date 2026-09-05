@@ -280,6 +280,7 @@
     <string name="unlock_error_invalid_password">主密码错误或密钥不匹配，解锁失败</string>
     <string name="unlock_error_pin_length">请输入 4 位数字 PIN 码</string>
     <string name="unlock_error_pin_invalid">PIN 码错误，QuickUnlock 解锁失败</string>
+    <string name="unlock_error_pin_locked">尝试次数过多，QuickUnlock 已临时锁定，请约 %1$d 秒后重试</string>
     <string name="unlock_error_quick_unavailable">QuickUnlock 不可用，请使用主密码解锁</string>
     <string name="unlock_quick_pin_enrolled_hint">QuickUnlock PIN 已设置，请输入主密码完成一次解锁以绑定凭据</string>
     <string name="unlock_biometric_title">生物识别解锁</string>

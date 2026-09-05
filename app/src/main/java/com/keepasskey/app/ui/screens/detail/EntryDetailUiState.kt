@@ -19,6 +19,8 @@ data class EntryDetailUiState(
     val revealedRevisionPasswords: Map<String, String> = emptyMap(),
     val isFavorite: Boolean = false,
     val protectedFieldsVisibility: Map<String, Boolean> = emptyMap(),
+    // F2 整改：受保护自定义字段按需解密出的明文（仅查看期间驻留，收起即清空），键为字段 id
+    val revealedProtectedFields: Map<String, String> = emptyMap(),
     val userMessage: UiMessage? = null,
     // 复制密码提示消息（按设置中的剪贴板超时时长动态生成，避免写死时长）
     val passwordCopyMessage: UiMessage = UiMessage(R.string.detail_password_copied_no_clear)

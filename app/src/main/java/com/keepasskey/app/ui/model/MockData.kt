@@ -15,7 +15,11 @@ data class VaultGroup(
 )
 
 /**
- * 自定义字段数据实体（支持受密码保护掩码展示）
+ * 自定义字段数据实体（支持受密码保护掩码展示）。
+ *
+ * F2 整改（CWE-316）：受保护字段（isProtected=true，如 Passkey 私钥/TOTP 种子/恢复码）的
+ * 明文**不随条目投影下发**——[value] 在仓库投影层对受保护字段恒为空串，仅在用户显式
+ * 查看/编辑时经 VaultRepository.getEntryProtectedField 按需单条解密。
  */
 data class UiCustomField(
     val id: String,
@@ -69,6 +73,8 @@ data class VaultDatabaseInfo(
  * M1 整改（CWE-316）：不再携带密码明文（passwordPlain）——列表/详情快照整体驻留 StateFlow，
  * 明文驻留会使堆转储可读全库密码；密码仅在用户显式查看/复制时经
  * [com.keepasskey.app.data.repository.VaultRepository.getEntryPassword] 按需单条解密。
+ * F2 整改：同样不再携带 TOTP 种子（totpSecret），验证码经仓库 calculateEntryTotp 按需即时计算，
+ * 受保护自定义字段明文亦不在投影层下发。
  */
 data class UiVaultEntry(
     val id: String,
@@ -80,7 +86,6 @@ data class UiVaultEntry(
     val passkeyRpId: String? = null,
     val totpCode: String? = null,
     val totpRemainingSeconds: Int = 30,
-    val totpSecret: String? = null,
     val totpPeriod: Int = 30,
     val totpDigits: Int = 6,
     val totpAlgorithm: String = "SHA1",

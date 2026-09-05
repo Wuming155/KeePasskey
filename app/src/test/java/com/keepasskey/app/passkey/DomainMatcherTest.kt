@@ -51,12 +51,56 @@ class DomainMatcherTest {
     fun isPackageMatch_validatesPackageNames() {
         assertTrue(DomainMatcher.isPackageMatch("com.example.app", "com.example.app"))
         assertTrue(DomainMatcher.isPackageMatch("COM.EXAMPLE.APP", "com.example.app"))
-        assertTrue(DomainMatcher.isPackageMatch("example.app", "com.example.app"))
-        assertTrue(DomainMatcher.isPackageMatch("com.example.app", "example.app"))
+
+        // F1 整改：包名间不存在父子信任关系，任何后缀包含匹配均已废除（精确相等才算命中）
+        assertFalse(DomainMatcher.isPackageMatch("example.app", "com.example.app"))
+        assertFalse(DomainMatcher.isPackageMatch("com.example.app", "example.app"))
 
         assertFalse(DomainMatcher.isPackageMatch("com.evilapp", "com.app"))
         assertFalse(DomainMatcher.isPackageMatch("com.example.app", "com.other.app"))
         assertFalse(DomainMatcher.isPackageMatch("", "com.example.app"))
+    }
+
+    @Test
+    fun isPackageMatch_rejectsSuffixFamilyPackagesBothDirections() {
+        // F1 回归测试（High 越权）：两个方向的包名后缀家族均不得互相命中——
+        // 覆盖审计报告示例及其修正方向（报告原示例 com.victim.app.evil 实际不匹配，
+        // 可利用方向是 evil.com.victim.app 一类以受害者包名为后缀的包）
+        assertFalse(DomainMatcher.isPackageMatch("com.victim.app", "com.victim.app.evil"))
+        assertFalse(DomainMatcher.isPackageMatch("com.victim.app", "evil.com.victim.app"))
+        assertFalse(DomainMatcher.isPackageMatch("com.victim.app", "victim.app"))
+        assertFalse(DomainMatcher.isPackageMatch("victim.app", "com.victim.app"))
+
+        // android:// 绑定条目同样按精确匹配裁决
+        assertFalse(DomainMatcher.isPackageMatch("android://com.victim.app", "evil.com.victim.app"))
+        assertFalse(DomainMatcher.isPackageMatch("android://com.victim.app", "com.victim.app.evil"))
+    }
+
+    @Test
+    fun isDomainMatch_rejectsPublicSuffixRpIds() {
+        // F5 回归测试：单标签/多标签公共后缀不得作为 RP ID / 条目域参与匹配（收敛钓鱼面）
+        assertFalse(DomainMatcher.isDomainMatch("io", "example.io"))
+        assertFalse(DomainMatcher.isDomainMatch("io", "io"))
+        assertFalse(DomainMatcher.isDomainMatch("com.cn", "example.com.cn"))
+        assertFalse(DomainMatcher.isDomainMatch("co.uk", "example.co.uk"))
+
+        // 正常可注册域名不受影响
+        assertTrue(DomainMatcher.isDomainMatch("example.io", "example.io"))
+        assertTrue(DomainMatcher.isDomainMatch("example.io", "login.example.io"))
+        assertTrue(DomainMatcher.isDomainMatch("example.co.uk", "www.example.co.uk"))
+    }
+
+    @Test
+    fun extractAndroidBoundPackage_extractsOnlyAndroidSchemeBindings() {
+        // F4 支撑函数：仅 android scheme 绑定可提取包名
+        assertEquals("com.example.app", DomainMatcher.extractAndroidBoundPackage("android://com.example.app"))
+        assertEquals("com.example.app", DomainMatcher.extractAndroidBoundPackage("android://com.example.app/path"))
+        assertEquals("com.example.app", DomainMatcher.extractAndroidBoundPackage("ANDROID://COM.EXAMPLE.APP"))
+
+        // Web 绑定（浏览器创建的 https 条目）不可被当作包名提取，杜绝普通应用冒领
+        assertEquals(null, DomainMatcher.extractAndroidBoundPackage("https://github.com"))
+        assertEquals(null, DomainMatcher.extractAndroidBoundPackage("github.com"))
+        assertEquals(null, DomainMatcher.extractAndroidBoundPackage(""))
     }
 
     @Test

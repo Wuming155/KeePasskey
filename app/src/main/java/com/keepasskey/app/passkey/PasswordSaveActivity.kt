@@ -38,8 +38,9 @@ class PasswordSaveActivity : BaseCredentialActivity() {
             else -> intent.getStringExtra(EXTRA_PASSWORD).orEmpty()
         }
         val targetPackage = providerReq?.callingAppInfo?.packageName ?: intent.getStringExtra(EXTRA_PACKAGE_NAME).orEmpty()
+        // H1 同源整改（审计观察 1）：web 域只信任本应用 Provider 服务填充的 EXTRA_WEB_DOMAIN，
+        // 绝不回退读取调用方可控的 candidateQueryData（死代码清理，防止未来重构使其可达）
         val webDomain = intent.getStringExtra(EXTRA_WEB_DOMAIN)
-            ?: providerReq?.callingRequest?.candidateQueryData?.getString(EXTRA_CREDENTIAL_REQUEST_ORIGIN)
 
         if (password.isBlank()) {
             Log.e(TAG, "缺少待保存的密码数据")
@@ -81,6 +82,5 @@ class PasswordSaveActivity : BaseCredentialActivity() {
         const val EXTRA_WEB_DOMAIN = "com.keepasskey.extra.WEB_DOMAIN"
         const val EXTRA_USERNAME = "com.keepasskey.extra.USERNAME"
         const val EXTRA_PASSWORD = "com.keepasskey.extra.PASSWORD"
-        const val EXTRA_CREDENTIAL_REQUEST_ORIGIN = "androidx.credentials.provider.extra.CREDENTIAL_REQUEST_ORIGIN"
     }
 }

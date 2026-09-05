@@ -249,6 +249,22 @@ class UnlockViewModel @Inject constructor(
             }
 
             // 已封印凭据：PIN 校验通过后解封主密码并用其真实解锁密码库
+            // 观察 2 整改：熔断预检——连续失败触发指数退避锁定期间给出可读的剩余等待提示
+            val remainingLockoutMs = store.getRemainingLockoutMs(dbId)
+            if (remainingLockoutMs > 0) {
+                _uiState.update {
+                    it.copy(
+                        isLoading = false,
+                        quickUnlockPin = "",
+                        errorMessage = UiMessage(
+                            R.string.unlock_error_pin_locked,
+                            listOf((remainingLockoutMs / 1000).coerceAtLeast(1))
+                        )
+                    )
+                }
+                return@launch
+            }
+
             val masterChars = store.unlockWithPin(dbId, pin.toCharArray())
             if (masterChars == null) {
                 _uiState.update {

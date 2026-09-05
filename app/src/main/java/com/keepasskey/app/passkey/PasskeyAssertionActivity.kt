@@ -70,15 +70,33 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
                     return@launch
                 }
 
+                // F4 整改：origin 缺失一律拒绝签发（fail-closed），不得以 RP ID 冒充 web origin
+                if (origin.isBlank()) {
+                    Log.e(TAG, "缺少调用来源 origin，拒绝签发断言")
+                    failAndFinish("调用来源缺失")
+                    return@launch
+                }
+
                 // H1 整改：签名前二次校验 origin 与凭据 RP-ID 的绑定关系。
-                // 浏览器委派的 web origin 必须与 RP ID 同域（或为其子域）；
-                // 普通应用的 apk-key-hash origin 已在候选组装阶段按严格包名绑定。
+                // 浏览器委派的 web origin 必须与 RP ID 同域（或为其子域）。
                 if (CallingOriginResolver.isBrowserOrigin(origin)) {
                     val originHost = DomainMatcher.extractDomain(origin)
                     if (originHost.isEmpty() ||
                         !DomainMatcher.isDomainMatch(passkeyData.relyingPartyId, originHost)
                     ) {
                         Log.e(TAG, "origin 与凭据 RP-ID 不匹配，拒绝签发断言")
+                        failAndFinish("调用来源与凭据不匹配")
+                        return@launch
+                    }
+                } else {
+                    // F4 整改：非浏览器（apk-key-hash）路径补充二次校验，不再单纯依赖候选组装阶段过滤——
+                    // 调用包名必须与条目绑定的 android://<包名> 精确一致（预期包名由候选组装方
+                    // 经不可伪造的 PendingIntent extras 传入，同 PasswordFillActivity 模式）；
+                    // 非应用绑定（https://<rpId>）的条目一律拒绝普通应用签发
+                    val expectedPackage = intent.getStringExtra(EXTRA_EXPECTED_PACKAGE).orEmpty()
+                    val boundPackage = DomainMatcher.extractAndroidBoundPackage(entry.url)
+                    if (expectedPackage.isBlank() || boundPackage != expectedPackage.trim().lowercase()) {
+                        Log.e(TAG, "调用包名与凭据绑定包名不一致，拒绝签发断言")
                         failAndFinish("调用来源与凭据不匹配")
                         return@launch
                     }
@@ -101,7 +119,7 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
                 val clientDataJson = JSONObject().apply {
                     put("type", "webauthn.get")
                     put("challenge", challenge)
-                    put("origin", origin.ifBlank { "https://${passkeyData.relyingPartyId}" })
+                    put("origin", origin)
                     put("androidPackageName", callingPackage ?: packageName)
                 }.toString()
                 val clientDataBytes = clientDataJson.toByteArray(Charsets.UTF_8)
@@ -173,5 +191,6 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
         const val EXTRA_REQUEST_JSON = "com.keepasskey.extra.REQUEST_JSON"
         const val EXTRA_CHALLENGE = "com.keepasskey.extra.CHALLENGE"
         const val EXTRA_ORIGIN = "com.keepasskey.extra.ORIGIN"
+        const val EXTRA_EXPECTED_PACKAGE = "com.keepasskey.extra.EXPECTED_PACKAGE"
     }
 }

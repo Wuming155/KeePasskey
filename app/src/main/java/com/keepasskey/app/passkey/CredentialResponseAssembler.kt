@@ -113,13 +113,15 @@ class CredentialResponseAssembler @Inject constructor(
                 putExtra(PasskeyAssertionActivity.EXTRA_ENTRY_ID, entry.id.toHexString())
                 putExtra(PasskeyAssertionActivity.EXTRA_REQUEST_JSON, option.requestJson)
                 putExtra(PasskeyAssertionActivity.EXTRA_CHALLENGE, challenge)
-                putExtra(
-                    PasskeyAssertionActivity.EXTRA_ORIGIN,
-                    when {
-                        browserFlow -> callingOrigin
-                        else -> callingOrigin.ifBlank { "android:apk-key-hash:unknown" }
-                    }
-                )
+                    putExtra(
+                        PasskeyAssertionActivity.EXTRA_ORIGIN,
+                        when {
+                            browserFlow -> callingOrigin
+                            else -> callingOrigin.ifBlank { "android:apk-key-hash:unknown" }
+                        }
+                    )
+                    // F4 整改：传入预期调用包名，供断言 Activity 签发前二次校验（与密码填充同模式）
+                    putExtra(PasskeyAssertionActivity.EXTRA_EXPECTED_PACKAGE, callingPackage)
             }
             val pendingIntent = PendingIntent.getActivity(
                 context,

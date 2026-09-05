@@ -280,6 +280,7 @@
     <string name="unlock_error_invalid_password">Incorrect master password or key mismatch</string>
     <string name="unlock_error_pin_length">Please enter a 4-digit PIN</string>
     <string name="unlock_error_pin_invalid">Incorrect PIN, QuickUnlock failed</string>
+    <string name="unlock_error_pin_locked">Too many attempts, QuickUnlock temporarily locked. Retry in about %1$d seconds</string>
     <string name="unlock_error_quick_unavailable">QuickUnlock unavailable, please use the master password</string>
     <string name="unlock_quick_pin_enrolled_hint">QuickUnlock PIN set. Unlock once with your master password to bind credentials</string>
     <string name="unlock_biometric_title">Biometric Unlock</string>

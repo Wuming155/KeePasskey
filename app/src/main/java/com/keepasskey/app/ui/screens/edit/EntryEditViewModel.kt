@@ -68,6 +68,15 @@ class EntryEditViewModel @Inject constructor(
             if (entry != null) {
                 // M1 整改：密码明文不随条目投影下发，编辑时按需单条解密
                 val password = vaultRepository.getEntryPassword(entry.id).orEmpty()
+                // F2 整改：受保护自定义字段同理按需单条解密——明文仅驻留当前编辑条目的状态中，
+                // 保存时随 customFields 显式提交（仓库层对空值受保护字段回填既有值作兜底）
+                val editableFields = entry.customFields.map { cf ->
+                    if (cf.isProtected) {
+                        cf.copy(value = vaultRepository.getEntryProtectedField(entry.id, cf.key).orEmpty())
+                    } else {
+                        cf
+                    }
+                }
                 _uiState.update {
                     it.copy(
                         entryId = entry.id,
@@ -79,7 +88,7 @@ class EntryEditViewModel @Inject constructor(
                         url = entry.url,
                         notes = entry.notes,
                         isPasskey = entry.isPasskey,
-                        customFields = entry.customFields,
+                        customFields = editableFields,
                         attachments = entry.attachments,
                         isDirty = false
                     )

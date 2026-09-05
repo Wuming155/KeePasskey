@@ -18,6 +18,7 @@ import com.keepasskey.core.model.KdbxTimes
 import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.core.model.PasskeyData
 import com.keepasskey.core.otp.OtpEngine
+import com.keepasskey.core.otp.ParsedTotpConfig
 import com.keepasskey.core.otp.TotpKeyUriParser
 import com.keepasskey.core.security.ProtectedString
 import com.keepasskey.database.file.KdbxDatabase
@@ -291,7 +292,14 @@ class RealVaultRepository @Inject constructor(
             }
 
             val uiCustomList = entry.customFields.map { cf ->
-                KdbxCustomField(cf.key, ProtectedString(cf.value, isProtected = cf.isProtected))
+                // F2 整改：UI 投影中受保护字段的明文恒为空（按需解密），回写时「空值」视为未修改，
+                // 回填既有条目的真实值——防止详情页回滚等携带掩码投影的保存路径清空受保护字段
+                val effectiveValue = if (cf.isProtected && cf.value.isEmpty()) {
+                    existing.customFields.firstOrNull { it.key == cf.key }?.value?.readString().orEmpty()
+                } else {
+                    cf.value
+                }
+                KdbxCustomField(cf.key, ProtectedString(effectiveValue, isProtected = cf.isProtected))
             }
             val uiKeys = uiCustomList.map { it.key }.toSet()
             // 保留既有条目中未在 UI 覆盖的系统字段（例如 Passkey 属性等）
@@ -498,11 +506,13 @@ class RealVaultRepository @Inject constructor(
     private fun mapKdbxEntryToUi(entry: KdbxEntry, db: KdbxDatabase?): UiVaultEntry {
         // M1 整改：不再将密码明文读入 UI 投影（全库明文驻留 StateFlow / 堆内存），
         // 密码仅在用户显式查看/复制时经 [getEntryPassword] 按需单条解密
+        // F2 整改：受保护自定义字段（Passkey 私钥/TOTP 种子/恢复码等）同样不进投影，
+        // 仅在用户显式查看/编辑时经 [getEntryProtectedField] 按需单条解密
         val uiCustomFields = entry.customFields.map { cf ->
             UiCustomField(
                 id = "${entry.id.toHexString()}_${cf.key}",
                 key = cf.key,
-                value = cf.value.readString(),
+                value = if (cf.isProtected) "" else cf.value.readString(),
                 isProtected = cf.isProtected
             )
         }
@@ -532,35 +542,16 @@ class RealVaultRepository @Inject constructor(
         }
 
         // 解析标准 OTP 或自定义字段中的 TOTP 配置
-        val otpRaw = entry.fields["otp"]?.readString()
-            ?: entry.customFields.firstOrNull {
-                it.key.equals("otp", ignoreCase = true) || it.key.startsWith("TOTP", ignoreCase = true)
-            }?.value?.readString()
-        val parsedTotp = TotpKeyUriParser.parse(otpRaw)
+        val parsedTotp = parseTotpConfig(entry)
 
-        val totpSecret = parsedTotp?.secret
         val totpPeriod = parsedTotp?.period ?: 30
         val totpDigits = parsedTotp?.digits ?: 6
         val totpAlgorithm = parsedTotp?.algorithm ?: "SHA1"
 
         val currentRemaining = OtpEngine.getRemainingSeconds(periodSeconds = totpPeriod)
-        val liveTotpCode = if (!totpSecret.isNullOrBlank()) {
-            try {
-                val algo = when (totpAlgorithm.uppercase()) {
-                    "SHA256" -> OtpEngine.HashAlgorithm.SHA256
-                    "SHA512" -> OtpEngine.HashAlgorithm.SHA512
-                    else -> OtpEngine.HashAlgorithm.SHA1
-                }
-                OtpEngine.calculateTotp(
-                    secretKeyBase32 = totpSecret,
-                    periodSeconds = totpPeriod,
-                    digits = totpDigits,
-                    algorithm = algo
-                )
-            } catch (_: Exception) {
-                null
-            }
-        } else null
+        // F2 整改：TOTP 种子不进 UiVaultEntry（种子 String 仅在本函数内瞬时存在，随 GC 回收），
+        // 列表展示用验证码在此即时计算；验证器页经 [calculateEntryTotp] 按需重算
+        val liveTotpCode = parsedTotp?.let { computeTotpCode(it) }
 
         val passkeyData = PasskeyData.fromCustomFields(entry.customFields)
         val icon = mapIconIdToName(entry.iconId)
@@ -575,7 +566,6 @@ class RealVaultRepository @Inject constructor(
             passkeyRpId = passkeyData?.relyingPartyId,
             totpCode = liveTotpCode,
             totpRemainingSeconds = currentRemaining,
-            totpSecret = totpSecret,
             totpPeriod = totpPeriod,
             totpDigits = totpDigits,
             totpAlgorithm = totpAlgorithm,
@@ -588,6 +578,34 @@ class RealVaultRepository @Inject constructor(
             attachments = uiAttachments,
             revisions = uiRevisions
         )
+    }
+
+    /** 解析条目中的 TOTP 配置（标准 otp 字段优先，回退 TOTP 开头的自定义字段） */
+    private fun parseTotpConfig(entry: KdbxEntry): ParsedTotpConfig? {
+        val otpRaw = entry.fields["otp"]?.readString()
+            ?: entry.customFields.firstOrNull {
+                it.key.equals("otp", ignoreCase = true) || it.key.startsWith("TOTP", ignoreCase = true)
+            }?.value?.readString()
+        return TotpKeyUriParser.parse(otpRaw)
+    }
+
+    /** 按配置即时计算 TOTP 验证码，配置非法或计算失败返回 null */
+    private fun computeTotpCode(config: ParsedTotpConfig): String? {
+        return try {
+            val algo = when (config.algorithm.uppercase()) {
+                "SHA256" -> OtpEngine.HashAlgorithm.SHA256
+                "SHA512" -> OtpEngine.HashAlgorithm.SHA512
+                else -> OtpEngine.HashAlgorithm.SHA1
+            }
+            OtpEngine.calculateTotp(
+                secretKeyBase32 = config.secret,
+                periodSeconds = config.period,
+                digits = config.digits,
+                algorithm = algo
+            )
+        } catch (_: Exception) {
+            null
+        }
     }
 
     private fun mapIconIdToName(iconId: Int): String {
@@ -689,6 +707,28 @@ class RealVaultRepository @Inject constructor(
         val currentDb = databaseSession.databaseFlow.first() ?: return null
         val entry = currentDb.rootGroup.allEntries().firstOrNull { it.id == targetUuid }
         return entry?.history?.firstOrNull { it.id == revisionUuid }?.password?.readString()
+    }
+
+    override suspend fun getEntryProtectedField(entryId: String, fieldKey: String): String? {
+        val targetUuid = parseUuidOrNull(entryId) ?: return null
+        val currentDb = databaseSession.databaseFlow.first() ?: return null
+        val entry = currentDb.rootGroup.allEntries().firstOrNull { it.id == targetUuid } ?: return null
+        return entry.customFields.firstOrNull { it.key == fieldKey }?.value?.readString()
+    }
+
+    override suspend fun calculateEntryTotp(entryId: String): EntryTotpSnapshot? {
+        val targetUuid = parseUuidOrNull(entryId) ?: return null
+        val currentDb = databaseSession.databaseFlow.first() ?: return null
+        val entry = currentDb.rootGroup.allEntries().firstOrNull { it.id == targetUuid } ?: return null
+        // 种子仅在数据层内瞬时解析并参与计算，绝不随结果外泄
+        val config = parseTotpConfig(entry) ?: return null
+        val code = computeTotpCode(config) ?: return null
+        return EntryTotpSnapshot(
+            code = code,
+            periodSeconds = config.period,
+            digits = config.digits,
+            algorithm = config.algorithm
+        )
     }
 
     override suspend fun saveNewPasskeyEntry(data: PasskeyData, boundPackage: String?): KdbxEntry {

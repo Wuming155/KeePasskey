@@ -43,8 +43,10 @@ class AuthenticatorViewModel @Inject constructor(
         timerSecondsFlow,
         userMessageFlow
     ) { entries, query, _, message ->
-        // 过滤包含真实 TOTP 密钥或有效验证码的条目
-        val totpEntries = entries.filter { !it.totpSecret.isNullOrBlank() || it.totpCode != null }
+        // F2 整改：TOTP 种子不再随条目投影下发（UiVaultEntry 已移除 totpSecret）。
+        // 依据投影层即时计算出的 totpCode 识别 TOTP 条目，验证码经仓库 calculateEntryTotp
+        // 按需单条重算——种子解析与计算均在数据层内完成，绝不外泄到 UI 层。
+        val totpEntries = entries.filter { it.totpCode != null }
 
         val filtered = if (query.isBlank()) {
             totpEntries
@@ -57,30 +59,10 @@ class AuthenticatorViewModel @Inject constructor(
         }
 
         val items = filtered.map { entry ->
-            val secret = entry.totpSecret
-            val period = entry.totpPeriod
-            val digits = entry.totpDigits
-            val algo = when (entry.totpAlgorithm.uppercase()) {
-                "SHA256" -> OtpEngine.HashAlgorithm.SHA256
-                "SHA512" -> OtpEngine.HashAlgorithm.SHA512
-                else -> OtpEngine.HashAlgorithm.SHA1
-            }
-
+            val snapshot = vaultRepository.calculateEntryTotp(entry.id)
+            val period = snapshot?.periodSeconds ?: entry.totpPeriod
             val remaining = OtpEngine.getRemainingSeconds(periodSeconds = period)
-            val raw = if (!secret.isNullOrBlank()) {
-                try {
-                    OtpEngine.calculateTotp(
-                        secretKeyBase32 = secret,
-                        periodSeconds = period,
-                        digits = digits,
-                        algorithm = algo
-                    )
-                } catch (_: Exception) {
-                    entry.totpCode ?: "000000"
-                }
-            } else {
-                entry.totpCode ?: "000000"
-            }
+            val raw = snapshot?.code ?: entry.totpCode ?: "000000"
 
             val formatted = when (raw.length) {
                 6 -> "${raw.substring(0, 3)} ${raw.substring(3)}"

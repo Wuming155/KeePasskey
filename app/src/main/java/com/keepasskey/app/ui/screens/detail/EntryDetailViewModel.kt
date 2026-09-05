@@ -44,6 +44,8 @@ class EntryDetailViewModel @Inject constructor(
     private val revealedRevisionPasswordsFlow = MutableStateFlow<Map<String, String>>(emptyMap())
     private val isFavoriteFlow = MutableStateFlow(false)
     private val protectedVisibilityFlow = MutableStateFlow<Map<String, Boolean>>(emptyMap())
+    // F2 整改：受保护自定义字段按需解密出的明文（仅查看期间驻留，收起即清空），键为字段 id
+    private val revealedProtectedFieldsFlow = MutableStateFlow<Map<String, String>>(emptyMap())
     private val userMessageFlow = MutableStateFlow<UiMessage?>(null)
 
     /** combine 中间聚合体（避开 5 流以上的元组嵌套） */
@@ -53,6 +55,13 @@ class EntryDetailViewModel @Inject constructor(
         val revealedPassword: String?,
         val revisionPasswords: Map<String, String>,
         val isFavorite: Boolean
+    )
+
+    /** combine 中间聚合体：可见性 / 已揭示字段明文 / 用户消息 */
+    private data class DetailExtras(
+        val protectedVisibility: Map<String, Boolean>,
+        val revealedProtectedFields: Map<String, String>,
+        val userMessage: UiMessage?
     )
 
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -67,21 +76,27 @@ class EntryDetailViewModel @Inject constructor(
     ) { entry, isPassVisible, revealed, revPasswords, isFav ->
         DetailCore(entry, isPassVisible, revealed, revPasswords, isFav)
     }
-        .combine(protectedVisibilityFlow) { core, visMap ->
-            core to visMap
+        .combine(
+            combine(
+                protectedVisibilityFlow,
+                revealedProtectedFieldsFlow,
+                userMessageFlow
+            ) { visMap, revealedFields, message ->
+                DetailExtras(visMap, revealedFields, message)
+            }
+        ) { core, extras ->
+            core to extras
         }
-        .combine(userMessageFlow) { (core, visMap), message ->
-            Triple(core, visMap, message)
-        }
-        .combine(settingsRepository.getSettings()) { (core, visMap, message), settings ->
+        .combine(settingsRepository.getSettings()) { (core, extras), settings ->
             EntryDetailUiState(
                 entry = core.entry,
                 isPasswordVisible = core.isPasswordVisible,
                 revealedPassword = core.revealedPassword,
                 revealedRevisionPasswords = core.revisionPasswords,
                 isFavorite = core.isFavorite,
-                protectedFieldsVisibility = visMap,
-                userMessage = message,
+                protectedFieldsVisibility = extras.protectedVisibility,
+                revealedProtectedFields = extras.revealedProtectedFields,
+                userMessage = extras.userMessage,
                 passwordCopyMessage = buildPasswordCopyMessage(settings.clipboardTimeoutSeconds)
             )
         }
@@ -115,10 +130,37 @@ class EntryDetailViewModel @Inject constructor(
         isFavoriteFlow.update { !it }
     }
 
+    /**
+     * 切换受保护自定义字段可见性（F2 整改）。
+     * 展开时经仓库按需单条解密该字段明文，收起时立即从驻留状态中移除。
+     */
     fun toggleCustomFieldVisibility(fieldId: String) {
-        protectedVisibilityFlow.update { current ->
-            val currentVal = current[fieldId] ?: false
-            current + (fieldId to !currentVal)
+        val becomingVisible = protectedVisibilityFlow.value[fieldId] != true
+        protectedVisibilityFlow.update { current -> current + (fieldId to becomingVisible) }
+        if (!becomingVisible) {
+            revealedProtectedFieldsFlow.update { it - fieldId }
+            return
+        }
+        val entry = uiState.value.entry ?: return
+        val field = entry.customFields.firstOrNull { it.id == fieldId } ?: return
+        viewModelScope.launch {
+            val value = vaultRepository.getEntryProtectedField(entry.id, field.key).orEmpty()
+            revealedProtectedFieldsFlow.update { it + (fieldId to value) }
+        }
+    }
+
+    /**
+     * 复制受保护自定义字段（F2 整改）：按需解密后写入受保护剪贴板，
+     * 不再依赖条目投影中的明文（投影层受保护字段恒为空）。
+     */
+    fun copyCustomField(fieldId: String, fieldKey: String) {
+        val entryId = entryIdFlow.value ?: return
+        viewModelScope.launch {
+            val value = vaultRepository.getEntryProtectedField(entryId, fieldKey)
+            if (value != null) {
+                clipboardSecurityManager?.copySensitiveText(fieldKey, value)
+                userMessageFlow.value = UiMessage(R.string.detail_field_copied, listOf(fieldKey))
+            }
         }
     }
 

@@ -76,9 +76,12 @@ class QuickUnlockPinStore @Inject constructor(
     /**
      * PIN 校验 + 主凭据解封。
      * 错误 PIN 返回 null；成功返回主密码 CharArray，调用方用毕必须显式清零。
+     * 观察 2 整改：连续失败达 [MAX_FAILURES_BEFORE_LOCKOUT] 次后触发指数退避熔断
+     * （4 位 PIN 空间仅 10⁴，无熔断时可被本地高频穷举），锁定期间直接返回 null。
      */
     fun unlockWithPin(databaseId: String, pin: CharArray): CharArray? {
         if (!hasBoundCredential(databaseId)) return null
+        if (getRemainingLockoutMs(databaseId) > 0) return null
         val salt = runCatching {
             Base64.decode(prefs.getString(saltKey(databaseId), null), Base64.NO_WRAP)
         }.getOrNull() ?: return null
@@ -88,7 +91,11 @@ class QuickUnlockPinStore @Inject constructor(
 
         // 常量时间比较 PBKDF2 派生校验器，杜绝时序侧信道
         val candidate = derivePinVerifier(pin, salt)
-        if (!MessageDigest.isEqual(expectedVerifier, candidate)) return null
+        if (!MessageDigest.isEqual(expectedVerifier, candidate)) {
+            recordPinFailure(databaseId)
+            return null
+        }
+        clearPinFailures(databaseId)
 
         val iv = runCatching {
             Base64.decode(prefs.getString(credIvKey(databaseId), null), Base64.NO_WRAP)
@@ -109,6 +116,32 @@ class QuickUnlockPinStore @Inject constructor(
         }
     }
 
+    /** 当前剩余锁定毫秒数（未锁定时为 0）。调用方可在校验前预检以给出可读的剩余等待提示。 */
+    fun getRemainingLockoutMs(databaseId: String): Long {
+        val until = prefs.getLong(lockUntilKey(databaseId), 0L)
+        val remaining = until - System.currentTimeMillis()
+        return if (remaining > 0) remaining else 0L
+    }
+
+    /** 记录一次 PIN 校验失败；连续失败达阈值后按指数退避设定锁定截止时间 */
+    private fun recordPinFailure(databaseId: String) {
+        val failures = prefs.getInt(failCountKey(databaseId), 0) + 1
+        val editor = prefs.edit().putInt(failCountKey(databaseId), failures)
+        val lockMs = computeLockoutMs(failures)
+        if (lockMs > 0) {
+            editor.putLong(lockUntilKey(databaseId), System.currentTimeMillis() + lockMs)
+        }
+        editor.apply()
+    }
+
+    /** 校验成功后清零失败计数与锁定状态 */
+    private fun clearPinFailures(databaseId: String) {
+        prefs.edit()
+            .remove(failCountKey(databaseId))
+            .remove(lockUntilKey(databaseId))
+            .apply()
+    }
+
     /** 清除特定数据库的 PIN 与封印凭据 */
     fun clearCredential(databaseId: String) {
         prefs.edit()
@@ -116,6 +149,8 @@ class QuickUnlockPinStore @Inject constructor(
             .remove(verifierKey(databaseId))
             .remove(credIvKey(databaseId))
             .remove(credCipherKey(databaseId))
+            .remove(failCountKey(databaseId))
+            .remove(lockUntilKey(databaseId))
             .apply()
     }
 
@@ -153,11 +188,32 @@ class QuickUnlockPinStore @Inject constructor(
     private fun verifierKey(databaseId: String) = "${databaseId}_pin_verifier"
     private fun credIvKey(databaseId: String) = "${databaseId}_cred_iv"
     private fun credCipherKey(databaseId: String) = "${databaseId}_cred_cipher"
+    private fun failCountKey(databaseId: String) = "${databaseId}_pin_fail_count"
+    private fun lockUntilKey(databaseId: String) = "${databaseId}_pin_lock_until"
 
     companion object {
         private const val PREFS_NAME = "com.keepasskey.quick_unlock_pin"
         private const val SALT_LENGTH_BYTES = 16
         private const val PBKDF2_ITERATIONS = 120_000
         private const val VERIFIER_BITS = 256
+
+        /** 触发熔断前允许的连续失败次数 */
+        private const val MAX_FAILURES_BEFORE_LOCKOUT = 5
+
+        /** 首次熔断时长（毫秒），此后按指数退避翻倍 */
+        private const val BASE_LOCKOUT_MS = 30_000L
+
+        /** 熔断时长上限（毫秒） */
+        private const val MAX_LOCKOUT_MS = 15 * 60_000L
+
+        /**
+         * 依连续失败次数计算熔断时长：未达阈值返回 0；达到阈值后按指数退避
+         * （30s → 1min → 2min → …），上限 15 分钟；移位封顶防溢出。
+         */
+        fun computeLockoutMs(consecutiveFailures: Int): Long {
+            if (consecutiveFailures < MAX_FAILURES_BEFORE_LOCKOUT) return 0L
+            val shift = (consecutiveFailures - MAX_FAILURES_BEFORE_LOCKOUT).coerceAtMost(10)
+            return (BASE_LOCKOUT_MS shl shift).coerceAtMost(MAX_LOCKOUT_MS)
+        }
     }
 }

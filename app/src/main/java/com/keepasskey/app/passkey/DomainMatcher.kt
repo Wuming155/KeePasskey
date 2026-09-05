@@ -68,6 +68,9 @@ object DomainMatcher {
      * 双方经 [extractDomain] 归一化后：必须完全相等，或 [originHost] 以 ".$rpIdOrDomain" 结尾（严格点号标签边界）。
      *
      * 严禁使用模糊双向 contains，防止 "evilgithub.com" 恶意冒充 "github.com"。
+     * F5 整改：凭据侧域名（[rpIdOrDomain]）须满足公共后缀下限约束（[isRegistrableDomain]）——
+     * 单标签（如 "io"）或多标签公共后缀（如 "com.cn"）一律拒绝，杜绝经恶意 kdbx 导入植入
+     * 公共后缀条目后冒充整条 TLD 的钓鱼匹配（WebAuthn 规范亦禁止公共后缀作 RP ID）。
      *
      * @param rpIdOrDomain 凭据中记录的 RP ID 或条目域名（如 "github.com"）
      * @param originHost 调用方真实来源主机名（如 "github.com", "login.github.com"）
@@ -76,14 +79,27 @@ object DomainMatcher {
         val d1 = extractDomain(rpIdOrDomain)
         val d2 = extractDomain(originHost)
         if (d1.isEmpty() || d2.isEmpty()) return false
+        if (!isRegistrableDomain(d1)) return false
 
         return d1 == d2 || d2.endsWith(".$d1")
     }
 
     /**
+     * 判断主机名是否为可注册域名：至少含一个点号，且不属于内置多标签公共后缀集合。
+     * 内置集合为常见多级公共后缀的最小子集（非完整 PSL），覆盖主流国家/地区二级注册域。
+     */
+    private fun isRegistrableDomain(host: String): Boolean {
+        if (!host.contains('.')) return false
+        return host !in MULTILABEL_PUBLIC_SUFFIXES
+    }
+
+    /**
      * Android 应用包名匹配逻辑。
-     * 双方必须完全相等，或以点号 '.' 边界保持父子包名包含关系。
-     * L1 整改：支持剥离条目 url 中的 android:// 等 scheme 前缀，
+     * F1 整改（CWE-284 水平越权）：scheme 剥离后必须**精确相等**。
+     * Android 包名之间不存在任何父子信任关系——"evil.com.victim.app" 与 "com.victim.app"
+     * 是可由任意开发者分别注册的两个独立应用，任何后缀/前缀包含匹配都会让无关包名
+     * 命中他人凭据（跨应用凭据读取）。对齐 Android 官方 Credential Provider 指南的包名精确匹配要求。
+     * L1 整改保留：支持剥离条目 url 中的 android:// 等 scheme 前缀，
      * 使入库时记录为 android://<包名> 的凭据可与调用包名正确匹配。
      */
     fun isPackageMatch(entryPackageHint: String, callingPackage: String): Boolean {
@@ -99,6 +115,33 @@ object DomainMatcher {
             if (slashIdx >= 0) p1 = p1.substring(0, slashIdx)
         }
 
-        return p1 == p2 || p1.endsWith(".$p2") || p2.endsWith(".$p1")
+        return p1 == p2
     }
+
+    /**
+     * 从条目 url 中提取 android:// 绑定的包名（F4 整改）。
+     * 仅接受 android scheme；非 android 绑定（如浏览器创建的 https://<rpId> 条目）返回 null，
+     * 确保普通应用无法通过注册与 Web 域同形的包名冒领 Web 绑定凭据。
+     */
+    fun extractAndroidBoundPackage(entryUrl: String): String? {
+        val schemeIdx = entryUrl.indexOf("://")
+        if (schemeIdx <= 0) return null
+        if (!entryUrl.substring(0, schemeIdx).equals("android", ignoreCase = true)) return null
+        var p = entryUrl.substring(schemeIdx + 3)
+        val slashIdx = p.indexOf('/')
+        if (slashIdx >= 0) p = p.substring(0, slashIdx)
+        val trimmed = p.trim().lowercase()
+        return trimmed.ifEmpty { null }
+    }
+
+    /** 常见多级公共后缀最小子集（F5 整改，非完整 PSL；命中即视为不可注册域） */
+    private val MULTILABEL_PUBLIC_SUFFIXES = setOf(
+        "co.uk", "org.uk", "ac.uk", "gov.uk", "me.uk",
+        "com.cn", "net.cn", "org.cn", "gov.cn",
+        "co.jp", "ne.jp", "or.jp", "ac.jp",
+        "com.hk", "org.hk", "com.tw", "com.au", "net.au", "org.au",
+        "co.nz", "net.nz", "org.nz", "com.br", "com.mx",
+        "co.in", "net.in", "org.in", "com.sg", "com.tr",
+        "com.ar", "co.za", "com.pl", "com.ru", "com.ua"
+    )
 }

@@ -6,6 +6,17 @@ import com.keepasskey.app.ui.model.VaultGroup
 import kotlinx.coroutines.flow.Flow
 
 /**
+ * 单条凭据的 TOTP 即时计算快照（F2 整改）。
+ * 仅含展示所需的非敏感结果（验证码与参数），不含种子。
+ */
+data class EntryTotpSnapshot(
+    val code: String,
+    val periodSeconds: Int,
+    val digits: Int,
+    val algorithm: String
+)
+
+/**
  * 密码库数据仓库接口，遵循谷歌官方 Recommended app architecture 数据层规范。
  * 屏蔽上层 UI/ViewModel 对具体存储技术（KDBX / 内存 / Room）的依赖。
  */
@@ -128,6 +139,20 @@ interface VaultRepository {
      * 按需解密单条历史修订的密码（M1 整改，供详情页回滚/对比使用），语义同 [getEntryPassword]。
      */
     suspend fun getEntryRevisionPassword(entryId: String, revisionId: String): String?
+
+    /**
+     * 按需解密单条凭据的受保护自定义字段（F2 整改，语义同 [getEntryPassword]）。
+     * 仅在用户显式查看/编辑该字段时调用；条目或字段不存在时返回 null，
+     * 未加保护的字段直接返回其值。
+     */
+    suspend fun getEntryProtectedField(entryId: String, fieldKey: String): String?
+
+    /**
+     * 按需计算单条凭据的当前 TOTP 验证码（F2 整改）。
+     * TOTP 种子绝不离开数据层——种子解析与验证码计算均在仓库内部完成并即时丢弃，
+     * UI 层仅取得验证码与展示配置；条目未配置 TOTP 时返回 null。
+     */
+    suspend fun calculateEntryTotp(entryId: String): EntryTotpSnapshot?
 
     /**
      * 根据依赖方标识 (RP ID) 或域名查询匹配的凭据条目

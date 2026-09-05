@@ -124,7 +124,14 @@ class FakeVaultRepository @Inject constructor() : VaultRepository {
         }
     }
 
-    override fun getEntries(): Flow<List<UiVaultEntry>> = entriesFlow.asStateFlow()
+    override fun getEntries(): Flow<List<UiVaultEntry>> = entriesFlow.map { list ->
+        // F2 整改：与真实仓库投影语义一致——受保护自定义字段明文不进投影
+        list.map { entry ->
+            entry.copy(customFields = entry.customFields.map { cf ->
+                if (cf.isProtected) cf.copy(value = "") else cf
+            })
+        }
+    }
 
     override fun getEntry(id: String): Flow<UiVaultEntry?> {
         return entriesFlow.map { list -> list.find { it.id == id } }
@@ -147,7 +154,14 @@ class FakeVaultRepository @Inject constructor() : VaultRepository {
                 notes = old.notes
             )
             val updatedRevisions = listOf(rev) + old.revisions
-            current[index] = entry.copy(revisions = updatedRevisions)
+            // F2 整改：掩码投影中受保护字段为空值，视为未修改并回填既有值
+            val mergedFields = entry.customFields.map { cf ->
+                if (cf.isProtected && cf.value.isEmpty()) {
+                    val existing = old.customFields.firstOrNull { it.key == cf.key }
+                    if (existing != null) existing else cf
+                } else cf
+            }
+            current[index] = entry.copy(customFields = mergedFields, revisions = updatedRevisions)
         } else {
             current.add(0, entry)
         }
@@ -254,6 +268,21 @@ class FakeVaultRepository @Inject constructor() : VaultRepository {
 
     override suspend fun getEntryRevisionPassword(entryId: String, revisionId: String): String? =
         passwordStore.value[entryId]
+
+    override suspend fun getEntryProtectedField(entryId: String, fieldKey: String): String? =
+        entriesFlow.value.firstOrNull { it.id == entryId }
+            ?.customFields?.firstOrNull { it.key == fieldKey }?.value
+
+    override suspend fun calculateEntryTotp(entryId: String): EntryTotpSnapshot? {
+        val entry = entriesFlow.value.firstOrNull { it.id == entryId } ?: return null
+        val code = entry.totpCode?.replace(" ", "") ?: return null
+        return EntryTotpSnapshot(
+            code = code,
+            periodSeconds = entry.totpPeriod,
+            digits = entry.totpDigits,
+            algorithm = entry.totpAlgorithm
+        )
+    }
 
     override suspend fun saveNewPasskeyEntry(data: PasskeyData, boundPackage: String?): KdbxEntry {
         val title = "${data.userName}@${data.relyingPartyId}"
@@ -478,7 +507,6 @@ class FakeVaultRepository @Inject constructor() : VaultRepository {
                 isPasskey = false,
                 totpCode = "849 201",
                 totpRemainingSeconds = 16,
-                totpSecret = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ",
                 totpPeriod = 30,
                 totpDigits = 6,
                 totpAlgorithm = "SHA1",

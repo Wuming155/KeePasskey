@@ -278,6 +278,5 @@ class KeePasskeyCredentialProviderService : CredentialProviderService() {
         private const val REQUEST_CODE_FILL = 102
         private const val REQUEST_CODE_CREATE_PASSKEY = 103
         private const val REQUEST_CODE_CREATE_PASSWORD = 104
-        const val EXTRA_CREDENTIAL_REQUEST_ORIGIN = "androidx.credentials.provider.extra.CREDENTIAL_REQUEST_ORIGIN"
     }
 }

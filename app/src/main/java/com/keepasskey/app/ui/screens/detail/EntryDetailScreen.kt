@@ -120,6 +120,7 @@ fun EntryDetailScreen(
         onToggleFavorite = viewModel::toggleFavorite,
         onTogglePasswordVisibility = viewModel::togglePasswordVisibility,
         onToggleCustomFieldVisibility = viewModel::toggleCustomFieldVisibility,
+        onCopyCustomField = viewModel::copyCustomField,
         onExportAttachment = viewModel::exportAttachment,
         onRollbackRevision = viewModel::rollbackToRevision,
         onPrepareRevisionDiff = viewModel::prepareRevisionDiff,
@@ -144,6 +145,7 @@ fun EntryDetailContent(
     onToggleFavorite: () -> Unit,
     onTogglePasswordVisibility: () -> Unit,
     onToggleCustomFieldVisibility: (String) -> Unit,
+    onCopyCustomField: (String, String) -> Unit = { _, _ -> },
     onExportAttachment: (UiAttachment) -> Unit,
     onRollbackRevision: (UiEntryRevision) -> Unit,
     onPrepareRevisionDiff: (String) -> Unit = {},
@@ -501,8 +503,13 @@ fun EntryDetailContent(
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
                                         Spacer(modifier = Modifier.height(2.dp))
+                                        // F2 整改：受保护字段明文不随投影下发，展开时经 ViewModel 按需解密
+                                        val displayValue = if (field.isProtected) {
+                                            if (isVisible) uiState.revealedProtectedFields[field.id].orEmpty()
+                                            else "••••••••"
+                                        } else field.value
                                         Text(
-                                            text = if (field.isProtected && !isVisible) "••••••••" else field.value,
+                                            text = displayValue,
                                             style = if (field.isProtected && !isVisible) MonospacePasswordStyle else MaterialTheme.typography.bodyMedium,
                                             color = MaterialTheme.colorScheme.onSurface
                                         )
@@ -518,7 +525,14 @@ fun EntryDetailContent(
                                                 )
                                             }
                                         }
-                                        IconButton(onClick = { onShowMessage(UiMessage(R.string.detail_field_copied, listOf(field.key))) }) {
+                                        // F2 整改：受保护字段复制经按需解密 + 受保护剪贴板，非保护字段保留原行为
+                                        IconButton(onClick = {
+                                            if (field.isProtected) {
+                                                onCopyCustomField(field.id, field.key)
+                                            } else {
+                                                onShowMessage(UiMessage(R.string.detail_field_copied, listOf(field.key)))
+                                            }
+                                        }) {
                                             Icon(
                                                 imageVector = Icons.Default.ContentCopy,
                                                 contentDescription = null,

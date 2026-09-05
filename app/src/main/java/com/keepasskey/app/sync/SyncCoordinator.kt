@@ -437,7 +437,9 @@ open class SyncCoordinator @Inject constructor(
             val re = refMap[ce.id] ?: return true
             if (ce.title != re.title ||
                 ce.userName != re.userName ||
-                ce.password?.readString() != re.password?.readString() ||
+                // F3 整改：直接走 ProtectedString.equals（底层字节数组 contentEquals 比较），
+            // 不再经 readString() 将全库密码物化为不可清除的 String 驻留 JVM 堆
+            ce.password != re.password ||
                 ce.url != re.url ||
                 ce.notes != re.notes
             ) {
