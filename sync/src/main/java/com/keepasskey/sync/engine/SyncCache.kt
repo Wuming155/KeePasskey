@@ -3,6 +3,9 @@ package com.keepasskey.sync.engine
 import com.keepasskey.sync.model.cleanEtag
 import java.io.File
 import java.io.FileOutputStream
+import java.nio.file.AtomicMoveNotSupportedException
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
 
 /**
@@ -23,6 +26,7 @@ data class SyncCacheState(
  * - `<hash>.cache`：数据库二进制文件内容（安全写入：.tmp -> flush/sync -> rename）
  * - `<hash>.version`：本地版本号（内容 SHA-256 十六进制）
  * - `<hash>.baseversion`：基准版本号（最后确认与云端一致时的 SHA-256 十六进制）
+ * - `<hash>.basecache`：基准内容快照（最后确认与云端一致时的完整字节）
  * - `<hash>.meta`：简易 key=value 行文本元数据（remotePath, etag, lastSyncMillis）
  */
 class SyncCache(private val cacheDir: File) {
@@ -73,7 +77,10 @@ class SyncCache(private val cacheDir: File) {
      * 原子写入本地缓存文件。
      *
      * 遵循 engineering-rules.md 安全写盘铁律：
-     * 写入 .tmp 临时文件 -> flush() -> fd.sync() -> renameTo 覆盖原文件。
+     * 写入 .tmp 临时文件 -> flush() -> fd.sync() -> 原子 rename 覆盖原文件。
+     * 注意：rename 直接原子替换已存在目标（POSIX 语义），绝不可先 delete 目标——
+     * 先删后改会在"目标已删、rename 未执行"的崩溃窗口留下缓存缺失，
+     * 进而被误判为未缓存而触发全量下载，丢失本地未同步修改。
      *
      * @param updateVersion 是否同步刷新 `<hash>.version`
      * @return 写入内容的 SHA-256 十六进制小写摘要
@@ -88,14 +95,7 @@ class SyncCache(private val cacheDir: File) {
             fos.fd.sync()
         }
 
-        if (cacheFile.exists()) {
-            cacheFile.delete()
-        }
-        if (!tmpFile.renameTo(cacheFile)) {
-            // 在某些系统上重命名失败时回退直接写入并删除 tmp
-            tmpFile.copyTo(cacheFile, overwrite = true)
-            tmpFile.delete()
-        }
+        moveAtomically(tmpFile, cacheFile)
 
         val sha256 = sha256Hex(data)
         if (updateVersion) {
@@ -103,6 +103,35 @@ class SyncCache(private val cacheDir: File) {
             writeStringSafely(versionFile, sha256)
         }
         return sha256
+    }
+
+    /**
+     * 读取基准内容快照（最后确认与云端一致时的完整字节）。
+     * 三方合并需要 base 的完整内容而非仅哈希；本地缓存会被工作副本覆盖，
+     * base 内容必须独立落盘，否则冲突会话中断后 base 会被本地修改版污染，
+     * 后续合并将退化为"远端全胜"的静默数据丢失。
+     */
+    fun readBaseContent(remotePath: String): ByteArray? {
+        val file = getFile(remotePath, SUFFIX_BASE_CACHE)
+        return if (file.exists() && file.isFile) {
+            file.readBytes()
+        } else {
+            null
+        }
+    }
+
+    /**
+     * 持久化基准内容快照。仅在字节确认与远端一致时由 SyncEngine 调用。
+     */
+    fun writeBaseContent(remotePath: String, data: ByteArray) {
+        val baseFile = getFile(remotePath, SUFFIX_BASE_CACHE)
+        val tmpFile = File(cacheDir, "${baseFile.name}$SUFFIX_TMP")
+        FileOutputStream(tmpFile).use { fos ->
+            fos.write(data)
+            fos.flush()
+            fos.fd.sync()
+        }
+        moveAtomically(tmpFile, baseFile)
     }
 
     /**
@@ -173,6 +202,7 @@ class SyncCache(private val cacheDir: File) {
             SUFFIX_CACHE,
             SUFFIX_VERSION,
             SUFFIX_BASE_VERSION,
+            SUFFIX_BASE_CACHE,
             SUFFIX_META,
             "$SUFFIX_CACHE$SUFFIX_TMP"
         ).forEach { suffix ->
@@ -180,6 +210,23 @@ class SyncCache(private val cacheDir: File) {
             if (file.exists()) {
                 file.delete()
             }
+        }
+    }
+
+    /**
+     * 原子替换移动：POSIX rename 对已存在目标执行原子替换（无窗口、无半写状态）；
+     * renameTo 失败的平台（如桌面 Windows 调试环境）回退 Files.move，
+     * 优先 ATOMIC_MOVE，不支持时降级 REPLACE_EXISTING，绝不做非原子 copyTo。
+     */
+    private fun moveAtomically(tmpFile: File, targetFile: File) {
+        if (tmpFile.renameTo(targetFile)) return
+        try {
+            Files.move(
+                tmpFile.toPath(), targetFile.toPath(),
+                StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING
+            )
+        } catch (_: AtomicMoveNotSupportedException) {
+            Files.move(tmpFile.toPath(), targetFile.toPath(), StandardCopyOption.REPLACE_EXISTING)
         }
     }
 
@@ -195,19 +242,14 @@ class SyncCache(private val cacheDir: File) {
             fos.flush()
             fos.fd.sync()
         }
-        if (targetFile.exists()) {
-            targetFile.delete()
-        }
-        if (!tmpFile.renameTo(targetFile)) {
-            tmpFile.copyTo(targetFile, overwrite = true)
-            tmpFile.delete()
-        }
+        moveAtomically(tmpFile, targetFile)
     }
 
     companion object {
         private const val SUFFIX_CACHE = ".cache"
         private const val SUFFIX_VERSION = ".version"
         private const val SUFFIX_BASE_VERSION = ".baseversion"
+        private const val SUFFIX_BASE_CACHE = ".basecache"
         private const val SUFFIX_META = ".meta"
         private const val SUFFIX_TMP = ".tmp"
 

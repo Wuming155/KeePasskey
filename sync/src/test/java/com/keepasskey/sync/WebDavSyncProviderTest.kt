@@ -163,14 +163,16 @@ class WebDavSyncProviderTest {
         assertTrue(result.isSuccess)
         assertEquals("final-etag-2", result.getOrThrow())
 
-        // 验证请求顺序与头部
+        // 验证请求顺序与头部（临时文件名含随机 UUID 成分，仅断言唯一名模式）
         val req1 = server.takeRequest()
         assertEquals("PUT", req1.method)
-        assertTrue(req1.path?.endsWith("vault.kdbx.kpktmp") == true)
-
+        assertTrue(req1.path?.startsWith("/vault.kdbx.") == true)
+        assertTrue(req1.path?.endsWith(".kpktmp") == true)
+        // MOVE 源（请求 URL）必须是本次 PUT 的同一个唯一临时文件
         val req2 = server.takeRequest()
         assertEquals("MOVE", req2.method)
         assertEquals("T", req2.getHeader("Overwrite"))
+        assertEquals(req1.path, req2.path)
         assertTrue(req2.getHeader("Destination")?.endsWith("vault.kdbx") == true)
     }
 
@@ -194,13 +196,15 @@ class WebDavSyncProviderTest {
         val result = provider.uploadAtomic("vault.kdbx", "binary-data".toByteArray())
         assertTrue(result.isFailure)
 
-        // 验证回滚调用了 DELETE
+        // 验证回滚调用了 DELETE，且清理的是本次 PUT 的同一个唯一临时文件
         val req1 = server.takeRequest() // PUT
         val req2 = server.takeRequest() // MOVE 1
         val req3 = server.takeRequest() // MOVE 2
         val req4 = server.takeRequest() // DELETE
         assertEquals("DELETE", req4.method)
-        assertTrue(req4.path?.endsWith("vault.kdbx.kpktmp") == true)
+        assertTrue(req1.path?.startsWith("/vault.kdbx.") == true)
+        assertTrue(req1.path?.endsWith(".kpktmp") == true)
+        assertEquals(req1.path, req4.path)
     }
 
     @Test

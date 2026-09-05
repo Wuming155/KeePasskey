@@ -127,6 +127,14 @@ object KdbxMerger {
                         else -> survivingGroups[groupId] = mergeGroupsBothModified(bg, lg, rg)
                     }
                 }
+                lg != null && rg == null -> {
+                    // 单侧新建分组（base 与墓碑中均无记录）：新建方保留。
+                    // 此分支必须在墓碑分支之后——带墓碑的单侧缺失已由上方删除分支裁决
+                    survivingGroups[groupId] = lg
+                }
+                lg == null && rg != null -> {
+                    survivingGroups[groupId] = rg
+                }
             }
         }
 
@@ -184,6 +192,14 @@ object KdbxMerger {
                             }
                         }
                     }
+                }
+                le != null && re == null -> {
+                    // 单侧新建条目（base 与墓碑中均无记录）：新建方保留。
+                    // 缺失此分支会导致合并静默丢弃所有一端新建的条目（静默数据丢失）
+                    survivingEntries.add(le)
+                }
+                le == null && re != null -> {
+                    survivingEntries.add(re)
                 }
             }
         }
@@ -344,11 +360,9 @@ object KdbxMerger {
 
     private fun isEntryModified(base: KdbxEntry?, current: KdbxEntry): Boolean {
         if (base == null) return true
-        if (base.fields.size != current.fields.size) return true
-        for ((k, v) in current.fields) {
-            val bv = base.fields[k] ?: return true
-            if (bv.readString() != v.readString()) return true
-        }
+        // ProtectedString.equals 为字节数组内容比较，直接用 Map 相等性判断，
+        // 不经 readString() 将全库密码物化为不可清除的 String
+        if (base.fields != current.fields) return true
         if (base.customFields != current.customFields) return true
         if (base.tags != current.tags) return true
         if (base.attachments != current.attachments) return true
@@ -409,15 +423,17 @@ object KdbxMerger {
             val lc = localCustomMap[key]
             val rc = remoteCustomMap[key]
 
-            val lChanged = lc?.value?.readString() != bc?.value?.readString()
-            val rChanged = rc?.value?.readString() != bc?.value?.readString()
+            // KdbxCustomField 为 data class，其 value 的 ProtectedString.equals
+            // 为字节数组内容比较，无需物化明文
+            val lChanged = lc?.value != bc?.value
+            val rChanged = rc?.value != bc?.value
 
             when {
                 lChanged && !rChanged -> if (lc != null) mergedCustomFields.add(lc)
                 !lChanged && rChanged -> if (rc != null) mergedCustomFields.add(rc)
                 !lChanged && !rChanged -> if (lc != null) mergedCustomFields.add(lc)
                 else -> {
-                    if (lc?.value?.readString() == rc?.value?.readString()) {
+                    if (lc?.value == rc?.value) {
                         if (lc != null) mergedCustomFields.add(lc)
                     } else {
                         diffFields.add("自定义字段: $key")
@@ -445,6 +461,12 @@ object KdbxMerger {
             }
         }
 
+        // 历史版本合并（对齐官方 MergeIn：三方历史并集，按最后修改时间去重后升序排列；
+        // 时间戳碰撞时优先保留本地侧快照）
+        val mergedHistory = (local.history + remote.history + base?.history.orEmpty())
+            .distinctBy { it.times.lastModificationTime }
+            .sortedBy { it.times.lastModificationTime }
+
         // 时间戳取最新
         val maxMod = if (remote.times.lastModificationTime.isAfter(local.times.lastModificationTime)) {
             remote.times.lastModificationTime
@@ -463,6 +485,7 @@ object KdbxMerger {
             customFields = mergedCustomFields,
             tags = mergedTags,
             attachments = mergedAttachments,
+            history = mergedHistory,
             times = local.times.copy(lastModificationTime = maxMod),
             parentGroupId = parentGroupId
         )
@@ -484,7 +507,8 @@ object KdbxMerger {
     private fun isFieldDifferent(a: ProtectedString?, b: ProtectedString?): Boolean {
         if (a == null && b == null) return false
         if (a == null || b == null) return true
-        return a.readString() != b.readString()
+        // ProtectedString.equals 为字节数组内容比较，不物化明文 String
+        return a != b
     }
 
     private fun getFieldDisplayName(key: String): String {
@@ -499,57 +523,6 @@ object KdbxMerger {
     }
 
     /**
-     * 兼容旧版基于时间戳的两端自动合并
-     */
-    fun detectConflictsAndMergeAuto(
-        localEntries: List<KdbxEntry>,
-        remoteEntries: List<KdbxEntry>,
-        lastSyncTimestamp: Long
-    ): Pair<List<KdbxEntry>, List<ConflictedEntryPair>> {
-        val localMap = localEntries.associateBy { it.id.toHexString() }
-        val remoteMap = remoteEntries.associateBy { it.id.toHexString() }
-
-        val allUuids = (localMap.keys + remoteMap.keys).toSet()
-        val mergedList = mutableListOf<KdbxEntry>()
-        val conflicts = mutableListOf<ConflictedEntryPair>()
-
-        for (uuid in allUuids) {
-            val local = localMap[uuid]
-            val remote = remoteMap[uuid]
-
-            when {
-                local != null && remote == null -> mergedList.add(local)
-                local == null && remote != null -> mergedList.add(remote)
-                local != null && remote != null -> {
-                    val localMod = local.times.lastModificationTime.toEpochMilli()
-                    val remoteMod = remote.times.lastModificationTime.toEpochMilli()
-
-                    val isLocalChanged = localMod > lastSyncTimestamp
-                    val isRemoteChanged = remoteMod > lastSyncTimestamp
-
-                    if (isLocalChanged && isRemoteChanged && !areEntriesIdentical(local, remote)) {
-                        val diffFields = findDifferentFields(local, remote)
-                        conflicts.add(
-                            ConflictedEntryPair(
-                                entryId = uuid,
-                                localEntry = local,
-                                remoteEntry = remote,
-                                modifiedFields = diffFields
-                            )
-                        )
-                    } else if (remoteMod > localMod) {
-                        mergedList.add(remote)
-                    } else {
-                        mergedList.add(local)
-                    }
-                }
-            }
-        }
-
-        return Pair(mergedList, conflicts)
-    }
-
-    /**
      * 根据用户在冲突界面中的选择解决冲突
      */
     fun resolveConflict(
@@ -560,30 +533,16 @@ object KdbxMerger {
             ConflictResolutionChoice.KEEP_LOCAL -> listOf(pair.localEntry)
             ConflictResolutionChoice.KEEP_REMOTE -> listOf(pair.remoteEntry)
             ConflictResolutionChoice.DUPLICATE_BOTH -> {
-                val remoteDuplicate = pair.remoteEntry.withField(
-                    KdbxConstants.Fields.TITLE,
-                    ProtectedString("${pair.remoteEntry.title} (云端冲突副本)", isProtected = false)
-                )
+                // 冲突副本必须换新 UUID：KDBX 要求 UUID 全局唯一，且同 UUID 副本
+                // 在应用回分组树时会与本地原条目命中同一槽位而互相覆盖
+                val remoteDuplicate = pair.remoteEntry
+                    .copy(id = KdbxUuid.random())
+                    .withField(
+                        KdbxConstants.Fields.TITLE,
+                        ProtectedString("${pair.remoteEntry.title} (云端冲突副本)", isProtected = false)
+                    )
                 listOf(pair.localEntry, remoteDuplicate)
             }
         }
-    }
-
-    private fun areEntriesIdentical(a: KdbxEntry, b: KdbxEntry): Boolean {
-        return a.title == b.title &&
-                a.userName == b.userName &&
-                a.password?.readString() == b.password?.readString() &&
-                a.url == b.url &&
-                a.notes == b.notes
-    }
-
-    private fun findDifferentFields(a: KdbxEntry, b: KdbxEntry): List<String> {
-        val diffs = mutableListOf<String>()
-        if (a.title != b.title) diffs.add("标题 (Title)")
-        if (a.userName != b.userName) diffs.add("用户名 (Username)")
-        if (a.password?.readString() != b.password?.readString()) diffs.add("密码 (Password)")
-        if (a.url != b.url) diffs.add("网址 (URL)")
-        if (a.notes != b.notes) diffs.add("备注 (Notes)")
-        return diffs
     }
 }

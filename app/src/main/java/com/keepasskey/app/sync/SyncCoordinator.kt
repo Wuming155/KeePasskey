@@ -3,8 +3,11 @@ package com.keepasskey.app.sync
 import android.content.Context
 import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.app.ui.screens.settings.CloudSyncProvider
+import com.keepasskey.core.model.DeletedObject
 import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.core.model.KdbxEntry
+import com.keepasskey.core.model.KdbxGroup
+import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.core.security.ProtectedString
 import com.keepasskey.database.file.KdbxDatabase
 import com.keepasskey.database.file.KdbxFile
@@ -18,6 +21,7 @@ import com.keepasskey.sync.merge.ConflictResolutionChoice
 import com.keepasskey.sync.merge.ConflictedEntryPair
 import com.keepasskey.sync.merge.KdbxDatabaseLite
 import com.keepasskey.sync.merge.KdbxMerger
+import com.keepasskey.sync.model.cleanEtag
 import com.keepasskey.sync.provider.SyncProvider
 import com.keepasskey.sync.s3.S3SyncProvider
 import com.keepasskey.sync.webdav.WebDavSyncProvider
@@ -101,6 +105,16 @@ open class SyncCoordinator @Inject constructor(
     private var pendingRemotePath: String? = null
     private var pendingLocalDb: KdbxDatabase? = null
     private var pendingRemoteDb: KdbxDatabase? = null
+
+    // A1 整改：三方合并产物必须保存到用户决策时刻——resolveConflicts 需以
+    // mergedRoot（含远端新增条目/分组与非冲突字段级合并）为底版应用用户选择，
+    // 若从纯 localDb 重建，合并产物将全部丢失
+    private var pendingMergedRoot: KdbxGroup? = null
+    private var pendingMergedTombstones: List<DeletedObject> = emptyList()
+
+    // E2 整改：冲突发生时刻的远端 ETag。resolveConflicts 的 If-Match 期望值必须用
+    // 该值而非重新探测的当前值，否则用户决策期间远端的再次更新会被静默覆盖
+    private var pendingRemoteEtag: String = ""
     private var lastSyncedDb: KdbxDatabase? = null
 
     // 允许单元测试注入模拟 Provider 与测试路径
@@ -154,7 +168,11 @@ open class SyncCoordinator @Inject constructor(
         lastSyncEngine = syncEngine
 
         val isCached = syncCache.isCached(remotePath)
-        val baseSnapshotBytes = if (isCached) syncCache.readCache(remotePath) else null
+        val cachedSnapshotBytes = if (isCached) syncCache.readCache(remotePath) else null
+        // A2 整改：三方合并的 base 必须取"最后确认与远端一致"的独立内容快照（basecache）。
+        // 本地缓存会被工作副本反复覆盖，绝不能再兼任 base 内容来源——
+        // 否则冲突会话中断后 base 会被本地修改版污染，后续合并退化为远端全胜
+        val baseSnapshotBytes = syncCache.readBaseContent(remotePath) ?: cachedSnapshotBytes
         val hasLocalContentChanged = hasDatabaseContentChanged(currentDb, lastSyncedDb)
 
         // 1. 获取本地数据库字节：若无内容变更且已缓存，复用缓存规避 KDBX4 随机 IV 导致的不必要哈希漂移；否则序列化并写缓存
@@ -166,7 +184,7 @@ open class SyncCoordinator @Inject constructor(
             }
             bytes
         } else {
-            baseSnapshotBytes ?: serializeLocalDatabase(currentDb)!!
+            cachedSnapshotBytes ?: serializeLocalDatabase(currentDb)!!
         }
 
         val isDirty = databaseSession.state.value == DatabaseSession.SessionState.DIRTY
@@ -200,13 +218,17 @@ open class SyncCoordinator @Inject constructor(
                     return@withLock SyncOutcome.UploadedLocal
                 }
                 is SyncCommitResult.ConflictNeedsMerge -> {
+                    // R3 整改：本地未同步修改必须先落盘正式库文件——冲突会话可能在
+                    // 用户退出/进程被杀时中断，仅存于缓存与内存的本地修改会随重启丢失
+                    databaseSession.save()
                     return@withLock handleConflictMerge(
                         syncEngine = syncEngine,
                         syncCache = syncCache,
                         remotePath = remotePath,
                         localBytes = localBytes,
                         remoteBytes = commitResult.remoteBytes,
-                        baseSnapshotBytes = baseSnapshotBytes
+                        baseSnapshotBytes = baseSnapshotBytes,
+                        remoteEtag = commitResult.remoteEtag
                     )
                 }
                 is SyncCommitResult.RemoteUnreachable -> {
@@ -242,13 +264,16 @@ open class SyncCoordinator @Inject constructor(
                     SyncOutcome.Offline
                 }
                 is SyncOpenResult.ConflictDetected -> {
+                    // R3 整改：同 commitLocal 冲突路径，先落盘本地会话再进入合并
+                    databaseSession.save()
                     handleConflictMerge(
                         syncEngine = syncEngine,
                         syncCache = syncCache,
                         remotePath = remotePath,
                         localBytes = openResult.localBytes,
                         remoteBytes = openResult.remoteBytes,
-                        baseSnapshotBytes = baseSnapshotBytes
+                        baseSnapshotBytes = baseSnapshotBytes,
+                        remoteEtag = openResult.remoteEtag
                     )
                 }
             }
@@ -270,7 +295,10 @@ open class SyncCoordinator @Inject constructor(
 
         return@withLock withContext(Dispatchers.Default) {
             val conflicts = _conflictFlow.value
-            var updatedRoot = localDb.rootGroup
+            // A1 整改：以三方合并产物为底版应用用户决策。mergedRoot 含远端新增
+            // 条目/分组、非冲突字段级合并与标签并集；若从纯 localDb 重建，
+            // 这些合并成果将随冲突决策一并丢失（静默数据丢失）
+            var updatedRoot = pendingMergedRoot ?: localDb.rootGroup
 
             for (pair in conflicts) {
                 val choice = resolutions[pair.entryId] ?: ConflictResolutionChoice.KEEP_LOCAL
@@ -281,26 +309,49 @@ open class SyncCoordinator @Inject constructor(
                 }
             }
 
-            val mergedDb = localDb.copy(rootGroup = updatedRoot)
+            val mergedDb = localDb.copy(
+                rootGroup = updatedRoot,
+                deletedObjects = pendingMergedTombstones
+            )
             val mergedBytes = serializeLocalDatabase(mergedDb)
                 ?: return@withContext SyncOutcome.Error("冲突合并数据库序列化失败")
 
-            val uploadResult = engine.markResolvedAndUpload(path, mergedBytes)
+            // E2 整改：If-Match 期望值取冲突发生时刻的远端 ETag——用户决策期间
+            // 远端若被再次修改，上传将 412 失败并暴露新冲突，而不是静默覆盖他端更新
+            val uploadResult = engine.markResolvedAndUpload(
+                path,
+                mergedBytes,
+                expectedEtag = pendingRemoteEtag.ifEmpty { null }
+            )
             if (uploadResult.isSuccess) {
                 databaseSession.updateDatabaseMeta { mergedDb }
                 databaseSession.save()
 
-                _conflictFlow.value = emptyList()
-                pendingRemoteEngine = null
-                pendingRemotePath = null
-                pendingLocalDb = null
-                pendingRemoteDb = null
-
+                clearPendingConflictSession()
                 SyncOutcome.MergedAndUploaded
             } else {
-                SyncOutcome.Error("上传冲突解决版本失败: ${uploadResult.exceptionOrNull()?.message}")
+                val ex = uploadResult.exceptionOrNull()
+                if (ex is com.keepasskey.sync.model.SyncException.ConflictError) {
+                    // 远端在决策期间再次更新：放弃本次解决会话（本地会话未被改写，
+                    // 未同步修改仍保留在缓存中），用户重新 syncNow 将以最新远端重新检测合并
+                    clearPendingConflictSession()
+                    SyncOutcome.Error("云端在冲突解决期间再次更新，请重新同步以重新合并")
+                } else {
+                    SyncOutcome.Error("上传冲突解决版本失败: ${ex?.message}")
+                }
             }
         }
+    }
+
+    private fun clearPendingConflictSession() {
+        _conflictFlow.value = emptyList()
+        pendingRemoteEngine = null
+        pendingRemotePath = null
+        pendingLocalDb = null
+        pendingRemoteDb = null
+        pendingMergedRoot = null
+        pendingMergedTombstones = emptyList()
+        pendingRemoteEtag = ""
     }
 
     /**
@@ -351,7 +402,8 @@ open class SyncCoordinator @Inject constructor(
         remotePath: String,
         localBytes: ByteArray,
         remoteBytes: ByteArray,
-        baseSnapshotBytes: ByteArray? = null
+        baseSnapshotBytes: ByteArray? = null,
+        remoteEtag: String = ""
     ): SyncOutcome = withContext(Dispatchers.Default) {
         val localDb = parseKdbxBytes(localBytes)
             ?: return@withContext SyncOutcome.Error("无法解密本地冲突数据库")
@@ -377,6 +429,9 @@ open class SyncCoordinator @Inject constructor(
             pendingRemotePath = remotePath
             pendingLocalDb = localDb
             pendingRemoteDb = remoteDb
+            pendingMergedRoot = mergeResult.mergedRoot
+            pendingMergedTombstones = mergeResult.mergedDeletedObjects
+            pendingRemoteEtag = cleanEtag(remoteEtag)
             SyncOutcome.ConflictNeedsUser(mergeResult.conflicts)
         } else {
             // 无条目级冲突，自动合并
@@ -505,25 +560,56 @@ open class SyncCoordinator @Inject constructor(
         return group.copy(subgroups = newSubs)
     }
 
+    /**
+     * 全字段递归内容比较（C1 整改）。
+     * 原实现仅比较 title/userName/password/url/notes 五项：仅修改 tags、自定义字段、
+     * 附件、图标、分组结构等内容的编辑会被误判为"无变化"，导致复用过期缓存并把
+     * 旧字节上传到云端（本地编辑与云端静默分叉）。
+     * ProtectedString.equals 为字节数组内容比较，整字段比较不会物化明文密码。
+     */
     private fun hasDatabaseContentChanged(current: KdbxDatabase, reference: KdbxDatabase?): Boolean {
         if (reference == null) return true
-        val curEntries = current.rootGroup.allEntries()
-        val refEntries = reference.rootGroup.allEntries()
-        if (curEntries.size != refEntries.size) return true
-        val refMap = refEntries.associateBy { it.id }
-        for (ce in curEntries) {
-            val re = refMap[ce.id] ?: return true
-            if (ce.title != re.title ||
-                ce.userName != re.userName ||
-                // F3 整改：直接走 ProtectedString.equals（底层字节数组 contentEquals 比较），
-            // 不再经 readString() 将全库密码物化为不可清除的 String 驻留 JVM 堆
-            ce.password != re.password ||
-                ce.url != re.url ||
-                ce.notes != re.notes
-            ) {
-                return true
-            }
+        if (current.deletedObjects != reference.deletedObjects) return true
+        return isGroupContentChanged(current.rootGroup, reference.rootGroup)
+    }
+
+    private fun isGroupContentChanged(a: KdbxGroup, b: KdbxGroup): Boolean {
+        if (a.id != b.id || a.name != b.name || a.notes != b.notes ||
+            a.iconId != b.iconId || a.customIconId != b.customIconId ||
+            a.parentGroupId != b.parentGroupId
+        ) {
+            return true
+        }
+        if (a.entries.size != b.entries.size) return true
+        val bEntries = b.entries.associateBy { it.id }
+        for (entry in a.entries) {
+            val ref = bEntries[entry.id] ?: return true
+            if (isEntryContentChanged(entry, ref)) return true
+        }
+        if (a.subgroups.size != b.subgroups.size) return true
+        val bSubgroups = b.subgroups.associateBy { it.id }
+        for (sub in a.subgroups) {
+            val ref = bSubgroups[sub.id] ?: return true
+            if (isGroupContentChanged(sub, ref)) return true
         }
         return false
+    }
+
+    private fun isEntryContentChanged(a: KdbxEntry, b: KdbxEntry): Boolean {
+        return a.fields != b.fields ||
+                a.customFields != b.customFields ||
+                a.tags != b.tags ||
+                a.attachments != b.attachments ||
+                a.iconId != b.iconId ||
+                a.customIconId != b.customIconId ||
+                a.overrideUrl != b.overrideUrl ||
+                a.qualityCheck != b.qualityCheck ||
+                a.parentGroupId != b.parentGroupId ||
+                a.previousParentGroup != b.previousParentGroup ||
+                a.customData != b.customData ||
+                a.autoType != b.autoType ||
+                a.backgroundColor != b.backgroundColor ||
+                a.foregroundColor != b.foregroundColor ||
+                a.history.size != b.history.size
     }
 }

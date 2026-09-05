@@ -17,6 +17,7 @@ import java.net.URLEncoder
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.TimeZone
+import java.util.UUID
 import javax.xml.parsers.DocumentBuilderFactory
 
 /**
@@ -25,7 +26,7 @@ import javax.xml.parsers.DocumentBuilderFactory
  * 1. PROPFIND: 基于 DOM 解析 getetag, getcontentlength, getlastmodified, resourcetype;
  * 2. GET: 二进制流下载;
  * 3. PUT: 支持 If-Match: <etag> 乐观并发保护;
- * 4. 事务写 (uploadAtomic): PUT .kpktmp -> MOVE 覆盖 -> 失败重试/回滚;
+ * 4. 事务写 (uploadAtomic): PUT 唯一随机名 .kpktmp -> MOVE 覆盖 -> 失败重试/回滚;
  * 5. URL 编码：对路径段执行逐段 UTF-8 编码。
  */
 class WebDavSyncProvider(
@@ -187,7 +188,9 @@ class WebDavSyncProvider(
     /**
      * 事务性原子上传 (P2-16)。
      * 流程：
-     * 1. 上传至 `<remotePath>.kpktmp` 临时文件；
+     * 1. 上传至 `<remotePath>.<随机UUID>.kpktmp` 临时文件——临时名含每次操作的
+     *    随机成分：若多客户端共用固定临时名，A 的 MOVE 可能搬运到 B 刚覆盖写入的
+     *    临时内容（If 预条件只约束 MOVE 目标，不约束源临时文件），造成数据交叉污染；
      * 2. 发送 WebDAV MOVE 命令（Destination: 目标完整 URL，Overwrite: T）；
      *    对远端目标文件的 ETag 预条件使用 RFC 4918 `If` 头 tagged list 语法
      *    （`If: <destUrl> (["etag"])`）——`If-Match` 默认仅作用于请求-URI（即源临时文件），
@@ -201,7 +204,7 @@ class WebDavSyncProvider(
         expectedEtag: String?
     ): Result<String> = withContext(Dispatchers.IO) {
         runCatching {
-            val tmpPath = "$remotePath$ATOMIC_TMP_SUFFIX"
+            val tmpPath = "$remotePath.${UUID.randomUUID()}$ATOMIC_TMP_SUFFIX"
             val tmpUploadResult = upload(tmpPath, data, expectedEtag = null)
             if (tmpUploadResult.isFailure) {
                 throw tmpUploadResult.exceptionOrNull() ?: SyncException.NetworkError("上传临时文件失败")

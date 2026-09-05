@@ -146,6 +146,11 @@ class SyncEngine(
      * 4. 本地有修改且 base != 远端 -> [SyncOpenResult.ConflictDetected]
      * 5. 远端 404 且有缓存 -> 上传恢复 -> [SyncOpenResult.RemoteLostRestored]
      * 6. 网络错误且有缓存 -> [SyncOpenResult.RemoteUnreachableUsingCache]
+     *
+     * 远端一致性双通道裁决：ETag 可用时按乐观锁比对（零下载）；
+     * 无 ETag 服务器（部分极简 WebDAV 不返回 ETag）回退内容哈希裁决——
+     * 下载一次与 baseversion 记录的 SHA-256 比对，避免 etag 缺失导致
+     * "每次同步都误判远端更新/冲突"的退化循环。
      */
     suspend fun openRemote(remotePath: String): SyncOpenResult = withContext(Dispatchers.IO) {
         if (isOffline) {
@@ -177,6 +182,7 @@ class SyncEngine(
 
             val hash = cache.writeCache(remotePath, remoteBytes)
             cache.updateBase(remotePath, hash, meta.etag)
+            cache.writeBaseContent(remotePath, remoteBytes)
             events.tryEmit(SyncCacheEvent.LoadedFromRemoteInSync(remotePath))
             return@withContext SyncOpenResult.RemoteSynced(remoteBytes, meta.etag)
         }
@@ -185,6 +191,7 @@ class SyncEngine(
         val cachedBytes = cache.readCache(remotePath) ?: ByteArray(0)
         val state = cache.getState(remotePath)
         val baseEtag = cleanEtag(state?.etag)
+        val baseVersionHash = state?.baseVersion.orEmpty().trim()
 
         val metaResult = provider.getMetadata(remotePath)
         if (metaResult.isFailure) {
@@ -196,6 +203,7 @@ class SyncEngine(
                     val newEtag = uploadResult.getOrThrow()
                     val localHash = state?.localVersion ?: SyncCache.sha256Hex(cachedBytes)
                     cache.updateBase(remotePath, localHash, newEtag)
+                    cache.writeBaseContent(remotePath, cachedBytes)
                     events.tryEmit(SyncCacheEvent.UpdatedRemoteFileOnLoad(remotePath))
                     return@withContext SyncOpenResult.RemoteLostRestored(newEtag)
                 }
@@ -211,38 +219,53 @@ class SyncEngine(
         val remoteEtag = cleanEtag(remoteMeta.etag)
         val localHasChanges = cache.hasLocalChanges(remotePath)
 
+        var downloadedBytes: ByteArray? = null
+        suspend fun isRemoteUnchanged(): Boolean {
+            if (baseEtag.isNotEmpty() && remoteEtag.isNotEmpty()) {
+                return baseEtag == remoteEtag
+            }
+            // ETag 双端任一缺失：回退内容哈希裁决
+            if (baseVersionHash.isEmpty()) return false
+            val bytes = downloadedBytes
+                ?: provider.download(remotePath).getOrNull()?.also { downloadedBytes = it }
+                ?: return false
+            return SyncCache.sha256Hex(bytes) == baseVersionHash
+        }
+
         if (!localHasChanges) {
             // 本地无修改
-            val isSameEtag = baseEtag.isNotEmpty() && baseEtag == remoteEtag
-            if (isSameEtag) {
+            if (isRemoteUnchanged()) {
+                if (downloadedBytes != null) {
+                    // 内容哈希裁决命中：内容一致，仅刷新元数据，无需重复写缓存
+                    cache.updateBase(remotePath, baseVersionHash, remoteEtag.ifEmpty { baseEtag })
+                }
                 events.tryEmit(SyncCacheEvent.LoadedFromRemoteInSync(remotePath))
-                SyncOpenResult.RemoteSynced(cachedBytes, remoteEtag)
+                SyncOpenResult.RemoteSynced(cachedBytes, remoteEtag.ifEmpty { baseEtag })
             } else {
                 // 远端有更新，拉取刷新
-                val downloadResult = provider.download(remotePath)
-                val remoteBytes = downloadResult.getOrThrow()
+                val remoteBytes = downloadedBytes ?: provider.download(remotePath).getOrThrow()
                 val newHash = cache.writeCache(remotePath, remoteBytes)
                 cache.updateBase(remotePath, newHash, remoteEtag)
+                cache.writeBaseContent(remotePath, remoteBytes)
                 events.tryEmit(SyncCacheEvent.UpdatedCachedFileOnLoad(remotePath))
                 SyncOpenResult.RemoteSynced(remoteBytes, remoteEtag)
             }
         } else {
             // 本地有修改
-            val isRemoteUnchanged = baseEtag.isNotEmpty() && baseEtag == remoteEtag
-            if (isRemoteUnchanged) {
+            if (isRemoteUnchanged()) {
                 // 本地有修改且远端未变 -> 本地赢，自动上传并基线前移
-                val uploadResult = provider.uploadAtomic(remotePath, cachedBytes, expectedEtag = baseEtag)
+                val uploadResult = provider.uploadAtomic(remotePath, cachedBytes, expectedEtag = baseEtag.ifEmpty { null })
                 if (uploadResult.isSuccess) {
                     val newEtag = uploadResult.getOrThrow()
                     val localHash = state?.localVersion ?: SyncCache.sha256Hex(cachedBytes)
                     cache.updateBase(remotePath, localHash, newEtag)
+                    cache.writeBaseContent(remotePath, cachedBytes)
                     events.tryEmit(SyncCacheEvent.UpdatedRemoteFileOnLoad(remotePath))
                     SyncOpenResult.LocalWinAutoUploaded(newEtag)
                 } else {
                     val uploadEx = uploadResult.exceptionOrNull()
                     if (uploadEx is SyncException.ConflictError) {
-                        val downloadResult = provider.download(remotePath)
-                        val remoteBytes = downloadResult.getOrThrow()
+                        val remoteBytes = downloadedBytes ?: provider.download(remotePath).getOrThrow()
                         events.tryEmit(SyncCacheEvent.OpenedFromLocalDueToConflict(remotePath))
                         SyncOpenResult.ConflictDetected(
                             cachedBytes,
@@ -256,8 +279,7 @@ class SyncEngine(
                 }
             } else {
                 // 本地有修改且远端也有修改 -> 双方冲突
-                val downloadResult = provider.download(remotePath)
-                val remoteBytes = downloadResult.getOrThrow()
+                val remoteBytes = downloadedBytes ?: provider.download(remotePath).getOrThrow()
                 events.tryEmit(SyncCacheEvent.OpenedFromLocalDueToConflict(remotePath))
                 SyncOpenResult.ConflictDetected(cachedBytes, remoteBytes, remoteEtag)
             }
@@ -285,6 +307,7 @@ class SyncEngine(
         if (uploadResult.isSuccess) {
             val newEtag = uploadResult.getOrThrow()
             cache.updateBase(remotePath, localHash, newEtag)
+            cache.writeBaseContent(remotePath, localBytes)
             SyncCommitResult.Uploaded(newEtag)
         } else {
             val ex = uploadResult.exceptionOrNull()
@@ -301,14 +324,29 @@ class SyncEngine(
 
     /**
      * 在冲突合并解决完成后提交最终数据，并将基准版本前移。
+     *
+     * @param expectedEtag 冲突发生时刻记录的远端 ETag。必须使用该值做 If-Match 乐观锁，
+     *   而非重新探测的当前 ETag——用户决策期间远端可能再次被修改，
+     *   用当前值会通过校验并静默覆盖他端的更新；用冲突时刻值则 412 暴露新冲突。
+     *   传空（如无 ETag 服务器）时回退为探测当前远端元数据。
+     *
+     * 写序约定（先上传后落缓存）：上传失败时缓存与基线保持原状
+     * （本地未同步修改仍在，下次同步自动重试），避免"缓存已含合并结果但
+     * 基线未动、内存会话未更新"的三处不一致状态。
      */
-    suspend fun markResolvedAndUpload(remotePath: String, mergedBytes: ByteArray): Result<String> = withContext(Dispatchers.IO) {
+    suspend fun markResolvedAndUpload(
+        remotePath: String,
+        mergedBytes: ByteArray,
+        expectedEtag: String? = null
+    ): Result<String> = withContext(Dispatchers.IO) {
         runCatching {
+            val finalExpected = expectedEtag?.takeIf { it.isNotBlank() }
+                ?: cleanEtag(provider.getMetadata(remotePath).getOrNull()?.etag)
+            val newEtag = provider.uploadAtomic(remotePath, mergedBytes, expectedEtag = finalExpected)
+                .getOrThrow()
             val localHash = cache.writeCache(remotePath, mergedBytes)
-            val currentMeta = provider.getMetadata(remotePath).getOrNull()
-            val uploadResult = provider.uploadAtomic(remotePath, mergedBytes, expectedEtag = currentMeta?.etag)
-            val newEtag = uploadResult.getOrThrow()
             cache.updateBase(remotePath, localHash, newEtag)
+            cache.writeBaseContent(remotePath, mergedBytes)
             newEtag
         }
     }

@@ -269,6 +269,108 @@ class SyncEngineTest {
         assertTrue(engine.events.replayCache.any { it is SyncCacheEvent.CouldntOpenFromRemote })
     }
 
+    @Test
+    fun `测试无ETag服务器内容未变不误判冲突`() = runTest {
+        // 服务器不返回 ETag（etag 为空串）：只能依赖内容哈希裁决
+        val v1 = "content-v1".toByteArray()
+        fakeProvider.remoteFiles[remotePath] = FakeRemoteFile(v1, etag = "")
+        engine.openRemote(remotePath)
+
+        // 远端内容未变（etag 仍为空）：应判定一致而非"远端有更新/冲突"
+        val result = engine.openRemote(remotePath)
+        assertTrue(result is SyncOpenResult.RemoteSynced)
+        assertArrayEquals(v1, (result as SyncOpenResult.RemoteSynced).remoteBytes)
+    }
+
+    @Test
+    fun `测试无ETag服务器本地修改且远端内容未变时本地赢`() = runTest {
+        val v1 = "content-v1".toByteArray()
+        fakeProvider.remoteFiles[remotePath] = FakeRemoteFile(v1, etag = "")
+        engine.openRemote(remotePath)
+
+        val localNew = "content-local-edited".toByteArray()
+        syncCache.writeCache(remotePath, localNew)
+
+        // 远端内容哈希与基线一致 -> 本地赢自动上传，而非误报冲突
+        val result = engine.openRemote(remotePath)
+        assertTrue(result is SyncOpenResult.LocalWinAutoUploaded)
+        assertArrayEquals(localNew, fakeProvider.remoteFiles[remotePath]?.data)
+    }
+
+    @Test
+    fun `测试无ETag服务器远端内容变化时触发冲突检测`() = runTest {
+        val v1 = "content-v1".toByteArray()
+        fakeProvider.remoteFiles[remotePath] = FakeRemoteFile(v1, etag = "")
+        engine.openRemote(remotePath)
+
+        val localNew = "content-local-edited".toByteArray()
+        syncCache.writeCache(remotePath, localNew)
+        fakeProvider.remoteFiles[remotePath] = FakeRemoteFile("remote-changed".toByteArray(), etag = "")
+
+        val result = engine.openRemote(remotePath)
+        assertTrue(result is SyncOpenResult.ConflictDetected)
+        assertArrayEquals("remote-changed".toByteArray(), (result as SyncOpenResult.ConflictDetected).remoteBytes)
+    }
+
+    @Test
+    fun `测试 base 内容快照随同步状态推进持久化`() = runTest {
+        // 首次下载：base 内容 = 远端内容
+        val v1 = "content-v1".toByteArray()
+        fakeProvider.remoteFiles[remotePath] = FakeRemoteFile(v1, etag = "etag-1")
+        engine.openRemote(remotePath)
+        assertArrayEquals(v1, syncCache.readBaseContent(remotePath))
+
+        // 本地修改并本地赢上传：base 内容前移为本地新内容
+        val localNew = "content-local-edited".toByteArray()
+        syncCache.writeCache(remotePath, localNew)
+        engine.openRemote(remotePath)
+        assertArrayEquals(localNew, syncCache.readBaseContent(remotePath))
+
+        // 远端更新下载刷新：base 内容前移为最新远端内容
+        val v2 = "content-v2".toByteArray()
+        fakeProvider.remoteFiles[remotePath] = FakeRemoteFile(v2, etag = "etag-2")
+        engine.openRemote(remotePath)
+        assertArrayEquals(v2, syncCache.readBaseContent(remotePath))
+    }
+
+    @Test
+    fun `测试 markResolvedAndUpload 失败不污染缓存与基线`() = runTest {
+        val v1 = "content-v1".toByteArray()
+        fakeProvider.remoteFiles[remotePath] = FakeRemoteFile(v1, etag = "etag-1")
+        engine.openRemote(remotePath)
+
+        // 本地有未同步修改
+        val localNew = "content-local-unsynced".toByteArray()
+        syncCache.writeCache(remotePath, localNew)
+        val baseBefore = syncCache.getState(remotePath)?.baseVersion
+
+        fakeProvider.networkError = true
+        val res = engine.markResolvedAndUpload(remotePath, "merged-bytes".toByteArray(), expectedEtag = "etag-1")
+        assertTrue(res.isFailure)
+
+        // 写序约定（先上传后落缓存）：失败时缓存与基线保持原状，
+        // 本地未同步修改仍在，下次同步自动重试
+        assertArrayEquals(localNew, syncCache.readCache(remotePath))
+        assertEquals(baseBefore, syncCache.getState(remotePath)?.baseVersion)
+        assertTrue(syncCache.hasLocalChanges(remotePath))
+    }
+
+    @Test
+    fun `测试 markResolvedAndUpload 使用冲突时刻 etag 遭遇并发修改时失败`() = runTest {
+        val v1 = "content-v1".toByteArray()
+        fakeProvider.remoteFiles[remotePath] = FakeRemoteFile(v1, etag = "etag-1")
+        engine.openRemote(remotePath)
+
+        // 模拟用户决策期间远端又被他人修改：以冲突时刻的旧 etag 提交必须 412 失败，
+        // 而不是通过校验静默覆盖他端更新
+        fakeProvider.remoteFiles[remotePath] = FakeRemoteFile("concurrent-mod".toByteArray(), etag = "etag-other")
+        val res = engine.markResolvedAndUpload(remotePath, "merged-bytes".toByteArray(), expectedEtag = "etag-1")
+        assertTrue(res.isFailure)
+        assertTrue(res.exceptionOrNull() is SyncException.ConflictError)
+        // 远端内容未被覆盖
+        assertArrayEquals("concurrent-mod".toByteArray(), fakeProvider.remoteFiles[remotePath]?.data)
+    }
+
     private class FakeRemoteFile(
         var data: ByteArray,
         var etag: String,
