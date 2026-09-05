@@ -88,7 +88,10 @@ object PasskeyCryptoEngine {
         val pubEncoded = pub.q.getEncoded(false)
         val pubBase64 = Base64.getEncoder().encodeToString(pubEncoded)
 
-        val privHex = priv.d.toString(16)
+        // 私钥标量定长 64 字符 hex（大数值左补零），封装进 ProtectedString 供 KDBX 受保护字段存储。
+        // KDBX 受保护字段以字符串承载是格式层不可消解的边界——字节数组与 BigInteger 中间量
+        // 均不落 String 且在写入 ProtectedString 后立即废弃，编码 String 存活期即 ProtectedString 存活期。
+        val privHex = String.format("%064x", priv.d)
         val privateKeyProtected = ProtectedString(privHex, isProtected = true)
 
         val handle = resolveUserHandle(userHandle)
@@ -224,28 +227,6 @@ object PasskeyCryptoEngine {
             }
         } finally {
             Arrays.fill(workingKey, 0.toByte())
-        }
-    }
-
-    /**
-     * 针对现有 16 进制字符串私钥的向后兼容层
-     */
-    @Deprecated("请优先使用接收 ByteArray 敏感私钥材料的 signAssertion(Int, ByteArray, ByteArray) API")
-    fun signAssertion(privateKeyHex: String, dataToSign: ByteArray): ByteArray {
-        val bigInt = BigInteger(privateKeyHex, 16)
-        val rawBytes = bigInt.toByteArray()
-        val cleanBytes = if (rawBytes.size > 32 && rawBytes[0] == 0.toByte()) {
-            rawBytes.copyOfRange(1, rawBytes.size)
-        } else {
-            rawBytes
-        }
-        try {
-            return signAssertion(PasskeyData.ALGORITHM_ES256, cleanBytes, dataToSign)
-        } finally {
-            Arrays.fill(cleanBytes, 0.toByte())
-            if (rawBytes !== cleanBytes) {
-                Arrays.fill(rawBytes, 0.toByte())
-            }
         }
     }
 

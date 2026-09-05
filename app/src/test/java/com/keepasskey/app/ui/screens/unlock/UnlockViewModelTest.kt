@@ -41,7 +41,7 @@ class UnlockViewModelTest {
     }
 
     private fun TestScope.createViewModel(): UnlockViewModel {
-        val viewModel = UnlockViewModel(FakeVaultRepository(), FakeSettingsRepository())
+        val viewModel = UnlockViewModel(FakeVaultRepository(), FakeSettingsRepository(), null, null, null, com.keepasskey.app.data.logger.DebugLogBuffer())
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
             viewModel.uiState.collect {}
         }
@@ -84,7 +84,7 @@ class UnlockViewModelTest {
     }
 
     @Test
-    fun `生物识别回退模拟解锁流程顺利触发成功事件`() = runTest {
+    fun `生物识别缺少宿主上下文时fail-closed不假解锁`() = runTest {
         val viewModel = createViewModel()
         var unlocked = false
 
@@ -97,10 +97,10 @@ class UnlockViewModelTest {
         }
 
         viewModel.unlockWithBiometric(null)
-        advanceTimeBy(700)
         testScheduler.runCurrent()
 
-        assertTrue(unlocked)
+        assertFalse(unlocked)
+        assertNotNull(viewModel.uiState.value.errorMessage)
     }
 
     @Test

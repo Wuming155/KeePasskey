@@ -89,6 +89,7 @@ data class SettingsUiState(
     val s3SecretKey: String = "",
     val s3SecretKeyMasked: String = "••••••••••••••••••••••••",
     val s3ObjectKey: String = "passwords/master_vault.kdbx",
+    val s3UsePathStyle: Boolean = false,
     // 通用同步状态
     val syncLastTime: String = "今天 10:20 (本地原子写盘已通过校验)",
     val syncStatusText: String = "已连接并保持同步",
@@ -180,6 +181,7 @@ data class SettingsUiState(
 
     // 8. 调试日志与系统诊断 (Debug & Diagnostics)
     val debugLogEnabled: Boolean = false, // KP2A: 启用调试日志
+    val debugLogLines: List<String> = emptyList(), // KP2A: 进程内真实调试日志环形缓冲快照
     val verboseSyncLog: Boolean = false, // KP2A: 详细同步与网络日志
     val debugLogRecordsCount: Int = 128,
 

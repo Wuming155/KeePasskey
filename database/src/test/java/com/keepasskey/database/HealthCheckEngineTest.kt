@@ -2,11 +2,14 @@ package com.keepasskey.database.audit
 
 import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.core.model.KdbxEntry
+import com.keepasskey.core.model.KdbxTimes
 import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.core.security.ProtectedString
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.time.Instant
 
 /**
  * HealthCheckEngine 密码健康度与安全审计单元测试
@@ -42,5 +45,33 @@ class HealthCheckEngineTest {
         val issues = HealthCheckEngine.analyzeEntries(listOf(weakEntry, reusedEntry1, reusedEntry2))
         assertTrue(issues.any { it.riskLevel == PasswordRiskLevel.WEAK })
         assertTrue(issues.any { it.riskLevel == PasswordRiskLevel.REUSED })
+    }
+
+    @Test
+    fun `测试已声明过期时间的过期条目被标记为 EXPIRED`() {
+        val expiredEntry = KdbxEntry(
+            id = KdbxUuid(ByteArray(16) { 4 }),
+            fields = mapOf(
+                KdbxConstants.Fields.TITLE to ProtectedString("Expired Site", isProtected = false),
+                KdbxConstants.Fields.PASSWORD to ProtectedString("StrongPass#2026!", isProtected = true)
+            ),
+            times = KdbxTimes(
+                expires = true,
+                expiryTime = Instant.now().minusSeconds(86_400)
+            )
+        )
+
+        val freshEntry = KdbxEntry(
+            id = KdbxUuid(ByteArray(16) { 5 }),
+            fields = mapOf(
+                KdbxConstants.Fields.TITLE to ProtectedString("Fresh Site", isProtected = false),
+                KdbxConstants.Fields.PASSWORD to ProtectedString("AnotherStrong#2026!", isProtected = true)
+            ),
+            times = KdbxTimes(expires = true, expiryTime = Instant.now().plusSeconds(86_400))
+        )
+
+        val issues = HealthCheckEngine.analyzeEntries(listOf(expiredEntry, freshEntry))
+        assertTrue(issues.any { it.riskLevel == PasswordRiskLevel.EXPIRED && it.title == "Expired Site" })
+        assertFalse(issues.any { it.riskLevel == PasswordRiskLevel.EXPIRED && it.title == "Fresh Site" })
     }
 }

@@ -242,18 +242,27 @@ class PasskeyCryptoEngineTest {
     }
 
     @Test
-    fun `测试既有兼容接口 signAssertion 保持可用`() {
+    fun `测试 hex 编码私钥经 ByteArray API 签名可用`() {
         val passkey = PasskeyCryptoEngine.generateEs256KeyPair("example.com", "bob")
         val clientDataHash = ByteArray(32) { (it + 1).toByte() }
         val authData = PasskeyCryptoEngine.buildAuthenticatorData("example.com", 0x01, 1)
 
         val dataToSign = authData + clientDataHash
-        @Suppress("DEPRECATION")
-        val signature = PasskeyCryptoEngine.signAssertion(passkey.privateKey.readString(), dataToSign)
-
-        assertNotNull(signature)
-        assertTrue(signature.isNotEmpty())
-        assertEquals(0x30.toByte(), signature[0])
+        // 私钥以定长 64 字符 hex 存于 ProtectedString；签名一律经 ByteArray 通道（敏感铁律）
+        val privBytes = java.math.BigInteger(passkey.privateKey.readString(), 16).toByteArray()
+            .let { raw -> if (raw.size > 32 && raw[0] == 0.toByte()) raw.copyOfRange(1, raw.size) else raw }
+        try {
+            val signature = PasskeyCryptoEngine.signAssertion(
+                com.keepasskey.core.model.PasskeyData.ALGORITHM_ES256,
+                privBytes,
+                dataToSign
+            )
+            assertNotNull(signature)
+            assertTrue(signature.isNotEmpty())
+            assertEquals(0x30.toByte(), signature[0])
+        } finally {
+            java.util.Arrays.fill(privBytes, 0.toByte())
+        }
     }
 
     @Test

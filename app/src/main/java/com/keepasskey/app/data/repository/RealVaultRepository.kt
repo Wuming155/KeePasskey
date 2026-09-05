@@ -251,7 +251,34 @@ class RealVaultRepository @Inject constructor(
         val uuid = parseUuidOrNull(id) ?: return
         val db = databaseSession.databaseFlow.first() ?: return
         if (uuid == db.recycleBinUuid) return
-        databaseSession.deleteGroup(uuid)
+        val targetGroup = db.rootGroup.allGroups().firstOrNull { it.id == uuid } ?: return
+
+        val alreadyInsideBin = db.recycleBinUuid?.let { binUuid ->
+            var parentId = targetGroup.parentGroupId
+            while (parentId != null) {
+                if (parentId == binUuid) return@let true
+                parentId = db.rootGroup.allGroups().firstOrNull { it.id == parentId }?.parentGroupId
+            }
+            false
+        } ?: false
+
+        if (alreadyInsideBin || !db.recycleBinEnabled) {
+            // 已在回收站内（或回收站被禁用）：物理删除整组并记录 DeletedObject 墓碑
+            databaseSession.deleteGroup(uuid)
+            databaseSession.updateDatabaseMeta { cur ->
+                cur.copy(deletedObjects = cur.deletedObjects + DeletedObject(id = uuid, deletionTime = Instant.now()))
+            }
+        } else {
+            // 标准回收站语义：整组（含子内容）移入库内回收站组，不产生墓碑
+            val binGroup = getOrCreateRecycleBinGroup()
+            val moved = targetGroup.copy(
+                parentGroupId = binGroup.id,
+                previousParentGroup = targetGroup.parentGroupId,
+                times = targetGroup.times.copy(lastModificationTime = Instant.now())
+            )
+            databaseSession.deleteGroup(uuid)
+            databaseSession.saveGroup(moved)
+        }
         databaseSession.save()
     }
 

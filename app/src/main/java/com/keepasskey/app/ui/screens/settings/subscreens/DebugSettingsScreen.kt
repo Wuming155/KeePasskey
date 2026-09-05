@@ -52,7 +52,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -72,6 +74,8 @@ fun DebugSettingsScreen(
     onBackClick: () -> Unit,
     onDebugLogToggle: (Boolean) -> Unit,
     onVerboseSyncLogToggle: (Boolean) -> Unit,
+    onRefreshLogs: () -> Unit = {},
+    onClearLogs: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
@@ -81,17 +85,9 @@ fun DebugSettingsScreen(
     val logExportedMsg = stringResource(R.string.debug_export_done)
     var showExportConfirmDialog by remember { mutableStateOf(false) }
 
-    val mockLogLines = remember {
-        listOf(
-            "[10:20:12.410] [INFO] [Database] Master vault header loaded. Cipher: ChaCha20, KDF: Argon2id (3 rounds, 64MB)",
-            "[10:20:12.825] [INFO] [KDF] Key derivation computed in 415ms (4 threads parallel)",
-            "[10:20:13.011] [INFO] [Security] JVM memory zeroization confirmed. ByteArray sanitized",
-            "[10:20:14.200] [DEBUG] [WebDAV] PROPFIND /Passkeys/keepasskey.kdbx -> 207 Multi-Status (ETag match)",
-            "[10:20:14.520] [INFO] [AutofillService] Credential request received for package: org.mozilla.firefox",
-            "[10:20:14.610] [DEBUG] [AutofillService] Matched 1 entry by web domain filter",
-            "[10:20:18.300] [DEBUG] [SyncEngine] Atomic write buffer committed. Checksum passed"
-        )
-    }
+    // 真实进程内调试日志快照（SyncCoordinator / Unlock 等运行时事件），不再使用硬编码演示数据
+    val logLines = uiState.debugLogLines
+    val clipboard = LocalClipboardManager.current
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -177,6 +173,7 @@ fun DebugSettingsScreen(
                     )
                     IconButton(
                         onClick = {
+                            onRefreshLogs()
                             coroutineScope.launch {
                                 snackbarHostState.showSnackbar(logRefreshedMsg)
                             }
@@ -198,7 +195,14 @@ fun DebugSettingsScreen(
                         .padding(12.dp)
                 ) {
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        mockLogLines.forEach { line ->
+                        if (logLines.isEmpty()) {
+                            Text(
+                                text = stringResource(R.string.debug_log_empty),
+                                style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                                color = Color(0xFF94A3B8)
+                            )
+                        }
+                        logLines.forEach { line ->
                             Text(
                                 text = line,
                                 style = MaterialTheme.typography.labelSmall.copy(
@@ -207,6 +211,7 @@ fun DebugSettingsScreen(
                                     lineHeight = 16.sp
                                 ),
                                 color = when {
+                                    line.contains("[ERROR]") -> Color(0xFFF87171)
                                     line.contains("[DEBUG]") -> Color(0xFF38BDF8)
                                     line.contains("[INFO]") -> Color(0xFF4ADE80)
                                     line.contains("[WARN]") -> Color(0xFFFBBF24)
@@ -237,6 +242,7 @@ fun DebugSettingsScreen(
 
                         OutlinedButton(
                             onClick = {
+                                onClearLogs()
                                 coroutineScope.launch {
                                     snackbarHostState.showSnackbar(logClearedMsg)
                                 }

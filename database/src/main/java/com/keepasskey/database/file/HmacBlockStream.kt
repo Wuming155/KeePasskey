@@ -13,8 +13,10 @@ import java.io.OutputStream
 /**
  * KDBX 4 HMAC 认证块流（HmacBlockStream）。
  * 针对每个数据块进行独立 HMAC-SHA256 签名校验，提供防篡改验证与加密块完整性。
- * 同时提供全量（readAll/writeAll）与流式（HmacBlockInputStream/HmacBlockOutputStream）两种形态；
- * 流式实现保留官方语义——「边解密边校验，错误尽早暴露」。
+ * 流式形态（HmacBlockInputStream/HmacBlockOutputStream）为 KdbxFile.load/save 主管线专用，
+ * 保留官方语义——「边解密边校验，错误尽早暴露」，且不整体物化密文。
+ * 全量形态（readAll/writeAll）会将整条数据物化进内存，仅限单元测试与离线工具使用；
+ * 生产代码严禁调用，以免退回整库物化的内存路径。
  */
 object HmacBlockStream {
 

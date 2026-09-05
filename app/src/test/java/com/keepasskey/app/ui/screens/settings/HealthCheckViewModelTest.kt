@@ -86,10 +86,10 @@ class HealthCheckViewModelTest {
                 } as android.content.SharedPreferences
         }
         val credentialsStore = com.keepasskey.app.sync.SyncCredentialsStore(fakeContext, null)
-        val coordinator = com.keepasskey.app.sync.SyncCoordinator(fakeContext, com.keepasskey.database.session.DatabaseSession(), credentialsStore)
+        val coordinator = com.keepasskey.app.sync.SyncCoordinator(fakeContext, com.keepasskey.database.session.DatabaseSession(), credentialsStore, com.keepasskey.app.data.logger.DebugLogBuffer())
 
         val testRepo = TestAuditVaultRepository(listOf(entryWeak1, entryReused1, entryReused2))
-        val viewModel = SettingsViewModel(FakeSettingsRepository(), testRepo, credentialsStore, coordinator)
+        val viewModel = SettingsViewModel(FakeSettingsRepository(), testRepo, credentialsStore, coordinator, com.keepasskey.app.data.logger.DebugLogBuffer())
         val job = backgroundScope.launch(kotlinx.coroutines.test.UnconfinedTestDispatcher(testScheduler)) {
             viewModel.uiState.collect {}
         }

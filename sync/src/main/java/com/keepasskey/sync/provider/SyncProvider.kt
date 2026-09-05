@@ -39,6 +39,17 @@ interface SyncProvider {
     ): Result<String>
 
     /**
+     * 事务性原子上传：先写临时对象再原子替换目标，避免进程中断在远端留下半写文件。
+     * 默认实现退化为普通 [upload]（协议不支持事务写时语义等价）；
+     * 支持的协议（WebDAV PUT+MOVE、S3 条件写）应覆写本方法提供真正的原子保证。
+     */
+    suspend fun uploadAtomic(
+        remotePath: String,
+        data: ByteArray,
+        expectedEtag: String? = null
+    ): Result<String> = upload(remotePath, data, expectedEtag)
+
+    /**
      * 删除远程文件
      */
     suspend fun delete(remotePath: String): Result<Unit>

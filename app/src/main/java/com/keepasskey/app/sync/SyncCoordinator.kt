@@ -1,6 +1,7 @@
 package com.keepasskey.app.sync
 
 import android.content.Context
+import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.app.ui.screens.settings.CloudSyncProvider
 import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.core.model.KdbxEntry
@@ -9,6 +10,7 @@ import com.keepasskey.database.file.KdbxDatabase
 import com.keepasskey.database.file.KdbxFile
 import com.keepasskey.database.session.DatabaseSession
 import com.keepasskey.sync.engine.SyncCache
+import com.keepasskey.sync.engine.SyncCacheEvent
 import com.keepasskey.sync.engine.SyncCommitResult
 import com.keepasskey.sync.engine.SyncEngine
 import com.keepasskey.sync.engine.SyncOpenResult
@@ -21,8 +23,11 @@ import com.keepasskey.sync.s3.S3SyncProvider
 import com.keepasskey.sync.webdav.WebDavSyncProvider
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -68,12 +73,28 @@ sealed class SyncOutcome {
 open class SyncCoordinator @Inject constructor(
     @ApplicationContext private val context: Context,
     private val databaseSession: DatabaseSession,
-    private val syncCredentialsStore: SyncCredentialsStore
+    private val syncCredentialsStore: SyncCredentialsStore,
+    private val debugLog: DebugLogBuffer
 ) {
     private val mutex = Mutex()
 
     private val _conflictFlow = MutableStateFlow<List<ConflictedEntryPair>>(emptyList())
     open val conflictFlow: StateFlow<List<ConflictedEntryPair>> = _conflictFlow.asStateFlow()
+
+    // ICacheSupervisor 六事件接线：每次同步周期结束后把引擎事件发布给上层订阅者
+    private val _syncEvents = MutableSharedFlow<SyncCacheEvent>(extraBufferCapacity = 64)
+    open val syncEvents: SharedFlow<SyncCacheEvent> = _syncEvents.asSharedFlow()
+
+    private val _recentSyncEvents = MutableStateFlow<List<SyncCacheEvent>>(emptyList())
+    open val recentSyncEvents: StateFlow<List<SyncCacheEvent>> = _recentSyncEvents.asStateFlow()
+
+    /** 离线模式开关：开启后同步引擎直接读本地缓存，不触碰网络 */
+    @Volatile
+    var isOfflineMode: Boolean = false
+        private set
+
+    // 最近一次同步周期使用的引擎实例，用于事后抽取事件 replayCache（每次 syncNow 都会创建新引擎）
+    private var lastSyncEngine: SyncEngine? = null
 
     // 缓存发生冲突时的上下文，供用户确认合并后提交
     private var pendingRemoteEngine: SyncEngine? = null
@@ -87,9 +108,33 @@ open class SyncCoordinator @Inject constructor(
     var testRemotePath: String? = null
 
     /**
+     * 设置离线模式（由设置页「使用离线缓存」开关驱动）
+     */
+    fun setOfflineMode(enabled: Boolean) {
+        isOfflineMode = enabled
+    }
+
+    /**
      * 执行全量即时同步
      */
-    suspend fun syncNow(): SyncOutcome = mutex.withLock {
+    suspend fun syncNow(): SyncOutcome {
+        debugLog.info(TAG, "手动/自动同步开始")
+        val outcome = runSyncCycle()
+        publishSyncEvents()
+        debugLog.info(TAG, "同步结束: ${describeOutcome(outcome)}")
+        return outcome
+    }
+
+    private fun describeOutcome(outcome: SyncOutcome): String = when (outcome) {
+        is SyncOutcome.UpToDate -> "UpToDate(与云端一致)"
+        is SyncOutcome.UploadedLocal -> "UploadedLocal(本地已上传)"
+        is SyncOutcome.MergedAndUploaded -> "MergedAndUploaded(合并后已上传)"
+        is SyncOutcome.ConflictNeedsUser -> "ConflictNeedsUser(条目冲突数=${outcome.conflicts.size})"
+        is SyncOutcome.Offline -> "Offline(离线/网络不可达)"
+        is SyncOutcome.Error -> "Error(${outcome.message})"
+    }
+
+    private suspend fun runSyncCycle(): SyncOutcome = mutex.withLock {
         val activeFile = databaseSession.currentFile
             ?: return@withLock SyncOutcome.Error("当前无打开的密码库文件")
 
@@ -104,6 +149,9 @@ open class SyncCoordinator @Inject constructor(
         val syncDir = File(context.cacheDir, "sync").apply { if (!exists()) mkdirs() }
         val syncCache = SyncCache(syncDir)
         val syncEngine = SyncEngine(provider, syncCache)
+        // 离线开关联动：设置页开关传导至引擎决策树
+        syncEngine.isOffline = isOfflineMode
+        lastSyncEngine = syncEngine
 
         val isCached = syncCache.isCached(remotePath)
         val baseSnapshotBytes = if (isCached) syncCache.readCache(remotePath) else null
@@ -268,6 +316,35 @@ open class SyncCoordinator @Inject constructor(
         }
     }
 
+    /**
+     * 把最近一次同步周期内引擎发射的 ICacheSupervisor 六事件发布给上层订阅者。
+     * 引擎使用 replay SharedFlow 且每次同步创建新实例，事后抽取 replayCache 即可无损回放，
+     * 无需为单次同步挂载临时收集协程。
+     */
+    private fun publishSyncEvents() {
+        val engine = lastSyncEngine ?: return
+        val recent = engine.events.replayCache
+        if (recent.isEmpty()) return
+        _recentSyncEvents.value = recent
+        recent.forEach { event ->
+            _syncEvents.tryEmit(event)
+            debugLog.info(TAG, "缓存监督事件: ${describeCacheEvent(event)}")
+        }
+    }
+
+    private fun describeCacheEvent(event: SyncCacheEvent): String = when (event) {
+        is SyncCacheEvent.UpdatedCachedFileOnLoad -> "UpdatedCachedFileOnLoad path=${event.remotePath}"
+        is SyncCacheEvent.UpdatedRemoteFileOnLoad -> "UpdatedRemoteFileOnLoad path=${event.remotePath}"
+        is SyncCacheEvent.OpenedFromLocalDueToConflict -> "OpenedFromLocalDueToConflict path=${event.remotePath}"
+        is SyncCacheEvent.LoadedFromRemoteInSync -> "LoadedFromRemoteInSync path=${event.remotePath}"
+        is SyncCacheEvent.CouldntSaveToRemote -> "CouldntSaveToRemote path=${event.remotePath}"
+        is SyncCacheEvent.CouldntOpenFromRemote -> "CouldntOpenFromRemote path=${event.remotePath}"
+    }
+
+    private companion object {
+        const val TAG = "SyncCoordinator"
+    }
+
     private suspend fun handleConflictMerge(
         syncEngine: SyncEngine,
         syncCache: SyncCache,
@@ -384,7 +461,8 @@ open class SyncCoordinator @Inject constructor(
                     bucketName = cfg.bucket,
                     region = cfg.region,
                     accessKeyId = cfg.accessKey,
-                    secretAccessKey = cfg.secretKey
+                    secretAccessKey = cfg.secretKey,
+                    usePathStyle = cfg.usePathStyle
                 )
             }
         }

@@ -480,7 +480,9 @@ fun KeePasskeyApp() {
                         uiState = settingsState,
                         onBackClick = { navController.popBackStack() },
                         onDebugLogToggle = settingsViewModel::setDebugLogEnabled,
-                        onVerboseSyncLogToggle = settingsViewModel::setVerboseSyncLog
+                        onVerboseSyncLogToggle = settingsViewModel::setVerboseSyncLog,
+                        onRefreshLogs = settingsViewModel::refreshDebugLogs,
+                        onClearLogs = settingsViewModel::clearDebugLogs
                     )
                 }
 

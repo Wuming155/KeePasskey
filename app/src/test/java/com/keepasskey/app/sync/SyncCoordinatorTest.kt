@@ -128,7 +128,7 @@ class SyncCoordinatorTest {
         assertTrue(createResult is com.keepasskey.core.result.KdbxResult.Success)
 
         credentialsStore = SyncCredentialsStore(fakeContext, null)
-        coordinator = SyncCoordinator(fakeContext, databaseSession, credentialsStore)
+        coordinator = SyncCoordinator(fakeContext, databaseSession, credentialsStore, com.keepasskey.app.data.logger.DebugLogBuffer())
     }
 
     @After

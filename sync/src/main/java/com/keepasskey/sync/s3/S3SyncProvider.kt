@@ -35,6 +35,11 @@ class S3SyncProvider(
     private val region: String = "us-east-1",
     private val accessKeyId: String,
     private val secretAccessKey: String,
+    /**
+     * 寻址风格：false = virtual-host 风格（`bucket.endpoint`，AWS S3/R2 默认）；
+     * true = path 风格（`endpoint/bucket`，自建 MinIO / 反向代理 / IP 直连场景必须开启）。
+     */
+    private val usePathStyle: Boolean = false,
     private val client: OkHttpClient = OkHttpClient()
 ) : SyncProvider {
 
@@ -47,12 +52,13 @@ class S3SyncProvider(
     private fun buildUrl(remotePath: String): String {
         val cleanEndpoint = endpoint.trimEnd('/')
         val cleanKey = encodePath(remotePath.trimStart('/'))
-        return if (cleanEndpoint.contains("://")) {
-            val scheme = cleanEndpoint.substringBefore("://")
-            val host = cleanEndpoint.substringAfter("://")
-            "$scheme://$bucketName.$host/$cleanKey"
+        val base = if (cleanEndpoint.contains("://")) cleanEndpoint else "https://$cleanEndpoint"
+        return if (usePathStyle) {
+            "$base/$bucketName/$cleanKey"
         } else {
-            "https://$bucketName.$cleanEndpoint/$cleanKey"
+            val scheme = base.substringBefore("://")
+            val host = base.substringAfter("://")
+            "$scheme://$bucketName.$host/$cleanKey"
         }
     }
 

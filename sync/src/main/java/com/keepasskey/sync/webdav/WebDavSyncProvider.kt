@@ -189,13 +189,16 @@ class WebDavSyncProvider(
      * 流程：
      * 1. 上传至 `<remotePath>.kpktmp` 临时文件；
      * 2. 发送 WebDAV MOVE 命令（Destination: 目标完整 URL，Overwrite: T）；
+     *    对远端目标文件的 ETag 预条件使用 RFC 4918 `If` 头 tagged list 语法
+     *    （`If: <destUrl> (["etag"])`）——`If-Match` 默认仅作用于请求-URI（即源临时文件），
+     *    对 MOVE 目标无约束效力；
      * 3. MOVE 失败重试 1 次；
      * 4. 仍失败则 DELETE 清除临时文件并抛错回滚。
      */
-    suspend fun uploadAtomic(
+    override suspend fun uploadAtomic(
         remotePath: String,
         data: ByteArray,
-        expectedEtag: String? = null
+        expectedEtag: String?
     ): Result<String> = withContext(Dispatchers.IO) {
         runCatching {
             val tmpPath = "$remotePath$ATOMIC_TMP_SUFFIX"
@@ -216,7 +219,8 @@ class WebDavSyncProvider(
                     .header("Overwrite", "T")
 
                 if (!expectedEtag.isNullOrBlank()) {
-                    moveBuilder.header("If-Match", expectedEtag.formatHeaderEtag())
+                    // RFC 4918 Section 10.4: tagged list If 头把 ETag 预条件绑定到 MOVE 目标资源
+                    moveBuilder.header("If", "<$destUrl> ([\"${cleanEtag(expectedEtag)}\"])")
                 }
                 return moveBuilder.build()
             }

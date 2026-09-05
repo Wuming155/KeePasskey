@@ -65,9 +65,19 @@ sealed class SyncException(message: String, cause: Throwable? = null) : Exceptio
 }
 
 /**
- * 清理 ETag 中的引号与前后空白/弱校验前缀 (W/ 等)
+ * 规范化 ETag：去除前后空白、可选的弱校验前缀 `W/` 与成对包裹引号。
+ * 仅做结构级剥离，不会误伤以 W、/ 等字符开头或结尾的合法不透明 ETag 值。
  */
-fun cleanEtag(etag: String?): String = etag?.trim('"', ' ', 'W', '/', '\\').orEmpty()
+fun cleanEtag(etag: String?): String {
+    var s = etag?.trim().orEmpty()
+    if (s.length >= 2 && s.startsWith("W/", ignoreCase = true)) {
+        s = s.substring(2).trim()
+    }
+    if (s.length >= 2 && s.first() == '"' && s.last() == '"') {
+        s = s.substring(1, s.length - 1).trim()
+    }
+    return s
+}
 
 @JvmName("cleanEtagExtension")
 fun String?.cleanEtag(): String = cleanEtag(this)

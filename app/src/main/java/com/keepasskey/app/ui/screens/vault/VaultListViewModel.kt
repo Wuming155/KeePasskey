@@ -5,7 +5,9 @@ import androidx.lifecycle.viewModelScope
 import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.SettingsRepository
 import com.keepasskey.app.data.repository.VaultRepository
+import com.keepasskey.app.security.ClipboardSecurityManager
 import com.keepasskey.app.ui.model.UiMessage
+import com.keepasskey.sync.engine.SyncCacheEvent
 import com.keepasskey.app.ui.model.UiVaultEntry
 import com.keepasskey.app.ui.model.VaultGroup
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -32,7 +34,8 @@ import javax.inject.Inject
 class VaultListViewModel @Inject constructor(
     private val vaultRepository: VaultRepository,
     private val settingsRepository: SettingsRepository,
-    private val clipboardSecurityManager: com.keepasskey.app.security.ClipboardSecurityManager? = null
+    private val clipboardSecurityManager: ClipboardSecurityManager? = null,
+    private val syncCoordinator: com.keepasskey.app.sync.SyncCoordinator
 ) : ViewModel() {
 
     private val currentGroupIdFlow = MutableStateFlow<String?>(null)
@@ -48,8 +51,8 @@ class VaultListViewModel @Inject constructor(
     // 云端同步指示状态
     private val syncStatusFlow = MutableStateFlow(VaultSyncStatus.SYNCED)
     private val isSyncingFlow = MutableStateFlow(false)
-    // 上次同步完成时间戳，驱动下拉指示区的「上次同步」文案
-    private val lastSyncTimeMillisFlow = MutableStateFlow(defaultLastSyncMillis())
+    // 上次同步完成时间戳，驱动下拉指示区的「上次同步」文案；0 表示本会话尚未同步过
+    private val lastSyncTimeMillisFlow = MutableStateFlow(0L)
 
     // TOTP 剩余秒数倒计时，与验证器页共用 30 秒周期窗口
     private val totpRemainingSecondsFlow = MutableStateFlow(calculateCurrentRemainingSeconds())
@@ -302,16 +305,59 @@ class VaultListViewModel @Inject constructor(
         }
     }
 
-    // 下拉手势同步触发
+    // 下拉手势同步触发：真实执行 SyncCoordinator 全量同步（不再使用演示性假桩）
     fun triggerPullRefresh() {
+        if (isSyncingFlow.value) return
         viewModelScope.launch {
             isSyncingFlow.value = true
             syncStatusFlow.value = VaultSyncStatus.SYNCING
-            delay(SYNC_VERIFICATION_DELAY_MS)
+            val outcome = syncCoordinator.syncNow()
+            applySyncOutcome(outcome)
+            surfaceSyncCacheEvents()
             isSyncingFlow.value = false
-            syncStatusFlow.value = VaultSyncStatus.SYNCED
-            lastSyncTimeMillisFlow.value = System.currentTimeMillis()
-            userMessageFlow.update { UiMessage(R.string.vault_sync_completed) }
+        }
+    }
+
+    /**
+     * ICacheSupervisor 六事件上浮：把引擎层缓存监督事件转化为可读的用户提示，
+     * 覆盖「云端已更新刷新本地」「保存失败留本地」两类最需要用户知情的事件
+     */
+    private fun surfaceSyncCacheEvents() {
+        val events = syncCoordinator.recentSyncEvents.value
+        when {
+            events.any { it is SyncCacheEvent.CouldntSaveToRemote } ->
+                userMessageFlow.update { UiMessage(R.string.vault_sync_saved_locally) }
+            events.any { it is SyncCacheEvent.UpdatedCachedFileOnLoad } ->
+                userMessageFlow.update { UiMessage(R.string.vault_sync_remote_updated) }
+            else -> Unit
+        }
+    }
+
+    private fun applySyncOutcome(outcome: com.keepasskey.app.sync.SyncOutcome) {
+        when (outcome) {
+            is com.keepasskey.app.sync.SyncOutcome.UpToDate -> {
+                syncStatusFlow.value = VaultSyncStatus.SYNCED
+                lastSyncTimeMillisFlow.value = System.currentTimeMillis()
+                userMessageFlow.update { UiMessage(R.string.vault_sync_completed) }
+            }
+            is com.keepasskey.app.sync.SyncOutcome.UploadedLocal,
+            is com.keepasskey.app.sync.SyncOutcome.MergedAndUploaded -> {
+                syncStatusFlow.value = VaultSyncStatus.SYNCED
+                lastSyncTimeMillisFlow.value = System.currentTimeMillis()
+                userMessageFlow.update { UiMessage(R.string.vault_sync_uploaded) }
+            }
+            is com.keepasskey.app.sync.SyncOutcome.ConflictNeedsUser -> {
+                syncStatusFlow.value = VaultSyncStatus.CONFLICT
+                userMessageFlow.update { UiMessage(R.string.sync_feedback_conflict) }
+            }
+            is com.keepasskey.app.sync.SyncOutcome.Offline -> {
+                syncStatusFlow.value = VaultSyncStatus.OFFLINE
+                userMessageFlow.update { UiMessage(R.string.sync_feedback_offline) }
+            }
+            is com.keepasskey.app.sync.SyncOutcome.Error -> {
+                syncStatusFlow.value = VaultSyncStatus.OFFLINE
+                userMessageFlow.update { UiMessage(R.string.sync_feedback_error, listOf(outcome.message)) }
+            }
         }
     }
 
@@ -382,9 +428,11 @@ class VaultListViewModel @Inject constructor(
     }
 
     /**
-     * 将时间戳格式化为相对日期文案（今天 / 昨天 / 具体日期）+ HH:mm
+     * 将时间戳格式化为相对日期文案（今天 / 昨天 / 具体日期）+ HH:mm；
+     * 0 表示本会话尚未执行过同步
      */
     private fun formatLastSyncTime(millis: Long): String {
+        if (millis <= 0L) return NEVER_SYNCED_TEXT
         val dateTime = Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault())
         val today = LocalDate.now()
         val datePrefix = when (dateTime.toLocalDate()) {
@@ -395,21 +443,10 @@ class VaultListViewModel @Inject constructor(
         return "$datePrefix ${dateTime.format(DateTimeFormatter.ofPattern("HH:mm"))}"
     }
 
-    private fun defaultLastSyncMillis(): Long =
-        LocalDate.now()
-            .atTime(DEFAULT_SYNC_HOUR, DEFAULT_SYNC_MINUTE)
-            .atZone(ZoneId.systemDefault())
-            .toInstant()
-            .toEpochMilli()
-
     companion object {
         private const val TOTP_PERIOD_SECONDS = 30
         private const val MILLIS_PER_SECOND = 1000L
         private const val TOTP_TICK_INTERVAL_MS = 1000L
-        private const val SYNC_VERIFICATION_DELAY_MS = 1000L
-
-        // 演示用默认「上次同步」时刻（当天 10:25）
-        private const val DEFAULT_SYNC_HOUR = 10
-        private const val DEFAULT_SYNC_MINUTE = 25
+        private const val NEVER_SYNCED_TEXT = "尚未同步"
     }
 }

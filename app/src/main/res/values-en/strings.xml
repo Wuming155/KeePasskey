@@ -209,6 +209,11 @@
     <string name="vault_recycle_emptied">Recycle bin emptied</string>
     <string name="vault_sync_verifying">Verifying latest version with cloud server...</string>
     <string name="vault_sync_completed">Cloud sync verification complete, you are up to date</string>
+    <string name="vault_sync_uploaded">Local changes uploaded to cloud</string>
+    <string name="vault_sync_saved_locally">Could not save to remote; your changes are safely kept in the local cache</string>
+    <string name="vault_sync_remote_updated">Remote updates detected; local database refreshed</string>
+    <string name="sync_s3_path_style_title">Path-Style Addressing</string>
+    <string name="sync_s3_path_style_sub">Enable for self-hosted MinIO, reverse proxies, or IP endpoints; keep off for AWS/R2</string>
     <string name="vault_group_created">Folder "%1$s" created</string>
     <string name="vault_group_renamed">Renamed to "%1$s"</string>
     <string name="vault_group_icon_updated">Folder icon updated</string>
@@ -718,6 +723,7 @@
     <string name="debug_verbose_sub">Emit finer-grained details for troubleshooting</string>
     <string name="debug_preview_title">Log preview</string>
     <string name="debug_cd_refresh">Refresh log</string>
+    <string name="debug_log_empty">No logs yet. Run a sync or unlock to see real runtime events here.</string>
     <string name="debug_log_refreshed">Log refreshed</string>
     <string name="debug_log_cleared">Log cleared</string>
     <string name="debug_export_btn">Export log</string>

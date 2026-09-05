@@ -1,6 +1,7 @@
 package com.keepasskey.database.audit
 
 import com.keepasskey.core.model.KdbxEntry
+import java.time.Instant
 
 /**
  * 密码安全审计健康状态
@@ -56,6 +57,19 @@ object HealthCheckEngine {
         for (entry in entries) {
             val pass = entry.password?.readString().orEmpty()
             val id = entry.id.toHexString()
+
+            // 密码时效性：条目声明了过期时间且已过期（文档承诺的 EXPIRED 风险等级真实落地）
+            if (entry.times.expires && entry.times.expiryTime.isBefore(Instant.now())) {
+                issues.add(
+                    EntryHealthIssue(
+                        entryId = id,
+                        title = entry.title,
+                        username = entry.userName,
+                        riskLevel = PasswordRiskLevel.EXPIRED,
+                        description = "该条目凭据已过期（${entry.times.expiryTime}），请更新密码或清除过期标记"
+                    )
+                )
+            }
 
             if (pass.isEmpty()) {
                 issues.add(

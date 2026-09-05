@@ -170,7 +170,10 @@ class SyncEngine(
 
             val meta = metaResult.getOrThrow()
             val downloadResult = provider.download(remotePath)
-            val remoteBytes = downloadResult.getOrThrow()
+            val remoteBytes = downloadResult.getOrElse { ex ->
+                events.tryEmit(SyncCacheEvent.CouldntOpenFromRemote(remotePath, ex))
+                throw ex
+            }
 
             val hash = cache.writeCache(remotePath, remoteBytes)
             cache.updateBase(remotePath, hash, meta.etag)
@@ -189,7 +192,7 @@ class SyncEngine(
             when (ex) {
                 is SyncException.FileNotFound -> {
                     // 远端 404 且有缓存 -> 上传恢复远端
-                    val uploadResult = provider.upload(remotePath, cachedBytes, expectedEtag = null)
+                    val uploadResult = provider.uploadAtomic(remotePath, cachedBytes, expectedEtag = null)
                     val newEtag = uploadResult.getOrThrow()
                     val localHash = state?.localVersion ?: SyncCache.sha256Hex(cachedBytes)
                     cache.updateBase(remotePath, localHash, newEtag)
@@ -228,7 +231,7 @@ class SyncEngine(
             val isRemoteUnchanged = baseEtag.isNotEmpty() && baseEtag == remoteEtag
             if (isRemoteUnchanged) {
                 // 本地有修改且远端未变 -> 本地赢，自动上传并基线前移
-                val uploadResult = provider.upload(remotePath, cachedBytes, expectedEtag = baseEtag)
+                val uploadResult = provider.uploadAtomic(remotePath, cachedBytes, expectedEtag = baseEtag)
                 if (uploadResult.isSuccess) {
                     val newEtag = uploadResult.getOrThrow()
                     val localHash = state?.localVersion ?: SyncCache.sha256Hex(cachedBytes)
@@ -278,7 +281,7 @@ class SyncEngine(
         }
 
         // 2. 尽力上传
-        val uploadResult = provider.upload(remotePath, localBytes, expectedEtag)
+        val uploadResult = provider.uploadAtomic(remotePath, localBytes, expectedEtag)
         if (uploadResult.isSuccess) {
             val newEtag = uploadResult.getOrThrow()
             cache.updateBase(remotePath, localHash, newEtag)
@@ -303,7 +306,7 @@ class SyncEngine(
         runCatching {
             val localHash = cache.writeCache(remotePath, mergedBytes)
             val currentMeta = provider.getMetadata(remotePath).getOrNull()
-            val uploadResult = provider.upload(remotePath, mergedBytes, expectedEtag = currentMeta?.etag)
+            val uploadResult = provider.uploadAtomic(remotePath, mergedBytes, expectedEtag = currentMeta?.etag)
             val newEtag = uploadResult.getOrThrow()
             cache.updateBase(remotePath, localHash, newEtag)
             newEtag

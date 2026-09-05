@@ -30,7 +30,9 @@ data class S3Credentials(
     val region: String,
     val accessKey: String,
     val secretKey: String,
-    val objectKey: String
+    val objectKey: String,
+    /** 寻址风格：false = virtual-host，true = path 风格（自建 MinIO/代理） */
+    val usePathStyle: Boolean = false
 )
 
 /**
@@ -82,6 +84,10 @@ class SyncCredentialsStore @Inject constructor(
                 editor.putString(KEY_WEBDAV_PASSWORD_IV, encrypted.first)
                 editor.putString(KEY_WEBDAV_PASSWORD_CIPHER, encrypted.second)
             }
+        } else {
+            // 显式清除旧密文，避免「旧密码在清空后仍继续生效」的隐式行为
+            editor.remove(KEY_WEBDAV_PASSWORD_IV)
+            editor.remove(KEY_WEBDAV_PASSWORD_CIPHER)
         }
         editor.apply()
     }
@@ -108,13 +114,15 @@ class SyncCredentialsStore @Inject constructor(
         region: String,
         accessKey: String,
         secretKey: String,
-        objectKey: String
+        objectKey: String,
+        usePathStyle: Boolean = false
     ) {
         val editor = prefs.edit()
         editor.putString(KEY_S3_ENDPOINT, endpoint)
         editor.putString(KEY_S3_BUCKET, bucket)
         editor.putString(KEY_S3_REGION, region)
         editor.putString(KEY_S3_OBJECT_KEY, objectKey)
+        editor.putBoolean(KEY_S3_USE_PATH_STYLE, usePathStyle)
 
         // L4 整改：AccessKey 与 SecretKey 同样经 Keystore AES-256-GCM 加密落盘，不再明文存储
         if (accessKey.isNotEmpty()) {
@@ -123,6 +131,9 @@ class SyncCredentialsStore @Inject constructor(
                 editor.putString(KEY_S3_ACCESS_KEY_IV, encryptedAccessKey.first)
                 editor.putString(KEY_S3_ACCESS_KEY_CIPHER, encryptedAccessKey.second)
             }
+        } else {
+            editor.remove(KEY_S3_ACCESS_KEY_IV)
+            editor.remove(KEY_S3_ACCESS_KEY_CIPHER)
         }
         if (secretKey.isNotEmpty()) {
             val encrypted = encrypt(secretKey)
@@ -130,6 +141,9 @@ class SyncCredentialsStore @Inject constructor(
                 editor.putString(KEY_S3_SECRET_IV, encrypted.first)
                 editor.putString(KEY_S3_SECRET_CIPHER, encrypted.second)
             }
+        } else {
+            editor.remove(KEY_S3_SECRET_IV)
+            editor.remove(KEY_S3_SECRET_CIPHER)
         }
         editor.apply()
     }
@@ -139,11 +153,27 @@ class SyncCredentialsStore @Inject constructor(
         val bucket = prefs.getString(KEY_S3_BUCKET, "") ?: ""
         val region = prefs.getString(KEY_S3_REGION, "us-east-1") ?: "us-east-1"
         val objectKey = prefs.getString(KEY_S3_OBJECT_KEY, "keepasskey.kdbx") ?: "keepasskey.kdbx"
+        val usePathStyle = prefs.getBoolean(KEY_S3_USE_PATH_STYLE, false)
         val accessIv = prefs.getString(KEY_S3_ACCESS_KEY_IV, null)
         val accessCipher = prefs.getString(KEY_S3_ACCESS_KEY_CIPHER, null)
-        // 兼容旧版本：密文缺失时回落到（历史遗留的）明文键，读出后由下次保存转为密文
+
+        val legacyPlainAccessKey = prefs.getString(KEY_S3_ACCESS_KEY, null)
         val accessKey = decrypt(accessIv, accessCipher)
-            ?: prefs.getString(KEY_S3_ACCESS_KEY, "") ?: ""
+            ?: legacyPlainAccessKey
+            ?: ""
+        if (accessIv.isNullOrBlank() && !legacyPlainAccessKey.isNullOrBlank()) {
+            // 旧版明文 AccessKey 残留清除：读取后立即转加密落盘并物理删除明文键，
+            // 不再依赖「用户下次保存配置」才迁移
+            val migrated = encrypt(legacyPlainAccessKey)
+            if (migrated != null) {
+                prefs.edit()
+                    .putString(KEY_S3_ACCESS_KEY_IV, migrated.first)
+                    .putString(KEY_S3_ACCESS_KEY_CIPHER, migrated.second)
+                    .remove(KEY_S3_ACCESS_KEY)
+                    .apply()
+            }
+        }
+
         val iv = prefs.getString(KEY_S3_SECRET_IV, null)
         val cipher = prefs.getString(KEY_S3_SECRET_CIPHER, null)
         val secretKey = decrypt(iv, cipher) ?: ""
@@ -154,7 +184,8 @@ class SyncCredentialsStore @Inject constructor(
             region = region,
             accessKey = accessKey,
             secretKey = secretKey,
-            objectKey = objectKey
+            objectKey = objectKey,
+            usePathStyle = usePathStyle
         )
     }
 
@@ -223,5 +254,6 @@ class SyncCredentialsStore @Inject constructor(
         private const val KEY_S3_OBJECT_KEY = "s3_object_key"
         private const val KEY_S3_SECRET_IV = "s3_secret_iv"
         private const val KEY_S3_SECRET_CIPHER = "s3_secret_cipher"
+        private const val KEY_S3_USE_PATH_STYLE = "s3_use_path_style"
     }
 }

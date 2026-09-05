@@ -109,7 +109,7 @@ fun CloudSyncScreen(
     onTestConnection: () -> Unit = onTriggerSync,
     onProviderChange: (CloudSyncProvider) -> Unit = {},
     onUpdateWebDav: (url: String, username: String, password: String, remotePath: String) -> Unit = { _, _, _, _ -> },
-    onUpdateS3: (endpoint: String, bucket: String, region: String, accessKey: String, secretKey: String, objectKey: String) -> Unit = { _, _, _, _, _, _ -> },
+    onUpdateS3: (endpoint: String, bucket: String, region: String, accessKey: String, secretKey: String, objectKey: String, usePathStyle: Boolean) -> Unit = { _, _, _, _, _, _, _ -> },
     // KP2A 扩展文件处理操作
     onUseOfflineCacheToggle: (Boolean) -> Unit = {},
     onSyncOnColdStartToggle: (Boolean) -> Unit = {},
@@ -144,6 +144,7 @@ fun CloudSyncScreen(
     var s3AccessKey by remember(uiState.s3AccessKey) { mutableStateOf(uiState.s3AccessKey) }
     var s3SecretKey by remember(uiState.s3SecretKey) { mutableStateOf(uiState.s3SecretKey) }
     var s3ObjectKey by remember(uiState.s3ObjectKey) { mutableStateOf(uiState.s3ObjectKey) }
+    var s3UsePathStyle by remember(uiState.s3UsePathStyle) { mutableStateOf(uiState.s3UsePathStyle) }
     var s3SecretKeyVisible by remember { mutableStateOf(false) }
 
     var showIntervalDialog by remember { mutableStateOf(false) }
@@ -404,6 +405,28 @@ fun CloudSyncScreen(
                                 shape = RoundedCornerShape(12.dp),
                                 modifier = Modifier.fillMaxWidth()
                             )
+
+                            // path-style 寻址开关：自建 MinIO / 反向代理 / IP 直连等场景必须开启
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = stringResource(R.string.sync_s3_path_style_title),
+                                        style = MaterialTheme.typography.bodyMedium
+                                    )
+                                    Text(
+                                        text = stringResource(R.string.sync_s3_path_style_sub),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                Switch(
+                                    checked = s3UsePathStyle,
+                                    onCheckedChange = { s3UsePathStyle = it }
+                                )
+                            }
                         }
 
                         Button(
@@ -412,7 +435,7 @@ fun CloudSyncScreen(
                                     onUpdateWebDav(webdavUrl, webdavUsername, webdavPassword, webdavRemotePath)
                                     saveFeedbackMessage = UiMessage(R.string.sync_webdav_saved)
                                 } else {
-                                    onUpdateS3(s3Endpoint, s3Bucket, s3Region, s3AccessKey, s3SecretKey, s3ObjectKey)
+                                    onUpdateS3(s3Endpoint, s3Bucket, s3Region, s3AccessKey, s3SecretKey, s3ObjectKey, s3UsePathStyle)
                                     saveFeedbackMessage = UiMessage(R.string.sync_s3_saved)
                                 }
                             },
@@ -873,7 +896,7 @@ fun WebDavSyncScreen(
     onTestConnection: () -> Unit = onTriggerSync,
     onProviderChange: (CloudSyncProvider) -> Unit = {},
     onUpdateWebDav: (url: String, username: String, password: String, remotePath: String) -> Unit = { _, _, _, _ -> },
-    onUpdateS3: (endpoint: String, bucket: String, region: String, accessKey: String, secretKey: String, objectKey: String) -> Unit = { _, _, _, _, _, _ -> },
+    onUpdateS3: (endpoint: String, bucket: String, region: String, accessKey: String, secretKey: String, objectKey: String, usePathStyle: Boolean) -> Unit = { _, _, _, _, _, _, _ -> },
     onUseOfflineCacheToggle: (Boolean) -> Unit = {},
     onSyncOnColdStartToggle: (Boolean) -> Unit = {},
     onPeriodicBackgroundSyncToggle: (Boolean) -> Unit = {},

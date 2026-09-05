@@ -221,6 +221,18 @@ class SyncEngineTest {
     }
 
     @Test
+    fun `测试 commitLocal 上传走事务性 uploadAtomic 路径`() = runTest {
+        val localData = "local-content-v1".toByteArray()
+        syncCache.writeCache(remotePath, localData)
+        syncCache.updateBase(remotePath, SyncCache.sha256Hex(localData), "etag-base")
+
+        val result = engine.commitLocal(remotePath, "local-content-v2".toByteArray())
+        assertTrue(result is SyncCommitResult.Uploaded)
+        // 生产管线必须经由事务性原子上传，而非普通 PUT
+        assertEquals(1, fakeProvider.uploadAtomicCalls)
+    }
+
+    @Test
     fun `测试 ICacheSupervisor 全部六种事件的触发与流转`() = runTest {
         // 1. LoadedFromRemoteInSync: 首次加载
         val v1 = "content-v1".toByteArray()
@@ -266,6 +278,16 @@ class SyncEngineTest {
     private class FakeSyncProvider : SyncProvider {
         val remoteFiles = mutableMapOf<String, FakeRemoteFile>()
         var networkError: Boolean = false
+        var uploadAtomicCalls: Int = 0
+
+        override suspend fun uploadAtomic(
+            remotePath: String,
+            data: ByteArray,
+            expectedEtag: String?
+        ): Result<String> {
+            uploadAtomicCalls++
+            return upload(remotePath, data, expectedEtag)
+        }
 
         override suspend fun testConnection(): Result<Unit> = Result.success(Unit)
 

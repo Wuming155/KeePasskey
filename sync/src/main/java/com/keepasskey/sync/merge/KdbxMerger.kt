@@ -214,11 +214,22 @@ object KdbxMerger {
             }
         }
 
-        // 条目分配至所属分组
-        val entriesByParent = survivingEntries.groupBy { entry ->
-            val pid = entry.parentGroupId
-            if (pid != null && sanitizedGroups.containsKey(pid)) pid else rootId
-        }
+        // 条目分配至所属分组：parentGroupId 失链时（删除vs修改复活场景）优先回退到
+        // previousParentGroup（KeePassXC Merger 复活规则：跨设备移动/复活条目应回到原父组
+        // 而非无条件抛到根组），仍无处可挂才归属根组；回退时同步改写条目 parentGroupId
+        val entriesByParent = survivingEntries
+            .map { entry ->
+                val pid = entry.parentGroupId
+                if (pid != null && sanitizedGroups.containsKey(pid)) {
+                    entry
+                } else {
+                    val target = entry.previousParentGroup
+                        ?.takeIf { sanitizedGroups.containsKey(it) }
+                        ?: rootId
+                    entry.copy(parentGroupId = target)
+                }
+            }
+            .groupBy { it.parentGroupId!! }
 
         val subgroupsByParent = sanitizedGroups.values.groupBy { it.parentGroupId ?: rootId }
 

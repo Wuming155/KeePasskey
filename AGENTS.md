@@ -28,7 +28,7 @@ KeePasskey 是一款使用原生 Kotlin 开发的现代化 Android 密码管理�
    - 仅当架构分析文档明确指出某个特定算法或数据格式边界、且文档说明不足以完成独立编写时，才允许按图索骥精确定位阅读该单个源文件；
    - 严禁修改 `参考项目/` 目录下的任何文件，严禁复制其代码入库（许可证约束）。
 4. **工程规则**（单一职责、禁止魔法数字、依赖倒置、错误处理等）详见下方规则文件，写代码前必须遵守。
-5. **阶段交付与版本归档纪律**：严格遵照 `DELIVERY_PLAN.md` 推进；**每完成一个阶段，必须同步更新 `AGENTS.md`（刷新当前状态、已完成内容与下一阶段目标），并立即将阶段成果全部暂存并提交 Git 到本地仓库（`git add` + 语义化 `git commit`）**，确保每个阶段里程碑均具备独立、清晰、可回退的本地 Git 提交历史。
+5. **阶段交付与版本归档纪律**：严格遵照 `DELIVERY_PLAN.md` 推进；**每完成一个阶段，必须同步更新 `AGENTS.md`（刷新当前状态、已完成内容与下一阶段目标），并立即将阶段成果全部暂存并提交 Git 到远程仓库**，确保每个阶段里程碑均具备独立、清晰、可回退的远程 Git 提交历史。
 
 ## 详细文档索引（按需阅读）
 
@@ -47,10 +47,10 @@ KeePasskey 是一款使用原生 Kotlin 开发的现代化 Android 密码管理�
 - `.\gradlew.bat assembleDebug` — 编译全部模块
 - `.\gradlew.bat :app:compileDebugKotlin` — 仅快速检查 Kotlin 编译
 - `.\gradlew.bat lint` — Android Lint
-- `.\gradlew.bat test` — 单元测试（全模块 `src/test` 已就绪，`testDebugUnitTest` 可单模块执行；当前 177 个测试全绿）
+- `.\gradlew.bat test` — 单元测试（全模块 `src/test` 已就绪，`testDebugUnitTest` 可单模块执行；当前 184 个测试全绿）
 - 版本升级需整体配套：AGP ↔ Gradle ↔ Kotlin ↔ Compose BOM（Compose BOM 2026.06.00+ 要求 compileSdk 37，当前用 2026.06.01 对齐 compileSdk 36）
 
-**当前阶段状态**：**🔧 安全代码审计整改（Wave 7）交付完毕——Wave 1-6（`REMEDIATION_PLAN.md`）+ Wave 7（审计报告 F1-F5 与附录观察全量修复）。**
+**当前阶段状态**：**🔧 功能完整性检查整改（Wave 8）交付完毕——Wave 1-7 全量整改 + Wave 8（功能完整性检查发现的假桩清零与"最后一公里"接线）。**
 原「7 阶段全量验收」表述经 2026-09-05 全量代码审计修正：对照参考项目发现 22 项问题（P0×6 / P1×7 / P2×9，含系统服务空壳响应、模拟延时同步、TOTP 假码、cipherKey 非官方派生等），已按 4 个 Wave 修复并逐波验收提交：
 
 - **Wave 1（git ed601da）KDBX 官方兼容 + crypto 底座**：cipherKey 派生修正为官方 SHA-512 截断标准（读取侧旧派生自动回退、保存自动迁移）；XML Times 修正为 .NET Ticks 编码；XML 全字段往返（Meta/AutoType/Binary-Ref/CustomData）；InnerHeader 二进制池与附件去重；类型化异常体系；CBOR/COSE 确定性编码器；Passkey 三算法签名（ES256/Ed25519/RS256 + RFC 6979）；KdfBenchmark 设备自适应基准。
@@ -62,6 +62,8 @@ KeePasskey 是一款使用原生 Kotlin 开发的现代化 Android 密码管理�
 
 **Wave 7（安全审计整改）**：对照《KeePasskey 安全代码审计报告》完成 F1-F5 与附录两条观察全量修复——① F1 `isPackageMatch` 双向后缀包名匹配（High 水平越权）收敛为 scheme 剥离后精确相等，6 个生产调用点同步核查；② F2 受保护自定义字段（Passkey 私钥/TOTP 种子/恢复码）与 `UiVaultEntry.totpSecret` 明文彻底退出 UI 投影——新增 `getEntryProtectedField` / `calculateEntryTotp` 按需单条解密，详情页揭示/复制、编辑页加载/回写、验证器页按秒重算全链路接线，`saveEntry` 对空值受保护字段回填既有值（防回滚路径清空）；③ F3 同步变更检测改走 `ProtectedString.equals`（字节数组比较，不再物化全库密码 String）；④ F4 `PasskeyAssertionActivity` 非浏览器分支补充调用包名与 `android://<包名>` 绑定精确二次校验（预期包名经不可伪造 PendingIntent extras 传入），空 origin 一律拒绝签发并修复 RP ID 冒充 web origin 回退；⑤ F5 `isDomainMatch` 公共后缀下限约束（单标签与内置多级公共后缀最小子集拒绝作 RP ID）；⑥ 观察 1 `PasswordSaveActivity` 移除 candidateQueryData 死代码 fallback；⑦ 观察 2 `QuickUnlockPinStore` 增加 PIN 连续失败计数与指数退避熔断（5 次起熔 30s → 封顶 15min）。
 
-**测试基线**：全工程 177 个单元测试全绿（app 70 / core 9 / crypto 34 / database 31 / sync 33）；`assembleDebug` 与 `assembleRelease`（R8 混淆）构建闭环通过。
+**Wave 8（功能完整性检查整改）**：对照功能完整性审查发现的假桩与孤岛功能全量整改——① P1 下拉刷新假同步（`VaultListViewModel.triggerPullRefresh` 仅 delay 即谎报"同步完成"）真实接线 `SyncCoordinator.syncNow()`，按 `SyncOutcome` 映射同步状态与反馈，并移除演示用"上次同步 10:25"假时间戳；② P1 离线开关联动——`SettingsViewModel.setUseOfflineCache` 现已实时传导 `SyncCoordinator.setOfflineMode` → `SyncEngine.isOffline`（此前 UI 开关为空转）；③ P1 ICacheSupervisor 六事件接线——`SyncCoordinator` 事后抽取引擎事件 replayCache 发布为 `syncEvents`/`recentSyncEvents`，VaultList 上浮「云端保存失败已留本地」「远端已更新」提示；④ P2 `uploadAtomic` 接入生产管线——`SyncProvider` 增加默认 `uploadAtomic` 契约，WebDAV 实现修正 MOVE 预条件为 RFC 4918 `If` 头 tagged list（原 `If-Match` 挂 MOVE 对目标无约束效力），SyncEngine 全部 4 处上传路径切换为原子写；⑤ P2 `deleteGroup` 补齐回收站语义（整组移入回收站 + previousParentGroup，物理删除时记录墓碑）；⑥ P2 KdbxMerger 补 `previousParentGroup` 复活回退（复活条目原父组失链时优先回到 previousParentGroup 并同步改写 parentGroupId）；⑦ P2 冲突解决界面不再物化双方密码明文（仅掩码呈现）；⑧ P2 生物识别 fail-closed——移除 `activity == null` 时 delay 后伪发 `UnlockSuccess` 的回退桩，解锁依赖去掉 `= null` 默认值；⑨ P2 死分支假反馈清理（SettingsViewModel/ConflictResolutionViewModel 对非空注入参数的 null 分支 delay 假"完成"路径删除）；⑩ P2 调试日志真实化——新增 `DebugLogBuffer` 进程内环形缓冲并接线 SyncCoordinator/Unlock 事件，DebugSettingsScreen 渲染真实日志（刷新/清空/导出到剪贴板均真实生效）；⑪ P3 HealthCheckEngine 落实 EXPIRED 过期检测（文档承诺此前无实现）；⑫ P3 S3 旧版明文 AccessKey 读取即迁移加密并物理删除明文键；`saveWebDavConfig`/`saveS3Config` 空密码显式清除旧密文；⑬ P3 S3 path-style 寻址支持（provider + 持久化 + UI 开关，兼容自建 MinIO/代理）；⑭ P3 `cleanEtag` 结构级解析（不再逐字符误伤含 W、/ 的合法不透明 ETag）；⑮ P3 `HmacBlockStream.readAll/writeAll` 标注为仅测试/工具使用。
 
-**已知限界（如实记录，详见 `REMEDIATION_PLAN.md` 执行日志）**：KDBX 解析已流式化，但对象树（KdbxGroup/KdbxEntry）仍整体驻留内存（增量加载/进度 Flow 远期）；S3 条件写依赖服务端支持——AWS S3 原子生效，少数未实现 If-Match 覆写的兼容存储降级为 HEAD 预检+无条件 PUT（KDoc 注明）；Compose 框架层 TextField 仍以 String 承载输入（框架 API 限制，已收敛至 `SecurePasswordField` 单点、最短生命周期；EntryEdit/DatabasePicker/Settings 的密码框尚未接入该组件）；QuickUnlock PIN 已真实校验（PBKDF2 校验器 + Keystore 封印凭据），但 PIN 输入仍为 String（4 位短数字，框架限制）；浏览器特权白名单内置 Chrome 稳定版签名指纹，浏览器证书轮换或白名单外浏览器将 fail-closed 降级为 apk-key-hash 路径（安全不放松，功能降级），需随浏览器版本更新指纹。
+**测试基线**：全工程 184 个单元测试全绿（app 70 / core 9 / crypto 34 / database 32 / sync 39）；`assembleDebug` 与 `assembleRelease`（R8 混淆）构建闭环通过。
+
+**已知限界（如实记录，详见 `REMEDIATION_PLAN.md` 执行日志）**：KDBX 解析已流式化，但对象树（KdbxGroup/KdbxEntry）仍整体驻留内存（增量加载/进度 Flow 远期）；S3 条件写依赖服务端支持——AWS S3 原子生效，少数未实现 If-Match 覆写的兼容存储降级为 HEAD 预检+无条件 PUT（KDoc 注明），WebDAV uploadAtomic 的 `If` 头 tagged list 预条件在个别极简 DAV 服务端可能被忽略（退化为普通事务写，不影响正确性）；KDBX 受保护字段以字符串承载为格式层边界——Passkey 私钥编码 String 存活期与 ProtectedString 一致，生成/签名路径的中间字节量均显式清零；Compose 框架层 TextField 仍以 String 承载输入（框架 API 限制，已收敛至 `SecurePasswordField` 单点、最短生命周期；EntryEdit/DatabasePicker/Settings 的密码框尚未接入该组件）；QuickUnlock PIN 已真实校验（PBKDF2 校验器 + Keystore 封印凭据），但 PIN 输入仍为 String（4 位短数字，框架限制）；浏览器特权白名单内置 Chrome 稳定版签名指纹，浏览器证书轮换或白名单外浏览器将 fail-closed 降级为 apk-key-hash 路径（安全不放松，功能降级），需随浏览器版本更新指纹。

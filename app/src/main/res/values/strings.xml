@@ -209,6 +209,11 @@
     <string name="vault_recycle_emptied">回收站已清空</string>
     <string name="vault_sync_verifying">正在与云端服务器校验最新版本...</string>
     <string name="vault_sync_completed">云端数据库同步校验完成，当前为最新版本</string>
+    <string name="vault_sync_uploaded">本地修改已上传至云端</string>
+    <string name="vault_sync_saved_locally">云端保存失败，本次修改已安全保留在本地缓存</string>
+    <string name="vault_sync_remote_updated">检测到云端已有更新，本地数据库已刷新</string>
+    <string name="sync_s3_path_style_title">Path 寻址风格 (Path-Style)</string>
+    <string name="sync_s3_path_style_sub">自建 MinIO、反向代理或 IP 直连端点请开启；AWS/R2 等保持关闭</string>
     <string name="vault_group_created">已创建文件夹「%1$s」</string>
     <string name="vault_group_renamed">已重命名为「%1$s」</string>
     <string name="vault_group_icon_updated">已更新文件夹图标</string>
@@ -718,6 +723,7 @@
     <string name="debug_verbose_sub">输出更细粒度的调试信息，便于定位问题</string>
     <string name="debug_preview_title">日志预览</string>
     <string name="debug_cd_refresh">刷新日志</string>
+    <string name="debug_log_empty">暂无日志，执行一次同步或解锁后这里会显示真实运行时事件</string>
     <string name="debug_log_refreshed">日志已刷新</string>
     <string name="debug_log_cleared">日志已清空</string>
     <string name="debug_export_btn">导出日志</string>

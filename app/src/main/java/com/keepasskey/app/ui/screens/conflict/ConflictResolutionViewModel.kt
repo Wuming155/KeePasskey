@@ -8,7 +8,6 @@ import com.keepasskey.app.sync.SyncOutcome
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.sync.merge.ConflictResolutionChoice
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -36,7 +35,7 @@ class ConflictResolutionViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
-            syncCoordinator?.conflictFlow?.collect { conflicts ->
+            syncCoordinator.conflictFlow.collect { conflicts ->
                 if (conflicts.isNotEmpty()) {
                     val items = conflicts.map { pair ->
                         val fieldList = mutableListOf<ConflictedField>()
@@ -46,10 +45,16 @@ class ConflictResolutionViewModel @Inject constructor(
                         if (pair.localEntry.userName != pair.remoteEntry.userName) {
                             fieldList.add(ConflictedField("用户名 (Username)", pair.localEntry.userName, pair.remoteEntry.userName))
                         }
-                        val localPwd = pair.localEntry.password?.readString().orEmpty()
-                        val remotePwd = pair.remoteEntry.password?.readString().orEmpty()
-                        if (localPwd != remotePwd) {
-                            fieldList.add(ConflictedField("密码 (Password)", localPwd, remotePwd, isSensitive = true))
+                        // 敏感数据铁律：冲突对比界面不物化密码明文，仅以掩码呈现「两侧不一致」事实
+                        if (pair.localEntry.password != pair.remoteEntry.password) {
+                            fieldList.add(
+                                ConflictedField(
+                                    "密码 (Password)",
+                                    "••••••••（本地版本）",
+                                    "••••••••（云端版本）",
+                                    isSensitive = true
+                                )
+                            )
                         }
                         if (pair.localEntry.url != pair.remoteEntry.url) {
                             fieldList.add(ConflictedField("网址 (URL)", pair.localEntry.url, pair.remoteEntry.url))
@@ -95,33 +100,26 @@ class ConflictResolutionViewModel @Inject constructor(
     }
 
     fun applyMerge() {
-        val coordinator = syncCoordinator
         viewModelScope.launch {
             _uiState.update { it.copy(isResolving = true) }
-            if (coordinator != null) {
-                val resolutions = _uiState.value.entries.associate { entry ->
-                    val hasRemote = entry.fields.any { it.selectedChoice == FieldChoice.REMOTE }
-                    val choice = if (hasRemote) ConflictResolutionChoice.KEEP_REMOTE else ConflictResolutionChoice.KEEP_LOCAL
-                    entry.id to choice
-                }
-                val outcome = coordinator.resolveConflicts(resolutions)
-                val isSuccess = outcome is SyncOutcome.MergedAndUploaded
-                _uiState.update {
-                    it.copy(
-                        isResolving = false,
-                        userMessage = if (isSuccess) {
-                            UiMessage(R.string.conflict_resolved_msg)
-                        } else {
-                            UiMessage(R.string.sync_feedback_error, listOf((outcome as? SyncOutcome.Error)?.message ?: "合并失败"))
-                        }
-                    )
-                }
-                if (isSuccess) {
-                    _events.emit(ConflictResolutionEvent.ResolveSuccess)
-                }
-            } else {
-                delay(600)
-                _uiState.update { it.copy(isResolving = false, userMessage = UiMessage(R.string.conflict_resolved_msg)) }
+            val resolutions = _uiState.value.entries.associate { entry ->
+                val hasRemote = entry.fields.any { it.selectedChoice == FieldChoice.REMOTE }
+                val choice = if (hasRemote) ConflictResolutionChoice.KEEP_REMOTE else ConflictResolutionChoice.KEEP_LOCAL
+                entry.id to choice
+            }
+            val outcome = syncCoordinator.resolveConflicts(resolutions)
+            val isSuccess = outcome is SyncOutcome.MergedAndUploaded
+            _uiState.update {
+                it.copy(
+                    isResolving = false,
+                    userMessage = if (isSuccess) {
+                        UiMessage(R.string.conflict_resolved_msg)
+                    } else {
+                        UiMessage(R.string.sync_feedback_error, listOf((outcome as? SyncOutcome.Error)?.message ?: "合并失败"))
+                    }
+                )
+            }
+            if (isSuccess) {
                 _events.emit(ConflictResolutionEvent.ResolveSuccess)
             }
         }

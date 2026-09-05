@@ -257,4 +257,54 @@ class KdbxMergerV2Test {
         assertNotNull(foundG2)
         assertEquals("FolderA", foundG1?.name)
     }
+
+    @Test
+    fun `测试复活条目回退到 previousParentGroup 而非根组`() {
+        val entryUuid = KdbxUuid(ByteArray(16) { 31 })
+        val groupAId = KdbxUuid(ByteArray(16) { 32 })
+        val groupBId = KdbxUuid(ByteArray(16) { 33 })
+
+        val oldTimes = KdbxTimes(
+            creationTime = Instant.ofEpochMilli(500L),
+            lastModificationTime = Instant.ofEpochMilli(500L)
+        )
+        val groupA = KdbxGroup(id = groupAId, parentGroupId = rootId, name = "GroupA", times = oldTimes)
+        val groupB = KdbxGroup(id = groupBId, parentGroupId = rootId, name = "GroupB", times = oldTimes)
+
+        // 基线：条目位于 GroupA；此前后条目曾从 GroupA 被移动到 GroupB
+        val baseEntry = KdbxEntry(
+            id = entryUuid,
+            parentGroupId = groupBId,
+            previousParentGroup = groupAId,
+            fields = mapOf(KdbxConstants.Fields.TITLE to ProtectedString("Original", false)),
+            times = KdbxTimes(lastModificationTime = Instant.ofEpochMilli(1000L))
+        )
+        val baseDb = KdbxDatabaseLite(createRootGroup(subgroups = listOf(groupA, groupB), entries = listOf(baseEntry)))
+
+        // Local 删除条目（墓碑），分组树保持不变
+        val localTombstone = DeletedObject(id = entryUuid, deletionTime = Instant.ofEpochMilli(1500L))
+        val localDb = KdbxDatabaseLite(
+            rootGroup = createRootGroup(subgroups = listOf(groupA, groupB)),
+            deletedObjects = listOf(localTombstone)
+        )
+
+        // Remote 修改了条目（修改方胜 → 复活），且远端已删除条目所在分组 GroupB；
+        // 移动史留下的 previousParentGroup 指向存活的 GroupA
+        val remoteModified = baseEntry.copy(
+            fields = mapOf(KdbxConstants.Fields.TITLE to ProtectedString("Remote Modified", false)),
+            times = KdbxTimes(lastModificationTime = Instant.ofEpochMilli(2500L))
+        )
+        val remoteTombstone = DeletedObject(id = groupBId, deletionTime = Instant.ofEpochMilli(2000L))
+        val remoteDb = KdbxDatabaseLite(
+            rootGroup = createRootGroup(subgroups = listOf(groupA), entries = listOf(remoteModified)),
+            deletedObjects = listOf(remoteTombstone)
+        )
+
+        val result = KdbxMerger.mergeDatabases(baseDb, localDb, remoteDb)
+
+        // 复活条目的 parentGroupId（GroupB）已不存活，应回退到 previousParentGroup（GroupA）而非根组
+        val revived = result.mergedRoot.findEntry(entryUuid)
+        assertNotNull(revived)
+        assertEquals(groupAId, revived?.parentGroupId)
+    }
 }

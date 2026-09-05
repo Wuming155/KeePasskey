@@ -5,6 +5,7 @@ import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.keepasskey.app.R
+import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.app.data.repository.SettingsRepository
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.security.BiometricAuthManager
@@ -14,7 +15,6 @@ import com.keepasskey.app.security.QuickUnlockPinStore
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.core.result.KdbxResult
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -42,9 +42,11 @@ sealed interface UnlockEvent {
 class UnlockViewModel @Inject constructor(
     private val vaultRepository: VaultRepository,
     private val settingsRepository: SettingsRepository,
-    private val biometricAuthManager: BiometricAuthManager? = null,
-    private val biometricCredentialStorage: BiometricCredentialStorage? = null,
-    private val quickUnlockPinStore: QuickUnlockPinStore? = null
+    // 依赖在类型上允许为 null 仅用于单测注入空实现；生产 DI 恒注入真实实例
+    private val biometricAuthManager: BiometricAuthManager?,
+    private val biometricCredentialStorage: BiometricCredentialStorage?,
+    private val quickUnlockPinStore: QuickUnlockPinStore?,
+    private val debugLog: DebugLogBuffer
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(UnlockUiState())
@@ -145,6 +147,7 @@ class UnlockViewModel @Inject constructor(
             try {
                 when (val result = vaultRepository.unlockActiveDatabase(passwordChars)) {
                     is KdbxResult.Success -> {
+                        debugLog.info(TAG, "主密码解锁成功")
                         // QuickUnlock 首次登记流程：以本次解锁的真实主密码封印 PIN 保护凭据
                         bindQuickUnlockCredentialIfPending(passwordChars)
                         // 若开启生物识别，自动保存经 Keystore 硬件加密的凭据 (CharArray 版本并及时清零)
@@ -156,6 +159,7 @@ class UnlockViewModel @Inject constructor(
                         _events.emit(UnlockEvent.UnlockSuccess)
                     }
                     is KdbxResult.Failure -> {
+                        debugLog.warn(TAG, "主密码解锁失败（凭据不匹配）")
                         _uiState.update {
                             it.copy(
                                 isLoading = false,
@@ -278,10 +282,12 @@ class UnlockViewModel @Inject constructor(
             try {
                 when (val result = vaultRepository.unlockActiveDatabase(masterChars)) {
                     is KdbxResult.Success -> {
+                        debugLog.info(TAG, "QuickUnlock PIN 解锁成功")
                         _uiState.update { it.copy(isLoading = false, quickUnlockPin = "") }
                         _events.emit(UnlockEvent.UnlockSuccess)
                     }
                     is KdbxResult.Failure -> {
+                        debugLog.warn(TAG, "主密码解锁失败（凭据不匹配）")
                         _uiState.update {
                             it.copy(
                                 isLoading = false,
@@ -317,7 +323,8 @@ class UnlockViewModel @Inject constructor(
     }
 
     /**
-     * 生物识别解锁：结合 AndroidX Biometric 与硬件 Keystore 解封
+     * 生物识别解锁：结合 AndroidX Biometric 与硬件 Keystore 解封。
+     * 缺少宿主 Activity / 硬件依赖 / 活动数据库时一律 fail-closed（不假解锁、不发成功事件）。
      */
     fun unlockWithBiometric(activity: FragmentActivity? = null) {
         if (_uiState.value.isLoading) return
@@ -327,12 +334,13 @@ class UnlockViewModel @Inject constructor(
         val dbId = activeDatabaseId
 
         if (activity == null || storage == null || authManager == null || dbId == null) {
-            // 测试环境或无硬件上下文时回退模拟解锁
-            viewModelScope.launch {
-                _uiState.update { it.copy(isLoading = true) }
-                delay(BIOMETRIC_PROMPT_DELAY_MS)
-                _uiState.update { it.copy(isLoading = false) }
-                _events.emit(UnlockEvent.UnlockSuccess)
+            // fail-closed：无真实生物识别上下文时不得伪造解锁成功
+            _uiState.update {
+                it.copy(
+                    isLoading = false,
+                    unlockMode = UnlockMode.STANDARD,
+                    errorMessage = UiMessage(R.string.sec_biometric_auth_failed)
+                )
             }
             return
         }
@@ -443,7 +451,7 @@ class UnlockViewModel @Inject constructor(
     }
 
     companion object {
-        private const val BIOMETRIC_PROMPT_DELAY_MS = 600L
+        private const val TAG = "Unlock"
         private const val QUICK_UNLOCK_PIN_LENGTH = 4
     }
 }

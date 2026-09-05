@@ -3,6 +3,7 @@ package com.keepasskey.app.ui.screens.settings
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.keepasskey.app.R
+import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.app.data.repository.SettingsRepository
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.sync.SyncCoordinator
@@ -13,7 +14,6 @@ import com.keepasskey.app.ui.theme.AppThemeMode
 import com.keepasskey.database.audit.HealthCheckEngine
 import com.keepasskey.database.audit.PasswordRiskLevel
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -32,7 +32,8 @@ class SettingsViewModel @Inject constructor(
     private val settingsRepository: SettingsRepository,
     private val vaultRepository: VaultRepository,
     private val syncCredentialsStore: SyncCredentialsStore,
-    private val syncCoordinator: SyncCoordinator
+    private val syncCoordinator: SyncCoordinator,
+    private val debugLogBuffer: DebugLogBuffer
 ) : ViewModel() {
 
     companion object {
@@ -106,6 +107,9 @@ class SettingsViewModel @Inject constructor(
     // KP2A 进阶特性与文件处理、快速解锁、显示、TOTP、调试日志状态集
     private val extendedSettingsFlow = MutableStateFlow(ExtendedSettings())
 
+    // 调试日志真实缓冲快照（随刷新/清除动作更新）
+    private val debugLogLinesFlow = MutableStateFlow(debugLogBuffer.snapshot())
+
     private data class ExtendedSettings(
         // 文件处理与进阶同步
         val useOfflineCache: Boolean = true,
@@ -175,6 +179,7 @@ class SettingsViewModel @Inject constructor(
         val s3AccessKey: String = "",
         val s3SecretKey: String = "",
         val s3ObjectKey: String = "keepasskey.kdbx",
+        val s3UsePathStyle: Boolean = false,
         val autoSyncEnabled: Boolean = true,
         val wifiOnlySync: Boolean = true,
         val isSyncing: Boolean = false,
@@ -221,8 +226,8 @@ class SettingsViewModel @Inject constructor(
         syncStateFlow,
         healthStateFlow,
         combine(autofillStateFlow, databaseConfigStateFlow) { af, db -> Pair(af, db) },
-        combine(securityTimeoutStateFlow, extendedSettingsFlow) { sec, ext -> Pair(sec, ext) }
-    ) { userSettings, syncState, healthState, (autofillState, dbState), (secState, extState) ->
+        combine(securityTimeoutStateFlow, extendedSettingsFlow, debugLogLinesFlow) { sec, ext, logs -> Triple(sec, ext, logs) }
+    ) { userSettings, syncState, healthState, (autofillState, dbState), (secState, extState, debugLogLines) ->
         SettingsUiState(
             // 1. 密码库与加密设置
             databaseName = dbState.databaseName,
@@ -253,6 +258,7 @@ class SettingsViewModel @Inject constructor(
             // M2 整改：掩码采用固定长度，杜绝通过掩码长度推断真实密钥长度
             s3SecretKeyMasked = FIXED_PASSWORD_MASK,
             s3ObjectKey = syncState.s3ObjectKey,
+            s3UsePathStyle = syncState.s3UsePathStyle,
             autoSyncEnabled = syncState.autoSyncEnabled,
             wifiOnlySync = syncState.wifiOnlySync,
             isSyncing = syncState.isSyncing,
@@ -339,7 +345,8 @@ class SettingsViewModel @Inject constructor(
 
             // 8. 调试日志
             debugLogEnabled = extState.debugLogEnabled,
-            verboseSyncLog = extState.verboseSyncLog
+            verboseSyncLog = extState.verboseSyncLog,
+            debugLogLines = debugLogLines
         )
     }.stateIn(
         scope = viewModelScope,
@@ -349,6 +356,8 @@ class SettingsViewModel @Inject constructor(
 
     init {
         restoreSyncCredentials()
+        // 离线开关联动：冷启动时把默认/持久化的离线偏好传导至同步协调器
+        syncCoordinator.setOfflineMode(extendedSettingsFlow.value.useOfflineCache)
         checkAndTriggerColdStartSync()
     }
 
@@ -369,7 +378,8 @@ class SettingsViewModel @Inject constructor(
                 s3Region = savedS3?.region ?: cur.s3Region,
                 s3AccessKey = savedS3?.accessKey ?: cur.s3AccessKey,
                 s3SecretKey = savedS3?.secretKey ?: cur.s3SecretKey,
-                s3ObjectKey = savedS3?.objectKey ?: cur.s3ObjectKey
+                s3ObjectKey = savedS3?.objectKey ?: cur.s3ObjectKey,
+                s3UsePathStyle = savedS3?.usePathStyle ?: cur.s3UsePathStyle
             )
         }
     }
@@ -464,9 +474,10 @@ class SettingsViewModel @Inject constructor(
         region: String,
         accessKey: String,
         secretKey: String = syncStateFlow.value.s3SecretKey,
-        objectKey: String
+        objectKey: String,
+        usePathStyle: Boolean = syncStateFlow.value.s3UsePathStyle
     ) {
-        syncCredentialsStore?.saveS3Config(endpoint, bucket, region, accessKey, secretKey, objectKey)
+        syncCredentialsStore?.saveS3Config(endpoint, bucket, region, accessKey, secretKey, objectKey, usePathStyle)
         syncStateFlow.update {
             it.copy(
                 s3Endpoint = endpoint,
@@ -474,7 +485,8 @@ class SettingsViewModel @Inject constructor(
                 s3Region = region,
                 s3AccessKey = accessKey,
                 s3SecretKey = secretKey,
-                s3ObjectKey = objectKey
+                s3ObjectKey = objectKey,
+                s3UsePathStyle = usePathStyle
             )
         }
     }
@@ -691,6 +703,8 @@ class SettingsViewModel @Inject constructor(
     // ========== KP2A 扩展：文件处理与高级同步策略 ==========
     fun setUseOfflineCache(enabled: Boolean) {
         extendedSettingsFlow.update { it.copy(useOfflineCache = enabled) }
+        // 离线开关联动：实时传导至同步引擎决策树（SyncEngine.isOffline）
+        syncCoordinator.setOfflineMode(enabled)
     }
 
     fun setPeriodicBackgroundSyncEnabled(enabled: Boolean) {
@@ -765,7 +779,6 @@ class SettingsViewModel @Inject constructor(
     fun triggerSync() {
         if (syncStateFlow.value.isSyncing) return
         val provider = syncStateFlow.value.provider
-        val coordinator = syncCoordinator
         viewModelScope.launch {
             syncStateFlow.update {
                 it.copy(
@@ -774,30 +787,20 @@ class SettingsViewModel @Inject constructor(
                 )
             }
 
-            if (coordinator != null) {
-                val outcome = coordinator.syncNow()
-                val feedback = when (outcome) {
-                    is SyncOutcome.UpToDate -> UiMessage(R.string.sync_feedback_done, listOf(provider.protocol))
-                    is SyncOutcome.UploadedLocal -> UiMessage(R.string.sync_feedback_uploaded, listOf(provider.protocol))
-                    is SyncOutcome.MergedAndUploaded -> UiMessage(R.string.sync_feedback_merged, listOf(provider.protocol))
-                    is SyncOutcome.ConflictNeedsUser -> UiMessage(R.string.sync_feedback_conflict)
-                    is SyncOutcome.Offline -> UiMessage(R.string.sync_feedback_offline)
-                    is SyncOutcome.Error -> UiMessage(R.string.sync_feedback_error, listOf(outcome.message))
-                }
-                syncStateFlow.update {
-                    it.copy(
-                        isSyncing = false,
-                        syncFeedbackMessage = feedback
-                    )
-                }
-            } else {
-                delay(1200)
-                syncStateFlow.update {
-                    it.copy(
-                        isSyncing = false,
-                        syncFeedbackMessage = UiMessage(R.string.sync_feedback_done, listOf(provider.protocol))
-                    )
-                }
+            val outcome = syncCoordinator.syncNow()
+            val feedback = when (outcome) {
+                is SyncOutcome.UpToDate -> UiMessage(R.string.sync_feedback_done, listOf(provider.protocol))
+                is SyncOutcome.UploadedLocal -> UiMessage(R.string.sync_feedback_uploaded, listOf(provider.protocol))
+                is SyncOutcome.MergedAndUploaded -> UiMessage(R.string.sync_feedback_merged, listOf(provider.protocol))
+                is SyncOutcome.ConflictNeedsUser -> UiMessage(R.string.sync_feedback_conflict)
+                is SyncOutcome.Offline -> UiMessage(R.string.sync_feedback_offline)
+                is SyncOutcome.Error -> UiMessage(R.string.sync_feedback_error, listOf(outcome.message))
+            }
+            syncStateFlow.update {
+                it.copy(
+                    isSyncing = false,
+                    syncFeedbackMessage = feedback
+                )
             }
         }
     }
@@ -805,7 +808,6 @@ class SettingsViewModel @Inject constructor(
     fun testSyncConnection() {
         if (syncStateFlow.value.isSyncing) return
         val provider = syncStateFlow.value.provider
-        val coordinator = syncCoordinator
         viewModelScope.launch {
             syncStateFlow.update {
                 it.copy(
@@ -813,33 +815,33 @@ class SettingsViewModel @Inject constructor(
                     syncFeedbackMessage = UiMessage(R.string.sync_feedback_connecting, listOf(provider.protocol))
                 )
             }
-            if (coordinator != null) {
-                val result = coordinator.testConnection()
-                val feedback = if (result.isSuccess) {
-                    UiMessage(R.string.sync_feedback_done, listOf(provider.protocol))
-                } else {
-                    UiMessage(R.string.sync_feedback_error, listOf(result.exceptionOrNull()?.message ?: "连接失败"))
-                }
-                syncStateFlow.update {
-                    it.copy(
-                        isSyncing = false,
-                        syncFeedbackMessage = feedback
-                    )
-                }
+            val result = syncCoordinator.testConnection()
+            val feedback = if (result.isSuccess) {
+                UiMessage(R.string.sync_feedback_done, listOf(provider.protocol))
             } else {
-                delay(800)
-                syncStateFlow.update {
-                    it.copy(
-                        isSyncing = false,
-                        syncFeedbackMessage = UiMessage(R.string.sync_feedback_done, listOf(provider.protocol))
-                    )
-                }
+                UiMessage(R.string.sync_feedback_error, listOf(result.exceptionOrNull()?.message ?: "连接失败"))
+            }
+            syncStateFlow.update {
+                it.copy(
+                    isSyncing = false,
+                    syncFeedbackMessage = feedback
+                )
             }
         }
     }
 
     fun clearSyncFeedbackMessage() {
         syncStateFlow.update { it.copy(syncFeedbackMessage = null) }
+    }
+
+    // ========== KP2A 扩展：调试日志（真实进程内缓冲） ==========
+    fun refreshDebugLogs() {
+        debugLogLinesFlow.value = debugLogBuffer.snapshot()
+    }
+
+    fun clearDebugLogs() {
+        debugLogBuffer.clear()
+        debugLogLinesFlow.value = emptyList()
     }
 
     fun rescanHealth() {
@@ -871,6 +873,7 @@ class SettingsViewModel @Inject constructor(
                 val lastScanText = "今天 $nowTime"
 
                 val message = when {
+                    expiredCount > 0 -> "发现 $expiredCount 个已过期凭据，$weakCount 个弱密码，$reusedCount 个复用"
                     weakCount == 0 && reusedCount == 0 -> "全库扫描完成，未发现弱密码与复用"
                     reusedCount > 0 && weakCount > 0 -> "发现 $weakCount 个弱密码，$reusedCount 个重复使用"
                     reusedCount > 0 -> "发现 $reusedCount 个密码重复使用，建议启用唯一密码"

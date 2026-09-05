@@ -27,6 +27,11 @@ class SyncCredentialsStoreTest {
                 val def = args[1] as? String
                 (memoryStorage[key] as? String) ?: def
             }
+            "getBoolean" -> {
+                val key = args[0] as String
+                val def = args[1] as? Boolean ?: false
+                (memoryStorage[key] as? Boolean) ?: def
+            }
             "edit" -> fakeEditor
             else -> null
         }
@@ -39,6 +44,14 @@ class SyncCredentialsStoreTest {
         when (method.name) {
             "putString" -> {
                 memoryStorage[args[0] as String] = args[1]
+                proxy
+            }
+            "putBoolean" -> {
+                memoryStorage[args[0] as String] = args[1]
+                proxy
+            }
+            "remove" -> {
+                memoryStorage.remove(args[0] as String)
                 proxy
             }
             "clear" -> {

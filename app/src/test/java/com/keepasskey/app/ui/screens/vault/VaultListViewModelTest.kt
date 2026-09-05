@@ -47,12 +47,32 @@ class VaultListViewModelTest {
      * 创建被测 ViewModel 并在后台订阅 uiState 以驱动 stateIn 的 WhileSubscribed 上游计算
      */
     private fun TestScope.createSubscribedViewModel(): VaultListViewModel {
-        val viewModel = VaultListViewModel(FakeVaultRepository(), FakeSettingsRepository())
+        val viewModel = VaultListViewModel(FakeVaultRepository(), FakeSettingsRepository(), null, buildTestCoordinator())
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
             viewModel.uiState.collect {}
         }
         testScheduler.runCurrent()
         return viewModel
+    }
+
+    /**
+     * 构造最小可用的 SyncCoordinator（假 Context + 空会话）；本测试不触发真实同步，
+     * 协调器仅满足构造依赖
+     */
+    private fun buildTestCoordinator(): com.keepasskey.app.sync.SyncCoordinator {
+        val cacheDir = java.nio.file.Files.createTempDirectory("kp_cache").toFile()
+        val filesDir = java.nio.file.Files.createTempDirectory("kp_files").toFile()
+        val context = object : android.content.ContextWrapper(null) {
+            override fun getCacheDir(): java.io.File = cacheDir
+            override fun getFilesDir(): java.io.File = filesDir
+            override fun getApplicationContext(): android.content.Context = this
+        }
+        return com.keepasskey.app.sync.SyncCoordinator(
+            context,
+            com.keepasskey.database.session.DatabaseSession(),
+            com.keepasskey.app.sync.SyncCredentialsStore(context, null),
+            com.keepasskey.app.data.logger.DebugLogBuffer()
+        )
     }
 
     @Test
@@ -114,7 +134,7 @@ class VaultListViewModelTest {
     @Test
     fun `批量选择与批量移入回收站`() = runTest {
         val repository = FakeVaultRepository()
-        val viewModel = VaultListViewModel(repository, FakeSettingsRepository())
+        val viewModel = VaultListViewModel(repository, FakeSettingsRepository(), null, buildTestCoordinator())
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
             viewModel.uiState.collect {}
         }
@@ -145,7 +165,7 @@ class VaultListViewModelTest {
     @Test
     fun `回收站内还原条目`() = runTest {
         val repository = FakeVaultRepository()
-        val viewModel = VaultListViewModel(repository, FakeSettingsRepository())
+        val viewModel = VaultListViewModel(repository, FakeSettingsRepository(), null, buildTestCoordinator())
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
             viewModel.uiState.collect {}
         }
@@ -161,7 +181,7 @@ class VaultListViewModelTest {
     @Test
     fun `彻底删除回收站条目`() = runTest {
         val repository = FakeVaultRepository()
-        val viewModel = VaultListViewModel(repository, FakeSettingsRepository())
+        val viewModel = VaultListViewModel(repository, FakeSettingsRepository(), null, buildTestCoordinator())
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
             viewModel.uiState.collect {}
         }
@@ -176,7 +196,7 @@ class VaultListViewModelTest {
     @Test
     fun `清空回收站`() = runTest {
         val repository = FakeVaultRepository()
-        val viewModel = VaultListViewModel(repository, FakeSettingsRepository())
+        val viewModel = VaultListViewModel(repository, FakeSettingsRepository(), null, buildTestCoordinator())
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
             viewModel.uiState.collect {}
         }
@@ -250,7 +270,7 @@ class VaultListViewModelTest {
     @Test
     fun `新建文件夹归属当前分组`() = runTest {
         val repository = FakeVaultRepository()
-        val viewModel = VaultListViewModel(repository, FakeSettingsRepository())
+        val viewModel = VaultListViewModel(repository, FakeSettingsRepository(), null, buildTestCoordinator())
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
             viewModel.uiState.collect {}
         }
