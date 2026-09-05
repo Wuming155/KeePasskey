@@ -10,6 +10,7 @@ import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.security.BiometricAuthManager
 import com.keepasskey.app.security.BiometricCredentialStorage
 import com.keepasskey.app.security.BiometricResult
+import com.keepasskey.app.security.QuickUnlockPinStore
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.core.result.KdbxResult
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -42,7 +43,8 @@ class UnlockViewModel @Inject constructor(
     private val vaultRepository: VaultRepository,
     private val settingsRepository: SettingsRepository,
     private val biometricAuthManager: BiometricAuthManager? = null,
-    private val biometricCredentialStorage: BiometricCredentialStorage? = null
+    private val biometricCredentialStorage: BiometricCredentialStorage? = null,
+    private val quickUnlockPinStore: QuickUnlockPinStore? = null
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(UnlockUiState())
@@ -52,6 +54,12 @@ class UnlockViewModel @Inject constructor(
     val events: SharedFlow<UnlockEvent> = _events.asSharedFlow()
 
     private var activeDatabaseId: String? = null
+
+    /**
+     * QuickUnlock 首次登记时暂存的 PIN（仅内存驻留）。
+     * 待用户以完整主密码解锁成功后，用它把主凭据封印进 [QuickUnlockPinStore]，随即清零。
+     */
+    private var pendingQuickUnlockPin: CharArray? = null
 
     /**
      * 主密码敏感态：仅以 CharArray 驻留 ViewModel 内部（绝不进入 UiState/StateFlow）。
@@ -66,11 +74,12 @@ class UnlockViewModel @Inject constructor(
                 if (active != null) {
                     activeDatabaseId = active.id
                     val hasBiometricCred = biometricCredentialStorage?.hasEncryptedCredential(active.id) == true
+                    val hasQuickUnlockCred = quickUnlockPinStore?.hasBoundCredential(active.id) == true
                     _uiState.update {
                         it.copy(
                             databaseName = active.name,
                             databaseStatus = if (active.isRemote) "云端同步 • " + active.syncType else "本地存储 • " + active.path,
-                            isQuickUnlockAvailable = hasBiometricCred
+                            isQuickUnlockAvailable = hasQuickUnlockCred || hasBiometricCred
                         )
                     }
                 }
@@ -82,7 +91,7 @@ class UnlockViewModel @Inject constructor(
             _uiState.update { state ->
                 state.copy(
                     isBiometricEnabled = settings.biometricEnabled,
-                    unlockMode = if (state.isQuickUnlockAvailable && settings.biometricEnabled) {
+                    unlockMode = if (state.isQuickUnlockAvailable) {
                         UnlockMode.QUICK_UNLOCK
                     } else {
                         UnlockMode.STANDARD
@@ -99,11 +108,11 @@ class UnlockViewModel @Inject constructor(
     fun onPasswordChangeSecure(password: CharArray) {
         passwordChars.fill('0')
         passwordChars = password.copyOf()
-        _uiState.update { it.copy(errorMessage = null) }
+        _uiState.update { it.copy(errorMessage = null, infoMessage = null) }
     }
 
     fun onQuickUnlockPinChange(pin: String) {
-        _uiState.update { it.copy(quickUnlockPin = pin, errorMessage = null) }
+        _uiState.update { it.copy(quickUnlockPin = pin, errorMessage = null, infoMessage = null) }
         // 4 位 PIN 自动触发快速校验
         if (pin.length == 4) {
             unlockWithQuickUnlock()
@@ -119,7 +128,7 @@ class UnlockViewModel @Inject constructor(
     }
 
     fun switchUnlockMode(mode: UnlockMode) {
-        _uiState.update { it.copy(unlockMode = mode, errorMessage = null) }
+        _uiState.update { it.copy(unlockMode = mode, errorMessage = null, infoMessage = null) }
     }
 
     /**
@@ -136,6 +145,8 @@ class UnlockViewModel @Inject constructor(
             try {
                 when (val result = vaultRepository.unlockActiveDatabase(passwordChars)) {
                     is KdbxResult.Success -> {
+                        // QuickUnlock 首次登记流程：以本次解锁的真实主密码封印 PIN 保护凭据
+                        bindQuickUnlockCredentialIfPending(passwordChars)
                         // 若开启生物识别，自动保存经 Keystore 硬件加密的凭据 (CharArray 版本并及时清零)
                         persistBiometricCredentialIfEnabled(passwordChars)
                         // 解锁成功后立即擦除驻留的主密码字符数组
@@ -202,10 +213,90 @@ class UnlockViewModel @Inject constructor(
 
     fun unlockWithQuickUnlock() {
         viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true, errorMessage = null) }
-            delay(300)
-            _uiState.update { it.copy(isLoading = false) }
-            _events.emit(UnlockEvent.UnlockSuccess)
+            val store = quickUnlockPinStore
+            val dbId = activeDatabaseId
+            if (store == null || dbId == null) {
+                _uiState.update {
+                    it.copy(errorMessage = UiMessage(R.string.unlock_error_quick_unavailable))
+                }
+                return@launch
+            }
+
+            val pin = _uiState.value.quickUnlockPin
+            if (pin.length != QUICK_UNLOCK_PIN_LENGTH) {
+                _uiState.update {
+                    it.copy(errorMessage = UiMessage(R.string.unlock_error_pin_length))
+                }
+                return@launch
+            }
+
+            _uiState.update { it.copy(isLoading = true, errorMessage = null, infoMessage = null) }
+
+            if (!store.hasBoundCredential(dbId)) {
+                // 首次使用 QuickUnlock：仅登记 PIN 校验因子，须完成一次完整主密码解锁以封印凭据
+                pendingQuickUnlockPin?.fill('0')
+                pendingQuickUnlockPin = pin.toCharArray()
+                store.enrollPin(dbId, pin.toCharArray())
+                _uiState.update {
+                    it.copy(
+                        isLoading = false,
+                        unlockMode = UnlockMode.STANDARD,
+                        quickUnlockPin = "",
+                        infoMessage = UiMessage(R.string.unlock_quick_pin_enrolled_hint)
+                    )
+                }
+                return@launch
+            }
+
+            // 已封印凭据：PIN 校验通过后解封主密码并用其真实解锁密码库
+            val masterChars = store.unlockWithPin(dbId, pin.toCharArray())
+            if (masterChars == null) {
+                _uiState.update {
+                    it.copy(
+                        isLoading = false,
+                        errorMessage = UiMessage(R.string.unlock_error_pin_invalid)
+                    )
+                }
+                return@launch
+            }
+            try {
+                when (val result = vaultRepository.unlockActiveDatabase(masterChars)) {
+                    is KdbxResult.Success -> {
+                        _uiState.update { it.copy(isLoading = false, quickUnlockPin = "") }
+                        _events.emit(UnlockEvent.UnlockSuccess)
+                    }
+                    is KdbxResult.Failure -> {
+                        _uiState.update {
+                            it.copy(
+                                isLoading = false,
+                                errorMessage = UiMessage(R.string.unlock_error_invalid_password)
+                            )
+                        }
+                    }
+                }
+            } finally {
+                // 解封出的主密码在任何路径下用毕立即清零
+                masterChars.fill('0')
+            }
+        }
+    }
+
+    /**
+     * 完整主密码解锁成功后，若存在 QuickUnlock 登记流程暂存的 PIN，
+     * 则将本次主密码封印至 [QuickUnlockPinStore]（Keystore AES-256-GCM 硬件保护），随即清零暂存 PIN。
+     */
+    private suspend fun bindQuickUnlockCredentialIfPending(masterPassword: CharArray) {
+        val pending = pendingQuickUnlockPin ?: return
+        val store = quickUnlockPinStore ?: return
+        val dbId = activeDatabaseId ?: return
+        try {
+            store.bindCredential(dbId, masterPassword)
+            _uiState.update { it.copy(isQuickUnlockAvailable = true) }
+        } catch (ignored: Exception) {
+            // 某些设备缺少 Keystore 硬件支持时跳过封印，QuickUnlock 保持不可用
+        } finally {
+            pending.fill('0')
+            pendingQuickUnlockPin = null
         }
     }
 
@@ -337,5 +428,6 @@ class UnlockViewModel @Inject constructor(
 
     companion object {
         private const val BIOMETRIC_PROMPT_DELAY_MS = 600L
+        private const val QUICK_UNLOCK_PIN_LENGTH = 4
     }
 }

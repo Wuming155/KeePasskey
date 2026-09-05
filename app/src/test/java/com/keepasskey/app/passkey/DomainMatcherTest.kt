@@ -58,4 +58,18 @@ class DomainMatcherTest {
         assertFalse(DomainMatcher.isPackageMatch("com.example.app", "com.other.app"))
         assertFalse(DomainMatcher.isPackageMatch("", "com.example.app"))
     }
+
+    @Test
+    fun isPackageMatch_stripsAndroidSchemeFromEntryUrl() {
+        // L1 整改：入库记录为 android://<包名> 的凭据因子必须可被调用包名正确匹配
+        assertTrue(DomainMatcher.isPackageMatch("android://com.example.app", "com.example.app"))
+        assertTrue(DomainMatcher.isPackageMatch("android://com.example.app/path", "com.example.app"))
+
+        // scheme 剥离后仍须保持严格点号边界
+        assertFalse(DomainMatcher.isPackageMatch("android://com.evilapp", "com.app"))
+        assertFalse(DomainMatcher.isPackageMatch("android://com.example.app", "com.other.app"))
+
+        // 纯包名输入不受影响
+        assertTrue(DomainMatcher.isPackageMatch("com.example.app", "com.example.app"))
+    }
 }

@@ -144,11 +144,10 @@ class KeePasskeyAutofillService : AutofillService() {
                     (passkey != null && DomainMatcher.isDomainMatch(passkey.relyingPartyId, webDomain)) ||
                             (entry.url.isNotBlank() && DomainMatcher.isDomainMatch(entry.url, webDomain))
                     )
-            val matchPackage = callingPkg.isNotBlank() && (
-                    entry.title.contains(callingPkg, ignoreCase = true) ||
-                            DomainMatcher.isPackageMatch(entry.url, callingPkg) ||
-                            entry.notes.contains(callingPkg, ignoreCase = true)
-                    )
+            // L1 整改：包名匹配仅走 DomainMatcher 严格点号边界（含 android:// scheme 剥离），
+            // 移除 title/notes.contains 启发式，杜绝宽松包含导致的跨应用凭据泄露
+            val matchPackage = callingPkg.isNotBlank() && entry.url.isNotBlank() &&
+                    DomainMatcher.isPackageMatch(entry.url, callingPkg)
             matchDomain || matchPackage
         }
 

@@ -33,7 +33,8 @@ class KeystoreManager @Inject constructor() {
     @Synchronized
     fun getOrCreateKey(
         alias: String = BIOMETRIC_KEY_ALIAS,
-        requireUserAuth: Boolean = true
+        requireUserAuth: Boolean = true,
+        invalidateOnBiometricEnrollment: Boolean = true
     ): SecretKey {
         if (keyStore.containsAlias(alias)) {
             val entry = keyStore.getEntry(alias, null) as? KeyStore.SecretKeyEntry
@@ -41,7 +42,7 @@ class KeystoreManager @Inject constructor() {
                 return entry.secretKey
             }
         }
-        return generateNewKey(alias, requireUserAuth)
+        return generateNewKey(alias, requireUserAuth, invalidateOnBiometricEnrollment)
     }
 
     /**
@@ -50,7 +51,8 @@ class KeystoreManager @Inject constructor() {
     @Synchronized
     fun generateNewKey(
         alias: String = BIOMETRIC_KEY_ALIAS,
-        requireUserAuth: Boolean = true
+        requireUserAuth: Boolean = true,
+        invalidateOnBiometricEnrollment: Boolean = true
     ): SecretKey {
         val keyGenerator = KeyGenerator.getInstance(
             KeyProperties.KEY_ALGORITHM_AES,
@@ -65,7 +67,7 @@ class KeystoreManager @Inject constructor() {
             .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
             .setKeySize(KEY_SIZE_BITS)
             .setUserAuthenticationRequired(requireUserAuth)
-            .setInvalidatedByBiometricEnrollment(true)
+            .setInvalidatedByBiometricEnrollment(invalidateOnBiometricEnrollment)
 
         keyGenerator.init(specBuilder.build())
         return keyGenerator.generateKey()
@@ -136,6 +138,7 @@ class KeystoreManager @Inject constructor() {
     companion object {
         const val ANDROID_KEY_STORE = "AndroidKeyStore"
         const val BIOMETRIC_KEY_ALIAS = "com.keepasskey.biometric_master_key"
+        const val QUICK_UNLOCK_KEY_ALIAS = "com.keepasskey.quick_unlock_key"
         private const val TRANSFORMATION = "AES/GCM/NoPadding"
         private const val KEY_SIZE_BITS = 256
         private const val GCM_TAG_LENGTH_BITS = 128

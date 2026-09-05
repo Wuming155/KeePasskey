@@ -75,18 +75,18 @@ data class SettingsUiState(
 
     // 2. 云端多协议同步与文件处理 (Cloud Sync & File Handling)
     val syncProvider: CloudSyncProvider = CloudSyncProvider.WEBDAV,
-    // WebDAV 专属字段
-    val webdavUrl: String = "https://cloud.example.com/remote.php/dav/files/user/",
-    val webdavUsername: String = "vault_master",
-    val webdavPassword: String = "mypassword123",
+    // WebDAV 专属字段（M2 整改：默认值一律空串，杜绝示例凭据被静默保存为真实凭据）
+    val webdavUrl: String = "",
+    val webdavUsername: String = "",
+    val webdavPassword: String = "",
     val webdavPasswordMasked: String = "••••••••••••",
-    val webdavRemotePath: String = "/Passkeys/keepasskey.kdbx",
-    // S3 兼容协议专属字段
-    val s3Endpoint: String = "https://<account_id>.r2.cloudflarestorage.com",
-    val s3Bucket: String = "my-secure-vault",
+    val webdavRemotePath: String = "/keepasskey.kdbx",
+    // S3 兼容协议专属字段（M2 整改：默认值一律空串）
+    val s3Endpoint: String = "",
+    val s3Bucket: String = "",
     val s3Region: String = "auto",
-    val s3AccessKey: String = "AKIAIOSFODNN7EXAMPLE",
-    val s3SecretKey: String = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+    val s3AccessKey: String = "",
+    val s3SecretKey: String = "",
     val s3SecretKeyMasked: String = "••••••••••••••••••••••••",
     val s3ObjectKey: String = "passwords/master_vault.kdbx",
     // 通用同步状态

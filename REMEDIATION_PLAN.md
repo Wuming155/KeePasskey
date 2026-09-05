@@ -128,6 +128,17 @@
   ④ **Compose 密码 String 边界最小化**：新增 `SecurePasswordField` 组件（显示 String 仅存活于组件内部并随组合销毁清零、变更即转 CharArray 上行、密码键盘/圆点遮罩/显隐切换/等宽字形内聚）；`UnlockUiState` 移除 `password: String` 字段，主密码以 CharArray 驻留 ViewModel 内部并在成功/异常路径显式清零（`onPasswordChangeSecure`）。
   **验证**：全工程 172 测试全绿（app 65 / core 9 / crypto 34 / database 31 / sync 33，database +3、sync +3 均为本波新增）；`assembleDebug` + `assembleRelease`（R8）通过。
 
+- **✅ Wave 6（全面安全审查整改专项）验收通过（轮 17）**：针对外部全面安全审查报告（2 高危 / 2 中危 / 4 低危）逐项核实后全量整改——
+  ① **H1 Origin/RP-ID 绑定缺陷（CWE-346）**：新增 `CallingOriginResolver`——浏览器委派强制走官方 `CallingAppInfo.getOrigin(privilegedAllowlist)`（浏览器特权白名单：包名 + 签名证书 SHA-256 指纹双重校验，异常一律 fail-closed）；普通应用固定颁发 `android:apk-key-hash:<base64url(sha256(签名证书))>` origin，彻底移除对 candidateQueryData 字符串的信任与 `origin` 私有字段反射；GET 流程 rp.id 与 origin 强绑定（浏览器：rp.id 必须为 origin 域或其可注册后缀；普通应用：不信任 requestJson 的 web rp.id，仅按严格包名边界匹配绑定凭据）；`PasswordFillActivity` 回传明文密码前按 DomainMatcher 二次校验（新增 EXPECTED_DOMAIN/EXPECTED_PACKAGE extras）；`PasskeyAssertionActivity` 签名前二次校验 origin 与凭据 RP-ID 同域；普通应用创建的 Passkey 额外记录 `android://<包名>` 绑定（`saveNewPasskeyEntry(boundPackage)`）。
+  ② **H2 QuickUnlock 空壳桩（CWE-798）**：新增 `QuickUnlockPinStore`——随机盐 + PBKDF2-HMAC-SHA256（120,000 迭代）PIN 校验器（常量时间比对）+ 主凭据 Keystore AES-256-GCM 硬件封印（独立 alias，`setInvalidatedByBiometricEnrollment` 可配）；`UnlockViewModel` 移除 `delay(300)` 桩——首次使用走「登记 PIN → 完整主密码解锁一次绑定凭据」流程，此后 PIN 校验通过才解封主密码并真实解锁密码库，任意路径用毕清零。
+  ③ **M1 整库明文驻留（CWE-316）**：`UiVaultEntry`/`UiEntryRevision` 移除 `passwordPlain`，列表/详情投影不再携带密码明文；`VaultRepository` 新增 `getEntryPassword`/`getEntryRevisionPassword` 按需单条解密；详情页显隐/复制、列表复制、编辑页加载、历史回滚/对比全部改为按需解密；`saveEntry(entry, passwordChars)` 显式提交密码（null 保留既有密码），杜绝全库明文驻留 StateFlow。
+  ④ **M2 硬编码示例凭据（CWE-798）**：删除 `mypassword123` 与 AWS 示例密钥对（SettingsViewModel/SettingsUiState/DatabasePickerScreen 默认值全部置空）；掩码改固定长度，不再泄露真实密码长度。
+  ⑤ **L1 匹配启发式与 scheme 剥离缺陷**：移除全部 `title/notes.contains(包名)` 启发式（CredentialProvider/Autofill/saveAutofillCredential 四处）；`DomainMatcher.isPackageMatch` 支持 `android://` scheme 剥离，修复 android:// 凭据因子永不匹配的功能缺陷（+回归测试）。
+  ⑥ **L2 WebDAV PROPFIND XXE 纵深防御**：`parsePropfindXml` 补齐与 KdbxXmlParser 同级四项加固（禁 DTD/外部实体/外部 DTD/XInclude）。
+  ⑦ **L3 生产 DI 假实现**：新增 `RealSettingsRepository`（SharedPreferences 持久化 + 监听流 + 安全默认值），RepositoryModule 生产绑定切换，Fake 仅保留测试使用——安全设置跨冷启动持久化。
+  ⑧ **L4 同步层完整性**：`WebDavSyncProvider` authHeader 改构造期立即计算（修复调用方清零 CharArray 后 lazy 才求值导致同步以空密码认证的功能失效）；`SyncCredentialsStore` S3 AccessKey 与 SecretKey 同等 AES-256-GCM 加密落盘（明文键保留向后兼容读取）。审查报告所称「S3 upload() 重复声明无法编译」经实测编译验证不成立（Wave 5 交付即为正确形态）。
+  **验证**：全工程 173 测试全绿（app 66 / core 9 / crypto 34 / database 31 / sync 33，含 DomainMatcher 新增回归用例）；`assembleDebug` + `assembleRelease`（R8）通过。
+
 ## 八、最终验收证据汇总（目标完成判定）
 
 | 验收项 | 证据 |
@@ -138,4 +149,5 @@
 | Wave 2 凭据服务 | git 4927189：CredentialProviderService 三回调真实化、4 Launcher Activity、AutofillService Dataset、DomainMatcher（app 测试含 DomainMatcher/AutofillScanner/Matching 8 用例） |
 | Wave 3 数据层 | git a45bfa5：编辑保留+HistoryManager、库内回收站+墓碑、TOTP RFC 6238 向量（t=59→287082）、健康检查、SyncCoordinator 全链路、凭据加密、allowBackup、附件管线（app 65 测试） |
 | Wave 4 构建与文档 | 166 测试全绿（--rerun-tasks 强制重跑验证）；assembleDebug+assembleRelease(R8) 通过；AGENTS.md/project-status.md 如实化；存档清理；最终 docs(wave4) 提交 |
+| Wave 6 安全审查整改 | H1 CallingOriginResolver（官方 getOrigin+白名单/apk-key-hash）+ GET/CREATE origin 绑定 + Activity 二次校验；H2 QuickUnlockPinStore（PBKDF2+Keystore 封印）替换 delay 桩；M1 passwordPlain 全链路移除 + 按需解密；M2/L1/L2/L3/L4 全项整改。173 测试全绿；assembleDebug+assembleRelease(R8) 通过 |
 | Wave 5 已知限界清零 | KDBX SAX/Writer/HMAC 块流全链路流式 + 首块探针旧派生裁决（KdbxStreamingPipelineTest 3 用例）；S3 If-Match 条件覆写（S3SyncProviderTest +3 用例）；CredentialUnlockActivity 链式解锁 + CredentialResponseAssembler；SecurePasswordField + UnlockUiState 去 String 明文。172 测试全绿；assembleDebug+assembleRelease(R8) 通过 |

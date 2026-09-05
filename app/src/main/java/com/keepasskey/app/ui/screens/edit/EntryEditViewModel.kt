@@ -66,6 +66,8 @@ class EntryEditViewModel @Inject constructor(
         viewModelScope.launch {
             val entry = vaultRepository.getEntry(id).firstOrNull()
             if (entry != null) {
+                // M1 整改：密码明文不随条目投影下发，编辑时按需单条解密
+                val password = vaultRepository.getEntryPassword(entry.id).orEmpty()
                 _uiState.update {
                     it.copy(
                         entryId = entry.id,
@@ -73,7 +75,7 @@ class EntryEditViewModel @Inject constructor(
                         iconName = entry.iconName,
                         title = entry.title,
                         username = entry.username,
-                        password = entry.passwordPlain,
+                        password = password,
                         url = entry.url,
                         notes = entry.notes,
                         isPasskey = entry.isPasskey,
@@ -208,7 +210,6 @@ class EntryEditViewModel @Inject constructor(
                 id = entryId,
                 title = state.title.trim(),
                 username = state.username.trim(),
-                passwordPlain = state.password,
                 url = state.url.trim(),
                 notes = state.notes.trim(),
                 isPasskey = state.isPasskey,
@@ -219,7 +220,8 @@ class EntryEditViewModel @Inject constructor(
                 customFields = state.customFields.filter { it.key.isNotBlank() },
                 attachments = state.attachments
             )
-            vaultRepository.saveEntry(entry)
+            // M1 整改：密码以独立参数显式提交，不再随条目投影携带
+            vaultRepository.saveEntry(entry, passwordChars = state.password.toCharArray())
             _events.emit(EntryEditEvent.SaveSuccess)
         }
     }

@@ -23,6 +23,7 @@ data class UnlockUiState(
     val keyFileName: String = "master.key",
     val isLoading: Boolean = false,
     val errorMessage: UiMessage? = null,
+    val infoMessage: UiMessage? = null,
     val databaseName: String = "personal-vault.kdbx",
     val databaseStatus: String = "本地已加密存储 • 关联 WebDAV 云端备份",
 

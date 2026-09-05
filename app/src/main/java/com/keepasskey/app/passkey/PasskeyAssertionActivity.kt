@@ -70,6 +70,20 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
                     return@launch
                 }
 
+                // H1 整改：签名前二次校验 origin 与凭据 RP-ID 的绑定关系。
+                // 浏览器委派的 web origin 必须与 RP ID 同域（或为其子域）；
+                // 普通应用的 apk-key-hash origin 已在候选组装阶段按严格包名绑定。
+                if (CallingOriginResolver.isBrowserOrigin(origin)) {
+                    val originHost = DomainMatcher.extractDomain(origin)
+                    if (originHost.isEmpty() ||
+                        !DomainMatcher.isDomainMatch(passkeyData.relyingPartyId, originHost)
+                    ) {
+                        Log.e(TAG, "origin 与凭据 RP-ID 不匹配，拒绝签发断言")
+                        failAndFinish("调用来源与凭据不匹配")
+                        return@launch
+                    }
+                }
+
                 // 1. 构造 AuthenticatorData (flags: UP | UV | BE | BS, 无 AT)
                 val flags = (PasskeyCryptoEngine.FLAG_UP.toInt() or
                         PasskeyCryptoEngine.FLAG_UV.toInt() or

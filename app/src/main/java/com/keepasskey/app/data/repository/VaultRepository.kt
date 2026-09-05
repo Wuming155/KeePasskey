@@ -81,9 +81,11 @@ interface VaultRepository {
     fun getEntry(id: String): Flow<UiVaultEntry?>
 
     /**
-     * 保存或更新凭据条目
+     * 保存或更新凭据条目。
+     * [passwordChars] 非空时写入新密码；为 null 时保留既有条目的密码不动（M1 整改：
+     * UI 投影不再携带密码明文，密码由编辑页按需加载后显式提交）。
      */
-    suspend fun saveEntry(entry: UiVaultEntry)
+    suspend fun saveEntry(entry: UiVaultEntry, passwordChars: CharArray? = null)
 
     /**
      * 删除凭据条目（移至回收站或彻底删除）
@@ -116,6 +118,18 @@ interface VaultRepository {
     suspend fun getKdbxEntries(): List<com.keepasskey.core.model.KdbxEntry>
 
     /**
+     * 按需解密单条凭据的密码（M1 整改）。
+     * 仅在用户显式查看/复制密码时调用，杜绝全库密码明文驻留 StateFlow / 堆内存；
+     * 返回 String 由调用方用毕自然丢弃（UI 显示边界），条目不存在或无密码时返回 null。
+     */
+    suspend fun getEntryPassword(entryId: String): String?
+
+    /**
+     * 按需解密单条历史修订的密码（M1 整改，供详情页回滚/对比使用），语义同 [getEntryPassword]。
+     */
+    suspend fun getEntryRevisionPassword(entryId: String, revisionId: String): String?
+
+    /**
      * 根据依赖方标识 (RP ID) 或域名查询匹配的凭据条目
      */
     suspend fun findEntriesForRpId(rpId: String): List<com.keepasskey.core.model.KdbxEntry>
@@ -126,9 +140,14 @@ interface VaultRepository {
     suspend fun findPasskeyByCredentialId(credentialId: String): com.keepasskey.core.model.KdbxEntry?
 
     /**
-     * 保存全新的 Passkey 凭据条目至根群组
+     * 保存全新的 Passkey 凭据条目至根群组。
+     * [boundPackage] 非空时（普通应用创建路径）条目 url 记录为 android://<包名>，
+     * 供凭据查询按严格包名边界匹配；为空时记录为 https://<rpId>。
      */
-    suspend fun saveNewPasskeyEntry(data: com.keepasskey.core.model.PasskeyData): com.keepasskey.core.model.KdbxEntry
+    suspend fun saveNewPasskeyEntry(
+        data: com.keepasskey.core.model.PasskeyData,
+        boundPackage: String? = null
+    ): com.keepasskey.core.model.KdbxEntry
 
     /**
      * 递增并写回 Passkey 条目的签名计数器 (SignCount)

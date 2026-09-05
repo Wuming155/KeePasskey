@@ -392,17 +392,17 @@ private fun OpenExistingVaultDialog(
     var localName by remember { mutableStateOf("passwords.kdbx") }
 
     // WebDAV 字段及连接凭据
-    var webdavUrl by remember { mutableStateOf("https://dav.example.com/remote.php/dav/files/user/vault.kdbx") }
+    var webdavUrl by remember { mutableStateOf("") }
     var webdavName by remember { mutableStateOf("cloud_vault.kdbx") }
-    var webdavUser by remember { mutableStateOf("keepass_user") }
-    var webdavPassword by remember { mutableStateOf("secure_token_12345") }
+    var webdavUser by remember { mutableStateOf("") }
+    var webdavPassword by remember { mutableStateOf("") }
 
-    // S3 兼容字段及连接凭据
-    var s3Endpoint by remember { mutableStateOf("https://<account_id>.r2.cloudflarestorage.com") }
-    var s3Bucket by remember { mutableStateOf("my-vault/keepass.kdbx") }
+    // S3 兼容字段及连接凭据（M2 整改：默认值一律空串，杜绝示例凭据被静默导入）
+    var s3Endpoint by remember { mutableStateOf("") }
+    var s3Bucket by remember { mutableStateOf("") }
     var s3Name by remember { mutableStateOf("s3_vault.kdbx") }
-    var s3AccessKey by remember { mutableStateOf("AKIAIOSFODNN7EXAMPLE") }
-    var s3SecretKey by remember { mutableStateOf("wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY") }
+    var s3AccessKey by remember { mutableStateOf("") }
+    var s3SecretKey by remember { mutableStateOf("") }
 
     AlertDialog(
         onDismissRequest = onDismiss,

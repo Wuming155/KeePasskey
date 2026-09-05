@@ -56,6 +56,9 @@ import com.keepasskey.app.ui.theme.MonospacePasswordStyle
 fun RevisionVisualDiffDialog(
     currentEntry: UiVaultEntry,
     revision: UiEntryRevision,
+    // M1 整改：密码明文由调用方按需解密后传入，不再随条目/修订投影携带
+    currentPassword: String = "",
+    revisionPassword: String = "",
     onDismiss: () -> Unit,
     onRollback: () -> Unit
 ) {
@@ -82,8 +85,8 @@ fun RevisionVisualDiffDialog(
                 // 密码差异字段
                 DiffFieldCard(
                     fieldLabel = stringResource(R.string.diff_field_password),
-                    currentValue = currentEntry.passwordPlain,
-                    historicalValue = revision.passwordPlain,
+                    currentValue = currentPassword,
+                    historicalValue = revisionPassword,
                     isSensitive = true
                 )
 

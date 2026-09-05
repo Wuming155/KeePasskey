@@ -114,9 +114,16 @@ class SyncCredentialsStore @Inject constructor(
         editor.putString(KEY_S3_ENDPOINT, endpoint)
         editor.putString(KEY_S3_BUCKET, bucket)
         editor.putString(KEY_S3_REGION, region)
-        editor.putString(KEY_S3_ACCESS_KEY, accessKey)
         editor.putString(KEY_S3_OBJECT_KEY, objectKey)
 
+        // L4 整改：AccessKey 与 SecretKey 同样经 Keystore AES-256-GCM 加密落盘，不再明文存储
+        if (accessKey.isNotEmpty()) {
+            val encryptedAccessKey = encrypt(accessKey)
+            if (encryptedAccessKey != null) {
+                editor.putString(KEY_S3_ACCESS_KEY_IV, encryptedAccessKey.first)
+                editor.putString(KEY_S3_ACCESS_KEY_CIPHER, encryptedAccessKey.second)
+            }
+        }
         if (secretKey.isNotEmpty()) {
             val encrypted = encrypt(secretKey)
             if (encrypted != null) {
@@ -131,8 +138,12 @@ class SyncCredentialsStore @Inject constructor(
         val endpoint = prefs.getString(KEY_S3_ENDPOINT, null) ?: return null
         val bucket = prefs.getString(KEY_S3_BUCKET, "") ?: ""
         val region = prefs.getString(KEY_S3_REGION, "us-east-1") ?: "us-east-1"
-        val accessKey = prefs.getString(KEY_S3_ACCESS_KEY, "") ?: ""
         val objectKey = prefs.getString(KEY_S3_OBJECT_KEY, "keepasskey.kdbx") ?: "keepasskey.kdbx"
+        val accessIv = prefs.getString(KEY_S3_ACCESS_KEY_IV, null)
+        val accessCipher = prefs.getString(KEY_S3_ACCESS_KEY_CIPHER, null)
+        // 兼容旧版本：密文缺失时回落到（历史遗留的）明文键，读出后由下次保存转为密文
+        val accessKey = decrypt(accessIv, accessCipher)
+            ?: prefs.getString(KEY_S3_ACCESS_KEY, "") ?: ""
         val iv = prefs.getString(KEY_S3_SECRET_IV, null)
         val cipher = prefs.getString(KEY_S3_SECRET_CIPHER, null)
         val secretKey = decrypt(iv, cipher) ?: ""
@@ -207,6 +218,8 @@ class SyncCredentialsStore @Inject constructor(
         private const val KEY_S3_BUCKET = "s3_bucket"
         private const val KEY_S3_REGION = "s3_region"
         private const val KEY_S3_ACCESS_KEY = "s3_access_key"
+        private const val KEY_S3_ACCESS_KEY_IV = "s3_access_key_iv"
+        private const val KEY_S3_ACCESS_KEY_CIPHER = "s3_access_key_cipher"
         private const val KEY_S3_OBJECT_KEY = "s3_object_key"
         private const val KEY_S3_SECRET_IV = "s3_secret_iv"
         private const val KEY_S3_SECRET_CIPHER = "s3_secret_cipher"

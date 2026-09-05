@@ -120,7 +120,7 @@
     <string name="detail_btn_copy_pwd">Copy Password</string>
     <string name="detail_basic_section">Credentials</string>
     <string name="detail_username_label">Username / Email</string>
-    <string name="detail_password_label">Password (%1$d chars)</string>
+    <string name="detail_password_label">Password</string>
     <string name="detail_totp_section">Two-Factor Token (TOTP)</string>
     <string name="detail_totp_code">Real-time TOTP Token</string>
     <string name="detail_passkey_section">Passkey Credential (WebAuthn)</string>
@@ -255,7 +255,7 @@
     <string name="detail_password_copied_timeout_minutes">Password copied, clipboard clears in %1$d minutes</string>
     <string name="detail_password_copied_no_clear">Password copied (clipboard auto-clear is disabled)</string>
     <string name="detail_attachment_tap_preview">%1$s • Tap to preview securely</string>
-    <string name="detail_revision_meta">Time: %1$s • Historical password: %2$s***</string>
+    <string name="detail_revision_meta">Time: %1$s • Historical revision snapshot</string>
     <string name="detail_updated_meta">Updated: %1$s • Encrypted in KDBX</string>
     <string name="detail_diff_compare">Compare changes</string>
 
@@ -278,6 +278,10 @@
     <string name="conflict_resolved_msg">Conflict resolved, local and cloud merged successfully</string>
     <string name="unlock_error_empty_password">Enter master password to unlock</string>
     <string name="unlock_error_invalid_password">Incorrect master password or key mismatch</string>
+    <string name="unlock_error_pin_length">Please enter a 4-digit PIN</string>
+    <string name="unlock_error_pin_invalid">Incorrect PIN, QuickUnlock failed</string>
+    <string name="unlock_error_quick_unavailable">QuickUnlock unavailable, please use the master password</string>
+    <string name="unlock_quick_pin_enrolled_hint">QuickUnlock PIN set. Unlock once with your master password to bind credentials</string>
     <string name="unlock_biometric_title">Biometric Unlock</string>
     <string name="unlock_biometric_subtitle">Verify your fingerprint or face to unlock</string>
     <string name="unlock_biometric_negative">Use Master Password</string>

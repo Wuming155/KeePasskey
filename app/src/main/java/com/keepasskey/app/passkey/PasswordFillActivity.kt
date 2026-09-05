@@ -25,6 +25,8 @@ class PasswordFillActivity : BaseCredentialActivity() {
         super.onCreate(savedInstanceState)
 
         val entryId = intent.getStringExtra(EXTRA_ENTRY_ID).orEmpty()
+        val expectedDomain = intent.getStringExtra(EXTRA_EXPECTED_DOMAIN).orEmpty()
+        val expectedPackage = intent.getStringExtra(EXTRA_EXPECTED_PACKAGE).orEmpty()
         if (entryId.isBlank()) {
             Log.e(TAG, "缺少密码凭据 entryId")
             failAndFinish("缺少凭据条目 ID")
@@ -47,6 +49,18 @@ class PasswordFillActivity : BaseCredentialActivity() {
                     return@launch
                 }
 
+                // H1 整改：回传明文密码前二次校验条目与预期调用方（域名/包名）的严格绑定关系，
+                // 与候选组装逻辑（DomainMatcher）保持一致，杜绝候选与回传之间的窗口被利用
+                val domainOk = expectedDomain.isNotBlank() && entry.url.isNotBlank() &&
+                        DomainMatcher.isDomainMatch(entry.url, expectedDomain)
+                val packageOk = expectedPackage.isNotBlank() && entry.url.isNotBlank() &&
+                        DomainMatcher.isPackageMatch(entry.url, expectedPackage)
+                if (!domainOk && !packageOk) {
+                    Log.e(TAG, "条目与调用方不匹配，拒绝回传密码")
+                    failAndFinish("凭据与调用方不匹配")
+                    return@launch
+                }
+
                 val username = entry.userName
                 val password = entry.password?.readString().orEmpty()
 
@@ -65,5 +79,7 @@ class PasswordFillActivity : BaseCredentialActivity() {
     companion object {
         private const val TAG = "PasswordFillActivity"
         const val EXTRA_ENTRY_ID = "com.keepasskey.extra.ENTRY_ID"
+        const val EXTRA_EXPECTED_DOMAIN = "com.keepasskey.extra.EXPECTED_DOMAIN"
+        const val EXTRA_EXPECTED_PACKAGE = "com.keepasskey.extra.EXPECTED_PACKAGE"
     }
 }

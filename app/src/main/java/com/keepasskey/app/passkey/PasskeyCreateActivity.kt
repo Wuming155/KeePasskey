@@ -59,10 +59,8 @@ class PasskeyCreateActivity : BaseCredentialActivity() {
             }
         }
         if (origin.isBlank()) {
-            val candidateOrigin = providerReq?.callingRequest?.candidateQueryData?.getString(EXTRA_CREDENTIAL_REQUEST_ORIGIN)
-            if (!candidateOrigin.isNullOrBlank()) {
-                origin = candidateOrigin
-            }
+            // H1 整改：不再从 candidateQueryData 读取调用方可控 origin（不可信）。
+            // 缺省 origin 留空，clientDataJSON 回退为 https://<rpId> 标准值。
         }
 
         if (rpId.isBlank() || userName.isBlank()) {
@@ -88,7 +86,13 @@ class PasskeyCreateActivity : BaseCredentialActivity() {
                 )
 
                 // 2. 存储至 KDBX 密码库
-                vaultRepository.saveNewPasskeyEntry(passkeyData)
+                //    普通应用（apk-key-hash origin）创建的凭据额外记录调用包绑定（android://<包名>），
+                //    供后续 GET 流程按严格包名边界匹配（H1/L1 整改）
+                vaultRepository.saveNewPasskeyEntry(
+                    data = passkeyData,
+                    boundPackage = if (CallingOriginResolver.isBrowserOrigin(origin)) null
+                    else (callingPackage ?: packageName).ifBlank { null }
+                )
 
                 // 3. 构建证明数据 (Attestation)
                 val credIdBytes = Base64.getUrlDecoder().decode(passkeyData.credentialId)
@@ -160,6 +164,5 @@ class PasskeyCreateActivity : BaseCredentialActivity() {
         const val EXTRA_USER_DISPLAY_NAME = "com.keepasskey.extra.USER_DISPLAY_NAME"
         const val EXTRA_CHALLENGE = "com.keepasskey.extra.CHALLENGE"
         const val EXTRA_ORIGIN = "com.keepasskey.extra.ORIGIN"
-        const val EXTRA_CREDENTIAL_REQUEST_ORIGIN = "androidx.credentials.provider.extra.CREDENTIAL_REQUEST_ORIGIN"
     }
 }

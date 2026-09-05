@@ -156,7 +156,7 @@ class KeePasskeyCredentialProviderService : CredentialProviderService() {
         val responseBuilder = BeginCreateCredentialResponse.Builder()
         val callingAppInfo = request.callingAppInfo
         val callingPackage = callingAppInfo?.packageName.orEmpty()
-        val callingOrigin = extractOrigin(callingAppInfo, request.candidateQueryData)
+        val callingOrigin = extractOrigin(callingAppInfo)
 
         when (request) {
             is BeginCreatePublicKeyCredentialRequest -> {
@@ -238,21 +238,20 @@ class KeePasskeyCredentialProviderService : CredentialProviderService() {
         callback.onResult(null)
     }
 
-    private fun extractOrigin(callingAppInfo: CallingAppInfo?, candidateQueryData: Bundle?): String {
+    /**
+     * 解析调用方可信 origin（H1 整改）：
+     * 浏览器委派走官方 getOrigin + 特权白名单；普通应用固定颁发 apk-key-hash origin。
+     * 绝不信任调用方可控的 candidateQueryData 字符串。
+     */
+    private fun extractOrigin(callingAppInfo: CallingAppInfo?): String {
         if (callingAppInfo == null) return ""
-        val fromBundle = candidateQueryData?.getString(EXTRA_CREDENTIAL_REQUEST_ORIGIN)
-        if (!fromBundle.isNullOrBlank()) return fromBundle
-        return try {
-            val field = CallingAppInfo::class.java.getDeclaredField("origin")
-            field.isAccessible = true
-            (field.get(callingAppInfo) as? String).orEmpty()
-        } catch (_: Exception) {
-            ""
-        }
+        return CallingOriginResolver.resolveTrustedOrigin(callingAppInfo)
     }
 
     /**
-     * 根据调用来源 (Origin 或 Package) 严格安全匹配条目 (供既有单元测试与内部查询复用)
+     * 根据调用来源 (Origin 或 Package) 严格安全匹配条目 (供既有单元测试与内部查询复用)。
+     * L1 整改：包名匹配仅走 DomainMatcher 严格点号边界（含 android:// scheme 剥离），
+     * 移除 title.contains 启发式，杜绝宽松包含导致的跨应用凭据泄露。
      */
     internal fun findMatchingEntries(
         entries: List<com.keepasskey.app.ui.model.UiVaultEntry>,
@@ -265,10 +264,8 @@ class KeePasskeyCredentialProviderService : CredentialProviderService() {
                     DomainMatcher.isDomainMatch(entry.passkeyRpId, cleanOrigin)
             val urlMatch = cleanOrigin.isNotEmpty() && entry.url.isNotBlank() &&
                     DomainMatcher.isDomainMatch(entry.url, cleanOrigin)
-            val packageMatch = packageName.isNotEmpty() && (
-                    entry.title.contains(packageName, ignoreCase = true) ||
-                            DomainMatcher.isPackageMatch(entry.url, packageName)
-                    )
+            val packageMatch = packageName.isNotEmpty() && entry.url.isNotBlank() &&
+                    DomainMatcher.isPackageMatch(entry.url, packageName)
             rpMatch || urlMatch || packageMatch
         }
     }

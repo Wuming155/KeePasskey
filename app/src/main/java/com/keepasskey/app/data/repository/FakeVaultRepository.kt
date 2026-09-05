@@ -33,6 +33,9 @@ class FakeVaultRepository @Inject constructor() : VaultRepository {
     private val groupsFlow = MutableStateFlow(initialMockGroups)
     private val entriesFlow = MutableStateFlow(initialMockEntries)
 
+    // M1 整改：密码明文不再进入 UiVaultEntry/StateFlow，改为按条目 id 独立存储的按需解密仓
+    private val passwordStore = MutableStateFlow<Map<String, String>>(emptyMap())
+
     override fun getDatabases(): Flow<List<VaultDatabaseInfo>> = databasesFlow.asStateFlow()
 
     override suspend fun selectDatabase(id: String) {
@@ -127,7 +130,10 @@ class FakeVaultRepository @Inject constructor() : VaultRepository {
         return entriesFlow.map { list -> list.find { it.id == id } }
     }
 
-    override suspend fun saveEntry(entry: UiVaultEntry) {
+    override suspend fun saveEntry(entry: UiVaultEntry, passwordChars: CharArray?) {
+        passwordChars?.let { pwd ->
+            passwordStore.value = passwordStore.value + (entry.id to String(pwd))
+        }
         val current = entriesFlow.value.toMutableList()
         val index = current.indexOfFirst { it.id == entry.id }
         if (index >= 0) {
@@ -138,7 +144,6 @@ class FakeVaultRepository @Inject constructor() : VaultRepository {
                 modifiedAt = "2026-09-04 10:30",
                 summary = "修订密码与凭据内容",
                 username = old.username,
-                passwordPlain = old.passwordPlain,
                 notes = old.notes
             )
             val updatedRevisions = listOf(rev) + old.revisions
@@ -199,7 +204,7 @@ class FakeVaultRepository @Inject constructor() : VaultRepository {
             val fields = mutableMapOf(
                 KdbxConstants.Fields.TITLE to ProtectedString(ui.title, isProtected = false),
                 KdbxConstants.Fields.USER_NAME to ProtectedString(ui.username, isProtected = false),
-                KdbxConstants.Fields.PASSWORD to ProtectedString(ui.passwordPlain, isProtected = true),
+                KdbxConstants.Fields.PASSWORD to ProtectedString(passwordStore.value[ui.id] ?: "", isProtected = true),
                 KdbxConstants.Fields.URL to ProtectedString(ui.url, isProtected = false),
                 KdbxConstants.Fields.NOTES to ProtectedString(ui.notes, isProtected = false)
             )
@@ -245,12 +250,18 @@ class FakeVaultRepository @Inject constructor() : VaultRepository {
         }
     }
 
-    override suspend fun saveNewPasskeyEntry(data: PasskeyData): KdbxEntry {
+    override suspend fun getEntryPassword(entryId: String): String? = passwordStore.value[entryId]
+
+    override suspend fun getEntryRevisionPassword(entryId: String, revisionId: String): String? =
+        passwordStore.value[entryId]
+
+    override suspend fun saveNewPasskeyEntry(data: PasskeyData, boundPackage: String?): KdbxEntry {
         val title = "${data.userName}@${data.relyingPartyId}"
+        val url = if (boundPackage.isNullOrBlank()) "https://${data.relyingPartyId}" else "android://$boundPackage"
         val fields = mapOf(
             KdbxConstants.Fields.TITLE to ProtectedString(title, isProtected = false),
             KdbxConstants.Fields.USER_NAME to ProtectedString(data.userName, isProtected = false),
-            KdbxConstants.Fields.URL to ProtectedString("https://${data.relyingPartyId}", isProtected = false)
+            KdbxConstants.Fields.URL to ProtectedString(url, isProtected = false)
         )
         val newEntry = KdbxEntry(
             id = KdbxUuid.random(),
@@ -291,17 +302,18 @@ class FakeVaultRepository @Inject constructor() : VaultRepository {
             val currentList = entriesFlow.value.toMutableList()
             val existingIndex = currentList.indexOfFirst {
                 val matchDomain = domain != null && it.url.isNotBlank() && DomainMatcher.isDomainMatch(it.url, domain)
-                val matchPackage = it.title.contains(packageName, ignoreCase = true) || (domain == null && it.url.contains(packageName, ignoreCase = true))
+                // L1 整改：与 RealVaultRepository 一致，仅走严格包名边界匹配
+                val matchPackage = it.url.isNotBlank() && DomainMatcher.isPackageMatch(it.url, packageName)
                 (matchDomain || matchPackage) && (it.username == username || it.username.isEmpty())
             }
 
             if (existingIndex >= 0) {
                 val old = currentList[existingIndex]
                 currentList[existingIndex] = old.copy(
-                    passwordPlain = pwdString,
                     passwordMasked = "••••••••••••••••",
                     username = if (old.username.isEmpty()) username else old.username
                 )
+                passwordStore.value = passwordStore.value + (old.id to pwdString)
             } else {
                 val titleDomain = domain ?: packageName
                 val title = if (username.isNotBlank()) "$username@$titleDomain" else titleDomain
@@ -310,12 +322,12 @@ class FakeVaultRepository @Inject constructor() : VaultRepository {
                     id = "auto_${System.currentTimeMillis()}",
                     title = title,
                     username = username,
-                    passwordPlain = pwdString,
                     passwordMasked = "••••••••••••••••",
                     url = url,
                     category = EntryCategory.LOGIN,
                     notes = "Auto-saved from $packageName"
                 )
+                passwordStore.value = passwordStore.value + (newEntry.id to pwdString)
                 currentList.add(newEntry)
             }
             entriesFlow.value = currentList
@@ -424,7 +436,6 @@ class FakeVaultRepository @Inject constructor() : VaultRepository {
                 id = "1",
                 title = "Google Workspace",
                 username = "alex.developer@gmail.com",
-                passwordPlain = "G8#wK9!mP2\$zL5@xV",
                 url = "https://accounts.google.com",
                 isPasskey = true,
                 passkeyRpId = "google.com",
@@ -455,7 +466,6 @@ class FakeVaultRepository @Inject constructor() : VaultRepository {
                         modifiedAt = "2026-08-20 14:10",
                         summary = "密码重置与安全增强",
                         username = "alex.developer@gmail.com",
-                        passwordPlain = "PrevPass2026@#",
                         notes = "初次设置工作空间邮箱"
                     )
                 )
@@ -464,7 +474,6 @@ class FakeVaultRepository @Inject constructor() : VaultRepository {
                 id = "2",
                 title = "GitHub Enterprise",
                 username = "octocat-dev",
-                passwordPlain = "vP9#wL2@xZ7&kM4\$qR",
                 url = "https://github.com/login",
                 isPasskey = false,
                 totpCode = "849 201",
@@ -498,7 +507,6 @@ class FakeVaultRepository @Inject constructor() : VaultRepository {
                 id = "3",
                 title = "Twitter / X",
                 username = "@tech_lead",
-                passwordPlain = "tL5#9vX2\$kP8@mQ",
                 url = "https://twitter.com",
                 isPasskey = false,
                 category = EntryCategory.LOGIN,
@@ -514,7 +522,6 @@ class FakeVaultRepository @Inject constructor() : VaultRepository {
                 id = "4",
                 title = "AWS IAM Console",
                 username = "admin-root",
-                passwordPlain = "aW7#kL9\$vP3@mX8!zQ",
                 url = "https://aws.amazon.com/console",
                 isPasskey = true,
                 passkeyRpId = "aws.amazon.com",
@@ -563,7 +570,6 @@ class FakeVaultRepository @Inject constructor() : VaultRepository {
                 id = "entry_recycled_1",
                 title = "Legacy Redis Cache Server",
                 username = "redis-cluster-admin",
-                passwordPlain = "rEdIs#99!Temp",
                 url = "redis://192.168.1.120:6379",
                 isPasskey = false,
                 category = EntryCategory.LOGIN,

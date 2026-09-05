@@ -122,6 +122,8 @@ fun EntryDetailScreen(
         onToggleCustomFieldVisibility = viewModel::toggleCustomFieldVisibility,
         onExportAttachment = viewModel::exportAttachment,
         onRollbackRevision = viewModel::rollbackToRevision,
+        onPrepareRevisionDiff = viewModel::prepareRevisionDiff,
+        onClearRevisionDiff = viewModel::clearRevisionDiff,
         onShowMessage = viewModel::showMessage,
         onCopyPassword = viewModel::copyPassword,
         onCopyUsername = viewModel::copyUsername,
@@ -144,8 +146,10 @@ fun EntryDetailContent(
     onToggleCustomFieldVisibility: (String) -> Unit,
     onExportAttachment: (UiAttachment) -> Unit,
     onRollbackRevision: (UiEntryRevision) -> Unit,
+    onPrepareRevisionDiff: (String) -> Unit = {},
+    onClearRevisionDiff: () -> Unit = {},
     onShowMessage: (UiMessage) -> Unit,
-    onCopyPassword: (String, String) -> Unit = { _, _ -> },
+    onCopyPassword: (String) -> Unit = { _ -> },
     onCopyUsername: (String, String) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier
 ) {
@@ -275,7 +279,7 @@ fun EntryDetailContent(
                         icon = Icons.Default.Key,
                         label = stringResource(R.string.detail_btn_copy_pwd),
                         modifier = Modifier.weight(1f),
-                        onClick = { onCopyPassword(entry.title, entry.passwordPlain) }
+                        onClick = { onCopyPassword(entry.title) }
                     )
                 }
 
@@ -334,13 +338,13 @@ fun EntryDetailContent(
                             ) {
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
-                                        text = stringResource(R.string.detail_password_label, entry.passwordPlain.length),
+                                        text = stringResource(R.string.detail_password_label),
                                         style = MaterialTheme.typography.labelMedium,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                     Spacer(modifier = Modifier.height(4.dp))
                                     Text(
-                                        text = if (uiState.isPasswordVisible) entry.passwordPlain else entry.passwordMasked,
+                                        text = if (uiState.isPasswordVisible) uiState.revealedPassword.orEmpty() else entry.passwordMasked,
                                         style = MonospacePasswordStyle.copy(
                                             color = MaterialTheme.colorScheme.onSurface,
                                             fontSize = 17.sp
@@ -356,7 +360,7 @@ fun EntryDetailContent(
                                             modifier = Modifier.size(20.dp)
                                         )
                                     }
-                                    IconButton(onClick = { onCopyPassword(entry.title, entry.passwordPlain) }) {
+                                    IconButton(onClick = { onCopyPassword(entry.title) }) {
                                         Icon(
                                             imageVector = Icons.Default.ContentCopy,
                                             contentDescription = stringResource(R.string.cd_copy_password),
@@ -634,7 +638,7 @@ fun EntryDetailContent(
                                                 color = MaterialTheme.colorScheme.onSurface
                                             )
                                             Text(
-                                                text = stringResource(R.string.detail_revision_meta, rev.modifiedAt, rev.passwordPlain.take(3)),
+                                                text = stringResource(R.string.detail_revision_meta, rev.modifiedAt),
                                                 style = MaterialTheme.typography.labelSmall,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                                             )
@@ -718,11 +722,17 @@ fun EntryDetailContent(
 
     // 版本历史差异对比对话框 (Visual Diff)
     revisionToDiff?.let { rev ->
+        LaunchedEffect(rev.id) { onPrepareRevisionDiff(rev.id) }
         entry?.let { current ->
             RevisionVisualDiffDialog(
                 currentEntry = current,
                 revision = rev,
-                onDismiss = { revisionToDiff = null },
+                currentPassword = uiState.revealedPassword.orEmpty(),
+                revisionPassword = uiState.revealedRevisionPasswords[rev.id].orEmpty(),
+                onDismiss = {
+                    onClearRevisionDiff()
+                    revisionToDiff = null
+                },
                 onRollback = {
                     onRollbackRevision(rev)
                     revisionToDiff = null

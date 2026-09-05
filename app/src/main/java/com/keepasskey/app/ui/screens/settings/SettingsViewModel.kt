@@ -41,6 +41,9 @@ class SettingsViewModel @Inject constructor(
         private const val HEALTH_PENALTY_REUSED = 10
         private const val HEALTH_PENALTY_EXPIRED = 15
 
+        // M2 整改：固定长度掩码，不随真实凭据长度变化
+        private const val FIXED_PASSWORD_MASK = "••••••••••••"
+
         // 标记当前应用进程生命周期内是否已执行过冷启动同步检测
         // 当软件被彻底杀死重启时，该静态字段重新变为 false，从而再次自动触发云端同步
         @Volatile
@@ -160,16 +163,18 @@ class SettingsViewModel @Inject constructor(
 
     private data class SyncUiState(
         val provider: CloudSyncProvider = CloudSyncProvider.WEBDAV,
-        val webdavUrl: String = "https://cloud.example.com/remote.php/dav/files/user/",
-        val webdavUsername: String = "vault_master",
-        val webdavPassword: String = "mypassword123",
-        val webdavRemotePath: String = "/Passkeys/keepasskey.kdbx",
-        val s3Endpoint: String = "https://<account_id>.r2.cloudflarestorage.com",
-        val s3Bucket: String = "my-secure-vault",
+        // M2 整改：默认值一律空串，杜绝示例凭据（mypassword123 / AKIA 示例密钥对）
+        // 被静默保存为真实云端凭据
+        val webdavUrl: String = "",
+        val webdavUsername: String = "",
+        val webdavPassword: String = "",
+        val webdavRemotePath: String = "/keepasskey.kdbx",
+        val s3Endpoint: String = "",
+        val s3Bucket: String = "",
         val s3Region: String = "auto",
-        val s3AccessKey: String = "AKIAIOSFODNN7EXAMPLE",
-        val s3SecretKey: String = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
-        val s3ObjectKey: String = "passwords/master_vault.kdbx",
+        val s3AccessKey: String = "",
+        val s3SecretKey: String = "",
+        val s3ObjectKey: String = "keepasskey.kdbx",
         val autoSyncEnabled: Boolean = true,
         val wifiOnlySync: Boolean = true,
         val isSyncing: Boolean = false,
@@ -237,14 +242,16 @@ class SettingsViewModel @Inject constructor(
             webdavUrl = syncState.webdavUrl,
             webdavUsername = syncState.webdavUsername,
             webdavPassword = syncState.webdavPassword,
-            webdavPasswordMasked = "•".repeat(syncState.webdavPassword.length.coerceAtLeast(8)),
+            // M2 整改：掩码采用固定长度，杜绝通过掩码长度推断真实密码长度
+            webdavPasswordMasked = FIXED_PASSWORD_MASK,
             webdavRemotePath = syncState.webdavRemotePath,
             s3Endpoint = syncState.s3Endpoint,
             s3Bucket = syncState.s3Bucket,
             s3Region = syncState.s3Region,
             s3AccessKey = syncState.s3AccessKey,
             s3SecretKey = syncState.s3SecretKey,
-            s3SecretKeyMasked = "•".repeat(syncState.s3SecretKey.length.coerceAtLeast(16)),
+            // M2 整改：掩码采用固定长度，杜绝通过掩码长度推断真实密钥长度
+            s3SecretKeyMasked = FIXED_PASSWORD_MASK,
             s3ObjectKey = syncState.s3ObjectKey,
             autoSyncEnabled = syncState.autoSyncEnabled,
             wifiOnlySync = syncState.wifiOnlySync,

@@ -37,14 +37,14 @@ data class UiAttachment(
 )
 
 /**
- * 条目历史修改快照版本
+ * 条目历史修改快照版本。
+ * M1 整改：不再携带密码明文（passwordPlain），历史密码须经仓库按需单条解密。
  */
 data class UiEntryRevision(
     val id: String,
     val modifiedAt: String,
     val summary: String,
     val username: String,
-    val passwordPlain: String,
     val notes: String = ""
 )
 
@@ -64,14 +64,17 @@ data class VaultDatabaseInfo(
 )
 
 /**
- * 界面预览与交互使用的凭据数据实体
+ * 界面预览与交互使用的凭据数据实体。
+ *
+ * M1 整改（CWE-316）：不再携带密码明文（passwordPlain）——列表/详情快照整体驻留 StateFlow，
+ * 明文驻留会使堆转储可读全库密码；密码仅在用户显式查看/复制时经
+ * [com.keepasskey.app.data.repository.VaultRepository.getEntryPassword] 按需单条解密。
  */
 data class UiVaultEntry(
     val id: String,
     val title: String,
     val username: String,
     val passwordMasked: String = "••••••••••••••••",
-    val passwordPlain: String = "k9#mP!2\$zQ8&vL5@wR",
     val url: String,
     val isPasskey: Boolean = false,
     val passkeyRpId: String? = null,

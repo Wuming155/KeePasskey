@@ -111,7 +111,6 @@ class RealVaultRepositoryTest {
             id = initialEntry.id.toHexString(),
             title = "Updated New Title",
             username = "updated_user",
-            passwordPlain = "brand_new_secret_pwd!",
             url = "https://updated.example.com",
             notes = "Updated note content",
             customFields = listOf(
@@ -119,7 +118,8 @@ class RealVaultRepositoryTest {
             )
         )
 
-        repository.saveEntry(updateUiEntry)
+        // M1 整改：密码以独立参数显式提交
+        repository.saveEntry(updateUiEntry, passwordChars = "brand_new_secret_pwd!".toCharArray())
 
         // 验证内存与领域模型
         val updatedDb = session.databaseFlow.first()!!
@@ -256,10 +256,9 @@ class RealVaultRepositoryTest {
             id = KdbxUuid.random().toHexString(),
             title = "Item to recycle",
             username = "user1",
-            passwordPlain = "pass1",
             url = "https://example.com"
         )
-        repository.saveEntry(newEntry)
+        repository.saveEntry(newEntry, passwordChars = "pass1".toCharArray())
 
         // 移入回收站
         repository.deleteEntry(newEntry.id)

@@ -431,6 +431,13 @@ fun UnlockContent(
                                 style = MaterialTheme.typography.bodySmall
                             )
                         }
+                        uiState.infoMessage?.let { message ->
+                            Text(
+                                text = message.resolveText(),
+                                color = MaterialTheme.colorScheme.primary,
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
                     },
                     isPasswordVisible = uiState.isPasswordVisible,
                     onToggleVisibility = onTogglePasswordVisibility,

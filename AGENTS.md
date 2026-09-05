@@ -47,10 +47,10 @@ KeePasskey 是一款使用原生 Kotlin 开发的现代化 Android 密码管理�
 - `.\gradlew.bat assembleDebug` — 编译全部模块
 - `.\gradlew.bat :app:compileDebugKotlin` — 仅快速检查 Kotlin 编译
 - `.\gradlew.bat lint` — Android Lint
-- `.\gradlew.bat test` — 单元测试（全模块 `src/test` 已就绪，`testDebugUnitTest` 可单模块执行；当前 172 个测试全绿）
+- `.\gradlew.bat test` — 单元测试（全模块 `src/test` 已就绪，`testDebugUnitTest` 可单模块执行；当前 173 个测试全绿）
 - 版本升级需整体配套：AGP ↔ Gradle ↔ Kotlin ↔ Compose BOM（Compose BOM 2026.06.00+ 要求 compileSdk 37，当前用 2026.06.01 对齐 compileSdk 36）
 
-**当前阶段状态**：**🔧 参考项目差距修复专项（`REMEDIATION_PLAN.md`）Wave 1-5 全量交付完毕（Wave 5 = 已知限界清零专项）。**
+**当前阶段状态**：**🔧 参考项目差距修复专项（`REMEDIATION_PLAN.md`）Wave 1-6 全量交付完毕（Wave 6 = 全面安全审查整改专项）。**
 原「7 阶段全量验收」表述经 2026-09-05 全量代码审计修正：对照参考项目发现 22 项问题（P0×6 / P1×7 / P2×9，含系统服务空壳响应、模拟延时同步、TOTP 假码、cipherKey 非官方派生等），已按 4 个 Wave 修复并逐波验收提交：
 
 - **Wave 1（git ed601da）KDBX 官方兼容 + crypto 底座**：cipherKey 派生修正为官方 SHA-512 截断标准（读取侧旧派生自动回退、保存自动迁移）；XML Times 修正为 .NET Ticks 编码；XML 全字段往返（Meta/AutoType/Binary-Ref/CustomData）；InnerHeader 二进制池与附件去重；类型化异常体系；CBOR/COSE 确定性编码器；Passkey 三算法签名（ES256/Ed25519/RS256 + RFC 6979）；KdfBenchmark 设备自适应基准。
@@ -58,7 +58,8 @@ KeePasskey 是一款使用原生 Kotlin 开发的现代化 Android 密码管理�
 - **Wave 3（git a45bfa5）数据层完整性**：编辑保存完整保留（history/times/tags/图标/自定义字段含 Passkey + HistoryManager 快照）；KDBX 标准库内回收站（recycleBinUuid 落库 + DeletedObject 墓碑 + previousParentGroup 还原）；TOTP 真实化（KeyUri 解析 + RFC 6238 官方向量）；健康检查真实化（HealthCheckEngine 接线 + 评分公式）；SyncCoordinator 同步全链路接线（KDBX4 随机 IV 哈希漂移防抖）；同步凭据 Keystore AES-256-GCM 加密持久化；Unlock 密码 CharArray 边界加固；allowBackup=false + dataExtractionRules；修复 parseDate Base64 含 T 误判缺陷；proguard 包级 keep 扩展。
 - **Wave 4（文档收口）**：文档如实化（本节）与存档清理。
 - **Wave 5（已知限界清零）**：① KDBX 全链路流式化——读取侧 DOM 改 SAX 流式状态机（官方 `ReadXmlStreamed` / KeePassDX `readDocumentStreamed` 对齐），写入侧改 `KdbxXmlStreamWriter` 紧凑流式写出（官方 `WriteDocument` 对齐），`HmacBlockStream` 新增流式读写（逐块「边校验边交付」），`KdbxFile.load/save` 全管线（HMAC 块流→加密流→GZip→XML）不再物化整条密文/明文/压缩数据；旧派生（SHA-256 cipherKey）识别改为首块解密探针裁决（官方与旧派生 hmacKey64 相同，头部 HMAC 无法区分）。② S3 覆写 PUT 附带 `If-Match: "<etag>"` 条件头，服务端原子校验消除 HEAD+PUT TOCTOU（不支持条件写的兼容存储自动降级为旧行为）。③ Credential Provider 链式解锁（锁库 UX v2）——锁库 Action 指向新 `CredentialUnlockActivity`，解锁成功后经 `PendingIntentHandler.setBeginGetCredentialResponse` 直接回传凭据候选，系统随即继续呈现；候选组装抽取为共享 `CredentialResponseAssembler`。④ `SecurePasswordField` 安全输入组件 + 主密码 CharArray 全链路——`UnlockUiState` 不再持有 String 明文，显示 String 仅存活于组件内部（dispose 清零），CharArray 直达 ViewModel 并在成功/异常路径显式擦除。
+- **Wave 6（安全审查整改）**：① H1 Origin/RP-ID 绑定——新增 `CallingOriginResolver`（浏览器走官方 `CallingAppInfo.getOrigin` + 包名/签名指纹特权白名单、异常 fail-closed；普通应用固定 `android:apk-key-hash:` origin，杜绝信任调用方 origin 字符串）；GET 流程 rp.id 与 origin 强绑定（浏览器 rp.id 须为 origin 可注册后缀，普通应用仅按严格包名边界匹配）；PasswordFill/PasskeyAssertion Activity 回传前二次校验；普通应用创建的 Passkey 记录 `android://<包名>` 绑定。② H2 QuickUnlock 真实化——新增 `QuickUnlockPinStore`（PBKDF2-HMAC-SHA256 120k 迭代 PIN 校验器 + 主凭据 Keystore AES-256-GCM 硬件封印），移除 `delay(300)` 空壳桩，首次使用走「登记 PIN → 完整解锁一次绑定凭据」流程。③ M1 `UiVaultEntry`/`UiEntryRevision` 移除 `passwordPlain`，新增 `getEntryPassword`/`getEntryRevisionPassword` 按需单条解密，详情/列表/编辑/回滚/对比全链路接线，`saveEntry` 密码显式参数提交。④ M2 硬编码示例凭据清零 + 掩码固定长度。⑤ L1 移除 title/notes.contains 启发式 + `isPackageMatch` 支持 android:// scheme 剥离（修复永不匹配缺陷）。⑥ L2 WebDAV PROPFIND XXE 四项加固。⑦ L3 生产 DI 切换 `RealSettingsRepository`（SharedPreferences 持久化 + 安全默认值），安全设置跨冷启动保留。⑧ L4 WebDAV authHeader 构造期立即计算（修复同步空密码认证功能失效）+ S3 AccessKey AES-256-GCM 加密落盘。
 
-**测试基线**：全工程 172 个单元测试全绿（app 65 / core 9 / crypto 34 / database 31 / sync 33）；`assembleDebug` 与 `assembleRelease`（R8 混淆）构建闭环通过。
+**测试基线**：全工程 173 个单元测试全绿（app 66 / core 9 / crypto 34 / database 31 / sync 33）；`assembleDebug` 与 `assembleRelease`（R8 混淆）构建闭环通过。
 
-**已知限界（如实记录，详见 `REMEDIATION_PLAN.md` 执行日志）**：KDBX 解析已流式化，但对象树（KdbxGroup/KdbxEntry）仍整体驻留内存（增量加载/进度 Flow 远期）；S3 条件写依赖服务端支持——AWS S3 原子生效，少数未实现 If-Match 覆写的兼容存储降级为 HEAD 预检+无条件 PUT（KDoc 注明）；Compose 框架层 TextField 仍以 String 承载输入（框架 API 限制，已收敛至 `SecurePasswordField` 单点、最短生命周期；EntryEdit/DatabasePicker/Settings 的密码框尚未接入该组件）；QuickUnlock PIN 仍为 String（4 位短数字，模拟解锁路径）。
+**已知限界（如实记录，详见 `REMEDIATION_PLAN.md` 执行日志）**：KDBX 解析已流式化，但对象树（KdbxGroup/KdbxEntry）仍整体驻留内存（增量加载/进度 Flow 远期）；S3 条件写依赖服务端支持——AWS S3 原子生效，少数未实现 If-Match 覆写的兼容存储降级为 HEAD 预检+无条件 PUT（KDoc 注明）；Compose 框架层 TextField 仍以 String 承载输入（框架 API 限制，已收敛至 `SecurePasswordField` 单点、最短生命周期；EntryEdit/DatabasePicker/Settings 的密码框尚未接入该组件）；QuickUnlock PIN 已真实校验（PBKDF2 校验器 + Keystore 封印凭据），但 PIN 输入仍为 String（4 位短数字，框架限制）；浏览器特权白名单内置 Chrome 稳定版签名指纹，浏览器证书轮换或白名单外浏览器将 fail-closed 降级为 apk-key-hash 路径（安全不放松，功能降级），需随浏览器版本更新指纹。

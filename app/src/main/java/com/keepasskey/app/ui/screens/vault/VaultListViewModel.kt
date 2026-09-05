@@ -232,8 +232,12 @@ class VaultListViewModel @Inject constructor(
     }
 
     fun copyPassword(entry: UiVaultEntry) {
-        clipboardSecurityManager?.copySensitiveText(entry.title, entry.passwordPlain)
-        userMessageFlow.update { UiMessage(R.string.vault_copy_password_done, listOf(entry.title)) }
+        // M1 整改：列表投影不携带密码明文，复制时按需单条解密
+        viewModelScope.launch {
+            val password = vaultRepository.getEntryPassword(entry.id).orEmpty()
+            clipboardSecurityManager?.copySensitiveText(entry.title, password)
+            userMessageFlow.update { UiMessage(R.string.vault_copy_password_done, listOf(entry.title)) }
+        }
     }
 
     fun copyUsername(entry: UiVaultEntry) {

@@ -120,7 +120,7 @@
     <string name="detail_btn_copy_pwd">复制密码</string>
     <string name="detail_basic_section">基础凭据</string>
     <string name="detail_username_label">用户名 / 登录邮箱</string>
-    <string name="detail_password_label">密码 (%1$d 字符)</string>
+    <string name="detail_password_label">密码</string>
     <string name="detail_totp_section">二次验证令牌 (TOTP)</string>
     <string name="detail_totp_code">实时动态验证码</string>
     <string name="detail_passkey_section">通行密钥凭据 (WebAuthn)</string>
@@ -255,7 +255,7 @@
     <string name="detail_password_copied_timeout_minutes">密码已复制，%1$d 分钟后自动清空</string>
     <string name="detail_password_copied_no_clear">密码已复制（剪贴板自动清空已关闭）</string>
     <string name="detail_attachment_tap_preview">%1$s • 点击安全预览</string>
-    <string name="detail_revision_meta">时间: %1$s • 历史密码: %2$s***</string>
+    <string name="detail_revision_meta">时间: %1$s • 历史修订快照</string>
     <string name="detail_updated_meta">更新时间: %1$s • 加密存储于 KDBX</string>
     <string name="detail_diff_compare">对比差异</string>
 
@@ -278,6 +278,10 @@
     <string name="conflict_resolved_msg">冲突解决完毕，已完成本地与云端三方合并</string>
     <string name="unlock_error_empty_password">请输入主密码以解锁</string>
     <string name="unlock_error_invalid_password">主密码错误或密钥不匹配，解锁失败</string>
+    <string name="unlock_error_pin_length">请输入 4 位数字 PIN 码</string>
+    <string name="unlock_error_pin_invalid">PIN 码错误，QuickUnlock 解锁失败</string>
+    <string name="unlock_error_quick_unavailable">QuickUnlock 不可用，请使用主密码解锁</string>
+    <string name="unlock_quick_pin_enrolled_hint">QuickUnlock PIN 已设置，请输入主密码完成一次解锁以绑定凭据</string>
     <string name="unlock_biometric_title">生物识别解锁</string>
     <string name="unlock_biometric_subtitle">请验证指纹或面容以解锁密码库</string>
     <string name="unlock_biometric_negative">使用主密码</string>

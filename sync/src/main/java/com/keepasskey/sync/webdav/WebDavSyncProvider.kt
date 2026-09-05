@@ -31,12 +31,18 @@ import javax.xml.parsers.DocumentBuilderFactory
 class WebDavSyncProvider(
     private val serverUrl: String,
     private val username: String,
-    private val passwordChars: CharArray,
+    passwordChars: CharArray,
     private val client: OkHttpClient = OkHttpClient()
 ) : SyncProvider {
 
-    private val authHeader: String by lazy {
-        Credentials.basic(username, String(passwordChars))
+    // L4 整改：Basic 认证头在构造时立即计算——调用方（SyncCoordinator）在构造返回后
+    // 会立即显式清零传入的密码 CharArray，此前的 by lazy 首请求延迟求值会在清零后
+    // 才读取密码，导致实际以空密码认证、同步必然失败。
+    private val authHeader: String
+
+    init {
+        authHeader = Credentials.basic(username, String(passwordChars))
+        passwordChars.fill('0')
     }
 
     private fun encodePath(path: String): String {
@@ -294,8 +300,16 @@ class WebDavSyncProvider(
             return ParsedPropfind("", 0L, 0L, false)
         }
         return try {
+            // L2 整改：与 KdbxXmlParser 同级的 XXE 纵深防御——禁用 DTD 与外部实体，
+            // 防御恶意/被劫持的 WebDAV 服务端返回带 XXE payload 的 PROPFIND 响应
             val factory = DocumentBuilderFactory.newInstance().apply {
                 isNamespaceAware = true
+                runCatching { setFeature("http://apache.org/xml/features/disallow-doctype-decl", true) }
+                runCatching { setFeature("http://xml.org/sax/features/external-general-entities", false) }
+                runCatching { setFeature("http://xml.org/sax/features/external-parameter-entities", false) }
+                runCatching { setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false) }
+                isXIncludeAware = false
+                isExpandEntityReferences = false
             }
             val builder = factory.newDocumentBuilder()
             val doc = builder.parse(xml.byteInputStream())

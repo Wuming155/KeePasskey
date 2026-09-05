@@ -270,7 +270,7 @@ class RealVaultRepository @Inject constructor(
         return getEntries().map { list -> list.find { it.id == id } }
     }
 
-    override suspend fun saveEntry(entry: UiVaultEntry) {
+    override suspend fun saveEntry(entry: UiVaultEntry, passwordChars: CharArray?) {
         val db = databaseSession.databaseFlow.first()
         val targetUuid = parseUuidOrNull(entry.id)
         val existing = if (targetUuid != null && db != null) {
@@ -279,10 +279,13 @@ class RealVaultRepository @Inject constructor(
 
         if (existing != null) {
             // 既有条目做合并更新：保留既有元数据与属性，更新提交字段，接入 HistoryManager
+            // M1 整改：密码仅在显式提交（passwordChars 非空）时更新，否则保留既有密码
             val mergedFields = existing.fields.toMutableMap().apply {
                 put(KdbxConstants.Fields.TITLE, ProtectedString(entry.title, isProtected = false))
                 put(KdbxConstants.Fields.USER_NAME, ProtectedString(entry.username, isProtected = false))
-                put(KdbxConstants.Fields.PASSWORD, ProtectedString(entry.passwordPlain, isProtected = true))
+                passwordChars?.let {
+                    put(KdbxConstants.Fields.PASSWORD, ProtectedString(it, isProtected = true))
+                }
                 put(KdbxConstants.Fields.URL, ProtectedString(entry.url, isProtected = false))
                 put(KdbxConstants.Fields.NOTES, ProtectedString(entry.notes, isProtected = false))
             }
@@ -317,7 +320,7 @@ class RealVaultRepository @Inject constructor(
             databaseSession.saveEntry(finalEntry)
         } else {
             // 新建条目
-            val kdbxEntry = mapUiEntryToKdbx(entry)
+            val kdbxEntry = mapUiEntryToKdbx(entry, passwordChars)
             databaseSession.saveEntry(kdbxEntry)
         }
         databaseSession.save()
@@ -493,9 +496,8 @@ class RealVaultRepository @Inject constructor(
     }
 
     private fun mapKdbxEntryToUi(entry: KdbxEntry, db: KdbxDatabase?): UiVaultEntry {
-        val passwordStr = entry.password?.readString().orEmpty()
-        val masked = if (passwordStr.isEmpty()) "" else "••••••••••••••••"
-
+        // M1 整改：不再将密码明文读入 UI 投影（全库明文驻留 StateFlow / 堆内存），
+        // 密码仅在用户显式查看/复制时经 [getEntryPassword] 按需单条解密
         val uiCustomFields = entry.customFields.map { cf ->
             UiCustomField(
                 id = "${entry.id.toHexString()}_${cf.key}",
@@ -511,7 +513,6 @@ class RealVaultRepository @Inject constructor(
                 modifiedAt = formatInstant(h.times.lastModificationTime),
                 summary = "历史修订",
                 username = h.userName,
-                passwordPlain = h.password?.readString().orEmpty(),
                 notes = h.notes
             )
         }
@@ -568,8 +569,7 @@ class RealVaultRepository @Inject constructor(
             id = entry.id.toHexString(),
             title = entry.title,
             username = entry.userName,
-            passwordPlain = passwordStr,
-            passwordMasked = masked,
+            passwordMasked = if (entry.password == null) "" else "••••••••••••••••",
             url = entry.url,
             isPasskey = passkeyData != null,
             passkeyRpId = passkeyData?.relyingPartyId,
@@ -613,11 +613,11 @@ class RealVaultRepository @Inject constructor(
         }
     }
 
-    private fun mapUiEntryToKdbx(entry: UiVaultEntry): KdbxEntry {
+    private fun mapUiEntryToKdbx(entry: UiVaultEntry, passwordChars: CharArray?): KdbxEntry {
         val fields = mutableMapOf(
             KdbxConstants.Fields.TITLE to ProtectedString(entry.title, isProtected = false),
             KdbxConstants.Fields.USER_NAME to ProtectedString(entry.username, isProtected = false),
-            KdbxConstants.Fields.PASSWORD to ProtectedString(entry.passwordPlain, isProtected = true),
+            KdbxConstants.Fields.PASSWORD to ProtectedString(passwordChars ?: CharArray(0), isProtected = true),
             KdbxConstants.Fields.URL to ProtectedString(entry.url, isProtected = false),
             KdbxConstants.Fields.NOTES to ProtectedString(entry.notes, isProtected = false)
         )
@@ -676,12 +676,28 @@ class RealVaultRepository @Inject constructor(
         }
     }
 
-    override suspend fun saveNewPasskeyEntry(data: PasskeyData): KdbxEntry {
+    override suspend fun getEntryPassword(entryId: String): String? {
+        val targetUuid = parseUuidOrNull(entryId) ?: return null
+        val currentDb = databaseSession.databaseFlow.first() ?: return null
+        val entry = currentDb.rootGroup.allEntries().firstOrNull { it.id == targetUuid }
+        return entry?.password?.readString()
+    }
+
+    override suspend fun getEntryRevisionPassword(entryId: String, revisionId: String): String? {
+        val targetUuid = parseUuidOrNull(entryId) ?: return null
+        val revisionUuid = parseUuidOrNull(revisionId) ?: return null
+        val currentDb = databaseSession.databaseFlow.first() ?: return null
+        val entry = currentDb.rootGroup.allEntries().firstOrNull { it.id == targetUuid }
+        return entry?.history?.firstOrNull { it.id == revisionUuid }?.password?.readString()
+    }
+
+    override suspend fun saveNewPasskeyEntry(data: PasskeyData, boundPackage: String?): KdbxEntry {
         val title = "${data.userName}@${data.relyingPartyId}"
+        val url = if (boundPackage.isNullOrBlank()) "https://${data.relyingPartyId}" else "android://$boundPackage"
         val fields = mapOf(
             KdbxConstants.Fields.TITLE to ProtectedString(title, isProtected = false),
             KdbxConstants.Fields.USER_NAME to ProtectedString(data.userName, isProtected = false),
-            KdbxConstants.Fields.URL to ProtectedString("https://${data.relyingPartyId}", isProtected = false)
+            KdbxConstants.Fields.URL to ProtectedString(url, isProtected = false)
         )
         val newEntry = KdbxEntry(
             id = KdbxUuid.random(),
@@ -733,9 +749,9 @@ class RealVaultRepository @Inject constructor(
 
             val matchedEntry = allEntries.firstOrNull { entry ->
                 val matchDomain = domain != null && entry.url.isNotBlank() && DomainMatcher.isDomainMatch(entry.url, domain)
-                val matchPackage = entry.title.contains(packageName, ignoreCase = true) ||
-                        entry.notes.contains(packageName, ignoreCase = true) ||
-                        (domain == null && entry.url.contains(packageName, ignoreCase = true))
+                // L1 整改：包名匹配仅走 DomainMatcher 严格点号边界（含 android:// scheme 剥离），
+                // 移除 title/notes.contains 启发式
+                val matchPackage = entry.url.isNotBlank() && DomainMatcher.isPackageMatch(entry.url, packageName)
                 (matchDomain || matchPackage) && (entry.userName == username || entry.userName.isEmpty())
             }
 

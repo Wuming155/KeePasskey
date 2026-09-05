@@ -83,11 +83,21 @@ object DomainMatcher {
     /**
      * Android 应用包名匹配逻辑。
      * 双方必须完全相等，或以点号 '.' 边界保持父子包名包含关系。
+     * L1 整改：支持剥离条目 url 中的 android:// 等 scheme 前缀，
+     * 使入库时记录为 android://<包名> 的凭据可与调用包名正确匹配。
      */
     fun isPackageMatch(entryPackageHint: String, callingPackage: String): Boolean {
-        val p1 = entryPackageHint.trim().lowercase()
+        var p1 = entryPackageHint.trim().lowercase()
         val p2 = callingPackage.trim().lowercase()
         if (p1.isEmpty() || p2.isEmpty()) return false
+
+        // 剥离 scheme 前缀（android://<包名> → <包名>），并截断路径尾部
+        val schemeIdx = p1.indexOf("://")
+        if (schemeIdx >= 0) {
+            p1 = p1.substring(schemeIdx + 3)
+            val slashIdx = p1.indexOf('/')
+            if (slashIdx >= 0) p1 = p1.substring(0, slashIdx)
+        }
 
         return p1 == p2 || p1.endsWith(".$p2") || p2.endsWith(".$p1")
     }
