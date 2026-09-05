@@ -431,4 +431,21 @@ class KdbxCompatibilityAndSecurityTest {
 
         HmacBlockStream.writeAll(encryptedPayload, outputStream, hmacKey64)
     }
+
+    /**
+     * HMAC 块尺寸上限回归（J 项整改）：读取侧单块尺寸不得超过 1 MB，
+     * 防止恶意/损坏文件以超大 blockSize 触发大块内存分配（DoS）。
+     * 构造仅含「32 字节伪 HMAC + 4 字节 blockSize(=2 MiB)」的流，
+     * 该校验在读取 blockData 之前触发，故无需有效 HMAC。
+     */
+    @Test
+    fun readAll_rejectsOversizedBlockSize() {
+        val oversized = (2 * 1024 * 1024)
+        val badStream = ByteArrayInputStream(
+            ByteArray(32) + LittleEndianUtil.intTo4Bytes(oversized)
+        )
+        assertThrows(KdbxCorruptFileException::class.java) {
+            HmacBlockStream.readAll(badStream, ByteArray(64))
+        }
+    }
 }

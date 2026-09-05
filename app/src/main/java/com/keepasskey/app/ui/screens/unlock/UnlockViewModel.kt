@@ -22,9 +22,13 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import java.nio.ByteBuffer
+import java.nio.CharBuffer
+import java.nio.charset.StandardCharsets
 import javax.inject.Inject
 
 /**
@@ -173,9 +177,12 @@ class UnlockViewModel @Inject constructor(
     }
 
     /**
-     * 主密码解锁
+     * 主密码解锁。
+     *
+     * @param activity 宿主 Activity。仅用于「首次登记生物识别凭据」时唤起 BiometricPrompt；
+     *   为 null 时登记跳过（fail-closed），**不影响本次解锁**。
      */
-    fun unlock() {
+    fun unlock(activity: FragmentActivity? = null) {
         viewModelScope.launch {
             // P1-10：已选择密钥文件时空密码合法（仅密钥文件解锁，对齐官方 KeePass
             // 解锁框对空密码不添加密码分量的语义）；密码与密钥文件均缺失才拦截
@@ -196,8 +203,8 @@ class UnlockViewModel @Inject constructor(
                         // QuickUnlock 首次登记流程：以本次解锁的真实主密码封印 PIN 保护凭据
                         // （复合密钥库跳过——守卫依赖 keyFileData，须在擦除密钥文件之前调用）
                         bindQuickUnlockCredentialIfPending(passwordChars)
-                        // 若开启生物识别，自动保存经 Keystore 硬件加密的凭据 (CharArray 版本并及时清零)
-                        persistBiometricCredentialIfEnabled(passwordChars)
+                        // 生物识别凭据登记：必须在擦除主密码之前完成（登记需要明文主密码）
+                        requestBiometricEnrollment(activity, passwordChars)
                         // 解锁成功后立即擦除驻留的密钥文件字节（会话已克隆缓存供保存使用）
                         keyFileData?.fill(0)
                         keyFileData = null
@@ -228,14 +235,27 @@ class UnlockViewModel @Inject constructor(
     }
 
     /**
-     * 若开启生物识别，自动保存经 Keystore 硬件加密的凭据。
+     * 若开启生物识别且尚未登记，请求一次 BiometricPrompt 授权后封印主凭据。
+     *
+     * 关键约束（F 项整改）：生物识别硬件密钥以
+     * `setUserAuthenticationParameters(0, AUTH_BIOMETRIC_STRONG)` 生成——**每次使用**（含加密）
+     * 都必须先取得一次 Class 3 授权。原实现直接对未授权 Cipher 调 `doFinal()`，
+     * 真机必然抛 `UserNotAuthenticatedException` 并被 `catch (ignored)` 吞掉，
+     * 导致「生物识别开关已开、凭据从未入库、下次冷启动无生物入口」的静默功能失效
+     * （与 Wave 11 H4 QuickUnlock 同构故障）。
+     * 故本方法改为：**先弹 BiometricPrompt 取得授权 Cipher，再在成功回调内执行封印**。
      *
      * 敏感数据设计考量与边界说明 (Wave 3-E P2-18)：
-     * 当前 Compose 输入控件 (TextField) 与 UiState 仍存在 String 边界妥协（由于 Compose 官方 API 设计限制）；
-     * 本方法改造为消费 [CharArray]，采用 CharBuffer 转换为临时 UTF-8 字节并在 finally 块中立即显式清零擦除，
+     * 消费 [CharArray]，经 CharBuffer 转为临时 UTF-8 字节并在 finally 块中立即显式清零，
      * 杜绝密码以持久明文字符串穿越硬件加密管线。
+     *
+     * 失败语义：登记失败（用户取消 / 硬件缺失 / 无宿主 Activity）一律 fail-safe——
+     * 仅留痕日志，**不影响本次主密码解锁**。
      */
-    private suspend fun persistBiometricCredentialIfEnabled(passwordChars: CharArray) {
+    private suspend fun requestBiometricEnrollment(
+        activity: FragmentActivity?,
+        passwordChars: CharArray
+    ) {
         // 修复虚假开关整改：复合密钥库（主密码 + 密钥文件）的密钥文件因子无法经
         // Keystore 封印还原，持久化凭据将永远无法独立完成解锁——直接不保存，fail-safe
         if (keyFileData != null) return
@@ -244,17 +264,49 @@ class UnlockViewModel @Inject constructor(
         val authManager = biometricAuthManager ?: return
         val settings = settingsRepository.getSettings().first()
         if (!settings.biometricEnabled) return
+        // 已登记过则不再重复弹窗（仅首次 + 凭据被清除后重新登记）
+        if (storage.hasEncryptedCredential(dbId)) return
 
-        try {
+        if (activity == null) {
+            debugLog.warn(TAG, "生物识别凭据未登记：缺少宿主 Activity，本次跳过（fail-closed，不影响解锁）")
+            return
+        }
+
+        val encrypted = try {
             val cipher = authManager.prepareEncryptCipher(dbId)
-            val charBuffer = java.nio.CharBuffer.wrap(passwordChars)
-            val byteBuffer = java.nio.charset.StandardCharsets.UTF_8.encode(charBuffer)
+            val charBuffer = CharBuffer.wrap(passwordChars)
+            val byteBuffer = StandardCharsets.UTF_8.encode(charBuffer)
             val bytes = ByteArray(byteBuffer.remaining())
             byteBuffer.get(bytes)
             try {
-                val encrypted = cipher.doFinal(bytes)
-                storage.saveEncryptedCredential(dbId, cipher.iv, encrypted)
-                _uiState.update { it.copy(isQuickUnlockAvailable = true) }
+                val authResult = awaitBiometricAuth(
+                    authManager = authManager,
+                    activity = activity,
+                    cipher = cipher
+                )
+                when (authResult) {
+                    is BiometricResult.Success -> {
+                        val authedCipher = authResult.cipher
+                        if (authedCipher == null) {
+                            debugLog.warn(TAG, "生物识别登记未取得授权 Cipher，跳过封印")
+                            null
+                        } else {
+                            authedCipher.doFinal(bytes)
+                        }
+                    }
+                    is BiometricResult.Cancelled -> {
+                        debugLog.info(TAG, "用户取消生物识别登记")
+                        null
+                    }
+                    is BiometricResult.Error -> {
+                        debugLog.warn(TAG, "生物识别登记失败: ${authResult.errString}")
+                        null
+                    }
+                    is BiometricResult.Failed -> {
+                        debugLog.warn(TAG, "生物识别登记未通过")
+                        null
+                    }
+                }?.let { cipher.iv to it }
             } finally {
                 bytes.fill(0)
                 byteBuffer.clear()
@@ -262,9 +314,41 @@ class UnlockViewModel @Inject constructor(
                     byteBuffer.array().fill(0)
                 }
             }
-        } catch (ignored: Exception) {
-            // 某些设备在缺少锁屏 PIN/生物识别时跳过存储
+        } catch (e: Exception) {
+            // 禁止静默失败：任何异常一律留痕，绝不 catch(ignored)
+            debugLog.warn(TAG, "生物识别凭据登记异常: ${e.javaClass.simpleName} - ${e.message}")
+            null
         }
+
+        if (encrypted != null) {
+            storage.saveEncryptedCredential(dbId, encrypted.first, encrypted.second)
+            _uiState.update { it.copy(isQuickUnlockAvailable = true) }
+            debugLog.info(TAG, "生物识别凭据登记成功")
+        }
+    }
+
+    /**
+     * 唤起 BiometricPrompt 并挂起等待一次性结果。
+     *
+     * 超时保护：宿主 Activity 正在销毁等极端情形下 BiometricPrompt 可能不回调，
+     * 超时后按失败处理并解除挂起，杜绝协程永久悬挂导致解锁流程卡死。
+     */
+    private suspend fun awaitBiometricAuth(
+        authManager: BiometricAuthManager,
+        activity: FragmentActivity,
+        cipher: javax.crypto.Cipher
+    ): BiometricResult {
+        val deferred = CompletableDeferred<BiometricResult>()
+        authManager.authenticate(
+            activity = activity,
+            title = activity.getString(R.string.unlock_biometric_enroll_title),
+            subtitle = activity.getString(R.string.unlock_biometric_enroll_subtitle),
+            negativeButtonText = activity.getString(R.string.unlock_biometric_enroll_negative),
+            cipher = cipher
+        ) { result -> deferred.complete(result) }
+
+        return withTimeoutOrNull(BIOMETRIC_ENROLL_TIMEOUT_MS) { deferred.await() }
+            ?: BiometricResult.Error(-1, "生物识别登记超时")
     }
 
     fun unlockWithQuickUnlock() {
@@ -443,9 +527,14 @@ class UnlockViewModel @Inject constructor(
                                             _events.emit(UnlockEvent.UnlockSuccess)
                                         }
                                         is KdbxResult.Failure -> {
+                                            // 生物识别已授权且密文成功解密，却解库失败：
+                                            // 极可能是主密码已变更导致入库凭据陈旧（死循环态）。
+                                            // 清除陈旧凭据，下次主密码解锁将自动重新登记。
+                                            storage.clearCredential(dbId)
                                             _uiState.update {
                                                 it.copy(
                                                     isLoading = false,
+                                                    isQuickUnlockAvailable = false,
                                                     errorMessage = UiMessage(R.string.unlock_error_invalid_password)
                                                 )
                                             }
@@ -520,5 +609,7 @@ class UnlockViewModel @Inject constructor(
     companion object {
         private const val TAG = "Unlock"
         private const val QUICK_UNLOCK_PIN_LENGTH = 4
+        // 生物识别登记弹窗挂起等待上限：超时按失败处理，避免协程永久悬挂卡死解锁流程
+        private const val BIOMETRIC_ENROLL_TIMEOUT_MS = 60_000L
     }
 }

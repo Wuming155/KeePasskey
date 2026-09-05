@@ -35,6 +35,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.time.Instant
 import java.time.ZoneId
@@ -235,12 +236,12 @@ class RealVaultRepository @Inject constructor(
         name: String,
         path: String,
         syncType: String
-    ): com.keepasskey.core.result.KdbxResult<Unit> {
+    ): com.keepasskey.core.result.KdbxResult<Unit> = withContext(Dispatchers.IO) {
         val externalFile = File(path)
         val filesDir = context.filesDir
-            ?: return com.keepasskey.core.result.KdbxResult.Failure(IllegalStateException("No filesDir"), "内部存储目录不可用")
+            ?: return@withContext com.keepasskey.core.result.KdbxResult.Failure(IllegalStateException("No filesDir"), "内部存储目录不可用")
         val destFile = File(filesDir, externalFile.name)
-        return try {
+        try {
             if (externalFile.exists() && externalFile.absolutePath != destFile.absolutePath) {
                 externalFile.copyTo(destFile, overwrite = true)
             }

@@ -22,6 +22,13 @@ object HmacBlockStream {
 
     const val DEFAULT_BLOCK_SIZE = 1024 * 1024 // 1 MB
 
+    /**
+     * 读取侧单块尺寸安全上限：等于写入侧块尺寸（官方 KeePass 2.61.1 恒以 1 MB 分块）。
+     * 既防止恶意/损坏文件以超大 blockSize 触发大块内存分配（DoS），
+     * 也确保与写入侧契约一致——我们永不写出超过 1 MB 的块。
+     */
+    const val MAX_READ_BLOCK_SIZE = DEFAULT_BLOCK_SIZE
+
     /// HMAC-SHA256 签名长度（字节）
     const val HMAC_SIZE = 32
 
@@ -92,6 +99,9 @@ object HmacBlockStream {
             val blockSize = LittleEndianUtil.readInt(inputStream)
             if (blockSize < 0) {
                 throw KdbxCorruptFileException("非法的负数块大小: $blockSize")
+            }
+            if (blockSize > HmacBlockStream.MAX_READ_BLOCK_SIZE) {
+                throw KdbxCorruptFileException("HMAC 块大小超出安全上限: $blockSize（上限 ${HmacBlockStream.MAX_READ_BLOCK_SIZE}）")
             }
 
             val blockKey = HmacBlockStream.computeBlockKey(blockIndex, hmacKey64)
@@ -194,6 +204,9 @@ class HmacBlockInputStream(
         val blockSize = LittleEndianUtil.readInt(source)
         if (blockSize < 0) {
             throw KdbxCorruptFileException("非法的负数块大小: $blockSize")
+        }
+        if (blockSize > HmacBlockStream.MAX_READ_BLOCK_SIZE) {
+            throw KdbxCorruptFileException("HMAC 块大小超出安全上限: $blockSize（上限 ${HmacBlockStream.MAX_READ_BLOCK_SIZE}）")
         }
 
         val blockKey = HmacBlockStream.computeBlockKey(blockIndex, hmacKey64)

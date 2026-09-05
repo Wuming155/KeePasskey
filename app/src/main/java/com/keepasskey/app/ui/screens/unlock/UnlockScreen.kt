@@ -160,7 +160,7 @@ fun UnlockScreen(
         onClearKeyFile = viewModel::clearKeyFile,
         onToggleReadOnly = viewModel::onToggleReadOnly,
         onSwitchMode = viewModel::switchUnlockMode,
-        onUnlock = viewModel::unlock,
+        onUnlock = { viewModel.unlock(activity) },
         onQuickUnlock = viewModel::unlockWithQuickUnlock,
         onBiometricUnlock = { viewModel.unlockWithBiometric(activity) },
         onNavigateToDatabasePicker = onNavigateToDatabasePicker,

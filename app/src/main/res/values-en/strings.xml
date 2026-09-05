@@ -293,6 +293,9 @@
     <string name="unlock_biometric_title">Biometric Unlock</string>
     <string name="unlock_biometric_subtitle">Verify your fingerprint or face to unlock</string>
     <string name="unlock_biometric_negative">Use Master Password</string>
+    <string name="unlock_biometric_enroll_title">Enable Biometric Unlock</string>
+    <string name="unlock_biometric_enroll_subtitle">Verify your fingerprint or face to securely store the passwordless unlock credential</string>
+    <string name="unlock_biometric_enroll_negative">Not now</string>
     <string name="sec_biometric_auth_failed">Biometric authentication failed or was cancelled</string>
     <string name="sec_biometric_key_invalidated">Biometric credentials changed, security key invalidated. Please use master password.</string>
 <string name="edit_scan_totp_qr">Open camera to scan TOTP QR code</string>

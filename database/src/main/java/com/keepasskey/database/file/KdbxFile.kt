@@ -31,9 +31,9 @@ import java.util.zip.GZIPOutputStream
  *
  * 遵循敏感数据铁律：主密码与派生密钥在完成变换后立即清零，绝不驻留 GC 堆。
  * 遵循官方标准（KeePass 2.61.1 §4 与 §8.1 / KeePassDX §5）：
- * - cipherKey: SHA-512(masterSeed ‖ transformedKey)[0..31]
+ * - cipherKey: SHA-256(masterSeed ‖ transformedKey)
  * - hmacKey64: SHA-512(masterSeed ‖ transformedKey ‖ 0x01)
- * - 兼顾读取历史旧派生产物，保存自动迁移至官方标准。
+ * - 兼顾读取历史旧派生产物（SHA-512 截断公式），保存自动迁移至官方标准。
  *
  * 全链路流式管线（对应官方 Read/Write 流栈：HmacBlockStream → Cipher → GZip → XML 状态机）：
  * 读写均不再将整条密文/明文/压缩数据物化为字节数组，大库加载与保存的峰值内存
@@ -388,7 +388,7 @@ object KdbxFile {
             outputStream.write(headerHmac)
             Arrays.fill(headerHmacKey, 0.toByte())
 
-            // 6. 流式加密写出负载：内层 Header（加密不压缩）→ GZip → 流式 XML
+            // 6. 流式加密写出负载：内层 Header ‖ XML 一同经 GZip 压缩后写入加密流，再由 HMAC 块流封装
             savePayload(outputStream, updatedHeader, innerHeader, innerCipher, updatedDatabase, cipherKey, hmacKey64)
             outputStream.flush()
         } finally {

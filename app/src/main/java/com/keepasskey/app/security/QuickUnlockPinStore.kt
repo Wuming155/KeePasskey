@@ -115,12 +115,18 @@ class QuickUnlockPinStore @Inject constructor(
         } catch (_: Exception) {
             return null
         }
+        var decoded: java.nio.CharBuffer? = null
         return try {
             // ByteBuffer 直接解码为 CharArray，杜绝「String 中转」造成的主密码不可变驻留
-            val decoded = StandardCharsets.UTF_8.decode(java.nio.ByteBuffer.wrap(plainBytes))
-            CharArray(decoded.remaining()).also { decoded.get(it) }
+            decoded = StandardCharsets.UTF_8.decode(java.nio.ByteBuffer.wrap(plainBytes))
+            val chars = CharArray(decoded.remaining())
+            decoded.get(chars)
+            chars
         } finally {
             plainBytes.fill(0)
+            if (decoded != null && decoded.hasArray()) {
+                java.util.Arrays.fill(decoded.array(), '0')
+            }
         }
     }
 

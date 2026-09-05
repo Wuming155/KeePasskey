@@ -103,6 +103,11 @@ class KeystoreManager @Inject constructor(
             .setUserAuthenticationRequired(requireUserAuth)
             .setInvalidatedByBiometricEnrollment(invalidateOnBiometricEnrollment)
 
+        if (requireUserAuth) {
+            // API 30+ 显式约束为 Class 3 强生物识别验证（per-operation，不接受锁屏密码/PIN/图案降级替代）
+            specBuilder.setUserAuthenticationParameters(0, KeyProperties.AUTH_BIOMETRIC_STRONG)
+        }
+
         if (strongBox) {
             specBuilder.setIsStrongBoxBacked(true)
         }

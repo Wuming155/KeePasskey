@@ -293,6 +293,9 @@
     <string name="unlock_biometric_title">生物识别解锁</string>
     <string name="unlock_biometric_subtitle">请验证指纹或面容以解锁密码库</string>
     <string name="unlock_biometric_negative">使用主密码</string>
+    <string name="unlock_biometric_enroll_title">启用生物识别解锁</string>
+    <string name="unlock_biometric_enroll_subtitle">请验证指纹或面容，以安全保存免密解锁凭据</string>
+    <string name="unlock_biometric_enroll_negative">暂不启用</string>
     <string name="sec_biometric_auth_failed">生物识别验证未通过或已取消</string>
     <string name="sec_biometric_key_invalidated">系统生物特征发生变更，安全密钥已失效，请使用主密码重新登录</string>
 <string name="edit_scan_totp_qr">呼起相机扫描 TOTP 二维码</string>
