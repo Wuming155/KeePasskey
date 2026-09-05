@@ -126,6 +126,7 @@ class RealVaultRepository @Inject constructor(
 
     override suspend fun unlockActiveDatabase(
         passwordChars: CharArray,
+        keyFileData: ByteArray?,
         readOnly: Boolean
     ): com.keepasskey.core.result.KdbxResult<Unit> {
         val filesDir = context.filesDir ?: return com.keepasskey.core.result.KdbxResult.Failure(
@@ -141,6 +142,14 @@ class RealVaultRepository @Inject constructor(
 
         val targetFile = File(activeDb.path)
         if (!targetFile.exists()) {
+            // 修复虚假开关整改：携带密钥文件说明意图是打开既有复合密钥库，
+            // 绝不允许静默降级为「用该密码新建无密钥文件保护库」
+            if (keyFileData != null) {
+                return com.keepasskey.core.result.KdbxResult.Failure(
+                    IllegalArgumentException("数据库文件不存在: ${targetFile.absolutePath}"),
+                    "数据库文件不存在，无法以复合密钥打开"
+                )
+            }
             // 文件尚不存在时初始化创建
             val createResult = databaseSession.create(
                 file = targetFile,
@@ -152,7 +161,9 @@ class RealVaultRepository @Inject constructor(
             return createResult
         }
 
-        val result = databaseSession.open(targetFile, passwordChars, readOnly = readOnly)
+        // 修复虚假开关整改：密钥文件字节透传至会话（复合密钥「主密码 + 密钥文件」），
+        // 成功后会话克隆缓存 keyFileCache 供后续 save() 使用，调用方持有副本负责擦除
+        val result = databaseSession.open(targetFile, passwordChars, keyFileData, readOnly)
         if (result is com.keepasskey.core.result.KdbxResult.Success) {
             refreshDatabases()
         }

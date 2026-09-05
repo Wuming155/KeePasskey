@@ -183,13 +183,11 @@ class KdbxCompatibilityAndSecurityTest {
         KdbxXmlSerializer(innerCipher).serialize(xmlBos, db)
         val xmlBytes = xmlBos.toByteArray()
 
-        val compressedBos = ByteArrayOutputStream()
-        GZIPOutputStream(compressedBos).use { it.write(xmlBytes) }
-        val compressedXml = compressedBos.toByteArray()
-
         val payloadBos = ByteArrayOutputStream()
-        innerHeader.serialize(payloadBos)
-        payloadBos.write(compressedXml)
+        GZIPOutputStream(payloadBos).use { gzip ->
+            innerHeader.serialize(gzip)
+            gzip.write(xmlBytes)
+        }
         val payload = payloadBos.toByteArray()
 
         val header = db.header

@@ -69,6 +69,13 @@ class UnlockViewModel @Inject constructor(
      */
     private var passwordChars = CharArray(0)
 
+    /**
+     * 密钥文件原始字节（修复虚假开关整改）：复合密钥「主密码 + 密钥文件」的第二因子。
+     * 仅以 ByteArray 驻留 ViewModel 内部（绝不进入 UiState/StateFlow/String），
+     * 取消选择 / 解锁成功 / ViewModel 销毁时显式清零；会话成功后会自行克隆缓存供保存使用。
+     */
+    private var keyFileData: ByteArray? = null
+
     init {
         viewModelScope.launch {
             vaultRepository.getDatabases().collect { databases ->
@@ -125,8 +132,35 @@ class UnlockViewModel @Inject constructor(
         _uiState.update { it.copy(isPasswordVisible = !it.isPasswordVisible) }
     }
 
-    fun onToggleKeyFile() {
-        _uiState.update { it.copy(hasKeyFile = !it.hasKeyFile) }
+    /**
+     * 密钥文件选择结果上行（来自解锁页 SAF 选择器，修复虚假开关整改）。
+     * 字节在本回调内即被复制持有，调用方（Screen）侧临时数组用毕自行清零。
+     */
+    fun onKeyFileSelected(data: ByteArray, fileName: String) {
+        keyFileData?.fill(0)
+        keyFileData = data.copyOf()
+        _uiState.update { it.copy(hasKeyFile = true, keyFileName = fileName) }
+    }
+
+    /**
+     * 取消密钥文件：擦除字节并复位开关状态
+     */
+    fun clearKeyFile() {
+        keyFileData?.fill(0)
+        keyFileData = null
+        _uiState.update { it.copy(hasKeyFile = false, keyFileName = "") }
+    }
+
+    /**
+     * 密钥文件读取失败（SAF 流打开/读取异常或超出大小上限）：
+     * 显式反馈用户，绝不静默忽略（禁止静默失败纪律）
+     */
+    fun onKeyFileReadFailed() {
+        keyFileData?.fill(0)
+        keyFileData = null
+        _uiState.update {
+            it.copy(hasKeyFile = false, keyFileName = "", errorMessage = UiMessage(R.string.unlock_keyfile_read_failed))
+        }
     }
 
     /** H4-只读整改：切换「只读打开」——开启后本次会话写盘硬拒绝 */
@@ -150,17 +184,25 @@ class UnlockViewModel @Inject constructor(
             _uiState.update { it.copy(isLoading = true, errorMessage = null) }
 
             try {
-                when (val result = vaultRepository.unlockActiveDatabase(passwordChars, readOnly = _uiState.value.openReadOnly)) {
+                when (val result = vaultRepository.unlockActiveDatabase(
+                    passwordChars,
+                    keyFileData = keyFileData,
+                    readOnly = _uiState.value.openReadOnly
+                )) {
                     is KdbxResult.Success -> {
                         debugLog.info(TAG, "主密码解锁成功")
                         // QuickUnlock 首次登记流程：以本次解锁的真实主密码封印 PIN 保护凭据
+                        // （复合密钥库跳过——守卫依赖 keyFileData，须在擦除密钥文件之前调用）
                         bindQuickUnlockCredentialIfPending(passwordChars)
                         // 若开启生物识别，自动保存经 Keystore 硬件加密的凭据 (CharArray 版本并及时清零)
                         persistBiometricCredentialIfEnabled(passwordChars)
+                        // 解锁成功后立即擦除驻留的密钥文件字节（会话已克隆缓存供保存使用）
+                        keyFileData?.fill(0)
+                        keyFileData = null
                         // 解锁成功后立即擦除驻留的主密码字符数组
                         passwordChars.fill('0')
                         passwordChars = CharArray(0)
-                        _uiState.update { it.copy(isLoading = false) }
+                        _uiState.update { it.copy(isLoading = false, hasKeyFile = false, keyFileName = "") }
                         _events.emit(UnlockEvent.UnlockSuccess)
                     }
                     is KdbxResult.Failure -> {
@@ -192,6 +234,9 @@ class UnlockViewModel @Inject constructor(
      * 杜绝密码以持久明文字符串穿越硬件加密管线。
      */
     private suspend fun persistBiometricCredentialIfEnabled(passwordChars: CharArray) {
+        // 修复虚假开关整改：复合密钥库（主密码 + 密钥文件）的密钥文件因子无法经
+        // Keystore 封印还原，持久化凭据将永远无法独立完成解锁——直接不保存，fail-safe
+        if (keyFileData != null) return
         val dbId = activeDatabaseId ?: return
         val storage = biometricCredentialStorage ?: return
         val authManager = biometricAuthManager ?: return
@@ -313,6 +358,8 @@ class UnlockViewModel @Inject constructor(
      * 则将本次主密码封印至 [QuickUnlockPinStore]（Keystore AES-256-GCM 硬件保护），随即清零暂存 PIN。
      */
     private suspend fun bindQuickUnlockCredentialIfPending(masterPassword: CharArray) {
+        // 修复虚假开关整改：复合密钥库的密钥文件因子无法被 PIN 封印机制还原，跳过封印
+        if (keyFileData != null) return
         val pending = pendingQuickUnlockPin ?: return
         val store = quickUnlockPinStore ?: return
         val dbId = activeDatabaseId ?: return
@@ -454,6 +501,15 @@ class UnlockViewModel @Inject constructor(
                 )
             }
         }
+    }
+
+    override fun onCleared() {
+        // 离开解锁页：显式擦除驻留的敏感字节（主密码与密钥文件）
+        passwordChars.fill('0')
+        passwordChars = CharArray(0)
+        keyFileData?.fill(0)
+        keyFileData = null
+        super.onCleared()
     }
 
     companion object {

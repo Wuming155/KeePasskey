@@ -61,6 +61,7 @@
     <string name="unlock_keyfile">Key File</string>
     <string name="unlock_keyfile_selected">Key file loaded: %1$s</string>
     <string name="unlock_keyfile_none">No key file selected (Optional)</string>
+    <string name="unlock_keyfile_read_failed">Failed to read the selected key file, please retry</string>
     <string name="unlock_btn_unlock">U N L O C K   V A U L T</string>
     <string name="unlock_btn_biometric">Quick unlock with Fingerprint or Face</string>
     <string name="unlock_switch_vault">Switch Vault</string>

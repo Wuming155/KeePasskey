@@ -83,8 +83,13 @@ data class KdbxHeader(
             writeField(headerBytesStream, KdbxConstants.HeaderFieldId.PUBLIC_CUSTOM_DATA, publicCustomData.toByteArray())
         }
 
-        // 字段 0: EndOfHeader
-        writeField(headerBytesStream, KdbxConstants.HeaderFieldId.END_OF_HEADER, ByteArray(0))
+        // 字段 0: EndOfHeader —— 官方格式带 4 字节 \r\n\r\n 数据（对齐 KeePass 2.x WriteHeaderField），
+        // 头部 SHA-256 / HMAC 覆盖含该数据的完整头部
+        writeField(
+            headerBytesStream,
+            KdbxConstants.HeaderFieldId.END_OF_HEADER,
+            byteArrayOf(0x0D, 0x0A, 0x0D, 0x0A)
+        )
 
         val headerBytes = headerBytesStream.toByteArray()
         outputStream.write(headerBytes)
@@ -280,7 +285,8 @@ data class KdbxHeader(
                     else
                         KdfParameters.Argon2.Argon2Type.ARGON2ID
                     val salt = vd.getByteArray("S") ?: throw KdbxCorruptFileException("Argon2 缺少 S 参数")
-                    val p = vd.getUInt64("P")?.toInt() ?: 2
+                    // 对齐 KeePassDX / 官方规范：P 与 V 在 KDBX4 变体字典中以 UInt32 类型写出，按 UInt32 读取
+                    val p = vd.getUInt32("P")?.toInt() ?: 2
                     val m = vd.getUInt64("M") ?: (64L * 1024 * 1024)
                     val i = vd.getUInt64("I") ?: 2L
                     val v = vd.getUInt32("V")?.toInt() ?: KdfParameters.Argon2.ARGON2_VERSION_13

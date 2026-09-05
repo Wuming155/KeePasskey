@@ -1,5 +1,9 @@
 package com.keepasskey.app.ui.screens.unlock
 
+import android.net.Uri
+import android.provider.OpenableColumns
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -57,6 +61,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -110,6 +115,40 @@ fun UnlockScreen(
         }
     }
 
+    // 修复虚假开关整改：真实 SAF 选择器——密钥文件字节立即读入内存交给 ViewModel，
+    // 不做任何路径/文件名假填充；读取失败显式反馈，绝不静默忽略
+    val keyFilePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        runCatching {
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                val buffer = java.io.ByteArrayOutputStream()
+                val chunk = ByteArray(KEY_FILE_READ_CHUNK)
+                var total = 0
+                while (true) {
+                    val read = input.read(chunk)
+                    if (read < 0) break
+                    total += read
+                    check(total <= MAX_KEY_FILE_BYTES) { "密钥文件超出大小上限" }
+                    buffer.write(chunk, 0, read)
+                }
+                buffer.toByteArray()
+            } ?: error("无法打开密钥文件流")
+        }.fold(
+            onSuccess = { bytes ->
+                if (bytes.isEmpty()) {
+                    viewModel.onKeyFileReadFailed()
+                } else {
+                    val displayName = queryKeyFileDisplayName(context, uri)
+                    viewModel.onKeyFileSelected(bytes, displayName)
+                    bytes.fill(0)
+                }
+            },
+            onFailure = { viewModel.onKeyFileReadFailed() }
+        )
+    }
+
     UnlockContent(
         uiState = uiState,
         currentTheme = currentTheme,
@@ -117,7 +156,8 @@ fun UnlockScreen(
         onPasswordChange = viewModel::onPasswordChangeSecure,
         onQuickUnlockPinChange = viewModel::onQuickUnlockPinChange,
         onTogglePasswordVisibility = viewModel::onTogglePasswordVisibility,
-        onToggleKeyFile = viewModel::onToggleKeyFile,
+        onSelectKeyFile = { keyFilePickerLauncher.launch(arrayOf("*/*")) },
+        onClearKeyFile = viewModel::clearKeyFile,
         onToggleReadOnly = viewModel::onToggleReadOnly,
         onSwitchMode = viewModel::switchUnlockMode,
         onUnlock = viewModel::unlock,
@@ -126,6 +166,20 @@ fun UnlockScreen(
         onNavigateToDatabasePicker = onNavigateToDatabasePicker,
         modifier = modifier
     )
+}
+
+/** 密钥文件读取上限：1 MiB（密钥文件惯例为 32~128 字节，上限防御异常超大 Uri） */
+private const val MAX_KEY_FILE_BYTES = 1 shl 20
+private const val KEY_FILE_READ_CHUNK = 8 * 1024
+
+/** 查询 SAF 文档显示名；查询失败回退为 Uri 最后一段 */
+private fun queryKeyFileDisplayName(context: android.content.Context, uri: Uri): String {
+    return runCatching {
+        context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+            val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+            if (index >= 0 && cursor.moveToFirst()) cursor.getString(index) else null
+        }
+    }.getOrNull() ?: uri.lastPathSegment.orEmpty()
 }
 
 /**
@@ -139,7 +193,8 @@ fun UnlockContent(
     onPasswordChange: (CharArray) -> Unit,
     onQuickUnlockPinChange: (String) -> Unit,
     onTogglePasswordVisibility: () -> Unit,
-    onToggleKeyFile: () -> Unit,
+    onSelectKeyFile: () -> Unit,
+    onClearKeyFile: () -> Unit,
     onToggleReadOnly: () -> Unit,
     onSwitchMode: (UnlockMode) -> Unit,
     onUnlock: () -> Unit,
@@ -455,12 +510,14 @@ fun UnlockContent(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                // 附加密钥文件切换
+                // 附加密钥文件切换（修复虚假开关整改：开启即唤起真实 SAF 选择器，关闭即擦除字节）
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(MaterialTheme.shapes.medium)
-                        .clickable { onToggleKeyFile() }
+                        .clickable {
+                            if (uiState.hasKeyFile) onClearKeyFile() else onSelectKeyFile()
+                        }
                         .padding(vertical = 8.dp, horizontal = 4.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -477,9 +534,9 @@ fun UnlockContent(
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurface
                         )
-                        if (uiState.hasKeyFile) {
+                        if (uiState.hasKeyFile && uiState.keyFileName.isNotBlank()) {
                             Text(
-                                text = uiState.keyFileName,
+                                text = stringResource(R.string.unlock_keyfile_selected, uiState.keyFileName),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.primary
                             )
@@ -487,7 +544,9 @@ fun UnlockContent(
                     }
                     androidx.compose.material3.Switch(
                         checked = uiState.hasKeyFile,
-                        onCheckedChange = { onToggleKeyFile() }
+                        onCheckedChange = { checked ->
+                            if (checked) onSelectKeyFile() else onClearKeyFile()
+                        }
                     )
                 }
 

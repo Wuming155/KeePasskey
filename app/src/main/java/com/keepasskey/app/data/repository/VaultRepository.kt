@@ -44,9 +44,13 @@ interface VaultRepository {
     /**
      * 解锁当前选中的活动密码库。
      * [readOnly] 为 true 时以只读模式打开（H4-只读整改）：会话期间一切写盘硬拒绝。
+     * [keyFileData] 为复合密钥的密钥文件原始字节（修复虚假开关整改）：数据库以
+     * 「主密码 + 密钥文件」保护时必须提供；数组为借用语义——实现方与会话内部各自克隆，
+     * 调用方持有方负责在解锁成功/失败收尾与离开页面时显式清零，绝不落地为 String。
      */
     suspend fun unlockActiveDatabase(
         passwordChars: CharArray,
+        keyFileData: ByteArray? = null,
         readOnly: Boolean = false
     ): com.keepasskey.core.result.KdbxResult<Unit>
 

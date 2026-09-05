@@ -26,8 +26,8 @@ object HmacBlockStream {
     const val HMAC_SIZE = 32
 
     /**
-     * 计算指定块索引的 64 字节 HMAC 密钥
-     * blockKey = SHA-512(blockIndex (Little Endian 8 bytes) || hmacKey64)
+     * 计算指定块索引的 64 字节 HMAC 密钥（官方规范 / 对齐 KeePass 2.x GetBlockKey、pykeepass、KeePassXC）：
+     * blockKey = SHA-512(blockIndex (Little Endian 8 bytes) ‖ hmacKey64)
      */
     fun computeBlockKey(blockIndex: Long, hmacKey64: ByteArray): ByteArray {
         val indexBytes = LittleEndianUtil.longTo8Bytes(blockIndex)
@@ -52,7 +52,9 @@ object HmacBlockStream {
 
             val blockKey = HmacBlockStream.computeBlockKey(blockIndex, hmacKey64)
             val sizeBytes = LittleEndianUtil.intTo4Bytes(currentBlockSize)
-            val blockHmac = HashUtil.hmacSha256(blockKey, sizeBytes, chunk)
+            // 官方规范：块 HMAC 数据 = LE64(块索引) ‖ 4 字节块长 ‖ 块数据（对齐 KeePassXC）
+            val indexBytes = LittleEndianUtil.longTo8Bytes(blockIndex)
+            val blockHmac = HashUtil.hmacSha256(blockKey, indexBytes, sizeBytes, chunk)
 
             outputStream.write(blockHmac)
             outputStream.write(sizeBytes)
@@ -65,7 +67,8 @@ object HmacBlockStream {
         // 写入终止块 (blockSize = 0)
         val termBlockKey = HmacBlockStream.computeBlockKey(blockIndex, hmacKey64)
         val termSizeBytes = LittleEndianUtil.intTo4Bytes(0)
-        val termHmac = HashUtil.hmacSha256(termBlockKey, termSizeBytes)
+        val termIndexBytes = LittleEndianUtil.longTo8Bytes(blockIndex)
+        val termHmac = HashUtil.hmacSha256(termBlockKey, termIndexBytes, termSizeBytes)
 
         outputStream.write(termHmac)
         outputStream.write(termSizeBytes)
@@ -93,10 +96,11 @@ object HmacBlockStream {
 
             val blockKey = HmacBlockStream.computeBlockKey(blockIndex, hmacKey64)
             val sizeBytes = LittleEndianUtil.intTo4Bytes(blockSize)
+            val indexBytes = LittleEndianUtil.longTo8Bytes(blockIndex)
 
             if (blockSize == 0) {
                 // 终止块校验
-                val actualHmac = HashUtil.hmacSha256(blockKey, sizeBytes)
+                val actualHmac = HashUtil.hmacSha256(blockKey, indexBytes, sizeBytes)
                 if (!actualHmac.contentEquals(expectedHmac)) {
                     throw KdbxInvalidCredentialsException("HMAC 终止块校验失败：主密码错误或文件末尾被篡改")
                 }
@@ -104,7 +108,7 @@ object HmacBlockStream {
             }
 
             val blockData = LittleEndianUtil.readBytes(inputStream, blockSize)
-            val actualHmac = HashUtil.hmacSha256(blockKey, sizeBytes, blockData)
+            val actualHmac = HashUtil.hmacSha256(blockKey, indexBytes, sizeBytes, blockData)
             if (!actualHmac.contentEquals(expectedHmac)) {
                 throw KdbxInvalidCredentialsException("HMAC 块 #$blockIndex 校验失败：主密码错误或数据块被篡改")
             }
@@ -194,10 +198,11 @@ class HmacBlockInputStream(
 
         val blockKey = HmacBlockStream.computeBlockKey(blockIndex, hmacKey64)
         val sizeBytes = LittleEndianUtil.intTo4Bytes(blockSize)
+        val indexBytes = LittleEndianUtil.longTo8Bytes(blockIndex)
 
         if (blockSize == 0) {
             terminated = true
-            val actualHmac = HashUtil.hmacSha256(blockKey, sizeBytes)
+            val actualHmac = HashUtil.hmacSha256(blockKey, indexBytes, sizeBytes)
             if (!actualHmac.contentEquals(expectedHmac)) {
                 throw KdbxInvalidCredentialsException("HMAC 终止块校验失败：主密码错误或文件末尾被篡改")
             }
@@ -205,7 +210,7 @@ class HmacBlockInputStream(
         }
 
         val blockData = LittleEndianUtil.readBytes(source, blockSize)
-        val actualHmac = HashUtil.hmacSha256(blockKey, sizeBytes, blockData)
+        val actualHmac = HashUtil.hmacSha256(blockKey, indexBytes, sizeBytes, blockData)
         if (!actualHmac.contentEquals(expectedHmac)) {
             throw KdbxInvalidCredentialsException("HMAC 块 #$blockIndex 校验失败：主密码错误或数据块被篡改")
         }
@@ -265,7 +270,8 @@ class HmacBlockOutputStream(
 
         val termBlockKey = HmacBlockStream.computeBlockKey(blockIndex, hmacKey64)
         val termSizeBytes = LittleEndianUtil.intTo4Bytes(0)
-        sink.write(HashUtil.hmacSha256(termBlockKey, termSizeBytes))
+        val termIndexBytes = LittleEndianUtil.longTo8Bytes(blockIndex)
+        sink.write(HashUtil.hmacSha256(termBlockKey, termIndexBytes, termSizeBytes))
         sink.write(termSizeBytes)
         sink.flush()
     }
@@ -276,7 +282,8 @@ class HmacBlockOutputStream(
         val sizeBytes = LittleEndianUtil.intTo4Bytes(filled)
         // 写满的块直接引用缓冲，末尾残块才拷贝切片
         val chunk = if (filled == blockSize) buffer else buffer.copyOf(filled)
-        sink.write(HashUtil.hmacSha256(blockKey, sizeBytes, chunk))
+        val indexBytes = LittleEndianUtil.longTo8Bytes(blockIndex)
+        sink.write(HashUtil.hmacSha256(blockKey, indexBytes, sizeBytes, chunk))
         sink.write(sizeBytes)
         sink.write(chunk)
         blockIndex++

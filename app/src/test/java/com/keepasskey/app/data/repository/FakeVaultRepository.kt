@@ -42,7 +42,11 @@ class FakeVaultRepository() : VaultRepository {
         databasesFlow.value = current
     }
 
-    override suspend fun unlockActiveDatabase(passwordChars: CharArray, readOnly: Boolean): com.keepasskey.core.result.KdbxResult<Unit> {
+    override suspend fun unlockActiveDatabase(
+        passwordChars: CharArray,
+        keyFileData: ByteArray?,
+        readOnly: Boolean
+    ): com.keepasskey.core.result.KdbxResult<Unit> {
         return if (passwordChars.isNotEmpty()) {
             com.keepasskey.core.result.KdbxResult.Success(Unit)
         } else {

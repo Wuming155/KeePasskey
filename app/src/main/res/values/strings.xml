@@ -61,6 +61,7 @@
     <string name="unlock_keyfile">密钥文件</string>
     <string name="unlock_keyfile_selected">已加载密钥文件: %1$s</string>
     <string name="unlock_keyfile_none">未关联密钥文件 (可选)</string>
+    <string name="unlock_keyfile_read_failed">无法读取所选密钥文件，请重试</string>
     <string name="unlock_btn_unlock">解 锁 密 码 库</string>
     <string name="unlock_btn_biometric">使用系统指纹或面容快速解锁</string>
     <string name="unlock_switch_vault">切换密码库</string>

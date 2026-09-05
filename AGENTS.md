@@ -50,7 +50,7 @@ KeePasskey 是一款使用原生 Kotlin 开发的现代化 Android 密码管理�
 - `.\gradlew.bat test` — 单元测试（全模块 `src/test` 已就绪，`testDebugUnitTest` 可单模块执行；当前 212 个测试全绿）
 - 版本升级需整体配套：AGP ↔ Gradle ↔ Kotlin ↔ Compose BOM（Compose BOM 2026.06.00+ 要求 compileSdk 37，当前用 2026.06.01 对齐 compileSdk 36）
 
-**当前阶段状态**：**🔐 内存安全与密码学审计整改（Wave 11）交付完毕——Wave 1-10 全量整改 + Wave 11（主密码处理 / 加解密流程 / 内存驻留专项审计整改，对照 KeePassDX 内存安全基线逐项修复）。**
+**当前阶段状态**：**🔐 真实 KDBX 4.0 与复合密钥真机互操作（Wave 12）交付完毕——Wave 1-11 全量整改 + Wave 12（主密码 + XML KeyFile v2.0 复合密钥真机解锁、官方 2.61.1 / KeePassDX / KeePassXC 三方交叉验证算法纠偏、pykeepass 双向往返完全闭环）。**
 原「7 阶段全量验收」表述经 2026-09-05 全量代码审计修正：对照参考项目发现 22 项问题（P0×6 / P1×7 / P2×9，含系统服务空壳响应、模拟延时同步、TOTP 假码、cipherKey 非官方派生等），已按 4 个 Wave 修复并逐波验收提交：
 
 - **Wave 1（git ed601da）KDBX 官方兼容 + crypto 底座**：cipherKey 派生修正为官方 SHA-512 截断标准（读取侧旧派生自动回退、保存自动迁移）；XML Times 修正为 .NET Ticks 编码；XML 全字段往返（Meta/AutoType/Binary-Ref/CustomData）；InnerHeader 二进制池与附件去重；类型化异常体系；CBOR/COSE 确定性编码器；Passkey 三算法签名（ES256/Ed25519/RS256 + RFC 6979）；KdfBenchmark 设备自适应基准。
@@ -82,6 +82,15 @@ KeePasskey 是一款使用原生 Kotlin 开发的现代化 Android 密码管理�
 
 **P3 内存防御升级（对齐 KeePassDX `protectInMemory`，弥合最大能力差距）**：新增 `core/security/InMemoryCipher`——`ProtectedString`（isProtected=true）在 JVM 堆内以**密文形态驻留**（AES-256-CTR，IV=SHA-256(进程密钥‖明文) 前 16 字节确定性派生并与实例共存），读取瞬间解密出临时副本用毕立即擦除；确定性映射保证相同明文恒得相同密文，`equals`/`hashCode` 直接比较密文即可——同步变更检测与三方合并的比较路径（Wave 9 C1/F3 语义）不解密、不物化明文；IV 依赖进程密钥派生，攻击者仅凭 dump 的 (IV, 密文) 无法对低熵值构造离线爆破预言机。如实声明边界：纵深防御层，取得进程密钥或具备任意代码执行能力者仍可在读取瞬间截获明文（KeePassDX 同级取舍）。+`ProtectedStringMemoryEncryptionTest` 12 用例（密文≠明文/往返/确定性/逐值 IV/相等性/清零拒绝）。
 
-**测试基线**：全工程 212 个单元测试全绿（app 70 / core 21 / crypto 34 / database 40 / sync 47；Wave 11 新增 20 例）；`assembleDebug` 与 `assembleRelease`（R8 混淆）构建闭环通过。
+**Wave 12（真实 KDBX 4.0 库与复合密钥真机互操作专项整改）**：对照用户真实文件（`测试.kdbx` + `111.keyx` + 主密码）在 Android 16 模拟器真机实测，与 KeePass 2.61.1 官方 C#、KeePassDX 与 KeePassXC 源码交叉验证，完成 6 项深层格式与算法缺陷修复——
+① **解锁页密钥文件虚假断链清零**：`VaultRepository.unlockActiveDatabase` 与实现类增加 `keyFileData: ByteArray?` 借用语义透传至会话，`UnlockScreen` 接入系统级真实 SAF 文档选择器（`ActivityResultContracts.OpenDocument`），安全读取并全链路直达会话，用毕显式清零；复合密钥模式下安全禁用不可还原的硬件 QuickUnlock；
+② **密钥文件解析梯子落位**：新增 `KdbxKeyFile`，严格实现 XML KeyFile（v1.0 Base64 / v2.0 Hex + Hash 前 4 字节校验）、32B 裸二进制、64Hex 文本与整文件哈希四级梯子，新增 10 个测试用例（覆盖真实 111.keyx 向量）；
+③ **Argon2 / Cipher 官方 UUID 纠正**：修正 `KdbxConstants.Kdf.ARGON2D`（`EF636DDF-8C29-444B-91F7-A9A403E30A0C`）、`ARGON2ID`（`9E298B19-56DB-4773-B23D-FC3EC6F0A1E6`）与 ChaCha20/Twofish 四个官方 UUID；
+④ **变体字典类型宽容与 P 读参规范**：`VariantDictionary` 实现数值 getter 宽容自适应（防御 UInt32 在 Int/Long 间的非法转换与符号扩展），`KdbxHeader` 对齐 KeePassDX 按 `getUInt32("P")` 读参；
+⑤ **HMAC 块签名索引前缀补齐**：块 HMAC 签名数据补齐开头的 `LittleEndian64(blockIndex)` 前缀；
+⑥ **载荷压缩与内层 Header 读写顺序纠偏**：对齐官方 C# `KdbxFile.Read.cs:172-178`（"Binary header before XML"）与 KeePassDX `DatabaseInputKDBX`，将内层 Header 置于 GZIP 压缩流内部处理（解密 → GZIP解压 → 读取内层 Header → 解析XML）；派生探针相应升级为优先识别 GZIP 魔数（`1F 8B 08`）；官方 `cipherKey = SHA-256(masterSeed ‖ transformedKey)` 归正，历史 SHA-512 截断公式仅作为旧文件探针回退路径。
+**最终双向验证**：模拟器真机以复合密钥成功解锁 `测试.kdbx`，正确读取群组「111」及条目「11」（明文密码 `~W4hUziUy7FSRR#K@N@K` 完全一致）；在 KeePasskey 中新建条目并落盘后，经独立第三方工具 `pykeepass` 完整往返读取校验通过。详见 `docs/KDBX4与复合密钥实战互操作排查日志.md`。
+
+**测试基线**：全工程 223 个单元测试全绿（app 70 / core 21 / crypto 35 / database 50 / sync 47；Wave 12 新增 11 例）；`assembleDebug` 与 `assembleRelease`（R8 混淆）构建闭环通过。
 
 **已知限界（如实记录，详见 `REMEDIATION_PLAN.md` 执行日志）**：KDBX 解析已流式化，但对象树（KdbxGroup/KdbxEntry）仍整体驻留内存（增量加载/进度 Flow 远期）；S3 条件写依赖服务端支持——AWS S3 原子生效，少数未实现 If-Match 覆写的兼容存储降级为 HEAD 预检+无条件 PUT（KDoc 注明），WebDAV uploadAtomic 的 `If` 头 tagged list 预条件在个别极简 DAV 服务端可能被忽略（退化为普通事务写，不影响正确性）；KDBX 受保护字段以字符串承载为格式层边界——Passkey 私钥编码 String 存活期与 ProtectedString 一致，生成/签名路径的中间字节量均显式清零；`ProtectedString` 驻留加密（Wave 11）为纵深防御层——对抗堆扫描/崩溃转储中的明文暴露，取得进程密钥或具备任意代码执行能力的攻击者仍可在读取瞬间截获明文（KeePassDX 同级取舍）；Compose 框架层 TextField 仍以 String 承载输入（框架 API 限制，已收敛至 `SecurePasswordField` 单点、最短生命周期；Unlock 与 DatabasePicker 创建向导已接入该组件，EntryEdit/Settings 的密码框尚未接入）；QuickUnlock PIN 已真实校验（PBKDF2 校验器 + Keystore 封印凭据，封印密钥为非认证绑定硬件密钥——安全门槛由 PIN 校验器 + 密钥不可导出承担，root 设备边界见 KDoc），但 PIN 输入仍为 String（4 位短数字，框架限制）；浏览器特权白名单内置 Chrome 稳定版签名指纹，浏览器证书轮换或白名单外浏览器将 fail-closed 降级为 apk-key-hash 路径（安全不放松，功能降级），需随浏览器版本更新指纹；自定义图标（customIcons 模型/序列化层完好）尚无上传/选择 UI、KeePass 字段引用（{REF:...}）引擎未实现，均列为下一轮特性计划；外部库经导入复制进内部存储后原地编辑（不写回外部原文件）为当前设计取舍。

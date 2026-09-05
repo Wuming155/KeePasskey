@@ -28,6 +28,15 @@
 
 ## 决策日志
 
+- **2026-09-05**：**真实 KDBX 4.0 库与复合密钥（主密码+XML KeyFile v2.0）真机实测互操作专项验收与整改**——使用用户提供的真实文件（`测试.kdbx` + `111.keyx` + 主密码）在 Android 16（Pixel_10）模拟器环境下端到端验证，对照 KeePass 2.61.1 官方 C#、KeePassDX 与 KeePassXC 源码彻底根治 6 项深层格式与算法缺陷：
+  ① **解锁页密钥文件虚假断链清零**：`VaultRepository.unlockActiveDatabase` 与实现类透传 `keyFileData: ByteArray?`，`UnlockScreen` 接入系统级真实 SAF 文档选择器（`ActivityResultContracts.OpenDocument`），安全读取并全链路直达会话，用毕显式清零；
+  ② **密钥文件解析梯子落位**：新增 `KdbxKeyFile`，严格实现 XML KeyFile（v1.0 Base64 / v2.0 Hex + Hash 前 4 字节校验）、32B 裸二进制、64Hex 文本与整文件哈希四级梯子，新增 10 个测试用例（覆盖真实 111.keyx 向量）；
+  ③ **Argon2 / Cipher 官方 UUID 纠正**：修正 `KdbxConstants.Kdf.ARGON2D`（`EF636DDF-8C29-444B-91F7-A9A403E30A0C`）、`ARGON2ID`（`9E298B19-56DB-4773-B23D-FC3EC6F0A1E6`）与 ChaCha20/Twofish 四个官方 UUID；
+  ④ **变体字典类型宽容与 P 读参规范**：`VariantDictionary` 实现数值 getter 宽容自适应（防御 UInt32 在 Int/Long 间的非法转换），`KdbxHeader` 对齐 KeePassDX 按 `getUInt32("P")` 读参；
+  ⑤ **HMAC 块签名索引前缀补齐**：块 HMAC 签名数据补齐开头的 `LittleEndian64(blockIndex)` 前缀；
+  ⑥ **载荷压缩与内层 Header 读写顺序纠偏**：对齐官方 C# `KdbxFile.Read.cs:172-178`（"Binary header before XML"）与 KeePassDX `DatabaseInputKDBX`，将内层 Header 置于 GZIP 压缩流内部处理（解密 → GZIP解压 → 读取内层 Header → 解析XML）；探针相应升级为优先识别 GZIP 魔数（`1F 8B 08`）。
+  **最终验证**：模拟器真机以复合密钥成功解锁 `测试.kdbx`，成功读取群组「111」及条目「11」（明文密码 `~W4hUziUy7FSRR#K@N@K` 完全一致）；在 KeePasskey 中新建条目并落盘后，经独立第三方工具 `pykeepass` 完整往返读取校验通过。详见 `docs/KDBX4与复合密钥实战互操作排查日志.md`。
+
 - **2026-09-05**：**Wave 5「已知限界清零专项」交付**——四项已知限界逐项解决：① KDBX 全链路流式化（读取 SAX 状态机 / 写侧 KdbxXmlStreamWriter / HmacBlockStream 流式双向 / KdbxFile 管线化，不再物化整条密文/明文/压缩数据）；② S3 覆写 PUT 附 `If-Match` 服务端原子校验，TOCTOU 消除（不支持条件写的兼容存储降级旧行为）；③ Credential Provider 链式解锁（锁库 UX v2：锁库 Action → CredentialUnlockActivity 解锁 → setBeginGetCredentialResponse 直接回传候选，共享 CredentialResponseAssembler）；④ SecurePasswordField 组件 + 主密码 CharArray 全链路（UnlockUiState 去 String 明文）。关键设计决策：⑤ 官方与旧派生 hmacKey64 相同（仅 cipherKey 异），头部 HMAC 无法区分派生变体，旧派生识别改为首块解密探针 + 内层 Header 结构校验裁决；⑥ SAX 解析器异常包装必须放行 KdbxInvalidCredentialsException（HMAC 语义不得被吞为文件损坏）。剩余限界：对象树仍整体驻留内存、Compose 框架层 String（已收敛单点）、部分次要密码框未接 SecurePasswordField。
 
 - **2026-09-05**：发现并修复「7 阶段全量验收」文档失真——全量代码审计对照参考项目架构分析发现 22 项问题（CredentialProviderService 空响应、triggerSync 模拟延时、TOTP 假码、cipherKey 非官方派生、parseDate Base64 含 T 误判等）。以 REMEDIATION_PLAN.md 4 波次多子代理模式完成修复，每波主会话独立复跑测试（--rerun-tasks 防缓存假绿）+ 语义化提交。关键设计决策：① cipherKey 迁移采用「官方派生优先+旧派生回退重试」，旧文件保存即自动迁移；② SyncEngine 定为纯字节级（sync 禁依赖 database），kdbx 语义合并编排放 app 层 SyncCoordinator；③ KDBX4 每次序列化随机 IV/Seed 导致哈希漂移，SyncCoordinator 以内容级比对防抖复用基线；④ 回收站改库内标准组（recycleBinUuid 落库），DatabaseSession 增量 updateDatabaseMeta 为唯一 database 适配点。已知限界：DOM 非流式解析（远期）、S3 HEAD+PUT TOCTOU 微窗口、锁库 UX v1、Compose 密码 String 边界妥协。（上述四项已由同日 Wave 5 清零，见上方决策日志）

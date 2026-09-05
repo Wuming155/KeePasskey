@@ -20,7 +20,8 @@ enum class UnlockMode {
 data class UnlockUiState(
     val isPasswordVisible: Boolean = false,
     val hasKeyFile: Boolean = false,
-    val keyFileName: String = "master.key",
+    // 修复虚假开关整改：仅在选择真实密钥文件后由 ViewModel 填充真实文件名，不再写死假名
+    val keyFileName: String = "",
     val isLoading: Boolean = false,
     val errorMessage: UiMessage? = null,
     val infoMessage: UiMessage? = null,

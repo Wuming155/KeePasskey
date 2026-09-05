@@ -95,7 +95,11 @@ object KdbxFile {
 
         try {
             // 4. 读取并校验 Header HMAC-SHA256
-            val headerHmacKey = HashUtil.sha512(LittleEndianUtil.longTo8Bytes(0xFFFFFFFFFFFFFFFFUL.toLong()), hmacKey64)
+            // 官方规范 / 对齐 KeePass 2.x、pykeepass：headerKey = SHA-512(LE64(0xFFFFFFFFFFFFFFFF) ‖ hmacKey64)
+            val headerHmacKey = HashUtil.sha512(
+                LittleEndianUtil.longTo8Bytes(0xFFFFFFFFFFFFFFFFUL.toLong()),
+                hmacKey64
+            )
             val actualHeaderHmac = HashUtil.hmacSha256(headerHmacKey, headerBytes)
             Arrays.fill(headerHmacKey, 0.toByte())
 
@@ -124,9 +128,10 @@ object KdbxFile {
         val hmacBlockIn = HmacBlockInputStream(NonClosingInputStream(inputStream), hmacKey64)
         val cipherEngine = CipherFactory.getEngine(header.cipherUuid)
 
-        // 旧派生裁决：取首个数据块做内层 Header 结构探针，官方派生不合法时回退旧派生
+        // 旧派生裁决：取首个数据块做解密探针，官方派生不合法时回退旧派生
         val firstBlock = hmacBlockIn.readBlock()
-        val activeKey = resolveCipherKey(cipherEngine, header, firstBlock, cipherKey) {
+        val isGzip = header.compression == KdbxConstants.Compression.GZIP
+        val activeKey = resolveCipherKey(cipherEngine, header, firstBlock, cipherKey, isGzip) {
             // 旧派生重算：仅取 cipherKey 参与裁决，hmacKey64 属 transformedKey 直接派生物，用毕立即擦除
             deriveKeys(header, passwordChars, keyFileData, isLegacy = true).let { (legacyCipherKey, legacyHmacKey) ->
                 try {
@@ -144,13 +149,15 @@ object KdbxFile {
         }
         val cipherIn = cipherEngine.createDecryptingStream(payloadStream, activeKey, header.encryptionIv)
 
-        val innerHeader = InnerHeader.deserialize(cipherIn)
-
+        // 官方载荷顺序（对齐 KeePass 2.x Read.cs / KeePassDX DatabaseInputKDBX）：
+        // 解密 → GZIP 解压 → 内层头部（在解压流内、XML 之前）→ XML
         val xmlInputStream = if (header.compression == KdbxConstants.Compression.GZIP) {
             GZIPInputStream(cipherIn)
         } else {
             cipherIn
         }
+
+        val innerHeader = InnerHeader.deserialize(xmlInputStream)
 
         val innerCipher = InnerRandomStreamCipher(
             innerHeader.innerRandomStreamId,
@@ -167,32 +174,35 @@ object KdbxFile {
 
     /**
      * 用首个数据块的解密结果裁决 cipherKey 派生变体：
-     * 正确密钥解密出的内层 Header 具有严格结构（字段 ID 受限、长度有界、以 END 结尾或跨块延续），
-     * 错误密钥的解密产物几乎不可能通过结构校验。两种派生均不合法时按凭据错误处理。
+     * GZIP 压缩库（官方默认）解密产物以 GZIP 魔数 1F 8B 08 开始；未压缩库解密产物
+     * 呈现合法的内层 Header 字段序列。错误密钥的解密产物几乎不可能通过结构校验。
+     * 两种派生均不合法时按凭据错误处理。
      */
     private fun resolveCipherKey(
         cipherEngine: CipherEngine,
         header: KdbxHeader,
         firstBlock: ByteArray?,
         officialKey: ByteArray,
+        isGzipCompressed: Boolean,
         deriveLegacyKey: () -> ByteArray
     ): ByteArray {
         if (firstBlock == null || firstBlock.size < MIN_PROBE_BLOCK_SIZE) {
             // 块过小无法构成有效探针（正常 KDBX 负载远大于此），按官方派生继续，由后续解析暴露问题
             return officialKey
         }
-        if (isPlausibleInnerHeaderPrefix(cipherEngine, header.encryptionIv, officialKey, firstBlock)) {
+        if (isPlausibleInnerHeaderPrefix(cipherEngine, header.encryptionIv, officialKey, firstBlock, isGzipCompressed)) {
             return officialKey
         }
         val legacyKey = deriveLegacyKey()
-        if (isPlausibleInnerHeaderPrefix(cipherEngine, header.encryptionIv, legacyKey, firstBlock)) {
+        if (isPlausibleInnerHeaderPrefix(cipherEngine, header.encryptionIv, legacyKey, firstBlock, isGzipCompressed)) {
             return legacyKey
         }
         throw KdbxInvalidCredentialsException("数据解密失败：主密码错误或文件已损坏")
     }
 
     /**
-     * 试解密首块并校验其前缀是否呈现合法的内层 Header 结构。
+     * 试解密首块并校验其前缀结构：
+     * GZIP 压缩库校验魔数（1F 8B 08）；未压缩库校验内层 Header 字段序列前缀。
      * 首块通常并非消息结尾，AES-PKCS5 在收尾 doFinal 时会触发 BadPadding——
      * 逐块读取并在该异常处停止，已解出的前缀对结构校验依然有效。
      */
@@ -200,7 +210,8 @@ object KdbxFile {
         cipherEngine: CipherEngine,
         encryptionIv: ByteArray,
         cipherKey: ByteArray,
-        firstBlock: ByteArray
+        firstBlock: ByteArray,
+        isGzipCompressed: Boolean
     ): Boolean {
         val prefix = try {
             val probe = cipherEngine.createDecryptingStream(ByteArrayInputStream(firstBlock), cipherKey, encryptionIv)
@@ -221,7 +232,14 @@ object KdbxFile {
         } catch (_: Exception) {
             return false
         }
-        return isPlausibleFieldSequence(prefix)
+        return if (isGzipCompressed) {
+            prefix.size >= 3 &&
+                    prefix[0] == 0x1F.toByte() &&
+                    prefix[1] == 0x8B.toByte() &&
+                    prefix[2] == 0x08.toByte()
+        } else {
+            isPlausibleFieldSequence(prefix)
+        }
     }
 
     /**
@@ -341,7 +359,11 @@ object KdbxFile {
             outputStream.write(headerBytes)
             outputStream.write(HashUtil.sha256(headerBytes))
 
-            val headerHmacKey = HashUtil.sha512(LittleEndianUtil.longTo8Bytes(0xFFFFFFFFFFFFFFFFUL.toLong()), hmacKey64)
+            // 与读取侧一致：SHA-512(LE64(0xFFFFFFFFFFFFFFFF) ‖ hmacKey64)
+            val headerHmacKey = HashUtil.sha512(
+                LittleEndianUtil.longTo8Bytes(0xFFFFFFFFFFFFFFFFUL.toLong()),
+                hmacKey64
+            )
             val headerHmac = HashUtil.hmacSha256(headerHmacKey, headerBytes)
             outputStream.write(headerHmac)
             Arrays.fill(headerHmacKey, 0.toByte())
@@ -368,15 +390,17 @@ object KdbxFile {
         val cipherEngine = CipherFactory.getEngine(header.cipherUuid)
         val cipherOut = cipherEngine.createEncryptingStream(blockOut, cipherKey, header.encryptionIv)
 
-        innerHeader.serialize(cipherOut)
-
+        // 官方载荷顺序（对齐 KeePass 2.x Write.cs / KeePassDX DatabaseOutputKDBX）：
+        // 内层头部写在 GZIP 流之内（与 XML 一同被压缩），读取侧先解压再读内层头部
         val gzipOut = if (header.compression == KdbxConstants.Compression.GZIP) {
             GZIPOutputStream(cipherOut)
         } else {
             null
         }
+        val bodyOut = gzipOut ?: cipherOut
         try {
-            KdbxXmlSerializer(innerCipher).serialize(gzipOut ?: cipherOut, database)
+            innerHeader.serialize(bodyOut)
+            KdbxXmlSerializer(innerCipher).serialize(bodyOut, database)
         } finally {
             // 级联收尾：GZip finish → 加密流 doFinal → HMAC 块流写入终止块
             gzipOut?.close() ?: cipherOut.close()
@@ -386,13 +410,14 @@ object KdbxFile {
     /**
      * 派生用于数据加密的 cipherKey (32B) 与用于认证的 hmacKey (64B)。
      *
-     * 官方标准（KeePass 2.61.1 §8.1，KdbxFile.ComputeKeys）：
-     * - cipherKey = SHA-512(masterSeed ‖ transformedKey)[0..31]（前 32 字节）
-     * - hmacKey64 = SHA-512(masterSeed ‖ transformedKey ‖ 0x01)
-     *
-     * 旧版兼容（isLegacy = true）：
+     * 官方标准（KeePass 2.61.1 KdbxFile.ComputeKeys + CryptoUtil.ResizeKey，
+     * 与 pykeepass compute_master / KeePassDX DatabaseInputKDBX 交叉验证一致）：
      * - cipherKey = SHA-256(masterSeed ‖ transformedKey)
      * - hmacKey64 = SHA-512(masterSeed ‖ transformedKey ‖ 0x01)
+     *
+     * 历史兼容（isLegacy = true，本应用早期版本写出的文件）：
+     * - cipherKey = SHA-512(masterSeed ‖ transformedKey)[0..32)
+     * - hmacKey64 同官方
      */
     internal fun deriveKeys(
         header: KdbxHeader,
@@ -405,9 +430,11 @@ object KdbxFile {
         Arrays.fill(passwordBytes, 0.toByte())
 
         val compositeKey = if (keyFileData != null && keyFileData.isNotEmpty()) {
-            val keyFileHash = HashUtil.sha256(keyFileData)
-            val comp = HashUtil.sha256(passwordHash, keyFileHash)
-            Arrays.fill(keyFileHash, 0.toByte())
+            // 修复虚假开关整改：按官方语义解析密钥文件（XML .keyx 取 <Data> 十六进制 / 裸 32 字节 /
+            // 64 位 hex 文本 / 任意二进制整文件 SHA-256），原实现对 XML 密钥文件整文件哈希导致复合密钥错误
+            val keyFileKey = KdbxKeyFile.extractKey(keyFileData)
+            val comp = HashUtil.sha256(passwordHash, keyFileKey)
+            Arrays.fill(keyFileKey, 0.toByte())
             comp
         } else {
             HashUtil.sha256(passwordHash)
@@ -424,15 +451,17 @@ object KdbxFile {
         System.arraycopy(transformedKey, 0, cmpKey, 32, 32)
         Arrays.fill(transformedKey, 0.toByte())
 
+        // 官方 KDBX4 派生（对齐 KeePass 2.x / pykeepass / KeePassXC）：
+        // cipherKey  = SHA-256(masterSeed ‖ transformedKey)
+        // hmacKey64  = SHA-512(masterSeed ‖ transformedKey ‖ 0x01)
+        // 历史 bug 回放：本应用曾把 cipherKey 误实现为 SHA-512(seed‖tk)[0..32)（无尾部常量），
+        // 该错误公式保留为旧文件探针回退路径（isLegacy = true）
         val cipherKeyBytes = ByteArray(64)
         System.arraycopy(cmpKey, 0, cipherKeyBytes, 0, 64)
         val cipherKey = if (isLegacy) {
-            HashUtil.sha256(cipherKeyBytes)
+            HashUtil.sha512(cipherKeyBytes).copyOfRange(0, 32)
         } else {
-            val sha512 = HashUtil.sha512(cipherKeyBytes)
-            val truncated = sha512.copyOfRange(0, 32)
-            Arrays.fill(sha512, 0.toByte())
-            truncated
+            HashUtil.sha256(cipherKeyBytes)
         }
         Arrays.fill(cipherKeyBytes, 0.toByte())
 

@@ -24,7 +24,13 @@ class VariantDictionary {
 
     fun getUInt32(key: String): Long? {
         val item = map[key] ?: return null
-        return (item.value as Int).toLong() and 0xFFFFFFFFL
+        // 类型宽容：UInt32 反序列化后可能以 Int 或 Long 形态驻留（UInt64 项亦可能被窄化存储），
+        // 硬编码 as 强转会毁掉与官方 KeePass 2.x（Argon2 P/V 等以 UInt32 写出）的互操作性
+        return when (val value = item.value) {
+            is Int -> value.toLong() and 0xFFFFFFFFL
+            is Long -> value and 0xFFFFFFFFL
+            else -> throw IOException("VariantDictionary 类型错误: $key 期望 UInt32")
+        }
     }
 
     fun setUInt64(key: String, value: Long) {
@@ -33,7 +39,12 @@ class VariantDictionary {
 
     fun getUInt64(key: String): Long? {
         val item = map[key] ?: return null
-        return item.value as Long
+        // 类型宽容：UInt32（Int）与 UInt64（Long）统一按无符号 64 位语义返回
+        return when (val value = item.value) {
+            is Long -> value
+            is Int -> value.toLong() and 0xFFFFFFFFL
+            else -> throw IOException("VariantDictionary 类型错误: $key 期望 UInt64")
+        }
     }
 
     fun setBool(key: String, value: Boolean) {
@@ -51,7 +62,11 @@ class VariantDictionary {
 
     fun getInt32(key: String): Int? {
         val item = map[key] ?: return null
-        return item.value as Int
+        return when (val value = item.value) {
+            is Int -> value
+            is Long -> value.toInt()
+            else -> throw IOException("VariantDictionary 类型错误: $key 期望 Int32")
+        }
     }
 
     fun setInt64(key: String, value: Long) {
@@ -60,7 +75,11 @@ class VariantDictionary {
 
     fun getInt64(key: String): Long? {
         val item = map[key] ?: return null
-        return item.value as Long
+        return when (val value = item.value) {
+            is Long -> value
+            is Int -> value.toLong()
+            else -> throw IOException("VariantDictionary 类型错误: $key 期望 Int64")
+        }
     }
 
     fun setString(key: String, value: String) {

@@ -66,21 +66,23 @@ object KdbxConstants {
     }
 
     /**
-     * 数据加密 Cipher UUID
+     * 数据加密 Cipher UUID（官方标准值，对齐 KeePass / KeePassXC）
      */
     object Cipher {
         val AES_256_CBC = KdbxUuid.fromHexString("31C1F2E6BF714350BE5805216AFC5AFF")
-        val CHACHA20 = KdbxUuid.fromHexString("D6038A2B3B6F4CA5A20118F6A4419777")
-        val TWOFISH = KdbxUuid.fromHexString("AD68F29FB35B4DB7B9C0C272C151F072")
+        val CHACHA20 = KdbxUuid.fromHexString("D6038A2B8B6F4CB5A524339A31DBB59A")
+        val TWOFISH = KdbxUuid.fromHexString("AD68F29F576F4BB9A36AD47AF965346C")
     }
 
     /**
-     * 密钥派生函数 KDF UUID 与默认参数
+     * 密钥派生函数 KDF UUID 与默认参数（官方标准值，对齐 KeePass / KeePassXC）：
+     * Argon2d  = EF636DDF-8C29-444B-91F7-A9A403E30A0C（KeePass 2.x 默认 KDF）
+     * Argon2id = 9E298B19-56DB-4773-B23D-FC3EC6F0A1E6（KeePassXC 默认 KDF）
      */
     object Kdf {
         val AES_KDF = KdbxUuid.fromHexString("C9D9F39A628A4460BF740D08C18A4FEA")
-        val ARGON2D = KdbxUuid.fromHexString("EF636DDF8C29444B91F7A948E42D3E28")
-        val ARGON2ID = KdbxUuid.fromHexString("9E7071B53CA345F1AC6D34ECDA197A31")
+        val ARGON2D = KdbxUuid.fromHexString("EF636DDF8C29444B91F7A9A403E30A0C")
+        val ARGON2ID = KdbxUuid.fromHexString("9E298B1956DB4773B23DFC3EC6F0A1E6")
 
         const val DEFAULT_AES_KDF_ROUNDS: Long = 6_000_000L
         const val DEFAULT_ARGON2_ITERATIONS: Long = 2L
