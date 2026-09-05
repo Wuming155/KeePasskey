@@ -4,6 +4,8 @@ import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.crypto.kdf.KdfParameters
 import com.keepasskey.database.crypto.VariantDictionary
+import com.keepasskey.database.exception.KdbxCorruptFileException
+import com.keepasskey.database.exception.KdbxUnsupportedVersionException
 import com.keepasskey.database.io.LittleEndianUtil
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
@@ -116,7 +118,7 @@ data class KdbxHeader(
                 secureRandom.nextBytes(seed)
                 KdfParameters.Aes(
                     seed = seed,
-                    rounds = 100000L
+                    rounds = KdbxConstants.Kdf.DEFAULT_AES_KDF_ROUNDS
                 )
             }
 
@@ -144,13 +146,13 @@ data class KdbxHeader(
                         sig2 != KdbxConstants.Signature.SIGNATURE_2_KDBX_OLD &&
                         sig2 != KdbxConstants.Signature.SIGNATURE_2_KDBX_PRE)
             ) {
-                throw IOException("非法的 KDBX 文件魔数签名: 0x${Integer.toHexString(sig1)}, 0x${Integer.toHexString(sig2)}")
+                throw KdbxCorruptFileException("非法的 KDBX 文件魔数签名: 0x${Integer.toHexString(sig1)}, 0x${Integer.toHexString(sig2)}")
             }
 
             val version = readAndRecordInt()
             val major = version and KdbxConstants.Version.VERSION_MAJOR_MASK
             if (major != KdbxConstants.Version.VERSION_4_0) {
-                throw IOException("目前仅支持 KDBX v4 版本，实际文件主版本为: 0x${Integer.toHexString(major)}")
+                throw KdbxUnsupportedVersionException("目前仅支持 KDBX v4 版本，实际文件主版本为: 0x${Integer.toHexString(major)}")
             }
 
             var cipherUuid: KdbxUuid = KdbxConstants.Cipher.AES_256_CBC
@@ -162,7 +164,7 @@ data class KdbxHeader(
 
             while (true) {
                 val fieldIdByte = inputStream.read()
-                if (fieldIdByte < 0) throw IOException("意外到达头部流末尾")
+                if (fieldIdByte < 0) throw KdbxCorruptFileException("意外到达头部流末尾")
                 recordingStream.write(fieldIdByte)
 
                 val fieldLenBytes = LittleEndianUtil.readBytes(inputStream, 4)
@@ -205,9 +207,9 @@ data class KdbxHeader(
                 version = version,
                 cipherUuid = cipherUuid,
                 compression = compression,
-                masterSeed = masterSeed ?: throw IOException("缺少 MasterSeed 头字段"),
-                encryptionIv = encryptionIv ?: throw IOException("缺少 EncryptionIV 头字段"),
-                kdfParameters = kdfParams ?: throw IOException("缺少 KdfParameters 头字段"),
+                masterSeed = masterSeed ?: throw KdbxCorruptFileException("缺少 MasterSeed 头字段"),
+                encryptionIv = encryptionIv ?: throw KdbxCorruptFileException("缺少 EncryptionIV 头字段"),
+                kdfParameters = kdfParams ?: throw KdbxCorruptFileException("缺少 KdfParameters 头字段"),
                 publicCustomData = publicCustomData
             )
 
@@ -247,13 +249,13 @@ data class KdbxHeader(
 
         private fun deserializeKdfParameters(bytes: ByteArray): KdfParameters {
             val vd = VariantDictionary.deserialize(bytes)
-            val uuidBytes = vd.getByteArray("\$UUID") ?: throw IOException("KDF 参数中缺失 \$UUID")
+            val uuidBytes = vd.getByteArray("\$UUID") ?: throw KdbxCorruptFileException("KDF 参数中缺失 \$UUID")
             val uuid = KdbxUuid(uuidBytes)
 
             return when (uuid) {
                 KdbxConstants.Kdf.AES_KDF -> {
-                    val seed = vd.getByteArray("S") ?: throw IOException("AES-KDF 缺少 S 参数")
-                    val rounds = vd.getUInt64("R") ?: throw IOException("AES-KDF 缺少 R 参数")
+                    val seed = vd.getByteArray("S") ?: throw KdbxCorruptFileException("AES-KDF 缺少 S 参数")
+                    val rounds = vd.getUInt64("R") ?: throw KdbxCorruptFileException("AES-KDF 缺少 R 参数")
                     KdfParameters.Aes(seed = seed, rounds = rounds)
                 }
                 KdbxConstants.Kdf.ARGON2D, KdbxConstants.Kdf.ARGON2ID -> {
@@ -261,7 +263,7 @@ data class KdbxHeader(
                         KdfParameters.Argon2.Argon2Type.ARGON2D
                     else
                         KdfParameters.Argon2.Argon2Type.ARGON2ID
-                    val salt = vd.getByteArray("S") ?: throw IOException("Argon2 缺少 S 参数")
+                    val salt = vd.getByteArray("S") ?: throw KdbxCorruptFileException("Argon2 缺少 S 参数")
                     val p = vd.getUInt64("P")?.toInt() ?: 2
                     val m = vd.getUInt64("M") ?: (64L * 1024 * 1024)
                     val i = vd.getUInt64("I") ?: 2L
@@ -279,7 +281,7 @@ data class KdbxHeader(
                         associatedData = a
                     )
                 }
-                else -> throw IOException("未知的 KDF 算法: $uuid")
+                else -> throw KdbxCorruptFileException("未知的 KDF 算法: $uuid")
             }
         }
     }

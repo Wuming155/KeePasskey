@@ -75,12 +75,17 @@ object KdbxConstants {
     }
 
     /**
-     * 密钥派生函数 KDF UUID
+     * 密钥派生函数 KDF UUID 与默认参数
      */
     object Kdf {
         val AES_KDF = KdbxUuid.fromHexString("C9D9F39A628A4460BF740D08C18A4FEA")
         val ARGON2D = KdbxUuid.fromHexString("EF636DDF8C29444B91F7A948E42D3E28")
         val ARGON2ID = KdbxUuid.fromHexString("9E7071B53CA345F1AC6D34ECDA197A31")
+
+        const val DEFAULT_AES_KDF_ROUNDS: Long = 6_000_000L
+        const val DEFAULT_ARGON2_ITERATIONS: Long = 2L
+        const val DEFAULT_ARGON2_MEMORY_BYTES: Long = 64L * 1024 * 1024
+        const val DEFAULT_ARGON2_PARALLELISM: Int = 2
     }
 
     /**
@@ -141,5 +146,54 @@ object KdbxConstants {
         const val EXPIRES = "Expires"
         const val USAGE_COUNT = "UsageCount"
         const val LOCATION_CHANGED = "LocationChanged"
+
+        // Meta 节点与配置
+        const val GENERATOR = "Generator"
+        const val DATABASE_NAME = "DatabaseName"
+        const val DATABASE_NAME_CHANGED = "DatabaseNameChanged"
+        const val DATABASE_DESCRIPTION = "DatabaseDescription"
+        const val DATABASE_DESCRIPTION_CHANGED = "DatabaseDescriptionChanged"
+        const val DEFAULT_USER_NAME = "DefaultUserName"
+        const val DEFAULT_USER_NAME_CHANGED = "DefaultUserNameChanged"
+        const val MAINTENANCE_HISTORY_DAYS = "MaintenanceHistoryDays"
+        const val COLOR = "Color"
+        const val MASTER_KEY_CHANGED = "MasterKeyChanged"
+        const val MASTER_KEY_CHANGE_REC = "MasterKeyChangeRec"
+        const val MASTER_KEY_CHANGE_FORCE = "MasterKeyChangeForce"
+        const val MEMORY_PROTECTION = "MemoryProtection"
+        const val PROTECT_TITLE = "ProtectTitle"
+        const val PROTECT_USER_NAME = "ProtectUserName"
+        const val PROTECT_PASSWORD = "ProtectPassword"
+        const val PROTECT_URL = "ProtectURL"
+        const val PROTECT_NOTES = "ProtectNotes"
+        const val CUSTOM_ICONS = "CustomIcons"
+        const val ICON = "Icon"
+        const val DATA = "Data"
+        const val RECYCLE_BIN_ENABLED = "RecycleBinEnabled"
+        const val RECYCLE_BIN_UUID = "RecycleBinUUID"
+        const val RECYCLE_BIN_CHANGED = "RecycleBinChanged"
+        const val ENTRY_TEMPLATES_GROUP = "EntryTemplatesGroup"
+        const val ENTRY_TEMPLATES_GROUP_CHANGED = "EntryTemplatesGroupChanged"
+        const val HISTORY_MAX_ITEMS = "HistoryMaxItems"
+        const val HISTORY_MAX_SIZE = "HistoryMaxSize"
+        const val LAST_SELECTED_GROUP = "LastSelectedGroup"
+        const val LAST_TOP_VISIBLE_GROUP = "LastTopVisibleGroup"
+        const val DELETED_OBJECTS = "DeletedObjects"
+        const val DELETED_OBJECT = "DeletedObject"
+        const val DELETION_TIME = "DeletionTime"
+        const val CUSTOM_DATA = "CustomData"
+        const val ITEM = "Item"
+
+        // 条目与分组额外属性
+        const val FOREGROUND_COLOR = "ForegroundColor"
+        const val BACKGROUND_COLOR = "BackgroundColor"
+        const val OVERRIDE_URL = "OverrideURL"
+        const val TAGS = "Tags"
+        const val QUALITY_CHECK = "QualityCheck"
+        const val PREVIOUS_PARENT_GROUP = "PreviousParentGroup"
+        const val DEFAULT_AUTO_TYPE_SEQUENCE = "DefaultAutoTypeSequence"
+        const val ENABLE_AUTO_TYPE = "EnableAutoType"
+        const val ENABLE_SEARCHING = "EnableSearching"
+        const val LAST_TOP_VISIBLE_ENTRY = "LastTopVisibleEntry"
     }
 }

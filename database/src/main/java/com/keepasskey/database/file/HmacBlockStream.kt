@@ -1,6 +1,8 @@
 package com.keepasskey.database.file
 
 import com.keepasskey.crypto.hash.HashUtil
+import com.keepasskey.database.exception.KdbxCorruptFileException
+import com.keepasskey.database.exception.KdbxInvalidCredentialsException
 import com.keepasskey.database.io.LittleEndianUtil
 import java.io.ByteArrayOutputStream
 import java.io.EOFException
@@ -74,12 +76,12 @@ object HmacBlockStream {
             val expectedHmac = try {
                 LittleEndianUtil.readBytes(inputStream, 32)
             } catch (e: EOFException) {
-                throw IOException("HMAC 块读取意外中断", e)
+                throw KdbxCorruptFileException("HMAC 块读取意外中断", e)
             }
 
             val blockSize = LittleEndianUtil.readInt(inputStream)
             if (blockSize < 0) {
-                throw IOException("非法的负数块大小: $blockSize")
+                throw KdbxCorruptFileException("非法的负数块大小: $blockSize")
             }
 
             val blockKey = computeBlockKey(blockIndex, hmacKey64)
@@ -89,7 +91,7 @@ object HmacBlockStream {
                 // 终止块校验
                 val actualHmac = HashUtil.hmacSha256(blockKey, sizeBytes)
                 if (!actualHmac.contentEquals(expectedHmac)) {
-                    throw IOException("HMAC 终止块校验失败：主密码错误或文件末尾被篡改")
+                    throw KdbxInvalidCredentialsException("HMAC 终止块校验失败：主密码错误或文件末尾被篡改")
                 }
                 break
             }
@@ -97,7 +99,7 @@ object HmacBlockStream {
             val blockData = LittleEndianUtil.readBytes(inputStream, blockSize)
             val actualHmac = HashUtil.hmacSha256(blockKey, sizeBytes, blockData)
             if (!actualHmac.contentEquals(expectedHmac)) {
-                throw IOException("HMAC 块 #$blockIndex 校验失败：主密码错误或数据块被篡改")
+                throw KdbxInvalidCredentialsException("HMAC 块 #$blockIndex 校验失败：主密码错误或数据块被篡改")
             }
 
             bos.write(blockData)

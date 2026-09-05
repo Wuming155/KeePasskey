@@ -41,11 +41,25 @@ class DatabaseSession {
     private var activeFile: File? = null
     private var passwordCache: CharArray? = null
     private var keyFileCache: ByteArray? = null
+    private val credentialLock = Any()
 
     private val mutex = Mutex()
 
     val currentFile: File?
         get() = activeFile
+
+    /**
+     * 在锁保护下获取当前缓存凭据的克隆副本并执行 [block]。
+     *
+     * 注意事项（敏感数据铁律）：
+     * 传入 [block] 的 [CharArray] 与 [ByteArray] 为克隆出的独立副本，
+     * 调用方在使用完毕后必须显式清零返回数组（例如 `Arrays.fill(...)`），绝不可长期驻留堆内存。
+     */
+    fun <T> useCredentials(block: (CharArray?, ByteArray?) -> T): T = synchronized(credentialLock) {
+        val pwdClone = passwordCache?.clone()
+        val keyClone = keyFileCache?.clone()
+        block(pwdClone, keyClone)
+    }
 
     /**
      * 创建全新密码库文件并打开会话
@@ -117,7 +131,9 @@ class DatabaseSession {
                 activeFile = file
                 cachePassword(passwordChars)
                 if (keyFileData != null) {
-                    keyFileCache = keyFileData.clone()
+                    synchronized(credentialLock) {
+                        keyFileCache = keyFileData.clone()
+                    }
                 }
 
                 _database.value = db
@@ -266,12 +282,12 @@ class DatabaseSession {
         _state.value = SessionState.CLOSED
     }
 
-    private fun cachePassword(passwordChars: CharArray) {
+    private fun cachePassword(passwordChars: CharArray) = synchronized(credentialLock) {
         clearSensitiveCache()
         passwordCache = passwordChars.clone()
     }
 
-    private fun clearSensitiveCache() {
+    private fun clearSensitiveCache() = synchronized(credentialLock) {
         passwordCache?.let { Arrays.fill(it, '0') }
         passwordCache = null
         keyFileCache?.let { Arrays.fill(it, 0.toByte()) }

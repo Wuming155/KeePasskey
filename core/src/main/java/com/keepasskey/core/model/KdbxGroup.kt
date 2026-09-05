@@ -16,6 +16,7 @@ data class KdbxGroup(
     val enableAutoType: Boolean? = null,
     val enableSearching: Boolean? = null,
     val lastTopVisibleEntry: KdbxUuid? = null,
+    val previousParentGroup: KdbxUuid? = null,
     val entries: List<KdbxEntry> = emptyList(),
     val subgroups: List<KdbxGroup> = emptyList()
 ) {

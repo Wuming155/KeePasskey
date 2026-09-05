@@ -19,7 +19,11 @@ data class KdbxEntry(
     val attachments: List<KdbxAttachment> = emptyList(),
     val autoType: KdbxAutoType? = null,
     val backgroundColor: String? = null,
-    val foregroundColor: String? = null
+    val foregroundColor: String? = null,
+    val overrideUrl: String? = null,
+    val qualityCheck: Boolean = true,
+    val previousParentGroup: KdbxUuid? = null,
+    val customData: Map<String, String> = emptyMap()
 ) {
     val title: String
         get() = fields[KdbxConstants.Fields.TITLE]?.readString().orEmpty()
