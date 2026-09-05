@@ -48,6 +48,14 @@ object KdbxXmlTimeHelper {
     }
 
     /**
+     * ISO-8601 日历日期嗅探模式（形如 "2024-01-01T..." 或 "2024-01-01..."）。
+     * 必须以「4 位数字 + 连字符」开头——标准 Base64 字母表（A-Za-z0-9+/=）不含连字符，
+     * 因此 Base64 编码的 Ticks 值绝不可能命中本模式，杜绝含大写 "T" 的 Base64
+     * 时间值被误判为 ISO-8601 的随机性缺陷。
+     */
+    private val iso8601Pattern = Regex("^\\d{4}-\\d{2}-\\d{2}")
+
+    /**
      * 从 XML 字符串解析时间戳。
      * 若 [dateStr] 为 null 或 blank（元素缺失）返回 [defaultInstant]；
      * 若内容存在但格式不符合规范，抛出 [KdbxCorruptFileException]。
@@ -56,8 +64,8 @@ object KdbxXmlTimeHelper {
         if (dateStr.isNullOrBlank()) return defaultInstant
         val clean = dateStr.trim()
 
-        // 兼容 KDBX 3 格式的 ISO-8601 字符串 (含 - 或 T)
-        if (clean.contains("-") || clean.contains("T")) {
+        // 兼容 KDBX 3 格式的 ISO-8601 字符串（严格模式嗅探，见 iso8601Pattern KDoc）
+        if (iso8601Pattern.containsMatchIn(clean)) {
             return try {
                 Instant.parse(clean)
             } catch (e: Exception) {

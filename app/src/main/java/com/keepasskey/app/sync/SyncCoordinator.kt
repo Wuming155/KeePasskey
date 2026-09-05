@@ -1,0 +1,449 @@
+package com.keepasskey.app.sync
+
+import android.content.Context
+import com.keepasskey.app.ui.screens.settings.CloudSyncProvider
+import com.keepasskey.core.model.KdbxConstants
+import com.keepasskey.core.model.KdbxEntry
+import com.keepasskey.core.security.ProtectedString
+import com.keepasskey.database.file.KdbxDatabase
+import com.keepasskey.database.file.KdbxFile
+import com.keepasskey.database.session.DatabaseSession
+import com.keepasskey.sync.engine.SyncCache
+import com.keepasskey.sync.engine.SyncCommitResult
+import com.keepasskey.sync.engine.SyncEngine
+import com.keepasskey.sync.engine.SyncOpenResult
+import com.keepasskey.sync.merge.ConflictResolutionChoice
+import com.keepasskey.sync.merge.ConflictedEntryPair
+import com.keepasskey.sync.merge.KdbxDatabaseLite
+import com.keepasskey.sync.merge.KdbxMerger
+import com.keepasskey.sync.provider.SyncProvider
+import com.keepasskey.sync.s3.S3SyncProvider
+import com.keepasskey.sync.webdav.WebDavSyncProvider
+import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
+import java.io.File
+import java.util.Arrays
+import javax.inject.Inject
+import javax.inject.Singleton
+
+/**
+ * 云同步结果状态模型 (Wave 3-E P0-5)
+ */
+sealed class SyncOutcome {
+    /** 数据库已与云端保持最新同步 */
+    data object UpToDate : SyncOutcome()
+
+    /** 本地修改赢并已成功上传云端 */
+    data object UploadedLocal : SyncOutcome()
+
+    /** 三方自动合并成功并已同步回写云端与本地 */
+    data object MergedAndUploaded : SyncOutcome()
+
+    /** 发生条目同字段冲突，需用户在冲突界面决策 */
+    data class ConflictNeedsUser(val conflicts: List<ConflictedEntryPair>) : SyncOutcome()
+
+    /** 离线模式或网络不可达，保留本地安全副本 */
+    data object Offline : SyncOutcome()
+
+    /** 同步过程发生错误 */
+    data class Error(val message: String) : SyncOutcome()
+}
+
+/**
+ * 应用级同步编排协调器 (Wave 3-E P0-5 app 侧接线)。
+ * 遵循安全与架构铁律：
+ * 1. 串联 DatabaseSession 状态机、KDBX4 序列化与三哈希字节级 SyncEngine；
+ * 2. 借出凭据 useCredentials 用完在 finally 显式擦除清零；
+ * 3. 严格划分协程调度边界：加密与合并在 Dispatchers.Default，网络与文件写盘在 Dispatchers.IO。
+ */
+@Singleton
+open class SyncCoordinator @Inject constructor(
+    @ApplicationContext private val context: Context,
+    private val databaseSession: DatabaseSession,
+    private val syncCredentialsStore: SyncCredentialsStore
+) {
+    private val mutex = Mutex()
+
+    private val _conflictFlow = MutableStateFlow<List<ConflictedEntryPair>>(emptyList())
+    open val conflictFlow: StateFlow<List<ConflictedEntryPair>> = _conflictFlow.asStateFlow()
+
+    // 缓存发生冲突时的上下文，供用户确认合并后提交
+    private var pendingRemoteEngine: SyncEngine? = null
+    private var pendingRemotePath: String? = null
+    private var pendingLocalDb: KdbxDatabase? = null
+    private var pendingRemoteDb: KdbxDatabase? = null
+    private var lastSyncedDb: KdbxDatabase? = null
+
+    // 允许单元测试注入模拟 Provider 与测试路径
+    var testSyncProvider: SyncProvider? = null
+    var testRemotePath: String? = null
+
+    /**
+     * 执行全量即时同步
+     */
+    suspend fun syncNow(): SyncOutcome = mutex.withLock {
+        val activeFile = databaseSession.currentFile
+            ?: return@withLock SyncOutcome.Error("当前无打开的密码库文件")
+
+        val currentDb = databaseSession.databaseFlow.value
+            ?: return@withLock SyncOutcome.Error("密码库未解锁或数据为空")
+
+        val provider = testSyncProvider ?: resolveProvider()
+            ?: return@withLock SyncOutcome.Error("未配置云同步凭据")
+
+        val remotePath = testRemotePath ?: resolveRemotePath(activeFile.name)
+
+        val syncDir = File(context.cacheDir, "sync").apply { if (!exists()) mkdirs() }
+        val syncCache = SyncCache(syncDir)
+        val syncEngine = SyncEngine(provider, syncCache)
+
+        val isCached = syncCache.isCached(remotePath)
+        val baseSnapshotBytes = if (isCached) syncCache.readCache(remotePath) else null
+        val hasLocalContentChanged = hasDatabaseContentChanged(currentDb, lastSyncedDb)
+
+        // 1. 获取本地数据库字节：若无内容变更且已缓存，复用缓存规避 KDBX4 随机 IV 导致的不必要哈希漂移；否则序列化并写缓存
+        val localBytes = if (!isCached || hasLocalContentChanged) {
+            val bytes = serializeLocalDatabase(currentDb)
+                ?: return@withLock SyncOutcome.Error("本地数据库序列化失败")
+            if (isCached) {
+                syncCache.writeCache(remotePath, bytes)
+            }
+            bytes
+        } else {
+            baseSnapshotBytes ?: serializeLocalDatabase(currentDb)!!
+        }
+
+        val isDirty = databaseSession.state.value == DatabaseSession.SessionState.DIRTY
+
+        // 2. 首次同步且尚未缓存：若远端尚未创建该文件，直接上传本地库建立基线
+        if (!isCached) {
+            val metaResult = provider.getMetadata(remotePath)
+            if (metaResult.isFailure) {
+                val ex = metaResult.exceptionOrNull()
+                if (ex is com.keepasskey.sync.model.SyncException.FileNotFound) {
+                    val uploadResult = syncEngine.commitLocal(remotePath, localBytes)
+                    return@withLock when (uploadResult) {
+                        is SyncCommitResult.Uploaded -> {
+                            lastSyncedDb = databaseSession.databaseFlow.value
+                            SyncOutcome.UploadedLocal
+                        }
+                        else -> SyncOutcome.Error("首次同步上传云端失败")
+                    }
+                } else {
+                    return@withLock SyncOutcome.Offline
+                }
+            }
+        }
+
+        // 3. 若本地为未落盘的修改态且本地已存在历史缓存基线，尝试快速提交
+        if (isDirty && syncCache.isCached(remotePath)) {
+            when (val commitResult = syncEngine.commitLocal(remotePath, localBytes)) {
+                is SyncCommitResult.Uploaded -> {
+                    databaseSession.save()
+                    lastSyncedDb = databaseSession.databaseFlow.value
+                    return@withLock SyncOutcome.UploadedLocal
+                }
+                is SyncCommitResult.ConflictNeedsMerge -> {
+                    return@withLock handleConflictMerge(
+                        syncEngine = syncEngine,
+                        syncCache = syncCache,
+                        remotePath = remotePath,
+                        localBytes = localBytes,
+                        remoteBytes = commitResult.remoteBytes,
+                        baseSnapshotBytes = baseSnapshotBytes
+                    )
+                }
+                is SyncCommitResult.RemoteUnreachable -> {
+                    return@withLock SyncOutcome.Offline
+                }
+            }
+        }
+
+        // 4. 执行 openRemote 同步状态机决策
+        return@withLock try {
+            when (val openResult = syncEngine.openRemote(remotePath)) {
+                is SyncOpenResult.RemoteSynced -> {
+                    val isIdentical = openResult.remoteBytes.contentEquals(localBytes)
+                    if (!isIdentical) {
+                        val applied = loadAndApplyRemoteBytes(openResult.remoteBytes)
+                        if (!applied) return@withLock SyncOutcome.Error("加载云端数据库失败，密码或格式不匹配")
+                    }
+                    lastSyncedDb = databaseSession.databaseFlow.value
+                    SyncOutcome.UpToDate
+                }
+                is SyncOpenResult.LocalWinAutoUploaded -> {
+                    lastSyncedDb = databaseSession.databaseFlow.value
+                    SyncOutcome.UploadedLocal
+                }
+                is SyncOpenResult.RemoteLostRestored -> {
+                    lastSyncedDb = databaseSession.databaseFlow.value
+                    SyncOutcome.UploadedLocal
+                }
+                is SyncOpenResult.CacheHitOffline -> {
+                    SyncOutcome.Offline
+                }
+                is SyncOpenResult.RemoteUnreachableUsingCache -> {
+                    SyncOutcome.Offline
+                }
+                is SyncOpenResult.ConflictDetected -> {
+                    handleConflictMerge(
+                        syncEngine = syncEngine,
+                        syncCache = syncCache,
+                        remotePath = remotePath,
+                        localBytes = openResult.localBytes,
+                        remoteBytes = openResult.remoteBytes,
+                        baseSnapshotBytes = baseSnapshotBytes
+                    )
+                }
+            }
+        } catch (e: com.keepasskey.sync.model.SyncException.NetworkError) {
+            SyncOutcome.Offline
+        } catch (e: Exception) {
+            SyncOutcome.Error(e.message ?: "同步发生未知错误")
+        }
+    }
+
+    /**
+     * 解决冲突并执行最终提交回写
+     */
+    open suspend fun resolveConflicts(resolutions: Map<String, ConflictResolutionChoice>): SyncOutcome = mutex.withLock {
+        val engine = pendingRemoteEngine ?: return@withLock SyncOutcome.Error("无待解决的冲突会话")
+        val path = pendingRemotePath ?: return@withLock SyncOutcome.Error("冲突路径失效")
+        val localDb = pendingLocalDb ?: return@withLock SyncOutcome.Error("本地冲突快照丢失")
+        val remoteDb = pendingRemoteDb ?: return@withLock SyncOutcome.Error("远端冲突快照丢失")
+
+        return@withLock withContext(Dispatchers.Default) {
+            val conflicts = _conflictFlow.value
+            var updatedRoot = localDb.rootGroup
+
+            for (pair in conflicts) {
+                val choice = resolutions[pair.entryId] ?: ConflictResolutionChoice.KEEP_LOCAL
+                val resolvedEntries = KdbxMerger.resolveConflict(pair, choice)
+                // 替换当前分组树中的条目
+                for (resolved in resolvedEntries) {
+                    updatedRoot = applyResolvedEntryToGroup(updatedRoot, resolved)
+                }
+            }
+
+            val mergedDb = localDb.copy(rootGroup = updatedRoot)
+            val mergedBytes = serializeLocalDatabase(mergedDb)
+                ?: return@withContext SyncOutcome.Error("冲突合并数据库序列化失败")
+
+            val uploadResult = engine.markResolvedAndUpload(path, mergedBytes)
+            if (uploadResult.isSuccess) {
+                databaseSession.updateDatabaseMeta { mergedDb }
+                databaseSession.save()
+
+                _conflictFlow.value = emptyList()
+                pendingRemoteEngine = null
+                pendingRemotePath = null
+                pendingLocalDb = null
+                pendingRemoteDb = null
+
+                SyncOutcome.MergedAndUploaded
+            } else {
+                SyncOutcome.Error("上传冲突解决版本失败: ${uploadResult.exceptionOrNull()?.message}")
+            }
+        }
+    }
+
+    /**
+     * 测试当前云端同步配置连接连通性
+     */
+    suspend fun testConnection(): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            val provider = testSyncProvider ?: resolveProvider()
+                ?: return@withContext Result.failure(IllegalStateException("未配置同步凭据"))
+            provider.testConnection()
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    private suspend fun handleConflictMerge(
+        syncEngine: SyncEngine,
+        syncCache: SyncCache,
+        remotePath: String,
+        localBytes: ByteArray,
+        remoteBytes: ByteArray,
+        baseSnapshotBytes: ByteArray? = null
+    ): SyncOutcome = withContext(Dispatchers.Default) {
+        val localDb = parseKdbxBytes(localBytes)
+            ?: return@withContext SyncOutcome.Error("无法解密本地冲突数据库")
+        val remoteDb = parseKdbxBytes(remoteBytes)
+            ?: return@withContext SyncOutcome.Error("无法解密云端冲突数据库")
+
+        val baseDb = if (baseSnapshotBytes != null) {
+            parseKdbxBytes(baseSnapshotBytes) ?: localDb
+        } else {
+            val cached = syncCache.readCache(remotePath)
+            if (cached != null) parseKdbxBytes(cached) ?: localDb else localDb
+        }
+
+        val baseLite = KdbxDatabaseLite(baseDb.rootGroup, baseDb.deletedObjects)
+        val localLite = KdbxDatabaseLite(localDb.rootGroup, localDb.deletedObjects)
+        val remoteLite = KdbxDatabaseLite(remoteDb.rootGroup, remoteDb.deletedObjects)
+
+        val mergeResult = KdbxMerger.mergeDatabases(baseLite, localLite, remoteLite)
+
+        if (mergeResult.conflicts.isNotEmpty()) {
+            _conflictFlow.value = mergeResult.conflicts
+            pendingRemoteEngine = syncEngine
+            pendingRemotePath = remotePath
+            pendingLocalDb = localDb
+            pendingRemoteDb = remoteDb
+            SyncOutcome.ConflictNeedsUser(mergeResult.conflicts)
+        } else {
+            // 无条目级冲突，自动合并
+            val mergedDb = localDb.copy(
+                rootGroup = mergeResult.mergedRoot,
+                deletedObjects = mergeResult.mergedDeletedObjects
+            )
+            val mergedBytes = serializeLocalDatabase(mergedDb)
+                ?: return@withContext SyncOutcome.Error("序列化合并数据库失败")
+
+            val uploadResult = syncEngine.markResolvedAndUpload(remotePath, mergedBytes)
+            if (uploadResult.isSuccess) {
+                databaseSession.updateDatabaseMeta { mergedDb }
+                databaseSession.save()
+                SyncOutcome.MergedAndUploaded
+            } else {
+                SyncOutcome.Error("上传合并版本失败: ${uploadResult.exceptionOrNull()?.message}")
+            }
+        }
+    }
+
+    private suspend fun serializeLocalDatabase(db: KdbxDatabase): ByteArray? = withContext(Dispatchers.Default) {
+        databaseSession.useCredentials { pwd, key ->
+            val pwdClone = pwd?.clone()
+            val keyClone = key?.clone()
+            try {
+                val baos = ByteArrayOutputStream()
+                KdbxFile.save(baos, db, pwdClone ?: CharArray(0), keyClone)
+                baos.toByteArray()
+            } catch (_: Exception) {
+                null
+            } finally {
+                pwdClone?.let { Arrays.fill(it, '0') }
+                keyClone?.let { Arrays.fill(it, 0.toByte()) }
+            }
+        }
+    }
+
+    private suspend fun parseKdbxBytes(bytes: ByteArray): KdbxDatabase? = withContext(Dispatchers.Default) {
+        databaseSession.useCredentials { pwd, key ->
+            val pwdClone = pwd?.clone()
+            val keyClone = key?.clone()
+            try {
+                KdbxFile.load(ByteArrayInputStream(bytes), pwdClone ?: CharArray(0), keyClone)
+            } catch (_: Exception) {
+                null
+            } finally {
+                pwdClone?.let { Arrays.fill(it, '0') }
+                keyClone?.let { Arrays.fill(it, 0.toByte()) }
+            }
+        }
+    }
+
+    private suspend fun loadAndApplyRemoteBytes(remoteBytes: ByteArray): Boolean {
+        val remoteDb = parseKdbxBytes(remoteBytes) ?: return false
+        databaseSession.updateDatabaseMeta { remoteDb }
+        databaseSession.save()
+        return true
+    }
+
+    private fun resolveProvider(): SyncProvider? {
+        return when (syncCredentialsStore.loadProvider()) {
+            CloudSyncProvider.WEBDAV -> {
+                val cfg = syncCredentialsStore.loadWebDavConfig() ?: return null
+                if (cfg.url.isBlank()) return null
+                val pwdChars = cfg.password.toCharArray()
+                try {
+                    WebDavSyncProvider(
+                        serverUrl = cfg.url,
+                        username = cfg.username,
+                        passwordChars = pwdChars
+                    )
+                } finally {
+                    pwdChars.fill('0')
+                }
+            }
+            CloudSyncProvider.S3_COMPATIBLE -> {
+                val cfg = syncCredentialsStore.loadS3Config() ?: return null
+                if (cfg.endpoint.isBlank() || cfg.bucket.isBlank()) return null
+                S3SyncProvider(
+                    endpoint = cfg.endpoint,
+                    bucketName = cfg.bucket,
+                    region = cfg.region,
+                    accessKeyId = cfg.accessKey,
+                    secretAccessKey = cfg.secretKey
+                )
+            }
+        }
+    }
+
+    private fun resolveRemotePath(defaultFileName: String): String {
+        return when (syncCredentialsStore.loadProvider()) {
+            CloudSyncProvider.WEBDAV -> {
+                val cfg = syncCredentialsStore.loadWebDavConfig()
+                val path = cfg?.remotePath?.trim()
+                if (!path.isNullOrBlank()) {
+                    if (path.startsWith("/")) path else "/$path"
+                } else {
+                    "/$defaultFileName"
+                }
+            }
+            CloudSyncProvider.S3_COMPATIBLE -> {
+                val cfg = syncCredentialsStore.loadS3Config()
+                cfg?.objectKey?.trim()?.ifBlank { defaultFileName } ?: defaultFileName
+            }
+        }
+    }
+
+    private fun applyResolvedEntryToGroup(
+        group: com.keepasskey.core.model.KdbxGroup,
+        entry: KdbxEntry
+    ): com.keepasskey.core.model.KdbxGroup {
+        val targetParentId = entry.parentGroupId ?: group.id
+        if (group.id == targetParentId) {
+            val idx = group.entries.indexOfFirst { it.id == entry.id }
+            val newEntries = group.entries.toMutableList()
+            if (idx >= 0) {
+                newEntries[idx] = entry
+            } else {
+                newEntries.add(entry)
+            }
+            return group.copy(entries = newEntries)
+        }
+        val newSubs = group.subgroups.map { applyResolvedEntryToGroup(it, entry) }
+        return group.copy(subgroups = newSubs)
+    }
+
+    private fun hasDatabaseContentChanged(current: KdbxDatabase, reference: KdbxDatabase?): Boolean {
+        if (reference == null) return true
+        val curEntries = current.rootGroup.allEntries()
+        val refEntries = reference.rootGroup.allEntries()
+        if (curEntries.size != refEntries.size) return true
+        val refMap = refEntries.associateBy { it.id }
+        for (ce in curEntries) {
+            val re = refMap[ce.id] ?: return true
+            if (ce.title != re.title ||
+                ce.userName != re.userName ||
+                ce.password?.readString() != re.password?.readString() ||
+                ce.url != re.url ||
+                ce.notes != re.notes
+            ) {
+                return true
+            }
+        }
+        return false
+    }
+}

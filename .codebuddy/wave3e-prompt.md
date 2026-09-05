@@ -23,10 +23,18 @@
 - `OtpEngine.calculateTotp(secretKeyBase32, ...)` / `getRemainingSeconds`（core 模块）；TOTP secret 存 KDBX 标准字段 `otp`（KeyUriFormat: otpauth://totp/...）——解析函数若 core 无则 E 自行实现 KeyUri 解析（放 core/otp 可新建文件——Wave 3 无并行冲突，core 允许你修改）
 - 类型化异常 `KdbxInvalidCredentialsException` 等
 
-## Wave 2 已交付 API（待 Wave 2 验收后由主会话补入实际签名）
-- Wave 2-C：`sync.engine.SyncEngine/SyncCache` + `KdbxMerger.mergeDatabases(base, local, remote): MergeResult` + `WebDavSyncProvider.uploadAtomic(...)` + S3 首传
-- Wave 2-D：`VaultRepository.getKdbxEntries()/findEntriesForRpId()/saveNewPasskeyEntry()/patchPasskeySignCount()/saveAutofillCredential()` 等
-- 【主会话补注区——启动前必须替换为实际签名】
+## Wave 2 已交付 API（git 4927189，实际签名，已核实）
+- Wave 2-C（sync 模块）：
+  - `sync.engine.SyncCache(cacheDir: File)`：`isCached(remotePath)/readCache(remotePath): ByteArray?/hasLocalChanges(remotePath)/writeCache(remotePath, data, updateVersion=true): String/updateBase(remotePath, baseVersion, etag?)/getState(remotePath): SyncCacheState?/clear(remotePath)`；`SyncCacheState`（含 localVersion/baseVersion/etag/lastSyncMillis）；伴生 `SyncCache.sha256Hex(bytes)`
+  - `sync.engine.SyncEngine(provider: SyncProvider, cache: SyncCache)`：`var isOffline: Boolean`；`val events: MutableSharedFlow<SyncCacheEvent>`；`suspend openRemote(remotePath): SyncOpenResult`（sealed：RemoteSynced(remoteBytes, etag)/ConflictDetected(localBytes, remoteBytes, remoteEtag)/LocalWinAutoUploaded(etag)/RemoteLostRestored(etag)/CacheHitOffline(localBytes)/RemoteUnreachableUsingCache(localBytes)）；`suspend commitLocal(remotePath, localBytes): SyncCommitResult`（sealed：Uploaded(newEtag)/ConflictNeedsMerge(remoteBytes, remoteEtag)/RemoteUnreachable(keptLocal)）；`suspend markResolvedAndUpload(remotePath, mergedBytes): Result<String>`
+  - `sync.merge.KdbxMerger`：`data class KdbxDatabaseLite(rootGroup: KdbxGroup, deletedObjects: List<DeletedObject> = emptyList())`；`data class MergeResult(mergedRoot, mergedDeletedObjects, conflicts: List<ConflictedEntryPair>)`；`fun mergeDatabases(base, local, remote): MergeResult`；既有 `ConflictedEntryPair(entryId: String, localEntry, remoteEntry, modifiedFields)` 与 `ConflictResolutionChoice{KEEP_LOCAL,KEEP_REMOTE,DUPLICATE_BOTH}`、`resolveConflict(pair, choice)` 保持兼容
+  - `webdav.WebDavSyncProvider(serverUrl, username, passwordChars, client?)`：`suspend uploadAtomic(remotePath, data, expectedEtag? = null): Result<String>` 新增；既有 testConnection/getMetadata/download/upload/delete 不变
+  - `s3.S3SyncProvider(endpoint, bucketName, region, accessKeyId, secretAccessKey, client?)`：不变（首传已带 If-None-Match:*）
+  - `sync.model.cleanEtag()` 扩展函数
+- Wave 2-D（app 仓库层，VaultRepository/Real/Fake 三处一致）：
+  - `suspend getKdbxEntries(): List<KdbxEntry>`；`suspend findEntriesForRpId(rpId): List<KdbxEntry>`；`suspend findPasskeyByCredentialId(credentialId): KdbxEntry?`；`suspend saveNewPasskeyEntry(data: PasskeyData): KdbxEntry`；`suspend patchPasskeySignCount(entryId: String, newCount: Int)`；`suspend saveAutofillCredential(packageName, webDomain?, username, passwordChars: CharArray)`
+  - `app.passkey.DomainMatcher`：`extractDomain(url)/isDomainMatch(rpIdOrDomain, originHost)/isPackageMatch(entryPackageHint, callingPackage)`
+  - CredentialProviderService/AutofillService/4 个 Activity 已真实化——**不得推翻，仅编译性最小修补**
 
 ## 文件所有权（Wave 3 无并行代理，但仍需守边界）
 - 允许修改：`app/**`（不得推翻 Wave 2-D 的 passkey/autofill 服务实现，仅可做编译性最小修补并报告）、`core/**`（仅允许新增 otp KeyUri 解析等小文件，不得改动 Wave 1 已交付语义）。

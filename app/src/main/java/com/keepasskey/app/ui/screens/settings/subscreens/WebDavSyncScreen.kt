@@ -106,6 +106,7 @@ fun CloudSyncScreen(
     onAutoSyncToggle: (Boolean) -> Unit,
     onWifiOnlyToggle: (Boolean) -> Unit,
     onTriggerSync: () -> Unit,
+    onTestConnection: () -> Unit = onTriggerSync,
     onProviderChange: (CloudSyncProvider) -> Unit = {},
     onUpdateWebDav: (url: String, username: String, password: String, remotePath: String) -> Unit = { _, _, _, _ -> },
     onUpdateS3: (endpoint: String, bucket: String, region: String, accessKey: String, secretKey: String, objectKey: String) -> Unit = { _, _, _, _, _, _ -> },
@@ -517,7 +518,7 @@ fun CloudSyncScreen(
                         }
 
                         OutlinedButton(
-                            onClick = { onTriggerSync() },
+                            onClick = { onTestConnection() },
                             shape = RoundedCornerShape(12.dp),
                             modifier = Modifier.weight(1f)
                         ) {
@@ -869,6 +870,7 @@ fun WebDavSyncScreen(
     onAutoSyncToggle: (Boolean) -> Unit,
     onWifiOnlyToggle: (Boolean) -> Unit,
     onTriggerSync: () -> Unit,
+    onTestConnection: () -> Unit = onTriggerSync,
     onProviderChange: (CloudSyncProvider) -> Unit = {},
     onUpdateWebDav: (url: String, username: String, password: String, remotePath: String) -> Unit = { _, _, _, _ -> },
     onUpdateS3: (endpoint: String, bucket: String, region: String, accessKey: String, secretKey: String, objectKey: String) -> Unit = { _, _, _, _, _, _ -> },
@@ -893,6 +895,7 @@ fun WebDavSyncScreen(
         onAutoSyncToggle = onAutoSyncToggle,
         onWifiOnlyToggle = onWifiOnlyToggle,
         onTriggerSync = onTriggerSync,
+        onTestConnection = onTestConnection,
         onProviderChange = onProviderChange,
         onUpdateWebDav = onUpdateWebDav,
         onUpdateS3 = onUpdateS3,

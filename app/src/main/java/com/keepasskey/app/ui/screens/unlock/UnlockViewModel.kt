@@ -126,9 +126,10 @@ class UnlockViewModel @Inject constructor(
             try {
                 when (val result = vaultRepository.unlockActiveDatabase(passwordChars)) {
                     is KdbxResult.Success -> {
-                        // 若开启生物识别，自动保存经 Keystore 硬件加密的凭据
-                        persistBiometricCredentialIfEnabled(password)
-                        _uiState.update { it.copy(isLoading = false) }
+                        // 若开启生物识别，自动保存经 Keystore 硬件加密的凭据 (CharArray 版本并及时清零)
+                        persistBiometricCredentialIfEnabled(passwordChars)
+                        // 解锁成功后立即擦除 UiState 中的明文密码字符串，防止内存长期驻留
+                        _uiState.update { it.copy(isLoading = false, password = "") }
                         _events.emit(UnlockEvent.UnlockSuccess)
                     }
                     is KdbxResult.Failure -> {
@@ -146,7 +147,15 @@ class UnlockViewModel @Inject constructor(
         }
     }
 
-    private suspend fun persistBiometricCredentialIfEnabled(password: String) {
+    /**
+     * 若开启生物识别，自动保存经 Keystore 硬件加密的凭据。
+     *
+     * 敏感数据设计考量与边界说明 (Wave 3-E P2-18)：
+     * 当前 Compose 输入控件 (TextField) 与 UiState 仍存在 String 边界妥协（由于 Compose 官方 API 设计限制）；
+     * 本方法改造为消费 [CharArray]，采用 CharBuffer 转换为临时 UTF-8 字节并在 finally 块中立即显式清零擦除，
+     * 杜绝密码以持久明文字符串穿越硬件加密管线。
+     */
+    private suspend fun persistBiometricCredentialIfEnabled(passwordChars: CharArray) {
         val dbId = activeDatabaseId ?: return
         val storage = biometricCredentialStorage ?: return
         val authManager = biometricAuthManager ?: return
@@ -155,11 +164,21 @@ class UnlockViewModel @Inject constructor(
 
         try {
             val cipher = authManager.prepareEncryptCipher(dbId)
-            val bytes = password.toByteArray(Charsets.UTF_8)
-            val encrypted = cipher.doFinal(bytes)
-            storage.saveEncryptedCredential(dbId, cipher.iv, encrypted)
-            bytes.fill(0)
-            _uiState.update { it.copy(isQuickUnlockAvailable = true) }
+            val charBuffer = java.nio.CharBuffer.wrap(passwordChars)
+            val byteBuffer = java.nio.charset.StandardCharsets.UTF_8.encode(charBuffer)
+            val bytes = ByteArray(byteBuffer.remaining())
+            byteBuffer.get(bytes)
+            try {
+                val encrypted = cipher.doFinal(bytes)
+                storage.saveEncryptedCredential(dbId, cipher.iv, encrypted)
+                _uiState.update { it.copy(isQuickUnlockAvailable = true) }
+            } finally {
+                bytes.fill(0)
+                byteBuffer.clear()
+                if (byteBuffer.hasArray()) {
+                    byteBuffer.array().fill(0)
+                }
+            }
         } catch (ignored: Exception) {
             // 某些设备在缺少锁屏 PIN/生物识别时跳过存储
         }

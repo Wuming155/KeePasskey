@@ -50,5 +50,12 @@
 -keep class com.keepasskey.database.session.** { *; }
 
 # 8. 系统服务生命周期组件保留
--keep class com.keepasskey.app.passkey.KeePasskeyCredentialProviderService { *; }
--keep class com.keepasskey.app.autofill.KeePasskeyAutofillService { *; }
+#    包级保留：覆盖 Credential Provider / Autofill 服务、Launcher Activity、
+#    DomainMatcher 与 AutofillFieldScanner（系统经 Manifest 反射实例化，混淆即失效）。
+-keep class com.keepasskey.app.passkey.** { *; }
+-keep class com.keepasskey.app.autofill.** { *; }
+
+# 9. androidx.credentials (Credential Manager Provider API)
+#    服务回调与 PendingIntentHandler 结果回传依赖框架反射；consumer 规则缺失时兜底。
+-keep class androidx.credentials.** { *; }
+-dontwarn androidx.credentials.**

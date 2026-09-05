@@ -535,6 +535,11 @@
     <string name="sync_cd_test_connection">测试连接</string>
     <string name="sync_feedback_connecting">正在通过 %1$s 连接云端服务器...</string>
     <string name="sync_feedback_done">%1$s 连接成功，云端数据库为最新版本</string>
+    <string name="sync_feedback_uploaded">本地修改已成功推送至 %1$s 云端</string>
+    <string name="sync_feedback_merged">云端与本地修改已自动合并并同步至 %1$s</string>
+    <string name="sync_feedback_conflict">检测到多端并发冲突，请在冲突解决界面处理</string>
+    <string name="sync_feedback_offline">当前处于离线模式或网络不可达，已保留本地修改</string>
+    <string name="sync_feedback_error">同步失败：%1$s</string>
     <string name="sync_section_offline">离线与后台同步</string>
     <string name="sync_offline_cache_title">离线缓存</string>
     <string name="sync_offline_cache_sub">断网时继续读写本地缓存，联网后自动同步</string>
@@ -738,6 +743,12 @@
     <string name="health_status_safe">已防护</string>
     <string name="health_tips_title">安全建议</string>
     <string name="health_tips_desc">为每个账户使用唯一的高强度密码，并开启双重认证；KeePasskey 可以帮你生成并记住它们</string>
+    <string name="health_level_excellent">优秀</string>
+    <string name="health_level_good">良好</string>
+    <string name="health_level_fair">一般</string>
+    <string name="health_level_poor">需改进</string>
+    <string name="health_not_scanned">未扫描</string>
+    <string name="health_not_scanned_desc">点击重新扫描以评估密码库安全健康状态</string>
 
     <!-- ===== 安全设置补充 (SecuritySettingsScreen) ===== -->
     <string name="sec_autolock_dialog_desc">选择无操作时的自动锁定等待时长，超时后需重新解锁密码库</string>

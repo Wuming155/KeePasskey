@@ -4,8 +4,14 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.SettingsRepository
+import com.keepasskey.app.data.repository.VaultRepository
+import com.keepasskey.app.sync.SyncCoordinator
+import com.keepasskey.app.sync.SyncCredentialsStore
+import com.keepasskey.app.sync.SyncOutcome
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.theme.AppThemeMode
+import com.keepasskey.database.audit.HealthCheckEngine
+import com.keepasskey.database.audit.PasswordRiskLevel
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -23,32 +29,22 @@ import javax.inject.Inject
  */
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
-    private val settingsRepository: SettingsRepository
+    private val settingsRepository: SettingsRepository,
+    private val vaultRepository: VaultRepository,
+    private val syncCredentialsStore: SyncCredentialsStore,
+    private val syncCoordinator: SyncCoordinator
 ) : ViewModel() {
 
     companion object {
+        private const val HEALTH_SCORE_BASE = 100
+        private const val HEALTH_PENALTY_WEAK = 5
+        private const val HEALTH_PENALTY_REUSED = 10
+        private const val HEALTH_PENALTY_EXPIRED = 15
+
         // 标记当前应用进程生命周期内是否已执行过冷启动同步检测
         // 当软件被彻底杀死重启时，该静态字段重新变为 false，从而再次自动触发云端同步
         @Volatile
         private var hasCheckedColdStartSync = false
-    }
-
-    init {
-        checkAndTriggerColdStartSync()
-    }
-
-    private fun checkAndTriggerColdStartSync() {
-        if (hasCheckedColdStartSync) return
-        hasCheckedColdStartSync = true
-        viewModelScope.launch {
-            try {
-                val currentSettings = settingsRepository.getSettings().first()
-                if (currentSettings.syncOnColdStart) {
-                    triggerSync()
-                }
-            } catch (_: Exception) {
-            }
-        }
     }
 
     private val syncStateFlow = MutableStateFlow(
@@ -63,13 +59,13 @@ class SettingsViewModel @Inject constructor(
 
     private val healthStateFlow = MutableStateFlow(
         HealthCheckUiState(
-            healthScore = 94,
-            healthStatus = "优秀",
-            healthMessage = "发现 1 个密码重复使用，未发现已知泄露",
+            healthScore = 0,
+            healthStatus = "未扫描",
+            healthMessage = "点击重新扫描以评估密码库安全健康状态",
             weakPasswordCount = 0,
-            reusedPasswordCount = 1,
+            reusedPasswordCount = 0,
             compromisedPasswordCount = 0,
-            lastHealthScanTime = "今天 10:20",
+            lastHealthScanTime = "未扫描",
             isHealthScanning = false
         )
     )
@@ -344,6 +340,47 @@ class SettingsViewModel @Inject constructor(
         initialValue = SettingsUiState()
     )
 
+    init {
+        restoreSyncCredentials()
+        checkAndTriggerColdStartSync()
+    }
+
+    private fun restoreSyncCredentials() {
+        val store = syncCredentialsStore ?: return
+        val savedProvider = store.loadProvider()
+        val savedWebDav = store.loadWebDavConfig()
+        val savedS3 = store.loadS3Config()
+        syncStateFlow.update { cur ->
+            cur.copy(
+                provider = savedProvider,
+                webdavUrl = savedWebDav?.url ?: cur.webdavUrl,
+                webdavUsername = savedWebDav?.username ?: cur.webdavUsername,
+                webdavPassword = savedWebDav?.password ?: cur.webdavPassword,
+                webdavRemotePath = savedWebDav?.remotePath ?: cur.webdavRemotePath,
+                s3Endpoint = savedS3?.endpoint ?: cur.s3Endpoint,
+                s3Bucket = savedS3?.bucket ?: cur.s3Bucket,
+                s3Region = savedS3?.region ?: cur.s3Region,
+                s3AccessKey = savedS3?.accessKey ?: cur.s3AccessKey,
+                s3SecretKey = savedS3?.secretKey ?: cur.s3SecretKey,
+                s3ObjectKey = savedS3?.objectKey ?: cur.s3ObjectKey
+            )
+        }
+    }
+
+    private fun checkAndTriggerColdStartSync() {
+        if (hasCheckedColdStartSync) return
+        hasCheckedColdStartSync = true
+        viewModelScope.launch {
+            try {
+                val currentSettings = settingsRepository.getSettings().first()
+                if (currentSettings.syncOnColdStart) {
+                    triggerSync()
+                }
+            } catch (_: Exception) {
+            }
+        }
+    }
+
     fun setAppLanguage(language: com.keepasskey.app.data.repository.AppLanguage) {
         viewModelScope.launch {
             settingsRepository.setAppLanguage(language)
@@ -393,6 +430,7 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun setSyncProvider(provider: CloudSyncProvider) {
+        syncCredentialsStore?.saveProvider(provider)
         syncStateFlow.update { it.copy(provider = provider) }
     }
 
@@ -402,6 +440,7 @@ class SettingsViewModel @Inject constructor(
         password: String = syncStateFlow.value.webdavPassword,
         remotePath: String
     ) {
+        syncCredentialsStore?.saveWebDavConfig(url, username, password, remotePath)
         syncStateFlow.update {
             it.copy(
                 webdavUrl = url,
@@ -420,6 +459,7 @@ class SettingsViewModel @Inject constructor(
         secretKey: String = syncStateFlow.value.s3SecretKey,
         objectKey: String
     ) {
+        syncCredentialsStore?.saveS3Config(endpoint, bucket, region, accessKey, secretKey, objectKey)
         syncStateFlow.update {
             it.copy(
                 s3Endpoint = endpoint,
@@ -718,6 +758,7 @@ class SettingsViewModel @Inject constructor(
     fun triggerSync() {
         if (syncStateFlow.value.isSyncing) return
         val provider = syncStateFlow.value.provider
+        val coordinator = syncCoordinator
         viewModelScope.launch {
             syncStateFlow.update {
                 it.copy(
@@ -725,12 +766,67 @@ class SettingsViewModel @Inject constructor(
                     syncFeedbackMessage = UiMessage(R.string.sync_feedback_connecting, listOf(provider.protocol))
                 )
             }
-            delay(1200)
+
+            if (coordinator != null) {
+                val outcome = coordinator.syncNow()
+                val feedback = when (outcome) {
+                    is SyncOutcome.UpToDate -> UiMessage(R.string.sync_feedback_done, listOf(provider.protocol))
+                    is SyncOutcome.UploadedLocal -> UiMessage(R.string.sync_feedback_uploaded, listOf(provider.protocol))
+                    is SyncOutcome.MergedAndUploaded -> UiMessage(R.string.sync_feedback_merged, listOf(provider.protocol))
+                    is SyncOutcome.ConflictNeedsUser -> UiMessage(R.string.sync_feedback_conflict)
+                    is SyncOutcome.Offline -> UiMessage(R.string.sync_feedback_offline)
+                    is SyncOutcome.Error -> UiMessage(R.string.sync_feedback_error, listOf(outcome.message))
+                }
+                syncStateFlow.update {
+                    it.copy(
+                        isSyncing = false,
+                        syncFeedbackMessage = feedback
+                    )
+                }
+            } else {
+                delay(1200)
+                syncStateFlow.update {
+                    it.copy(
+                        isSyncing = false,
+                        syncFeedbackMessage = UiMessage(R.string.sync_feedback_done, listOf(provider.protocol))
+                    )
+                }
+            }
+        }
+    }
+
+    fun testSyncConnection() {
+        if (syncStateFlow.value.isSyncing) return
+        val provider = syncStateFlow.value.provider
+        val coordinator = syncCoordinator
+        viewModelScope.launch {
             syncStateFlow.update {
                 it.copy(
-                    isSyncing = false,
-                    syncFeedbackMessage = UiMessage(R.string.sync_feedback_done, listOf(provider.protocol))
+                    isSyncing = true,
+                    syncFeedbackMessage = UiMessage(R.string.sync_feedback_connecting, listOf(provider.protocol))
                 )
+            }
+            if (coordinator != null) {
+                val result = coordinator.testConnection()
+                val feedback = if (result.isSuccess) {
+                    UiMessage(R.string.sync_feedback_done, listOf(provider.protocol))
+                } else {
+                    UiMessage(R.string.sync_feedback_error, listOf(result.exceptionOrNull()?.message ?: "连接失败"))
+                }
+                syncStateFlow.update {
+                    it.copy(
+                        isSyncing = false,
+                        syncFeedbackMessage = feedback
+                    )
+                }
+            } else {
+                delay(800)
+                syncStateFlow.update {
+                    it.copy(
+                        isSyncing = false,
+                        syncFeedbackMessage = UiMessage(R.string.sync_feedback_done, listOf(provider.protocol))
+                    )
+                }
             }
         }
     }
@@ -743,15 +839,56 @@ class SettingsViewModel @Inject constructor(
         if (healthStateFlow.value.isHealthScanning) return
         viewModelScope.launch {
             healthStateFlow.update { it.copy(isHealthScanning = true) }
-            delay(1000)
-            healthStateFlow.update {
-                it.copy(
-                    isHealthScanning = false,
-                    healthScore = 96,
-                    healthStatus = "优秀",
-                    healthMessage = "全库扫描完成，未发现已知泄露与弱密码",
-                    lastHealthScanTime = "刚刚"
-                )
+            try {
+                val entries = vaultRepository.getKdbxEntries()
+                val issues = HealthCheckEngine.analyzeEntries(entries)
+
+                val weakCount = issues.count { it.riskLevel == PasswordRiskLevel.WEAK }
+                val reusedCount = issues.count { it.riskLevel == PasswordRiskLevel.REUSED }
+                val expiredCount = issues.count { it.riskLevel == PasswordRiskLevel.EXPIRED }
+
+                val calculatedScore = (HEALTH_SCORE_BASE -
+                        weakCount * HEALTH_PENALTY_WEAK -
+                        reusedCount * HEALTH_PENALTY_REUSED -
+                        expiredCount * HEALTH_PENALTY_EXPIRED).coerceIn(0, 100)
+
+                val status = when {
+                    calculatedScore >= 90 -> "优秀"
+                    calculatedScore >= 70 -> "良好"
+                    calculatedScore >= 50 -> "一般"
+                    else -> "需改进"
+                }
+
+                val nowTime = java.time.format.DateTimeFormatter.ofPattern("HH:mm", java.util.Locale.getDefault())
+                    .format(java.time.LocalTime.now())
+                val lastScanText = "今天 $nowTime"
+
+                val message = when {
+                    weakCount == 0 && reusedCount == 0 -> "全库扫描完成，未发现弱密码与复用"
+                    reusedCount > 0 && weakCount > 0 -> "发现 $weakCount 个弱密码，$reusedCount 个重复使用"
+                    reusedCount > 0 -> "发现 $reusedCount 个密码重复使用，建议启用唯一密码"
+                    else -> "发现 $weakCount 个弱密码，建议提升密码复杂度"
+                }
+
+                healthStateFlow.update {
+                    it.copy(
+                        isHealthScanning = false,
+                        healthScore = calculatedScore,
+                        healthStatus = status,
+                        healthMessage = message,
+                        weakPasswordCount = weakCount,
+                        reusedPasswordCount = reusedCount,
+                        compromisedPasswordCount = 0,
+                        lastHealthScanTime = lastScanText
+                    )
+                }
+            } catch (e: Exception) {
+                healthStateFlow.update {
+                    it.copy(
+                        isHealthScanning = false,
+                        healthMessage = "健康扫描失败: ${e.message}"
+                    )
+                }
             }
         }
     }

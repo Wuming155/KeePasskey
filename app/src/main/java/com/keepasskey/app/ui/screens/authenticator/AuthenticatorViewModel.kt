@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.ui.model.UiMessage
+import com.keepasskey.core.otp.OtpEngine
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -23,15 +24,15 @@ class AuthenticatorViewModel @Inject constructor(
 ) : ViewModel() {
 
     private val searchQueryFlow = MutableStateFlow("")
-    private val timerSecondsFlow = MutableStateFlow(calculateCurrentRemainingSeconds())
+    private val timerSecondsFlow = MutableStateFlow(OtpEngine.getRemainingSeconds())
     private val userMessageFlow = MutableStateFlow<UiMessage?>(null)
 
     init {
         // 每秒自增刷新 TOTP 剩余秒数倒计时
-        viewModelScope.launch {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.Default) {
             while (isActive) {
                 delay(1000)
-                timerSecondsFlow.value = calculateCurrentRemainingSeconds()
+                timerSecondsFlow.value = OtpEngine.getRemainingSeconds()
             }
         }
     }
@@ -41,12 +42,9 @@ class AuthenticatorViewModel @Inject constructor(
         searchQueryFlow,
         timerSecondsFlow,
         userMessageFlow
-    ) { entries, query, remainingSeconds, message ->
-        // 过滤包含 TOTP 验证码的条目
-        val totpEntries = entries.filter { entry ->
-            entry.totpCode != null || entry.title.contains("GitHub", ignoreCase = true) ||
-                    entry.title.contains("Google", ignoreCase = true) || entry.title.contains("AWS", ignoreCase = true)
-        }
+    ) { entries, query, _, message ->
+        // 过滤包含真实 TOTP 密钥或有效验证码的条目
+        val totpEntries = entries.filter { !it.totpSecret.isNullOrBlank() || it.totpCode != null }
 
         val filtered = if (query.isBlank()) {
             totpEntries
@@ -59,10 +57,36 @@ class AuthenticatorViewModel @Inject constructor(
         }
 
         val items = filtered.map { entry ->
-            val raw = entry.totpCode ?: generateMockCode(entry.id, remainingSeconds)
-            val formatted = if (raw.length == 6) {
-                "${raw.substring(0, 3)} ${raw.substring(3)}"
-            } else raw
+            val secret = entry.totpSecret
+            val period = entry.totpPeriod
+            val digits = entry.totpDigits
+            val algo = when (entry.totpAlgorithm.uppercase()) {
+                "SHA256" -> OtpEngine.HashAlgorithm.SHA256
+                "SHA512" -> OtpEngine.HashAlgorithm.SHA512
+                else -> OtpEngine.HashAlgorithm.SHA1
+            }
+
+            val remaining = OtpEngine.getRemainingSeconds(periodSeconds = period)
+            val raw = if (!secret.isNullOrBlank()) {
+                try {
+                    OtpEngine.calculateTotp(
+                        secretKeyBase32 = secret,
+                        periodSeconds = period,
+                        digits = digits,
+                        algorithm = algo
+                    )
+                } catch (_: Exception) {
+                    entry.totpCode ?: "000000"
+                }
+            } else {
+                entry.totpCode ?: "000000"
+            }
+
+            val formatted = when (raw.length) {
+                6 -> "${raw.substring(0, 3)} ${raw.substring(3)}"
+                8 -> "${raw.substring(0, 4)} ${raw.substring(4)}"
+                else -> raw
+            }
 
             TotpCardItem(
                 entryId = entry.id,
@@ -70,7 +94,7 @@ class AuthenticatorViewModel @Inject constructor(
                 account = entry.username,
                 codeFormatted = formatted,
                 codeRaw = raw,
-                remainingSeconds = remainingSeconds,
+                remainingSeconds = remaining,
                 iconName = entry.iconName,
                 url = entry.url
             )
@@ -97,16 +121,5 @@ class AuthenticatorViewModel @Inject constructor(
 
     fun clearUserMessage() {
         userMessageFlow.value = null
-    }
-
-    private fun calculateCurrentRemainingSeconds(): Int {
-        val nowSec = (System.currentTimeMillis() / 1000).toInt()
-        val remainder = nowSec % 30
-        return 30 - remainder
-    }
-
-    private fun generateMockCode(seed: String, remainingSeconds: Int): String {
-        val hash = kotlin.math.abs(seed.hashCode() xor ((System.currentTimeMillis() / 30000).toInt()))
-        return String.format("%06d", hash % 1000000)
     }
 }

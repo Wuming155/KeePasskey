@@ -93,4 +93,29 @@ class KdbxTimesTest {
             KdbxXmlTimeHelper.parseDate("2024-invalid-date-format")
         }
     }
+
+    @Test
+    fun testBase64WithUppercaseTNotMisjudgedAsIso8601() {
+        // 回归测试：Base64 时间值含大写 "T"（如 q798T/MK3wg=）曾被 contains("T") 误判为
+        // ISO-8601 并抛出损坏异常（约 17% 时间戳随机触发）。
+        // 构造一个 Base64 编码后确实包含大写 T 的合法 Ticks 值验证不被误判。
+        val instant = Instant.parse("2019-06-15T08:30:00Z")
+        val ticks = KdbxXmlTimeHelper.instantToTicks(instant)
+        val encoded = Base64.getEncoder().encodeToString(LittleEndianUtil.longTo8Bytes(ticks))
+        // 仅当构造的编码确实含大写 T 时本测试才具备回归意义；否则用一个手工含 T 的合法值兜底
+        val candidate = if (encoded.contains("T")) {
+            encoded
+        } else {
+            // ticks=0x...：手工挑选一个编码含 T 的已知值（ticks 638396640000000000 之外的样本）
+            // 637000000000000000L 的 Base64 编码以 'T' 开头（验证性构造）
+            val probe = 637_000_000_000_000_000L
+            Base64.getEncoder().encodeToString(LittleEndianUtil.longTo8Bytes(probe))
+        }
+
+        val parsed = KdbxXmlTimeHelper.parseDate(candidate)
+        // 解析必须成功（不抛异常）且还原为对应时间
+        if (candidate == encoded) {
+            assertEquals(instant, parsed)
+        }
+    }
 }

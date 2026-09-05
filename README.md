@@ -164,9 +164,10 @@ sync/                # 同步层：文件存储抽象 + WebDAV / S3 兼容实现
 - **KeePassDX**（`参考项目/KeePassDX-master`）：Kotlin 实现的 Android KeePass 应用，包含 `database`、`crypto` 模块，最贴近本项目。
 - **keepass2android**（`参考项目/keepass2android-main`）：功能丰富的 Java 实现，可参考同步与自动填充方案。
 - **KeePass 官方**（`参考项目/KeePass-2.61.1-Source`）：官方 C# 实现，kdbx 二进制 / XML 格式的权威参照。
+- **KeePassXC**（`参考项目/keepassxc-develop`）：跨平台 C++/Qt 实现，其 `Merger` KDBX 合并引擎与通行密钥属性规范是本项目合并与 Passkey 数据模型的直接算法参考。
 - **Monica**（`参考项目/Monica-main`）：Kotlin 项目，可参考通用工程结构与 Compose 实践。
 
-> 仅作为学习与架构参考，注意各自的开源许可证约束；本仓库代码独立编写，严禁复制其代码入库。各功能的参考定位详见 `.codebuddy/skills/reference-projects.md`。
+> 仅作为学习与架构参考，注意各自的开源许可证约束；本仓库代码独立编写，严禁复制其代码入库。各功能的参考定位详见 `.codebuddy/skills/reference-projects.md`；5 个参考项目的深度架构分析文档集中于 `参考项目/*-架构分析.md` 并同步收录在 `.codebuddy/skills/references/`。
 
 ---
 

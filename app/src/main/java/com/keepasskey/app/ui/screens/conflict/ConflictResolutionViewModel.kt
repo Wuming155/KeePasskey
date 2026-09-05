@@ -1,9 +1,12 @@
 package com.keepasskey.app.ui.screens.conflict
 
 import androidx.lifecycle.ViewModel
-import com.keepasskey.app.R
-import com.keepasskey.app.ui.model.UiMessage
 import androidx.lifecycle.viewModelScope
+import com.keepasskey.app.R
+import com.keepasskey.app.sync.SyncCoordinator
+import com.keepasskey.app.sync.SyncOutcome
+import com.keepasskey.app.ui.model.UiMessage
+import com.keepasskey.sync.merge.ConflictResolutionChoice
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -21,51 +24,51 @@ sealed interface ConflictResolutionEvent {
 }
 
 @HiltViewModel
-class ConflictResolutionViewModel @Inject constructor() : ViewModel() {
+class ConflictResolutionViewModel @Inject constructor(
+    private val syncCoordinator: SyncCoordinator
+) : ViewModel() {
 
-    private val _uiState = MutableStateFlow(
-        ConflictResolutionUiState(
-            entries = listOf(
-                ConflictedEntryItem(
-                    id = "entry_conflict_1",
-                    title = "GitHub Pro Account",
-                    groupPath = "根目录 / 工作开发",
-                    fields = listOf(
-                        ConflictedField(
-                            fieldName = "密码 (Password)",
-                            localValue = "ghp_secureToken2026!#",
-                            remoteValue = "ghp_oldToken2025_abc",
-                            selectedChoice = FieldChoice.LOCAL,
-                            isSensitive = true
-                        ),
-                        ConflictedField(
-                            fieldName = "备注 (Notes)",
-                            localValue = "已升级为组织两步验证密钥",
-                            remoteValue = "待开启 2FA",
-                            selectedChoice = FieldChoice.LOCAL
-                        )
-                    )
-                ),
-                ConflictedEntryItem(
-                    id = "entry_conflict_2",
-                    title = "AWS IAM Production",
-                    groupPath = "根目录 / 基础架构",
-                    fields = listOf(
-                        ConflictedField(
-                            fieldName = "用户名 (Username)",
-                            localValue = "admin@keepasskey.io",
-                            remoteValue = "devops_root",
-                            selectedChoice = FieldChoice.LOCAL
-                        )
-                    )
-                )
-            )
-        )
-    )
+    private val _uiState = MutableStateFlow(ConflictResolutionUiState(entries = emptyList()))
     val uiState: StateFlow<ConflictResolutionUiState> = _uiState.asStateFlow()
 
     private val _events = MutableSharedFlow<ConflictResolutionEvent>()
     val events: SharedFlow<ConflictResolutionEvent> = _events.asSharedFlow()
+
+    init {
+        viewModelScope.launch {
+            syncCoordinator?.conflictFlow?.collect { conflicts ->
+                if (conflicts.isNotEmpty()) {
+                    val items = conflicts.map { pair ->
+                        val fieldList = mutableListOf<ConflictedField>()
+                        if (pair.localEntry.title != pair.remoteEntry.title) {
+                            fieldList.add(ConflictedField("标题 (Title)", pair.localEntry.title, pair.remoteEntry.title))
+                        }
+                        if (pair.localEntry.userName != pair.remoteEntry.userName) {
+                            fieldList.add(ConflictedField("用户名 (Username)", pair.localEntry.userName, pair.remoteEntry.userName))
+                        }
+                        val localPwd = pair.localEntry.password?.readString().orEmpty()
+                        val remotePwd = pair.remoteEntry.password?.readString().orEmpty()
+                        if (localPwd != remotePwd) {
+                            fieldList.add(ConflictedField("密码 (Password)", localPwd, remotePwd, isSensitive = true))
+                        }
+                        if (pair.localEntry.url != pair.remoteEntry.url) {
+                            fieldList.add(ConflictedField("网址 (URL)", pair.localEntry.url, pair.remoteEntry.url))
+                        }
+                        if (pair.localEntry.notes != pair.remoteEntry.notes) {
+                            fieldList.add(ConflictedField("备注 (Notes)", pair.localEntry.notes, pair.remoteEntry.notes))
+                        }
+                        ConflictedEntryItem(
+                            id = pair.entryId,
+                            title = pair.localEntry.title.ifBlank { pair.remoteEntry.title },
+                            groupPath = "根目录 / 同步冲突",
+                            fields = fieldList
+                        )
+                    }
+                    _uiState.update { it.copy(entries = items) }
+                }
+            }
+        }
+    }
 
     fun selectFieldChoice(entryId: String, fieldName: String, choice: FieldChoice) {
         _uiState.update { state ->
@@ -92,11 +95,35 @@ class ConflictResolutionViewModel @Inject constructor() : ViewModel() {
     }
 
     fun applyMerge() {
+        val coordinator = syncCoordinator
         viewModelScope.launch {
             _uiState.update { it.copy(isResolving = true) }
-            delay(600) // 模拟合并写入与远程校验
-            _uiState.update { it.copy(isResolving = false, userMessage = UiMessage(R.string.conflict_resolved_msg)) }
-            _events.emit(ConflictResolutionEvent.ResolveSuccess)
+            if (coordinator != null) {
+                val resolutions = _uiState.value.entries.associate { entry ->
+                    val hasRemote = entry.fields.any { it.selectedChoice == FieldChoice.REMOTE }
+                    val choice = if (hasRemote) ConflictResolutionChoice.KEEP_REMOTE else ConflictResolutionChoice.KEEP_LOCAL
+                    entry.id to choice
+                }
+                val outcome = coordinator.resolveConflicts(resolutions)
+                val isSuccess = outcome is SyncOutcome.MergedAndUploaded
+                _uiState.update {
+                    it.copy(
+                        isResolving = false,
+                        userMessage = if (isSuccess) {
+                            UiMessage(R.string.conflict_resolved_msg)
+                        } else {
+                            UiMessage(R.string.sync_feedback_error, listOf((outcome as? SyncOutcome.Error)?.message ?: "合并失败"))
+                        }
+                    )
+                }
+                if (isSuccess) {
+                    _events.emit(ConflictResolutionEvent.ResolveSuccess)
+                }
+            } else {
+                delay(600)
+                _uiState.update { it.copy(isResolving = false, userMessage = UiMessage(R.string.conflict_resolved_msg)) }
+                _events.emit(ConflictResolutionEvent.ResolveSuccess)
+            }
         }
     }
 

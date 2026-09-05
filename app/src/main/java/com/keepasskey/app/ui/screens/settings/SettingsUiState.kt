@@ -169,13 +169,13 @@ data class SettingsUiState(
     val defaultTotpDigits: Int = 6, // 默认位数 (6位)
 
     // 7. 密码库健康度检查与审计 (Audit & Health Check)
-    val healthScore: Int = 94,
-    val healthStatus: String = "优秀",
-    val healthMessage: String = "发现 1 个密码重复使用，未发现已知泄露",
+    val healthScore: Int = 0,
+    val healthStatus: String = "未扫描",
+    val healthMessage: String = "点击重新扫描以评估密码库安全健康状态",
     val weakPasswordCount: Int = 0,
-    val reusedPasswordCount: Int = 1,
+    val reusedPasswordCount: Int = 0,
     val compromisedPasswordCount: Int = 0,
-    val lastHealthScanTime: String = "今天 10:20",
+    val lastHealthScanTime: String = "未扫描",
     val isHealthScanning: Boolean = false,
 
     // 8. 调试日志与系统诊断 (Debug & Diagnostics)

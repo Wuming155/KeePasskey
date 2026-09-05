@@ -212,6 +212,16 @@ class DatabaseSession {
     }
 
     /**
+     * 允许受控原子修改数据库顶层元数据与墓碑列表（例如 recycleBinUuid、deletedObjects 追加）。
+     * 修改后置为 SessionState.DIRTY 状态，供后续统一 save() 序列化落盘。
+     */
+    suspend fun updateDatabaseMeta(transform: (KdbxDatabase) -> KdbxDatabase) = mutex.withLock {
+        val currentDb = _database.value ?: return@withLock
+        _database.value = transform(currentDb)
+        _state.value = SessionState.DIRTY
+    }
+
+    /**
      * 删除分组
      */
     suspend fun deleteGroup(groupId: KdbxUuid) = mutex.withLock {

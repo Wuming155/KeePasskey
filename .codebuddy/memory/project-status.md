@@ -32,6 +32,8 @@
 
 ## 决策日志
 
+- **2026-09-05**：新增第 5 个参考项目 **KeePassXC**（`参考项目/keepassxc-develop`，C++/Qt develop 分支），完成 728 行深度架构分析（`KeePassXC-架构分析.md`），并同步收录至 `.codebuddy/skills/references/`。重点固化三块可移植资产：① `Merger`（`src/core/Merger.cpp`）的条目级合并、秒级时间戳截断与墓碑复活规则 → `KdbxMerger` 直接算法参考；② `KdbxReader/KdbxWriter` KDBX 3/4 读写管线 → `database` 模块交叉验证；③ 浏览器集成的 `KPEX_PASSKEY_*` Entry 属性 schema 与 WebAuthn 栈隔离分层 → `PasskeyData` 与 Credential Provider 隔离设计。参考项目优先级层级更新为 5 级（KeePassXC 列为"算法级参考"，Monica 降为第 5 级），`AGENTS.md`、主 `README.md`、`.codebuddy/skills/reference-projects.md` 与两处 references README 已同步更新。
+
 - **2026-09-04**：完成**阶段 7「质量工程、测试基线、混淆加固与全渠道交付」**全量交付。全项目 7 个阶段全面竣工！交付物涵盖：Material 3 响应式全功能界面、BouncyCastle/Argon2/AES-KDF 加密与 KDBX v4 原子读写、AndroidX Biometric 强生物识别与 Keystore 硬件加固、Android 16+ Passkey (WebAuthn) 原生 CredentialProviderService、WebDAV (ETag 412) / S3 (SigV4) 云同步与三方冲突合并、纯 Kotlin RFC 6238 TOTP 动态双重认证、附件物理管理、版本历史回滚与离线密码安全审计。全量单元测试与 R8 混淆构建 100% 通过。
 
 - **2026-09-04**：完成**阶段 6「KeePass 高级特性与全功能工具箱」**全量交付。落地 `OtpEngine`（RFC 6238/4226）、`Base32Decoder`、`HealthCheckEngine`、`HistoryManager` 与 `AttachmentManager`，测试与编译全量通过。下一阶段正式进入**阶段 7「质量工程、测试基线、混淆加固与全渠道交付」**。

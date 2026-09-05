@@ -357,6 +357,7 @@ fun KeePasskeyApp() {
                         onAutoSyncToggle = settingsViewModel::setAutoSyncEnabled,
                         onWifiOnlyToggle = settingsViewModel::setWifiOnlySync,
                         onTriggerSync = settingsViewModel::triggerSync,
+                        onTestConnection = settingsViewModel::testSyncConnection,
                         onProviderChange = settingsViewModel::setSyncProvider,
                         onUpdateWebDav = settingsViewModel::updateWebDavConfig,
                         onUpdateS3 = settingsViewModel::updateS3Config,

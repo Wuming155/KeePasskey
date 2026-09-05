@@ -535,6 +535,11 @@
     <string name="sync_cd_test_connection">Test connection</string>
     <string name="sync_feedback_connecting">Connecting to the cloud via %1$s...</string>
     <string name="sync_feedback_done">%1$s connected, cloud database is up to date</string>
+    <string name="sync_feedback_uploaded">Local changes uploaded to %1$s successfully</string>
+    <string name="sync_feedback_merged">Changes automatically merged and synced to %1$s</string>
+    <string name="sync_feedback_conflict">Conflict detected, please resolve in conflict screen</string>
+    <string name="sync_feedback_offline">Offline or network unreachable; local changes kept safe</string>
+    <string name="sync_feedback_error">Sync failed: %1$s</string>
     <string name="sync_section_offline">Offline &amp; background sync</string>
     <string name="sync_offline_cache_title">Offline cache</string>
     <string name="sync_offline_cache_sub">Keep reading and writing locally while offline, sync when back online</string>
@@ -738,6 +743,12 @@
     <string name="health_status_safe">Protected</string>
     <string name="health_tips_title">Security tips</string>
     <string name="health_tips_desc">Use a unique strong password for every account and enable two-factor authentication. KeePasskey can generate and remember them for you</string>
+    <string name="health_level_excellent">Excellent</string>
+    <string name="health_level_good">Good</string>
+    <string name="health_level_fair">Fair</string>
+    <string name="health_level_poor">Needs Improvement</string>
+    <string name="health_not_scanned">Not scanned</string>
+    <string name="health_not_scanned_desc">Tap rescan to evaluate the security health of your vault</string>
 
     <!-- ===== Security settings extras ===== -->
     <string name="sec_autolock_dialog_desc">Choose how long to wait before auto-locking after inactivity</string>

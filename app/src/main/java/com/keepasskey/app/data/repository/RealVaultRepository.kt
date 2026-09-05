@@ -9,6 +9,7 @@ import com.keepasskey.app.ui.model.UiEntryRevision
 import com.keepasskey.app.ui.model.UiVaultEntry
 import com.keepasskey.app.ui.model.VaultDatabaseInfo
 import com.keepasskey.app.ui.model.VaultGroup
+import com.keepasskey.core.model.DeletedObject
 import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.core.model.KdbxCustomField
 import com.keepasskey.core.model.KdbxEntry
@@ -16,7 +17,11 @@ import com.keepasskey.core.model.KdbxGroup
 import com.keepasskey.core.model.KdbxTimes
 import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.core.model.PasskeyData
+import com.keepasskey.core.otp.OtpEngine
+import com.keepasskey.core.otp.TotpKeyUriParser
 import com.keepasskey.core.security.ProtectedString
+import com.keepasskey.database.file.KdbxDatabase
+import com.keepasskey.database.history.HistoryManager
 import com.keepasskey.database.session.DatabaseSession
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
@@ -29,6 +34,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import java.io.File
+import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -48,9 +54,6 @@ class RealVaultRepository @Inject constructor(
     private val repositoryScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     private val databasesFlow = MutableStateFlow<List<VaultDatabaseInfo>>(emptyList())
-
-    // 内存回收站缓冲，用于保存移入回收站但尚未物理彻底抹除的条目 ID
-    private val recycledEntryIds = MutableStateFlow<Set<String>>(emptySet())
 
     init {
         refreshDatabases()
@@ -211,19 +214,23 @@ class RealVaultRepository @Inject constructor(
             if (db == null) {
                 listOf(RECYCLE_BIN_GROUP)
             } else {
+                val binUuid = db.recycleBinUuid
                 val allKdbxGroups = db.rootGroup.allGroups()
                 val uiGroups = allKdbxGroups.map { kdbxGroup ->
+                    val isRecycle = (binUuid != null && kdbxGroup.id == binUuid) ||
+                            kdbxGroup.name == RECYCLE_BIN_NAME ||
+                            kdbxGroup.name.equals("Recycle Bin", ignoreCase = true)
                     VaultGroup(
                         id = kdbxGroup.id.toHexString(),
                         name = kdbxGroup.name,
                         parentId = kdbxGroup.parentGroupId?.toHexString(),
-                        iconName = "folder",
+                        iconName = if (isRecycle || kdbxGroup.iconId == 43) "delete" else "folder",
                         updatedAt = formatInstant(kdbxGroup.times.lastModificationTime),
                         createdAt = formatInstant(kdbxGroup.times.creationTime),
-                        isRecycleBin = false
+                        isRecycleBin = isRecycle
                     )
                 }
-                uiGroups + RECYCLE_BIN_GROUP
+                uiGroups
             }
         }
     }
@@ -233,15 +240,16 @@ class RealVaultRepository @Inject constructor(
             id = parseUuidOrRandom(group.id),
             parentGroupId = group.parentId?.let { parseUuidOrNull(it) },
             name = group.name,
-            iconId = 48
+            iconId = if (group.isRecycleBin) 43 else 48
         )
         databaseSession.saveGroup(kdbxGroup)
         databaseSession.save()
     }
 
     override suspend fun deleteGroup(id: String) {
-        if (id == RECYCLE_BIN_GROUP_ID) return
         val uuid = parseUuidOrNull(id) ?: return
+        val db = databaseSession.databaseFlow.first() ?: return
+        if (uuid == db.recycleBinUuid) return
         databaseSession.deleteGroup(uuid)
         databaseSession.save()
     }
@@ -251,13 +259,8 @@ class RealVaultRepository @Inject constructor(
             if (db == null) {
                 emptyList()
             } else {
-                val recycled = recycledEntryIds.value
                 db.rootGroup.allEntries().map { kdbxEntry ->
-                    val entryIdHex = kdbxEntry.id.toHexString()
-                    val isRecycled = entryIdHex in recycled
-                    val effectiveGroupId = if (isRecycled) RECYCLE_BIN_GROUP_ID else kdbxEntry.parentGroupId?.toHexString()
-
-                    mapKdbxEntryToUi(kdbxEntry, effectiveGroupId)
+                    mapKdbxEntryToUi(kdbxEntry, db)
                 }
             }
         }
@@ -268,35 +271,124 @@ class RealVaultRepository @Inject constructor(
     }
 
     override suspend fun saveEntry(entry: UiVaultEntry) {
-        val kdbxEntry = mapUiEntryToKdbx(entry)
-        databaseSession.saveEntry(kdbxEntry)
+        val db = databaseSession.databaseFlow.first()
+        val targetUuid = parseUuidOrNull(entry.id)
+        val existing = if (targetUuid != null && db != null) {
+            db.rootGroup.allEntries().firstOrNull { it.id == targetUuid }
+        } else null
+
+        if (existing != null) {
+            // 既有条目做合并更新：保留既有元数据与属性，更新提交字段，接入 HistoryManager
+            val mergedFields = existing.fields.toMutableMap().apply {
+                put(KdbxConstants.Fields.TITLE, ProtectedString(entry.title, isProtected = false))
+                put(KdbxConstants.Fields.USER_NAME, ProtectedString(entry.username, isProtected = false))
+                put(KdbxConstants.Fields.PASSWORD, ProtectedString(entry.passwordPlain, isProtected = true))
+                put(KdbxConstants.Fields.URL, ProtectedString(entry.url, isProtected = false))
+                put(KdbxConstants.Fields.NOTES, ProtectedString(entry.notes, isProtected = false))
+            }
+
+            val uiCustomList = entry.customFields.map { cf ->
+                KdbxCustomField(cf.key, ProtectedString(cf.value, isProtected = cf.isProtected))
+            }
+            val uiKeys = uiCustomList.map { it.key }.toSet()
+            // 保留既有条目中未在 UI 覆盖的系统字段（例如 Passkey 属性等）
+            val preservedCustom = existing.customFields.filter { ef -> ef.key !in uiKeys }
+            val mergedCustomFields = uiCustomList + preservedCustom
+
+            val targetParentId = entry.groupId?.let { parseUuidOrNull(it) } ?: existing.parentGroupId
+            val isParentChanged = targetParentId != existing.parentGroupId
+
+            val pendingNewEntry = existing.copy(
+                parentGroupId = targetParentId,
+                fields = mergedFields,
+                customFields = mergedCustomFields
+            )
+
+            val maxHistory = db?.historyMaxItems ?: 10
+            val finalEntry = HistoryManager.recordHistorySnapshot(
+                currentEntry = existing,
+                newEntry = pendingNewEntry,
+                maxHistoryItems = maxHistory
+            )
+
+            if (isParentChanged) {
+                databaseSession.deleteEntry(existing.id)
+            }
+            databaseSession.saveEntry(finalEntry)
+        } else {
+            // 新建条目
+            val kdbxEntry = mapUiEntryToKdbx(entry)
+            databaseSession.saveEntry(kdbxEntry)
+        }
         databaseSession.save()
     }
 
     override suspend fun deleteEntry(id: String) {
-        val currentRecycled = recycledEntryIds.value
-        if (id in currentRecycled) {
-            // 已在回收站中，物理彻底删除
-            recycledEntryIds.value = currentRecycled - id
-            val uuid = parseUuidOrNull(id) ?: return
+        val uuid = parseUuidOrNull(id) ?: return
+        val db = databaseSession.databaseFlow.first() ?: return
+        val entry = db.rootGroup.allEntries().firstOrNull { it.id == uuid } ?: return
+
+        val binUuid = db.recycleBinUuid
+        val isAlreadyInRecycle = (binUuid != null && entry.parentGroupId == binUuid) ||
+                (entry.parentGroupId != null && db.rootGroup.allGroups().any {
+                    it.id == entry.parentGroupId && (it.name == RECYCLE_BIN_NAME || it.name.equals("Recycle Bin", ignoreCase = true))
+                })
+
+        if (isAlreadyInRecycle || !db.recycleBinEnabled) {
+            // 已在回收站内或禁用回收站：物理删除并记录 DeletedObject 墓碑
             databaseSession.deleteEntry(uuid)
-            databaseSession.save()
+            databaseSession.updateDatabaseMeta { cur ->
+                val tombstone = DeletedObject(id = uuid, deletionTime = Instant.now())
+                cur.copy(deletedObjects = cur.deletedObjects + tombstone)
+            }
         } else {
-            // 移入回收站
-            recycledEntryIds.value = currentRecycled + id
+            // 移入标准库内回收站组
+            val binGroup = getOrCreateRecycleBinGroup()
+            val moved = entry.copy(
+                parentGroupId = binGroup.id,
+                previousParentGroup = entry.parentGroupId,
+                times = entry.times.copy(lastModificationTime = Instant.now())
+            )
+            databaseSession.deleteEntry(uuid)
+            databaseSession.saveEntry(moved)
         }
+        databaseSession.save()
     }
 
     override suspend fun restoreEntry(id: String) {
-        recycledEntryIds.value = recycledEntryIds.value - id
+        val uuid = parseUuidOrNull(id) ?: return
+        val db = databaseSession.databaseFlow.first() ?: return
+        val entry = db.rootGroup.allEntries().firstOrNull { it.id == uuid } ?: return
+
+        val allGroups = db.rootGroup.allGroups()
+        val targetParentId = entry.previousParentGroup?.takeIf { prevId -> allGroups.any { it.id == prevId } }
+            ?: db.rootGroup.id
+
+        val restored = entry.copy(
+            parentGroupId = targetParentId,
+            previousParentGroup = null,
+            times = entry.times.copy(lastModificationTime = Instant.now())
+        )
+        databaseSession.deleteEntry(uuid)
+        databaseSession.saveEntry(restored)
+        databaseSession.save()
     }
 
     override suspend fun emptyRecycleBin() {
-        val toDelete = recycledEntryIds.value
-        recycledEntryIds.value = emptySet()
-        for (id in toDelete) {
-            val uuid = parseUuidOrNull(id) ?: continue
-            databaseSession.deleteEntry(uuid)
+        val db = databaseSession.databaseFlow.first() ?: return
+        val binUuid = db.recycleBinUuid
+        val binGroup = db.rootGroup.allGroups().firstOrNull {
+            (binUuid != null && it.id == binUuid) || it.name == RECYCLE_BIN_NAME || it.name.equals("Recycle Bin", ignoreCase = true)
+        } ?: return
+
+        val entriesToDelete = binGroup.allEntries()
+        if (entriesToDelete.isEmpty()) return
+
+        val entryIds = entriesToDelete.map { it.id }.toSet()
+        databaseSession.batchDeleteEntries(entryIds)
+        databaseSession.updateDatabaseMeta { cur ->
+            val tombstones = entryIds.map { DeletedObject(it, Instant.now()) }
+            cur.copy(deletedObjects = cur.deletedObjects + tombstones)
         }
         databaseSession.save()
     }
@@ -309,20 +401,98 @@ class RealVaultRepository @Inject constructor(
     }
 
     override suspend fun batchDeleteEntries(entryIds: Set<String>) {
-        val currentRecycled = recycledEntryIds.value
-        val toPermanentDelete = entryIds.filter { it in currentRecycled }
-        val toRecycle = entryIds.filter { it !in currentRecycled }
+        val db = databaseSession.databaseFlow.first() ?: return
+        val binUuid = db.recycleBinUuid
+        val allGroups = db.rootGroup.allGroups()
+        val allEntries = db.rootGroup.allEntries().associateBy { it.id.toHexString() }
 
-        recycledEntryIds.value = (currentRecycled - toPermanentDelete.toSet()) + toRecycle.toSet()
+        val toPermanentDelete = mutableSetOf<KdbxUuid>()
+        val toMoveToBin = mutableListOf<KdbxEntry>()
+
+        for (id in entryIds) {
+            val entry = allEntries[id] ?: continue
+            val isAlreadyInRecycle = (binUuid != null && entry.parentGroupId == binUuid) ||
+                    (entry.parentGroupId != null && allGroups.any {
+                        it.id == entry.parentGroupId && (it.name == RECYCLE_BIN_NAME || it.name.equals("Recycle Bin", ignoreCase = true))
+                    })
+
+            if (isAlreadyInRecycle || !db.recycleBinEnabled) {
+                toPermanentDelete.add(entry.id)
+            } else {
+                toMoveToBin.add(entry)
+            }
+        }
+
+        if (toMoveToBin.isNotEmpty()) {
+            val binGroup = getOrCreateRecycleBinGroup()
+            for (e in toMoveToBin) {
+                val moved = e.copy(
+                    parentGroupId = binGroup.id,
+                    previousParentGroup = e.parentGroupId,
+                    times = e.times.copy(lastModificationTime = Instant.now())
+                )
+                databaseSession.deleteEntry(e.id)
+                databaseSession.saveEntry(moved)
+            }
+        }
 
         if (toPermanentDelete.isNotEmpty()) {
-            val uuidSet = toPermanentDelete.mapNotNull { parseUuidOrNull(it) }.toSet()
-            databaseSession.batchDeleteEntries(uuidSet)
-            databaseSession.save()
+            databaseSession.batchDeleteEntries(toPermanentDelete)
+            databaseSession.updateDatabaseMeta { cur ->
+                val tombstones = toPermanentDelete.map { DeletedObject(it, Instant.now()) }
+                cur.copy(deletedObjects = cur.deletedObjects + tombstones)
+            }
         }
+
+        databaseSession.save()
     }
 
-    private fun mapKdbxEntryToUi(entry: KdbxEntry, effectiveGroupId: String?): UiVaultEntry {
+    private suspend fun getOrCreateRecycleBinGroup(): KdbxGroup {
+        val db = databaseSession.databaseFlow.first()
+            ?: throw IllegalStateException("当前数据库未处于已解锁状态")
+
+        if (db.recycleBinUuid != null) {
+            val existingBin = db.rootGroup.allGroups().firstOrNull { it.id == db.recycleBinUuid }
+            if (existingBin != null) {
+                return existingBin
+            }
+        }
+
+        val candidate = db.rootGroup.subgroups.firstOrNull {
+            it.name == RECYCLE_BIN_NAME || it.name.equals("Recycle Bin", ignoreCase = true)
+        } ?: db.rootGroup.allGroups().firstOrNull {
+            it.name == RECYCLE_BIN_NAME || it.name.equals("Recycle Bin", ignoreCase = true)
+        }
+
+        if (candidate != null) {
+            databaseSession.updateDatabaseMeta {
+                it.copy(
+                    recycleBinUuid = candidate.id,
+                    recycleBinEnabled = true,
+                    recycleBinChanged = Instant.now()
+                )
+            }
+            return candidate
+        }
+
+        val newBinGroup = KdbxGroup(
+            id = KdbxUuid.random(),
+            parentGroupId = db.rootGroup.id,
+            name = RECYCLE_BIN_NAME,
+            iconId = 43
+        )
+        databaseSession.saveGroup(newBinGroup)
+        databaseSession.updateDatabaseMeta {
+            it.copy(
+                recycleBinUuid = newBinGroup.id,
+                recycleBinEnabled = true,
+                recycleBinChanged = Instant.now()
+            )
+        }
+        return newBinGroup
+    }
+
+    private fun mapKdbxEntryToUi(entry: KdbxEntry, db: KdbxDatabase?): UiVaultEntry {
         val passwordStr = entry.password?.readString().orEmpty()
         val masked = if (passwordStr.isEmpty()) "" else "••••••••••••••••"
 
@@ -346,6 +516,54 @@ class RealVaultRepository @Inject constructor(
             )
         }
 
+        val binaryPool = db?.binaries?.map { it.data } ?: emptyList()
+        val uiAttachments = entry.attachments.map { att ->
+            val dataBytes = att.resolveData(binaryPool)
+            val sizeKb = (dataBytes.size / 1024).coerceAtLeast(if (dataBytes.isNotEmpty()) 1 else 0)
+            val sizeFormatted = if (dataBytes.size < 1024) "${dataBytes.size} B" else "$sizeKb KB"
+            UiAttachment(
+                id = "${entry.id.toHexString()}_${att.name}",
+                fileName = att.name,
+                fileSizeFormatted = sizeFormatted,
+                mimeType = determineMimeType(att.name),
+                addedAt = formatInstant(entry.times.creationTime)
+            )
+        }
+
+        // 解析标准 OTP 或自定义字段中的 TOTP 配置
+        val otpRaw = entry.fields["otp"]?.readString()
+            ?: entry.customFields.firstOrNull {
+                it.key.equals("otp", ignoreCase = true) || it.key.startsWith("TOTP", ignoreCase = true)
+            }?.value?.readString()
+        val parsedTotp = TotpKeyUriParser.parse(otpRaw)
+
+        val totpSecret = parsedTotp?.secret
+        val totpPeriod = parsedTotp?.period ?: 30
+        val totpDigits = parsedTotp?.digits ?: 6
+        val totpAlgorithm = parsedTotp?.algorithm ?: "SHA1"
+
+        val currentRemaining = OtpEngine.getRemainingSeconds(periodSeconds = totpPeriod)
+        val liveTotpCode = if (!totpSecret.isNullOrBlank()) {
+            try {
+                val algo = when (totpAlgorithm.uppercase()) {
+                    "SHA256" -> OtpEngine.HashAlgorithm.SHA256
+                    "SHA512" -> OtpEngine.HashAlgorithm.SHA512
+                    else -> OtpEngine.HashAlgorithm.SHA1
+                }
+                OtpEngine.calculateTotp(
+                    secretKeyBase32 = totpSecret,
+                    periodSeconds = totpPeriod,
+                    digits = totpDigits,
+                    algorithm = algo
+                )
+            } catch (_: Exception) {
+                null
+            }
+        } else null
+
+        val passkeyData = PasskeyData.fromCustomFields(entry.customFields)
+        val icon = mapIconIdToName(entry.iconId)
+
         return UiVaultEntry(
             id = entry.id.toHexString(),
             title = entry.title,
@@ -353,14 +571,46 @@ class RealVaultRepository @Inject constructor(
             passwordPlain = passwordStr,
             passwordMasked = masked,
             url = entry.url,
+            isPasskey = passkeyData != null,
+            passkeyRpId = passkeyData?.relyingPartyId,
+            totpCode = liveTotpCode,
+            totpRemainingSeconds = currentRemaining,
+            totpSecret = totpSecret,
+            totpPeriod = totpPeriod,
+            totpDigits = totpDigits,
+            totpAlgorithm = totpAlgorithm,
             notes = entry.notes,
-            groupId = effectiveGroupId,
-            iconName = "key",
+            groupId = entry.parentGroupId?.toHexString(),
+            iconName = icon,
             updatedAt = formatInstant(entry.times.lastModificationTime),
             createdAt = formatInstant(entry.times.creationTime),
             customFields = uiCustomFields,
+            attachments = uiAttachments,
             revisions = uiRevisions
         )
+    }
+
+    private fun mapIconIdToName(iconId: Int): String {
+        return when (iconId) {
+            0, 48 -> "key"
+            1 -> "web"
+            2 -> "email"
+            43 -> "delete"
+            49 -> "folder"
+            else -> "key"
+        }
+    }
+
+    private fun determineMimeType(fileName: String): String {
+        val ext = fileName.substringAfterLast('.', "").lowercase()
+        return when (ext) {
+            "txt" -> "text/plain"
+            "pdf" -> "application/pdf"
+            "png" -> "image/png"
+            "jpg", "jpeg" -> "image/jpeg"
+            "json" -> "application/json"
+            else -> "application/octet-stream"
+        }
     }
 
     private fun mapUiEntryToKdbx(entry: UiVaultEntry): KdbxEntry {
@@ -381,7 +631,7 @@ class RealVaultRepository @Inject constructor(
 
         return KdbxEntry(
             id = parseUuidOrRandom(entry.id),
-            parentGroupId = entry.groupId?.let { if (it == RECYCLE_BIN_GROUP_ID) null else parseUuidOrNull(it) },
+            parentGroupId = entry.groupId?.let { parseUuidOrNull(it) },
             fields = fields,
             customFields = customFields
         )
@@ -521,11 +771,12 @@ class RealVaultRepository @Inject constructor(
     }
 
     companion object {
+        const val RECYCLE_BIN_NAME = "回收站"
         const val RECYCLE_BIN_GROUP_ID = "group_recycle_bin"
 
         val RECYCLE_BIN_GROUP = VaultGroup(
             id = RECYCLE_BIN_GROUP_ID,
-            name = "回收站",
+            name = RECYCLE_BIN_NAME,
             iconName = "delete",
             isRecycleBin = true
         )
