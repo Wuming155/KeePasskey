@@ -1,6 +1,7 @@
 package com.keepasskey.app.data.repository
 
 import android.content.Context
+import com.keepasskey.app.ui.model.UiAttachment
 import com.keepasskey.app.ui.model.UiCustomField
 import com.keepasskey.app.ui.model.UiVaultEntry
 import com.keepasskey.core.model.DeletedObject
@@ -104,15 +105,24 @@ class RealVaultRepositoryTest {
         val session = DatabaseSession()
         session.setDatabaseForTesting(database)
 
-        val repository = RealVaultRepository(createMockContext(tempFolder.root), session)
+        val repository = RealVaultRepository(createMockContext(tempFolder.root), session, com.keepasskey.app.data.logger.DebugLogBuffer())
 
-        // UI 触发条目编辑：修改标题、密码，传入新的普通自定义字段，不传 Passkey 字段
+        // UI 触发条目编辑：修改标题、密码，传入新的普通自定义字段，不传 Passkey 字段。
+        // H4-断点补齐后，附件/标签/OverrideUrl/图标/AutoType 由 UI 投影全量携带
+        // （与真实编辑页 loadEntry 行为一致——loadEntry 从仓库投影回填全部字段）
         val updateUiEntry = UiVaultEntry(
             id = initialEntry.id.toHexString(),
             title = "Updated New Title",
             username = "updated_user",
             url = "https://updated.example.com",
             notes = "Updated note content",
+            iconName = "public", // mapIconIdToName(1)=public（KDBX World 图标）
+            tags = listOf("finance", "critical"),
+            overrideUrl = "https://custom.override.url",
+            attachments = listOf(
+                // data=null 表示已落库附件，仓库按名称匹配保留既有 refIndex 引用
+                UiAttachment(id = "att1", fileName = "secret.key", fileSizeFormatted = "1 KB")
+            ),
             customFields = listOf(
                 UiCustomField(id = "cf1", key = "AppLanguage", value = "zh-CN", isProtected = false)
             )
@@ -133,13 +143,15 @@ class RealVaultRepositoryTest {
         assertEquals("Updated note content", resultEntry.notes)
 
         // 2. 既有属性完整保留
-        assertEquals(initialEntry.iconId, resultEntry.iconId)
+        assertEquals(1, resultEntry.iconId) // iconName=public 反演回官方 PwIcon World=1
         assertEquals("#FF0000", resultEntry.backgroundColor)
         assertEquals("#00FF00", resultEntry.foregroundColor)
         assertEquals("https://custom.override.url", resultEntry.overrideUrl)
         assertEquals(listOf("finance", "critical"), resultEntry.tags)
         assertEquals(1, resultEntry.attachments.size)
         assertEquals("secret.key", resultEntry.attachments[0].name)
+        // 已落库附件按名称匹配保留引用，二进制内容不丢
+        assertTrue(resultEntry.attachments[0].resolveData(listOf("BIN_DATA_0".toByteArray())).contentEquals("BIN_DATA_0".toByteArray()))
 
         // 3. Passkey 等未在 UI 展示的自定义字段完整保留，且新增的自定义字段也写入
         val customKeys = resultEntry.customFields.map { it.key }
@@ -160,7 +172,7 @@ class RealVaultRepositoryTest {
         val session = DatabaseSession()
         session.setDatabaseForTesting(database)
 
-        val repository = RealVaultRepository(createMockContext(tempFolder.root), session)
+        val repository = RealVaultRepository(createMockContext(tempFolder.root), session, com.keepasskey.app.data.logger.DebugLogBuffer())
 
         val entryIdHex = initialEntry.id.toHexString()
 
@@ -216,7 +228,7 @@ class RealVaultRepositoryTest {
 
         val session = DatabaseSession()
         session.setDatabaseForTesting(dbWithTwo)
-        val repository = RealVaultRepository(createMockContext(tempFolder.root), session)
+        val repository = RealVaultRepository(createMockContext(tempFolder.root), session, com.keepasskey.app.data.logger.DebugLogBuffer())
 
         // 将两个条目均移入回收站
         repository.deleteEntry(initialEntry.id.toHexString())
@@ -249,7 +261,7 @@ class RealVaultRepositoryTest {
         )
         assertTrue(createResult is com.keepasskey.core.result.KdbxResult.Success)
 
-        val repository = RealVaultRepository(createMockContext(tempFolder.root), session)
+        val repository = RealVaultRepository(createMockContext(tempFolder.root), session, com.keepasskey.app.data.logger.DebugLogBuffer())
 
         // 添加一个测试条目
         val newEntry = UiVaultEntry(
@@ -273,7 +285,7 @@ class RealVaultRepositoryTest {
 
         val reloadedDb = openSession.databaseFlow.first()!!
         assertNotNull("持久化重开后 recycleBinUuid 应完好保留", reloadedDb.recycleBinUuid)
-        val reloadedRepo = RealVaultRepository(createMockContext(tempFolder.root), openSession)
+        val reloadedRepo = RealVaultRepository(createMockContext(tempFolder.root), openSession, com.keepasskey.app.data.logger.DebugLogBuffer())
         val reloadedGroups = reloadedRepo.getGroups().first()
         assertTrue("回收站分组应在重开后持久存在", reloadedGroups.any { it.isRecycleBin })
 

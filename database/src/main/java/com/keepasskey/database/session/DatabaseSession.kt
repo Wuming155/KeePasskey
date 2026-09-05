@@ -42,11 +42,17 @@ class DatabaseSession {
     private var passwordCache: CharArray? = null
     private var keyFileCache: ByteArray? = null
     private val credentialLock = Any()
-
-    private val mutex = Mutex()
+    // H4-只读整改：以只读模式打开的会话，一切落盘写操作硬拒绝
+    private var readOnlyMode: Boolean = false
 
     val currentFile: File?
         get() = activeFile
+
+    /** 当前会话是否为只读模式（锁定/关闭后重置为 false） */
+    val isReadOnly: Boolean
+        get() = readOnlyMode
+
+    private val mutex = Mutex()
 
     /**
      * 在锁保护下获取当前缓存凭据的克隆副本并执行 [block]。
@@ -96,6 +102,7 @@ class DatabaseSession {
 
                 // 缓存主凭据供会话期写回使用
                 activeFile = file
+                readOnlyMode = false
                 cachePassword(passwordChars)
                 _database.value = db
                 _state.value = SessionState.OPENED
@@ -108,12 +115,14 @@ class DatabaseSession {
     }
 
     /**
-     * 打开并解密已有 KDBX 文件
+     * 打开并解密已有 KDBX 文件。
+     * [readOnly] 为 true 时进入只读会话：后续 save() 硬拒绝、内存树变更方法 no-op。
      */
     suspend fun open(
         file: File,
         passwordChars: CharArray,
-        keyFileData: ByteArray? = null
+        keyFileData: ByteArray? = null,
+        readOnly: Boolean = false
     ): KdbxResult<Unit> = mutex.withLock {
         withContext(Dispatchers.IO) {
             try {
@@ -129,6 +138,7 @@ class DatabaseSession {
                 }
 
                 activeFile = file
+                readOnlyMode = readOnly
                 cachePassword(passwordChars)
                 if (keyFileData != null) {
                     synchronized(credentialLock) {
@@ -149,6 +159,12 @@ class DatabaseSession {
      * 保存当前内存中的活动数据库并写入文件
      */
     suspend fun save(): KdbxResult<Unit> = mutex.withLock {
+        if (readOnlyMode) {
+            return@withLock KdbxResult.Failure(
+                IllegalStateException("数据库以只读模式打开"),
+                "数据库以只读模式打开，无法保存"
+            )
+        }
         withContext(Dispatchers.Default) {
             val file = activeFile ?: return@withContext KdbxResult.Failure(
                 IllegalStateException("无活动数据库文件"),
@@ -181,6 +197,7 @@ class DatabaseSession {
      * 更新或保存条目
      */
     suspend fun saveEntry(entry: KdbxEntry) = mutex.withLock {
+        if (readOnlyMode) return@withLock
         val currentDb = _database.value ?: return@withLock
         val updatedRoot = updateOrAddEntry(currentDb.rootGroup, entry)
         _database.value = currentDb.copy(rootGroup = updatedRoot)
@@ -191,6 +208,7 @@ class DatabaseSession {
      * 删除条目
      */
     suspend fun deleteEntry(entryId: KdbxUuid) = mutex.withLock {
+        if (readOnlyMode) return@withLock
         val currentDb = _database.value ?: return@withLock
         val updatedRoot = removeEntry(currentDb.rootGroup, entryId)
         _database.value = currentDb.copy(rootGroup = updatedRoot)
@@ -201,6 +219,7 @@ class DatabaseSession {
      * 保存或更新分组
      */
     suspend fun saveGroup(group: KdbxGroup) = mutex.withLock {
+        if (readOnlyMode) return@withLock
         val currentDb = _database.value ?: return@withLock
         val updatedRoot = if (group.id == currentDb.rootGroup.id) {
             group
@@ -216,6 +235,7 @@ class DatabaseSession {
      * 修改后置为 SessionState.DIRTY 状态，供后续统一 save() 序列化落盘。
      */
     suspend fun updateDatabaseMeta(transform: (KdbxDatabase) -> KdbxDatabase) = mutex.withLock {
+        if (readOnlyMode) return@withLock
         val currentDb = _database.value ?: return@withLock
         _database.value = transform(currentDb)
         _state.value = SessionState.DIRTY
@@ -225,6 +245,7 @@ class DatabaseSession {
      * 删除分组
      */
     suspend fun deleteGroup(groupId: KdbxUuid) = mutex.withLock {
+        if (readOnlyMode) return@withLock
         val currentDb = _database.value ?: return@withLock
         if (groupId == currentDb.rootGroup.id) return@withLock
         val updatedRoot = removeGroup(currentDb.rootGroup, groupId)
@@ -236,6 +257,7 @@ class DatabaseSession {
      * 批量移动条目
      */
     suspend fun batchMoveEntries(entryIds: Set<KdbxUuid>, targetGroupId: KdbxUuid?) = mutex.withLock {
+        if (readOnlyMode) return@withLock
         val currentDb = _database.value ?: return@withLock
         val entriesToMove = currentDb.rootGroup.allEntries().filter { it.id in entryIds }
         var currentRoot = currentDb.rootGroup
@@ -254,6 +276,7 @@ class DatabaseSession {
      * 批量删除条目
      */
     suspend fun batchDeleteEntries(entryIds: Set<KdbxUuid>) = mutex.withLock {
+        if (readOnlyMode) return@withLock
         val currentDb = _database.value ?: return@withLock
         var currentRoot = currentDb.rootGroup
         for (id in entryIds) {
@@ -275,6 +298,7 @@ class DatabaseSession {
      * 锁定当前数据库：保留文件路径引用，但物理销毁内存中的敏感主密码与数据库明文树
      */
     suspend fun lock() = mutex.withLock {
+        readOnlyMode = false
         clearSensitiveCache()
         _database.value?.clearSensitiveData()
         _database.value = null
@@ -285,6 +309,7 @@ class DatabaseSession {
      * 完全关闭数据库会话并置空一切关联
      */
     suspend fun close() = mutex.withLock {
+        readOnlyMode = false
         clearSensitiveCache()
         _database.value?.clearSensitiveData()
         _database.value = null

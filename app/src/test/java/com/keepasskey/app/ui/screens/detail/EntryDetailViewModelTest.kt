@@ -43,7 +43,7 @@ class EntryDetailViewModelTest {
 
     private fun TestScope.createViewModel(entryId: String?): EntryDetailViewModel {
         val handle = if (entryId != null) SavedStateHandle(mapOf("entryId" to entryId)) else SavedStateHandle()
-        val viewModel = EntryDetailViewModel(handle, FakeVaultRepository(), FakeSettingsRepository())
+        val viewModel = EntryDetailViewModel(null, handle, FakeVaultRepository(), FakeSettingsRepository())
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
             viewModel.uiState.collect {}
         }
@@ -89,7 +89,7 @@ class EntryDetailViewModelTest {
         val settings = FakeSettingsRepository()
         settings.setClipboardTimeout(0)
         val handle = SavedStateHandle(mapOf("entryId" to "1"))
-        val viewModel = EntryDetailViewModel(handle, FakeVaultRepository(), settings)
+        val viewModel = EntryDetailViewModel(null, handle, FakeVaultRepository(), settings)
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
             viewModel.uiState.collect {}
         }

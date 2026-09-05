@@ -1,6 +1,15 @@
 package com.keepasskey.app.ui.screens.edit
 
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import com.journeyapps.barcodescanner.ScanContract
+import com.journeyapps.barcodescanner.ScanOptions
+import androidx.compose.runtime.rememberCoroutineScope
+import android.provider.OpenableColumns
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -66,6 +75,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -105,6 +115,38 @@ fun EntryEditScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
 
+    // 断点1 整改：真实 SAF 附件选择器——读取所选文件字节后随编辑会话提交
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val attachmentPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) {
+            scope.launch(Dispatchers.IO) {
+                try {
+                    val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                    if (bytes == null || bytes.isEmpty()) {
+                        withContext(Dispatchers.Main) {
+                            viewModel.showMessage(UiMessage(R.string.edit_attachment_empty))
+                        }
+                        return@launch
+                    }
+                    val displayName = queryDisplayName(context, uri) ?: "attachment.bin"
+                    withContext(Dispatchers.Main) {
+                        viewModel.addAttachment(displayName, formatAttachmentSize(bytes.size), bytes)
+                    }
+                } catch (e: Exception) {
+                    withContext(Dispatchers.Main) {
+                        viewModel.showMessage(UiMessage(R.string.edit_attachment_empty))
+                    }
+                }
+            }
+        }
+    }
+
+    // 断点5 整改：TOTP 二维码真实扫描（zxing-embedded），扫描结果直接回填种子输入框
+    val qrScanner = rememberLauncherForActivityResult(ScanContract()) { result ->
+        result.contents?.let { viewModel.onTotpSecretChange(it) }
+    }
+
     LaunchedEffect(viewModel) {
         viewModel.events.collect { event ->
             when (event) {
@@ -136,10 +178,12 @@ fun EntryEditScreen(
         onNotesChange = viewModel::onNotesChange,
         onTogglePasskey = viewModel::onTogglePasskey,
         onTotpSecretChange = viewModel::onTotpSecretChange,
+        onTagsInputChange = viewModel::onTagsInputChange,
+        onAutoTypeSequenceChange = viewModel::onAutoTypeSequenceChange,
+        onOverrideUrlChange = viewModel::onOverrideUrlChange,
         onAddCustomField = viewModel::addCustomField,
         onUpdateCustomField = viewModel::updateCustomField,
         onRemoveCustomField = viewModel::removeCustomField,
-        onAddAttachment = viewModel::addAttachment,
         onRemoveAttachment = viewModel::removeAttachment,
         onTogglePasswordVisibility = viewModel::onTogglePasswordVisibility,
         onToggleGenerator = viewModel::onToggleGenerator,
@@ -150,8 +194,34 @@ fun EntryEditScreen(
         onToggleDigits = viewModel::onToggleDigits,
         onToggleSymbols = viewModel::onToggleSymbols,
         onShowMessage = viewModel::showMessage,
+        onPickAttachmentFile = { attachmentPicker.launch("*/*") },
+        onScanTotpQr = {
+            val options = ScanOptions()
+            options.setDesiredBarcodeFormats(ScanOptions.QR_CODE)
+            options.setPrompt(context.getString(R.string.edit_scan_totp_qr))
+            options.setBeepEnabled(false)
+            options.setOrientationLocked(true)
+            qrScanner.launch(options)
+        },
         modifier = modifier
     )
+}
+
+/** SAF 附件显示名查询 */
+private fun queryDisplayName(context: android.content.Context, uri: android.net.Uri): String? {
+    return try {
+        context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+            val idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+            if (idx >= 0 && cursor.moveToFirst()) cursor.getString(idx) else null
+        }
+    } catch (e: Exception) {
+        null
+    }
+}
+
+/** 附件尺寸格式化 */
+private fun formatAttachmentSize(bytes: Int): String {
+    return if (bytes < 1024) "$bytes B" else "${bytes / 1024} KB"
 }
 
 /**
@@ -174,10 +244,12 @@ fun EntryEditContent(
     onNotesChange: (String) -> Unit,
     onTogglePasskey: () -> Unit,
     onTotpSecretChange: (String) -> Unit,
+    onTagsInputChange: (String) -> Unit,
+    onAutoTypeSequenceChange: (String) -> Unit,
+    onOverrideUrlChange: (String) -> Unit,
     onAddCustomField: () -> Unit,
     onUpdateCustomField: (String, String, String, Boolean) -> Unit,
     onRemoveCustomField: (String) -> Unit,
-    onAddAttachment: (String, String) -> Unit,
     onRemoveAttachment: (String) -> Unit,
     onTogglePasswordVisibility: () -> Unit,
     onToggleGenerator: () -> Unit,
@@ -188,6 +260,8 @@ fun EntryEditContent(
     onToggleDigits: () -> Unit,
     onToggleSymbols: () -> Unit,
     onShowMessage: (UiMessage) -> Unit,
+    onPickAttachmentFile: () -> Unit,
+    onScanTotpQr: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val securityColors = LocalSecurityColors.current
@@ -218,7 +292,7 @@ fun EntryEditContent(
                     }
                 },
                 actions = {
-                    IconButton(onClick = onSaveClick) {
+                    IconButton(onClick = onSaveClick, enabled = !uiState.isReadOnly) {
                         Icon(
                             imageVector = Icons.Default.Check,
                             contentDescription = stringResource(R.string.cd_save),
@@ -281,6 +355,23 @@ fun EntryEditContent(
                             }
                         )
                     }
+                }
+            }
+
+            // H4-只读整改：只读会话提示横幅
+            if (uiState.isReadOnly) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.6f))
+                        .padding(horizontal = 12.dp, vertical = 10.dp)
+                ) {
+                    Text(
+                        text = stringResource(R.string.readonly_banner),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onErrorContainer
+                    )
                 }
             }
 
@@ -434,7 +525,8 @@ fun EntryEditContent(
                     onValueChange = onTotpSecretChange,
                     label = { Text(stringResource(R.string.edit_totp_hint)) },
                     trailingIcon = {
-                        IconButton(onClick = { onShowMessage(UiMessage(R.string.edit_scan_totp_qr)) }) {
+                        // 断点5 整改：按钮直接呼起真实扫码
+                        IconButton(onClick = onScanTotpQr) {
                             Icon(
                                 imageVector = Icons.Default.QrCodeScanner,
                                 contentDescription = stringResource(R.string.cd_scan_qr),
@@ -621,7 +713,8 @@ fun EntryEditContent(
                     }
 
                     OutlinedButton(
-                        onClick = { onAddAttachment("recovery_key_${System.currentTimeMillis() % 1000}.pem", "4.2 KB") },
+                        // 断点1 整改：移除写死假附件名，呼起真实 SAF 文件选择器
+                        onClick = onPickAttachmentFile,
                         shape = CapsuleShape,
                         modifier = Modifier.fillMaxWidth()
                     ) {
@@ -629,6 +722,47 @@ fun EntryEditContent(
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(stringResource(R.string.edit_add_attachment))
                     }
+                }
+            }
+
+            // KP2A 能力补齐：高级属性（标签 / AutoType / Override URL）
+            Text(
+                text = stringResource(R.string.edit_extra_section),
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                color = MaterialTheme.colorScheme.onSurface
+            )
+
+            BentoCard(
+                modifier = Modifier.fillMaxWidth(),
+                backgroundColor = MaterialTheme.colorScheme.surfaceContainerLowest
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlinedTextField(
+                        value = uiState.tagsInput,
+                        onValueChange = onTagsInputChange,
+                        label = { Text(stringResource(R.string.edit_tags_hint)) },
+                        singleLine = true,
+                        shape = MaterialTheme.shapes.medium,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    OutlinedTextField(
+                        value = uiState.autoTypeSequence,
+                        onValueChange = onAutoTypeSequenceChange,
+                        label = { Text(stringResource(R.string.edit_autotype_hint)) },
+                        singleLine = true,
+                        shape = MaterialTheme.shapes.medium,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    OutlinedTextField(
+                        value = uiState.overrideUrl,
+                        onValueChange = onOverrideUrlChange,
+                        label = { Text(stringResource(R.string.edit_override_url_hint)) },
+                        singleLine = true,
+                        shape = MaterialTheme.shapes.medium,
+                        modifier = Modifier.fillMaxWidth()
+                    )
                 }
             }
 
@@ -655,9 +789,10 @@ fun EntryEditContent(
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            // 底部保存大按钮
+            // 底部保存大按钮（H4-只读整改：只读会话禁用保存）
             Button(
                 onClick = onSaveClick,
+                enabled = !uiState.isReadOnly,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(50.dp),

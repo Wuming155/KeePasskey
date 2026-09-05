@@ -60,6 +60,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
@@ -172,6 +173,7 @@ fun VaultListScreen(
         onPurgeEntry = viewModel::purgeEntry,
         onEmptyRecycleBin = viewModel::emptyRecycleBin,
         onTriggerSync = viewModel::triggerPullRefresh,
+    onNavigateToConflictResolver = onNavigateToConflictResolver,
         onSelectAllBatch = viewModel::selectAllEntries,
         onClearBatch = viewModel::clearBatchSelection,
         onBatchDelete = viewModel::batchDeleteSelected,
@@ -203,6 +205,7 @@ fun VaultListContent(
     onPurgeEntry: (String) -> Unit,
     onEmptyRecycleBin: () -> Unit,
     onTriggerSync: () -> Unit,
+    onNavigateToConflictResolver: () -> Unit = {},
     onSelectAllBatch: () -> Unit,
     onClearBatch: () -> Unit,
     onBatchDelete: () -> Unit,
@@ -345,14 +348,17 @@ fun VaultListContent(
                 enter = androidx.compose.animation.fadeIn() + androidx.compose.animation.scaleIn(),
                 exit = androidx.compose.animation.fadeOut() + androidx.compose.animation.scaleOut()
             ) {
-                ExtendedFloatingActionButton(
-                    onClick = { showCreateTypeDialog = true },
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    contentColor = MaterialTheme.colorScheme.onPrimary,
-                    shape = CapsuleShape,
-                    icon = { Icon(Icons.Default.Add, contentDescription = stringResource(R.string.cd_create)) },
-                    text = { Text(stringResource(R.string.btn_create), fontWeight = FontWeight.SemiBold) }
-                )
+                // H4-只读整改：只读会话隐藏新建入口
+                if (!uiState.isReadOnly) {
+                    ExtendedFloatingActionButton(
+                        onClick = { showCreateTypeDialog = true },
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary,
+                        shape = CapsuleShape,
+                        icon = { Icon(Icons.Default.Add, contentDescription = stringResource(R.string.cd_create)) },
+                        text = { Text(stringResource(R.string.btn_create), fontWeight = FontWeight.SemiBold) }
+                    )
+                }
             }
         }
     ) { innerPadding ->
@@ -377,6 +383,46 @@ fun VaultListContent(
             contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
+            // H2 整改：存在待解决冲突会话时展示「去解决冲突」横幅——
+            // 此前冲突解决页是死路由，用户收到冲突提示后无任何入口
+            if (uiState.hasPendingConflict) {
+                item {
+                    Surface(
+                        color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.55f),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable(onClick = onNavigateToConflictResolver)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Warning,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onErrorContainer,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text(
+                                text = stringResource(R.string.sync_feedback_conflict),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Text(
+                                text = stringResource(R.string.vault_conflict_action),
+                                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                }
+            }
+
             // 1. 面包屑路径导航
             if (uiState.breadcrumbs.isNotEmpty() && uiState.searchQuery.isBlank()) {
                 item {

@@ -5,14 +5,11 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /**
- * 阶段 1 内存设置仓库实现
+ * 仅供 JVM 单元测试使用的内存设置仓库假实现（H4 整改：移出生产 source set）。
  */
-@Singleton
-class FakeSettingsRepository @Inject constructor() : SettingsRepository {
+class FakeSettingsRepository() : SettingsRepository {
 
     private val settingsFlow = MutableStateFlow(UserSettings())
 

@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import com.keepasskey.app.R
 import androidx.lifecycle.viewModelScope
 import com.keepasskey.app.data.repository.VaultRepository
+import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.model.EntryCategory
 import com.keepasskey.app.ui.model.UiAttachment
@@ -47,6 +48,8 @@ class EntryEditViewModel @Inject constructor(
     val events: SharedFlow<EntryEditEvent> = _events.asSharedFlow()
 
     init {
+        // H4-只读整改：会话只读时编辑页禁用保存
+        _uiState.update { it.copy(isReadOnly = vaultRepository.isSessionReadOnly()) }
         val entryId: String? = savedStateHandle["entryId"]
         val groupId: String? = savedStateHandle["groupId"]
         if (entryId != null) {
@@ -77,6 +80,8 @@ class EntryEditViewModel @Inject constructor(
                         cf
                     }
                 }
+                // 断点4 整改：TOTP 配置原文按需回填（otp 字段优先，回退 TOTP 开头的自定义字段）
+                val totpRaw = vaultRepository.getEntryTotpSecret(entry.id).orEmpty()
                 _uiState.update {
                     it.copy(
                         entryId = entry.id,
@@ -88,8 +93,12 @@ class EntryEditViewModel @Inject constructor(
                         url = entry.url,
                         notes = entry.notes,
                         isPasskey = entry.isPasskey,
+                        totpSecret = totpRaw,
                         customFields = editableFields,
                         attachments = entry.attachments,
+                        tagsInput = entry.tags.joinToString(", "),
+                        autoTypeSequence = entry.autoTypeSequence,
+                        overrideUrl = entry.overrideUrl.orEmpty(),
                         isDirty = false
                     )
                 }
@@ -112,6 +121,12 @@ class EntryEditViewModel @Inject constructor(
     }
 
     fun onTotpSecretChange(secret: String) = _uiState.update { it.copy(totpSecret = secret, isDirty = true) }
+
+    fun onTagsInputChange(input: String) = _uiState.update { it.copy(tagsInput = input, isDirty = true) }
+
+    fun onAutoTypeSequenceChange(sequence: String) = _uiState.update { it.copy(autoTypeSequence = sequence, isDirty = true) }
+
+    fun onOverrideUrlChange(url: String) = _uiState.update { it.copy(overrideUrl = url, isDirty = true) }
 
     fun onTogglePasswordVisibility() = _uiState.update { it.copy(isPasswordVisible = !it.isPasswordVisible) }
     fun onToggleGenerator() = _uiState.update { it.copy(showGenerator = !it.showGenerator) }
@@ -189,15 +204,26 @@ class EntryEditViewModel @Inject constructor(
         }
     }
 
-    fun addAttachment(fileName: String, fileSizeFormatted: String) {
+    /**
+     * 断点1 整改：真实附件添加——读取用户经 SAF 选择文件的字节并随编辑会话驻留内存，
+     * 保存时随条目提交入库（保存时经去重器入池）。同名附件视为替换。
+     */
+    fun addAttachment(fileName: String, fileSizeFormatted: String, data: ByteArray) {
+        if (data.isEmpty()) {
+            _uiState.update { it.copy(userMessage = UiMessage(R.string.edit_attachment_empty)) }
+            return
+        }
         val newAtt = UiAttachment(
             id = "att_${System.currentTimeMillis()}",
             fileName = fileName,
             fileSizeFormatted = fileSizeFormatted,
             mimeType = "application/octet-stream",
-            addedAt = "刚刚"
+            addedAt = "刚刚",
+            data = data
         )
-        _uiState.update { it.copy(attachments = it.attachments + newAtt, isDirty = true) }
+        _uiState.update { state ->
+            state.copy(attachments = state.attachments.filterNot { it.fileName == fileName } + newAtt, isDirty = true)
+        }
     }
 
     fun removeAttachment(id: String) {
@@ -208,6 +234,10 @@ class EntryEditViewModel @Inject constructor(
 
     fun saveEntry() {
         val state = _uiState.value
+        if (state.isReadOnly) {
+            _uiState.update { it.copy(userMessage = UiMessage(R.string.readonly_save_rejected)) }
+            return
+        }
         if (state.title.isBlank()) {
             _uiState.update { it.copy(userMessage = UiMessage(R.string.edit_title_required)) }
             return
@@ -227,11 +257,27 @@ class EntryEditViewModel @Inject constructor(
                 groupId = state.groupId,
                 iconName = state.iconName,
                 customFields = state.customFields.filter { it.key.isNotBlank() },
-                attachments = state.attachments
+                attachments = state.attachments,
+                tags = state.tagsInput.split(',', '\uff0c', ' ').map { it.trim() }.filter { it.isNotEmpty() }.distinct(),
+                autoTypeSequence = state.autoTypeSequence,
+                overrideUrl = state.overrideUrl.trim().takeIf { it.isNotEmpty() }
             )
             // M1 整改：密码以独立参数显式提交，不再随条目投影携带
-            vaultRepository.saveEntry(entry, passwordChars = state.password.toCharArray())
-            _events.emit(EntryEditEvent.SaveSuccess)
+            // 断点4 整改：TOTP 种子随保存显式提交（空串=清除 TOTP）
+            // H3 整改：保存失败必须显式反馈，禁止磁盘写失败时谎报成功
+            val result = vaultRepository.saveEntry(
+                entry,
+                passwordChars = state.password.toCharArray(),
+                totpSecret = state.totpSecret
+            )
+            if (result is KdbxResult.Success) {
+                _events.emit(EntryEditEvent.SaveSuccess)
+            } else {
+                val failure = result as KdbxResult.Failure
+                _uiState.update {
+                    it.copy(userMessage = UiMessage(R.string.edit_save_failed, listOf(failure.message)))
+                }
+            }
         }
     }
 

@@ -129,6 +129,11 @@ class UnlockViewModel @Inject constructor(
         _uiState.update { it.copy(hasKeyFile = !it.hasKeyFile) }
     }
 
+    /** H4-只读整改：切换「只读打开」——开启后本次会话写盘硬拒绝 */
+    fun onToggleReadOnly() {
+        _uiState.update { it.copy(openReadOnly = !it.openReadOnly) }
+    }
+
     fun switchUnlockMode(mode: UnlockMode) {
         _uiState.update { it.copy(unlockMode = mode, errorMessage = null, infoMessage = null) }
     }
@@ -145,7 +150,7 @@ class UnlockViewModel @Inject constructor(
             _uiState.update { it.copy(isLoading = true, errorMessage = null) }
 
             try {
-                when (val result = vaultRepository.unlockActiveDatabase(passwordChars)) {
+                when (val result = vaultRepository.unlockActiveDatabase(passwordChars, readOnly = _uiState.value.openReadOnly)) {
                     is KdbxResult.Success -> {
                         debugLog.info(TAG, "主密码解锁成功")
                         // QuickUnlock 首次登记流程：以本次解锁的真实主密码封印 PIN 保护凭据

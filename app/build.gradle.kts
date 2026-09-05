@@ -77,6 +77,8 @@ dependencies {
     kapt("com.google.dagger:hilt-compiler:2.60.1")
     implementation("androidx.hilt:hilt-navigation-compose:1.3.0")
     implementation("androidx.credentials:credentials:1.5.0")
+    // TOTP 二维码扫描（断点5 整改：扫码按钮真实化）
+    implementation("com.journeyapps:zxing-android-embedded:4.3.0")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 

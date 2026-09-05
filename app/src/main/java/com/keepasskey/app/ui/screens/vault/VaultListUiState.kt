@@ -51,15 +51,19 @@ data class VaultListUiState(
     val allGroups: List<VaultGroup> = emptyList(),
     val entries: List<UiVaultEntry> = emptyList(),
     val totalEntriesCount: Int = 0,
-    val databaseName: String = "personal-vault.kdbx",
+    val databaseName: String = "",
     val syncStatus: VaultSyncStatus = VaultSyncStatus.SYNCED,
     val isSyncing: Boolean = false,
-    // 上次同步完成时间的展示文案（如下拉指示区显示「今天 10:25」）
-    val lastSyncTimeText: String = "今天 10:25",
+    // 上次同步完成时间的展示文案（如下拉指示区显示「今天 10:25」）；空串表示本会话尚未同步
+    val lastSyncTimeText: String = "",
     val isLocked: Boolean = false,
     val isBatchMode: Boolean = false,
     val selectedEntryIds: Set<String> = emptySet(),
     val userMessage: UiMessage? = null,
+    // H2 整改：存在待解决的同步冲突会话时为 true，驱动「去解决冲突」入口
+    val hasPendingConflict: Boolean = false,
+    // H4-只读整改：当前会话以只读模式打开时为 true，禁用新增/编辑/删除入口
+    val isReadOnly: Boolean = false,
     val showUsernameInList: Boolean = true,
     val showOtpInList: Boolean = true,
     val showPasskeyBadge: Boolean = true,

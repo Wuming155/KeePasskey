@@ -6,6 +6,16 @@ import com.keepasskey.app.ui.model.VaultGroup
 import kotlinx.coroutines.flow.Flow
 
 /**
+ * 历史修订的完整回滚快照（断点8 整改）。
+ * [entry] 的受保护自定义字段已按需解密回填，可直接作为 saveEntry 入参提交；
+ * [totpSecret] 为该修订的 TOTP 配置原文，空串表示该修订无 TOTP 配置。
+ */
+data class EntryRevisionSnapshot(
+    val entry: UiVaultEntry,
+    val totpSecret: String
+)
+
+/**
  * 单条凭据的 TOTP 即时计算快照（F2 整改）。
  * 仅含展示所需的非敏感结果（验证码与参数），不含种子。
  */
@@ -32,9 +42,13 @@ interface VaultRepository {
     suspend fun selectDatabase(id: String)
 
     /**
-     * 解锁当前选中的活动密码库
+     * 解锁当前选中的活动密码库。
+     * [readOnly] 为 true 时以只读模式打开（H4-只读整改）：会话期间一切写盘硬拒绝。
      */
-    suspend fun unlockActiveDatabase(passwordChars: CharArray): com.keepasskey.core.result.KdbxResult<Unit>
+    suspend fun unlockActiveDatabase(
+        passwordChars: CharArray,
+        readOnly: Boolean = false
+    ): com.keepasskey.core.result.KdbxResult<Unit>
 
     /**
      * 锁定当前密码库，清空内存凭据与活动树
@@ -47,24 +61,28 @@ interface VaultRepository {
     fun isLocked(): Boolean
 
     /**
-     * 创建新密码库
+     * 创建新密码库（H3 整改：创建/写盘结果必须向上传播，禁止静默失败）
      */
     suspend fun createDatabase(
         name: String,
         masterPassword: String,
         keyFile: Boolean,
         preset: String
-    )
+    ): com.keepasskey.core.result.KdbxResult<Unit>
 
     /**
      * 移除密码库关联
      */
-    suspend fun removeDatabase(id: String)
+    suspend fun removeDatabase(id: String): com.keepasskey.core.result.KdbxResult<Unit>
 
     /**
      * 导入并打开已有 KDBX 数据库 (支持本地、WebDAV、S3 来源)
      */
-    suspend fun importExternalDatabase(name: String, path: String, syncType: String = "本地设备存储")
+    suspend fun importExternalDatabase(
+        name: String,
+        path: String,
+        syncType: String = "本地设备存储"
+    ): com.keepasskey.core.result.KdbxResult<Unit>
 
     /**
      * 获取全部群组/文件夹的实时响应式流
@@ -74,12 +92,12 @@ interface VaultRepository {
     /**
      * 保存或更新群组/文件夹
      */
-    suspend fun saveGroup(group: VaultGroup)
+    suspend fun saveGroup(group: VaultGroup): com.keepasskey.core.result.KdbxResult<Unit>
 
     /**
      * 删除群组/文件夹
      */
-    suspend fun deleteGroup(id: String)
+    suspend fun deleteGroup(id: String): com.keepasskey.core.result.KdbxResult<Unit>
 
     /**
      * 获取全部凭据条目的实时响应式流
@@ -95,33 +113,41 @@ interface VaultRepository {
      * 保存或更新凭据条目。
      * [passwordChars] 非空时写入新密码；为 null 时保留既有条目的密码不动（M1 整改：
      * UI 投影不再携带密码明文，密码由编辑页按需加载后显式提交）。
+     * [totpSecret] 语义同密码（断点4 整改）：null 表示未修改保留既有 TOTP 配置；
+     * 非 null 时写入标准 otp 字段（空串表示清除 TOTP）。
+     * 返回 [com.keepasskey.core.result.KdbxResult]（H3 整改）：保存失败必须显式返回，
+     * 禁止磁盘写失败被静默吞掉而 UI 谎报成功。
      */
-    suspend fun saveEntry(entry: UiVaultEntry, passwordChars: CharArray? = null)
+    suspend fun saveEntry(
+        entry: UiVaultEntry,
+        passwordChars: CharArray? = null,
+        totpSecret: String? = null
+    ): com.keepasskey.core.result.KdbxResult<Unit>
 
     /**
      * 删除凭据条目（移至回收站或彻底删除）
      */
-    suspend fun deleteEntry(id: String)
+    suspend fun deleteEntry(id: String): com.keepasskey.core.result.KdbxResult<Unit>
 
     /**
      * 还原处于回收站中的凭据条目
      */
-    suspend fun restoreEntry(id: String)
+    suspend fun restoreEntry(id: String): com.keepasskey.core.result.KdbxResult<Unit>
 
     /**
-     * 清空回收站
+     * 清空回收站（断点9 整改：同时清除回收站内的子分组并记录墓碑）
      */
-    suspend fun emptyRecycleBin()
+    suspend fun emptyRecycleBin(): com.keepasskey.core.result.KdbxResult<Unit>
 
     /**
      * 批量移动凭据条目至目标分组
      */
-    suspend fun batchMoveEntries(entryIds: Set<String>, targetGroupId: String?)
+    suspend fun batchMoveEntries(entryIds: Set<String>, targetGroupId: String?): com.keepasskey.core.result.KdbxResult<Unit>
 
     /**
      * 批量删除凭据条目（移至回收站）
      */
-    suspend fun batchDeleteEntries(entryIds: Set<String>)
+    suspend fun batchDeleteEntries(entryIds: Set<String>): com.keepasskey.core.result.KdbxResult<Unit>
 
     /**
      * 一次性快照直出 Core 层 KdbxEntry 列表（供 Credential Provider 与 Autofill 系统服务直接消费，不经 UI 投影）
@@ -139,6 +165,14 @@ interface VaultRepository {
      * 按需解密单条历史修订的密码（M1 整改，供详情页回滚/对比使用），语义同 [getEntryPassword]。
      */
     suspend fun getEntryRevisionPassword(entryId: String, revisionId: String): String?
+
+    /**
+     * 读取单条历史修订的完整回滚快照（断点8 整改，供详情页全字段回滚）。
+     * 返回的 [EntryRevisionSnapshot.entry] 中受保护字段已解密（仅驻留编辑会话），
+     * [EntryRevisionSnapshot.totpSecret] 为该修订 TOTP 配置原文（无则空串）；
+     * 修订不存在时返回 null。
+     */
+    suspend fun getEntryRevisionSnapshot(entryId: String, revisionId: String): EntryRevisionSnapshot?
 
     /**
      * 按需解密单条凭据的受保护自定义字段（F2 整改，语义同 [getEntryPassword]）。
@@ -188,4 +222,22 @@ interface VaultRepository {
         username: String,
         passwordChars: CharArray
     )
+
+    /**
+     * 按需读取单条凭据的 TOTP 配置原文（断点4 整改，编辑页回填用）。
+     * 与 [calculateEntryTotp] 同源：标准 otp 字段优先，回退 TOTP 开头的自定义字段；
+     * 未配置时返回 null。种子 String 仅在编辑会话内存活。
+     */
+    suspend fun getEntryTotpSecret(entryId: String): String?
+
+    /**
+     * 按需解析单条凭据指定附件的二进制内容（断点3 整改，SAF 导出用）。
+     * 附件不存在或名称不匹配时返回 null。
+     */
+    suspend fun getAttachmentData(entryId: String, fileName: String): ByteArray?
+
+    /**
+     * 当前会话是否以只读模式打开（H4-只读整改）。锁定/关闭状态下返回 false。
+     */
+    fun isSessionReadOnly(): Boolean
 }

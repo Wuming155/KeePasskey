@@ -19,15 +19,12 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import java.util.Arrays
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /**
  * 阶段 1 内存实现，提供群组文件夹、凭据、多数据库管理与回收站的假数据和响应式状态更新。
- * 当阶段 2 真实 KDBX 数据库就绪后，可通过 Hilt 绑定无缝替换。
+ * 仅供 JVM 单元测试使用，禁止迁回生产 main source set 或绑定生产 DI。
  */
-@Singleton
-class FakeVaultRepository @Inject constructor() : VaultRepository {
+class FakeVaultRepository() : VaultRepository {
 
     private val databasesFlow = MutableStateFlow(initialMockDatabases)
     private val groupsFlow = MutableStateFlow(initialMockGroups)
@@ -45,7 +42,7 @@ class FakeVaultRepository @Inject constructor() : VaultRepository {
         databasesFlow.value = current
     }
 
-    override suspend fun unlockActiveDatabase(passwordChars: CharArray): com.keepasskey.core.result.KdbxResult<Unit> {
+    override suspend fun unlockActiveDatabase(passwordChars: CharArray, readOnly: Boolean): com.keepasskey.core.result.KdbxResult<Unit> {
         return if (passwordChars.isNotEmpty()) {
             com.keepasskey.core.result.KdbxResult.Success(Unit)
         } else {
@@ -64,7 +61,7 @@ class FakeVaultRepository @Inject constructor() : VaultRepository {
         masterPassword: String,
         keyFile: Boolean,
         preset: String
-    ) {
+    ): com.keepasskey.core.result.KdbxResult<Unit> {
         val fileName = if (name.endsWith(".kdbx")) name else "$name.kdbx"
         val newDb = VaultDatabaseInfo(
             id = "db_${System.currentTimeMillis()}",
@@ -80,13 +77,15 @@ class FakeVaultRepository @Inject constructor() : VaultRepository {
         val current = databasesFlow.value.map { it.copy(isActive = false) }.toMutableList()
         current.add(0, newDb)
         databasesFlow.value = current
+        return com.keepasskey.core.result.KdbxResult.Success(Unit)
     }
 
-    override suspend fun removeDatabase(id: String) {
+    override suspend fun removeDatabase(id: String): com.keepasskey.core.result.KdbxResult<Unit> {
         databasesFlow.value = databasesFlow.value.filter { it.id != id }
+        return com.keepasskey.core.result.KdbxResult.Success(Unit)
     }
 
-    override suspend fun importExternalDatabase(name: String, path: String, syncType: String) {
+    override suspend fun importExternalDatabase(name: String, path: String, syncType: String): com.keepasskey.core.result.KdbxResult<Unit> {
         val newDb = VaultDatabaseInfo(
             id = "db_${System.currentTimeMillis()}",
             name = name,
@@ -101,11 +100,12 @@ class FakeVaultRepository @Inject constructor() : VaultRepository {
         val current = databasesFlow.value.map { it.copy(isActive = false) }.toMutableList()
         current.add(0, newDb)
         databasesFlow.value = current
+        return com.keepasskey.core.result.KdbxResult.Success(Unit)
     }
 
     override fun getGroups(): Flow<List<VaultGroup>> = groupsFlow.asStateFlow()
 
-    override suspend fun saveGroup(group: VaultGroup) {
+    override suspend fun saveGroup(group: VaultGroup): com.keepasskey.core.result.KdbxResult<Unit> {
         val current = groupsFlow.value.toMutableList()
         val index = current.indexOfFirst { it.id == group.id }
         if (index >= 0) {
@@ -114,14 +114,16 @@ class FakeVaultRepository @Inject constructor() : VaultRepository {
             current.add(0, group)
         }
         groupsFlow.value = current
+        return com.keepasskey.core.result.KdbxResult.Success(Unit)
     }
 
-    override suspend fun deleteGroup(id: String) {
+    override suspend fun deleteGroup(id: String): com.keepasskey.core.result.KdbxResult<Unit> {
         // 删除文件夹及其下属条目或移入回收站
         groupsFlow.value = groupsFlow.value.filter { it.id != id }
         entriesFlow.value = entriesFlow.value.map { entry ->
             if (entry.groupId == id) entry.copy(groupId = "group_recycle_bin") else entry
         }
+        return com.keepasskey.core.result.KdbxResult.Success(Unit)
     }
 
     override fun getEntries(): Flow<List<UiVaultEntry>> = entriesFlow.map { list ->
@@ -137,7 +139,7 @@ class FakeVaultRepository @Inject constructor() : VaultRepository {
         return entriesFlow.map { list -> list.find { it.id == id } }
     }
 
-    override suspend fun saveEntry(entry: UiVaultEntry, passwordChars: CharArray?) {
+    override suspend fun saveEntry(entry: UiVaultEntry, passwordChars: CharArray?, totpSecret: String?): com.keepasskey.core.result.KdbxResult<Unit> {
         passwordChars?.let { pwd ->
             passwordStore.value = passwordStore.value + (entry.id to String(pwd))
         }
@@ -166,9 +168,10 @@ class FakeVaultRepository @Inject constructor() : VaultRepository {
             current.add(0, entry)
         }
         entriesFlow.value = current
+        return com.keepasskey.core.result.KdbxResult.Success(Unit)
     }
 
-    override suspend fun deleteEntry(id: String) {
+    override suspend fun deleteEntry(id: String): com.keepasskey.core.result.KdbxResult<Unit> {
         val current = entriesFlow.value.toMutableList()
         val index = current.indexOfFirst { it.id == id }
         if (index >= 0) {
@@ -182,33 +185,38 @@ class FakeVaultRepository @Inject constructor() : VaultRepository {
             }
             entriesFlow.value = current
         }
+        return com.keepasskey.core.result.KdbxResult.Success(Unit)
     }
 
-    override suspend fun restoreEntry(id: String) {
+    override suspend fun restoreEntry(id: String): com.keepasskey.core.result.KdbxResult<Unit> {
         val current = entriesFlow.value.toMutableList()
         val index = current.indexOfFirst { it.id == id }
         if (index >= 0) {
             current[index] = current[index].copy(groupId = null)
             entriesFlow.value = current
         }
+        return com.keepasskey.core.result.KdbxResult.Success(Unit)
     }
 
-    override suspend fun emptyRecycleBin() {
+    override suspend fun emptyRecycleBin(): com.keepasskey.core.result.KdbxResult<Unit> {
         entriesFlow.value = entriesFlow.value.filter { it.groupId != "group_recycle_bin" }
+        return com.keepasskey.core.result.KdbxResult.Success(Unit)
     }
 
-    override suspend fun batchMoveEntries(entryIds: Set<String>, targetGroupId: String?) {
+    override suspend fun batchMoveEntries(entryIds: Set<String>, targetGroupId: String?): com.keepasskey.core.result.KdbxResult<Unit> {
         val current = entriesFlow.value.map { entry ->
             if (entry.id in entryIds) entry.copy(groupId = targetGroupId) else entry
         }
         entriesFlow.value = current
+        return com.keepasskey.core.result.KdbxResult.Success(Unit)
     }
 
-    override suspend fun batchDeleteEntries(entryIds: Set<String>) {
+    override suspend fun batchDeleteEntries(entryIds: Set<String>): com.keepasskey.core.result.KdbxResult<Unit> {
         val current = entriesFlow.value.map { entry ->
             if (entry.id in entryIds) entry.copy(groupId = "group_recycle_bin") else entry
         }
         entriesFlow.value = current
+        return com.keepasskey.core.result.KdbxResult.Success(Unit)
     }
 
     private val extraKdbxEntries = MutableStateFlow<List<KdbxEntry>>(emptyList())
@@ -611,4 +619,12 @@ class FakeVaultRepository @Inject constructor() : VaultRepository {
             )
         )
     }
+
+    override suspend fun getEntryTotpSecret(entryId: String): String? = null
+
+    override suspend fun getEntryRevisionSnapshot(entryId: String, revisionId: String): EntryRevisionSnapshot? = null
+
+    override suspend fun getAttachmentData(entryId: String, fileName: String): ByteArray? = null
+
+    override fun isSessionReadOnly(): Boolean = false
 }

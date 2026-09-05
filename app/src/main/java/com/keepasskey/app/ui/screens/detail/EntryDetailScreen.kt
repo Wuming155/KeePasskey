@@ -34,6 +34,8 @@ import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -68,7 +70,6 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.keepasskey.app.R
-import com.keepasskey.app.data.repository.FakeVaultRepository
 import com.keepasskey.app.ui.components.BentoCard
 import com.keepasskey.app.ui.components.PasskeyBadge
 import com.keepasskey.app.ui.components.PasswordStrengthBar
@@ -102,6 +103,18 @@ fun EntryDetailScreen(
     }
 
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+
+    // 断点3 整改：SAF 导出挂起中的附件，选择目标后交给 ViewModel 真实写盘
+    var pendingExportAttachment by remember { mutableStateOf<UiAttachment?>(null) }
+    val exportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("*/*")
+    ) { uri ->
+        val att = pendingExportAttachment
+        if (uri != null && att != null) {
+            viewModel.exportAttachment(att, uri)
+        }
+        pendingExportAttachment = null
+    }
     val snackbarHostState = remember { SnackbarHostState() }
 
     uiState.userMessage?.let { message ->
@@ -121,7 +134,11 @@ fun EntryDetailScreen(
         onTogglePasswordVisibility = viewModel::togglePasswordVisibility,
         onToggleCustomFieldVisibility = viewModel::toggleCustomFieldVisibility,
         onCopyCustomField = viewModel::copyCustomField,
-        onExportAttachment = viewModel::exportAttachment,
+        onExportAttachment = { att ->
+            // 断点3 整改：呼起真实 SAF 另存为，导出经仓库解析的真实附件字节
+            pendingExportAttachment = att
+            exportLauncher.launch(att.fileName)
+        },
         onRollbackRevision = viewModel::rollbackToRevision,
         onPrepareRevisionDiff = viewModel::prepareRevisionDiff,
         onClearRevisionDiff = viewModel::clearRevisionDiff,
@@ -184,12 +201,15 @@ fun EntryDetailContent(
                             tint = if (uiState.isFavorite) securityColors.warning else MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    IconButton(onClick = onEditClick) {
-                        Icon(
-                            imageVector = Icons.Default.Edit,
-                            contentDescription = stringResource(R.string.cd_edit),
-                            tint = MaterialTheme.colorScheme.primary
-                        )
+                    // H4-只读整改：只读会话隐藏编辑入口
+                    if (!uiState.isReadOnly) {
+                        IconButton(onClick = onEditClick) {
+                            Icon(
+                                imageVector = Icons.Default.Edit,
+                                contentDescription = stringResource(R.string.cd_edit),
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -407,14 +427,14 @@ fun EntryDetailContent(
                                 )
                                 Spacer(modifier = Modifier.height(4.dp))
                                 Text(
-                                    text = entry.totpCode,
+                                    text = uiState.liveTotpCode ?: entry.totpCode,
                                     style = MonospaceTotpStyle.copy(color = MaterialTheme.colorScheme.primary)
                                 )
                             }
 
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 TotpMiniGauge(
-                                    remainingSeconds = entry.totpRemainingSeconds,
+                                    remainingSeconds = uiState.totpRemainingSeconds ?: entry.totpRemainingSeconds,
                                     modifier = Modifier.size(34.dp)
                                 )
                                 Spacer(modifier = Modifier.width(12.dp))

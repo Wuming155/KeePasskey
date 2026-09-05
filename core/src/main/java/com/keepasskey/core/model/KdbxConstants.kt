@@ -107,6 +107,8 @@ object KdbxConstants {
         const val PASSWORD = "Password"
         const val URL = "URL"
         const val NOTES = "Notes"
+        /** 标准 TOTP 字段（KeePassXC 语义：otpauth:// URI 或纯 Base32 种子） */
+        const val OTP = "otp"
     }
 
     /**

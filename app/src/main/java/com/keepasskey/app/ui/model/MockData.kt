@@ -9,8 +9,8 @@ data class VaultGroup(
     val parentId: String? = null,
     val iconName: String = "folder",
     val orderIndex: Int = 0,
-    val updatedAt: String = "2026-09-04 10:00",
-    val createdAt: String = "2026-08-01 09:00",
+    val updatedAt: String = "",
+    val createdAt: String = "",
     val isRecycleBin: Boolean = false
 )
 
@@ -37,8 +37,21 @@ data class UiAttachment(
     val fileName: String,
     val fileSizeFormatted: String,
     val mimeType: String = "application/octet-stream",
-    val addedAt: String = "2026-09-04"
-)
+    val addedAt: String = "",
+    /**
+     * H4-附件整改：仅「本次编辑会话中新添加」的附件在内存中携带真实字节（data 非空），
+     * 已落库附件恒为 null（按 refIndex 从库二进制池解析）。绝不持久化、不写日志。
+     */
+    val data: ByteArray? = null
+) {
+    override fun equals(other: Any?): Boolean =
+        other is UiAttachment && id == other.id && fileName == other.fileName &&
+                fileSizeFormatted == other.fileSizeFormatted && mimeType == other.mimeType &&
+                addedAt == other.addedAt && (data contentEquals other.data)
+
+    override fun hashCode(): Int = listOf(id, fileName, fileSizeFormatted, mimeType, addedAt).hashCode() * 31 +
+            (data?.contentHashCode() ?: 0)
+}
 
 /**
  * 条目历史修改快照版本。
@@ -61,8 +74,8 @@ data class VaultDatabaseInfo(
     val path: String,
     val isRemote: Boolean = false,
     val syncType: String = "WebDAV",
-    val lastOpenedAt: String = "今天 10:25",
-    val fileSizeFormatted: String = "142 KB",
+    val lastOpenedAt: String = "",
+    val fileSizeFormatted: String = "",
     val isActive: Boolean = false,
     val encryptionPreset: String = "ChaCha20 + Argon2id"
 )
@@ -92,8 +105,8 @@ data class UiVaultEntry(
     val category: EntryCategory = EntryCategory.LOGIN,
     val strengthBits: Int = 112,
     val notes: String = "",
-    val updatedAt: String = "2026-09-04 10:25",
-    val createdAt: String = "2026-08-01 09:00",
+    val updatedAt: String = "",
+    val createdAt: String = "",
     val orderIndex: Int = 0,
     val groupId: String? = null,
     val iconName: String = "key",
@@ -103,7 +116,11 @@ data class UiVaultEntry(
     val cardCvv: String? = null,
     val customFields: List<UiCustomField> = emptyList(),
     val attachments: List<UiAttachment> = emptyList(),
-    val revisions: List<UiEntryRevision> = emptyList()
+    val revisions: List<UiEntryRevision> = emptyList(),
+    // KP2A 能力补齐：标签 / AutoType 序列 / Override URL 的 UI 编辑通道（H4-断点补齐）
+    val tags: List<String> = emptyList(),
+    val autoTypeSequence: String = "",
+    val overrideUrl: String? = null
 )
 
 enum class EntryCategory(val label: String) {

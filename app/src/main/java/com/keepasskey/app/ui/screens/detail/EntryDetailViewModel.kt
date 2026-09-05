@@ -1,5 +1,7 @@
 package com.keepasskey.app.ui.screens.detail
 
+import android.content.Context
+import android.net.Uri
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -21,6 +23,9 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -30,6 +35,8 @@ import javax.inject.Inject
  */
 @HiltViewModel
 class EntryDetailViewModel @Inject constructor(
+    // 允许为 null 仅用于单测注入；生产 DI 注入 @ApplicationContext
+    @ApplicationContext private val appContext: Context?,
     savedStateHandle: SavedStateHandle,
     private val vaultRepository: VaultRepository,
     private val settingsRepository: SettingsRepository,
@@ -48,6 +55,11 @@ class EntryDetailViewModel @Inject constructor(
     private val revealedProtectedFieldsFlow = MutableStateFlow<Map<String, String>>(emptyMap())
     private val userMessageFlow = MutableStateFlow<UiMessage?>(null)
 
+    // 断点6 整改：详情页 TOTP 每秒倒计时（原为投影一次性值，进度环静止）
+    private val totpRemainingSecondsFlow = MutableStateFlow(0)
+    // 断点6 整改：周期翻转时经仓库按需重算的实时验证码（null=沿用投影值）
+    private val liveTotpCodeFlow = MutableStateFlow<String?>(null)
+
     /** combine 中间聚合体（避开 5 流以上的元组嵌套） */
     private data class DetailCore(
         val entry: UiVaultEntry?,
@@ -57,11 +69,13 @@ class EntryDetailViewModel @Inject constructor(
         val isFavorite: Boolean
     )
 
-    /** combine 中间聚合体：可见性 / 已揭示字段明文 / 用户消息 */
+    /** combine 中间聚合体：可见性 / 已揭示字段明文 / 用户消息 / TOTP 实时态 */
     private data class DetailExtras(
         val protectedVisibility: Map<String, Boolean>,
         val revealedProtectedFields: Map<String, String>,
-        val userMessage: UiMessage?
+        val userMessage: UiMessage?,
+        val totpRemainingSeconds: Int? = null,
+        val liveTotpCode: String? = null
     )
 
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -83,6 +97,8 @@ class EntryDetailViewModel @Inject constructor(
                 userMessageFlow
             ) { visMap, revealedFields, message ->
                 DetailExtras(visMap, revealedFields, message)
+            }.combine(combine(totpRemainingSecondsFlow, liveTotpCodeFlow) { r, c -> r to c }) { extras, totp ->
+                extras.copy(totpRemainingSeconds = totp.first, liveTotpCode = totp.second)
             }
         ) { core, extras ->
             core to extras
@@ -97,6 +113,9 @@ class EntryDetailViewModel @Inject constructor(
                 protectedFieldsVisibility = extras.protectedVisibility,
                 revealedProtectedFields = extras.revealedProtectedFields,
                 userMessage = extras.userMessage,
+                totpRemainingSeconds = extras.totpRemainingSeconds,
+                liveTotpCode = extras.liveTotpCode,
+                isReadOnly = vaultRepository.isSessionReadOnly(),
                 passwordCopyMessage = buildPasswordCopyMessage(settings.clipboardTimeoutSeconds)
             )
         }
@@ -105,6 +124,36 @@ class EntryDetailViewModel @Inject constructor(
             started = SharingStarted.WhileSubscribed(5000),
             initialValue = EntryDetailUiState(isLoading = true)
         )
+
+    init {
+        // 断点6 整改：每秒驱动 TOTP 倒计时；周期翻转（剩余秒数不降反升）时重算实时验证码
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.Default) {
+            var previous = -1
+            while (isActive) {
+                delay(TOTP_TICK_MS)
+                val snapshot = uiState.value.entry?.takeIf { it.totpCode != null }
+                if (snapshot != null) {
+                    val fresh = vaultRepository.calculateEntryTotp(snapshot.id)
+                    val period = fresh?.periodSeconds ?: snapshot.totpPeriod
+                    val remaining = if (fresh != null) {
+                        val nowSec = (System.currentTimeMillis() / 1000L).toInt()
+                        val r = period - (nowSec % period)
+                        if (r == 0) period else r
+                    } else {
+                        (snapshot.totpRemainingSeconds - 1).coerceAtLeast(0)
+                    }
+                    totpRemainingSecondsFlow.value = remaining
+                    if (previous in 1..remaining) {
+                        // 剩余秒数回跳到满值 → 新周期开始，刷新验证码
+                        liveTotpCodeFlow.value = fresh?.code
+                    } else if (previous == -1 && fresh != null) {
+                        liveTotpCodeFlow.value = fresh.code
+                    }
+                    previous = remaining
+                }
+            }
+        }
+    }
 
     fun setEntryId(id: String?) {
         entryIdFlow.value = id
@@ -165,23 +214,35 @@ class EntryDetailViewModel @Inject constructor(
     }
 
     /**
-     * 回滚到历史修订。密码从修订快照按需解密后随保存显式提交。
+     * 回滚到历史修订（断点8 整改）。
+     * 原实现仅恢复 username/notes/password 三字段，title/url/自定义字段/TOTP 全部丢失；
+     * 现改为取整修订快照（含解密后的受保护字段与 TOTP 配置）全字段回滚，
+     * 保存时由 HistoryManager 把回滚前的当前版本归档为最新历史。
      */
     fun rollbackToRevision(revision: UiEntryRevision) {
         val current = uiState.value.entry ?: return
         val entryId = current.id
         viewModelScope.launch {
+            val snapshot = vaultRepository.getEntryRevisionSnapshot(entryId, revision.id)
+            if (snapshot == null) {
+                userMessageFlow.value = UiMessage(R.string.detail_history_rolled_back)
+                return@launch
+            }
             val revisionPassword = vaultRepository.getEntryRevisionPassword(entryId, revision.id)
-            val updated = current.copy(
-                username = revision.username,
-                notes = if (revision.notes.isNotBlank()) revision.notes else current.notes,
+            val updated = snapshot.entry.copy(
+                groupId = current.groupId,
                 updatedAt = "刚刚 (从历史版本回滚)"
             )
-            vaultRepository.saveEntry(
+            val result = vaultRepository.saveEntry(
                 updated,
-                passwordChars = revisionPassword?.toCharArray()
+                passwordChars = revisionPassword?.toCharArray(),
+                totpSecret = snapshot.totpSecret
             )
-            userMessageFlow.value = UiMessage(R.string.detail_history_rolled_back)
+            userMessageFlow.value = if (result is com.keepasskey.core.result.KdbxResult.Success) {
+                UiMessage(R.string.detail_history_rolled_back)
+            } else {
+                UiMessage(R.string.edit_save_failed, listOf((result as com.keepasskey.core.result.KdbxResult.Failure).message))
+            }
         }
     }
 
@@ -202,8 +263,35 @@ class EntryDetailViewModel @Inject constructor(
         revealedPasswordFlow.value = null
     }
 
-    fun exportAttachment(attachment: UiAttachment) {
-        userMessageFlow.value = UiMessage(R.string.detail_attachment_export_toast, listOf(attachment.fileName))
+    /**
+     * 断点3 整改：真实附件导出——按需解析附件字节并写入 SAF 目标 Uri。
+     * [targetUri] 由 Screen 层 CreateDocument 选择器产生；此前该方法仅发 Toast。
+     */
+    fun exportAttachment(attachment: UiAttachment, targetUri: Uri) {
+        val entryId = entryIdFlow.value ?: return
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                val bytes = vaultRepository.getAttachmentData(entryId, attachment.fileName)
+                if (bytes == null) {
+                    userMessageFlow.value = UiMessage(R.string.detail_attachment_export_failed)
+                    return@launch
+                }
+                val resolver = appContext?.contentResolver ?: run {
+                    userMessageFlow.value = UiMessage(R.string.detail_attachment_export_failed)
+                    return@launch
+                }
+                resolver.openOutputStream(targetUri)?.use { os ->
+                    os.write(bytes)
+                    os.flush()
+                } ?: run {
+                    userMessageFlow.value = UiMessage(R.string.detail_attachment_export_failed)
+                    return@launch
+                }
+                userMessageFlow.value = UiMessage(R.string.detail_attachment_export_toast, listOf(attachment.fileName))
+            } catch (e: Exception) {
+                userMessageFlow.value = UiMessage(R.string.detail_attachment_export_failed)
+            }
+        }
     }
 
     fun showMessage(message: UiMessage) {
@@ -245,5 +333,6 @@ class EntryDetailViewModel @Inject constructor(
 
     companion object {
         private const val SECONDS_PER_MINUTE = 60
+        private const val TOTP_TICK_MS = 1000L
     }
 }

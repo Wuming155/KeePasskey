@@ -11,6 +11,7 @@ import com.keepasskey.app.ui.model.VaultDatabaseInfo
 import com.keepasskey.app.ui.model.VaultGroup
 import com.keepasskey.core.model.DeletedObject
 import com.keepasskey.core.model.KdbxConstants
+import com.keepasskey.core.model.KdbxAttachment
 import com.keepasskey.core.model.KdbxCustomField
 import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.model.KdbxGroup
@@ -49,7 +50,8 @@ import javax.inject.Singleton
 @Singleton
 class RealVaultRepository @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val databaseSession: DatabaseSession
+    private val databaseSession: DatabaseSession,
+    private val debugLog: com.keepasskey.app.data.logger.DebugLogBuffer
 ) : VaultRepository {
 
     private val repositoryScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -122,7 +124,10 @@ class RealVaultRepository @Inject constructor(
         }
     }
 
-    override suspend fun unlockActiveDatabase(passwordChars: CharArray): com.keepasskey.core.result.KdbxResult<Unit> {
+    override suspend fun unlockActiveDatabase(
+        passwordChars: CharArray,
+        readOnly: Boolean
+    ): com.keepasskey.core.result.KdbxResult<Unit> {
         val filesDir = context.filesDir ?: return com.keepasskey.core.result.KdbxResult.Failure(
             IllegalStateException("No filesDir"),
             "内部存储目录不可用"
@@ -147,7 +152,7 @@ class RealVaultRepository @Inject constructor(
             return createResult
         }
 
-        val result = databaseSession.open(targetFile, passwordChars)
+        val result = databaseSession.open(targetFile, passwordChars, readOnly = readOnly)
         if (result is com.keepasskey.core.result.KdbxResult.Success) {
             refreshDatabases()
         }
@@ -168,46 +173,66 @@ class RealVaultRepository @Inject constructor(
         masterPassword: String,
         keyFile: Boolean,
         preset: String
-    ) {
-        val filesDir = context.filesDir ?: return
+    ): com.keepasskey.core.result.KdbxResult<Unit> {
+        val filesDir = context.filesDir ?: return com.keepasskey.core.result.KdbxResult.Failure(
+            IllegalStateException("No filesDir"),
+            "内部存储目录不可用"
+        )
         val fileName = if (name.endsWith(".kdbx", ignoreCase = true)) name else "$name.kdbx"
         val targetFile = File(filesDir, fileName)
 
         val useArgon2 = !preset.contains("AES-KDF", ignoreCase = true)
         val passwordChars = masterPassword.toCharArray()
         try {
-            databaseSession.create(
+            val result = databaseSession.create(
                 file = targetFile,
                 name = name.removeSuffix(".kdbx"),
                 passwordChars = passwordChars,
                 useArgon2 = useArgon2
             )
             refreshDatabases()
+            return result
         } finally {
             passwordChars.fill('0')
         }
     }
 
-    override suspend fun removeDatabase(id: String) {
-        val filesDir = context.filesDir ?: return
+    override suspend fun removeDatabase(id: String): com.keepasskey.core.result.KdbxResult<Unit> {
+        val filesDir = context.filesDir
+            ?: return com.keepasskey.core.result.KdbxResult.Failure(IllegalStateException("No filesDir"), "内部存储目录不可用")
         val targetFile = File(filesDir, id)
-        if (targetFile.exists()) {
-            targetFile.delete()
+        return try {
+            if (targetFile.exists()) {
+                targetFile.delete()
+            }
+            if (databaseSession.currentFile?.name == id) {
+                databaseSession.close()
+            }
+            refreshDatabases()
+            com.keepasskey.core.result.KdbxResult.Success(Unit)
+        } catch (t: Throwable) {
+            com.keepasskey.core.result.KdbxResult.Failure(t, "移除密码库失败: ${t.message}")
         }
-        if (databaseSession.currentFile?.name == id) {
-            databaseSession.close()
-        }
-        refreshDatabases()
     }
 
-    override suspend fun importExternalDatabase(name: String, path: String, syncType: String) {
+    override suspend fun importExternalDatabase(
+        name: String,
+        path: String,
+        syncType: String
+    ): com.keepasskey.core.result.KdbxResult<Unit> {
         val externalFile = File(path)
-        val filesDir = context.filesDir ?: return
+        val filesDir = context.filesDir
+            ?: return com.keepasskey.core.result.KdbxResult.Failure(IllegalStateException("No filesDir"), "内部存储目录不可用")
         val destFile = File(filesDir, externalFile.name)
-        if (externalFile.exists() && externalFile.absolutePath != destFile.absolutePath) {
-            externalFile.copyTo(destFile, overwrite = true)
+        return try {
+            if (externalFile.exists() && externalFile.absolutePath != destFile.absolutePath) {
+                externalFile.copyTo(destFile, overwrite = true)
+            }
+            refreshDatabases()
+            com.keepasskey.core.result.KdbxResult.Success(Unit)
+        } catch (t: Throwable) {
+            com.keepasskey.core.result.KdbxResult.Failure(t, "导入数据库失败: ${t.message}")
         }
-        refreshDatabases()
     }
 
     override fun getGroups(): Flow<List<VaultGroup>> {
@@ -236,22 +261,28 @@ class RealVaultRepository @Inject constructor(
         }
     }
 
-    override suspend fun saveGroup(group: VaultGroup) {
+    override suspend fun saveGroup(group: VaultGroup): com.keepasskey.core.result.KdbxResult<Unit> {
         val kdbxGroup = KdbxGroup(
             id = parseUuidOrRandom(group.id),
             parentGroupId = group.parentId?.let { parseUuidOrNull(it) },
             name = group.name,
-            iconId = if (group.isRecycleBin) 43 else 48
+            // 断点7 整改：分组图标按名称映射到 KDBX 标准图标 ID（回收站强制 43 TrashBin）
+            iconId = if (group.isRecycleBin) ICON_TRASH_BIN else mapIconNameToId(group.iconName, fallbackId = ICON_FOLDER)
         )
         databaseSession.saveGroup(kdbxGroup)
-        databaseSession.save()
+        return persistSession()
     }
 
-    override suspend fun deleteGroup(id: String) {
-        val uuid = parseUuidOrNull(id) ?: return
-        val db = databaseSession.databaseFlow.first() ?: return
-        if (uuid == db.recycleBinUuid) return
-        val targetGroup = db.rootGroup.allGroups().firstOrNull { it.id == uuid } ?: return
+    override suspend fun deleteGroup(id: String): com.keepasskey.core.result.KdbxResult<Unit> {
+        val uuid = parseUuidOrNull(id)
+            ?: return com.keepasskey.core.result.KdbxResult.Failure(IllegalArgumentException("无效的分组 ID"), "分组不存在")
+        val db = databaseSession.databaseFlow.first()
+            ?: return com.keepasskey.core.result.KdbxResult.Failure(IllegalStateException("数据库未解锁"), "数据库未解锁")
+        if (uuid == db.recycleBinUuid) {
+            return com.keepasskey.core.result.KdbxResult.Success(Unit)
+        }
+        val targetGroup = db.rootGroup.allGroups().firstOrNull { it.id == uuid }
+            ?: return com.keepasskey.core.result.KdbxResult.Failure(IllegalArgumentException("分组不存在"), "分组不存在")
 
         val alreadyInsideBin = db.recycleBinUuid?.let { binUuid ->
             var parentId = targetGroup.parentGroupId
@@ -279,7 +310,7 @@ class RealVaultRepository @Inject constructor(
             databaseSession.deleteGroup(uuid)
             databaseSession.saveGroup(moved)
         }
-        databaseSession.save()
+        return persistSession()
     }
 
     override fun getEntries(): Flow<List<UiVaultEntry>> {
@@ -298,7 +329,11 @@ class RealVaultRepository @Inject constructor(
         return getEntries().map { list -> list.find { it.id == id } }
     }
 
-    override suspend fun saveEntry(entry: UiVaultEntry, passwordChars: CharArray?) {
+    override suspend fun saveEntry(
+        entry: UiVaultEntry,
+        passwordChars: CharArray?,
+        totpSecret: String?
+    ): com.keepasskey.core.result.KdbxResult<Unit> {
         val db = databaseSession.databaseFlow.first()
         val targetUuid = parseUuidOrNull(entry.id)
         val existing = if (targetUuid != null && db != null) {
@@ -316,6 +351,14 @@ class RealVaultRepository @Inject constructor(
                 }
                 put(KdbxConstants.Fields.URL, ProtectedString(entry.url, isProtected = false))
                 put(KdbxConstants.Fields.NOTES, ProtectedString(entry.notes, isProtected = false))
+                // 断点4 整改：TOTP 种子显式提交（null=未修改；空串=清除；非空=写标准 otp 字段）
+                if (totpSecret != null) {
+                    if (totpSecret.isBlank()) {
+                        remove(KdbxConstants.Fields.OTP)
+                    } else {
+                        put(KdbxConstants.Fields.OTP, ProtectedString(totpSecret.trim(), isProtected = false))
+                    }
+                }
             }
 
             val uiCustomList = entry.customFields.map { cf ->
@@ -336,10 +379,33 @@ class RealVaultRepository @Inject constructor(
             val targetParentId = entry.groupId?.let { parseUuidOrNull(it) } ?: existing.parentGroupId
             val isParentChanged = targetParentId != existing.parentGroupId
 
+            // 断点1-2 整改：附件全链路——UI 侧新附件（data 非空）直接随条目提交，
+            // 已落库附件（data 为空）按名称匹配既有引用保留 refIndex；
+            // UI 中被移除的附件不再出现在列表里，即自然从条目上删除（二进制池在保存时去重重建）
+            val mergedAttachments = entry.attachments.map { ui ->
+                if (ui.data != null) {
+                    KdbxAttachment(name = ui.fileName, data = ui.data, isProtected = false)
+                } else {
+                    existing.attachments.firstOrNull { it.name == ui.fileName }
+                        ?: KdbxAttachment(name = ui.fileName, data = byteArrayOf())
+                }
+            }
+
+            // 断点7 整改：图标落盘——把 UI 图标名映射回 KDBX 标准 iconId
+            val newIconId = mapIconNameToId(entry.iconName, fallbackId = existing.iconId)
+
+            // KP2A 能力补齐：tags / overrideUrl / AutoType 序列
+            val mergedAutoType = mergeAutoType(existing.autoType, entry.autoTypeSequence)
+
             val pendingNewEntry = existing.copy(
                 parentGroupId = targetParentId,
                 fields = mergedFields,
-                customFields = mergedCustomFields
+                customFields = mergedCustomFields,
+                attachments = mergedAttachments,
+                iconId = newIconId,
+                tags = entry.tags,
+                overrideUrl = entry.overrideUrl?.takeIf { it.isNotBlank() },
+                autoType = mergedAutoType
             )
 
             val maxHistory = db?.historyMaxItems ?: 10
@@ -355,16 +421,19 @@ class RealVaultRepository @Inject constructor(
             databaseSession.saveEntry(finalEntry)
         } else {
             // 新建条目
-            val kdbxEntry = mapUiEntryToKdbx(entry, passwordChars)
+            val kdbxEntry = mapUiEntryToKdbx(entry, passwordChars, totpSecret)
             databaseSession.saveEntry(kdbxEntry)
         }
-        databaseSession.save()
+        return persistSession()
     }
 
-    override suspend fun deleteEntry(id: String) {
-        val uuid = parseUuidOrNull(id) ?: return
-        val db = databaseSession.databaseFlow.first() ?: return
-        val entry = db.rootGroup.allEntries().firstOrNull { it.id == uuid } ?: return
+    override suspend fun deleteEntry(id: String): com.keepasskey.core.result.KdbxResult<Unit> {
+        val uuid = parseUuidOrNull(id)
+            ?: return com.keepasskey.core.result.KdbxResult.Failure(IllegalArgumentException("无效的条目 ID"), "条目不存在")
+        val db = databaseSession.databaseFlow.first()
+            ?: return com.keepasskey.core.result.KdbxResult.Failure(IllegalStateException("数据库未解锁"), "数据库未解锁")
+        val entry = db.rootGroup.allEntries().firstOrNull { it.id == uuid }
+            ?: return com.keepasskey.core.result.KdbxResult.Failure(IllegalArgumentException("条目不存在"), "条目不存在")
 
         val binUuid = db.recycleBinUuid
         val isAlreadyInRecycle = (binUuid != null && entry.parentGroupId == binUuid) ||
@@ -390,13 +459,16 @@ class RealVaultRepository @Inject constructor(
             databaseSession.deleteEntry(uuid)
             databaseSession.saveEntry(moved)
         }
-        databaseSession.save()
+        return persistSession()
     }
 
-    override suspend fun restoreEntry(id: String) {
-        val uuid = parseUuidOrNull(id) ?: return
-        val db = databaseSession.databaseFlow.first() ?: return
-        val entry = db.rootGroup.allEntries().firstOrNull { it.id == uuid } ?: return
+    override suspend fun restoreEntry(id: String): com.keepasskey.core.result.KdbxResult<Unit> {
+        val uuid = parseUuidOrNull(id)
+            ?: return com.keepasskey.core.result.KdbxResult.Failure(IllegalArgumentException("无效的条目 ID"), "条目不存在")
+        val db = databaseSession.databaseFlow.first()
+            ?: return com.keepasskey.core.result.KdbxResult.Failure(IllegalStateException("数据库未解锁"), "数据库未解锁")
+        val entry = db.rootGroup.allEntries().firstOrNull { it.id == uuid }
+            ?: return com.keepasskey.core.result.KdbxResult.Failure(IllegalArgumentException("条目不存在"), "条目不存在")
 
         val allGroups = db.rootGroup.allGroups()
         val targetParentId = entry.previousParentGroup?.takeIf { prevId -> allGroups.any { it.id == prevId } }
@@ -409,37 +481,50 @@ class RealVaultRepository @Inject constructor(
         )
         databaseSession.deleteEntry(uuid)
         databaseSession.saveEntry(restored)
-        databaseSession.save()
+        return persistSession()
     }
 
-    override suspend fun emptyRecycleBin() {
-        val db = databaseSession.databaseFlow.first() ?: return
+    override suspend fun emptyRecycleBin(): com.keepasskey.core.result.KdbxResult<Unit> {
+        val db = databaseSession.databaseFlow.first()
+            ?: return com.keepasskey.core.result.KdbxResult.Failure(IllegalStateException("数据库未解锁"), "数据库未解锁")
         val binUuid = db.recycleBinUuid
         val binGroup = db.rootGroup.allGroups().firstOrNull {
             (binUuid != null && it.id == binUuid) || it.name == RECYCLE_BIN_NAME || it.name.equals("Recycle Bin", ignoreCase = true)
-        } ?: return
+        } ?: return com.keepasskey.core.result.KdbxResult.Success(Unit)
 
+        // 断点9 整改：清空回收站必须覆盖其子分组——递归收集子树内全部条目，
+        // 子分组本身物理删除并记录墓碑（KeePassDX 语义：回收站清空即整棵清空）
         val entriesToDelete = binGroup.allEntries()
-        if (entriesToDelete.isEmpty()) return
+        val subgroupsToDelete = binGroup.allGroups().filter { it.id != binGroup.id }
+        if (entriesToDelete.isEmpty() && subgroupsToDelete.isEmpty()) {
+            return com.keepasskey.core.result.KdbxResult.Success(Unit)
+        }
 
         val entryIds = entriesToDelete.map { it.id }.toSet()
-        databaseSession.batchDeleteEntries(entryIds)
+        if (entryIds.isNotEmpty()) {
+            databaseSession.batchDeleteEntries(entryIds)
+        }
+        for (sub in subgroupsToDelete) {
+            databaseSession.deleteGroup(sub.id)
+        }
         databaseSession.updateDatabaseMeta { cur ->
-            val tombstones = entryIds.map { DeletedObject(it, Instant.now()) }
+            val tombstones = entryIds.map { DeletedObject(it, Instant.now()) } +
+                    subgroupsToDelete.map { DeletedObject(it.id, Instant.now()) }
             cur.copy(deletedObjects = cur.deletedObjects + tombstones)
         }
-        databaseSession.save()
+        return persistSession()
     }
 
-    override suspend fun batchMoveEntries(entryIds: Set<String>, targetGroupId: String?) {
+    override suspend fun batchMoveEntries(entryIds: Set<String>, targetGroupId: String?): com.keepasskey.core.result.KdbxResult<Unit> {
         val uuidSet = entryIds.mapNotNull { parseUuidOrNull(it) }.toSet()
         val targetUuid = targetGroupId?.let { parseUuidOrNull(it) }
         databaseSession.batchMoveEntries(uuidSet, targetUuid)
-        databaseSession.save()
+        return persistSession()
     }
 
-    override suspend fun batchDeleteEntries(entryIds: Set<String>) {
-        val db = databaseSession.databaseFlow.first() ?: return
+    override suspend fun batchDeleteEntries(entryIds: Set<String>): com.keepasskey.core.result.KdbxResult<Unit> {
+        val db = databaseSession.databaseFlow.first()
+            ?: return com.keepasskey.core.result.KdbxResult.Failure(IllegalStateException("数据库未解锁"), "数据库未解锁")
         val binUuid = db.recycleBinUuid
         val allGroups = db.rootGroup.allGroups()
         val allEntries = db.rootGroup.allEntries().associateBy { it.id.toHexString() }
@@ -482,7 +567,7 @@ class RealVaultRepository @Inject constructor(
             }
         }
 
-        databaseSession.save()
+        return persistSession()
     }
 
     private suspend fun getOrCreateRecycleBinGroup(): KdbxGroup {
@@ -603,7 +688,10 @@ class RealVaultRepository @Inject constructor(
             createdAt = formatInstant(entry.times.creationTime),
             customFields = uiCustomFields,
             attachments = uiAttachments,
-            revisions = uiRevisions
+            revisions = uiRevisions,
+            tags = entry.tags,
+            autoTypeSequence = entry.autoType?.defaultSequence.orEmpty(),
+            overrideUrl = entry.overrideUrl
         )
     }
 
@@ -635,15 +723,91 @@ class RealVaultRepository @Inject constructor(
         }
     }
 
+    /**
+     * KDBX 标准图标 ID → UI 图标名。
+     * ID 以官方 KeePass PwIcon 枚举为准（格式层裁决者）：0=Key 1=World 3=NetworkServer 5=UserCommunication
+     * 7=Notepad 13=MultiKeys 19=EMail 20=Configuration 26=Disk 29=TerminalEncrypted 30=Console
+     * 32=ProgramIcons 35=WorldComputer 37=Homebanking 43=TrashBin 44=Note 48=Folder 51=LockOpen
+     * 52=PaperLocked 58=UserKey 66=Money 67=Certificate 68=BlackBerry。
+     * 原实现把 2(Warning) 误译为 email，本轮已纠正。
+     */
     private fun mapIconIdToName(iconId: Int): String {
         return when (iconId) {
-            0, 48 -> "key"
-            1 -> "web"
-            2 -> "email"
+            0, 58 -> "key"
+            1, 8, 16 -> "public"
+            3 -> "wifi"
+            5 -> "forum"
+            4, 27, 47, 48, 49, 50 -> "folder"
+            7, 22, 41, 44 -> "description"
+            13 -> "vpn_key"
+            19, 25, 40 -> "email"
+            20, 34 -> "dns"
+            26, 36 -> "database"
+            29, 30, 33 -> "terminal"
+            32 -> "code"
+            35 -> "cloud"
+            37, 66 -> "credit_card"
             43 -> "delete"
-            49 -> "folder"
+            51 -> "lock"
+            52 -> "security"
+            67 -> "work"
+            68 -> "phone"
             else -> "key"
         }
+    }
+
+    /** UI 图标名 → KDBX 标准 iconId（与 [mapIconIdToName] 互为反演；未知名回退 [fallbackId]） */
+    private fun mapIconNameToId(iconName: String, fallbackId: Int): Int {
+        return when (iconName) {
+            "key" -> 0
+            "public" -> 1
+            "wifi" -> 3
+            "forum" -> 5
+            "folder" -> 48
+            "description" -> 44
+            "vpn_key" -> 13
+            "email" -> 19
+            "dns" -> 20
+            "database" -> 26
+            "terminal" -> 29
+            "code" -> 32
+            "cloud" -> 35
+            "credit_card" -> 37
+            "lock" -> 51
+            "security" -> 52
+            "work" -> 67
+            "phone" -> 68
+            "account_balance" -> 66
+            "delete" -> ICON_TRASH_BIN
+            else -> fallbackId
+        }
+    }
+
+    /**
+     * 合并 AutoType 序列（KP2A 能力补齐）。
+     * UI 仅编辑条目级默认序列；既有 associations/混淆配置原样保留；
+     * 归约到全默认值时置 null，避免为空配置生成冗余节点。
+     */
+    private fun mergeAutoType(existing: com.keepasskey.core.model.KdbxAutoType?, uiSequence: String): com.keepasskey.core.model.KdbxAutoType? {
+        val base = existing ?: return if (uiSequence.isBlank()) null else com.keepasskey.core.model.KdbxAutoType(defaultSequence = uiSequence.trim())
+        val newSequence = uiSequence.trim()
+        if (newSequence == base.defaultSequence) return base
+        val merged = base.copy(defaultSequence = newSequence)
+        return if (merged.enabled && merged.defaultSequence.isEmpty() &&
+            merged.dataTransferObfuscation == 0 && merged.associations.isEmpty()
+        ) null else merged
+    }
+
+    /**
+     * H3 整改：会话落盘的唯一出口——save() 失败必须原样向上传播，
+     * 禁止磁盘写失败被静默吞掉导致 UI 谎报保存成功、锁库后修改永久丢失。
+     */
+    private suspend fun persistSession(): com.keepasskey.core.result.KdbxResult<Unit> {
+        val result = databaseSession.save()
+        if (result is com.keepasskey.core.result.KdbxResult.Failure) {
+            debugLog.error(TAG, "数据库保存失败: ${result.message}")
+        }
+        return result
     }
 
     private fun determineMimeType(fileName: String): String {
@@ -658,7 +822,7 @@ class RealVaultRepository @Inject constructor(
         }
     }
 
-    private fun mapUiEntryToKdbx(entry: UiVaultEntry, passwordChars: CharArray?): KdbxEntry {
+    private fun mapUiEntryToKdbx(entry: UiVaultEntry, passwordChars: CharArray?, totpSecret: String?): KdbxEntry {
         val fields = mutableMapOf(
             KdbxConstants.Fields.TITLE to ProtectedString(entry.title, isProtected = false),
             KdbxConstants.Fields.USER_NAME to ProtectedString(entry.username, isProtected = false),
@@ -666,6 +830,9 @@ class RealVaultRepository @Inject constructor(
             KdbxConstants.Fields.URL to ProtectedString(entry.url, isProtected = false),
             KdbxConstants.Fields.NOTES to ProtectedString(entry.notes, isProtected = false)
         )
+        if (!totpSecret.isNullOrBlank()) {
+            fields[KdbxConstants.Fields.OTP] = ProtectedString(totpSecret.trim(), isProtected = false)
+        }
 
         val customFields = entry.customFields.map { cf ->
             KdbxCustomField(
@@ -674,11 +841,21 @@ class RealVaultRepository @Inject constructor(
             )
         }
 
+        // 断点1-2 整改：新建路径同样消费 UI 附件（携带真实字节，保存时经去重器入池）
+        val attachments = entry.attachments.mapNotNull { ui ->
+            ui.data?.let { KdbxAttachment(name = ui.fileName, data = it, isProtected = false) }
+        }
+
         return KdbxEntry(
             id = parseUuidOrRandom(entry.id),
             parentGroupId = entry.groupId?.let { parseUuidOrNull(it) },
+            iconId = mapIconNameToId(entry.iconName, fallbackId = ICON_KEY),
             fields = fields,
-            customFields = customFields
+            customFields = customFields,
+            tags = entry.tags,
+            attachments = attachments,
+            autoType = mergeAutoType(null, entry.autoTypeSequence),
+            overrideUrl = entry.overrideUrl?.takeIf { it.isNotBlank() }
         )
     }
 
@@ -736,6 +913,32 @@ class RealVaultRepository @Inject constructor(
         return entry?.history?.firstOrNull { it.id == revisionUuid }?.password?.readString()
     }
 
+    override suspend fun getEntryRevisionSnapshot(entryId: String, revisionId: String): EntryRevisionSnapshot? {
+        val targetUuid = parseUuidOrNull(entryId) ?: return null
+        val revisionUuid = parseUuidOrNull(revisionId) ?: return null
+        val currentDb = databaseSession.databaseFlow.first() ?: return null
+        val entry = currentDb.rootGroup.allEntries().firstOrNull { it.id == targetUuid } ?: return null
+        val revision = entry.history.firstOrNull { it.id == revisionUuid } ?: return null
+        // 断点8 整改：整修订快照投影 + 受保护字段解密回填（仅驻留回滚会话），
+        // 使回滚保存时 title/url/自定义字段/TOTP/密码全字段真实还原
+        val projection = mapKdbxEntryToUi(revision, currentDb)
+        val decryptedFields = projection.customFields.map { cf ->
+            if (cf.isProtected) {
+                cf.copy(value = revision.customFields.firstOrNull { it.key == cf.key }?.value?.readString().orEmpty())
+            } else {
+                cf
+            }
+        }
+        val totpRaw = revision.fields[KdbxConstants.Fields.OTP]?.readString()
+            ?: revision.customFields.firstOrNull {
+                it.key.equals("otp", ignoreCase = true) || it.key.startsWith("TOTP", ignoreCase = true)
+            }?.value?.readString().orEmpty()
+        return EntryRevisionSnapshot(
+            entry = projection.copy(customFields = decryptedFields),
+            totpSecret = totpRaw
+        )
+    }
+
     override suspend fun getEntryProtectedField(entryId: String, fieldKey: String): String? {
         val targetUuid = parseUuidOrNull(entryId) ?: return null
         val currentDb = databaseSession.databaseFlow.first() ?: return null
@@ -758,6 +961,30 @@ class RealVaultRepository @Inject constructor(
         )
     }
 
+    override suspend fun getEntryTotpSecret(entryId: String): String? {
+        val targetUuid = parseUuidOrNull(entryId) ?: return null
+        val currentDb = databaseSession.databaseFlow.first() ?: return null
+        val entry = currentDb.rootGroup.allEntries().firstOrNull { it.id == targetUuid } ?: return null
+        // 断点4 整改：与 parseTotpConfig 同源读取（otp 字段优先，回退 TOTP 开头的自定义字段），
+        // 返回配置原文（otpauth:// URI 或 Base32 种子）供编辑页回填
+        return entry.fields[KdbxConstants.Fields.OTP]?.readString()
+            ?: entry.customFields.firstOrNull {
+                it.key.equals("otp", ignoreCase = true) || it.key.startsWith("TOTP", ignoreCase = true)
+            }?.value?.readString()
+    }
+
+    override suspend fun getAttachmentData(entryId: String, fileName: String): ByteArray? {
+        val targetUuid = parseUuidOrNull(entryId) ?: return null
+        val currentDb = databaseSession.databaseFlow.first() ?: return null
+        val entry = currentDb.rootGroup.allEntries().firstOrNull { it.id == targetUuid } ?: return null
+        val binaryPool = currentDb.binaries.map { it.data }
+        val attachment = entry.attachments.firstOrNull { it.name == fileName } ?: return null
+        val bytes = attachment.resolveData(binaryPool)
+        return if (bytes.isEmpty()) null else bytes.copyOf()
+    }
+
+    override fun isSessionReadOnly(): Boolean = databaseSession.isReadOnly
+
     override suspend fun saveNewPasskeyEntry(data: PasskeyData, boundPackage: String?): KdbxEntry {
         val title = "${data.userName}@${data.relyingPartyId}"
         val url = if (boundPackage.isNullOrBlank()) "https://${data.relyingPartyId}" else "android://$boundPackage"
@@ -773,7 +1000,10 @@ class RealVaultRepository @Inject constructor(
             customFields = data.toCustomFields()
         )
         databaseSession.saveEntry(newEntry)
-        databaseSession.save()
+        val saved = persistSession()
+        if (saved is com.keepasskey.core.result.KdbxResult.Failure) {
+            debugLog.warn(TAG, "Passkey 条目创建成功但落盘失败: ${saved.message}")
+        }
         return newEntry
     }
 
@@ -801,7 +1031,7 @@ class RealVaultRepository @Inject constructor(
             times = entry.times.withModified()
         )
         databaseSession.saveEntry(updatedEntry)
-        databaseSession.save()
+        persistSession()
     }
 
     override suspend fun saveAutofillCredential(
@@ -847,13 +1077,20 @@ class RealVaultRepository @Inject constructor(
                 )
                 databaseSession.saveEntry(newEntry)
             }
-            databaseSession.save()
+            persistSession()
         } finally {
             java.util.Arrays.fill(passwordChars, '0')
         }
     }
 
     companion object {
+        private const val TAG = "RealVaultRepository"
+
+        /** KDBX 标准 PwIcon ID（官方 KeePass PwEnums.cs 裁决） */
+        const val ICON_KEY = 0
+        const val ICON_FOLDER = 48
+        const val ICON_TRASH_BIN = 43
+
         const val RECYCLE_BIN_NAME = "回收站"
         const val RECYCLE_BIN_GROUP_ID = "group_recycle_bin"
 

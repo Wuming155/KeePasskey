@@ -16,6 +16,9 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import javax.inject.Inject
 
 sealed interface ConflictResolutionEvent {
@@ -69,10 +72,30 @@ class ConflictResolutionViewModel @Inject constructor(
                             fields = fieldList
                         )
                     }
-                    _uiState.update { it.copy(entries = items) }
+                    // H1 整改：两侧修改时间取冲突条目中最新的真实 lastModificationTime，
+                    // 不再展示写死的演示时间戳（原为「今天 10:25/10:22」，会误导用户裁决）
+                    val localNewest = conflicts.maxOfOrNull { it.localEntry.times.lastModificationTime }
+                    val remoteNewest = conflicts.maxOfOrNull { it.remoteEntry.times.lastModificationTime }
+                    _uiState.update {
+                        it.copy(
+                            entries = items,
+                            localModifiedTime = localNewest?.let(::formatConflictTime).orEmpty().ifEmpty { "未知" },
+                            remoteModifiedTime = remoteNewest?.let(::formatConflictTime).orEmpty().ifEmpty { "未知" }
+                        )
+                    }
                 }
             }
         }
+    }
+
+    private fun formatConflictTime(instant: Instant): String {
+        val local = instant.atZone(ZoneId.systemDefault())
+        val datePrefix = when (local.toLocalDate()) {
+            java.time.LocalDate.now() -> "今天"
+            java.time.LocalDate.now().minusDays(1) -> "昨天"
+            else -> local.format(DateTimeFormatter.ofPattern("M月d日"))
+        }
+        return "$datePrefix ${local.format(DateTimeFormatter.ofPattern("HH:mm"))}"
     }
 
     fun selectFieldChoice(entryId: String, fieldName: String, choice: FieldChoice) {

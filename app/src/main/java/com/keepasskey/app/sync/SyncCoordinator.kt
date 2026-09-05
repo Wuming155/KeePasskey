@@ -8,6 +8,7 @@ import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.model.KdbxGroup
 import com.keepasskey.core.model.KdbxUuid
+import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.core.security.ProtectedString
 import com.keepasskey.database.file.KdbxDatabase
 import com.keepasskey.database.file.KdbxFile
@@ -117,9 +118,25 @@ open class SyncCoordinator @Inject constructor(
     private var pendingRemoteEtag: String = ""
     private var lastSyncedDb: KdbxDatabase? = null
 
-    // 允许单元测试注入模拟 Provider 与测试路径
+    // 允许单元测试注入模拟 Provider 与测试路径（禁止生产代码赋值）
+    @androidx.annotation.VisibleForTesting
     var testSyncProvider: SyncProvider? = null
+    @androidx.annotation.VisibleForTesting
     var testRemotePath: String? = null
+
+    /**
+     * H4-断点11 整改：解锁后自动重同步前判断是否已配置云同步（不触发网络）。
+     * 读取凭据存储在未配置存储环境（如 JVM 单测的空壳 Context）下可能失败，
+     * 此时按「未配置」处理并记录日志，绝不向上抛出。
+     */
+    fun isSyncConfigured(): Boolean {
+        return try {
+            testSyncProvider != null || resolveProvider() != null
+        } catch (e: Exception) {
+            debugLog.warn(TAG, "探测同步配置失败，按未配置处理: ${e.message}")
+            false
+        }
+    }
 
     /**
      * 设置离线模式（由设置页「使用离线缓存」开关驱动）
@@ -213,7 +230,11 @@ open class SyncCoordinator @Inject constructor(
         if (isDirty && syncCache.isCached(remotePath)) {
             when (val commitResult = syncEngine.commitLocal(remotePath, localBytes)) {
                 is SyncCommitResult.Uploaded -> {
-                    databaseSession.save()
+                    // H3 整改：缓存已上传云端但本地正式文件保存失败时如实报错，不再静默
+                    val saveResult = databaseSession.save()
+                    if (saveResult is KdbxResult.Failure) {
+                        return@withLock SyncOutcome.Error("云端已更新但本地保存失败: ${saveResult.message}")
+                    }
                     lastSyncedDb = databaseSession.databaseFlow.value
                     return@withLock SyncOutcome.UploadedLocal
                 }
@@ -265,7 +286,10 @@ open class SyncCoordinator @Inject constructor(
                 }
                 is SyncOpenResult.ConflictDetected -> {
                     // R3 整改：同 commitLocal 冲突路径，先落盘本地会话再进入合并
-                    databaseSession.save()
+                    val preSave = databaseSession.save()
+                    if (preSave is KdbxResult.Failure) {
+                        return@withLock SyncOutcome.Error("冲突会话前置保存失败: ${preSave.message}")
+                    }
                     handleConflictMerge(
                         syncEngine = syncEngine,
                         syncCache = syncCache,
@@ -325,10 +349,14 @@ open class SyncCoordinator @Inject constructor(
             )
             if (uploadResult.isSuccess) {
                 databaseSession.updateDatabaseMeta { mergedDb }
-                databaseSession.save()
-
+                // H3 整改：云端已接收合并版本，本地落盘失败必须如实暴露
+                val saveResult = databaseSession.save()
                 clearPendingConflictSession()
-                SyncOutcome.MergedAndUploaded
+                if (saveResult is KdbxResult.Failure) {
+                    SyncOutcome.Error("合并版本已上传云端，但本地保存失败: ${saveResult.message}")
+                } else {
+                    SyncOutcome.MergedAndUploaded
+                }
             } else {
                 val ex = uploadResult.exceptionOrNull()
                 if (ex is com.keepasskey.sync.model.SyncException.ConflictError) {
@@ -445,8 +473,12 @@ open class SyncCoordinator @Inject constructor(
             val uploadResult = syncEngine.markResolvedAndUpload(remotePath, mergedBytes)
             if (uploadResult.isSuccess) {
                 databaseSession.updateDatabaseMeta { mergedDb }
-                databaseSession.save()
-                SyncOutcome.MergedAndUploaded
+                val saveResult = databaseSession.save()
+                if (saveResult is KdbxResult.Failure) {
+                    SyncOutcome.Error("合并版本已上传云端，但本地保存失败: ${saveResult.message}")
+                } else {
+                    SyncOutcome.MergedAndUploaded
+                }
             } else {
                 SyncOutcome.Error("上传合并版本失败: ${uploadResult.exceptionOrNull()?.message}")
             }
@@ -488,8 +520,7 @@ open class SyncCoordinator @Inject constructor(
     private suspend fun loadAndApplyRemoteBytes(remoteBytes: ByteArray): Boolean {
         val remoteDb = parseKdbxBytes(remoteBytes) ?: return false
         databaseSession.updateDatabaseMeta { remoteDb }
-        databaseSession.save()
-        return true
+        return databaseSession.save() is KdbxResult.Success
     }
 
     private fun resolveProvider(): SyncProvider? {

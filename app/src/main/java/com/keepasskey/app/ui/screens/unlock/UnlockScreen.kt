@@ -89,6 +89,7 @@ fun UnlockScreen(
     viewModel: UnlockViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val onToggleReadOnly = viewModel::onToggleReadOnly
     val context = androidx.compose.ui.platform.LocalContext.current
     val activity = androidx.compose.runtime.remember(context) { context as? androidx.fragment.app.FragmentActivity }
 
@@ -117,6 +118,7 @@ fun UnlockScreen(
         onQuickUnlockPinChange = viewModel::onQuickUnlockPinChange,
         onTogglePasswordVisibility = viewModel::onTogglePasswordVisibility,
         onToggleKeyFile = viewModel::onToggleKeyFile,
+        onToggleReadOnly = viewModel::onToggleReadOnly,
         onSwitchMode = viewModel::switchUnlockMode,
         onUnlock = viewModel::unlock,
         onQuickUnlock = viewModel::unlockWithQuickUnlock,
@@ -138,6 +140,7 @@ fun UnlockContent(
     onQuickUnlockPinChange: (String) -> Unit,
     onTogglePasswordVisibility: () -> Unit,
     onToggleKeyFile: () -> Unit,
+    onToggleReadOnly: () -> Unit,
     onSwitchMode: (UnlockMode) -> Unit,
     onUnlock: () -> Unit,
     onQuickUnlock: () -> Unit,
@@ -286,24 +289,29 @@ fun UnlockContent(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Security, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = uiState.hardwareBackedSecurity,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.primary
-                            )
+                        // H1 整改：仅在拿到真实数据时展示，不再渲染写死的假硬件声明/假剩余时长
+                        if (uiState.hardwareBackedSecurity.isNotEmpty()) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.Security, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = uiState.hardwareBackedSecurity,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
                         }
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Timer, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(14.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = stringResource(R.string.unlock_quick_cache_validity, uiState.quickUnlockRemainingMinutes),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                        if (uiState.quickUnlockRemainingMinutes > 0) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.Timer, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = stringResource(R.string.unlock_quick_cache_validity, uiState.quickUnlockRemainingMinutes),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
                         }
 
                         Spacer(modifier = Modifier.height(16.dp))
@@ -483,7 +491,35 @@ fun UnlockContent(
                     )
                 }
 
-                Spacer(modifier = Modifier.height(20.dp))
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // H4-只读整改：只读打开开关（KeePassDX/KP2A 同款能力）
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(MaterialTheme.shapes.medium)
+                        .padding(vertical = 4.dp, horizontal = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = stringResource(R.string.unlock_readonly),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = stringResource(R.string.unlock_readonly_desc),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    androidx.compose.material3.Switch(
+                        checked = uiState.openReadOnly,
+                        onCheckedChange = { onToggleReadOnly() }
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
 
                 // 解锁主操作按钮
                 Button(

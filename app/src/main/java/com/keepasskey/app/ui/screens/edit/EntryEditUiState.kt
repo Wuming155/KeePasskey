@@ -23,6 +23,10 @@ data class EntryEditUiState(
     val totpSecret: String = "",
     val customFields: List<UiCustomField> = emptyList(),
     val attachments: List<UiAttachment> = emptyList(),
+    // KP2A 能力补齐：标签（逗号/空格分隔输入）与 AutoType 默认序列、Override URL
+    val tagsInput: String = "",
+    val autoTypeSequence: String = "",
+    val overrideUrl: String = "",
     val isPasswordVisible: Boolean = false,
     val showGenerator: Boolean = false,
     val passLength: Float = 20f,
@@ -33,6 +37,8 @@ data class EntryEditUiState(
     val excludeConfusing: Boolean = true,
     val userMessage: UiMessage? = null,
     val isSaved: Boolean = false,
+    // H4-只读整改：数据库以只读模式打开时禁用保存
+    val isReadOnly: Boolean = false,
     // 表单脏标记：发生任何未保存修改后为 true，驱动返回前的丢弃确认
     val isDirty: Boolean = false
 )

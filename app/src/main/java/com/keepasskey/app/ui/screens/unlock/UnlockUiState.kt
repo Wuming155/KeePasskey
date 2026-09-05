@@ -24,8 +24,11 @@ data class UnlockUiState(
     val isLoading: Boolean = false,
     val errorMessage: UiMessage? = null,
     val infoMessage: UiMessage? = null,
-    val databaseName: String = "personal-vault.kdbx",
-    val databaseStatus: String = "本地已加密存储 • 关联 WebDAV 云端备份",
+    // H1 整改：默认值不再写死演示库名/假状态文案，由真实活动数据库填充
+    val databaseName: String = "",
+    val databaseStatus: String = "",
+    // H4-只读整改：用户可选择以只读模式打开（会话期间写盘硬拒绝）
+    val openReadOnly: Boolean = false,
 
     // QuickUnlock 状态 (KP2A & KeePassDX 特性)
     // true 表示本机已输入过主密码、存在快捷解锁缓存
@@ -34,6 +37,7 @@ data class UnlockUiState(
     val unlockMode: UnlockMode = UnlockMode.STANDARD,
     val isBiometricEnabled: Boolean = false,
     val quickUnlockPin: String = "",
-    val hardwareBackedSecurity: String = "Android StrongBox / TEE 硬件隔离密钥已激活",
-    val quickUnlockRemainingMinutes: Int = 118 // 缓存有效剩余时长
+    // H1 整改：硬件安全声明与缓存剩余时长不再写死假值，仅在有真实数据时展示
+    val hardwareBackedSecurity: String = "",
+    val quickUnlockRemainingMinutes: Int = 0
 )

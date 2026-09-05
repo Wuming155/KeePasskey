@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.keepasskey.app.R
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.data.repository.VaultRepository
+import com.keepasskey.core.result.KdbxResult
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -76,24 +77,37 @@ class DatabasePickerViewModel @Inject constructor(
 
     fun createDatabase(name: String, masterPassword: String, keyFile: Boolean, preset: String) {
         viewModelScope.launch {
-            vaultRepository.createDatabase(name, masterPassword, keyFile, preset)
-            showCreateDialogFlow.value = false
-            userMessageFlow.value = UiMessage(R.string.db_picker_msg_created)
+            // H3 整改：创建失败（写盘失败等）不再谎报创建成功
+            val result = vaultRepository.createDatabase(name, masterPassword, keyFile, preset)
+            if (result is KdbxResult.Success) {
+                showCreateDialogFlow.value = false
+                userMessageFlow.value = UiMessage(R.string.db_picker_msg_created)
+            } else {
+                userMessageFlow.value = UiMessage(R.string.vault_op_failed, listOf((result as KdbxResult.Failure).message))
+            }
         }
     }
 
     fun importDatabaseFromSource(source: OpenVaultSourceType, name: String, path: String) {
         viewModelScope.launch {
-            vaultRepository.importExternalDatabase(name, path, syncType = source.label)
-            showOpenSourceDialogFlow.value = false
-            userMessageFlow.value = UiMessage(R.string.db_picker_msg_opened)
+            val result = vaultRepository.importExternalDatabase(name, path, syncType = source.label)
+            if (result is KdbxResult.Success) {
+                showOpenSourceDialogFlow.value = false
+                userMessageFlow.value = UiMessage(R.string.db_picker_msg_opened)
+            } else {
+                userMessageFlow.value = UiMessage(R.string.vault_op_failed, listOf((result as KdbxResult.Failure).message))
+            }
         }
     }
 
     fun removeDatabase(id: String) {
         viewModelScope.launch {
-            vaultRepository.removeDatabase(id)
-            userMessageFlow.value = UiMessage(R.string.db_picker_msg_removed)
+            val result = vaultRepository.removeDatabase(id)
+            if (result is KdbxResult.Success) {
+                userMessageFlow.value = UiMessage(R.string.db_picker_msg_removed)
+            } else {
+                userMessageFlow.value = UiMessage(R.string.vault_op_failed, listOf((result as KdbxResult.Failure).message))
+            }
         }
     }
 

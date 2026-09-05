@@ -90,9 +90,9 @@ data class SettingsUiState(
     val s3SecretKeyMasked: String = "••••••••••••••••••••••••",
     val s3ObjectKey: String = "passwords/master_vault.kdbx",
     val s3UsePathStyle: Boolean = false,
-    // 通用同步状态
-    val syncLastTime: String = "今天 10:20 (本地原子写盘已通过校验)",
-    val syncStatusText: String = "已连接并保持同步",
+    // 通用同步状态（H1 整改：默认值不再写死演示时间戳/假状态文案，由真实同步结果填充）
+    val syncLastTime: String = "尚未同步",
+    val syncStatusText: String = "未验证",
     val autoSyncEnabled: Boolean = true,
     val wifiOnlySync: Boolean = true,
     val isSyncing: Boolean = false,

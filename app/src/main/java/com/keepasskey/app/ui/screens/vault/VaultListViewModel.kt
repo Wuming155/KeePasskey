@@ -6,6 +6,7 @@ import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.SettingsRepository
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.security.ClipboardSecurityManager
+import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.sync.engine.SyncCacheEvent
 import com.keepasskey.app.ui.model.UiVaultEntry
@@ -57,13 +58,56 @@ class VaultListViewModel @Inject constructor(
     // TOTP 剩余秒数倒计时，与验证器页共用 30 秒周期窗口
     private val totpRemainingSecondsFlow = MutableStateFlow(calculateCurrentRemainingSeconds())
 
+    // 断点6 整改：周期翻转时按需重算的实时验证码表（entryId -> code）；
+    // 原实现验证码仅在数据库流发射时计算一次，周期翻转后展示旧码
+    private val liveTotpCodesFlow = MutableStateFlow<Map<String, String>>(emptyMap())
+
+    // H2 整改：存在待解决的冲突会话时驱动「去解决冲突」入口
+    private val hasPendingConflictFlow = MutableStateFlow(false)
+
+    // H4-只读整改：会话只读标志（解锁时刻确定，只读时禁用新增/批量编辑入口）
+    private val isReadOnlyFlow = MutableStateFlow(vaultRepository.isSessionReadOnly())
+
+    // 记录上一秒的剩余秒数，用于检测 TOTP 周期翻转
+    private var previousTotpRemaining = -1
+
     init {
-        // 每秒刷新 TOTP 剩余秒数，驱动列表内验证码环形倒计时实时跳动
+        // 每秒刷新 TOTP 剩余秒数，驱动列表内验证码环形倒计时实时跳动；
+        // 周期翻转时对本组带 TOTP 的条目按需重算验证码
         viewModelScope.launch(Dispatchers.Default) {
             while (isActive) {
                 delay(TOTP_TICK_INTERVAL_MS)
-                totpRemainingSecondsFlow.value = calculateCurrentRemainingSeconds()
+                val remaining = calculateCurrentRemainingSeconds()
+                totpRemainingSecondsFlow.value = remaining
+                if (previousTotpRemaining in 1..remaining || previousTotpRemaining == -1) {
+                    refreshLiveTotpCodes()
+                }
+                previousTotpRemaining = remaining
             }
+        }
+        // H2 整改：订阅冲突会话流，冲突待解决时点亮列表页冲突入口
+        viewModelScope.launch {
+            syncCoordinator.conflictFlow.collect { conflicts ->
+                hasPendingConflictFlow.value = conflicts.isNotEmpty()
+            }
+        }
+        // 断点11 整改：解锁进入列表页即自动重同步一次（配置了云同步才触发），
+        // 避免解锁后停留在缓存旧数据直到手动下拉刷新
+        if (syncCoordinator.isSyncConfigured()) {
+            triggerPullRefresh()
+        }
+    }
+
+    /** 对当前列表中带 TOTP 的条目按需重算实时验证码（种子在数据层内解析，绝不外泄） */
+    private fun refreshLiveTotpCodes() {
+        viewModelScope.launch(Dispatchers.Default) {
+            val updated = mutableMapOf<String, String>()
+            for (entry in uiState.value.entries) {
+                if (entry.totpCode == null) continue
+                val snapshot = vaultRepository.calculateEntryTotp(entry.id) ?: continue
+                updated[entry.id] = snapshot.code
+            }
+            liveTotpCodesFlow.value = updated
         }
     }
 
@@ -86,7 +130,9 @@ class VaultListViewModel @Inject constructor(
         val selectedEntryIds: Set<String>,
         val syncStatus: VaultSyncStatus,
         val isSyncing: Boolean,
-        val lastSyncTimeText: String
+        val lastSyncTimeText: String,
+        val hasPendingConflict: Boolean = false,
+        val isReadOnly: Boolean = false
     )
 
     private val batchAndSyncFlow = combine(
@@ -97,6 +143,10 @@ class VaultListViewModel @Inject constructor(
         lastSyncTimeMillisFlow
     ) { isBatch, selected, status, syncing, lastSyncMillis ->
         BatchAndSyncState(isBatch, selected, status, syncing, formatLastSyncTime(lastSyncMillis))
+    }.combine(hasPendingConflictFlow) { state, hasConflict ->
+        state.copy(hasPendingConflict = hasConflict)
+    }.combine(isReadOnlyFlow) { state, readOnly ->
+        state.copy(isReadOnly = readOnly)
     }
 
     private data class SessionState(
@@ -133,11 +183,25 @@ class VaultListViewModel @Inject constructor(
             curId = grp.parentId
         }
 
-        val isInsideRecycleBin = session.currentGroupId == "group_recycle_bin" || breadcrumbs.any { it.isRecycleBin }
+        // H5 整改：回收站判定不再依赖 mock 常量字符串——以分组投影的 isRecycleBin 标记
+        // 连同其全部后代分组构建回收站 id 集合
+        val recycleBinGroupIds = buildSet {
+            fun addDescendants(parentId: String) {
+                allGroups.filter { it.parentId == parentId }.forEach { sub ->
+                    add(sub.id)
+                    addDescendants(sub.id)
+                }
+            }
+            allGroups.filter { it.isRecycleBin }.forEach { bin ->
+                add(bin.id)
+                addDescendants(bin.id)
+            }
+        }
+        val isInsideRecycleBin = breadcrumbs.any { it.isRecycleBin }
 
-        // 1. 过滤条目：搜索时全局匹配，正常时只展示当前文件夹下的条目（回收站除外）
+        // 1. 过滤条目：搜索时全局匹配（排除回收站内容），正常时只展示当前文件夹下的条目
         val targetEntries = if (isSearching) {
-            allEntries.filter { if (!isInsideRecycleBin) it.groupId != "group_recycle_bin" else true }
+            allEntries.filter { if (!isInsideRecycleBin) it.groupId !in recycleBinGroupIds else true }
         } else {
             allEntries.filter { it.groupId == session.currentGroupId }
         }
@@ -160,10 +224,12 @@ class VaultListViewModel @Inject constructor(
             VaultSortOption.CREATED_ASC -> filteredEntries.sortedBy { it.createdAt }
         }
 
-        // 3. 带实时 TOTP 剩余秒数的条目列表
+        // 3. 带实时 TOTP 剩余秒数与跨周期实时验证码的条目列表
+        val liveCodes = batchSync.let { liveTotpCodesFlow.value }
         val entriesWithLiveTotp = sortedEntries.map { entry ->
-            if (entry.totpCode != null) {
-                entry.copy(totpRemainingSeconds = session.totpRemainingSeconds)
+            val liveCode = liveCodes[entry.id] ?: entry.totpCode
+            if (liveCode != null) {
+                entry.copy(totpCode = liveCode, totpRemainingSeconds = session.totpRemainingSeconds)
             } else {
                 entry
             }
@@ -192,6 +258,8 @@ class VaultListViewModel @Inject constructor(
             syncStatus = batchSync.syncStatus,
             isSyncing = batchSync.isSyncing,
             lastSyncTimeText = batchSync.lastSyncTimeText,
+            hasPendingConflict = batchSync.hasPendingConflict,
+            isReadOnly = batchSync.isReadOnly,
             userMessage = session.userMessage,
             showUsernameInList = settings.showUsernameInList,
             showOtpInList = settings.showOtpInList,
@@ -289,9 +357,13 @@ class VaultListViewModel @Inject constructor(
         val selected = selectedEntryIdsFlow.value
         if (selected.isEmpty()) return
         viewModelScope.launch {
-            vaultRepository.batchMoveEntries(selected, targetGroupId)
-            userMessageFlow.update { UiMessage(R.string.vault_batch_moved, listOf(selected.size)) }
-            clearBatchSelection()
+            val result = vaultRepository.batchMoveEntries(selected, targetGroupId)
+            if (result is KdbxResult.Success) {
+                userMessageFlow.update { UiMessage(R.string.vault_batch_moved, listOf(selected.size)) }
+                clearBatchSelection()
+            } else {
+                userMessageFlow.update { UiMessage(R.string.vault_op_failed, listOf((result as KdbxResult.Failure).message)) }
+            }
         }
     }
 
@@ -299,9 +371,13 @@ class VaultListViewModel @Inject constructor(
         val selected = selectedEntryIdsFlow.value
         if (selected.isEmpty()) return
         viewModelScope.launch {
-            vaultRepository.batchDeleteEntries(selected)
-            userMessageFlow.update { UiMessage(R.string.vault_batch_deleted, listOf(selected.size)) }
-            clearBatchSelection()
+            val result = vaultRepository.batchDeleteEntries(selected)
+            if (result is KdbxResult.Success) {
+                userMessageFlow.update { UiMessage(R.string.vault_batch_deleted, listOf(selected.size)) }
+                clearBatchSelection()
+            } else {
+                userMessageFlow.update { UiMessage(R.string.vault_op_failed, listOf((result as KdbxResult.Failure).message)) }
+            }
         }
     }
 
@@ -362,7 +438,7 @@ class VaultListViewModel @Inject constructor(
     }
 
     fun createGroup(name: String, iconName: String = "folder") {
-        if (name.isBlank()) return
+        if (name.isBlank() || isReadOnlyFlow.value) return
         viewModelScope.launch {
             val newGroup = VaultGroup(
                 id = "group_${System.currentTimeMillis()}",
@@ -373,20 +449,29 @@ class VaultListViewModel @Inject constructor(
                 updatedAt = "刚刚",
                 createdAt = "刚刚"
             )
-            vaultRepository.saveGroup(newGroup)
-            userMessageFlow.update { UiMessage(R.string.vault_group_created, listOf(name.trim())) }
+            val result = vaultRepository.saveGroup(newGroup)
+            if (result is KdbxResult.Success) {
+                userMessageFlow.update { UiMessage(R.string.vault_group_created, listOf(name.trim())) }
+            } else {
+                userMessageFlow.update { UiMessage(R.string.vault_op_failed, listOf((result as KdbxResult.Failure).message)) }
+            }
         }
     }
 
     fun renameGroup(group: VaultGroup, newName: String) {
-        if (newName.isBlank()) return
+        if (newName.isBlank() || isReadOnlyFlow.value) return
         viewModelScope.launch {
-            vaultRepository.saveGroup(group.copy(name = newName.trim(), updatedAt = "刚刚"))
-            userMessageFlow.update { UiMessage(R.string.vault_group_renamed, listOf(newName.trim())) }
+            val result = vaultRepository.saveGroup(group.copy(name = newName.trim(), updatedAt = "刚刚"))
+            if (result is KdbxResult.Success) {
+                userMessageFlow.update { UiMessage(R.string.vault_group_renamed, listOf(newName.trim())) }
+            } else {
+                userMessageFlow.update { UiMessage(R.string.vault_op_failed, listOf((result as KdbxResult.Failure).message)) }
+            }
         }
     }
 
     fun changeGroupIcon(group: VaultGroup, newIcon: String) {
+        if (isReadOnlyFlow.value) return
         viewModelScope.launch {
             vaultRepository.saveGroup(group.copy(iconName = newIcon, updatedAt = "刚刚"))
             userMessageFlow.update { UiMessage(R.string.vault_group_icon_updated) }
@@ -394,30 +479,50 @@ class VaultListViewModel @Inject constructor(
     }
 
     fun deleteGroup(groupId: String) {
+        if (isReadOnlyFlow.value) return
         viewModelScope.launch {
-            vaultRepository.deleteGroup(groupId)
-            userMessageFlow.update { UiMessage(R.string.vault_group_deleted) }
+            val result = vaultRepository.deleteGroup(groupId)
+            if (result is KdbxResult.Success) {
+                userMessageFlow.update { UiMessage(R.string.vault_group_deleted) }
+            } else {
+                userMessageFlow.update { UiMessage(R.string.vault_op_failed, listOf((result as KdbxResult.Failure).message)) }
+            }
         }
     }
 
     fun restoreEntry(entryId: String) {
+        if (isReadOnlyFlow.value) return
         viewModelScope.launch {
-            vaultRepository.restoreEntry(entryId)
-            userMessageFlow.update { UiMessage(R.string.vault_entry_restored) }
+            val result = vaultRepository.restoreEntry(entryId)
+            if (result is KdbxResult.Success) {
+                userMessageFlow.update { UiMessage(R.string.vault_entry_restored) }
+            } else {
+                userMessageFlow.update { UiMessage(R.string.vault_op_failed, listOf((result as KdbxResult.Failure).message)) }
+            }
         }
     }
 
     fun purgeEntry(entryId: String) {
+        if (isReadOnlyFlow.value) return
         viewModelScope.launch {
-            vaultRepository.deleteEntry(entryId)
-            userMessageFlow.update { UiMessage(R.string.vault_entry_purged) }
+            val result = vaultRepository.deleteEntry(entryId)
+            if (result is KdbxResult.Success) {
+                userMessageFlow.update { UiMessage(R.string.vault_entry_purged) }
+            } else {
+                userMessageFlow.update { UiMessage(R.string.vault_op_failed, listOf((result as KdbxResult.Failure).message)) }
+            }
         }
     }
 
     fun emptyRecycleBin() {
+        if (isReadOnlyFlow.value) return
         viewModelScope.launch {
-            vaultRepository.emptyRecycleBin()
-            userMessageFlow.update { UiMessage(R.string.vault_recycle_emptied) }
+            val result = vaultRepository.emptyRecycleBin()
+            if (result is KdbxResult.Success) {
+                userMessageFlow.update { UiMessage(R.string.vault_recycle_emptied) }
+            } else {
+                userMessageFlow.update { UiMessage(R.string.vault_op_failed, listOf((result as KdbxResult.Failure).message)) }
+            }
         }
     }
 

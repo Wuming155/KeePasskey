@@ -183,7 +183,9 @@ class SettingsViewModel @Inject constructor(
         val autoSyncEnabled: Boolean = true,
         val wifiOnlySync: Boolean = true,
         val isSyncing: Boolean = false,
-        val syncFeedbackMessage: UiMessage? = null
+        val syncFeedbackMessage: UiMessage? = null,
+        // H1 整改：真实同步完成时刻文案（空串=本会话尚未同步成功过）
+        val lastSyncTimeText: String = ""
     )
 
     private data class HealthCheckUiState(
@@ -263,6 +265,7 @@ class SettingsViewModel @Inject constructor(
             wifiOnlySync = syncState.wifiOnlySync,
             isSyncing = syncState.isSyncing,
             syncFeedbackMessage = syncState.syncFeedbackMessage,
+            syncLastTime = syncState.lastSyncTimeText.ifEmpty { "尚未同步" },
             useOfflineCache = extState.useOfflineCache,
             syncOnColdStart = userSettings.syncOnColdStart,
             periodicBackgroundSyncEnabled = extState.periodicBackgroundSyncEnabled,
@@ -796,13 +799,31 @@ class SettingsViewModel @Inject constructor(
                 is SyncOutcome.Offline -> UiMessage(R.string.sync_feedback_offline)
                 is SyncOutcome.Error -> UiMessage(R.string.sync_feedback_error, listOf(outcome.message))
             }
+            // H1 整改：syncLastTime 由真实同步完成时刻填充，不再展示写死的演示文案
+            val syncedNow = outcome is SyncOutcome.UpToDate ||
+                    outcome is SyncOutcome.UploadedLocal ||
+                    outcome is SyncOutcome.MergedAndUploaded
             syncStateFlow.update {
                 it.copy(
                     isSyncing = false,
-                    syncFeedbackMessage = feedback
+                    syncFeedbackMessage = feedback,
+                    lastSyncTimeText = if (syncedNow) formatSyncTimestamp() else syncStateFlow.value.lastSyncTimeText
                 )
             }
         }
+    }
+
+    /** 将本次同步完成时刻格式化为「今天/昨天/M月d日 HH:mm」本地文案 */
+    private fun formatSyncTimestamp(): String {
+        val dateTime = java.time.Instant.ofEpochMilli(System.currentTimeMillis())
+            .atZone(java.time.ZoneId.systemDefault())
+        val today = java.time.LocalDate.now()
+        val datePrefix = when (dateTime.toLocalDate()) {
+            today -> "今天"
+            today.minusDays(1) -> "昨天"
+            else -> dateTime.format(java.time.format.DateTimeFormatter.ofPattern("M月d日"))
+        }
+        return "$datePrefix ${dateTime.format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"))}"
     }
 
     fun testSyncConnection() {

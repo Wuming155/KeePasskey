@@ -131,6 +131,7 @@
     <string name="detail_attachments_section">Attachments &amp; Certificates</string>
     <string name="detail_attachment_preview">Preview</string>
     <string name="detail_attachment_export">Export to Storage</string>
+    <string name="detail_attachment_export_failed">Attachment export failed, please retry</string>
     <string name="detail_attachment_export_toast">Attachment %1$s exported to Downloads</string>
     <string name="detail_history_section">Revision History</string>
     <string name="detail_history_rollback">Rollback to this</string>
@@ -294,6 +295,14 @@
     <string name="sec_biometric_auth_failed">Biometric authentication failed or was cancelled</string>
     <string name="sec_biometric_key_invalidated">Biometric credentials changed, security key invalidated. Please use master password.</string>
 <string name="edit_scan_totp_qr">Open camera to scan TOTP QR code</string>
+    <string name="edit_attachment_empty">Attachment is empty, not added</string>
+    <string name="edit_save_failed">Save failed: %1$s</string>
+    <string name="readonly_save_rejected">Database is open in read-only mode, saving is disabled</string>
+    <string name="readonly_banner">Read-only mode: database was opened read-only, editing and saving are disabled</string>
+    <string name="edit_tags_hint">Tags (separate multiple tags with commas)</string>
+    <string name="edit_autotype_hint">AutoType sequence (e.g. {USERNAME}{TAB}{PASSWORD}{ENTER})</string>
+    <string name="edit_override_url_hint">Override URL (autofill matching override)</string>
+    <string name="edit_extra_section">Advanced Properties</string>
 
     <!-- Unlock QuickUnlock -->
     <string name="unlock_quick_title">QuickUnlock Fast Unlock</string>
@@ -302,6 +311,8 @@
     <string name="unlock_quick_pin_label">Enter quick PIN or short password</string>
     <string name="unlock_quick_pin_placeholder">Enter your quick PIN to unlock</string>
     <string name="unlock_quick_btn">Quick Unlock</string>
+    <string name="unlock_readonly">Open read-only</string>
+    <string name="unlock_readonly_desc">View only this session, all writes rejected</string>
     <string name="unlock_biometric_btn">Biometrics</string>
     <string name="unlock_switch_to_full">Switch to full master password &amp; key file unlock</string>
     <string name="unlock_switch_back_quick">Switch back to QuickUnlock</string>
@@ -548,6 +559,8 @@
     <string name="sync_feedback_uploaded">Local changes uploaded to %1$s successfully</string>
     <string name="sync_feedback_merged">Changes automatically merged and synced to %1$s</string>
     <string name="sync_feedback_conflict">Conflict detected, please resolve in conflict screen</string>
+    <string name="vault_conflict_action">Resolve conflict</string>
+    <string name="vault_op_failed">Operation failed: %1$s</string>
     <string name="sync_feedback_offline">Offline or network unreachable; local changes kept safe</string>
     <string name="sync_feedback_error">Sync failed: %1$s</string>
     <string name="sync_section_offline">Offline &amp; background sync</string>

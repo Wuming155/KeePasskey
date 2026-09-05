@@ -7,6 +7,7 @@ import android.content.IntentFilter
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
+import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.app.data.repository.SettingsRepository
 import com.keepasskey.database.session.DatabaseSession
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -35,7 +36,8 @@ import javax.inject.Singleton
 class AutoLockManager @Inject constructor(
     @ApplicationContext private val context: Context,
     private val databaseSession: DatabaseSession,
-    private val settingsRepository: SettingsRepository
+    private val settingsRepository: SettingsRepository,
+    private val debugLog: DebugLogBuffer
 ) : DefaultLifecycleObserver {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -98,10 +100,19 @@ class AutoLockManager @Inject constructor(
     }
 
     /**
-     * 触发锁定：擦除内存数据库敏感状态，发出锁定事件
+     * 触发锁定：擦除内存数据库敏感状态，发出锁定事件。
+     * H3 整改：锁库前若存在未落盘修改（DIRTY），先做一次 best-effort 补存——
+     * 锁库会销毁内存树与主密码缓存，跳过补存将使未落盘修改永久丢失（对齐 KP2A 锁库守卫语义）。
      */
     fun triggerLock(reason: String = "安全锁定") {
         scope.launch {
+            val state = databaseSession.state.value
+            if (state == DatabaseSession.SessionState.DIRTY) {
+                val saveResult = databaseSession.save()
+                if (saveResult is com.keepasskey.core.result.KdbxResult.Failure) {
+                    debugLog.error(TAG, "锁库前补存失败: ${saveResult.message}")
+                }
+            }
             databaseSession.lock()
             _isLocked.value = true
             _lockEvents.tryEmit(Unit)
@@ -114,6 +125,10 @@ class AutoLockManager @Inject constructor(
     fun onUnlockSuccess() {
         _isLocked.value = false
         backgroundTimestamp = 0L
+    }
+
+    companion object {
+        private const val TAG = "AutoLockManager"
     }
 
     /**

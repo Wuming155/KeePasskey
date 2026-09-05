@@ -243,6 +243,10 @@ fun KeePasskeyApp() {
                             navController.navigate(Screen.Unlock.route) {
                                 popUpTo(0) { inclusive = true }
                             }
+                        },
+                        // H2 整改：冲突解决死路由接线——冲突横幅可直接进入冲突解决页
+                        onNavigateToConflictResolver = {
+                            navController.navigate(Screen.ConflictResolver.route)
                         }
                     )
                 }

@@ -22,6 +22,12 @@ data class EntryDetailUiState(
     // F2 整改：受保护自定义字段按需解密出的明文（仅查看期间驻留，收起即清空），键为字段 id
     val revealedProtectedFields: Map<String, String> = emptyMap(),
     val userMessage: UiMessage? = null,
+    // H4-只读整改：只读会话禁用编辑入口
+    val isReadOnly: Boolean = false,
+    // 断点6 整改：每秒驱动的 TOTP 剩余秒数（null=尚未首帧，沿用投影值）
+    val totpRemainingSeconds: Int? = null,
+    // 断点6 整改：周期翻转时按需重算的实时验证码（null=沿用投影值）
+    val liveTotpCode: String? = null,
     // 复制密码提示消息（按设置中的剪贴板超时时长动态生成，避免写死时长）
     val passwordCopyMessage: UiMessage = UiMessage(R.string.detail_password_copied_no_clear)
 )

@@ -23,8 +23,9 @@ data class ConflictedEntryItem(
 )
 
 data class ConflictResolutionUiState(
-    val localModifiedTime: String = "今天 10:25 (本地)",
-    val remoteModifiedTime: String = "今天 10:22 (WebDAV 云端)",
+    // H1 整改：两侧修改时间由真实冲突条目的 lastModificationTime 填充，空串表示尚未取得
+    val localModifiedTime: String = "",
+    val remoteModifiedTime: String = "",
     val entries: List<ConflictedEntryItem> = emptyList(),
     val isResolving: Boolean = false,
     val userMessage: UiMessage? = null
