@@ -203,7 +203,7 @@ class HmacBlockInputStream(
         if (blockSize == 0) {
             terminated = true
             val actualHmac = HashUtil.hmacSha256(blockKey, indexBytes, sizeBytes)
-            if (!actualHmac.contentEquals(expectedHmac)) {
+            if (!java.security.MessageDigest.isEqual(actualHmac, expectedHmac)) {
                 throw KdbxInvalidCredentialsException("HMAC 终止块校验失败：主密码错误或文件末尾被篡改")
             }
             return false
@@ -211,7 +211,7 @@ class HmacBlockInputStream(
 
         val blockData = LittleEndianUtil.readBytes(source, blockSize)
         val actualHmac = HashUtil.hmacSha256(blockKey, indexBytes, sizeBytes, blockData)
-        if (!actualHmac.contentEquals(expectedHmac)) {
+        if (!java.security.MessageDigest.isEqual(actualHmac, expectedHmac)) {
             throw KdbxInvalidCredentialsException("HMAC 块 #$blockIndex 校验失败：主密码错误或数据块被篡改")
         }
 

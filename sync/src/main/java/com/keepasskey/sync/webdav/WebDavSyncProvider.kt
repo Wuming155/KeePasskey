@@ -219,11 +219,15 @@ class WebDavSyncProvider(
                     .method("MOVE", null)
                     .header("Authorization", authHeader)
                     .header("Destination", destUrl)
-                    .header("Overwrite", "T")
 
                 if (!expectedEtag.isNullOrBlank()) {
                     // RFC 4918 Section 10.4: tagged list If 头把 ETag 预条件绑定到 MOVE 目标资源
+                    moveBuilder.header("Overwrite", "T")
                     moveBuilder.header("If", "<$destUrl> ([\"${cleanEtag(expectedEtag)}\"])")
+                } else {
+                    // P1-11 整改：无期望 ETag 时为首传语义，禁止 Overwrite: T 无条件覆盖；
+                    // 标记 Overwrite: F，若目标已存在由服务端返回 412 Precondition Failed 并转为 ConflictError
+                    moveBuilder.header("Overwrite", "F")
                 }
                 return moveBuilder.build()
             }

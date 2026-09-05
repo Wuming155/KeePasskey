@@ -47,11 +47,16 @@ class FakeVaultRepository() : VaultRepository {
         keyFileData: ByteArray?,
         readOnly: Boolean
     ): com.keepasskey.core.result.KdbxResult<Unit> {
-        return if (passwordChars.isNotEmpty()) {
+        // P1-10 语义：仅密钥文件（空密码 + 密钥文件）亦为合法复合密钥
+        return if (passwordChars.isNotEmpty() || keyFileData != null) {
             com.keepasskey.core.result.KdbxResult.Success(Unit)
         } else {
             com.keepasskey.core.result.KdbxResult.Failure(IllegalArgumentException("密码为空"), "密码不能为空")
         }
+    }
+
+    override suspend fun changeMasterPassword(newPassword: CharArray): com.keepasskey.core.result.KdbxResult<Unit> {
+        return com.keepasskey.core.result.KdbxResult.Success(Unit)
     }
 
     override suspend fun lockDatabase() {
@@ -336,7 +341,7 @@ class FakeVaultRepository() : VaultRepository {
         webDomain: String?,
         username: String,
         passwordChars: CharArray
-    ) {
+    ): com.keepasskey.core.result.KdbxResult<Unit> {
         try {
             val domain = webDomain?.takeIf { it.isNotBlank() }
             val pwdString = String(passwordChars)
@@ -372,6 +377,7 @@ class FakeVaultRepository() : VaultRepository {
                 currentList.add(newEntry)
             }
             entriesFlow.value = currentList
+            return com.keepasskey.core.result.KdbxResult.Success(Unit)
         } finally {
             Arrays.fill(passwordChars, '0')
         }

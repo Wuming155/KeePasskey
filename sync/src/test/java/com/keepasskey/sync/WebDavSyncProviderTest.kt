@@ -171,7 +171,8 @@ class WebDavSyncProviderTest {
         // MOVE 源（请求 URL）必须是本次 PUT 的同一个唯一临时文件
         val req2 = server.takeRequest()
         assertEquals("MOVE", req2.method)
-        assertEquals("T", req2.getHeader("Overwrite"))
+        // P1-11: expectedEtag 为空时为首传语义，Overwrite 必须为 F
+        assertEquals("F", req2.getHeader("Overwrite"))
         assertEquals(req1.path, req2.path)
         assertTrue(req2.getHeader("Destination")?.endsWith("vault.kdbx") == true)
     }

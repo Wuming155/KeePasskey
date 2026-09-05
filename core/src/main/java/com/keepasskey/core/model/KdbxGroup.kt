@@ -17,6 +17,10 @@ data class KdbxGroup(
     val enableSearching: Boolean? = null,
     val lastTopVisibleEntry: KdbxUuid? = null,
     val previousParentGroup: KdbxUuid? = null,
+    /** 分组标签（官方 KeePass 2.51+ 支持 Group 级 Tags，XML 中以分号分隔存储） */
+    val tags: List<String> = emptyList(),
+    /** 分组自定义数据（官方 Group 级 <CustomData>） */
+    val customData: Map<String, String> = emptyMap(),
     val entries: List<KdbxEntry> = emptyList(),
     val subgroups: List<KdbxGroup> = emptyList()
 ) {

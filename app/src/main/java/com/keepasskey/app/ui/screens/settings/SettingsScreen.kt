@@ -113,6 +113,7 @@ fun SettingsScreen(
         onNavigateToTotp = onNavigateToTotp,
         onNavigateToDebug = onNavigateToDebug,
         onNavigateToAbout = onNavigateToAbout,
+        onChangeMasterPassword = { viewModel.changeMasterPassword(it) },
         onBackClick = onBackClick,
         showBackButton = showBackButton,
         modifier = modifier
@@ -135,6 +136,7 @@ fun SettingsContent(
     onNavigateToTotp: () -> Unit = {},
     onNavigateToDebug: () -> Unit = {},
     onNavigateToAbout: () -> Unit,
+    onChangeMasterPassword: suspend (CharArray) -> com.keepasskey.core.result.KdbxResult<Unit> = { com.keepasskey.core.result.KdbxResult.Success(Unit) },
     onBackClick: () -> Unit = {},
     showBackButton: Boolean = false,
     modifier: Modifier = Modifier
@@ -350,9 +352,18 @@ fun SettingsContent(
                 Button(
                     onClick = {
                         if (newPassword.isNotEmpty() && newPassword == confirmPassword) {
+                            val pwdChars = newPassword.toCharArray()
                             showMasterKeyDialog = false
                             coroutineScope.launch {
-                                snackbarHostState.showSnackbar(masterKeyUpdatedMsg)
+                                val result = onChangeMasterPassword(pwdChars)
+                                when (result) {
+                                    is com.keepasskey.core.result.KdbxResult.Success<*> -> {
+                                        snackbarHostState.showSnackbar(masterKeyUpdatedMsg)
+                                    }
+                                    is com.keepasskey.core.result.KdbxResult.Failure -> {
+                                        snackbarHostState.showSnackbar(result.message)
+                                    }
+                                }
                             }
                         }
                     },

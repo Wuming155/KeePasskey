@@ -24,8 +24,10 @@ class ChaCha20CipherEngine : CipherEngine {
 
     override val cipherUuid: KdbxUuid = KdbxConstants.Cipher.CHACHA20
     override val name: String = "ChaCha20"
+    override val ivLength: Int = KdbxConstants.Cipher.CHACHA20_NONCE_LENGTH
 
     override fun encrypt(key: ByteArray, iv: ByteArray, data: ByteArray): ByteArray {
+        validateNonceLength(iv)
         return try {
             val cipher = initCipher(Cipher.ENCRYPT_MODE, key, iv)
             cipher.doFinal(data)
@@ -35,6 +37,7 @@ class ChaCha20CipherEngine : CipherEngine {
     }
 
     override fun decrypt(key: ByteArray, iv: ByteArray, data: ByteArray): ByteArray {
+        validateNonceLength(iv)
         return try {
             val cipher = initCipher(Cipher.DECRYPT_MODE, key, iv)
             cipher.doFinal(data)
@@ -48,6 +51,7 @@ class ChaCha20CipherEngine : CipherEngine {
         key: ByteArray,
         iv: ByteArray
     ): OutputStream {
+        validateNonceLength(iv)
         val cipher = initCipher(Cipher.ENCRYPT_MODE, key, iv)
         return CipherOutputStream(outputStream, cipher)
     }
@@ -57,15 +61,29 @@ class ChaCha20CipherEngine : CipherEngine {
         key: ByteArray,
         iv: ByteArray
     ): InputStream {
+        validateNonceLength(iv)
         val cipher = initCipher(Cipher.DECRYPT_MODE, key, iv)
         return CipherInputStream(inputStream, cipher)
     }
 
+    /**
+     * P0-4 整改：RFC 7539 nonce 恒为 12 字节，长度不符立即失败。
+     * 原实现把超长 IV 静默截断为前 12 字节，掩盖了 KdbxFile 侧恒生成 16 字节 IV 的上游缺陷，
+     * 产出官方 KeePass（ChaCha20Cipher 构造器对 pbIV12.Length != 12 直接抛出）无法打开的文件；
+     * 读取侧对称截断又令自读自写往返永远通过，互操作缺陷被结构性掩盖。
+     */
+    private fun validateNonceLength(iv: ByteArray) {
+        if (iv.size != KdbxConstants.Cipher.CHACHA20_NONCE_LENGTH) {
+            throw IllegalArgumentException(
+                "ChaCha20 nonce 必须为 " + KdbxConstants.Cipher.CHACHA20_NONCE_LENGTH +
+                    " 字节，实际为: " + iv.size
+            )
+        }
+    }
+
     private fun initCipher(mode: Int, key: ByteArray, iv: ByteArray): Cipher {
         val cipher = Cipher.getInstance("ChaCha7539", BouncyCastleProvider.PROVIDER_NAME)
-        // 若 IV 是 16 字节，ChaCha7539 取前 12 字节作为 nonce（RFC 7539 规范）
-        val nonce = if (iv.size > 12) iv.copyOfRange(0, 12) else iv
-        cipher.init(mode, SecretKeySpec(key, "ChaCha7539"), IvParameterSpec(nonce))
+        cipher.init(mode, SecretKeySpec(key, "ChaCha7539"), IvParameterSpec(iv))
         return cipher
     }
 

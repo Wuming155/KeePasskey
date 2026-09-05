@@ -61,6 +61,31 @@ class UnlockViewModelTest {
         assertNotNull(state.errorMessage)
         assertEquals(com.keepasskey.app.R.string.unlock_error_empty_password, state.errorMessage?.resId)
     }
+    /**
+     * P1-10 回归锁：已选择密钥文件时空密码合法（仅密钥文件解锁，
+     * 对齐官方 KeePass 解锁框对空密码不添加密码分量的语义）。
+     */
+    @Test
+    fun `空密码加密钥文件允许仅密钥文件解锁`() = runTest {
+        val viewModel = createViewModel()
+        var unlocked = false
+
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            viewModel.events.collect { event ->
+                if (event is UnlockEvent.UnlockSuccess) {
+                    unlocked = true
+                }
+            }
+        }
+
+        viewModel.onKeyFileSelected(ByteArray(32) { it.toByte() }, "vault.keyx")
+        viewModel.onPasswordChangeSecure(CharArray(0))
+        viewModel.unlock()
+        testScheduler.runCurrent()
+
+        assertTrue(unlocked)
+        assertNull(viewModel.uiState.value.errorMessage)
+    }
 
     @Test
     fun `输入有效主密码成功解锁`() = runTest {

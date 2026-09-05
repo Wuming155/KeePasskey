@@ -205,6 +205,28 @@ class SyncEngineTest {
     }
 
     @Test
+    fun `测试 commitLocal 冲突后下载失败返回远端不可达而非伪造空冲突`() = runTest {
+        val v1 = "content-v1".toByteArray()
+        fakeProvider.remoteFiles[remotePath] = FakeRemoteFile(v1, etag = "etag-1")
+        engine.openRemote(remotePath)
+
+        // 远端被他人修改引发 412 冲突；随后下载远端内容失败（412 之后网络中断）
+        fakeProvider.remoteFiles[remotePath] = FakeRemoteFile("concurrent-mod".toByteArray(), etag = "etag-other")
+        fakeProvider.downloadError = true
+
+        val v3 = "content-v3".toByteArray()
+        val result = engine.commitLocal(remotePath, v3)
+
+        // 严禁以 ByteArray(0) 伪造空冲突远端参与三方合并；
+        // 本地缓存已安全保留 → 如实返回 RemoteUnreachable(keptLocal = true)
+        assertTrue("期望 RemoteUnreachable，实际: $result", result is SyncCommitResult.RemoteUnreachable)
+        assertTrue((result as SyncCommitResult.RemoteUnreachable).keptLocal)
+        assertArrayEquals(v3, syncCache.readCache(remotePath))
+        // 应发布远端保存失败事件（含下载失败原因）
+        assertTrue(engine.events.replayCache.any { it is SyncCacheEvent.CouldntSaveToRemote })
+    }
+
+    @Test
     fun `测试 markResolvedAndUpload 合并解决提交基线前移`() = runTest {
         val v1 = "content-v1".toByteArray()
         fakeProvider.remoteFiles[remotePath] = FakeRemoteFile(v1, etag = "etag-1")
@@ -380,6 +402,9 @@ class SyncEngineTest {
     private class FakeSyncProvider : SyncProvider {
         val remoteFiles = mutableMapOf<String, FakeRemoteFile>()
         var networkError: Boolean = false
+
+        /** 仅令 download 失败（模拟 412 冲突响应后网络中断） */
+        var downloadError: Boolean = false
         var uploadAtomicCalls: Int = 0
 
         override suspend fun uploadAtomic(
@@ -408,6 +433,7 @@ class SyncEngineTest {
         }
 
         override suspend fun download(remotePath: String): Result<ByteArray> {
+            if (downloadError) return Result.failure(SyncException.NetworkError("Download failed after conflict"))
             if (networkError) return Result.failure(SyncException.NetworkError("Network down"))
             val file = remoteFiles[remotePath]
                 ?: return Result.failure(SyncException.FileNotFound("Not found"))

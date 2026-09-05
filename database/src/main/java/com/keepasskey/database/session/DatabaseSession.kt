@@ -117,10 +117,13 @@ class DatabaseSession {
     /**
      * 打开并解密已有 KDBX 文件。
      * [readOnly] 为 true 时进入只读会话：后续 save() 硬拒绝、内存树变更方法 no-op。
+     *
+     * [passwordChars] 允许为 null 或空数组（P1-10：仅密钥文件解锁，
+     * 对齐官方 KeyUtil.CreateKey 对空密码不添加密码分量的语义）。
      */
     suspend fun open(
         file: File,
-        passwordChars: CharArray,
+        passwordChars: CharArray?,
         keyFileData: ByteArray? = null,
         readOnly: Boolean = false
     ): KdbxResult<Unit> = mutex.withLock {
@@ -176,10 +179,15 @@ class DatabaseSession {
                 IllegalStateException("活动数据库为空"),
                 "当前无活动数据库"
             )
-            val pwd = passwordCache ?: return@withContext KdbxResult.Failure(
-                IllegalStateException("主密码已被清理"),
-                "主密码凭据丢失，请重新输入主密码"
-            )
+            // P1-10：仅密钥文件会话（主密码为 null/空）下 passwordCache 可为空，
+            // 只要密钥文件缓存仍在即可完成保存；两者皆缺失才视为凭据丢失
+            val pwd = passwordCache
+            if (pwd == null && keyFileCache == null) {
+                return@withContext KdbxResult.Failure(
+                    IllegalStateException("主密码已被清理"),
+                    "主密码凭据丢失，请重新输入主密码"
+                )
+            }
 
             try {
                 withContext(Dispatchers.IO) {
@@ -218,13 +226,17 @@ class DatabaseSession {
     }
 
     /**
-     * 保存或更新分组
+     * 保存或更新分组。
+     *
+     * P0-1 防御性保护：更新既有分组（含根分组）时，若传入分组不携带任何子项而既有分组含有子项，
+     * 经 [preserveChildrenIfMissing] 保留既有子项，防止「重命名/改图标」等仅更新元数据的
+     * 调用路径意外清空子条目与子分组。
      */
     suspend fun saveGroup(group: KdbxGroup) = mutex.withLock {
         if (readOnlyMode) return@withLock
         val currentDb = _database.value ?: return@withLock
         val updatedRoot = if (group.id == currentDb.rootGroup.id) {
-            group
+            preserveChildrenIfMissing(currentDb.rootGroup, group)
         } else {
             updateOrAddGroup(currentDb.rootGroup, group)
         }
@@ -319,9 +331,66 @@ class DatabaseSession {
         _state.value = SessionState.CLOSED
     }
 
-    private fun cachePassword(passwordChars: CharArray) = synchronized(credentialLock) {
+    /**
+     * P0-3 更改主凭据：更新内存中的主密码/密钥文件缓存，并立即触发全量重加密写盘。
+     * KDBX4 规范在每次保存时均生成全新的随机 MasterSeed 与 Salt，因此更换凭据等价于以新凭据重新序列化保存。
+     */
+    suspend fun changeCredentials(
+        newPasswordChars: CharArray?,
+        newKeyFileData: ByteArray? = keyFileCache?.clone()
+    ): KdbxResult<Unit> = mutex.withLock {
+        if (readOnlyMode) {
+            return@withLock KdbxResult.Failure(
+                IllegalStateException("数据库处于只读模式，无法修改主凭据"),
+                "数据库处于只读模式，无法修改主凭据"
+            )
+        }
+        val file = activeFile ?: return@withLock KdbxResult.Failure(
+            IllegalStateException("无活动数据库文件"),
+            "当前无活动数据库"
+        )
+        val db = _database.value ?: return@withLock KdbxResult.Failure(
+            IllegalStateException("活动数据库为空"),
+            "当前无活动数据库"
+        )
+
+        val oldPwd = passwordCache?.clone()
+        val oldKey = keyFileCache?.clone()
+
+        synchronized(credentialLock) {
+            passwordCache?.let { Arrays.fill(it, '0') }
+            passwordCache = newPasswordChars?.clone()
+            if (newKeyFileData != null) {
+                keyFileCache?.let { Arrays.fill(it, 0.toByte()) }
+                keyFileCache = newKeyFileData.clone()
+            }
+        }
+
+        try {
+            withContext(Dispatchers.IO) {
+                AtomicFileWriter.writeAtomic(file) { os ->
+                    KdbxFile.save(os, db, newPasswordChars, newKeyFileData)
+                }
+            }
+            _state.value = SessionState.OPENED
+            oldPwd?.let { Arrays.fill(it, '0') }
+            oldKey?.let { Arrays.fill(it, 0.toByte()) }
+            KdbxResult.Success(Unit)
+        } catch (t: Throwable) {
+            // 失败时回滚既有凭据
+            synchronized(credentialLock) {
+                passwordCache?.let { Arrays.fill(it, '0') }
+                passwordCache = oldPwd
+                keyFileCache?.let { Arrays.fill(it, 0.toByte()) }
+                keyFileCache = oldKey
+            }
+            KdbxResult.Failure(t, "更新主密码失败: ${t.message}")
+        }
+    }
+
+    private fun cachePassword(passwordChars: CharArray?) = synchronized(credentialLock) {
         clearSensitiveCache()
-        passwordCache = passwordChars.clone()
+        passwordCache = passwordChars?.clone()
     }
 
     private fun clearSensitiveCache() = synchronized(credentialLock) {
@@ -362,7 +431,8 @@ class DatabaseSession {
             val existingIndex = parent.subgroups.indexOfFirst { it.id == groupToSave.id }
             val newSubgroups = parent.subgroups.toMutableList()
             if (existingIndex >= 0) {
-                newSubgroups[existingIndex] = groupToSave
+                // P0-1 保护性合并：替换既有分组前保留其子项（详见 preserveChildrenIfMissing）
+                newSubgroups[existingIndex] = preserveChildrenIfMissing(parent.subgroups[existingIndex], groupToSave)
             } else {
                 newSubgroups.add(groupToSave)
             }
@@ -373,6 +443,21 @@ class DatabaseSession {
             updateOrAddGroup(sub, groupToSave)
         }
         return parent.copy(subgroups = newSubgroups)
+    }
+
+    /**
+     * P0-1 防御性合并：更新既有分组时，若调用方传入的新分组不携带任何子项
+     * （entries 与 subgroups 均为空）而既有分组含有子项，则把既有子项原样并入新分组，
+     * 确保重命名/改图标等仅更新元数据的保存路径不会清空既有分组的子条目与子分组。
+     * 若新分组自身携带子项（如回收站移动、合并引擎回写等显式重建场景），则以其为准，不做合并。
+     */
+    private fun preserveChildrenIfMissing(existing: KdbxGroup, incoming: KdbxGroup): KdbxGroup {
+        val incomingHasChildren = incoming.entries.isNotEmpty() || incoming.subgroups.isNotEmpty()
+        val existingHasChildren = existing.entries.isNotEmpty() || existing.subgroups.isNotEmpty()
+        if (!incomingHasChildren && existingHasChildren) {
+            return incoming.copy(entries = existing.entries, subgroups = existing.subgroups)
+        }
+        return incoming
     }
 
     private fun removeGroup(parent: KdbxGroup, groupId: KdbxUuid): KdbxGroup {

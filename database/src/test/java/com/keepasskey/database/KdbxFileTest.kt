@@ -248,4 +248,55 @@ class KdbxFileTest {
         session.close()
         assertEquals(DatabaseSession.SessionState.CLOSED, session.state.value)
     }
+
+    /**
+     * P1-10 回归锁：仅密钥文件（无主密码）的会话全生命周期——
+     * null 密码解锁 → 无密码分量的保存（passwordCache 为 null、keyFileCache 在场）→ 重解锁读取。
+     */
+    @Test
+    fun testDatabaseSessionKeyFileOnlyLifecycle() = runBlocking {
+        val testFile = File(tempFolder.root, "keyfile_only_vault.kdbx")
+        val keyFileData = ByteArray(32) { (it * 17 + 3).toByte() }
+        val session = DatabaseSession()
+
+        // 1. 以仅密钥文件（无主密码分量）直接落盘建库
+        val db = KdbxDatabase(
+            header = KdbxHeader.createDefault(useArgon2 = false),
+            databaseName = "KeyFileOnlySession",
+            rootGroup = KdbxGroup(name = "Root")
+        )
+        testFile.outputStream().use { fos ->
+            KdbxFile.save(fos, db, null, keyFileData)
+        }
+
+        // 2. null 密码 + 密钥文件解锁会话
+        val openResult = session.open(testFile, null, keyFileData)
+        assertTrue(openResult.isSuccess)
+        assertEquals(DatabaseSession.SessionState.OPENED, session.state.value)
+
+        // 3. 新增受保护条目并保存（仅密钥文件会话的保存路径）
+        session.saveEntry(
+            KdbxEntry(
+                fields = mapOf(
+                    KdbxConstants.Fields.TITLE to ProtectedString("KeyFileOnlySessionEntry", isProtected = false),
+                    KdbxConstants.Fields.PASSWORD to ProtectedString("SessionSecret!99", isProtected = true)
+                )
+            )
+        )
+        val saveResult = session.save()
+        assertTrue(saveResult.isSuccess)
+
+        // 4. 锁定后仅密钥文件重新解锁，条目与受保护字段完整
+        session.lock()
+        val reopenResult = session.open(testFile, null, keyFileData)
+        assertTrue(reopenResult.isSuccess)
+        val entries = session.databaseFlow.value?.rootGroup?.allEntries()
+        assertNotNull(entries)
+        assertEquals(1, entries!!.size)
+        assertEquals("KeyFileOnlySessionEntry", entries[0].title)
+        assertEquals("SessionSecret!99", entries[0].password?.readString())
+
+        session.close()
+        assertEquals(DatabaseSession.SessionState.CLOSED, session.state.value)
+    }
 }

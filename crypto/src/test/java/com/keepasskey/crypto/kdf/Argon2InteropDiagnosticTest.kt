@@ -1,59 +1,77 @@
 package com.keepasskey.crypto.kdf
 
-import com.keepasskey.core.model.KdbxConstants
-import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.crypto.kdf.KdfParameters.Argon2.Argon2Type
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Test
 import java.security.MessageDigest
 
 /**
- * 临时诊断测试：真机 test.kdbx（KeePass 2.x 生成，Argon2d）的 transformedKey 与
- * pykeepass/libargon2 参考值（sha256=37d0cbcf731e5be0c110f81df8da610a53152d1a292fc55f81744f872533efdf）比对。
- * 参考基准（pykeepass compute_key_composite + argon2-cffi hash_secret_raw）：
- * composite sha256 = da1c26c725496f55905ea808729e8d81dfbd4fc8be2d3d60bf6f5c34df74f647
+ * Argon2 互操作已知答案测试（KAT）：以安全的合成测试口令与自造的密钥文件密钥 / 盐为输入，
+ * 用独立参考实现（libargon2，经 pykeepass 同款 argon2-cffi）预计算的期望值，验证本工程
+ * Bouncy Castle Argon2 派生与 KDBX 复合密钥组装公式的一致性：
+ * composite = SHA-256(SHA-256(password) ‖ keyFileKey)，transformedKey = Argon2d(composite, salt, ...)。
+ *
+ * 凭据泄露整改（P0-2）：原诊断向量中的真实主密码 / 真实密钥文件密钥 / 真实库盐已全部替换为
+ * 合成测试向量；期望值由独立参考实现按同一公式离线计算，保持跨实现互操作校验语义不变。
+ *
+ * 参考基准（argon2-cffi 25.1.0 / libargon2，Argon2d t=3 m=8192KiB p=2 v=19）：
+ * composite sha256 = cf8a8915ff0670c9171c416970665fc9401614131daf1cf64ae938bde15a813a
+ * transformedKey sha256 = 4423de6810bd7f08812cac7b9d40c96b19939c3de38ac8c3d60e407e9759a9ce
  */
 class Argon2InteropDiagnosticTest {
 
     @Test
-    fun `transformed key matches libargon2 reference for real world file`() {
-        val password = "xdqaCEGFEAHBETAH72732/*632."
+    fun `transformed key matches libargon2 reference for synthetic vector`() {
+        val password = "TestMasterPassword!2026#Secure"
 
-        // 复合密钥 = SHA256(SHA256(pwd) ‖ keyfileKey32)，keyfileKey 来自 XML v2.0 十六进制 Data
+        // 复合密钥 = SHA256(SHA256(pwd) ‖ keyfileKey32)，keyfileKey 为自造的 32 字节测试十六进制串
         val passwordHash = MessageDigest.getInstance("SHA-256").digest(password.toByteArray(Charsets.UTF_8))
-        val keyFileKey = "7DDC70C9FED76DEE09DBFCE3FA317E7F200C71F23651617F5225F44CB212ABDE"
+        val keyFileKey = "CAFEBABEDEADBEEF00112233445566778899AABBCCDDEEFF0123456789ABCDEF"
             .chunked(2).map { it.toInt(16).toByte() }.toByteArray()
         val composite = MessageDigest.getInstance("SHA-256")
             .digest(passwordHash + keyFileKey)
         assertArrayEquals(
-            "composite 与 pykeepass 基准不一致",
-            "e1ae9645d9b7f9f459a25be856005dbc6f7effcdc298a64b458beb5572e8689e".chunked(2)
+            "composite 与 libargon2/pykeepass 参考基准不一致",
+            "cf8a8915ff0670c9171c416970665fc9401614131daf1cf64ae938bde15a813a".chunked(2)
                 .map { it.toInt(16).toByte() }.toByteArray(),
             composite
         )
 
-        // 真实文件的 Argon2 参数
-        val salt = "327c276fe8c3ece964e8595c6a251915c4ade462235a822b57ff24746729b278"
+        // 自造的 32 字节测试盐与轻量参数（保持测试快速可重复执行）
+        val salt = "FEEDFACE0BADC0DE00112233445566778899AABBCCDDEEFFDEADBEEFCAFEBABE"
             .chunked(2).map { it.toInt(16).toByte() }.toByteArray()
         val params = KdfParameters.Argon2(
             type = Argon2Type.ARGON2D,
             salt = salt,
-            parallelism = 4,
-            memoryInBytes = 64L * 1024 * 1024,
-            iterations = 89L,
+            parallelism = 2,
+            memoryInBytes = 8L * 1024 * 1024,
+            iterations = 3L,
             version = 19
         )
 
         val engine = Argon2KdfEngine(Argon2Type.ARGON2D)
         val transformed = engine.transform(composite, params)
+
+        // 派生成功且非平凡：32 字节输出、非全零、确与输入不同（真实完成 KDF 变换而非直通）
+        assertEquals(32, transformed.size)
+        assertFalse(transformed.all { it == 0.toByte() })
+        assertFalse(composite.contentEquals(transformed))
+
+        // 一致性：同一输入与参数重复派生必须逐字节一致（确定性）
+        assertArrayEquals(
+            "同参数重复派生结果应一致",
+            transformed,
+            engine.transform(composite, params)
+        )
+
+        // 与独立参考实现（libargon2）预计算基准比对
         val digest = MessageDigest.getInstance("SHA-256").digest(transformed)
         val hex = digest.joinToString("") { "%02x".format(it) }
-        println("BC transformedKey sha256 = $hex")
-
         assertEquals(
-            "transformedKey 与 libargon2/pykeepass 参考不一致",
-            "37d0cbcf731e5be0c110f81df8da610a53152d1a292fc55f81744f872533efdf",
+            "transformedKey 与 libargon2/pykeepass 参考基准不一致",
+            "4423de6810bd7f08812cac7b9d40c96b19939c3de38ac8c3d60e407e9759a9ce",
             hex
         )
     }

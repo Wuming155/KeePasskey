@@ -91,9 +91,19 @@ class ClipboardSecurityManager @Inject constructor(
      * 检查当前剪贴板是否仍为先前复制的敏感内容；若是则执行物理清空
      */
     fun performClearIfMatching(expectedHash: ByteArray): Boolean {
-        val currentText = getCurrentClipText() ?: return false
+        val currentText = getCurrentClipText()
+        if (currentText == null) {
+            // P1-15 整改：Android 10+ 后台限制导致 primaryClip 返回 null；
+            // 此时只要最后一次复制的哈希仍匹配记录，执行 fail-safe 保护清空
+            if (lastSensitiveHash?.contentEquals(expectedHash) == true) {
+                clearClipboard()
+                lastSensitiveHash = null
+                return true
+            }
+            return false
+        }
         val currentHash = sha256(currentText)
-        if (currentHash.contentEquals(expectedHash)) {
+        if (java.security.MessageDigest.isEqual(currentHash, expectedHash)) {
             clearClipboard()
             lastSensitiveHash = null
             return true

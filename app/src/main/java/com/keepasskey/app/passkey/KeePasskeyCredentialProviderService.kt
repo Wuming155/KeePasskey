@@ -14,6 +14,7 @@ import androidx.credentials.exceptions.CreateCredentialException
 import androidx.credentials.exceptions.GetCredentialCustomException
 import androidx.credentials.exceptions.GetCredentialException
 import androidx.credentials.provider.Action
+import androidx.credentials.provider.AuthenticationAction
 import androidx.credentials.provider.BeginCreateCredentialRequest
 import androidx.credentials.provider.BeginCreateCredentialResponse
 import androidx.credentials.provider.BeginCreatePasswordCredentialRequest
@@ -111,12 +112,12 @@ class KeePasskeyCredentialProviderService : CredentialProviderService() {
                 unlockIntent,
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
             )
-            val action = Action.Builder(
+            val action = AuthenticationAction.Builder(
                 getString(R.string.cred_unlock_action_title),
                 pendingIntent
-            ).setSubtitle(getString(R.string.cred_unlock_action_subtitle)).build()
+            ).build()
 
-            responseBuilder.addAction(action)
+            responseBuilder.addAuthenticationAction(action)
             return responseBuilder.build()
         }
 

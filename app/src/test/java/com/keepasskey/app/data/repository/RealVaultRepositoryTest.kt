@@ -4,6 +4,7 @@ import android.content.Context
 import com.keepasskey.app.ui.model.UiAttachment
 import com.keepasskey.app.ui.model.UiCustomField
 import com.keepasskey.app.ui.model.UiVaultEntry
+import com.keepasskey.app.ui.model.VaultGroup
 import com.keepasskey.core.model.DeletedObject
 import com.keepasskey.core.model.KdbxAttachment
 import com.keepasskey.core.model.KdbxConstants
@@ -293,6 +294,104 @@ class RealVaultRepositoryTest {
         val reloadedItem = reloadedEntries.firstOrNull { it.id == newEntry.id }
         assertNotNull(reloadedItem)
         assertEquals(reloadedDb.recycleBinUuid?.toHexString(), reloadedItem!!.groupId)
+
+        password.fill('0')
+    }
+
+    @Test
+    fun `saveGroup 重命名与改图标后子条目与子分组完好无损`() = runTest {
+        val testFile = File(tempFolder.root, "group_rename_test.kdbx")
+        val password = "StrongPassword#2026".toCharArray()
+
+        val session = DatabaseSession()
+        val createResult = session.create(
+            file = testFile,
+            name = "GroupVault",
+            passwordChars = password,
+            useArgon2 = false // 单元测试快速使用 AES-KDF
+        )
+        assertTrue(createResult is com.keepasskey.core.result.KdbxResult.Success)
+
+        val repository = RealVaultRepository(createMockContext(tempFolder.root), session, com.keepasskey.app.data.logger.DebugLogBuffer())
+
+        // 1. 创建分组（模拟 VaultListViewModel.createGroup：非 UUID 临时 id → 仓库生成新 UUID）
+        val groupCreateResult = repository.saveGroup(
+            VaultGroup(id = "group_new", name = "财务", parentId = null, iconName = "folder")
+        )
+        assertTrue(groupCreateResult is com.keepasskey.core.result.KdbxResult.Success)
+        val createdUiGroup = repository.getGroups().first().firstOrNull { it.name == "财务" }
+        assertNotNull("新建分组应出现在分组投影中", createdUiGroup)
+
+        // 2. 向该分组添加子条目
+        val childEntryId = KdbxUuid.random().toHexString()
+        val entrySaveResult = repository.saveEntry(
+            UiVaultEntry(
+                id = childEntryId,
+                title = "银行卡",
+                username = "alice",
+                url = "https://bank.example.com",
+                groupId = createdUiGroup!!.id
+            ),
+            passwordChars = "child_pwd".toCharArray()
+        )
+        assertTrue(entrySaveResult is com.keepasskey.core.result.KdbxResult.Success)
+
+        // 3. 向该分组添加子分组，并在子分组内放置孙条目
+        val subGroupCreateResult = repository.saveGroup(
+            VaultGroup(id = "group_sub", name = "子分组", parentId = createdUiGroup.id, iconName = "folder")
+        )
+        assertTrue(subGroupCreateResult is com.keepasskey.core.result.KdbxResult.Success)
+        val subUiGroup = repository.getGroups().first().firstOrNull { it.name == "子分组" }
+        assertNotNull(subUiGroup)
+        repository.saveEntry(
+            UiVaultEntry(
+                id = KdbxUuid.random().toHexString(),
+                title = "孙条目",
+                username = "bob",
+                url = "https://sub.example.com",
+                groupId = subUiGroup!!.id
+            ),
+            passwordChars = "grand_pwd".toCharArray()
+        )
+
+        // 4. P0-1 原灾难路径：以 UI 投影（仅名称/图标等元数据）回写保存——重命名 + 改图标
+        //    原实现会构造仅 4 字段的 KdbxGroup 覆盖既有分组，子条目与子分组全部被清空
+        val renameResult = repository.saveGroup(
+            createdUiGroup.copy(name = "财务-已重命名", iconName = "work")
+        )
+        assertTrue(renameResult is com.keepasskey.core.result.KdbxResult.Success)
+
+        // 5. 验证内存树：名称与图标更新生效，子条目与子分组完好无损
+        val dbAfterRename = session.databaseFlow.first()!!
+        val targetUuid = KdbxUuid.fromHexString(createdUiGroup.id)
+        val renamedGroup = dbAfterRename.rootGroup.findGroup(targetUuid)
+        assertNotNull("重命名后分组必须仍存在于分组树中", renamedGroup)
+        assertEquals("财务-已重命名", renamedGroup!!.name)
+        assertEquals("图标应更新为 work 对应的官方 PwIcon 67", 67, renamedGroup.iconId)
+        assertEquals("子条目必须完好保留", 1, renamedGroup.entries.size)
+        assertEquals("银行卡", renamedGroup.entries[0].title)
+        assertEquals(childEntryId, renamedGroup.entries[0].id.toHexString())
+        assertEquals("子分组必须完好保留", 1, renamedGroup.subgroups.size)
+        assertEquals("子分组", renamedGroup.subgroups[0].name)
+        assertEquals("孙条目必须随子分组完好保留", 1, renamedGroup.subgroups[0].entries.size)
+        assertEquals("孙条目", renamedGroup.subgroups[0].entries[0].title)
+        assertEquals("全树条目数量不得丢失", 2, dbAfterRename.rootGroup.allEntries().size)
+
+        // 6. 持久化往返验证：关闭会话重新打开后，重命名结果与子项均从磁盘完整恢复
+        session.close()
+        val reopenSession = DatabaseSession()
+        val reopenResult = reopenSession.open(testFile, password)
+        assertTrue(reopenResult is com.keepasskey.core.result.KdbxResult.Success)
+        val reloadedDb = reopenSession.databaseFlow.first()!!
+        val reloadedGroup = reloadedDb.rootGroup.findGroup(targetUuid)
+        assertNotNull("重开后分组应存在", reloadedGroup)
+        assertEquals("财务-已重命名", reloadedGroup!!.name)
+        assertEquals(67, reloadedGroup.iconId)
+        assertEquals("重开后子条目必须仍在", 1, reloadedGroup.entries.size)
+        assertEquals("银行卡", reloadedGroup.entries[0].title)
+        assertEquals("重开后子分组必须仍在", 1, reloadedGroup.subgroups.size)
+        assertEquals("孙条目", reloadedGroup.subgroups[0].entries[0].title)
+        assertEquals(2, reloadedDb.rootGroup.allEntries().size)
 
         password.fill('0')
     }

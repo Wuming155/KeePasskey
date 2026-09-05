@@ -56,7 +56,8 @@ class CryptoTest {
     fun testChaCha20CipherRoundtrip() {
         val engine = ChaCha20CipherEngine()
         val key = ByteArray(32) { (it + 5).toByte() }
-        val iv = ByteArray(16) { it.toByte() }
+        // RFC 7539 / KDBX4：ChaCha20 nonce 恒为 12 字节（引擎已按官方规范硬校验）
+        val iv = ByteArray(12) { it.toByte() }
         val plaintext = "ChaCha20 RFC 7539 KeePass v4 encryption test".toByteArray(StandardCharsets.UTF_8)
 
         val encrypted = engine.encrypt(key, iv, plaintext)
@@ -163,5 +164,70 @@ class CryptoTest {
         val decrypted = decryptStream.processBytes(encrypted)
 
         assertArrayEquals(data, decrypted)
+    }
+    /**
+     * P0-4 回归锁：nonce 长度非 12 字节必须立即失败（IllegalArgumentException）。
+     * 旧行为（>12 字节静默截断为前 12 字节）曾掩盖 KdbxFile 恒写 16 字节 IV 的上游缺陷，
+     * 产出官方客户端打不开的文件——若回退到静默截断，本用例必须失败。
+     */
+    @Test
+    fun testChaCha20RejectsNon12ByteNonce() {
+        val engine = ChaCha20CipherEngine()
+        val key = ByteArray(32) { (it + 5).toByte() }
+        val data = "nonce length validation".toByteArray(StandardCharsets.UTF_8)
+
+        for (badNonce in listOf(ByteArray(16) { it.toByte() }, ByteArray(8) { it.toByte() })) {
+            try {
+                engine.encrypt(key, badNonce, data)
+                org.junit.Assert.fail("nonce 为 ${badNonce.size} 字节时 encrypt 必须抛出 IllegalArgumentException")
+            } catch (expected: IllegalArgumentException) {
+                assertTrue(expected.message?.contains("12") == true)
+                assertTrue(expected.message?.contains("${badNonce.size}") == true)
+            }
+            try {
+                engine.decrypt(key, badNonce, data)
+                org.junit.Assert.fail("nonce 为 ${badNonce.size} 字节时 decrypt 必须抛出 IllegalArgumentException")
+            } catch (expected: IllegalArgumentException) {
+                assertTrue(expected.message?.contains("${badNonce.size}") == true)
+            }
+        }
+
+        // 流式入口（保存/读取管线实际使用的路径）
+        try {
+            engine.createEncryptingStream(java.io.ByteArrayOutputStream(), key, ByteArray(16) { it.toByte() })
+            org.junit.Assert.fail("nonce 为 16 字节时 createEncryptingStream 必须抛出 IllegalArgumentException")
+        } catch (expected: IllegalArgumentException) {
+            assertTrue(expected.message?.contains("16") == true)
+        }
+        try {
+            engine.createDecryptingStream(java.io.ByteArrayInputStream(ByteArray(32)), key, ByteArray(16) { it.toByte() })
+            org.junit.Assert.fail("nonce 为 16 字节时 createDecryptingStream 必须抛出 IllegalArgumentException")
+        } catch (expected: IllegalArgumentException) {
+            assertTrue(expected.message?.contains("16") == true)
+        }
+    }
+
+    /**
+     * P3-1 回归锁：InnerRandomStreamID = 0 (None) 为合法流类型（无内层加密）——
+     * processBytes 直通透传（返回输入副本）、不消费任何密钥流状态。
+     */
+    @Test
+    fun testInnerRandomStreamNonePassthrough() {
+        val key = ByteArray(64) { (it * 3).toByte() }
+        val stream = InnerRandomStreamCipher(KdbxConstants.InnerRandomStream.NONE, key)
+        val data = "PlainProtectedValue!123".toByteArray(StandardCharsets.UTF_8)
+
+        // 直通：输出等于输入（内容拷贝，非同一实例）
+        val output = stream.processBytes(data)
+        assertArrayEquals(data, output)
+        assertTrue(output !== data)
+
+        // 无状态：连续两次变换均返回原文（真实流密码第二次会得到乱码）
+        val output2 = stream.processBytes(data)
+        assertArrayEquals(data, output2)
+
+        // 密钥流恒为零（受保护字段 Base64 解码后即明文，无需 XOR）
+        val randomBytes = stream.getRandomBytes(16)
+        assertArrayEquals(ByteArray(16), randomBytes)
     }
 }

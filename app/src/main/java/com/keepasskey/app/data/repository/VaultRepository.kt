@@ -55,6 +55,11 @@ interface VaultRepository {
     ): com.keepasskey.core.result.KdbxResult<Unit>
 
     /**
+     * 更改当前数据库的主密钥。
+     */
+    suspend fun changeMasterPassword(newPassword: CharArray): com.keepasskey.core.result.KdbxResult<Unit>
+
+    /**
      * 锁定当前密码库，清空内存凭据与活动树
      */
     suspend fun lockDatabase()
@@ -227,7 +232,7 @@ interface VaultRepository {
         webDomain: String?,
         username: String,
         passwordChars: CharArray
-    )
+    ): com.keepasskey.core.result.KdbxResult<Unit>
 
     /**
      * 按需读取单条凭据的 TOTP 配置原文（断点4 整改，编辑页回填用）。

@@ -59,8 +59,14 @@ object KdbxXmlTimeHelper {
      * 从 XML 字符串解析时间戳。
      * 若 [dateStr] 为 null 或 blank（元素缺失）返回 [defaultInstant]；
      * 若内容存在但格式不符合规范，抛出 [KdbxCorruptFileException]。
+     *
+     * P3-2 整改：缺省值由「当前时刻」改为 [Instant.EPOCH]（合理远古时间）。
+     * 原实现缺省取 now()，导致 <Times> 子元素缺失的文件在解析时被判定为「刚刚修改」，
+     * 三方合并中会虚假覆盖对端的 newer 判定（LastModificationTime 越新越胜出）。
+     * 缺失时间戳语义上属于「未知/远古」，取 EPOCH 后既不参与虚假胜出，
+     * 也保证后续写出（formatDate 编码 .NET Ticks）仍在合法值域内。
      */
-    fun parseDate(dateStr: String?, defaultInstant: Instant = Instant.now()): Instant {
+    fun parseDate(dateStr: String?, defaultInstant: Instant = Instant.EPOCH): Instant {
         if (dateStr.isNullOrBlank()) return defaultInstant
         val clean = dateStr.trim()
 

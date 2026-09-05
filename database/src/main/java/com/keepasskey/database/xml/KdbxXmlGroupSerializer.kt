@@ -44,6 +44,23 @@ object KdbxXmlGroupSerializer {
             KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.PREVIOUS_PARENT_GROUP, KdbxXmlValueUtil.encodeUuid(it))
         }
 
+        // 官方 Group 级 <Tags>（KeePass 2.51+，分号分隔，语义与条目 Tags 一致）
+        if (group.tags.isNotEmpty()) {
+            KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.TAGS, group.tags.joinToString("; "))
+        }
+
+        // 官方 Group 级 <CustomData>
+        if (group.customData.isNotEmpty()) {
+            writer.startElement(KdbxConstants.Xml.CUSTOM_DATA)
+            for ((key, value) in group.customData) {
+                writer.startElement(KdbxConstants.Xml.ITEM)
+                KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.KEY, key)
+                KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.VALUE, value)
+                writer.endElement()
+            }
+            writer.endElement()
+        }
+
         for (entry in group.entries) {
             KdbxXmlEntrySerializer.serialize(writer, entry, innerStreamCipher)
         }

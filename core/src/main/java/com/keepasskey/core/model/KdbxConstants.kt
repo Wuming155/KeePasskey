@@ -72,6 +72,12 @@ object KdbxConstants {
         val AES_256_CBC = KdbxUuid.fromHexString("31C1F2E6BF714350BE5805216AFC5AFF")
         val CHACHA20 = KdbxUuid.fromHexString("D6038A2B8B6F4CB5A524339A31DBB59A")
         val TWOFISH = KdbxUuid.fromHexString("AD68F29F576F4BB9A36AD47AF965346C")
+
+        /** ChaCha20 (RFC 7539) 加密 nonce 长度（字节）——官方 KeePass 2.61.1 ChaCha20Cipher 硬校验值 */
+        const val CHACHA20_NONCE_LENGTH: Int = 12
+
+        /** AES-256-CBC / Twofish-CBC 分组密码 IV 长度（字节） */
+        const val BLOCK_CIPHER_IV_LENGTH: Int = 16
     }
 
     /**
@@ -164,6 +170,7 @@ object KdbxConstants {
         const val MASTER_KEY_CHANGED = "MasterKeyChanged"
         const val MASTER_KEY_CHANGE_REC = "MasterKeyChangeRec"
         const val MASTER_KEY_CHANGE_FORCE = "MasterKeyChangeForce"
+        const val SETTINGS_CHANGED = "SettingsChanged"
         const val MEMORY_PROTECTION = "MemoryProtection"
         const val PROTECT_TITLE = "ProtectTitle"
         const val PROTECT_USER_NAME = "ProtectUserName"

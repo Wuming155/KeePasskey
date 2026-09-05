@@ -3,6 +3,7 @@ package com.keepasskey.crypto.stream
 import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.crypto.exception.CryptoException
 import com.keepasskey.crypto.hash.HashUtil
+import org.bouncycastle.crypto.CipherParameters
 import org.bouncycastle.crypto.StreamCipher
 import org.bouncycastle.crypto.engines.ChaCha7539Engine
 import org.bouncycastle.crypto.engines.Salsa20Engine
@@ -22,6 +23,12 @@ class InnerRandomStreamCipher(
 
     init {
         when (streamId) {
+            KdbxConstants.InnerRandomStream.NONE -> {
+                // P3-1 整改：InnerRandomStreamID = 0 (None) 为合法取值，表示无内层流加密。
+                // 受保护字段仅以 Base64 形态存储、不做 XOR 密钥流变换，直通透传即可；
+                // 原实现落入 else 分支直接抛异常，导致此类合法 KDBX4 库被拒绝打开。
+                cipher = NoopStreamCipher
+            }
             KdbxConstants.InnerRandomStream.CHACHA20 -> {
                 // KDBX 4: SHA-512(streamKey)，前 32 字节为 Key，随后 12 字节为 Nonce
                 val sha512 = HashUtil.sha512(streamKey)
@@ -75,5 +82,35 @@ class InnerRandomStreamCipher(
         val output = ByteArray(input.size)
         cipher.processBytes(input, 0, input.size, output, 0)
         return output
+    }
+}
+
+/**
+ * 直通（noop）流密码实现，对应 InnerRandomStreamID = 0 (None)：
+ * 不产生任何密钥流，processBytes 等价于返回输入字节数组的副本。
+ */
+private object NoopStreamCipher : StreamCipher {
+
+    override fun getAlgorithmName(): String = "None (pass-through)"
+
+    override fun init(forEncryption: Boolean, params: CipherParameters?) {
+        // 无状态直通实现，无需初始化参数
+    }
+
+    override fun returnByte(inByte: Byte): Byte = inByte
+
+    override fun processBytes(
+        inBytes: ByteArray,
+        inOff: Int,
+        len: Int,
+        outBytes: ByteArray,
+        outOff: Int
+    ): Int {
+        System.arraycopy(inBytes, inOff, outBytes, outOff, len)
+        return len
+    }
+
+    override fun reset() {
+        // 无状态，无需重置
     }
 }

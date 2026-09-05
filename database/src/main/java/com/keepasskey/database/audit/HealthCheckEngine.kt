@@ -44,18 +44,26 @@ object HealthCheckEngine {
      */
     fun analyzeEntries(entries: List<KdbxEntry>): List<EntryHealthIssue> {
         val issues = mutableListOf<EntryHealthIssue>()
-        val passwordCountMap = mutableMapOf<String, Int>()
+        // P1-1 整改：使用 SHA-256 哈希值而非明文密码建立重用索引，绝不构建全库明文密码表
+        val passwordHashCountMap = mutableMapOf<String, Int>()
 
-        // 统计密码重用频率
+        // 统计密码重用频率（基于哈希，用毕显式清零明文字节）
         for (entry in entries) {
-            val pass = entry.password?.readString().orEmpty()
-            if (pass.isNotEmpty()) {
-                passwordCountMap[pass] = (passwordCountMap[pass] ?: 0) + 1
+            val passProtected = entry.password
+            if (passProtected != null && passProtected.length > 0) {
+                val passBytes = passProtected.readUtf8()
+                try {
+                    if (passBytes.isNotEmpty()) {
+                        val hashHex = com.keepasskey.crypto.hash.HashUtil.sha256(passBytes).joinToString("") { "%02x".format(it) }
+                        passwordHashCountMap[hashHex] = (passwordHashCountMap[hashHex] ?: 0) + 1
+                    }
+                } finally {
+                    java.util.Arrays.fill(passBytes, 0.toByte())
+                }
             }
         }
 
         for (entry in entries) {
-            val pass = entry.password?.readString().orEmpty()
             val id = entry.id.toHexString()
 
             // 密码时效性：条目声明了过期时间且已过期（文档承诺的 EXPIRED 风险等级真实落地）
@@ -71,7 +79,8 @@ object HealthCheckEngine {
                 )
             }
 
-            if (pass.isEmpty()) {
+            val passProtected = entry.password
+            if (passProtected == null || passProtected.length == 0) {
                 issues.add(
                     EntryHealthIssue(
                         entryId = id,
@@ -84,21 +93,37 @@ object HealthCheckEngine {
                 continue
             }
 
-            // 检查常见弱口令与长度
-            if (pass.length < 8 || COMMON_WEAK_PASSWORDS.contains(pass.lowercase())) {
+            // 检查常见弱口令与长度（单条临时读取并在 finally 中擦除）
+            val passChars = passProtected.readChars()
+            val passBytes = passProtected.readUtf8()
+            var passLength = passChars.size
+            var isWeak = false
+            var hashHex = ""
+            try {
+                val passStr = String(passChars)
+                if (passLength < 8 || COMMON_WEAK_PASSWORDS.contains(passStr.lowercase())) {
+                    isWeak = true
+                }
+                hashHex = com.keepasskey.crypto.hash.HashUtil.sha256(passBytes).joinToString("") { "%02x".format(it) }
+            } finally {
+                java.util.Arrays.fill(passChars, '0')
+                java.util.Arrays.fill(passBytes, 0.toByte())
+            }
+
+            if (isWeak) {
                 issues.add(
                     EntryHealthIssue(
                         entryId = id,
                         title = entry.title,
                         username = entry.userName,
                         riskLevel = PasswordRiskLevel.WEAK,
-                        description = "密码过短或属于常见弱密码（长度: ${pass.length}，建议 ≥ 12 位）"
+                        description = "密码过短或属于常见弱密码（长度: ${passLength}，建议 ≥ 12 位）"
                     )
                 )
             }
 
-            // 检查多处复用
-            val reuseCount = passwordCountMap[pass] ?: 0
+            // 检查多处复用（按哈希查重）
+            val reuseCount = passwordHashCountMap[hashHex] ?: 0
             if (reuseCount > 1) {
                 issues.add(
                     EntryHealthIssue(

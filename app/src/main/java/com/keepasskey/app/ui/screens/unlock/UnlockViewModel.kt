@@ -177,7 +177,9 @@ class UnlockViewModel @Inject constructor(
      */
     fun unlock() {
         viewModelScope.launch {
-            if (passwordChars.isEmpty()) {
+            // P1-10：已选择密钥文件时空密码合法（仅密钥文件解锁，对齐官方 KeePass
+            // 解锁框对空密码不添加密码分量的语义）；密码与密钥文件均缺失才拦截
+            if (passwordChars.isEmpty() && keyFileData == null) {
                 _uiState.update { it.copy(errorMessage = UiMessage(R.string.unlock_error_empty_password)) }
                 return@launch
             }
@@ -430,7 +432,10 @@ class UnlockViewModel @Inject constructor(
                         viewModelScope.launch {
                             try {
                                 val decryptedBytes = cipher.doFinal(cred.second)
-                                val chars = Charsets.UTF_8.decode(ByteBuffer.wrap(decryptedBytes)).array()
+                                // P1-13 整改：精确按 CharBuffer.remaining() 拷贝字符，杜绝后备数组尾零残留导致非 ASCII 主密码解锁失败
+                                val charBuf = Charsets.UTF_8.decode(ByteBuffer.wrap(decryptedBytes))
+                                val chars = CharArray(charBuf.remaining())
+                                charBuf.get(chars)
                                 try {
                                     when (val unlockResult = vaultRepository.unlockActiveDatabase(chars)) {
                                         is KdbxResult.Success -> {

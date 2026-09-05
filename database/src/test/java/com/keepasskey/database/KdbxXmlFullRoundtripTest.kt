@@ -276,4 +276,139 @@ class KdbxXmlFullRoundtripTest {
             parser.parse(ByteArrayInputStream(corruptXml.toByteArray()))
         }
     }
+
+    /**
+     * P1-8 回归：7 个官方 Meta 字段（DefaultUserName / MaintenanceHistoryDays / Color /
+     * MasterKeyChanged / MasterKeyChangeRec / MasterKeyChangeForce / SettingsChanged）
+     * 及 DefaultUserNameChanged 完整往返零丢失。
+     */
+    @Test
+    fun testMetaOfficialFieldsRoundtrip() {
+        val defaultUserNameChanged = Instant.parse("2024-04-01T09:15:00Z")
+        val masterKeyChanged = Instant.parse("2024-04-02T18:45:00Z")
+        val settingsChanged = Instant.parse("2024-04-03T08:00:00Z")
+
+        val originalDb = KdbxDatabase(
+            header = KdbxHeader.createDefault(useArgon2 = false),
+            rootGroup = KdbxGroup(name = "Root"),
+            defaultUserName = "alice@example.com",
+            defaultUserNameChanged = defaultUserNameChanged,
+            maintenanceHistoryDays = 180,
+            color = "Firebrick",
+            masterKeyChanged = masterKeyChanged,
+            masterKeyChangeRec = 365,
+            masterKeyChangeForce = 730,
+            settingsChanged = settingsChanged
+        )
+
+        val bos = ByteArrayOutputStream()
+        KdbxFile.save(bos, originalDb, testPassword)
+        val loadedDb = KdbxFile.load(ByteArrayInputStream(bos.toByteArray()), testPassword)
+
+        assertEquals("alice@example.com", loadedDb.defaultUserName)
+        assertEquals(defaultUserNameChanged, loadedDb.defaultUserNameChanged)
+        assertEquals(180, loadedDb.maintenanceHistoryDays)
+        assertEquals("Firebrick", loadedDb.color)
+        assertEquals(masterKeyChanged, loadedDb.masterKeyChanged)
+        assertEquals(365, loadedDb.masterKeyChangeRec)
+        assertEquals(730, loadedDb.masterKeyChangeForce)
+        assertEquals(settingsChanged, loadedDb.settingsChanged)
+    }
+
+    /**
+     * P1-8 回归：分组 <Tags> 与 <CustomData>（含嵌套子分组）往返零丢失。
+     */
+    @Test
+    fun testGroupTagsAndCustomDataRoundtrip() {
+        val subGroup = KdbxGroup(
+            name = "TaggedSubGroup",
+            tags = listOf("工作", "重要", "同步"),
+            customData = mapOf("GroupKey1" to "GroupVal1", "GroupKey2" to "GroupVal2")
+        )
+        val rootGroup = KdbxGroup(
+            name = "Root",
+            tags = listOf("root-tag"),
+            customData = mapOf("RootKey" to "RootVal"),
+            subgroups = listOf(subGroup)
+        )
+        val db = KdbxDatabase(
+            header = KdbxHeader.createDefault(useArgon2 = false),
+            rootGroup = rootGroup
+        )
+
+        val bos = ByteArrayOutputStream()
+        KdbxFile.save(bos, db, testPassword)
+        val loadedDb = KdbxFile.load(ByteArrayInputStream(bos.toByteArray()), testPassword)
+
+        assertEquals(listOf("root-tag"), loadedDb.rootGroup.tags)
+        assertEquals(mapOf("RootKey" to "RootVal"), loadedDb.rootGroup.customData)
+
+        val loadedSub = loadedDb.rootGroup.subgroups[0]
+        assertEquals("TaggedSubGroup", loadedSub.name)
+        assertEquals(listOf("工作", "重要", "同步"), loadedSub.tags)
+        assertEquals(mapOf("GroupKey1" to "GroupVal1", "GroupKey2" to "GroupVal2"), loadedSub.customData)
+    }
+
+    /**
+     * P3-3 回归：多行文本中的 CRLF（与孤立 CR）经 &#xD; 字符引用写出后往返一致，
+     * 不被 XML 1.0 行尾规范化静默折叠为纯 LF。
+     */
+    @Test
+    fun testCrlfTextPreservedRoundtrip() {
+        val notesText = "第一行\r\n第二行\n第三行\r第四行\r\n尾部"
+        val groupNotes = "分组备注A\r\n分组备注B\rlone-cr"
+
+        val entry = KdbxEntry(
+            fields = mapOf(
+                KdbxConstants.Fields.TITLE to ProtectedString("CrlfEntry", isProtected = false),
+                KdbxConstants.Fields.NOTES to ProtectedString(notesText, isProtected = false)
+            )
+        )
+        val rootGroup = KdbxGroup(name = "Root", notes = groupNotes, entries = listOf(entry))
+        val db = KdbxDatabase(
+            header = KdbxHeader.createDefault(useArgon2 = false),
+            rootGroup = rootGroup
+        )
+
+        val bos = ByteArrayOutputStream()
+        KdbxFile.save(bos, db, testPassword)
+        val loadedDb = KdbxFile.load(ByteArrayInputStream(bos.toByteArray()), testPassword)
+
+        // 条目 Notes（未受保护明文字段）
+        assertEquals(notesText, loadedDb.rootGroup.entries[0].fields[KdbxConstants.Fields.NOTES]?.readString())
+        // 分组 Notes
+        assertEquals(groupNotes, loadedDb.rootGroup.notes)
+    }
+
+    /**
+     * P3-2 回归：<Times> 子元素缺失时按「合理远古时间」（Instant.EPOCH）解析，
+     * 不再默认 now()——三方合并中缺失时间不得被误判为「刚刚修改」而虚假覆盖对端。
+     */
+    @Test
+    fun testMissingTimesSubElementsDefaultToEpoch() {
+        val groupUuidBase64 = java.util.Base64.getEncoder().encodeToString(ByteArray(16))
+        val xml = """
+            <KeePassFile>
+                <Root>
+                    <Group>
+                        <UUID>$groupUuidBase64</UUID>
+                        <Name>TimesMissing</Name>
+                        <Times>
+                            <Expires>False</Expires>
+                        </Times>
+                    </Group>
+                </Root>
+            </KeePassFile>
+        """.trimIndent()
+
+        val parser = KdbxXmlParser(null)
+        val result = parser.parse(ByteArrayInputStream(xml.toByteArray()))
+
+        assertEquals(Instant.EPOCH, result.rootGroup.times.creationTime)
+        assertEquals(Instant.EPOCH, result.rootGroup.times.lastModificationTime)
+        assertEquals(Instant.EPOCH, result.rootGroup.times.lastAccessTime)
+        assertEquals(Instant.EPOCH, result.rootGroup.times.expiryTime)
+        assertEquals(Instant.EPOCH, result.rootGroup.times.locationChanged)
+        assertFalse(result.rootGroup.times.expires)
+    }
 }

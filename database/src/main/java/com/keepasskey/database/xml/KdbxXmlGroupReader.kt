@@ -10,6 +10,7 @@ import com.keepasskey.core.model.KdbxTimes
 import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.core.security.ProtectedString
 import com.keepasskey.crypto.stream.InnerRandomStreamCipher
+import com.keepasskey.database.exception.KdbxCorruptFileException
 import com.keepasskey.database.file.InnerHeader
 import org.xml.sax.Attributes
 import java.util.Base64
@@ -38,6 +39,8 @@ internal class GroupNode(
     private var enableSearching: Boolean? = null
     private var lastTopVisibleEntry: KdbxUuid? = null
     private var previousParentGroup: KdbxUuid? = null
+    private var tagsStr: String? = null
+    private val customData = mutableMapOf<String, String>()
     private val entries = mutableListOf<KdbxEntry>()
     private val subgroups = mutableListOf<KdbxGroup>()
 
@@ -55,6 +58,8 @@ internal class GroupNode(
             KdbxConstants.Xml.ENABLE_SEARCHING -> TextNode { enableSearching = parseNullableBoolean(it) }
             KdbxConstants.Xml.LAST_TOP_VISIBLE_ENTRY -> TextNode { lastTopVisibleEntry = KdbxXmlValueUtil.parseOptionalUuid(it) }
             KdbxConstants.Xml.PREVIOUS_PARENT_GROUP -> TextNode { previousParentGroup = KdbxXmlValueUtil.parseOptionalUuid(it) }
+            KdbxConstants.Xml.TAGS -> TextNode { tagsStr = it }
+            KdbxConstants.Xml.CUSTOM_DATA -> CustomDataItemsNode { customData.putAll(it) }
             KdbxConstants.Xml.ENTRY -> EntryNode(selfUuid, innerStreamCipher, binariesPool) { entries.add(it) }
             KdbxConstants.Xml.GROUP -> GroupNode(selfUuid, innerStreamCipher, binariesPool) { subgroups.add(it) }
             else -> IgnoredNode()
@@ -62,6 +67,12 @@ internal class GroupNode(
     }
 
     override fun end() {
+        // 标签解析语义与条目 <Tags> 一致（分号分隔 + trim + 去空）
+        val tags = tagsStr?.split(";")
+            ?.map { it.trim() }
+            ?.filter { it.isNotEmpty() }
+            .orEmpty()
+
         onDone(
             KdbxGroup(
                 id = requireUuid(selfUuid.value, "Group"),
@@ -77,6 +88,8 @@ internal class GroupNode(
                 enableSearching = enableSearching,
                 lastTopVisibleEntry = lastTopVisibleEntry,
                 previousParentGroup = previousParentGroup,
+                tags = tags,
+                customData = customData.toMap(),
                 entries = entries.toList(),
                 subgroups = subgroups.toList()
             )
@@ -251,10 +264,15 @@ private class StringNode(
     override fun end() {
         val value = rawValue ?: return
         val protectedString = if (isProtected && innerStreamCipher != null) {
+            // 受保护值在写入侧恒为合法 Base64（官方与本项目序列化器均单行编码），
+            // 解码前先 trim() 去除 XML 缩进/换行空白。
+            // 解码失败说明文件已损坏：严禁降级为 value.toByteArray()——其字节数与
+            // Base64 解码结果不一致，会使内层流密码 keystream 错位，级联污染后续
+            // 所有受保护字段的解密结果（全部变成乱码），必须立即中断解析。
             val decoded = try {
-                Base64.getDecoder().decode(value)
-            } catch (_: Exception) {
-                value.toByteArray()
+                Base64.getDecoder().decode(value.trim())
+            } catch (e: IllegalArgumentException) {
+                throw KdbxCorruptFileException("无法解码受保护字段 Base64 数据: key=$key", e)
             }
             val plainBytes = innerStreamCipher.processBytes(decoded)
             ProtectedString(isProtected = true, bytes = plainBytes)

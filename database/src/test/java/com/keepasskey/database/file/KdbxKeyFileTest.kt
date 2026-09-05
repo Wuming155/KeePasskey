@@ -10,39 +10,40 @@ import java.security.MessageDigest
 /**
  * KdbxKeyFile 单元测试：密钥文件官方解析梯子（XML v1.0 Base64 / v2.0 Hex+Hash 校验 /
  * 裸 32 字节 / 64 位 hex 文本 / 任意二进制整文件 SHA-256）。
- * XML v2.0 向量取自真实 KeePass 2.x 生成的 .keyx 密钥文件（111.keyx）。
+ * XML v2.0 向量为测试专用的合成密钥（P0-2 凭据泄露整改：不使用任何真实密钥文件内容；
+ * Hash 属性 = 合成密钥 SHA-256 前 4 字节，按官方同一公式计算）。
  */
 class KdbxKeyFileTest {
 
     companion object {
-        /** 真实 KeePass 2.x 生成的 v2.0 XML 密钥文件（与测试库配套的原始文件内容） */
-        private const val REAL_V2_KEYFILE_XML = """<?xml version="1.0" encoding="UTF-8"?>
+        /** 测试专用合成 v2.0 XML 密钥文件（32 字节测试密钥 = 0x01..0x20 顺序十六进制串） */
+        private const val TEST_V2_KEYFILE_XML = """<?xml version="1.0" encoding="UTF-8"?>
 <KeyFile>
     <Meta>
         <Version>2.0</Version>
     </Meta>
     <Key>
-        <Data Hash="F6BC2010">
-            7DDC70C9 FED76DEE 09DBFCE3 FA317E7F
-            200C71F2 3651617F 5225F44C B212ABDE
+        <Data Hash="AE216C2E">
+            01020304 05060708 090A0B0C 0D0E0F10
+            11121314 15161718 191A1B1C 1D1E1F20
         </Data>
     </Key>
 </KeyFile>
 """
 
-        private const val REAL_V2_KEY_HEX = "7DDC70C9FED76DEE09DBFCE3FA317E7F200C71F23651617F5225F44CB212ABDE"
+        private const val TEST_V2_KEY_HEX = "0102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F20"
     }
 
     @Test
-    fun `v2_0 xml keyfile with real world vector extracts hex decoded key`() {
-        val key = KdbxKeyFile.extractKey(REAL_V2_KEYFILE_XML.toByteArray(Charsets.UTF_8))
+    fun `v2_0 xml keyfile with synthetic vector extracts hex decoded key`() {
+        val key = KdbxKeyFile.extractKey(TEST_V2_KEYFILE_XML.toByteArray(Charsets.UTF_8))
         assertEquals(32, key.size)
-        assertEquals(REAL_V2_KEY_HEX, key.joinToString("") { "%02X".format(it) })
+        assertEquals(TEST_V2_KEY_HEX, key.joinToString("") { "%02X".format(it) })
     }
 
     @Test
     fun `v2_0 xml keyfile with tampered hash attribute is rejected`() {
-        val tampered = REAL_V2_KEYFILE_XML.replace("F6BC2010", "F6BC2011")
+        val tampered = TEST_V2_KEYFILE_XML.replace("AE216C2E", "AE216C2F")
         assertThrows(KdbxCorruptFileException::class.java) {
             KdbxKeyFile.extractKey(tampered.toByteArray(Charsets.UTF_8))
         }
@@ -67,7 +68,7 @@ class KdbxKeyFileTest {
         val xml = """<?xml version="1.0" encoding="UTF-8"?>
 <KeyFile>
     <Meta><Version>2.0</Version></Meta>
-    <Key><Data>ZZZZ70C9 FED76DEE 09DBFCE3 FA317E7F 200C71F2 3651617F 5225F44C B212ABDE</Data></Key>
+    <Key><Data>ZZ020304 05060708 090A0B0C 0D0E0F10 11121314 15161718 191A1B1C 1D1E1F20</Data></Key>
 </KeyFile>
 """
         assertThrows(KdbxCorruptFileException::class.java) {
@@ -97,17 +98,17 @@ class KdbxKeyFileTest {
 
     @Test
     fun `64 char hex text file with whitespace is decoded`() {
-        val text = "7D DC 70 C9 FE D7 6D EE 09 DB FC E3 FA 31 7E 7F\n" +
-                "20 0C 71 F2 36 51 61 7F 52 25 F4 4C B2 12 AB DE\n"
+        val text = "01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F 10\n" +
+                "11 12 13 14 15 16 17 18 19 1A 1B 1C 1D 1E 1F 20\n"
         val key = KdbxKeyFile.extractKey(text.toByteArray(Charsets.UTF_8))
-        assertEquals(REAL_V2_KEY_HEX, key.joinToString("") { "%02X".format(it) })
+        assertEquals(TEST_V2_KEY_HEX, key.joinToString("") { "%02X".format(it) })
     }
 
     @Test
     fun `uppercase hex text file is decoded case insensitively`() {
-        val text = REAL_V2_KEY_HEX.lowercase()
+        val text = TEST_V2_KEY_HEX.lowercase()
         val key = KdbxKeyFile.extractKey(text.toByteArray(Charsets.UTF_8))
-        assertEquals(REAL_V2_KEY_HEX, key.joinToString("") { "%02X".format(it) })
+        assertEquals(TEST_V2_KEY_HEX, key.joinToString("") { "%02X".format(it) })
     }
 
     @Test
@@ -120,9 +121,9 @@ class KdbxKeyFileTest {
 
     @Test
     fun `utf8 bom prefixed xml keyfile still parses`() {
-        val xml = REAL_V2_KEYFILE_XML.toByteArray(Charsets.UTF_8)
+        val xml = TEST_V2_KEYFILE_XML.toByteArray(Charsets.UTF_8)
         val withBom = byteArrayOf(0xEF.toByte(), 0xBB.toByte(), 0xBF.toByte()) + xml
         val key = KdbxKeyFile.extractKey(withBom)
-        assertEquals(REAL_V2_KEY_HEX, key.joinToString("") { "%02X".format(it) })
+        assertEquals(TEST_V2_KEY_HEX, key.joinToString("") { "%02X".format(it) })
     }
 }

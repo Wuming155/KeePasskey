@@ -522,6 +522,13 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    /**
+     * P0-3 整改：真实调用仓库修改当前数据库的主密钥
+     */
+    suspend fun changeMasterPassword(newPasswordChars: CharArray): com.keepasskey.core.result.KdbxResult<Unit> {
+        return vaultRepository.changeMasterPassword(newPasswordChars)
+    }
+
     // ================= M6 整改：KDF 设备自适应基准真实接线 =================
 
     private val kdfBenchmarkFlow = MutableStateFlow(KdfBenchmarkUiState())

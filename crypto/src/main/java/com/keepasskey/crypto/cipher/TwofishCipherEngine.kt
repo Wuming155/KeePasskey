@@ -24,6 +24,7 @@ class TwofishCipherEngine : CipherEngine {
 
     override val cipherUuid: KdbxUuid = KdbxConstants.Cipher.TWOFISH
     override val name: String = "Twofish"
+    override val ivLength: Int = KdbxConstants.Cipher.BLOCK_CIPHER_IV_LENGTH
 
     override fun encrypt(key: ByteArray, iv: ByteArray, data: ByteArray): ByteArray {
         return try {

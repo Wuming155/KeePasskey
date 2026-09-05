@@ -43,13 +43,29 @@ class ProtectedString(
 
     constructor(text: String, isProtected: Boolean = true) : this(
         isProtected = isProtected,
-        bytes = text.toByteArray(StandardCharsets.UTF_8)
+        bytes = text.toByteArray(StandardCharsets.UTF_8),
+        owned = true
     )
 
     constructor(chars: CharArray, isProtected: Boolean = true) : this(
         isProtected = isProtected,
-        bytes = charsToUtf8(chars)
+        bytes = charsToUtf8(chars),
+        owned = true
     )
+
+    /**
+     * P0-7 整改：自有明文中间量构造通道。
+     * String / CharArray 便捷构造在内部生成的 UTF-8 明文副本归本构造通道所有——
+     * 经主构造完成密文驻留（或明文克隆）后在此立即清零，杜绝明文副本滞留堆内等待 GC。
+     * 主构造的 bytes 入参保持既有借用语义（归调用方所有，不由本类清零）。
+     */
+    private constructor(isProtected: Boolean, bytes: ByteArray, owned: Boolean) : this(
+        isProtected = isProtected,
+        bytes = bytes
+    ) {
+        check(owned) { "仅自有中间量允许走此构造通道" }
+        Arrays.fill(bytes, 0.toByte())
+    }
 
     val length: Int
         get() {
@@ -71,6 +87,9 @@ class ProtectedString(
             val cb = StandardCharsets.UTF_8.decode(ByteBuffer.wrap(plain))
             val chars = CharArray(cb.remaining())
             cb.get(chars)
+            // P0-7 整改：解码器内部 CharBuffer 同样承载过明文，一并清零，
+            // 明文副本仅存活于返回给调用方的 CharArray
+            if (cb.hasArray()) Arrays.fill(cb.array(), '0')
             chars
         } finally {
             Arrays.fill(plain, 0.toByte())
@@ -167,11 +186,11 @@ class ProtectedString(
     }
 
     override fun toString(): String {
-        return if (isProtected) {
-            "ProtectedString(protected=true, len=${if (isCleared) 0 else data.size})"
-        } else {
-            readString()
-        }
+        // P2-4 整改：toString 绝不返回明文——无论 isProtected 与否仅返回类型与长度描述。
+        // 防止日志、字符串模板、数据类 toString 等隐式转换物化敏感内容（含
+        // MemoryProtection 允许 ProtectPassword=False 的非保护字段）；
+        // 明文一律经显式 readChars()/readUtf8()/readString() 按需读取
+        return "ProtectedString(protected=$isProtected, len=${if (isCleared) 0 else data.size})"
     }
 
     companion object {
@@ -181,6 +200,8 @@ class ProtectedString(
             val bb = StandardCharsets.UTF_8.encode(CharBuffer.wrap(chars))
             val bytes = ByteArray(bb.remaining())
             bb.get(bytes)
+            // P0-7 整改：编码器内部 ByteBuffer 同样承载过明文，一并清零
+            if (bb.hasArray()) Arrays.fill(bb.array(), 0.toByte())
             return bytes
         }
     }

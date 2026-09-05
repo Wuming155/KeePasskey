@@ -99,6 +99,20 @@ data class KdbxHeader(
     companion object {
         private val secureRandom = SecureRandom()
 
+        /**
+         * 外层 Header 单字段长度安全上限（1 MiB）。
+         * 头部位于 SHA-256 / HMAC 认证之前，fieldLen 完全不可信（P0-5）：
+         * 合法字段远小于此上限（End of Header 4B、种子 32B、IV 16B、KDF 参数与种子数 KB 内），
+         * 超限长度在分配前即按损坏文件拒绝。
+         */
+        internal const val MAX_HEADER_FIELD_BYTES = 1024 * 1024
+
+        /** MasterSeed 合法长度（官方规范：32 字节） */
+        private const val MASTER_SEED_SIZE = 32
+
+        /** CompressionFlags 字段合法长度（小端 Int32） */
+        private const val COMPRESSION_FIELD_SIZE = 4
+
         /** Argon2 内存下界：官方最小合法工作区（1 MB） */
         private const val ARGON2_MIN_MEMORY_BYTES = 1024L * 1024
 
@@ -119,7 +133,15 @@ data class KdbxHeader(
             useArgon2: Boolean = true
         ): KdbxHeader {
             val masterSeed = ByteArray(32)
-            val encryptionIv = ByteArray(16)
+            // IV 长度按算法官方规范生成（P2-8 配套）：ChaCha20 → 12B nonce，AES/Twofish → 16B，
+            // 保证新建文件天然通过 [validateEncryptionIvSize] 校验
+            val encryptionIv = ByteArray(
+                if (cipherUuid == KdbxConstants.Cipher.CHACHA20) {
+                    KdbxConstants.Cipher.CHACHA20_NONCE_LENGTH
+                } else {
+                    KdbxConstants.Cipher.BLOCK_CIPHER_IV_LENGTH
+                }
+            )
             secureRandom.nextBytes(masterSeed)
             secureRandom.nextBytes(encryptionIv)
 
@@ -191,7 +213,15 @@ data class KdbxHeader(
                 recordingStream.write(fieldLenBytes)
                 val fieldLen = LittleEndianUtil.bytesToInt(fieldLenBytes)
 
-                val fieldData = LittleEndianUtil.readBytes(inputStream, fieldLen)
+                // P0-5：fieldLen 来自未认证输入，必须在 ByteArray 分配前通过边界裁决，
+                // 否则恶意长度（0xFFFFFFFF 负数 / 0x7FFFFFFF 超大值）直接造成崩溃或 OOM
+                if (fieldLen < 0 || fieldLen > MAX_HEADER_FIELD_BYTES) {
+                    throw KdbxCorruptFileException(
+                        "头部字段长度非法或超过安全上限: fieldId=$fieldIdByte, length=$fieldLen（允许 0 ~ $MAX_HEADER_FIELD_BYTES）"
+                    )
+                }
+
+                val fieldData = LittleEndianUtil.readBytes(inputStream, fieldLen, MAX_HEADER_FIELD_BYTES)
                 recordingStream.write(fieldData)
 
                 val fieldId = fieldIdByte.toByte()
@@ -201,12 +231,32 @@ data class KdbxHeader(
 
                 when (fieldId) {
                     KdbxConstants.HeaderFieldId.CIPHER_ID -> {
+                        if (fieldData.size != KdbxUuid.UUID_SIZE) {
+                            throw KdbxCorruptFileException(
+                                "CipherID 头字段长度非法: ${fieldData.size}（期望 ${KdbxUuid.UUID_SIZE}）"
+                            )
+                        }
                         cipherUuid = KdbxUuid(fieldData)
                     }
                     KdbxConstants.HeaderFieldId.COMPRESSION_FLAGS -> {
+                        if (fieldData.size != COMPRESSION_FIELD_SIZE) {
+                            throw KdbxCorruptFileException(
+                                "CompressionFlags 头字段长度非法: ${fieldData.size}（期望 $COMPRESSION_FIELD_SIZE）"
+                            )
+                        }
                         compression = LittleEndianUtil.bytesToInt(fieldData)
+                        if (compression != KdbxConstants.Compression.NONE &&
+                            compression != KdbxConstants.Compression.GZIP
+                        ) {
+                            throw KdbxCorruptFileException("未知的压缩算法标识: $compression")
+                        }
                     }
                     KdbxConstants.HeaderFieldId.MASTER_SEED -> {
+                        if (fieldData.size != MASTER_SEED_SIZE) {
+                            throw KdbxCorruptFileException(
+                                "MasterSeed 头字段长度非法: ${fieldData.size}（期望 $MASTER_SEED_SIZE）"
+                            )
+                        }
                         masterSeed = fieldData
                     }
                     KdbxConstants.HeaderFieldId.ENCRYPTION_IV -> {
@@ -233,7 +283,31 @@ data class KdbxHeader(
                 publicCustomData = publicCustomData
             )
 
+            // P2-8：EncryptionIV 合法长度依赖 CipherID 字段，且字段出现顺序不作保证，
+            // 必须在全部字段解析完成后统一裁决
+            validateEncryptionIvSize(header.cipherUuid, header.encryptionIv)
+
             return Pair(header, recordingStream.toByteArray())
+        }
+
+        /**
+         * 外层 Header 字段间语义校验（P2-8）：
+         * 按官方规范校验 EncryptionIV 长度——ChaCha20 为 12 字节、AES-256-CBC / Twofish 为 16 字节；
+         * 未知加密算法不在本校验范围（由 CipherFactory 在解密期以类型化异常裁决）。
+         */
+        internal fun validateEncryptionIvSize(cipherUuid: KdbxUuid, encryptionIv: ByteArray) {
+            val expectedSize = when (cipherUuid) {
+                KdbxConstants.Cipher.CHACHA20 -> KdbxConstants.Cipher.CHACHA20_NONCE_LENGTH
+                KdbxConstants.Cipher.AES_256_CBC, KdbxConstants.Cipher.TWOFISH ->
+                    KdbxConstants.Cipher.BLOCK_CIPHER_IV_LENGTH
+                else -> return
+            }
+            if (encryptionIv.size != expectedSize) {
+                throw KdbxCorruptFileException(
+                    "EncryptionIV 头字段长度非法: ${encryptionIv.size}" +
+                            "（算法 ${cipherUuid.toFormattedString()} 期望 $expectedSize）"
+                )
+            }
         }
 
         private fun writeField(outputStream: OutputStream, fieldId: Byte, data: ByteArray) {

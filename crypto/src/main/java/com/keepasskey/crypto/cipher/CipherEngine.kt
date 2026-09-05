@@ -11,6 +11,13 @@ interface CipherEngine {
     val cipherUuid: KdbxUuid
     val name: String
 
+    /**
+     * 该算法要求的 EncryptionIV / Nonce 长度（字节）。
+     * KDBX4 规范要求 Header 字段 7 的长度等于所选算法的 IV 长度
+     * （ChaCha20 = 12，AES-256-CBC / Twofish = 16，对齐官方 KeePass 2.61.1 各 Cipher 构造器硬校验）。
+     */
+    val ivLength: Int
+
     fun encrypt(key: ByteArray, iv: ByteArray, data: ByteArray): ByteArray
     fun decrypt(key: ByteArray, iv: ByteArray, data: ByteArray): ByteArray
 

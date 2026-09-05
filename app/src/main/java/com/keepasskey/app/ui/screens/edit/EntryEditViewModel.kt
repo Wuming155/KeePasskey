@@ -23,7 +23,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.util.UUID
 import javax.inject.Inject
-import kotlin.random.Random
+import java.security.SecureRandom
 
 /**
  * 编辑页单次事件
@@ -170,8 +170,9 @@ class EntryEditViewModel @Inject constructor(
         if (state.useSymbols) pool += symbols
         if (pool.isEmpty()) pool = lower
 
+        val secureRandom = SecureRandom()
         val newPassword = (1..state.passLength.toInt())
-            .map { pool[Random.nextInt(pool.length)] }
+            .map { pool[secureRandom.nextInt(pool.length)] }
             .joinToString("")
 
         _uiState.update { it.copy(password = newPassword, isDirty = true) }

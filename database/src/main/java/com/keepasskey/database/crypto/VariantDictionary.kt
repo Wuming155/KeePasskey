@@ -1,5 +1,6 @@
 package com.keepasskey.database.crypto
 
+import com.keepasskey.database.exception.KdbxCorruptFileException
 import com.keepasskey.database.io.LittleEndianUtil
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
@@ -29,7 +30,9 @@ class VariantDictionary {
         return when (val value = item.value) {
             is Int -> value.toLong() and 0xFFFFFFFFL
             is Long -> value and 0xFFFFFFFFL
-            else -> throw IOException("VariantDictionary 类型错误: $key 期望 UInt32")
+            else -> throw KdbxCorruptFileException(
+                "VariantDictionary 类型错误: $key 期望 UInt32，实际 ${typeNameOf(item.value)}"
+            )
         }
     }
 
@@ -43,7 +46,9 @@ class VariantDictionary {
         return when (val value = item.value) {
             is Long -> value
             is Int -> value.toLong() and 0xFFFFFFFFL
-            else -> throw IOException("VariantDictionary 类型错误: $key 期望 UInt64")
+            else -> throw KdbxCorruptFileException(
+                "VariantDictionary 类型错误: $key 期望 UInt64，实际 ${typeNameOf(item.value)}"
+            )
         }
     }
 
@@ -53,7 +58,15 @@ class VariantDictionary {
 
     fun getBool(key: String): Boolean? {
         val item = map[key] ?: return null
-        return item.value as Boolean
+        // 类型宽容（P2-6）：数值项按非零即真自适应，杜绝 as Boolean 的 ClassCastException
+        return when (val value = item.value) {
+            is Boolean -> value
+            is Int -> value != 0
+            is Long -> value != 0L
+            else -> throw KdbxCorruptFileException(
+                "VariantDictionary 类型错误: $key 期望 Bool，实际 ${typeNameOf(item.value)}"
+            )
+        }
     }
 
     fun setInt32(key: String, value: Int) {
@@ -65,7 +78,9 @@ class VariantDictionary {
         return when (val value = item.value) {
             is Int -> value
             is Long -> value.toInt()
-            else -> throw IOException("VariantDictionary 类型错误: $key 期望 Int32")
+            else -> throw KdbxCorruptFileException(
+                "VariantDictionary 类型错误: $key 期望 Int32，实际 ${typeNameOf(item.value)}"
+            )
         }
     }
 
@@ -78,7 +93,9 @@ class VariantDictionary {
         return when (val value = item.value) {
             is Long -> value
             is Int -> value.toLong()
-            else -> throw IOException("VariantDictionary 类型错误: $key 期望 Int64")
+            else -> throw KdbxCorruptFileException(
+                "VariantDictionary 类型错误: $key 期望 Int64，实际 ${typeNameOf(item.value)}"
+            )
         }
     }
 
@@ -88,7 +105,13 @@ class VariantDictionary {
 
     fun getString(key: String): String? {
         val item = map[key] ?: return null
-        return item.value as String
+        // P2-6：杜绝 as String 的 ClassCastException，类型不符按损坏文件裁决
+        return when (val value = item.value) {
+            is String -> value
+            else -> throw KdbxCorruptFileException(
+                "VariantDictionary 类型错误: $key 期望 String，实际 ${typeNameOf(item.value)}"
+            )
+        }
     }
 
     fun setByteArray(key: String, value: ByteArray) {
@@ -97,7 +120,13 @@ class VariantDictionary {
 
     fun getByteArray(key: String): ByteArray? {
         val item = map[key] ?: return null
-        return (item.value as ByteArray).clone()
+        // P2-6：杜绝 as ByteArray 的 ClassCastException，类型不符按损坏文件裁决
+        return when (val value = item.value) {
+            is ByteArray -> value.clone()
+            else -> throw KdbxCorruptFileException(
+                "VariantDictionary 类型错误: $key 期望 ByteArray，实际 ${typeNameOf(item.value)}"
+            )
+        }
     }
 
     fun containsKey(key: String): Boolean = map.containsKey(key)
@@ -163,6 +192,15 @@ class VariantDictionary {
         const val TYPE_STRING: Byte = 0x18
         const val TYPE_BYTE_ARRAY: Byte = 0x42
 
+        /**
+         * 变体字典 key 长度安全上限：合法 key 均为短标识（如 "$UUID"、"S"、"M"、"I"），
+         * 空或超长 key 视为损坏文件（P0-5：keyLen 未认证，严禁直接驱动分配）。
+         */
+        const val MAX_KEY_LENGTH = 256
+
+        /** 变体字典 value 长度安全上限（1 MiB）：KDF 种子/盐值与自定义数据远小于此 */
+        const val MAX_VALUE_LENGTH = 1024 * 1024
+
         fun deserialize(inputStream: InputStream): VariantDictionary {
             val dict = VariantDictionary()
             val version = LittleEndianUtil.readShort(inputStream)
@@ -175,21 +213,49 @@ class VariantDictionary {
                 if (type < 0 || type.toByte() == TYPE_NONE) {
                     break
                 }
+
+                // P0-5：keyLen / valLen 均来自未认证的文件字节，进入分配前必须先过边界裁决
                 val keyLen = LittleEndianUtil.readInt(inputStream)
-                val keyBytes = LittleEndianUtil.readBytes(inputStream, keyLen)
+                if (keyLen < 1 || keyLen > MAX_KEY_LENGTH) {
+                    throw KdbxCorruptFileException(
+                        "变体字典 key 长度非法或超过安全上限: keyLen=$keyLen（允许 1 ~ $MAX_KEY_LENGTH）"
+                    )
+                }
+                val keyBytes = LittleEndianUtil.readBytes(inputStream, keyLen, MAX_KEY_LENGTH)
                 val key = String(keyBytes, StandardCharsets.UTF_8)
 
                 val valLen = LittleEndianUtil.readInt(inputStream)
-                val valBytes = LittleEndianUtil.readBytes(inputStream, valLen)
+                if (valLen < 0 || valLen > MAX_VALUE_LENGTH) {
+                    throw KdbxCorruptFileException(
+                        "变体字典 value 长度非法或超过安全上限: key=$key, valLen=$valLen（允许 0 ~ $MAX_VALUE_LENGTH）"
+                    )
+                }
+                val valBytes = LittleEndianUtil.readBytes(inputStream, valLen, MAX_VALUE_LENGTH)
 
                 when (type.toByte()) {
-                    TYPE_UINT32 -> dict.setUInt32(key, LittleEndianUtil.bytesToInt(valBytes).toLong() and 0xFFFFFFFFL)
-                    TYPE_UINT64 -> dict.setUInt64(key, LittleEndianUtil.bytesToLong(valBytes))
-                    TYPE_BOOL -> dict.setBool(key, valBytes.isNotEmpty() && valBytes[0] != 0.toByte())
-                    TYPE_INT32 -> dict.setInt32(key, LittleEndianUtil.bytesToInt(valBytes))
-                    TYPE_INT64 -> dict.setInt64(key, LittleEndianUtil.bytesToLong(valBytes))
+                    TYPE_UINT32 -> {
+                        requireFixedSizeValue(key, "UInt32", valBytes, 4)
+                        dict.setUInt32(key, LittleEndianUtil.bytesToInt(valBytes).toLong() and 0xFFFFFFFFL)
+                    }
+                    TYPE_UINT64 -> {
+                        requireFixedSizeValue(key, "UInt64", valBytes, 8)
+                        dict.setUInt64(key, LittleEndianUtil.bytesToLong(valBytes))
+                    }
+                    TYPE_BOOL -> {
+                        requireFixedSizeValue(key, "Bool", valBytes, 1)
+                        dict.setBool(key, valBytes[0] != 0.toByte())
+                    }
+                    TYPE_INT32 -> {
+                        requireFixedSizeValue(key, "Int32", valBytes, 4)
+                        dict.setInt32(key, LittleEndianUtil.bytesToInt(valBytes))
+                    }
+                    TYPE_INT64 -> {
+                        requireFixedSizeValue(key, "Int64", valBytes, 8)
+                        dict.setInt64(key, LittleEndianUtil.bytesToLong(valBytes))
+                    }
                     TYPE_STRING -> dict.setString(key, String(valBytes, StandardCharsets.UTF_8))
                     TYPE_BYTE_ARRAY -> dict.setByteArray(key, valBytes)
+                    // 未知类型：按官方前向兼容语义消费并跳过（长度已受限，不构成分配风险）
                 }
             }
             return dict
@@ -198,5 +264,20 @@ class VariantDictionary {
         fun deserialize(bytes: ByteArray): VariantDictionary {
             return deserialize(ByteArrayInputStream(bytes))
         }
+
+        /**
+         * 定长类型（UInt32/Int32=4B、UInt64/Int64=8B、Bool=1B）的值长度校验：
+         * 长度不符的项按损坏文件拒绝，杜绝 bytesToInt/bytesToLong 越界抛出未类型化异常。
+         */
+        private fun requireFixedSizeValue(key: String, typeName: String, value: ByteArray, expectedSize: Int) {
+            if (value.size != expectedSize) {
+                throw KdbxCorruptFileException(
+                    "变体字典 $typeName 值长度非法: key=$key, length=${value.size}（期望 $expectedSize）"
+                )
+            }
+        }
     }
+
+    /** 类型名（用于类型错误消息，值类型受限于 set* 系列产生的封闭集合） */
+    private fun typeNameOf(value: Any): String = value::class.simpleName ?: "未知类型"
 }

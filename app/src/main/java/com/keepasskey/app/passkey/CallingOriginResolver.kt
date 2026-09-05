@@ -25,18 +25,20 @@ object CallingOriginResolver {
      * 浏览器签名证书轮换或新增受信浏览器时更新此处即可。
      */
     private val PRIVILEGED_BROWSER_ALLOWLIST = """
-        [
-          {
-            "type": "android",
-            "info": {
-              "package_name": "com.android.chrome",
-              "signatures": [
-                {"build": "default", "userdebug": false, "cert_fingerprint_sha256": "32:a2:fc:74:d7:31:10:58:59:e5:a8:5d:f1:6d:95:f1:02:d8:5b:22:09:9b:80:64:c6:d6:ba:bb:66:52:84:9f"},
-                {"build": "default", "userdebug": false, "cert_fingerprint_sha256": "32a2fc74d731105859e5a85df16d95f102d85b22099b8064c6d6babbb6652849f"}
-              ]
+        {
+          "apps": [
+            {
+              "type": "android",
+              "info": {
+                "package_name": "com.android.chrome",
+                "signatures": [
+                  {"build": "default", "userdebug": false, "cert_fingerprint_sha256": "32:a2:fc:74:d7:31:10:58:59:e5:a8:5d:f1:6d:95:f1:02:d8:5b:22:09:9b:80:64:c6:d6:ba:bb:66:52:84:9f"},
+                  {"build": "default", "userdebug": false, "cert_fingerprint_sha256": "32a2fc74d731105859e5a85df16d95f102d85b22099b8064c6d6babbb6652849f"}
+                ]
+              }
             }
-          }
-        ]
+          ]
+        }
     """.trimIndent()
 
     /**

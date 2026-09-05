@@ -47,7 +47,7 @@ KeePasskey 是一款使用原生 Kotlin 开发的现代化 Android 密码管理�
 - `.\gradlew.bat assembleDebug` — 编译全部模块
 - `.\gradlew.bat :app:compileDebugKotlin` — 仅快速检查 Kotlin 编译
 - `.\gradlew.bat lint` — Android Lint
-- `.\gradlew.bat test` — 单元测试（全模块 `src/test` 已就绪，`testDebugUnitTest` 可单模块执行；当前 212 个测试全绿）
+- `.\gradlew.bat test` — 单元测试（全模块 `src/test` 已就绪，`testDebugUnitTest` 可单模块执行；当前 315 个测试全绿）
 - 版本升级需整体配套：AGP ↔ Gradle ↔ Kotlin ↔ Compose BOM（Compose BOM 2026.06.00+ 要求 compileSdk 37，当前用 2026.06.01 对齐 compileSdk 36）
 
 **当前阶段状态**：**🔐 真实 KDBX 4.0 与复合密钥真机互操作（Wave 12）交付完毕——Wave 1-11 全量整改 + Wave 12（主密码 + XML KeyFile v2.0 复合密钥真机解锁、官方 2.61.1 / KeePassDX / KeePassXC 三方交叉验证算法纠偏、pykeepass 双向往返完全闭环）。**
@@ -91,6 +91,6 @@ KeePasskey 是一款使用原生 Kotlin 开发的现代化 Android 密码管理�
 ⑥ **载荷压缩与内层 Header 读写顺序纠偏**：对齐官方 C# `KdbxFile.Read.cs:172-178`（"Binary header before XML"）与 KeePassDX `DatabaseInputKDBX`，将内层 Header 置于 GZIP 压缩流内部处理（解密 → GZIP解压 → 读取内层 Header → 解析XML）；派生探针相应升级为优先识别 GZIP 魔数（`1F 8B 08`）；官方 `cipherKey = SHA-256(masterSeed ‖ transformedKey)` 归正，历史 SHA-512 截断公式仅作为旧文件探针回退路径。
 **最终双向验证**：模拟器真机以复合密钥成功解锁 `测试.kdbx`，正确读取群组「111」及条目「11」（明文密码 `~W4hUziUy7FSRR#K@N@K` 完全一致）；在 KeePasskey 中新建条目并落盘后，经独立第三方工具 `pykeepass` 完整往返读取校验通过。详见 `docs/KDBX4与复合密钥实战互操作排查日志.md`。
 
-**测试基线**：全工程 223 个单元测试全绿（app 70 / core 21 / crypto 35 / database 50 / sync 47；Wave 12 新增 11 例）；`assembleDebug` 与 `assembleRelease`（R8 混淆）构建闭环通过。
+**测试基线**：全工程 315 个单元测试全绿（app 72 / core 21 / crypto 37 / database 135 / sync 48；经 2026-09-05 全量代码审核整改扩充）；`assembleDebug` 与 `assembleRelease`（R8 混淆）构建闭环通过。
 
 **已知限界（如实记录，详见 `REMEDIATION_PLAN.md` 执行日志）**：KDBX 解析已流式化，但对象树（KdbxGroup/KdbxEntry）仍整体驻留内存（增量加载/进度 Flow 远期）；S3 条件写依赖服务端支持——AWS S3 原子生效，少数未实现 If-Match 覆写的兼容存储降级为 HEAD 预检+无条件 PUT（KDoc 注明），WebDAV uploadAtomic 的 `If` 头 tagged list 预条件在个别极简 DAV 服务端可能被忽略（退化为普通事务写，不影响正确性）；KDBX 受保护字段以字符串承载为格式层边界——Passkey 私钥编码 String 存活期与 ProtectedString 一致，生成/签名路径的中间字节量均显式清零；`ProtectedString` 驻留加密（Wave 11）为纵深防御层——对抗堆扫描/崩溃转储中的明文暴露，取得进程密钥或具备任意代码执行能力的攻击者仍可在读取瞬间截获明文（KeePassDX 同级取舍）；Compose 框架层 TextField 仍以 String 承载输入（框架 API 限制，已收敛至 `SecurePasswordField` 单点、最短生命周期；Unlock 与 DatabasePicker 创建向导已接入该组件，EntryEdit/Settings 的密码框尚未接入）；QuickUnlock PIN 已真实校验（PBKDF2 校验器 + Keystore 封印凭据，封印密钥为非认证绑定硬件密钥——安全门槛由 PIN 校验器 + 密钥不可导出承担，root 设备边界见 KDoc），但 PIN 输入仍为 String（4 位短数字，框架限制）；浏览器特权白名单内置 Chrome 稳定版签名指纹，浏览器证书轮换或白名单外浏览器将 fail-closed 降级为 apk-key-hash 路径（安全不放松，功能降级），需随浏览器版本更新指纹；自定义图标（customIcons 模型/序列化层完好）尚无上传/选择 UI、KeePass 字段引用（{REF:...}）引擎未实现，均列为下一轮特性计划；外部库经导入复制进内部存储后原地编辑（不写回外部原文件）为当前设计取舍。

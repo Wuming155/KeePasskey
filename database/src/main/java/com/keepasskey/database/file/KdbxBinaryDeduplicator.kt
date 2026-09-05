@@ -54,14 +54,18 @@ object KdbxBinaryDeduplicator {
                 existingIndex
             } else {
                 val idx = dedupList.size
-                dedupList.add(InnerHeader.BinaryItem(flag, dataBytes))
+                // 入池必须使用独立副本：dataBytes 可能是旧池（existingPool）或原附件
+                // 的内部数组别名，直接入池会让外部清零旧数组时连带清零新二进制池。
+                dedupList.add(InnerHeader.BinaryItem(flag, dataBytes.clone()))
                 idx
             }
             KdbxAttachment(
                 name = att.name,
                 refIndex = finalIndex,
                 isProtected = att.isProtected,
-                data = dataBytes
+                // 附件同样持独立拷贝：外部调用 attachment.clear()/close()（Closeable 契约）
+                // 时只清零自身副本，严禁将内层 Header 二进制池（dedupList）中的数据一并清零。
+                data = dataBytes.clone()
             )
         }
 

@@ -59,4 +59,13 @@ data class KdbxEntry(
         attachments.forEach { it.clear() }
         history.forEach { it.clearSensitiveData() }
     }
+
+    override fun toString(): String {
+        // P2-4 整改：数据类默认 toString 会展开 fields/customFields/history 等集合，
+        // 任何隐式字符串化（日志、调试、异常消息）都不该物化字段内容——
+        // 此处仅呈现结构摘要；字段明文一律经 ProtectedString 显式 readChars()/readString() 按需读取
+        return "KdbxEntry(id=$id, parentGroupId=$parentGroupId, iconId=$iconId, " +
+            "fields=${fields.size}, customFields=${customFields.size}, " +
+            "attachments=${attachments.size}, history=${history.size}, tags=$tags)"
+    }
 }

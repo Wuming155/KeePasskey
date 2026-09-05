@@ -289,8 +289,10 @@ class SyncEngine(
     /**
      * 提交本地修改。
      * 先写本地缓存（本地数据安全第一），再尽力上传；
-     * 上传遭遇 412/ETag 不匹配则返回 [SyncCommitResult.ConflictNeedsMerge]；
-     * 网络失败则保留本地缓存并返回 [SyncCommitResult.RemoteUnreachable]。
+     * 上传遭遇 412/ETag 不匹配则下载远端内容并返回 [SyncCommitResult.ConflictNeedsMerge]；
+     * 冲突后下载远端内容失败时，严禁以空字节伪造冲突远端——本地缓存已安全保留，
+     * 如实返回 [SyncCommitResult.RemoteUnreachable]，待网络恢复后重新同步触发完整冲突流程；
+     * 普通网络失败同样保留本地缓存并返回 [SyncCommitResult.RemoteUnreachable]。
      */
     suspend fun commitLocal(remotePath: String, localBytes: ByteArray): SyncCommitResult = withContext(Dispatchers.IO) {
         // 1. 先写缓存
@@ -313,8 +315,18 @@ class SyncEngine(
             val ex = uploadResult.exceptionOrNull()
             if (ex is SyncException.ConflictError) {
                 val downloadResult = provider.download(remotePath)
-                val remoteBytes = downloadResult.getOrNull() ?: ByteArray(0)
-                SyncCommitResult.ConflictNeedsMerge(remoteBytes, ex.remoteEtag)
+                val remoteBytes = downloadResult.getOrNull()
+                if (remoteBytes != null) {
+                    SyncCommitResult.ConflictNeedsMerge(remoteBytes, ex.remoteEtag)
+                } else {
+                    // 远端已确认冲突但拉取远端内容失败：严禁以 ByteArray(0) 伪造空冲突远端
+                    // ——空字节会被当作合法远端版本参与三方合并，导致远端全部内容被静默丢弃。
+                    // 本地缓存已在步骤 1 安全保留，如实返回远端不可达，
+                    // 待网络恢复后重新同步走完整的冲突检测与合并流程。
+                    val downloadEx = downloadResult.exceptionOrNull()
+                    events.tryEmit(SyncCacheEvent.CouldntSaveToRemote(remotePath, downloadEx ?: ex))
+                    SyncCommitResult.RemoteUnreachable(keptLocal = true)
+                }
             } else {
                 events.tryEmit(SyncCacheEvent.CouldntSaveToRemote(remotePath, ex))
                 SyncCommitResult.RemoteUnreachable(keptLocal = true)

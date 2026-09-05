@@ -75,6 +75,18 @@ class KdbxTimesTest {
         assertEquals(defaultTime, KdbxXmlTimeHelper.parseDate("   ", defaultTime))
     }
 
+    /**
+     * P3-2 回归：缺失时间戳的缺省值为 Instant.EPOCH（合理远古时间）而非 now()——
+     * 三方合并按 lastModificationTime 越新越胜出，缺省 now() 会让 Times 子元素缺失的
+     * 文件被判定为「刚刚修改」而虚假覆盖对端。
+     */
+    @Test
+    fun testMissingDateDefaultsToEpochNotNow() {
+        assertEquals(Instant.EPOCH, KdbxXmlTimeHelper.parseDate(null))
+        assertEquals(Instant.EPOCH, KdbxXmlTimeHelper.parseDate(""))
+        assertEquals(Instant.EPOCH, KdbxXmlTimeHelper.parseDate("   "))
+    }
+
     @Test
     fun testCorruptDateThrowsException() {
         // 非法 Base64

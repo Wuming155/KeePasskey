@@ -132,19 +132,20 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
                 System.arraycopy(clientDataHash, 0, dataToSign, authData.size, clientDataHash.size)
 
                 // 4. 读取私钥并执行签名，全流程保护敏感内存
-                val privChars = passkeyData.privateKey.readChars()
+                // P0-7 整改：直接从 ProtectedString 取字节数组并解码，严禁生成不可变私钥 String
+                val rawBytes = passkeyData.privateKey.readUtf8()
                 val privBytes = try {
-                    val privStr = String(privChars).trim()
-                    val isHex = privStr.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }
-                    if (isHex && privStr.length <= 64) {
-                        val bigInt = BigInteger(privStr, 16)
+                    val trimmed = String(rawBytes).trim() // 获取编码形式判断
+                    val isHex = trimmed.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }
+                    if (isHex && trimmed.length <= 64) {
+                        val bigInt = BigInteger(trimmed, 16)
                         val raw = bigInt.toByteArray()
                         if (raw.size > 32 && raw[0] == 0.toByte()) raw.copyOfRange(1, raw.size) else raw
                     } else {
-                        Base64.getDecoder().decode(privStr)
+                        Base64.getDecoder().decode(trimmed)
                     }
                 } finally {
-                    Arrays.fill(privChars, '0')
+                    Arrays.fill(rawBytes, 0.toByte())
                 }
 
                 val signature = try {

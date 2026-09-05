@@ -87,11 +87,19 @@ class PasskeyCreateActivity : BaseCredentialActivity() {
 
                 // 2. 存储至 KDBX 密码库
                 //    普通应用（apk-key-hash origin）创建的凭据额外记录调用包绑定（android://<包名>），
-                //    供后续 GET 流程按严格包名边界匹配（H1/L1 整改）
+                //    供后续 GET 流程按严格包名边界匹配（H1/L1/P1-4 整改）
+                val callerPackage = providerReq?.callingAppInfo?.packageName
+                    ?: callingPackage?.ifBlank { null }
+                if (!CallingOriginResolver.isBrowserOrigin(origin) && callerPackage.isNullOrBlank()) {
+                    Log.e(TAG, "无法确定调用应用包名，拒绝创建应用内 Passkey")
+                    failAndFinish("无法确定调用方应用标识")
+                    return@launch
+                }
+
                 vaultRepository.saveNewPasskeyEntry(
                     data = passkeyData,
                     boundPackage = if (CallingOriginResolver.isBrowserOrigin(origin)) null
-                    else (callingPackage ?: packageName).ifBlank { null }
+                    else callerPackage
                 )
 
                 // 3. 构建证明数据 (Attestation)
@@ -124,7 +132,7 @@ class PasskeyCreateActivity : BaseCredentialActivity() {
                     put("type", "webauthn.create")
                     put("challenge", challenge)
                     put("origin", origin.ifBlank { "https://$rpId" })
-                    put("androidPackageName", callingPackage ?: packageName)
+                    put("androidPackageName", callerPackage ?: packageName)
                 }.toString()
 
                 val clientDataBase64 = Base64.getUrlEncoder().withoutPadding()

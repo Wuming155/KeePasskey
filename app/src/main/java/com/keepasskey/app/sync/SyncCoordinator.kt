@@ -491,7 +491,8 @@ open class SyncCoordinator @Inject constructor(
             val keyClone = key?.clone()
             try {
                 val baos = ByteArrayOutputStream()
-                KdbxFile.save(baos, db, pwdClone ?: CharArray(0), keyClone)
+                // P1-10：pwdClone 为 null 表示仅密钥文件会话（无主密码分量），直接透传
+                KdbxFile.save(baos, db, pwdClone, keyClone)
                 baos.toByteArray()
             } catch (_: Exception) {
                 null
@@ -507,7 +508,8 @@ open class SyncCoordinator @Inject constructor(
             val pwdClone = pwd?.clone()
             val keyClone = key?.clone()
             try {
-                KdbxFile.load(ByteArrayInputStream(bytes), pwdClone ?: CharArray(0), keyClone)
+                // P1-10：pwdClone 为 null 表示仅密钥文件会话（无主密码分量），直接透传
+                KdbxFile.load(ByteArrayInputStream(bytes), pwdClone, keyClone)
             } catch (_: Exception) {
                 null
             } finally {
@@ -607,7 +609,10 @@ open class SyncCoordinator @Inject constructor(
     private fun isGroupContentChanged(a: KdbxGroup, b: KdbxGroup): Boolean {
         if (a.id != b.id || a.name != b.name || a.notes != b.notes ||
             a.iconId != b.iconId || a.customIconId != b.customIconId ||
-            a.parentGroupId != b.parentGroupId
+            a.parentGroupId != b.parentGroupId ||
+            // P1-8 配套：分组 tags / customData 已为一等持久化字段，纳入变化检测，
+            // 防止仅修改分组标签的编辑被误判为「无变化」而把旧字节上传云端
+            a.tags != b.tags || a.customData != b.customData
         ) {
             return true
         }

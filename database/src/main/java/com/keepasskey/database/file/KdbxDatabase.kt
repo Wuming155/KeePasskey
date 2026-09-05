@@ -32,7 +32,16 @@ data class KdbxDatabase(
     val lastTopVisibleGroup: KdbxUuid? = null,
     val generator: String = "KeePasskey",
     val databaseNameChanged: Instant? = null,
-    val databaseDescriptionChanged: Instant? = null
+    val databaseDescriptionChanged: Instant? = null,
+    // 官方 Meta 字段（KeePass 2.61.1 PwDatabase 初始值，P1-8 补齐）
+    val defaultUserName: String = "",
+    val defaultUserNameChanged: Instant? = null,
+    val maintenanceHistoryDays: Int = 365,
+    val color: String = "",
+    val masterKeyChanged: Instant? = null,
+    val masterKeyChangeRec: Int = -1,
+    val masterKeyChangeForce: Int = -1,
+    val settingsChanged: Instant? = null
 ) {
     fun clearSensitiveData() {
         rootGroup.clearSensitiveData()

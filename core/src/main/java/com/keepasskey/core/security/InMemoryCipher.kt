@@ -43,10 +43,15 @@ internal object InMemoryCipher {
     /** 明文 → (IV, 密文)。确定性映射：相同明文恒得相同产物。 */
     fun seal(plain: ByteArray): Sealed {
         if (plain.isEmpty()) return Sealed(ByteArray(0), plain.clone())
+        // P2-3 整改：计算 IV 派生时分块 update 摘要，避免 keyBytes + plain 拼接数组驻留内存堆
+        val md = MessageDigest.getInstance("SHA-256")
+        md.update(keyBytes)
+        md.update(plain)
+        val hash = md.digest()
+        val iv = hash.copyOfRange(0, IV_LENGTH_BYTES)
+        java.util.Arrays.fill(hash, 0.toByte())
+
         return try {
-            val iv = MessageDigest.getInstance("SHA-256")
-                .digest(keyBytes + plain)
-                .copyOfRange(0, IV_LENGTH_BYTES)
             val cipher = Cipher.getInstance(TRANSFORMATION)
             cipher.init(Cipher.ENCRYPT_MODE, SecretKeySpec(keyBytes, "AES"), IvParameterSpec(iv))
             Sealed(iv, cipher.doFinal(plain))

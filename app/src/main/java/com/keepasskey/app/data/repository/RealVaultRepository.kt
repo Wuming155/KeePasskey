@@ -170,6 +170,14 @@ class RealVaultRepository @Inject constructor(
         return result
     }
 
+    override suspend fun changeMasterPassword(newPassword: CharArray): com.keepasskey.core.result.KdbxResult<Unit> {
+        val result = databaseSession.changeCredentials(newPassword)
+        if (result is com.keepasskey.core.result.KdbxResult.Success) {
+            refreshDatabases()
+        }
+        return result
+    }
+
     override suspend fun lockDatabase() {
         databaseSession.lock()
         refreshDatabases()
@@ -270,13 +278,32 @@ class RealVaultRepository @Inject constructor(
     }
 
     override suspend fun saveGroup(group: VaultGroup): com.keepasskey.core.result.KdbxResult<Unit> {
-        val kdbxGroup = KdbxGroup(
-            id = parseUuidOrRandom(group.id),
-            parentGroupId = group.parentId?.let { parseUuidOrNull(it) },
-            name = group.name,
-            // 断点7 整改：分组图标按名称映射到 KDBX 标准图标 ID（回收站强制 43 TrashBin）
-            iconId = if (group.isRecycleBin) ICON_TRASH_BIN else mapIconNameToId(group.iconName, fallbackId = ICON_FOLDER)
-        )
+        val targetId = parseUuidOrRandom(group.id)
+        // P0-1 灾难性缺陷修复：重命名/改图标路径曾以仅含 4 个字段的新建 KdbxGroup 直接
+        // 覆盖既有分组（entries/subgroups 均为默认空列表），导致其全部子条目与子分组被清空。
+        // 现先按 UUID 从会话中查找既有分组：命中则基于 existing.copy(...) 仅更新名称/图标/父组，
+        // 子条目与子分组原样保留；未命中（真正的新建分组）才构造空分组。
+        val existing = databaseSession.databaseFlow.first()
+            ?.rootGroup
+            ?.findGroup(targetId)
+        val kdbxGroup = if (existing != null) {
+            existing.copy(
+                name = group.name,
+                // 断点7 整改：分组图标按名称映射到 KDBX 标准图标 ID（回收站强制 43 TrashBin）；
+                // 未知名回退既有图标，避免重命名时把已设置的图标意外重置为默认文件夹
+                iconId = if (group.isRecycleBin) ICON_TRASH_BIN
+                else mapIconNameToId(group.iconName, fallbackId = existing.iconId),
+                // parentId 缺失时保留既有父组，防止空 parentId 把嵌套分组意外改挂到根组
+                parentGroupId = group.parentId?.let { parseUuidOrNull(it) } ?: existing.parentGroupId
+            )
+        } else {
+            KdbxGroup(
+                id = targetId,
+                parentGroupId = group.parentId?.let { parseUuidOrNull(it) },
+                name = group.name,
+                iconId = if (group.isRecycleBin) ICON_TRASH_BIN else mapIconNameToId(group.iconName, fallbackId = ICON_FOLDER)
+            )
+        }
         databaseSession.saveGroup(kdbxGroup)
         return persistSession()
     }
@@ -416,11 +443,13 @@ class RealVaultRepository @Inject constructor(
                 autoType = mergedAutoType
             )
 
-            val maxHistory = db?.historyMaxItems ?: 10
+            // P3-4 整改：历史修剪遵从库级 Meta 配置（historyMaxItems / historyMaxSize），
+            // 缺失时回退官方默认值，不再写死 10 条上限
             val finalEntry = HistoryManager.recordHistorySnapshot(
                 currentEntry = existing,
                 newEntry = pendingNewEntry,
-                maxHistoryItems = maxHistory
+                maxHistoryItems = db?.historyMaxItems ?: HistoryManager.DEFAULT_MAX_HISTORY_ITEMS,
+                maxHistorySize = db?.historyMaxSize ?: HistoryManager.DEFAULT_MAX_HISTORY_SIZE
             )
 
             if (isParentChanged) {
@@ -1047,7 +1076,7 @@ class RealVaultRepository @Inject constructor(
         webDomain: String?,
         username: String,
         passwordChars: CharArray
-    ) {
+    ): com.keepasskey.core.result.KdbxResult<Unit> {
         try {
             val domain = webDomain?.takeIf { it.isNotBlank() }
             val allEntries = getKdbxEntries()
@@ -1085,7 +1114,7 @@ class RealVaultRepository @Inject constructor(
                 )
                 databaseSession.saveEntry(newEntry)
             }
-            persistSession()
+            return persistSession()
         } finally {
             java.util.Arrays.fill(passwordChars, '0')
         }

@@ -11,6 +11,9 @@ import java.io.OutputStreamWriter
  *
  * - 紧凑输出（无缩进空白）：文本节点的字符内容与模型值严格一致，压缩前体积也更小；
  * - 文本与属性分别按 XML 规则转义，非法 XML 1.0 控制字符被剔除；
+ * - 回车（\r）一律转义为字符引用 &#xD;：XML 1.0 §2.11 要求解析器将字面 CR / CRLF
+ *   规范化为 LF（字符引用不受影响），按字面写出会使 CRLF 多行文本往返后丢失 CR
+ *   （P3-3 整改，保证 Windows 风格换行往返一致）；
  * - [close] 仅冲刷自身缓冲，不关闭底层流——外层管线（GZip/加密/HMAC 块流）的级联关闭由 [com.keepasskey.database.file.KdbxFile] 统一控制。
  */
 class KdbxXmlStreamWriter(
@@ -85,8 +88,11 @@ class KdbxXmlStreamWriter(
                 codePoint == '<'.code -> writer.write("&lt;")
                 codePoint == '>'.code -> writer.write("&gt;")
                 codePoint == '"'.code && escapeNewLines -> writer.write("&quot;")
+                // P3-3：CR 一律转义为字符引用（文本与属性两路径一致）。
+                // 字面 CR / CRLF 会被任何符合 XML 1.0 的解析器规范化为 LF，而
+                // 字符引用 &#xD; 不参与行尾规范化，可保证 CRLF 精确往返。
+                codePoint == '\r'.code -> writer.write("&#xD;")
                 codePoint == '\n'.code && escapeNewLines -> writer.write("&#10;")
-                codePoint == '\r'.code && escapeNewLines -> writer.write("&#13;")
                 codePoint == '\t'.code && escapeNewLines -> writer.write("&#9;")
                 isLegalXmlCodePoint(codePoint) -> writer.write(codePoint)
                 // 非法 XML 1.0 控制字符剔除，保证写出文档始终 well-formed

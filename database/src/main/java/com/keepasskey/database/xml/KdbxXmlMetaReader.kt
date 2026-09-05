@@ -22,6 +22,14 @@ internal class MetaNode(
     private var databaseNameChanged: java.time.Instant? = null
     private var databaseDescription: String = ""
     private var databaseDescriptionChanged: java.time.Instant? = null
+    private var defaultUserName: String = ""
+    private var defaultUserNameChanged: java.time.Instant? = null
+    private var maintenanceHistoryDays: Int = 365
+    private var color: String = ""
+    private var masterKeyChanged: java.time.Instant? = null
+    private var masterKeyChangeRec: Int = -1
+    private var masterKeyChangeForce: Int = -1
+    private var settingsChanged: java.time.Instant? = null
     private var recycleBinEnabled: Boolean = true
     private var recycleBinUuid: KdbxUuid? = null
     private var recycleBinChanged: java.time.Instant? = null
@@ -43,6 +51,14 @@ internal class MetaNode(
             KdbxConstants.Xml.DATABASE_NAME_CHANGED -> TextNode { databaseNameChanged = KdbxXmlTimeHelper.parseDate(it) }
             KdbxConstants.Xml.DATABASE_DESCRIPTION -> TextNode { databaseDescription = it }
             KdbxConstants.Xml.DATABASE_DESCRIPTION_CHANGED -> TextNode { databaseDescriptionChanged = KdbxXmlTimeHelper.parseDate(it) }
+            KdbxConstants.Xml.DEFAULT_USER_NAME -> TextNode { defaultUserName = it }
+            KdbxConstants.Xml.DEFAULT_USER_NAME_CHANGED -> TextNode { defaultUserNameChanged = KdbxXmlTimeHelper.parseDate(it) }
+            KdbxConstants.Xml.MAINTENANCE_HISTORY_DAYS -> TextNode { maintenanceHistoryDays = it.trim().toIntOrNull() ?: 365 }
+            KdbxConstants.Xml.COLOR -> TextNode { color = it }
+            KdbxConstants.Xml.MASTER_KEY_CHANGED -> TextNode { masterKeyChanged = KdbxXmlTimeHelper.parseDate(it) }
+            KdbxConstants.Xml.MASTER_KEY_CHANGE_REC -> TextNode { masterKeyChangeRec = it.trim().toIntOrNull() ?: -1 }
+            KdbxConstants.Xml.MASTER_KEY_CHANGE_FORCE -> TextNode { masterKeyChangeForce = it.trim().toIntOrNull() ?: -1 }
+            KdbxConstants.Xml.SETTINGS_CHANGED -> TextNode { settingsChanged = KdbxXmlTimeHelper.parseDate(it) }
             KdbxConstants.Xml.RECYCLE_BIN_ENABLED -> TextNode { recycleBinEnabled = it.lowercase() != "false" }
             KdbxConstants.Xml.RECYCLE_BIN_UUID -> TextNode { recycleBinUuid = KdbxXmlValueUtil.parseOptionalUuid(it) }
             KdbxConstants.Xml.RECYCLE_BIN_CHANGED -> TextNode { recycleBinChanged = KdbxXmlTimeHelper.parseDate(it) }
@@ -68,6 +84,14 @@ internal class MetaNode(
                 databaseNameChanged = databaseNameChanged,
                 databaseDescription = databaseDescription,
                 databaseDescriptionChanged = databaseDescriptionChanged,
+                defaultUserName = defaultUserName,
+                defaultUserNameChanged = defaultUserNameChanged,
+                maintenanceHistoryDays = maintenanceHistoryDays,
+                color = color,
+                masterKeyChanged = masterKeyChanged,
+                masterKeyChangeRec = masterKeyChangeRec,
+                masterKeyChangeForce = masterKeyChangeForce,
+                settingsChanged = settingsChanged,
                 recycleBinEnabled = recycleBinEnabled,
                 recycleBinUuid = recycleBinUuid,
                 recycleBinChanged = recycleBinChanged,

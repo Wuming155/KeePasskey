@@ -218,15 +218,24 @@ class KeePasskeyAutofillService : AutofillService() {
 
                 if (password.isNotBlank()) {
                     val passwordChars = password.toCharArray()
-                    vaultRepository.saveAutofillCredential(
+                    val result = vaultRepository.saveAutofillCredential(
                         packageName = callingPkg,
                         webDomain = scanResult.webDomain,
                         username = username,
                         passwordChars = passwordChars
                     )
+                    when (result) {
+                        is com.keepasskey.core.result.KdbxResult.Success -> {
+                            callback.onSuccess()
+                        }
+                        is com.keepasskey.core.result.KdbxResult.Failure -> {
+                            Log.e(TAG, "onSaveRequest 保存凭据失败: ${result.message}", result.error)
+                            callback.onFailure(result.message)
+                        }
+                    }
+                } else {
+                    callback.onSuccess()
                 }
-
-                callback.onSuccess()
             } catch (t: Throwable) {
                 Log.e(TAG, "onSaveRequest 保存凭据失败", t)
                 callback.onFailure(t.message)
