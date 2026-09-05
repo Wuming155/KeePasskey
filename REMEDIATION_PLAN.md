@@ -81,6 +81,11 @@
 
 - 每波：所属模块 `compileDebugKotlin` + `testDebugUnitTest` 全绿 → 主会话 `git add -A && git commit`（语义化消息，注明波次与问题编号）。
 - Wave 4：`.\gradlew.bat assembleDebug`、`testDebugUnitTest` 全绿；R8 混淆编译不回归；`AGENTS.md` / `.codebuddy/memory/project-status.md` 如实更新（含真实测试计数与遗留限界）；最终提交。
+- **Wave 4 主会话收口清单（轮 5 预研补充）**：
+  1. proguard-rules.pro 第 8 节扩展：`com.keepasskey.app.passkey.**` / `com.keepasskey.app.autofill.**` 包级 keep（覆盖 Wave 2-D 新增 4 个 Launcher Activity 与 DomainMatcher/AutofillFieldScanner）；追加 `androidx.credentials.**` 安全 keep（防 AAR consumer 规则缺失时 provider 回调反射失效）；
+  2. `assembleRelease`（或 `minifyReleaseWithR8`）验证混淆编译；
+  3. 文档更新：AGENTS.md 当前阶段状态改为「差距修复交付」+ 真实测试计数（77 基线 + Wave1 新增 53 + Wave2/3 增量）；project-status.md 决策日志补记 4 个 Wave 的 git 哈希与遗留限界（流式解析、S3 TOCTOU、生物解锁 String 边界妥协等）；
+  4. 清理 `.codebuddy/wave2*.md`/`wave3e-prompt.md` 执行存档（保留 REMEDIATION_PLAN.md 执行日志）。
 
 ## 六、风险与既定决策
 
@@ -99,3 +104,11 @@
 - **Wave 1 中期进度（轮 2 文件系统观察）**：A 已产出 core 新模型（DeletedObject/CustomIcon/MemoryProtectionConfig）并更新 KdbxAttachment/KdbxConstants/KdbxEntry/KdbxGroup/KdbxDatabase/DatabaseSession 与 3 个类型化异常；B 已产出 CBOR/COSE/KdfBenchmark 全部主代码与测试、PasskeyCryptoEngine 扩展至 20KB。两代理仍在收尾（XML 解析器/序列化器改造与签名测试）。
 - **Wave 2 提示词预备完成（轮 3）**：`.codebuddy/wave2c-prompt.md`（SyncEngine 三哈希状态机/墓碑合并 v2/WebDAV·S3 加固，含 sync 禁止依赖 database 硬约束与 Kp2a 9.2 节九条建议映射）与 `.codebuddy/wave2d-prompt.md`（Credential Provider 端到端/Autofill 真实化/DomainMatcher/4 个 Launcher Activity/androidx.credentials 依赖补齐）已存档，Wave 1 验收通过后即可发出。A 正按单一职责拆分 XML 层（8 个新文件：TimeHelper/DomUtil/MetaParser·Serializer/EntryParser·Serializer/GroupParser·Serializer），已完成 KdbxFile/KdbxHeader/HmacBlockStream/BinaryDeduplicator 改造，进行 KdbxAttachment 收尾。
 - **✅ Wave 1-B 验收通过（轮 4）**：代理 B 交付 CBOR（RFC 8949 确定性编码）/COSE（EC2/OKP/RSA 三结构）/PasskeyCryptoEngine 三算法扩展（keygen+signAssertion 统一 API+AT 段重载+coseKeyFor，敏感字节 finally 清零）/KdfBenchmark（AES 外推+Argon2 自适应+内存门槛，可注入采样）。主会话独立复跑 `:crypto:compileDebugKotlin :crypto:testDebugUnitTest` BUILD SUCCESSFUL（34 测试全绿）；代码抽查：CoseKey 标签/插入序/前导零剥离正确，CborEncoder 负整数编码含 Long.MIN_VALUE 溢出安全处理。契约 API 已按第四节落实（CborEncoder/CoseKey/PasskeyCryptoEngine/KdfBenchmark），供 Wave 2-D 消费。
+- **✅ Wave 1-A 验收通过（轮 4）**：代理 A 交付官方 cipherKey 派生+旧派生回退迁移、.NET Ticks 时间编码（含已知向量 638396640000000000L 测试）、XML 全字段往返（Meta/AutoType/Binary-Ref/CustomData，8 个单一职责子组件）、二进制池+KdbxBinaryDeduplicator 去重、类型化异常+严格解析、useCredentials API、AES-KDF 6M 轮对齐。主会话独立复跑 `:core/:database` 编译测试 BUILD SUCCESSFUL（27 测试全绿），抽查 KdbxFile 回退逻辑正确（官方派生 HMAC 失败→旧派生重试→解密失败再回退，双重保险）。
+- **✅ Wave 1 收口（轮 4）**：全模块回归 `testDebugUnitTest` 114 任务全绿（含 app 兼容性）；Git 提交 `ed601da`（feat(wave1)，工作区干净）。Wave 2-C（同步引擎）与 Wave 2-D（凭据服务端到端）已携带 Wave 1 实际 API 契约并行启动。
+- **Wave 3 预备完成（轮 5）**：`.codebuddy/wave3e-prompt.md` 已存档（P0-6 编辑保留/E2 库内回收站含墓碑/TOTP KeyUri 解析+OtpEngine 接线/健康检查真实化/SyncCoordinator+E5 同步接线/同步凭据加密持久化/密码 CharArray 边界/allowBackup 加固/附件尽力项；含 Wave 2 API 补注占位区，Wave 2 验收后填入实际签名再发出）。Wave 4 收口清单补入第五节（proguard 包级 keep 扩展/混淆构建/文档如实更新/存档清理）。
+- **Wave 2 中期进度（轮 5 观察）**：C 已落盘 SyncCache/SyncEngine/KdbxMerger v2 重写/WebDavSyncProvider 加固与 SyncModels 扩展；D 已落盘 DomainMatcher/VaultRepository 三处增量方法/AutofillFieldScanner/autofill_dataset_item.xml。两代理均按单一职责推进，无越界迹象。
+- **Wave 2 预审通过（轮 6，主会话代码抽查）**：① `SyncEngine.kt`（312 行）决策树完整对齐 Kp2a（未缓存下载/无修改刷新/本地赢自动上传/412 后二次下载冲突/404 自愈/网络降级），六事件 sealed 类完备，离线开关、ByteArray equals 规范覆盖、Dispatchers.IO 全覆盖——验收基础良好；② `DomainMatcher.kt` 严格点边界后缀匹配（evilgithub.com 不命中 github.com），extractDomain 处理 scheme/凭据/路径/端口/IPv6，isPackageMatch 点边界包名匹配——P2-14 修复质量确认；③ D 已补 `androidx.credentials:1.5.0` 依赖（解析成功），4 个 Launcher Activity 编写中。
+- **Wave 2 预审补充（轮 7）**：④ `PasskeyAssertionActivity`（163 行）组装链正确：UP|UV|BE|BS flags、authData‖SHA-256(clientDataJSON) 签名输入、hex/Base64 双格式私钥解析且 finally 清零、PendingIntentHandler.setGetCredentialResponse 回传、patchPasskeySignCount 落盘；⑤ `KdbxMerger.kt` v2（578 行）三方合并算法对齐官方 MergeIn：删除vs修改（修改胜）、删除后重建（modTime>墓碑时间则新版胜）、分组环路检测自愈挂根、字段级合并+冲突清单、墓碑按 UUID 去重取最晚删除时间；`KdbxDatabaseLite` 聚合类型正确解耦 database 依赖。
+- **Wave 2 收尾观察（轮 7 末）**：两代理进入最终阶段——D 重写 KeePasskeyCredentialProviderService 与 PasskeyCreateActivity（9:13）；C 完善 SyncEngineTest/WebDavSyncProviderTest。等待完成报告后进入验收流程。
+- **✅ Wave 2-C 验收通过（轮 8）**：代理 C 交付 SyncCache（三哈希磁盘布局+原子写盘）/SyncEngine（决策树+六事件+离线开关）/KdbxMerger v2（墓碑三方合并）/WebDAV DOM 解析+uploadAtomic 事务写+URL 编码/S3 If-None-Match 首传+SigV4 编码一致性。主会话独立复跑 `:sync:compileDebugKotlin :sync:testDebugUnitTest` BUILD SUCCESSFUL（30 测试全绿：SyncEngineTest 11 + KdbxMergerV2Test 7 + WebDav 6 + S3 4 + 旧接口回归 2）；预审已确认决策树/合并算法正确性。旧 API detectConflictsAndMergeAuto/resolveConflict 保持兼容。

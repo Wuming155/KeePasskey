@@ -76,6 +76,7 @@ dependencies {
     implementation("com.google.dagger:hilt-android:2.60.1")
     kapt("com.google.dagger:hilt-compiler:2.60.1")
     implementation("androidx.hilt:hilt-navigation-compose:1.3.0")
+    implementation("androidx.credentials:credentials:1.5.0")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 

@@ -775,4 +775,19 @@
     <string name="totp_save_btn">Save settings</string>
     <string name="totp_info_desc">The KeePasskey engine is fully compatible with RFC 6238 HMAC-SHA1 / SHA256 and auto-corrects system clock drift. Custom field names mainly serve interoperability with third-party desktop KeePass plugins</string>
 
+    <!-- ===== Credential Provider & Autofill ===== -->
+    <string name="cred_unlock_action_title">Unlock KeePasskey to fill</string>
+    <string name="cred_unlock_action_subtitle">Vault is locked. Tap to authenticate and unlock</string>
+    <string name="cred_create_entry_title">Save in KeePasskey</string>
+    <string name="cred_create_entry_subtitle">Save passkey or password to active vault</string>
+    <string name="cred_autofill_unlock_prompt">Unlock KeePasskey to view credentials</string>
+    <string name="cred_autofill_locked_subtitle">Tap to unlock vault and autofill</string>
+    <string name="cred_passkey_create_title">Create Passkey</string>
+    <string name="cred_passkey_assert_title">Verify Passkey</string>
+    <string name="cred_password_save_title">Save Password</string>
+    <string name="cred_password_fill_title">Fill Password</string>
+    <string name="cred_error_vault_locked">Vault is locked, cannot perform this operation</string>
+    <string name="cred_error_entry_not_found">Credential entry not found</string>
+    <string name="cred_error_unknown">An error occurred while handling credential request</string>
+
 </resources>

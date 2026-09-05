@@ -1,8 +1,14 @@
 package com.keepasskey.sync.merge
 
+import com.keepasskey.core.model.DeletedObject
+import com.keepasskey.core.model.KdbxAttachment
 import com.keepasskey.core.model.KdbxConstants
+import com.keepasskey.core.model.KdbxCustomField
 import com.keepasskey.core.model.KdbxEntry
+import com.keepasskey.core.model.KdbxGroup
+import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.core.security.ProtectedString
+import java.time.Instant
 
 /**
  * 条目冲突合并决策
@@ -24,18 +30,465 @@ data class ConflictedEntryPair(
 )
 
 /**
- * KDBX 三方同步合并引擎。
- * 针对云端多人并发协同或离线多端编辑场景：
- * 1. 快速计算两端条目增删；
- * 2. 依据条目 LastModificationTime（最后修改时间戳）自动合并无冲突条目；
- * 3. 对同时被修改的条目精确识别差异字段，生成待审冲突清单供用户决策；
- * 4. 支持复制副本 (DUPLICATE_BOTH) 或字段级覆盖合并。
+ * 数据库轻量级镜像（仅包含分组树与墓碑列表）。
+ * 由 sync 模块定义与消费，解耦对 database 模块的直接依赖。
+ */
+data class KdbxDatabaseLite(
+    val rootGroup: KdbxGroup,
+    val deletedObjects: List<DeletedObject> = emptyList()
+)
+
+/**
+ * 三方合并结果模型。
+ */
+data class MergeResult(
+    val mergedRoot: KdbxGroup,
+    val mergedDeletedObjects: List<DeletedObject>,
+    val conflicts: List<ConflictedEntryPair>
+)
+
+/**
+ * KDBX 墓碑感知三方同步合并引擎 (v2)。
+ * 遵循 KeePass 官方 PwDatabase.MergeIn 三方合并语义：
+ * 1. 基于 UUID 索引 base / local / remote 三方条目与分组树；
+ * 2. 墓碑感知：单边删除且对端未修改则确认删除并保留墓碑；
+ *    删除 vs 修改：修改方胜并从墓碑池中移除；
+ *    删除后重建：修改/创建时间晚于墓碑时间则采纳新版并清除墓碑；
+ * 3. 字段级精细合并：双方修改不同字段自动合并；同字段不同值生成冲突清单；
+ * 4. 分组层级自愈：无环校验、父组继承与条目自动归属；
+ * 5. 墓碑去重：按 UUID 去重并保留最晚删除时间戳。
  */
 object KdbxMerger {
 
     /**
-     * 比较本地数据库条目集合与云端远端条目集合
-     * @return Pair<已自动合并条目列表, 存在冲突的条目对列表>
+     * 墓碑感知三方数据库合并。
+     */
+    fun mergeDatabases(
+        base: KdbxDatabaseLite,
+        local: KdbxDatabaseLite,
+        remote: KdbxDatabaseLite
+    ): MergeResult {
+        val rootId = local.rootGroup.id
+
+        // 1. 索引三方条目与分组
+        val baseEntries = base.rootGroup.allEntries().associateBy { it.id }
+        val localEntries = local.rootGroup.allEntries().associateBy { it.id }
+        val remoteEntries = remote.rootGroup.allEntries().associateBy { it.id }
+
+        val baseGroups = base.rootGroup.allGroups().associateBy { it.id }
+        val localGroups = local.rootGroup.allGroups().associateBy { it.id }
+        val remoteGroups = remote.rootGroup.allGroups().associateBy { it.id }
+
+        val localDeleted = local.deletedObjects.associateBy { it.id }
+        val remoteDeleted = remote.deletedObjects.associateBy { it.id }
+
+        // 2. 合并分组结构
+        val allGroupUuids = (baseGroups.keys + localGroups.keys + remoteGroups.keys).filter { it != rootId }.toSet()
+        val survivingGroups = mutableMapOf<KdbxUuid, KdbxGroup>()
+
+        for (groupId in allGroupUuids) {
+            val bg = baseGroups[groupId]
+            val lg = localGroups[groupId]
+            val rg = remoteGroups[groupId]
+            val ld = localDeleted[groupId]
+            val rd = remoteDeleted[groupId]
+
+            val isLocalGroupDeleted = lg == null && (ld != null || bg != null)
+            val isRemoteGroupDeleted = rg == null && (rd != null || bg != null)
+
+            when {
+                lg == null && rg == null -> {
+                    // 双方均已删除
+                }
+                isLocalGroupDeleted && rg != null -> {
+                    val rModTime = rg.times.lastModificationTime
+                    val reRecreated = ld != null && rModTime.isAfter(ld.deletionTime)
+                    val rModified = isGroupModified(bg, rg)
+                    if (reRecreated || rModified) {
+                        // 修改方胜 / 删除后重建胜
+                        survivingGroups[groupId] = rg
+                    }
+                }
+                isRemoteGroupDeleted && lg != null -> {
+                    val lModTime = lg.times.lastModificationTime
+                    val leRecreated = rd != null && lModTime.isAfter(rd.deletionTime)
+                    val lModified = isGroupModified(bg, lg)
+                    if (leRecreated || lModified) {
+                        survivingGroups[groupId] = lg
+                    }
+                }
+                lg != null && rg != null -> {
+                    val lModified = isGroupModified(bg, lg)
+                    val rModified = isGroupModified(bg, rg)
+                    when {
+                        !lModified && !rModified -> survivingGroups[groupId] = lg
+                        lModified && !rModified -> survivingGroups[groupId] = lg
+                        !lModified && rModified -> survivingGroups[groupId] = rg
+                        else -> survivingGroups[groupId] = mergeGroupsBothModified(bg, lg, rg)
+                    }
+                }
+            }
+        }
+
+        // 3. 合并条目
+        val allEntryUuids = (baseEntries.keys + localEntries.keys + remoteEntries.keys + localDeleted.keys + remoteDeleted.keys)
+            .filter { !allGroupUuids.contains(it) && it != rootId }
+            .toSet()
+
+        val survivingEntries = mutableListOf<KdbxEntry>()
+        val conflicts = mutableListOf<ConflictedEntryPair>()
+
+        for (entryId in allEntryUuids) {
+            val be = baseEntries[entryId]
+            val le = localEntries[entryId]
+            val re = remoteEntries[entryId]
+            val ld = localDeleted[entryId]
+            val rd = remoteDeleted[entryId]
+
+            val isLocalDeleted = le == null && (ld != null || be != null)
+            val isRemoteDeleted = re == null && (rd != null || be != null)
+
+            when {
+                le == null && re == null -> {
+                    // 双方均无此条目 / 双方均已删除
+                }
+                isLocalDeleted && re != null -> {
+                    val rModTime = re.times.lastModificationTime
+                    val reRecreated = ld != null && rModTime.isAfter(ld.deletionTime)
+                    val reModified = isEntryModified(be, re)
+                    if (reRecreated || reModified) {
+                        // 修改胜 / 重建胜
+                        survivingEntries.add(re)
+                    }
+                }
+                isRemoteDeleted && le != null -> {
+                    val lModTime = le.times.lastModificationTime
+                    val leRecreated = rd != null && lModTime.isAfter(rd.deletionTime)
+                    val leModified = isEntryModified(be, le)
+                    if (leRecreated || leModified) {
+                        survivingEntries.add(le)
+                    }
+                }
+                le != null && re != null -> {
+                    val lModified = isEntryModified(be, le)
+                    val rModified = isEntryModified(be, re)
+                    when {
+                        !lModified && !rModified -> survivingEntries.add(le)
+                        lModified && !rModified -> survivingEntries.add(le)
+                        !lModified && rModified -> survivingEntries.add(re)
+                        else -> {
+                            val (mergedEntry, conflictPair) = mergeConflictedEntry(be, le, re)
+                            survivingEntries.add(mergedEntry)
+                            if (conflictPair != null) {
+                                conflicts.add(conflictPair)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 4. 构建合并后分组树与父子关系自愈（防死循环/断链挂载至根组）
+        val sanitizedGroups = mutableMapOf<KdbxUuid, KdbxGroup>()
+        for ((gid, g) in survivingGroups) {
+            val targetParent = g.parentGroupId
+            if (targetParent == null || targetParent == rootId || !survivingGroups.containsKey(targetParent)) {
+                sanitizedGroups[gid] = g.copy(parentGroupId = rootId)
+            } else {
+                // 环路检测
+                var curr = targetParent
+                var hasCycle = false
+                val visited = mutableSetOf(gid)
+                while (curr != null && curr != rootId && survivingGroups.containsKey(curr)) {
+                    if (!visited.add(curr)) {
+                        hasCycle = true
+                        break
+                    }
+                    curr = survivingGroups[curr]?.parentGroupId
+                }
+                if (hasCycle) {
+                    sanitizedGroups[gid] = g.copy(parentGroupId = rootId)
+                } else {
+                    sanitizedGroups[gid] = g
+                }
+            }
+        }
+
+        // 条目分配至所属分组
+        val entriesByParent = survivingEntries.groupBy { entry ->
+            val pid = entry.parentGroupId
+            if (pid != null && sanitizedGroups.containsKey(pid)) pid else rootId
+        }
+
+        val subgroupsByParent = sanitizedGroups.values.groupBy { it.parentGroupId ?: rootId }
+
+        fun assembleGroup(gid: KdbxUuid): KdbxGroup {
+            val rawGroup = if (gid == rootId) {
+                val lRoot = local.rootGroup
+                val rRoot = remote.rootGroup
+                val laterTimes = if (rRoot.times.lastModificationTime.isAfter(lRoot.times.lastModificationTime)) {
+                    rRoot.times
+                } else {
+                    lRoot.times
+                }
+                lRoot.copy(times = laterTimes)
+            } else {
+                sanitizedGroups[gid]!!
+            }
+
+            val childEntries = entriesByParent[gid].orEmpty()
+            val childGroups = (subgroupsByParent[gid].orEmpty()).map { assembleGroup(it.id) }
+
+            return rawGroup.copy(
+                entries = childEntries,
+                subgroups = childGroups
+            )
+        }
+
+        val mergedRootGroup = assembleGroup(rootId)
+
+        // 5. 墓碑合并去重与存活对象清洗
+        val survivingEntryUuids = survivingEntries.map { it.id }.toSet()
+        val survivingGroupUuids = sanitizedGroups.keys + rootId
+        val allSurvivingUuids = survivingEntryUuids + survivingGroupUuids
+
+        val candidateTombstones = (base.deletedObjects + local.deletedObjects + remote.deletedObjects)
+            .groupBy { it.id }
+
+        val mergedDeletedObjects = mutableListOf<DeletedObject>()
+        for ((id, list) in candidateTombstones) {
+            // 若存活（修改方胜或重建胜），从墓碑中剔除
+            if (!allSurvivingUuids.contains(id)) {
+                val latest = list.maxByOrNull { it.deletionTime }!!
+                mergedDeletedObjects.add(latest)
+            }
+        }
+
+        return MergeResult(
+            mergedRoot = mergedRootGroup,
+            mergedDeletedObjects = mergedDeletedObjects,
+            conflicts = conflicts
+        )
+    }
+
+    private fun isGroupModified(base: KdbxGroup?, current: KdbxGroup): Boolean {
+        if (base == null) return true
+        return base.name != current.name ||
+                base.notes != current.notes ||
+                base.iconId != current.iconId ||
+                base.customIconId != current.customIconId ||
+                base.parentGroupId != current.parentGroupId ||
+                base.times.lastModificationTime != current.times.lastModificationTime
+    }
+
+    private fun mergeGroupsBothModified(
+        base: KdbxGroup?,
+        local: KdbxGroup,
+        remote: KdbxGroup
+    ): KdbxGroup {
+        val lTime = local.times.lastModificationTime
+        val rTime = remote.times.lastModificationTime
+
+        val bName = base?.name
+        val name = when {
+            local.name != bName && remote.name == bName -> local.name
+            local.name == bName && remote.name != bName -> remote.name
+            local.name == remote.name -> local.name
+            else -> if (rTime.isAfter(lTime)) remote.name else local.name
+        }
+
+        val bNotes = base?.notes
+        val notes = when {
+            local.notes != bNotes && remote.notes == bNotes -> local.notes
+            local.notes == bNotes && remote.notes != bNotes -> remote.notes
+            local.notes == remote.notes -> local.notes
+            else -> if (rTime.isAfter(lTime)) remote.notes else local.notes
+        }
+
+        val bIconId = base?.iconId
+        val iconId = when {
+            local.iconId != bIconId && remote.iconId == bIconId -> local.iconId
+            local.iconId == bIconId && remote.iconId != bIconId -> remote.iconId
+            else -> if (rTime.isAfter(lTime)) remote.iconId else local.iconId
+        }
+
+        val bParent = base?.parentGroupId
+        val parentGroupId = when {
+            local.parentGroupId != bParent && remote.parentGroupId == bParent -> local.parentGroupId
+            local.parentGroupId == bParent && remote.parentGroupId != bParent -> remote.parentGroupId
+            else -> if (rTime.isAfter(lTime)) remote.parentGroupId else local.parentGroupId
+        }
+
+        val maxMod = if (rTime.isAfter(lTime)) rTime else lTime
+        val mergedTimes = local.times.copy(lastModificationTime = maxMod)
+
+        return local.copy(
+            name = name,
+            notes = notes,
+            iconId = iconId,
+            parentGroupId = parentGroupId,
+            times = mergedTimes
+        )
+    }
+
+    private fun isEntryModified(base: KdbxEntry?, current: KdbxEntry): Boolean {
+        if (base == null) return true
+        if (base.fields.size != current.fields.size) return true
+        for ((k, v) in current.fields) {
+            val bv = base.fields[k] ?: return true
+            if (bv.readString() != v.readString()) return true
+        }
+        if (base.customFields != current.customFields) return true
+        if (base.tags != current.tags) return true
+        if (base.attachments != current.attachments) return true
+        if (base.parentGroupId != current.parentGroupId) return true
+        if (base.overrideUrl != current.overrideUrl) return true
+        if (base.qualityCheck != current.qualityCheck) return true
+        if (base.iconId != current.iconId || base.customIconId != current.customIconId) return true
+        if (base.times.lastModificationTime != current.times.lastModificationTime) return true
+        return false
+    }
+
+    private fun mergeConflictedEntry(
+        base: KdbxEntry?,
+        local: KdbxEntry,
+        remote: KdbxEntry
+    ): Pair<KdbxEntry, ConflictedEntryPair?> {
+        val diffFields = mutableListOf<String>()
+
+        // 字段级三方合并
+        val allFieldKeys = (local.fields.keys + remote.fields.keys + (base?.fields?.keys ?: emptySet())).toSet()
+        val mergedFields = mutableMapOf<String, ProtectedString>()
+
+        for (key in allFieldKeys) {
+            val bv = base?.fields?.get(key)
+            val lv = local.fields[key]
+            val rv = remote.fields[key]
+
+            val lChanged = isFieldDifferent(lv, bv)
+            val rChanged = isFieldDifferent(rv, bv)
+
+            when {
+                lChanged && !rChanged -> if (lv != null) mergedFields[key] = lv
+                !lChanged && rChanged -> if (rv != null) mergedFields[key] = rv
+                !lChanged && !rChanged -> if (lv != null) mergedFields[key] = lv
+                else -> {
+                    // 双方均修改
+                    if (!isFieldDifferent(lv, rv)) {
+                        if (lv != null) mergedFields[key] = lv
+                    } else {
+                        // 冲突字段
+                        diffFields.add(getFieldDisplayName(key))
+                        val picked = if (remote.times.lastModificationTime.isAfter(local.times.lastModificationTime)) rv else lv
+                        if (picked != null) mergedFields[key] = picked
+                    }
+                }
+            }
+        }
+
+        // 自定义字段合并
+        val baseCustomMap = base?.customFields?.associateBy { it.key } ?: emptyMap()
+        val localCustomMap = local.customFields.associateBy { it.key }
+        val remoteCustomMap = remote.customFields.associateBy { it.key }
+        val allCustomKeys = (localCustomMap.keys + remoteCustomMap.keys + baseCustomMap.keys).toSet()
+        val mergedCustomFields = mutableListOf<KdbxCustomField>()
+
+        for (key in allCustomKeys) {
+            val bc = baseCustomMap[key]
+            val lc = localCustomMap[key]
+            val rc = remoteCustomMap[key]
+
+            val lChanged = lc?.value?.readString() != bc?.value?.readString()
+            val rChanged = rc?.value?.readString() != bc?.value?.readString()
+
+            when {
+                lChanged && !rChanged -> if (lc != null) mergedCustomFields.add(lc)
+                !lChanged && rChanged -> if (rc != null) mergedCustomFields.add(rc)
+                !lChanged && !rChanged -> if (lc != null) mergedCustomFields.add(lc)
+                else -> {
+                    if (lc?.value?.readString() == rc?.value?.readString()) {
+                        if (lc != null) mergedCustomFields.add(lc)
+                    } else {
+                        diffFields.add("自定义字段: $key")
+                        val picked = if (remote.times.lastModificationTime.isAfter(local.times.lastModificationTime)) rc else lc
+                        if (picked != null) mergedCustomFields.add(picked)
+                    }
+                }
+            }
+        }
+
+        // 标签合并 (Union)
+        val mergedTags = (local.tags + remote.tags).distinct()
+
+        // 附件合并
+        val bAttachments: List<KdbxAttachment> = base?.attachments ?: emptyList()
+        val mergedAttachments = when {
+            local.attachments != bAttachments && remote.attachments == bAttachments -> local.attachments
+            local.attachments == bAttachments && remote.attachments != bAttachments -> remote.attachments
+            else -> {
+                val attMap = mutableMapOf<String, KdbxAttachment>()
+                bAttachments.forEach { attMap[it.name] = it }
+                remote.attachments.forEach { attMap[it.name] = it }
+                local.attachments.forEach { attMap[it.name] = it }
+                attMap.values.toList()
+            }
+        }
+
+        // 时间戳取最新
+        val maxMod = if (remote.times.lastModificationTime.isAfter(local.times.lastModificationTime)) {
+            remote.times.lastModificationTime
+        } else {
+            local.times.lastModificationTime
+        }
+
+        val parentGroupId = when {
+            local.parentGroupId != base?.parentGroupId && remote.parentGroupId == base?.parentGroupId -> local.parentGroupId
+            local.parentGroupId == base?.parentGroupId && remote.parentGroupId != base?.parentGroupId -> remote.parentGroupId
+            else -> if (remote.times.lastModificationTime.isAfter(local.times.lastModificationTime)) remote.parentGroupId else local.parentGroupId
+        }
+
+        val mergedEntry = local.copy(
+            fields = mergedFields,
+            customFields = mergedCustomFields,
+            tags = mergedTags,
+            attachments = mergedAttachments,
+            times = local.times.copy(lastModificationTime = maxMod),
+            parentGroupId = parentGroupId
+        )
+
+        val conflictPair = if (diffFields.isNotEmpty()) {
+            ConflictedEntryPair(
+                entryId = local.id.toHexString(),
+                localEntry = local,
+                remoteEntry = remote,
+                modifiedFields = diffFields
+            )
+        } else {
+            null
+        }
+
+        return Pair(mergedEntry, conflictPair)
+    }
+
+    private fun isFieldDifferent(a: ProtectedString?, b: ProtectedString?): Boolean {
+        if (a == null && b == null) return false
+        if (a == null || b == null) return true
+        return a.readString() != b.readString()
+    }
+
+    private fun getFieldDisplayName(key: String): String {
+        return when (key) {
+            KdbxConstants.Fields.TITLE -> "标题 (Title)"
+            KdbxConstants.Fields.USER_NAME -> "用户名 (Username)"
+            KdbxConstants.Fields.PASSWORD -> "密码 (Password)"
+            KdbxConstants.Fields.URL -> "网址 (URL)"
+            KdbxConstants.Fields.NOTES -> "备注 (Notes)"
+            else -> key
+        }
+    }
+
+    /**
+     * 兼容旧版基于时间戳的两端自动合并
      */
     fun detectConflictsAndMergeAuto(
         localEntries: List<KdbxEntry>,
@@ -54,24 +507,16 @@ object KdbxMerger {
             val remote = remoteMap[uuid]
 
             when {
-                // 仅本地存在（本地新增）
-                local != null && remote == null -> {
-                    mergedList.add(local)
-                }
-                // 仅远端存在（远端新增）
-                local == null && remote != null -> {
-                    mergedList.add(remote)
-                }
-                // 两端均存在：检查两端最后修改时间
+                local != null && remote == null -> mergedList.add(local)
+                local == null && remote != null -> mergedList.add(remote)
                 local != null && remote != null -> {
-                    val localMod = local.times.lastModificationTime?.toEpochMilli() ?: 0L
-                    val remoteMod = remote.times.lastModificationTime?.toEpochMilli() ?: 0L
+                    val localMod = local.times.lastModificationTime.toEpochMilli()
+                    val remoteMod = remote.times.lastModificationTime.toEpochMilli()
 
                     val isLocalChanged = localMod > lastSyncTimestamp
                     val isRemoteChanged = remoteMod > lastSyncTimestamp
 
                     if (isLocalChanged && isRemoteChanged && !areEntriesIdentical(local, remote)) {
-                        // 两端在上次同步后均发生编辑，且内容不一致 -> 触发冲突
                         val diffFields = findDifferentFields(local, remote)
                         conflicts.add(
                             ConflictedEntryPair(
@@ -82,10 +527,8 @@ object KdbxMerger {
                             )
                         )
                     } else if (remoteMod > localMod) {
-                        // 远端更新，采纳远端
                         mergedList.add(remote)
                     } else {
-                        // 本地更新或时间一致，采纳本地
                         mergedList.add(local)
                     }
                 }
@@ -96,7 +539,7 @@ object KdbxMerger {
     }
 
     /**
-     * 根据用户在 ConflictResolutionScreen 中的选择解决冲突
+     * 根据用户在冲突界面中的选择解决冲突
      */
     fun resolveConflict(
         pair: ConflictedEntryPair,

@@ -109,4 +109,39 @@ interface VaultRepository {
      * 批量删除凭据条目（移至回收站）
      */
     suspend fun batchDeleteEntries(entryIds: Set<String>)
+
+    /**
+     * 一次性快照直出 Core 层 KdbxEntry 列表（供 Credential Provider 与 Autofill 系统服务直接消费，不经 UI 投影）
+     */
+    suspend fun getKdbxEntries(): List<com.keepasskey.core.model.KdbxEntry>
+
+    /**
+     * 根据依赖方标识 (RP ID) 或域名查询匹配的凭据条目
+     */
+    suspend fun findEntriesForRpId(rpId: String): List<com.keepasskey.core.model.KdbxEntry>
+
+    /**
+     * 根据 Base64URL 编码的 Credential ID 查找对应的 Passkey 凭据条目
+     */
+    suspend fun findPasskeyByCredentialId(credentialId: String): com.keepasskey.core.model.KdbxEntry?
+
+    /**
+     * 保存全新的 Passkey 凭据条目至根群组
+     */
+    suspend fun saveNewPasskeyEntry(data: com.keepasskey.core.model.PasskeyData): com.keepasskey.core.model.KdbxEntry
+
+    /**
+     * 递增并写回 Passkey 条目的签名计数器 (SignCount)
+     */
+    suspend fun patchPasskeySignCount(entryId: String, newCount: Int)
+
+    /**
+     * 保存传统自动填充捕获的凭据：匹配既有条目则更新密码，否则新建条目。用毕显式擦除密码字符。
+     */
+    suspend fun saveAutofillCredential(
+        packageName: String,
+        webDomain: String?,
+        username: String,
+        passwordChars: CharArray
+    )
 }

@@ -21,6 +21,27 @@
             </intent-filter>
         </activity>
 
+        <!-- Credential Manager 凭据注册与断言交互 Activity (exported=false) -->
+        <activity
+            android:name=".passkey.PasskeyCreateActivity"
+            android:exported="false"
+            android:theme="@style/Theme.KeePasskey" />
+
+        <activity
+            android:name=".passkey.PasskeyAssertionActivity"
+            android:exported="false"
+            android:theme="@style/Theme.KeePasskey" />
+
+        <activity
+            android:name=".passkey.PasswordFillActivity"
+            android:exported="false"
+            android:theme="@style/Theme.KeePasskey" />
+
+        <activity
+            android:name=".passkey.PasswordSaveActivity"
+            android:exported="false"
+            android:theme="@style/Theme.KeePasskey" />
+
         <!-- Android 16+ Credential Manager 系统凭据提供者服务 -->
         <service
             android:name=".passkey.KeePasskeyCredentialProviderService"

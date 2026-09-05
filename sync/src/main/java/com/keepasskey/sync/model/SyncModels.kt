@@ -63,3 +63,12 @@ sealed class SyncException(message: String, cause: Throwable? = null) : Exceptio
      */
     class ProtocolError(val statusCode: Int, message: String) : SyncException("HTTP $statusCode: $message")
 }
+
+/**
+ * 清理 ETag 中的引号与前后空白/弱校验前缀 (W/ 等)
+ */
+fun cleanEtag(etag: String?): String = etag?.trim('"', ' ', 'W', '/', '\\').orEmpty()
+
+@JvmName("cleanEtagExtension")
+fun String?.cleanEtag(): String = cleanEtag(this)
+

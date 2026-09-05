@@ -2,6 +2,7 @@ package com.keepasskey.sync.s3
 
 import com.keepasskey.sync.model.RemoteFileMetadata
 import com.keepasskey.sync.model.SyncException
+import com.keepasskey.sync.model.cleanEtag
 import com.keepasskey.sync.provider.SyncProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -9,6 +10,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import java.net.URLEncoder
 import java.security.MessageDigest
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -23,7 +25,9 @@ import javax.crypto.spec.SecretKeySpec
  * 内部实现纯净轻量级 AWS Signature Version 4 (SigV4) 鉴权算法：
  * 1. 规范请求 (Canonical Request) 构造与 SHA-256 摘要；
  * 2. 待签名字符串 (StringToSign) 生成；
- * 3. 级联 HMAC-SHA256 派生签名密钥 (Signing Key) 与最终 Authorization Header 构造。
+ * 3. 级联 HMAC-SHA256 派生签名密钥 (Signing Key) 与最终 Authorization Header 构造；
+ * 4. 对象键 URL 编码与 SigV4 canonicalUri 严格一致；
+ * 5. 首传 If-None-Match: * 原子创建与条件写并发控制。
  */
 class S3SyncProvider(
     private val endpoint: String,
@@ -34,9 +38,15 @@ class S3SyncProvider(
     private val client: OkHttpClient = OkHttpClient()
 ) : SyncProvider {
 
+    private fun encodePath(path: String): String {
+        return path.split('/').joinToString("/") { segment ->
+            if (segment.isEmpty()) "" else URLEncoder.encode(segment, "UTF-8").replace("+", "%20")
+        }
+    }
+
     private fun buildUrl(remotePath: String): String {
         val cleanEndpoint = endpoint.trimEnd('/')
-        val cleanKey = remotePath.trimStart('/')
+        val cleanKey = encodePath(remotePath.trimStart('/'))
         return if (cleanEndpoint.contains("://")) {
             val scheme = cleanEndpoint.substringBefore("://")
             val host = cleanEndpoint.substringAfter("://")
@@ -53,7 +63,6 @@ class S3SyncProvider(
 
     override suspend fun testConnection(): Result<Unit> = withContext(Dispatchers.IO) {
         runCatching {
-            // 通过 HEAD 请求根路径或测试对象检查存储桶连通性
             val url = buildUrl("")
             val headers = signV4(
                 method = "HEAD",
@@ -136,16 +145,37 @@ class S3SyncProvider(
         }
     }
 
+    /**
+     * 上传本地数据库文件至 S3。
+     *
+     * 并发安全与条件写策略：
+     * 1. 首传场景 (expectedEtag == null)：
+     *    执行 HEAD 探测，若文件不存在（HTTP 404），则在 PUT 时附带 `If-None-Match: *` 请求头，
+     *    实现 S3 协议级原子创建；若遭遇并发写入冲突，S3 返回 HTTP 412 Precondition Failed。
+     * 2. 覆盖更新场景：
+     *    若远端已存在，执行 HEAD 获取远端当前 ETag，比对 expectedEtag；
+     *    若不匹配则抛出 [SyncException.ConflictError]。
+     *    【TOCTOU 限界说明】：标准 AWS S3 PUT 不支持对现有对象的 If-Match 条件覆写，
+     *    因此在 HEAD 探测与 PUT 提交之间存在微小的 TOCTOU (Time-of-Check to Time-of-Use) 竞争窗口。
+     */
     override suspend fun upload(
         remotePath: String,
         data: ByteArray,
         expectedEtag: String?
     ): Result<String> = withContext(Dispatchers.IO) {
         runCatching {
-            // 若携带 expectedEtag，先做 HEAD 检查避免并发覆盖
-            if (!expectedEtag.isNullOrBlank()) {
+            val isFirstUpload: Boolean
+            if (expectedEtag.isNullOrBlank()) {
+                val metaResult = getMetadata(remotePath)
+                if (metaResult.isFailure && metaResult.exceptionOrNull() is SyncException.FileNotFound) {
+                    isFirstUpload = true
+                } else {
+                    isFirstUpload = false
+                }
+            } else {
+                isFirstUpload = false
                 val currentMeta = getMetadata(remotePath).getOrNull()
-                if (currentMeta != null && currentMeta.etag != expectedEtag.cleanEtag()) {
+                if (currentMeta != null && currentMeta.etag != cleanEtag(expectedEtag)) {
                     throw SyncException.ConflictError(
                         remoteEtag = currentMeta.etag,
                         localExpectedEtag = expectedEtag,
@@ -168,8 +198,20 @@ class S3SyncProvider(
 
             headers.forEach { (k, v) -> requestBuilder.header(k, v) }
 
+            if (isFirstUpload) {
+                requestBuilder.header("If-None-Match", "*")
+            }
+
             client.newCall(requestBuilder.build()).execute().use { response ->
                 when {
+                    response.code == 412 -> {
+                        val currentMeta = getMetadata(remotePath).getOrNull()
+                        throw SyncException.ConflictError(
+                            remoteEtag = currentMeta?.etag.orEmpty(),
+                            localExpectedEtag = expectedEtag.orEmpty(),
+                            message = "S3 对象并发创建冲突或已被其他人修改 (HTTP 412 Precondition Failed)"
+                        )
+                    }
                     response.code == 401 || response.code == 403 ->
                         throw SyncException.AuthenticationError("S3 鉴权失败 (${response.code})")
                     !response.isSuccessful -> throw SyncException.ProtocolError(response.code, response.message)
@@ -203,7 +245,8 @@ class S3SyncProvider(
     }
 
     /**
-     * 实现 AWS Signature Version 4 鉴权
+     * 实现 AWS Signature Version 4 鉴权。
+     * canonicalUri 必须与实际请求 URL 经过相同路径编码后的 URI 严格一致。
      */
     internal fun signV4(
         method: String,
@@ -269,17 +312,15 @@ class S3SyncProvider(
         return digest.digest(data).joinToString("") { "%02x".format(it) }
     }
 
-    private fun String.cleanEtag(): String = trim('"', ' ', 'W', '/', '\\')
-
     private fun parseHttpDate(dateStr: String): Long {
-        if (dateStr.isBlank()) return System.currentTimeMillis()
+        if (dateStr.isBlank()) return 0L
         try {
             val sdf = SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss zzz", Locale.US).apply {
                 timeZone = TimeZone.getTimeZone("GMT")
             }
-            return sdf.parse(dateStr)?.time ?: System.currentTimeMillis()
+            return sdf.parse(dateStr)?.time ?: 0L
         } catch (_: Exception) {
-            return System.currentTimeMillis()
+            return 0L
         }
     }
 

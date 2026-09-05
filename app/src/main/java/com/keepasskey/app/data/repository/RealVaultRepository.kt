@@ -1,6 +1,7 @@
 package com.keepasskey.app.data.repository
 
 import android.content.Context
+import com.keepasskey.app.passkey.DomainMatcher
 import com.keepasskey.app.ui.model.EntryCategory
 import com.keepasskey.app.ui.model.UiAttachment
 import com.keepasskey.app.ui.model.UiCustomField
@@ -14,6 +15,7 @@ import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.model.KdbxGroup
 import com.keepasskey.core.model.KdbxTimes
 import com.keepasskey.core.model.KdbxUuid
+import com.keepasskey.core.model.PasskeyData
 import com.keepasskey.core.security.ProtectedString
 import com.keepasskey.database.session.DatabaseSession
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -23,6 +25,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import java.io.File
@@ -399,6 +402,122 @@ class RealVaultRepository @Inject constructor(
     private fun formatInstant(instant: java.time.Instant): String {
         val dtf = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm", Locale.getDefault())
         return dtf.format(instant.atZone(ZoneId.systemDefault()))
+    }
+
+    override suspend fun getKdbxEntries(): List<KdbxEntry> {
+        val db = databaseSession.databaseFlow.first() ?: return emptyList()
+        return db.rootGroup.allEntries()
+    }
+
+    override suspend fun findEntriesForRpId(rpId: String): List<KdbxEntry> {
+        val cleanTarget = DomainMatcher.extractDomain(rpId)
+        return getKdbxEntries().filter { entry ->
+            val passkey = PasskeyData.fromCustomFields(entry.customFields)
+            val passkeyMatch = passkey != null && DomainMatcher.isDomainMatch(passkey.relyingPartyId, cleanTarget)
+            val urlMatch = entry.url.isNotBlank() && DomainMatcher.isDomainMatch(entry.url, cleanTarget)
+            passkeyMatch || urlMatch
+        }
+    }
+
+    override suspend fun findPasskeyByCredentialId(credentialId: String): KdbxEntry? {
+        return getKdbxEntries().firstOrNull { entry ->
+            val passkey = PasskeyData.fromCustomFields(entry.customFields)
+            passkey?.credentialId == credentialId
+        }
+    }
+
+    override suspend fun saveNewPasskeyEntry(data: PasskeyData): KdbxEntry {
+        val title = "${data.userName}@${data.relyingPartyId}"
+        val fields = mapOf(
+            KdbxConstants.Fields.TITLE to ProtectedString(title, isProtected = false),
+            KdbxConstants.Fields.USER_NAME to ProtectedString(data.userName, isProtected = false),
+            KdbxConstants.Fields.URL to ProtectedString("https://${data.relyingPartyId}", isProtected = false)
+        )
+        val newEntry = KdbxEntry(
+            id = KdbxUuid.random(),
+            parentGroupId = null,
+            fields = fields,
+            customFields = data.toCustomFields()
+        )
+        databaseSession.saveEntry(newEntry)
+        databaseSession.save()
+        return newEntry
+    }
+
+    override suspend fun patchPasskeySignCount(entryId: String, newCount: Int) {
+        val targetUuid = parseUuidOrNull(entryId) ?: return
+        val currentDb = databaseSession.databaseFlow.first() ?: return
+        val entry = currentDb.rootGroup.allEntries().firstOrNull { it.id == targetUuid } ?: return
+
+        var found = false
+        val updatedCustomFields = entry.customFields.map { cf ->
+            if (cf.key == PasskeyData.FIELD_SIGN_COUNT) {
+                found = true
+                KdbxCustomField(cf.key, ProtectedString(newCount.toString(), isProtected = false))
+            } else {
+                cf
+            }
+        }.toMutableList()
+
+        if (!found) {
+            updatedCustomFields.add(KdbxCustomField(PasskeyData.FIELD_SIGN_COUNT, ProtectedString(newCount.toString(), isProtected = false)))
+        }
+
+        val updatedEntry = entry.copy(
+            customFields = updatedCustomFields,
+            times = entry.times.withModified()
+        )
+        databaseSession.saveEntry(updatedEntry)
+        databaseSession.save()
+    }
+
+    override suspend fun saveAutofillCredential(
+        packageName: String,
+        webDomain: String?,
+        username: String,
+        passwordChars: CharArray
+    ) {
+        try {
+            val domain = webDomain?.takeIf { it.isNotBlank() }
+            val allEntries = getKdbxEntries()
+
+            val matchedEntry = allEntries.firstOrNull { entry ->
+                val matchDomain = domain != null && entry.url.isNotBlank() && DomainMatcher.isDomainMatch(entry.url, domain)
+                val matchPackage = entry.title.contains(packageName, ignoreCase = true) ||
+                        entry.notes.contains(packageName, ignoreCase = true) ||
+                        (domain == null && entry.url.contains(packageName, ignoreCase = true))
+                (matchDomain || matchPackage) && (entry.userName == username || entry.userName.isEmpty())
+            }
+
+            val pwdProtected = ProtectedString(passwordChars, isProtected = true)
+            if (matchedEntry != null) {
+                var updated = matchedEntry.withField(KdbxConstants.Fields.PASSWORD, pwdProtected)
+                if (updated.userName.isEmpty() && username.isNotBlank()) {
+                    updated = updated.withField(KdbxConstants.Fields.USER_NAME, username)
+                }
+                databaseSession.saveEntry(updated)
+            } else {
+                val titleDomain = domain ?: packageName
+                val title = if (username.isNotBlank()) "$username@$titleDomain" else titleDomain
+                val url = if (domain != null) "https://$domain" else "android://$packageName"
+                val fields = mapOf(
+                    KdbxConstants.Fields.TITLE to ProtectedString(title, isProtected = false),
+                    KdbxConstants.Fields.USER_NAME to ProtectedString(username, isProtected = false),
+                    KdbxConstants.Fields.PASSWORD to pwdProtected,
+                    KdbxConstants.Fields.URL to ProtectedString(url, isProtected = false),
+                    KdbxConstants.Fields.NOTES to ProtectedString("Package: $packageName", isProtected = false)
+                )
+                val newEntry = KdbxEntry(
+                    id = KdbxUuid.random(),
+                    parentGroupId = null,
+                    fields = fields
+                )
+                databaseSession.saveEntry(newEntry)
+            }
+            databaseSession.save()
+        } finally {
+            java.util.Arrays.fill(passwordChars, '0')
+        }
     }
 
     companion object {
