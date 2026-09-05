@@ -15,22 +15,20 @@
 | minSdk | 36 | 仅考虑 API 36+，无旧版垫片负担 |
 | JVM | 17 | 所有模块统一 source/target 17（Kotlin 2.2 起 `android.kotlinOptions` 已移除，统一用 `kotlin { compilerOptions { jvmTarget } }`） |
 
-构建统一使用 Gradle Wrapper（Gradle 9.3.1），Windows 下执行 `.\gradlew.bat`；常用任务：`assembleDebug`、`:app:compileDebugKotlin`（快速编译检查）、`lint`、`test`（尚无 `src/test`）。
+构建统一使用 Gradle Wrapper（Gradle 9.3.1），Windows 下执行 `.\gradlew.bat`；常用任务：`assembleDebug`、`:app:compileDebugKotlin`（快速编译检查）、`lint`、`testDebugUnitTest`（全模块 166 个测试）。
 
-## 项目现状（全 7 个阶段全部圆满达成！🎉 项目全功能交付）
+## 项目现状（参考项目差距修复专项 Wave 1-4 交付完毕，166 测试全绿）
 
-- **阶段 7 核心成果全量落地**：
-  - **生产级 R8 混淆与安全防剥离（proguard-rules.pro）**：
-    - 精确配置对 BouncyCastle 算法提供者、Hilt/Dagger 注入、OkHttp、AndroidX 等的混淆保留规则；
-    - 针对敏感数据安全类（`ClearableByteArray`、`ProtectedString`）明确保留 `clear()`、`close()`、`fill(...)` 方法，杜绝 R8 误判为无副作用死代码而剥离；
-    - 在 `app/build.gradle.kts` 中配置 `isMinifyEnabled = true`，成功通过 `minifyReleaseWithR8` 混淆编译；
-  - **全模块自动化单元测试保护网**：
-    - 覆盖 `core`、`crypto`、`database`、`sync`、`app` 全部 5 个模块；
-    - 共计 114 个高精度单元测试，100% 绿灯通过；
-  - **交付闭环与编译健康**：
-    - `assembleDebug` 与混淆 Release 编译全部一次性通过，零崩溃、零警告。
+- **2026-09-05 差距修复专项（REMEDIATION_PLAN.md，4 Wave 多子代理模式）**：
+  - **Wave 1（git ed601da）**：KDBX v4 引擎与 KeePass 官方 2.61.1 逐字节互操作——cipherKey 改官方 SHA-512 截断派生（旧库自动回退迁移）、.NET Ticks 时间编码、XML 全字段往返（Meta/AutoType/Binary-Ref/CustomData）、InnerHeader 二进制池去重、类型化异常；crypto 补齐 CBOR/COSE/三算法 Passkey 签名/KDF 基准。
+  - **Wave 2（git 4927189）**：sync 模块三哈希同步状态机（SyncCache/SyncEngine + ICacheSupervisor 六事件）+ KdbxMerger v2 墓碑三方合并 + WebDAV/S3 协议加固；app 模块 CredentialProviderService/AutofillService 从空壳真实化（4 个 Launcher Activity + DomainMatcher 严格域名匹配）。
+  - **Wave 3（git a45bfa5）**：数据层编辑保留、库内回收站（墓碑落库）、TOTP/健康检查去假数据、SyncCoordinator 同步全链路接线、同步凭据 Keystore 加密持久化、allowBackup 加固、parseDate 含 T 误判缺陷修复、proguard 包级 keep 扩展。
+  - **Wave 4（文档收口）**：AGENTS.md 与本文件如实化（22 项问题与 4 Wave 修复全记录）。
+  - **测试基线**：166 个单元测试全绿（app 65 / core 9 / crypto 34 / database 28 / sync 30）；assembleDebug 与 assembleRelease（R8）通过。
 
 ## 决策日志
+
+- **2026-09-05**：发现并修复「7 阶段全量验收」文档失真——全量代码审计对照参考项目架构分析发现 22 项问题（CredentialProviderService 空响应、triggerSync 模拟延时、TOTP 假码、cipherKey 非官方派生、parseDate Base64 含 T 误判等）。以 REMEDIATION_PLAN.md 4 波次多子代理模式完成修复，每波主会话独立复跑测试（--rerun-tasks 防缓存假绿）+ 语义化提交。关键设计决策：① cipherKey 迁移采用「官方派生优先+旧派生回退重试」，旧文件保存即自动迁移；② SyncEngine 定为纯字节级（sync 禁依赖 database），kdbx 语义合并编排放 app 层 SyncCoordinator；③ KDBX4 每次序列化随机 IV/Seed 导致哈希漂移，SyncCoordinator 以内容级比对防抖复用基线；④ 回收站改库内标准组（recycleBinUuid 落库），DatabaseSession 增量 updateDatabaseMeta 为唯一 database 适配点。已知限界：DOM 非流式解析（远期）、S3 HEAD+PUT TOCTOU 微窗口、锁库 UX v1、Compose 密码 String 边界妥协。
 
 - **2026-09-05**：新增第 5 个参考项目 **KeePassXC**（`参考项目/keepassxc-develop`，C++/Qt develop 分支），完成 728 行深度架构分析（`KeePassXC-架构分析.md`），并同步收录至 `.codebuddy/skills/references/`。重点固化三块可移植资产：① `Merger`（`src/core/Merger.cpp`）的条目级合并、秒级时间戳截断与墓碑复活规则 → `KdbxMerger` 直接算法参考；② `KdbxReader/KdbxWriter` KDBX 3/4 读写管线 → `database` 模块交叉验证；③ 浏览器集成的 `KPEX_PASSKEY_*` Entry 属性 schema 与 WebAuthn 栈隔离分层 → `PasskeyData` 与 Credential Provider 隔离设计。参考项目优先级层级更新为 5 级（KeePassXC 列为"算法级参考"，Monica 降为第 5 级），`AGENTS.md`、主 `README.md`、`.codebuddy/skills/reference-projects.md` 与两处 references README 已同步更新。
 
@@ -62,7 +60,9 @@
 
 ## 待办与已知问题
 
+- KDBX DOM 解析改造流式（XmlPullParser + 进度 Flow）——大库内存优化，远期。
+- S3 覆写路径的 TOCTOU 微窗口（HEAD+ETag 预检后 PUT）——S3 原生条件写待版本桶支持后引入。
+- Credential Provider 锁库 UX v2：链式解锁（系统弹窗内完成生物识别）。
 - kapt 迁移 KSP（需与 Kotlin 升级联动）。
 - 引入 version catalog（`libs.versions.toml`）收敛依赖版本。
-- `crypto` 模块待引入 BouncyCastle 依赖；Argon2 纯 Java 性能待评估，NDK 加速列为远期优化。
-- `database` / `crypto` 需规划 KDBX 标准测试向量与 `src/test`。
+- Argon2 纯 JVM 性能待评估，NDK 加速列为远期优化（KdfBenchmark 已提供设备自适应参数）。

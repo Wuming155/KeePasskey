@@ -47,14 +47,17 @@ KeePasskey 是一款使用原生 Kotlin 开发的现代化 Android 密码管理�
 - `.\gradlew.bat assembleDebug` — 编译全部模块
 - `.\gradlew.bat :app:compileDebugKotlin` — 仅快速检查 Kotlin 编译
 - `.\gradlew.bat lint` — Android Lint
-- `.\gradlew.bat test` — 单元测试（目前尚无 `src/test`，规划中）
+- `.\gradlew.bat test` — 单元测试（全模块 `src/test` 已就绪，`testDebugUnitTest` 可单模块执行；当前 166 个测试全绿）
 - 版本升级需整体配套：AGP ↔ Gradle ↔ Kotlin ↔ Compose BOM（Compose BOM 2026.06.00+ 要求 compileSdk 37，当前用 2026.06.01 对齐 compileSdk 36）
 
-**当前阶段状态**：**🎉 KeePasskey 全部 7 个交付阶段已圆满达成并全量验收完毕！**
-- **阶段 1（UI 优先）**：Material 3 + Jetpack Compose 15 个屏幕/子屏与响应式双端适配；
-- **阶段 2（密码学核心与 KDBX 引擎）**：BouncyCastle 对称/流密码/Argon2/AES-KDF，KDBX v4 二进制/XML 解析写回与 `DatabaseSession` 原子写盘；
-- **阶段 3（系统级生物识别与防御性加固）**：AndroidX Biometric 强生物识别 Class 3 + Keystore AES-256-GCM 硬件凭据解封，动态 `FLAG_SECURE` 防多任务窥屏，剪贴板 `EXTRA_IS_SENSITIVE` 与定时擦除，Auto-Lock 熄屏超时熔断；
-- **阶段 4（通行密钥与 Credential Manager）**：WebAuthn/FIDO2 `PasskeyData` 规范，`PasskeyCryptoEngine` (ES256 ECDSA P-256/RFC 6979)，接入 Android 16+ `CredentialProviderService` 与传统表单 `AutofillService`；
-- **阶段 5（多协议云端同步与三方冲突合并）**：通用 `SyncProvider`，`WebDavSyncProvider` (ETag 412 乐观锁)，`S3SyncProvider` (纯 Kotlin AWS SigV4 规范鉴权)，`KdbxMerger` 条目级时间戳增量识别与三方冲突合并；
-- **阶段 6（KeePass 高级特性与工具箱）**：纯 Kotlin RFC 6238 TOTP / RFC 4226 HOTP 动态双重认证与 KeyUri 解析，`AttachmentManager` 附件安全管理，`HistoryManager` 历史快照与一键回滚，`HealthCheckEngine` 离线弱密码字典与重复复用审计；
-- **阶段 7（质量工程与混淆加固交付）**：生产级 R8 规则 `proguard-rules.pro` 保护敏感内存方法与密码学底座，全工程 114 个高精度单元测试全部绿灯通过，混淆与打包编译构建顺利闭环。
+**当前阶段状态**：**🔧 参考项目差距修复专项（`REMEDIATION_PLAN.md`）Wave 1-4 全量交付完毕。**
+原「7 阶段全量验收」表述经 2026-09-05 全量代码审计修正：对照参考项目发现 22 项问题（P0×6 / P1×7 / P2×9，含系统服务空壳响应、模拟延时同步、TOTP 假码、cipherKey 非官方派生等），已按 4 个 Wave 修复并逐波验收提交：
+
+- **Wave 1（git ed601da）KDBX 官方兼容 + crypto 底座**：cipherKey 派生修正为官方 SHA-512 截断标准（读取侧旧派生自动回退、保存自动迁移）；XML Times 修正为 .NET Ticks 编码；XML 全字段往返（Meta/AutoType/Binary-Ref/CustomData）；InnerHeader 二进制池与附件去重；类型化异常体系；CBOR/COSE 确定性编码器；Passkey 三算法签名（ES256/Ed25519/RS256 + RFC 6979）；KdfBenchmark 设备自适应基准。
+- **Wave 2（git 4927189）同步引擎 + 凭据服务端到端**：SyncEngine 三哈希状态机（Kp2a 决策树 + ICacheSupervisor 六事件 + 离线开关）；KdbxMerger v2 墓碑感知三方合并（删除vs修改/删除后重建/字段级合并/环路自愈）；WebDAV DOM 解析 + uploadAtomic 事务写 + URL 编码；S3 `If-None-Match:*` 原子首传 + SigV4 编码一致性；CredentialProviderService/AutofillService 从空壳真实化（PublicKey/PasswordCredentialEntry + CreateEntry + 锁库 Action + 5s 超时预算）；4 个 Launcher Activity（FLAG_SECURE + attestation/assertion 组装）；DomainMatcher 严格域名匹配根治跨域凭据泄露。
+- **Wave 3（git a45bfa5）数据层完整性**：编辑保存完整保留（history/times/tags/图标/自定义字段含 Passkey + HistoryManager 快照）；KDBX 标准库内回收站（recycleBinUuid 落库 + DeletedObject 墓碑 + previousParentGroup 还原）；TOTP 真实化（KeyUri 解析 + RFC 6238 官方向量）；健康检查真实化（HealthCheckEngine 接线 + 评分公式）；SyncCoordinator 同步全链路接线（KDBX4 随机 IV 哈希漂移防抖）；同步凭据 Keystore AES-256-GCM 加密持久化；Unlock 密码 CharArray 边界加固；allowBackup=false + dataExtractionRules；修复 parseDate Base64 含 T 误判缺陷；proguard 包级 keep 扩展。
+- **Wave 4（文档收口）**：文档如实化（本节）与存档清理。
+
+**测试基线**：全工程 166 个单元测试全绿（app 65 / core 9 / crypto 34 / database 28 / sync 30）；`assembleDebug` 与 `assembleRelease`（R8 混淆）构建闭环通过。
+
+**已知限界（如实记录，详见 `REMEDIATION_PLAN.md` 执行日志）**：KDBX 解析为 DOM 非流式（大库内存优化远期）；S3 覆写存在 HEAD+PUT TOCTOU 微窗口（KDoc 注明）；Credential Provider 锁库 UX 为 v1（Action 引导解锁，非链式解锁）；Compose TextField 密码 String 边界妥协（ViewModel 第一时间转 CharArray 并清零）。

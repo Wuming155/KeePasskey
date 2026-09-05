@@ -119,3 +119,16 @@
 - **Wave 3-E 继续推进（轮 12 预审）**：E3 TOTP 真实化确认——AuthenticatorViewModel 已删除 generateMockCode 与 GitHub/Google/AWS 标题硬编码，改为 totpSecret 过滤 + OtpEngine.calculateTotp（SHA1/256/512 三算法映射）+ OtpEngine.getRemainingSeconds；已新增 TotpKeyUriParserTest 与 AuthenticatorViewModelTest。E1/E2/E3 主代码与测试渐次落盘，剩 E4(健康检查)/E5(同步接线)/E6(凭据持久化)/E7/E8/E9。
 - **Wave 3-E 后段预审（轮 13）**：E4 健康检查（SettingsViewModel+HealthCheckViewModelTest）、E6 SyncCredentialsStore(+Test)、E5 SyncCoordinator（379 行）均已落盘并预审通过——SyncCoordinator 决策树完整（DIRTY+已缓存→commitLocal 快速路径→openRemote 全分支映射 RemoteSynced/LocalWinAutoUploaded/RemoteLostRestored/ConflictDetected→三方合并），mutex 串行保护、useCredentials 借出清零、Default/IO 调度边界、conflictFlow + pending 上下文缓存、测试注入点（testSyncProvider/testRemotePath）设计规范。AGENTS.md 外部更新（新增 KeePassXC 第 4 优先级算法参考）与已交付 KdbxMerger v2 墓碑语义一致，无需返工。剩 ConflictResolutionViewModel 接线/E7/E8/E9 与全量验证。
 - **Wave 3-E 收尾观察（轮 14）**：E5 剩余件全部落盘——ConflictResolutionViewModel 接线(+Test 假数据删除)、SyncCoordinatorTest、WebDavSyncScreen 测试连接接线、E7 UnlockViewModel 密码边界（9:56）、E8 data_extraction_rules.xml + Manifest allowBackup=false（9:58）。代理正执行最终全量验证（10:05 仍在调整 SettingsViewModel，疑为测试修复迭代）。
+- **✅ Wave 3 验收通过（轮 15）**：代理 E 交付 E1-E9 全部任务（含附件数据管线 P2-21 完整落地，超预期）。**主会话强制重跑（--rerun-tasks）发现 3 个 database 测试随机失败**——根因即代理报告的 Wave 1 遗留缺陷：`KdbxXmlTimeHelper.parseDate` 用 `contains("T")` 嗅探 ISO-8601，Base64 时间值含大写 T（约 17% 概率）被误判抛 KdbxCorruptFileException。主会话直接修复：改严格正则 `^\d{4}-\d{2}-\d{2}` 嗅探（Base64 字母表无连字符，永不误判）+ 回归测试。修复后全模块 166 测试全绿（33 套件：app 65/core 9/crypto 34/database 28/sync 30）；assembleDebug + assembleRelease（R8）通过。Git 提交 `a45bfa5`（wave3+嗅探修复+proguard 扩展）。
+- **✅ Wave 4 收口（轮 15）**：AGENTS.md「当前阶段状态」如实化（4 Wave 修复全记录+166 测试基线+已知限界）；project-status.md 项目现状/决策日志/待办更新（决策日志含 4 项关键设计决策与已知限界）；执行存档清理（wave2c/2d/3e prompt 与 wave4 草稿删除，本计划保留）。最终提交 docs(wave4)。
+
+## 八、最终验收证据汇总（目标完成判定）
+
+| 验收项 | 证据 |
+|---|---|
+| Wave 1 KDBX 官方兼容 | git ed601da：cipherKey SHA-512 截断+回退迁移、.NET Ticks（已知向量 638396640000000000L）、XML 全字段往返、二进制池去重、类型化异常（KdbxCompatibilityAndSecurityTest 等 27 database 测试） |
+| Wave 1 crypto 扩展 | git ed601da：CBOR（RFC 8949 向量）、COSE 三结构、三算法 keygen→sign→verify 闭环、AT 段结构断言、KdfBenchmark 夹紧边界（34 crypto 测试） |
+| Wave 2 同步引擎 | git 4927189：SyncEngine 决策树全分支（SyncEngineTest 11 用例）、KdbxMerger v2 墓碑语义（KdbxMergerV2Test 7 用例）、WebDAV 事务写与编码、S3 原子首传（sync 30 测试） |
+| Wave 2 凭据服务 | git 4927189：CredentialProviderService 三回调真实化、4 Launcher Activity、AutofillService Dataset、DomainMatcher（app 测试含 DomainMatcher/AutofillScanner/Matching 8 用例） |
+| Wave 3 数据层 | git a45bfa5：编辑保留+HistoryManager、库内回收站+墓碑、TOTP RFC 6238 向量（t=59→287082）、健康检查、SyncCoordinator 全链路、凭据加密、allowBackup、附件管线（app 65 测试） |
+| Wave 4 构建与文档 | 166 测试全绿（--rerun-tasks 强制重跑验证）；assembleDebug+assembleRelease(R8) 通过；AGENTS.md/project-status.md 如实化；存档清理；最终 docs(wave4) 提交 |
