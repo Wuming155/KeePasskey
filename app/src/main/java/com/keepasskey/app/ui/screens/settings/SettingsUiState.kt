@@ -190,3 +190,16 @@ data class SettingsUiState(
     val buildNumber: String = "Build 2026.09.04",
     val kdbxFormat: String = "KDBX 4.1 (Argon2id + ChaCha20)"
 )
+
+/**
+ * KDF 设备自适应基准状态（M6 整改：KdfBenchmark 真实接线，替代原假基准按钮）。
+ * [recommendedIterations]/[recommendedMemoryMb]/[recommendedParallelism] 非空时表示基准完成，
+ * UI 应将推荐值填入 Argon2 参数调节项。
+ */
+data class KdfBenchmarkUiState(
+    val isRunning: Boolean = false,
+    val recommendedIterations: Long? = null,
+    val recommendedMemoryMb: Long? = null,
+    val recommendedParallelism: Int? = null,
+    val errorMessage: String? = null
+)

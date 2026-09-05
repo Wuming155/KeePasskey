@@ -51,6 +51,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -62,6 +63,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import com.keepasskey.app.ui.components.SecurePasswordField
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -126,7 +128,7 @@ fun DatabasePickerContent(
     onSelectDatabase: (String) -> Unit,
     onOpenCreateDialog: () -> Unit,
     onCloseCreateDialog: () -> Unit,
-    onCreateDatabase: (name: String, pwd: String, keyFile: Boolean, preset: String) -> Unit,
+    onCreateDatabase: (name: String, pwd: CharArray, keyFile: Boolean, preset: String) -> Unit,
     onOpenExistingClick: () -> Unit,
     onCloseOpenSourceDialog: () -> Unit,
     onImportFromSource: (source: OpenVaultSourceType, name: String, path: String) -> Unit,
@@ -618,11 +620,12 @@ private fun OpenExistingVaultDialog(
 @Composable
 private fun CreateVaultWizardDialog(
     onDismiss: () -> Unit,
-    onConfirm: (name: String, pwd: String, keyFile: Boolean, preset: String) -> Unit
+    onConfirm: (name: String, pwd: CharArray, keyFile: Boolean, preset: String) -> Unit
 ) {
     var vaultName by remember { mutableStateOf("my_vault.kdbx") }
-    var password by remember { mutableStateOf("") }
-    var confirmPassword by remember { mutableStateOf("") }
+    // H2 整改：主密码以 CharArray 承载（SecurePasswordField 桥接），不进入 String / UiState / StateFlow
+    var passwordChars by remember { mutableStateOf(CharArray(0)) }
+    var confirmChars by remember { mutableStateOf(CharArray(0)) }
     var passwordVisible by remember { mutableStateOf(false) }
     var useKeyFile by remember { mutableStateOf(false) }
     var keyFileMode by remember { mutableStateOf("GENERATE") } // "GENERATE" or "SELECT_EXISTING"
@@ -630,7 +633,15 @@ private fun CreateVaultWizardDialog(
     var selectedPreset by remember { mutableStateOf("ChaCha20 + Argon2id") }
     val presets = listOf("ChaCha20 + Argon2id", "AES-256 + Argon2id", "Twofish + AES-KDF")
 
-    val isFormValid = vaultName.isNotBlank() && password.isNotEmpty() && password == confirmPassword
+    val isFormValid = vaultName.isNotBlank() && passwordChars.isNotEmpty() && passwordChars.contentEquals(confirmChars)
+
+    // 弹窗离场（确认 / 取消 / 进程回收）时擦除组件内持有的全部密码副本
+    DisposableEffect(Unit) {
+        onDispose {
+            passwordChars.fill('0')
+            confirmChars.fill('0')
+        }
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -651,32 +662,31 @@ private fun CreateVaultWizardDialog(
                     modifier = Modifier.fillMaxWidth()
                 )
 
-                OutlinedTextField(
-                    value = password,
-                    onValueChange = { password = it },
-                    label = { Text(stringResource(R.string.db_picker_new_pwd)) },
-                    visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                    trailingIcon = {
-                        IconButton(onClick = { passwordVisible = !passwordVisible }) {
-                            Icon(if (passwordVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility, contentDescription = null)
-                        }
+                SecurePasswordField(
+                    label = stringResource(R.string.db_picker_new_pwd),
+                    onPasswordChanged = { chars ->
+                        passwordChars.fill('0')
+                        passwordChars = chars.copyOf()
                     },
-                    singleLine = true,
+                    isPasswordVisible = passwordVisible,
+                    onToggleVisibility = { passwordVisible = !passwordVisible },
                     modifier = Modifier.fillMaxWidth()
                 )
 
-                OutlinedTextField(
-                    value = confirmPassword,
-                    onValueChange = { confirmPassword = it },
-                    label = { Text(stringResource(R.string.db_picker_confirm_pwd)) },
-                    visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                    isError = confirmPassword.isNotEmpty() && confirmPassword != password,
+                SecurePasswordField(
+                    label = stringResource(R.string.db_picker_confirm_pwd),
+                    onPasswordChanged = { chars ->
+                        confirmChars.fill('0')
+                        confirmChars = chars.copyOf()
+                    },
+                    isError = confirmChars.isNotEmpty() && !confirmChars.contentEquals(passwordChars),
                     supportingText = {
-                        if (confirmPassword.isNotEmpty() && confirmPassword != password) {
+                        if (confirmChars.isNotEmpty() && !confirmChars.contentEquals(passwordChars)) {
                             Text(stringResource(R.string.db_picker_pwd_mismatch), color = MaterialTheme.colorScheme.error)
                         }
                     },
-                    singleLine = true,
+                    isPasswordVisible = passwordVisible,
+                    onToggleVisibility = { passwordVisible = !passwordVisible },
                     modifier = Modifier.fillMaxWidth()
                 )
 
@@ -778,7 +788,8 @@ private fun CreateVaultWizardDialog(
         },
         confirmButton = {
             Button(
-                onClick = { onConfirm(vaultName, password, useKeyFile, selectedPreset) },
+                // H2 整改：直接移交组件持有的 CharArray（ViewModel 复制私有副本并自行擦除）
+                onClick = { onConfirm(vaultName, passwordChars, useKeyFile, selectedPreset) },
                 enabled = isFormValid,
                 shape = CapsuleShape
             ) {

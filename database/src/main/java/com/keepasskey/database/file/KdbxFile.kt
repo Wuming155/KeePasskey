@@ -127,7 +127,14 @@ object KdbxFile {
         // 旧派生裁决：取首个数据块做内层 Header 结构探针，官方派生不合法时回退旧派生
         val firstBlock = hmacBlockIn.readBlock()
         val activeKey = resolveCipherKey(cipherEngine, header, firstBlock, cipherKey) {
-            deriveKeys(header, passwordChars, keyFileData, isLegacy = true).first
+            // 旧派生重算：仅取 cipherKey 参与裁决，hmacKey64 属 transformedKey 直接派生物，用毕立即擦除
+            deriveKeys(header, passwordChars, keyFileData, isLegacy = true).let { (legacyCipherKey, legacyHmacKey) ->
+                try {
+                    legacyCipherKey
+                } finally {
+                    Arrays.fill(legacyHmacKey, 0.toByte())
+                }
+            }
         }
 
         val payloadStream = if (firstBlock != null) {

@@ -435,8 +435,9 @@ class UnlockViewModel @Inject constructor(
                 }
             }
         } catch (e: KeyPermanentlyInvalidatedException) {
-            // 系统指纹增删导致密钥作废：清空失效凭据并提示用户使用主密码重新验证
+            // 系统指纹增删导致密钥作废：清空失效凭据与硬件密钥别名，提示用户使用主密码重新验证
             storage.clearCredential(dbId)
+            authManager.deleteKeyForDatabase(dbId)
             _uiState.update {
                 it.copy(
                     isLoading = false,

@@ -156,7 +156,27 @@ class EntryDetailViewModel @Inject constructor(
     }
 
     fun setEntryId(id: String?) {
+        // M1 整改：切换条目时立即擦除上一条目按需解密出的全部明文（密码/修订密码/受保护字段），
+        // 杜绝「查看 A 条目密码后切到 B，A 的明文仍驻留 ViewModel 状态」的跨条目残留
+        if (id == entryIdFlow.value) return
         entryIdFlow.value = id
+        clearAllRevealedSecrets()
+    }
+
+    /**
+     * Screen 离开组合（返回导航 / 目的地销毁）时调用：擦除全部按需解密明文。
+     * 对比 KeePassDX「解密即用即弃」语义——明文仅允许在显式查看期间驻留。
+     */
+    fun onScreenDisposed() {
+        clearAllRevealedSecrets()
+    }
+
+    private fun clearAllRevealedSecrets() {
+        revealedPasswordFlow.value = null
+        revealedRevisionPasswordsFlow.value = emptyMap()
+        revealedProtectedFieldsFlow.value = emptyMap()
+        isPasswordVisibleFlow.value = false
+        protectedVisibilityFlow.value = emptyMap()
     }
 
     /**
@@ -260,7 +280,10 @@ class EntryDetailViewModel @Inject constructor(
     }
 
     fun clearRevisionDiff() {
+        // M1 整改：关闭对比弹窗时必须连修订密码映射一并清空
+        // （原实现只清当前密码，revealedRevisionPasswords 跨弹窗累积驻留明文）
         revealedPasswordFlow.value = null
+        revealedRevisionPasswordsFlow.value = emptyMap()
     }
 
     /**

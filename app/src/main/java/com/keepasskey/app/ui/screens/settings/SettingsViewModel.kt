@@ -1,5 +1,7 @@
 package com.keepasskey.app.ui.screens.settings
 
+import android.app.ActivityManager
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.keepasskey.app.R
@@ -11,9 +13,12 @@ import com.keepasskey.app.sync.SyncCredentialsStore
 import com.keepasskey.app.sync.SyncOutcome
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.theme.AppThemeMode
+import com.keepasskey.crypto.kdf.KdfBenchmark
 import com.keepasskey.database.audit.HealthCheckEngine
 import com.keepasskey.database.audit.PasswordRiskLevel
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -33,7 +38,9 @@ class SettingsViewModel @Inject constructor(
     private val vaultRepository: VaultRepository,
     private val syncCredentialsStore: SyncCredentialsStore,
     private val syncCoordinator: SyncCoordinator,
-    private val debugLogBuffer: DebugLogBuffer
+    private val debugLogBuffer: DebugLogBuffer,
+    // 允许为 null 仅用于单测注入；生产 DI 注入 @ApplicationContext
+    @ApplicationContext private val appContext: Context? = null
 ) : ViewModel() {
 
     companion object {
@@ -44,6 +51,9 @@ class SettingsViewModel @Inject constructor(
 
         // M2 整改：固定长度掩码，不随真实凭据长度变化
         private const val FIXED_PASSWORD_MASK = "••••••••••••"
+
+        /** ActivityManager 不可得时的兜底应用堆上限（MiB） */
+        private const val DEFAULT_HEAP_MB = 128
 
         // 标记当前应用进程生命周期内是否已执行过冷启动同步检测
         // 当软件被彻底杀死重启时，该静态字段重新变为 false，从而再次自动触发云端同步
@@ -510,6 +520,47 @@ class SettingsViewModel @Inject constructor(
                 argon2Parallelism = parallelism
             )
         }
+    }
+
+    // ================= M6 整改：KDF 设备自适应基准真实接线 =================
+
+    private val kdfBenchmarkFlow = MutableStateFlow(KdfBenchmarkUiState())
+
+    /** KDF 基准实时状态（运行中 / 推荐参数 / 失败原因） */
+    val kdfBenchmark: StateFlow<KdfBenchmarkUiState> = kdfBenchmarkFlow
+
+    /**
+     * 运行真实 KDF 基准测试（Dispatchers.Default，不阻塞主线程）：
+     * 以设备应用堆上限为内存约束，实测 Argon2 单轮耗时后按 1s 目标外推推荐参数。
+     */
+    fun runKdfBenchmark() {
+        if (kdfBenchmarkFlow.value.isRunning) return
+        viewModelScope.launch(Dispatchers.Default) {
+            kdfBenchmarkFlow.value = KdfBenchmarkUiState(isRunning = true)
+            try {
+                val recommendation = KdfBenchmark.benchmarkArgon2(
+                    availableMemoryBytes = deviceAvailableMemoryBytes()
+                )
+                kdfBenchmarkFlow.value = KdfBenchmarkUiState(
+                    isRunning = false,
+                    recommendedIterations = recommendation.iterations,
+                    recommendedMemoryMb = recommendation.memoryBytes / (1024L * 1024L),
+                    recommendedParallelism = recommendation.parallelism
+                )
+            } catch (t: Throwable) {
+                kdfBenchmarkFlow.value = KdfBenchmarkUiState(
+                    isRunning = false,
+                    errorMessage = t.message ?: "基准测试失败"
+                )
+            }
+        }
+    }
+
+    /** Argon2 在 Java 堆分配内存矩阵，应用堆上限（memoryClass）即实际可用内存约束 */
+    private fun deviceAvailableMemoryBytes(): Long {
+        val activityManager = appContext?.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
+        val heapMb = activityManager?.memoryClass ?: DEFAULT_HEAP_MB
+        return heapMb * 1024L * 1024L
     }
 
     fun setAutoLockTimeout(seconds: Int) {

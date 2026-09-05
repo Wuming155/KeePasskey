@@ -16,10 +16,12 @@ import javax.inject.Singleton
  *
  * 安全设计：
  * 1. PIN 校验因子：随机盐 + PBKDF2-HMAC-SHA256（120,000 次迭代）派生校验哈希，PIN 明文绝不落盘；
- * 2. 主凭据封印：主密码字节数组经 Android Keystore AES-256-GCM 硬件密钥加密后落盘——
+ * 2. 主凭据封印：主密码字节数组经 Android Keystore AES-256-GCM 硬件密钥（不绑定用户认证）加密后落盘——
  *    仅凭存储文件无法离线爆破（硬件密钥不可导出），PIN 校验器仅是前置门槛；
+ *    root 设备边界如实声明：攻击者同时取得密文与 Keystore 授权使用时可能离线解封（与 KP2A 同级取舍）；
  * 3. 错误 PIN 在校验器比对阶段即被拒绝，主凭据永不解封；
- * 4. 解封成功后主密码以 CharArray 交付调用方，用毕由调用方显式清零。
+ * 4. 解封成功后主密码以 CharArray 交付调用方，用毕由调用方显式清零；
+ * 5. 全链路无 String 物化：封印与解封均以 CharBuffer/ByteBuffer 直转字节数组（敏感数据铁律）。
  */
 @Singleton
 class QuickUnlockPinStore @Inject constructor(
@@ -61,7 +63,11 @@ class QuickUnlockPinStore @Inject constructor(
      */
     fun bindCredential(databaseId: String, masterPassword: CharArray) {
         require(hasEnrollment(databaseId)) { "QuickUnlock PIN 未登记，禁止封印主凭据" }
-        val bytes = String(masterPassword).toByteArray(StandardCharsets.UTF_8)
+        // CharBuffer 直接编码 UTF-8，全程不物化 String（String 为不可变对象无法显式擦除）
+        val charBuffer = java.nio.CharBuffer.wrap(masterPassword)
+        val byteBuffer = StandardCharsets.UTF_8.encode(charBuffer)
+        val bytes = ByteArray(byteBuffer.remaining())
+        byteBuffer.get(bytes)
         try {
             val (iv, cipherBytes) = seal(bytes)
             prefs.edit()
@@ -110,7 +116,9 @@ class QuickUnlockPinStore @Inject constructor(
             return null
         }
         return try {
-            String(plainBytes, StandardCharsets.UTF_8).toCharArray()
+            // ByteBuffer 直接解码为 CharArray，杜绝「String 中转」造成的主密码不可变驻留
+            val decoded = StandardCharsets.UTF_8.decode(java.nio.ByteBuffer.wrap(plainBytes))
+            CharArray(decoded.remaining()).also { decoded.get(it) }
         } finally {
             plainBytes.fill(0)
         }
@@ -142,7 +150,7 @@ class QuickUnlockPinStore @Inject constructor(
             .apply()
     }
 
-    /** 清除特定数据库的 PIN 与封印凭据 */
+    /** 清除特定数据库的 PIN 与封印凭据，并在无任何剩余封印时联动删除共享硬件密钥别名 */
     fun clearCredential(databaseId: String) {
         prefs.edit()
             .remove(saltKey(databaseId))
@@ -152,11 +160,29 @@ class QuickUnlockPinStore @Inject constructor(
             .remove(failCountKey(databaseId))
             .remove(lockUntilKey(databaseId))
             .apply()
+        cleanupSharedKeyAliasIfUnused()
     }
 
-    /** 清除全部 QuickUnlock 数据 */
+    /** 清除全部 QuickUnlock 数据并删除共享硬件密钥别名 */
     fun clearAll() {
         prefs.edit().clear().apply()
+        try {
+            keystoreManager?.deleteKey(KeystoreManager.QUICK_UNLOCK_KEY_ALIAS)
+        } catch (_: Exception) {
+            // Keystore 不可达时静默跳过（密钥残留无敏感数据）
+        }
+    }
+
+    /** QUICK_UNLOCK 别名被多库共享：仅在所有库的封印凭据均已清除后才删除，避免误伤其余数据库 */
+    private fun cleanupSharedKeyAliasIfUnused() {
+        val hasRemainingCredential = prefs.all.keys.any { it.endsWith("_cred_cipher") }
+        if (!hasRemainingCredential) {
+            try {
+                keystoreManager?.deleteKey(KeystoreManager.QUICK_UNLOCK_KEY_ALIAS)
+            } catch (_: Exception) {
+                // Keystore 不可达时静默跳过
+            }
+        }
     }
 
     /** PBKDF2-HMAC-SHA256 派生 PIN 校验器（高迭代次数抑制设备本地爆破） */
@@ -173,14 +199,15 @@ class QuickUnlockPinStore @Inject constructor(
     private fun seal(plaintext: ByteArray): Pair<ByteArray, ByteArray> {
         customSealer?.let { return it(plaintext) }
         val km = keystoreManager ?: error("KeystoreManager 未注入")
-        val cipher = km.initEncryptCipher(KeystoreManager.QUICK_UNLOCK_KEY_ALIAS)
+        // 非认证绑定密钥：纯 PIN 场景无 BiometricPrompt CryptoObject，认证绑定密钥必然 UserNotAuthenticated（H4 修复）
+        val cipher = km.initSealCipher(KeystoreManager.QUICK_UNLOCK_KEY_ALIAS)
         return Pair(cipher.iv, km.encryptData(cipher, plaintext))
     }
 
     private fun unseal(iv: ByteArray, cipherBytes: ByteArray): ByteArray {
         customUnsealer?.let { return it(iv, cipherBytes) }
         val km = keystoreManager ?: error("KeystoreManager 未注入")
-        val cipher = km.initDecryptCipher(iv, KeystoreManager.QUICK_UNLOCK_KEY_ALIAS)
+        val cipher = km.initUnsealCipher(iv, KeystoreManager.QUICK_UNLOCK_KEY_ALIAS)
         return km.decryptData(cipher, cipherBytes)
     }
 

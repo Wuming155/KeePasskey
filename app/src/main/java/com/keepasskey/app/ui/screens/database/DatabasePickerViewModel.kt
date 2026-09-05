@@ -75,15 +75,22 @@ class DatabasePickerViewModel @Inject constructor(
         showOpenSourceDialogFlow.value = false
     }
 
-    fun createDatabase(name: String, masterPassword: String, keyFile: Boolean, preset: String) {
+    fun createDatabase(name: String, masterPassword: CharArray, keyFile: Boolean, preset: String) {
         viewModelScope.launch {
-            // H3 整改：创建失败（写盘失败等）不再谎报创建成功
-            val result = vaultRepository.createDatabase(name, masterPassword, keyFile, preset)
-            if (result is KdbxResult.Success) {
-                showCreateDialogFlow.value = false
-                userMessageFlow.value = UiMessage(R.string.db_picker_msg_created)
-            } else {
-                userMessageFlow.value = UiMessage(R.string.vault_op_failed, listOf((result as KdbxResult.Failure).message))
+            // H2 整改：主密码全程 CharArray——复制私有副本并在 finally 擦除；
+            // 入参数组为调用方（弹窗）所有，由其自身生命周期管理擦除
+            val pwd = masterPassword.copyOf()
+            try {
+                // H3 整改：创建失败（写盘失败等）不再谎报创建成功
+                val result = vaultRepository.createDatabase(name, pwd, keyFile, preset)
+                if (result is KdbxResult.Success) {
+                    showCreateDialogFlow.value = false
+                    userMessageFlow.value = UiMessage(R.string.db_picker_msg_created)
+                } else {
+                    userMessageFlow.value = UiMessage(R.string.vault_op_failed, listOf((result as KdbxResult.Failure).message))
+                }
+            } finally {
+                pwd.fill('0')
             }
         }
     }

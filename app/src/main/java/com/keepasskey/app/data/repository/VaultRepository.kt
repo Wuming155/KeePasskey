@@ -61,11 +61,13 @@ interface VaultRepository {
     fun isLocked(): Boolean
 
     /**
-     * 创建新密码库（H3 整改：创建/写盘结果必须向上传播，禁止静默失败）
+     * 创建新密码库（H3 整改：创建/写盘结果必须向上传播，禁止静默失败）。
+     * H2 整改：主密码以 [CharArray] 承载（原 String 参数不可变驻留堆内存）；
+     * 数组为借用语义——实现方不持有、不擦除，调用方用毕自行清零。
      */
     suspend fun createDatabase(
         name: String,
-        masterPassword: String,
+        masterPassword: CharArray,
         keyFile: Boolean,
         preset: String
     ): com.keepasskey.core.result.KdbxResult<Unit>

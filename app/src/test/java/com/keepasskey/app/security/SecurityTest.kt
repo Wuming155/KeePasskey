@@ -56,7 +56,7 @@ class SecurityTest {
 
     @Test
     fun `测试生物识别密钥别名生成规则`() {
-        val keystoreManager = KeystoreManager()
+        val keystoreManager = KeystoreManager(null)
         val authManager = BiometricAuthManager(keystoreManager)
 
         val alias = authManager.getAliasForDatabase("my_vault_01")

@@ -56,6 +56,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
@@ -73,6 +74,7 @@ import com.keepasskey.app.R
 import com.keepasskey.app.ui.components.BentoCard
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.model.resolveText
+import com.keepasskey.app.ui.screens.settings.KdfBenchmarkUiState
 import com.keepasskey.app.ui.screens.settings.SettingsUiState
 
 /**
@@ -89,6 +91,9 @@ fun DatabaseSettingsScreen(
     onArgon2ParametersChange: (iterations: Long, memoryMb: Long, parallelism: Int) -> Unit = { _, _, _ -> },
     onTanExpiresOnUseToggle: (Boolean) -> Unit = {},
     onCheckForDuplicateUuidsToggle: (Boolean) -> Unit = {},
+    // M6 整改：真实 KDF 基准状态与触发（原按钮仅展示假完成消息）
+    kdfBenchmarkState: KdfBenchmarkUiState? = null,
+    onRunKdfBenchmark: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var showCipherDialog by remember { mutableStateOf(false) }
@@ -98,7 +103,6 @@ fun DatabaseSettingsScreen(
     var showChildDbDialog by remember { mutableStateOf(false) }
     var showExportDialog by remember { mutableStateOf(false) }
     var showImportDialog by remember { mutableStateOf(false) }
-    var benchmarkMessage by remember { mutableStateOf<UiMessage?>(null) }
     var operationFeedback by remember { mutableStateOf<UiMessage?>(null) }
 
     Scaffold(
@@ -598,9 +602,8 @@ fun DatabaseSettingsScreen(
                     }
 
                     OutlinedButton(
-                        onClick = {
-                            benchmarkMessage = UiMessage(R.string.dbset_benchmark_done)
-                        },
+                        onClick = onRunKdfBenchmark,
+                        enabled = kdfBenchmarkState?.isRunning != true,
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Icon(Icons.Default.Speed, contentDescription = null, modifier = Modifier.size(18.dp))
@@ -608,12 +611,40 @@ fun DatabaseSettingsScreen(
                         Text(stringResource(R.string.dbset_benchmark_btn))
                     }
 
-                    if (benchmarkMessage != null) {
-                        Text(
-                            text = benchmarkMessage!!.resolveText(),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary
-                        )
+                    // M6 整改：真实基准状态展示——运行中 / 推荐参数（自动填入上方调节项）/ 失败原因
+                    val benchmarkState = kdfBenchmarkState
+                    if (benchmarkState != null) {
+                        if (benchmarkState.isRunning) {
+                            Text(
+                                text = stringResource(R.string.dbset_benchmark_running),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        benchmarkState.recommendedIterations?.let { recommendedIterations ->
+                            LaunchedEffect(recommendedIterations) {
+                                tempIterations = recommendedIterations
+                                benchmarkState.recommendedMemoryMb?.let { tempMemoryMb = it }
+                                benchmarkState.recommendedParallelism?.let { tempParallelism = it }
+                            }
+                            Text(
+                                text = stringResource(
+                                    R.string.dbset_benchmark_result,
+                                    recommendedIterations,
+                                    benchmarkState.recommendedMemoryMb ?: 0L,
+                                    benchmarkState.recommendedParallelism ?: 0
+                                ),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        benchmarkState.errorMessage?.let { error ->
+                            Text(
+                                text = stringResource(R.string.dbset_benchmark_failed, error),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        }
                     }
                 }
             },

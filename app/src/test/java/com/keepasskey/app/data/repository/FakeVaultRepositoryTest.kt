@@ -45,7 +45,7 @@ class FakeVaultRepositoryTest {
     fun `createDatabase 新建库并设为激活`() = runTest {
         val repository = newRepository()
 
-        repository.createDatabase(name = "新密码库", masterPassword = "test-only-password", keyFile = false, preset = "AES-256 + Argon2id")
+        repository.createDatabase(name = "新密码库", masterPassword = "test-only-password".toCharArray(), keyFile = false, preset = "AES-256 + Argon2id")
 
         val databases = repository.getDatabases().first()
         val created = databases.first { it.name == "新密码库.kdbx" }

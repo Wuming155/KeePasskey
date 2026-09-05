@@ -339,6 +339,7 @@ fun KeePasskeyApp() {
                 composable(Screen.SettingsDatabase.route) {
                     val settingsViewModel: SettingsViewModel = hiltViewModel()
                     val settingsState by settingsViewModel.uiState.collectAsStateWithLifecycle()
+                    val kdfBenchmarkState by settingsViewModel.kdfBenchmark.collectAsStateWithLifecycle()
                     DatabaseSettingsScreen(
                         uiState = settingsState,
                         onBackClick = { navController.popBackStack() },
@@ -347,7 +348,10 @@ fun KeePasskeyApp() {
                         onKdfAlgorithmChange = settingsViewModel::setKdfAlgorithm,
                         onArgon2ParametersChange = settingsViewModel::setArgon2Parameters,
                         onTanExpiresOnUseToggle = settingsViewModel::setTanExpiresOnUse,
-                        onCheckForDuplicateUuidsToggle = settingsViewModel::setCheckForDuplicateUuids
+                        onCheckForDuplicateUuidsToggle = settingsViewModel::setCheckForDuplicateUuids,
+                        // M6 整改：真实 KDF 基准接线
+                        kdfBenchmarkState = kdfBenchmarkState,
+                        onRunKdfBenchmark = settingsViewModel::runKdfBenchmark
                     )
                 }
 

@@ -170,7 +170,7 @@ class RealVaultRepository @Inject constructor(
 
     override suspend fun createDatabase(
         name: String,
-        masterPassword: String,
+        masterPassword: CharArray,
         keyFile: Boolean,
         preset: String
     ): com.keepasskey.core.result.KdbxResult<Unit> {
@@ -181,20 +181,17 @@ class RealVaultRepository @Inject constructor(
         val fileName = if (name.endsWith(".kdbx", ignoreCase = true)) name else "$name.kdbx"
         val targetFile = File(filesDir, fileName)
 
+        // H2 整改：主密码全程 CharArray（原实现接收 String 参数不可变驻留）；
+        // 数组为借用语义，session.create 内部克隆缓存，调用方负责最终擦除
         val useArgon2 = !preset.contains("AES-KDF", ignoreCase = true)
-        val passwordChars = masterPassword.toCharArray()
-        try {
-            val result = databaseSession.create(
-                file = targetFile,
-                name = name.removeSuffix(".kdbx"),
-                passwordChars = passwordChars,
-                useArgon2 = useArgon2
-            )
-            refreshDatabases()
-            return result
-        } finally {
-            passwordChars.fill('0')
-        }
+        val result = databaseSession.create(
+            file = targetFile,
+            name = name.removeSuffix(".kdbx"),
+            passwordChars = masterPassword,
+            useArgon2 = useArgon2
+        )
+        refreshDatabases()
+        return result
     }
 
     override suspend fun removeDatabase(id: String): com.keepasskey.core.result.KdbxResult<Unit> {

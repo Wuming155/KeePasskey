@@ -452,7 +452,9 @@
     <string name="dbset_argon2_parallelism_label">Parallelism: %1$d</string>
     <string name="dbset_argon2_threads_chip">%1$d threads</string>
     <string name="dbset_benchmark_btn">Run benchmark</string>
-    <string name="dbset_benchmark_done">Benchmark finished, optimal parameters suggested</string>
+    <string name="dbset_benchmark_running">Running KDF benchmark (measuring device throughput, may take a few seconds)…</string>
+    <string name="dbset_benchmark_result">Benchmark done: recommended %1$d iterations, %2$d MiB memory, parallelism %3$d — parameters applied</string>
+    <string name="dbset_benchmark_failed">Benchmark failed: %1$s</string>
     <string name="dbset_apply_params">Apply parameters</string>
     <string name="dbset_btn_done">Done</string>
     <string name="dbset_templates_dialog_title">Install entry templates</string>

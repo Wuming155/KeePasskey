@@ -58,7 +58,7 @@ class FakeVaultRepository() : VaultRepository {
 
     override suspend fun createDatabase(
         name: String,
-        masterPassword: String,
+        masterPassword: CharArray,
         keyFile: Boolean,
         preset: String
     ): com.keepasskey.core.result.KdbxResult<Unit> {

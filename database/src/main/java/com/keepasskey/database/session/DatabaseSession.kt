@@ -124,7 +124,9 @@ class DatabaseSession {
         keyFileData: ByteArray? = null,
         readOnly: Boolean = false
     ): KdbxResult<Unit> = mutex.withLock {
-        withContext(Dispatchers.IO) {
+        // 全链路流式读取与 CPU 密集段（KDF 派生 / 解密 / XML 解析）交织，统一在 Default 执行，
+        // 防止 Argon2 长时间占死 IO 线程池挤占磁盘/网络任务（save 侧对称：CPU 在 Default、写盘在 IO）
+        withContext(Dispatchers.Default) {
             try {
                 if (!file.exists()) {
                     return@withContext KdbxResult.Failure(

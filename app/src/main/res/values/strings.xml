@@ -452,7 +452,9 @@
     <string name="dbset_argon2_parallelism_label">并行线程数：%1$d</string>
     <string name="dbset_argon2_threads_chip">%1$d 线程</string>
     <string name="dbset_benchmark_btn">运行性能基准测试</string>
-    <string name="dbset_benchmark_done">基准测试完成，已推荐最优参数</string>
+    <string name="dbset_benchmark_running">正在运行 KDF 基准测试（实测设备吞吐，约需数秒）…</string>
+    <string name="dbset_benchmark_result">基准完成：推荐迭代 %1$d 轮、内存 %2$d MiB、并行度 %3$d，已自动填入参数</string>
+    <string name="dbset_benchmark_failed">基准测试失败：%1$s</string>
     <string name="dbset_apply_params">应用参数</string>
     <string name="dbset_btn_done">完成</string>
     <string name="dbset_templates_dialog_title">安装条目模板</string>
