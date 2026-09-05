@@ -43,6 +43,12 @@
             android:exported="false"
             android:theme="@style/Theme.KeePasskey" />
 
+        <!-- Credential Manager 链式解锁落地 Activity（锁库 Action 点选后由系统拉起，解锁成功回传凭据候选） -->
+        <activity
+            android:name=".passkey.CredentialUnlockActivity"
+            android:exported="false"
+            android:theme="@style/Theme.KeePasskey" />
+
         <!-- Android 16+ Credential Manager 系统凭据提供者服务 -->
         <service
             android:name=".passkey.KeePasskeyCredentialProviderService"

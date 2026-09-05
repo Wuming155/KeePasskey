@@ -73,6 +73,7 @@ import com.keepasskey.app.ui.components.BentoCard
 import com.keepasskey.app.ui.components.ThemeToggleCapsule
 import com.keepasskey.app.ui.theme.AppThemeMode
 import com.keepasskey.app.ui.theme.CapsuleShape
+import com.keepasskey.app.ui.components.SecurePasswordField
 import com.keepasskey.app.ui.theme.MonospacePasswordStyle
 
 /**
@@ -112,7 +113,7 @@ fun UnlockScreen(
         uiState = uiState,
         currentTheme = currentTheme,
         onThemeToggle = onThemeToggle,
-        onPasswordChange = viewModel::onPasswordChange,
+        onPasswordChange = viewModel::onPasswordChangeSecure,
         onQuickUnlockPinChange = viewModel::onQuickUnlockPinChange,
         onTogglePasswordVisibility = viewModel::onTogglePasswordVisibility,
         onToggleKeyFile = viewModel::onToggleKeyFile,
@@ -133,7 +134,7 @@ fun UnlockContent(
     uiState: UnlockUiState,
     currentTheme: AppThemeMode,
     onThemeToggle: () -> Unit,
-    onPasswordChange: (String) -> Unit,
+    onPasswordChange: (CharArray) -> Unit,
     onQuickUnlockPinChange: (String) -> Unit,
     onTogglePasswordVisibility: () -> Unit,
     onToggleKeyFile: () -> Unit,
@@ -416,12 +417,11 @@ fun UnlockContent(
                     }
                 }
             } else {
-                // 完整主密码输入框
-                OutlinedTextField(
-                    value = uiState.password,
-                    onValueChange = onPasswordChange,
-                    label = { Text(stringResource(R.string.unlock_master_password)) },
-                    placeholder = { Text(stringResource(R.string.unlock_master_password_hint)) },
+                // 完整主密码输入框（SecurePasswordField：显示 String 仅存活于组件内部，CharArray 直达 ViewModel）
+                SecurePasswordField(
+                    label = stringResource(R.string.unlock_master_password),
+                    placeholder = stringResource(R.string.unlock_master_password_hint),
+                    onPasswordChanged = onPasswordChange,
                     isError = uiState.errorMessage != null,
                     supportingText = {
                         uiState.errorMessage?.let { message ->
@@ -432,33 +432,9 @@ fun UnlockContent(
                             )
                         }
                     },
-                    singleLine = true,
-                    visualTransformation = if (uiState.isPasswordVisible) VisualTransformation.None else PasswordVisualTransformation('●'),
-                    keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.Password,
-                        imeAction = ImeAction.Done
-                    ),
-                    keyboardActions = KeyboardActions(onDone = { onUnlock() }),
-                    trailingIcon = {
-                        IconButton(onClick = onTogglePasswordVisibility) {
-                            Icon(
-                                imageVector = if (uiState.isPasswordVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                                contentDescription = if (uiState.isPasswordVisible) stringResource(R.string.cd_hide_password) else stringResource(R.string.cd_show_password),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    },
-                    textStyle = MonospacePasswordStyle.copy(
-                        fontSize = 17.sp,
-                        color = MaterialTheme.colorScheme.onSurface
-                    ),
-                    shape = MaterialTheme.shapes.medium,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = MaterialTheme.colorScheme.primary,
-                        unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
-                        focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
-                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest
-                    ),
+                    isPasswordVisible = uiState.isPasswordVisible,
+                    onToggleVisibility = onTogglePasswordVisibility,
+                    onDone = onUnlock,
                     modifier = Modifier.fillMaxWidth()
                 )
 

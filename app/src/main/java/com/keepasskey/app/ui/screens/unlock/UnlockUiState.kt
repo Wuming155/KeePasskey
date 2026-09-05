@@ -11,10 +11,13 @@ enum class UnlockMode {
 }
 
 /**
- * 解锁屏幕的不可变 UI 状态
+ * 解锁屏幕的不可变 UI 状态。
+ *
+ * 安全设计：主密码不再以 String 形式驻留 UiState / StateFlow——
+ * 输入侧由 [com.keepasskey.app.ui.components.SecurePasswordField] 桥接为 CharArray 直达 ViewModel，
+ * 显示用 String 仅存活于输入组件内部并在离开组合时清零。
  */
 data class UnlockUiState(
-    val password: String = "",
     val isPasswordVisible: Boolean = false,
     val hasKeyFile: Boolean = false,
     val keyFileName: String = "master.key",

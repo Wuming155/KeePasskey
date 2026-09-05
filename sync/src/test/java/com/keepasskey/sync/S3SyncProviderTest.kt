@@ -135,6 +135,103 @@ class S3SyncProviderTest {
     }
 
     @Test
+    fun `测试覆盖更新 PUT 附带 If-Match 条件头实现原子覆写`() = runTest {
+        // 1. HEAD 预检返回现有 ETag
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setHeader("ETag", "\"remote-current-etag\"")
+                .setHeader("Last-Modified", "Wed, 21 Oct 2026 07:28:00 GMT")
+        )
+        // 2. PUT 覆写成功
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setHeader("ETag", "\"new-etag\"")
+        )
+
+        val provider = S3SyncProvider(
+            endpoint = "http://127.0.0.1:${server.port}",
+            bucketName = "test-bucket",
+            region = "us-east-1",
+            accessKeyId = "TESTKEY",
+            secretAccessKey = "TESTSECRET",
+            client = createLoopbackClient()
+        )
+
+        val result = provider.upload("vault.kdbx", "data".toByteArray(), expectedEtag = "remote-current-etag")
+        assertTrue(result.isSuccess)
+        assertEquals("new-etag", result.getOrThrow())
+
+        val headReq = server.takeRequest()
+        assertEquals("HEAD", headReq.method)
+
+        val putReq = server.takeRequest()
+        assertEquals("PUT", putReq.method)
+        // If-Match 必须携带引号包裹的期望 ETag，由服务端原子校验，消除 HEAD+PUT TOCTOU 窗口
+        assertEquals("\"remote-current-etag\"", putReq.getHeader("If-Match"))
+    }
+
+    @Test
+    fun `测试覆盖更新 If-Match 遭遇并发 412 抛出冲突异常`() = runTest {
+        // 1. HEAD 预检返回现有 ETag
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setHeader("ETag", "\"stale-etag\"")
+                .setHeader("Last-Modified", "Wed, 21 Oct 2026 07:28:00 GMT")
+        )
+        // 2. PUT 被服务端条件校验拒绝（HEAD 后被并发修改）
+        server.enqueue(MockResponse().setResponseCode(412))
+        // 3. 冲突后获取当前远端元数据
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setHeader("ETag", "\"concurrent-new-etag\"")
+        )
+
+        val provider = S3SyncProvider(
+            endpoint = "http://127.0.0.1:${server.port}",
+            bucketName = "test-bucket",
+            region = "us-east-1",
+            accessKeyId = "TESTKEY",
+            secretAccessKey = "TESTSECRET",
+            client = createLoopbackClient()
+        )
+
+        val result = provider.upload("vault.kdbx", "data".toByteArray(), expectedEtag = "stale-etag")
+        assertTrue(result.isFailure)
+        val ex = result.exceptionOrNull()
+        assertTrue(ex is SyncException.ConflictError)
+    }
+
+    @Test
+    fun `测试覆盖更新 ETag 预检不匹配快速失败不发 PUT`() = runTest {
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setHeader("ETag", "\"someone-elses-etag\"")
+                .setHeader("Last-Modified", "Wed, 21 Oct 2026 07:28:00 GMT")
+        )
+
+        val provider = S3SyncProvider(
+            endpoint = "http://127.0.0.1:${server.port}",
+            bucketName = "test-bucket",
+            region = "us-east-1",
+            accessKeyId = "TESTKEY",
+            secretAccessKey = "TESTSECRET",
+            client = createLoopbackClient()
+        )
+
+        val result = provider.upload("vault.kdbx", "data".toByteArray(), expectedEtag = "my-expected-etag")
+        assertTrue(result.isFailure)
+        assertTrue(result.exceptionOrNull() is SyncException.ConflictError)
+        // 仅 HEAD 预检，无 PUT 发出
+        assertEquals("HEAD", server.takeRequest().method)
+        assertEquals(1, server.requestCount)
+    }
+
+    @Test
     fun `测试编码对象键与 SigV4 规范 URI 一致性`() {
         val provider = S3SyncProvider(
             endpoint = "https://s3.amazonaws.com",

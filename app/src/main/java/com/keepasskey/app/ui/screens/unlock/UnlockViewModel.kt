@@ -53,6 +53,12 @@ class UnlockViewModel @Inject constructor(
 
     private var activeDatabaseId: String? = null
 
+    /**
+     * 主密码敏感态：仅以 CharArray 驻留 ViewModel 内部（绝不进入 UiState/StateFlow）。
+     * 更换内容与解锁完成后立即显式清零。
+     */
+    private var passwordChars = CharArray(0)
+
     init {
         viewModelScope.launch {
             vaultRepository.getDatabases().collect { databases ->
@@ -86,8 +92,14 @@ class UnlockViewModel @Inject constructor(
         }
     }
 
-    fun onPasswordChange(password: String) {
-        _uiState.update { it.copy(password = password, errorMessage = null) }
+    /**
+     * 主密码输入上行（来自 [com.keepasskey.app.ui.components.SecurePasswordField] 的 CharArray 桥接）。
+     * 输入的数组仅在本次回调内有效，此处立即复制持有并清零上一份。
+     */
+    fun onPasswordChangeSecure(password: CharArray) {
+        passwordChars.fill('0')
+        passwordChars = password.copyOf()
+        _uiState.update { it.copy(errorMessage = null) }
     }
 
     fun onQuickUnlockPinChange(pin: String) {
@@ -115,21 +127,21 @@ class UnlockViewModel @Inject constructor(
      */
     fun unlock() {
         viewModelScope.launch {
-            val password = _uiState.value.password
-            if (password.isEmpty()) {
+            if (passwordChars.isEmpty()) {
                 _uiState.update { it.copy(errorMessage = UiMessage(R.string.unlock_error_empty_password)) }
                 return@launch
             }
             _uiState.update { it.copy(isLoading = true, errorMessage = null) }
 
-            val passwordChars = password.toCharArray()
             try {
                 when (val result = vaultRepository.unlockActiveDatabase(passwordChars)) {
                     is KdbxResult.Success -> {
                         // 若开启生物识别，自动保存经 Keystore 硬件加密的凭据 (CharArray 版本并及时清零)
                         persistBiometricCredentialIfEnabled(passwordChars)
-                        // 解锁成功后立即擦除 UiState 中的明文密码字符串，防止内存长期驻留
-                        _uiState.update { it.copy(isLoading = false, password = "") }
+                        // 解锁成功后立即擦除驻留的主密码字符数组
+                        passwordChars.fill('0')
+                        passwordChars = CharArray(0)
+                        _uiState.update { it.copy(isLoading = false) }
                         _events.emit(UnlockEvent.UnlockSuccess)
                     }
                     is KdbxResult.Failure -> {
@@ -142,7 +154,11 @@ class UnlockViewModel @Inject constructor(
                     }
                 }
             } finally {
-                passwordChars.fill('0')
+                // 失败重试路径保留输入，成功路径已在上方清零；此处仅确保异常时亦清零
+                if (_uiState.value.isLoading) {
+                    passwordChars.fill('0')
+                    passwordChars = CharArray(0)
+                }
             }
         }
     }

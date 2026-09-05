@@ -27,7 +27,7 @@ import javax.crypto.spec.SecretKeySpec
  * 2. 待签名字符串 (StringToSign) 生成；
  * 3. 级联 HMAC-SHA256 派生签名密钥 (Signing Key) 与最终 Authorization Header 构造；
  * 4. 对象键 URL 编码与 SigV4 canonicalUri 严格一致；
- * 5. 首传 If-None-Match: * 原子创建与条件写并发控制。
+ * 5. 首传 If-None-Match: * 原子创建与覆盖 If-Match 条件写并发控制（无 TOCTOU 竞争窗口）。
  */
 class S3SyncProvider(
     private val endpoint: String,
@@ -148,15 +148,17 @@ class S3SyncProvider(
     /**
      * 上传本地数据库文件至 S3。
      *
-     * 并发安全与条件写策略：
-     * 1. 首传场景 (expectedEtag == null)：
-     *    执行 HEAD 探测，若文件不存在（HTTP 404），则在 PUT 时附带 `If-None-Match: *` 请求头，
-     *    实现 S3 协议级原子创建；若遭遇并发写入冲突，S3 返回 HTTP 412 Precondition Failed。
+     * 并发安全与条件写策略（条件写全闭环，无 TOCTOU 竞争窗口）：
+     * 1. 首传场景 (expectedEtag == null 且远端不存在)：
+     *    PUT 附带 `If-None-Match: *` 请求头，实现 S3 协议级原子创建；
+     *    遭遇并发创建冲突时 S3 返回 HTTP 412 Precondition Failed。
      * 2. 覆盖更新场景：
-     *    若远端已存在，执行 HEAD 获取远端当前 ETag，比对 expectedEtag；
-     *    若不匹配则抛出 [SyncException.ConflictError]。
-     *    【TOCTOU 限界说明】：标准 AWS S3 PUT 不支持对现有对象的 If-Match 条件覆写，
-     *    因此在 HEAD 探测与 PUT 提交之间存在微小的 TOCTOU (Time-of-Check to Time-of-Use) 竞争窗口。
+     *    PUT 附带 `If-Match: "<expectedEtag>"` 条件头（AWS S3 及支持条件写的兼容存储
+     *    在服务端原子校验），远端 ETag 与期望不符（含 HEAD 探测后被并发修改）时
+     *    S3 返回 HTTP 412，映射为 [SyncException.ConflictError]。
+     *    HEAD 预检仅作快速失败优化，正确性完全由 PUT 的 If-Match 服务端校验保证。
+     * 3. 兼容性降级说明：少数未支持条件覆写的 S3 兼容存储可能忽略 If-Match 头，
+     *    此时语义退化为「HEAD 预检 + 无条件 PUT」，行为与旧版一致，不会更差。
      */
     override suspend fun upload(
         remotePath: String,
@@ -165,12 +167,15 @@ class S3SyncProvider(
     ): Result<String> = withContext(Dispatchers.IO) {
         runCatching {
             val isFirstUpload: Boolean
+            var precheckEtag: String? = null
             if (expectedEtag.isNullOrBlank()) {
                 val metaResult = getMetadata(remotePath)
                 if (metaResult.isFailure && metaResult.exceptionOrNull() is SyncException.FileNotFound) {
                     isFirstUpload = true
                 } else {
                     isFirstUpload = false
+                    // 远端已存在却未声明期望 ETag：锁定 HEAD 所见版本，保证「覆盖的即所见」
+                    precheckEtag = metaResult.getOrNull()?.etag
                 }
             } else {
                 isFirstUpload = false
@@ -182,6 +187,7 @@ class S3SyncProvider(
                         message = "S3 远端文件已被其他人更新 (ETag 不匹配)"
                     )
                 }
+                precheckEtag = expectedEtag
             }
 
             val url = buildUrl(remotePath)
@@ -200,6 +206,10 @@ class S3SyncProvider(
 
             if (isFirstUpload) {
                 requestBuilder.header("If-None-Match", "*")
+            } else {
+                precheckEtag?.takeIf { it.isNotBlank() }?.let { conditionEtag ->
+                    requestBuilder.header("If-Match", "\"${cleanEtag(conditionEtag)}\"")
+                }
             }
 
             client.newCall(requestBuilder.build()).execute().use { response ->

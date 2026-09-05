@@ -49,7 +49,9 @@ import javax.inject.Inject
  * 深度集成 Jetpack androidx.credentials.provider 框架，对接 Android 系统级 Credential Manager：
  * 1. onBeginGetCredentialRequest: 接收应用/浏览器的登录请求，处理 Passkey (FIDO2) 与传统密码候选构建；
  *    - 响应超时预算：设置严格的 [TIMEOUT_MS] 5,000ms 预算，超时或取消将返回已完成的部分条目或安全空响应，杜绝阻塞系统身份验证弹窗；
- *    - 库锁定 UX v1：当密码库处于锁定状态时，主动返回「解锁 KeePasskey 填充凭据」动作条目 (Action) 引导用户解锁；
+ *    - 库锁定 UX v2（链式解锁）：当密码库处于锁定状态时，返回「解锁 KeePasskey 填充凭据」动作条目 (Action)，
+ *      用户点选后由 [CredentialUnlockActivity] 承接解锁，成功后直接回传 BeginGetCredentialResponse，
+ *      系统 Credential Manager 随即继续呈现凭据候选——一次解锁直达填充；
  *    - 严格域名隔离：采用严格标签边界判定，杜绝跨域钓鱼；
  * 2. onBeginCreateCredentialRequest: 响应新凭据创建请求，引导至独立的 Passkey 注册或密码保存流程；
  * 3. onClearCredentialStateRequest: 响应凭据状态清理。
@@ -62,6 +64,9 @@ class KeePasskeyCredentialProviderService : CredentialProviderService() {
 
     @Inject
     lateinit var biometricAuthManager: BiometricAuthManager
+
+    @Inject
+    lateinit var responseAssembler: CredentialResponseAssembler
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
@@ -94,16 +99,12 @@ class KeePasskeyCredentialProviderService : CredentialProviderService() {
     }
 
     private suspend fun buildBeginGetResponse(request: BeginGetCredentialRequest): BeginGetCredentialResponse {
-        val callingAppInfo = request.callingAppInfo
-        val callingPackage = callingAppInfo?.packageName.orEmpty()
-        val callingOrigin = extractOrigin(callingAppInfo, null)
         val responseBuilder = BeginGetCredentialResponse.Builder()
 
-        // 1. 密码库处于锁定状态：输出解锁 Action
+        // 1. 密码库处于锁定状态：输出解锁 Action，链式引导至 CredentialUnlockActivity
+        //    （解锁成功后由该 Activity 直接回传凭据候选，系统随即继续呈现，无需用户二次发起）
         if (vaultRepository.isLocked()) {
-            val unlockIntent = Intent(this, MainActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            }
+            val unlockIntent = Intent(this, CredentialUnlockActivity::class.java)
             val pendingIntent = PendingIntent.getActivity(
                 this,
                 REQUEST_CODE_UNLOCK,
@@ -119,110 +120,8 @@ class KeePasskeyCredentialProviderService : CredentialProviderService() {
             return responseBuilder.build()
         }
 
-        // 2. 密码库已就绪：检索并输出匹配凭据
-        val allEntries = vaultRepository.getKdbxEntries()
-        val isBiometricAvailable = biometricAuthManager.canAuthenticate(this) == BiometricStatus.AVAILABLE
-
-        for (option in request.beginGetCredentialOptions) {
-            when (option) {
-                is BeginGetPublicKeyCredentialOption -> {
-                    val rpIdFromOption = try {
-                        val json = JSONObject(option.requestJson)
-                        json.optJSONObject("rp")?.optString("id").orEmpty()
-                    } catch (_: Exception) {
-                        ""
-                    }
-                    val targetRpId = rpIdFromOption.ifBlank { DomainMatcher.extractDomain(callingOrigin) }
-                    if (targetRpId.isBlank()) continue
-
-                    val matchedPasskeys = allEntries.filter { entry ->
-                        val passkey = PasskeyData.fromCustomFields(entry.customFields)
-                        passkey != null && DomainMatcher.isDomainMatch(passkey.relyingPartyId, targetRpId)
-                    }
-
-                    for (entry in matchedPasskeys) {
-                        val passkey = PasskeyData.fromCustomFields(entry.customFields) ?: continue
-                        val challenge = try {
-                            JSONObject(option.requestJson).optString("challenge")
-                        } catch (_: Exception) {
-                            ""
-                        }
-
-                        val intent = Intent(this, PasskeyAssertionActivity::class.java).apply {
-                            putExtra(PasskeyAssertionActivity.EXTRA_ENTRY_ID, entry.id.toHexString())
-                            putExtra(PasskeyAssertionActivity.EXTRA_REQUEST_JSON, option.requestJson)
-                            putExtra(PasskeyAssertionActivity.EXTRA_CHALLENGE, challenge)
-                            putExtra(PasskeyAssertionActivity.EXTRA_ORIGIN, callingOrigin.ifBlank { "https://$targetRpId" })
-                        }
-                        val pendingIntent = PendingIntent.getActivity(
-                            this,
-                            REQUEST_CODE_ASSERT + entry.id.hashCode(),
-                            intent,
-                            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-                        )
-
-                        val entryBuilder = PublicKeyCredentialEntry.Builder(
-                            this,
-                            passkey.userName.ifBlank { entry.title },
-                            pendingIntent,
-                            option
-                        ).setIcon(Icon.createWithResource(this, R.drawable.ic_launcher))
-
-                        if (passkey.userDisplayName.isNotBlank()) {
-                            entryBuilder.setDisplayName(passkey.userDisplayName)
-                        }
-
-                        if (isBiometricAvailable) {
-                            val bioPromptData = BiometricPromptData(
-                                null,
-                                BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL
-                            )
-                            entryBuilder.setBiometricPromptData(bioPromptData)
-                        }
-
-                        responseBuilder.addCredentialEntry(entryBuilder.build())
-                    }
-                }
-
-                is BeginGetPasswordOption -> {
-                    val targetDomain = DomainMatcher.extractDomain(callingOrigin)
-                    val matchedPasswords = allEntries.filter { entry ->
-                        val hasPassword = entry.password != null
-                        val domainMatch = targetDomain.isNotBlank() && entry.url.isNotBlank() &&
-                                DomainMatcher.isDomainMatch(entry.url, targetDomain)
-                        val packageMatch = callingPackage.isNotBlank() && (
-                                entry.title.contains(callingPackage, ignoreCase = true) ||
-                                        DomainMatcher.isPackageMatch(entry.url, callingPackage)
-                                )
-                        hasPassword && (domainMatch || packageMatch)
-                    }
-
-                    for (entry in matchedPasswords) {
-                        val intent = Intent(this, PasswordFillActivity::class.java).apply {
-                            putExtra(PasswordFillActivity.EXTRA_ENTRY_ID, entry.id.toHexString())
-                        }
-                        val pendingIntent = PendingIntent.getActivity(
-                            this,
-                            REQUEST_CODE_FILL + entry.id.hashCode(),
-                            intent,
-                            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-                        )
-
-                        val entryBuilder = PasswordCredentialEntry.Builder(
-                            this,
-                            entry.userName.ifBlank { entry.title },
-                            pendingIntent,
-                            option
-                        ).setDisplayName(entry.title)
-                            .setIcon(Icon.createWithResource(this, R.drawable.ic_launcher))
-
-                        responseBuilder.addCredentialEntry(entryBuilder.build())
-                    }
-                }
-            }
-        }
-
-        return responseBuilder.build()
+        // 2. 密码库已就绪：委派共享组装器检索并输出匹配凭据
+        return responseAssembler.buildUnlockedGetResponse(request)
     }
 
     override fun onBeginCreateCredentialRequest(

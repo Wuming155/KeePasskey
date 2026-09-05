@@ -5,117 +5,99 @@ import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.security.ProtectedString
 import com.keepasskey.crypto.stream.InnerRandomStreamCipher
-import org.w3c.dom.Document
-import org.w3c.dom.Element
 import java.util.Base64
 
 /**
- * KDBX XML <Entry> 节点序列化写出器。
+ * KDBX XML <Entry> 节点序列化写出器（流式）。
  */
 object KdbxXmlEntrySerializer {
 
     fun serialize(
-        doc: Document,
-        parentElem: Element,
+        writer: KdbxXmlStreamWriter,
         entry: KdbxEntry,
         innerStreamCipher: InnerRandomStreamCipher?,
         isHistory: Boolean = false
     ) {
-        val entryElem = doc.createElement(KdbxConstants.Xml.ENTRY)
-        parentElem.appendChild(entryElem)
+        writer.startElement(KdbxConstants.Xml.ENTRY)
 
-        KdbxXmlDomUtil.appendTextElement(doc, entryElem, KdbxConstants.Xml.UUID, KdbxXmlDomUtil.encodeUuid(entry.id))
-        KdbxXmlDomUtil.appendTextElement(doc, entryElem, KdbxConstants.Xml.ICON_ID, entry.iconId.toString())
+        KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.UUID, KdbxXmlValueUtil.encodeUuid(entry.id))
+        KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.ICON_ID, entry.iconId.toString())
 
         entry.customIconId?.let {
-            KdbxXmlDomUtil.appendTextElement(doc, entryElem, KdbxConstants.Xml.CUSTOM_ICON_UUID, KdbxXmlDomUtil.encodeUuid(it))
+            KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.CUSTOM_ICON_UUID, KdbxXmlValueUtil.encodeUuid(it))
         }
-        entry.foregroundColor?.let {
-            KdbxXmlDomUtil.appendTextElement(doc, entryElem, KdbxConstants.Xml.FOREGROUND_COLOR, it)
-        }
-        entry.backgroundColor?.let {
-            KdbxXmlDomUtil.appendTextElement(doc, entryElem, KdbxConstants.Xml.BACKGROUND_COLOR, it)
-        }
-        entry.overrideUrl?.let {
-            KdbxXmlDomUtil.appendTextElement(doc, entryElem, KdbxConstants.Xml.OVERRIDE_URL, it)
-        }
+        KdbxXmlWriteUtil.optionalTextElement(writer, KdbxConstants.Xml.FOREGROUND_COLOR, entry.foregroundColor)
+        KdbxXmlWriteUtil.optionalTextElement(writer, KdbxConstants.Xml.BACKGROUND_COLOR, entry.backgroundColor)
+        KdbxXmlWriteUtil.optionalTextElement(writer, KdbxConstants.Xml.OVERRIDE_URL, entry.overrideUrl)
         if (!entry.qualityCheck) {
-            KdbxXmlDomUtil.appendTextElement(doc, entryElem, KdbxConstants.Xml.QUALITY_CHECK, "False")
+            KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.QUALITY_CHECK, "False")
         }
         entry.previousParentGroup?.let {
-            KdbxXmlDomUtil.appendTextElement(doc, entryElem, KdbxConstants.Xml.PREVIOUS_PARENT_GROUP, KdbxXmlDomUtil.encodeUuid(it))
+            KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.PREVIOUS_PARENT_GROUP, KdbxXmlValueUtil.encodeUuid(it))
         }
         if (entry.tags.isNotEmpty()) {
-            KdbxXmlDomUtil.appendTextElement(doc, entryElem, KdbxConstants.Xml.TAGS, entry.tags.joinToString("; "))
+            KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.TAGS, entry.tags.joinToString("; "))
         }
 
-        KdbxXmlDomUtil.serializeTimes(doc, entryElem, entry.times)
+        KdbxXmlWriteUtil.serializeTimes(writer, entry.times)
 
-        // 字段 (标准字段 + 自定义字段)
         for ((key, protectedString) in entry.fields) {
-            serializeField(doc, entryElem, key, protectedString, innerStreamCipher)
+            serializeField(writer, key, protectedString, innerStreamCipher)
         }
         for (cf in entry.customFields) {
-            serializeField(doc, entryElem, cf.key, cf.value, innerStreamCipher)
+            serializeField(writer, cf.key, cf.value, innerStreamCipher)
         }
 
-        // 自动输入 (AutoType)
         entry.autoType?.let {
-            serializeAutoType(doc, entryElem, it)
+            serializeAutoType(writer, it)
         }
 
-        // 附件二进制引用 (<Binary>)
         for (att in entry.attachments) {
-            val binElem = doc.createElement(KdbxConstants.Xml.BINARY)
-            entryElem.appendChild(binElem)
-            KdbxXmlDomUtil.appendTextElement(doc, binElem, KdbxConstants.Xml.KEY, att.name)
-            val valElem = doc.createElement(KdbxConstants.Xml.VALUE)
-            binElem.appendChild(valElem)
-            valElem.setAttribute(KdbxConstants.Xml.REF, att.refIndex.toString())
+            writer.startElement(KdbxConstants.Xml.BINARY)
+            KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.KEY, att.name)
+            writer.startElement(KdbxConstants.Xml.VALUE)
+            writer.attribute(KdbxConstants.Xml.REF, att.refIndex.toString())
             if (att.isProtected) {
-                valElem.setAttribute(KdbxConstants.Xml.PROTECTED, "True")
+                writer.attribute(KdbxConstants.Xml.PROTECTED, "True")
             }
+            writer.endElement()
+            writer.endElement()
         }
 
-        // CustomData
         if (entry.customData.isNotEmpty()) {
-            val cdElem = doc.createElement(KdbxConstants.Xml.CUSTOM_DATA)
-            entryElem.appendChild(cdElem)
+            writer.startElement(KdbxConstants.Xml.CUSTOM_DATA)
             for ((k, v) in entry.customData) {
-                val itemElem = doc.createElement(KdbxConstants.Xml.ITEM)
-                cdElem.appendChild(itemElem)
-                KdbxXmlDomUtil.appendTextElement(doc, itemElem, KdbxConstants.Xml.KEY, k)
-                KdbxXmlDomUtil.appendTextElement(doc, itemElem, KdbxConstants.Xml.VALUE, v)
+                writer.startElement(KdbxConstants.Xml.ITEM)
+                KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.KEY, k)
+                KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.VALUE, v)
+                writer.endElement()
             }
+            writer.endElement()
         }
 
-        // 历史版本 (历史条目内不再递归嵌套历史)
         if (!isHistory && entry.history.isNotEmpty()) {
-            val histElem = doc.createElement(KdbxConstants.Xml.HISTORY)
-            entryElem.appendChild(histElem)
+            writer.startElement(KdbxConstants.Xml.HISTORY)
             for (histEntry in entry.history) {
-                serialize(doc, histElem, histEntry, innerStreamCipher, isHistory = true)
+                serialize(writer, histEntry, innerStreamCipher, isHistory = true)
             }
+            writer.endElement()
         }
+
+        writer.endElement()
     }
 
     private fun serializeField(
-        doc: Document,
-        parentElem: Element,
+        writer: KdbxXmlStreamWriter,
         key: String,
         value: ProtectedString,
         innerStreamCipher: InnerRandomStreamCipher?
     ) {
-        val stringElem = doc.createElement(KdbxConstants.Xml.STRING)
-        parentElem.appendChild(stringElem)
+        writer.startElement(KdbxConstants.Xml.STRING)
+        KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.KEY, key)
 
-        KdbxXmlDomUtil.appendTextElement(doc, stringElem, KdbxConstants.Xml.KEY, key)
-
-        val valueElem = doc.createElement(KdbxConstants.Xml.VALUE)
-        stringElem.appendChild(valueElem)
-
+        writer.startElement(KdbxConstants.Xml.VALUE)
         if (value.isProtected) {
-            valueElem.setAttribute(KdbxConstants.Xml.PROTECTED, "True")
+            writer.attribute(KdbxConstants.Xml.PROTECTED, "True")
             val rawBytes = value.readUtf8()
             try {
                 val encodedBytes = if (innerStreamCipher != null) {
@@ -123,29 +105,31 @@ object KdbxXmlEntrySerializer {
                 } else {
                     rawBytes
                 }
-                valueElem.textContent = Base64.getEncoder().encodeToString(encodedBytes)
+                writer.text(Base64.getEncoder().encodeToString(encodedBytes))
             } finally {
                 rawBytes.fill(0)
             }
         } else {
-            valueElem.textContent = value.readString()
+            writer.text(value.readString())
         }
+        writer.endElement()
+
+        writer.endElement()
     }
 
-    private fun serializeAutoType(doc: Document, parentElem: Element, autoType: KdbxAutoType) {
-        val atElem = doc.createElement(KdbxConstants.Xml.AUTO_TYPE)
-        parentElem.appendChild(atElem)
-
-        KdbxXmlDomUtil.appendTextElement(doc, atElem, KdbxConstants.Xml.ENABLED, if (autoType.enabled) "True" else "False")
-        KdbxXmlDomUtil.appendTextElement(doc, atElem, KdbxConstants.Xml.DATA_TRANSFER_OBFUSCATION, autoType.dataTransferObfuscation.toString())
+    private fun serializeAutoType(writer: KdbxXmlStreamWriter, autoType: KdbxAutoType) {
+        writer.startElement(KdbxConstants.Xml.AUTO_TYPE)
+        KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.ENABLED, if (autoType.enabled) "True" else "False")
+        KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.DATA_TRANSFER_OBFUSCATION, autoType.dataTransferObfuscation.toString())
         if (autoType.defaultSequence.isNotEmpty()) {
-            KdbxXmlDomUtil.appendTextElement(doc, atElem, KdbxConstants.Xml.DEFAULT_SEQUENCE, autoType.defaultSequence)
+            KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.DEFAULT_SEQUENCE, autoType.defaultSequence)
         }
         for (assoc in autoType.associations) {
-            val assocElem = doc.createElement(KdbxConstants.Xml.ASSOCIATION)
-            atElem.appendChild(assocElem)
-            KdbxXmlDomUtil.appendTextElement(doc, assocElem, KdbxConstants.Xml.WINDOW, assoc.window)
-            KdbxXmlDomUtil.appendTextElement(doc, assocElem, KdbxConstants.Xml.KEYSTROKE_SEQUENCE, assoc.keystrokeSequence)
+            writer.startElement(KdbxConstants.Xml.ASSOCIATION)
+            KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.WINDOW, assoc.window)
+            KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.KEYSTROKE_SEQUENCE, assoc.keystrokeSequence)
+            writer.endElement()
         }
+        writer.endElement()
     }
 }

@@ -53,7 +53,7 @@ class UnlockViewModelTest {
     fun `空密码点击解锁提示错误`() = runTest {
         val viewModel = createViewModel()
 
-        viewModel.onPasswordChange("")
+        viewModel.onPasswordChangeSecure(CharArray(0))
         viewModel.unlock()
         testScheduler.runCurrent()
 
@@ -75,7 +75,7 @@ class UnlockViewModelTest {
             }
         }
 
-        viewModel.onPasswordChange("ValidMasterPass#123")
+        viewModel.onPasswordChangeSecure("ValidMasterPass#123".toCharArray())
         viewModel.unlock()
         testScheduler.runCurrent()
 

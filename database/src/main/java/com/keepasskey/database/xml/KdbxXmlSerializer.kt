@@ -5,17 +5,12 @@ import com.keepasskey.core.model.KdbxGroup
 import com.keepasskey.crypto.stream.InnerRandomStreamCipher
 import com.keepasskey.database.file.KdbxDatabase
 import com.keepasskey.database.file.KdbxHeader
-import org.w3c.dom.Element
 import java.io.OutputStream
-import javax.xml.parsers.DocumentBuilderFactory
-import javax.xml.transform.OutputKeys
-import javax.xml.transform.TransformerFactory
-import javax.xml.transform.dom.DOMSource
-import javax.xml.transform.stream.StreamResult
 
 /**
- * KDBX XML 序列化写回器。
- * 遵循单一职责与高内聚设计：委派 [KdbxXmlMetaSerializer] 与 [KdbxXmlGroupSerializer] 处理具体节点树。
+ * KDBX XML 序列化写回器（流式，不构建 DOM）。
+ * 遵循单一职责与高内聚设计：委派 [KdbxXmlMetaSerializer] 与 [KdbxXmlGroupSerializer] 流式写出具体节点。
+ * 注意：[serialize] 结束时仅冲刷写出器缓冲，外层压缩/加密流的级联关闭由 [com.keepasskey.database.file.KdbxFile] 负责。
  */
 class KdbxXmlSerializer(
     private val innerStreamCipher: InnerRandomStreamCipher?
@@ -25,17 +20,14 @@ class KdbxXmlSerializer(
         outputStream: OutputStream,
         database: KdbxDatabase
     ) {
-        val factory = DocumentBuilderFactory.newInstance()
-        val builder = factory.newDocumentBuilder()
-        val doc = builder.newDocument()
+        val writer = KdbxXmlStreamWriter(outputStream)
+        writer.startDocument()
 
-        val rootElem = doc.createElement(KdbxConstants.Xml.ROOT)
-        doc.appendChild(rootElem)
+        writer.startElement(KdbxConstants.Xml.ROOT)
 
-        // 1. 序列化 <Meta>
+        // 1. 流式写出 <Meta>
         KdbxXmlMetaSerializer.serialize(
-            doc = doc,
-            rootElem = rootElem,
+            writer = writer,
             generator = database.generator,
             databaseName = database.databaseName,
             databaseNameChanged = database.databaseNameChanged,
@@ -56,25 +48,13 @@ class KdbxXmlSerializer(
             customData = database.customData
         )
 
-        // 2. 序列化 <Root> 节点包裹的根分组
-        val rootNodeElem = doc.createElement(KdbxConstants.Xml.ROOT_GROUP)
-        rootElem.appendChild(rootNodeElem)
-        KdbxXmlGroupSerializer.serialize(doc, rootNodeElem, database.rootGroup, innerStreamCipher)
+        // 2. 流式写出 <Root> 包裹的根分组
+        writer.startElement(KdbxConstants.Xml.ROOT_GROUP)
+        KdbxXmlGroupSerializer.serialize(writer, database.rootGroup, innerStreamCipher)
+        writer.endElement()
 
-        // 3. 转换并输出至流
-        val transformerFactory = TransformerFactory.newInstance()
-        val transformer = transformerFactory.newTransformer()
-        transformer.setOutputProperty(OutputKeys.ENCODING, "UTF-8")
-        transformer.setOutputProperty(OutputKeys.INDENT, "yes")
-        try {
-            transformer.setOutputProperty("{http://xml.apache.org/xslt}indent-amount", "2")
-        } catch (_: Exception) {
-            // 部分 XML 实现可能不支持特定属性
-        }
-
-        val source = DOMSource(doc)
-        val result = StreamResult(outputStream)
-        transformer.transform(source, result)
+        writer.endElement()
+        writer.close()
     }
 
     /**

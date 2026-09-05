@@ -28,7 +28,9 @@
 
 ## 决策日志
 
-- **2026-09-05**：发现并修复「7 阶段全量验收」文档失真——全量代码审计对照参考项目架构分析发现 22 项问题（CredentialProviderService 空响应、triggerSync 模拟延时、TOTP 假码、cipherKey 非官方派生、parseDate Base64 含 T 误判等）。以 REMEDIATION_PLAN.md 4 波次多子代理模式完成修复，每波主会话独立复跑测试（--rerun-tasks 防缓存假绿）+ 语义化提交。关键设计决策：① cipherKey 迁移采用「官方派生优先+旧派生回退重试」，旧文件保存即自动迁移；② SyncEngine 定为纯字节级（sync 禁依赖 database），kdbx 语义合并编排放 app 层 SyncCoordinator；③ KDBX4 每次序列化随机 IV/Seed 导致哈希漂移，SyncCoordinator 以内容级比对防抖复用基线；④ 回收站改库内标准组（recycleBinUuid 落库），DatabaseSession 增量 updateDatabaseMeta 为唯一 database 适配点。已知限界：DOM 非流式解析（远期）、S3 HEAD+PUT TOCTOU 微窗口、锁库 UX v1、Compose 密码 String 边界妥协。
+- **2026-09-05**：**Wave 5「已知限界清零专项」交付**——四项已知限界逐项解决：① KDBX 全链路流式化（读取 SAX 状态机 / 写侧 KdbxXmlStreamWriter / HmacBlockStream 流式双向 / KdbxFile 管线化，不再物化整条密文/明文/压缩数据）；② S3 覆写 PUT 附 `If-Match` 服务端原子校验，TOCTOU 消除（不支持条件写的兼容存储降级旧行为）；③ Credential Provider 链式解锁（锁库 UX v2：锁库 Action → CredentialUnlockActivity 解锁 → setBeginGetCredentialResponse 直接回传候选，共享 CredentialResponseAssembler）；④ SecurePasswordField 组件 + 主密码 CharArray 全链路（UnlockUiState 去 String 明文）。关键设计决策：⑤ 官方与旧派生 hmacKey64 相同（仅 cipherKey 异），头部 HMAC 无法区分派生变体，旧派生识别改为首块解密探针 + 内层 Header 结构校验裁决；⑥ SAX 解析器异常包装必须放行 KdbxInvalidCredentialsException（HMAC 语义不得被吞为文件损坏）。剩余限界：对象树仍整体驻留内存、Compose 框架层 String（已收敛单点）、部分次要密码框未接 SecurePasswordField。
+
+- **2026-09-05**：发现并修复「7 阶段全量验收」文档失真——全量代码审计对照参考项目架构分析发现 22 项问题（CredentialProviderService 空响应、triggerSync 模拟延时、TOTP 假码、cipherKey 非官方派生、parseDate Base64 含 T 误判等）。以 REMEDIATION_PLAN.md 4 波次多子代理模式完成修复，每波主会话独立复跑测试（--rerun-tasks 防缓存假绿）+ 语义化提交。关键设计决策：① cipherKey 迁移采用「官方派生优先+旧派生回退重试」，旧文件保存即自动迁移；② SyncEngine 定为纯字节级（sync 禁依赖 database），kdbx 语义合并编排放 app 层 SyncCoordinator；③ KDBX4 每次序列化随机 IV/Seed 导致哈希漂移，SyncCoordinator 以内容级比对防抖复用基线；④ 回收站改库内标准组（recycleBinUuid 落库），DatabaseSession 增量 updateDatabaseMeta 为唯一 database 适配点。已知限界：DOM 非流式解析（远期）、S3 HEAD+PUT TOCTOU 微窗口、锁库 UX v1、Compose 密码 String 边界妥协。（上述四项已由同日 Wave 5 清零，见上方决策日志）
 
 - **2026-09-05**：新增第 5 个参考项目 **KeePassXC**（`参考项目/keepassxc-develop`，C++/Qt develop 分支），完成 728 行深度架构分析（`KeePassXC-架构分析.md`），并同步收录至 `.codebuddy/skills/references/`。重点固化三块可移植资产：① `Merger`（`src/core/Merger.cpp`）的条目级合并、秒级时间戳截断与墓碑复活规则 → `KdbxMerger` 直接算法参考；② `KdbxReader/KdbxWriter` KDBX 3/4 读写管线 → `database` 模块交叉验证；③ 浏览器集成的 `KPEX_PASSKEY_*` Entry 属性 schema 与 WebAuthn 栈隔离分层 → `PasskeyData` 与 Credential Provider 隔离设计。参考项目优先级层级更新为 5 级（KeePassXC 列为"算法级参考"，Monica 降为第 5 级），`AGENTS.md`、主 `README.md`、`.codebuddy/skills/reference-projects.md` 与两处 references README 已同步更新。
 
@@ -60,9 +62,9 @@
 
 ## 待办与已知问题
 
-- KDBX DOM 解析改造流式（XmlPullParser + 进度 Flow）——大库内存优化，远期。
-- S3 覆写路径的 TOCTOU 微窗口（HEAD+ETag 预检后 PUT）——S3 原生条件写待版本桶支持后引入。
-- Credential Provider 锁库 UX v2：链式解锁（系统弹窗内完成生物识别）。
+- KDBX 流式化已完成（Wave 5），剩余：对象树仍整体驻留内存——增量加载 / 解析进度 Flow 列为远期。
+- S3 条件写已闭环（Wave 5 If-Match）；对未支持条件覆写的 S3 兼容存储自动降级为 HEAD 预检 + 无条件 PUT（行为不劣于旧版）。
+- SecurePasswordField 已覆盖解锁主密码路径（Wave 5）；EntryEdit / DatabasePicker / Settings 密码框与 QuickUnlock PIN 接入列为待办。
 - kapt 迁移 KSP（需与 Kotlin 升级联动）。
 - 引入 version catalog（`libs.versions.toml`）收敛依赖版本。
 - Argon2 纯 JVM 性能待评估，NDK 加速列为远期优化（KdfBenchmark 已提供设备自适应参数）。

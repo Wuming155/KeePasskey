@@ -5,19 +5,16 @@ import com.keepasskey.core.model.DeletedObject
 import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.core.model.MemoryProtectionConfig
-import org.w3c.dom.Document
-import org.w3c.dom.Element
 import java.time.Instant
 import java.util.Base64
 
 /**
- * KDBX XML <Meta> 节点序列化写出器。
+ * KDBX XML <Meta> 节点序列化写出器（流式）。
  */
 object KdbxXmlMetaSerializer {
 
     fun serialize(
-        doc: Document,
-        rootElem: Element,
+        writer: KdbxXmlStreamWriter,
         generator: String,
         databaseName: String,
         databaseNameChanged: Instant?,
@@ -37,87 +34,88 @@ object KdbxXmlMetaSerializer {
         deletedObjects: List<DeletedObject>,
         customData: Map<String, String>
     ) {
-        val metaElem = doc.createElement(KdbxConstants.Xml.META)
-        rootElem.appendChild(metaElem)
+        writer.startElement(KdbxConstants.Xml.META)
 
-        KdbxXmlDomUtil.appendTextElement(doc, metaElem, KdbxConstants.Xml.GENERATOR, generator)
-        KdbxXmlDomUtil.appendTextElement(doc, metaElem, KdbxConstants.Xml.DATABASE_NAME, databaseName)
+        KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.GENERATOR, generator)
+        KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.DATABASE_NAME, databaseName)
         if (databaseNameChanged != null) {
-            KdbxXmlDomUtil.appendTextElement(doc, metaElem, KdbxConstants.Xml.DATABASE_NAME_CHANGED, KdbxXmlTimeHelper.formatDate(databaseNameChanged))
+            KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.DATABASE_NAME_CHANGED, KdbxXmlTimeHelper.formatDate(databaseNameChanged))
         }
-        KdbxXmlDomUtil.appendTextElement(doc, metaElem, KdbxConstants.Xml.DATABASE_DESCRIPTION, databaseDescription)
+        KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.DATABASE_DESCRIPTION, databaseDescription)
         if (databaseDescriptionChanged != null) {
-            KdbxXmlDomUtil.appendTextElement(doc, metaElem, KdbxConstants.Xml.DATABASE_DESCRIPTION_CHANGED, KdbxXmlTimeHelper.formatDate(databaseDescriptionChanged))
+            KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.DATABASE_DESCRIPTION_CHANGED, KdbxXmlTimeHelper.formatDate(databaseDescriptionChanged))
         }
 
-        KdbxXmlDomUtil.appendTextElement(doc, metaElem, KdbxConstants.Xml.RECYCLE_BIN_ENABLED, if (recycleBinEnabled) "True" else "False")
+        KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.RECYCLE_BIN_ENABLED, if (recycleBinEnabled) "True" else "False")
         if (recycleBinUuid != null) {
-            KdbxXmlDomUtil.appendTextElement(doc, metaElem, KdbxConstants.Xml.RECYCLE_BIN_UUID, KdbxXmlDomUtil.encodeUuid(recycleBinUuid))
+            KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.RECYCLE_BIN_UUID, KdbxXmlValueUtil.encodeUuid(recycleBinUuid))
         }
         if (recycleBinChanged != null) {
-            KdbxXmlDomUtil.appendTextElement(doc, metaElem, KdbxConstants.Xml.RECYCLE_BIN_CHANGED, KdbxXmlTimeHelper.formatDate(recycleBinChanged))
+            KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.RECYCLE_BIN_CHANGED, KdbxXmlTimeHelper.formatDate(recycleBinChanged))
         }
 
         if (entryTemplatesGroup != null) {
-            KdbxXmlDomUtil.appendTextElement(doc, metaElem, KdbxConstants.Xml.ENTRY_TEMPLATES_GROUP, KdbxXmlDomUtil.encodeUuid(entryTemplatesGroup))
+            KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.ENTRY_TEMPLATES_GROUP, KdbxXmlValueUtil.encodeUuid(entryTemplatesGroup))
         }
         if (entryTemplatesGroupChanged != null) {
-            KdbxXmlDomUtil.appendTextElement(doc, metaElem, KdbxConstants.Xml.ENTRY_TEMPLATES_GROUP_CHANGED, KdbxXmlTimeHelper.formatDate(entryTemplatesGroupChanged))
+            KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.ENTRY_TEMPLATES_GROUP_CHANGED, KdbxXmlTimeHelper.formatDate(entryTemplatesGroupChanged))
         }
 
-        KdbxXmlDomUtil.appendTextElement(doc, metaElem, KdbxConstants.Xml.HISTORY_MAX_ITEMS, historyMaxItems.toString())
-        KdbxXmlDomUtil.appendTextElement(doc, metaElem, KdbxConstants.Xml.HISTORY_MAX_SIZE, historyMaxSize.toString())
+        KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.HISTORY_MAX_ITEMS, historyMaxItems.toString())
+        KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.HISTORY_MAX_SIZE, historyMaxSize.toString())
 
         if (lastSelectedGroup != null) {
-            KdbxXmlDomUtil.appendTextElement(doc, metaElem, KdbxConstants.Xml.LAST_SELECTED_GROUP, KdbxXmlDomUtil.encodeUuid(lastSelectedGroup))
+            KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.LAST_SELECTED_GROUP, KdbxXmlValueUtil.encodeUuid(lastSelectedGroup))
         }
         if (lastTopVisibleGroup != null) {
-            KdbxXmlDomUtil.appendTextElement(doc, metaElem, KdbxConstants.Xml.LAST_TOP_VISIBLE_GROUP, KdbxXmlDomUtil.encodeUuid(lastTopVisibleGroup))
+            KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.LAST_TOP_VISIBLE_GROUP, KdbxXmlValueUtil.encodeUuid(lastTopVisibleGroup))
         }
 
-        // MemoryProtection
-        val memProtElem = doc.createElement(KdbxConstants.Xml.MEMORY_PROTECTION)
-        metaElem.appendChild(memProtElem)
-        KdbxXmlDomUtil.appendTextElement(doc, memProtElem, KdbxConstants.Xml.PROTECT_TITLE, if (memoryProtection.protectTitle) "True" else "False")
-        KdbxXmlDomUtil.appendTextElement(doc, memProtElem, KdbxConstants.Xml.PROTECT_USER_NAME, if (memoryProtection.protectUserName) "True" else "False")
-        KdbxXmlDomUtil.appendTextElement(doc, memProtElem, KdbxConstants.Xml.PROTECT_PASSWORD, if (memoryProtection.protectPassword) "True" else "False")
-        KdbxXmlDomUtil.appendTextElement(doc, memProtElem, KdbxConstants.Xml.PROTECT_URL, if (memoryProtection.protectUrl) "True" else "False")
-        KdbxXmlDomUtil.appendTextElement(doc, memProtElem, KdbxConstants.Xml.PROTECT_NOTES, if (memoryProtection.protectNotes) "True" else "False")
+        serializeMemoryProtection(writer, memoryProtection)
 
-        // CustomIcons
         if (customIcons.isNotEmpty()) {
-            val customIconsElem = doc.createElement(KdbxConstants.Xml.CUSTOM_ICONS)
-            metaElem.appendChild(customIconsElem)
+            writer.startElement(KdbxConstants.Xml.CUSTOM_ICONS)
             for (icon in customIcons) {
-                val iconElem = doc.createElement(KdbxConstants.Xml.ICON)
-                customIconsElem.appendChild(iconElem)
-                KdbxXmlDomUtil.appendTextElement(doc, iconElem, KdbxConstants.Xml.UUID, KdbxXmlDomUtil.encodeUuid(icon.uuid))
-                KdbxXmlDomUtil.appendTextElement(doc, iconElem, KdbxConstants.Xml.DATA, Base64.getEncoder().encodeToString(icon.data))
+                writer.startElement(KdbxConstants.Xml.ICON)
+                KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.UUID, KdbxXmlValueUtil.encodeUuid(icon.uuid))
+                KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.DATA, Base64.getEncoder().encodeToString(icon.data))
+                writer.endElement()
             }
+            writer.endElement()
         }
 
-        // DeletedObjects
         if (deletedObjects.isNotEmpty()) {
-            val delObjsElem = doc.createElement(KdbxConstants.Xml.DELETED_OBJECTS)
-            metaElem.appendChild(delObjsElem)
+            writer.startElement(KdbxConstants.Xml.DELETED_OBJECTS)
             for (del in deletedObjects) {
-                val delElem = doc.createElement(KdbxConstants.Xml.DELETED_OBJECT)
-                delObjsElem.appendChild(delElem)
-                KdbxXmlDomUtil.appendTextElement(doc, delElem, KdbxConstants.Xml.UUID, KdbxXmlDomUtil.encodeUuid(del.id))
-                KdbxXmlDomUtil.appendTextElement(doc, delElem, KdbxConstants.Xml.DELETION_TIME, KdbxXmlTimeHelper.formatDate(del.deletionTime))
+                writer.startElement(KdbxConstants.Xml.DELETED_OBJECT)
+                KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.UUID, KdbxXmlValueUtil.encodeUuid(del.id))
+                KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.DELETION_TIME, KdbxXmlTimeHelper.formatDate(del.deletionTime))
+                writer.endElement()
             }
+            writer.endElement()
         }
 
-        // CustomData
         if (customData.isNotEmpty()) {
-            val cdElem = doc.createElement(KdbxConstants.Xml.CUSTOM_DATA)
-            metaElem.appendChild(cdElem)
+            writer.startElement(KdbxConstants.Xml.CUSTOM_DATA)
             for ((key, value) in customData) {
-                val itemElem = doc.createElement(KdbxConstants.Xml.ITEM)
-                cdElem.appendChild(itemElem)
-                KdbxXmlDomUtil.appendTextElement(doc, itemElem, KdbxConstants.Xml.KEY, key)
-                KdbxXmlDomUtil.appendTextElement(doc, itemElem, KdbxConstants.Xml.VALUE, value)
+                writer.startElement(KdbxConstants.Xml.ITEM)
+                KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.KEY, key)
+                KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.VALUE, value)
+                writer.endElement()
             }
+            writer.endElement()
         }
+
+        writer.endElement()
+    }
+
+    private fun serializeMemoryProtection(writer: KdbxXmlStreamWriter, memoryProtection: MemoryProtectionConfig) {
+        writer.startElement(KdbxConstants.Xml.MEMORY_PROTECTION)
+        KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.PROTECT_TITLE, if (memoryProtection.protectTitle) "True" else "False")
+        KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.PROTECT_USER_NAME, if (memoryProtection.protectUserName) "True" else "False")
+        KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.PROTECT_PASSWORD, if (memoryProtection.protectPassword) "True" else "False")
+        KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.PROTECT_URL, if (memoryProtection.protectUrl) "True" else "False")
+        KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.PROTECT_NOTES, if (memoryProtection.protectNotes) "True" else "False")
+        writer.endElement()
     }
 }

@@ -1,6 +1,7 @@
 package com.keepasskey.database.file
 
 import com.keepasskey.core.model.KdbxConstants
+import com.keepasskey.crypto.cipher.CipherEngine
 import com.keepasskey.crypto.cipher.CipherFactory
 import com.keepasskey.crypto.hash.HashUtil
 import com.keepasskey.crypto.kdf.KdfFactory
@@ -9,12 +10,16 @@ import com.keepasskey.crypto.stream.InnerRandomStreamCipher
 import com.keepasskey.database.exception.KdbxCorruptFileException
 import com.keepasskey.database.exception.KdbxInvalidCredentialsException
 import com.keepasskey.database.io.LittleEndianUtil
+import com.keepasskey.database.io.NonClosingInputStream
+import com.keepasskey.database.io.NonClosingOutputStream
+import com.keepasskey.database.xml.KdbxMetaData
 import com.keepasskey.database.xml.KdbxXmlParser
 import com.keepasskey.database.xml.KdbxXmlSerializer
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
 import java.io.OutputStream
+import java.io.SequenceInputStream
 import java.nio.charset.StandardCharsets
 import java.security.SecureRandom
 import java.util.Arrays
@@ -29,14 +34,36 @@ import java.util.zip.GZIPOutputStream
  * - cipherKey: SHA-512(masterSeed ‖ transformedKey)[0..31]
  * - hmacKey64: SHA-512(masterSeed ‖ transformedKey ‖ 0x01)
  * - 兼顾读取历史旧派生产物，保存自动迁移至官方标准。
+ *
+ * 全链路流式管线（对应官方 Read/Write 流栈：HmacBlockStream → Cipher → GZip → XML 状态机）：
+ * 读写均不再将整条密文/明文/压缩数据物化为字节数组，大库加载与保存的峰值内存
+ * 由「数倍库体积」降为「单个块缓冲 + 对象树」。
  */
 object KdbxFile {
 
     private val secureRandom = SecureRandom()
 
+    /** 内层 Header 字段头大小：1 字节字段 ID + 4 字节小端长度 */
+    private const val FIELD_HEADER_SIZE = 5
+
+    /** 解密探针所需的最小块大小（一个 AES 分组） */
+    private const val MIN_PROBE_BLOCK_SIZE = 16
+
+    /** 解密探针的分块读取缓冲 */
+    private const val PROBE_READ_BUFFER_SIZE = 8192
+
+    private val INNER_HEADER_FIELD_IDS = setOf(
+        KdbxConstants.InnerHeaderFieldId.END.toInt(),
+        KdbxConstants.InnerHeaderFieldId.INNER_RANDOM_STREAM_ID.toInt(),
+        KdbxConstants.InnerHeaderFieldId.INNER_RANDOM_STREAM_KEY.toInt(),
+        KdbxConstants.InnerHeaderFieldId.BINARY.toInt()
+    )
+
     /**
      * 打开并解密 KDBX v4 数据库。
-     * 先采用官方标准密钥派生校验解密；若失败则尝试旧派生（SHA-256）兼容回退。
+     * 先采用官方标准密钥派生校验头部 HMAC（凭据正确性在解密前的最终裁决）；
+     * 历史旧派生（SHA-256 cipherKey）与官方派生的 hmacKey64 完全一致，头部 HMAC 无法区分二者，
+     * 因此 cipherKey 变体由数据段首个块的解密探针裁决（见 [resolveCipherKey]），保存时自动迁移官方标准。
      */
     fun load(
         inputStream: InputStream,
@@ -63,9 +90,8 @@ object KdbxFile {
             throw KdbxCorruptFileException("读取头部 HMAC 意外中断", e)
         }
 
-        // 3. 密钥派生：先尝试官方派生标准
-        var isLegacyDerivation = false
-        var (cipherKey, hmacKey64) = deriveKeys(header, passwordChars, keyFileData, isLegacy = false)
+        // 3. 官方标准派生
+        val (cipherKey, hmacKey64) = deriveKeys(header, passwordChars, keyFileData, isLegacy = false)
 
         try {
             // 4. 读取并校验 Header HMAC-SHA256
@@ -74,98 +100,10 @@ object KdbxFile {
             Arrays.fill(headerHmacKey, 0.toByte())
 
             if (!actualHeaderHmac.contentEquals(storedHeaderHmac)) {
-                // 官方派生未通过头部 HMAC，尝试旧版派生
-                Arrays.fill(cipherKey, 0.toByte())
-                Arrays.fill(hmacKey64, 0.toByte())
-                val legacyKeys = deriveKeys(header, passwordChars, keyFileData, isLegacy = true)
-                cipherKey = legacyKeys.first
-                hmacKey64 = legacyKeys.second
-
-                val legacyHmacKey = HashUtil.sha512(LittleEndianUtil.longTo8Bytes(0xFFFFFFFFFFFFFFFFUL.toLong()), hmacKey64)
-                val actualLegacyHmac = HashUtil.hmacSha256(legacyHmacKey, headerBytes)
-                Arrays.fill(legacyHmacKey, 0.toByte())
-
-                if (!actualLegacyHmac.contentEquals(storedHeaderHmac)) {
-                    throw KdbxInvalidCredentialsException("主密码错误或文件头部认证失败（HMAC 校验未通过）")
-                }
-                isLegacyDerivation = true
+                throw KdbxInvalidCredentialsException("主密码错误或文件头部认证失败（HMAC 校验未通过）")
             }
 
-            // 5. 读取并校验 HMAC 认证数据块流
-            val encryptedPayload = HmacBlockStream.readAll(inputStream, hmacKey64)
-
-            // 6. 解密负载数据并解析内层 Header (支持旧派生自动回退)
-            val cipherEngine = CipherFactory.getEngine(header.cipherUuid)
-            val (resolvedPayload, resolvedInnerHeader) = try {
-                val candidatePayload = cipherEngine.decrypt(cipherKey, header.encryptionIv, encryptedPayload)
-                val testStream = ByteArrayInputStream(candidatePayload)
-                val candidateHeader = InnerHeader.deserialize(testStream)
-                Pair(candidatePayload, candidateHeader)
-            } catch (e: Exception) {
-                if (!isLegacyDerivation) {
-                    // 若官方密钥解密失败，尝试旧派生 (SHA-256) 回退
-                    Arrays.fill(cipherKey, 0.toByte())
-                    val legacyKeys = deriveKeys(header, passwordChars, keyFileData, isLegacy = true)
-                    cipherKey = legacyKeys.first
-                    Arrays.fill(legacyKeys.second, 0.toByte())
-
-                    try {
-                        val legacyCandidate = cipherEngine.decrypt(cipherKey, header.encryptionIv, encryptedPayload)
-                        val testStream = ByteArrayInputStream(legacyCandidate)
-                        val candidateHeader = InnerHeader.deserialize(testStream)
-                        isLegacyDerivation = true
-                        Pair(legacyCandidate, candidateHeader)
-                    } catch (e2: Exception) {
-                        throw KdbxInvalidCredentialsException("数据解密失败：主密码错误或文件已损坏", e2)
-                    }
-                } else {
-                    throw KdbxInvalidCredentialsException("数据解密失败：主密码错误或文件已损坏", e)
-                }
-            }
-
-            // 7. 定位并解压缩 XML 数据
-            val payloadStream = ByteArrayInputStream(resolvedPayload)
-            InnerHeader.deserialize(payloadStream) // 跳过已解析的内层 Header
-
-            val xmlInputStream = if (header.compression == KdbxConstants.Compression.GZIP) {
-                GZIPInputStream(payloadStream)
-            } else {
-                payloadStream
-            }
-
-            // 8. 初始化内层内存保护流解码器
-            val innerCipher = InnerRandomStreamCipher(
-                resolvedInnerHeader.innerRandomStreamId,
-                resolvedInnerHeader.innerRandomStreamKey
-            )
-
-            // 9. 解析 XML DOM 数据树
-            val parser = KdbxXmlParser(innerCipher)
-            val parseResult = parser.parse(xmlInputStream, resolvedInnerHeader.binaries)
-
-            return KdbxDatabase(
-                header = header,
-                databaseName = parseResult.meta.databaseName,
-                databaseNameChanged = parseResult.meta.databaseNameChanged,
-                databaseDescription = parseResult.meta.databaseDescription,
-                databaseDescriptionChanged = parseResult.meta.databaseDescriptionChanged,
-                rootGroup = parseResult.rootGroup,
-                binaries = resolvedInnerHeader.binaries,
-                recycleBinUuid = parseResult.meta.recycleBinUuid,
-                recycleBinEnabled = parseResult.meta.recycleBinEnabled,
-                recycleBinChanged = parseResult.meta.recycleBinChanged,
-                entryTemplatesGroup = parseResult.meta.entryTemplatesGroup,
-                entryTemplatesGroupChanged = parseResult.meta.entryTemplatesGroupChanged,
-                customIcons = parseResult.meta.customIcons,
-                deletedObjects = parseResult.meta.deletedObjects,
-                memoryProtection = parseResult.meta.memoryProtection,
-                customData = parseResult.meta.customData,
-                historyMaxItems = parseResult.meta.historyMaxItems,
-                historyMaxSize = parseResult.meta.historyMaxSize,
-                lastSelectedGroup = parseResult.meta.lastSelectedGroup,
-                lastTopVisibleGroup = parseResult.meta.lastTopVisibleGroup,
-                generator = parseResult.meta.generator
-            )
+            return loadPayload(inputStream, header, passwordChars, keyFileData, cipherKey, hmacKey64)
         } finally {
             Arrays.fill(cipherKey, 0.toByte())
             Arrays.fill(hmacKey64, 0.toByte())
@@ -173,7 +111,166 @@ object KdbxFile {
     }
 
     /**
-     * 保存并序列化 KDBX v4 数据库。
+     * 流式解密负载数据：HMAC 块流（逐块校验）→ 解密流 → 内层 Header → 可选 GZip 解压 → 流式 XML 解析。
+     */
+    private fun loadPayload(
+        inputStream: InputStream,
+        header: KdbxHeader,
+        passwordChars: CharArray,
+        keyFileData: ByteArray?,
+        cipherKey: ByteArray,
+        hmacKey64: ByteArray
+    ): KdbxDatabase {
+        val hmacBlockIn = HmacBlockInputStream(NonClosingInputStream(inputStream), hmacKey64)
+        val cipherEngine = CipherFactory.getEngine(header.cipherUuid)
+
+        // 旧派生裁决：取首个数据块做内层 Header 结构探针，官方派生不合法时回退旧派生
+        val firstBlock = hmacBlockIn.readBlock()
+        val activeKey = resolveCipherKey(cipherEngine, header, firstBlock, cipherKey) {
+            deriveKeys(header, passwordChars, keyFileData, isLegacy = true).first
+        }
+
+        val payloadStream = if (firstBlock != null) {
+            SequenceInputStream(ByteArrayInputStream(firstBlock), hmacBlockIn)
+        } else {
+            hmacBlockIn
+        }
+        val cipherIn = cipherEngine.createDecryptingStream(payloadStream, activeKey, header.encryptionIv)
+
+        val innerHeader = InnerHeader.deserialize(cipherIn)
+
+        val xmlInputStream = if (header.compression == KdbxConstants.Compression.GZIP) {
+            GZIPInputStream(cipherIn)
+        } else {
+            cipherIn
+        }
+
+        val innerCipher = InnerRandomStreamCipher(
+            innerHeader.innerRandomStreamId,
+            innerHeader.innerRandomStreamKey
+        )
+
+        val parseResult = KdbxXmlParser(innerCipher).parse(xmlInputStream, innerHeader.binaries)
+
+        // XML 解析可能在 GZip 尾部即停止拉取，显式确认 HMAC 终止块已被消费校验
+        hmacBlockIn.verifyEndOfStream()
+
+        return buildDatabase(header, innerHeader, parseResult)
+    }
+
+    /**
+     * 用首个数据块的解密结果裁决 cipherKey 派生变体：
+     * 正确密钥解密出的内层 Header 具有严格结构（字段 ID 受限、长度有界、以 END 结尾或跨块延续），
+     * 错误密钥的解密产物几乎不可能通过结构校验。两种派生均不合法时按凭据错误处理。
+     */
+    private fun resolveCipherKey(
+        cipherEngine: CipherEngine,
+        header: KdbxHeader,
+        firstBlock: ByteArray?,
+        officialKey: ByteArray,
+        deriveLegacyKey: () -> ByteArray
+    ): ByteArray {
+        if (firstBlock == null || firstBlock.size < MIN_PROBE_BLOCK_SIZE) {
+            // 块过小无法构成有效探针（正常 KDBX 负载远大于此），按官方派生继续，由后续解析暴露问题
+            return officialKey
+        }
+        if (isPlausibleInnerHeaderPrefix(cipherEngine, header.encryptionIv, officialKey, firstBlock)) {
+            return officialKey
+        }
+        val legacyKey = deriveLegacyKey()
+        if (isPlausibleInnerHeaderPrefix(cipherEngine, header.encryptionIv, legacyKey, firstBlock)) {
+            return legacyKey
+        }
+        throw KdbxInvalidCredentialsException("数据解密失败：主密码错误或文件已损坏")
+    }
+
+    /**
+     * 试解密首块并校验其前缀是否呈现合法的内层 Header 结构。
+     * 首块通常并非消息结尾，AES-PKCS5 在收尾 doFinal 时会触发 BadPadding——
+     * 逐块读取并在该异常处停止，已解出的前缀对结构校验依然有效。
+     */
+    private fun isPlausibleInnerHeaderPrefix(
+        cipherEngine: CipherEngine,
+        encryptionIv: ByteArray,
+        cipherKey: ByteArray,
+        firstBlock: ByteArray
+    ): Boolean {
+        val prefix = try {
+            val probe = cipherEngine.createDecryptingStream(ByteArrayInputStream(firstBlock), cipherKey, encryptionIv)
+            probe.use { stream ->
+                val buffer = ByteArray(PROBE_READ_BUFFER_SIZE)
+                val collected = ByteArrayOutputStream()
+                try {
+                    while (true) {
+                        val count = stream.read(buffer)
+                        if (count < 0) break
+                        collected.write(buffer, 0, count)
+                    }
+                } catch (_: java.io.IOException) {
+                    // 解密流收尾异常：截取已解出的前缀继续校验
+                }
+                collected.toByteArray()
+            }
+        } catch (_: Exception) {
+            return false
+        }
+        return isPlausibleFieldSequence(prefix)
+    }
+
+    /**
+     * 校验字节序列是否为合法的内层 Header 字段序列前缀：
+     * 字段 ID 必须属于已知集合，字段长度非负且有界，END 字段正常终止；
+     * 仅 BINARY 字段允许「长度超出前缀剩余量」——大二进制池可合法跨越后续 HMAC 块延续。
+     */
+    private fun isPlausibleFieldSequence(prefix: ByteArray): Boolean {
+        var offset = 0
+        while (offset + FIELD_HEADER_SIZE <= prefix.size) {
+            val fieldId = prefix[offset].toInt() and 0xFF
+            if (fieldId !in INNER_HEADER_FIELD_IDS) return false
+            val length = LittleEndianUtil.bytesToInt(prefix, offset + 1)
+            if (length < 0) return false
+            offset += FIELD_HEADER_SIZE + length
+            if (fieldId == KdbxConstants.InnerHeaderFieldId.END.toInt()) return true
+            if (offset > prefix.size) {
+                return fieldId == KdbxConstants.InnerHeaderFieldId.BINARY.toInt()
+            }
+        }
+        return offset <= prefix.size
+    }
+
+    private fun buildDatabase(
+        header: KdbxHeader,
+        innerHeader: InnerHeader,
+        parseResult: KdbxXmlParser.ParseResult
+    ): KdbxDatabase {
+        val meta: KdbxMetaData = parseResult.meta
+        return KdbxDatabase(
+            header = header,
+            databaseName = meta.databaseName,
+            databaseNameChanged = meta.databaseNameChanged,
+            databaseDescription = meta.databaseDescription,
+            databaseDescriptionChanged = meta.databaseDescriptionChanged,
+            rootGroup = parseResult.rootGroup,
+            binaries = innerHeader.binaries,
+            recycleBinUuid = meta.recycleBinUuid,
+            recycleBinEnabled = meta.recycleBinEnabled,
+            recycleBinChanged = meta.recycleBinChanged,
+            entryTemplatesGroup = meta.entryTemplatesGroup,
+            entryTemplatesGroupChanged = meta.entryTemplatesGroupChanged,
+            customIcons = meta.customIcons,
+            deletedObjects = meta.deletedObjects,
+            memoryProtection = meta.memoryProtection,
+            customData = meta.customData,
+            historyMaxItems = meta.historyMaxItems,
+            historyMaxSize = meta.historyMaxSize,
+            lastSelectedGroup = meta.lastSelectedGroup,
+            lastTopVisibleGroup = meta.lastTopVisibleGroup,
+            generator = meta.generator
+        )
+    }
+
+    /**
+     * 保存并序列化 KDBX v4 数据库（全链路流式：XML 流式写出 → GZip → 加密流 → HMAC 块流）。
      * 恒用官方标准派生进行加密落盘，自动迁移旧派生库。
      */
     fun save(
@@ -202,30 +299,7 @@ object KdbxFile {
             innerHeader.innerRandomStreamKey
         )
 
-        // 3. 序列化 XML 树
-        val xmlBos = ByteArrayOutputStream()
-        val serializer = KdbxXmlSerializer(innerCipher)
-        serializer.serialize(xmlBos, updatedDatabase)
-        val xmlBytes = xmlBos.toByteArray()
-
-        // 4. GZip 压缩 XML
-        val compressedBos = ByteArrayOutputStream()
-        if (database.header.compression == KdbxConstants.Compression.GZIP) {
-            GZIPOutputStream(compressedBos).use { gzip ->
-                gzip.write(xmlBytes)
-            }
-        } else {
-            compressedBos.write(xmlBytes)
-        }
-        val compressedXml = compressedBos.toByteArray()
-
-        // 5. 组装待加密负载：InnerHeader + CompressedXml
-        val payloadBos = ByteArrayOutputStream()
-        innerHeader.serialize(payloadBos)
-        payloadBos.write(compressedXml)
-        val payload = payloadBos.toByteArray()
-
-        // 6. 生成全新随机 MasterSeed 与 EncryptionIV，更新 KDF Salt
+        // 3. 生成全新随机 MasterSeed 与 EncryptionIV，更新 KDF Salt
         val freshMasterSeed = ByteArray(32)
         val freshEncryptionIv = ByteArray(16)
         secureRandom.nextBytes(freshMasterSeed)
@@ -250,35 +324,55 @@ object KdbxFile {
             kdfParameters = freshKdfParams
         )
 
-        // 7. 恒用官方派生标准计算主加密与 HMAC 密钥
+        // 4. 恒用官方派生标准计算主加密与 HMAC 密钥
         val (cipherKey, hmacKey64) = deriveKeys(updatedHeader, passwordChars, keyFileData, isLegacy = false)
 
         try {
-            // 8. 对称加密负载
-            val cipherEngine = CipherFactory.getEngine(updatedHeader.cipherUuid)
-            val encryptedPayload = cipherEngine.encrypt(cipherKey, updatedHeader.encryptionIv, payload)
-
-            // 9. 写入外层 Header
+            // 5. 写入外层 Header + Header SHA-256 + Header HMAC
             val headerBytesStream = ByteArrayOutputStream()
             val headerBytes = updatedHeader.serialize(headerBytesStream)
             outputStream.write(headerBytes)
+            outputStream.write(HashUtil.sha256(headerBytes))
 
-            // 10. 写入 Header SHA-256
-            val headerSha = HashUtil.sha256(headerBytes)
-            outputStream.write(headerSha)
-
-            // 11. 写入 Header HMAC-SHA256
             val headerHmacKey = HashUtil.sha512(LittleEndianUtil.longTo8Bytes(0xFFFFFFFFFFFFFFFFUL.toLong()), hmacKey64)
             val headerHmac = HashUtil.hmacSha256(headerHmacKey, headerBytes)
             outputStream.write(headerHmac)
             Arrays.fill(headerHmacKey, 0.toByte())
 
-            // 12. 写入 HMAC 块流
-            HmacBlockStream.writeAll(encryptedPayload, outputStream, hmacKey64)
+            // 6. 流式加密写出负载：内层 Header（加密不压缩）→ GZip → 流式 XML
+            savePayload(outputStream, updatedHeader, innerHeader, innerCipher, updatedDatabase, cipherKey, hmacKey64)
             outputStream.flush()
         } finally {
             Arrays.fill(cipherKey, 0.toByte())
             Arrays.fill(hmacKey64, 0.toByte())
+        }
+    }
+
+    private fun savePayload(
+        outputStream: OutputStream,
+        header: KdbxHeader,
+        innerHeader: InnerHeader,
+        innerCipher: InnerRandomStreamCipher,
+        database: KdbxDatabase,
+        cipherKey: ByteArray,
+        hmacKey64: ByteArray
+    ) {
+        val blockOut = HmacBlockOutputStream(NonClosingOutputStream(outputStream), hmacKey64)
+        val cipherEngine = CipherFactory.getEngine(header.cipherUuid)
+        val cipherOut = cipherEngine.createEncryptingStream(blockOut, cipherKey, header.encryptionIv)
+
+        innerHeader.serialize(cipherOut)
+
+        val gzipOut = if (header.compression == KdbxConstants.Compression.GZIP) {
+            GZIPOutputStream(cipherOut)
+        } else {
+            null
+        }
+        try {
+            KdbxXmlSerializer(innerCipher).serialize(gzipOut ?: cipherOut, database)
+        } finally {
+            // 级联收尾：GZip finish → 加密流 doFinal → HMAC 块流写入终止块
+            gzipOut?.close() ?: cipherOut.close()
         }
     }
 
