@@ -8,6 +8,10 @@ import com.keepasskey.app.ui.model.VaultGroup
 
 /**
  * 凭据编辑/添加页面的不可变 UI 状态
+ *
+ * M1 整改（加解密审查 2026-09）：本状态类不再承载密码明文（String 不可变驻留 StateFlow 堆内存，
+ * 且每次 update 都会产生新副本）。密码经 EntryEditViewModel 的 CharArray 私有链路承载，
+ * UI 仅感知 [passwordLength] 用于强度条渲染。
  */
 data class EntryEditUiState(
     val entryId: String? = null,
@@ -16,7 +20,8 @@ data class EntryEditUiState(
     val iconName: String = "key",
     val title: String = "",
     val username: String = "",
-    val password: String = "",
+    /** 密码长度（非敏感元数据，用于强度条）；密码明文本身经 ViewModel CharArray 链路 */
+    val passwordLength: Int = 0,
     val url: String = "",
     val notes: String = "",
     val isPasskey: Boolean = false,

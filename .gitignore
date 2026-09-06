@@ -36,7 +36,6 @@ local.properties
 captures/
 .externalNativeBuild/
 .cxx/
-local.properties
 
 # Keystore files
 *.jks
@@ -46,7 +45,7 @@ local.properties
 google-services.json
 GoogleService-Info.plist
 
-# Android Profiling
+# Android Profiling & Dumps
 *.hprof
 
 # NDK
@@ -68,15 +67,20 @@ crashlytics.properties
 crashlytics-build.properties
 fabric.properties
 
-# Temp/backup files
+# Temp/backup/diff files
 *~
 *.bak
 *.swp
 *.tmp
+*.diff
+*.patch
+.git_broken_backup/
 
 # 参考项目（整个目录忽略）
 参考项目/
-
 测试项目/
+
 # 本地手工测试库与凭据（严禁入库）
 KeePasskey测试/
+KeePasskey测试_backup/
+*_backup/

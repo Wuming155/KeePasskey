@@ -13,6 +13,7 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -36,7 +37,10 @@ import com.keepasskey.app.ui.theme.MonospacePasswordStyle
  * 1. 显示用 String 仅存活于组件内部（不进入 UiState / StateFlow，杜绝状态层长期驻留明文）；
  * 2. 每次输入变更第一时间转换为 [CharArray] 经 [onPasswordChanged] 上行（收件方如需长期持有必须自行复制并负责清零）；
  * 3. 组件离开组合（DisposableEffect onDispose）或内容变更时，立即对桥接 CharArray 显式清零并释放 String 引用；
- * 4. 密码键盘、圆点遮罩、可见性切换、等宽字形等安全输入惯例内聚于此，调用方零配置复用。
+ * 4. 密码键盘、圆点遮罩、可见性切换、等宽字形等安全输入惯例内聚于此，调用方零配置复用；
+ * 5. [initialPassword] 支持既有密码一次性预填（编辑场景）：按 [initialKey] 消费一次，
+ *    仅注入组件内部显示态，不回写 [onPasswordChanged]（预填非用户编辑，不触发脏标记；
+ *    长期持有由数据层自行管理，加解密审查 2026-09 M1 整改）。
  */
 @Composable
 fun SecurePasswordField(
@@ -50,10 +54,27 @@ fun SecurePasswordField(
     onToggleVisibility: (() -> Unit)? = null,
     enabled: Boolean = true,
     leadingIcon: ImageVector? = null,
+    trailingIcon: (@Composable () -> Unit)? = null,
+    initialPassword: CharArray? = null,
+    initialKey: Any? = null,
     onDone: () -> Unit = {}
 ) {
     var displayText by remember { mutableStateOf("") }
     var charBridge by remember { mutableStateOf(CharArray(0)) }
+    // 预填消费闩：同一 initialKey 只消费一次，避免输入过程中被重复回写覆盖
+    var consumedInitialKey by remember { mutableStateOf<Any?>(null) }
+
+    LaunchedEffect(initialKey, initialPassword) {
+        val initial = initialPassword
+        if (initial != null && initialKey != null && consumedInitialKey != initialKey) {
+            consumedInitialKey = initialKey
+            charBridge.fill('0')
+            charBridge = initial.copyOf()
+            // 显示用 String：仅存活于组件内部（框架边界），离开组合即释放；
+            // 预填不回写 onPasswordChanged——预填不是用户编辑，不产生脏标记
+            displayText = String(initial)
+        }
+    }
 
     fun wipeSecret() {
         charBridge.fill('0')
@@ -89,7 +110,7 @@ fun SecurePasswordField(
             imeAction = ImeAction.Done
         ),
         keyboardActions = KeyboardActions(onDone = { onDone() }),
-        trailingIcon = onToggleVisibility?.let { toggle ->
+        trailingIcon = trailingIcon ?: onToggleVisibility?.let { toggle ->
             {
                 IconButton(onClick = toggle) {
                     Icon(

@@ -124,6 +124,9 @@ interface VaultRepository {
      * 保存或更新凭据条目。
      * [passwordChars] 非空时写入新密码；为 null 时保留既有条目的密码不动（M1 整改：
      * UI 投影不再携带密码明文，密码由编辑页按需加载后显式提交）。
+     * 擦除契约（加解密审查 2026-09 M4/M1 统一）：实现方在任何结果路径（成功/失败/异常）
+     * 用毕后负责显式清零传入的 [passwordChars]（与 [saveAutofillCredential] 同一契约），
+     * 调用方须传入可被清零的副本，不可复用为后续编辑状态。
      * [totpSecret] 语义同密码（断点4 整改）：null 表示未修改保留既有 TOTP 配置；
      * 非 null 时写入标准 otp 字段（空串表示清除 TOTP）。
      * 返回 [com.keepasskey.core.result.KdbxResult]（H3 整改）：保存失败必须显式返回，
@@ -173,9 +176,23 @@ interface VaultRepository {
     suspend fun getEntryPassword(entryId: String): String?
 
     /**
+     * 按需解密单条凭据的密码为 CharArray（加解密审查 2026-09 M1 整改，编辑页 CharArray 直通链路）。
+     * 返回的数组是分配给调用方的独占副本，调用方使用完毕必须显式清零
+     * （`Arrays.fill(chars, '0')`）；条目不存在或无密码时返回 null。
+     */
+    suspend fun getEntryPasswordChars(entryId: String): CharArray?
+
+    /**
      * 按需解密单条历史修订的密码（M1 整改，供详情页回滚/对比使用），语义同 [getEntryPassword]。
      */
     suspend fun getEntryRevisionPassword(entryId: String, revisionId: String): String?
+
+    /**
+     * 按需解密单条历史修订的密码为 CharArray（加解密审查 2026-09 M2 整改，回滚路径专用：
+     * 全程 CharArray、不经 String 中转）。返回的数组是分配给调用方的独占副本，调用方
+     * 使用完毕必须显式清零；修订不存在或无密码时返回 null。
+     */
+    suspend fun getEntryRevisionPasswordChars(entryId: String, revisionId: String): CharArray?
 
     /**
      * 读取单条历史修订的完整回滚快照（断点8 整改，供详情页全字段回滚）。

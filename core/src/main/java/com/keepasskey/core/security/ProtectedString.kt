@@ -12,10 +12,14 @@ import java.util.Arrays
  * 内部优先采用字节数组承载，支持显式清零，杜绝常驻 GC 堆字符串池。
  *
  * P3 整改（对齐 KeePassDX `protectInMemory`）：`isProtected = true` 的实例在堆内存中以
- * **密文形态驻留**（经 [InMemoryCipher] 确定性加密，IV 随实例存储），内存 dump 与字符串扫描
+ * **密文形态驻留**（经 [InMemoryCipher] 随机化加密，IV 随实例存储），内存 dump 与字符串扫描
  * 无法直接读出明文；仅 [readChars]/[readUtf8]/[readString] 读取的瞬间解密出临时副本，
- * 副本用毕立即擦除。加密是确定性的——相同明文恒得相同密文，因此 equals/hashCode 直接
- * 比较密文即可（同步变更检测与三方合并的比较路径不解密、不物化明文）。
+ * 副本用毕立即擦除。
+ *
+ * 2026-09 加解密审查整改：等值语义与加密解耦——加密每次使用随机 IV（同明文两次密封的
+ * 密文不同，堆中不存在可跨实例关联的确定性密文）；equals/hashCode 改为比较
+ * **HMAC 等值标签**（常时时间比较），同步变更检测与三方合并的比较路径依然不解密、
+ * 不物化明文。
  */
 class ProtectedString(
     val isProtected: Boolean = true,
@@ -28,15 +32,20 @@ class ProtectedString(
     /** 驻留解密 IV（与密文一并驻留；非保护或空值时为 null） */
     private val memoryIv: ByteArray?
 
+    /** 等值标签：HMAC-SHA256(eqKey, 明文)（非保护或空值时为 null，equals/hashCode 使用） */
+    private val memoryTag: ByteArray?
+
     private var isCleared = false
 
     init {
         if (isProtected && bytes.isNotEmpty()) {
             val sealed = InMemoryCipher.seal(bytes)
             memoryIv = sealed.iv
+            memoryTag = sealed.tag
             data = sealed.data
         } else {
             memoryIv = null
+            memoryTag = null
             data = bytes.clone()
         }
     }
@@ -142,12 +151,13 @@ class ProtectedString(
     }
 
     /**
-     * 显式擦除敏感内存（密文与 IV 一并清零）
+     * 显式擦除敏感内存（密文、IV 与等值标签一并清零）
      */
     fun clear() {
         if (!isCleared) {
             Arrays.fill(data, 0.toByte())
             memoryIv?.fill(0)
+            memoryTag?.fill(0)
             isCleared = true
         }
     }
@@ -174,14 +184,22 @@ class ProtectedString(
         if (other !is ProtectedString) return false
         if (isCleared || other.isCleared) return false
         if (isProtected != other.isProtected) return false
-        // 确定性加密：相同明文恒得相同（IV, 密文），密文比较即明文比较，无需解密
-        return data.contentEquals(other.data)
+        // 等值标签（HMAC）常时时间比较：相同明文恒得相同标签，不解密、不物化明文；
+        // 空值/非保护实例走明文副本路径（数据为空或非敏感，直接内容比较）
+        val a = memoryTag
+        val b = other.memoryTag
+        return if (a != null && b != null) {
+            InMemoryCipher.tagsEqual(a, b)
+        } else {
+            data.contentEquals(other.data)
+        }
     }
 
     override fun hashCode(): Int {
         if (isCleared) return 0
         var result = isProtected.hashCode()
-        result = 31 * result + data.contentHashCode()
+        // 等值标签为 HMAC 伪随机输出，直接作为哈希输入安全且分布均匀
+        result = 31 * result + (memoryTag ?: data).contentHashCode()
         return result
     }
 

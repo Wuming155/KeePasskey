@@ -33,8 +33,6 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Password
 import androidx.compose.material.icons.filled.Storage
-import androidx.compose.material.icons.filled.Visibility
-import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.VpnKey
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -67,14 +65,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.keepasskey.app.R
+import com.keepasskey.app.ui.components.SecurePasswordField
 import com.keepasskey.app.ui.theme.CapsuleShape
 import com.keepasskey.app.ui.theme.KeePasskeyTheme
 import com.keepasskey.app.ui.theme.LocalSecurityColors
@@ -303,12 +300,29 @@ fun SettingsContent(
 
     // 现代主密钥更改对话框
     if (showMasterKeyDialog) {
-        var newPassword by remember { mutableStateOf("") }
-        var confirmPassword by remember { mutableStateOf("") }
+        // M3 整改（加解密审查 2026-09）：新主密码以 CharArray 承载（SecurePasswordField 桥接），
+        // 不进入 String 状态——String 副本不可擦除且驻留堆内存
+        var newPasswordChars by remember { mutableStateOf(CharArray(0)) }
+        var confirmPasswordChars by remember { mutableStateOf(CharArray(0)) }
         var passwordVisible by remember { mutableStateOf(false) }
 
+        // 对话框关闭（确认/取消/点按外部）即擦除；下游 changeCredentials 不擦调用方数组，
+        // 提交副本的擦除责任由本对话框承担
+        fun wipeDialogPasswords() {
+            newPasswordChars.fill('0')
+            newPasswordChars = CharArray(0)
+            confirmPasswordChars.fill('0')
+            confirmPasswordChars = CharArray(0)
+        }
+
+        val passwordsMatch = newPasswordChars.isNotEmpty() &&
+            newPasswordChars.contentEquals(confirmPasswordChars)
+
         AlertDialog(
-            onDismissRequest = { showMasterKeyDialog = false },
+            onDismissRequest = {
+                wipeDialogPasswords()
+                showMasterKeyDialog = false
+            },
             shape = RoundedCornerShape(22.dp),
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
             title = {
@@ -325,68 +339,63 @@ fun SettingsContent(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
 
-                    OutlinedTextField(
-                        value = newPassword,
-                        onValueChange = { newPassword = it },
-                        label = { Text(stringResource(R.string.set_new_master_password)) },
-                        leadingIcon = {
-                            Icon(Icons.Default.Lock, contentDescription = null, modifier = Modifier.size(20.dp))
+                    SecurePasswordField(
+                        label = stringResource(R.string.set_new_master_password),
+                        onPasswordChanged = { chars ->
+                            newPasswordChars.fill('0')
+                            newPasswordChars = chars.copyOf()
                         },
-                        trailingIcon = {
-                            IconButton(onClick = { passwordVisible = !passwordVisible }) {
-                                Icon(
-                                    imageVector = if (passwordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                                    contentDescription = null
-                                )
-                            }
-                        },
-                        visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                        singleLine = true,
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth()
+                        isPasswordVisible = passwordVisible,
+                        onToggleVisibility = { passwordVisible = !passwordVisible }
                     )
 
-                    OutlinedTextField(
-                        value = confirmPassword,
-                        onValueChange = { confirmPassword = it },
-                        label = { Text(stringResource(R.string.set_confirm_master_password)) },
-                        leadingIcon = {
-                            Icon(Icons.Default.Lock, contentDescription = null, modifier = Modifier.size(20.dp))
+                    SecurePasswordField(
+                        label = stringResource(R.string.set_confirm_master_password),
+                        onPasswordChanged = { chars ->
+                            confirmPasswordChars.fill('0')
+                            confirmPasswordChars = chars.copyOf()
                         },
-                        visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                        singleLine = true,
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth()
+                        isPasswordVisible = passwordVisible,
+                        onToggleVisibility = { passwordVisible = !passwordVisible }
                     )
                 }
             },
             confirmButton = {
                 Button(
                     onClick = {
-                        if (newPassword.isNotEmpty() && newPassword == confirmPassword) {
-                            val pwdChars = newPassword.toCharArray()
+                        if (passwordsMatch) {
+                            val pwdChars = newPasswordChars.copyOf()
+                            wipeDialogPasswords()
                             showMasterKeyDialog = false
                             coroutineScope.launch {
-                                val result = onChangeMasterPassword(pwdChars)
-                                when (result) {
-                                    is com.keepasskey.core.result.KdbxResult.Success<*> -> {
-                                        snackbarHostState.showSnackbar(masterKeyUpdatedMsg)
+                                try {
+                                    val result = onChangeMasterPassword(pwdChars)
+                                    when (result) {
+                                        is com.keepasskey.core.result.KdbxResult.Success<*> -> {
+                                            snackbarHostState.showSnackbar(masterKeyUpdatedMsg)
+                                        }
+                                        is com.keepasskey.core.result.KdbxResult.Failure -> {
+                                            snackbarHostState.showSnackbar(result.message)
+                                        }
                                     }
-                                    is com.keepasskey.core.result.KdbxResult.Failure -> {
-                                        snackbarHostState.showSnackbar(result.message)
-                                    }
+                                } finally {
+                                    // M3 整改：提交副本在任何结果路径用毕即清零
+                                    pwdChars.fill('0')
                                 }
                             }
                         }
                     },
-                    enabled = newPassword.isNotEmpty() && newPassword == confirmPassword,
+                    enabled = passwordsMatch,
                     shape = CapsuleShape
                 ) {
                     Text(stringResource(R.string.set_save_changes))
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showMasterKeyDialog = false }) {
+                TextButton(onClick = {
+                    wipeDialogPasswords()
+                    showMasterKeyDialog = false
+                }) {
                     Text(stringResource(R.string.btn_cancel))
                 }
             }

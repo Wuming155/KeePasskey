@@ -248,14 +248,16 @@ class EntryDetailViewModel @Inject constructor(
                 userMessageFlow.value = UiMessage(R.string.detail_history_rolled_back)
                 return@launch
             }
-            val revisionPassword = vaultRepository.getEntryRevisionPassword(entryId, revision.id)
+            // M2 整改（加解密审查 2026-09）：回滚路径全程 CharArray，不再经 String 中转；
+            // 副本按 saveEntry 擦除契约由仓库用毕清零
+            val revisionPasswordChars = vaultRepository.getEntryRevisionPasswordChars(entryId, revision.id)
             val updated = snapshot.entry.copy(
                 groupId = current.groupId,
                 updatedAt = "刚刚 (从历史版本回滚)"
             )
             val result = vaultRepository.saveEntry(
                 updated,
-                passwordChars = revisionPassword?.toCharArray(),
+                passwordChars = revisionPasswordChars,
                 totpSecret = snapshot.totpSecret
             )
             userMessageFlow.value = if (result is com.keepasskey.core.result.KdbxResult.Success) {

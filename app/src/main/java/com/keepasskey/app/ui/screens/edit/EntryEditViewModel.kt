@@ -34,6 +34,13 @@ sealed interface EntryEditEvent {
 
 /**
  * 凭据添加与编辑状态容器 ViewModel
+ *
+ * M1 整改（加解密审查 2026-09）：条目密码不再进入 [EntryEditUiState]（String 不可变驻留
+ * StateFlow 堆内存），改由 ViewModel 以 [CharArray] 私有承载——
+ * - 输入上行走 [onPasswordChangeSecure]（SecurePasswordField CharArray 桥接）；
+ * - 既有条目密码经 [loadedPassword] 一次性下发至 SecurePasswordField 预填，
+ *   显示用 String 仅存活于组件内部（框架边界），不进任何状态流；
+ * - 保存时向仓库提交副本（仓库负责用毕清零），ViewModel 自有副本在 [onCleared] 擦除。
  */
 @HiltViewModel
 class EntryEditViewModel @Inject constructor(
@@ -46,6 +53,13 @@ class EntryEditViewModel @Inject constructor(
 
     private val _events = MutableSharedFlow<EntryEditEvent>()
     val events: SharedFlow<EntryEditEvent> = _events.asSharedFlow()
+
+    /** M1 整改：编辑中的条目密码，仅以 CharArray 驻留 ViewModel（绝不进入 UiState/StateFlow） */
+    private var passwordChars = CharArray(0)
+
+    /** 既有条目密码的一次性预填通道：SecurePasswordField 消费后即由输入路径接管 */
+    private val _loadedPassword = MutableStateFlow<CharArray?>(null)
+    val loadedPassword: StateFlow<CharArray?> = _loadedPassword.asStateFlow()
 
     init {
         // H4-只读整改：会话只读时编辑页禁用保存
@@ -69,8 +83,9 @@ class EntryEditViewModel @Inject constructor(
         viewModelScope.launch {
             val entry = vaultRepository.getEntry(id).firstOrNull()
             if (entry != null) {
-                // M1 整改：密码明文不随条目投影下发，编辑时按需单条解密
-                val password = vaultRepository.getEntryPassword(entry.id).orEmpty()
+                // M1 整改：密码明文不随条目投影下发，编辑时按需单条解密为 CharArray
+                // （所有权移交：数组副本交 loadedPassword 预填通道，用户编辑后即清零回收）
+                val password = vaultRepository.getEntryPasswordChars(entry.id)
                 // F2 整改：受保护自定义字段同理按需单条解密——明文仅驻留当前编辑条目的状态中，
                 // 保存时随 customFields 显式提交（仓库层对空值受保护字段回填既有值作兜底）
                 val editableFields = entry.customFields.map { cf ->
@@ -82,6 +97,12 @@ class EntryEditViewModel @Inject constructor(
                 }
                 // 断点4 整改：TOTP 配置原文按需回填（otp 字段优先，回退 TOTP 开头的自定义字段）
                 val totpRaw = vaultRepository.getEntryTotpSecret(entry.id).orEmpty()
+                // M1 整改：密码副本双通道——ViewModel 私有副本（保存用）+ 预填通道（组件显示用，
+                // 用户开始编辑或 ViewModel 销毁时清零）
+                passwordChars.fill('0')
+                passwordChars = password?.copyOf() ?: CharArray(0)
+                _loadedPassword.value?.fill('0')
+                _loadedPassword.value = password
                 _uiState.update {
                     it.copy(
                         entryId = entry.id,
@@ -89,7 +110,7 @@ class EntryEditViewModel @Inject constructor(
                         iconName = entry.iconName,
                         title = entry.title,
                         username = entry.username,
-                        password = password,
+                        passwordLength = password?.size ?: 0,
                         url = entry.url,
                         notes = entry.notes,
                         isPasskey = entry.isPasskey,
@@ -106,10 +127,23 @@ class EntryEditViewModel @Inject constructor(
         }
     }
 
+    /**
+     * M1 整改：SecurePasswordField 的 CharArray 桥接上行（用户输入）。
+     * 桥接数组归组件所有（组件自行清零），此处复制私有副本长期持有；
+     * 同时终结既有密码预填通道生命周期。
+     */
+    fun onPasswordChangeSecure(password: CharArray) {
+        passwordChars.fill('0')
+        passwordChars = password.copyOf()
+        // 用户开始编辑后，既有密码预填通道生命周期结束
+        _loadedPassword.value?.fill('0')
+        _loadedPassword.value = null
+        _uiState.update { it.copy(passwordLength = passwordChars.size, isDirty = true) }
+    }
+
     fun onIconChange(icon: String) = _uiState.update { it.copy(iconName = icon, isDirty = true) }
     fun onTitleChange(title: String) = _uiState.update { it.copy(title = title, isDirty = true) }
     fun onUsernameChange(username: String) = _uiState.update { it.copy(username = username, isDirty = true) }
-    fun onPasswordChange(password: String) = _uiState.update { it.copy(password = password, isDirty = true) }
     fun onUrlChange(url: String) = _uiState.update { it.copy(url = url, isDirty = true) }
     fun onNotesChange(notes: String) = _uiState.update { it.copy(notes = notes, isDirty = true) }
 
@@ -171,11 +205,12 @@ class EntryEditViewModel @Inject constructor(
         if (pool.isEmpty()) pool = lower
 
         val secureRandom = SecureRandom()
-        val newPassword = (1..state.passLength.toInt())
-            .map { pool[secureRandom.nextInt(pool.length)] }
-            .joinToString("")
-
-        _uiState.update { it.copy(password = newPassword, isDirty = true) }
+        // M1 整改：生成结果直达 CharArray，不经 String 中转
+        val newPassword = CharArray(state.passLength.toInt()) {
+            pool[secureRandom.nextInt(pool.length)]
+        }
+        onPasswordChangeSecure(newPassword)
+        newPassword.fill('0')
     }
 
     fun onGroupChange(groupId: String?) = _uiState.update { it.copy(groupId = groupId, isDirty = true) }
@@ -263,14 +298,21 @@ class EntryEditViewModel @Inject constructor(
                 autoTypeSequence = state.autoTypeSequence,
                 overrideUrl = state.overrideUrl.trim().takeIf { it.isNotEmpty() }
             )
-            // M1 整改：密码以独立参数显式提交，不再随条目投影携带
+            // M1 整改：密码以独立参数显式提交，不再随条目投影携带；提交副本归仓库擦除
+            // （契约：仓库任何结果路径用毕清零），ViewModel 自有副本保留以支持失败后继续编辑
             // 断点4 整改：TOTP 种子随保存显式提交（空串=清除 TOTP）
             // H3 整改：保存失败必须显式反馈，禁止磁盘写失败时谎报成功
-            val result = vaultRepository.saveEntry(
-                entry,
-                passwordChars = state.password.toCharArray(),
-                totpSecret = state.totpSecret
-            )
+            val passwordCopy = passwordChars.copyOf()
+            val result = try {
+                vaultRepository.saveEntry(
+                    entry,
+                    passwordChars = passwordCopy,
+                    totpSecret = state.totpSecret
+                )
+            } finally {
+                // 兜底擦除：若仓库实现未按契约清零（如旧版本 Fake），此处保证副本不残留明文
+                passwordCopy.fill('0')
+            }
             if (result is KdbxResult.Success) {
                 _events.emit(EntryEditEvent.SaveSuccess)
             } else {
@@ -288,5 +330,14 @@ class EntryEditViewModel @Inject constructor(
 
     fun clearUserMessage() {
         _uiState.update { it.copy(userMessage = null) }
+    }
+
+    override fun onCleared() {
+        // M1 整改：ViewModel 销毁时彻底擦除密码驻留（预填通道与编辑副本）
+        passwordChars.fill('0')
+        passwordChars = CharArray(0)
+        _loadedPassword.value?.fill('0')
+        _loadedPassword.value = null
+        super.onCleared()
     }
 }

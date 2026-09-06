@@ -370,6 +370,20 @@ class RealVaultRepository @Inject constructor(
         passwordChars: CharArray?,
         totpSecret: String?
     ): com.keepasskey.core.result.KdbxResult<Unit> {
+        // 擦除契约（加解密审查 2026-09）：任何结果路径（成功/失败/异常）用毕清零传入副本，
+        // 与 saveAutofillCredential / FakeVaultRepository 同一契约
+        try {
+            return saveEntryInternal(entry, passwordChars, totpSecret)
+        } finally {
+            passwordChars?.fill('0')
+        }
+    }
+
+    private suspend fun saveEntryInternal(
+        entry: UiVaultEntry,
+        passwordChars: CharArray?,
+        totpSecret: String?
+    ): com.keepasskey.core.result.KdbxResult<Unit> {
         val db = databaseSession.databaseFlow.first()
         val targetUuid = parseUuidOrNull(entry.id)
         val existing = if (targetUuid != null && db != null) {
@@ -943,12 +957,29 @@ class RealVaultRepository @Inject constructor(
         return entry?.password?.readString()
     }
 
+    override suspend fun getEntryPasswordChars(entryId: String): CharArray? {
+        val targetUuid = parseUuidOrNull(entryId) ?: return null
+        val currentDb = databaseSession.databaseFlow.first() ?: return null
+        val entry = currentDb.rootGroup.allEntries().firstOrNull { it.id == targetUuid }
+        // readChars() 返回独占副本（内部中间量已清零），清零责任随契约移交调用方
+        return entry?.password?.readChars()
+    }
+
     override suspend fun getEntryRevisionPassword(entryId: String, revisionId: String): String? {
         val targetUuid = parseUuidOrNull(entryId) ?: return null
         val revisionUuid = parseUuidOrNull(revisionId) ?: return null
         val currentDb = databaseSession.databaseFlow.first() ?: return null
         val entry = currentDb.rootGroup.allEntries().firstOrNull { it.id == targetUuid }
         return entry?.history?.firstOrNull { it.id == revisionUuid }?.password?.readString()
+    }
+
+    override suspend fun getEntryRevisionPasswordChars(entryId: String, revisionId: String): CharArray? {
+        val targetUuid = parseUuidOrNull(entryId) ?: return null
+        val revisionUuid = parseUuidOrNull(revisionId) ?: return null
+        val currentDb = databaseSession.databaseFlow.first() ?: return null
+        val entry = currentDb.rootGroup.allEntries().firstOrNull { it.id == targetUuid }
+        // M2 整改：回滚路径全程 CharArray（readChars 返回独占副本，内部中间量已清零）
+        return entry?.history?.firstOrNull { it.id == revisionUuid }?.password?.readChars()
     }
 
     override suspend fun getEntryRevisionSnapshot(entryId: String, revisionId: String): EntryRevisionSnapshot? {

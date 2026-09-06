@@ -81,7 +81,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.keepasskey.app.R
@@ -90,10 +89,10 @@ import com.keepasskey.app.ui.model.resolveText
 import com.keepasskey.app.ui.components.BentoCard
 import com.keepasskey.app.ui.components.IconPickerDialog
 import com.keepasskey.app.ui.components.PasswordStrengthBar
+import com.keepasskey.app.ui.components.SecurePasswordField
 import com.keepasskey.app.ui.components.getVaultIcon
 import com.keepasskey.app.ui.theme.CapsuleShape
 import com.keepasskey.app.ui.theme.LocalSecurityColors
-import com.keepasskey.app.ui.theme.MonospacePasswordStyle
 
 /**
  * 有状态凭据编辑/添加页面（Route）
@@ -113,6 +112,8 @@ fun EntryEditScreen(
     }
 
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    // M1 整改：既有条目密码的一次性预填通道（SecurePasswordField 消费后即清零）
+    val loadedPassword by viewModel.loadedPassword.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
 
     // 断点1 整改：真实 SAF 附件选择器——读取所选文件字节后随编辑会话提交
@@ -167,6 +168,7 @@ fun EntryEditScreen(
 
     EntryEditContent(
         uiState = uiState,
+        loadedPassword = loadedPassword,
         isDirty = uiState.isDirty,
         snackbarHostState = snackbarHostState,
         onBackClick = onBackClick,
@@ -175,7 +177,7 @@ fun EntryEditScreen(
         onIconChange = viewModel::onIconChange,
         onTitleChange = viewModel::onTitleChange,
         onUsernameChange = viewModel::onUsernameChange,
-        onPasswordChange = viewModel::onPasswordChange,
+        onPasswordChangeSecure = viewModel::onPasswordChangeSecure,
         onUrlChange = viewModel::onUrlChange,
         onNotesChange = viewModel::onNotesChange,
         onTogglePasskey = viewModel::onTogglePasskey,
@@ -234,6 +236,7 @@ private fun formatAttachmentSize(bytes: Int): String {
 @Composable
 fun EntryEditContent(
     uiState: EntryEditUiState,
+    loadedPassword: CharArray?,
     isDirty: Boolean,
     snackbarHostState: SnackbarHostState,
     onBackClick: () -> Unit,
@@ -242,7 +245,7 @@ fun EntryEditContent(
     onIconChange: (String) -> Unit,
     onTitleChange: (String) -> Unit,
     onUsernameChange: (String) -> Unit,
-    onPasswordChange: (String) -> Unit,
+    onPasswordChangeSecure: (CharArray) -> Unit,
     onUrlChange: (String) -> Unit,
     onNotesChange: (String) -> Unit,
     onTogglePasskey: () -> Unit,
@@ -454,12 +457,14 @@ fun EntryEditContent(
                         modifier = Modifier.fillMaxWidth()
                     )
 
-                    OutlinedTextField(
-                        value = uiState.password,
-                        onValueChange = onPasswordChange,
-                        label = { Text(stringResource(R.string.edit_password_hint)) },
-                        singleLine = true,
-                        visualTransformation = if (uiState.isPasswordVisible) VisualTransformation.None else PasswordVisualTransformation('●'),
+                    // M1 整改：密码输入走 SecurePasswordField——显示用 String 仅存活于组件内部，
+                    // CharArray 直达 ViewModel；既有密码经 loadedPassword 一次性预填
+                    SecurePasswordField(
+                        label = stringResource(R.string.edit_password_hint),
+                        onPasswordChanged = onPasswordChangeSecure,
+                        isPasswordVisible = uiState.isPasswordVisible,
+                        initialPassword = loadedPassword,
+                        initialKey = uiState.entryId ?: "new-entry",
                         trailingIcon = {
                             Row {
                                 IconButton(onClick = onTogglePasswordVisibility) {
@@ -477,18 +482,12 @@ fun EntryEditContent(
                                     )
                                 }
                             }
-                        },
-                        textStyle = MonospacePasswordStyle.copy(
-                            fontSize = 16.sp,
-                            color = MaterialTheme.colorScheme.onSurface
-                        ),
-                        shape = MaterialTheme.shapes.medium,
-                        modifier = Modifier.fillMaxWidth()
+                        }
                     )
 
-                    if (uiState.password.isNotEmpty()) {
+                    if (uiState.passwordLength > 0) {
                         PasswordStrengthBar(
-                            entropyBits = (uiState.password.length * 4.5).toInt(),
+                            entropyBits = (uiState.passwordLength * 4.5).toInt(),
                             modifier = Modifier.fillMaxWidth()
                         )
                     }

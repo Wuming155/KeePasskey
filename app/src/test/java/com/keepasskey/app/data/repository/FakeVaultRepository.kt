@@ -283,8 +283,14 @@ class FakeVaultRepository() : VaultRepository {
 
     override suspend fun getEntryPassword(entryId: String): String? = passwordStore.value[entryId]
 
+    override suspend fun getEntryPasswordChars(entryId: String): CharArray? =
+        passwordStore.value[entryId]?.toCharArray()
+
     override suspend fun getEntryRevisionPassword(entryId: String, revisionId: String): String? =
         passwordStore.value[entryId]
+
+    override suspend fun getEntryRevisionPasswordChars(entryId: String, revisionId: String): CharArray? =
+        passwordStore.value[entryId]?.toCharArray()
 
     override suspend fun getEntryProtectedField(entryId: String, fieldKey: String): String? =
         entriesFlow.value.firstOrNull { it.id == entryId }

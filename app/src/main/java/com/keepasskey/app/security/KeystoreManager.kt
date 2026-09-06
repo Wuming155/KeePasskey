@@ -7,6 +7,7 @@ import android.security.keystore.KeyInfo
 import android.security.keystore.KeyPermanentlyInvalidatedException
 import android.security.keystore.KeyProperties
 import android.security.keystore.StrongBoxUnavailableException
+import com.keepasskey.app.data.logger.DebugLogBuffer
 import java.security.KeyFactory
 import java.security.KeyStore
 import javax.crypto.Cipher
@@ -28,12 +29,19 @@ import dagger.hilt.android.qualifiers.ApplicationContext
  *   （setUserAuthenticationParameters(0, AUTH_BIOMETRIC_STRONG | AUTH_DEVICE_CREDENTIAL)），
  *   取代旧版「非认证密钥 + 应用内 PIN 校验器」方案——爆破门槛从自选应用 PIN 提升到系统锁屏凭据强度，
  *   且用户认证约束可由安全硬件强制执行（isUserAuthenticationRequirementEnforcedBySecureHardware）；
+ * - 认证绑定密钥启用 setUnlockedDeviceRequired(true)（设备须处于解锁态方可使用，官方推荐的
+ *   与认证要求互补的纵深约束；Android 12–14 的已知缺陷在 15+ 修复，本项目 minSdk 36 恒安全）。
+ *   非认证密钥（如 WebDAV 同步凭据封印密钥）不启用——后台同步需在锁屏态可用；
+ * - 密钥生成后经 KeyInfo.getSecurityLevel() 校验落位（StrongBox / TEE / 软件），
+ *   软件级 Keystore 时记录警告（诊断 API：[getKeySecurityLevel]），不硬失败以兼容模拟器/CI；
  * - 支持 StrongBox 安全元件（FEATURE_STRONGBOX_KEYSTORE），不可用时自动回退 TEE。
  */
 @Singleton
 class KeystoreManager @Inject constructor(
     // 允许为 null 仅用于单测注入空实现；生产 DI 注入 @ApplicationContext
-    @ApplicationContext private val context: Context?
+    @ApplicationContext private val context: Context?,
+    // 允许为 null 仅用于单测手动构造；生产 DI 注入
+    private val debugLog: DebugLogBuffer? = null
 ) {
 
     private val keyStore: KeyStore by lazy {
@@ -89,7 +97,8 @@ class KeystoreManager @Inject constructor(
         requireUserAuth: Boolean,
         invalidateOnBiometricEnrollment: Boolean,
         strongBox: Boolean,
-        authenticatorTypes: Int = KeyProperties.AUTH_BIOMETRIC_STRONG
+        authenticatorTypes: Int = KeyProperties.AUTH_BIOMETRIC_STRONG,
+        unlockedDeviceRequired: Boolean = requireUserAuth
     ): SecretKey {
         val keyGenerator = KeyGenerator.getInstance(
             KeyProperties.KEY_ALGORITHM_AES,
@@ -105,6 +114,7 @@ class KeystoreManager @Inject constructor(
             .setKeySize(KEY_SIZE_BITS)
             .setUserAuthenticationRequired(requireUserAuth)
             .setInvalidatedByBiometricEnrollment(invalidateOnBiometricEnrollment)
+            .setUnlockedDeviceRequired(unlockedDeviceRequired)
 
         if (requireUserAuth) {
             // per-operation 授权（timeout=0）：认证器集合由 authenticatorTypes 决定——
@@ -118,7 +128,59 @@ class KeystoreManager @Inject constructor(
         }
 
         keyGenerator.init(specBuilder.build())
-        return keyGenerator.generateKey()
+        val key = keyGenerator.generateKey()
+        // 生成即校验硬件落位：诊断性告警（不硬失败，兼容模拟器/CI 的软件 Keystore）
+        val level = getKeySecurityLevel(alias)
+        if (level == KeySecurityLevel.SOFTWARE) {
+            debugLog?.warn(
+                TAG,
+                "密钥 $alias 落位软件 Keystore（非 TEE/StrongBox），硬件隔离未生效"
+            )
+        }
+        return key
+    }
+
+    /**
+     * 密钥硬件落位等级（对齐官方 KeyInfo.getSecurityLevel()，API 31+，minSdk 36 恒可用）。
+     */
+    enum class KeySecurityLevel {
+        /** StrongBox 安全元件（最高隔离） */
+        STRONGBOX,
+
+        /** TEE（可信执行环境） */
+        TRUSTED_ENVIRONMENT,
+
+        /** 软件 Keystore（无硬件隔离，应告警） */
+        SOFTWARE,
+
+        /** 探测失败（密钥不存在或查询异常） */
+        UNKNOWN
+    }
+
+    /**
+     * 查询指定别名的密钥实际硬件落位等级。
+     * 注意：`setIsStrongBoxBacked(true)` 只是请求 StrongBox，实际落位须以本方法探测为准。
+     */
+    fun getKeySecurityLevel(alias: String): KeySecurityLevel {
+        return try {
+            if (!keyStore.containsAlias(alias)) return KeySecurityLevel.UNKNOWN
+            val entry = keyStore.getEntry(alias, null) as? KeyStore.SecretKeyEntry
+                ?: return KeySecurityLevel.UNKNOWN
+            val factory = KeyFactory.getInstance(
+                KeyProperties.KEY_ALGORITHM_AES,
+                ANDROID_KEY_STORE
+            )
+            val info = factory.getKeySpec(entry.secretKey, KeyInfo::class.java)
+            when (info.securityLevel) {
+                KeyProperties.SECURITY_LEVEL_STRONGBOX -> KeySecurityLevel.STRONGBOX
+                KeyProperties.SECURITY_LEVEL_TRUSTED_ENVIRONMENT -> KeySecurityLevel.TRUSTED_ENVIRONMENT
+                KeyProperties.SECURITY_LEVEL_SOFTWARE -> KeySecurityLevel.SOFTWARE
+                KeyProperties.SECURITY_LEVEL_UNKNOWN -> KeySecurityLevel.UNKNOWN
+                else -> KeySecurityLevel.UNKNOWN
+            }
+        } catch (_: Exception) {
+            KeySecurityLevel.UNKNOWN
+        }
     }
 
     /**
@@ -256,5 +318,6 @@ class KeystoreManager @Inject constructor(
         private const val TRANSFORMATION = "AES/GCM/NoPadding"
         private const val KEY_SIZE_BITS = 256
         private const val GCM_TAG_LENGTH_BITS = 128
+        private const val TAG = "KeystoreManager"
     }
 }

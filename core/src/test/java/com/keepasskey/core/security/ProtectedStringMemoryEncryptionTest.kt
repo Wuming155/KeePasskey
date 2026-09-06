@@ -10,7 +10,8 @@ import org.junit.Test
 
 /**
  * P3 整改回归：ProtectedString 内存加密驻留。
- * 验证：密文驻留不泄露明文、密封/解封往返一致、确定性映射保持 equals/hashCode 语义、
+ * 验证：密文驻留不泄露明文、密封/解封往返一致、随机化加密 + HMAC 等值标签保持
+ * equals/hashCode 语义（同明文同标签、异明文异标签、密文不可跨实例关联）、
  * 清零后访问硬拒绝、非保护路径行为不变。
  */
 class ProtectedStringMemoryEncryptionTest {
@@ -26,6 +27,7 @@ class ProtectedStringMemoryEncryptionTest {
         assertFalse("密文不得等于明文", sealed.data.contentEquals(plain))
         assertEquals("CTR 无填充：密文长度必须等于明文长度", plain.size, sealed.data.size)
         assertEquals("IV 长度必须为 16 字节", 16, sealed.iv.size)
+        assertEquals("等值标签必须为 32 字节（HMAC-SHA256）", 32, sealed.tag.size)
     }
 
     @Test
@@ -45,19 +47,29 @@ class ProtectedStringMemoryEncryptionTest {
     }
 
     @Test
-    fun `密封是确定性的-相同明文恒得相同产物`() {
+    fun `相同明文等值标签一致且密文随机化`() {
         val plain = secret.toByteArray(Charsets.UTF_8)
         val first = InMemoryCipher.seal(plain)
         val second = InMemoryCipher.seal(plain)
-        assertArrayEquals(first.iv, second.iv)
-        assertArrayEquals(first.data, second.data)
+        assertArrayEquals(
+            "等值语义：相同明文恒得相同 HMAC 标签",
+            first.tag, second.tag
+        )
+        assertFalse(
+            "加密随机化：相同明文两次密封的 IV 必不相同（密钥流不复用，无确定性密文可关联）",
+            first.iv.contentEquals(second.iv)
+        )
+        assertFalse("IV 不同则密钥流不同，密文必不相同", first.data.contentEquals(second.data))
+        assertTrue("常时时间比较应判定相同标签相等", InMemoryCipher.tagsEqual(first.tag, second.tag))
+        assertFalse("常时时间比较应判定不同标签不等", InMemoryCipher.tagsEqual(first.tag, InMemoryCipher.seal("other".toByteArray()).tag))
     }
 
     @Test
-    fun `不同明文产生不同 IV`() {
+    fun `不同明文产生不同等值标签与随机IV`() {
         val first = InMemoryCipher.seal("password-A".toByteArray())
         val second = InMemoryCipher.seal("password-B".toByteArray())
         assertFalse("不同明文必须使用不同密钥流", first.iv.contentEquals(second.iv))
+        assertFalse("不同明文必须产生不同等值标签", first.tag.contentEquals(second.tag))
     }
 
     // ================= ProtectedString 驻留语义 =================
@@ -71,11 +83,11 @@ class ProtectedStringMemoryEncryptionTest {
     }
 
     @Test
-    fun `相等性经密文保持`() {
+    fun `相等性经等值标签保持`() {
         val a = ProtectedString("same-master-password")
         val b = ProtectedString("same-master-password")
         assertEquals(a, b)
-        assertEquals("确定性加密下 hashCode 必须一致", a.hashCode(), b.hashCode())
+        assertEquals("等值标签下 hashCode 必须一致", a.hashCode(), b.hashCode())
     }
 
     @Test
