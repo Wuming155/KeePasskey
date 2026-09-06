@@ -33,7 +33,9 @@ object CallingOriginResolver {
                 "package_name": "com.android.chrome",
                 "signatures": [
                   {"build": "default", "userdebug": false, "cert_fingerprint_sha256": "32:a2:fc:74:d7:31:10:58:59:e5:a8:5d:f1:6d:95:f1:02:d8:5b:22:09:9b:80:64:c6:d6:ba:bb:66:52:84:9f"},
-                  {"build": "default", "userdebug": false, "cert_fingerprint_sha256": "32a2fc74d731105859e5a85df16d95f102d85b22099b8064c6d6babbb6652849f"}
+                  {"build": "default", "userdebug": false, "cert_fingerprint_sha256": "32a2fc74d731105859e5a85df16d95f102d85b22099b8064c6d6babbb6652849f"},
+                  {"build": "default", "userdebug": false, "cert_fingerprint_sha256": "f0:fd:6c:5b:41:0f:25:cb:25:c3:b5:33:46:c8:97:2f:ae:30:f8:ee:74:11:df:91:04:80:ad:6b:2d:60:db:83"},
+                  {"build": "default", "userdebug": false, "cert_fingerprint_sha256": "f0fd6c5b410f25cb25c3b53346c8972fae30f8ee7411df910480ad6b2d60db83"}
                 ]
               }
             }

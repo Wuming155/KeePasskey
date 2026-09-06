@@ -16,7 +16,6 @@ import android.util.Log
 import android.view.autofill.AutofillId
 import android.view.autofill.AutofillValue
 import android.widget.RemoteViews
-import com.keepasskey.app.MainActivity
 import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.passkey.DomainMatcher
@@ -116,7 +115,9 @@ class KeePasskeyAutofillService : AutofillService() {
                 setTextViewText(R.id.tv_username, getString(R.string.cred_autofill_unlock_prompt))
                 setTextViewText(R.id.tv_subtitle, getString(R.string.cred_autofill_locked_subtitle))
             }
-            val unlockIntent = Intent(this, MainActivity::class.java).apply {
+            // 认证入口指向专用 AutofillUnlockActivity：解锁成功即 setResult+finish，
+            // 自动填充框架收到成功结果后自动重发 onFillRequest（此时库已解锁，直接出真实候选）
+            val unlockIntent = Intent(this, AutofillUnlockActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
             }
             val pendingIntent = PendingIntent.getActivity(

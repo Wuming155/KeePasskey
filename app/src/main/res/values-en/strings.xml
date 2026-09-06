@@ -5,6 +5,8 @@
     <!-- General Buttons & Actions -->
     <string name="btn_cancel">Cancel</string>
     <string name="btn_confirm">Confirm</string>
+    <string name="btn_lock">Lock</string>
+    <string name="cd_lock">Lock Database</string>
     <string name="btn_save">Save</string>
     <string name="btn_delete">Delete</string>
     <string name="btn_edit">Edit</string>

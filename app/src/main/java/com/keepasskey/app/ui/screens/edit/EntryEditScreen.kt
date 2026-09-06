@@ -163,6 +163,8 @@ fun EntryEditScreen(
         }
     }
 
+    val scanPrompt = stringResource(R.string.edit_scan_totp_qr)
+
     EntryEditContent(
         uiState = uiState,
         isDirty = uiState.isDirty,
@@ -198,7 +200,8 @@ fun EntryEditScreen(
         onScanTotpQr = {
             val options = ScanOptions()
             options.setDesiredBarcodeFormats(ScanOptions.QR_CODE)
-            options.setPrompt(context.getString(R.string.edit_scan_totp_qr))
+            // LINT 修正：在 Composable 内部使用 StringResource 避免 stale 引用
+            options.setPrompt(scanPrompt)
             options.setBeepEnabled(false)
             options.setOrientationLocked(true)
             qrScanner.launch(options)

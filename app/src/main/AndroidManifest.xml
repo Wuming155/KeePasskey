@@ -49,6 +49,12 @@
             android:exported="false"
             android:theme="@style/Theme.KeePasskey" />
 
+        <!-- 传统自动填充链式解锁落地 Activity（认证数据集点选后由系统拉起，解锁成功 finish 触发框架重发填充请求） -->
+        <activity
+            android:name=".autofill.AutofillUnlockActivity"
+            android:exported="false"
+            android:theme="@style/Theme.KeePasskey" />
+
         <!-- Android 16+ Credential Manager 系统凭据提供者服务 -->
         <service
             android:name=".passkey.KeePasskeyCredentialProviderService"

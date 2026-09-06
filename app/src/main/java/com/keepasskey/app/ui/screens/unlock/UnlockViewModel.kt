@@ -119,6 +119,7 @@ class UnlockViewModel @Inject constructor(
      * 输入的数组仅在本次回调内有效，此处立即复制持有并清零上一份。
      */
     fun onPasswordChangeSecure(password: CharArray) {
+        debugLog.info(TAG, "onPasswordChangeSecure: input length=${password.size}")
         passwordChars.fill('0')
         passwordChars = password.copyOf()
         _uiState.update { it.copy(errorMessage = null, infoMessage = null) }
@@ -215,7 +216,8 @@ class UnlockViewModel @Inject constructor(
                         _events.emit(UnlockEvent.UnlockSuccess)
                     }
                     is KdbxResult.Failure -> {
-                        debugLog.warn(TAG, "主密码解锁失败（凭据不匹配）")
+                        debugLog.error(TAG, "主密码解锁失败: activeDb=$activeDatabaseId, pwdLen=${passwordChars.size}, keyFileLen=${keyFileData?.size}, err=${result.message}")
+                        debugLog.warn(TAG, "主密码解锁失败（凭据不匹配）: ${result.message}")
                         _uiState.update {
                             it.copy(
                                 isLoading = false,

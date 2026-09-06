@@ -199,11 +199,16 @@ class VaultListViewModel @Inject constructor(
         }
         val isInsideRecycleBin = breadcrumbs.any { it.isRecycleBin }
 
+        // 根目录内容直显：currentGroupId == null 表示密码库顶层，
+        // 应展示根分组内部内容（子分组 + 根级条目），而非把根分组自身渲染成一个节点
+        val effectiveGroupId = session.currentGroupId
+            ?: allGroups.firstOrNull { it.parentId == null }?.id
+
         // 1. 过滤条目：搜索时全局匹配（排除回收站内容），正常时只展示当前文件夹下的条目
         val targetEntries = if (isSearching) {
             allEntries.filter { if (!isInsideRecycleBin) it.groupId !in recycleBinGroupIds else true }
         } else {
-            allEntries.filter { it.groupId == session.currentGroupId }
+            allEntries.filter { it.groupId == effectiveGroupId }
         }
 
         val filteredEntries = targetEntries.filter { entry ->
@@ -239,7 +244,7 @@ class VaultListViewModel @Inject constructor(
         val targetGroups = if (isSearching) {
             allGroups.filter { it.name.contains(session.filterParams.query, ignoreCase = true) }
         } else {
-            allGroups.filter { it.parentId == session.currentGroupId }
+            allGroups.filter { it.parentId == effectiveGroupId }
         }
 
         VaultListUiState(
