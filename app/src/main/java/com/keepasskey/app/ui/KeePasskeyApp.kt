@@ -384,8 +384,7 @@ fun KeePasskeyApp() {
                         onCheckRemoteChangesToggle = settingsViewModel::setCheckRemoteChangesBeforeSave,
                         onConflictResolutionChange = settingsViewModel::setConflictResolution,
                         onUseFileTransactionsToggle = settingsViewModel::setUseFileTransactions,
-                        onAcceptAllCertificatesToggle = settingsViewModel::setAcceptAllCertificates,
-                        onCleartextTrafficPermittedToggle = settingsViewModel::setCleartextTrafficPermitted,
+                        onWebDavCertPinsChange = settingsViewModel::setWebDavCertPins,
                         onWebdavChunkedUploadToggle = settingsViewModel::setWebdavChunkedUpload,
                         onPreloadDatabaseEnabledToggle = settingsViewModel::setPreloadDatabaseEnabled
                     )

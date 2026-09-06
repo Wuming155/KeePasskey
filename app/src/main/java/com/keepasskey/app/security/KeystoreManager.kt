@@ -20,13 +20,15 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 /**
  * Android Keystore 硬件安全密钥管理器。
  * 提供基于硬件 TEE / StrongBox 隔离的 AES-256-GCM 凭据封印与解封能力。
- * 遵循安全规范：
+ * 遵循安全规范（对齐 Android 官方 Keystore 文档）：
  * - 生物识别密钥启用 setUserAuthenticationRequired 要求 Class 3 强生物识别验证（per-operation 认证，
  *   无时间有效期，配合 BiometricPrompt CryptoObject 逐次授权）；
- * - 启用 setInvalidatedByBiometricEnrollment(true)，当系统录入新指纹或清空指纹时自动吊销硬件密钥，防范物理设备攻击；
- * - 支持 StrongBox 安全元件（FEATURE_STRONGBOX_KEYSTORE），不可用时自动回退 TEE；
- * - QuickUnlock 封印密钥不绑定用户认证（PIN 校验器是前置门槛 + 硬件密钥不可导出承担离线防护），
- *   旧版误生成的认证绑定密钥经 KeyInfo 探测后自动迁移重建。
+ * - 纯生物识别密钥启用 setInvalidatedByBiometricEnrollment(true)，系统录入/清空指纹时自动吊销密钥，防范物理设备攻击；
+ * - Wave 12：快速解锁密钥改为「强生物识别 或 设备锁屏凭据」双重授权绑定
+ *   （setUserAuthenticationParameters(0, AUTH_BIOMETRIC_STRONG | AUTH_DEVICE_CREDENTIAL)），
+ *   取代旧版「非认证密钥 + 应用内 PIN 校验器」方案——爆破门槛从自选应用 PIN 提升到系统锁屏凭据强度，
+ *   且用户认证约束可由安全硬件强制执行（isUserAuthenticationRequirementEnforcedBySecureHardware）；
+ * - 支持 StrongBox 安全元件（FEATURE_STRONGBOX_KEYSTORE），不可用时自动回退 TEE。
  */
 @Singleton
 class KeystoreManager @Inject constructor(
@@ -86,7 +88,8 @@ class KeystoreManager @Inject constructor(
         alias: String,
         requireUserAuth: Boolean,
         invalidateOnBiometricEnrollment: Boolean,
-        strongBox: Boolean
+        strongBox: Boolean,
+        authenticatorTypes: Int = KeyProperties.AUTH_BIOMETRIC_STRONG
     ): SecretKey {
         val keyGenerator = KeyGenerator.getInstance(
             KeyProperties.KEY_ALGORITHM_AES,
@@ -104,8 +107,10 @@ class KeystoreManager @Inject constructor(
             .setInvalidatedByBiometricEnrollment(invalidateOnBiometricEnrollment)
 
         if (requireUserAuth) {
-            // API 30+ 显式约束为 Class 3 强生物识别验证（per-operation，不接受锁屏密码/PIN/图案降级替代）
-            specBuilder.setUserAuthenticationParameters(0, KeyProperties.AUTH_BIOMETRIC_STRONG)
+            // per-operation 授权（timeout=0）：认证器集合由 authenticatorTypes 决定——
+            // 纯生物识别密钥用 AUTH_BIOMETRIC_STRONG；快速解锁密钥用 AUTH_BIOMETRIC_STRONG | AUTH_DEVICE_CREDENTIAL
+            // （后者允许设备锁屏 PIN/图案/密码作为强认证授权来源，官方推荐的凭据绑定方式）
+            specBuilder.setUserAuthenticationParameters(0, authenticatorTypes)
         }
 
         if (strongBox) {
@@ -117,54 +122,89 @@ class KeystoreManager @Inject constructor(
     }
 
     /**
-     * 获取或生成不绑定用户认证的硬件密钥（QuickUnlock 主凭据封印专用）。
+     * 获取或生成「生物识别 + 设备锁屏凭据」双重授权绑定的硬件密钥（Wave 12 统一快速解锁专用）。
      *
-     * 认证语义说明：QuickUnlock 的安全门槛是 PIN 校验器（PBKDF2）+ 硬件密钥不可导出；
-     * 该密钥若绑定 per-operation 用户认证，则无 BiometricPrompt CryptoObject 的纯 PIN 封印/解封
-     * 在真机上必然抛 UserNotAuthenticatedException（历史缺陷），故此别名必须以非认证密钥存在。
-     * 旧版本生成的认证绑定密钥经 [KeyInfo] 探测后自动删除重建——旧密文随之失效，
-     * 用户下次以主密码完整解锁后重新封印（fail-safe 迁移）。
+     * 官方语义（Android Keystore 文档）：
+     * - `setUserAuthenticationParameters(0, AUTH_BIOMETRIC_STRONG or AUTH_DEVICE_CREDENTIAL)`：
+     *   每次加解密操作均需经 BiometricPrompt 以强生物识别**或**设备锁屏凭据（PIN/图案/密码）单独授权；
+     * - 解锁加密操作时请求的认证器集合必须与密钥生成时一致（官方硬性要求），
+     *   解封方须以 `BIOMETRIC_STRONG | DEVICE_CREDENTIAL` 发起（见 BiometricAuthManager.UNLOCK_AUTHENTICATORS）；
+     * - `setInvalidatedByBiometricEnrollment` 对含 AUTH_DEVICE_CREDENTIAL 的密钥被系统忽略
+     *   （锁屏凭据变更不触发失效），故本密钥不设置该标志，如实反映官方语义。
+     *
+     * 密钥授权在生成后不可变（官方约束）→ 旧版本以仅 AUTH_BIOMETRIC_STRONG 生成的同名密钥
+     * 经 [KeyInfo.getUserAuthenticationType] 探测后自动删除重建，旧封印凭据随之失效
+     * （fail-safe 迁移：用户下次以主密码完整解锁后自动重新封印，对齐 Wave 11 H4 模式）。
      */
-    fun getOrCreateUnauthenticatedKey(alias: String): SecretKey {
+    fun getOrCreateDeviceCredentialKey(alias: String): SecretKey {
         if (keyStore.containsAlias(alias)) {
             val entry = keyStore.getEntry(alias, null) as? KeyStore.SecretKeyEntry
             if (entry != null) {
-                val isAuthBound = try {
+                val matchesRequirement = try {
                     val factory = KeyFactory.getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEY_STORE)
-                    factory.getKeySpec(entry.secretKey, KeyInfo::class.java).isUserAuthenticationRequired
+                    val info = factory.getKeySpec(entry.secretKey, KeyInfo::class.java)
+                    info.isUserAuthenticationRequired &&
+                        (info.userAuthenticationType and REQUIRED_AUTHENTICATOR_TYPES) == REQUIRED_AUTHENTICATOR_TYPES
                 } catch (_: Exception) {
-                    // 规格探测失败按认证绑定处理，触发迁移重建
-                    true
+                    // 规格探测失败按不匹配处理，触发迁移重建（fail-safe）
+                    false
                 }
-                if (!isAuthBound) {
+                if (matchesRequirement) {
                     return entry.secretKey
                 }
                 deleteKey(alias)
             }
         }
-        return generateNewKey(alias, requireUserAuth = false, invalidateOnBiometricEnrollment = false)
+        return generateNewDeviceCredentialKey(alias)
     }
 
     /**
-     * 初始化用于加密凭据的 Cipher（供传递给 BiometricPrompt.CryptoObject 或直接加密）
+     * 生成全新的设备凭据绑定硬件密钥：StrongBox 安全元件优先，不可用自动回退 TEE。
      */
-    fun initEncryptCipher(alias: String = BIOMETRIC_KEY_ALIAS): Cipher {
-        val key = getOrCreateKey(alias)
+    fun generateNewDeviceCredentialKey(alias: String): SecretKey {
+        if (isStrongBoxSupported) {
+            try {
+                return generateKeyInternal(
+                    alias,
+                    requireUserAuth = true,
+                    invalidateOnBiometricEnrollment = false,
+                    strongBox = true,
+                    authenticatorTypes = REQUIRED_AUTHENTICATOR_TYPES
+                )
+            } catch (_: StrongBoxUnavailableException) {
+                // StrongBox 缺席或临时繁忙：回退 TEE 生成
+            }
+        }
+        return generateKeyInternal(
+            alias,
+            requireUserAuth = true,
+            invalidateOnBiometricEnrollment = false,
+            strongBox = false,
+            authenticatorTypes = REQUIRED_AUTHENTICATOR_TYPES
+        )
+    }
+
+    /**
+     * 初始化快速解锁凭据封印（加密）Cipher——设备凭据绑定密钥，
+     * 返回的 Cipher 须经 BiometricPrompt（BIOMETRIC_STRONG | DEVICE_CREDENTIAL）授权后方可 doFinal。
+     */
+    fun initDeviceCredentialEncryptCipher(alias: String): Cipher {
+        val key = getOrCreateDeviceCredentialKey(alias)
         val cipher = Cipher.getInstance(TRANSFORMATION)
         cipher.init(Cipher.ENCRYPT_MODE, key)
         return cipher
     }
 
     /**
-     * 初始化用于解密凭据的 Cipher
+     * 初始化快速解锁凭据解封（解密）Cipher。
      * 若检测到密钥已因生物识别特征变更而失效（KeyPermanentlyInvalidatedException），自动清除脏密钥并抛出异常
      */
-    fun initDecryptCipher(
+    fun initDeviceCredentialDecryptCipher(
         iv: ByteArray,
-        alias: String = BIOMETRIC_KEY_ALIAS
+        alias: String
     ): Cipher {
         try {
-            val key = getOrCreateKey(alias)
+            val key = getOrCreateDeviceCredentialKey(alias)
             val cipher = Cipher.getInstance(TRANSFORMATION)
             val spec = GCMParameterSpec(GCM_TAG_LENGTH_BITS, iv)
             cipher.init(Cipher.DECRYPT_MODE, key, spec)
@@ -174,26 +214,6 @@ class KeystoreManager @Inject constructor(
             deleteKey(alias)
             throw e
         }
-    }
-
-    /**
-     * 初始化 QuickUnlock 主凭据封印（加密）Cipher——使用不绑定用户认证的硬件密钥
-     */
-    fun initSealCipher(alias: String): Cipher {
-        val key = getOrCreateUnauthenticatedKey(alias)
-        val cipher = Cipher.getInstance(TRANSFORMATION)
-        cipher.init(Cipher.ENCRYPT_MODE, key)
-        return cipher
-    }
-
-    /**
-     * 初始化 QuickUnlock 主凭据解封（解密）Cipher
-     */
-    fun initUnsealCipher(iv: ByteArray, alias: String): Cipher {
-        val key = getOrCreateUnauthenticatedKey(alias)
-        val cipher = Cipher.getInstance(TRANSFORMATION)
-        cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(GCM_TAG_LENGTH_BITS, iv))
-        return cipher
     }
 
     /**
@@ -211,13 +231,6 @@ class KeystoreManager @Inject constructor(
     }
 
     /**
-     * 检查密钥别名是否存在
-     */
-    fun containsKey(alias: String = BIOMETRIC_KEY_ALIAS): Boolean {
-        return keyStore.containsAlias(alias)
-    }
-
-    /**
      * 删除指定的密钥别名
      */
     @Synchronized
@@ -230,7 +243,16 @@ class KeystoreManager @Inject constructor(
     companion object {
         const val ANDROID_KEY_STORE = "AndroidKeyStore"
         const val BIOMETRIC_KEY_ALIAS = "com.keepasskey.biometric_master_key"
-        const val QUICK_UNLOCK_KEY_ALIAS = "com.keepasskey.quick_unlock_key"
+
+        /**
+         * Wave 12 前遗留的 QuickUnlock 非认证密钥别名：该密钥不绑定用户认证（历史设计），
+         * 现由设备凭据绑定密钥取代；常量仅供 BiometricCredentialStorage 启动期清理旧别名，不再生成新密钥。
+         */
+        const val LEGACY_QUICK_UNLOCK_KEY_ALIAS = "com.keepasskey.quick_unlock_key"
+
+        /** 快速解锁密钥的授权集合：强生物识别 或 设备锁屏凭据（per-operation，与 BiometricAuthManager.UNLOCK_AUTHENTICATORS 对应） */
+        val REQUIRED_AUTHENTICATOR_TYPES = KeyProperties.AUTH_BIOMETRIC_STRONG or KeyProperties.AUTH_DEVICE_CREDENTIAL
+
         private const val TRANSFORMATION = "AES/GCM/NoPadding"
         private const val KEY_SIZE_BITS = 256
         private const val GCM_TAG_LENGTH_BITS = 128

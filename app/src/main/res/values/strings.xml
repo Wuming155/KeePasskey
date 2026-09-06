@@ -68,7 +68,7 @@
     <string name="unlock_btn_biometric">使用系统指纹或面容快速解锁</string>
     <string name="unlock_switch_vault">切换密码库</string>
     <string name="unlock_status_local">本地已加密存储 • 关联 WebDAV 云端备份</string>
-    <string name="unlock_biometric_primary_btn">使用生物识别解锁</string>
+    <string name="unlock_biometric_primary_btn">使用生物识别 / 锁屏凭据解锁</string>
 
     <!-- 密码库管理器 / 选择器 -->
     <string name="db_picker_title">密码库管理</string>
@@ -287,17 +287,10 @@
     <string name="conflict_resolved_msg">冲突解决完毕，已完成本地与云端三方合并</string>
     <string name="unlock_error_empty_password">请输入主密码以解锁</string>
     <string name="unlock_error_invalid_password">主密码错误或密钥不匹配，解锁失败</string>
-    <string name="unlock_error_pin_length">请输入 4 位数字 PIN 码</string>
-    <string name="unlock_error_pin_invalid">PIN 码错误，QuickUnlock 解锁失败</string>
-    <string name="unlock_error_pin_locked">尝试次数过多，QuickUnlock 已临时锁定，请约 %1$d 秒后重试</string>
-    <string name="unlock_error_quick_unavailable">QuickUnlock 不可用，请使用主密码解锁</string>
-    <string name="unlock_quick_pin_enrolled_hint">QuickUnlock PIN 已设置，请输入主密码完成一次解锁以绑定凭据</string>
     <string name="unlock_biometric_title">生物识别解锁</string>
     <string name="unlock_biometric_subtitle">请验证指纹或面容以解锁密码库</string>
-    <string name="unlock_biometric_negative">使用主密码</string>
     <string name="unlock_biometric_enroll_title">启用生物识别解锁</string>
     <string name="unlock_biometric_enroll_subtitle">请验证指纹或面容，以安全保存免密解锁凭据</string>
-    <string name="unlock_biometric_enroll_negative">暂不启用</string>
     <string name="sec_biometric_auth_failed">生物识别验证未通过或已取消</string>
     <string name="sec_biometric_key_invalidated">系统生物特征发生变更，安全密钥已失效，请使用主密码重新登录</string>
 <string name="edit_scan_totp_qr">呼起相机扫描 TOTP 二维码</string>
@@ -310,16 +303,11 @@
     <string name="edit_override_url_hint">Override URL（自动填充匹配覆盖）</string>
     <string name="edit_extra_section">高级属性</string>
 
-    <!-- 解锁页 QuickUnlock -->
+    <!-- 解锁页 快速解锁 (Wave 12：强生物识别或设备锁屏凭据经硬件密钥承载，自研 PIN 已移除) -->
     <string name="unlock_quick_title">QuickUnlock 极速解锁</string>
     <string name="unlock_quick_subtitle">已通过硬件 KeyStore 保全加密主密钥</string>
-    <string name="unlock_quick_cache_validity">快捷解锁凭据缓存剩余有效期：约 %1$d 分钟</string>
-    <string name="unlock_quick_pin_label">输入快捷 PIN 码或短密码</string>
-    <string name="unlock_quick_pin_placeholder">输入设置的快捷 PIN 码解锁</string>
-    <string name="unlock_quick_btn">极速解锁</string>
     <string name="unlock_readonly">只读打开</string>
     <string name="unlock_readonly_desc">本次会话仅查看，禁止任何写入</string>
-    <string name="unlock_biometric_btn">生物识别</string>
     <string name="unlock_switch_to_full">切换为完整主密码与密钥文件解锁</string>
     <string name="unlock_switch_back_quick">切换回 QuickUnlock 极速解锁</string>
 
@@ -608,10 +596,10 @@
     <string name="sync_conflict_keep_local">以本地为准</string>
     <string name="sync_conflict_keep_local_desc">冲突时保留本地版本，云端修改将被覆盖</string>
     <string name="sync_section_network">网络安全</string>
-    <string name="sync_accept_certs_title">信任自签名证书</string>
-    <string name="sync_accept_certs_sub">允许自建服务器使用自签名 TLS 证书</string>
-    <string name="sync_cleartext_title">允许 HTTP 明文连接</string>
-    <string name="sync_cleartext_sub">允许未加密连接（不推荐，凭据可能被窃听）</string>
+    <string name="sync_webdav_cert_pins_label">证书锁定（可选，仅 WebDAV）</string>
+    <string name="sync_webdav_cert_pins_hint">dav.example.com=sha256/Base64…</string>
+    <string name="sync_webdav_cert_pins_sub">每行一条「主机=sha256/公钥哈希」，防御 CA 层中间人；留空则不锁定（避免阻碍服务器证书轮换）</string>
+    <string name="sync_webdav_cert_pins_save">保存证书锁定</string>
     <string name="sync_chunked_title">分块传输</string>
     <string name="sync_chunked_sub">大文件分块上传下载，弱网环境更稳定</string>
     <string name="sync_preload_title">预加载远程数据库</string>

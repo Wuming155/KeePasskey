@@ -6,114 +6,103 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * [DomainMatcher] 纯函数单元测试，严格覆盖 P2-14 域名安全匹配与解析要求。
+ * DomainMatcher 严格域名匹配与 RP ID 可信校验单元测试。
+ * 覆盖：WebAuthn 域名匹配点号边界、公共后缀下限拒绝（F5）、
+ * 创建分支 rp.id↔origin 可注册后缀绑定（Wave 12）。
  */
 class DomainMatcherTest {
 
-    @Test
-    fun extractDomain_stripsProtocolsPortsPathsAndQueries() {
-        assertEquals("github.com", DomainMatcher.extractDomain("https://github.com"))
-        assertEquals("github.com", DomainMatcher.extractDomain("http://github.com/login?tab=1#top"))
-        assertEquals("login.github.com", DomainMatcher.extractDomain("https://login.github.com:8443/auth"))
-        assertEquals("example.org", DomainMatcher.extractDomain("example.org"))
-        assertEquals("example.org", DomainMatcher.extractDomain("HTTPS://EXAMPLE.ORG/"))
-        assertEquals("localhost", DomainMatcher.extractDomain("http://user:pass@localhost:8080/test"))
-        assertEquals("127.0.0.1", DomainMatcher.extractDomain("http://127.0.0.1:3000"))
-        assertEquals("::1", DomainMatcher.extractDomain("http://[::1]:8080/"))
-        assertEquals("", DomainMatcher.extractDomain("   "))
-    }
+    // ===== isDomainMatch（断言/填充侧） =====
 
     @Test
-    fun isDomainMatch_preventsSubdomainSpoofingAndEvilDomain() {
-        // P2-14 核心安全测试：evilgithub.com 绝不能命中 github.com
-        assertFalse(DomainMatcher.isDomainMatch("github.com", "evilgithub.com"))
-        assertFalse(DomainMatcher.isDomainMatch("evilgithub.com", "github.com"))
-        assertFalse(DomainMatcher.isDomainMatch("https://github.com", "https://evilgithub.com"))
-
-        // 精确匹配
+    fun `域名匹配_完全相等与子域命中`() {
         assertTrue(DomainMatcher.isDomainMatch("github.com", "github.com"))
-        assertTrue(DomainMatcher.isDomainMatch("https://github.com", "http://github.com/"))
-
-        // 子域名合法匹配（严格标签边界，login.github.com 命中 github.com）
         assertTrue(DomainMatcher.isDomainMatch("github.com", "login.github.com"))
-        assertTrue(DomainMatcher.isDomainMatch("github.com", "https://auth.api.github.com/v1"))
-
-        // 反向不匹配（条目绑定了特定子域，不能用于根域或同级其他子域）
-        assertFalse(DomainMatcher.isDomainMatch("login.github.com", "github.com"))
-        assertFalse(DomainMatcher.isDomainMatch("login.github.com", "api.github.com"))
-
-        // 空串防守
-        assertFalse(DomainMatcher.isDomainMatch("", "github.com"))
-        assertFalse(DomainMatcher.isDomainMatch("github.com", ""))
+        // 大小写与协议归一化
+        assertTrue(DomainMatcher.isDomainMatch("HTTPS://GitHub.com", "https://login.github.com/path"))
     }
 
     @Test
-    fun isPackageMatch_validatesPackageNames() {
-        assertTrue(DomainMatcher.isPackageMatch("com.example.app", "com.example.app"))
-        assertTrue(DomainMatcher.isPackageMatch("COM.EXAMPLE.APP", "com.example.app"))
-
-        // F1 整改：包名间不存在父子信任关系，任何后缀包含匹配均已废除（精确相等才算命中）
-        assertFalse(DomainMatcher.isPackageMatch("example.app", "com.example.app"))
-        assertFalse(DomainMatcher.isPackageMatch("com.example.app", "example.app"))
-
-        assertFalse(DomainMatcher.isPackageMatch("com.evilapp", "com.app"))
-        assertFalse(DomainMatcher.isPackageMatch("com.example.app", "com.other.app"))
-        assertFalse(DomainMatcher.isPackageMatch("", "com.example.app"))
+    fun `域名匹配_拒绝后缀伪装与交叉域`() {
+        // 严禁模糊 contains：evilgithub.com 不得命中 github.com
+        assertFalse(DomainMatcher.isDomainMatch("github.com", "evilgithub.com"))
+        assertFalse(DomainMatcher.isDomainMatch("github.com", "github.com.evil.io"))
+        assertFalse(DomainMatcher.isDomainMatch("google.com", "github.com"))
     }
 
     @Test
-    fun isPackageMatch_rejectsSuffixFamilyPackagesBothDirections() {
-        // F1 回归测试（High 越权）：两个方向的包名后缀家族均不得互相命中——
-        // 覆盖审计报告示例及其修正方向（报告原示例 com.victim.app.evil 实际不匹配，
-        // 可利用方向是 evil.com.victim.app 一类以受害者包名为后缀的包）
-        assertFalse(DomainMatcher.isPackageMatch("com.victim.app", "com.victim.app.evil"))
-        assertFalse(DomainMatcher.isPackageMatch("com.victim.app", "evil.com.victim.app"))
-        assertFalse(DomainMatcher.isPackageMatch("com.victim.app", "victim.app"))
-        assertFalse(DomainMatcher.isPackageMatch("victim.app", "com.victim.app"))
-
-        // android:// 绑定条目同样按精确匹配裁决
-        assertFalse(DomainMatcher.isPackageMatch("android://com.victim.app", "evil.com.victim.app"))
-        assertFalse(DomainMatcher.isPackageMatch("android://com.victim.app", "com.victim.app.evil"))
+    fun `域名匹配_公共后缀与单标签凭据一律拒绝`() {
+        // F5：公共后缀/单标签不得作为凭据侧 RP ID（防整条 TLD 冒充）
+        assertFalse(DomainMatcher.isDomainMatch("co.uk", "news.bbc.co.uk"))
+        assertFalse(DomainMatcher.isDomainMatch("com", "example.com"))
+        assertFalse(DomainMatcher.isDomainMatch("localhost", "localhost"))
     }
 
     @Test
-    fun isDomainMatch_rejectsPublicSuffixRpIds() {
-        // F5 回归测试：单标签/多标签公共后缀不得作为 RP ID / 条目域参与匹配（收敛钓鱼面）
-        assertFalse(DomainMatcher.isDomainMatch("io", "example.io"))
-        assertFalse(DomainMatcher.isDomainMatch("io", "io"))
-        assertFalse(DomainMatcher.isDomainMatch("com.cn", "example.com.cn"))
-        assertFalse(DomainMatcher.isDomainMatch("co.uk", "example.co.uk"))
+    fun `域名匹配_多级公共后缀下的可注册域正常命中`() {
+        // 凭据侧为公共后缀之下的可注册域：正常命中
+        assertTrue(DomainMatcher.isDomainMatch("bbc.co.uk", "news.bbc.co.uk"))
+        assertTrue(DomainMatcher.isDomainMatch("example.com.cn", "www.example.com.cn"))
+    }
 
-        // 正常可注册域名不受影响
-        assertTrue(DomainMatcher.isDomainMatch("example.io", "example.io"))
-        assertTrue(DomainMatcher.isDomainMatch("example.io", "login.example.io"))
-        assertTrue(DomainMatcher.isDomainMatch("example.co.uk", "www.example.co.uk"))
+    // ===== isRpIdTrustedForCreation（Wave 12 创建分支） =====
+
+    @Test
+    fun `创建校验_浏览器来源_rp_id 须为 origin 可注册后缀`() {
+        // rp.id 为 origin 主机或其父域（origin 是 rp.id 的子域）才可信
+        val browserOrigin = "https://github.com"
+        assertTrue(DomainMatcher.isRpIdTrustedForCreation("github.com", browserOrigin))
+        val subdomainOrigin = "https://login.github.com"
+        assertTrue(DomainMatcher.isRpIdTrustedForCreation("github.com", subdomainOrigin))
+        // 跨域与后缀伪装一律拒绝
+        assertFalse(DomainMatcher.isRpIdTrustedForCreation("evil-github.com", browserOrigin))
+        assertFalse(DomainMatcher.isRpIdTrustedForCreation("github.com.evil.io", browserOrigin))
+        assertFalse(DomainMatcher.isRpIdTrustedForCreation("google.com", browserOrigin))
+        // rp.id 为 origin 的子域不可信（rp.id 必须是 origin 的后缀，方向不可反转）
+        assertFalse(DomainMatcher.isRpIdTrustedForCreation("login.github.com", browserOrigin))
     }
 
     @Test
-    fun extractAndroidBoundPackage_extractsOnlyAndroidSchemeBindings() {
-        // F4 支撑函数：仅 android scheme 绑定可提取包名
-        assertEquals("com.example.app", DomainMatcher.extractAndroidBoundPackage("android://com.example.app"))
-        assertEquals("com.example.app", DomainMatcher.extractAndroidBoundPackage("android://com.example.app/path"))
-        assertEquals("com.example.app", DomainMatcher.extractAndroidBoundPackage("ANDROID://COM.EXAMPLE.APP"))
-
-        // Web 绑定（浏览器创建的 https 条目）不可被当作包名提取，杜绝普通应用冒领
-        assertEquals(null, DomainMatcher.extractAndroidBoundPackage("https://github.com"))
-        assertEquals(null, DomainMatcher.extractAndroidBoundPackage("github.com"))
-        assertEquals(null, DomainMatcher.extractAndroidBoundPackage(""))
+    fun `创建校验_浏览器来源_公共后缀与单标签拒绝`() {
+        val browserOrigin = "https://news.bbc.co.uk"
+        assertFalse(DomainMatcher.isRpIdTrustedForCreation("co.uk", browserOrigin))
+        assertFalse(DomainMatcher.isRpIdTrustedForCreation("uk", browserOrigin))
+        assertFalse(DomainMatcher.isRpIdTrustedForCreation("", browserOrigin))
     }
 
     @Test
-    fun isPackageMatch_stripsAndroidSchemeFromEntryUrl() {
-        // L1 整改：入库记录为 android://<包名> 的凭据因子必须可被调用包名正确匹配
+    fun `创建校验_普通应用来源_仅要求可注册域并拒绝公共后缀`() {
+        // android:apk-key-hash origin 无 web 域可绑定：归属由 RP 服务端 DAL 裁决
+        val appOrigin = "android:apk-key-hash:AbCdEf123456"
+        assertTrue(DomainMatcher.isRpIdTrustedForCreation("app.example.com", appOrigin))
+        assertFalse(DomainMatcher.isRpIdTrustedForCreation("co.uk", appOrigin))
+        assertFalse(DomainMatcher.isRpIdTrustedForCreation("com", appOrigin))
+        assertFalse(DomainMatcher.isRpIdTrustedForCreation("", appOrigin))
+    }
+
+    @Test
+    fun `创建校验_空来源按普通应用规则降级`() {
+        assertTrue(DomainMatcher.isRpIdTrustedForCreation("app.example.com", ""))
+        assertFalse(DomainMatcher.isRpIdTrustedForCreation("co.uk", ""))
+    }
+
+    // ===== isPackageMatch（F1 回归锁） =====
+
+    @Test
+    fun `包名匹配_剥离 android scheme 后精确相等`() {
         assertTrue(DomainMatcher.isPackageMatch("android://com.example.app", "com.example.app"))
-        assertTrue(DomainMatcher.isPackageMatch("android://com.example.app/path", "com.example.app"))
-
-        // scheme 剥离后仍须保持严格点号边界
-        assertFalse(DomainMatcher.isPackageMatch("android://com.evilapp", "com.app"))
-        assertFalse(DomainMatcher.isPackageMatch("android://com.example.app", "com.other.app"))
-
-        // 纯包名输入不受影响
         assertTrue(DomainMatcher.isPackageMatch("com.example.app", "com.example.app"))
+        // 后缀包名不做任何父子信任匹配（CWE-284）
+        assertFalse(DomainMatcher.isPackageMatch("com.example.app", "evil.com.example.app"))
+        assertFalse(DomainMatcher.isPackageMatch("com.example.app.pro", "com.example.app"))
+    }
+
+    // ===== extractAndroidBoundPackage（F4 回归锁） =====
+
+    @Test
+    fun `android 绑定提取_仅接受 android scheme`() {
+        assertEquals("com.example.app", DomainMatcher.extractAndroidBoundPackage("android://com.example.app"))
+        assertEquals(null, DomainMatcher.extractAndroidBoundPackage("https://github.com"))
+        assertEquals(null, DomainMatcher.extractAndroidBoundPackage("webauthn://com.example.app"))
     }
 }

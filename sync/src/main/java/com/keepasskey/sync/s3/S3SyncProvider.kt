@@ -3,6 +3,8 @@ package com.keepasskey.sync.s3
 import com.keepasskey.sync.model.RemoteFileMetadata
 import com.keepasskey.sync.model.SyncException
 import com.keepasskey.sync.model.cleanEtag
+import com.keepasskey.sync.network.SyncHttpClientFactory
+import com.keepasskey.sync.network.SyncNetworkOptions
 import com.keepasskey.sync.provider.SyncProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -40,8 +42,18 @@ class S3SyncProvider(
      * true = path 风格（`endpoint/bucket`，自建 MinIO / 反向代理 / IP 直连场景必须开启）。
      */
     private val usePathStyle: Boolean = false,
-    private val client: OkHttpClient = OkHttpClient()
+    /**
+     * Wave 12 传输加固网络选项（TLS-only 恒定 + 显式超时 + 可选证书锁定）。
+     * 由 app 层组装传入（纯数据契约，维持 sync 不依赖 app 的单向依赖）。
+     */
+    private val networkOptions: SyncNetworkOptions = SyncNetworkOptions(),
+    // 测试注入口：HTTP 回环（MockWebServer）需显式传入默认规格客户端；生产恒为 null（走 TLS-only 工厂）
+    client: OkHttpClient? = null
 ) : SyncProvider {
+
+    // Wave 12 传输加固：默认经 TLS-only 工厂构建（排除 CLEARTEXT + 显式超时 + 可选证书锁定），
+    // 仅 HTTP 回环测试需显式注入明文客户端
+    private val httpClient: OkHttpClient = client ?: SyncHttpClientFactory.createSyncClient(networkOptions)
 
     private fun encodePath(path: String): String {
         return path.split('/').joinToString("/") { segment ->
@@ -79,7 +91,7 @@ class S3SyncProvider(
             val requestBuilder = Request.Builder().url(url).head()
             headers.forEach { (k, v) -> requestBuilder.header(k, v) }
 
-            client.newCall(requestBuilder.build()).execute().use { response ->
+            httpClient.newCall(requestBuilder.build()).execute().use { response ->
                 when {
                     response.isSuccessful || response.code == 404 -> Unit
                     response.code == 401 || response.code == 403 ->
@@ -102,7 +114,7 @@ class S3SyncProvider(
             val requestBuilder = Request.Builder().url(url).head()
             headers.forEach { (k, v) -> requestBuilder.header(k, v) }
 
-            client.newCall(requestBuilder.build()).execute().use { response ->
+            httpClient.newCall(requestBuilder.build()).execute().use { response ->
                 when {
                     response.code == 404 -> throw SyncException.FileNotFound("S3 对象不存在: $remotePath")
                     response.code == 401 || response.code == 403 ->
@@ -138,7 +150,7 @@ class S3SyncProvider(
             val requestBuilder = Request.Builder().url(url).get()
             headers.forEach { (k, v) -> requestBuilder.header(k, v) }
 
-            client.newCall(requestBuilder.build()).execute().use { response ->
+            httpClient.newCall(requestBuilder.build()).execute().use { response ->
                 when {
                     response.code == 404 -> throw SyncException.FileNotFound("S3 对象不存在: $remotePath")
                     response.code == 401 || response.code == 403 ->
@@ -218,7 +230,7 @@ class S3SyncProvider(
                 }
             }
 
-            client.newCall(requestBuilder.build()).execute().use { response ->
+            httpClient.newCall(requestBuilder.build()).execute().use { response ->
                 when {
                     response.code == 412 -> {
                         val currentMeta = getMetadata(remotePath).getOrNull()
@@ -252,7 +264,7 @@ class S3SyncProvider(
             val requestBuilder = Request.Builder().url(url).delete()
             headers.forEach { (k, v) -> requestBuilder.header(k, v) }
 
-            client.newCall(requestBuilder.build()).execute().use { response ->
+            httpClient.newCall(requestBuilder.build()).execute().use { response ->
                 if (!response.isSuccessful && response.code != 404) {
                     throw SyncException.ProtocolError(response.code, response.message)
                 }

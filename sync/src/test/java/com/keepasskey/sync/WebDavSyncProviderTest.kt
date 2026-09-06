@@ -6,6 +6,7 @@ import com.keepasskey.sync.webdav.WebDavSyncProvider
 import kotlinx.coroutines.test.runTest
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
+import okhttp3.OkHttpClient
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -21,6 +22,9 @@ import org.junit.Test
 class WebDavSyncProviderTest {
 
     private lateinit var server: MockWebServer
+
+    // Wave 12 TLS-only 工厂默认拒绝明文：MockWebServer 为 HTTP 回环，测试显式注入默认规格客户端
+    private val plainLoopbackClient = OkHttpClient()
 
     @Before
     fun setUp() {
@@ -59,7 +63,8 @@ class WebDavSyncProviderTest {
         val provider = WebDavSyncProvider(
             serverUrl = server.url("/").toString(),
             username = "admin",
-            passwordChars = "pass123".toCharArray()
+            passwordChars = "pass123".toCharArray(),
+            client = plainLoopbackClient
         )
 
         val metaResult = provider.getMetadata("test.kdbx")
@@ -97,7 +102,8 @@ class WebDavSyncProviderTest {
         val provider = WebDavSyncProvider(
             serverUrl = server.url("/").toString(),
             username = "admin",
-            passwordChars = "pass123".toCharArray()
+            passwordChars = "pass123".toCharArray(),
+            client = plainLoopbackClient
         )
 
         val metaResult = provider.getMetadata("vault_dir")
@@ -126,7 +132,8 @@ class WebDavSyncProviderTest {
         val provider = WebDavSyncProvider(
             serverUrl = server.url("/").toString(),
             username = "admin",
-            passwordChars = "pass123".toCharArray()
+            passwordChars = "pass123".toCharArray(),
+            client = plainLoopbackClient
         )
 
         val uploadResult = provider.upload("test.kdbx", "test-bytes".toByteArray(), expectedEtag = "outdated_etag")
@@ -156,7 +163,8 @@ class WebDavSyncProviderTest {
         val provider = WebDavSyncProvider(
             serverUrl = server.url("/").toString(),
             username = "admin",
-            passwordChars = "pass123".toCharArray()
+            passwordChars = "pass123".toCharArray(),
+            client = plainLoopbackClient
         )
 
         val result = provider.uploadAtomic("vault.kdbx", "binary-data".toByteArray())
@@ -191,7 +199,8 @@ class WebDavSyncProviderTest {
         val provider = WebDavSyncProvider(
             serverUrl = server.url("/").toString(),
             username = "admin",
-            passwordChars = "pass123".toCharArray()
+            passwordChars = "pass123".toCharArray(),
+            client = plainLoopbackClient
         )
 
         val result = provider.uploadAtomic("vault.kdbx", "binary-data".toByteArray())
@@ -219,7 +228,8 @@ class WebDavSyncProviderTest {
         val provider = WebDavSyncProvider(
             serverUrl = server.url("/").toString(),
             username = "admin",
-            passwordChars = "pass123".toCharArray()
+            passwordChars = "pass123".toCharArray(),
+            client = plainLoopbackClient
         )
 
         val downloadResult = provider.download("我的 密码库/工作 vault.kdbx")

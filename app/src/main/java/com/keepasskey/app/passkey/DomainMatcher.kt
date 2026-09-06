@@ -85,6 +85,28 @@ object DomainMatcher {
     }
 
     /**
+     * 创建分支的 RP ID 可信校验（Wave 12 授权收紧，对齐官方《创建通行密钥》规范：
+     * "rp.id 必须是调用方 origin 的可注册后缀"）。
+     *
+     * - 浏览器委派调用（origin 为 https web origin）：[rpId] 必须与 origin 主机严格点号边界匹配
+     *   （复用 [isDomainMatch]，含公共后缀下限拒绝）；
+     * - 普通应用调用（android:apk-key-hash origin）：无 web 域可绑定，仅要求 [rpId] 本身为可注册域名——
+     *   应用与域名的真实归属由 RP 服务端经 Digital Asset Links 在注册响应校验阶段裁决；
+     * - 任何空白 / 单标签 / 公共后缀 rp.id 一律拒绝（WebAuthn 规范禁止其作 RP ID）。
+     */
+    fun isRpIdTrustedForCreation(rpId: String, callingOrigin: String): Boolean {
+        val rp = extractDomain(rpId)
+        if (rp.isEmpty()) return false
+
+        val originHost = extractDomain(callingOrigin)
+        return if (originHost.isNotEmpty() && CallingOriginResolver.isBrowserOrigin(callingOrigin)) {
+            isDomainMatch(rp, originHost)
+        } else {
+            isRegistrableDomain(rp)
+        }
+    }
+
+    /**
      * 判断主机名是否为可注册域名：至少含一个点号，且不属于内置多标签公共后缀集合。
      * 内置集合为常见多级公共后缀的最小子集（非完整 PSL），覆盖主流国家/地区二级注册域。
      */
@@ -134,14 +156,17 @@ object DomainMatcher {
         return trimmed.ifEmpty { null }
     }
 
-    /** 常见多级公共后缀最小子集（F5 整改，非完整 PSL；命中即视为不可注册域） */
+    /** 常见多级公共后缀最小子集（F5 整改 + Wave 12 扩充，非完整 PSL；命中即视为不可注册域） */
     private val MULTILABEL_PUBLIC_SUFFIXES = setOf(
         "co.uk", "org.uk", "ac.uk", "gov.uk", "me.uk",
         "com.cn", "net.cn", "org.cn", "gov.cn",
         "co.jp", "ne.jp", "or.jp", "ac.jp",
+        "co.kr", "or.kr", "ne.kr", "re.kr",
         "com.hk", "org.hk", "com.tw", "com.au", "net.au", "org.au",
         "co.nz", "net.nz", "org.nz", "com.br", "com.mx",
         "co.in", "net.in", "org.in", "com.sg", "com.tr",
-        "com.ar", "co.za", "com.pl", "com.ru", "com.ua"
+        "com.ar", "co.za", "com.pl", "com.ru", "com.ua",
+        "com.my", "co.th", "com.ph", "com.vn", "co.il",
+        "com.sa", "com.ng", "com.co", "com.pe"
     )
 }

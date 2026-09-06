@@ -1,5 +1,6 @@
 package com.keepasskey.database.xml
 
+import com.keepasskey.database.exception.KdbxCorruptFileException
 import org.xml.sax.Attributes
 
 /**
@@ -29,19 +30,36 @@ internal abstract class SaxNode {
 
 /**
  * 纯文本叶节点：收集自身全部字符数据并在闭合时回调。
+ *
+ * Wave 12 解析炸弹防线：单节点字符数封顶（[MAX_TEXT_CHARS]）——
+ * XML 文本层是此前唯一无长度限制的解析层，恶意文件可借单一字段
+ * （如超大 Base64 受保护值/图标数据）耗尽内存。
  */
 internal class TextNode(
+    // maxChars 置于首位：使既有「尾随 lambda」调用点（TextNode { ... }）继续绑定 onText
+    private val maxChars: Int = MAX_TEXT_CHARS,
     private val onText: (String) -> Unit
 ) : SaxNode() {
 
     private val buffer = StringBuilder()
 
     override fun text(ch: CharArray, start: Int, length: Int) {
+        if (buffer.length + length > maxChars) {
+            throw KdbxCorruptFileException("XML 文本节点超出长度上限（$maxChars 字符），疑似解析炸弹")
+        }
         buffer.append(ch, start, length)
     }
 
     override fun end() {
         onText(buffer.toString())
+    }
+
+    companion object {
+        /**
+         * 单文本节点字符上限：8 Mi 字符（约 16 MiB JVM 内存）。
+         * 覆盖 Base64 受保护值、自定义图标数据等最大合法负载，正常库远低于该界。
+         */
+        const val MAX_TEXT_CHARS = 8 shl 20
     }
 }
 

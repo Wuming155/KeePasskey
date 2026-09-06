@@ -52,6 +52,13 @@ object KdbxFile {
     /** 解密探针的分块读取缓冲 */
     private const val PROBE_READ_BUFFER_SIZE = 8192
 
+    /**
+     * 载荷解压输出（或未压缩载荷）累计字节数安全上限：512 MiB（Wave 12 解析炸弹防线）。
+     * 恶意 .kdbx（导入场景，用户持有其密码）可携带高压缩比 payload 解压出数 GB 明文；
+     * 该上限将解析期资源消耗约束在常数界内，合法库远低于该界（流式解析本就不整体物化）。
+     */
+    private const val MAX_DECOMPRESSED_PAYLOAD_BYTES = 512L * 1024 * 1024
+
     private val INNER_HEADER_FIELD_IDS = setOf(
         KdbxConstants.InnerHeaderFieldId.END.toInt(),
         KdbxConstants.InnerHeaderFieldId.INNER_RANDOM_STREAM_ID.toInt(),
@@ -154,10 +161,11 @@ object KdbxFile {
 
         // 官方载荷顺序（对齐 KeePass 2.x Read.cs / KeePassDX DatabaseInputKDBX）：
         // 解密 → GZIP 解压 → 内层头部（在解压流内、XML 之前）→ XML
+        // Wave 12 解析炸弹防线：对解压输出（及未压缩载荷）做累计字节数封顶
         val xmlInputStream = if (header.compression == KdbxConstants.Compression.GZIP) {
-            GZIPInputStream(cipherIn)
+            SizeBoundedInputStream(GZIPInputStream(cipherIn), MAX_DECOMPRESSED_PAYLOAD_BYTES)
         } else {
-            cipherIn
+            SizeBoundedInputStream(cipherIn, MAX_DECOMPRESSED_PAYLOAD_BYTES)
         }
 
         val innerHeader = InnerHeader.deserialize(xmlInputStream)

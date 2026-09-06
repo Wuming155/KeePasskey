@@ -31,14 +31,12 @@ data class UnlockUiState(
     // H4-只读整改：用户可选择以只读模式打开（会话期间写盘硬拒绝）
     val openReadOnly: Boolean = false,
 
-    // QuickUnlock 状态 (KP2A & KeePassDX 特性)
-    // true 表示本机已输入过主密码、存在快捷解锁缓存
+    // 快速解锁状态 (KP2A & KeePassDX 特性；Wave 12 起由强生物识别或设备锁屏凭据承载，自研 PIN 已移除)
+    // true 表示本库已封印快速解锁凭据（完整主密码解锁成功后自动登记）
     val isQuickUnlockAvailable: Boolean = true,
-    // 默认要求输入完整主密码；由 ViewModel 依据快捷缓存与生物认证设置降级到快捷方式
+    // 默认要求输入完整主密码；由 ViewModel 依据封印凭据与快速解锁设置降级到快捷方式
     val unlockMode: UnlockMode = UnlockMode.STANDARD,
     val isBiometricEnabled: Boolean = false,
-    val quickUnlockPin: String = "",
-    // H1 整改：硬件安全声明与缓存剩余时长不再写死假值，仅在有真实数据时展示
-    val hardwareBackedSecurity: String = "",
-    val quickUnlockRemainingMinutes: Int = 0
+    // H1 整改：硬件安全声明不再写死假值，仅在有真实数据时展示
+    val hardwareBackedSecurity: String = ""
 )

@@ -120,8 +120,8 @@ fun CloudSyncScreen(
     onCheckRemoteChangesToggle: (Boolean) -> Unit = {},
     onConflictResolutionChange: (ConflictResolution) -> Unit = {},
     onUseFileTransactionsToggle: (Boolean) -> Unit = {},
-    onAcceptAllCertificatesToggle: (Boolean) -> Unit = {},
-    onCleartextTrafficPermittedToggle: (Boolean) -> Unit = {},
+    // Wave 12：明文/自签证书假开关已移除（TLS-only 恒定）；新增 WebDAV 证书锁定独立设置项
+    onWebDavCertPinsChange: (String) -> Unit = {},
     onWebdavChunkedUploadToggle: (Boolean) -> Unit = {},
     onPreloadDatabaseEnabledToggle: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier
@@ -728,21 +728,27 @@ fun CloudSyncScreen(
                             .padding(horizontal = 16.dp, vertical = 8.dp),
                         verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        SyncSwitchItem(
-                            icon = Icons.Default.Lock,
-                            title = stringResource(R.string.sync_accept_certs_title),
-                            subtitle = stringResource(R.string.sync_accept_certs_sub),
-                            checked = uiState.acceptAllCertificates,
-                            onCheckedChange = onAcceptAllCertificatesToggle
+                        // Wave 12 传输加固：同步客户端恒定 TLS-only（明文与自签证书假开关已移除）；
+                        // 证书锁定为可选防御纵深，由用户显式配置（官方警示：勿强制锁定以免阻碍证书轮换）
+                        var webdavCertPinsDraft by remember(uiState.webdavCertPins) {
+                            mutableStateOf(uiState.webdavCertPins)
+                        }
+                        OutlinedTextField(
+                            value = webdavCertPinsDraft,
+                            onValueChange = { webdavCertPinsDraft = it },
+                            label = { Text(stringResource(R.string.sync_webdav_cert_pins_label)) },
+                            placeholder = { Text(stringResource(R.string.sync_webdav_cert_pins_hint)) },
+                            supportingText = { Text(stringResource(R.string.sync_webdav_cert_pins_sub)) },
+                            minLines = 2,
+                            textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp),
+                            modifier = Modifier.fillMaxWidth()
                         )
-
-                        SyncSwitchItem(
-                            icon = Icons.Default.Public,
-                            title = stringResource(R.string.sync_cleartext_title),
-                            subtitle = stringResource(R.string.sync_cleartext_sub),
-                            checked = uiState.cleartextTrafficPermitted,
-                            onCheckedChange = onCleartextTrafficPermittedToggle
-                        )
+                        TextButton(
+                            onClick = { onWebDavCertPinsChange(webdavCertPinsDraft) },
+                            modifier = Modifier.align(Alignment.End)
+                        ) {
+                            Text(stringResource(R.string.sync_webdav_cert_pins_save))
+                        }
 
                         SyncSwitchItem(
                             icon = Icons.Default.CloudQueue,
@@ -906,8 +912,7 @@ fun WebDavSyncScreen(
     onCheckRemoteChangesToggle: (Boolean) -> Unit = {},
     onConflictResolutionChange: (ConflictResolution) -> Unit = {},
     onUseFileTransactionsToggle: (Boolean) -> Unit = {},
-    onAcceptAllCertificatesToggle: (Boolean) -> Unit = {},
-    onCleartextTrafficPermittedToggle: (Boolean) -> Unit = {},
+    onWebDavCertPinsChange: (String) -> Unit = {},
     onWebdavChunkedUploadToggle: (Boolean) -> Unit = {},
     onPreloadDatabaseEnabledToggle: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier
@@ -931,8 +936,7 @@ fun WebDavSyncScreen(
         onCheckRemoteChangesToggle = onCheckRemoteChangesToggle,
         onConflictResolutionChange = onConflictResolutionChange,
         onUseFileTransactionsToggle = onUseFileTransactionsToggle,
-        onAcceptAllCertificatesToggle = onAcceptAllCertificatesToggle,
-        onCleartextTrafficPermittedToggle = onCleartextTrafficPermittedToggle,
+        onWebDavCertPinsChange = onWebDavCertPinsChange,
         onWebdavChunkedUploadToggle = onWebdavChunkedUploadToggle,
         onPreloadDatabaseEnabledToggle = onPreloadDatabaseEnabledToggle,
         modifier = modifier

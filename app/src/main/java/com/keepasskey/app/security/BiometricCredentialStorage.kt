@@ -1,28 +1,57 @@
 package com.keepasskey.app.security
 
 import android.content.Context
-import android.util.Base64
 import dagger.hilt.android.qualifiers.ApplicationContext
+import java.util.Base64
 import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * 经 Android Keystore 硬件加密的主凭据安全存储仓库。
- * 存储的内容为 AES-256-GCM 密文与对应的初始化向量 (IV)，即使设备 root 或读取明文 XML 也无法解密，
- * 必须通过硬件 TEE/StrongBox 结合活体生物特征认证授权方可解包。
+ * 经 Android Keystore 硬件加密的统一快速解锁主凭据安全存储仓库（Wave 12 收敛）。
+ *
+ * 强生物识别与设备锁屏凭据两条快速解锁路径共用本存储（与 per-database 硬件密钥别名一一对应），
+ * 存储内容为 AES-256-GCM 密文与初始化向量 (IV)——即使设备 root 或读取明文 XML 也无法解密，
+ * 必须通过硬件 TEE/StrongBox 经 BiometricPrompt（强生物识别或设备锁屏凭据授权）后方可解包。
+ *
+ * Wave 12 迁移说明：旧版 QuickUnlock PIN 体系（自研 PBKDF2 校验器 + 非认证密钥封印 + 应用级熔断）
+ * 已整体移除，快速解锁安全门槛改由「设备凭据绑定硬件密钥 + 系统锁屏凭据」承载；
+ * 首次构造时清理遗留 prefs 文件与遗留 Keystore 别名（fail-safe：旧封印凭据随之失效，
+ * 用户下次以主密码完整解锁后自动重新封印）。
+ *
+ * 编解码说明：使用 java.util.Base64（API 26+，minSdk 36 恒满足）而非 android.util.Base64，
+ * 消除 JVM 单元测试对 Android 桩实现的依赖。
  */
 @Singleton
 class BiometricCredentialStorage @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    // 允许为 null 仅用于 JVM 单测注入空实现；生产 DI 注入 @Singleton 真实实例
+    private val keystoreManager: KeystoreManager? = null
 ) {
     private val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+
+    init {
+        cleanupLegacyQuickUnlockData()
+    }
+
+    /** 一次性清理 Wave 12 前遗留的 QuickUnlock PIN 体系数据（遗留 prefs 文件 + 非认证硬件密钥别名） */
+    private fun cleanupLegacyQuickUnlockData() {
+        runCatching {
+            // JVM 单测注入的 ContextWrapper(null) 无真实底层，此处静默跳过
+            context.deleteSharedPreferences(LEGACY_QUICK_UNLOCK_PREFS)
+        }
+        try {
+            keystoreManager?.deleteKey(KeystoreManager.LEGACY_QUICK_UNLOCK_KEY_ALIAS)
+        } catch (_: Exception) {
+            // Keystore 不可达时跳过：残留密钥不含明文数据，下次启动重试
+        }
+    }
 
     /**
      * 保存加密凭据及初始化向量 (IV)
      */
     fun saveEncryptedCredential(databaseId: String, iv: ByteArray, ciphertext: ByteArray) {
-        val ivB64 = Base64.encodeToString(iv, Base64.NO_WRAP)
-        val cipherB64 = Base64.encodeToString(ciphertext, Base64.NO_WRAP)
+        val ivB64 = Base64.getEncoder().encodeToString(iv)
+        val cipherB64 = Base64.getEncoder().encodeToString(ciphertext)
         prefs.edit()
             .putString("${databaseId}_iv", ivB64)
             .putString("${databaseId}_cipher", cipherB64)
@@ -30,29 +59,29 @@ class BiometricCredentialStorage @Inject constructor(
     }
 
     /**
-     * 获取加密凭据及初始化向量 (IV)
+     * 获取加密凭据及初始化向量 (IV)；数据损坏（Base64 非法）时返回 null（fail-safe，由调用方引导重新登记）
      */
     fun getEncryptedCredential(databaseId: String): Pair<ByteArray, ByteArray>? {
         val ivB64 = prefs.getString("${databaseId}_iv", null) ?: return null
         val cipherB64 = prefs.getString("${databaseId}_cipher", null) ?: return null
         return try {
-            val iv = Base64.decode(ivB64, Base64.NO_WRAP)
-            val ciphertext = Base64.decode(cipherB64, Base64.NO_WRAP)
+            val iv = Base64.getDecoder().decode(ivB64)
+            val ciphertext = Base64.getDecoder().decode(cipherB64)
             Pair(iv, ciphertext)
-        } catch (e: Exception) {
+        } catch (e: IllegalArgumentException) {
             null
         }
     }
 
     /**
-     * 检查是否存在已配置的生物识别凭据
+     * 检查是否存在已封印的快速解锁凭据
      */
     fun hasEncryptedCredential(databaseId: String): Boolean {
         return prefs.contains("${databaseId}_iv") && prefs.contains("${databaseId}_cipher")
     }
 
     /**
-     * 清除特定数据库的生物凭据
+     * 清除特定数据库的封印凭据
      */
     fun clearCredential(databaseId: String) {
         prefs.edit()
@@ -62,7 +91,7 @@ class BiometricCredentialStorage @Inject constructor(
     }
 
     /**
-     * 清除所有数据库的生物凭据
+     * 清除所有数据库的封印凭据
      */
     fun clearAll() {
         prefs.edit().clear().apply()
@@ -70,5 +99,8 @@ class BiometricCredentialStorage @Inject constructor(
 
     companion object {
         private const val PREFS_NAME = "com.keepasskey.biometric_credentials"
+
+        /** Wave 12 前遗留 QuickUnlock PIN 体系 prefs 文件名（仅供启动期清理引用） */
+        private const val LEGACY_QUICK_UNLOCK_PREFS = "com.keepasskey.quick_unlock_pin"
     }
 }

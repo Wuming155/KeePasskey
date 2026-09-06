@@ -182,6 +182,13 @@ class KeePasskeyCredentialProviderService : CredentialProviderService() {
                     rpId = DomainMatcher.extractDomain(callingOrigin)
                 }
 
+                // Wave 12 授权收紧（对齐官方「rp.id 须为 origin 可注册后缀」）：
+                // 创建分支与断言分支同等 fail-closed——rp.id 不可信时拒绝呈现创建入口
+                if (!DomainMatcher.isRpIdTrustedForCreation(rpId, callingOrigin)) {
+                    Log.w(TAG, "拒绝创建请求：rp.id 不可信（非调用方可注册后缀或为公共后缀） rpId=$rpId")
+                    return responseBuilder.build()
+                }
+
                 val intent = Intent(this, PasskeyCreateActivity::class.java).apply {
                     putExtra(PasskeyCreateActivity.EXTRA_RP_ID, rpId)
                     putExtra(PasskeyCreateActivity.EXTRA_USER_NAME, userName)

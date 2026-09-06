@@ -87,6 +87,20 @@ data class InnerHeader(
         /** InnerRandomStreamKey 字段长度安全上限（官方写入 64 字节） */
         private const val MAX_INNER_RANDOM_STREAM_KEY_BYTES = 1024
 
+        /**
+         * 二进制池条目数安全上限（Wave 12 解析炸弹防线）。
+         * 官方实现的附件数量与库规模线性相关，1024 远超一切合法库的附件总量；
+         * 超限即视为恶意构造（每条目仍受 [MAX_INNER_FIELD_BYTES] 单字段上限约束）。
+         */
+        internal const val MAX_BINARY_POOL_ENTRIES = 1024
+
+        /**
+         * 二进制池累计字节数安全上限（256 MiB，Wave 12 解析炸弹防线）。
+         * 即使每条目均满足单字段上限，海量条目仍可累积出巨量内存驻留；
+         * 总量封顶将恶意文件的资源消耗约束在常数界内。
+         */
+        internal const val MAX_BINARY_POOL_TOTAL_BYTES = 256L * 1024 * 1024
+
         fun createDefault(): InnerHeader {
             val key = ByteArray(64)
             secureRandom.nextBytes(key)
@@ -100,6 +114,8 @@ data class InnerHeader(
             var streamId = KdbxConstants.InnerRandomStream.CHACHA20
             var streamKey = ByteArray(64)
             val binaries = mutableListOf<BinaryItem>()
+            // Wave 12 解析炸弹防线：二进制池条目数与累计字节数双封顶
+            var binaryPoolTotalBytes = 0L
 
             while (true) {
                 val fieldIdByte = inputStream.read()
@@ -141,8 +157,20 @@ data class InnerHeader(
                     }
                     KdbxConstants.InnerHeaderFieldId.BINARY -> {
                         if (fieldData.isNotEmpty()) {
+                            if (binaries.size >= MAX_BINARY_POOL_ENTRIES) {
+                                throw KdbxCorruptFileException(
+                                    "二进制池条目数超出安全上限: ${binaries.size + 1}" +
+                                            "（允许 ≤ $MAX_BINARY_POOL_ENTRIES），疑似解析炸弹"
+                                )
+                            }
                             val flag = fieldData[0]
                             val data = fieldData.copyOfRange(1, fieldData.size)
+                            binaryPoolTotalBytes += data.size
+                            if (binaryPoolTotalBytes > MAX_BINARY_POOL_TOTAL_BYTES) {
+                                throw KdbxCorruptFileException(
+                                    "二进制池累计字节超出安全上限（允许 ≤ $MAX_BINARY_POOL_TOTAL_BYTES），疑似解析炸弹"
+                                )
+                            }
                             binaries.add(BinaryItem(flag, data))
                         }
                     }

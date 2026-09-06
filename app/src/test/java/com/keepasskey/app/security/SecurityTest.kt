@@ -63,6 +63,26 @@ class SecurityTest {
         assertEquals("com.keepasskey.biometric_master_key_my_vault_01", alias)
     }
 
+    /**
+     * Wave 12 敏感数据卫生回归锁：GCM 封印路径每次独立 init Cipher，
+     * 平台必须为每次加密生成全新随机 IV——同一密钥连续封印绝不复用 IV（AES-GCM 灾难性失效条件）。
+     */
+    @Test
+    fun `GCM 随机 IV 连续初始化不重复`() {
+        val keyGen = KeyGenerator.getInstance("AES")
+        keyGen.init(256)
+        val secretKey = keyGen.generateKey()
+
+        val ivs = (1..16).map {
+            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+            cipher.init(Cipher.ENCRYPT_MODE, secretKey)
+            cipher.iv
+        }
+
+        assertEquals(16, ivs.toSet().size)
+        ivs.forEach { iv -> assertEquals(12, iv.size) }
+    }
+
     @Test
     fun `测试剪贴板敏感数据 SHA-256 哈希比对逻辑`() {
         val original = "SuperSecretPassword123"
@@ -117,21 +137,5 @@ class SecurityTest {
         val recentBackground = 85_000L
         val elapsedShort = now - recentBackground
         assertFalse(elapsedShort >= timeoutMillis)
-    }
-
-    @Test
-    fun `测试 QuickUnlock PIN 熔断时长指数退避与封顶`() {
-        // 未达失败阈值 -> 不熔断
-        assertEquals(0L, QuickUnlockPinStore.computeLockoutMs(0))
-        assertEquals(0L, QuickUnlockPinStore.computeLockoutMs(4))
-
-        // 达阈值后按 30s 基数指数退避
-        assertEquals(30_000L, QuickUnlockPinStore.computeLockoutMs(5))
-        assertEquals(60_000L, QuickUnlockPinStore.computeLockoutMs(6))
-        assertEquals(120_000L, QuickUnlockPinStore.computeLockoutMs(7))
-
-        // 长尾封顶 15 分钟，且不因超大失败次数溢出
-        assertEquals(15 * 60_000L, QuickUnlockPinStore.computeLockoutMs(12))
-        assertEquals(15 * 60_000L, QuickUnlockPinStore.computeLockoutMs(1000))
     }
 }

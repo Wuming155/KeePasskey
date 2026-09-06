@@ -130,8 +130,6 @@ class SettingsViewModel @Inject constructor(
         val checkRemoteChangesBeforeSave: Boolean = true,
         val conflictResolution: ConflictResolution = ConflictResolution.AUTO_MERGE,
         val useFileTransactions: Boolean = true,
-        val acceptAllCertificates: Boolean = false,
-        val cleartextTrafficPermitted: Boolean = false,
         val webdavChunkedUpload: Boolean = false,
         val webdavChunkSizeMb: Int = 10,
         val preloadDatabaseEnabled: Boolean = true,
@@ -183,6 +181,7 @@ class SettingsViewModel @Inject constructor(
         val webdavUsername: String = "",
         val webdavPassword: String = "",
         val webdavRemotePath: String = "/keepasskey.kdbx",
+        val webdavCertPins: String = "",
         val s3Endpoint: String = "",
         val s3Bucket: String = "",
         val s3Region: String = "auto",
@@ -262,6 +261,7 @@ class SettingsViewModel @Inject constructor(
             // M2 整改：掩码采用固定长度，杜绝通过掩码长度推断真实密码长度
             webdavPasswordMasked = FIXED_PASSWORD_MASK,
             webdavRemotePath = syncState.webdavRemotePath,
+            webdavCertPins = syncState.webdavCertPins,
             s3Endpoint = syncState.s3Endpoint,
             s3Bucket = syncState.s3Bucket,
             s3Region = syncState.s3Region,
@@ -285,8 +285,6 @@ class SettingsViewModel @Inject constructor(
             checkRemoteChangesBeforeSave = extState.checkRemoteChangesBeforeSave,
             conflictResolution = extState.conflictResolution,
             useFileTransactions = extState.useFileTransactions,
-            acceptAllCertificates = extState.acceptAllCertificates,
-            cleartextTrafficPermitted = extState.cleartextTrafficPermitted,
             webdavChunkedUpload = extState.webdavChunkedUpload,
             webdavChunkSizeMb = extState.webdavChunkSizeMb,
             preloadDatabaseEnabled = extState.preloadDatabaseEnabled,
@@ -386,6 +384,7 @@ class SettingsViewModel @Inject constructor(
                 webdavUsername = savedWebDav?.username ?: cur.webdavUsername,
                 webdavPassword = savedWebDav?.password ?: cur.webdavPassword,
                 webdavRemotePath = savedWebDav?.remotePath ?: cur.webdavRemotePath,
+                webdavCertPins = savedWebDav?.certPins ?: cur.webdavCertPins,
                 s3Endpoint = savedS3?.endpoint ?: cur.s3Endpoint,
                 s3Bucket = savedS3?.bucket ?: cur.s3Bucket,
                 s3Region = savedS3?.region ?: cur.s3Region,
@@ -796,12 +795,14 @@ class SettingsViewModel @Inject constructor(
         extendedSettingsFlow.update { it.copy(useFileTransactions = enabled) }
     }
 
-    fun setAcceptAllCertificates(enabled: Boolean) {
-        extendedSettingsFlow.update { it.copy(acceptAllCertificates = enabled) }
-    }
-
-    fun setCleartextTrafficPermitted(enabled: Boolean) {
-        extendedSettingsFlow.update { it.copy(cleartextTrafficPermitted = enabled) }
+    /**
+     * Wave 12：WebDAV 证书锁定（可选防御纵深）——每行一条 `host=sha256/Base64`（SPKI 公钥哈希）。
+     * 遵循 OkHttp 官方警示，锁定仅在用户显式配置时生效；空串=不锁定。
+     * 「允许明文流量」与「信任自签名证书」假开关已随传输加固整体移除（TLS-only 恒定）。
+     */
+    fun setWebDavCertPins(pins: String) {
+        syncCredentialsStore?.saveWebDavCertPins(pins)
+        syncStateFlow.update { it.copy(webdavCertPins = pins) }
     }
 
     fun setWebdavChunkedUpload(enabled: Boolean) {

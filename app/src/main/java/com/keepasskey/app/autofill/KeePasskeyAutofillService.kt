@@ -218,21 +218,28 @@ class KeePasskeyAutofillService : AutofillService() {
                 val password = scanResult.passwordId?.toIntOrNull()?.let { parsedNodes.getOrNull(it)?.text }.orEmpty()
 
                 if (password.isNotBlank()) {
+                    // Wave 12 敏感数据卫生：调用方持有的密码 CharArray 在任何结果路径下用毕立即清零
+                    // （注：来源 node.text 的 String 由系统 AssistStructure 提供，应用侧无法擦除，
+                    //  已尽量缩短其存活期——本回调结束即失去引用，绝不进入日志/StateFlow/成员变量）
                     val passwordChars = password.toCharArray()
-                    val result = vaultRepository.saveAutofillCredential(
-                        packageName = callingPkg,
-                        webDomain = scanResult.webDomain,
-                        username = username,
-                        passwordChars = passwordChars
-                    )
-                    when (result) {
-                        is com.keepasskey.core.result.KdbxResult.Success -> {
-                            callback.onSuccess()
+                    try {
+                        val result = vaultRepository.saveAutofillCredential(
+                            packageName = callingPkg,
+                            webDomain = scanResult.webDomain,
+                            username = username,
+                            passwordChars = passwordChars
+                        )
+                        when (result) {
+                            is com.keepasskey.core.result.KdbxResult.Success -> {
+                                callback.onSuccess()
+                            }
+                            is com.keepasskey.core.result.KdbxResult.Failure -> {
+                                Log.e(TAG, "onSaveRequest 保存凭据失败: ${result.message}", result.error)
+                                callback.onFailure(result.message)
+                            }
                         }
-                        is com.keepasskey.core.result.KdbxResult.Failure -> {
-                            Log.e(TAG, "onSaveRequest 保存凭据失败: ${result.message}", result.error)
-                            callback.onFailure(result.message)
-                        }
+                    } finally {
+                        passwordChars.fill('0')
                     }
                 } else {
                     callback.onSuccess()

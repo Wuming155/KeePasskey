@@ -3,6 +3,8 @@ package com.keepasskey.sync.webdav
 import com.keepasskey.sync.model.RemoteFileMetadata
 import com.keepasskey.sync.model.SyncException
 import com.keepasskey.sync.model.cleanEtag
+import com.keepasskey.sync.network.SyncHttpClientFactory
+import com.keepasskey.sync.network.SyncNetworkOptions
 import com.keepasskey.sync.provider.SyncProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -33,8 +35,18 @@ class WebDavSyncProvider(
     private val serverUrl: String,
     private val username: String,
     passwordChars: CharArray,
-    private val client: OkHttpClient = OkHttpClient()
+    /**
+     * Wave 12 传输加固网络选项（TLS-only 恒定 + 显式超时 + 可选证书锁定）。
+     * 由 app 层组装传入（纯数据契约，维持 sync 不依赖 app 的单向依赖）。
+     */
+    private val networkOptions: SyncNetworkOptions = SyncNetworkOptions(),
+    // 测试注入口：HTTP 回环（MockWebServer）需显式传入默认规格客户端；生产恒为 null（走 TLS-only 工厂）
+    client: OkHttpClient? = null
 ) : SyncProvider {
+
+    // Wave 12 传输加固：默认经 TLS-only 工厂构建（排除 CLEARTEXT + 显式超时 + 可选证书锁定），
+    // 仅 HTTP 回环测试需显式注入明文客户端
+    private val httpClient: OkHttpClient = client ?: SyncHttpClientFactory.createSyncClient(networkOptions)
 
     // L4 整改：Basic 认证头在构造时立即计算——调用方（SyncCoordinator）在构造返回后
     // 会立即显式清零传入的密码 CharArray，此前的 by lazy 首请求延迟求值会在清零后
@@ -68,7 +80,7 @@ class WebDavSyncProvider(
                 .header("Depth", "0")
                 .build()
 
-            client.newCall(request).execute().use { response ->
+            httpClient.newCall(request).execute().use { response ->
                 when {
                     response.isSuccessful || response.code == 207 -> Unit
                     response.code == 401 || response.code == 403 ->
@@ -89,7 +101,7 @@ class WebDavSyncProvider(
                 .header("Depth", "0")
                 .build()
 
-            client.newCall(request).execute().use { response ->
+            httpClient.newCall(request).execute().use { response ->
                 when {
                     response.code == 404 -> throw SyncException.FileNotFound("远程文件不存在: $remotePath")
                     response.code == 401 || response.code == 403 ->
@@ -135,7 +147,7 @@ class WebDavSyncProvider(
                 .header("Authorization", authHeader)
                 .build()
 
-            client.newCall(request).execute().use { response ->
+            httpClient.newCall(request).execute().use { response ->
                 when {
                     response.code == 404 -> throw SyncException.FileNotFound("远程文件不存在: $remotePath")
                     response.code == 401 || response.code == 403 ->
@@ -164,7 +176,7 @@ class WebDavSyncProvider(
                 requestBuilder.header("If-Match", expectedEtag.formatHeaderEtag())
             }
 
-            client.newCall(requestBuilder.build()).execute().use { response ->
+            httpClient.newCall(requestBuilder.build()).execute().use { response ->
                 when {
                     response.code == 412 -> {
                         val currentMeta = getMetadata(remotePath).getOrNull()
@@ -238,7 +250,7 @@ class WebDavSyncProvider(
 
             for (attempt in 0..1) {
                 try {
-                    val resp = client.newCall(createMoveRequest()).execute()
+                    val resp = httpClient.newCall(createMoveRequest()).execute()
                     if (resp.code == 412) {
                         val currentMeta = getMetadata(remotePath).getOrNull()
                         conflictError = SyncException.ConflictError(
@@ -286,7 +298,7 @@ class WebDavSyncProvider(
                 .header("Authorization", authHeader)
                 .build()
 
-            client.newCall(request).execute().use { response ->
+            httpClient.newCall(request).execute().use { response ->
                 if (!response.isSuccessful && response.code != 404) {
                     throw SyncException.ProtocolError(response.code, response.message)
                 }

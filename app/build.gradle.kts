@@ -71,12 +71,15 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-process:2.9.0")
     implementation("androidx.activity:activity-compose:1.10.0")
     implementation("androidx.navigation:navigation-compose:2.9.0")
-    implementation("androidx.biometric:biometric:1.2.0-alpha05")
+    // Wave 12 依赖治理：biometric 稳定渠道最新为 1.1.0（1.2.x/1.4.x 均为 alpha，
+    // 官方发布页 2026-04 确认；Authenticators/setAllowedAuthenticators/CryptoObject 均已覆盖），
+    // 消除安全关键组件的 alpha 依赖；credentials 升至稳定版 1.6.0（1.5.0 bugfix：isConditional 传播修复）
+    implementation("androidx.biometric:biometric:1.1.0")
 
     implementation("com.google.dagger:hilt-android:2.60.1")
     kapt("com.google.dagger:hilt-compiler:2.60.1")
     implementation("androidx.hilt:hilt-navigation-compose:1.3.0")
-    implementation("androidx.credentials:credentials:1.5.0")
+    implementation("androidx.credentials:credentials:1.6.0")
     // TOTP 二维码扫描（断点5 整改：扫码按钮真实化）
     implementation("com.journeyapps:zxing-android-embedded:4.3.0")
 

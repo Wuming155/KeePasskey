@@ -41,7 +41,7 @@ class UnlockViewModelTest {
     }
 
     private fun TestScope.createViewModel(): UnlockViewModel {
-        val viewModel = UnlockViewModel(FakeVaultRepository(), FakeSettingsRepository(), null, null, null, com.keepasskey.app.data.logger.DebugLogBuffer())
+        val viewModel = UnlockViewModel(FakeVaultRepository(), FakeSettingsRepository(), null, null, com.keepasskey.app.data.logger.DebugLogBuffer())
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
             viewModel.uiState.collect {}
         }

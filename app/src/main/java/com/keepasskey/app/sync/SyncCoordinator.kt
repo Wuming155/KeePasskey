@@ -23,6 +23,7 @@ import com.keepasskey.sync.merge.ConflictedEntryPair
 import com.keepasskey.sync.merge.KdbxDatabaseLite
 import com.keepasskey.sync.merge.KdbxMerger
 import com.keepasskey.sync.model.cleanEtag
+import com.keepasskey.sync.network.SyncNetworkOptions
 import com.keepasskey.sync.provider.SyncProvider
 import com.keepasskey.sync.s3.S3SyncProvider
 import com.keepasskey.sync.webdav.WebDavSyncProvider
@@ -422,6 +423,9 @@ open class SyncCoordinator @Inject constructor(
 
     private companion object {
         const val TAG = "SyncCoordinator"
+
+        /** 证书锁定 pin 的 scheme 前缀（OkHttp CertificatePinner 约定格式） */
+        const val PIN_SCHEME_PREFIX = "sha256/"
     }
 
     private suspend fun handleConflictMerge(
@@ -535,7 +539,10 @@ open class SyncCoordinator @Inject constructor(
                     WebDavSyncProvider(
                         serverUrl = cfg.url,
                         username = cfg.username,
-                        passwordChars = pwdChars
+                        passwordChars = pwdChars,
+                        // Wave 12 传输加固：TLS-only + 显式超时 + 可选证书锁定（用户显式配置时生效），
+                        // 客户端由 sync 模块工厂构建（app 仅传纯数据选项）
+                        networkOptions = buildNetworkOptions(cfg.certPins)
                     )
                 } finally {
                     pwdChars.fill('0')
@@ -550,10 +557,38 @@ open class SyncCoordinator @Inject constructor(
                     region = cfg.region,
                     accessKeyId = cfg.accessKey,
                     secretAccessKey = cfg.secretKey,
-                    usePathStyle = cfg.usePathStyle
+                    usePathStyle = cfg.usePathStyle,
+                    networkOptions = SyncNetworkOptions()
                 )
             }
         }
+    }
+
+    /**
+     * 解析用户配置的证书锁定条目（每行一条 `host=sha256/Base64`）。
+     * 非法行（缺分隔符 / pin 前缀不符 / 空 host）一律忽略并留痕，绝不静默放宽为「锁定全部」。
+     */
+    private fun buildNetworkOptions(certPinsRaw: String): SyncNetworkOptions {
+        if (certPinsRaw.isBlank()) return SyncNetworkOptions()
+        val pins = mutableMapOf<String, MutableList<String>>()
+        certPinsRaw.lineSequence()
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .forEach { line ->
+                val separatorIndex = line.indexOf('=')
+                if (separatorIndex <= 0) {
+                    debugLog.warn(TAG, "证书锁定条目格式非法已忽略（缺少 host= 分隔符）")
+                    return@forEach
+                }
+                val host = line.substring(0, separatorIndex).trim().lowercase()
+                val pin = line.substring(separatorIndex + 1).trim()
+                if (host.isEmpty() || !pin.startsWith(PIN_SCHEME_PREFIX)) {
+                    debugLog.warn(TAG, "证书锁定条目格式非法已忽略（host 为空或 pin 前缀不符）")
+                    return@forEach
+                }
+                pins.getOrPut(host) { mutableListOf() }.add(pin)
+            }
+        return SyncNetworkOptions(pinnedHosts = pins)
     }
 
     private fun resolveRemotePath(defaultFileName: String): String {

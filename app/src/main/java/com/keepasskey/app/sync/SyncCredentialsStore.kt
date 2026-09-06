@@ -18,7 +18,9 @@ data class WebDavCredentials(
     val url: String,
     val username: String,
     val password: String,
-    val remotePath: String
+    val remotePath: String,
+    /** Wave 12 可选证书锁定：每行一条 `host=sha256/Base64`（SPKI 公钥哈希），空串=不锁定 */
+    val certPins: String = ""
 )
 
 /**
@@ -71,12 +73,14 @@ class SyncCredentialsStore @Inject constructor(
         url: String,
         username: String,
         password: String,
-        remotePath: String
+        remotePath: String,
+        certPins: String = ""
     ) {
         val editor = prefs.edit()
         editor.putString(KEY_WEBDAV_URL, url)
         editor.putString(KEY_WEBDAV_USERNAME, username)
         editor.putString(KEY_WEBDAV_REMOTE_PATH, remotePath)
+        editor.putString(KEY_WEBDAV_CERT_PINS, certPins)
 
         if (password.isNotEmpty()) {
             val encrypted = encrypt(password)
@@ -99,13 +103,22 @@ class SyncCredentialsStore @Inject constructor(
         val iv = prefs.getString(KEY_WEBDAV_PASSWORD_IV, null)
         val cipher = prefs.getString(KEY_WEBDAV_PASSWORD_CIPHER, null)
         val password = decrypt(iv, cipher) ?: ""
+        val certPins = prefs.getString(KEY_WEBDAV_CERT_PINS, "") ?: ""
 
         return WebDavCredentials(
             url = url,
             username = username,
             password = password,
-            remotePath = remotePath
+            remotePath = remotePath,
+            certPins = certPins
         )
+    }
+
+    /**
+     * 单独保存 WebDAV 证书锁定条目（Wave 12：不随凭据表单提交，独立设置项即时生效于下次同步）
+     */
+    fun saveWebDavCertPins(pins: String) {
+        prefs.edit().putString(KEY_WEBDAV_CERT_PINS, pins).apply()
     }
 
     fun saveS3Config(
@@ -244,6 +257,7 @@ class SyncCredentialsStore @Inject constructor(
         private const val KEY_WEBDAV_REMOTE_PATH = "webdav_remote_path"
         private const val KEY_WEBDAV_PASSWORD_IV = "webdav_password_iv"
         private const val KEY_WEBDAV_PASSWORD_CIPHER = "webdav_password_cipher"
+        private const val KEY_WEBDAV_CERT_PINS = "webdav_cert_pins"
 
         private const val KEY_S3_ENDPOINT = "s3_endpoint"
         private const val KEY_S3_BUCKET = "s3_bucket"

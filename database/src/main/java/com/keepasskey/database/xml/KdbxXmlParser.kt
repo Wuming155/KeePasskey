@@ -58,6 +58,11 @@ class KdbxXmlParser(
             }
 
             override fun startElement(uri: String?, localName: String?, qName: String, attributes: Attributes) {
+                // Wave 12 解析炸弹防线：XML 嵌套深度封顶（合法库远低于该界；深度受限同时
+                // 约束分组树嵌套与 IgnoredNode 未知子树的栈消耗）
+                if (nodeStack.size >= MAX_XML_DEPTH) {
+                    throw KdbxCorruptFileException("KDBX XML 嵌套深度超出上限（$MAX_XML_DEPTH），疑似解析炸弹")
+                }
                 if (nodeStack.isEmpty()) {
                     if (qName != KdbxConstants.Xml.ROOT) {
                         throw KdbxCorruptFileException("KDBX XML 根节点必须是 <${KdbxConstants.Xml.ROOT}>，实际为 <$qName>")
@@ -99,6 +104,15 @@ class KdbxXmlParser(
 
     fun parse(inputStream: InputStream): ParseResult {
         return parse(inputStream, emptyList())
+    }
+
+    companion object {
+        /**
+         * XML 嵌套深度安全上限（Wave 12 解析炸弹防线）。
+         * 合法 KDBX 文档最深路径（KeePassFile>Root>Group*…>Entry>History>Entry>String>Value）
+         * 约在 40 层以内，64 为宽松上限；恶意深嵌套在内存耗尽前即被拒绝。
+         */
+        const val MAX_XML_DEPTH = 64
     }
 }
 

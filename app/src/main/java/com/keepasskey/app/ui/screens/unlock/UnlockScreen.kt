@@ -26,8 +26,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AttachFile
@@ -38,7 +36,6 @@ import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.SwapHoriz
-import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
@@ -47,9 +44,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -64,10 +58,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
@@ -79,7 +69,6 @@ import com.keepasskey.app.ui.components.ThemeToggleCapsule
 import com.keepasskey.app.ui.theme.AppThemeMode
 import com.keepasskey.app.ui.theme.CapsuleShape
 import com.keepasskey.app.ui.components.SecurePasswordField
-import com.keepasskey.app.ui.theme.MonospacePasswordStyle
 
 /**
  * 有状态解锁页面（Route），负责收集 ViewModel 状态与事件转发
@@ -154,14 +143,12 @@ fun UnlockScreen(
         currentTheme = currentTheme,
         onThemeToggle = onThemeToggle,
         onPasswordChange = viewModel::onPasswordChangeSecure,
-        onQuickUnlockPinChange = viewModel::onQuickUnlockPinChange,
         onTogglePasswordVisibility = viewModel::onTogglePasswordVisibility,
         onSelectKeyFile = { keyFilePickerLauncher.launch(arrayOf("*/*")) },
         onClearKeyFile = viewModel::clearKeyFile,
         onToggleReadOnly = viewModel::onToggleReadOnly,
         onSwitchMode = viewModel::switchUnlockMode,
         onUnlock = { viewModel.unlock(activity) },
-        onQuickUnlock = viewModel::unlockWithQuickUnlock,
         onBiometricUnlock = { viewModel.unlockWithBiometric(activity) },
         onNavigateToDatabasePicker = onNavigateToDatabasePicker,
         modifier = modifier
@@ -191,14 +178,12 @@ fun UnlockContent(
     currentTheme: AppThemeMode,
     onThemeToggle: () -> Unit,
     onPasswordChange: (CharArray) -> Unit,
-    onQuickUnlockPinChange: (String) -> Unit,
     onTogglePasswordVisibility: () -> Unit,
     onSelectKeyFile: () -> Unit,
     onClearKeyFile: () -> Unit,
     onToggleReadOnly: () -> Unit,
     onSwitchMode: (UnlockMode) -> Unit,
     onUnlock: () -> Unit,
-    onQuickUnlock: () -> Unit,
     onBiometricUnlock: () -> Unit,
     onNavigateToDatabasePicker: () -> Unit,
     modifier: Modifier = Modifier
@@ -357,115 +342,35 @@ fun UnlockContent(
                             }
                             Spacer(modifier = Modifier.height(4.dp))
                         }
-                        if (uiState.quickUnlockRemainingMinutes > 0) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.Timer, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(14.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(
-                                    text = stringResource(R.string.unlock_quick_cache_validity, uiState.quickUnlockRemainingMinutes),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-
                         Spacer(modifier = Modifier.height(16.dp))
 
-                        // 已开启生物认证：优先使用生物识别解锁
-                        if (uiState.isBiometricEnabled) {
-                            Button(
-                                onClick = onBiometricUnlock,
-                                enabled = !uiState.isLoading,
-                                shape = CapsuleShape,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(50.dp)
-                            ) {
-                                if (uiState.isLoading) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(22.dp),
-                                        color = MaterialTheme.colorScheme.onPrimary,
-                                        strokeWidth = 2.5.dp
-                                    )
-                                } else {
-                                    Icon(
-                                        imageVector = Icons.Default.Fingerprint,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(
-                                        text = stringResource(R.string.unlock_biometric_primary_btn),
-                                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-                                    )
-                                }
-                            }
-
-                            Spacer(modifier = Modifier.height(12.dp))
-                        }
-
-                        // PIN / 短密码快捷输入
-                        OutlinedTextField(
-                            value = uiState.quickUnlockPin,
-                            onValueChange = onQuickUnlockPinChange,
-                            label = { Text(stringResource(R.string.unlock_quick_pin_label)) },
-                            placeholder = { Text(stringResource(R.string.unlock_quick_pin_placeholder)) },
-                            singleLine = true,
-                            visualTransformation = PasswordVisualTransformation('●'),
-                            keyboardOptions = KeyboardOptions(
-                                keyboardType = KeyboardType.NumberPassword,
-                                imeAction = ImeAction.Done
-                            ),
-                            keyboardActions = KeyboardActions(onDone = { onQuickUnlock() }),
-                            textStyle = MonospacePasswordStyle.copy(fontSize = 18.sp, color = MaterialTheme.colorScheme.onSurface),
-                            shape = MaterialTheme.shapes.medium,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-
-                        Spacer(modifier = Modifier.height(12.dp))
-
-                        if (uiState.isBiometricEnabled) {
-                            // 生物认证开启时快速解锁 PIN 退居次要方式
-                            OutlinedButton(
-                                onClick = onQuickUnlock,
-                                enabled = !uiState.isLoading && uiState.quickUnlockPin.isNotBlank(),
-                                shape = CapsuleShape,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(46.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.FlashOn,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary
+                        // Wave 12 统一快速解锁：强生物识别或设备锁屏凭据（PIN/图案/密码）经硬件密钥解封——
+                        // 认证入口由系统 BiometricPrompt 承载，不再提供自研 PIN 输入
+                        Button(
+                            onClick = onBiometricUnlock,
+                            enabled = !uiState.isLoading,
+                            shape = CapsuleShape,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(50.dp)
+                        ) {
+                            if (uiState.isLoading) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(22.dp),
+                                    color = MaterialTheme.colorScheme.onPrimary,
+                                    strokeWidth = 2.5.dp
                                 )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(stringResource(R.string.unlock_quick_btn))
-                            }
-                        } else {
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                Button(
-                                    onClick = onQuickUnlock,
-                                    enabled = !uiState.isLoading && uiState.quickUnlockPin.isNotBlank(),
-                                    shape = CapsuleShape,
-                                    modifier = Modifier.weight(1f).height(46.dp)
-                                ) {
-                                    if (uiState.isLoading) {
-                                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
-                                    } else {
-                                        Text(stringResource(R.string.unlock_quick_btn), fontWeight = FontWeight.Bold)
-                                    }
-                                }
-
-                                OutlinedButton(
-                                    onClick = onBiometricUnlock,
-                                    shape = CapsuleShape,
-                                    modifier = Modifier.height(46.dp)
-                                ) {
-                                    Icon(Icons.Default.Fingerprint, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(stringResource(R.string.unlock_biometric_btn))
-                                }
+                            } else {
+                                Icon(
+                                    imageVector = Icons.Default.Fingerprint,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = stringResource(R.string.unlock_biometric_primary_btn),
+                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                                )
                             }
                         }
 

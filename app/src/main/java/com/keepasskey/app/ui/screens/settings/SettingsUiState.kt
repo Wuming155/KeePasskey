@@ -81,6 +81,8 @@ data class SettingsUiState(
     val webdavPassword: String = "",
     val webdavPasswordMasked: String = "••••••••••••",
     val webdavRemotePath: String = "/keepasskey.kdbx",
+    // Wave 12：WebDAV 证书锁定（可选，每行一条 host=sha256/...，空串=不锁定）
+    val webdavCertPins: String = "",
     // S3 兼容协议专属字段（M2 整改：默认值一律空串）
     val s3Endpoint: String = "",
     val s3Bucket: String = "",
@@ -107,8 +109,8 @@ data class SettingsUiState(
     val checkRemoteChangesBeforeSave: Boolean = true, // KP2A: 保存前检查远端修改
     val conflictResolution: ConflictResolution = ConflictResolution.AUTO_MERGE, // KP2A: 冲突解决策略
     val useFileTransactions: Boolean = true, // KP2A: 原子事务写盘
-    val acceptAllCertificates: Boolean = false, // KP2A: 接受自签名 SSL/TLS 证书
-    val cleartextTrafficPermitted: Boolean = false, // KP2A: 允许 HTTP 明文流量
+    // Wave 12 传输加固：「允许明文流量」与「信任自签名证书」假开关已整体移除——
+    // 同步客户端恒定 TLS-only（SyncHttpClientFactory），二者均属无消费者的空实现且语义不安全
     val webdavChunkedUpload: Boolean = false, // KP2A: WebDAV 分块传输
     val webdavChunkSizeMb: Int = 10, // KP2A: 分块大小
     val preloadDatabaseEnabled: Boolean = true, // KP2A: 预加载数据库加速解锁
