@@ -38,12 +38,12 @@ class S3SyncProvider(
     private val accessKeyId: String,
     private val secretAccessKey: String,
     /**
-     * 寻址风格：false = virtual-host 风格（`bucket.endpoint`，AWS S3/R2 默认）；
-     * true = path 风格（`endpoint/bucket`，自建 MinIO / 反向代理 / IP 直连场景必须开启）。
+     * 寻址风格：false = virtual-host 风格（`bucket.endpoint`，AWS S3 等默认）；
+     * true = path 风格（`endpoint/bucket`，Cloudflare R2、IP 直连端点等商业云场景开启）。
      */
     private val usePathStyle: Boolean = false,
     /**
-     * Wave 12 传输加固网络选项（TLS-only 恒定 + 显式超时 + 可选证书锁定）。
+     * Wave 14 传输安全网络选项（TLS-only 恒定 + 显式超时；证书固定已移除，走系统默认 CA 链）。
      * 由 app 层组装传入（纯数据契约，维持 sync 不依赖 app 的单向依赖）。
      */
     private val networkOptions: SyncNetworkOptions = SyncNetworkOptions(),
@@ -51,9 +51,24 @@ class S3SyncProvider(
     client: OkHttpClient? = null
 ) : SyncProvider {
 
-    // Wave 12 传输加固：默认经 TLS-only 工厂构建（排除 CLEARTEXT + 显式超时 + 可选证书锁定），
+    // Wave 12/14 传输安全：默认经 TLS-only 工厂构建（排除 CLEARTEXT + 显式超时 + 系统 CA 链验证），
     // 仅 HTTP 回环测试需显式注入明文客户端
     private val httpClient: OkHttpClient = client ?: SyncHttpClientFactory.createSyncClient(networkOptions)
+
+    init {
+        // Wave 14 全站强制 HTTPS（生产路径 fail-fast）：显式 http:// 端点在构造期即拒绝并抛
+        // 类型化 InvalidEndpointError；无 scheme 输入由 buildUrl 自动补 https://；
+        // 仅测试回环（显式注入 HTTP 客户端）豁免
+        if (client == null) {
+            val trimmedEndpoint = endpoint.trim()
+            if (trimmedEndpoint.contains("://") && !trimmedEndpoint.startsWith("https://", ignoreCase = true)) {
+                throw SyncException.InvalidEndpointError(
+                    "S3 端点必须使用 HTTPS（当前协议为 \"${trimmedEndpoint.substringBefore("://")}://\"）。" +
+                        "明文 HTTP 已被禁止以保护凭据与密码库传输，请填写 https:// 开头的商业云服务地址"
+                )
+            }
+        }
+    }
 
     private fun encodePath(path: String): String {
         return path.split('/').joinToString("/") { segment ->

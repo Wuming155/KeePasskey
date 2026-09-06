@@ -32,6 +32,9 @@ class SyncCredentialsStoreTest {
                 val def = args[1] as? Boolean ?: false
                 (memoryStorage[key] as? Boolean) ?: def
             }
+            "contains" -> {
+                memoryStorage.containsKey(args[0] as String)
+            }
             "edit" -> fakeEditor
             else -> null
         }
@@ -134,5 +137,18 @@ class SyncCredentialsStoreTest {
         assertNull(store.loadWebDavConfig())
         assertNull(store.loadS3Config())
         assertEquals(CloudSyncProvider.WEBDAV, store.loadProvider())
+    }
+
+    @Test
+    fun `加载时物理清除 Wave 14 前遗留的证书锁定键`() {
+        // 模拟旧版本残留的证书锁定配置（Wave 14 已整体移除该功能）
+        memoryStorage["webdav_cert_pins"] = "dav.example.com=sha256/AAAA="
+        memoryStorage["webdav_url"] = "https://dav.example.com/remote.php/webdav"
+
+        val loaded = store.loadWebDavConfig()
+
+        // 遗留键必须在加载期一次性物理清除，杜绝残留配置继续留存
+        assertNotNull(loaded)
+        assertNull(memoryStorage["webdav_cert_pins"])
     }
 }

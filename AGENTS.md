@@ -36,6 +36,7 @@ KeePasskey 是一款使用原生 Kotlin 开发的现代化 Android 密码管理�
 |------|------|----------|
 | `.codebuddy/rules/engineering-rules.md` | 工程规则：单一职责与巨型类阈值、魔法数字、依赖倒置与 Hilt 注入、Result 错误处理、敏感数据、Compose 规范、**原子写盘、协程调度约束、Credential Provider 隔离、防御性安全（FLAG_SECURE / 剪贴板 / 混淆）** | **写 / 改任何代码前** |
 | `DELIVERY_PLAN.md` | **完整项目交付规划**：7 大阶段任务、阶段交付物清单、验收门禁（DoD）与全渠道发布标准 | **规划任务、核对阶段与交付时** |
+| `docs/HEALTH_CHECK_ROADMAP.md` | **技术体检分批整改路线图**（批次 A 传输安全已完成；批次 B-F：kapt→KSP、DataStore、版本目录、Baseline Profiles、M3 Expressive/minSdk，含各批次范围/风险/验收标准） | **规划后续整改批次、核对官方依据时** |
 | `.codebuddy/skills/architecture.md` | 5 模块职责与依赖规则、7 条关键架构决策（加密分离、kdbx 兼容、DatabaseSession、同步模型、passkey 路线、UI 优先），另见 `ARCHITECTURE.md` | 跨模块改动、新增功能落位前 |
 | `.codebuddy/skills/reference-projects.md` | 参考项目地图：各功能应参照哪个项目的哪些文件 | 实现 database / crypto / sync / passkey 功能时 |
 | `.codebuddy/memory/project-status.md` | 版本配套表、项目现状、决策日志、待办 | 升级依赖、了解进度与历史决策时 |
@@ -47,10 +48,10 @@ KeePasskey 是一款使用原生 Kotlin 开发的现代化 Android 密码管理�
 - `.\gradlew.bat assembleDebug` — 编译全部模块
 - `.\gradlew.bat :app:compileDebugKotlin` — 仅快速检查 Kotlin 编译
 - `.\gradlew.bat lint` — Android Lint
-- `.\gradlew.bat test` — 单元测试（全模块 `src/test` 已就绪，`testDebugUnitTest` 可单模块执行；当前 338 个测试全绿）
+- `.\gradlew.bat test` — 单元测试（全模块 `src/test` 已就绪，`testDebugUnitTest` 可单模块执行；当前 339 个测试全绿）
 - 版本升级需整体配套：AGP ↔ Gradle ↔ Kotlin ↔ Compose BOM（Compose BOM 2026.06.00+ 要求 compileSdk 37，当前用 2026.06.01 对齐 compileSdk 36）
 
-**当前阶段状态**：**🛡️ 官方文档对照安全审计整改（Wave 13）交付完毕——Wave 1-12 全量整改 + Wave 13（16 项安全发现全量整改：QuickUnlock 设备锁屏凭据绑定、传输 TLS-only 加固与假开关下线、rp.id 创建绑定、KDBX 解析资源防线、依赖稳定渠道迁移；审查存档见 `docs/SECURITY_REVIEW_2026-09.md`）。**
+**当前阶段状态**：**🔐 Wave 14 传输安全整改（技术体检批次 A）交付完毕——依据 2026-09-06 google-developer-knowledge（developer.android.com 官方语料）技术体检，确立「仅支持正规公网商业云服务（不支持内网 NAS/私有 WebDAV/本地 S3）」新前提并完成：①证书固定全量移除（sync 契约/工厂、app 解析器/存储键/UI 链路/中英字符串，证书验证完全依赖系统默认 CA 链，避免云厂商证书轮换阻断，遗留 `webdav_cert_pins` 键加载期一次性物理清除）；②平台级 Network Security Config 全局禁明文 + 仅系统 CA 信任锚（`network_security_config.xml` 零豁免，与 OkHttp TLS-only 构成双层防线）；③WebDAV/S3 端点 https-only 保存期归一化校验 + Provider 构造期 fail-fast（类型化 `SyncException.InvalidEndpointError`，豁免 MockWebServer 回环测试路径）；④S3 Path-Style 保留（Cloudflare R2 等商业云适用）仅修「自建」文案。全量体检后续批次路线图见 `docs/HEALTH_CHECK_ROADMAP.md`（批次 B kapt→KSP、C DataStore、D 版本目录、E Baseline Profiles、F M3 Expressive/minSdk）。Wave 13 及此前历史见下文。**
 原「7 阶段全量验收」表述经 2026-09-05 全量代码审计修正：对照参考项目发现 22 项问题（P0×6 / P1×7 / P2×9，含系统服务空壳响应、模拟延时同步、TOTP 假码、cipherKey 非官方派生等），已按 4 个 Wave 修复并逐波验收提交：
 
 - **Wave 1（git ed601da）KDBX 官方兼容 + crypto 底座**：cipherKey 派生修正为官方 SHA-512 截断标准（读取侧旧派生自动回退、保存自动迁移）；XML Times 修正为 .NET Ticks 编码；XML 全字段往返（Meta/AutoType/Binary-Ref/CustomData）；InnerHeader 二进制池与附件去重；类型化异常体系；CBOR/COSE 确定性编码器；Passkey 三算法签名（ES256/Ed25519/RS256 + RFC 6979）；KdfBenchmark 设备自适应基准。
@@ -99,6 +100,8 @@ KeePasskey 是一款使用原生 Kotlin 开发的现代化 Android 密码管理�
 ⑤ **KDBX 解析资源防线**：XML 文本单节点 8 Mi 字符封顶、SAX 嵌套深度 64 层封顶、内层 Header 二进制池条目 ≤1024 / 总量 ≤256 MiB 双封顶、GZip 解压输出 ≤512 MiB 护栏（`SizeBoundedInputStream`），全部 O(1) 常量检查无热路径回归；
 ⑥ **敏感信息卫生与依赖治理**：GCM IV 唯一性回归锁（同密钥连续 16 次 init 全新 IV）；Autofill onSaveRequest 密码 CharArray finally 清零；`androidx.biometric` 1.2.0-alpha05 → **1.1.0**（官方稳定渠道最新，1.2.x/1.4.x 均为 alpha）、`androidx.credentials` 1.5.0 → **1.6.0**；EncryptedSharedPreferences 经查官方已弃用（建议直连 AndroidKeyStore），不引入，维持直连 Keystore 方案。
 
-**测试基线**：全工程 338 个单元测试全绿（app 80 / core 21 / crypto 37 / database 146 / sync 54；经 2026-09-05 全量代码审核与 Wave 13 安全整改扩充，较 315 基线 +23）；`assembleDebug` 与 `assembleRelease`（R8 混淆）构建闭环通过。
+**Wave 14（传输安全整改——技术体检批次 A）**：依据 google-developer-knowledge 官方语料体检报告，确立「仅支持正规公网商业云服务」前提——①**证书固定全量移除**（官方 security-ssl 明示 pinning 不推荐且阻碍云厂商证书轮换）：删除 `SyncNetworkOptions.pinnedHosts`、`SyncHttpClientFactory` CertificatePinner 组装、`SyncCoordinator.buildNetworkOptions` 解析器与 `PIN_SCHEME_PREFIX`、`SyncCredentialsStore` certPins 字段/方法/存储键写入、Settings 全链路状态与 UI 区块及中英字符串，`loadWebDavConfig` 加载期一次性物理清除遗留 `webdav_cert_pins` 键；证书验证完全依赖系统默认 CA 链（无自定义 TrustManager）；②**全站强制 HTTPS 双层防线**：新增平台级 `network_security_config.xml`（`cleartextTrafficPermitted="false"` + 仅系统 CA 信任锚，零 domain-config 豁免）挂载 Manifest，与 OkHttp TLS-only ConnectionSpec 叠加；③**https-only fail-fast**：`updateWebDavConfig/updateS3Config` 保存期归一化（无 scheme 补 https://，显式 http:// 拒绝并经新增 `sync_error_https_required` 反馈），两 Provider 构造期抛新增类型化 `SyncException.InvalidEndpointError`（豁免显式注入 client 的 MockWebServer 回环测试路径），`runSyncCycle` 上浮为同步失败反馈；④S3 Path-Style 保留（Cloudflare R2 等商业云适用）仅修正「自建」中英文案；`DELIVERY_PLAN.md` 阶段 5「自签名信任 + 局域网明文豁免」旧设计作废改写；全量体检后续批次路线图落为 `docs/HEALTH_CHECK_ROADMAP.md`。
+
+**测试基线**：全工程 339 个单元测试全绿（app 81 / core 21 / crypto 37 / database 146 / sync 54；Wave 14 新增遗留键清除、http:// 构造期拒绝、https/无 scheme 放行、系统 CA 链无 pin 装配断言，工厂测试 2 个 pin 装配用例随功能移除删除）；`assembleDebug` 与 `assembleRelease`（R8 混淆）构建闭环通过。
 
 **已知限界（如实记录，详见 `REMEDIATION_PLAN.md` 执行日志）**：KDBX 解析已流式化，但对象树（KdbxGroup/KdbxEntry）仍整体驻留内存（增量加载/进度 Flow 远期）；S3 条件写依赖服务端支持——AWS S3 原子生效，少数未实现 If-Match 覆写的兼容存储降级为 HEAD 预检+无条件 PUT（KDoc 注明），WebDAV uploadAtomic 的 `If` 头 tagged list 预条件在个别极简 DAV 服务端可能被忽略（退化为普通事务写，不影响正确性）；KDBX 受保护字段以字符串承载为格式层边界——Passkey 私钥编码 String 存活期与 ProtectedString 一致，生成/签名路径的中间字节量均显式清零；`ProtectedString` 驻留加密（Wave 11）为纵深防御层——对抗堆扫描/崩溃转储中的明文暴露，取得进程密钥或具备任意代码执行能力的攻击者仍可在读取瞬间截获明文（KeePassDX 同级取舍）；Compose 框架层 TextField 仍以 String 承载输入（框架 API 限制，已收敛至 `SecurePasswordField` 单点、最短生命周期；Unlock 与 DatabasePicker 创建向导已接入该组件，EntryEdit/Settings 的密码框尚未接入）；Wave 13 起 QuickUnlock 自研 PIN 体系已整体移除、改为设备锁屏凭据绑定密钥（安全门槛为系统锁屏凭据 + 安全硬件强制认证，root 设备边界与 KDoc 声明一致），存量 PIN 登记经 fail-safe 迁移自动失效（用户以主密码完整解锁一次后自动重新封印）；浏览器特权白名单内置 Chrome 稳定版签名指纹，浏览器证书轮换或白名单外浏览器将 fail-closed 降级为 apk-key-hash 路径（安全不放松，功能降级），需随浏览器版本更新指纹；自定义图标（customIcons 模型/序列化层完好）尚无上传/选择 UI、KeePass 字段引用（{REF:...}）引擎未实现，均列为下一轮特性计划；外部库经导入复制进内部存储后原地编辑（不写回外部原文件）为当前设计取舍。

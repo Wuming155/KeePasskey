@@ -217,7 +217,8 @@
     <string name="vault_sync_saved_locally">Could not save to remote; your changes are safely kept in the local cache</string>
     <string name="vault_sync_remote_updated">Remote updates detected; local database refreshed</string>
     <string name="sync_s3_path_style_title">Path-Style Addressing</string>
-    <string name="sync_s3_path_style_sub">Enable for self-hosted MinIO, reverse proxies, or IP endpoints; keep off for AWS/R2</string>
+    <string name="sync_s3_path_style_sub">Enable for commercial-cloud scenarios such as Cloudflare R2 or IP-direct endpoints; keep off for AWS</string>
+    <string name="sync_error_https_required">Save rejected: the %1$s endpoint must use HTTPS (starts with https://). Cleartext HTTP is prohibited to protect credential and vault traffic</string>
     <string name="vault_group_created">Folder "%1$s" created</string>
     <string name="vault_group_renamed">Renamed to "%1$s"</string>
     <string name="vault_group_icon_updated">Folder icon updated</string>

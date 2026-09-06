@@ -217,7 +217,7 @@
     <string name="vault_sync_saved_locally">云端保存失败，本次修改已安全保留在本地缓存</string>
     <string name="vault_sync_remote_updated">检测到云端已有更新，本地数据库已刷新</string>
     <string name="sync_s3_path_style_title">Path 寻址风格 (Path-Style)</string>
-    <string name="sync_s3_path_style_sub">自建 MinIO、反向代理或 IP 直连端点请开启；AWS/R2 等保持关闭</string>
+    <string name="sync_s3_path_style_sub">Cloudflare R2、IP 直连端点等商业云场景请开启；AWS 等保持关闭</string>
     <string name="vault_group_created">已创建文件夹「%1$s」</string>
     <string name="vault_group_renamed">已重命名为「%1$s」</string>
     <string name="vault_group_icon_updated">已更新文件夹图标</string>
@@ -559,6 +559,7 @@
     <string name="vault_op_failed">操作失败：%1$s</string>
     <string name="sync_feedback_offline">当前处于离线模式或网络不可达，已保留本地修改</string>
     <string name="sync_feedback_error">同步失败：%1$s</string>
+    <string name="sync_error_https_required">拒绝保存：%1$s 端点必须使用 HTTPS（https:// 开头）。明文 HTTP 已被禁止，以保护凭据与密码库传输安全</string>
     <string name="sync_section_offline">离线与后台同步</string>
     <string name="sync_offline_cache_title">离线缓存</string>
     <string name="sync_offline_cache_sub">断网时继续读写本地缓存，联网后自动同步</string>
@@ -596,10 +597,6 @@
     <string name="sync_conflict_keep_local">以本地为准</string>
     <string name="sync_conflict_keep_local_desc">冲突时保留本地版本，云端修改将被覆盖</string>
     <string name="sync_section_network">网络安全</string>
-    <string name="sync_webdav_cert_pins_label">证书锁定（可选，仅 WebDAV）</string>
-    <string name="sync_webdav_cert_pins_hint">dav.example.com=sha256/Base64…</string>
-    <string name="sync_webdav_cert_pins_sub">每行一条「主机=sha256/公钥哈希」，防御 CA 层中间人；留空则不锁定（避免阻碍服务器证书轮换）</string>
-    <string name="sync_webdav_cert_pins_save">保存证书锁定</string>
     <string name="sync_chunked_title">分块传输</string>
     <string name="sync_chunked_sub">大文件分块上传下载，弱网环境更稳定</string>
     <string name="sync_preload_title">预加载远程数据库</string>

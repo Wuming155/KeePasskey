@@ -1,15 +1,14 @@
 package com.keepasskey.sync.network
 
 import okhttp3.ConnectionSpec
-import okhttp3.CertificatePinner
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * SyncHttpClientFactory 传输加固单元测试（Wave 12）：
- * 验证 TLS-only 连接规格（明文整体下线）、显式超时与可选证书锁定装配。
+ * SyncHttpClientFactory 传输安全单元测试（Wave 12 建立，Wave 14 收敛）：
+ * 验证 TLS-only 连接规格（明文整体下线）、显式超时，以及证书固定移除后
+ * 证书验证完全依赖系统默认 CA 链（无任何 pin 装配）。
  */
 class SyncHttpClientFactoryTest {
 
@@ -44,39 +43,11 @@ class SyncHttpClientFactoryTest {
     }
 
     @Test
-    fun `未配置锁定时不挂载证书锁定`() {
+    fun `证书验证依赖系统默认 CA 链 不装配任何证书锁定`() {
         val client = SyncHttpClientFactory.createSyncClient()
 
-        // 官方警示：锁定会限制服务端证书轮换，默认不启用（尊重自建服务器）
+        // Wave 14：证书固定已整体移除——SPKI 锁定会阻碍云厂商常规证书轮换导致连接阻断；
+        // 客户端不挂载任何 pin，证书验证完全走系统默认 CA 链
         assertTrue(client.certificatePinner.pins.isEmpty())
-    }
-
-    @Test
-    fun `配置锁定条目时装配 CertificatePinner`() {
-        val options = SyncNetworkOptions(
-            pinnedHosts = mapOf(
-                "dav.example.com" to listOf("sha256/afwiKY3RxoMmLkuRW1l7QsPZTJPwDS2pdDROQjXw8ig=")
-            )
-        )
-
-        val client = SyncHttpClientFactory.createSyncClient(options)
-
-        assertNotEquals(CertificatePinner.DEFAULT, client.certificatePinner)
-        assertEquals(1, client.certificatePinner.pins.size)
-        assertEquals("dav.example.com", client.certificatePinner.pins.first().pattern)
-    }
-
-    @Test
-    fun `多主机多 pin 全量装配`() {
-        val options = SyncNetworkOptions(
-            pinnedHosts = mapOf(
-                "a.example.com" to listOf("sha256/AAAA=", "sha256/BBBB="),
-                "b.example.com" to listOf("sha256/CCCC=")
-            )
-        )
-
-        val client = SyncHttpClientFactory.createSyncClient(options)
-
-        assertEquals(3, client.certificatePinner.pins.size)
     }
 }

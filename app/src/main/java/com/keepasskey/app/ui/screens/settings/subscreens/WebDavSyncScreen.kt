@@ -24,7 +24,6 @@ import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.Backup
 import androidx.compose.material.icons.filled.Cached
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.CloudQueue
 import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.FolderOpen
@@ -44,15 +43,12 @@ import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuAnchorType
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -120,8 +116,6 @@ fun CloudSyncScreen(
     onCheckRemoteChangesToggle: (Boolean) -> Unit = {},
     onConflictResolutionChange: (ConflictResolution) -> Unit = {},
     onUseFileTransactionsToggle: (Boolean) -> Unit = {},
-    // Wave 12：明文/自签证书假开关已移除（TLS-only 恒定）；新增 WebDAV 证书锁定独立设置项
-    onWebDavCertPinsChange: (String) -> Unit = {},
     onWebdavChunkedUploadToggle: (Boolean) -> Unit = {},
     onPreloadDatabaseEnabledToggle: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier
@@ -728,27 +722,8 @@ fun CloudSyncScreen(
                             .padding(horizontal = 16.dp, vertical = 8.dp),
                         verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        // Wave 12 传输加固：同步客户端恒定 TLS-only（明文与自签证书假开关已移除）；
-                        // 证书锁定为可选防御纵深，由用户显式配置（官方警示：勿强制锁定以免阻碍证书轮换）
-                        var webdavCertPinsDraft by remember(uiState.webdavCertPins) {
-                            mutableStateOf(uiState.webdavCertPins)
-                        }
-                        OutlinedTextField(
-                            value = webdavCertPinsDraft,
-                            onValueChange = { webdavCertPinsDraft = it },
-                            label = { Text(stringResource(R.string.sync_webdav_cert_pins_label)) },
-                            placeholder = { Text(stringResource(R.string.sync_webdav_cert_pins_hint)) },
-                            supportingText = { Text(stringResource(R.string.sync_webdav_cert_pins_sub)) },
-                            minLines = 2,
-                            textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp),
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                        TextButton(
-                            onClick = { onWebDavCertPinsChange(webdavCertPinsDraft) },
-                            modifier = Modifier.align(Alignment.End)
-                        ) {
-                            Text(stringResource(R.string.sync_webdav_cert_pins_save))
-                        }
+                        // Wave 14 传输安全：同步客户端恒定 TLS-only 且证书验证完全依赖系统默认 CA 链
+                        // （证书固定已随 Wave 14 整体移除，明文 HTTP 由平台 Network Security Config 全局禁止）
 
                         SyncSwitchItem(
                             icon = Icons.Default.CloudQueue,
@@ -912,7 +887,6 @@ fun WebDavSyncScreen(
     onCheckRemoteChangesToggle: (Boolean) -> Unit = {},
     onConflictResolutionChange: (ConflictResolution) -> Unit = {},
     onUseFileTransactionsToggle: (Boolean) -> Unit = {},
-    onWebDavCertPinsChange: (String) -> Unit = {},
     onWebdavChunkedUploadToggle: (Boolean) -> Unit = {},
     onPreloadDatabaseEnabledToggle: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier
@@ -936,7 +910,6 @@ fun WebDavSyncScreen(
         onCheckRemoteChangesToggle = onCheckRemoteChangesToggle,
         onConflictResolutionChange = onConflictResolutionChange,
         onUseFileTransactionsToggle = onUseFileTransactionsToggle,
-        onWebDavCertPinsChange = onWebDavCertPinsChange,
         onWebdavChunkedUploadToggle = onWebdavChunkedUploadToggle,
         onPreloadDatabaseEnabledToggle = onPreloadDatabaseEnabledToggle,
         modifier = modifier

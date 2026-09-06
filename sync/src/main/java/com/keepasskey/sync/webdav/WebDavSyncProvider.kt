@@ -24,7 +24,7 @@ import javax.xml.parsers.DocumentBuilderFactory
 
 /**
  * 标准 WebDAV 客户端实现 (RFC 4918)。
- * 支持 Nextcloud, ownCloud, 坚果云, Synology NAS 等主流 WebDAV 服务：
+ * 支持 Nextcloud、ownCloud、坚果云等主流公网商业云 WebDAV 服务（不支持自建内网服务器）：
  * 1. PROPFIND: 基于 DOM 解析 getetag, getcontentlength, getlastmodified, resourcetype;
  * 2. GET: 二进制流下载;
  * 3. PUT: 支持 If-Match: <etag> 乐观并发保护;
@@ -36,7 +36,7 @@ class WebDavSyncProvider(
     private val username: String,
     passwordChars: CharArray,
     /**
-     * Wave 12 传输加固网络选项（TLS-only 恒定 + 显式超时 + 可选证书锁定）。
+     * Wave 14 传输安全网络选项（TLS-only 恒定 + 显式超时；证书固定已移除，走系统默认 CA 链）。
      * 由 app 层组装传入（纯数据契约，维持 sync 不依赖 app 的单向依赖）。
      */
     private val networkOptions: SyncNetworkOptions = SyncNetworkOptions(),
@@ -44,7 +44,7 @@ class WebDavSyncProvider(
     client: OkHttpClient? = null
 ) : SyncProvider {
 
-    // Wave 12 传输加固：默认经 TLS-only 工厂构建（排除 CLEARTEXT + 显式超时 + 可选证书锁定），
+    // Wave 12/14 传输安全：默认经 TLS-only 工厂构建（排除 CLEARTEXT + 显式超时 + 系统 CA 链验证），
     // 仅 HTTP 回环测试需显式注入明文客户端
     private val httpClient: OkHttpClient = client ?: SyncHttpClientFactory.createSyncClient(networkOptions)
 
@@ -54,6 +54,18 @@ class WebDavSyncProvider(
     private val authHeader: String
 
     init {
+        // Wave 14 全站强制 HTTPS（生产路径 fail-fast）：显式 http:// 端点在构造期即拒绝并抛
+        // 类型化 InvalidEndpointError（用户可理解提示），而非在网络层以晦涩错误失败；
+        // 仅测试回环（显式注入 HTTP 客户端）豁免——MockWebServer 回环地址为 http://，不承载生产流量
+        if (client == null) {
+            val trimmedUrl = serverUrl.trim()
+            if (trimmedUrl.contains("://") && !trimmedUrl.startsWith("https://", ignoreCase = true)) {
+                throw SyncException.InvalidEndpointError(
+                    "WebDAV 端点必须使用 HTTPS（当前协议为 \"${trimmedUrl.substringBefore("://")}://\"）。" +
+                        "明文 HTTP 已被禁止以保护凭据与密码库传输，请填写 https:// 开头的商业云服务地址"
+                )
+            }
+        }
         authHeader = Credentials.basic(username, String(passwordChars))
         passwordChars.fill('0')
     }

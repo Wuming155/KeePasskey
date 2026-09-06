@@ -181,7 +181,6 @@ class SettingsViewModel @Inject constructor(
         val webdavUsername: String = "",
         val webdavPassword: String = "",
         val webdavRemotePath: String = "/keepasskey.kdbx",
-        val webdavCertPins: String = "",
         val s3Endpoint: String = "",
         val s3Bucket: String = "",
         val s3Region: String = "auto",
@@ -261,7 +260,6 @@ class SettingsViewModel @Inject constructor(
             // M2 整改：掩码采用固定长度，杜绝通过掩码长度推断真实密码长度
             webdavPasswordMasked = FIXED_PASSWORD_MASK,
             webdavRemotePath = syncState.webdavRemotePath,
-            webdavCertPins = syncState.webdavCertPins,
             s3Endpoint = syncState.s3Endpoint,
             s3Bucket = syncState.s3Bucket,
             s3Region = syncState.s3Region,
@@ -384,7 +382,6 @@ class SettingsViewModel @Inject constructor(
                 webdavUsername = savedWebDav?.username ?: cur.webdavUsername,
                 webdavPassword = savedWebDav?.password ?: cur.webdavPassword,
                 webdavRemotePath = savedWebDav?.remotePath ?: cur.webdavRemotePath,
-                webdavCertPins = savedWebDav?.certPins ?: cur.webdavCertPins,
                 s3Endpoint = savedS3?.endpoint ?: cur.s3Endpoint,
                 s3Bucket = savedS3?.bucket ?: cur.s3Bucket,
                 s3Region = savedS3?.region ?: cur.s3Region,
@@ -469,10 +466,19 @@ class SettingsViewModel @Inject constructor(
         password: String = syncStateFlow.value.webdavPassword,
         remotePath: String
     ) {
-        syncCredentialsStore?.saveWebDavConfig(url, username, password, remotePath)
+        // Wave 14 全站强制 HTTPS：保存时即时校验端点（fail-fast），
+        // 显式 http:// 直接拒绝并反馈；无 scheme 输入自动归一化为 https://
+        val normalizedUrl = normalizeHttpsEndpoint(url)
+        if (normalizedUrl == null) {
+            syncStateFlow.update {
+                it.copy(syncFeedbackMessage = UiMessage(R.string.sync_error_https_required, listOf("WebDAV")))
+            }
+            return
+        }
+        syncCredentialsStore?.saveWebDavConfig(normalizedUrl, username, password, remotePath)
         syncStateFlow.update {
             it.copy(
-                webdavUrl = url,
+                webdavUrl = normalizedUrl,
                 webdavUsername = username,
                 webdavPassword = password,
                 webdavRemotePath = remotePath
@@ -489,10 +495,18 @@ class SettingsViewModel @Inject constructor(
         objectKey: String,
         usePathStyle: Boolean = syncStateFlow.value.s3UsePathStyle
     ) {
-        syncCredentialsStore?.saveS3Config(endpoint, bucket, region, accessKey, secretKey, objectKey, usePathStyle)
+        // Wave 14 全站强制 HTTPS：与 WebDAV 一致的保存期端点校验
+        val normalizedEndpoint = normalizeHttpsEndpoint(endpoint)
+        if (normalizedEndpoint == null) {
+            syncStateFlow.update {
+                it.copy(syncFeedbackMessage = UiMessage(R.string.sync_error_https_required, listOf("S3")))
+            }
+            return
+        }
+        syncCredentialsStore?.saveS3Config(normalizedEndpoint, bucket, region, accessKey, secretKey, objectKey, usePathStyle)
         syncStateFlow.update {
             it.copy(
-                s3Endpoint = endpoint,
+                s3Endpoint = normalizedEndpoint,
                 s3Bucket = bucket,
                 s3Region = region,
                 s3AccessKey = accessKey,
@@ -501,6 +515,18 @@ class SettingsViewModel @Inject constructor(
                 s3UsePathStyle = usePathStyle
             )
         }
+    }
+
+    /**
+     * Wave 14 全站强制 HTTPS：端点归一化与校验。
+     * 空串原样返回（允许清空配置）；无 scheme 输入自动补 https://；
+     * 显式非 https scheme（http:// 等）返回 null 表示拒绝保存。
+     */
+    private fun normalizeHttpsEndpoint(raw: String): String? {
+        val trimmed = raw.trim()
+        if (trimmed.isEmpty()) return trimmed
+        val withScheme = if (trimmed.contains("://")) trimmed else "https://$trimmed"
+        return if (withScheme.startsWith("https://", ignoreCase = true)) withScheme else null
     }
 
     fun setEncryptionAlgorithm(algorithm: String) {
@@ -793,16 +819,6 @@ class SettingsViewModel @Inject constructor(
 
     fun setUseFileTransactions(enabled: Boolean) {
         extendedSettingsFlow.update { it.copy(useFileTransactions = enabled) }
-    }
-
-    /**
-     * Wave 12：WebDAV 证书锁定（可选防御纵深）——每行一条 `host=sha256/Base64`（SPKI 公钥哈希）。
-     * 遵循 OkHttp 官方警示，锁定仅在用户显式配置时生效；空串=不锁定。
-     * 「允许明文流量」与「信任自签名证书」假开关已随传输加固整体移除（TLS-only 恒定）。
-     */
-    fun setWebDavCertPins(pins: String) {
-        syncCredentialsStore?.saveWebDavCertPins(pins)
-        syncStateFlow.update { it.copy(webdavCertPins = pins) }
     }
 
     fun setWebdavChunkedUpload(enabled: Boolean) {

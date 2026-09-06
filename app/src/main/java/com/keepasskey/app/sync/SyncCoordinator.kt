@@ -22,6 +22,7 @@ import com.keepasskey.sync.merge.ConflictResolutionChoice
 import com.keepasskey.sync.merge.ConflictedEntryPair
 import com.keepasskey.sync.merge.KdbxDatabaseLite
 import com.keepasskey.sync.merge.KdbxMerger
+import com.keepasskey.sync.model.SyncException
 import com.keepasskey.sync.model.cleanEtag
 import com.keepasskey.sync.network.SyncNetworkOptions
 import com.keepasskey.sync.provider.SyncProvider
@@ -173,8 +174,13 @@ open class SyncCoordinator @Inject constructor(
         val currentDb = databaseSession.databaseFlow.value
             ?: return@withLock SyncOutcome.Error("密码库未解锁或数据为空")
 
-        val provider = testSyncProvider ?: resolveProvider()
-            ?: return@withLock SyncOutcome.Error("未配置云同步凭据")
+        // Wave 14 全站强制 HTTPS：遗留的 http:// 端点在 Provider 构造期被拒，
+        // 此处将类型化错误上浮为用户可理解的同步失败反馈
+        val provider = try {
+            testSyncProvider ?: resolveProvider()
+        } catch (e: SyncException.InvalidEndpointError) {
+            return@withLock SyncOutcome.Error(e.message ?: "端点配置非法")
+        } ?: return@withLock SyncOutcome.Error("未配置云同步凭据")
 
         val remotePath = testRemotePath ?: resolveRemotePath(activeFile.name)
 
@@ -424,8 +430,6 @@ open class SyncCoordinator @Inject constructor(
     private companion object {
         const val TAG = "SyncCoordinator"
 
-        /** 证书锁定 pin 的 scheme 前缀（OkHttp CertificatePinner 约定格式） */
-        const val PIN_SCHEME_PREFIX = "sha256/"
     }
 
     private suspend fun handleConflictMerge(
@@ -540,9 +544,9 @@ open class SyncCoordinator @Inject constructor(
                         serverUrl = cfg.url,
                         username = cfg.username,
                         passwordChars = pwdChars,
-                        // Wave 12 传输加固：TLS-only + 显式超时 + 可选证书锁定（用户显式配置时生效），
-                        // 客户端由 sync 模块工厂构建（app 仅传纯数据选项）
-                        networkOptions = buildNetworkOptions(cfg.certPins)
+                        // Wave 14 传输安全：TLS-only + 显式超时；证书固定已整体移除，
+                        // 证书验证完全依赖系统默认 CA 链（客户端由 sync 模块工厂构建）
+                        networkOptions = SyncNetworkOptions()
                     )
                 } finally {
                     pwdChars.fill('0')
@@ -562,33 +566,6 @@ open class SyncCoordinator @Inject constructor(
                 )
             }
         }
-    }
-
-    /**
-     * 解析用户配置的证书锁定条目（每行一条 `host=sha256/Base64`）。
-     * 非法行（缺分隔符 / pin 前缀不符 / 空 host）一律忽略并留痕，绝不静默放宽为「锁定全部」。
-     */
-    private fun buildNetworkOptions(certPinsRaw: String): SyncNetworkOptions {
-        if (certPinsRaw.isBlank()) return SyncNetworkOptions()
-        val pins = mutableMapOf<String, MutableList<String>>()
-        certPinsRaw.lineSequence()
-            .map { it.trim() }
-            .filter { it.isNotEmpty() }
-            .forEach { line ->
-                val separatorIndex = line.indexOf('=')
-                if (separatorIndex <= 0) {
-                    debugLog.warn(TAG, "证书锁定条目格式非法已忽略（缺少 host= 分隔符）")
-                    return@forEach
-                }
-                val host = line.substring(0, separatorIndex).trim().lowercase()
-                val pin = line.substring(separatorIndex + 1).trim()
-                if (host.isEmpty() || !pin.startsWith(PIN_SCHEME_PREFIX)) {
-                    debugLog.warn(TAG, "证书锁定条目格式非法已忽略（host 为空或 pin 前缀不符）")
-                    return@forEach
-                }
-                pins.getOrPut(host) { mutableListOf() }.add(pin)
-            }
-        return SyncNetworkOptions(pinnedHosts = pins)
     }
 
     private fun resolveRemotePath(defaultFileName: String): String {

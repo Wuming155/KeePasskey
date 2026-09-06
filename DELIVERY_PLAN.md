@@ -163,7 +163,7 @@
   2. **WebDAV 客户端实现**：
      - [x] 基于 OkHttp 实现 WebDAV 核心动词：`PROPFIND`（解析 ETag、Content-Length 与 Last-Modified）、`GET`、`PUT`、`DELETE`。
      - [x] 实现基于 HTTP ETag 的乐观锁检查（`If-Match: <remote-etag>` 与 HTTP 412 捕获），防止覆盖他人提交。
-     - [x] 支持自签名 SSL/TLS 证书信任与局域网 HTTP 明确豁免。
+     - [x] （Wave 14 作废改写）全站强制 HTTPS：平台 Network Security Config 全局禁明文（cleartextTrafficPermitted="false"）+ 仅系统 CA 信任锚，与 OkHttp 层 TLS-only 构成双层防线；不再提供自签名证书信任与局域网 HTTP 豁免（本应用仅支持正规公网商业云服务），端点实施 https-only 保存期/构造期 fail-fast 校验。
   3. **S3 兼容协议客户端实现**：
      - [x] 针对 AWS S3、Cloudflare R2、MinIO 等实现轻量级 AWS Signature Version 4（SigV4）鉴权算法。
      - [x] 支持 Bucket 探测、对象读取、版本控制（Versioning）与流式上传。

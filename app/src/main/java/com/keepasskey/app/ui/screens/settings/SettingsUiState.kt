@@ -81,8 +81,6 @@ data class SettingsUiState(
     val webdavPassword: String = "",
     val webdavPasswordMasked: String = "••••••••••••",
     val webdavRemotePath: String = "/keepasskey.kdbx",
-    // Wave 12：WebDAV 证书锁定（可选，每行一条 host=sha256/...，空串=不锁定）
-    val webdavCertPins: String = "",
     // S3 兼容协议专属字段（M2 整改：默认值一律空串）
     val s3Endpoint: String = "",
     val s3Bucket: String = "",

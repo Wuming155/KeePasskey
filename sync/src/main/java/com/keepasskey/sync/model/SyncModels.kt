@@ -62,6 +62,13 @@ sealed class SyncException(message: String, cause: Throwable? = null) : Exceptio
      * 未知或不可恢复协议错误
      */
     class ProtocolError(val statusCode: Int, message: String) : SyncException("HTTP $statusCode: $message")
+
+    /**
+     * 端点配置非法（Wave 14 全站强制 HTTPS）：显式 http:// 端点在 Provider 构造期即拒绝，
+     * 实现 fail-fast，而非在网络层以晦涩错误失败。本应用仅支持正规公网商业云服务，
+     * 证书验证完全依赖系统默认 CA 链，明文 HTTP 一律不放行。
+     */
+    class InvalidEndpointError(message: String) : SyncException(message)
 }
 
 /**

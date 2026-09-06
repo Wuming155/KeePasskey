@@ -241,4 +241,38 @@ class WebDavSyncProviderTest {
         assertTrue(path.contains("%E6%88%91%E7%9A%84%20%E5%AF%86%E7%A0%81%E5%BA%93"))
         assertTrue(path.contains("%E5%B7%A5%E4%BD%9C%20vault.kdbx"))
     }
+
+    @Test
+    fun `生产路径显式 http 端点在构造期被拒绝`() {
+        // Wave 14 全站强制 HTTPS：生产路径（未注入测试客户端）构造期即 fail-fast，
+        // 抛类型化 InvalidEndpointError 并给出用户可理解提示
+        val exception = runCatching {
+            WebDavSyncProvider(
+                serverUrl = "http://dav.example.com/remote.php/webdav",
+                username = "admin",
+                passwordChars = "pass123".toCharArray()
+            )
+        }.exceptionOrNull()
+
+        assertTrue(exception is SyncException.InvalidEndpointError)
+    }
+
+    @Test
+    fun `生产路径 https 与无 scheme 端点构造通过`() {
+        // https 显式 scheme 直接通过构造（TLS-only 工厂客户端，不发起网络请求）
+        val httpsProvider = WebDavSyncProvider(
+            serverUrl = "https://dav.example.com/remote.php/webdav",
+            username = "admin",
+            passwordChars = "pass123".toCharArray()
+        )
+        assertNotNull(httpsProvider)
+
+        // 无 scheme 输入按 https 语义处理（上层归一化补 https://），构造不拒绝
+        val noSchemeProvider = WebDavSyncProvider(
+            serverUrl = "dav.example.com/remote.php/webdav",
+            username = "admin",
+            passwordChars = "pass123".toCharArray()
+        )
+        assertNotNull(noSchemeProvider)
+    }
 }

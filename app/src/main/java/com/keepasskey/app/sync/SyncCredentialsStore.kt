@@ -18,9 +18,7 @@ data class WebDavCredentials(
     val url: String,
     val username: String,
     val password: String,
-    val remotePath: String,
-    /** Wave 12 可选证书锁定：每行一条 `host=sha256/Base64`（SPKI 公钥哈希），空串=不锁定 */
-    val certPins: String = ""
+    val remotePath: String
 )
 
 /**
@@ -33,7 +31,7 @@ data class S3Credentials(
     val accessKey: String,
     val secretKey: String,
     val objectKey: String,
-    /** 寻址风格：false = virtual-host，true = path 风格（自建 MinIO/代理） */
+    /** 寻址风格：false = virtual-host（AWS 等默认），true = path 风格（Cloudflare R2、IP 直连端点等） */
     val usePathStyle: Boolean = false
 )
 
@@ -73,14 +71,12 @@ class SyncCredentialsStore @Inject constructor(
         url: String,
         username: String,
         password: String,
-        remotePath: String,
-        certPins: String = ""
+        remotePath: String
     ) {
         val editor = prefs.edit()
         editor.putString(KEY_WEBDAV_URL, url)
         editor.putString(KEY_WEBDAV_USERNAME, username)
         editor.putString(KEY_WEBDAV_REMOTE_PATH, remotePath)
-        editor.putString(KEY_WEBDAV_CERT_PINS, certPins)
 
         if (password.isNotEmpty()) {
             val encrypted = encrypt(password)
@@ -97,28 +93,26 @@ class SyncCredentialsStore @Inject constructor(
     }
 
     fun loadWebDavConfig(): WebDavCredentials? {
+        // Wave 14 证书固定整体移除：旧版本遗留的锁定配置键在此一次性物理清除，
+        // 不依赖「用户下次保存配置」才清理（对齐下方旧版明文 AccessKey 的迁移模式）。
+        // 用 getString 判空而非 contains()：语义等价，且兼容 JVM 单测的 SharedPreferences 代理桩
+        if (prefs.getString(KEY_WEBDAV_CERT_PINS, null) != null) {
+            prefs.edit().remove(KEY_WEBDAV_CERT_PINS).apply()
+        }
+
         val url = prefs.getString(KEY_WEBDAV_URL, null) ?: return null
         val username = prefs.getString(KEY_WEBDAV_USERNAME, "") ?: ""
         val remotePath = prefs.getString(KEY_WEBDAV_REMOTE_PATH, "/keepasskey.kdbx") ?: "/keepasskey.kdbx"
         val iv = prefs.getString(KEY_WEBDAV_PASSWORD_IV, null)
         val cipher = prefs.getString(KEY_WEBDAV_PASSWORD_CIPHER, null)
         val password = decrypt(iv, cipher) ?: ""
-        val certPins = prefs.getString(KEY_WEBDAV_CERT_PINS, "") ?: ""
 
         return WebDavCredentials(
             url = url,
             username = username,
             password = password,
-            remotePath = remotePath,
-            certPins = certPins
+            remotePath = remotePath
         )
-    }
-
-    /**
-     * 单独保存 WebDAV 证书锁定条目（Wave 12：不随凭据表单提交，独立设置项即时生效于下次同步）
-     */
-    fun saveWebDavCertPins(pins: String) {
-        prefs.edit().putString(KEY_WEBDAV_CERT_PINS, pins).apply()
     }
 
     fun saveS3Config(
@@ -257,6 +251,7 @@ class SyncCredentialsStore @Inject constructor(
         private const val KEY_WEBDAV_REMOTE_PATH = "webdav_remote_path"
         private const val KEY_WEBDAV_PASSWORD_IV = "webdav_password_iv"
         private const val KEY_WEBDAV_PASSWORD_CIPHER = "webdav_password_cipher"
+        /** Wave 14 已废弃的证书锁定键：仅保留常量供加载期一次性清理遗留数据引用 */
         private const val KEY_WEBDAV_CERT_PINS = "webdav_cert_pins"
 
         private const val KEY_S3_ENDPOINT = "s3_endpoint"
