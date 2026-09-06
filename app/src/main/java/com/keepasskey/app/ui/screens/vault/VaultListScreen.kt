@@ -40,6 +40,7 @@ import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Key
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SearchOff
 import androidx.compose.material.icons.filled.SelectAll
@@ -173,7 +174,8 @@ fun VaultListScreen(
         onPurgeEntry = viewModel::purgeEntry,
         onEmptyRecycleBin = viewModel::emptyRecycleBin,
         onTriggerSync = viewModel::triggerPullRefresh,
-    onNavigateToConflictResolver = onNavigateToConflictResolver,
+        onNavigateToConflictResolver = onNavigateToConflictResolver,
+        onLockClick = onLockClick,
         onSelectAllBatch = viewModel::selectAllEntries,
         onClearBatch = viewModel::clearBatchSelection,
         onBatchDelete = viewModel::batchDeleteSelected,
@@ -206,6 +208,7 @@ fun VaultListContent(
     onEmptyRecycleBin: () -> Unit,
     onTriggerSync: () -> Unit,
     onNavigateToConflictResolver: () -> Unit = {},
+    onLockClick: () -> Unit = {},
     onSelectAllBatch: () -> Unit,
     onClearBatch: () -> Unit,
     onBatchDelete: () -> Unit,
@@ -333,6 +336,13 @@ fun VaultListContent(
                                     imageVector = Icons.AutoMirrored.Filled.Sort,
                                     contentDescription = stringResource(R.string.cd_sort),
                                     tint = if (uiState.sortOption != VaultSortOption.DEFAULT) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            IconButton(onClick = onLockClick) {
+                                Icon(
+                                    imageVector = Icons.Default.Lock,
+                                    contentDescription = stringResource(R.string.cd_lock),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
                         }

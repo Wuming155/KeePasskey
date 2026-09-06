@@ -95,6 +95,7 @@ fun SettingsScreen(
     onNavigateToTotp: () -> Unit = {},
     onNavigateToDebug: () -> Unit = {},
     onNavigateToAbout: () -> Unit,
+    onLockClick: () -> Unit = {},
     onBackClick: () -> Unit = {},
     showBackButton: Boolean = false,
     modifier: Modifier = Modifier,
@@ -113,6 +114,7 @@ fun SettingsScreen(
         onNavigateToTotp = onNavigateToTotp,
         onNavigateToDebug = onNavigateToDebug,
         onNavigateToAbout = onNavigateToAbout,
+        onLockClick = onLockClick,
         onChangeMasterPassword = { viewModel.changeMasterPassword(it) },
         onBackClick = onBackClick,
         showBackButton = showBackButton,
@@ -136,6 +138,7 @@ fun SettingsContent(
     onNavigateToTotp: () -> Unit = {},
     onNavigateToDebug: () -> Unit = {},
     onNavigateToAbout: () -> Unit,
+    onLockClick: () -> Unit = {},
     onChangeMasterPassword: suspend (CharArray) -> com.keepasskey.core.result.KdbxResult<Unit> = { com.keepasskey.core.result.KdbxResult.Success(Unit) },
     onBackClick: () -> Unit = {},
     showBackButton: Boolean = false,
@@ -170,6 +173,15 @@ fun SettingsContent(
                                 contentDescription = stringResource(R.string.cd_back)
                             )
                         }
+                    }
+                },
+                actions = {
+                    IconButton(onClick = onLockClick) {
+                        Icon(
+                            imageVector = Icons.Default.Lock,
+                            contentDescription = stringResource(R.string.cd_lock),
+                            tint = MaterialTheme.colorScheme.error
+                        )
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(

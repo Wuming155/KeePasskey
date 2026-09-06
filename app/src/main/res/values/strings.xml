@@ -20,6 +20,8 @@
     <string name="btn_open">打开</string>
     <string name="btn_back">返回</string>
     <string name="btn_more">更多</string>
+    <string name="btn_lock">锁定</string>
+    <string name="cd_lock">锁定密码库</string>
 
     <!-- 底部导航 -->
     <string name="nav_vault">密码库</string>

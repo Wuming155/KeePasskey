@@ -331,6 +331,12 @@ fun KeePasskeyApp() {
                         onNavigateToTotp = { navController.navigate(Screen.SettingsTotp.route) },
                         onNavigateToDebug = { navController.navigate(Screen.SettingsDebug.route) },
                         onNavigateToAbout = { navController.navigate(Screen.SettingsAbout.route) },
+                        onLockClick = {
+                            autoLockManager?.triggerLock("用户从设置界面手动点击锁定")
+                            navController.navigate(Screen.Unlock.route) {
+                                popUpTo(0) { inclusive = true }
+                            }
+                        },
                         showBackButton = false
                     )
                 }
