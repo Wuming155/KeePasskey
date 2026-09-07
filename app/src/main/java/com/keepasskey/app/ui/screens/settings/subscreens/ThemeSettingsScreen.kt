@@ -1,5 +1,6 @@
 package com.keepasskey.app.ui.screens.settings.subscreens
 
+import android.os.Build
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -76,6 +77,7 @@ fun ThemeSettingsScreen(
     onPaletteSelected: (com.keepasskey.app.ui.theme.AppThemePalette) -> Unit = {},
     onLanguageSelected: (AppLanguage) -> Unit = {},
     onOledOptimizationToggle: (Boolean) -> Unit,
+    onDynamicColorToggle: (Boolean) -> Unit = {},
     onShowUsernameInList: (Boolean) -> Unit = {},
     onShowOtpInList: (Boolean) -> Unit = {},
     onShowPasskeyBadge: (Boolean) -> Unit = {},
@@ -141,7 +143,7 @@ fun ThemeSettingsScreen(
             item {
                 BentoCard(
                     modifier = Modifier.fillMaxWidth(),
-                    backgroundColor = MaterialTheme.colorScheme.surfaceContainerLowest
+                    backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow
                 ) {
                     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                         Text(
@@ -211,6 +213,19 @@ fun ThemeSettingsScreen(
                                 )
                             }
                         }
+
+                        // Material You 动态取色（Android 12+）：跟随壁纸取色，覆盖品牌调色盘
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                            HorizontalDivider(
+                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                            )
+                            DisplayPrefRow(
+                                title = stringResource(R.string.theme_dynamic_title),
+                                subtitle = stringResource(R.string.theme_dynamic_sub),
+                                checked = uiState.dynamicColorEnabled,
+                                onCheckedChange = onDynamicColorToggle
+                            )
+                        }
                     }
                 }
             }
@@ -228,7 +243,7 @@ fun ThemeSettingsScreen(
             item {
                 BentoCard(
                     modifier = Modifier.fillMaxWidth(),
-                    backgroundColor = MaterialTheme.colorScheme.surfaceContainerLowest
+                    backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow
                 ) {
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Text(
@@ -263,7 +278,7 @@ fun ThemeSettingsScreen(
             item {
                 BentoCard(
                     modifier = Modifier.fillMaxWidth(),
-                    backgroundColor = MaterialTheme.colorScheme.surfaceContainerLowest
+                    backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow
                 ) {
                     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                         DisplayPrefRow(
@@ -296,7 +311,7 @@ fun ThemeSettingsScreen(
             item {
                 BentoCard(
                     modifier = Modifier.fillMaxWidth(),
-                    backgroundColor = MaterialTheme.colorScheme.surfaceContainerLowest
+                    backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow
                 ) {
                     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                         Column {
@@ -410,7 +425,7 @@ fun ThemeSettingsScreen(
             item {
                 BentoCard(
                     modifier = Modifier.fillMaxWidth(),
-                    backgroundColor = MaterialTheme.colorScheme.surfaceContainerLowest
+                    backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow
                 ) {
                     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                         DisplayPrefRow(
@@ -457,7 +472,7 @@ fun ThemeSettingsScreen(
             item {
                 BentoCard(
                     modifier = Modifier.fillMaxWidth(),
-                    backgroundColor = MaterialTheme.colorScheme.surfaceContainerLowest
+                    backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow
                 ) {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         IconSetOption.entries.forEach { option ->
@@ -508,7 +523,7 @@ fun ThemeSettingsScreen(
             item {
                 BentoCard(
                     modifier = Modifier.fillMaxWidth(),
-                    backgroundColor = MaterialTheme.colorScheme.surfaceContainerLowest
+                    backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow
                 ) {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         listOf(

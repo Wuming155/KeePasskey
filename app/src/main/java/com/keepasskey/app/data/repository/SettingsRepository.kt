@@ -19,6 +19,8 @@ data class UserSettings(
     val themeMode: AppThemeMode = AppThemeMode.SYSTEM,
     val themePalette: com.keepasskey.app.ui.theme.AppThemePalette = com.keepasskey.app.ui.theme.AppThemePalette.SAPPHIRE,
     val oledBlackOptimization: Boolean = false,
+    // Material You 动态取色（Android 12+ 生效，开启后覆盖品牌调色盘）
+    val dynamicColorEnabled: Boolean = false,
     val appLanguage: AppLanguage = AppLanguage.SYSTEM,
     val biometricEnabled: Boolean = true,
     val autoLockBackground: Boolean = true,
@@ -50,6 +52,7 @@ interface SettingsRepository {
     suspend fun setThemeMode(themeMode: AppThemeMode)
     suspend fun setThemePalette(themePalette: com.keepasskey.app.ui.theme.AppThemePalette)
     suspend fun setOledBlackOptimization(enabled: Boolean)
+    suspend fun setDynamicColorEnabled(enabled: Boolean)
     suspend fun setAppLanguage(language: AppLanguage)
     suspend fun setBiometricEnabled(enabled: Boolean)
     suspend fun setAutoLockBackground(enabled: Boolean)

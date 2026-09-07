@@ -128,7 +128,7 @@ fun AutofillSettingsScreen(
             item {
                 BentoCard(
                     modifier = Modifier.fillMaxWidth(),
-                    backgroundColor = MaterialTheme.colorScheme.surfaceContainerLowest
+                    backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow
                 ) {
                     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                         AutofillSwitchRow(
@@ -171,7 +171,7 @@ fun AutofillSettingsScreen(
             item {
                 BentoCard(
                     modifier = Modifier.fillMaxWidth(),
-                    backgroundColor = MaterialTheme.colorScheme.surfaceContainerLowest
+                    backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow
                 ) {
                     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                         AutofillSwitchRow(
@@ -214,7 +214,7 @@ fun AutofillSettingsScreen(
             item {
                 BentoCard(
                     modifier = Modifier.fillMaxWidth(),
-                    backgroundColor = MaterialTheme.colorScheme.surfaceContainerLowest
+                    backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow
                 ) {
                     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                         AutofillSwitchRow(
@@ -249,7 +249,7 @@ fun AutofillSettingsScreen(
             item {
                 BentoCard(
                     modifier = Modifier.fillMaxWidth(),
-                    backgroundColor = MaterialTheme.colorScheme.surfaceContainerLowest
+                    backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow
                 ) {
                     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                         AutofillSwitchRow(

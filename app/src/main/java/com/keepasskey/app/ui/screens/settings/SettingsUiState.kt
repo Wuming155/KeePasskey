@@ -146,6 +146,7 @@ data class SettingsUiState(
     val themePalette: com.keepasskey.app.ui.theme.AppThemePalette = com.keepasskey.app.ui.theme.AppThemePalette.SAPPHIRE,
     val appLanguage: com.keepasskey.app.data.repository.AppLanguage = com.keepasskey.app.data.repository.AppLanguage.SYSTEM,
     val oledBlackOptimization: Boolean = false,
+    val dynamicColorEnabled: Boolean = false, // Material You 动态取色 (Android 12+)
     val showUsernameInList: Boolean = true,
     val showOtpInList: Boolean = true,
     val showPasskeyBadge: Boolean = true,

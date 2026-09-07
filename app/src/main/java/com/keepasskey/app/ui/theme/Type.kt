@@ -7,13 +7,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 
 val Typography = Typography(
-    displayLarge = TextStyle(
-        fontFamily = FontFamily.Default,
-        fontWeight = FontWeight.Bold,
-        fontSize = 28.sp,
-        lineHeight = 34.sp,
-        letterSpacing = (-0.25).sp
-    ),
+    // displayLarge 不再自定义（M3 官方 57sp 规格对手机竖屏过大，且此前 28sp 定义为僵尸样式）：
+    // 解锁页大标题等超大字号场景直接使用下方专用的 HeroTitleStyle
     headlineMedium = TextStyle(
         fontFamily = FontFamily.Default,
         fontWeight = FontWeight.SemiBold,
@@ -64,6 +59,18 @@ val Typography = Typography(
         fontSize = 12.sp,
         lineHeight = 16.sp
     )
+)
+
+/**
+ * 解锁页等核心界面的大标题样式（Hero Title）：
+ * 语义上不再占用 displayLarge 槽位，按单手竖屏信息层级定义为 24sp Bold
+ */
+val HeroTitleStyle = TextStyle(
+    fontFamily = FontFamily.Default,
+    fontWeight = FontWeight.Bold,
+    fontSize = 24.sp,
+    lineHeight = 30.sp,
+    letterSpacing = (-0.25).sp
 )
 
 /**

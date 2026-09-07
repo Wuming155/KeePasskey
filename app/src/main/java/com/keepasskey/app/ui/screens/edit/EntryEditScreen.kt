@@ -390,7 +390,7 @@ fun EntryEditContent(
 
             BentoCard(
                 modifier = Modifier.fillMaxWidth(),
-                backgroundColor = MaterialTheme.colorScheme.surfaceContainerLowest
+                backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow
             ) {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Row(
@@ -445,7 +445,7 @@ fun EntryEditContent(
 
             BentoCard(
                 modifier = Modifier.fillMaxWidth(),
-                backgroundColor = MaterialTheme.colorScheme.surfaceContainerLowest
+                backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow
             ) {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     OutlinedTextField(
@@ -520,7 +520,7 @@ fun EntryEditContent(
 
             BentoCard(
                 modifier = Modifier.fillMaxWidth(),
-                backgroundColor = MaterialTheme.colorScheme.surfaceContainerLowest
+                backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow
             ) {
                 OutlinedTextField(
                     value = uiState.totpSecret,
@@ -551,8 +551,8 @@ fun EntryEditContent(
 
             BentoCard(
                 modifier = Modifier.fillMaxWidth(),
-                backgroundColor = if (uiState.isPasskey) securityColors.passkeyContainer.copy(alpha = 0.35f) else MaterialTheme.colorScheme.surfaceContainerLowest,
-                borderColor = if (uiState.isPasskey) securityColors.passkey.copy(alpha = 0.5f) else MaterialTheme.colorScheme.outlineVariant
+                backgroundColor = if (uiState.isPasskey) securityColors.passkeyContainer.copy(alpha = 0.35f) else MaterialTheme.colorScheme.surfaceContainerLow,
+                borderColor = if (uiState.isPasskey) securityColors.passkey.copy(alpha = 0.5f) else null
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -592,7 +592,7 @@ fun EntryEditContent(
 
             BentoCard(
                 modifier = Modifier.fillMaxWidth(),
-                backgroundColor = MaterialTheme.colorScheme.surfaceContainerLowest
+                backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow
             ) {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     uiState.customFields.forEach { field ->
@@ -675,7 +675,7 @@ fun EntryEditContent(
 
             BentoCard(
                 modifier = Modifier.fillMaxWidth(),
-                backgroundColor = MaterialTheme.colorScheme.surfaceContainerLowest
+                backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow
             ) {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     uiState.attachments.forEach { att ->
@@ -736,7 +736,7 @@ fun EntryEditContent(
 
             BentoCard(
                 modifier = Modifier.fillMaxWidth(),
-                backgroundColor = MaterialTheme.colorScheme.surfaceContainerLowest
+                backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow
             ) {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     OutlinedTextField(
@@ -777,7 +777,7 @@ fun EntryEditContent(
 
             BentoCard(
                 modifier = Modifier.fillMaxWidth(),
-                backgroundColor = MaterialTheme.colorScheme.surfaceContainerLowest
+                backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow
             ) {
                 OutlinedTextField(
                     value = uiState.notes,

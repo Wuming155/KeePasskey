@@ -60,6 +60,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
@@ -221,10 +223,11 @@ private fun GeneratorDisplayCard(
         animationSpec = tween(durationMillis = 350),
         label = "rotate"
     )
+    val haptic = LocalHapticFeedback.current
 
     BentoCard(
         modifier = Modifier.fillMaxWidth(),
-        backgroundColor = MaterialTheme.colorScheme.surfaceContainerLowest
+        backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Row(
@@ -245,6 +248,8 @@ private fun GeneratorDisplayCard(
                 }
 
                 IconButton(onClick = {
+                    // 重新生成：ContextClick 轻震对应「新值产生」时刻，与旋转动画同步
+                    haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
                     rotationAngle += 360f
                     onRegenerate()
                 }) {
@@ -303,7 +308,7 @@ private fun RandomModeOptions(
 ) {
     BentoCard(
         modifier = Modifier.fillMaxWidth(),
-        backgroundColor = MaterialTheme.colorScheme.surfaceContainerLowest
+        backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Text(
@@ -348,7 +353,7 @@ private fun PassphraseModeOptions(
 
     BentoCard(
         modifier = Modifier.fillMaxWidth(),
-        backgroundColor = MaterialTheme.colorScheme.surfaceContainerLowest
+        backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Text(
@@ -425,7 +430,7 @@ private fun MaskModeOptions(
 
     BentoCard(
         modifier = Modifier.fillMaxWidth(),
-        backgroundColor = MaterialTheme.colorScheme.surfaceContainerLowest
+        backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Text(

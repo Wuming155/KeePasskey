@@ -151,7 +151,7 @@ fun DatabaseSettingsScreen(
             item {
                 BentoCard(
                     modifier = Modifier.fillMaxWidth(),
-                    backgroundColor = MaterialTheme.colorScheme.surfaceContainerLowest
+                    backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow
                 ) {
                     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         DatabaseFieldRow(label = stringResource(R.string.dbset_field_db_name), value = uiState.databaseName)
@@ -202,7 +202,7 @@ fun DatabaseSettingsScreen(
             item {
                 BentoCard(
                     modifier = Modifier.fillMaxWidth(),
-                    backgroundColor = MaterialTheme.colorScheme.surfaceContainerLowest
+                    backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow
                 ) {
                     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         DatabaseFieldRow(
@@ -242,7 +242,7 @@ fun DatabaseSettingsScreen(
             item {
                 BentoCard(
                     modifier = Modifier.fillMaxWidth(),
-                    backgroundColor = MaterialTheme.colorScheme.surfaceContainerLowest
+                    backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow
                 ) {
                     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         DatabaseActionRow(
@@ -279,7 +279,7 @@ fun DatabaseSettingsScreen(
             item {
                 BentoCard(
                     modifier = Modifier.fillMaxWidth(),
-                    backgroundColor = MaterialTheme.colorScheme.surfaceContainerLowest
+                    backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow
                 ) {
                     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         DatabaseActionRow(
@@ -319,7 +319,7 @@ fun DatabaseSettingsScreen(
             item {
                 BentoCard(
                     modifier = Modifier.fillMaxWidth(),
-                    backgroundColor = MaterialTheme.colorScheme.surfaceContainerLowest
+                    backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow
                 ) {
                     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         Row(

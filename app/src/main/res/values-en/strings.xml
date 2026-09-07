@@ -630,6 +630,8 @@
     <string name="theme_mode_pick_desc">Choose the app appearance. Dark mode pairs with the OLED true-black optimization</string>
     <string name="theme_oled_title">OLED true black</string>
     <string name="theme_oled_sub">Use a pure black background in dark mode to save power on OLED screens</string>
+    <string name="theme_dynamic_title">Dynamic color (Material You)</string>
+    <string name="theme_dynamic_sub">Tint the app from your wallpaper, overriding the brand palette</string>
     <string name="theme_section_palette">Color palette</string>
     <string name="theme_palette_pick_desc">Pick a primary color scheme with instant preview</string>
     <string name="theme_palette_sapphire">Sapphire</string>

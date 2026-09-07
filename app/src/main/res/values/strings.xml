@@ -614,6 +614,8 @@
     <string name="theme_mode_pick_desc">选择应用的外观模式，深色模式可配合 OLED 纯黑优化</string>
     <string name="theme_oled_title">OLED 纯黑优化</string>
     <string name="theme_oled_sub">深色模式下使用纯黑背景，为 OLED 屏幕省电</string>
+    <string name="theme_dynamic_title">动态取色（Material You）</string>
+    <string name="theme_dynamic_sub">跟随系统壁纸自动取色，开启后覆盖品牌调色盘</string>
     <string name="theme_section_palette">主题调色盘</string>
     <string name="theme_palette_pick_desc">选择一组主色配色方案，即时预览全局效果</string>
     <string name="theme_palette_sapphire">蓝宝石</string>

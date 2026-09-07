@@ -50,6 +50,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -174,19 +176,24 @@ fun UnifiedVaultEntryRow(
     onPurge: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val borderColor = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.8f)
-    val borderWidth = if (isSelected) 1.5.dp else 1.dp
-    val containerBg = if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f)
-    else MaterialTheme.colorScheme.surfaceContainerLowest
+    // M3 色调层级：常态用 surfaceContainerLow 表达容器感，描边仅保留给选中态强强调
+    val isSelectedBorder = if (isSelected) {
+        Modifier.border(1.5.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(12.dp))
+    } else {
+        Modifier
+    }
 
     Card(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
             .combinedClickable(onClick = onClick, onLongClick = onLongClick)
-            .border(borderWidth, borderColor, RoundedCornerShape(12.dp)),
+            .then(isSelectedBorder),
         shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = containerBg)
+        colors = CardDefaults.cardColors(
+            containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f)
+            else MaterialTheme.colorScheme.surfaceContainerLow
+        )
     ) {
         when (entry.category) {
             EntryCategory.CARD -> {
@@ -230,6 +237,7 @@ private fun StandardEntryLayout(
     onRestore: () -> Unit,
     onPurge: () -> Unit
 ) {
+    val haptic = LocalHapticFeedback.current
     Row(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -334,11 +342,17 @@ private fun StandardEntryLayout(
             } else {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (entry.username.isNotBlank()) {
-                        IconButton(onClick = onCopyUsername) {
+                        IconButton(onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.Confirm)
+                            onCopyUsername()
+                        }) {
                             Icon(Icons.Default.PersonOutline, contentDescription = stringResource(R.string.cd_copy_username), tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
                         }
                     }
-                    IconButton(onClick = onCopyPassword) {
+                    IconButton(onClick = {
+                        haptic.performHapticFeedback(HapticFeedbackType.Confirm)
+                        onCopyPassword()
+                    }) {
                         Icon(Icons.Default.ContentCopy, contentDescription = stringResource(R.string.cd_copy_password), tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
                     }
                 }
@@ -383,7 +397,7 @@ private fun CreditCardLayout(
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = entry.title,
-                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, fontSize = 15.sp),
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold, fontSize = 15.sp),
                 color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
@@ -454,7 +468,7 @@ private fun SecureNoteLayout(
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = entry.title,
-                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, fontSize = 15.sp),
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold, fontSize = 15.sp),
                 color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis

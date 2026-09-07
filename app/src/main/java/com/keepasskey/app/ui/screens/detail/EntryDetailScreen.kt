@@ -2,6 +2,12 @@ package com.keepasskey.app.ui.screens.detail
 
 import android.content.res.Configuration
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -63,6 +69,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
@@ -180,6 +188,7 @@ fun EntryDetailContent(
 ) {
     val entry = uiState.entry
     val securityColors = LocalSecurityColors.current
+    val haptic = LocalHapticFeedback.current
     var revisionToRollback by remember { mutableStateOf<UiEntryRevision?>(null) }
     var revisionToDiff by remember { mutableStateOf<UiEntryRevision?>(null) }
     var attachmentToPreview by remember { mutableStateOf<UiAttachment?>(null) }
@@ -301,13 +310,19 @@ fun EntryDetailContent(
                         icon = Icons.Default.ContentCopy,
                         label = stringResource(R.string.detail_btn_copy_user),
                         modifier = Modifier.weight(1f),
-                        onClick = { onCopyUsername(entry.title, entry.username) }
+                        onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.Confirm)
+                            onCopyUsername(entry.title, entry.username)
+                        }
                     )
                     QuickActionTile(
                         icon = Icons.Default.Key,
                         label = stringResource(R.string.detail_btn_copy_pwd),
                         modifier = Modifier.weight(1f),
-                        onClick = { onCopyPassword(entry.title) }
+                        onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.Confirm)
+                            onCopyPassword(entry.title)
+                        }
                     )
                 }
 
@@ -320,7 +335,7 @@ fun EntryDetailContent(
 
                 BentoCard(
                     modifier = Modifier.fillMaxWidth(),
-                    backgroundColor = MaterialTheme.colorScheme.surfaceContainerLowest
+                    backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow
                 ) {
                     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                         Row(
@@ -371,16 +386,31 @@ fun EntryDetailContent(
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                     Spacer(modifier = Modifier.height(4.dp))
-                                    Text(
-                                        text = if (uiState.isPasswordVisible) uiState.revealedPassword.orEmpty() else entry.passwordMasked,
-                                        style = MonospacePasswordStyle.copy(
-                                            color = MaterialTheme.colorScheme.onSurface,
-                                            fontSize = 17.sp
+                                    // 明文/掩码切换：交叉淡入 + 容器尺寸平滑过渡（消除突兀跳变）
+                                    AnimatedContent(
+                                        targetState = uiState.isPasswordVisible,
+                                        transitionSpec = {
+                                            (fadeIn(tween(150)) togetherWith fadeOut(tween(90)))
+                                                .using(SizeTransform(clip = false))
+                                        },
+                                        label = "passwordReveal"
+                                    ) { isVisible ->
+                                        Text(
+                                            text = if (isVisible) uiState.revealedPassword.orEmpty() else entry.passwordMasked,
+                                            style = MonospacePasswordStyle.copy(
+                                                color = MaterialTheme.colorScheme.onSurface,
+                                                fontSize = 17.sp
+                                            ),
+                                            maxLines = 1
                                         )
-                                    )
+                                    }
                                 }
                                 Row {
-                                    IconButton(onClick = onTogglePasswordVisibility) {
+                                    IconButton(onClick = {
+                                        // 揭示明文用轻触感（Tick）：克制、不与复制成功反馈混淆
+                                        haptic.performHapticFeedback(HapticFeedbackType.SegmentTick)
+                                        onTogglePasswordVisibility()
+                                    }) {
                                         Icon(
                                             imageVector = if (uiState.isPasswordVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
                                             contentDescription = stringResource(R.string.cd_toggle_password_visibility),
@@ -388,7 +418,10 @@ fun EntryDetailContent(
                                             modifier = Modifier.size(20.dp)
                                         )
                                     }
-                                    IconButton(onClick = { onCopyPassword(entry.title) }) {
+                                    IconButton(onClick = {
+                                        haptic.performHapticFeedback(HapticFeedbackType.Confirm)
+                                        onCopyPassword(entry.title)
+                                    }) {
                                         Icon(
                                             imageVector = Icons.Default.ContentCopy,
                                             contentDescription = stringResource(R.string.cd_copy_password),
@@ -418,7 +451,7 @@ fun EntryDetailContent(
 
                     BentoCard(
                         modifier = Modifier.fillMaxWidth(),
-                        backgroundColor = MaterialTheme.colorScheme.surfaceContainerLowest
+                        backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow
                     ) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -512,7 +545,7 @@ fun EntryDetailContent(
 
                     BentoCard(
                         modifier = Modifier.fillMaxWidth(),
-                        backgroundColor = MaterialTheme.colorScheme.surfaceContainerLowest
+                        backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow
                     ) {
                         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                             entry.customFields.forEachIndexed { index, field ->
@@ -592,7 +625,7 @@ fun EntryDetailContent(
 
                     BentoCard(
                         modifier = Modifier.fillMaxWidth(),
-                        backgroundColor = MaterialTheme.colorScheme.surfaceContainerLowest
+                        backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow
                     ) {
                         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                             entry.attachments.forEach { att ->
@@ -654,7 +687,7 @@ fun EntryDetailContent(
 
                     BentoCard(
                         modifier = Modifier.fillMaxWidth(),
-                        backgroundColor = MaterialTheme.colorScheme.surfaceContainerLowest
+                        backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow
                     ) {
                         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                             entry.revisions.forEach { rev ->
@@ -711,7 +744,7 @@ fun EntryDetailContent(
 
                     BentoCard(
                         modifier = Modifier.fillMaxWidth(),
-                        backgroundColor = MaterialTheme.colorScheme.surfaceContainerLowest
+                        backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow
                     ) {
                         Column {
                             Text(

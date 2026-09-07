@@ -97,7 +97,7 @@ fun HealthCheckScreen(
             item {
                 BentoCard(
                     modifier = Modifier.fillMaxWidth(),
-                    backgroundColor = MaterialTheme.colorScheme.surfaceContainerLowest
+                    backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow
                 ) {
                     Column(
                         modifier = Modifier.fillMaxWidth(),

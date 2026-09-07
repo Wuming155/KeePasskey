@@ -245,7 +245,7 @@ private fun ConflictedEntryCard(
 ) {
     BentoCard(
         modifier = Modifier.fillMaxWidth(),
-        backgroundColor = MaterialTheme.colorScheme.surfaceContainerLowest
+        backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(

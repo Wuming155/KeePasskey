@@ -68,6 +68,7 @@ import com.keepasskey.app.ui.components.BentoCard
 import com.keepasskey.app.ui.components.ThemeToggleCapsule
 import com.keepasskey.app.ui.theme.AppThemeMode
 import com.keepasskey.app.ui.theme.CapsuleShape
+import com.keepasskey.app.ui.theme.HeroTitleStyle
 import com.keepasskey.app.ui.components.SecurePasswordField
 
 /**
@@ -258,7 +259,7 @@ fun UnlockContent(
 
             Text(
                 text = if (uiState.unlockMode == UnlockMode.QUICK_UNLOCK) stringResource(R.string.unlock_quick_title) else stringResource(R.string.unlock_title),
-                style = MaterialTheme.typography.displayLarge.copy(fontWeight = FontWeight.Bold, fontSize = 24.sp),
+                style = HeroTitleStyle,
                 color = MaterialTheme.colorScheme.onBackground
             )
 

@@ -323,6 +323,7 @@ class SettingsViewModel @Inject constructor(
             themePalette = userSettings.themePalette,
             appLanguage = userSettings.appLanguage,
             oledBlackOptimization = userSettings.oledBlackOptimization,
+            dynamicColorEnabled = userSettings.dynamicColorEnabled,
             showUsernameInList = userSettings.showUsernameInList,
             showOtpInList = userSettings.showOtpInList,
             showPasskeyBadge = userSettings.showPasskeyBadge,
@@ -432,6 +433,12 @@ class SettingsViewModel @Inject constructor(
     fun setOledBlackOptimization(enabled: Boolean) {
         viewModelScope.launch {
             settingsRepository.setOledBlackOptimization(enabled)
+        }
+    }
+
+    fun setDynamicColorEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.setDynamicColorEnabled(enabled)
         }
     }
 

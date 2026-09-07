@@ -7,6 +7,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
@@ -113,7 +114,8 @@ fun KeePasskeyApp() {
         KeePasskeyTheme(
             themeMode = appSettings.themeMode,
             themePalette = appSettings.themePalette,
-            oledBlack = appSettings.oledBlackOptimization
+            oledBlack = appSettings.oledBlackOptimization,
+            dynamicColorEnabled = appSettings.dynamicColorEnabled
         ) {
             val navController = rememberNavController()
             val navBackStackEntry by navController.currentBackStackEntryAsState()
@@ -169,6 +171,7 @@ fun KeePasskeyApp() {
             }
 
             Scaffold(
+                modifier = Modifier.imePadding(),
                 bottomBar = {
                     if (showBottomBar && !isWideScreen) {
                         AppBottomBar(
@@ -443,6 +446,7 @@ fun KeePasskeyApp() {
                         onPaletteSelected = settingsViewModel::setThemePalette,
                         onLanguageSelected = settingsViewModel::setAppLanguage,
                         onOledOptimizationToggle = settingsViewModel::setOledBlackOptimization,
+                        onDynamicColorToggle = settingsViewModel::setDynamicColorEnabled,
                         onShowUsernameInList = settingsViewModel::setShowUsernameInList,
                         onShowOtpInList = settingsViewModel::setShowOtpInList,
                         onShowPasskeyBadge = settingsViewModel::setShowPasskeyBadge,

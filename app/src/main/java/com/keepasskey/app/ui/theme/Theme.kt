@@ -1,14 +1,18 @@
 package com.keepasskey.app.ui.theme
 
 import android.app.Activity
+import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.dynamicDarkColorScheme
+import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 
@@ -38,6 +42,7 @@ fun KeePasskeyTheme(
     themeMode: AppThemeMode = AppThemeMode.SYSTEM,
     themePalette: AppThemePalette = AppThemePalette.SAPPHIRE,
     oledBlack: Boolean = false,
+    dynamicColorEnabled: Boolean = false,
     content: @Composable () -> Unit
 ) {
     val darkTheme = when (themeMode) {
@@ -52,9 +57,15 @@ fun KeePasskeyTheme(
         LightColorScheme
     }
 
-    // 根据选中的现代化主题色彩风格动态适配完整的 Material 3 调色板
-    val colorScheme = if (darkTheme) {
-        baseColorScheme.copy(
+    // Material You 动态取色（Android 12+）：开启后以系统壁纸取色为基准，品牌调色盘让位；
+    // 语义安全色 (LocalSecurityColors) 保持固定，不随壁纸漂移
+    val useDynamicColor = dynamicColorEnabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+    val colorScheme = when {
+        useDynamicColor -> {
+            val context = LocalContext.current
+            if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+        }
+        darkTheme -> baseColorScheme.copy(
             primary = themePalette.primaryColorDark,
             onPrimary = themePalette.onPrimaryDark,
             primaryContainer = themePalette.containerColorDark,
@@ -66,8 +77,7 @@ fun KeePasskeyTheme(
             tertiary = themePalette.tertiaryColorDark,
             tertiaryContainer = themePalette.tertiaryContainerDark
         )
-    } else {
-        baseColorScheme.copy(
+        else -> baseColorScheme.copy(
             primary = themePalette.primaryColorLight,
             onPrimary = themePalette.onPrimaryLight,
             primaryContainer = themePalette.containerColorLight,
@@ -79,6 +89,13 @@ fun KeePasskeyTheme(
             tertiary = themePalette.tertiaryColorLight,
             tertiaryContainer = themePalette.tertiaryContainerLight
         )
+    }
+
+    // 动态取色路径下 OLED 纯黑需手动接管（品牌暗色板已内置纯黑方案）
+    val finalColorScheme = if (useDynamicColor && darkTheme && oledBlack) {
+        colorScheme.copy(background = Color.Black, surface = Color.Black)
+    } else {
+        colorScheme
     }
 
     val securityColors = if (darkTheme) {
@@ -115,8 +132,9 @@ fun KeePasskeyTheme(
         LocalSecurityColors provides securityColors
     ) {
         MaterialTheme(
-            colorScheme = colorScheme,
+            colorScheme = finalColorScheme,
             typography = Typography,
+            shapes = Shapes,
             content = content
         )
     }

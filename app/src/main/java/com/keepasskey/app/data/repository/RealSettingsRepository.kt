@@ -41,6 +41,7 @@ class RealSettingsRepository @Inject constructor(
         themeMode = enumValueOrDefault(prefs.getString(KEY_THEME_MODE, null), AppThemeMode.SYSTEM),
         themePalette = enumValueOrDefault(prefs.getString(KEY_THEME_PALETTE, null), AppThemePalette.SAPPHIRE),
         oledBlackOptimization = prefs.getBoolean(KEY_OLED_BLACK, false),
+        dynamicColorEnabled = prefs.getBoolean(KEY_DYNAMIC_COLOR, false),
         appLanguage = enumValueOrDefault(prefs.getString(KEY_APP_LANGUAGE, null), AppLanguage.SYSTEM),
         biometricEnabled = prefs.getBoolean(KEY_BIOMETRIC_ENABLED, true),
         autoLockBackground = prefs.getBoolean(KEY_AUTO_LOCK_BACKGROUND, true),
@@ -77,6 +78,9 @@ class RealSettingsRepository @Inject constructor(
 
     override suspend fun setOledBlackOptimization(enabled: Boolean) =
         edit { it.putBoolean(KEY_OLED_BLACK, enabled) }
+
+    override suspend fun setDynamicColorEnabled(enabled: Boolean) =
+        edit { it.putBoolean(KEY_DYNAMIC_COLOR, enabled) }
 
     override suspend fun setAppLanguage(language: AppLanguage) =
         edit { it.putString(KEY_APP_LANGUAGE, language.name) }
@@ -135,6 +139,7 @@ class RealSettingsRepository @Inject constructor(
         private const val KEY_THEME_MODE = "theme_mode"
         private const val KEY_THEME_PALETTE = "theme_palette"
         private const val KEY_OLED_BLACK = "oled_black_optimization"
+        private const val KEY_DYNAMIC_COLOR = "dynamic_color_enabled"
         private const val KEY_APP_LANGUAGE = "app_language"
         private const val KEY_BIOMETRIC_ENABLED = "biometric_enabled"
         private const val KEY_AUTO_LOCK_BACKGROUND = "auto_lock_background"

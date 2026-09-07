@@ -36,6 +36,7 @@ import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.CreditCard
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.FolderOpen
@@ -80,6 +81,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -807,17 +810,24 @@ fun VaultListContent(
 
     // 删除文件夹确认对话框
     groupToDelete?.let { grp ->
+        val haptic = LocalHapticFeedback.current
         AlertDialog(
             onDismissRequest = { groupToDelete = null },
+            icon = { Icon(Icons.Default.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
             title = { Text(stringResource(R.string.vault_folder_delete)) },
             text = { Text(stringResource(R.string.vault_folder_delete_desc)) },
             confirmButton = {
                 Button(
                     onClick = {
+                        // 危险操作确认：Reject 触感强化「不可逆」心智
+                        haptic.performHapticFeedback(HapticFeedbackType.Reject)
                         onDeleteGroup(grp.id)
                         groupToDelete = null
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error,
+                        contentColor = MaterialTheme.colorScheme.onError
+                    )
                 ) { Text(stringResource(R.string.btn_delete)) }
             },
             dismissButton = {
@@ -828,17 +838,23 @@ fun VaultListContent(
 
     // 清空回收站确认对话框
     if (showEmptyRecycleBinDialog) {
+        val haptic = LocalHapticFeedback.current
         AlertDialog(
             onDismissRequest = { showEmptyRecycleBinDialog = false },
+            icon = { Icon(Icons.Default.DeleteForever, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
             title = { Text(stringResource(R.string.vault_empty_recycle_bin)) },
             text = { Text(stringResource(R.string.vault_empty_recycle_bin_confirm)) },
             confirmButton = {
                 Button(
                     onClick = {
+                        haptic.performHapticFeedback(HapticFeedbackType.Reject)
                         onEmptyRecycleBin()
                         showEmptyRecycleBinDialog = false
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error,
+                        contentColor = MaterialTheme.colorScheme.onError
+                    )
                 ) { Text(stringResource(R.string.btn_empty)) }
             },
             dismissButton = {
