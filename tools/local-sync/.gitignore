@@ -1,0 +1,9 @@
+# 本地联调二进制与运行数据（禁止入库）
+bin/
+minio-data/
+webdav-data/
+certs/key.pem
+certs/minio/private.key
+*.log
+/tmp/
+_s3_*.txt
