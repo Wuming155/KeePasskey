@@ -10,7 +10,7 @@
 | 维度 | 数值 / 状态 | 官方依据与说明 |
 |---|---|---|
 | **Git HEAD** | `7b3e756` (main) | 干净工作区无提交滞后（不含本次治理改动） |
-| **测试基线** | **417 个单元测试全绿**（app 99 / core 21 / crypto 42 / database 146 / sync 109） | `./gradlew test` 强制重跑校验，其中 `LiveSyncServersTest` 12 例默认跳过（需 `-DliveSyncTest`） |
+| **测试基线** | **422 个单元测试全绿**（app 99 / core 21 / crypto 47 / database 146 / sync 109） | `./gradlew test` 强制重跑校验，其中 `LiveSyncServersTest` 12 例默认跳过（需 `-DliveSyncTest`） |
 | **构建状态** | `assembleDebug` + `assembleRelease` (R8) 全量通过 | AGP 9.1.0 / Gradle 9.3.1 / Kotlin 2.4.10 / Hilt 2.60.1 |
 | **系统基线** | **minSdk 36**, compileSdk 36, targetSdk 36 | 仅针对 Android 16+ 深度优化，固化无旧版垫片决策 |
 | **传输安全防线** | 全站强制 HTTPS（`network_security_config.xml` 禁明文 + OkHttp TLS-only），零证书固定 | 对齐 Google Developer Knowledge `pinning not recommended` 指南 |
@@ -27,14 +27,14 @@
 | ID | 领域 | 任务名称 | 来源 | 优先级 | 状态 | 说明 / 证据 |
 |:---:|:---:|---|---|:---:|:---:|---|
 | **TASK-01** | 安全 | **批次 C：HMAC 防篡改回归锁 flaky 排查** | 体检路线图 C | **P0** | ✅ 已修复（2026-09-07） | **根因定位并修复**：`testCorruptHmacBlock` 偶发未抛异常系真实安全缺陷——解析期间 GZip 预读拉取到 HMAC 终止块时，`javax.crypto.CipherInputStream` 将底层 `IOException`（凭据异常）吞掉伪装为 EOF，而 `HmacBlockInputStream` 在校验**通过前**即置 `terminated=true`，`verifyEndOfStream` 误判放行（实测 ~10% 概率篡改文件静默解锁）。整改：`terminated` 仅在终止块 HMAC 校验通过后置位，失败先记录 `terminalValidationFailed` 再抛出，`verifyEndOfStream` 作为权威检查点重放失败（fail-closed）。验收：`testCorruptHmacBlock` 连跑 **20 次零失败**（修复前 40 次内 6 次复现）；`KdbxFile.kt` `!!` 已清理 |
-| **TASK-02** | 平台 | **凭据能力注册实机回归** | Wave 16 遗留 | **P1** | 📋 待验证 | Wave 16 修正了 `meta-data` 名为 `android.credentials.provider`，需真机「设置 → 密码、密钥和自动填充」确认 KeePasskey 出现且能力生效 |
+| **TASK-02** | 平台 | **凭据能力注册实机回归** | Wave 16 遗留 | **P1** | 📋 待验证（代码层已核实） | 2026-09-07 代码层核实：`AndroidManifest.xml` 凭据服务 `meta-data` 名为 `android.credentials.provider`（契约名正确），`@xml/credential_provider_service` 资源存在，Autofill 兼容层 `android.autofill` 同步在位。**剩余动作需真机**：「设置 → 密码、密钥和自动填充」确认 KeePasskey 出现且能力生效 |
 | **TASK-03** | 依赖 | **批次 D：kapt → KSP 迁移 + 启用 built-in Kotlin** | 体检路线图 D | **P2** | 📋 规划 | AGP 9 要求切内置 Kotlin，AGP 10 移除 opt-out；`kapt("hilt-compiler")` → `ksp("hilt-android-compiler")` |
 | **TASK-04** | 存储 | **批次 E：RealSettingsRepository 迁移 Preferences DataStore** | 体检路线图 E | **P2** | 📋 规划 | 替换 SharedPreferences；`SyncCredentialsStore` Keystore AES-256-GCM 方案保持不动 |
 | **TASK-05** | 构建 | **批次 F：Gradle 版本目录（`libs.versions.toml`）** | 体检路线图 F | **P2** | 📋 规划 | 集中 5 模块依赖；核对 `hilt` 1.4.0 / `credentials` 1.6.0 等依赖货币性 |
 | **TASK-06** | 性能 | **批次 G：Baseline Profiles + Startup Profiles** | 体检路线图 G | **P3** | 📋 规划 | 引入 `profileinstaller` + Macrobenchmark，针对冷启动/解码生成 DEX 布局 profile |
 | **TASK-07** | UI/SDK | **批次 H：compileSdk 37 → Material 3 Expressive** | 体检路线图 H | **P3** | 📋 规划 | 需 Compose BOM 2026.08.00+（compileSdk 37）；固化 minSdk 36 决策 |
 | **TASK-08** | 同步 | **周期性后台同步（WorkManager）** | 功能缺口 | **P2** | ❌ 未实现 | 设置项 `periodicBackgroundSyncIntervalMinutes`（默认 30m）与 `wifiOnlySync` 已落地，**无 WorkManager 调度消费方** |
-| **TASK-09** | 安全 | **P0-2 测试代码真实凭据清洗** | 审核报告 P0-2 | **P1** | ❌ 未修 | `Argon2InteropDiagnosticTest.kt:27-52` 仍含真实主密码/密钥，须删该文件改用随机自造向量；`KdbxKeyFileTest.kt:33` 同步清洗 |
+| **TASK-09** | 安全 | **P0-2 测试代码真实凭据清洗** | 审核报告 P0-2 | **P1** | ✅ 已完成（2026-09-07） | **核实完成**：`Argon2InteropDiagnosticTest.kt` 已全部换用合成口令 `TestMasterPassword!2026#Secure` 与自造十六进制密钥/盐（期望值由独立参考实现离线预计算，互操作校验语义不变）；`KdbxKeyFileTest.kt` 为 32B 合成测试字节（0x01..0x20）。仓库级扫描（测试源码密码赋值模式 + `.kdbx`/真实库引用模式）零命中，**仓库内零真实凭据**。FINDINGS P0-2 已在历史提交中标记修复，本次为看板状态同步 |
 | **TASK-10** | 内存 | **TOTP 种子与受保护自定义字段编辑态 CharArray 化** | 加解密审查 B9 | **P2** | ❌ 未修 | `EntryEditUiState.kt:28` `totpSecret: String` 与 `customFields.value: String` 编辑态仍以 String 承载，须同模式 CharArray 化 |
 | **TASK-11** | 安全 | **Autofill Dataset 已解锁分支增加二次确认/认证** | 审核报告 P2-24 | **P2** | ❌ 未修 | `KeePasskeyAutofillService.kt:228` 已解锁分支直接下发明文密码未设 `setAuthentication` |
 | **TASK-12** | 架构 | **设置项 33 个字段持久化与废弃假开关下架** | 审核报告 P1-6 | **P2** | ❌ 未修 | `SettingsViewModel.kt` `ExtendedSettings` 约 35 个开关为纯内存回显，`skipDalVerification` 等假开关须下架 |
@@ -48,7 +48,7 @@
 | **TASK-20** | CI | **GitHub Dependabot / OWASP 依赖漏洞巡检** | 供应链 | **P3** | 📋 评估 | 配置自动化依赖漏洞扫描工作流 |
 | **TASK-21** | 整洁度 | **超 800 行文件拆分与硬编码中文抽取** | 审核报告 P3-22/23 | **P3** | ❌ 未修 | 7 个文件超 800 行（`RealVaultRepository` 1184 行、`SettingsViewModel` 1119 行等）；约 250 处硬编码中文需抽至 `strings.xml` |
 | **TASK-22** | 安全/稳定 | **P3-30：`@Singleton` AutoLockManager 在 `MainActivity.onDestroy` 被 destroy** | FINDINGS 核实 | **P0(真实 Bug)** | ✅ 已修复（2026-09-07） | 移除 `MainActivity.onDestroy` 中的 `autoLockManager.destroy()` 调用（含空覆写与随之成为死代码的 `AutoLockManager.destroy()`）。`AutoLockManager` 为进程级单例（监听 `ProcessLifecycleOwner` + 熄屏广播），生命周期与进程对齐，`initialize()` 幂等，资源随进程退出由系统回收；旋转/配置重建不再销毁自动锁定调度器 |
-| **TASK-23** | 安全 | **P2-9：`parseEcPrivateKey` 缺 `d ∈ [1, n-1]` 范围校验** | FINDINGS 核实 | **P1** | ❌ 未修 | `PasskeyCryptoEngine.kt:364` 用 `BigInteger(1, bytes)` 构造标量，`bytes=0` 即生成非法/可被利用私钥；应 fail-closed |
+| **TASK-23** | 安全 | **P2-9：`parseEcPrivateKey` 缺 `d ∈ [1, n-1]` 范围校验** | FINDINGS 核实 | **P1** | ✅ 已修复（2026-09-07） | `PasskeyCryptoEngine.kt` 新增显式标量范围校验 `validateEcScalarRange`（权威检查点，不依赖库层行为），越界 fail-closed 抛类型化 `CryptoException.InvalidKeyException`；库层构造器 IAE 经 `newEcPrivateKey` 归一为同一异常类型且不作回退放行。补 5 例单测：d=0 / d=n / d>n（32B 标量与 64B hex 文本两形态）均拒绝，边界 d=1 / d=n-1 签名可用 |
 | **TASK-24** | 内存 | **P2-10：旧派生回退 `legacyCipherKey` 未清零** | FINDINGS 核实 | **P2** | ❌ 未修 | `KdbxFile.kt:144` `finally` 仅清 `legacyHmacKey`，`legacyCipherKey` 返回后残留；补 `Arrays.fill` |
 | **TASK-25** | 互操作 | **P2-11：WebDAV Basic 认证 ISO-8859-1 致中文密码 401** | FINDINGS 核实 | **P2** | ❌ 未修 | `WebDavSyncProvider.kt:85` 应发 `charset=UTF-8` 并改 UTF-8 编码 |
 | **TASK-26** | 协议 | **P3-16：S3 SigV4 对 `*` 与 `~` 编码不符 AWS 规范** | FINDINGS 核实 | **P2** | ❌ 未修 | `S3SyncProvider.kt:75` 含 `*`/`~` 对象键会签名不匹配 403 |
@@ -77,13 +77,13 @@
 
 | 报告来源 | 发现总数 | ✅ 已修复 | ⚠️ 部分修复 | ❌ 未修复 | ➖ 不适用 / 记录备查 |
 |---|:---:|:---:|:---:|:---:|:---:|
-| **全量代码审核报告（2026-09-05）** | 93 | 37 | 15 | 39 | 2 |
+| **全量代码审核报告（2026-09-05）** | 93 | 38 | 15 | 38 | 2 |
 | **安全审查报告（2026-09-06 Wave 13）** | 16 | 15 | 0 | 1 | 0 |
 | **加解密实现审查报告（2026-09-06）** | 9 | 8 | 0 | 1 | 0 |
 | **审核报告第七节测试覆盖缺口** | 7 | 2 | 2 | 3 | 0 |
-| **合计** | **131** | **62 (47%)** | **17 (13%)** | **44 (34%)** | **8 (6%)** |
+| **合计** | **131** | **63 (48%)** | **17 (13%)** | **43 (33%)** | **8 (6%)** |
 
-> **关键结论**：在 131 项发现中，所有 P0 级阻断项（7 项）与高危安全缺陷（如自研 PIN 解锁、全站明文流量、旧派生 HMAC 校验、GCM IV 唯一性等）已**100% 修复**；未修复的 44 项主要集中在：① 约 35 个设置项无消费者（P1-6）；② 5 个假动作 SAF 导出（P1-7）；③ 超 800 行文件与硬编码中文（P3-22/23）；④ 测试代码中的假用例与覆盖缺口（P2-36/37）。
+> **关键结论**：在 131 项发现中，所有 P0 级阻断项（7 项）与高危安全缺陷（如自研 PIN 解锁、全站明文流量、旧派生 HMAC 校验、GCM IV 唯一性等）已**100% 修复**；未修复的 43 项主要集中在：① 约 35 个设置项无消费者（P1-6）；② 5 个假动作 SAF 导出（P1-7）；③ 超 800 行文件与硬编码中文（P3-22/23）；④ 测试代码中的假用例与覆盖缺口（P2-36/37）。
 
 ### 3.1 实测核实补充结论（2026-09-07）
 

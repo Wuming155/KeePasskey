@@ -1,6 +1,7 @@
 package com.keepasskey.crypto.passkey
 
 import com.keepasskey.core.model.PasskeyData
+import com.keepasskey.crypto.exception.CryptoException
 import org.bouncycastle.asn1.ASN1InputStream
 import org.bouncycastle.asn1.ASN1Integer
 import org.bouncycastle.asn1.ASN1Sequence
@@ -17,6 +18,7 @@ import org.bouncycastle.crypto.util.PublicKeyFactory
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.math.BigInteger
@@ -284,5 +286,93 @@ class PasskeyCryptoEngineTest {
         assertEquals(passkey.algorithmId, restored.algorithmId)
         assertEquals(passkey.publicKeyBase64, restored.publicKeyBase64)
         assertEquals(passkey.privateKey.readString(), restored.privateKey.readString())
+    }
+
+    // ================= EC 私钥标量范围校验（P2-9 fail-closed） =================
+
+    companion object {
+        /** secp256r1 群阶 n */
+        private val SECP256R1_N = BigInteger(
+            "ffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551", 16
+        )
+
+        /** BigInteger → 定长 32 字节大端标量（左补零 / 去符号位） */
+        private fun toScalar32(value: BigInteger): ByteArray {
+            val raw = value.toByteArray()
+            val unsigned = if (raw.size == 33 && raw[0] == 0.toByte()) raw.copyOfRange(1, 33) else raw
+            require(unsigned.size <= 32) { "标量超出 256 位: $value" }
+            val out = ByteArray(32)
+            System.arraycopy(unsigned, 0, out, 32 - unsigned.size, unsigned.size)
+            return out
+        }
+
+        private val sampleDataToSign: ByteArray =
+            "P2-9 scalar range validation challenge".toByteArray(Charsets.UTF_8)
+    }
+
+    @Test
+    fun `测试 EC 私钥标量 d=0 被 fail-closed 拒绝`() {
+        val zeroScalar = ByteArray(32)
+        assertThrows(CryptoException.InvalidKeyException::class.java) {
+            PasskeyCryptoEngine.signAssertion(
+                PasskeyData.ALGORITHM_ES256, zeroScalar, sampleDataToSign
+            )
+        }
+    }
+
+    @Test
+    fun `测试 EC 私钥标量 d=n 被 fail-closed 拒绝`() {
+        val nScalar = toScalar32(SECP256R1_N)
+        assertThrows(CryptoException.InvalidKeyException::class.java) {
+            PasskeyCryptoEngine.signAssertion(
+                PasskeyData.ALGORITHM_ES256, nScalar, sampleDataToSign
+            )
+        }
+    }
+
+    @Test
+    fun `测试 EC 私钥标量 d大于n 被 fail-closed 拒绝`() {
+        val overNScalar = toScalar32(SECP256R1_N.add(BigInteger.ONE))
+        assertThrows(CryptoException.InvalidKeyException::class.java) {
+            PasskeyCryptoEngine.signAssertion(
+                PasskeyData.ALGORITHM_ES256, overNScalar, sampleDataToSign
+            )
+        }
+    }
+
+    @Test
+    fun `测试边界标量 d=1 与 d=n-1 签名可用`() {
+        // d = 1：合法域下界
+        val oneScalar = toScalar32(BigInteger.ONE)
+        val sigLower = PasskeyCryptoEngine.signAssertion(
+            PasskeyData.ALGORITHM_ES256, oneScalar, sampleDataToSign
+        )
+        assertEquals(0x30.toByte(), sigLower[0]) // ASN.1 SEQUENCE
+
+        // d = n-1：合法域上界
+        val maxScalar = toScalar32(SECP256R1_N.subtract(BigInteger.ONE))
+        val sigUpper = PasskeyCryptoEngine.signAssertion(
+            PasskeyData.ALGORITHM_ES256, maxScalar, sampleDataToSign
+        )
+        assertEquals(0x30.toByte(), sigUpper[0])
+    }
+
+    @Test
+    fun `测试 64 字节 hex 文本形态私钥越界同样被拒绝`() {
+        // 全零 hex 文本（64 个 '0' 的 ASCII 字节流）→ 解析为 d=0 → 拒绝
+        val zeroHexAscii = "0".repeat(64).toByteArray(Charsets.UTF_8)
+        assertThrows(CryptoException.InvalidKeyException::class.java) {
+            PasskeyCryptoEngine.signAssertion(
+                PasskeyData.ALGORITHM_ES256, zeroHexAscii, sampleDataToSign
+            )
+        }
+
+        // d ≥ n 的 hex 文本 → 拒绝
+        val nHexAscii = SECP256R1_N.toString(16).padStart(64, '0').toByteArray(Charsets.UTF_8)
+        assertThrows(CryptoException.InvalidKeyException::class.java) {
+            PasskeyCryptoEngine.signAssertion(
+                PasskeyData.ALGORITHM_ES256, nHexAscii, sampleDataToSign
+            )
+        }
     }
 }

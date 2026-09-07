@@ -361,18 +361,27 @@ object PasskeyCryptoEngine {
         return signer.generateSignature()
     }
 
+    /**
+     * 解析 EC (ES256/P-256) 私钥字节流为签名参数。
+     * 兼容三种输入形态：32 字节原始标量 / 64 字节 hex 文本字节流 / PKCS#8 DER（失败回退 hex 文本）。
+     *
+     * P2-9 整改：标量必须满足 d ∈ [1, n-1]（SEC1 §3.2 私钥有效域），越界（含 d=0 / d≥n）
+     * 一律 fail-closed 抛出本模块类型化 [CryptoException.InvalidKeyException]——杜绝全零字节流
+     * 等病态输入生成非法私钥参与签名运算。显式范围校验为权威检查点，库层 IAE 统一归一为同一异常类型。
+     */
     private fun parseEcPrivateKey(bytes: ByteArray): ECPrivateKeyParameters {
-        return when {
+        val privKey = when {
             bytes.size == 32 -> {
-                ECPrivateKeyParameters(BigInteger(1, bytes), domainParams)
+                newEcPrivateKey(BigInteger(1, bytes))
             }
             bytes.size == 64 -> {
                 // 兼容 hex 字符串对应的 ASCII 字节流
                 try {
-                    val hexStr = String(bytes, Charsets.UTF_8)
-                    ECPrivateKeyParameters(BigInteger(hexStr, 16), domainParams)
+                    newEcPrivateKey(BigInteger(String(bytes, Charsets.UTF_8), 16))
+                } catch (e: CryptoException.InvalidKeyException) {
+                    throw e
                 } catch (e: Exception) {
-                    ECPrivateKeyParameters(BigInteger(1, bytes), domainParams)
+                    newEcPrivateKey(BigInteger(1, bytes))
                 }
             }
             else -> {
@@ -380,11 +389,42 @@ object PasskeyCryptoEngine {
                     val keyParam = PrivateKeyFactory.createKey(bytes) as ECPrivateKeyParameters
                     keyParam
                 } catch (e: Exception) {
-                    // 回退尝试当作 UTF-8 hex
-                    val hexStr = String(bytes, Charsets.UTF_8)
-                    ECPrivateKeyParameters(BigInteger(hexStr, 16), domainParams)
+                    try {
+                        // 回退尝试当作 UTF-8 hex 文本
+                        newEcPrivateKey(BigInteger(String(bytes, Charsets.UTF_8), 16))
+                    } catch (e2: CryptoException.InvalidKeyException) {
+                        throw e2
+                    } catch (e2: Exception) {
+                        throw CryptoException.InvalidKeyException("无法从字节流解析 EC 私钥（所有形态均失败）", e2)
+                    }
                 }
             }
+        }
+        // 权威检查点：显式标量范围校验（不依赖库层构造器的行为）
+        validateEcScalarRange(privKey.d)
+        return privKey
+    }
+
+    /**
+     * 构造 EC 私钥参数；库层对标量越界抛出的 IllegalArgumentException 统一归一为
+     * 本模块类型化的 [CryptoException.InvalidKeyException]（fail-closed，不作任何回退放行）。
+     */
+    private fun newEcPrivateKey(d: BigInteger): ECPrivateKeyParameters {
+        return try {
+            ECPrivateKeyParameters(d, domainParams)
+        } catch (e: IllegalArgumentException) {
+            throw CryptoException.InvalidKeyException("EC 私钥标量越界：d 须满足 [1, n-1]，实际值不合法，已拒绝签名运算", e)
+        }
+    }
+
+    /**
+     * EC 私钥标量有效性校验：d ∈ [1, n-1]，越界 fail-closed。
+     */
+    private fun validateEcScalarRange(d: BigInteger) {
+        if (d.signum() < 1 || d >= ecParams.n) {
+            throw CryptoException.InvalidKeyException(
+                "EC 私钥标量越界：d 须满足 [1, n-1]，实际值不合法，已拒绝签名运算"
+            )
         }
     }
 

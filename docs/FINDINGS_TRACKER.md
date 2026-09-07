@@ -53,7 +53,7 @@
 | **P2-6** | `VariantDictionary` 硬类型转换无长度校验抛异常 | ✅ 已修复 | `VariantDictionary.kt:59` 全面改为 `when` 宽容匹配，失配抛类型化异常并加固 Key/Value 上限 | 否（已修复） | 类型匹配已宽容 |
 | **P2-7** | 原子写盘降级分支先删目标文件再 rename | ⚠️ 部分修复 | `AtomicFileWriter.kt:106` 改为先 renameTo，无备份兜底时拒绝覆盖；但 fsync 缺失 | 低 | 降级分支已先 renameTo；fsync 缺失可补（现行 `SyncCache` 已 `fd.sync()`） |
 | **P2-8** | 外层 Header 缺 masterSeed 长度与算法取值校验 | ✅ 已修复 | `KdbxHeader.kt:254` 强制 MasterSeed 必须 32B，Compression 仅 NONE/GZIP，IV 匹配算法长度 | 否（已修复） | 校验已加 |
-| **P2-9** | `parseEcPrivateKey` 用越界标量构造 KeyParameters | ❌ 未修复 | `PasskeyCryptoEngine.kt:364` 未增加 `d ∈ [1, n-1]` 范围校验 | 中（安全） | 用 `BigInteger(1, bytes)` 构造标量，`bytes=0` 即生成非法/可被利用私钥；应加范围校验并 fail-closed |
+| **P2-9** | `parseEcPrivateKey` 用越界标量构造 KeyParameters | ✅ 已修复 | `PasskeyCryptoEngine.kt` 新增 `validateEcScalarRange` 显式校验（d ∈ [1, n-1]），越界 fail-closed 抛 `CryptoException.InvalidKeyException`；库层 IAE 经 `newEcPrivateKey` 归一为同一类型；5 例标量校验单测（d=0/d=n/d>n 拒绝，d=1/d=n-1 可用，hex 文本形态覆盖） | 否（已修复） | 标量越界 fail-closed |
 | **P2-10** | 旧派生回退分支 `legacyCipherKey` 从不清零 | ❌ 未修复 | `KdbxFile.kt:144` 旧派生失败与成功路径中 `legacyCipherKey` 均未清零 | 中 | `finally` 中只清 `legacyHmacKey`，`legacyCipherKey` 返回后未清零，敏感密钥残留内存；建议补 `Arrays.fill` |
 | **P2-11** | WebDAV Basic 认证使用 ISO-8859-1 致中文密码 401 | ❌ 未修复 | `WebDavSyncProvider.kt:85` 仍按 ISO-8859-1 编码密码 | 中 | 按 RFC 7617 默认 charset 编码，但非 ASCII（中文）密码会 401；应发 `charset=UTF-8` 并改 UTF-8 编码 |
 | **P2-12** | 全网络请求无 `callTimeout` 与退避重试 | ❌ 未修复 | `SyncHttpClientFactory.kt:28` 仅设 connect/read/write timeout，无全局 callTimeout | 低-中 | 缺全局 `callTimeout`（含 DNS 解析）；弱网仍有悬挂风险，建议补 `callTimeout` |
