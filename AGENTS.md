@@ -24,7 +24,7 @@ KeePasskey 是一款使用原生 Kotlin 开发的现代化 Android 密码管理�
 2. **敏感数据铁律**：主密码、密钥用 `CharArray`/`ByteArray` 并显式清零，绝不落地为 `String`，日志严禁敏感明文。
 3. **参考项目只读与文档优先铁律（禁止盲目翻看源码）**：
    - 严禁对 `参考项目/` 源码目录执行无目标的全局 `grep`、`glob` 或大面积扫源码；
-   - 5 个参考项目均已完成详尽的架构分析，集中存放在 **`.codebuddy/skills/references/`**；
+   - 5 个参考项目均已完成详尽的架构分析，集中存放在 **`docs/references/`**；
    - **参考项目优先级层级（严格遵照执行）**：
      1. 🥇 **核心参考**：**KeePassDX** — 与本项目技术栈最贴近（Android 原生 Kotlin），优先参考其 `database`/`crypto` 领域模型、`DatabaseSession` 生命周期与 WebAuthn/Passkey；
      2. 🥈 **次核心参考**：**keepass2android** — 重点参考云同步架构（WebDAV/S3 适配）、文件存储抽象（`IFileStorage`）、本地缓存机制与冲突合并；
@@ -35,18 +35,26 @@ KeePasskey 是一款使用原生 Kotlin 开发的现代化 Android 密码管理�
    - 严禁修改 `参考项目/` 下任何文件，严禁复制其代码入库（许可证约束）。
 4. **工程规则**（单一职责与巨型类阈值、魔法数字、依赖倒置、 Result 错误处理等）详见 `.codebuddy/rules/engineering-rules.md`，写代码前必须遵守。
 5. **单一真相源维护纪律**：**新增或修改任务必须在 `docs/STATUS.md` 统一注册与更新**，保持状态看板实时准确。
+6. **改动提交纪律**：每次完成一组相关修改、且 `.\gradlew.bat test` 通过后，须及时提交 GitHub 记录——`git commit`（并视情况 `git push`）。提交信息遵循本仓库约定：以 `TASK-xx` / `批次 X` 引用任务并简述主题，例如 `fix(TASK-22): 修复旋转屏幕时 AutoLock 单例被销毁`；**勿让改动长时间堆积在工作区**，避免丢失或与后续提交混淆。
 
 ---
 
 ## 详细文档索引
 
+> **文档存放约定**：所有项目文档统一归档于 `docs/`。仅 `.codebuddy/rules/engineering-rules.md` 为 **Agent 功能配置**（工程规则），由系统自动加载、须保留在原位；原 `.codebuddy/skills/` 下的参考项目分析实为文档，已移入 `docs/`（`docs/reference-projects.md`、`docs/references/`）。架构指南（`architecture-guide.md`）因与 `docs/ARCHITECTURE.md` 内容重叠，已删除。
+
 | 文件 | 内容 | 何时阅读 |
 |------|------|----------|
-| [**docs/STATUS.md**](docs/STATUS.md) | **单一真相源**：当前基线、未完成任务唯一看板（21项）、历史提交日志索引 | **开始任何工作前、检查进度时** |
+| [**docs/STATUS.md**](docs/STATUS.md) | **单一真相源**：当前基线、未完成任务唯一看板（42 项）、历史提交日志索引 | **开始任何工作前、检查进度时** |
 | [**docs/FINDINGS_TRACKER.md**](docs/FINDINGS_TRACKER.md) | **历史审查发现跟踪表**：131 项发现的物理核对状态与代码证据 | **确认历史 Bug 是否已修时** |
-| `.codebuddy/rules/engineering-rules.md` | 工程规则：单一职责、敏感数据、Compose 规范、原子写盘、协程调度、防御性安全 | **编写/修改任何代码前** |
-| `.codebuddy/skills/architecture.md` | 5 模块职责与依赖规则、关键架构决策，另见 `ARCHITECTURE.md` | **跨模块改动、新增功能落位前** |
-| `.codebuddy/skills/reference-projects.md` | 参考项目地图：各功能应参照哪个项目的哪些文件 | **实现算法/格式兼容时** |
+| [**docs/HEALTH_CHECK_ROADMAP.md**](docs/HEALTH_CHECK_ROADMAP.md) | **体检批次落地规划**：批次 A–H 的官方依据、范围与验收（对应 TASK-01/03~07） | **执行体检批次整改时** |
+| [**docs/ARCHITECTURE.md**](docs/ARCHITECTURE.md) | 模块依赖拓扑、关键架构决策与目录约定（原根目录 `ARCHITECTURE.md`） | **跨模块改动、新增功能落位前** |
+| [**docs/reference-projects.md**](docs/reference-projects.md) | 参考项目地图：各功能应参照哪个项目的哪些文件、阶段对照（原 `skills/reference-projects.md`，已归档） | **实现算法/格式兼容时** |
+| [**docs/references/**](docs/references/) | 5 个参考项目架构分析（KeePassDX / keepass2android / KeePass-2.61.1 / KeePassXC / Monica） | **实现思路借鉴前** |
+| [**docs/KDBX4与复合密钥实战互操作排查日志.md**](docs/KDBX4与复合密钥实战互操作排查日志.md) | KDBX4 + 复合密钥（密码+KeyFile）真机互操作排查记录 | **排查 KDBX 解析/密钥兼容性时** |
+| `.codebuddy/rules/engineering-rules.md` | **工程规则（功能配置，保留原位）**：单一职责、敏感数据、Compose 规范、原子写盘、协程调度、防御性安全 | **编写/修改任何代码前** |
+
+> 另有 `tools/local-sync/README.md` 为本地同步联调工具的使用说明，随工具保留在 `tools/` 目录，未纳入 `docs/`。
 
 ---
 

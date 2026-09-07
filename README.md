@@ -25,7 +25,7 @@
 | 构建 | Gradle 9.3.1（Wrapper）+ AGP 9.1.0 |
 | UI | **Jetpack Compose**（Material 3），优先声明式、可预览的 Compose 方案 |
 | 异步 | **Kotlin Coroutines + Flow** |
-| 依赖注入 | **Hilt 2.60.1**（当前 kapt，体检批次 B 规划迁移 KSP） |
+| 依赖注入 | **Hilt 2.60.1**（当前 kapt，批次 D 规划迁移 KSP，见 `docs/HEALTH_CHECK_ROADMAP.md`） |
 | 本地缓存 | 自研 `SyncCache`（三哈希磁盘布局 + 原子写盘，位于 `sync` 模块）；**未引入 Room** |
 | 数据库解析 | 自研 `database` 模块：KDBX **v4** 全链路流式解析 / 写回（参考 KeePassDX `database` 与 KeePass 2.61.1 官方 C#） |
 | 加密 | AES-256 / Twofish / ChaCha20 分组加密，Argon2d / Argon2id / AES-KDF（SHA-256）派生（BouncyCastle） |
@@ -105,8 +105,8 @@ sync/                # 同步层：文件存储抽象 + WebDAV / S3 兼容实现
 ## 5. 开发路线图
 
 > 核心原则：**先 UI，后功能**。先把界面与交互流程搭好并确认合适，再逐层接入真实数据。
-> 全生命周期 7 大阶段的完整交付物清单、任务拆解与发布验收门禁详见：[**DELIVERY_PLAN.md**](DELIVERY_PLAN.md)。
-> **进度（2026-09-07 核对）**：7 大阶段已于 2026-09-04 全部竣工（git `b0cdc89`），此后经 Wave 1–16 共 20 轮专项整改收口，各轮记录见 `AGENTS.md`。
+> 全生命周期 7 大阶段的完整交付物清单、任务拆解与发布验收门禁曾收录于已归档的 `DELIVERY_PLAN.md`（已于 2026-09-07 并入 `docs/STATUS.md`）。
+> **进度（2026-09-07 核对）**：7 大阶段已于 2026-09-04 全部竣工（git `b0cdc89`）；此后专项整改（含已冻结的旧 Wave 编号体系）的逐轮记录以 `docs/STATUS.md` §4「历史改动日志索引」为唯一追溯入口；实时未完成任务看板见 `docs/STATUS.md` §2。
 
 ### 阶段 0：工程脚手架
 - [x] 初始化 Android 工程（Gradle Kotlin DSL）
@@ -171,6 +171,8 @@ sync/                # 同步层：文件存储抽象 + WebDAV / S3 兼容实现
 
 ## 5.1 已知未实现（如实记录，勿据勾选状态误判）
 
+> 以下为面向用户的**已知局限摘要**；完整的实时未实现 / 未修复任务清单以 `docs/STATUS.md` §2「未完成工作唯一看板」为唯一真相源（本表不重复维护状态）。
+
 | 项 | 现状 |
 |---|---|
 | 自定义图标上传 / 选择 UI | 模型与序列化层完好，无 UI |
@@ -196,7 +198,7 @@ sync/                # 同步层：文件存储抽象 + WebDAV / S3 兼容实现
 - **KeePassXC**（`参考项目/keepassxc-develop`）：跨平台 C++/Qt 实现，其 `Merger` KDBX 合并引擎与通行密钥属性规范是本项目合并与 Passkey 数据模型的直接算法参考。
 - **Monica**（`参考项目/Monica-main`）：Kotlin 项目，可参考通用工程结构与 Compose 实践。
 
-> 仅作为学习与架构参考，注意各自的开源许可证约束；本仓库代码独立编写，严禁复制其代码入库。各功能的参考定位详见 `.codebuddy/skills/reference-projects.md`；5 个参考项目的深度架构分析文档集中于 `参考项目/*-架构分析.md` 并同步收录在 `.codebuddy/skills/references/`。
+> 仅作为学习与架构参考，注意各自的开源许可证约束；本仓库代码独立编写，严禁复制其代码入库。各功能的参考定位详见 `docs/reference-projects.md`；5 个参考项目的深度架构分析文档集中于 `参考项目/*-架构分析.md` 并同步收录在 `docs/references/`。
 
 ---
 

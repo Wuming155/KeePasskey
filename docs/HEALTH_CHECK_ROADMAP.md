@@ -1,30 +1,37 @@
-# KeePasskey 技术体检整改路线图（Wave 14+）
+# KeePasskey 技术体检整改路线图
 
-> **来源**：2026-09-06 基于 google-developer-knowledge（developer.android.com 官方语料）完成的全量技术体检报告。
-> **前提（新）**：应用不支持用户自建服务器（不含内网 NAS、私有 WebDAV、本地 S3），所有同步通信仅面向正规公网商业云服务。
-> **用途**：体检报告全部条目的分批整改规划。各批次按风险与依赖排序，逐批执行、逐批验收；本文档随批次完成滚动更新。
+> **更新时间**：2026-09-07
+> **文档定位**：本文档为 `STATUS.md` 第 2 节「未完成工作看板」中**体检批次**（TASK-01 / TASK-03 ~ TASK-07）的详细落地规划，仅作执行依据；批次的「状态 / 优先级」以 `STATUS.md` 看板为唯一真相源。
+> **编号规则**：旧「Wave」编号体系已整体冻结（见 `STATUS.md` §4），自本文档起批次统一以 **STATUS TASK ID + Git 提交号**标识。
+> **来源**：基于 google-developer-knowledge（developer.android.com 官方语料）完成的技术体检结论。
+> **前提**：应用不支持用户自建服务器（不含内网 NAS、私有 WebDAV、本地 S3），所有同步通信仅面向正规公网商业云服务。
+> **用途**：体检条目分批整改规划。各批次按风险与依赖排序，逐批执行、逐批验收；本文档随批次完成滚动更新。
 
 ---
 
 ## 批次总览
 
-| 批次 | Wave | 主题 | 官方依据要点 | 状态 |
-| :--: | :--: | --- | --- | :--: |
-| A | **14** | 传输安全：移除证书固定 + 全局强制 HTTPS | security-ssl「pinning not recommended」、security-config | ✅ 已完成 |
-| **G** | **20** | 标准库对齐与安全纵深：PSL 全量接入 + HMAC 归一 JCE + readFully 等价收敛 | publicsuffix.org 官方算法、RFC 4231/2104、JDK DataInputStream | ✅ 已完成（安全项插队，先于批次 B 执行） |
-| **H** | **17** | HMAC 防篡改回归锁 flaky 排查与定型 | KDBX4 HMAC 块流规范（终止块必校验）；篡改检测零漏报 | ⚠️ 已立项（安全项插队，先于批次 B） |
-| B | 待定 | kapt→KSP 迁移 + 启用 built-in Kotlin | kapt maintenance mode；AGP 10 移除 opt-out | 📋 规划 |
-| C | 待定 | Settings 迁移 Preferences DataStore | DataStore「aimed at replacing SharedPreferences」 | 📋 规划 |
-| D | 待定 | Gradle 版本目录 + 依赖货币性刷新 | migrate-to-catalogs；AndroidX 版本渠道 | 📋 规划 |
-| E | 待定 | Baseline Profiles + Startup Profiles | 首启/交互约 30% 提升；AGP 9.1 全支持 | 📋 规划 |
-| F | 待定 | compileSdk 37 → Material 3 Expressive；minSdk 决策固化 | M3 Expressive 配合 Android 16 视觉 | 📋 规划 |
-| 持续 | — | Passkey UX 最佳实践 / 依赖周期核对 / 配置缓存评估 | credential-manager UX 指南 | 🔄 长期 |
+| 批次 | TASK | 主题 | 官方依据要点 |
+| :--: | :--: | --- | --- |
+| A | — | 传输安全：移除证书固定 + 全局强制 HTTPS | security-ssl「pinning not recommended」、security-config |
+| B | — | 标准库对齐与安全纵深：PSL 全量接入 + HMAC 归一 JCE + readFully 等价收敛 | publicsuffix.org 官方算法、RFC 4231/2104、JDK DataInputStream |
+| C | TASK-01 | HMAC 防篡改回归锁 flaky 排查与定型 | KDBX4 HMAC 块流规范（终止块必校验）；篡改检测零漏报 |
+| D | TASK-03 | kapt→KSP 迁移 + 启用 built-in Kotlin | kapt maintenance mode；AGP 10 移除 opt-out |
+| E | TASK-04 | Settings 迁移 Preferences DataStore | DataStore「aimed at replacing SharedPreferences」 |
+| F | TASK-05 | Gradle 版本目录 + 依赖货币性刷新 | migrate-to-catalogs；AndroidX 版本渠道 |
+| G | TASK-06 | Baseline Profiles + Startup Profiles | 首启/交互约 30% 提升；AGP 9.1 全支持 |
+| H | TASK-07 | compileSdk 37 → Material 3 Expressive；minSdk 决策固化 | M3 Expressive 配合 Android 16 视觉 |
+| 持续 | — | Passkey UX 最佳实践 / 依赖周期核对 / 配置缓存评估 | credential-manager UX 指南 |
 
-> **Wave 编号说明（2026-09-07 修订）**：B–F 原预分配的 Wave 15–19 已被实际交付工作占用——Wave 15 为「同步凭据链路 CharArray 化」（`c3dccbc`），Wave 16 为「系统凭据服务真实化 + 同步稳定性收口」（`7b3e756`），Wave 17 预留给插队批次 H。故 B–F 的 Wave 号不再预先绑定，**执行时按当时最新 Wave 号顺延**（下一批次 B 预计为 Wave 18）。
+> **状态唯一真相源**：上表仅列批次规划（批次 / TASK / 主题 / 依据），**不维护状态列**；各批次的实时状态与优先级以 `STATUS.md` §2「未完成工作唯一看板」为唯一真相源（本文档开头已声明）。批次 A / B 已完成，提交号见 `STATUS.md` §4。
+
+> **关联提交**：批次 A（`a7efa12`）、B（`b05d18b`）及全部历史改动统一登记于 `STATUS.md` §4 历史改动日志索引；批次 C/D/E/F/G/H 完成后以提交号回填该节，本文档不再重复维护提交号。
+
+> **编号说明**：批次按执行顺序连续编号为 **A~H**（A/B 已完成，C=进行中 HMAC 排查，D~H 规划中）；旧 Wave 编号体系已冻结（见 `STATUS.md` §4），本文档不再使用 Wave 编号。批次状态/优先级以 `STATUS.md` §2 为唯一真相源，完成以 Git 提交号登记于 `STATUS.md` §4 改动日志。
 
 ---
 
-## 批次 A（Wave 14，已完成）：传输安全整改
+## 批次 A（提交 `a7efa12`）：传输安全整改
 
 **范围与落地**：
 1. **证书固定全量移除**（官方依据：`developer.android.com/privacy-and-security/security-ssl`——"Certificate pinning ... is not recommended for Android apps"；锁定会阻碍云厂商常规证书轮换导致连接阻断，且本应用仅面向商业云、无自建服务器场景）：
@@ -35,18 +42,18 @@
    - 移除后证书验证**完全依赖系统默认 CA 链**（代码库本无自定义 TrustManager，不新增任何信任逻辑）。
 2. **全站强制 HTTPS（双层防御）**：
    - 平台层：新增 `app/src/main/res/xml/network_security_config.xml`——`<base-config cleartextTrafficPermitted="false">` + 仅系统 CA 信任锚（显式固化 targetSdk 28+ 默认行为，并拒绝用户 CA 注入 MITM），零 domain-config 豁免；Manifest 挂载 `android:networkSecurityConfig`；
-   - 传输层：保留 Wave 12 的 OkHttp `ConnectionSpec` TLS-only（排除 CLEARTEXT）防线；
+   - 传输层：保留 OkHttp `ConnectionSpec` TLS-only（排除 CLEARTEXT）防线；
    - 输入层：`SettingsViewModel.updateWebDavConfig/updateS3Config` 保存期 https-only 归一化校验（无 scheme 自动补 `https://`，显式 `http://` 拒绝并反馈）；`WebDavSyncProvider`/`S3SyncProvider` 构造期 fail-fast 抛类型化 `SyncException.InvalidEndpointError`（豁免 MockWebServer 回环测试注入路径），`runSyncCycle` 将其上浮为用户可理解的同步失败反馈。
 3. **S3 Path-Style 保留**：`usePathStyle` 字段/UI 开关/存储键保留（Cloudflare R2 等商业 S3 兼容服务适用），仅修正「自建 MinIO」相关中英文案。
-4. **作废旧设计**：`DELIVERY_PLAN.md` 阶段 5「自签名 SSL/TLS 证书信任与局域网 HTTP 明文豁免」表述作废改写。
+4. **作废旧设计**：旧交付计划中关于「自签名 SSL/TLS 证书信任与局域网 HTTP 明文豁免」的表述作废改写。
 
 **验收**：全模块单测全绿（含新增：遗留键清除、http:// 构造期拒绝、https/无 scheme 放行、系统 CA 链无 pin 装配断言）+ `assembleDebug` 通过；`certPin|pinnedHosts|CertificatePinner` 生产代码零残留（仅余守卫性注释/负向断言与遗留清理代码）。
 
 ---
 
-## 批次 G（Wave 20，已完成）：标准库对齐与安全纵深
+## 批次 B（提交 `b05d18b`）：标准库对齐与安全纵深
 
-> 安全项插队说明：P1（PSL 盲区）属 Passkey 安全核心，优先于批次 B 执行；Wave 编号自批次 F 顺延为 20（批次 B–F 的编号规则已于 2026-09-07 修订，见「批次总览」表下说明）。
+> 安全项插队说明：P1（PSL 盲区）属 Passkey 安全核心，优先于批次 D 执行。
 
 **范围与落地**：
 1. **P1 `DomainMatcher` 接入完整 PSL**（安全整改）：
@@ -63,13 +70,13 @@
    - 手写 while 循环换 `DataInputStream.readFully`（「读满否则抛 EOFException」语义逐字等价）；**报告的 `readNBytes(length)` 方案否决**（"up to" 短读静默返回，破坏 KDBX 严格长度解析）；
    - 实现偏差修正：方案原稿 `.use { }` 包装会经 `DataInputStream.close` 传导关闭底层流、破坏 KDBX 流式解析，实际落地为不关闭包装流；`intTo4Bytes`/`bytesToInt` 等小端数值函数保留（KDBX 小端解析标准做法，KAT 已覆盖）。
 
-**验收**：全模块单测全绿（**该批次交付时基线为 350 例**；截至 2026-09-07 全量基线已为 417 例，增量为后续 Wave 15/16 所致，非本批次回退）；`readNBytes` 否决理由与 `.use` 包装关闭底层流的坑均已在代码注释中固化。
+**验收**：全模块单测全绿（该批次交付时基线为 350 例；截至 2026-09-07 全量基线已为 417 例，增量为后续提交所致，非本批次回退）；`readNBytes` 否决理由与 `.use` 包装关闭底层流的坑均已在代码注释中固化。
 
 ---
 
-## 批次 H（Wave 17）：HMAC 防篡改回归锁 flaky 排查与定型
+## 批次 C（TASK-01）：HMAC 防篡改回归锁 flaky 排查与定型
 
-> **安全项插队说明（2026-09-07 立项）**：`KdbxCompatibilityAndSecurityTest.testCorruptHmacBlockThrowsKdbxInvalidCredentialsException` 守护的是 **KDBX 防篡改检测**这一核心安全属性（被篡改的密码库必须被拒绝加载），且已**实证存在不确定性**（非理论风险），故优先于批次 B 执行。
+> **安全项插队说明**：`KdbxCompatibilityAndSecurityTest.testCorruptHmacBlockThrowsKdbxInvalidCredentialsException` 守护的是 **KDBX 防篡改检测**这一核心安全属性（被篡改的密码库必须被拒绝加载），且已**实证存在不确定性**（非理论风险），故优先于批次 D 执行。
 
 **问题陈述**：
 - **现象**：篡改 KDBX4 文件末尾字节后加载，期望抛 `KdbxInvalidCredentialsException`，但**偶发**出现 `nothing was thrown`——即篡改后的库被成功加载。实测同一份代码 6 次运行失败 1 次（单独执行该类稳定通过，全量执行时间歇复现）。
@@ -93,7 +100,7 @@
 
 ---
 
-## 批次 B：kapt→KSP 迁移 + 启用 built-in Kotlin
+## 批次 D（TASK-03）：kapt→KSP 迁移 + 启用 built-in Kotlin
 
 **官方依据**：`developer.android.com/build/migrate-to-ksp`——"Kapt is now in maintenance mode, and we recommend that you migrate from kapt to KSP"；KSP 对 Kotlin 代码直接分析，构建最高快 2x。`migrate-to-built-in-kotlin`——AGP 9.0 起内置 Kotlin 与 `org.jetbrains.kotlin.kapt` 插件**不兼容**；`android.builtInKotlin=false` 的 opt-out 在 **AGP 10.0 将被移除**（当前 `gradle.properties` 的 `builtInKotlin=false`/`newDsl=false` 是死路配置）。
 
@@ -110,7 +117,7 @@
 
 ---
 
-## 批次 C：RealSettingsRepository 迁移 Preferences DataStore
+## 批次 E（TASK-04）：RealSettingsRepository 迁移 Preferences DataStore
 
 **官方依据**：`developer.android.com/topic/libraries/architecture/datastore`——"Jetpack DataStore is a new and improved data storage solution aimed at replacingSharedPreferences. Built on Kotlin coroutines and Flow"；提供 `SharedPreferencesMigration` 平滑迁移；事务性、异步、一致性强于 SharedPreferences。
 
@@ -127,7 +134,7 @@
 
 ---
 
-## 批次 D：Gradle 版本目录 + 依赖货币性刷新
+## 批次 F（TASK-05）：Gradle 版本目录 + 依赖货币性刷新
 
 **官方依据**：`developer.android.com/build/migrate-to-catalogs`——版本目录使多模块依赖与插件集中、类型安全、可辅助补全；本项目 5 模块正是最大受益场景。
 
@@ -145,7 +152,7 @@
 
 ---
 
-## 批次 E：Baseline Profiles + Startup Profiles
+## 批次 G（TASK-06）：Baseline Profiles + Startup Profiles
 
 **官方依据**：`developer.android.com/topic/performance/baselineprofiles`——Baseline Profiles 使首启与关键交互约 **30%** 提速；官方建议 **Baseline + Startup Profiles 同时使用**（后者优化 DEX 布局再提升约 15%）；AGP **9.1** 已支持库模块全源集目录。
 
@@ -160,7 +167,7 @@
 
 ---
 
-## 批次 F：compileSdk 37 → Material 3 Expressive；minSdk 决策固化
+## 批次 H（TASK-07）：compileSdk 37 → Material 3 Expressive；minSdk 决策固化
 
 **官方依据**：`developer.android.com/develop/ui/compose/designsystems/material3`——Material 3 Expressive 是 "the next evolution of Material Design ... complements the Android 16 visual style and system UI"；需 Compose BOM 2026.08.00+（Compose 1.12.x，要求 compileSdk 37）。
 
@@ -175,7 +182,7 @@
 
 ---
 
-## 持续项（不设 Wave，纳入例行维护）
+## 持续项（不设 TASK，纳入例行维护）
 
 1. **Credential Manager / Passkey UX 最佳实践**（官方 2026 指南）：设置页展示每个 Passkey 元数据（rp.id/创建时间/绑定）；在账户创建、登录后、恢复、密码重置等关键时刻引导创建 Passkey；关注 Digital Credential API 与 Verified Email via Credential Manager（2026-04）新能力。
 2. **依赖版本周期核对**：每季度按 AndroidX 稳定渠道核对一次；安全关键组件（credentials/biometric/crypto）坚持稳定渠道优先。
