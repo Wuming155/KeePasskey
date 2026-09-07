@@ -3,12 +3,16 @@ package com.keepasskey.app.autofill
 import android.app.PendingIntent
 import android.app.assist.AssistStructure
 import android.content.Intent
+import android.graphics.drawable.Icon
 import android.os.CancellationSignal
 import android.service.autofill.AutofillService
 import android.service.autofill.Dataset
+import android.service.autofill.Field
 import android.service.autofill.FillCallback
 import android.service.autofill.FillRequest
 import android.service.autofill.FillResponse
+import android.service.autofill.InlinePresentation
+import android.service.autofill.Presentations
 import android.service.autofill.SaveCallback
 import android.service.autofill.SaveInfo
 import android.service.autofill.SaveRequest
@@ -16,14 +20,21 @@ import android.util.Log
 import android.view.autofill.AutofillId
 import android.view.autofill.AutofillValue
 import android.widget.RemoteViews
+import android.widget.inline.InlinePresentationSpec
+import android.view.inputmethod.InlineSuggestionsRequest
+import androidx.autofill.inline.UiVersions
+import androidx.autofill.inline.v1.InlineSuggestionUi
+import com.keepasskey.app.MainActivity
 import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.passkey.DomainMatcher
 import com.keepasskey.core.model.PasskeyData
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Inject
@@ -34,7 +45,12 @@ import javax.inject.Inject
  * 1. 结构树纯库化抽象扫描与表单字段识别；
  * 2. 库锁定时响应单项解锁引导 Action；
  * 3. 库解锁时基于严格域名与包名匹配输出候选数据集；
- * 4. onSaveRequest 自动捕获新密码并安全写回。
+ * 4. onSaveRequest 自动捕获新密码并安全写回（与 CM 保存通道共用 saveAutofillCredential，
+ *    写入层内容级幂等查重，防双通道重复落库）；
+ * 5. IME 内联建议（InlinePresentation）：请求侧声明 supportsInlineSuggestions 且 IME 支持
+ *    v1 模板时，Dataset 携带官方 androidx.autofill.inline v1 内容 Slice 以内联形式呈现；
+ * 6. 生命周期契约（官方：调用无状态、服务仅请求期间绑定）：cancellationSignal 取消即级联
+ *    取消协程，onDestroy 取消全部在途任务，杜绝解绑后空转与迟到回调。
  */
 @AndroidEntryPoint
 class KeePasskeyAutofillService : AutofillService() {
@@ -51,7 +67,7 @@ class KeePasskeyAutofillService : AutofillService() {
     ) {
         if (cancellationSignal.isCanceled) return
 
-        serviceScope.launch {
+        val job = serviceScope.launch {
             try {
                 withTimeoutOrNull(AUTOFILL_TIMEOUT_MS) {
                     processFillRequest(request, callback)
@@ -59,11 +75,16 @@ class KeePasskeyAutofillService : AutofillService() {
                     Log.w(TAG, "onFillRequest 超时 ($AUTOFILL_TIMEOUT_MS ms)")
                     callback.onSuccess(null)
                 }
+            } catch (c: CancellationException) {
+                // 系统侧已取消请求：静默退出，不再回调
+                throw c
             } catch (t: Throwable) {
                 Log.e(TAG, "onFillRequest 发生异常", t)
                 callback.onFailure(t.message)
             }
         }
+        // 生命周期接线：系统取消请求（界面切换/新聚焦事件）即级联取消协程，不空转至超时预算
+        cancellationSignal.setOnCancelListener { job.cancel() }
     }
 
     private suspend fun processFillRequest(
@@ -108,6 +129,9 @@ class KeePasskeyAutofillService : AutofillService() {
         }
 
         val responseBuilder = FillResponse.Builder()
+        // 内联建议通道（IME）：请求侧携带 InlineSuggestionsRequest 且声明 supportsInlineSuggestions
+        // 时才构建 InlinePresentation，否则 Dataset 自动回退为下拉/填充对话框展示
+        val inlineRequest = request.inlineSuggestionsRequest
 
         // 库已锁定：提供解锁 Action Dataset
         if (vaultRepository.isLocked()) {
@@ -126,9 +150,30 @@ class KeePasskeyAutofillService : AutofillService() {
                 unlockIntent,
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
             )
-            val dsBuilder = Dataset.Builder(views)
-            if (usernameId != null) dsBuilder.setValue(usernameId, null)
-            if (passwordId != null) dsBuilder.setValue(passwordId, null)
+            val dsBuilder = Dataset.Builder(
+                Presentations.Builder()
+                    .setMenuPresentation(views)
+                    .setDialogPresentation(views)
+                    .apply {
+                        buildInlinePresentation(
+                            inlineRequest,
+                            getString(R.string.cred_autofill_unlock_prompt),
+                            getString(R.string.cred_autofill_locked_subtitle)
+                        )?.let { setInlinePresentation(it) }
+                    }
+                    .build()
+            )
+            if (usernameId != null) {
+                // 认证数据集语义（官方 Dataset.Builder.setValue 文档）：value 传 null 表示
+                // 该字段属于本数据集但值在解锁后才可用（新版 Field.Builder.setValue 已标注
+                // 非空，null 值走旧版 setValue 重载）
+                @Suppress("DEPRECATION")
+                dsBuilder.setValue(usernameId, null)
+            }
+            if (passwordId != null) {
+                @Suppress("DEPRECATION")
+                dsBuilder.setValue(passwordId, null)
+            }
             dsBuilder.setAuthentication(pendingIntent.intentSender)
 
             responseBuilder.addDataset(dsBuilder.build())
@@ -161,12 +206,30 @@ class KeePasskeyAutofillService : AutofillService() {
                 setTextViewText(R.id.tv_subtitle, entry.title)
             }
 
-            val dsBuilder = Dataset.Builder(views)
+            val dsBuilder = Dataset.Builder(
+                Presentations.Builder()
+                    .setMenuPresentation(views)
+                    .setDialogPresentation(views)
+                    .apply {
+                        buildInlinePresentation(
+                            inlineRequest,
+                            username.ifBlank { entry.title },
+                            entry.title
+                        )?.let { setInlinePresentation(it) }
+                    }
+                    .build()
+            )
             if (usernameId != null && username.isNotEmpty()) {
-                dsBuilder.setValue(usernameId, AutofillValue.forText(username))
+                dsBuilder.setField(
+                    usernameId,
+                    Field.Builder().setValue(AutofillValue.forText(username)).build()
+                )
             }
             if (passwordId != null && password.isNotEmpty()) {
-                dsBuilder.setValue(passwordId, AutofillValue.forText(password))
+                dsBuilder.setField(
+                    passwordId,
+                    Field.Builder().setValue(AutofillValue.forText(password)).build()
+                )
             }
             responseBuilder.addDataset(dsBuilder.build())
         }
@@ -180,6 +243,43 @@ class KeePasskeyAutofillService : AutofillService() {
         }
 
         callback.onSuccess(responseBuilder.build())
+    }
+
+    /**
+     * 构建 IME 内联建议展示（官方 androidx.autofill.inline v1 内容模型 → Slice）。
+     * 请求侧未携带 [InlineSuggestionsRequest]、IME spec 未声明 v1 UI 模板或构建失败时
+     * 返回 null，调用方 Dataset 不携带内联展示，自动回退为下拉/填充对话框呈现。
+     */
+    private fun buildInlinePresentation(
+        inlineRequest: InlineSuggestionsRequest?,
+        title: CharSequence,
+        subtitle: CharSequence
+    ): InlinePresentation? {
+        if (inlineRequest == null) return null
+        val spec: InlinePresentationSpec = inlineRequest.inlinePresentationSpecs.firstOrNull()
+            ?: return null
+        return try {
+            // 官方裁决：仅当 IME spec 声明支持 v1 UI 模板时才构建 Slice
+            if (!UiVersions.getVersions(spec.style).contains(UiVersions.INLINE_UI_VERSION_1)) {
+                return null
+            }
+            // v1 内容构建器要求 attribution PendingIntent（系统内联卡片上打开提供方应用的入口）
+            val attribution = PendingIntent.getActivity(
+                this,
+                REQUEST_CODE_INLINE_ATTRIBUTION,
+                Intent(this, MainActivity::class.java),
+                PendingIntent.FLAG_IMMUTABLE
+            )
+            val content = InlineSuggestionUi.newContentBuilder(attribution)
+                .setTitle(title)
+                .setSubtitle(subtitle)
+                .setStartIcon(Icon.createWithResource(this, R.drawable.ic_launcher))
+                .build()
+            InlinePresentation(content.slice, spec, false)
+        } catch (t: Throwable) {
+            Log.w(TAG, "构建 InlinePresentation 失败，回退下拉展示", t)
+            null
+        }
     }
 
     override fun onSaveRequest(
@@ -244,11 +344,20 @@ class KeePasskeyAutofillService : AutofillService() {
                 } else {
                     callback.onSuccess()
                 }
+            } catch (c: CancellationException) {
+                // 服务解绑/协程取消：静默退出，不再回调
+                throw c
             } catch (t: Throwable) {
                 Log.e(TAG, "onSaveRequest 保存凭据失败", t)
                 callback.onFailure(t.message)
             }
         }
+    }
+
+    override fun onDestroy() {
+        // 无状态服务契约（官方）：系统解绑即取消全部在途协程，杜绝解绑后空转与迟到回调
+        serviceScope.cancel()
+        super.onDestroy()
     }
 
     private fun traverseStructure(
@@ -305,5 +414,6 @@ class KeePasskeyAutofillService : AutofillService() {
         private const val AUTOFILL_TIMEOUT_MS = 4_000L
         private const val MAX_DATASET_COUNT = 8
         private const val REQUEST_CODE_UNLOCK = 2001
+        private const val REQUEST_CODE_INLINE_ATTRIBUTION = 2002
     }
 }

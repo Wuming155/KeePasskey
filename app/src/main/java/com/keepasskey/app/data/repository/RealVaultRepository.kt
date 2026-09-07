@@ -1123,6 +1123,16 @@ class RealVaultRepository @Inject constructor(
 
             val pwdProtected = ProtectedString(passwordChars, isProtected = true)
             if (matchedEntry != null) {
+                // 双通道防重（2026-09 共存审查）：Autofill SaveInfo 与 Credential Manager
+                // 保存双通道均收敛于本方法。当目标条目与新凭据内容完全一致（同用户名、同密码，
+                // 经 ProtectedString HMAC 等值标签常时比较，不解密、不物化明文）时，保存为
+                // 幂等操作：直接返回成功并跳过落库——防止用户在两个保存弹窗各确认一次导致
+                // history 修订翻倍与同步脏标记污染。
+                val passwordUnchanged = matchedEntry.password == pwdProtected
+                val usernameUnchanged = matchedEntry.userName.isNotEmpty() || username.isBlank()
+                if (passwordUnchanged && usernameUnchanged) {
+                    return com.keepasskey.core.result.KdbxResult.Success(Unit)
+                }
                 var updated = matchedEntry.withField(KdbxConstants.Fields.PASSWORD, pwdProtected)
                 if (updated.userName.isEmpty() && username.isNotBlank()) {
                     updated = updated.withField(KdbxConstants.Fields.USER_NAME, username)

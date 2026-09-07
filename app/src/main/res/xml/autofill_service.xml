@@ -1,4 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+    supportsInlineSuggestions：声明本服务支持 IME 键盘内联建议通道
+    （Dataset 需携带 InlinePresentation 才会以内联形式呈现）。
+-->
 <autofill-service
     xmlns:android="http://schemas.android.com/apk/res/android"
-    android:settingsActivity="com.keepasskey.app.MainActivity" />
+    android:settingsActivity="com.keepasskey.app.MainActivity"
+    android:supportsInlineSuggestions="true" />

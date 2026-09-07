@@ -85,6 +85,9 @@ dependencies {
     kapt("com.google.dagger:hilt-compiler:2.60.1")
     implementation("androidx.hilt:hilt-navigation-compose:1.3.0")
     implementation("androidx.credentials:credentials:1.6.0")
+    // Autofill IME 内联建议（官方 androidx.autofill.inline v1 内容模型）：
+    // 服务侧 InlineSuggestionUi Slice 构建自 1.1.0 起可用，1.3.0 为当前稳定版
+    implementation("androidx.autofill:autofill:1.3.0")
     // TOTP 二维码扫描（断点5 整改：扫码按钮真实化）
     implementation("com.journeyapps:zxing-android-embedded:4.3.0")
 

@@ -37,9 +37,11 @@ import com.keepasskey.app.security.BiometricAuthManager
 import com.keepasskey.app.security.BiometricStatus
 import com.keepasskey.core.model.PasskeyData
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
@@ -78,7 +80,7 @@ class KeePasskeyCredentialProviderService : CredentialProviderService() {
     ) {
         if (cancellationSignal.isCanceled) return
 
-        serviceScope.launch {
+        val job = serviceScope.launch {
             try {
                 val response = withTimeoutOrNull(TIMEOUT_MS) {
                     buildBeginGetResponse(request)
@@ -87,6 +89,9 @@ class KeePasskeyCredentialProviderService : CredentialProviderService() {
                     BeginGetCredentialResponse.Builder().build()
                 }
                 callback.onResult(response)
+            } catch (c: CancellationException) {
+                // 系统侧已取消请求：静默退出，不再回调
+                throw c
             } catch (t: Throwable) {
                 Log.e(TAG, "onBeginGetCredential 处理异常", t)
                 callback.onError(
@@ -97,6 +102,8 @@ class KeePasskeyCredentialProviderService : CredentialProviderService() {
                 )
             }
         }
+        // 生命周期接线：系统取消请求即级联取消协程（无状态契约，杜绝解绑后空转）
+        cancellationSignal.setOnCancelListener { job.cancel() }
     }
 
     private suspend fun buildBeginGetResponse(request: BeginGetCredentialRequest): BeginGetCredentialResponse {
@@ -132,7 +139,7 @@ class KeePasskeyCredentialProviderService : CredentialProviderService() {
     ) {
         if (cancellationSignal.isCanceled) return
 
-        serviceScope.launch {
+        val job = serviceScope.launch {
             try {
                 val response = withTimeoutOrNull(TIMEOUT_MS) {
                     buildBeginCreateResponse(request)
@@ -141,6 +148,9 @@ class KeePasskeyCredentialProviderService : CredentialProviderService() {
                     BeginCreateCredentialResponse.Builder().build()
                 }
                 callback.onResult(response)
+            } catch (c: CancellationException) {
+                // 系统侧已取消请求：静默退出，不再回调
+                throw c
             } catch (t: Throwable) {
                 Log.e(TAG, "onBeginCreateCredential 异常", t)
                 callback.onError(
@@ -151,6 +161,8 @@ class KeePasskeyCredentialProviderService : CredentialProviderService() {
                 )
             }
         }
+        // 生命周期接线：系统取消请求即级联取消协程（无状态契约，杜绝解绑后空转）
+        cancellationSignal.setOnCancelListener { job.cancel() }
     }
 
     private suspend fun buildBeginCreateResponse(request: BeginCreateCredentialRequest): BeginCreateCredentialResponse {
@@ -244,6 +256,12 @@ class KeePasskeyCredentialProviderService : CredentialProviderService() {
         callback: OutcomeReceiver<Void?, ClearCredentialException>
     ) {
         callback.onResult(null)
+    }
+
+    override fun onDestroy() {
+        // 无状态服务契约（官方）：系统解绑即取消全部在途协程，杜绝解绑后空转与迟到回调
+        serviceScope.cancel()
+        super.onDestroy()
     }
 
     /**
