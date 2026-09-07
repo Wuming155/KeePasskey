@@ -41,8 +41,25 @@ class DebugLogBuffer @Inject constructor() {
 
     fun exportText(): String = synchronized(lock) { lines.joinToString("\n") }
 
+    /**
+     * 断点整改：脱敏导出——兑现设置页「导出前自动移除账号名与网址字段」的 UI 承诺。
+     * 缓冲按契约只记录非敏感运行时事件，但异常/结果消息可能带出主机地址或账号，
+     * 导出前统一做确定性脱敏：先整体移除 URL（内部可能嵌邮箱），再移除独立邮箱。
+     */
+    fun exportSanitizedText(): String = synchronized(lock) {
+        lines.joinToString("\n")
+            .replace(URL_PATTERN, REDACTED_URL)
+            .replace(EMAIL_PATTERN, REDACTED_ACCOUNT)
+    }
+
     companion object {
         private const val MAX_LINES = 500
         private val TS_FORMAT = DateTimeFormatter.ofPattern("HH:mm:ss.SSS")
+
+        // 脱敏规则：URL 须先于邮箱处理（避免 URL 内嵌邮箱被二次匹配后残留 scheme 碎片）
+        private val URL_PATTERN = Regex("https?://\\S+")
+        private val EMAIL_PATTERN = Regex("[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}")
+        private const val REDACTED_URL = "<redacted-url>"
+        private const val REDACTED_ACCOUNT = "<redacted-account>"
     }
 }

@@ -24,8 +24,7 @@ kotlin {
 
 dependencies {
     implementation(project(":core"))
-    // P2 整改：与 app 模块同版；1.18.0+ 要求 compileSdk ≥ 36.1/37，本项目锁定 compileSdk 36
-    implementation("androidx.core:core-ktx:1.17.0")
+    // P3-6 整改：移除从未使用的 androidx.core:core-ktx（三模块源码零 androidx 导入）
     implementation("org.bouncycastle:bcprov-jdk18on:1.79")
 
     testImplementation("junit:junit:4.13.2")

@@ -488,13 +488,17 @@ fun KeePasskeyApp() {
                 composable(Screen.SettingsDebug.route) {
                     val settingsViewModel: SettingsViewModel = hiltViewModel()
                     val settingsState by settingsViewModel.uiState.collectAsStateWithLifecycle()
+                    val debugExportFeedback by settingsViewModel.debugExportFeedback.collectAsStateWithLifecycle()
                     DebugSettingsScreen(
                         uiState = settingsState,
                         onBackClick = { navController.popBackStack() },
                         onDebugLogToggle = settingsViewModel::setDebugLogEnabled,
                         onVerboseSyncLogToggle = settingsViewModel::setVerboseSyncLog,
                         onRefreshLogs = settingsViewModel::refreshDebugLogs,
-                        onClearLogs = settingsViewModel::clearDebugLogs
+                        onClearLogs = settingsViewModel::clearDebugLogs,
+                        onExportLogs = settingsViewModel::exportDebugLogs,
+                        exportFeedback = debugExportFeedback,
+                        onClearExportFeedback = settingsViewModel::clearDebugExportFeedback
                     )
                 }
 

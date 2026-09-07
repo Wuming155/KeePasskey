@@ -1,5 +1,8 @@
 package com.keepasskey.app.ui.screens.settings.subscreens
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -42,6 +45,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -59,8 +63,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.keepasskey.app.R
 import com.keepasskey.app.ui.components.BentoCard
+import com.keepasskey.app.ui.model.UiMessage
+import com.keepasskey.app.ui.model.resolveText
 import com.keepasskey.app.ui.screens.settings.SettingsUiState
 import kotlinx.coroutines.launch
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
+
+/** 导出文件名时间戳格式（不含日期分隔符更兼容远端文件名约束） */
+private val EXPORT_FILE_TS_FORMAT = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss")
 
 /**
  * 系统诊断与调试日志二级设置页 (对应 KeePass2Android 调试日志系统)
@@ -74,17 +85,35 @@ fun DebugSettingsScreen(
     onVerboseSyncLogToggle: (Boolean) -> Unit,
     onRefreshLogs: () -> Unit = {},
     onClearLogs: () -> Unit = {},
+    onExportLogs: (Uri) -> Unit = {},
+    exportFeedback: UiMessage? = null,
+    onClearExportFeedback: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
     val coroutineScope = rememberCoroutineScope()
     val logRefreshedMsg = stringResource(R.string.debug_log_refreshed)
     val logClearedMsg = stringResource(R.string.debug_log_cleared)
-    val logExportedMsg = stringResource(R.string.debug_export_done)
     var showExportConfirmDialog by remember { mutableStateOf(false) }
 
     // 真实进程内调试日志快照（SyncCoordinator / Unlock 等运行时事件），不再使用硬编码演示数据
     val logLines = uiState.debugLogLines
+
+    // 断点整改：SAF 另存为——选择目标后交给 ViewModel 真实写盘（此前仅弹假 Snackbar）
+    val exportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("text/plain")
+    ) { uri ->
+        if (uri != null) onExportLogs(uri)
+    }
+
+    // 断点整改：导出结果（成功/失败）经 ViewModel 反馈流回到本页 Snackbar
+    exportFeedback?.let { message ->
+        val text = message.resolveText()
+        LaunchedEffect(message, text) {
+            snackbarHostState.showSnackbar(text)
+            onClearExportFeedback()
+        }
+    }
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -299,10 +328,11 @@ fun DebugSettingsScreen(
             confirmButton = {
                 Button(onClick = {
                     showExportConfirmDialog = false
-                    coroutineScope.launch {
-                        snackbarHostState.showSnackbar(logExportedMsg)
-                    }
-                }) {
+                    // 断点整改：呼起真实 SAF 另存为，导出经 ViewModel 脱敏写盘
+                    val suggestedName =
+                        "keepasskey-debug-log-" + LocalDateTime.now().format(EXPORT_FILE_TS_FORMAT) + ".txt"
+                    exportLauncher.launch(suggestedName)
+                }, enabled = logLines.isNotEmpty()) {
                     Text(stringResource(R.string.debug_export_confirm_btn))
                 }
             },

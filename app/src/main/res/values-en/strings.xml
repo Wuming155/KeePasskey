@@ -749,10 +749,11 @@
     <string name="debug_log_refreshed">Log refreshed</string>
     <string name="debug_log_cleared">Log cleared</string>
     <string name="debug_export_btn">Export log</string>
-    <string name="debug_export_done">Log exported to the Download folder</string>
+    <string name="debug_export_done">Log exported</string>
+    <string name="debug_export_failed">Log export failed, please retry</string>
     <string name="debug_clear_btn">Clear log</string>
     <string name="debug_export_dialog_title">Export diagnostic log</string>
-    <string name="debug_export_dialog_desc">The exported log is sanitized and contains no passwords or keys</string>
+    <string name="debug_export_dialog_desc">A system save dialog will open to choose the destination; the log is sanitized before export (URLs and account names stripped) and contains no passwords or keys</string>
     <string name="debug_export_confirm_btn">Confirm export</string>
     <string name="debug_privacy_desc">Logs stay on this device; account names and URLs are stripped before export</string>
 

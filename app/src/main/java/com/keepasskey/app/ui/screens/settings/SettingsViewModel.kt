@@ -2,6 +2,7 @@ package com.keepasskey.app.ui.screens.settings
 
 import android.app.ActivityManager
 import android.content.Context
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.keepasskey.app.R
@@ -22,6 +23,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
@@ -44,6 +46,8 @@ class SettingsViewModel @Inject constructor(
 ) : ViewModel() {
 
     companion object {
+        private const val TAG = "SettingsViewModel"
+
         private const val HEALTH_SCORE_BASE = 100
         private const val HEALTH_PENALTY_WEAK = 5
         private const val HEALTH_PENALTY_REUSED = 10
@@ -938,6 +942,45 @@ class SettingsViewModel @Inject constructor(
     fun clearDebugLogs() {
         debugLogBuffer.clear()
         debugLogLinesFlow.value = emptyList()
+    }
+
+    // ========== 断点整改：调试日志导出（SAF CreateDocument 真实落盘） ==========
+    private val debugExportFeedbackFlow = MutableStateFlow<UiMessage?>(null)
+
+    /** SAF 另存为结果反馈（成功/失败），由 Screen 层消费后清除 */
+    val debugExportFeedback: StateFlow<UiMessage?> = debugExportFeedbackFlow.asStateFlow()
+
+    /**
+     * 断点整改：真实导出调试日志——内容经脱敏（移除网址与账号字段）后写入 SAF 目标 Uri。
+     * [targetUri] 由 Screen 层 CreateDocument 选择器产生；此前导出仅弹 Snackbar，从未落盘。
+     */
+    fun exportDebugLogs(targetUri: Uri) {
+        val resolver = appContext?.contentResolver
+        if (resolver == null) {
+            debugExportFeedbackFlow.value = UiMessage(R.string.debug_export_failed)
+            return
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val sanitizedText = debugLogBuffer.exportSanitizedText()
+                val written = resolver.openOutputStream(targetUri)?.use { os ->
+                    os.write(sanitizedText.toByteArray(Charsets.UTF_8))
+                    os.flush()
+                    true
+                } ?: false
+                debugExportFeedbackFlow.value =
+                    if (written) UiMessage(R.string.debug_export_done)
+                    else UiMessage(R.string.debug_export_failed)
+            } catch (e: Exception) {
+                // 只留痕异常类型，不落异常消息（防御性，避免潜在敏感内容回流日志缓冲）
+                debugLogBuffer.warn(TAG, "调试日志导出失败: ${e.javaClass.simpleName}")
+                debugExportFeedbackFlow.value = UiMessage(R.string.debug_export_failed)
+            }
+        }
+    }
+
+    fun clearDebugExportFeedback() {
+        debugExportFeedbackFlow.value = null
     }
 
     fun rescanHealth() {
