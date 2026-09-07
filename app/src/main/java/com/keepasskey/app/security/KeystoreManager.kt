@@ -312,8 +312,14 @@ class KeystoreManager @Inject constructor(
          */
         const val LEGACY_QUICK_UNLOCK_KEY_ALIAS = "com.keepasskey.quick_unlock_key"
 
-        /** 快速解锁密钥的授权集合：强生物识别 或 设备锁屏凭据（per-operation，与 BiometricAuthManager.UNLOCK_AUTHENTICATORS 对应） */
-        val REQUIRED_AUTHENTICATOR_TYPES = KeyProperties.AUTH_BIOMETRIC_STRONG or KeyProperties.AUTH_DEVICE_CREDENTIAL
+        /**
+         * 快速解锁密钥的授权集合：强生物识别 或 设备锁屏凭据（per-operation）。
+         *
+         * P1 整改：不再在本处独立书写位或表达式，改由 [UnlockAuthPolicy] 单点声明语义——
+         * 官方要求「解锁加密操作请求的认证器集合必须与密钥生成时一致」，
+         * 该约束现由同一份策略同时喂给密钥生成侧与本常量，杜绝两侧漂移。
+         */
+        val REQUIRED_AUTHENTICATOR_TYPES: Int get() = UnlockAuthPolicy.keystoreAuthTypes
 
         private const val TRANSFORMATION = "AES/GCM/NoPadding"
         private const val KEY_SIZE_BITS = 256

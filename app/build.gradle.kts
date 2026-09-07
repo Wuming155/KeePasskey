@@ -53,7 +53,12 @@ dependencies {
     implementation(project(":database"))
     implementation(project(":sync"))
 
-    implementation("androidx.core:core-ktx:1.13.1")
+    // P2 整改：core-ktx 升级到「compileSdk 36 下可用的最高官方稳定版」1.17.0。
+    // 官方 release notes 明示：1.18.0 起 compileSdk 由 API 36 改为 API 36.1，1.19.0 更要求 API 37，
+    // 而本项目受 Compose BOM 2026.06.01 约束必须停留在 compileSdk 36（AGP 9.1.0 上限亦为 36），
+    // 故 1.17.0 是当前版本矩阵下的天花板，不可再升。
+    // ContextCompat.RECEIVER_NOT_EXPORTED 自 1.9.0 起可用，本次即为该 API 引入。
+    implementation("androidx.core:core-ktx:1.17.0")
 
     // Compose 物料清单：统一管理所有 androidx.compose.* 版本，与 Kotlin 2.4.10 的 Compose 编译器对齐。
     // 使用 2026.06.01（Compose 1.11.x，要求 compileSdk ≤ 36）；最新 2026.08.00(1.12.x) 要求 compileSdk 37，当前 SDK 未安装。

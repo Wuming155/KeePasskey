@@ -1,6 +1,7 @@
 package com.keepasskey.app.sync
 
 import android.content.Context
+import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.app.security.KeystoreManager
 import com.keepasskey.app.ui.screens.settings.CloudSyncProvider
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -44,7 +45,9 @@ data class S3Credentials(
 @Singleton
 class SyncCredentialsStore @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val keystoreManager: KeystoreManager? = null
+    private val keystoreManager: KeystoreManager? = null,
+    // 允许为 null 仅用于 JVM 单测注入；生产 DI 恒定注入真实实现
+    private val debugLog: DebugLogBuffer? = null
 ) {
     // 供单元测试注入模拟加解密闭包
     var customEncryptor: ((ByteArray) -> Pair<ByteArray, ByteArray>)? = null // plaintext -> (iv, ciphertext)
@@ -105,7 +108,15 @@ class SyncCredentialsStore @Inject constructor(
         val remotePath = prefs.getString(KEY_WEBDAV_REMOTE_PATH, "/keepasskey.kdbx") ?: "/keepasskey.kdbx"
         val iv = prefs.getString(KEY_WEBDAV_PASSWORD_IV, null)
         val cipher = prefs.getString(KEY_WEBDAV_PASSWORD_CIPHER, null)
-        val password = decrypt(iv, cipher) ?: ""
+
+        // P2 整改 fail-closed：已存在密文却解除封印失败（密钥被生物识别变更作废 / 密文损坏）
+        // 时，原实现会把 password 退化为空串返回。上层据此会认为「用户主动清空了密码」，
+        // 保存配置时进而把空密码写回云端，造成凭据不可逆丢失。现一律返回 null，交由 UI 显式重录。
+        val password = if (isCipherTextPresent(iv, cipher)) {
+            decrypt(iv, cipher) ?: return null
+        } else {
+            ""
+        }
 
         return WebDavCredentials(
             url = url,
@@ -165,9 +176,15 @@ class SyncCredentialsStore @Inject constructor(
         val accessCipher = prefs.getString(KEY_S3_ACCESS_KEY_CIPHER, null)
 
         val legacyPlainAccessKey = prefs.getString(KEY_S3_ACCESS_KEY, null)
-        val accessKey = decrypt(accessIv, accessCipher)
-            ?: legacyPlainAccessKey
-            ?: ""
+
+        // P2 整改 fail-closed：存在密文却解封失败时不再回退为「空 / 明文」，
+        // 直接返回 null 避免上层把失效凭据当作用户主动清空写回云端。
+        val accessKey = when {
+            isCipherTextPresent(accessIv, accessCipher) ->
+                decrypt(accessIv, accessCipher) ?: return null
+            !legacyPlainAccessKey.isNullOrBlank() -> legacyPlainAccessKey
+            else -> ""
+        }
         if (accessIv.isNullOrBlank() && !legacyPlainAccessKey.isNullOrBlank()) {
             // 旧版明文 AccessKey 残留清除：读取后立即转加密落盘并物理删除明文键，
             // 不再依赖「用户下次保存配置」才迁移
@@ -183,7 +200,12 @@ class SyncCredentialsStore @Inject constructor(
 
         val iv = prefs.getString(KEY_S3_SECRET_IV, null)
         val cipher = prefs.getString(KEY_S3_SECRET_CIPHER, null)
-        val secretKey = decrypt(iv, cipher) ?: ""
+        // P2 整改 fail-closed：同上，SecretKey 存在密文却解封失败一律让上层感知
+        val secretKey = if (isCipherTextPresent(iv, cipher)) {
+            decrypt(iv, cipher) ?: return null
+        } else {
+            ""
+        }
 
         return S3Credentials(
             endpoint = endpoint,
@@ -215,7 +237,11 @@ class SyncCredentialsStore @Inject constructor(
                 Base64.getEncoder().encodeToString(iv),
                 Base64.getEncoder().encodeToString(cipherBytes)
             )
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            // P2 整改：原实现 `catch (_: Exception) { null }` 全静默吞掉异常。
+            // 密钥失效（用户增删指纹触发 setInvalidatedByBiometricEnrollment）或 Keystore 暂不可用时，
+            // 封印失败会一路静默退化，运行期完全无从感知。现显式落调试日志——注意只记异常类型，绝不写明文。
+            debugLog?.error(TAG, "同步凭据封印失败，凭据未写入: ${e.javaClass.simpleName}")
             null
         }
     }
@@ -234,12 +260,20 @@ class SyncCredentialsStore @Inject constructor(
                 cipher.doFinal(cipherBytes)
             }
             String(decryptedBytes, StandardCharsets.UTF_8)
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            // P2 整改：同上，解除封印失败不得静默。返回 null 由调用方按 fail-closed 处理，
+            // 绝不退化为空字符串被上层误判为「用户主动清空了密码」。
+            debugLog?.warn(TAG, "同步凭据解除封印失败: ${e.javaClass.simpleName}")
             null
         }
     }
 
+    /** 判定 iv + 密文二元组是否均已落盘（存在密文才意味着「曾成功封印过」，可用于区分空值与解封失败） */
+    private fun isCipherTextPresent(ivBase64: String?, cipherBase64: String?): Boolean =
+        !ivBase64.isNullOrBlank() && !cipherBase64.isNullOrBlank()
+
     companion object {
+        private const val TAG = "SyncCredentialsStore"
         const val PREFS_NAME = "sync_credentials_prefs"
         const val SYNC_KEY_ALIAS = "com.keepasskey.sync_credential_key"
         private const val TRANSFORMATION = "AES/GCM/NoPadding"

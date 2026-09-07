@@ -2,6 +2,7 @@ package com.keepasskey.app.ui.screens.generator
 
 import androidx.lifecycle.ViewModel
 import com.keepasskey.app.R
+import com.keepasskey.app.security.ClipboardSecurityManager
 import com.keepasskey.app.ui.model.UiMessage
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -11,7 +12,14 @@ import kotlinx.coroutines.flow.update
 import javax.inject.Inject
 
 @HiltViewModel
-class GeneratorViewModel @Inject constructor() : ViewModel() {
+class GeneratorViewModel @Inject constructor(
+    private val clipboardSecurityManager: ClipboardSecurityManager
+) : ViewModel() {
+
+    companion object {
+        /** 写入剪贴板时展示给系统的标签（不参与任何安全判定，仅作提示） */
+        private const val GENERATED_PASSWORD_CLIP_LABEL = "Generated Password"
+    }
 
     private val _uiState = MutableStateFlow(GeneratorUiState())
     val uiState: StateFlow<GeneratorUiState> = _uiState.asStateFlow()
@@ -96,7 +104,17 @@ class GeneratorViewModel @Inject constructor() : ViewModel() {
         }
     }
 
-    fun notifyCopied() {
+    /**
+     * 复制生成的密码至受保护剪贴板。
+     *
+     * P0 整改：此前复制逻辑直接写在 GeneratorScreen 的 Composable 内部并直连 ClipboardManager，
+     * 绕过了 [ClipboardSecurityManager] 的定时擦除链路——新生成的明文密码会永久滞留剪贴板，
+     * 且无视用户在「剪贴板自动清空」设置中配置的超时策略。
+     * 现统一走受保护复制：注入官方 `ClipDescription.EXTRA_IS_SENSITIVE` 敏感标记 +
+     * 按用户配置超时自动物理清空。
+     */
+    fun copyGeneratedPassword(password: String) {
+        clipboardSecurityManager.copySensitiveText(GENERATED_PASSWORD_CLIP_LABEL, password)
         _uiState.update { it.copy(userMessage = UiMessage(R.string.generator_password_copied)) }
     }
 

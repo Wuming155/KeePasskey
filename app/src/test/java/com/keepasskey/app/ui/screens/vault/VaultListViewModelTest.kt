@@ -31,6 +31,11 @@ import org.junit.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class VaultListViewModelTest {
 
+    private companion object {
+        /** 与 VaultListViewModel.SEARCH_DEBOUNCE_MS 对齐的搜索防抖窗口（毫秒） */
+        const val SEARCH_DEBOUNCE_MS = 300L
+    }
+
     private val testDispatcher = StandardTestDispatcher()
 
     @Before
@@ -113,6 +118,9 @@ class VaultListViewModelTest {
         val viewModel = createSubscribedViewModel()
 
         viewModel.onSearchQueryChange("github")
+        // P2 整改：搜索输入已接入 300ms 防抖（官方 Flow.debounce），
+        // 需先把虚拟时钟推进越过防抖窗口再断言列表结果
+        advanceTimeBy(SEARCH_DEBOUNCE_MS)
         testScheduler.runCurrent()
 
         val state = viewModel.uiState.value

@@ -49,14 +49,17 @@ class CredentialResponseAssembler @Inject constructor(
         val allEntries = vaultRepository.getKdbxEntries()
         val isBiometricAvailable = biometricAuthManager.canAuthenticate(context) == BiometricStatus.AVAILABLE
 
+        // P1 整改：整份响应的 requestCode 由单一分配器供给，跨 Passkey/密码两类候选两两互异
+        val requestCodes = RequestCodeAllocator()
+
         for (option in request.beginGetCredentialOptions) {
             when (option) {
                 is BeginGetPublicKeyCredentialOption -> {
-                    buildPasskeyEntries(option, callingOrigin, callingPackage, allEntries, isBiometricAvailable, responseBuilder)
+                    buildPasskeyEntries(option, callingOrigin, callingPackage, allEntries, isBiometricAvailable, requestCodes, responseBuilder)
                 }
 
                 is BeginGetPasswordOption -> {
-                    buildPasswordEntries(option, callingPackage, callingOrigin, allEntries, responseBuilder)
+                    buildPasswordEntries(option, callingPackage, callingOrigin, allEntries, requestCodes, responseBuilder)
                 }
             }
         }
@@ -70,6 +73,7 @@ class CredentialResponseAssembler @Inject constructor(
         callingPackage: String,
         allEntries: List<KdbxEntry>,
         isBiometricAvailable: Boolean,
+        requestCodes: RequestCodeAllocator,
         responseBuilder: BeginGetCredentialResponse.Builder
     ) {
         val rpIdFromOption = try {
@@ -125,7 +129,7 @@ class CredentialResponseAssembler @Inject constructor(
             }
             val pendingIntent = PendingIntent.getActivity(
                 context,
-                REQUEST_CODE_ASSERT + entry.id.hashCode(),
+                requestCodes.next(),
                 intent,
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
             )
@@ -158,6 +162,7 @@ class CredentialResponseAssembler @Inject constructor(
         callingPackage: String,
         callingOrigin: String,
         allEntries: List<KdbxEntry>,
+        requestCodes: RequestCodeAllocator,
         responseBuilder: BeginGetCredentialResponse.Builder
     ) {
         // H1/L1 整改：仅浏览器委派信任 web origin 域匹配；普通应用仅按严格包名边界匹配
@@ -182,7 +187,7 @@ class CredentialResponseAssembler @Inject constructor(
             }
             val pendingIntent = PendingIntent.getActivity(
                 context,
-                REQUEST_CODE_FILL + entry.id.hashCode(),
+                requestCodes.next(),
                 intent,
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
             )
@@ -208,7 +213,23 @@ class CredentialResponseAssembler @Inject constructor(
 
     companion object {
         private const val TAG = "CredResponseAssembler"
-        private const val REQUEST_CODE_ASSERT = 101
-        private const val REQUEST_CODE_FILL = 102
+
+        /**
+         * PendingIntent requestCode 分配器：一次候选组装内全域单调递增，保证同一批候选两两互异。
+         *
+         * P1 整改：原实现使用 `REQUEST_CODE_ASSERT + entry.id.hashCode()`，存在两重缺陷——
+         * 1. 同一批候选内不同条目哈希可能碰撞，叠加 FLAG_UPDATE_CURRENT 后写条目会覆盖先写条目，
+         *    表现为「用户点中第 1 条候选，实际拉起第 3 条」；
+         * 2. 两个 base 仅相差 1（101/102），跨类型（Passkey 断言 / 密码填充）条目同样会撞同一 requestCode
+         *    （如 101 + h(A) == 102 + h(B)）。
+         * 现改为单次响应内统一基数分配，彻底消除碰撞面。
+         */
+        private class RequestCodeAllocator {
+            private var next = REQUEST_CODE_BASE
+            fun next(): Int = next++
+        }
+
+        /** PendingIntent requestCode 分配基线 */
+        private const val REQUEST_CODE_BASE = 1000
     }
 }

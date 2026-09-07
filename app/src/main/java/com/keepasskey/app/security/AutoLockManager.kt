@@ -4,6 +4,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
@@ -74,7 +75,15 @@ class AutoLockManager @Inject constructor(
         ProcessLifecycleOwner.get().lifecycle.addObserver(this)
 
         val filter = IntentFilter(Intent.ACTION_SCREEN_OFF)
-        context.registerReceiver(screenOffReceiver, filter)
+        // P0 整改：官方自 androidx.core 1.9.0 起要求 context-registered receiver 显式声明导出标志。
+        // ACTION_SCREEN_OFF 属「仅本应用 + 系统 UID」来源，按官方规则标记 RECEIVER_NOT_EXPORTED，
+        // 杜绝其它应用向本接收器投递伪造熄屏广播触发主动锁库（拒绝服务 / 会话劫持面）。
+        ContextCompat.registerReceiver(
+            context,
+            screenOffReceiver,
+            filter,
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
     }
 
     override fun onStop(owner: LifecycleOwner) {

@@ -1,8 +1,5 @@
 package com.keepasskey.app.ui.screens.authenticator
 
-import android.content.ClipData
-import android.content.ClipboardManager
-import android.content.Context
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.background
@@ -54,7 +51,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -80,7 +76,6 @@ fun AuthenticatorScreen(
     viewModel: AuthenticatorViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
 
     uiState.userMessage?.let { message ->
@@ -91,15 +86,9 @@ fun AuthenticatorScreen(
         }
     }
 
-    val copyCode: (String) -> Unit = { rawCode ->
-        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        val clip = ClipData.newPlainText("TOTP Token", rawCode)
-        clip.description.extras = android.os.PersistableBundle().apply {
-            putBoolean(android.content.ClipDescription.EXTRA_IS_SENSITIVE, true)
-        }
-        cm.setPrimaryClip(clip)
-        viewModel.copyTotpCode(rawCode)
-    }
+    // P0 整改：不再在 Composable 内直连 ClipboardManager（该路径缺失定时擦除，
+    // TOTP 验证码会永久滞留剪贴板）；统一交给 ViewModel → ClipboardSecurityManager。
+    val copyCode: (String) -> Unit = viewModel::copyTotpCode
 
     Scaffold(
         modifier = modifier.fillMaxSize(),

@@ -1,8 +1,5 @@
 package com.keepasskey.app.ui.screens.generator
 
-import android.content.ClipData
-import android.content.ClipboardManager
-import android.content.Context
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -65,7 +62,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -91,7 +87,6 @@ fun GeneratorScreen(
     viewModel: GeneratorViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
 
     uiState.userMessage?.let { message ->
@@ -102,15 +97,9 @@ fun GeneratorScreen(
         }
     }
 
-    val onCopy: (String) -> Unit = { text ->
-        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        val clip = ClipData.newPlainText("Generated Password", text)
-        clip.description.extras = android.os.PersistableBundle().apply {
-            putBoolean(android.content.ClipDescription.EXTRA_IS_SENSITIVE, true)
-        }
-        cm.setPrimaryClip(clip)
-        viewModel.notifyCopied()
-    }
+    // P0 整改：不再在 Composable 内直连 ClipboardManager（该路径缺失定时擦除，
+    // 生成的明文密码会永久滞留剪贴板）；统一交给 ViewModel → ClipboardSecurityManager。
+    val onCopy: (String) -> Unit = viewModel::copyGeneratedPassword
 
     Scaffold(
         modifier = modifier.fillMaxSize(),

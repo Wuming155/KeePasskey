@@ -12,6 +12,7 @@ import com.keepasskey.app.ui.model.UiAttachment
 import com.keepasskey.app.ui.model.UiEntryRevision
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.model.UiVaultEntry
+import com.keepasskey.app.util.tickerFlow
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -23,8 +24,6 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -129,28 +128,25 @@ class EntryDetailViewModel @Inject constructor(
         // 断点6 整改：每秒驱动 TOTP 倒计时；周期翻转（剩余秒数不降反升）时重算实时验证码
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.Default) {
             var previous = -1
-            while (isActive) {
-                delay(TOTP_TICK_MS)
-                val snapshot = uiState.value.entry?.takeIf { it.totpCode != null }
-                if (snapshot != null) {
-                    val fresh = vaultRepository.calculateEntryTotp(snapshot.id)
-                    val period = fresh?.periodSeconds ?: snapshot.totpPeriod
-                    val remaining = if (fresh != null) {
-                        val nowSec = (System.currentTimeMillis() / 1000L).toInt()
-                        val r = period - (nowSec % period)
-                        if (r == 0) period else r
-                    } else {
-                        (snapshot.totpRemainingSeconds - 1).coerceAtLeast(0)
-                    }
-                    totpRemainingSecondsFlow.value = remaining
-                    if (previous in 1..remaining) {
-                        // 剩余秒数回跳到满值 → 新周期开始，刷新验证码
-                        liveTotpCodeFlow.value = fresh?.code
-                    } else if (previous == -1 && fresh != null) {
-                        liveTotpCodeFlow.value = fresh.code
-                    }
-                    previous = remaining
+            tickerFlow(TOTP_TICK_MS).collect {
+                val snapshot = uiState.value.entry?.takeIf { it.totpCode != null } ?: return@collect
+                val fresh = vaultRepository.calculateEntryTotp(snapshot.id)
+                val period = fresh?.periodSeconds ?: snapshot.totpPeriod
+                val remaining = if (fresh != null) {
+                    val nowSec = (System.currentTimeMillis() / 1000L).toInt()
+                    val r = period - (nowSec % period)
+                    if (r == 0) period else r
+                } else {
+                    (snapshot.totpRemainingSeconds - 1).coerceAtLeast(0)
                 }
+                totpRemainingSecondsFlow.value = remaining
+                if (previous in 1..remaining) {
+                    // 剩余秒数回跳到满值 → 新周期开始，刷新验证码
+                    liveTotpCodeFlow.value = fresh?.code
+                } else if (previous == -1 && fresh != null) {
+                    liveTotpCodeFlow.value = fresh.code
+                }
+                previous = remaining
             }
         }
     }

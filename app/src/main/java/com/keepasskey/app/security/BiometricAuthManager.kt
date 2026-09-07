@@ -170,10 +170,10 @@ class BiometricAuthManager @Inject constructor(
     companion object {
         /**
          * 快速解锁统一认证器集合：强生物识别 或 设备锁屏凭据（PIN/图案/密码）。
-         * 与 KeystoreManager.REQUIRED_AUTHENTICATOR_TYPES（密钥生成侧）一一对应。
+         *
+         * P1 整改：不再在本处独立书写位或表达式（原实现与密钥生成侧双写、靠注释维系），
+         * 改由 [UnlockAuthPolicy] 统一声明语义后投影——两侧从此不可能漂移。
          */
-        val UNLOCK_AUTHENTICATORS =
-            BiometricManager.Authenticators.BIOMETRIC_STRONG or
-                BiometricManager.Authenticators.DEVICE_CREDENTIAL
+        val UNLOCK_AUTHENTICATORS: Int get() = UnlockAuthPolicy.promptAuthenticators
     }
 }

@@ -212,8 +212,10 @@ fun UnlockContent(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .verticalScroll(scrollState)
+                // P0 整改：官方 edge-to-edge 约束下 imePadding 必须置于 verticalScroll 之前，
+                // 使滚动容器先被 IME 压缩高度再滚动；置于其后会导致容器不参与避让、输入框被键盘遮挡。
                 .imePadding()
+                .verticalScroll(scrollState)
                 .padding(horizontal = 24.dp, vertical = 32.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center

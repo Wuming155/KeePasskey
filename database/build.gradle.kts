@@ -26,7 +26,8 @@ dependencies {
     implementation(project(":core"))
     // database 的接口签名会暴露 crypto 类型（如 KdfParameters），需用 api 传递
     api(project(":crypto"))
-    implementation("androidx.core:core-ktx:1.13.1")
+    // P2 整改：与 app 模块同版；1.18.0+ 要求 compileSdk ≥ 36.1/37，本项目锁定 compileSdk 36
+    implementation("androidx.core:core-ktx:1.17.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
 
     testImplementation("junit:junit:4.13.2")

@@ -6,6 +6,7 @@ import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.SettingsRepository
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.security.ClipboardSecurityManager
+import com.keepasskey.app.util.tickerFlow
 import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.sync.engine.SyncCacheEvent
@@ -13,14 +14,18 @@ import com.keepasskey.app.ui.model.UiVaultEntry
 import com.keepasskey.app.ui.model.VaultGroup
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.time.Instant
 import java.time.LocalDate
@@ -72,18 +77,22 @@ class VaultListViewModel @Inject constructor(
     private var previousTotpRemaining = -1
 
     init {
-        // 每秒刷新 TOTP 剩余秒数，驱动列表内验证码环形倒计时实时跳动；
-        // 周期翻转时对本组带 TOTP 的条目按需重算验证码
+        // P1 整改：秒级 tick 改由官方 tickerFlow 冷流驱动。
+        // 此前此处与 EntryDetail / Authenticator 各写一份 `while (isActive) { delay(); ... }`，
+        // 三份独立 delay 起点互不对齐，导致「剩余秒数回跳」的周期翻转判定在不同页面差出最多 1 秒；
+        // 现在单一 tick 源 + 虚拟时钟可推进，行为一致且可测。
         viewModelScope.launch(Dispatchers.Default) {
-            while (isActive) {
-                delay(TOTP_TICK_INTERVAL_MS)
-                val remaining = calculateCurrentRemainingSeconds()
-                totpRemainingSecondsFlow.value = remaining
-                if (previousTotpRemaining in 1..remaining || previousTotpRemaining == -1) {
-                    refreshLiveTotpCodes()
+            tickerFlow(TOTP_TICK_INTERVAL_MS)
+                .map { calculateCurrentRemainingSeconds() }
+                .distinctUntilChanged()
+                .collect { remaining ->
+                    totpRemainingSecondsFlow.value = remaining
+                    // 剩余秒数回跳到更大值 → 新周期开始，对本组带 TOTP 的条目按需重算验证码
+                    if (previousTotpRemaining in 1..remaining || previousTotpRemaining == -1) {
+                        refreshLiveTotpCodes()
+                    }
+                    previousTotpRemaining = remaining
                 }
-                previousTotpRemaining = remaining
-            }
         }
         // H2 整改：订阅冲突会话流，冲突待解决时点亮列表页冲突入口
         viewModelScope.launch {
@@ -117,8 +126,23 @@ class VaultListViewModel @Inject constructor(
         val sortOption: VaultSortOption
     )
 
+    /**
+     * P2 整改：搜索输入防抖 —— 官方 kotlinx.coroutines `Flow.debounce` 标准算子。
+     *
+     * 原实现 searchQueryFlow 直接进 combine，每敲一个字符都触发一次
+     * 「全条目过滤 + 排序 + 分组树遍历 + 回收站集合构建」的完整重算，
+     * 大库场景下构成明显掉帧源；现在输入停顿 SEARCH_DEBOUNCE_MS 后才下发新关键词。
+     *
+     * 首帧补发（flow{emit(current); emitAll(...)}）：保证初次渲染与
+     * 「关闭搜索时立即清空关键词」不被防抖窗口延迟，distinctUntilChanged 负责吸收重复值。
+     */
+    private val debouncedSearchQueryFlow: Flow<String> = flow {
+        emit(searchQueryFlow.value)
+        emitAll(searchQueryFlow.debounce(SEARCH_DEBOUNCE_MS))
+    }.distinctUntilChanged()
+
     private val filterParamsFlow = combine(
-        searchQueryFlow,
+        debouncedSearchQueryFlow,
         isSearchActiveFlow,
         sortOptionFlow
     ) { query, isSearchActive, sortOption ->
@@ -557,6 +581,8 @@ class VaultListViewModel @Inject constructor(
         private const val TOTP_PERIOD_SECONDS = 30
         private const val MILLIS_PER_SECOND = 1000L
         private const val TOTP_TICK_INTERVAL_MS = 1000L
+        /** 搜索输入停顿多久后才触发列表重算（毫秒） */
+        private const val SEARCH_DEBOUNCE_MS = 300L
         private const val NEVER_SYNCED_TEXT = "尚未同步"
     }
 }
