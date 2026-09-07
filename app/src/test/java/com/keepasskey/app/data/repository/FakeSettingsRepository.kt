@@ -23,6 +23,10 @@ class FakeSettingsRepository() : SettingsRepository {
         settingsFlow.update { it.copy(themePalette = themePalette) }
     }
 
+    override suspend fun setDynamicColorEnabled(enabled: Boolean) {
+        settingsFlow.update { it.copy(dynamicColorEnabled = enabled) }
+    }
+
     override suspend fun setOledBlackOptimization(enabled: Boolean) {
         settingsFlow.update { it.copy(oledBlackOptimization = enabled) }
     }

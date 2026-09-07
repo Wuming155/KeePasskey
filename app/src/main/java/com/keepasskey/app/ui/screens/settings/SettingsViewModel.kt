@@ -53,9 +53,6 @@ class SettingsViewModel @Inject constructor(
         private const val HEALTH_PENALTY_REUSED = 10
         private const val HEALTH_PENALTY_EXPIRED = 15
 
-        // M2 整改：固定长度掩码，不随真实凭据长度变化
-        private const val FIXED_PASSWORD_MASK = "••••••••••••"
-
         /** ActivityManager 不可得时的兜底应用堆上限（MiB） */
         private const val DEFAULT_HEAP_MB = 128
 
@@ -74,6 +71,26 @@ class SettingsViewModel @Inject constructor(
             syncFeedbackMessage = null
         )
     )
+
+    // Wave 15 整改：同步凭据明文一次性预填通道（对齐 EntryEdit loadedPassword 模式）。
+    // 解密结果以 CharArray 承载、绝不进入 UiState/StateFlow；组件消费（或用户开始编辑、
+    // 保存成功、ViewModel 销毁）后即擦除置空。
+    private val _webdavPasswordPrefill = MutableStateFlow<CharArray?>(null)
+    val webdavPasswordPrefill: StateFlow<CharArray?> = _webdavPasswordPrefill.asStateFlow()
+
+    private val _s3SecretKeyPrefill = MutableStateFlow<CharArray?>(null)
+    val s3SecretKeyPrefill: StateFlow<CharArray?> = _s3SecretKeyPrefill.asStateFlow()
+
+    /** Wave 15 整改：用户开始编辑密码后终结预填通道生命周期（防旋转后旧值回写覆盖用户输入） */
+    fun clearWebDavPasswordPrefill() {
+        _webdavPasswordPrefill.value?.fill('0')
+        _webdavPasswordPrefill.value = null
+    }
+
+    fun clearS3SecretKeyPrefill() {
+        _s3SecretKeyPrefill.value?.fill('0')
+        _s3SecretKeyPrefill.value = null
+    }
 
     private val healthStateFlow = MutableStateFlow(
         HealthCheckUiState(
@@ -181,15 +198,15 @@ class SettingsViewModel @Inject constructor(
         val provider: CloudSyncProvider = CloudSyncProvider.WEBDAV,
         // M2 整改：默认值一律空串，杜绝示例凭据（mypassword123 / AKIA 示例密钥对）
         // 被静默保存为真实云端凭据
+        // Wave 15 整改：webdavPassword/s3SecretKey 明文不再驻留本状态流
+        // （经 CharArray 一次性预填通道下发，保存后即擦除）
         val webdavUrl: String = "",
         val webdavUsername: String = "",
-        val webdavPassword: String = "",
         val webdavRemotePath: String = "/keepasskey.kdbx",
         val s3Endpoint: String = "",
         val s3Bucket: String = "",
         val s3Region: String = "auto",
         val s3AccessKey: String = "",
-        val s3SecretKey: String = "",
         val s3ObjectKey: String = "keepasskey.kdbx",
         val s3UsePathStyle: Boolean = false,
         val autoSyncEnabled: Boolean = true,
@@ -260,17 +277,11 @@ class SettingsViewModel @Inject constructor(
             syncProvider = syncState.provider,
             webdavUrl = syncState.webdavUrl,
             webdavUsername = syncState.webdavUsername,
-            webdavPassword = syncState.webdavPassword,
-            // M2 整改：掩码采用固定长度，杜绝通过掩码长度推断真实密码长度
-            webdavPasswordMasked = FIXED_PASSWORD_MASK,
             webdavRemotePath = syncState.webdavRemotePath,
             s3Endpoint = syncState.s3Endpoint,
             s3Bucket = syncState.s3Bucket,
             s3Region = syncState.s3Region,
             s3AccessKey = syncState.s3AccessKey,
-            s3SecretKey = syncState.s3SecretKey,
-            // M2 整改：掩码采用固定长度，杜绝通过掩码长度推断真实密钥长度
-            s3SecretKeyMasked = FIXED_PASSWORD_MASK,
             s3ObjectKey = syncState.s3ObjectKey,
             s3UsePathStyle = syncState.s3UsePathStyle,
             autoSyncEnabled = syncState.autoSyncEnabled,
@@ -375,23 +386,38 @@ class SettingsViewModel @Inject constructor(
         checkAndTriggerColdStartSync()
     }
 
+    /**
+     * Wave 15 整改：凭据恢复改走 CharArray 一次性预填通道——解密出的密码/SecretKey
+     * 不再以 String 驻留 syncStateFlow；WebDAV 密码与 S3 SecretKey 经预填通道下发至
+     * SecurePasswordField，AccessKey ID 属标识符（随请求头明文传输）保留 String 投影。
+     */
     private fun restoreSyncCredentials() {
-        val store = syncCredentialsStore ?: return
+        val store = syncCredentialsStore
         val savedProvider = store.loadProvider()
         val savedWebDav = store.loadWebDavConfig()
         val savedS3 = store.loadS3Config()
+        savedWebDav?.let { cfg ->
+            _webdavPasswordPrefill.value?.fill('0')
+            _webdavPasswordPrefill.value = cfg.password
+        }
+        savedS3?.let { cfg ->
+            _s3SecretKeyPrefill.value?.fill('0')
+            _s3SecretKeyPrefill.value = cfg.secretKey
+        }
+        // AccessKey ID 转 String 投影后擦除 CharArray 原件（标识符边界，非机密）
+        val s3AccessKeyText = savedS3?.accessKey?.let { chars ->
+            String(chars).also { chars.fill('0') }
+        }
         syncStateFlow.update { cur ->
             cur.copy(
                 provider = savedProvider,
                 webdavUrl = savedWebDav?.url ?: cur.webdavUrl,
                 webdavUsername = savedWebDav?.username ?: cur.webdavUsername,
-                webdavPassword = savedWebDav?.password ?: cur.webdavPassword,
                 webdavRemotePath = savedWebDav?.remotePath ?: cur.webdavRemotePath,
                 s3Endpoint = savedS3?.endpoint ?: cur.s3Endpoint,
                 s3Bucket = savedS3?.bucket ?: cur.s3Bucket,
                 s3Region = savedS3?.region ?: cur.s3Region,
-                s3AccessKey = savedS3?.accessKey ?: cur.s3AccessKey,
-                s3SecretKey = savedS3?.secretKey ?: cur.s3SecretKey,
+                s3AccessKey = s3AccessKeyText ?: cur.s3AccessKey,
                 s3ObjectKey = savedS3?.objectKey ?: cur.s3ObjectKey,
                 s3UsePathStyle = savedS3?.usePathStyle ?: cur.s3UsePathStyle
             )
@@ -471,12 +497,17 @@ class SettingsViewModel @Inject constructor(
         syncStateFlow.update { it.copy(provider = provider) }
     }
 
+    /**
+     * Wave 15 整改：密码以 [CharArray] 借用语义提交（本方法消费后立即擦除），明文不再回写状态流；
+     * 返回保存结果——Wave 14 https 校验拒绝或 Wave 15 凭据封印失败时如实回传 false 并上浮反馈，
+     * 不再无条件谎报「已保存」。
+     */
     fun updateWebDavConfig(
         url: String,
         username: String,
-        password: String = syncStateFlow.value.webdavPassword,
+        password: CharArray,
         remotePath: String
-    ) {
+    ): Boolean {
         // Wave 14 全站强制 HTTPS：保存时即时校验端点（fail-fast），
         // 显式 http:// 直接拒绝并反馈；无 scheme 输入自动归一化为 https://
         val normalizedUrl = normalizeHttpsEndpoint(url)
@@ -484,48 +515,76 @@ class SettingsViewModel @Inject constructor(
             syncStateFlow.update {
                 it.copy(syncFeedbackMessage = UiMessage(R.string.sync_error_https_required, listOf("WebDAV")))
             }
-            return
+            password.fill('0')
+            return false
         }
-        syncCredentialsStore?.saveWebDavConfig(normalizedUrl, username, password, remotePath)
+        val saved = syncCredentialsStore.saveWebDavConfig(normalizedUrl, username, password, remotePath)
+        password.fill('0')
+        if (!saved) {
+            syncStateFlow.update {
+                it.copy(syncFeedbackMessage = UiMessage(R.string.sync_config_save_failed))
+            }
+            return false
+        }
         syncStateFlow.update {
             it.copy(
                 webdavUrl = normalizedUrl,
                 webdavUsername = username,
-                webdavPassword = password,
                 webdavRemotePath = remotePath
             )
         }
+        // 保存成功后旧预填通道失效（最新凭据已由存储库持有，重进页面将重新恢复）
+        _webdavPasswordPrefill.value?.fill('0')
+        _webdavPasswordPrefill.value = null
+        return true
     }
 
+    /**
+     * Wave 15 整改：SecretKey 以 [CharArray] 借用语义提交（本方法消费后立即擦除），明文不再回写状态流；
+     * AccessKey ID 属标识符保留 String 参数。返回保存结果（语义同 [updateWebDavConfig]）。
+     */
     fun updateS3Config(
         endpoint: String,
         bucket: String,
         region: String,
         accessKey: String,
-        secretKey: String = syncStateFlow.value.s3SecretKey,
+        secretKey: CharArray,
         objectKey: String,
         usePathStyle: Boolean = syncStateFlow.value.s3UsePathStyle
-    ) {
+    ): Boolean {
         // Wave 14 全站强制 HTTPS：与 WebDAV 一致的保存期端点校验
         val normalizedEndpoint = normalizeHttpsEndpoint(endpoint)
         if (normalizedEndpoint == null) {
             syncStateFlow.update {
                 it.copy(syncFeedbackMessage = UiMessage(R.string.sync_error_https_required, listOf("S3")))
             }
-            return
+            secretKey.fill('0')
+            return false
         }
-        syncCredentialsStore?.saveS3Config(normalizedEndpoint, bucket, region, accessKey, secretKey, objectKey, usePathStyle)
+        // AccessKey ID 属标识符：转 CharArray 提交（存储库封印后即擦除），SecretKey 借用语义直达
+        val saved = syncCredentialsStore.saveS3Config(
+            normalizedEndpoint, bucket, region, accessKey.toCharArray(), secretKey, objectKey, usePathStyle
+        )
+        secretKey.fill('0')
+        if (!saved) {
+            syncStateFlow.update {
+                it.copy(syncFeedbackMessage = UiMessage(R.string.sync_config_save_failed))
+            }
+            return false
+        }
         syncStateFlow.update {
             it.copy(
                 s3Endpoint = normalizedEndpoint,
                 s3Bucket = bucket,
                 s3Region = region,
                 s3AccessKey = accessKey,
-                s3SecretKey = secretKey,
                 s3ObjectKey = objectKey,
                 s3UsePathStyle = usePathStyle
             )
         }
+        _s3SecretKeyPrefill.value?.fill('0')
+        _s3SecretKeyPrefill.value = null
+        return true
     }
 
     /**
@@ -1047,5 +1106,14 @@ class SettingsViewModel @Inject constructor(
                 }
             }
         }
+    }
+
+    override fun onCleared() {
+        // Wave 15 整改：ViewModel 销毁时擦除凭据预填通道中的明文驻留
+        _webdavPasswordPrefill.value?.fill('0')
+        _webdavPasswordPrefill.value = null
+        _s3SecretKeyPrefill.value?.fill('0')
+        _s3SecretKeyPrefill.value = null
+        super.onCleared()
     }
 }

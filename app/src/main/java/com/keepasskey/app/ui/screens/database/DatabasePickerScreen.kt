@@ -62,7 +62,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import com.keepasskey.app.ui.components.SecurePasswordField
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
@@ -393,18 +392,14 @@ private fun OpenExistingVaultDialog(
     var localPath by remember { mutableStateOf("/storage/emulated/0/Documents/passwords.kdbx") }
     var localName by remember { mutableStateOf("passwords.kdbx") }
 
-    // WebDAV 字段及连接凭据
+    // WebDAV 字段（Wave 15 假桩清零：仅保留有消费者的展示名称与 URL，凭据统一在同步设置中配置）
     var webdavUrl by remember { mutableStateOf("") }
     var webdavName by remember { mutableStateOf("cloud_vault.kdbx") }
-    var webdavUser by remember { mutableStateOf("") }
-    var webdavPassword by remember { mutableStateOf("") }
 
-    // S3 兼容字段及连接凭据（M2 整改：默认值一律空串，杜绝示例凭据被静默导入）
+    // S3 兼容字段（同上）
     var s3Endpoint by remember { mutableStateOf("") }
     var s3Bucket by remember { mutableStateOf("") }
     var s3Name by remember { mutableStateOf("s3_vault.kdbx") }
-    var s3AccessKey by remember { mutableStateOf("") }
-    var s3SecretKey by remember { mutableStateOf("") }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -513,24 +508,9 @@ private fun OpenExistingVaultDialog(
                                 singleLine = true,
                                 modifier = Modifier.fillMaxWidth()
                             )
-
-                            OutlinedTextField(
-                                value = webdavUser,
-                                onValueChange = { webdavUser = it },
-                                label = { Text("WebDAV 认证用户名") },
-                                placeholder = { Text("username") },
-                                singleLine = true,
-                                modifier = Modifier.fillMaxWidth()
-                            )
-
-                            OutlinedTextField(
-                                value = webdavPassword,
-                                onValueChange = { webdavPassword = it },
-                                label = { Text("WebDAV 密码 / 应用专用 Token") },
-                                visualTransformation = PasswordVisualTransformation(),
-                                singleLine = true,
-                                modifier = Modifier.fillMaxWidth()
-                            )
+                            // Wave 15 整改（假桩清零）：原 WebDAV 认证用户名/密码输入框无任何消费者
+                            // （onConfirm 仅回传展示名称与 URL，凭据从未参与库导入），整体移除；
+                            // 云端凭据统一在「设置 → 云端同步」中经加密持久化配置
                         }
                     }
 
@@ -568,27 +548,7 @@ private fun OpenExistingVaultDialog(
                                 singleLine = true,
                                 modifier = Modifier.fillMaxWidth()
                             )
-
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                OutlinedTextField(
-                                    value = s3AccessKey,
-                                    onValueChange = { s3AccessKey = it },
-                                    label = { Text("Access Key") },
-                                    singleLine = true,
-                                    modifier = Modifier.weight(1f)
-                                )
-                                OutlinedTextField(
-                                    value = s3SecretKey,
-                                    onValueChange = { s3SecretKey = it },
-                                    label = { Text("Secret Key") },
-                                    visualTransformation = PasswordVisualTransformation(),
-                                    singleLine = true,
-                                    modifier = Modifier.weight(1f)
-                                )
-                            }
+                            // Wave 15 整改（假桩清零）：原 Access Key/Secret Key 输入框无任何消费者，整体移除
                         }
                     }
                 }

@@ -557,6 +557,7 @@
     <string name="sync_save_config_btn">Save configuration</string>
     <string name="sync_webdav_saved">WebDAV configuration saved</string>
     <string name="sync_s3_saved">S3 configuration saved</string>
+    <string name="sync_config_save_failed">Save failed: credential encryption sealing did not succeed (security key may be temporarily unavailable). Configuration was not written, please retry</string>
     <string name="sync_connection_status">Connection status</string>
     <string name="sync_sync_now_btn">Sync now</string>
     <string name="sync_btn_syncing">Syncing...</string>

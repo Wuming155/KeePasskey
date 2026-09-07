@@ -544,6 +544,7 @@
     <string name="sync_save_config_btn">保存配置</string>
     <string name="sync_webdav_saved">WebDAV 配置已保存</string>
     <string name="sync_s3_saved">S3 配置已保存</string>
+    <string name="sync_config_save_failed">保存失败：凭据加密封印未成功（安全密钥可能暂不可用），配置未写入，请重试</string>
     <string name="sync_connection_status">连接状态</string>
     <string name="sync_sync_now_btn">立即同步</string>
     <string name="sync_btn_syncing">同步中...</string>

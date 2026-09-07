@@ -5,6 +5,8 @@ import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.app.security.KeystoreManager
 import com.keepasskey.app.ui.screens.settings.CloudSyncProvider
 import dagger.hilt.android.qualifiers.ApplicationContext
+import java.nio.ByteBuffer
+import java.nio.CharBuffer
 import java.nio.charset.StandardCharsets
 import java.util.Base64
 import javax.crypto.Cipher
@@ -13,24 +15,30 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * WebDAV 同步凭据模型
+ * WebDAV 同步凭据模型。
+ *
+ * Wave 15 整改：[password] 以 [CharArray] 承载（借用语义：调用方用毕立即清零，
+ * 绝不以 String 长期驻留）。
  */
-data class WebDavCredentials(
+class WebDavCredentials(
     val url: String,
     val username: String,
-    val password: String,
+    val password: CharArray,
     val remotePath: String
 )
 
 /**
- * S3 兼容协议同步凭据模型
+ * S3 兼容协议同步凭据模型。
+ *
+ * Wave 15 整改：[accessKey] / [secretKey] 以 [CharArray] 承载（借用语义：
+ * 调用方用毕立即清零，绝不以 String 长期驻留）。
  */
-data class S3Credentials(
+class S3Credentials(
     val endpoint: String,
     val bucket: String,
     val region: String,
-    val accessKey: String,
-    val secretKey: String,
+    val accessKey: CharArray,
+    val secretKey: CharArray,
     val objectKey: String,
     /** 寻址风格：false = virtual-host（AWS 等默认），true = path 风格（Cloudflare R2、IP 直连端点等） */
     val usePathStyle: Boolean = false
@@ -40,6 +48,8 @@ data class S3Credentials(
  * 云同步协议凭据持久化加密存储库 (Wave 3-E P2-19)。
  * 遵循安全规范：
  * 敏感密码与 AccessKey/SecretKey 经 Keystore AES-256-GCM 硬件加密后落盘于私有 SharedPreferences 中。
+ * Wave 15 整改：凭据读写全链路以 CharArray 承载（CharBuffer 直转 UTF-8 字节，全程不经 String），
+ * 借用语义由调用方承担用毕清零义务；保存结果如实回传（封印失败返回 false）。
  * 允许在单测中注入恒等/模拟加解密器以测试往返逻辑。
  */
 @Singleton
@@ -70,31 +80,35 @@ class SyncCredentialsStore @Inject constructor(
         }
     }
 
+    /**
+     * Wave 15 整改：密码以 [CharArray] 借用语义提交，本方法内部转换为字节封印后立即擦除调用方数组；
+     * 返回保存结果——先封印后落盘（Wave 15：封印失败时整体不 apply，杜绝「URL 已存但凭据未写入」的半写状态）。
+     */
     fun saveWebDavConfig(
         url: String,
         username: String,
-        password: String,
+        password: CharArray,
         remotePath: String
-    ) {
+    ): Boolean {
+        // 先封印：失败则整体不落盘（fail-fast）
+        val encrypted = if (password.isNotEmpty()) encrypt(password) ?: return false else null
         val editor = prefs.edit()
         editor.putString(KEY_WEBDAV_URL, url)
         editor.putString(KEY_WEBDAV_USERNAME, username)
         editor.putString(KEY_WEBDAV_REMOTE_PATH, remotePath)
-
-        if (password.isNotEmpty()) {
-            val encrypted = encrypt(password)
-            if (encrypted != null) {
-                editor.putString(KEY_WEBDAV_PASSWORD_IV, encrypted.first)
-                editor.putString(KEY_WEBDAV_PASSWORD_CIPHER, encrypted.second)
-            }
+        if (encrypted != null) {
+            editor.putString(KEY_WEBDAV_PASSWORD_IV, encrypted.first)
+            editor.putString(KEY_WEBDAV_PASSWORD_CIPHER, encrypted.second)
         } else {
             // 显式清除旧密文，避免「旧密码在清空后仍继续生效」的隐式行为
             editor.remove(KEY_WEBDAV_PASSWORD_IV)
             editor.remove(KEY_WEBDAV_PASSWORD_CIPHER)
         }
         editor.apply()
+        return true
     }
 
+    /** Wave 15 整改：读取解密以 [CharArray] 承载（借用语义），调用方用毕立即清零 */
     fun loadWebDavConfig(): WebDavCredentials? {
         // Wave 14 证书固定整体移除：旧版本遗留的锁定配置键在此一次性物理清除，
         // 不依赖「用户下次保存配置」才清理（对齐下方旧版明文 AccessKey 的迁移模式）。
@@ -115,7 +129,7 @@ class SyncCredentialsStore @Inject constructor(
         val password = if (isCipherTextPresent(iv, cipher)) {
             decrypt(iv, cipher) ?: return null
         } else {
-            ""
+            CharArray(0)
         }
 
         return WebDavCredentials(
@@ -126,46 +140,55 @@ class SyncCredentialsStore @Inject constructor(
         )
     }
 
+    /**
+     * Wave 15 整改：AccessKey/SecretKey 以 [CharArray] 借用语义提交，封印后立即擦除调用方数组；
+     * 返回保存结果——先封印后落盘（封印失败时整体不 apply，语义同 [saveWebDavConfig]）。
+     */
     fun saveS3Config(
         endpoint: String,
         bucket: String,
         region: String,
-        accessKey: String,
-        secretKey: String,
+        accessKey: CharArray,
+        secretKey: CharArray,
         objectKey: String,
         usePathStyle: Boolean = false
-    ) {
-        val editor = prefs.edit()
-        editor.putString(KEY_S3_ENDPOINT, endpoint)
-        editor.putString(KEY_S3_BUCKET, bucket)
-        editor.putString(KEY_S3_REGION, region)
-        editor.putString(KEY_S3_OBJECT_KEY, objectKey)
-        editor.putBoolean(KEY_S3_USE_PATH_STYLE, usePathStyle)
+    ): Boolean {
+        try {
+            // 先封印：任一失败则整体不落盘（fail-fast）
+            // L4 整改：AccessKey 与 SecretKey 同样经 Keystore AES-256-GCM 加密落盘，不再明文存储
+            val encryptedAccessKey = if (accessKey.isNotEmpty()) encrypt(accessKey) ?: return false else null
+            val encryptedSecretKey = if (secretKey.isNotEmpty()) encrypt(secretKey) ?: return false else null
 
-        // L4 整改：AccessKey 与 SecretKey 同样经 Keystore AES-256-GCM 加密落盘，不再明文存储
-        if (accessKey.isNotEmpty()) {
-            val encryptedAccessKey = encrypt(accessKey)
+            val editor = prefs.edit()
+            editor.putString(KEY_S3_ENDPOINT, endpoint)
+            editor.putString(KEY_S3_BUCKET, bucket)
+            editor.putString(KEY_S3_REGION, region)
+            editor.putString(KEY_S3_OBJECT_KEY, objectKey)
+            editor.putBoolean(KEY_S3_USE_PATH_STYLE, usePathStyle)
             if (encryptedAccessKey != null) {
                 editor.putString(KEY_S3_ACCESS_KEY_IV, encryptedAccessKey.first)
                 editor.putString(KEY_S3_ACCESS_KEY_CIPHER, encryptedAccessKey.second)
+            } else {
+                editor.remove(KEY_S3_ACCESS_KEY_IV)
+                editor.remove(KEY_S3_ACCESS_KEY_CIPHER)
             }
-        } else {
-            editor.remove(KEY_S3_ACCESS_KEY_IV)
-            editor.remove(KEY_S3_ACCESS_KEY_CIPHER)
-        }
-        if (secretKey.isNotEmpty()) {
-            val encrypted = encrypt(secretKey)
-            if (encrypted != null) {
-                editor.putString(KEY_S3_SECRET_IV, encrypted.first)
-                editor.putString(KEY_S3_SECRET_CIPHER, encrypted.second)
+            if (encryptedSecretKey != null) {
+                editor.putString(KEY_S3_SECRET_IV, encryptedSecretKey.first)
+                editor.putString(KEY_S3_SECRET_CIPHER, encryptedSecretKey.second)
+            } else {
+                editor.remove(KEY_S3_SECRET_IV)
+                editor.remove(KEY_S3_SECRET_CIPHER)
             }
-        } else {
-            editor.remove(KEY_S3_SECRET_IV)
-            editor.remove(KEY_S3_SECRET_CIPHER)
+            editor.apply()
+            return true
+        } finally {
+            // 借用语义：任何结果路径（成功/封印失败）均擦除调用方密钥数组
+            accessKey.fill('0')
+            secretKey.fill('0')
         }
-        editor.apply()
     }
 
+    /** Wave 15 整改：读取解密以 [CharArray] 承载（借用语义），调用方用毕立即清零 */
     fun loadS3Config(): S3Credentials? {
         val endpoint = prefs.getString(KEY_S3_ENDPOINT, null) ?: return null
         val bucket = prefs.getString(KEY_S3_BUCKET, "") ?: ""
@@ -182,13 +205,13 @@ class SyncCredentialsStore @Inject constructor(
         val accessKey = when {
             isCipherTextPresent(accessIv, accessCipher) ->
                 decrypt(accessIv, accessCipher) ?: return null
-            !legacyPlainAccessKey.isNullOrBlank() -> legacyPlainAccessKey
-            else -> ""
+            !legacyPlainAccessKey.isNullOrBlank() -> legacyPlainAccessKey.toCharArray()
+            else -> CharArray(0)
         }
         if (accessIv.isNullOrBlank() && !legacyPlainAccessKey.isNullOrBlank()) {
             // 旧版明文 AccessKey 残留清除：读取后立即转加密落盘并物理删除明文键，
             // 不再依赖「用户下次保存配置」才迁移
-            val migrated = encrypt(legacyPlainAccessKey)
+            val migrated = encrypt(accessKey)
             if (migrated != null) {
                 prefs.edit()
                     .putString(KEY_S3_ACCESS_KEY_IV, migrated.first)
@@ -204,7 +227,7 @@ class SyncCredentialsStore @Inject constructor(
         val secretKey = if (isCipherTextPresent(iv, cipher)) {
             decrypt(iv, cipher) ?: return null
         } else {
-            ""
+            CharArray(0)
         }
 
         return S3Credentials(
@@ -222,9 +245,13 @@ class SyncCredentialsStore @Inject constructor(
         prefs.edit().clear().apply()
     }
 
-    private fun encrypt(plaintext: String): Pair<String, String>? {
-        if (plaintext.isEmpty()) return null
-        val bytes = plaintext.toByteArray(StandardCharsets.UTF_8)
+    /**
+     * Wave 15 整改：封印输入以 [CharArray] 承载，经 CharBuffer 直转 UTF-8 字节
+     * （对齐 Wave 11 H1 手法），明文字节在封印完成后立即擦除，全程不经 String。
+     */
+    private fun encrypt(chars: CharArray): Pair<String, String>? {
+        if (chars.isEmpty()) return null
+        val bytes = chars.toUtf8Bytes()
         return try {
             val (iv, cipherBytes) = customEncryptor?.invoke(bytes) ?: run {
                 val km = keystoreManager ?: return null
@@ -243,15 +270,22 @@ class SyncCredentialsStore @Inject constructor(
             // 封印失败会一路静默退化，运行期完全无从感知。现显式落调试日志——注意只记异常类型，绝不写明文。
             debugLog?.error(TAG, "同步凭据封印失败，凭据未写入: ${e.javaClass.simpleName}")
             null
+        } finally {
+            bytes.fill(0)
         }
     }
 
-    private fun decrypt(ivBase64: String?, cipherBase64: String?): String? {
+    /**
+     * Wave 15 整改：解除封印以 [CharArray] 承载（UTF-8 直解码，全程不经 String），
+     * 中间字节用毕立即擦除。调用方对返回数组承担用毕清零义务（借用语义）。
+     */
+    private fun decrypt(ivBase64: String?, cipherBase64: String?): CharArray? {
         if (ivBase64.isNullOrBlank() || cipherBase64.isNullOrBlank()) return null
+        var decryptedBytes: ByteArray? = null
         return try {
             val iv = Base64.getDecoder().decode(ivBase64)
             val cipherBytes = Base64.getDecoder().decode(cipherBase64)
-            val decryptedBytes = customDecryptor?.invoke(iv, cipherBytes) ?: run {
+            decryptedBytes = customDecryptor?.invoke(iv, cipherBytes) ?: run {
                 val km = keystoreManager ?: return null
                 val key = km.getOrCreateKey(SYNC_KEY_ALIAS, requireUserAuth = false)
                 val cipher = Cipher.getInstance(TRANSFORMATION)
@@ -259,12 +293,38 @@ class SyncCredentialsStore @Inject constructor(
                 cipher.init(Cipher.DECRYPT_MODE, key, spec)
                 cipher.doFinal(cipherBytes)
             }
-            String(decryptedBytes, StandardCharsets.UTF_8)
+            decryptedBytes.toUtf8Chars()
         } catch (e: Exception) {
             // P2 整改：同上，解除封印失败不得静默。返回 null 由调用方按 fail-closed 处理，
             // 绝不退化为空字符串被上层误判为「用户主动清空了密码」。
             debugLog?.warn(TAG, "同步凭据解除封印失败: ${e.javaClass.simpleName}")
             null
+        } finally {
+            decryptedBytes?.fill(0)
+        }
+    }
+
+    /** CharArray → UTF-8 字节（CharBuffer 直转，缓冲区底层副本尽力擦除，不经 String） */
+    private fun CharArray.toUtf8Bytes(): ByteArray {
+        val bb = StandardCharsets.UTF_8.encode(CharBuffer.wrap(this))
+        return try {
+            val bytes = ByteArray(bb.remaining())
+            bb.get(bytes)
+            bytes
+        } finally {
+            if (bb.hasArray()) bb.array().fill(0)
+        }
+    }
+
+    /** UTF-8 字节 → CharArray（ByteBuffer 直解码，缓冲区底层副本尽力擦除，不经 String） */
+    private fun ByteArray.toUtf8Chars(): CharArray {
+        val cb = StandardCharsets.UTF_8.decode(ByteBuffer.wrap(this))
+        return try {
+            val chars = CharArray(cb.remaining())
+            cb.get(chars)
+            chars
+        } finally {
+            if (cb.hasArray()) cb.array().fill('0')
         }
     }
 

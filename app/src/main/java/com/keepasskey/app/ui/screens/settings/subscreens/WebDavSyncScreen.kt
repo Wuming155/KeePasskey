@@ -36,8 +36,6 @@ import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Sync
-import androidx.compose.material.icons.filled.Visibility
-import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.VpnKey
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.Wifi
@@ -66,6 +64,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -78,11 +77,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.keepasskey.app.R
+import com.keepasskey.app.ui.components.SecurePasswordField
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.model.resolveText
 import com.keepasskey.app.ui.screens.settings.CloudSyncProvider
@@ -104,8 +102,15 @@ fun CloudSyncScreen(
     onTriggerSync: () -> Unit,
     onTestConnection: () -> Unit = onTriggerSync,
     onProviderChange: (CloudSyncProvider) -> Unit = {},
-    onUpdateWebDav: (url: String, username: String, password: String, remotePath: String) -> Unit = { _, _, _, _ -> },
-    onUpdateS3: (endpoint: String, bucket: String, region: String, accessKey: String, secretKey: String, objectKey: String, usePathStyle: Boolean) -> Unit = { _, _, _, _, _, _, _ -> },
+    // Wave 15 整改：密码/SecretKey 以 CharArray 借用语义提交，返回保存结果（false = 保存被拒绝或封印失败）
+    onUpdateWebDav: (url: String, username: String, password: CharArray, remotePath: String) -> Boolean = { _, _, _, _ -> false },
+    onUpdateS3: (endpoint: String, bucket: String, region: String, accessKey: String, secretKey: CharArray, objectKey: String, usePathStyle: Boolean) -> Boolean = { _, _, _, _, _, _, _ -> false },
+    // Wave 15 整改：既有凭据经一次性预填通道下发（SecurePasswordField 消费后即清零）；
+    // 用户开始编辑时经回调终结预填通道生命周期
+    webdavPasswordPrefill: CharArray? = null,
+    s3SecretKeyPrefill: CharArray? = null,
+    onWebDavPasswordEdited: () -> Unit = {},
+    onS3SecretKeyEdited: () -> Unit = {},
     // KP2A 扩展文件处理操作
     onUseOfflineCacheToggle: (Boolean) -> Unit = {},
     onSyncOnColdStartToggle: (Boolean) -> Unit = {},
@@ -128,7 +133,9 @@ fun CloudSyncScreen(
 
     var webdavUrl by remember(uiState.webdavUrl) { mutableStateOf(uiState.webdavUrl) }
     var webdavUsername by remember(uiState.webdavUsername) { mutableStateOf(uiState.webdavUsername) }
-    var webdavPassword by remember(uiState.webdavPassword) { mutableStateOf(uiState.webdavPassword) }
+    // Wave 15 整改：密码以 CharArray 本地承载（显示用 String 仅存活于 SecurePasswordField 组件内部），
+    // 离开组合时立即擦除
+    var webdavPasswordChars by remember { mutableStateOf(CharArray(0)) }
     var webdavRemotePath by remember(uiState.webdavRemotePath) { mutableStateOf(uiState.webdavRemotePath) }
     var webdavPasswordVisible by remember { mutableStateOf(false) }
 
@@ -136,10 +143,18 @@ fun CloudSyncScreen(
     var s3Bucket by remember(uiState.s3Bucket) { mutableStateOf(uiState.s3Bucket) }
     var s3Region by remember(uiState.s3Region) { mutableStateOf(uiState.s3Region) }
     var s3AccessKey by remember(uiState.s3AccessKey) { mutableStateOf(uiState.s3AccessKey) }
-    var s3SecretKey by remember(uiState.s3SecretKey) { mutableStateOf(uiState.s3SecretKey) }
+    var s3SecretKeyChars by remember { mutableStateOf(CharArray(0)) }
     var s3ObjectKey by remember(uiState.s3ObjectKey) { mutableStateOf(uiState.s3ObjectKey) }
     var s3UsePathStyle by remember(uiState.s3UsePathStyle) { mutableStateOf(uiState.s3UsePathStyle) }
     var s3SecretKeyVisible by remember { mutableStateOf(false) }
+
+    // Wave 15 整改：离场（离开组合）擦除本地密码驻留
+    DisposableEffect(Unit) {
+        onDispose {
+            webdavPasswordChars.fill('0')
+            s3SecretKeyChars.fill('0')
+        }
+    }
 
     var showIntervalDialog by remember { mutableStateOf(false) }
     var showConflictDialog by remember { mutableStateOf(false) }
@@ -296,22 +311,20 @@ fun CloudSyncScreen(
                                 modifier = Modifier.fillMaxWidth()
                             )
 
-                            OutlinedTextField(
-                                value = webdavPassword,
-                                onValueChange = { webdavPassword = it },
-                                label = { Text(stringResource(R.string.sync_webdav_password_label)) },
-                                leadingIcon = { Icon(Icons.Default.Lock, contentDescription = null, modifier = Modifier.size(20.dp)) },
-                                trailingIcon = {
-                                    IconButton(onClick = { webdavPasswordVisible = !webdavPasswordVisible }) {
-                                        Icon(
-                                            imageVector = if (webdavPasswordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                                            contentDescription = null
-                                        )
-                                    }
+                            // Wave 15 整改：密码输入走 SecurePasswordField——显示用 String 仅存活于组件内部，
+                            // CharArray 直达本地状态；既有密码经预填通道一次性下发（不触发脏标记）
+                            SecurePasswordField(
+                                label = stringResource(R.string.sync_webdav_password_label),
+                                onPasswordChanged = { chars ->
+                                    webdavPasswordChars.fill('0')
+                                    webdavPasswordChars = chars.copyOf()
+                                    onWebDavPasswordEdited()
                                 },
-                                visualTransformation = if (webdavPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                                singleLine = true,
-                                shape = RoundedCornerShape(12.dp),
+                                isPasswordVisible = webdavPasswordVisible,
+                                onToggleVisibility = { webdavPasswordVisible = !webdavPasswordVisible },
+                                initialPassword = webdavPasswordPrefill,
+                                initialKey = webdavPasswordPrefill,
+                                leadingIcon = Icons.Default.Lock,
                                 modifier = Modifier.fillMaxWidth()
                             )
 
@@ -370,22 +383,19 @@ fun CloudSyncScreen(
                                 modifier = Modifier.fillMaxWidth()
                             )
 
-                            OutlinedTextField(
-                                value = s3SecretKey,
-                                onValueChange = { s3SecretKey = it },
-                                label = { Text("Secret Access Key") },
-                                leadingIcon = { Icon(Icons.Default.Lock, contentDescription = null, modifier = Modifier.size(20.dp)) },
-                                trailingIcon = {
-                                    IconButton(onClick = { s3SecretKeyVisible = !s3SecretKeyVisible }) {
-                                        Icon(
-                                            imageVector = if (s3SecretKeyVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                                            contentDescription = null
-                                        )
-                                    }
+                            // Wave 15 整改：SecretKey 输入走 SecurePasswordField（同 WebDAV 密码语义）
+                            SecurePasswordField(
+                                label = "Secret Access Key",
+                                onPasswordChanged = { chars ->
+                                    s3SecretKeyChars.fill('0')
+                                    s3SecretKeyChars = chars.copyOf()
+                                    onS3SecretKeyEdited()
                                 },
-                                visualTransformation = if (s3SecretKeyVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                                singleLine = true,
-                                shape = RoundedCornerShape(12.dp),
+                                isPasswordVisible = s3SecretKeyVisible,
+                                onToggleVisibility = { s3SecretKeyVisible = !s3SecretKeyVisible },
+                                initialPassword = s3SecretKeyPrefill,
+                                initialKey = s3SecretKeyPrefill,
+                                leadingIcon = Icons.Default.Lock,
                                 modifier = Modifier.fillMaxWidth()
                             )
 
@@ -426,11 +436,19 @@ fun CloudSyncScreen(
                         Button(
                             onClick = {
                                 if (uiState.syncProvider == CloudSyncProvider.WEBDAV) {
-                                    onUpdateWebDav(webdavUrl, webdavUsername, webdavPassword, webdavRemotePath)
-                                    saveFeedbackMessage = UiMessage(R.string.sync_webdav_saved)
+                                    // Wave 15 整改：借用语义——调用后密码数组已被 ViewModel 消费擦除；
+                                    // 保存失败（https 拒绝/封印失败）由 ViewModel 上浮反馈，本地不再谎报「已保存」
+                                    val saved = onUpdateWebDav(webdavUrl, webdavUsername, webdavPasswordChars, webdavRemotePath)
+                                    if (saved) {
+                                        saveFeedbackMessage = UiMessage(R.string.sync_webdav_saved)
+                                        webdavPasswordChars = CharArray(0)
+                                    }
                                 } else {
-                                    onUpdateS3(s3Endpoint, s3Bucket, s3Region, s3AccessKey, s3SecretKey, s3ObjectKey, s3UsePathStyle)
-                                    saveFeedbackMessage = UiMessage(R.string.sync_s3_saved)
+                                    val saved = onUpdateS3(s3Endpoint, s3Bucket, s3Region, s3AccessKey, s3SecretKeyChars, s3ObjectKey, s3UsePathStyle)
+                                    if (saved) {
+                                        saveFeedbackMessage = UiMessage(R.string.sync_s3_saved)
+                                        s3SecretKeyChars = CharArray(0)
+                                    }
                                 }
                             },
                             shape = RoundedCornerShape(12.dp),
@@ -876,8 +894,13 @@ fun WebDavSyncScreen(
     onTriggerSync: () -> Unit,
     onTestConnection: () -> Unit = onTriggerSync,
     onProviderChange: (CloudSyncProvider) -> Unit = {},
-    onUpdateWebDav: (url: String, username: String, password: String, remotePath: String) -> Unit = { _, _, _, _ -> },
-    onUpdateS3: (endpoint: String, bucket: String, region: String, accessKey: String, secretKey: String, objectKey: String, usePathStyle: Boolean) -> Unit = { _, _, _, _, _, _, _ -> },
+    // Wave 15 整改：密码/SecretKey 以 CharArray 借用语义提交，返回保存结果
+    onUpdateWebDav: (url: String, username: String, password: CharArray, remotePath: String) -> Boolean = { _, _, _, _ -> false },
+    onUpdateS3: (endpoint: String, bucket: String, region: String, accessKey: String, secretKey: CharArray, objectKey: String, usePathStyle: Boolean) -> Boolean = { _, _, _, _, _, _, _ -> false },
+    webdavPasswordPrefill: CharArray? = null,
+    s3SecretKeyPrefill: CharArray? = null,
+    onWebDavPasswordEdited: () -> Unit = {},
+    onS3SecretKeyEdited: () -> Unit = {},
     onUseOfflineCacheToggle: (Boolean) -> Unit = {},
     onSyncOnColdStartToggle: (Boolean) -> Unit = {},
     onPeriodicBackgroundSyncToggle: (Boolean) -> Unit = {},
@@ -901,6 +924,10 @@ fun WebDavSyncScreen(
         onProviderChange = onProviderChange,
         onUpdateWebDav = onUpdateWebDav,
         onUpdateS3 = onUpdateS3,
+        webdavPasswordPrefill = webdavPasswordPrefill,
+        s3SecretKeyPrefill = s3SecretKeyPrefill,
+        onWebDavPasswordEdited = onWebDavPasswordEdited,
+        onS3SecretKeyEdited = onS3SecretKeyEdited,
         onUseOfflineCacheToggle = onUseOfflineCacheToggle,
         onSyncOnColdStartToggle = onSyncOnColdStartToggle,
         onPeriodicBackgroundSyncToggle = onPeriodicBackgroundSyncToggle,

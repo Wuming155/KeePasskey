@@ -538,32 +538,40 @@ open class SyncCoordinator @Inject constructor(
             CloudSyncProvider.WEBDAV -> {
                 val cfg = syncCredentialsStore.loadWebDavConfig() ?: return null
                 if (cfg.url.isBlank()) return null
-                val pwdChars = cfg.password.toCharArray()
                 try {
                     WebDavSyncProvider(
                         serverUrl = cfg.url,
                         username = cfg.username,
-                        passwordChars = pwdChars,
+                        // Wave 15：cfg.password 已是 CharArray（借用语义），构造完成后由本方统一擦除
+                        passwordChars = cfg.password,
                         // Wave 14 传输安全：TLS-only + 显式超时；证书固定已整体移除，
                         // 证书验证完全依赖系统默认 CA 链（客户端由 sync 模块工厂构建）
                         networkOptions = SyncNetworkOptions()
                     )
                 } finally {
-                    pwdChars.fill('0')
+                    cfg.password.fill('0')
                 }
             }
             CloudSyncProvider.S3_COMPATIBLE -> {
                 val cfg = syncCredentialsStore.loadS3Config() ?: return null
                 if (cfg.endpoint.isBlank() || cfg.bucket.isBlank()) return null
-                S3SyncProvider(
-                    endpoint = cfg.endpoint,
-                    bucketName = cfg.bucket,
-                    region = cfg.region,
-                    accessKeyId = cfg.accessKey,
-                    secretAccessKey = cfg.secretKey,
-                    usePathStyle = cfg.usePathStyle,
-                    networkOptions = SyncNetworkOptions()
-                )
+                try {
+                    S3SyncProvider(
+                        endpoint = cfg.endpoint,
+                        bucketName = cfg.bucket,
+                        region = cfg.region,
+                        // Wave 15 边界声明：SigV4 签名管线以 String 承载密钥（对齐 WebDAV 侧
+                        // OkHttp Credentials.basic 的网络层框架边界），此处物化后立即擦除
+                        // CharArray 原件；已知限界——密钥 String 与 Provider 同生命周期
+                        accessKeyId = String(cfg.accessKey),
+                        secretAccessKey = String(cfg.secretKey),
+                        usePathStyle = cfg.usePathStyle,
+                        networkOptions = SyncNetworkOptions()
+                    )
+                } finally {
+                    cfg.accessKey.fill('0')
+                    cfg.secretKey.fill('0')
+                }
             }
         }
     }
