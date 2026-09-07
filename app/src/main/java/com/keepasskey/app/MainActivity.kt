@@ -29,7 +29,12 @@ class MainActivity : FragmentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        // 绑定 FLAG_SECURE 动态守卫与自动锁定调度器
+        // 系统硬化：屏蔽第三方应用悬浮窗覆盖本窗口（官方反 overlay 攻击建议，
+        // FLAG_SECURE 不覆盖该攻击面）
+        window.setHideOverlayWindows(true)
+
+        // 绑定 FLAG_SECURE 动态守卫（用户开关 ∨ 会话锁定态并集，首帧同步生效）
+        // 与自动锁定调度器
         flagSecureGuard.attach(this, lifecycleScope)
         autoLockManager.initialize()
 

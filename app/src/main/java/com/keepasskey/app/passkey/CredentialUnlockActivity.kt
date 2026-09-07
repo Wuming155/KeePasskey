@@ -48,6 +48,8 @@ class CredentialUnlockActivity : FragmentActivity() {
             WindowManager.LayoutParams.FLAG_SECURE,
             WindowManager.LayoutParams.FLAG_SECURE
         )
+        // 官方反 overlay 攻击加固：屏蔽其它应用悬浮窗覆盖解锁窗口
+        window.setHideOverlayWindows(true)
 
         val originalRequest = try {
             PendingIntentHandler.retrieveBeginGetCredentialRequest(intent)

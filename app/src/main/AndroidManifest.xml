@@ -4,6 +4,11 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
+    <!-- 官方反欺诈加固（API 31+，minSdk 36 无兼容负担）：配合各敏感 Activity 的
+         setHideOverlayWindows(true) 屏蔽其它应用的 TYPE_APPLICATION_OVERLAY 悬浮窗
+         覆盖敏感窗口，防御 cloak-and-dagger 类 overlay 攻击——官方明确 FLAG_SECURE
+         不覆盖该攻击面（developer.android.com/security/fraud-prevention/activities）。 -->
+    <uses-permission android:name="android.permission.HIDE_OVERLAY_WINDOWS" />
 
     <application
         android:name=".MainApplication"
