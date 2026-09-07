@@ -139,16 +139,4 @@ class AutoLockManager @Inject constructor(
     companion object {
         private const val TAG = "AutoLockManager"
     }
-
-    /**
-     * 手动清理资源
-     */
-    fun destroy() {
-        if (!isInitialized) return
-        try {
-            context.unregisterReceiver(screenOffReceiver)
-        } catch (ignored: Exception) {}
-        ProcessLifecycleOwner.get().lifecycle.removeObserver(this)
-        isInitialized = false
-    }
 }

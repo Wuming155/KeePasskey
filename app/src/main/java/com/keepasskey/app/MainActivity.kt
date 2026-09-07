@@ -15,6 +15,10 @@ import javax.inject.Inject
  * 应用主入口 Activity，承载 KeePasskeyApp 全局 Compose 导航与主题容器。
  * 继承 FragmentActivity 以支持 AndroidX BiometricPrompt 强生物识别硬件弹窗；
  * 挂载 FlagSecureGuard（防截屏/防多任务窥视）与 AutoLockManager（后台超时与锁屏自动熔断）。
+ *
+ * TASK-22 整改：AutoLockManager 为 @Singleton（进程级生命周期，监听
+ * ProcessLifecycleOwner + 熄屏广播），旋转/配置重建触发的 onDestroy 不得销毁它；
+ * initialize() 幂等，资源随进程退出由系统统一回收，本类不做任何销毁动作。
  */
 @AndroidEntryPoint
 class MainActivity : FragmentActivity() {
@@ -41,10 +45,5 @@ class MainActivity : FragmentActivity() {
         setContent {
             KeePasskeyApp()
         }
-    }
-
-    override fun onDestroy() {
-        super.onDestroy()
-        autoLockManager.destroy()
     }
 }

@@ -26,7 +26,7 @@
 
 | ID | 领域 | 任务名称 | 来源 | 优先级 | 状态 | 说明 / 证据 |
 |:---:|:---:|---|---|:---:|:---:|---|
-| **TASK-01** | 安全 | **批次 C：HMAC 防篡改回归锁 flaky 排查** | 体检路线图 C | **P0** | 🟡 进行中 | `testCorruptHmacBlock` 偶发未抛异常，KDBX 防篡改关键回归锁，需 ≥20 次全跑零失败；代码侧 `KdbxFile.kt` `!!` 清理已完成未提交 |
+| **TASK-01** | 安全 | **批次 C：HMAC 防篡改回归锁 flaky 排查** | 体检路线图 C | **P0** | ✅ 已修复（2026-09-07） | **根因定位并修复**：`testCorruptHmacBlock` 偶发未抛异常系真实安全缺陷——解析期间 GZip 预读拉取到 HMAC 终止块时，`javax.crypto.CipherInputStream` 将底层 `IOException`（凭据异常）吞掉伪装为 EOF，而 `HmacBlockInputStream` 在校验**通过前**即置 `terminated=true`，`verifyEndOfStream` 误判放行（实测 ~10% 概率篡改文件静默解锁）。整改：`terminated` 仅在终止块 HMAC 校验通过后置位，失败先记录 `terminalValidationFailed` 再抛出，`verifyEndOfStream` 作为权威检查点重放失败（fail-closed）。验收：`testCorruptHmacBlock` 连跑 **20 次零失败**（修复前 40 次内 6 次复现）；`KdbxFile.kt` `!!` 已清理 |
 | **TASK-02** | 平台 | **凭据能力注册实机回归** | Wave 16 遗留 | **P1** | 📋 待验证 | Wave 16 修正了 `meta-data` 名为 `android.credentials.provider`，需真机「设置 → 密码、密钥和自动填充」确认 KeePasskey 出现且能力生效 |
 | **TASK-03** | 依赖 | **批次 D：kapt → KSP 迁移 + 启用 built-in Kotlin** | 体检路线图 D | **P2** | 📋 规划 | AGP 9 要求切内置 Kotlin，AGP 10 移除 opt-out；`kapt("hilt-compiler")` → `ksp("hilt-android-compiler")` |
 | **TASK-04** | 存储 | **批次 E：RealSettingsRepository 迁移 Preferences DataStore** | 体检路线图 E | **P2** | 📋 规划 | 替换 SharedPreferences；`SyncCredentialsStore` Keystore AES-256-GCM 方案保持不动 |
@@ -47,7 +47,7 @@
 | **TASK-19** | 依赖 | **zxing → CameraX + ML Kit 迁移评估** | 依赖治理 | **P3** | 📋 评估 | `zxing-android-embedded:4.3.0` 保持稳定，评估迁移至现代 CameraX + ML Kit |
 | **TASK-20** | CI | **GitHub Dependabot / OWASP 依赖漏洞巡检** | 供应链 | **P3** | 📋 评估 | 配置自动化依赖漏洞扫描工作流 |
 | **TASK-21** | 整洁度 | **超 800 行文件拆分与硬编码中文抽取** | 审核报告 P3-22/23 | **P3** | ❌ 未修 | 7 个文件超 800 行（`RealVaultRepository` 1184 行、`SettingsViewModel` 1119 行等）；约 250 处硬编码中文需抽至 `strings.xml` |
-| **TASK-22** | 安全/稳定 | **P3-30：`@Singleton` AutoLockManager 在 `MainActivity.onDestroy` 被 destroy** | FINDINGS 核实 | **P0(真实 Bug)** | ❌ 未修 | `AutoLockManager` 为 `@Singleton`（`.kt:36`），旋转重建触发 `onDestroy` 即 `destroy()`，自动锁定单例被销毁；应移除或加 Activity 生命周期守卫 |
+| **TASK-22** | 安全/稳定 | **P3-30：`@Singleton` AutoLockManager 在 `MainActivity.onDestroy` 被 destroy** | FINDINGS 核实 | **P0(真实 Bug)** | ✅ 已修复（2026-09-07） | 移除 `MainActivity.onDestroy` 中的 `autoLockManager.destroy()` 调用（含空覆写与随之成为死代码的 `AutoLockManager.destroy()`）。`AutoLockManager` 为进程级单例（监听 `ProcessLifecycleOwner` + 熄屏广播），生命周期与进程对齐，`initialize()` 幂等，资源随进程退出由系统回收；旋转/配置重建不再销毁自动锁定调度器 |
 | **TASK-23** | 安全 | **P2-9：`parseEcPrivateKey` 缺 `d ∈ [1, n-1]` 范围校验** | FINDINGS 核实 | **P1** | ❌ 未修 | `PasskeyCryptoEngine.kt:364` 用 `BigInteger(1, bytes)` 构造标量，`bytes=0` 即生成非法/可被利用私钥；应 fail-closed |
 | **TASK-24** | 内存 | **P2-10：旧派生回退 `legacyCipherKey` 未清零** | FINDINGS 核实 | **P2** | ❌ 未修 | `KdbxFile.kt:144` `finally` 仅清 `legacyHmacKey`，`legacyCipherKey` 返回后残留；补 `Arrays.fill` |
 | **TASK-25** | 互操作 | **P2-11：WebDAV Basic 认证 ISO-8859-1 致中文密码 401** | FINDINGS 核实 | **P2** | ❌ 未修 | `WebDavSyncProvider.kt:85` 应发 `charset=UTF-8` 并改 UTF-8 编码 |

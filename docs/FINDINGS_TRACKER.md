@@ -116,7 +116,7 @@
 | **P3-27** | 空 onClick 按钮与写死黑名单 | ❌ 未修复 | `AutofillSettingsScreen.kt:343` 按钮回调为空且黑名单写死 | 中（功能） | 黑名单项为写死列表，删除 `IconButton(onClick = { })` 为空回调，黑名单管理是假功能 |
 | **P3-28** | 带有仅含注释的空 if 块 | ❌ 未修复 | `PasskeyCreateActivity.kt:61` 存在空 if 块 | 极低 | `if (origin.isBlank()) { /* 仅注释 */ }` 空 if 块，清理即可 |
 | **P3-29** | 从 Context 强转 MainActivity 获取单例 | ❌ 未修复 | `KeePasskeyApp.kt:149` 存在 `(context as? MainActivity)?.autoLockManager` 强转 | 不急（描述有误） | 实测为 `(context as? MainActivity)?.autoLockManager`——是**安全转换 `as?` 而非强转**，对 null 已优雅处理，风险很低；原结论"强转"不准确 |
-| **P3-30** | 熄屏自动锁在 Activity onDestroy 时销毁单例 | ❌ 未修复 | `MainActivity.kt:48` onDestroy 中误调了单例 `autoLockManager.destroy()` | 高（真实 Bug） | `AutoLockManager` 是 `@Singleton`（`.kt:36`），而 `MainActivity.onDestroy` 在旋转重建时也会触发，导致单例被 `destroy()`；屏幕旋转即销毁自动锁定单例，应移除或加 Activity 生命周期守卫 |
+| **P3-30** | 熄屏自动锁在 Activity onDestroy 时销毁单例 | ❌ 未修复 → ✅ 已修复（2026-09-07，TASK-22） | `MainActivity.kt:48` onDestroy 中误调了单例 `autoLockManager.destroy()` | 高（真实 Bug） | 已整改：移除 `MainActivity.onDestroy` 的 `destroy()` 调用与空覆写，并清理 `AutoLockManager.destroy()` 死代码；单例生命周期与进程对齐，`initialize()` 幂等，旋转重建不再销毁调度器 |
 | **P3-31** | 捕获 Exception 丢弃具体异常细节 | ❌ 未修复 | `SyncCoordinator.kt:534` 存在 `catch (_: Exception) { null }` | 低 | `catch (_: Exception) { null }` 丢弃异常细节，序列化失败被静默吞掉；建议至少记 `debugLog` |
 | **P3-32** | 生产类构造函数保留 Context? 可空形参 | ❌ 未修复 | `KeystoreManager.kt:42` 等生产构造中保留 Context? | 低 | 生产构造保留 `Context?` 可空形参仅为单测注入，可保留 |
 | **P3-33** | MockData.kt 文件名与死链注释残留 | ❌ 未修复 | `MockData.kt` 文件名未改且注释存在死链 | 极低 | 文件名 `MockData` 实为生产 UI 模型（VaultGroup/UiVaultEntry 等），应改名如 `UiModels.kt` |

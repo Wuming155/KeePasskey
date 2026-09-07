@@ -135,6 +135,11 @@ object HmacBlockStream {
  * HMAC 块流读取侧（流式）：逐块校验 HMAC 后才交付明文，不在内存中积压整条密文。
  * 读取到 size=0 的终止块后返回 EOF；[verifyEndOfStream] 用于强制确认终止块已被校验
  * （上层数据流可能提前停止拉取，例如 GZip 解压到尾部即终止）。
+ *
+ * TASK-01 整改：`terminated` 仅在终止块 HMAC 校验**通过后**置位；校验失败时先记录
+ * [terminalValidationFailed] 再抛出。原因：javax.crypto.CipherInputStream 会把底层流
+ * 抛出的 IOException（含本流的凭据异常）吞掉并伪装为 EOF，若解析期间（GZip 预读）
+ * 恰好拉取到终止块，异常将无法抵达上层——权威裁决以 [verifyEndOfStream] 为准。
  */
 class HmacBlockInputStream(
     private val source: InputStream,
@@ -144,7 +149,16 @@ class HmacBlockInputStream(
     private var blockIndex = 0L
     private var currentBlock = ByteArray(0)
     private var position = 0
+
+    /** 终止块已被消费且 HMAC 校验通过 */
     private var terminated = false
+
+    /**
+     * 终止块 HMAC 校验失败（TASK-01 整改）。
+     * 校验异常可能被解密流（CipherInputStream 吞底层异常伪装 EOF）拦截，
+     * 该标记确保 [verifyEndOfStream] 作为权威检查点时必能重放失败，fail-closed。
+     */
+    private var terminalValidationFailed = false
 
     override fun read(): Int {
         if (!ensureDataAvailable()) return -1
@@ -164,6 +178,13 @@ class HmacBlockInputStream(
      * 确认流已正常走到终止块并完成其 HMAC 校验；若上层数据流提前停止拉取，则继续消费并校验剩余块。
      */
     fun verifyEndOfStream() {
+        // TASK-01 整改（flaky 根因修复）：终止块 HMAC 校验失败的异常可能被解密流
+        // （javax.crypto.CipherInputStream 会把底层流异常吞掉并伪装为 EOF）拦截，
+        // 导致本方法把「未校验通过」误判为「已通过」。此处作为权威检查点，
+        // 必须重放已记录的校验失败，确保篡改文件在任何路径下都 fail-closed。
+        if (terminalValidationFailed) {
+            throw KdbxInvalidCredentialsException("HMAC 终止块校验失败：主密码错误或文件末尾被篡改")
+        }
         while (!terminated) {
             if (!loadNextBlock()) break
         }
@@ -214,11 +235,15 @@ class HmacBlockInputStream(
         val indexBytes = LittleEndianUtil.longTo8Bytes(blockIndex)
 
         if (blockSize == 0) {
-            terminated = true
             val actualHmac = HashUtil.hmacSha256(blockKey, indexBytes, sizeBytes)
             if (!java.security.MessageDigest.isEqual(actualHmac, expectedHmac)) {
+                // TASK-01 整改：先记账再抛出。绝不提前置 terminated=true——
+                // 若该异常被中间层（如 CipherInputStream）吞掉，[verifyEndOfStream]
+                // 必须能凭 terminalValidationFailed 重放失败，杜绝篡改文件静默通过。
+                terminalValidationFailed = true
                 throw KdbxInvalidCredentialsException("HMAC 终止块校验失败：主密码错误或文件末尾被篡改")
             }
+            terminated = true
             return false
         }
 
