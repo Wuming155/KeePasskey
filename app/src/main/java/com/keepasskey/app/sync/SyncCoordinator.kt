@@ -197,7 +197,7 @@ open class SyncCoordinator @Inject constructor(
         // 本地缓存会被工作副本反复覆盖，绝不能再兼任 base 内容来源——
         // 否则冲突会话中断后 base 会被本地修改版污染，后续合并退化为远端全胜
         val baseSnapshotBytes = syncCache.readBaseContent(remotePath) ?: cachedSnapshotBytes
-        val hasLocalContentChanged = hasDatabaseContentChanged(currentDb, lastSyncedDb)
+        val hasLocalContentChanged = resolveLocalContentChanged(currentDb, cachedSnapshotBytes)
 
         // 1. 获取本地数据库字节：若无内容变更且已缓存，复用缓存规避 KDBX4 随机 IV 导致的不必要哈希漂移；否则序列化并写缓存
         val localBytes = if (!isCached || hasLocalContentChanged) {
@@ -270,12 +270,36 @@ open class SyncCoordinator @Inject constructor(
             when (val openResult = syncEngine.openRemote(remotePath)) {
                 is SyncOpenResult.RemoteSynced -> {
                     val isIdentical = openResult.remoteBytes.contentEquals(localBytes)
-                    if (!isIdentical) {
+                    if (isIdentical) {
+                        lastSyncedDb = databaseSession.databaseFlow.value
+                        SyncOutcome.UpToDate
+                    } else if (isDirty || hasLocalContentChanged) {
+                        // F1 修复：本地存在未同步修改（缓存被回收导致步骤 3 快速提交被跳过时
+                        // 尤其危险——Android 官方文档明确 cacheDir 会在存储不足时被系统自动
+                        // 回收，读取前必须检查存在性）。判据用 isDirty || hasLocalContentChanged：
+                        // 前者覆盖「内存修改未落盘」，后者覆盖「已落盘但尚未同步」（更常见，
+                        // isDirty 在 save() 后即复位，绝不能只看它）。严禁以远端整体覆盖会话，
+                        // 否则本地未上传修改将不可恢复地丢失：先按 R3 落盘本地会话，
+                        // 再转三方合并（base 缺失时按 F2 修复退化为双方并集合并）
+                        val preSave = databaseSession.save()
+                        if (preSave is KdbxResult.Failure) {
+                            return@withLock SyncOutcome.Error("冲突会话前置保存失败: ${preSave.message}")
+                        }
+                        handleConflictMerge(
+                            syncEngine = syncEngine,
+                            syncCache = syncCache,
+                            remotePath = remotePath,
+                            localBytes = localBytes,
+                            remoteBytes = openResult.remoteBytes,
+                            baseSnapshotBytes = baseSnapshotBytes,
+                            remoteEtag = openResult.etag
+                        )
+                    } else {
                         val applied = loadAndApplyRemoteBytes(openResult.remoteBytes)
                         if (!applied) return@withLock SyncOutcome.Error("加载云端数据库失败，密码或格式不匹配")
+                        lastSyncedDb = databaseSession.databaseFlow.value
+                        SyncOutcome.UpToDate
                     }
-                    lastSyncedDb = databaseSession.databaseFlow.value
-                    SyncOutcome.UpToDate
                 }
                 is SyncOpenResult.LocalWinAutoUploaded -> {
                     lastSyncedDb = databaseSession.databaseFlow.value
@@ -446,14 +470,19 @@ open class SyncCoordinator @Inject constructor(
         val remoteDb = parseKdbxBytes(remoteBytes)
             ?: return@withContext SyncOutcome.Error("无法解密云端冲突数据库")
 
-        val baseDb = if (baseSnapshotBytes != null) {
-            parseKdbxBytes(baseSnapshotBytes) ?: localDb
-        } else {
-            val cached = syncCache.readCache(remotePath)
-            if (cached != null) parseKdbxBytes(cached) ?: localDb else localDb
-        }
+        // F2 修复：base 快照必须通过三重可信检验——存在、可解析、且内容与本地字节不同
+        // （本地工作副本污染判定：KDBX4 随机 IV 使同一内容的两次序列化字节必然不同，
+        // 字节级 contentEquals 命中相同即证明 base 已被本地内容顶替）。
+        // 不可信时严禁以本地充当 base——那会把「本地新建」误判为「远端已删除且本地未修改」
+        // 而确认删除且不留墓碑，同时远端修改全胜；改为以空库充当 base，
+        // 三方合并退化为双方并集语义：单侧新建保留、同 UUID 条目字段级合并、
+        // 同字段分叉进入冲突清单交用户决策（宁多冲突不静默丢数据）。
+        val parsedBase = baseSnapshotBytes?.let { parseKdbxBytes(it) }
+        val trustedBase = parsedBase?.takeIf { !baseSnapshotBytes.contentEquals(localBytes) }
 
-        val baseLite = KdbxDatabaseLite(baseDb.rootGroup, baseDb.deletedObjects)
+        val baseLite = trustedBase
+            ?.let { KdbxDatabaseLite(it.rootGroup, it.deletedObjects) }
+            ?: KdbxDatabaseLite(KdbxGroup(name = ""), emptyList())
         val localLite = KdbxDatabaseLite(localDb.rootGroup, localDb.deletedObjects)
         val remoteLite = KdbxDatabaseLite(remoteDb.rootGroup, remoteDb.deletedObjects)
 
@@ -611,6 +640,32 @@ open class SyncCoordinator @Inject constructor(
         }
         val newSubs = group.subgroups.map { applyResolvedEntryToGroup(it, entry) }
         return group.copy(subgroups = newSubs)
+    }
+
+    /**
+     * 判定本地会话库是否存在未同步的内容变更（F5 修复）。
+     *
+     * - 进程内存基线（lastSyncedDb）可用时按全字段内容比较；
+     * - 冷启动后内存基线缺失时，绝不能直接判定「有变化」并重序列化覆盖缓存——
+     *   KDBX4 随机 IV 使重序列化字节必然漂移，刷新 version 后引擎将把「无修改」
+     *   误判为「本地赢」，触发无意义重传并前移远端 ETag，成为多设备协同的噪音源。
+     *   正确做法：把缓存快照解析为数据库后做内容级比较；
+     * - 缓存解析失败（损坏）按「有变化」保守处理：以会话库重建缓存——
+     *   会话库即本地真相，重建内容不会偏离用户数据。
+     */
+    private suspend fun resolveLocalContentChanged(
+        currentDb: KdbxDatabase,
+        cachedSnapshotBytes: ByteArray?
+    ): Boolean {
+        val reference = lastSyncedDb
+        if (reference != null) {
+            return hasDatabaseContentChanged(currentDb, reference)
+        }
+        if (cachedSnapshotBytes != null) {
+            val cachedDb = parseKdbxBytes(cachedSnapshotBytes) ?: return true
+            return hasDatabaseContentChanged(currentDb, cachedDb)
+        }
+        return true
     }
 
     /**

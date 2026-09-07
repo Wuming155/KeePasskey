@@ -203,12 +203,23 @@ class S3SyncProvider(
             var precheckEtag: String? = null
             if (expectedEtag.isNullOrBlank()) {
                 val metaResult = getMetadata(remotePath)
-                if (metaResult.isFailure && metaResult.exceptionOrNull() is SyncException.FileNotFound) {
-                    isFirstUpload = true
-                } else {
-                    isFirstUpload = false
+                when {
+                    // 确认 404：真首传，PUT 附带 If-None-Match: * 原子创建
+                    metaResult.exceptionOrNull() is SyncException.FileNotFound -> {
+                        isFirstUpload = true
+                    }
                     // 远端已存在却未声明期望 ETag：锁定 HEAD 所见版本，保证「覆盖的即所见」
-                    precheckEtag = metaResult.getOrNull()?.etag
+                    metaResult.isSuccess -> {
+                        isFirstUpload = false
+                        precheckEtag = metaResult.getOrThrow().etag
+                    }
+                    // HEAD 探测遭遇网络错误 / 5xx 等非 404 失败时严禁无条件 PUT——
+                    // 此时不带任何条件头的 PUT 若成功将静默覆盖远端（可能含他人更新）。
+                    // 如实上抛失败交由上层按「远端不可达」处理（本地缓存已安全保留）
+                    else -> {
+                        throw metaResult.exceptionOrNull()
+                            ?: SyncException.NetworkError("S3 上传前置探测失败")
+                    }
                 }
             } else {
                 isFirstUpload = false

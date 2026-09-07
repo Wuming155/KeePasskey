@@ -232,6 +232,29 @@ class S3SyncProviderTest {
     }
 
     @Test
+    fun `测试首传前置探测网络失败时快速失败不发无条件PUT`() = runTest {
+        // F6 修复：expectedEtag 为空且 HEAD 探测遭遇非 404 失败（网络错误/5xx）时必须
+        // 快速失败——若退化为无条件 PUT，远端存在他人更新时将被静默覆盖
+        server.enqueue(MockResponse().setResponseCode(500).setBody("Internal Server Error"))
+
+        val provider = S3SyncProvider(
+            endpoint = "http://127.0.0.1:${server.port}",
+            bucketName = "test-bucket",
+            region = "us-east-1",
+            accessKeyId = "TESTKEY",
+            secretAccessKey = "TESTSECRET",
+            client = createLoopbackClient()
+        )
+
+        val result = provider.upload("vault.kdbx", "data".toByteArray(), expectedEtag = null)
+        assertTrue("探测失败必须 fail-fast: ${result.exceptionOrNull()}", result.isFailure)
+        assertTrue(result.exceptionOrNull() is SyncException.ProtocolError)
+        // 仅 HEAD 探测，绝无 PUT 发出
+        assertEquals("HEAD", server.takeRequest().method)
+        assertEquals(1, server.requestCount)
+    }
+
+    @Test
     fun `测试编码对象键与 SigV4 规范 URI 一致性`() {
         val provider = S3SyncProvider(
             endpoint = "https://s3.amazonaws.com",

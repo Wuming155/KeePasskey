@@ -14,6 +14,7 @@ import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.fail
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
@@ -115,6 +116,31 @@ class SyncEngineTest {
         // 远端文件已被更新为本地数据
         assertArrayEquals(localNew, fakeProvider.remoteFiles[remotePath]?.data)
         assertFalse(syncCache.hasLocalChanges(remotePath))
+    }
+
+    @Test
+    fun `测试缓存读取失败时中止同步而非以空字节继续`() = runTest {
+        // F4 修复：isCached 与实际读取之间状态漂移（系统回收 cacheDir / 并发清理 / 外部删除）
+        // 时，绝不能以空字节数组继续——空数组命中本地赢路径会把远端全库覆盖为空
+        val v1 = "content-v1".toByteArray()
+        fakeProvider.remoteFiles[remotePath] = FakeRemoteFile(v1, etag = "etag-1")
+        engine.openRemote(remotePath)
+
+        // 模拟「isCached 为 true 但 readCache 失败返回 null」的竞态窗口
+        val flakyCache = object : SyncCache(cacheDir) {
+            override fun readCache(remotePath: String): ByteArray? = null
+        }
+        val flakyEngine = SyncEngine(fakeProvider, flakyCache)
+
+        try {
+            flakyEngine.openRemote(remotePath)
+            fail("缓存读取失败必须 fail-fast 终止同步")
+        } catch (_: SyncException.CacheCorruptedError) {
+            // 预期路径
+        }
+
+        // 远端内容必须原样保留，绝未被空字节覆盖
+        assertArrayEquals(v1, fakeProvider.remoteFiles[remotePath]?.data)
     }
 
     @Test

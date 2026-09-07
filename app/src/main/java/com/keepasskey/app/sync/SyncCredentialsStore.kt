@@ -90,22 +90,28 @@ class SyncCredentialsStore @Inject constructor(
         password: CharArray,
         remotePath: String
     ): Boolean {
-        // 先封印：失败则整体不落盘（fail-fast）
-        val encrypted = if (password.isNotEmpty()) encrypt(password) ?: return false else null
-        val editor = prefs.edit()
-        editor.putString(KEY_WEBDAV_URL, url)
-        editor.putString(KEY_WEBDAV_USERNAME, username)
-        editor.putString(KEY_WEBDAV_REMOTE_PATH, remotePath)
-        if (encrypted != null) {
-            editor.putString(KEY_WEBDAV_PASSWORD_IV, encrypted.first)
-            editor.putString(KEY_WEBDAV_PASSWORD_CIPHER, encrypted.second)
-        } else {
-            // 显式清除旧密文，避免「旧密码在清空后仍继续生效」的隐式行为
-            editor.remove(KEY_WEBDAV_PASSWORD_IV)
-            editor.remove(KEY_WEBDAV_PASSWORD_CIPHER)
+        try {
+            // 先封印：失败则整体不落盘（fail-fast）
+            val encrypted = if (password.isNotEmpty()) encrypt(password) ?: return false else null
+            val editor = prefs.edit()
+            editor.putString(KEY_WEBDAV_URL, url)
+            editor.putString(KEY_WEBDAV_USERNAME, username)
+            editor.putString(KEY_WEBDAV_REMOTE_PATH, remotePath)
+            if (encrypted != null) {
+                editor.putString(KEY_WEBDAV_PASSWORD_IV, encrypted.first)
+                editor.putString(KEY_WEBDAV_PASSWORD_CIPHER, encrypted.second)
+            } else {
+                // 显式清除旧密文，避免「旧密码在清空后仍继续生效」的隐式行为
+                editor.remove(KEY_WEBDAV_PASSWORD_IV)
+                editor.remove(KEY_WEBDAV_PASSWORD_CIPHER)
+            }
+            editor.apply()
+            return true
+        } finally {
+            // 借用语义：任何结果路径（成功/封印失败）均擦除调用方密码数组
+            // （对齐 saveS3Config 的 finally 擦除契约与 Wave 15 文档声明）
+            password.fill('0')
         }
-        editor.apply()
-        return true
     }
 
     /** Wave 15 整改：读取解密以 [CharArray] 承载（借用语义），调用方用毕立即清零 */

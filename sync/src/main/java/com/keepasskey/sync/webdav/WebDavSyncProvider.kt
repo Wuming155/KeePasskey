@@ -8,7 +8,6 @@ import com.keepasskey.sync.network.SyncNetworkOptions
 import com.keepasskey.sync.provider.SyncProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import okhttp3.Credentials
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -16,7 +15,10 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import org.w3c.dom.Node
 import java.net.URLEncoder
+import java.nio.CharBuffer
+import java.nio.charset.StandardCharsets
 import java.text.SimpleDateFormat
+import java.util.Base64
 import java.util.Locale
 import java.util.TimeZone
 import java.util.UUID
@@ -66,8 +68,36 @@ class WebDavSyncProvider(
                 )
             }
         }
-        authHeader = Credentials.basic(username, String(passwordChars))
+        authHeader = buildBasicAuthHeader(username, passwordChars)
         passwordChars.fill('0')
+    }
+
+    /**
+     * 手工构造 Basic 认证头，密码全程不经 String（敏感数据铁律）。
+     *
+     * 对齐 OkHttp Credentials.basic 的默认语义（RFC 7617 默认 charset ISO-8859-1）：
+     * username 属非机密标识符可走 String；password 以 CharBuffer 直转 ISO-8859-1 字节
+     * 参与 "user:pass" 凭据拼接，Base64 编码后中间字节数组立即擦除。
+     * 已声明限界：最终 Authorization 头以 Base64 形态驻留 Provider 生命周期
+     * （OkHttp header API 以 String 承载），与 S3 侧 SigV4 管线的 String 边界声明一致。
+     */
+    private fun buildBasicAuthHeader(username: String, passwordChars: CharArray): String {
+        val passwordBuffer = StandardCharsets.ISO_8859_1.encode(CharBuffer.wrap(passwordChars))
+        val encoded = try {
+            val passwordBytes = ByteArray(passwordBuffer.remaining())
+            passwordBuffer.get(passwordBytes)
+            val combined = username.toByteArray(StandardCharsets.ISO_8859_1) +
+                    byteArrayOf(':'.code.toByte()) +
+                    passwordBytes
+            try {
+                Base64.getEncoder().encodeToString(combined)
+            } finally {
+                combined.fill(0)
+            }
+        } finally {
+            if (passwordBuffer.hasArray()) passwordBuffer.array().fill(0)
+        }
+        return "Basic $encoded"
     }
 
     private fun encodePath(path: String): String {
@@ -215,12 +245,21 @@ class WebDavSyncProvider(
      * 1. 上传至 `<remotePath>.<随机UUID>.kpktmp` 临时文件——临时名含每次操作的
      *    随机成分：若多客户端共用固定临时名，A 的 MOVE 可能搬运到 B 刚覆盖写入的
      *    临时内容（If 预条件只约束 MOVE 目标，不约束源临时文件），造成数据交叉污染；
-     * 2. 发送 WebDAV MOVE 命令（Destination: 目标完整 URL，Overwrite: T）；
+     * 2. 发送 WebDAV MOVE 命令（Destination: 目标完整 URL）；
      *    对远端目标文件的 ETag 预条件使用 RFC 4918 `If` 头 tagged list 语法
      *    （`If: <destUrl> (["etag"])`）——`If-Match` 默认仅作用于请求-URI（即源临时文件），
      *    对 MOVE 目标无约束效力；
      * 3. MOVE 失败重试 1 次；
      * 4. 仍失败则 DELETE 清除临时文件并抛错回滚。
+     *
+     * Overwrite 语义裁定（expectedEtag 为空时的两种形态必须区分）：
+     * - **真首传**（远端目标不存在）→ `Overwrite: F` 保持原子创建保护，
+     *   目标若被并发创建由服务端 412 转 ConflictError；
+     * - **无 ETag 服务器的覆盖上传**（本地赢自动上传 / 冲突解决提交路径，目标必然已存在）
+     *   → `Overwrite: T`，语义退化为最后写入者胜——无 ETag 服务器无法实施乐观锁，
+     *   这是在此类服务器上唯一可行的写语义；恒用 `Overwrite: F` 会让 MOVE 对已存在目标
+     *   恒定 412，上传路径陷入死锁（冲突解决提交同样 412，同步永久无法收敛）。
+     *   目标存在性以 PROPFIND 探测判定，探测失败按「目标存在」的保守对侧处理为 `F`（fail-safe）。
      */
     override suspend fun uploadAtomic(
         remotePath: String,
@@ -237,6 +276,14 @@ class WebDavSyncProvider(
             val sourceUrl = buildUrl(tmpPath)
             val destUrl = buildUrl(remotePath)
 
+            val overwriteFlag = if (!expectedEtag.isNullOrBlank()) {
+                // If tagged list 已在服务端原子校验目标 ETag，Overwrite: T 仅表示允许替换
+                "T"
+            } else {
+                // 无期望 ETag：探测目标存在性区分真首传与无 ETag 服务器的覆盖上传
+                if (getMetadata(remotePath).isSuccess) "T" else "F"
+            }
+
             fun createMoveRequest(): Request {
                 val moveBuilder = Request.Builder()
                     .url(sourceUrl)
@@ -246,12 +293,10 @@ class WebDavSyncProvider(
 
                 if (!expectedEtag.isNullOrBlank()) {
                     // RFC 4918 Section 10.4: tagged list If 头把 ETag 预条件绑定到 MOVE 目标资源
-                    moveBuilder.header("Overwrite", "T")
+                    moveBuilder.header("Overwrite", overwriteFlag)
                     moveBuilder.header("If", "<$destUrl> ([\"${cleanEtag(expectedEtag)}\"])")
                 } else {
-                    // P1-11 整改：无期望 ETag 时为首传语义，禁止 Overwrite: T 无条件覆盖；
-                    // 标记 Overwrite: F，若目标已存在由服务端返回 412 Precondition Failed 并转为 ConflictError
-                    moveBuilder.header("Overwrite", "F")
+                    moveBuilder.header("Overwrite", overwriteFlag)
                 }
                 return moveBuilder.build()
             }

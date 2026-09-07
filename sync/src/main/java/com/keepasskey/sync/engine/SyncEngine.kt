@@ -134,7 +134,11 @@ class SyncEngine(
 
     /**
      * 离线模式开关。开启后直接从缓存读取，不触碰网络。
+     * @Volatile 提供单布尔标志的跨协程可见性保证（官方并发最佳实践：
+     * 单变量可见性用 @Volatile，代码块互斥用 Mutex——调用方 SyncCoordinator 已用
+     * mutex 串行化同步周期，此处仅补齐可见性防御）。
      */
+    @Volatile
     var isOffline: Boolean = false
 
     /**
@@ -174,6 +178,11 @@ class SyncEngine(
             }
 
             val meta = metaResult.getOrThrow()
+            if (meta.isDirectory) {
+                // 路径误指远端目录（如 PROPFIND 命中 collection）时 GET 将返回 HTML 目录列表，
+                // 直接落库会产生脏缓存并污染三哈希基线，fail-fast 终止
+                throw SyncException.ProtocolError(400, "远程路径指向目录而非数据库文件: $remotePath")
+            }
             val downloadResult = provider.download(remotePath)
             val remoteBytes = downloadResult.getOrElse { ex ->
                 events.tryEmit(SyncCacheEvent.CouldntOpenFromRemote(remotePath, ex))
@@ -187,8 +196,10 @@ class SyncEngine(
             return@withContext SyncOpenResult.RemoteSynced(remoteBytes, meta.etag)
         }
 
-        // 已缓存
-        val cachedBytes = cache.readCache(remotePath) ?: ByteArray(0)
+        // 已缓存。读取失败绝不以空字节数组继续——空数组一旦命中「本地赢自动上传」
+        // 路径会把远端全库覆盖为空（数据丢失级故障），必须 fail-fast 终止本次同步
+        val cachedBytes = cache.readCache(remotePath)
+            ?: throw SyncException.CacheCorruptedError("本地同步缓存读取失败: $remotePath")
         val state = cache.getState(remotePath)
         val baseEtag = cleanEtag(state?.etag)
         val baseVersionHash = state?.baseVersion.orEmpty().trim()

@@ -7,6 +7,7 @@ import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
+import java.util.UUID
 
 /**
  * 缓存快照元数据状态。
@@ -29,7 +30,7 @@ data class SyncCacheState(
  * - `<hash>.basecache`：基准内容快照（最后确认与云端一致时的完整字节）
  * - `<hash>.meta`：简易 key=value 行文本元数据（remotePath, etag, lastSyncMillis）
  */
-class SyncCache(private val cacheDir: File) {
+open class SyncCache(private val cacheDir: File) {
 
     init {
         if (!cacheDir.exists()) {
@@ -47,8 +48,9 @@ class SyncCache(private val cacheDir: File) {
 
     /**
      * 读取本地缓存的二进制内容。
+     * open 仅供单元测试子类化注入「isCached 与读取之间状态漂移」的模拟场景。
      */
-    fun readCache(remotePath: String): ByteArray? {
+    open fun readCache(remotePath: String): ByteArray? {
         val file = getFile(remotePath, SUFFIX_CACHE)
         return if (file.exists() && file.isFile) {
             file.readBytes()
@@ -87,7 +89,7 @@ class SyncCache(private val cacheDir: File) {
      */
     fun writeCache(remotePath: String, data: ByteArray, updateVersion: Boolean = true): String {
         val cacheFile = getFile(remotePath, SUFFIX_CACHE)
-        val tmpFile = File(cacheDir, "${cacheFile.name}$SUFFIX_TMP")
+        val tmpFile = tmpFileFor(cacheFile)
 
         FileOutputStream(tmpFile).use { fos ->
             fos.write(data)
@@ -125,7 +127,7 @@ class SyncCache(private val cacheDir: File) {
      */
     fun writeBaseContent(remotePath: String, data: ByteArray) {
         val baseFile = getFile(remotePath, SUFFIX_BASE_CACHE)
-        val tmpFile = File(cacheDir, "${baseFile.name}$SUFFIX_TMP")
+        val tmpFile = tmpFileFor(baseFile)
         FileOutputStream(tmpFile).use { fos ->
             fos.write(data)
             fos.flush()
@@ -211,6 +213,27 @@ class SyncCache(private val cacheDir: File) {
                 file.delete()
             }
         }
+        deleteOrphanTmpFiles(remotePath)
+    }
+
+    /**
+     * 生成唯一临时文件路径。
+     * 固定名 tmp 在并发写同一 remotePath 时会互相覆盖，造成 A 的 rename 交付 B 的
+     * 内容（交叉污染）；对齐 Wave 9 WebDAV uploadAtomic 临时名唯一化的同类整改语义。
+     * 当前 SyncCoordinator 以 mutex 串行化同步周期，唯一名作为并发防御纵深兜底。
+     */
+    private fun tmpFileFor(targetFile: File): File =
+        File(cacheDir, "${targetFile.name}.${UUID.randomUUID()}$SUFFIX_TMP")
+
+    /**
+     * 通配清理本 remotePath 的全部残留 tmp 文件。
+     * tmp 名含随机成分后，固定名清单不再完备；以「缓存键前缀 + tmp 后缀」通配兜底，
+     * 防止进程崩溃残留的 tmp 文件累积泄漏磁盘。
+     */
+    private fun deleteOrphanTmpFiles(remotePath: String) {
+        val key = sha256Hex(remotePath.toByteArray(Charsets.UTF_8))
+        cacheDir.listFiles { file -> file.name.startsWith(key) && file.name.endsWith(SUFFIX_TMP) }
+            ?.forEach { it.delete() }
     }
 
     /**
@@ -236,7 +259,7 @@ class SyncCache(private val cacheDir: File) {
     }
 
     private fun writeStringSafely(targetFile: File, content: String) {
-        val tmpFile = File(cacheDir, "${targetFile.name}$SUFFIX_TMP")
+        val tmpFile = tmpFileFor(targetFile)
         FileOutputStream(tmpFile).use { fos ->
             fos.write(content.toByteArray(Charsets.UTF_8))
             fos.flush()

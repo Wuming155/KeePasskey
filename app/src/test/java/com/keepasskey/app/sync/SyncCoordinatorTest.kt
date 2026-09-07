@@ -223,4 +223,71 @@ class SyncCoordinatorTest {
         // 6. 验证冲突列表已清空
         assertTrue(coordinator.conflictFlow.value.isEmpty())
     }
+
+    @Test
+    fun `测试缓存被系统回收且本地有未同步修改时不被远端覆盖`() = runTest(testDispatcher) {
+        // F1 + F2 修复验收：cacheDir 会被系统在存储不足时自动回收（Android 官方语义）。
+        // 缓存丢失后本地存在未同步修改（已落盘但尚未同步，isDirty 已复位的最常见形态）时，
+        // 严禁以远端整体覆盖会话；basecache 一并丢失时必须以空 base 退化并集合并，
+        // 本地修改必须存活并交由用户决策，而非静默丢失
+        val memoryProvider = MemorySyncProvider()
+        val remotePath = "/remote/vault_test4.kdbx"
+        coordinator.testSyncProvider = memoryProvider
+        coordinator.testRemotePath = remotePath
+
+        // 1. 建立基线并上传云端
+        val entryId = KdbxUuid.random()
+        val sharedEntry = KdbxEntry(
+            id = entryId,
+            fields = mapOf(
+                KdbxConstants.Fields.TITLE to ProtectedString("Shared Entry", false),
+                KdbxConstants.Fields.PASSWORD to ProtectedString("BasePassword#1", true)
+            )
+        )
+        databaseSession.saveEntry(sharedEntry)
+        databaseSession.save()
+        coordinator.syncNow()
+
+        // 2. 本地修改密码并落盘（已保存但尚未同步）
+        val localModified = sharedEntry.withField(
+            KdbxConstants.Fields.PASSWORD, ProtectedString("LocalOnly#9", true)
+        )
+        databaseSession.saveEntry(localModified)
+        databaseSession.save()
+
+        // 3. 模拟 Android 系统回收 cacheDir（缓存与 basecache 一并丢失）
+        File(tempFolder.root, "cache/sync").deleteRecursively()
+
+        // 4. 远端被其他设备修改为不同密码
+        val remoteDb = databaseSession.databaseFlow.value!!.copy()
+        val remoteEntry = sharedEntry.withField(
+            KdbxConstants.Fields.PASSWORD, ProtectedString("RemoteOnly#7", true)
+        )
+        val updatedRemoteRoot = remoteDb.rootGroup.copy(
+            entries = remoteDb.rootGroup.entries.map { if (it.id == entryId) remoteEntry else it }
+        )
+        val baos = ByteArrayOutputStream()
+        KdbxFile.save(baos, remoteDb.copy(rootGroup = updatedRemoteRoot), masterPassword)
+        memoryProvider.remoteStorage[remotePath] = Pair(baos.toByteArray(), "etag_remote_change")
+
+        // 5. 同步：修复前本地修改被远端整体覆盖（UpToDate 且数据丢失）；
+        //    修复后转三方合并——basecache 一并丢失，F2 修复退化并集合并 → 字段冲突交用户决策
+        val outcome = coordinator.syncNow()
+        assertTrue(
+            "缓存回收 + 本地未同步修改必须转冲突合并而非覆盖: $outcome",
+            outcome is SyncOutcome.ConflictNeedsUser
+        )
+        val conflicts = (outcome as SyncOutcome.ConflictNeedsUser).conflicts
+        assertEquals(1, conflicts.size)
+        assertEquals(entryId.toHexString(), conflicts.first().entryId)
+
+        // 6. 用户选择保留本地 → 合并版本上传 → 本地修改完整保留
+        val resolveOutcome = coordinator.resolveConflicts(
+            mapOf(entryId.toHexString() to ConflictResolutionChoice.KEEP_LOCAL)
+        )
+        assertTrue("冲突解决应成功上传: $resolveOutcome", resolveOutcome is SyncOutcome.MergedAndUploaded)
+        val savedEntry = databaseSession.databaseFlow.value!!.rootGroup.allEntries()
+            .first { it.id == entryId }
+        assertEquals("LocalOnly#9", savedEntry.fields[KdbxConstants.Fields.PASSWORD]?.readString())
+    }
 }

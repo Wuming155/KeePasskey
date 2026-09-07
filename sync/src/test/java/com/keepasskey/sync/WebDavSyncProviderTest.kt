@@ -153,7 +153,10 @@ class WebDavSyncProviderTest {
                 .setResponseCode(201)
                 .setHeader("ETag", "\"tmp-etag-1\"")
         )
-        // 2. MOVE
+        // 2. PROPFIND 目标存在性探测（F3 修复：expectedEtag 为空时区分真首传与无 ETag 覆盖）
+        //    404 = 目标不存在 = 真首传语义
+        server.enqueue(MockResponse().setResponseCode(404))
+        // 3. MOVE
         server.enqueue(
             MockResponse()
                 .setResponseCode(204)
@@ -176,24 +179,63 @@ class WebDavSyncProviderTest {
         assertEquals("PUT", req1.method)
         assertTrue(req1.path?.startsWith("/vault.kdbx.") == true)
         assertTrue(req1.path?.endsWith(".kpktmp") == true)
+        // F3 修复：无 ETag 上传前先探测目标存在性
+        val reqProbe = server.takeRequest()
+        assertEquals("PROPFIND", reqProbe.method)
         // MOVE 源（请求 URL）必须是本次 PUT 的同一个唯一临时文件
         val req2 = server.takeRequest()
         assertEquals("MOVE", req2.method)
-        // P1-11: expectedEtag 为空时为首传语义，Overwrite 必须为 F
+        // 目标不存在（404）：保持 P1-11 首传语义，Overwrite 必须为 F
         assertEquals("F", req2.getHeader("Overwrite"))
         assertEquals(req1.path, req2.path)
         assertTrue(req2.getHeader("Destination")?.endsWith("vault.kdbx") == true)
     }
 
     @Test
+    fun `测试 uploadAtomic 无ETag且目标已存在时 Overwrite T 覆盖语义`() = runTest {
+        // F3 修复：无 ETag 服务器的覆盖上传（本地赢/冲突解决路径，目标必然已存在）
+        // 必须允许 Overwrite: T——恒用 F 会让 MOVE 对已存在目标恒定 412，上传路径死锁
+        // 1. PUT .kpktmp
+        server.enqueue(MockResponse().setResponseCode(201).setHeader("ETag", "\"tmp-etag-1\""))
+        // 2. PROPFIND 探测：目标存在（无 ETag 服务器返回 207 但不带 ETag 头）
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(207)
+                .setBody("""<?xml version="1.0" encoding="utf-8"?><D:multistatus xmlns:D="DAV:"/>""")
+        )
+        // 3. MOVE
+        server.enqueue(MockResponse().setResponseCode(204).setHeader("ETag", "\"final-etag-2\""))
+
+        val provider = WebDavSyncProvider(
+            serverUrl = server.url("/").toString(),
+            username = "admin",
+            passwordChars = "pass123".toCharArray(),
+            client = plainLoopbackClient
+        )
+
+        val result = provider.uploadAtomic("vault.kdbx", "binary-data".toByteArray())
+        assertTrue("无 ETag 目标已存在时必须以 Overwrite T 完成覆盖: ${result.exceptionOrNull()}", result.isSuccess)
+
+        server.takeRequest() // PUT
+        val probeReq = server.takeRequest()
+        assertEquals("PROPFIND", probeReq.method)
+        val moveReq = server.takeRequest()
+        assertEquals("MOVE", moveReq.method)
+        assertEquals("T", moveReq.getHeader("Overwrite"))
+        assertTrue(moveReq.getHeader("Destination")?.endsWith("vault.kdbx") == true)
+    }
+
+    @Test
     fun `测试 uploadAtomic 在 MOVE 失败重试后回滚清理临时文件`() = runTest {
         // 1. PUT .kpktmp 成功
         server.enqueue(MockResponse().setResponseCode(201).setHeader("ETag", "\"tmp\""))
-        // 2. MOVE 尝试 1 失败
+        // 2. PROPFIND 目标存在性探测（F3 修复引入，探测失败按首传 Overwrite: F 处理）
+        server.enqueue(MockResponse().setResponseCode(404))
+        // 3. MOVE 尝试 1 失败
         server.enqueue(MockResponse().setResponseCode(500).setBody("Server error"))
-        // 3. MOVE 尝试 2 (重试) 失败
+        // 4. MOVE 尝试 2 (重试) 失败
         server.enqueue(MockResponse().setResponseCode(500).setBody("Server error"))
-        // 4. DELETE .kpktmp 回滚清理
+        // 5. DELETE .kpktmp 回滚清理
         server.enqueue(MockResponse().setResponseCode(204))
 
         val provider = WebDavSyncProvider(
@@ -208,13 +250,15 @@ class WebDavSyncProviderTest {
 
         // 验证回滚调用了 DELETE，且清理的是本次 PUT 的同一个唯一临时文件
         val req1 = server.takeRequest() // PUT
-        val req2 = server.takeRequest() // MOVE 1
-        val req3 = server.takeRequest() // MOVE 2
-        val req4 = server.takeRequest() // DELETE
-        assertEquals("DELETE", req4.method)
+        server.takeRequest()            // PROPFIND 探测
+        val req3 = server.takeRequest() // MOVE 1
+        val req4 = server.takeRequest() // MOVE 2
+        val req5 = server.takeRequest() // DELETE
+        assertEquals("DELETE", req5.method)
         assertTrue(req1.path?.startsWith("/vault.kdbx.") == true)
         assertTrue(req1.path?.endsWith(".kpktmp") == true)
-        assertEquals(req1.path, req4.path)
+        assertEquals(req1.path, req3.path)
+        assertEquals(req1.path, req5.path)
     }
 
     @Test
