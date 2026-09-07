@@ -62,7 +62,8 @@ class CoseKeyTest {
 
         val cbor = CoseKey.rsa2048(rawN, rawE)
 
-        // 预期结构:
+        // 预期结构 (键集 {1,3,-1,-2} 的编码字节 0x01<0x03<0x20<0x21 恰与插入序一致，
+        // 即 RFC 8949 Canonical 键序；-257 为键 3 的值而非键):
         // A4 (map of 4)
         // 01 03 (1: 3, kty: RSA)
         // 03 390100 (3: -257, alg: RS256)

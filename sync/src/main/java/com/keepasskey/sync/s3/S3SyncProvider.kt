@@ -12,7 +12,6 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
-import java.net.URLEncoder
 import java.security.MessageDigest
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -70,10 +69,38 @@ class S3SyncProvider(
         }
     }
 
-    private fun encodePath(path: String): String {
+    /**
+     * TASK-26 整改：AWS SigV4 规范 URI 编码（对齐官方 `SignatureVersion4` 文档的
+     * URI encode 规则）——保留集仅为 RFC 3986 unreserved 字符（`A-Za-z0-9 - _ . ~`），
+     * 其余全部百分号编码（大写十六进制，空格编码为 %20 而非 +）。
+     *
+     * 此前实现使用 java.net.URLEncoder（表单编码语义）：`*` 属 URLEncoder 保留集不编码、
+     * `~` 被强制编码为 %7E——两者均与 AWS 规范相反，含这两字符的对象键 canonicalUri
+     * 与服务端期望不一致，签名必然不匹配（403 SignatureDoesNotMatch）。
+     * internal 可见性仅供单元测试已知答案向量校验。
+     */
+    internal fun encodePath(path: String): String {
         return path.split('/').joinToString("/") { segment ->
-            if (segment.isEmpty()) "" else URLEncoder.encode(segment, "UTF-8").replace("+", "%20")
+            awsUriEncode(segment)
         }
+    }
+
+    private fun awsUriEncode(segment: String): String {
+        val bytes = segment.toByteArray(Charsets.UTF_8)
+        val sb = StringBuilder(bytes.size)
+        for (b in bytes) {
+            val c = b.toInt() and 0xFF
+            val isUnreserved = (c in 'A'.code..'Z'.code) ||
+                (c in 'a'.code..'z'.code) ||
+                (c in '0'.code..'9'.code) ||
+                c == '-'.code || c == '_'.code || c == '.'.code || c == '~'.code
+            if (isUnreserved) {
+                sb.append(c.toChar())
+            } else {
+                sb.append('%').append("%02X".format(c))
+            }
+        }
+        return sb.toString()
     }
 
     private fun buildUrl(remotePath: String): String {

@@ -279,4 +279,49 @@ class S3SyncProviderTest {
         // 确保签名计算成功且格式合法
         assertEquals("my-vault.s3.amazonaws.com", headers["Host"])
     }
+
+    // ===== TASK-26：AWS SigV4 URI 编码规范（* 必须编码、~ 必须保留）回归锁 =====
+
+    @Test
+    fun `测试对象键编码符合 AWS 规范已知答案`() {
+        val provider = S3SyncProvider(
+            endpoint = "https://s3.amazonaws.com",
+            bucketName = "my-vault",
+            accessKeyId = "TESTKEY",
+            secretAccessKey = "TESTSECRET"
+        )
+
+        // `*` 必须编码为 %2A、`~` 必须原样保留、空格为 %20（非 +）、中文按 UTF-8 百分号大写编码
+        val encoded = provider.encodePath("keepasskey/信号*~bar baz.kdbx")
+        assertEquals("keepasskey/%E4%BF%A1%E5%8F%B7%2A~bar%20baz.kdbx", encoded)
+    }
+
+    @Test
+    fun `测试 SigV4 签名已知答案向量含星号波浪号与UTF8键`() {
+        // 已知答案向量由独立参考实现（Python hmac/hashlib）离线预计算，与被测实现零共享代码
+        val provider = S3SyncProvider(
+            endpoint = "https://s3.amazonaws.com",
+            bucketName = "examplebucket",
+            region = "us-east-1",
+            accessKeyId = "AKIAIOSFODNN7EXAMPLE",
+            secretAccessKey = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+        )
+
+        val fixedDate = Date(1788500000000L)
+        val url = "https://examplebucket.s3.amazonaws.com/keepasskey/%E4%BF%A1%E5%8F%B7%2A~bar%20baz.kdbx"
+        val headers = provider.signV4(
+            method = "GET",
+            url = url,
+            payloadHash = S3SyncProvider.EMPTY_SHA256,
+            dateTime = fixedDate
+        )
+
+        assertEquals("20260904T053320Z", headers["x-amz-date"])
+        val auth = headers["Authorization"].orEmpty()
+        assertTrue(auth.contains("Credential=AKIAIOSFODNN7EXAMPLE/20260904/us-east-1/s3/aws4_request"))
+        assertTrue(
+            "签名与独立参考实现预计算值不一致: $auth",
+            auth.contains("Signature=115f4d4984e0f7584c4d687b64f7a508d64ad831da9affab921fb8105bc82c7b")
+        )
+    }
 }

@@ -114,6 +114,32 @@ class WebDavSyncProviderTest {
     }
 
     @Test
+    fun `测试中文密码 Basic 认证头按UTF8编码`() = runTest {
+        // TASK-25 回归锁：非 ASCII（中文）密码此前按 ISO-8859-1 编码被错误转码，
+        // 主流 WebDAV 服务端（按 UTF-8 解码凭据）必然 401
+        server.enqueue(MockResponse().setResponseCode(207).setBody("<d:multistatus xmlns:d=\"DAV:\"></d:multistatus>"))
+
+        val provider = WebDavSyncProvider(
+            serverUrl = server.url("/").toString(),
+            username = "用户",
+            passwordChars = "密码123".toCharArray(),
+            client = plainLoopbackClient
+        )
+
+        assertTrue(provider.testConnection().isSuccess)
+
+        val request = server.takeRequest()
+        val authHeader = request.getHeader("Authorization").orEmpty()
+        assertTrue(authHeader.startsWith("Basic "))
+
+        val decoded = String(
+            java.util.Base64.getDecoder().decode(authHeader.removePrefix("Basic ")),
+            Charsets.UTF_8
+        )
+        assertEquals("用户:密码123", decoded)
+    }
+
+    @Test
     fun `测试 PUT 上传触发 HTTP 412 乐观并发锁异常`() = runTest {
         server.enqueue(
             MockResponse()

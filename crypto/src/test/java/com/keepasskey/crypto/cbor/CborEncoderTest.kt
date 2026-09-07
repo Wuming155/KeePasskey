@@ -134,4 +134,69 @@ class CborEncoderTest {
         val expected = fromHex("A20167706173736B657902420A0B")
         assertArrayEquals(expected, bytes)
     }
+
+    // ===== TASK-27：RFC 8949 Canonical 键序回归锁 =====
+
+    @Test
+    fun `测试文本键乱序插入强制按编码字节字典序重排`() {
+        // 插入序 {"z": 1, "a": 2} → Canonical 序 "a"(0x6161) < "z"(0x617A)
+        val map = LinkedHashMap<String, Any>().apply {
+            put("z", 1L)
+            put("a", 2L)
+        }
+        // A2 | 61 61 02 | 61 7A 01
+        assertEquals("A2616102617A01", CborEncoder.encodeMap(map).toHex())
+    }
+
+    @Test
+    fun `测试整数键按 CBOR 编码字节排序而非数值排序`() {
+        // 编码字节：1→0x01、3→0x03、-1→0x20；Canonical 序为 1, 3, -1（非数值序 -1,1,3）
+        val map = LinkedHashMap<Long, Any>().apply {
+            put(3L, "c")
+            put(1L, "a")
+            put(-1L, "z")
+        }
+        // A3 | 01 61 61 | 03 61 63 | 20 61 7A
+        assertEquals("A301616103616320617A", CborEncoder.encodeMap(map).toHex())
+    }
+
+    @Test
+    fun `测试不同长度文本键短编码字典序在前`() {
+        // "b" 编码 0x6162，"aa" 编码 0x6261 → "b" 排在 "aa" 之前（长度无关，纯字节序）
+        val map = LinkedHashMap<String, Any>().apply {
+            put("b", 1L)
+            put("aa", 2L)
+        }
+        // A2 | 61 62 01 | 62 61 61 02
+        assertEquals("A2616201" + "626161" + "02", CborEncoder.encodeMap(map).toHex())
+    }
+
+    @Test
+    fun `测试嵌套 Map 同样强制 Canonical 键序`() {
+        val nested = LinkedHashMap<String, Any>().apply {
+            put("bb", 1L)
+            put("aa", 2L)
+        }
+        val outer = LinkedHashMap<String, Any>().apply {
+            put("z", nested)
+        }
+        // A1 61 7A | A2 62 61 61 02 | 62 62 62 01（62 为长度 2 文本键的头字节）
+        assertEquals("A1617A" + "A262616102" + "62626201", CborEncoder.encodeMap(outer).toHex())
+    }
+
+    @Test
+    fun `测试编码字节相同的异型键判定为重复键并拒绝编码`() {
+        // Long(1) 与 Int(1) 在 Map<Any,Any> 中为两个不同键（equals 不互等），
+        // 但 CBOR 编码同为 0x01——确定性编码要求键唯一，必须 fail-fast
+        val map = LinkedHashMap<Any, Any>().apply {
+            put(1L, "long")
+            put(1 as Int, "int")
+        }
+        try {
+            CborEncoder.encodeMap(map)
+            throw AssertionError("重复键必须抛出 IllegalArgumentException")
+        } catch (expected: IllegalArgumentException) {
+            // 预期路径
+        }
+    }
 }

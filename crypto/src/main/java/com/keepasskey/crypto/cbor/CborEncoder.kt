@@ -8,7 +8,9 @@ import java.nio.charset.StandardCharsets
  * 针对 WebAuthn / FIDO2 / COSE 签名与凭据交换场景进行了最小化与高保真实现：
  * 1. 严格支持无符号整数、负整数（Long 范围）、byte string、text string、array 与 map；
  * 2. 整数与长度均采用 RFC 8949 规定的最短字节表示形式（Core Deterministic Encoding）；
- * 3. 映射表 (Map) 严格遵循插入序（建议搭配 [LinkedHashMap]），保证输出字节流绝对确定；
+ * 3. 映射表 (Map) 强制 RFC 8949 §4.2.1 Canonical 键序：按键自身的 CBOR 编码字节流
+ *    以字典序升序排列后写出（TASK-27 整改，此前按插入序编码——与外部 WebAuthn
+ *    实现互验签名时键序不一致将直接失败）；出现重复键时 fail-fast 拒绝编码；
  * 4. 零第三方依赖、不可变链式调用与即时字节导出。
  */
 class CborEncoder private constructor(
@@ -125,15 +127,53 @@ class CborEncoder private constructor(
                 }
             }
             is Map<*, *> -> {
-                writeMapHeader(item.size)
-                for ((k, v) in item) {
-                    writeItem(k)
-                    writeItem(v)
-                }
+                writeCanonicalMap(item)
             }
             else -> throw IllegalArgumentException("不支持的 CBOR 编码数据类型: ${item.javaClass.name}")
         }
         return this
+    }
+
+    /**
+     * RFC 8949 §4.2.1 Canonical 键序写 Map。
+     *
+     * 排序依据是**键自身的 CBOR 编码字节流**的字典序（而非键的逻辑值比较）：
+     * 确定性编码的核心不变量为「编码后的字节流唯一」，按编码字节排序可直接保证
+     * 键序与最终字节流顺序一致；同 major type 下短编码键（首字节更小）天然排在前面，
+     * 与 RFC 附录示例（如 {10: -1, "n": ...} 中整数键先于文本键）一致。
+     * 重复键（编码字节流相同）在确定性编码中属非法输入，fail-fast 抛出。
+     */
+    private fun writeCanonicalMap(item: Map<*, *>) {
+        val sortedEntries = item.entries
+            .map { (key, value) ->
+                val keyBytes = CborEncoder().writeItem(key).toByteArray()
+                Triple(key, value, keyBytes)
+            }
+            .sortedWith { a, b -> compareEncodedBytes(a.third, b.third) }
+
+        // 重复键检测：确定性编码要求键唯一，相邻编码相同即为重复
+        for (i in 1 until sortedEntries.size) {
+            if (compareEncodedBytes(sortedEntries[i - 1].third, sortedEntries[i].third) == 0) {
+                throw IllegalArgumentException("CBOR 确定性编码检测到重复的 Map 键: ${sortedEntries[i].first}")
+            }
+        }
+
+        writeMapHeader(item.size)
+        for ((key, value, _) in sortedEntries) {
+            writeItem(key)
+            writeItem(value)
+        }
+    }
+
+    /** 编码字节流字典序比较（避免依赖 java.util.Arrays.compare 的平台可用性） */
+    private fun compareEncodedBytes(a: ByteArray, b: ByteArray): Int {
+        val minLen = minOf(a.size, b.size)
+        for (i in 0 until minLen) {
+            val av = a[i].toInt() and 0xFF
+            val bv = b[i].toInt() and 0xFF
+            if (av != bv) return av - bv
+        }
+        return a.size - b.size
     }
 
     /**
@@ -193,7 +233,7 @@ class CborEncoder private constructor(
         }
 
         /**
-         * 快速编码 Map（保持插入序）为 CBOR 字节流
+         * 快速编码 Map（强制 RFC 8949 Canonical 键序，见 [writeCanonicalMap]）为 CBOR 字节流
          */
         fun encodeMap(map: Map<*, *>): ByteArray {
             return CborEncoder().writeItem(map).toByteArray()
