@@ -158,7 +158,7 @@ class WebDavSyncProvider(
                 val etag = parsed.etag.ifBlank {
                     response.header("ETag")?.cleanEtag().orEmpty()
                 }
-                val contentLength = if (parsed.contentLength > 0L) {
+                val contentLength = if (parsed.contentLength >= 0L) {
                     parsed.contentLength
                 } else {
                     response.header("Content-Length")?.toLongOrNull() ?: 0L
@@ -377,7 +377,7 @@ class WebDavSyncProvider(
 
     private fun parsePropfindXml(xml: String): ParsedPropfind {
         if (xml.isBlank()) {
-            return ParsedPropfind("", 0L, 0L, false)
+            return ParsedPropfind("", -1L, 0L, false)
         }
         return try {
             // L2 整改：与 KdbxXmlParser 同级的 XXE 纵深防御——禁用 DTD 与外部实体，
@@ -412,7 +412,10 @@ class WebDavSyncProvider(
 
             val lengthNodes = mutableListOf<Node>()
             findNodes(root, "getcontentlength", lengthNodes)
-            val contentLength = lengthNodes.firstOrNull()?.textContent?.trim()?.toLongOrNull() ?: 0L
+            // 节点缺失以 -1 哨兵标记（回退 HTTP 头）；节点存在（含 0，零字节文件）必须如实采信——
+            // 207 响应的 HTTP Content-Length 是 XML 报文自身大小，误当文件大小会让零字节文件
+            // 元数据撒谎并污染同步基线比较
+            val contentLength = lengthNodes.firstOrNull()?.textContent?.trim()?.toLongOrNull() ?: -1L
 
             val modNodes = mutableListOf<Node>()
             findNodes(root, "getlastmodified", modNodes)
@@ -425,7 +428,7 @@ class WebDavSyncProvider(
 
             ParsedPropfind(etag, contentLength, lastModifiedMillis, isDirectory)
         } catch (_: Exception) {
-            ParsedPropfind("", 0L, 0L, false)
+            ParsedPropfind("", -1L, 0L, false)
         }
     }
 

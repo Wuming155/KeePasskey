@@ -10,10 +10,14 @@ import com.keepasskey.sync.merge.KdbxMerger
 import com.keepasskey.sync.model.SyncException
 import com.keepasskey.sync.s3.S3SyncProvider
 import com.keepasskey.sync.webdav.WebDavSyncProvider
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.test.runTest
 import okhttp3.OkHttpClient
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Assume
@@ -27,6 +31,7 @@ import javax.net.ssl.SSLContext
 import javax.net.ssl.TrustManagerFactory
 import javax.net.ssl.X509TrustManager
 import java.util.concurrent.TimeUnit
+import kotlin.random.Random
 
 /**
  * 针对本地真实 HTTPS 服务（WebDAV / MinIO S3）的端到端联调测试。
@@ -238,6 +243,166 @@ class LiveSyncServersTest {
         provider.delete("conf_base.bin")
         provider.delete("conf_local.bin")
         provider.delete("conf_remote.bin")
+    }
+
+    // ------------------------------------------------------------------
+    // 真实使用场景（多端并发/编码/空文件/大文件/元数据一致性）
+    // ------------------------------------------------------------------
+
+    @Test
+    fun `LIVE WebDAV 中文与合法特殊字符文件名往返`() = runTest {
+        assumeLive()
+        val provider = WebDavSyncProvider(webdavUrl, webdavUser, webdavPass.toCharArray(), client = createTrustingClient())
+
+        // Windows 文件系统保留字符（\ / : * ? " < > |）由 MockWebServer 编码用例覆盖，
+        // 真机用例验证服务端对 UTF-8 编码路径的解码与存储往返
+        val name = "中文 库 (100%) +v1.kdbx"
+        val payload = "中文内容-контент-コンテンツ".toByteArray(Charsets.UTF_8)
+
+        val etag = provider.upload(name, payload).getOrThrow()
+        assertTrue(etag.isNotBlank())
+
+        val meta = provider.getMetadata(name).getOrThrow()
+        assertEquals("中文文件名元数据大小一致", payload.size.toLong(), meta.contentLength)
+
+        assertArrayEquals("中文名下载字节精确", payload, provider.download(name).getOrThrow())
+        assertTrue(provider.delete(name).isSuccess)
+    }
+
+    @Test
+    fun `LIVE S3 中文与特殊字符嵌套对象键往返`() = runTest {
+        assumeLive()
+        val provider = S3SyncProvider(
+            endpoint = s3Endpoint, bucketName = s3Bucket, region = "us-east-1",
+            accessKeyId = s3Access, secretAccessKey = s3Secret,
+            usePathStyle = true, client = createTrustingClient()
+        )
+
+        // 嵌套键 + 中文 + 空格 + 括号 + 百分号 + 加号：SigV4 canonicalUri 与实际请求
+        // 路径编码必须严格一致，编码不一致在真实服务器上会直接签名失败
+        val key = "nested/中文 库 (+100%).kdbx"
+        val payload = "nested-中文-payload".toByteArray(Charsets.UTF_8)
+
+        val etag = provider.upload(key, payload).getOrThrow()
+        assertTrue(etag.isNotBlank())
+
+        val meta = provider.getMetadata(key).getOrThrow()
+        assertEquals("嵌套中文键元数据大小一致", payload.size.toLong(), meta.contentLength)
+
+        assertArrayEquals("嵌套中文键下载字节精确", payload, provider.download(key).getOrThrow())
+        assertTrue(provider.delete(key).isSuccess)
+    }
+
+    @Test
+    fun `LIVE WebDAV 零字节文件往返`() = runTest {
+        assumeLive()
+        val provider = WebDavSyncProvider(webdavUrl, webdavUser, webdavPass.toCharArray(), client = createTrustingClient())
+
+        val etag = provider.upload("live-empty.kdbx", ByteArray(0)).getOrThrow()
+        assertTrue(etag.isNotBlank())
+
+        val downloaded = provider.download("live-empty.kdbx").getOrThrow()
+        assertEquals("真机零字节下载必须为空数组而非失败", 0, downloaded.size)
+        assertEquals(0L, provider.getMetadata("live-empty.kdbx").getOrThrow().contentLength)
+        assertTrue(provider.delete("live-empty.kdbx").isSuccess)
+    }
+
+    @Test
+    fun `LIVE S3 零字节对象往返`() = runTest {
+        assumeLive()
+        val provider = S3SyncProvider(
+            endpoint = s3Endpoint, bucketName = s3Bucket, region = "us-east-1",
+            accessKeyId = s3Access, secretAccessKey = s3Secret,
+            usePathStyle = true, client = createTrustingClient()
+        )
+
+        provider.upload("live-empty.kdbx", ByteArray(0)).getOrThrow()
+        val downloaded = provider.download("live-empty.kdbx").getOrThrow()
+        assertEquals(0, downloaded.size)
+        assertEquals(0L, provider.getMetadata("live-empty.kdbx").getOrThrow().contentLength)
+        assertTrue(provider.delete("live-empty.kdbx").isSuccess)
+    }
+
+    @Test
+    fun `LIVE WebDAV 1MiB二进制大文件往返`() = runTest {
+        assumeLive()
+        val provider = WebDavSyncProvider(webdavUrl, webdavUser, webdavPass.toCharArray(), client = createTrustingClient())
+
+        val payload = Random(42).nextBytes(1024 * 1024)
+        provider.upload("live-big.kdbx", payload).getOrThrow()
+        assertArrayEquals("真机 1MiB 往返字节精确", payload, provider.download("live-big.kdbx").getOrThrow())
+        assertEquals(payload.size.toLong(), provider.getMetadata("live-big.kdbx").getOrThrow().contentLength)
+        assertTrue(provider.delete("live-big.kdbx").isSuccess)
+    }
+
+    @Test
+    fun `LIVE S3 1MiB二进制大对象往返`() = runTest {
+        assumeLive()
+        val provider = S3SyncProvider(
+            endpoint = s3Endpoint, bucketName = s3Bucket, region = "us-east-1",
+            accessKeyId = s3Access, secretAccessKey = s3Secret,
+            usePathStyle = true, client = createTrustingClient()
+        )
+
+        val payload = Random(43).nextBytes(1024 * 1024)
+        provider.upload("live-big.kdbx", payload).getOrThrow()
+        assertArrayEquals("真机 1MiB 往返字节精确", payload, provider.download("live-big.kdbx").getOrThrow())
+        assertEquals(payload.size.toLong(), provider.getMetadata("live-big.kdbx").getOrThrow().contentLength)
+        assertTrue(provider.delete("live-big.kdbx").isSuccess)
+    }
+
+    @Test
+    fun `LIVE MinIO 同基线并发条件写 恰好一胜`() = runTest {
+        assumeLive()
+        val provider = S3SyncProvider(
+            endpoint = s3Endpoint, bucketName = s3Bucket, region = "us-east-1",
+            accessKeyId = s3Access, secretAccessKey = s3Secret,
+            usePathStyle = true, client = createTrustingClient()
+        )
+
+        val etag0 = provider.upload("race.kdbx", "base".toByteArray()).getOrThrow()
+        val bytesA = ByteArray(16 * 1024) { 'A'.code.toByte() }
+        val bytesB = ByteArray(16 * 1024) { 'B'.code.toByte() }
+
+        val (resultA, resultB) = coroutineScope {
+            val a = async(Dispatchers.IO) { provider.upload("race.kdbx", bytesA, expectedEtag = etag0) }
+            val b = async(Dispatchers.IO) { provider.upload("race.kdbx", bytesB, expectedEtag = etag0) }
+            a.await() to b.await()
+        }
+
+        val winnerBytes: ByteArray
+        if (resultA.isSuccess) {
+            assertFalse("真实 MinIO 条件写并发必须恰好一胜", resultB.isSuccess)
+            assertTrue(resultB.exceptionOrNull() is SyncException.ConflictError)
+            winnerBytes = bytesA
+        } else {
+            assertTrue("真实 MinIO 条件写并发必须恰好一胜", resultB.isSuccess)
+            assertTrue(resultA.exceptionOrNull() is SyncException.ConflictError)
+            winnerBytes = bytesB
+        }
+        assertArrayEquals("远端最终内容必须是胜者载荷", winnerBytes, provider.download("race.kdbx").getOrThrow())
+        assertTrue(provider.delete("race.kdbx").isSuccess)
+    }
+
+    @Test
+    fun `LIVE 元数据一致性 ETag跨操作稳定`() = runTest {
+        assumeLive()
+        val dav = WebDavSyncProvider(webdavUrl, webdavUser, webdavPass.toCharArray(), client = createTrustingClient())
+        val s3 = S3SyncProvider(
+            endpoint = s3Endpoint, bucketName = s3Bucket, region = "us-east-1",
+            accessKeyId = s3Access, secretAccessKey = s3Secret,
+            usePathStyle = true, client = createTrustingClient()
+        )
+
+        // WebDAV：PUT 响应 ETag 与后续 PROPFIND 元数据 ETag 必须一致
+        val davEtag = dav.upload("meta.kdbx", "meta-payload".toByteArray()).getOrThrow()
+        assertEquals("WebDAV PUT/PROPFIND ETag 必须一致", davEtag, dav.getMetadata("meta.kdbx").getOrThrow().etag)
+        dav.delete("meta.kdbx")
+
+        // S3：PUT 响应 ETag 与后续 HEAD 元数据 ETag 必须一致
+        val s3Etag = s3.upload("meta.kdbx", "meta-payload".toByteArray()).getOrThrow()
+        assertEquals("S3 PUT/HEAD ETag 必须一致", s3Etag, s3.getMetadata("meta.kdbx").getOrThrow().etag)
+        s3.delete("meta.kdbx")
     }
 
     // ---- 三方库镜像 <-> 字节 的确定性序列化（仅测试用，模拟 kdbx 内容在服务器上的往返） ----
