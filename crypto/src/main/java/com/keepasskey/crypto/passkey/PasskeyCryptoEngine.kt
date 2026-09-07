@@ -166,11 +166,15 @@ object PasskeyCryptoEngine {
         userDisplayName: String = ""
     ): PasskeyData {
         val generator = RSAKeyPairGenerator()
+        // P3-13 整改（TASK-29）：素数确定性参数 certainty 由 12 提升至 80——
+        // 原值下伪素数（False-prime）漏检概率约 1/2^12，远低于工业要求；80 对齐
+        // BouncyCastle 官方示例与主流密码库默认（单素数误判概率 ≤ 2^-80），
+        // 生成耗时可接受（Miller-Rabin 轮数增加对 2048 位密钥仅为毫秒级）。
         val rsaGenParam = RSAKeyGenerationParameters(
             BigInteger.valueOf(65537),
             secureRandom,
             2048,
-            12
+            80
         )
         generator.init(rsaGenParam)
         val keyPair = generator.generateKeyPair()

@@ -10,7 +10,7 @@
 | 维度 | 数值 / 状态 | 官方依据与说明 |
 |---|---|---|
 | **Git HEAD** | `7b3e756` (main) | 干净工作区无提交滞后（不含本次治理改动） |
-| **测试基线** | **422 个单元测试全绿**（app 99 / core 21 / crypto 47 / database 146 / sync 109） | `./gradlew test` 强制重跑校验，其中 `LiveSyncServersTest` 12 例默认跳过（需 `-DliveSyncTest`） |
+| **测试基线** | **428 个单元测试全绿**（app 99 / core 27 / crypto 47 / database 146 / sync 109） | `./gradlew test` 强制重跑校验，其中 `LiveSyncServersTest` 12 例默认跳过（需 `-DliveSyncTest`） |
 | **构建状态** | `assembleDebug` + `assembleRelease` (R8) 全量通过 | AGP 9.1.0 / Gradle 9.3.1 / Kotlin 2.4.10 / Hilt 2.60.1 |
 | **系统基线** | **minSdk 36**, compileSdk 36, targetSdk 36 | 仅针对 Android 16+ 深度优化，固化无旧版垫片决策 |
 | **传输安全防线** | 全站强制 HTTPS（`network_security_config.xml` 禁明文 + OkHttp TLS-only），零证书固定 | 对齐 Google Developer Knowledge `pinning not recommended` 指南 |
@@ -35,11 +35,11 @@
 | **TASK-07** | UI/SDK | **批次 H：compileSdk 37 → Material 3 Expressive** | 体检路线图 H | **P3** | 📋 规划 | 需 Compose BOM 2026.08.00+（compileSdk 37）；固化 minSdk 36 决策 |
 | **TASK-08** | 同步 | **周期性后台同步（WorkManager）** | 功能缺口 | **P2** | ❌ 未实现 | 设置项 `periodicBackgroundSyncIntervalMinutes`（默认 30m）与 `wifiOnlySync` 已落地，**无 WorkManager 调度消费方** |
 | **TASK-09** | 安全 | **P0-2 测试代码真实凭据清洗** | 审核报告 P0-2 | **P1** | ✅ 已完成（2026-09-07） | **核实完成**：`Argon2InteropDiagnosticTest.kt` 已全部换用合成口令 `TestMasterPassword!2026#Secure` 与自造十六进制密钥/盐（期望值由独立参考实现离线预计算，互操作校验语义不变）；`KdbxKeyFileTest.kt` 为 32B 合成测试字节（0x01..0x20）。仓库级扫描（测试源码密码赋值模式 + `.kdbx`/真实库引用模式）零命中，**仓库内零真实凭据**。FINDINGS P0-2 已在历史提交中标记修复，本次为看板状态同步 |
-| **TASK-10** | 内存 | **TOTP 种子与受保护自定义字段编辑态 CharArray 化** | 加解密审查 B9 | **P2** | ❌ 未修 | `EntryEditUiState.kt:28` `totpSecret: String` 与 `customFields.value: String` 编辑态仍以 String 承载，须同模式 CharArray 化 |
-| **TASK-11** | 安全 | **Autofill Dataset 已解锁分支增加二次确认/认证** | 审核报告 P2-24 | **P2** | ❌ 未修 | `KeePasskeyAutofillService.kt:228` 已解锁分支直接下发明文密码未设 `setAuthentication` |
+| **TASK-10** | 内存 | **TOTP 种子与受保护自定义字段编辑态 CharArray 化** | 加解密审查 B9 | **P2** | ✅ 已修复（2026-09-07） | **同 M1 密码模式全面 CharArray 化**：`EntryEditUiState` 移除 `totpSecret: String`，TOTP 种子经 `EntryEditViewModel` CharArray 私有链路 + 一次性预填通道（`loadedTotpSecret`）承载，UI 走 `SecurePasswordField` 桥接；受保护自定义字段明文经 `protectedFieldChars` 私有映射 + `loadedProtectedFields` 预填通道承载（UI 投影恒空串，对齐详情页掩码投影语义），保护标记切换时明文自动迁移存储。仓库契约同步收紧：`saveEntry` 改 `totpSecretChars: CharArray?` + `protectedFieldChars: Map<String, CharArray>`（擦除契约扩展）、`getEntryTotpSecret`/`getEntryProtectedField` 改 CharArray 独占副本读取；详情页展示/复制路径同步改造。`onCleared` 擦除全部驻留。428 例全绿 |
+| **TASK-11** | 安全 | **Autofill Dataset 已解锁分支增加二次确认/认证** | 审核报告 P2-24 | **P2** | ✅ 已修复（2026-09-07） | `KeePasskeyAutofillService` 已解锁分支每个数据集下发前挂 `setAuthentication`，认证 PendingIntent 指向新增 `AutofillConfirmActivity`（每数据集独立 requestCode 防 PendingIntent 覆盖）：优先系统级生物识别/锁屏凭据（`UNLOCK_AUTHENTICATORS` 集合），无硬件时退化为受保护窗口内手动确认（确认/取消）。Activity 具备 FLAG_SECURE + `setHideOverlayWindows(true)` 反截屏/反 overlay 加固；仅 RESULT_OK 后框架才将数据集值写入目标表单 |
 | **TASK-12** | 架构 | **设置项 33 个字段持久化与废弃假开关下架** | 审核报告 P1-6 | **P2** | ❌ 未修 | `SettingsViewModel.kt` `ExtendedSettings` 约 35 个开关为纯内存回显，`skipDalVerification` 等假开关须下架 |
 | **TASK-13** | UI/SAF | **设置页 5 个动作 SAF 写盘接入** | 审核报告 P1-7 | **P2** | ❌ 未修 | 导出 KDBX、导出 XML、导出密钥文件、模板安装、子库挂载目前仅 `UiMessage` 假提示，需接 `CreateDocument` 写盘 |
-| **TASK-14** | 安全 | **`SyncCredentialsStore` 删生产测试钩子** | 审核报告 P2-21 | **P2** | ❌ 未修 | `SyncCredentialsStore.kt:63` 保留 `public var customEncryptor / customDecryptor`，需移除或受 `@VisibleForTesting` 保护 |
+| **TASK-14** | 安全 | **`SyncCredentialsStore` 删生产测试钩子** | 审核报告 P2-21 | **P2** | ✅ 已修复（2026-09-07） | `customEncryptor`/`customDecryptor` 加 `@VisibleForTesting` 注解并收窄为 `internal`——生产 DI 与外部调用方不可见、不可写，仅本模块单元测试（同一编译单元）可注入模拟加解密闭包 |
 | **TASK-15** | 特性 | **自定义图标上传 / 选择 UI** | 功能缺口 | **P3** | ❌ 未实现 | 模型与 XML 序列化层完好，缺前端上传与选择界面 |
 | **TASK-16** | 特性 | **条目克隆（duplicate）** | 功能缺口 | **P3** | ❌ 未实现 | 库层与 ViewModel 缺克隆逻辑 |
 | **TASK-17** | 协议 | **KeePass 字段引用（`{REF:...}`）引擎** | 功能缺口 | **P3** | ❌ 未实现 | 暂不支持条目间字段动态交叉引用解析 |
@@ -49,12 +49,12 @@
 | **TASK-21** | 整洁度 | **超 800 行文件拆分与硬编码中文抽取** | 审核报告 P3-22/23 | **P3** | ❌ 未修 | 7 个文件超 800 行（`RealVaultRepository` 1184 行、`SettingsViewModel` 1119 行等）；约 250 处硬编码中文需抽至 `strings.xml` |
 | **TASK-22** | 安全/稳定 | **P3-30：`@Singleton` AutoLockManager 在 `MainActivity.onDestroy` 被 destroy** | FINDINGS 核实 | **P0(真实 Bug)** | ✅ 已修复（2026-09-07） | 移除 `MainActivity.onDestroy` 中的 `autoLockManager.destroy()` 调用（含空覆写与随之成为死代码的 `AutoLockManager.destroy()`）。`AutoLockManager` 为进程级单例（监听 `ProcessLifecycleOwner` + 熄屏广播），生命周期与进程对齐，`initialize()` 幂等，资源随进程退出由系统回收；旋转/配置重建不再销毁自动锁定调度器 |
 | **TASK-23** | 安全 | **P2-9：`parseEcPrivateKey` 缺 `d ∈ [1, n-1]` 范围校验** | FINDINGS 核实 | **P1** | ✅ 已修复（2026-09-07） | `PasskeyCryptoEngine.kt` 新增显式标量范围校验 `validateEcScalarRange`（权威检查点，不依赖库层行为），越界 fail-closed 抛类型化 `CryptoException.InvalidKeyException`；库层构造器 IAE 经 `newEcPrivateKey` 归一为同一异常类型且不作回退放行。补 5 例单测：d=0 / d=n / d>n（32B 标量与 64B hex 文本两形态）均拒绝，边界 d=1 / d=n-1 签名可用 |
-| **TASK-24** | 内存 | **P2-10：旧派生回退 `legacyCipherKey` 未清零** | FINDINGS 核实 | **P2** | ❌ 未修 | `KdbxFile.kt:144` `finally` 仅清 `legacyHmacKey`，`legacyCipherKey` 返回后残留；补 `Arrays.fill` |
+| **TASK-24** | 内存 | **P2-10：旧派生回退 `legacyCipherKey` 未清零** | FINDINGS 核实 | **P2** | ✅ 已修复（2026-09-07） | `KdbxFile.resolveCipherKey` 重构为返回 `CipherKeyResolution`（activeKey + legacyKeyToWipe）：未选中的 `legacyCipherKey` 在任何结果路径（含裁决失败抛异常）的 `finally` 中统一清零；被选中的旧派生密钥在解密流建立（`SecretKeySpec` 已克隆密钥材料）后立即擦除。`legacyHmacKey` 派生后即时擦除语义保持不变 |
 | **TASK-25** | 互操作 | **P2-11：WebDAV Basic 认证 ISO-8859-1 致中文密码 401** | FINDINGS 核实 | **P2** | ❌ 未修 | `WebDavSyncProvider.kt:85` 应发 `charset=UTF-8` 并改 UTF-8 编码 |
 | **TASK-26** | 协议 | **P3-16：S3 SigV4 对 `*` 与 `~` 编码不符 AWS 规范** | FINDINGS 核实 | **P2** | ❌ 未修 | `S3SyncProvider.kt:75` 含 `*`/`~` 对象键会签名不匹配 403 |
 | **TASK-27** | 协议 | **P3-11：CBOR `encodeMap` 不强制 RFC 8949 Canonical 键序** | FINDINGS 核实 | **P2** | ❌ 未修 | `CborEncoder.kt:127` 按 Map 迭代序编码，Passkey 签名互验可能因键序不一致失败 |
-| **TASK-28** | 敏感 | **P3-12：附件缓存明文无清理** | FINDINGS 核实 | **P2** | ❌ 未修 | `AttachmentManager.kt:14` 应加密缓存/用完即删 |
-| **TASK-29** | 安全 | **P3-13：RSA `certainty = 12` 偏低** | FINDINGS 核实 | **P2** | ❌ 未修 | `PasskeyCryptoEngine.kt:173` 常规 ≥80+，False-prime 概率 ~1/2¹² |
+| **TASK-28** | 敏感 | **P3-12：附件缓存明文无清理** | FINDINGS 核实 | **P2** | ✅ 已修复（2026-09-07） | `AttachmentManager` 重写为「用完即删」纵深防线：导出集中至专用子目录 `attachment_view`（`cleanCache` 不再全盘粗暴删除）、随机 UUID 前缀防路径猜测/劫持、每次新导出清除上一轮遗留明文（含上次进程残留）、新增 `deleteExported` 供查看方消费后即删、`deleteOnExit` JVM 退出兜底。补 6 例单测（子目录隔离/文件名净化/会话即弃/用完即删/定向清理回归锁/同名互异） |
+| **TASK-29** | 安全 | **P3-13：RSA `certainty = 12` 偏低** | FINDINGS 核实 | **P2** | ✅ 已修复（2026-09-07） | `PasskeyCryptoEngine.generateRs256KeyPair` 素数确定性参数 `certainty` 12 → 80（False-prime 概率 ~1/2¹² → ≤1/2⁸⁰），对齐 BouncyCastle 官方示例与主流密码库默认 |
 | **TASK-30** | 功能 | **P2-17：冲突解决逐字段选择塌缩为整条目二选一** | FINDINGS 核实 | **P2** | ❌ 未修 | `ConflictResolutionViewModel.kt:128` 应实现字段级合并或简化 UI |
 | **TASK-31** | 功能 | **P2-19：历史快照为空时谎报「已回滚」** | FINDINGS 核实 | **P2** | ❌ 未修 | `EntryDetailViewModel.kt:242` 应改错误提示 |
 | **TASK-32** | 功能 | **P2-27：条目密码强度恒硬编码 112 bit** | FINDINGS 核实 | **P2** | ❌ 未修 | `MockData.kt:106` 应接入真实熵估算或显式标注未计算 |

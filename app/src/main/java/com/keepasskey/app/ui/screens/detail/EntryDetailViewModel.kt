@@ -209,7 +209,14 @@ class EntryDetailViewModel @Inject constructor(
         val entry = uiState.value.entry ?: return
         val field = entry.customFields.firstOrNull { it.id == fieldId } ?: return
         viewModelScope.launch {
-            val value = vaultRepository.getEntryProtectedField(entry.id, field.key).orEmpty()
+            // TASK-10：仓库读取改走 CharArray 独占副本；展示用 String 为 UI 显示边界
+            // （与 getEntryPassword 同一边界语义），副本即时清零
+            val chars = vaultRepository.getEntryProtectedFieldChars(entry.id, field.key)
+            val value = if (chars != null) {
+                val revealed = String(chars)
+                chars.fill('0')
+                revealed
+            } else ""
             revealedProtectedFieldsFlow.update { it + (fieldId to value) }
         }
     }
@@ -221,8 +228,12 @@ class EntryDetailViewModel @Inject constructor(
     fun copyCustomField(fieldId: String, fieldKey: String) {
         val entryId = entryIdFlow.value ?: return
         viewModelScope.launch {
-            val value = vaultRepository.getEntryProtectedField(entryId, fieldKey)
-            if (value != null) {
+            // TASK-10：仓库读取改走 CharArray 独占副本；剪贴板写入是 String 边界，
+            // 副本即时清零
+            val chars = vaultRepository.getEntryProtectedFieldChars(entryId, fieldKey)
+            if (chars != null) {
+                val value = String(chars)
+                chars.fill('0')
                 clipboardSecurityManager?.copySensitiveText(fieldKey, value)
                 userMessageFlow.value = UiMessage(R.string.detail_field_copied, listOf(fieldKey))
             }
@@ -254,7 +265,7 @@ class EntryDetailViewModel @Inject constructor(
             val result = vaultRepository.saveEntry(
                 updated,
                 passwordChars = revisionPasswordChars,
-                totpSecret = snapshot.totpSecret
+                totpSecretChars = snapshot.totpSecret.toCharArray()
             )
             userMessageFlow.value = if (result is com.keepasskey.core.result.KdbxResult.Success) {
                 UiMessage(R.string.detail_history_rolled_back)

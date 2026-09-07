@@ -830,6 +830,12 @@
     <string name="cred_create_entry_subtitle">Save passkey or password to active vault</string>
     <string name="cred_autofill_unlock_prompt">Unlock KeePasskey to view credentials</string>
     <string name="cred_autofill_locked_subtitle">Tap to unlock vault and autofill</string>
+    <!-- TASK-11: secondary confirmation for the unlocked branch (AutofillConfirmActivity) -->
+    <string name="autofill_confirm_title">Confirm Autofill</string>
+    <string name="autofill_confirm_biometric_subtitle">Authenticate to fill credential \"%1$s\" into the current app</string>
+    <string name="autofill_confirm_manual_hint">Credential \"%1$s\" is about to be filled into the current app. Confirm below to continue.</string>
+    <string name="autofill_confirm_ok">Confirm Fill</string>
+    <string name="autofill_confirm_cancel">Cancel</string>
     <string name="cred_passkey_create_title">Create Passkey</string>
     <string name="cred_passkey_assert_title">Verify Passkey</string>
     <string name="cred_password_save_title">Save Password</string>

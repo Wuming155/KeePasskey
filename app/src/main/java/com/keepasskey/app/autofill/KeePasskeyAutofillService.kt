@@ -197,7 +197,15 @@ class KeePasskeyAutofillService : AutofillService() {
             matchDomain || matchPackage
         }
 
-        for (entry in matchedEntries.take(MAX_DATASET_COUNT)) {
+        // TASK-11 整改（审核报告 P2-24）：已解锁分支的每个数据集必须携带 setAuthentication
+        // 二次确认——否则任何前台应用都可静默拉起候选并完成明文密码填充（用户无感知泄露）。
+        // 用户点选数据集 → 拉起 AutofillConfirmActivity（生物识别/锁屏凭据或受保护窗口内
+        // 手动确认）→ RESULT_OK 后框架才将该数据集的值真正写入目标表单。
+        val confirmIntent = Intent(this, AutofillConfirmActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+
+        for ((index, entry) in matchedEntries.take(MAX_DATASET_COUNT).withIndex()) {
             val username = entry.userName
             val password = entry.password?.readString().orEmpty()
 
@@ -219,6 +227,16 @@ class KeePasskeyAutofillService : AutofillService() {
                     }
                     .build()
             )
+            // 每个数据集独立 requestCode，避免 PendingIntent 因 extras 相互覆盖
+            val confirmPendingIntent = PendingIntent.getActivity(
+                this,
+                REQUEST_CODE_CONFIRM_BASE + index,
+                confirmIntent.putExtra(
+                    AutofillConfirmActivity.EXTRA_CREDENTIAL_TITLE,
+                    username.ifBlank { entry.title }
+                ),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            )
             if (usernameId != null && username.isNotEmpty()) {
                 dsBuilder.setField(
                     usernameId,
@@ -231,6 +249,7 @@ class KeePasskeyAutofillService : AutofillService() {
                     Field.Builder().setValue(AutofillValue.forText(password)).build()
                 )
             }
+            dsBuilder.setAuthentication(confirmPendingIntent.intentSender)
             responseBuilder.addDataset(dsBuilder.build())
         }
 
@@ -415,5 +434,7 @@ class KeePasskeyAutofillService : AutofillService() {
         private const val MAX_DATASET_COUNT = 8
         private const val REQUEST_CODE_UNLOCK = 2001
         private const val REQUEST_CODE_INLINE_ATTRIBUTION = 2002
+        /** TASK-11：已解锁分支二次确认数据集的 PendingIntent requestCode 基址 */
+        private const val REQUEST_CODE_CONFIRM_BASE = 2100
     }
 }

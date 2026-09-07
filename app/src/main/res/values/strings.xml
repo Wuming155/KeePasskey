@@ -814,6 +814,12 @@
     <string name="cred_create_entry_subtitle">将通行密钥或密码保存至活动密码库</string>
     <string name="cred_autofill_unlock_prompt">解锁 KeePasskey 查看凭据</string>
     <string name="cred_autofill_locked_subtitle">点击解锁密码库后自动填充</string>
+    <!-- TASK-11：已解锁分支二次确认（AutofillConfirmActivity） -->
+    <string name="autofill_confirm_title">确认自动填充</string>
+    <string name="autofill_confirm_biometric_subtitle">验证身份后向当前应用填充凭据「%1$s」</string>
+    <string name="autofill_confirm_manual_hint">即将向当前应用填充凭据「%1$s」。请在下方确认后继续。</string>
+    <string name="autofill_confirm_ok">确认填充</string>
+    <string name="autofill_confirm_cancel">取消</string>
     <string name="cred_passkey_create_title">创建通行密钥</string>
     <string name="cred_passkey_assert_title">验证通行密钥</string>
     <string name="cred_password_save_title">保存密码凭据</string>

@@ -125,17 +125,22 @@ interface VaultRepository {
      * [passwordChars] 非空时写入新密码；为 null 时保留既有条目的密码不动（M1 整改：
      * UI 投影不再携带密码明文，密码由编辑页按需加载后显式提交）。
      * 擦除契约（加解密审查 2026-09 M4/M1 统一）：实现方在任何结果路径（成功/失败/异常）
-     * 用毕后负责显式清零传入的 [passwordChars]（与 [saveAutofillCredential] 同一契约），
-     * 调用方须传入可被清零的副本，不可复用为后续编辑状态。
-     * [totpSecret] 语义同密码（断点4 整改）：null 表示未修改保留既有 TOTP 配置；
-     * 非 null 时写入标准 otp 字段（空串表示清除 TOTP）。
+     * 用毕后负责显式清零传入的 [passwordChars]、[totpSecretChars] 与 [protectedFieldChars]
+     * 各数组副本（与 [saveAutofillCredential] 同一契约），调用方须传入可被清零的副本，
+     * 不可复用为后续编辑状态。
+     * [totpSecretChars] 语义同密码（断点4 整改 + TASK-10 CharArray 化）：null 表示未修改
+     * 保留既有 TOTP 配置；非 null 时写入标准 otp 字段（空数组表示清除 TOTP）。
+     * [protectedFieldChars]（TASK-10：受保护自定义字段编辑态 CharArray 化）：键为
+     * [UiCustomField.id]，值为用户显式编辑后的受保护字段明文——仅显式编辑过的字段需要
+     * 提交，未编辑的受保护字段在 UI 投影中值为空串，由实现方回填既有值（F2 语义）。
      * 返回 [com.keepasskey.core.result.KdbxResult]（H3 整改）：保存失败必须显式返回，
      * 禁止磁盘写失败被静默吞掉而 UI 谎报成功。
      */
     suspend fun saveEntry(
         entry: UiVaultEntry,
         passwordChars: CharArray? = null,
-        totpSecret: String? = null
+        totpSecretChars: CharArray? = null,
+        protectedFieldChars: Map<String, CharArray> = emptyMap()
     ): com.keepasskey.core.result.KdbxResult<Unit>
 
     /**
@@ -203,11 +208,12 @@ interface VaultRepository {
     suspend fun getEntryRevisionSnapshot(entryId: String, revisionId: String): EntryRevisionSnapshot?
 
     /**
-     * 按需解密单条凭据的受保护自定义字段（F2 整改，语义同 [getEntryPassword]）。
-     * 仅在用户显式查看/编辑该字段时调用；条目或字段不存在时返回 null，
-     * 未加保护的字段直接返回其值。
+     * 按需解密单条凭据的受保护自定义字段为 CharArray（TASK-10：编辑态 CharArray 化，
+     * 与 [getEntryPasswordChars] 同一借用语义）。
+     * 仅在用户显式编辑该字段时调用；返回的数组是分配给调用方的独占副本，调用方使用完毕
+     * 必须显式清零；条目或字段不存在时返回 null，未加保护的字段直接返回其值副本。
      */
-    suspend fun getEntryProtectedField(entryId: String, fieldKey: String): String?
+    suspend fun getEntryProtectedFieldChars(entryId: String, fieldKey: String): CharArray?
 
     /**
      * 按需计算单条凭据的当前 TOTP 验证码（F2 整改）。
@@ -252,11 +258,11 @@ interface VaultRepository {
     ): com.keepasskey.core.result.KdbxResult<Unit>
 
     /**
-     * 按需读取单条凭据的 TOTP 配置原文（断点4 整改，编辑页回填用）。
+     * 按需读取单条凭据的 TOTP 配置原文为 CharArray（断点4 整改 + TASK-10 编辑态 CharArray 化）。
      * 与 [calculateEntryTotp] 同源：标准 otp 字段优先，回退 TOTP 开头的自定义字段；
-     * 未配置时返回 null。种子 String 仅在编辑会话内存活。
+     * 未配置时返回 null。返回的数组是分配给调用方的独占副本，调用方使用完毕必须显式清零。
      */
-    suspend fun getEntryTotpSecret(entryId: String): String?
+    suspend fun getEntryTotpSecretChars(entryId: String): CharArray?
 
     /**
      * 按需解析单条凭据指定附件的二进制内容（断点3 整改，SAF 导出用）。

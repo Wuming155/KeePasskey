@@ -54,7 +54,7 @@
 | **P2-7** | 原子写盘降级分支先删目标文件再 rename | ⚠️ 部分修复 | `AtomicFileWriter.kt:106` 改为先 renameTo，无备份兜底时拒绝覆盖；但 fsync 缺失 | 低 | 降级分支已先 renameTo；fsync 缺失可补（现行 `SyncCache` 已 `fd.sync()`） |
 | **P2-8** | 外层 Header 缺 masterSeed 长度与算法取值校验 | ✅ 已修复 | `KdbxHeader.kt:254` 强制 MasterSeed 必须 32B，Compression 仅 NONE/GZIP，IV 匹配算法长度 | 否（已修复） | 校验已加 |
 | **P2-9** | `parseEcPrivateKey` 用越界标量构造 KeyParameters | ✅ 已修复 | `PasskeyCryptoEngine.kt` 新增 `validateEcScalarRange` 显式校验（d ∈ [1, n-1]），越界 fail-closed 抛 `CryptoException.InvalidKeyException`；库层 IAE 经 `newEcPrivateKey` 归一为同一类型；5 例标量校验单测（d=0/d=n/d>n 拒绝，d=1/d=n-1 可用，hex 文本形态覆盖） | 否（已修复） | 标量越界 fail-closed |
-| **P2-10** | 旧派生回退分支 `legacyCipherKey` 从不清零 | ❌ 未修复 | `KdbxFile.kt:144` 旧派生失败与成功路径中 `legacyCipherKey` 均未清零 | 中 | `finally` 中只清 `legacyHmacKey`，`legacyCipherKey` 返回后未清零，敏感密钥残留内存；建议补 `Arrays.fill` |
+| **P2-10** | 旧派生回退分支 `legacyCipherKey` 从不清零 | ✅ 已修复（2026-09-07） | `KdbxFile.kt` `resolveCipherKey` 重构为返回 `CipherKeyResolution`：未选中路径 `finally` 统一清零，选中路径在解密流建立后立即擦除 | 中 | 代码证据：`CipherKeyResolution(activeKey, legacyKeyToWipe)` + `loadPayload` 中 `resolution.legacyKeyToWipe?.fill(0)`（SecretKeySpec 已克隆密钥材料后擦除原数组） |
 | **P2-11** | WebDAV Basic 认证使用 ISO-8859-1 致中文密码 401 | ❌ 未修复 | `WebDavSyncProvider.kt:85` 仍按 ISO-8859-1 编码密码 | 中 | 按 RFC 7617 默认 charset 编码，但非 ASCII（中文）密码会 401；应发 `charset=UTF-8` 并改 UTF-8 编码 |
 | **P2-12** | 全网络请求无 `callTimeout` 与退避重试 | ❌ 未修复 | `SyncHttpClientFactory.kt:28` 仅设 connect/read/write timeout，无全局 callTimeout | 低-中 | 缺全局 `callTimeout`（含 DNS 解析）；弱网仍有悬挂风险，建议补 `callTimeout` |
 | **P2-13** | 凭据加密失败时旧密文被保留且无错误上报 | ✅ 已修复 | `SyncCredentialsStore.kt:95` 改为先封印后落盘，加密失败直接中断并不改动磁盘 | 否（已修复） | 先封印后落盘已加 |
@@ -65,10 +65,10 @@
 | **P2-18** | WebDAV/S3 凭据明文长期驻留 StateFlow | ⚠️ 部分修复 | `SettingsUiState.kt:79` 密码改用 `CharArray?` 一次性预填通道；S3 AccessKey 仍以 String 留存 | 低-中 | 密码已走 CharArray 预填；S3 AccessKey 仍以 String 留存 StateFlow，建议同改造 |
 | **P2-19** | 历史修订快照为空时谎报"已回滚" | ❌ 未修复 | `EntryDetailViewModel.kt:242` snapshot==null 路径依然触发已回滚 Snackbar | 中 | `snapshot == null` 时仍弹 `detail_history_rolled_back`（"已回滚"）但实际未回滚；应改错误提示 |
 | **P2-20** | TOTP 复制绕过 `ClipboardSecurityManager` | ✅ 已修复 | `AuthenticatorViewModel.kt:124` 统一改调 `clipboardSecurityManager.copySensitiveText` | 否（已修复） | 已走受保护复制 |
-| **P2-21** | 生产代码保留可替换加解密/封印测试钩子 | ⚠️ 部分修复 | QuickUnlockPinStore 与 SyncCoordinator 钩子已清理；`SyncCredentialsStore.kt:63` customEncryptor 仍留存 | 低 | `customEncryptor` 仅测试可见注入点，生产不走；可接受但建议加 `@TestOnly` 注解约束 |
+| **P2-21** | 生产代码保留可替换加解密/封印测试钩子 | ✅ 已修复（2026-09-07） | `SyncCredentialsStore.kt` `customEncryptor`/`customDecryptor` 加 `@VisibleForTesting` + `internal` 双重收窄，生产 DI 与外部调用方不可写 | 低 | QuickUnlockPinStore 与 SyncCoordinator 钩子已清理；SyncCredentialsStore 钩子现仅限本模块单元测试注入 |
 | **P2-22** | 改密对话框与编辑页密码框未用 `SecurePasswordField` | ✅ 已修复 | `SettingsScreen.kt:342` 与 `EntryEditScreen.kt:462` 均已换用 `SecurePasswordField`（CharArray 直通） | 否（已修复） | 已换用安全输入框 |
 | **P2-23** | QuickUnlock PIN 以 String 进 UiState | ➖ 不适用 | 自研 PIN 体系已在 Wave 13 整体彻底删除，PIN 相关属性已被清理 | 否（不适用） | 自研 PIN 体系已删除 |
-| **P2-24** | Autofill Dataset 在已解锁分支未设 setAuthentication | ❌ 未修复 | `KeePasskeyAutofillService.kt:228` 已解锁分支直接下发明文，无二次验证门 | 低-中（加固） | 已认证会话直发明文属 Android 标准做法；属加固建议（可加轻量确认/锁屏态复核），非明确漏洞 |
+| **P2-24** | Autofill Dataset 在已解锁分支未设 setAuthentication | ✅ 已修复（2026-09-07） | `KeePasskeyAutofillService.kt` 已解锁分支每个数据集挂 `setAuthentication` → 新增 `AutofillConfirmActivity` 二次确认（生物识别/锁屏凭据优先，受保护窗口手动确认兜底） | 低-中（加固） | 认证数据集独立 requestCode；Activity 带 FLAG_SECURE + setHideOverlayWindows(true)；RESULT_OK 后框架才写入凭据值 |
 | **P2-25** | 生物凭据封印失败被静默吞掉（catch ignored） | ✅ 已修复 | `UnlockViewModel.kt:301` 捕获异常并记录 `debugLog.warn`，显式提示用户 | 否（已修复） | 已显式提示 |
 | **P2-26** | 数据库列表元数据硬编码假值与占位库 | ❌ 未修复 | `RealVaultRepository.kt:80` 仍使用占位数据与静态描述文案 | 低 | 无 kdbx 文件时回退占位 `default_vault` 作「引导创建首个库」可接受，优先级低 |
 | **P2-27** | 条目密码强度恒为硬编码 112 bit | ❌ 未修复 | `MockData.kt:106` 硬编码 112 bit，无真实熵计算引擎接入 | 中 | `UiVaultEntry.strengthBits` 默认 112 恒显，误导用户；应接入熵估算或显式标注未计算 |
@@ -98,8 +98,8 @@
 | **P3-9** | `setDatabaseForTesting` 为绕过只读模式的公有后门 | ❌ 未修复 | `DatabaseSession.kt:306` 该测试后门依然为 public 且无约束 | 低 | 为 public 测试后门；建议加 `@VisibleForTesting` 或 internal 约束 |
 | **P3-10** | ProtectedString.EMPTY 共享单例可被污染 | ❌ 未修复 | `ProtectedString.kt:79` EMPTY 单例可被 clear() 影响全局 | 低 | `EMPTY` 共享单例可被任意 `clear()` 置 `isCleared=true`，后续引用者 `equals` 等会异常；建议单例禁止 clear 或改用不可变空对象 |
 | **P3-11** | CborEncoder.encodeMap 不强制 Canonical 键序 | ❌ 未修复 | `CborEncoder.kt:127` encodeMap 直接按 Map 迭代顺序编码 | 中（正确性） | 未按 RFC 8949 确定性键序（长度优先/字节序）；Passkey COSE/断言签名若与外部方互验可能因键序不一致失败 |
-| **P3-12** | AttachmentManager.exportToCache 缓存无清理 | ❌ 未修复 | `AttachmentManager.kt:14` 仍直接写缓存且 cleanCache 为全盘粗暴删除 | 中（敏感） | `exportToCache` 把附件明文（可能含敏感文档）写入缓存且查看后无清理；`cleanCache` 粗暴全盘删；应加密缓存/用完即删 |
-| **P3-13** | RSA `certainty = 12` 低于常规标准 | ❌ 未修复 | `PasskeyCryptoEngine.kt:173` certainty 仍硬编码为 12 | 中 | `RSAKeyGenerationParameters(..., 2048, 12)` 确定性 `certainty=12` 偏低（常规 ≥80+），False-prime 概率 ~1/2¹² |
+| **P3-12** | AttachmentManager.exportToCache 缓存无清理 | ✅ 已修复（2026-09-07） | `AttachmentManager.kt` 重写：专用子目录 `attachment_view` + 随机 UUID 文件名 + 会话即弃（新导出清上一轮）+ `deleteExported` 用完即删 + `deleteOnExit` 兜底 | 中（敏感） | `cleanCache` 改为仅清理专用子目录（全盘误删缺陷回归锁于 `AttachmentManagerTest`，6 例单测） |
+| **P3-13** | RSA `certainty = 12` 低于常规标准 | ✅ 已修复（2026-09-07） | `PasskeyCryptoEngine.generateRs256KeyPair` certainty 12 → 80 | 中 | `RSAKeyGenerationParameters(..., 2048, 80)`：False-prime 概率 ≤1/2⁸⁰，对齐 BouncyCastle 官方示例 |
 | **P3-14** | 魔法数字残留 | ❌ 未修复 | `KdbxFile.kt:336` 等多处硬编码数字未抽离为语义化常量 | 极低 | `ByteArray(64)` 等魔数应抽语义常量 |
 | **P3-15** | 路径编码保留 ".." 导致路径遍历风险 | ❌ 未修复 | `WebDavSyncProvider.kt:103` encodePath 未剔除 ".." | 低（纵深防御） | `encodePath` 未剔除 `..` 段，存在路径遍历可能；当前路径来自应用受控配置，风险有限，建议剔除 |
 | **P3-16** | SigV4 编码与 AWS 规范不符（`*` 与 `~` 处理） | ❌ 未修复 | `S3SyncProvider.kt:75` 编码逻辑未针对 AWS 规范微调 | 中（正确性） | `URLEncoder.encode` 把 `*`→`%2A`、`~`→`%7E`；AWS SigV4 canonical URI 要求 `*` 不编码、`~` 不编码，含这两字符的对象键会**签名不匹配 403** |

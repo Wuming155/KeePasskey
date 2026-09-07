@@ -62,6 +62,13 @@
             android:exported="false"
             android:theme="@style/Theme.KeePasskey" />
 
+        <!-- 传统自动填充「已解锁分支」二次确认落地 Activity (TASK-11：认证数据集点选后拉起，
+             用户二次确认成功返回 RESULT_OK 后框架才真正写入凭据值) -->
+        <activity
+            android:name=".autofill.AutofillConfirmActivity"
+            android:exported="false"
+            android:theme="@style/Theme.KeePasskey" />
+
         <!-- Android 16+ Credential Manager 系统凭据提供者服务 -->
         <service
             android:name=".passkey.KeePasskeyCredentialProviderService"

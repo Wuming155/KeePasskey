@@ -148,7 +148,12 @@ class FakeVaultRepository() : VaultRepository {
         return entriesFlow.map { list -> list.find { it.id == id } }
     }
 
-    override suspend fun saveEntry(entry: UiVaultEntry, passwordChars: CharArray?, totpSecret: String?): com.keepasskey.core.result.KdbxResult<Unit> {
+    override suspend fun saveEntry(
+        entry: UiVaultEntry,
+        passwordChars: CharArray?,
+        totpSecretChars: CharArray?,
+        protectedFieldChars: Map<String, CharArray>
+    ): com.keepasskey.core.result.KdbxResult<Unit> {
         passwordChars?.let { pwd ->
             passwordStore.value = passwordStore.value + (entry.id to String(pwd))
         }
@@ -165,18 +170,28 @@ class FakeVaultRepository() : VaultRepository {
                 notes = old.notes
             )
             val updatedRevisions = listOf(rev) + old.revisions
-            // F2 整改：掩码投影中受保护字段为空值，视为未修改并回填既有值
+            // F2 整改：掩码投影中受保护字段为空值，视为未修改并回填既有值；
+            // TASK-10：用户显式编辑的受保护字段（protectedFieldChars）以提交的明文覆盖
             val mergedFields = entry.customFields.map { cf ->
-                if (cf.isProtected && cf.value.isEmpty()) {
-                    val existing = old.customFields.firstOrNull { it.key == cf.key }
-                    if (existing != null) existing else cf
-                } else cf
+                val submitted = protectedFieldChars[cf.id]
+                when {
+                    submitted != null -> cf.copy(value = String(submitted))
+                    cf.isProtected && cf.value.isEmpty() -> {
+                        val existing = old.customFields.firstOrNull { it.key == cf.key }
+                        if (existing != null) existing else cf
+                    }
+                    else -> cf
+                }
             }
             current[index] = entry.copy(customFields = mergedFields, revisions = updatedRevisions)
         } else {
             current.add(0, entry)
         }
         entriesFlow.value = current
+        // 擦除契约：与 RealVaultRepository 同一契约——任何结果路径用毕清零传入副本
+        passwordChars?.fill('0')
+        totpSecretChars?.fill('0')
+        protectedFieldChars.values.forEach { it.fill('0') }
         return com.keepasskey.core.result.KdbxResult.Success(Unit)
     }
 
@@ -292,9 +307,9 @@ class FakeVaultRepository() : VaultRepository {
     override suspend fun getEntryRevisionPasswordChars(entryId: String, revisionId: String): CharArray? =
         passwordStore.value[entryId]?.toCharArray()
 
-    override suspend fun getEntryProtectedField(entryId: String, fieldKey: String): String? =
+    override suspend fun getEntryProtectedFieldChars(entryId: String, fieldKey: String): CharArray? =
         entriesFlow.value.firstOrNull { it.id == entryId }
-            ?.customFields?.firstOrNull { it.key == fieldKey }?.value
+            ?.customFields?.firstOrNull { it.key == fieldKey }?.value?.toCharArray()
 
     override suspend fun calculateEntryTotp(entryId: String): EntryTotpSnapshot? {
         val entry = entriesFlow.value.firstOrNull { it.id == entryId } ?: return null
@@ -636,7 +651,7 @@ class FakeVaultRepository() : VaultRepository {
         )
     }
 
-    override suspend fun getEntryTotpSecret(entryId: String): String? = null
+    override suspend fun getEntryTotpSecretChars(entryId: String): CharArray? = null
 
     override suspend fun getEntryRevisionSnapshot(entryId: String, revisionId: String): EntryRevisionSnapshot? = null
 

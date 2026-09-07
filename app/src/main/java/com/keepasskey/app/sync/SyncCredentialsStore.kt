@@ -1,6 +1,7 @@
 package com.keepasskey.app.sync
 
 import android.content.Context
+import androidx.annotation.VisibleForTesting
 import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.app.security.KeystoreManager
 import com.keepasskey.app.ui.screens.settings.CloudSyncProvider
@@ -59,9 +60,15 @@ class SyncCredentialsStore @Inject constructor(
     // 允许为 null 仅用于 JVM 单测注入；生产 DI 恒定注入真实实现
     private val debugLog: DebugLogBuffer? = null
 ) {
-    // 供单元测试注入模拟加解密闭包
-    var customEncryptor: ((ByteArray) -> Pair<ByteArray, ByteArray>)? = null // plaintext -> (iv, ciphertext)
-    var customDecryptor: ((ByteArray, ByteArray) -> ByteArray)? = null // (iv, ciphertext) -> plaintext
+    // TASK-14 整改（P2-21）：生产类不得暴露 public 可写加解密钩子——任何持有实例的
+    // 代码都可静默替换封印算法，形成凭据泄露面。现以 @VisibleForTesting + internal
+    // 双重收窄：仅本模块单元测试（同一编译单元）可注入模拟加解密闭包，
+    // 生产 DI 与外部调用方不可见、不可写。
+    @VisibleForTesting
+    internal var customEncryptor: ((ByteArray) -> Pair<ByteArray, ByteArray>)? = null // plaintext -> (iv, ciphertext)
+
+    @VisibleForTesting
+    internal var customDecryptor: ((ByteArray, ByteArray) -> ByteArray)? = null // (iv, ciphertext) -> plaintext
 
     private val prefs by lazy {
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)

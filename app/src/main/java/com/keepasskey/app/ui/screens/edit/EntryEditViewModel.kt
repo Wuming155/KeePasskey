@@ -57,9 +57,27 @@ class EntryEditViewModel @Inject constructor(
     /** M1 整改：编辑中的条目密码，仅以 CharArray 驻留 ViewModel（绝不进入 UiState/StateFlow） */
     private var passwordChars = CharArray(0)
 
+    /** TASK-10：编辑中的 TOTP 种子，仅以 CharArray 驻留 ViewModel（绝不进入 UiState/StateFlow） */
+    private var totpSecretChars = CharArray(0)
+
+    /**
+     * TASK-10：受保护自定义字段编辑明文（键为 UiCustomField.id），仅以 CharArray 驻留
+     * ViewModel——UI 投影中受保护字段值恒为空串（与详情页读路径掩码投影语义一致）。
+     * 保存时按 id 显式提交，未编辑过的字段由仓库回填既有值（F2 语义）。
+     */
+    private val protectedFieldChars = mutableMapOf<String, CharArray>()
+
     /** 既有条目密码的一次性预填通道：SecurePasswordField 消费后即由输入路径接管 */
     private val _loadedPassword = MutableStateFlow<CharArray?>(null)
     val loadedPassword: StateFlow<CharArray?> = _loadedPassword.asStateFlow()
+
+    /** TASK-10：既有 TOTP 种子的一次性预填通道（语义同 [loadedPassword]） */
+    private val _loadedTotpSecret = MutableStateFlow<CharArray?>(null)
+    val loadedTotpSecret: StateFlow<CharArray?> = _loadedTotpSecret.asStateFlow()
+
+    /** TASK-10：既有受保护自定义字段的一次性预填通道（仅在条目加载时填充一次，编辑不经此回写） */
+    private val _loadedProtectedFields = MutableStateFlow<Map<String, CharArray>>(emptyMap())
+    val loadedProtectedFields: StateFlow<Map<String, CharArray>> = _loadedProtectedFields.asStateFlow()
 
     init {
         // H4-只读整改：会话只读时编辑页禁用保存
@@ -86,23 +104,37 @@ class EntryEditViewModel @Inject constructor(
                 // M1 整改：密码明文不随条目投影下发，编辑时按需单条解密为 CharArray
                 // （所有权移交：数组副本交 loadedPassword 预填通道，用户编辑后即清零回收）
                 val password = vaultRepository.getEntryPasswordChars(entry.id)
-                // F2 整改：受保护自定义字段同理按需单条解密——明文仅驻留当前编辑条目的状态中，
-                // 保存时随 customFields 显式提交（仓库层对空值受保护字段回填既有值作兜底）
-                val editableFields = entry.customFields.map { cf ->
+                // TASK-10：受保护自定义字段明文同理按需单条解密为 CharArray——不进 UiState
+                // String，经私有映射驻留 + loadedProtectedFields 一次性预填；
+                // UI 投影中受保护字段值恒为空串（保存时未编辑字段由仓库回填既有值）
+                val loadedProtected = mutableMapOf<String, CharArray>()
+                for (cf in entry.customFields) {
                     if (cf.isProtected) {
-                        cf.copy(value = vaultRepository.getEntryProtectedField(entry.id, cf.key).orEmpty())
-                    } else {
-                        cf
+                        vaultRepository.getEntryProtectedFieldChars(entry.id, cf.key)?.let { chars ->
+                            loadedProtected[cf.id] = chars
+                        }
                     }
                 }
-                // 断点4 整改：TOTP 配置原文按需回填（otp 字段优先，回退 TOTP 开头的自定义字段）
-                val totpRaw = vaultRepository.getEntryTotpSecret(entry.id).orEmpty()
+                // 断点4 整改 + TASK-10：TOTP 配置原文按需解密为 CharArray（otp 字段优先，
+                // 回退 TOTP 开头的自定义字段），经一次性预填通道下发
+                val totpRaw = vaultRepository.getEntryTotpSecretChars(entry.id)
                 // M1 整改：密码副本双通道——ViewModel 私有副本（保存用）+ 预填通道（组件显示用，
                 // 用户开始编辑或 ViewModel 销毁时清零）
                 passwordChars.fill('0')
                 passwordChars = password?.copyOf() ?: CharArray(0)
                 _loadedPassword.value?.fill('0')
                 _loadedPassword.value = password
+                // TASK-10：TOTP 私有副本 + 预填通道（语义同密码双通道）
+                totpSecretChars.fill('0')
+                totpSecretChars = totpRaw?.copyOf() ?: CharArray(0)
+                _loadedTotpSecret.value?.fill('0')
+                _loadedTotpSecret.value = totpRaw
+                // TASK-10：重载前擦除旧受保护字段驻留，再重建私有副本与预填通道
+                protectedFieldChars.values.forEach { it.fill('0') }
+                protectedFieldChars.clear()
+                _loadedProtectedFields.value.values.forEach { it.fill('0') }
+                protectedFieldChars.putAll(loadedProtected.mapValues { (_, v) -> v.copyOf() })
+                _loadedProtectedFields.value = loadedProtected
                 _uiState.update {
                     it.copy(
                         entryId = entry.id,
@@ -114,8 +146,7 @@ class EntryEditViewModel @Inject constructor(
                         url = entry.url,
                         notes = entry.notes,
                         isPasskey = entry.isPasskey,
-                        totpSecret = totpRaw,
-                        customFields = editableFields,
+                        customFields = entry.customFields,
                         attachments = entry.attachments,
                         tagsInput = entry.tags.joinToString(", "),
                         autoTypeSequence = entry.autoTypeSequence,
@@ -154,7 +185,18 @@ class EntryEditViewModel @Inject constructor(
         )
     }
 
-    fun onTotpSecretChange(secret: String) = _uiState.update { it.copy(totpSecret = secret, isDirty = true) }
+    /**
+     * TASK-10：TOTP 种子输入的 CharArray 桥接上行（语义同 [onPasswordChangeSecure]）。
+     * 桥接数组归组件所有（组件自行清零），此处复制私有副本长期持有；
+     * 同时终结既有 TOTP 预填通道生命周期。
+     */
+    fun onTotpSecretChangeSecure(secret: CharArray) {
+        totpSecretChars.fill('0')
+        totpSecretChars = secret.copyOf()
+        _loadedTotpSecret.value?.fill('0')
+        _loadedTotpSecret.value = null
+        _uiState.update { it.copy(isDirty = true) }
+    }
 
     fun onTagsInputChange(input: String) = _uiState.update { it.copy(tagsInput = input, isDirty = true) }
 
@@ -225,16 +267,49 @@ class EntryEditViewModel @Inject constructor(
         _uiState.update { it.copy(customFields = it.customFields + newField, isDirty = true) }
     }
 
+    /**
+     * 非受保护字段明文 / 键名 / 保护标记的通用编辑入口。
+     * TASK-10：保护标记切换时同步迁移明文存储位置——
+     * - 非受保护 → 受保护：明文迁入 CharArray 私有链路，状态值转为空串（掩码投影语义）；
+     * - 受保护 → 非受保护：明文迁回状态 String（非受保护字段按格式边界以明文存储），Char 副本擦除。
+     */
     fun updateCustomField(id: String, key: String, value: String, isProtected: Boolean) {
+        val previous = _uiState.value.customFields.firstOrNull { it.id == id }
+        var effectiveValue = value
+        when {
+            previous != null && !previous.isProtected && isProtected && value.isNotEmpty() -> {
+                protectedFieldChars[id]?.fill('0')
+                protectedFieldChars[id] = value.toCharArray()
+                effectiveValue = ""
+            }
+            previous != null && previous.isProtected && !isProtected -> {
+                val chars = protectedFieldChars.remove(id)
+                if (chars != null) {
+                    effectiveValue = String(chars)
+                    chars.fill('0')
+                }
+            }
+        }
         _uiState.update { state ->
             val updated = state.customFields.map { f ->
-                if (f.id == id) f.copy(key = key, value = value, isProtected = isProtected) else f
+                if (f.id == id) f.copy(key = key, value = effectiveValue, isProtected = isProtected) else f
             }
             state.copy(customFields = updated, isDirty = true)
         }
     }
 
+    /**
+     * TASK-10：受保护字段明文输入的 CharArray 桥接上行（语义同 [onPasswordChangeSecure]）。
+     * 桥接数组归组件所有（组件自行清零），此处复制私有副本长期持有。
+     */
+    fun updateProtectedFieldValue(id: String, chars: CharArray) {
+        protectedFieldChars[id]?.fill('0')
+        protectedFieldChars[id] = chars.copyOf()
+        _uiState.update { it.copy(isDirty = true) }
+    }
+
     fun removeCustomField(id: String) {
+        protectedFieldChars.remove(id)?.fill('0')
         _uiState.update { state ->
             state.copy(customFields = state.customFields.filter { it.id != id }, isDirty = true)
         }
@@ -300,18 +375,23 @@ class EntryEditViewModel @Inject constructor(
             )
             // M1 整改：密码以独立参数显式提交，不再随条目投影携带；提交副本归仓库擦除
             // （契约：仓库任何结果路径用毕清零），ViewModel 自有副本保留以支持失败后继续编辑
-            // 断点4 整改：TOTP 种子随保存显式提交（空串=清除 TOTP）
+            // 断点4 整改 + TASK-10：TOTP 种子与受保护自定义字段明文以 CharArray 副本随保存显式提交
             // H3 整改：保存失败必须显式反馈，禁止磁盘写失败时谎报成功
             val passwordCopy = passwordChars.copyOf()
+            val totpCopy = totpSecretChars.copyOf()
+            val protectedCopy = protectedFieldChars.mapValues { (_, v) -> v.copyOf() }
             val result = try {
                 vaultRepository.saveEntry(
                     entry,
                     passwordChars = passwordCopy,
-                    totpSecret = state.totpSecret
+                    totpSecretChars = totpCopy,
+                    protectedFieldChars = protectedCopy
                 )
             } finally {
                 // 兜底擦除：若仓库实现未按契约清零（如旧版本 Fake），此处保证副本不残留明文
                 passwordCopy.fill('0')
+                totpCopy.fill('0')
+                protectedCopy.values.forEach { it.fill('0') }
             }
             if (result is KdbxResult.Success) {
                 _events.emit(EntryEditEvent.SaveSuccess)
@@ -338,6 +418,15 @@ class EntryEditViewModel @Inject constructor(
         passwordChars = CharArray(0)
         _loadedPassword.value?.fill('0')
         _loadedPassword.value = null
+        // TASK-10：TOTP 种子与受保护自定义字段明文驻留一并彻底擦除
+        totpSecretChars.fill('0')
+        totpSecretChars = CharArray(0)
+        _loadedTotpSecret.value?.fill('0')
+        _loadedTotpSecret.value = null
+        protectedFieldChars.values.forEach { it.fill('0') }
+        protectedFieldChars.clear()
+        _loadedProtectedFields.value.values.forEach { it.fill('0') }
+        _loadedProtectedFields.value = emptyMap()
         super.onCleared()
     }
 }

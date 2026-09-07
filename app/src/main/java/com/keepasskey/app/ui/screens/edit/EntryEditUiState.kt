@@ -12,6 +12,10 @@ import com.keepasskey.app.ui.model.VaultGroup
  * M1 整改（加解密审查 2026-09）：本状态类不再承载密码明文（String 不可变驻留 StateFlow 堆内存，
  * 且每次 update 都会产生新副本）。密码经 EntryEditViewModel 的 CharArray 私有链路承载，
  * UI 仅感知 [passwordLength] 用于强度条渲染。
+ *
+ * TASK-10 整改（加解密审查 B9）：TOTP 种子与受保护自定义字段明文同样退出本状态类——
+ * 前者由 ViewModel 的 CharArray 私有链路承载，后者在 UI 投影中恒为空串（与详情页读路径
+ * 的掩码投影语义一致），编辑明文经 ViewModel 的 CharArray 私有链路承载与显式提交。
  */
 data class EntryEditUiState(
     val entryId: String? = null,
@@ -25,7 +29,6 @@ data class EntryEditUiState(
     val url: String = "",
     val notes: String = "",
     val isPasskey: Boolean = false,
-    val totpSecret: String = "",
     val customFields: List<UiCustomField> = emptyList(),
     val attachments: List<UiAttachment> = emptyList(),
     // KP2A 能力补齐：标签（逗号/空格分隔输入）与 AutoType 默认序列、Override URL

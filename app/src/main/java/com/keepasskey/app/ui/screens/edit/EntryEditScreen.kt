@@ -78,8 +78,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -114,6 +112,9 @@ fun EntryEditScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     // M1 整改：既有条目密码的一次性预填通道（SecurePasswordField 消费后即清零）
     val loadedPassword by viewModel.loadedPassword.collectAsStateWithLifecycle()
+    // TASK-10：TOTP 种子与受保护自定义字段明文的一次性预填通道（语义同 loadedPassword）
+    val loadedTotpSecret by viewModel.loadedTotpSecret.collectAsStateWithLifecycle()
+    val loadedProtectedFields by viewModel.loadedProtectedFields.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
 
     // 断点1 整改：真实 SAF 附件选择器——读取所选文件字节后随编辑会话提交
@@ -143,9 +144,10 @@ fun EntryEditScreen(
         }
     }
 
-    // 断点5 整改：TOTP 二维码真实扫描（zxing-embedded），扫描结果直接回填种子输入框
+    // 断点5 整改：TOTP 二维码真实扫描（zxing-embedded），扫描结果直接回填种子输入框。
+    // TASK-10：扫码结果（框架边界 String）即刻转为 CharArray 走安全桥接上行
     val qrScanner = rememberLauncherForActivityResult(ScanContract()) { result ->
-        result.contents?.let { viewModel.onTotpSecretChange(it) }
+        result.contents?.let { viewModel.onTotpSecretChangeSecure(it.toCharArray()) }
     }
 
     LaunchedEffect(viewModel) {
@@ -169,6 +171,8 @@ fun EntryEditScreen(
     EntryEditContent(
         uiState = uiState,
         loadedPassword = loadedPassword,
+        loadedTotpSecret = loadedTotpSecret,
+        loadedProtectedFields = loadedProtectedFields,
         isDirty = uiState.isDirty,
         snackbarHostState = snackbarHostState,
         onBackClick = onBackClick,
@@ -181,7 +185,8 @@ fun EntryEditScreen(
         onUrlChange = viewModel::onUrlChange,
         onNotesChange = viewModel::onNotesChange,
         onTogglePasskey = viewModel::onTogglePasskey,
-        onTotpSecretChange = viewModel::onTotpSecretChange,
+        onTotpSecretChangeSecure = viewModel::onTotpSecretChangeSecure,
+        onUpdateProtectedFieldValue = viewModel::updateProtectedFieldValue,
         onTagsInputChange = viewModel::onTagsInputChange,
         onAutoTypeSequenceChange = viewModel::onAutoTypeSequenceChange,
         onOverrideUrlChange = viewModel::onOverrideUrlChange,
@@ -237,6 +242,8 @@ private fun formatAttachmentSize(bytes: Int): String {
 fun EntryEditContent(
     uiState: EntryEditUiState,
     loadedPassword: CharArray?,
+    loadedTotpSecret: CharArray?,
+    loadedProtectedFields: Map<String, CharArray>,
     isDirty: Boolean,
     snackbarHostState: SnackbarHostState,
     onBackClick: () -> Unit,
@@ -249,7 +256,8 @@ fun EntryEditContent(
     onUrlChange: (String) -> Unit,
     onNotesChange: (String) -> Unit,
     onTogglePasskey: () -> Unit,
-    onTotpSecretChange: (String) -> Unit,
+    onTotpSecretChangeSecure: (CharArray) -> Unit,
+    onUpdateProtectedFieldValue: (String, CharArray) -> Unit,
     onTagsInputChange: (String) -> Unit,
     onAutoTypeSequenceChange: (String) -> Unit,
     onOverrideUrlChange: (String) -> Unit,
@@ -522,10 +530,18 @@ fun EntryEditContent(
                 modifier = Modifier.fillMaxWidth(),
                 backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow
             ) {
-                OutlinedTextField(
-                    value = uiState.totpSecret,
-                    onValueChange = onTotpSecretChange,
-                    label = { Text(stringResource(R.string.edit_totp_hint)) },
+                // TASK-10 整改（加解密审查 B9）：TOTP 种子输入走 SecurePasswordField——
+                // 显示用 String 仅存活于组件内部，CharArray 直达 ViewModel；
+                // 既有种子经 loadedTotpSecret 一次性预填。种子默认明文显示（Base32 配置
+                // 常需人工核对），保留可见性切换。
+                var totpVisible by remember { mutableStateOf(true) }
+                SecurePasswordField(
+                    label = stringResource(R.string.edit_totp_hint),
+                    onPasswordChanged = onTotpSecretChangeSecure,
+                    isPasswordVisible = totpVisible,
+                    onToggleVisibility = { totpVisible = !totpVisible },
+                    initialPassword = loadedTotpSecret,
+                    initialKey = uiState.entryId?.let { "totp-$it" } ?: "totp-new-entry",
                     trailingIcon = {
                         // 断点5 整改：按钮直接呼起真实扫码
                         IconButton(onClick = onScanTotpQr) {
@@ -536,8 +552,6 @@ fun EntryEditContent(
                             )
                         }
                     },
-                    singleLine = true,
-                    shape = MaterialTheme.shapes.medium,
                     modifier = Modifier.fillMaxWidth()
                 )
             }
@@ -626,14 +640,31 @@ fun EntryEditContent(
                                 }
                             }
 
-                            OutlinedTextField(
-                                value = field.value,
-                                onValueChange = { onUpdateCustomField(field.id, field.key, it, field.isProtected) },
-                                label = { Text(stringResource(R.string.edit_field_value)) },
-                                visualTransformation = if (field.isProtected) PasswordVisualTransformation() else VisualTransformation.None,
-                                singleLine = true,
-                                modifier = Modifier.fillMaxWidth()
-                            )
+                            if (field.isProtected) {
+                                // TASK-10 整改（加解密审查 B9）：受保护字段明文输入走
+                                // SecurePasswordField——显示用 String 仅存活于组件内部，
+                                // CharArray 直达 ViewModel 私有链路；既有值经预填通道一次性注入
+                                var protectedVisible by remember(field.id) { mutableStateOf(false) }
+                                SecurePasswordField(
+                                    label = stringResource(R.string.edit_field_value),
+                                    onPasswordChanged = { chars ->
+                                        onUpdateProtectedFieldValue(field.id, chars)
+                                    },
+                                    isPasswordVisible = protectedVisible,
+                                    onToggleVisibility = { protectedVisible = !protectedVisible },
+                                    initialPassword = loadedProtectedFields[field.id],
+                                    initialKey = field.id,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            } else {
+                                OutlinedTextField(
+                                    value = field.value,
+                                    onValueChange = { onUpdateCustomField(field.id, field.key, it, field.isProtected) },
+                                    label = { Text(stringResource(R.string.edit_field_value)) },
+                                    singleLine = true,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
 
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,

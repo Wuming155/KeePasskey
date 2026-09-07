@@ -368,21 +368,26 @@ class RealVaultRepository @Inject constructor(
     override suspend fun saveEntry(
         entry: UiVaultEntry,
         passwordChars: CharArray?,
-        totpSecret: String?
+        totpSecretChars: CharArray?,
+        protectedFieldChars: Map<String, CharArray>
     ): com.keepasskey.core.result.KdbxResult<Unit> {
         // 擦除契约（加解密审查 2026-09）：任何结果路径（成功/失败/异常）用毕清零传入副本，
-        // 与 saveAutofillCredential / FakeVaultRepository 同一契约
+        // 与 saveAutofillCredential / FakeVaultRepository 同一契约。
+        // TASK-10：TOTP 种子与受保护自定义字段明文副本同样纳入擦除契约
         try {
-            return saveEntryInternal(entry, passwordChars, totpSecret)
+            return saveEntryInternal(entry, passwordChars, totpSecretChars, protectedFieldChars)
         } finally {
             passwordChars?.fill('0')
+            totpSecretChars?.fill('0')
+            protectedFieldChars.values.forEach { it.fill('0') }
         }
     }
 
     private suspend fun saveEntryInternal(
         entry: UiVaultEntry,
         passwordChars: CharArray?,
-        totpSecret: String?
+        totpSecretChars: CharArray?,
+        protectedFieldChars: Map<String, CharArray>
     ): com.keepasskey.core.result.KdbxResult<Unit> {
         val db = databaseSession.databaseFlow.first()
         val targetUuid = parseUuidOrNull(entry.id)
@@ -402,24 +407,43 @@ class RealVaultRepository @Inject constructor(
                 put(KdbxConstants.Fields.URL, ProtectedString(entry.url, isProtected = false))
                 put(KdbxConstants.Fields.NOTES, ProtectedString(entry.notes, isProtected = false))
                 // 断点4 整改：TOTP 种子显式提交（null=未修改；空串=清除；非空=写标准 otp 字段）
-                if (totpSecret != null) {
-                    if (totpSecret.isBlank()) {
+                // TASK-10：TOTP 配置以 CharArray 显式提交（null=未修改保留既有；空数组=清除），
+                // 明文仅在 ProtectedString 密封瞬间物化，中间副本即时擦除
+                if (totpSecretChars != null) {
+                    val trimmedTotp = totpSecretChars.trimmedCopy()
+                    if (trimmedTotp.isEmpty()) {
                         remove(KdbxConstants.Fields.OTP)
                     } else {
-                        put(KdbxConstants.Fields.OTP, ProtectedString(totpSecret.trim(), isProtected = false))
+                        put(KdbxConstants.Fields.OTP, ProtectedString(trimmedTotp, isProtected = false))
                     }
+                    trimmedTotp.fill('0')
                 }
             }
 
             val uiCustomList = entry.customFields.map { cf ->
-                // F2 整改：UI 投影中受保护字段的明文恒为空（按需解密），回写时「空值」视为未修改，
-                // 回填既有条目的真实值——防止详情页回滚等携带掩码投影的保存路径清空受保护字段
-                val effectiveValue = if (cf.isProtected && cf.value.isEmpty()) {
-                    existing.customFields.firstOrNull { it.key == cf.key }?.value?.readString().orEmpty()
-                } else {
-                    cf.value
+                // TASK-10：受保护自定义字段编辑态明文以 CharArray 显式提交（键为字段编辑 id），
+                // 仅用户显式编辑过的字段出现在 protectedFieldChars 中。
+                // 擦除语义：submittedChars 归 saveEntry 的 finally 契约擦除；回填路径的
+                // readChars 独占副本在密封后立即擦除
+                val submittedChars = if (cf.isProtected) protectedFieldChars[cf.id] else null
+                // F2 整改：UI 投影中受保护字段的明文恒为空（按需解密），未编辑的受保护字段
+                // 回写时「空值」视为未修改，回填既有条目的真实值——防止详情页回滚等携带掩码
+                // 投影的保存路径清空受保护字段
+                val existingField = existing.customFields.firstOrNull { it.key == cf.key }
+                when {
+                    submittedChars != null ->
+                        KdbxCustomField(cf.key, ProtectedString(submittedChars, isProtected = true))
+                    cf.isProtected && cf.value.isEmpty() -> {
+                        val backfillChars = existingField?.value?.readChars()
+                        try {
+                            KdbxCustomField(cf.key, ProtectedString(backfillChars ?: CharArray(0), isProtected = true))
+                        } finally {
+                            backfillChars?.fill('0')
+                        }
+                    }
+                    else ->
+                        KdbxCustomField(cf.key, ProtectedString(cf.value, isProtected = cf.isProtected))
                 }
-                KdbxCustomField(cf.key, ProtectedString(effectiveValue, isProtected = cf.isProtected))
             }
             val uiKeys = uiCustomList.map { it.key }.toSet()
             // 保留既有条目中未在 UI 覆盖的系统字段（例如 Passkey 属性等）
@@ -473,7 +497,7 @@ class RealVaultRepository @Inject constructor(
             databaseSession.saveEntry(finalEntry)
         } else {
             // 新建条目
-            val kdbxEntry = mapUiEntryToKdbx(entry, passwordChars, totpSecret)
+            val kdbxEntry = mapUiEntryToKdbx(entry, passwordChars, totpSecretChars, protectedFieldChars)
             databaseSession.saveEntry(kdbxEntry)
         }
         return persistSession()
@@ -874,7 +898,12 @@ class RealVaultRepository @Inject constructor(
         }
     }
 
-    private fun mapUiEntryToKdbx(entry: UiVaultEntry, passwordChars: CharArray?, totpSecret: String?): KdbxEntry {
+    private fun mapUiEntryToKdbx(
+        entry: UiVaultEntry,
+        passwordChars: CharArray?,
+        totpSecretChars: CharArray?,
+        protectedFieldChars: Map<String, CharArray>
+    ): KdbxEntry {
         val fields = mutableMapOf(
             KdbxConstants.Fields.TITLE to ProtectedString(entry.title, isProtected = false),
             KdbxConstants.Fields.USER_NAME to ProtectedString(entry.username, isProtected = false),
@@ -882,14 +911,24 @@ class RealVaultRepository @Inject constructor(
             KdbxConstants.Fields.URL to ProtectedString(entry.url, isProtected = false),
             KdbxConstants.Fields.NOTES to ProtectedString(entry.notes, isProtected = false)
         )
-        if (!totpSecret.isNullOrBlank()) {
-            fields[KdbxConstants.Fields.OTP] = ProtectedString(totpSecret.trim(), isProtected = false)
+        // TASK-10：TOTP 配置以 CharArray 提交（空数组=无 TOTP），中间副本即时擦除
+        if (totpSecretChars != null) {
+            val trimmedTotp = totpSecretChars.trimmedCopy()
+            if (trimmedTotp.isNotEmpty()) {
+                fields[KdbxConstants.Fields.OTP] = ProtectedString(trimmedTotp, isProtected = false)
+            }
+            trimmedTotp.fill('0')
         }
 
         val customFields = entry.customFields.map { cf ->
+            val submittedChars = if (cf.isProtected) protectedFieldChars[cf.id] else null
             KdbxCustomField(
                 key = cf.key,
-                value = ProtectedString(cf.value, isProtected = cf.isProtected)
+                value = when {
+                    // TASK-10：用户显式编辑的受保护字段明文以 CharArray 提交（副本由 saveEntry finally 擦除）
+                    submittedChars != null -> ProtectedString(submittedChars, isProtected = true)
+                    else -> ProtectedString(cf.value, isProtected = cf.isProtected)
+                }
             )
         }
 
@@ -1008,11 +1047,12 @@ class RealVaultRepository @Inject constructor(
         )
     }
 
-    override suspend fun getEntryProtectedField(entryId: String, fieldKey: String): String? {
+    override suspend fun getEntryProtectedFieldChars(entryId: String, fieldKey: String): CharArray? {
         val targetUuid = parseUuidOrNull(entryId) ?: return null
         val currentDb = databaseSession.databaseFlow.first() ?: return null
         val entry = currentDb.rootGroup.allEntries().firstOrNull { it.id == targetUuid } ?: return null
-        return entry.customFields.firstOrNull { it.key == fieldKey }?.value?.readString()
+        // TASK-10：编辑态 CharArray 化——readChars 返回独占副本，调用方按借用语义用毕清零
+        return entry.customFields.firstOrNull { it.key == fieldKey }?.value?.readChars()
     }
 
     override suspend fun calculateEntryTotp(entryId: String): EntryTotpSnapshot? {
@@ -1030,16 +1070,17 @@ class RealVaultRepository @Inject constructor(
         )
     }
 
-    override suspend fun getEntryTotpSecret(entryId: String): String? {
+    override suspend fun getEntryTotpSecretChars(entryId: String): CharArray? {
         val targetUuid = parseUuidOrNull(entryId) ?: return null
         val currentDb = databaseSession.databaseFlow.first() ?: return null
         val entry = currentDb.rootGroup.allEntries().firstOrNull { it.id == targetUuid } ?: return null
-        // 断点4 整改：与 parseTotpConfig 同源读取（otp 字段优先，回退 TOTP 开头的自定义字段），
-        // 返回配置原文（otpauth:// URI 或 Base32 种子）供编辑页回填
-        return entry.fields[KdbxConstants.Fields.OTP]?.readString()
+        // 断点4 整改：与 parseTotpConfig 同源读取（otp 字段优先，回退 TOTP 开头的自定义字段）。
+        // TASK-10：返回配置原文独占 CharArray 副本（otpauth:// URI 或 Base32 种子）供编辑页回填，
+        // 调用方按借用语义用毕清零
+        return entry.fields[KdbxConstants.Fields.OTP]?.readChars()
             ?: entry.customFields.firstOrNull {
                 it.key.equals("otp", ignoreCase = true) || it.key.startsWith("TOTP", ignoreCase = true)
-            }?.value?.readString()
+            }?.value?.readChars()
     }
 
     override suspend fun getAttachmentData(entryId: String, fileName: String): ByteArray? {
@@ -1180,4 +1221,16 @@ class RealVaultRepository @Inject constructor(
             isRecycleBin = true
         )
     }
+}
+
+/**
+ * CharArray 去除首尾空白并返回新副本（TASK-10：TOTP 配置 CharArray 化的 trim 等价物）。
+ * 原数组归调用方所有并按擦除契约清零；返回的新副本由调用点用毕立即擦除。
+ */
+private fun CharArray.trimmedCopy(): CharArray {
+    var start = 0
+    var end = size
+    while (start < end && this[start].isWhitespace()) start++
+    while (end > start && this[end - 1].isWhitespace()) end--
+    return copyOfRange(start, end)
 }

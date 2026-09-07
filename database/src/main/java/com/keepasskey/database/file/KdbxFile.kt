@@ -141,11 +141,11 @@ object KdbxFile {
         // 旧派生裁决：取首个数据块做解密探针，官方派生不合法时回退旧派生
         val firstBlock = hmacBlockIn.readBlock()
         val isGzip = header.compression == KdbxConstants.Compression.GZIP
-        val activeKey = resolveCipherKey(cipherEngine, header, firstBlock, cipherKey, isGzip) {
+        val resolution = resolveCipherKey(cipherEngine, header, firstBlock, cipherKey, isGzip) {
             // 旧派生重算：仅取 cipherKey 参与裁决，hmacKey64 属 transformedKey 直接派生物，用毕立即擦除
             deriveKeys(header, passwordChars, keyFileData, isLegacy = true).let { (legacyCipherKey, legacyHmacKey) ->
                 try {
-                    legacyCipherKey
+                    Pair(legacyCipherKey, legacyHmacKey)
                 } finally {
                     Arrays.fill(legacyHmacKey, 0.toByte())
                 }
@@ -157,7 +157,11 @@ object KdbxFile {
         } else {
             hmacBlockIn
         }
-        val cipherIn = cipherEngine.createDecryptingStream(payloadStream, activeKey, header.encryptionIv)
+        val cipherIn = cipherEngine.createDecryptingStream(payloadStream, resolution.activeKey, header.encryptionIv)
+        // P2-10 整改（TASK-24）：解密流建立后（SecretKeySpec 构造时已克隆密钥材料），
+        // 被选中的旧派生密钥原数组立即擦除；未被选中的旧派生密钥已在 resolveCipherKey
+        // 内部任何结果路径（含裁决失败抛异常）统一清零——legacyCipherKey 不再残留 GC 堆。
+        resolution.legacyKeyToWipe?.let { Arrays.fill(it, 0.toByte()) }
 
         // 官方载荷顺序（对齐 KeePass 2.x Read.cs / KeePassDX DatabaseInputKDBX）：
         // 解密 → GZIP 解压 → 内层头部（在解压流内、XML 之前）→ XML
@@ -184,10 +188,25 @@ object KdbxFile {
     }
 
     /**
+     * cipherKey 派生裁决结果：
+     * [activeKey] 为本次解密实际使用的密钥（官方派生或旧派生）；
+     * [legacyKeyToWipe] 为被选中的旧派生密钥原数组——调用方在解密流建立（密钥材料已被
+     * SecretKeySpec 克隆）后必须立即擦除；官方派生被选中时为 null（由 [load] 的 finally 统一擦除）。
+     */
+    private class CipherKeyResolution(
+        val activeKey: ByteArray,
+        val legacyKeyToWipe: ByteArray?
+    )
+
+    /**
      * 用首个数据块的解密结果裁决 cipherKey 派生变体：
      * GZIP 压缩库（官方默认）解密产物以 GZIP 魔数 1F 8B 08 开始；未压缩库解密产物
      * 呈现合法的内层 Header 字段序列。错误密钥的解密产物几乎不可能通过结构校验。
      * 两种派生均不合法时按凭据错误处理。
+     *
+     * P2-10 整改（TASK-24）：旧派生密钥的生命周期由本方法全权管理——
+     * 未被选中的 legacyCipherKey 与裁决失败抛异常路径下的 legacyCipherKey
+     * 均在 finally 中统一清零，绝不残留 GC 堆。
      */
     private fun resolveCipherKey(
         cipherEngine: CipherEngine,
@@ -195,20 +214,32 @@ object KdbxFile {
         firstBlock: ByteArray?,
         officialKey: ByteArray,
         isGzipCompressed: Boolean,
-        deriveLegacyKey: () -> ByteArray
-    ): ByteArray {
+        deriveLegacyKeys: () -> Pair<ByteArray, ByteArray>
+    ): CipherKeyResolution {
         if (firstBlock == null || firstBlock.size < MIN_PROBE_BLOCK_SIZE) {
             // 块过小无法构成有效探针（正常 KDBX 负载远大于此），按官方派生继续，由后续解析暴露问题
-            return officialKey
+            return CipherKeyResolution(officialKey, null)
         }
         if (isPlausibleInnerHeaderPrefix(cipherEngine, header.encryptionIv, officialKey, firstBlock, isGzipCompressed)) {
-            return officialKey
+            return CipherKeyResolution(officialKey, null)
         }
-        val legacyKey = deriveLegacyKey()
-        if (isPlausibleInnerHeaderPrefix(cipherEngine, header.encryptionIv, legacyKey, firstBlock, isGzipCompressed)) {
-            return legacyKey
+        val (legacyCipherKey, legacyHmacKey) = deriveLegacyKeys()
+        var legacyAccepted = false
+        try {
+            if (isPlausibleInnerHeaderPrefix(cipherEngine, header.encryptionIv, legacyCipherKey, firstBlock, isGzipCompressed)) {
+                // 旧派生被选中：原数组交由调用方在解密流建立后擦除（见 CipherKeyResolution 契约）
+                legacyAccepted = true
+                return CipherKeyResolution(legacyCipherKey, legacyCipherKey)
+            }
+            throw KdbxInvalidCredentialsException("数据解密失败：主密码错误或文件已损坏")
+        } finally {
+            // 未被选中的旧派生密钥在任何结果路径（含裁决失败抛异常）下统一清零；
+            // hmacKey64 属 transformedKey 直接派生物，无论是否选中均立即擦除
+            if (!legacyAccepted) {
+                Arrays.fill(legacyCipherKey, 0.toByte())
+            }
+            Arrays.fill(legacyHmacKey, 0.toByte())
         }
-        throw KdbxInvalidCredentialsException("数据解密失败：主密码错误或文件已损坏")
     }
 
     /**
