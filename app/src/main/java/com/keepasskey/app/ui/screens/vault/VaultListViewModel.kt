@@ -14,6 +14,7 @@ import com.keepasskey.app.ui.model.UiVaultEntry
 import com.keepasskey.app.ui.model.VaultGroup
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -136,6 +137,7 @@ class VaultListViewModel @Inject constructor(
      * 首帧补发（flow{emit(current); emitAll(...)}）：保证初次渲染与
      * 「关闭搜索时立即清空关键词」不被防抖窗口延迟，distinctUntilChanged 负责吸收重复值。
      */
+    @OptIn(FlowPreview::class)
     private val debouncedSearchQueryFlow: Flow<String> = flow {
         emit(searchQueryFlow.value)
         emitAll(searchQueryFlow.debounce(SEARCH_DEBOUNCE_MS))

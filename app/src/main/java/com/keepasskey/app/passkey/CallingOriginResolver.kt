@@ -67,7 +67,8 @@ object CallingOriginResolver {
     /** 普通应用固定颁发 apk-key-hash origin（签名证书 SHA-256，base64url 无填充） */
     private fun apkKeyHashOrigin(callingAppInfo: CallingAppInfo): String {
         return try {
-            val signer = callingAppInfo.signingInfo?.apkContentsSigners?.firstOrNull()
+            // signingInfo 为平台保证非空；apkContentsSigners 仍可能为空数组，保留安全调用
+            val signer = callingAppInfo.signingInfo.apkContentsSigners?.firstOrNull()
                 ?: return ""
             val digest = MessageDigest.getInstance("SHA-256").digest(signer.toByteArray())
             APK_KEY_HASH_PREFIX + Base64.encodeToString(

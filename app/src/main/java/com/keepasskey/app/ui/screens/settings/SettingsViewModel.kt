@@ -493,7 +493,7 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun setSyncProvider(provider: CloudSyncProvider) {
-        syncCredentialsStore?.saveProvider(provider)
+        syncCredentialsStore.saveProvider(provider)
         syncStateFlow.update { it.copy(provider = provider) }
     }
 

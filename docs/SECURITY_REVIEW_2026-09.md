@@ -1,9 +1,9 @@
 # KeePasskey 安全审查报告（2026-09）与 Wave 13 整改存档
 
-> 审查方法：以 Context7 官方文档库（`/websites/developer_android`、`/androidx/androidx`、`/websites/square_github_io_okhttp`）
-> 与 Android 官方安全文档（密钥库系统、创建通行密钥、OkHttp HTTPS 特性）为对照基准，
-> 对认证、授权、输入验证、数据加密、敏感信息处理、依赖安全六个领域逐项审查。
-> 整改代号：**Wave 13（安全审计整改）**——编号顺延自既有 Wave 1-12 交付序列。
+> ⚠️ **历史文档存档（HISTORICAL ARCHIVE）**
+> **停止更新声明**：本报告为 2026-09 审计时的快照。各项发现的最新物理核对状态见 [**docs/FINDINGS_TRACKER.md**](FINDINGS_TRACKER.md)；项目整体状态与任务看板见 [**docs/STATUS.md**](STATUS.md)。
+
+---
 
 ## 一、发现清单与处置总表（16 项）
 

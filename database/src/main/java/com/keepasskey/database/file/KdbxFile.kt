@@ -466,12 +466,12 @@ object KdbxFile {
         val compositeKey = when {
             hasPassword && hasKeyFile -> {
                 // 密码 + 密钥文件：SHA-256(SHA-256(password) ‖ keyFileKey)
-                val passwordHash = HashUtil.sha256(charsToUtf8(passwordChars!!))
+                val passwordHash = HashUtil.sha256(charsToUtf8(passwordChars))
                 try {
                     // 按官方语义解析密钥文件（XML .keyx 取 <Data> / 裸 32 字节 /
                     // 64 位 hex 文本 / 任意二进制整文件 SHA-256），
                     // 原实现对 XML 密钥文件整文件哈希导致复合密钥错误（虚假开关整改）
-                    val keyFileKey = KdbxKeyFile.extractKey(keyFileData!!)
+                    val keyFileKey = KdbxKeyFile.extractKey(keyFileData)
                     try {
                         HashUtil.sha256(passwordHash, keyFileKey)
                     } finally {
@@ -484,7 +484,7 @@ object KdbxFile {
             hasKeyFile -> {
                 // P1-10：仅密钥文件 —— 直接 SHA-256(keyFileKey)，不拼入空密码分量 SHA-256("")。
                 // 原实现恒拼入 SHA-256("")，官方仅密钥文件库 100% 派生错误密钥、报「主密码错误」
-                val keyFileKey = KdbxKeyFile.extractKey(keyFileData!!)
+                val keyFileKey = KdbxKeyFile.extractKey(keyFileData)
                 try {
                     HashUtil.sha256(keyFileKey)
                 } finally {
@@ -496,7 +496,7 @@ object KdbxFile {
                 // 密码与密钥文件均缺失时退化为 SHA-256(SHA-256(""))——本应用历史「空密码库」
                 // 语义（官方客户端无法创建此类库），保持既有空密码库读写兼容，
                 // 凭据校验由头部 HMAC 给出明确失败。
-                val passwordBytes = if (hasPassword) charsToUtf8(passwordChars!!) else ByteArray(0)
+                val passwordBytes = if (hasPassword) charsToUtf8(passwordChars) else ByteArray(0)
                 val passwordHash = HashUtil.sha256(passwordBytes)
                 Arrays.fill(passwordBytes, 0.toByte())
                 try {

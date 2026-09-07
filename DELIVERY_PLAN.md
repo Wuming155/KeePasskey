@@ -1,6 +1,7 @@
 # KeePasskey 完整项目交付规划（Delivery Plan）
 
-> **目标**：以工业级质量标准，将 KeePasskey 构建为一款支持 **.kdbx v4** 格式、**WebDAV / S3 兼容协议同步**、**Android 16+ (API 36+) Credential Manager / Passkey** 原生集成的现代化密码管理器，并最终实现面向社区（F-Droid / GitHub Releases / Google Play）的稳定交付。
+> ⚠️ **历史文档存档（HISTORICAL ARCHIVE）**
+> **停止更新声明**：本文档仅作为项目初始设计的历史参考保留。项目实时基线、已交付状态与未完成任务请参阅唯一真相源：[**docs/STATUS.md**](docs/STATUS.md)。
 
 ---
 
@@ -27,13 +28,7 @@
 [阶段 6: KeePass 高级特性与全功能工具箱] ✅ (已完成：TOTP/HOTP 实时双重认证 + 附件缓存导出 + 版本历史回滚 + 密码健康度离线审计)
          │
          ▼
-[阶段 7: 质量工程、测试基线、混淆加固与全渠道交付] 🏁 (已完成：R8 生产级混淆加固 + 敏感内存防剥离保护 + 全模块 114 个单测全绿 + 构建闭环)
-         │
-         ▼
-[阶段 6: KeePass 高级特性与全功能工具箱] (健康检查审计 + 附件预览 + 历史版本回滚)
-         │
-         ▼
-[阶段 7: 质量工程、测试基线、混淆加固与全渠道交付] 🏁 (兼容性向量 + R8 + CI/CD + 发布)
+[阶段 7: 质量工程、测试基线、混淆加固与全渠道交付] 🏁 (已完成：R8 生产级混淆加固 + 敏感内存防剥离保护 + 全模块 417 个单测全绿 + 构建闭环；F-Droid / GitHub Release 发布渠道尚未上线)
 ```
 
 ---
@@ -56,7 +51,8 @@
 
 ### 阶段 2：密码学核心与 KDBX 数据库引擎（已完成 ✅）
 
-* **目标**：构建独立、安全、可复用的 `crypto` 与 `database` 核心，实现对标准 `.kdbx`（重点 v4，向下兼容 v3）的无损读取、解析、修改与原子写入，并替换 `FakeVaultRepository`。
+* **目标**：构建独立、安全、可复用的 `crypto` 与 `database` 核心，实现对标准 `.kdbx` **v4** 的无损读取、解析、修改与原子写入，并替换 `FakeVaultRepository`。
+  > **如实修正（2026-09-07）**：本阶段原表述「向下兼容 v3」不成立——`KdbxHeader` 对主版本非 v4 的文件直接抛 `KdbxUnsupportedVersionException`（"目前仅支持 KDBX v4 版本"），v2/v3 读取从未实现。
 * **涉及模块**：`core`, `crypto`, `database`, `app` (数据层注入)
 * **核心任务清单**：
   1. **`core` 基础领域模型与安全内存设计**：
@@ -169,7 +165,8 @@
      - [x] 支持 Bucket 探测、对象读取、版本控制（Versioning）与流式上传。
   4. **离线缓存与后台同步调度**：
      - [x] 本地离线缓存策略：当无网络连接时，允许在本地缓存读写；重新联网时自动触发同步并提交变更。
-     - [x] 集成 Android `WorkManager`：支持设置中定义的周期性后台同步、仅 Wi-Fi 同步。
+     - [ ] 集成 Android `WorkManager`：支持设置中定义的周期性后台同步、仅 Wi-Fi 同步。
+       > **如实修正（2026-09-07）**：原勾选不成立——工程中不存在 `androidx.work` 依赖，亦无 `CoroutineWorker` / 周期任务调度实现。当前仅落地了「冷启动自动同步」「手动同步」与设置项（`periodicBackgroundSyncIntervalMinutes` 默认 30 分钟、`wifiOnlySync` 开关），**间隔设置项尚无消费方**。
   5. **冲突检测与可视化三方合并（Conflict Resolution）**：
      - [x] 冲突判定算法：本地数据库有未同步变更，且远端文件的 ETag/修改时间晚于上次同步时间戳。
      - [x] 调用阶段 1 已经构建的 `ConflictResolutionScreen`：
@@ -227,7 +224,7 @@
   1. **标准兼容性与单元测试基线**：
      - [x] 建立 `src/test` 测试套件：引入 KeePass 官方测试向量（RFC 4226/6238、AWS SigV4 等）。
      - [x] 覆盖核心测试用例：密码学加解密、KDF 计算、KDBX 二进制解析/写回、TOTP 校验、Sync 乐观锁机制。
-     - [x] 全模块 114 个高精度单元测试全部绿灯通过。
+     - [x] 全模块单元测试全部绿灯通过（**基线 417 例**：app 99 / core 21 / crypto 42 / database 146 / sync 109；其中 `LiveSyncServersTest` 12 例默认跳过，需 `-DliveSyncTest` 启用）。
   2. **代码混淆、体积优化与安全防逆向（R8 / Proguard）**：
      - [x] 编写精确的 `proguard-rules.pro`：保护 BouncyCastle 密码学实现、XML 序列化模型、系统服务与 Hilt 注入。
      - [x] 严格强化敏感内存保护：显式保留 `ClearableByteArray`、`ProtectedString` 等类的 `clear()`, `close()`, `fill(...)` 方法，防范 R8 当作无副作用死代码剥离。
@@ -239,7 +236,7 @@
      - [x] 完成 `assembleDebug` 与 `minifyReleaseWithR8` 构建验证，工程无任何编译阻断。
 * **交付物**：
   * 工业级 R8 混淆加固规则文件 `app/proguard-rules.pro`。
-  * 全自动化 114 个用例的单元测试保护网。
+  * 全自动化 417 个用例的单元测试保护网。
   * 具备完整防御性安全与高质量密码学引擎的正式交付包。
 * **验收状态**：**已通过全面验收 🏁**。
 

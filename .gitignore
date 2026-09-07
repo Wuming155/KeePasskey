@@ -84,3 +84,9 @@ fabric.properties
 KeePasskey测试/
 KeePasskey测试_backup/
 *_backup/
+
+# Python 工具链产物（tools/local-sync 等本地联调脚本）
+__pycache__/
+*.py[cod]
+.venv/
+venv/

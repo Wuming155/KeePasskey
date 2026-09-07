@@ -12,12 +12,15 @@
 | :--: | :--: | --- | --- | :--: |
 | A | **14** | 传输安全：移除证书固定 + 全局强制 HTTPS | security-ssl「pinning not recommended」、security-config | ✅ 已完成 |
 | **G** | **20** | 标准库对齐与安全纵深：PSL 全量接入 + HMAC 归一 JCE + readFully 等价收敛 | publicsuffix.org 官方算法、RFC 4231/2104、JDK DataInputStream | ✅ 已完成（安全项插队，先于批次 B 执行） |
-| B | 15 | kapt→KSP 迁移 + 启用 built-in Kotlin | kapt maintenance mode；AGP 10 移除 opt-out | 📋 规划 |
-| C | 16 | Settings 迁移 Preferences DataStore | DataStore「aimed at replacing SharedPreferences」 | 📋 规划 |
-| D | 17 | Gradle 版本目录 + 依赖货币性刷新 | migrate-to-catalogs；AndroidX 版本渠道 | 📋 规划 |
-| E | 18 | Baseline Profiles + Startup Profiles | 首启/交互约 30% 提升；AGP 9.1 全支持 | 📋 规划 |
-| F | 19 | compileSdk 37 → Material 3 Expressive；minSdk 决策固化 | M3 Expressive 配合 Android 16 视觉 | 📋 规划 |
+| **H** | **17** | HMAC 防篡改回归锁 flaky 排查与定型 | KDBX4 HMAC 块流规范（终止块必校验）；篡改检测零漏报 | ⚠️ 已立项（安全项插队，先于批次 B） |
+| B | 待定 | kapt→KSP 迁移 + 启用 built-in Kotlin | kapt maintenance mode；AGP 10 移除 opt-out | 📋 规划 |
+| C | 待定 | Settings 迁移 Preferences DataStore | DataStore「aimed at replacing SharedPreferences」 | 📋 规划 |
+| D | 待定 | Gradle 版本目录 + 依赖货币性刷新 | migrate-to-catalogs；AndroidX 版本渠道 | 📋 规划 |
+| E | 待定 | Baseline Profiles + Startup Profiles | 首启/交互约 30% 提升；AGP 9.1 全支持 | 📋 规划 |
+| F | 待定 | compileSdk 37 → Material 3 Expressive；minSdk 决策固化 | M3 Expressive 配合 Android 16 视觉 | 📋 规划 |
 | 持续 | — | Passkey UX 最佳实践 / 依赖周期核对 / 配置缓存评估 | credential-manager UX 指南 | 🔄 长期 |
+
+> **Wave 编号说明（2026-09-07 修订）**：B–F 原预分配的 Wave 15–19 已被实际交付工作占用——Wave 15 为「同步凭据链路 CharArray 化」（`c3dccbc`），Wave 16 为「系统凭据服务真实化 + 同步稳定性收口」（`7b3e756`），Wave 17 预留给插队批次 H。故 B–F 的 Wave 号不再预先绑定，**执行时按当时最新 Wave 号顺延**（下一批次 B 预计为 Wave 18）。
 
 ---
 
@@ -43,7 +46,7 @@
 
 ## 批次 G（Wave 20，已完成）：标准库对齐与安全纵深
 
-> 安全项插队说明：P1（PSL 盲区）属 Passkey 安全核心，优先于批次 B 执行；Wave 编号自批次 F 顺延为 20。
+> 安全项插队说明：P1（PSL 盲区）属 Passkey 安全核心，优先于批次 B 执行；Wave 编号自批次 F 顺延为 20（批次 B–F 的编号规则已于 2026-09-07 修订，见「批次总览」表下说明）。
 
 **范围与落地**：
 1. **P1 `DomainMatcher` 接入完整 PSL**（安全整改）：
@@ -60,11 +63,37 @@
    - 手写 while 循环换 `DataInputStream.readFully`（「读满否则抛 EOFException」语义逐字等价）；**报告的 `readNBytes(length)` 方案否决**（"up to" 短读静默返回，破坏 KDBX 严格长度解析）；
    - 实现偏差修正：方案原稿 `.use { }` 包装会经 `DataInputStream.close` 传导关闭底层流、破坏 KDBX 流式解析，实际落地为不关闭包装流；`intTo4Bytes`/`bytesToInt` 等小端数值函数保留（KDBX 小端解析标准做法，KAT 已覆盖）。
 
-**验收**：全模块单测全绿（350 例）；`readNBytes` 否决理由与 `.use` 包装关闭底层流的坑均已在代码注释中固化。
+**验收**：全模块单测全绿（**该批次交付时基线为 350 例**；截至 2026-09-07 全量基线已为 417 例，增量为后续 Wave 15/16 所致，非本批次回退）；`readNBytes` 否决理由与 `.use` 包装关闭底层流的坑均已在代码注释中固化。
 
 ---
 
-## 批次 B（Wave 15）：kapt→KSP 迁移 + 启用 built-in Kotlin
+## 批次 H（Wave 17）：HMAC 防篡改回归锁 flaky 排查与定型
+
+> **安全项插队说明（2026-09-07 立项）**：`KdbxCompatibilityAndSecurityTest.testCorruptHmacBlockThrowsKdbxInvalidCredentialsException` 守护的是 **KDBX 防篡改检测**这一核心安全属性（被篡改的密码库必须被拒绝加载），且已**实证存在不确定性**（非理论风险），故优先于批次 B 执行。
+
+**问题陈述**：
+- **现象**：篡改 KDBX4 文件末尾字节后加载，期望抛 `KdbxInvalidCredentialsException`，但**偶发**出现 `nothing was thrown`——即篡改后的库被成功加载。实测同一份代码 6 次运行失败 1 次（单独执行该类稳定通过，全量执行时间歇复现）。
+- **已排除**：与 `KdbxFile` 密钥派生路径的非空断言清理无关（回退对照验证通过）；与 Keystore / 运行环境无关。
+- **现有兜底**：`KdbxFile.loadPayload` 在「旧派生探针」与「正常」两条路径之后统一调用 `HmacBlockInputStream.verifyEndOfStream()`，强制消费至终止块并校验其 HMAC，未正常终止则抛 `KdbxCorruptFileException`。因此理论上篡改应被稳定检出，需查清为何偶发不抛。
+
+**排查范围（两步定因，按序执行）**：
+1. **先证伪测试侧假设**（低成本优先）：用例以硬编码偏移 `bytes[bytes.size - 20]` 赌其落在终止块 HMAC 内（终止块固定为文件末尾 36 字节 = 32B HMAC + 4B size=0）。需断言/打印文件末尾布局，确认该偏移是否**恒定**落在终止块 HMAC 内；若不恒定，改为**显式定位终止块**而非硬编码偏移，使用例恢复确定性。
+2. **若布局恒定成立，则追代码侧漏检**（安全缺陷，优先级立即提升）：查 `verifyEndOfStream()` 为何在终止块 HMAC 被篡改时判定通过。重点核查 `HmacBlockInputStream.loadNextBlock()` 的 `terminated` 置位与 HMAC 比较路径、`readBlock()` 探针经 `SequenceInputStream` 回填是否影响块游标、以及 GZip 层预读对底层流游标的影响。
+
+**风险**：第 2 步若成立，意味着存在「被篡改 KDBX 被静默接受」的窗口，属高危。**严禁**通过删除或放宽断言的方式"修复"。
+
+**验收**：
+- 根因结论明确，并固化于代码注释或本文档；
+- 该用例在**连续 ≥20 次全量运行**（含 `--rerun-tasks` 强制重跑）中零失败；
+- 若属测试侧问题：用例改为确定性定位，且保持「篡改必被拦截」的断言强度不降低；
+- 若属代码侧问题：补最小化回归用例锁死修复，并评估是否需同步审计 `HmacBlockStream` 读写两侧；
+- 刷新 `AGENTS.md` 当前状态与「已知限界」条目。
+
+**回退策略**：排查期不改生产解析逻辑；第 1 步若证实为测试假设问题，改动仅限测试代码，零生产风险。
+
+---
+
+## 批次 B：kapt→KSP 迁移 + 启用 built-in Kotlin
 
 **官方依据**：`developer.android.com/build/migrate-to-ksp`——"Kapt is now in maintenance mode, and we recommend that you migrate from kapt to KSP"；KSP 对 Kotlin 代码直接分析，构建最高快 2x。`migrate-to-built-in-kotlin`——AGP 9.0 起内置 Kotlin 与 `org.jetbrains.kotlin.kapt` 插件**不兼容**；`android.builtInKotlin=false` 的 opt-out 在 **AGP 10.0 将被移除**（当前 `gradle.properties` 的 `builtInKotlin=false`/`newDsl=false` 是死路配置）。
 
@@ -81,7 +110,7 @@
 
 ---
 
-## 批次 C（Wave 16）：RealSettingsRepository 迁移 Preferences DataStore
+## 批次 C：RealSettingsRepository 迁移 Preferences DataStore
 
 **官方依据**：`developer.android.com/topic/libraries/architecture/datastore`——"Jetpack DataStore is a new and improved data storage solution aimed at replacingSharedPreferences. Built on Kotlin coroutines and Flow"；提供 `SharedPreferencesMigration` 平滑迁移；事务性、异步、一致性强于 SharedPreferences。
 
@@ -98,7 +127,7 @@
 
 ---
 
-## 批次 D（Wave 17）：Gradle 版本目录 + 依赖货币性刷新
+## 批次 D：Gradle 版本目录 + 依赖货币性刷新
 
 **官方依据**：`developer.android.com/build/migrate-to-catalogs`——版本目录使多模块依赖与插件集中、类型安全、可辅助补全；本项目 5 模块正是最大受益场景。
 
@@ -116,7 +145,7 @@
 
 ---
 
-## 批次 E（Wave 18）：Baseline Profiles + Startup Profiles
+## 批次 E：Baseline Profiles + Startup Profiles
 
 **官方依据**：`developer.android.com/topic/performance/baselineprofiles`——Baseline Profiles 使首启与关键交互约 **30%** 提速；官方建议 **Baseline + Startup Profiles 同时使用**（后者优化 DEX 布局再提升约 15%）；AGP **9.1** 已支持库模块全源集目录。
 
@@ -131,7 +160,7 @@
 
 ---
 
-## 批次 F（Wave 19）：compileSdk 37 → Material 3 Expressive；minSdk 决策固化
+## 批次 F：compileSdk 37 → Material 3 Expressive；minSdk 决策固化
 
 **官方依据**：`developer.android.com/develop/ui/compose/designsystems/material3`——Material 3 Expressive 是 "the next evolution of Material Design ... complements the Android 16 visual style and system UI"；需 Compose BOM 2026.08.00+（Compose 1.12.x，要求 compileSdk 37）。
 

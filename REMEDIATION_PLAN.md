@@ -1,8 +1,9 @@
-# REMEDIATION_PLAN.md — 参考项目差距修复计划（多子代理分波执行）
+# REMEDIATION_PLAN.md — 参考项目差距修复计划
 
-> 依据：2026-09 对本项目与 4 个参考项目（KeePassDX / keepass2android / KeePass 2.61.1 官方 / Monica）的全量代码审计。
-> 执行方式：主会话统筹，子代理分 4 个波次并行/串贯执行；每波次结束由主会话统一验证构建并按语义化消息提交 Git。
-> 铁律（对所有执行者生效）：严禁读取/扫描 `参考项目/` 源码树（仅允许按架构分析文档精确指引的单点求证）；严禁复制参考代码；模块依赖单向 `app→database→crypto→core`、`app→sync→core`；敏感数据 CharArray/ByteArray 显式清零；文档与注释使用简体中文。
+> ⚠️ **历史文档存档（HISTORICAL ARCHIVE）**
+> **停止更新声明**：本文档仅作为差距修复专项（Wave 1-6）的历史执行记录保留。项目当前实际状态与未完成任务请参阅唯一真相源：[**docs/STATUS.md**](docs/STATUS.md)。
+
+---
 
 ## 一、问题总清单
 
@@ -151,3 +152,21 @@
 | Wave 4 构建与文档 | 166 测试全绿（--rerun-tasks 强制重跑验证）；assembleDebug+assembleRelease(R8) 通过；AGENTS.md/project-status.md 如实化；存档清理；最终 docs(wave4) 提交 |
 | Wave 6 安全审查整改 | H1 CallingOriginResolver（官方 getOrigin+白名单/apk-key-hash）+ GET/CREATE origin 绑定 + Activity 二次校验；H2 QuickUnlockPinStore（PBKDF2+Keystore 封印）替换 delay 桩；M1 passwordPlain 全链路移除 + 按需解密；M2/L1/L2/L3/L4 全项整改。173 测试全绿；assembleDebug+assembleRelease(R8) 通过 |
 | Wave 5 已知限界清零 | KDBX SAX/Writer/HMAC 块流全链路流式 + 首块探针旧派生裁决（KdbxStreamingPipelineTest 3 用例）；S3 If-Match 条件覆写（S3SyncProviderTest +3 用例）；CredentialUnlockActivity 链式解锁 + CredentialResponseAssembler；SecurePasswordField + UnlockUiState 去 String 明文。172 测试全绿；assembleDebug+assembleRelease(R8) 通过 |
+| Wave 6 安全审查整改 | H1 CallingOriginResolver（官方 getOrigin + 浏览器白名单 / apk-key-hash）+ GET/CREATE origin 绑定 + Activity 二次校验；H2 QuickUnlockPinStore（PBKDF2 + Keystore 封印）替换 delay 桩；M1 passwordPlain 全链路移除 + 按需解密；M2/L1/L2/L3/L4 全项整改。173 测试全绿 |
+
+> **执行日志止于 Wave 6 的说明（2026-09-07 补记）**：Wave 7 起的整改转入 `AGENTS.md`「历史整改归档」表统一记录（本表不再逐条续写），但**沿用同一套纪律**——每波独立复跑测试（`--rerun-tasks` 防缓存假绿）+ 语义化 Git 提交。要点索引：
+>
+> | Wave | 主题要点 |
+> | :--: | --- |
+> | 7 | 安全审计 F1–F5：包名精确匹配、受保护字段与 TOTP 种子明文退出 UI 投影、同步变更检测走 `ProtectedString.equals`、断言 Activity 包名二次校验、`isDomainMatch` 公共后缀下限、PIN 失败指数退避熔断 |
+> | 8 | 功能完整性：假同步 / 离线开关 / ICacheSupervisor 六事件真实接线、`uploadAtomic` 入生产管线、回收站语义、冲突界面不物化明文、生物识别 fail-closed、调试日志真实化、S3 path-style 与 `cleanEtag` 结构级解析 |
+> | 9 | 同步与合并数据丢失专项（P0×5）：单侧新建 catch-all 分支、冲突决策以合并产物为底版、`DUPLICATE_BOTH` 副本换新 UUID、base 内容独立持久化（`.basecache`）、冲突分支先落盘再合并 |
+> | 10 | 收尾专项：`VaultRepository` 写方法全返 `KdbxResult` 根治静默写失败、Fake 仓库出库至 `src/test`、功能断点 11 项（附件增删导、TOTP 跨周期滚动、图标编辑持久化、历史全字段回滚、清空回收站、只读模式等） |
+> | 11 | 内存安全与密码学审计：KDF 参数上界校验、QuickUnlock 封印密钥认证语义修正、主密码 String 物化清零、`InMemoryCipher` 堆内密文驻留、StrongBox 支持、KDF 切 `Dispatchers.Default` |
+> | 12 | 真实 KDBX4 复合密钥互操作：SAF 选择器透传、`KdbxKeyFile` 四级解析梯子、Argon2/ChaCha20/Twofish 官方 UUID 纠正、HMAC 块签名补 `blockIndex` 前缀、内层 Header 置于 GZIP 内部；真机解锁 + `pykeepass` 往返校验通过 |
+> | 13 | 官方文档对照安全审计：QuickUnlock 改设备锁屏凭据绑定（自研 PIN 体系整体删除）、BiometricPrompt 认证器集合重构、传输 TLS-only、rp.id 创建分支 fail-closed、KDBX 解析资源防线（节点/深度/二进制池/GZip 多重封顶） |
+> | 14 | 传输安全（体检批次 A）：证书固定全量移除并加载期清除遗留键、平台 `network_security_config.xml` 禁明文 + OkHttp TLS-only 双层防线、https-only fail-fast |
+> | 15 | 同步凭据链路 CharArray 化：`SyncCredentialsStore` 借用语义与封印即擦除、保存改「先封印成功才落盘」、`SettingsViewModel` 明文驻留收敛、设置页换 `SecurePasswordField` |
+> | 16 | 系统凭据服务真实化与同步稳定性收口：凭据 `meta-data` 契约名修正为 `android.credentials.provider` 并补齐 `<capabilities>`、IME 内联建议、双通道保存幂等查重、overlay 防护、`CacheCorruptedError`、KDBX4 随机 IV 误判重传修复、`SyncCache` 临时文件 UUID 化、本地 HTTPS 联调工具链 |
+>
+> 测试基线演进：77 → 114 → 166 → 172 → 173 → 358 → **417 例全绿**（2026-09-07）。

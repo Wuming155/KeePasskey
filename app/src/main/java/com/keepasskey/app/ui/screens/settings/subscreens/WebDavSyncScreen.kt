@@ -519,7 +519,7 @@ fun CloudSyncScreen(
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    text = uiState.syncFeedbackMessage?.resolveText() ?: "",
+                                    text = uiState.syncFeedbackMessage.resolveText(),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.primary
                                 )
