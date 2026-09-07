@@ -1,14 +1,15 @@
 package com.keepasskey.crypto.hash
 
 import com.keepasskey.crypto.exception.CryptoException
-import org.bouncycastle.crypto.digests.SHA256Digest
-import org.bouncycastle.crypto.digests.SHA512Digest
-import org.bouncycastle.crypto.macs.HMac
-import org.bouncycastle.crypto.params.KeyParameter
 import java.security.MessageDigest
+import javax.crypto.Mac
+import javax.crypto.spec.SecretKeySpec
 
 /**
  * 哈希与 HMAC 运算工具，严格遵循敏感数据擦除规范。
+ *
+ * HMAC 统一走 JCE（`Mac.getInstance` + `SecretKeySpec`），与项目既有 JCE 用法
+ * （InMemoryCipher / OtpEngine）保持一致；RFC 4231 官方向量测试锁定实现正确性。
  */
 object HashUtil {
 
@@ -40,12 +41,9 @@ object HashUtil {
 
     fun hmacSha256(key: ByteArray, data: ByteArray): ByteArray {
         return try {
-            val hmac = HMac(SHA256Digest())
-            hmac.init(KeyParameter(key))
-            hmac.update(data, 0, data.size)
-            val result = ByteArray(hmac.macSize)
-            hmac.doFinal(result, 0)
-            result
+            val mac = Mac.getInstance("HmacSHA256")
+            mac.init(SecretKeySpec(key, "HmacSHA256"))
+            mac.doFinal(data)
         } catch (e: Exception) {
             throw CryptoException.HashException("HMAC-SHA256 计算失败", e)
         }
@@ -53,14 +51,12 @@ object HashUtil {
 
     fun hmacSha256(key: ByteArray, vararg chunks: ByteArray): ByteArray {
         return try {
-            val hmac = HMac(SHA256Digest())
-            hmac.init(KeyParameter(key))
+            val mac = Mac.getInstance("HmacSHA256")
+            mac.init(SecretKeySpec(key, "HmacSHA256"))
             for (chunk in chunks) {
-                hmac.update(chunk, 0, chunk.size)
+                mac.update(chunk)
             }
-            val result = ByteArray(hmac.macSize)
-            hmac.doFinal(result, 0)
-            result
+            mac.doFinal()
         } catch (e: Exception) {
             throw CryptoException.HashException("HMAC-SHA256 计算失败", e)
         }
@@ -68,12 +64,9 @@ object HashUtil {
 
     fun hmacSha512(key: ByteArray, data: ByteArray): ByteArray {
         return try {
-            val hmac = HMac(SHA512Digest())
-            hmac.init(KeyParameter(key))
-            hmac.update(data, 0, data.size)
-            val result = ByteArray(hmac.macSize)
-            hmac.doFinal(result, 0)
-            result
+            val mac = Mac.getInstance("HmacSHA512")
+            mac.init(SecretKeySpec(key, "HmacSHA512"))
+            mac.doFinal(data)
         } catch (e: Exception) {
             throw CryptoException.HashException("HMAC-SHA512 计算失败", e)
         }

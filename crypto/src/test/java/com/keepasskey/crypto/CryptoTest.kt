@@ -39,6 +39,73 @@ class CryptoTest {
         assertArrayEquals(mac1, mac2)
     }
 
+    private fun toHex(bytes: ByteArray): String = bytes.joinToString("") { "%02x".format(it) }
+
+    /** RFC 4231 Test Case 1：HMAC-SHA256/512 已知答案 */
+    @Test
+    fun testHmacRfc4231TestCase1() {
+        val key = ByteArray(20) { 0x0b }
+        val data = "Hi There".toByteArray(StandardCharsets.US_ASCII)
+        assertEquals(
+            "b0344c61d8db38535ca8afceaf0bf12b881dc200c9833da726e9376c2e32cff7",
+            toHex(HashUtil.hmacSha256(key, data))
+        )
+        assertEquals(
+            "87aa7cdea5ef619d4ff0b4241a1d6cb02379f4e2ce4ec2787ad0b30545e17cdedaa833b7d6b8a702038b274eaea3f4e4be9d914eeb61f1702e696c203a126854",
+            toHex(HashUtil.hmacSha512(key, data))
+        )
+    }
+
+    /** RFC 4231 Test Case 2：HMAC-SHA256/512 已知答案 */
+    @Test
+    fun testHmacRfc4231TestCase2() {
+        val key = "Jefe".toByteArray(StandardCharsets.US_ASCII)
+        val data = "what do ya want for nothing?".toByteArray(StandardCharsets.US_ASCII)
+        assertEquals(
+            "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843",
+            toHex(HashUtil.hmacSha256(key, data))
+        )
+        assertEquals(
+            "164b7a7bfcf819e2e395fbe73b56e0a387bd64222e831fd610270cd7ea2505549758bf75c05a994a6d034f65f8f0e6fdcaeab1a34d4a6b4b636e070a38bce737",
+            toHex(HashUtil.hmacSha512(key, data))
+        )
+    }
+
+    /** RFC 4231 Test Case 6：超过分组长度（64 字节）的 131 字节长密钥，锁定 RFC 2104「先哈希密钥」语义 */
+    @Test
+    fun testHmacRfc4231TestCase6LongKey() {
+        val key = ByteArray(131) { 0xaa.toByte() }
+        val data = "Test Using Larger Than Block-Size Key - Hash Key First".toByteArray(StandardCharsets.US_ASCII)
+        assertEquals(
+            "60e431591ee0b67f0d8a26aacbf5b77f8e0bc6213728c5140546040f0ee37f54",
+            toHex(HashUtil.hmacSha256(key, data))
+        )
+        assertEquals(
+            "80b24263c7c1a3ebb71493c1dd7be8b49b46d1f41b4aeec1121b013783f8f3526b56d037e05f2598bd0fd2215d6a1e5295e64f73f63f0aec8b915a985d786598",
+            toHex(HashUtil.hmacSha512(key, data))
+        )
+    }
+
+    /** vararg 分块 update 与单数组一次性计算结果一致（KDBX HMAC 块流依赖分块路径） */
+    @Test
+    fun testHmacVarargChunksConsistency() {
+        val key = ByteArray(32) { (it * 7).toByte() }
+        val chunkA = "KeePasskey".toByteArray(StandardCharsets.UTF_8)
+        val chunkB = ByteArray(1000) { (it % 251).toByte() }
+        val chunkC = "HMAC".toByteArray(StandardCharsets.UTF_8)
+        val merged = chunkA + chunkB + chunkC
+        assertArrayEquals(HashUtil.hmacSha256(key, merged), HashUtil.hmacSha256(key, chunkA, chunkB, chunkC))
+    }
+
+    /** 输出长度：SHA256=32 字节、SHA512=64 字节 */
+    @Test
+    fun testHmacOutputLength() {
+        val key = ByteArray(16) { 0x11 }
+        val data = "length".toByteArray(StandardCharsets.UTF_8)
+        assertEquals(32, HashUtil.hmacSha256(key, data).size)
+        assertEquals(64, HashUtil.hmacSha512(key, data).size)
+    }
+
     @Test
     fun testAesCipherRoundtrip() {
         val engine = AesCipherEngine()

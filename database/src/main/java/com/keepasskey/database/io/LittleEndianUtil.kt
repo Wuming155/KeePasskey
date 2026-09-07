@@ -1,6 +1,7 @@
 package com.keepasskey.database.io
 
 import com.keepasskey.database.exception.KdbxCorruptFileException
+import java.io.DataInputStream
 import java.io.EOFException
 import java.io.InputStream
 import java.io.OutputStream
@@ -60,14 +61,9 @@ object LittleEndianUtil {
             throw KdbxCorruptFileException("读取字段长度非法或超过安全上限: length=$length")
         }
         val buffer = ByteArray(length)
-        var totalRead = 0
-        while (totalRead < length) {
-            val read = inputStream.read(buffer, totalRead, length - totalRead)
-            if (read < 0) {
-                throw EOFException("期望读取 $length 字节，实际仅读取 $totalRead 字节")
-            }
-            totalRead += read
-        }
+        // readFully 语义：「读满 length 字节，否则抛 EOFException」——与手写循环逐字等价。
+        // 注意不得用 use{} 包装：DataInputStream.close 会传导关闭底层流，破坏 KDBX 流式解析。
+        DataInputStream(inputStream).readFully(buffer)
         return buffer
     }
 

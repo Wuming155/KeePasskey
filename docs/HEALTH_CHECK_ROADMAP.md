@@ -11,6 +11,7 @@
 | 批次 | Wave | 主题 | 官方依据要点 | 状态 |
 | :--: | :--: | --- | --- | :--: |
 | A | **14** | 传输安全：移除证书固定 + 全局强制 HTTPS | security-ssl「pinning not recommended」、security-config | ✅ 已完成 |
+| **G** | **20** | 标准库对齐与安全纵深：PSL 全量接入 + HMAC 归一 JCE + readFully 等价收敛 | publicsuffix.org 官方算法、RFC 4231/2104、JDK DataInputStream | ✅ 已完成（安全项插队，先于批次 B 执行） |
 | B | 15 | kapt→KSP 迁移 + 启用 built-in Kotlin | kapt maintenance mode；AGP 10 移除 opt-out | 📋 规划 |
 | C | 16 | Settings 迁移 Preferences DataStore | DataStore「aimed at replacing SharedPreferences」 | 📋 规划 |
 | D | 17 | Gradle 版本目录 + 依赖货币性刷新 | migrate-to-catalogs；AndroidX 版本渠道 | 📋 规划 |
@@ -37,6 +38,29 @@
 4. **作废旧设计**：`DELIVERY_PLAN.md` 阶段 5「自签名 SSL/TLS 证书信任与局域网 HTTP 明文豁免」表述作废改写。
 
 **验收**：全模块单测全绿（含新增：遗留键清除、http:// 构造期拒绝、https/无 scheme 放行、系统 CA 链无 pin 装配断言）+ `assembleDebug` 通过；`certPin|pinnedHosts|CertificatePinner` 生产代码零残留（仅余守卫性注释/负向断言与遗留清理代码）。
+
+---
+
+## 批次 G（Wave 20，已完成）：标准库对齐与安全纵深
+
+> 安全项插队说明：P1（PSL 盲区）属 Passkey 安全核心，优先于批次 B 执行；Wave 编号自批次 F 顺延为 20。
+
+**范围与落地**：
+1. **P1 `DomainMatcher` 接入完整 PSL**（安全整改）：
+   - 原 47 条硬编码 `MULTILABEL_PUBLIC_SUFFIXES` 存在真实漏判盲区（`edu.cn`/`gov.au`/`co.id`/`ac.jp`/`github.io` 自身等），后果是整条公共后缀被当作可注册域放行作 RP ID（恶意 kdbx 导入植入 `rpId="edu.cn"` 可匹配任意 `*.edu.cn` origin，破坏 WebAuthn 域边界）；
+   - 打包 Mozilla 官方 `public_suffix_list.dat`（约 330KB，MPL-2.0，版本 2026-09-05）至 `app/src/main/resources/publicsuffix/`，不引 Guava / 不复用 OkHttp internal 类；
+   - 新增 `PublicSuffixList.kt`（纯 Kotlin 零依赖，~150 行）：惰性单例 + 双检锁加载，精确/通配 `*`/例外 `!` 三类规则分离，官方算法（例外优先 → 最长匹配 → 默认规则 `*`）；IDN 规则与查询 host 经 `java.net.IDN.toASCII` 归一 punycode；数据加载失败 fail-closed（一律判不可注册）；
+   - `DomainMatcher.isRegistrableDomain` 改为委托 `PublicSuffixList`，对外 5 个函数签名全部不动；`isDomainMatch` 两侧 host 补 IDN punycode 归一（unicode/punycode 跨表示可匹配）；
+   - 测试：漏判项拒绝（edu.cn/gov.au/co.id/ac.jp）、可注册域放行、`*.ck` 通配、`!www.ck` 例外、私有段（github.io 自身拒绝/子域放行）、IDN 等价、尾点/空串/空标签 fail 处理，共 6 个新用例。
+2. **P2 `HashUtil` HMAC 归一 JCE**：
+   - 先补测试后动手：新增 RFC 4231 Test Case 1/2 已知答案（HMAC-SHA256/512）+ Test Case 6（131 字节超块长密钥，锁定 RFC 2104「先哈希密钥」语义）+ vararg 分块与单数组一致性 + 输出长度 32/64，共 5 个新用例（对改写前 BC 实现跑绿，双重校验向量与实现）；
+   - `hmacSha256`/`hmacSha512` 从 BC lightweight API（`HMac(SHA256Digest())`）改写为 JCE（`Mac.getInstance` + `SecretKeySpec`），与项目既有 `InMemoryCipher`/`OtpEngine` 用法统一；分块 `update`、`CryptoException.HashException` 包装与函数签名不变；
+   - **明确不做**：不删 `bcprov-jdk18on`（Twofish/ChaCha20/Argon2/InnerRandomStream/PasskeyCryptoEngine 仍强制依赖），不碰其余 BC 使用点。注意：原 BC lightweight API 自包含可用、不经过平台 BC Provider，本项为一致性收敛而非缺陷修复。
+3. **P3 `LittleEndianUtil.readBytes` 等价收敛**：
+   - 手写 while 循环换 `DataInputStream.readFully`（「读满否则抛 EOFException」语义逐字等价）；**报告的 `readNBytes(length)` 方案否决**（"up to" 短读静默返回，破坏 KDBX 严格长度解析）；
+   - 实现偏差修正：方案原稿 `.use { }` 包装会经 `DataInputStream.close` 传导关闭底层流、破坏 KDBX 流式解析，实际落地为不关闭包装流；`intTo4Bytes`/`bytesToInt` 等小端数值函数保留（KDBX 小端解析标准做法，KAT 已覆盖）。
+
+**验收**：全模块单测全绿（350 例）；`readNBytes` 否决理由与 `.use` 包装关闭底层流的坑均已在代码注释中固化。
 
 ---
 

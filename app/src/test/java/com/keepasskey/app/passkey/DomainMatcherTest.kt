@@ -86,6 +86,61 @@ class DomainMatcherTest {
         assertFalse(DomainMatcher.isRpIdTrustedForCreation("co.uk", ""))
     }
 
+    // ===== 完整 PSL 接入（批次 G / P1） =====
+
+    @Test
+    fun `PSL_原硬编码清单漏判项一律拒绝`() {
+        // 47 条旧清单漏判：整条公共后缀不得作为凭据侧 RP ID
+        assertFalse(DomainMatcher.isDomainMatch("edu.cn", "mail.tsinghua.edu.cn"))
+        assertFalse(DomainMatcher.isDomainMatch("gov.au", "service.nsw.gov.au"))
+        assertFalse(DomainMatcher.isDomainMatch("co.id", "shop.tokopedia.co.id"))
+        assertFalse(DomainMatcher.isDomainMatch("ac.jp", "www.u-tokyo.ac.jp"))
+    }
+
+    @Test
+    fun `PSL_公共后缀之下的可注册域正常命中`() {
+        assertTrue(DomainMatcher.isDomainMatch("example.edu.cn", "www.example.edu.cn"))
+        assertTrue(DomainMatcher.isDomainMatch("example.gov.au", "portal.example.gov.au"))
+    }
+
+    @Test
+    fun `PSL_通配规则与例外规则`() {
+        // *.ck：foo.ck 为公共后缀（不可注册），其子域可注册
+        assertFalse(DomainMatcher.isDomainMatch("foo.ck", "www.foo.ck"))
+        assertTrue(DomainMatcher.isDomainMatch("bar.foo.ck", "www.bar.foo.ck"))
+        // !www.ck 例外：www.ck 本身可注册
+        assertTrue(DomainMatcher.isDomainMatch("www.ck", "www.ck"))
+        assertFalse(DomainMatcher.isDomainMatch("ck", "www.ck"))
+    }
+
+    @Test
+    fun `PSL_私有段_github_io 自身拒绝而子域放行`() {
+        assertFalse(DomainMatcher.isDomainMatch("github.io", "myproject.github.io"))
+        assertFalse(DomainMatcher.isDomainMatch("gitlab.io", "pages.gitlab.io"))
+        assertTrue(DomainMatcher.isDomainMatch("myproject.github.io", "myproject.github.io"))
+    }
+
+    @Test
+    fun `PSL_IDN 与 punycode 等价判定`() {
+        // 中国域名：unicode 与 punycode 等价
+        assertFalse(DomainMatcher.isDomainMatch("中国", "www.example.中国"))
+        assertFalse(DomainMatcher.isDomainMatch("xn--fiqs8s", "www.example.中国"))
+        assertTrue(DomainMatcher.isDomainMatch("example.中国", "www.example.中国"))
+        assertTrue(DomainMatcher.isDomainMatch("example.xn--fiqs8s", "www.example.中国"))
+    }
+
+    @Test
+    fun `PSL_尾部根点与非法输入 fail 处理`() {
+        // 尾部根点归一
+        assertTrue(PublicSuffixList.isRegistrableDomain("example.com."))
+        // 空串 / 单标签 / TLD 一律不可注册
+        assertFalse(PublicSuffixList.isRegistrableDomain(""))
+        assertFalse(PublicSuffixList.isRegistrableDomain("localhost"))
+        assertFalse(PublicSuffixList.isRegistrableDomain("com"))
+        // 内部空标签拒绝
+        assertFalse(PublicSuffixList.isRegistrableDomain("a..com"))
+    }
+
     // ===== isPackageMatch（F1 回归锁） =====
 
     @Test

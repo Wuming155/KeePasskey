@@ -76,12 +76,22 @@ object DomainMatcher {
      * @param originHost 调用方真实来源主机名（如 "github.com", "login.github.com"）
      */
     fun isDomainMatch(rpIdOrDomain: String, originHost: String): Boolean {
-        val d1 = extractDomain(rpIdOrDomain)
-        val d2 = extractDomain(originHost)
+        val d1 = toAsciiHost(extractDomain(rpIdOrDomain))
+        val d2 = toAsciiHost(extractDomain(originHost))
         if (d1.isEmpty() || d2.isEmpty()) return false
         if (!isRegistrableDomain(d1)) return false
 
         return d1 == d2 || d2.endsWith(".$d1")
+    }
+
+    /** 非 ASCII 域名（IDN）归一为 punycode，使 unicode / punycode 两种表示可跨形式匹配；失败原样返回 */
+    private fun toAsciiHost(host: String): String {
+        if (host.none { it.code > 127 }) return host
+        return try {
+            java.net.IDN.toASCII(host)
+        } catch (e: Exception) {
+            host
+        }
     }
 
     /**
@@ -107,12 +117,12 @@ object DomainMatcher {
     }
 
     /**
-     * 判断主机名是否为可注册域名：至少含一个点号，且不属于内置多标签公共后缀集合。
-     * 内置集合为常见多级公共后缀的最小子集（非完整 PSL），覆盖主流国家/地区二级注册域。
+     * 判断主机名是否为可注册域名（批次 G / P1 安全整改）：
+     * 委托 [PublicSuffixList] 按 Mozilla 官方 PSL 全量数据判定（含私有段与通配/例外规则），
+     * 根治原 47 条硬编码清单的漏判盲区（如 `edu.cn`、`gov.au`、`co.id`、`github.io` 自身）。
      */
     private fun isRegistrableDomain(host: String): Boolean {
-        if (!host.contains('.')) return false
-        return host !in MULTILABEL_PUBLIC_SUFFIXES
+        return PublicSuffixList.isRegistrableDomain(host)
     }
 
     /**
@@ -155,18 +165,4 @@ object DomainMatcher {
         val trimmed = p.trim().lowercase()
         return trimmed.ifEmpty { null }
     }
-
-    /** 常见多级公共后缀最小子集（F5 整改 + Wave 12 扩充，非完整 PSL；命中即视为不可注册域） */
-    private val MULTILABEL_PUBLIC_SUFFIXES = setOf(
-        "co.uk", "org.uk", "ac.uk", "gov.uk", "me.uk",
-        "com.cn", "net.cn", "org.cn", "gov.cn",
-        "co.jp", "ne.jp", "or.jp", "ac.jp",
-        "co.kr", "or.kr", "ne.kr", "re.kr",
-        "com.hk", "org.hk", "com.tw", "com.au", "net.au", "org.au",
-        "co.nz", "net.nz", "org.nz", "com.br", "com.mx",
-        "co.in", "net.in", "org.in", "com.sg", "com.tr",
-        "com.ar", "co.za", "com.pl", "com.ru", "com.ua",
-        "com.my", "co.th", "com.ph", "com.vn", "co.il",
-        "com.sa", "com.ng", "com.co", "com.pe"
-    )
 }
