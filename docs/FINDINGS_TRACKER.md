@@ -79,9 +79,9 @@
 | **P2-32** | Release 未开 shrinkResources；ProGuard 过度宽松 | ❌ 未修复 | `app/build.gradle.kts:24` 未开启 shrinkResources，`-dontwarn **` 仍保留 | 中 | `isMinifyEnabled=true` 但缺 `isShrinkResources = true`；建议开启并对 `proguard-rules.pro` 收敛 |
 | **P2-33** | Passkey 注册未对 rp.id 做 DAL 校验 | ⚠️ 部分修复 | `DomainMatcher.kt:107` 已加入可注册域匹配防线；完整 DAL 远程校验未引入 | 低 | 可注册域匹配已加；完整 DAL 远程校验（需网络）未引入，属增强项 |
 | **P2-34** | TOTP 缺失时以假验证码 "000000" 兜底 | ❌ 未修复 | `AuthenticatorViewModel.kt:82` 异常时依然 fallback 到 `"000000"` | 中 | 计算失败时 `?: "000000"` 显示看似合法的假码，误导用户；应显示错误或空白 |
-| **P2-35** | `SecurityTest` 宣称覆盖硬件闭环实际只测 JDK | ❌ 未修复 | `SecurityTest.kt:30` 依然使用 JDK 默认 KeyGenerator | 低（测试质量） | 声称覆盖硬件闭环却用 JDK 默认 `KeyGenerator`（非 AndroidKeyStore）；应注入 `AndroidKeyStore` 密钥或改名澄清 |
+| **P2-35** | `SecurityTest` 宣称覆盖硬件闭环实际只测 JDK | ✅ 已修复（2026-09-08，TASK-40） | KDoc 与用例名诚实化（JVM 测试 = JDK 软件密钥算法语义验证，非 AndroidKeyStore 硬件路径）；补 GCM 密文篡改 fail-closed 回归锁（AEADBadTagException） | 低（测试质量） | 不再虚标硬件覆盖；硬件隔离属 Instrumented 范畴（已注明） |
 | **P2-36** | app 测试 14 个在测 `FakeVaultRepository` 本身 | ⚠️ 部分修复 | Fake 已出库至 `src/test`；但这 14 个单元测试依然测的是 Fake 自身 | 低 | Fake 已出库；14 个单测仍测 Fake 自身，属测试有效性缺口，优先级低 |
-| **P2-37** | `SyncCredentialsStoreTest` 注入 XOR 假加密绕过真实路径 | ❌ 未修复 | `SyncCredentialsStoreTest.kt:88` 仍统一注入 XOR 假加密 | 中（测试） | 注入 XOR 假加密器，未走真实 Keystore 路径；应补真实/Instrumented 加密路径用例（同 T-05） |
+| **P2-37** | `SyncCredentialsStoreTest` 注入 XOR 假加密绕过真实路径 | ✅ 已修复（2026-09-08，TASK-40） | 新增真实 AES-GCM 算法路径用例（生产同款 `AES/GCM/NoPadding` 软件密钥）：封印往返 / IV 一次性 / 密文篡改解封 fail-closed（WebDAV + S3 双协议） | 中（测试） | XOR 假加密语义不再承担安全验证；AndroidKeyStore 硬件隔离属 Instrumented 范畴（KDoc 注明） |
 
 ### P3 低危与整洁度（34 项）
 
@@ -169,8 +169,8 @@
 |:---:|---|:---:|---|:---:|---|
 | **T-01** | WebDAV `If` tagged-list 预条件用例缺失 | ✅ 已修复 | `WebDavSyncScenarioTest.kt:95` 显式断言 ETag 匹配与 412 冲突分支 | 否（已修复） | 已断言 ETag/412 |
 | **T-02** | 无期望 ETag 时不得覆盖远端的判定测试 | ⚠️ 部分修复 | `S3SyncProviderTest.kt:235` 已覆盖；FakeSyncProvider 仍无条件覆盖 | 低 | S3 真实路径已覆盖；FakeSyncProvider 仍无条件覆盖，测试有效性缺口 |
-| **T-03** | `SyncCache` 缺乏独立单元测试文件 | ❌ 未修复 | `sync/src/test` 目录下仍无独立 `SyncCacheTest.kt` 文件 | 中（测试） | 缓存原子写/版本判定缺独立单测，建议补 `SyncCacheTest.kt` |
-| **T-04** | S3 SigV4 缺少官方已知答案向量比对 | ❌ 未修复 | `S3SyncProviderTest.kt:72` 仍仅断言 `Signature=` 包含关系 | 中（测试） | 仅 `assertTrue(auth.contains("Signature=")`，无官方已知答案向量比对，SigV4 正确性未真正验证 |
-| **T-05** | `SyncCredentialsStore` 真实 Keystore 路径无测试 | ❌ 未修复 | `SyncCredentialsStoreTest.kt:86` 仍统一注入假加密器测试 | 中（测试） | 真实 Keystore 加密路径无测试；与 P2-37 同源，建议补真实/Instrumented 用例 |
+| **T-03** | `SyncCache` 缺乏独立单元测试文件 | ✅ 已完成（2026-09-08，TASK-37） | 新增 `SyncCacheTest.kt` 5 例：读写往返/updateBase 一致性/etag 保留/无 tmp 残留 | 中（测试） | 缓存原子写与版本判定已获独立回归锁 |
+| **T-04** | S3 SigV4 缺少官方已知答案向量比对 | ✅ 已完成（2026-09-08，TASK-26） | `S3SyncProviderTest` 补编码已知答案与 SigV4 签名已知答案向量（独立 Python 参考实现离线预计算，含 `*`/`~`/UTF-8 键，零共享代码） | 中（测试） | SigV4 正确性已获独立参考比对 |
+| **T-05** | `SyncCredentialsStore` 真实 Keystore 路径无测试 | ✅ 已完成（2026-09-08，TASK-40） | JVM 层已补真实 AES-GCM 算法路径用例（同 P2-37）；AndroidKeyStore 硬件路径属 Instrumented 范畴 | 中（测试） | 算法级真实路径已获回归锁；硬件路径需 Instrumented 测试补齐 |
 | **T-06** | KdbxMerger 缺少三处边缘分支测试 | ⚠️ 部分修复 | `KdbxMergerV2Test.kt:262` 仅覆盖复活条目，丢失挂载与字段级仲裁未测 | 低 | 仅覆盖复活条目；挂载与字段级仲裁未测 |
 | **T-07** | P0 级缺陷无针对性回归测试 | ✅ 已修复 | `RealVaultRepositoryTest.kt:302` 显式锁死分组保存子树完整性；KDBX 包含 IV 断言 | 否（已修复） | 已锁死回归 |

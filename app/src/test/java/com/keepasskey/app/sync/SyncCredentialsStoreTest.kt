@@ -233,4 +233,83 @@ class SyncCredentialsStoreTest {
         assertNotNull(loaded)
         assertNull(memoryStorage["webdav_cert_pins"])
     }
+
+    // ===== P2-37 / T-05 补强（TASK-40）：真实 AES-GCM 算法路径用例 =====
+    // 此前本测试类仅注入 XOR 假加密（无可逆算法语义、无认证标签、无 IV 随机性验证）。
+    // 以下用例注入与生产同款 TRANSFORMATION（AES/GCM/NoPadding + GCMParameterSpec(128)）
+    // 的真实 AES-GCM 软件密钥实现，验证封印格式（Base64 iv/cipher）、认证完整性
+    // 与 IV 一次性；AndroidKeyStore 硬件隔离与生物识别绑定属 Instrumented 范畴。
+
+    /** 生产同款 AES-256-GCM 软件密钥加解密闭包（替代 XOR 假加密的算法级真实路径） */
+    private fun installRealAesGcmSealers() {
+        val keyGen = javax.crypto.KeyGenerator.getInstance("AES")
+        keyGen.init(256)
+        val secretKey = keyGen.generateKey()
+        store.customEncryptor = { plaintext ->
+            val cipher = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding")
+            cipher.init(javax.crypto.Cipher.ENCRYPT_MODE, secretKey)
+            Pair(cipher.iv, cipher.doFinal(plaintext))
+        }
+        store.customDecryptor = { iv, cipherBytes ->
+            val cipher = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding")
+            cipher.init(
+                javax.crypto.Cipher.DECRYPT_MODE, secretKey,
+                javax.crypto.spec.GCMParameterSpec(128, iv)
+            )
+            cipher.doFinal(cipherBytes)
+        }
+    }
+
+    @Test
+    fun `真实 AES-GCM 封印往返与 IV 一次性`() {
+        installRealAesGcmSealers()
+
+        val password = "Real#AesGcm#Roundtrip#2026".toCharArray()
+        assertTrue(store.saveWebDavConfig("https://dav.example.com", "user", password, "/v.kdbx"))
+        assertTrue(password.all { it == '0' })
+
+        val loaded = store.loadWebDavConfig()
+        assertNotNull(loaded)
+        assertArrayEquals("Real#AesGcm#Roundtrip#2026".toCharArray(), loaded!!.password)
+        loaded.password.fill('0')
+
+        // IV 一次性：同密钥连续封印三次，落盘 IV 必两两不同（AES-GCM 灾难性失效条件）
+        val seen = mutableSetOf<String>()
+        assertTrue(store.saveWebDavConfig("https://dav.example.com", "user", "a".toCharArray(), "/v.kdbx"))
+        seen += memoryStorage["webdav_password_iv"] as String
+        assertTrue(store.saveWebDavConfig("https://dav.example.com", "user", "b".toCharArray(), "/v.kdbx"))
+        seen += memoryStorage["webdav_password_iv"] as String
+        assertTrue(store.saveWebDavConfig("https://dav.example.com", "user", "c".toCharArray(), "/v.kdbx"))
+        seen += memoryStorage["webdav_password_iv"] as String
+        assertEquals(3, seen.size)
+    }
+
+    @Test
+    fun `真实 AES-GCM 密文被篡改时解封 fail-closed 返回 null`() {
+        installRealAesGcmSealers()
+
+        assertTrue(store.saveWebDavConfig("https://dav.example.com", "user", "tamper_me".toCharArray(), "/v.kdbx"))
+        assertNotNull(memoryStorage["webdav_password_cipher"])
+
+        // 篡改落盘密文（Base64 解码 → 翻转首字节 → 重编码）
+        val cipherB64 = memoryStorage["webdav_password_cipher"] as String
+        val raw = java.util.Base64.getDecoder().decode(cipherB64)
+        raw[0] = (raw[0].toInt() xor 0x01).toByte()
+        memoryStorage["webdav_password_cipher"] = java.util.Base64.getEncoder().encodeToString(raw)
+
+        // GCM 认证标签校验拒绝篡改密文 → 解封失败 → 上层按 fail-closed 得到 null，
+        // 绝不退化为空串被误判为「用户主动清空密码」
+        assertNull(store.loadWebDavConfig())
+
+        // SecretKey 同语义：S3 密文篡改 → loadS3Config 返回 null
+        assertTrue(store.saveS3Config(
+            "https://s3.example.com", "bucket", "us-east-1",
+            "AKID".toCharArray(), "SECRETKEY".toCharArray(), "v.kdbx"
+        ))
+        val secretB64 = memoryStorage["s3_secret_cipher"] as String
+        val secretRaw = java.util.Base64.getDecoder().decode(secretB64)
+        secretRaw[secretRaw.size - 1] = (secretRaw[secretRaw.size - 1].toInt() xor 0x80).toByte()
+        memoryStorage["s3_secret_cipher"] = java.util.Base64.getEncoder().encodeToString(secretRaw)
+        assertNull(store.loadS3Config())
+    }
 }

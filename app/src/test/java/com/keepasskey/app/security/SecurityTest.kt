@@ -22,20 +22,24 @@ import javax.crypto.spec.GCMParameterSpec
 
 /**
  * 阶段 3 系统级安全加固与生物识别机制单元测试：
- * 覆盖 AES-GCM 硬件加密逻辑、哈希匹配比对、自动锁定熔断调度与状态机擦除。
+ * 覆盖 AES-GCM 加解密语义、哈希匹配比对、自动锁定熔断调度与状态机擦除。
+ *
+ * P2-35 澄清（TASK-40）：本测试运行于 JVM，`KeyGenerator` 为 JDK 软件实现——
+ * 验证的是 AES-256-GCM 算法语义与完整性保证，**非** AndroidKeyStore 硬件路径；
+ * 硬件隔离（TEE/StrongBox）与生物识别绑定属 Instrumented 测试范畴，此处不虚标。
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class SecurityTest {
 
     @Test
-    fun `测试 AES-256-GCM 硬件加密加解密闭环`() {
+    fun `测试 AES-256-GCM 加解密闭环（JDK 软件密钥算法语义）`() {
         val keyGen = KeyGenerator.getInstance("AES")
         keyGen.init(256)
         val secretKey = keyGen.generateKey()
 
         val plaintext = "MasterPassword#2026!SecureKey".toByteArray(Charsets.UTF_8)
 
-        // 模拟硬件 Keystore 加密
+        // JDK 软件密钥 AES-GCM 加密（生产封印路径同款 TRANSFORMATION；硬件隔离见 Instrumented 测试）
         val encryptCipher = Cipher.getInstance("AES/GCM/NoPadding")
         encryptCipher.init(Cipher.ENCRYPT_MODE, secretKey)
         val iv = encryptCipher.iv
@@ -45,13 +49,43 @@ class SecurityTest {
         assertEquals(12, iv.size)
         assertTrue(ciphertext.isNotEmpty())
 
-        // 模拟生物识别验证通过后解密
+        // 解密还原
         val decryptCipher = Cipher.getInstance("AES/GCM/NoPadding")
         val spec = GCMParameterSpec(128, iv)
         decryptCipher.init(Cipher.DECRYPT_MODE, secretKey, spec)
         val decrypted = decryptCipher.doFinal(ciphertext)
 
         assertEquals(String(plaintext, Charsets.UTF_8), String(decrypted, Charsets.UTF_8))
+    }
+
+    /**
+     * AES-GCM 完整性保证回归锁（P2-35 补强）：密文或认证标签任一比特被篡改，
+     * 解密必须失败（AEADBadTagException）——绝不返回被篡改的明文。
+     */
+    @Test
+    fun `GCM 密文篡改时解密必须 fail-closed 抛认证异常`() {
+        val keyGen = KeyGenerator.getInstance("AES")
+        keyGen.init(256)
+        val secretKey = keyGen.generateKey()
+
+        val plaintext = "integrity-check-payload".toByteArray(Charsets.UTF_8)
+        val encryptCipher = Cipher.getInstance("AES/GCM/NoPadding")
+        encryptCipher.init(Cipher.ENCRYPT_MODE, secretKey)
+        val iv = encryptCipher.iv
+        val ciphertext = encryptCipher.doFinal(plaintext)
+
+        // 篡改密文首字节
+        val tampered = ciphertext.copyOf().also { it[0] = (it[0].toInt() xor 0x01).toByte() }
+
+        val decryptCipher = Cipher.getInstance("AES/GCM/NoPadding")
+        decryptCipher.init(Cipher.DECRYPT_MODE, secretKey, GCMParameterSpec(128, iv))
+        val failed = try {
+            decryptCipher.doFinal(tampered)
+            false
+        } catch (_: javax.crypto.AEADBadTagException) {
+            true
+        }
+        assertTrue("GCM 认证标签校验必须拒绝被篡改的密文", failed)
     }
 
     @Test
