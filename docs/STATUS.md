@@ -11,7 +11,7 @@
 
 | 维度 | 数值 / 状态 | 官方依据与说明 |
 |---|---|---|
-| **Git HEAD** | `c530761` (main) | TASK-45/20 提交（S3 SigV4 时钟偏移补偿 `d4bc46c` + Dependabot/OWASP 依赖巡检 `c530761`）；**已推送 `origin/main`（本地与远端 0 ahead / 0 behind）** |
+| **Git HEAD** | `756003c` (main) | TASK-44 提交（自动填充黑名单完整生命周期）；**已推送 `origin/main`（本地与远端 0 ahead / 0 behind）** |
 | **测试基线** | **486 个单元测试用例**（app 126 / core 32 / crypto 52 / database 155 / sync 121）：**474 通过、0 失败、12 跳过** | `./gradlew test` 全模块执行；跳过的 12 例为 `LiveSyncServersTest` 真实联调用例（需先起 `tools/local-sync` 服务并加 `-DliveSyncTest`） |
 | **构建状态** | `assembleDebug` + `assembleRelease` (R8) 全量通过 | **AGP 9.2.1 / Gradle 9.4.1** / Kotlin 2.4.10（经 buildscript classpath 锚定内置 KGP）/ Hilt 2.60.1 / **KSP 2.3.11** |
 | **系统基线** | **minSdk 36**, **compileSdk 37**, targetSdk 36 | 仅针对 Android 16+ 深度优化，固化无旧版垫片决策；compileSdk 37 随批次 H 升级（Compose BOM 2026.08.00 + M3 Expressive） |
@@ -118,6 +118,7 @@
 
 > 索引中出现的 `Wave N` / `阶段 N` 字样为对应历史提交的**原始主题**，属已冻结语境，仅供追溯；新提交请以 `TASK-xx` / `批次 X` + 提交哈希 引用，勿再使用 Wave / 阶段 编号。
 
+- `756003c` (2026-09-08): TASK-44 自动填充黑名单完整生命周期——`AutofillBlocklistStore`（包名集合持久化 + 官方包名校验 + 非法/重复如实失败）；Autofill 与 Credential Provider 双通道命中 fail-closed 不下发；详情页 `android://` 绑定条目顶栏一键屏蔽；设置页条目化列表 + 删除 + 按包名新增；无写入方的 `disabledAutofillQueriesCount` 计数与持久化键下架；回归 11 例（486 例全绿）
 - `c530761` (2026-09-08): TASK-20 依赖巡检 CI——`.github/dependabot.yml`（gradle + github-actions 每周分组 PR）+ OWASP Dependency-Check workflow（13.0.0 init 脚本仅 CI 注入、`dependencyCheckAggregate` 汇总 5 模块、failBuildOnCVSS=11 首次仅告警、SARIF 归档）+ suppression 白名单骨架
 - `d4bc46c` (2026-09-08): TASK-45 S3 SigV4 时钟偏移补偿——每响 `Date` 头刷新偏移（≥1s 节流持久化）/ 签名统一 `signingDate()` 补偿 / `executeSignedRequest` 对偏斜 403 恰一次自愈重试 / 无 Date 头 fail-closed；偏移经 `SyncCredentialsStore` 跨进程持久化、`saveS3Config` 重录作废；回归 4 例（475 例全绿）；TASK-26 已知答案向量不回退
 - `5f03036` (2026-09-08): TASK-46 `OtpEngine` TOTP 计算链路 ByteArray 化 + 用毕擦除（fail-clean）——计算入参改 ByteArray、解码借用语义固化、`computeTotpCode` finally 擦除；RFC 4226/6238/4648 官方向量回归 + 擦除断言入单测（470 例全绿）；STATUS/FINDINGS/AGENTS 同步回写
