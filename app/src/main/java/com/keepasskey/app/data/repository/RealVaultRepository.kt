@@ -523,6 +523,18 @@ class RealVaultRepository @Inject constructor(
             ?.let { customIcons.snapshotIconBytes(it) }
             ?: emptyMap()
 
+    // TASK-17：{REF:...} 字段引用解析（仅消费点调用，投影层不展开）
+    override suspend fun resolveFieldReferences(entryId: String, rawText: String): String? {
+        if (!com.keepasskey.database.fieldref.FieldReferenceEngine.containsReference(rawText)) {
+            return rawText
+        }
+        val uuid = parseKdbxUuidOrNull(entryId) ?: return null
+        val currentDb = databaseSession.databaseFlow.first() ?: return null
+        // 条目存在性校验：引用解析仅对库内真实条目开放
+        if (currentDb.rootGroup.allEntries().none { it.id == uuid }) return null
+        return com.keepasskey.database.fieldref.FieldReferenceEngine.resolve(rawText, currentDb.rootGroup)
+    }
+
     override suspend fun restoreEntry(id: String): KdbxResult<Unit> = recycleBin.restoreEntry(id)
 
     override suspend fun emptyRecycleBin(): KdbxResult<Unit> = recycleBin.emptyRecycleBin()

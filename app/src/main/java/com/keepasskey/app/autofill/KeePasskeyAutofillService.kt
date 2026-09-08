@@ -206,8 +206,13 @@ class KeePasskeyAutofillService : AutofillService() {
         }
 
         for ((index, entry) in matchedEntries.take(MAX_DATASET_COUNT).withIndex()) {
-            val username = entry.userName
-            val password = entry.password?.readString().orEmpty()
+            // TASK-17：下发前解析 {REF:...} 字段引用（仅在取值消费点展开，投影层不物化）
+            val entryIdHex = entry.id.toHexString()
+            val username = vaultRepository.resolveFieldReferences(entryIdHex, entry.userName)
+                ?: entry.userName
+            val password = entry.password?.readString()
+                ?.let { raw -> vaultRepository.resolveFieldReferences(entryIdHex, raw) }
+                .orEmpty()
 
             val views = RemoteViews(packageName, R.layout.autofill_dataset_item).apply {
                 setTextViewText(R.id.tv_username, username.ifBlank { entry.title })

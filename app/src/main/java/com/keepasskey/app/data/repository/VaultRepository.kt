@@ -169,6 +169,14 @@ interface VaultRepository {
     suspend fun getCustomIconBytes(): Map<String, ByteArray>
 
     /**
+     * 解析 [rawText] 中的 KeePass 字段引用 `{REF:...}`（TASK-17）。
+     * 仅在取值消费点调用（详情复制 / 自动填充下发），投影层不展开——
+     * 引用指向的密码明文不得提前物化进 UI 状态流。
+     * 条目或库会话不可用时返回 null（调用方回退原文）。
+     */
+    suspend fun resolveFieldReferences(entryId: String, rawText: String): String?
+
+    /**
      * 切换条目收藏状态并持久化落库（TASK-34 整改：原实现仅翻转内存 Flow 不落库）。
      * 收藏标记存于 KDBX 条目 customData，随库文件同步；不产生历史修订快照。
      */

@@ -370,15 +370,22 @@ class EntryDetailViewModel @Inject constructor(
     fun copyPassword(title: String) {
         val entryId = entryIdFlow.value ?: return
         viewModelScope.launch {
-            val password = vaultRepository.getEntryPassword(entryId).orEmpty()
+            // TASK-17：复制前解析 {REF:...} 引用（密码可能指向其他条目的字段）
+            val raw = vaultRepository.getEntryPassword(entryId).orEmpty()
+            val password = vaultRepository.resolveFieldReferences(entryId, raw) ?: raw
             clipboardSecurityManager?.copySensitiveText(title, password)
             userMessageFlow.value = uiState.value.passwordCopyMessage
         }
     }
 
     fun copyUsername(title: String, username: String) {
-        clipboardSecurityManager?.copyPlainText(title, username)
-        userMessageFlow.value = UiMessage(R.string.detail_username_copied_short)
+        val entryId = entryIdFlow.value ?: return
+        viewModelScope.launch {
+            // TASK-17：用户名可能为 {REF:U@...} 引用，复制前解析
+            val resolved = vaultRepository.resolveFieldReferences(entryId, username) ?: username
+            clipboardSecurityManager?.copyPlainText(title, resolved)
+            userMessageFlow.value = UiMessage(R.string.detail_username_copied_short)
+        }
     }
 
     fun clearUserMessage() {
