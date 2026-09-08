@@ -104,68 +104,10 @@ sync/                # 同步层：文件存储抽象 + WebDAV / S3 兼容实现
 
 ## 5. 开发路线图
 
-> 核心原则：**先 UI，后功能**。先把界面与交互流程搭好并确认合适，再逐层接入真实数据。
-> 全生命周期 7 大阶段的完整交付物清单、任务拆解与发布验收门禁曾收录于已归档的 `DELIVERY_PLAN.md`（已于 2026-09-07 并入 `docs/STATUS.md`）。
-> **进度（2026-09-08 核对）**：7 大阶段已于 2026-09-04 全部竣工（git `b0cdc89`）；此后专项整改（含已冻结的旧 Wave 编号体系）的逐轮记录以 `docs/STATUS.md` §4「历史改动日志索引」为唯一追溯入口；实时未完成任务看板见 `docs/STATUS.md` §2。
+> 核心原则：**先 UI，后功能**。全生命周期 7 大阶段（工程脚手架 → UI 优先 → 密码学/KDBX 引擎 → 生物识别与安全 → 通行密钥/自动填充 → 多协议云同步与冲突合并 → 高级特性 → 质量工程）已于 2026-09-04 全部竣工（git `b0cdc89`）。
+> 实时未完成任务看板、历史改动索引与逐项交付物拆分均以 [`docs/STATUS.md`](docs/STATUS.md) 为唯一真相源。
 
-### 阶段 0：工程脚手架
-- [x] 初始化 Android 工程（Gradle Kotlin DSL）
-- [x] 接入 Compose、Hilt、Coroutines、OkHttp 等依赖（Room 经评估未引入，本地缓存改用自研 `SyncCache`）
-- [x] 配置 Material 3 主题（浅色 / 深色 / 动态配色，另含 5 套品牌配色与 OLED 纯黑优化）
-- [x] 确定包结构与模块划分（5 模块架构）
-
-### 阶段 1：UI 优先（已完成）
-目标：用**静态 / 假数据**搭建全部界面与导航，确认交互与视觉。
-
-- [x] **导航骨架**：启动页 → 数据库列表 → 解锁 → 主界面（分组/条目）
-- [x] **数据库列表页**：已添加数据库卡片、添加数据库入口（多密码库管理：创建 / 移除 / 导入外部库）
-- [x] **解锁页**：主密码输入框、密钥文件选择、生物识别按钮、快速解锁（Quick Unlock）
-- [x] **主列表页**：分组树 + 条目列表 + 搜索栏 + 排序/过滤 + 批量操作
-- [x] **条目详情页**：字段展示、复制、显示/隐藏密码、附件、历史、Visual Diff 差异比对与回滚
-- [x] **条目编辑页**：各字段输入、图标选择、自定义字段增删
-- [x] **分组页**：分组创建/重命名/移动/图标更换
-- [x] **设置页**：主题、默认打开、同步管理入口（含 9 个子页：主题 / 安全 / WebDAV与S3 / 自动填充 / 数据库 / 健康检查 / TOTP / 调试 / 关于）
-- [x] **同步配置页**：WebDAV / S3 表单（仅 UI）
-- [x] **独立模块页**：独立双重认证（Authenticator）、全功能密码生成器（Generator）、云同步双栏冲突合并（Conflict Resolver）
-- [x] 统一组件库：密码可见切换、复制按钮、空状态、加载态、对话框（`AppBottomBar`、`AppNavigationRail`、`BentoCard`、`IconPickerDialog`、`SecurityBadge` 等）
-- [x] 中英双语字符串资源（`values` / `values-en` 均各 772 行，完全对齐）
-- [x] 在设备/模拟器与代码层走查完整流程，确认 UI 完备可用
-
-### 阶段 2：密码学核心与 KDBX 数据库引擎（已完成 ✅）
-- [x] `crypto`：BouncyCastle + AES-256 / ChaCha20 / Twofish 分组加密
-- [x] `crypto`：Argon2d/id 与 AES-KDF（SHA-256）派生，敏感数据显式清零
-- [x] `database`：KDBX **v4** 头部解析与 Payload 加解密（全链路流式：HMAC 块流 → 加密流 → GZip → XML）
-- [x] `database`：XML 流式解析 / 序列化，映射 Group / Entry 领域模型
-- [x] `database`：`DatabaseSession` 状态机维护与原子写盘（tmp → sync → rename + .bak 滚动备份）
-- [x] 数据层替换：`RealVaultRepository` 替换 `FakeVaultRepository`（Fake 出库至 `src/test`）
-
-### 阶段 3：生物识别与防御性安全加固（已完成 ✅）
-- [x] 生物识别解锁（AndroidX Biometric，Class 3 强验证 + Keystore 硬件封装）
-- [x] FLAG_SECURE / 剪贴板自动擦除 / 自动锁定熔断 / overlay 攻击防护（Wave 16）
-- [x] Autofill 框架接入
-
-### 阶段 4：通行密钥与 Credential Manager 自动填充（已完成 ✅）
-- [x] FIDO2 / WebAuthn 凭据在 KDBX 中的安全存储
-- [x] Credential Manager 集成（`KeePasskeyCredentialProviderService`，API 36+）
-- [x] Origin / RP-ID 强绑定（`CallingOriginResolver`）
-
-### 阶段 5：多协议云同步与三方冲突合并（已完成 ✅）
-- [x] 抽象 `SyncProvider` 接口（连接 / 元数据 / 下载 / 上传 / 删除）
-- [x] WebDAV 拉取 / 推送 / 冲突处理（ETag 乐观锁 + uploadAtomic 事务写）
-- [x] S3 兼容协议接入（自研 AWS SigV4，非 SDK）
-- [x] 同步状态展示与手动 / 冷启动同步
-- [x] 周期性后台同步（WorkManager）：冷启动恢复调度，间隔 / Wi-Fi 约束即时生效（TASK-08）
-
-### 阶段 6：KeePass 高级特性与全功能工具箱（已完成 ✅）
-- [x] TOTP / HOTP 引擎、密码生成器（含 Diceware）
-- [x] 附件管理、版本历史与回滚、密码健康度审计、条目模板
-- [x] 多语言（中英）
-
-### 阶段 7：质量工程、测试基线、混淆加固（已完成 🏁）
-- [x] 全模块 **462 个单元测试**（app 111 / core 27 / crypto 52 / database 155 / sync 117）：**450 通过 / 0 失败 / 12 跳过**（跳过项为需真实联调的 `LiveSyncServersTest`，加 `-DliveSyncTest` 启用）
-- [x] R8 全量混淆 `assembleRelease` 构建闭环 + 敏感内存方法防剥离 keep 规则
-- [x] 官方标准向量校验（RFC 4226 / 6238、RFC 4231、AWS SigV4、KDBX 互操作）
-- [ ] 构建发布（F-Droid / GitHub Release）：**未发布**，仅构建链路就绪
+**未发布**：构建链路（含 R8 混淆、`assembleRelease`）已就绪，F-Droid / GitHub Release 发布为待办项。
 
 ---
 
