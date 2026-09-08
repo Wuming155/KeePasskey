@@ -163,3 +163,68 @@
 - `4927189` (2026-09-05): 云同步引擎三哈希状态机与 Credential Provider / Autofill 端到端贯通
 - `ed601da` (2026-09-05): KDBX v4 引擎官方兼容与 crypto 底座
 - `b0cdc89` (2026-09-04): 7 阶段全量竣工初始提交
+
+---
+
+## 5. 功能清单（功能勾选状态唯一源）
+
+> 本表为功能勾选状态的唯一真相源，与代码一致（2026-09-08 全量核对）。未勾选项在 §6 列出。README 仅保留「特性亮点」摘要，不重复本明细。
+
+### 5.1 数据库与解锁
+- [x] 创建 / 打开 `.kdbx` 数据库（**仅 v4**；v3 及以下明确拒绝）
+- [x] 主密码、密钥文件（key file：`KdbxKeyFile` 四级解析梯子）、生物识别解锁
+- [x] AES-256 / Twofish / ChaCha20 加密算法
+- [x] Argon2（d / id）、AES-KDF（SHA-256）派生
+- [x] 与 KeePass / KeePassXC / pykeepass 文件互通（真实复合密钥库解锁 + 第三方往返校验已实测）
+- [x] 只读模式打开（会话期写盘硬拒绝）
+
+### 5.2 条目与分组
+- [x] 分组树结构（无限层级）
+- [x] 条目字段：标题、用户名、密码、URL、备注、自定义字段（含 tags / overrideUrl / AutoType）
+- [x] 图标：内置图标选择 + 自定义图标上传 / 选择 UI 已完成（模型/序列化/图标池/`IconPickerDialog`/Photo Picker 全链路落地）；**残余**：列表行/详情页位图渲染与图标删除入口未接线
+- [x] 附件（文件嵌入、增删导）
+- [x] 条目历史版本与恢复（含全字段回滚、Visual Diff 比对）
+- [x] 模板（预置网页登录 / 银行卡等常用模板，设置页一键安装）
+- [x] 回收站（KDBX 标准库内回收站 + 墓碑 + `previousParentGroup` 还原）
+- [x] 全文搜索与过滤（防抖 + 回收站过滤）
+
+### 5.3 增强功能
+- [x] **TOTP / HOTP**（`OtpEngine` 支持 SHA-1/256/512，扫码与手动添加，RFC 4226/6238 官方向量校验）
+- [x] 密码生成器（强度评估 + Diceware 词表）
+- [x] 自动填充（Credential Provider + Autofill 双通道，含 IME 内联建议）
+- [ ] 自定义键盘（Magikeyboard 式字段填充）：未实现，当前仅提供 IME 内联建议
+- [x] 条目移动 / 只读锁定；[x] 条目克隆（全字段保真 + 新 UUID + 清历史）
+- [x] 密码健康度离线审计（`HealthCheckEngine`）
+
+### 5.4 同步
+- [x] **WebDAV** 同步（账号、URL、路径，全站强制 HTTPS）
+- [x] **S3 兼容协议** 同步（Endpoint、Bucket、Access Key/Secret、区域、path-style）
+- [x] 同步状态展示（最新同步时间、云端版本、同步反馈）
+- [x] 冲突处理：三方哈希状态机 + 墓碑感知合并 + 可视化逐字段决策界面
+- [x] 后台同步（手动 / 冷启动 / 周期性 WorkManager 后台同步）：冷启动按持久化偏好恢复调度，间隔 / Wi-Fi 约束即时生效
+- [x] KeePass 字段引用（`{REF:...}`）引擎：官方语法子集（T/U/P/A/N/I）整库检索 + 递归展开 + 循环防护；**残余**：Notes/URL 展示侧未接
+
+### 5.5 通行密钥（Passkey）
+- [x] 在数据库中安全存储 FIDO2 / WebAuthn 凭据（对齐 KeePassXC `KPEX_PASSKEY_*` 属性 schema）
+- [x] 通过 Credential Manager 创建 / 调用通行密钥（ES256 / Ed25519 / RS256 三算法）
+- [x] 使用通行密钥作为数据库解锁方式（设备绑定解锁通行密钥：WebAuthn 本地断言 + 硬件 ES256 + signCount 反克隆，旧凭据兼容通道）
+
+---
+
+## 6. 已知局限（已知未实现摘要）
+
+> 完整实时清单以 §2「未完成工作唯一看板」为唯一真相源；本表为面向用户的局限摘要，不重复维护状态。
+
+| 项 | 现状 |
+|---|---|
+| 自定义键盘（Magikeyboard 式字段填充） | 未实现；已提供 IME 内联建议 + 自动填充双通道替代 |
+| 图标列表行 / 详情页位图渲染与图标删除入口 | TASK-15 自定义图标上传/选择已落地，位图渲染与删除为残余项 |
+| KeePass 字段引用展示侧（Notes/URL） | TASK-25 引擎已落地，Notes/URL 引用展开展示未接线（并入 TASK-43 范畴） |
+| 进阶偏好消费方接线 | 全部开关已持久化（TASK-12），消费方未接线，登记 **TASK-43** |
+| 自动填充黑名单完整生命周期 | 阻断/告警可用，增删数据源与持久化未闭环，登记 **TASK-44** |
+| S3 SigV4 服务端时钟偏移补偿 | 直取本地时间，时钟偏移 >15min 返回 403，登记 **TASK-45** |
+| `OtpEngine` TOTP 计算链路 ByteArray 化 | 编辑态已 CharArray 闭环，计算链路仍 String，登记 **TASK-46** |
+| KDBX v3 及以下读写 | 明确拒绝（`KdbxUnsupportedVersionException`） |
+| 应用发布 | 构建链路就绪，未完成 F-Droid / GitHub Release 发布 |
+
+> 其余工程限界（对象树内存驻留、条件写依赖服务端、`ProtectedString` 纵深防御边界等）见 `AGENTS.md`「已知限界」。

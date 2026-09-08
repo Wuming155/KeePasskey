@@ -65,3 +65,40 @@ app/src/main/java/com/keepasskey/app/
 - `参考项目/Monica-main`：Kotlin / Compose 工程结构与约定参考。
 
 > 参考项目仅用于学习与架构借鉴，注意其各自的许可证约束；本仓库代码独立编写。
+
+---
+
+## 6. 技术栈与模块目录
+
+### 技术栈
+
+| 领域 | 选型 |
+|------|------|
+| 系统基准 | Android API 36+（`minSdk 36`, `compileSdk 37`, `targetSdk 36`），仅 Android 16+ 深度优化 |
+| 语言 | Kotlin 2.4.10（Compose 编译器随 Kotlin 一同发布） |
+| 构建 | Gradle 9.4.1（Wrapper）+ AGP 9.2.1，依赖版本统一由 `gradle/libs.versions.toml` 管理 |
+| UI | Jetpack Compose（Material 3 / M3 Expressive） |
+| 异步 | Kotlin Coroutines + Flow |
+| 依赖注入 | Hilt 2.60.1（KSP 2.3.11，AGP 9 内置 Kotlin） |
+| 本地缓存 | 自研 `SyncCache`（三哈希磁盘布局 + 原子写盘）；未引入 Room |
+| 数据库解析 | 自研 `database` 模块：KDBX v4 全链路流式解析 / 写回 |
+| 加密 | AES-256 / Twofish / ChaCha20，Argon2d/id / AES-KDF（SHA-256）派生（BouncyCastle） |
+| 网络 | OkHttp（TLS-only）；WebDAV 走 XML/PROPFIND，S3 走自研 AWS SigV4；未引入 ktor |
+| 生物识别 / 自动填充 / 通行密钥 | AndroidX Biometric / Autofill Framework / Credential Manager + FIDO2 |
+
+### 模块目录
+
+```
+app/                 # 应用壳：导航、入口、Hilt、平台集成
+ ├── ui/             # Compose 界面与状态
+ ├── biometric/      # 生物识别解锁（app 内部包）
+ ├── autofill/       # 系统自动填充（app 内部包）
+ ├── passkey/        # 通行密钥认证接入（app 内部包）
+ └── di/             # 依赖注入
+core/                # 共享基础层：领域模型、工具
+crypto/              # 加密层：分组加密、KDF、KDBX 块流
+database/            # 数据库层：kdbx 解析、条目/分组模型、搜索、合并、通行密钥凭据存储
+sync/                # 同步层：文件存储抽象 + WebDAV / S3 兼容实现
+```
+
+**同步抽象层**：定义统一的 `SyncProvider` 接口（连接、拉取、推送、冲突检测），WebDAV 与 S3 各自实现，便于后续扩展更多后端。
