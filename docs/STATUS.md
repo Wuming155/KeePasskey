@@ -12,7 +12,7 @@
 
 | 维度 | 数值 / 状态 | 官方依据与说明 |
 |---|---|---|
-| **Git HEAD** | 代码基线 `756003c`；最新提交 `38c2e03`（docs 口径校准） | 本表 HEAD 记 **代码基线**（最后一次含代码改动的提交）；**纯文档提交不抬升该基线**，避免文档自引用无限漂移。代码基线即 TASK-44 自动填充黑名单提交。分支 `main` 与 `origin/main` 同步（0 ahead / 0 behind） |
+| **Git HEAD** | 代码基线 `756003c`（TASK-44 自动填充黑名单） | 本表 HEAD 记 **代码基线**（最后一次含代码改动的提交）；**纯文档提交不抬升该基线**（避免文档自引用无限漂移），**最新提交一律见 §4 日志索引首条**。分支 `main` 与 `origin/main` 同步（0 ahead / 0 behind） |
 | **测试基线** | **486 个单元测试用例**（app 126 / core 32 / crypto 52 / database 155 / sync 121）：**474 通过、0 失败、12 跳过** | `./gradlew test` 全模块执行；跳过的 12 例为 `LiveSyncServersTest` 真实联调用例（需先起 `tools/local-sync` 服务并加 `-DliveSyncTest`） |
 | **构建状态** | `assembleDebug` + `assembleRelease` (R8) 全量通过 | **AGP 9.2.1 / Gradle 9.4.1** / Kotlin 2.4.10（经 buildscript classpath 锚定内置 KGP）/ Hilt 2.60.1 / **KSP 2.3.11** |
 | **系统基线** | **minSdk 36**, **compileSdk 37**, targetSdk 36 | 仅针对 Android 16+ 深度优化，固化无旧版垫片决策；compileSdk 37 随批次 H 升级（Compose BOM 2026.08.00 + M3 Expressive） |
