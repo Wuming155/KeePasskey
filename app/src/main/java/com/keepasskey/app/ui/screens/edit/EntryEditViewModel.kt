@@ -77,6 +77,10 @@ class EntryEditViewModel @Inject constructor(
     private val _loadedPassword = MutableStateFlow<CharArray?>(null)
     val loadedPassword: StateFlow<CharArray?> = _loadedPassword.asStateFlow()
 
+    // TASK-15：库内自定义图标池快照（UUID hex → PNG 字节），UI 层按需解码为 ImageBitmap
+    private val _customIconOptions = MutableStateFlow<Map<String, ByteArray>>(emptyMap())
+    val customIconOptions: StateFlow<Map<String, ByteArray>> = _customIconOptions.asStateFlow()
+
     /** TASK-10：既有 TOTP 种子的一次性预填通道（语义同 [loadedPassword]） */
     private val _loadedTotpSecret = MutableStateFlow<CharArray?>(null)
     val loadedTotpSecret: StateFlow<CharArray?> = _loadedTotpSecret.asStateFlow()
@@ -100,6 +104,11 @@ class EntryEditViewModel @Inject constructor(
             vaultRepository.getGroups().collect { groups ->
                 _uiState.update { it.copy(availableGroups = groups) }
             }
+        }
+
+        // TASK-15：加载库内自定义图标池（上传/选择界面数据源）
+        viewModelScope.launch {
+            _customIconOptions.value = vaultRepository.getCustomIconBytes()
         }
     }
 
@@ -146,6 +155,7 @@ class EntryEditViewModel @Inject constructor(
                         entryId = entry.id,
                         groupId = entry.groupId,
                         iconName = entry.iconName,
+                        customIconId = entry.customIconId,
                         title = entry.title,
                         username = entry.username,
                         passwordLength = password?.size ?: 0,
@@ -178,7 +188,28 @@ class EntryEditViewModel @Inject constructor(
         _uiState.update { it.copy(passwordLength = passwordChars.size, isDirty = true) }
     }
 
-    fun onIconChange(icon: String) = _uiState.update { it.copy(iconName = icon, isDirty = true) }
+    // TASK-15：标准图标与自定义图标互斥——选标准图标即清除自定义引用
+    fun onIconChange(icon: String) = _uiState.update { it.copy(iconName = icon, customIconId = null, isDirty = true) }
+
+    /** TASK-15：选择/清除（null）自定义图标引用 */
+    fun onCustomIconSelected(iconId: String?) =
+        _uiState.update { current -> current.copy(customIconId = iconId, isDirty = current.customIconId != iconId) }
+
+    /** TASK-15：上传 PNG 字节为库级自定义图标并选中；失败如实上浮 */
+    fun onCustomIconUploaded(pngBytes: ByteArray) {
+        viewModelScope.launch {
+            when (val result = vaultRepository.addCustomIcon(pngBytes)) {
+                is com.keepasskey.core.result.KdbxResult.Success -> {
+                    _customIconOptions.value = vaultRepository.getCustomIconBytes()
+                    _uiState.update { it.copy(customIconId = result.data, isDirty = true) }
+                }
+                is com.keepasskey.core.result.KdbxResult.Failure ->
+                    _uiState.update {
+                        it.copy(userMessage = UiMessage(R.string.edit_save_failed, listOf(result.message)))
+                    }
+            }
+        }
+    }
     fun onTitleChange(title: String) = _uiState.update { it.copy(title = title, isDirty = true) }
     fun onUsernameChange(username: String) = _uiState.update { it.copy(username = username, isDirty = true) }
     fun onUrlChange(url: String) = _uiState.update { it.copy(url = url, isDirty = true) }
@@ -373,6 +404,7 @@ class EntryEditViewModel @Inject constructor(
                 updatedAt = strings.get(R.string.time_just_now),
                 groupId = state.groupId,
                 iconName = state.iconName,
+                customIconId = state.customIconId,
                 customFields = state.customFields.filter { it.key.isNotBlank() },
                 attachments = state.attachments,
                 tags = state.tagsInput.split(',', '\uff0c', ' ').map { it.trim() }.filter { it.isNotEmpty() }.distinct(),

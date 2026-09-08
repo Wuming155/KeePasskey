@@ -159,6 +159,16 @@ interface VaultRepository {
     suspend fun duplicateEntry(id: String): com.keepasskey.core.result.KdbxResult<String>
 
     /**
+     * 上传 PNG 字节为库级自定义图标（TASK-15，存于 KDBX Meta CustomIcons，
+     * 条目经 CustomIconUUID 引用）。内容去重：重复上传相同图片返回既有图标 UUID。
+     * 成功返回图标 UUID hex（KdbxResult.Success.data）。
+     */
+    suspend fun addCustomIcon(pngBytes: ByteArray): com.keepasskey.core.result.KdbxResult<String>
+
+    /** 库内自定义图标池快照（UUID hex → PNG 字节），供 UI 解码渲染 */
+    suspend fun getCustomIconBytes(): Map<String, ByteArray>
+
+    /**
      * 切换条目收藏状态并持久化落库（TASK-34 整改：原实现仅翻转内存 Flow 不落库）。
      * 收藏标记存于 KDBX 条目 customData，随库文件同步；不产生历史修订快照。
      */

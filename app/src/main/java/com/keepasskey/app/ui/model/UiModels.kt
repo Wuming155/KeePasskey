@@ -117,6 +117,8 @@ data class UiVaultEntry(
     val orderIndex: Int = 0,
     val groupId: String? = null,
     val iconName: String = "key",
+    // TASK-15：KDBX 自定义图标 UUID（hex）；null=未使用自定义图标（iconName 为标准图标回退）
+    val customIconId: String? = null,
     val cardNumberMasked: String? = null,
     val cardHolder: String? = null,
     val cardExpiry: String? = null,

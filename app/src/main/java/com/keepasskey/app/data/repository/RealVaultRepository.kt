@@ -52,6 +52,7 @@ class RealVaultRepository @Inject constructor(
     private val entryMapper = VaultEntryMapper(strings)
     private val recycleBin = RecycleBinCoordinator(strings, databaseSession) { persistSession() }
     private val entryDuplicator = EntryDuplicateCoordinator(strings, databaseSession) { persistSession() }
+    private val customIcons = CustomIconCoordinator(strings, databaseSession) { persistSession() }
     private val passkeyEntries = PasskeyEntryCoordinator(databaseSession, debugLog) { persistSession() }
 
     private val databasesFlow = MutableStateFlow<List<VaultDatabaseInfo>>(emptyList())
@@ -446,6 +447,8 @@ class RealVaultRepository @Inject constructor(
                 customFields = mergedCustomFields,
                 attachments = mergedAttachments,
                 iconId = newIconId,
+                // TASK-15：自定义图标引用以 UI 选择为准（null=清除引用，回退标准图标）
+                customIconId = entry.customIconId?.let { parseKdbxUuidOrNull(it) },
                 tags = entry.tags,
                 overrideUrl = entry.overrideUrl?.takeIf { it.isNotBlank() },
                 autoType = mergedAutoType
@@ -510,6 +513,15 @@ class RealVaultRepository @Inject constructor(
 
     // TASK-16：条目克隆（全字段保真 + 新 UUID + 清历史），委托独立协调器
     override suspend fun duplicateEntry(id: String): KdbxResult<String> = entryDuplicator.duplicateEntry(id)
+
+    // TASK-15：自定义图标上传（PNG 校验/去重/落库 Meta）与图标池快照
+    override suspend fun addCustomIcon(pngBytes: ByteArray): KdbxResult<String> =
+        customIcons.addCustomIcon(pngBytes)
+
+    override suspend fun getCustomIconBytes(): Map<String, ByteArray> =
+        databaseSession.databaseFlow.first()
+            ?.let { customIcons.snapshotIconBytes(it) }
+            ?: emptyMap()
 
     override suspend fun restoreEntry(id: String): KdbxResult<Unit> = recycleBin.restoreEntry(id)
 

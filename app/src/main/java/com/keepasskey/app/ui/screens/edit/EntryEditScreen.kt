@@ -1,9 +1,13 @@
 package com.keepasskey.app.ui.screens.edit
 
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import androidx.activity.compose.BackHandler
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -55,6 +59,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -75,6 +80,45 @@ import com.keepasskey.app.ui.theme.CapsuleShape
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.ByteArrayOutputStream
+
+/** TASK-15：自定义图标降采样目标上限（KDBX 生态约定小尺寸 PNG，KeePassXC 默认 128px） */
+private const val CUSTOM_ICON_MAX_PX = 128
+
+/**
+ * TASK-15：解码任意图片字节并降采样至 ≤[CUSTOM_ICON_MAX_PX] 的 PNG（KDBX CustomIcon 载荷）。
+ * 解码失败（非图片/损坏数据）返回 null，调用方如实上浮错误。
+ */
+private fun decodeAndScaleToPng(bytes: ByteArray): ByteArray? {
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+
+    // 先按 2 的幂次抽样粗降采样，再精确缩放至目标上限，控制峰值内存
+    var sampleSize = 1
+    while (maxOf(bounds.outWidth, bounds.outHeight) / (sampleSize * 2) >= CUSTOM_ICON_MAX_PX) {
+        sampleSize *= 2
+    }
+    val decodeOpts = BitmapFactory.Options().apply { inSampleSize = sampleSize }
+    val src = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, decodeOpts) ?: return null
+
+    val scale = minOf(1f, CUSTOM_ICON_MAX_PX.toFloat() / maxOf(src.width, src.height))
+    val scaled = if (scale < 1f) {
+        Bitmap.createScaledBitmap(
+            src,
+            (src.width * scale).toInt().coerceAtLeast(1),
+            (src.height * scale).toInt().coerceAtLeast(1),
+            true
+        )
+    } else {
+        src
+    }
+    val output = ByteArrayOutputStream()
+    scaled.compress(Bitmap.CompressFormat.PNG, 100, output)
+    if (scaled !== src) scaled.recycle()
+    src.recycle()
+    return output.toByteArray()
+}
 
 /**
  * 有状态凭据编辑/添加页面（Route）
@@ -134,6 +178,41 @@ fun EntryEditScreen(
         result.contents?.let { viewModel.onTotpSecretChangeSecure(it.toCharArray()) }
     }
 
+    // TASK-15：自定义图标——系统相册（Photo Picker）选图，读取字节后降采样为 ≤128px PNG 上传
+    val customIconOptions by viewModel.customIconOptions.collectAsStateWithLifecycle()
+    var decodedCustomIcons by remember { mutableStateOf<List<com.keepasskey.app.ui.components.CustomIconItem>>(emptyList()) }
+    LaunchedEffect(customIconOptions) {
+        // PNG → ImageBitmap 解码为 CPU 操作，移出主线程
+        decodedCustomIcons = withContext(Dispatchers.Default) {
+            customIconOptions.mapNotNull { (id, bytes) ->
+                BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.let {
+                    com.keepasskey.app.ui.components.CustomIconItem(id, it.asImageBitmap())
+                }
+            }
+        }
+    }
+    val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri != null) {
+            scope.launch(Dispatchers.IO) {
+                try {
+                    val rawBytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                    val pngBytes = rawBytes?.let { decodeAndScaleToPng(it) }
+                    withContext(Dispatchers.Main) {
+                        if (pngBytes != null) {
+                            viewModel.onCustomIconUploaded(pngBytes)
+                        } else {
+                            viewModel.showMessage(UiMessage(R.string.icon_invalid_not_png))
+                        }
+                    }
+                } catch (e: Exception) {
+                    withContext(Dispatchers.Main) {
+                        viewModel.showMessage(UiMessage(R.string.icon_invalid_not_png))
+                    }
+                }
+            }
+        }
+    }
+
     LaunchedEffect(viewModel) {
         viewModel.events.collect { event ->
             when (event) {
@@ -163,6 +242,11 @@ fun EntryEditScreen(
         onSaveClick = viewModel::saveEntry,
         onGroupChange = viewModel::onGroupChange,
         onIconChange = viewModel::onIconChange,
+        customIconOptions = decodedCustomIcons,
+        onSelectCustomIcon = viewModel::onCustomIconSelected,
+        onUploadCustomIcon = {
+            photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+        },
         onTitleChange = viewModel::onTitleChange,
         onUsernameChange = viewModel::onUsernameChange,
         onPasswordChangeSecure = viewModel::onPasswordChangeSecure,
@@ -220,6 +304,10 @@ fun EntryEditContent(
     onSaveClick: () -> Unit,
     onGroupChange: (String?) -> Unit,
     onIconChange: (String) -> Unit,
+    // TASK-15：自定义图标扩展（库内图标池 / 选择回调 / 相册上传入口）
+    customIconOptions: List<com.keepasskey.app.ui.components.CustomIconItem> = emptyList(),
+    onSelectCustomIcon: (String) -> Unit = {},
+    onUploadCustomIcon: () -> Unit = {},
     onTitleChange: (String) -> Unit,
     onUsernameChange: (String) -> Unit,
     onPasswordChangeSecure: (CharArray) -> Unit,
@@ -384,12 +472,22 @@ fun EntryEditContent(
                                 .clickable { showIconPicker = true },
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(
-                                imageVector = getVaultIcon(uiState.iconName),
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                modifier = Modifier.size(28.dp)
-                            )
+                            // TASK-15：选中自定义图标时渲染位图，否则回退标准图标
+                            val selectedCustom = customIconOptions.firstOrNull { it.id == uiState.customIconId }
+                            if (selectedCustom != null) {
+                                Image(
+                                    bitmap = selectedCustom.bitmap,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(34.dp)
+                                )
+                            } else {
+                                Icon(
+                                    imageVector = getVaultIcon(uiState.iconName),
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    modifier = Modifier.size(28.dp)
+                                )
+                            }
                         }
 
                         OutlinedTextField(
@@ -578,7 +676,15 @@ fun EntryEditContent(
                 onIconChange(it)
                 showIconPicker = false
             },
-            onDismiss = { showIconPicker = false }
+            onDismiss = { showIconPicker = false },
+            // TASK-15：自定义图标扩展段
+            customIcons = customIconOptions,
+            selectedCustomIconId = uiState.customIconId,
+            onSelectCustomIcon = {
+                onSelectCustomIcon(it)
+                showIconPicker = false
+            },
+            onUploadClick = onUploadCustomIcon
         )
     }
 

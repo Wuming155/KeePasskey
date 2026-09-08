@@ -22,6 +22,8 @@ data class EntryEditUiState(
     val groupId: String? = null,
     val availableGroups: List<VaultGroup> = emptyList(),
     val iconName: String = "key",
+    // TASK-15：选中的自定义图标 UUID（hex）；非空时优先于 iconName 展示
+    val customIconId: String? = null,
     val title: String = "",
     val username: String = "",
     /** 密码长度（非敏感元数据，用于强度条）；密码明文本身经 ViewModel CharArray 链路 */

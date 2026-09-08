@@ -220,6 +220,20 @@ class FakeVaultRepository() : VaultRepository {
         return com.keepasskey.core.result.KdbxResult.Success(cloneId)
     }
 
+    // TASK-15 Fake 语义：内存图标池 + 引用上传
+    private val customIconPool = MutableStateFlow<Map<String, ByteArray>>(emptyMap())
+
+    override suspend fun addCustomIcon(pngBytes: ByteArray): com.keepasskey.core.result.KdbxResult<String> {
+        val existing = customIconPool.value.entries.firstOrNull { it.value.contentEquals(pngBytes) }
+        val id = existing?.key ?: "icon_${System.currentTimeMillis()}"
+        if (existing == null) {
+            customIconPool.value = customIconPool.value + (id to pngBytes.copyOf())
+        }
+        return com.keepasskey.core.result.KdbxResult.Success(id)
+    }
+
+    override suspend fun getCustomIconBytes(): Map<String, ByteArray> = customIconPool.value
+
     override suspend fun deleteEntry(id: String): com.keepasskey.core.result.KdbxResult<Unit> {
         val current = entriesFlow.value.toMutableList()
         val index = current.indexOfFirst { it.id == id }
