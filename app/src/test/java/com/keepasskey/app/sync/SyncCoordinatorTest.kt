@@ -37,6 +37,9 @@ import java.io.IOException
  * SyncCoordinator 全分支同步状态机测试 (Wave 3-E P0-5 与 E5 验收标准)
  */
 @OptIn(ExperimentalCoroutinesApi::class)
+/** TASK-21：用户可见消息已资源化；单测无资源环境，注入返回占位文本的假 StringsProvider */
+private val TEST_STRINGS = com.keepasskey.app.ui.model.StringsProvider { _, _ -> "" }
+
 class SyncCoordinatorTest {
 
     @get:Rule
@@ -128,7 +131,7 @@ class SyncCoordinatorTest {
         assertTrue(createResult is com.keepasskey.core.result.KdbxResult.Success)
 
         credentialsStore = SyncCredentialsStore(fakeContext, null)
-        coordinator = SyncCoordinator(fakeContext, databaseSession, credentialsStore, com.keepasskey.app.data.logger.DebugLogBuffer())
+        coordinator = SyncCoordinator(fakeContext, databaseSession, credentialsStore, com.keepasskey.app.data.logger.DebugLogBuffer(), TEST_STRINGS)
     }
 
     @After

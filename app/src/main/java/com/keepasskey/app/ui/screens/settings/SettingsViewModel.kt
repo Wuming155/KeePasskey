@@ -11,12 +11,10 @@ import com.keepasskey.app.data.repository.SettingsRepository
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.sync.SyncCoordinator
 import com.keepasskey.app.sync.SyncCredentialsStore
-import com.keepasskey.app.sync.SyncOutcome
+import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.theme.AppThemeMode
 import com.keepasskey.crypto.kdf.KdfBenchmark
-import com.keepasskey.database.audit.HealthCheckEngine
-import com.keepasskey.database.audit.PasswordRiskLevel
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -46,16 +44,13 @@ class SettingsViewModel @Inject constructor(
     // TASK-08 整改：周期后台同步调度器（设置变更即时生效）
     private val periodicSyncScheduler: com.keepasskey.app.sync.PeriodicSyncScheduler,
     // 允许为 null 仅用于单测注入；生产 DI 注入 @ApplicationContext
-    @ApplicationContext private val appContext: Context? = null
+    @ApplicationContext private val appContext: Context? = null,
+    // TASK-21：非 Compose 层文案资源解析通道（生产经 appContext 转发；单测注入假实现）
+    private val stringsProvider: StringsProvider? = null
 ) : ViewModel() {
 
     companion object {
         private const val TAG = "SettingsViewModel"
-
-        private const val HEALTH_SCORE_BASE = 100
-        private const val HEALTH_PENALTY_WEAK = 5
-        private const val HEALTH_PENALTY_REUSED = 10
-        private const val HEALTH_PENALTY_EXPIRED = 15
 
         /** ActivityManager 不可得时的兜底应用堆上限（MiB） */
         private const val DEFAULT_HEAP_MB = 128
@@ -66,48 +61,28 @@ class SettingsViewModel @Inject constructor(
         private var hasCheckedColdStartSync = false
     }
 
-    private val syncStateFlow = MutableStateFlow(
-        SyncUiState(
-            provider = CloudSyncProvider.WEBDAV,
-            autoSyncEnabled = true,
-            wifiOnlySync = true,
-            isSyncing = false,
-            syncFeedbackMessage = null
-        )
+    // TASK-21 拆分：文案解析通道与领域控制器（同步/健康/导出），ViewModel 保留状态编排
+    private val strings: StringsProvider = stringsProvider
+        ?: appContext?.let { ctx -> StringsProvider { id, args -> ctx.getString(id, *args) } }
+        ?: StringsProvider { _, _ -> "" }
+
+    private val syncController = SettingsSyncController(
+        syncCredentialsStore, syncCoordinator, extendedSettingsStore, strings, viewModelScope
+    )
+    private val healthController = SettingsHealthController(vaultRepository, strings, viewModelScope)
+    private val exportController = SettingsExportController(
+        vaultRepository, debugLogBuffer, appContext, strings, viewModelScope
     )
 
-    // Wave 15 整改：同步凭据明文一次性预填通道（对齐 EntryEdit loadedPassword 模式）。
-    // 解密结果以 CharArray 承载、绝不进入 UiState/StateFlow；组件消费（或用户开始编辑、
-    // 保存成功、ViewModel 销毁）后即擦除置空。
-    private val _webdavPasswordPrefill = MutableStateFlow<CharArray?>(null)
-    val webdavPasswordPrefill: StateFlow<CharArray?> = _webdavPasswordPrefill.asStateFlow()
+    // TASK-21 拆分：同步状态流与凭据明文预填通道由 [SettingsSyncController] 承载
+    val webdavPasswordPrefill: StateFlow<CharArray?> get() = syncController.webdavPasswordPrefill
 
-    private val _s3SecretKeyPrefill = MutableStateFlow<CharArray?>(null)
-    val s3SecretKeyPrefill: StateFlow<CharArray?> = _s3SecretKeyPrefill.asStateFlow()
+    val s3SecretKeyPrefill: StateFlow<CharArray?> get() = syncController.s3SecretKeyPrefill
 
     /** Wave 15 整改：用户开始编辑密码后终结预填通道生命周期（防旋转后旧值回写覆盖用户输入） */
-    fun clearWebDavPasswordPrefill() {
-        _webdavPasswordPrefill.value?.fill('0')
-        _webdavPasswordPrefill.value = null
-    }
+    fun clearWebDavPasswordPrefill() = syncController.clearWebDavPasswordPrefill()
 
-    fun clearS3SecretKeyPrefill() {
-        _s3SecretKeyPrefill.value?.fill('0')
-        _s3SecretKeyPrefill.value = null
-    }
-
-    private val healthStateFlow = MutableStateFlow(
-        HealthCheckUiState(
-            healthScore = 0,
-            healthStatus = "未扫描",
-            healthMessage = "点击重新扫描以评估密码库安全健康状态",
-            weakPasswordCount = 0,
-            reusedPasswordCount = 0,
-            compromisedPasswordCount = 0,
-            lastHealthScanTime = "未扫描",
-            isHealthScanning = false
-        )
-    )
+    fun clearS3SecretKeyPrefill() = syncController.clearS3SecretKeyPrefill()
 
     private val autofillStateFlow = MutableStateFlow(
         AutofillUiState(
@@ -155,40 +130,6 @@ class SettingsViewModel @Inject constructor(
         extendedSettingsStore.save(extendedSettingsFlow.value)
     }
 
-    private data class SyncUiState(
-        val provider: CloudSyncProvider = CloudSyncProvider.WEBDAV,
-        // M2 整改：默认值一律空串，杜绝示例凭据（mypassword123 / AKIA 示例密钥对）
-        // 被静默保存为真实云端凭据
-        // Wave 15 整改：webdavPassword/s3SecretKey 明文不再驻留本状态流
-        // （经 CharArray 一次性预填通道下发，保存后即擦除）
-        val webdavUrl: String = "",
-        val webdavUsername: String = "",
-        val webdavRemotePath: String = "/keepasskey.kdbx",
-        val s3Endpoint: String = "",
-        val s3Bucket: String = "",
-        val s3Region: String = "auto",
-        val s3AccessKey: String = "",
-        val s3ObjectKey: String = "keepasskey.kdbx",
-        val s3UsePathStyle: Boolean = false,
-        val autoSyncEnabled: Boolean = true,
-        val wifiOnlySync: Boolean = true,
-        val isSyncing: Boolean = false,
-        val syncFeedbackMessage: UiMessage? = null,
-        // H1 整改：真实同步完成时刻文案（空串=本会话尚未同步成功过）
-        val lastSyncTimeText: String = ""
-    )
-
-    private data class HealthCheckUiState(
-        val healthScore: Int,
-        val healthStatus: String,
-        val healthMessage: String,
-        val weakPasswordCount: Int,
-        val reusedPasswordCount: Int,
-        val compromisedPasswordCount: Int,
-        val lastHealthScanTime: String,
-        val isHealthScanning: Boolean
-    )
-
     private data class AutofillUiState(
         val credentialProviderEnabled: Boolean,
         val passkeySupportEnabled: Boolean,
@@ -215,8 +156,8 @@ class SettingsViewModel @Inject constructor(
 
     val uiState: StateFlow<SettingsUiState> = combine(
         settingsRepository.getSettings(),
-        syncStateFlow,
-        healthStateFlow,
+        syncController.state,
+        healthController.state,
         combine(autofillStateFlow, databaseConfigStateFlow) { af, db -> Pair(af, db) },
         combine(securityTimeoutStateFlow, extendedSettingsFlow, debugLogLinesFlow) { sec, ext, logs -> Triple(sec, ext, logs) }
     ) { userSettings, syncState, healthState, (autofillState, dbState), (secState, extState, debugLogLines) ->
@@ -249,7 +190,7 @@ class SettingsViewModel @Inject constructor(
             wifiOnlySync = syncState.wifiOnlySync,
             isSyncing = syncState.isSyncing,
             syncFeedbackMessage = syncState.syncFeedbackMessage,
-            syncLastTime = syncState.lastSyncTimeText.ifEmpty { "尚未同步" },
+            syncLastTime = syncState.lastSyncTimeText.ifEmpty { strings.get(R.string.sync_last_time_never) },
             useOfflineCache = extState.useOfflineCache,
             syncOnColdStart = userSettings.syncOnColdStart,
             periodicBackgroundSyncEnabled = extState.periodicBackgroundSyncEnabled,
@@ -342,49 +283,11 @@ class SettingsViewModel @Inject constructor(
 
     init {
         // TASK-12 整改：wifiOnlySync 持久化恢复（周期同步网络约束的消费方）
-        syncStateFlow.update { it.copy(wifiOnlySync = extendedSettingsStore.loadWifiOnlySync()) }
-        restoreSyncCredentials()
+        syncController.updateWifiOnlySync(extendedSettingsStore.loadWifiOnlySync())
+        syncController.restoreSyncCredentials()
         // 离线开关联动：冷启动时把默认/持久化的离线偏好传导至同步协调器
         syncCoordinator.setOfflineMode(extendedSettingsFlow.value.useOfflineCache)
         checkAndTriggerColdStartSync()
-    }
-
-    /**
-     * Wave 15 整改：凭据恢复改走 CharArray 一次性预填通道——解密出的密码/SecretKey
-     * 不再以 String 驻留 syncStateFlow；WebDAV 密码与 S3 SecretKey 经预填通道下发至
-     * SecurePasswordField，AccessKey ID 属标识符（随请求头明文传输）保留 String 投影。
-     */
-    private fun restoreSyncCredentials() {
-        val store = syncCredentialsStore
-        val savedProvider = store.loadProvider()
-        val savedWebDav = store.loadWebDavConfig()
-        val savedS3 = store.loadS3Config()
-        savedWebDav?.let { cfg ->
-            _webdavPasswordPrefill.value?.fill('0')
-            _webdavPasswordPrefill.value = cfg.password
-        }
-        savedS3?.let { cfg ->
-            _s3SecretKeyPrefill.value?.fill('0')
-            _s3SecretKeyPrefill.value = cfg.secretKey
-        }
-        // AccessKey ID 转 String 投影后擦除 CharArray 原件（标识符边界，非机密）
-        val s3AccessKeyText = savedS3?.accessKey?.let { chars ->
-            String(chars).also { chars.fill('0') }
-        }
-        syncStateFlow.update { cur ->
-            cur.copy(
-                provider = savedProvider,
-                webdavUrl = savedWebDav?.url ?: cur.webdavUrl,
-                webdavUsername = savedWebDav?.username ?: cur.webdavUsername,
-                webdavRemotePath = savedWebDav?.remotePath ?: cur.webdavRemotePath,
-                s3Endpoint = savedS3?.endpoint ?: cur.s3Endpoint,
-                s3Bucket = savedS3?.bucket ?: cur.s3Bucket,
-                s3Region = savedS3?.region ?: cur.s3Region,
-                s3AccessKey = s3AccessKeyText ?: cur.s3AccessKey,
-                s3ObjectKey = savedS3?.objectKey ?: cur.s3ObjectKey,
-                s3UsePathStyle = savedS3?.usePathStyle ?: cur.s3UsePathStyle
-            )
-        }
     }
 
     private fun checkAndTriggerColdStartSync() {
@@ -455,57 +358,22 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    fun setSyncProvider(provider: CloudSyncProvider) {
-        syncCredentialsStore.saveProvider(provider)
-        syncStateFlow.update { it.copy(provider = provider) }
-    }
+    // ========== TASK-21 拆分：同步配置/动作委托 [SettingsSyncController] ==========
+
+    fun setSyncProvider(provider: CloudSyncProvider) = syncController.setSyncProvider(provider)
 
     /**
-     * Wave 15 整改：密码以 [CharArray] 借用语义提交（本方法消费后立即擦除），明文不再回写状态流；
-     * 返回保存结果——Wave 14 https 校验拒绝或 Wave 15 凭据封印失败时如实回传 false 并上浮反馈，
-     * 不再无条件谎报「已保存」。
+     * Wave 15 整改：密码以 [CharArray] 借用语义提交（消费后立即擦除），明文不回写状态流；
+     * 返回保存结果（https 校验拒绝或凭据封印失败时如实回传 false 并上浮反馈）。
      */
     fun updateWebDavConfig(
         url: String,
         username: String,
         password: CharArray,
         remotePath: String
-    ): Boolean {
-        // Wave 14 全站强制 HTTPS：保存时即时校验端点（fail-fast），
-        // 显式 http:// 直接拒绝并反馈；无 scheme 输入自动归一化为 https://
-        val normalizedUrl = normalizeHttpsEndpoint(url)
-        if (normalizedUrl == null) {
-            syncStateFlow.update {
-                it.copy(syncFeedbackMessage = UiMessage(R.string.sync_error_https_required, listOf("WebDAV")))
-            }
-            password.fill('0')
-            return false
-        }
-        val saved = syncCredentialsStore.saveWebDavConfig(normalizedUrl, username, password, remotePath)
-        password.fill('0')
-        if (!saved) {
-            syncStateFlow.update {
-                it.copy(syncFeedbackMessage = UiMessage(R.string.sync_config_save_failed))
-            }
-            return false
-        }
-        syncStateFlow.update {
-            it.copy(
-                webdavUrl = normalizedUrl,
-                webdavUsername = username,
-                webdavRemotePath = remotePath
-            )
-        }
-        // 保存成功后旧预填通道失效（最新凭据已由存储库持有，重进页面将重新恢复）
-        _webdavPasswordPrefill.value?.fill('0')
-        _webdavPasswordPrefill.value = null
-        return true
-    }
+    ): Boolean = syncController.updateWebDavConfig(url, username, password, remotePath)
 
-    /**
-     * Wave 15 整改：SecretKey 以 [CharArray] 借用语义提交（本方法消费后立即擦除），明文不再回写状态流；
-     * AccessKey ID 属标识符保留 String 参数。返回保存结果（语义同 [updateWebDavConfig]）。
-     */
+    /** Wave 15 整改：SecretKey 以 [CharArray] 借用语义提交（语义同 [updateWebDavConfig]） */
     fun updateS3Config(
         endpoint: String,
         bucket: String,
@@ -513,54 +381,24 @@ class SettingsViewModel @Inject constructor(
         accessKey: String,
         secretKey: CharArray,
         objectKey: String,
-        usePathStyle: Boolean = syncStateFlow.value.s3UsePathStyle
-    ): Boolean {
-        // Wave 14 全站强制 HTTPS：与 WebDAV 一致的保存期端点校验
-        val normalizedEndpoint = normalizeHttpsEndpoint(endpoint)
-        if (normalizedEndpoint == null) {
-            syncStateFlow.update {
-                it.copy(syncFeedbackMessage = UiMessage(R.string.sync_error_https_required, listOf("S3")))
-            }
-            secretKey.fill('0')
-            return false
-        }
-        // AccessKey ID 属标识符：转 CharArray 提交（存储库封印后即擦除），SecretKey 借用语义直达
-        val saved = syncCredentialsStore.saveS3Config(
-            normalizedEndpoint, bucket, region, accessKey.toCharArray(), secretKey, objectKey, usePathStyle
-        )
-        secretKey.fill('0')
-        if (!saved) {
-            syncStateFlow.update {
-                it.copy(syncFeedbackMessage = UiMessage(R.string.sync_config_save_failed))
-            }
-            return false
-        }
-        syncStateFlow.update {
-            it.copy(
-                s3Endpoint = normalizedEndpoint,
-                s3Bucket = bucket,
-                s3Region = region,
-                s3AccessKey = accessKey,
-                s3ObjectKey = objectKey,
-                s3UsePathStyle = usePathStyle
-            )
-        }
-        _s3SecretKeyPrefill.value?.fill('0')
-        _s3SecretKeyPrefill.value = null
-        return true
+        usePathStyle: Boolean = syncController.state.value.s3UsePathStyle
+    ): Boolean = syncController.updateS3Config(endpoint, bucket, region, accessKey, secretKey, objectKey, usePathStyle)
+
+    fun setAutoSyncEnabled(enabled: Boolean) = syncController.setAutoSyncEnabled(enabled)
+
+    fun setWifiOnlySync(enabled: Boolean) {
+        syncController.updateWifiOnlySync(enabled)
+        // TASK-12 整改：持久化（原为纯内存回显）
+        extendedSettingsStore.saveWifiOnlySync(enabled)
+        // TASK-08 整改：网络约束变更即时生效（仅周期同步开启时）
+        reschedulePeriodicSyncIfNeeded()
     }
 
-    /**
-     * Wave 14 全站强制 HTTPS：端点归一化与校验。
-     * 空串原样返回（允许清空配置）；无 scheme 输入自动补 https://；
-     * 显式非 https scheme（http:// 等）返回 null 表示拒绝保存。
-     */
-    private fun normalizeHttpsEndpoint(raw: String): String? {
-        val trimmed = raw.trim()
-        if (trimmed.isEmpty()) return trimmed
-        val withScheme = if (trimmed.contains("://")) trimmed else "https://$trimmed"
-        return if (withScheme.startsWith("https://", ignoreCase = true)) withScheme else null
-    }
+    fun triggerSync() = syncController.triggerSync()
+
+    fun testSyncConnection() = syncController.testSyncConnection()
+
+    fun clearSyncFeedbackMessage() = syncController.clearSyncFeedbackMessage()
 
     fun setEncryptionAlgorithm(algorithm: String) {
         databaseConfigStateFlow.update { it.copy(encryptionAlgorithm = algorithm) }
@@ -615,7 +453,7 @@ class SettingsViewModel @Inject constructor(
             } catch (t: Throwable) {
                 kdfBenchmarkFlow.value = KdfBenchmarkUiState(
                     isRunning = false,
-                    errorMessage = t.message ?: "基准测试失败"
+                    errorMessage = t.message ?: strings.get(R.string.kdf_benchmark_failed)
                 )
             }
         }
@@ -641,18 +479,6 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             settingsRepository.setClipboardTimeout(seconds)
         }
-    }
-
-    fun setAutoSyncEnabled(enabled: Boolean) {
-        syncStateFlow.update { it.copy(autoSyncEnabled = enabled) }
-    }
-
-    fun setWifiOnlySync(enabled: Boolean) {
-        syncStateFlow.update { it.copy(wifiOnlySync = enabled) }
-        // TASK-12 整改：持久化（原为纯内存回显）
-        extendedSettingsStore.saveWifiOnlySync(enabled)
-        // TASK-08 整改：网络约束变更即时生效（仅周期同步开启时）
-        reschedulePeriodicSyncIfNeeded()
     }
 
     fun setCredentialProviderEnabled(enabled: Boolean) {
@@ -836,7 +662,7 @@ class SettingsViewModel @Inject constructor(
         periodicSyncScheduler.reschedule(
             enabled = enabled,
             intervalMinutes = extendedSettingsFlow.value.periodicBackgroundSyncIntervalMinutes,
-            wifiOnly = syncStateFlow.value.wifiOnlySync
+            wifiOnly = syncController.currentWifiOnlySync()
         )
     }
 
@@ -853,7 +679,7 @@ class SettingsViewModel @Inject constructor(
             periodicSyncScheduler.reschedule(
                 enabled = true,
                 intervalMinutes = settings.periodicBackgroundSyncIntervalMinutes,
-                wifiOnly = syncStateFlow.value.wifiOnlySync
+                wifiOnly = syncController.currentWifiOnlySync()
             )
         }
     }
@@ -911,82 +737,6 @@ class SettingsViewModel @Inject constructor(
         updateExtended { it.copy(verboseSyncLog = enabled) }
     }
 
-    fun triggerSync() {
-        if (syncStateFlow.value.isSyncing) return
-        val provider = syncStateFlow.value.provider
-        viewModelScope.launch {
-            syncStateFlow.update {
-                it.copy(
-                    isSyncing = true,
-                    syncFeedbackMessage = UiMessage(R.string.sync_feedback_connecting, listOf(provider.protocol))
-                )
-            }
-
-            val outcome = syncCoordinator.syncNow()
-            val feedback = when (outcome) {
-                is SyncOutcome.UpToDate -> UiMessage(R.string.sync_feedback_done, listOf(provider.protocol))
-                is SyncOutcome.UploadedLocal -> UiMessage(R.string.sync_feedback_uploaded, listOf(provider.protocol))
-                is SyncOutcome.MergedAndUploaded -> UiMessage(R.string.sync_feedback_merged, listOf(provider.protocol))
-                is SyncOutcome.ConflictNeedsUser -> UiMessage(R.string.sync_feedback_conflict)
-                is SyncOutcome.Offline -> UiMessage(R.string.sync_feedback_offline)
-                is SyncOutcome.Error -> UiMessage(R.string.sync_feedback_error, listOf(outcome.message))
-            }
-            // H1 整改：syncLastTime 由真实同步完成时刻填充，不再展示写死的演示文案
-            val syncedNow = outcome is SyncOutcome.UpToDate ||
-                    outcome is SyncOutcome.UploadedLocal ||
-                    outcome is SyncOutcome.MergedAndUploaded
-            syncStateFlow.update {
-                it.copy(
-                    isSyncing = false,
-                    syncFeedbackMessage = feedback,
-                    lastSyncTimeText = if (syncedNow) formatSyncTimestamp() else syncStateFlow.value.lastSyncTimeText
-                )
-            }
-        }
-    }
-
-    /** 将本次同步完成时刻格式化为「今天/昨天/M月d日 HH:mm」本地文案 */
-    private fun formatSyncTimestamp(): String {
-        val dateTime = java.time.Instant.ofEpochMilli(System.currentTimeMillis())
-            .atZone(java.time.ZoneId.systemDefault())
-        val today = java.time.LocalDate.now()
-        val datePrefix = when (dateTime.toLocalDate()) {
-            today -> "今天"
-            today.minusDays(1) -> "昨天"
-            else -> dateTime.format(java.time.format.DateTimeFormatter.ofPattern("M月d日"))
-        }
-        return "$datePrefix ${dateTime.format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"))}"
-    }
-
-    fun testSyncConnection() {
-        if (syncStateFlow.value.isSyncing) return
-        val provider = syncStateFlow.value.provider
-        viewModelScope.launch {
-            syncStateFlow.update {
-                it.copy(
-                    isSyncing = true,
-                    syncFeedbackMessage = UiMessage(R.string.sync_feedback_connecting, listOf(provider.protocol))
-                )
-            }
-            val result = syncCoordinator.testConnection()
-            val feedback = if (result.isSuccess) {
-                UiMessage(R.string.sync_feedback_done, listOf(provider.protocol))
-            } else {
-                UiMessage(R.string.sync_feedback_error, listOf(result.exceptionOrNull()?.message ?: "连接失败"))
-            }
-            syncStateFlow.update {
-                it.copy(
-                    isSyncing = false,
-                    syncFeedbackMessage = feedback
-                )
-            }
-        }
-    }
-
-    fun clearSyncFeedbackMessage() {
-        syncStateFlow.update { it.copy(syncFeedbackMessage = null) }
-    }
-
     // ========== KP2A 扩展：调试日志（真实进程内缓冲） ==========
     fun refreshDebugLogs() {
         debugLogLinesFlow.value = debugLogBuffer.snapshot()
@@ -997,197 +747,40 @@ class SettingsViewModel @Inject constructor(
         debugLogLinesFlow.value = emptyList()
     }
 
-    // ========== 断点整改：调试日志导出（SAF CreateDocument 真实落盘） ==========
-    private val debugExportFeedbackFlow = MutableStateFlow<UiMessage?>(null)
+    // ========== TASK-21 拆分：导出/模板/调试日志委托 [SettingsExportController] ==========
 
-    /** SAF 另存为结果反馈（成功/失败），由 Screen 层消费后清除 */
-    val debugExportFeedback: StateFlow<UiMessage?> = debugExportFeedbackFlow.asStateFlow()
+    /** SAF 调试日志导出结果反馈（成功/失败），由 Screen 层消费后清除 */
+    val debugExportFeedback: StateFlow<UiMessage?> get() = exportController.debugExportFeedback
 
-    /**
-     * 断点整改：真实导出调试日志——内容经脱敏（移除网址与账号字段）后写入 SAF 目标 Uri。
-     * [targetUri] 由 Screen 层 CreateDocument 选择器产生；此前导出仅弹 Snackbar，从未落盘。
-     */
-    fun exportDebugLogs(targetUri: Uri) {
-        val resolver = appContext?.contentResolver
-        if (resolver == null) {
-            debugExportFeedbackFlow.value = UiMessage(R.string.debug_export_failed)
-            return
-        }
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                val sanitizedText = debugLogBuffer.exportSanitizedText()
-                val written = resolver.openOutputStream(targetUri)?.use { os ->
-                    os.write(sanitizedText.toByteArray(Charsets.UTF_8))
-                    os.flush()
-                    true
-                } ?: false
-                debugExportFeedbackFlow.value =
-                    if (written) UiMessage(R.string.debug_export_done)
-                    else UiMessage(R.string.debug_export_failed)
-            } catch (e: Exception) {
-                // 只留痕异常类型，不落异常消息（防御性，避免潜在敏感内容回流日志缓冲）
-                debugLogBuffer.warn(TAG, "调试日志导出失败: ${e.javaClass.simpleName}")
-                debugExportFeedbackFlow.value = UiMessage(R.string.debug_export_failed)
-            }
-        }
-    }
+    fun exportDebugLogs(targetUri: Uri) = exportController.exportDebugLogs(targetUri)
 
-    fun clearDebugExportFeedback() {
-        debugExportFeedbackFlow.value = null
-    }
-
-    // ========== TASK-13 整改：密码库设置页导出/模板动作真实化 ==========
-    // 此前「导出 KDBX / 导出 XML / 导出密钥文件 / 模板安装 / 子库挂载」五个动作仅弹
-    // UiMessage 假成功提示，从未触碰任何数据；现导出三件套走仓库真实序列化 + SAF 落盘，
-    // 模板安装真实建组落库，子库挂载如实告知未实现（无对应系统能力，属功能缺口）。
-
-    private val exportFeedbackFlow = MutableStateFlow<UiMessage?>(null)
+    fun clearDebugExportFeedback() = exportController.clearDebugExportFeedback()
 
     /** 导出/模板动作结果反馈（成功/失败），由 Screen 层消费后清除 */
-    val exportFeedback: StateFlow<UiMessage?> = exportFeedbackFlow.asStateFlow()
+    val exportFeedback: StateFlow<UiMessage?> get() = exportController.exportFeedback
 
-    fun clearExportFeedback() {
-        exportFeedbackFlow.value = null
-    }
+    fun clearExportFeedback() = exportController.clearExportFeedback()
 
     /** 导出当前数据库为 KDBX 完整副本并写入 SAF 目标 Uri */
-    fun exportKdbxTo(targetUri: Uri) {
-        viewModelScope.launch(Dispatchers.IO) {
-            exportFeedbackFlow.value = exportAndWrite(
-                targetUri, R.string.dbset_export_kdbx_done
-            ) { vaultRepository.exportKdbxBytes() }
-        }
-    }
+    fun exportKdbxTo(targetUri: Uri) = exportController.exportKdbxTo(targetUri)
 
     /** 导出当前数据库为 KeePass 2.x 兼容明文 XML 并写入 SAF 目标 Uri */
-    fun exportVaultXmlTo(targetUri: Uri) {
-        viewModelScope.launch(Dispatchers.IO) {
-            exportFeedbackFlow.value = exportAndWrite(
-                targetUri, R.string.dbset_export_xml_done
-            ) { vaultRepository.exportVaultXmlBytes() }
-        }
-    }
+    fun exportVaultXmlTo(targetUri: Uri) = exportController.exportVaultXmlTo(targetUri)
 
     /** 导出会话绑定的密钥文件并写入 SAF 目标 Uri */
-    fun exportKeyFileTo(targetUri: Uri) {
-        viewModelScope.launch(Dispatchers.IO) {
-            exportFeedbackFlow.value = exportAndWrite(
-                targetUri, R.string.dbset_keyfile_exported
-            ) { vaultRepository.exportKeyFileBytes() }
-        }
-    }
+    fun exportKeyFileTo(targetUri: Uri) = exportController.exportKeyFileTo(targetUri)
 
     /** 安装条目模板库（真实创建「模板」分组与 5 个模板条目） */
-    fun installEntryTemplates() {
-        viewModelScope.launch {
-            val result = vaultRepository.installEntryTemplates()
-            exportFeedbackFlow.value = if (result.isSuccess) {
-                UiMessage(R.string.dbset_templates_installed)
-            } else {
-                UiMessage(R.string.settings_action_failed, listOf((result as com.keepasskey.core.result.KdbxResult.Failure).message))
-            }
-        }
-    }
+    fun installEntryTemplates() = exportController.installEntryTemplates()
 
-    /** 序列化 → SAF 写盘的公共管线；任一环节失败都映射为可理解的失败反馈 */
-    private suspend fun exportAndWrite(
-        targetUri: Uri,
-        successMessageRes: Int,
-        bytesProvider: suspend () -> com.keepasskey.core.result.KdbxResult<ByteArray>
-    ): UiMessage {
-        val result = bytesProvider()
-        if (!result.isSuccess) {
-            val failure = result as com.keepasskey.core.result.KdbxResult.Failure
-            return UiMessage(R.string.settings_action_failed, listOf(failure.message))
-        }
-        val bytes = result.getOrNull()
-        val resolver = appContext?.contentResolver
-        val written = if (bytes != null && resolver != null) {
-            try {
-                resolver.openOutputStream(targetUri)?.use { os ->
-                    os.write(bytes)
-                    os.flush()
-                    true
-                } ?: false
-            } catch (e: Exception) {
-                debugLogBuffer.warn(TAG, "SAF 导出写盘失败: ${e.javaClass.simpleName}")
-                false
-            }
-        } else {
-            false
-        }
-        return if (written) {
-            UiMessage(successMessageRes)
-        } else {
-            UiMessage(R.string.settings_action_failed, listOf("SAF 写盘失败"))
-        }
-    }
+    // ========== TASK-21 拆分：健康检查委托 [SettingsHealthController] ==========
 
-    fun rescanHealth() {
-        if (healthStateFlow.value.isHealthScanning) return
-        viewModelScope.launch {
-            healthStateFlow.update { it.copy(isHealthScanning = true) }
-            try {
-                val entries = vaultRepository.getKdbxEntries()
-                val issues = HealthCheckEngine.analyzeEntries(entries)
-
-                val weakCount = issues.count { it.riskLevel == PasswordRiskLevel.WEAK }
-                val reusedCount = issues.count { it.riskLevel == PasswordRiskLevel.REUSED }
-                val expiredCount = issues.count { it.riskLevel == PasswordRiskLevel.EXPIRED }
-
-                val calculatedScore = (HEALTH_SCORE_BASE -
-                        weakCount * HEALTH_PENALTY_WEAK -
-                        reusedCount * HEALTH_PENALTY_REUSED -
-                        expiredCount * HEALTH_PENALTY_EXPIRED).coerceIn(0, 100)
-
-                val status = when {
-                    calculatedScore >= 90 -> "优秀"
-                    calculatedScore >= 70 -> "良好"
-                    calculatedScore >= 50 -> "一般"
-                    else -> "需改进"
-                }
-
-                val nowTime = java.time.format.DateTimeFormatter.ofPattern("HH:mm", java.util.Locale.getDefault())
-                    .format(java.time.LocalTime.now())
-                val lastScanText = "今天 $nowTime"
-
-                val message = when {
-                    expiredCount > 0 -> "发现 $expiredCount 个已过期凭据，$weakCount 个弱密码，$reusedCount 个复用"
-                    weakCount == 0 && reusedCount == 0 -> "全库扫描完成，未发现弱密码与复用"
-                    reusedCount > 0 && weakCount > 0 -> "发现 $weakCount 个弱密码，$reusedCount 个重复使用"
-                    reusedCount > 0 -> "发现 $reusedCount 个密码重复使用，建议启用唯一密码"
-                    else -> "发现 $weakCount 个弱密码，建议提升密码复杂度"
-                }
-
-                healthStateFlow.update {
-                    it.copy(
-                        isHealthScanning = false,
-                        healthScore = calculatedScore,
-                        healthStatus = status,
-                        healthMessage = message,
-                        weakPasswordCount = weakCount,
-                        reusedPasswordCount = reusedCount,
-                        compromisedPasswordCount = 0,
-                        lastHealthScanTime = lastScanText
-                    )
-                }
-            } catch (e: Exception) {
-                healthStateFlow.update {
-                    it.copy(
-                        isHealthScanning = false,
-                        healthMessage = "健康扫描失败: ${e.message}"
-                    )
-                }
-            }
-        }
-    }
+    fun rescanHealth() = healthController.rescanHealth()
 
     override fun onCleared() {
         // Wave 15 整改：ViewModel 销毁时擦除凭据预填通道中的明文驻留
-        _webdavPasswordPrefill.value?.fill('0')
-        _webdavPasswordPrefill.value = null
-        _s3SecretKeyPrefill.value?.fill('0')
-        _s3SecretKeyPrefill.value = null
+        syncController.clearWebDavPasswordPrefill()
+        syncController.clearS3SecretKeyPrefill()
         super.onCleared()
     }
 }

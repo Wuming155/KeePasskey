@@ -11,6 +11,7 @@ import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.security.BiometricAuthManager
 import com.keepasskey.app.security.BiometricCredentialStorage
 import com.keepasskey.app.security.BiometricResult
+import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.core.result.KdbxResult
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -49,8 +50,13 @@ class UnlockViewModel @Inject constructor(
     // 依赖在类型上允许为 null 仅用于单测注入空实现；生产 DI 恒注入真实实例
     private val biometricAuthManager: BiometricAuthManager?,
     private val biometricCredentialStorage: BiometricCredentialStorage?,
-    private val debugLog: DebugLogBuffer
+    private val debugLog: DebugLogBuffer,
+    // TASK-21：非 Compose 层文案资源解析通道（生产 DI 注入真实现；单测注入假实现）
+    private val stringsProvider: StringsProvider? = null
 ) : ViewModel() {
+
+    // P3-23：null 时回退空串实现（生产 Hilt 恒注入 StringsProviderModule 真实现）
+    private val strings: StringsProvider = stringsProvider ?: StringsProvider { _, _ -> "" }
 
     private val _uiState = MutableStateFlow(UnlockUiState())
     val uiState: StateFlow<UnlockUiState> = _uiState.asStateFlow()
@@ -84,7 +90,11 @@ class UnlockViewModel @Inject constructor(
                     _uiState.update {
                         it.copy(
                             databaseName = active.name,
-                            databaseStatus = if (active.isRemote) "云端同步 • " + active.syncType else "本地存储 • " + active.path,
+                            databaseStatus = if (active.isRemote) {
+                                strings.get(R.string.unlock_db_status_cloud, active.syncType)
+                            } else {
+                                strings.get(R.string.unlock_db_status_local, active.path)
+                            },
                             isQuickUnlockAvailable = hasSealedCredential
                         )
                     }
@@ -332,6 +342,7 @@ class UnlockViewModel @Inject constructor(
         ) { result -> deferred.complete(result) }
 
         return withTimeoutOrNull(BIOMETRIC_ENROLL_TIMEOUT_MS) { deferred.await() }
+            // P3-23：errString 仅经 debugLog 留痕（不外显 UI），属内部诊断文案，保留原样
             ?: BiometricResult.Error(-1, "生物识别登记超时")
     }
 

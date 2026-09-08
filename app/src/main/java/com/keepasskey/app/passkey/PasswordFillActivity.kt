@@ -7,6 +7,7 @@ import androidx.credentials.GetCredentialResponse
 import androidx.credentials.PasswordCredential
 import androidx.credentials.provider.PendingIntentHandler
 import androidx.lifecycle.lifecycleScope
+import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.VaultRepository
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.launch
@@ -29,7 +30,7 @@ class PasswordFillActivity : BaseCredentialActivity() {
         val expectedPackage = intent.getStringExtra(EXTRA_EXPECTED_PACKAGE).orEmpty()
         if (entryId.isBlank()) {
             Log.e(TAG, "缺少密码凭据 entryId")
-            failAndFinish("缺少凭据条目 ID")
+            failAndFinish(getString(R.string.passkey_error_missing_credential_id))
             return
         }
 
@@ -37,7 +38,7 @@ class PasswordFillActivity : BaseCredentialActivity() {
             try {
                 if (vaultRepository.isLocked()) {
                     Log.w(TAG, "密码库处于锁定状态，无法填充密码")
-                    failAndFinish("密码库已锁定")
+                    failAndFinish(getString(R.string.cred_error_vault_locked))
                     return@launch
                 }
 
@@ -45,7 +46,7 @@ class PasswordFillActivity : BaseCredentialActivity() {
                 val entry = allEntries.firstOrNull { it.id.toHexString() == entryId }
                 if (entry == null) {
                     Log.e(TAG, "未找到目标密码条目: entryId=$entryId")
-                    failAndFinish("未找到匹配的凭据条目")
+                    failAndFinish(getString(R.string.cred_error_entry_not_found))
                     return@launch
                 }
 
@@ -57,7 +58,7 @@ class PasswordFillActivity : BaseCredentialActivity() {
                         DomainMatcher.isPackageMatch(entry.url, expectedPackage)
                 if (!domainOk && !packageOk) {
                     Log.e(TAG, "条目与调用方不匹配，拒绝回传密码")
-                    failAndFinish("凭据与调用方不匹配")
+                    failAndFinish(getString(R.string.passkey_error_caller_mismatch))
                     return@launch
                 }
 

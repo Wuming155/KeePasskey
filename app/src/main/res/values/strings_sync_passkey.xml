@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    TASK-21 第二阶段（P3-23）：同步编排层与 Passkey / Credential Provider 层用户可见中文抽取。
+    仅收录进入 SyncOutcome.Error / 异常消息 / 凭据流程失败反馈的用户可见文案；
+    debugLog / Log.x 开发者日志文案不抽取，保留在各源文件内。
+-->
+<resources>
+
+    <!-- ===== 同步编排层 (SyncCoordinator) 错误反馈 ===== -->
+    <string name="sync_error_no_open_vault_file">当前无打开的密码库文件</string>
+    <string name="sync_error_vault_not_unlocked">密码库未解锁或数据为空</string>
+    <string name="sync_error_invalid_endpoint">端点配置非法</string>
+    <string name="sync_error_no_sync_credentials">未配置云同步凭据</string>
+    <string name="sync_error_test_no_credentials">未配置同步凭据</string>
+    <string name="sync_error_local_serialize_failed">本地数据库序列化失败</string>
+    <string name="sync_error_first_upload_failed">首次同步上传云端失败</string>
+    <string name="sync_error_remote_updated_local_save_failed">云端已更新但本地保存失败: %1$s</string>
+    <string name="sync_error_conflict_presave_failed">冲突会话前置保存失败: %1$s</string>
+    <string name="sync_error_load_remote_failed">加载云端数据库失败，密码或格式不匹配</string>
+    <string name="sync_error_unknown">同步发生未知错误</string>
+    <string name="sync_error_no_pending_conflict">无待解决的冲突会话</string>
+    <string name="sync_error_conflict_path_invalid">冲突路径失效</string>
+    <string name="sync_error_local_snapshot_lost">本地冲突快照丢失</string>
+    <string name="sync_error_remote_snapshot_lost">远端冲突快照丢失</string>
+    <string name="sync_error_conflict_serialize_failed">冲突合并数据库序列化失败</string>
+    <string name="sync_error_merged_upload_local_save_failed">合并版本已上传云端，但本地保存失败: %1$s</string>
+    <string name="sync_error_remote_changed_during_resolve">云端在冲突解决期间再次更新，请重新同步以重新合并</string>
+    <string name="sync_error_upload_resolved_failed">上传冲突解决版本失败: %1$s</string>
+    <string name="sync_error_decrypt_local_conflict_failed">无法解密本地冲突数据库</string>
+    <string name="sync_error_decrypt_remote_conflict_failed">无法解密云端冲突数据库</string>
+    <string name="sync_error_serialize_merged_failed">序列化合并数据库失败</string>
+    <string name="sync_error_upload_merged_failed">上传合并版本失败: %1$s</string>
+
+    <!-- ===== Passkey / 凭据流程失败反馈（锁库、条目缺失等短消息复用主 strings.xml 的 cred_error_* 既有键） ===== -->
+    <string name="passkey_error_missing_credential_id">缺少凭据条目 ID</string>
+    <string name="passkey_error_invalid_passkey_entry">无效的通行密钥条目</string>
+    <string name="passkey_error_origin_missing">调用来源缺失</string>
+    <string name="passkey_error_caller_mismatch">凭据与调用方不匹配</string>
+    <string name="passkey_error_missing_register_params">缺少通行密钥注册核心参数</string>
+    <string name="passkey_error_caller_unknown">无法确定调用方应用标识</string>
+    <string name="passkey_error_password_empty">密码数据为空</string>
+
+</resources>

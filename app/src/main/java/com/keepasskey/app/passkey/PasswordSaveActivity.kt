@@ -6,6 +6,7 @@ import android.util.Log
 import androidx.credentials.CreatePasswordResponse
 import androidx.credentials.provider.PendingIntentHandler
 import androidx.lifecycle.lifecycleScope
+import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.VaultRepository
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.launch
@@ -49,7 +50,7 @@ class PasswordSaveActivity : BaseCredentialActivity() {
 
         if (password.isNullOrBlank()) {
             Log.e(TAG, "缺少待保存的密码数据")
-            failAndFinish("密码数据为空")
+            failAndFinish(getString(R.string.passkey_error_password_empty))
             return
         }
 
@@ -61,7 +62,7 @@ class PasswordSaveActivity : BaseCredentialActivity() {
             try {
                 if (vaultRepository.isLocked()) {
                     Log.w(TAG, "密码库处于锁定状态，无法保存密码凭据")
-                    failAndFinish("密码库已锁定")
+                    failAndFinish(getString(R.string.cred_error_vault_locked))
                     return@launch
                 }
 

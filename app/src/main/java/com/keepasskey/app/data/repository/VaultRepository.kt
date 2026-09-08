@@ -88,6 +88,9 @@ interface VaultRepository {
 
     /**
      * 导入并打开已有 KDBX 数据库 (支持本地、WebDAV、S3 来源)
+     *
+     * P3-23：[syncType] 为落库的持久化标签（数据库卡片回显其存储值，与
+     * OpenVaultSourceType.LOCAL.label 对齐），非纯展示文案，保留原样
      */
     suspend fun importExternalDatabase(
         name: String,

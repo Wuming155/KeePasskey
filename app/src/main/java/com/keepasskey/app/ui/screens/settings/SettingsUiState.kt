@@ -69,6 +69,8 @@ data class SettingsUiState(
     val argon2Iterations: Long = 3L,
     val argon2MemoryMb: Long = 64L,
     val argon2Parallelism: Int = 4,
+    // P3-23：展示型默认值，无任何生产者覆写（DatabaseSettingsScreen 直读）；
+    // 资源化需先在 SettingsViewModel 补 strings 生产者（超出本任务改动面），保留原样
     val compressionAlgorithm: String = "GZip 压缩",
     val recycleBinEnabled: Boolean = true,
     val tanExpiresOnUse: Boolean = true, // KP2A: TAN 一次性凭证使用后自动过期
@@ -91,8 +93,11 @@ data class SettingsUiState(
     val s3AccessKey: String = "",
     val s3ObjectKey: String = "passwords/master_vault.kdbx",
     val s3UsePathStyle: Boolean = false,
-    // 通用同步状态（H1 整改：默认值不再写死演示时间戳/假状态文案，由真实同步结果填充）
-    val syncLastTime: String = "尚未同步",
+    // 通用同步状态（H1 整改：默认值不再写死演示时间戳/假状态文案，由真实同步结果填充；
+    // P3-23：syncLastTime 空串占位，真实值由 SettingsViewModel 经 strings.get(sync_last_time_never) 填充）
+    val syncLastTime: String = "",
+    // P3-23：展示型默认值，无任何生产者覆写（CloudSyncComponents 直读）；资源化需先在
+    // SettingsViewModel 补 strings 生产者（超出本任务改动面），保留原样
     val syncStatusText: String = "未验证",
     val autoSyncEnabled: Boolean = true,
     val wifiOnlySync: Boolean = true,
@@ -172,13 +177,15 @@ data class SettingsUiState(
     val defaultTotpDigits: Int = 6, // 默认位数 (6位)
 
     // 7. 密码库健康度检查与审计 (Audit & Health Check)
+    // P3-23：默认空串占位——真实初值由 SettingsHealthController 经 strings.get
+    // （health_status_not_scanned / health_scan_hint_idle）填充
     val healthScore: Int = 0,
-    val healthStatus: String = "未扫描",
-    val healthMessage: String = "点击重新扫描以评估密码库安全健康状态",
+    val healthStatus: String = "",
+    val healthMessage: String = "",
     val weakPasswordCount: Int = 0,
     val reusedPasswordCount: Int = 0,
     val compromisedPasswordCount: Int = 0,
-    val lastHealthScanTime: String = "未扫描",
+    val lastHealthScanTime: String = "",
     val isHealthScanning: Boolean = false,
 
     // 8. 调试日志与系统诊断 (Debug & Diagnostics)

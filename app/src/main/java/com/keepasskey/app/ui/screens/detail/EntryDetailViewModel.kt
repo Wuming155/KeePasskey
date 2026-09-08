@@ -10,6 +10,7 @@ import com.keepasskey.app.data.repository.SettingsRepository
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.ui.model.UiAttachment
 import com.keepasskey.app.ui.model.UiEntryRevision
+import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.model.UiVaultEntry
 import com.keepasskey.app.util.tickerFlow
@@ -39,8 +40,15 @@ class EntryDetailViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val vaultRepository: VaultRepository,
     private val settingsRepository: SettingsRepository,
-    private val clipboardSecurityManager: com.keepasskey.app.security.ClipboardSecurityManager? = null
+    private val clipboardSecurityManager: com.keepasskey.app.security.ClipboardSecurityManager? = null,
+    // TASK-21：非 Compose 层文案资源解析通道（生产 DI 注入真实现；单测注入假实现）
+    private val stringsProvider: StringsProvider? = null
 ) : ViewModel() {
+
+    // P3-23：文案解析通道（优先 stringsProvider，其次经 appContext 转发，均缺省时回退空串实现）
+    private val strings: StringsProvider = stringsProvider
+        ?: appContext?.let { ctx -> StringsProvider { id, args -> ctx.getString(id, *args) } }
+        ?: StringsProvider { _, _ -> "" }
 
     private val entryIdFlow = MutableStateFlow<String?>(savedStateHandle.get<String>("entryId"))
     private val isPasswordVisibleFlow = MutableStateFlow(false)
@@ -268,7 +276,7 @@ class EntryDetailViewModel @Inject constructor(
             val revisionPasswordChars = vaultRepository.getEntryRevisionPasswordChars(entryId, revision.id)
             val updated = snapshot.entry.copy(
                 groupId = current.groupId,
-                updatedAt = "刚刚 (从历史版本回滚)"
+                updatedAt = strings.get(R.string.detail_rollback_updated_at)
             )
             val result = vaultRepository.saveEntry(
                 updated,

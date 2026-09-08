@@ -548,6 +548,7 @@ private fun ModernSectionHeader(
     )
 }
 
+// P3-23：以下 Preview name 为 IDE 预览标注（仅开发期可见，非运行时 UI），保留原样
 @Preview(name = "浅色模式", showBackground = true)
 @Preview(name = "深色模式", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
 @Composable

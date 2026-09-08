@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.keepasskey.app.R
 import com.keepasskey.app.sync.SyncCoordinator
 import com.keepasskey.app.sync.SyncOutcome
+import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.sync.merge.ConflictResolutionChoice
@@ -28,8 +29,13 @@ sealed interface ConflictResolutionEvent {
 
 @HiltViewModel
 class ConflictResolutionViewModel @Inject constructor(
-    private val syncCoordinator: SyncCoordinator
+    private val syncCoordinator: SyncCoordinator,
+    // TASK-21：非 Compose 层文案资源解析通道（生产 DI 注入真实现；单测注入假实现）
+    private val stringsProvider: StringsProvider? = null
 ) : ViewModel() {
+
+    // P3-23：null 时回退空串实现（生产 Hilt 恒注入 StringsProviderModule 真实现）
+    private val strings: StringsProvider = stringsProvider ?: StringsProvider { _, _ -> "" }
 
     private val _uiState = MutableStateFlow(ConflictResolutionUiState(entries = emptyList()))
     val uiState: StateFlow<ConflictResolutionUiState> = _uiState.asStateFlow()
@@ -47,7 +53,7 @@ class ConflictResolutionViewModel @Inject constructor(
                             fieldList.add(
                                 ConflictedField(
                                     KdbxConstants.Fields.TITLE,
-                                    "标题 (Title)",
+                                    strings.get(R.string.conflict_field_title),
                                     pair.localEntry.title,
                                     pair.remoteEntry.title
                                 )
@@ -57,7 +63,7 @@ class ConflictResolutionViewModel @Inject constructor(
                             fieldList.add(
                                 ConflictedField(
                                     KdbxConstants.Fields.USER_NAME,
-                                    "用户名 (Username)",
+                                    strings.get(R.string.conflict_field_username),
                                     pair.localEntry.userName,
                                     pair.remoteEntry.userName
                                 )
@@ -68,9 +74,9 @@ class ConflictResolutionViewModel @Inject constructor(
                             fieldList.add(
                                 ConflictedField(
                                     KdbxConstants.Fields.PASSWORD,
-                                    "密码 (Password)",
-                                    "••••••••（本地版本）",
-                                    "••••••••（云端版本）",
+                                    strings.get(R.string.conflict_field_password),
+                                    strings.get(R.string.conflict_mask_local),
+                                    strings.get(R.string.conflict_mask_remote),
                                     isSensitive = true
                                 )
                             )
@@ -79,7 +85,7 @@ class ConflictResolutionViewModel @Inject constructor(
                             fieldList.add(
                                 ConflictedField(
                                     KdbxConstants.Fields.URL,
-                                    "网址 (URL)",
+                                    strings.get(R.string.conflict_field_url),
                                     pair.localEntry.url,
                                     pair.remoteEntry.url
                                 )
@@ -89,7 +95,7 @@ class ConflictResolutionViewModel @Inject constructor(
                             fieldList.add(
                                 ConflictedField(
                                     KdbxConstants.Fields.NOTES,
-                                    "备注 (Notes)",
+                                    strings.get(R.string.conflict_field_notes),
                                     pair.localEntry.notes,
                                     pair.remoteEntry.notes
                                 )
@@ -98,7 +104,7 @@ class ConflictResolutionViewModel @Inject constructor(
                         ConflictedEntryItem(
                             id = pair.entryId,
                             title = pair.localEntry.title.ifBlank { pair.remoteEntry.title },
-                            groupPath = "根目录 / 同步冲突",
+                            groupPath = strings.get(R.string.conflict_group_path),
                             fields = fieldList
                         )
                     }
@@ -109,8 +115,10 @@ class ConflictResolutionViewModel @Inject constructor(
                     _uiState.update {
                         it.copy(
                             entries = items,
-                            localModifiedTime = localNewest?.let(::formatConflictTime).orEmpty().ifEmpty { "未知" },
-                            remoteModifiedTime = remoteNewest?.let(::formatConflictTime).orEmpty().ifEmpty { "未知" }
+                            localModifiedTime = localNewest?.let(::formatConflictTime).orEmpty()
+                                .ifEmpty { strings.get(R.string.conflict_time_unknown) },
+                            remoteModifiedTime = remoteNewest?.let(::formatConflictTime).orEmpty()
+                                .ifEmpty { strings.get(R.string.conflict_time_unknown) }
                         )
                     }
                 }
@@ -121,9 +129,9 @@ class ConflictResolutionViewModel @Inject constructor(
     private fun formatConflictTime(instant: Instant): String {
         val local = instant.atZone(ZoneId.systemDefault())
         val datePrefix = when (local.toLocalDate()) {
-            java.time.LocalDate.now() -> "今天"
-            java.time.LocalDate.now().minusDays(1) -> "昨天"
-            else -> local.format(DateTimeFormatter.ofPattern("M月d日"))
+            java.time.LocalDate.now() -> strings.get(R.string.time_today)
+            java.time.LocalDate.now().minusDays(1) -> strings.get(R.string.time_yesterday)
+            else -> local.format(DateTimeFormatter.ofPattern(strings.get(R.string.date_pattern_month_day)))
         }
         return "$datePrefix ${local.format(DateTimeFormatter.ofPattern("HH:mm"))}"
     }
@@ -182,7 +190,10 @@ class ConflictResolutionViewModel @Inject constructor(
                     userMessage = if (isSuccess) {
                         UiMessage(R.string.conflict_resolved_msg)
                     } else {
-                        UiMessage(R.string.sync_feedback_error, listOf((outcome as? SyncOutcome.Error)?.message ?: "合并失败"))
+                        UiMessage(
+                            R.string.sync_feedback_error,
+                            listOf((outcome as? SyncOutcome.Error)?.message ?: strings.get(R.string.conflict_merge_failed))
+                        )
                     }
                 )
             }

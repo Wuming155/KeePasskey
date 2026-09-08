@@ -129,6 +129,8 @@ fun UnlockScreen(
                             val read = input.read(chunk)
                             if (read < 0) break
                             total += read
+                            // P3-23：以下 check/error 消息为内部异常诊断文案（runCatching 吞没，
+                            // 失败统一经 onKeyFileReadFailed 上浮资源化 UiMessage），不外显，保留原样
                             check(total <= MAX_KEY_FILE_BYTES) { "密钥文件超出大小上限" }
                             buffer.write(chunk, 0, read)
                         }

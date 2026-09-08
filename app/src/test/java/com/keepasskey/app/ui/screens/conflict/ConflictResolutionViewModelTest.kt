@@ -106,7 +106,16 @@ class ConflictResolutionViewModelTest {
             }
         }
 
-        val viewModel = ConflictResolutionViewModel(mockCoordinator)
+        // P3-23：文案资源化后，单测注入按资源 ID 映射的假 StringsProvider（无 Android 资源环境），
+        // 断言语义与资源化前等价（字段标签仍为「标题/密码」中文文案）
+        val fakeStrings = com.keepasskey.app.ui.model.StringsProvider { id, _ ->
+            when (id) {
+                com.keepasskey.app.R.string.conflict_field_title -> "标题 (Title)"
+                com.keepasskey.app.R.string.conflict_field_password -> "密码 (Password)"
+                else -> ""
+            }
+        }
+        val viewModel = ConflictResolutionViewModel(mockCoordinator, stringsProvider = fakeStrings)
         val job = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
             viewModel.uiState.collect {}
         }

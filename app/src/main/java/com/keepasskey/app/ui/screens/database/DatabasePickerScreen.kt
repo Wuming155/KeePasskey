@@ -405,14 +405,14 @@ private fun OpenExistingVaultDialog(
         onDismissRequest = onDismiss,
         title = {
             Text(
-                text = "打开已有 KDBX 密码库",
+                text = stringResource(R.string.picker_open_vault_title),
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
             )
         },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(
-                    text = "请选择已有密码库文件的存储源位置：",
+                    text = stringResource(R.string.picker_open_vault_source_hint),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -429,9 +429,9 @@ private fun OpenExistingVaultDialog(
                             label = {
                                 Text(
                                     text = when (source) {
-                                        OpenVaultSourceType.LOCAL -> "本地设备"
-                                        OpenVaultSourceType.WEBDAV -> "WebDAV"
-                                        OpenVaultSourceType.S3_COMPATIBLE -> "兼容 S3"
+                                        OpenVaultSourceType.LOCAL -> stringResource(R.string.picker_chip_local)
+                                        OpenVaultSourceType.WEBDAV -> stringResource(R.string.picker_chip_webdav)
+                                        OpenVaultSourceType.S3_COMPATIBLE -> stringResource(R.string.picker_chip_s3)
                                     },
                                     fontSize = 12.sp
                                 )
@@ -446,7 +446,7 @@ private fun OpenExistingVaultDialog(
                     OpenVaultSourceType.LOCAL -> {
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Text(
-                                text = "从本机设备存储或系统 SAF 选择器导入已存在的 .kdbx 数据库：",
+                                text = stringResource(R.string.picker_local_desc),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -454,7 +454,7 @@ private fun OpenExistingVaultDialog(
                             OutlinedTextField(
                                 value = localName,
                                 onValueChange = { localName = it },
-                                label = { Text("密码库标识名称") },
+                                label = { Text(stringResource(R.string.picker_vault_id_name)) },
                                 singleLine = true,
                                 modifier = Modifier.fillMaxWidth()
                             )
@@ -462,7 +462,7 @@ private fun OpenExistingVaultDialog(
                             OutlinedTextField(
                                 value = localPath,
                                 onValueChange = { localPath = it },
-                                label = { Text("本地绝对路径 / 虚拟 URI") },
+                                label = { Text(stringResource(R.string.picker_local_path_label)) },
                                 leadingIcon = { Icon(Icons.Default.Storage, contentDescription = null, modifier = Modifier.size(18.dp)) },
                                 singleLine = true,
                                 modifier = Modifier.fillMaxWidth()
@@ -478,7 +478,7 @@ private fun OpenExistingVaultDialog(
                             ) {
                                 Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text("启动系统文件选择器定位")
+                                Text(stringResource(R.string.picker_browse_file))
                             }
                         }
                     }
@@ -486,7 +486,7 @@ private fun OpenExistingVaultDialog(
                     OpenVaultSourceType.WEBDAV -> {
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Text(
-                                text = "连接私有 WebDAV 服务器 (Nextcloud / 坚果云 / 群晖) 打开远端库：",
+                                text = stringResource(R.string.picker_webdav_desc),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -494,7 +494,7 @@ private fun OpenExistingVaultDialog(
                             OutlinedTextField(
                                 value = webdavName,
                                 onValueChange = { webdavName = it },
-                                label = { Text("密码库展示名称") },
+                                label = { Text(stringResource(R.string.picker_vault_display_name)) },
                                 singleLine = true,
                                 modifier = Modifier.fillMaxWidth()
                             )
@@ -502,7 +502,7 @@ private fun OpenExistingVaultDialog(
                             OutlinedTextField(
                                 value = webdavUrl,
                                 onValueChange = { webdavUrl = it },
-                                label = { Text("WebDAV 服务器完整路径 (URL)") },
+                                label = { Text(stringResource(R.string.picker_webdav_url_label)) },
                                 placeholder = { Text("https://example.com/dav/passwords.kdbx") },
                                 leadingIcon = { Icon(Icons.Default.Public, contentDescription = null, modifier = Modifier.size(18.dp)) },
                                 singleLine = true,
@@ -517,7 +517,7 @@ private fun OpenExistingVaultDialog(
                     OpenVaultSourceType.S3_COMPATIBLE -> {
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Text(
-                                text = "连接兼容 AWS S3 规范的对象存储桶 (Cloudflare R2 / MinIO) 打开已有库：",
+                                text = stringResource(R.string.picker_s3_desc),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -525,7 +525,7 @@ private fun OpenExistingVaultDialog(
                             OutlinedTextField(
                                 value = s3Name,
                                 onValueChange = { s3Name = it },
-                                label = { Text("密码库展示名称") },
+                                label = { Text(stringResource(R.string.picker_vault_display_name)) },
                                 singleLine = true,
                                 modifier = Modifier.fillMaxWidth()
                             )
@@ -533,7 +533,7 @@ private fun OpenExistingVaultDialog(
                             OutlinedTextField(
                                 value = s3Endpoint,
                                 onValueChange = { s3Endpoint = it },
-                                label = { Text("S3 Endpoint 接入端点 URL") },
+                                label = { Text(stringResource(R.string.picker_s3_endpoint_label)) },
                                 placeholder = { Text("https://<account>.r2.cloudflarestorage.com") },
                                 leadingIcon = { Icon(Icons.Default.CloudQueue, contentDescription = null, modifier = Modifier.size(18.dp)) },
                                 singleLine = true,
@@ -543,7 +543,7 @@ private fun OpenExistingVaultDialog(
                             OutlinedTextField(
                                 value = s3Bucket,
                                 onValueChange = { s3Bucket = it },
-                                label = { Text("存储桶名称 (Bucket) 及路径") },
+                                label = { Text(stringResource(R.string.picker_s3_bucket_label)) },
                                 placeholder = { Text("my-vault/keepass.kdbx") },
                                 singleLine = true,
                                 modifier = Modifier.fillMaxWidth()
@@ -565,7 +565,7 @@ private fun OpenExistingVaultDialog(
                 },
                 shape = CapsuleShape
             ) {
-                Text("打开并加载")
+                Text(stringResource(R.string.picker_open_and_load))
             }
         },
         dismissButton = {
@@ -667,11 +667,11 @@ private fun CreateVaultWizardDialog(
                         Spacer(modifier = Modifier.width(4.dp))
                         Column {
                             Text(
-                                text = "启用文件密钥 (KeyFile / 可选项)",
+                                text = stringResource(R.string.picker_keyfile_toggle),
                                 style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold)
                             )
                             Text(
-                                text = "主密码结合物理密钥文件，构成真正的双重鉴权",
+                                text = stringResource(R.string.picker_keyfile_toggle_desc),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -686,20 +686,20 @@ private fun CreateVaultWizardDialog(
                             FilterChip(
                                 selected = keyFileMode == "GENERATE",
                                 onClick = { keyFileMode = "GENERATE" },
-                                label = { Text("生成新密钥文件", fontSize = 11.sp) },
+                                label = { Text(stringResource(R.string.picker_keyfile_generate), fontSize = 11.sp) },
                                 shape = CapsuleShape
                             )
                             FilterChip(
                                 selected = keyFileMode == "SELECT_EXISTING",
                                 onClick = { keyFileMode = "SELECT_EXISTING" },
-                                label = { Text("选择已有密钥文件", fontSize = 11.sp) },
+                                label = { Text(stringResource(R.string.picker_keyfile_select_existing), fontSize = 11.sp) },
                                 shape = CapsuleShape
                             )
                         }
 
                         if (keyFileMode == "GENERATE") {
                             Text(
-                                text = "创建密码库时将自动生成一份 256-bit 高熵随机 .key 密钥文件并保存至安全存储。",
+                                text = stringResource(R.string.picker_keyfile_generate_desc),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.primary
                             )
@@ -708,7 +708,7 @@ private fun CreateVaultWizardDialog(
                                 OutlinedTextField(
                                     value = selectedKeyFilePath,
                                     onValueChange = { selectedKeyFilePath = it },
-                                    label = { Text("已有密钥文件路径") },
+                                    label = { Text(stringResource(R.string.picker_keyfile_path_label)) },
                                     singleLine = true,
                                     modifier = Modifier.fillMaxWidth()
                                 )
@@ -721,7 +721,7 @@ private fun CreateVaultWizardDialog(
                                 ) {
                                     Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(16.dp))
                                     Spacer(modifier = Modifier.width(6.dp))
-                                    Text("从设备选取已有密钥", fontSize = 12.sp)
+                                    Text(stringResource(R.string.picker_keyfile_pick), fontSize = 12.sp)
                                 }
                             }
                         }

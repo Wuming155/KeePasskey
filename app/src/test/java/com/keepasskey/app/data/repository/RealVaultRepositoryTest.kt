@@ -50,6 +50,10 @@ class RealVaultRepositoryTest {
         }
     }
 
+    /** TASK-21：仓库消息已资源化（StringsProvider）；单测无资源环境，注入返回占位文本的假实现 */
+    private fun createTestStrings(): com.keepasskey.app.ui.model.StringsProvider =
+        com.keepasskey.app.ui.model.StringsProvider { _, _ -> "" }
+
     private fun createInitialDatabase(): Pair<KdbxDatabase, KdbxEntry> {
         val rootGroupId = KdbxUuid.random()
         val entryId = KdbxUuid.random()
@@ -106,7 +110,7 @@ class RealVaultRepositoryTest {
         val session = DatabaseSession()
         session.setDatabaseForTesting(database)
 
-        val repository = RealVaultRepository(createMockContext(tempFolder.root), session, com.keepasskey.app.data.logger.DebugLogBuffer())
+        val repository = RealVaultRepository(createMockContext(tempFolder.root), session, com.keepasskey.app.data.logger.DebugLogBuffer(), createTestStrings())
 
         // UI 触发条目编辑：修改标题、密码，传入新的普通自定义字段，不传 Passkey 字段。
         // H4-断点补齐后，附件/标签/OverrideUrl/图标/AutoType 由 UI 投影全量携带
@@ -173,7 +177,7 @@ class RealVaultRepositoryTest {
         val session = DatabaseSession()
         session.setDatabaseForTesting(database)
 
-        val repository = RealVaultRepository(createMockContext(tempFolder.root), session, com.keepasskey.app.data.logger.DebugLogBuffer())
+        val repository = RealVaultRepository(createMockContext(tempFolder.root), session, com.keepasskey.app.data.logger.DebugLogBuffer(), createTestStrings())
 
         val entryIdHex = initialEntry.id.toHexString()
 
@@ -229,7 +233,7 @@ class RealVaultRepositoryTest {
 
         val session = DatabaseSession()
         session.setDatabaseForTesting(dbWithTwo)
-        val repository = RealVaultRepository(createMockContext(tempFolder.root), session, com.keepasskey.app.data.logger.DebugLogBuffer())
+        val repository = RealVaultRepository(createMockContext(tempFolder.root), session, com.keepasskey.app.data.logger.DebugLogBuffer(), createTestStrings())
 
         // 将两个条目均移入回收站
         repository.deleteEntry(initialEntry.id.toHexString())
@@ -262,7 +266,7 @@ class RealVaultRepositoryTest {
         )
         assertTrue(createResult is com.keepasskey.core.result.KdbxResult.Success)
 
-        val repository = RealVaultRepository(createMockContext(tempFolder.root), session, com.keepasskey.app.data.logger.DebugLogBuffer())
+        val repository = RealVaultRepository(createMockContext(tempFolder.root), session, com.keepasskey.app.data.logger.DebugLogBuffer(), createTestStrings())
 
         // 添加一个测试条目
         val newEntry = UiVaultEntry(
@@ -286,7 +290,7 @@ class RealVaultRepositoryTest {
 
         val reloadedDb = openSession.databaseFlow.first()!!
         assertNotNull("持久化重开后 recycleBinUuid 应完好保留", reloadedDb.recycleBinUuid)
-        val reloadedRepo = RealVaultRepository(createMockContext(tempFolder.root), openSession, com.keepasskey.app.data.logger.DebugLogBuffer())
+        val reloadedRepo = RealVaultRepository(createMockContext(tempFolder.root), openSession, com.keepasskey.app.data.logger.DebugLogBuffer(), createTestStrings())
         val reloadedGroups = reloadedRepo.getGroups().first()
         assertTrue("回收站分组应在重开后持久存在", reloadedGroups.any { it.isRecycleBin })
 
@@ -312,7 +316,7 @@ class RealVaultRepositoryTest {
         )
         assertTrue(createResult is com.keepasskey.core.result.KdbxResult.Success)
 
-        val repository = RealVaultRepository(createMockContext(tempFolder.root), session, com.keepasskey.app.data.logger.DebugLogBuffer())
+        val repository = RealVaultRepository(createMockContext(tempFolder.root), session, com.keepasskey.app.data.logger.DebugLogBuffer(), createTestStrings())
 
         // 1. 创建分组（模拟 VaultListViewModel.createGroup：非 UUID 临时 id → 仓库生成新 UUID）
         val groupCreateResult = repository.saveGroup(

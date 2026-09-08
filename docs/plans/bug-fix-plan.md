@@ -87,7 +87,7 @@
 | **TASK-35** | `RealVaultRepository.kt:723` 卡条目当普通登录 | category 与卡字段映射 |
 | **TASK-36** | `AutofillSettingsScreen.kt:343` 黑名单空 onClick | 实现删除逻辑 |
 | **TASK-40** | 测试覆盖缺口（T-03/T-04/P2-35/P2-37） | 补 `SyncCacheTest`/SigV4/`SecurityTest`/真实 Keystore 用例 |
-| **TASK-21** | 7 文件超 800 行 + ~250 硬编码中文 | 拆分 + 抽 `strings.xml` |
+| **TASK-21** | 7 文件超 800 行 + ~250 硬编码中文 | ✅ 已完成（2026-09-08）：7 文件全部拆分达标；用户可见文案全量资源化（`StringsProvider` 通道 + 3 个新 values 文件共 113 键），中文字面量 294→114（余为日志/开发异常/持久化数据），状态与证据见 `STATUS.md` / `FINDINGS_TRACKER.md` |
 | **TASK-41** | 低危清理批次（P3-5/7/9...） | 死代码/魔数/空块清理 |
 | **TASK-42** | 低-中调度批次（P2-2/12/29...） | Argon2 走 IO / callTimeout / flowOn |
 

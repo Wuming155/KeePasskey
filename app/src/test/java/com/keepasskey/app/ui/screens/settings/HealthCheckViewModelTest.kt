@@ -25,6 +25,9 @@ import org.junit.Test
 /**
  * SettingsViewModel 真实健康检查审计集成测试 (Wave 3-E P1-13)
  */
+/** TASK-21：同步/健康文案已资源化；单测注入按资源 ID 映射的假 StringsProvider */
+private val TEST_STRINGS = com.keepasskey.app.ui.model.StringsProvider { _, _ -> "" }
+
 @OptIn(ExperimentalCoroutinesApi::class)
 class HealthCheckViewModelTest {
 
@@ -86,13 +89,26 @@ class HealthCheckViewModelTest {
                 } as android.content.SharedPreferences
         }
         val credentialsStore = com.keepasskey.app.sync.SyncCredentialsStore(fakeContext, null)
-        val coordinator = com.keepasskey.app.sync.SyncCoordinator(fakeContext, com.keepasskey.database.session.DatabaseSession(), credentialsStore, com.keepasskey.app.data.logger.DebugLogBuffer())
+        val coordinator = com.keepasskey.app.sync.SyncCoordinator(fakeContext, com.keepasskey.database.session.DatabaseSession(), credentialsStore, com.keepasskey.app.data.logger.DebugLogBuffer(), TEST_STRINGS)
 
         val testRepo = TestAuditVaultRepository(listOf(entryWeak1, entryReused1, entryReused2))
         // TASK-12/08：补注入扩展偏好持久化仓库（null 上下文=内存语义）与周期同步调度器
         val extendedStore = com.keepasskey.app.data.repository.ExtendedSettingsStore(null)
         val periodicScheduler = com.keepasskey.app.sync.PeriodicSyncScheduler(fakeContext, extendedStore)
-        val viewModel = SettingsViewModel(FakeSettingsRepository(), testRepo, credentialsStore, coordinator, com.keepasskey.app.data.logger.DebugLogBuffer(), extendedStore, periodicScheduler)
+        // TASK-21：文案资源化后，单测注入按资源 ID 映射的假 StringsProvider（无 Android 资源环境）
+        val fakeStrings = com.keepasskey.app.ui.model.StringsProvider { id, _ ->
+            when (id) {
+                com.keepasskey.app.R.string.health_status_not_scanned -> "未扫描"
+                com.keepasskey.app.R.string.health_status_good -> "良好"
+                com.keepasskey.app.R.string.time_today -> "今天"
+                else -> ""
+            }
+        }
+        val viewModel = SettingsViewModel(
+            FakeSettingsRepository(), testRepo, credentialsStore, coordinator,
+            com.keepasskey.app.data.logger.DebugLogBuffer(), extendedStore, periodicScheduler,
+            stringsProvider = fakeStrings
+        )
         val job = backgroundScope.launch(kotlinx.coroutines.test.UnconfinedTestDispatcher(testScheduler)) {
             viewModel.uiState.collect {}
         }

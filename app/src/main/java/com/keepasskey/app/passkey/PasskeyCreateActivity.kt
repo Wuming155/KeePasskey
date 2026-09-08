@@ -6,6 +6,7 @@ import android.util.Log
 import androidx.credentials.CreatePublicKeyCredentialResponse
 import androidx.credentials.provider.PendingIntentHandler
 import androidx.lifecycle.lifecycleScope
+import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.crypto.cbor.CborEncoder
 import com.keepasskey.crypto.passkey.PasskeyCryptoEngine
@@ -64,7 +65,7 @@ class PasskeyCreateActivity : BaseCredentialActivity() {
 
         if (rpId.isBlank() || userName.isBlank()) {
             Log.e(TAG, "缺少必要注册参数: rpId=$rpId, userName=$userName")
-            failAndFinish("缺少通行密钥注册核心参数")
+            failAndFinish(getString(R.string.passkey_error_missing_register_params))
             return
         }
 
@@ -72,7 +73,7 @@ class PasskeyCreateActivity : BaseCredentialActivity() {
             try {
                 if (vaultRepository.isLocked()) {
                     Log.w(TAG, "密码库处于锁定状态，无法注册新 Passkey")
-                    failAndFinish("密码库已锁定")
+                    failAndFinish(getString(R.string.cred_error_vault_locked))
                     return@launch
                 }
 
@@ -91,7 +92,7 @@ class PasskeyCreateActivity : BaseCredentialActivity() {
                     ?: callingPackage?.ifBlank { null }
                 if (!CallingOriginResolver.isBrowserOrigin(origin) && callerPackage.isNullOrBlank()) {
                     Log.e(TAG, "无法确定调用应用包名，拒绝创建应用内 Passkey")
-                    failAndFinish("无法确定调用方应用标识")
+                    failAndFinish(getString(R.string.passkey_error_caller_unknown))
                     return@launch
                 }
 

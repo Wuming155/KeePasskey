@@ -8,6 +8,7 @@ import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.security.ClipboardSecurityManager
 import com.keepasskey.app.util.tickerFlow
 import com.keepasskey.core.result.KdbxResult
+import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.sync.engine.SyncCacheEvent
 import com.keepasskey.app.ui.model.UiVaultEntry
@@ -42,8 +43,13 @@ class VaultListViewModel @Inject constructor(
     private val vaultRepository: VaultRepository,
     private val settingsRepository: SettingsRepository,
     private val clipboardSecurityManager: ClipboardSecurityManager? = null,
-    private val syncCoordinator: com.keepasskey.app.sync.SyncCoordinator
+    private val syncCoordinator: com.keepasskey.app.sync.SyncCoordinator,
+    // TASK-21：非 Compose 层文案资源解析通道（生产 DI 注入真实现；单测注入假实现）
+    private val stringsProvider: StringsProvider? = null
 ) : ViewModel() {
+
+    // P3-23：null 时回退空串实现（生产 Hilt 恒注入 StringsProviderModule 真实现）
+    private val strings: StringsProvider = stringsProvider ?: StringsProvider { _, _ -> "" }
 
     private val currentGroupIdFlow = MutableStateFlow<String?>(null)
     private val searchQueryFlow = MutableStateFlow("")
@@ -477,8 +483,8 @@ class VaultListViewModel @Inject constructor(
                 parentId = currentGroupIdFlow.value,
                 iconName = iconName,
                 orderIndex = (uiState.value.currentGroups.maxOfOrNull { it.orderIndex } ?: 0) + 1,
-                updatedAt = "刚刚",
-                createdAt = "刚刚"
+                updatedAt = strings.get(R.string.time_just_now),
+                createdAt = strings.get(R.string.time_just_now)
             )
             val result = vaultRepository.saveGroup(newGroup)
             if (result is KdbxResult.Success) {
@@ -492,7 +498,9 @@ class VaultListViewModel @Inject constructor(
     fun renameGroup(group: VaultGroup, newName: String) {
         if (newName.isBlank() || isReadOnlyFlow.value) return
         viewModelScope.launch {
-            val result = vaultRepository.saveGroup(group.copy(name = newName.trim(), updatedAt = "刚刚"))
+            val result = vaultRepository.saveGroup(
+                group.copy(name = newName.trim(), updatedAt = strings.get(R.string.time_just_now))
+            )
             if (result is KdbxResult.Success) {
                 userMessageFlow.update { UiMessage(R.string.vault_group_renamed, listOf(newName.trim())) }
             } else {
@@ -504,7 +512,9 @@ class VaultListViewModel @Inject constructor(
     fun changeGroupIcon(group: VaultGroup, newIcon: String) {
         if (isReadOnlyFlow.value) return
         viewModelScope.launch {
-            vaultRepository.saveGroup(group.copy(iconName = newIcon, updatedAt = "刚刚"))
+            vaultRepository.saveGroup(
+                group.copy(iconName = newIcon, updatedAt = strings.get(R.string.time_just_now))
+            )
             userMessageFlow.update { UiMessage(R.string.vault_group_icon_updated) }
         }
     }
@@ -568,13 +578,13 @@ class VaultListViewModel @Inject constructor(
      * 0 表示本会话尚未执行过同步
      */
     private fun formatLastSyncTime(millis: Long): String {
-        if (millis <= 0L) return NEVER_SYNCED_TEXT
+        if (millis <= 0L) return strings.get(R.string.sync_last_time_never)
         val dateTime = Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault())
         val today = LocalDate.now()
         val datePrefix = when (dateTime.toLocalDate()) {
-            today -> "今天"
-            today.minusDays(1) -> "昨天"
-            else -> dateTime.format(DateTimeFormatter.ofPattern("M月d日"))
+            today -> strings.get(R.string.time_today)
+            today.minusDays(1) -> strings.get(R.string.time_yesterday)
+            else -> dateTime.format(DateTimeFormatter.ofPattern(strings.get(R.string.date_pattern_month_day)))
         }
         return "$datePrefix ${dateTime.format(DateTimeFormatter.ofPattern("HH:mm"))}"
     }
@@ -585,6 +595,5 @@ class VaultListViewModel @Inject constructor(
         private const val TOTP_TICK_INTERVAL_MS = 1000L
         /** 搜索输入停顿多久后才触发列表重算（毫秒） */
         private const val SEARCH_DEBOUNCE_MS = 300L
-        private const val NEVER_SYNCED_TEXT = "尚未同步"
     }
 }

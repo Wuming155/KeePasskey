@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    P3-23（TASK-21 第二阶段）：用户可见中文字面量资源化——界面消息补充键。
+    与主 strings.xml 分文件维护，避免与其他任务冲突；键名按页面语义前缀分组：
+    picker_（数据库选择器）、conflict_（冲突解决）、unlock_（解锁）、
+    auth_（验证码页）、cat_（条目分类标签）、time_/detail_（相对时间词）。
+-->
+<resources>
+
+    <!-- ========== 密码库选择器 (DatabasePickerScreen / DatabasePickerUiState) ========== -->
+    <string name="picker_open_vault_title">打开已有 KDBX 密码库</string>
+    <string name="picker_open_vault_source_hint">请选择已有密码库文件的存储源位置：</string>
+    <string name="picker_chip_local">本地设备</string>
+    <string name="picker_chip_webdav">WebDAV</string>
+    <string name="picker_chip_s3">兼容 S3</string>
+    <string name="picker_local_desc">从本机设备存储或系统 SAF 选择器导入已存在的 .kdbx 数据库：</string>
+    <string name="picker_vault_id_name">密码库标识名称</string>
+    <string name="picker_local_path_label">本地绝对路径 / 虚拟 URI</string>
+    <string name="picker_browse_file">启动系统文件选择器定位</string>
+    <string name="picker_webdav_desc">连接私有 WebDAV 服务器 (Nextcloud / 坚果云 / 群晖) 打开远端库：</string>
+    <string name="picker_vault_display_name">密码库展示名称</string>
+    <string name="picker_webdav_url_label">WebDAV 服务器完整路径 (URL)</string>
+    <string name="picker_s3_desc">连接兼容 AWS S3 规范的对象存储桶 (Cloudflare R2 / MinIO) 打开已有库：</string>
+    <string name="picker_s3_endpoint_label">S3 Endpoint 接入端点 URL</string>
+    <string name="picker_s3_bucket_label">存储桶名称 (Bucket) 及路径</string>
+    <string name="picker_open_and_load">打开并加载</string>
+    <string name="picker_keyfile_toggle">启用文件密钥 (KeyFile / 可选项)</string>
+    <string name="picker_keyfile_toggle_desc">主密码结合物理密钥文件，构成真正的双重鉴权</string>
+    <string name="picker_keyfile_generate">生成新密钥文件</string>
+    <string name="picker_keyfile_select_existing">选择已有密钥文件</string>
+    <string name="picker_keyfile_generate_desc">创建密码库时将自动生成一份 256-bit 高熵随机 .key 密钥文件并保存至安全存储。</string>
+    <string name="picker_keyfile_path_label">已有密钥文件路径</string>
+    <string name="picker_keyfile_pick">从设备选取已有密钥</string>
+    <!-- OpenVaultSourceType 各来源说明（label 为落库 syncType 标签，不资源化） -->
+    <string name="picker_source_local_desc">通过系统文件选择器打开设备存储或 SD 卡中的 .kdbx 文件</string>
+    <string name="picker_source_webdav_desc">从 Nextcloud / 坚果云 / 群晖 NAS / ownCloud 导入</string>
+    <string name="picker_source_s3_desc">从 Cloudflare R2 / AWS S3 / MinIO / 阿里云 OSS 导入</string>
+
+    <!-- ========== 冲突解决 (ConflictResolutionViewModel) ========== -->
+    <string name="conflict_field_title">标题 (Title)</string>
+    <string name="conflict_field_username">用户名 (Username)</string>
+    <string name="conflict_field_password">密码 (Password)</string>
+    <string name="conflict_field_url">网址 (URL)</string>
+    <string name="conflict_field_notes">备注 (Notes)</string>
+    <!-- 敏感数据铁律：冲突对比界面不物化密码明文，仅以掩码呈现「两侧不一致」事实 -->
+    <string name="conflict_mask_local">••••••••（本地版本）</string>
+    <string name="conflict_mask_remote">••••••••（云端版本）</string>
+    <string name="conflict_group_path">根目录 / 同步冲突</string>
+    <string name="conflict_time_unknown">未知</string>
+    <string name="conflict_merge_failed">合并失败</string>
+
+    <!-- ========== 解锁 (UnlockViewModel) ========== -->
+    <string name="unlock_db_status_cloud">云端同步 • %1$s</string>
+    <string name="unlock_db_status_local">本地存储 • %1$s</string>
+
+    <!-- ========== 验证码页 (AuthenticatorScreen) ========== -->
+    <string name="auth_search_hint">搜索双重验证账号...</string>
+    <string name="auth_empty_search_result">未匹配到对应的双重认证账号</string>
+    <string name="auth_empty_title">暂无双重验证码条目</string>
+    <string name="auth_empty_subtitle">在密码库中创建或编辑条目并添加 TOTP 种子，即可在此集中查看</string>
+
+    <!-- ========== 条目分类显示标签 (EntryCategory) ========== -->
+    <string name="cat_all">全部</string>
+    <string name="cat_login">密码凭据</string>
+    <string name="cat_passkey">通行密钥</string>
+    <string name="cat_card">银行卡</string>
+    <string name="cat_note">安全便签</string>
+
+    <!-- ========== 相对时间词（复用主 strings.xml 的 time_today / time_yesterday /
+         date_pattern_month_day / sync_last_time_never） ========== -->
+    <string name="time_just_now">刚刚</string>
+    <string name="detail_rollback_updated_at">刚刚 (从历史版本回滚)</string>
+
+</resources>

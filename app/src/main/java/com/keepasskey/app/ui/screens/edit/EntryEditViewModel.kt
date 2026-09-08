@@ -6,6 +6,7 @@ import com.keepasskey.app.R
 import androidx.lifecycle.viewModelScope
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.core.result.KdbxResult
+import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.model.EntryCategory
 import com.keepasskey.app.ui.model.UiAttachment
@@ -45,8 +46,13 @@ sealed interface EntryEditEvent {
 @HiltViewModel
 class EntryEditViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
-    private val vaultRepository: VaultRepository
+    private val vaultRepository: VaultRepository,
+    // TASK-21：非 Compose 层文案资源解析通道（生产 DI 注入真实现；单测注入假实现）
+    private val stringsProvider: StringsProvider? = null
 ) : ViewModel() {
+
+    // P3-23：null 时回退空串实现（生产 Hilt 恒注入 StringsProviderModule 真实现）
+    private val strings: StringsProvider = stringsProvider ?: StringsProvider { _, _ -> "" }
 
     private val _uiState = MutableStateFlow(EntryEditUiState())
     val uiState: StateFlow<EntryEditUiState> = _uiState.asStateFlow()
@@ -329,7 +335,7 @@ class EntryEditViewModel @Inject constructor(
             fileName = fileName,
             fileSizeFormatted = fileSizeFormatted,
             mimeType = "application/octet-stream",
-            addedAt = "刚刚",
+            addedAt = strings.get(R.string.time_just_now),
             data = data
         )
         _uiState.update { state ->
@@ -364,7 +370,7 @@ class EntryEditViewModel @Inject constructor(
                 notes = state.notes.trim(),
                 isPasskey = state.isPasskey,
                 category = if (state.isPasskey) EntryCategory.PASSKEY else EntryCategory.LOGIN,
-                updatedAt = "刚刚",
+                updatedAt = strings.get(R.string.time_just_now),
                 groupId = state.groupId,
                 iconName = state.iconName,
                 customFields = state.customFields.filter { it.key.isNotBlank() },

@@ -1,5 +1,8 @@
 package com.keepasskey.app.ui.model
 
+import androidx.annotation.StringRes
+import com.keepasskey.app.R
+
 /**
  * 界面展现层群组/文件夹实体（参考 KeePassDX Group 模型）
  */
@@ -127,10 +130,14 @@ data class UiVaultEntry(
     val overrideUrl: String? = null
 )
 
-enum class EntryCategory(val label: String) {
-    ALL("全部"),
-    LOGIN("密码凭据"),
-    PASSKEY("通行密钥"),
-    CARD("银行卡"),
-    NOTE("安全便签")
+/**
+ * 条目分类（P3-23：显示标签资源化为 [labelRes]，Compose 层经 stringResource 解析；
+ * 原中文字面量 label 无任何调用方，直接替换不破坏既有调用）
+ */
+enum class EntryCategory(@StringRes val labelRes: Int) {
+    ALL(R.string.cat_all),
+    LOGIN(R.string.cat_login),
+    PASSKEY(R.string.cat_passkey),
+    CARD(R.string.cat_card),
+    NOTE(R.string.cat_note)
 }

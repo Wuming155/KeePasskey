@@ -121,7 +121,7 @@ fun AuthenticatorScreen(
                             Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
                                 if (uiState.searchQuery.isEmpty()) {
                                     Text(
-                                        text = "搜索双重验证账号...",
+                                        text = stringResource(R.string.auth_search_hint),
                                         style = MaterialTheme.typography.bodyMedium,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                                     )
@@ -191,14 +191,17 @@ fun AuthenticatorScreen(
                             )
                             Spacer(modifier = Modifier.height(12.dp))
                             Text(
-                                text = if (uiState.searchQuery.isNotBlank()) "未匹配到对应的双重认证账号"
-                                else "暂无双重验证码条目",
+                                text = if (uiState.searchQuery.isNotBlank()) {
+                                    stringResource(R.string.auth_empty_search_result)
+                                } else {
+                                    stringResource(R.string.auth_empty_title)
+                                },
                                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Spacer(modifier = Modifier.height(6.dp))
                             Text(
-                                text = "在密码库中创建或编辑条目并添加 TOTP 种子，即可在此集中查看",
+                                text = stringResource(R.string.auth_empty_subtitle),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -347,7 +350,7 @@ private fun TotpLargeCard(
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = "复制",
+                            text = stringResource(R.string.btn_copy),
                             style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
                             color = MaterialTheme.colorScheme.primary
                         )

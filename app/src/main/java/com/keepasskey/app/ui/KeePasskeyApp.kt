@@ -242,6 +242,7 @@ fun KeePasskeyApp() {
                             navController.navigate(Screen.EntryEdit.createRoute(groupId = groupId))
                         },
                         onLockClick = {
+                            // P3-23：锁定原因仅供 AutoLockManager 内部 debugLog 留痕（非用户可见），保留原样
                             autoLockManager?.triggerLock("用户手动点击锁定")
                             navController.navigate(Screen.Unlock.route) {
                                 popUpTo(0) { inclusive = true }
@@ -335,6 +336,7 @@ fun KeePasskeyApp() {
                         onNavigateToDebug = { navController.navigate(Screen.SettingsDebug.route) },
                         onNavigateToAbout = { navController.navigate(Screen.SettingsAbout.route) },
                         onLockClick = {
+                            // P3-23：同上，锁定原因仅供内部 debugLog 留痕，保留原样
                             autoLockManager?.triggerLock("用户从设置界面手动点击锁定")
                             navController.navigate(Screen.Unlock.route) {
                                 popUpTo(0) { inclusive = true }

@@ -1,6 +1,7 @@
 package com.keepasskey.app.sync
 
 import android.content.Context
+import com.keepasskey.app.R
 import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.app.ui.screens.settings.CloudSyncProvider
 import com.keepasskey.core.model.DeletedObject
@@ -81,8 +82,12 @@ open class SyncCoordinator @Inject constructor(
     @ApplicationContext private val context: Context,
     private val databaseSession: DatabaseSession,
     private val syncCredentialsStore: SyncCredentialsStore,
-    private val debugLog: DebugLogBuffer
+    private val debugLog: DebugLogBuffer,
+    // TASK-21：用户可见错误消息经 StringsProvider 资源解析（P3-23；单测注入假实现）
+    private val strings: com.keepasskey.app.ui.model.StringsProvider? = null
 ) {
+    private val effectiveStrings: com.keepasskey.app.ui.model.StringsProvider =
+        strings ?: com.keepasskey.app.ui.model.StringsProvider { id, args -> context.getString(id, *args) }
     private val mutex = Mutex()
 
     private val _conflictFlow = MutableStateFlow<List<ConflictedEntryPair>>(emptyList())
@@ -169,18 +174,18 @@ open class SyncCoordinator @Inject constructor(
 
     private suspend fun runSyncCycle(): SyncOutcome = mutex.withLock {
         val activeFile = databaseSession.currentFile
-            ?: return@withLock SyncOutcome.Error("当前无打开的密码库文件")
+            ?: return@withLock SyncOutcome.Error(effectiveStrings.get(R.string.sync_error_no_open_vault_file))
 
         val currentDb = databaseSession.databaseFlow.value
-            ?: return@withLock SyncOutcome.Error("密码库未解锁或数据为空")
+            ?: return@withLock SyncOutcome.Error(effectiveStrings.get(R.string.sync_error_vault_not_unlocked))
 
         // Wave 14 全站强制 HTTPS：遗留的 http:// 端点在 Provider 构造期被拒，
         // 此处将类型化错误上浮为用户可理解的同步失败反馈
         val provider = try {
             testSyncProvider ?: resolveProvider()
         } catch (e: SyncException.InvalidEndpointError) {
-            return@withLock SyncOutcome.Error(e.message ?: "端点配置非法")
-        } ?: return@withLock SyncOutcome.Error("未配置云同步凭据")
+            return@withLock SyncOutcome.Error(e.message ?: effectiveStrings.get(R.string.sync_error_invalid_endpoint))
+        } ?: return@withLock SyncOutcome.Error(effectiveStrings.get(R.string.sync_error_no_sync_credentials))
 
         val remotePath = testRemotePath ?: resolveRemotePath(activeFile.name)
 
@@ -202,7 +207,7 @@ open class SyncCoordinator @Inject constructor(
         // 1. 获取本地数据库字节：若无内容变更且已缓存，复用缓存规避 KDBX4 随机 IV 导致的不必要哈希漂移；否则序列化并写缓存
         val localBytes = if (!isCached || hasLocalContentChanged) {
             val bytes = serializeLocalDatabase(currentDb)
-                ?: return@withLock SyncOutcome.Error("本地数据库序列化失败")
+                ?: return@withLock SyncOutcome.Error(effectiveStrings.get(R.string.sync_error_local_serialize_failed))
             if (isCached) {
                 syncCache.writeCache(remotePath, bytes)
             }
@@ -225,7 +230,7 @@ open class SyncCoordinator @Inject constructor(
                             lastSyncedDb = databaseSession.databaseFlow.value
                             SyncOutcome.UploadedLocal
                         }
-                        else -> SyncOutcome.Error("首次同步上传云端失败")
+                        else -> SyncOutcome.Error(effectiveStrings.get(R.string.sync_error_first_upload_failed))
                     }
                 } else {
                     return@withLock SyncOutcome.Offline
@@ -240,7 +245,9 @@ open class SyncCoordinator @Inject constructor(
                     // H3 整改：缓存已上传云端但本地正式文件保存失败时如实报错，不再静默
                     val saveResult = databaseSession.save()
                     if (saveResult is KdbxResult.Failure) {
-                        return@withLock SyncOutcome.Error("云端已更新但本地保存失败: ${saveResult.message}")
+                        return@withLock SyncOutcome.Error(
+                            effectiveStrings.get(R.string.sync_error_remote_updated_local_save_failed, saveResult.message)
+                        )
                     }
                     lastSyncedDb = databaseSession.databaseFlow.value
                     return@withLock SyncOutcome.UploadedLocal
@@ -283,7 +290,9 @@ open class SyncCoordinator @Inject constructor(
                         // 再转三方合并（base 缺失时按 F2 修复退化为双方并集合并）
                         val preSave = databaseSession.save()
                         if (preSave is KdbxResult.Failure) {
-                            return@withLock SyncOutcome.Error("冲突会话前置保存失败: ${preSave.message}")
+                            return@withLock SyncOutcome.Error(
+                                effectiveStrings.get(R.string.sync_error_conflict_presave_failed, preSave.message)
+                            )
                         }
                         handleConflictMerge(
                             syncEngine = syncEngine,
@@ -296,7 +305,7 @@ open class SyncCoordinator @Inject constructor(
                         )
                     } else {
                         val applied = loadAndApplyRemoteBytes(openResult.remoteBytes)
-                        if (!applied) return@withLock SyncOutcome.Error("加载云端数据库失败，密码或格式不匹配")
+                        if (!applied) return@withLock SyncOutcome.Error(effectiveStrings.get(R.string.sync_error_load_remote_failed))
                         lastSyncedDb = databaseSession.databaseFlow.value
                         SyncOutcome.UpToDate
                     }
@@ -319,7 +328,9 @@ open class SyncCoordinator @Inject constructor(
                     // R3 整改：同 commitLocal 冲突路径，先落盘本地会话再进入合并
                     val preSave = databaseSession.save()
                     if (preSave is KdbxResult.Failure) {
-                        return@withLock SyncOutcome.Error("冲突会话前置保存失败: ${preSave.message}")
+                        return@withLock SyncOutcome.Error(
+                            effectiveStrings.get(R.string.sync_error_conflict_presave_failed, preSave.message)
+                        )
                     }
                     handleConflictMerge(
                         syncEngine = syncEngine,
@@ -335,7 +346,7 @@ open class SyncCoordinator @Inject constructor(
         } catch (e: com.keepasskey.sync.model.SyncException.NetworkError) {
             SyncOutcome.Offline
         } catch (e: Exception) {
-            SyncOutcome.Error(e.message ?: "同步发生未知错误")
+            SyncOutcome.Error(e.message ?: effectiveStrings.get(R.string.sync_error_unknown))
         }
     }
 
@@ -349,10 +360,10 @@ open class SyncCoordinator @Inject constructor(
         resolutions: Map<String, ConflictResolutionChoice>,
         fieldResolutions: Map<String, Map<String, ConflictResolutionChoice>> = emptyMap()
     ): SyncOutcome = mutex.withLock {
-        val engine = pendingRemoteEngine ?: return@withLock SyncOutcome.Error("无待解决的冲突会话")
-        val path = pendingRemotePath ?: return@withLock SyncOutcome.Error("冲突路径失效")
-        val localDb = pendingLocalDb ?: return@withLock SyncOutcome.Error("本地冲突快照丢失")
-        val remoteDb = pendingRemoteDb ?: return@withLock SyncOutcome.Error("远端冲突快照丢失")
+        val engine = pendingRemoteEngine ?: return@withLock SyncOutcome.Error(effectiveStrings.get(R.string.sync_error_no_pending_conflict))
+        val path = pendingRemotePath ?: return@withLock SyncOutcome.Error(effectiveStrings.get(R.string.sync_error_conflict_path_invalid))
+        val localDb = pendingLocalDb ?: return@withLock SyncOutcome.Error(effectiveStrings.get(R.string.sync_error_local_snapshot_lost))
+        val remoteDb = pendingRemoteDb ?: return@withLock SyncOutcome.Error(effectiveStrings.get(R.string.sync_error_remote_snapshot_lost))
 
         return@withLock withContext(Dispatchers.Default) {
             val conflicts = _conflictFlow.value
@@ -382,7 +393,7 @@ open class SyncCoordinator @Inject constructor(
                 deletedObjects = pendingMergedTombstones
             )
             val mergedBytes = serializeLocalDatabase(mergedDb)
-                ?: return@withContext SyncOutcome.Error("冲突合并数据库序列化失败")
+                ?: return@withContext SyncOutcome.Error(effectiveStrings.get(R.string.sync_error_conflict_serialize_failed))
 
             // E2 整改：If-Match 期望值取冲突发生时刻的远端 ETag——用户决策期间
             // 远端若被再次修改，上传将 412 失败并暴露新冲突，而不是静默覆盖他端更新
@@ -397,7 +408,9 @@ open class SyncCoordinator @Inject constructor(
                 val saveResult = databaseSession.save()
                 clearPendingConflictSession()
                 if (saveResult is KdbxResult.Failure) {
-                    SyncOutcome.Error("合并版本已上传云端，但本地保存失败: ${saveResult.message}")
+                    SyncOutcome.Error(
+                        effectiveStrings.get(R.string.sync_error_merged_upload_local_save_failed, saveResult.message)
+                    )
                 } else {
                     SyncOutcome.MergedAndUploaded
                 }
@@ -407,9 +420,9 @@ open class SyncCoordinator @Inject constructor(
                     // 远端在决策期间再次更新：放弃本次解决会话（本地会话未被改写，
                     // 未同步修改仍保留在缓存中），用户重新 syncNow 将以最新远端重新检测合并
                     clearPendingConflictSession()
-                    SyncOutcome.Error("云端在冲突解决期间再次更新，请重新同步以重新合并")
+                    SyncOutcome.Error(effectiveStrings.get(R.string.sync_error_remote_changed_during_resolve))
                 } else {
-                    SyncOutcome.Error("上传冲突解决版本失败: ${ex?.message}")
+                    SyncOutcome.Error(effectiveStrings.get(R.string.sync_error_upload_resolved_failed, ex?.message))
                 }
             }
         }
@@ -432,7 +445,9 @@ open class SyncCoordinator @Inject constructor(
     suspend fun testConnection(): Result<Unit> = withContext(Dispatchers.IO) {
         try {
             val provider = testSyncProvider ?: resolveProvider()
-                ?: return@withContext Result.failure(IllegalStateException("未配置同步凭据"))
+                ?: return@withContext Result.failure(
+                    IllegalStateException(effectiveStrings.get(R.string.sync_error_test_no_credentials))
+                )
             provider.testConnection()
         } catch (e: Exception) {
             Result.failure(e)
@@ -479,9 +494,9 @@ open class SyncCoordinator @Inject constructor(
         remoteEtag: String = ""
     ): SyncOutcome = withContext(Dispatchers.Default) {
         val localDb = parseKdbxBytes(localBytes)
-            ?: return@withContext SyncOutcome.Error("无法解密本地冲突数据库")
+            ?: return@withContext SyncOutcome.Error(effectiveStrings.get(R.string.sync_error_decrypt_local_conflict_failed))
         val remoteDb = parseKdbxBytes(remoteBytes)
-            ?: return@withContext SyncOutcome.Error("无法解密云端冲突数据库")
+            ?: return@withContext SyncOutcome.Error(effectiveStrings.get(R.string.sync_error_decrypt_remote_conflict_failed))
 
         // F2 修复：base 快照必须通过三重可信检验——存在、可解析、且内容与本地字节不同
         // （本地工作副本污染判定：KDBX4 随机 IV 使同一内容的两次序列化字节必然不同，
@@ -518,19 +533,23 @@ open class SyncCoordinator @Inject constructor(
                 deletedObjects = mergeResult.mergedDeletedObjects
             )
             val mergedBytes = serializeLocalDatabase(mergedDb)
-                ?: return@withContext SyncOutcome.Error("序列化合并数据库失败")
+                ?: return@withContext SyncOutcome.Error(effectiveStrings.get(R.string.sync_error_serialize_merged_failed))
 
             val uploadResult = syncEngine.markResolvedAndUpload(remotePath, mergedBytes)
             if (uploadResult.isSuccess) {
                 databaseSession.updateDatabaseMeta { mergedDb }
                 val saveResult = databaseSession.save()
                 if (saveResult is KdbxResult.Failure) {
-                    SyncOutcome.Error("合并版本已上传云端，但本地保存失败: ${saveResult.message}")
+                    SyncOutcome.Error(
+                        effectiveStrings.get(R.string.sync_error_merged_upload_local_save_failed, saveResult.message)
+                    )
                 } else {
                     SyncOutcome.MergedAndUploaded
                 }
             } else {
-                SyncOutcome.Error("上传合并版本失败: ${uploadResult.exceptionOrNull()?.message}")
+                SyncOutcome.Error(
+                    effectiveStrings.get(R.string.sync_error_upload_merged_failed, uploadResult.exceptionOrNull()?.message)
+                )
             }
         }
     }

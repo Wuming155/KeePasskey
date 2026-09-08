@@ -831,4 +831,48 @@
     <string name="cred_error_entry_not_found">未找到对应的凭据条目</string>
     <string name="cred_error_unknown">处理凭据请求时发生异常</string>
 
+    <!-- TASK-21：数据仓库层用户可见消息（repo_*） -->
+    <string name="repo_files_dir_unavailable">内部存储目录不可用</string>
+    <string name="repo_no_active_database">请先选择或创建密码库</string>
+    <string name="repo_file_missing_with_keyfile">数据库文件不存在，无法以复合密钥打开</string>
+    <string name="repo_db_locked">数据库未解锁</string>
+    <string name="repo_invalid_group_id">无效的分组 ID</string>
+    <string name="repo_group_not_found">分组不存在</string>
+    <string name="repo_invalid_entry_id">无效的条目 ID</string>
+    <string name="repo_entry_not_found">条目不存在</string>
+    <string name="repo_remove_failed">移除密码库失败: %1$s</string>
+    <string name="repo_import_failed">导入数据库失败: %1$s</string>
+    <string name="repo_not_unlocked_state">当前数据库未处于已解锁状态</string>
+    <string name="repo_revision_summary">历史修订</string>
+    <string name="repo_no_active_db_for_export">当前无活动数据库（已锁定或未打开）</string>
+    <string name="repo_export_xml_failed">导出 XML 失败: %1$s</string>
+    <string name="repo_no_keyfile_to_export">当前会话未使用密钥文件，无密钥文件可导出</string>
+    <string name="repo_templates_already_installed">模板分组「%1$s」已存在，无需重复安装</string>
+    <string name="repo_sync_type_local">本地存储</string>
+    <string name="repo_last_opened_not_created">尚未创建</string>
+    <string name="repo_sync_type_local_device">本地设备存储</string>
+    <string name="repo_last_opened_in_use">当前使用中</string>
+    <string name="repo_last_opened_ready">本地就绪</string>
+
+    <!-- TASK-21：设置层 ViewModel/控制器用户可见文案（settings_* / health_* / kdf_* / export_* / time_*） -->
+    <string name="time_today">今天</string>
+    <string name="time_yesterday">昨天</string>
+    <string name="date_pattern_month_day">M月d日</string>
+    <string name="sync_last_time_never">尚未同步</string>
+    <string name="sync_test_connection_failed">连接失败</string>
+    <string name="health_status_not_scanned">未扫描</string>
+    <string name="health_scan_hint_idle">点击重新扫描以评估密码库安全健康状态</string>
+    <string name="health_status_excellent">优秀</string>
+    <string name="health_status_good">良好</string>
+    <string name="health_status_fair">一般</string>
+    <string name="health_status_needs_improvement">需改进</string>
+    <string name="health_msg_expired">发现 %1$d 个已过期凭据，%2$d 个弱密码，%3$d 个复用</string>
+    <string name="health_msg_clean">全库扫描完成，未发现弱密码与复用</string>
+    <string name="health_msg_weak_and_reused">发现 %1$d 个弱密码，%2$d 个重复使用</string>
+    <string name="health_msg_reused_only">发现 %1$d 个密码重复使用，建议启用唯一密码</string>
+    <string name="health_msg_weak_only">发现 %1$d 个弱密码，建议提升密码复杂度</string>
+    <string name="health_scan_failed">健康扫描失败: %1$s</string>
+    <string name="kdf_benchmark_failed">基准测试失败</string>
+    <string name="export_saf_write_failed">SAF 写盘失败</string>
+
 </resources>

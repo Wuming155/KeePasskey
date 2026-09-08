@@ -10,7 +10,7 @@
 | 维度 | 数值 / 状态 | 官方依据与说明 |
 |---|---|---|
 | **Git HEAD** | `863d81c` (main) | 干净工作区无提交滞后（不含本次治理改动） |
-| **测试基线** | **443 个单元测试全绿**（app 101 / core 27 / crypto 52 / database 146 / sync 117） | `./gradlew test` 强制重跑校验，其中 `LiveSyncServersTest` 12 例默认跳过（需 `-DliveSyncTest`） |
+| **测试基线** | **446 个单元测试全绿**（app / core / crypto / database / sync 五模块） | `./gradlew test` 强制重跑校验，其中 `LiveSyncServersTest` 12 例默认跳过（需 `-DliveSyncTest`） |
 | **构建状态** | `assembleDebug` + `assembleRelease` (R8) 全量通过 | AGP 9.1.0 / Gradle 9.3.1 / Kotlin 2.4.10 / Hilt 2.60.1 |
 | **系统基线** | **minSdk 36**, compileSdk 36, targetSdk 36 | 仅针对 Android 16+ 深度优化，固化无旧版垫片决策 |
 | **传输安全防线** | 全站强制 HTTPS（`network_security_config.xml` 禁明文 + OkHttp TLS-only），零证书固定 | 对齐 Google Developer Knowledge `pinning not recommended` 指南 |
@@ -47,7 +47,7 @@
 | **TASK-18** | 特性 | **Passkey 作为数据库解锁方式** | 功能缺口 | **P3** | ❌ 未实现 | 现快速解锁为设备锁屏凭据绑定密钥，Passkey 仅作条目数据 |
 | **TASK-19** | 依赖 | **zxing → CameraX + ML Kit 迁移评估** | 依赖治理 | **P3** | 📋 评估 | `zxing-android-embedded:4.3.0` 保持稳定，评估迁移至现代 CameraX + ML Kit |
 | **TASK-20** | CI | **GitHub Dependabot / OWASP 依赖漏洞巡检** | 供应链 | **P3** | 📋 评估 | 配置自动化依赖漏洞扫描工作流 |
-| **TASK-21** | 整洁度 | **超 800 行文件拆分与硬编码中文抽取** | 审核报告 P3-22/23 | **P3** | ❌ 未修 | 7 个文件超 800 行（`RealVaultRepository` 1184 行、`SettingsViewModel` 1119 行等）；约 250 处硬编码中文需抽至 `strings.xml` |
+| **TASK-21** | 整洁度 | **超 800 行文件拆分与硬编码中文抽取** | 审核报告 P3-22/23 | **P3** | ✅ 已完成（2026-09-08） | **P3-22 全闭合**：7 个超 800 行文件全部拆分（`RealVaultRepository` 1436→771 + 新增 `VaultEntryMapper`/`RecycleBinCoordinator`/`PasskeyEntryCoordinator`/`VaultTemplateFactory`；`SettingsViewModel` 1193→700 + 新增 `SettingsSyncController`/`SettingsHealthController`/`SettingsExportController`；5 个大屏 Compose 文件拆出区块/组件/对话框文件，公共 API 与行为零变更）。**P3-23 渐进闭合**：用户可见文案全量资源化（新增 `strings_ui_messages.xml` 39 键、`strings_sync_passkey.xml` 30 键、主 strings.xml `repo_*`/`health_*`/`time_*` 等 44 键；非 Compose 层新增 `StringsProvider` 通道 + Hilt 绑定，生产转发 getString、单测注入假实现）。中文字面量 294→114，剩余均为合理保留：debugLog/Log 日志、开发者面向异常消息、KDBX 持久化数据（回收站/模板/卡字段键/占位库名）、`core` 纯 JVM 模块异常兜底「未知错误」（无 Android 资源层）。**446 例测试全绿** |
 | **TASK-22** | 安全/稳定 | **P3-30：`@Singleton` AutoLockManager 在 `MainActivity.onDestroy` 被 destroy** | FINDINGS 核实 | **P0(真实 Bug)** | ✅ 已修复（2026-09-07） | 移除 `MainActivity.onDestroy` 中的 `autoLockManager.destroy()` 调用（含空覆写与随之成为死代码的 `AutoLockManager.destroy()`）。`AutoLockManager` 为进程级单例（监听 `ProcessLifecycleOwner` + 熄屏广播），生命周期与进程对齐，`initialize()` 幂等，资源随进程退出由系统回收；旋转/配置重建不再销毁自动锁定调度器 |
 | **TASK-23** | 安全 | **P2-9：`parseEcPrivateKey` 缺 `d ∈ [1, n-1]` 范围校验** | FINDINGS 核实 | **P1** | ✅ 已修复（2026-09-07） | `PasskeyCryptoEngine.kt` 新增显式标量范围校验 `validateEcScalarRange`（权威检查点，不依赖库层行为），越界 fail-closed 抛类型化 `CryptoException.InvalidKeyException`；库层构造器 IAE 经 `newEcPrivateKey` 归一为同一异常类型且不作回退放行。补 5 例单测：d=0 / d=n / d>n（32B 标量与 64B hex 文本两形态）均拒绝，边界 d=1 / d=n-1 签名可用 |
 | **TASK-24** | 内存 | **P2-10：旧派生回退 `legacyCipherKey` 未清零** | FINDINGS 核实 | **P2** | ✅ 已修复（2026-09-07） | `KdbxFile.resolveCipherKey` 重构为返回 `CipherKeyResolution`（activeKey + legacyKeyToWipe）：未选中的 `legacyCipherKey` 在任何结果路径（含裁决失败抛异常）的 `finally` 中统一清零；被选中的旧派生密钥在解密流建立（`SecretKeySpec` 已克隆密钥材料）后立即擦除。`legacyHmacKey` 派生后即时擦除语义保持不变 |
@@ -114,6 +114,7 @@
 > 索引中出现的 `Wave N` / `阶段 N` 字样为对应历史提交的**原始主题**，属已冻结语境，仅供追溯；新提交请以 `TASK-xx` / `批次 X` + 提交哈希 引用，勿再使用 Wave / 阶段 编号。
 
 - `863d81c` (2026-09-08): TASK-41 低危清理批次——13 项 P3 闭合（O(n²) 去重 / 未用 import / 测试后门 / EMPTY 单例污染 / 魔数 / 路径遍历 / 静默 catch / 演示默认值 / 空 if 块 / 吞异常 / MockData 改名；P3-32/34 按原裁定不修）；bug-fix-plan 与交接文档被看板吸收后删除
+- `本次提交` (2026-09-08): TASK-21 整洁度整改——P3-22 七文件拆分（`RealVaultRepository` 1436→771 拆出 `VaultEntryMapper`/`RecycleBinCoordinator`/`PasskeyEntryCoordinator`/`VaultTemplateFactory`；`SettingsViewModel` 1193→700 拆出 `SettingsSyncController`/`SettingsHealthController`/`SettingsExportController`；5 个大屏拆出组件/对话框文件，公共 API 零变更）+ P3-23 用户可见文案全量资源化（新增 `StringsProvider` 通道 + Hilt 绑定、`strings_ui_messages.xml` 39 键、`strings_sync_passkey.xml` 30 键、主 strings.xml 44 键；中文字面量 294→114，余为日志/开发异常/持久化数据）。446 例全绿（哈希待补记）
 - `68f2bcb` (2026-09-08): 阶段5 功能/质量收尾——TASK-30~36 七项闭合（字段级冲突合并 / 空快照诚实报错 / 密码强度真实熵 / TOTP 假码移除 / 收藏落库 / 卡条目映射 / 黑名单诚实化）+ TASK-44 登记
 - `7b3e756` (2026-09-07): WebDAV 零字节文件元数据误报修复
 - `0d4fc16` (2026-09-07): 本地 HTTPS 同步联调工具链与端到端测试 (`LiveSyncServersTest`)
