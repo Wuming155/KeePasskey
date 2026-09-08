@@ -19,8 +19,10 @@ import javax.inject.Singleton
  * 回落到 [ExtendedSettings] 默认值；`appContext` 为 null（纯 JVM 单元测试注入）时
  * 退化为不持久化的内存语义，不破坏可测性。
  *
- * 生命周期决策：kapt→KSP 与 Preferences DataStore 迁移属 TASK-03/04 独立批次，
- * 本仓库沿用 SharedPreferences 以避免跨批次耦合。
+ * 生命周期决策（TASK-04）：`RealSettingsRepository` 已迁移 Preferences DataStore；
+ * 本仓库仍沿用 SharedPreferences——其同步 load/save API 与「null 上下文注入 JVM 单测」
+ * 的可测性设计强绑定，DataStore 化需将全部消费方（SettingsViewModel/控制器/调度器）
+ * 改为异步语义，风险大于收益，后续如 DataStore 化须整体评估。
  */
 @Singleton
 class ExtendedSettingsStore @Inject constructor(
