@@ -1,11 +1,17 @@
 // 顶层构建文件：仅声明插件版本，模块级配置放在各自 build.gradle.kts 中。
-// 注意：版本号需与本地 Android Gradle Plugin / Kotlin 匹配，首次导入后按需微调。
+buildscript {
+    // TASK-03：AGP 9 内置 Kotlin 默认使用其内嵌 KGP（AGP 9.0 为 2.2.10）。
+    // 本项目锁定 Kotlin 2.4.10（与 Compose 编译器插件严格对齐），
+    // 按官方迁移指南经 buildscript classpath 提升内置 Kotlin 所用的 KGP 版本。
+    dependencies {
+        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:2.4.10")
+    }
+}
+
 plugins {
-    id("com.android.application") version "9.1.0" apply false
-    id("com.android.library") version "9.1.0" apply false
-    id("org.jetbrains.kotlin.android") version "2.4.10" apply false
-    id("org.jetbrains.kotlin.kapt") version "2.4.10" apply false
-    // Kotlin 2.0 起 Compose 编译器随 Kotlin 一同发布，版本必须与 Kotlin 保持一致
-    id("org.jetbrains.kotlin.plugin.compose") version "2.4.10" apply false
-    id("com.google.dagger.hilt.android") version "2.60.1" apply false
+    alias(libs.plugins.android.application) apply false
+    alias(libs.plugins.android.library) apply false
+    alias(libs.plugins.compose.compiler) apply false
+    alias(libs.plugins.hilt) apply false
+    alias(libs.plugins.ksp) apply false
 }

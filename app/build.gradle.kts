@@ -1,11 +1,8 @@
-import org.jetbrains.kotlin.gradle.dsl.JvmTarget
-
 plugins {
-    id("com.android.application")
-    id("org.jetbrains.kotlin.android")
-    id("org.jetbrains.kotlin.plugin.compose")
-    id("org.jetbrains.kotlin.kapt")
-    id("com.google.dagger.hilt.android")
+    alias(libs.plugins.android.application)
+    alias(libs.plugins.compose.compiler)
+    alias(libs.plugins.hilt)
+    alias(libs.plugins.ksp)
 }
 
 android {
@@ -43,12 +40,8 @@ android {
     }
 }
 
-// Kotlin 2.2 起 android.kotlinOptions 已移除，统一使用 kotlin.compilerOptions
-kotlin {
-    compilerOptions {
-        jvmTarget = JvmTarget.JVM_17
-    }
-}
+// TASK-03：内置 Kotlin 下 jvmTarget 默认取 android.compileOptions.targetCompatibility
+// （JVM 17），无需显式 kotlin.compilerOptions 配置
 
 dependencies {
     // 依赖所有功能模块
@@ -61,44 +54,45 @@ dependencies {
     // 而本项目受 Compose BOM 2026.06.01 约束必须停留在 compileSdk 36（AGP 9.1.0 上限亦为 36），
     // 故 1.17.0 是当前版本矩阵下的天花板，不可再升。
     // ContextCompat.RECEIVER_NOT_EXPORTED 自 1.9.0 起可用，本次即为该 API 引入。
-    implementation("androidx.core:core-ktx:1.17.0")
+    implementation(libs.androidx.core.ktx)
 
     // Compose 物料清单：统一管理所有 androidx.compose.* 版本，与 Kotlin 2.4.10 的 Compose 编译器对齐。
-    // 使用 2026.06.01（Compose 1.11.x，要求 compileSdk ≤ 36）；最新 2026.08.00(1.12.x) 要求 compileSdk 37，当前 SDK 未安装。
-    implementation(platform("androidx.compose:compose-bom:2026.06.01"))
-    implementation("androidx.compose.ui:ui")
-    implementation("androidx.compose.ui:ui-graphics")
-    implementation("androidx.compose.ui:ui-tooling-preview")
-    implementation("androidx.compose.foundation:foundation")
-    implementation("androidx.compose.material3:material3")
-    implementation("androidx.compose.material:material-icons-extended")
+    // 使用 2026.06.01（Compose 1.11.x，要求 compileSdk ≤ 36）；最新 2026.08.00(1.12.x) 要求 compileSdk 37（TASK-07 升级项）
+    implementation(platform(libs.compose.bom))
+    implementation(libs.compose.ui)
+    implementation(libs.compose.ui.graphics)
+    implementation(libs.compose.ui.tooling.preview)
+    implementation(libs.compose.foundation)
+    implementation(libs.compose.material3)
+    implementation(libs.compose.material.icons.extended)
 
-    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.9.0")
-    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.9.0")
-    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.9.0")
-    implementation("androidx.lifecycle:lifecycle-process:2.9.0")
-    implementation("androidx.activity:activity-compose:1.10.0")
-    implementation("androidx.navigation:navigation-compose:2.9.0")
+    implementation(libs.lifecycle.runtime.ktx)
+    implementation(libs.lifecycle.runtime.compose)
+    implementation(libs.lifecycle.viewmodel.compose)
+    implementation(libs.lifecycle.process)
+    implementation(libs.activity.compose)
+    implementation(libs.navigation.compose)
     // Wave 12 依赖治理：biometric 稳定渠道最新为 1.1.0（1.2.x/1.4.x 均为 alpha，
     // 官方发布页 2026-04 确认；Authenticators/setAllowedAuthenticators/CryptoObject 均已覆盖），
     // 消除安全关键组件的 alpha 依赖；credentials 升至稳定版 1.6.0（1.5.0 bugfix：isConditional 传播修复）
-    implementation("androidx.biometric:biometric:1.1.0")
+    implementation(libs.biometric)
 
-    implementation("com.google.dagger:hilt-android:2.60.1")
-    kapt("com.google.dagger:hilt-compiler:2.60.1")
-    implementation("androidx.hilt:hilt-navigation-compose:1.3.0")
-    implementation("androidx.credentials:credentials:1.6.0")
+    implementation(libs.hilt.android)
+    // TASK-03：kapt → KSP（内置 Kotlin 不支持 kapt）
+    ksp(libs.hilt.compiler)
+    implementation(libs.hilt.navigation.compose)
+    implementation(libs.credentials)
     // TASK-08 整改：周期性后台同步调度（设置项 periodicBackgroundSyncEnabled 此前无消费方）
-    implementation("androidx.work:work-runtime-ktx:2.10.0")
+    implementation(libs.work.runtime.ktx)
     // Autofill IME 内联建议（官方 androidx.autofill.inline v1 内容模型）：
     // 服务侧 InlineSuggestionUi Slice 构建自 1.1.0 起可用，1.3.0 为当前稳定版
-    implementation("androidx.autofill:autofill:1.3.0")
+    implementation(libs.autofill)
     // TOTP 二维码扫描（断点5 整改：扫码按钮真实化）
-    implementation("com.journeyapps:zxing-android-embedded:4.3.0")
+    implementation(libs.zxing.embedded)
 
-    debugImplementation("androidx.compose.ui:ui-tooling")
+    debugImplementation(libs.compose.ui.tooling)
 
     // 单元测试
-    testImplementation("junit:junit:4.13.2")
-    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
+    testImplementation(libs.junit)
+    testImplementation(libs.coroutines.test)
 }

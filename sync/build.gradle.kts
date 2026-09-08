@@ -1,8 +1,5 @@
-import org.jetbrains.kotlin.gradle.dsl.JvmTarget
-
 plugins {
-    id("com.android.library")
-    id("org.jetbrains.kotlin.android")
+    alias(libs.plugins.android.library)
 }
 
 android {
@@ -15,21 +12,16 @@ android {
     }
 }
 
-// Kotlin 2.2 起 android.kotlinOptions 已移除，统一使用 kotlin.compilerOptions
-kotlin {
-    compilerOptions {
-        jvmTarget = JvmTarget.JVM_17
-    }
-}
+// TASK-03：内置 Kotlin 下 jvmTarget 默认取 android.compileOptions.targetCompatibility（JVM 17）
 
 dependencies {
     implementation(project(":core"))
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
-    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation(libs.coroutines.core)
+    implementation(libs.okhttp)
 
-    testImplementation("junit:junit:4.13.2")
-    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
-    testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
+    testImplementation(libs.junit)
+    testImplementation(libs.coroutines.test)
+    testImplementation(libs.mockwebserver)
 }
 
 // 本地 HTTPS 服务联调开关：仅当 -DliveSyncTest 存在时，将 live* 参数转发到测试 JVM。

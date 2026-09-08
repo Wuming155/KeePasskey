@@ -1,8 +1,5 @@
-import org.jetbrains.kotlin.gradle.dsl.JvmTarget
-
 plugins {
-    id("com.android.library")
-    id("org.jetbrains.kotlin.android")
+    alias(libs.plugins.android.library)
 }
 
 android {
@@ -15,14 +12,9 @@ android {
     }
 }
 
-// Kotlin 2.2 起 android.kotlinOptions 已移除，统一使用 kotlin.compilerOptions
-kotlin {
-    compilerOptions {
-        jvmTarget = JvmTarget.JVM_17
-    }
-}
+// TASK-03：内置 Kotlin 下 jvmTarget 默认取 android.compileOptions.targetCompatibility（JVM 17）
 
 dependencies {
     // P3-6 整改：移除从未使用的 androidx.core:core-ktx（三模块源码零 androidx 导入）
-    testImplementation("junit:junit:4.13.2")
+    testImplementation(libs.junit)
 }
