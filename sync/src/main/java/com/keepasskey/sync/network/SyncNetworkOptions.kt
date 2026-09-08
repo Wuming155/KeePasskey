@@ -14,11 +14,14 @@ package com.keepasskey.sync.network
 data class SyncNetworkOptions(
     val connectTimeoutMs: Long = DEFAULT_CONNECT_TIMEOUT_MS,
     val readTimeoutMs: Long = DEFAULT_READ_TIMEOUT_MS,
-    val writeTimeoutMs: Long = DEFAULT_WRITE_TIMEOUT_MS
+    val writeTimeoutMs: Long = DEFAULT_WRITE_TIMEOUT_MS,
+    // TASK-42 整改（P2-12）：全局调用超时（含 DNS），兜底封顶弱网悬挂
+    val callTimeoutMs: Long = DEFAULT_CALL_TIMEOUT_MS
 ) {
     companion object {
         const val DEFAULT_CONNECT_TIMEOUT_MS = 10_000L
         const val DEFAULT_READ_TIMEOUT_MS = 30_000L
         const val DEFAULT_WRITE_TIMEOUT_MS = 30_000L
+        const val DEFAULT_CALL_TIMEOUT_MS = 300_000L
     }
 }

@@ -4,7 +4,6 @@ import androidx.lifecycle.ViewModel
 import com.keepasskey.app.data.repository.FakeVaultRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -13,7 +12,6 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -21,6 +19,10 @@ import org.junit.Test
 
 /**
  * AuthenticatorViewModel 真实 TOTP 计算与状态容器单元测试 (Wave 3-E P1-11)
+ *
+ * TASK-42（P2-30）整改后 uiState 上游经 `flowOn(Dispatchers.Default)` 在真实 Default
+ * 线程池计算（与测试虚拟调度器异步），状态断言改为「轮询等待」式：
+ * [awaitUiState] 以真实时间短轮询等待 Flow 传播完成，避免虚拟时钟跑不到真实线程的时序脆弱性。
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class AuthenticatorViewModelTest {
@@ -37,6 +39,23 @@ class AuthenticatorViewModelTest {
         Dispatchers.resetMain()
     }
 
+    /** 真实时间轮询等待 uiState 满足条件（上游 flowOn(Default) 与虚拟调度器异步） */
+    private suspend fun awaitUiState(
+        viewModel: AuthenticatorViewModel,
+        timeoutMs: Long = 5_000L,
+        cond: (AuthenticatorUiState) -> Boolean
+    ): AuthenticatorUiState {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (true) {
+            val state = viewModel.uiState.value
+            if (cond(state)) return state
+            if (System.currentTimeMillis() > deadline) {
+                error("等待 uiState 满足条件超时（${timeoutMs}ms）")
+            }
+            Thread.sleep(10)
+        }
+    }
+
     @Test
     fun `仅展示包含真实 TOTP 密钥的条目并计算真实动态码`() = runTest(testDispatcher) {
         val fakeRepo = FakeVaultRepository()
@@ -45,9 +64,7 @@ class AuthenticatorViewModelTest {
             viewModel.uiState.collect {}
         }
 
-        testScheduler.runCurrent()
-
-        val state = viewModel.uiState.value
+        val state = awaitUiState(viewModel) { it.items.isNotEmpty() }
         // FakeVaultRepository 中 entry 2 配备了 totpSecret: GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ
         assertTrue("应至少包含 1 个带 TOTP 的条目", state.items.isNotEmpty())
 
@@ -76,12 +93,10 @@ class AuthenticatorViewModelTest {
             viewModel.uiState.collect {}
         }
 
-        testScheduler.runCurrent()
+        awaitUiState(viewModel) { it.items.isNotEmpty() }
 
         viewModel.onSearchQueryChange("non_existing_keyword_xyz")
-        testScheduler.runCurrent()
-
-        val state = viewModel.uiState.value
+        val state = awaitUiState(viewModel) { it.items.isEmpty() }
         assertEquals("搜索无匹配时项应为空", 0, state.items.size)
 
         job.cancel()

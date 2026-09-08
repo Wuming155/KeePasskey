@@ -46,7 +46,7 @@
 | 编号 | 问题描述 | 物理状态 | 代码证据 / 修复实现 | 是否有必要修复 | 说明 |
 |:---:|---|:---:|---|:---:|---|
 | **P2-1** | 全代码库无常量时间比较，HMAC 校验用 `contentEquals` | ⚠️ 部分修复 | 生产流路径 `KdbxFile.kt:93`/`HmacBlockStream.kt:219` 改 `MessageDigest.isEqual`；测试专用 `readAll` 仍保留 | 低 | 生产流已常量时间比较；测试 `readAll` 属非安全路径，可接受 |
-| **P2-2** | 保存路径把 Argon2 KDF 放进 `Dispatchers.IO` | ❌ 未修复 | `DatabaseSession.kt:193` `KdbxFile.save`（含 Argon2 变换）仍包裹在 `withContext(Dispatchers.IO)` 内 | 低-中（性能微调） | Argon2 为 CPU 密集，理想应走 `Dispatchers.Default`；非安全缺陷 |
+| **P2-2** | 保存路径把 Argon2 KDF 放进 `Dispatchers.IO` | ✅ 已修复（2026-09-08，TASK-42） | `DatabaseSession.save` 序列化（Argon2+流加密）移至 `Dispatchers.Default`，仅落盘走 IO；写毕擦除序列化缓冲 | 低-中（性能微调） | 对齐 exportToBytes 既有先例 |
 | **P2-3** | `InMemoryCipher.seal` 留下未清零的「密钥‖明文」拼接数组 | ✅ 已修复 | `InMemoryCipher.kt:84` 已重构为「随机 16B IV + AES-256-CTR 密文 + HMAC 标签」，主密钥 62 行即时清零 | 否（已修复） | 已重构并清零 |
 | **P2-4** | ProtectedString.toString() 泄露明文；Entry getter 读明文 | ⚠️ 部分修复 | `ProtectedString.kt:206` toString 改为脱敏字符串；getter 仍读明文 | 低 | toString 已脱敏；getter 读明文属投影层取舍，沿用 `useChars` 闭环即可 |
 | **P2-5** | TOTP 种子全程 String + 装箱 Byte 列表从不清零 | ❌ 未修复 | `OtpEngine.kt:146` Base32 仍以 String 承载且非法字符 `continue` 静默跳过 | 中 | `calculateTotp(secretKeyBase32: String)` 全程 String；`Base32Decoder.decode` 用 `mutableListOf<Byte>` 装箱；建议 ByteArray 链路并在用毕擦除 |
@@ -56,14 +56,14 @@
 | **P2-9** | `parseEcPrivateKey` 用越界标量构造 KeyParameters | ✅ 已修复 | `PasskeyCryptoEngine.kt` 新增 `validateEcScalarRange` 显式校验（d ∈ [1, n-1]），越界 fail-closed 抛 `CryptoException.InvalidKeyException`；库层 IAE 经 `newEcPrivateKey` 归一为同一类型；5 例标量校验单测（d=0/d=n/d>n 拒绝，d=1/d=n-1 可用，hex 文本形态覆盖） | 否（已修复） | 标量越界 fail-closed |
 | **P2-10** | 旧派生回退分支 `legacyCipherKey` 从不清零 | ✅ 已修复（2026-09-07） | `KdbxFile.kt` `resolveCipherKey` 重构为返回 `CipherKeyResolution`：未选中路径 `finally` 统一清零，选中路径在解密流建立后立即擦除 | 中 | 代码证据：`CipherKeyResolution(activeKey, legacyKeyToWipe)` + `loadPayload` 中 `resolution.legacyKeyToWipe?.fill(0)`（SecretKeySpec 已克隆密钥材料后擦除原数组） |
 | **P2-11** | WebDAV Basic 认证使用 ISO-8859-1 致中文密码 401 | ❌ 未修复 | `WebDavSyncProvider.kt:85` 仍按 ISO-8859-1 编码密码 | 中 | 按 RFC 7617 默认 charset 编码，但非 ASCII（中文）密码会 401；应发 `charset=UTF-8` 并改 UTF-8 编码 |
-| **P2-12** | 全网络请求无 `callTimeout` 与退避重试 | ❌ 未修复 | `SyncHttpClientFactory.kt:28` 仅设 connect/read/write timeout，无全局 callTimeout | 低-中 | 缺全局 `callTimeout`（含 DNS 解析）；弱网仍有悬挂风险，建议补 `callTimeout` |
+| **P2-12** | 全网络请求无 `callTimeout` 与退避重试 | ✅ 已修复（2026-09-08，TASK-42） | `SyncHttpClientFactory` 补全局 `callTimeout`（默认 5 分钟，`SyncNetworkOptions` 新增 `callTimeoutMs`），覆盖 DNS+连接+读写全生命周期兜底封顶 | 低-中 | 退避重试属增强项，未纳入本次范围 |
 | **P2-13** | 凭据加密失败时旧密文被保留且无错误上报 | ✅ 已修复 | `SyncCredentialsStore.kt:95` 改为先封印后落盘，加密失败直接中断并不改动磁盘 | 否（已修复） | 先封印后落盘已加 |
 | **P2-14** | S3 无时钟偏移处理（导致 RequestTimeTooSkewed 403） | ❌ 未修复 | `S3SyncProvider.kt:305` 直接取本地时间，无服务端时间补偿机制 | 低 | `signV4` 取本地 `Date()`；设备时钟偏移 >15min 才触发，发生概率低，建议加偏移补偿 |
-| **P2-15** | `updateBase` 两文件非原子对（.baseversion 与 .meta） | ❌ 未修复 | `SyncCache.kt:142` 分两次写，无原子保证 | 中 | `.baseversion` 与 `.meta` 分两次 `writeStringSafely`，崩溃窗口可能不一致；建议合并为单次原子写 |
+| **P2-15** | `updateBase` 两文件非原子对（.baseversion 与 .meta） | ✅ 已修复（2026-09-08，TASK-37） | `SyncCache.updateBase` 改为单次原子写：版本+元数据合并写入同一临时文件后原子 rename（TASK-37 整改），并新增 `SyncCacheTest` 5 例 | 中 | 崩溃窗口不一致已消除 |
 | **P2-16** | 缓存临时文件名确定性致并发踩写 | ✅ 已修复 | `SyncCache.kt:225` 临时文件名加上 `UUID.randomUUID()` 防碰撞 | 否（已修复） | 已加 UUID |
-| **P2-17** | 冲突解决页字段级选择塌缩为整条目二选一 | ❌ 未修复 | `ConflictResolutionViewModel.kt:128` 仍直接全量覆盖 | 中（功能） | UI 提供逐字段选择（`selectFieldChoice`），但 `applyMerge` 仅按「任一字段选 REMOTE 即整条 KEEP_REMOTE」塌缩；逐字段 UI 误导，应实现字段级合并或简化 UI |
+| **P2-17** | 冲突解决页字段级选择塌缩为整条目二选一 | ✅ 已修复（2026-09-08，TASK-30） | `KdbxMerger.resolveConflictByFields` 逐字段合并（KEEP_REMOTE 字段取远端并刷新 lastModificationTime）；`SyncCoordinator.resolveConflicts` 新增 `fieldResolutions` 参数，`ConflictResolutionViewModel.applyMerge` 生成逐字段决策下发 | 中（功能） | 字段级合并已落地 |
 | **P2-18** | WebDAV/S3 凭据明文长期驻留 StateFlow | ⚠️ 部分修复 | `SettingsUiState.kt:79` 密码改用 `CharArray?` 一次性预填通道；S3 AccessKey 仍以 String 留存 | 低-中 | 密码已走 CharArray 预填；S3 AccessKey 仍以 String 留存 StateFlow，建议同改造 |
-| **P2-19** | 历史修订快照为空时谎报"已回滚" | ❌ 未修复 | `EntryDetailViewModel.kt:242` snapshot==null 路径依然触发已回滚 Snackbar | 中 | `snapshot == null` 时仍弹 `detail_history_rolled_back`（"已回滚"）但实际未回滚；应改错误提示 |
+| **P2-19** | 历史修订快照为空时谎报"已回滚" | ✅ 已修复（2026-09-08，TASK-31） | `EntryDetailViewModel` 快照缺失路径改发错误提示（不再触发 `detail_history_rolled_back`），仅真实回滚成功才报成功 | 中 | 成功/失败语义诚实化 |
 | **P2-20** | TOTP 复制绕过 `ClipboardSecurityManager` | ✅ 已修复 | `AuthenticatorViewModel.kt:124` 统一改调 `clipboardSecurityManager.copySensitiveText` | 否（已修复） | 已走受保护复制 |
 | **P2-21** | 生产代码保留可替换加解密/封印测试钩子 | ✅ 已修复（2026-09-07） | `SyncCredentialsStore.kt` `customEncryptor`/`customDecryptor` 加 `@VisibleForTesting` + `internal` 双重收窄，生产 DI 与外部调用方不可写 | 低 | QuickUnlockPinStore 与 SyncCoordinator 钩子已清理；SyncCredentialsStore 钩子现仅限本模块单元测试注入 |
 | **P2-22** | 改密对话框与编辑页密码框未用 `SecurePasswordField` | ✅ 已修复 | `SettingsScreen.kt:342` 与 `EntryEditScreen.kt:462` 均已换用 `SecurePasswordField`（CharArray 直通） | 否（已修复） | 已换用安全输入框 |
@@ -71,14 +71,14 @@
 | **P2-24** | Autofill Dataset 在已解锁分支未设 setAuthentication | ✅ 已修复（2026-09-07） | `KeePasskeyAutofillService.kt` 已解锁分支每个数据集挂 `setAuthentication` → 新增 `AutofillConfirmActivity` 二次确认（生物识别/锁屏凭据优先，受保护窗口手动确认兜底） | 低-中（加固） | 认证数据集独立 requestCode；Activity 带 FLAG_SECURE + setHideOverlayWindows(true)；RESULT_OK 后框架才写入凭据值 |
 | **P2-25** | 生物凭据封印失败被静默吞掉（catch ignored） | ✅ 已修复 | `UnlockViewModel.kt:301` 捕获异常并记录 `debugLog.warn`，显式提示用户 | 否（已修复） | 已显式提示 |
 | **P2-26** | 数据库列表元数据硬编码假值与占位库 | ❌ 未修复 | `RealVaultRepository.kt:80` 仍使用占位数据与静态描述文案 | 低 | 无 kdbx 文件时回退占位 `default_vault` 作「引导创建首个库」可接受，优先级低 |
-| **P2-27** | 条目密码强度恒为硬编码 112 bit | ❌ 未修复 | `MockData.kt:106` 硬编码 112 bit，无真实熵计算引擎接入 | 中 | `UiVaultEntry.strengthBits` 默认 112 恒显，误导用户；应接入熵估算或显式标注未计算 |
+| **P2-27** | 条目密码强度恒为硬编码 112 bit | ✅ 已修复（2026-09-08，TASK-32） | `UiVaultEntry.strengthBits` 改为 `Int?`（默认 null，显式标注「未计算」）；`EntryDetailViewModel` 揭示密码时接真实熵估算 | 中 | 不再恒显误导值 |
 | **P2-28** | 健康检查"已泄露密码"恒 0 | ❌ 未修复 | `SettingsViewModel.kt:1096` `compromisedPasswordCount = 0` 硬编码 | 低（需外部服务） | 需 HIBP 类泄露库接入才有意义；当前占位可接受 |
-| **P2-29** | 密钥文件 SAF 读取在主线程完成 | ❌ 未修复 | `UnlockScreen.kt:110` SAF 回调中直接在主线程读取 InputStream 字节 | 中 | SAF 回调中 `openInputStream` 读取密钥文件字节在主线程同步执行；大文件可能 ANR，应移至 `Dispatchers.IO` |
-| **P2-30** | 验证器页每秒在主线程对全部 TOTP 条目做解密+HMAC | ❌ 未修复 | `AuthenticatorViewModel.kt:57` combine 变换未指定 IO 调度器 | 低-中 | `combine` 未显式 `flowOn`，但上游 `timerSecondsFlow` 已标 `Dispatchers.Default`；建议显式 `flowOn(Dispatchers.Default)` 兜底 |
-| **P2-31** | `@Singleton` 仓库构造函数内同步做磁盘扫描 | ❌ 未修复 | `RealVaultRepository.kt:62` init 块同步在主线程扫描 `filesDir` | 低 | `@Singleton` 构造 `init` 同步扫描 `filesDir`；操作快但应移出构造期（懒加载/IO） |
-| **P2-32** | Release 未开 shrinkResources；ProGuard 过度宽松 | ❌ 未修复 | `app/build.gradle.kts:24` 未开启 shrinkResources，`-dontwarn **` 仍保留 | 中 | `isMinifyEnabled=true` 但缺 `isShrinkResources = true`；建议开启并对 `proguard-rules.pro` 收敛 |
+| **P2-29** | 密钥文件 SAF 读取在主线程完成 | ✅ 已修复（2026-09-08，TASK-39） | `UnlockScreen` SAF 回调整体重构：1 MiB 流式读取与 DISPLAY_NAME 游标查询经 `withContext(Dispatchers.IO)` 移出主线程，结果折叠回主线程分发 | 中 | 大文件不再 ANR |
+| **P2-30** | 验证器页每秒在主线程对全部 TOTP 条目做解密+HMAC | ✅ 已修复（2026-09-08，TASK-42） | `AuthenticatorViewModel` uiState 上游显式 `flowOn(Dispatchers.Default)`：combine 内含 calculateEntryTotp（种子解析+HMAC）全部脱离主线程 | 低-中 | 不依赖上游实现的调度选择，兜底防 ANR |
+| **P2-31** | `@Singleton` 仓库构造函数内同步做磁盘扫描 | ✅ 已修复（2026-09-08，TASK-42） | `RealVaultRepository` init 改为仓库协程内异步初始化：`listFiles` 扫盘移至 `Dispatchers.IO`，并监听 `databaseFlow` 推送刷新 | 低 | `databasesFlow` 经 Flow 自然推送更新 |
+| **P2-32** | Release 未开 shrinkResources；ProGuard 过度宽松 | ✅ 已修复（2026-09-08，TASK-38） | `app/build.gradle.kts` 启用 `isShrinkResources = true`；ProGuard 规则收敛（移除 `-dontwarn **` 宽松兜底），顺手修复 lintVital 孤儿翻译 | 中 | 收紧后 assembleRelease(R8) 通过 |
 | **P2-33** | Passkey 注册未对 rp.id 做 DAL 校验 | ⚠️ 部分修复 | `DomainMatcher.kt:107` 已加入可注册域匹配防线；完整 DAL 远程校验未引入 | 低 | 可注册域匹配已加；完整 DAL 远程校验（需网络）未引入，属增强项 |
-| **P2-34** | TOTP 缺失时以假验证码 "000000" 兜底 | ❌ 未修复 | `AuthenticatorViewModel.kt:82` 异常时依然 fallback 到 `"000000"` | 中 | 计算失败时 `?: "000000"` 显示看似合法的假码，误导用户；应显示错误或空白 |
+| **P2-34** | TOTP 缺失时以假验证码 "000000" 兜底 | ✅ 已修复（2026-09-08，TASK-33） | `AuthenticatorViewModel` 移除 `?: "000000"` 回退：快照缺失时 `codeRaw = null`、展示占位 "------"（不可复制） | 中 | 假码已下线 |
 | **P2-35** | `SecurityTest` 宣称覆盖硬件闭环实际只测 JDK | ✅ 已修复（2026-09-08，TASK-40） | KDoc 与用例名诚实化（JVM 测试 = JDK 软件密钥算法语义验证，非 AndroidKeyStore 硬件路径）；补 GCM 密文篡改 fail-closed 回归锁（AEADBadTagException） | 低（测试质量） | 不再虚标硬件覆盖；硬件隔离属 Instrumented 范畴（已注明） |
 | **P2-36** | app 测试 14 个在测 `FakeVaultRepository` 本身 | ⚠️ 部分修复 | Fake 已出库至 `src/test`；但这 14 个单元测试依然测的是 Fake 自身 | 低 | Fake 已出库；14 个单测仍测 Fake 自身，属测试有效性缺口，优先级低 |
 | **P2-37** | `SyncCredentialsStoreTest` 注入 XOR 假加密绕过真实路径 | ✅ 已修复（2026-09-08，TASK-40） | 新增真实 AES-GCM 算法路径用例（生产同款 `AES/GCM/NoPadding` 软件密钥）：封印往返 / IV 一次性 / 密文篡改解封 fail-closed（WebDAV + S3 双协议） | 中（测试） | XOR 假加密语义不再承担安全验证；AndroidKeyStore 硬件隔离属 Instrumented 范畴（KDoc 注明） |

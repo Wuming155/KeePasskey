@@ -109,11 +109,15 @@ class AuthenticatorViewModel @Inject constructor(
             searchQuery = query,
             userMessage = message
         )
-    }.stateIn(
-        scope = viewModelScope,
-        started = SharingStarted.WhileSubscribed(5000),
-        initialValue = AuthenticatorUiState()
-    )
+    }
+        // TASK-42 整改（P2-30）：combine 变换内含 calculateEntryTotp（种子解析+HMAC 计算），
+        // 显式 flowOn(Default) 使全部上游变换脱离主线程——不依赖上游实现的调度选择，兜底防 ANR
+        .flowOn(Dispatchers.Default)
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = AuthenticatorUiState()
+        )
 
     fun onSearchQueryChange(query: String) {
         searchQueryFlow.value = query

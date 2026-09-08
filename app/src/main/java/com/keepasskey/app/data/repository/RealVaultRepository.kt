@@ -60,7 +60,10 @@ class RealVaultRepository @Inject constructor(
     private val databasesFlow = MutableStateFlow<List<VaultDatabaseInfo>>(emptyList())
 
     init {
-        refreshDatabases()
+        // TASK-42 整改（P2-31）：构造期不再同步扫盘——@Singleton 构造发生在主线程，
+        // listFiles 磁盘 IO 移至协程 + Dispatchers.IO；databasesFlow 初始为空列表，
+        // 扫描完成后由 Flow 自然推送更新，观察者语义不变
+        repositoryScope.launch { refreshDatabases() }
         // 观察会话，当数据库发生变化时同步刷新
         repositoryScope.launch {
             databaseSession.databaseFlow.collect {
@@ -69,11 +72,13 @@ class RealVaultRepository @Inject constructor(
         }
     }
 
-    private fun refreshDatabases() {
+    private suspend fun refreshDatabases() {
         val filesDir = context.filesDir ?: return
-        val kdbxFiles = filesDir.listFiles { file ->
-            file.extension.equals("kdbx", ignoreCase = true)
-        } ?: emptyArray()
+        val kdbxFiles = withContext(Dispatchers.IO) {
+            filesDir.listFiles { file ->
+                file.extension.equals("kdbx", ignoreCase = true)
+            } ?: emptyArray()
+        }
 
         val currentActivePath = databaseSession.currentFile?.absolutePath
 

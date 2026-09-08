@@ -30,6 +30,10 @@ object SyncHttpClientFactory {
             .connectTimeout(options.connectTimeoutMs, TimeUnit.MILLISECONDS)
             .readTimeout(options.readTimeoutMs, TimeUnit.MILLISECONDS)
             .writeTimeout(options.writeTimeoutMs, TimeUnit.MILLISECONDS)
+            // TASK-42 整改（P2-12）：全局 callTimeout 覆盖 DNS 解析 + 连接 + 请求体写 + 响应体读
+            // 全生命周期——逐段超时无法约束「每段都缓慢重启计时」的悬挂场景，弱网下同步协程
+            // 仍可能无限滞留。callTimeout 不含重试（OkHttp 默认重试由重试次数约束），兜底封顶。
+            .callTimeout(options.callTimeoutMs, TimeUnit.MILLISECONDS)
             .build()
     }
 }

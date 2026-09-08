@@ -191,11 +191,20 @@ class DatabaseSession {
             }
 
             try {
+                // TASK-42 整改（P2-2）：Argon2 派生与流加密为 CPU 密集，序列化走 Default；
+                // 仅字节落盘（writeAtomic + fsync）走 IO——对齐 exportToBytes 的既有调度先例
+                val serialized = withContext(Dispatchers.Default) {
+                    ByteArrayOutputStream().also { buffer ->
+                        KdbxFile.save(buffer, db, pwd, keyFileCache)
+                    }.toByteArray()
+                }
                 withContext(Dispatchers.IO) {
                     AtomicFileWriter.writeAtomic(file) { os ->
-                        KdbxFile.save(os, db, pwd, keyFileCache)
+                        os.write(serialized)
                     }
                 }
+                // 序列化缓冲即整库密文（头部外全加密），写毕即擦，避免缓冲滞留
+                serialized.fill(0)
                 _state.value = SessionState.OPENED
                 KdbxResult.Success(Unit)
             } catch (t: Throwable) {
