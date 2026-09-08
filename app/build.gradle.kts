@@ -84,6 +84,8 @@ dependencies {
     implementation(libs.credentials)
     // TASK-04 整改：设置持久化迁移 Preferences DataStore（含 SharedPreferences 一次性迁移器）
     implementation(libs.datastore.preferences)
+    // TASK-06 整改：Baseline Profile 运行期安装器——首启后异步触发 ART 配置文件安装
+    implementation(libs.profileinstaller)
     // TASK-08 整改：周期性后台同步调度（设置项 periodicBackgroundSyncEnabled 此前无消费方）
     implementation(libs.work.runtime.ktx)
     // Autofill IME 内联建议（官方 androidx.autofill.inline v1 内容模型）：

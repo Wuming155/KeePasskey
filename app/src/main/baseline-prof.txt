@@ -1,0 +1,47 @@
+# KeePasskey 手动 Baseline Profile（TASK-06 批次 G）
+#
+# 语法：[FLAGS][CLASS_DESCRIPTOR]->[METHOD_SIGNATURE]
+#   FLAGS: H=Hot / S=Startup / P=Post-Startup；通配符 ** 跨包匹配、* 单段匹配
+# 放置位置：src/main/baseline-prof.txt（AGP 构建期合并编译进 APK assets/dexopt/baseline.prof）
+# 运行期安装：androidx.profileinstaller（首启后异步触发 ART 配置文件安装）
+#
+# 策略（冷启动 + 解锁首屏路径优先，避免整包 S 标志导致 dex2oat 膨胀）：
+#   1) 应用壳与导航：Application / MainActivity / 导航图 / 主题
+#   2) DI（Hilt 生成代码）：模块与成员注入工厂
+#   3) 解锁首屏：UnlockScreen / UnlockViewModel / 安全封存（Keystore/生物识别）
+#   4) 设置与自锁：AutoLockManager / SettingsRepository（首帧即读）
+#   5) 核心库启动热路径：database/crypto/core 中解锁链路类
+
+# ── 应用壳 / 导航 / 主题 ────────────────────────────────────────────────
+HSPLcom/keepasskey/app/MainApplication;->**(**)**
+HSPLcom/keepasskey/app/MainActivity;->**(**)**
+HSPLcom/keepasskey/app/di/**->**(**)**
+HSPLcom/keepasskey/app/ui/navigation/**->**(**)**
+HSPLcom/keepasskey/app/ui/theme/**->**(**)**
+HSPLcom/keepasskey/app/ui/KeePasskeyApp**->**(**)**
+Lcom/keepasskey/app/MainApplication;
+Lcom/keepasskey/app/MainActivity;
+
+# ── 解锁首屏（冷启动必经）──────────────────────────────────────────────
+HSPLcom/keepasskey/app/ui/screens/unlock/**->**(**)**
+HSPLcom/keepasskey/app/security/**->**(**)**
+HSPLcom/keepasskey/app/util/**->**(**)**
+
+# ── 设置仓库与自锁（首帧读取）──────────────────────────────────────────
+HSPLcom/keepasskey/app/data/repository/RealSettingsRepository;->**(**)**
+HSPLcom/keepasskey/app/data/repository/SettingsRepository**->**(**)**
+HSPLcom/keepasskey/app/data/repository/UserSettings;->**(**)**
+HSPLcom/keepasskey/app/data/repository/AppLanguage;->**(**)**
+HSPLcom/keepasskey/app/security/AutoLockManager;->**(**)**
+
+# ── 核心库：解锁链路（KDF/解密/会话建立）────────────────────────────────
+HSPLcom/keepasskey/core/model/KdbxUuid;->**(**)**
+HSPLcom/keepasskey/core/model/KdbxConstants*->**(**)**
+HSPLcom/keepasskey/crypto/kdf/**->**(**)**
+HSPLcom/keepasskey/crypto/cipher/**->**(**)**
+HSPLcom/keepasskey/crypto/**/Argon2*->**(**)**
+HSPLcom/keepasskey/database/session/DatabaseSession;->**(**)**
+HSPLcom/keepasskey/database/file/KdbxFile;->**(**)**
+
+# ── Compose 运行时热路径兜底（无库自带 profile 的补强）─────────────────
+HSPLcom/keepasskey/app/ui/model/**->**(**)**
