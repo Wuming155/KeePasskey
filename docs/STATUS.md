@@ -1,11 +1,12 @@
 # KeePasskey 项目状态单一真相源（Single Source of Truth）
 
-> **更新时间**：2026-09-08（TASK-47 已泄露密码检测接入 HIBP 落地回写）
+> **更新时间**：2026-09-08（TASK-50 Dependabot 3 项依赖升级 PR 批量落地回写）
 > **权威声明**：本项目**唯一**有效的状态与任务跟踪页。`README.md` 仅作对外简介。原 `DELIVERY_PLAN.md` / `REMEDIATION_PLAN.md` / `docs/*审查报告*.md` 等历史存档文档已于 2026-09-07 **物理删除**，其结论已并入本文件与 `FINDINGS_TRACKER.md`，不再单独保留。
 > **2026-09-08 文档梳理**：看板去重（删除 TASK-08/15/16/17/18 的 5 条失效「❌ 未实现」副本），按 ID 升序重排；基线 HEAD、测试口径与 §4 日志索引按实际提交校正。
 > **2026-09-08 TASK-44**：自动填充黑名单完整生命周期闭环。
 > **2026-09-08 TASK-47**：健康度「已泄露密码」接入真实泄露库（HIBP k-匿名范围查询）——路线 A（接入）落地：显式开关默认关闭（关闭态零外联）、失败如实上浮、指标可空不以 0 冒充安全。
 > **2026-09-08 口径校准**：① §1 基线 HEAD 由 `756003c` 校正为实际 HEAD `4d52f27`；② §4 补登 3 条漏记提交（`4ce7dc0` / `e6d7f27` / `4d52f27`）；③ FINDINGS 残余「未修复」项（P2-26 占位库假元数据、P2-28 泄露密码恒 0）与两处功能残余（TASK-15 图标渲染/删除、TASK-17 引用展示侧）在看板无条目，按纪律 #5 补登为 **TASK-47 ~ TASK-49**；④ TASK-45/46 行内的「475 / 470 例」标注为当时提交快照，现行基线一律以 §1 为准。
+> **2026-09-08 TASK-50**：GitHub 上 3 个开放 Dependabot PR（#1 gradle-minor-patch 组 8 项 / #2 okhttp 5.5.0 / #3 foojay-resolver 1.0.0）因共写 `libs.versions.toml` 必然冲突，改为本地一次性落地 main 后由 Dependabot 自动关闭；`gradlew test` 全量绿（506 例口径不变）。
 
 ---
 
@@ -15,14 +16,14 @@
 |---|---|---|
 | **Git HEAD** | 代码基线 `64b94f4`（TASK-47 已泄露密码检测） | 本表 HEAD 记 **代码基线**（最后一次含代码改动的提交）；**纯文档提交不抬升该基线**（避免文档自引用无限漂移）。最新提交以 `git log` 为准——§4 索引登记**代码改动提交**，docs 类提交不逐条补登。分支 `main` 与 `origin/main` 同步（0 ahead / 0 behind） |
 | **测试基线** | **506 个单元测试用例**（app 146 / core 32 / crypto 52 / database 155 / sync 121）：**494 通过、0 失败、12 跳过** | `./gradlew test` 全模块执行；跳过的 12 例为 `LiveSyncServersTest` 真实联调用例（需先起 `tools/local-sync` 服务并加 `-DliveSyncTest`） |
-| **构建状态** | `assembleDebug` + `assembleRelease` (R8) 全量通过 | **AGP 9.2.1 / Gradle 9.4.1** / Kotlin 2.4.10（经 buildscript classpath 锚定内置 KGP）/ Hilt 2.60.1 / **KSP 2.3.11** |
+| **构建状态** | `assembleDebug` + `assembleRelease` (R8) 全量通过 | **AGP 9.4.0 / Gradle 9.7.1** / Kotlin 2.4.10（经 buildscript classpath 锚定内置 KGP）/ Hilt 2.60.1 / **KSP 2.3.11** |
 | **系统基线** | **minSdk 36**, **compileSdk 37**, targetSdk 36 | 仅针对 Android 16+ 深度优化，固化无旧版垫片决策；compileSdk 37 随批次 H 升级（Compose BOM 2026.08.00 + M3 Expressive） |
 | **传输安全防线** | 全站强制 HTTPS（`network_security_config.xml` 禁明文 + OkHttp TLS-only），零证书固定 | 对齐 Google Developer Knowledge `pinning not recommended` 指南 |
 | **PSL 与域名匹配** | 完整接入 Mozilla PSL（`public_suffix_list.dat`），IDN punycode 归一 | 消除 47 条硬编码漏判盲区，fail-closed |
 
 ---
 
-## 2. 任务唯一看板（49 项：44 ✅ 完成 / 2 📋 待验证·评估 / 3 ❌ 未实现）
+## 2. 任务唯一看板（50 项：45 ✅ 完成 / 2 📋 待验证·评估 / 3 ❌ 未实现）
 
 所有进行中、已立项、待执行体检批次、未实现功能、安全遗留与欠账统一收录于下表，**按 TASK ID 升序排列**（优先级见各行「优先级」列）。**新增任务必须在此表注册，新 ID 顺延。**
 
@@ -79,6 +80,7 @@
 | **TASK-47** | 安全 | **P2-28：健康检查「已泄露密码」接入真实泄露库（HIBP）** | FINDINGS P2-28 | **P3** | ✅ 已完成（2026-09-08） | **裁定走路线 A（接入）**：新增 `BreachCheckCoordinator` + `HibpRangeClient`（HIBP Pwned Passwords k-匿名范围查询：本地算密码 SHA-1，仅上送前 5 位前缀，完整哈希与明文不出端，同前缀聚合去重减少外联）+ `BreachHasher`（公开已知答案向量回归）；传输安全沿用双层防御（`network_security_config` 禁明文 + DI 注入客户端 `ConnectionSpec` 排除 CLEARTEXT）。**门控与诚实化语义**：`ExtendedSettings.breachCheckEnabled` 显式开关（默认关闭，关闭态零外联，设置持久化随 TASK-12 通道）；`compromisedPasswordCount` 改可空——未启用 / 失败为 null 绝不回填 0，失败转 `BreachCheckStatus.FAILED` 透出原因（DISABLED/CHECKING/CLEAN/BREACHED/FAILED 五态）；健康度页泄露项按真实状态呈现并内嵌开关与 k-匿名说明（中英双语），命中计入健康分扣减（20/条）。回归 20 例：`BreachHasherTest` 已知答案 4 例、`HibpRangeClientTest`（MockWebServer 前缀上送不变量 / 解析 / 失败 fail-closed）6 例、`BreachCheckCoordinatorTest` 5 例、`BreachCheckHealthTest`（关闭态零请求断言 / 命中计数与扣分 / 失败上浮）3 例、`BreachCheckModuleTest` 传输安全回归锁 2 例。**506 例全绿**（494 通过 / 12 跳过） |
 | **TASK-48** | 数据 | **P2-26：数据库列表占位库假元数据** | FINDINGS P2-26 | **P3** | ❌ 未实现（风险已接受） | 无 `.kdbx` 文件时 `RealVaultRepository` 回退占位 `default_vault` 并附静态描述文案。当前语义为「引导创建首个库」，风险已接受；若后续保留该引导，需将占位项与真实库在 UI 上显式区分（避免用户误认存在真实数据库） |
 | **TASK-49** | 特性 | **两处已落地功能的残余接线** | TASK-15 / TASK-17 残余 | **P3** | ❌ 未实现 | ① **TASK-15 残余**：自定义图标在列表行 / 详情页的位图渲染与图标删除入口未接线（`CustomIconCoordinator` 与 `customIconId` 数据通道已就绪）；② **TASK-17 残余**：`{REF:...}` 字段引用在 Notes / URL 展示侧未展开（引擎已落地，消费点平移即可，须保持「投影层不物化被引用密码明文」的 M1 语义） |
+| **TASK-50** | 依赖 | **Dependabot 3 项依赖升级 PR 批量落地** | GitHub PR #1/#2/#3 | **P2** | ✅ 已完成（2026-09-08） | 3 个开放 PR 共写 `libs.versions.toml` 直接逐个合并必冲突，改为本地一次性落地后由 Dependabot 自动关闭：① PR#1 gradle-minor-patch 组——Gradle Wrapper 9.4.1→9.7.1（jar/脚本/properties 全量重生成，保留腾讯镜像分发地址）、AGP 9.2.1→9.4.0、navigation-compose 2.9.0→2.10.0、hilt-navigation-compose 1.3.0→1.4.0、bcprov-jdk18on 1.79→1.85.2、kotlinx-coroutines 1.10.2→1.11.0；② PR#2 okhttp 4.12.0→5.5.0（大版本，`okhttp3.mockwebserver` 经典包兼容层全量测试验证通过）；③ PR#3 foojay-resolver-convention 0.10.0→1.0.0（需 Gradle 9.7+，与 wrapper 升级同批生效）。风险点：AGP 9.4.0 与 foojay 1.0.0 均要求 Gradle 9.7 运行时，`wrapper` 任务在旧发行版下执行会 `NoClassDefFoundError`，采用直接改 `distributionUrl` 先换底座再重生成 wrapper 文件解决。验收：`gradlew test` 506 例全绿（494 通过 / 0 失败 / 12 跳过，口径不变） |
 
 ---
 

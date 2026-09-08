@@ -71,7 +71,7 @@ KeePasskey 是一款使用原生 Kotlin 开发的现代化 Android 密码管理�
 
 ## 构建与测试命令
 
-统一使用 Gradle Wrapper（**Gradle 9.4.1**，AGP 9.2.1 / Kotlin 2.4.10 / Hilt 2.60.1 / **KSP 2.3.11**，版本集中于 `gradle/libs.versions.toml`）。Windows 下执行 `.\gradlew.bat <task>`：
+统一使用 Gradle Wrapper（**Gradle 9.7.1**，AGP 9.4.0 / Kotlin 2.4.10 / Hilt 2.60.1 / **KSP 2.3.11**，版本集中于 `gradle/libs.versions.toml`）。Windows 下执行 `.\gradlew.bat <task>`：
 
 - `.\gradlew.bat assembleDebug` — 编译全部模块
 - `.\gradlew.bat :app:compileDebugKotlin` — 仅快速检查 Kotlin 编译
