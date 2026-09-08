@@ -15,7 +15,7 @@
 
 | 维度 | 数值 / 状态 | 官方依据与说明 |
 |---|---|---|
-| **Git HEAD** | 代码基线 `a0d972c`（TASK-50 Dependabot 依赖升级批量落地） | 本表 HEAD 记 **代码基线**（最后一次含代码改动的提交）；**纯文档提交不抬升该基线**（避免文档自引用无限漂移）。最新提交以 `git log` 为准——§4 索引登记**代码改动提交**，docs 类提交不逐条补登。分支 `main` 与 `origin/main` 同步（0 ahead / 0 behind） |
+| **Git HEAD** | 代码基线 `84b7b5e`（TASK-51 dependency-scan 三层根因修复） | 本表 HEAD 记 **代码基线**（最后一次含代码改动的提交）；**纯文档提交不抬升该基线**（避免文档自引用无限漂移）。最新提交以 `git log` 为准——§4 索引登记**代码改动提交**，docs 类提交不逐条补登。分支 `main` 与 `origin/main` 同步（0 ahead / 0 behind） |
 | **测试基线** | **506 个单元测试用例**（app 146 / core 32 / crypto 52 / database 155 / sync 121）：**494 通过、0 失败、12 跳过** | `./gradlew test` 全模块执行；跳过的 12 例为 `LiveSyncServersTest` 真实联调用例（需先起 `tools/local-sync` 服务并加 `-DliveSyncTest`） |
 | **构建状态** | `assembleDebug` + `assembleRelease` (R8) 全量通过 | **AGP 9.4.0 / Gradle 9.7.1** / Kotlin 2.4.10（经 buildscript classpath 锚定内置 KGP）/ Hilt 2.60.1 / **KSP 2.3.11** |
 | **系统基线** | **minSdk 36**, **compileSdk 37**, targetSdk 36 | 仅针对 Android 16+ 深度优化，固化无旧版垫片决策；compileSdk 37 随批次 H 升级（Compose BOM 2026.08.00 + M3 Expressive） |
@@ -128,6 +128,7 @@
 > 索引中出现的 `Wave N` / `阶段 N` 字样为对应历史提交的**原始主题**，属已冻结语境，仅供追溯；新提交请以 `TASK-xx` / `批次 X` + 提交哈希 引用，勿再使用 Wave / 阶段 编号。
 > **登记口径（杜绝自引用漂移）**：本节登记**含代码改动的提交**；纯 `docs:` 回写提交不逐条补登（其本身即为维护本文件的产物，逐条登记会无限递归）。查最新提交请用 `git --no-pager log --oneline -5`。
 
+- `84b7b5e` (2026-09-08): fix(TASK-51) dependency-scan 三层根因修复——gradlew 可执行位 100755 / init 脚本 NVD 双通道（Secret Key 优先 + 官方镜像兜底）/ workflow 报告与 SARIF 路径修正；STATUS 看板新增 TASK-51（50→51 项）；本地实证 dependencyCheckAggregate BUILD SUCCESSFUL 后落地
 - `a0d972c` (2026-09-08): build(TASK-50) Dependabot PR #1/#2/#3 批量落地——Gradle Wrapper 9.4.1→9.7.1（wrapper 文件重生成，保留腾讯镜像）、AGP 9.2.1→9.4.0、navigation-compose 2.10.0、hilt-navigation-compose 1.4.0、bcprov 1.85.2、coroutines 1.11.0、okhttp 5.5.0、foojay-resolver 1.0.0；STATUS 看板新增 TASK-50（49→50 项）并同步 §1 构建基线；AGENTS.md 构建命令同步；506 例全绿
 - `64b94f4` (2026-09-08): TASK-47 已泄露密码检测接入 HIBP——`BreachHasher`/`HibpRangeClient`/`BreachCheckCoordinator`（k-匿名仅上送 SHA-1 前 5 位 + 同前缀去重）+ `BreachCheckModule` TLS-only 装配；`breachCheckEnabled` 显式开关默认关闭（关闭态零外联）、`compromisedPasswordCount` 改可空不以 0 冒充安全、失败转 FAILED 如实上浮；健康度页真实五态呈现 + 内嵌开关说明（中英）；回归 20 例（506 例全绿）；STATUS/FINDINGS/AGENTS/REPAIR_PLAN/README 同步回写
 - `38c2e03` (2026-09-08): docs 口径校准——§1 HEAD 改为「代码基线 + 最新提交」双字段（纯文档提交不抬升代码基线，杜绝自引用漂移）；§2 补登 **TASK-47（HIBP 泄露密码检测）/ TASK-48（占位库假元数据）/ TASK-49（图标渲染删除 + 引用展示侧残余）**（看板 46 → 49 项）；§4 补登漏记提交；§6 局限表同步并修正 TASK-17 笔误；FINDINGS P2-26/P2-28 回写 TASK 映射
