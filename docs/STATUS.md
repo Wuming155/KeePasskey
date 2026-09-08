@@ -12,7 +12,7 @@
 
 | 维度 | 数值 / 状态 | 官方依据与说明 |
 |---|---|---|
-| **Git HEAD** | `4d52f27` (main) | 文档口径校准提交（§1 HEAD 与 §4 日志索引校正、补登 TASK-47~49）；**已推送 `origin/main`（本地与远端 0 ahead / 0 behind）**；代码基线仍为 `756003c`（TASK-44 自动填充黑名单） |
+| **Git HEAD** | 代码基线 `756003c`；最新提交 `38c2e03`（docs 口径校准） | 本表 HEAD 记 **代码基线**（最后一次含代码改动的提交）；**纯文档提交不抬升该基线**，避免文档自引用无限漂移。代码基线即 TASK-44 自动填充黑名单提交。分支 `main` 与 `origin/main` 同步（0 ahead / 0 behind） |
 | **测试基线** | **486 个单元测试用例**（app 126 / core 32 / crypto 52 / database 155 / sync 121）：**474 通过、0 失败、12 跳过** | `./gradlew test` 全模块执行；跳过的 12 例为 `LiveSyncServersTest` 真实联调用例（需先起 `tools/local-sync` 服务并加 `-DliveSyncTest`） |
 | **构建状态** | `assembleDebug` + `assembleRelease` (R8) 全量通过 | **AGP 9.2.1 / Gradle 9.4.1** / Kotlin 2.4.10（经 buildscript classpath 锚定内置 KGP）/ Hilt 2.60.1 / **KSP 2.3.11** |
 | **系统基线** | **minSdk 36**, **compileSdk 37**, targetSdk 36 | 仅针对 Android 16+ 深度优化，固化无旧版垫片决策；compileSdk 37 随批次 H 升级（Compose BOM 2026.08.00 + M3 Expressive） |
@@ -122,6 +122,7 @@
 
 > 索引中出现的 `Wave N` / `阶段 N` 字样为对应历史提交的**原始主题**，属已冻结语境，仅供追溯；新提交请以 `TASK-xx` / `批次 X` + 提交哈希 引用，勿再使用 Wave / 阶段 编号。
 
+- `38c2e03` (2026-09-08): docs 口径校准——§1 HEAD 改为「代码基线 + 最新提交」双字段（纯文档提交不抬升代码基线，杜绝自引用漂移）；§2 补登 **TASK-47（HIBP 泄露密码检测）/ TASK-48（占位库假元数据）/ TASK-49（图标渲染删除 + 引用展示侧残余）**（看板 46 → 49 项）；§4 补登漏记提交；§6 局限表同步并修正 TASK-17 笔误；FINDINGS P2-26/P2-28 回写 TASK 映射
 - `4d52f27` (2026-09-08): docs 口径校准——§1 基线 HEAD 校正为实际 HEAD（`756003c` → `4d52f27`）；§2 补登 **TASK-47（HIBP 泄露密码检测）/ TASK-48（占位库假元数据）/ TASK-49（图标渲染删除 + 引用展示侧残余）**（看板 46 → 49 项）；§4 补登漏记提交；§6 局限表同步并修正 TASK-17 笔误
 - `e6d7f27` (2026-09-08): docs(REPAIR_PLAN) TASK-45/20 落地后删除其规划段落 + 总览表 / 基线同步（剩 4 项未实现 / 待验证）
 - `4ce7dc0` (2026-09-08): docs TASK-45/20 看板 / 基线 / FINDINGS / AGENTS 回写（46 项看板 42 ✅ / 2 📋 / 2 ❌，475 例全绿）
