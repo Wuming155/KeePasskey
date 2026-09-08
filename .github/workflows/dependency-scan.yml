@@ -73,7 +73,7 @@ jobs:
         with:
           name: dependency-check-report
           path: |
-            **/build/reports/dependency-check-report.*
+            **/build/reports/dependency-check/dependency-check-report.*
           if-no-files-found: warn
 
       - name: Upload SARIF to Code Scanning
@@ -81,4 +81,4 @@ jobs:
         continue-on-error: true # 扫描结果不应阻断（首次仅告警）；即使无 SARIF 也不使作业失败
         uses: github/codeql-action/upload-sarif@v3
         with:
-          sarif_file: build/reports/dependency-check-report.sarif
+          sarif_file: build/reports/dependency-check/dependency-check-report.sarif

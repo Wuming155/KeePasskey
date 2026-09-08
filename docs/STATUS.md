@@ -6,6 +6,7 @@
 > **2026-09-08 TASK-44**：自动填充黑名单完整生命周期闭环。
 > **2026-09-08 TASK-47**：健康度「已泄露密码」接入真实泄露库（HIBP k-匿名范围查询）——路线 A（接入）落地：显式开关默认关闭（关闭态零外联）、失败如实上浮、指标可空不以 0 冒充安全。
 > **2026-09-08 口径校准**：① §1 基线 HEAD 由 `756003c` 校正为实际 HEAD `4d52f27`；② §4 补登 3 条漏记提交（`4ce7dc0` / `e6d7f27` / `4d52f27`）；③ FINDINGS 残余「未修复」项（P2-26 占位库假元数据、P2-28 泄露密码恒 0）与两处功能残余（TASK-15 图标渲染/删除、TASK-17 引用展示侧）在看板无条目，按纪律 #5 补登为 **TASK-47 ~ TASK-49**；④ TASK-45/46 行内的「475 / 470 例」标注为当时提交快照，现行基线一律以 §1 为准。
+> **2026-09-08 TASK-51**：`dependency-scan` workflow 自建成以来连续 8 次失败，经本地逐层复现定位为三层根因（gradlew 缺可执行位 / NVD 无 Key 匿名通道必然失败 / 报告上传路径错配），全部修复并本地实证 BUILD SUCCESSFUL 后方落地（先撤回过一版未验证的半成品提交，验证通过才重新提交）。
 > **2026-09-08 TASK-50**：GitHub 上 3 个开放 Dependabot PR（#1 gradle-minor-patch 组 8 项 / #2 okhttp 5.5.0 / #3 foojay-resolver 1.0.0）因共写 `libs.versions.toml` 必然冲突，改为本地一次性落地 main 后由 Dependabot 自动关闭；`gradlew test` 全量绿（506 例口径不变）。
 
 ---
@@ -23,7 +24,7 @@
 
 ---
 
-## 2. 任务唯一看板（50 项：45 ✅ 完成 / 2 📋 待验证·评估 / 3 ❌ 未实现）
+## 2. 任务唯一看板（51 项：46 ✅ 完成 / 2 📋 待验证·评估 / 3 ❌ 未实现）
 
 所有进行中、已立项、待执行体检批次、未实现功能、安全遗留与欠账统一收录于下表，**按 TASK ID 升序排列**（优先级见各行「优先级」列）。**新增任务必须在此表注册，新 ID 顺延。**
 
@@ -81,6 +82,7 @@
 | **TASK-48** | 数据 | **P2-26：数据库列表占位库假元数据** | FINDINGS P2-26 | **P3** | ❌ 未实现（风险已接受） | 无 `.kdbx` 文件时 `RealVaultRepository` 回退占位 `default_vault` 并附静态描述文案。当前语义为「引导创建首个库」，风险已接受；若后续保留该引导，需将占位项与真实库在 UI 上显式区分（避免用户误认存在真实数据库） |
 | **TASK-49** | 特性 | **两处已落地功能的残余接线** | TASK-15 / TASK-17 残余 | **P3** | ❌ 未实现 | ① **TASK-15 残余**：自定义图标在列表行 / 详情页的位图渲染与图标删除入口未接线（`CustomIconCoordinator` 与 `customIconId` 数据通道已就绪）；② **TASK-17 残余**：`{REF:...}` 字段引用在 Notes / URL 展示侧未展开（引擎已落地，消费点平移即可，须保持「投影层不物化被引用密码明文」的 M1 语义） |
 | **TASK-50** | 依赖 | **Dependabot 3 项依赖升级 PR 批量落地** | GitHub PR #1/#2/#3 | **P2** | ✅ 已完成（2026-09-08） | 3 个开放 PR 共写 `libs.versions.toml` 直接逐个合并必冲突，改为本地一次性落地后由 Dependabot 自动关闭：① PR#1 gradle-minor-patch 组——Gradle Wrapper 9.4.1→9.7.1（jar/脚本/properties 全量重生成，保留腾讯镜像分发地址）、AGP 9.2.1→9.4.0、navigation-compose 2.9.0→2.10.0、hilt-navigation-compose 1.3.0→1.4.0、bcprov-jdk18on 1.79→1.85.2、kotlinx-coroutines 1.10.2→1.11.0；② PR#2 okhttp 4.12.0→5.5.0（大版本，`okhttp3.mockwebserver` 经典包兼容层全量测试验证通过）；③ PR#3 foojay-resolver-convention 0.10.0→1.0.0（需 Gradle 9.7+，与 wrapper 升级同批生效）。风险点：AGP 9.4.0 与 foojay 1.0.0 均要求 Gradle 9.7 运行时，`wrapper` 任务在旧发行版下执行会 `NoClassDefFoundError`，采用直接改 `distributionUrl` 先换底座再重生成 wrapper 文件解决。验收：`gradlew test` 506 例全绿（494 通过 / 0 失败 / 12 跳过，口径不变） |
+| **TASK-51** | CI | **`dependency-scan` workflow 连续 8 次失败：三层根因全链修复** | GitHub 通知（CI 活动） | **P1** | ✅ 已修复（2026-09-08，本地实证后落地） | **三层根因**（本地复现逐层排除，前两版未验证提交曾按用户要求从远端撤回重做）：① `gradlew` 在 git 索引为 `100644`（Windows 提交未保留可执行位），Linux CI `./gradlew` Permission denied 秒失败 → `git update-index --chmod=+x` 补 `100755`；② 仓库未配 `NVD_API_KEY` 时插件 13.0.0 对空密钥抛 `NvdApiException("Invalid API Key, length of 0")`，且 `failOnError=false` 不覆盖 NVD 更新阶段、`autoUpdate=false` 又因空库抛 `NoDataException: No documents exist`（两条兜底路均经本地实测不可行）→ init 脚本改为**双通道**：读环境变量 `NVD_API_KEY`（GitHub Secret 同名注入）走官方 API，未配置回落 OWASP 官方托管镜像 datafeed（`DependencyCheck_Builder/nvd_cache`，24h 更新，无需 Secret），并弃用 workflow 未经证实的 `-Dorg.owasp.dependencycheck.nvd.api.key` 系统属性传参；③ workflow 报告/SARIF 上传路径写错（实际产物在 `build/reports/dependency-check/` 子目录）→ 两处 path 修正。**验收**：本地注入真实 Key 完整跑通 `dependencyCheckAggregate`——BUILD SUCCESSFUL，HTML/JSON/SARIF 三格式报告产出，扫描发现真实 CVE（如 CVE-2026-53914 影响 kotlin-build-tools 工具链，CVSS 未达 11 阈值不阻断，符合「首次仅告警」策略）；CI 首次运行待线上确认 |
 
 ---
 

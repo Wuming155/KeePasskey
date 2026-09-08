@@ -30,6 +30,35 @@ allprojects {
         failBuildOnCVSS = 11.0f
         formats = mutableListOf("HTML", "SARIF", "JSON")
 
+        // 扫描内部错误（含 NVD 数据更新失败）不阻断构建（本地验证中，暂不提交）：
+        // 仓库未配置 NVD_API_KEY Secret 时，插件 13.0.0 对空密钥直接抛
+        // NvdApiException("Invalid API Key, length of 0")，若不放行会使每次
+        // 扫描都在 NVD 更新阶段失败、报告无法产出。置 false 后 NVD 更新失败
+        // 仅记 error 日志，扫描以其余数据源（KEV / 托管抑制 / 本地缓存）继续，
+        // 与「首次仅告警、恒不阻断」策略对齐。配置 NVD_API_KEY 后数据即完整。
+        failOnError = false
+
+        // NVD 数据源双通道（本地验证中，暂不提交）：
+        // ① 配置了环境变量 NVD_API_KEY（GitHub Secret 同名注入 workflow）→ 走
+        //    NVD 官方 API 实时通道；
+        // ② 未配置 → 回落 dependency-check 官方托管镜像 datafeed（24h 尽力而为
+        //    更新，绕开 API Key 与限流），CI 在无 Secret 时仍能完整跑通：
+        //    https://dependency-check.github.io/DependencyCheck/data/mirrornvd.html
+        // 背景：13.0.0 在无 Key 时 NVD API 匿名拉取必然抛 NvdApiException
+        // ("Invalid API Key, length of 0")，failOnError 不覆盖该阶段；
+        // autoUpdate=false 又会因空库抛 NoDataException——故必须有数据源兜底。
+        // 注意：不使用 workflow 的 -Dorg.owasp.dependencycheck.nvd.api.key 系统
+        // 属性传参（该属性名在 13.0.0 新 Property API 下是否生效未验证），统一以
+        // 环境变量为唯一事实源。
+        nvd {
+            val envKey = System.getenv("NVD_API_KEY")
+            if (!envKey.isNullOrBlank()) {
+                apiKey = envKey
+            } else {
+                datafeedUrl = "https://dependency-check.github.io/DependencyCheck_Builder/nvd_cache/nvdcve-{0}.json.gz"
+            }
+        }
+
         // suppression 白名单相对仓库根解析（各项目 rootProject 同指仓库根）
         suppressionFiles = mutableListOf(
             rootProject.file(".github/owasp-dependency-suppressions.xml").absolutePath
