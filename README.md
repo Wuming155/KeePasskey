@@ -195,7 +195,7 @@ sync/                # 同步层：文件存储抽象 + WebDAV / S3 兼容实现
 | 参考项目 | GitHub 仓库 | 许可证 | 在本项目中的参考定位 |
 | :--- | :--- | :--- | :--- |
 | **KeePassDX**（`KeePassDX-master`） | [Kunzisoft/KeePassDX](https://github.com/Kunzisoft/KeePassDX) | **GPL-3.0** | 同为原生 Android Kotlin 实现，模块划分最贴近；参考 `database` / `crypto` 领域模型、`DatabaseSession` 会话与 WebAuthn/Passkey 接入 |
-| **keepass2android**（`keepass2android-main`） | [PhilippC/keepass2android](https://github.com/PhilippC/keepass2android) | **GPL-3.0** | 云同步架构最成熟；参考 WebDAV / S3 抽象层、本地缓存、ETag 三方哈希冲突检测与 Quick Unlock |
+| **keepass2android**（`keepass2android-main`） | [PhilippC/keepass2android](https://github.com/PhilippC/keepass2android) | **GPL-3.0** | 云同步架构最成熟；参考 WebDAV抽象层、本地缓存、ETag 三方哈希冲突检测与 Quick Unlock |
 | **KeePass 官方（2.61.1）**（`KeePass-2.61.1-Source`） | [SourceForge](https://sourceforge.net/projects/keepass/) | **GPL-2.0** | `.kdbx` 格式的权威基准；仅在二进制 Header、XML 树结构歧义时作最终裁决 |
 | **KeePassXC**（`keepassxc-develop`） | [keepassxreboot/keepassxc](https://github.com/keepassxreboot/keepassxc) | **GPL-2.0 或 GPL-3.0**（双许可） | `Merger` 条目级合并与墓碑复活规则 → `KdbxMerger`；`KPEX_PASSKEY_*` 属性 schema → `PasskeyData` |
 | **Monica**（`Monica-main`） | [Monica-Pass/Monica](https://github.com/Monica-Pass/Monica) | **GPL-3.0** | 辅助参考；现代 Material 3 + Compose 交互与本地优先（Local-first）同步思路 |
