@@ -11,7 +11,7 @@
 | 维度 | 数值 / 状态 | 官方依据与说明 |
 |---|---|---|
 | **Git HEAD** | `8133576` (main) | 阶段 6 批次 7 笔提交（TASK-03/04/05/06/07/15/16/17/18）+ 4 笔 README/LICENSE 文档提交；**已推送 `origin/main`（本地与远端 0 ahead / 0 behind）** |
-| **测试基线** | **462 个单元测试用例**（app 111 / core 27 / crypto 52 / database 155 / sync 117）：**450 通过、0 失败、12 跳过** | `./gradlew test` 全模块执行；跳过的 12 例为 `LiveSyncServersTest` 真实联调用例（需先起 `tools/local-sync` 服务并加 `-DliveSyncTest`） |
+| **测试基线** | **470 个单元测试用例**（app 114 / core 32 / crypto 52 / database 155 / sync 117）：**458 通过、0 失败、12 跳过** | `./gradlew test` 全模块执行；跳过的 12 例为 `LiveSyncServersTest` 真实联调用例（需先起 `tools/local-sync` 服务并加 `-DliveSyncTest`） |
 | **构建状态** | `assembleDebug` + `assembleRelease` (R8) 全量通过 | **AGP 9.2.1 / Gradle 9.4.1** / Kotlin 2.4.10（经 buildscript classpath 锚定内置 KGP）/ Hilt 2.60.1 / **KSP 2.3.11** |
 | **系统基线** | **minSdk 36**, **compileSdk 37**, targetSdk 36 | 仅针对 Android 16+ 深度优化，固化无旧版垫片决策；compileSdk 37 随批次 H 升级（Compose BOM 2026.08.00 + M3 Expressive） |
 | **传输安全防线** | 全站强制 HTTPS（`network_security_config.xml` 禁明文 + OkHttp TLS-only），零证书固定 | 对齐 Google Developer Knowledge `pinning not recommended` 指南 |
@@ -19,7 +19,7 @@
 
 ---
 
-## 2. 任务唯一看板（46 项：39 ✅ 完成 / 3 📋 待验证·评估 / 4 ❌ 未实现）
+## 2. 任务唯一看板（46 项：40 ✅ 完成 / 3 📋 待验证·评估 / 3 ❌ 未实现）
 
 所有进行中、已立项、待执行体检批次、未实现功能、安全遗留与欠账统一收录于下表，**按 TASK ID 升序排列**（优先级见各行「优先级」列）。**新增任务必须在此表注册，新 ID 顺延。**
 
@@ -72,7 +72,7 @@
 | **TASK-43** | 特性 | **进阶偏好消费方接线（预留功能清单）** | TASK-12 裁定衍生 | **P3** | ❌ 未实现 | 设置页全部进阶开关保留为预留功能（已随 TASK-12 持久化，不再回显丢失）。待接线消费方：`webdavChunkedUpload`/`webdavChunkSizeMb`（WebDAV 分块上传）、`createBackupBeforeSave`（保存前 .bak）、`checkRemoteChangesBeforeSave`、`conflictResolution` 默认策略、`useFileTransactions`（已是既定行为，接线为信息展示）、`preloadDatabaseEnabled`、`lockWhenNavigateBack`、`clearPasswordOnLeave`、`rememberRecentFiles`、`rememberKeyFileLocation`、`showKillAppOption`、`offerSaveCredentials`、`inlineSuggestionsEnabled`、`autoReturnFromQuery`、`autofillCopyTotp`、`autofillShowTotpNotification`、`skipDalVerification`、`overrideNoAutofill`、`disabledAutofillQueriesCount`（黑名单，完整生命周期见 TASK-44）、`maskPasswordsDefault`、`maskTotpDefault`、`showUnlockedNotification`、`showGroupInSearchResult`、`showGroupInEntry`、`listDensity`、`autoActivateSearchOnOpen`、`iconSet`、TOTP 字段映射、`debugLogEnabled`、`verboseSyncLog`、子库挂载（TASK-13 改诚实提示）。另：导出/导入五源（1PUX/Bitwarden/KeePass/浏览器 CSV）解析器亦为独立功能缺口 |
 | **TASK-44** | 特性 | **自动填充黑名单完整生命周期** | TASK-36 整改衍生 | **P3** | ❌ 未实现 | TASK-36 整改确认黑名单为端到端功能缺口（设置页仅展示计数，且该计数无任何写入方）。待建设：① 黑名单存储（包名集合持久化，替代现无写入方的 `disabledAutofillQueriesCount` 计数）；② 自动填充服务侧消费（黑名单包名不下发数据集）；③ 入口（详情页/系统设置「为本应用禁用填充」写入黑名单）；④ 设置页条目化展示与删除（替代当前仅计数展示）。对齐 KP2A「禁用自动填充查询」语义 |
 | **TASK-45** | 协议 | **S3 SigV4 服务端时钟偏移补偿** | FINDINGS P2-14 | **P3** | ❌ 未实现 | `S3SyncProvider.signV4` 直接取本地 `Date()`，设备时钟偏移 >15min 时服务端返回 `RequestTimeTooSkewed` 403；建议以响应 `Date` 头计算偏移量并在签名时补偿 |
-| **TASK-46** | 内存 | **`OtpEngine` TOTP 计算链路 ByteArray 化** | FINDINGS P2-5 | **P2** | ❌ 未实现 | 编辑态已随 TASK-10 全线 CharArray 化（C-09 闭合）；残余 `calculateTotp(secretKeyBase32: String)` 全程 String 与 `Base32Decoder.decode` 装箱 `List<Byte>` 未清零，建议改 ByteArray 链路并在用毕擦除 |
+| **TASK-46** | 内存 | **`OtpEngine` TOTP 计算链路 ByteArray 化** | FINDINGS P2-5 | **P2** | ✅ 已完成（2026-09-08） | **计算侧残余闭合**：`OtpEngine.calculateTotp`/`calculateHotp` 入参由 `String` 改 `ByteArray`（`calculateHotpRaw` 合并移除），种子经 Base32 解码后全程字节态（HMAC-over-counter 链路零 String 密钥中间值）；`Base32Decoder.decode` 固化借用语义（调用方独占新数组、无内部缓存，KDoc 注明用毕 `fill(0)`）；`VaultEntryMapper.computeTotpCode` 解码产物成功/失败路径 `finally fill(0)` 擦除（fail-clean，不因早退残留种子副本）。回归：RFC 4226 Appendix D 全量 10 组、RFC 6238 Appendix B SHA-1/256/512 各 6 组、RFC 4648 §10 官方向量 + 「引擎不篡改调用方种子」「擦除后重解码重算一致（无缓存驻留）」断言全绿；新增 `VaultEntryMapperTotpTest` 3 例（有效出码 / 无效种子 fail-clean / SHA-256·512 消费）。**470 例全绿**（458 通过 / 12 跳过） |
 
 ---
 
@@ -90,7 +90,7 @@
 
 > **计数校正（2026-09-08）**：原记「131 项」为列向加总错误，按四份报告行枚举实为 **125 项**（93 + 16 + 9 + 7）；上表数字已按 `FINDINGS_TRACKER.md` 当前物理状态重新点算。
 >
-> **关键结论**：125 项发现中，所有 P0 级阻断项（7 项）与高危安全缺陷（自研 PIN 解锁、全站明文流量、旧派生 HMAC 校验、GCM IV 唯一性等）已 **100% 修复**。原「未修复 43 项」的四类主因——① 约 35 个设置项无消费者（P1-6）、② 5 个假动作 SAF 导出（P1-7）、③ 超 800 行文件与硬编码中文（P3-22/23）、④ 测试假用例与覆盖缺口（P2-36/37）——已随 TASK-12/13/21/40 全部闭合。**当前仅余 5 项未修复**：P2-5（`OtpEngine` TOTP 计算链路仍 String，编辑态已随 TASK-10 闭环 → 登记 **TASK-46**）、P2-14（S3 时钟偏移补偿 → **TASK-45**）、P2-26（占位库演示数据，低优先级可接受）、P2-28（「已泄露密码」恒 0，需接入 HIBP 外部服务）、S-16（CI 依赖巡检 → **TASK-20**）。另有 14 项为「部分修复」（均属风险已接受的残余项，详见 FINDINGS「说明」列）。
+> **关键结论**：125 项发现中，所有 P0 级阻断项（7 项）与高危安全缺陷（自研 PIN 解锁、全站明文流量、旧派生 HMAC 校验、GCM IV 唯一性等）已 **100% 修复**。原「未修复 43 项」的四类主因——① 约 35 个设置项无消费者（P1-6）、② 5 个假动作 SAF 导出（P1-7）、③ 超 800 行文件与硬编码中文（P3-22/23）、④ 测试假用例与覆盖缺口（P2-36/37）——已随 TASK-12/13/21/40 全部闭合。**当前仅余 4 项未修复**：P2-14（S3 时钟偏移补偿 → **TASK-45**）、P2-26（占位库演示数据，低优先级可接受）、P2-28（「已泄露密码」恒 0，需接入 HIBP 外部服务）、S-16（CI 依赖巡检 → **TASK-20**）。另有 14 项为「部分修复」（均属风险已接受的残余项，详见 FINDINGS「说明」列）。
 
 ### 3.1 实测核实补充结论（2026-09-07）
 
@@ -223,7 +223,7 @@
 | 进阶偏好消费方接线 | 全部开关已持久化（TASK-12），消费方未接线，登记 **TASK-43** |
 | 自动填充黑名单完整生命周期 | 阻断/告警可用，增删数据源与持久化未闭环，登记 **TASK-44** |
 | S3 SigV4 服务端时钟偏移补偿 | 直取本地时间，时钟偏移 >15min 返回 403，登记 **TASK-45** |
-| `OtpEngine` TOTP 计算链路 ByteArray 化 | 编辑态已 CharArray 闭环，计算链路仍 String，登记 **TASK-46** |
+| `OtpEngine` TOTP 计算链路 ByteArray 化 | ✅ 已闭环（2026-09-08，TASK-46）：计算链路全程 ByteArray + 用毕擦除（fail-clean），RFC 4226/6238/4648 官方向量回归全绿 |
 | KDBX v3 及以下读写 | 明确拒绝（`KdbxUnsupportedVersionException`） |
 | 应用发布 | 构建链路就绪，未完成 F-Droid / GitHub Release 发布 |
 

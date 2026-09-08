@@ -55,7 +55,7 @@ KeePasskey 是一款使用原生 Kotlin 开发的现代化 Android 密码管理�
 
 | 文件 | 内容 | 何时阅读 |
 |------|------|----------|
-| [**docs/STATUS.md**](docs/STATUS.md) | **单一真相源**：当前版本基线、未完成任务唯一看板（46 项：39 ✅ / 3 📋 / 4 ❌）、历史提交日志索引 | **开始任何工作前、检查进度时** |
+| [**docs/STATUS.md**](docs/STATUS.md) | **单一真相源**：当前版本基线、未完成任务唯一看板（46 项：40 ✅ / 3 📋 / 3 ❌）、历史提交日志索引 | **开始任何工作前、检查进度时** |
 | [**docs/FINDINGS_TRACKER.md**](docs/FINDINGS_TRACKER.md) | **历史审查发现跟踪表**：125 项发现的物理核对状态与代码证据 | **确认历史 Bug 是否已修时** |
 | [**docs/HEALTH_CHECK_ROADMAP.md**](docs/HEALTH_CHECK_ROADMAP.md) | **体检批次落地规划**：批次 A–H 的官方依据、范围与验收（对应 TASK-01/03~07） | **执行体检批次整改时** |
 | [**docs/ARCHITECTURE.md**](docs/ARCHITECTURE.md) | 模块依赖拓扑、关键架构决策与目录约定（原根目录 `ARCHITECTURE.md`） | **跨模块改动、新增功能落位前** |
@@ -75,7 +75,7 @@ KeePasskey 是一款使用原生 Kotlin 开发的现代化 Android 密码管理�
 - `.\gradlew.bat assembleDebug` — 编译全部模块
 - `.\gradlew.bat :app:compileDebugKotlin` — 仅快速检查 Kotlin 编译
 - `.\gradlew.bat lint` — Android Lint
-- `.\gradlew.bat test` — 单元测试（全模块 `src/test`；当前 **462 例：450 通过 / 0 失败 / 12 跳过**，跳过项需 `-DliveSyncTest` 才启用）
+- `.\gradlew.bat test` — 单元测试（全模块 `src/test`；当前 **470 例：458 通过 / 0 失败 / 12 跳过**，跳过项需 `-DliveSyncTest` 才启用）
 - `.\gradlew.bat test -DliveSyncTest` — 追加启用 `LiveSyncServersTest` 真实联调用例（默认跳过 12 例，需先起 `tools/local-sync` 服务）
 
 ---

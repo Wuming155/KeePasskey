@@ -66,14 +66,20 @@ class TotpKeyUriParserTest {
         // RFC 6238 官方测试密钥: "12345678901234567890" Base32: GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ
         // 在 t = 59 秒时，步长 30s，counter = 59 / 30 = 1
         // HOTP(K, 1) 的 6 位截断结果为 287082
+        // TASK-46：计算侧入参为 ByteArray（Base32 解码产物，用毕擦除）
         val timestampMillis = 59_000L
-        val code = OtpEngine.calculateTotp(
-            secretKeyBase32 = rfcSecret,
-            timestampMillis = timestampMillis,
-            periodSeconds = 30,
-            digits = 6,
-            algorithm = OtpEngine.HashAlgorithm.SHA1
-        )
+        val secretBytes = Base32Decoder.decode(rfcSecret)
+        val code = try {
+            OtpEngine.calculateTotp(
+                secretKey = secretBytes,
+                timestampMillis = timestampMillis,
+                periodSeconds = 30,
+                digits = 6,
+                algorithm = OtpEngine.HashAlgorithm.SHA1
+            )
+        } finally {
+            secretBytes.fill(0)
+        }
         assertEquals("287082", code)
 
         val remaining = OtpEngine.getRemainingSeconds(

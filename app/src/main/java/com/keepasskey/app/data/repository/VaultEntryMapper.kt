@@ -13,6 +13,7 @@ import com.keepasskey.core.model.KdbxCustomField
 import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.core.model.PasskeyData
+import com.keepasskey.core.otp.Base32Decoder
 import com.keepasskey.core.otp.OtpEngine
 import com.keepasskey.core.otp.ParsedTotpConfig
 import com.keepasskey.core.otp.TotpKeyUriParser
@@ -154,6 +155,14 @@ internal class VaultEntryMapper(private val strings: StringsProvider) {
 
     /** 按配置即时计算 TOTP 验证码，配置非法或计算失败返回 null */
     fun computeTotpCode(config: ParsedTotpConfig): String? {
+        // TASK-46：种子经 Base32 解码为 ByteArray 后全程字节态参与计算（绝不还原为 String）；
+        // 解码产物归本函数所有，无论成功 / 失败路径均在 finally 中显式擦除（fail-clean），
+        // 不因早退残留种子副本（对齐 KdbxKeyFile / SyncCredentialsStore 借用语义）
+        val secretBytes = try {
+            Base32Decoder.decode(config.secret)
+        } catch (_: Exception) {
+            return null
+        }
         return try {
             val algo = when (config.algorithm.uppercase()) {
                 "SHA256" -> OtpEngine.HashAlgorithm.SHA256
@@ -161,13 +170,15 @@ internal class VaultEntryMapper(private val strings: StringsProvider) {
                 else -> OtpEngine.HashAlgorithm.SHA1
             }
             OtpEngine.calculateTotp(
-                secretKeyBase32 = config.secret,
+                secretKey = secretBytes,
                 periodSeconds = config.period,
                 digits = config.digits,
                 algorithm = algo
             )
         } catch (_: Exception) {
             null
+        } finally {
+            secretBytes.fill(0)
         }
     }
 
