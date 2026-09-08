@@ -72,7 +72,7 @@
 | **P2-25** | 生物凭据封印失败被静默吞掉（catch ignored） | ✅ 已修复 | `UnlockViewModel.kt:301` 捕获异常并记录 `debugLog.warn`，显式提示用户 | 否（已修复） | 已显式提示 |
 | **P2-26** | 数据库列表元数据硬编码假值与占位库 | ❌ 未修复 | `RealVaultRepository.kt:80` 仍使用占位数据与静态描述文案 | 低 | 无 kdbx 文件时回退占位 `default_vault` 作「引导创建首个库」可接受，优先级低；**已登记 STATUS TASK-48**（保留引导则须在 UI 显式区分占位项与真实库） |
 | **P2-27** | 条目密码强度恒为硬编码 112 bit | ✅ 已修复（2026-09-08，TASK-32） | `UiVaultEntry.strengthBits` 改为 `Int?`（默认 null，显式标注「未计算」）；`EntryDetailViewModel` 揭示密码时接真实熵估算 | 中 | 不再恒显误导值 |
-| **P2-28** | 健康检查"已泄露密码"恒 0 | ❌ 未修复 | `SettingsViewModel.kt:1096` `compromisedPasswordCount = 0` 硬编码 | 低（需外部服务） | 需 HIBP 类泄露库接入才有意义；当前占位可接受；**已登记 STATUS TASK-47**（先做「接入 / 下架」决策，不得长期显示恒 0 假指标） |
+| **P2-28** | 健康检查"已泄露密码"恒 0 | ✅ 已修复（2026-09-08，TASK-47） | 路线 A（接入）落地：`BreachCheckCoordinator`/`HibpRangeClient`（HIBP k-匿名范围查询，仅上送密码 SHA-1 前 5 位）；`compromisedPasswordCount` 改可空（未启用/失败为 null，不回填 0），失败转 `BreachCheckStatus.FAILED` 如实上浮；检测由 `ExtendedSettings.breachCheckEnabled` 显式开关门控（默认关闭，关闭态零外联） | 低（需外部服务） | 假指标消除：未检测、失败与「已比对安全」三种语义分离；回归 20 例（MockWebServer 前缀查询 / 关闭态零请求断言 / 失败上浮 / 前缀去重） |
 | **P2-29** | 密钥文件 SAF 读取在主线程完成 | ✅ 已修复（2026-09-08，TASK-39） | `UnlockScreen` SAF 回调整体重构：1 MiB 流式读取与 DISPLAY_NAME 游标查询经 `withContext(Dispatchers.IO)` 移出主线程，结果折叠回主线程分发 | 中 | 大文件不再 ANR |
 | **P2-30** | 验证器页每秒在主线程对全部 TOTP 条目做解密+HMAC | ✅ 已修复（2026-09-08，TASK-42） | `AuthenticatorViewModel` uiState 上游显式 `flowOn(Dispatchers.Default)`：combine 内含 calculateEntryTotp（种子解析+HMAC）全部脱离主线程 | 低-中 | 不依赖上游实现的调度选择，兜底防 ANR |
 | **P2-31** | `@Singleton` 仓库构造函数内同步做磁盘扫描 | ✅ 已修复（2026-09-08，TASK-42） | `RealVaultRepository` init 改为仓库协程内异步初始化：`listFiles` 扫盘移至 `Dispatchers.IO`，并监听 `databaseFlow` 推送刷新 | 低 | `databasesFlow` 经 Flow 自然推送更新 |

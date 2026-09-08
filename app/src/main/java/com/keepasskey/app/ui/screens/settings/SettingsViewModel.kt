@@ -45,6 +45,8 @@ class SettingsViewModel @Inject constructor(
     private val periodicSyncScheduler: com.keepasskey.app.sync.PeriodicSyncScheduler,
     // TASK-44 整改：自动填充黑名单（真实包名条目，替代无写入方的禁用计数）
     private val autofillBlocklistStore: com.keepasskey.app.data.repository.AutofillBlocklistStore,
+    // TASK-47 整改：已泄露密码检测（HIBP k-匿名范围查询，由 breachCheckEnabled 开关门控）
+    private val breachCheckCoordinator: com.keepasskey.app.data.breach.BreachCheckCoordinator,
     // 允许为 null 仅用于单测注入；生产 DI 注入 @ApplicationContext
     @ApplicationContext private val appContext: Context? = null,
     // TASK-21：非 Compose 层文案资源解析通道（生产经 appContext 转发；单测注入假实现）
@@ -71,7 +73,13 @@ class SettingsViewModel @Inject constructor(
     private val syncController = SettingsSyncController(
         syncCredentialsStore, syncCoordinator, extendedSettingsStore, strings, viewModelScope
     )
-    private val healthController = SettingsHealthController(vaultRepository, strings, viewModelScope)
+    private val healthController = SettingsHealthController(
+        vaultRepository = vaultRepository,
+        breachCheckCoordinator = breachCheckCoordinator,
+        strings = strings,
+        breachCheckEnabled = { extendedSettingsFlow.value.breachCheckEnabled },
+        scope = viewModelScope
+    )
     private val exportController = SettingsExportController(
         vaultRepository, debugLogBuffer, appContext, strings, viewModelScope
     )
@@ -268,6 +276,9 @@ class SettingsViewModel @Inject constructor(
             weakPasswordCount = healthState.weakPasswordCount,
             reusedPasswordCount = healthState.reusedPasswordCount,
             compromisedPasswordCount = healthState.compromisedPasswordCount,
+            breachCheckStatus = healthState.breachCheckStatus,
+            breachCheckMessage = healthState.breachCheckMessage,
+            breachCheckEnabled = extState.breachCheckEnabled,
             lastHealthScanTime = healthState.lastHealthScanTime,
             isHealthScanning = healthState.isHealthScanning,
 
@@ -745,6 +756,18 @@ class SettingsViewModel @Inject constructor(
                 defaultTotpDigits = digits
             )
         }
+    }
+
+    // ========== TASK-47：已泄露密码检测（联网，默认关闭） ==========
+
+    /**
+     * 开启 / 关闭已泄露密码检测（默认关闭）。
+     *
+     * 关闭态健康度扫描**不发起任何网络请求**，「已泄露密码」指标无值（UI 如实展示「未启用」）；
+     * 开启后重新扫描才会向公开泄露库发起 k-匿名范围查询（仅上送密码 SHA-1 前 5 位）。
+     */
+    fun setBreachCheckEnabled(enabled: Boolean) {
+        updateExtended { it.copy(breachCheckEnabled = enabled) }
     }
 
     // ========== KP2A 扩展：调试日志 ==========

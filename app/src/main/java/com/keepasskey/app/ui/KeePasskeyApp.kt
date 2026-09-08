@@ -507,7 +507,9 @@ fun KeePasskeyApp() {
                     HealthCheckScreen(
                         uiState = settingsState,
                         onBackClick = { navController.popBackStack() },
-                        onRescanClick = settingsViewModel::rescanHealth
+                        onRescanClick = settingsViewModel::rescanHealth,
+                        // TASK-47：已泄露密码检测开关（默认关闭，开启后才会联网比对）
+                        onBreachCheckToggle = settingsViewModel::setBreachCheckEnabled
                     )
                 }
 

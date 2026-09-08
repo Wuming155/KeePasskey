@@ -186,7 +186,14 @@ data class SettingsUiState(
     val healthMessage: String = "",
     val weakPasswordCount: Int = 0,
     val reusedPasswordCount: Int = 0,
-    val compromisedPasswordCount: Int = 0,
+    // TASK-47：泄露检测指标——null = 未检测（未启用 / 失败），绝不回填 0 冒充「未泄露」
+    val compromisedPasswordCount: Int? = null,
+    val breachCheckStatus: com.keepasskey.app.data.breach.BreachCheckStatus =
+        com.keepasskey.app.data.breach.BreachCheckStatus.DISABLED,
+    // TASK-47：泄露检测补充文案（失败原因等），非 FAILED 态为空串
+    val breachCheckMessage: String = "",
+    // TASK-47：泄露检测开关（默认关闭，联网查询须显式开启）
+    val breachCheckEnabled: Boolean = false,
     val lastHealthScanTime: String = "",
     val isHealthScanning: Boolean = false,
 

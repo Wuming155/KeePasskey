@@ -1,9 +1,10 @@
 # KeePasskey 项目状态单一真相源（Single Source of Truth）
 
-> **更新时间**：2026-09-08（文档口径校准：新增 TASK-47~49，基线 HEAD 校正至 `4d52f27`）
+> **更新时间**：2026-09-08（TASK-47 已泄露密码检测接入 HIBP 落地回写）
 > **权威声明**：本项目**唯一**有效的状态与任务跟踪页。`README.md` 仅作对外简介。原 `DELIVERY_PLAN.md` / `REMEDIATION_PLAN.md` / `docs/*审查报告*.md` 等历史存档文档已于 2026-09-07 **物理删除**，其结论已并入本文件与 `FINDINGS_TRACKER.md`，不再单独保留。
 > **2026-09-08 文档梳理**：看板去重（删除 TASK-08/15/16/17/18 的 5 条失效「❌ 未实现」副本），按 ID 升序重排；基线 HEAD、测试口径与 §4 日志索引按实际提交校正。
 > **2026-09-08 TASK-44**：自动填充黑名单完整生命周期闭环。
+> **2026-09-08 TASK-47**：健康度「已泄露密码」接入真实泄露库（HIBP k-匿名范围查询）——路线 A（接入）落地：显式开关默认关闭（关闭态零外联）、失败如实上浮、指标可空不以 0 冒充安全。
 > **2026-09-08 口径校准**：① §1 基线 HEAD 由 `756003c` 校正为实际 HEAD `4d52f27`；② §4 补登 3 条漏记提交（`4ce7dc0` / `e6d7f27` / `4d52f27`）；③ FINDINGS 残余「未修复」项（P2-26 占位库假元数据、P2-28 泄露密码恒 0）与两处功能残余（TASK-15 图标渲染/删除、TASK-17 引用展示侧）在看板无条目，按纪律 #5 补登为 **TASK-47 ~ TASK-49**；④ TASK-45/46 行内的「475 / 470 例」标注为当时提交快照，现行基线一律以 §1 为准。
 
 ---
@@ -13,7 +14,7 @@
 | 维度 | 数值 / 状态 | 官方依据与说明 |
 |---|---|---|
 | **Git HEAD** | 代码基线 `756003c`（TASK-44 自动填充黑名单） | 本表 HEAD 记 **代码基线**（最后一次含代码改动的提交）；**纯文档提交不抬升该基线**（避免文档自引用无限漂移）。最新提交以 `git log` 为准——§4 索引登记**代码改动提交**，docs 类提交不逐条补登。分支 `main` 与 `origin/main` 同步（0 ahead / 0 behind） |
-| **测试基线** | **486 个单元测试用例**（app 126 / core 32 / crypto 52 / database 155 / sync 121）：**474 通过、0 失败、12 跳过** | `./gradlew test` 全模块执行；跳过的 12 例为 `LiveSyncServersTest` 真实联调用例（需先起 `tools/local-sync` 服务并加 `-DliveSyncTest`） |
+| **测试基线** | **506 个单元测试用例**（app 146 / core 32 / crypto 52 / database 155 / sync 121）：**494 通过、0 失败、12 跳过** | `./gradlew test` 全模块执行；跳过的 12 例为 `LiveSyncServersTest` 真实联调用例（需先起 `tools/local-sync` 服务并加 `-DliveSyncTest`） |
 | **构建状态** | `assembleDebug` + `assembleRelease` (R8) 全量通过 | **AGP 9.2.1 / Gradle 9.4.1** / Kotlin 2.4.10（经 buildscript classpath 锚定内置 KGP）/ Hilt 2.60.1 / **KSP 2.3.11** |
 | **系统基线** | **minSdk 36**, **compileSdk 37**, targetSdk 36 | 仅针对 Android 16+ 深度优化，固化无旧版垫片决策；compileSdk 37 随批次 H 升级（Compose BOM 2026.08.00 + M3 Expressive） |
 | **传输安全防线** | 全站强制 HTTPS（`network_security_config.xml` 禁明文 + OkHttp TLS-only），零证书固定 | 对齐 Google Developer Knowledge `pinning not recommended` 指南 |
@@ -21,7 +22,7 @@
 
 ---
 
-## 2. 任务唯一看板（49 项：43 ✅ 完成 / 2 📋 待验证·评估 / 4 ❌ 未实现）
+## 2. 任务唯一看板（49 项：44 ✅ 完成 / 2 📋 待验证·评估 / 3 ❌ 未实现）
 
 所有进行中、已立项、待执行体检批次、未实现功能、安全遗留与欠账统一收录于下表，**按 TASK ID 升序排列**（优先级见各行「优先级」列）。**新增任务必须在此表注册，新 ID 顺延。**
 
@@ -75,7 +76,7 @@
 | **TASK-44** | 特性 | **自动填充黑名单完整生命周期** | TASK-36 整改衍生 | **P3** | ✅ 已完成（2026-09-08） | 端到端闭环（对齐 KP2A「禁用自动填充查询」）：① 新增 `AutofillBlocklistStore`（SharedPreferences 持久化包名集合 + `blockedPackages` StateFlow + Android 官方包名规则校验，非法/重复由返回值如实告知，null Context 退化为内存语义保可测性）；② 双通道消费——`KeePasskeyAutofillService` 与 `KeePasskeyCredentialProviderService` 命中即 fail-closed 返回空响应（不产出解锁引导/数据集/SaveInfo/凭据候选；Android 16+ 上 CM 为主通道，仅屏蔽传统 Autofill 等于形同虚设）；③ 入口——详情页 `android://<包名>` 绑定条目顶栏「为本应用禁用自动填充」写入/移除黑名单并如实提示（未绑定应用的条目不呈现该入口，避免无意义开关）；④ 设置页改为条目化列表（应用名+包名，解析失败回落包名）与删除、按包名新增且失败如实报错。无写入方的 `disabledAutofillQueriesCount` 计数及其持久化键、`ExtendedSettings`/`SettingsUiState` 对应字段一并下架，零假开关。回归 11 例（仓库 8 + 详情页 3），486 例全绿 |
 | **TASK-45** | 协议 | **S3 SigV4 服务端时钟偏移补偿** | FINDINGS P2-14 | **P3** | ✅ 已完成（2026-09-08） | `S3SyncProvider` 新增时钟偏移补偿链路：**每响必刷新**——任何响应（含 4xx/5xx）携带有效 `Date` 头即经 `refreshClockOffset` 更新运行时偏移（变化 ≥1s 才回调持久化，抑制 HTTP Date 秒级抖动刷盘）；**签名补偿**——`signingDate()` = 本地时间 + 偏移，5 个签名请求全走补偿时间（TASK-26 已知答案向量不回退，`signV4` 纯函数语义保持）；**skew 自愈**——`executeSignedRequest` 统一执行器对「403 且偏移跳变 >14min（HEAD 无错误实体场景同样适用）或错误主体含 `RequestTimeTooSkewed`」**恰好一次**重签重试，首次同步偏移未知也能自愈；**fail-closed**——无有效 `Date` 头不补偿、不盲目重试、按原路径如实上浮。偏移经 `SyncCredentialsStore.loadS3ClockOffsetMillis/saveS3ClockOffsetMillis` 持久化跨进程恢复（非敏感常量，与凭据同文件；`saveS3Config` 重录配置即作废旧偏移重新学习），`SyncCoordinator.resolveProvider` 注入初始偏移 + 刷新回调（持久化失败仅丢跨进程记忆，不阻断同步）。回归 4 例：正/负偏移补偿签名断言、首次同步 skew 自愈（恰 2 请求 + 回调偏移 ≈ 服务端偏差）、无 Date 头 fail-closed（单请求不重试） |
 | **TASK-46** | 内存 | **`OtpEngine` TOTP 计算链路 ByteArray 化** | FINDINGS P2-5 | **P2** | ✅ 已完成（2026-09-08） | **计算侧残余闭合**：`OtpEngine.calculateTotp`/`calculateHotp` 入参由 `String` 改 `ByteArray`（`calculateHotpRaw` 合并移除），种子经 Base32 解码后全程字节态（HMAC-over-counter 链路零 String 密钥中间值）；`Base32Decoder.decode` 固化借用语义（调用方独占新数组、无内部缓存，KDoc 注明用毕 `fill(0)`）；`VaultEntryMapper.computeTotpCode` 解码产物成功/失败路径 `finally fill(0)` 擦除（fail-clean，不因早退残留种子副本）。回归：RFC 4226 Appendix D 全量 10 组、RFC 6238 Appendix B SHA-1/256/512 各 6 组、RFC 4648 §10 官方向量 + 「引擎不篡改调用方种子」「擦除后重解码重算一致（无缓存驻留）」断言全绿；新增 `VaultEntryMapperTotpTest` 3 例（有效出码 / 无效种子 fail-clean / SHA-256·512 消费）。**470 例全绿**（458 通过 / 12 跳过；**该提交时点快照，现行基线以 §1 为准**） |
-| **TASK-47** | 安全 | **P2-28：健康检查「已泄露密码」接入真实泄露库（HIBP）** | FINDINGS P2-28 | **P3** | ❌ 未实现 | `HealthCheckEngine` / `SettingsViewModel` 的 `compromisedPasswordCount` 恒为 0（`SettingsViewModel` 硬编码），属「假指标」。真实实现需接 Have I Been Pwned 类外部服务（k- anonymity 范围查询：仅上传密码 SHA-1 前 5 位，明文不出端），并按既有铁律纳入「网络可选 + 失败如实暴露」语义。**前置决策**：是否引入外部网络依赖（与「离线优先、零外联」定位冲突）——若裁定不接，应按 TASK-12/13/36 诚实化先例**下架该指标**而非显示恒 0 |
+| **TASK-47** | 安全 | **P2-28：健康检查「已泄露密码」接入真实泄露库（HIBP）** | FINDINGS P2-28 | **P3** | ✅ 已完成（2026-09-08） | **裁定走路线 A（接入）**：新增 `BreachCheckCoordinator` + `HibpRangeClient`（HIBP Pwned Passwords k-匿名范围查询：本地算密码 SHA-1，仅上送前 5 位前缀，完整哈希与明文不出端，同前缀聚合去重减少外联）+ `BreachHasher`（公开已知答案向量回归）；传输安全沿用双层防御（`network_security_config` 禁明文 + DI 注入客户端 `ConnectionSpec` 排除 CLEARTEXT）。**门控与诚实化语义**：`ExtendedSettings.breachCheckEnabled` 显式开关（默认关闭，关闭态零外联，设置持久化随 TASK-12 通道）；`compromisedPasswordCount` 改可空——未启用 / 失败为 null 绝不回填 0，失败转 `BreachCheckStatus.FAILED` 透出原因（DISABLED/CHECKING/CLEAN/BREACHED/FAILED 五态）；健康度页泄露项按真实状态呈现并内嵌开关与 k-匿名说明（中英双语），命中计入健康分扣减（20/条）。回归 20 例：`BreachHasherTest` 已知答案 4 例、`HibpRangeClientTest`（MockWebServer 前缀上送不变量 / 解析 / 失败 fail-closed）6 例、`BreachCheckCoordinatorTest` 5 例、`BreachCheckHealthTest`（关闭态零请求断言 / 命中计数与扣分 / 失败上浮）3 例、`BreachCheckModuleTest` 传输安全回归锁 2 例。**506 例全绿**（494 通过 / 12 跳过） |
 | **TASK-48** | 数据 | **P2-26：数据库列表占位库假元数据** | FINDINGS P2-26 | **P3** | ❌ 未实现（风险已接受） | 无 `.kdbx` 文件时 `RealVaultRepository` 回退占位 `default_vault` 并附静态描述文案。当前语义为「引导创建首个库」，风险已接受；若后续保留该引导，需将占位项与真实库在 UI 上显式区分（避免用户误认存在真实数据库） |
 | **TASK-49** | 特性 | **两处已落地功能的残余接线** | TASK-15 / TASK-17 残余 | **P3** | ❌ 未实现 | ① **TASK-15 残余**：自定义图标在列表行 / 详情页的位图渲染与图标删除入口未接线（`CustomIconCoordinator` 与 `customIconId` 数据通道已就绪）；② **TASK-17 残余**：`{REF:...}` 字段引用在 Notes / URL 展示侧未展开（引擎已落地，消费点平移即可，须保持「投影层不物化被引用密码明文」的 M1 语义） |
 
@@ -87,15 +88,15 @@
 
 | 报告来源 | 发现总数 | ✅ 已修复 | ⚠️ 部分修复 | ❌ 未修复 | ➖ 不适用 / 记录备查 |
 |---|:---:|:---:|:---:|:---:|:---:|
-| **全量代码审核报告（2026-09-05）** | 93 | 71 | 12 | 3 | 7 |
+| **全量代码审核报告（2026-09-05）** | 93 | 72 | 12 | 2 | 7 |
 | **安全审查报告（2026-09-06 Wave 13）** | 16 | 16 | 0 | 0 | 0 |
 | **加解密实现审查报告（2026-09-06）** | 9 | 9 | 0 | 0 | 0 |
 | **审核报告第七节测试覆盖缺口** | 7 | 5 | 2 | 0 | 0 |
-| **合计** | **125** | **101 (81%)** | **14 (11%)** | **3 (2%)** | **7 (6%)** |
+| **合计** | **125** | **102 (82%)** | **14 (11%)** | **2 (2%)** | **7 (6%)** |
 
 > **计数校正（2026-09-08）**：原记「131 项」为列向加总错误，按四份报告行枚举实为 **125 项**（93 + 16 + 9 + 7）；上表数字已按 `FINDINGS_TRACKER.md` 当前物理状态重新点算。
 >
-> **关键结论**：125 项发现中，所有 P0 级阻断项（7 项）与高危安全缺陷（自研 PIN 解锁、全站明文流量、旧派生 HMAC 校验、GCM IV 唯一性等）已 **100% 修复**。原「未修复 43 项」的四类主因——① 约 35 个设置项无消费者（P1-6）、② 5 个假动作 SAF 导出（P1-7）、③ 超 800 行文件与硬编码中文（P3-22/23）、④ 测试假用例与覆盖缺口（P2-36/37）——已随 TASK-12/13/21/40 全部闭合。**当前仅余 2 项未修复**：P2-26（占位库演示数据，低优先级可接受，**已登记 TASK-48**）、P2-28（「已泄露密码」恒 0，需接入 HIBP 外部服务，**已登记 TASK-47**）；P2-14（S3 时钟偏移补偿）与 S-16（CI 依赖巡检）已于 2026-09-08 分别随 **TASK-45** / **TASK-20** 闭合。另有 14 项为「部分修复」（均属风险已接受的残余项，详见 FINDINGS「说明」列）。
+> **关键结论**：125 项发现中，所有 P0 级阻断项（7 项）与高危安全缺陷（自研 PIN 解锁、全站明文流量、旧派生 HMAC 校验、GCM IV 唯一性等）已 **100% 修复**。原「未修复 43 项」的四类主因——① 约 35 个设置项无消费者（P1-6）、② 5 个假动作 SAF 导出（P1-7）、③ 超 800 行文件与硬编码中文（P3-22/23）、④ 测试假用例与覆盖缺口（P2-36/37）——已随 TASK-12/13/21/40 全部闭合。**当前仅余 1 项未修复**：P2-26（占位库演示数据，低优先级可接受，**已登记 TASK-48**）；P2-28（「已泄露密码」恒 0）已于 2026-09-08 随 **TASK-47** 闭合（路线 A：HIBP k-匿名接入，显式开关默认关闭 + 失败如实上浮）；P2-14（S3 时钟偏移补偿）与 S-16（CI 依赖巡检）已于 2026-09-08 分别随 **TASK-45** / **TASK-20** 闭合。另有 14 项为「部分修复」（均属风险已接受的残余项，详见 FINDINGS「说明」列）。
 
 ### 3.1 实测核实补充结论（2026-09-07）
 
@@ -209,7 +210,7 @@
 - [x] 应用级自动填充黑名单（双通道 fail-closed：命中包名不下发数据集/凭据候选；详情页 `android://` 绑定条目可一键屏蔽，设置页条目化增删）
 - [ ] 自定义键盘（Magikeyboard 式字段填充）：未实现，当前仅提供 IME 内联建议
 - [x] 条目移动 / 只读锁定；[x] 条目克隆（全字段保真 + 新 UUID + 清历史）
-- [x] 密码健康度离线审计（`HealthCheckEngine`）；**不含**已泄露密码检测（该指标恒为 0 占位，登记 **TASK-47**）
+- [x] 密码健康度离线审计（`HealthCheckEngine`）+ **已泄露密码检测**（2026-09-08 TASK-47：HIBP k-匿名范围查询——仅上送密码 SHA-1 前 5 位；**默认关闭**，显式开启后重新扫描才联网，失败如实上浮不以 0 冒充安全）
 
 ### 5.4 同步
 - [x] **WebDAV** 同步（账号、URL、路径，全站强制 HTTPS）
@@ -236,7 +237,7 @@
 | 图标列表行 / 详情页位图渲染与图标删除入口 | TASK-15 自定义图标上传 / 选择已落地，位图渲染与删除为残余项，登记 **TASK-49** |
 | KeePass 字段引用展示侧（Notes/URL） | **TASK-17** 引擎已落地（原文 TASK-25 为笔误，已校正），Notes / URL 引用展开展示未接线，登记 **TASK-49** |
 | 进阶偏好消费方接线 | 全部开关已持久化（TASK-12），消费方未接线，登记 **TASK-43** |
-| 已泄露密码检测 | 未实现：健康度「已泄露密码」恒 0（外部 HIBP 服务未接），登记 **TASK-47**；若裁定不引外部依赖则按诚实化先例下架该指标 |
+| 已泄露密码检测 | ✅ 已闭环（2026-09-08，TASK-47）：HIBP k-匿名范围查询（仅上送密码 SHA-1 前 5 位）；**显式开关默认关闭**（关闭态零外联），开启后重新扫描比对，失败如实上浮、指标可空不以 0 冒充安全 |
 | 数据库列表占位库假元数据 | 无 `.kdbx` 时回退占位 `default_vault` 作「引导创建首个库」，风险已接受，登记 **TASK-48** |
 | 自动填充黑名单语义边界 | ✅ 已闭环（2026-09-08，TASK-44）：**按应用包名屏蔽**，浏览器类应用以自身包名发起 Credential Manager 请求，屏蔽浏览器即屏蔽其承载的全部站点填充（「按应用」语义的固有结果）；站点级屏蔽属 `TASK-43` 范畴 |
 | S3 SigV4 服务端时钟偏移补偿 | ✅ 已闭环（2026-09-08，TASK-45）：`Date` 头探测 + 持久化补偿 + 偏斜 403 恰一次自愈，无 Date 头 fail-closed |

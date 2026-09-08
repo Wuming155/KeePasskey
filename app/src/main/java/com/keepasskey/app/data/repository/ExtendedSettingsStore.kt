@@ -113,6 +113,9 @@ class ExtendedSettingsStore @Inject constructor(
             ),
             defaultTotpDigits = p.getInt(K_DEFAULT_TOTP_DIGITS, defaults.defaultTotpDigits),
 
+            // TASK-47：已泄露密码检测开关（默认关闭，未持久化时回落 false）
+            breachCheckEnabled = p.getBoolean(K_BREACH_CHECK_ENABLED, defaults.breachCheckEnabled),
+
             // 调试日志
             debugLogEnabled = p.getBoolean(K_DEBUG_LOG_ENABLED, defaults.debugLogEnabled),
             verboseSyncLog = p.getBoolean(K_VERBOSE_SYNC_LOG, defaults.verboseSyncLog)
@@ -159,6 +162,7 @@ class ExtendedSettingsStore @Inject constructor(
             .putString(K_TOTP_SETTINGS_FIELD_NAME, settings.totpSettingsFieldName)
             .putInt(K_DEFAULT_TOTP_STEP_SECONDS, settings.defaultTotpStepSeconds)
             .putInt(K_DEFAULT_TOTP_DIGITS, settings.defaultTotpDigits)
+            .putBoolean(K_BREACH_CHECK_ENABLED, settings.breachCheckEnabled)
             .putBoolean(K_DEBUG_LOG_ENABLED, settings.debugLogEnabled)
             .putBoolean(K_VERBOSE_SYNC_LOG, settings.verboseSyncLog)
             .apply()
@@ -213,6 +217,7 @@ class ExtendedSettingsStore @Inject constructor(
         const val K_TOTP_SETTINGS_FIELD_NAME = "totp_settings_field_name"
         const val K_DEFAULT_TOTP_STEP_SECONDS = "default_totp_step_seconds"
         const val K_DEFAULT_TOTP_DIGITS = "default_totp_digits"
+        const val K_BREACH_CHECK_ENABLED = "breach_check_enabled"
         const val K_DEBUG_LOG_ENABLED = "debug_log_enabled"
         const val K_VERBOSE_SYNC_LOG = "verbose_sync_log"
         const val K_WIFI_ONLY_SYNC = "wifi_only_sync"

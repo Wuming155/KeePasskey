@@ -29,6 +29,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -43,6 +44,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.keepasskey.app.R
+import com.keepasskey.app.data.breach.BreachCheckStatus
 import com.keepasskey.app.ui.components.BentoCard
 import com.keepasskey.app.ui.screens.settings.SettingsUiState
 import com.keepasskey.app.ui.theme.LocalSecurityColors
@@ -56,6 +58,8 @@ fun HealthCheckScreen(
     uiState: SettingsUiState,
     onBackClick: () -> Unit,
     onRescanClick: () -> Unit,
+    // TASK-47：已泄露密码检测为「显式开关 + 默认关闭」的联网特性，开关与说明同屏呈现
+    onBreachCheckToggle: (Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val securityColors = LocalSecurityColors.current
@@ -217,14 +221,62 @@ fun HealthCheckScreen(
                 )
             }
 
+            // TASK-47：泄露密码审计项——按真实检测状态呈现，绝不以「已防护」掩盖未检测 / 失败
             item {
+                val leak = when (uiState.breachCheckStatus) {
+                    BreachCheckStatus.DISABLED -> LeakRowPresentation(
+                        icon = Icons.Default.Security,
+                        iconTint = MaterialTheme.colorScheme.outline,
+                        subtitle = stringResource(R.string.health_leak_sub_disabled),
+                        statusText = stringResource(R.string.health_leak_status_disabled),
+                        isWarning = false
+                    )
+                    BreachCheckStatus.CHECKING -> LeakRowPresentation(
+                        icon = Icons.Default.Security,
+                        iconTint = MaterialTheme.colorScheme.primary,
+                        subtitle = stringResource(R.string.health_leak_sub_checking),
+                        statusText = stringResource(R.string.health_leak_status_checking),
+                        isWarning = false
+                    )
+                    BreachCheckStatus.CLEAN -> LeakRowPresentation(
+                        icon = Icons.Default.CheckCircle,
+                        iconTint = securityColors.success,
+                        subtitle = stringResource(R.string.health_leak_sub_clean),
+                        statusText = stringResource(R.string.health_status_safe),
+                        isWarning = false
+                    )
+                    BreachCheckStatus.BREACHED -> LeakRowPresentation(
+                        icon = Icons.Default.WarningAmber,
+                        iconTint = securityColors.warning,
+                        subtitle = stringResource(
+                            R.string.health_leak_sub_breached, uiState.compromisedPasswordCount ?: 0
+                        ),
+                        statusText = stringResource(R.string.health_leak_status_breached),
+                        isWarning = true
+                    )
+                    BreachCheckStatus.FAILED -> LeakRowPresentation(
+                        icon = Icons.Default.WarningAmber,
+                        iconTint = MaterialTheme.colorScheme.error,
+                        subtitle = stringResource(R.string.health_leak_sub_failed, uiState.breachCheckMessage),
+                        statusText = stringResource(R.string.health_leak_status_failed),
+                        isWarning = true
+                    )
+                }
                 HealthAuditRowItem(
-                    icon = Icons.Default.CheckCircle,
-                    iconTint = securityColors.success,
+                    icon = leak.icon,
+                    iconTint = leak.iconTint,
                     title = stringResource(R.string.health_leak_title),
-                    subtitle = stringResource(R.string.health_leak_sub),
-                    statusText = stringResource(R.string.health_status_safe),
-                    isWarning = false
+                    subtitle = leak.subtitle,
+                    statusText = leak.statusText,
+                    isWarning = leak.isWarning
+                )
+            }
+
+            // TASK-47：泄露检测开关（默认关闭；联网查询须用户显式开启）
+            item {
+                BreachCheckToggleRow(
+                    enabled = uiState.breachCheckEnabled,
+                    onToggle = onBreachCheckToggle
                 )
             }
 
@@ -262,6 +314,65 @@ fun HealthCheckScreen(
             item {
                 Spacer(modifier = Modifier.height(24.dp))
             }
+        }
+    }
+}
+
+/**
+ * TASK-47：泄露密码审计行的展示模型（按检测状态派生，状态与文案一一对应）
+ */
+private data class LeakRowPresentation(
+    val icon: ImageVector,
+    val iconTint: Color,
+    val subtitle: String,
+    val statusText: String,
+    val isWarning: Boolean
+)
+
+/**
+ * TASK-47：已泄露密码检测开关行。
+ *
+ * 「默认关闭 + 显式开启」是可审计的隐私边界：关闭时本应用不发起任何泄露查询请求，
+ * 开启时以 k-匿名方式比对（仅上送密码 SHA-1 前 5 位），说明文案如实披露数据流向。
+ */
+@Composable
+private fun BreachCheckToggleRow(
+    enabled: Boolean,
+    onToggle: (Boolean) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(MaterialTheme.shapes.large)
+            .border(
+                width = 1.dp,
+                color = MaterialTheme.colorScheme.outlineVariant,
+                shape = MaterialTheme.shapes.large
+            )
+            .background(MaterialTheme.colorScheme.surfaceContainerLowest)
+            .padding(16.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = stringResource(R.string.health_breach_toggle_title),
+                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = stringResource(R.string.health_breach_toggle_sub),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    lineHeight = 18.sp
+                )
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            Switch(checked = enabled, onCheckedChange = onToggle)
         }
     }
 }

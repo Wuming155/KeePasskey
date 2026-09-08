@@ -99,4 +99,7 @@ dependencies {
     // 单元测试
     testImplementation(libs.junit)
     testImplementation(libs.coroutines.test)
+    // TASK-47：已泄露密码检测（HIBP k-匿名范围查询）——范围查询客户端与 MockWebServer 回归
+    implementation(libs.okhttp)
+    testImplementation(libs.mockwebserver)
 }

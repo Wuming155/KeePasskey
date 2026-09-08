@@ -8,7 +8,7 @@
 - **多方式同步**：WebDAV（Nextcloud、ownCloud 等）与 S3 兼容协议（AWS S3、MinIO、Cloudflare R2 等）
 - **通行密钥**：FIDO2 / WebAuthn 凭据的安全存储，并可作为设备绑定解锁方式与系统自动填充凭据
 - **全功能**：分组树 / 条目字段 / 附件 / 历史版本与回滚 / 模板 / 回收站 / 全文搜索
-- **增强**：TOTP·HOTP、密码生成器（含 Diceware）、离线密码健康度审计、KeePass 字段引用 `{REF:...}`
+- **增强**：TOTP·HOTP、密码生成器（含 Diceware）、离线密码健康度审计（可选联网泄露比对，k-匿名、默认关闭）、KeePass 字段引用 `{REF:...}`
 - **安全优先**：主密码 + 密钥文件 + 生物识别解锁；`ProtectedString` 驻留加密、FLAG_SECURE、自动锁定熔断
 - **仅 Android 16+（API 36+）**：Compose + Material 3，无需向下兼容负担
 

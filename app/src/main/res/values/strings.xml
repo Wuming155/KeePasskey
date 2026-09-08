@@ -776,8 +776,18 @@
     <string name="health_reuse_sub">%1$d 个条目复用了相同密码，一处泄露将殃及全部</string>
     <string name="health_status_warn">需注意</string>
     <string name="health_leak_title">泄露密码</string>
-    <string name="health_leak_sub">出现在公开泄露库中，请立即修改</string>
+    <string name="health_leak_sub_clean">已与公开泄露库比对，未发现本库密码</string>
+    <string name="health_leak_sub_disabled">未启用：开启后重新扫描才会联网比对，当前不发起任何网络请求</string>
+    <string name="health_leak_sub_checking">正在与公开泄露库比对…</string>
+    <string name="health_leak_sub_breached">%1$d 个条目的密码出现在公开泄露库中，请立即修改</string>
+    <string name="health_leak_sub_failed">比对失败：%1$s</string>
+    <string name="health_leak_status_disabled">未启用</string>
+    <string name="health_leak_status_checking">比对中</string>
+    <string name="health_leak_status_breached">立即修改</string>
+    <string name="health_leak_status_failed">失败</string>
     <string name="health_status_safe">已防护</string>
+    <string name="health_breach_toggle_title">已泄露密码检测（联网）</string>
+    <string name="health_breach_toggle_sub">默认关闭。开启后重新扫描时以 k-匿名方式查询公开泄露库（Have I Been Pwned）：仅发送密码 SHA-1 的前 5 位，密码明文与完整哈希均不出设备；关闭时本应用不发起任何相关网络请求</string>
     <string name="health_tips_title">安全建议</string>
     <string name="health_tips_desc">为每个账户使用唯一的高强度密码，并开启双重认证；KeePasskey 可以帮你生成并记住它们</string>
     <string name="health_level_excellent">优秀</string>
@@ -885,6 +895,9 @@
     <string name="health_msg_reused_only">发现 %1$d 个密码重复使用，建议启用唯一密码</string>
     <string name="health_msg_weak_only">发现 %1$d 个弱密码，建议提升密码复杂度</string>
     <string name="health_scan_failed">健康扫描失败: %1$s</string>
+    <!-- TASK-47：已泄露密码检测（HIBP k-匿名范围查询） -->
+    <string name="health_msg_breach">发现 %1$d 个条目密码出现在公开泄露库中，请立即修改（弱密码 %2$d，复用 %3$d）</string>
+    <string name="health_breach_error_unknown">未知错误</string>
     <string name="kdf_benchmark_failed">基准测试失败</string>
     <string name="export_saf_write_failed">SAF 写盘失败</string>
 

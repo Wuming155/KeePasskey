@@ -57,6 +57,11 @@ data class ExtendedSettings(
     val defaultTotpStepSeconds: Int = 30,
     val defaultTotpDigits: Int = 6,
 
+    // TASK-47：已泄露密码检测（联网，k-匿名范围查询）
+    // 默认关闭——本项目定位「离线优先、零外联」，任何对外查询必须由用户显式开启；
+    // 关闭态健康度扫描不发起任何网络请求，「已泄露密码」指标无值（不回显 0）
+    val breachCheckEnabled: Boolean = false,
+
     // 调试日志
     val debugLogEnabled: Boolean = false,
     val verboseSyncLog: Boolean = false
