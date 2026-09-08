@@ -9,7 +9,7 @@
 
 | 维度 | 数值 / 状态 | 官方依据与说明 |
 |---|---|---|
-| **Git HEAD** | `7b3e756` (main) | 干净工作区无提交滞后（不含本次治理改动） |
+| **Git HEAD** | `863d81c` (main) | 干净工作区无提交滞后（不含本次治理改动） |
 | **测试基线** | **443 个单元测试全绿**（app 101 / core 27 / crypto 52 / database 146 / sync 117） | `./gradlew test` 强制重跑校验，其中 `LiveSyncServersTest` 12 例默认跳过（需 `-DliveSyncTest`） |
 | **构建状态** | `assembleDebug` + `assembleRelease` (R8) 全量通过 | AGP 9.1.0 / Gradle 9.3.1 / Kotlin 2.4.10 / Hilt 2.60.1 |
 | **系统基线** | **minSdk 36**, compileSdk 36, targetSdk 36 | 仅针对 Android 16+ 深度优化，固化无旧版垫片决策 |
@@ -113,6 +113,7 @@
 
 > 索引中出现的 `Wave N` / `阶段 N` 字样为对应历史提交的**原始主题**，属已冻结语境，仅供追溯；新提交请以 `TASK-xx` / `批次 X` + 提交哈希 引用，勿再使用 Wave / 阶段 编号。
 
+- `863d81c` (2026-09-08): TASK-41 低危清理批次——13 项 P3 闭合（O(n²) 去重 / 未用 import / 测试后门 / EMPTY 单例污染 / 魔数 / 路径遍历 / 静默 catch / 演示默认值 / 空 if 块 / 吞异常 / MockData 改名；P3-32/34 按原裁定不修）；bug-fix-plan 与交接文档被看板吸收后删除
 - `68f2bcb` (2026-09-08): 阶段5 功能/质量收尾——TASK-30~36 七项闭合（字段级冲突合并 / 空快照诚实报错 / 密码强度真实熵 / TOTP 假码移除 / 收藏落库 / 卡条目映射 / 黑名单诚实化）+ TASK-44 登记
 - `7b3e756` (2026-09-07): WebDAV 零字节文件元数据误报修复
 - `0d4fc16` (2026-09-07): 本地 HTTPS 同步联调工具链与端到端测试 (`LiveSyncServersTest`)
