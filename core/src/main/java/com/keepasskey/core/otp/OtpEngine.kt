@@ -1,7 +1,6 @@
 package com.keepasskey.core.otp
 
 import java.nio.ByteBuffer
-import java.security.MessageDigest
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 import kotlin.math.pow

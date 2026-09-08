@@ -311,8 +311,10 @@ class DatabaseSession {
     }
 
     /**
-     * 仅供测试使用：直接注入内存数据库模型
+     * 仅供测试使用：直接注入内存数据库模型（P3-9 整改：@VisibleForTesting 显式约束，
+     * 生产代码调用视为契约违规；app 模块单测跨模块注入仍可访问）
      */
+    @androidx.annotation.VisibleForTesting
     fun setDatabaseForTesting(db: KdbxDatabase) {
         _database.value = db
         _state.value = SessionState.OPENED

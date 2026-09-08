@@ -58,10 +58,9 @@ class PasskeyCreateActivity : BaseCredentialActivity() {
                 Log.w(TAG, "解析 callingRequest.requestJson 失败", e)
             }
         }
-        if (origin.isBlank()) {
-            // H1 整改：不再从 candidateQueryData 读取调用方可控 origin（不可信）。
-            // 缺省 origin 留空，clientDataJSON 回退为 https://<rpId> 标准值。
-        }
+        // H1 整改：不再从 candidateQueryData 读取调用方可控 origin（不可信）。
+        // origin 缺省留空，clientDataJSON 回退为 https://<rpId> 标准值。
+        // （P3-28 整改：移除仅含注释的空 if 块）
 
         if (rpId.isBlank() || userName.isBlank()) {
             Log.e(TAG, "缺少必要注册参数: rpId=$rpId, userName=$userName")

@@ -7,9 +7,7 @@ import com.keepasskey.database.crypto.VariantDictionary
 import com.keepasskey.database.exception.KdbxCorruptFileException
 import com.keepasskey.database.exception.KdbxUnsupportedVersionException
 import com.keepasskey.database.io.LittleEndianUtil
-import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
-import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
 import java.security.SecureRandom

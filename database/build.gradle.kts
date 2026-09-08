@@ -28,6 +28,8 @@ dependencies {
     api(project(":crypto"))
     // P3-6 整改：移除从未使用的 androidx.core:core-ktx（三模块源码零 androidx 导入）
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
+    // P3-9 整改：@VisibleForTesting 注解（setDatabaseForTesting 测试后门显式约束）
+    implementation("androidx.annotation:annotation:1.9.1")
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")

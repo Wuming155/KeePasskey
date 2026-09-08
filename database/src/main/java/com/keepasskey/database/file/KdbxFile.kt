@@ -46,6 +46,12 @@ object KdbxFile {
     /** 内层 Header 字段头大小：1 字节字段 ID + 4 字节小端长度 */
     private const val FIELD_HEADER_SIZE = 5
 
+    /** KDBX4 内层流密码密钥长度（官方 InnerRandomStreamKey 恒为 64 字节） */
+    private const val INNER_RANDOM_STREAM_KEY_SIZE = 64
+
+    /** 主密钥派生时的种子缓冲长度（SHA-512 摘要长度） */
+    private const val SEED_HASH_BUFFER_SIZE = 64
+
     /** 解密探针所需的最小块大小（一个 AES 分组） */
     private const val MIN_PROBE_BLOCK_SIZE = 16
 
@@ -364,7 +370,7 @@ object KdbxFile {
         )
 
         // 2. 初始化全新内层 Header 与内层流密码
-        val freshInnerKey = ByteArray(64)
+        val freshInnerKey = ByteArray(INNER_RANDOM_STREAM_KEY_SIZE)
         secureRandom.nextBytes(freshInnerKey)
         val innerHeader = InnerHeader(
             innerRandomStreamId = KdbxConstants.InnerRandomStream.CHACHA20,
@@ -553,7 +559,7 @@ object KdbxFile {
         // hmacKey64  = SHA-512(masterSeed ‖ transformedKey ‖ 0x01)
         // 历史 bug 回放：本应用曾把 cipherKey 误实现为 SHA-512(seed‖tk)[0..32)（无尾部常量），
         // 该错误公式保留为旧文件探针回退路径（isLegacy = true）
-        val cipherKeyBytes = ByteArray(64)
+        val cipherKeyBytes = ByteArray(SEED_HASH_BUFFER_SIZE)
         System.arraycopy(cmpKey, 0, cipherKeyBytes, 0, 64)
         val cipherKey = if (isLegacy) {
             HashUtil.sha512(cipherKeyBytes).copyOfRange(0, 32)

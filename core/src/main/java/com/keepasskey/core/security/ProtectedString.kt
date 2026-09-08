@@ -151,9 +151,12 @@ class ProtectedString(
     }
 
     /**
-     * 显式擦除敏感内存（密文、IV 与等值标签一并清零）
+     * 显式擦除敏感内存（密文、IV 与等值标签一并清零）。
+     * P3-10 整改：[EMPTY] 为全局共享单例，对其 clear 一律 no-op——
+     * 防止任一调用方把共享空实例置为已清零态后污染后续引用者（equals/close 语义异常）。
      */
     fun clear() {
+        if (this === EMPTY) return
         if (!isCleared) {
             Arrays.fill(data, 0.toByte())
             memoryIv?.fill(0)

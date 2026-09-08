@@ -10,25 +10,39 @@ import com.keepasskey.core.model.KdbxGroup
  */
 object KdbxBinaryDeduplicator {
 
+    /**
+     * 二进制指纹（flags + 字节内容）：P3-5 整改——以哈希索引替代 O(n²) 线性遍历，
+     * 等值语义为字节数组内容比较（[ByteArray.contentEquals]）。
+     */
+    private class Fingerprint(private val flags: Byte, private val data: ByteArray) {
+        private val hash: Int = 31 * flags.hashCode() + data.contentHashCode()
+        override fun hashCode(): Int = hash
+        override fun equals(other: Any?): Boolean =
+            other is Fingerprint && other.flags == flags && other.data.contentEquals(data)
+    }
+
     fun deduplicate(
         rootGroup: KdbxGroup,
         existingPool: List<InnerHeader.BinaryItem>
     ): Pair<KdbxGroup, List<InnerHeader.BinaryItem>> {
         val dedupList = mutableListOf<InnerHeader.BinaryItem>()
-        val updatedGroup = deduplicateGroup(rootGroup, existingPool, dedupList)
+        // P3-5 整改：指纹索引整库共享（与 dedupList 同生命周期），跨条目/跨历史去重均命中
+        val fingerprintIndex = HashMap<Fingerprint, Int>()
+        val updatedGroup = deduplicateGroup(rootGroup, existingPool, dedupList, fingerprintIndex)
         return Pair(updatedGroup, dedupList)
     }
 
     private fun deduplicateGroup(
         group: KdbxGroup,
         existingPool: List<InnerHeader.BinaryItem>,
-        dedupList: MutableList<InnerHeader.BinaryItem>
+        dedupList: MutableList<InnerHeader.BinaryItem>,
+        fingerprintIndex: HashMap<Fingerprint, Int>
     ): KdbxGroup {
         val updatedEntries = group.entries.map { entry ->
-            deduplicateEntry(entry, existingPool, dedupList)
+            deduplicateEntry(entry, existingPool, dedupList, fingerprintIndex)
         }
         val updatedSubgroups = group.subgroups.map { sub ->
-            deduplicateGroup(sub, existingPool, dedupList)
+            deduplicateGroup(sub, existingPool, dedupList, fingerprintIndex)
         }
         return group.copy(entries = updatedEntries, subgroups = updatedSubgroups)
     }
@@ -36,7 +50,8 @@ object KdbxBinaryDeduplicator {
     private fun deduplicateEntry(
         entry: KdbxEntry,
         existingPool: List<InnerHeader.BinaryItem>,
-        dedupList: MutableList<InnerHeader.BinaryItem>
+        dedupList: MutableList<InnerHeader.BinaryItem>,
+        fingerprintIndex: HashMap<Fingerprint, Int>
     ): KdbxEntry {
         val updatedAttachments = entry.attachments.map { att ->
             val dataBytes = if (att.data.isNotEmpty()) {
@@ -49,10 +64,7 @@ object KdbxBinaryDeduplicator {
             val flag: Byte = if (att.isProtected) 1.toByte() else {
                 if (att.refIndex in existingPool.indices) existingPool[att.refIndex].flags else 0.toByte()
             }
-            val existingIndex = dedupList.indexOfFirst { it.flags == flag && it.data.contentEquals(dataBytes) }
-            val finalIndex = if (existingIndex >= 0) {
-                existingIndex
-            } else {
+            val finalIndex = fingerprintIndex.getOrPut(Fingerprint(flag, dataBytes)) {
                 val idx = dedupList.size
                 // 入池必须使用独立副本：dataBytes 可能是旧池（existingPool）或原附件
                 // 的内部数组别名，直接入池会让外部清零旧数组时连带清零新二进制池。
@@ -70,7 +82,7 @@ object KdbxBinaryDeduplicator {
         }
 
         val updatedHistory = entry.history.map { histEntry ->
-            deduplicateEntry(histEntry, existingPool, dedupList)
+            deduplicateEntry(histEntry, existingPool, dedupList, fingerprintIndex)
         }
 
         return entry.copy(

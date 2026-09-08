@@ -59,9 +59,11 @@ enum class ConflictResolution(
  */
 data class SettingsUiState(
     // 1. 密码库与加密设置 (Database & Encryption) - 完全可调
-    val databaseName: String = "master_vault.kdbx",
-    val databasePath: String = "/storage/emulated/0/Documents/master_vault.kdbx",
-    val databaseDefaultUsername: String = "user@keepasskey.com",
+    // P3-24 整改：库名/路径/默认用户名默认空串（未加载前如实展示，不再预置演示数据），
+    // 真实值由 ViewModel 活动库加载后覆盖
+    val databaseName: String = "",
+    val databasePath: String = "",
+    val databaseDefaultUsername: String = "",
     val encryptionAlgorithm: String = "ChaCha20-Poly1305 (256-bit)",
     val kdfAlgorithm: String = "Argon2id",
     val argon2Iterations: Long = 3L,

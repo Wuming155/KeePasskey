@@ -544,7 +544,9 @@ open class SyncCoordinator @Inject constructor(
                 // P1-10：pwdClone 为 null 表示仅密钥文件会话（无主密码分量），直接透传
                 KdbxFile.save(baos, db, pwdClone, keyClone)
                 baos.toByteArray()
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                // P3-31 整改：序列化失败不再静默吞掉，至少落调试日志保留异常细节
+                debugLog.warn(TAG, "本地数据库序列化失败（合并上传中断）: ${e.message}")
                 null
             } finally {
                 pwdClone?.let { Arrays.fill(it, '0') }
@@ -560,7 +562,9 @@ open class SyncCoordinator @Inject constructor(
             try {
                 // P1-10：pwdClone 为 null 表示仅密钥文件会话（无主密码分量），直接透传
                 KdbxFile.load(ByteArrayInputStream(bytes), pwdClone, keyClone)
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                // P3-31 整改：解析失败不再静默吞掉，至少落调试日志保留异常细节
+                debugLog.warn(TAG, "远端数据库字节解析失败: ${e.message}")
                 null
             } finally {
                 pwdClone?.let { Arrays.fill(it, '0') }

@@ -5,7 +5,6 @@ import com.keepasskey.core.security.ProtectedString
 import com.keepasskey.crypto.cose.CoseKey
 import com.keepasskey.crypto.exception.CryptoException
 import org.bouncycastle.asn1.ASN1InputStream
-import org.bouncycastle.asn1.ASN1Sequence
 import org.bouncycastle.asn1.pkcs.PrivateKeyInfo
 import org.bouncycastle.asn1.pkcs.RSAPublicKey
 import org.bouncycastle.asn1.sec.SECNamedCurves

@@ -91,36 +91,36 @@
 | **P3-2** | Times 缺失默认 `now()` 致三方合并恒压过对端 | ✅ 已修复 | `KdbxXmlTimeHelper.kt:69` 缺省 fallback 改为 `Instant.EPOCH` | 否（已修复） | 已改 EPOCH |
 | **P3-3** | XML 写出不转义 CR (CRLF→LF) 且剔除控制字符 | ✅ 已修复 | `KdbxXmlStreamWriter.kt:94` escape 已将 `\r` 转义为 `&#xD;` | 否（已修复） | CR 已转义 |
 | **P3-4** | HistoryManager 硬编码上限且快照顺序反 | ✅ 已修复 | `HistoryManager.kt:41` 已接入库级配置上限，快照顺序修正为最新在前 | 否（已修复） | 上限与顺序已修正 |
-| **P3-5** | 二进制池去重为 O(n²) 线性遍历 | ❌ 未修复 | `KdbxBinaryDeduplicator.kt:52` 依然使用 `indexOfFirst` 遍历 | 低（性能） | `indexOfFirst` O(n²) 遍历；附件池规模小时无感，大库才显著，可换 HashMap 指纹索引 |
+| **P3-5** | 二进制池去重为 O(n²) 线性遍历 | ✅ 已修复（2026-09-08，TASK-41） | `KdbxBinaryDeduplicator.kt` `indexOfFirst` O(n²) → `Fingerprint(flags, data)` HashMap 指纹索引；索引在 `deduplicate()` 入口创建、整库共享并递归传递 | 否（已修复） | 曾踩坑：per-entry 索引会导致跨条目去重失效，已修正为整库共享索引 |
 | **P3-6** | 三个模块声明未使用的 `androidx.core:core-ktx` | ✅ 已修复 | core/crypto/database 三模块 `build.gradle.kts` 已移除该依赖 | 否（已修复） | 依赖已移除 |
-| **P3-7** | 未使用 import 残留 | ❌ 未修复 | `KdbxHeader.kt:10` 等文件中未使用的 import 仍存在 | 极低 | `import java.io.ByteArrayInputStream` 全文件仅出现于 import（未使用）；死代码清理 |
+| **P3-7** | 未使用 import 残留 | ⚠️ 部分修复（2026-09-08，TASK-41） | 已删除 8 处经逐一人工核实的未使用 import（`KdbxHeader.kt` ByteArrayInputStream/IOException、`KdbxUuid.kt` Arrays、`OtpEngine.kt` MessageDigest、`TwofishCipherEngine.kt` Security、`PasskeyCryptoEngine.kt` ASN1Sequence、`KdbxXmlMetaSerializer.kt` KdbxUuid、`SyncProvider.kt` InputStream） | 极低 | app 模块 UI 层剩余候选 ~80 条留待 IDE inspection：`getValue`/`setValue`/`provideDelegate` 为 Compose 委托语法必用导入，批量脚本删除有误报风险（曾被安全策略拒绝），逐文件人工核实口径 |
 | **P3-8** | `KdbxFile.save` 头部序列化两遍 | ❌ 未修复 | `KdbxFile.kt:385` 仍存在 ByteArrayOutputStream 双重缓冲 | 极低 | 实测仅一次 `serialize`（写入 ByteArrayOutputStream 并返回同一 `headerBytes` 再写盘），是**双重缓冲**而非"序列化两遍"，非正确性 bug |
-| **P3-9** | `setDatabaseForTesting` 为绕过只读模式的公有后门 | ❌ 未修复 | `DatabaseSession.kt:306` 该测试后门依然为 public 且无约束 | 低 | 为 public 测试后门；建议加 `@VisibleForTesting` 或 internal 约束 |
-| **P3-10** | ProtectedString.EMPTY 共享单例可被污染 | ❌ 未修复 | `ProtectedString.kt:79` EMPTY 单例可被 clear() 影响全局 | 低 | `EMPTY` 共享单例可被任意 `clear()` 置 `isCleared=true`，后续引用者 `equals` 等会异常；建议单例禁止 clear 或改用不可变空对象 |
+| **P3-9** | `setDatabaseForTesting` 为绕过只读模式的公有后门 | ✅ 已修复（2026-09-08，TASK-41） | `DatabaseSession.setDatabaseForTesting` 加 `@androidx.annotation.VisibleForTesting`（database 模块新增 `androidx.annotation:annotation:1.9.1`） | 否（已修复） | 不用 internal：app 模块单测 RealVaultRepositoryTest/SecurityTest 跨模块调用，internal 会致编译失败 |
+| **P3-10** | ProtectedString.EMPTY 共享单例可被污染 | ✅ 已修复（2026-09-08，TASK-41） | `ProtectedString.clear()` 对 `EMPTY` no-op（`if (this === EMPTY) return`） | 否（已修复） | 共享单例不再被污染为已清零态 |
 | **P3-11** | CborEncoder.encodeMap 不强制 Canonical 键序 | ❌ 未修复 | `CborEncoder.kt:127` encodeMap 直接按 Map 迭代顺序编码 | 中（正确性） | 未按 RFC 8949 确定性键序（长度优先/字节序）；Passkey COSE/断言签名若与外部方互验可能因键序不一致失败 |
 | **P3-12** | AttachmentManager.exportToCache 缓存无清理 | ✅ 已修复（2026-09-07） | `AttachmentManager.kt` 重写：专用子目录 `attachment_view` + 随机 UUID 文件名 + 会话即弃（新导出清上一轮）+ `deleteExported` 用完即删 + `deleteOnExit` 兜底 | 中（敏感） | `cleanCache` 改为仅清理专用子目录（全盘误删缺陷回归锁于 `AttachmentManagerTest`，6 例单测） |
 | **P3-13** | RSA `certainty = 12` 低于常规标准 | ✅ 已修复（2026-09-07） | `PasskeyCryptoEngine.generateRs256KeyPair` certainty 12 → 80 | 中 | `RSAKeyGenerationParameters(..., 2048, 80)`：False-prime 概率 ≤1/2⁸⁰，对齐 BouncyCastle 官方示例 |
-| **P3-14** | 魔法数字残留 | ❌ 未修复 | `KdbxFile.kt:336` 等多处硬编码数字未抽离为语义化常量 | 极低 | `ByteArray(64)` 等魔数应抽语义常量 |
-| **P3-15** | 路径编码保留 ".." 导致路径遍历风险 | ❌ 未修复 | `WebDavSyncProvider.kt:103` encodePath 未剔除 ".." | 低（纵深防御） | `encodePath` 未剔除 `..` 段，存在路径遍历可能；当前路径来自应用受控配置，风险有限，建议剔除 |
+| **P3-14** | 魔法数字残留 | ⚠️ 部分修复（2026-09-08，TASK-41） | `KdbxFile.kt` 两处 `ByteArray(64)` 抽为 `INNER_RANDOM_STREAM_KEY_SIZE` / `SEED_HASH_BUFFER_SIZE` 语义常量 | 极低 | 按原建议只抽语义关键处，其余零散魔数不做大面积重命名以控风险 |
+| **P3-15** | 路径编码保留 ".." 导致路径遍历风险 | ✅ 已修复（2026-09-08，TASK-41） | `WebDavSyncProvider.encodePath` 已剔除 `.` / `..` 段 | 否（已修复） | 纵深防御补强 |
 | **P3-16** | SigV4 编码与 AWS 规范不符（`*` 与 `~` 处理） | ❌ 未修复 | `S3SyncProvider.kt:75` 编码逻辑未针对 AWS 规范微调 | 中（正确性） | `URLEncoder.encode` 把 `*`→`%2A`、`~`→`%7E`；AWS SigV4 canonical URI 要求 `*` 不编码、`~` 不编码，含这两字符的对象键会**签名不匹配 403** |
-| **P3-17** | `parsePropfindXml` 吞掉所有异常返回空对象 | ❌ 未修复 | `WebDavSyncProvider.kt:430` 使用 `catch (_: Exception)` 静默返回 | 低 | 静默 catch 返回空，吞掉解析错误可能掩盖同步异常；建议至少记录日志 |
+| **P3-17** | `parsePropfindXml` 吞掉所有异常返回空对象 | ✅ 已修复（2026-09-08，TASK-41） | `WebDavSyncProvider.parsePropfindXml` 静默 catch → `Log.w(TAG, ...)`（sync 模块新增日志设施） | 否（已修复） | 解析错误不再被静默掩盖 |
 | **P3-18** | `SyncCache.clear()` 漏删四类 `.tmp` 文件 | ✅ 已修复 | `SyncCache.kt:216` 改为 `deleteOrphanTmpFiles()` 通配删除 | 否（已修复） | 已通配删除孤立 tmp |
 | **P3-19** | `hasLocalChanges` 对缺失 version 与 baseversion 方向相反 | ❌ 未修复 | `SyncCache.kt:68` 缺失 .version 返回 false，缺失 .baseversion 返回 true | 不急（存疑） | 实测"方向相反"说法站不住：.version 缺失→无法确认本地修改→`false`（合理）；.baseversion 缺失→无法比对→保守返回 `true`（合理）；当前更像是保守策略，建议补注释明确语义，而非当作 bug 修 |
 | **P3-20** | 无 HTTPS 强制与 URL scheme 校验 | ✅ 已修复 | WebDav/S3 Provider 构造函数在 `WebDavSyncProvider.kt:64` 处强校验非 https 即抛异常 | 否（已修复） | 已强校验 https |
 | **P3-21** | sync 模块 minSdk = 36 | ➖ 记录备查 | 固化的 Android 16+ 基线产品决策 | 否（产品决策） | Android 16+ 基线，固化决策 |
 | **P3-22** | 7 个 Kotlin 文件超过 800 行 | ⚠️ 部分修复 | `RealVaultRepository` (1184行)、`SettingsViewModel` (1119行) 等 7 个文件超 800 行 | 低 | 巨型类整改为渐进项，当前保留 |
 | **P3-23** | 约 250 处硬编码中文未抽离至 strings.xml | ❌ 未修复 | `SettingsViewModel.kt` 等 29 个文件中仍残存约 250 处硬编码中文 | 低（i18n） | 硬编码中文影响国际化；渐进整改即可 |
-| **P3-24** | SettingsUiState 默认值为演示数据 | ❌ 未修复 | `SettingsUiState.kt:63` databasePath 等仍为预置演示路径 | 低 | `databasePath` 默认演示路径，真实数据加载后覆盖；仅初始默认值问题 |
+| **P3-24** | SettingsUiState 默认值为演示数据 | ✅ 已修复（2026-09-08，TASK-41） | `SettingsUiState` `databaseName`/`databasePath`/`databaseDefaultUsername` 演示默认值 → 空串 | 否（已修复） | 诚实化：真实数据加载前不再回显演示路径 |
 | **P3-25** | 收藏功能不落库（仅翻转内存 Flow） | ✅ 已修复（2026-09-08） | `VaultRepository.setEntryFavorite` 新契约；`RealVaultRepository` 持久化至 KDBX `customData["KeePasskey.Favorite"]`；`toggleFavorite` 调仓库保存且失败如实上浮；收藏随投影 `isFavorite` 下发 | 中（功能） | 收藏重启不再丢失 |
 | **P3-26** | EntryCategory 与银行卡字段为死代码 | ❌ 未修复 | `RealVaultRepository.kt:723` mapKdbxEntryToUi 未映射 category 且未处理卡字段 | 低-中（功能） | `mapKdbxEntryToUi` 不映射 `category`（恒 LOGIN）也不处理银行卡字段，`UiVaultEntry` 卡字段恒为 null，银行卡条目被当普通登录展示 |
 | **P3-27** | 空 onClick 按钮与写死黑名单 | ✅ 已修复（2026-09-08） | `AutofillSettingsScreen` 黑名单对话框移除写死示例条目与空 onClick 删除按钮，改诚实展示真实计数/空态；孤儿字符串（中英 4 条）清理；完整生命周期登记 TASK-44 | 中（功能） | 沿 TASK-12/13 诚实化裁定先例；假功能不再回显 |
-| **P3-28** | 带有仅含注释的空 if 块 | ❌ 未修复 | `PasskeyCreateActivity.kt:61` 存在空 if 块 | 极低 | `if (origin.isBlank()) { /* 仅注释 */ }` 空 if 块，清理即可 |
+| **P3-28** | 带有仅含注释的空 if 块 | ✅ 已修复（2026-09-08，TASK-41） | `PasskeyCreateActivity` 移除仅含注释的空 if 块（注释保留在块外） | 否（已修复） | 死代码清理 |
 | **P3-29** | 从 Context 强转 MainActivity 获取单例 | ❌ 未修复 | `KeePasskeyApp.kt:149` 存在 `(context as? MainActivity)?.autoLockManager` 强转 | 不急（描述有误） | 实测为 `(context as? MainActivity)?.autoLockManager`——是**安全转换 `as?` 而非强转**，对 null 已优雅处理，风险很低；原结论"强转"不准确 |
 | **P3-30** | 熄屏自动锁在 Activity onDestroy 时销毁单例 | ❌ 未修复 → ✅ 已修复（2026-09-07，TASK-22） | `MainActivity.kt:48` onDestroy 中误调了单例 `autoLockManager.destroy()` | 高（真实 Bug） | 已整改：移除 `MainActivity.onDestroy` 的 `destroy()` 调用与空覆写，并清理 `AutoLockManager.destroy()` 死代码；单例生命周期与进程对齐，`initialize()` 幂等，旋转重建不再销毁调度器 |
-| **P3-31** | 捕获 Exception 丢弃具体异常细节 | ❌ 未修复 | `SyncCoordinator.kt:534` 存在 `catch (_: Exception) { null }` | 低 | `catch (_: Exception) { null }` 丢弃异常细节，序列化失败被静默吞掉；建议至少记 `debugLog` |
-| **P3-32** | 生产类构造函数保留 Context? 可空形参 | ❌ 未修复 | `KeystoreManager.kt:42` 等生产构造中保留 Context? | 低 | 生产构造保留 `Context?` 可空形参仅为单测注入，可保留 |
-| **P3-33** | MockData.kt 文件名与死链注释残留 | ❌ 未修复 | `MockData.kt` 文件名未改且注释存在死链 | 极低 | 文件名 `MockData` 实为生产 UI 模型（VaultGroup/UiVaultEntry 等），应改名如 `UiModels.kt` |
-| **P3-34** | REMEDIATION_PLAN.md 包含已废弃旧 API 表述 | ❌ 未修复 | 属于需归档废弃的旧文档表述问题 | 极低 | 文档已在顶部声明"历史存档/停止更新"，含旧 API 表述属正常归档，无需动作 |
+| **P3-31** | 捕获 Exception 丢弃具体异常细节 | ✅ 已修复（2026-09-08，TASK-41） | `SyncCoordinator` `serializeLocalDatabase` 与 `parseKdbxBytes` 两处 `catch (_: Exception)` → `debugLog.warn(TAG, ...)` | 否（已修复） | 后者同模式顺手一并修复 |
+| **P3-32** | 生产类构造函数保留 Context? 可空形参 | ➖ 按原裁定不修（2026-09-08，TASK-41 回写） | `KeystoreManager.kt:42` 等保留 `Context?` | 低 | FINDINGS 原文即裁定「仅为单测注入，可保留」，无需改代码 |
+| **P3-33** | MockData.kt 文件名与死链注释残留 | ✅ 已修复（2026-09-08，TASK-41） | `MockData.kt` → `UiModels.kt`（git mv 保留历史；文件内无 `MockData` 类、全仓无按文件名引用，全量编译测试零影响） | 否（已修复） | 文件名与内容语义对齐 |
+| **P3-34** | REMEDIATION_PLAN.md 包含已废弃旧 API 表述 | ➖ 按原裁定不修（2026-09-08，TASK-41 回写） | 文档顶部已声明「历史存档/停止更新」 | 极低 | 历史归档文档含旧 API 表述属正常，无需动作 |
 
 ---
 

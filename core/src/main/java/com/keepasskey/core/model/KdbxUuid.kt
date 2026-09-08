@@ -2,7 +2,6 @@ package com.keepasskey.core.model
 
 import java.nio.ByteBuffer
 import java.security.SecureRandom
-import java.util.Arrays
 import java.util.UUID
 
 /**

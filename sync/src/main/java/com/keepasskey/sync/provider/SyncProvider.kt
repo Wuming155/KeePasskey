@@ -1,7 +1,6 @@
 package com.keepasskey.sync.provider
 
 import com.keepasskey.sync.model.RemoteFileMetadata
-import java.io.InputStream
 
 /**
  * 通用云存储协议提供者契约接口。

@@ -3,7 +3,6 @@ package com.keepasskey.database.xml
 import com.keepasskey.core.model.CustomIcon
 import com.keepasskey.core.model.DeletedObject
 import com.keepasskey.core.model.KdbxConstants
-import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.core.model.MemoryProtectionConfig
 import java.util.Base64
 

@@ -1,5 +1,6 @@
 package com.keepasskey.sync.webdav
 
+import android.util.Log
 import com.keepasskey.sync.model.RemoteFileMetadata
 import com.keepasskey.sync.model.SyncException
 import com.keepasskey.sync.model.cleanEtag
@@ -105,9 +106,12 @@ class WebDavSyncProvider(
     }
 
     private fun encodePath(path: String): String {
-        return path.split('/').joinToString("/") { segment ->
-            if (segment.isEmpty()) "" else URLEncoder.encode(segment, "UTF-8").replace("+", "%20")
-        }
+        // P3-15 纵深防御：剔除 "." 与 ".." 段，杜绝路径遍历序列直达服务器
+        return path.split('/')
+            .filter { segment -> segment != "." && segment != ".." }
+            .joinToString("/") { segment ->
+                if (segment.isEmpty()) "" else URLEncoder.encode(segment, "UTF-8").replace("+", "%20")
+            }
     }
 
     private fun buildUrl(remotePath: String): String {
@@ -431,7 +435,10 @@ class WebDavSyncProvider(
             val isDirectory = collectionNodes.isNotEmpty()
 
             ParsedPropfind(etag, contentLength, lastModifiedMillis, isDirectory)
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            // P3-17 整改：解析失败至少落日志，不再静默吞掉（回退空元数据语义保留，
+            // 由调用方按「缺失」回退 HTTP 头哨兵处理）
+            Log.w(TAG, "PROPFIND 响应 XML 解析失败，回退空元数据", e)
             ParsedPropfind("", -1L, 0L, false)
         }
     }
@@ -456,6 +463,8 @@ class WebDavSyncProvider(
     }
 
     companion object {
+        private const val TAG = "WebDavSyncProvider"
+
         const val ATOMIC_TMP_SUFFIX = ".kpktmp"
 
         private const val PROPFIND_XML = """<?xml version="1.0" encoding="utf-8" ?>
