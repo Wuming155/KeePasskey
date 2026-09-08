@@ -178,6 +178,9 @@ class SyncCredentialsStore @Inject constructor(
             editor.putString(KEY_S3_REGION, region)
             editor.putString(KEY_S3_OBJECT_KEY, objectKey)
             editor.putBoolean(KEY_S3_USE_PATH_STYLE, usePathStyle)
+            // TASK-45：凭据变更 = 换端点/换桶，旧端点探测的时钟偏移立即作废（置未知，
+            // 下次同步 fail-closed 以本地时间签名并据首个响应 Date 头重新学习）
+            editor.remove(KEY_S3_CLOCK_OFFSET)
             if (encryptedAccessKey != null) {
                 editor.putString(KEY_S3_ACCESS_KEY_IV, encryptedAccessKey.first)
                 editor.putString(KEY_S3_ACCESS_KEY_CIPHER, encryptedAccessKey.second)
@@ -256,6 +259,21 @@ class SyncCredentialsStore @Inject constructor(
 
     fun clear() {
         prefs.edit().clear().apply()
+    }
+
+    /**
+     * TASK-45（P2-14）：S3 服务端时钟偏移持久化。
+     *
+     * 偏移量 = 服务端时间 - 本地时间（毫秒），非敏感数据（不含任何凭据/密钥分量），
+     * 与 S3 凭据同文件落盘即可（「随凭据落盘一致」防篡改面见 AGENTS.md 敏感数据铁律——
+     * 此处仅为偏移常量，被篡改最坏结果是多一次 RequestTimeTooSkewed 自愈重试，无数据泄露）。
+     * 未探测时返回 0（fail-closed 语义：不补偿、以本地时间签名）。
+     */
+    fun loadS3ClockOffsetMillis(): Long = prefs.getLong(KEY_S3_CLOCK_OFFSET, 0L)
+
+    /** TASK-45：保存最新探测的 S3 时钟偏移（由 S3SyncProvider 刷新回调驱动，尽力而为） */
+    fun saveS3ClockOffsetMillis(offsetMillis: Long) {
+        prefs.edit().putLong(KEY_S3_CLOCK_OFFSET, offsetMillis).apply()
     }
 
     /**
@@ -371,5 +389,6 @@ class SyncCredentialsStore @Inject constructor(
         private const val KEY_S3_SECRET_IV = "s3_secret_iv"
         private const val KEY_S3_SECRET_CIPHER = "s3_secret_cipher"
         private const val KEY_S3_USE_PATH_STYLE = "s3_use_path_style"
+        private const val KEY_S3_CLOCK_OFFSET = "s3_clock_offset_millis"
     }
 }

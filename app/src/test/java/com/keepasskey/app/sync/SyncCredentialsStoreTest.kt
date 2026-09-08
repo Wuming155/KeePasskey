@@ -38,6 +38,11 @@ class SyncCredentialsStoreTest {
                 val def = args[1] as? Boolean ?: false
                 (memoryStorage[key] as? Boolean) ?: def
             }
+            "getLong" -> {
+                val key = args[0] as String
+                val def = args[1] as Long
+                (memoryStorage[key] as? Long) ?: def
+            }
             "contains" -> {
                 memoryStorage.containsKey(args[0] as String)
             }
@@ -56,6 +61,10 @@ class SyncCredentialsStoreTest {
                 proxy
             }
             "putBoolean" -> {
+                memoryStorage[args[0] as String] = args[1]
+                proxy
+            }
+            "putLong" -> {
                 memoryStorage[args[0] as String] = args[1]
                 proxy
             }
@@ -144,6 +153,26 @@ class SyncCredentialsStoreTest {
         assertEquals("databases/primary.kdbx", loaded.objectKey)
         loaded.accessKey.fill('0')
         loaded.secretKey.fill('0')
+    }
+
+    @Test
+    fun `S3 时钟偏移持久化 round-trip 与配置重录清除`() {
+        // TASK-45：未探测时默认 0（fail-closed）
+        assertEquals(0L, store.loadS3ClockOffsetMillis())
+
+        store.saveS3ClockOffsetMillis(25L * 60 * 1000)
+        assertEquals(25L * 60 * 1000, store.loadS3ClockOffsetMillis())
+
+        // 配置重录（换端点/换桶）必须作废旧偏移，置 0 等待下次同步重新学习
+        store.saveS3Config(
+            endpoint = "https://s3.ap-northeast-1.amazonaws.com",
+            bucket = "my-secure-vault",
+            region = "ap-northeast-1",
+            accessKey = "AKIAIOSFODNN7EXAMPLE".toCharArray(),
+            secretKey = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".toCharArray(),
+            objectKey = "databases/primary.kdbx"
+        )
+        assertEquals(0L, store.loadS3ClockOffsetMillis())
     }
 
     @Test

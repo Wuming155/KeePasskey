@@ -14,7 +14,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import java.net.InetAddress
+import java.text.SimpleDateFormat
 import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
 
 /**
  * S3SyncProvider 单元测试：
@@ -323,5 +326,120 @@ class S3SyncProviderTest {
             "签名与独立参考实现预计算值不一致: $auth",
             auth.contains("Signature=115f4d4984e0f7584c4d687b64f7a508d64ad831da9affab921fb8105bc82c7b")
         )
+    }
+
+    // ===== TASK-45（FINDINGS P2-14）：S3 SigV4 服务端时钟偏移补偿 =====
+
+    private fun httpDate(serverMillis: Long): String =
+        SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss 'GMT'", Locale.US).apply {
+            timeZone = TimeZone.getTimeZone("GMT")
+        }.format(Date(serverMillis))
+
+    private fun parseAmzDate(value: String): Long {
+        val formatter = SimpleDateFormat("yyyyMMdd'T'HHmmss'Z'", Locale.US).apply {
+            timeZone = TimeZone.getTimeZone("UTC")
+        }
+        return formatter.parse(value)?.time ?: 0L
+    }
+
+    private fun loopbackProvider(initialOffset: Long = 0L, offsetUpdater: ((Long) -> Unit)? = null) =
+        S3SyncProvider(
+            endpoint = "http://127.0.0.1:${server.port}",
+            bucketName = "test-bucket",
+            region = "us-east-1",
+            accessKeyId = "TESTKEY",
+            secretAccessKey = "TESTSECRET",
+            client = createLoopbackClient(),
+            initialClockOffsetMillis = initialOffset,
+            clockOffsetUpdater = offsetUpdater
+        )
+
+    @Test
+    fun `TASK45_正向偏移注入_签名采用补偿后时间`() = runTest {
+        server.enqueue(MockResponse().setResponseCode(200).setHeader("ETag", "\"e1\""))
+        val offset = 30L * 60 * 1000 // 设备时钟比服务端慢 30 分钟（超出 SigV4 +15min 容限）
+        val provider = loopbackProvider(initialOffset = offset)
+
+        val result = provider.getMetadata("vault.kdbx")
+        assertTrue("应成功: ${result.exceptionOrNull()}", result.isSuccess)
+
+        val amzDate = parseAmzDate(server.takeRequest().getHeader("x-amz-date").orEmpty())
+        val expected = System.currentTimeMillis() + offset
+        assertTrue(
+            "x-amz-date 必须按 本地时间+偏移 补偿 (actual=$amzDate, expected≈$expected)",
+            Math.abs(amzDate - expected) < 10_000
+        )
+    }
+
+    @Test
+    fun `TASK45_负向偏移注入_签名采用补偿后时间`() = runTest {
+        server.enqueue(MockResponse().setResponseCode(200).setHeader("ETag", "\"e1\""))
+        val offset = -45L * 60 * 1000 // 设备时钟比服务端快 45 分钟（超出 SigV4 -15min 容限）
+        val provider = loopbackProvider(initialOffset = offset)
+
+        val result = provider.getMetadata("vault.kdbx")
+        assertTrue("应成功: ${result.exceptionOrNull()}", result.isSuccess)
+
+        val amzDate = parseAmzDate(server.takeRequest().getHeader("x-amz-date").orEmpty())
+        val expected = System.currentTimeMillis() + offset
+        assertTrue(
+            "x-amz-date 必须按 本地时间+偏移 补偿 (actual=$amzDate, expected≈$expected)",
+            Math.abs(amzDate - expected) < 10_000
+        )
+    }
+
+    @Test
+    fun `TASK45_首次同步偏斜403_据Date头自愈重试一次成功`() = runTest {
+        // getMetadata 走 HEAD 请求：HTTP 规范禁止 HEAD 携带错误主体（真实 AWS 亦无 body），
+        // 故偏斜判定依赖 Date 头偏移跳变信号——MockWebServer 对 HEAD 若设 body 会违规发送
+        // 实体字节污染持久连接，此处严禁设置 body
+        val serverTimeAhead = System.currentTimeMillis() + 25L * 60 * 1000
+        server.enqueue(
+            MockResponse().setResponseCode(403)
+                .setHeader("Date", httpDate(serverTimeAhead))
+        )
+        server.enqueue(MockResponse().setResponseCode(200).setHeader("ETag", "\"ok-etag\""))
+
+        val reportedOffsets = mutableListOf<Long>()
+        val provider = loopbackProvider(offsetUpdater = { reportedOffsets.add(it) })
+
+        val result = provider.getMetadata("vault.kdbx")
+        assertTrue("偏斜自愈后应成功: ${result.exceptionOrNull()}", result.isSuccess)
+
+        assertEquals("恰好一次自愈重试（共 2 个请求）", 2, server.requestCount)
+        // FIFO：第 1 个为未补偿的首请求（403），第 2 个才是补偿后重试请求
+        val firstRequest = server.takeRequest()
+        val retryRequest = server.takeRequest()
+        val firstAmzDate = parseAmzDate(firstRequest.getHeader("x-amz-date").orEmpty())
+        assertTrue(
+            "首请求应使用本地时间（未补偿）",
+            Math.abs(firstAmzDate - System.currentTimeMillis()) < 10_000
+        )
+        val retryAmzDate = parseAmzDate(retryRequest.getHeader("x-amz-date").orEmpty())
+        assertTrue(
+            "重试签名时间应逼近首响应 Date 头服务端时间 (retry=$retryAmzDate, server≈$serverTimeAhead)",
+            Math.abs(retryAmzDate - serverTimeAhead) < 10_000
+        )
+        assertTrue("偏移刷新后必须回调持久化", reportedOffsets.isNotEmpty())
+        assertTrue(
+            "回调偏移应≈+25min (actual=${reportedOffsets.last()})",
+            Math.abs(reportedOffsets.last() - 25L * 60 * 1000) < 10_000
+        )
+    }
+
+    @Test
+    fun `TASK45_偏斜403无有效Date头_failClosed不盲目重试`() = runTest {
+        // 无有效 Date 头 = 无法刷新偏移 → 无法确认偏斜 → 按原路径如实上浮（不静默放行也不盲目重试）
+        server.enqueue(
+            MockResponse().setResponseCode(403)
+                .setHeader("Date", "not-a-parseable-date")
+        )
+        val provider = loopbackProvider()
+
+        val result = provider.getMetadata("vault.kdbx")
+
+        assertTrue(result.isFailure)
+        assertTrue("偏斜无 Date 头须按原路径上浮鉴权错误", result.exceptionOrNull() is SyncException.AuthenticationError)
+        assertEquals("无有效 Date 头不得盲目重试", 1, server.requestCount)
     }
 }

@@ -631,7 +631,19 @@ open class SyncCoordinator @Inject constructor(
                         accessKeyId = String(cfg.accessKey),
                         secretAccessKey = String(cfg.secretKey),
                         usePathStyle = cfg.usePathStyle,
-                        networkOptions = SyncNetworkOptions()
+                        networkOptions = SyncNetworkOptions(),
+                        // TASK-45（P2-14）：恢复上次持久化的服务端时钟偏移，启动即补偿；
+                        // 同步期间每次响应携带 Date 头即经回调刷新落盘（跨进程保留）
+                        initialClockOffsetMillis = syncCredentialsStore.loadS3ClockOffsetMillis(),
+                        clockOffsetUpdater = { offset ->
+                            try {
+                                syncCredentialsStore.saveS3ClockOffsetMillis(offset)
+                            } catch (e: Exception) {
+                                // 持久化失败仅丢失跨进程记忆：本会话内存偏移仍即时生效，
+                                // 下次同步按 fail-closed 重新学习，不阻断本次同步
+                                debugLog.warn(TAG, "S3 时钟偏移持久化失败: ${e.message}")
+                            }
+                        }
                     )
                 } finally {
                     cfg.accessKey.fill('0')
