@@ -6,6 +6,13 @@ import java.util.Base64
 import javax.inject.Inject
 import javax.inject.Singleton
 
+/** 解锁通行密钥登记记录（TASK-18）：公钥 / 凭据 ID / 最新 signCount */
+data class UnlockPasskeyRecord(
+    val publicKeyB64: String,
+    val credentialIdB64: String,
+    val signCount: Int
+)
+
 /**
  * 经 Android Keystore 硬件加密的统一快速解锁主凭据安全存储仓库（Wave 12 收敛）。
  *
@@ -95,6 +102,39 @@ class BiometricCredentialStorage @Inject constructor(
      */
     fun clearAll() {
         prefs.edit().clear().apply()
+    }
+
+    // ── 解锁通行密钥记录（TASK-18）────────────────────────────────────────
+
+    /** 保存解锁通行密钥登记记录（公钥 X.509 编码 Base64 / 凭据 ID Base64 / signCount） */
+    fun saveUnlockPasskey(databaseId: String, publicKeyB64: String, credentialIdB64: String, signCount: Int) {
+        prefs.edit()
+            .putString("${databaseId}_passkey_pub", publicKeyB64)
+            .putString("${databaseId}_passkey_cred", credentialIdB64)
+            .putInt("${databaseId}_passkey_count", signCount)
+            .apply()
+    }
+
+    /** 读取解锁通行密钥登记记录；未登记返回 null */
+    fun getUnlockPasskey(databaseId: String): UnlockPasskeyRecord? {
+        val pubB64 = prefs.getString("${databaseId}_passkey_pub", null) ?: return null
+        val credB64 = prefs.getString("${databaseId}_passkey_cred", null) ?: return null
+        val count = prefs.getInt("${databaseId}_passkey_count", 0)
+        return UnlockPasskeyRecord(publicKeyB64 = pubB64, credentialIdB64 = credB64, signCount = count)
+    }
+
+    /** 累进 signCount（成功断言后提交，防克隆语义见 [UnlockPasskeyManager]） */
+    fun commitSignCount(databaseId: String, newSignCount: Int) {
+        prefs.edit().putInt("${databaseId}_passkey_count", newSignCount).apply()
+    }
+
+    /** 清除解锁通行密钥登记记录 */
+    fun clearUnlockPasskey(databaseId: String) {
+        prefs.edit()
+            .remove("${databaseId}_passkey_pub")
+            .remove("${databaseId}_passkey_cred")
+            .remove("${databaseId}_passkey_count")
+            .apply()
     }
 
     companion object {

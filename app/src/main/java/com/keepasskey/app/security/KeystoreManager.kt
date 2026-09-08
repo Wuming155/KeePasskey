@@ -9,6 +9,8 @@ import android.security.keystore.KeyProperties
 import android.security.keystore.StrongBoxUnavailableException
 import com.keepasskey.app.data.logger.DebugLogBuffer
 import java.security.KeyFactory
+import java.security.KeyPair
+import java.security.KeyPairGenerator
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -299,6 +301,55 @@ class KeystoreManager @Inject constructor(
     fun deleteKey(alias: String = BIOMETRIC_KEY_ALIAS) {
         if (keyStore.containsAlias(alias)) {
             keyStore.deleteEntry(alias)
+        }
+    }
+
+    /**
+     * 获取或生成设备绑定「解锁通行密钥」ES256（P-256 ECDSA）密钥对（TASK-18）。
+     *
+     * 私钥生成于 Keystore 硬件内（StrongBox 优先，回退 TEE），**不可导出**；
+     * 不设 per-operation 用户认证门控——断言仅在生物识别授权完成 AES-GCM 解封之后
+     * 静默执行（认证门控由封印密钥承担，断言承担凭据持有性证明与 signCount 防克隆）。
+     */
+    @Synchronized
+    fun getOrCreateUnlockPasskeyPair(alias: String): KeyPair? {
+        try {
+            if (keyStore.containsAlias(alias)) {
+                val entry = keyStore.getEntry(alias, null) as? KeyStore.PrivateKeyEntry
+                if (entry != null) {
+                    return KeyPair(entry.certificate.publicKey, entry.privateKey)
+                }
+            }
+            val generator = KeyPairGenerator.getInstance(
+                KeyProperties.KEY_ALGORITHM_EC,
+                ANDROID_KEY_STORE
+            )
+            val spec = KeyGenParameterSpec.Builder(
+                alias,
+                KeyProperties.PURPOSE_SIGN or KeyProperties.PURPOSE_VERIFY
+            )
+                .setDigests(KeyProperties.DIGEST_SHA256)
+                .setUserAuthenticationRequired(false)
+                .build()
+            if (isStrongBoxSupported) {
+                try {
+                    generator.initialize(
+                        KeyGenParameterSpec.Builder(alias, KeyProperties.PURPOSE_SIGN or KeyProperties.PURPOSE_VERIFY)
+                            .setDigests(KeyProperties.DIGEST_SHA256)
+                            .setUserAuthenticationRequired(false)
+                            .setIsStrongBoxBacked(true)
+                            .build()
+                    )
+                    return generator.generateKeyPair()
+                } catch (_: StrongBoxUnavailableException) {
+                    // StrongBox 缺席：回退 TEE 生成
+                }
+            }
+            generator.initialize(spec)
+            return generator.generateKeyPair()
+        } catch (e: Exception) {
+            debugLog?.warn(TAG, "解锁通行密钥生成/读取失败: ${e.javaClass.simpleName} - ${e.message}")
+            return null
         }
     }
 

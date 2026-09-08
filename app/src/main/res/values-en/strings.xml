@@ -39,6 +39,7 @@
     <string name="icon_custom_upload">Upload image</string>
     <string name="icon_invalid_not_png">The selected file is not a valid image</string>
     <string name="icon_too_large">Image too large; please choose one under 256 KB</string>
+    <string name="unlock_passkey_verify_failed">Quick unlock credential verification failed; unlock with master password and re-enroll</string>
     <string name="cd_hide_password">Hide password</string>
     <string name="cd_show_password">Show password</string>
     <string name="cd_toggle_password_visibility">Toggle password visibility</string>

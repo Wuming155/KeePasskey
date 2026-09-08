@@ -39,6 +39,7 @@
     <string name="icon_custom_upload">上传图片</string>
     <string name="icon_invalid_not_png">所选文件不是有效图片</string>
     <string name="icon_too_large">图片过大，请选择小于 256 KB 的图片</string>
+    <string name="unlock_passkey_verify_failed">快速解锁凭据校验未通过，请使用主密码解锁后重新登记</string>
     <string name="cd_hide_password">隐藏密码</string>
     <string name="cd_show_password">显示密码</string>
     <string name="cd_toggle_password_visibility">密码显示与隐藏</string>

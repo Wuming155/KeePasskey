@@ -11,6 +11,7 @@ import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.security.BiometricAuthManager
 import com.keepasskey.app.security.BiometricCredentialStorage
 import com.keepasskey.app.security.BiometricResult
+import com.keepasskey.app.security.UnlockPasskeyManager
 import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.core.result.KdbxResult
@@ -52,7 +53,9 @@ class UnlockViewModel @Inject constructor(
     private val biometricCredentialStorage: BiometricCredentialStorage?,
     private val debugLog: DebugLogBuffer,
     // TASK-21：非 Compose 层文案资源解析通道（生产 DI 注入真实现；单测注入假实现）
-    private val stringsProvider: StringsProvider? = null
+    private val stringsProvider: StringsProvider? = null,
+    // TASK-18：设备绑定解锁通行密钥（nullable 仅用于单测注入；生产 DI 恒注入真实实例）
+    private val unlockPasskeyManager: UnlockPasskeyManager? = null
 ) : ViewModel() {
 
     // P3-23：null 时回退空串实现（生产 Hilt 恒注入 StringsProviderModule 真实现）
@@ -316,9 +319,50 @@ class UnlockViewModel @Inject constructor(
 
         if (encrypted != null) {
             storage.saveEncryptedCredential(dbId, encrypted.first, encrypted.second)
+            // TASK-18：随快速解锁凭据登记设备绑定解锁通行密钥（best-effort，失败不影响本次解锁）
+            if (unlockPasskeyManager?.enroll(dbId) == false) {
+                debugLog.warn(TAG, "解锁通行密钥登记未成功，本次快速解锁回退为纯封印语义")
+            }
             _uiState.update { it.copy(isQuickUnlockAvailable = true) }
             debugLog.info(TAG, "生物识别凭据登记成功")
         }
+    }
+
+    /**
+     * 解锁通行密钥断言验证（TASK-18）。
+     *
+     * 已登记（含本次功能上线后新登记）：断言未通过一律 fail-closed——清除封印凭据与
+     * 通行密钥登记（视为凭据被克隆/篡改），引导用户以主密码完整解锁后重新登记。
+     * 兼容策略：本功能上线前登记的旧凭据无通行密钥记录——本次跳过断言（不破坏既有
+     * 用户）并后台补登记，下次解锁起强制断言。
+     */
+    private suspend fun verifyUnlockPasskeyOrCompat(
+        storage: BiometricCredentialStorage,
+        dbId: String
+    ): Boolean {
+        val passkeyManager = unlockPasskeyManager ?: return true
+        if (!passkeyManager.isEnrolled(dbId)) {
+            // 旧凭据兼容通道：后台补登记，下次解锁起强制断言
+            debugLog.warn(TAG, "旧快速解锁凭据无通行密钥记录，本次跳过断言并后台补登记")
+            passkeyManager.enroll(dbId)
+            return true
+        }
+        val assertion = passkeyManager.assertUnlock(dbId)
+        if (assertion == null || !passkeyManager.verifyAndCommit(dbId, assertion)) {
+            debugLog.warn(TAG, "解锁通行密钥断言未通过，fail-closed 拒绝快速解锁")
+            storage.clearCredential(dbId)
+            passkeyManager.clear(dbId)
+            _uiState.update {
+                it.copy(
+                    isLoading = false,
+                    isQuickUnlockAvailable = false,
+                    unlockMode = UnlockMode.STANDARD,
+                    errorMessage = UiMessage(R.string.unlock_passkey_verify_failed)
+                )
+            }
+            return false
+        }
+        return true
     }
 
     /**
@@ -402,6 +446,11 @@ class UnlockViewModel @Inject constructor(
                         viewModelScope.launch {
                             try {
                                 val decryptedBytes = cipher.doFinal(cred.second)
+                                // TASK-18：生物识别门控通过后，执行解锁通行密钥断言
+                                // （硬件私钥签名 + 公钥验证 + signCount 严格单调防克隆，fail-closed）
+                                if (!verifyUnlockPasskeyOrCompat(storage, dbId)) {
+                                    return@launch
+                                }
                                 // P1-13 整改：精确按 CharBuffer.remaining() 拷贝字符，杜绝后备数组尾零残留导致非 ASCII 主密码解锁失败
                                 val charBuf = Charsets.UTF_8.decode(ByteBuffer.wrap(decryptedBytes))
                                 val chars = CharArray(charBuf.remaining())
@@ -464,6 +513,7 @@ class UnlockViewModel @Inject constructor(
         } catch (e: KeyPermanentlyInvalidatedException) {
             // 系统指纹增删导致密钥作废：清空失效凭据与硬件密钥别名，提示用户使用主密码重新验证
             storage.clearCredential(dbId)
+            unlockPasskeyManager?.clear(dbId)
             authManager.deleteKeyForDatabase(dbId)
             _uiState.update {
                 it.copy(
