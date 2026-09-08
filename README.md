@@ -196,11 +196,11 @@ sync/                # 同步层：文件存储抽象 + WebDAV / S3 兼容实现
 | :--- | :--- | :--- | :--- |
 | **KeePassDX**（`KeePassDX-master`） | [Kunzisoft/KeePassDX](https://github.com/Kunzisoft/KeePassDX) | **GPL-3.0** | 同为原生 Android Kotlin 实现，模块划分最贴近；参考 `database` / `crypto` 领域模型、`DatabaseSession` 会话与 WebAuthn/Passkey 接入 |
 | **keepass2android**（`keepass2android-main`） | [PhilippC/keepass2android](https://github.com/PhilippC/keepass2android) | **GPL-3.0** | 云同步架构最成熟；参考 WebDAV / S3 抽象层、本地缓存、ETag 三方哈希冲突检测与 Quick Unlock |
-| **KeePass 官方（2.61.1）**（`KeePass-2.61.1-Source`） | 官方源码：[SourceForge](https://sourceforge.net/projects/keepass/) ／ GitHub 非官方镜像：[dlech/keepass2](https://github.com/dlech/keepass2) | **GPL-2.0** | `.kdbx` 格式的权威基准；仅在二进制 Header、XML 树结构歧义时作最终裁决 |
+| **KeePass 官方（2.61.1）**（`KeePass-2.61.1-Source`） | [SourceForge](https://sourceforge.net/projects/keepass/) | **GPL-2.0** | `.kdbx` 格式的权威基准；仅在二进制 Header、XML 树结构歧义时作最终裁决 |
 | **KeePassXC**（`keepassxc-develop`） | [keepassxreboot/keepassxc](https://github.com/keepassxreboot/keepassxc) | **GPL-2.0 或 GPL-3.0**（双许可） | `Merger` 条目级合并与墓碑复活规则 → `KdbxMerger`；`KPEX_PASSKEY_*` 属性 schema → `PasskeyData` |
 | **Monica**（`Monica-main`） | [Monica-Pass/Monica](https://github.com/Monica-Pass/Monica) | **GPL-3.0** | 辅助参考；现代 Material 3 + Compose 交互与本地优先（Local-first）同步思路 |
 
-> ⚠️ **许可证合规提示**：上述项目均基于 Copyleft 开源许可证（GPL-2.0 / GPL-3.0）。本项目代码**独立编写**，仅借鉴其架构与设计思路，**未复制任何源码**，因此不受其许可证传染条款约束。各功能的详细参考定位见 `docs/reference-projects.md`；5 个参考项目的深度架构分析文档集中于 `docs/references/`。
+各功能的详细参考定位见 `docs/reference-projects.md`；5 个参考项目的深度架构分析文档集中于 `docs/references/`。
 
 ---
 
@@ -209,5 +209,17 @@ sync/                # 同步层：文件存储抽象 + WebDAV / S3 兼容实现
 本项目以 **GNU General Public License v3.0（GPL-3.0）** 开源发布。完整许可证文本见仓库根目录的 [`LICENSE`](LICENSE) 文件。
 
 > **Copyleft 说明**：GPL-3.0 为强 Copyleft 许可证。任何基于本仓库源码的衍生作品（含修改后分发的版本）必须以相同许可证（GPL-3.0）开源，并保留版权与许可证声明。
->
-> 本仓库 `参考项目/` 目录下仅存放用于学习与架构借鉴的第三方源码快照，**未合入本项目源码**，不受其上手许可证的传染条款约束（详见 §6 合规提示）。
+
+---
+
+## 8. 致谢
+
+本项目受益于众多优秀的开源项目、规范与库的坚实基础，在此一并致谢：
+
+- **参考项目（架构与设计借鉴，详见 §6）**：[KeePassDX](https://github.com/Kunzisoft/KeePassDX)、[keepass2android](https://github.com/PhilippC/keepass2android)、[KeePass 官方](https://sourceforge.net/projects/keepass/)、[KeePassXC](https://github.com/keepassxreboot/keepassxc)、[Monica](https://github.com/Monica-Pass/Monica)。感谢它们作为开源实现的标杆，为 KDBX 格式、云同步与通行密钥落地提供了权威参照。
+- **密码学**：[BouncyCastle](https://www.bouncycastle.org/) 提供的 AES / Twofish / ChaCha20 与 Argon2 等算法实现。
+- **网络与同步**：[OkHttp](https://square.github.io/okhttp/)（TLS-only 网络栈）、自研 AWS SigV4 与 WebDAV 实现。
+- **平台与依赖注入**：AndroidX（Biometric、Autofill、Credential Manager）、[Jetpack Compose](https://developer.android.com/compose) 与 [Hilt](https://developer.android.com/training/dependency-injection/hilt-android)。
+- **KeePass 生态**：感谢 KeePass / KeePassXC 社区维护的 `.kdbx` 标准与 `KPEX_PASSKEY_*` 等属性规范，使跨客户端互通成为可能。
+
+本项目代码为独立编写，仅借鉴上述项目的架构与设计思路。
