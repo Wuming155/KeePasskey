@@ -10,7 +10,7 @@
 
 | 维度 | 数值 / 状态 | 官方依据与说明 |
 |---|---|---|
-| **Git HEAD** | `8133576` (main) | 阶段 6 批次 7 笔提交（TASK-03/04/05/06/07/15/16/17/18）+ 4 笔 README/LICENSE 文档提交；**已推送 `origin/main`（本地与远端 0 ahead / 0 behind）** |
+| **Git HEAD** | `5f03036` (main) | TASK-46 提交（`OtpEngine` TOTP 计算链路 ByteArray 化）；**已推送 `origin/main`（本地与远端 0 ahead / 0 behind）** |
 | **测试基线** | **470 个单元测试用例**（app 114 / core 32 / crypto 52 / database 155 / sync 117）：**458 通过、0 失败、12 跳过** | `./gradlew test` 全模块执行；跳过的 12 例为 `LiveSyncServersTest` 真实联调用例（需先起 `tools/local-sync` 服务并加 `-DliveSyncTest`） |
 | **构建状态** | `assembleDebug` + `assembleRelease` (R8) 全量通过 | **AGP 9.2.1 / Gradle 9.4.1** / Kotlin 2.4.10（经 buildscript classpath 锚定内置 KGP）/ Hilt 2.60.1 / **KSP 2.3.11** |
 | **系统基线** | **minSdk 36**, **compileSdk 37**, targetSdk 36 | 仅针对 Android 16+ 深度优化，固化无旧版垫片决策；compileSdk 37 随批次 H 升级（Compose BOM 2026.08.00 + M3 Expressive） |
@@ -117,6 +117,7 @@
 
 > 索引中出现的 `Wave N` / `阶段 N` 字样为对应历史提交的**原始主题**，属已冻结语境，仅供追溯；新提交请以 `TASK-xx` / `批次 X` + 提交哈希 引用，勿再使用 Wave / 阶段 编号。
 
+- `5f03036` (2026-09-08): TASK-46 `OtpEngine` TOTP 计算链路 ByteArray 化 + 用毕擦除（fail-clean）——计算入参改 ByteArray、解码借用语义固化、`computeTotpCode` finally 擦除；RFC 4226/6238/4648 官方向量回归 + 擦除断言入单测（470 例全绿）；STATUS/FINDINGS/AGENTS 同步回写
 - `8133576` (2026-09-08): docs README 参考项目说明更新（keepass2android 定位措辞）
 - `be0a11b` (2026-09-08): docs README 删除许可证合规提示冗余说明
 - `2f4d419` (2026-09-08): docs 发布准备——README 补 5 个参考项目 GitHub 地址与许可证，确立 GPL-3.0 并新增 LICENSE
