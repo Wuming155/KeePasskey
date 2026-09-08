@@ -8,17 +8,12 @@
 -dontnote **
 -dontwarn **
 
-# 2. Kotlin 标准库与协程
--keep class kotlin.** { *; }
--keep class kotlinx.coroutines.** { *; }
+# 2. Kotlin 标准库与协程 / AndroidX（TASK-38 收紧）
+#    kotlin-stdlib、kotlinx-coroutines、androidx.compose/lifecycle/navigation/biometric
+#    均自带 AAR consumer rules，R8 已自动应用；此前的整包 `-keep class ** { *; }`
+#    完全禁用了这些库的混淆与无用代码剥离，属过度保留，现全部移除交由官方规则接管。
 
-# 3. AndroidX 与 Material 3 / Compose
--keep class androidx.compose.** { *; }
--keep class androidx.biometric.** { *; }
--keep class androidx.lifecycle.** { *; }
--keep class androidx.navigation.** { *; }
-
-# 4. Hilt / Dagger 依赖注入
+# 3. Hilt / Dagger 依赖注入
 -keep class com.google.dagger.** { *; }
 -keep class dagger.** { *; }
 -keep class * extends dagger.hilt.internal.UnsafeCasts { *; }

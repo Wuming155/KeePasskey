@@ -50,6 +50,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -60,6 +61,9 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.keepasskey.app.R
@@ -107,36 +111,44 @@ fun UnlockScreen(
 
     // 修复虚假开关整改：真实 SAF 选择器——密钥文件字节立即读入内存交给 ViewModel，
     // 不做任何路径/文件名假填充；读取失败显式反馈，绝不静默忽略
+    // TASK-39 整改：SAF 流读取与 DISPLAY_NAME 查询均为阻塞 IO，移至 Dispatchers.IO
+    // 执行（原实现在主线程回调内同步读取，大文件/慢提供方会卡死 UI 线程）
+    val coroutineScope = rememberCoroutineScope()
     val keyFilePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
         if (uri == null) return@rememberLauncherForActivityResult
-        runCatching {
-            context.contentResolver.openInputStream(uri)?.use { input ->
-                val buffer = java.io.ByteArrayOutputStream()
-                val chunk = ByteArray(KEY_FILE_READ_CHUNK)
-                var total = 0
-                while (true) {
-                    val read = input.read(chunk)
-                    if (read < 0) break
-                    total += read
-                    check(total <= MAX_KEY_FILE_BYTES) { "密钥文件超出大小上限" }
-                    buffer.write(chunk, 0, read)
+        coroutineScope.launch {
+            val readResult = withContext(Dispatchers.IO) {
+                runCatching {
+                    val bytes = context.contentResolver.openInputStream(uri)?.use { input ->
+                        val buffer = java.io.ByteArrayOutputStream()
+                        val chunk = ByteArray(KEY_FILE_READ_CHUNK)
+                        var total = 0
+                        while (true) {
+                            val read = input.read(chunk)
+                            if (read < 0) break
+                            total += read
+                            check(total <= MAX_KEY_FILE_BYTES) { "密钥文件超出大小上限" }
+                            buffer.write(chunk, 0, read)
+                        }
+                        buffer.toByteArray()
+                    } ?: error("无法打开密钥文件流")
+                    bytes to queryKeyFileDisplayName(context, uri)
                 }
-                buffer.toByteArray()
-            } ?: error("无法打开密钥文件流")
-        }.fold(
-            onSuccess = { bytes ->
-                if (bytes.isEmpty()) {
-                    viewModel.onKeyFileReadFailed()
-                } else {
-                    val displayName = queryKeyFileDisplayName(context, uri)
-                    viewModel.onKeyFileSelected(bytes, displayName)
-                    bytes.fill(0)
-                }
-            },
-            onFailure = { viewModel.onKeyFileReadFailed() }
-        )
+            }
+            readResult.fold(
+                onSuccess = { (bytes, displayName) ->
+                    if (bytes.isEmpty()) {
+                        viewModel.onKeyFileReadFailed()
+                    } else {
+                        viewModel.onKeyFileSelected(bytes, displayName)
+                        bytes.fill(0)
+                    }
+                },
+                onFailure = { viewModel.onKeyFileReadFailed() }
+            )
+        }
     }
 
     UnlockContent(

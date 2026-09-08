@@ -23,6 +23,9 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = true
+            // TASK-38 整改：启用资源收缩——随 R8 移除未被引用的资源（图标/布局/字符串等），
+            // 与 minifyEnabled 协同进一步压缩 APK 体积并减少资源面攻击暴露
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

@@ -288,17 +288,10 @@
     <string name="conflict_resolved_msg">Conflict resolved, local and cloud merged successfully</string>
     <string name="unlock_error_empty_password">Enter master password to unlock</string>
     <string name="unlock_error_invalid_password">Incorrect master password or key mismatch</string>
-    <string name="unlock_error_pin_length">Please enter a 4-digit PIN</string>
-    <string name="unlock_error_pin_invalid">Incorrect PIN, QuickUnlock failed</string>
-    <string name="unlock_error_pin_locked">Too many attempts, QuickUnlock temporarily locked. Retry in about %1$d seconds</string>
-    <string name="unlock_error_quick_unavailable">QuickUnlock unavailable, please use the master password</string>
-    <string name="unlock_quick_pin_enrolled_hint">QuickUnlock PIN set. Unlock once with your master password to bind credentials</string>
     <string name="unlock_biometric_title">Biometric Unlock</string>
     <string name="unlock_biometric_subtitle">Verify your fingerprint or face to unlock</string>
-    <string name="unlock_biometric_negative">Use Master Password</string>
     <string name="unlock_biometric_enroll_title">Enable Biometric Unlock</string>
     <string name="unlock_biometric_enroll_subtitle">Verify your fingerprint or face to securely store the passwordless unlock credential</string>
-    <string name="unlock_biometric_enroll_negative">Not now</string>
     <string name="sec_biometric_auth_failed">Biometric authentication failed or was cancelled</string>
     <string name="sec_biometric_key_invalidated">Biometric credentials changed, security key invalidated. Please use master password.</string>
 <string name="edit_scan_totp_qr">Open camera to scan TOTP QR code</string>
@@ -314,13 +307,8 @@
     <!-- Unlock QuickUnlock -->
     <string name="unlock_quick_title">QuickUnlock Fast Unlock</string>
     <string name="unlock_quick_subtitle">Master key secured by hardware-backed KeyStore</string>
-    <string name="unlock_quick_cache_validity">Quick unlock credential cache valid for about %1$d minutes</string>
-    <string name="unlock_quick_pin_label">Enter quick PIN or short password</string>
-    <string name="unlock_quick_pin_placeholder">Enter your quick PIN to unlock</string>
-    <string name="unlock_quick_btn">Quick Unlock</string>
     <string name="unlock_readonly">Open read-only</string>
     <string name="unlock_readonly_desc">View only this session, all writes rejected</string>
-    <string name="unlock_biometric_btn">Biometrics</string>
     <string name="unlock_switch_to_full">Switch to full master password &amp; key file unlock</string>
     <string name="unlock_switch_back_quick">Switch back to QuickUnlock</string>
 
@@ -610,10 +598,6 @@
     <string name="sync_conflict_keep_local">Keep local</string>
     <string name="sync_conflict_keep_local_desc">Always keep the local version, cloud changes are overwritten</string>
     <string name="sync_section_network">Network security</string>
-    <string name="sync_accept_certs_title">Trust self-signed certificates</string>
-    <string name="sync_accept_certs_sub">Allow self-hosted servers with self-signed TLS certificates</string>
-    <string name="sync_cleartext_title">Allow HTTP cleartext</string>
-    <string name="sync_cleartext_sub">Allow unencrypted connections (not recommended, credentials may be intercepted)</string>
     <string name="sync_chunked_title">Chunked transfer</string>
     <string name="sync_chunked_sub">Upload and download large files in chunks, more stable on weak networks</string>
     <string name="sync_preload_title">Preload remote database</string>

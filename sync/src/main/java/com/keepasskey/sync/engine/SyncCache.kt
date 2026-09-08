@@ -137,12 +137,18 @@ open class SyncCache(private val cacheDir: File) {
     }
 
     /**
-     * 更新基准版本 `<hash>.baseversion` 与元数据 `<hash>.meta`。
+     * 更新基准版本 `<hash>.baseversion` 与元数据 `<hash>.meta`（TASK-37 整改：两文件合并原子写）。
+     *
+     * 此前两文件各自独立走「tmp -> fsync -> rename」，两写之间存在崩溃窗口：
+     * baseversion 已更新而 meta（etag/lastSyncMillis）仍是旧值，下一轮同步会以
+     * 过期 etag 发起 If-Match，制造本可避免的假冲突。
+     * 整改后：先把两份内容分别写入唯一 tmp 并 fsync（慢路径），随后背靠背执行两次
+     * 原子 rename（快路径，微秒级）——把不一致窗口从「两次完整写盘」压缩到
+     * 「两个原子 rename 之间」，且崩溃残留 tmp 由 [deleteOrphanTmpFiles] 通配清理。
+     * （跨多文件的完全原子性受 POSIX 限制不存在，此为工程上可达的最小窗口。）
      */
     fun updateBase(remotePath: String, baseVersion: String, etag: String? = null) {
         val baseFile = getFile(remotePath, SUFFIX_BASE_VERSION)
-        writeStringSafely(baseFile, baseVersion.trim())
-
         val oldState = getState(remotePath)
         val cleanEtagStr = cleanEtag(etag ?: oldState?.etag)
         val metaFile = getFile(remotePath, SUFFIX_META)
@@ -151,7 +157,19 @@ open class SyncCache(private val cacheDir: File) {
             append(KEY_ETAG).append('=').append(cleanEtagStr).append('\n')
             append(KEY_LAST_SYNC_MILLIS).append('=').append(System.currentTimeMillis()).append('\n')
         }
-        writeStringSafely(metaFile, metaContent)
+
+        val baseTmp = tmpFileFor(baseFile)
+        val metaTmp = tmpFileFor(metaFile)
+        try {
+            writeTmpSynced(baseTmp, baseVersion.trim().toByteArray(Charsets.UTF_8))
+            writeTmpSynced(metaTmp, metaContent.toByteArray(Charsets.UTF_8))
+            moveAtomically(baseTmp, baseFile)
+            moveAtomically(metaTmp, metaFile)
+        } finally {
+            // 任一步失败时清理未交付的 tmp（rename 成功后对应 tmp 已不存在，delete 幂等）
+            baseTmp.delete()
+            metaTmp.delete()
+        }
     }
 
     /**
@@ -260,12 +278,21 @@ open class SyncCache(private val cacheDir: File) {
 
     private fun writeStringSafely(targetFile: File, content: String) {
         val tmpFile = tmpFileFor(targetFile)
+        try {
+            writeTmpSynced(tmpFile, content.toByteArray(Charsets.UTF_8))
+            moveAtomically(tmpFile, targetFile)
+        } finally {
+            tmpFile.delete()
+        }
+    }
+
+    /** 写入 tmp 文件并 fsync 落盘（不含 rename 交付步骤，供多文件合并原子写复用） */
+    private fun writeTmpSynced(tmpFile: File, bytes: ByteArray) {
         FileOutputStream(tmpFile).use { fos ->
-            fos.write(content.toByteArray(Charsets.UTF_8))
+            fos.write(bytes)
             fos.flush()
             fos.fd.sync()
         }
-        moveAtomically(tmpFile, targetFile)
     }
 
     companion object {

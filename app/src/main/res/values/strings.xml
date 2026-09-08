@@ -287,6 +287,8 @@
     <string name="conflict_resolved_msg">冲突解决完毕，已完成本地与云端三方合并</string>
     <string name="unlock_error_empty_password">请输入主密码以解锁</string>
     <string name="unlock_error_invalid_password">主密码错误或密钥不匹配，解锁失败</string>
+    <!-- 既有构建债顺手整改：values-en 存在此条翻译但默认 locale 缺失，lintVitalRelease 因此 fail（阻塞 assembleRelease） -->
+    <string name="unlock_error_pin_length">请输入 4 位 PIN 码</string>
     <string name="unlock_biometric_title">生物识别解锁</string>
     <string name="unlock_biometric_subtitle">请验证指纹或面容以解锁密码库</string>
     <string name="unlock_biometric_enroll_title">启用生物识别解锁</string>
