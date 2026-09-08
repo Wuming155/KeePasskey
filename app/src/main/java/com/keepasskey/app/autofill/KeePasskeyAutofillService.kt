@@ -50,13 +50,19 @@ import javax.inject.Inject
  * 5. IME 内联建议（InlinePresentation）：请求侧声明 supportsInlineSuggestions 且 IME 支持
  *    v1 模板时，Dataset 携带官方 androidx.autofill.inline v1 内容 Slice 以内联形式呈现；
  * 6. 生命周期契约（官方：调用无状态、服务仅请求期间绑定）：cancellationSignal 取消即级联
- *    取消协程，onDestroy 取消全部在途任务，杜绝解绑后空转与迟到回调。
+ *    取消协程，onDestroy 取消全部在途任务，杜绝解绑后空转与迟到回调；
+ * 7. TASK-44 黑名单：命中黑名单的调用包名在填充前即 fail-closed 返回空响应，
+ *    不产出于解锁引导、数据集与 SaveInfo（语义上等价于未注册本填充服务）。
  */
 @AndroidEntryPoint
 class KeePasskeyAutofillService : AutofillService() {
 
     @Inject
     lateinit var vaultRepository: VaultRepository
+
+    // TASK-44：自动填充黑名单（命中即不下发任何数据集，fail-closed）
+    @Inject
+    lateinit var autofillBlocklistStore: com.keepasskey.app.data.repository.AutofillBlocklistStore
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
@@ -97,6 +103,15 @@ class KeePasskeyAutofillService : AutofillService() {
         }
 
         val callingPkg = structure.activityComponent.packageName
+
+        // TASK-44：黑名单命中即 fail-closed——不下发数据集（含解锁引导与 SaveInfo），
+        // 等价于「该应用从未注册过本填充服务」，不降级已有填充语义也不返回错误。
+        if (autofillBlocklistStore.isBlocked(callingPkg)) {
+            Log.i(TAG, "调用应用已列入自动填充黑名单，拒绝下发数据集: $callingPkg")
+            callback.onSuccess(null)
+            return
+        }
+
         val parsedNodes = mutableListOf<ParsedViewNode>()
         val scanNodes = mutableListOf<ScanNode>()
 

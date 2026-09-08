@@ -14,6 +14,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Star
@@ -102,6 +103,7 @@ fun EntryDetailScreen(
         onEditClick = { uiState.entry?.let { onEditClick(it.id) } },
         onToggleFavorite = viewModel::toggleFavorite,
         onDuplicateEntry = viewModel::duplicateEntry,
+        onToggleAutofillBlock = viewModel::toggleAutofillBlockForApp,
         onTogglePasswordVisibility = viewModel::togglePasswordVisibility,
         onToggleCustomFieldVisibility = viewModel::toggleCustomFieldVisibility,
         onCopyCustomField = viewModel::copyCustomField,
@@ -132,6 +134,8 @@ fun EntryDetailContent(
     onEditClick: () -> Unit,
     onToggleFavorite: () -> Unit,
     onDuplicateEntry: () -> Unit = {},
+    // TASK-44：「为本应用禁用自动填充」开关（仅绑定了 Android 应用的条目呈现）
+    onToggleAutofillBlock: () -> Unit = {},
     onTogglePasswordVisibility: () -> Unit,
     onToggleCustomFieldVisibility: (String) -> Unit,
     onCopyCustomField: (String, String) -> Unit = { _, _ -> },
@@ -180,6 +184,21 @@ fun EntryDetailContent(
                                 imageVector = Icons.Default.ContentCopy,
                                 contentDescription = stringResource(R.string.cd_duplicate),
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                    // TASK-44：为本应用禁用自动填充（仅条目绑定了 Android 应用时呈现；
+                    // 未绑定应用的条目无明确屏蔽对象，入口不出现，避免成为无意义开关）
+                    if (uiState.autofillBoundPackage != null) {
+                        IconButton(onClick = onToggleAutofillBlock) {
+                            Icon(
+                                imageVector = Icons.Default.Block,
+                                contentDescription = stringResource(R.string.cd_autofill_block),
+                                tint = if (uiState.isAutofillBlockedForApp) {
+                                    MaterialTheme.colorScheme.error
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                }
                             )
                         }
                     }

@@ -43,6 +43,8 @@ class SettingsViewModel @Inject constructor(
     private val extendedSettingsStore: com.keepasskey.app.data.repository.ExtendedSettingsStore,
     // TASK-08 整改：周期后台同步调度器（设置变更即时生效）
     private val periodicSyncScheduler: com.keepasskey.app.sync.PeriodicSyncScheduler,
+    // TASK-44 整改：自动填充黑名单（真实包名条目，替代无写入方的禁用计数）
+    private val autofillBlocklistStore: com.keepasskey.app.data.repository.AutofillBlocklistStore,
     // 允许为 null 仅用于单测注入；生产 DI 注入 @ApplicationContext
     @ApplicationContext private val appContext: Context? = null,
     // TASK-21：非 Compose 层文案资源解析通道（生产经 appContext 转发；单测注入假实现）
@@ -215,7 +217,6 @@ class SettingsViewModel @Inject constructor(
             autofillShowTotpNotification = extState.autofillShowTotpNotification,
             skipDalVerification = extState.skipDalVerification,
             overrideNoAutofill = extState.overrideNoAutofill,
-            disabledAutofillQueriesCount = extState.disabledAutofillQueriesCount,
 
             // 4. 设备解锁与安全 (指纹识别与锁定规则)
             biometricEnabled = userSettings.biometricEnabled,
@@ -603,6 +604,24 @@ class SettingsViewModel @Inject constructor(
     fun setOverrideNoAutofill(enabled: Boolean) {
         updateExtended { it.copy(overrideNoAutofill = enabled) }
     }
+
+    // ========== TASK-44：自动填充黑名单（真实条目生命周期） ==========
+
+    /**
+     * 自动填充黑名单快照（按包名升序）。黑名单不进 [uiState] 的 combine 链——
+     * 其更新频率与生命周期独立于设置项，单独下发可避免 5 流 combine 的元组膨胀。
+     */
+    val autofillBlockedPackages: StateFlow<List<String>> = autofillBlocklistStore.blockedPackages
+
+    /**
+     * 将应用加入黑名单。
+     * @return true=新增成功；false=包名非法或已在黑名单中（调用方据此如实提示，不谎报成功）
+     */
+    fun blockAutofillPackage(packageName: String): Boolean = autofillBlocklistStore.add(packageName)
+
+    /** 将应用移出黑名单（删除动作）。@return true=移除成功；false=包名非法或本就不在黑名单中 */
+    fun unblockAutofillPackage(packageName: String): Boolean =
+        autofillBlocklistStore.remove(packageName)
 
     // ========== KP2A 扩展：显示与外观交互 ==========
     fun setMaskPasswordsDefault(enabled: Boolean) {

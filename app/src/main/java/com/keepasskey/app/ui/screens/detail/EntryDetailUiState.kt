@@ -32,5 +32,10 @@ data class EntryDetailUiState(
     // 真实熵由详情页 ViewModel 在用户显式查看密码时按需估算下发）
     val passwordStrengthBits: Int? = null,
     // 复制密码提示消息（按设置中的剪贴板超时时长动态生成，避免写死时长）
-    val passwordCopyMessage: UiMessage = UiMessage(R.string.detail_password_copied_no_clear)
+    val passwordCopyMessage: UiMessage = UiMessage(R.string.detail_password_copied_no_clear),
+    // TASK-44：本条目绑定的 Android 应用包名（自 URL 的 android:// 绑定解析）。
+    // null=条目未绑定具体应用（如纯 Web 凭据），此时详情页不提供「为本应用禁用填充」入口
+    val autofillBoundPackage: String? = null,
+    // TASK-44：该绑定应用是否已列入自动填充黑名单（fill-closed 判定的 UI 回显）
+    val isAutofillBlockedForApp: Boolean = false
 )

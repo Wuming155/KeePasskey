@@ -107,6 +107,8 @@ class HealthCheckViewModelTest {
         val viewModel = SettingsViewModel(
             FakeSettingsRepository(), testRepo, credentialsStore, coordinator,
             com.keepasskey.app.data.logger.DebugLogBuffer(), extendedStore, periodicScheduler,
+            // TASK-44：自动填充黑名单仓库（无持久化层的内存语义）
+            com.keepasskey.app.data.repository.AutofillBlocklistStore(null),
             stringsProvider = fakeStrings
         )
         val job = backgroundScope.launch(kotlinx.coroutines.test.UnconfinedTestDispatcher(testScheduler)) {

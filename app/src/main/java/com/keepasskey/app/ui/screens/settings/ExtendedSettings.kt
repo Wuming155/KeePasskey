@@ -38,7 +38,8 @@ data class ExtendedSettings(
     val autofillShowTotpNotification: Boolean = false,
     val skipDalVerification: Boolean = false,
     val overrideNoAutofill: Boolean = false,
-    val disabledAutofillQueriesCount: Int = 0,
+    // 自动填充黑名单已由 AutofillBlocklistStore 承载（TASK-44）：
+    // 原 disabledAutofillQueriesCount 计数无任何写入方，随本次整改一并下架
 
     // 显示与视觉进阶
     val maskPasswordsDefault: Boolean = true,

@@ -414,6 +414,8 @@ fun KeePasskeyApp() {
                 composable(Screen.SettingsAutofill.route) {
                     val settingsViewModel: SettingsViewModel = hiltViewModel()
                     val settingsState by settingsViewModel.uiState.collectAsStateWithLifecycle()
+                    // TASK-44：黑名单独立通道（不进 settingsState 的 5 流 combine）
+                    val blockedPackages by settingsViewModel.autofillBlockedPackages.collectAsStateWithLifecycle()
                     AutofillSettingsScreen(
                         uiState = settingsState,
                         onBackClick = { navController.popBackStack() },
@@ -427,7 +429,10 @@ fun KeePasskeyApp() {
                         onAutofillCopyTotpToggle = settingsViewModel::setAutofillCopyTotp,
                         onAutofillShowTotpNotificationToggle = settingsViewModel::setAutofillShowTotpNotification,
                         onSkipDalVerificationToggle = settingsViewModel::setSkipDalVerification,
-                        onOverrideNoAutofillToggle = settingsViewModel::setOverrideNoAutofill
+                        onOverrideNoAutofillToggle = settingsViewModel::setOverrideNoAutofill,
+                        blockedPackages = blockedPackages,
+                        onBlockAutofillPackage = settingsViewModel::blockAutofillPackage,
+                        onUnblockAutofillPackage = settingsViewModel::unblockAutofillPackage
                     )
                 }
 

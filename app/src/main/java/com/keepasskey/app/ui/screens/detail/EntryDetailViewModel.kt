@@ -8,6 +8,7 @@ import androidx.lifecycle.viewModelScope
 import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.SettingsRepository
 import com.keepasskey.app.data.repository.VaultRepository
+import com.keepasskey.app.passkey.DomainMatcher
 import com.keepasskey.app.ui.model.UiAttachment
 import com.keepasskey.app.ui.model.UiEntryRevision
 import com.keepasskey.app.ui.model.StringsProvider
@@ -41,6 +42,8 @@ class EntryDetailViewModel @Inject constructor(
     private val vaultRepository: VaultRepository,
     private val settingsRepository: SettingsRepository,
     private val clipboardSecurityManager: com.keepasskey.app.security.ClipboardSecurityManager? = null,
+    // TASK-44：自动填充黑名单仓库（详情页「为本应用禁用自动填充」入口的写入方）
+    private val autofillBlocklistStore: com.keepasskey.app.data.repository.AutofillBlocklistStore,
     // TASK-21：非 Compose 层文案资源解析通道（生产 DI 注入真实现；单测注入假实现）
     private val stringsProvider: StringsProvider? = null
 ) : ViewModel() {
@@ -131,6 +134,15 @@ class EntryDetailViewModel @Inject constructor(
                 passwordStrengthBits = extras.strengthBits,
                 isReadOnly = vaultRepository.isSessionReadOnly(),
                 passwordCopyMessage = buildPasswordCopyMessage(settings.clipboardTimeoutSeconds)
+            )
+        }
+        // TASK-44：黑名单状态叠加——条目绑定的应用包名 + 该包名当前是否被屏蔽
+        .combine(autofillBlocklistStore.blockedPackages) { state, blockedPackages ->
+            val boundPackage = state.entry?.url
+                ?.let { DomainMatcher.extractAndroidBoundPackage(it) }
+            state.copy(
+                autofillBoundPackage = boundPackage,
+                isAutofillBlockedForApp = boundPackage != null && blockedPackages.contains(boundPackage)
             )
         }
         .stateIn(
@@ -225,6 +237,29 @@ class EntryDetailViewModel @Inject constructor(
                 is com.keepasskey.core.result.KdbxResult.Failure ->
                     userMessageFlow.value = UiMessage(R.string.edit_save_failed, listOf(result.message))
             }
+        }
+    }
+
+    /**
+     * TASK-44：切换「为本应用禁用自动填充」——写入/移出自动填充黑名单。
+     *
+     * 仅当条目 URL 携带 `android://<包名>` 绑定（即凭据确有明确归属应用）时可用；
+     * 未绑定应用的条目（如纯 Web 凭据）本入口不呈现，调用亦为 no-op。
+     * 结果经 [userMessageFlow] 如实告知用户（屏蔽 / 恢复），不做乐观谎报。
+     */
+    fun toggleAutofillBlockForApp() {
+        val packageName = uiState.value.autofillBoundPackage ?: return
+        val nowBlocked = if (autofillBlocklistStore.isBlocked(packageName)) {
+            autofillBlocklistStore.remove(packageName)
+            false
+        } else {
+            autofillBlocklistStore.add(packageName)
+            true
+        }
+        userMessageFlow.value = if (nowBlocked) {
+            UiMessage(R.string.detail_autofill_blocked, listOf(packageName))
+        } else {
+            UiMessage(R.string.detail_autofill_unblocked, listOf(packageName))
         }
     }
 

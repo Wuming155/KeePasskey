@@ -732,7 +732,13 @@
     <string name="autofill_blacklist_count">已屏蔽 %1$d 个应用</string>
     <string name="autofill_blacklist_empty">暂无屏蔽的应用</string>
     <string name="autofill_blacklist_dialog_title">管理自动填充黑名单</string>
-    <string name="autofill_blacklist_dialog_desc">黑名单中的应用不会弹出自动填充建议，适合银行等高安全场景</string>
+    <string name="autofill_blacklist_dialog_desc">黑名单中的应用不会收到任何自动填充建议（系统自动填充与 Credential Manager 双通道同时生效），适合银行等高安全场景</string>
+    <string name="autofill_blacklist_add_hint">应用包名（如 com.example.bank）</string>
+    <string name="autofill_blacklist_add_invalid">包名无效或已在黑名单中</string>
+    <string name="autofill_blacklist_delete_cd">从黑名单移除</string>
+    <string name="cd_autofill_block">为本应用禁用自动填充</string>
+    <string name="detail_autofill_blocked">已为 %1$s 禁用自动填充</string>
+    <string name="detail_autofill_unblocked">已恢复 %1$s 的自动填充</string>
 
     <!-- ===== 开发者调试子页 (DebugSettingsScreen) ===== -->
     <string name="debug_section_options">诊断选项</string>

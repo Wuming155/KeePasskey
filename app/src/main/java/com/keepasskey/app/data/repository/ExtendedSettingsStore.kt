@@ -84,9 +84,8 @@ class ExtendedSettingsStore @Inject constructor(
             ),
             skipDalVerification = p.getBoolean(K_SKIP_DAL_VERIFICATION, defaults.skipDalVerification),
             overrideNoAutofill = p.getBoolean(K_OVERRIDE_NO_AUTOFILL, defaults.overrideNoAutofill),
-            disabledAutofillQueriesCount = p.getInt(
-                K_DISABLED_AUTOFILL_QUERIES_COUNT, defaults.disabledAutofillQueriesCount
-            ),
+            // TASK-44：自动填充黑名单改由 AutofillBlocklistStore 持久化真实包名条目，
+            // 原 disabledAutofillQueriesCount（无写入方计数）及其持久化键一并下架
 
             // 显示与视觉进阶
             maskPasswordsDefault = p.getBoolean(K_MASK_PASSWORDS_DEFAULT, defaults.maskPasswordsDefault),
@@ -148,7 +147,6 @@ class ExtendedSettingsStore @Inject constructor(
             .putBoolean(K_AUTOFILL_SHOW_TOTP_NOTIFICATION, settings.autofillShowTotpNotification)
             .putBoolean(K_SKIP_DAL_VERIFICATION, settings.skipDalVerification)
             .putBoolean(K_OVERRIDE_NO_AUTOFILL, settings.overrideNoAutofill)
-            .putInt(K_DISABLED_AUTOFILL_QUERIES_COUNT, settings.disabledAutofillQueriesCount)
             .putBoolean(K_MASK_PASSWORDS_DEFAULT, settings.maskPasswordsDefault)
             .putBoolean(K_MASK_TOTP_DEFAULT, settings.maskTotpDefault)
             .putBoolean(K_SHOW_UNLOCKED_NOTIFICATION, settings.showUnlockedNotification)
@@ -203,7 +201,6 @@ class ExtendedSettingsStore @Inject constructor(
         const val K_AUTOFILL_SHOW_TOTP_NOTIFICATION = "autofill_show_totp_notification"
         const val K_SKIP_DAL_VERIFICATION = "skip_dal_verification"
         const val K_OVERRIDE_NO_AUTOFILL = "override_no_autofill"
-        const val K_DISABLED_AUTOFILL_QUERIES_COUNT = "disabled_autofill_queries_count"
         const val K_MASK_PASSWORDS_DEFAULT = "mask_passwords_default"
         const val K_MASK_TOTP_DEFAULT = "mask_totp_default"
         const val K_SHOW_UNLOCKED_NOTIFICATION = "show_unlocked_notification"

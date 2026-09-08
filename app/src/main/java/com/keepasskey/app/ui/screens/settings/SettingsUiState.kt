@@ -130,7 +130,9 @@ data class SettingsUiState(
     val autofillShowTotpNotification: Boolean = false, // KP2A: 填充后在通知栏显示 TOTP 验证码
     val skipDalVerification: Boolean = false, // KP2A: 跳过数字资产链接 (DAL) 校验（预留功能，见 STATUS TASK-43）
     val overrideNoAutofill: Boolean = false, // KP2A: 强制忽略应用的禁止自动填充标记
-    val disabledAutofillQueriesCount: Int = 0, // KP2A: 已禁用的自动填充黑名单数量
+    // 自动填充黑名单（TASK-44）：改为真实包名条目，由 AutofillBlocklistStore 经独立
+    // StateFlow 下发（SettingsViewModel.autofillBlockedPackages）；原无写入方的
+    // disabledAutofillQueriesCount 计数已下架
 
     // 4. 设备解锁与安全策略 (Device Unlock & Security) - 生物识别与锁定策略
     val biometricEnabled: Boolean = true, // 生物识别 / 指纹验证

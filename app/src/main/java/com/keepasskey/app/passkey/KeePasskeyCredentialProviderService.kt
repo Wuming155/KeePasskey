@@ -57,7 +57,9 @@ import javax.inject.Inject
  *      系统 Credential Manager 随即继续呈现凭据候选——一次解锁直达填充；
  *    - 严格域名隔离：采用严格标签边界判定，杜绝跨域钓鱼；
  * 2. onBeginCreateCredentialRequest: 响应新凭据创建请求，引导至独立的 Passkey 注册或密码保存流程；
- * 3. onClearCredentialStateRequest: 响应凭据状态清理。
+ * 3. onClearCredentialStateRequest: 响应凭据状态清理；
+ * 4. TASK-44 黑名单：命中黑名单的调用包名在查询前即 fail-closed 返回空响应（不产出解锁
+ *    Action 与任何凭据候选），与传统 Autofill 服务共用同一份黑名单。
  */
 @AndroidEntryPoint
 class KeePasskeyCredentialProviderService : CredentialProviderService() {
@@ -70,6 +72,10 @@ class KeePasskeyCredentialProviderService : CredentialProviderService() {
 
     @Inject
     lateinit var responseAssembler: CredentialResponseAssembler
+
+    // TASK-44：自动填充黑名单（命中即不返回任何凭据候选，fail-closed）
+    @Inject
+    lateinit var autofillBlocklistStore: com.keepasskey.app.data.repository.AutofillBlocklistStore
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
@@ -108,6 +114,16 @@ class KeePasskeyCredentialProviderService : CredentialProviderService() {
 
     private suspend fun buildBeginGetResponse(request: BeginGetCredentialRequest): BeginGetCredentialResponse {
         val responseBuilder = BeginGetCredentialResponse.Builder()
+
+        // 0. TASK-44 黑名单：命中即 fail-closed 返回空响应（不产出解锁引导，也不产出凭据候选）。
+        //    Android 16+ 上 Credential Manager 是主通道，仅屏蔽传统 Autofill 服务等于形同虚设，
+        //    故双通道统一消费同一黑名单。浏览器以自身包名发起请求，屏蔽浏览器即屏蔽其承载的
+        //    全部站点填充——此为「按应用屏蔽」语义的固有结果（KDoc 与 STATUS §6 已注明）。
+        val callingPackage = request.callingAppInfo?.packageName.orEmpty()
+        if (autofillBlocklistStore.isBlocked(callingPackage)) {
+            Log.i(TAG, "调用应用已列入自动填充黑名单，拒绝返回凭据候选: $callingPackage")
+            return responseBuilder.build()
+        }
 
         // 1. 密码库处于锁定状态：输出解锁 Action，链式引导至 CredentialUnlockActivity
         //    （解锁成功后由该 Activity 直接回传凭据候选，系统随即继续呈现，无需用户二次发起）

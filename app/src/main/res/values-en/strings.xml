@@ -730,7 +730,13 @@
     <string name="autofill_blacklist_count">%1$d apps blocked</string>
     <string name="autofill_blacklist_empty">No apps blocked</string>
     <string name="autofill_blacklist_dialog_title">Manage autofill blacklist</string>
-    <string name="autofill_blacklist_dialog_desc">Blacklisted apps never receive autofill suggestions, ideal for banking and other high-security scenarios</string>
+    <string name="autofill_blacklist_dialog_desc">Blacklisted apps receive no autofill suggestions on either channel (system autofill and Credential Manager), ideal for banking and other high-security scenarios</string>
+    <string name="autofill_blacklist_add_hint">App package name (e.g. com.example.bank)</string>
+    <string name="autofill_blacklist_add_invalid">Invalid package name or already blacklisted</string>
+    <string name="autofill_blacklist_delete_cd">Remove from blacklist</string>
+    <string name="cd_autofill_block">Disable autofill for this app</string>
+    <string name="detail_autofill_blocked">Autofill disabled for %1$s</string>
+    <string name="detail_autofill_unblocked">Autofill re-enabled for %1$s</string>
 
     <!-- ===== Developer diagnostics subscreen ===== -->
     <string name="debug_section_options">Diagnostics</string>
