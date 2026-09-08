@@ -3,7 +3,8 @@ package com.keepasskey.app.ui.theme
 import android.app.Activity
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MaterialExpressiveTheme
+import androidx.compose.material3.MotionScheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.runtime.Composable
@@ -131,10 +132,13 @@ fun KeePasskeyTheme(
         LocalThemePalette provides themePalette,
         LocalSecurityColors provides securityColors
     ) {
-        MaterialTheme(
+        // TASK-07：Material 3 Expressive——Expressive 主题承载官方弹性动效（MotionScheme），
+        // 形状/排版在 Expressive 语义下渲染；品牌 ColorScheme/typography/shapes 定制保持不变
+        MaterialExpressiveTheme(
             colorScheme = finalColorScheme,
             typography = Typography,
             shapes = Shapes,
+            motionScheme = MotionScheme.expressive(),
             content = content
         )
     }

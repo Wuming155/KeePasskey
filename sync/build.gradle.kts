@@ -4,7 +4,7 @@ plugins {
 
 android {
     namespace = "com.keepasskey.sync"
-    compileSdk = 36
+    compileSdk = 37
     defaultConfig { minSdk = 36 }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

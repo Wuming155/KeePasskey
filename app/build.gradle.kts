@@ -7,7 +7,7 @@ plugins {
 
 android {
     namespace = "com.keepasskey.app"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.keepasskey"
@@ -49,21 +49,21 @@ dependencies {
     implementation(project(":database"))
     implementation(project(":sync"))
 
-    // P2 整改：core-ktx 升级到「compileSdk 36 下可用的最高官方稳定版」1.17.0。
-    // 官方 release notes 明示：1.18.0 起 compileSdk 由 API 36 改为 API 36.1，1.19.0 更要求 API 37，
-    // 而本项目受 Compose BOM 2026.06.01 约束必须停留在 compileSdk 36（AGP 9.1.0 上限亦为 36），
-    // 故 1.17.0 是当前版本矩阵下的天花板，不可再升。
-    // ContextCompat.RECEIVER_NOT_EXPORTED 自 1.9.0 起可用，本次即为该 API 引入。
+    // TASK-07 整改：compileSdk 37 就位后 core-ktx 升至 1.19.0（1.19.0 起要求 API 37）
     implementation(libs.androidx.core.ktx)
 
     // Compose 物料清单：统一管理所有 androidx.compose.* 版本，与 Kotlin 2.4.10 的 Compose 编译器对齐。
-    // 使用 2026.06.01（Compose 1.11.x，要求 compileSdk ≤ 36）；最新 2026.08.00(1.12.x) 要求 compileSdk 37（TASK-07 升级项）
+    // TASK-07 整改：2026.08.00（Compose 1.12.x + Material 3 Expressive）要求 compileSdk 37
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.ui)
     implementation(libs.compose.ui.graphics)
     implementation(libs.compose.ui.tooling.preview)
     implementation(libs.compose.foundation)
     implementation(libs.compose.material3)
+    // TASK-07：material3 1.5.0-alpha27 显式覆盖 BOM 映射——M3 Expressive 公开 API
+    // （MaterialExpressiveTheme/MotionScheme）在 1.4.0 stable 中仍为 internal，
+    // 1.5.0 stable 毕业后可移除本行回归 BOM 托管
+    implementation(libs.compose.material3.alpha)
     implementation(libs.compose.material.icons.extended)
 
     implementation(libs.lifecycle.runtime.ktx)

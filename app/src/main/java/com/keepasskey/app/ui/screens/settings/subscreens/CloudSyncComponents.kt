@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.VpnKey
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuAnchorType
@@ -153,9 +154,12 @@ internal fun ProviderSelectionSection(
                     .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
             )
 
-            ExposedDropdownMenu(
+            // TASK-07：material3 1.5.0 起 ExposedDropdownMenu 由实验性新签名取代，
+            // 经 DropdownMenu + exposedDropdownSize() 保持等价的锚定尺寸行为
+            DropdownMenu(
                 expanded = expanded,
-                onDismissRequest = { onExpandedChange(false) }
+                onDismissRequest = { onExpandedChange(false) },
+                modifier = Modifier.exposedDropdownSize()
             ) {
                 CloudSyncProvider.entries.forEach { provider ->
                     DropdownMenuItem(
