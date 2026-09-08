@@ -79,13 +79,18 @@ class AuthenticatorViewModel @Inject constructor(
             val snapshot = vaultRepository.calculateEntryTotp(entry.id)
             val period = snapshot?.periodSeconds ?: entry.totpPeriod
             val remaining = OtpEngine.getRemainingSeconds(periodSeconds = period)
-            val raw = snapshot?.code ?: entry.totpCode ?: "000000"
 
-            val formatted = when (raw.length) {
-                6 -> "${raw.substring(0, 3)} ${raw.substring(3)}"
-                8 -> "${raw.substring(0, 4)} ${raw.substring(4)}"
-                else -> raw
-            }
+            // TASK-33 整改：快照缺失（种子缺失/解析失败/计算异常）时不再回退假码 "000000"，
+            // 改为下发 null + 占位符 "------"，UI 端禁用复制——假码会诱导用户复制无效第二因子
+            val raw = snapshot?.code
+
+            val formatted = raw?.let {
+                when (it.length) {
+                    6 -> "${it.substring(0, 3)} ${it.substring(3)}"
+                    8 -> "${it.substring(0, 4)} ${it.substring(4)}"
+                    else -> it
+                }
+            } ?: "------"
 
             TotpCardItem(
                 entryId = entry.id,

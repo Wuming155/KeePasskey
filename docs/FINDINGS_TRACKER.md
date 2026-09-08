@@ -111,9 +111,9 @@
 | **P3-22** | 7 个 Kotlin 文件超过 800 行 | ⚠️ 部分修复 | `RealVaultRepository` (1184行)、`SettingsViewModel` (1119行) 等 7 个文件超 800 行 | 低 | 巨型类整改为渐进项，当前保留 |
 | **P3-23** | 约 250 处硬编码中文未抽离至 strings.xml | ❌ 未修复 | `SettingsViewModel.kt` 等 29 个文件中仍残存约 250 处硬编码中文 | 低（i18n） | 硬编码中文影响国际化；渐进整改即可 |
 | **P3-24** | SettingsUiState 默认值为演示数据 | ❌ 未修复 | `SettingsUiState.kt:63` databasePath 等仍为预置演示路径 | 低 | `databasePath` 默认演示路径，真实数据加载后覆盖；仅初始默认值问题 |
-| **P3-25** | 收藏功能不落库（仅翻转内存 Flow） | ❌ 未修复 | `EntryDetailViewModel.kt:195` toggleFavorite 未调用 Repository 保存 | 中（功能） | `toggleFavorite` 仅翻转内存 `isFavoriteFlow`，未调 Repository 落库，收藏重启即失效 |
+| **P3-25** | 收藏功能不落库（仅翻转内存 Flow） | ✅ 已修复（2026-09-08） | `VaultRepository.setEntryFavorite` 新契约；`RealVaultRepository` 持久化至 KDBX `customData["KeePasskey.Favorite"]`；`toggleFavorite` 调仓库保存且失败如实上浮；收藏随投影 `isFavorite` 下发 | 中（功能） | 收藏重启不再丢失 |
 | **P3-26** | EntryCategory 与银行卡字段为死代码 | ❌ 未修复 | `RealVaultRepository.kt:723` mapKdbxEntryToUi 未映射 category 且未处理卡字段 | 低-中（功能） | `mapKdbxEntryToUi` 不映射 `category`（恒 LOGIN）也不处理银行卡字段，`UiVaultEntry` 卡字段恒为 null，银行卡条目被当普通登录展示 |
-| **P3-27** | 空 onClick 按钮与写死黑名单 | ❌ 未修复 | `AutofillSettingsScreen.kt:343` 按钮回调为空且黑名单写死 | 中（功能） | 黑名单项为写死列表，删除 `IconButton(onClick = { })` 为空回调，黑名单管理是假功能 |
+| **P3-27** | 空 onClick 按钮与写死黑名单 | ✅ 已修复（2026-09-08） | `AutofillSettingsScreen` 黑名单对话框移除写死示例条目与空 onClick 删除按钮，改诚实展示真实计数/空态；孤儿字符串（中英 4 条）清理；完整生命周期登记 TASK-44 | 中（功能） | 沿 TASK-12/13 诚实化裁定先例；假功能不再回显 |
 | **P3-28** | 带有仅含注释的空 if 块 | ❌ 未修复 | `PasskeyCreateActivity.kt:61` 存在空 if 块 | 极低 | `if (origin.isBlank()) { /* 仅注释 */ }` 空 if 块，清理即可 |
 | **P3-29** | 从 Context 强转 MainActivity 获取单例 | ❌ 未修复 | `KeePasskeyApp.kt:149` 存在 `(context as? MainActivity)?.autoLockManager` 强转 | 不急（描述有误） | 实测为 `(context as? MainActivity)?.autoLockManager`——是**安全转换 `as?` 而非强转**，对 null 已优雅处理，风险很低；原结论"强转"不准确 |
 | **P3-30** | 熄屏自动锁在 Activity onDestroy 时销毁单例 | ❌ 未修复 → ✅ 已修复（2026-09-07，TASK-22） | `MainActivity.kt:48` onDestroy 中误调了单例 `autoLockManager.destroy()` | 高（真实 Bug） | 已整改：移除 `MainActivity.onDestroy` 的 `destroy()` 调用与空覆写，并清理 `AutoLockManager.destroy()` 死代码；单例生命周期与进程对齐，`initialize()` 幂等，旋转重建不再销毁调度器 |

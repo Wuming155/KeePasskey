@@ -28,6 +28,9 @@ data class EntryDetailUiState(
     val totpRemainingSeconds: Int? = null,
     // 断点6 整改：周期翻转时按需重算的实时验证码（null=沿用投影值）
     val liveTotpCode: String? = null,
+    // TASK-32 整改：真实熵估算的密码强度位数（null=未计算/无密码，投影层不解密密码，
+    // 真实熵由详情页 ViewModel 在用户显式查看密码时按需估算下发）
+    val passwordStrengthBits: Int? = null,
     // 复制密码提示消息（按设置中的剪贴板超时时长动态生成，避免写死时长）
     val passwordCopyMessage: UiMessage = UiMessage(R.string.detail_password_copied_no_clear)
 )

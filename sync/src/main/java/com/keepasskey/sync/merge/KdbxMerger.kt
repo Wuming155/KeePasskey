@@ -523,6 +523,31 @@ object KdbxMerger {
     }
 
     /**
+     * 字段级冲突解决（TASK-30 整改）：按字段粒度应用用户决策——以本地条目为底版，
+     * 用户选择「云端」的字段用远端值覆写，其余字段保留本地值。
+     *
+     * 合并条目保留本地 UUID（同一冲突条目的就地裁决）；任一字段采用远端值时
+     * lastModificationTime 刷新为当前时刻（产物相对两侧均有变化，需触发他端再次合并）。
+     * [fieldChoices] 键为 KDBX 标准字段键（KdbxConstants.Fields.*）；密码等敏感字段
+     * 以 ProtectedString 整体移交，全程不物化明文。
+     */
+    fun resolveConflictByFields(
+        pair: ConflictedEntryPair,
+        fieldChoices: Map<String, ConflictResolutionChoice>
+    ): KdbxEntry {
+        var merged = pair.localEntry
+        var adoptedRemote = false
+        for ((fieldKey, choice) in fieldChoices) {
+            if (choice != ConflictResolutionChoice.KEEP_REMOTE) continue
+            val remoteValue = pair.remoteEntry.fields[fieldKey] ?: continue
+            merged = merged.withField(fieldKey, remoteValue)
+            adoptedRemote = true
+        }
+        if (!adoptedRemote) return merged
+        return merged.copy(times = merged.times.copy(lastModificationTime = Instant.now()))
+    }
+
+    /**
      * 根据用户在冲突界面中的选择解决冲突
      */
     fun resolveConflict(

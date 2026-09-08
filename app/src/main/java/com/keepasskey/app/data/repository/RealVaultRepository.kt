@@ -503,6 +503,31 @@ class RealVaultRepository @Inject constructor(
         return persistSession()
     }
 
+    override suspend fun setEntryFavorite(
+        entryId: String,
+        favorite: Boolean
+    ): com.keepasskey.core.result.KdbxResult<Unit> {
+        // TASK-34 整改：收藏状态持久化至 KDBX 条目 customData（随库文件同步），
+        // 直接改内存树并落盘——不经 HistoryManager，收藏切换不产生历史修订
+        val uuid = parseUuidOrNull(entryId)
+            ?: return com.keepasskey.core.result.KdbxResult.Failure(IllegalArgumentException("无效的条目 ID"), "条目不存在")
+        val db = databaseSession.databaseFlow.first()
+            ?: return com.keepasskey.core.result.KdbxResult.Failure(IllegalStateException("数据库未解锁"), "数据库未解锁")
+        val entry = db.rootGroup.allEntries().firstOrNull { it.id == uuid }
+            ?: return com.keepasskey.core.result.KdbxResult.Failure(IllegalArgumentException("条目不存在"), "条目不存在")
+
+        val updated = entry.copy(
+            customData = if (favorite) {
+                entry.customData + (FAVORITE_CUSTOM_DATA_KEY to "true")
+            } else {
+                entry.customData - FAVORITE_CUSTOM_DATA_KEY
+            },
+            times = entry.times.copy(lastModificationTime = Instant.now())
+        )
+        databaseSession.saveEntry(updated)
+        return persistSession()
+    }
+
     override suspend fun deleteEntry(id: String): com.keepasskey.core.result.KdbxResult<Unit> {
         val uuid = parseUuidOrNull(id)
             ?: return com.keepasskey.core.result.KdbxResult.Failure(IllegalArgumentException("无效的条目 ID"), "条目不存在")
@@ -744,6 +769,30 @@ class RealVaultRepository @Inject constructor(
         val passkeyData = PasskeyData.fromCustomFields(entry.customFields)
         val icon = mapIconIdToName(entry.iconId)
 
+        // TASK-35 整改：识别银行卡条目并映射卡面字段——模板「信用卡」以自定义字段
+        // 存放卡信息（卡号/持卡人/有效期/CVV），此前一律按普通登录展示。
+        // 仅读取未加保护字段进投影（受保护字段不物化明文，F2 语义不变）；
+        // 受保护的卡号/CVV 保持 null，由 UI 渲染整卡掩码兜底。
+        val cfByKey = entry.customFields.associateBy { it.key }
+        fun unprotectedValue(vararg keys: String): String? {
+            for (key in keys) {
+                val field = cfByKey[key] ?: continue
+                if (!field.isProtected) {
+                    val raw = field.value.readString()
+                    if (raw.isNotBlank()) return raw
+                }
+            }
+            return null
+        }
+        val cardNumber = unprotectedValue("卡号", "Card Number")
+        val cardHolderValue = unprotectedValue("持卡人", "Card Holder")
+        val cardExpiryValue = unprotectedValue("有效期", "Expiry", "Expiry Date")
+        val isCardEntry = cardNumber != null || cardHolderValue != null ||
+                cardExpiryValue != null || entry.iconId == 27
+        val cardNumberMasked = cardNumber?.let { raw ->
+            if (raw.length >= 4) "•••• •••• •••• ${raw.takeLast(4)}" else "••••"
+        }
+
         return UiVaultEntry(
             id = entry.id.toHexString(),
             title = entry.title,
@@ -757,11 +806,16 @@ class RealVaultRepository @Inject constructor(
             totpPeriod = totpPeriod,
             totpDigits = totpDigits,
             totpAlgorithm = totpAlgorithm,
+            category = if (isCardEntry) EntryCategory.CARD else EntryCategory.LOGIN,
+            isFavorite = entry.customData[FAVORITE_CUSTOM_DATA_KEY] == "true",
             notes = entry.notes,
             groupId = entry.parentGroupId?.toHexString(),
             iconName = icon,
             updatedAt = formatInstant(entry.times.lastModificationTime),
             createdAt = formatInstant(entry.times.creationTime),
+            cardNumberMasked = cardNumberMasked,
+            cardHolder = cardHolderValue,
+            cardExpiry = cardExpiryValue,
             customFields = uiCustomFields,
             attachments = uiAttachments,
             revisions = uiRevisions,
@@ -1340,6 +1394,9 @@ class RealVaultRepository @Inject constructor(
 
     companion object {
         private const val TAG = "RealVaultRepository"
+
+        /** TASK-34：条目收藏标记的 customData 键（随 KDBX 条目持久化与同步） */
+        const val FAVORITE_CUSTOM_DATA_KEY = "KeePasskey.Favorite"
 
         /** 模板分组固定名（installEntryTemplates 幂等判定依据） */
         private const val TEMPLATE_GROUP_NAME = "模板"

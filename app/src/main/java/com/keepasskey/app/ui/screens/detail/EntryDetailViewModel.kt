@@ -58,6 +58,9 @@ class EntryDetailViewModel @Inject constructor(
     private val totpRemainingSecondsFlow = MutableStateFlow(0)
     // 断点6 整改：周期翻转时经仓库按需重算的实时验证码（null=沿用投影值）
     private val liveTotpCodeFlow = MutableStateFlow<String?>(null)
+    // TASK-32 整改：按需解密估算的真实密码熵（bit）。null=无密码或尚未计算完成；
+    // 明文仅在计算期间以 CharArray 副本瞬时存在，用毕立即清零，绝不驻留
+    private val passwordStrengthBitsFlow = MutableStateFlow<Int?>(null)
 
     /** combine 中间聚合体（避开 5 流以上的元组嵌套） */
     private data class DetailCore(
@@ -68,13 +71,14 @@ class EntryDetailViewModel @Inject constructor(
         val isFavorite: Boolean
     )
 
-    /** combine 中间聚合体：可见性 / 已揭示字段明文 / 用户消息 / TOTP 实时态 */
+    /** combine 中间聚合体：可见性 / 已揭示字段明文 / 用户消息 / TOTP 实时态 / 密码熵 */
     private data class DetailExtras(
         val protectedVisibility: Map<String, Boolean>,
         val revealedProtectedFields: Map<String, String>,
         val userMessage: UiMessage?,
         val totpRemainingSeconds: Int? = null,
-        val liveTotpCode: String? = null
+        val liveTotpCode: String? = null,
+        val strengthBits: Int? = null
     )
 
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -98,6 +102,8 @@ class EntryDetailViewModel @Inject constructor(
                 DetailExtras(visMap, revealedFields, message)
             }.combine(combine(totpRemainingSecondsFlow, liveTotpCodeFlow) { r, c -> r to c }) { extras, totp ->
                 extras.copy(totpRemainingSeconds = totp.first, liveTotpCode = totp.second)
+            }.combine(passwordStrengthBitsFlow) { extras, strength ->
+                extras.copy(strengthBits = strength)
             }
         ) { core, extras ->
             core to extras
@@ -114,6 +120,7 @@ class EntryDetailViewModel @Inject constructor(
                 userMessage = extras.userMessage,
                 totpRemainingSeconds = extras.totpRemainingSeconds,
                 liveTotpCode = extras.liveTotpCode,
+                passwordStrengthBits = extras.strengthBits,
                 isReadOnly = vaultRepository.isSessionReadOnly(),
                 passwordCopyMessage = buildPasswordCopyMessage(settings.clipboardTimeoutSeconds)
             )
@@ -252,7 +259,8 @@ class EntryDetailViewModel @Inject constructor(
         viewModelScope.launch {
             val snapshot = vaultRepository.getEntryRevisionSnapshot(entryId, revision.id)
             if (snapshot == null) {
-                userMessageFlow.value = UiMessage(R.string.detail_history_rolled_back)
+                // TASK-31 整改：历史快照缺失（已被修剪/清理）时不得谎报「已回滚」，如实暴露失败
+                userMessageFlow.value = UiMessage(R.string.detail_history_rollback_failed)
                 return@launch
             }
             // M2 整改（加解密审查 2026-09）：回滚路径全程 CharArray，不再经 String 中转；

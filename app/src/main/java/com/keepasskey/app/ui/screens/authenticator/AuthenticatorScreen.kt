@@ -169,7 +169,7 @@ fun AuthenticatorScreen(
                 TotpLargeCard(
                     item = item,
                     onClick = { onEntryClick(item.entryId) },
-                    onCopy = { copyCode(item.codeRaw) }
+                    onCopy = { item.codeRaw?.let(copyCode) }
                 )
             }
 
@@ -307,13 +307,14 @@ private fun TotpLargeCard(
                 }
             }
 
-            // 中部：大号分段动态码 + 一键复制按钮
+            // 中部：大号分段动态码 + 一键复制按钮（TASK-33：验证码不可用时复制通道整体禁用）
+            val canCopy = item.codeRaw != null
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(10.dp))
                     .background(MaterialTheme.colorScheme.surfaceContainerLow)
-                    .clickable { onCopy() }
+                    .clickable(enabled = canCopy) { onCopy() }
                     .padding(horizontal = 14.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
@@ -324,14 +325,15 @@ private fun TotpLargeCard(
                         fontSize = 28.sp,
                         fontWeight = FontWeight.Bold,
                         letterSpacing = 3.sp,
-                        color = gaugeColor
+                        color = if (canCopy) gaugeColor else MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 )
 
                 Surface(
-                    color = MaterialTheme.colorScheme.primaryContainer,
+                    color = if (canCopy) MaterialTheme.colorScheme.primaryContainer
+                    else MaterialTheme.colorScheme.surfaceContainerHighest,
                     shape = CapsuleShape,
-                    modifier = Modifier.clickable { onCopy() }
+                    modifier = Modifier.clickable(enabled = canCopy) { onCopy() }
                 ) {
                     Row(
                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),

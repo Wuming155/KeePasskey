@@ -195,6 +195,20 @@ class FakeVaultRepository() : VaultRepository {
         return com.keepasskey.core.result.KdbxResult.Success(Unit)
     }
 
+    override suspend fun setEntryFavorite(
+        entryId: String,
+        favorite: Boolean
+    ): com.keepasskey.core.result.KdbxResult<Unit> {
+        // TASK-34：与 RealVaultRepository 同语义——收藏状态落进条目投影
+        val current = entriesFlow.value.toMutableList()
+        val index = current.indexOfFirst { it.id == entryId }
+        if (index >= 0) {
+            current[index] = current[index].copy(isFavorite = favorite)
+            entriesFlow.value = current
+        }
+        return com.keepasskey.core.result.KdbxResult.Success(Unit)
+    }
+
     override suspend fun deleteEntry(id: String): com.keepasskey.core.result.KdbxResult<Unit> {
         val current = entriesFlow.value.toMutableList()
         val index = current.indexOfFirst { it.id == id }

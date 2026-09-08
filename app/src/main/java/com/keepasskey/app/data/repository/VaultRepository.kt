@@ -149,6 +149,15 @@ interface VaultRepository {
     suspend fun deleteEntry(id: String): com.keepasskey.core.result.KdbxResult<Unit>
 
     /**
+     * 切换条目收藏状态并持久化落库（TASK-34 整改：原实现仅翻转内存 Flow 不落库）。
+     * 收藏标记存于 KDBX 条目 customData，随库文件同步；不产生历史修订快照。
+     */
+    suspend fun setEntryFavorite(
+        entryId: String,
+        favorite: Boolean
+    ): com.keepasskey.core.result.KdbxResult<Unit>
+
+    /**
      * 还原处于回收站中的凭据条目
      */
     suspend fun restoreEntry(id: String): com.keepasskey.core.result.KdbxResult<Unit>

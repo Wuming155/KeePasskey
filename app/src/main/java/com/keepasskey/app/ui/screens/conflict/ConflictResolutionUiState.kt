@@ -8,6 +8,8 @@ enum class FieldChoice {
 }
 
 data class ConflictedField(
+    // TASK-30：字段标准键（KdbxConstants.Fields.*），applyMerge 据此生成字段级合并决策
+    val fieldKey: String,
     val fieldName: String,
     val localValue: String,
     val remoteValue: String,

@@ -103,7 +103,11 @@ data class UiVaultEntry(
     val totpDigits: Int = 6,
     val totpAlgorithm: String = "SHA1",
     val category: EntryCategory = EntryCategory.LOGIN,
-    val strengthBits: Int = 112,
+    // TASK-32 整改：恒硬编码 112 bit 撤销——null 表示「未计算」（投影层不解密密码，
+    // 真实熵由详情页 ViewModel 按需解密估算后经 EntryDetailUiState 下发）
+    val strengthBits: Int? = null,
+    // TASK-34 整改：收藏状态随条目投影下发（持久化于 KDBX 条目 customData，仓库层读写）
+    val isFavorite: Boolean = false,
     val notes: String = "",
     val updatedAt: String = "",
     val createdAt: String = "",

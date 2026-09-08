@@ -227,8 +227,8 @@ fun ConflictResolutionScreen(
             items(uiState.entries, key = { it.id }) { entry ->
                 ConflictedEntryCard(
                     entry = entry,
-                    onFieldChoiceChange = { fieldName, choice ->
-                        viewModel.selectFieldChoice(entry.id, fieldName, choice)
+                    onFieldChoiceChange = { fieldKey, choice ->
+                        viewModel.selectFieldChoice(entry.id, fieldKey, choice)
                     }
                 )
             }
@@ -270,7 +270,7 @@ private fun ConflictedEntryCard(
             entry.fields.forEach { field ->
                 FieldDiffRow(
                     field = field,
-                    onChoiceSelected = { choice -> onFieldChoiceChange(field.fieldName, choice) }
+                    onChoiceSelected = { choice -> onFieldChoiceChange(field.fieldKey, choice) }
                 )
             }
         }

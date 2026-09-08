@@ -140,6 +140,7 @@
     <string name="detail_history_rollback">Rollback to this</string>
     <string name="detail_history_rollback_confirm">Are you sure you want to rollback this entry to this historical snapshot?</string>
     <string name="detail_history_rolled_back">Entry successfully restored to historical version</string>
+    <string name="detail_history_rollback_failed">History snapshot is no longer available (possibly pruned); rollback failed</string>
     <string name="detail_notes_section">Notes &amp; Metadata</string>
 
     <!-- Entry Edit Screen -->
@@ -723,8 +724,6 @@
     <string name="autofill_blacklist_empty">No apps blocked</string>
     <string name="autofill_blacklist_dialog_title">Manage autofill blacklist</string>
     <string name="autofill_blacklist_dialog_desc">Blacklisted apps never receive autofill suggestions, ideal for banking and other high-security scenarios</string>
-    <string name="autofill_blacklist_item_bank">Banking and payment apps (recommended)</string>
-    <string name="autofill_blacklist_item_portal">Enterprise portals and SSO clients</string>
 
     <!-- ===== Developer diagnostics subscreen ===== -->
     <string name="debug_section_options">Diagnostics</string>

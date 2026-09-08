@@ -53,8 +53,10 @@ class AuthenticatorViewModelTest {
 
         val githubItem = state.items.firstOrNull { it.entryId == "2" }
         assertNotNull("条目 2 (GitHub Enterprise) 应在 TOTP 列表中", githubItem)
-        assertEquals(6, githubItem!!.codeRaw.length)
-        assertTrue("TOTP 代码必须全为数字", githubItem.codeRaw.all { it.isDigit() })
+        // TASK-33 整改：codeRaw 可空（种子缺失=占位符不可复制）；种子完好时必须非空且全数字
+        val codeRaw = githubItem!!.codeRaw ?: error("种子完好条目的验证码不得为 null")
+        assertEquals(6, codeRaw.length)
+        assertTrue("TOTP 代码必须全为数字", codeRaw.all { it.isDigit() })
         // 格式化应为 "xxx xxx"
         assertEquals(7, githubItem.codeFormatted.length)
         assertTrue(githubItem.codeFormatted.contains(' '))

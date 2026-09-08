@@ -340,9 +340,15 @@ open class SyncCoordinator @Inject constructor(
     }
 
     /**
-     * 解决冲突并执行最终提交回写
+     * 解决冲突并执行最终提交回写。
+     * [resolutions] 为条目级决策（默认兜底）；[fieldResolutions]（TASK-30 整改）为字段级
+     * 决策——键为条目 ID，值为「字段键 → 选择」映射，非空时该条目按字段粒度合并
+     * （本地为底版、远端仅覆写用户钦点字段），取代整条目二选一的塌缩行为。
      */
-    open suspend fun resolveConflicts(resolutions: Map<String, ConflictResolutionChoice>): SyncOutcome = mutex.withLock {
+    open suspend fun resolveConflicts(
+        resolutions: Map<String, ConflictResolutionChoice>,
+        fieldResolutions: Map<String, Map<String, ConflictResolutionChoice>> = emptyMap()
+    ): SyncOutcome = mutex.withLock {
         val engine = pendingRemoteEngine ?: return@withLock SyncOutcome.Error("无待解决的冲突会话")
         val path = pendingRemotePath ?: return@withLock SyncOutcome.Error("冲突路径失效")
         val localDb = pendingLocalDb ?: return@withLock SyncOutcome.Error("本地冲突快照丢失")
@@ -357,7 +363,14 @@ open class SyncCoordinator @Inject constructor(
 
             for (pair in conflicts) {
                 val choice = resolutions[pair.entryId] ?: ConflictResolutionChoice.KEEP_LOCAL
-                val resolvedEntries = KdbxMerger.resolveConflict(pair, choice)
+                val fieldChoice = fieldResolutions[pair.entryId]
+                // TASK-30：字段级决策优先——本地为底版、远端仅覆写用户钦点的字段；
+                // 无字段级决策时回退整条目二选一
+                val resolvedEntries = if (fieldChoice != null) {
+                    listOf(KdbxMerger.resolveConflictByFields(pair, fieldChoice))
+                } else {
+                    KdbxMerger.resolveConflict(pair, choice)
+                }
                 // 替换当前分组树中的条目
                 for (resolved in resolvedEntries) {
                     updatedRoot = applyResolvedEntryToGroup(updatedRoot, resolved)

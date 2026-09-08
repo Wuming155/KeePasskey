@@ -73,6 +73,7 @@ class ConflictResolutionViewModelTest {
         val conflictFlowInternal = MutableStateFlow<List<ConflictedEntryPair>>(listOf(conflictPair))
 
         var resolvedMap: Map<String, ConflictResolutionChoice>? = null
+        var resolvedFieldMap: Map<String, Map<String, ConflictResolutionChoice>>? = null
 
         // 使用 ContextWrapper + DatabaseSession 创建一个用于测试的 Coordinator 实例
         val tempDir = java.nio.file.Files.createTempDirectory("coord_test").toFile()
@@ -94,8 +95,12 @@ class ConflictResolutionViewModelTest {
             override val conflictFlow: StateFlow<List<ConflictedEntryPair>>
                 get() = conflictFlowInternal.asStateFlow()
 
-            override suspend fun resolveConflicts(resolutions: Map<String, ConflictResolutionChoice>): SyncOutcome {
+            override suspend fun resolveConflicts(
+                resolutions: Map<String, ConflictResolutionChoice>,
+                fieldResolutions: Map<String, Map<String, ConflictResolutionChoice>>
+            ): SyncOutcome {
                 resolvedMap = resolutions
+                resolvedFieldMap = fieldResolutions
                 conflictFlowInternal.value = emptyList()
                 return SyncOutcome.MergedAndUploaded
             }
@@ -114,8 +119,8 @@ class ConflictResolutionViewModelTest {
         assertTrue(item.fields.any { it.fieldName.contains("标题") })
         assertTrue(item.fields.any { it.fieldName.contains("密码") })
 
-        // 用户选择 REMOTE
-        viewModel.selectFieldChoice(item.id, item.fields.first().fieldName, FieldChoice.REMOTE)
+        // 用户选择 REMOTE（标题字段）
+        viewModel.selectFieldChoice(item.id, item.fields.first().fieldKey, FieldChoice.REMOTE)
         testScheduler.runCurrent()
 
         // 提交合并
@@ -134,6 +139,12 @@ class ConflictResolutionViewModelTest {
         assertTrue("应触发 ResolveSuccess 事件", resolveSuccessEmitted)
         assertNotNull(resolvedMap)
         assertEquals(ConflictResolutionChoice.KEEP_REMOTE, resolvedMap!![entryId.toHexString()])
+        // TASK-30：字段级决策必须随行下发——标题（用户钦点）为 KEEP_REMOTE，
+        // 密码（未触碰）保持 KEEP_LOCAL，不再塌缩为整条目二选一
+        val fieldChoices = resolvedFieldMap!![entryId.toHexString()]
+        assertNotNull(fieldChoices)
+        assertEquals(ConflictResolutionChoice.KEEP_REMOTE, fieldChoices!![KdbxConstants.Fields.TITLE])
+        assertEquals(ConflictResolutionChoice.KEEP_LOCAL, fieldChoices[KdbxConstants.Fields.PASSWORD])
 
         job.cancel()
         eventJob.cancel()

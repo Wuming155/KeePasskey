@@ -61,13 +61,16 @@ fun PasskeyBadge(
 }
 
 /**
- * 密码强度指示条
+ * 密码强度指示条。
+ * TASK-32 整改：[entropyBits] 允许为 null（密码未解密/未计算时）——此时隐藏强度条，
+ * 不再回显误导性的默认强度；调用方为生成器/编辑页时恒传非空值。
  */
 @Composable
 fun PasswordStrengthBar(
-    entropyBits: Int,
+    entropyBits: Int?,
     modifier: Modifier = Modifier
 ) {
+    if (entropyBits == null) return
     val securityColors = LocalSecurityColors.current
     val (color, label, progress) = when {
         entropyBits >= 100 -> Triple(securityColors.success, stringResource(R.string.generator_strength_extreme, entropyBits), 1.0f)

@@ -18,7 +18,7 @@
 
 ---
 
-## 2. 未完成工作唯一看板（43 项）
+## 2. 未完成工作唯一看板（44 项）
 
 所有进行中、已立项、待执行体检批次、未实现功能、安全遗留与欠账统一收录于下表，按优先级排序。**新增任务必须在此表注册。**
 
@@ -56,20 +56,21 @@
 | **TASK-27** | 协议 | **P3-11：CBOR `encodeMap` 不强制 RFC 8949 Canonical 键序** | FINDINGS 核实 | **P2** | ✅ 已修复（2026-09-08） | `CborEncoder` Map 编码强制 RFC 8949 §4.2.1 Canonical 键序：按键自身 CBOR 编码字节流字典序升序写出（新增 `writeCanonicalMap`），重复键（编码字节相同，如异型 `Long(1)`/`Int(1)`）fail-fast 拒绝。COSE 公钥（EC2/Ed25519/RSA）输出经 Canonical 重排后与 CTAP2 规范形态一致，互验兼容性提升；补 5 例键序回归锁（乱序重排/整数键编码序/变长键/嵌套 Map/重复键拒绝） |
 | **TASK-28** | 敏感 | **P3-12：附件缓存明文无清理** | FINDINGS 核实 | **P2** | ✅ 已修复（2026-09-07） | `AttachmentManager` 重写为「用完即删」纵深防线：导出集中至专用子目录 `attachment_view`（`cleanCache` 不再全盘粗暴删除）、随机 UUID 前缀防路径猜测/劫持、每次新导出清除上一轮遗留明文（含上次进程残留）、新增 `deleteExported` 供查看方消费后即删、`deleteOnExit` JVM 退出兜底。补 6 例单测（子目录隔离/文件名净化/会话即弃/用完即删/定向清理回归锁/同名互异） |
 | **TASK-29** | 安全 | **P3-13：RSA `certainty = 12` 偏低** | FINDINGS 核实 | **P2** | ✅ 已修复（2026-09-07） | `PasskeyCryptoEngine.generateRs256KeyPair` 素数确定性参数 `certainty` 12 → 80（False-prime 概率 ~1/2¹² → ≤1/2⁸⁰），对齐 BouncyCastle 官方示例与主流密码库默认 |
-| **TASK-30** | 功能 | **P2-17：冲突解决逐字段选择塌缩为整条目二选一** | FINDINGS 核实 | **P2** | ❌ 未修 | `ConflictResolutionViewModel.kt:128` 应实现字段级合并或简化 UI |
-| **TASK-31** | 功能 | **P2-19：历史快照为空时谎报「已回滚」** | FINDINGS 核实 | **P2** | ❌ 未修 | `EntryDetailViewModel.kt:242` 应改错误提示 |
-| **TASK-32** | 功能 | **P2-27：条目密码强度恒硬编码 112 bit** | FINDINGS 核实 | **P2** | ❌ 未修 | `MockData.kt:106` 应接入真实熵估算或显式标注未计算 |
-| **TASK-33** | 功能 | **P2-34：TOTP 缺失时 fallback 假码 "000000"** | FINDINGS 核实 | **P2** | ❌ 未修 | `AuthenticatorViewModel.kt:82` 应显示错误或空白 |
-| **TASK-34** | 功能 | **P3-25：收藏功能不落库（仅翻转内存 Flow）** | FINDINGS 核实 | **P2** | ❌ 未修 | `EntryDetailViewModel.kt:195` `toggleFavorite` 未调 Repository 保存 |
-| **TASK-35** | 功能 | **P3-26：`EntryCategory` 与银行卡字段未映射** | FINDINGS 核实 | **P2** | ❌ 未修 | `RealVaultRepository.kt:723` 卡条目被当普通登录展示 |
-| **TASK-36** | 功能 | **P3-27：自动填充黑名单空 onClick + 写死列表** | FINDINGS 核实 | **P2** | ❌ 未修 | `AutofillSettingsScreen.kt:343` 删除按钮回调为空 |
+| **TASK-30** | 功能 | **P2-17：冲突解决逐字段选择塌缩为整条目二选一** | FINDINGS 核实 | **P2** | ✅ 已修复（2026-09-08） | **字段级合并落地**：`KdbxMerger` 新增 `resolveConflictByFields`（按字段 `KEEP_REMOTE` 逐字段采纳远端值，采纳时刷新 `lastModificationTime`）；`SyncCoordinator.resolveConflicts` 扩展 `fieldResolutions` 参数走字段级路径（整条目二选一语义保持兼容）；`ConflictResolutionUiState.ConflictedField` 增加 `fieldKey`，`ConflictResolutionViewModel` 新增 `selectFieldChoice(entryId, fieldKey, choice)` 逐字段选择，`applyMerge` 按字段生成 resolutions + fieldResolutions 双通道下发；`ConflictResolutionScreen` 字段行接线逐字段单选。补字段级合并 ViewModel 回归测试 |
+| **TASK-31** | 功能 | **P2-19：历史快照为空时谎报「已回滚」** | FINDINGS 核实 | **P2** | ✅ 已修复（2026-09-08） | `EntryDetailViewModel.rollbackToRevision` 快照缺失（已被修剪/清理）时不再落入通用成功提示，改发新增 `detail_history_rollback_failed`（中英双语）如实暴露失败 |
+| **TASK-32** | 功能 | **P2-27：条目密码强度恒硬编码 112 bit** | FINDINGS 核实 | **P2** | ✅ 已修复（2026-09-08） | `UiVaultEntry.strengthBits` 改可空 `Int?` 且投影层恒为 null（不解密密码）；真实熵由 `EntryDetailViewModel` 在用户显式查看密码时按需估算，经 `EntryDetailUiState.passwordStrengthBits` 下发；`PasswordStrengthBar` 接受可空熵位（null=隐藏强度条，不回显误导默认值），`EntryDetailScreen` 改用 uiState 熵位。Mock 层注释同步标注「未计算」语义 |
+| **TASK-33** | 功能 | **P2-34：TOTP 缺失时 fallback 假码 "000000"** | FINDINGS 核实 | **P2** | ✅ 已修复（2026-09-08） | `AuthenticatorViewModel` 移除 `?: "000000"` 假码回退：快照缺失（种子缺失/解析失败/计算异常）时 `codeRaw=null` + 占位符 `------`；`TotpCardItem.codeRaw` 改可空，`AuthenticatorScreen` 复制通道整体禁用（行点击 + 复制按钮 `clickable(enabled=...)`，配色降级）。测试同步更新（种子完好条目非空且全数字断言保留） |
+| **TASK-34** | 功能 | **P3-25：收藏功能不落库（仅翻转内存 Flow）** | FINDINGS 核实 | **P2** | ✅ 已修复（2026-09-08） | `VaultRepository` 新增 `setEntryFavorite(entryId, favorite)` 契约；`RealVaultRepository` 实现持久化至 KDBX 条目 `customData`（键 `KeePasskey.Favorite`）并刷新 `lastModificationTime` 后落盘；`EntryDetailViewModel.toggleFavorite` 改调仓库保存，失败如实上浮错误提示；收藏状态随条目投影（`UiVaultEntry.isFavorite`）下发，重启不再丢失 |
+| **TASK-35** | 功能 | **P3-26：`EntryCategory` 与银行卡字段未映射** | FINDINGS 核实 | **P2** | ✅ 已修复（2026-09-08） | `RealVaultRepository.mapKdbxEntryToUi` 识别银行卡条目（模板「信用卡」以自定义字段存放卡号/持卡人/有效期/CVV）：非受保护卡字段映射至 `UiVaultEntry.cardNumberMasked/cardHolder/cardExpiry/cardCvv` + `category=CARD`；受保护卡号/CVV 保持 null 由 UI 整卡掩码兜底（F2 不物化明文语义不变） |
+| **TASK-36** | 功能 | **P3-27：自动填充黑名单空 onClick + 写死列表** | FINDINGS 核实 | **P2** | ✅ 已修复（2026-09-08） | **诚实化整改**（沿 TASK-12/13 裁定先例）：`AutofillSettingsScreen` 黑名单对话框移除两条写死示例条目（银行/门户）与空 onClick 删除按钮，改为如实展示真实计数（`disabledAutofillQueriesCount`）或空态文案；对应孤儿字符串资源（中英 4 条）清理。黑名单完整生命周期（服务侧写入/条目展示/删除/填充拦截）为真实功能缺口，登记 TASK-44 |
 | **TASK-37** | 数据 | **P2-15：`SyncCache.updateBase` 两文件非原子写** | FINDINGS 核实 | **P2** | ✅ 已修复（2026-09-08） | 重构为「两份内容先各自写唯一 tmp 并 fsync（慢路径）→ 背靠背两次原子 rename（快路径，微秒级）」，把 `.baseversion` 与 `.meta` 的不一致窗口从两次完整写盘压缩至两个原子 rename 之间；失败路径 `finally` 清理未交付 tmp。跨多文件的完全原子性受 POSIX 限制不存在，此为工程最小窗口（KDoc 已注明）。新增 `SyncCacheTest` 5 例（TASK-40 T-03 缺口一并补强：读写往返/updateBase 一致性/etag 保留/无 tmp 残留） |
 | **TASK-38** | 构建 | **P2-32：Release 未开 `shrinkResources`；ProGuard 过度宽松** | FINDINGS 核实 | **P2** | ✅ 已修复（2026-09-08） | `app/build.gradle.kts` release 启用 `isShrinkResources = true`；`proguard-rules.pro` 移除对自带 consumer rules 库的整包过度 keep（kotlin-stdlib / kotlinx-coroutines / Compose / lifecycle / navigation / biometric），混淆与无用代码剥离交由官方规则接管（Hilt/BouncyCastle/自有包/OkHttp 规则保留）。顺手修复阻塞 `assembleRelease` 的既有 lintVital 致命错误：values-en 存在 15 条对应已删功能（自研 PIN QuickUnlock / 自签名证书 / 明文同步）的孤儿翻译（ExtraTranslation），已清理并补默认 locale `unlock_error_pin_length` |
 | **TASK-39** | 性能 | **P2-29：SAF 密钥文件读取在主线程完成** | FINDINGS 核实 | **P2** | ✅ 已修复（2026-09-08） | `UnlockScreen` 密钥文件 SAF 回调整体重构：1 MiB 流式读取与 `DISPLAY_NAME` 游标查询经 `rememberCoroutineScope.launch + withContext(Dispatchers.IO)` 移出主线程，结果折叠（成功/失败/空文件）回主线程统一分发 ViewModel；读取失败反馈语义不变 |
 | **TASK-40** | 测试 | **测试覆盖补强（T-03 / T-04 / P2-35 / P2-37）** | FINDINGS 核实 | **P2** | ❌ 未修 | 补 `SyncCacheTest` / SigV4 已知答案向量 / `SecurityTest` 真实密钥 / 真实 Keystore 路径用例 |
 | **TASK-41** | 整洁度 | **低危清理批次（P3-5/7/9/10/14/15/17/24/28/31/32/33/34）** | FINDINGS 核实 | **P3** | ❌ 未修 | O(n²) 去重 / 未用 import / 测试后门 / EMPTY 单例污染 / 魔数 / 路径遍历 / 静默 catch / 演示路径 / 空 if 块 / 吞异常 / Context? / 文件名 / 旧文档 |
 | **TASK-42** | 性能 | **低-中调度批次（P2-2 / P2-12 / P2-30 / P2-31）** | FINDINGS 核实 | **P3** | ❌ 未修 | Argon2 走 Dispatchers.IO / 缺 callTimeout / combine 未 flowOn / 构造期扫盘 |
-| **TASK-43** | 特性 | **进阶偏好消费方接线（预留功能清单）** | TASK-12 裁定衍生 | **P3** | ❌ 未实现 | 设置页全部进阶开关保留为预留功能（已随 TASK-12 持久化，不再回显丢失）。待接线消费方：`webdavChunkedUpload`/`webdavChunkSizeMb`（WebDAV 分块上传）、`createBackupBeforeSave`（保存前 .bak）、`checkRemoteChangesBeforeSave`、`conflictResolution` 默认策略、`useFileTransactions`（已是既定行为，接线为信息展示）、`preloadDatabaseEnabled`、`lockWhenNavigateBack`、`clearPasswordOnLeave`、`rememberRecentFiles`、`rememberKeyFileLocation`、`showKillAppOption`、`offerSaveCredentials`、`inlineSuggestionsEnabled`、`autoReturnFromQuery`、`autofillCopyTotp`、`autofillShowTotpNotification`、`skipDalVerification`、`overrideNoAutofill`、`disabledAutofillQueriesCount`（黑名单）、`maskPasswordsDefault`、`maskTotpDefault`、`showUnlockedNotification`、`showGroupInSearchResult`、`showGroupInEntry`、`listDensity`、`autoActivateSearchOnOpen`、`iconSet`、TOTP 字段映射、`debugLogEnabled`、`verboseSyncLog`、子库挂载（TASK-13 改诚实提示）。另：导出/导入五源（1PUX/Bitwarden/KeePass/浏览器 CSV）解析器亦为独立功能缺口 |
+| **TASK-43** | 特性 | **进阶偏好消费方接线（预留功能清单）** | TASK-12 裁定衍生 | **P3** | ❌ 未实现 | 设置页全部进阶开关保留为预留功能（已随 TASK-12 持久化，不再回显丢失）。待接线消费方：`webdavChunkedUpload`/`webdavChunkSizeMb`（WebDAV 分块上传）、`createBackupBeforeSave`（保存前 .bak）、`checkRemoteChangesBeforeSave`、`conflictResolution` 默认策略、`useFileTransactions`（已是既定行为，接线为信息展示）、`preloadDatabaseEnabled`、`lockWhenNavigateBack`、`clearPasswordOnLeave`、`rememberRecentFiles`、`rememberKeyFileLocation`、`showKillAppOption`、`offerSaveCredentials`、`inlineSuggestionsEnabled`、`autoReturnFromQuery`、`autofillCopyTotp`、`autofillShowTotpNotification`、`skipDalVerification`、`overrideNoAutofill`、`disabledAutofillQueriesCount`（黑名单，完整生命周期见 TASK-44）、`maskPasswordsDefault`、`maskTotpDefault`、`showUnlockedNotification`、`showGroupInSearchResult`、`showGroupInEntry`、`listDensity`、`autoActivateSearchOnOpen`、`iconSet`、TOTP 字段映射、`debugLogEnabled`、`verboseSyncLog`、子库挂载（TASK-13 改诚实提示）。另：导出/导入五源（1PUX/Bitwarden/KeePass/浏览器 CSV）解析器亦为独立功能缺口 |
+| **TASK-44** | 特性 | **自动填充黑名单完整生命周期** | TASK-36 整改衍生 | **P3** | ❌ 未实现 | TASK-36 整改确认黑名单为端到端功能缺口（设置页仅展示计数，且该计数无任何写入方）。待建设：① 黑名单存储（包名集合持久化，替代现无写入方的 `disabledAutofillQueriesCount` 计数）；② 自动填充服务侧消费（黑名单包名不下发数据集）；③ 入口（详情页/系统设置「为本应用禁用填充」写入黑名单）；④ 设置页条目化展示与删除（替代当前仅计数展示）。对齐 KP2A「禁用自动填充查询」语义 |
 
 ---
 
@@ -100,7 +101,7 @@
 
 - **高（真实 Bug）**：P3-30 → **TASK-22**（`@Singleton` `autoLockManager` 在 `MainActivity.onDestroy` 被 `destroy()`，旋转即失效）
 - **中（安全）**：P2-9、P2-10、P3-11、P3-12、P3-13、P3-16 → TASK-23~29（EC 标量越界 / `legacyCipherKey` 残留 / CBOR 非 Canonical / 附件明文缓存 / RSA `certainty=12` / SigV4 `*` `~` 编码不符）
-- **中（功能 / 数据 / 互操作 / 构建 / 测试）**：P2-15、P2-17、P2-19、P2-27、P2-34、P3-25、P3-26、P3-27、P2-11、P2-32、T-03、T-04、P2-35、P2-37 → TASK-30~40（非原子写 / 字段级合并塌缩 / 空快照谎报回滚 / 强度硬编码 112 / 假码 000000 / 收藏不落库 / category 与卡字段未映射 / 黑名单空 onClick / WebDAV ISO-8859-1 / `shrinkResources` 未开 / `SyncCacheTest` 缺失 / SigV4 无已知答案 / `SecurityTest` 假密钥 / 真实 Keystore 路径无测）
+- **中（功能 / 数据 / 互操作 / 构建 / 测试）**：P2-15、P2-17、P2-19、P2-27、P2-34、P3-25、P3-26、P3-27、P2-11、P2-32、T-03、T-04、P2-35、P2-37 → TASK-30~40（非原子写 / 字段级合并塌缩 / 空快照谎报回滚 / 强度硬编码 112 / 假码 000000 / 收藏不落库 / category 与卡字段未映射 / 黑名单空 onClick / WebDAV ISO-8859-1 / `shrinkResources` 未开 / `SyncCacheTest` 缺失 / SigV4 无已知答案 / `SecurityTest` 假密钥 / 真实 Keystore 路径无测）。其中 P2-17/P2-19/P2-27/P2-34/P3-25/P3-26/P3-27 七项已随 TASK-30~36 于 2026-09-08 闭合；T-03（`SyncCacheTest`）已随 TASK-37 补齐；T-04/P2-35/P2-37 见 TASK-40 余项
 - **低-中（性能 / 调度）**：P2-2、P2-12、P2-29、P2-30、P2-31 → **TASK-42**（Argon2 走 `Dispatchers.IO` / 缺 callTimeout / SAF 主线程读密钥 / `combine` 未 flowOn / 构造期扫盘）
 - **低（整洁度 / 需外部服务）**：P3-5/7/9/10/14/15/17/24/28/31/32/33/34、P2-26、P2-28 → **TASK-41**（死代码 / 魔数 / 空块 / 单例污染 / 路径遍历等清理；P2-26 占位演示数据、P2-28 泄露密码恒 0 需 HIBP 接入）
 
@@ -112,6 +113,7 @@
 
 > 索引中出现的 `Wave N` / `阶段 N` 字样为对应历史提交的**原始主题**，属已冻结语境，仅供追溯；新提交请以 `TASK-xx` / `批次 X` + 提交哈希 引用，勿再使用 Wave / 阶段 编号。
 
+- `（本次提交）` (2026-09-08): 阶段5 功能/质量收尾——TASK-30~36 七项闭合（字段级冲突合并 / 空快照诚实报错 / 密码强度真实熵 / TOTP 假码移除 / 收藏落库 / 卡条目映射 / 黑名单诚实化）+ TASK-44 登记
 - `7b3e756` (2026-09-07): WebDAV 零字节文件元数据误报修复
 - `0d4fc16` (2026-09-07): 本地 HTTPS 同步联调工具链与端到端测试 (`LiveSyncServersTest`)
 - `fe979fe` (2026-09-07): 全量同步整改与稳定性修复（`CacheCorruptedError`、KDBX4 随机 IV 误判重传修复、`SyncCache` UUID 化、WebDAV/S3 原子写加固）

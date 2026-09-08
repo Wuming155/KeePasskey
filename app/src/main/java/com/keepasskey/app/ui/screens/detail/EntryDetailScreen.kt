@@ -433,8 +433,10 @@ fun EntryDetailContent(
                             }
 
                             Spacer(modifier = Modifier.height(8.dp))
+                            // TASK-32 整改：投影层恒不解密密码（entry.strengthBits 恒 null），
+                            // 真实熵由 ViewModel 在用户显式查看密码时估算后经 uiState 下发
                             PasswordStrengthBar(
-                                entropyBits = entry.strengthBits,
+                                entropyBits = uiState.passwordStrengthBits,
                                 modifier = Modifier.fillMaxWidth()
                             )
                         }

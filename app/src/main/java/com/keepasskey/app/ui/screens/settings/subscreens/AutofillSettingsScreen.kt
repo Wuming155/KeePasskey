@@ -19,14 +19,12 @@ import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.ContentPasteGo
-import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Password
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Security
-import androidx.compose.material.icons.filled.Undo
 import androidx.compose.material.icons.filled.VpnKey
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -317,6 +315,9 @@ fun AutofillSettingsScreen(
     }
 
     // 黑名单管理对话框
+    // TASK-36 整改：此前渲染两条写死的示例条目（银行/门户）并挂空 onClick 删除按钮，
+    // 属假数据回显——现改为诚实展示真实黑名单计数；黑名单的写入/展示/删除完整生命周期
+    // 依赖自动填充服务侧的「为本应用禁用填充」链路，尚未建设，已登记 TASK-44
     if (showBlacklistDialog) {
         AlertDialog(
             onDismissRequest = { showBlacklistDialog = false },
@@ -328,22 +329,20 @@ fun AutofillSettingsScreen(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    listOf(
-                        stringResource(R.string.autofill_blacklist_item_bank),
-                        stringResource(R.string.autofill_blacklist_item_portal)
-                    ).forEach { item ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text(item, style = MaterialTheme.typography.bodySmall)
-                            IconButton(onClick = { }, modifier = Modifier.size(28.dp)) {
-                                Icon(Icons.Default.Delete, contentDescription = stringResource(R.string.edit_passkey_unbind), tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(18.dp))
-                            }
-                        }
+                    if (uiState.disabledAutofillQueriesCount > 0) {
+                        Text(
+                            text = stringResource(
+                                R.string.autofill_blacklist_count,
+                                uiState.disabledAutofillQueriesCount
+                            ),
+                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
+                        )
+                    } else {
+                        Text(
+                            text = stringResource(R.string.autofill_blacklist_empty),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                 }
             },
