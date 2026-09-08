@@ -38,13 +38,14 @@ KeePasskey 是一款使用原生 Kotlin 开发的现代化 Android 密码管理�
    - **增量更新**：计划/批次未全部完成、仅完成某个阶段或里程碑，也须立即更新 STATUS 与相关文档，**不攒到全部做完才写**；
    - **新问题必登记**：工作中发现的任何缺陷 / 风险 / 待办（**即使暂不整改**），必须写入对应文档——可行动任务登记为 `STATUS.md §2` 新 TASK；属代码审计类发现补登 `FINDINGS_TRACKER.md`；**严禁只记在聊天或脑中而不同步到文档**。
 6. **改动提交纪律**：每次完成一组相关修改、且 `.\gradlew.bat test` 通过后，须及时**提交并推送到 GitHub 远端**——`git commit` 后**立即 `git push`**（除非因网络原因推送失败，可暂缓并在 STATUS/提交信息中记录，待网络恢复后立即补推）。提交信息遵循本仓库约定：以 `TASK-xx` / `批次 X` 引用任务并简述主题，例如 `fix(TASK-22): 修复旋转屏幕时 AutoLock 单例被销毁`；**勿让改动长时间堆积在工作区**，避免丢失或与后续提交混淆。
-7. **计划文档生命周期纪律**：新建方案前先查 `docs/plans/` 等目录有无过期计划；方案落地或被 `STATUS.md` 看板吸收后，**须实时回写 `STATUS.md` 并删除已冗余的独立计划文件**，杜绝与 SSOT 多头并存。仍承载执行细节（范围 / 依据 / 风险 / 验收）的方案（如 `HEALTH_CHECK_ROADMAP.md`）可保留，但其「完成状态」一律以 `STATUS.md §2` 看板为准，**不在计划文件内重复维护状态**。
+7. **计划文档生命周期纪律**：新建方案前先查 `docs/plans/` 等目录有无过期计划（**当前为空目录，无在库方案**）；方案落地或被 `STATUS.md` 看板吸收后，**须实时回写 `STATUS.md` 并删除已冗余的独立计划文件**，杜绝与 SSOT 多头并存。仍承载执行细节（范围 / 依据 / 风险 / 验收）的方案（如 `HEALTH_CHECK_ROADMAP.md`）可保留，但其「完成状态」一律以 `STATUS.md §2` 看板为准，**不在计划文件内重复维护状态**。
 8. **问题闭环流程（发现 → 登记 → 整改+验证 → 更新记录并推送）**：任何改动须走完以下闭环，缺一环不算完成：
    1. **发现**：工作中识别到缺陷 / 风险 / 待办（含审计发现）；
    2. **登记**：即时写入 SSOT——可行动任务登 `STATUS.md §2` 新 TASK，审计类发现补登 `FINDINGS_TRACKER.md`；暂不整改也须登记，**严禁只记聊天或脑中**；
    3. **整改 + 验证**：修复代码，且 `.\gradlew.bat test` 全绿（含相关回归用例）方准入库；
    4. **更新记录并推送**：状态变更即时回写 STATUS（标记完成），与代码**同一次 `git commit`**，并**立即 `git push`**；审计类任务回写 `FINDINGS` 代码证据；计划被吸收后按 #7 删冗余文件。
    > 文档与代码须**原子提交**，确保看板与实现永不失联。
+9. **跨文档口径一致性纪律**：同一事实在多处出现时（版本基线、测试例数、发现项总数、看板项数、功能勾选状态），**一律以 `STATUS.md` §1/§2 为准**；基线或任务状态变更后，须同步刷新 `AGENTS.md`（构建命令 / 文档索引）、`README.md`（技术栈 / 功能清单 / 已知未实现）、`FINDINGS_TRACKER.md`（物理状态与代码证据），杜绝同一事实多头失真。**看板表按 TASK ID 升序维护，不得残留同 ID 的失效副本**。
 
 ---
 
@@ -54,8 +55,8 @@ KeePasskey 是一款使用原生 Kotlin 开发的现代化 Android 密码管理�
 
 | 文件 | 内容 | 何时阅读 |
 |------|------|----------|
-| [**docs/STATUS.md**](docs/STATUS.md) | **单一真相源**：当前基线、未完成任务唯一看板（42 项）、历史提交日志索引 | **开始任何工作前、检查进度时** |
-| [**docs/FINDINGS_TRACKER.md**](docs/FINDINGS_TRACKER.md) | **历史审查发现跟踪表**：131 项发现的物理核对状态与代码证据 | **确认历史 Bug 是否已修时** |
+| [**docs/STATUS.md**](docs/STATUS.md) | **单一真相源**：当前版本基线、未完成任务唯一看板（46 项：39 ✅ / 3 📋 / 4 ❌）、历史提交日志索引 | **开始任何工作前、检查进度时** |
+| [**docs/FINDINGS_TRACKER.md**](docs/FINDINGS_TRACKER.md) | **历史审查发现跟踪表**：125 项发现的物理核对状态与代码证据 | **确认历史 Bug 是否已修时** |
 | [**docs/HEALTH_CHECK_ROADMAP.md**](docs/HEALTH_CHECK_ROADMAP.md) | **体检批次落地规划**：批次 A–H 的官方依据、范围与验收（对应 TASK-01/03~07） | **执行体检批次整改时** |
 | [**docs/ARCHITECTURE.md**](docs/ARCHITECTURE.md) | 模块依赖拓扑、关键架构决策与目录约定（原根目录 `ARCHITECTURE.md`） | **跨模块改动、新增功能落位前** |
 | [**docs/reference-projects.md**](docs/reference-projects.md) | 参考项目地图：各功能应参照哪个项目的哪些文件、阶段对照（原 `skills/reference-projects.md`，已归档） | **实现算法/格式兼容时** |
@@ -69,12 +70,12 @@ KeePasskey 是一款使用原生 Kotlin 开发的现代化 Android 密码管理�
 
 ## 构建与测试命令
 
-统一使用 Gradle Wrapper（**Gradle 9.3.1**，AGP 9.1.0 / Kotlin 2.4.10 / Hilt 2.60.1，kapt）。Windows 下执行 `.\gradlew.bat <task>`：
+统一使用 Gradle Wrapper（**Gradle 9.4.1**，AGP 9.2.1 / Kotlin 2.4.10 / Hilt 2.60.1 / **KSP 2.3.11**，版本集中于 `gradle/libs.versions.toml`）。Windows 下执行 `.\gradlew.bat <task>`：
 
 - `.\gradlew.bat assembleDebug` — 编译全部模块
 - `.\gradlew.bat :app:compileDebugKotlin` — 仅快速检查 Kotlin 编译
 - `.\gradlew.bat lint` — Android Lint
-- `.\gradlew.bat test` — 单元测试（全模块 `src/test`；当前 **462 例全绿**）
+- `.\gradlew.bat test` — 单元测试（全模块 `src/test`；当前 **462 例：450 通过 / 0 失败 / 12 跳过**，跳过项需 `-DliveSyncTest` 才启用）
 - `.\gradlew.bat test -DliveSyncTest` — 追加启用 `LiveSyncServersTest` 真实联调用例（默认跳过 12 例，需先起 `tools/local-sync` 服务）
 
 ---

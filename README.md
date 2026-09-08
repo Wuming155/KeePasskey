@@ -20,12 +20,12 @@
 
 | 领域 | 选型 |
 |------|------|
-| 系统基准 | **Android API 36+**（`minSdk 36`, `compileSdk 36`, `targetSdk 36`），仅针对 Android 16+ 深度优化，无需向下兼容负担 |
+| 系统基准 | **Android API 36+**（`minSdk 36`, `compileSdk 37`, `targetSdk 36`），仅针对 Android 16+ 深度优化，无需向下兼容负担 |
 | 语言 | **Kotlin 2.4.10**（Compose 编译器随 Kotlin 一同发布） |
-| 构建 | Gradle 9.3.1（Wrapper）+ AGP 9.1.0 |
+| 构建 | Gradle 9.4.1（Wrapper）+ AGP 9.2.1，依赖版本统一由 `gradle/libs.versions.toml` 管理 |
 | UI | **Jetpack Compose**（Material 3），优先声明式、可预览的 Compose 方案 |
 | 异步 | **Kotlin Coroutines + Flow** |
-| 依赖注入 | **Hilt 2.60.1**（当前 kapt，批次 D 规划迁移 KSP，见 `docs/HEALTH_CHECK_ROADMAP.md`） |
+| 依赖注入 | **Hilt 2.60.1**（已由 kapt 迁移 **KSP 2.3.11**，AGP 9 内置 Kotlin） |
 | 本地缓存 | 自研 `SyncCache`（三哈希磁盘布局 + 原子写盘，位于 `sync` 模块）；**未引入 Room** |
 | 数据库解析 | 自研 `database` 模块：KDBX **v4** 全链路流式解析 / 写回（参考 KeePassDX `database` 与 KeePass 2.61.1 官方 C#） |
 | 加密 | AES-256 / Twofish / ChaCha20 分组加密，Argon2d / Argon2id / AES-KDF（SHA-256）派生（BouncyCastle） |
@@ -59,7 +59,7 @@ sync/                # 同步层：文件存储抽象 + WebDAV / S3 兼容实现
 
 ## 4. 功能清单（KeePass 全功能）
 
-> 勾选状态与代码一致（2026-09-07 全量核对）。未勾选项在「已知未实现」中列出。
+> 勾选状态与代码一致（2026-09-08 全量核对）。未勾选项在「已知未实现」中列出。
 
 ### 4.1 数据库与解锁
 - [x] 创建 / 打开 `.kdbx` 数据库（**仅 v4**；v3 及以下明确拒绝）
@@ -72,7 +72,7 @@ sync/                # 同步层：文件存储抽象 + WebDAV / S3 兼容实现
 ### 4.2 条目与分组
 - [x] 分组树结构（无限层级）
 - [x] 条目字段：标题、用户名、密码、URL、备注、自定义字段（含 tags / overrideUrl / AutoType）
-- [~] 图标：**内置图标选择已完成**；自定义图标上传 / 选择 UI 未实现（模型与序列化层已就绪）
+- [x] 图标：内置图标选择 + **自定义图标上传 / 选择 UI 已完成**（模型/序列化/图标池/`IconPickerDialog`/Photo Picker 全链路落地）；**残余**：列表行/详情页位图渲染与图标删除入口未接线
 - [x] 附件（文件嵌入、增删导）
 - [x] 条目历史版本与恢复（含全字段回滚、Visual Diff 比对）
 - [x] 模板（预置网页登录 / 银行卡等常用模板，设置页一键安装）
@@ -84,7 +84,7 @@ sync/                # 同步层：文件存储抽象 + WebDAV / S3 兼容实现
 - [x] 密码生成器（强度评估 + Diceware 词表）
 - [x] 自动填充（Credential Provider + Autofill 双通道，含 IME 内联建议）
 - [ ] 自定义键盘（Magikeyboard 式字段填充）：未实现，当前仅提供 IME 内联建议
-- [x] 条目移动 / 只读锁定；**条目克隆未实现**
+- [x] 条目移动 / 只读锁定；[x] 条目克隆（全字段保真 + 新 UUID + 清历史）
 - [x] 密码健康度离线审计（`HealthCheckEngine`）
 
 ### 4.4 同步
@@ -92,13 +92,13 @@ sync/                # 同步层：文件存储抽象 + WebDAV / S3 兼容实现
 - [x] **S3 兼容协议** 同步（Endpoint、Bucket、Access Key/Secret、区域、path-style）
 - [x] 同步状态展示（最新同步时间、云端版本、同步反馈）
 - [x] 冲突处理：三方哈希状态机 + 墓碑感知合并 + 可视化逐字段决策界面
-- [ ] 后台自动同步与手动同步：手动同步与冷启动同步已完成；**周期性后台同步仅有设置项，WorkManager 调度未实现**
-- [ ] KeePass 字段引用（`{REF:...}`）引擎：未实现
+- [x] 后台同步（手动 / 冷启动 / 周期性 WorkManager 后台同步）：冷启动按持久化偏好恢复调度，间隔 / Wi-Fi 约束即时生效
+- [x] KeePass 字段引用（`{REF:...}`）引擎：官方语法子集（T/U/P/A/N/I）整库检索 + 递归展开 + 循环防护；**残余**：Notes/URL 展示侧未接
 
 ### 4.5 通行密钥（Passkey）
 - [x] 在数据库中安全存储 FIDO2 / WebAuthn 凭据（对齐 KeePassXC `KPEX_PASSKEY_*` 属性 schema）
 - [x] 通过 Credential Manager 创建 / 调用通行密钥（ES256 / Ed25519 / RS256 三算法）
-- [ ] 使用通行密钥作为数据库解锁方式之一：未实现（快速解锁为设备锁屏凭据绑定密钥）
+- [x] 使用通行密钥作为数据库解锁方式（设备绑定解锁通行密钥：WebAuthn 本地断言 + 硬件 ES256 + signCount 反克隆，旧凭据兼容通道）
 
 ---
 
@@ -106,7 +106,7 @@ sync/                # 同步层：文件存储抽象 + WebDAV / S3 兼容实现
 
 > 核心原则：**先 UI，后功能**。先把界面与交互流程搭好并确认合适，再逐层接入真实数据。
 > 全生命周期 7 大阶段的完整交付物清单、任务拆解与发布验收门禁曾收录于已归档的 `DELIVERY_PLAN.md`（已于 2026-09-07 并入 `docs/STATUS.md`）。
-> **进度（2026-09-07 核对）**：7 大阶段已于 2026-09-04 全部竣工（git `b0cdc89`）；此后专项整改（含已冻结的旧 Wave 编号体系）的逐轮记录以 `docs/STATUS.md` §4「历史改动日志索引」为唯一追溯入口；实时未完成任务看板见 `docs/STATUS.md` §2。
+> **进度（2026-09-08 核对）**：7 大阶段已于 2026-09-04 全部竣工（git `b0cdc89`）；此后专项整改（含已冻结的旧 Wave 编号体系）的逐轮记录以 `docs/STATUS.md` §4「历史改动日志索引」为唯一追溯入口；实时未完成任务看板见 `docs/STATUS.md` §2。
 
 ### 阶段 0：工程脚手架
 - [x] 初始化 Android 工程（Gradle Kotlin DSL）
@@ -154,7 +154,7 @@ sync/                # 同步层：文件存储抽象 + WebDAV / S3 兼容实现
 - [x] WebDAV 拉取 / 推送 / 冲突处理（ETag 乐观锁 + uploadAtomic 事务写）
 - [x] S3 兼容协议接入（自研 AWS SigV4，非 SDK）
 - [x] 同步状态展示与手动 / 冷启动同步
-- [ ] 周期性后台同步（WorkManager）：**未实现**，仅设置项就绪
+- [x] 周期性后台同步（WorkManager）：冷启动恢复调度，间隔 / Wi-Fi 约束即时生效（TASK-08）
 
 ### 阶段 6：KeePass 高级特性与全功能工具箱（已完成 ✅）
 - [x] TOTP / HOTP 引擎、密码生成器（含 Diceware）
@@ -162,7 +162,7 @@ sync/                # 同步层：文件存储抽象 + WebDAV / S3 兼容实现
 - [x] 多语言（中英）
 
 ### 阶段 7：质量工程、测试基线、混淆加固（已完成 🏁）
-- [x] 全模块 **417 个单元测试全绿**（app 99 / core 21 / crypto 42 / database 146 / sync 109）
+- [x] 全模块 **462 个单元测试**（app 111 / core 27 / crypto 52 / database 155 / sync 117）：**450 通过 / 0 失败 / 12 跳过**（跳过项为需真实联调的 `LiveSyncServersTest`，加 `-DliveSyncTest` 启用）
 - [x] R8 全量混淆 `assembleRelease` 构建闭环 + 敏感内存方法防剥离 keep 规则
 - [x] 官方标准向量校验（RFC 4226 / 6238、RFC 4231、AWS SigV4、KDBX 互操作）
 - [ ] 构建发布（F-Droid / GitHub Release）：**未发布**，仅构建链路就绪
@@ -175,12 +175,13 @@ sync/                # 同步层：文件存储抽象 + WebDAV / S3 兼容实现
 
 | 项 | 现状 |
 |---|---|
-| 自定义图标上传 / 选择 UI | 模型与序列化层完好，无 UI |
-| KeePass 字段引用 `{REF:...}` | 引擎未实现 |
-| 自定义键盘（Magikeyboard 式） | 未实现；已提供 IME 内联建议作为替代 |
-| 条目克隆（duplicate） | 未实现 |
-| 周期性后台同步（WorkManager） | 仅有间隔 / 仅 Wi-Fi 设置项，无调度实现 |
-| Passkey 作为数据库解锁方式 | 未实现；快速解锁为设备锁屏凭据绑定密钥 |
+| 自定义键盘（Magikeyboard 式字段填充） | 未实现；已提供 IME 内联建议 + 自动填充双通道替代 |
+| 图标列表行 / 详情页位图渲染与图标删除入口 | TASK-15 自定义图标上传/选择已落地，位图渲染与删除为残余项 |
+| KeePass 字段引用展示侧（Notes/URL） | TASK-25 引擎已落地，Notes/URL 引用展开展示未接线（并入 TASK-43 范畴） |
+| 进阶偏好消费方接线 | 全部开关已持久化（TASK-12），消费方未接线，登记 **TASK-43** |
+| 自动填充黑名单完整生命周期 | 阻断/告警可用，增删数据源与持久化未闭环，登记 **TASK-44** |
+| S3 SigV4 服务端时钟偏移补偿 | 直取本地时间，时钟偏移 >15min 返回 403，登记 **TASK-45** |
+| `OtpEngine` TOTP 计算链路 ByteArray 化 | 编辑态已 CharArray 闭环，计算链路仍 String，登记 **TASK-46** |
 | KDBX v3 及以下读写 | 明确拒绝（`KdbxUnsupportedVersionException`） |
 | 应用发布 | 构建链路就绪，未完成 F-Droid / GitHub Release 发布 |
 

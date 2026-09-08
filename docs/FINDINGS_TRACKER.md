@@ -1,7 +1,7 @@
-# KeePasskey 历史审查发现项全量跟踪表（131 项）
+# KeePasskey 历史审查发现项全量跟踪表（125 项）
 
-> **更新时间**：2026-09-07  
-> **数据说明**：本表基于 2026-09-07 对 `main` 分支（git `7b3e756`）全量 201 个 Kotlin 源码文件与测试套件的**实测代码物理核对**结果生成。所有 P0 级阻断项与高危安全缺陷均已 100% 验证修复。
+> **更新时间**：2026-09-08（2026-09-07 全量物理核对 + 2026-09-08 修复回写与计数校正）  
+> **数据说明**：本表基于 2026-09-07 对 `main` 分支（git `7b3e756`）全量 201 个 Kotlin 源码文件与测试套件的**实测代码物理核对**结果生成。**计数校正（2026-09-08）**：四份报告实际枚举条目为 93 + 16 + 9 + 7 = **125 项**（原记 131 系列向加总错误，已按行枚举校准）。所有 P0 级阻断项与高危安全缺陷均已 100% 验证修复。
 > **状态说明**：本表「物理状态」列为 **2026-09-07 审计时点的代码快照**，仅作历史核对记录，**不随后续修复实时更新**；任务实时完成状态以 `STATUS.md` §2 看板为准，修复落地后请在 STATUS 置 ✅ 并回写此处代码证据。  
 > **列说明**：`是否有必要修复` 取值为「否（已修复）/ 否（不适用）/ 低 / 低-中 / 中 / 中（安全）/ 中（功能）/ 中（测试）/ 高（真实 Bug）/ 不急（存疑）/ 不急（描述有误）/ 极低」；`说明` 为实测核对结论。
 
@@ -30,8 +30,8 @@
 | **P1-3** | 锁库态用 addAction 而非 addAuthenticationAction | ✅ 已修复 | `KeePasskeyCredentialProviderService.kt:122` 调 `AuthenticationAction.Builder` 并以 `addAuthenticationAction` 添加 | 否（已修复） | 已走认证动作 |
 | **P1-4** | Passkey 创建绑定包名取自 `callingPackage` 错误 | ✅ 已修复 | `PasskeyCreateActivity.kt:91` 改用 `providerReq?.callingAppInfo?.packageName`，包名缺失 fail-closed | 否（已修复） | 包名来源已修正 |
 | **P1-5** | 编辑页密码生成器使用非密码学安全随机源 | ✅ 已修复 | `EntryEditViewModel.kt:207` 改用 `java.security.SecureRandom` 生成密码并用完擦除 | 否（已修复） | 已换密码学随机源 |
-| **P1-6** | 设置模块 35 个开关为纯内存回显且无消费者 | ⚠️ 部分修复 | `RealSettingsRepository.kt` 已将 21 项关键设置持久化；下架了危险假开关；但约 35 个扩展开关仍纯内存回显 | 是（残余待补） | 关键设置已持久化；约 35 个扩展开关按需补齐持久化或明确标注为展示项 |
-| **P1-7** | 数据库设置页 5 个动作 + 调试日志导出全为假成功 | ⚠️ 部分修复 | `SettingsViewModel.kt:1023` 调试日志导出已接 SAF 写盘；导出 KDBX/XML/密钥文件/模板/子库挂载 5 动作仍为假提示 | 是（残余待补） | 日志导出已接 SAF；5 个导出动作需接真实实现 |
+| **P1-6** | 设置模块 35 个开关为纯内存回显且无消费者 | ✅ 已修复（2026-09-08，TASK-12） | `ExtendedSettings` 提升为公共模型 + 新增 `ExtendedSettingsStore`（SharedPreferences 持久化，null 上下文退化为内存语义保可测性），`SettingsViewModel` 全部 setter 经 `updateExtended` 统一「更新+落盘」；`wifiOnlySync` 独立键持久化 | 否（已修复） | 裁定：**全部开关保留不下架**（均为预留功能）；持久化缺口已消除，冷启动不再静默回落默认值；消费方未接线属独立缺口，登记 **TASK-43** |
+| **P1-7** | 数据库设置页 5 个动作 + 调试日志导出全为假成功 | ✅ 已修复（2026-09-08，TASK-13） | 导出 KDBX（`DatabaseSession.exportToBytes`）/ XML（新增 `KeePassXmlExporter`，可被 KeePass·KeePassXC 导入）/ 密钥文件（会话 `keyFileCache` 原件字节）均经 `CreateDocument` SAF 落盘；模板安装幂等创建「模板」分组与 5 个标准模板条目 | 否（已修复） | 子库挂载由谎报「挂载成功」改为如实提示「尚未实现」（真实缺口，纳入 TASK-43）；失败路径如实上浮 |
 | **P1-8** | Meta/Group 7 个官方字段及 Group CustomData/Tags 读写丢失 | ⚠️ 部分修复 | `KdbxXmlMetaReader.kt`/`Serializer.kt` 补齐 7 字段读写；`KdbxXmlGroupReader.kt` 补齐 CustomData/Tags；保留桶机制未做 | 是（残余待补） | 7 字段及 CustomData/Tags 已补；保留桶（RecycleBin 内容保留）机制未做 |
 | **P1-9** | 附件字节数组在去重后别名共享，clear() 清零二进制池 | ⚠️ 部分修复 | `KdbxBinaryDeduplicator.kt:59` 保存去重时克隆副本；读取侧 `KdbxXmlGroupReader.kt:315` 仍共享池数组引用 | 低 | 保存侧已克隆；读取侧别名共享在只读解析场景风险有限，可后续消除 |
 | **P1-10** | 仅密钥文件（无密码）的官方库无法打开 | ✅ 已修复 | `KdbxFile.kt:457` `deriveKeys` 改为 `passwordChars: CharArray?`，无密码时只算 `SHA-256(keyFileKey)` | 否（已修复） | 仅密钥文件库可开 |
@@ -49,16 +49,16 @@
 | **P2-2** | 保存路径把 Argon2 KDF 放进 `Dispatchers.IO` | ✅ 已修复（2026-09-08，TASK-42） | `DatabaseSession.save` 序列化（Argon2+流加密）移至 `Dispatchers.Default`，仅落盘走 IO；写毕擦除序列化缓冲 | 低-中（性能微调） | 对齐 exportToBytes 既有先例 |
 | **P2-3** | `InMemoryCipher.seal` 留下未清零的「密钥‖明文」拼接数组 | ✅ 已修复 | `InMemoryCipher.kt:84` 已重构为「随机 16B IV + AES-256-CTR 密文 + HMAC 标签」，主密钥 62 行即时清零 | 否（已修复） | 已重构并清零 |
 | **P2-4** | ProtectedString.toString() 泄露明文；Entry getter 读明文 | ⚠️ 部分修复 | `ProtectedString.kt:206` toString 改为脱敏字符串；getter 仍读明文 | 低 | toString 已脱敏；getter 读明文属投影层取舍，沿用 `useChars` 闭环即可 |
-| **P2-5** | TOTP 种子全程 String + 装箱 Byte 列表从不清零 | ❌ 未修复 | `OtpEngine.kt:146` Base32 仍以 String 承载且非法字符 `continue` 静默跳过 | 中 | `calculateTotp(secretKeyBase32: String)` 全程 String；`Base32Decoder.decode` 用 `mutableListOf<Byte>` 装箱；建议 ByteArray 链路并在用毕擦除 |
+| **P2-5** | TOTP 种子全程 String + 装箱 Byte 列表从不清零 | ❌ 未修复（编辑态已闭环，计算链路待改） | `OtpEngine.kt:146` Base32 仍以 String 承载且非法字符 `continue` 静默跳过；**编辑态已随 TASK-10 全线 CharArray 化**（见 C-09） | 中 | 残余为**计算链路**：`calculateTotp(secretKeyBase32: String)` 全程 String、`Base32Decoder.decode` 用 `mutableListOf<Byte>` 装箱；已登记 **TASK-46**（ByteArray 链路 + 用毕擦除） |
 | **P2-6** | `VariantDictionary` 硬类型转换无长度校验抛异常 | ✅ 已修复 | `VariantDictionary.kt:59` 全面改为 `when` 宽容匹配，失配抛类型化异常并加固 Key/Value 上限 | 否（已修复） | 类型匹配已宽容 |
 | **P2-7** | 原子写盘降级分支先删目标文件再 rename | ⚠️ 部分修复 | `AtomicFileWriter.kt:106` 改为先 renameTo，无备份兜底时拒绝覆盖；但 fsync 缺失 | 低 | 降级分支已先 renameTo；fsync 缺失可补（现行 `SyncCache` 已 `fd.sync()`） |
 | **P2-8** | 外层 Header 缺 masterSeed 长度与算法取值校验 | ✅ 已修复 | `KdbxHeader.kt:254` 强制 MasterSeed 必须 32B，Compression 仅 NONE/GZIP，IV 匹配算法长度 | 否（已修复） | 校验已加 |
 | **P2-9** | `parseEcPrivateKey` 用越界标量构造 KeyParameters | ✅ 已修复 | `PasskeyCryptoEngine.kt` 新增 `validateEcScalarRange` 显式校验（d ∈ [1, n-1]），越界 fail-closed 抛 `CryptoException.InvalidKeyException`；库层 IAE 经 `newEcPrivateKey` 归一为同一类型；5 例标量校验单测（d=0/d=n/d>n 拒绝，d=1/d=n-1 可用，hex 文本形态覆盖） | 否（已修复） | 标量越界 fail-closed |
 | **P2-10** | 旧派生回退分支 `legacyCipherKey` 从不清零 | ✅ 已修复（2026-09-07） | `KdbxFile.kt` `resolveCipherKey` 重构为返回 `CipherKeyResolution`：未选中路径 `finally` 统一清零，选中路径在解密流建立后立即擦除 | 中 | 代码证据：`CipherKeyResolution(activeKey, legacyKeyToWipe)` + `loadPayload` 中 `resolution.legacyKeyToWipe?.fill(0)`（SecretKeySpec 已克隆密钥材料后擦除原数组） |
-| **P2-11** | WebDAV Basic 认证使用 ISO-8859-1 致中文密码 401 | ❌ 未修复 | `WebDavSyncProvider.kt:85` 仍按 ISO-8859-1 编码密码 | 中 | 按 RFC 7617 默认 charset 编码，但非 ASCII（中文）密码会 401；应发 `charset=UTF-8` 并改 UTF-8 编码 |
+| **P2-11** | WebDAV Basic 认证使用 ISO-8859-1 致中文密码 401 | ✅ 已修复（2026-09-08，TASK-25） | `WebDavSyncProvider.buildBasicAuthHeader` 凭据拼接改按 UTF-8 编码（CharBuffer 直转，敏感数据铁律不变）；补中文用户名/密码回归测试（Authorization 头 Base64 解码逐字节断言） | 否（已修复） | RFC 7617 §2.1 的 `charset` 参数仅存在于服务端挑战侧，请求侧无声明机制，故只改编码不附参数（sabre 系服务端按 UTF-8 解码） |
 | **P2-12** | 全网络请求无 `callTimeout` 与退避重试 | ✅ 已修复（2026-09-08，TASK-42） | `SyncHttpClientFactory` 补全局 `callTimeout`（默认 5 分钟，`SyncNetworkOptions` 新增 `callTimeoutMs`），覆盖 DNS+连接+读写全生命周期兜底封顶 | 低-中 | 退避重试属增强项，未纳入本次范围 |
 | **P2-13** | 凭据加密失败时旧密文被保留且无错误上报 | ✅ 已修复 | `SyncCredentialsStore.kt:95` 改为先封印后落盘，加密失败直接中断并不改动磁盘 | 否（已修复） | 先封印后落盘已加 |
-| **P2-14** | S3 无时钟偏移处理（导致 RequestTimeTooSkewed 403） | ❌ 未修复 | `S3SyncProvider.kt:305` 直接取本地时间，无服务端时间补偿机制 | 低 | `signV4` 取本地 `Date()`；设备时钟偏移 >15min 才触发，发生概率低，建议加偏移补偿 |
+| **P2-14** | S3 无时钟偏移处理（导致 RequestTimeTooSkewed 403） | ❌ 未修复 | `S3SyncProvider.kt:305` 直接取本地时间，无服务端时间补偿机制 | 低 | `signV4` 取本地 `Date()`；设备时钟偏移 >15min 才触发，发生概率低；已登记 **TASK-45**（服务端时间偏移补偿） |
 | **P2-15** | `updateBase` 两文件非原子对（.baseversion 与 .meta） | ✅ 已修复（2026-09-08，TASK-37） | `SyncCache.updateBase` 改为单次原子写：版本+元数据合并写入同一临时文件后原子 rename（TASK-37 整改），并新增 `SyncCacheTest` 5 例 | 中 | 崩溃窗口不一致已消除 |
 | **P2-16** | 缓存临时文件名确定性致并发踩写 | ✅ 已修复 | `SyncCache.kt:225` 临时文件名加上 `UUID.randomUUID()` 防碰撞 | 否（已修复） | 已加 UUID |
 | **P2-17** | 冲突解决页字段级选择塌缩为整条目二选一 | ✅ 已修复（2026-09-08，TASK-30） | `KdbxMerger.resolveConflictByFields` 逐字段合并（KEEP_REMOTE 字段取远端并刷新 lastModificationTime）；`SyncCoordinator.resolveConflicts` 新增 `fieldResolutions` 参数，`ConflictResolutionViewModel.applyMerge` 生成逐字段决策下发 | 中（功能） | 字段级合并已落地 |
@@ -94,29 +94,29 @@
 | **P3-5** | 二进制池去重为 O(n²) 线性遍历 | ✅ 已修复（2026-09-08，TASK-41） | `KdbxBinaryDeduplicator.kt` `indexOfFirst` O(n²) → `Fingerprint(flags, data)` HashMap 指纹索引；索引在 `deduplicate()` 入口创建、整库共享并递归传递 | 否（已修复） | 曾踩坑：per-entry 索引会导致跨条目去重失效，已修正为整库共享索引 |
 | **P3-6** | 三个模块声明未使用的 `androidx.core:core-ktx` | ✅ 已修复 | core/crypto/database 三模块 `build.gradle.kts` 已移除该依赖 | 否（已修复） | 依赖已移除 |
 | **P3-7** | 未使用 import 残留 | ⚠️ 部分修复（2026-09-08，TASK-41） | 已删除 8 处经逐一人工核实的未使用 import（`KdbxHeader.kt` ByteArrayInputStream/IOException、`KdbxUuid.kt` Arrays、`OtpEngine.kt` MessageDigest、`TwofishCipherEngine.kt` Security、`PasskeyCryptoEngine.kt` ASN1Sequence、`KdbxXmlMetaSerializer.kt` KdbxUuid、`SyncProvider.kt` InputStream） | 极低 | app 模块 UI 层剩余候选 ~80 条留待 IDE inspection：`getValue`/`setValue`/`provideDelegate` 为 Compose 委托语法必用导入，批量脚本删除有误报风险（曾被安全策略拒绝），逐文件人工核实口径 |
-| **P3-8** | `KdbxFile.save` 头部序列化两遍 | ❌ 未修复 | `KdbxFile.kt:385` 仍存在 ByteArrayOutputStream 双重缓冲 | 极低 | 实测仅一次 `serialize`（写入 ByteArrayOutputStream 并返回同一 `headerBytes` 再写盘），是**双重缓冲**而非"序列化两遍"，非正确性 bug |
+| **P3-8** | `KdbxFile.save` 头部序列化两遍 | ➖ 记录备查（实测非 Bug） | `KdbxFile.kt:385` 仍存在 ByteArrayOutputStream 双重缓冲 | 否（描述有误） | 实测仅一次 `serialize`（写入 ByteArrayOutputStream 并返回同一 `headerBytes` 再写盘），是**双重缓冲**而非「序列化两遍」，无正确性风险，不整改 |
 | **P3-9** | `setDatabaseForTesting` 为绕过只读模式的公有后门 | ✅ 已修复（2026-09-08，TASK-41） | `DatabaseSession.setDatabaseForTesting` 加 `@androidx.annotation.VisibleForTesting`（database 模块新增 `androidx.annotation:annotation:1.9.1`） | 否（已修复） | 不用 internal：app 模块单测 RealVaultRepositoryTest/SecurityTest 跨模块调用，internal 会致编译失败 |
 | **P3-10** | ProtectedString.EMPTY 共享单例可被污染 | ✅ 已修复（2026-09-08，TASK-41） | `ProtectedString.clear()` 对 `EMPTY` no-op（`if (this === EMPTY) return`） | 否（已修复） | 共享单例不再被污染为已清零态 |
-| **P3-11** | CborEncoder.encodeMap 不强制 Canonical 键序 | ❌ 未修复 | `CborEncoder.kt:127` encodeMap 直接按 Map 迭代顺序编码 | 中（正确性） | 未按 RFC 8949 确定性键序（长度优先/字节序）；Passkey COSE/断言签名若与外部方互验可能因键序不一致失败 |
+| **P3-11** | CborEncoder.encodeMap 不强制 Canonical 键序 | ✅ 已修复（2026-09-08，TASK-27） | `CborEncoder` 新增 `writeCanonicalMap`：按键自身 CBOR 编码字节流字典序升序写出，重复键（编码字节相同，如 `Long(1)`/`Int(1)`）fail-fast 拒绝；补 5 例键序回归锁 | 否（已修复） | COSE 公钥（EC2/Ed25519/RSA）输出经 Canonical 重排后与 CTAP2 规范形态一致 |
 | **P3-12** | AttachmentManager.exportToCache 缓存无清理 | ✅ 已修复（2026-09-07） | `AttachmentManager.kt` 重写：专用子目录 `attachment_view` + 随机 UUID 文件名 + 会话即弃（新导出清上一轮）+ `deleteExported` 用完即删 + `deleteOnExit` 兜底 | 中（敏感） | `cleanCache` 改为仅清理专用子目录（全盘误删缺陷回归锁于 `AttachmentManagerTest`，6 例单测） |
 | **P3-13** | RSA `certainty = 12` 低于常规标准 | ✅ 已修复（2026-09-07） | `PasskeyCryptoEngine.generateRs256KeyPair` certainty 12 → 80 | 中 | `RSAKeyGenerationParameters(..., 2048, 80)`：False-prime 概率 ≤1/2⁸⁰，对齐 BouncyCastle 官方示例 |
 | **P3-14** | 魔法数字残留 | ⚠️ 部分修复（2026-09-08，TASK-41） | `KdbxFile.kt` 两处 `ByteArray(64)` 抽为 `INNER_RANDOM_STREAM_KEY_SIZE` / `SEED_HASH_BUFFER_SIZE` 语义常量 | 极低 | 按原建议只抽语义关键处，其余零散魔数不做大面积重命名以控风险 |
 | **P3-15** | 路径编码保留 ".." 导致路径遍历风险 | ✅ 已修复（2026-09-08，TASK-41） | `WebDavSyncProvider.encodePath` 已剔除 `.` / `..` 段 | 否（已修复） | 纵深防御补强 |
-| **P3-16** | SigV4 编码与 AWS 规范不符（`*` 与 `~` 处理） | ❌ 未修复 | `S3SyncProvider.kt:75` 编码逻辑未针对 AWS 规范微调 | 中（正确性） | `URLEncoder.encode` 把 `*`→`%2A`、`~`→`%7E`；AWS SigV4 canonical URI 要求 `*` 不编码、`~` 不编码，含这两字符的对象键会**签名不匹配 403** |
+| **P3-16** | SigV4 编码与 AWS 规范不符（`*` 与 `~` 处理） | ✅ 已修复（2026-09-08，TASK-26） | `S3SyncProvider.encodePath` 重写为 AWS SigV4 规范 URI 编码：保留集仅 RFC 3986 unreserved（`A-Za-z0-9-_.~`），其余大写百分号编码（`*`→`%2A`、`~` 保留）；补编码已知答案 + SigV4 签名已知答案向量（独立 Python 参考实现离线预计算，零共享代码） | 否（已修复） | 原 `URLEncoder` 为表单语义（`*` 不编码、`~` 强转 `%7E`），恰与 AWS 规范相反，含这两字符的键必 403；现与 AWS 规范对齐 |
 | **P3-17** | `parsePropfindXml` 吞掉所有异常返回空对象 | ✅ 已修复（2026-09-08，TASK-41） | `WebDavSyncProvider.parsePropfindXml` 静默 catch → `Log.w(TAG, ...)`（sync 模块新增日志设施） | 否（已修复） | 解析错误不再被静默掩盖 |
 | **P3-18** | `SyncCache.clear()` 漏删四类 `.tmp` 文件 | ✅ 已修复 | `SyncCache.kt:216` 改为 `deleteOrphanTmpFiles()` 通配删除 | 否（已修复） | 已通配删除孤立 tmp |
-| **P3-19** | `hasLocalChanges` 对缺失 version 与 baseversion 方向相反 | ❌ 未修复 | `SyncCache.kt:68` 缺失 .version 返回 false，缺失 .baseversion 返回 true | 不急（存疑） | 实测"方向相反"说法站不住：.version 缺失→无法确认本地修改→`false`（合理）；.baseversion 缺失→无法比对→保守返回 `true`（合理）；当前更像是保守策略，建议补注释明确语义，而非当作 bug 修 |
+| **P3-19** | `hasLocalChanges` 对缺失 version 与 baseversion 方向相反 | ➖ 记录备查（实测为保守策略） | `SyncCache.kt:68` 缺失 .version 返回 false，缺失 .baseversion 返回 true | 否（描述有误） | 实测"方向相反"说法站不住：.version 缺失→无法确认本地修改→`false`（合理）；.baseversion 缺失→无法比对→保守返回 `true`（合理）；当前更像是保守策略，建议补注释明确语义，而非当作 bug 修 |
 | **P3-20** | 无 HTTPS 强制与 URL scheme 校验 | ✅ 已修复 | WebDav/S3 Provider 构造函数在 `WebDavSyncProvider.kt:64` 处强校验非 https 即抛异常 | 否（已修复） | 已强校验 https |
 | **P3-21** | sync 模块 minSdk = 36 | ➖ 记录备查 | 固化的 Android 16+ 基线产品决策 | 否（产品决策） | Android 16+ 基线，固化决策 |
 | **P3-22** | 7 个 Kotlin 文件超过 800 行 | ✅ 已修复（2026-09-08，TASK-21） | `RealVaultRepository` 1436→771 行（拆出 `VaultEntryMapper`/`RecycleBinCoordinator`/`PasskeyEntryCoordinator`/`VaultTemplateFactory`）；`SettingsViewModel` 1193→700 行（拆出 `SettingsSyncController`/`SettingsHealthController`/`SettingsExportController`）；`VaultListScreen` 1005→387、`WebDavSyncScreen(CloudSync)` 997→348+68、`DatabaseSettingsScreen` 977→260、`EntryEditScreen` 956→603、`EntryDetailScreen` 876→343（各拆出区块/组件/对话框文件）。公共 API 名称与签名零变更，行为零变更 | 否（已修复） | 全仓 main 源码无超 800 行文件（脚本核验） |
 | **P3-23** | 约 250 处硬编码中文未抽离至 strings.xml | ✅ 渐进闭合（2026-09-08，TASK-21） | 用户可见文案全量资源化：UI 层 `stringResource`；非 Compose 层新增 `StringsProvider` 通道（`ui/model/StringsProvider.kt`）+ Hilt 绑定（`di/StringsProviderModule.kt`），`RealVaultRepository`/`SyncCoordinator`/`Settings*Controller`/`ConflictResolutionViewModel` 等经其解析；新增 `strings_ui_messages.xml`（39 键）、`strings_sync_passkey.xml`（30 键）、主 strings.xml `repo_*`/`health_*`/`time_*` 等（44 键）。中文字面量 294→114，剩余均为合理保留：①`debugLog`/`Log` 日志文案（非 UI）；②开发者面向异常消息（如 `IllegalStateException("PSL 资源缺失")`）；③KDBX 持久化数据（`RECYCLE_BIN_NAME="回收站"`、模板标题/备注、卡字段键「卡号」等、占位库名 `默认密码库.kdbx`、`OpenVaultSourceType.label` 落库标签）；④`core` 纯 JVM 模块 `KdbxResult` 兜底「未知错误」（无 Android 资源层，无法引用 R.string） | 低（i18n，余项均有据可查） | 国际化基础就绪；余 114 处性质见代码证据 |
 | **P3-24** | SettingsUiState 默认值为演示数据 | ✅ 已修复（2026-09-08，TASK-41） | `SettingsUiState` `databaseName`/`databasePath`/`databaseDefaultUsername` 演示默认值 → 空串 | 否（已修复） | 诚实化：真实数据加载前不再回显演示路径 |
 | **P3-25** | 收藏功能不落库（仅翻转内存 Flow） | ✅ 已修复（2026-09-08） | `VaultRepository.setEntryFavorite` 新契约；`RealVaultRepository` 持久化至 KDBX `customData["KeePasskey.Favorite"]`；`toggleFavorite` 调仓库保存且失败如实上浮；收藏随投影 `isFavorite` 下发 | 中（功能） | 收藏重启不再丢失 |
-| **P3-26** | EntryCategory 与银行卡字段为死代码 | ❌ 未修复 | `RealVaultRepository.kt:723` mapKdbxEntryToUi 未映射 category 且未处理卡字段 | 低-中（功能） | `mapKdbxEntryToUi` 不映射 `category`（恒 LOGIN）也不处理银行卡字段，`UiVaultEntry` 卡字段恒为 null，银行卡条目被当普通登录展示 |
+| **P3-26** | EntryCategory 与银行卡字段为死代码 | ✅ 已修复（2026-09-08，TASK-35） | `VaultEntryMapper.mapKdbxEntryToUi` 识别银行卡条目：非受保护卡字段映射至 `UiVaultEntry.cardNumberMasked/cardHolder/cardExpiry/cardCvv` + `category=CARD`；受保护卡号/CVV 保持 null 由 UI 整卡掩码兜底 | 否（已修复） | F2「投影层不物化明文」语义保持不变 |
 | **P3-27** | 空 onClick 按钮与写死黑名单 | ✅ 已修复（2026-09-08） | `AutofillSettingsScreen` 黑名单对话框移除写死示例条目与空 onClick 删除按钮，改诚实展示真实计数/空态；孤儿字符串（中英 4 条）清理；完整生命周期登记 TASK-44 | 中（功能） | 沿 TASK-12/13 诚实化裁定先例；假功能不再回显 |
 | **P3-28** | 带有仅含注释的空 if 块 | ✅ 已修复（2026-09-08，TASK-41） | `PasskeyCreateActivity` 移除仅含注释的空 if 块（注释保留在块外） | 否（已修复） | 死代码清理 |
-| **P3-29** | 从 Context 强转 MainActivity 获取单例 | ❌ 未修复 | `KeePasskeyApp.kt:149` 存在 `(context as? MainActivity)?.autoLockManager` 强转 | 不急（描述有误） | 实测为 `(context as? MainActivity)?.autoLockManager`——是**安全转换 `as?` 而非强转**，对 null 已优雅处理，风险很低；原结论"强转"不准确 |
-| **P3-30** | 熄屏自动锁在 Activity onDestroy 时销毁单例 | ❌ 未修复 → ✅ 已修复（2026-09-07，TASK-22） | `MainActivity.kt:48` onDestroy 中误调了单例 `autoLockManager.destroy()` | 高（真实 Bug） | 已整改：移除 `MainActivity.onDestroy` 的 `destroy()` 调用与空覆写，并清理 `AutoLockManager.destroy()` 死代码；单例生命周期与进程对齐，`initialize()` 幂等，旋转重建不再销毁调度器 |
+| **P3-29** | 从 Context 强转 MainActivity 获取单例 | ➖ 记录备查（实测为安全转换） | `KeePasskeyApp.kt:149` 为 `(context as? MainActivity)?.autoLockManager` | 否（描述有误） | 实测为 `(context as? MainActivity)?.autoLockManager`——是**安全转换 `as?` 而非强转**，对 null 已优雅处理，风险很低；原结论"强转"不准确 |
+| **P3-30** | 熄屏自动锁在 Activity onDestroy 时销毁单例 | ✅ 已修复（2026-09-07，TASK-22） | `MainActivity.kt:48` onDestroy 中误调了单例 `autoLockManager.destroy()` | 否（已修复） | 已整改：移除 `MainActivity.onDestroy` 的 `destroy()` 调用与空覆写，并清理 `AutoLockManager.destroy()` 死代码；单例生命周期与进程对齐，`initialize()` 幂等，旋转重建不再销毁调度器 |
 | **P3-31** | 捕获 Exception 丢弃具体异常细节 | ✅ 已修复（2026-09-08，TASK-41） | `SyncCoordinator` `serializeLocalDatabase` 与 `parseKdbxBytes` 两处 `catch (_: Exception)` → `debugLog.warn(TAG, ...)` | 否（已修复） | 后者同模式顺手一并修复 |
 | **P3-32** | 生产类构造函数保留 Context? 可空形参 | ➖ 按原裁定不修（2026-09-08，TASK-41 回写） | `KeystoreManager.kt:42` 等保留 `Context?` | 低 | FINDINGS 原文即裁定「仅为单测注入，可保留」，无需改代码 |
 | **P3-33** | MockData.kt 文件名与死链注释残留 | ✅ 已修复（2026-09-08，TASK-41） | `MockData.kt` → `UiModels.kt`（git mv 保留历史；文件内无 `MockData` 类、全仓无按文件名引用，全量编译测试零影响） | 否（已修复） | 文件名与内容语义对齐 |
@@ -143,7 +143,7 @@
 | **S-13** | 敏感 | Autofill `onSaveRequest` 密码 CharArray 未擦除 | P2 | ✅ 已修复 | `KeePasskeyAutofillService.kt:341` 增加 `finally { passwordChars.fill('0') }` | 否（已修复） | 已 finally 擦除 |
 | **S-14** | 依赖 | `androidx.biometric` 处于 alpha 依赖 | P0 | ✅ 已修复 | `app/build.gradle.kts:82` 降级迁移至稳定版 `1.1.0` | 否（已修复） | 已迁移稳定版 |
 | **S-15** | 依赖 | `androidx.credentials` 落后于稳定版 | P0 | ✅ 已修复 | `app/build.gradle.kts:87` 升级至稳定版 `1.6.0` | 否（已修复） | 已升级稳定版 |
-| **S-16** | CI | 无自动化依赖漏洞巡检 | P2 | ❌ 未修复 | 工作区缺乏 Dependabot 或 Dependency-Check 工作流文件 | 中（流程） | 缺 CI 依赖巡检；建议补 GitHub Actions 依赖漏洞巡检工作流 |
+| **S-16** | CI | 无自动化依赖漏洞巡检 | P2 | ❌ 未修复 | 工作区缺乏 Dependabot 或 Dependency-Check 工作流文件 | 中（流程） | 已登记 **TASK-20**（Dependabot / OWASP 依赖漏洞巡检） |
 
 ---
 
@@ -159,7 +159,7 @@
 | **C-06** | UI | 条目历史版本回滚走 String 中转 | ✅ 已修复 | `EntryDetailViewModel.kt:249` 改走 `getEntryRevisionPasswordChars` 全程 CharArray | 否（已修复） | 已全程 CharArray |
 | **C-07** | UI | 设置改密对话框使用普通文本框 | ✅ 已修复 | `SettingsScreen.kt:342` 改用双 `SecurePasswordField` CharArray 直通 | 否（已修复） | 已换安全输入框 |
 | **C-08** | 仓库 | `RealVaultRepository.saveEntry` 擦除契约缺漏 | ✅ 已修复 | `RealVaultRepository.kt:375` 拆分内部实现，`finally` 强制擦除传入副本 | 否（已修复） | 已 finally 擦除 |
-| **C-09** | 遗留 | TOTP 种子与受保护自定义字段编辑态以 String 承载 | ❌ 未修复 | `EntryEditUiState.kt:28` `totpSecret: String` 编辑态仍以 String 承载 | 低-中（敏感） | `totpSecret: String` 编辑态仍以 String 承载于 StateFlow；与 P2-5 同源，属已知 String 边界局限，建议编辑态改 CharArray/ByteArray 链路 |
+| **C-09** | 遗留 | TOTP 种子与受保护自定义字段编辑态以 String 承载 | ✅ 已修复（2026-09-08，TASK-10） | `EntryEditUiState` 移除 `totpSecret: String`，种子经 `EntryEditViewModel` CharArray 私有链路 + 一次性预填通道（`loadedTotpSecret`）承载，UI 走 `SecurePasswordField` 桥接；受保护自定义字段经 `protectedFieldChars` + `loadedProtectedFields` 承载 | 否（已修复） | 仓库契约收紧为 `saveEntry(totpSecretChars: CharArray?, protectedFieldChars: Map<String, CharArray>)`；`onCleared` 擦除全部驻留。**计算链路**残余见 P2-5 / TASK-46 |
 
 ---
 

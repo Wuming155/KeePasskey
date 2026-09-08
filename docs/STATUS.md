@@ -1,7 +1,8 @@
 # KeePasskey 项目状态单一真相源（Single Source of Truth）
 
-> **更新时间**：2026-09-08（阶段 6：新功能 / 现代化 批次完成）  
-> **权威声明**：本项目**唯一**有效的状态与任务跟踪页。`README.md` 仅作对外简介。原 `DELIVERY_PLAN.md` / `REMEDIATION_PLAN.md` / `docs/*审查报告*.md` 等历史存档文档已于 2026-09-07 **物理删除**，其结论已并入本文件与 `FINDINGS_TRACKER.md`，不再单独保留。
+> **更新时间**：2026-09-08（阶段 6 批次完成 + 全量文档梳理）  
+> **权威声明**：本项目**唯一**有效的状态与任务跟踪页。`README.md` 仅作对外简介。原 `DELIVERY_PLAN.md` / `REMEDIATION_PLAN.md` / `docs/*审查报告*.md` 等历史存档文档已于 2026-09-07 **物理删除**，其结论已并入本文件与 `FINDINGS_TRACKER.md`，不再单独保留。  
+> **2026-09-08 文档梳理**：看板去重（删除 TASK-08/15/16/17/18 的 5 条失效「❌ 未实现」副本），44 项按 ID 升序重排；基线 HEAD、测试口径与 §4 日志索引按实际提交校正。
 
 ---
 
@@ -9,8 +10,8 @@
 
 | 维度 | 数值 / 状态 | 官方依据与说明 |
 |---|---|---|
-| **Git HEAD** | `7dcc092` (main) | 阶段 6 批次 7 笔提交（TASK-03/04/05/07/06/15/16/17/18）；**推送因网络中继故障暂缓，待恢复立即补推** |
-| **测试基线** | **462 个单元测试全绿**（app / core / crypto / database / sync 五模块） | `./gradlew test` 强制重跑校验，其中 `LiveSyncServersTest` 12 例默认跳过（需 `-DliveSyncTest`） |
+| **Git HEAD** | `8133576` (main) | 阶段 6 批次 7 笔提交（TASK-03/04/05/06/07/15/16/17/18）+ 4 笔 README/LICENSE 文档提交；**已推送 `origin/main`（本地与远端 0 ahead / 0 behind）** |
+| **测试基线** | **462 个单元测试用例**（app 111 / core 27 / crypto 52 / database 155 / sync 117）：**450 通过、0 失败、12 跳过** | `./gradlew test` 全模块执行；跳过的 12 例为 `LiveSyncServersTest` 真实联调用例（需先起 `tools/local-sync` 服务并加 `-DliveSyncTest`） |
 | **构建状态** | `assembleDebug` + `assembleRelease` (R8) 全量通过 | **AGP 9.2.1 / Gradle 9.4.1** / Kotlin 2.4.10（经 buildscript classpath 锚定内置 KGP）/ Hilt 2.60.1 / **KSP 2.3.11** |
 | **系统基线** | **minSdk 36**, **compileSdk 37**, targetSdk 36 | 仅针对 Android 16+ 深度优化，固化无旧版垫片决策；compileSdk 37 随批次 H 升级（Compose BOM 2026.08.00 + M3 Expressive） |
 | **传输安全防线** | 全站强制 HTTPS（`network_security_config.xml` 禁明文 + OkHttp TLS-only），零证书固定 | 对齐 Google Developer Knowledge `pinning not recommended` 指南 |
@@ -18,9 +19,9 @@
 
 ---
 
-## 2. 任务唯一看板（44 项：39 ✅ 完成 / 5 未闭合）
+## 2. 任务唯一看板（46 项：39 ✅ 完成 / 3 📋 待验证·评估 / 4 ❌ 未实现）
 
-所有进行中、已立项、待执行体检批次、未实现功能、安全遗留与欠账统一收录于下表，按优先级排序。**新增任务必须在此表注册。**
+所有进行中、已立项、待执行体检批次、未实现功能、安全遗留与欠账统一收录于下表，**按 TASK ID 升序排列**（优先级见各行「优先级」列）。**新增任务必须在此表注册，新 ID 顺延。**
 
 > **与另两份文档的边界（消除多头管理）**：本表是**任务完成态的唯一看板**。`FINDINGS_TRACKER.md` 为 2026-09-07 审计时点的**代码证据快照**（其「物理状态」列不随修复实时更新，仅供追溯）；审计类任务（TASK-09~42）修复落地后**以本表状态为准**并回写 FINDINGS 的代码证据。`HEALTH_CHECK_ROADMAP.md` 仅作体检批次的**执行方案**（范围 / 依据 / 风险 / 验收），状态不在此重复维护。
 
@@ -33,22 +34,17 @@
 | **TASK-05** | 构建 | **批次 F：Gradle 版本目录（`libs.versions.toml`）** | 体检路线图 F | **P2** | ✅ 已完成（2026-09-08） | 5 模块插件与依赖全部入 `gradle/libs.versions.toml` 集中管理；版本货币性核对（hilt 2.60.1 / credentials 1.6.0 / okhttp 4.12.0 / coroutines 1.10.2 / zxing 4.3.0）；后续批次（datastore / profileinstaller / BOM 2026.08.00 / material3 / AGP 9.2.1 / core-ktx 1.19.0 / KSP）版本均经目录注入 |
 | **TASK-06** | 性能 | **批次 G：Baseline Profiles + Startup Profiles** | 体检路线图 G | **P3** | ✅ 已完成（2026-09-08） | 引入 `androidx.profileinstaller:1.4.1`（首启异步触发 ART 配置安装）；新增手动 `app/src/main/baseline-prof.txt`：冷启动 + 解锁首屏路径优先（应用壳/导航/主题、Hilt DI、Unlock/安全封存、设置仓库/自锁、database/crypto 解锁链路），S 标志规则同时驱动 DEX 布局优化；release APK 实测产出 `assets/dexopt/baseline.prof(+m)`。Macrobenchmark 实测生成（需真机跑 `generateBaselineProfile`）为后续可选精化 |
 | **TASK-07** | UI/SDK | **批次 H：compileSdk 37 → Material 3 Expressive** | 体检路线图 H | **P3** | ✅ 已完成（2026-09-08） | 5 模块 compileSdk 36→37（android-37.0 平台）；AGP 9.1.0→9.2.1（SDK 37 正式支持）+ Gradle Wrapper 9.3.1→9.4.1；core-ktx 1.17.0→1.19.0；Compose BOM 2026.06.01→2026.08.00（material3 1.4.0 底座）；M3 Expressive：material3 显式采用 1.5.0-alpha27（ExpressiveTheme/MotionScheme 公开 API 1.5.0 才毕业，1.4.0 中 internal），`KeePasskeyTheme` 切 `MaterialExpressiveTheme` + `MotionScheme.expressive()`；ExposedDropdownMenu 1.5.0 移除→迁移 `DropdownMenu + exposedDropdownSize()`。minSdk 36 决策固化不变 |
-| **TASK-15** | 特性 | **自定义图标上传 / 选择 UI** | 功能缺口 | **P3** | ✅ 已完成（2026-09-08） | 新增 `CustomIconCoordinator`（PNG 魔数校验 fail-closed / 单图 256KB 上限 / 内容去重 / KDBX Meta CustomIcons 落库）；`VaultRepository` 新增 `addCustomIcon` / `getCustomIconBytes`；`UiVaultEntry.customIconId` 投影与保存路径双向写回；`IconPickerDialog` 扩展自定义图标区（位图网格 + 相册上传，既有分组调用点零变更）；编辑页 Photo Picker 选图 → 降采样 ≤128px PNG（离主线程）→ 上传即选中，标准/自定义图标互斥。**余项**：列表行/详情页位图渲染与图标删除未接线（图标数据通道已就绪） |
-| **TASK-16** | 特性 | **条目克隆（duplicate）** | 功能缺口 | **P3** | ✅ 已完成（2026-09-08） | 新增 `EntryDuplicateCoordinator`（独立协调器，沿 RecycleBinCoordinator 模式）：全字段保真复制（标准/自定义/受保护字段、TOTP、附件引用、tags、AutoType、customData）+ 新 `KdbxUuid`（否则会话层视为更新覆盖）+ 清空历史修订 + 时间属性重置；只读会话如实拒绝（会话 saveEntry 只读静默 no-op，故仓库层显式前置校验）；详情页顶栏克隆入口（只读隐藏），成功后就地切换至克隆体；`RealVaultRepositoryTest` 真实文件持久化往返用例 |
-| **TASK-17** | 协议 | **KeePass 字段引用（`{REF:...}`）引擎** | 功能缺口 | **P3** | ✅ 已完成（2026-09-08） | database 模块新增 `FieldReferenceEngine`：`{REF:<Want>@<SearchIn>:<Text>}` 官方语法子集（T/U/P/A/N/I，大小写不敏感），整库检索首个命中条目取值替换，引用链递归展开（深度上限 10 防循环），未命中保守保持原文；取值消费点接入自动填充下发与详情页复制（密码/用户名）——投影层不展开，引用指向的密码明文不提前物化进 UI 状态流（M1 语义不变）；8 例引擎单测。**余项**：Notes/URL 展示侧解析未接（同消费点策略可平移） |
-| **TASK-18** | 特性 | **Passkey 作为数据库解锁方式** | 功能缺口 | **P3** | ✅ 已完成（2026-09-08） | 快速解锁升级为「设备绑定解锁通行密钥」：主密码 AES-256-GCM 封印（生物识别/锁屏凭据门控）之上叠加 WebAuthn 形态本地断言——登记生成硬件不可导出 ES256（P-256，StrongBox 优先）密钥对，公钥 + 随机 credentialId 落私有存储；解锁时硬件私钥签名 AuthenticatorData（rpIdHash + UP + signCount），公钥验证 + rpIdHash 归属 + signCount 严格单调（反克隆），未通过 fail-closed 拒绝并清除登记；旧凭据兼容通道（首解跳过断言并后台补登记）。新增 `UnlockPasskeyManager`（验证纯逻辑 JVM 可测，6 例单测） |
-| **TASK-08** | 同步 | **周期性后台同步（WorkManager）** | 功能缺口 | **P2** | ❌ 未实现 | 设置项 `periodicBackgroundSyncIntervalMinutes`（默认 30m）与 `wifiOnlySync` 已落地，**无 WorkManager 调度消费方** |
+| **TASK-08** | 同步 | **周期性后台同步（WorkManager）** | 功能缺口 | **P2** | ✅ 已完成（2026-09-08） | 新增 `PeriodicSyncWorker`（CoroutineWorker + Hilt EntryPoint 获取 `SyncCoordinator`，与前台同步共享 mutex 天然互斥；冲突留待用户决策、错误不重试避免退避风暴）与 `PeriodicSyncScheduler`（唯一周期任务 UPDATE 语义，间隔强制 ≥15 分钟，`wifiOnlySync` 映射 UNMETERED/CONNECTED 网络约束）。冷启动 `MainApplication` 按持久化偏好恢复调度；设置页开关/间隔/Wi-Fi 三项变更即时生效。依赖 `androidx.work:work-runtime-ktx:2.10.0` |
 | **TASK-09** | 安全 | **P0-2 测试代码真实凭据清洗** | 审核报告 P0-2 | **P1** | ✅ 已完成（2026-09-07） | **核实完成**：`Argon2InteropDiagnosticTest.kt` 已全部换用合成口令 `TestMasterPassword!2026#Secure` 与自造十六进制密钥/盐（期望值由独立参考实现离线预计算，互操作校验语义不变）；`KdbxKeyFileTest.kt` 为 32B 合成测试字节（0x01..0x20）。仓库级扫描（测试源码密码赋值模式 + `.kdbx`/真实库引用模式）零命中，**仓库内零真实凭据**。FINDINGS P0-2 已在历史提交中标记修复，本次为看板状态同步 |
 | **TASK-10** | 内存 | **TOTP 种子与受保护自定义字段编辑态 CharArray 化** | 加解密审查 B9 | **P2** | ✅ 已修复（2026-09-07） | **同 M1 密码模式全面 CharArray 化**：`EntryEditUiState` 移除 `totpSecret: String`，TOTP 种子经 `EntryEditViewModel` CharArray 私有链路 + 一次性预填通道（`loadedTotpSecret`）承载，UI 走 `SecurePasswordField` 桥接；受保护自定义字段明文经 `protectedFieldChars` 私有映射 + `loadedProtectedFields` 预填通道承载（UI 投影恒空串，对齐详情页掩码投影语义），保护标记切换时明文自动迁移存储。仓库契约同步收紧：`saveEntry` 改 `totpSecretChars: CharArray?` + `protectedFieldChars: Map<String, CharArray>`（擦除契约扩展）、`getEntryTotpSecret`/`getEntryProtectedField` 改 CharArray 独占副本读取；详情页展示/复制路径同步改造。`onCleared` 擦除全部驻留。428 例全绿 |
 | **TASK-11** | 安全 | **Autofill Dataset 已解锁分支增加二次确认/认证** | 审核报告 P2-24 | **P2** | ✅ 已修复（2026-09-07） | `KeePasskeyAutofillService` 已解锁分支每个数据集下发前挂 `setAuthentication`，认证 PendingIntent 指向新增 `AutofillConfirmActivity`（每数据集独立 requestCode 防 PendingIntent 覆盖）：优先系统级生物识别/锁屏凭据（`UNLOCK_AUTHENTICATORS` 集合），无硬件时退化为受保护窗口内手动确认（确认/取消）。Activity 具备 FLAG_SECURE + `setHideOverlayWindows(true)` 反截屏/反 overlay 加固；仅 RESULT_OK 后框架才将数据集值写入目标表单 |
 | **TASK-12** | 架构 | **设置项 33 个字段持久化（全部开关保留为预留功能）** | 审核报告 P1-6 | **P2** | ✅ 已完成（2026-09-08） | **裁定：全部开关保留不下架**（均为预留功能，消费方接线登记为 TASK-43）。整改核心为消除「纯内存回显」：`ExtendedSettings` 提升为公共模型并新增 `ExtendedSettingsStore`（SharedPreferences 持久化，整体读/整体写，null 上下文时退化为内存语义保可测性），`SettingsViewModel` 全部 setter 经 `updateExtended` 统一「更新+落盘」，冷启动不再静默回落默认值；`wifiOnlySync` 以独立键持久化。Store 无持久化层回退语义补单测 |
 | **TASK-13** | UI/SAF | **设置页 5 个动作 SAF 真实化** | 审核报告 P1-7 | **P2** | ✅ 已完成（2026-09-08） | 导出三件套真实化：KDBX（`DatabaseSession.exportToBytes` 内存库全量序列化）、XML（新增 `KeePassXmlExporter` 输出 KeePass 2.x 兼容明文格式，可被 KeePass/KeePassXC 导入，明文安全声明见导出警告文案）、密钥文件（会话 `keyFileCache` 原件字节）——三者均经 `CreateDocument` SAF 另存为落盘，失败如实上浮。模板安装真实化：`installEntryTemplates` 幂等创建「模板」分组与 5 个标准模板条目并落库。子库挂载：从谎报「挂载成功」改为如实提示「尚未实现」（真实功能缺口，登记 TASK-43） |
-| **TASK-08** | 同步 | **周期性后台同步（WorkManager）** | 功能缺口 | **P2** | ✅ 已完成（2026-09-08） | 新增 `PeriodicSyncWorker`（CoroutineWorker + Hilt EntryPoint 获取 `SyncCoordinator`，与前台同步共享 mutex 天然互斥；冲突留待用户决策、错误不重试避免退避风暴）与 `PeriodicSyncScheduler`（唯一周期任务 UPDATE 语义，间隔强制 ≥15 分钟，`wifiOnlySync` 映射 UNMETERED/CONNECTED 网络约束）。冷启动 `MainApplication` 按持久化偏好恢复调度；设置页开关/间隔/Wi-Fi 三项变更即时生效。依赖 `androidx.work:work-runtime-ktx:2.10.0` |
 | **TASK-14** | 安全 | **`SyncCredentialsStore` 删生产测试钩子** | 审核报告 P2-21 | **P2** | ✅ 已修复（2026-09-07） | `customEncryptor`/`customDecryptor` 加 `@VisibleForTesting` 注解并收窄为 `internal`——生产 DI 与外部调用方不可见、不可写，仅本模块单元测试（同一编译单元）可注入模拟加解密闭包 |
-| **TASK-15** | 特性 | **自定义图标上传 / 选择 UI** | 功能缺口 | **P3** | ❌ 未实现 | 模型与 XML 序列化层完好，缺前端上传与选择界面 |
-| **TASK-16** | 特性 | **条目克隆（duplicate）** | 功能缺口 | **P3** | ❌ 未实现 | 库层与 ViewModel 缺克隆逻辑 |
-| **TASK-17** | 协议 | **KeePass 字段引用（`{REF:...}`）引擎** | 功能缺口 | **P3** | ❌ 未实现 | 暂不支持条目间字段动态交叉引用解析 |
-| **TASK-18** | 特性 | **Passkey 作为数据库解锁方式** | 功能缺口 | **P3** | ❌ 未实现 | 现快速解锁为设备锁屏凭据绑定密钥，Passkey 仅作条目数据 |
+| **TASK-15** | 特性 | **自定义图标上传 / 选择 UI** | 功能缺口 | **P3** | ✅ 已完成（2026-09-08） | 新增 `CustomIconCoordinator`（PNG 魔数校验 fail-closed / 单图 256KB 上限 / 内容去重 / KDBX Meta CustomIcons 落库）；`VaultRepository` 新增 `addCustomIcon` / `getCustomIconBytes`；`UiVaultEntry.customIconId` 投影与保存路径双向写回；`IconPickerDialog` 扩展自定义图标区（位图网格 + 相册上传，既有分组调用点零变更）；编辑页 Photo Picker 选图 → 降采样 ≤128px PNG（离主线程）→ 上传即选中，标准/自定义图标互斥。**余项**：列表行/详情页位图渲染与图标删除未接线（图标数据通道已就绪） |
+| **TASK-16** | 特性 | **条目克隆（duplicate）** | 功能缺口 | **P3** | ✅ 已完成（2026-09-08） | 新增 `EntryDuplicateCoordinator`（独立协调器，沿 RecycleBinCoordinator 模式）：全字段保真复制（标准/自定义/受保护字段、TOTP、附件引用、tags、AutoType、customData）+ 新 `KdbxUuid`（否则会话层视为更新覆盖）+ 清空历史修订 + 时间属性重置；只读会话如实拒绝（会话 saveEntry 只读静默 no-op，故仓库层显式前置校验）；详情页顶栏克隆入口（只读隐藏），成功后就地切换至克隆体；`RealVaultRepositoryTest` 真实文件持久化往返用例 |
+| **TASK-17** | 协议 | **KeePass 字段引用（`{REF:...}`）引擎** | 功能缺口 | **P3** | ✅ 已完成（2026-09-08） | database 模块新增 `FieldReferenceEngine`：`{REF:<Want>@<SearchIn>:<Text>}` 官方语法子集（T/U/P/A/N/I，大小写不敏感），整库检索首个命中条目取值替换，引用链递归展开（深度上限 10 防循环），未命中保守保持原文；取值消费点接入自动填充下发与详情页复制（密码/用户名）——投影层不展开，引用指向的密码明文不提前物化进 UI 状态流（M1 语义不变）；8 例引擎单测。**余项**：Notes/URL 展示侧解析未接（同消费点策略可平移） |
+| **TASK-18** | 特性 | **Passkey 作为数据库解锁方式** | 功能缺口 | **P3** | ✅ 已完成（2026-09-08） | 快速解锁升级为「设备绑定解锁通行密钥」：主密码 AES-256-GCM 封印（生物识别/锁屏凭据门控）之上叠加 WebAuthn 形态本地断言——登记生成硬件不可导出 ES256（P-256，StrongBox 优先）密钥对，公钥 + 随机 credentialId 落私有存储；解锁时硬件私钥签名 AuthenticatorData（rpIdHash + UP + signCount），公钥验证 + rpIdHash 归属 + signCount 严格单调（反克隆），未通过 fail-closed 拒绝并清除登记；旧凭据兼容通道（首解跳过断言并后台补登记）。新增 `UnlockPasskeyManager`（验证纯逻辑 JVM 可测，6 例单测） |
 | **TASK-19** | 依赖 | **zxing → CameraX + ML Kit 迁移评估** | 依赖治理 | **P3** | 📋 评估 | `zxing-android-embedded:4.3.0` 保持稳定，评估迁移至现代 CameraX + ML Kit |
 | **TASK-20** | CI | **GitHub Dependabot / OWASP 依赖漏洞巡检** | 供应链 | **P3** | 📋 评估 | 配置自动化依赖漏洞扫描工作流 |
 | **TASK-21** | 整洁度 | **超 800 行文件拆分与硬编码中文抽取** | 审核报告 P3-22/23 | **P3** | ✅ 已完成（2026-09-08） | **P3-22 全闭合**：7 个超 800 行文件全部拆分（`RealVaultRepository` 1436→771 + 新增 `VaultEntryMapper`/`RecycleBinCoordinator`/`PasskeyEntryCoordinator`/`VaultTemplateFactory`；`SettingsViewModel` 1193→700 + 新增 `SettingsSyncController`/`SettingsHealthController`/`SettingsExportController`；5 个大屏 Compose 文件拆出区块/组件/对话框文件，公共 API 与行为零变更）。**P3-23 渐进闭合**：用户可见文案全量资源化（新增 `strings_ui_messages.xml` 39 键、`strings_sync_passkey.xml` 30 键、主 strings.xml `repo_*`/`health_*`/`time_*` 等 44 键；非 Compose 层新增 `StringsProvider` 通道 + Hilt 绑定，生产转发 getString、单测注入假实现）。中文字面量 294→114，剩余均为合理保留：debugLog/Log 日志、开发者面向异常消息、KDBX 持久化数据（回收站/模板/卡字段键/占位库名）、`core` 纯 JVM 模块异常兜底「未知错误」（无 Android 资源层）。**446 例测试全绿** |
@@ -75,22 +71,26 @@
 | **TASK-42** | 性能 | **低-中调度批次（P2-2 / P2-12 / P2-30 / P2-31）** | FINDINGS 核实 | **P3** | ✅ 已修复（2026-09-08） | 四项全闭合：P2-2 `DatabaseSession.save` 序列化（Argon2 派生+流加密，CPU 密集）移至 `Dispatchers.Default`，仅字节落盘（writeAtomic+fsync）走 IO（对齐 exportToBytes 先例，写毕擦除序列化缓冲）；P2-12 `SyncHttpClientFactory` 补全局 `callTimeout`（默认 5 分钟，覆盖 DNS+连接+读写全生命周期，弱网悬挂兜底封顶，`SyncNetworkOptions` 新增 `callTimeoutMs`）；P2-30 `AuthenticatorViewModel` uiState 上游显式 `flowOn(Dispatchers.Default)`（combine 内含种子解析+HMAC，兜底脱离主线程，测试同步改为真实时间轮询等待）；P2-31 `RealVaultRepository` 构造期不再同步扫盘——`listFiles` 移至协程 + `Dispatchers.IO`，databasesFlow 经 Flow 自然推送更新 |
 | **TASK-43** | 特性 | **进阶偏好消费方接线（预留功能清单）** | TASK-12 裁定衍生 | **P3** | ❌ 未实现 | 设置页全部进阶开关保留为预留功能（已随 TASK-12 持久化，不再回显丢失）。待接线消费方：`webdavChunkedUpload`/`webdavChunkSizeMb`（WebDAV 分块上传）、`createBackupBeforeSave`（保存前 .bak）、`checkRemoteChangesBeforeSave`、`conflictResolution` 默认策略、`useFileTransactions`（已是既定行为，接线为信息展示）、`preloadDatabaseEnabled`、`lockWhenNavigateBack`、`clearPasswordOnLeave`、`rememberRecentFiles`、`rememberKeyFileLocation`、`showKillAppOption`、`offerSaveCredentials`、`inlineSuggestionsEnabled`、`autoReturnFromQuery`、`autofillCopyTotp`、`autofillShowTotpNotification`、`skipDalVerification`、`overrideNoAutofill`、`disabledAutofillQueriesCount`（黑名单，完整生命周期见 TASK-44）、`maskPasswordsDefault`、`maskTotpDefault`、`showUnlockedNotification`、`showGroupInSearchResult`、`showGroupInEntry`、`listDensity`、`autoActivateSearchOnOpen`、`iconSet`、TOTP 字段映射、`debugLogEnabled`、`verboseSyncLog`、子库挂载（TASK-13 改诚实提示）。另：导出/导入五源（1PUX/Bitwarden/KeePass/浏览器 CSV）解析器亦为独立功能缺口 |
 | **TASK-44** | 特性 | **自动填充黑名单完整生命周期** | TASK-36 整改衍生 | **P3** | ❌ 未实现 | TASK-36 整改确认黑名单为端到端功能缺口（设置页仅展示计数，且该计数无任何写入方）。待建设：① 黑名单存储（包名集合持久化，替代现无写入方的 `disabledAutofillQueriesCount` 计数）；② 自动填充服务侧消费（黑名单包名不下发数据集）；③ 入口（详情页/系统设置「为本应用禁用填充」写入黑名单）；④ 设置页条目化展示与删除（替代当前仅计数展示）。对齐 KP2A「禁用自动填充查询」语义 |
+| **TASK-45** | 协议 | **S3 SigV4 服务端时钟偏移补偿** | FINDINGS P2-14 | **P3** | ❌ 未实现 | `S3SyncProvider.signV4` 直接取本地 `Date()`，设备时钟偏移 >15min 时服务端返回 `RequestTimeTooSkewed` 403；建议以响应 `Date` 头计算偏移量并在签名时补偿 |
+| **TASK-46** | 内存 | **`OtpEngine` TOTP 计算链路 ByteArray 化** | FINDINGS P2-5 | **P2** | ❌ 未实现 | 编辑态已随 TASK-10 全线 CharArray 化（C-09 闭合）；残余 `calculateTotp(secretKeyBase32: String)` 全程 String 与 `Base32Decoder.decode` 装箱 `List<Byte>` 未清零，建议改 ByteArray 链路并在用毕擦除 |
 
 ---
 
-## 3. 历史发现项全量审计汇总（131 项）
+## 3. 历史发现项全量审计汇总（125 项）
 
 针对 2026-09-05 及 2026-09-06 三份审查报告中的 131 项发现，对照当前 `main` 分支代码完成逐条物理核对。详细核对卷宗见 [**FINDINGS_TRACKER.md**](FINDINGS_TRACKER.md)。
 
 | 报告来源 | 发现总数 | ✅ 已修复 | ⚠️ 部分修复 | ❌ 未修复 | ➖ 不适用 / 记录备查 |
 |---|:---:|:---:|:---:|:---:|:---:|
-| **全量代码审核报告（2026-09-05）** | 93 | 38 | 15 | 38 | 2 |
+| **全量代码审核报告（2026-09-05）** | 93 | 70 | 12 | 4 | 7 |
 | **安全审查报告（2026-09-06 Wave 13）** | 16 | 15 | 0 | 1 | 0 |
-| **加解密实现审查报告（2026-09-06）** | 9 | 8 | 0 | 1 | 0 |
-| **审核报告第七节测试覆盖缺口** | 7 | 2 | 2 | 3 | 0 |
-| **合计** | **131** | **63 (48%)** | **17 (13%)** | **43 (33%)** | **8 (6%)** |
+| **加解密实现审查报告（2026-09-06）** | 9 | 9 | 0 | 0 | 0 |
+| **审核报告第七节测试覆盖缺口** | 7 | 5 | 2 | 0 | 0 |
+| **合计** | **125** | **99 (79%)** | **14 (11%)** | **5 (4%)** | **7 (6%)** |
 
-> **关键结论**：在 131 项发现中，所有 P0 级阻断项（7 项）与高危安全缺陷（如自研 PIN 解锁、全站明文流量、旧派生 HMAC 校验、GCM IV 唯一性等）已**100% 修复**；未修复的 43 项主要集中在：① 约 35 个设置项无消费者（P1-6）；② 5 个假动作 SAF 导出（P1-7）；③ 超 800 行文件与硬编码中文（P3-22/23）；④ 测试代码中的假用例与覆盖缺口（P2-36/37）。
+> **计数校正（2026-09-08）**：原记「131 项」为列向加总错误，按四份报告行枚举实为 **125 项**（93 + 16 + 9 + 7）；上表数字已按 `FINDINGS_TRACKER.md` 当前物理状态重新点算。
+>
+> **关键结论**：125 项发现中，所有 P0 级阻断项（7 项）与高危安全缺陷（自研 PIN 解锁、全站明文流量、旧派生 HMAC 校验、GCM IV 唯一性等）已 **100% 修复**。原「未修复 43 项」的四类主因——① 约 35 个设置项无消费者（P1-6）、② 5 个假动作 SAF 导出（P1-7）、③ 超 800 行文件与硬编码中文（P3-22/23）、④ 测试假用例与覆盖缺口（P2-36/37）——已随 TASK-12/13/21/40 全部闭合。**当前仅余 5 项未修复**：P2-5（`OtpEngine` TOTP 计算链路仍 String，编辑态已随 TASK-10 闭环 → 登记 **TASK-46**）、P2-14（S3 时钟偏移补偿 → **TASK-45**）、P2-26（占位库演示数据，低优先级可接受）、P2-28（「已泄露密码」恒 0，需接入 HIBP 外部服务）、S-16（CI 依赖巡检 → **TASK-20**）。另有 14 项为「部分修复」（均属风险已接受的残余项，详见 FINDINGS「说明」列）。
 
 ### 3.1 实测核实补充结论（2026-09-07）
 
@@ -117,6 +117,10 @@
 
 > 索引中出现的 `Wave N` / `阶段 N` 字样为对应历史提交的**原始主题**，属已冻结语境，仅供追溯；新提交请以 `TASK-xx` / `批次 X` + 提交哈希 引用，勿再使用 Wave / 阶段 编号。
 
+- `8133576` (2026-09-08): docs README 参考项目说明更新（keepass2android 定位措辞）
+- `be0a11b` (2026-09-08): docs README 删除许可证合规提示冗余说明
+- `2f4d419` (2026-09-08): docs 发布准备——README 补 5 个参考项目 GitHub 地址与许可证，确立 GPL-3.0 并新增 LICENSE
+- `d578df7` (2026-09-08): docs 阶段 6 批次收尾——看板吸收 TASK-03~07/15~18 九项，删除已冗余的 bug-fix-plan.md
 - `7dcc092` (2026-09-08): TASK-18 设备绑定解锁通行密钥——快速解锁叠加 WebAuthn 形态本地断言（硬件 ES256 私钥 + signCount 反克隆 + fail-closed；旧凭据兼容通道）；新增 `UnlockPasskeyManager`（验证纯逻辑 JVM 可测 6 例）
 - `8a7816e` (2026-09-08): TASK-17 `{REF:...}` 字段引用引擎——官方语法子集（T/U/P/A/N/I）整库检索 + 递归展开 + 循环防护；自动填充/详情复制消费点接线（投影层不展开）；8 例单测
 - `1a0b759` (2026-09-08): TASK-15 自定义图标上传/选择——`CustomIconCoordinator`（PNG 校验/去重/Meta 落库）+ 图标池投影/写回 + `IconPickerDialog` 自定义区 + Photo Picker 降采样上传
@@ -124,10 +128,19 @@
 - `56a1d33` (2026-09-08): TASK-07 compileSdk 37——AGP 9.2.1 / Gradle 9.4.1 / core-ktx 1.19.0 / BOM 2026.08.00 / material3 1.5.0-alpha27 `MaterialExpressiveTheme + MotionScheme.expressive()`
 - `1e27379` (2026-09-08): TASK-04 设置持久化迁移 Preferences DataStore——21 键全量 + 手写一次性 SharedPreferences 迁移（Mutex 恰好一次）
 - `4b7c6d1` (2026-09-08): TASK-03/05 kapt→KSP 2.3.11 + AGP 9 内置 Kotlin（移除 opt-out 旗标，Kotlin 2.4.10 经 buildscript classpath 锚定）+ Gradle 版本目录 `libs.versions.toml` 落地
+- `abe5cef` (2026-09-08): TASK-06 Baseline Profiles——profileinstaller 1.4.1 + 手动 `baseline-prof.txt`（冷启动/解锁首屏路径，S 标志驱动 DEX 布局）
+- `7da95f5` (2026-09-08): TASK-12/13/08 阶段4 功能债——设置项全量持久化（开关保留为预留功能，登记 TASK-43）/ 5 个 SAF 动作真实化（导出 KDBX·XML·密钥文件 + 模板安装，子库挂载改诚实提示）/ WorkManager 周期性后台同步
+- `4af3382` (2026-09-08): TASK-37/38/39 阶段4 数据·构建·性能债——`SyncCache` 合并原子写 / `shrinkResources` + ProGuard 收紧（顺手修 lintVital 孤儿翻译）/ SAF 密钥读取移 IO；新增 `SyncCacheTest`
+- `1136235` (2026-09-08): TASK-25/26/27 阶段4 协议互操作——WebDAV Basic 认证改 UTF-8 / SigV4 AWS 规范 URI 编码 + 已知答案向量 / CBOR RFC 8949 Canonical 键序
+- `f2188cd` (2026-09-08): TASK-42 调度批次——Argon2 序列化移 `Dispatchers.Default` 仅落盘走 IO / OkHttp 全局 `callTimeout` / 验证器 `flowOn(Default)` / 构造期扫盘移 IO 协程；同步补齐 FINDINGS 历史漏回写
+- `5ff2e18` (2026-09-08): TASK-40 测试覆盖收口——`SecurityTest` 诚实化 + GCM 篡改回归锁 / `SyncCredentialsStoreTest` 真实 AES-GCM 算法路径用例
 
 - `863d81c` (2026-09-08): TASK-41 低危清理批次——13 项 P3 闭合（O(n²) 去重 / 未用 import / 测试后门 / EMPTY 单例污染 / 魔数 / 路径遍历 / 静默 catch / 演示默认值 / 空 if 块 / 吞异常 / MockData 改名；P3-32/34 按原裁定不修）；bug-fix-plan 与交接文档被看板吸收后删除
 - `c69779e` (2026-09-08): TASK-21 整洁度整改——P3-22 七文件拆分（`RealVaultRepository` 1436→771 拆出 `VaultEntryMapper`/`RecycleBinCoordinator`/`PasskeyEntryCoordinator`/`VaultTemplateFactory`；`SettingsViewModel` 1193→700 拆出 `SettingsSyncController`/`SettingsHealthController`/`SettingsExportController`；5 个大屏拆出组件/对话框文件，公共 API 零变更）+ P3-23 用户可见文案全量资源化（新增 `StringsProvider` 通道 + Hilt 绑定、`strings_ui_messages.xml` 39 键、`strings_sync_passkey.xml` 30 键、主 strings.xml 44 键；中文字面量 294→114，余为日志/开发异常/持久化数据）。446 例全绿
 - `68f2bcb` (2026-09-08): 阶段5 功能/质量收尾——TASK-30~36 七项闭合（字段级冲突合并 / 空快照诚实报错 / 密码强度真实熵 / TOTP 假码移除 / 收藏落库 / 卡条目映射 / 黑名单诚实化）+ TASK-44 登记
+- `6e4e6c7` (2026-09-07): TASK-10/11/14/24/28/29 安全与功能债第一批——TOTP 种子与受保护字段 CharArray 化 / Autofill 二次确认 / 测试钩子收窄 / `legacyCipherKey` 清零 / 附件缓存用完即删 / RSA certainty 80
+- `5db6372` (2026-09-07): TASK-09/TASK-23——测试代码真实凭据清洗核实 + EC 私钥标量范围校验 fail-closed
+- `1173e31` (2026-09-07): TASK-01/TASK-22——HMAC 终止块校验 fail-closed 门禁 + `AutoLockManager` 单例生命周期守卫（移除 `onDestroy` 误销毁）
 - `7b3e756` (2026-09-07): WebDAV 零字节文件元数据误报修复
 - `0d4fc16` (2026-09-07): 本地 HTTPS 同步联调工具链与端到端测试 (`LiveSyncServersTest`)
 - `fe979fe` (2026-09-07): 全量同步整改与稳定性修复（`CacheCorruptedError`、KDBX4 随机 IV 误判重传修复、`SyncCache` UUID 化、WebDAV/S3 原子写加固）
