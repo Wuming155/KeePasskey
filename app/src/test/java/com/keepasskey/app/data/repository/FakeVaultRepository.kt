@@ -209,6 +209,17 @@ class FakeVaultRepository() : VaultRepository {
         return com.keepasskey.core.result.KdbxResult.Success(Unit)
     }
 
+    // TASK-16 Fake 语义：克隆 = 同字段复制 + 新 id + 清历史修订
+    override suspend fun duplicateEntry(id: String): com.keepasskey.core.result.KdbxResult<String> {
+        val source = entriesFlow.value.firstOrNull { it.id == id }
+            ?: return com.keepasskey.core.result.KdbxResult.Failure(
+                IllegalArgumentException("条目不存在"), "条目不存在"
+            )
+        val cloneId = "dup_${System.currentTimeMillis()}"
+        entriesFlow.value = entriesFlow.value + source.copy(id = cloneId, revisions = emptyList())
+        return com.keepasskey.core.result.KdbxResult.Success(cloneId)
+    }
+
     override suspend fun deleteEntry(id: String): com.keepasskey.core.result.KdbxResult<Unit> {
         val current = entriesFlow.value.toMutableList()
         val index = current.indexOfFirst { it.id == id }

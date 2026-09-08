@@ -34,6 +34,7 @@
     <string name="cd_save">Save</string>
     <string name="cd_edit">Edit</string>
     <string name="cd_favorite">Favorite</string>
+    <string name="cd_duplicate">Duplicate this entry</string>
     <string name="cd_hide_password">Hide password</string>
     <string name="cd_show_password">Show password</string>
     <string name="cd_toggle_password_visibility">Toggle password visibility</string>
@@ -141,6 +142,7 @@
     <string name="detail_history_rollback_confirm">Are you sure you want to rollback this entry to this historical snapshot?</string>
     <string name="detail_history_rolled_back">Entry successfully restored to historical version</string>
     <string name="detail_history_rollback_failed">History snapshot is no longer available (possibly pruned); rollback failed</string>
+    <string name="detail_duplicate_success">Entry duplicate created</string>
     <string name="detail_notes_section">Notes &amp; Metadata</string>
 
     <!-- Entry Edit Screen -->

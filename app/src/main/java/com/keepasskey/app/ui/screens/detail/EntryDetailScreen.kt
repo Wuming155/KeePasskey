@@ -14,6 +14,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
@@ -100,6 +101,7 @@ fun EntryDetailScreen(
         onBackClick = onBackClick,
         onEditClick = { uiState.entry?.let { onEditClick(it.id) } },
         onToggleFavorite = viewModel::toggleFavorite,
+        onDuplicateEntry = viewModel::duplicateEntry,
         onTogglePasswordVisibility = viewModel::togglePasswordVisibility,
         onToggleCustomFieldVisibility = viewModel::toggleCustomFieldVisibility,
         onCopyCustomField = viewModel::copyCustomField,
@@ -129,6 +131,7 @@ fun EntryDetailContent(
     onBackClick: () -> Unit,
     onEditClick: () -> Unit,
     onToggleFavorite: () -> Unit,
+    onDuplicateEntry: () -> Unit = {},
     onTogglePasswordVisibility: () -> Unit,
     onToggleCustomFieldVisibility: (String) -> Unit,
     onCopyCustomField: (String, String) -> Unit = { _, _ -> },
@@ -169,6 +172,16 @@ fun EntryDetailContent(
                             contentDescription = stringResource(R.string.cd_favorite),
                             tint = if (uiState.isFavorite) securityColors.warning else MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                    }
+                    // TASK-16：条目克隆（只读会话隐藏）
+                    if (!uiState.isReadOnly) {
+                        IconButton(onClick = onDuplicateEntry) {
+                            Icon(
+                                imageVector = Icons.Default.ContentCopy,
+                                contentDescription = stringResource(R.string.cd_duplicate),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                     // H4-只读整改：只读会话隐藏编辑入口
                     if (!uiState.isReadOnly) {

@@ -152,6 +152,13 @@ interface VaultRepository {
     suspend fun deleteEntry(id: String): com.keepasskey.core.result.KdbxResult<Unit>
 
     /**
+     * 克隆凭据条目（TASK-16）：全字段保真复制至同一分组，分配全新 UUID、
+     * 清空历史修订、时间属性重置为克隆时刻。成功返回新条目十六进制 UUID
+     * （KdbxResult.Success.data），供 UI 导航至克隆体。
+     */
+    suspend fun duplicateEntry(id: String): com.keepasskey.core.result.KdbxResult<String>
+
+    /**
      * 切换条目收藏状态并持久化落库（TASK-34 整改：原实现仅翻转内存 Flow 不落库）。
      * 收藏标记存于 KDBX 条目 customData，随库文件同步；不产生历史修订快照。
      */

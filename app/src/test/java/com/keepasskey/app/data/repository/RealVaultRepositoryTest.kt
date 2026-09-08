@@ -399,4 +399,76 @@ class RealVaultRepositoryTest {
 
         password.fill('0')
     }
+
+    @Test
+    fun `duplicateEntry 克隆保真新UUID清历史并持久化往返`() = runTest {
+        val testFile = File(tempFolder.root, "duplicate_test.kdbx")
+        val password = "StrongPassword#2026".toCharArray()
+
+        val session = DatabaseSession()
+        val createResult = session.create(
+            file = testFile,
+            name = "DupVault",
+            passwordChars = password,
+            useArgon2 = false
+        )
+        assertTrue(createResult is com.keepasskey.core.result.KdbxResult.Success)
+
+        val repository = RealVaultRepository(createMockContext(tempFolder.root), session, com.keepasskey.app.data.logger.DebugLogBuffer(), createTestStrings())
+
+        // 1. 创建源条目（含历史修订，验证克隆体不继承 history）
+        val srcId = KdbxUuid.random().toHexString()
+        val saveResult = repository.saveEntry(
+            UiVaultEntry(
+                id = srcId,
+                title = "原始条目",
+                username = "alice",
+                url = "https://example.com",
+                tags = listOf("finance")
+            ),
+            passwordChars = "src_pwd_123".toCharArray()
+        )
+        assertTrue(saveResult is com.keepasskey.core.result.KdbxResult.Success)
+        // Fake 投影外的 revisions 走 KDBX 层——再次编辑以制造 history 快照
+        repository.saveEntry(
+            UiVaultEntry(id = srcId, title = "原始条目v2", username = "alice", url = "https://example.com", tags = listOf("finance")),
+            passwordChars = "src_pwd_v2".toCharArray()
+        )
+
+        // 2. 克隆
+        val dupResult = repository.duplicateEntry(srcId)
+        assertTrue("克隆应成功（含真实落盘）", dupResult is com.keepasskey.core.result.KdbxResult.Success)
+        val cloneId = (dupResult as com.keepasskey.core.result.KdbxResult.Success).data
+        assertTrue("克隆体必须持有全新 UUID", cloneId != srcId)
+
+        // 3. 内存树验证：两份条目共存，克隆体全字段保真且无历史
+        val dbAfterDup = session.databaseFlow.first()!!
+        val entries = dbAfterDup.rootGroup.allEntries()
+        assertEquals("克隆后应为两条条目", 2, entries.size)
+        val clone = entries.first { it.id.toHexString() == cloneId }
+        val original = entries.first { it.id.toHexString() == srcId }
+        assertEquals("标题应保真", "原始条目v2", clone.title)
+        assertEquals("用户名应保真", "alice", clone.userName)
+        assertEquals("URL 应保真", "https://example.com", clone.url)
+        assertEquals("密码应保真", "src_pwd_v2", clone.password?.readString())
+        assertEquals("标签应保真", listOf("finance"), clone.tags)
+        assertEquals("克隆体不得继承历史修订", 0, clone.history.size)
+        assertTrue("原条目应保留其历史修订", original.history.isNotEmpty())
+        assertEquals("克隆体父组应与原条目一致", original.parentGroupId, clone.parentGroupId)
+
+        // 4. 不存在的条目 / 非法 id → 如实失败
+        assertTrue(repository.duplicateEntry("deadbeef") is com.keepasskey.core.result.KdbxResult.Failure)
+
+        // 5. 持久化往返：重开后克隆体仍在
+        session.close()
+        val reopenSession = DatabaseSession()
+        assertTrue(reopenSession.open(testFile, password) is com.keepasskey.core.result.KdbxResult.Success)
+        assertEquals(2, reopenSession.databaseFlow.first()!!.rootGroup.allEntries().size)
+        assertTrue(
+            "重开后克隆体应存在",
+            reopenSession.databaseFlow.first()!!.rootGroup.allEntries().any { it.id.toHexString() == cloneId }
+        )
+
+        password.fill('0')
+    }
 }

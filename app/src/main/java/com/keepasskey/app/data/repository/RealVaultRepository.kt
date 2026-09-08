@@ -51,6 +51,7 @@ class RealVaultRepository @Inject constructor(
     // TASK-21 拆分：投影映射器与领域协调器（回收站/Passkey/模板），仓库仅保留 CRUD 编排
     private val entryMapper = VaultEntryMapper(strings)
     private val recycleBin = RecycleBinCoordinator(strings, databaseSession) { persistSession() }
+    private val entryDuplicator = EntryDuplicateCoordinator(strings, databaseSession) { persistSession() }
     private val passkeyEntries = PasskeyEntryCoordinator(databaseSession, debugLog) { persistSession() }
 
     private val databasesFlow = MutableStateFlow<List<VaultDatabaseInfo>>(emptyList())
@@ -506,6 +507,9 @@ class RealVaultRepository @Inject constructor(
     }
 
     override suspend fun deleteEntry(id: String): KdbxResult<Unit> = recycleBin.deleteEntry(id)
+
+    // TASK-16：条目克隆（全字段保真 + 新 UUID + 清历史），委托独立协调器
+    override suspend fun duplicateEntry(id: String): KdbxResult<String> = entryDuplicator.duplicateEntry(id)
 
     override suspend fun restoreEntry(id: String): KdbxResult<Unit> = recycleBin.restoreEntry(id)
 

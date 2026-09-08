@@ -34,6 +34,7 @@
     <string name="cd_save">保存</string>
     <string name="cd_edit">编辑</string>
     <string name="cd_favorite">收藏</string>
+    <string name="cd_duplicate">克隆此条目</string>
     <string name="cd_hide_password">隐藏密码</string>
     <string name="cd_show_password">显示密码</string>
     <string name="cd_toggle_password_visibility">密码显示与隐藏</string>
@@ -141,6 +142,7 @@
     <string name="detail_history_rollback_confirm">确定将当前条目回滚至此历史快照版本吗？</string>
     <string name="detail_history_rolled_back">已成功还原至历史快照版本</string>
     <string name="detail_history_rollback_failed">历史快照已不可用（可能已被清理），无法回滚</string>
+    <string name="detail_duplicate_success">已创建条目克隆</string>
     <string name="detail_notes_section">备注与元数据</string>
 
     <!-- 凭据编辑页面 -->

@@ -211,6 +211,24 @@ class EntryDetailViewModel @Inject constructor(
     }
 
     /**
+     * 克隆当前条目（TASK-16）：全字段保真复制 + 新 UUID + 清历史，落库后
+     * 详情页就地切换至克隆体。失败如实上浮（H3 语义）。
+     */
+    fun duplicateEntry() {
+        val entryId = entryIdFlow.value ?: return
+        viewModelScope.launch {
+            when (val result = vaultRepository.duplicateEntry(entryId)) {
+                is com.keepasskey.core.result.KdbxResult.Success -> {
+                    userMessageFlow.value = UiMessage(R.string.detail_duplicate_success)
+                    setEntryId(result.data)
+                }
+                is com.keepasskey.core.result.KdbxResult.Failure ->
+                    userMessageFlow.value = UiMessage(R.string.edit_save_failed, listOf(result.message))
+            }
+        }
+    }
+
+    /**
      * 切换受保护自定义字段可见性（F2 整改）。
      * 展开时经仓库按需单条解密该字段明文，收起时立即从驻留状态中移除。
      */
