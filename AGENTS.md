@@ -74,7 +74,7 @@ KeePasskey 是一款使用原生 Kotlin 开发的现代化 Android 密码管理�
 - `.\gradlew.bat assembleDebug` — 编译全部模块
 - `.\gradlew.bat :app:compileDebugKotlin` — 仅快速检查 Kotlin 编译
 - `.\gradlew.bat lint` — Android Lint
-- `.\gradlew.bat test` — 单元测试（全模块 `src/test`；当前 **417 例全绿**）
+- `.\gradlew.bat test` — 单元测试（全模块 `src/test`；当前 **462 例全绿**）
 - `.\gradlew.bat test -DliveSyncTest` — 追加启用 `LiveSyncServersTest` 真实联调用例（默认跳过 12 例，需先起 `tools/local-sync` 服务）
 
 ---

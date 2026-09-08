@@ -1,6 +1,6 @@
 # KeePasskey 项目状态单一真相源（Single Source of Truth）
 
-> **更新时间**：2026-09-08  
+> **更新时间**：2026-09-08（阶段 6：新功能 / 现代化 批次完成）  
 > **权威声明**：本项目**唯一**有效的状态与任务跟踪页。`README.md` 仅作对外简介。原 `DELIVERY_PLAN.md` / `REMEDIATION_PLAN.md` / `docs/*审查报告*.md` 等历史存档文档已于 2026-09-07 **物理删除**，其结论已并入本文件与 `FINDINGS_TRACKER.md`，不再单独保留。
 
 ---
@@ -9,16 +9,16 @@
 
 | 维度 | 数值 / 状态 | 官方依据与说明 |
 |---|---|---|
-| **Git HEAD** | `c69779e` (main) | 干净工作区无提交滞后（不含本次治理改动） |
-| **测试基线** | **446 个单元测试全绿**（app / core / crypto / database / sync 五模块） | `./gradlew test` 强制重跑校验，其中 `LiveSyncServersTest` 12 例默认跳过（需 `-DliveSyncTest`） |
-| **构建状态** | `assembleDebug` + `assembleRelease` (R8) 全量通过 | AGP 9.1.0 / Gradle 9.3.1 / Kotlin 2.4.10 / Hilt 2.60.1 |
-| **系统基线** | **minSdk 36**, compileSdk 36, targetSdk 36 | 仅针对 Android 16+ 深度优化，固化无旧版垫片决策 |
+| **Git HEAD** | `7dcc092` (main) | 阶段 6 批次 7 笔提交（TASK-03/04/05/07/06/15/16/17/18）；**推送因网络中继故障暂缓，待恢复立即补推** |
+| **测试基线** | **462 个单元测试全绿**（app / core / crypto / database / sync 五模块） | `./gradlew test` 强制重跑校验，其中 `LiveSyncServersTest` 12 例默认跳过（需 `-DliveSyncTest`） |
+| **构建状态** | `assembleDebug` + `assembleRelease` (R8) 全量通过 | **AGP 9.2.1 / Gradle 9.4.1** / Kotlin 2.4.10（经 buildscript classpath 锚定内置 KGP）/ Hilt 2.60.1 / **KSP 2.3.11** |
+| **系统基线** | **minSdk 36**, **compileSdk 37**, targetSdk 36 | 仅针对 Android 16+ 深度优化，固化无旧版垫片决策；compileSdk 37 随批次 H 升级（Compose BOM 2026.08.00 + M3 Expressive） |
 | **传输安全防线** | 全站强制 HTTPS（`network_security_config.xml` 禁明文 + OkHttp TLS-only），零证书固定 | 对齐 Google Developer Knowledge `pinning not recommended` 指南 |
 | **PSL 与域名匹配** | 完整接入 Mozilla PSL（`public_suffix_list.dat`），IDN punycode 归一 | 消除 47 条硬编码漏判盲区，fail-closed |
 
 ---
 
-## 2. 未完成工作唯一看板（44 项）
+## 2. 任务唯一看板（44 项：39 ✅ 完成 / 5 未闭合）
 
 所有进行中、已立项、待执行体检批次、未实现功能、安全遗留与欠账统一收录于下表，按优先级排序。**新增任务必须在此表注册。**
 
@@ -28,11 +28,15 @@
 |:---:|:---:|---|---|:---:|:---:|---|
 | **TASK-01** | 安全 | **批次 C：HMAC 防篡改回归锁 flaky 排查** | 体检路线图 C | **P0** | ✅ 已修复（2026-09-07） | **根因定位并修复**：`testCorruptHmacBlock` 偶发未抛异常系真实安全缺陷——解析期间 GZip 预读拉取到 HMAC 终止块时，`javax.crypto.CipherInputStream` 将底层 `IOException`（凭据异常）吞掉伪装为 EOF，而 `HmacBlockInputStream` 在校验**通过前**即置 `terminated=true`，`verifyEndOfStream` 误判放行（实测 ~10% 概率篡改文件静默解锁）。整改：`terminated` 仅在终止块 HMAC 校验通过后置位，失败先记录 `terminalValidationFailed` 再抛出，`verifyEndOfStream` 作为权威检查点重放失败（fail-closed）。验收：`testCorruptHmacBlock` 连跑 **20 次零失败**（修复前 40 次内 6 次复现）；`KdbxFile.kt` `!!` 已清理 |
 | **TASK-02** | 平台 | **凭据能力注册实机回归** | Wave 16 遗留 | **P1** | 📋 待验证（代码层已核实） | 2026-09-07 代码层核实：`AndroidManifest.xml` 凭据服务 `meta-data` 名为 `android.credentials.provider`（契约名正确），`@xml/credential_provider_service` 资源存在，Autofill 兼容层 `android.autofill` 同步在位。**剩余动作需真机**：「设置 → 密码、密钥和自动填充」确认 KeePasskey 出现且能力生效 |
-| **TASK-03** | 依赖 | **批次 D：kapt → KSP 迁移 + 启用 built-in Kotlin** | 体检路线图 D | **P2** | 📋 规划 | AGP 9 要求切内置 Kotlin，AGP 10 移除 opt-out；`kapt("hilt-compiler")` → `ksp("hilt-android-compiler")` |
-| **TASK-04** | 存储 | **批次 E：RealSettingsRepository 迁移 Preferences DataStore** | 体检路线图 E | **P2** | 📋 规划 | 替换 SharedPreferences；`SyncCredentialsStore` Keystore AES-256-GCM 方案保持不动 |
-| **TASK-05** | 构建 | **批次 F：Gradle 版本目录（`libs.versions.toml`）** | 体检路线图 F | **P2** | 📋 规划 | 集中 5 模块依赖；核对 `hilt` 1.4.0 / `credentials` 1.6.0 等依赖货币性 |
-| **TASK-06** | 性能 | **批次 G：Baseline Profiles + Startup Profiles** | 体检路线图 G | **P3** | 📋 规划 | 引入 `profileinstaller` + Macrobenchmark，针对冷启动/解码生成 DEX 布局 profile |
-| **TASK-07** | UI/SDK | **批次 H：compileSdk 37 → Material 3 Expressive** | 体检路线图 H | **P3** | 📋 规划 | 需 Compose BOM 2026.08.00+（compileSdk 37）；固化 minSdk 36 决策 |
+| **TASK-03** | 依赖 | **批次 D：kapt → KSP 迁移 + 启用 built-in Kotlin** | 体检路线图 D | **P2** | ✅ 已完成（2026-09-08） | kapt → KSP 2.3.11（AGP 9 要求 ≥2.3.6）；移除 kotlin-android / kapt 插件与 `android.builtInKotlin` / `android.newDsl` opt-out 旗标；Kotlin 2.4.10 经顶层 buildscript classpath 锚定内置 Kotlin（与 Compose 编译器插件版本严格对齐）；各模块 `kotlin.compilerOptions.jvmTarget` 移除（内置 Kotlin 默认取 compileOptions JVM 17）。KSP `kspDebugKotlin` 正常执行，全量测试绿 |
+| **TASK-04** | 存储 | **批次 E：RealSettingsRepository 迁移 Preferences DataStore** | 体检路线图 E | **P2** | ✅ 已完成（2026-09-08） | datastore-preferences 1.2.1（稳定版）；21 个设置键全量迁移：事务性原子写、Flow 原生变更通知；手写一次性迁移（首次收集设置流时旧 SharedPreferences 键值整体写入 DataStore 后删旧文件，Mutex 保证恰好一次，IO 调度器承载）——弃用官方 `SharedPreferencesMigration`（1.2.1 构造器默认参数解析异常，手写更可控）。`ExtendedSettingsStore` 保持 SharedPreferences（同步 load/save API 与「null 上下文注入 JVM 单测」可测性设计强绑定，KDoc 已注明后续整体评估） |
+| **TASK-05** | 构建 | **批次 F：Gradle 版本目录（`libs.versions.toml`）** | 体检路线图 F | **P2** | ✅ 已完成（2026-09-08） | 5 模块插件与依赖全部入 `gradle/libs.versions.toml` 集中管理；版本货币性核对（hilt 2.60.1 / credentials 1.6.0 / okhttp 4.12.0 / coroutines 1.10.2 / zxing 4.3.0）；后续批次（datastore / profileinstaller / BOM 2026.08.00 / material3 / AGP 9.2.1 / core-ktx 1.19.0 / KSP）版本均经目录注入 |
+| **TASK-06** | 性能 | **批次 G：Baseline Profiles + Startup Profiles** | 体检路线图 G | **P3** | ✅ 已完成（2026-09-08） | 引入 `androidx.profileinstaller:1.4.1`（首启异步触发 ART 配置安装）；新增手动 `app/src/main/baseline-prof.txt`：冷启动 + 解锁首屏路径优先（应用壳/导航/主题、Hilt DI、Unlock/安全封存、设置仓库/自锁、database/crypto 解锁链路），S 标志规则同时驱动 DEX 布局优化；release APK 实测产出 `assets/dexopt/baseline.prof(+m)`。Macrobenchmark 实测生成（需真机跑 `generateBaselineProfile`）为后续可选精化 |
+| **TASK-07** | UI/SDK | **批次 H：compileSdk 37 → Material 3 Expressive** | 体检路线图 H | **P3** | ✅ 已完成（2026-09-08） | 5 模块 compileSdk 36→37（android-37.0 平台）；AGP 9.1.0→9.2.1（SDK 37 正式支持）+ Gradle Wrapper 9.3.1→9.4.1；core-ktx 1.17.0→1.19.0；Compose BOM 2026.06.01→2026.08.00（material3 1.4.0 底座）；M3 Expressive：material3 显式采用 1.5.0-alpha27（ExpressiveTheme/MotionScheme 公开 API 1.5.0 才毕业，1.4.0 中 internal），`KeePasskeyTheme` 切 `MaterialExpressiveTheme` + `MotionScheme.expressive()`；ExposedDropdownMenu 1.5.0 移除→迁移 `DropdownMenu + exposedDropdownSize()`。minSdk 36 决策固化不变 |
+| **TASK-15** | 特性 | **自定义图标上传 / 选择 UI** | 功能缺口 | **P3** | ✅ 已完成（2026-09-08） | 新增 `CustomIconCoordinator`（PNG 魔数校验 fail-closed / 单图 256KB 上限 / 内容去重 / KDBX Meta CustomIcons 落库）；`VaultRepository` 新增 `addCustomIcon` / `getCustomIconBytes`；`UiVaultEntry.customIconId` 投影与保存路径双向写回；`IconPickerDialog` 扩展自定义图标区（位图网格 + 相册上传，既有分组调用点零变更）；编辑页 Photo Picker 选图 → 降采样 ≤128px PNG（离主线程）→ 上传即选中，标准/自定义图标互斥。**余项**：列表行/详情页位图渲染与图标删除未接线（图标数据通道已就绪） |
+| **TASK-16** | 特性 | **条目克隆（duplicate）** | 功能缺口 | **P3** | ✅ 已完成（2026-09-08） | 新增 `EntryDuplicateCoordinator`（独立协调器，沿 RecycleBinCoordinator 模式）：全字段保真复制（标准/自定义/受保护字段、TOTP、附件引用、tags、AutoType、customData）+ 新 `KdbxUuid`（否则会话层视为更新覆盖）+ 清空历史修订 + 时间属性重置；只读会话如实拒绝（会话 saveEntry 只读静默 no-op，故仓库层显式前置校验）；详情页顶栏克隆入口（只读隐藏），成功后就地切换至克隆体；`RealVaultRepositoryTest` 真实文件持久化往返用例 |
+| **TASK-17** | 协议 | **KeePass 字段引用（`{REF:...}`）引擎** | 功能缺口 | **P3** | ✅ 已完成（2026-09-08） | database 模块新增 `FieldReferenceEngine`：`{REF:<Want>@<SearchIn>:<Text>}` 官方语法子集（T/U/P/A/N/I，大小写不敏感），整库检索首个命中条目取值替换，引用链递归展开（深度上限 10 防循环），未命中保守保持原文；取值消费点接入自动填充下发与详情页复制（密码/用户名）——投影层不展开，引用指向的密码明文不提前物化进 UI 状态流（M1 语义不变）；8 例引擎单测。**余项**：Notes/URL 展示侧解析未接（同消费点策略可平移） |
+| **TASK-18** | 特性 | **Passkey 作为数据库解锁方式** | 功能缺口 | **P3** | ✅ 已完成（2026-09-08） | 快速解锁升级为「设备绑定解锁通行密钥」：主密码 AES-256-GCM 封印（生物识别/锁屏凭据门控）之上叠加 WebAuthn 形态本地断言——登记生成硬件不可导出 ES256（P-256，StrongBox 优先）密钥对，公钥 + 随机 credentialId 落私有存储；解锁时硬件私钥签名 AuthenticatorData（rpIdHash + UP + signCount），公钥验证 + rpIdHash 归属 + signCount 严格单调（反克隆），未通过 fail-closed 拒绝并清除登记；旧凭据兼容通道（首解跳过断言并后台补登记）。新增 `UnlockPasskeyManager`（验证纯逻辑 JVM 可测，6 例单测） |
 | **TASK-08** | 同步 | **周期性后台同步（WorkManager）** | 功能缺口 | **P2** | ❌ 未实现 | 设置项 `periodicBackgroundSyncIntervalMinutes`（默认 30m）与 `wifiOnlySync` 已落地，**无 WorkManager 调度消费方** |
 | **TASK-09** | 安全 | **P0-2 测试代码真实凭据清洗** | 审核报告 P0-2 | **P1** | ✅ 已完成（2026-09-07） | **核实完成**：`Argon2InteropDiagnosticTest.kt` 已全部换用合成口令 `TestMasterPassword!2026#Secure` 与自造十六进制密钥/盐（期望值由独立参考实现离线预计算，互操作校验语义不变）；`KdbxKeyFileTest.kt` 为 32B 合成测试字节（0x01..0x20）。仓库级扫描（测试源码密码赋值模式 + `.kdbx`/真实库引用模式）零命中，**仓库内零真实凭据**。FINDINGS P0-2 已在历史提交中标记修复，本次为看板状态同步 |
 | **TASK-10** | 内存 | **TOTP 种子与受保护自定义字段编辑态 CharArray 化** | 加解密审查 B9 | **P2** | ✅ 已修复（2026-09-07） | **同 M1 密码模式全面 CharArray 化**：`EntryEditUiState` 移除 `totpSecret: String`，TOTP 种子经 `EntryEditViewModel` CharArray 私有链路 + 一次性预填通道（`loadedTotpSecret`）承载，UI 走 `SecurePasswordField` 桥接；受保护自定义字段明文经 `protectedFieldChars` 私有映射 + `loadedProtectedFields` 预填通道承载（UI 投影恒空串，对齐详情页掩码投影语义），保护标记切换时明文自动迁移存储。仓库契约同步收紧：`saveEntry` 改 `totpSecretChars: CharArray?` + `protectedFieldChars: Map<String, CharArray>`（擦除契约扩展）、`getEntryTotpSecret`/`getEntryProtectedField` 改 CharArray 独占副本读取；详情页展示/复制路径同步改造。`onCleared` 擦除全部驻留。428 例全绿 |
@@ -112,6 +116,14 @@
 旧的 Wave 编号体系因插队与顺延已失去时间语义，**即日起整体冻结，改用「Git 提交号 + 日期 + 主题」作唯一标识**：
 
 > 索引中出现的 `Wave N` / `阶段 N` 字样为对应历史提交的**原始主题**，属已冻结语境，仅供追溯；新提交请以 `TASK-xx` / `批次 X` + 提交哈希 引用，勿再使用 Wave / 阶段 编号。
+
+- `7dcc092` (2026-09-08): TASK-18 设备绑定解锁通行密钥——快速解锁叠加 WebAuthn 形态本地断言（硬件 ES256 私钥 + signCount 反克隆 + fail-closed；旧凭据兼容通道）；新增 `UnlockPasskeyManager`（验证纯逻辑 JVM 可测 6 例）
+- `8a7816e` (2026-09-08): TASK-17 `{REF:...}` 字段引用引擎——官方语法子集（T/U/P/A/N/I）整库检索 + 递归展开 + 循环防护；自动填充/详情复制消费点接线（投影层不展开）；8 例单测
+- `1a0b759` (2026-09-08): TASK-15 自定义图标上传/选择——`CustomIconCoordinator`（PNG 校验/去重/Meta 落库）+ 图标池投影/写回 + `IconPickerDialog` 自定义区 + Photo Picker 降采样上传
+- `e91c913` (2026-09-08): TASK-16 条目克隆——`EntryDuplicateCoordinator` 全字段保真 + 新 UUID + 清历史；详情页克隆入口；真实文件持久化往返用例
+- `56a1d33` (2026-09-08): TASK-07 compileSdk 37——AGP 9.2.1 / Gradle 9.4.1 / core-ktx 1.19.0 / BOM 2026.08.00 / material3 1.5.0-alpha27 `MaterialExpressiveTheme + MotionScheme.expressive()`
+- `1e27379` (2026-09-08): TASK-04 设置持久化迁移 Preferences DataStore——21 键全量 + 手写一次性 SharedPreferences 迁移（Mutex 恰好一次）
+- `4b7c6d1` (2026-09-08): TASK-03/05 kapt→KSP 2.3.11 + AGP 9 内置 Kotlin（移除 opt-out 旗标，Kotlin 2.4.10 经 buildscript classpath 锚定）+ Gradle 版本目录 `libs.versions.toml` 落地
 
 - `863d81c` (2026-09-08): TASK-41 低危清理批次——13 项 P3 闭合（O(n²) 去重 / 未用 import / 测试后门 / EMPTY 单例污染 / 魔数 / 路径遍历 / 静默 catch / 演示默认值 / 空 if 块 / 吞异常 / MockData 改名；P3-32/34 按原裁定不修）；bug-fix-plan 与交接文档被看板吸收后删除
 - `c69779e` (2026-09-08): TASK-21 整洁度整改——P3-22 七文件拆分（`RealVaultRepository` 1436→771 拆出 `VaultEntryMapper`/`RecycleBinCoordinator`/`PasskeyEntryCoordinator`/`VaultTemplateFactory`；`SettingsViewModel` 1193→700 拆出 `SettingsSyncController`/`SettingsHealthController`/`SettingsExportController`；5 个大屏拆出组件/对话框文件，公共 API 零变更）+ P3-23 用户可见文案全量资源化（新增 `StringsProvider` 通道 + Hilt 绑定、`strings_ui_messages.xml` 39 键、`strings_sync_passkey.xml` 30 键、主 strings.xml 44 键；中文字面量 294→114，余为日志/开发异常/持久化数据）。446 例全绿
