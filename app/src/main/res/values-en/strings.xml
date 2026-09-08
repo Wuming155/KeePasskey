@@ -463,6 +463,7 @@
     <string name="dbset_templates_installed">Entry templates installed</string>
     <string name="dbset_child_db_dialog_desc">Mounted child databases appear as read-only groups in the current database</string>
     <string name="dbset_child_db_mounted">Child database mounted</string>
+    <string name="dbset_child_db_not_supported">Child database mounting is not implemented yet</string>
     <string name="dbset_child_db_select_file">Choose a KDBX file</string>
     <string name="dbset_cd_modify">Modify</string>
     <string name="dbset_export_dialog_title">Export database</string>
@@ -714,6 +715,7 @@
     <string name="autofill_save_prompt_sub">Ask to save when a new or changed password is detected</string>
     <string name="autofill_override_title">Override app filling</string>
     <string name="autofill_override_sub">Prefer this app over the system default fill service</string>
+    <string name="settings_action_failed">Action failed: %1$s</string>
     <string name="autofill_skip_dal_title">Skip browser compatibility layer</string>
     <string name="autofill_skip_dal_sub">Fill native forms directly without browser adapters</string>
     <string name="autofill_blacklist_row_title">Autofill blacklist</string>

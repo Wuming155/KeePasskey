@@ -121,7 +121,7 @@ data class SettingsUiState(
     val autoReturnFromQuery: Boolean = true, // KP2A: 填充或选定条目后自动返回原应用
     val autofillCopyTotp: Boolean = true, // KP2A: 填充后自动将 TOTP 动态码复制到剪贴板
     val autofillShowTotpNotification: Boolean = false, // KP2A: 填充后在通知栏显示 TOTP 验证码
-    val skipDalVerification: Boolean = false, // KP2A: 跳过数字资产链接 (DAL) 校验
+    val skipDalVerification: Boolean = false, // KP2A: 跳过数字资产链接 (DAL) 校验（预留功能，见 STATUS TASK-43）
     val overrideNoAutofill: Boolean = false, // KP2A: 强制忽略应用的禁止自动填充标记
     val disabledAutofillQueriesCount: Int = 0, // KP2A: 已禁用的自动填充黑名单数量
 

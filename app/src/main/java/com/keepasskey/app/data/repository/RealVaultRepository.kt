@@ -1203,8 +1203,146 @@ class RealVaultRepository @Inject constructor(
         }
     }
 
+    // ================= TASK-13 整改：设置页导出/模板真实化 =================
+
+    override suspend fun exportKdbxBytes(): com.keepasskey.core.result.KdbxResult<ByteArray> =
+        databaseSession.exportToBytes()
+
+    override suspend fun exportVaultXmlBytes(): com.keepasskey.core.result.KdbxResult<ByteArray> =
+        withContext(Dispatchers.Default) {
+            val db = databaseSession.databaseFlow.first()
+                ?: return@withContext com.keepasskey.core.result.KdbxResult.Failure(
+                    IllegalStateException("活动数据库为空"),
+                    "当前无活动数据库（已锁定或未打开）"
+                )
+            try {
+                com.keepasskey.core.result.KdbxResult.Success(
+                    com.keepasskey.database.xml.KeePassXmlExporter.export(db)
+                )
+            } catch (t: Throwable) {
+                com.keepasskey.core.result.KdbxResult.Failure(t, "导出 XML 失败: ${t.message}")
+            }
+        }
+
+    override suspend fun exportKeyFileBytes(): com.keepasskey.core.result.KdbxResult<ByteArray> {
+        val bytes = databaseSession.exportKeyFileBytes()
+            ?: return com.keepasskey.core.result.KdbxResult.Failure(
+                IllegalStateException("会话未绑定密钥文件"),
+                "当前会话未使用密钥文件，无密钥文件可导出"
+            )
+        return com.keepasskey.core.result.KdbxResult.Success(bytes)
+    }
+
+    override suspend fun installEntryTemplates(): com.keepasskey.core.result.KdbxResult<Unit> {
+        // 幂等保护：已存在同名模板分组时不再重复安装
+        val currentDb = databaseSession.databaseFlow.first()
+            ?: return com.keepasskey.core.result.KdbxResult.Failure(
+                IllegalStateException("活动数据库为空"),
+                "当前无活动数据库（已锁定或未打开）"
+            )
+        if (currentDb.rootGroup.subgroups.any { it.name == TEMPLATE_GROUP_NAME }) {
+            return com.keepasskey.core.result.KdbxResult.Failure(
+                IllegalStateException("模板分组已存在"),
+                "模板分组「$TEMPLATE_GROUP_NAME」已存在，无需重复安装"
+            )
+        }
+        // saveGroup 仅更新内存树（置 DIRTY），由 persistSession 统一序列化落盘并上传播结果
+        databaseSession.saveGroup(buildTemplateGroup())
+        return persistSession()
+    }
+
+    /** 构建「模板」分组与 5 个标准模板条目（网页登录 / 信用卡 / WiFi / 安全笔记 / SSH 密钥） */
+    private fun buildTemplateGroup(): KdbxGroup {
+        val groupId = KdbxUuid.random()
+        fun template(
+            title: String,
+            iconId: Int,
+            notes: String,
+            standard: Map<String, String> = emptyMap(),
+            extra: List<Pair<String, Boolean>> = emptyList()
+        ): KdbxEntry {
+            val fields = mutableMapOf(
+                KdbxConstants.Fields.TITLE to ProtectedString(title, isProtected = false),
+                KdbxConstants.Fields.NOTES to ProtectedString(notes, isProtected = false)
+            )
+            standard.forEach { (key, value) ->
+                fields[key] = ProtectedString(value, isProtected = false)
+            }
+            return KdbxEntry(
+                id = KdbxUuid.random(),
+                parentGroupId = groupId,
+                iconId = iconId,
+                fields = fields,
+                customFields = extra.map { (key, protected) ->
+                    KdbxCustomField(key, ProtectedString("", isProtected = protected))
+                }
+            )
+        }
+
+        val entries = listOf(
+            template(
+                title = "网页登录",
+                iconId = 1,
+                notes = "标准网页登录模板：填写用户名与密码后使用",
+                standard = mapOf(
+                    KdbxConstants.Fields.USER_NAME to "",
+                    KdbxConstants.Fields.PASSWORD to "",
+                    KdbxConstants.Fields.URL to "https://"
+                )
+            ),
+            template(
+                title = "信用卡",
+                iconId = 27,
+                notes = "银行卡模板：卡片信息作为自定义字段存放",
+                extra = listOf(
+                    "持卡人" to false,
+                    "卡号" to true,
+                    "有效期" to false,
+                    "CVV" to true,
+                    "PIN" to true
+                )
+            ),
+            template(
+                title = "WiFi",
+                iconId = 33,
+                notes = "无线网络模板",
+                extra = listOf(
+                    "SSID" to false,
+                    "密码" to true
+                )
+            ),
+            template(
+                title = "安全笔记",
+                iconId = 11,
+                notes = "纯文本安全笔记：将内容写入备注字段"
+            ),
+            template(
+                title = "SSH 密钥",
+                iconId = 17,
+                notes = "SSH 密钥模板：私钥以受保护字段存放",
+                standard = mapOf(KdbxConstants.Fields.USER_NAME to ""),
+                extra = listOf(
+                    "Host" to false,
+                    "Private Key" to true,
+                    "Passphrase" to true
+                )
+            )
+        )
+
+        return KdbxGroup(
+            id = groupId,
+            parentGroupId = null,
+            name = TEMPLATE_GROUP_NAME,
+            iconId = ICON_FOLDER,
+            entries = entries
+        )
+    }
+
     companion object {
         private const val TAG = "RealVaultRepository"
+
+        /** 模板分组固定名（installEntryTemplates 幂等判定依据） */
+        private const val TEMPLATE_GROUP_NAME = "模板"
 
         /** KDBX 标准 PwIcon ID（官方 KeePass PwEnums.cs 裁决） */
         const val ICON_KEY = 0

@@ -464,6 +464,7 @@
     <string name="dbset_templates_installed">条目模板安装完成</string>
     <string name="dbset_child_db_dialog_desc">挂载的子密码库将以只读分组形式出现在当前库中</string>
     <string name="dbset_child_db_mounted">子密码库挂载成功</string>
+    <string name="dbset_child_db_not_supported">子密码库挂载功能尚未实现</string>
     <string name="dbset_child_db_select_file">选择 KDBX 文件</string>
     <string name="dbset_cd_modify">修改</string>
     <string name="dbset_export_dialog_title">导出密码库</string>
@@ -716,6 +717,7 @@
     <string name="autofill_save_prompt_sub">检测到新注册或修改的密码时询问是否保存</string>
     <string name="autofill_override_title">覆盖应用填充</string>
     <string name="autofill_override_sub">优先使用本应用替代系统默认填充服务</string>
+    <string name="settings_action_failed">操作失败：%1$s</string>
     <string name="autofill_skip_dal_title">跳过浏览器兼容层</string>
     <string name="autofill_skip_dal_sub">不通过浏览器兼容适配直接填充原生表单</string>
     <string name="autofill_blacklist_row_title">自动填充黑名单</string>

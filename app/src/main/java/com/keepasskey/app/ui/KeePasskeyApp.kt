@@ -349,6 +349,8 @@ fun KeePasskeyApp() {
                     val settingsViewModel: SettingsViewModel = hiltViewModel()
                     val settingsState by settingsViewModel.uiState.collectAsStateWithLifecycle()
                     val kdfBenchmarkState by settingsViewModel.kdfBenchmark.collectAsStateWithLifecycle()
+                    // TASK-13 整改：导出/模板动作反馈流
+                    val exportFeedback by settingsViewModel.exportFeedback.collectAsStateWithLifecycle()
                     DatabaseSettingsScreen(
                         uiState = settingsState,
                         onBackClick = { navController.popBackStack() },
@@ -360,7 +362,14 @@ fun KeePasskeyApp() {
                         onCheckForDuplicateUuidsToggle = settingsViewModel::setCheckForDuplicateUuids,
                         // M6 整改：真实 KDF 基准接线
                         kdfBenchmarkState = kdfBenchmarkState,
-                        onRunKdfBenchmark = settingsViewModel::runKdfBenchmark
+                        onRunKdfBenchmark = settingsViewModel::runKdfBenchmark,
+                        // TASK-13 整改：导出/模板真实动作接线
+                        exportFeedback = exportFeedback,
+                        onClearExportFeedback = settingsViewModel::clearExportFeedback,
+                        onExportKdbx = settingsViewModel::exportKdbxTo,
+                        onExportXml = settingsViewModel::exportVaultXmlTo,
+                        onExportKeyFile = settingsViewModel::exportKeyFileTo,
+                        onInstallTemplates = settingsViewModel::installEntryTemplates
                     )
                 }
 

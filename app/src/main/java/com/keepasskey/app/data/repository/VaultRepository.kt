@@ -274,4 +274,27 @@ interface VaultRepository {
      * 当前会话是否以只读模式打开（H4-只读整改）。锁定/关闭状态下返回 false。
      */
     fun isSessionReadOnly(): Boolean
+
+    /**
+     * TASK-13 整改：将当前内存数据库序列化为 KDBX 完整字节流（设置页「导出 KDBX」SAF 写盘用）。
+     * 锁定/关闭/凭据丢失时返回 [com.keepasskey.core.result.KdbxResult.Failure]。
+     */
+    suspend fun exportKdbxBytes(): com.keepasskey.core.result.KdbxResult<ByteArray>
+
+    /**
+     * TASK-13 整改：将当前内存数据库导出为 KeePass 2.x 兼容明文 XML（设置页「导出 XML」用）。
+     * 明文包含全部受保护字段（安全声明见导出确认对话框），锁定/关闭时返回 Failure。
+     */
+    suspend fun exportVaultXmlBytes(): com.keepasskey.core.result.KdbxResult<ByteArray>
+
+    /**
+     * TASK-13 整改：导出会话绑定的密钥文件原始字节（设置页「导出密钥文件」用）。
+     * 会话未绑定密钥文件时返回 Failure。
+     */
+    suspend fun exportKeyFileBytes(): com.keepasskey.core.result.KdbxResult<ByteArray>
+
+    /**
+     * TASK-13 整改：安装条目模板库（创建「模板」分组与 5 个标准模板条目，真实落库）。
+     */
+    suspend fun installEntryTemplates(): com.keepasskey.core.result.KdbxResult<Unit>
 }

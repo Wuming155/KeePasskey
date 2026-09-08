@@ -89,7 +89,10 @@ class HealthCheckViewModelTest {
         val coordinator = com.keepasskey.app.sync.SyncCoordinator(fakeContext, com.keepasskey.database.session.DatabaseSession(), credentialsStore, com.keepasskey.app.data.logger.DebugLogBuffer())
 
         val testRepo = TestAuditVaultRepository(listOf(entryWeak1, entryReused1, entryReused2))
-        val viewModel = SettingsViewModel(FakeSettingsRepository(), testRepo, credentialsStore, coordinator, com.keepasskey.app.data.logger.DebugLogBuffer())
+        // TASK-12/08：补注入扩展偏好持久化仓库（null 上下文=内存语义）与周期同步调度器
+        val extendedStore = com.keepasskey.app.data.repository.ExtendedSettingsStore(null)
+        val periodicScheduler = com.keepasskey.app.sync.PeriodicSyncScheduler(fakeContext, extendedStore)
+        val viewModel = SettingsViewModel(FakeSettingsRepository(), testRepo, credentialsStore, coordinator, com.keepasskey.app.data.logger.DebugLogBuffer(), extendedStore, periodicScheduler)
         val job = backgroundScope.launch(kotlinx.coroutines.test.UnconfinedTestDispatcher(testScheduler)) {
             viewModel.uiState.collect {}
         }

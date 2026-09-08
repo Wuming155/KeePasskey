@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileInputStream
 import java.util.Arrays
@@ -306,6 +307,44 @@ class DatabaseSession {
     fun setDatabaseForTesting(db: KdbxDatabase) {
         _database.value = db
         _state.value = SessionState.OPENED
+    }
+
+    /**
+     * TASK-13 整改：将当前内存数据库序列化为 KDBX 字节流（SAF 导出用）。
+     * 与 [save] 相同的凭据要求与序列化管线（含密钥文件复合密钥），但不落盘到活动文件，
+     * 字节交由调用方处置；锁定/关闭状态（内存树已销毁）下如实失败。
+     */
+    suspend fun exportToBytes(): KdbxResult<ByteArray> = mutex.withLock {
+        val db = _database.value ?: return@withLock KdbxResult.Failure(
+            IllegalStateException("活动数据库为空"),
+            "当前无活动数据库（已锁定或未打开）"
+        )
+        val pwd = passwordCache
+        if (pwd == null && keyFileCache == null) {
+            return@withLock KdbxResult.Failure(
+                IllegalStateException("主密码已被清理"),
+                "主密码凭据丢失，无法导出"
+            )
+        }
+        withContext(Dispatchers.Default) {
+            try {
+                val bytes = ByteArrayOutputStream().also { baos ->
+                    KdbxFile.save(baos, db, pwd, keyFileCache)
+                }.toByteArray()
+                KdbxResult.Success(bytes)
+            } catch (t: Throwable) {
+                KdbxResult.Failure(t, "导出数据库失败: ${t.message}")
+            }
+        }
+    }
+
+    /**
+     * TASK-13 整改：导出会话绑定的密钥文件原始字节（SAF 导出用）。
+     * [keyFileCache] 缓存的是用户导入时的密钥文件原件字节（克隆语义）；
+     * 会话未绑定密钥文件时返回 null，由调用方映射为可理解的错误提示。
+     */
+    fun exportKeyFileBytes(): ByteArray? = synchronized(credentialLock) {
+        keyFileCache?.clone()
     }
 
     /**

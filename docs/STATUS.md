@@ -10,7 +10,7 @@
 | 维度 | 数值 / 状态 | 官方依据与说明 |
 |---|---|---|
 | **Git HEAD** | `7b3e756` (main) | 干净工作区无提交滞后（不含本次治理改动） |
-| **测试基线** | **428 个单元测试全绿**（app 99 / core 27 / crypto 47 / database 146 / sync 109） | `./gradlew test` 强制重跑校验，其中 `LiveSyncServersTest` 12 例默认跳过（需 `-DliveSyncTest`） |
+| **测试基线** | **443 个单元测试全绿**（app 101 / core 27 / crypto 52 / database 146 / sync 117） | `./gradlew test` 强制重跑校验，其中 `LiveSyncServersTest` 12 例默认跳过（需 `-DliveSyncTest`） |
 | **构建状态** | `assembleDebug` + `assembleRelease` (R8) 全量通过 | AGP 9.1.0 / Gradle 9.3.1 / Kotlin 2.4.10 / Hilt 2.60.1 |
 | **系统基线** | **minSdk 36**, compileSdk 36, targetSdk 36 | 仅针对 Android 16+ 深度优化，固化无旧版垫片决策 |
 | **传输安全防线** | 全站强制 HTTPS（`network_security_config.xml` 禁明文 + OkHttp TLS-only），零证书固定 | 对齐 Google Developer Knowledge `pinning not recommended` 指南 |
@@ -18,7 +18,7 @@
 
 ---
 
-## 2. 未完成工作唯一看板（42 项）
+## 2. 未完成工作唯一看板（43 项）
 
 所有进行中、已立项、待执行体检批次、未实现功能、安全遗留与欠账统一收录于下表，按优先级排序。**新增任务必须在此表注册。**
 
@@ -37,8 +37,9 @@
 | **TASK-09** | 安全 | **P0-2 测试代码真实凭据清洗** | 审核报告 P0-2 | **P1** | ✅ 已完成（2026-09-07） | **核实完成**：`Argon2InteropDiagnosticTest.kt` 已全部换用合成口令 `TestMasterPassword!2026#Secure` 与自造十六进制密钥/盐（期望值由独立参考实现离线预计算，互操作校验语义不变）；`KdbxKeyFileTest.kt` 为 32B 合成测试字节（0x01..0x20）。仓库级扫描（测试源码密码赋值模式 + `.kdbx`/真实库引用模式）零命中，**仓库内零真实凭据**。FINDINGS P0-2 已在历史提交中标记修复，本次为看板状态同步 |
 | **TASK-10** | 内存 | **TOTP 种子与受保护自定义字段编辑态 CharArray 化** | 加解密审查 B9 | **P2** | ✅ 已修复（2026-09-07） | **同 M1 密码模式全面 CharArray 化**：`EntryEditUiState` 移除 `totpSecret: String`，TOTP 种子经 `EntryEditViewModel` CharArray 私有链路 + 一次性预填通道（`loadedTotpSecret`）承载，UI 走 `SecurePasswordField` 桥接；受保护自定义字段明文经 `protectedFieldChars` 私有映射 + `loadedProtectedFields` 预填通道承载（UI 投影恒空串，对齐详情页掩码投影语义），保护标记切换时明文自动迁移存储。仓库契约同步收紧：`saveEntry` 改 `totpSecretChars: CharArray?` + `protectedFieldChars: Map<String, CharArray>`（擦除契约扩展）、`getEntryTotpSecret`/`getEntryProtectedField` 改 CharArray 独占副本读取；详情页展示/复制路径同步改造。`onCleared` 擦除全部驻留。428 例全绿 |
 | **TASK-11** | 安全 | **Autofill Dataset 已解锁分支增加二次确认/认证** | 审核报告 P2-24 | **P2** | ✅ 已修复（2026-09-07） | `KeePasskeyAutofillService` 已解锁分支每个数据集下发前挂 `setAuthentication`，认证 PendingIntent 指向新增 `AutofillConfirmActivity`（每数据集独立 requestCode 防 PendingIntent 覆盖）：优先系统级生物识别/锁屏凭据（`UNLOCK_AUTHENTICATORS` 集合），无硬件时退化为受保护窗口内手动确认（确认/取消）。Activity 具备 FLAG_SECURE + `setHideOverlayWindows(true)` 反截屏/反 overlay 加固；仅 RESULT_OK 后框架才将数据集值写入目标表单 |
-| **TASK-12** | 架构 | **设置项 33 个字段持久化与废弃假开关下架** | 审核报告 P1-6 | **P2** | ❌ 未修 | `SettingsViewModel.kt` `ExtendedSettings` 约 35 个开关为纯内存回显，`skipDalVerification` 等假开关须下架 |
-| **TASK-13** | UI/SAF | **设置页 5 个动作 SAF 写盘接入** | 审核报告 P1-7 | **P2** | ❌ 未修 | 导出 KDBX、导出 XML、导出密钥文件、模板安装、子库挂载目前仅 `UiMessage` 假提示，需接 `CreateDocument` 写盘 |
+| **TASK-12** | 架构 | **设置项 33 个字段持久化（全部开关保留为预留功能）** | 审核报告 P1-6 | **P2** | ✅ 已完成（2026-09-08） | **裁定：全部开关保留不下架**（均为预留功能，消费方接线登记为 TASK-43）。整改核心为消除「纯内存回显」：`ExtendedSettings` 提升为公共模型并新增 `ExtendedSettingsStore`（SharedPreferences 持久化，整体读/整体写，null 上下文时退化为内存语义保可测性），`SettingsViewModel` 全部 setter 经 `updateExtended` 统一「更新+落盘」，冷启动不再静默回落默认值；`wifiOnlySync` 以独立键持久化。Store 无持久化层回退语义补单测 |
+| **TASK-13** | UI/SAF | **设置页 5 个动作 SAF 真实化** | 审核报告 P1-7 | **P2** | ✅ 已完成（2026-09-08） | 导出三件套真实化：KDBX（`DatabaseSession.exportToBytes` 内存库全量序列化）、XML（新增 `KeePassXmlExporter` 输出 KeePass 2.x 兼容明文格式，可被 KeePass/KeePassXC 导入，明文安全声明见导出警告文案）、密钥文件（会话 `keyFileCache` 原件字节）——三者均经 `CreateDocument` SAF 另存为落盘，失败如实上浮。模板安装真实化：`installEntryTemplates` 幂等创建「模板」分组与 5 个标准模板条目并落库。子库挂载：从谎报「挂载成功」改为如实提示「尚未实现」（真实功能缺口，登记 TASK-43） |
+| **TASK-08** | 同步 | **周期性后台同步（WorkManager）** | 功能缺口 | **P2** | ✅ 已完成（2026-09-08） | 新增 `PeriodicSyncWorker`（CoroutineWorker + Hilt EntryPoint 获取 `SyncCoordinator`，与前台同步共享 mutex 天然互斥；冲突留待用户决策、错误不重试避免退避风暴）与 `PeriodicSyncScheduler`（唯一周期任务 UPDATE 语义，间隔强制 ≥15 分钟，`wifiOnlySync` 映射 UNMETERED/CONNECTED 网络约束）。冷启动 `MainApplication` 按持久化偏好恢复调度；设置页开关/间隔/Wi-Fi 三项变更即时生效。依赖 `androidx.work:work-runtime-ktx:2.10.0` |
 | **TASK-14** | 安全 | **`SyncCredentialsStore` 删生产测试钩子** | 审核报告 P2-21 | **P2** | ✅ 已修复（2026-09-07） | `customEncryptor`/`customDecryptor` 加 `@VisibleForTesting` 注解并收窄为 `internal`——生产 DI 与外部调用方不可见、不可写，仅本模块单元测试（同一编译单元）可注入模拟加解密闭包 |
 | **TASK-15** | 特性 | **自定义图标上传 / 选择 UI** | 功能缺口 | **P3** | ❌ 未实现 | 模型与 XML 序列化层完好，缺前端上传与选择界面 |
 | **TASK-16** | 特性 | **条目克隆（duplicate）** | 功能缺口 | **P3** | ❌ 未实现 | 库层与 ViewModel 缺克隆逻辑 |
@@ -68,6 +69,7 @@
 | **TASK-40** | 测试 | **测试覆盖补强（T-03 / T-04 / P2-35 / P2-37）** | FINDINGS 核实 | **P2** | ❌ 未修 | 补 `SyncCacheTest` / SigV4 已知答案向量 / `SecurityTest` 真实密钥 / 真实 Keystore 路径用例 |
 | **TASK-41** | 整洁度 | **低危清理批次（P3-5/7/9/10/14/15/17/24/28/31/32/33/34）** | FINDINGS 核实 | **P3** | ❌ 未修 | O(n²) 去重 / 未用 import / 测试后门 / EMPTY 单例污染 / 魔数 / 路径遍历 / 静默 catch / 演示路径 / 空 if 块 / 吞异常 / Context? / 文件名 / 旧文档 |
 | **TASK-42** | 性能 | **低-中调度批次（P2-2 / P2-12 / P2-30 / P2-31）** | FINDINGS 核实 | **P3** | ❌ 未修 | Argon2 走 Dispatchers.IO / 缺 callTimeout / combine 未 flowOn / 构造期扫盘 |
+| **TASK-43** | 特性 | **进阶偏好消费方接线（预留功能清单）** | TASK-12 裁定衍生 | **P3** | ❌ 未实现 | 设置页全部进阶开关保留为预留功能（已随 TASK-12 持久化，不再回显丢失）。待接线消费方：`webdavChunkedUpload`/`webdavChunkSizeMb`（WebDAV 分块上传）、`createBackupBeforeSave`（保存前 .bak）、`checkRemoteChangesBeforeSave`、`conflictResolution` 默认策略、`useFileTransactions`（已是既定行为，接线为信息展示）、`preloadDatabaseEnabled`、`lockWhenNavigateBack`、`clearPasswordOnLeave`、`rememberRecentFiles`、`rememberKeyFileLocation`、`showKillAppOption`、`offerSaveCredentials`、`inlineSuggestionsEnabled`、`autoReturnFromQuery`、`autofillCopyTotp`、`autofillShowTotpNotification`、`skipDalVerification`、`overrideNoAutofill`、`disabledAutofillQueriesCount`（黑名单）、`maskPasswordsDefault`、`maskTotpDefault`、`showUnlockedNotification`、`showGroupInSearchResult`、`showGroupInEntry`、`listDensity`、`autoActivateSearchOnOpen`、`iconSet`、TOTP 字段映射、`debugLogEnabled`、`verboseSyncLog`、子库挂载（TASK-13 改诚实提示）。另：导出/导入五源（1PUX/Bitwarden/KeePass/浏览器 CSV）解析器亦为独立功能缺口 |
 
 ---
 

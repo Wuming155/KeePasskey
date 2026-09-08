@@ -94,6 +94,13 @@ fun DatabaseSettingsScreen(
     // M6 整改：真实 KDF 基准状态与触发（原按钮仅展示假完成消息）
     kdfBenchmarkState: KdfBenchmarkUiState? = null,
     onRunKdfBenchmark: () -> Unit = {},
+    // TASK-13 整改：导出/模板动作经 ViewModel 真实序列化与 SAF 落盘
+    exportFeedback: UiMessage? = null,
+    onClearExportFeedback: () -> Unit = {},
+    onExportKdbx: (android.net.Uri) -> Unit = {},
+    onExportXml: (android.net.Uri) -> Unit = {},
+    onExportKeyFile: (android.net.Uri) -> Unit = {},
+    onInstallTemplates: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var showCipherDialog by remember { mutableStateOf(false) }
@@ -104,6 +111,17 @@ fun DatabaseSettingsScreen(
     var showExportDialog by remember { mutableStateOf(false) }
     var showImportDialog by remember { mutableStateOf(false) }
     var operationFeedback by remember { mutableStateOf<UiMessage?>(null) }
+
+    // TASK-13 整改：SAF CreateDocument 真实另存为（此前导出/密钥文件仅弹假成功提示）
+    val exportKdbxLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/octet-stream")
+    ) { uri -> uri?.let(onExportKdbx) }
+    val exportXmlLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.CreateDocument("text/xml")
+    ) { uri -> uri?.let(onExportXml) }
+    val exportKeyFileLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/octet-stream")
+    ) { uri -> uri?.let(onExportKeyFile) }
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -300,7 +318,10 @@ fun DatabaseSettingsScreen(
                             icon = Icons.Default.VpnKey,
                             title = stringResource(R.string.dbset_keyfile_export_title),
                             subtitle = stringResource(R.string.dbset_keyfile_export_sub),
-                            onClick = { operationFeedback = UiMessage(R.string.dbset_keyfile_exported) }
+                            onClick = {
+                                // TASK-13 整改：呼起 SAF 另存为，会话绑定密钥文件经仓库真实导出
+                                exportKeyFileLauncher.launch("keepasskey.keyx")
+                            }
                         )
                     }
                 }
@@ -386,6 +407,24 @@ fun DatabaseSettingsScreen(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.padding(start = 4.dp)
+                    )
+                }
+            }
+
+            // TASK-13 整改：导出/模板动作结果反馈（点击清除），真实动作的结果如实上浮
+            exportFeedback?.let { feedback ->
+                item {
+                    Text(
+                        text = feedback.resolveText(),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (feedback.resolveText().contains("失败")) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.primary
+                        },
+                        modifier = Modifier
+                            .padding(start = 4.dp)
+                            .clickable { onClearExportFeedback() }
                     )
                 }
             }
@@ -702,7 +741,8 @@ fun DatabaseSettingsScreen(
             confirmButton = {
                 Button(onClick = {
                     showTemplatesDialog = false
-                    operationFeedback = UiMessage(R.string.dbset_templates_installed)
+                    // TASK-13 整改：真实创建模板分组与模板条目（幂等）
+                    onInstallTemplates()
                 }) {
                     Text(stringResource(R.string.dbset_install_templates))
                 }
@@ -730,7 +770,9 @@ fun DatabaseSettingsScreen(
                     OutlinedButton(
                         onClick = {
                             showChildDbDialog = false
-                            operationFeedback = UiMessage(R.string.dbset_child_db_mounted)
+                            // TASK-13 整改：如实告知未实现——子库挂载需独立功能开发，
+                            // 不再谎报「挂载成功」（登记 STATUS TASK-43 预留功能清单）
+                            operationFeedback = UiMessage(R.string.dbset_child_db_not_supported)
                         },
                         modifier = Modifier.fillMaxWidth()
                     ) {
@@ -763,7 +805,10 @@ fun DatabaseSettingsScreen(
                     Button(
                         onClick = {
                             showExportDialog = false
-                            operationFeedback = UiMessage(R.string.dbset_export_kdbx_done)
+                            // TASK-13 整改：呼起 SAF 另存为，当前内存数据库经仓库真实序列化落盘
+                            exportKdbxLauncher.launch(
+                                uiState.databaseName.ifBlank { "keepasskey-export.kdbx" }
+                            )
                         },
                         modifier = Modifier.fillMaxWidth()
                     ) {
@@ -772,7 +817,10 @@ fun DatabaseSettingsScreen(
                     OutlinedButton(
                         onClick = {
                             showExportDialog = false
-                            operationFeedback = UiMessage(R.string.dbset_export_xml_done)
+                            // TASK-13 整改：呼起 SAF 另存为，明文 XML 经 KeePassXmlExporter 真实生成
+                            val baseName = uiState.databaseName.removeSuffix(".kdbx")
+                                .ifBlank { "keepasskey" }
+                            exportXmlLauncher.launch("$baseName-export.xml")
                         },
                         modifier = Modifier.fillMaxWidth()
                     ) {

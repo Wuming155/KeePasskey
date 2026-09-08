@@ -41,6 +41,10 @@ class SettingsViewModel @Inject constructor(
     private val syncCredentialsStore: SyncCredentialsStore,
     private val syncCoordinator: SyncCoordinator,
     private val debugLogBuffer: DebugLogBuffer,
+    // TASK-12 整改：进阶偏好持久化仓库（冷启动不再静默回落默认值）
+    private val extendedSettingsStore: com.keepasskey.app.data.repository.ExtendedSettingsStore,
+    // TASK-08 整改：周期后台同步调度器（设置变更即时生效）
+    private val periodicSyncScheduler: com.keepasskey.app.sync.PeriodicSyncScheduler,
     // 允许为 null 仅用于单测注入；生产 DI 注入 @ApplicationContext
     @ApplicationContext private val appContext: Context? = null
 ) : ViewModel() {
@@ -136,63 +140,20 @@ class SettingsViewModel @Inject constructor(
     )
 
     // KP2A 进阶特性与文件处理、快速解锁、显示、TOTP、调试日志状态集
-    private val extendedSettingsFlow = MutableStateFlow(ExtendedSettings())
+    // TASK-12 整改：初值自持久化仓库恢复（原为纯内存回显，冷启动静默回落默认值）
+    private val extendedSettingsFlow = MutableStateFlow(extendedSettingsStore.load())
 
     // 调试日志真实缓冲快照（随刷新/清除动作更新）
     private val debugLogLinesFlow = MutableStateFlow(debugLogBuffer.snapshot())
 
-    private data class ExtendedSettings(
-        // 文件处理与进阶同步
-        val useOfflineCache: Boolean = true,
-        val periodicBackgroundSyncEnabled: Boolean = false,
-        val periodicBackgroundSyncIntervalMinutes: Int = 30,
-        val allowedWifiSsids: String = "",
-        val createBackupBeforeSave: Boolean = true,
-        val checkRemoteChangesBeforeSave: Boolean = true,
-        val conflictResolution: ConflictResolution = ConflictResolution.AUTO_MERGE,
-        val useFileTransactions: Boolean = true,
-        val webdavChunkedUpload: Boolean = false,
-        val webdavChunkSizeMb: Int = 10,
-        val preloadDatabaseEnabled: Boolean = true,
-
-        // 安全锁定规则与环境
-        val lockWhenScreenOff: Boolean = true,
-        val lockWhenNavigateBack: Boolean = false,
-        val clearPasswordOnLeave: Boolean = false,
-        val rememberRecentFiles: Boolean = true,
-        val rememberKeyFileLocation: Boolean = true,
-        val showKillAppOption: Boolean = false,
-
-        // 自动填充进阶
-        val offerSaveCredentials: Boolean = true,
-        val inlineSuggestionsEnabled: Boolean = true,
-        val autoReturnFromQuery: Boolean = true,
-        val autofillCopyTotp: Boolean = true,
-        val autofillShowTotpNotification: Boolean = false,
-        val skipDalVerification: Boolean = false,
-        val overrideNoAutofill: Boolean = false,
-        val disabledAutofillQueriesCount: Int = 0,
-
-        // 显示与视觉进阶
-        val maskPasswordsDefault: Boolean = true,
-        val maskTotpDefault: Boolean = false,
-        val showUnlockedNotification: Boolean = true,
-        val showGroupInSearchResult: Boolean = true,
-        val showGroupInEntry: Boolean = false,
-        val listDensity: ListDensity = ListDensity.NORMAL,
-        val autoActivateSearchOnOpen: Boolean = false,
-        val iconSet: IconSetOption = IconSetOption.MATERIAL,
-
-        // TOTP 规范字段映射
-        val totpSeedFieldName: String = "TOTP Seed",
-        val totpSettingsFieldName: String = "TOTP Settings",
-        val defaultTotpStepSeconds: Int = 30,
-        val defaultTotpDigits: Int = 6,
-
-        // 调试日志
-        val debugLogEnabled: Boolean = false,
-        val verboseSyncLog: Boolean = false
-    )
+    /**
+     * TASK-12 整改：进阶偏好统一变更通道——内存 Flow 更新与持久化落盘原子完成，
+     * 杜绝任何 setter 只改内存不落盘的「回显漂移」。
+     */
+    private fun updateExtended(transform: (ExtendedSettings) -> ExtendedSettings) {
+        extendedSettingsFlow.update(transform)
+        extendedSettingsStore.save(extendedSettingsFlow.value)
+    }
 
     private data class SyncUiState(
         val provider: CloudSyncProvider = CloudSyncProvider.WEBDAV,
@@ -380,6 +341,8 @@ class SettingsViewModel @Inject constructor(
     )
 
     init {
+        // TASK-12 整改：wifiOnlySync 持久化恢复（周期同步网络约束的消费方）
+        syncStateFlow.update { it.copy(wifiOnlySync = extendedSettingsStore.loadWifiOnlySync()) }
         restoreSyncCredentials()
         // 离线开关联动：冷启动时把默认/持久化的离线偏好传导至同步协调器
         syncCoordinator.setOfflineMode(extendedSettingsFlow.value.useOfflineCache)
@@ -686,6 +649,10 @@ class SettingsViewModel @Inject constructor(
 
     fun setWifiOnlySync(enabled: Boolean) {
         syncStateFlow.update { it.copy(wifiOnlySync = enabled) }
+        // TASK-12 整改：持久化（原为纯内存回显）
+        extendedSettingsStore.saveWifiOnlySync(enabled)
+        // TASK-08 整改：网络约束变更即时生效（仅周期同步开启时）
+        reschedulePeriodicSyncIfNeeded()
     }
 
     fun setCredentialProviderEnabled(enabled: Boolean) {
@@ -756,92 +723,92 @@ class SettingsViewModel @Inject constructor(
 
     // ========== 安全锁定规则控制 ==========
     fun setLockWhenScreenOff(enabled: Boolean) {
-        extendedSettingsFlow.update { it.copy(lockWhenScreenOff = enabled) }
+        updateExtended { it.copy(lockWhenScreenOff = enabled) }
         viewModelScope.launch {
             settingsRepository.setLockWhenScreenOff(enabled)
         }
     }
 
     fun setLockWhenNavigateBack(enabled: Boolean) {
-        extendedSettingsFlow.update { it.copy(lockWhenNavigateBack = enabled) }
+        updateExtended { it.copy(lockWhenNavigateBack = enabled) }
     }
 
     fun setClearPasswordOnLeave(enabled: Boolean) {
-        extendedSettingsFlow.update { it.copy(clearPasswordOnLeave = enabled) }
+        updateExtended { it.copy(clearPasswordOnLeave = enabled) }
     }
 
     fun setRememberRecentFiles(enabled: Boolean) {
-        extendedSettingsFlow.update { it.copy(rememberRecentFiles = enabled) }
+        updateExtended { it.copy(rememberRecentFiles = enabled) }
     }
 
     fun setRememberKeyFileLocation(enabled: Boolean) {
-        extendedSettingsFlow.update { it.copy(rememberKeyFileLocation = enabled) }
+        updateExtended { it.copy(rememberKeyFileLocation = enabled) }
     }
 
     fun setShowKillAppOption(enabled: Boolean) {
-        extendedSettingsFlow.update { it.copy(showKillAppOption = enabled) }
+        updateExtended { it.copy(showKillAppOption = enabled) }
     }
 
     // ========== KP2A 扩展：表单自动填充与体验 ==========
     fun setOfferSaveCredentials(enabled: Boolean) {
-        extendedSettingsFlow.update { it.copy(offerSaveCredentials = enabled) }
+        updateExtended { it.copy(offerSaveCredentials = enabled) }
     }
 
     fun setInlineSuggestionsEnabled(enabled: Boolean) {
-        extendedSettingsFlow.update { it.copy(inlineSuggestionsEnabled = enabled) }
+        updateExtended { it.copy(inlineSuggestionsEnabled = enabled) }
     }
 
     fun setAutoReturnFromQuery(enabled: Boolean) {
-        extendedSettingsFlow.update { it.copy(autoReturnFromQuery = enabled) }
+        updateExtended { it.copy(autoReturnFromQuery = enabled) }
     }
 
     fun setAutofillCopyTotp(enabled: Boolean) {
-        extendedSettingsFlow.update { it.copy(autofillCopyTotp = enabled) }
+        updateExtended { it.copy(autofillCopyTotp = enabled) }
     }
 
     fun setAutofillShowTotpNotification(enabled: Boolean) {
-        extendedSettingsFlow.update { it.copy(autofillShowTotpNotification = enabled) }
+        updateExtended { it.copy(autofillShowTotpNotification = enabled) }
     }
 
     fun setSkipDalVerification(enabled: Boolean) {
-        extendedSettingsFlow.update { it.copy(skipDalVerification = enabled) }
+        updateExtended { it.copy(skipDalVerification = enabled) }
     }
 
     fun setOverrideNoAutofill(enabled: Boolean) {
-        extendedSettingsFlow.update { it.copy(overrideNoAutofill = enabled) }
+        updateExtended { it.copy(overrideNoAutofill = enabled) }
     }
 
     // ========== KP2A 扩展：显示与外观交互 ==========
     fun setMaskPasswordsDefault(enabled: Boolean) {
-        extendedSettingsFlow.update { it.copy(maskPasswordsDefault = enabled) }
+        updateExtended { it.copy(maskPasswordsDefault = enabled) }
     }
 
     fun setMaskTotpDefault(enabled: Boolean) {
-        extendedSettingsFlow.update { it.copy(maskTotpDefault = enabled) }
+        updateExtended { it.copy(maskTotpDefault = enabled) }
     }
 
     fun setShowUnlockedNotification(enabled: Boolean) {
-        extendedSettingsFlow.update { it.copy(showUnlockedNotification = enabled) }
+        updateExtended { it.copy(showUnlockedNotification = enabled) }
     }
 
     fun setShowGroupInSearchResult(enabled: Boolean) {
-        extendedSettingsFlow.update { it.copy(showGroupInSearchResult = enabled) }
+        updateExtended { it.copy(showGroupInSearchResult = enabled) }
     }
 
     fun setShowGroupInEntry(enabled: Boolean) {
-        extendedSettingsFlow.update { it.copy(showGroupInEntry = enabled) }
+        updateExtended { it.copy(showGroupInEntry = enabled) }
     }
 
     fun setListDensity(density: ListDensity) {
-        extendedSettingsFlow.update { it.copy(listDensity = density) }
+        updateExtended { it.copy(listDensity = density) }
     }
 
     fun setAutoActivateSearchOnOpen(enabled: Boolean) {
-        extendedSettingsFlow.update { it.copy(autoActivateSearchOnOpen = enabled) }
+        updateExtended { it.copy(autoActivateSearchOnOpen = enabled) }
     }
 
     fun setIconSet(iconSet: IconSetOption) {
-        extendedSettingsFlow.update { it.copy(iconSet = iconSet) }
+        updateExtended { it.copy(iconSet = iconSet) }
     }
 
     fun setShowAuthenticatorTab(enabled: Boolean) {
@@ -858,49 +825,69 @@ class SettingsViewModel @Inject constructor(
 
     // ========== KP2A 扩展：文件处理与高级同步策略 ==========
     fun setUseOfflineCache(enabled: Boolean) {
-        extendedSettingsFlow.update { it.copy(useOfflineCache = enabled) }
+        updateExtended { it.copy(useOfflineCache = enabled) }
         // 离线开关联动：实时传导至同步引擎决策树（SyncEngine.isOffline）
         syncCoordinator.setOfflineMode(enabled)
     }
 
     fun setPeriodicBackgroundSyncEnabled(enabled: Boolean) {
-        extendedSettingsFlow.update { it.copy(periodicBackgroundSyncEnabled = enabled) }
+        updateExtended { it.copy(periodicBackgroundSyncEnabled = enabled) }
+        // TASK-08 整改：开关接入 WorkManager 唯一周期任务（开启注册 / 关闭取消）
+        periodicSyncScheduler.reschedule(
+            enabled = enabled,
+            intervalMinutes = extendedSettingsFlow.value.periodicBackgroundSyncIntervalMinutes,
+            wifiOnly = syncStateFlow.value.wifiOnlySync
+        )
     }
 
     fun setPeriodicBackgroundSyncInterval(minutes: Int) {
-        extendedSettingsFlow.update { it.copy(periodicBackgroundSyncIntervalMinutes = minutes) }
+        updateExtended { it.copy(periodicBackgroundSyncIntervalMinutes = minutes) }
+        // TASK-08 整改：间隔变更经 UPDATE 策略原子更新周期任务
+        reschedulePeriodicSyncIfNeeded()
+    }
+
+    /** TASK-08：周期同步开启时按最新偏好重排任务（wifiOnly/间隔变更共用入口） */
+    private fun reschedulePeriodicSyncIfNeeded() {
+        val settings = extendedSettingsFlow.value
+        if (settings.periodicBackgroundSyncEnabled) {
+            periodicSyncScheduler.reschedule(
+                enabled = true,
+                intervalMinutes = settings.periodicBackgroundSyncIntervalMinutes,
+                wifiOnly = syncStateFlow.value.wifiOnlySync
+            )
+        }
     }
 
     fun setAllowedWifiSsids(ssids: String) {
-        extendedSettingsFlow.update { it.copy(allowedWifiSsids = ssids) }
+        updateExtended { it.copy(allowedWifiSsids = ssids) }
     }
 
     fun setCreateBackupBeforeSave(enabled: Boolean) {
-        extendedSettingsFlow.update { it.copy(createBackupBeforeSave = enabled) }
+        updateExtended { it.copy(createBackupBeforeSave = enabled) }
     }
 
     fun setCheckRemoteChangesBeforeSave(enabled: Boolean) {
-        extendedSettingsFlow.update { it.copy(checkRemoteChangesBeforeSave = enabled) }
+        updateExtended { it.copy(checkRemoteChangesBeforeSave = enabled) }
     }
 
     fun setConflictResolution(resolution: ConflictResolution) {
-        extendedSettingsFlow.update { it.copy(conflictResolution = resolution) }
+        updateExtended { it.copy(conflictResolution = resolution) }
     }
 
     fun setUseFileTransactions(enabled: Boolean) {
-        extendedSettingsFlow.update { it.copy(useFileTransactions = enabled) }
+        updateExtended { it.copy(useFileTransactions = enabled) }
     }
 
     fun setWebdavChunkedUpload(enabled: Boolean) {
-        extendedSettingsFlow.update { it.copy(webdavChunkedUpload = enabled) }
+        updateExtended { it.copy(webdavChunkedUpload = enabled) }
     }
 
     fun setWebdavChunkSizeMb(sizeMb: Int) {
-        extendedSettingsFlow.update { it.copy(webdavChunkSizeMb = sizeMb) }
+        updateExtended { it.copy(webdavChunkSizeMb = sizeMb) }
     }
 
     fun setPreloadDatabaseEnabled(enabled: Boolean) {
-        extendedSettingsFlow.update { it.copy(preloadDatabaseEnabled = enabled) }
+        updateExtended { it.copy(preloadDatabaseEnabled = enabled) }
     }
 
     // ========== KP2A 扩展：TOTP 规范映射 ==========
@@ -917,11 +904,11 @@ class SettingsViewModel @Inject constructor(
 
     // ========== KP2A 扩展：调试日志 ==========
     fun setDebugLogEnabled(enabled: Boolean) {
-        extendedSettingsFlow.update { it.copy(debugLogEnabled = enabled) }
+        updateExtended { it.copy(debugLogEnabled = enabled) }
     }
 
     fun setVerboseSyncLog(enabled: Boolean) {
-        extendedSettingsFlow.update { it.copy(verboseSyncLog = enabled) }
+        updateExtended { it.copy(verboseSyncLog = enabled) }
     }
 
     fun triggerSync() {
@@ -1047,6 +1034,93 @@ class SettingsViewModel @Inject constructor(
 
     fun clearDebugExportFeedback() {
         debugExportFeedbackFlow.value = null
+    }
+
+    // ========== TASK-13 整改：密码库设置页导出/模板动作真实化 ==========
+    // 此前「导出 KDBX / 导出 XML / 导出密钥文件 / 模板安装 / 子库挂载」五个动作仅弹
+    // UiMessage 假成功提示，从未触碰任何数据；现导出三件套走仓库真实序列化 + SAF 落盘，
+    // 模板安装真实建组落库，子库挂载如实告知未实现（无对应系统能力，属功能缺口）。
+
+    private val exportFeedbackFlow = MutableStateFlow<UiMessage?>(null)
+
+    /** 导出/模板动作结果反馈（成功/失败），由 Screen 层消费后清除 */
+    val exportFeedback: StateFlow<UiMessage?> = exportFeedbackFlow.asStateFlow()
+
+    fun clearExportFeedback() {
+        exportFeedbackFlow.value = null
+    }
+
+    /** 导出当前数据库为 KDBX 完整副本并写入 SAF 目标 Uri */
+    fun exportKdbxTo(targetUri: Uri) {
+        viewModelScope.launch(Dispatchers.IO) {
+            exportFeedbackFlow.value = exportAndWrite(
+                targetUri, R.string.dbset_export_kdbx_done
+            ) { vaultRepository.exportKdbxBytes() }
+        }
+    }
+
+    /** 导出当前数据库为 KeePass 2.x 兼容明文 XML 并写入 SAF 目标 Uri */
+    fun exportVaultXmlTo(targetUri: Uri) {
+        viewModelScope.launch(Dispatchers.IO) {
+            exportFeedbackFlow.value = exportAndWrite(
+                targetUri, R.string.dbset_export_xml_done
+            ) { vaultRepository.exportVaultXmlBytes() }
+        }
+    }
+
+    /** 导出会话绑定的密钥文件并写入 SAF 目标 Uri */
+    fun exportKeyFileTo(targetUri: Uri) {
+        viewModelScope.launch(Dispatchers.IO) {
+            exportFeedbackFlow.value = exportAndWrite(
+                targetUri, R.string.dbset_keyfile_exported
+            ) { vaultRepository.exportKeyFileBytes() }
+        }
+    }
+
+    /** 安装条目模板库（真实创建「模板」分组与 5 个模板条目） */
+    fun installEntryTemplates() {
+        viewModelScope.launch {
+            val result = vaultRepository.installEntryTemplates()
+            exportFeedbackFlow.value = if (result.isSuccess) {
+                UiMessage(R.string.dbset_templates_installed)
+            } else {
+                UiMessage(R.string.settings_action_failed, listOf((result as com.keepasskey.core.result.KdbxResult.Failure).message))
+            }
+        }
+    }
+
+    /** 序列化 → SAF 写盘的公共管线；任一环节失败都映射为可理解的失败反馈 */
+    private suspend fun exportAndWrite(
+        targetUri: Uri,
+        successMessageRes: Int,
+        bytesProvider: suspend () -> com.keepasskey.core.result.KdbxResult<ByteArray>
+    ): UiMessage {
+        val result = bytesProvider()
+        if (!result.isSuccess) {
+            val failure = result as com.keepasskey.core.result.KdbxResult.Failure
+            return UiMessage(R.string.settings_action_failed, listOf(failure.message))
+        }
+        val bytes = result.getOrNull()
+        val resolver = appContext?.contentResolver
+        val written = if (bytes != null && resolver != null) {
+            try {
+                resolver.openOutputStream(targetUri)?.use { os ->
+                    os.write(bytes)
+                    os.flush()
+                    true
+                } ?: false
+            } catch (e: Exception) {
+                debugLogBuffer.warn(TAG, "SAF 导出写盘失败: ${e.javaClass.simpleName}")
+                false
+            }
+        } else {
+            false
+        }
+        return if (written) {
+            UiMessage(successMessageRes)
+        } else {
+            UiMessage(R.string.settings_action_failed, listOf("SAF 写盘失败"))
+        }
     }
 
     fun rescanHealth() {

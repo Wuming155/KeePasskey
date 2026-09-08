@@ -658,4 +658,26 @@ class FakeVaultRepository() : VaultRepository {
     override suspend fun getAttachmentData(entryId: String, fileName: String): ByteArray? = null
 
     override fun isSessionReadOnly(): Boolean = false
+
+    // TASK-13 新契约：Fake 仓储不支持导出（如实失败），模板安装幂等成功
+    override suspend fun exportKdbxBytes(): com.keepasskey.core.result.KdbxResult<ByteArray> =
+        com.keepasskey.core.result.KdbxResult.Failure(
+            UnsupportedOperationException("Fake 仓储不支持 KDBX 导出"),
+            "测试 Fake 不支持导出"
+        )
+
+    override suspend fun exportVaultXmlBytes(): com.keepasskey.core.result.KdbxResult<ByteArray> =
+        com.keepasskey.core.result.KdbxResult.Failure(
+            UnsupportedOperationException("Fake 仓储不支持 XML 导出"),
+            "测试 Fake 不支持导出"
+        )
+
+    override suspend fun exportKeyFileBytes(): com.keepasskey.core.result.KdbxResult<ByteArray> =
+        com.keepasskey.core.result.KdbxResult.Failure(
+            UnsupportedOperationException("Fake 仓储不支持密钥文件导出"),
+            "测试 Fake 不支持导出"
+        )
+
+    override suspend fun installEntryTemplates(): com.keepasskey.core.result.KdbxResult<Unit> =
+        com.keepasskey.core.result.KdbxResult.Success(Unit)
 }
