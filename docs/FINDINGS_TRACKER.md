@@ -58,7 +58,7 @@
 | **P2-11** | WebDAV Basic 认证使用 ISO-8859-1 致中文密码 401 | ✅ 已修复（2026-09-08，TASK-25） | `WebDavSyncProvider.buildBasicAuthHeader` 凭据拼接改按 UTF-8 编码（CharBuffer 直转，敏感数据铁律不变）；补中文用户名/密码回归测试（Authorization 头 Base64 解码逐字节断言） | 否（已修复） | RFC 7617 §2.1 的 `charset` 参数仅存在于服务端挑战侧，请求侧无声明机制，故只改编码不附参数（sabre 系服务端按 UTF-8 解码） |
 | **P2-12** | 全网络请求无 `callTimeout` 与退避重试 | ✅ 已修复（2026-09-08，TASK-42） | `SyncHttpClientFactory` 补全局 `callTimeout`（默认 5 分钟，`SyncNetworkOptions` 新增 `callTimeoutMs`），覆盖 DNS+连接+读写全生命周期兜底封顶 | 低-中 | 退避重试属增强项，未纳入本次范围 |
 | **P2-13** | 凭据加密失败时旧密文被保留且无错误上报 | ✅ 已修复 | `SyncCredentialsStore.kt:95` 改为先封印后落盘，加密失败直接中断并不改动磁盘 | 否（已修复） | 先封印后落盘已加 |
-| **P2-14** | S3 无时钟偏移处理（导致 RequestTimeTooSkewed 403） | ❌ 未修复 | `S3SyncProvider.kt:305` 直接取本地时间，无服务端时间补偿机制 | 低 | `signV4` 取本地 `Date()`；设备时钟偏移 >15min 才触发，发生概率低；已登记 **TASK-45**（服务端时间偏移补偿） |
+| **P2-14** | S3 无时钟偏移处理（导致 RequestTimeTooSkewed 403） | ✅ 已修复（2026-09-08，TASK-45） | `S3SyncProvider.kt`：`refreshClockOffset` 每响应 `Date` 头刷新偏移（≥1s 变化回调持久化）、`signingDate()` 统一以本地+偏移签名、`executeSignedRequest` 对偏斜 403（偏移跳变 >14min 或主体含 `RequestTimeTooSkewed`）恰一次重签自愈、无有效 `Date` 头 fail-closed；偏移经 `SyncCredentialsStore.loadS3ClockOffsetMillis/saveS3ClockOffsetMillis` 跨进程持久化（`saveS3Config` 重录即作废） | 低 | 回归 4 例：正/负偏移补偿签名、首次同步 skew 自愈（恰 2 请求）、无 Date 头 fail-closed 单请求；TASK-26 SigV4 已知答案向量不回退 |
 | **P2-15** | `updateBase` 两文件非原子对（.baseversion 与 .meta） | ✅ 已修复（2026-09-08，TASK-37） | `SyncCache.updateBase` 改为单次原子写：版本+元数据合并写入同一临时文件后原子 rename（TASK-37 整改），并新增 `SyncCacheTest` 5 例 | 中 | 崩溃窗口不一致已消除 |
 | **P2-16** | 缓存临时文件名确定性致并发踩写 | ✅ 已修复 | `SyncCache.kt:225` 临时文件名加上 `UUID.randomUUID()` 防碰撞 | 否（已修复） | 已加 UUID |
 | **P2-17** | 冲突解决页字段级选择塌缩为整条目二选一 | ✅ 已修复（2026-09-08，TASK-30） | `KdbxMerger.resolveConflictByFields` 逐字段合并（KEEP_REMOTE 字段取远端并刷新 lastModificationTime）；`SyncCoordinator.resolveConflicts` 新增 `fieldResolutions` 参数，`ConflictResolutionViewModel.applyMerge` 生成逐字段决策下发 | 中（功能） | 字段级合并已落地 |
@@ -143,7 +143,7 @@
 | **S-13** | 敏感 | Autofill `onSaveRequest` 密码 CharArray 未擦除 | P2 | ✅ 已修复 | `KeePasskeyAutofillService.kt:341` 增加 `finally { passwordChars.fill('0') }` | 否（已修复） | 已 finally 擦除 |
 | **S-14** | 依赖 | `androidx.biometric` 处于 alpha 依赖 | P0 | ✅ 已修复 | `app/build.gradle.kts:82` 降级迁移至稳定版 `1.1.0` | 否（已修复） | 已迁移稳定版 |
 | **S-15** | 依赖 | `androidx.credentials` 落后于稳定版 | P0 | ✅ 已修复 | `app/build.gradle.kts:87` 升级至稳定版 `1.6.0` | 否（已修复） | 已升级稳定版 |
-| **S-16** | CI | 无自动化依赖漏洞巡检 | P2 | ❌ 未修复 | 工作区缺乏 Dependabot 或 Dependency-Check 工作流文件 | 中（流程） | 已登记 **TASK-20**（Dependabot / OWASP 依赖漏洞巡检） |
+| **S-16** | CI | 无自动化依赖漏洞巡检 | P2 | ✅ 已修复（2026-09-08，TASK-20） | `.github/dependabot.yml`（gradle + github-actions 每周分组 PR）+ `.github/workflows/dependency-scan.yml`（OWASP `dependency-check-gradle:13.0.0` init 脚本仅 CI 注入，`dependencyCheckAggregate` 汇总 5 模块，failBuildOnCVSS=11 首次仅告警，SARIF 归档 Code Scanning）+ `.github/owasp-dependency-suppressions.xml` 误报白名单 | 中（流程） | 首次扫描误报登记纪律：suppression 条目须注明核实依据并同步 STATUS/FINDINGS |
 
 ---
 

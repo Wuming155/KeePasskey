@@ -1,6 +1,6 @@
 # KeePasskey 项目状态单一真相源（Single Source of Truth）
 
-> **更新时间**：2026-09-08（阶段 6 批次完成 + 全量文档梳理）  
+> **更新时间**：2026-09-08（TASK-45 S3 时钟偏移补偿 + TASK-20 依赖巡检 CI）  
 > **权威声明**：本项目**唯一**有效的状态与任务跟踪页。`README.md` 仅作对外简介。原 `DELIVERY_PLAN.md` / `REMEDIATION_PLAN.md` / `docs/*审查报告*.md` 等历史存档文档已于 2026-09-07 **物理删除**，其结论已并入本文件与 `FINDINGS_TRACKER.md`，不再单独保留。  
 > **2026-09-08 文档梳理**：看板去重（删除 TASK-08/15/16/17/18 的 5 条失效「❌ 未实现」副本），44 项按 ID 升序重排；基线 HEAD、测试口径与 §4 日志索引按实际提交校正。
 
@@ -10,8 +10,8 @@
 
 | 维度 | 数值 / 状态 | 官方依据与说明 |
 |---|---|---|
-| **Git HEAD** | `5f03036` (main) | TASK-46 提交（`OtpEngine` TOTP 计算链路 ByteArray 化）；**已推送 `origin/main`（本地与远端 0 ahead / 0 behind）** |
-| **测试基线** | **470 个单元测试用例**（app 114 / core 32 / crypto 52 / database 155 / sync 117）：**458 通过、0 失败、12 跳过** | `./gradlew test` 全模块执行；跳过的 12 例为 `LiveSyncServersTest` 真实联调用例（需先起 `tools/local-sync` 服务并加 `-DliveSyncTest`） |
+| **Git HEAD** | `c530761` (main) | TASK-45/20 提交（S3 SigV4 时钟偏移补偿 `d4bc46c` + Dependabot/OWASP 依赖巡检 `c530761`）；**已推送 `origin/main`（本地与远端 0 ahead / 0 behind）** |
+| **测试基线** | **475 个单元测试用例**（app 115 / core 32 / crypto 52 / database 155 / sync 121）：**463 通过、0 失败、12 跳过** | `./gradlew test` 全模块执行；跳过的 12 例为 `LiveSyncServersTest` 真实联调用例（需先起 `tools/local-sync` 服务并加 `-DliveSyncTest`） |
 | **构建状态** | `assembleDebug` + `assembleRelease` (R8) 全量通过 | **AGP 9.2.1 / Gradle 9.4.1** / Kotlin 2.4.10（经 buildscript classpath 锚定内置 KGP）/ Hilt 2.60.1 / **KSP 2.3.11** |
 | **系统基线** | **minSdk 36**, **compileSdk 37**, targetSdk 36 | 仅针对 Android 16+ 深度优化，固化无旧版垫片决策；compileSdk 37 随批次 H 升级（Compose BOM 2026.08.00 + M3 Expressive） |
 | **传输安全防线** | 全站强制 HTTPS（`network_security_config.xml` 禁明文 + OkHttp TLS-only），零证书固定 | 对齐 Google Developer Knowledge `pinning not recommended` 指南 |
@@ -19,7 +19,7 @@
 
 ---
 
-## 2. 任务唯一看板（46 项：40 ✅ 完成 / 3 📋 待验证·评估 / 3 ❌ 未实现）
+## 2. 任务唯一看板（46 项：42 ✅ 完成 / 2 📋 待验证·评估 / 2 ❌ 未实现）
 
 所有进行中、已立项、待执行体检批次、未实现功能、安全遗留与欠账统一收录于下表，**按 TASK ID 升序排列**（优先级见各行「优先级」列）。**新增任务必须在此表注册，新 ID 顺延。**
 
@@ -46,7 +46,7 @@
 | **TASK-17** | 协议 | **KeePass 字段引用（`{REF:...}`）引擎** | 功能缺口 | **P3** | ✅ 已完成（2026-09-08） | database 模块新增 `FieldReferenceEngine`：`{REF:<Want>@<SearchIn>:<Text>}` 官方语法子集（T/U/P/A/N/I，大小写不敏感），整库检索首个命中条目取值替换，引用链递归展开（深度上限 10 防循环），未命中保守保持原文；取值消费点接入自动填充下发与详情页复制（密码/用户名）——投影层不展开，引用指向的密码明文不提前物化进 UI 状态流（M1 语义不变）；8 例引擎单测。**余项**：Notes/URL 展示侧解析未接（同消费点策略可平移） |
 | **TASK-18** | 特性 | **Passkey 作为数据库解锁方式** | 功能缺口 | **P3** | ✅ 已完成（2026-09-08） | 快速解锁升级为「设备绑定解锁通行密钥」：主密码 AES-256-GCM 封印（生物识别/锁屏凭据门控）之上叠加 WebAuthn 形态本地断言——登记生成硬件不可导出 ES256（P-256，StrongBox 优先）密钥对，公钥 + 随机 credentialId 落私有存储；解锁时硬件私钥签名 AuthenticatorData（rpIdHash + UP + signCount），公钥验证 + rpIdHash 归属 + signCount 严格单调（反克隆），未通过 fail-closed 拒绝并清除登记；旧凭据兼容通道（首解跳过断言并后台补登记）。新增 `UnlockPasskeyManager`（验证纯逻辑 JVM 可测，6 例单测） |
 | **TASK-19** | 依赖 | **zxing → CameraX + ML Kit 迁移评估** | 依赖治理 | **P3** | 📋 评估 | `zxing-android-embedded:4.3.0` 保持稳定，评估迁移至现代 CameraX + ML Kit |
-| **TASK-20** | CI | **GitHub Dependabot / OWASP 依赖漏洞巡检** | 供应链 | **P3** | 📋 评估 | 配置自动化依赖漏洞扫描工作流 |
+| **TASK-20** | CI | **GitHub Dependabot / OWASP 依赖漏洞巡检** | 供应链 | **P3** | ✅ 已完成（2026-09-08） | `.github/dependabot.yml`：`gradle`（目录 `/` 覆盖 5 模块 build 文件与 `libs.versions.toml` 版本目录）+ `github-actions` 两生态每周分组 PR（gradle minor/patch 合并、major 独立评审）。`.github/workflows/dependency-scan.yml`：每日 18:00 UTC 定时 + 手动 + 依赖清单变更（push/PR paths）触发；OWASP `dependency-check-gradle:13.0.0` 经 `.github/dependency-check.init.gradle.kts` 仅 CI 注入（**不进常驻构建**，init 脚本与 `dependencyCheckAggregate` 任务注入已本地 `gradlew help/tasks` 验证），汇总 5 模块依赖解析图；`failBuildOnCVSS=11` **首次仅告警**，HTML/SARIF/JSON 报告 artifact 归档 + SARIF 上传 Code Scanning，`NVD_API_KEY` Secret 可选提速。误报经 `.github/owasp-dependency-suppressions.xml` 白名单登记（核实依据/日期/责任人纪律见文件头注释） |
 | **TASK-21** | 整洁度 | **超 800 行文件拆分与硬编码中文抽取** | 审核报告 P3-22/23 | **P3** | ✅ 已完成（2026-09-08） | **P3-22 全闭合**：7 个超 800 行文件全部拆分（`RealVaultRepository` 1436→771 + 新增 `VaultEntryMapper`/`RecycleBinCoordinator`/`PasskeyEntryCoordinator`/`VaultTemplateFactory`；`SettingsViewModel` 1193→700 + 新增 `SettingsSyncController`/`SettingsHealthController`/`SettingsExportController`；5 个大屏 Compose 文件拆出区块/组件/对话框文件，公共 API 与行为零变更）。**P3-23 渐进闭合**：用户可见文案全量资源化（新增 `strings_ui_messages.xml` 39 键、`strings_sync_passkey.xml` 30 键、主 strings.xml `repo_*`/`health_*`/`time_*` 等 44 键；非 Compose 层新增 `StringsProvider` 通道 + Hilt 绑定，生产转发 getString、单测注入假实现）。中文字面量 294→114，剩余均为合理保留：debugLog/Log 日志、开发者面向异常消息、KDBX 持久化数据（回收站/模板/卡字段键/占位库名）、`core` 纯 JVM 模块异常兜底「未知错误」（无 Android 资源层）。**446 例测试全绿** |
 | **TASK-22** | 安全/稳定 | **P3-30：`@Singleton` AutoLockManager 在 `MainActivity.onDestroy` 被 destroy** | FINDINGS 核实 | **P0(真实 Bug)** | ✅ 已修复（2026-09-07） | 移除 `MainActivity.onDestroy` 中的 `autoLockManager.destroy()` 调用（含空覆写与随之成为死代码的 `AutoLockManager.destroy()`）。`AutoLockManager` 为进程级单例（监听 `ProcessLifecycleOwner` + 熄屏广播），生命周期与进程对齐，`initialize()` 幂等，资源随进程退出由系统回收；旋转/配置重建不再销毁自动锁定调度器 |
 | **TASK-23** | 安全 | **P2-9：`parseEcPrivateKey` 缺 `d ∈ [1, n-1]` 范围校验** | FINDINGS 核实 | **P1** | ✅ 已修复（2026-09-07） | `PasskeyCryptoEngine.kt` 新增显式标量范围校验 `validateEcScalarRange`（权威检查点，不依赖库层行为），越界 fail-closed 抛类型化 `CryptoException.InvalidKeyException`；库层构造器 IAE 经 `newEcPrivateKey` 归一为同一异常类型且不作回退放行。补 5 例单测：d=0 / d=n / d>n（32B 标量与 64B hex 文本两形态）均拒绝，边界 d=1 / d=n-1 签名可用 |
@@ -71,7 +71,7 @@
 | **TASK-42** | 性能 | **低-中调度批次（P2-2 / P2-12 / P2-30 / P2-31）** | FINDINGS 核实 | **P3** | ✅ 已修复（2026-09-08） | 四项全闭合：P2-2 `DatabaseSession.save` 序列化（Argon2 派生+流加密，CPU 密集）移至 `Dispatchers.Default`，仅字节落盘（writeAtomic+fsync）走 IO（对齐 exportToBytes 先例，写毕擦除序列化缓冲）；P2-12 `SyncHttpClientFactory` 补全局 `callTimeout`（默认 5 分钟，覆盖 DNS+连接+读写全生命周期，弱网悬挂兜底封顶，`SyncNetworkOptions` 新增 `callTimeoutMs`）；P2-30 `AuthenticatorViewModel` uiState 上游显式 `flowOn(Dispatchers.Default)`（combine 内含种子解析+HMAC，兜底脱离主线程，测试同步改为真实时间轮询等待）；P2-31 `RealVaultRepository` 构造期不再同步扫盘——`listFiles` 移至协程 + `Dispatchers.IO`，databasesFlow 经 Flow 自然推送更新 |
 | **TASK-43** | 特性 | **进阶偏好消费方接线（预留功能清单）** | TASK-12 裁定衍生 | **P3** | ❌ 未实现 | 设置页全部进阶开关保留为预留功能（已随 TASK-12 持久化，不再回显丢失）。待接线消费方：`webdavChunkedUpload`/`webdavChunkSizeMb`（WebDAV 分块上传）、`createBackupBeforeSave`（保存前 .bak）、`checkRemoteChangesBeforeSave`、`conflictResolution` 默认策略、`useFileTransactions`（已是既定行为，接线为信息展示）、`preloadDatabaseEnabled`、`lockWhenNavigateBack`、`clearPasswordOnLeave`、`rememberRecentFiles`、`rememberKeyFileLocation`、`showKillAppOption`、`offerSaveCredentials`、`inlineSuggestionsEnabled`、`autoReturnFromQuery`、`autofillCopyTotp`、`autofillShowTotpNotification`、`skipDalVerification`、`overrideNoAutofill`、`disabledAutofillQueriesCount`（黑名单，完整生命周期见 TASK-44）、`maskPasswordsDefault`、`maskTotpDefault`、`showUnlockedNotification`、`showGroupInSearchResult`、`showGroupInEntry`、`listDensity`、`autoActivateSearchOnOpen`、`iconSet`、TOTP 字段映射、`debugLogEnabled`、`verboseSyncLog`、子库挂载（TASK-13 改诚实提示）。另：导出/导入五源（1PUX/Bitwarden/KeePass/浏览器 CSV）解析器亦为独立功能缺口 |
 | **TASK-44** | 特性 | **自动填充黑名单完整生命周期** | TASK-36 整改衍生 | **P3** | ❌ 未实现 | TASK-36 整改确认黑名单为端到端功能缺口（设置页仅展示计数，且该计数无任何写入方）。待建设：① 黑名单存储（包名集合持久化，替代现无写入方的 `disabledAutofillQueriesCount` 计数）；② 自动填充服务侧消费（黑名单包名不下发数据集）；③ 入口（详情页/系统设置「为本应用禁用填充」写入黑名单）；④ 设置页条目化展示与删除（替代当前仅计数展示）。对齐 KP2A「禁用自动填充查询」语义 |
-| **TASK-45** | 协议 | **S3 SigV4 服务端时钟偏移补偿** | FINDINGS P2-14 | **P3** | ❌ 未实现 | `S3SyncProvider.signV4` 直接取本地 `Date()`，设备时钟偏移 >15min 时服务端返回 `RequestTimeTooSkewed` 403；建议以响应 `Date` 头计算偏移量并在签名时补偿 |
+| **TASK-45** | 协议 | **S3 SigV4 服务端时钟偏移补偿** | FINDINGS P2-14 | **P3** | ✅ 已完成（2026-09-08） | `S3SyncProvider` 新增时钟偏移补偿链路：**每响必刷新**——任何响应（含 4xx/5xx）携带有效 `Date` 头即经 `refreshClockOffset` 更新运行时偏移（变化 ≥1s 才回调持久化，抑制 HTTP Date 秒级抖动刷盘）；**签名补偿**——`signingDate()` = 本地时间 + 偏移，5 个签名请求全走补偿时间（TASK-26 已知答案向量不回退，`signV4` 纯函数语义保持）；**skew 自愈**——`executeSignedRequest` 统一执行器对「403 且偏移跳变 >14min（HEAD 无错误实体场景同样适用）或错误主体含 `RequestTimeTooSkewed`」**恰好一次**重签重试，首次同步偏移未知也能自愈；**fail-closed**——无有效 `Date` 头不补偿、不盲目重试、按原路径如实上浮。偏移经 `SyncCredentialsStore.loadS3ClockOffsetMillis/saveS3ClockOffsetMillis` 持久化跨进程恢复（非敏感常量，与凭据同文件；`saveS3Config` 重录配置即作废旧偏移重新学习），`SyncCoordinator.resolveProvider` 注入初始偏移 + 刷新回调（持久化失败仅丢跨进程记忆，不阻断同步）。回归 4 例：正/负偏移补偿签名断言、首次同步 skew 自愈（恰 2 请求 + 回调偏移 ≈ 服务端偏差）、无 Date 头 fail-closed（单请求不重试） |
 | **TASK-46** | 内存 | **`OtpEngine` TOTP 计算链路 ByteArray 化** | FINDINGS P2-5 | **P2** | ✅ 已完成（2026-09-08） | **计算侧残余闭合**：`OtpEngine.calculateTotp`/`calculateHotp` 入参由 `String` 改 `ByteArray`（`calculateHotpRaw` 合并移除），种子经 Base32 解码后全程字节态（HMAC-over-counter 链路零 String 密钥中间值）；`Base32Decoder.decode` 固化借用语义（调用方独占新数组、无内部缓存，KDoc 注明用毕 `fill(0)`）；`VaultEntryMapper.computeTotpCode` 解码产物成功/失败路径 `finally fill(0)` 擦除（fail-clean，不因早退残留种子副本）。回归：RFC 4226 Appendix D 全量 10 组、RFC 6238 Appendix B SHA-1/256/512 各 6 组、RFC 4648 §10 官方向量 + 「引擎不篡改调用方种子」「擦除后重解码重算一致（无缓存驻留）」断言全绿；新增 `VaultEntryMapperTotpTest` 3 例（有效出码 / 无效种子 fail-clean / SHA-256·512 消费）。**470 例全绿**（458 通过 / 12 跳过） |
 
 ---
@@ -82,15 +82,15 @@
 
 | 报告来源 | 发现总数 | ✅ 已修复 | ⚠️ 部分修复 | ❌ 未修复 | ➖ 不适用 / 记录备查 |
 |---|:---:|:---:|:---:|:---:|:---:|
-| **全量代码审核报告（2026-09-05）** | 93 | 70 | 12 | 4 | 7 |
-| **安全审查报告（2026-09-06 Wave 13）** | 16 | 15 | 0 | 1 | 0 |
+| **全量代码审核报告（2026-09-05）** | 93 | 71 | 12 | 3 | 7 |
+| **安全审查报告（2026-09-06 Wave 13）** | 16 | 16 | 0 | 0 | 0 |
 | **加解密实现审查报告（2026-09-06）** | 9 | 9 | 0 | 0 | 0 |
 | **审核报告第七节测试覆盖缺口** | 7 | 5 | 2 | 0 | 0 |
-| **合计** | **125** | **99 (79%)** | **14 (11%)** | **5 (4%)** | **7 (6%)** |
+| **合计** | **125** | **101 (81%)** | **14 (11%)** | **3 (2%)** | **7 (6%)** |
 
 > **计数校正（2026-09-08）**：原记「131 项」为列向加总错误，按四份报告行枚举实为 **125 项**（93 + 16 + 9 + 7）；上表数字已按 `FINDINGS_TRACKER.md` 当前物理状态重新点算。
 >
-> **关键结论**：125 项发现中，所有 P0 级阻断项（7 项）与高危安全缺陷（自研 PIN 解锁、全站明文流量、旧派生 HMAC 校验、GCM IV 唯一性等）已 **100% 修复**。原「未修复 43 项」的四类主因——① 约 35 个设置项无消费者（P1-6）、② 5 个假动作 SAF 导出（P1-7）、③ 超 800 行文件与硬编码中文（P3-22/23）、④ 测试假用例与覆盖缺口（P2-36/37）——已随 TASK-12/13/21/40 全部闭合。**当前仅余 4 项未修复**：P2-14（S3 时钟偏移补偿 → **TASK-45**）、P2-26（占位库演示数据，低优先级可接受）、P2-28（「已泄露密码」恒 0，需接入 HIBP 外部服务）、S-16（CI 依赖巡检 → **TASK-20**）。另有 14 项为「部分修复」（均属风险已接受的残余项，详见 FINDINGS「说明」列）。
+> **关键结论**：125 项发现中，所有 P0 级阻断项（7 项）与高危安全缺陷（自研 PIN 解锁、全站明文流量、旧派生 HMAC 校验、GCM IV 唯一性等）已 **100% 修复**。原「未修复 43 项」的四类主因——① 约 35 个设置项无消费者（P1-6）、② 5 个假动作 SAF 导出（P1-7）、③ 超 800 行文件与硬编码中文（P3-22/23）、④ 测试假用例与覆盖缺口（P2-36/37）——已随 TASK-12/13/21/40 全部闭合。**当前仅余 2 项未修复**：P2-26（占位库演示数据，低优先级可接受）、P2-28（「已泄露密码」恒 0，需接入 HIBP 外部服务）；P2-14（S3 时钟偏移补偿）与 S-16（CI 依赖巡检）已于 2026-09-08 分别随 **TASK-45** / **TASK-20** 闭合。另有 14 项为「部分修复」（均属风险已接受的残余项，详见 FINDINGS「说明」列）。
 
 ### 3.1 实测核实补充结论（2026-09-07）
 
@@ -117,6 +117,8 @@
 
 > 索引中出现的 `Wave N` / `阶段 N` 字样为对应历史提交的**原始主题**，属已冻结语境，仅供追溯；新提交请以 `TASK-xx` / `批次 X` + 提交哈希 引用，勿再使用 Wave / 阶段 编号。
 
+- `c530761` (2026-09-08): TASK-20 依赖巡检 CI——`.github/dependabot.yml`（gradle + github-actions 每周分组 PR）+ OWASP Dependency-Check workflow（13.0.0 init 脚本仅 CI 注入、`dependencyCheckAggregate` 汇总 5 模块、failBuildOnCVSS=11 首次仅告警、SARIF 归档）+ suppression 白名单骨架
+- `d4bc46c` (2026-09-08): TASK-45 S3 SigV4 时钟偏移补偿——每响 `Date` 头刷新偏移（≥1s 节流持久化）/ 签名统一 `signingDate()` 补偿 / `executeSignedRequest` 对偏斜 403 恰一次自愈重试 / 无 Date 头 fail-closed；偏移经 `SyncCredentialsStore` 跨进程持久化、`saveS3Config` 重录作废；回归 4 例（475 例全绿）；TASK-26 已知答案向量不回退
 - `5f03036` (2026-09-08): TASK-46 `OtpEngine` TOTP 计算链路 ByteArray 化 + 用毕擦除（fail-clean）——计算入参改 ByteArray、解码借用语义固化、`computeTotpCode` finally 擦除；RFC 4226/6238/4648 官方向量回归 + 擦除断言入单测（470 例全绿）；STATUS/FINDINGS/AGENTS 同步回写
 - `8133576` (2026-09-08): docs README 参考项目说明更新（keepass2android 定位措辞）
 - `be0a11b` (2026-09-08): docs README 删除许可证合规提示冗余说明
@@ -199,7 +201,7 @@
 
 ### 5.4 同步
 - [x] **WebDAV** 同步（账号、URL、路径，全站强制 HTTPS）
-- [x] **S3 兼容协议** 同步（Endpoint、Bucket、Access Key/Secret、区域、path-style）
+- [x] **S3 兼容协议** 同步（Endpoint、Bucket、Access Key/Secret、区域、path-style；服务端时钟偏移自动补偿：`Date` 头探测 + 跨进程持久化 + 偏斜 403 自愈重试）
 - [x] 同步状态展示（最新同步时间、云端版本、同步反馈）
 - [x] 冲突处理：三方哈希状态机 + 墓碑感知合并 + 可视化逐字段决策界面
 - [x] 后台同步（手动 / 冷启动 / 周期性 WorkManager 后台同步）：冷启动按持久化偏好恢复调度，间隔 / Wi-Fi 约束即时生效
@@ -223,7 +225,7 @@
 | KeePass 字段引用展示侧（Notes/URL） | TASK-25 引擎已落地，Notes/URL 引用展开展示未接线（并入 TASK-43 范畴） |
 | 进阶偏好消费方接线 | 全部开关已持久化（TASK-12），消费方未接线，登记 **TASK-43** |
 | 自动填充黑名单完整生命周期 | 阻断/告警可用，增删数据源与持久化未闭环，登记 **TASK-44** |
-| S3 SigV4 服务端时钟偏移补偿 | 直取本地时间，时钟偏移 >15min 返回 403，登记 **TASK-45** |
+| S3 SigV4 服务端时钟偏移补偿 | ✅ 已闭环（2026-09-08，TASK-45）：`Date` 头探测 + 持久化补偿 + 偏斜 403 恰一次自愈，无 Date 头 fail-closed |
 | `OtpEngine` TOTP 计算链路 ByteArray 化 | ✅ 已闭环（2026-09-08，TASK-46）：计算链路全程 ByteArray + 用毕擦除（fail-clean），RFC 4226/6238/4648 官方向量回归全绿 |
 | KDBX v3 及以下读写 | 明确拒绝（`KdbxUnsupportedVersionException`） |
 | 应用发布 | 构建链路就绪，未完成 F-Droid / GitHub Release 发布 |
