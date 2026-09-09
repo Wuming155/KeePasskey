@@ -206,6 +206,16 @@ class PasskeyCreateActivity : BaseCredentialActivity() {
     /**
      * 组装标准 WebAuthn 注册响应 JSON（authData 中携带 AT 位与 UV 位）。
      * 无证明声明采用 `fmt="none"`；私钥不参与该路径，仅使用公钥构建 COSE 键。
+     *
+     * ISSUE-P1-02 内存脱敏边界声明：
+     * - 私钥全程不进入本路径——生成侧（[PasskeyCryptoEngine]）已保证零 String 中间量，
+     *   私钥唯一长期持有者是落库条目内的 [com.keepasskey.core.security.ProtectedString]
+     *   （密文驻留，且经 [PasskeyData.toCustomFields] 零拷贝别名共享，**不可 clear**）；
+     * - credentialId / 公钥 / authData / attestationObject 均为 WebAuthn 规范定义的公开材料，
+     *   派生字节数组仍统一 try/finally 擦除，保持防御一致性；
+     * - 不可消解的 String 边界：系统 Credential Manager 契约要求响应为 JSON 字符串
+     *   （[CreatePublicKeyCredentialResponse]），该不可变实例无法显式清零——其内容均为
+     *   公开注册材料（不含私钥），属受控且可接受的驻留。
      */
     private fun buildRegistrationJson(
         passkeyData: com.keepasskey.core.model.PasskeyData,
@@ -215,49 +225,56 @@ class PasskeyCreateActivity : BaseCredentialActivity() {
         callerPackage: String?,
         flags: Byte
     ): String {
-        val credIdBytes = Base64.getUrlDecoder().decode(passkeyData.credentialId)
-        val pubBytes = Base64.getDecoder().decode(passkeyData.publicKeyBase64)
-        val coseKeyBytes = PasskeyCryptoEngine.coseKeyFor(passkeyData.algorithmId, pubBytes)
+        var authData: ByteArray? = null
+        var attestationObjectBytes: ByteArray? = null
+        try {
+            val credIdBytes = Base64.getUrlDecoder().decode(passkeyData.credentialId)
+            val pubBytes = Base64.getDecoder().decode(passkeyData.publicKeyBase64)
+            val coseKeyBytes = PasskeyCryptoEngine.coseKeyFor(passkeyData.algorithmId, pubBytes)
 
-        val authData = PasskeyCryptoEngine.buildAuthenticatorData(
-            rpId = rpId,
-            flags = flags,
-            signCount = 0,
-            credentialId = credIdBytes,
-            cosePublicKey = coseKeyBytes
-        )
+            authData = PasskeyCryptoEngine.buildAuthenticatorData(
+                rpId = rpId,
+                flags = flags,
+                signCount = 0,
+                credentialId = credIdBytes,
+                cosePublicKey = coseKeyBytes
+            )
 
-        val attestationMap = linkedMapOf<String, Any>(
-            "fmt" to "none",
-            "attStmt" to emptyMap<String, Any>(),
-            "authData" to authData
-        )
-        val attestationObjectBytes = CborEncoder.encodeMap(attestationMap)
+            val attestationMap = linkedMapOf<String, Any>(
+                "fmt" to "none",
+                "attStmt" to emptyMap<String, Any>(),
+                "authData" to authData
+            )
+            attestationObjectBytes = CborEncoder.encodeMap(attestationMap)
 
-        val clientDataJson = JSONObject().apply {
-            put("type", "webauthn.create")
-            put("challenge", challenge)
-            put("origin", origin.ifBlank { "https://$rpId" })
-            put("androidPackageName", callerPackage ?: packageName)
-        }.toString()
+            val clientDataJson = JSONObject().apply {
+                put("type", "webauthn.create")
+                put("challenge", challenge)
+                put("origin", origin.ifBlank { "https://$rpId" })
+                put("androidPackageName", callerPackage ?: packageName)
+            }.toString()
 
-        val clientDataBase64 = Base64.getUrlEncoder().withoutPadding()
-            .encodeToString(clientDataJson.toByteArray(Charsets.UTF_8))
-        val attestationBase64 = Base64.getUrlEncoder().withoutPadding()
-            .encodeToString(attestationObjectBytes)
+            val clientDataBase64 = Base64.getUrlEncoder().withoutPadding()
+                .encodeToString(clientDataJson.toByteArray(Charsets.UTF_8))
+            val attestationBase64 = Base64.getUrlEncoder().withoutPadding()
+                .encodeToString(attestationObjectBytes)
 
-        return JSONObject().apply {
-            put("id", passkeyData.credentialId)
-            put("rawId", passkeyData.credentialId)
-            put("type", "public-key")
-            put("authenticatorAttachment", "platform")
-            put("clientExtensionResults", JSONObject())
-            put("response", JSONObject().apply {
-                put("clientDataJSON", clientDataBase64)
-                put("attestationObject", attestationBase64)
-                put("transports", JSONArray().put("internal"))
-            })
-        }.toString()
+            return JSONObject().apply {
+                put("id", passkeyData.credentialId)
+                put("rawId", passkeyData.credentialId)
+                put("type", "public-key")
+                put("authenticatorAttachment", "platform")
+                put("clientExtensionResults", JSONObject())
+                put("response", JSONObject().apply {
+                    put("clientDataJSON", clientDataBase64)
+                    put("attestationObject", attestationBase64)
+                    put("transports", JSONArray().put("internal"))
+                })
+            }.toString()
+        } finally {
+            authData?.fill(0)
+            attestationObjectBytes?.fill(0)
+        }
     }
 
     companion object {

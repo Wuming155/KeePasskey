@@ -46,6 +46,11 @@ import java.util.Base64
  *    - RS256 (RSASSA-PKCS1-v1_5 with SHA-256 2048-bit)。
  * 2. 导出 COSE_Key 结构与支持证明数据 (Attested Credential Data) 的 AuthenticatorData 二进制块；
  * 3. 统一签名 API，集成确定性 RFC 6979 DSA、Ed25519 原生验签与 RSA-SHA256，所有私钥运算保证敏感内存清理。
+ *
+ * ISSUE-P1-02（生成侧内存脱敏）：密钥对生成全程**零 String 中间量**——ES256 私钥标量直接从
+ * BigInteger 二进制形态编码为 hex [CharArray]，Ed25519/RS256 的 Base64 编码经 [CharArray] 通道
+ * 封装，全部中间字节/字符副本用毕即 `fill(0)` 擦除。私钥文本形态的唯一长期持有者是
+ * [ProtectedString]（InMemoryCipher 密文驻留），KDBX 受保护字段以文本承载属格式层不可消解边界。
  */
 object PasskeyCryptoEngine {
 
@@ -87,11 +92,11 @@ object PasskeyCryptoEngine {
         val pubEncoded = pub.q.getEncoded(false)
         val pubBase64 = Base64.getEncoder().encodeToString(pubEncoded)
 
-        // 私钥标量定长 64 字符 hex（大数值左补零），封装进 ProtectedString 供 KDBX 受保护字段存储。
-        // KDBX 受保护字段以字符串承载是格式层不可消解的边界——字节数组与 BigInteger 中间量
-        // 均不落 String 且在写入 ProtectedString 后立即废弃，编码 String 存活期即 ProtectedString 存活期。
-        val privHex = String.format("%064x", priv.d)
-        val privateKeyProtected = ProtectedString(privHex, isProtected = true)
+        // ISSUE-P1-02（生成侧脱敏）：私钥标量不落 String——直接从 BigInteger 二进制形态编码为
+        // 定长 64 字符小写 hex CharArray（标量二进制副本与字符副本用毕即清零），再封装进
+        // ProtectedString 密文驻留层供 KDBX 受保护字段存储。
+        val privHexChars = scalarToHexChars(priv.d, EC_SCALAR_HEX_CHARS)
+        val privateKeyProtected = sealedFromPrivateChars(privHexChars)
 
         val handle = resolveUserHandle(userHandle)
 
@@ -130,10 +135,13 @@ object PasskeyCryptoEngine {
 
         val privEncoded = priv.encoded
         val pubEncoded = pub.encoded
-        val privBase64 = Base64.getEncoder().encodeToString(privEncoded)
         val pubBase64 = Base64.getEncoder().encodeToString(pubEncoded)
 
+        // ISSUE-P1-02（生成侧脱敏）：Base64 编码结果不落 String，经 CharArray 通道封装进
+        // ProtectedString，字符副本与原始种子字节副本用毕即清零。
+        val privChars = base64ToChars(privEncoded)
         Arrays.fill(privEncoded, 0.toByte())
+        val privateKey = sealedFromPrivateChars(privChars)
 
         val credIdBase64Url = generateRandomCredentialId()
         val handle = resolveUserHandle(userHandle)
@@ -146,7 +154,7 @@ object PasskeyCryptoEngine {
             credentialId = credIdBase64Url,
             algorithmId = PasskeyData.ALGORITHM_ED25519,
             publicKeyBase64 = pubBase64,
-            privateKey = ProtectedString(privBase64, isProtected = true),
+            privateKey = privateKey,
             signCount = 0,
             backupEligible = true,
             backupState = true
@@ -187,10 +195,13 @@ object PasskeyCryptoEngine {
         val privEncoded = privInfo.encoded
         val pubEncoded = pubInfo.encoded
 
-        val privBase64 = Base64.getEncoder().encodeToString(privEncoded)
         val pubBase64 = Base64.getEncoder().encodeToString(pubEncoded)
 
+        // ISSUE-P1-02（生成侧脱敏）：PKCS#8 DER 的 Base64 编码不落 String，经 CharArray 通道
+        // 封装进 ProtectedString，字符副本与 DER 中间副本用毕即清零。
+        val privChars = base64ToChars(privEncoded)
         Arrays.fill(privEncoded, 0.toByte())
+        val privateKey = sealedFromPrivateChars(privChars)
 
         val credIdBase64Url = generateRandomCredentialId()
         val handle = resolveUserHandle(userHandle)
@@ -203,7 +214,7 @@ object PasskeyCryptoEngine {
             credentialId = credIdBase64Url,
             algorithmId = PasskeyData.ALGORITHM_RS256,
             publicKeyBase64 = pubBase64,
-            privateKey = ProtectedString(privBase64, isProtected = true),
+            privateKey = privateKey,
             signCount = 0,
             backupEligible = true,
             backupState = true
@@ -325,6 +336,69 @@ object PasskeyCryptoEngine {
     }
 
     // ================= 私有实现与辅助工具 =================
+
+    // ================= 生成侧敏感编码辅助（ISSUE-P1-02：全程零 String 中间量） =================
+
+    /** ES256 私钥标量的定长 hex 字符数（256 位 → 64 hex 字符，等价 String.format("%064x")） */
+    private const val EC_SCALAR_HEX_CHARS = 64
+
+    /** 小写 hex 字母表（公开字母表常量，非敏感数据） */
+    private const val HEX_DIGITS = "0123456789abcdef"
+
+    /**
+     * 将非负整数编码为定长 [digits] 位小写 hex 的 [CharArray]（零 String 中间量），
+     * 左侧不足补 '0'，结果等价于 `String.format("%0${digits}x", value)`。
+     * BigInteger 的二进制副本在 finally 中立即清零。
+     */
+    private fun scalarToHexChars(value: BigInteger, digits: Int): CharArray {
+        require(value.signum() >= 0) { "仅支持非负整数编码" }
+        val magnitude = value.toByteArray()
+        try {
+            // 去除 two's-complement 符号位前导 0x00（值本身非负，最高位字节 0x00 均为符号填充）
+            var start = 0
+            while (start < magnitude.size - 1 && magnitude[start] == 0.toByte()) start++
+            val magLen = magnitude.size - start
+            require(magLen * 2 <= digits) { "数值超出定长 hex 编码容量: 需 ${magLen * 2} 位 > $digits 位" }
+            val chars = CharArray(digits) { '0' }
+            var ci = digits - 1
+            for (i in magnitude.size - 1 downTo start) {
+                val b = magnitude[i].toInt() and 0xFF
+                // 自右向左回填：先写低半字节（占较高索引），再写高半字节（占较低索引）
+                chars[ci--] = HEX_DIGITS[b and 0x0F]
+                chars[ci--] = HEX_DIGITS[b ushr 4]
+            }
+            return chars
+        } finally {
+            Arrays.fill(magnitude, 0.toByte())
+        }
+    }
+
+    /**
+     * 将字节流以标准 Base64 编码为 [CharArray]（零 String 中间量；Base64 输出恒为 ASCII，
+     * 逐字节映射无损且可经 UTF-8 往还），中间编码字节副本在 finally 中立即清零。
+     */
+    private fun base64ToChars(bytes: ByteArray): CharArray {
+        val encoded = Base64.getEncoder().encode(bytes)
+        try {
+            return CharArray(encoded.size) { encoded[it].toInt().toChar() }
+        } finally {
+            Arrays.fill(encoded, 0.toByte())
+        }
+    }
+
+    /**
+     * 以 [CharArray] 承载的私钥文本封装受保护字段（InMemoryCipher 密文驻留），
+     * 封装完成后字符副本立即清零。生成侧统一出口：私钥材料在此之后仅以
+     * [ProtectedString] 形态存活，明文仅存活于受控读取瞬间。
+     */
+    private fun sealedFromPrivateChars(chars: CharArray): ProtectedString {
+        try {
+            return ProtectedString(chars, isProtected = true)
+        } finally {
+            Arrays.fill(chars, '0')
+        }
+    }
+
 
     private fun signEs256(privateKeyBytes: ByteArray, dataToSign: ByteArray): ByteArray {
         val privKeyParams = parseEcPrivateKey(privateKeyBytes)

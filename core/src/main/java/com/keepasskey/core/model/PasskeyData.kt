@@ -6,6 +6,17 @@ import com.keepasskey.core.security.ProtectedString
  * FIDO2 / WebAuthn 通行密钥 (Passkey) 核心领域模型。
  * 遵循 W3C WebAuthn 规范与 KeePass 扩展标准（对齐 KeePassXC / KeeWeb / KeePassDX）。
  * 持久化至条目自定义字段 (Custom Fields)，私钥严格以 ProtectedString / CharArray 保护。
+ *
+ * **ISSUE-P1-02 私钥受控生命周期与不可变边界声明**：
+ * - KDBX 4 自定义字段值在格式层为 XML 文本（`<Value Protected="True">`），**必须以文本形态
+ *   承载**——这是格式标准不可消解的边界，与 KeePassXC `KPEX_PASSKEY_PRIVATE_KEY_PEM` 等
+ *   schema 的承载方式一致；
+ * - 因此私钥明文文本的唯一长期持有者是 [privateKey] ([ProtectedString])：驻留态经
+ *   [InMemoryCipher] 随机化加密，堆扫描不可直接读出；明文仅在受控读取瞬间物化；
+ * - 任何对私钥的消费必须走 [usePrivateKeyBytes] 字节流通道（读出即用、退出自动清零），
+ *   **严禁**调用 `readString()` 生成不可变私钥 String（不可擦除、必驻堆）；
+ * - 除私钥外的其余字段（rpId / userName / credentialId / 公钥等）均为 WebAuthn 规范定义的
+ *   公开材料，允许以 String 承载。
  */
 data class PasskeyData(
     /**
@@ -44,7 +55,10 @@ data class PasskeyData(
     val publicKeyBase64: String,
 
     /**
-     * 私钥数据 (PKCS#8 格式，严格以 ProtectedString 封装，杜绝堆残留)
+     * 私钥数据 (PKCS#8 格式，严格以 ProtectedString 封装，杜绝堆残留)。
+     *
+     * 受控生命周期（ISSUE-P1-02）：本属性是私钥明文文本在内存中的**唯一**长期持有者
+     * （密文驻留）；格式层要求的文本形态由其承载，消费侧一律走 [usePrivateKeyBytes]。
      */
     val privateKey: ProtectedString,
 
@@ -65,7 +79,11 @@ data class PasskeyData(
     val createdAtMillis: Long = System.currentTimeMillis()
 ) {
     /**
-     * 将通行密钥数据映射为 KDBX 条目自定义字段列表 (对齐 KeePass 事实标准)
+     * 将通行密钥数据映射为 KDBX 条目自定义字段列表 (对齐 KeePass 事实标准)。
+     *
+     * 零拷贝别名语义（ISSUE-P1-02）：[FIELD_PRIVATE_KEY] 字段**直接引用** [privateKey]
+     * 同一 [ProtectedString] 实例（不克隆、不物化明文副本）。因此落库完成前**严禁**对本
+     * 对象执行任何 `clear()`——否则会连同库内驻留字段一并置为已清零态，后续断言读取将 fail。
      */
     fun toCustomFields(): List<KdbxCustomField> {
         return listOf(
@@ -83,6 +101,13 @@ data class PasskeyData(
             KdbxCustomField(FIELD_CREATED_AT, ProtectedString(createdAtMillis.toString(), isProtected = false))
         )
     }
+
+    /**
+     * 私钥受控消费通道（ISSUE-P1-02）：以 UTF-8 字节流读出私钥交由 [block] 使用，
+     * 退出时自动清零字节副本——全程不产生不可变私钥 String。
+     * 仅限签名 / 导入导出等一次性消费场景，对齐断言侧 `readUtf8()` 字节流路径。
+     */
+    inline fun <R> usePrivateKeyBytes(block: (ByteArray) -> R): R = privateKey.useUtf8(block)
 
     companion object {
         // COSE 算法定义 (RFC 8152 / W3C WebAuthn)
@@ -106,7 +131,11 @@ data class PasskeyData(
         const val FIELD_CREATED_AT = "${FIELD_PREFIX}CreatedAt"
 
         /**
-         * 从条目自定义字段中解析还原 PasskeyData；若缺少关键字段则返回 null
+         * 从条目自定义字段中解析还原 PasskeyData；若缺少关键字段则返回 null。
+         *
+         * 反序列化边界（ISSUE-P1-02）：本方法对私钥字段**只引用不读取**（[privateKey] 直接
+         * 挂接库内既有 [ProtectedString]，不物化明文）；其余字段为公开材料，允许 `readString()`
+         * 生成 String（候选匹配等只读消费所需）。
          */
         fun fromCustomFields(fields: List<KdbxCustomField>): PasskeyData? {
             val map = fields.associateBy { it.key }

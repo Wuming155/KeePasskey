@@ -288,6 +288,66 @@ class PasskeyCryptoEngineTest {
         assertEquals(passkey.privateKey.readString(), restored.privateKey.readString())
     }
 
+    // ================= ISSUE-P1-02 生成侧零 String 约束回归 =================
+
+    @Test
+    fun `测试 ISSUE-P1-02 ES256 私钥保持定长 64 字符小写 hex 且经受控字节流通道签名可用`() {
+        val passkey = PasskeyCryptoEngine.generateEs256KeyPair("p1-02.example", "byte-gen")
+
+        // 1. 文本契约：生成侧改走 CharArray 编码后，私钥驻留文本必须仍为
+        //    定长 64 字符小写 hex（等价 String.format("%064x")，既有解析路径不变）
+        val privText = passkey.privateKey.useUtf8 { String(it, Charsets.US_ASCII) }
+        assertEquals(64, privText.length)
+        assertTrue("私钥必须为小写 hex 编码", privText.all { it in '0'..'9' || it in 'a'..'f' })
+
+        // 2. 字节流消费契约：usePrivateKeyBytes 读出即签名（hex 文本字节流形态由签名引擎兼容解析）
+        val clientDataHash = ByteArray(32) { (it + 1).toByte() }
+        val authData = PasskeyCryptoEngine.buildAuthenticatorData("p1-02.example", 0x01, 1)
+        val dataToSign = authData + clientDataHash
+
+        passkey.usePrivateKeyBytes { raw ->
+            val signature = PasskeyCryptoEngine.signAssertion(
+                PasskeyData.ALGORITHM_ES256, raw, dataToSign
+            )
+            assertEquals(0x30.toByte(), signature[0]) // ASN.1 SEQUENCE
+        }
+    }
+
+    @Test
+    fun `测试 ISSUE-P1-02 Ed25519 与 RS256 私钥经受控字节流通道签名可用`() {
+        // Ed25519：字节流通道交付 Base64 文本字节流（44B），消费侧解码后应还原 32 字节种子
+        val ed = PasskeyCryptoEngine.generateEd25519KeyPair("p1-02-ed.example", "byte-ed")
+        val dataEd = "P1-02 ed25519 byte channel".toByteArray(Charsets.UTF_8)
+        ed.usePrivateKeyBytes { raw ->
+            assertEquals(44, raw.size)
+            val seed = Base64.getDecoder().decode(raw)
+            try {
+                assertEquals(32, seed.size)
+                val signature = PasskeyCryptoEngine.signAssertion(
+                    PasskeyData.ALGORITHM_ED25519, seed, dataEd
+                )
+                assertEquals(64, signature.size)
+            } finally {
+                java.util.Arrays.fill(seed, 0.toByte())
+            }
+        }
+
+        // RS256：字节流通道交付 PKCS#8 DER 的 Base64 文本字节流，消费侧解码后应可签名
+        val rs = PasskeyCryptoEngine.generateRs256KeyPair("p1-02-rs.example", "byte-rs")
+        val dataRs = "P1-02 rs256 byte channel".toByteArray(Charsets.UTF_8)
+        rs.usePrivateKeyBytes { raw ->
+            val der = Base64.getDecoder().decode(raw)
+            try {
+                val signature = PasskeyCryptoEngine.signAssertion(
+                    PasskeyData.ALGORITHM_RS256, der, dataRs
+                )
+                assertEquals(256, signature.size)
+            } finally {
+                java.util.Arrays.fill(der, 0.toByte())
+            }
+        }
+    }
+
     // ================= EC 私钥标量范围校验（P2-9 fail-closed） =================
 
     companion object {

@@ -15,6 +15,7 @@
    - [2.4 测试覆盖缺口审查（7 项）](#24-测试覆盖缺口审查7-项)
    - [2.5 零信任专项审计（ZT 系列）](#25-零信任专项审计zt-系列)
    - [2.6 凭据提供者端到端契约（P1-01）](#26-凭据提供者端到端契约p1-01)
+   - [2.7 生成侧私钥内存脱敏（P1-02）](#27-生成侧私钥内存脱敏p1-02)
 
 ---
 
@@ -252,3 +253,20 @@
     3. `CredentialUnlockActivity` 加固：`lifecycleScope`（`Dispatchers.Main.immediate`）内已完成回传时跳过解锁页渲染，消除「已解锁态点选解锁 Action」的解锁页闪屏后再 finish；缺失原始请求的告警日志显式标注唯一成因（`AuthenticationAction` 的 PendingIntent 需 `FLAG_MUTABLE`），便于真机日志定位。
   - **不相干项说明**：传统 Autofill 兼容层（`KeePasskeyAutofillService`）的 PendingIntent 语义与 Credential Manager 不同，保持 `FLAG_IMMUTABLE` 不变，未纳入本次改动面。
   - **测试证据**：新增 `app/src/test/java/com/keepasskey/app/passkey/CredentialPendingIntentsTest.kt` 4 例，锁定不变式——必须含 `FLAG_MUTABLE`、必须含 `FLAG_UPDATE_CURRENT`、严禁 `FLAG_IMMUTABLE`、严禁 `FLAG_ONE_SHOT`。全量回归 **543 例：531 通过 / 0 失败 / 12 跳过**（app 179 → 183）。
+
+### 2.7 生成侧私钥内存脱敏（P1-02）
+
+> 来源：ISSUE-P1-02（P0-7 残余）。断言侧已于此前改造为 `readUtf8()` 字节流路径，本节闭环生成侧（密钥对生成 / 注册响应构建）与受保护字段（反）序列化层的内存脱敏评估与整改。
+
+- **ISSUE-P1-02（Passkey 私钥在生成侧与受保护字段的内存脱敏评估）**：已修复（2026-09-09）。
+  - **缺陷（全链路评估结论）**：
+    1. `PasskeyCryptoEngine.generateEs256KeyPair` 经 `String.format("%064x", priv.d)` 生成不可变私钥 hex String；`generateEd25519KeyPair` / `generateRs256KeyPair` 经 `Base64.encodeToString` 生成不可变私钥 Base64 String——三路生成侧私钥编码产物全部驻留堆；
+    2. 断言侧解码路径残留两处不可变私钥 String：`String(rawBytes).trim()`（形态判断物化）与 `BigInteger(String, 16)`（hex 解析物化）；
+    3. 注册响应构建（`PasskeyCreateActivity.buildRegistrationJson`）派生字节数组（authData / attestationObject）无擦除。
+  - **整改**：
+    1. `PasskeyCryptoEngine` 新增零 String 编码辅助三件套：`scalarToHexChars`（BigInteger 二进制形态 → 定长 64 hex CharArray，标量副本 finally 清零）、`base64ToChars`（Base64 → CharArray，中间编码字节副本清零）、`sealedFromPrivateChars`（CharArray → ProtectedString 密文封装后字符副本清零）——三路密钥生成全部改走该通道，私钥材料生成后仅以 `ProtectedString`（InMemoryCipher 密文驻留）形态存活；
+    2. `PasskeyData` 固化受控生命周期契约：类级 KDoc 声明「KDBX 4 自定义字段为 XML 文本承载、`privateKey` 是私钥明文文本唯一长期持有者、消费一律走新增的 `usePrivateKeyBytes()` 字节流通道（读出即用、退出自动清零）、严禁 `readString()`」；`toCustomFields()` KDoc 明示零拷贝别名语义（落库完成前严禁 clear）；`fromCustomFields()` KDoc 明示私钥只引用不读取；
+    3. `PasskeyAssertionActivity.decodePrivateKeyBytes` 重写为纯字节通道：hex 手工半字节解析（奇数长度左对齐补零，等价 `BigInteger(String,16)` 无符号语义）、Base64 直接字节流解码（两侧 ASCII 空白剔除后切片解码、切片副本擦除），全程零 String 中间量；断言会话派生量（authData / clientDataBytes / dataToSign）统一 finally 擦除；
+    4. `PasskeyCreateActivity.buildRegistrationJson` 补齐派生数组擦除（authData / attestationObjectBytes finally 清零），并以 KDoc 声明不可消解边界——系统 Credential Manager 契约要求响应为 JSON 字符串，其内容均为公开注册材料（不含私钥），属受控且可接受驻留。
+  - **验证过程记录**：初版 `scalarToHexChars` 存在「自右向左回填时高/低半字节写反」缺陷（每字节半字节序颠倒，签名验签闭环测试立即捕获 20/20 公钥反推不匹配），已修正为先写低半字节再写高半字节，并以 50 例随机标量对照 `String.format("%064x")` 全等通过。
+  - **测试证据**：新增 `crypto/src/test/java/com/keepasskey/crypto/PasskeyCryptoEngineTest.kt` 2 例——「ES256 私钥保持定长 64 字符小写 hex 且经受控字节流通道签名可用」（既有文本解析契约不变 + `usePrivateKeyBytes` 消费契约）与「Ed25519 与 RS256 私钥经受控字节流通道签名可用」（Base64 文本字节流 44B 解码还原种子 / PKCS#8 DER 签名）。全量回归 **545 例：533 通过 / 0 失败 / 12 跳过**（crypto 52 → 54）。

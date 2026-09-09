@@ -17,25 +17,7 @@
 
 ---
 
-## P1 高危与核心功能问题（9 项）
-
-### ISSUE-P1-02 (P0-7 残余): Passkey 私钥在生成侧与受保护字段的内存脱敏评估
-- **优先级**：P1（安全纵深）
-- **分类**：内存安全 / 密码学
-- **背景与现象**：
-  断言侧已改造为 `readUtf8()` 字节流路径并在消费后立即擦除（`PasskeyAssertionActivity.kt`）。但在 Passkey 生成阶段（`PasskeyCreateActivity.kt`）及 KDBX XML 受保护自定义字段（`KPEX_PASSKEY_PRIVATEKEY`）序列化与反序列化层，受既有 KDBX 格式标准约束，仍有中间态 `String` 实例生成。
-- **整改依据**：
-  工程规则敏感数据铁律；KeePassXC Passkey 扩展 schema。
-- **涉及核心文件**：
-  - `app/src/main/java/com/keepasskey/app/passkey/PasskeyCreateActivity.kt`
-  - `crypto/src/main/java/com/keepasskey/crypto/PasskeyCryptoEngine.kt`
-  - `database/src/main/java/com/keepasskey/database/PasskeyData.kt`
-- **验收标准**：
-  1. 评估在生成侧私钥 PKCS#8 编码、Base64 封装及写入 KDBX 节点的全链路；
-  2. 尽可能改用 `ByteArray` / `CharArray` 并在使用后 `fill(0)` 擦除；
-  3. 若格式层必须保留 String，需在 KDoc 明确标注受控生命周期与不可变边界。
-
----
+## P1 高危与核心功能问题（8 项）
 
 ### ISSUE-P1-03 (P1-8 残余): KDBX Meta 与 Group 回收站保留桶机制补齐
 - **优先级**：P1（数据完整性）
