@@ -733,6 +733,9 @@
     <string name="settings_action_failed">操作失败：%1$s</string>
     <string name="autofill_skip_dal_title">跳过浏览器兼容层</string>
     <string name="autofill_skip_dal_sub">不通过浏览器兼容适配直接填充原生表单</string>
+    <!-- ISSUE-P0-02：设置页明示「下发前二次确认」为强制策略（无开关，不可关闭） -->
+    <string name="autofill_fill_confirm_title">下发前二次确认</string>
+    <string name="autofill_fill_confirm_sub">填充密码前始终要求生物识别或手动确认，属强制安全策略</string>
     <string name="autofill_blacklist_row_title">自动填充黑名单</string>
     <string name="autofill_blacklist_count">已屏蔽 %1$d 个应用</string>
     <string name="autofill_blacklist_empty">暂无屏蔽的应用</string>
@@ -851,6 +854,10 @@
     <string name="autofill_confirm_manual_hint">即将向当前应用填充凭据「%1$s」。请在下方确认后继续。</string>
     <string name="autofill_confirm_ok">确认填充</string>
     <string name="autofill_confirm_cancel">取消</string>
+    <!-- ISSUE-P0-02：Credential Manager 密码下发前的强制用户验证（PasswordFillActivity） -->
+    <string name="cred_fill_confirm_title">确认填充凭据</string>
+    <string name="cred_fill_confirm_biometric_subtitle">验证身份后向当前应用填充凭据「%1$s」</string>
+    <string name="cred_fill_confirm_manual_hint">即将向当前应用填充凭据「%1$s」。本设备无可用生物识别或锁屏凭据，请在下方手动确认后继续。</string>
     <string name="cred_passkey_create_title">创建通行密钥</string>
     <string name="cred_passkey_assert_title">验证通行密钥</string>
     <string name="cred_password_save_title">保存密码凭据</string>

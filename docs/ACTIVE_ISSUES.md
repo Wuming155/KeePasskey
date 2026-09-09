@@ -17,28 +17,10 @@
 
 ---
 
-## P0 阻断级问题（2 项）
+## P0 阻断级问题（1 项）
 
 > 来源：**2026-09-09 零信任（Zero Trust）专项审计**（NIST SP 800-207 七支柱 + Assume Breach 视角）。
 > 直接击穿「始终验证 / 显式验证」支柱，且可被无需特权的本地攻击者链路利用。
-
----
-
-### ISSUE-P0-02 (ZT-02): Credential Manager 密码填充通道零用户验证门控
-- **优先级**：P0（显式验证缺失 / 越权下发凭据）
-- **分类**：Credential Manager / 零信任-显式验证
-- **背景与现象**：
-  `CredentialResponseAssembler.kt:195-201` 构造 `PasswordCredentialEntry` 时**未设置 `BiometricPromptData`**，且 `PasswordFillActivity.kt:28-77` 自身不做任何生物识别或二次确认。对比 Autofill 兼容通道——每个 dataset 都强制挂 `setAuthentication` 并拉起 `AutofillConfirmActivity`（`KeePasskeyAutofillService.kt:251-259`）——**两条通道确认强度严重不一致**。
-  后果：库处于已解锁态时，任意调起 Credential Manager 的应用可在**用户零交互**下取得明文密码；设备被短暂占有即等同于全库可读。
-- **整改依据**：NIST SP 800-207「每次访问请求都必须经显式认证与授权」；Android 官方 Credential Provider 安全规范。
-- **涉及核心文件**：
-  - `app/src/main/java/com/keepasskey/app/passkey/CredentialResponseAssembler.kt`
-  - `app/src/main/java/com/keepasskey/app/passkey/PasswordFillActivity.kt`
-  - `app/src/main/java/com/keepasskey/app/ui/screens/settings/subscreens/AutofillSettingsScreen.kt`
-- **验收标准**：
-  1. `PasswordCredentialEntry`（及 Passkey 断言）在解锁态下默认挂 `BiometricPromptData` 或等价二次确认；
-  2. 提供与 Autofill 通道一致的黑名单 fail-closed 与用户确认回退；
-  3. 补齐单测：无确认路径不得返回 `RESULT_OK`。
 
 ---
 

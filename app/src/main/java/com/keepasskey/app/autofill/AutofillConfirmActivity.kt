@@ -3,28 +3,9 @@ package com.keepasskey.app.autofill
 import android.os.Bundle
 import android.view.WindowManager
 import androidx.activity.compose.setContent
-import androidx.biometric.BiometricManager
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Button
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
 import androidx.fragment.app.FragmentActivity
 import com.keepasskey.app.R
+import com.keepasskey.app.passkey.CredentialFillConfirmScreen
 import com.keepasskey.app.security.BiometricAuthManager
 import com.keepasskey.app.security.BiometricResult
 import com.keepasskey.app.security.BiometricStatus
@@ -82,9 +63,11 @@ class AutofillConfirmActivity : FragmentActivity() {
             }
             else -> {
                 setContent {
-                    ConfirmFillScreen(
+                    CredentialFillConfirmScreen(
                         title = getString(R.string.autofill_confirm_title),
                         hint = manualHint,
+                        confirmText = getString(R.string.autofill_confirm_ok),
+                        cancelText = getString(R.string.autofill_confirm_cancel),
                         onConfirm = { completeAuthResult() },
                         onCancel = { finish() }
                     )
@@ -99,49 +82,6 @@ class AutofillConfirmActivity : FragmentActivity() {
         // 官方认证数据集语义：RESULT_OK 后框架才会把该数据集的值写入目标表单
         setResult(RESULT_OK)
         finish()
-    }
-
-    /** 无生物识别硬件时的手动确认兜底 UI（受 FLAG_SECURE + 反 overlay 保护的窗口内） */
-    @Composable
-    private fun ConfirmFillScreen(
-        title: String,
-        hint: String,
-        onConfirm: () -> Unit,
-        onCancel: () -> Unit
-    ) {
-        Surface(modifier = Modifier.fillMaxSize()) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(24.dp),
-                verticalArrangement = Arrangement.Center,
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.SemiBold),
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-                Text(
-                    text = hint,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(modifier = Modifier.height(28.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally)
-                ) {
-                    OutlinedButton(onClick = onCancel) {
-                        Text(stringResource(R.string.autofill_confirm_cancel))
-                    }
-                    Button(onClick = onConfirm) {
-                        Text(stringResource(R.string.autofill_confirm_ok))
-                    }
-                }
-            }
-        }
     }
 
     companion object {

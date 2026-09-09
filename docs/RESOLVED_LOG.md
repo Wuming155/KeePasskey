@@ -209,3 +209,14 @@
     2. 将判定与会话熔断内核拆分为纯 Kotlin 类 `AutoLockSessionGuard`（`app/src/main/java/com/keepasskey/app/security/AutoLockSessionGuard.kt`：熄屏熔断 `lockOnScreenOff`、后台超时 `lockOnBackgroundResume`（`now` 可注入）、`triggerLock` 含 DIRTY best-effort 补存），`AutoLockManager` 收窄为 Android 注册管道（生命周期观察者 + 熄屏广播）并对内核做 API 委托，公开 API（`isLocked` / `lockEvents` / `triggerLock` / `onUnlockSuccess`）不变；
     3. `AutofillUnlockActivity` / `CredentialUnlockActivity` 由静态 `FLAG_SECURE` 窗口标志升级为与 `MainActivity` 同源的 `FlagSecureGuard.attach()` 动态守卫（用户开关 ∨ 会话锁定态并集，首帧同步生效）。
   - **测试证据**：新增 `app/src/test/java/com/keepasskey/app/security/AutoLockSessionGuardTest.kt` 7 例，以真实 `DatabaseSession`（AES-KDF 路径免 NDK）驱动「不启动 MainActivity，仅经解锁入口打开会话 → 熄屏 → 会话锁定」全链路：熄屏熔断（`lockWhenScreenOff` / 仅 `autoLockBackground`）/ 双开关关闭不锁 / 后台超时熔断与未达超时放行 / 零时间戳放行 / DIRTY 补存后锁定并重开校验。全量回归 **521 例：509 通过 / 0 失败 / 12 跳过**。
+
+- **ZT-02（ISSUE-P0-02，Credential Manager 密码填充通道零用户验证门控）**：已修复（2026-09-09）。
+  - **缺陷**：`CredentialResponseAssembler.buildPasswordEntries()` 构造 `PasswordCredentialEntry` 时未挂 `BiometricPromptData`，且 `PasswordFillActivity` 自身不做任何生物识别或二次确认；而 Autofill 兼容通道每个 dataset 都强制 `setAuthentication` 并拉起 `AutofillConfirmActivity`——两条通道确认强度严重不一致。后果：密码库处于解锁态时，任意调起 Credential Manager 的应用可在**用户零交互**下取得明文密码，设备被短暂占有即等同全库可读。
+  - **整改**：
+    1. 新增纯 Kotlin 门控内核 `CredentialFillVerifier`（`app/src/main/java/com/keepasskey/app/passkey/CredentialFillVerifier.kt`）：由设备认证器状态映射验证等级 `BIOMETRIC` / `MANUAL_CONFIRMATION`，并以 `isSatisfied()` 对「要求等级 × 实际验证结果」做 fail-closed 裁决——未验证、失败、取消、以及「要求生物识别却仅手动确认」的降级路径一律拒绝；
+    2. `PasswordFillActivity` 改为「先验证、后取密」：进入即复核调用包名黑名单（与 Autofill 通道一致的 fail-closed），随后二次校验「条目 ⇄ 调用方」绑定关系，再由 `BiometricAuthManager` 拉起系统级 BiometricPrompt，设备无可用认证器时退化为受保护窗口（FLAG_SECURE + 反 overlay）内的显式手动确认；仅当门控裁决通过才回传明文密码，其余路径一律 `RESULT_CANCELED`；
+    3. `BaseCredentialActivity` 基类由 `ComponentActivity` 提升为 `FragmentActivity`（`androidx.biometric.BiometricPrompt` 要求 FragmentActivity 宿主），使门控在同一受保护窗口内闭环；
+    4. 手动确认 UI 抽离为双通道共用组件 `CredentialFillConfirmScreen`，`AutofillConfirmActivity` 同步复用，消除重复实现；
+    5. `CredentialResponseAssembler`（直查与链式解锁两条路径的唯一候选出口）统一复核黑名单，命中即不产出任何候选；设置页 `AutofillSettingsScreen` 以只读策略行明示「下发前二次确认」为强制保证，不提供可关闭的假开关。
+  - **关键取舍（为何不直接在 entry 上挂 `BiometricPromptData`）**：`androidx.credentials:1.6.0` 中 `BiometricPromptData` 标注 `@RestrictTo(LIBRARY)`，`PendingIntentHandler` **未提供** `BiometricPromptResult` 读取入口（已核对 1.6.0 AAR 常量池确认），提供方 Activity 无法判定系统门控究竟成功、失败还是被绕过——挂上即得「看起来已验证」的假门控、无法闭环。故改为 Activity 内自持门控：结果可判定、可记录、可被纯 JVM 单测覆盖。遗留：Passkey 断言侧 UV 位与实际验证解耦问题由 **ISSUE-P0-03 (ZT-03)** 独立闭环。
+  - **测试证据**：新增 `app/src/test/java/com/keepasskey/app/passkey/CredentialFillVerifierTest.kt` 11 例，穷举覆盖「无确认路径不得返回 `RESULT_OK`」安全不变式：等级映射（AVAILABLE → BIOMETRIC；NO_HARDWARE / HARDWARE_UNAVAILABLE / NOT_ENROLLED / SECURITY_UPDATE_REQUIRED 一律降级为手动确认而非免验证）/ 生物识别要求下成功放行、未验证·失败·取消·手动确认均拒绝 / 手动确认要求下确认与更强生物识别放行、未确认·取消拒绝 / 全域不变式（任一等级下未验证拒绝、任一等级下非成功结果拒绝）。全量回归 **532 例：520 通过 / 0 失败 / 12 跳过**（app 161 → 172）。

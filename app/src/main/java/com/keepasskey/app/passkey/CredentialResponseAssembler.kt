@@ -14,6 +14,7 @@ import androidx.credentials.provider.CallingAppInfo
 import androidx.credentials.provider.PasswordCredentialEntry
 import androidx.credentials.provider.PublicKeyCredentialEntry
 import com.keepasskey.app.R
+import com.keepasskey.app.data.repository.AutofillBlocklistStore
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.security.BiometricAuthManager
 import com.keepasskey.app.security.BiometricStatus
@@ -29,11 +30,20 @@ import javax.inject.Inject
  * 从 [KeePasskeyCredentialProviderService] 中拆分出的「密码库已解锁」路径凭据构建逻辑，
  * 供服务端查询与 [CredentialUnlockActivity] 链式解锁完成后复用（保证两端候选列表完全一致）。
  * 严格域名隔离（[DomainMatcher]）与超时预算外的轻量约束均与本类无关——调用方负责会话状态判断。
+ *
+ * ISSUE-P0-02 (ZT-02) 相关的两点取舍：
+ * - **黑名单 fail-closed**：本类是全部候选的唯一出口（直查 + 链式解锁两条路径都经此），
+ *   故在此统一复核黑名单，避免新增入口时遗漏（服务侧仍保留一次前置拦截，纵深防御）；
+ * - **不下发即不挂 `BiometricPromptData` 了事**：`androidx.credentials:1.6.0` 未向提供方
+ *   暴露 `BiometricPromptResult` 读取入口，挂在 entry 上无法判定系统门控是否真的通过，
+ *   会形成「看起来已验证」的假门控。真实门控由 [PasswordFillActivity] 联合
+ *   [CredentialFillVerifier] 在受保护窗口内闭环执行，未通过绝不返回凭据。
  */
 class CredentialResponseAssembler @Inject constructor(
     @ApplicationContext private val context: Context,
     private val vaultRepository: VaultRepository,
-    private val biometricAuthManager: BiometricAuthManager
+    private val biometricAuthManager: BiometricAuthManager,
+    private val autofillBlocklistStore: AutofillBlocklistStore
 ) {
 
     /**
@@ -45,6 +55,12 @@ class CredentialResponseAssembler @Inject constructor(
         val callingPackage = callingAppInfo?.packageName.orEmpty()
         val callingOrigin = extractOrigin(callingAppInfo)
         val responseBuilder = BeginGetCredentialResponse.Builder()
+
+        // ISSUE-P0-02：候选出口处的 fail-closed 黑名单复核（命中即不产出任何候选，
+        // 语义等价于本应用从未注册过凭据服务）。包名空白时交由下游严格匹配兜底为「无候选」。
+        if (autofillBlocklistStore.isBlocked(callingPackage)) {
+            return responseBuilder.build()
+        }
 
         val allEntries = vaultRepository.getKdbxEntries()
         val isBiometricAvailable = biometricAuthManager.canAuthenticate(context) == BiometricStatus.AVAILABLE

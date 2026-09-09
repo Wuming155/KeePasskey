@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.ContentPasteGo
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Keyboard
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Password
 import androidx.compose.material.icons.filled.Save
@@ -163,6 +164,14 @@ fun AutofillSettingsScreen(
                             subtitle = stringResource(R.string.autofill_legacy_sub),
                             checked = uiState.autofillServiceEnabled,
                             onCheckedChange = onAutofillServiceToggle
+                        )
+
+                        // ISSUE-P0-02：下发前二次确认为强制安全策略（无开关、不可关闭），
+                        // 此处仅如实告知用户该保证，避免设置页出现「看似可关」的假开关
+                        AutofillInfoRow(
+                            icon = Icons.Default.Lock,
+                            title = stringResource(R.string.autofill_fill_confirm_title),
+                            subtitle = stringResource(R.string.autofill_fill_confirm_sub)
                         )
                     }
                 }
@@ -481,6 +490,48 @@ private fun rememberAppLabel(packageName: String): String {
         }
     }
     return label.value
+}
+
+/**
+ * 只读策略说明行：用于展示**不可关闭**的安全保证（不提供 Switch，杜绝「假开关」）。
+ */
+@Composable
+private fun AutofillInfoRow(
+    icon: ImageVector,
+    title: String,
+    subtitle: String
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Row(
+            modifier = Modifier.weight(1f),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(22.dp)
+            )
+            Spacer(modifier = Modifier.width(12.dp))
+            Column {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
 }
 
 @Composable
