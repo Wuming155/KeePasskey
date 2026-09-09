@@ -9,12 +9,19 @@
 - **通行密钥**：FIDO2 / WebAuthn 凭据的安全存储，并可作为设备绑定解锁方式与系统自动填充凭据
 - **全功能**：分组树 / 条目字段 / 附件 / 历史版本与回滚 / 模板 / 回收站 / 全文搜索
 - **增强**：TOTP·HOTP、密码生成器（含 Diceware）、离线密码健康度审计（可选联网泄露比对，k-匿名、默认关闭）、KeePass 字段引用 `{REF:...}`
-- **安全优先**：主密码 + 密钥文件 + 生物识别解锁；`ProtectedString` 驻留加密、FLAG_SECURE、自动锁定熔断
+- **安全优先**：主密码 + 密钥文件 + 生物识别解锁；Argon2 KDF 走 **Rust 原生内核**（秘密缓冲 `zeroize` 确定性擦除），`ProtectedString` 驻留加密、FLAG_SECURE、自动锁定熔断
 - **仅 Android 16+（API 36+）**：Compose + Material 3，无需向下兼容负担
 
 ## 构建与运行
 
-环境前提：JDK 17、Android SDK 37（平台 `android-37.0`）、Android Studio（AGP 9.4.0）、**NDK 28.2.13676358 + CMake 3.22.1**（Argon2 原生加速构建所需，`sdkmanager` 安装）。
+环境前提：JDK 17、Android SDK 37（平台 `android-37.0`）、Android Studio（AGP 9.4.0）、**NDK 28.2.13676358**（`sdkmanager "ndk;28.2.13676358"`，供 AGP strip 与原生链接器共用）。
+
+Argon2 原生内核位于 `crypto/src/main/rust/`，由 **Rust + cargo-ndk 从源码交叉编译**（无预编译二进制），需额外准备：
+
+- **Rust stable** + 4 个 Android target：`rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android i686-linux-android`
+- **cargo-ndk**：`cargo install cargo-ndk`
+
+`:crypto:cargoNdkBuild` 在 `assembleDebug` / `assembleRelease` 时自动触发，产出 4 ABI `libkeepasskey_argon2.so`；纯 `test` 不触发（桌面单测走 BouncyCastle 兜底，或经 `:crypto:cargoHostBuild` 加载宿主库验证原生路径）。
 
 ```bash
 # 编译调试包
