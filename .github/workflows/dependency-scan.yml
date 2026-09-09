@@ -1,7 +1,9 @@
 # TASK-20（P3）：OWASP Dependency-Check 供应链依赖漏洞巡检。
 #
-# 策略（首次仅告警）：
-# - 每日定时（18:00 UTC ≈ 北京次日 02:00）+ 手动触发 + 依赖清单变更（push/PR）即扫；
+# 触发策略（**手动优先**）：
+# - 仅 `workflow_dispatch`：云端自动构建/定时扫描已停用，需要时到 Actions 页手动 Run workflow；
+# - 原每日定时（18:00 UTC）与 push/PR 自动触发已移除，避免占用云端构建资源（如需恢复，
+#   直接在本文件 `on:` 下补回 `schedule` / `push` / `pull_request` 段即可）。
 # - 恒不阻断（init 脚本 failBuildOnCVSS=11），报告以 artifact 归档，
 #   SARIF 上传 GitHub Code Scanning（Security 页可视化）；误报登记 suppression 白名单；
 # - NVD API Key 可选：配置仓库 Secret `NVD_API_KEY`（https://nvd.nist.gov/developers/vulnerabilities）
@@ -10,22 +12,6 @@ name: dependency-scan
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "0 18 * * *"
-  push:
-    branches: [ "main" ]
-    paths:
-      - "**/build.gradle.kts"
-      - "gradle/**"
-      - "settings.gradle.kts"
-      - ".github/workflows/dependency-scan.yml"
-      - ".github/dependency-check.init.gradle.kts"
-  pull_request:
-    paths:
-      - "**/build.gradle.kts"
-      - "gradle/**"
-      - "settings.gradle.kts"
-      - ".github/dependency-check.init.gradle.kts"
 
 permissions:
   contents: read
