@@ -279,6 +279,20 @@ class SyncCredentialsStore @Inject constructor(
     /**
      * Wave 15 整改：封印输入以 [CharArray] 承载，经 CharBuffer 直转 UTF-8 字节
      * （对齐 Wave 11 H1 手法），明文字节在封印完成后立即擦除，全程不经 String。
+     *
+     * ISSUE-P1-06 安全取舍声明（requireUserAuth = false）：
+     * 同步凭据封印密钥 [SYNC_KEY_ALIAS] 不绑定用户认证——这是**有意为之的架构决策**：
+     * - **必要性**：后台周期同步（WorkManager）与冷启动自动同步需在设备锁屏态执行，
+     *   若密钥要求 per-operation 生物认证，则锁屏期间无法解封凭据，同步功能彻底瘫痪；
+     * - **风险**：进程内任意代码路径（含被注入的恶意线程）可无认证解封凭据；
+     * - **缓解措施**：
+     *   1. 凭据解封后以 CharArray 承载，借用语义要求调用方用毕立即 fill('0') 擦除；
+     *   2. S3 凭据在同步周期结束后经 [S3SyncProvider.clearCredentials] 显式清零；
+     *   3. SigV4 派生链（signingKey/kSecret/kDate/kRegion/kService）全程 finally 擦除；
+     *   4. UI 层（CloudSyncScreen ZeroKnowledgeCard）向用户明示此安全取舍；
+     * - **替代方案评估**：改为 requireUserAuth=true + 短时授权窗口（如 30s）会导致
+     *   后台同步频繁弹出 BiometricPrompt，用户体验不可接受；当前方案在「可用性」与
+     *   「安全性」间取得平衡，凭据暴露面已从「String 不可变驻留」收窄至「CharArray 可控生命周期」。
      */
     private fun encrypt(chars: CharArray): Pair<String, String>? {
         if (chars.isEmpty()) return null
@@ -286,6 +300,7 @@ class SyncCredentialsStore @Inject constructor(
         return try {
             val (iv, cipherBytes) = customEncryptor?.invoke(bytes) ?: run {
                 val km = keystoreManager ?: return null
+                // ISSUE-P1-06：requireUserAuth=false 为有意决策（见方法 KDoc 安全取舍声明）
                 val key = km.getOrCreateKey(SYNC_KEY_ALIAS, requireUserAuth = false)
                 val cipher = Cipher.getInstance(TRANSFORMATION)
                 cipher.init(Cipher.ENCRYPT_MODE, key)

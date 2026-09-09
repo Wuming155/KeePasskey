@@ -300,6 +300,13 @@ internal fun ZeroKnowledgeCard() {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             lineHeight = 18.sp
         )
+        // ISSUE-P1-06 整改：向用户明示同步凭据封印密钥不绑定生物认证的安全取舍
+        Text(
+            text = stringResource(R.string.sync_credential_auth_notice),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            lineHeight = 18.sp
+        )
     }
 }
 

@@ -187,6 +187,9 @@ open class SyncCoordinator @Inject constructor(
             return@withLock SyncOutcome.Error(e.message ?: effectiveStrings.get(R.string.sync_error_invalid_endpoint))
         } ?: return@withLock SyncOutcome.Error(effectiveStrings.get(R.string.sync_error_no_sync_credentials))
 
+        // ISSUE-P1-06 整改：同步周期结束后显式擦除 S3 凭据 CharArray，
+        // 杜绝 Provider 实例被 GC 前凭据长期驻留堆内存（try-finally 保证任何退出路径均擦除）
+        try {
         val remotePath = testRemotePath ?: resolveRemotePath(activeFile.name)
 
         val syncDir = File(context.cacheDir, "sync").apply { if (!exists()) mkdirs() }
@@ -347,6 +350,12 @@ open class SyncCoordinator @Inject constructor(
             SyncOutcome.Offline
         } catch (e: Exception) {
             SyncOutcome.Error(e.message ?: effectiveStrings.get(R.string.sync_error_unknown))
+        }
+        } finally {
+            // ISSUE-P1-06：同步周期结束（无论成功/失败/异常），显式擦除 S3 凭据 CharArray。
+            // WebDAV 侧密码已在 resolveProvider() 构造完成后即时擦除（passwordChars 借用语义），
+            // S3 侧因 Provider 需在整个同步周期内多次签名复用，故延迟至此处统一擦除。
+            (provider as? S3SyncProvider)?.clearCredentials()
         }
     }
 
@@ -620,16 +629,19 @@ open class SyncCoordinator @Inject constructor(
             CloudSyncProvider.S3_COMPATIBLE -> {
                 val cfg = syncCredentialsStore.loadS3Config() ?: return null
                 if (cfg.endpoint.isBlank() || cfg.bucket.isBlank()) return null
+                // ISSUE-P1-06 整改：凭据以 CharArray clone 传入 Provider（借用语义转移），
+                // Provider 持有期间可多次签名复用，同步周期结束后由 runSyncCycle 调用
+                // clearCredentials() 显式擦除——杜绝旧版 String(cfg.accessKey) 物化后
+                // 与 Provider 同生命周期、结构性不可擦除的缺陷。
+                val accessKeyClone = cfg.accessKey.clone()
+                val secretKeyClone = cfg.secretKey.clone()
                 try {
                     S3SyncProvider(
                         endpoint = cfg.endpoint,
                         bucketName = cfg.bucket,
                         region = cfg.region,
-                        // Wave 15 边界声明：SigV4 签名管线以 String 承载密钥（对齐 WebDAV 侧
-                        // OkHttp Credentials.basic 的网络层框架边界），此处物化后立即擦除
-                        // CharArray 原件；已知限界——密钥 String 与 Provider 同生命周期
-                        accessKeyId = String(cfg.accessKey),
-                        secretAccessKey = String(cfg.secretKey),
+                        accessKeyId = accessKeyClone,
+                        secretAccessKey = secretKeyClone,
                         usePathStyle = cfg.usePathStyle,
                         networkOptions = SyncNetworkOptions(),
                         // TASK-45（P2-14）：恢复上次持久化的服务端时钟偏移，启动即补偿；
@@ -645,7 +657,13 @@ open class SyncCoordinator @Inject constructor(
                             }
                         }
                     )
+                } catch (e: Exception) {
+                    // 构造失败（如端点校验拒绝）时擦除已 clone 的凭据副本，防泄漏
+                    accessKeyClone.fill('0')
+                    secretKeyClone.fill('0')
+                    throw e
                 } finally {
+                    // 原始 cfg 数组由 loadS3Config 借用语义管理，此处擦除防止残留
                     cfg.accessKey.fill('0')
                     cfg.secretKey.fill('0')
                 }

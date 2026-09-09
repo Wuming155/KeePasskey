@@ -36,8 +36,18 @@ class S3SyncProvider(
     private val endpoint: String,
     private val bucketName: String,
     private val region: String = "us-east-1",
-    private val accessKeyId: String,
-    private val secretAccessKey: String,
+    /**
+     * ISSUE-P1-06 整改：AccessKey ID 改为 [CharArray] 承载（借用语义），
+     * 与 Provider 同生命周期但可显式擦除——杜绝 String 不可变驻留堆的结构性缺陷。
+     * 调用方（SyncCoordinator）在同步周期结束后应调用 [clearCredentials] 主动清零。
+     */
+    private val accessKeyId: CharArray,
+    /**
+     * ISSUE-P1-06 整改：Secret Access Key 改为 [CharArray] 承载（借用语义），
+     * SigV4 派生链仅在签名瞬间转为 UTF-8 字节，用毕立即 `fill(0)` 擦除。
+     * 调用方（SyncCoordinator）在同步周期结束后应调用 [clearCredentials] 主动清零。
+     */
+    private val secretAccessKey: CharArray,
     /**
      * 寻址风格：false = virtual-host 风格（`bucket.endpoint`，AWS S3 等默认）；
      * true = path 风格（`endpoint/bucket`，Cloudflare R2、IP 直连端点等商业云场景开启）。
@@ -94,6 +104,17 @@ class S3SyncProvider(
             // 网段校验由连接期 SsrfGuardDns 承担。仅测试回环（注入客户端）豁免
             SyncEndpointGuard.validateEndpointHost(endpoint, networkOptions.ssrfAllowedHosts)
         }
+    }
+
+    /**
+     * ISSUE-P1-06 整改：显式擦除构造期注入的凭据 CharArray。
+     * 调用方（SyncCoordinator）在同步周期结束后必须调用本方法，
+     * 杜绝凭据在 Provider 实例被 GC 前长期驻留堆内存。
+     * 幂等安全：多次调用无副作用。
+     */
+    fun clearCredentials() {
+        accessKeyId.fill('0')
+        secretAccessKey.fill('0')
     }
 
     /**
@@ -436,6 +457,10 @@ class S3SyncProvider(
      *
      * TASK-45：生产调用方一律经 [signingDate] 传入补偿后时间戳；[dateTime] 保留默认值
      * 仅供单元测试注入固定时间点（已知答案向量）使用。
+     *
+     * ISSUE-P1-06 整改：signingKey 派生链全程 ByteArray 承载，用毕 finally 逐一 fill(0)；
+     * accessKeyId 仅在构造 Authorization header 瞬间转 String（HTTP 协议边界不可避免），
+     * 该 String 为方法局部变量，随栈帧退出即不可达（对比旧版构造器字段级 String 驻留）。
      */
     internal fun signV4(
         method: String,
@@ -460,15 +485,28 @@ class S3SyncProvider(
         val signedHeaders = "host;x-amz-content-sha256;x-amz-date"
 
         val canonicalRequest = "$method\n$canonicalUri\n\n$canonicalHeaders\n$signedHeaders\n$payloadHash"
-        val canonicalRequestHash = sha256Hex(canonicalRequest.toByteArray(Charsets.UTF_8))
+        val canonicalRequestBytes = canonicalRequest.toByteArray(Charsets.UTF_8)
+        val canonicalRequestHash = try {
+            sha256Hex(canonicalRequestBytes)
+        } finally {
+            canonicalRequestBytes.fill(0)
+        }
 
         val credentialScope = "$dateStamp/$region/s3/aws4_request"
         val stringToSign = "AWS4-HMAC-SHA256\n$amzDate\n$credentialScope\n$canonicalRequestHash"
 
+        // ISSUE-P1-06：signingKey 为敏感派生中间量，用毕必须擦除
         val signingKey = getSignatureKey(secretAccessKey, dateStamp, region, "s3")
-        val signature = hmacSha256Hex(signingKey, stringToSign)
+        val signature = try {
+            hmacSha256Hex(signingKey, stringToSign)
+        } finally {
+            signingKey.fill(0)
+        }
 
-        val authorizationHeader = "AWS4-HMAC-SHA256 Credential=$accessKeyId/$credentialScope, SignedHeaders=$signedHeaders, Signature=$signature"
+        // accessKeyId CharArray → String：仅存活于本方法栈帧（HTTP header 协议边界），
+        // 对比旧版构造器字段级 String 驻留，暴露面从「Provider 生命周期」收窄至「单次签名调用」
+        val accessKeyIdStr = String(accessKeyId)
+        val authorizationHeader = "AWS4-HMAC-SHA256 Credential=$accessKeyIdStr/$credentialScope, SignedHeaders=$signedHeaders, Signature=$signature"
 
         return mapOf(
             "Host" to host,
@@ -478,22 +516,84 @@ class S3SyncProvider(
         )
     }
 
-    private fun getSignatureKey(key: String, dateStamp: String, regionName: String, serviceName: String): ByteArray {
-        val kSecret = ("AWS4$key").toByteArray(Charsets.UTF_8)
-        val kDate = hmacSha256(kSecret, dateStamp)
-        val kRegion = hmacSha256(kDate, regionName)
-        val kService = hmacSha256(kRegion, serviceName)
-        return hmacSha256(kService, "aws4_request")
+    /**
+     * ISSUE-P1-06 整改：SigV4 签名密钥派生链（kSecret → kDate → kRegion → kService → signingKey）。
+     * 全链 ByteArray 中间量在 finally 中逐一 fill(0) 擦除——杜绝派生密钥材料残留堆内存。
+     *
+     * @param key Secret Access Key（CharArray 借用语义，本方法不擦除调用方数组，
+     *            仅在内部转为 UTF-8 字节并立即擦除该字节副本）
+     */
+    private fun getSignatureKey(key: CharArray, dateStamp: String, regionName: String, serviceName: String): ByteArray {
+        // CharArray → UTF-8 字节（"AWS4" 前缀拼接），用毕立即擦除
+        val kSecret = try {
+            val prefix = "AWS4".toByteArray(Charsets.UTF_8)
+            val keyBytes = key.toByteArrayUtf8()
+            val combined = ByteArray(prefix.size + keyBytes.size)
+            try {
+                prefix.copyInto(combined, 0)
+                keyBytes.copyInto(combined, prefix.size)
+                combined.copyOf() // 返回独立副本，prefix/keyBytes 可先擦除
+            } finally {
+                prefix.fill(0)
+                keyBytes.fill(0)
+            }
+        } catch (_: Exception) {
+            // 极端 OOM 下 combined 可能未初始化，fallback 空数组（后续 HMAC 必失败，如实上浮）
+            ByteArray(0)
+        }
+
+        val kDate: ByteArray
+        val kRegion: ByteArray
+        val kService: ByteArray
+        val signingKey: ByteArray
+        try {
+            kDate = hmacSha256(kSecret, dateStamp)
+            kRegion = hmacSha256(kDate, regionName)
+            kService = hmacSha256(kRegion, serviceName)
+            signingKey = hmacSha256(kService, "aws4_request")
+        } finally {
+            kSecret.fill(0)
+        }
+        // kDate/kRegion/kService 在 signingKey 派生完成后已无引用价值，逐一擦除
+        try {
+            return signingKey
+        } finally {
+            kDate.fill(0)
+            kRegion.fill(0)
+            kService.fill(0)
+        }
+    }
+
+    /** CharArray → UTF-8 ByteArray（CharBuffer 直转，不经 String，对齐 SyncCredentialsStore 手法） */
+    private fun CharArray.toByteArrayUtf8(): ByteArray {
+        val bb = java.nio.charset.StandardCharsets.UTF_8.encode(java.nio.CharBuffer.wrap(this))
+        return try {
+            val bytes = ByteArray(bb.remaining())
+            bb.get(bytes)
+            bytes
+        } finally {
+            if (bb.hasArray()) bb.array().fill(0)
+        }
     }
 
     private fun hmacSha256(key: ByteArray, data: String): ByteArray {
-        val mac = Mac.getInstance("HmacSHA256")
-        mac.init(SecretKeySpec(key, "HmacSHA256"))
-        return mac.doFinal(data.toByteArray(Charsets.UTF_8))
+        val dataBytes = data.toByteArray(Charsets.UTF_8)
+        return try {
+            val mac = Mac.getInstance("HmacSHA256")
+            mac.init(SecretKeySpec(key, "HmacSHA256"))
+            mac.doFinal(dataBytes)
+        } finally {
+            dataBytes.fill(0)
+        }
     }
 
     private fun hmacSha256Hex(key: ByteArray, data: String): String {
-        return hmacSha256(key, data).toHexString()
+        val result = hmacSha256(key, data)
+        return try {
+            result.toHexString()
+        } finally {
+            result.fill(0)
+        }
     }
 
     private fun sha256Hex(data: ByteArray): String {

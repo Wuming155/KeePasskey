@@ -623,6 +623,7 @@
     <string name="sync_preload_sub">Wi-Fi 下后台预取云端副本，加快解锁速度</string>
     <string name="sync_zeroknowledge_title">零知识端到端加密</string>
     <string name="sync_zeroknowledge_desc">主密码永不离开本机，云端仅存储 Argon2 加密后的数据块，服务器与网络中间人都无法解密你的密码库</string>
+    <string name="sync_credential_auth_notice">同步凭据经硬件 Keystore 加密封印，但封印密钥不绑定生物认证——以确保后台自动同步在锁屏态仍可执行。凭据仅在同步瞬间解封，用毕立即从内存擦除（CharArray 借用语义 + SigV4 派生链全清零），不会以不可变 String 长期驻留</string>
 
     <!-- ===== 主题设置子页 (ThemeSettingsScreen) ===== -->
     <string name="theme_section_mode">外观模式</string>

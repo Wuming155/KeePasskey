@@ -72,8 +72,8 @@ class S3SyncScenarioTest {
             endpoint = server.url("/").toString(),
             bucketName = "bucket",
             region = "us-east-1",
-            accessKeyId = "tester",
-            secretAccessKey = "tester1234",
+            accessKeyId = "tester".toCharArray(),
+            secretAccessKey = "tester1234".toCharArray(),
             usePathStyle = true,
             client = plainClient
         )
@@ -212,7 +212,7 @@ class S3SyncScenarioTest {
 
         val p = S3SyncProvider(
             endpoint = server.url("/").toString(), bucketName = "bucket",
-            accessKeyId = "tester", secretAccessKey = "pw",
+            accessKeyId = "tester".toCharArray(), secretAccessKey = "pw".toCharArray(),
             usePathStyle = true, client = shortTimeoutClient
         )
         val start = System.nanoTime()
@@ -381,7 +381,7 @@ class S3SyncScenarioTest {
         val shortConnect = OkHttpClient.Builder().connectTimeout(300, TimeUnit.MILLISECONDS).build()
         val p = S3SyncProvider(
             endpoint = "http://10.255.255.1:9", bucketName = "bucket",
-            accessKeyId = "tester", secretAccessKey = "pw",
+            accessKeyId = "tester".toCharArray(), secretAccessKey = "pw".toCharArray(),
             usePathStyle = true, client = shortConnect
         )
         assertTrue("连接超时必须如实失败", p.download("vault.kdbx").isFailure)

@@ -54,8 +54,8 @@ class S3SyncProviderTest {
             endpoint = "https://s3.amazonaws.com",
             bucketName = "my-secure-vault",
             region = "us-east-1",
-            accessKeyId = "AKIAEXAMPLEKEY",
-            secretAccessKey = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+            accessKeyId = "AKIAEXAMPLEKEY".toCharArray(),
+            secretAccessKey = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".toCharArray()
         )
 
         val fixedDate = Date(1788500000000L) // 固定测试时间点
@@ -92,8 +92,8 @@ class S3SyncProviderTest {
             endpoint = "http://127.0.0.1:${server.port}",
             bucketName = "test-bucket",
             region = "us-east-1",
-            accessKeyId = "TESTKEY",
-            secretAccessKey = "TESTSECRET",
+            accessKeyId = "TESTKEY".toCharArray(),
+            secretAccessKey = "TESTSECRET".toCharArray(),
             client = createLoopbackClient()
         )
 
@@ -126,8 +126,8 @@ class S3SyncProviderTest {
             endpoint = "http://127.0.0.1:${server.port}",
             bucketName = "test-bucket",
             region = "us-east-1",
-            accessKeyId = "TESTKEY",
-            secretAccessKey = "TESTSECRET",
+            accessKeyId = "TESTKEY".toCharArray(),
+            secretAccessKey = "TESTSECRET".toCharArray(),
             client = createLoopbackClient()
         )
 
@@ -157,8 +157,8 @@ class S3SyncProviderTest {
             endpoint = "http://127.0.0.1:${server.port}",
             bucketName = "test-bucket",
             region = "us-east-1",
-            accessKeyId = "TESTKEY",
-            secretAccessKey = "TESTSECRET",
+            accessKeyId = "TESTKEY".toCharArray(),
+            secretAccessKey = "TESTSECRET".toCharArray(),
             client = createLoopbackClient()
         )
 
@@ -197,8 +197,8 @@ class S3SyncProviderTest {
             endpoint = "http://127.0.0.1:${server.port}",
             bucketName = "test-bucket",
             region = "us-east-1",
-            accessKeyId = "TESTKEY",
-            secretAccessKey = "TESTSECRET",
+            accessKeyId = "TESTKEY".toCharArray(),
+            secretAccessKey = "TESTSECRET".toCharArray(),
             client = createLoopbackClient()
         )
 
@@ -221,8 +221,8 @@ class S3SyncProviderTest {
             endpoint = "http://127.0.0.1:${server.port}",
             bucketName = "test-bucket",
             region = "us-east-1",
-            accessKeyId = "TESTKEY",
-            secretAccessKey = "TESTSECRET",
+            accessKeyId = "TESTKEY".toCharArray(),
+            secretAccessKey = "TESTSECRET".toCharArray(),
             client = createLoopbackClient()
         )
 
@@ -244,8 +244,8 @@ class S3SyncProviderTest {
             endpoint = "http://127.0.0.1:${server.port}",
             bucketName = "test-bucket",
             region = "us-east-1",
-            accessKeyId = "TESTKEY",
-            secretAccessKey = "TESTSECRET",
+            accessKeyId = "TESTKEY".toCharArray(),
+            secretAccessKey = "TESTSECRET".toCharArray(),
             client = createLoopbackClient()
         )
 
@@ -263,8 +263,8 @@ class S3SyncProviderTest {
             endpoint = "https://s3.amazonaws.com",
             bucketName = "my-vault",
             region = "us-east-1",
-            accessKeyId = "TESTKEY",
-            secretAccessKey = "TESTSECRET"
+            accessKeyId = "TESTKEY".toCharArray(),
+            secretAccessKey = "TESTSECRET".toCharArray()
         )
 
         val fixedDate = Date(1788500000000L)
@@ -290,8 +290,8 @@ class S3SyncProviderTest {
         val provider = S3SyncProvider(
             endpoint = "https://s3.amazonaws.com",
             bucketName = "my-vault",
-            accessKeyId = "TESTKEY",
-            secretAccessKey = "TESTSECRET"
+            accessKeyId = "TESTKEY".toCharArray(),
+            secretAccessKey = "TESTSECRET".toCharArray()
         )
 
         // `*` 必须编码为 %2A、`~` 必须原样保留、空格为 %20（非 +）、中文按 UTF-8 百分号大写编码
@@ -306,8 +306,8 @@ class S3SyncProviderTest {
             endpoint = "https://s3.amazonaws.com",
             bucketName = "examplebucket",
             region = "us-east-1",
-            accessKeyId = "AKIAIOSFODNN7EXAMPLE",
-            secretAccessKey = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+            accessKeyId = "AKIAIOSFODNN7EXAMPLE".toCharArray(),
+            secretAccessKey = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".toCharArray()
         )
 
         val fixedDate = Date(1788500000000L)
@@ -347,8 +347,8 @@ class S3SyncProviderTest {
             endpoint = "http://127.0.0.1:${server.port}",
             bucketName = "test-bucket",
             region = "us-east-1",
-            accessKeyId = "TESTKEY",
-            secretAccessKey = "TESTSECRET",
+            accessKeyId = "TESTKEY".toCharArray(),
+            secretAccessKey = "TESTSECRET".toCharArray(),
             client = createLoopbackClient(),
             initialClockOffsetMillis = initialOffset,
             clockOffsetUpdater = offsetUpdater
@@ -453,8 +453,8 @@ class S3SyncProviderTest {
             S3SyncProvider(
                 endpoint = "https://s3.amazonaws.com",
                 bucketName = "x@evil.com/",
-                accessKeyId = "TESTKEY",
-                secretAccessKey = "TESTSECRET"
+                accessKeyId = "TESTKEY".toCharArray(),
+                secretAccessKey = "TESTSECRET".toCharArray()
             )
         }.exceptionOrNull()
         assertTrue("桶名 @ / 注入必须被拒", ex is SyncException.InvalidEndpointError)
@@ -466,8 +466,8 @@ class S3SyncProviderTest {
             S3SyncProvider(
                 endpoint = "https://s3.amazonaws.com",
                 bucketName = "x#",
-                accessKeyId = "TESTKEY",
-                secretAccessKey = "TESTSECRET"
+                accessKeyId = "TESTKEY".toCharArray(),
+                secretAccessKey = "TESTSECRET".toCharArray()
             )
         }.exceptionOrNull()
         assertTrue("桶名 # 注入必须被拒", ex is SyncException.InvalidEndpointError)
@@ -485,8 +485,8 @@ class S3SyncProviderTest {
                 S3SyncProvider(
                     endpoint = endpoint,
                     bucketName = "test-bucket",
-                    accessKeyId = "TESTKEY",
-                    secretAccessKey = "TESTSECRET"
+                    accessKeyId = "TESTKEY".toCharArray(),
+                    secretAccessKey = "TESTSECRET".toCharArray()
                 )
             }.exceptionOrNull()
             assertTrue("内网/元数据端点 \"$endpoint\" 必须被拒", ex is SyncException.InvalidEndpointError)

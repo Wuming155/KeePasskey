@@ -137,8 +137,8 @@ class LiveSyncServersTest {
             endpoint = s3Endpoint,
             bucketName = s3Bucket,
             region = "us-east-1",
-            accessKeyId = s3Access,
-            secretAccessKey = s3Secret,
+            accessKeyId = s3Access.toCharArray(),
+            secretAccessKey = s3Secret.toCharArray(),
             usePathStyle = true,
             client = client
         )
@@ -274,7 +274,7 @@ class LiveSyncServersTest {
         assumeLive()
         val provider = S3SyncProvider(
             endpoint = s3Endpoint, bucketName = s3Bucket, region = "us-east-1",
-            accessKeyId = s3Access, secretAccessKey = s3Secret,
+            accessKeyId = s3Access.toCharArray(), secretAccessKey = s3Secret.toCharArray(),
             usePathStyle = true, client = createTrustingClient()
         )
 
@@ -312,7 +312,7 @@ class LiveSyncServersTest {
         assumeLive()
         val provider = S3SyncProvider(
             endpoint = s3Endpoint, bucketName = s3Bucket, region = "us-east-1",
-            accessKeyId = s3Access, secretAccessKey = s3Secret,
+            accessKeyId = s3Access.toCharArray(), secretAccessKey = s3Secret.toCharArray(),
             usePathStyle = true, client = createTrustingClient()
         )
 
@@ -340,7 +340,7 @@ class LiveSyncServersTest {
         assumeLive()
         val provider = S3SyncProvider(
             endpoint = s3Endpoint, bucketName = s3Bucket, region = "us-east-1",
-            accessKeyId = s3Access, secretAccessKey = s3Secret,
+            accessKeyId = s3Access.toCharArray(), secretAccessKey = s3Secret.toCharArray(),
             usePathStyle = true, client = createTrustingClient()
         )
 
@@ -356,7 +356,7 @@ class LiveSyncServersTest {
         assumeLive()
         val provider = S3SyncProvider(
             endpoint = s3Endpoint, bucketName = s3Bucket, region = "us-east-1",
-            accessKeyId = s3Access, secretAccessKey = s3Secret,
+            accessKeyId = s3Access.toCharArray(), secretAccessKey = s3Secret.toCharArray(),
             usePathStyle = true, client = createTrustingClient()
         )
 
@@ -390,7 +390,7 @@ class LiveSyncServersTest {
         val dav = WebDavSyncProvider(webdavUrl, webdavUser, webdavPass.toCharArray(), client = createTrustingClient())
         val s3 = S3SyncProvider(
             endpoint = s3Endpoint, bucketName = s3Bucket, region = "us-east-1",
-            accessKeyId = s3Access, secretAccessKey = s3Secret,
+            accessKeyId = s3Access.toCharArray(), secretAccessKey = s3Secret.toCharArray(),
             usePathStyle = true, client = createTrustingClient()
         )
 

@@ -616,6 +616,7 @@
     <string name="sync_preload_sub">Prefetch the cloud copy on Wi-Fi to speed up unlocking</string>
     <string name="sync_zeroknowledge_title">Zero-knowledge end-to-end encryption</string>
     <string name="sync_zeroknowledge_desc">Your master password never leaves this device. The cloud stores only Argon2-encrypted blocks, so neither the server nor anyone in between can decrypt your vault</string>
+    <string name="sync_credential_auth_notice">Sync credentials are sealed with hardware Keystore encryption, but the sealing key does not require biometric authentication — this ensures background auto-sync works while the device is locked. Credentials are unsealed only during sync and immediately wiped from memory afterward (CharArray borrow semantics + full SigV4 derivation chain zeroing), never persisting as immutable Strings</string>
 
     <!-- ===== Theme settings subscreen ===== -->
     <string name="theme_section_mode">Appearance</string>

@@ -17,26 +17,7 @@
 
 ---
 
-## P1 高危与核心功能问题（5 项）
-
-### ISSUE-P1-06 (ZT-06): 同步凭据无认证绑定 + S3 密钥 String 驻留与 SigV4 派生链零擦除
-- **优先级**：P1（凭据治理 / 内存安全）
-- **分类**：静态存储 / 密码学中间量
-- **背景与现象**：
-  1. `SyncCredentialsStore.kt:289,321` 以 `getOrCreateKey(SYNC_KEY_ALIAS, requireUserAuth = false)` 封印 WebDAV 密码与 S3 SecretKey → 进程内任意路径（含后台同步）**无需任何用户认证即可解封**；
-  2. `S3SyncProvider.kt:38-39` 的 `accessKeyId: String` / `secretAccessKey: String` 为构造器字段，与 Provider 同生命周期，结构性不可擦除（`SyncCoordinator.kt:631-632` 由 `String(cfg.accessKey)` 物化）；
-  3. `S3SyncProvider.kt:460-479` 的 SigV4 派生链 `signingKey / kSecret / kDate / kRegion / kService` **全部未 `fill(0)`**——整个 `sync` 模块 S3 路径擦除点数为 0（WebDAV 侧已有 `:100,103`）。
-- **整改依据**：工程规则敏感数据铁律；零信任「凭据最小暴露面」。
-- **涉及核心文件**：
-  - `sync/src/main/java/com/keepasskey/sync/s3/S3SyncProvider.kt`
-  - `app/src/main/java/com/keepasskey/app/sync/SyncCoordinator.kt`
-  - `app/src/main/java/com/keepasskey/app/data/repository/SyncCredentialsStore.kt`
-- **验收标准**：
-  1. SigV4 全派生链 `finally` 清零；
-  2. S3 凭据改为调用期传入的 `CharArray` / `ByteArray`，Provider 不长期持有 String；
-  3. 评估 `requireUserAuth=false` 的取舍并在 UI 明示（或改为按需短时授权）。
-
----
+## P1 高危与核心功能问题（4 项）
 
 ### ISSUE-P1-07 (ZT-07): 同步缓存锁库后不清理，KDBX 密文长期驻留
 - **优先级**：P1（数据生命周期 / Assume Breach）

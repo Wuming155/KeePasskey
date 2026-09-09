@@ -18,6 +18,7 @@
    - [2.7 生成侧私钥内存脱敏（P1-02）](#27-生成侧私钥内存脱敏p1-02)
    - [2.8 KDBX 回收站保留桶与历史保留期维护（P1-03）](#28-kdbx-回收站保留桶与历史保留期维护p1-03)
    - [2.9 主密码解锁失败节流与失败态清零（P1-04）](#29-主密码解锁失败节流与失败态清零p1-04)
+   - [2.10 同步凭据认证绑定与 S3 密钥内存治理（P1-06）](#210-同步凭据认证绑定与-s3-密钥内存治理p1-06)
 
 ---
 
@@ -339,3 +340,33 @@
     - 新增 `app/security/UnlockThrottleManagerTest` 7 例：阈值以下不退避、达阈值起指数增长、退避封顶不溢出、连续失败累加计数且阈值前不锁定、达阈值触发锁定并到期自动放行（计数保留续升退避）、成功解锁重置、预置锁定态下闸门拒绝且剩余时长正确；
     - `app/ui/screens/unlock/UnlockViewModelTest` 新增 4 例（6 → 10）：失败后无条件清零（二次不输入重试命中「空密码」反证 `passwordChars` 已清）、连续失败累加计数并达阈值触发锁定（锁定期内计数不再累加）、锁定期内闸门拒绝「正确」主密码且不假成功、成功解锁后节流计数归零；配套 `FakeUnlockThrottleStore` 内存实现与 `FakeVaultRepository(forceInvalidCredentials=true)` 认证失败驱动。
     - 全量回归 **584 例：572 通过 / 0 失败 / 12 跳过**（app 185 → 196；跳过 12 例仍为 `LiveSyncServersTest` 真实联调用例）。
+
+---
+
+### 2.10 同步凭据认证绑定与 S3 密钥内存治理（P1-06）
+
+> 来源：ISSUE-P1-06（ZT-06）。整改依据：工程规则敏感数据铁律（CharArray/ByteArray 显式清零，绝不落地为 String）；零信任「凭据最小暴露面」；Android Keystore 官方密钥认证语义。
+
+- **ISSUE-P1-06（同步凭据无认证绑定 + S3 密钥 String 驻留与 SigV4 派生链零擦除）**：已修复（2026-09-09）。
+  - **缺陷**：
+    1. **S3 凭据 String 不可变驻留**：`S3SyncProvider` 构造器字段 `accessKeyId: String` / `secretAccessKey: String` 与 Provider 同生命周期，结构性不可擦除；`SyncCoordinator` 由 `String(cfg.accessKey)` 物化后传入；
+    2. **SigV4 派生链零擦除**：`signV4()` / `getSignatureKey()` 中 `signingKey / kSecret / kDate / kRegion / kService` 全部未 `fill(0)`——整个 sync 模块 S3 路径擦除点数为 0；
+    3. **requireUserAuth=false 无 UI 明示**：`SyncCredentialsStore` 以 `getOrCreateKey(SYNC_KEY_ALIAS, requireUserAuth = false)` 封印凭据，进程内任意路径无需用户认证即可解封，但用户对此安全取舍完全不知情。
+  - **整改**：
+    1. `S3SyncProvider` 构造器凭据改为 `CharArray`（借用语义），新增 `clearCredentials()` 方法供调用方在同步周期结束后显式擦除；
+    2. `signV4()` 重写：`canonicalRequestBytes` 用毕 finally 清零；`signingKey` 用毕 finally 清零；`accessKeyId` 仅在构造 Authorization header 瞬间转 String（方法局部变量，随栈帧退出不可达）；
+    3. `getSignatureKey()` 重写：接受 `CharArray` 参数，全派生链（kSecret/kDate/kRegion/kService）在 finally 中逐一 `fill(0)` 擦除；新增 `CharArray.toByteArrayUtf8()` 扩展（CharBuffer 直转，不经 String）；
+    4. `hmacSha256()` / `hmacSha256Hex()` 重写：`dataBytes` 与 `result` 用毕 finally 清零；
+    5. `SyncCoordinator.resolveProvider()` 改为传递 `cfg.accessKey.clone()` / `cfg.secretKey.clone()`（CharArray 借用语义转移），构造失败时 catch 块擦除 clone 副本；`runSyncCycle()` 包裹 try-finally，finally 中调用 `(provider as? S3SyncProvider)?.clearCredentials()`；
+    6. `SyncCredentialsStore.encrypt()` 补充完整 KDoc 安全取舍声明（必要性/风险/缓解措施/替代方案评估）；
+    7. UI 层 `ZeroKnowledgeCard` 新增 `sync_credential_auth_notice` 文案（中英双语），向用户明示封印密钥不绑定生物认证的取舍与缓解措施。
+  - **涉及文件**：
+    - `sync/src/main/java/com/keepasskey/sync/s3/S3SyncProvider.kt`（构造器 CharArray + signV4/getSignatureKey/hmacSha256 全链 finally 清零 + clearCredentials）
+    - `app/src/main/java/com/keepasskey/app/sync/SyncCoordinator.kt`（CharArray clone 传入 + try-finally clearCredentials）
+    - `app/src/main/java/com/keepasskey/app/sync/SyncCredentialsStore.kt`（requireUserAuth=false 安全取舍 KDoc）
+    - `app/src/main/java/com/keepasskey/app/ui/screens/settings/subscreens/CloudSyncSections.kt`（ZeroKnowledgeCard 新增文案）
+    - `app/src/main/res/values/strings.xml` + `values-en/strings.xml`（sync_credential_auth_notice 双语）
+    - `sync/src/test/.../S3SyncProviderTest.kt`、`S3SyncScenarioTest.kt`、`LiveSyncServersTest.kt`（适配 CharArray 构造器）
+  - **测试证据**：
+    - 全量回归 **584 例：572 通过 / 0 失败 / 12 跳过**（测试数不变，仅构造器签名适配；跳过 12 例仍为 `LiveSyncServersTest` 真实联调用例）。
+    - SigV4 已知答案向量测试（`测试 SigV4 签名已知答案向量含星号波浪号与UTF8键`）通过，证明派生链清零未影响签名正确性。
