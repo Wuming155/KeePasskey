@@ -131,6 +131,11 @@
 > 索引中出现的 `Wave N` / `阶段 N` 字样为对应历史提交的**原始主题**，属已冻结语境，仅供追溯；新提交请以 `TASK-xx` / `批次 X` + 提交哈希 引用，勿再使用 Wave / 阶段 编号。
 > **登记口径（杜绝自引用漂移）**：本节登记**含代码改动的提交**；纯 `docs:` 回写提交不逐条补登（其本身即为维护本文件的产物，逐条登记会无限递归）。查最新提交请用 `git --no-pager log --oneline -5`。
 
+- `4235f16` (2026-09-09): refactor(TASK-53) Base64 统一（消除 android.util.Base64）+ Hex 编解码现代化——`CallingOriginResolver` 改 kotlin Base64 UrlSafe ABSENT_OPTIONAL、`KdbxUuid`/`BreachHasher`/`HealthCheckEngine`/`S3SyncProvider`/`SyncCache` Hex 现代化；核实裁定 java.util→kotlin 全量替换不做（padding 严格性差异）；STATUS 看板新增 TASK-53（52→53 项）并同步 §1 测试基线 514 例（502/0/12）；AGENTS.md 口径同步
+- `d241f24` (2026-09-09): refactor(TASK-52) Argon2 原生构建改为自维护 vendor 方案，移除 argon2kt 依赖
+- `4eb9fd3` (2026-09-09): perf(TASK-52) Argon2 原生 JNI 加速解锁（PHC 官方实现 vendor 入库 + 自维护 JNI 桥 + BC 兜底与 OOM 防护）+ 旧版 KDBX 提示简化；看板 TASK-52（52 项）
+- `ef46ce4` (2026-09-09): build 发布签名配置自动化（keystore.properties / 环境变量，未配置时安全降级）+ R8 WorkManager/Room/ZXing keep 规则补强
+- `354d432` (2026-09-09): feat(TASK-48) 清理数据库列表虚假默认库与假路径，实现 SAF 真实选库与开箱引导；看板 TASK-48（回归 7 例，513 例全绿）
 - `84b7b5e` (2026-09-08): fix(TASK-51) dependency-scan 三层根因修复——gradlew 可执行位 100755 / init 脚本 NVD 双通道（Secret Key 优先 + 官方镜像兜底）/ workflow 报告与 SARIF 路径修正；STATUS 看板新增 TASK-51（50→51 项）；本地实证 dependencyCheckAggregate BUILD SUCCESSFUL 后落地
 - `a0d972c` (2026-09-08): build(TASK-50) Dependabot PR #1/#2/#3 批量落地——Gradle Wrapper 9.4.1→9.7.1（wrapper 文件重生成，保留腾讯镜像）、AGP 9.2.1→9.4.0、navigation-compose 2.10.0、hilt-navigation-compose 1.4.0、bcprov 1.85.2、coroutines 1.11.0、okhttp 5.5.0、foojay-resolver 1.0.0；STATUS 看板新增 TASK-50（49→50 项）并同步 §1 构建基线；AGENTS.md 构建命令同步；506 例全绿
 - `64b94f4` (2026-09-08): TASK-47 已泄露密码检测接入 HIBP——`BreachHasher`/`HibpRangeClient`/`BreachCheckCoordinator`（k-匿名仅上送 SHA-1 前 5 位 + 同前缀去重）+ `BreachCheckModule` TLS-only 装配；`breachCheckEnabled` 显式开关默认关闭（关闭态零外联）、`compromisedPasswordCount` 改可空不以 0 冒充安全、失败转 FAILED 如实上浮；健康度页真实五态呈现 + 内嵌开关说明（中英）；回归 20 例（506 例全绿）；STATUS/FINDINGS/AGENTS/REPAIR_PLAN/README 同步回写
