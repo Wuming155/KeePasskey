@@ -357,7 +357,12 @@
     - **R2 裁定**：`AssociatedData::MAX_LEN = 32B`（0.5.3/0.6.0 同）为硬上限；真实 KeePass/KeePassXC 不设 KDF `A`
       字段 → 互操作风险 ≈ 0；`derive()` 对 AD>32 fail-closed 返回 None，**Batch 3 须在 `Argon2KdfEngine` 加最小
       Kotlin 守卫**将 AD>32 路由 BC 兜底（对「Kotlin 零改动」的受控偏差）。
-  - **Batch 2–3 进行中**。
+  - **Batch 2 ✅**：`jni_bridge.rs` 导出 `Java_com_keepasskey_crypto_kdf_NativeArgon2_deriveKey`，
+    符号名经 PE 导出表核对与 C 桥逐字一致、签名经编译期 fn 指针断言对齐；password/salt/secret/AD
+    拷入 `Zeroizing<Vec<u8>>`、输出拷入 `Zeroizing<[u8;32]>`，全路径（含 `?` 提前返回）RAII 擦除；
+    整个 FFI 体裹 `catch_unwind` → panic 归一为返回 null（不跨 JNI 边界 unwind）；有符号 jint 闸门
+    先行拦截负值再转 u32。`cargo test` 9/9 全绿。
+  - **Batch 3 进行中**。
 
 ---
 

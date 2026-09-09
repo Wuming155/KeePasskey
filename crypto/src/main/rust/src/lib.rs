@@ -15,6 +15,8 @@
 //! - `secret`(K) / `ad`(X)：KDBX4 罕见可选参数；`ad` 受 RustCrypto `AssociatedData::MAX_LEN=32`
 //!   限制（风险 R2），> 32B 时 [`derive`] 返回 `None`（C/BC 则接受任意长度）。
 
+mod jni_bridge;
+
 use argon2::{Algorithm, AssociatedData, Argon2, ParamsBuilder, Version};
 use zeroize::Zeroizing;
 
@@ -103,13 +105,6 @@ pub fn derive(
     ctx.hash_password_into(password, salt, out.as_mut_slice())
         .ok()?;
     Some(*out)
-}
-
-/// JNI 边界辅助：把借切入参拷入 `Zeroizing<Vec<u8>>`，确保 FFI 拷贝在用毕/错误路径均被擦除。
-/// 供 Batch 2 `jni_bridge.rs` 使用；此处提前固化「拷贝即受管」约定。
-#[allow(dead_code)]
-pub(crate) fn zeroizing_copy(src: &[u8]) -> Zeroizing<Vec<u8>> {
-    Zeroizing::new(src.to_vec())
 }
 
 #[cfg(test)]
