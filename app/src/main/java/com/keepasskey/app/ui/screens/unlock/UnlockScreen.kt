@@ -497,6 +497,8 @@ fun UnlockContent(
                         isPasswordVisible = uiState.isPasswordVisible,
                         onToggleVisibility = onTogglePasswordVisibility,
                         onDone = onUnlock,
+                        // ISSUE-P1-04：失败/锁定后令牌递增，驱动输入框擦除显示态，与 VM 主密码清零同步
+                        wipeToken = uiState.clearPasswordFieldToken,
                         modifier = Modifier.fillMaxWidth()
                     )
 

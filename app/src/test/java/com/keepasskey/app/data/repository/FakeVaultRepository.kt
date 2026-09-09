@@ -25,7 +25,10 @@ import java.util.Arrays
  * 仅供 JVM 单元测试使用，禁止迁回生产 main source set 或绑定生产 DI。
  */
 class FakeVaultRepository(
-    initialDatabases: List<VaultDatabaseInfo> = initialMockDatabases
+    initialDatabases: List<VaultDatabaseInfo> = initialMockDatabases,
+    // ISSUE-P1-04：置 true 时 unlockActiveDatabase 恒返回「凭据错误」失败，
+    // 供节流/清零路径单测驱动认证失败分支（默认 false，不影响既有用例）
+    private val forceInvalidCredentials: Boolean = false
 ) : VaultRepository {
 
     private val databasesFlow = MutableStateFlow(initialDatabases)
@@ -49,6 +52,13 @@ class FakeVaultRepository(
         keyFileData: ByteArray?,
         readOnly: Boolean
     ): com.keepasskey.core.result.KdbxResult<Unit> {
+        // ISSUE-P1-04：强制凭据错误——驱动 ViewModel 认证失败分支（节流计数 + 无条件清零）
+        if (forceInvalidCredentials) {
+            return com.keepasskey.core.result.KdbxResult.Failure(
+                com.keepasskey.database.exception.KdbxInvalidCredentialsException("主密码错误"),
+                "主密码错误"
+            )
+        }
         // P1-10 语义：仅密钥文件（空密码 + 密钥文件）亦为合法复合密钥
         return if (passwordChars.isNotEmpty() || keyFileData != null) {
             com.keepasskey.core.result.KdbxResult.Success(Unit)

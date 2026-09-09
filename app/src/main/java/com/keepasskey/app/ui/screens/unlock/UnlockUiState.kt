@@ -40,5 +40,14 @@ data class UnlockUiState(
     val unlockMode: UnlockMode = UnlockMode.STANDARD,
     val isBiometricEnabled: Boolean = false,
     // H1 整改：硬件安全声明不再写死假值，仅在有真实数据时展示
-    val hardwareBackedSecurity: String = ""
+    val hardwareBackedSecurity: String = "",
+
+    // ISSUE-P1-04：主密码解锁失败节流状态（反暴力破解）
+    // 连续失败次数（成功解锁后归零，供 UI 呈现「剩余尝试」等提示）
+    val throttleFailureCount: Int = 0,
+    // 距锁定解除的剩余毫秒数（0 表示当前未锁定）
+    val throttleLockoutRemainingMs: Long = 0L,
+    // 递增令牌：失败/锁定后通知 SecurePasswordField 同步擦除显示态，
+    // 与 ViewModel 内 passwordChars 无条件清零保持一致，杜绝「字段有点、VM 已空」的重试错配
+    val clearPasswordFieldToken: Long = 0L
 )

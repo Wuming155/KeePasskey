@@ -57,6 +57,9 @@ fun SecurePasswordField(
     trailingIcon: (@Composable () -> Unit)? = null,
     initialPassword: CharArray? = null,
     initialKey: Any? = null,
+    // ISSUE-P1-04：外部擦除令牌——值变化时立即清空本组件显示态与桥接 CharArray，
+    // 用于解锁失败/锁定后与 ViewModel 内主密码清零保持同步（用户须重新输入后重试）
+    wipeToken: Any? = null,
     onDone: () -> Unit = {}
 ) {
     var displayText by remember { mutableStateOf("") }
@@ -80,6 +83,15 @@ fun SecurePasswordField(
         charBridge.fill('0')
         charBridge = CharArray(0)
         displayText = ""
+    }
+
+    // 仅在令牌「发生变化」时擦除，避免首次组合即以初始值误清空（含预填场景）
+    var lastWipeToken by remember { mutableStateOf(wipeToken) }
+    LaunchedEffect(wipeToken) {
+        if (wipeToken != lastWipeToken) {
+            lastWipeToken = wipeToken
+            wipeSecret()
+        }
     }
 
     DisposableEffect(Unit) {

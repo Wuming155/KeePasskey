@@ -17,24 +17,7 @@
 
 ---
 
-## P1 高危与核心功能问题（6 项）
-
-### ISSUE-P1-04 (ZT-04): 主密码解锁零失败节流与锁定，失败态主密码滞留堆内存
-- **优先级**：P1（反暴力破解 / 内存治理）
-- **分类**：认证节流 / 敏感数据
-- **背景与现象**：
-  1. 全 `app/src/main` 检索 `attemptCount|failedAttempt|lockout|throttle|backoff|cooldown` **零命中**（已实证）：主密码解锁无任何失败计数、指数退避或临时锁定，仅依赖 KDF 计算成本；
-  2. `UnlockViewModel.kt:253-259` 的 `finally` 判据为 `if (_uiState.value.isLoading)`，而失败分支已于 `:245-250` 将 `isLoading` 置 false → **失败后 `passwordChars` 永不清零**，错误主密码持续驻留堆内存直至下次输入或 `onCleared()`。
-- **整改依据**：OWASP MASVS-AUTH-10（失败限流）；工程规则敏感数据铁律。
-- **涉及核心文件**：
-  - `app/src/main/java/com/keepasskey/app/ui/screens/unlock/UnlockViewModel.kt`
-  - `app/src/main/java/com/keepasskey/app/ui/screens/unlock/UnlockUiState.kt`
-- **验收标准**：
-  1. 引入持久化失败计数与渐进延迟/锁定（阈值可配，默认不超过 5 次后启用退避）；
-  2. 失败路径无条件清零 `passwordChars`（`finally` 判据不再依赖 `isLoading`）；
-  3. 单测覆盖计数累加、锁定触发与清零。
-
----
+## P1 高危与核心功能问题（5 项）
 
 ### ISSUE-P1-06 (ZT-06): 同步凭据无认证绑定 + S3 密钥 String 驻留与 SigV4 派生链零擦除
 - **优先级**：P1（凭据治理 / 内存安全）

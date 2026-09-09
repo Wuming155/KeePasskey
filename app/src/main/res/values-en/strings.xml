@@ -296,6 +296,9 @@
     <string name="conflict_resolved_msg">Conflict resolved, local and cloud merged successfully</string>
     <string name="unlock_error_empty_password">Enter master password to unlock</string>
     <string name="unlock_error_invalid_password">Incorrect master password or key mismatch</string>
+    <!-- ISSUE-P1-04: progressive backoff lockout after repeated failed master password attempts -->
+    <string name="unlock_error_locked_out_seconds">Too many failed attempts. Vault temporarily locked, retry in %1$d seconds</string>
+    <string name="unlock_error_locked_out_minutes">Too many failed attempts. Vault temporarily locked, retry in %1$d minutes</string>
     <string name="unlock_biometric_title">Biometric Unlock</string>
     <string name="unlock_biometric_subtitle">Verify your fingerprint or face to unlock</string>
     <string name="unlock_biometric_enroll_title">Enable Biometric Unlock</string>

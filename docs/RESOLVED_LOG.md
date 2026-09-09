@@ -17,6 +17,7 @@
    - [2.6 凭据提供者端到端契约（P1-01）](#26-凭据提供者端到端契约p1-01)
    - [2.7 生成侧私钥内存脱敏（P1-02）](#27-生成侧私钥内存脱敏p1-02)
    - [2.8 KDBX 回收站保留桶与历史保留期维护（P1-03）](#28-kdbx-回收站保留桶与历史保留期维护p1-03)
+   - [2.9 主密码解锁失败节流与失败态清零（P1-04）](#29-主密码解锁失败节流与失败态清零p1-04)
 
 ---
 
@@ -310,3 +311,31 @@
     - `database/KdbxXmlFullRoundtripTest` 新增 1 例 `testRecycleBinBucketStructureRoundtrip`：回收站保留桶结构（TrashBin 图标 + 禁用 AutoType/搜索的回收站组、桶内条目 `previousParentGroup` 回退指针、桶内嵌套子分组、Meta `recycleBinUuid/Enabled/Changed` 三字段）完整往返无损；
     - `app/RealVaultRepositoryTest` 新增 2 例：删除包含回收站的父组走物理删除且根组存活（不整库丢失）+ 追加墓碑、删除回收站嵌套子分组内条目物理删除 + 追加墓碑。
     - 全量回归 **573 例：561 通过 / 0 失败 / 12 跳过**（app 183 → 185、database 155 → 160；跳过 12 例仍为 `LiveSyncServersTest` 真实联调用例）。
+
+---
+
+### 2.9 主密码解锁失败节流与失败态清零（P1-04）
+
+> 来源：ISSUE-P1-04（ZT-04）。整改依据：OWASP MASVS-AUTH-10（失败限流）与工程规则敏感数据铁律；节流阈值与退避策略参照 Google/业界惯例（如 Apigee「5 次失败触发锁定」）与 Android 平台「限制认证频率、硬件级退避抵御在线/离线暴力破解」指南（google-developer-knowledge 检索确认）。
+
+- **ISSUE-P1-04（主密码解锁零失败节流与锁定，失败态主密码滞留堆内存）**：已修复（2026-09-09）。
+  - **缺陷**：
+    1. **零失败节流（反暴力破解缺口）**：全 `app/src/main` 检索 `attemptCount|failedAttempt|lockout|throttle|backoff|cooldown` 零命中——主密码解锁无任何失败计数、指数退避或临时锁定，仅依赖 KDF 计算成本抵御在线爆破；
+    2. **失败态主密码永不清零（内存治理缺口）**：`UnlockViewModel.unlock()` 的 `finally` 判据为 `if (_uiState.value.isLoading)`，而失败分支已先将 `isLoading` 置 false → 失败后 `passwordChars` 永不清零，错误主密码持续驻留堆内存直至下次输入或 `onCleared()`。
+  - **整改**：
+    1. 新增单一防线 `app/src/main/java/com/keepasskey/app/security/UnlockThrottle.kt`，内聚四件套：
+       - `UnlockThrottleRecord`（失败计数 + 锁定截止时间戳）、`ThrottleGate`（`Allowed` / `Locked`  sealed 判定，携带 `failureCount` 与剩余毫秒）；
+       - `UnlockThrottleStore` 存储抽象 + `SharedPrefsUnlockThrottleStore` 生产实现（`@Singleton`，计数与锁定截止落盘 SharedPreferences，**跨冷启动持久化**，杜绝「杀进程即重置计数」的绕过路径；持久化内容不含任何主密码明文）；
+       - `UnlockThrottlePolicy` 纯函数退避策略：连续失败达 `FAILURE_THRESHOLD=5` 起启用指数退避 `BASE_BACKOFF_MS(30s) * 2^(count-5)`，封顶 `MAX_BACKOFF_MS(30min)`，移位安全阈值防溢出；阈值与时长集中为 `const val`（阈值可配）；
+       - `UnlockThrottleManager`（`@Singleton`）状态机三原子操作：`gate`（解锁前闸门，锁定期 fail-closed）/ `registerFailure`（累加计数 + 重算锁定截止）/ `registerSuccess`（清零复位）；时间源以方法默认参数 `now` 注入，锁定边界在 JVM 单测可精确断言无需真实等待；
+    2. `SecurityModule`（新增 DI 模块）以 `@Binds` 将 `UnlockThrottleStore` 绑定到 `SharedPrefsUnlockThrottleStore`；`UnlockViewModel` 追加 nullable `unlockThrottleManager`（生产 Hilt 恒注入真实实例，单测注入内存实现）；
+    3. `UnlockViewModel.unlock()` 重构：
+       - **解锁前闸门**：锁定期内直接 fail-closed 拒绝（**绝不触碰 KDF/解密管线**），呈现本地化锁定剩余时长（≥1 分钟按分钟、否则按秒，文案交字符串资源），并同步清零主密码与递增输入框擦除令牌；
+       - **失败计数分流**：仅「凭据错误」（`KdbxInvalidCredentialsException`）计入节流，IO/文件损坏等非认证失败不计入，避免瞬时故障误锁用户；达到阈值时错误文案切换为锁定提示；
+       - **失败路径无条件清零**（核心修复）：抽出 `wipeMasterPassword()`，失败分支与 `finally` 兜底均**无条件**清零 `passwordChars`（判据不再依赖 `isLoading`），异常/失败/成功/锁定各路径均不残留主密码明文；成功路径追加 `registerSuccess` 复位计数；
+    4. `UnlockUiState` 新增 `throttleFailureCount` / `throttleLockoutRemainingMs` / `clearPasswordFieldToken`（递增令牌）；`SecurePasswordField` 新增 `wipeToken` 参数——令牌变化时擦除组件显示态与桥接 CharArray（仅在「变化」时触发，避免首次组合误清空预填），`UnlockScreen` 传入 `uiState.clearPasswordFieldToken`，使失败后 VM 清零与输入框显示态一致（用户须重新输入后重试），杜绝「字段有点、VM 已空」的重试错配；
+    5. 新增 `values/` 与 `values-en/` 锁定文案 `unlock_error_locked_out_seconds` / `unlock_error_locked_out_minutes`（双语齐备，规避 `lintVitalRelease` MissingTranslation）。
+  - **测试证据**：
+    - 新增 `app/security/UnlockThrottleManagerTest` 7 例：阈值以下不退避、达阈值起指数增长、退避封顶不溢出、连续失败累加计数且阈值前不锁定、达阈值触发锁定并到期自动放行（计数保留续升退避）、成功解锁重置、预置锁定态下闸门拒绝且剩余时长正确；
+    - `app/ui/screens/unlock/UnlockViewModelTest` 新增 4 例（6 → 10）：失败后无条件清零（二次不输入重试命中「空密码」反证 `passwordChars` 已清）、连续失败累加计数并达阈值触发锁定（锁定期内计数不再累加）、锁定期内闸门拒绝「正确」主密码且不假成功、成功解锁后节流计数归零；配套 `FakeUnlockThrottleStore` 内存实现与 `FakeVaultRepository(forceInvalidCredentials=true)` 认证失败驱动。
+    - 全量回归 **584 例：572 通过 / 0 失败 / 12 跳过**（app 185 → 196；跳过 12 例仍为 `LiveSyncServersTest` 真实联调用例）。

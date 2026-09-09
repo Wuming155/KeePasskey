@@ -300,6 +300,9 @@
     <string name="conflict_resolved_msg">冲突解决完毕，已完成本地与云端三方合并</string>
     <string name="unlock_error_empty_password">请输入主密码以解锁</string>
     <string name="unlock_error_invalid_password">主密码错误或密钥不匹配，解锁失败</string>
+    <!-- ISSUE-P1-04：主密码连续失败触发渐进退避锁定的提示（反暴力破解） -->
+    <string name="unlock_error_locked_out_seconds">连续多次解锁失败，密码库已临时锁定，请在 %1$d 秒后重试</string>
+    <string name="unlock_error_locked_out_minutes">连续多次解锁失败，密码库已临时锁定，请在 %1$d 分钟后重试</string>
     <!-- 既有构建债顺手整改：values-en 存在此条翻译但默认 locale 缺失，lintVitalRelease 因此 fail（阻塞 assembleRelease） -->
     <string name="unlock_error_pin_length">请输入 4 位 PIN 码</string>
     <string name="unlock_biometric_title">生物识别解锁</string>

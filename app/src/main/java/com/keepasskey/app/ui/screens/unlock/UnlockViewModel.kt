@@ -11,7 +11,9 @@ import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.security.BiometricAuthManager
 import com.keepasskey.app.security.BiometricCredentialStorage
 import com.keepasskey.app.security.BiometricResult
+import com.keepasskey.app.security.ThrottleGate
 import com.keepasskey.app.security.UnlockPasskeyManager
+import com.keepasskey.app.security.UnlockThrottleManager
 import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.core.result.KdbxResult
@@ -55,7 +57,9 @@ class UnlockViewModel @Inject constructor(
     // TASK-21：非 Compose 层文案资源解析通道（生产 DI 注入真实现；单测注入假实现）
     private val stringsProvider: StringsProvider? = null,
     // TASK-18：设备绑定解锁通行密钥（nullable 仅用于单测注入；生产 DI 恒注入真实实例）
-    private val unlockPasskeyManager: UnlockPasskeyManager? = null
+    private val unlockPasskeyManager: UnlockPasskeyManager? = null,
+    // ISSUE-P1-04：主密码解锁失败节流管理器（nullable 仅用于单测；生产 DI 恒注入真实实例）
+    private val unlockThrottleManager: UnlockThrottleManager? = null
 ) : ViewModel() {
 
     // P3-23：null 时回退空串实现（生产 Hilt 恒注入 StringsProviderModule 真实现）
@@ -208,6 +212,25 @@ class UnlockViewModel @Inject constructor(
      */
     fun unlock(activity: FragmentActivity? = null) {
         viewModelScope.launch {
+            val dbId = activeDatabaseId
+
+            // ISSUE-P1-04：失败节流闸门——锁定期内 fail-closed 直接拒绝，绝不触碰 KDF/解密管线，
+            // 并同步清零驻留主密码与输入框显示态（避免锁定期间明文滞留堆内存）
+            val gate = dbId?.let { unlockThrottleManager?.gate(it) }
+            if (gate is ThrottleGate.Locked) {
+                wipeMasterPassword()
+                _uiState.update {
+                    it.copy(
+                        isLoading = false,
+                        throttleFailureCount = gate.failureCount,
+                        throttleLockoutRemainingMs = gate.remainingMs,
+                        clearPasswordFieldToken = it.clearPasswordFieldToken + 1,
+                        errorMessage = lockoutMessage(gate.remainingMs)
+                    )
+                }
+                return@launch
+            }
+
             // P1-10：已选择密钥文件时空密码合法（仅密钥文件解锁，对齐官方 KeePass
             // 解锁框对空密码不添加密码分量的语义）；密码与密钥文件均缺失才拦截
             if (passwordChars.isEmpty() && keyFileData == null) {
@@ -224,39 +247,82 @@ class UnlockViewModel @Inject constructor(
                 )) {
                     is KdbxResult.Success -> {
                         debugLog.info(TAG, "主密码解锁成功")
+                        // 成功解锁：清零失败计数与锁定状态（节流状态机复位）
+                        dbId?.let { unlockThrottleManager?.registerSuccess(it) }
                         // 快速解锁凭据登记：必须在擦除主密码之前完成（登记需要明文主密码）
                         requestBiometricEnrollment(activity, passwordChars)
                         // 解锁成功后立即擦除驻留的密钥文件字节（会话已克隆缓存供保存使用）
                         keyFileData?.fill(0)
                         keyFileData = null
                         // 解锁成功后立即擦除驻留的主密码字符数组
-                        passwordChars.fill('0')
-                        passwordChars = CharArray(0)
-                        _uiState.update { it.copy(isLoading = false, hasKeyFile = false, keyFileName = "") }
-                        _events.emit(UnlockEvent.UnlockSuccess)
-                    }
-                    is KdbxResult.Failure -> {
-                        debugLog.error(TAG, "主密码解锁失败: activeDb=$activeDatabaseId, pwdLen=${passwordChars.size}, keyFileLen=${keyFileData?.size}, err=${result.message}")
-                        val errorMsg = if (result.error is com.keepasskey.database.exception.KdbxInvalidCredentialsException) {
-                            UiMessage(R.string.unlock_error_invalid_password)
-                        } else {
-                            UiMessage(R.string.vault_op_failed, listOf(result.message))
-                        }
+                        wipeMasterPassword()
                         _uiState.update {
                             it.copy(
                                 isLoading = false,
-                                errorMessage = errorMsg
+                                hasKeyFile = false,
+                                keyFileName = "",
+                                throttleFailureCount = 0,
+                                throttleLockoutRemainingMs = 0L
+                            )
+                        }
+                        _events.emit(UnlockEvent.UnlockSuccess)
+                    }
+                    is KdbxResult.Failure -> {
+                        val invalidCredentials =
+                            result.error is com.keepasskey.database.exception.KdbxInvalidCredentialsException
+                        debugLog.error(TAG, "主密码解锁失败: activeDb=$dbId, invalidCreds=$invalidCredentials, keyFileLen=${keyFileData?.size}, err=${result.message}")
+                        // ISSUE-P1-04：仅「凭据错误」计入暴力破解节流；IO/文件损坏等非认证失败不计入，避免瞬时故障误锁
+                        val newGate = if (invalidCredentials) {
+                            dbId?.let { unlockThrottleManager?.registerFailure(it) }
+                        } else {
+                            null
+                        }
+                        val errorMsg = when {
+                            newGate is ThrottleGate.Locked -> lockoutMessage(newGate.remainingMs)
+                            invalidCredentials -> UiMessage(R.string.unlock_error_invalid_password)
+                            else -> UiMessage(R.string.vault_op_failed, listOf(result.message))
+                        }
+                        // ISSUE-P1-04：失败路径无条件清零主密码（不再保留错误密码驻留堆内存）
+                        wipeMasterPassword()
+                        _uiState.update {
+                            it.copy(
+                                isLoading = false,
+                                errorMessage = errorMsg,
+                                // 通知输入组件同步擦除显示态，与 VM 清零保持一致（用户须重新输入后重试）
+                                clearPasswordFieldToken = it.clearPasswordFieldToken + 1,
+                                throttleFailureCount = newGate?.failureCount ?: it.throttleFailureCount,
+                                throttleLockoutRemainingMs =
+                                    (newGate as? ThrottleGate.Locked)?.remainingMs ?: 0L
                             )
                         }
                     }
                 }
             } finally {
-                // 失败重试路径保留输入，成功路径已在上方清零；此处仅确保异常时亦清零
-                if (_uiState.value.isLoading) {
-                    passwordChars.fill('0')
-                    passwordChars = CharArray(0)
-                }
+                // ISSUE-P1-04：兜底无条件清零——原实现判据为 `if (_uiState.value.isLoading)`，
+                // 而失败分支已先将 isLoading 置 false，导致失败态主密码永不清零、持续驻留堆内存。
+                // 现改为无条件清零，异常/失败/成功各路径均不残留主密码明文。
+                wipeMasterPassword()
             }
+        }
+    }
+
+    /** 无条件擦除驻留的主密码字符数组（失败/成功/异常/锁定各路径共用） */
+    private fun wipeMasterPassword() {
+        passwordChars.fill('0')
+        passwordChars = CharArray(0)
+    }
+
+    /**
+     * 将锁定剩余时长映射为本地化 [UiMessage]：≥1 分钟按分钟（向上取整）呈现，否则按秒。
+     * 数值计算内联、文案交由字符串资源，杜绝硬编码文案泄漏到代码层。
+     */
+    private fun lockoutMessage(remainingMs: Long): UiMessage {
+        val totalSeconds = (remainingMs + 999L) / 1000L
+        return if (totalSeconds >= 60L) {
+            val minutes = (totalSeconds + 59L) / 60L
+            UiMessage(R.string.unlock_error_locked_out_minutes, listOf(minutes.toInt()))
+        } else {
+            UiMessage(R.string.unlock_error_locked_out_seconds, listOf(totalSeconds.toInt()))
         }
     }
 
