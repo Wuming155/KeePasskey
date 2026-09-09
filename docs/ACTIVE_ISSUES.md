@@ -92,7 +92,7 @@
 
 ---
 
-## P2 中危缺陷与协议/测试缺口（13 项）
+## P2 中危缺陷与协议/测试缺口（14 项）
 
 ### ISSUE-P2-01 (P2-18 残余): S3 AccessKey 在 SettingsUiState 中的 String 留存改造
 - **优先级**：P2（内存敏感度）
@@ -310,6 +310,44 @@
   1. 先判 `autoLockTimeoutSeconds < 0` 直接返回（真正的「永不」）；
   2. 后台期间启动延迟任务，到点即锁（而非回前台才判）；
   3. 单测覆盖 0 / 30 / -1 三档语义。
+
+---
+
+### ISSUE-P2-14 (Rust 秘密飞地 PoC): Argon2 原生内核 C→Rust 迁移
+- **优先级**：P2（架构演进 / 敏感数据抗堆扫描）
+- **分类**：crypto 原生 KDF / 供应链
+- **背景与现象**：
+  `crypto/src/main/cpp/` 现以 vendored PHC 官方 C 参考实现（`argon2/`，1814 行）+ 手写 JNI 桥
+  `keepasskey_argon2_jni.c` 提供 Argon2d/id 派生。C 侧靠手动 `malloc`/`kp_wipe`/`free` 管理
+  password/salt/secret/AD 缓冲——「忘记 wipe / 错误路径漏擦」是 C 手动内存管理的固有隐患，正是
+  `AGENTS.md §6` 承认的「抗堆扫描 / 崩溃转储明文暴露」短板的原生解法缺口。JVM 侧已内存安全，
+  但 KDF 秘密在原生层的确定性擦除无法由 Kotlin 保证。
+- **整改依据**：
+  - RustCrypto `argon2`（纯 Rust，`zeroize` RAII 确定性擦除，消除 C 手动内存管理面）；
+  - 「零二进制信任根」哲学：Rust 源码 + 依赖全量入库、从源码交叉编译，可复现构建；
+  - 完整分批计划与风险登记册见 [`plans/rust-enclave-poc.md`](../plans/rust-enclave-poc.md)（PoC 探索计划，应用户既定偏好维护）。
+- **分批范围（每批=独立提交+测试全绿）**：
+  - **Batch 0**：冻结 BC 对照向量 `crypto/src/test/resources/argon2-interop/argon2-bc-vectors.json`
+    （14 条，覆盖 d/id × 0x10/0x13 × secret/AD 组合 × p=1/4 × 现实档位 + 2 条 64B 长 AD 探针验证 R2）；
+  - **Batch 1**：新建 `crypto/src/main/rust/` crate（`argon2`+`zeroize`+`jni`），纯 `derive()` 复刻 C 参数闸门，
+    `cargo test` 断言与 PHC 官方向量 + BC 对照向量逐字节一致，并裁定 R2（AD 长度上限）；
+  - **Batch 2**：Rust JNI 桥 `Java_com_keepasskey_crypto_kdf_NativeArgon2_deriveKey` 符号/签名逐字对齐，
+    全路径（含错误路径）`Zeroizing` 擦除；
+  - **Batch 3**：`cargo-ndk` 交叉编译 4 ABI `.so`，Gradle 接线、退役 CMake-argon2，Kotlin 侧零改动 drop-in；
+  - **Batch 4/5**（后续）：真机互操作+性能回归决策闸门；清理 C 遗留、文档流转归档。
+- **涉及核心文件**：
+  - `crypto/src/main/rust/`（新增 crate：`Cargo.toml` / `src/lib.rs` / `src/jni_bridge.rs`）
+  - `crypto/src/main/cpp/`（Batch 3 退役 CMake-argon2，Batch 5 `git rm` C 遗留）
+  - `crypto/build.gradle.kts`（Batch 3 接 `cargoNdkBuild`，移除 `externalNativeBuild.cmake`）
+  - `crypto/src/main/java/com/keepasskey/crypto/kdf/NativeArgon2.kt`（**不改**：库名/签名/null 语义保持）
+  - `crypto/src/test/java/com/keepasskey/crypto/kdf/Argon2BcVectorTest.kt`（Batch 0 向量冻结/防漂移锁）
+- **验收标准**：
+  1. Rust 内核对全参数域输出与 BC 逐字节一致（`cargo test` 绿）；真实 KeePass/KeePassXC `.kdbx` 可解锁（Batch 4 真机）；
+  2. 并行 KDF（rayon）解锁延迟回退在预算内（Batch 4 决策闸门）；
+  3. 秘密缓冲全路径 `zeroize` 确定性擦除，C 手动 `malloc/free/wipe` 面消除；
+  4. `assembleDebug`+`assembleRelease`(R8) 通过，APK 含 4 ABI Rust `.so`，全程源码构建；
+  5. 每批 `./gradlew.bat test`（+ `cargo test`）全绿，文档与代码同批提交推送。
+- **进度**：Batch 0 已完成（向量冻结 + ISSUE 登记）；Batch 1–3 进行中。
 
 ---
 

@@ -29,3 +29,13 @@ dependencies {
 
     testImplementation(libs.junit)
 }
+
+// Rust 迁移 PoC · Batch 0：把 -DexportArgon2Vectors 转发进单元测试 JVM，
+// 使 `gradlew :crypto:test -DexportArgon2Vectors=true` 可用 BC 重算并覆写对照向量 JSON；
+// 默认（false）时该测试仅读取已冻结向量并防漂移校验，永不 skip。
+tasks.withType<Test>().configureEach {
+    systemProperty(
+        "exportArgon2Vectors",
+        System.getProperty("exportArgon2Vectors") ?: "false"
+    )
+}
