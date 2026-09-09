@@ -12,7 +12,7 @@ This file provides guidance to AI coding agents when working with code in this r
 | 维度 | 数值 / 状态 | 官方依据与说明 |
 |---|---|---|
 | **Git HEAD** | 代码基线 `4235f16`（TASK-53 Base64/Hex 整洁度） | 分支 `main` 与 `origin/main` 同步 |
-| **测试基线** | **586 个单元测试用例**（app 196 / core 32 / crypto 56 / database 160 / sync 142，其中 sync 142 含 12 例联调跳过）：**574 通过、0 失败、12 跳过**（另有 Rust 侧 `cargo test` 9 例，见 §5） | `./gradlew test` 全模块执行；跳过的 12 例为 `LiveSyncServersTest` 真实联调用例（需先起 `tools/local-sync` 服务并加 `-DliveSyncTest`） |
+| **测试基线** | **591 个单元测试用例**（app 196 / core 32 / crypto 61 / database 160 / sync 142，其中 sync 142 含 12 例联调跳过）：**579 通过、0 失败、12 跳过**（另有 Rust 侧 `cargo test` 9 例，见 §5） | `./gradlew test` 全模块执行；跳过的 12 例为 `LiveSyncServersTest` 真实联调用例（需先起 `tools/local-sync` 服务并加 `-DliveSyncTest`）；crypto 61 含 4 例宿主侧原生 JNI 运行时验证（无 cargo 宿主库时 `Assume` 跳过，见 §5） |
 | **构建状态** | `assembleDebug` + `assembleRelease` (R8) 全量通过 | **AGP 9.4.0 / Gradle 9.7.1** / Kotlin 2.4.10（经 buildscript classpath 锚定内置 KGP）/ Hilt 2.60.1 / **KSP 2.3.11** |
 | **系统基线** | **minSdk 36**, **compileSdk 37**, targetSdk 36 | 仅针对 Android 16+ 深度优化，固化无旧版垫片决策；compileSdk 37（Compose BOM 2026.08.00 + M3 Expressive） |
 | **传输安全防线** | 全站强制 HTTPS（`network_security_config.xml` 禁明文 + OkHttp TLS-only），零证书固定 | 对齐 Google Developer Knowledge `pinning not recommended` 指南 |
@@ -36,6 +36,9 @@ KeePasskey 是一款使用原生 Kotlin 开发的现代化 Android 密码管理�
     └───> sync ────────────────> core
    ```
 2. **敏感数据铁律**：主密码、密钥用 `CharArray`/`ByteArray` 并显式清零，绝不落地为 `String`，日志严禁敏感明文。
+   - **原生侧**：Argon2 KDF 的 password/salt/secret/AD/派生输出在 Rust 侧（`crypto/src/main/rust/`）经
+     `Zeroizing` **RAII 全路径确定性擦除**（含错误提前返回路径），panic 经 `catch_unwind` 归一为返回 `null`；
+     禁止再引入手写的 C/C++ 秘密缓冲管理（`malloc`/`free`/手动 wipe）。
 3. **参考项目只读与文档优先铁律（禁止盲目翻看源码）**：
    - 严禁对 `参考项目/` 源码目录执行无目标的全局 `grep`、`glob` 或大面积扫源码；
    - 5 个参考项目均已完成详尽的架构分析，集中存放在 **`docs/references/`**；
@@ -80,7 +83,7 @@ KeePasskey 是一款使用原生 Kotlin 开发的现代化 Android 密码管理�
 - `.\gradlew.bat assembleDebug` — 编译全部模块
 - `.\gradlew.bat :app:compileDebugKotlin` — 仅快速检查 Kotlin 编译
 - `.\gradlew.bat lint` — Android Lint
-- `.\gradlew.bat test` — 单元测试（全模块 `src/test`；当前 **586 例：574 通过 / 0 失败 / 12 跳过**，分布 app 196 / core 32 / crypto 56 / database 160 / sync 142，跳过项需 `-DliveSyncTest` 才启用）
+- `.\gradlew.bat test` — 单元测试（全模块 `src/test`；当前 **591 例：579 通过 / 0 失败 / 12 跳过**，分布 app 196 / core 32 / crypto 61 / database 160 / sync 142，跳过项需 `-DliveSyncTest` 才启用）
 - `.\gradlew.bat test -DliveSyncTest` — 追加启用 `LiveSyncServersTest` 真实联调用例（默认跳过 12 例，需先起 `tools/local-sync` 服务）
 - `.\gradlew.bat assembleRelease` — R8 混淆 + 资源收缩发布包（签名配置见 `keystore.properties.example` / 环境变量，未配置时产出未签名包）
 - **Rust 原生内核（ISSUE-P2-14 PoC Batch 1+）**：`cd crypto/src/main/rust && cargo test` — Rust Argon2 内核单测（当前 **9 例全绿**：IETF 官方 KAT ×4 + BC 冻结向量等价 + 参数闸门 + 确定性 + JNI 签名/闸门）
@@ -90,7 +93,13 @@ KeePasskey 是一款使用原生 Kotlin 开发的现代化 Android 密码管理�
 > - **Rust stable + 4 个 Android target**：`rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android i686-linux-android`；
 > - **cargo-ndk**：`cargo install cargo-ndk`（Gradle task `:crypto:cargoNdkBuild` 经 `ANDROID_NDK_HOME` 调用，`assembleDebug/Release` 自动触发；纯 `test` 不触发）。
 >
-> 原 `crypto/src/main/cpp/`（vendored PHC C + JNI 桥）已**退役不再参与构建**（`externalNativeBuild.cmake` 已移除），源码暂留仓库待 Batch 5 `git rm`。国内网络可经 `RUSTUP_DIST_SERVER=https://rsproxy.cn` 加速 target 下载。
+> **宿主侧原生验证（Batch 4 起）**：`.\gradlew.bat :crypto:test` 会先跑 `:crypto:cargoHostBuild`
+> （`cargo build --release`，产物 `build/rust/host/release/`）并经 `-Djava.library.path` 注入单测 JVM，
+> 使桌面单测也能加载原生库、真实覆盖 JNI 调用路径；**未安装 cargo 或构建失败时自动降级为跳过相关用例**（不阻断）。
+>
+> **供应链**：`cd crypto/src/main/rust && cargo deny check`（需 `cargo install cargo-deny`；`deny.toml` 已入库）。
+>
+> 原 `crypto/src/main/cpp/`（vendored PHC C + JNI 桥）已于 **Batch 5 `git rm`**（git 历史可回溯），国内网络可经 `RUSTUP_DIST_SERVER=https://rsproxy.cn` 加速 target 下载。
 
 ---
 
@@ -99,5 +108,6 @@ KeePasskey 是一款使用原生 Kotlin 开发的现代化 Android 密码管理�
 - **KDBX 对象树仍整体驻留内存**：解析已流式化，但 `KdbxGroup`/`KdbxEntry` 树仍在内存（增量加载/进度 Flow 为远期项）。
 - **条件写依赖服务端**：AWS S3 原子生效，少数未实现 `If-Match` 覆写的兼容存储降级为 HEAD 预检 + 无条件 PUT；WebDAV `uploadAtomic` 预条件在个别极简 DAV 服务端可能被忽略。
 - **`ProtectedString` 驻留加密为纵深防御层**：对抗堆扫描与崩溃转储中的明文暴露；取得进程密钥或具备任意代码执行能力者仍可在读取瞬间截获明文。
+- **原生 Argon2 为 Rust 内核（体积代价）**：4 ABI 各含 Rust std + rayon + blake2，strip 后 `.so` 约 313~506KB/ABI（原 C 内核约 18~22KB/ABI）；收益是秘密确定性擦除与宿主侧实测 2.2~5.4× 于 BC 的派生速度。真机 arm64 instrumented 验证待设备可用时补（ISSUE-P3-11）。
 - **浏览器特权白名单**：内置 Chrome 稳定版签名指纹，证书轮换或白名单外浏览器 fail-closed 降级为 apk-key-hash 路径。
 - **外部库导入策略**：经导入复制进内部存储后原地编辑（不写回外部原文件），为当前设计取舍。

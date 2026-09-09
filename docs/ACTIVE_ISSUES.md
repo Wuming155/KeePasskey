@@ -313,106 +313,7 @@
 
 ---
 
-### ISSUE-P2-14 (Rust 秘密飞地 PoC): Argon2 原生内核 C→Rust 迁移
-- **优先级**：P2（架构演进 / 敏感数据抗堆扫描）
-- **分类**：crypto 原生 KDF / 供应链
-- **背景与现象**：
-  `crypto/src/main/cpp/` 现以 vendored PHC 官方 C 参考实现（`argon2/`，1814 行）+ 手写 JNI 桥
-  `keepasskey_argon2_jni.c` 提供 Argon2d/id 派生。C 侧靠手动 `malloc`/`kp_wipe`/`free` 管理
-  password/salt/secret/AD 缓冲——「忘记 wipe / 错误路径漏擦」是 C 手动内存管理的固有隐患，正是
-  `AGENTS.md §6` 承认的「抗堆扫描 / 崩溃转储明文暴露」短板的原生解法缺口。JVM 侧已内存安全，
-  但 KDF 秘密在原生层的确定性擦除无法由 Kotlin 保证。
-- **整改依据**：
-  - RustCrypto `argon2`（纯 Rust，`zeroize` RAII 确定性擦除，消除 C 手动内存管理面）；
-  - 「零二进制信任根」哲学：Rust 源码 + 依赖全量入库、从源码交叉编译，可复现构建；
-  - 完整分批计划与风险登记册见 [`plans/rust-enclave-poc.md`](../plans/rust-enclave-poc.md)（PoC 探索计划，应用户既定偏好维护）。
-- **分批范围（每批=独立提交+测试全绿）**：
-  - **Batch 0**：冻结 BC 对照向量 `crypto/src/test/resources/argon2-interop/argon2-bc-vectors.json`
-    （14 条，覆盖 d/id × 0x10/0x13 × secret/AD 组合 × p=1/4 × 现实档位 + 2 条 64B 长 AD 探针验证 R2）；
-  - **Batch 1**：新建 `crypto/src/main/rust/` crate（`argon2`+`zeroize`+`jni`），纯 `derive()` 复刻 C 参数闸门，
-    `cargo test` 断言与 PHC 官方向量 + BC 对照向量逐字节一致，并裁定 R2（AD 长度上限）；
-  - **Batch 2**：Rust JNI 桥 `Java_com_keepasskey_crypto_kdf_NativeArgon2_deriveKey` 符号/签名逐字对齐，
-    全路径（含错误路径）`Zeroizing` 擦除；
-  - **Batch 3**：`cargo-ndk` 交叉编译 4 ABI `.so`，Gradle 接线、退役 CMake-argon2，Kotlin 侧零改动 drop-in；
-  - **Batch 4/5**（后续）：真机互操作+性能回归决策闸门；清理 C 遗留、文档流转归档。
-- **涉及核心文件**：
-  - `crypto/src/main/rust/`（新增 crate：`Cargo.toml` / `src/lib.rs` / `src/jni_bridge.rs`）
-  - `crypto/src/main/cpp/`（Batch 3 退役 CMake-argon2，Batch 5 `git rm` C 遗留）
-  - `crypto/build.gradle.kts`（Batch 3 接 `cargoNdkBuild`，移除 `externalNativeBuild.cmake`）
-  - `crypto/src/main/java/com/keepasskey/crypto/kdf/NativeArgon2.kt`（**不改**：库名/签名/null 语义保持）
-  - `crypto/src/test/java/com/keepasskey/crypto/kdf/Argon2BcVectorTest.kt`（Batch 0 向量冻结/防漂移锁）
-  - `crypto/src/test/java/com/keepasskey/crypto/kdf/NativeArgon2HostJniTest.kt`（Batch 4 宿主侧 JNI 运行时验证）
-- **验收标准**：
-  1. Rust 内核对全参数域输出与 BC 逐字节一致（`cargo test` 绿）；真实 KeePass/KeePassXC `.kdbx` 可解锁（Batch 4 真机）；
-  2. 并行 KDF（rayon）解锁延迟回退在预算内（Batch 4 决策闸门）；
-  3. 秘密缓冲全路径 `zeroize` 确定性擦除，C 手动 `malloc/free/wipe` 面消除；
-  4. `assembleDebug`+`assembleRelease`(R8) 通过，APK 含 4 ABI Rust `.so`，全程源码构建；
-  5. 每批 `./gradlew.bat test`（+ `cargo test`）全绿，文档与代码同批提交推送。
-- **进度**：
-  - **Batch 0 ✅**：BC 对照向量冻结（14 条）+ ISSUE 登记 + 基线 585（crypto 55）。
-  - **Batch 1 ✅**：`crypto/src/main/rust/` crate 落地（`argon2 0.6.0` + `zeroize`），纯 `derive()` 复刻 C 参数闸门；
-    `cargo test` 7/7 全绿——IETF draft-irtf-cfrg-argon2-12 §5 官方 KAT（d/id × 0x10/0x13）逐字节命中，
-    BC 冻结向量 12 条 AD≤32 逐字节等价、2 条 64B 长 AD 探针 fail-closed 返回 None，闸门负例与确定性覆盖。
-    - **R1 裁定**：`argon2 0.5.3` 无 `parallel`/rayon（单线程 lanes）→ 改用 **0.6.0** 并启用 `parallel`(rayon)，
-      多线程输出与 BC 逐字节一致，保住 p=2/p=4 多核收益（真机性能对照留 Batch 4 决策闸门）。
-    - **R2 裁定**：`AssociatedData::MAX_LEN = 32B`（0.5.3/0.6.0 同）为硬上限；真实 KeePass/KeePassXC 不设 KDF `A`
-      字段 → 互操作风险 ≈ 0；`derive()` 对 AD>32 fail-closed 返回 None，**Batch 3 须在 `Argon2KdfEngine` 加最小
-      Kotlin 守卫**将 AD>32 路由 BC 兜底（对「Kotlin 零改动」的受控偏差）。
-  - **Batch 2 ✅**：`jni_bridge.rs` 导出 `Java_com_keepasskey_crypto_kdf_NativeArgon2_deriveKey`，
-    符号名经 PE 导出表核对与 C 桥逐字一致、签名经编译期 fn 指针断言对齐；password/salt/secret/AD
-    拷入 `Zeroizing<Vec<u8>>`、输出拷入 `Zeroizing<[u8;32]>`，全路径（含 `?` 提前返回）RAII 擦除；
-    整个 FFI 体裹 `catch_unwind` → panic 归一为返回 null（不跨 JNI 边界 unwind）；有符号 jint 闸门
-    先行拦截负值再转 u32。`cargo test` 9/9 全绿。
-  - **Batch 3 ✅**：cargo-ndk 4.1.2 + 4 Android target（经 `RUSTUP_DIST_SERVER=rsproxy.cn` 镜像安装，
-    官方 CDN 在本网络 403/超时）；Gradle `:crypto:cargoNdkBuild`（Exec，`ANDROID_NDK_HOME` 指向
-    NDK 28.2.13676358）交叉编译 4 ABI 至 `build/rust/jniLibs/<abi>/`，`sourceSets.main.jniLibs.srcDirs`
-    接入，`merge*NativeLibs` 依赖之；**移除 `externalNativeBuild.cmake`**（C 内核退役，源码留待 Batch 5）。
-    - **产物核对**：4 ABI `libkeepasskey_argon2.so` 均入 APK（arm64-v8a 434KB / armeabi-v7a 313KB /
-      x86 506KB / x86_64 478KB，AGP strip 后）；`llvm-readelf` 确认 arm64 为 AArch64 ELF64 DYN、
-      导出 `Java_com_keepasskey_crypto_kdf_NativeArgon2_deriveKey`（GLOBAL FUNC）、NEEDED 仅 libc/libdl。
-    - **R8 keep 核对**：release `seeds.txt` 含 `NativeArgon2: byte[] deriveKey(...)`（`-keepclasseswithmembernames
-      … native <methods>` 生效），native 方法名未被混淆 → JNI 符号可解析。
-    - **R2 守卫落地**：`Argon2KdfEngine` 增 `NATIVE_MAX_AD_LEN=32` + `adExceedsNativeLimit` 分支，AD>32 路由 BC；
-      新增 `Argon2AdLimitFallbackTest`（64B AD 经 BC 兜底派生 == 冻结向量），crypto 单测 55→56。
-    - **供应链**：`deny.toml` 落地（许可证白名单 + advisory deny + 4 android target graph）；`cargo deny` 执行
-      需 `cargo install cargo-deny`（未在本次授权安装范围内，配置就绪待跑）。
-    - `assembleDebug` + `assembleRelease`(R8) 均 BUILD SUCCESSFUL；`./gradlew.bat test` 全绿（**586 例：574 通过 /
-      0 失败 / 12 跳过**，纯 test 不触发 cargoNdkBuild）；`cargo test` 9/9。基线同步更新 AGENTS.md §1/§5。
-    - **体积增量**：Rust .so 含 std+rayon+blake2，较原 C ref 实现（数十 KB/ABI）增约 +0.3~0.5MB/ABI（未压缩）；
-      精确 C-vs-Rust APK 增量对照留 Batch 4（需从 git 历史重建 C 基线包）。
-  - **Batch 4 ✅（宿主侧替代验证；R1 决策闸门：通过）**：
-    - **偏差说明（无设备/模拟器）**：本机 `adb devices` 为空、工程无 `androidTest` 源集，无法执行计划原定的
-      instrumented 测试。改为**宿主侧 JNI 运行时验证**（风险 R6 的替代缓解路径）：Gradle 新增 `cargoHostBuild`
-      （`cargo build --release`，`CARGO_TARGET_DIR=<build>/rust/host`；无 cargo 或构建失败时 `onlyIf` +
-      `isIgnoreExitValue` 降级为「不产出宿主库」，相关用例 `Assume` 跳过），产物目录经
-      `-Djava.library.path` 注入单测 JVM → 桌面 `NativeArgon2.available == true`，**原生路径从此被桌面单测真实覆盖**。
-    - **新增用例（crypto 56 → 61）**：
-      - `NativeArgon2HostJniTest` 4 例：①原生 ≡ BC 于 KDBX4 全参数域（12 组：d/id × 0x10/0x13 × 含/不含
-        secret+AD × p=1/4 × m=4096KiB 现实档）逐字节一致；②JNI 边界闸门（type∉{0,2}、version∉{0x10,0x13}、
-        t/p 下界含负值、m<8p、AD 33B 越 R2 上限）全部归一返回 null，且合法基线/AD=32B 必须成功；
-        ③确定性且 secret/AD 参与 H0 运算；④原生 vs BC 性能对照。
-      - `Argon2InteropDiagnosticTest` +1 例：宿主库可用时 `Argon2KdfEngine` 必走原生分支，复现
-        libargon2（C 参考实现）预计算基准 `4423de68…` → **跨实现互操作在原生路径上成立**
-        （真实 KeePass/KeePassXC 不设 KDF 的 `A` 字段，该参数形态即真实解锁路径）。
-    - **R1 决策闸门（宿主 Windows x86_64，m=16MiB t=2，warmup 后取 3 次最优）**：
-      | 档位 | 原生 | BouncyCastle | 加速比 |
-      |---|---|---|---|
-      | p=1 | 11.6 ms | 25.8 ms | 2.22× |
-      | p=2 | 6.8 ms | 21.5 ms | 3.15× |
-      | p=4 | 3.9 ms | 20.8 ms | 5.37× |
-      rayon 多核收益明确（原生 p1→p4 提速约 3×），**无任何性能回退 → 闸门通过，进入 Batch 5**；
-      用例内落 `NATIVE_VS_BC_MAX_RATIO = 2.0` 回归断言（任一档位原生耗时不得超过 BC 的 2 倍）。
-      ⚠️ 该组数据为**宿主侧**绝对值，真机 arm64 实测待设备可用时补（已另立 ISSUE-P3-11）。
-    - **体积增量（C → Rust，AGP strip 后 release `.so`）**：arm64-v8a 17.6KB → 434.0KB；armeabi-v7a
-      19.2KB → 312.7KB；x86 21.9KB → 505.8KB；x86_64 22.4KB → 478.0KB（C 基线取自 Batch 3 前的 CMake 产物
-      `build/intermediates/library_and_local_jars_jni/release/…`）。增量来源：Rust std + rayon/crossbeam + blake2。
-    - `./gradlew.bat test` 全绿（**591 例：579 通过 / 0 失败 / 12 跳过**；crypto 61）；`cargo test` 9/9。
-  - **Batch 5 待办**：`git rm` C 遗留（含 `Argon2BcVectorTest` 模块识别路径修正）、文档流转归档、基线更新。
-  - **遗留已外置**：真机 androidTest 与 arm64 性能实测 → ISSUE-P3-11；`cargo deny check` 待 `cargo install cargo-deny`（R4）。
-
----
-
-## P3 低危问题、特性接线与体验优化（10 项）
+## P3 低危问题、特性接线与体验优化（11 项）
 
 ### ISSUE-P3-01 (TASK-55): 生物识别解锁开关开启后第二次解锁不默认触发生物识别
 - **优先级**：P3（用户体验）
@@ -547,13 +448,17 @@
   3. **alpha 依赖进生产**：`material3 = 1.5.0-alpha27`（`app/build.gradle.kts:111` 覆盖 BOM）；`argon2kt 1.6.0` 为孤儿版本（TASK-52 后无消费方）；`zxing-android-embedded 4.3.0` 偏旧；
   4. **CI 无门禁**：`dependency-check.init.gradle.kts:30` `failBuildOnCVSS = 11.0f` + `:39` `failOnError = false` + `dependency-scan.yml:81` `continue-on-error: true` → 扫描纯告警；Action 全部 tag 引用（`actions/checkout@v4` 等）未 SHA 钉死；**无 build / test / lint 流水线**；
   5. `.gitignore:40-43` 缺 `*.p12` / `*.pfx` / `*.pem` / `*.key` 规则。
+  6. **Rust 侧供应链闸门未接入 CI**：`crypto/src/main/rust/deny.toml` 已落地且
+     `cargo deny check licenses bans sources` 通过，但 `advisories` 子检查需联网拉取
+     rustsec/advisory-db（本环境 github 连接被重置），且 CI 无该步骤。
 - **整改依据**：SLSA 供应链分级；Google Play 签名与 R8 最佳实践。
 - **验收标准**：
   1. 关闭 v1、启用 v3/v4；
   2. 收窄 keep 规则（保留组件与擦除方法即可）、移除 `-dontwarn **` 与冗余 Room 规则、补 Log 剥离；
   3. alpha 依赖降级为稳定版或明确管控；清理孤儿版本；
   4. CI 增加 build/test 门禁、Action SHA 钉死、扫描具备失败阻断阈值；
-  5. `.gitignore` 补齐密钥扩展名。
+  5. `.gitignore` 补齐密钥扩展名；
+  6. CI 增加 `cargo deny check`（含 advisories）与 4 ABI 原生构建步骤，并固定 Rust/NDK 版本。
 
 ---
 

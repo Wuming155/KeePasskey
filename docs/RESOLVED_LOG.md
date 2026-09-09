@@ -19,6 +19,7 @@
    - [2.8 KDBX 回收站保留桶与历史保留期维护（P1-03）](#28-kdbx-回收站保留桶与历史保留期维护p1-03)
    - [2.9 主密码解锁失败节流与失败态清零（P1-04）](#29-主密码解锁失败节流与失败态清零p1-04)
    - [2.10 同步凭据认证绑定与 S3 密钥内存治理（P1-06）](#210-同步凭据认证绑定与-s3-密钥内存治理p1-06)
+   - [2.11 Argon2 原生内核 C→Rust 迁移（P2-14）](#211-argon2-原生内核-crust-迁移p2-14)
 
 ---
 
@@ -370,3 +371,69 @@
   - **测试证据**：
     - 全量回归 **584 例：572 通过 / 0 失败 / 12 跳过**（测试数不变，仅构造器签名适配；跳过 12 例仍为 `LiveSyncServersTest` 真实联调用例）。
     - SigV4 已知答案向量测试（`测试 SigV4 签名已知答案向量含星号波浪号与UTF8键`）通过，证明派生链清零未影响签名正确性。
+
+---
+
+### 2.11 Argon2 原生内核 C→Rust 迁移（P2-14）
+
+> 来源：ISSUE-P2-14（Rust 秘密飞地 PoC）。整改依据：RustCrypto `argon2`（纯 Rust + `zeroize` RAII 确定性擦除，消除 C 手动 `malloc`/`kp_wipe`/`free` 面）；「零二进制信任根」哲学（源码全量入库 + 从源码交叉编译）。分批计划与风险登记册见 [`plans/rust-enclave-poc.md`](../plans/rust-enclave-poc.md)。
+
+- **ISSUE-P2-14（Argon2 原生内核 C→Rust 迁移）**：已完成（2026-09-09，Batch 0~5 全部闭环）。
+  - **缺陷 / 动机**：原 `crypto/src/main/cpp/` 以 vendored PHC 官方 C 参考实现（`argon2/`，1814 行）+ 手写 JNI 桥
+    `keepasskey_argon2_jni.c` 提供派生，靠手动 `malloc`/`kp_wipe`/`free` 管理 password/salt/secret/AD 缓冲
+    ——「忘记 wipe / 错误路径漏擦」是 C 手动内存管理的固有隐患，正是 `AGENTS.md §6` 承认的
+    「抗堆扫描 / 崩溃转储明文暴露」短板的原生解法缺口。
+  - **整改（drop-in 替换，Kotlin 侧库名/签名/null 语义零改动）**：
+    1. **Batch 0**：冻结 14 条 BouncyCastle 对照向量（d/id × 0x10/0x13 × secret/AD × p=1/4 × 现实档位
+       + 2 条 64B 长 AD 探针）`crypto/src/test/resources/argon2-interop/argon2-bc-vectors.json`；
+    2. **Batch 1**：新建 Rust crate `crypto/src/main/rust/`（`argon2 0.6.0` + `zeroize` + `jni`），
+       纯 `derive()` 逐条复刻 C 参数闸门；`cargo test` 9/9（IETF draft-irtf-cfrg-argon2-12 §5 官方 KAT ×4
+       + BC 冻结向量等价 + 闸门负例 + 确定性 + JNI 签名/闸门）；
+    3. **Batch 2**：`jni_bridge.rs` 导出 `Java_com_keepasskey_crypto_kdf_NativeArgon2_deriveKey`
+       （符号/签名与 C 桥逐字一致）；输入拷入 `Zeroizing<Vec<u8>>`、输出 `Zeroizing<[u8;32]>`，
+       全路径（含 `?` 提前返回）RAII 擦除；整个 FFI 体裹 `catch_unwind`，panic 归一为返回 `null`；
+    4. **Batch 3**：Gradle `:crypto:cargoNdkBuild` 经 cargo-ndk 交叉编译 4 ABI 至 `build/rust/jniLibs/`，
+       移除 `externalNativeBuild.cmake`；APK 内 4 ABI `.so` 经 `llvm-readelf` 核对（AArch64 ELF64 DYN、
+       导出符号 GLOBAL FUNC、NEEDED 仅 libc/libdl），release `seeds.txt` 核对 native 方法未被 R8 混淆；
+       `deny.toml` 落地供应链闸门；
+    5. **Batch 4**：宿主侧 JNI 运行时验证（见下）+ R1 性能决策闸门通过；
+    6. **Batch 5**：`git rm crypto/src/main/cpp/`（17 文件 / 4212 行，git 历史可回溯），
+       同步修正 `Argon2BcVectorTest` 的模块识别（改判 `src/main/rust`）与 `NativeArgon2`/`Argon2KdfEngine`/`ARCHITECTURE` 文档。
+  - **R1（并行性能）裁定与实测**：`argon2 0.5.3` 无 `parallel` feature → 采用 **0.6.0 + `parallel`(rayon)**。
+    宿主 Windows x86_64，m=16MiB t=2，warmup 后取 3 次最优：
+
+    | 档位 | Rust 原生 | BouncyCastle | 加速比 |
+    |---|---|---|---|
+    | p=1 | 11.6 ms | 25.8 ms | 2.22× |
+    | p=2 | 6.8 ms | 21.5 ms | 3.15× |
+    | p=4 | 3.9 ms | 20.8 ms | 5.37× |
+
+    原生 p1→p4 提速约 3×（rayon 多核收益成立），**无性能回退 → 决策闸门通过**。
+  - **R2（AD 长度上限）裁定与缓解**：RustCrypto `AssociatedData::MAX_LEN = 32B` 为硬上限（0.5.3/0.6.0 同），
+    而 C/BC 接受任意长度。真实 KeePass/KeePassXC 生成库不设 KDF 的 `A` 字段 → 互操作风险 ≈ 0；
+    Rust `derive()` 对 AD>32 fail-closed 返回 `None`，并在 `Argon2KdfEngine` 加最小 Kotlin 守卫
+    （`NATIVE_MAX_AD_LEN = 32`，AD 超限路由 BC 兜底）—— 对「Kotlin 零改动」目标的**受控偏差**，
+    由 `Argon2AdLimitFallbackTest`（64B AD 经 BC 兜底 == 冻结向量）锁定。
+  - **R6（桌面无 `.so`）缓解**：计划原定用 `androidTest` 做运行时验证，本机无设备/模拟器；
+    改为**宿主侧替代方案** —— `:crypto:cargoHostBuild` 产出宿主 cdylib，
+    经 `-Djava.library.path` 注入单测 JVM，使桌面 `NativeArgon2.available == true`，
+    新增 `NativeArgon2HostJniTest`（4 例：全参数域原生 ≡ BC、JNI 边界闸门归一 null、确定性、
+    性能回归断言 `NATIVE_VS_BC_MAX_RATIO = 2.0`）；无 cargo 时自动 `Assume` 跳过，不阻断 CI。
+    真机 arm64 instrumented 验证已外置为 **ISSUE-P3-11**。
+  - **体积代价（AGP strip 后 release `.so`）**：arm64-v8a 17.6KB → 434.0KB；armeabi-v7a 19.2KB → 312.7KB；
+    x86 21.9KB → 505.8KB；x86_64 22.4KB → 478.0KB（增量来自 Rust std + rayon/crossbeam + blake2）。
+  - **涉及文件**：
+    - `crypto/src/main/rust/`（`Cargo.toml`、`src/lib.rs`、`src/jni_bridge.rs`、`deny.toml`，新增）
+    - `crypto/src/main/cpp/`（Batch 5 `git rm` 删除）
+    - `crypto/build.gradle.kts`（`cargoNdkBuild` 4 ABI 交叉编译 + `cargoHostBuild` 宿主验证 + `-Djava.library.path` 注入）
+    - `crypto/src/main/java/com/keepasskey/crypto/kdf/Argon2KdfEngine.kt`（R2 守卫 `NATIVE_MAX_AD_LEN`）
+    - `crypto/src/test/java/com/keepasskey/crypto/kdf/`（`NativeArgon2HostJniTest` 新增；
+      `Argon2InteropDiagnosticTest` 增「原生路径复现 libargon2 参考基准」；`Argon2AdLimitFallbackTest` 新增；
+      `Argon2BcVectorTest` 模块识别路径修正）
+  - **测试证据**：
+    - `./gradlew.bat test` 全绿 **591 例：579 通过 / 0 失败 / 12 跳过**（crypto 55 → 61）；
+      跳过 12 例仍为 `LiveSyncServersTest`。
+    - `cargo test` 9/9 全绿；`assembleDebug` + `assembleRelease`(R8) 通过。
+    - 互操作：宿主原生路径复现 libargon2（C 参考实现）预计算基准 `4423de68…`（`Argon2InteropDiagnosticTest`）。
+    - 供应链：`cargo deny check licenses bans sources` → **bans ok, licenses ok, sources ok**（仅「白名单许可未出现」
+      级 warning）；`advisories` 子检查需联网拉取 rustsec/advisory-db，本环境 github 连接被重置未能执行，已并入 ISSUE-P3-09。

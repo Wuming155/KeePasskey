@@ -206,7 +206,9 @@ class Argon2BcVectorTest {
         val base = File(System.getProperty("user.dir") ?: ".")
         val relative = "src/test/resources/argon2-interop/argon2-bc-vectors.json"
         val asModule = File(base, relative)
-        val looksLikeCryptoModule = File(base, "build.gradle.kts").exists() && File(base, "src/main/cpp").exists()
+        // Batch 5：C 源码已 git rm，改以 Rust crate 目录识别 crypto 模块
+        val looksLikeCryptoModule =
+            File(base, "build.gradle.kts").exists() && File(base, "src/main/rust").exists()
         return if (looksLikeCryptoModule) asModule else File(base, "crypto/$relative")
     }
 

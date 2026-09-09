@@ -6,6 +6,13 @@
 >
 > **闭环纪律**：每批 = 一次独立 `git commit` + `git push`；每批完成时 `./gradlew.bat test` 全绿（Rust 侧另加 `cargo test`）方可进入下一批。
 
+> **✅ PoC 状态：已完成并归档（2026-09-09）**。Batch 0~5 全部闭环，四项成功判据（正确性 / 性能 /
+> 安全增益 / 构建）均达成；完整整改记录与代码证据见
+> [`docs/RESOLVED_LOG.md` §2.11](docs/RESOLVED_LOG.md)（ISSUE-P2-14）。
+> 与计划的**两处受控偏差**：①Batch 4 因本机无设备/模拟器，真机 `androidTest` 改为**宿主侧 JNI 运行时验证**
+> （`cargoHostBuild` + `-Djava.library.path`），真机 arm64 复测外置为 ISSUE-P3-11；②R2 触发
+> `Argon2KdfEngine` 增加 AD>32B 路由 BC 的 Kotlin 守卫（对「Kotlin 零改动」的最小偏差）。
+
 ---
 
 ## 0. PoC 范围与非目标

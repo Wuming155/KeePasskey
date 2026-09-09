@@ -6,7 +6,7 @@ plugins {
 
 // ============================================================================
 // Rust 秘密飞地 PoC · Batch 3：Argon2 原生内核由 cargo-ndk 从源码交叉编译产出，
-// 替代原 CMake C 内核（TASK-52）。C 源码 src/main/cpp/ 暂留仓库，Batch 5 git rm。
+// 替代原 CMake C 内核（TASK-52）；vendored PHC C 源码已于 Batch 5 `git rm`（git 历史可回溯）。
 // ============================================================================
 
 // NDK 版本与 AGP strip/构建所用一致；cargo-ndk 通过 ANDROID_NDK_HOME 复用同一 NDK。

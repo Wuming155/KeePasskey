@@ -24,7 +24,7 @@ app ──> database ──> crypto ──> core
 
 ## 3. 关键架构决策（方向级）
 
-1. **加密与解析分离**：`crypto` 只做纯加密，不感知 kdbx 格式，可独立测试。Argon2 已落地原生加速（TASK-52：PHC 官方参考实现 vendor 入库 + 自维护 JNI 桥，BouncyCastle 保留兜底）；AES-KDF 原生加速仍为远期性能优化项。
+1. **加密与解析分离**：`crypto` 只做纯加密，不感知 kdbx 格式，可独立测试。Argon2 已落地原生加速（TASK-52 立项；ISSUE-P2-14 起内核为 **Rust**：`crypto/src/main/rust/` 经 cargo-ndk 从源码交叉编译 4 ABI，秘密缓冲 `zeroize` 确定性擦除，BouncyCastle 保留兜底，宿主侧实测快于 BC 2.2~5.4×）；AES-KDF 原生加速仍为远期性能优化项。
 2. **kdbx 版本兼容**：读取时按文件头双签名嗅探分派解析器，只比对主版本号（`0xFFFF0000` 掩码），次版本号递增自动兼容（参考 KeePassDX）。
 3. **已解锁数据库的所有权**：app 层持有单例 `DatabaseSession`（进程内），生物识别解锁、自动填充、通行密钥认证先与主进程同进程访问；确有需要（如 autofill 独立进程）再调整。
 4. **同步模型**：kdbx 同步的本质是「整文件读 / 写 / 合并」。`sync` 层提供文件存储抽象（读取、事务式写、版本哈希检测）+ 本地缓存（对比 baseversion / version 哈希）；仅两端都修改时才报冲突，冲突合并下沉到 `database` 层的 KDBX merge（参考 keepass2android 的 `CachingFileStorage`）。
@@ -96,7 +96,7 @@ app/                 # 应用壳：导航、入口、Hilt、平台集成
  ├── passkey/        # 通行密钥认证接入（app 内部包）
  └── di/             # 依赖注入
 core/                # 共享基础层：领域模型、工具
-crypto/              # 加密层：分组加密、KDF、KDBX 块流；含 NDK 原生 Argon2（src/main/cpp/）
+crypto/              # 加密层：分组加密、KDF、KDBX 块流；含原生 Argon2（src/main/rust/，Rust + cargo-ndk 交叉编译）
 database/            # 数据库层：kdbx 解析、条目/分组模型、搜索、合并、通行密钥凭据存储
 sync/                # 同步层：文件存储抽象 + WebDAV / S3 兼容实现
 ```

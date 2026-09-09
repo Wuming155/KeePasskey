@@ -9,8 +9,9 @@ import org.bouncycastle.crypto.params.Argon2Parameters
 /**
  * Argon2 (Argon2d / Argon2id) 密钥派生引擎（KDBX 4 现代化标准 KDF）
  *
- * TASK-50 性能整改：优先走自维护原生 JNI 实现 `NativeArgon2`（PHC 官方参考实现，
- * 对齐 KeePassDX 的 native libargon2 架构，速度远快于 BouncyCastle 纯 Java 实现）；
+ * TASK-50 性能整改：优先走自维护原生 JNI 实现 `NativeArgon2`（ISSUE-P2-14 起为 **Rust 内核**：
+ * RustCrypto `argon2` + `zeroize` 确定性擦除，对齐 KeePassDX 的 native libargon2 架构；
+ * Batch 4 宿主侧实测较 BouncyCastle 快 2.2~5.4 倍，p=4 多核收益约 3×）；
  * JVM 实现仅作兜底——
  * 1. 桌面 JVM（单元测试）无法加载 Android .so 时；
  * 2. Argon2 版本非 0x10/0x13 时；

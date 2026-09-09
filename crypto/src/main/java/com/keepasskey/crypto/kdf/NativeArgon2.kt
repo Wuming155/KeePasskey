@@ -5,9 +5,9 @@ import com.keepasskey.crypto.exception.CryptoException
 /**
  * Argon2 原生 JNI 绑定（自维护）
  *
- * 原生库 `libkeepasskey_argon2.so` 由本模块 `src/main/cpp/` 源码构建：
- * PHC 官方参考实现（CC0 / Apache-2.0，全源码入库可审计）+ 薄 JNI 透传桥
- * `keepasskey_argon2_jni.c`（仅参数搬运，零自定义密码学逻辑）。
+ * 原生库 `libkeepasskey_argon2.so` 由本模块 `src/main/rust/` 源码构建（ISSUE-P2-14 Rust 秘密飞地）：
+ * RustCrypto `argon2` + `zeroize`，经 cargo-ndk 从源码交叉编译 4 ABI（零二进制信任根）；
+ * password/salt/secret/AD/派生输出全路径 RAII 确定性擦除，panic 经 `catch_unwind` 归一为返回 null。
  *
  * 仅在 Android 运行时可用；桌面 JVM（单元测试）加载失败自动降级 BouncyCastle。
  */
