@@ -16,7 +16,13 @@ data class SyncNetworkOptions(
     val readTimeoutMs: Long = DEFAULT_READ_TIMEOUT_MS,
     val writeTimeoutMs: Long = DEFAULT_WRITE_TIMEOUT_MS,
     // TASK-42 整改（P2-12）：全局调用超时（含 DNS），兜底封顶弱网悬挂
-    val callTimeoutMs: Long = DEFAULT_CALL_TIMEOUT_MS
+    val callTimeoutMs: Long = DEFAULT_CALL_TIMEOUT_MS,
+    /**
+     * ISSUE-P1-05（ZT-05）SSRF 防护显式白名单豁免（默认空 = 不豁免任何主机）。
+     * 命中的主机跳过构造期字面 IP/保留名校验与连接期 [SsrfGuardDns] 解析网段校验，
+     * 供确需直连特定主机的场景经上层显式、可审计地放行；生产默认恒为空。
+     */
+    val ssrfAllowedHosts: Set<String> = emptySet()
 ) {
     companion object {
         const val DEFAULT_CONNECT_TIMEOUT_MS = 10_000L

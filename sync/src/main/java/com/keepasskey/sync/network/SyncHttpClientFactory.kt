@@ -1,6 +1,7 @@
 package com.keepasskey.sync.network
 
 import okhttp3.ConnectionSpec
+import okhttp3.Dns
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
 
@@ -15,6 +16,9 @@ import java.util.concurrent.TimeUnit
  * 3. **系统默认 CA 链为唯一信任源（Wave 14）**：证书固定已整体移除——SPKI 锁定会阻碍云厂商常规
  *    证书轮换导致连接阻断；本应用仅面向正规公网商业云服务，证书验证完全依赖系统默认 CA 链，
  *    不注入任何自定义 TrustManager 或 CertificatePinner。
+ * 4. **SSRF 防护 DNS（ISSUE-P1-05 / ZT-05）**：装配 [SsrfGuardDns] 于连接期拦截主机名解析结果，
+ *    任一解析地址落入内网/保留网段（环回、链路本地含 169.254 云元数据、RFC1918、ULA 等）即整体拒绝，
+ *    同时抵御 DNS 重绑定。仅生产客户端经本工厂构建时生效；测试/本地联调经注入自定义客户端旁路。
  */
 object SyncHttpClientFactory {
 
@@ -27,6 +31,8 @@ object SyncHttpClientFactory {
     fun createSyncClient(options: SyncNetworkOptions = SyncNetworkOptions()): OkHttpClient {
         return OkHttpClient.Builder()
             .connectionSpecs(TLS_CONNECTION_SPECS)
+            // ISSUE-P1-05（ZT-05）：连接期 SSRF 防护——解析到内网/保留网段即拒绝，抵御 DNS 重绑定
+            .dns(SsrfGuardDns(Dns.SYSTEM, options.ssrfAllowedHosts))
             .connectTimeout(options.connectTimeoutMs, TimeUnit.MILLISECONDS)
             .readTimeout(options.readTimeoutMs, TimeUnit.MILLISECONDS)
             .writeTimeout(options.writeTimeoutMs, TimeUnit.MILLISECONDS)

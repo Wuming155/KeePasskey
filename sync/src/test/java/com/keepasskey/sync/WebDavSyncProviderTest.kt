@@ -345,4 +345,37 @@ class WebDavSyncProviderTest {
         )
         assertNotNull(noSchemeProvider)
     }
+
+    // ===== ISSUE-P1-05（ZT-05）：SSRF 端点内网/注入防线 =====
+
+    @Test
+    fun `生产路径内网与云元数据 IP 端点在构造期被拒`() {
+        listOf(
+            "https://169.254.169.254/remote.php/webdav",
+            "https://192.168.1.10/dav",
+            "https://127.0.0.1/dav",
+            "https://localhost/dav"
+        ).forEach { url ->
+            val ex = runCatching {
+                WebDavSyncProvider(
+                    serverUrl = url,
+                    username = "admin",
+                    passwordChars = "pass123".toCharArray()
+                )
+            }.exceptionOrNull()
+            assertTrue("内网/元数据端点 \"$url\" 必须被拒（SSRF）", ex is SyncException.InvalidEndpointError)
+        }
+    }
+
+    @Test
+    fun `生产路径 userinfo 注入端点在构造期被拒`() {
+        val ex = runCatching {
+            WebDavSyncProvider(
+                serverUrl = "https://good.com@evil.com/dav",
+                username = "admin",
+                passwordChars = "pass123".toCharArray()
+            )
+        }.exceptionOrNull()
+        assertTrue("userinfo（@）注入端点必须被拒", ex is SyncException.InvalidEndpointError)
+    }
 }

@@ -17,7 +17,7 @@
 
 ---
 
-## P1 高危与核心功能问题（8 项）
+## P1 高危与核心功能问题（7 项）
 
 ### ISSUE-P1-03 (P1-8 残余): KDBX Meta 与 Group 回收站保留桶机制补齐
 - **优先级**：P1（数据完整性）
@@ -51,23 +51,6 @@
   1. 引入持久化失败计数与渐进延迟/锁定（阈值可配，默认不超过 5 次后启用退避）；
   2. 失败路径无条件清零 `passwordChars`（`finally` 判据不再依赖 `isLoading`）；
   3. 单测覆盖计数累加、锁定触发与清零。
-
----
-
-### ISSUE-P1-05 (ZT-05): 同步端点 SSRF 与 S3 bucket 名 host 注入
-- **优先级**：P1（网络最小权限 / 输入验证）
-- **分类**：网络安全 / SSRF
-- **背景与现象**：
-  1. WebDAV（`WebDavSyncProvider.kt:63-71`）与 S3（`S3SyncProvider.kt:80-88`）端点**仅校验 scheme 为 https**，全 `main` 源码 `169.254|InetAddress|isLoopback|isSiteLocalAddress` 零命中 → 用户可控 URL 可直连内网段与云元数据端点（`https://169.254.169.254/...`）；
-  2. S3 virtual-hosted 分支 `S3SyncProvider.kt:134` 将未校验的 `bucketName` 直接拼进 authority：`"$scheme://$bucketName.$host/$cleanKey"`。注入 `x@evil.com/`、`x#`、`x?` 即可改写目标主机，且 `signV4()` 的 canonicalHeaders 取自被注入后的 host，**签名仍自洽** → 向攻击者主机投递对其有效的 SigV4 签名；亦可转为 SSRF。
-- **整改依据**：CWE-918 SSRF；AWS S3 桶命名规范（`[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]`）。
-- **涉及核心文件**：
-  - `sync/src/main/java/com/keepasskey/sync/s3/S3SyncProvider.kt`
-  - `sync/src/main/java/com/keepasskey/sync/webdav/WebDavSyncProvider.kt`
-- **验收标准**：
-  1. `bucketName` 严格按 S3 命名正则校验，非法即拒绝；
-  2. 端点解析后拒绝 loopback / link-local / site-local / 保留网段（可显式白名单豁免）；
-  3. 单测覆盖 `x@evil.com`、`x#`、内网 IP 三类注入被拒。
 
 ---
 

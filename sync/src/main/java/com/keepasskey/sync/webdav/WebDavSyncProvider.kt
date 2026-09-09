@@ -4,6 +4,7 @@ import android.util.Log
 import com.keepasskey.sync.model.RemoteFileMetadata
 import com.keepasskey.sync.model.SyncException
 import com.keepasskey.sync.model.cleanEtag
+import com.keepasskey.sync.network.SyncEndpointGuard
 import com.keepasskey.sync.network.SyncHttpClientFactory
 import com.keepasskey.sync.network.SyncNetworkOptions
 import com.keepasskey.sync.provider.SyncProvider
@@ -68,6 +69,10 @@ class WebDavSyncProvider(
                         "明文 HTTP 已被禁止以保护凭据与密码库传输，请填写 https:// 开头的商业云服务地址"
                 )
             }
+            // ISSUE-P1-05（ZT-05）SSRF 构造期防线：拒绝 userinfo 注入、本地/内网保留名与
+            // 字面 IP 的内网/保留网段（含 169.254.169.254 云元数据端点）；主机名的解析后
+            // 网段校验由连接期 SsrfGuardDns 承担。仅测试回环（注入客户端）豁免
+            SyncEndpointGuard.validateEndpointHost(serverUrl, networkOptions.ssrfAllowedHosts)
         }
         authHeader = buildBasicAuthHeader(username, passwordChars)
         passwordChars.fill('0')

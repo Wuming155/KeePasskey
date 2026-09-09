@@ -235,6 +235,21 @@
     6. 手动确认降级文案向用户明示「未执行用户验证 (UV=0)」并提示仅在可信设备继续（`passkey_assert/create_manual_hint` 等 7 条新字符串），杜绝「看似已验证」的误导。
   - **测试证据**：新增 `app/src/test/java/com/keepasskey/app/passkey/PasskeyAuthFlagsTest.kt` 7 例，锁定两条验收分支——「无生物（手动确认通过）→ 断言 / 注册 UV=0」与「生物识别 / 锁屏凭据二次确认通过 → UV=1」，并覆盖未验证 / 失败 / 取消两路径全 fail-closed 及注册 AT 位独立。全量回归 **539 例：527 通过 / 0 失败 / 12 跳过**（app 172 → 179）。
 
+- **ZT-05（ISSUE-P1-05，同步端点 SSRF 与 S3 bucket 名 host 注入）**：已修复（2026-09-09）。
+  - **缺陷**：
+    1. **SSRF（CWE-918）**：WebDAV（`WebDavSyncProvider` init）与 S3（`S3SyncProvider` init）端点此前**仅校验 scheme 为 https**，全 `main` 源码 `169.254|InetAddress|isLoopback|isSiteLocalAddress` 零命中 → 用户可控 URL 可直连内网段与云元数据端点（`https://169.254.169.254/`、`https://192.168.x.x/`、`https://localhost/`），或填入解析到内网 IP 的域名，诱导设备向内部网络发起携带凭据的请求；
+    2. **S3 bucket 名 host 注入**：virtual-hosted 分支 `buildUrl` 将未校验的 `bucketName` 直接拼进 authority（`"$scheme://$bucketName.$host/$cleanKey"`）。注入 `x@evil.com/`（userinfo 改写真实主机为 evil.com）、`x#`（fragment 截断 authority）、`x?` 即可改写目标主机，且 `signV4()` 的 canonicalHeaders 取自被注入后的 host，**签名仍自洽** → 向攻击者主机投递对其有效的 SigV4 签名，亦可转为 SSRF。
+  - **整改依据**：CWE-918 SSRF；AWS S3 桶命名规范；Google Android 开发者文档 `unsafe-uri-loading`（scheme + host 全量校验、拒绝 userinfo 注入、阻断 loopback/link-local/site-local 私有网段）。
+  - **整改**：
+    1. 新增单一防线 `sync/src/main/java/com/keepasskey/sync/network/SyncEndpointGuard.kt`，两层 fail-closed：
+       - **构造期（纯字符串 / 字面 IP 校验，零网络阻塞）**：`validateBucketName` 按 AWS S3 命名正则 `^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$` 严格校验桶名（天然排除 `@ / # ? :` 等 authority 分隔符），并追加拒绝相邻点号、IP 地址格式桶名与 `xn--` / `sthree-` / `-s3alias` / `--ol-s3` 保留前后缀；`validateEndpointHost` 以 **OkHttp `HttpUrl`（与实际连接同源解析器，杜绝校验/连接解析差异）** 解析端点，拒绝 userinfo（`@`）注入、`localhost` / `.local` / `.internal` 等本地内网保留名，以及字面 IP 的内网/保留网段；
+       - **连接期（DNS 解析后校验）**：`SsrfGuardDns` 包装系统 DNS，对主机名解析结果逐一判定，**任一地址落入内网/保留网段即整体拒绝**（不做「过滤后放行」，杜绝「公网 IP + 内网 IP」混合应答的 DNS 重绑定绕过）；校验用解析结果即喂给实际连接，故对重绑定同样有效；
+       - `isBlockedAddress` 覆盖 IPv4 与 IPv6：环回 / 任意本地 / 链路本地（含 169.254 云元数据）/ 站点本地（RFC1918）/ 组播，补充 CGNAT `100.64/10`、TEST-NET、`198.18/15`、`240/4`、IPv6 ULA `fc00::/7` 与 IPv4-mapped `::ffff:0:0/96`（递归抽取内嵌 IPv4 判定，杜绝映射地址绕过）；
+    2. `S3SyncProvider` init：**恒常**校验桶名（注入面与是否回环无关），生产路径（`client == null`）追加端点主机 SSRF 校验；`WebDavSyncProvider` init 生产路径追加同款端点校验；两者沿用既有「注入客户端旁路生产校验」约定，MockWebServer 回环与本地联调测试不受影响；
+    3. `SyncHttpClientFactory.createSyncClient` 装配 `SsrfGuardDns(Dns.SYSTEM, options.ssrfAllowedHosts)`，使全部生产同步客户端连接期恒受 SSRF 防护；
+    4. `SyncNetworkOptions` 新增 `ssrfAllowedHosts: Set<String> = emptySet()`——显式、可审计的白名单豁免通道（默认空 = 不豁免），满足「可显式白名单豁免」验收项，生产默认恒为空。
+  - **测试证据**：新增 `sync/src/test/java/com/keepasskey/sync/network/SyncEndpointGuardTest.kt` 16 例（桶名注入 `x@evil.com` / `x#` / `x?` / IP 格式 / 非法与合法桶名；端点内网与云元数据字面 IP / 本地内网保留名 / userinfo 注入 / 公网放行 / 白名单豁免；`isBlockedAddress` IPv4+IPv6 网段判定；`SsrfGuardDns` 拒绝纯内网、拒绝公私混合重绑定、放行公网、白名单豁免），并在 `S3SyncProviderTest`（+3）与 `WebDavSyncProviderTest`（+2）补齐 Provider 构造期注入被拒回归锁——三类注入（`x@evil.com`、`x#`、内网 IP）均按验收标准 fail-closed 抛 `InvalidEndpointError`。全量回归 **566 例：554 通过 / 0 失败 / 12 跳过**（sync 121 → 142）。
+
 ### 2.6 凭据提供者端到端契约（P1-01）
 
 > 来源：2026-09-09 Android 16+ 真机实测回归（系统设置内已可勾选启用 KeePasskey，但第三方应用调起后握手/响应失败）。

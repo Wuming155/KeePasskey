@@ -442,4 +442,54 @@ class S3SyncProviderTest {
         assertTrue("偏斜无 Date 头须按原路径上浮鉴权错误", result.exceptionOrNull() is SyncException.AuthenticationError)
         assertEquals("无有效 Date 头不得盲目重试", 1, server.requestCount)
     }
+
+    // ===== ISSUE-P1-05（ZT-05）：SSRF 与 S3 桶名主机注入防线 =====
+
+    @Test
+    fun `生产路径桶名注入 x at evil dot com 在构造期被拒`() {
+        // `x@evil.com/` 拼进 virtual-host authority 后，真实主机被改写为 evil.com（userinfo 注入），
+        // 且 SigV4 canonicalHeaders 取自被注入后的 host → 签名对攻击者主机自洽
+        val ex = runCatching {
+            S3SyncProvider(
+                endpoint = "https://s3.amazonaws.com",
+                bucketName = "x@evil.com/",
+                accessKeyId = "TESTKEY",
+                secretAccessKey = "TESTSECRET"
+            )
+        }.exceptionOrNull()
+        assertTrue("桶名 @ / 注入必须被拒", ex is SyncException.InvalidEndpointError)
+    }
+
+    @Test
+    fun `生产路径桶名注入 x 井号 在构造期被拒`() {
+        val ex = runCatching {
+            S3SyncProvider(
+                endpoint = "https://s3.amazonaws.com",
+                bucketName = "x#",
+                accessKeyId = "TESTKEY",
+                secretAccessKey = "TESTSECRET"
+            )
+        }.exceptionOrNull()
+        assertTrue("桶名 # 注入必须被拒", ex is SyncException.InvalidEndpointError)
+    }
+
+    @Test
+    fun `生产路径内网与云元数据 IP 端点在构造期被拒`() {
+        // 用户可控端点直连云元数据服务（169.254.169.254）与内网段属 SSRF，构造期即 fail-closed
+        listOf(
+            "https://169.254.169.254",
+            "https://192.168.1.10",
+            "https://127.0.0.1"
+        ).forEach { endpoint ->
+            val ex = runCatching {
+                S3SyncProvider(
+                    endpoint = endpoint,
+                    bucketName = "test-bucket",
+                    accessKeyId = "TESTKEY",
+                    secretAccessKey = "TESTSECRET"
+                )
+            }.exceptionOrNull()
+            assertTrue("内网/元数据端点 \"$endpoint\" 必须被拒", ex is SyncException.InvalidEndpointError)
+        }
+    }
 }
