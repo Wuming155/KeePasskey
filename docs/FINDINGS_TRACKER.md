@@ -70,7 +70,7 @@
 | **P2-23** | QuickUnlock PIN 以 String 进 UiState | ➖ 不适用 | 自研 PIN 体系已在 Wave 13 整体彻底删除，PIN 相关属性已被清理 | 否（不适用） | 自研 PIN 体系已删除 |
 | **P2-24** | Autofill Dataset 在已解锁分支未设 setAuthentication | ✅ 已修复（2026-09-07） | `KeePasskeyAutofillService.kt` 已解锁分支每个数据集挂 `setAuthentication` → 新增 `AutofillConfirmActivity` 二次确认（生物识别/锁屏凭据优先，受保护窗口手动确认兜底） | 低-中（加固） | 认证数据集独立 requestCode；Activity 带 FLAG_SECURE + setHideOverlayWindows(true)；RESULT_OK 后框架才写入凭据值 |
 | **P2-25** | 生物凭据封印失败被静默吞掉（catch ignored） | ✅ 已修复 | `UnlockViewModel.kt:301` 捕获异常并记录 `debugLog.warn`，显式提示用户 | 否（已修复） | 已显式提示 |
-| **P2-26** | 数据库列表元数据硬编码假值与占位库 | ❌ 未修复 | `RealVaultRepository.kt:80` 仍使用占位数据与静态描述文案 | 低 | 无 kdbx 文件时回退占位 `default_vault` 作「引导创建首个库」可接受，优先级低；**已登记 STATUS TASK-48**（保留引导则须在 UI 显式区分占位项与真实库） |
+| **P2-26** | 数据库列表元数据硬编码假值与占位库 | ✅ 已修复 | `RealVaultRepository.kt` 彻底移除合成 default_vault，DatabasePickerScreen 接入系统 SAF 真实选库 | 低 | 无 kdbx 文件时如实返回空列表并呈现开箱引导，打开/新建密码库真实接入系统 SAF 文件选择器（**TASK-48**） |
 | **P2-27** | 条目密码强度恒为硬编码 112 bit | ✅ 已修复（2026-09-08，TASK-32） | `UiVaultEntry.strengthBits` 改为 `Int?`（默认 null，显式标注「未计算」）；`EntryDetailViewModel` 揭示密码时接真实熵估算 | 中 | 不再恒显误导值 |
 | **P2-28** | 健康检查"已泄露密码"恒 0 | ✅ 已修复（2026-09-08，TASK-47） | 路线 A（接入）落地：`BreachCheckCoordinator`/`HibpRangeClient`（HIBP k-匿名范围查询，仅上送密码 SHA-1 前 5 位）；`compromisedPasswordCount` 改可空（未启用/失败为 null，不回填 0），失败转 `BreachCheckStatus.FAILED` 如实上浮；检测由 `ExtendedSettings.breachCheckEnabled` 显式开关门控（默认关闭，关闭态零外联） | 低（需外部服务） | 假指标消除：未检测、失败与「已比对安全」三种语义分离；回归 20 例（MockWebServer 前缀查询 / 关闭态零请求断言 / 失败上浮 / 前缀去重） |
 | **P2-29** | 密钥文件 SAF 读取在主线程完成 | ✅ 已修复（2026-09-08，TASK-39） | `UnlockScreen` SAF 回调整体重构：1 MiB 流式读取与 DISPLAY_NAME 游标查询经 `withContext(Dispatchers.IO)` 移出主线程，结果折叠回主线程分发 | 中 | 大文件不再 ANR |

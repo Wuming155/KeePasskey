@@ -75,6 +75,11 @@
     <string name="unlock_switch_vault">切换密码库</string>
     <string name="unlock_status_local">本地已加密存储 • 关联 WebDAV 云端备份</string>
     <string name="unlock_biometric_primary_btn">使用生物识别 / 锁屏凭据解锁</string>
+    <string name="unlock_empty_vault_title">欢迎使用 KeePasskey</string>
+    <string name="unlock_empty_vault_subtitle">尚未选择或创建密码库，请从下方选择开始方式：</string>
+    <string name="unlock_empty_create_btn">新建密码库</string>
+    <string name="unlock_empty_open_btn">打开已有密码库 (.kdbx)</string>
+    <string name="unlock_empty_manage_btn">前往密码库管理</string>
 
     <!-- 密码库管理器 / 选择器 -->
     <string name="db_picker_title">密码库管理</string>

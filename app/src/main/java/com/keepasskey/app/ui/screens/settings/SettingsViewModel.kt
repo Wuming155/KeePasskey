@@ -104,8 +104,8 @@ class SettingsViewModel @Inject constructor(
 
     private val databaseConfigStateFlow = MutableStateFlow(
         DatabaseConfigUiState(
-            databaseName = "master_vault.kdbx",
-            defaultUsername = "user@keepasskey.com",
+            databaseName = "",
+            defaultUsername = "",
             encryptionAlgorithm = "ChaCha20-Poly1305 (256-bit)",
             kdfAlgorithm = "Argon2id",
             argon2Iterations = 3L,
@@ -300,6 +300,18 @@ class SettingsViewModel @Inject constructor(
         // 离线开关联动：冷启动时把默认/持久化的离线偏好传导至同步协调器
         syncCoordinator.setOfflineMode(extendedSettingsFlow.value.useOfflineCache)
         checkAndTriggerColdStartSync()
+
+        // 动态订阅活动数据库，更新设置页数据库名称
+        viewModelScope.launch {
+            vaultRepository.getDatabases().collect { databases ->
+                val active = databases.firstOrNull { it.isActive } ?: databases.firstOrNull()
+                databaseConfigStateFlow.update {
+                    it.copy(
+                        databaseName = active?.name.orEmpty()
+                    )
+                }
+            }
+        }
     }
 
     private fun checkAndTriggerColdStartSync() {

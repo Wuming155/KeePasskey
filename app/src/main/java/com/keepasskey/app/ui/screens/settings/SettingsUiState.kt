@@ -91,7 +91,7 @@ data class SettingsUiState(
     val s3Bucket: String = "",
     val s3Region: String = "auto",
     val s3AccessKey: String = "",
-    val s3ObjectKey: String = "passwords/master_vault.kdbx",
+    val s3ObjectKey: String = "keepasskey.kdbx",
     val s3UsePathStyle: Boolean = false,
     // 通用同步状态（H1 整改：默认值不再写死演示时间戳/假状态文案，由真实同步结果填充；
     // P3-23：syncLastTime 空串占位，真实值由 SettingsViewModel 经 strings.get(sync_last_time_never) 填充）

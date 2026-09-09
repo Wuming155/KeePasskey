@@ -1,6 +1,9 @@
 package com.keepasskey.app.data.repository
 
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.provider.OpenableColumns
 import com.keepasskey.app.R
 import com.keepasskey.app.passkey.DomainMatcher
 import com.keepasskey.app.ui.model.UiVaultEntry
@@ -28,7 +31,11 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import org.json.JSONObject
 import java.io.File
+import java.io.IOException
+import java.io.InputStream
 import java.time.Instant
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -70,65 +77,176 @@ class RealVaultRepository @Inject constructor(
         }
     }
 
+    private data class KnownDatabaseEntry(
+        val id: String,
+        val name: String,
+        val path: String,
+        val isRemote: Boolean,
+        val syncType: String,
+        val lastOpenedAt: String
+    )
+
+    private fun loadKnownDatabases(): List<KnownDatabaseEntry> {
+        return try {
+            val sp = context.getSharedPreferences("keepasskey_vault_meta", Context.MODE_PRIVATE) ?: return emptyList()
+            val raw = sp.getString("known_databases_v1", null) ?: return emptyList()
+            if (raw.isBlank()) return emptyList()
+            raw.split("\u0002").filter { it.isNotBlank() }.mapNotNull { record ->
+                val fields = record.split("\u0001")
+                if (fields.size >= 6) {
+                    KnownDatabaseEntry(
+                        id = fields[0],
+                        name = fields[1],
+                        path = fields[2],
+                        isRemote = fields[3].toBoolean(),
+                        syncType = fields[4],
+                        lastOpenedAt = fields[5]
+                    )
+                } else null
+            }
+        } catch (_: Throwable) {
+            emptyList()
+        }
+    }
+
+    private fun saveKnownDatabases(entries: List<KnownDatabaseEntry>) {
+        try {
+            val sp = context.getSharedPreferences("keepasskey_vault_meta", Context.MODE_PRIVATE) ?: return
+            val encoded = entries.joinToString("\u0002") { entry ->
+                listOf(
+                    entry.id,
+                    entry.name,
+                    entry.path,
+                    entry.isRemote.toString(),
+                    entry.syncType,
+                    entry.lastOpenedAt
+                ).joinToString("\u0001")
+            }
+            sp.edit().putString("known_databases_v1", encoded).apply()
+        } catch (_: Throwable) {
+        }
+    }
+
+    private fun loadActiveDbId(): String? {
+        return try {
+            context.getSharedPreferences("keepasskey_vault_meta", Context.MODE_PRIVATE)
+                ?.getString("active_database_id", null)
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
+    private fun saveActiveDbId(id: String?) {
+        try {
+            val sp = context.getSharedPreferences("keepasskey_vault_meta", Context.MODE_PRIVATE) ?: return
+            if (id == null) {
+                sp.edit().remove("active_database_id").apply()
+            } else {
+                sp.edit().putString("active_database_id", id).apply()
+            }
+        } catch (_: Throwable) {
+        }
+    }
+
     private suspend fun refreshDatabases() {
-        val filesDir = context.filesDir ?: return
+        val filesDir = context.filesDir
         val kdbxFiles = withContext(Dispatchers.IO) {
-            filesDir.listFiles { file ->
+            filesDir?.listFiles { file ->
                 file.extension.equals("kdbx", ignoreCase = true)
             } ?: emptyArray()
         }
 
-        val currentActivePath = databaseSession.currentFile?.absolutePath
-
-        val list = if (kdbxFiles.isEmpty()) {
-            // 如果本地尚无 kdbx 文件，提供一个占位默认库描述供 UI 引导
-            // （name 为潜在建库文件名，属持久化数据，保持常量不本地化）
-            listOf(
-                VaultDatabaseInfo(
-                    id = "default_vault",
-                    name = DEFAULT_VAULT_DISPLAY_NAME,
-                    path = File(filesDir, "default_vault.kdbx").absolutePath,
-                    isRemote = false,
-                    syncType = strings.get(R.string.repo_sync_type_local),
-                    lastOpenedAt = strings.get(R.string.repo_last_opened_not_created),
-                    fileSizeFormatted = "0 KB",
-                    isActive = false,
-                    encryptionPreset = "AES-256 + Argon2id"
-                )
+        val internalEntries = kdbxFiles.map { file ->
+            val sizeKb = (file.length() / 1024).coerceAtLeast(1)
+            VaultDatabaseInfo(
+                id = file.name,
+                name = file.name,
+                path = file.absolutePath,
+                isRemote = false,
+                syncType = strings.get(R.string.repo_sync_type_local_device),
+                lastOpenedAt = strings.get(R.string.repo_last_opened_ready),
+                fileSizeFormatted = "$sizeKb KB",
+                isActive = false,
+                encryptionPreset = "AES-256 + Argon2id"
             )
+        }
+
+        val knownExternal = loadKnownDatabases().map { ext ->
+            val sizeKb = if (ext.path.startsWith("content://")) {
+                withContext(Dispatchers.IO) {
+                    try {
+                        val uri = Uri.parse(ext.path)
+                        context.contentResolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)?.use { cursor ->
+                            val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
+                            if (sizeIndex >= 0 && cursor.moveToFirst()) {
+                                (cursor.getLong(sizeIndex) / 1024).coerceAtLeast(1)
+                            } else null
+                        } ?: 32L
+                    } catch (_: Throwable) {
+                        32L
+                    }
+                }
+            } else {
+                val f = File(ext.path)
+                if (f.exists()) (f.length() / 1024).coerceAtLeast(1) else 32L
+            }
+            VaultDatabaseInfo(
+                id = ext.id,
+                name = ext.name,
+                path = ext.path,
+                isRemote = ext.isRemote,
+                syncType = ext.syncType,
+                lastOpenedAt = strings.get(R.string.repo_last_opened_ready),
+                fileSizeFormatted = "$sizeKb KB",
+                isActive = false,
+                encryptionPreset = "AES-256 + Argon2id"
+            )
+        }
+
+        // 合并外部库与沙盒内部库
+        val combined = (knownExternal + internalEntries).distinctBy { it.id }
+
+        val sessionActiveIdentifier = databaseSession.currentPathIdentifier ?: databaseSession.currentFile?.name
+        val storedActiveId = loadActiveDbId()
+        val effectiveActiveId = sessionActiveIdentifier ?: storedActiveId
+
+        val finalList = if (combined.isEmpty()) {
+            emptyList()
         } else {
-            kdbxFiles.map { file ->
-                val sizeKb = (file.length() / 1024).coerceAtLeast(1)
-                val isActive = file.absolutePath == currentActivePath
-                VaultDatabaseInfo(
-                    id = file.name,
-                    name = file.name,
-                    path = file.absolutePath,
-                    isRemote = false,
-                    syncType = strings.get(R.string.repo_sync_type_local_device),
-                    lastOpenedAt = if (isActive) {
+            val list = combined.map { db ->
+                val isActive = (db.id == effectiveActiveId || db.path == effectiveActiveId || db.name == effectiveActiveId)
+                db.copy(
+                    isActive = isActive,
+                    lastOpenedAt = if (isActive && databaseSession.state.value == DatabaseSession.SessionState.OPENED) {
                         strings.get(R.string.repo_last_opened_in_use)
                     } else {
                         strings.get(R.string.repo_last_opened_ready)
-                    },
-                    fileSizeFormatted = "$sizeKb KB",
-                    isActive = isActive,
-                    encryptionPreset = "AES-256 + Argon2id"
+                    }
                 )
             }
+            if (list.none { it.isActive }) {
+                list.mapIndexed { index, item ->
+                    if (index == 0) {
+                        saveActiveDbId(item.id)
+                        item.copy(isActive = true)
+                    } else item
+                }
+            } else {
+                list
+            }
         }
-        databasesFlow.value = list
+        databasesFlow.value = finalList
     }
 
     override fun getDatabases(): Flow<List<VaultDatabaseInfo>> = databasesFlow.asStateFlow()
 
     override suspend fun selectDatabase(id: String) {
-        val filesDir = context.filesDir ?: return
-        val targetFile = File(filesDir, id)
-        if (targetFile.exists()) {
-            // 选定数据库，更新激活态
-            databasesFlow.value = databasesFlow.value.map { db ->
-                db.copy(isActive = db.id == id)
+        val current = databasesFlow.value
+        val target = current.firstOrNull { it.id == id || it.path == id || it.name == id }
+        if (target != null) {
+            saveActiveDbId(target.id)
+            databasesFlow.value = current.map { db ->
+                db.copy(isActive = db.id == target.id)
             }
         }
     }
@@ -138,10 +256,6 @@ class RealVaultRepository @Inject constructor(
         keyFileData: ByteArray?,
         readOnly: Boolean
     ): com.keepasskey.core.result.KdbxResult<Unit> {
-        val filesDir = context.filesDir ?: return KdbxResult.Failure(
-            IllegalStateException("No filesDir"),
-            strings.get(R.string.repo_files_dir_unavailable)
-        )
         val activeDb = databasesFlow.value.firstOrNull { it.isActive }
             ?: databasesFlow.value.firstOrNull()
             ?: return KdbxResult.Failure(
@@ -149,30 +263,48 @@ class RealVaultRepository @Inject constructor(
                 strings.get(R.string.repo_no_active_database)
             )
 
-        val targetFile = File(activeDb.path)
-        if (!targetFile.exists()) {
-            // 修复虚假开关整改：携带密钥文件说明意图是打开既有复合密钥库，
-            // 绝不允许静默降级为「用该密码新建无密钥文件保护库」
-            if (keyFileData != null) {
-                return KdbxResult.Failure(
-                    IllegalArgumentException("数据库文件不存在: ${targetFile.absolutePath}"),
-                    strings.get(R.string.repo_file_missing_with_keyfile)
-                )
-            }
-            // 文件尚不存在时初始化创建
-            val createResult = databaseSession.create(
-                file = targetFile,
-                name = activeDb.name.removeSuffix(".kdbx"),
+        val result = if (activeDb.path.startsWith("content://")) {
+            val uri = Uri.parse(activeDb.path)
+            databaseSession.openStream(
+                pathIdentifier = activeDb.path,
+                inputStreamProvider = {
+                    context.contentResolver.openInputStream(uri)
+                        ?: throw IOException("无法打开数据库文件流: ${activeDb.name}")
+                },
+                saveWriter = { bytes ->
+                    withContext(Dispatchers.IO) {
+                        context.contentResolver.openOutputStream(uri, "rwt")?.use { os ->
+                            os.write(bytes)
+                            os.flush()
+                        } ?: throw IOException("无法写入目标数据库文件: ${activeDb.name}")
+                    }
+                },
                 passwordChars = passwordChars,
-                useArgon2 = true
+                keyFileData = keyFileData,
+                readOnly = readOnly
             )
-            refreshDatabases()
-            return createResult
+        } else {
+            val targetFile = File(activeDb.path)
+            if (!targetFile.exists()) {
+                if (keyFileData != null) {
+                    return KdbxResult.Failure(
+                        IllegalArgumentException("数据库文件不存在: ${targetFile.absolutePath}"),
+                        strings.get(R.string.repo_file_missing_with_keyfile)
+                    )
+                }
+                // 文件尚不存在时初始化创建
+                val createResult = databaseSession.create(
+                    file = targetFile,
+                    name = activeDb.name.removeSuffix(".kdbx"),
+                    passwordChars = passwordChars,
+                    useArgon2 = true
+                )
+                refreshDatabases()
+                return createResult
+            }
+            databaseSession.open(targetFile, passwordChars, keyFileData, readOnly)
         }
 
-        // 修复虚假开关整改：密钥文件字节透传至会话（复合密钥「主密码 + 密钥文件」），
-        // 成功后会话克隆缓存 keyFileCache 供后续 save() 使用，调用方持有副本负责擦除
-        val result = databaseSession.open(targetFile, passwordChars, keyFileData, readOnly)
         if (result is com.keepasskey.core.result.KdbxResult.Success) {
             refreshDatabases()
         }
@@ -218,20 +350,34 @@ class RealVaultRepository @Inject constructor(
             passwordChars = masterPassword,
             useArgon2 = useArgon2
         )
+        if (result is KdbxResult.Success) {
+            selectDatabase(fileName)
+        }
         refreshDatabases()
         return result
     }
 
     override suspend fun removeDatabase(id: String): KdbxResult<Unit> {
-        val filesDir = context.filesDir
-            ?: return KdbxResult.Failure(IllegalStateException("No filesDir"), strings.get(R.string.repo_files_dir_unavailable))
-        val targetFile = File(filesDir, id)
         return try {
-            if (targetFile.exists()) {
-                targetFile.delete()
+            val known = loadKnownDatabases()
+            val matchExternal = known.find { it.id == id || it.path == id || it.name == id }
+            if (matchExternal != null) {
+                saveKnownDatabases(known.filter { it.id != matchExternal.id && it.path != matchExternal.path })
             }
-            if (databaseSession.currentFile?.name == id) {
+
+            val filesDir = context.filesDir
+            if (filesDir != null) {
+                val targetFile = File(filesDir, id)
+                if (targetFile.exists()) {
+                    targetFile.delete()
+                }
+            }
+
+            if (databaseSession.currentFile?.name == id || databaseSession.currentPathIdentifier == id) {
                 databaseSession.close()
+            }
+            if (loadActiveDbId() == id) {
+                saveActiveDbId(null)
             }
             refreshDatabases()
             KdbxResult.Success(Unit)
@@ -245,14 +391,30 @@ class RealVaultRepository @Inject constructor(
         path: String,
         syncType: String
     ): KdbxResult<Unit> = withContext(Dispatchers.IO) {
-        val externalFile = File(path)
-        val filesDir = context.filesDir
-            ?: return@withContext KdbxResult.Failure(IllegalStateException("No filesDir"), strings.get(R.string.repo_files_dir_unavailable))
-        val destFile = File(filesDir, externalFile.name)
         try {
-            if (externalFile.exists() && externalFile.absolutePath != destFile.absolutePath) {
-                externalFile.copyTo(destFile, overwrite = true)
+            if (path.startsWith("content://")) {
+                val uri = Uri.parse(path)
+                try {
+                    context.contentResolver.takePersistableUriPermission(
+                        uri,
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                    )
+                } catch (_: Throwable) {
+                    // 部分外部 Provider 不支持持久化授权，容错继续
+                }
             }
+            val sanitizedName = if (name.endsWith(".kdbx", ignoreCase = true)) name else "$name.kdbx"
+            val entry = KnownDatabaseEntry(
+                id = path,
+                name = sanitizedName,
+                path = path,
+                isRemote = syncType != "本地设备存储" && syncType != "系统文件选择器",
+                syncType = syncType,
+                lastOpenedAt = ""
+            )
+            val updated = loadKnownDatabases().filter { it.path != path && it.id != entry.id } + entry
+            saveKnownDatabases(updated)
+            saveActiveDbId(entry.id)
             refreshDatabases()
             KdbxResult.Success(Unit)
         } catch (t: Throwable) {

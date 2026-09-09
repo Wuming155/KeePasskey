@@ -24,9 +24,11 @@ import java.util.Arrays
  * 阶段 1 内存实现，提供群组文件夹、凭据、多数据库管理与回收站的假数据和响应式状态更新。
  * 仅供 JVM 单元测试使用，禁止迁回生产 main source set 或绑定生产 DI。
  */
-class FakeVaultRepository() : VaultRepository {
+class FakeVaultRepository(
+    initialDatabases: List<VaultDatabaseInfo> = initialMockDatabases
+) : VaultRepository {
 
-    private val databasesFlow = MutableStateFlow(initialMockDatabases)
+    private val databasesFlow = MutableStateFlow(initialDatabases)
     private val groupsFlow = MutableStateFlow(initialMockGroups)
     private val entriesFlow = MutableStateFlow(initialMockEntries)
 

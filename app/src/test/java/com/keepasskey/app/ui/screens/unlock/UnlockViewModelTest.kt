@@ -145,4 +145,17 @@ class UnlockViewModelTest {
         testScheduler.runCurrent()
         assertTrue(viewModel.uiState.value.isPasswordVisible)
     }
+
+    @Test
+    fun `无活动数据库时hasDatabase为false`() = runTest {
+        val emptyRepo = FakeVaultRepository(initialDatabases = emptyList())
+        val viewModel = UnlockViewModel(emptyRepo, FakeSettingsRepository(), null, null, com.keepasskey.app.data.logger.DebugLogBuffer())
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            viewModel.uiState.collect {}
+        }
+        testScheduler.runCurrent()
+
+        assertFalse("无数据库时 hasDatabase 必须为 false", viewModel.uiState.value.hasDatabase)
+        assertEquals("", viewModel.uiState.value.databaseName)
+    }
 }

@@ -31,6 +31,10 @@
     <string name="picker_keyfile_generate_desc">创建密码库时将自动生成一份 256-bit 高熵随机 .key 密钥文件并保存至安全存储。</string>
     <string name="picker_keyfile_path_label">已有密钥文件路径</string>
     <string name="picker_keyfile_pick">从设备选取已有密钥</string>
+    <string name="picker_empty_databases">当前暂无密码库，请点击上方按钮新建或打开</string>
+    <string name="picker_file_selected">已选择文件：%1$s</string>
+    <string name="picker_file_not_selected">尚未选择文件，请点击按钮选择</string>
+    <string name="picker_file_read_error">读取选定文件失败，请检查文件权限后重试</string>
     <!-- OpenVaultSourceType 各来源说明（label 为落库 syncType 标签，不资源化） -->
     <string name="picker_source_local_desc">通过系统文件选择器打开设备存储或 SD 卡中的 .kdbx 文件</string>
     <string name="picker_source_webdav_desc">从 Nextcloud / 坚果云 / 群晖 NAS / ownCloud 导入</string>

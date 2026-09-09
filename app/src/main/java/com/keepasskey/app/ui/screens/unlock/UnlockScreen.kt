@@ -153,6 +153,14 @@ fun UnlockScreen(
         }
     }
 
+    val kdbxImportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        val displayName = queryKeyFileDisplayName(context, uri)
+        viewModel.importExternalDatabase(displayName, uri.toString())
+    }
+
     UnlockContent(
         uiState = uiState,
         currentTheme = currentTheme,
@@ -166,6 +174,7 @@ fun UnlockScreen(
         onUnlock = { viewModel.unlock(activity) },
         onBiometricUnlock = { viewModel.unlockWithBiometric(activity) },
         onNavigateToDatabasePicker = onNavigateToDatabasePicker,
+        onOpenExistingVault = { kdbxImportLauncher.launch(arrayOf("*/*")) },
         modifier = modifier
     )
 }
@@ -201,6 +210,7 @@ fun UnlockContent(
     onUnlock: () -> Unit,
     onBiometricUnlock: () -> Unit,
     onNavigateToDatabasePicker: () -> Unit,
+    onOpenExistingVault: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val scrollState = rememberScrollState()
@@ -261,7 +271,7 @@ fun UnlockContent(
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        imageVector = if (uiState.unlockMode == UnlockMode.QUICK_UNLOCK) Icons.Default.FlashOn else Icons.Default.Lock,
+                        imageVector = if (!uiState.hasDatabase) Icons.Default.Lock else if (uiState.unlockMode == UnlockMode.QUICK_UNLOCK) Icons.Default.FlashOn else Icons.Default.Lock,
                         contentDescription = stringResource(R.string.cd_vault_locked),
                         tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(32.dp)
@@ -271,270 +281,331 @@ fun UnlockContent(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            Text(
-                text = if (uiState.unlockMode == UnlockMode.QUICK_UNLOCK) stringResource(R.string.unlock_quick_title) else stringResource(R.string.unlock_title),
-                style = HeroTitleStyle,
-                color = MaterialTheme.colorScheme.onBackground
-            )
-
-            Spacer(modifier = Modifier.height(4.dp))
-
-            Text(
-                text = if (uiState.unlockMode == UnlockMode.QUICK_UNLOCK) stringResource(R.string.unlock_quick_subtitle) else stringResource(R.string.unlock_subtitle),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-
-            Spacer(modifier = Modifier.height(20.dp))
-
-            // 当前数据库概要条目
-            BentoCard(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(MaterialTheme.shapes.medium)
-                    .clickable { onNavigateToDatabasePicker() },
-                backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                shape = MaterialTheme.shapes.medium
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Row(
-                        modifier = Modifier.weight(1f),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.CheckCircle,
-                            contentDescription = stringResource(R.string.cd_active_database),
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Column {
-                            Text(
-                                text = uiState.databaseName,
-                                style = MaterialTheme.typography.titleMedium,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Text(
-                                text = uiState.databaseStatus,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-
-                    TextButton(onClick = onNavigateToDatabasePicker) {
-                        Icon(Icons.Default.SwapHoriz, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(stringResource(R.string.unlock_switch_vault), fontSize = 12.sp)
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // QuickUnlock 模式与完整解锁模式切换
-            if (uiState.unlockMode == UnlockMode.QUICK_UNLOCK) {
-                // QuickUnlock 卡片区域 (KP2A / KeePassDX 风格)
-                Surface(
-                    color = MaterialTheme.colorScheme.surfaceContainerLowest,
-                    shape = RoundedCornerShape(16.dp),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.8f)),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        // H1 整改：仅在拿到真实数据时展示，不再渲染写死的假硬件声明/假剩余时长
-                        if (uiState.hardwareBackedSecurity.isNotEmpty()) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.Security, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = uiState.hardwareBackedSecurity,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                            }
-                            Spacer(modifier = Modifier.height(4.dp))
-                        }
-                        Spacer(modifier = Modifier.height(16.dp))
-
-                        // Wave 12 统一快速解锁：强生物识别或设备锁屏凭据（PIN/图案/密码）经硬件密钥解封——
-                        // 认证入口由系统 BiometricPrompt 承载，不再提供自研 PIN 输入
-                        Button(
-                            onClick = onBiometricUnlock,
-                            enabled = !uiState.isLoading,
-                            shape = CapsuleShape,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(50.dp)
-                        ) {
-                            if (uiState.isLoading) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(22.dp),
-                                    color = MaterialTheme.colorScheme.onPrimary,
-                                    strokeWidth = 2.5.dp
-                                )
-                            } else {
-                                Icon(
-                                    imageVector = Icons.Default.Fingerprint,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = stringResource(R.string.unlock_biometric_primary_btn),
-                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-                                )
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(6.dp))
-
-                        TextButton(
-                            onClick = { onSwitchMode(UnlockMode.STANDARD) },
-                            modifier = Modifier.align(Alignment.CenterHorizontally)
-                        ) {
-                            Text(stringResource(R.string.unlock_switch_to_full), style = MaterialTheme.typography.labelSmall)
-                        }
-                    }
-                }
-            } else {
-                // 完整主密码输入框（SecurePasswordField：显示 String 仅存活于组件内部，CharArray 直达 ViewModel）
-                SecurePasswordField(
-                    label = stringResource(R.string.unlock_master_password),
-                    placeholder = stringResource(R.string.unlock_master_password_hint),
-                    onPasswordChanged = onPasswordChange,
-                    isError = uiState.errorMessage != null,
-                    supportingText = {
-                        uiState.errorMessage?.let { message ->
-                            Text(
-                                text = message.resolveText(),
-                                color = MaterialTheme.colorScheme.error,
-                                style = MaterialTheme.typography.bodySmall
-                            )
-                        }
-                        uiState.infoMessage?.let { message ->
-                            Text(
-                                text = message.resolveText(),
-                                color = MaterialTheme.colorScheme.primary,
-                                style = MaterialTheme.typography.bodySmall
-                            )
-                        }
-                    },
-                    isPasswordVisible = uiState.isPasswordVisible,
-                    onToggleVisibility = onTogglePasswordVisibility,
-                    onDone = onUnlock,
-                    modifier = Modifier.fillMaxWidth()
+            if (!uiState.hasDatabase) {
+                // 空状态：当前未配置或选择任何密码库
+                Text(
+                    text = stringResource(R.string.unlock_empty_vault_title),
+                    style = HeroTitleStyle,
+                    color = MaterialTheme.colorScheme.onBackground
                 )
 
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(6.dp))
 
-                // 附加密钥文件切换（修复虚假开关整改：开启即唤起真实 SAF 选择器，关闭即擦除字节）
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(MaterialTheme.shapes.medium)
-                        .clickable {
-                            if (uiState.hasKeyFile) onClearKeyFile() else onSelectKeyFile()
-                        }
-                        .padding(vertical = 8.dp, horizontal = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.AttachFile,
-                        contentDescription = stringResource(R.string.unlock_keyfile),
-                        tint = if (uiState.hasKeyFile) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = stringResource(R.string.unlock_keyfile),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        if (uiState.hasKeyFile && uiState.keyFileName.isNotBlank()) {
-                            Text(
-                                text = stringResource(R.string.unlock_keyfile_selected, uiState.keyFileName),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                    }
-                    androidx.compose.material3.Switch(
-                        checked = uiState.hasKeyFile,
-                        onCheckedChange = { checked ->
-                            if (checked) onSelectKeyFile() else onClearKeyFile()
-                        }
+                Text(
+                    text = stringResource(R.string.unlock_empty_vault_subtitle),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                )
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                uiState.errorMessage?.let { message ->
+                    Text(
+                        text = message.resolveText(),
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(bottom = 12.dp)
                     )
                 }
 
-                Spacer(modifier = Modifier.height(12.dp))
-
-                // H4-只读整改：只读打开开关（KeePassDX/KP2A 同款能力）
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(MaterialTheme.shapes.medium)
-                        .padding(vertical = 4.dp, horizontal = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = stringResource(R.string.unlock_readonly),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Text(
-                            text = stringResource(R.string.unlock_readonly_desc),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    androidx.compose.material3.Switch(
-                        checked = uiState.openReadOnly,
-                        onCheckedChange = { onToggleReadOnly() }
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // 解锁主操作按钮
                 Button(
-                    onClick = onUnlock,
-                    enabled = !uiState.isLoading,
+                    onClick = onNavigateToDatabasePicker,
                     shape = CapsuleShape,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.primary,
-                        contentColor = MaterialTheme.colorScheme.onPrimary
-                    ),
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(50.dp)
                 ) {
-                    if (uiState.isLoading) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(22.dp),
-                            color = MaterialTheme.colorScheme.onPrimary,
-                            strokeWidth = 2.5.dp
-                        )
-                    } else {
-                        Text(
-                            text = stringResource(R.string.unlock_btn_unlock),
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-                        )
+                    Icon(Icons.Default.Lock, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = stringResource(R.string.unlock_empty_create_btn),
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                androidx.compose.material3.OutlinedButton(
+                    onClick = onOpenExistingVault,
+                    shape = CapsuleShape,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp)
+                ) {
+                    Icon(Icons.Default.AttachFile, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = stringResource(R.string.unlock_empty_open_btn),
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                    )
+                }
+            } else {
+                Text(
+                    text = if (uiState.unlockMode == UnlockMode.QUICK_UNLOCK) stringResource(R.string.unlock_quick_title) else stringResource(R.string.unlock_title),
+                    style = HeroTitleStyle,
+                    color = MaterialTheme.colorScheme.onBackground
+                )
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                Text(
+                    text = if (uiState.unlockMode == UnlockMode.QUICK_UNLOCK) stringResource(R.string.unlock_quick_subtitle) else stringResource(R.string.unlock_subtitle),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                // 当前数据库概要条目
+                BentoCard(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(MaterialTheme.shapes.medium)
+                        .clickable { onNavigateToDatabasePicker() },
+                    backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                    shape = MaterialTheme.shapes.medium
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            modifier = Modifier.weight(1f),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.CheckCircle,
+                                contentDescription = stringResource(R.string.cd_active_database),
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column {
+                                Text(
+                                    text = uiState.databaseName,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = uiState.databaseStatus,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+
+                        TextButton(onClick = onNavigateToDatabasePicker) {
+                            Icon(Icons.Default.SwapHoriz, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(stringResource(R.string.unlock_switch_vault), fontSize = 12.sp)
+                        }
                     }
                 }
 
-                if (uiState.isQuickUnlockAvailable) {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    TextButton(onClick = { onSwitchMode(UnlockMode.QUICK_UNLOCK) }) {
-                        Icon(Icons.Default.FlashOn, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(stringResource(R.string.unlock_switch_back_quick), style = MaterialTheme.typography.labelSmall)
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // QuickUnlock 模式与完整解锁模式切换
+                if (uiState.unlockMode == UnlockMode.QUICK_UNLOCK) {
+                    // QuickUnlock 卡片区域 (KP2A / KeePassDX 风格)
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceContainerLowest,
+                        shape = RoundedCornerShape(16.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.8f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            // H1 整改：仅在拿到真实数据时展示，不再渲染写死的假硬件声明/假剩余时长
+                            if (uiState.hardwareBackedSecurity.isNotEmpty()) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.Security, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = uiState.hardwareBackedSecurity,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(4.dp))
+                            }
+                            Spacer(modifier = Modifier.height(16.dp))
+
+                            // Wave 12 统一快速解锁：强生物识别或设备锁屏凭据（PIN/图案/密码）经硬件密钥解封——
+                            // 认证入口由系统 BiometricPrompt 承载，不再提供自研 PIN 输入
+                            Button(
+                                onClick = onBiometricUnlock,
+                                enabled = !uiState.isLoading,
+                                shape = CapsuleShape,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(50.dp)
+                            ) {
+                                if (uiState.isLoading) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(22.dp),
+                                        color = MaterialTheme.colorScheme.onPrimary,
+                                        strokeWidth = 2.5.dp
+                                    )
+                                } else {
+                                    Icon(
+                                        imageVector = Icons.Default.Fingerprint,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = stringResource(R.string.unlock_biometric_primary_btn),
+                                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(6.dp))
+
+                            TextButton(
+                                onClick = { onSwitchMode(UnlockMode.STANDARD) },
+                                modifier = Modifier.align(Alignment.CenterHorizontally)
+                            ) {
+                                Text(stringResource(R.string.unlock_switch_to_full), style = MaterialTheme.typography.labelSmall)
+                            }
+                        }
+                    }
+                } else {
+                    // 完整主密码输入框（SecurePasswordField：显示 String 仅存活于组件内部，CharArray 直达 ViewModel）
+                    SecurePasswordField(
+                        label = stringResource(R.string.unlock_master_password),
+                        placeholder = stringResource(R.string.unlock_master_password_hint),
+                        onPasswordChanged = onPasswordChange,
+                        isError = uiState.errorMessage != null,
+                        supportingText = {
+                            uiState.errorMessage?.let { message ->
+                                Text(
+                                    text = message.resolveText(),
+                                    color = MaterialTheme.colorScheme.error,
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
+                            uiState.infoMessage?.let { message ->
+                                Text(
+                                    text = message.resolveText(),
+                                    color = MaterialTheme.colorScheme.primary,
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
+                        },
+                        isPasswordVisible = uiState.isPasswordVisible,
+                        onToggleVisibility = onTogglePasswordVisibility,
+                        onDone = onUnlock,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // 附加密钥文件切换（修复虚假开关整改：开启即唤起真实 SAF 选择器，关闭即擦除字节）
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(MaterialTheme.shapes.medium)
+                            .clickable {
+                                if (uiState.hasKeyFile) onClearKeyFile() else onSelectKeyFile()
+                            }
+                            .padding(vertical = 8.dp, horizontal = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.AttachFile,
+                            contentDescription = stringResource(R.string.unlock_keyfile),
+                            tint = if (uiState.hasKeyFile) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = stringResource(R.string.unlock_keyfile),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            if (uiState.hasKeyFile && uiState.keyFileName.isNotBlank()) {
+                                Text(
+                                    text = stringResource(R.string.unlock_keyfile_selected, uiState.keyFileName),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
+                        androidx.compose.material3.Switch(
+                            checked = uiState.hasKeyFile,
+                            onCheckedChange = { checked ->
+                                if (checked) onSelectKeyFile() else onClearKeyFile()
+                            }
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // H4-只读整改：只读打开开关（KeePassDX/KP2A 同款能力）
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(MaterialTheme.shapes.medium)
+                            .padding(vertical = 4.dp, horizontal = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = stringResource(R.string.unlock_readonly),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = stringResource(R.string.unlock_readonly_desc),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        androidx.compose.material3.Switch(
+                            checked = uiState.openReadOnly,
+                            onCheckedChange = { onToggleReadOnly() }
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // 解锁主操作按钮
+                    Button(
+                        onClick = onUnlock,
+                        enabled = !uiState.isLoading,
+                        shape = CapsuleShape,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(50.dp)
+                    ) {
+                        if (uiState.isLoading) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(22.dp),
+                                color = MaterialTheme.colorScheme.onPrimary,
+                                strokeWidth = 2.5.dp
+                            )
+                        } else {
+                            Text(
+                                text = stringResource(R.string.unlock_btn_unlock),
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                            )
+                        }
+                    }
+
+                    if (uiState.isQuickUnlockAvailable) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        TextButton(onClick = { onSwitchMode(UnlockMode.QUICK_UNLOCK) }) {
+                            Icon(Icons.Default.FlashOn, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(stringResource(R.string.unlock_switch_back_quick), style = MaterialTheme.typography.labelSmall)
+                        }
                     }
                 }
             }

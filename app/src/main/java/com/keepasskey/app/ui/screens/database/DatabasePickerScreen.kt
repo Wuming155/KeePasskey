@@ -1,5 +1,9 @@
 package com.keepasskey.app.ui.screens.database
 
+import android.net.Uri
+import android.provider.OpenableColumns
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -60,6 +64,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import com.keepasskey.app.ui.components.SecurePasswordField
@@ -206,16 +211,42 @@ fun DatabasePickerContent(
             Spacer(modifier = Modifier.height(16.dp))
 
             // 数据库卡片列表
-            LazyColumn(
-                modifier = Modifier.fillMaxWidth().weight(1f),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                items(uiState.databases, key = { it.id }) { db ->
-                    VaultDatabaseCard(
-                        database = db,
-                        onSelect = { onSelectDatabase(db.id) },
-                        onDelete = { dbToRemove = db }
-                    )
+            if (uiState.databases.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Storage,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.outlineVariant,
+                            modifier = Modifier.size(48.dp)
+                        )
+                        Text(
+                            text = stringResource(R.string.picker_empty_databases),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxWidth().weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    items(uiState.databases, key = { it.id }) { db ->
+                        VaultDatabaseCard(
+                            database = db,
+                            onSelect = { onSelectDatabase(db.id) },
+                            onDelete = { dbToRemove = db }
+                        )
+                    }
                 }
             }
         }
@@ -378,6 +409,15 @@ private fun VaultDatabaseCard(
     }
 }
 
+private fun queryDocumentDisplayName(context: android.content.Context, uri: Uri): String {
+    return runCatching {
+        context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+            val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+            if (index >= 0 && cursor.moveToFirst()) cursor.getString(index) else null
+        }
+    }.getOrNull() ?: uri.lastPathSegment.orEmpty()
+}
+
 /**
  * 打开已有 KDBX 文件对话框 (支持本地/WebDAV/S3 自动展示并填写连接配置)
  */
@@ -386,20 +426,37 @@ private fun OpenExistingVaultDialog(
     onDismiss: () -> Unit,
     onConfirm: (source: OpenVaultSourceType, name: String, path: String) -> Unit
 ) {
+    val context = LocalContext.current
     var selectedSource by remember { mutableStateOf(OpenVaultSourceType.LOCAL) }
 
-    // 本地字段
-    var localPath by remember { mutableStateOf("/storage/emulated/0/Documents/passwords.kdbx") }
-    var localName by remember { mutableStateOf("passwords.kdbx") }
+    // 本地字段（彻底去除硬编码假路径，通过 SAF 选择器获取真实 URI 与文件名）
+    var localPath by remember { mutableStateOf("") }
+    var localName by remember { mutableStateOf("") }
+
+    val kdbxPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            val displayName = queryDocumentDisplayName(context, uri)
+            localName = displayName
+            localPath = uri.toString()
+        }
+    }
 
     // WebDAV 字段（Wave 15 假桩清零：仅保留有消费者的展示名称与 URL，凭据统一在同步设置中配置）
     var webdavUrl by remember { mutableStateOf("") }
-    var webdavName by remember { mutableStateOf("cloud_vault.kdbx") }
+    var webdavName by remember { mutableStateOf("") }
 
     // S3 兼容字段（同上）
     var s3Endpoint by remember { mutableStateOf("") }
     var s3Bucket by remember { mutableStateOf("") }
-    var s3Name by remember { mutableStateOf("s3_vault.kdbx") }
+    var s3Name by remember { mutableStateOf("") }
+
+    val isConfirmEnabled = when (selectedSource) {
+        OpenVaultSourceType.LOCAL -> localPath.isNotBlank() && localName.isNotBlank()
+        OpenVaultSourceType.WEBDAV -> webdavName.isNotBlank() && webdavUrl.isNotBlank()
+        OpenVaultSourceType.S3_COMPATIBLE -> s3Name.isNotBlank() && s3Endpoint.isNotBlank() && s3Bucket.isNotBlank()
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -451,10 +508,35 @@ private fun OpenExistingVaultDialog(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
 
+                            OutlinedButton(
+                                onClick = { kdbxPickerLauncher.launch(arrayOf("*/*")) },
+                                shape = CapsuleShape,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(stringResource(R.string.picker_browse_file))
+                            }
+
+                            if (localName.isNotBlank()) {
+                                Text(
+                                    text = stringResource(R.string.picker_file_selected, localName),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            } else {
+                                Text(
+                                    text = stringResource(R.string.picker_file_not_selected),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.outline
+                                )
+                            }
+
                             OutlinedTextField(
                                 value = localName,
                                 onValueChange = { localName = it },
                                 label = { Text(stringResource(R.string.picker_vault_id_name)) },
+                                placeholder = { Text("passwords.kdbx") },
                                 singleLine = true,
                                 modifier = Modifier.fillMaxWidth()
                             )
@@ -463,23 +545,11 @@ private fun OpenExistingVaultDialog(
                                 value = localPath,
                                 onValueChange = { localPath = it },
                                 label = { Text(stringResource(R.string.picker_local_path_label)) },
+                                placeholder = { Text("content://... 或 /path/to/vault.kdbx") },
                                 leadingIcon = { Icon(Icons.Default.Storage, contentDescription = null, modifier = Modifier.size(18.dp)) },
                                 singleLine = true,
                                 modifier = Modifier.fillMaxWidth()
                             )
-
-                            OutlinedButton(
-                                onClick = {
-                                    localPath = "/storage/emulated/0/Download/personal.kdbx"
-                                    localName = "personal.kdbx"
-                                },
-                                shape = CapsuleShape,
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(stringResource(R.string.picker_browse_file))
-                            }
                         }
                     }
 
@@ -495,6 +565,7 @@ private fun OpenExistingVaultDialog(
                                 value = webdavName,
                                 onValueChange = { webdavName = it },
                                 label = { Text(stringResource(R.string.picker_vault_display_name)) },
+                                placeholder = { Text("cloud_vault.kdbx") },
                                 singleLine = true,
                                 modifier = Modifier.fillMaxWidth()
                             )
@@ -508,9 +579,6 @@ private fun OpenExistingVaultDialog(
                                 singleLine = true,
                                 modifier = Modifier.fillMaxWidth()
                             )
-                            // Wave 15 整改（假桩清零）：原 WebDAV 认证用户名/密码输入框无任何消费者
-                            // （onConfirm 仅回传展示名称与 URL，凭据从未参与库导入），整体移除；
-                            // 云端凭据统一在「设置 → 云端同步」中经加密持久化配置
                         }
                     }
 
@@ -526,6 +594,7 @@ private fun OpenExistingVaultDialog(
                                 value = s3Name,
                                 onValueChange = { s3Name = it },
                                 label = { Text(stringResource(R.string.picker_vault_display_name)) },
+                                placeholder = { Text("s3_vault.kdbx") },
                                 singleLine = true,
                                 modifier = Modifier.fillMaxWidth()
                             )
@@ -548,7 +617,6 @@ private fun OpenExistingVaultDialog(
                                 singleLine = true,
                                 modifier = Modifier.fillMaxWidth()
                             )
-                            // Wave 15 整改（假桩清零）：原 Access Key/Secret Key 输入框无任何消费者，整体移除
                         }
                     }
                 }
@@ -563,6 +631,7 @@ private fun OpenExistingVaultDialog(
                         OpenVaultSourceType.S3_COMPATIBLE -> onConfirm(selectedSource, s3Name, "$s3Endpoint/$s3Bucket")
                     }
                 },
+                enabled = isConfirmEnabled,
                 shape = CapsuleShape
             ) {
                 Text(stringResource(R.string.picker_open_and_load))
@@ -582,18 +651,31 @@ private fun CreateVaultWizardDialog(
     onDismiss: () -> Unit,
     onConfirm: (name: String, pwd: CharArray, keyFile: Boolean, preset: String) -> Unit
 ) {
-    var vaultName by remember { mutableStateOf("my_vault.kdbx") }
+    val context = LocalContext.current
+    var vaultName by remember { mutableStateOf("passwords.kdbx") }
     // H2 整改：主密码以 CharArray 承载（SecurePasswordField 桥接），不进入 String / UiState / StateFlow
     var passwordChars by remember { mutableStateOf(CharArray(0)) }
     var confirmChars by remember { mutableStateOf(CharArray(0)) }
     var passwordVisible by remember { mutableStateOf(false) }
     var useKeyFile by remember { mutableStateOf(false) }
     var keyFileMode by remember { mutableStateOf("GENERATE") } // "GENERATE" or "SELECT_EXISTING"
-    var selectedKeyFilePath by remember { mutableStateOf("/storage/emulated/0/Documents/my_key.key") }
+    var selectedKeyFilePath by remember { mutableStateOf("") }
+    var selectedKeyFileName by remember { mutableStateOf("") }
     var selectedPreset by remember { mutableStateOf("ChaCha20 + Argon2id") }
     val presets = listOf("ChaCha20 + Argon2id", "AES-256 + Argon2id", "Twofish + AES-KDF")
 
-    val isFormValid = vaultName.isNotBlank() && passwordChars.isNotEmpty() && passwordChars.contentEquals(confirmChars)
+    val keyPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            val displayName = queryDocumentDisplayName(context, uri)
+            selectedKeyFileName = displayName
+            selectedKeyFilePath = uri.toString()
+        }
+    }
+
+    val isKeyFileValid = !useKeyFile || keyFileMode == "GENERATE" || selectedKeyFilePath.isNotBlank()
+    val isFormValid = vaultName.isNotBlank() && passwordChars.isNotEmpty() && passwordChars.contentEquals(confirmChars) && isKeyFileValid
 
     // 弹窗离场（确认 / 取消 / 进程回收）时擦除组件内持有的全部密码副本
     DisposableEffect(Unit) {
@@ -705,17 +787,8 @@ private fun CreateVaultWizardDialog(
                             )
                         } else {
                             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                OutlinedTextField(
-                                    value = selectedKeyFilePath,
-                                    onValueChange = { selectedKeyFilePath = it },
-                                    label = { Text(stringResource(R.string.picker_keyfile_path_label)) },
-                                    singleLine = true,
-                                    modifier = Modifier.fillMaxWidth()
-                                )
                                 OutlinedButton(
-                                    onClick = {
-                                        selectedKeyFilePath = "/storage/emulated/0/Download/custom_vault.key"
-                                    },
+                                    onClick = { keyPickerLauncher.launch(arrayOf("*/*")) },
                                     shape = CapsuleShape,
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
@@ -723,6 +796,23 @@ private fun CreateVaultWizardDialog(
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Text(stringResource(R.string.picker_keyfile_pick), fontSize = 12.sp)
                                 }
+
+                                if (selectedKeyFileName.isNotBlank()) {
+                                    Text(
+                                        text = stringResource(R.string.picker_file_selected, selectedKeyFileName),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+
+                                OutlinedTextField(
+                                    value = selectedKeyFilePath,
+                                    onValueChange = { selectedKeyFilePath = it },
+                                    label = { Text(stringResource(R.string.picker_keyfile_path_label)) },
+                                    placeholder = { Text("content://... 或 /path/to/keyfile.key") },
+                                    singleLine = true,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
                             }
                         }
                     }

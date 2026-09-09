@@ -84,8 +84,10 @@ class DatabasePickerViewModel @Inject constructor(
                 // H3 整改：创建失败（写盘失败等）不再谎报创建成功
                 val result = vaultRepository.createDatabase(name, pwd, keyFile, preset)
                 if (result is KdbxResult.Success) {
+                    val fileName = if (name.endsWith(".kdbx", ignoreCase = true)) name else "$name.kdbx"
                     showCreateDialogFlow.value = false
                     userMessageFlow.value = UiMessage(R.string.db_picker_msg_created)
+                    _events.emit(DatabasePickerEvent.DatabaseSelected(fileName))
                 } else {
                     userMessageFlow.value = UiMessage(R.string.vault_op_failed, listOf((result as KdbxResult.Failure).message))
                 }
@@ -99,8 +101,10 @@ class DatabasePickerViewModel @Inject constructor(
         viewModelScope.launch {
             val result = vaultRepository.importExternalDatabase(name, path, syncType = source.label)
             if (result is KdbxResult.Success) {
+                val fileName = if (name.endsWith(".kdbx", ignoreCase = true)) name else "$name.kdbx"
                 showOpenSourceDialogFlow.value = false
                 userMessageFlow.value = UiMessage(R.string.db_picker_msg_opened)
+                _events.emit(DatabasePickerEvent.DatabaseSelected(fileName))
             } else {
                 userMessageFlow.value = UiMessage(R.string.vault_op_failed, listOf((result as KdbxResult.Failure).message))
             }

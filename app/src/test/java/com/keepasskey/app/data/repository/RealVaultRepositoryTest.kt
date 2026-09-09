@@ -44,9 +44,44 @@ class RealVaultRepositoryTest {
     val tempFolder = TemporaryFolder()
 
     private fun createMockContext(filesDir: File): Context {
+        val prefsMap = mutableMapOf<String, String?>()
+        val mockPrefs = object : android.content.SharedPreferences {
+            override fun getAll(): MutableMap<String, *> = prefsMap.toMutableMap()
+            override fun getString(key: String?, defValue: String?): String? = prefsMap[key] ?: defValue
+            override fun getStringSet(key: String?, defValues: MutableSet<String>?): MutableSet<String>? = null
+            override fun getInt(key: String?, defValue: Int): Int = defValue
+            override fun getLong(key: String?, defValue: Long): Long = defValue
+            override fun getFloat(key: String?, defValue: Float): Float = defValue
+            override fun getBoolean(key: String?, defValue: Boolean): Boolean = defValue
+            override fun contains(key: String?): Boolean = prefsMap.containsKey(key)
+            override fun edit(): android.content.SharedPreferences.Editor = object : android.content.SharedPreferences.Editor {
+                override fun putString(key: String?, value: String?): android.content.SharedPreferences.Editor {
+                    if (key != null) prefsMap[key] = value
+                    return this
+                }
+                override fun putStringSet(key: String?, values: MutableSet<String>?): android.content.SharedPreferences.Editor = this
+                override fun putInt(key: String?, value: Int): android.content.SharedPreferences.Editor = this
+                override fun putLong(key: String?, value: Long): android.content.SharedPreferences.Editor = this
+                override fun putFloat(key: String?, value: Float): android.content.SharedPreferences.Editor = this
+                override fun putBoolean(key: String?, value: Boolean): android.content.SharedPreferences.Editor = this
+                override fun remove(key: String?): android.content.SharedPreferences.Editor {
+                    prefsMap.remove(key)
+                    return this
+                }
+                override fun clear(): android.content.SharedPreferences.Editor {
+                    prefsMap.clear()
+                    return this
+                }
+                override fun commit(): Boolean = true
+                override fun apply() {}
+            }
+            override fun registerOnSharedPreferenceChangeListener(listener: android.content.SharedPreferences.OnSharedPreferenceChangeListener?) {}
+            override fun unregisterOnSharedPreferenceChangeListener(listener: android.content.SharedPreferences.OnSharedPreferenceChangeListener?) {}
+        }
         return object : android.content.ContextWrapper(null) {
             override fun getFilesDir(): File = filesDir
             override fun getApplicationContext(): Context = this
+            override fun getSharedPreferences(name: String?, mode: Int): android.content.SharedPreferences = mockPrefs
         }
     }
 
@@ -468,6 +503,69 @@ class RealVaultRepositoryTest {
             "重开后克隆体应存在",
             reopenSession.databaseFlow.first()!!.rootGroup.allEntries().any { it.id.toHexString() == cloneId }
         )
+
+        password.fill('0')
+    }
+
+    @Test
+    fun `本地尚无 kdbx 文件时 getDatabases 如实返回空列表不伪造默认库`() = runTest {
+        val emptyDir = tempFolder.newFolder("empty_vault_dir")
+        val session = DatabaseSession()
+        val repository = RealVaultRepository(createMockContext(emptyDir), session, com.keepasskey.app.data.logger.DebugLogBuffer(), createTestStrings())
+
+        val databases = repository.getDatabases().first()
+        assertTrue("无文件时必须返回空列表，绝不能伪造 default_vault", databases.isEmpty())
+    }
+
+    @Test
+    fun `importExternalDatabase 导入外部文件成功后自动更新列表并设为当前激活库`() = runTest {
+        val storageDir = tempFolder.newFolder("app_storage")
+        val externalDir = tempFolder.newFolder("external_storage")
+        val externalFile = File(externalDir, "source_vault.kdbx")
+        externalFile.writeBytes(byteArrayOf(0x03, 0xD9.toByte(), 0xA2.toByte(), 0x9A.toByte())) // KDBX signature prefix
+
+        val session = DatabaseSession()
+        val repository = RealVaultRepository(createMockContext(storageDir), session, com.keepasskey.app.data.logger.DebugLogBuffer(), createTestStrings())
+
+        val importResult = repository.importExternalDatabase("source_vault.kdbx", externalFile.absolutePath)
+        assertTrue("导入应成功", importResult is com.keepasskey.core.result.KdbxResult.Success)
+
+        val databases = repository.getDatabases().first()
+        assertEquals(1, databases.size)
+        assertEquals("source_vault.kdbx", databases[0].name)
+        assertTrue("新导入的数据库应自动设为当前激活态", databases[0].isActive)
+    }
+
+    @Test
+    fun `外部物理数据库文件通过 unlockActiveDatabase 正确解锁且不复制到内部目录`() = runTest {
+        val storageDir = tempFolder.newFolder("internal_storage")
+        val externalDir = tempFolder.newFolder("external_docs")
+        val externalKdbx = File(externalDir, "my_external.kdbx")
+        val password = "MySecretPassword#2026".toCharArray()
+
+        // 预先创建一个真实的有效 KDBX 库
+        val tempSession = DatabaseSession()
+        tempSession.create(externalKdbx, "MyExternal", password, useArgon2 = false)
+        tempSession.close()
+
+        val session = DatabaseSession()
+        val repository = RealVaultRepository(createMockContext(storageDir), session, com.keepasskey.app.data.logger.DebugLogBuffer(), createTestStrings())
+
+        // 登记外部数据库
+        repository.importExternalDatabase("my_external.kdbx", externalKdbx.absolutePath)
+
+        // 验证内部沙盒目录下未产生该文件（绝不强制复制到私有沙盒）
+        val internalCopy = File(storageDir, "my_external.kdbx")
+        assertFalse("外部库绝不应被强制复制到内部沙盒目录", internalCopy.exists())
+
+        // 解锁外部数据库
+        val unlockResult = repository.unlockActiveDatabase(password)
+        assertTrue("外部数据库应顺利解锁成功: $unlockResult", unlockResult is com.keepasskey.core.result.KdbxResult.Success)
+
+        // 验证会话已打开，且条目与群组正常可读
+        assertFalse("解锁后仓库不应处于锁定态", repository.isLocked())
+        val groups = repository.getGroups().first()
+        assertTrue("应包含根群组", groups.isNotEmpty())
 
         password.fill('0')
     }

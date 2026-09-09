@@ -198,12 +198,13 @@ class VaultListViewModel @Inject constructor(
     }
 
     val uiState: StateFlow<VaultListUiState> = combine(
-        vaultRepository.getGroups(),
+        combine(vaultRepository.getDatabases(), vaultRepository.getGroups()) { dbs, groups -> Pair(dbs, groups) },
         vaultRepository.getEntries(),
         settingsRepository.getSettings(),
         sessionStateFlow,
         batchAndSyncFlow
-    ) { allGroups, allEntries, settings, session, batchSync ->
+    ) { (databases, allGroups), allEntries, settings, session, batchSync ->
+        val activeDb = databases.firstOrNull { it.isActive } ?: databases.firstOrNull()
         val isSearching = session.filterParams.query.isNotBlank()
 
         // 计算当前面包屑路径
@@ -290,6 +291,7 @@ class VaultListViewModel @Inject constructor(
             allGroups = allGroups,
             entries = entriesWithLiveTotp,
             totalEntriesCount = allEntries.size,
+            databaseName = activeDb?.name.orEmpty(),
             isBatchMode = batchSync.isBatchMode,
             selectedEntryIds = batchSync.selectedEntryIds,
             syncStatus = batchSync.syncStatus,

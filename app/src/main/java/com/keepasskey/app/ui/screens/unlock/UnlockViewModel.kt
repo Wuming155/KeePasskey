@@ -98,7 +98,18 @@ class UnlockViewModel @Inject constructor(
                             } else {
                                 strings.get(R.string.unlock_db_status_local, active.path)
                             },
-                            isQuickUnlockAvailable = hasSealedCredential
+                            isQuickUnlockAvailable = hasSealedCredential,
+                            hasDatabase = true
+                        )
+                    }
+                } else {
+                    activeDatabaseId = null
+                    _uiState.update {
+                        it.copy(
+                            databaseName = "",
+                            databaseStatus = "",
+                            isQuickUnlockAvailable = false,
+                            hasDatabase = false
                         )
                     }
                 }
@@ -116,6 +127,20 @@ class UnlockViewModel @Inject constructor(
                         UnlockMode.STANDARD
                     }
                 )
+            }
+        }
+    }
+
+    /**
+     * 从外部文件导入密码库（在空状态下快速打开已有库）
+     */
+    fun importExternalDatabase(name: String, path: String) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoading = true, errorMessage = null) }
+            val result = vaultRepository.importExternalDatabase(name, path)
+            _uiState.update { it.copy(isLoading = false) }
+            if (result is KdbxResult.Failure) {
+                _uiState.update { it.copy(errorMessage = UiMessage(R.string.vault_op_failed, listOf(result.message))) }
             }
         }
     }
@@ -212,11 +237,15 @@ class UnlockViewModel @Inject constructor(
                     }
                     is KdbxResult.Failure -> {
                         debugLog.error(TAG, "主密码解锁失败: activeDb=$activeDatabaseId, pwdLen=${passwordChars.size}, keyFileLen=${keyFileData?.size}, err=${result.message}")
-                        debugLog.warn(TAG, "主密码解锁失败（凭据不匹配）: ${result.message}")
+                        val errorMsg = if (result.error is com.keepasskey.database.exception.KdbxInvalidCredentialsException) {
+                            UiMessage(R.string.unlock_error_invalid_password)
+                        } else {
+                            UiMessage(R.string.vault_op_failed, listOf(result.message))
+                        }
                         _uiState.update {
                             it.copy(
                                 isLoading = false,
-                                errorMessage = UiMessage(R.string.unlock_error_invalid_password)
+                                errorMessage = errorMsg
                             )
                         }
                     }

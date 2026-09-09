@@ -40,6 +40,8 @@ class DatabaseSession {
     val databaseFlow: StateFlow<KdbxDatabase?> = _database.asStateFlow()
 
     private var activeFile: File? = null
+    private var activePathIdentifier: String? = null
+    private var saveWriter: (suspend (ByteArray) -> Unit)? = null
     private var passwordCache: CharArray? = null
     private var keyFileCache: ByteArray? = null
     private val credentialLock = Any()
@@ -48,6 +50,9 @@ class DatabaseSession {
 
     val currentFile: File?
         get() = activeFile
+
+    val currentPathIdentifier: String?
+        get() = activePathIdentifier
 
     /** 当前会话是否为只读模式（锁定/关闭后重置为 false） */
     val isReadOnly: Boolean
@@ -103,6 +108,14 @@ class DatabaseSession {
 
                 // 缓存主凭据供会话期写回使用
                 activeFile = file
+                activePathIdentifier = file.absolutePath
+                saveWriter = { bytes ->
+                    withContext(Dispatchers.IO) {
+                        AtomicFileWriter.writeAtomic(file) { os ->
+                            os.write(bytes)
+                        }
+                    }
+                }
                 readOnlyMode = false
                 cachePassword(passwordChars)
                 _database.value = db
@@ -116,34 +129,57 @@ class DatabaseSession {
     }
 
     /**
-     * 打开并解密已有 KDBX 文件。
-     * [readOnly] 为 true 时进入只读会话：后续 save() 硬拒绝、内存树变更方法 no-op。
-     *
-     * [passwordChars] 允许为 null 或空数组（P1-10：仅密钥文件解锁，
-     * 对齐官方 KeyUtil.CreateKey 对空密码不添加密码分量的语义）。
+     * 打开并解密已有 KDBX 文件（支持直接传入 File）。
      */
     suspend fun open(
         file: File,
         passwordChars: CharArray?,
         keyFileData: ByteArray? = null,
         readOnly: Boolean = false
+    ): KdbxResult<Unit> = openStream(
+        pathIdentifier = file.absolutePath,
+        inputStreamProvider = {
+            if (!file.exists()) {
+                throw java.io.FileNotFoundException("文件不存在: ${file.absolutePath}")
+            }
+            FileInputStream(file)
+        },
+        saveWriter = { bytes ->
+            withContext(Dispatchers.IO) {
+                AtomicFileWriter.writeAtomic(file) { os ->
+                    os.write(bytes)
+                }
+            }
+        },
+        passwordChars = passwordChars,
+        keyFileData = keyFileData,
+        readOnly = readOnly,
+        associatedFile = file
+    )
+
+    /**
+     * 打开并解密 KDBX 流（支持系统 SAF Uri、网络缓存及普通 File 等多元数据源）。
+     * [inputStreamProvider] 每次按需提供新鲜可读输入流；
+     * [saveWriter] 保存时的二进制写出通道（如 ContentResolver.openOutputStream 或原子写盘）。
+     */
+    suspend fun openStream(
+        pathIdentifier: String,
+        inputStreamProvider: suspend () -> java.io.InputStream,
+        saveWriter: (suspend (ByteArray) -> Unit)? = null,
+        passwordChars: CharArray?,
+        keyFileData: ByteArray? = null,
+        readOnly: Boolean = false,
+        associatedFile: File? = null
     ): KdbxResult<Unit> = mutex.withLock {
-        // 全链路流式读取与 CPU 密集段（KDF 派生 / 解密 / XML 解析）交织，统一在 Default 执行，
-        // 防止 Argon2 长时间占死 IO 线程池挤占磁盘/网络任务（save 侧对称：CPU 在 Default、写盘在 IO）
         withContext(Dispatchers.Default) {
             try {
-                if (!file.exists()) {
-                    return@withContext KdbxResult.Failure(
-                        IllegalArgumentException("文件不存在: ${file.absolutePath}"),
-                        "数据库文件不存在"
-                    )
-                }
-
-                val db = FileInputStream(file).use { fis ->
+                val db = inputStreamProvider().use { fis ->
                     KdbxFile.load(fis, passwordChars, keyFileData)
                 }
 
-                activeFile = file
+                activeFile = associatedFile
+                activePathIdentifier = pathIdentifier
+                this@DatabaseSession.saveWriter = saveWriter
                 readOnlyMode = readOnly
                 cachePassword(passwordChars)
                 if (keyFileData != null) {
@@ -162,7 +198,7 @@ class DatabaseSession {
     }
 
     /**
-     * 保存当前内存中的活动数据库并写入文件
+     * 保存当前内存中的活动数据库并写入文件/URI 通道
      */
     suspend fun save(): KdbxResult<Unit> = mutex.withLock {
         if (readOnlyMode) {
@@ -172,9 +208,9 @@ class DatabaseSession {
             )
         }
         withContext(Dispatchers.Default) {
-            val file = activeFile ?: return@withContext KdbxResult.Failure(
-                IllegalStateException("无活动数据库文件"),
-                "未指定活动数据库文件"
+            val writer = saveWriter ?: return@withContext KdbxResult.Failure(
+                IllegalStateException("无活动数据库保存通道"),
+                "未指定活动数据库保存通道"
             )
             val db = _database.value ?: return@withContext KdbxResult.Failure(
                 IllegalStateException("活动数据库为空"),
@@ -198,11 +234,7 @@ class DatabaseSession {
                         KdbxFile.save(buffer, db, pwd, keyFileCache)
                     }.toByteArray()
                 }
-                withContext(Dispatchers.IO) {
-                    AtomicFileWriter.writeAtomic(file) { os ->
-                        os.write(serialized)
-                    }
-                }
+                writer(serialized)
                 // 序列化缓冲即整库密文（头部外全加密），写毕即擦，避免缓冲滞留
                 serialized.fill(0)
                 _state.value = SessionState.OPENED
@@ -378,6 +410,8 @@ class DatabaseSession {
         _database.value?.clearSensitiveData()
         _database.value = null
         activeFile = null
+        activePathIdentifier = null
+        saveWriter = null
         _state.value = SessionState.CLOSED
     }
 
@@ -395,8 +429,8 @@ class DatabaseSession {
                 "数据库处于只读模式，无法修改主凭据"
             )
         }
-        val file = activeFile ?: return@withLock KdbxResult.Failure(
-            IllegalStateException("无活动数据库文件"),
+        val writer = saveWriter ?: return@withLock KdbxResult.Failure(
+            IllegalStateException("无活动数据库保存通道"),
             "当前无活动数据库"
         )
         val db = _database.value ?: return@withLock KdbxResult.Failure(
@@ -417,11 +451,13 @@ class DatabaseSession {
         }
 
         try {
-            withContext(Dispatchers.IO) {
-                AtomicFileWriter.writeAtomic(file) { os ->
-                    KdbxFile.save(os, db, newPasswordChars, newKeyFileData)
-                }
+            val serialized = withContext(Dispatchers.Default) {
+                ByteArrayOutputStream().also { buffer ->
+                    KdbxFile.save(buffer, db, newPasswordChars, newKeyFileData)
+                }.toByteArray()
             }
+            writer(serialized)
+            serialized.fill(0)
             _state.value = SessionState.OPENED
             oldPwd?.let { Arrays.fill(it, '0') }
             oldKey?.let { Arrays.fill(it, 0.toByte()) }
