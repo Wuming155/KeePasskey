@@ -1,6 +1,6 @@
 # KeePasskey 项目状态单一真相源（Single Source of Truth）
 
-> **更新时间**：2026-09-08（TASK-50 Dependabot 3 项依赖升级 PR 批量落地回写）
+> **更新时间**：2026-09-09（TASK-52 Argon2 原生 JNI 加速解锁 + 旧版提示简化 + KDF OOM 防护回写）
 > **权威声明**：本项目**唯一**有效的状态与任务跟踪页。`README.md` 仅作对外简介。原 `DELIVERY_PLAN.md` / `REMEDIATION_PLAN.md` / `docs/*审查报告*.md` 等历史存档文档已于 2026-09-07 **物理删除**，其结论已并入本文件与 `FINDINGS_TRACKER.md`，不再单独保留。
 > **2026-09-08 文档梳理**：看板去重（删除 TASK-08/15/16/17/18 的 5 条失效「❌ 未实现」副本），按 ID 升序重排；基线 HEAD、测试口径与 §4 日志索引按实际提交校正。
 > **2026-09-08 TASK-44**：自动填充黑名单完整生命周期闭环。
@@ -8,6 +8,7 @@
 > **2026-09-08 口径校准**：① §1 基线 HEAD 由 `756003c` 校正为实际 HEAD `4d52f27`；② §4 补登 3 条漏记提交（`4ce7dc0` / `e6d7f27` / `4d52f27`）；③ FINDINGS 残余「未修复」项（P2-26 占位库假元数据、P2-28 泄露密码恒 0）与两处功能残余（TASK-15 图标渲染/删除、TASK-17 引用展示侧）在看板无条目，按纪律 #5 补登为 **TASK-47 ~ TASK-49**；④ TASK-45/46 行内的「475 / 470 例」标注为当时提交快照，现行基线一律以 §1 为准。
 > **2026-09-08 TASK-51**：`dependency-scan` workflow 自建成以来连续 8 次失败，经本地逐层复现定位为三层根因（gradlew 缺可执行位 / NVD 无 Key 匿名通道必然失败 / 报告上传路径错配），全部修复并本地实证 BUILD SUCCESSFUL 后方落地（先撤回过一版未验证的半成品提交，验证通过才重新提交）。
 > **2026-09-08 TASK-50**：GitHub 上 3 个开放 Dependabot PR（#1 gradle-minor-patch 组 8 项 / #2 okhttp 5.5.0 / #3 foojay-resolver 1.0.0）因共写 `libs.versions.toml` 必然冲突，改为本地一次性落地 main 后由 Dependabot 自动关闭；`gradlew test` 全量绿（506 例口径不变）。
+> **2026-09-09 TASK-52**：解锁性能提速——引入 argon2kt（原生 JNI libargon2）优先派生，BC 降为兜底；旧版 KDBX 错误文案简化；BC 兜底路径补内存参数预检与 OOM 友好失败（防闪退）。
 
 ---
 
@@ -16,7 +17,7 @@
 | 维度 | 数值 / 状态 | 官方依据与说明 |
 |---|---|---|
 | **Git HEAD** | 代码基线 `84b7b5e`（TASK-51 dependency-scan 三层根因修复） | 本表 HEAD 记 **代码基线**（最后一次含代码改动的提交）；**纯文档提交不抬升该基线**（避免文档自引用无限漂移）。最新提交以 `git log` 为准——§4 索引登记**代码改动提交**，docs 类提交不逐条补登。分支 `main` 与 `origin/main` 同步（0 ahead / 0 behind） |
-| **测试基线** | **506 个单元测试用例**（app 146 / core 32 / crypto 52 / database 155 / sync 121）：**494 通过、0 失败、12 跳过** | `./gradlew test` 全模块执行；跳过的 12 例为 `LiveSyncServersTest` 真实联调用例（需先起 `tools/local-sync` 服务并加 `-DliveSyncTest`） |
+| **测试基线** | **513 个单元测试用例**（app 153 / core 32 / crypto 52 / database 155 / sync 121）：**501 通过、0 失败、12 跳过** | `./gradlew test` 全模块执行；跳过的 12 例为 `LiveSyncServersTest` 真实联调用例（需先起 `tools/local-sync` 服务并加 `-DliveSyncTest`） |
 | **构建状态** | `assembleDebug` + `assembleRelease` (R8) 全量通过 | **AGP 9.4.0 / Gradle 9.7.1** / Kotlin 2.4.10（经 buildscript classpath 锚定内置 KGP）/ Hilt 2.60.1 / **KSP 2.3.11** |
 | **系统基线** | **minSdk 36**, **compileSdk 37**, targetSdk 36 | 仅针对 Android 16+ 深度优化，固化无旧版垫片决策；compileSdk 37 随批次 H 升级（Compose BOM 2026.08.00 + M3 Expressive） |
 | **传输安全防线** | 全站强制 HTTPS（`network_security_config.xml` 禁明文 + OkHttp TLS-only），零证书固定 | 对齐 Google Developer Knowledge `pinning not recommended` 指南 |
@@ -24,7 +25,7 @@
 
 ---
 
-## 2. 任务唯一看板（51 项：46 ✅ 完成 / 2 📋 待验证·评估 / 3 ❌ 未实现）
+## 2. 任务唯一看板（52 项：48 ✅ 完成 / 2 📋 待验证·评估 / 2 ❌ 未实现）
 
 所有进行中、已立项、待执行体检批次、未实现功能、安全遗留与欠账统一收录于下表，**按 TASK ID 升序排列**（优先级见各行「优先级」列）。**新增任务必须在此表注册，新 ID 顺延。**
 
@@ -79,10 +80,11 @@
 | **TASK-45** | 协议 | **S3 SigV4 服务端时钟偏移补偿** | FINDINGS P2-14 | **P3** | ✅ 已完成（2026-09-08） | `S3SyncProvider` 新增时钟偏移补偿链路：**每响必刷新**——任何响应（含 4xx/5xx）携带有效 `Date` 头即经 `refreshClockOffset` 更新运行时偏移（变化 ≥1s 才回调持久化，抑制 HTTP Date 秒级抖动刷盘）；**签名补偿**——`signingDate()` = 本地时间 + 偏移，5 个签名请求全走补偿时间（TASK-26 已知答案向量不回退，`signV4` 纯函数语义保持）；**skew 自愈**——`executeSignedRequest` 统一执行器对「403 且偏移跳变 >14min（HEAD 无错误实体场景同样适用）或错误主体含 `RequestTimeTooSkewed`」**恰好一次**重签重试，首次同步偏移未知也能自愈；**fail-closed**——无有效 `Date` 头不补偿、不盲目重试、按原路径如实上浮。偏移经 `SyncCredentialsStore.loadS3ClockOffsetMillis/saveS3ClockOffsetMillis` 持久化跨进程恢复（非敏感常量，与凭据同文件；`saveS3Config` 重录配置即作废旧偏移重新学习），`SyncCoordinator.resolveProvider` 注入初始偏移 + 刷新回调（持久化失败仅丢跨进程记忆，不阻断同步）。回归 4 例：正/负偏移补偿签名断言、首次同步 skew 自愈（恰 2 请求 + 回调偏移 ≈ 服务端偏差）、无 Date 头 fail-closed（单请求不重试） |
 | **TASK-46** | 内存 | **`OtpEngine` TOTP 计算链路 ByteArray 化** | FINDINGS P2-5 | **P2** | ✅ 已完成（2026-09-08） | **计算侧残余闭合**：`OtpEngine.calculateTotp`/`calculateHotp` 入参由 `String` 改 `ByteArray`（`calculateHotpRaw` 合并移除），种子经 Base32 解码后全程字节态（HMAC-over-counter 链路零 String 密钥中间值）；`Base32Decoder.decode` 固化借用语义（调用方独占新数组、无内部缓存，KDoc 注明用毕 `fill(0)`）；`VaultEntryMapper.computeTotpCode` 解码产物成功/失败路径 `finally fill(0)` 擦除（fail-clean，不因早退残留种子副本）。回归：RFC 4226 Appendix D 全量 10 组、RFC 6238 Appendix B SHA-1/256/512 各 6 组、RFC 4648 §10 官方向量 + 「引擎不篡改调用方种子」「擦除后重解码重算一致（无缓存驻留）」断言全绿；新增 `VaultEntryMapperTotpTest` 3 例（有效出码 / 无效种子 fail-clean / SHA-256·512 消费）。**470 例全绿**（458 通过 / 12 跳过；**该提交时点快照，现行基线以 §1 为准**） |
 | **TASK-47** | 安全 | **P2-28：健康检查「已泄露密码」接入真实泄露库（HIBP）** | FINDINGS P2-28 | **P3** | ✅ 已完成（2026-09-08） | **裁定走路线 A（接入）**：新增 `BreachCheckCoordinator` + `HibpRangeClient`（HIBP Pwned Passwords k-匿名范围查询：本地算密码 SHA-1，仅上送前 5 位前缀，完整哈希与明文不出端，同前缀聚合去重减少外联）+ `BreachHasher`（公开已知答案向量回归）；传输安全沿用双层防御（`network_security_config` 禁明文 + DI 注入客户端 `ConnectionSpec` 排除 CLEARTEXT）。**门控与诚实化语义**：`ExtendedSettings.breachCheckEnabled` 显式开关（默认关闭，关闭态零外联，设置持久化随 TASK-12 通道）；`compromisedPasswordCount` 改可空——未启用 / 失败为 null 绝不回填 0，失败转 `BreachCheckStatus.FAILED` 透出原因（DISABLED/CHECKING/CLEAN/BREACHED/FAILED 五态）；健康度页泄露项按真实状态呈现并内嵌开关与 k-匿名说明（中英双语），命中计入健康分扣减（20/条）。回归 20 例：`BreachHasherTest` 已知答案 4 例、`HibpRangeClientTest`（MockWebServer 前缀上送不变量 / 解析 / 失败 fail-closed）6 例、`BreachCheckCoordinatorTest` 5 例、`BreachCheckHealthTest`（关闭态零请求断言 / 命中计数与扣分 / 失败上浮）3 例、`BreachCheckModuleTest` 传输安全回归锁 2 例。**506 例全绿**（494 通过 / 12 跳过） |
-| **TASK-48** | 数据 | **P2-26：数据库列表占位库假元数据** | FINDINGS P2-26 | **P3** | ❌ 未实现（风险已接受） | 无 `.kdbx` 文件时 `RealVaultRepository` 回退占位 `default_vault` 并附静态描述文案。当前语义为「引导创建首个库」，风险已接受；若后续保留该引导，需将占位项与真实库在 UI 上显式区分（避免用户误认存在真实数据库） |
+| **TASK-48** | 数据 | **P2-26：清理数据库列表虚假默认库与假路径，实现真实文件选择与开箱引导** | FINDINGS P2-26 | **P3** | ✅ 已完成（2026-09-09） | **虚假数据与假路径彻底清零**：① `RealVaultRepository` 构造与 `refreshDatabases` 移除针对空文件的合成 `default_vault`，无文件时如实返回 `emptyList()`；② `UnlockScreen` 针对无数据库状态呈现开箱引导页（支持直达新建密码库向导或通过 SAF 选取外部 `.kdbx` 导入）；③ `DatabasePickerScreen` 彻底移除一切硬编码假路径（`/storage/emulated/0/...`），通过 SAF（`ActivityResultContracts.OpenDocument`）实现真实的本地 `.kdbx` 密码库与密钥文件选择；④ `RealVaultRepository.importExternalDatabase` 支持 `content://` 流式导入并自动激活新库。回归 7 例：`RealVaultRepositoryTest` 2 例、`UnlockViewModelTest` 1 例、`DatabasePickerViewModelTest` 4 例。**513 例全绿**（501 通过 / 12 跳过） |
 | **TASK-49** | 特性 | **两处已落地功能的残余接线** | TASK-15 / TASK-17 残余 | **P3** | ❌ 未实现 | ① **TASK-15 残余**：自定义图标在列表行 / 详情页的位图渲染与图标删除入口未接线（`CustomIconCoordinator` 与 `customIconId` 数据通道已就绪）；② **TASK-17 残余**：`{REF:...}` 字段引用在 Notes / URL 展示侧未展开（引擎已落地，消费点平移即可，须保持「投影层不物化被引用密码明文」的 M1 语义） |
 | **TASK-50** | 依赖 | **Dependabot 3 项依赖升级 PR 批量落地** | GitHub PR #1/#2/#3 | **P2** | ✅ 已完成（2026-09-08） | 3 个开放 PR 共写 `libs.versions.toml` 直接逐个合并必冲突，改为本地一次性落地后由 Dependabot 自动关闭：① PR#1 gradle-minor-patch 组——Gradle Wrapper 9.4.1→9.7.1（jar/脚本/properties 全量重生成，保留腾讯镜像分发地址）、AGP 9.2.1→9.4.0、navigation-compose 2.9.0→2.10.0、hilt-navigation-compose 1.3.0→1.4.0、bcprov-jdk18on 1.79→1.85.2、kotlinx-coroutines 1.10.2→1.11.0；② PR#2 okhttp 4.12.0→5.5.0（大版本，`okhttp3.mockwebserver` 经典包兼容层全量测试验证通过）；③ PR#3 foojay-resolver-convention 0.10.0→1.0.0（需 Gradle 9.7+，与 wrapper 升级同批生效）。风险点：AGP 9.4.0 与 foojay 1.0.0 均要求 Gradle 9.7 运行时，`wrapper` 任务在旧发行版下执行会 `NoClassDefFoundError`，采用直接改 `distributionUrl` 先换底座再重生成 wrapper 文件解决。验收：`gradlew test` 506 例全绿（494 通过 / 0 失败 / 12 跳过，口径不变） |
 | **TASK-51** | CI | **`dependency-scan` workflow 连续 8 次失败：三层根因全链修复** | GitHub 通知（CI 活动） | **P1** | ✅ 已修复（2026-09-08，本地实证后落地） | **三层根因**（本地复现逐层排除，前两版未验证提交曾按用户要求从远端撤回重做）：① `gradlew` 在 git 索引为 `100644`（Windows 提交未保留可执行位），Linux CI `./gradlew` Permission denied 秒失败 → `git update-index --chmod=+x` 补 `100755`；② 仓库未配 `NVD_API_KEY` 时插件 13.0.0 对空密钥抛 `NvdApiException("Invalid API Key, length of 0")`，且 `failOnError=false` 不覆盖 NVD 更新阶段、`autoUpdate=false` 又因空库抛 `NoDataException: No documents exist`（两条兜底路均经本地实测不可行）→ init 脚本改为**双通道**：读环境变量 `NVD_API_KEY`（GitHub Secret 同名注入）走官方 API，未配置回落 OWASP 官方托管镜像 datafeed（`DependencyCheck_Builder/nvd_cache`，24h 更新，无需 Secret），并弃用 workflow 未经证实的 `-Dorg.owasp.dependencycheck.nvd.api.key` 系统属性传参；③ workflow 报告/SARIF 上传路径写错（实际产物在 `build/reports/dependency-check/` 子目录）→ 两处 path 修正。**验收**：本地注入真实 Key 完整跑通 `dependencyCheckAggregate`——BUILD SUCCESSFUL，HTML/JSON/SARIF 三格式报告产出，扫描发现真实 CVE（如 CVE-2026-53914 影响 kotlin-build-tools 工具链，CVSS 未达 11 阈值不阻断，符合「首次仅告警」策略）；CI 首次运行待线上确认 |
+| **TASK-52** | 性能/UX | **Argon2 原生 JNI 加速解锁 + 旧版 KDBX 提示简化 + KDF OOM 防护** | 用户反馈 | **P1** | ✅ 已完成（2026-09-09） | ① **解锁提速**：引入 `argon2kt 1.6.0`（MIT 许可，AAR 内置 4 ABI 预编译 `libargon2jni.so`，免 NDK/CMake），`Argon2KdfEngine` 改「原生优先 + BouncyCastle 兜底」——对齐 KeePassDX 的 native libargon2 C 实现架构（BC 纯 Java Argon2 是此前解锁显著慢于 KeePassDX 的根因，参考 `docs/references/keepassdx-架构分析.md` §4/§10）；KDBX 头携带 KDF secret/associatedData 或 Argon2 版本非 0x10/0x13 时走 BC 兜底；原生探活失败（桌面 JVM 单测 / 个别机型 .so 加载失败）自动降级，全量单测天然覆盖 BC 路径全绿；② **UX**：`KdbxHeader` 旧版 KDBX 错误文案「目前仅支持 KDBX v4 版本，实际文件主版本为 0x…」简化为「不支持 KDBX v4 之前的版本」；③ **稳定性（防闪退）**：BC 兜底路径新增内存参数预检（`maxHeap × 0.6` 余量，KeePassDX Limits 模式）与 `OutOfMemoryError` → 友好 `KdfException`，桌面端创建的高内存参数库不再裸 OOM；原生路径 `Argon2Exception`（含内存分配失败）同样归一为友好失败。`assembleDebug` 实证 `libargon2jni.so`/`libargon2native.so` 打包 4 ABI（+~250KB/ABI）；`gradlew test` 全绿（0 失败 / 12 跳过）。**待真机回归**：原生路径实际加速幅度、高内存参数库解锁表现；若闪退仍复现需 logcat 定位（`DatabaseSession` 已有 `catch(Throwable)` 兜底） |
 
 ---
 

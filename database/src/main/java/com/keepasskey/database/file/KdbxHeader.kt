@@ -192,7 +192,7 @@ data class KdbxHeader(
             val version = readAndRecordInt()
             val major = version and KdbxConstants.Version.VERSION_MAJOR_MASK
             if (major != KdbxConstants.Version.VERSION_4_0) {
-                throw KdbxUnsupportedVersionException("目前仅支持 KDBX v4 版本，实际文件主版本为: 0x${Integer.toHexString(major)}")
+                throw KdbxUnsupportedVersionException("不支持 KDBX v4 之前的版本")
             }
 
             var cipherUuid: KdbxUuid = KdbxConstants.Cipher.AES_256_CBC
