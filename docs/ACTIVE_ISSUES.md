@@ -362,7 +362,24 @@
     拷入 `Zeroizing<Vec<u8>>`、输出拷入 `Zeroizing<[u8;32]>`，全路径（含 `?` 提前返回）RAII 擦除；
     整个 FFI 体裹 `catch_unwind` → panic 归一为返回 null（不跨 JNI 边界 unwind）；有符号 jint 闸门
     先行拦截负值再转 u32。`cargo test` 9/9 全绿。
-  - **Batch 3 进行中**。
+  - **Batch 3 ✅**：cargo-ndk 4.1.2 + 4 Android target（经 `RUSTUP_DIST_SERVER=rsproxy.cn` 镜像安装，
+    官方 CDN 在本网络 403/超时）；Gradle `:crypto:cargoNdkBuild`（Exec，`ANDROID_NDK_HOME` 指向
+    NDK 28.2.13676358）交叉编译 4 ABI 至 `build/rust/jniLibs/<abi>/`，`sourceSets.main.jniLibs.srcDirs`
+    接入，`merge*NativeLibs` 依赖之；**移除 `externalNativeBuild.cmake`**（C 内核退役，源码留待 Batch 5）。
+    - **产物核对**：4 ABI `libkeepasskey_argon2.so` 均入 APK（arm64-v8a 434KB / armeabi-v7a 313KB /
+      x86 506KB / x86_64 478KB，AGP strip 后）；`llvm-readelf` 确认 arm64 为 AArch64 ELF64 DYN、
+      导出 `Java_com_keepasskey_crypto_kdf_NativeArgon2_deriveKey`（GLOBAL FUNC）、NEEDED 仅 libc/libdl。
+    - **R8 keep 核对**：release `seeds.txt` 含 `NativeArgon2: byte[] deriveKey(...)`（`-keepclasseswithmembernames
+      … native <methods>` 生效），native 方法名未被混淆 → JNI 符号可解析。
+    - **R2 守卫落地**：`Argon2KdfEngine` 增 `NATIVE_MAX_AD_LEN=32` + `adExceedsNativeLimit` 分支，AD>32 路由 BC；
+      新增 `Argon2AdLimitFallbackTest`（64B AD 经 BC 兜底派生 == 冻结向量），crypto 单测 55→56。
+    - **供应链**：`deny.toml` 落地（许可证白名单 + advisory deny + 4 android target graph）；`cargo deny` 执行
+      需 `cargo install cargo-deny`（未在本次授权安装范围内，配置就绪待跑）。
+    - `assembleDebug` + `assembleRelease`(R8) 均 BUILD SUCCESSFUL；`./gradlew.bat test` 全绿（**586 例：574 通过 /
+      0 失败 / 12 跳过**，纯 test 不触发 cargoNdkBuild）；`cargo test` 9/9。基线同步更新 AGENTS.md §1/§5。
+    - **体积增量**：Rust .so 含 std+rayon+blake2，较原 C ref 实现（数十 KB/ABI）增约 +0.3~0.5MB/ABI（未压缩）；
+      精确 C-vs-Rust APK 增量对照留 Batch 4（需从 git 历史重建 C 基线包）。
+  - **Batch 4–5 待办**：真机互操作 + 性能回归决策闸门（R1 多线程实测）；`git rm` C 遗留、文档流转归档。
 
 ---
 

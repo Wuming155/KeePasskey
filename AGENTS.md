@@ -12,7 +12,7 @@ This file provides guidance to AI coding agents when working with code in this r
 | 维度 | 数值 / 状态 | 官方依据与说明 |
 |---|---|---|
 | **Git HEAD** | 代码基线 `4235f16`（TASK-53 Base64/Hex 整洁度） | 分支 `main` 与 `origin/main` 同步 |
-| **测试基线** | **585 个单元测试用例**（app 196 / core 32 / crypto 55 / database 160 / sync 142，其中 sync 142 含 12 例联调跳过）：**573 通过、0 失败、12 跳过** | `./gradlew test` 全模块执行；跳过的 12 例为 `LiveSyncServersTest` 真实联调用例（需先起 `tools/local-sync` 服务并加 `-DliveSyncTest`） |
+| **测试基线** | **586 个单元测试用例**（app 196 / core 32 / crypto 56 / database 160 / sync 142，其中 sync 142 含 12 例联调跳过）：**574 通过、0 失败、12 跳过**（另有 Rust 侧 `cargo test` 9 例，见 §5） | `./gradlew test` 全模块执行；跳过的 12 例为 `LiveSyncServersTest` 真实联调用例（需先起 `tools/local-sync` 服务并加 `-DliveSyncTest`） |
 | **构建状态** | `assembleDebug` + `assembleRelease` (R8) 全量通过 | **AGP 9.4.0 / Gradle 9.7.1** / Kotlin 2.4.10（经 buildscript classpath 锚定内置 KGP）/ Hilt 2.60.1 / **KSP 2.3.11** |
 | **系统基线** | **minSdk 36**, **compileSdk 37**, targetSdk 36 | 仅针对 Android 16+ 深度优化，固化无旧版垫片决策；compileSdk 37（Compose BOM 2026.08.00 + M3 Expressive） |
 | **传输安全防线** | 全站强制 HTTPS（`network_security_config.xml` 禁明文 + OkHttp TLS-only），零证书固定 | 对齐 Google Developer Knowledge `pinning not recommended` 指南 |
@@ -80,11 +80,17 @@ KeePasskey 是一款使用原生 Kotlin 开发的现代化 Android 密码管理�
 - `.\gradlew.bat assembleDebug` — 编译全部模块
 - `.\gradlew.bat :app:compileDebugKotlin` — 仅快速检查 Kotlin 编译
 - `.\gradlew.bat lint` — Android Lint
-- `.\gradlew.bat test` — 单元测试（全模块 `src/test`；当前 **585 例：573 通过 / 0 失败 / 12 跳过**，分布 app 196 / core 32 / crypto 55 / database 160 / sync 142，跳过项需 `-DliveSyncTest` 才启用）
+- `.\gradlew.bat test` — 单元测试（全模块 `src/test`；当前 **586 例：574 通过 / 0 失败 / 12 跳过**，分布 app 196 / core 32 / crypto 56 / database 160 / sync 142，跳过项需 `-DliveSyncTest` 才启用）
 - `.\gradlew.bat test -DliveSyncTest` — 追加启用 `LiveSyncServersTest` 真实联调用例（默认跳过 12 例，需先起 `tools/local-sync` 服务）
 - `.\gradlew.bat assembleRelease` — R8 混淆 + 资源收缩发布包（签名配置见 `keystore.properties.example` / 环境变量，未配置时产出未签名包）
+- **Rust 原生内核（ISSUE-P2-14 PoC Batch 1+）**：`cd crypto/src/main/rust && cargo test` — Rust Argon2 内核单测（当前 **9 例全绿**：IETF 官方 KAT ×4 + BC 冻结向量等价 + 参数闸门 + 确定性 + JNI 签名/闸门）
 
-> **原生构建前置（TASK-52 起）**：crypto 模块含 NDK 原生构建（Argon2 官方参考实现，`crypto/src/main/cpp/`），需 **NDK 28.2.13676358 + CMake 3.22.1**（`sdkmanager "ndk;28.2.13676358" "cmake;3.22.1"`），缺失时 Gradle 配置阶段即报错。
+> **原生构建前置（ISSUE-P2-14 PoC Batch 3 起，替代原 TASK-52 CMake 方案）**：crypto 模块的 Argon2 原生内核改由 **Rust + cargo-ndk 从源码交叉编译**（`crypto/src/main/rust/`，产出 4 ABI `libkeepasskey_argon2.so`）。前置工具链：
+> - **NDK 28.2.13676358**（`sdkmanager "ndk;28.2.13676358"`；AGP strip + cargo-ndk 链接器共用）；
+> - **Rust stable + 4 个 Android target**：`rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android i686-linux-android`；
+> - **cargo-ndk**：`cargo install cargo-ndk`（Gradle task `:crypto:cargoNdkBuild` 经 `ANDROID_NDK_HOME` 调用，`assembleDebug/Release` 自动触发；纯 `test` 不触发）。
+>
+> 原 `crypto/src/main/cpp/`（vendored PHC C + JNI 桥）已**退役不再参与构建**（`externalNativeBuild.cmake` 已移除），源码暂留仓库待 Batch 5 `git rm`。国内网络可经 `RUSTUP_DIST_SERVER=https://rsproxy.cn` 加速 target 下载。
 
 ---
 

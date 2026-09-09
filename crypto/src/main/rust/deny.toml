@@ -1,0 +1,50 @@
+# cargo-deny 配置（Rust 秘密飞地 PoC · Batch 3 · 供应链治理 R4）
+#
+# 用途：锁定 Rust 依赖树的许可证与已知漏洞，支撑「零二进制信任根」哲学下的可审计构建。
+# 运行：`cargo deny check`（需 `cargo install cargo-deny`；PoC 阶段该工具安装为可选步骤）。
+# 依赖树（argon2 0.6.0 + parallel/rayon + zeroize + jni）均为 RustCrypto / 主流可信 crate。
+
+[graph]
+# 仅审计实际编译进产物的依赖（排除 dev-dependencies，如 serde_json/hex 仅测试用）
+targets = [
+    { triple = "aarch64-linux-android" },
+    { triple = "armv7-linux-androideabi" },
+    { triple = "x86_64-linux-android" },
+    { triple = "i686-linux-android" },
+]
+all-features = false
+no-default-features = false
+
+[advisories]
+version = 2
+db-path = "~/.cargo/advisory-db"
+db-urls = ["https://github.com/rustsec/advisory-db"]
+# 发现 RUSTSEC 漏洞公告即失败（不设 ignore，PoC 阶段从严）
+yanked = "deny"
+
+[licenses]
+version = 2
+# 允许清单：本项目 Rust 依赖树涉及的全部为宽松许可
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Zlib",
+]
+confidence-threshold = 0.8
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+# 禁止意外引入重复密码学实现（Argon2/Blake2 只应来自 RustCrypto argon2/blake2）
+deny = []
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

@@ -43,7 +43,12 @@ class Argon2KdfEngine(
         val versionSupported = argonParams.version == KdfParameters.Argon2.ARGON2_VERSION_13 ||
             argonParams.version == KdfParameters.Argon2.ARGON2_VERSION_10
 
-        if (NativeArgon2.available && versionSupported) {
+        // R2（ISSUE-P2-14）：原生 Rust Argon2 内核（RustCrypto argon2 0.6.0）的 AssociatedData 上限为 32B，
+        // AD 超过则 derive() fail-closed 返回 null。为保持与旧 C 内核 / BouncyCastle 任意长度 AD 的行为一致，
+        // AD>32 时强制走 BC 兜底（真实 KeePass/KeePassXC 生成库不设 KDF 的 A 字段，此路径极罕见）。
+        val adExceedsNativeLimit = argonParams.associatedData?.let { it.size > NATIVE_MAX_AD_LEN } == true
+
+        if (NativeArgon2.available && versionSupported && !adExceedsNativeLimit) {
             return NativeArgon2.derive(
                 password = compositeKey,
                 salt = argonParams.salt,
@@ -111,6 +116,13 @@ class Argon2KdfEngine(
     }
 
     companion object {
+        /**
+         * R2（ISSUE-P2-14）：原生 Rust Argon2 内核（RustCrypto argon2 0.6.0）的 AssociatedData 上限，
+         * 与 Rust 侧 `MAX_AD_LEN` 保持一致；AD 超过此长度时原生内核 fail-closed 返回 null，
+         * 由 [transform] 改走 BouncyCastle 兜底路径。
+         */
+        const val NATIVE_MAX_AD_LEN = 32
+
         /**
          * JVM 兜底实现的内存预检：最大堆预留 40% 余量后能否容纳整段内存块。
          */
