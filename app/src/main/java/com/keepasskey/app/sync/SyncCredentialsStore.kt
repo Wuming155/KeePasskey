@@ -58,7 +58,11 @@ class SyncCredentialsStore @Inject constructor(
     @ApplicationContext private val context: Context,
     private val keystoreManager: KeystoreManager? = null,
     // 允许为 null 仅用于 JVM 单测注入；生产 DI 恒定注入真实实现
-    private val debugLog: DebugLogBuffer? = null
+    private val debugLog: DebugLogBuffer? = null,
+    // ISSUE-P1-07：凭据销毁必须连带销毁同步缓存中的 KDBX 密文快照。
+    // 允许为 null 仅用于 JVM 单测注入；生产 DI 恒定注入真实实现（构造无环：
+    // SyncCacheEvictor 仅依赖 ApplicationContext 与调试日志）。
+    private val syncCacheEvictor: SyncCacheEvictor? = null
 ) {
     // TASK-14 整改（P2-21）：生产类不得暴露 public 可写加解密钩子——任何持有实例的
     // 代码都可静默替换封印算法，形成凭据泄露面。现以 @VisibleForTesting + internal
@@ -257,8 +261,16 @@ class SyncCredentialsStore @Inject constructor(
         )
     }
 
+    /**
+     * 清空全部同步凭据配置。
+     *
+     * ISSUE-P1-07：同步关系终止（换服务器、退出同步、用户主动清空）后，
+     * 缓存中的两份完整 KDBX 密文快照若继续驻留，即成为无主的离线爆破素材。
+     * 故凭据销毁与缓存销毁必须同批完成。
+     */
     fun clear() {
         prefs.edit().clear().apply()
+        syncCacheEvictor?.evictAll()
     }
 
     /**

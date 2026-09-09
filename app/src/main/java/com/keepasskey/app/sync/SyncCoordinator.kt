@@ -11,6 +11,7 @@ import com.keepasskey.core.model.KdbxGroup
 import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.core.security.ProtectedString
+import com.keepasskey.core.session.SessionLockObserver
 import com.keepasskey.database.file.KdbxDatabase
 import com.keepasskey.database.file.KdbxFile
 import com.keepasskey.database.session.DatabaseSession
@@ -85,10 +86,18 @@ open class SyncCoordinator @Inject constructor(
     private val debugLog: DebugLogBuffer,
     // TASK-21：用户可见错误消息经 StringsProvider 资源解析（P3-23；单测注入假实现）
     private val strings: com.keepasskey.app.ui.model.StringsProvider? = null
-) {
+) : SessionLockObserver {
     private val effectiveStrings: com.keepasskey.app.ui.model.StringsProvider =
         strings ?: com.keepasskey.app.ui.model.StringsProvider { id, args -> context.getString(id, *args) }
     private val mutex = Mutex()
+
+    init {
+        // ISSUE-P1-07：本协调器是单例，lastSyncedDb / pendingLocalDb / pendingRemoteDb 持有
+        // 整棵 KdbxDatabase 树（含全部 ProtectedString）。锁库只销毁会话内的树，
+        // 若不在此同步释放，这些副本会跨锁定周期长期驻留——内存侧的生命周期同样需要终止点。
+        // 磁盘侧缓存（cacheDir/sync 的 .cache/.basecache）由 SyncCacheEvictor 独立负责。
+        databaseSession.addLockObserver(this)
+    }
 
     private val _conflictFlow = MutableStateFlow<List<ConflictedEntryPair>>(emptyList())
     open val conflictFlow: StateFlow<List<ConflictedEntryPair>> = _conflictFlow.asStateFlow()
@@ -130,6 +139,17 @@ open class SyncCoordinator @Inject constructor(
     var testSyncProvider: SyncProvider? = null
     @androidx.annotation.VisibleForTesting
     var testRemotePath: String? = null
+
+    /**
+     * ISSUE-P1-07：会话终止（锁定/关闭）时释放本协调器持有的全部数据库树副本。
+     * 回调在会话锁内同步触发，此处仅置空引用，不做任何阻塞操作。
+     */
+    override fun onSessionLocked() {
+        lastSyncedDb = null
+        lastSyncEngine = null
+        clearPendingConflictSession()
+        _recentSyncEvents.value = emptyList()
+    }
 
     /**
      * H4-断点11 整改：解锁后自动重同步前判断是否已配置云同步（不触发网络）。
@@ -192,7 +212,8 @@ open class SyncCoordinator @Inject constructor(
         try {
         val remotePath = testRemotePath ?: resolveRemotePath(activeFile.name)
 
-        val syncDir = File(context.cacheDir, "sync").apply { if (!exists()) mkdirs() }
+        // ISSUE-P1-07：目录名与 SyncCacheEvictor 共用同一常量，杜绝两处字面量漂移
+        val syncDir = File(context.cacheDir, SyncCache.CACHE_DIR_NAME).apply { if (!exists()) mkdirs() }
         val syncCache = SyncCache(syncDir)
         val syncEngine = SyncEngine(provider, syncCache)
         // 离线开关联动：设置页开关传导至引擎决策树

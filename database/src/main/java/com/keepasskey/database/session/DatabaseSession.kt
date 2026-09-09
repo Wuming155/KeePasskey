@@ -5,6 +5,7 @@ import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.model.KdbxGroup
 import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.core.result.KdbxResult
+import com.keepasskey.core.session.SessionLockObserver
 import com.keepasskey.database.file.KdbxDatabase
 import com.keepasskey.database.file.KdbxFile
 import com.keepasskey.database.file.KdbxHeader
@@ -46,6 +47,9 @@ class DatabaseSession {
     private var passwordCache: CharArray? = null
     private var keyFileCache: ByteArray? = null
     private val credentialLock = Any()
+    // ISSUE-P1-07：会话终止观察者集合——锁定/关闭时同步通知各派生敏态数据的持有方清理
+    private val sessionLockObservers = LinkedHashSet<SessionLockObserver>()
+    private val observerLock = Any()
     // H4-只读整改：以只读模式打开的会话，一切落盘写操作硬拒绝
     private var readOnlyMode: Boolean = false
 
@@ -60,6 +64,40 @@ class DatabaseSession {
         get() = readOnlyMode
 
     private val mutex = Mutex()
+
+    /**
+     * 注册会话终止观察者（ISSUE-P1-07）。
+     *
+     * 典型用途：同步缓存在 `cacheDir` 落盘了完整 KDBX 密文快照，必须在锁库/关闭时
+     * 一并销毁，否则「锁定」之后密文仍可被离线无限期爆破。观察者由 app 侧在 DI 装配期注册。
+     *
+     * @return 观察者此前未注册时返回 true（重复注册为幂等无操作，返回 false）
+     */
+    fun addLockObserver(observer: SessionLockObserver): Boolean = synchronized(observerLock) {
+        sessionLockObservers.add(observer)
+    }
+
+    /** 注销会话终止观察者；未注册时返回 false */
+    fun removeLockObserver(observer: SessionLockObserver): Boolean = synchronized(observerLock) {
+        sessionLockObservers.remove(observer)
+    }
+
+    /**
+     * 通知全部观察者会话已终止。
+     *
+     * 锁定/关闭是不可失败的原子动作：观察者异常一律隔离吞掉，绝不允许某个派生数据的
+     * 清理失败反噬会话锁定本身（观察者须按 [SessionLockObserver] 契约自行记录失败）。
+     */
+    private fun notifySessionLockObservers() {
+        val snapshot = synchronized(observerLock) { sessionLockObservers.toList() }
+        for (observer in snapshot) {
+            try {
+                observer.onSessionLocked()
+            } catch (_: Throwable) {
+                // 隔离：清理失败不得阻断锁定流程
+            }
+        }
+    }
 
     /**
      * 在锁保护下获取当前缓存凭据的克隆副本并执行 [block]。
@@ -410,6 +448,8 @@ class DatabaseSession {
         _database.value?.clearSensitiveData()
         _database.value = null
         _state.value = SessionState.LOCKED
+        // ISSUE-P1-07：锁定即销毁——连同派生的敏态产物（同步缓存密文快照）一并终止生命周期
+        notifySessionLockObservers()
     }
 
     /**
@@ -424,6 +464,8 @@ class DatabaseSession {
         activePathIdentifier = null
         saveWriter = null
         _state.value = SessionState.CLOSED
+        // ISSUE-P1-07：关闭隐含锁定，派生敏态产物同样必须清理
+        notifySessionLockObservers()
     }
 
     /**

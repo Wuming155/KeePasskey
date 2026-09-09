@@ -6,6 +6,7 @@ import java.io.FileOutputStream
 import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
+import java.nio.file.attribute.PosixFilePermission
 import java.security.MessageDigest
 import java.util.UUID
 
@@ -29,6 +30,12 @@ data class SyncCacheState(
  * - `<hash>.baseversion`：基准版本号（最后确认与云端一致时的 SHA-256 十六进制）
  * - `<hash>.basecache`：基准内容快照（最后确认与云端一致时的完整字节）
  * - `<hash>.meta`：简易 key=value 行文本元数据（remotePath, etag, lastSyncMillis）
+ *
+ * ISSUE-P1-07 数据生命周期治理：
+ * 1. 全部落盘文件（含临时文件）显式收敛为「仅属主可读写」（0600，目录 0700）——
+ *    cacheDir 虽位于应用私有目录，但绝不依赖系统默认 umask；
+ * 2. 提供 [clear]（单远端路径）与 [clearAll]（全量）两级销毁入口，
+ *    由会话锁定 / 同步凭据销毁时机驱动，杜绝密文快照无限期驻留。
  */
 open class SyncCache(private val cacheDir: File) {
 
@@ -36,6 +43,7 @@ open class SyncCache(private val cacheDir: File) {
         if (!cacheDir.exists()) {
             cacheDir.mkdirs()
         }
+        restrictToOwnerOnly(cacheDir, isDirectory = true)
     }
 
     /**
@@ -235,6 +243,25 @@ open class SyncCache(private val cacheDir: File) {
     }
 
     /**
+     * 销毁全部远端路径的缓存（ISSUE-P1-07）。
+     *
+     * 会话锁定与同步凭据销毁时调用：缓存内是**完整 KDBX 密文快照**，锁定后若不清理，
+     * 设备失窃即可被离线无限期爆破主密码——「锁定」必须在数据生命周期上真正闭环。
+     * 仅清空目录内容（目录本身保留，[SyncCache] 构造期保证其存在）。
+     *
+     * @return 是否全部删除成功（存在删除失败项时返回 false，调用方可据此告警）
+     */
+    fun clearAll(): Boolean {
+        val children = cacheDir.listFiles() ?: return true
+        var allDeleted = true
+        for (child in children) {
+            val removed = if (child.isDirectory) child.deleteRecursively() else child.delete()
+            allDeleted = allDeleted && removed
+        }
+        return allDeleted
+    }
+
+    /**
      * 生成唯一临时文件路径。
      * 固定名 tmp 在并发写同一 remotePath 时会互相覆盖，造成 A 的 rename 交付 B 的
      * 内容（交叉污染）；对齐 Wave 9 WebDAV uploadAtomic 临时名唯一化的同类整改语义。
@@ -260,7 +287,10 @@ open class SyncCache(private val cacheDir: File) {
      * 优先 ATOMIC_MOVE，不支持时降级 REPLACE_EXISTING，绝不做非原子 copyTo。
      */
     private fun moveAtomically(tmpFile: File, targetFile: File) {
-        if (tmpFile.renameTo(targetFile)) return
+        if (tmpFile.renameTo(targetFile)) {
+            restrictToOwnerOnly(targetFile, isDirectory = false)
+            return
+        }
         try {
             Files.move(
                 tmpFile.toPath(), targetFile.toPath(),
@@ -268,6 +298,29 @@ open class SyncCache(private val cacheDir: File) {
             )
         } catch (_: AtomicMoveNotSupportedException) {
             Files.move(tmpFile.toPath(), targetFile.toPath(), StandardCopyOption.REPLACE_EXISTING)
+        }
+        restrictToOwnerOnly(targetFile, isDirectory = false)
+    }
+
+    /**
+     * 收敛文件权限为「仅属主可访问」（ISSUE-P1-07 验收标准 2）。
+     *
+     * 缓存文件承载完整 KDBX 密文快照，即便位于应用私有目录也必须显式降权：
+     * 默认 umask 通常给出 0644，同 UID（`sharedUserId`、调试备份、root 场景）之外
+     * 的读取面应被彻底关闭。优先走 POSIX 精确置位（0600 / 0700）；
+     * 非 POSIX 文件系统（如 Windows 开发机 / FAT 分区）降级为 `java.io` 语义尽力而为。
+     */
+    private fun restrictToOwnerOnly(file: File, isDirectory: Boolean) {
+        runCatching {
+            Files.setPosixFilePermissions(
+                file.toPath(),
+                if (isDirectory) DIRECTORY_OWNER_ONLY else FILE_OWNER_ONLY
+            )
+        }.onFailure {
+            // 降级路径：仅属主可读可写；目录额外需要属主可执行（进入权限）
+            file.setReadable(true, true)
+            file.setWritable(true, true)
+            if (isDirectory) file.setExecutable(true, true) else file.setExecutable(false, false)
         }
     }
 
@@ -293,6 +346,8 @@ open class SyncCache(private val cacheDir: File) {
             fos.flush()
             fos.fd.sync()
         }
+        // 密文自落盘第一刻起即为仅属主可见，绝不在窗口期内以默认 umask 权限暴露
+        restrictToOwnerOnly(tmpFile, isDirectory = false)
     }
 
     companion object {
@@ -306,6 +361,19 @@ open class SyncCache(private val cacheDir: File) {
         private const val KEY_REMOTE_PATH = "remotePath"
         private const val KEY_ETAG = "etag"
         private const val KEY_LAST_SYNC_MILLIS = "lastSyncMillis"
+
+        /**
+         * 同步缓存目录名（`context.cacheDir` 下的相对路径）。
+         * 由 app 侧 [SyncCache] 使用方与缓存清理器共用，避免两处各写字面量而漂移。
+         */
+        const val CACHE_DIR_NAME = "sync"
+
+        private val FILE_OWNER_ONLY = setOf(
+            PosixFilePermission.OWNER_READ,
+            PosixFilePermission.OWNER_WRITE
+        )
+
+        private val DIRECTORY_OWNER_ONLY = FILE_OWNER_ONLY + PosixFilePermission.OWNER_EXECUTE
 
         fun sha256Hex(data: ByteArray): String {
             val digest = MessageDigest.getInstance("SHA-256")

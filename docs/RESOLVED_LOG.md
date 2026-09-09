@@ -254,6 +254,17 @@
     4. `SyncNetworkOptions` 新增 `ssrfAllowedHosts: Set<String> = emptySet()`——显式、可审计的白名单豁免通道（默认空 = 不豁免），满足「可显式白名单豁免」验收项，生产默认恒为空。
   - **测试证据**：新增 `sync/src/test/java/com/keepasskey/sync/network/SyncEndpointGuardTest.kt` 16 例（桶名注入 `x@evil.com` / `x#` / `x?` / IP 格式 / 非法与合法桶名；端点内网与云元数据字面 IP / 本地内网保留名 / userinfo 注入 / 公网放行 / 白名单豁免；`isBlockedAddress` IPv4+IPv6 网段判定；`SsrfGuardDns` 拒绝纯内网、拒绝公私混合重绑定、放行公网、白名单豁免），并在 `S3SyncProviderTest`（+3）与 `WebDavSyncProviderTest`（+2）补齐 Provider 构造期注入被拒回归锁——三类注入（`x@evil.com`、`x#`、内网 IP）均按验收标准 fail-closed 抛 `InvalidEndpointError`。全量回归 **566 例：554 通过 / 0 失败 / 12 跳过**（sync 121 → 142）。
 
+- **ZT-07（ISSUE-P1-07，同步缓存锁库后不清理，KDBX 密文长期驻留）**：已修复（2026-09-09）。
+  - **缺陷**：`SyncCoordinator` 在 `context.cacheDir/sync` 落盘 `<sha256(remotePath)>.cache`（工作副本）与 `.basecache`（三方合并基准），二者均为**完整 KDBX 密文**；`DatabaseSession.lock()` / `close()` 仅销毁内存主凭据与数据库树，`SyncCredentialsStore.clear()` 只清 SharedPreferences，二者**均不触碰该目录**，而 `SyncCache.clear()` 方法在 `app/src/main` 下零调用方。后果：设备失窃后，攻击者可对两份密文快照无限期离线爆破主密码——「假设已被入侵」下的数据生命周期缺少终止点。此外缓存文件沿用默认 umask（通常 0644），未做显式降权；`SyncCoordinator` 作为单例持有的 `lastSyncedDb` / `pendingLocalDb` / `pendingRemoteDb`（整棵 `KdbxDatabase` 树，含全部 `ProtectedString`）同样跨锁定周期驻留。
+  - **整改依据**：NIST SP 800-207「数据可见性与生命周期治理」；`data_extraction_rules` 不覆盖 `cacheDir`，缓存必须由应用自行治理。
+  - **整改**：
+    1. core 新增会话终止观察者契约 `SessionLockObserver`（`core/src/main/java/com/keepasskey/core/session/SessionLockObserver.kt`，`fun interface` + `onSessionLocked()`），KDoc 固化三条契约：非阻塞（回调在会话锁内同步触发，严禁重入会话 API）、幂等、自容错（会话为保锁定原子性会隔离吞掉回调异常）；
+    2. `DatabaseSession` 新增 `addLockObserver` / `removeLockObserver`（重复注册幂等），并在 `lock()` 与 `close()` 收尾处同步 `notifySessionLockObservers()`——逐个隔离异常，任一观察者的清理失败绝不反噬「锁定」本身；
+    3. app 新增单例 `SyncCacheEvictor`（实现 `SessionLockObserver`），统一收口两条销毁时机：`DatabaseModule.provideDatabaseSession` 在装配期注册为会话观察者（覆盖手动锁定 / 熄屏熔断 / 后台超时 / 切换密码库全部路径），`SyncCredentialsStore.clear()` 直接调用（凭据销毁 = 同步关系终止，缓存不得成为无主密文）；「哪些文件属于同步缓存」的知识保留在 sync 模块，app 侧不重复枚举后缀；
+    4. `SyncCoordinator` 实现 `SessionLockObserver` 并在 init 注册自身：锁库即释放 `lastSyncedDb` / `lastSyncEngine` / 冲突会话持有的 `pendingLocalDb` / `pendingRemoteDb`，补上内存侧生命周期终止点（磁盘侧由 `SyncCacheEvictor` 负责）；
+    5. `SyncCache` 权限加固：新增 `clearAll()`（销毁全部远端路径的缓存内容），全部落盘文件（含 tmp）经 `restrictToOwnerOnly` 显式收敛——优先 POSIX 精确置位（文件 0600 / 目录 0700），非 POSIX 文件系统（Windows / FAT）降级为 `java.io` 仅属主语义；缓存目录名统一收口为 `SyncCache.CACHE_DIR_NAME`，`SyncCoordinator` 与 `SyncCacheEvictor` 共用，杜绝字面量漂移。
+  - **测试证据**：新增 `app/src/test/java/com/keepasskey/app/sync/SyncCacheEvictorTest.kt` 5 例（锁库 / 关闭后缓存目录为空、未注册观察者时不越权清理、凭据清空连带销毁、目录缺失时幂等），`database/src/test/java/com/keepasskey/database/session/DatabaseSessionLockObserverTest.kt` 3 例（锁定与关闭均触发、重复注册幂等与注销、观察者抛异常不得阻断锁库），`SyncCacheTest` +3 例（单路径 `clear` 销毁全部后缀、`clearAll` 后目录为空、文件权限 0600 / 目录 0700，POSIX 视图不支持时按 `Assume` 跳过）。全量回归 **602 例：589 通过 / 0 失败 / 13 跳过**（app 196 → 201、database 160 → 163、sync 142 → 145；新增 1 例跳过为 Windows 无 POSIX 权限视图的权限断言）。
+
 ### 2.6 凭据提供者端到端契约（P1-01）
 
 > 来源：2026-09-09 Android 16+ 真机实测回归（系统设置内已可勾选启用 KeePasskey，但第三方应用调起后握手/响应失败）。

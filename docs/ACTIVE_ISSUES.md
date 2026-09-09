@@ -17,25 +17,7 @@
 
 ---
 
-## P1 高危与核心功能问题（4 项）
-
-### ISSUE-P1-07 (ZT-07): 同步缓存锁库后不清理，KDBX 密文长期驻留
-- **优先级**：P1（数据生命周期 / Assume Breach）
-- **分类**：静态存储 / 残留数据
-- **背景与现象**：
-  `SyncCoordinator.kt:192-193` 在 `context.cacheDir/sync` 落盘 `<sha256(remotePath)>.cache` 与 `.basecache`（两份完整 KDBX 密文）。`DatabaseSession.lock()`（`DatabaseSession.kt:396-402`）与 `SyncCredentialsStore.clear()`（`:260-262`）**均不触碰该目录**；`SyncCache.clear()`（`:220-235`）方法存在但在 `app/src/main` 下**零调用方**。
-  后果：设备失窃后，攻击者可离线对两份密文快照无限期暴力破解主密码——「假设已被入侵」下的数据生命周期缺少终止点。
-- **整改依据**：NIST SP 800-207「数据可见性与生命周期治理」；`data_extraction_rules` 不覆盖 cacheDir。
-- **涉及核心文件**：
-  - `app/src/main/java/com/keepasskey/app/sync/SyncCoordinator.kt`
-  - `sync/src/main/java/com/keepasskey/sync/cache/SyncCache.kt`
-  - `database/src/main/java/com/keepasskey/database/session/DatabaseSession.kt`
-- **验收标准**：
-  1. `lock()` / `SyncCredentialsStore.clear()` 触发缓存清理（或按策略加密缓存并绑定会话密钥）；
-  2. 缓存文件显式 `chmod 0600`；
-  3. 单测覆盖锁库后缓存目录为空。
-
----
+## P1 高危与核心功能问题（3 项）
 
 ### ISSUE-P1-08 (ZT-08): 生物封印凭据可被系统 PIN 解封，且新增指纹不使既有凭据失效
 - **优先级**：P1（认证强度 / 凭据失效）
