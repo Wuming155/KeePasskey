@@ -54,3 +54,31 @@
 #    服务回调与 PendingIntentHandler 结果回传依赖框架反射；consumer 规则缺失时兜底。
 -keep class androidx.credentials.** { *; }
 -dontwarn androidx.credentials.**
+
+# 10. AndroidX WorkManager 与 Room 反射实例化
+#     WorkManager 启动初始化 WorkDatabase_Impl 时通过反射获取无参构造函数，
+#     在 R8 优化/剪裁下需显式保留其构造器，防止出现 NoSuchMethodException 导致 InitializationProvider 启动崩溃。
+-keep class * extends androidx.room.RoomDatabase {
+    public <init>();
+}
+-keep class androidx.work.impl.WorkDatabase_Impl {
+    public <init>();
+    *;
+}
+-keepclassmembers class androidx.work.impl.WorkDatabase_Impl {
+    public <init>();
+    *;
+}
+-keep class * extends androidx.work.ListenableWorker {
+    public <init>(android.content.Context, androidx.work.WorkerParameters);
+}
+-keep class * extends androidx.work.Worker {
+    public <init>(android.content.Context, androidx.work.WorkerParameters);
+}
+
+# 11. ZXing / 条形码与二维码扫描库
+-keep class com.journeyapps.barcodescanner.** { *; }
+-keep class com.google.zxing.** { *; }
+-dontwarn com.google.zxing.**
+-dontwarn com.journeyapps.barcodescanner.**
+
