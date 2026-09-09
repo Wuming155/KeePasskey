@@ -67,6 +67,18 @@ data class KdbxGroup(
         return null
     }
 
+    /**
+     * 本子树（含自身）是否包含指定 UUID 的分组。
+     *
+     * 对齐官方 KeePass `PwGroup.IsContainedIn` 的祖先/后代判定语义：
+     * 回收站分流据此判断「某组是否位于回收站之内」或「某组是否包含回收站」，
+     * 从而在移动/删除时避免把回收站移入自身造成的自嵌套与数据丢失。
+     */
+    fun subtreeContainsGroup(groupId: KdbxUuid): Boolean {
+        if (id == groupId) return true
+        return subgroups.any { it.subtreeContainsGroup(groupId) }
+    }
+
     fun clearSensitiveData() {
         entries.forEach { it.clearSensitiveData() }
         subgroups.forEach { it.clearSensitiveData() }

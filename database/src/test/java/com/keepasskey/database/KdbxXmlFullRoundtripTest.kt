@@ -411,4 +411,77 @@ class KdbxXmlFullRoundtripTest {
         assertEquals(Instant.EPOCH, result.rootGroup.times.locationChanged)
         assertFalse(result.rootGroup.times.expires)
     }
+
+    /**
+     * ISSUE-P1-03 回归：回收站「保留桶」结构完整往返——
+     * 回收站组（TrashBin 图标 + 禁用 AutoType/搜索）、桶内条目（携带 previousParentGroup 回退指针）、
+     * 桶内嵌套子分组，以及 Meta 的 recycleBinUuid/Enabled/Changed 三字段均须无损往返。
+     */
+    @Test
+    fun testRecycleBinBucketStructureRoundtrip() {
+        val originalGroupId = KdbxUuid.random()
+        val binId = KdbxUuid.random()
+        val nestedBinSubgroupId = KdbxUuid.random()
+        val binChanged = Instant.parse("2024-05-01T08:30:00Z")
+
+        val recycledEntry = KdbxEntry(
+            fields = mapOf(KdbxConstants.Fields.TITLE to ProtectedString("Recycled Item", isProtected = false)),
+            parentGroupId = binId,
+            previousParentGroup = originalGroupId
+        )
+        val nestedInBin = KdbxGroup(
+            id = nestedBinSubgroupId,
+            parentGroupId = binId,
+            name = "Bin Subfolder"
+        )
+        val recycleBin = KdbxGroup(
+            id = binId,
+            name = "Recycle Bin",
+            iconId = 43,
+            enableAutoType = false,
+            enableSearching = false,
+            entries = listOf(recycledEntry),
+            subgroups = listOf(nestedInBin)
+        )
+        val normalGroup = KdbxGroup(id = originalGroupId, name = "Work")
+        val rootGroup = KdbxGroup(
+            name = "Root",
+            subgroups = listOf(normalGroup, recycleBin)
+        )
+
+        val originalDb = KdbxDatabase(
+            header = KdbxHeader.createDefault(useArgon2 = false),
+            rootGroup = rootGroup,
+            recycleBinEnabled = true,
+            recycleBinUuid = binId,
+            recycleBinChanged = binChanged
+        )
+
+        val bos = ByteArrayOutputStream()
+        KdbxFile.save(bos, originalDb, testPassword)
+        val loadedDb = KdbxFile.load(ByteArrayInputStream(bos.toByteArray()), testPassword)
+
+        // Meta 回收站三字段
+        assertTrue(loadedDb.recycleBinEnabled)
+        assertEquals(binId, loadedDb.recycleBinUuid)
+        assertEquals(binChanged, loadedDb.recycleBinChanged)
+
+        // 回收站组属性（官方 EnsureRecycleBin：TrashBin 图标 + 禁用 AutoType/搜索）
+        val loadedBin = loadedDb.rootGroup.findGroup(binId)
+        assertNotNull(loadedBin)
+        assertEquals("Recycle Bin", loadedBin!!.name)
+        assertEquals(43, loadedBin.iconId)
+        assertEquals(false, loadedBin.enableAutoType)
+        assertEquals(false, loadedBin.enableSearching)
+
+        // 桶内条目：父组为回收站、previousParentGroup 回退指针保留
+        val loadedRecycled = loadedBin.entries.single()
+        assertEquals("Recycled Item", loadedRecycled.title)
+        assertEquals(binId, loadedRecycled.parentGroupId)
+        assertEquals(originalGroupId, loadedRecycled.previousParentGroup)
+
+        // 桶内嵌套子分组保留
+        assertEquals(nestedBinSubgroupId, loadedBin.subgroups.single().id)
+        assertEquals("Bin Subfolder", loadedBin.subgroups.single().name)
+    }
 }

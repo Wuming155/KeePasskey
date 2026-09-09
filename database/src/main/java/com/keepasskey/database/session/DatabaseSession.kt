@@ -8,6 +8,7 @@ import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.database.file.KdbxDatabase
 import com.keepasskey.database.file.KdbxFile
 import com.keepasskey.database.file.KdbxHeader
+import com.keepasskey.database.history.HistoryManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -227,11 +228,21 @@ class DatabaseSession {
             }
 
             try {
+                // ISSUE-P1-03 Retention 维护：按 Meta.maintenanceHistoryDays 自动修剪超期历史快照
+                // （官方 KeePass DatabaseOperationsForm「删除 N 天前的历史条目」语义），
+                // 使该 Meta 字段真实生效；仅在确有修剪时重建内存树，避免每次保存无谓拷贝。
+                val prunedRoot = HistoryManager.pruneGroupHistoryByAge(db.rootGroup, db.maintenanceHistoryDays)
+                val dbToSave = if (prunedRoot !== db.rootGroup) {
+                    db.copy(rootGroup = prunedRoot).also { _database.value = it }
+                } else {
+                    db
+                }
+
                 // TASK-42 整改（P2-2）：Argon2 派生与流加密为 CPU 密集，序列化走 Default；
                 // 仅字节落盘（writeAtomic + fsync）走 IO——对齐 exportToBytes 的既有调度先例
                 val serialized = withContext(Dispatchers.Default) {
                     ByteArrayOutputStream().also { buffer ->
-                        KdbxFile.save(buffer, db, pwd, keyFileCache)
+                        KdbxFile.save(buffer, dbToSave, pwd, keyFileCache)
                     }.toByteArray()
                 }
                 writer(serialized)

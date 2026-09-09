@@ -17,25 +17,7 @@
 
 ---
 
-## P1 高危与核心功能问题（7 项）
-
-### ISSUE-P1-03 (P1-8 残余): KDBX Meta 与 Group 回收站保留桶机制补齐
-- **优先级**：P1（数据完整性）
-- **分类**：KDBX 格式标准 / 存储
-- **背景与现象**：
-  Meta 和 Group 读写已补齐 7 个官方字段与 CustomData/Tags，但官方 KeePass 2.x 的回收站（RecycleBin）条目保留与自动清理（Retention / Maintenance）桶机制尚未完全对齐。
-- **整改依据**：
-  KeePass 2.61.1 C# 官方实现 `PwDatabase.cs` 与 `PwGroup.cs` 回收站策略。
-- **涉及核心文件**：
-  - `database/src/main/java/com/keepasskey/database/KdbxDatabase.kt`
-  - `database/src/main/java/com/keepasskey/database/xml/KdbxXmlGroupReader.kt`
-  - `database/src/main/java/com/keepasskey/database/xml/KdbxXmlStreamWriter.kt`
-- **验收标准**：
-  1. 正确处理 RecycleBin 启用/禁用状态下的条目删除与软删除逻辑；
-  2. 历史版本与回收站条目上限自动修剪；
-  3. 往返序列化单测覆盖回收站保留桶结构。
-
----
+## P1 高危与核心功能问题（6 项）
 
 ### ISSUE-P1-04 (ZT-04): 主密码解锁零失败节流与锁定，失败态主密码滞留堆内存
 - **优先级**：P1（反暴力破解 / 内存治理）

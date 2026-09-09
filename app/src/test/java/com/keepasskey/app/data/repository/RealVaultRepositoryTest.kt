@@ -569,4 +569,113 @@ class RealVaultRepositoryTest {
 
         password.fill('0')
     }
+
+    /**
+     * ISSUE-P1-03 数据完整性：删除「包含回收站」的祖先组必须走物理删除（官方
+     * pgRecycleBin.IsContainedIn(pg) 分支），绝不能把回收站连同子树移入自身——
+     * 旧实现会因 saveGroup 找不到已被删的父组而静默丢库。
+     */
+    @Test
+    fun `删除包含回收站的父组走物理删除避免自嵌套丢库`() = runTest {
+        val rootId = KdbxUuid.random()
+        val binId = KdbxUuid.random()
+        val ancestorId = KdbxUuid.random()
+        val binEntryId = KdbxUuid.random()
+
+        val binEntry = KdbxEntry(
+            id = binEntryId,
+            parentGroupId = binId,
+            fields = mapOf(KdbxConstants.Fields.TITLE to ProtectedString("In Bin", false))
+        )
+        val recycleBin = KdbxGroup(
+            id = binId,
+            parentGroupId = ancestorId,
+            name = "Recycle Bin",
+            iconId = 43,
+            entries = listOf(binEntry)
+        )
+        val ancestor = KdbxGroup(
+            id = ancestorId,
+            parentGroupId = rootId,
+            name = "Ancestor Of Bin",
+            subgroups = listOf(recycleBin)
+        )
+        val root = KdbxGroup(id = rootId, name = "Root", subgroups = listOf(ancestor))
+        val db = KdbxDatabase(
+            header = KdbxHeader.createDefault(),
+            rootGroup = root,
+            recycleBinEnabled = true,
+            recycleBinUuid = binId
+        )
+
+        val session = DatabaseSession()
+        session.setDatabaseForTesting(db)
+        val repository = RealVaultRepository(
+            createMockContext(tempFolder.root), session,
+            com.keepasskey.app.data.logger.DebugLogBuffer(), createTestStrings()
+        )
+
+        repository.deleteGroup(ancestorId.toHexString())
+
+        val after = session.databaseFlow.first()!!
+        val remainingGroups = after.rootGroup.allGroups()
+        assertNull("祖先组应被物理删除", remainingGroups.firstOrNull { it.id == ancestorId })
+        assertNull("其内嵌回收站随子树物理删除", remainingGroups.firstOrNull { it.id == binId })
+        assertNull("回收站内条目随子树物理删除", after.rootGroup.allEntries().firstOrNull { it.id == binEntryId })
+        assertTrue("根组必须存活，不得整库丢失", remainingGroups.any { it.id == rootId })
+        assertTrue("应追加祖先组墓碑", after.deletedObjects.any { it.id == ancestorId })
+    }
+
+    /**
+     * ISSUE-P1-03：条目位于回收站的**嵌套子分组**内时按官方
+     * pgParent.IsContainedIn(pgRecycleBin) 物理删除并追加墓碑；
+     * 旧实现只比对直接父组，会漏判嵌套情形而错误地再次「移入回收站」。
+     */
+    @Test
+    fun `删除回收站子分组内的条目走物理删除并追加墓碑`() = runTest {
+        val rootId = KdbxUuid.random()
+        val binId = KdbxUuid.random()
+        val binSubId = KdbxUuid.random()
+        val entryId = KdbxUuid.random()
+
+        val nestedEntry = KdbxEntry(
+            id = entryId,
+            parentGroupId = binSubId,
+            fields = mapOf(KdbxConstants.Fields.TITLE to ProtectedString("Nested In Bin", false))
+        )
+        val binSub = KdbxGroup(
+            id = binSubId,
+            parentGroupId = binId,
+            name = "Bin Subfolder",
+            entries = listOf(nestedEntry)
+        )
+        val recycleBin = KdbxGroup(
+            id = binId,
+            parentGroupId = rootId,
+            name = "Recycle Bin",
+            iconId = 43,
+            subgroups = listOf(binSub)
+        )
+        val root = KdbxGroup(id = rootId, name = "Root", subgroups = listOf(recycleBin))
+        val db = KdbxDatabase(
+            header = KdbxHeader.createDefault(),
+            rootGroup = root,
+            recycleBinEnabled = true,
+            recycleBinUuid = binId
+        )
+
+        val session = DatabaseSession()
+        session.setDatabaseForTesting(db)
+        val repository = RealVaultRepository(
+            createMockContext(tempFolder.root), session,
+            com.keepasskey.app.data.logger.DebugLogBuffer(), createTestStrings()
+        )
+
+        repository.deleteEntry(entryId.toHexString())
+
+        val after = session.databaseFlow.first()!!
+        assertNull("嵌套于回收站内的条目应被物理删除", after.rootGroup.allEntries().firstOrNull { it.id == entryId })
+        assertTrue("应追加该条目墓碑", after.deletedObjects.any { it.id == entryId })
+        assertNotNull("回收站组自身应保留", after.rootGroup.allGroups().firstOrNull { it.id == binId })
+    }
 }

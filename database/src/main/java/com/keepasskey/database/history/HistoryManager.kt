@@ -1,6 +1,8 @@
 package com.keepasskey.database.history
 
 import com.keepasskey.core.model.KdbxEntry
+import com.keepasskey.core.model.KdbxGroup
+import java.time.Duration
 import java.time.Instant
 
 /**
@@ -92,6 +94,58 @@ object HistoryManager {
                 lastModificationTime = Instant.now()
             )
         )
+    }
+
+    /**
+     * 官方数据库维护操作「删除 N 天前的历史条目」的单条目实现
+     * （KeePass 2.61.1 `DatabaseOperationsForm` + `PwDatabase.MaintenanceHistoryDays`）：
+     * 移除 [entry] 历史列表中 `lastModificationTime` 早于 `now - maintenanceHistoryDays` 的快照。
+     *
+     * 官方判据 `(dtNow - peHist.LastModificationTime) >= tsSpan` 即「保留期外」移除，
+     * 等价于本实现的「仅保留 lastModificationTime 严格晚于 cutoff 的快照」。
+     *
+     * 安全取舍：`maintenanceHistoryDays <= 0` 时**不执行任何修剪**并原样返回。
+     * 官方 uint 语义下 0 会删除全部历史，但本函数用于保存时的**自动**保留期维护，
+     * 0/负值一律视为「未配置保留期」以免误删（缺省 365 天，与官方默认一致）。
+     *
+     * @return 修剪后的条目；若无历史或无快照超期，返回**同一实例**（便于调用方免拷贝判定）。
+     */
+    fun pruneHistoryByAge(
+        entry: KdbxEntry,
+        maintenanceHistoryDays: Int,
+        now: Instant = Instant.now()
+    ): KdbxEntry {
+        if (maintenanceHistoryDays <= 0 || entry.history.isEmpty()) return entry
+        val cutoff = now.minus(Duration.ofDays(maintenanceHistoryDays.toLong()))
+        val kept = entry.history.filter { it.times.lastModificationTime.isAfter(cutoff) }
+        if (kept.size == entry.history.size) return entry
+        return entry.copy(history = kept)
+    }
+
+    /**
+     * 对整棵分组树递归执行历史保留期维护（[pruneHistoryByAge]）。
+     * 仅在实际发生修剪时才重建对应分组节点；全树无变化时返回**同一根实例**，
+     * 供 [com.keepasskey.database.session.DatabaseSession] 在保存前免拷贝判定。
+     */
+    fun pruneGroupHistoryByAge(
+        group: KdbxGroup,
+        maintenanceHistoryDays: Int,
+        now: Instant = Instant.now()
+    ): KdbxGroup {
+        if (maintenanceHistoryDays <= 0) return group
+
+        var changed = false
+        val newEntries = group.entries.map { entry ->
+            val pruned = pruneHistoryByAge(entry, maintenanceHistoryDays, now)
+            if (pruned !== entry) changed = true
+            pruned
+        }
+        val newSubgroups = group.subgroups.map { sub ->
+            val pruned = pruneGroupHistoryByAge(sub, maintenanceHistoryDays, now)
+            if (pruned !== sub) changed = true
+            pruned
+        }
+        return if (changed) group.copy(entries = newEntries, subgroups = newSubgroups) else group
     }
 
     /**

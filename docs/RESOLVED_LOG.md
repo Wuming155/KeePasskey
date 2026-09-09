@@ -16,6 +16,7 @@
    - [2.5 零信任专项审计（ZT 系列）](#25-零信任专项审计zt-系列)
    - [2.6 凭据提供者端到端契约（P1-01）](#26-凭据提供者端到端契约p1-01)
    - [2.7 生成侧私钥内存脱敏（P1-02）](#27-生成侧私钥内存脱敏p1-02)
+   - [2.8 KDBX 回收站保留桶与历史保留期维护（P1-03）](#28-kdbx-回收站保留桶与历史保留期维护p1-03)
 
 ---
 
@@ -285,3 +286,27 @@
     4. `PasskeyCreateActivity.buildRegistrationJson` 补齐派生数组擦除（authData / attestationObjectBytes finally 清零），并以 KDoc 声明不可消解边界——系统 Credential Manager 契约要求响应为 JSON 字符串，其内容均为公开注册材料（不含私钥），属受控且可接受驻留。
   - **验证过程记录**：初版 `scalarToHexChars` 存在「自右向左回填时高/低半字节写反」缺陷（每字节半字节序颠倒，签名验签闭环测试立即捕获 20/20 公钥反推不匹配），已修正为先写低半字节再写高半字节，并以 50 例随机标量对照 `String.format("%064x")` 全等通过。
   - **测试证据**：新增 `crypto/src/test/java/com/keepasskey/crypto/PasskeyCryptoEngineTest.kt` 2 例——「ES256 私钥保持定长 64 字符小写 hex 且经受控字节流通道签名可用」（既有文本解析契约不变 + `usePrivateKeyBytes` 消费契约）与「Ed25519 与 RS256 私钥经受控字节流通道签名可用」（Base64 文本字节流 44B 解码还原种子 / PKCS#8 DER 签名）。全量回归 **545 例：533 通过 / 0 失败 / 12 跳过**（crypto 52 → 54）。
+
+---
+
+### 2.8 KDBX 回收站保留桶与历史保留期维护（P1-03）
+
+> 来源：ISSUE-P1-03（P1-8 残余）。Meta 与 Group 的 7 个官方字段及 CustomData/Tags 已于 P1-8 补齐读写往返，本节闭环官方 KeePass 2.x 回收站（RecycleBin）分流策略与保留期/维护（Retention / Maintenance）桶机制。整改依据以 KeePass 2.61.1 C# 官方实现为终极裁决：`KeePass/Forms/MainForm_Functions.cs`（`EnsureRecycleBin` / `DeleteEntry` / `DeleteGroup` 分流）与 `KeePass/Forms/DatabaseOperationsForm.cs`（`MaintenanceHistoryDays` 历史维护）。
+
+- **ISSUE-P1-03（KDBX Meta 与 Group 回收站保留桶机制补齐）**：已修复（2026-09-09）。
+  - **缺陷**：
+    1. **删除「包含回收站」的祖先组会静默丢库**（数据完整性 P1）：`RecycleBinCoordinator.deleteGroup` 旧实现仅沿父链上溯判断「目标是否位于回收站内」，未覆盖官方 `pgRecycleBin.IsContainedIn(pg)`（回收站是目标的后代）分支 → 走软删路径把整棵子树（连同回收站自身）移入 `binGroup.id`，而该父组已先被 `deleteGroup(uuid)` 摘除，`saveGroup` 找不到父组 → 目标组及其全部内容**无墓碑静默消失**。
+    2. **回收站嵌套子分组内的条目漏判**：`deleteEntry` / `batchDeleteEntries` 旧实现只比对「直接父组 UUID 或名称是否为回收站」，未覆盖官方 `pgParent.IsContainedIn(pgRecycleBin)`（父组位于回收站子树内）→ 位于回收站子分组内的条目被错误地再次「移入回收站」而非物理删除。
+    3. **`maintenanceHistoryDays` 为死字段**：Meta 的保留期字段读写往返完好，但全仓无任何消费方——官方「删除 N 天前的历史条目」维护操作从未生效，历史保留期（Retention）缺失自动清理。
+    4. **回收站组创建属性未对齐官方 `EnsureRecycleBin`**：懒创建的回收站组仅设 TrashBin 图标（43），缺 `EnableAutoType=false` / `EnableSearching=false`，导致回收站条目仍被搜索与 AutoType 命中。
+  - **整改**：
+    1. `core/model/KdbxGroup.kt` 新增 `subtreeContainsGroup(groupId)` 原语，对齐官方 `PwGroup.IsContainedIn` 的祖先/后代判定语义（含自身）；
+    2. `RecycleBinCoordinator` 三处删除路径统一改走官方分流：新增只读 `resolveRecycleBinGroup(db)`（UUID 命中优先、名称回退、不创建不改 Meta），`deleteGroup` 物理删除条件补齐为「回收站禁用 ∨ 目标即/在回收站子树内 ∨ **目标包含回收站**」，`deleteEntry` / `batchDeleteEntries` 改为「父组即回收站或位于回收站子树内 → 物理删除 + 墓碑」；
+    3. `database/history/HistoryManager.kt` 新增 `pruneHistoryByAge` / `pruneGroupHistoryByAge`，实现官方 `DatabaseOperationsForm` 维护算法（移除 `lastModificationTime` 早于 `now - maintenanceHistoryDays` 的历史快照）；安全取舍：`maintenanceHistoryDays <= 0` 一律视为「未配置保留期」不修剪（官方 uint 语义下 0 会删全部历史，自动路径下拒绝该破坏性行为）；全树无变化时返回同一实例，供保存路径免拷贝；
+    4. `DatabaseSession.save()` 序列化前接线保留期维护：按 `db.maintenanceHistoryDays` 修剪超期历史，仅在确有修剪时重建内存树并回写 `_database`，使该 Meta 字段真实生效；
+    5. `getOrCreateRecycleBinGroup` 懒创建对齐官方 `EnsureRecycleBin`：补 `enableAutoType=false` / `enableSearching=false`（TrashBin 图标 43 保持）。
+  - **测试证据**：
+    - `database/HistoryManagerTest` 新增 4 例：保留期修剪移除超期快照、`<=0` 不修剪（同一实例）、无超期返回同一实例、整树递归维护且无变化免拷贝；
+    - `database/KdbxXmlFullRoundtripTest` 新增 1 例 `testRecycleBinBucketStructureRoundtrip`：回收站保留桶结构（TrashBin 图标 + 禁用 AutoType/搜索的回收站组、桶内条目 `previousParentGroup` 回退指针、桶内嵌套子分组、Meta `recycleBinUuid/Enabled/Changed` 三字段）完整往返无损；
+    - `app/RealVaultRepositoryTest` 新增 2 例：删除包含回收站的父组走物理删除且根组存活（不整库丢失）+ 追加墓碑、删除回收站嵌套子分组内条目物理删除 + 追加墓碑。
+    - 全量回归 **573 例：561 通过 / 0 失败 / 12 跳过**（app 183 → 185、database 155 → 160；跳过 12 例仍为 `LiveSyncServersTest` 真实联调用例）。

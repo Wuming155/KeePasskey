@@ -7,6 +7,7 @@ import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.model.KdbxGroup
 import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.core.result.KdbxResult
+import com.keepasskey.database.file.KdbxDatabase
 import com.keepasskey.database.session.DatabaseSession
 import kotlinx.coroutines.flow.first
 import java.time.Instant
@@ -41,13 +42,15 @@ internal class RecycleBinCoordinator(
                 strings.get(R.string.repo_entry_not_found)
             )
 
-        val binUuid = db.recycleBinUuid
-        val isAlreadyInRecycle = (binUuid != null && entry.parentGroupId == binUuid) ||
-                (entry.parentGroupId != null && db.rootGroup.allGroups().any {
-                    it.id == entry.parentGroupId && (it.name == RealVaultRepository.RECYCLE_BIN_NAME || it.name.equals("Recycle Bin", ignoreCase = true))
-                })
+        // 官方 KeePass MainForm_Functions 分流：回收站禁用，或条目父组即为回收站/位于回收站
+        // 子树内（PwGroup.IsContainedIn 语义），一律物理删除并追加墓碑；否则软删移入回收站。
+        val binGroup = resolveRecycleBinGroup(db)
+        val entryParentId = entry.parentGroupId
+        val parentInsideBin = binGroup != null &&
+                entryParentId != null &&
+                binGroup.subtreeContainsGroup(entryParentId)
 
-        if (isAlreadyInRecycle || !db.recycleBinEnabled) {
+        if (parentInsideBin || !db.recycleBinEnabled) {
             // 已在回收站内或禁用回收站：物理删除并记录 DeletedObject 墓碑
             databaseSession.deleteEntry(uuid)
             databaseSession.updateDatabaseMeta { cur ->
@@ -56,9 +59,9 @@ internal class RecycleBinCoordinator(
             }
         } else {
             // 移入标准库内回收站组
-            val binGroup = getOrCreateRecycleBinGroup()
+            val targetBin = getOrCreateRecycleBinGroup()
             val moved = entry.copy(
-                parentGroupId = binGroup.id,
+                parentGroupId = targetBin.id,
                 previousParentGroup = entry.parentGroupId,
                 times = entry.times.copy(lastModificationTime = Instant.now())
             )
@@ -89,16 +92,17 @@ internal class RecycleBinCoordinator(
                 strings.get(R.string.repo_group_not_found)
             )
 
-        val alreadyInsideBin = db.recycleBinUuid?.let { binUuid ->
-            var parentId = targetGroup.parentGroupId
-            while (parentId != null) {
-                if (parentId == binUuid) return@let true
-                parentId = db.rootGroup.allGroups().firstOrNull { it.id == parentId }?.parentGroupId
-            }
-            false
-        } ?: false
+        // 官方 KeePass 分组删除分流（MainForm_Functions DeleteGroup）：
+        //  - 回收站禁用；或
+        //  - 目标组即为回收站、或位于回收站子树内（bin.subtreeContains(target)）；或
+        //  - 目标组包含回收站（target.subtreeContains(bin)，官方 pgRecycleBin.IsContainedIn(pg)）
+        // 三者任一成立即物理删除整组并追加墓碑。尤其「目标包含回收站」若走软删，会把回收站
+        // 连同整棵子树移入自身，saveGroup 随即找不到父组而静默丢库——此即 ISSUE-P1-03 数据完整性修复点。
+        val binGroup = resolveRecycleBinGroup(db)
+        val binRelated = binGroup != null &&
+                (binGroup.subtreeContainsGroup(targetGroup.id) || targetGroup.subtreeContainsGroup(binGroup.id))
 
-        if (alreadyInsideBin || !db.recycleBinEnabled) {
+        if (binRelated || !db.recycleBinEnabled) {
             // 已在回收站内（或回收站被禁用）：物理删除整组并记录 DeletedObject 墓碑
             databaseSession.deleteGroup(uuid)
             databaseSession.updateDatabaseMeta { cur ->
@@ -106,9 +110,9 @@ internal class RecycleBinCoordinator(
             }
         } else {
             // 标准回收站语义：整组（含子内容）移入库内回收站组，不产生墓碑
-            val binGroup = getOrCreateRecycleBinGroup()
+            val targetBin = getOrCreateRecycleBinGroup()
             val moved = targetGroup.copy(
-                parentGroupId = binGroup.id,
+                parentGroupId = targetBin.id,
                 previousParentGroup = targetGroup.parentGroupId,
                 times = targetGroup.times.copy(lastModificationTime = Instant.now())
             )
@@ -193,8 +197,7 @@ internal class RecycleBinCoordinator(
                 IllegalStateException(strings.get(R.string.repo_db_locked)),
                 strings.get(R.string.repo_db_locked)
             )
-        val binUuid = db.recycleBinUuid
-        val allGroups = db.rootGroup.allGroups()
+        val binGroup = resolveRecycleBinGroup(db)
         val allEntries = db.rootGroup.allEntries().associateBy { it.id.toHexString() }
 
         val toPermanentDelete = mutableSetOf<KdbxUuid>()
@@ -202,12 +205,13 @@ internal class RecycleBinCoordinator(
 
         for (id in entryIds) {
             val entry = allEntries[id] ?: continue
-            val isAlreadyInRecycle = (binUuid != null && entry.parentGroupId == binUuid) ||
-                    (entry.parentGroupId != null && allGroups.any {
-                        it.id == entry.parentGroupId && (it.name == RealVaultRepository.RECYCLE_BIN_NAME || it.name.equals("Recycle Bin", ignoreCase = true))
-                    })
+            // 官方分流（同 deleteEntry）：父组即为回收站或位于回收站子树内 → 物理删除
+            val entryParentId = entry.parentGroupId
+            val parentInsideBin = binGroup != null &&
+                    entryParentId != null &&
+                    binGroup.subtreeContainsGroup(entryParentId)
 
-            if (isAlreadyInRecycle || !db.recycleBinEnabled) {
+            if (parentInsideBin || !db.recycleBinEnabled) {
                 toPermanentDelete.add(entry.id)
             } else {
                 toMoveToBin.add(entry)
@@ -215,10 +219,10 @@ internal class RecycleBinCoordinator(
         }
 
         if (toMoveToBin.isNotEmpty()) {
-            val binGroup = getOrCreateRecycleBinGroup()
+            val targetBin = getOrCreateRecycleBinGroup()
             for (e in toMoveToBin) {
                 val moved = e.copy(
-                    parentGroupId = binGroup.id,
+                    parentGroupId = targetBin.id,
                     previousParentGroup = e.parentGroupId,
                     times = e.times.copy(lastModificationTime = Instant.now())
                 )
@@ -271,7 +275,10 @@ internal class RecycleBinCoordinator(
             id = KdbxUuid.random(),
             parentGroupId = db.rootGroup.id,
             name = RealVaultRepository.RECYCLE_BIN_NAME,
-            iconId = 43
+            iconId = 43,
+            // 官方 EnsureRecycleBin：回收站组禁用 AutoType 与搜索（PwIcon.TrashBin=43）
+            enableAutoType = false,
+            enableSearching = false
         )
         databaseSession.saveGroup(newBinGroup)
         databaseSession.updateDatabaseMeta {
@@ -282,5 +289,17 @@ internal class RecycleBinCoordinator(
             )
         }
         return newBinGroup
+    }
+
+    /**
+     * 只读定位当前回收站组（不创建、不改 Meta）：优先按 [KdbxDatabase.recycleBinUuid] 命中，
+     * 回退按官方 "Recycle Bin" 名称匹配（兼容外部 KeePass 生成、UUID 未回填的库）。
+     * 找不到返回 null——对应官方 `pgRecycleBin == null`（此时删除走「软删并懒创建回收站」分支）。
+     */
+    private fun resolveRecycleBinGroup(db: KdbxDatabase): KdbxGroup? {
+        db.recycleBinUuid?.let { uuid -> db.rootGroup.findGroup(uuid)?.let { return it } }
+        return db.rootGroup.allGroups().firstOrNull {
+            it.name == RealVaultRepository.RECYCLE_BIN_NAME || it.name.equals("Recycle Bin", ignoreCase = true)
+        }
     }
 }

@@ -2,11 +2,15 @@ package com.keepasskey.database.history
 
 import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.core.model.KdbxEntry
+import com.keepasskey.core.model.KdbxGroup
+import com.keepasskey.core.model.KdbxTimes
 import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.core.security.ProtectedString
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.time.Instant
 
 /**
  * HistoryManager 版本历史归档与回滚单元测试
@@ -152,5 +156,90 @@ class HistoryManagerTest {
         assertEquals(10, current.history.size)
         assertEquals("V14", current.history.first().title)
         assertEquals("V5", current.history.last().title)
+    }
+
+    /**
+     * ISSUE-P1-03：官方 DatabaseOperationsForm「删除 N 天前的历史条目」维护算法——
+     * 仅保留 lastModificationTime 晚于 (now - maintenanceHistoryDays) 的历史快照。
+     */
+    @Test
+    fun `保留期修剪移除超期历史快照`() {
+        val now = Instant.parse("2026-09-09T00:00:00Z")
+        val recent = historySnapshot("recent", now.minusSeconds(86_400L * 10))   // 10 天前
+        val stale = historySnapshot("stale", now.minusSeconds(86_400L * 400))    // 400 天前
+        val ancient = historySnapshot("ancient", now.minusSeconds(86_400L * 800)) // 800 天前
+        val entry = entryOf("current").copy(history = listOf(recent, stale, ancient))
+
+        val pruned = HistoryManager.pruneHistoryByAge(entry, maintenanceHistoryDays = 365, now = now)
+
+        assertEquals(1, pruned.history.size)
+        assertEquals("recent", pruned.history.first().title)
+        // 当前条目自身不受影响
+        assertEquals("current", pruned.title)
+    }
+
+    /**
+     * ISSUE-P1-03：maintenanceHistoryDays <= 0 视为「未配置保留期」，不修剪并原样返回同一实例。
+     */
+    @Test
+    fun `保留期为零或负值不执行修剪`() {
+        val now = Instant.parse("2026-09-09T00:00:00Z")
+        val entry = entryOf("current").copy(
+            history = listOf(historySnapshot("ancient", now.minusSeconds(86_400L * 2000)))
+        )
+        assertSame(entry, HistoryManager.pruneHistoryByAge(entry, 0, now))
+        assertSame(entry, HistoryManager.pruneHistoryByAge(entry, -1, now))
+    }
+
+    /**
+     * ISSUE-P1-03：无快照超期时返回同一实例（保存路径据此免拷贝）。
+     */
+    @Test
+    fun `无超期快照时返回同一实例`() {
+        val now = Instant.parse("2026-09-09T00:00:00Z")
+        val entry = entryOf("current").copy(
+            history = listOf(historySnapshot("fresh", now.minusSeconds(86_400L)))
+        )
+        assertSame(entry, HistoryManager.pruneHistoryByAge(entry, 365, now))
+    }
+
+    /**
+     * ISSUE-P1-03：整树维护递归覆盖嵌套子分组，且全树无变化时返回同一根实例。
+     */
+    @Test
+    fun `整树历史保留期维护递归且无变化时免拷贝`() {
+        val now = Instant.parse("2026-09-09T00:00:00Z")
+
+        // 场景 A：全树历史均在保留期内 → 返回同一根实例
+        val freshEntry = entryOf("fresh").copy(
+            history = listOf(historySnapshot("h", now.minusSeconds(86_400L)))
+        )
+        val unchangedRoot = KdbxGroup(name = "Root", entries = listOf(freshEntry))
+        assertSame(
+            unchangedRoot,
+            HistoryManager.pruneGroupHistoryByAge(unchangedRoot, 365, now)
+        )
+
+        // 场景 B：嵌套子分组内条目含超期历史 → 递归修剪，仅保留期内快照
+        val staleEntry = entryOf("deep").copy(
+            history = listOf(
+                historySnapshot("keep", now.minusSeconds(86_400L * 30)),
+                historySnapshot("drop", now.minusSeconds(86_400L * 500))
+            )
+        )
+        val subGroup = KdbxGroup(name = "Sub", entries = listOf(staleEntry))
+        val root = KdbxGroup(name = "Root", subgroups = listOf(subGroup))
+
+        val prunedRoot = HistoryManager.pruneGroupHistoryByAge(root, 365, now)
+        val prunedDeep = prunedRoot.subgroups.first().entries.first()
+        assertEquals(1, prunedDeep.history.size)
+        assertEquals("keep", prunedDeep.history.first().title)
+    }
+
+    private fun historySnapshot(title: String, lastModified: Instant): KdbxEntry {
+        return KdbxEntry(
+            fields = mapOf(KdbxConstants.Fields.TITLE to ProtectedString(title, isProtected = false)),
+            times = KdbxTimes(lastModificationTime = lastModified)
+        )
     }
 }
