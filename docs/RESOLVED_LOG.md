@@ -14,6 +14,7 @@
    - [2.3 加解密实现审查（9 项）](#23-加解密实现审查9-项)
    - [2.4 测试覆盖缺口审查（7 项）](#24-测试覆盖缺口审查7-项)
    - [2.5 零信任专项审计（ZT 系列）](#25-零信任专项审计zt-系列)
+   - [2.6 凭据提供者端到端契约（P1-01）](#26-凭据提供者端到端契约p1-01)
 
 ---
 
@@ -22,6 +23,7 @@
 | TASK ID | 领域 | 任务主题 | 优先级 | 完成日期 | 核心实现与代码证据 / 说明 |
 |:---:|:---:|---|:---:|:---:|---|
 | **TASK-01** | 安全 | HMAC 防篡改回归锁 flaky 排查与定型 | **P0** | 2026-09-07 | 定位并修复终止块未校验即置 `terminated=true` 导致篡改文件 ~10% 概率静默解锁的漏洞；改为仅校验通过后置位并在 `verifyEndOfStream` 权威检查点 fail-closed；`testCorruptHmacBlock` 20 连跑零失败。 |
+| **TASK-02** | 平台集成 | 凭据提供者服务实机端到端注册与调起（ISSUE-P1-01） | **P1** | 2026-09-09 | 根因：全部凭据条目 PendingIntent 误用 `FLAG_IMMUTABLE`，系统注入的 fillIn extras 被静默丢弃 → 链式解锁 / 密码保存 / 应用内注册全链路握手失败。新增 `CredentialPendingIntents.ENTRY_FLAGS`（`FLAG_MUTABLE｜FLAG_UPDATE_CURRENT`）统一替换 5 处创建点，附 4 例契约回归锁。详见 [§2.6](##26-凭据提供者端到端契约专项p1-01)。 |
 | **TASK-03** | 依赖 | kapt → KSP 2.3.11 迁移 + 启用内置 Kotlin | **P2** | 2026-09-08 | 移除 kapt 插件，全面接入 KSP 2.3.11 与 AGP 9 内置 Kotlin 2.4.10，编译速度提升。 |
 | **TASK-04** | 存储 | 设置持久化迁移 Preferences DataStore | **P2** | 2026-09-08 | 21 个设置项全量迁移 DataStore，提供 Flow 响应式通知与 SharedPreferences 自动平滑迁移。 |
 | **TASK-05** | 构建 | Gradle 版本目录（`libs.versions.toml`）集中管理 | **P2** | 2026-09-08 | 5 个子模块依赖与插件统一收口至版本目录，依赖版本规范化。 |
@@ -231,3 +233,22 @@
     5. `CredentialResponseAssembler` 移除候选 entry 上的 `BiometricPromptData` 假门控（无法闭环且与窗口内验证重复弹窗），Passkey 候选与密码候选统一「不下发即不验证」模式；同步清理 `KeePasskeyCredentialProviderService` 失效的 `biometricAuthManager` 注入与 import；
     6. 手动确认降级文案向用户明示「未执行用户验证 (UV=0)」并提示仅在可信设备继续（`passkey_assert/create_manual_hint` 等 7 条新字符串），杜绝「看似已验证」的误导。
   - **测试证据**：新增 `app/src/test/java/com/keepasskey/app/passkey/PasskeyAuthFlagsTest.kt` 7 例，锁定两条验收分支——「无生物（手动确认通过）→ 断言 / 注册 UV=0」与「生物识别 / 锁屏凭据二次确认通过 → UV=1」，并覆盖未验证 / 失败 / 取消两路径全 fail-closed 及注册 AT 位独立。全量回归 **539 例：527 通过 / 0 失败 / 12 跳过**（app 172 → 179）。
+
+### 2.6 凭据提供者端到端契约（P1-01）
+
+> 来源：2026-09-09 Android 16+ 真机实测回归（系统设置内已可勾选启用 KeePasskey，但第三方应用调起后握手/响应失败）。
+
+- **ISSUE-P1-01（TASK-02，凭据提供者服务实机端到端注册与调起）**：已修复（2026-09-09）。
+  - **现象与定界**：`AndroidManifest.xml` 的凭据服务契约名 `android.credentials.provider`、`SERVICE_INTERFACE` action、`BIND_CREDENTIAL_PROVIDER_SERVICE` 权限、`@xml/credential_provider_service`（含 `<capabilities>` 双能力声明与 `settingsActivity`）**全部正确**，系统在「设置 → 密码、密钥和自动填充」中可正常列出并启用 KeePasskey，说明服务发现与绑定链路无问题；故障发生在**绑定之后的请求注入阶段**。
+  - **根因（平台契约级）**：挂在凭据条目上的 PendingIntent 全部以 `FLAG_IMMUTABLE` 创建，而系统 Credential Manager 在用户点选条目时是以 **fillIn Intent** 方式 `send()` 该 PendingIntent 的——请求本体（`EXTRA_BEGIN_GET_CREDENTIAL_REQUEST` / `EXTRA_GET_CREDENTIAL_REQUEST` / `EXTRA_CREATE_CREDENTIAL_REQUEST`）由系统在 send 阶段注入。`PendingIntent.FLAG_IMMUTABLE` 的官方语义为「**传给 send 方法用于填充未设置属性的附加 Intent 将被忽略**」，注入的 extras 因此被**静默丢弃**（已核对 `androidx.credentials:credentials:1.6.0` 源码 KDoc：`Action` / `AuthenticationAction` / `CreateEntry` / `PasswordCredentialEntry` / `PublicKeyCredentialEntry` / `CustomCredentialEntry` 一致要求 `must be created ... with flag PendingIntent.FLAG_MUTABLE to allow the Android system to attach the final request, and NOT with flag FLAG_ONE_SHOT`）。
+  - **端到端后果**：
+    1. `CredentialUnlockActivity` 的 `PendingIntentHandler.retrieveBeginGetCredentialRequest(intent)` 恒为 null → 走 `RESULT_CANCELED` → **锁库态下点选「解锁 KeePasskey」永远无法回传候选**（系统按规范将选择器重新弹出并标注该 Action「无有效凭据」），对应验收标准 3 失败；
+    2. `PasswordSaveActivity` 取不到 `CreatePasswordRequest` → `password` 恒为 null → **密码保存链路 100% 失败**；
+    3. `PasskeyCreateActivity` 取不到 `callingAppInfo` → 非浏览器（`android:apk-key-hash`）路径无法绑定调用包名，注册被拒；
+    4. 密码 / Passkey 候选条目自身不读取系统注入 extras（凭据内容由本应用 extras 承载），故表现为「部分场景可用、部分场景静默失败」的难定位握手故障。
+  - **整改**：
+    1. 新增单一事实源 `app/src/main/java/com/keepasskey/app/passkey/CredentialPendingIntents.kt`，以 `const val ENTRY_FLAGS = FLAG_MUTABLE or FLAG_UPDATE_CURRENT` 固化官方契约，并在 KDoc 中完整记录「为何必须 MUTABLE / 为何禁止 ONE_SHOT」与三类失败后果（常量声明为 `const val`，使纯 JVM 单测无需 Robolectric 即可断言）；
+    2. `KeePasskeyCredentialProviderService` 3 处创建点（解锁 `AuthenticationAction`、`Passkey` 注册 `CreateEntry`、密码保存 `CreateEntry`）与 `CredentialResponseAssembler` 2 处创建点（`PublicKeyCredentialEntry`、`PasswordCredentialEntry`）统一改用 `CredentialPendingIntents.ENTRY_FLAGS`，全凭据路径再无 `FLAG_IMMUTABLE` 残留；
+    3. `CredentialUnlockActivity` 加固：`lifecycleScope`（`Dispatchers.Main.immediate`）内已完成回传时跳过解锁页渲染，消除「已解锁态点选解锁 Action」的解锁页闪屏后再 finish；缺失原始请求的告警日志显式标注唯一成因（`AuthenticationAction` 的 PendingIntent 需 `FLAG_MUTABLE`），便于真机日志定位。
+  - **不相干项说明**：传统 Autofill 兼容层（`KeePasskeyAutofillService`）的 PendingIntent 语义与 Credential Manager 不同，保持 `FLAG_IMMUTABLE` 不变，未纳入本次改动面。
+  - **测试证据**：新增 `app/src/test/java/com/keepasskey/app/passkey/CredentialPendingIntentsTest.kt` 4 例，锁定不变式——必须含 `FLAG_MUTABLE`、必须含 `FLAG_UPDATE_CURRENT`、严禁 `FLAG_IMMUTABLE`、严禁 `FLAG_ONE_SHOT`。全量回归 **543 例：531 通过 / 0 失败 / 12 跳过**（app 179 → 183）。

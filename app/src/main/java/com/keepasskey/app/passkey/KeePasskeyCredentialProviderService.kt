@@ -55,7 +55,10 @@ import javax.inject.Inject
  * 2. onBeginCreateCredentialRequest: 响应新凭据创建请求，引导至独立的 Passkey 注册或密码保存流程；
  * 3. onClearCredentialStateRequest: 响应凭据状态清理；
  * 4. TASK-44 黑名单：命中黑名单的调用包名在查询前即 fail-closed 返回空响应（不产出解锁
- *    Action 与任何凭据候选），与传统 Autofill 服务共用同一份黑名单。
+ *    Action 与任何凭据候选），与传统 Autofill 服务共用同一份黑名单；
+ * 5. ISSUE-P1-01：全部条目的 PendingIntent 统一使用 [CredentialPendingIntents.ENTRY_FLAGS]
+ *    （`FLAG_MUTABLE`）——系统以 fillIn Intent 注入最终请求，误用 `FLAG_IMMUTABLE` 会让注入的
+ *    extras 被静默丢弃，链式解锁与密码保存全链路握手失败（详见该常量 KDoc）。
  */
 @AndroidEntryPoint
 class KeePasskeyCredentialProviderService : CredentialProviderService() {
@@ -126,7 +129,8 @@ class KeePasskeyCredentialProviderService : CredentialProviderService() {
                 this,
                 REQUEST_CODE_UNLOCK,
                 unlockIntent,
-                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+                // ISSUE-P1-01：必须 FLAG_MUTABLE，系统需注入原始 BeginGetCredentialRequest
+                CredentialPendingIntents.ENTRY_FLAGS
             )
             val action = AuthenticationAction.Builder(
                 getString(R.string.cred_unlock_action_title),
@@ -222,7 +226,8 @@ class KeePasskeyCredentialProviderService : CredentialProviderService() {
                     this,
                     REQUEST_CODE_CREATE_PASSKEY,
                     intent,
-                    PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+                    // ISSUE-P1-01：必须 FLAG_MUTABLE，系统需注入 ProviderCreateCredentialRequest
+                    CredentialPendingIntents.ENTRY_FLAGS
                 )
 
                 val accountLabel = userName.ifBlank { getString(R.string.cred_create_entry_title) }
@@ -244,7 +249,8 @@ class KeePasskeyCredentialProviderService : CredentialProviderService() {
                     this,
                     REQUEST_CODE_CREATE_PASSWORD,
                     intent,
-                    PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+                    // ISSUE-P1-01：必须 FLAG_MUTABLE，系统需注入 ProviderCreateCredentialRequest
+                    CredentialPendingIntents.ENTRY_FLAGS
                 )
 
                 val createEntry = CreateEntry.Builder(getString(R.string.cred_create_entry_title), pendingIntent)

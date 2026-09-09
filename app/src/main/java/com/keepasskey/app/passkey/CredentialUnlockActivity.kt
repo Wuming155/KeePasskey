@@ -28,6 +28,11 @@ import javax.inject.Inject
  *
  * 链路：锁库 Action → 本 Activity 解锁 → setResult(BeginGetCredentialResponse) → 系统呈现候选。
  *
+ * ISSUE-P1-01：原始请求由**系统**经 fillIn Intent 注入，故上游 [AuthenticationAction] 的
+ * PendingIntent 必须以 `FLAG_MUTABLE` 创建（见 [CredentialPendingIntents.ENTRY_FLAGS]）；
+ * 若误用 `FLAG_IMMUTABLE`，[PendingIntentHandler.retrieveBeginGetCredentialRequest] 恒为 null，
+ * 本 Activity 只能 `RESULT_CANCELED`——表现为「解锁成功却永不出现凭据候选」。
+ *
  * ISSUE-P0-01 (ZT-01)：本 Activity 属不经 MainActivity 的独立冷启动入口，
  * 防护与主入口同源——挂载 FlagSecureGuard 动态守卫（首帧同步生效，冷启动会话
  * 必为锁定态 → 强制遮蔽无条件成立）；熄屏熔断与后台超时锁定由进程级
@@ -71,11 +76,14 @@ class CredentialUnlockActivity : FragmentActivity() {
             }
         }
 
-        renderUnlockScreen(originalRequest)
+        // ISSUE-P1-01 加固：lifecycleScope 为 Dispatchers.Main.immediate，上述 launch 已在
+        // 主线程同步执行完毕；若已完成回传则不渲染解锁页，杜绝解锁后闪屏再 finish。
+        if (!completed) renderUnlockScreen(originalRequest)
     }
 
     private fun renderUnlockScreen(originalRequest: BeginGetCredentialRequest?) {
         lifecycleScope.launch {
+            if (completed) return@launch
             val settings = settingsRepository.getSettings().first()
             setContent {
                 UnlockScreen(
@@ -98,7 +106,9 @@ class CredentialUnlockActivity : FragmentActivity() {
         lifecycleScope.launch {
             try {
                 if (originalRequest == null) {
-                    Log.w(TAG, "缺少原始凭据请求，无法链式回传候选")
+                    // 唯一成因：上游 AuthenticationAction 的 PendingIntent 未以 FLAG_MUTABLE 创建，
+                    // 系统注入的 fillIn extras 被丢弃（ISSUE-P1-01）。fail-closed，绝不伪造候选。
+                    Log.w(TAG, "缺少原始凭据请求（AuthenticationAction PendingIntent 需 FLAG_MUTABLE），无法链式回传候选")
                     failAndFinish()
                     return@launch
                 }

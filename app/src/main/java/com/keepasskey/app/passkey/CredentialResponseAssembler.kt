@@ -143,7 +143,8 @@ class CredentialResponseAssembler @Inject constructor(
                 context,
                 requestCodes.next(),
                 intent,
-                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+                // ISSUE-P1-01：必须 FLAG_MUTABLE，系统需注入 ProviderGetCredentialRequest
+                CredentialPendingIntents.ENTRY_FLAGS
             )
 
             val entryBuilder = PublicKeyCredentialEntry.Builder(
@@ -197,7 +198,8 @@ class CredentialResponseAssembler @Inject constructor(
                 context,
                 requestCodes.next(),
                 intent,
-                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+                // ISSUE-P1-01：必须 FLAG_MUTABLE，系统需注入 ProviderGetCredentialRequest
+                CredentialPendingIntents.ENTRY_FLAGS
             )
 
             val entryBuilder = PasswordCredentialEntry.Builder(

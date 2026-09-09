@@ -17,25 +17,7 @@
 
 ---
 
-## P1 高危与核心功能问题（10 项）
-
-### ISSUE-P1-01 (TASK-02): 凭据提供者服务实机端到端注册与调起
-- **优先级**：P1（平台契约）
-- **分类**：平台集成 / Credential Manager
-- **背景与现象**：
-  代码层已核实 `AndroidManifest.xml` 中凭据服务契约名 `android.credentials.provider` 正确，`@xml/credential_provider_service` 资源在位，Autofill 兼容层同步配置。但在 Android 16+ 真机实测中，系统设置内勾选 KeePasskey 凭据服务后，第三方应用调起凭据提供者存在端到端握手或响应失败问题。
-- **整改依据**：
-  Android 16 官方 Credential Manager Provider 实现规范（`androidx.credentials:credentials:1.6.0`）。
-- **涉及核心文件**：
-  - `app/src/main/AndroidManifest.xml`
-  - `app/src/main/java/com/keepasskey/app/autofill/KeePasskeyCredentialProviderService.kt`
-  - `app/src/main/res/xml/credential_provider_service.xml`
-- **验收标准**：
-  1. 在 Android 16+ 系统「设置 → 密码、密钥和自动填充」中成功启用 KeePasskey；
-  2. 真实 App（如 Chrome / 示例登录页）调起 Credential Manager 时，KeePasskey 能正常唤起匹配的密码或 Passkey 凭据；
-  3. 锁库态下能拉起 `AuthenticationAction` 解锁后下发凭据。
-
----
+## P1 高危与核心功能问题（9 项）
 
 ### ISSUE-P1-02 (P0-7 残余): Passkey 私钥在生成侧与受保护字段的内存脱敏评估
 - **优先级**：P1（安全纵深）
