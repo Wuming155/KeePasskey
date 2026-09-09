@@ -85,6 +85,32 @@ dependencies {
     testImplementation(libs.junit)
 }
 
+// Rust 迁移 PoC · Batch 4：宿主侧（桌面 JVM）原生运行时验证。
+// cargo 产出宿主 cdylib 后经 -Djava.library.path 注入单元测试 JVM，使 NativeArgon2.available
+// 在桌面同样走 Rust 原生路径 —— 以桌面单测的代价获得与 androidTest 等价的 JNI 调用覆盖
+// （Rust 侧 cargo test 只能验纯函数与静态符号，验不了 JNIEnv/byte[]/null 语义，见风险 R6）。
+val hostLibName = System.mapLibraryName("keepasskey_argon2")
+val rustHostTargetDir = layout.buildDirectory.dir("rust/host")
+val rustHostLibDir = rustHostTargetDir.get().asFile.resolve("release")
+
+val cargoHostBuild = tasks.register<Exec>("cargoHostBuild") {
+    group = "build"
+    description = "cargo 构建宿主 cdylib（$hostLibName），供桌面单测加载验证 Rust JNI 桥（Batch 4）"
+    workingDir = rustProjectDir
+    // 产物落 build/ 下，避免污染源码树（Cargo.toml/Cargo.lock 仍入库）
+    environment("CARGO_TARGET_DIR", rustHostTargetDir.get().asFile.absolutePath)
+    commandLine("cargo", "build", "--release")
+    // 未安装 cargo / 离线构建失败时降级为「不产出宿主库」：相关用例 Assume 跳过，不阻断主流程
+    isIgnoreExitValue = true
+    onlyIf {
+        try {
+            ProcessBuilder("cargo", "--version").redirectErrorStream(true).start().waitFor() == 0
+        } catch (t: Throwable) {
+            false
+        }
+    }
+}
+
 // Rust 迁移 PoC · Batch 0：把 -DexportArgon2Vectors 转发进单元测试 JVM，
 // 使 `gradlew :crypto:test -DexportArgon2Vectors=true` 可用 BC 重算并覆写对照向量 JSON；
 // 默认（false）时该测试仅读取已冻结向量并防漂移校验，永不 skip。
@@ -92,5 +118,13 @@ tasks.withType<Test>().configureEach {
     systemProperty(
         "exportArgon2Vectors",
         System.getProperty("exportArgon2Vectors") ?: "false"
+    )
+    // Batch 4：宿主原生库目录进 java.library.path（追加而非覆盖，保留工具链自带路径）
+    dependsOn(cargoHostBuild)
+    jvmArgs(
+        "-Djava.library.path=" + listOfNotNull(
+            System.getProperty("java.library.path"),
+            rustHostLibDir.absolutePath
+        ).joinToString(File.pathSeparator)
     )
 }

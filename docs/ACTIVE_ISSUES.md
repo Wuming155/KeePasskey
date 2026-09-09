@@ -341,6 +341,7 @@
   - `crypto/build.gradle.kts`（Batch 3 接 `cargoNdkBuild`，移除 `externalNativeBuild.cmake`）
   - `crypto/src/main/java/com/keepasskey/crypto/kdf/NativeArgon2.kt`（**不改**：库名/签名/null 语义保持）
   - `crypto/src/test/java/com/keepasskey/crypto/kdf/Argon2BcVectorTest.kt`（Batch 0 向量冻结/防漂移锁）
+  - `crypto/src/test/java/com/keepasskey/crypto/kdf/NativeArgon2HostJniTest.kt`（Batch 4 宿主侧 JNI 运行时验证）
 - **验收标准**：
   1. Rust 内核对全参数域输出与 BC 逐字节一致（`cargo test` 绿）；真实 KeePass/KeePassXC `.kdbx` 可解锁（Batch 4 真机）；
   2. 并行 KDF（rayon）解锁延迟回退在预算内（Batch 4 决策闸门）；
@@ -379,7 +380,35 @@
       0 失败 / 12 跳过**，纯 test 不触发 cargoNdkBuild）；`cargo test` 9/9。基线同步更新 AGENTS.md §1/§5。
     - **体积增量**：Rust .so 含 std+rayon+blake2，较原 C ref 实现（数十 KB/ABI）增约 +0.3~0.5MB/ABI（未压缩）；
       精确 C-vs-Rust APK 增量对照留 Batch 4（需从 git 历史重建 C 基线包）。
-  - **Batch 4–5 待办**：真机互操作 + 性能回归决策闸门（R1 多线程实测）；`git rm` C 遗留、文档流转归档。
+  - **Batch 4 ✅（宿主侧替代验证；R1 决策闸门：通过）**：
+    - **偏差说明（无设备/模拟器）**：本机 `adb devices` 为空、工程无 `androidTest` 源集，无法执行计划原定的
+      instrumented 测试。改为**宿主侧 JNI 运行时验证**（风险 R6 的替代缓解路径）：Gradle 新增 `cargoHostBuild`
+      （`cargo build --release`，`CARGO_TARGET_DIR=<build>/rust/host`；无 cargo 或构建失败时 `onlyIf` +
+      `isIgnoreExitValue` 降级为「不产出宿主库」，相关用例 `Assume` 跳过），产物目录经
+      `-Djava.library.path` 注入单测 JVM → 桌面 `NativeArgon2.available == true`，**原生路径从此被桌面单测真实覆盖**。
+    - **新增用例（crypto 56 → 61）**：
+      - `NativeArgon2HostJniTest` 4 例：①原生 ≡ BC 于 KDBX4 全参数域（12 组：d/id × 0x10/0x13 × 含/不含
+        secret+AD × p=1/4 × m=4096KiB 现实档）逐字节一致；②JNI 边界闸门（type∉{0,2}、version∉{0x10,0x13}、
+        t/p 下界含负值、m<8p、AD 33B 越 R2 上限）全部归一返回 null，且合法基线/AD=32B 必须成功；
+        ③确定性且 secret/AD 参与 H0 运算；④原生 vs BC 性能对照。
+      - `Argon2InteropDiagnosticTest` +1 例：宿主库可用时 `Argon2KdfEngine` 必走原生分支，复现
+        libargon2（C 参考实现）预计算基准 `4423de68…` → **跨实现互操作在原生路径上成立**
+        （真实 KeePass/KeePassXC 不设 KDF 的 `A` 字段，该参数形态即真实解锁路径）。
+    - **R1 决策闸门（宿主 Windows x86_64，m=16MiB t=2，warmup 后取 3 次最优）**：
+      | 档位 | 原生 | BouncyCastle | 加速比 |
+      |---|---|---|---|
+      | p=1 | 11.6 ms | 25.8 ms | 2.22× |
+      | p=2 | 6.8 ms | 21.5 ms | 3.15× |
+      | p=4 | 3.9 ms | 20.8 ms | 5.37× |
+      rayon 多核收益明确（原生 p1→p4 提速约 3×），**无任何性能回退 → 闸门通过，进入 Batch 5**；
+      用例内落 `NATIVE_VS_BC_MAX_RATIO = 2.0` 回归断言（任一档位原生耗时不得超过 BC 的 2 倍）。
+      ⚠️ 该组数据为**宿主侧**绝对值，真机 arm64 实测待设备可用时补（已另立 ISSUE-P3-11）。
+    - **体积增量（C → Rust，AGP strip 后 release `.so`）**：arm64-v8a 17.6KB → 434.0KB；armeabi-v7a
+      19.2KB → 312.7KB；x86 21.9KB → 505.8KB；x86_64 22.4KB → 478.0KB（C 基线取自 Batch 3 前的 CMake 产物
+      `build/intermediates/library_and_local_jars_jni/release/…`）。增量来源：Rust std + rayon/crossbeam + blake2。
+    - `./gradlew.bat test` 全绿（**591 例：579 通过 / 0 失败 / 12 跳过**；crypto 61）；`cargo test` 9/9。
+  - **Batch 5 待办**：`git rm` C 遗留（含 `Argon2BcVectorTest` 模块识别路径修正）、文档流转归档、基线更新。
+  - **遗留已外置**：真机 androidTest 与 arm64 性能实测 → ISSUE-P3-11；`cargo deny check` 待 `cargo install cargo-deny`（R4）。
 
 ---
 
@@ -546,5 +575,29 @@
   2. signCount 做上界钳制与溢出防护，写入改为受控事务；
   3. `setFeature` 失败至少落告警日志；
   4. 测试凭据改为随机生成或必须由环境注入。
+
+---
+
+### ISSUE-P3-11 (P2-14 遗留): Rust Argon2 原生内核的真机 instrumented 验证
+- **优先级**：P3（验证覆盖；依赖外部设备资源）
+- **分类**：crypto 原生 KDF / 测试基础设施
+- **背景与现象**：
+  ISSUE-P2-14 的 Argon2 内核 C→Rust 迁移已在**宿主侧**完成运行时验证（Batch 4：`cargoHostBuild` 产出宿主
+  cdylib，桌面单测经 `-Djava.library.path` 走原生路径，断言原生 ≡ BC 全参数域、≡ libargon2 参考基准，
+  并测得宿主侧性能对照）。但计划原定的**真机/模拟器 instrumented 验证**因本机 `adb devices` 为空、
+  工程无 `androidTest` 源集而未能执行，`NativeArgon2` 在 Android arm64 上的 JNI 加载与端到端解锁
+  目前仅有 `assemble*` 打包期证据（符号/ABI/strip 已核对），缺运行时证据。
+- **整改依据**：`plans/rust-enclave-poc.md` §2 Batch 4；风险 R6（桌面单测无 `.so`，原生路径不被覆盖）。
+- **涉及核心文件**：
+  - `crypto/src/androidTest/java/com/keepasskey/crypto/kdf/`（新增 `NativeArgon2InstrumentedTest`）
+  - `crypto/build.gradle.kts`（新增 `androidTestImplementation(androidx.test.*)` 与 `testInstrumentationRunner`）
+  - `crypto/src/main/java/com/keepasskey/crypto/kdf/NativeArgon2.kt`（被测对象，不改）
+- **验收标准**：
+  1. 起模拟器或连真机后，`connectedAndroidTest` 能加载 APK 内 `libkeepasskey_argon2.so`，
+     断言 `NativeArgon2.available == true` 且派生结果与 BC 冻结向量逐字节一致；
+  2. 用真实 KeePass 2.61.1 / KeePassXC 生成的 Argon2d/id（0x10/0x13）`.kdbx` 语料端到端解锁成功
+     （语料需先补入 `crypto/src/test/resources/argon2-interop/`）；
+  3. 记录 arm64 真机性能数据（t=2/m=64MiB/p=2 与 p=4），与 Batch 4 宿主侧数据并列归档，
+     复核对 R1 决策闸门（原生不得慢于 BC 的 2 倍）。
 
 
