@@ -1,0 +1,16 @@
+# 统一行尾规范：所有文本文件一律以 LF 入库与检出。
+# 背景：ISSUE-P1-02 整改期间曾出现编辑工具将 LF 文件整文件改写为 CRLF 的事故，
+# 本文件为 git 层权威约束，配合 .editorconfig（编辑器层）双重防护。
+* text=auto eol=lf
+
+# Windows 批处理必须保持 CRLF（cmd 解释器硬性要求，禁止规范化）
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# 二进制资产显式标记，杜绝误规范化（text=auto 的内容嗅探兜底之外的保险）
+# 注意：仓库内 *.keyx（database/src/test/resources/fixtures/111.keyx）实为文本 XML
+# KeyFile，须交由 text=auto 嗅探规范化，严禁标记为 binary。
+*.jar binary
+*.kdbx binary
+*.keystore binary
+*.jks binary
