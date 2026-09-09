@@ -20,14 +20,16 @@ object BreachHasher {
     /** SHA-1 十六进制摘要长度 */
     private const val HASH_HEX_LENGTH = 40
 
+    /** HIBP 协议要求大写十六进制摘要 */
+    private val UpperCaseHex = HexFormat { upperCase = true }
+
     /**
      * 计算密码明文字节的 SHA-1 十六进制（大写）。
      *
      * 借用语义：调用方持有 [data] 的独占所有权，本函数不缓存、不留存，用毕由调用方清零。
      */
     fun sha1HexUpper(data: ByteArray): String {
-        val digest = MessageDigest.getInstance("SHA-1").digest(data)
-        return digest.joinToString("") { "%02X".format(it) }
+        return MessageDigest.getInstance("SHA-1").digest(data).toHexString(UpperCaseHex)
     }
 
     /**

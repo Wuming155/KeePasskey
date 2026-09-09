@@ -309,7 +309,7 @@ open class SyncCache(private val cacheDir: File) {
 
         fun sha256Hex(data: ByteArray): String {
             val digest = MessageDigest.getInstance("SHA-256")
-            return digest.digest(data).joinToString("") { "%02x".format(it) }
+            return digest.digest(data).toHexString()
         }
     }
 }

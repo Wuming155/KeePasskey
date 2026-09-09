@@ -485,12 +485,12 @@ class S3SyncProvider(
     }
 
     private fun hmacSha256Hex(key: ByteArray, data: String): String {
-        return hmacSha256(key, data).joinToString("") { "%02x".format(it) }
+        return hmacSha256(key, data).toHexString()
     }
 
     private fun sha256Hex(data: ByteArray): String {
         val digest = MessageDigest.getInstance("SHA-256")
-        return digest.digest(data).joinToString("") { "%02x".format(it) }
+        return digest.digest(data).toHexString()
     }
 
     private fun parseHttpDate(dateStr: String): Long {

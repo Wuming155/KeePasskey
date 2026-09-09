@@ -22,13 +22,7 @@ class KdbxUuid(
 
     fun toByteArray(): ByteArray = data.clone()
 
-    fun toHexString(): String {
-        val sb = StringBuilder(UUID_SIZE * 2)
-        for (b in data) {
-            sb.append(String.format("%02X", b.toInt() and 0xFF))
-        }
-        return sb.toString()
-    }
+    fun toHexString(): String = data.toHexString(UpperCaseHex)
 
     fun toFormattedString(): String {
         val hex = toHexString()
@@ -58,6 +52,9 @@ class KdbxUuid(
     companion object {
         const val UUID_SIZE = 16
 
+        /** 大写无分隔符十六进制格式（与既有存储/展示口径一致，8-4-4-4-12 分组基于该输出） */
+        private val UpperCaseHex = HexFormat { upperCase = true }
+
         val ZERO = KdbxUuid(ByteArray(UUID_SIZE))
 
         private val secureRandom = SecureRandom()
@@ -80,12 +77,7 @@ class KdbxUuid(
             require(clean.length == UUID_SIZE * 2) {
                 "Hex 长度非法: $hex"
             }
-            val bytes = ByteArray(UUID_SIZE)
-            for (i in 0 until UUID_SIZE) {
-                val index = i * 2
-                bytes[i] = clean.substring(index, index + 2).toInt(16).toByte()
-            }
-            return KdbxUuid(bytes)
+            return KdbxUuid(clean.hexToByteArray())
         }
     }
 }

@@ -54,7 +54,7 @@ object HealthCheckEngine {
                 val passBytes = passProtected.readUtf8()
                 try {
                     if (passBytes.isNotEmpty()) {
-                        val hashHex = com.keepasskey.crypto.hash.HashUtil.sha256(passBytes).joinToString("") { "%02x".format(it) }
+                        val hashHex = com.keepasskey.crypto.hash.HashUtil.sha256(passBytes).toHexString()
                         passwordHashCountMap[hashHex] = (passwordHashCountMap[hashHex] ?: 0) + 1
                     }
                 } finally {
@@ -104,7 +104,7 @@ object HealthCheckEngine {
                 if (passLength < 8 || COMMON_WEAK_PASSWORDS.contains(passStr.lowercase())) {
                     isWeak = true
                 }
-                hashHex = com.keepasskey.crypto.hash.HashUtil.sha256(passBytes).joinToString("") { "%02x".format(it) }
+                hashHex = com.keepasskey.crypto.hash.HashUtil.sha256(passBytes).toHexString()
             } finally {
                 java.util.Arrays.fill(passChars, '0')
                 java.util.Arrays.fill(passBytes, 0.toByte())

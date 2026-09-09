@@ -1,8 +1,8 @@
 package com.keepasskey.app.passkey
 
-import android.util.Base64
 import androidx.credentials.provider.CallingAppInfo
 import java.security.MessageDigest
+import kotlin.io.encoding.Base64
 
 /**
  * 调用方 Origin 可信解析器（H1 整改，CWE-346）。
@@ -18,6 +18,12 @@ import java.security.MessageDigest
 object CallingOriginResolver {
 
     const val APK_KEY_HASH_PREFIX = "android:apk-key-hash:"
+
+    /**
+     * URL-Safe 无 Padding Base64（WebAuthn apk-key-hash 语义，对齐 android.util.Base64
+     * 的 URL_SAFE or NO_PADDING or NO_WRAP；ABSENT_OPTIONAL 解码兼容有/无 padding 输入）。
+     */
+    private val Base64UrlNoPadding = Base64.UrlSafe.withPadding(Base64.PaddingOption.ABSENT_OPTIONAL)
 
     /**
      * 浏览器特权白名单（官方 getOrigin 格式）。
@@ -71,10 +77,7 @@ object CallingOriginResolver {
             val signer = callingAppInfo.signingInfo.apkContentsSigners?.firstOrNull()
                 ?: return ""
             val digest = MessageDigest.getInstance("SHA-256").digest(signer.toByteArray())
-            APK_KEY_HASH_PREFIX + Base64.encodeToString(
-                digest,
-                Base64.NO_WRAP or Base64.URL_SAFE or Base64.NO_PADDING
-            )
+            APK_KEY_HASH_PREFIX + Base64UrlNoPadding.encode(digest)
         } catch (_: Throwable) {
             ""
         }

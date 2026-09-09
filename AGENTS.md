@@ -55,7 +55,7 @@ KeePasskey 是一款使用原生 Kotlin 开发的现代化 Android 密码管理�
 
 | 文件 | 内容 | 何时阅读 |
 |------|------|----------|
-| [**docs/STATUS.md**](docs/STATUS.md) | **单一真相源**：当前版本基线、未完成任务唯一看板（49 项：44 ✅ / 2 📋 / 3 ❌）、历史提交日志索引 | **开始任何工作前、检查进度时** |
+| [**docs/STATUS.md**](docs/STATUS.md) | **单一真相源**：当前版本基线、未完成任务唯一看板（53 项：49 ✅ / 2 📋 / 2 ❌）、历史提交日志索引 | **开始任何工作前、检查进度时** |
 | [**docs/FINDINGS_TRACKER.md**](docs/FINDINGS_TRACKER.md) | **历史审查发现跟踪表**：125 项发现的物理核对状态与代码证据 | **确认历史 Bug 是否已修时** |
 | [**docs/HEALTH_CHECK_ROADMAP.md**](docs/HEALTH_CHECK_ROADMAP.md) | **体检批次落地规划**：批次 A–H 的官方依据、范围与验收（对应 TASK-01/03~07） | **执行体检批次整改时** |
 | [**docs/plans/REPAIR_PLAN.md**](docs/plans/REPAIR_PLAN.md) | **残余任务执行方案**：TASK-02（真机回归）/ 19（zxing 评估）/ 43（进阶偏好消费方，拆 43a–43f）/ 48~49 的范围 · 依据 · 风险 · 验收 | **动手实现残余任务前** |
