@@ -1,0 +1,2 @@
+# Rust 构建产物（不入库）；Cargo.lock 保留入库以锁定依赖树、支撑可复现构建（见 ISSUE-P2-14 R4）
+/target

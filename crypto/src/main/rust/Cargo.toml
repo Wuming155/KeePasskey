@@ -1,0 +1,31 @@
+[package]
+name = "keepasskey_argon2"
+version = "0.1.0"
+edition = "2021"
+description = "KeePasskey Argon2 native KDF kernel (Rust secret enclave PoC)"
+license = "Apache-2.0 OR MIT"
+publish = false
+
+[lib]
+name = "keepasskey_argon2"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# 最小化依赖面（供应链收敛）：关闭默认 password-hash/rand，仅取 KDF 所需特性。
+# - alloc：hash_password_into 所需
+# - kdf：argon2 0.6.0 低层 KDF API（hash_password_into 系列）
+# - parallel：启用 rayon 多线程 lanes 计算，保住 p=2/p=4 多核收益（对齐 C 侧 threads=parallelism，缓解 R1）
+# - zeroize：argon2 内部秘密缓冲擦除
+argon2 = { version = "0.6.0", default-features = false, features = ["alloc", "kdf", "parallel", "zeroize"] }
+zeroize = { version = "1", default-features = false, features = ["alloc"] }
+
+[dev-dependencies]
+serde_json = "1"
+hex = "0.4"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+# 不设 panic = "abort"：JNI 边界需 catch_unwind 把 panic 归一为返回 null（Batch 2），
+# abort 会直接终止 App 进程，比 C 侧返回 NULL 更危险。

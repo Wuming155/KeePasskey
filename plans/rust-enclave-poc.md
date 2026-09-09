@@ -40,7 +40,15 @@
 | `crypto/build.gradle.kts` | `externalNativeBuild.cmake` 指向 `src/main/cpp/CMakeLists.txt`；`ndkVersion=28.2.13676358` | 退役 CMake-argon2，改接 cargo-ndk（见 Batch 3） |
 | `crypto/src/main/cpp/argon2/` | vendored PHC 官方 C（1814 行，CC0/Apache-2.0） | Batch 5 移除（git 受控，可回溯） |
 
-**RustCrypto 事实（已核实）**：`argon2` crate 通过可选 `rayon`（`parallel` feature）支持多线程并行 lanes；secret 走 `Argon2::hash_password_into_with_secret`；AD 走 `Params.data()`。AD 长度上限需在 Batch 1 验证是否覆盖 KDBX4 用例（风险 R2）。
+**RustCrypto 事实（Batch 1 已核实并裁定）**：
+- **版本选型**：采用 `argon2 = 0.6.0`（**非** 0.5.3）。0.5.3 **无** `parallel`/`rayon` feature（lanes 单线程计算）；0.6.0 新增 `parallel`（= `dep:rayon`）与 `kdf` feature，启用后多线程计算 lanes，**保住 p=2/p=4 多核收益**（对齐 C 侧 `threads=parallelism`），缓解 R1。实测：parallel 开启后输出与 BC 冻结向量**逐字节一致**（线程化不改变结果）。
+- **依赖特性**：`default-features = false, features = ["alloc", "kdf", "parallel", "zeroize"]`——关闭 `password-hash`/`rand`，最小化供应链面。实际编译树含 rayon/crossbeam 系（R1 代价），均为 RustCrypto/主流可信 crate。
+- **secret(K)**：走 `Argon2::new_with_secret(secret, alg, ver, params)` 后 `hash_password_into(pwd, salt, out)`（**注意**：无 `hash_password_into_with_secret` 这一 API，原计划表述有误，已订正）。`MAX_SECRET_LEN = 0xFFFFFFFF`，与 C/BC 任意长度一致。
+- **AD(X)**：走 `ParamsBuilder::data(AssociatedData::new(ad)?)`，注入 H0 的 X 段；`keyid` **不进入 H0**（仅 PHC 字符串字段），故迁移**不得**设置 keyid。
+- **R2 裁定（AD 长度上限）**：`AssociatedData::MAX_LEN = Params::MAX_DATA_LEN = 32` 字节，**0.5.3 与 0.6.0 均如此**——硬上限，无法通过公开 API 表达 > 32B 的 AD。而 C/BC 接受任意长度 AD。
+  - **现实影响**：KeePass 2.61.1 / KeePassXC 生成 KDBX4 时**不设置** Argon2 KDF 的 `A`（associatedData）字段（VariantDictionary 可选、实务恒空），故真实互操作风险 ≈ 0。
+  - **fail-closed 策略**：Rust `derive()` 对 AD > 32B 返回 `None`（等价 C 的非法/失败 NULL）。为避免相对 C 路径的行为回退，**Batch 3 需在 `Argon2KdfEngine` 增加一处最小 Kotlin 守卫**：`associatedData != null && size > 32` 时走 BC 兜底路径（此为对「Kotlin 零改动」目标的**受控偏差**，由 R2 触发，Batch 3 决策）。
+- **H0 逐字段核对**：argon2 0.6.0 `initial_hash` 顺序 = `p‖outlen‖m‖t‖ver‖type‖len(pwd)‖pwd‖len(salt)‖salt‖len(secret)‖secret‖len(ad)‖ad`，与 Argon2 参考实现 / BC / C 桥完全一致 → AD≤32、任意 secret 场景 Rust≡BC≡C。
 
 ---
 
@@ -169,8 +177,8 @@
 
 | 编号 | 风险 | 影响 | 缓解 |
 |---|---|---|---|
-| **R1** | 并行性能回退（C 现用 `threads=parallelism` 真多核） | 解锁变慢，用户可感知 | 启用 RustCrypto `parallel`(rayon) feature；Batch 4 设决策闸门，超预算不强行推进 |
-| **R2** | RustCrypto `Params.data()`（AD）长度上限可能 < KDBX4 语料 | 含长 AD 的库无法解锁 | Batch 1 专项验证；若受限，评估 fork/patch 或该场景回退 BC/C |
+| **R1** | 并行性能回退（C 现用 `threads=parallelism` 真多核） | 解锁变慢，用户可感知 | **Batch 1 缓解**：改用 `argon2 0.6.0` + `parallel`(rayon) feature（0.5.3 无此能力），lanes 多线程计算，输出经 BC 向量验证逐字节一致；Batch 4 真机设决策闸门，超预算不强行推进 |
+| **R2** | RustCrypto `AssociatedData` 长度上限可能 < KDBX4 语料 | 含长 AD 的库无法解锁 | **Batch 1 裁定**：上限恒为 **32B**（0.5.3/0.6.0 同），C/BC 无此限。真实 KeePass/KeePassXC 不设 `A` 字段→风险≈0；Rust `derive()` 对 AD>32 fail-closed 返回 None；Batch 3 在 `Argon2KdfEngine` 加最小守卫将 AD>32 路由 BC 兜底（受控偏差） |
 | **R3** | secret/AD 罕见路径与 KeePass 官方语义偏差 | 少数库互操作失败 | Batch 1 用 BC 等价向量 + Batch 4 真机语料双重覆盖 |
 | **R4** | "零二进制信任根"哲学 vs 引入 Rust 依赖树 | 供应链信任面扩大 | Rust 源码 + 依赖全量入库；`cargo deny` 锁许可证/advisory；可复现构建 |
 | **R5** | cargo-ndk 在 CI/Windows 构建链不稳定 | 构建失败 | 优先 Git Bash（项目已用 `MSYS_NO_PATHCONV=1 ./gradlew.bat`）；CI 固定 Rust/NDK 版本并缓存 |

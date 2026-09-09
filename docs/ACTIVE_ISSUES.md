@@ -347,7 +347,17 @@
   3. 秘密缓冲全路径 `zeroize` 确定性擦除，C 手动 `malloc/free/wipe` 面消除；
   4. `assembleDebug`+`assembleRelease`(R8) 通过，APK 含 4 ABI Rust `.so`，全程源码构建；
   5. 每批 `./gradlew.bat test`（+ `cargo test`）全绿，文档与代码同批提交推送。
-- **进度**：Batch 0 已完成（向量冻结 + ISSUE 登记）；Batch 1–3 进行中。
+- **进度**：
+  - **Batch 0 ✅**：BC 对照向量冻结（14 条）+ ISSUE 登记 + 基线 585（crypto 55）。
+  - **Batch 1 ✅**：`crypto/src/main/rust/` crate 落地（`argon2 0.6.0` + `zeroize`），纯 `derive()` 复刻 C 参数闸门；
+    `cargo test` 7/7 全绿——IETF draft-irtf-cfrg-argon2-12 §5 官方 KAT（d/id × 0x10/0x13）逐字节命中，
+    BC 冻结向量 12 条 AD≤32 逐字节等价、2 条 64B 长 AD 探针 fail-closed 返回 None，闸门负例与确定性覆盖。
+    - **R1 裁定**：`argon2 0.5.3` 无 `parallel`/rayon（单线程 lanes）→ 改用 **0.6.0** 并启用 `parallel`(rayon)，
+      多线程输出与 BC 逐字节一致，保住 p=2/p=4 多核收益（真机性能对照留 Batch 4 决策闸门）。
+    - **R2 裁定**：`AssociatedData::MAX_LEN = 32B`（0.5.3/0.6.0 同）为硬上限；真实 KeePass/KeePassXC 不设 KDF `A`
+      字段 → 互操作风险 ≈ 0；`derive()` 对 AD>32 fail-closed 返回 None，**Batch 3 须在 `Argon2KdfEngine` 加最小
+      Kotlin 守卫**将 AD>32 路由 BC 兜底（对「Kotlin 零改动」的受控偏差）。
+  - **Batch 2–3 进行中**。
 
 ---
 
