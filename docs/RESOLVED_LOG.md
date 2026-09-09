@@ -13,6 +13,7 @@
    - [2.2 安全审查 Wave 13（16 项）](#22-安全审查-wave-1316-项)
    - [2.3 加解密实现审查（9 项）](#23-加解密实现审查9-项)
    - [2.4 测试覆盖缺口审查（7 项）](#24-测试覆盖缺口审查7-项)
+   - [2.5 零信任专项审计（ZT 系列）](#25-零信任专项审计zt-系列)
 
 ---
 
@@ -196,3 +197,15 @@
 - **T-04（S3 SigV4 官方向量比对）**：已完成。引入独立 Python 预计算的 SigV4 向量（TASK-26）。
 - **T-05（Keystore 真实路径测试）**：已完成。JVM 层补齐真实 AES-GCM 算法单测（TASK-40）。
 - **T-07（P0 缺陷回归用例）**：已修复。锁死子树完整性与 IV 校验断言。
+
+### 2.5 零信任专项审计（ZT 系列）
+
+> 来源：2026-09-09 零信任专项审计（NIST SP 800-207 七支柱 + Assume Breach 视角）。
+
+- **ZT-01（ISSUE-P0-01，自动锁定守护未覆盖 Autofill / Credential 冷启动入口）**：已修复（2026-09-09）。
+  - **缺陷**：`AutoLockManager.initialize()` 唯一调用点在 `MainActivity.onCreate()`，而应用存在 `AutofillUnlockActivity` / `CredentialUnlockActivity` 两条不经 MainActivity 的独立冷启动入口——从这两条路径冷启动后 `ProcessLifecycleOwner` 观察者与 `ACTION_SCREEN_OFF` 广播均未注册，后台超时锁定、熄屏锁定全部失效，会话在进程存活期内无限期保持 `OPENED`。
+  - **整改**：
+    1. `AutoLockManager.initialize()` 下沉至 `MainApplication.onCreate()`（进程级唯一冷启动点，幂等守卫保留），`MainActivity` 移除调用（字段保留供 `KeePasskeyApp` 经 `LocalContext` 订阅 `lockEvents` / 手动锁定）；
+    2. 将判定与会话熔断内核拆分为纯 Kotlin 类 `AutoLockSessionGuard`（`app/src/main/java/com/keepasskey/app/security/AutoLockSessionGuard.kt`：熄屏熔断 `lockOnScreenOff`、后台超时 `lockOnBackgroundResume`（`now` 可注入）、`triggerLock` 含 DIRTY best-effort 补存），`AutoLockManager` 收窄为 Android 注册管道（生命周期观察者 + 熄屏广播）并对内核做 API 委托，公开 API（`isLocked` / `lockEvents` / `triggerLock` / `onUnlockSuccess`）不变；
+    3. `AutofillUnlockActivity` / `CredentialUnlockActivity` 由静态 `FLAG_SECURE` 窗口标志升级为与 `MainActivity` 同源的 `FlagSecureGuard.attach()` 动态守卫（用户开关 ∨ 会话锁定态并集，首帧同步生效）。
+  - **测试证据**：新增 `app/src/test/java/com/keepasskey/app/security/AutoLockSessionGuardTest.kt` 7 例，以真实 `DatabaseSession`（AES-KDF 路径免 NDK）驱动「不启动 MainActivity，仅经解锁入口打开会话 → 熄屏 → 会话锁定」全链路：熄屏熔断（`lockWhenScreenOff` / 仅 `autoLockBackground`）/ 双开关关闭不锁 / 后台超时熔断与未达超时放行 / 零时间戳放行 / DIRTY 补存后锁定并重开校验。全量回归 **521 例：509 通过 / 0 失败 / 12 跳过**。

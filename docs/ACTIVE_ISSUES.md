@@ -17,31 +17,10 @@
 
 ---
 
-## P0 阻断级问题（3 项）
+## P0 阻断级问题（2 项）
 
 > 来源：**2026-09-09 零信任（Zero Trust）专项审计**（NIST SP 800-207 七支柱 + Assume Breach 视角）。
-> 三项均直接击穿「始终验证 / 显式验证」支柱，且均可被无需特权的本地攻击者链路利用。
-
----
-
-### ISSUE-P0-01 (ZT-01): 自动锁定守护未覆盖 Autofill / Credential 冷启动入口
-- **优先级**：P0（会话无终止 / 持续验证失效）
-- **分类**：会话治理 / 零信任-持续验证
-- **背景与现象**：
-  `AutoLockManager.initialize()` 唯一调用点是 `MainActivity.onCreate()`（`MainActivity.kt:43`），而 `MainApplication.onCreate()` 只恢复周期同步、`initialize()` 零调用（`MainApplication.kt:14-19`）。应用存在两条**不经 MainActivity 的独立冷启动入口**：
-  - `AutofillUnlockActivity`（`autofill/AutofillUnlockActivity.kt:31-51`）
-  - `CredentialUnlockActivity`（`passkey/CredentialUnlockActivity.kt:45-83`）
-
-  二者直接 `setContent { UnlockScreen(...) }`。**从这两条路径冷启动后，`ProcessLifecycleOwner` 观察者与 `ACTION_SCREEN_OFF` 广播均未注册** → 后台超时锁定、熄屏锁定全部失效，会话在进程存活期内无限期保持 `OPENED`，主密码缓存可被 `useCredentials()` 反复取用。
-- **整改依据**：NIST SP 800-207「持续验证、会话非永久可信」；`docs/RESOLVED_LOG.md` TASK-22 单例生命周期守卫的延伸。
-- **涉及核心文件**：
-  - `app/src/main/java/com/keepasskey/app/MainApplication.kt`
-  - `app/src/main/java/com/keepasskey/app/security/AutoLockManager.kt`
-  - `app/src/main/java/com/keepasskey/app/MainActivity.kt`
-- **验收标准**：
-  1. `AutoLockManager.initialize()` 下沉至 `MainApplication.onCreate()`（进程级一次），保留幂等守卫；
-  2. 单测覆盖「不启动 MainActivity，仅经 Autofill 入口解锁 → 熄屏 → 会话锁定」；
-  3. 两条入口均注册 FlagSecure 与锁屏广播，回归通过。
+> 直接击穿「始终验证 / 显式验证」支柱，且可被无需特权的本地攻击者链路利用。
 
 ---
 

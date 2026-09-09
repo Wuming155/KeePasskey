@@ -3,7 +3,6 @@ package com.keepasskey.app.passkey
 import android.content.Intent
 import android.os.Bundle
 import android.util.Log
-import android.view.WindowManager
 import androidx.activity.compose.setContent
 import androidx.credentials.provider.BeginGetCredentialRequest
 import androidx.credentials.provider.BeginGetCredentialResponse
@@ -12,6 +11,7 @@ import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
 import com.keepasskey.app.data.repository.SettingsRepository
 import com.keepasskey.app.data.repository.VaultRepository
+import com.keepasskey.app.security.FlagSecureGuard
 import com.keepasskey.app.ui.screens.unlock.UnlockScreen
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.flow.first
@@ -27,6 +27,11 @@ import javax.inject.Inject
  * 系统 Credential Manager 随即继续呈现凭据候选——用户一次解锁直达填充，无需手动二次发起。
  *
  * 链路：锁库 Action → 本 Activity 解锁 → setResult(BeginGetCredentialResponse) → 系统呈现候选。
+ *
+ * ISSUE-P0-01 (ZT-01)：本 Activity 属不经 MainActivity 的独立冷启动入口，
+ * 防护与主入口同源——挂载 FlagSecureGuard 动态守卫（首帧同步生效，冷启动会话
+ * 必为锁定态 → 强制遮蔽无条件成立）；熄屏熔断与后台超时锁定由进程级
+ * AutoLockManager（MainApplication.onCreate 注册）统一覆盖。
  */
 @AndroidEntryPoint
 class CredentialUnlockActivity : FragmentActivity() {
@@ -40,14 +45,15 @@ class CredentialUnlockActivity : FragmentActivity() {
     @Inject
     lateinit var responseAssembler: CredentialResponseAssembler
 
+    @Inject
+    lateinit var flagSecureGuard: FlagSecureGuard
+
     private var completed = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        window.setFlags(
-            WindowManager.LayoutParams.FLAG_SECURE,
-            WindowManager.LayoutParams.FLAG_SECURE
-        )
+        // 与 MainActivity 同源的 FLAG_SECURE 动态守卫（用户开关 ∨ 会话锁定态并集，首帧同步生效）
+        flagSecureGuard.attach(this, lifecycleScope)
         // 官方反 overlay 攻击加固：屏蔽其它应用悬浮窗覆盖解锁窗口
         window.setHideOverlayWindows(true)
 
