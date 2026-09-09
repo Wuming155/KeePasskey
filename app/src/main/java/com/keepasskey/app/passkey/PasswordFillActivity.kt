@@ -3,7 +3,6 @@ package com.keepasskey.app.passkey
 import android.content.Intent
 import android.os.Bundle
 import android.util.Log
-import androidx.activity.compose.setContent
 import androidx.credentials.GetCredentialResponse
 import androidx.credentials.PasswordCredential
 import androidx.credentials.provider.PendingIntentHandler
@@ -12,7 +11,6 @@ import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.AutofillBlocklistStore
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.security.BiometricAuthManager
-import com.keepasskey.app.security.BiometricResult
 import com.keepasskey.core.model.KdbxEntry
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.launch
@@ -101,84 +99,29 @@ class PasswordFillActivity : BaseCredentialActivity() {
                     return@launch
                 }
 
-                // 先验证、后取密：密码明文在用户验证通过之前绝不物化
-                requestUserVerification(entry) { deliverPassword(entry) }
+                // 先验证、后取密：密码明文在用户验证通过之前绝不物化。
+                // 验证请求复用共享门控 [requestCredentialUserVerification]（ISSUE-P0-03 抽取），
+                // 其结果已被 [CredentialFillVerifier] 裁决为满足要求，未通过路径一律走 [onRejected]。
+                val credentialLabel = entry.title.ifBlank { entry.userName }.ifBlank { entry.url }
+                requestCredentialUserVerification(
+                    biometricAuthManager = biometricAuthManager,
+                    fillVerifier = fillVerifier,
+                    title = getString(R.string.cred_fill_confirm_title),
+                    biometricSubtitle = getString(
+                        R.string.cred_fill_confirm_biometric_subtitle,
+                        credentialLabel
+                    ),
+                    manualHint = getString(R.string.cred_fill_confirm_manual_hint, credentialLabel),
+                    confirmText = getString(R.string.autofill_confirm_ok),
+                    cancelText = getString(R.string.autofill_confirm_cancel),
+                    onVerified = { deliverPassword(entry) },
+                    onRejected = { failAndFinish() }
+                )
             } catch (t: Throwable) {
                 Log.e(TAG, "密码填充失败", t)
                 failAndFinish()
             }
         }
-    }
-
-    /**
-     * 拉起本次下发所要求的用户验证；验证通过后回调 [onVerified]。
-     *
-     * 验证结果统一交由 [CredentialFillVerifier] 裁决，本方法不对「是否放行」做任何自行判断。
-     */
-    private fun requestUserVerification(entry: KdbxEntry, onVerified: () -> Unit) {
-        val status = biometricAuthManager.canAuthenticate(
-            this,
-            BiometricAuthManager.UNLOCK_AUTHENTICATORS
-        )
-        val requirement = fillVerifier.requirementFor(status)
-        val credentialLabel = entry.title.ifBlank { entry.userName }.ifBlank { entry.url }
-
-        when (requirement) {
-            CredentialFillRequirement.BIOMETRIC -> {
-                biometricAuthManager.authenticate(
-                    activity = this,
-                    title = getString(R.string.cred_fill_confirm_title),
-                    subtitle = getString(R.string.cred_fill_confirm_biometric_subtitle, credentialLabel),
-                    authenticators = BiometricAuthManager.UNLOCK_AUTHENTICATORS
-                ) { result ->
-                    val verification = when (result) {
-                        is BiometricResult.Success -> CredentialUserVerification.BiometricSucceeded
-                        is BiometricResult.Cancelled -> CredentialUserVerification.BiometricCancelled
-                        is BiometricResult.Failed -> CredentialUserVerification.BiometricFailed
-                        is BiometricResult.Error -> CredentialUserVerification.BiometricFailed
-                    }
-                    consumeVerification(requirement, verification, onVerified)
-                }
-            }
-
-            CredentialFillRequirement.MANUAL_CONFIRMATION -> {
-                setContent {
-                    CredentialFillConfirmScreen(
-                        title = getString(R.string.cred_fill_confirm_title),
-                        hint = getString(R.string.cred_fill_confirm_manual_hint, credentialLabel),
-                        confirmText = getString(R.string.autofill_confirm_ok),
-                        cancelText = getString(R.string.autofill_confirm_cancel),
-                        onConfirm = {
-                            consumeVerification(
-                                requirement,
-                                CredentialUserVerification.ManualConfirmed,
-                                onVerified
-                            )
-                        },
-                        onCancel = {
-                            consumeVerification(
-                                requirement,
-                                CredentialUserVerification.ManualCancelled,
-                                onVerified
-                            )
-                        }
-                    )
-                }
-            }
-        }
-    }
-
-    private fun consumeVerification(
-        requirement: CredentialFillRequirement,
-        verification: CredentialUserVerification,
-        onVerified: () -> Unit
-    ) {
-        if (!fillVerifier.isSatisfied(requirement, verification)) {
-            Log.w(TAG, "用户验证未通过，拒绝回传密码: requirement=$requirement result=$verification")
-            failAndFinish()
-            return
-        }
-        onVerified()
     }
 
     /** 验证通过后回传明文密码（唯一允许 `RESULT_OK` 的路径） */

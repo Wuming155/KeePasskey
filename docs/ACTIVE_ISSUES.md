@@ -17,31 +17,6 @@
 
 ---
 
-## P0 阻断级问题（1 项）
-
-> 来源：**2026-09-09 零信任（Zero Trust）专项审计**（NIST SP 800-207 七支柱 + Assume Breach 视角）。
-> 直接击穿「始终验证 / 显式验证」支柱，且可被无需特权的本地攻击者链路利用。
-
----
-
-### ISSUE-P0-03 (ZT-03): Passkey 断言与注册无条件硬编码 UV=1，向依赖方谎报用户已验证
-- **优先级**：P0（信任断言伪造 / 污染依赖方决策）
-- **分类**：WebAuthn / 零信任-完整性
-- **背景与现象**：
-  `PasskeyAssertionActivity.kt:106-110` 的 flags **无条件** `UP|UV|BE|BS` 全置位，与实际是否发生用户验证完全解耦；`PasskeyCreateActivity.kt:110-114` 注册路径同样硬编码。而真实的 UV 门控仅挂在「生物识别可用时」（`CredentialResponseAssembler.kt:148-154` `if (isBiometricAvailable)`）。
-  后果：设备无强生物识别 / 无锁屏凭据时，仍向 RP 签发 `UV=1` 的断言——RP 端据此放宽风控（如免密支付、敏感操作放行），形成**跨系统的信任伪造**。叠加 P0-02 后尤为严重。
-- **整改依据**：W3C WebAuthn Level 2 §6.1 Authenticator Data flags 语义；FIDO2 CTAP2 规范。
-- **涉及核心文件**：
-  - `app/src/main/java/com/keepasskey/app/passkey/PasskeyAssertionActivity.kt`
-  - `app/src/main/java/com/keepasskey/app/passkey/PasskeyCreateActivity.kt`
-  - `app/src/main/java/com/keepasskey/app/passkey/CredentialResponseAssembler.kt`
-- **验收标准**：
-  1. UV 位取值必须来自本次断言实际发生的用户验证结果（无验证则 `UV=0`）；
-  2. 无可用验证手段时按策略 fail-closed 拒绝断言，或明确降级为 `UV=0` 并由 UI 告知；
-  3. 单测覆盖「无生物 → UV=0」与「二次确认通过 → UV=1」两条分支。
-
----
-
 ## P1 高危与核心功能问题（10 项）
 
 ### ISSUE-P1-01 (TASK-02): 凭据提供者服务实机端到端注册与调起

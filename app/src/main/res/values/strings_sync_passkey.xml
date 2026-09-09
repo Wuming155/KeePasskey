@@ -40,4 +40,13 @@
     <string name="passkey_error_caller_unknown">无法确定调用方应用标识</string>
     <string name="passkey_error_password_empty">密码数据为空</string>
 
+    <!-- ===== ISSUE-P0-03 (ZT-03)：Passkey 断言/注册受保护窗口内用户验证门控文案 =====
+         手动确认文案必须向用户明示「未执行用户验证 (UV=0)」降级，绝不暗示强验证已发生。 -->
+    <string name="passkey_confirm_ok">允许</string>
+    <string name="passkey_confirm_cancel">取消</string>
+    <string name="passkey_assert_biometric_subtitle">验证身份后为「%1$s」执行通行密钥签名</string>
+    <string name="passkey_assert_manual_hint">即将为「%1$s」执行通行密钥签名。\n\n本设备无可用生物识别或锁屏凭据，本次签名将如实标记为「未执行用户验证」(UV=0)，部分网站可能因此拒绝登录或要求二次验证。\n\n仅在可信设备上继续。</string>
+    <string name="passkey_create_biometric_subtitle">验证身份后为「%1$s」创建通行密钥</string>
+    <string name="passkey_create_manual_hint">即将为「%1$s」创建通行密钥。\n\n本设备无可用生物识别或锁屏凭据，新凭据将如实标记为「创建时未执行用户验证」(UV=0)，后续部分网站可能拒绝其登录。\n\n仅在可信设备上继续。</string>
+
 </resources>

@@ -4,20 +4,16 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.graphics.drawable.Icon
-import androidx.biometric.BiometricManager
 import androidx.credentials.provider.BeginGetCredentialRequest
 import androidx.credentials.provider.BeginGetCredentialResponse
 import androidx.credentials.provider.BeginGetPasswordOption
 import androidx.credentials.provider.BeginGetPublicKeyCredentialOption
-import androidx.credentials.provider.BiometricPromptData
 import androidx.credentials.provider.CallingAppInfo
 import androidx.credentials.provider.PasswordCredentialEntry
 import androidx.credentials.provider.PublicKeyCredentialEntry
 import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.AutofillBlocklistStore
 import com.keepasskey.app.data.repository.VaultRepository
-import com.keepasskey.app.security.BiometricAuthManager
-import com.keepasskey.app.security.BiometricStatus
 import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.model.PasskeyData
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -31,18 +27,20 @@ import javax.inject.Inject
  * 供服务端查询与 [CredentialUnlockActivity] 链式解锁完成后复用（保证两端候选列表完全一致）。
  * 严格域名隔离（[DomainMatcher]）与超时预算外的轻量约束均与本类无关——调用方负责会话状态判断。
  *
- * ISSUE-P0-02 (ZT-02) 相关的两点取舍：
+ * ISSUE-P0-02 (ZT-02) / ISSUE-P0-03 (ZT-03) 相关取舍：
  * - **黑名单 fail-closed**：本类是全部候选的唯一出口（直查 + 链式解锁两条路径都经此），
  *   故在此统一复核黑名单，避免新增入口时遗漏（服务侧仍保留一次前置拦截，纵深防御）；
- * - **不下发即不挂 `BiometricPromptData` 了事**：`androidx.credentials:1.6.0` 未向提供方
- *   暴露 `BiometricPromptResult` 读取入口，挂在 entry 上无法判定系统门控是否真的通过，
- *   会形成「看起来已验证」的假门控。真实门控由 [PasswordFillActivity] 联合
- *   [CredentialFillVerifier] 在受保护窗口内闭环执行，未通过绝不返回凭据。
+ * - **不挂 `BiometricPromptData` 假门控**：`androidx.credentials:1.6.0` 未向提供方暴露
+ *   `BiometricPromptResult` 读取入口，挂在 entry 上无法判定系统门控是否真的通过，只会形成
+ *   「看起来已验证」的假门控（且会造成与窗口内验证重复弹窗）。Passkey 候选同样遵循
+ *   「不下发即不验证」：真实门控一律在受保护窗口内闭环执行——
+ *   [PasswordFillActivity]（密码）、[PasskeyAssertionActivity]（断言）与
+ *   [PasskeyCreateActivity]（注册）联合 [CredentialFillVerifier] 强制执行，并由
+ *   [PasskeyAuthFlags] 将验证结果如实投影为 WebAuthn UV 位，未验证绝不产出断言 / 注册材料。
  */
 class CredentialResponseAssembler @Inject constructor(
     @ApplicationContext private val context: Context,
     private val vaultRepository: VaultRepository,
-    private val biometricAuthManager: BiometricAuthManager,
     private val autofillBlocklistStore: AutofillBlocklistStore
 ) {
 
@@ -63,7 +61,6 @@ class CredentialResponseAssembler @Inject constructor(
         }
 
         val allEntries = vaultRepository.getKdbxEntries()
-        val isBiometricAvailable = biometricAuthManager.canAuthenticate(context) == BiometricStatus.AVAILABLE
 
         // P1 整改：整份响应的 requestCode 由单一分配器供给，跨 Passkey/密码两类候选两两互异
         val requestCodes = RequestCodeAllocator()
@@ -71,7 +68,7 @@ class CredentialResponseAssembler @Inject constructor(
         for (option in request.beginGetCredentialOptions) {
             when (option) {
                 is BeginGetPublicKeyCredentialOption -> {
-                    buildPasskeyEntries(option, callingOrigin, callingPackage, allEntries, isBiometricAvailable, requestCodes, responseBuilder)
+                    buildPasskeyEntries(option, callingOrigin, callingPackage, allEntries, requestCodes, responseBuilder)
                 }
 
                 is BeginGetPasswordOption -> {
@@ -88,7 +85,6 @@ class CredentialResponseAssembler @Inject constructor(
         callingOrigin: String,
         callingPackage: String,
         allEntries: List<KdbxEntry>,
-        isBiometricAvailable: Boolean,
         requestCodes: RequestCodeAllocator,
         responseBuilder: BeginGetCredentialResponse.Builder
     ) {
@@ -161,14 +157,10 @@ class CredentialResponseAssembler @Inject constructor(
                 entryBuilder.setDisplayName(passkey.userDisplayName)
             }
 
-            if (isBiometricAvailable) {
-                val bioPromptData = BiometricPromptData(
-                    null,
-                    BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL
-                )
-                entryBuilder.setBiometricPromptData(bioPromptData)
-            }
-
+            // ISSUE-P0-03 (ZT-03)：不再在候选条目上挂 BiometricPromptData——它只是「看起来已验证」
+            // 的假门控，无法判定系统门控是否真的通过，且会与 PasskeyAssertionActivity 窗口内验证
+            // 重复弹窗。真实验证门控在受保护窗口内闭环执行：用户点选候选拉起断言 Activity 后，
+            // 由其在签名前强制执行生物识别 / 锁屏凭据验证（无可用认证器则手动确认并如实 UV=0）。
             responseBuilder.addCredentialEntry(entryBuilder.build())
         }
     }

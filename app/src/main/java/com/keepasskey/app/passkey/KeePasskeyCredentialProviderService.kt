@@ -7,7 +7,6 @@ import android.os.Bundle
 import android.os.CancellationSignal
 import android.os.OutcomeReceiver
 import android.util.Log
-import androidx.biometric.BiometricManager
 import androidx.credentials.exceptions.ClearCredentialException
 import androidx.credentials.exceptions.CreateCredentialCustomException
 import androidx.credentials.exceptions.CreateCredentialException
@@ -23,7 +22,6 @@ import androidx.credentials.provider.BeginGetCredentialRequest
 import androidx.credentials.provider.BeginGetCredentialResponse
 import androidx.credentials.provider.BeginGetPasswordOption
 import androidx.credentials.provider.BeginGetPublicKeyCredentialOption
-import androidx.credentials.provider.BiometricPromptData
 import androidx.credentials.provider.CallingAppInfo
 import androidx.credentials.provider.CreateEntry
 import androidx.credentials.provider.CredentialProviderService
@@ -33,8 +31,6 @@ import androidx.credentials.provider.PublicKeyCredentialEntry
 import com.keepasskey.app.MainActivity
 import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.VaultRepository
-import com.keepasskey.app.security.BiometricAuthManager
-import com.keepasskey.app.security.BiometricStatus
 import com.keepasskey.core.model.PasskeyData
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CancellationException
@@ -66,9 +62,6 @@ class KeePasskeyCredentialProviderService : CredentialProviderService() {
 
     @Inject
     lateinit var vaultRepository: VaultRepository
-
-    @Inject
-    lateinit var biometricAuthManager: BiometricAuthManager
 
     @Inject
     lateinit var responseAssembler: CredentialResponseAssembler

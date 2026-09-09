@@ -220,3 +220,14 @@
     5. `CredentialResponseAssembler`（直查与链式解锁两条路径的唯一候选出口）统一复核黑名单，命中即不产出任何候选；设置页 `AutofillSettingsScreen` 以只读策略行明示「下发前二次确认」为强制保证，不提供可关闭的假开关。
   - **关键取舍（为何不直接在 entry 上挂 `BiometricPromptData`）**：`androidx.credentials:1.6.0` 中 `BiometricPromptData` 标注 `@RestrictTo(LIBRARY)`，`PendingIntentHandler` **未提供** `BiometricPromptResult` 读取入口（已核对 1.6.0 AAR 常量池确认），提供方 Activity 无法判定系统门控究竟成功、失败还是被绕过——挂上即得「看起来已验证」的假门控、无法闭环。故改为 Activity 内自持门控：结果可判定、可记录、可被纯 JVM 单测覆盖。遗留：Passkey 断言侧 UV 位与实际验证解耦问题由 **ISSUE-P0-03 (ZT-03)** 独立闭环。
   - **测试证据**：新增 `app/src/test/java/com/keepasskey/app/passkey/CredentialFillVerifierTest.kt` 11 例，穷举覆盖「无确认路径不得返回 `RESULT_OK`」安全不变式：等级映射（AVAILABLE → BIOMETRIC；NO_HARDWARE / HARDWARE_UNAVAILABLE / NOT_ENROLLED / SECURITY_UPDATE_REQUIRED 一律降级为手动确认而非免验证）/ 生物识别要求下成功放行、未验证·失败·取消·手动确认均拒绝 / 手动确认要求下确认与更强生物识别放行、未确认·取消拒绝 / 全域不变式（任一等级下未验证拒绝、任一等级下非成功结果拒绝）。全量回归 **532 例：520 通过 / 0 失败 / 12 跳过**（app 161 → 172）。
+
+- **ZT-03（ISSUE-P0-03，Passkey 断言与注册无条件硬编码 UV=1，向依赖方谎报用户已验证）**：已修复（2026-09-09）。
+  - **缺陷**：`PasskeyAssertionActivity` 签名前 AuthenticatorData flags **无条件** `UP|UV|BE|BS` 全置位，`PasskeyCreateActivity` 注册路径同样硬编码 `UP|UV|BE|BS|AT`——与实际是否发生用户验证完全解耦；真实 UV 门控仅挂在「生物识别可用时」的候选 entry `BiometricPromptData` 上，而 `androidx.credentials:1.6.0` 不提供 `BiometricPromptResult` 读取入口，提供方 Activity 无法闭环判定系统门控是否真实通过。后果：设备无强生物识别 / 无锁屏凭据时仍向 RP 签发 `UV=1` 断言，RP 端据此放宽风控（如免密支付、敏感操作放行），形成**跨系统的信任伪造**。
+  - **整改**：
+    1. 新增纯 Kotlin flags 组装决策 `PasskeyAuthFlags`（`app/src/main/java/com/keepasskey/app/passkey/PasskeyAuthFlags.kt`）：依据 W3C WebAuthn §6.1 语义由**本次实际验证结果**投影 flags——强验证（生物识别 / 锁屏凭据认证成功）→ `UV=1`；仅手动确认 → 如实 `UV=0`（UP/BE/BS 保持在场与备份位）；未验证 / 失败 / 取消一律返回 null（fail-closed 拒绝签发）；
+    2. 抽取共享「受保护窗口内用户验证」入口 `CredentialVerificationLauncher.requestCredentialUserVerification`（自 `PasswordFillActivity` 门控实现提升复用）：可用强认证器 → 系统级 BiometricPrompt；不可用 → 窗口内显式手动确认；任何回调先经 `CredentialFillVerifier.isSatisfied` fail-closed 裁决；
+    3. `PasskeyAssertionActivity` 改为「先验证、后签名」：origin/RP-ID 与包名绑定二次校验通过后先执行验证门控，再按 `PasskeyAuthFlags` 结果构造 flags 完成签名回传；验证未通过一律 `RESULT_CANCELED` 拒绝签发，密码学运算迁至 `Dispatchers.Default`；
+    4. `PasskeyCreateActivity` 改为「先验证、后生成与落库」：门控通过后才生成 ES256 密钥对、`saveNewPasskeyEntry` 与构造 attestation，注册 flags 的 UV 位如实反映验证结果；
+    5. `CredentialResponseAssembler` 移除候选 entry 上的 `BiometricPromptData` 假门控（无法闭环且与窗口内验证重复弹窗），Passkey 候选与密码候选统一「不下发即不验证」模式；同步清理 `KeePasskeyCredentialProviderService` 失效的 `biometricAuthManager` 注入与 import；
+    6. 手动确认降级文案向用户明示「未执行用户验证 (UV=0)」并提示仅在可信设备继续（`passkey_assert/create_manual_hint` 等 7 条新字符串），杜绝「看似已验证」的误导。
+  - **测试证据**：新增 `app/src/test/java/com/keepasskey/app/passkey/PasskeyAuthFlagsTest.kt` 7 例，锁定两条验收分支——「无生物（手动确认通过）→ 断言 / 注册 UV=0」与「生物识别 / 锁屏凭据二次确认通过 → UV=1」，并覆盖未验证 / 失败 / 取消两路径全 fail-closed 及注册 AT 位独立。全量回归 **539 例：527 通过 / 0 失败 / 12 跳过**（app 172 → 179）。
