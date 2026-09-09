@@ -25,7 +25,7 @@
 
 ---
 
-## 2. 任务唯一看板（53 项：49 ✅ 完成 / 2 📋 待验证·评估 / 2 ❌ 未实现）
+## 2. 任务唯一看板（55 项：49 ✅ 完成 / 1 📋 待验证·评估 / 5 ❌ 未实现）
 
 所有进行中、已立项、待执行体检批次、未实现功能、安全遗留与欠账统一收录于下表，**按 TASK ID 升序排列**（优先级见各行「优先级」列）。**新增任务必须在此表注册，新 ID 顺延。**
 
@@ -86,6 +86,8 @@
 | **TASK-51** | CI | **`dependency-scan` workflow 连续 8 次失败：三层根因全链修复** | GitHub 通知（CI 活动） | **P1** | ✅ 已修复（2026-09-08，本地实证后落地） | **三层根因**（本地复现逐层排除，前两版未验证提交曾按用户要求从远端撤回重做）：① `gradlew` 在 git 索引为 `100644`（Windows 提交未保留可执行位），Linux CI `./gradlew` Permission denied 秒失败 → `git update-index --chmod=+x` 补 `100755`；② 仓库未配 `NVD_API_KEY` 时插件 13.0.0 对空密钥抛 `NvdApiException("Invalid API Key, length of 0")`，且 `failOnError=false` 不覆盖 NVD 更新阶段、`autoUpdate=false` 又因空库抛 `NoDataException: No documents exist`（两条兜底路均经本地实测不可行）→ init 脚本改为**双通道**：读环境变量 `NVD_API_KEY`（GitHub Secret 同名注入）走官方 API，未配置回落 OWASP 官方托管镜像 datafeed（`DependencyCheck_Builder/nvd_cache`，24h 更新，无需 Secret），并弃用 workflow 未经证实的 `-Dorg.owasp.dependencycheck.nvd.api.key` 系统属性传参；③ workflow 报告/SARIF 上传路径写错（实际产物在 `build/reports/dependency-check/` 子目录）→ 两处 path 修正。**验收**：本地注入真实 Key 完整跑通 `dependencyCheckAggregate`——BUILD SUCCESSFUL，HTML/JSON/SARIF 三格式报告产出，扫描发现真实 CVE（如 CVE-2026-53914 影响 kotlin-build-tools 工具链，CVSS 未达 11 阈值不阻断，符合「首次仅告警」策略）；CI 首次运行待线上确认 |
 | **TASK-52** | 性能/UX | **Argon2 原生 JNI 加速解锁 + 旧版 KDBX 提示简化 + KDF OOM 防护** | 用户反馈 | **P1** | ✅ 已完成（2026-09-09） | ① **解锁提速**：PHC 官方 Argon2 参考实现（**CC0 / Apache-2.0 双许可**，全源码 vendor 入库 `crypto/src/main/cpp/argon2/`，可审计、零二进制信任根）+ 自维护薄 JNI 桥 `keepasskey_argon2_jni.c`（仅参数透传 `argon2_context`，零自定义密码学逻辑，支持 KDF secret/associatedData 完整参数面），`Argon2KdfEngine` 改「原生优先 + BouncyCastle 兜底」——对齐 KeePassDX 的 native libargon2 架构（BC 纯 Java Argon2 是此前解锁显著慢于 KeePassDX 的根因，参考 `docs/references/keepassdx-架构分析.md` §4/§10）；CMake `ref` 路径 + 多线程启用（parallelism 真实生效），NDK 28.2.13676358 / CMake 3.22.1；曾先落地第三方 argon2kt AAR 方案，因单一维护者、低 star 且 .so 二进制不可审计的供应链顾虑（用户裁定）替换为自维护构建；Argon2 版本非 0x10/0x13 或原生探活失败时走 BC 兜底，桌面 JVM 单测天然覆盖 BC 路径全绿；② **UX**：`KdbxHeader` 旧版 KDBX 错误文案「目前仅支持 KDBX v4 版本，实际文件主版本为 0x…」简化为「不支持 KDBX v4 之前的版本」；③ **稳定性（防闪退）**：BC 兜底路径新增内存参数预检（`maxHeap × 0.6` 余量，KeePassDX Limits 模式）与 `OutOfMemoryError` → 友好 `KdfException`；原生路径失败（参数越界 / 内存分配失败）同样归一为友好失败，JNI 桥对敏感输入缓冲（password/secret/AD）用毕立即清零。`assembleDebug` 实证 `libkeepasskey_argon2.so` 打包 4 ABI；`gradlew test` 全绿（0 失败 / 12 跳过）。**真机回归通过（2026-09-09，release 签名包用户实测）**：原生路径解锁速度较此前 BC 纯 Java 实现显著提升，KDBX4 真库解锁后密码校验正确；本机 keystore.properties 签名构建 `assembleRelease` 亦验证通过 |
 | **TASK-53** | 整洁度 | **Base64 统一（消除 android.util.Base64）+ Hex 编解码现代化** | 架构现代化方案（核实后收窄范围） | **P3** | ✅ 已完成（2026-09-09） | **核实裁定走「最小批次」**：原方案宣称的 app 模块 `android.util.Base64` 混用实为**仅 1 处**（其余生产文件均已是 `java.util.Base64`，测试早已同源，无桩依赖），且 kotlin.io.encoding 的 `Base64.UrlSafe` 默认 PaddingOption 为 **PRESENT**（编码带 `=`、解码强制要求 padding），方案映射表「默认无 Padding」系错误——直接套用将使 Credential ID 存储形态偏离系统 Credential Manager 回传的无 padding Base64URL、破坏匹配；叠加 `Base64.Default` 解码强制 padding 与 `java.util` 宽容忍忍差异，java.util → kotlin 全量替换收益小于回归面，**不做**。落地：① `CallingOriginResolver`（唯一 android.util 依赖点，仅编码路径）改 `Base64.UrlSafe.withPadding(ABSENT_OPTIONAL)`，`android:apk-key-hash` 输出字节级等价；② Hex 现代化：`KdbxUuid`（StringBuilder `%02X` → `toHexString(UpperCaseHex)`、`substring.toInt(16)` → `hexToByteArray()`，8-4-4-4-12 大写展示口径不变）、`BreachHasher`（HIBP 大写摘要保留）、`HealthCheckEngine` 两处、`S3SyncProvider`（SigV4 小写 hex 保留）、`SyncCache`；`PasskeyCryptoEngine` 私钥标量 `%064x` 按方案防坑提示保持不动；`S3SyncProvider.encodePath` 的 `%02X` 系 URL percent-encoding 不在范围。行为零变更，514 例全绿（502 通过 / 0 失败 / 12 跳过） |
+| **TASK-54** | 特性 | **导入密钥功能缺失** | 用户反馈（TASK-02 实机回归时发现） | **P3** | ❌ 未实现（用户裁定暂不整改） | 用户反馈缺少导入密钥的功能（导入既有密钥到本应用）；具体范围（库 KeyFile 导入 / 凭据提供者侧密钥导入等）与交互形态待澄清后再拆解实现 |
+| **TASK-55** | 特性/UX | **生物识别解锁开关不生效（第二次解锁不触发生物识别）** | 用户反馈（TASK-02 实机回归时发现） | **P3** | ❌ 未实现（用户裁定暂不整改） | 用户实测：生物识别解锁开关已开启，但第二次解锁不触发生物识别，仍走主密码。**期望语义（用户裁定）**：开关开启 = 解锁时默认使用生物识别；开关关闭 = 默认不使用。根因待排查（开关消费方未接线 / 触发条件判定问题） |
 
 ---
 
@@ -258,6 +260,9 @@
 | S3 SigV4 服务端时钟偏移补偿 | ✅ 已闭环（2026-09-08，TASK-45）：`Date` 头探测 + 持久化补偿 + 偏斜 403 恰一次自愈，无 Date 头 fail-closed |
 | `OtpEngine` TOTP 计算链路 ByteArray 化 | ✅ 已闭环（2026-09-08，TASK-46）：计算链路全程 ByteArray + 用毕擦除（fail-clean），RFC 4226/6238/4648 官方向量回归全绿 |
 | KDBX v3 及以下读写 | 明确拒绝（`KdbxUnsupportedVersionException`） |
+| 凭据端到端（Credential Manager 拉起 / 自动填充候选） | 注册层通过（系统设置双通道可见可设），端到端失败，登记 **TASK-02**（后期解决） |
+| 导入密钥功能 | 未实现，登记 **TASK-54** |
+| 生物识别解锁开关生效性 | 开关开启后第二次解锁不触发生物识别，登记 **TASK-55**（期望：开=默认使用、关=默认关闭） |
 | 应用发布 | 构建链路就绪，未完成 F-Droid / GitHub Release 发布 |
 
 > 其余工程限界（对象树内存驻留、条件写依赖服务端、`ProtectedString` 纵深防御边界等）见 `AGENTS.md`「已知限界」。
