@@ -38,14 +38,15 @@
 
 | 文档 | 内容 |
 |------|------|
-| [`docs/STATUS.md`](docs/STATUS.md) | **单一真相源**：版本基线、功能勾选状态、未完成工作看板、历史改动索引、发现项跟踪 |
+| [`docs/ACTIVE_ISSUES.md`](docs/ACTIVE_ISSUES.md) | **现存问题与待办清单**：按 P0 → P1 → P2 → P3 排序，自包含背景与验收标准 |
+| [`docs/RESOLVED_LOG.md`](docs/RESOLVED_LOG.md) | **已整改问题与历史任务归档**：已完成核心任务与 120+ 审查项代码证据 |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | 模块依赖拓扑、技术栈、关键架构决策与目录约定 |
 | [`docs/reference-projects.md`](docs/reference-projects.md) 与 [`docs/references/`](docs/references/) | 5 个参考项目的定位地图与深度架构分析 |
-| `AGENTS.md` | 给 AI 协作代理的项目约束与文档索引 |
+| `AGENTS.md` | 给 AI 协作代理的项目约束、版本基线与闭环纪律 |
 
 ## 已知局限
 
-> 完整实时清单见 [`docs/STATUS.md`](docs/STATUS.md) §2。
+> 完整实时清单见 [`docs/ACTIVE_ISSUES.md`](docs/ACTIVE_ISSUES.md) 与 `AGENTS.md` §6。
 
 自定义键盘（Magikeyboard 式）未实现（已提供 IME 内联建议 + 自动填充替代）；`KDBX v3` 及以下明确拒绝；应用尚未发布至 F-Droid / GitHub Release。
 

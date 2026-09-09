@@ -1,12 +1,26 @@
 # AGENTS.md
 This file provides guidance to AI coding agents when working with code in this repository.
 
-> **实时状态与任务唯一看板**：详见 [**docs/STATUS.md**](docs/STATUS.md)。
-> 所有未完成任务、当前版本基线、历史改动索引与已完成发现项跟踪均以 `STATUS.md` 为单一真相源（Single Source of Truth）。
+> **双文档敏捷驱动体系**：
+> 1. **现存问题与待办清单**：[**docs/ACTIVE_ISSUES.md**](docs/ACTIVE_ISSUES.md) — 严格按优先级（P0 → P1 → P2 → P3）降序排列，自包含背景与验收标准，**拿起来直接做，无需额外计划文件**。
+> 2. **已整改问题与历史归档**：[**docs/RESOLVED_LOG.md**](docs/RESOLVED_LOG.md) — 已完成修复的 49 项核心任务与 120+ 审查项代码证据。
 
 ---
 
-## 项目概述
+## 1. 当前版本基线
+
+| 维度 | 数值 / 状态 | 官方依据与说明 |
+|---|---|---|
+| **Git HEAD** | 代码基线 `4235f16`（TASK-53 Base64/Hex 整洁度） | 分支 `main` 与 `origin/main` 同步 |
+| **测试基线** | **514 个单元测试用例**（app 154 / core 32 / crypto 52 / database 155 / sync 121，其中 sync 121 含 12 例联调跳过）：**502 通过、0 失败、12 跳过** | `./gradlew test` 全模块执行；跳过的 12 例为 `LiveSyncServersTest` 真实联调用例（需先起 `tools/local-sync` 服务并加 `-DliveSyncTest`） |
+| **构建状态** | `assembleDebug` + `assembleRelease` (R8) 全量通过 | **AGP 9.4.0 / Gradle 9.7.1** / Kotlin 2.4.10（经 buildscript classpath 锚定内置 KGP）/ Hilt 2.60.1 / **KSP 2.3.11** |
+| **系统基线** | **minSdk 36**, **compileSdk 37**, targetSdk 36 | 仅针对 Android 16+ 深度优化，固化无旧版垫片决策；compileSdk 37（Compose BOM 2026.08.00 + M3 Expressive） |
+| **传输安全防线** | 全站强制 HTTPS（`network_security_config.xml` 禁明文 + OkHttp TLS-only），零证书固定 | 对齐 Google Developer Knowledge `pinning not recommended` 指南 |
+| **PSL 与域名匹配** | 完整接入 Mozilla PSL（`public_suffix_list.dat`），IDN punycode 归一 | 消除 47 条硬编码漏判盲区，fail-closed |
+
+---
+
+## 2. 项目概述
 
 KeePasskey 是一款使用原生 Kotlin 开发的现代化 Android 密码管理器。基于标准 `.kdbx`（v4）格式，内置 WebDAV 与 S3 兼容协议同步；以 Android 16+（API 36+）为核心基线深度集成系统 Credential Manager，支持通行密钥（Passkey / WebAuthn）的端到端生成、存储与自动验证。
 
@@ -14,7 +28,7 @@ KeePasskey 是一款使用原生 Kotlin 开发的现代化 Android 密码管理�
 
 ---
 
-## 硬约束（任何操作都必须严格遵守）
+## 3. 硬约束与极简闭环纪律
 
 1. **模块依赖严格单向**，禁止反向或同层互依：
    ```
@@ -34,42 +48,32 @@ KeePasskey 是一款使用原生 Kotlin 开发的现代化 Android 密码管理�
    - **凡涉及实现思路借鉴，必须先读对应架构分析文档，严禁直接翻原始代码**；
    - 严禁修改 `参考项目/` 下任何文件，严禁复制其代码入库（许可证约束）。
 4. **工程规则**（单一职责与巨型类阈值、魔法数字、依赖倒置、 Result 错误处理等）详见 `.codebuddy/rules/engineering-rules.md`，写代码前必须遵守。
-5. **单一真相源维护纪律（实时、增量）**：**任何任务状态变更、阶段完成、或新发现问题，都必须即时回写 `docs/STATUS.md`**，保持看板实时准确：
-   - **增量更新**：计划/批次未全部完成、仅完成某个阶段或里程碑，也须立即更新 STATUS 与相关文档，**不攒到全部做完才写**；
-   - **新问题必登记**：工作中发现的任何缺陷 / 风险 / 待办（**即使暂不整改**），必须写入对应文档——可行动任务登记为 `STATUS.md §2` 新 TASK；属代码审计类发现补登 `FINDINGS_TRACKER.md`；**严禁只记在聊天或脑中而不同步到文档**。
-6. **改动提交纪律**：每次完成一组相关修改、且 `.\gradlew.bat test` 通过后，须及时**提交并推送到 GitHub 远端**——`git commit` 后**立即 `git push`**（除非因网络原因推送失败，可暂缓并在 STATUS/提交信息中记录，待网络恢复后立即补推）。提交信息遵循本仓库约定：以 `TASK-xx` / `批次 X` 引用任务并简述主题，例如 `fix(TASK-22): 修复旋转屏幕时 AutoLock 单例被销毁`；**勿让改动长时间堆积在工作区**，避免丢失或与后续提交混淆。
-7. **计划文档生命周期纪律**：新建方案前先查 `docs/plans/` 等目录有无过期计划（**当前在库方案：`docs/plans/REPAIR_PLAN.md`，承载 TASK-02 / 19 / 43 / 49 的执行细节**）；方案落地或被 `STATUS.md` 看板吸收后，**须实时回写 `STATUS.md` 并删除已冗余的独立计划文件**，杜绝与 SSOT 多头并存。仍承载执行细节（范围 / 依据 / 风险 / 验收）的方案（如 `HEALTH_CHECK_ROADMAP.md`）可保留，但其「完成状态」一律以 `STATUS.md §2` 看板为准，**不在计划文件内重复维护状态**。
-8. **问题闭环流程（发现 → 登记 → 整改+验证 → 更新记录并推送）**：任何改动须走完以下闭环，缺一环不算完成：
-   1. **发现**：工作中识别到缺陷 / 风险 / 待办（含审计发现）；
-   2. **登记**：即时写入 SSOT——可行动任务登 `STATUS.md §2` 新 TASK，审计类发现补登 `FINDINGS_TRACKER.md`；暂不整改也须登记，**严禁只记聊天或脑中**；
-   3. **整改 + 验证**：修复代码，且 `.\gradlew.bat test` 全绿（含相关回归用例）方准入库；
-   4. **更新记录并推送**：状态变更即时回写 STATUS（标记完成），与代码**同一次 `git commit`**，并**立即 `git push`**；审计类任务回写 `FINDINGS` 代码证据；计划被吸收后按 #7 删冗余文件。
-   > 文档与代码须**原子提交**，确保看板与实现永不失联。
-9. **跨文档口径一致性纪律**：同一事实在多处出现时（版本基线、测试例数、发现项总数、看板项数、功能勾选状态），**一律以 `STATUS.md` §1/§2 为准**；基线或任务状态变更后，须同步刷新 `AGENTS.md`（构建命令 / 文档索引）、`README.md`（读者向入口：特性亮点 / 构建运行 / 基本使用）、`STATUS.md` §5 功能清单与 §6 已知局限、`ARCHITECTURE.md` §6 技术栈与模块目录、`FINDINGS_TRACKER.md`（物理状态与代码证据），杜绝同一事实多头失真。**看板表按 TASK ID 升序维护，不得残留同 ID 的失效副本**。
+5. **无需中间计划文件（直接看 ACTIVE_ISSUES）**：
+   - **严禁创建冗余的 plan 计划文档**；所有任务的背景、整改依据、涉及文件与验收标准直接在 `docs/ACTIVE_ISSUES.md` 内自包含维护。
+6. **极简闭环工作流（认领 → 整改+验证 → 流转归档 → 提交推送）**：
+   1. **认领**：从 [**docs/ACTIVE_ISSUES.md**](docs/ACTIVE_ISSUES.md) 顶部按优先级（P0 → P1 → P2 → P3）认领待办事项；若发现新问题，即时按优先级格式补登至 `ACTIVE_ISSUES.md`（**严禁只记聊天或脑中**）；
+   2. **整改 + 验证**：修改代码，且 `.\gradlew.bat test` 全绿（含相关回归用例）方准入库；
+   3. **流转归档**：将该条目从 `docs/ACTIVE_ISSUES.md` **剪切移入** [**docs/RESOLVED_LOG.md**](docs/RESOLVED_LOG.md)；若测试用例数或基线发生变动，同步更新本文件 §1 基线；
+   4. **更新记录并推送**：文档与代码**同一次 `git commit`**，并**立即 `git push`**。
+   > 提交信息遵循约定：以 `TASK-xx` / `ISSUE-xx` 引用任务并简述主题，例如 `fix(ISSUE-P0-01): 将 AutoLockManager 下沉至 MainApplication`。
 
 ---
 
-## 详细文档索引
-
-> **文档存放约定**：所有项目文档统一归档于 `docs/`。仅 `.codebuddy/rules/engineering-rules.md` 为 **Agent 功能配置**（工程规则），由系统自动加载、须保留在原位；原 `.codebuddy/skills/` 下的参考项目分析实为文档，已移入 `docs/`（`docs/reference-projects.md`、`docs/references/`）。架构指南（`architecture-guide.md`）因与 `docs/ARCHITECTURE.md` 内容重叠，已删除。
+## 4. 详细文档索引
 
 | 文件 | 内容 | 何时阅读 |
 |------|------|----------|
-| [**docs/STATUS.md**](docs/STATUS.md) | **单一真相源**：当前版本基线、未完成任务唯一看板（55 项：49 ✅ / 1 📋 / 5 ❌）、历史提交日志索引 | **开始任何工作前、检查进度时** |
-| [**docs/FINDINGS_TRACKER.md**](docs/FINDINGS_TRACKER.md) | **历史审查发现跟踪表**：125 项发现的物理核对状态与代码证据 | **确认历史 Bug 是否已修时** |
-| [**docs/HEALTH_CHECK_ROADMAP.md**](docs/HEALTH_CHECK_ROADMAP.md) | **体检批次落地规划**：批次 A–H 的官方依据、范围与验收（对应 TASK-01/03~07） | **执行体检批次整改时** |
-| [**docs/plans/REPAIR_PLAN.md**](docs/plans/REPAIR_PLAN.md) | **残余任务执行方案**：TASK-19（zxing 评估）/ 43（进阶偏好消费方，拆 43a–43f）/ 49（图标 + 引用展示侧残余）的范围 · 依据 · 风险 · 验收 | **动手实现残余任务前** |
-| [**docs/ARCHITECTURE.md**](docs/ARCHITECTURE.md) | 模块依赖拓扑、关键架构决策与目录约定（原根目录 `ARCHITECTURE.md`） | **跨模块改动、新增功能落位前** |
-| [**docs/reference-projects.md**](docs/reference-projects.md) | 参考项目地图：各功能应参照哪个项目的哪些文件、阶段对照（原 `skills/reference-projects.md`，已归档） | **实现算法/格式兼容时** |
+| [**docs/ACTIVE_ISSUES.md**](docs/ACTIVE_ISSUES.md) | **现存问题与待办清单**：按 P0 → P1 → P2 → P3 降序排列，自包含背景与验收标准 | **认领与开始任何新工作前** |
+| [**docs/RESOLVED_LOG.md**](docs/RESOLVED_LOG.md) | **已整改问题与历史任务归档**：已完成任务与 120+ 审查项代码证据 | **确认历史 Bug 是否已修、归档已完成工作时** |
+| [**docs/ARCHITECTURE.md**](docs/ARCHITECTURE.md) | 模块依赖拓扑、关键架构决策与目录约定 | **跨模块改动、新增功能落位前** |
+| [**docs/reference-projects.md**](docs/reference-projects.md) | 参考项目地图：各功能应参照哪个项目的哪些文件 | **实现算法/格式兼容时** |
 | [**docs/references/**](docs/references/) | 5 个参考项目架构分析（KeePassDX / keepass2android / KeePass-2.61.1 / KeePassXC / Monica） | **实现思路借鉴前** |
 | [**docs/KDBX4与复合密钥实战互操作排查日志.md**](docs/KDBX4与复合密钥实战互操作排查日志.md) | KDBX4 + 复合密钥（密码+KeyFile）真机互操作排查记录 | **排查 KDBX 解析/密钥兼容性时** |
-| `.codebuddy/rules/engineering-rules.md` | **工程规则（功能配置，保留原位）**：单一职责、敏感数据、Compose 规范、原子写盘、协程调度、防御性安全 | **编写/修改任何代码前** |
-
-> 另有 `tools/local-sync/README.md` 为本地同步联调工具的使用说明，随工具保留在 `tools/` 目录，未纳入 `docs/`。
+| `.codebuddy/rules/engineering-rules.md` | **工程规则**：单一职责、敏感数据、Compose 规范、原子写盘、协程调度、防御性安全 | **编写/修改任何代码前** |
 
 ---
 
-## 构建与测试命令
+## 5. 构建与测试命令
 
 统一使用 Gradle Wrapper（**Gradle 9.7.1**，AGP 9.4.0 / Kotlin 2.4.10 / Hilt 2.60.1 / **KSP 2.3.11**，版本集中于 `gradle/libs.versions.toml`）。Windows 下执行 `.\gradlew.bat <task>`：
 
@@ -84,7 +88,7 @@ KeePasskey 是一款使用原生 Kotlin 开发的现代化 Android 密码管理�
 
 ---
 
-## 已知工程限界
+## 6. 已知工程限界
 
 - **KDBX 对象树仍整体驻留内存**：解析已流式化，但 `KdbxGroup`/`KdbxEntry` 树仍在内存（增量加载/进度 Flow 为远期项）。
 - **条件写依赖服务端**：AWS S3 原子生效，少数未实现 `If-Match` 覆写的兼容存储降级为 HEAD 预检 + 无条件 PUT；WebDAV `uploadAtomic` 预条件在个别极简 DAV 服务端可能被忽略。
