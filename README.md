@@ -14,7 +14,7 @@
 
 ## 构建与运行
 
-环境前提：JDK 17、Android SDK 37（平台 `android-37.0`）、Android Studio（AGP 9.2.1）。
+环境前提：JDK 17、Android SDK 37（平台 `android-37.0`）、Android Studio（AGP 9.4.0）、**NDK 28.2.13676358 + CMake 3.22.1**（Argon2 原生加速构建所需，`sdkmanager` 安装）。
 
 ```bash
 # 编译调试包

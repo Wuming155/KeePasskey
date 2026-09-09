@@ -76,8 +76,11 @@ KeePasskey 是一款使用原生 Kotlin 开发的现代化 Android 密码管理�
 - `.\gradlew.bat assembleDebug` — 编译全部模块
 - `.\gradlew.bat :app:compileDebugKotlin` — 仅快速检查 Kotlin 编译
 - `.\gradlew.bat lint` — Android Lint
-- `.\gradlew.bat test` — 单元测试（全模块 `src/test`；当前 **506 例：494 通过 / 0 失败 / 12 跳过**，跳过项需 `-DliveSyncTest` 才启用）
+- `.\gradlew.bat test` — 单元测试（全模块 `src/test`；当前 **514 例：502 通过 / 0 失败 / 12 跳过**，分布 app 154 / core 32 / crypto 52 / database 155 / sync 121，跳过项需 `-DliveSyncTest` 才启用）
 - `.\gradlew.bat test -DliveSyncTest` — 追加启用 `LiveSyncServersTest` 真实联调用例（默认跳过 12 例，需先起 `tools/local-sync` 服务）
+- `.\gradlew.bat assembleRelease` — R8 混淆 + 资源收缩发布包（签名配置见 `keystore.properties.example` / 环境变量，未配置时产出未签名包）
+
+> **原生构建前置（TASK-52 起）**：crypto 模块含 NDK 原生构建（Argon2 官方参考实现，`crypto/src/main/cpp/`），需 **NDK 28.2.13676358 + CMake 3.22.1**（`sdkmanager "ndk;28.2.13676358" "cmake;3.22.1"`），缺失时 Gradle 配置阶段即报错。
 
 ---
 
