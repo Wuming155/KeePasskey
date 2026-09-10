@@ -16,8 +16,9 @@ import javax.inject.Singleton
 /**
  * 子库（复合数据库 / child database）挂载与只读会话的统一编排入口（ISSUE-P3-20 核心层）。
  *
- * 本类是本特性的**唯一对外门面**：设置页对话框与 `childDatabasesCount` 都接在这里；
- * 子库条目的只读投影经 [projectedEntries] 暴露，供根库界面按需合并展示。
+ * 本类是本特性的**唯一对外门面**：设置页对话框、`childDatabasesCount` 与库列表的只读分区
+ * 都接在这里；子库条目的只读投影经 [projectedEntries] 暴露，由库列表以**并列的只读分区**
+ * 展示（ISSUE-P3-30 已接线，见本类 KDoc 末节「生命周期语义」）。
  *
  * ## 挂载点抽象（设计要点 1）
  *
@@ -74,8 +75,10 @@ import javax.inject.Singleton
  *   且失败路径不保留凭据。
  * - `content://` 来源的**持久化读授权**由 UI 层在 SAF 选择时申请（见 [mount] KDoc），
  *   本层只负责读取与如实报错，不代替调用方扩权。
- * - 子库条目**不进入根库条目列表 / 搜索 / 自动填充链路**：本阶段只提供
- *   [projectedEntries] 只读投影，是否在根库界面展示由上层决定（UI 接线不在本阶段范围内）。
+ * - 子库条目经 [projectedEntries] 在库列表中以**只读分区**展示（ISSUE-P3-30 已接线），
+ *   但**不进入根库条目流**：列表侧只把投影转成只读展示行
+ *   （`ChildVaultEntryRow`，与根库 `UiVaultEntry` 分属两个类型），
+ *   既不参与搜索过滤与自动填充链路，也永不写入根库对象树——本类不因此新增任何写通道。
  */
 @Singleton
 class ChildDatabaseSessionManager @Inject constructor(

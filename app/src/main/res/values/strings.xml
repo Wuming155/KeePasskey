@@ -249,6 +249,12 @@
     <string name="vault_action_resolve_conflict">解决冲突</string>
     <string name="vault_last_sync_time">上次同步 · %1$s</string>
 
+    <!-- ISSUE-P3-30：库列表中的子库只读分区（已解锁子库的条目以只读形式并列展示） -->
+    <string name="vault_child_db_section_title">子库 · %1$s（只读）</string>
+    <string name="vault_child_db_section_count">%1$d 条条目</string>
+    <string name="vault_child_db_search_excluded">子库条目不参与搜索与自动填充</string>
+    <string name="cd_child_db_entry_read_only">只读子库条目，无编辑或复制入口</string>
+
     <!-- 云端同步状态与排序选项 -->
     <string name="sync_status_synced">已同步</string>
     <string name="sync_status_syncing">正在同步...</string>
@@ -481,7 +487,7 @@
     <string name="dbset_tpl_ssh">SSH 密钥</string>
     <string name="dbset_install_templates">立即安装</string>
     <string name="dbset_templates_installed">条目模板安装完成</string>
-    <string name="dbset_child_db_dialog_desc">子库以独立凭据只读挂载：可查看条目数与解锁状态；其条目暂未合并进当前库列表</string>
+    <string name="dbset_child_db_dialog_desc">子库以独立凭据只读挂载：可查看条目数与解锁状态；其条目在库列表中只读并列展示（不并入当前库，不参与搜索与自动填充）</string>
     <string name="dbset_child_db_mounted">子密码库挂载成功</string>
     <!-- ISSUE-P3-20：子库挂载已真实落地，「功能尚未实现」文案随之删除（零引用） -->
     <string name="dbset_child_db_select_file">选择 KDBX 文件</string>

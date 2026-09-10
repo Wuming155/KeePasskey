@@ -174,6 +174,10 @@ fun VaultListContent(
         ListDensityPresenter.specOf(uiState.listDensity)
     }
 
+    // ISSUE-P3-30：搜索态标记（仅用于「子库条目不参与搜索」的提示行；
+    // 子库分区本身的可见性判定在状态层完成，见 VaultListUiState.childEntrySectionVisible）
+    val isSearching = uiState.searchQuery.isNotBlank()
+
     // 文件夹上下文操作状态
     var groupToRename by remember { mutableStateOf<VaultGroup?>(null) }
     var groupToChangeIcon by remember { mutableStateOf<VaultGroup?>(null) }
@@ -268,6 +272,11 @@ fun VaultListContent(
                     }
                 }
 
+                // 3.1 ISSUE-P3-30：搜索态下如实说明子库条目不参与搜索（有已挂载子库时才提示）
+                if (isSearching && uiState.mountedChildDatabaseCount > 0) {
+                    item(key = CHILD_DB_SEARCH_HINT_KEY) { ChildDatabaseSearchExclusionHint() }
+                }
+
                 // 4. 文件夹列表（ISSUE-P3-22：分组图标与条目侧共用同一投影缓存）
                 items(uiState.currentGroups, key = { "group_${it.id}" }) { group ->
                     KeePassGroupRow(
@@ -307,8 +316,27 @@ fun VaultListContent(
                     )
                 }
 
-                // 6. 空状态
-                if (uiState.currentGroups.isEmpty() && uiState.entries.isEmpty()) {
+                // 6. ISSUE-P3-30：已解锁子库的只读分区。
+                // 与根库条目**并列**渲染（各自独立的 key 命名空间），不混入上面的 items(entries)；
+                // 子库行组件不接收任何写回调，故列表分区内不存在编辑 / 删除 / 复制入口。
+                if (uiState.childEntrySectionVisible) {
+                    uiState.childEntryGroups.forEach { childGroup ->
+                        item(key = "child_header_${childGroup.mountId}") {
+                            ChildDatabaseSectionHeader(group = childGroup)
+                        }
+                        items(childGroup.entries, key = { "child_${it.rowKey}" }) { childEntry ->
+                            ChildVaultEntryRowView(
+                                row = childEntry,
+                                showUsername = uiState.showUsernameInList,
+                                showUrl = uiState.showUrlInList,
+                                densitySpec = densitySpec
+                            )
+                        }
+                    }
+                }
+
+                // 7. 空状态（子库分区有内容时不算空）
+                if (uiState.currentGroups.isEmpty() && uiState.entries.isEmpty() && !uiState.childEntrySectionVisible) {
                     item { VaultEmptyState(isSearching = uiState.searchQuery.isNotBlank()) }
                 }
 
@@ -415,3 +443,6 @@ fun VaultListContent(
         )
     }
 }
+
+/** ISSUE-P3-30：搜索态子库排除提示行的稳定 key（不同排序 / 筛选下不重建） */
+private const val CHILD_DB_SEARCH_HINT_KEY = "child_db_search_exclusion"

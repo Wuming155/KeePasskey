@@ -3,6 +3,7 @@ package com.keepasskey.app.ui.screens.vault
 import androidx.annotation.StringRes
 import com.keepasskey.app.R
 import com.keepasskey.app.ui.model.BitmapEntryIcon
+import com.keepasskey.app.ui.model.ChildVaultEntryGroup
 import com.keepasskey.app.ui.model.EntryDecorations
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.model.UiVaultEntry
@@ -91,6 +92,35 @@ data class VaultListUiState(
      * 与条目图标共用同一 [com.keepasskey.app.ui.model.EntryIconPresenter]（同一解码缓存）。
      */
     val groupIcons: Map<String, BitmapEntryIcon> = emptyMap(),
+    /**
+     * ISSUE-P3-30：已解锁子库的只读条目分区（按挂载分组）。
+     *
+     * **与 [entries] 严格并列，绝不混入**：[entries] 恒为根库条目（`UiVaultEntry`），
+     * 本字段恒为子库只读行（`ChildVaultEntryRow`）——两者类型不同，故
+     * 「子库条目被根库写路径（编辑 / 删除 / 批量 / 回收站）消费」在类型层面即不可能发生。
+     * 锁定根库时核心层会终止全部子库会话，本字段随之回到空表（UI 无需额外清理逻辑）。
+     *
+     * 首版**仅在浏览库顶层（`currentGroupId == null`）且未搜索时**渲染；搜索与自动填充
+     * 均不参与（理由与裁决见 `VaultListViewModel` 的字段 KDoc 与 [mountedChildDatabaseCount]）。
+     */
+    val childEntryGroups: List<ChildVaultEntryGroup> = emptyList(),
+    /**
+     * ISSUE-P3-30：已挂载子库数量（含未解锁）。
+     *
+     * 与 [childEntryGroups] 语义不同：后者只含「已解锁并已投影」的子库。
+     * 本字段用于在搜索态下如实提示「子库条目不参与搜索与自动填充」——
+     * 用户挂载了子库却搜不到其条目时，界面须说明原因而不是静默。
+     */
+    val mountedChildDatabaseCount: Int = 0,
+    /**
+     * ISSUE-P3-30：子库只读分区是否可见。
+     *
+     * 判定在**状态层**完成（与 ISSUE-P3-17 / P3-22 的「状态层装配、UI 只绘制」同一约定）：
+     * 仅在「浏览库顶层（[currentGroupId] == null）且未搜索且确有已解锁子库」时为 true。
+     * 搜索态与子分组态一律 false —— 子库条目不参与搜索（裁决见对应 ViewModel KDoc），
+     * 而站在根库某个子分组里展示无关子库的条目只会造成归属歧义。
+     */
+    val childEntrySectionVisible: Boolean = false,
     // ISSUE-P3-02：条目展示装饰（自定义图标投影 + Notes/URL 字段引用展开文案）。
     // 图标解码与引用解析均在状态层完成，Composable 只做纯绘制（禁止在 UI 内做 IO/解码）。
     val decorations: EntryDecorations = EntryDecorations.EMPTY

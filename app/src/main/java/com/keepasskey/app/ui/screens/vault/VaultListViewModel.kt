@@ -3,12 +3,15 @@ package com.keepasskey.app.ui.screens.vault
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.keepasskey.app.R
+import com.keepasskey.app.data.childdb.ChildDatabaseEntryProjection
+import com.keepasskey.app.data.childdb.ChildDatabaseSessionManager
 import com.keepasskey.app.data.repository.SettingsRepository
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.security.ClipboardSecurityManager
 import com.keepasskey.app.util.tickerFlow
 import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.app.ui.model.BitmapEntryIcon
+import com.keepasskey.app.ui.model.ChildVaultEntryGroup
 import com.keepasskey.app.ui.model.EntryDecorations
 import com.keepasskey.app.ui.model.EntryDisplayDispatcher
 import com.keepasskey.app.ui.model.EntryIconPresenter
@@ -32,6 +35,7 @@ import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -44,7 +48,27 @@ import java.time.format.DateTimeFormatter
 import javax.inject.Inject
 
 /**
- * 密码库列表状态容器 ViewModel，基于 Flow 响应式驱动 UI 状态组合
+ * 密码库列表状态容器 ViewModel，基于 Flow 响应式驱动 UI 状态组合。
+ *
+ * ## 子库（ISSUE-P3-30）展示边界裁决
+ *
+ * 已解锁子库的条目以**只读分区**并列展示（`ChildVaultEntryRow`），与根库条目
+ * （`UiVaultEntry`）分属两个类型与两个状态字段。本类据此明确三项边界：
+ *
+ * 1. **只读**：子库行不提供任何点击 / 长按 / 复制 / 编辑 / 删除入口——本类所有写方法
+ *    （`batchMoveSelected` / `batchDeleteSelected` / `purgeEntry` / `restoreEntry` …）
+ *    的入参都来自根库条目流，子库行在类型层面进不来。**刻意不做**按 UUID 的运行时拒绝：
+ *    子库可能是根库副本（UUID 全同），按 ID 拒绝会误伤根库自身的合法编辑。
+ * 2. **不参与搜索**：搜索只过滤 `vaultRepository` 的根库条目；子库行不经关键词过滤，
+ *    搜索态下整块分区隐藏（不做「搜不到但仍显示」的半吊子行为），并由 UI 如实提示原因。
+ *    首版裁决理由：子库投影是**已解密条目的展示快照**，未解锁时无任何可检索内容，
+ *    若纳入搜索会出现「同一子库时而搜得到、时而不见」的降级歧义；先不纳入更诚实。
+ * 3. **不参与自动填充**：`KeePasskeyAutofillService` 走 `VaultRepository`，而子库投影
+ *    从不进入该仓库（核心层 `ChildDatabaseSessionManager` KDoc 的同步交互不变量），
+ *    故自动填充零改动、零新增暴露面。
+ *
+ * 同步 / 合并 / 历史 / 回收站路径同样零子库条目——本类不改动、不触碰这些路径，
+ * 结构断言见 `ChildDatabaseSyncIsolationTest` 与本批 `VaultListChildDatabaseTest`。
  */
 @HiltViewModel
 class VaultListViewModel @Inject constructor(
@@ -59,7 +83,10 @@ class VaultListViewModel @Inject constructor(
     // ISSUE-P3-17：进阶显示偏好通道（列表密度 / 分组路径 / 自动聚焦搜索）。
     // 该通道只有同步快照读取（无 Flow），故在此以 StateFlow 承载快照，页面进入时刷新；
     // null 仅用于纯 JVM 单测（生产 DI 经 ExtendedSettingsSourceModule 恒注入）
-    private val extendedSettingsSource: ExtendedSettingsSource? = null
+    private val extendedSettingsSource: ExtendedSettingsSource? = null,
+    // ISSUE-P3-30：子库只读投影通道（生产 DI 注入 @Singleton 单例）。
+    // null 仅用于不涉子库的纯 JVM 单测；无该通道时子库分区恒为空表，不影响根库列表任何行为。
+    private val childDatabaseSessionManager: ChildDatabaseSessionManager? = null
 ) : ViewModel() {
 
     // P3-23：null 时回退空串实现（生产 Hilt 恒注入 StringsProviderModule 真实现）
@@ -206,6 +233,34 @@ class VaultListViewModel @Inject constructor(
         state.copy(isReadOnly = readOnly)
     }
 
+    /**
+     * ISSUE-P3-30：子库投影通道的快照（条目投影 + 已挂载计数）。
+     *
+     * 两者语义不同且**必须同时下发**：投影只含「已解锁」子库（用于渲染分区），
+     * 计数含「已挂载」子库（用于搜索态下如实提示「子库条目不参与搜索」）。
+     */
+    private data class ChildDatabaseSnapshotState(
+        val projections: List<ChildDatabaseEntryProjection> = emptyList(),
+        val mountedCount: Int = 0
+    )
+
+    /**
+     * ISSUE-P3-30：子库只读投影流。
+     *
+     * 只订阅核心层既有 `StateFlow`（`projectedEntries` / `mountedCount`），**不新增任何写通道**：
+     * 本 ViewModel 不持有子库凭据，也不提供任何子库写方法。锁定根库时核心层
+     * `ChildDatabaseSessionManager.onSessionLocked` 会终止会话并令 `projectedEntries` 归空，
+     * 子库分区因此**自动消失**，无需 UI 侧额外清理。
+     *
+     * 未注入通道（单测）时恒为空表快照，根库列表行为零变化。
+     */
+    private val childDatabaseStateFlow: Flow<ChildDatabaseSnapshotState> =
+        childDatabaseSessionManager?.let { manager ->
+            combine(manager.projectedEntries, manager.mountedCount) { projections, count ->
+                ChildDatabaseSnapshotState(projections = projections, mountedCount = count)
+            }
+        } ?: flowOf(ChildDatabaseSnapshotState())
+
     private data class SessionState(
         val currentGroupId: String?,
         val filterParams: FilterParams,
@@ -214,7 +269,9 @@ class VaultListViewModel @Inject constructor(
         // ISSUE-P3-17：进阶显示偏好快照（列表密度 / 搜索结果分组路径）
         val extended: ExtendedSettings = ExtendedSettings(),
         // ISSUE-P3-17：自动聚焦搜索栏的一次性意图（消费后置 false）
-        val autoActivateSearch: Boolean = false
+        val autoActivateSearch: Boolean = false,
+        // ISSUE-P3-30：子库只读投影快照（已解锁条目 + 已挂载计数）
+        val childDatabase: ChildDatabaseSnapshotState = ChildDatabaseSnapshotState()
     )
 
     private val sessionStateFlow = combine(
@@ -228,6 +285,8 @@ class VaultListViewModel @Inject constructor(
         state.copy(extended = extended)
     }.combine(autoActivateSearchFlow) { state, autoActivate ->
         state.copy(autoActivateSearch = autoActivate)
+    }.combine(childDatabaseStateFlow) { state, childDatabase ->
+        state.copy(childDatabase = childDatabase)
     }
 
     // ISSUE-P3-02（TASK-49）/ ISSUE-P3-22：条目与分组**共用同一个** EntryIconPresenter——
@@ -363,6 +422,16 @@ class VaultListViewModel @Inject constructor(
             emptyMap()
         }
 
+        // 6. ISSUE-P3-30：已解锁子库的只读分区装配。
+        // 只做「投影 → 展示结构」的归拢，不参与上面的过滤 / 排序 / 分组树遍历：
+        // 子库条目既不进 entries（根库条目流），也不参与搜索与自动填充。
+        val childEntryGroups: List<ChildVaultEntryGroup> =
+            ChildVaultEntryPresenter.groupsOf(session.childDatabase.projections)
+        // 可见性判定与列表数据同处状态层：搜索态 / 根库子分组态一律不展示（理由见 UiState KDoc）
+        val childEntrySectionVisible = !isSearching &&
+            session.currentGroupId == null &&
+            childEntryGroups.isNotEmpty()
+
         VaultListUiState(
             searchQuery = session.filterParams.query,
             isSearchActive = session.filterParams.isSearchActive,
@@ -393,7 +462,10 @@ class VaultListViewModel @Inject constructor(
             entryGroupPaths = entryGroupPaths,
             autoActivateSearch = session.autoActivateSearch,
             groupIcons = batchSyncDecorations.groupIcons,
-            decorations = batchSyncDecorations.decorations
+            decorations = batchSyncDecorations.decorations,
+            childEntryGroups = childEntryGroups,
+            mountedChildDatabaseCount = session.childDatabase.mountedCount,
+            childEntrySectionVisible = childEntrySectionVisible
         )
     }.stateIn(
         scope = viewModelScope,

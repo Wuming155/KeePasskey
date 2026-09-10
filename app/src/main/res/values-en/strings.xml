@@ -245,6 +245,12 @@
     <string name="vault_action_resolve_conflict">Resolve conflict</string>
     <string name="vault_last_sync_time">Last synced · %1$s</string>
 
+    <!-- ISSUE-P3-30: read-only child-database section in the vault list -->
+    <string name="vault_child_db_section_title">Child database · %1$s (read-only)</string>
+    <string name="vault_child_db_section_count">%1$d entries</string>
+    <string name="vault_child_db_search_excluded">Child database entries are excluded from search and autofill</string>
+    <string name="cd_child_db_entry_read_only">Read-only child database entry; no edit or copy entry point</string>
+
     <!-- Cloud sync status & sort options -->
     <string name="sync_status_synced">Synced</string>
     <string name="sync_status_syncing">Syncing...</string>
@@ -475,7 +481,7 @@
     <string name="dbset_tpl_ssh">SSH key</string>
     <string name="dbset_install_templates">Install now</string>
     <string name="dbset_templates_installed">Entry templates installed</string>
-    <string name="dbset_child_db_dialog_desc">Child databases are mounted read-only with their own credentials: entry count and unlock status are shown; their entries are not merged into the current database list yet</string>
+    <string name="dbset_child_db_dialog_desc">Child databases are mounted read-only with their own credentials: entry count and unlock status are shown; their entries are listed read-only alongside the current database (never merged into it, and excluded from search and autofill)</string>
     <string name="dbset_child_db_mounted">Child database mounted</string>
     <!-- ISSUE-P3-20: mounting is implemented, so the "not implemented yet" string is removed (zero references) -->
     <string name="dbset_child_db_select_file">Choose a KDBX file</string>

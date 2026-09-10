@@ -14,9 +14,10 @@
 | §2 | 历史全量代码审计（93 项代码审核 + 4 类专项审查 + ZT/P1/P2 逐项） | 2.1 ~ 2.22 |
 | §3 | P3 批次（16 项：低危加固 / 特性接线 / 体验优化） | ISSUE-P3-01 ~ P3-16 |
 | §4 | P3 残余批次（12 项：假开关整改 / 特性接线 / 文档治理） | ISSUE-P3-17 ~ P3-28 |
+| §5 | P3-30 单条批次（子库条目只读投影接入库列表） | ISSUE-P3-30 |
 
 > 本索引仅到**章节粒度**，因此不会随条目增删而过期；章节内的子条目按编号顺序排列。
-> 各批次的**验收证据**（用例数 / 通过 / 失败 / 跳过）分别见 §2.22、§3.1、§4.1。
+> 各批次的**验收证据**（用例数 / 通过 / 失败 / 跳过）分别见 §2.22、§3.1、§4.1、§5.1。
 
 ---
 
@@ -987,3 +988,68 @@
 15. **测试用例数显著增长**：921 → 1189（**+268**）。其中 app 416 → 667（+251）。
     集中编译把队员的静态自检升级为**真实门禁证据**，是本批次能在 30 个初始编译错误、
     25 例系统性测试失败、6 例残留失败中被逐层收敛到 0 的直接原因。
+
+---
+
+## 5. ISSUE-P3-30 归档（子库条目只读投影接入库列表）
+
+> 来源：`docs/ACTIVE_ISSUES.md` §P3 的 **P3-20 后续 · 接线中如实发现的过度声明**。完成日期：2026-09-10。
+> 背景：`ChildDatabaseSessionManager.projectedEntries` 当时**生产消费方为零**，而设置页文案已在 P3-20
+> 诚实化为「其条目暂未合并进当前库列表」——即挂载、真实解密、条目计数、状态流转、解锁/卸载全为真，
+> **唯独「条目在当前库中可见」未接线**。本批次把该投影接入库列表，并守住三条边界：
+> **只读**、**不并入根库条目流**、**不参与搜索与自动填充**。
+
+### 5.1 本批次验收证据
+
+| 模块 | 用例 | 失败 | 跳过 |
+|---|---:|---:|---:|
+| app | 678 | 0 | 0 |
+| core | 58 | 0 | 0 |
+| crypto | 61 | 0 | 0 |
+| database | 224 | 0 | 0 |
+| sync | 179 | 0 | 13 |
+| **合计** | **1200** | **0** | **13** |
+
+**1187 通过 / 0 失败 / 13 跳过**（基线 1189 → **1200，净增 +11 例，零退化**；app 667 → 678）。
+命令：`.\gradlew.bat test --rerun-tasks --max-workers=1 --continue` → **BUILD SUCCESSFUL**；
+`.\gradlew.bat assembleDebug` → **BUILD SUCCESSFUL**。13 例跳过仍为 §4.1 登记的既有两项，与本批次无关。
+
+### 5.2 验收标准逐条对照
+
+| 条目验收标准 | 落实与代码证据 |
+|---|---|
+| ① 已解锁子库条目以分组路径可见，编辑/删除入口被拒 | `ChildVaultEntryPresenter.groupsOf()` 把扁平投影按挂载归拢为展示分区（保持登记顺序）；`ChildVaultEntryRow.displayPath` = 「挂载别名 + 子库内分组路径」（根级条目回退别名，分隔符复用 `GroupPathPresenter.SEPARATOR`，不另写一套）；`VaultChildDatabaseSections.kt` 的 `ChildDatabaseSectionHeader` / `ChildVaultEntryRowView` **不接收任何回调形参**——`onClick` / `onLongClick` / `onCopyPassword` / `onDelete` 一个都不存在 |
+| ② 根库同步/合并/历史/回收站路径零子库条目 | 类型级切割：根库条目流恒为 `VaultListUiState.entries`（`UiVaultEntry`），子库投影恒为 `childEntryGroups`（`ChildVaultEntryRow`），两者**不是同一类型**，故所有写方法（`batchMoveSelected` / `batchDeleteSelected` / `purgeEntry` / `restoreEntry` …）在编译期即不可能收到子库行。新增 `VaultListChildDatabaseTest` 3 条结构断言（根库条目流与总数不因子库挂载改变；全选只覆盖根库条目；批量删除后子库投影不变）。同步隔离沿用 §4.2 P3-20 的 `ChildDatabaseSyncIsolationTest` |
+| ③ 根库锁库后投影即时消失 | 核心层 `onSessionLocked` → `terminateAllSessions()` → `projectedEntries` 归空；ViewModel 仅订阅该 StateFlow，UI 无清理逻辑。专测：锁定后 `childEntryGroups` 空、分区隐藏、**挂载计数仍为 1**（登记属非敏感配置） |
+| ④ 原过度声明文案 | **见 §5.3 偏离说明**（本批次仍改写了文案） |
+| ⑤ 补单测：投影装配 / 只读拒绝 / 锁库消失 | 新增 **11 例**：`ChildVaultEntryPresenterTest` 6 例（纯函数：空输入 / 归拢与顺序 / 路径回退 / 分隔符展开 / 跨挂载同名 UUID 的行 key 唯一性 / 字段映射）+ `VaultListChildDatabaseTest` 5 例（端到端真实解密：分区下发与流隔离 / 锁库消失 / 卸载消失 / 搜索不参与 / 批量写不触碰子库） |
+| ⑥ `test` 全绿且用例数不减 | 见 §5.1 |
+
+**非验收要求但一并做的诚实化**：`ChildDatabaseSessionManager` 类 KDoc 原写「是否在根库界面展示由上层决定
+（UI 接线不在本阶段范围内）」「供根库界面**按需合并展示**」——本批次接线后该表述已失真，就地改写为
+「以**并列的只读分区**展示，且不进入根库条目流 / 搜索 / 自动填充」，避免留下与实现相反的一手注释。
+
+### 5.3 与条目正文的偏离（如实登记）
+
+1. **验收标准 ④ 说「原过度声明文案无需再改」，本批次仍然改写了它。** 该句在 P3-20 被诚实化为
+   「其条目**暂未**合并进当前库列表」，而本次接线后条目**已确实在列表中可见**，保留原句会构成
+   **反向失真**（§4.4-A 已有多处「反向的不诚实同样属违规」先例）。故中英双语改写为
+   「其条目在库列表中只读并列展示（不并入当前库，不参与搜索与自动填充）」——语句与实现逐字对应。
+2. **「编辑/删除入口被拒」按「入口不存在」实现，而非「运行期拒绝」。** 子库行与根库条目分属两个类型、
+   行组件不接收写回调，故不存在可被绕过的判定。
+   **并且刻意不做**按 UUID 的运行时拒绝：子库完全可能是根库的副本（KDBX 复制即 UUID 全同），
+   按「子库 UUID 集合」拒绝会**误伤根库自身的合法编辑**——该取舍已写入 `ChildVaultEntryRow` KDoc。
+3. **搜索与自动填充的裁决已显式落定并留痕**（条目要求「显式裁决并写入 KDoc」）：首版**均不参与**。
+   搜索不参与的理由是投影只是「已解密条目的展示快照」，未解锁即无可检索内容，若纳入会出现
+   「同一子库时而搜得到、时而不见」的降级歧义；不参与时由 `ChildDatabaseSearchExclusionHint`
+   在搜索态如实提示（`mountedChildDatabaseCount > 0` 才出现），不做静默漏项。
+   自动填充侧**零改动**：`KeePasskeyAutofillService` 走 `VaultRepository`，子库投影从不进入该仓库。
+
+### 5.4 本批次过程缺陷（如实留痕）
+
+1. **`VaultListUiState.kt` 新增 `ChildVaultEntryGroup` 字段时漏写 import**，首轮 `:app:compileDebugKotlin`
+   报 7 处 `Unresolved reference`（含被连带解析成 `items(count)` 重载的假错误）。补齐 import 后单轮通过——
+   登记教训：**新增跨包类型的字段后应立即编译，而非写完所有文件再统一编译**（后者的错误会被连带放大）。
+2. **初稿在 `VaultChildDatabaseSections.kt` 留下一个仅为「用掉 import」而写的 `private val densityTypeAnchor`**
+   死代码，自查时连同多余的 `ListDensity` import 一并删除。登记教训：**为迁就 import 而新增符号是本末倒置**，
+   正确做法是删 import。
