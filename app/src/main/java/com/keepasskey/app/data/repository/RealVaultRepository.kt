@@ -734,11 +734,35 @@ class RealVaultRepository @Inject constructor(
     override suspend fun findPasskeyByCredentialId(credentialId: String): KdbxEntry? =
         passkeyEntries.findPasskeyByCredentialId(credentialId)
 
+    /**
+     * ISSUE-P2-15 兼容读取通道：把受保护值读成 String 并保证中间 CharArray 副本即时清零。
+     *
+     * 返回值本身仍是不可擦除的 String（UI 投影模型与待下线 String 接口的既有约束），
+     * 但相对直接调用 `ProtectedString.readString()`，本通道不再让明文副本静默等待 GC。
+     * 新代码应优先使用对应的 CharArray 借用通道。
+     */
+    private fun readErasableString(value: ProtectedString?): String? {
+        val chars = value?.readChars() ?: return null
+        return try {
+            String(chars)
+        } finally {
+            chars.fill('0')
+        }
+    }
+
+    /** ISSUE-P2-15：返回受保护值的 CharArray 独占副本（或 null），清零责任随借用契约移交调用方 */
+    private fun readErasableChars(value: ProtectedString?): CharArray? = value?.readChars()
+
+    @Deprecated(
+        message = "String 明文不可显式擦除；请改用 getEntryPasswordChars 并在 finally 中清零",
+        replaceWith = ReplaceWith("getEntryPasswordChars(entryId)")
+    )
     override suspend fun getEntryPassword(entryId: String): String? {
         val targetUuid = parseKdbxUuidOrNull(entryId) ?: return null
         val currentDb = databaseSession.databaseFlow.first() ?: return null
         val entry = currentDb.rootGroup.allEntries().firstOrNull { it.id == targetUuid }
-        return entry?.password?.readString()
+        // ISSUE-P2-15：不再直接 readString()，经 CharArray 独占副本中转并即时清零
+        return readErasableString(entry?.password)
     }
 
     override suspend fun getEntryPasswordChars(entryId: String): CharArray? {
@@ -749,12 +773,17 @@ class RealVaultRepository @Inject constructor(
         return entry?.password?.readChars()
     }
 
+    @Deprecated(
+        message = "String 明文不可显式擦除；请改用 getEntryRevisionPasswordChars 并在 finally 中清零",
+        replaceWith = ReplaceWith("getEntryRevisionPasswordChars(entryId, revisionId)")
+    )
     override suspend fun getEntryRevisionPassword(entryId: String, revisionId: String): String? {
         val targetUuid = parseKdbxUuidOrNull(entryId) ?: return null
         val revisionUuid = parseKdbxUuidOrNull(revisionId) ?: return null
         val currentDb = databaseSession.databaseFlow.first() ?: return null
         val entry = currentDb.rootGroup.allEntries().firstOrNull { it.id == targetUuid }
-        return entry?.history?.firstOrNull { it.id == revisionUuid }?.password?.readString()
+        // ISSUE-P2-15：不再直接 readString()，经 CharArray 独占副本中转并即时清零
+        return readErasableString(entry?.history?.firstOrNull { it.id == revisionUuid }?.password)
     }
 
     override suspend fun getEntryRevisionPasswordChars(entryId: String, revisionId: String): CharArray? {
@@ -775,21 +804,31 @@ class RealVaultRepository @Inject constructor(
         // 断点8 整改：整修订快照投影 + 受保护字段解密回填（仅驻留回滚会话），
         // 使回滚保存时 title/url/自定义字段/TOTP/密码全字段真实还原
         val projection = entryMapper.mapKdbxEntryToUi(revision, currentDb)
+        // ISSUE-P2-15：受保护字段经 CharArray 独占副本中转（用毕清零）；UiCustomField.value 仍为
+        // String（UI 投影模型已知约束），此处物化的 String 属投影边界、不可擦，见 ISSUE-P2-15 备注
         val decryptedFields = projection.customFields.map { cf ->
             if (cf.isProtected) {
-                cf.copy(value = revision.customFields.firstOrNull { it.key == cf.key }?.value?.readString().orEmpty())
+                cf.copy(
+                    value = readErasableString(
+                        revision.customFields.firstOrNull { it.key == cf.key }?.value
+                    ).orEmpty()
+                )
             } else {
                 cf
             }
         }
-        val totpRaw = revision.fields[KdbxConstants.Fields.OTP]?.readString()
-            ?: revision.customFields.firstOrNull {
-                it.key.equals(KdbxConstants.Fields.OTP, ignoreCase = true) ||
-                    it.key.startsWith(VaultEntryMapper.TOTP_CUSTOM_FIELD_PREFIX, ignoreCase = true)
-            }?.value?.readString().orEmpty()
+        // ISSUE-P2-15：TOTP 原文以 CharArray 独占副本返回，不再物化不可擦 String
+        val totpRawChars = readErasableChars(revision.fields[KdbxConstants.Fields.OTP])
+            ?: readErasableChars(
+                revision.customFields.firstOrNull {
+                    it.key.equals(KdbxConstants.Fields.OTP, ignoreCase = true) ||
+                        it.key.startsWith(VaultEntryMapper.TOTP_CUSTOM_FIELD_PREFIX, ignoreCase = true)
+                }?.value
+            )
+            ?: CharArray(0)
         return EntryRevisionSnapshot(
             entry = projection.copy(customFields = decryptedFields),
-            totpSecret = totpRaw
+            totpSecretChars = totpRawChars
         )
     }
 

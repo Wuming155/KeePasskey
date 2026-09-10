@@ -679,4 +679,95 @@ class RealVaultRepositoryTest {
         assertTrue("应追加该条目墓碑", after.deletedObjects.any { it.id == entryId })
         assertNotNull("回收站组自身应保留", after.rootGroup.allGroups().firstOrNull { it.id == binId })
     }
+
+    /**
+     * ISSUE-P2-15：仓库密码读取走 CharArray 借用通道后，返回的必须是**独立副本**——
+     * 调用方按契约清零副本绝不能抹掉库内原始受保护值。
+     */
+    @Test
+    fun `getEntryPasswordChars 返回独立副本且调用方清零不影响库内密码`() = runTest {
+        val (database, initialEntry) = createInitialDatabase()
+        val session = DatabaseSession()
+        session.setDatabaseForTesting(database)
+        val repository = RealVaultRepository(
+            createMockContext(tempFolder.root), session,
+            com.keepasskey.app.data.logger.DebugLogBuffer(), createTestStrings()
+        )
+
+        val chars = repository.getEntryPasswordChars(initialEntry.id.toHexString())
+        assertNotNull(chars)
+        assertEquals("old_password_123", String(chars!!))
+        chars.fill('0')
+
+        assertEquals(
+            "清零借用副本后库内原始值必须不受影响",
+            "old_password_123",
+            initialEntry.password?.readString()
+        )
+    }
+
+    /**
+     * ISSUE-P2-15：修订密码与修订 TOTP 原文均以 CharArray 独占副本返回，不再经 readString()
+     * 物化为不可擦 String；回滚路径可直接转交 saveEntry 的擦除契约。
+     */
+    @Test
+    fun `修订快照密码与 TOTP 原文均以 CharArray 返回且可安全清零`() = runTest {
+        val rootGroupId = KdbxUuid.random()
+        val entryId = KdbxUuid.random()
+        val revisionId = KdbxUuid.random()
+        val otpUri = "otpauth://totp/Acc?secret=JBSWY3DPEHPK3PXP"
+        val revision = KdbxEntry(
+            id = revisionId,
+            parentGroupId = rootGroupId,
+            fields = mapOf(
+                KdbxConstants.Fields.TITLE to ProtectedString("Revision", false),
+                KdbxConstants.Fields.PASSWORD to ProtectedString("revision_pwd", true),
+                KdbxConstants.Fields.OTP to ProtectedString(otpUri, false)
+            )
+        )
+        val entry = KdbxEntry(
+            id = entryId,
+            parentGroupId = rootGroupId,
+            fields = mapOf(KdbxConstants.Fields.TITLE to ProtectedString("Current", false)),
+            history = listOf(revision)
+        )
+        val database = KdbxDatabase(
+            header = KdbxHeader.createDefault(),
+            rootGroup = KdbxGroup(id = rootGroupId, name = "Root", entries = listOf(entry))
+        )
+
+        val session = DatabaseSession()
+        session.setDatabaseForTesting(database)
+        val repository = RealVaultRepository(
+            createMockContext(tempFolder.root), session,
+            com.keepasskey.app.data.logger.DebugLogBuffer(), createTestStrings()
+        )
+
+        val revisionPwdChars = repository.getEntryRevisionPasswordChars(
+            entryId.toHexString(), revisionId.toHexString()
+        )
+        assertNotNull(revisionPwdChars)
+        assertEquals("revision_pwd", String(revisionPwdChars!!))
+        revisionPwdChars.fill('0')
+
+        val snapshot = repository.getEntryRevisionSnapshot(entryId.toHexString(), revisionId.toHexString())
+        assertNotNull(snapshot)
+        val totpChars = snapshot!!.totpSecretChars
+        try {
+            assertEquals(otpUri, String(totpChars))
+        } finally {
+            totpChars.fill('0')
+        }
+
+        assertEquals(
+            "清零借用副本后历史修订密码必须不受影响",
+            "revision_pwd",
+            revision.password?.readString()
+        )
+        assertEquals(
+            "清零借用副本后历史修订 TOTP 原文必须不受影响",
+            otpUri,
+            revision.fields[KdbxConstants.Fields.OTP]?.readString()
+        )
+    }
 }

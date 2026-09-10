@@ -154,8 +154,13 @@ fun GeneratorScreen(
 
             // 2. 主展示卡片：生成的密码与快捷操作
             item {
+                // ISSUE-P2-16：Compose Text 只接受 String，UI 渲染边界无法完全避免物化明文；
+                // 以 remember 绑定受控容器实例——仅在生成结果变化时物化一次，且收敛于该最小作用域
+                val displayPassword = remember(uiState.currentPassword) {
+                    uiState.currentPassword.readString()
+                }
                 GeneratorDisplayCard(
-                    password = uiState.currentPassword.readString(),
+                    password = displayPassword,
                     strengthLabel = uiState.strengthLabel,
                     entropyBits = uiState.entropyBits,
                     onRegenerate = viewModel::regenerate,
@@ -195,8 +200,10 @@ fun GeneratorScreen(
                 }
 
                 items(uiState.history) { historyItem ->
+                    // ISSUE-P2-16：同上，历史行渲染边界的 String 物化按条目实例 remember，避免重复物化
+                    val displayHistory = remember(historyItem) { historyItem.readString() }
                     HistoryPasswordRow(
-                        password = historyItem.readString(),
+                        password = displayHistory,
                         onSelect = { viewModel.selectHistoryPassword(historyItem) },
                         onCopy = { viewModel.copyGeneratedPassword(historyItem) }
                     )

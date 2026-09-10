@@ -8,11 +8,16 @@ import kotlinx.coroutines.flow.Flow
 /**
  * 历史修订的完整回滚快照（断点8 整改）。
  * [entry] 的受保护自定义字段已按需解密回填，可直接作为 saveEntry 入参提交；
- * [totpSecret] 为该修订的 TOTP 配置原文，空串表示该修订无 TOTP 配置。
+ * [totpSecretChars] 为该修订的 TOTP 配置原文（otpauth:// URI 或 Base32 种子），
+ * 空数组表示该修订无 TOTP 配置。
+ *
+ * ISSUE-P2-15：TOTP 原文由不可擦除的 String 改为 **CharArray 独占副本**，归调用方所有；
+ * 回滚路径应直接将其转交 [saveEntry] 的 `totpSecretChars` 参数（由仓库按擦除契约用毕清零），
+ * 或在用毕自行 `fill('0')`，不得再遗留 String 中转。
  */
 data class EntryRevisionSnapshot(
     val entry: UiVaultEntry,
-    val totpSecret: String
+    val totpSecretChars: CharArray
 )
 
 /**
@@ -214,7 +219,15 @@ interface VaultRepository {
      * 按需解密单条凭据的密码（M1 整改）。
      * 仅在用户显式查看/复制密码时调用，杜绝全库密码明文驻留 StateFlow / 堆内存；
      * 返回 String 由调用方用毕自然丢弃（UI 显示边界），条目不存在或无密码时返回 null。
+     *
+     * ISSUE-P2-15：返回值为不可擦除 String，已列入下线通道；新代码一律改用
+     * [getEntryPasswordChars]（CharArray 独占副本，调用方用毕 `fill('0')`）。
+     * 仅剩 {REF:...} 字段引用解析等 String 语义引擎不得不用时保留。
      */
+    @Deprecated(
+        message = "String 明文不可显式擦除；请改用 getEntryPasswordChars 并在 finally 中清零",
+        replaceWith = ReplaceWith("getEntryPasswordChars(entryId)")
+    )
     suspend fun getEntryPassword(entryId: String): String?
 
     /**
@@ -226,7 +239,14 @@ interface VaultRepository {
 
     /**
      * 按需解密单条历史修订的密码（M1 整改，供详情页回滚/对比使用），语义同 [getEntryPassword]。
+     *
+     * ISSUE-P2-15：同属待下线 String 通道，请改用 [getEntryRevisionPasswordChars]
+     * （CharArray 独占副本，调用方用毕 `fill('0')` 或交由 [saveEntry] 擦除）。
      */
+    @Deprecated(
+        message = "String 明文不可显式擦除；请改用 getEntryRevisionPasswordChars 并在 finally 中清零",
+        replaceWith = ReplaceWith("getEntryRevisionPasswordChars(entryId, revisionId)")
+    )
     suspend fun getEntryRevisionPassword(entryId: String, revisionId: String): String?
 
     /**
@@ -239,8 +259,8 @@ interface VaultRepository {
     /**
      * 读取单条历史修订的完整回滚快照（断点8 整改，供详情页全字段回滚）。
      * 返回的 [EntryRevisionSnapshot.entry] 中受保护字段已解密（仅驻留编辑会话），
-     * [EntryRevisionSnapshot.totpSecret] 为该修订 TOTP 配置原文（无则空串）；
-     * 修订不存在时返回 null。
+     * [EntryRevisionSnapshot.totpSecretChars] 为该修订 TOTP 配置原文独占 CharArray 副本
+     * （无则空数组），调用方按借用语义用毕清零或交由 [saveEntry] 擦除；修订不存在时返回 null。
      */
     suspend fun getEntryRevisionSnapshot(entryId: String, revisionId: String): EntryRevisionSnapshot?
 

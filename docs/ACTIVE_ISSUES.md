@@ -23,57 +23,12 @@
 
 ---
 
-## P2 中危缺陷与协议/测试缺口（2 项）
+## P2 中危缺陷与协议/测试缺口（0 项）
 
 > ISSUE-P2-05 ~ ISSUE-P2-13 九项已全部整改并归档，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §2.16 ~ §2.20。
-> 下列 2 项为 P2-12 整改中**如实登记的残余面**（当初验收为「部分完成」，不计入九项闭环）。
-
-### ISSUE-P2-15 (P2-12 残余 A): 模型层受保护值经 readString() 退化为不可擦除 String（TOTP 种子/详情/修订路径）
-
-- **优先级**：P2（内存治理）
-- **分类**：敏感数据 / 领域模型边界
-- **背景与现象**：
-  ISSUE-P2-12 已把**解析层与 TOTP 计算链路**字节化，但领域模型/仓库接口的返回通道仍为不可擦除 `String`：
-  - `app/src/main/java/com/keepasskey/app/data/repository/RealVaultRepository.kt` **5 处** `readString()`：
-    `:741`（`getEntryPassword`）、`:757`（修订密码 `getEntryRevisionPassword`）、`:780`/`:789`（自定义字段回填）、`:785`（修订 TOTP 原文）；
-  - `core/src/main/java/com/keepasskey/core/otp/TotpKeyUriParser.kt:114` 的 `parse(String)` 兼容重载（生产路径已不走，但重载本身是 String 物化入口）。
-  这些 String 一旦生成即驻留堆直至 GC，且**无法显式清零**——与工程规则「能用 Char/Byte 的地方绝不落到 String」冲突。
-- **整改依据**：工程规则敏感数据铁律；对齐 `getEntryPasswordChars` / `getEntryTotpSecretChars` 已有的 CharArray 借用契约（调用方用毕清零）。
-- **涉及核心文件**：
-  - `app/src/main/java/com/keepasskey/app/data/repository/RealVaultRepository.kt`
-  - `app/src/main/java/com/keepasskey/app/data/repository/VaultRepository.kt`（接口契约）
-  - `core/src/main/java/com/keepasskey/core/otp/TotpKeyUriParser.kt`
-- **验收标准**：
-  1. 新增/迁移 `CharArray` 借用型接口（如 `getEntryPasswordChars` 已存在，补齐修订与自定义字段的字节通道），消费方在 `finally` 中 `fill('0')`；
-  2. 现有 `String` 通道标记 `@Deprecated` 并逐步下线（UI 层若必须 String，收敛在最小作用域并注明不可擦边界）；
-  3. `TotpKeyUriParser.parse(String)` 重载收敛为**仅测试可见**（`internal` + `@VisibleForTesting`）或删除；
-  4. 单测断言新字节通道的借用与清零契约。
-- **已知约束**：本项改动横跨 UI 投影模型（`UiVaultEntry` 等字段类型为 `String`），需与 M1「投影层不物化密码明文」原则一并对齐，属跨模块契约改造，建议独立批次。
-
----
-
-### ISSUE-P2-16 (P2-12 残余 B): 密码生成引擎出边界仍返回不可擦除 String
-
-- **优先级**：P2（内存治理）
-- **分类**：敏感数据 / 生成器
-- **背景与现象**：
-  `app/src/main/java/com/keepasskey/app/ui/screens/generator/DicewareWordList.kt` 的三个生成函数内部**已用 `CharArray` 计算**，但返回值仍物化为 `String`：
-  - `:277` `generateRandomPassword`（`:284` 返回 `String`）
-  - `:311` `generatePassphrase`（`:316` 返回 `String`）
-  - `:333` `generateMaskedPassword`（返回 `String`）
-  连带下游：`GeneratorScreen.kt:213/513` 渲染与剪贴板 `copySensitiveText` 边界。ISSUE-P2-12 已把 `GeneratorUiState` 当前密码与 history 容器改为 `ProtectedString` 并在淘汰/`onCleared` 清零，但**生成瞬间的返回值仍是不可擦 String**，等于在 M1 边界上开了一个明文物化口。
-- **整改依据**：工程规则敏感数据铁律；M1「投影层不物化密码明文」；`DicewareWordList.calculateEntropy(CharArray)` 已有先例。
-- **涉及核心文件**：
-  - `app/src/main/java/com/keepasskey/app/ui/screens/generator/DicewareWordList.kt`
-  - `app/src/main/java/com/keepasskey/app/ui/screens/generator/GeneratorViewModel.kt`
-  - `app/src/main/java/com/keepasskey/app/ui/screens/generator/GeneratorScreen.kt`
-- **验收标准**：
-  1. 三个生成函数改为返回 `CharArray`（或直接返回 `ProtectedString`），取消 `String` 重载（`calculateEntropy(String)` 一并收敛）；
-  2. `GeneratorViewModel` 消费后立即将 `CharArray` 交给既有 `ProtectedString` 容器（避免中间态驻留）；
-  3. 复制到剪贴板路径改为「CharArray → 受保护剪贴板 API」直通，不经 `String`；UI 渲染如需 String，须在最小作用域内并注明不可擦边界；
-  4. 单测覆盖生成的字节/字符通道与用毕清零，且既有生成器用例全绿。
-
----
+> P2-12 整改中如实登记的残余面 ISSUE-P2-15 / ISSUE-P2-16（受保护值经 String 退化、
+> 密码生成引擎出边界仍返回 String）已整改并归档，见 §2.21。
+> 当前 P2 级别无待办。
 
 ---
 

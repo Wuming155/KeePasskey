@@ -122,9 +122,12 @@ class GeneratorViewModel @Inject constructor(
      * 按用户配置超时自动物理清空。
      */
     fun copyGeneratedPassword(secret: ProtectedString) {
-        // ClipData 只接受 CharSequence，属不可消除的系统边界；明文 String 的终结
-        // 由 ClipboardSecurityManager 的定时擦除链路负责
-        clipboardSecurityManager.copySensitiveText(GENERATED_PASSWORD_CLIP_LABEL, secret.readString())
+        // ISSUE-P2-16：路径改为 ProtectedString → CharArray（useChars 自动清零）→ 受保护
+        // 剪贴板 CharArray 通道，应用侧不再物化不可擦 String；跨进程写入系统服务属框架边界。
+        // 自动擦除超时策略仍由 ClipboardSecurityManager 统一负责。
+        secret.useChars { chars ->
+            clipboardSecurityManager.copySensitiveChars(GENERATED_PASSWORD_CLIP_LABEL, chars)
+        }
         _uiState.update { it.copy(userMessage = UiMessage(R.string.generator_password_copied)) }
     }
 
@@ -134,7 +137,9 @@ class GeneratorViewModel @Inject constructor(
 
     private fun generateNewPassword() {
         val currentState = _uiState.value
-        val newPassword = when (currentState.mode) {
+        // ISSUE-P2-16：引擎返回 CharArray 独占副本（生成瞬间不再物化不可擦 String）。
+        // 熵值计算与 ProtectedString 密封复用同一副本，密封完成（内部已加密/拷贝）后立即清零。
+        val newPasswordChars = when (currentState.mode) {
             GeneratorMode.RANDOM -> {
                 PasswordGenerationEngine.generateRandomPassword(
                     length = currentState.randomLength,
@@ -160,10 +165,14 @@ class GeneratorViewModel @Inject constructor(
             }
         }
 
-        val entropy = PasswordGenerationEngine.calculateEntropy(newPassword).toInt()
+        var entropy = 0
+        val newSecret = try {
+            entropy = PasswordGenerationEngine.calculateEntropy(newPasswordChars).toInt()
+            ProtectedString(newPasswordChars, isProtected = true)
+        } finally {
+            newPasswordChars.fill('0')
+        }
         val strength = evaluateStrengthLabel(entropy)
-        // ISSUE-P2-12：状态改持受控容器；引擎返回的 String 属生成边界，无法原地擦除
-        val newSecret = ProtectedString(newPassword, isProtected = true)
 
         _uiState.update { current ->
             val previous = current.currentPassword

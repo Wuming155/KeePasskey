@@ -350,11 +350,19 @@ class FakeVaultRepository(
         }
     }
 
+    @Deprecated(
+        message = "String 明文不可显式擦除；请改用 getEntryPasswordChars 并在 finally 中清零",
+        replaceWith = ReplaceWith("getEntryPasswordChars(entryId)")
+    )
     override suspend fun getEntryPassword(entryId: String): String? = passwordStore.value[entryId]
 
     override suspend fun getEntryPasswordChars(entryId: String): CharArray? =
         passwordStore.value[entryId]?.toCharArray()
 
+    @Deprecated(
+        message = "String 明文不可显式擦除；请改用 getEntryRevisionPasswordChars 并在 finally 中清零",
+        replaceWith = ReplaceWith("getEntryRevisionPasswordChars(entryId, revisionId)")
+    )
     override suspend fun getEntryRevisionPassword(entryId: String, revisionId: String): String? =
         passwordStore.value[entryId]
 

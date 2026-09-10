@@ -30,6 +30,7 @@
    - 2.19 明文导出治理与自动锁定语义修正（P2-10 / P2-13）
    - 2.20 OTP 种子与详情路径字节化（P2-12）
    - 2.16 ~ 2.20 批次验收证据（P2 九项整体闭环）
+   - [2.21 受保护值字节通道收口与密码生成器出边界 CharArray 化（P2-15 / P2-16）](#221-受保护值字节通道收口与密码生成器出边界-chararray-化p2-15--p2-16)
 
 ---
 
@@ -738,7 +739,8 @@
   2. **消费侧清零责任链**：`VaultEntryMapper.parseTotpConfig` 经 `ProtectedString.readUtf8()` 读取并在 finally 清 `rawBytes`；`mapKdbxEntryToUi` 清 `parsedTotp.secret`；`RealVaultRepository.calculateEntryTotp` 清 `config.secret`；`computeTotpCode` 仅清 Base32 解码出的二进制 key；`getEntryTotpSecretChars` 返回 CharArray 借出给调用方；
   3. **GeneratorUiState 当前密码与 history**：容器已改 `ProtectedString`，淘汰项与 `onCleared` 显式清零；**部分完成**——生成引擎 `generateRandomPassword/generatePassphrase/generateMaskedPassword` 仍返回 `String`（生成边界），`GeneratorScreen` 渲染与剪贴板 `copySensitiveText` 边界仍会物化不可擦 String；
   4. **健康扫描字节化**：`HealthCheckEngine` 删除 `String(passChars)`，改为字符数组大小写不敏感比较。
-- **如实保留的残余面（已回登待办）**：`RealVaultRepository` **5 处** `readString()` 受仓库接口/UI String 模型限制未改、`TotpKeyUriParser.parse(String)` 兼容重载保留 → 见 [ACTIVE_ISSUES.md](ACTIVE_ISSUES.md) **ISSUE-P2-15**；生成引擎三函数仍返回 `String`（`DicewareWordList.kt:277/311/333`）→ 见 **ISSUE-P2-16**。
+- **如实保留的残余面（已闭环）**：`RealVaultRepository` **5 处** `readString()` 受仓库接口/UI String 模型限制未改、`TotpKeyUriParser.parse(String)` 兼容重载保留（**ISSUE-P2-15**）；生成引擎三函数仍返回 `String`（`DicewareWordList.kt:277/311/333`，**ISSUE-P2-16**）。
+  两项残余面后续已独立整改并归档，见 **§2.21**。
 - **涉及文件**：`core/.../otp/TotpKeyUriParser.kt`、`core/.../otp/OtpEngine.kt`、`app/.../data/repository/VaultEntryMapper.kt`、`RealVaultRepository.kt`、`app/.../ui/screens/generator/{GeneratorUiState,GeneratorViewModel,GeneratorScreen,DicewareWordList}.kt`、`database/.../audit/HealthCheckEngine.kt` 及对应测试。
 - **测试证据**：新增 `Base32DecoderByteSemanticsTest`，`TotpKeyUriParserTest` / `VaultEntryMapperTotpTest` / `HealthCheckEngineTest` 按字节语义同步修正。
 
@@ -753,3 +755,45 @@
 - **批次特有回归锁**：`database/src/test/.../DatabaseSessionSensitiveErasureTest.kt`
   的 `删除后再以共享字段副本重新插入不得被误擦且可落盘重开`——固化集成阶段实测出的
   「删除路径身份擦除误伤复用字段」缺陷（详见 §2.17），防止回退。
+
+---
+
+### 2.21 受保护值字节通道收口与密码生成器出边界 CharArray 化（P2-15 / P2-16）
+
+> 来源：ISSUE-P2-15 / ISSUE-P2-16（P2-12 OTP 字节化整改中如实登记的残余面，见 §2.20）。
+> 整改依据：工程规则敏感数据铁律（能用 Char/Byte 的地方绝不落到 String）；M1「投影层不物化密码明文」；`DicewareWordList.calculateEntropy(CharArray)` 既有先例。
+
+- **ISSUE-P2-15（模型层受保护值经 `readString()` 退化为不可擦除 String）**：已完成。
+  - `RealVaultRepository` 原有 **5 处** 直接 `readString()` 全部消除：新增私有兼容通道
+    `readErasableString(ProtectedString?)` / `readErasableChars(ProtectedString?)`，一律经
+    `readChars()` 独占副本中转并在 `finally` 中 `fill('0')`；
+  - 仓库接口 `getEntryPassword` / `getEntryRevisionPassword` 标记 `@Deprecated`（附 `ReplaceWith`
+    指向 CharArray 借用通道），生产消费方全部迁移至字节通道：`VaultListViewModel.copyPassword`、
+    `EntryDetailViewModel.togglePasswordVisibility` / `prepareRevisionDiff` / `copyCustomField` / `copyPassword`；
+  - `EntryRevisionSnapshot.totpSecret: String` → **`totpSecretChars: CharArray`**（仓库返回独占副本），
+    回滚路径直接转交 `saveEntry` 的擦除契约，不再经 `toCharArray()` 中转；
+  - `TotpKeyUriParser.parse(String)` 兼容重载收敛为 `internal`（仅同模块单测 friend 可见），
+    生产路径只用 `parse(ByteArray)`；
+  - 新增 `SensitiveCharSequence`（零拷贝只读 CharSequence 视图）与 `sensitiveTextSha256(CharSequence)`，
+    受保护剪贴板新增 `copySensitiveChars` 直通 CharArray，且与 String 通道摘要一致
+    （自动擦除的「当前内容是否仍为先前敏感值」比对不受通道切换影响）；
+  - **如实保留的已知约束**：`EntryRevisionSnapshot.entry`（`UiVaultEntry` / `UiCustomField`）中受保护
+    字段值仍为 String 投影，属跨模块契约改造（M1 投影层对齐的独立批次），已在 KDoc 注明为不可擦边界。
+- **ISSUE-P2-16（生成引擎出边界返回 String）**：已完成。
+  - `PasswordGenerationEngine.generateRandomPassword` / `generatePassphrase` / `generateMaskedPassword`
+    返回值由 `String` 改为 **`CharArray` 独占副本**；删除 `calculateEntropy(String)` 重载；
+  - 新增可覆盖中间缓冲 `buildChars`（`StringBuilder` → `getChars` → 覆盖清零再截断），
+    消除 `joinToString` / `toString()` 的明文物化路径；
+  - `GeneratorViewModel.generateNewPassword` 以同一副本完成熵计算与 `ProtectedString` 密封后
+    `finally` 清零；`copyGeneratedPassword` 经 `ProtectedString.useChars` 直通 `copySensitiveChars`；
+  - `GeneratorScreen` 渲染边界的 String 物化以 `remember(受控容器实例)` 收敛在最小作用域，
+    并显式注释为不可擦的 Compose 显示边界。
+- **涉及文件**：`core/.../otp/TotpKeyUriParser.kt`、`app/.../data/repository/{VaultRepository,RealVaultRepository}.kt`、
+  `app/.../security/{ClipboardSecurityManager,SensitiveClipboardSupport}.kt`、
+  `app/.../ui/screens/detail/EntryDetailViewModel.kt`、`app/.../ui/screens/vault/VaultListViewModel.kt`、
+  `app/.../ui/screens/generator/{DicewareWordList,GeneratorViewModel,GeneratorScreen}.kt` 及对应测试。
+- **测试证据**：新增 `PasswordGenerationEngineTest`（6 例：CharArray 出口、字符集/词数/掩码、熵值、
+  密封后清零契约）与 `SensitiveCharSequenceTest`（4 例：零拷贝视图、两通道摘要一致、多字节 UTF-8）；
+  `RealVaultRepositoryTest` 追加 2 例借用/清零契约（`getEntryPasswordChars` 独立副本、
+  修订密码与 `totpSecretChars` 清零不影响库内原文）；`TotpKeyUriParserTest`（String 重载）
+  与既有生成器/详情用例全绿。

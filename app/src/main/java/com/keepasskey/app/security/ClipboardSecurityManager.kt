@@ -14,7 +14,6 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import java.security.MessageDigest
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -53,9 +52,34 @@ class ClipboardSecurityManager @Inject constructor(
         }
         clipboardManager.setPrimaryClip(clipData)
 
-        val hash = sha256(text.toString())
-        lastSensitiveHash = hash
+        armScheduledClear(sensitiveTextSha256(text), customTimeoutSeconds)
+    }
 
+    /**
+     * ISSUE-P2-15：复制 CharArray 载体（受保护字段 / 生成结果）至受保护剪贴板。
+     *
+     * [chars] 为调用方持有的**借用副本**，本方法只读不写；方法返回前已完成 ClipData 序列化
+     * 与摘要计算，调用方可安全地在 `finally` 中 `fill('0')`。应用侧全程不经 String 物化
+     * （仅 Android 框架跨进程写入属系统边界），并与 [copySensitiveText] 复用同一自动擦除链路
+     * （摘要算法一致，「当前剪贴板是否仍为先前敏感值」比对不受通道差异影响）。
+     */
+    fun copySensitiveChars(
+        label: CharSequence,
+        chars: CharArray,
+        customTimeoutSeconds: Int? = null
+    ) {
+        val clipData = ClipData.newPlainText(label, SensitiveCharSequence(chars))
+        clipData.description.extras = PersistableBundle().apply {
+            putBoolean(ClipDescription.EXTRA_IS_SENSITIVE, true)
+        }
+        clipboardManager.setPrimaryClip(clipData)
+
+        armScheduledClear(sensitiveTextSha256(SensitiveCharSequence(chars)), customTimeoutSeconds)
+    }
+
+    /** 记录敏感值摘要并（按用户配置）调度后台自动擦除 */
+    private fun armScheduledClear(hash: ByteArray, customTimeoutSeconds: Int?) {
+        lastSensitiveHash = hash
         scope.launch {
             val settings = settingsRepository.getSettings().first()
             if (!settings.autoClearClipboard) return@launch
@@ -102,7 +126,7 @@ class ClipboardSecurityManager @Inject constructor(
             }
             return false
         }
-        val currentHash = sha256(currentText)
+        val currentHash = sensitiveTextSha256(currentText)
         if (java.security.MessageDigest.isEqual(currentHash, expectedHash)) {
             clearClipboard()
             lastSensitiveHash = null
@@ -143,10 +167,5 @@ class ClipboardSecurityManager @Inject constructor(
             return item.text?.toString()
         }
         return null
-    }
-
-    private fun sha256(input: String): ByteArray {
-        val md = MessageDigest.getInstance("SHA-256")
-        return md.digest(input.toByteArray(Charsets.UTF_8))
     }
 }

@@ -110,8 +110,11 @@ object TotpKeyUriParser {
      * String 入口兼容层：内部转 UTF-8 字节后立即擦除。
      * 生产路径（VaultEntryMapper / RealVaultRepository）请直接使用 [parse] 的 ByteArray 重载，
      * 避免把种子固化为不可擦除的 String。
+     *
+     * ISSUE-P2-15：收敛为**仅测试可见**（`internal`）——String 入参本身即不可擦除的种子物化入口，
+     * 生产代码不得再经此重载；核心单测（`core/src/test`）因同模块 friend 可见性仍可调用。
      */
-    fun parse(uriOrSecret: String?): ParsedTotpConfig? {
+    internal fun parse(uriOrSecret: String?): ParsedTotpConfig? {
         if (uriOrSecret.isNullOrBlank()) return null
         val bytes = uriOrSecret.toByteArray(StandardCharsets.UTF_8)
         return try {

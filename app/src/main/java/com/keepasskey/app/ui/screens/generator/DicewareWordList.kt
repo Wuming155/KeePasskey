@@ -272,7 +272,10 @@ object PasswordGenerationEngine {
     const val AMBIGUOUS_CHARS = "0OIl1"
 
     /**
-     * 生成随机字符密码
+     * 生成随机字符密码。
+     *
+     * ISSUE-P2-16：返回 **CharArray 独占副本**（归调用方所有，用毕须 `fill('0')`），
+     * 生成边界不再物化不可擦 String。
      */
     fun generateRandomPassword(
         length: Int,
@@ -281,7 +284,7 @@ object PasswordGenerationEngine {
         useDigits: Boolean,
         useSymbols: Boolean,
         excludeAmbiguous: Boolean
-    ): String {
+    ): CharArray {
         var pool = buildString {
             if (useUpper) append(CHARS_UPPER)
             if (useLower) append(CHARS_LOWER)
@@ -302,18 +305,20 @@ object PasswordGenerationEngine {
             val idx = secureRandom.nextInt(pool.length)
             chars[i] = pool[idx]
         }
-        return String(chars)
+        return chars
     }
 
     /**
-     * 生成 Diceware 密码短语
+     * 生成 Diceware 密码短语。
+     *
+     * ISSUE-P2-16：返回 **CharArray 独占副本**（归调用方所有，用毕须 `fill('0')`）。
      */
     fun generatePassphrase(
         wordCount: Int,
         separator: String,
         capitalize: Boolean,
         includeNumber: Boolean
-    ): String {
+    ): CharArray {
         val selectedWords = (1..wordCount).map {
             val word = DICEWARE_WORDS[secureRandom.nextInt(DICEWARE_WORDS.size)]
             if (capitalize) word.replaceFirstChar { it.uppercase() } else word
@@ -324,28 +329,57 @@ object PasswordGenerationEngine {
             selectedWords[selectedWords.lastIndex] = selectedWords.last() + randomNum
         }
 
-        return selectedWords.joinToString(separator)
+        // ISSUE-P2-16：不再 joinToString 物化不可擦 String；可覆盖中间缓冲 → CharArray 出口
+        val capacity = selectedWords.sumOf { it.length } +
+            separator.length * (selectedWords.size - 1).coerceAtLeast(0)
+        return buildChars(capacity) {
+            selectedWords.forEachIndexed { index, word ->
+                if (index > 0) append(separator)
+                append(word)
+            }
+        }
     }
 
     /**
-     * 根据自定义掩码生成密码 (d: 数字, u: 大写, l: 小写, s: 符号)
+     * 根据自定义掩码生成密码 (d: 数字, u: 大写, l: 小写, s: 符号)。
+     *
+     * ISSUE-P2-16：返回 **CharArray 独占副本**（归调用方所有，用毕须 `fill('0')`）。
      */
-    fun generateMaskedPassword(mask: String): String {
-        val sb = StringBuilder()
+    fun generateMaskedPassword(mask: String): CharArray = buildChars(mask.length) {
         for (ch in mask) {
             when (ch) {
-                'd' -> sb.append(CHARS_DIGITS[secureRandom.nextInt(CHARS_DIGITS.length)])
-                'u' -> sb.append(CHARS_UPPER[secureRandom.nextInt(CHARS_UPPER.length)])
-                'l' -> sb.append(CHARS_LOWER[secureRandom.nextInt(CHARS_LOWER.length)])
-                's' -> sb.append(CHARS_SYMBOLS[secureRandom.nextInt(CHARS_SYMBOLS.length)])
+                'd' -> append(CHARS_DIGITS[secureRandom.nextInt(CHARS_DIGITS.length)])
+                'u' -> append(CHARS_UPPER[secureRandom.nextInt(CHARS_UPPER.length)])
+                'l' -> append(CHARS_LOWER[secureRandom.nextInt(CHARS_LOWER.length)])
+                's' -> append(CHARS_SYMBOLS[secureRandom.nextInt(CHARS_SYMBOLS.length)])
                 'x' -> {
                     val mixed = CHARS_LOWER + CHARS_DIGITS
-                    sb.append(mixed[secureRandom.nextInt(mixed.length)])
+                    append(mixed[secureRandom.nextInt(mixed.length)])
                 }
-                else -> sb.append(ch)
+                else -> append(ch)
             }
         }
-        return sb.toString()
+    }
+
+    /**
+     * ISSUE-P2-16：把可擦除的字符构建过程收敛到 CharArray 出口。
+     * [StringBuilder] 仅作长度可变的中间缓冲，结果经 `getChars` 拷贝后立即覆盖为零并截断，
+     * 避免生成明文以不可擦 String 形态在堆中驻留。
+     */
+    // Kotlin 将 StringBuilder.getChars 标记为「冗余/弃用」，但 toString() 会物化不可擦 String，
+    // 与 ISSUE-P2-16 目标冲突；此处刻意保留 getChars 并显式压制告警
+    @Suppress("DEPRECATION")
+    private inline fun buildChars(capacity: Int, block: StringBuilder.() -> Unit): CharArray {
+        val sb = StringBuilder(capacity.coerceAtLeast(0))
+        return try {
+            sb.block()
+            val result = CharArray(sb.length)
+            sb.getChars(0, sb.length, result, 0)
+            result
+        } finally {
+            for (i in 0 until sb.length) sb.setCharAt(i, '\u0000')
+            sb.setLength(0)
+        }
     }
 
     /**
@@ -363,15 +397,5 @@ object PasswordGenerationEngine {
 
         val bitsPerChar = kotlin.math.log2(poolSize.toDouble())
         return password.size * bitsPerChar
-    }
-
-    /** String 兼容入口：内部字符副本用毕显式清零 */
-    fun calculateEntropy(password: String): Double {
-        val chars = password.toCharArray()
-        return try {
-            calculateEntropy(chars)
-        } finally {
-            chars.fill('0')
-        }
     }
 }

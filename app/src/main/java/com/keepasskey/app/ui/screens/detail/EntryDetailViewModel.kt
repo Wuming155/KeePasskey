@@ -223,7 +223,22 @@ class EntryDetailViewModel @Inject constructor(
         }
         val entryId = entryIdFlow.value ?: return
         viewModelScope.launch {
-            revealedPasswordFlow.value = vaultRepository.getEntryPassword(entryId)
+            // ISSUE-P2-15：仓库读取走 CharArray 借用通道；revealedPassword 为 Compose 展示态，
+            // String 物化属 UI 显示边界（不可擦），故仅在最小作用域内转换并立即清零副本
+            revealedPasswordFlow.value = vaultRepository.getEntryPasswordChars(entryId).toDisplayString()
+        }
+    }
+
+    /**
+     * ISSUE-P2-15：把仓库返回的 CharArray 独占副本转成 UI 展示 String。
+     * String 一旦物化不可擦除（Compose Text 显示边界），但借用的 CharArray 副本用毕立即清零。
+     */
+    private fun CharArray?.toDisplayString(): String? {
+        if (this == null) return null
+        return try {
+            String(this)
+        } finally {
+            fill('0')
         }
     }
 
@@ -305,13 +320,15 @@ class EntryDetailViewModel @Inject constructor(
     fun copyCustomField(fieldId: String, fieldKey: String) {
         val entryId = entryIdFlow.value ?: return
         viewModelScope.launch {
-            // TASK-10：仓库读取改走 CharArray 独占副本；剪贴板写入是 String 边界，
-            // 副本即时清零
+            // TASK-10 + ISSUE-P2-15：仓库读取走 CharArray 独占副本，并直通受保护剪贴板的
+            // CharArray 通道（不经中间 String），副本用毕清零
             val chars = vaultRepository.getEntryProtectedFieldChars(entryId, fieldKey)
             if (chars != null) {
-                val value = String(chars)
-                chars.fill('0')
-                clipboardSecurityManager?.copySensitiveText(fieldKey, value)
+                try {
+                    clipboardSecurityManager?.copySensitiveChars(fieldKey, chars)
+                } finally {
+                    chars.fill('0')
+                }
                 userMessageFlow.value = UiMessage(R.string.detail_field_copied, listOf(fieldKey))
             }
         }
@@ -340,10 +357,12 @@ class EntryDetailViewModel @Inject constructor(
                 groupId = current.groupId,
                 updatedAt = strings.get(R.string.detail_rollback_updated_at)
             )
+            // ISSUE-P2-15：TOTP 原文已由仓库以 CharArray 独占副本返回，直接转交 saveEntry
+            // （由其擦除契约用毕清零），不再经 String 中转
             val result = vaultRepository.saveEntry(
                 updated,
                 passwordChars = revisionPasswordChars,
-                totpSecretChars = snapshot.totpSecret.toCharArray()
+                totpSecretChars = snapshot.totpSecretChars
             )
             userMessageFlow.value = if (result is com.keepasskey.core.result.KdbxResult.Success) {
                 UiMessage(R.string.detail_history_rolled_back)
@@ -359,8 +378,11 @@ class EntryDetailViewModel @Inject constructor(
     fun prepareRevisionDiff(revisionId: String) {
         val entryId = entryIdFlow.value ?: return
         viewModelScope.launch {
-            val currentPw = revealedPasswordFlow.value ?: vaultRepository.getEntryPassword(entryId)
-            val revisionPw = vaultRepository.getEntryRevisionPassword(entryId, revisionId)
+            // ISSUE-P2-15：对比路径同样改走 CharArray 借用通道，String 物化收敛在展示边界
+            val currentPw = revealedPasswordFlow.value
+                ?: vaultRepository.getEntryPasswordChars(entryId).toDisplayString()
+            val revisionPw = vaultRepository.getEntryRevisionPasswordChars(entryId, revisionId)
+                .toDisplayString()
             revealedPasswordFlow.value = currentPw
             revealedRevisionPasswordsFlow.update { it + (revisionId to revisionPw.orEmpty()) }
         }
@@ -438,8 +460,10 @@ class EntryDetailViewModel @Inject constructor(
     fun copyPassword(title: String) {
         val entryId = entryIdFlow.value ?: return
         viewModelScope.launch {
-            // TASK-17：复制前解析 {REF:...} 引用（密码可能指向其他条目的字段）
-            val raw = vaultRepository.getEntryPassword(entryId).orEmpty()
+            // TASK-17：复制前解析 {REF:...} 引用（密码可能指向其他条目的字段）。
+            // ISSUE-P2-15：先经 CharArray 借用通道读取；{REF:...} 引擎为 String 文本语义，
+            // 此处的 String 物化属引用解析边界，副本已即时清零
+            val raw = vaultRepository.getEntryPasswordChars(entryId).toDisplayString().orEmpty()
             val password = vaultRepository.resolveFieldReferences(entryId, raw) ?: raw
             clipboardSecurityManager?.copySensitiveText(title, password)
             userMessageFlow.value = uiState.value.passwordCopyMessage

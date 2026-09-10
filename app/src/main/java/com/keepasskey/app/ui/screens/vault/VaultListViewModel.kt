@@ -343,9 +343,16 @@ class VaultListViewModel @Inject constructor(
 
     fun copyPassword(entry: UiVaultEntry) {
         // M1 整改：列表投影不携带密码明文，复制时按需单条解密
+        // ISSUE-P2-15：读取与写入全程走 CharArray 借用通道，不经不可擦 String 中转
         viewModelScope.launch {
-            val password = vaultRepository.getEntryPassword(entry.id).orEmpty()
-            clipboardSecurityManager?.copySensitiveText(entry.title, password)
+            val chars = vaultRepository.getEntryPasswordChars(entry.id)
+            if (chars != null) {
+                try {
+                    clipboardSecurityManager?.copySensitiveChars(entry.title, chars)
+                } finally {
+                    chars.fill('0')
+                }
+            }
             userMessageFlow.update { UiMessage(R.string.vault_copy_password_done, listOf(entry.title)) }
         }
     }
