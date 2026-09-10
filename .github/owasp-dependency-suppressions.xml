@@ -47,4 +47,92 @@
         ]]></notes>
         <packageUrl regex="true">^pkg:maven/androidx\.sqlite/sqlite(-framework)?@.*$</packageUrl>
     </suppress>
+
+    <!-- ============ ISSUE-P3-32：构建工具链专属构件（不进入发布产物，2026-09-10 核实） ============ -->
+
+    <suppress>
+        <notes><![CDATA[
+            核实结论：**仅存在于构建工具链，不进入 APK**。
+
+            核实依据（2026-09-10，命令可复现）：
+            1. 血缘：报告 JSON 中这 11 个 org.jline 构件的载体文件**全部**是
+               `kotlin-compiler-32.4.0.jar (shaded: org.jline:...)`
+               —— 即 AGP 9.4.0 内置 Kotlin 编译器所 shade 的副本，不是本仓声明的依赖；
+            2. 运行面：`.\gradlew.bat :app:dependencyInsight --configuration releaseRuntimeClasspath
+               --dependency org.jline:jline` → **No dependencies matching**，即 release 运行时面不存在，
+               不可能进入发布 APK；
+            3. 利用面：CVE-2026-56740 的受影响模块是 jline 的 **Telnet 服务端**（remote-telnet），
+               CVE-2026-56741 同族；本仓既不启用 JLine 的 Telnet/SSH 服务，CI 亦不对外暴露该端口。
+        ]]></notes>
+        <packageUrl regex="true">^pkg:maven/org\.jline/.*@3\.24\.1$</packageUrl>
+        <cve>CVE-2026-56740</cve>
+        <cve>CVE-2026-56741</cve>
+        <cve>CVE-2023-50572</cve>
+    </suppress>
+
+    <suppress>
+        <notes><![CDATA[
+            核实结论：**仅存在于构建工具链，不进入 APK**。
+
+            核实依据（2026-09-10）：
+            1. 血缘：该 `protobuf-java@2.6.1` 的载体文件是
+               `kotlin-compiler-32.4.0.jar (shaded: com.google.protobuf:protobuf-java:2.6.1)`
+               —— AGP 内置 Kotlin 编译器 shade 的旧版 protobuf，非本仓依赖；
+               （本仓另有的 `protobuf-java@3.25.5` 为独立构件，**不在本豁免范围内**。）
+            2. 运行面：`--configuration releaseRuntimeClasspath --dependency com.google.protobuf:protobuf-java`
+               → **No dependencies matching**，不进入发布 APK。
+        ]]></notes>
+        <packageUrl regex="true">^pkg:maven/com\.google\.protobuf/protobuf-java@2\.6\.1$</packageUrl>
+        <cve>CVE-2024-7254</cve>
+        <cve>CVE-2022-3171</cve>
+        <cve>CVE-2021-22569</cve>
+    </suppress>
+
+    <suppress>
+        <notes><![CDATA[
+            核实结论：**AGP 自身内部件，不进入 APK**。
+
+            核实依据（2026-09-10）：
+            1. `com.android.tools.analytics-library:protos@32.4.0` 属 Android Gradle Plugin 的
+               构建分析组件（与同批 `shared` / `tracker` 同源），非本仓声明依赖；
+            2. 被匹配的是 CVE-2008-0986——一条 2008 年的历史漏洞，与该构件的实际用途无任何交集，
+               属 CPE 名称比对误报；
+            3. 该构件不在 `:app:releaseRuntimeClasspath` 上。
+        ]]></notes>
+        <packageUrl regex="true">^pkg:maven/com\.android\.tools\.analytics-library/.*@32\.4\.0$</packageUrl>
+        <cve>CVE-2008-0986</cve>
+    </suppress>
+
+    <!-- ============ ISSUE-P3-32：CVE-2026-53914 的 CPE 产品级过度匹配 ============ -->
+
+    <suppress>
+        <notes><![CDATA[
+            核实结论：**CPE 产品级过度匹配 + 受影响面已由升级消除**。
+
+            核实依据（2026-09-10，逐条可复现）：
+            1. **NVD 的 CPE 是产品级**：`cpe:2.3:a:jetbrains:kotlin:*` 且 `versionEndExcluding=2.4.20`
+               （来源：`https://services.nvd.nist.gov/rest/json/cves/2.0?cveId=CVE-2026-53914`），
+               因此 dependency-check 把该 CVE 挂到了 `org.jetbrains.kotlin` 下**约 30 个互不相同的构件**上
+               （从 `kotlin-stdlib@1.6.10` 到 `kotlin-stdlib@2.4.10`、`kotlin-reflect`、`kotlin-daemon-*`
+               ……）；而厂商公告所指的实际受影响构件是 `compose-group-mapping`（构建缓存元数据组件）。
+            2. **成因与运行时无关**：描述为 "unsafe deserialization in the **build cache metadata**"，
+               CWE-502；厂商自评 CVSS 3.1 = **6.7 MEDIUM**（`AV:L/AC:H/PR:H`，本地 + 高权限），
+               CISA SSVC 明确 `exploitation: none` / `automatable: no`（NVD 的 9.8 为通用反序列化打分）。
+            3. **已做真修复而非仅豁免**：本批次把 Kotlin 2.4.10 → **2.4.20**（即该 CVE 的修复版本），
+               见 `gradle/libs.versions.toml` 与 `build.gradle.kts` 的 buildscript classpath；
+               实测 `:app:dependencyInsight --configuration releaseRuntimeClasspath
+               --dependency org.jetbrains.kotlin:kotlin-stdlib` 现在只解析到 **2.4.20**
+               （升级前为 2.4.10），且 `.\gradlew.bat test --rerun-tasks` 实测
+               **1200 例 / 1187 通过 / 0 失败 / 13 跳过**，零退化。
+            4. **残余匹配全部是构建工具**：报告中其余 Kotlin 版本（1.6.10 / 1.8.x / 2.2.x / 2.3.x / 2.4.0）
+               来自 Kotlin 构建工具与其自身的传递依赖（`kotlin-compiler-*`、`kotlin-daemon-*`、
+               `kotlin-build-tools-*` 等），均不在 `:app:releaseRuntimeClasspath` 上。
+
+            范围与护栏：本豁免**只绑定 `CVE-2026-53914` 这一个 CVE**；Kotlin 出现任何**其它** CVE 时闸门照常失败。
+            **若将来 `:app:releaseRuntimeClasspath` 上出现低于 2.4.20 的 Kotlin 构件，本豁免即不应再适用，
+            必须重新评估**（该情形在本次升级后已不成立）。
+        ]]></notes>
+        <packageUrl regex="true">^pkg:maven/org\.jetbrains\.kotlin/.*$</packageUrl>
+        <cve>CVE-2026-53914</cve>
+    </suppress>
 </suppressions>

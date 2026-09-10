@@ -5,9 +5,12 @@
 # bcprov 1.85.2 / coroutines 1.11.0 / okhttp 5.5.0 / foojay-resolver 1.0.0 / wrapper 9.7.1
 [versions]
 agp = "9.4.0"
-# Kotlin 版本：经顶层 buildscript classpath 提升内置 Kotlin 的 KGP 至 2.4.10，
-# Compose 编译器插件版本必须与之一致
-kotlin = "2.4.10"
+# Kotlin 版本：经顶层 buildscript classpath 提升内置 Kotlin 的 KGP 至 2.4.20，
+# Compose 编译器插件版本必须与之一致。
+# ISSUE-P3-32：2.4.10 → 2.4.20 系 CVE-2026-53914（Kotlin < 2.4.20 构建缓存元数据
+# 不安全反序列化，CWE-502）的上游修复版本；厂商自评 6.7（AV:L/AC:H/PR:H），
+# 成因仅限构建缓存元数据解析，不涉及 kotlin-stdlib 运行时。
+kotlin = "2.4.20"
 # KSP 2.3.x 起独立版本号（与 Kotlin 解耦）；AGP 9 要求 ≥ 2.3.6
 ksp = "2.3.11"
 hilt = "2.60.1"
