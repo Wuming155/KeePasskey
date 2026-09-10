@@ -109,6 +109,9 @@ class HealthCheckViewModelTest {
             com.keepasskey.app.data.logger.DebugLogBuffer(), extendedStore, periodicScheduler,
             // TASK-44：自动填充黑名单仓库（无持久化层的内存语义）
             com.keepasskey.app.data.repository.AutofillBlocklistStore(null),
+            // ISSUE-P3-43：保存侧黑名单与字段级屏蔽（内存语义）
+            com.keepasskey.app.autofill.AutofillSaveBlocklistStore(null),
+            com.keepasskey.app.autofill.AutofillFieldBlocklistStore(null),
             // TASK-47：已泄露密码检测协调器（测试用假客户端：无真实外联）
             com.keepasskey.app.data.breach.BreachCheckCoordinator(
                 com.keepasskey.app.ui.screens.settings.NoOpBreachRangeClient

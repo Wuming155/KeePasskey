@@ -78,6 +78,14 @@ class KeePasskeyAutofillService : AutofillService() {
     @Inject
     lateinit var settingsStore: com.keepasskey.app.data.repository.ExtendedSettingsStore
 
+    // ISSUE-P3-43 ②：字段签名级屏蔽（「包名 + 域 + 角色」粒度，用户在选择器内写入）
+    @Inject
+    lateinit var autofillFieldBlocklistStore: AutofillFieldBlocklistStore
+
+    // ISSUE-P3-43 ③：保存侧独立黑名单（命中即静默跳过保存，不影响填充）
+    @Inject
+    lateinit var autofillSaveBlocklistStore: AutofillSaveBlocklistStore
+
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     override fun onFillRequest(
@@ -167,13 +175,31 @@ class KeePasskeyAutofillService : AutofillService() {
         val usernameParsed = scanResult.usernameId?.toIntOrNull()?.let { parsedNodes.getOrNull(it) }
         val passwordParsed = scanResult.passwordId?.toIntOrNull()?.let { parsedNodes.getOrNull(it) }
 
-        val usernameId: AutofillId? = usernameParsed?.autofillId
-        val passwordId: AutofillId? = passwordParsed?.autofillId
+        val scannedUsernameId: AutofillId? = usernameParsed?.autofillId
+        val scannedPasswordId: AutofillId? = passwordParsed?.autofillId
 
-        if (usernameId == null && passwordId == null) {
+        if (scannedUsernameId == null && scannedPasswordId == null) {
             callback.onSuccess(null)
             return
         }
+
+        // ISSUE-P3-43 ②：字段签名级屏蔽——判定先于「库锁定引导」与任何数据集构建，
+        // 因此被屏蔽的框连解锁引导都不会收到（更保守）。签名的域取表单**自报**的
+        // scanResult.webDomain（用户屏蔽的是他当时看到的那个表单），
+        // 与后续用于凭据匹配的「归属校验后 webDomain」是两个独立用途，不可互替。
+        val fieldDecision = AutofillFieldBlockPolicy.decide(
+            hasUsernameField = scannedUsernameId != null,
+            hasPasswordField = scannedPasswordId != null
+        ) { role ->
+            autofillFieldBlocklistStore.isBlocked(callingPkg, scanResult.webDomain, role)
+        }
+        if (fieldDecision.blocksEntireForm) {
+            AppLog.i(TAG, "本表单字段已被用户逐字段屏蔽，拒绝下发数据集")
+            callback.onSuccess(null)
+            return
+        }
+        val usernameId: AutofillId? = scannedUsernameId.takeIf { fieldDecision.allowUsername }
+        val passwordId: AutofillId? = scannedPasswordId.takeIf { fieldDecision.allowPassword }
 
         val responseBuilder = FillResponse.Builder()
         // 内联建议通道（IME）：请求侧携带 InlineSuggestionsRequest 且声明 supportsInlineSuggestions
@@ -336,6 +362,10 @@ class KeePasskeyAutofillService : AutofillService() {
         val pickerIntent = Intent(this, AutofillPickerActivity::class.java).apply {
             putExtra(AutofillPickerActivity.EXTRA_USERNAME_ID, usernameId)
             putExtra(AutofillPickerActivity.EXTRA_PASSWORD_ID, passwordId)
+            // ISSUE-P3-43 ②：下传「字段签名」所需上下文，使选择器成为字段级屏蔽的写入入口。
+            // 只传包名与表单自报域（均为非敏感标识），不传任何表单内容或凭据。
+            putExtra(AutofillPickerActivity.EXTRA_CALLING_PACKAGE, callingPkg)
+            putExtra(AutofillPickerActivity.EXTRA_WEB_DOMAIN, scanResult.webDomain.orEmpty())
         }
         val pickerPendingIntent = PendingIntent.getActivity(
             this,
@@ -426,6 +456,15 @@ class KeePasskeyAutofillService : AutofillService() {
                 // 关闭时不落库、不打扰用户——向框架回调成功即表示「本次无需保存」。
                 if (!settingsStore.isOfferSaveCredentialsEnabled()) {
                     AppLog.i(TAG, "已关闭新密码保存，跳过本次自动填充保存")
+                    callback.onSuccess()
+                    return@launch
+                }
+
+                // ISSUE-P3-43 ③：保存侧独立黑名单（与填充黑名单分离）。
+                // 命中即**静默**跳过：不落库、不向用户报错（onSuccess 表示「本次无需保存」），
+                // 且不影响该应用的填充能力。包名非法时 store 侧 fail-closed 同样跳过。
+                if (autofillSaveBlocklistStore.isSaveBlocked(callingPkg)) {
+                    AppLog.i(TAG, "调用应用已列入保存黑名单，静默跳过本次保存")
                     callback.onSuccess()
                     return@launch
                 }

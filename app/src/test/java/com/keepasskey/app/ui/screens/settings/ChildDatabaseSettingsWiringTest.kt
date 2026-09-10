@@ -433,6 +433,9 @@ class ChildDatabaseSettingsWiringTest {
             ExtendedSettingsStore(null),
             PeriodicSyncScheduler(fakeContext, ExtendedSettingsStore(null)),
             AutofillBlocklistStore(null),
+            // ISSUE-P3-43：保存侧黑名单与字段级屏蔽（内存语义）
+            com.keepasskey.app.autofill.AutofillSaveBlocklistStore(null),
+            com.keepasskey.app.autofill.AutofillFieldBlocklistStore(null),
             BreachCheckCoordinator(NoOpBreachRangeClient),
             stringsProvider = TEST_STRINGS,
             childDatabaseSessionManager = manager,

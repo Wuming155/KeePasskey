@@ -18,6 +18,9 @@
 | §6 | P3-29 批次 A（全仓超阈值债务：优先级 8 项 + 增量 2 项 + 1 项例外登记） | ISSUE-P3-29 |
 | §7 | CI 首跑实测整改（lint 门禁 147 项清零 / CodeQL 10 条处置 / 供应链闸门静默失效补强） | ISSUE-P3-32 |
 | §8 | 原生内核扩展与工程化批次（AES-KDF / Twofish / 口令强度 / HMAC 摘要收敛 / 语料脚本） | ISSUE-P3-34 ~ P3-38 |
+| §9 | 自动填充能力对标批次（字段识别打分 / 手动选择器 / 健康自检 / 会话宽限 / 保存开关 / 结构化评估） | ISSUE-P3-39 ~ P3-45 |
+| §10 | P3-31 批次 B（残余超阈值债务：`RealVaultRepository` / `DatabasePickerScreen`） | ISSUE-P3-31 |
+| §11 | P3-31 批次 C + P3-43 闭环（巨型类三件套 / 三级自动填充屏蔽 / 熵写入方补位） | ISSUE-P3-31 / P3-43 |
 
 > 本索引仅到**章节粒度**，因此不会随条目增删而过期；章节内的子条目按编号顺序排列。
 > 各批次的**验收证据**（用例数 / 通过 / 失败 / 跳过）分别见 §2.22、§3.1、§4.1、§5.1。
@@ -1829,4 +1832,122 @@ size ∈ {0,1,16,1024}` 共 20 组**逐字节一致**；另断言偏移切片与
 | 1 | 编译缺陷（已修） | 拆出 `OpenExistingVaultDialog.kt` 时漏拷 `androidx.compose.foundation.shape.RoundedCornerShape` 的 import，首轮 `:app:compileDebugKotlin` 报 `Unresolved reference 'RoundedCornerShape'`；补 import 后通过。 |
 | 2 | 文档基线不一致（未改，登记） | `AGENTS.md` §1 记测试基线为 **1291 例**，而 §5 与 `ACTIVE_ISSUES.md` 记 **1257 例**；本批次实测各模块 XML 汇总为 **1291 例**（app 712 / core 58 / crypto 107 / database 235 / sync 179），与 §1 一致。1257 系更早快照，本批次未擅自改动 §5 数值（避免无依据改动历史记录），在此留痕待维护者统一。 |
 | 3 | 验证边界 | 本批次全部证据为**编译 + JVM 单测 + Lint**；Compose UI 侧（三个拆出的组件）无任何 instrumented / 真机渲染验证，本机无设备与模拟器。拆分虽为纯结构性，但 UI 重组的实际渲染未实测。 |
+
+---
+
+## 11. ISSUE-P3-31 批次 C + ISSUE-P3-43 闭环归档（巨型类三件套 / 三级自动填充屏蔽 / 熵写入方补位）
+
+> 核实时间点：**2026-09-10**。核实方式：`wc -l` 全仓复核、`gradlew test --rerun-tasks --max-workers=1`
+> 实测 **1328 例 / 0 失败 / 13 跳过**、`gradlew lint --max-workers=1` 全模块 **0 error**。
+> **本节含 1 项既有生产缺陷的发现与修复（§11.5）与 6 条过程缺陷如实留痕（§11.8）**。
+
+### 11.1 批次范围
+
+| 条目 | 内容 | 结论 |
+|---|---|---|
+| ISSUE-P3-31 批次 C | `ThemeSettingsScreen`(762) / `EntryEditScreen`(712) / `EntryDetailViewModel`(708) 三件套拆分 | ✅ 三者分别降至 **155 / 388 / 399**，清单 21 → **18** 项 |
+| ISSUE-P3-43 ② | 字段签名级屏蔽（选择器 UI 入口 + 不可逆持久化 + 填充侧判定**三件套一次性交付**） | ✅ 闭环 |
+| ISSUE-P3-43 ③ | 保存侧独立黑名单（设置页管理入口 + 持久化 + `onSaveRequest` 判定**三件套一次性交付**） | ✅ 闭环 |
+| （过程发现） | `EntryDetailUiState.passwordStrengthBits` **无任何写入方**——强度条恒不渲染的生产缺陷 | ✅ 顺带修复；签名抗枚举加固残余登记为 **ISSUE-P3-46（ACTIVE）** |
+
+### 11.2 P3-31 批次 C：三件套拆分明细（纯结构性）
+
+拆分为纯结构性改动：**渲染树、item 数量与顺序、combine 嵌套形状与叠加顺序逐字保留**；
+原同文件 `private` 搬出后一律收敛为 `internal`（同包可见，**未**扩大公开 API 面）。
+
+| 原文件 | 行数 | 拆出单元 | 拆后 |
+|---|---|---|---|
+| `ThemeSettingsScreen.kt` | 762 → **155** | `ThemeSettingsSections.kt`（主题类三节，`LazyListScope` 扩展）、`ThemeSettingsListSections.kt`（列表/搜索/图标集/语言四节）、`ThemeSettingsComponents.kt`（282，5 个展示组件） | 155 |
+| `EntryEditScreen.kt` | 712 → **388** | `EntryEditIconCodec.kt`（46，降采样）、`EntryEditFormSections.kt`（326，五个 `ColumnScope` 表单分节）、`EntryEditPickers.kt`（SAF/扫码/相册三选择器聚合） | 388 |
+| `EntryDetailViewModel.kt` | 708 → **399** | `EntryDetailStateAssembler.kt`（219，UI 状态装配）、`EntryDetailRevealController.kt`（揭示/遮掩行为 + 熵流）、`EntryDetailSecrets.kt`（明文驻留与**唯一清零入口**）、`EntryDetailTotpTicker.kt`（56）、`EntryDetailAttachmentExporter.kt`（66）、`EntryDetailRevisionController.kt`（历史回滚/对比）、`PasswordEntropyEstimator.kt`（59） | 399 |
+
+结构要点（也是审查锚点）：
+1. **明文清零点未被复制**：`EntryDetailSecrets.clearAll()` 是唯一清零入口，`RevealController` 与
+   `RevisionController` 只写它不另设副本；`toDisplayString()` 的「物化即清零」边界提为同包 `internal` 顶层扩展，实现逐字不变。
+2. **`EntryEditFormSections` 各分节声明为 `ColumnScope` 扩展**：保证分节内部子元素仍是父 `Column` 的直接子节点，
+   `spacedBy(16.dp)` 的分节间距与 `AnimatedVisibility` 的 `ColumnScope` 重载解析（expand/shrink 默认动画）与拆分前一致。
+3. **combine 叠加顺序逐字保留**（assembler）：后层 `copy` 会覆盖前层，任何"看起来更整齐"的重排都是行为变更，故禁止。
+4. 顺带具名化 2 处魔法数字：`PASSWORD_BITS_PER_CHAR = 4.5`（编辑页强度条长度启发式，注释声明**不是**真实熵）；
+   `SECONDS_PER_MINUTE` 随消息构造下沉至 assembler companion。
+
+### 11.3 P3-43 ②：字段签名级屏蔽（三件套）
+
+| 件 | 落点 | 证据 |
+|---|---|---|
+| **UI 入口** | `AutofillPickerScreen` 新增「不再填充账号框/密码框」入口（仅当本次请求识别到对应框时呈现，杜绝无对象假按钮）→ 确认弹窗 → `AutofillPickerActivity.blockFieldAndFinish` 写入并结束本次填充（`RESULT_CANCELED`） | 选择器是用户唯一能明确指认「此表单此框别再填」的位置 |
+| **持久化** | 新增 `AutofillFieldBlocklistStore`（`@Singleton`，SharedPreferences `blocked_field_signatures` + 每安装随机盐）；签名 = `SHA-256(salt‖"v1‖包名‖域‖角色")` 截 128 bit hex（`AutofillFieldSignature`） | **零明文**：不持久化包名、域名或表单内容；盐因清数据丢失 → 记录保守失效（回到可填充态），不会误屏蔽 |
+| **填充侧判定** | `AutofillFieldBlockPolicy.decide`（纯函数可单测）+ 服务接线：判定**先于**库锁定引导与任何数据集构建，整表单命中 → 空响应；单框命中 → 该框不下发（另一框不受影响） | 域取表单**自报** `scanResult.webDomain`（用户屏蔽的是他看到的那个表单），与凭据匹配用的「归属校验后域」是两个独立用途 |
+
+**安全边界（如实声明，不夸大）**：签名**不可逆**（无法读出包名/域名），但**不具备抗枚举性**——
+持有私有目录盐与签名集合者可对候选逐一计算比对。抗枚举加固（Keystore 不可导出 HMAC 密钥替代随机盐）
+登记为 **ISSUE-P3-46（ACTIVE）**。
+
+### 11.4 P3-43 ③：保存侧独立黑名单（三件套）
+
+| 件 | 落点 | 证据 |
+|---|---|---|
+| **UI 入口** | `AutofillSettingsScreen` 第 4 节新增「不再提示保存的应用」管理行 → `PackageBlocklistManageDialog`（与填充黑名单**共用**同一对话框实现，文案参数化；实现搬至 `AutofillBlocklistDialogs.kt`） | `SettingsViewModel.autofillSaveBlockedPackages` / `blockSavePackage` / `unblockSavePackage` 接线，`KeePasskeySettingsNavGraph` 消费 |
+| **持久化** | 新增 `AutofillSaveBlocklistStore`（`@Singleton`，`save_blocked_targets`，包名经 `AutofillPackageNames` 严格校验） | 与填充黑名单**刻意分离**：「不再问保存」≠「不再填充」，共用名单会迫使用户二选一 |
+| **判定** | `KeePasskeyAutofillService.onSaveRequest`：保存开关检查之后、表单解析之前，命中 → `callback.onSuccess()` **静默跳过**（不落库、不报错、不打扰），且不影响该应用填充能力 | 包名非法时 store 判定 fail-closed 返回 true，同样跳过 |
+
+同包化收口：包名校验判据下沉至 `AutofillPackageNames`（包级 / 字段级 / 保存侧三处**同一来源**），
+`AutofillBlocklistStore.normalize` 改为委托（判据逐字不变，调用方无感知）。
+另同步 `values/` 与 `values-en/` 各 +20 条文案（选择器屏蔽入口、确认弹窗、两个管理对话框）。
+
+### 11.5 生产缺陷：`passwordStrengthBits` 无写入方（发现 → 修复）
+
+- **发现经过**：批次 C 拆分 `EntryDetailViewModel` 逐行搬移时核实——`passwordStrengthBitsFlow`
+  声明后**没有任何写入方**（恒 null），而 `EntryDetailComponents.kt:310` 消费它、
+  `PasswordStrengthBar` 对 null 直接 `return`：**详情页密码强度条从不渲染**。
+  同文件 `decryptPasswordForDisplay` 上方注释却声称「真实熵由 ViewModel 在用户显式查看密码时估算后经 uiState 下发」
+  ——注释与事实相反（与 §8 的「文档与实测相反」同类）。
+- **修复**：`PasswordEntropyEstimator`（新增）在**明文副本清零之前**就地估算
+  （`CharArray` → UTF-8 `ByteBuffer`（内部清零）→ `PasswordStrengthEvaluator.evaluate` → `log10 × log2(10)`）；
+  展开密码时写入，收起 / 切条目 / 离开页面时随明文一并失效（熵是明文派生信息，必须同生命周期）。
+  评估异常时返回 null（宁可不显示，不谎报强度）；全程不物化 String。
+- **单测**：`PasswordEntropyEstimatorTest` 6 例（null/空边界、非负单调、不改入参、bitsOf 换算、NaN/负值收敛）。
+
+### 11.6 验收标准逐条对照
+
+**P3-31（标准 2/3/4；标准 1 已由批次 B 完成并指向本批）**：
+
+| # | 标准 | 结论 |
+|---|---|---|
+| 2 | 每批纯结构性：`test` 全绿且用例数不减 | ✅ **1328 例 / 0 失败 / 13 跳过**（app 749 / core 58 / crypto 107 / database 235 / sync 179）；基数 1291 → 1328 的 **+37** 全部为本批次新增单测（5 文件），既有用例逐模块零增减 |
+| 3 | 拆分后逐条对照敏感数据清零点与公开 API | ✅ 清零点 9 → 9（`EntryDetailSecrets.clearAll()` 单点收口，`Chars.fill('0')` 全部保留）；公开 API 零丢失零新增（三原文件的 public 声明逐条未动，拆出单元全部 `internal`） |
+| 4 | 归档并更新清单快照 | ✅ 本节 + ACTIVE_ISSUES 清单刷新（21 → 18 项） |
+
+**P3-43（2026-09-10 重新定义的验收标准）**：
+
+| # | 标准 | 结论 |
+|---|---|---|
+| 1 | 字段签名级：选择器内可屏蔽，屏蔽后同「包名+域+角色」不再下发，持久化值不可逆 | ✅ §11.3；`AutofillFieldSignatureTest` 锁定不可逆性（签名不含原文）与盐敏感性 |
+| 2 | 保存侧：命中目标在 `onSaveRequest` 中静默不落库且不向用户报错 | ✅ §11.4；`callback.onSuccess()` 语义与 ISSUE-P3-44 的「关闭保存」路径一致 |
+| 3 | 单测覆盖三级判定与非法输入 fail-closed | ✅ 新增 5 文件 37 例：签名 9 / 字段判定 6 / 字段仓库 9 / 保存仓库 7 / 熵估算 6；非法包名在**写入与判定两方向**均 fail-closed 断言 |
+
+### 11.7 门禁证据与清单快照（2026-09-10 实测）
+
+- `.\gradlew.bat test --rerun-tasks --max-workers=1 --continue` → **BUILD SUCCESSFUL**，
+  **1328 例 / 0 失败 / 13 跳过**（app 749 / core 58 / crypto 107 / database 235 / sync 179）。
+- `.\gradlew.bat lint --max-workers=1` → **BUILD SUCCESSFUL**，5 模块 **0 error**。
+- 超阈值快照（同批次 B 命令重测）：21 → **18 项**：
+  `697 DatabaseSession` · `674 SecuritySettingsScreen` · `634 KeePasskeyAutofillService` ·
+  `629 S3SyncProvider` · `596 PasskeyCryptoEngine` · `578 KdbxMerger` · `568 SettingsScreen` ·
+  `562 UnlockScreen` · `550 GeneratorScreen` · `509 WebDavSyncProvider` · `504 AutofillSettingsScreen` ·
+  `494 EntryEditComponents` · `481 CloudSyncComponents` · `477 EntryDetailComponents` ·
+  `470 EntryEditViewModel` · `462 KeystoreManager` · `453 HealthCheckScreen` · `443 SyncEngine`
+  （`SettingsViewModel` 424 系批次 A 已建拆分框架内的接线增长、`DicewareWordList` 408 为登记例外，均不计入）。
+- **两处增量如实标注**：`KeePasskeyAutofillService` 595 → **634**、`SettingsViewModel` 400 → **424**，
+  系 P3-43 判定与接线所致的**功能性增长**（非拆分遗漏），已在 ACTIVE_ISSUES 清单内标注来源。
+
+### 11.8 本批次过程缺陷（如实留痕）
+
+| # | 类型 | 说明 |
+|---|---|---|
+| 1 | 编译缺陷（已修） | 首版 `EntryDetailAttachmentExporter.export` 为普通函数但内部调用 `suspend fun getAttachmentData`，`ILLEGAL_SUSPEND_FUNCTION_CALL`；补 `suspend` 后通过。暴露「搬运代码时未复核被调方签名」的过程问题。 |
+| 2 | 图标资源不可用（已修） | 设置页两个新入口初写 `Icons.Default.SaveAs` / `Icons.Default.DisabledByDefault`，均属 extended 图标集（本仓未引），`Unresolved reference`；改用已 import 的 `Save` / `Password` 后通过。 |
+| 3 | 测试构造错位（已修） | `SettingsViewModel` 构造器插入两个新参数后，3 个按**位置传参**的既有测试（`BreachCheckHealthTest` / `ChildDatabaseSettingsWiringTest` / `HealthCheckViewModelTest`）报「No value passed / type mismatch」；三处补传内存语义实例后通过。教训：构造器中部插参对位置传参测试是破坏性变更，新参数应追加至末尾或全面改具名传参。 |
+| 4 | 预防性规避（无缺陷发生） | `AutofillFieldBlocklistStore` 的盐编解码初版拟用 `android.util.Base64`——其在纯 JVM 单测中是未实现桩，会使存储层在测试环境**静默退化**、令「屏蔽是否生效」的断言失真；改为手写 hex 后对 Android 框架依赖归零。 |
+| 5 | 事实修正 | `EntryDetailViewModel` 内关于 `passwordStrengthBits` 的既有注释（「TASK-32 整改：真实熵……由 ViewModel 估算后下发」）自 TASK-32 落地起即为**未兑现声明**，本批次以 §11.5 修复兑现；历史归档中 TASK-32 的相关表述以本节为准。 |
+| 6 | 验证边界 | 同批次 B：全部证据为**编译 + JVM 单测 + Lint**；Compose UI（新入口/对话框/选择器屏蔽行）与 `AutofillService` 真机填充/保存链路无 instrumented 验证（本机无设备），field-level 判定的端到端行为由纯函数单测 + 服务层接线复核保障，未做真机回归。 |
 

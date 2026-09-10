@@ -87,9 +87,18 @@ fun AutofillSettingsScreen(
     blockedPackages: List<String> = emptyList(),
     onBlockAutofillPackage: (String) -> Boolean = { false },
     onUnblockAutofillPackage: (String) -> Boolean = { false },
+    // ISSUE-P3-43 ③：保存侧独立黑名单（与填充黑名单分离：只禁保存、不禁填充）
+    saveBlockedPackages: List<String> = emptyList(),
+    onBlockSavePackage: (String) -> Boolean = { false },
+    onUnblockSavePackage: (String) -> Boolean = { false },
+    // ISSUE-P3-43 ②：字段签名级屏蔽（签名不可逆，故仅可回显条数并整体清除）
+    blockedFieldCount: Int = 0,
+    onClearBlockedFields: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var showBlacklistDialog by remember { mutableStateOf(false) }
+    var showSaveBlacklistDialog by remember { mutableStateOf(false) }
+    var showFieldBlockDialog by remember { mutableStateOf(false) }
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -315,36 +324,41 @@ fun AutofillSettingsScreen(
                             onCheckedChange = onSkipDalVerificationToggle
                         )
 
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { showBlacklistDialog = true }
-                                .padding(vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.Block, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp))
-                                Spacer(modifier = Modifier.width(12.dp))
-                                Column {
-                                    Text(
-                                        text = stringResource(R.string.autofill_blacklist_row_title),
-                                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
-                                    Text(
-                                        text = if (blockedPackages.isNotEmpty()) {
-                                            stringResource(R.string.autofill_blacklist_count, blockedPackages.size)
-                                        } else {
-                                            stringResource(R.string.autofill_blacklist_empty)
-                                        },
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                            }
-                            Icon(Icons.AutoMirrored.Filled.ArrowForwardIos, contentDescription = null, tint = MaterialTheme.colorScheme.outlineVariant, modifier = Modifier.size(14.dp))
-                        }
+                        // 一级：按应用屏蔽填充（TASK-44）
+                        AutofillManageEntryRow(
+                            icon = Icons.Default.Block,
+                            title = stringResource(R.string.autofill_blacklist_row_title),
+                            subtitle = if (blockedPackages.isNotEmpty()) {
+                                stringResource(R.string.autofill_blacklist_count, blockedPackages.size)
+                            } else {
+                                stringResource(R.string.autofill_blacklist_empty)
+                            },
+                            onClick = { showBlacklistDialog = true }
+                        )
+
+                        // 二级：按应用屏蔽**保存提示**（ISSUE-P3-43 ③，与填充屏蔽相互独立）
+                        AutofillManageEntryRow(
+                            icon = Icons.Default.Save,
+                            title = stringResource(R.string.autofill_save_blacklist_row_title),
+                            subtitle = if (saveBlockedPackages.isNotEmpty()) {
+                                stringResource(R.string.autofill_save_blacklist_count, saveBlockedPackages.size)
+                            } else {
+                                stringResource(R.string.autofill_save_blacklist_empty)
+                            },
+                            onClick = { showSaveBlacklistDialog = true }
+                        )
+
+                        // 三级：字段签名级屏蔽（ISSUE-P3-43 ②，写入入口在手动选择器内）
+                        AutofillManageEntryRow(
+                            icon = Icons.Default.Password,
+                            title = stringResource(R.string.autofill_field_block_row_title),
+                            subtitle = if (blockedFieldCount > 0) {
+                                stringResource(R.string.autofill_field_block_count, blockedFieldCount)
+                            } else {
+                                stringResource(R.string.autofill_field_block_empty)
+                            },
+                            onClick = { showFieldBlockDialog = true }
+                        )
                     }
                 }
             }
@@ -355,161 +369,46 @@ fun AutofillSettingsScreen(
         }
     }
 
-    // 黑名单管理对话框
+    // 填充黑名单管理对话框
     // TASK-36 整改：此前渲染两条写死的示例条目（银行/门户）并挂空 onClick 删除按钮，属假数据回显，
     // 已诚实化下架；TASK-44 补齐真实生命周期——展示持久化包名条目、支持删除与按包名新增，
     // 填充侧（AutofillService / CredentialProviderService）命中即 fail-closed 不下发。
+    // ISSUE-P3-43：对话框实现搬至 AutofillBlocklistDialogs.kt 并与保存侧共用（文案参数化）。
     if (showBlacklistDialog) {
-        BlacklistManageDialog(
+        PackageBlocklistManageDialog(
+            title = stringResource(R.string.autofill_blacklist_dialog_title),
+            description = stringResource(R.string.autofill_blacklist_dialog_desc),
+            emptyText = stringResource(R.string.autofill_blacklist_empty),
+            addHint = stringResource(R.string.autofill_blacklist_add_hint),
             blockedPackages = blockedPackages,
             onDismiss = { showBlacklistDialog = false },
             onAdd = onBlockAutofillPackage,
             onRemove = onUnblockAutofillPackage
         )
     }
-}
 
-/**
- * 黑名单管理对话框：条目化展示（应用名 + 包名）与删除，底部按包名新增。
- * 新增失败（包名非法或已存在）如实上浮错误提示，不谎报成功。
- */
-@Composable
-private fun BlacklistManageDialog(
-    blockedPackages: List<String>,
-    onDismiss: () -> Unit,
-    onAdd: (String) -> Boolean,
-    onRemove: (String) -> Boolean
-) {
-    var pendingPackage by remember { mutableStateOf("") }
-    var showAddError by remember { mutableStateOf(false) }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.autofill_blacklist_dialog_title)) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(
-                    text = stringResource(R.string.autofill_blacklist_dialog_desc),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-
-                if (blockedPackages.isEmpty()) {
-                    Text(
-                        text = stringResource(R.string.autofill_blacklist_empty),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                } else {
-                    LazyColumn(modifier = Modifier.heightIn(max = 220.dp)) {
-                        items(blockedPackages, key = { it }) { packageName ->
-                            BlockedPackageRow(
-                                packageName = packageName,
-                                onRemove = { onRemove(packageName) }
-                            )
-                        }
-                    }
-                }
-
-                OutlinedTextField(
-                    value = pendingPackage,
-                    onValueChange = {
-                        pendingPackage = it
-                        showAddError = false
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text(stringResource(R.string.autofill_blacklist_add_hint)) },
-                    singleLine = true,
-                    isError = showAddError
-                )
-                if (showAddError) {
-                    Text(
-                        text = stringResource(R.string.autofill_blacklist_add_invalid),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error
-                    )
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = {
-                    if (onAdd(pendingPackage)) {
-                        pendingPackage = ""
-                        showAddError = false
-                    } else {
-                        // 真实失败如实反馈（包名非法 / 已存在于黑名单）
-                        showAddError = true
-                    }
-                },
-                enabled = pendingPackage.isNotBlank()
-            ) {
-                Text(stringResource(R.string.btn_add))
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text(stringResource(R.string.btn_close))
-            }
-        }
-    )
-}
-
-@Composable
-private fun BlockedPackageRow(
-    packageName: String,
-    onRemove: () -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = rememberAppLabel(packageName),
-                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1
-            )
-            Text(
-                text = packageName,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1
-            )
-        }
-        IconButton(onClick = onRemove) {
-            Icon(
-                imageVector = Icons.Default.Delete,
-                contentDescription = stringResource(R.string.autofill_blacklist_delete_cd),
-                tint = MaterialTheme.colorScheme.error,
-                modifier = Modifier.size(20.dp)
-            )
-        }
+    // ISSUE-P3-43 ③：保存侧黑名单管理（命中后 onSaveRequest 静默跳过，不影响填充）
+    if (showSaveBlacklistDialog) {
+        PackageBlocklistManageDialog(
+            title = stringResource(R.string.autofill_save_blacklist_dialog_title),
+            description = stringResource(R.string.autofill_save_blacklist_dialog_desc),
+            emptyText = stringResource(R.string.autofill_save_blacklist_empty),
+            addHint = stringResource(R.string.autofill_blacklist_add_hint),
+            blockedPackages = saveBlockedPackages,
+            onDismiss = { showSaveBlacklistDialog = false },
+            onAdd = onBlockSavePackage,
+            onRemove = onUnblockSavePackage
+        )
     }
-}
 
-/**
- * 解析已安装应用的可读名称（IO 线程）。包名不可解析（未安装 / 受包可见性限制）时
- * 如实回落为包名本身——不伪造应用名。
- */
-@Composable
-private fun rememberAppLabel(packageName: String): String {
-    val context = LocalContext.current
-    val label = produceState(initialValue = packageName, packageName) {
-        value = withContext(Dispatchers.IO) {
-            try {
-                val info = context.packageManager.getApplicationInfo(packageName, 0)
-                context.packageManager.getApplicationLabel(info).toString()
-            } catch (_: Exception) {
-                packageName
-            }
-        }
+    // ISSUE-P3-43 ②：字段签名级屏蔽——签名不可逆，只提供条数回显与整体清除
+    if (showFieldBlockDialog) {
+        FieldBlocklistClearDialog(
+            blockedFieldCount = blockedFieldCount,
+            onDismiss = { showFieldBlockDialog = false },
+            onConfirmClear = onClearBlockedFields
+        )
     }
-    return label.value
 }
 
 /**

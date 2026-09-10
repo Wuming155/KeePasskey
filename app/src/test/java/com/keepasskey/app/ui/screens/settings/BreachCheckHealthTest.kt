@@ -112,6 +112,9 @@ class BreachCheckHealthTest {
             ExtendedSettingsStore(null),
             com.keepasskey.app.sync.PeriodicSyncScheduler(fakeContext, ExtendedSettingsStore(null)),
             com.keepasskey.app.data.repository.AutofillBlocklistStore(null),
+            // ISSUE-P3-43：保存侧黑名单与字段级屏蔽（内存语义）
+            com.keepasskey.app.autofill.AutofillSaveBlocklistStore(null),
+            com.keepasskey.app.autofill.AutofillFieldBlocklistStore(null),
             BreachCheckCoordinator(rangeClient),
             stringsProvider = TEST_STRINGS
         )

@@ -60,6 +60,10 @@ class SettingsViewModel @Inject constructor(
     private val periodicSyncScheduler: com.keepasskey.app.sync.PeriodicSyncScheduler,
     // TASK-44 整改：自动填充黑名单（真实包名条目，替代无写入方的禁用计数）
     private val autofillBlocklistStore: com.keepasskey.app.data.repository.AutofillBlocklistStore,
+    // ISSUE-P3-43 ③：保存侧独立黑名单（只禁保存提示，不影响填充）
+    private val autofillSaveBlocklistStore: com.keepasskey.app.autofill.AutofillSaveBlocklistStore,
+    // ISSUE-P3-43 ②：字段签名级屏蔽（写入方为手动选择器，本页仅计数与整体清除）
+    private val autofillFieldBlocklistStore: com.keepasskey.app.autofill.AutofillFieldBlocklistStore,
     // TASK-47 整改：已泄露密码检测（HIBP k-匿名范围查询，由 breachCheckEnabled 开关门控）
     private val breachCheckCoordinator: com.keepasskey.app.data.breach.BreachCheckCoordinator,
     // ISSUE-P2-11 (ZT-16)：会话级「保存前创建 .bak 备份」偏好下发通道。
@@ -159,6 +163,8 @@ class SettingsViewModel @Inject constructor(
         settingsRepository = settingsRepository,
         vaultRepository = vaultRepository,
         autofillBlocklistStore = autofillBlocklistStore,
+        autofillSaveBlocklistStore = autofillSaveBlocklistStore,
+        autofillFieldBlocklistStore = autofillFieldBlocklistStore,
         debugLogBuffer = debugLogBuffer,
         scope = viewModelScope
     )
@@ -317,6 +323,24 @@ class SettingsViewModel @Inject constructor(
 
     /** 移出黑名单。@return true=移除成功；false=包名非法或本就不在黑名单中 */
     fun unblockAutofillPackage(packageName: String): Boolean = preferences.unblockAutofillPackage(packageName)
+
+    // ===== ISSUE-P3-43：保存侧独立黑名单 + 字段签名级屏蔽 =====
+    /** 「不再提示保存」名单快照（按包名升序）。 */
+    val autofillSaveBlockedPackages: StateFlow<List<String>> = preferences.autofillSaveBlockedPackages
+
+    /** 加入「不再提示保存」名单。@return true=新增成功；false=包名非法或已存在 */
+    fun blockSavePackage(packageName: String): Boolean = preferences.blockSavePackage(packageName)
+
+    /** 移出「不再提示保存」名单。@return true=移除成功；false=包名非法或本就不在名单中 */
+    fun unblockSavePackage(packageName: String): Boolean = preferences.unblockSavePackage(packageName)
+
+    /** 已屏蔽字段签名的条数（签名不可逆，故只下发计数，不下发签名本身）。 */
+    val autofillBlockedFieldCount: StateFlow<Int> = preferences.autofillBlockedFieldCount
+
+    /** 清除全部字段级屏蔽。 */
+    fun clearBlockedFields() {
+        preferences.clearBlockedFields()
+    }
 
     // ===== KP2A 扩展：显示与外观交互 =====
     fun setMaskPasswordsDefault(enabled: Boolean) = extendedPreferences.setMaskPasswordsDefault(enabled)

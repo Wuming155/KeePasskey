@@ -802,6 +802,26 @@
     <string name="detail_autofill_blocked">已为 %1$s 禁用自动填充</string>
     <string name="detail_autofill_unblocked">已恢复 %1$s 的自动填充</string>
 
+    <!-- ISSUE-P3-43 ②：字段签名级屏蔽（写入入口在手动选择器内） -->
+    <string name="autofill_picker_block_username">不再填充账号框</string>
+    <string name="autofill_picker_block_password">不再填充密码框</string>
+    <string name="autofill_picker_block_confirm_title">不再填充此字段？</string>
+    <string name="autofill_picker_block_confirm_desc">今后在同一应用、同一网址的同类输入框中不再提供填充建议。屏蔽记录以不可逆签名保存（不记录网址明文），可在「设置 → 自动填充」中整体清除。本次填充将取消。</string>
+    <string name="autofill_picker_block_confirm_btn">不再填充</string>
+    <string name="autofill_field_block_row_title">已屏蔽的表单字段</string>
+    <string name="autofill_field_block_count">已屏蔽 %1$d 个字段</string>
+    <string name="autofill_field_block_empty">暂无屏蔽的字段</string>
+    <string name="autofill_field_block_dialog_title">字段级屏蔽</string>
+    <string name="autofill_field_block_dialog_desc">屏蔽记录以不可逆签名（应用 + 网址 + 字段角色）保存，因此无法在此列出具体网址——只能整体清除。清除后这些字段会重新提供填充建议。</string>
+    <string name="autofill_field_block_clear_btn">全部清除</string>
+
+    <!-- ISSUE-P3-43 ③：保存侧独立黑名单（只禁保存提示，不影响填充） -->
+    <string name="autofill_save_blacklist_row_title">不再提示保存的应用</string>
+    <string name="autofill_save_blacklist_count">已设置 %1$d 个应用</string>
+    <string name="autofill_save_blacklist_empty">暂无设置的应用</string>
+    <string name="autofill_save_blacklist_dialog_title">管理「不再提示保存」名单</string>
+    <string name="autofill_save_blacklist_dialog_desc">名单中的应用在提交表单后不再询问是否保存密码，也不会写入任何凭据；该名单与上方的填充黑名单相互独立——仍可正常为这些应用填充已有凭据。</string>
+
     <!-- ===== 开发者调试子页 (DebugSettingsScreen) ===== -->
     <string name="debug_section_options">诊断选项</string>
     <string name="debug_log_title">诊断日志</string>

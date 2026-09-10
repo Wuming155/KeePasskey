@@ -51,7 +51,7 @@
 > 密码生成引擎出边界仍返回 String）已整改并归档，见 §2.21。
 > 当前 P2 级别无待办。
 
-## P3 低危问题、特性接线与体验优化（5 项）
+## P3 低危问题、特性接线与体验优化（4 项）
 
 > **背景**：P3 残余批次原 **12 项**（ISSUE-P3-17 ~ P3-28）已于 **2026-09-10** 整体整改。
 > 其中 **10 项完整闭环并归档**（P3-17 / 18 / 19 / **20** / 21 / 22 / 25 / 26 / 27 / 28，含逐项代码证据与 15 条过程缺陷留痕），
@@ -85,14 +85,20 @@
 > 就地保留待办并已重写验收标准（严禁先落库无写入方的存储 API）。
 > **2026-09-10 追加七（P3-31 批次 B）**：ISSUE-P3-31 验收标准 1 点名的两项
 > `RealVaultRepository`（1090 → 372）与 `DatabasePickerScreen`（968 → 319）已按纯结构性拆分完成并归档，
-> 见 [RESOLVED_LOG.md](RESOLVED_LOG.md) **§10**；**ISSUE-P3-31 本条未闭环**（残余 21 项），清单已就地刷新。
-> 本节余 **5 项**（P3-23 / P3-24 / P3-31 / P3-32 / P3-43）。
+> 见 [RESOLVED_LOG.md](RESOLVED_LOG.md) **§10**。
+> **2026-09-10 追加八（P3-31 批次 C + P3-43 闭环）**：批次 C 三项
+> （`ThemeSettingsScreen` 762 → 155 / `EntryEditScreen` 712 → 388 / `EntryDetailViewModel` 708 → 399）
+> 已完成并归档，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) **§11**；**ISSUE-P3-31 本条未闭环**（残余 18 项），清单已就地刷新。
+> 同批次 **ISSUE-P3-43 全部闭环并归档**（② 字段签名级屏蔽 / ③ 保存侧独立黑名单，
+> 三件套一次性交付，见 §11.3 / §11.4），本文件中该条目已移除；
+> 同批次顺带发现并修复一处既有生产缺陷（详情页 `passwordStrengthBits` 无写入方 → 强度条恒不渲染，见 §11.5），
+> 其签名抗枚举加固残余新登记为 **ISSUE-P3-46**。
+> 本节余 **4 项**（P3-23 / P3-24 / P3-31 / P3-32）+ 新登记 **P3-46**，共 **5 项**。
 > 归档门禁证据（2026-09-10 实测，`--rerun-tasks` 强制真实执行）：
 > `.\gradlew.bat test --rerun-tasks --max-workers=1 --continue` → **BUILD SUCCESSFUL**，
-> **1291 例 / 1278 通过 / 0 失败 / 13 跳过**（app 712 / core 58 / crypto 107 / database 235 / sync 179）
-> ——本处数值此前记为 1257 例，系更早快照，本次按各模块
-> `build/test-results/testDebugUnitTest/*.xml` 实测汇总修正（详见 RESOLVED_LOG §10.6 第 2 条）；
-> `assembleDebug` 与 `lint`（5 模块 **0 error**）通过；`:database:assembleDebugAndroidTest` 通过（ISSUE-P3-23 验收标准①）。
+> **1328 例 / 0 失败 / 13 跳过**（app 749 / core 58 / crypto 107 / database 235 / sync 179；
+> 较批次 B 基线 1291 例净增 37 例，全部为 §11 批次新增单测）；
+> `lint`（5 模块 **0 error**）通过；`:database:assembleDebugAndroidTest` 通过（ISSUE-P3-23 验收标准①）。
 
 ### 前提复核记录（2026-09-10，依「条目维护规则」第 2 条）
 
@@ -100,6 +106,9 @@
 > 「核实时间点与核实方式」段落内**（ISSUE-P3-28 确立的格式），此处不再重复列表。
 > **复核结论**：P3-23 的「语料未入库」成立，但其「`database` 无 `androidTest` 源集」已不成立
 > （该源集已建立并接线），已在条目内就地标注；P3-24 前提完整成立。
+> **2026-09-10 追加八复核结论**：P3-31 批次 C 前提成立（三项行数经 `wc -l` 复核与清单一致）；
+> P3-43 的两项待办前提成立（`AutofillBlocklistStore` 仍无字段级/保存侧能力，手动选择器已在位可作交互落点）。
+> **P3-43 已于同批次闭环归档**（见 §11），条目移出本文件。
 > **P3-30 已于 2026-09-10 归档**（前提「生产消费方为零」在开工时成立，整改后消费方落地，见 §5）。
 > **P3-29 已于 2026-09-10 批次 A 闭环归档**（见 §6）；其残余 23 项已按「新增条目须附核实时间点与核实方式」
 > 转入本节 **ISSUE-P3-31**（2026-09-10 经 `wc -l` 全仓复核）。
@@ -201,44 +210,46 @@
   **不得据此认为 CI 已跑通。**
 
 ---
-### ISSUE-P3-31 (P3-29 批次 A 后续): 残余 21 个真逻辑超阈值文件的**分批拆分债务**
+### ISSUE-P3-31 (P3-29 批次 A 后续): 残余 18 个真逻辑超阈值文件的**分批拆分债务**
 
 - **优先级**：P3（代码整洁度）
-- **2026-09-10 批次 B 进展（就地标注，本条未闭环）**：按验收标准 1「优先处理体量最大且耦合最高的」
-  两项已完成并**归档**，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) **§10**——
-  `RealVaultRepository` **1090 → 372**（拆出 6 个 internal 协调器）、
-  `DatabasePickerScreen` **968 → 319**（拆出 3 个组件文件）；
-  门禁 `test --rerun-tasks` **1291 例 / 0 失败 / 13 跳过**逐模块零退化、`lint` 5 模块 0 error，
-  敏感数据清零点 **9 → 9 / UI 4 → 4** 逐条对齐，公开 API diff 为空。
-  **残余清单已按批次 B 后实测刷新为 21 项**（见下）。
-- **核实时间点与核实方式（2026-09-10）**：ISSUE-P3-29 批次 A 完成后，于本仓根执行
+- **2026-09-10 批次 B 进展**：`RealVaultRepository` 1090 → 372、`DatabasePickerScreen` 968 → 319，
+  归档见 [RESOLVED_LOG.md](RESOLVED_LOG.md) **§10**。
+- **2026-09-10 批次 C 进展（就地标注，本条未闭环）**：验收标准 1 点名的下一批三项
+  **全部降至阈值内并归档**，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) **§11**——
+  `ThemeSettingsScreen` **762 → 155**、`EntryEditScreen` **712 → 388**、`EntryDetailViewModel` **708 → 399**；
+  门禁 `test --rerun-tasks` **1328 例 / 0 失败 / 13 跳过**（app 749 / core 58 / crypto 107 / database 235 / sync 179）、
+  `lint` 5 模块 0 error，敏感数据清零点 **9 → 9** 逐条对齐、公开 API 零丢失零新增。
+  同批次顺带闭环 **ISSUE-P3-43**（§11.3 / §11.4）并修复一处既有生产缺陷（§11.5）。
+  **残余清单已按批次 C 后实测刷新为 18 项**（见下）。
+- **核实时间点与核实方式（2026-09-10）**：于本仓根执行
   `for d in app database sync core crypto; do find $d/src/main/java -name '*.kt'; done | xargs wc -l`，
   以 `awk '$1>400 && $2!="total"'` 筛出 `> 400` 行者并人工剔除纯常量例外；
-  **2026-09-10 批次 B 完成后以同一命令重测**，残余由 23 项降至 **21 项**。
+  **2026-09-10 批次 C 完成后以同一命令重测**，残余由 21 项降至 **18 项**。
 - **为何单独登记**：ISSUE-P3-29 正文的**优先级 8 项已于批次 A 全部降至阈值内并归档**（见
   [RESOLVED_LOG.md](RESOLVED_LOG.md) **§6**），但全仓扫描显示超阈值仍是**普遍性既有债务**；
   按「严禁只记聊天或脑中」纪律，残余面必须有独立条目承接，避免后人误以为「巨型类问题已解决」。
 
-- **清单（2026-09-10 批次 B 完成后实测 21 项）**：
+- **清单（2026-09-10 批次 C 完成后实测 18 项）**：
 
-  `762 ThemeSettingsScreen.kt` · `712 EntryEditScreen.kt` ·
-  `708 EntryDetailViewModel.kt` · `697 DatabaseSession.kt` ·
-  `674 SecuritySettingsScreen.kt` · `629 S3SyncProvider.kt` · `596 PasskeyCryptoEngine.kt` ·
-  `588 AutofillSettingsScreen.kt` · `578 KdbxMerger.kt` · `568 SettingsScreen.kt` · `562 UnlockScreen.kt` ·
-  `550 GeneratorScreen.kt` · `509 WebDavSyncProvider.kt` · `494 EntryEditComponents.kt` ·
-  `488 KeePasskeyAutofillService.kt` · `481 CloudSyncComponents.kt` · `477 EntryDetailComponents.kt` ·
+  `697 DatabaseSession.kt` · `674 SecuritySettingsScreen.kt` ·
+  `634 KeePasskeyAutofillService.kt` · `629 S3SyncProvider.kt` · `596 PasskeyCryptoEngine.kt` ·
+  `578 KdbxMerger.kt` · `568 SettingsScreen.kt` · `562 UnlockScreen.kt` ·
+  `550 GeneratorScreen.kt` · `509 WebDavSyncProvider.kt` · `504 AutofillSettingsScreen.kt` ·
+  `494 EntryEditComponents.kt` · `481 CloudSyncComponents.kt` · `477 EntryDetailComponents.kt` ·
   `470 EntryEditViewModel.kt` · `462 KeystoreManager.kt` · `453 HealthCheckScreen.kt` · `443 SyncEngine.kt`
 
   > 路径简写：`app/.../` = `app/src/main/java/com/keepasskey/app/`；`database/.../`、`sync/.../`、`crypto/.../` 同理。
-  > **已登记为例外（不再列入债务）**：`app/.../ui/screens/generator/DicewareWordList.kt`（401 行）——
+  > **功能性增量标注（2026-09-10 批次 C，非拆分遗漏）**：`KeePasskeyAutofillService` 595 → 634、
+  > `SettingsViewModel` 400 → 424，均系 **ISSUE-P3-43** 的判定与接线所致（见 [RESOLVED_LOG.md] §11.7）。
+  > **已登记为例外（不再列入债务）**：`app/.../ui/screens/generator/DicewareWordList.kt`（408 行）——
   > 其内容为 EFF/KeePassDX 风格 Diceware **词表**（约 300 行为不可压缩的字符串常量）与少量纯函数，
   > 按「是否含真实逻辑」分级属**经论证的纯常量例外**，不拆分（保留单文件可保证词表作为一个不可分割的整体被审查）。
 
 - **验收标准（未来分批）**：
-  1. 按模块分批拆分，**优先处理体量最大且耦合最高的文件**——`RealVaultRepository` / `DatabasePickerScreen`
-     已于**批次 B（2026-09-10）完成并归档**（见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §10）；
-     下一批应指向 **`ThemeSettingsScreen`（762）/ `EntryEditScreen`（712）/ `EntryDetailViewModel`（708）**；
-  2. 每批拆分为**纯结构性**改动：`.\gradlew.bat test` 全绿且用例数不减（当前 **1291 例**）；
+  1. 按模块分批拆分，**优先处理体量最大且耦合最高的文件**——批次 B 两项（§10）与批次 C 三项（§11）已完成；
+     下一批应指向 **`DatabaseSession`（697）/ `SecuritySettingsScreen`（674）/ `KeePasskeyAutofillService`（634）**；
+  2. 每批拆分为**纯结构性**改动：`.\gradlew.bat test` 全绿且用例数不减（当前 **1328 例**）；
   3. 拆分后**逐条对照敏感数据清零点与公开 API 可见性**（沿用批次 A 的验证范式：
      公开 API 零丢失零新增 + 清零点逐一对照）；
   4. 每批完成后按「极简闭环工作流」归档并更新本清单快照。
@@ -297,35 +308,31 @@
 
 ---
 
-### ISSUE-P3-43 (自动填充对标 ⑤): 字段签名级屏蔽 + 保存侧独立黑名单 + 尊重 importantForAutofill
+### ISSUE-P3-46 (新登记): 字段签名的抗枚举加固（Keystore HMAC 盐）
 
-- **优先级**：P3（粒度补齐）
-- **核实时间点与核实方式（2026-09-10）**：读
-  `app/src/main/java/com/keepasskey/app/data/repository/AutofillBlocklistStore.kt`——**仅包级**集合
-  （`blocked_packages`），无字段级、无保存侧独立控制；读 `KeePasskeyAutofillService.kt`——
-  无「尊重 `importantForAutofill=no`」策略。
-- **背景**：Monica 具备三级控制——`blacklist_packages`（包级，含默认微信/支付宝/云闪付）、
-  `blocked_field_signatures`（**字段签名级**，记住「该包该表单字段不填」）、
-  `save_blocked_targets`（**保存侧**独立黑名单），另有 `v2_respect_autofill_off` 开关。
-  本仓仅有「按应用屏蔽」一档。
-- **2026-09-10 进展（部分达标，就地标注）**：
-  1. ✅ **已完成 ——「尊重 `importantForAutofill`」真实接线**：未新增开关，而是接线既有
-     `overrideNoAutofill`（此前**无任何填充侧消费方**，属假开关）：默认 false 即尊重页面标记，
-     跳过 `IMPORTANT_FOR_AUTOFILL_NO*` 字段；置 true 则覆盖。落点为
-     `AutofillFieldScanner.scan(nodes, respectImportantForAutofill)` +
-     `KeePasskeyAutofillService.isImportantForAutofill(AssistStructure.ViewNode)` +
-     `ExtendedSettingsStore.isOverrideNoAutofillEnabled()`；新增 2 例单测（启用/覆盖两种语义）。
-  2. ⏳ **待办 —— 字段签名级屏蔽**：需用户交互写入入口（如在选择器中「不再填充此字段」）。
-     P3-40 已交付手动选择器，可作为该交互落点；在落位前**不得**先落库无写入方的存储 API，
-     避免重现「有数据无消费方」的假开关。
-  3. ⏳ **待办 —— 保存侧独立黑名单**：需设置页新增「不再提示保存」列表条目管理
-     （UI 入口 + 持久化 + 判定三件套一次性交付，否则又是一处无写入方配置）。
-- **安全要求（对两项待办同等适用）**：字段签名须为**不可逆归一**值（包名 + 域 + 字段角色），
-  **严禁**持久化明文表单内容；保存侧黑名单命中必须与填充侧同等 fail-closed。
-- **验收标准（2026-09-10 重新定义）**：
-  1. 字段签名级：选择器内可屏蔽某字段，屏蔽后同「包名 + 域 + 角色」不再下发，且持久化值不可逆；
-  2. 保存侧：命中「不再提示保存」的目标在 `onSaveRequest` 中静默不落库且不向用户报错；
-  3. 单测覆盖三级判定与非法输入 fail-closed。
+- **优先级**：P3（纵深防御加固；非当前可利用缺口）
+- **核实时间点与核实方式（2026-09-10）**：ISSUE-P3-43 批次交付 `AutofillFieldSignature`
+  （`app/src/main/java/com/keepasskey/app/autofill/AutofillFieldSignature.kt`）时逐行核实——
+  签名为 `SHA-256(salt‖"v1‖包名‖域‖角色")`，`salt` 为 `AutofillFieldBlocklistStore` 生成的
+  **32 字节 `SecureRandom` 随机数，与签名同库（SharedPreferences）持久化**。
+  归档依据见 [RESOLVED_LOG.md](RESOLVED_LOG.md) **§11.3**。
+- **背景**：字段签名级屏蔽（ISSUE-P3-43 ②）的持久化值满足**不可逆**（无法从签名读出包名/域名），
+  但**不具备抗枚举性**——攻击者若同时取得应用私有目录中的**盐**与**签名集合**
+  （需已获得任意代码执行或 root 读私有数据能力），可对候选「包名 × 域名 × 角色」逐一计算比对，
+  从而判断用户是否屏蔽过某个特定站点，得到「用户用过哪些网站」这一侧信道画像。
+- **威胁模型界定（如实）**：该攻击的**前提**是攻击者已能读应用私有目录——此时其本就可直接读取
+  整个 KDBX 缓存与偏好明文，本项属**纵深防御**而非修复可独立利用的漏洞；
+  但 KDBX 主库受主密码保护而签名库不受，二者暴露面不对称，故仍值得加固。
+- **整改方向**：把随机盐替换为 **Android Keystore 内不可导出密钥**的 HMAC-SHA256
+  （`HmacSpec`，`setUserAuthenticationRequired(false)` 保证服务进程可离线计算），
+  签名算法版本号 `v1` → `v2`（旧签名自然失效——等价于屏蔽记录保守清空，不产生误屏蔽）；
+  `AutofillFieldSignature` 的纯函数形态保留（新增 `HmacFieldSignatureSource` 抽象注入密钥来源），
+  现有 9 例单测迁移至 HMAC 实现并保持同一断言面。
+- **验收标准**：
+  1. 盐不再落盘（prefs 中无任何签名密钥材料），Keystore 密钥不可导出（`isInsideSecureHardware` 或非导出断言）；
+  2. 既有 `blocked_field_signatures` 数据在升级后按设计失效（清空或忽略），**不得**产生「旧签名误命中新目标」；
+  3. 纯 JVM 单测仍可对签名/判定/仓库三层断言（经密钥来源抽象注入测试密钥）；
+  4. KDoc 与本文件的**安全边界声明同步更新**——不得继续宣称 SHA-256+随机盐「抗枚举」。
 
 ---
 

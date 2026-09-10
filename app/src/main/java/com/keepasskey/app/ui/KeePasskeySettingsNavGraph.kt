@@ -115,6 +115,9 @@ internal fun NavGraphBuilder.keepasskeySettingsNavGraph(
         val settingsState by settingsViewModel.uiState.collectAsStateWithLifecycle()
         // TASK-44：黑名单独立通道（不进 settingsState 的 5 流 combine）
         val blockedPackages by settingsViewModel.autofillBlockedPackages.collectAsStateWithLifecycle()
+        // ISSUE-P3-43：保存侧黑名单与字段级屏蔽计数（同样走独立通道）
+        val saveBlockedPackages by settingsViewModel.autofillSaveBlockedPackages.collectAsStateWithLifecycle()
+        val blockedFieldCount by settingsViewModel.autofillBlockedFieldCount.collectAsStateWithLifecycle()
         AutofillSettingsScreen(
             uiState = settingsState,
             onBackClick = { navController.popBackStack() },
@@ -132,7 +135,12 @@ internal fun NavGraphBuilder.keepasskeySettingsNavGraph(
             onAutofillSessionGrantToggle = settingsViewModel::setAutofillSessionGrantEnabled,
             blockedPackages = blockedPackages,
             onBlockAutofillPackage = settingsViewModel::blockAutofillPackage,
-            onUnblockAutofillPackage = settingsViewModel::unblockAutofillPackage
+            onUnblockAutofillPackage = settingsViewModel::unblockAutofillPackage,
+            saveBlockedPackages = saveBlockedPackages,
+            onBlockSavePackage = settingsViewModel::blockSavePackage,
+            onUnblockSavePackage = settingsViewModel::unblockSavePackage,
+            blockedFieldCount = blockedFieldCount,
+            onClearBlockedFields = settingsViewModel::clearBlockedFields
         )
     }
 

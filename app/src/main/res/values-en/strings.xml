@@ -776,6 +776,26 @@
     <string name="detail_autofill_blocked">Autofill disabled for %1$s</string>
     <string name="detail_autofill_unblocked">Autofill re-enabled for %1$s</string>
 
+    <!-- ISSUE-P3-43 (2): field-signature level blocking (written from the manual picker) -->
+    <string name="autofill_picker_block_username">Never fill username here</string>
+    <string name="autofill_picker_block_password">Never fill password here</string>
+    <string name="autofill_picker_block_confirm_title">Stop filling this field?</string>
+    <string name="autofill_picker_block_confirm_desc">Suggestions will no longer appear for this kind of field on the same app and website. The record is stored as an irreversible signature (the URL is never stored in clear text) and can be cleared as a whole in Settings → Autofill. This fill will be cancelled.</string>
+    <string name="autofill_picker_block_confirm_btn">Stop filling</string>
+    <string name="autofill_field_block_row_title">Blocked form fields</string>
+    <string name="autofill_field_block_count">%1$d field(s) blocked</string>
+    <string name="autofill_field_block_empty">No blocked fields</string>
+    <string name="autofill_field_block_dialog_title">Field-level blocking</string>
+    <string name="autofill_field_block_dialog_desc">Records are stored as irreversible signatures (app + website + field role), so the individual websites cannot be listed here — they can only be cleared as a whole. After clearing, these fields will receive suggestions again.</string>
+    <string name="autofill_field_block_clear_btn">Clear all</string>
+
+    <!-- ISSUE-P3-43 (3): save-side blocklist (blocks save prompts only, filling still works) -->
+    <string name="autofill_save_blacklist_row_title">Apps never asked to save</string>
+    <string name="autofill_save_blacklist_count">%1$d app(s) configured</string>
+    <string name="autofill_save_blacklist_empty">No apps configured</string>
+    <string name="autofill_save_blacklist_dialog_title">Manage "never ask to save" list</string>
+    <string name="autofill_save_blacklist_dialog_desc">Apps on this list will never be asked about saving passwords and no credential will be written. This list is independent from the autofill blacklist above — existing credentials can still be filled for these apps.</string>
+
     <!-- ===== Developer diagnostics subscreen ===== -->
     <string name="debug_section_options">Diagnostics</string>
     <string name="debug_log_title">Diagnostic log</string>

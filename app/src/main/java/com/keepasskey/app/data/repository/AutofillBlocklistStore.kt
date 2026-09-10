@@ -114,19 +114,16 @@ class AutofillBlocklistStore @Inject constructor(
     /**
      * 归一化并校验包名：小写化后按 Android 官方包名规则校验
      * （≥2 段、每段字母开头、仅 `[a-z0-9_]`、总长 ≤255）。非法返回 null。
+     *
+     * ISSUE-P3-43：判据本身**逐字不变**，但实现下沉至
+     * [com.keepasskey.app.autofill.AutofillPackageNames]——字段级与保存侧黑名单需要同一判据，
+     * 复制第二份正则必然随时间漂移出「A 处合法、B 处非法」的裂缝。
      */
-    internal fun normalize(packageName: String): String? {
-        val trimmed = packageName.trim().lowercase()
-        if (trimmed.length !in MIN_PACKAGE_LENGTH..MAX_PACKAGE_LENGTH) return null
-        return if (PACKAGE_PATTERN.matches(trimmed)) trimmed else null
-    }
+    internal fun normalize(packageName: String): String? =
+        com.keepasskey.app.autofill.AutofillPackageNames.normalize(packageName)
 
     private companion object {
         const val PREFS_NAME = "keepasskey_autofill_blocklist"
         const val K_BLOCKED_PACKAGES = "blocked_packages"
-        /** "a.b" 为最短合法包名 */
-        const val MIN_PACKAGE_LENGTH = 3
-        const val MAX_PACKAGE_LENGTH = 255
-        val PACKAGE_PATTERN = Regex("[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+")
     }
 }

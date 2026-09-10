@@ -1,5 +1,7 @@
 package com.keepasskey.app.ui.screens.settings
 
+import com.keepasskey.app.autofill.AutofillFieldBlocklistStore
+import com.keepasskey.app.autofill.AutofillSaveBlocklistStore
 import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.app.data.repository.AppLanguage
 import com.keepasskey.app.data.repository.AutofillBlocklistStore
@@ -9,7 +11,10 @@ import com.keepasskey.app.ui.theme.AppThemeMode
 import com.keepasskey.app.ui.theme.AppThemePalette
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -26,6 +31,10 @@ internal class SettingsPreferencesController(
     private val settingsRepository: SettingsRepository,
     vaultRepository: VaultRepository,
     private val autofillBlocklistStore: AutofillBlocklistStore,
+    // ISSUE-P3-43 ③：保存侧独立黑名单（与填充黑名单分离）
+    private val autofillSaveBlocklistStore: AutofillSaveBlocklistStore,
+    // ISSUE-P3-43 ②：字段签名级屏蔽（写入方在手动选择器；此处仅计数回显与整体清除）
+    private val autofillFieldBlocklistStore: AutofillFieldBlocklistStore,
     private val debugLogBuffer: DebugLogBuffer,
     private val scope: CoroutineScope
 ) {
@@ -86,6 +95,30 @@ internal class SettingsPreferencesController(
     /** 将应用移出黑名单（删除动作）。@return true=移除成功；false=包名非法或本就不在黑名单中 */
     fun unblockAutofillPackage(packageName: String): Boolean =
         autofillBlocklistStore.remove(packageName)
+
+    // ========== ISSUE-P3-43：保存侧黑名单与字段签名级屏蔽 ==========
+
+    /** 「不再提示保存」名单快照（按包名升序）。 */
+    val autofillSaveBlockedPackages: StateFlow<List<String>> = autofillSaveBlocklistStore.blockedPackages
+
+    /** 加入「不再提示保存」名单。@return true=新增成功；false=包名非法或已存在 */
+    fun blockSavePackage(packageName: String): Boolean = autofillSaveBlocklistStore.add(packageName)
+
+    /** 移出「不再提示保存」名单。@return true=移除成功；false=包名非法或本就不在名单中 */
+    fun unblockSavePackage(packageName: String): Boolean = autofillSaveBlocklistStore.remove(packageName)
+
+    /**
+     * 已屏蔽字段签名的**条数**（不下发签名本身）。
+     *
+     * 只下发计数是有意的：签名不可逆，UI 无法把它还原成可读目标，
+     * 把签名递到 UI 层只会诱导后来者去"展示列表"，做出一份失真回显。
+     */
+    val autofillBlockedFieldCount: StateFlow<Int> = autofillFieldBlocklistStore.blockedSignatures
+        .map { it.size }
+        .stateIn(scope, SharingStarted.Eagerly, 0)
+
+    /** 清除全部字段级屏蔽。@return 被清除的条数 */
+    fun clearBlockedFields(): Int = autofillFieldBlocklistStore.clearAll()
 
     init {
         // 动态订阅活动数据库，更新设置页数据库名称

@@ -47,6 +47,11 @@ class AutofillPickerActivity : FragmentActivity() {
     @Inject
     lateinit var biometricAuthManager: BiometricAuthManager
 
+    // ISSUE-P3-43 ②：字段签名级屏蔽的**写入入口**——选择器是用户唯一能明确指认
+    // 「就是这个表单的这个框别再填」的位置，故写入方落在此处而非设置页
+    @Inject
+    lateinit var autofillFieldBlocklistStore: AutofillFieldBlocklistStore
+
     private val viewModel: AutofillPickerViewModel by viewModels()
 
     private var completed = false
@@ -71,9 +76,31 @@ class AutofillPickerActivity : FragmentActivity() {
                 onQueryChange = { query = it },
                 results = results,
                 onPick = ::confirmAndFill,
-                onCancel = ::finish
+                onCancel = ::finish,
+                // 仅在本次请求确实识别到对应框时提供屏蔽入口（否则是无对象的假按钮）
+                canBlockUsername = readAutofillId(EXTRA_USERNAME_ID) != null,
+                canBlockPassword = readAutofillId(EXTRA_PASSWORD_ID) != null,
+                onBlockField = ::blockFieldAndFinish
             )
         }
+    }
+
+    /**
+     * ISSUE-P3-43 ②：把「本表单该角色」写入字段级屏蔽，随后结束本次填充。
+     *
+     * 结束（而非继续填充）是有意的：用户刚刚表达了「这里别再填」，此时仍完成一次填充
+     * 会与其意图直接冲突。写入失败（包名不可识别等）时同样结束，但不谎报成功。
+     */
+    private fun blockFieldAndFinish(role: AutofillFieldRole) {
+        if (completed) return
+        completed = true
+        val callingPackage = intent.getStringExtra(EXTRA_CALLING_PACKAGE).orEmpty()
+        val webDomain = intent.getStringExtra(EXTRA_WEB_DOMAIN)?.takeIf { it.isNotBlank() }
+        val blocked = autofillFieldBlocklistStore.block(callingPackage, webDomain, role)
+        // 日志不携带包名/域等调用方标识（ISSUE-P1-10 语义）
+        AppLog.i(TAG, "字段级屏蔽写入结果=$blocked role=${role.wireName}")
+        setResult(RESULT_CANCELED)
+        finish()
     }
 
     /** 用户选中条目：按需解密 → 二次确认（可用生物识别时）→ 回传数据集 */
@@ -162,5 +189,11 @@ class AutofillPickerActivity : FragmentActivity() {
 
         /** 目标密码框（可为 null） */
         const val EXTRA_PASSWORD_ID = "com.keepasskey.app.autofill.EXTRA_PICKER_PASSWORD_ID"
+
+        /** ISSUE-P3-43：调用应用包名（字段签名输入之一，非敏感标识） */
+        const val EXTRA_CALLING_PACKAGE = "com.keepasskey.app.autofill.EXTRA_PICKER_PACKAGE"
+
+        /** ISSUE-P3-43：表单自报域（字段签名输入之一；空串表示纯 App 表单） */
+        const val EXTRA_WEB_DOMAIN = "com.keepasskey.app.autofill.EXTRA_PICKER_WEB_DOMAIN"
     }
 }
