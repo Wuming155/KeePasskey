@@ -22,6 +22,7 @@
    - [2.11 Argon2 原生内核 C→Rust 迁移（P2-14）](#211-argon2-原生内核-crust-迁移p2-14)
    - [2.12 S3 AccessKey 在 SettingsUiState 中的 String 留存改造（P2-01）](#212-s3-accesskey-在-settingsuistate-中的-string-留存改造p2-01)
    - [2.13 Passkey 注册 DAL 远程资产声明校验（P2-02）](#213-passkey-注册-dal-远程资产声明校验p2-02)
+   - [2.14 App 模块 14 个测试用例消除 Fake 自测（P2-03）](#214-app-模块-14-个测试用例消除-fake-自测p2-03)
 
 ---
 
@@ -562,3 +563,34 @@
     JSON 解析容错、指纹跨格式归一、缓存命中/TTL 过期/负向可恢复、非法入参零网络请求）全部通过；
     `./gradlew.bat test` 全绿：全仓 **644 例（app 239 / core 36 / crypto 61 / database 163 / sync 145），
     631 通过 / 0 失败 / 13 跳过**（12 例联调 + 1 例 Windows 权限视图，跳过项与既有基线一致）。
+
+---
+
+### 2.14 App 模块 14 个测试用例消除 Fake 自测（P2-03）
+
+> 来源：ISSUE-P2-03（P2-36 残余）。整改依据：工程规则高质量测试要求（单测必须验证真实生产行为与状态机）。
+
+- **ISSUE-P2-03（App 模块 14 个测试用例消除 Fake 自测）**：已完成（2026-09-10）。
+  - **缺陷 / 动机**：`FakeVaultRepositoryTest` 的 14 个用例直接断言 `FakeVaultRepository`
+    自身的内存容器增删改行为（多库管理、CRUD、回收站语义、分组操作），而非被测
+    ViewModel / Coordinator 对仓库契约的处理——测试目标错位，覆盖率虚高。
+  - **逐项处置**（14 例审查结论）：
+    1. **11 例语义已被生产 ViewModel 测试真实覆盖**，随文件删除：
+       库选择/新建/移除（`DatabasePickerViewModelTest` 4 例已覆盖）、回收站还原/彻底删除/清空、
+       批量删除、新建分组（`VaultListViewModelTest` 已覆盖）、`saveEntry` 首删入回收站语义
+       （`回收站内还原条目` 等用例依赖同一 Coordinator 路径）；
+    2. **3 例纯 fixture 断言**（初始数据仅一库激活、回收站分组标记、mock 类别全覆盖）
+       无生产行为可验证，删除；
+    3. **3 例生产语义缺口重构为被测 ViewModel 驱动**（见下）。
+  - **整改实现**：
+    1. 删除 `app/src/test/java/com/keepasskey/app/data/repository/FakeVaultRepositoryTest.kt`（14 例自测）；
+    2. 新增 `EntryEditViewModelTest`（2 例）：新建条目保存成功发出 `SaveSuccess` 事件并落库；
+       更新既有条目经 ViewModel 保存链路自动归档历史修订（修订数 +1 且修订快照保留旧凭据字段）；
+    3. `VaultListViewModelTest` 补 2 例：`batchMoveSelected` 批量移动选中条目到目标分组并退出
+       批量模式；`deleteGroup` 删除分组并将下属条目全部移入回收站。
+  - **涉及文件**：
+    - `app/src/test/java/com/keepasskey/app/data/repository/FakeVaultRepositoryTest.kt`（删除）
+    - `app/src/test/java/com/keepasskey/app/ui/screens/edit/EntryEditViewModelTest.kt`（新增）
+    - `app/src/test/java/com/keepasskey/app/ui/screens/vault/VaultListViewModelTest.kt`
+  - **测试证据**：`./gradlew.bat test` 全绿：全仓 **634 例（app 229 / core 36 / crypto 61 / database 163 / sync 145），
+    621 通过 / 0 失败 / 13 跳过**（跳过项与既有基线一致）；净变化 −14 Fake 自测、+4 ViewModel 真行为用例。

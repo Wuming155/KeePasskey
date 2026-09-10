@@ -202,6 +202,42 @@ class VaultListViewModelTest {
     }
 
     @Test
+    fun `批量移动选中条目到目标分组`() = runTest {
+        val repository = FakeVaultRepository()
+        val viewModel = VaultListViewModel(repository, FakeSettingsRepository(), null, buildTestCoordinator())
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            viewModel.uiState.collect {}
+        }
+
+        viewModel.startBatchMode("1")
+        viewModel.toggleEntrySelection("3")
+        viewModel.batchMoveSelected("group_work")
+        testScheduler.runCurrent()
+
+        assertFalse(viewModel.uiState.value.isBatchMode)
+        val entries = repository.getEntries().first()
+        assertEquals("group_work", entries.find { it.id == "1" }!!.groupId)
+        assertEquals("group_work", entries.find { it.id == "3" }!!.groupId)
+    }
+
+    @Test
+    fun `删除分组将下属条目移入回收站`() = runTest {
+        val repository = FakeVaultRepository()
+        val viewModel = VaultListViewModel(repository, FakeSettingsRepository(), null, buildTestCoordinator())
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            viewModel.uiState.collect {}
+        }
+
+        viewModel.deleteGroup("group_dev")
+        testScheduler.runCurrent()
+
+        assertTrue(repository.getGroups().first().none { it.id == "group_dev" })
+        val devEntries = repository.getEntries().first().filter { it.id == "2" || it.id == "4" || it.id == "6" }
+        assertTrue(devEntries.isNotEmpty())
+        assertTrue(devEntries.all { it.groupId == "group_recycle_bin" })
+    }
+
+    @Test
     fun `清空回收站`() = runTest {
         val repository = FakeVaultRepository()
         val viewModel = VaultListViewModel(repository, FakeSettingsRepository(), null, buildTestCoordinator())
