@@ -47,16 +47,26 @@ def wait_port(host, port, timeout=40):
 
 
 def _redact(text):
-    """回显前擦除口令：本脚本的日志与子进程输出不得出现明文凭据
-    （CodeQL py/clear-text-logging-sensitive-data）。"""
+    """**纵深防御**：若子进程输出意外带出口令，回显前擦除。
+
+    注意：CodeQL 的 `py/clear-text-logging-sensitive-data` **不把** `str.replace` 视为净化器，
+    因此不能依赖本函数来阻断该规则——真正的手段是让口令根本不进入任何 `print` 路径（见 `run`）。
+    本函数只用于「子进程输出」这一条非污点路径的兜底。
+    """
     for secret in (PASSWORD, S3_PASSWORD):
         if secret:
             text = text.replace(secret, "***")
     return text
 
 
-def run(cmd):
-    print("  $", _redact(cmd))
+def run(cmd, display):
+    """执行 `cmd`；`display` 是**调用方显式构造、不含任何凭据**的命令摘要，仅用于回显。
+
+    刻意不把 `cmd`（可能内嵌同步凭据）传入 `print`：CodeQL 不把字符串替换识别为净化器，
+    「先擦除再回显」仍会被判为明文日志，故改为结构性隔离——
+    机密值只出现在传给 `subprocess` 的实参里，日志只接受调用方提供的安全摘要。
+    """
+    print("  $", display)
     r = subprocess.run(cmd, cwd=HERE, capture_output=True, text=True, shell=True)
     out = (r.stdout or "") + (r.stderr or "")
     for line in out.splitlines()[-40:]:
@@ -86,8 +96,14 @@ def main():
         print("[FATAL] MinIO 未就绪"); return 1
     print("[lab] MinIO HTTPS 就绪 :9000")
 
-    ok, _ = run(f'"{MC}" --insecure alias set local https://localhost:9000 {S3_USER} {S3_PASSWORD}')
-    ok2, out = run(f'"{MC}" --insecure mb local/{BUCKET}')
+    ok, _ = run(
+        f'"{MC}" --insecure alias set local https://localhost:9000 {S3_USER} {S3_PASSWORD}',
+        display=f'"{MC}" --insecure alias set local https://localhost:9000 {S3_USER} ***',
+    )
+    ok2, out = run(
+        f'"{MC}" --insecure mb local/{BUCKET}',
+        display=f'"{MC}" --insecure mb local/{BUCKET}',
+    )
     if not (ok and (ok2 or "exists" in out)):
         print("[WARN] 建桶可能失败，S3 测试可能失败")
 

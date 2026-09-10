@@ -33,16 +33,26 @@ def wait_port(host, port, timeout=30):
 
 
 def _redact(text):
-    """回显前擦除口令：本脚本的日志与子进程输出不得出现明文凭据
-    （CodeQL py/clear-text-logging-sensitive-data）。"""
+    """**纵深防御**：若子进程输出意外带出口令，回显前擦除。
+
+    注意：CodeQL 的 `py/clear-text-logging-sensitive-data` **不把** `str.replace` 视为净化器，
+    因此不能依赖本函数来阻断该规则——真正的手段是让口令根本不进入任何 `print` 路径（见 `run`）。
+    本函数只用于「子进程输出」这一条非污点路径的兜底。
+    """
     for secret in (PASSWORD,):
         if secret:
             text = text.replace(secret, "***")
     return text
 
 
-def run(cmd, **kw):
-    print("  $", _redact(" ".join(cmd)))
+def run(cmd, display, **kw):
+    """执行 `cmd`；`display` 是**调用方显式构造、不含任何凭据**的命令摘要，仅用于回显。
+
+    刻意不把 `cmd`（可能内嵌同步凭据）传入 `print`：CodeQL 不把字符串替换识别为净化器，
+    「先擦除再回显」仍会被判为明文日志，故改为结构性隔离——
+    机密值只出现在传给 `subprocess` 的实参里，日志只接受调用方提供的安全摘要。
+    """
+    print("  $", display)
     r = subprocess.run(cmd, cwd=HERE, capture_output=True, text=True, **kw)
     out = (r.stdout or "") + (r.stderr or "")
     for line in out.splitlines():
@@ -73,24 +83,39 @@ def main():
         ok = True
         # mc 对自签名证书用 --insecure 跳过校验（仅测试客户端侧；App 端以真实证书信任）
         alias = "local"
-        s, _ = run([MC, "--insecure", "alias", "set", alias, ENDPOINT, USER, PASSWORD])
+        s, _ = run(
+            [MC, "--insecure", "alias", "set", alias, ENDPOINT, USER, PASSWORD],
+            display=f"{MC} --insecure alias set {alias} {ENDPOINT} {USER} ***",
+        )
         ok = ok and s
-        s, o = run([MC, "--insecure", "mb", f"{alias}/{BUCKET}"])
+        s, o = run(
+            [MC, "--insecure", "mb", f"{alias}/{BUCKET}"],
+            display=f"{MC} --insecure mb {alias}/{BUCKET}",
+        )
         ok = ok and (s or "already exists" in o or "exists" in o)
         # 上传
         with open(os.path.join(HERE, "_s3_tmp.txt"), "w") as f:
             f.write("s3-kdbx-bytes-payload")
-        s, _ = run([MC, "--insecure", "cp", "_s3_tmp.txt", f"{alias}/{BUCKET}/vault.kdbx"])
+        s, _ = run(
+            [MC, "--insecure", "cp", "_s3_tmp.txt", f"{alias}/{BUCKET}/vault.kdbx"],
+            display=f"{MC} --insecure cp _s3_tmp.txt {alias}/{BUCKET}/vault.kdbx",
+        )
         ok = ok and s
         # 下载并比对
-        s, _ = run([MC, "--insecure", "cp", f"{alias}/{BUCKET}/vault.kdbx", "_s3_dl.txt"])
+        s, _ = run(
+            [MC, "--insecure", "cp", f"{alias}/{BUCKET}/vault.kdbx", "_s3_dl.txt"],
+            display=f"{MC} --insecure cp {alias}/{BUCKET}/vault.kdbx _s3_dl.txt",
+        )
         ok = ok and s
         with open(os.path.join(HERE, "_s3_dl.txt")) as f:
             dl = f.read()
         ok = ok and (dl == "s3-kdbx-bytes-payload")
         print(f"[{'PASS' if dl == 's3-kdbx-bytes-payload' else 'FAIL'}] 下载字节一致 (len={len(dl)})")
         # 删除
-        s, _ = run([MC, "--insecure", "rm", f"{alias}/{BUCKET}/vault.kdbx"])
+        s, _ = run(
+            [MC, "--insecure", "rm", f"{alias}/{BUCKET}/vault.kdbx"],
+            display=f"{MC} --insecure rm {alias}/{BUCKET}/vault.kdbx",
+        )
         ok = ok and s
         print("RESULT:", "ALL PASS" if ok else "HAS FAILURE")
         return 0 if ok else 1
