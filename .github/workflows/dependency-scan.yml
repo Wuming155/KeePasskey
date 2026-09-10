@@ -65,6 +65,26 @@ jobs:
             "${args[@]}" \
             --console=plain
 
+      # =====================================================================================
+      # ISSUE-P3-32：CVSS 阈值**硬断言**（fail-closed）。
+      #
+      # 为什么必须有这一步：init 脚本里的 `failBuildOnCVSS = 7.0f` 在 dependencyCheckAggregate
+      # 任务上**不会**让构建失败——本仓 CI 已实测证伪：
+      #   · 运行 34335443660（dependency-scan，conclusion=success）日志中，六个工程各自都打印了
+      #     "One or more dependencies were identified with known vulnerabilities in <project>:"
+      #     之后仍是 "BUILD SUCCESSFUL in 37m"；
+      #   · 该次运行归档的报告 JSON 含 188 条漏洞实例，其中 **138 条 CVSS ≥ 7.0**（51 条 ≥ 9.0）。
+      # 即"文档声称真实阻断、实际静默放行"。故补此步对报告本身做断言：
+      #   · 有分数 → 分数 ≥ 7.0 即失败；无分数但有 severity → CRITICAL/HIGH 即失败；
+      #   · 报告缺失或不可解析 → 同样失败（无报告 = 无结论 ≠ 通过）。
+      # 豁免的唯一通道是 .github/owasp-dependency-suppressions.xml（插件在报告生成阶段剔除），
+      # **不得**通过调低阈值或删除本步骤来变绿。
+      # =====================================================================================
+      - name: CVSS 阈值硬断言（fail-closed）
+        run: |
+          python3 .github/check_dependency_cvss.py \
+            build/reports/dependency-check/dependency-check-report.json
+
       # 无报告 = 扫描未产出结论，按 if-no-files-found: error 显式暴露，而非静默放过
       - name: Upload report artifact
         if: always()
