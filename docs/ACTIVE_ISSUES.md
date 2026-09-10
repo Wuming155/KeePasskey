@@ -63,23 +63,20 @@
 
 ### 前提复核记录（2026-09-10，依「条目维护规则」第 2 条）
 
-| 条目 | 正文前提 | 核实方式 | 结论 |
-|:--:|---|---|:--:|
-| P3-23 | 语料未入库；`database` 无 `androidTest` 源集 | 目录枚举 | ⚠️ **前半仍成立；后半已不成立**（`database/src/androidTest/` 已建立并接线） |
-| P3-24 | CI 从未真实运行 | 只读探测 + 联网核实 | ✅ 成立（**三 job 仍未真实执行**） |
-| P3-29 | （新登记，前提即「全仓存在超阈值文件」） | `(Get-Content).Count` 全仓扫描 | ✅ 成立（**35 个生产文件 > 400 行**，清单见该条目） |
-| P3-30 | （新登记，前提即「`projectedEntries` 无消费方却已对外声明」） | 全仓 `grep projectedEntries app/src` | ✅ 成立（**生产消费方为零**，仅核心层自身与单测引用） |
+> 已对本节全部条目完成一次前提复核：**核实时间点 2026-09-10**。**逐条的核实方式记录在各条目自身的
+> 「核实时间点与核实方式」段落内**（ISSUE-P3-28 确立的格式），此处不再重复列表。
+> **复核结论**：4 条前提均成立 —— 其中 P3-23 的「语料未入库」成立，但其「`database` 无 `androidTest`
+> 源集」已不成立（该源集本批次已建立并接线），已在条目内就地标注；其余 3 条前提完整成立。
 
-> **ISSUE-P3-20 已闭环**（子库挂载的 **UI 接线**完成：`childDatabasesCount` 去硬编码并接真实 `mountedCount`；
+> **ISSUE-P3-20 已闭环**（子库挂载 **UI 接线**：`childDatabasesCount` 去硬编码并接真实 `mountedCount`；
 > `ChildDatabaseDialog` 成为真实入口并调用核心层 `mount`/`open`/`unmount`；两条失真文案随能力上线删除；
 > 新增 26 例单测），归档见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §4.2。
-> 其接线过程中**由执行者如实发现的「过度声明」残余面**已作为 **ISSUE-P3-30** 另行登记。
+> 其接线过程中**由执行者如实发现的「过度声明」残余面**已作为 **ISSUE-P3-30** 登记。
 >
-> **ISSUE-P3-25 已闭环**（3 个点名文件全部降至阈值内：`SyncCoordinator` 965→254、`KdbxXmlGroupReader` 407→218、
-> `UnlockViewModel` 979→396），但其「全仓扫描」暴露的整体债务已作为 **ISSUE-P3-29** 登记，
+> **ISSUE-P3-25 已闭环**（3 个点名文件全部降至阈值内：`SyncCoordinator` 965→254、`KdbxXmlGroupReader`
+> 407→218、`UnlockViewModel` 979→396），但其「全仓扫描」暴露的整体债务已作为 **ISSUE-P3-29** 登记，
 > **不代表巨型类问题已解决**。
 
----
 
 ### ISSUE-P3-23 (P3-11 残余): arm64 真机 instrumented 验证与真实 `.kdbx` 语料端到端解锁
 
@@ -153,64 +150,51 @@
 - **优先级**：P3（代码整洁度）
 - **核实时间点与核实方式（2026-09-10）**：ISSUE-P3-25 整改完成后，对全仓生产源集执行
   `Get-ChildItem -Recurse -Include *.kt -Path {app,database,sync,core,crypto}/src/main/java`
-  并逐文件 `(Get-Content).Count` 统计，筛出 `> 400` 行者。**共 35 个生产文件超标**（P3-20 接线令 2 个文件新增越界）。
+  并逐文件 `(Get-Content).Count` 统计，筛出 `> 400` 行者。**共 34 个生产文件超标**（其中 P3-20 接线令 **1 个**文件新增越界）。
 - **为何单独登记**：ISSUE-P3-25 的正文只点名了 **3 个文件**（`SyncCoordinator` / `UnlockViewModel` /
   `KdbxXmlGroupReader`），该 3 项均已降至阈值内并归档（见 `RESOLVED_LOG.md` §4.2）。
   但全仓扫描显示**超标是普遍性既有债务**，而非 3 个孤例——按「严禁只记聊天或脑中」纪律就地登记，
   避免后人误以为「巨型类问题已解决」。
 
-- **完整清单（2026-09-10 快照，行数降序）**：
+- **清单（2026-09-10 快照，实测 34 项）**：分为两组——**① 本批次接线致增长的 8 项（优先处理）**，
+  **② 纯既有债务 26 项**。
 
-  | 行数 | 文件 | 备注 |
+  **① 本批次接线致增长（8 项）**
+
+  | 行数 | 文件 | 变化 |
   |---:|---|---|
-  | 1090 | `app/.../data/repository/RealVaultRepository.kt` | 既有 |
-  | 968 | `app/.../ui/screens/database/DatabasePickerScreen.kt` | 既有 |
-  | 1120 | `app/.../ui/screens/settings/SettingsViewModel.kt` | 既有 879 + **P3-19 导入接线（+23）** + **P3-20 子库 UI 接线（+218）** |
-  | 617 | `app/.../ui/screens/settings/subscreens/DatabaseSettingsDialogs.kt` | 既有 338 + **P3-20 子库对话框真实化（+279）** ← **本批次新致超标** |
-  | 762 | `app/.../ui/screens/settings/subscreens/ThemeSettingsScreen.kt` | 既有 |
-  | 731 | `app/.../ui/screens/vault/VaultListViewModel.kt` | 既有 641 + **本批次 4 个偏好派生量（+90）** |
-  | 712 | `app/.../ui/screens/edit/EntryEditScreen.kt` | 既有 |
-  | 708 | `app/.../ui/screens/detail/EntryDetailViewModel.kt` | 既有 |
-  | 697 | `database/.../session/DatabaseSession.kt` | 既有 |
-  | 674 | `app/.../ui/screens/settings/subscreens/SecuritySettingsScreen.kt` | 既有 |
-  | 629 | `sync/.../s3/S3SyncProvider.kt` | 既有 |
-  | 614 | `database/.../file/KdbxFile.kt` | 既有 602 + **本批次安全常量 KDoc（+12）** |
-  | 596 | `crypto/.../passkey/PasskeyCryptoEngine.kt` | 既有 |
-  | 588 | `app/.../ui/screens/settings/subscreens/AutofillSettingsScreen.kt` | 既有 |
-  | 582 | `app/.../ui/KeePasskeyApp.kt` | 既有 |
-  | 578 | `sync/.../merge/KdbxMerger.kt` | 既有 |
-  | 569 | `app/.../ui/screens/settings/SettingsScreen.kt` | 既有 |
-  | 562 | `app/.../ui/screens/unlock/UnlockScreen.kt` | 既有（**注**：`UnlockViewModel` 已拆分，同目录的 Screen 仍超标） |
-  | 550 | `app/.../ui/screens/generator/GeneratorScreen.kt` | 既有 |
-  | 510 | `sync/.../webdav/WebDavSyncProvider.kt` | 既有 |
-  | 494 | `app/.../ui/screens/edit/EntryEditComponents.kt` | 既有 |
-  | 488 | `app/.../autofill/KeePasskeyAutofillService.kt` | 既有 |
-  | 481 | `app/.../ui/screens/settings/subscreens/CloudSyncComponents.kt` | 既有 |
-  | 477 | `app/.../ui/screens/detail/EntryDetailComponents.kt` | 既有 |
-  | 470 | `app/.../ui/screens/edit/EntryEditViewModel.kt` | 既有 |
-  | 466 | `app/.../ui/screens/vault/VaultEntryRows.kt` | 既有 + **本批次分组图标接线** |
-  | 461 | `app/.../security/KeystoreManager.kt` | 既有 |
-  | 453 | `app/.../ui/screens/settings/subscreens/HealthCheckScreen.kt` | 既有 |
-  | 443 | `sync/.../engine/SyncEngine.kt` | 既有 |
-  | 435 | `app/.../data/repository/VaultRepository.kt` | 既有 + **本批次 `incrementPasskeySignCount` 等** |
-  | 421 | `app/.../sync/SyncCredentialsStore.kt` | 既有 |
-  | 418 | `database/.../file/KdbxHeader.kt` | 既有 |
-  | 417 | `app/.../ui/screens/vault/VaultListScreen.kt` | 既有 + **本批次接线** |
-  | 401 | `app/.../ui/screens/generator/DicewareWordList.kt` | 既有（**数据表**，属「纯查表常量」，建议豁免并登记例外） |
+  | 1120 | `app/.../ui/screens/settings/SettingsViewModel.kt` | 879 → +23（P3-19 导入接线）+218（P3-20 子库 UI 接线） |
+  | 731 | `app/.../ui/screens/vault/VaultListViewModel.kt` | 641 → +90（P3-17 四个偏好派生量） |
+  | 617 | `app/.../ui/screens/settings/subscreens/DatabaseSettingsDialogs.kt` | 338 → +279（P3-20 子库对话框真实化）← **本批次唯一新致超标者** |
+  | 614 | `database/.../file/KdbxFile.kt` | 602 → +12（P3-27 安全常量 KDoc，**仅注释**） |
+  | 590 | `app/.../ui/KeePasskeyApp.kt` | 555 → +35（P3-17 / 19 / 20 接线） |
+  | 466 | `app/.../ui/screens/vault/VaultEntryRows.kt` | 既有 + P3-22 分组图标接线 |
+  | 435 | `app/.../data/repository/VaultRepository.kt` | 既有 + P3-27 `incrementPasskeySignCount` 等 |
+  | 417 | `app/.../ui/screens/vault/VaultListScreen.kt` | 既有 + P3-17 / P3-22 接线 |
 
-- **诚实说明**：上表 35 项中，**绝大多数属本批次开工前即已超标**；本批次新增逻辑刻意收敛为短方法，
-  但**必要接线**仍令 6 个文件增长（已在上表逐项标注），其中 **`SettingsViewModel.kt`（1120）与
-  `DatabaseSettingsDialogs.kt`（617）是本批次新致超标**，优先级应高于纯既有债务。
-  ⚠️ **P3-20 接线执行者已如实登记**：其可写清单**不含新建生产文件**，故无法抽出
-  `SettingsChildDatabaseController`（与既有 5 个 `Settings*Controller` 同款）或 `subscreens/ChildDatabaseDialogs.kt`。
-  ISSUE-P3-25 的闭环**不**代表整体债务已清。
+  **② 纯既有债务（26 项，本批次未触及）**
+
+  `1090 RealVaultRepository.kt` · `968 DatabasePickerScreen.kt` · `762 ThemeSettingsScreen.kt` ·
+  `712 EntryEditScreen.kt` · `708 EntryDetailViewModel.kt` · `697 DatabaseSession.kt` ·
+  `674 SecuritySettingsScreen.kt` · `629 S3SyncProvider.kt` · `596 PasskeyCryptoEngine.kt` ·
+  `588 AutofillSettingsScreen.kt` · `578 KdbxMerger.kt` · `569 SettingsScreen.kt` · `562 UnlockScreen.kt` ·
+  `550 GeneratorScreen.kt` · `510 WebDavSyncProvider.kt` · `494 EntryEditComponents.kt` ·
+  `488 KeePasskeyAutofillService.kt` · `481 CloudSyncComponents.kt` · `477 EntryDetailComponents.kt` ·
+  `470 EntryEditViewModel.kt` · `462 KeystoreManager.kt` · `453 HealthCheckScreen.kt` · `443 SyncEngine.kt` ·
+  `421 SyncCredentialsStore.kt` · `418 KdbxHeader.kt` · `401 DicewareWordList.kt`
+
+  > 路径简写：`app/.../` = `app/src/main/java/com/keepasskey/app/`；`database/.../`、`sync/.../`、`crypto/.../` 同理。
+  > `DicewareWordList.kt`（401 行）为**纯查表常量**，建议按验收标准 1 登记为经论证的例外。
+  > **注**：`UnlockScreen.kt`（562）与已拆分的 `UnlockViewModel` 同目录，属既有债务，P3-25 未纳入其范围。
+
 - **验收标准（未来分批）**：
   1. 按「是否含真实逻辑」分级——纯数据/常量表（如 `DicewareWordList.kt`）建议**登记为例外**并说明理由；
-  2. 其余按模块分批拆分（建议优先 `RealVaultRepository` / `DatabasePickerScreen` / `SettingsViewModel` /
-     `VaultListViewModel`——**后两者是本批次新致超标的，优先级应高于纯既有债务**）；
-  3. 每批拆分为**纯结构性**改动：`.\gradlew.bat test` 全绿且用例数不减（当前 **1159 例**）；
+  2. 其余按模块分批拆分，**优先处理上表 ① 的 8 项**（其中 `SettingsViewModel` / `DatabaseSettingsDialogs` /
+     `VaultListViewModel` 最值得先拆——后两者是本批次新致超标或大幅增长）；
+  3. 每批拆分为**纯结构性**改动：`.\gradlew.bat test` 全绿且用例数不减（当前 **1189 例**）；
   4. 拆分后**逐条对照敏感数据清零点与公开 API 可见性**（沿用 P3-25 对 `UnlockViewModel` 的验证范式：
      公开 API 零丢失零新增 + 清零点逐一对照）。
+
 ### ISSUE-P3-30 (P3-20 后续 · 接线中如实发现的过度声明): 子库条目投影尚未合并进根库列表
 
 - **优先级**：P3（功能完整性 / 拒绝过度声明）

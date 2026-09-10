@@ -6,45 +6,12 @@
 
 ---
 
-## 目录
-1. [已完成核心任务清单（TASK-01 ~ TASK-53）](#1-已完成核心任务清单)
-2. [历史全量代码审计发现项整改归档（125 项）](#2-历史全量代码审计发现项整改归档)
-   - [2.1 全量代码审核（93 项）](#21-全量代码审核93-项)
-   - [2.2 安全审查 Wave 13（16 项）](#22-安全审查-wave-1316-项)
-   - [2.3 加解密实现审查（9 项）](#23-加解密实现审查9-项)
-   - [2.4 测试覆盖缺口审查（7 项）](#24-测试覆盖缺口审查7-项)
-   - [2.5 零信任专项审计（ZT 系列）](#25-零信任专项审计zt-系列)
-   - [2.6 凭据提供者端到端契约（P1-01）](#26-凭据提供者端到端契约p1-01)
-   - [2.7 生成侧私钥内存脱敏（P1-02）](#27-生成侧私钥内存脱敏p1-02)
-   - [2.8 KDBX 回收站保留桶与历史保留期维护（P1-03）](#28-kdbx-回收站保留桶与历史保留期维护p1-03)
-   - [2.9 主密码解锁失败节流与失败态清零（P1-04）](#29-主密码解锁失败节流与失败态清零p1-04)
-   - [2.10 同步凭据认证绑定与 S3 密钥内存治理（P1-06）](#210-同步凭据认证绑定与-s3-密钥内存治理p1-06)
-   - [2.11 Argon2 原生内核 C→Rust 迁移（P2-14）](#211-argon2-原生内核-crust-迁移p2-14)
-   - [2.12 S3 AccessKey 在 SettingsUiState 中的 String 留存改造（P2-01）](#212-s3-accesskey-在-settingsuistate-中的-string-留存改造p2-01)
-   - [2.13 Passkey 注册 DAL 远程资产声明校验（P2-02）](#213-passkey-注册-dal-远程资产声明校验p2-02)
-   - [2.14 App 模块 14 个测试用例消除 Fake 自测（P2-03）](#214-app-模块-14-个测试用例消除-fake-自测p2-03)
-   - [2.15 Sync 与 Merger 边缘分支单元测试补齐（P2-04）](#215-sync-与-merger-边缘分支单元测试补齐p2-04)
-   - 2.16 原子写盘降级 fsync 与 `.bak` 生命周期闭环（P2-05 / P2-11）
-   - 2.17 锁定不等于销毁：copy-on-write 敏感字段定点擦除（P2-06）
-   - 2.18 Autofill 信任边界与运行时完整性防护（P2-07 / P2-08 / P2-09）
-   - 2.19 明文导出治理与自动锁定语义修正（P2-10 / P2-13）
-   - 2.20 OTP 种子与详情路径字节化（P2-12）
-   - 2.16 ~ 2.20 批次验收证据（P2 九项整体闭环）
-   - [2.21 受保护值字节通道收口与密码生成器出边界 CharArray 化（P2-15 / P2-16）](#221-受保护值字节通道收口与密码生成器出边界-chararray-化p2-15--p2-16)
-3. [P3 批次整改归档（低危项 / 特性接线 / 体验优化）](#3-p3-批次整改归档低危项--特性接线--体验优化)
-   - [3.1 P3 批次整体验收证据](#31-p3-批次整体验收证据)
-   - [3.2 已闭环条目逐项归档（ISSUE-P3-01 ~ P3-16）](#32-已闭环条目逐项归档issue-p3-01--p3-16)
-   - [3.3 本批次登记的过程缺陷与事实修正](#33-本批次登记的过程缺陷与事实修正)
-   - [3.4 本批次新登记的遗留问题](#34-本批次新登记的遗留问题)
-
----
-
 ## 1. 已完成核心任务清单
 
 | TASK ID | 领域 | 任务主题 | 优先级 | 完成日期 | 核心实现与代码证据 / 说明 |
 |:---:|:---:|---|:---:|:---:|---|
 | **TASK-01** | 安全 | HMAC 防篡改回归锁 flaky 排查与定型 | **P0** | 2026-09-07 | 定位并修复终止块未校验即置 `terminated=true` 导致篡改文件 ~10% 概率静默解锁的漏洞；改为仅校验通过后置位并在 `verifyEndOfStream` 权威检查点 fail-closed；`testCorruptHmacBlock` 20 连跑零失败。 |
-| **TASK-02** | 平台集成 | 凭据提供者服务实机端到端注册与调起（ISSUE-P1-01） | **P1** | 2026-09-09 | 根因：全部凭据条目 PendingIntent 误用 `FLAG_IMMUTABLE`，系统注入的 fillIn extras 被静默丢弃 → 链式解锁 / 密码保存 / 应用内注册全链路握手失败。新增 `CredentialPendingIntents.ENTRY_FLAGS`（`FLAG_MUTABLE｜FLAG_UPDATE_CURRENT`）统一替换 5 处创建点，附 4 例契约回归锁。详见 [§2.6](##26-凭据提供者端到端契约专项p1-01)。 |
+| **TASK-02** | 平台集成 | 凭据提供者服务实机端到端注册与调起（ISSUE-P1-01） | **P1** | 2026-09-09 | 根因：全部凭据条目 PendingIntent 误用 `FLAG_IMMUTABLE`，系统注入的 fillIn extras 被静默丢弃 → 链式解锁 / 密码保存 / 应用内注册全链路握手失败。新增 `CredentialPendingIntents.ENTRY_FLAGS`（`FLAG_MUTABLE｜FLAG_UPDATE_CURRENT`）统一替换 5 处创建点，附 4 例契约回归锁。详见 [§2.6](#26-凭据提供者端到端契约p1-01)。 |
 | **TASK-03** | 依赖 | kapt → KSP 2.3.11 迁移 + 启用内置 Kotlin | **P2** | 2026-09-08 | 移除 kapt 插件，全面接入 KSP 2.3.11 与 AGP 9 内置 Kotlin 2.4.10，编译速度提升。 |
 | **TASK-04** | 存储 | 设置持久化迁移 Preferences DataStore | **P2** | 2026-09-08 | 21 个设置项全量迁移 DataStore，提供 Flow 响应式通知与 SharedPreferences 自动平滑迁移。 |
 | **TASK-05** | 构建 | Gradle 版本目录（`libs.versions.toml`）集中管理 | **P2** | 2026-09-08 | 5 个子模块依赖与插件统一收口至版本目录，依赖版本规范化。 |
@@ -884,20 +851,9 @@
 
 ### 3.4 本批次新登记的遗留问题
 
-> 以上 16 项中**未完全达成验收标准**的残余面，已按「严禁只记聊天或脑中」纪律**全部回登 `docs/ACTIVE_ISSUES.md`**，编号与主题见下表。
-
-| 新条目 | 主题 | 来源 |
-|---|---|---|
-| ISSUE-P3-17 | 43c UI 显示偏好接线（7 键） | P3-03 残余（消费方全在并行组范围，本轮仅诚实标识 + 接线配方） |
-| ISSUE-P3-18 | 通知基础设施（`NotificationChannel` + `POST_NOTIFICATIONS`）并接线 2 键 | P3-03 残余（`showUnlockedNotification` / `autofillShowTotpNotification`） |
-| ISSUE-P3-19 | 明文导入框架与 4 源解析器（KeePass XML / Bitwarden / 浏览器 CSV / 1PUX） | P3-03 残余（43d；现仅有假提示，已改诚实说明） |
-| ISSUE-P3-20 | 子库挂载支持 | P3-03 残余（43e；建议独立立项，设计要点见交接 R-2） |
-| ISSUE-P3-21 | 建库侧「生成附属密钥文件」假开关（`RealVaultRepository.createDatabase` 忽略 `keyFile` 参数） | P3-04 残余（修复需改 `database` 层） |
-| ISSUE-P3-22 | 分组自定义图标渲染（`KdbxGroup` 的 `CustomIconUUID`） | P3-02 残余（本轮仅让删除路径清理分组引用以避免悬挂） |
-| ISSUE-P3-23 | arm64 真机 instrumented 验证 + Argon2 真实 `.kdbx` 语料端到端解锁 | P3-11 残余（验收 1 的 arm64 部分与验收 2 完全未达成） |
-| ISSUE-P3-24 | CI 首跑校准（`build.yml` 三 job 首次真实运行、`dependency-scan.yml` CVSS≥7 实际阻断、`cargo deny advisories` 联网拉取） | P3-09 残余（本环境无 GitHub runner 与 NVD/rustsec 通道） |
-| ISSUE-P3-25 | 巨型类拆分（`SyncCoordinator.kt` ~965 行、`UnlockViewModel.kt` ~979 行，均属接线前既存超标） | P3-03 / P3-04 残余 |
-| ISSUE-P3-26 | `AtomicFileWriter.deleteBackup` 删除 `.bak` 后未做目录 fsync（同类小缺口） | P3-13 残余 |
+> 该批次未完全达标的 10 项残余面（ISSUE-P3-17 ~ P3-26）曾在此逐条登记。
+> **截至 2026-09-10 已全部闭环或就地更新**：闭环裁决与代码证据见 **§4.2**，仍有残余者见 **§4.3**，
+> 未达成项见 [ACTIVE_ISSUES.md](ACTIVE_ISSUES.md)。**原 10 行表格已删除**——它与 §4 重复且已过期。
 
 ---
 
@@ -946,12 +902,16 @@
 另：拆分后 `BiometricAuthManager.kt` 与 `KeystoreManager.kt` 中 2 处指向 `UnlockViewModel` 的**陈旧 KDoc 引用**
 已由编排者就地更正（改指新协作者）。 |
 
-### 4.3 部分达标条目（残余面已就地更新，留在 `ACTIVE_ISSUES.md`）
+### 4.3 部分达标条目（本环境物理不可达）
 
-| 条目 | 本批次已完成 | 仍未达成 |
+> 本批次 **2 项部分达标**，且两者都是**验证类**条目——缺的是**外部硬件/服务**，不是可写的代码。
+> **完整背景、已完成部分与仍未达成项以 [ACTIVE_ISSUES.md](ACTIVE_ISSUES.md) 对应条目为单一真相源**；
+> 此处仅记录「本批次实际推进了什么」这一句结论，避免与之重复。
+
+| 条目 | 本批次实际推进 | 为何仍不可达 |
 |---|---|---|
-| **P3-23** arm64 与真实语料 | `database` 模块**首次建立 androidTest 源集**与依赖接线；设备侧端到端解锁用例落地且 **fail-closed**（语料缺失 → `Assume` 显式跳过并声明「跳过不代表验收达成」；语料在而伴生元数据缺失/非法 → **硬失败**）；真实探测记录（已安装 system-image 仅 x86_64、`adb devices` 空、arm64 镜像**远端有发布但本机未安装**）；语料逐步生成清单写入 `crypto/src/test/resources/argon2-interop/README.md` | arm64 真机/模拟器数据（**未安装镜像**，且 x86_64 宿主上的 arm64 模拟器数据按纪律不得与真机同表登记）；真实 KeePass 2.61.1 / KeePassXC `.kdbx` 语料（需人工 GUI 建库，无人值守流程无法产出） |
-| **P3-24** CI 首跑校准 | **静态校准并修正 3 处「首次必红」缺陷**：① `platforms;android-37` 远端**不存在** → 改正为 `android-37.0`（证据：`sdkmanager --list` + 本机 `package.xml`）；② 签名断言两处必然误红 → `apksigner` 不自动读同目录 `.idsig`（v4 恒 `false`）故补 `--v4-signature-file`；minSdk 36≥28 且 v3 同开时 AGP **省略 v2 块**故「v2:true」断言不可能成立 → 改为「v2 块必须缺席」并新增 `v1: false` 断言（**未削弱**）；③ JDK 17 → 21 与 `gradle-daemon-jvm.properties: toolchainVersion=21` 对齐（**残留不确定性已如实标注**）。另：7 个 Action SHA 逐一核实存在且与声明版本一致（**未遇限流**）；Rust 1.97.1 **确认真实已发布**（推翻「未发布必红」担忧）；cargo-ndk 4.1.2 / cargo-deny 0.20.2 真实存在；material3 **1.5.0 stable 核实不存在** → 退出条件未满足、维持 alpha27（**未改** `libs.versions.toml`）；`cargo deny check` **本机实跑通过**（`advisories/bans/licenses/sources ok`，advisory-db 当日真实拉取，`curl 28` 未复现）；Linux 侧「疑似首次即红」静态判定 **0 例**。留痕 `docs/ci-静态校准记录.md` | 三 job 在 runner 上的**真实执行**、`dependency-scan.yml` 在 CVSS≥7 的真实阻断、CI 网络下 advisory-db 拉取、镜像实际预装 API 级别、GHAS 可用性——**本环境从未运行 CI，不得据此认为已跑通** |
+| **P3-23** arm64 与真实语料 | `database` 模块**首次建立 androidTest 源集**与依赖接线；设备侧端到端解锁用例（**fail-closed**：语料缺失显式跳过、伴生元数据非法硬失败）；语料逐步生成清单写入 `crypto/src/test/resources/argon2-interop/README.md` | 需 **arm64 真机或 arm64 镜像**（本机已安装 system-image 仅 x86_64、`adb devices` 为空）与**人工 GUI 生成**的 KeePass / KeePassXC `.kdbx` 语料 |
+| **P3-24** CI 首跑校准 | **静态校准并修正 3 处「首次必红」缺陷**（`platforms;android-37` 远端不存在 → `android-37.0`；apksigner 需 `--v4-signature-file` 才能验 v4；v2 块被 AGP 省略故原断言不可能成立）；7 个 Action SHA 逐一核实；Rust 1.97.1 确认真实已发布；material3 1.5.0 stable 核实不存在；`cargo deny check` 本机实跑通过。留痕 `docs/ci-静态校准记录.md` | 需**真实 GitHub runner** 与 NVD / rustsec 数据通道 |
 
 ### 4.4 本批次登记的过程缺陷与事实修正
 
