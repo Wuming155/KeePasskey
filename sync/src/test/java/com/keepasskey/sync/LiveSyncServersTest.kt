@@ -31,6 +31,7 @@ import javax.net.ssl.SSLContext
 import javax.net.ssl.TrustManagerFactory
 import javax.net.ssl.X509TrustManager
 import java.util.concurrent.TimeUnit
+import java.util.UUID
 import kotlin.random.Random
 
 /**
@@ -49,15 +50,28 @@ import kotlin.random.Random
 class LiveSyncServersTest {
 
     private val webdavUrl = prop("liveWebdavUrl", "https://localhost:9443")
-    private val webdavUser = prop("liveWebdavUser", "tester")
-    private val webdavPass = prop("liveWebdavPass", "tester123")
+    private val webdavUser = credential("liveWebdavUser", "WEBDAV_USER")
+    private val webdavPass = credential("liveWebdavPass", "WEBDAV_PASSWORD")
     private val s3Endpoint = prop("liveS3Endpoint", "https://localhost:9000")
     private val s3Bucket = prop("liveS3Bucket", "keepasskey-test")
-    private val s3Access = prop("liveS3Access", "tester")
-    private val s3Secret = prop("liveS3Secret", "tester1234")
+    private val s3Access = credential("liveS3Access", "MINIO_ROOT_USER")
+    private val s3Secret = credential("liveS3Secret", "MINIO_ROOT_PASSWORD")
 
     private fun prop(key: String, default: String): String {
         return System.getProperty(key) ?: System.getenv(key) ?: default
+    }
+
+    /**
+     * 联调凭据解析（ISSUE-P3-10 子项 4）：JVM 属性 → 环境变量 → 随机一次性口令。
+     *
+     * 测试源码中不得保留固定弱口令默认值（原 `tester123` / `tester1234` 已移除）。
+     * Gradle 侧（`sync/build.gradle.kts`）已把同名属性/环境变量转发进测试 JVM，
+     * 真实联调请两侧注入同一组值（服务端读取 `WEBDAV_*` / `MINIO_ROOT_*`）。
+     */
+    private fun credential(propertyKey: String, envKey: String): String {
+        return System.getProperty(propertyKey)
+            ?: System.getenv(envKey)
+            ?: "kp" + UUID.randomUUID().toString().replace("-", "")
     }
 
     private fun assumeLive() {

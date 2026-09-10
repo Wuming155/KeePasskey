@@ -31,6 +31,11 @@
    - 2.20 OTP 种子与详情路径字节化（P2-12）
    - 2.16 ~ 2.20 批次验收证据（P2 九项整体闭环）
    - [2.21 受保护值字节通道收口与密码生成器出边界 CharArray 化（P2-15 / P2-16）](#221-受保护值字节通道收口与密码生成器出边界-chararray-化p2-15--p2-16)
+3. [P3 批次整改归档（低危项 / 特性接线 / 体验优化）](#3-p3-批次整改归档低危项--特性接线--体验优化)
+   - [3.1 P3 批次整体验收证据](#31-p3-批次整体验收证据)
+   - [3.2 已闭环条目逐项归档（ISSUE-P3-01 ~ P3-16）](#32-已闭环条目逐项归档issue-p3-01--p3-16)
+   - [3.3 本批次登记的过程缺陷与事实修正](#33-本批次登记的过程缺陷与事实修正)
+   - [3.4 本批次新登记的遗留问题](#34-本批次新登记的遗留问题)
 
 ---
 
@@ -431,7 +436,7 @@
 
 ### 2.11 Argon2 原生内核 C→Rust 迁移（P2-14）
 
-> 来源：ISSUE-P2-14（Rust 秘密飞地 PoC）。整改依据：RustCrypto `argon2`（纯 Rust + `zeroize` RAII 确定性擦除，消除 C 手动 `malloc`/`kp_wipe`/`free` 面）；「零二进制信任根」哲学（源码全量入库 + 从源码交叉编译）。分批计划与风险登记册见 [`plans/rust-enclave-poc.md`](../plans/rust-enclave-poc.md)。
+> 来源：ISSUE-P2-14（Rust 秘密飞地 PoC）。整改依据：RustCrypto `argon2`（纯 Rust + `zeroize` RAII 确定性擦除，消除 C 手动 `malloc`/`kp_wipe`/`free` 面）；「零二进制信任根」哲学（源码全量入库 + 从源码交叉编译）。原分批计划与风险登记册 `plans/rust-enclave-poc.md` 已随文档体系重构删除；其中风险 R6（桌面单测无 `.so`，原生路径不被覆盖）的残余已转入 [**docs/ACTIVE_ISSUES.md**](ACTIVE_ISSUES.md) 的 ISSUE-P3-11。
 
 - **ISSUE-P2-14（Argon2 原生内核 C→Rust 迁移）**：已完成（2026-09-09，Batch 0~5 全部闭环）。
   - **缺陷 / 动机**：原 `crypto/src/main/cpp/` 以 vendored PHC 官方 C 参考实现（`argon2/`，1814 行）+ 手写 JNI 桥
@@ -797,3 +802,99 @@
   `RealVaultRepositoryTest` 追加 2 例借用/清零契约（`getEntryPasswordChars` 独立副本、
   修订密码与 `totpSecretChars` 清零不影响库内原文）；`TotpKeyUriParserTest`（String 重载）
   与既有生成器/详情用例全绿。
+
+---
+
+## 3. P3 批次整改归档（低危项 / 特性接线 / 体验优化）
+
+> 来源：`docs/ACTIVE_ISSUES.md` §P3 全量 16 项。完成日期：2026-09-10。
+> 提交基线：`7307f5f` → 本批次提交。**验收方式：全模块 `.\gradlew.bat test --rerun-tasks` 强制真实执行。**
+
+### 3.1 P3 批次整体验收证据
+
+| 模块 | 测试套件 | 用例 | 失败 | 跳过 |
+|---|---:|---:|---:|---:|
+| app | 63 | 416 | 0 | 0 |
+| core | 8 | 58 | 0 | 0 |
+| crypto | 9 | 61 | 0 | 0 |
+| database | 28 | 207 | 0 | 0 |
+| sync | 16 | 179 | 0 | 13 |
+| **合计** | **124** | **921** | **0** | **13** |
+
+**908 通过 / 0 失败 / 13 跳过**（基线 737 → 921，**+184 例，零退化**）。13 例跳过为 `LiveSyncServersTest`
+真实联调（12 例，需 `-DliveSyncTest` + `tools/local-sync`）与 `SyncCacheTest` 的 Windows 无 POSIX 权限视图断言（1 例）。
+
+补齐的验证缺口（本批次新增的**非跳过**运行时证据）：
+- **crypto `skipped=0`**：原 4 例宿主侧原生 JNI 用例在无 `cargoHostBuild` 产物时 `Assume` 跳过，现真实执行；
+- **database `skipped=0`**：原先的 Windows POSIX 权限断言跳过项已不在此模块（实际位于 `sync/.../SyncCacheTest.kt:121`，为独立既有限界）；
+- **crypto instrumented**：新增 `crypto/src/androidTest/`，在 x86_64 模拟器（Android 16 / API 36）实测
+  `connectedDebugAndroidTest` **7 例 0 失败、exit 0**，证据 `libkeepasskey_argon2.so=477976 bytes` 自 APK 内加载、
+  `磁盘解包副本=false`、`NativeArgon2.available==true`、派生结果与 BC 冻结向量逐字节一致；
+  性能（t=2/m=64MiB）p=2 native 132.1ms vs BC 657.7ms（**4.98×**）、p=4 native 91.6ms vs BC 771.7ms（**8.42×**），
+  R1 闸门（原生 ≤ 2× BC）以极大余量通过。
+
+### 3.2 已闭环条目逐项归档（ISSUE-P3-01 ~ P3-16）
+
+| 条目 | 主题 | 优先级 | 裁决 | 核心实现与代码证据 |
+|---|---|:---:|:---:|---|
+| **P3-01** (TASK-55) | 生物识别解锁开关开启后第二次解锁不默认触发 | P3 | **达成（真机交互未验证）** | 根因：`unlockMode` 由「设置流」与「封印凭据流」两条独立异步源推导，先到者把终态定格为 `STANDARD`，故开关已开仍停在主密码界面。改为任一路径抵达后统一重算（`UnlockViewModel.refreshUnlockModeAndAutoPrompt`），并把自动唤起收敛为显式一次性意图 `onBiometricAutoPromptRequested()` + `IDLE→PENDING→CONSUMED` 状态机（`BiometricAutoPrompt`/`BiometricAutoPromptPolicy`，`CONSUMED` 不可逆），Screen 仅透传不判定——**取消后回落主密码不再自动重试，死循环结构性不可达**。新增 22 例。 |
+| **P3-02** (TASK-49) | 自定义图标渲染/删除 + Notes/URL 字段引用展示侧接线 | P3 | **字段引用与循环引用达成；图标渲染/删除入口部分达成（渲染需真机）** | 图标投影层 `EntryIcon<T>`（`Default`/`Custom`/`Missing`，泛型载荷使 JVM 可测）+ 纯函数 `EntryIconProjection.of` 判定形态；`EntryIconPresenter` 在 `Dispatchers.Default` 解码，`IconBitmapCache` 有界 LRU（64 项、同 id 只解码一次、失败登记不重试）；Composable 只经纯绘制 `EntryIconContent`。删除链路：详情页溢出菜单 + 确认弹窗 → `CustomIconAdmin.deleteCustomIcon` **单次事务**内清理 Meta 图标池并把引用条目/分组回退默认、随后落盘，失败如实上浮。引用展示：引擎新增展示模式 `resolveForDisplay`，**受保护字段在任何递归深度输出 `••••••••` 掩码**（M1 投影层不物化明文），`MAX_DEPTH=10` 兜底循环/超深引用不崩溃，既有 `resolve` 取值语义与签名不变。新增 46 例（含 `FieldReferenceDisplayModeTest` 13 例）。 |
+| **P3-03** (TASK-43) | 进阶偏好设置消费方接线（分批） | P3 | **43f 达成；43a/43b 部分达成；43c 接线未达成（诚实化达成）；43d/43e 未达成（如实登记）** | 先出**22 键现状审计矩阵**（逐键 grep 证据）。**查出「假开关」**：`debugLogEnabled` 有 10+ 处写日志、**0 处读偏好** → 接入 `DiagnosticLogGate` 闸门，且审计通道 `audit()` 独立不受偏好关闭（保住 P2-10 导出审计契约）。43a：`webdavChunkedUpload`/`webdavChunkSizeMb`（`SyncTransferOptions` 1..512MB 校验 + `WebDavUploadBody` 分块流式）、`checkRemoteChangesBeforeSave`（`commitLocalForce`/`overwriteRemoteWithoutPrecondition`）、`conflictResolution` **4 策略全部真实生效**（`PROMPT_USER` 经 `BothModifiedEntryCollector` 与自动合并行为可分）。43b：`inlineSuggestionsEnabled`（抽工厂 + 闸门）、`autofillCopyTotp`（下传条目 ID → 确认后经受保护剪贴板复制，500ms 硬超时不拖慢填充）。**未接线项一律在设置页补「（预留，暂未生效）」中英双语诚实标识**，拒绝留假开关。`sync` 新增 21 例（158→179）。 |
+| **P3-04** (TASK-54) | 导入密钥与 KeyFile 管理 | P3 | **达成（SAF/真机交互未验证）** | 摸查确认 KeyFile 解析（`KdbxKeyFile`：XML v1/v2 + Hash 校验 + 32B 裸格式 + 64 hex + SHA-256 兜底）、复合密钥三分支（`KdbxFile.deriveKeys`）、解锁透传**均已存在**，未重复造轮子。补齐缺失：`KeyFileAccess` 契约 + `SafKeyFileAccess`（`use{}`/8KiB 分块/1MiB 上限/缓冲 `fill(0)`；**仅当偏好开启时**申请 `takePersistableUriPermission` 并回读校验，失败优雅降级 + 提示）；Uri/显示名经 DataStore 记忆、`init` 三重裁决恢复（偏好+记录+授权）、失效静默降级清记录；解锁成功按「实际使用的因子」记忆/清除，**跨会话绝不缓存密钥字节**；失败语义分型（带密钥文件 → `keyfile_or_password_mismatch`，不谎称主密码错——KDBX 复合密钥单次 HMAC 校验无法区分哪个因子错）。**查出第二个假开关**：`rememberKeyFileLocation` 此前无任何消费方，本次接成记忆功能总闸门。新增 27 例。 |
+| **P3-05** (TASK-19) | zxing → CameraX + ML Kit 迁移评估 | P3 | **达成（纯评估，代码零改动）** | 决策：**维持 zxing 4.3.0，转条件触发式迁移（T1~T6）**。核查推翻了 ISSUE 的收益前提：「更小体积」方向相反——实测现状扫码 dex 仅 **349 KB**，而 ML Kit bundled 的 `libbarhopper_v3.so` 4 ABI 合计 **19.3 MB**，本项目通用 APK + `extractNativeLibs=false` 下 APK 14.27MB → 33~35MB；「Compose 原生集成」现状已满足；「对焦更流畅」无缺陷证据亦无真机可测。真实成本：ML Kit **会发送性能/使用指标**（官方数据披露页逐项列明），将把「纯离线零采集」改写为「含 Google SDK 遥测」，Play 数据安全申报必变。唯一真收益是脱离 deprecated Camera1（AAR 常量池实测 8/80 类引用 `android/hardware/Camera`）。另发现 ISSUE 遗漏成本：**自有 manifest 未声明 `CAMERA`，现由 zxing 库清单合并注入**，迁移须显式补声明。产出 `docs/扫码方案评估_ZXing与CameraXMLKit.md`（423 行，20 条来源 URL）。 |
+| **P3-06** | UI 层冗余 import 清理 | P3 | **部分达成（保守保留差额）** | 纯 import 行删除：**20 个文件净删 60 行**，`git diff` 证据为「除文件头外所有变更行均以 `-import ` 开头」——**未触碰任何业务代码**，且未误删 Compose 委托所需的 `getValue`/`setValue`。原估约 80 处，差额为**保守保留**（KDoc `[...]` 链接引用、疑似被委托间接使用的导入）；继续激进删除的收益远低于误删导致 Compose 屏编译失败的风险。 |
+| **P3-07** | 附件读取侧别名共享消除 | P3 | **达成** | `KdbxXmlGroupReader` 的 `BinaryNode` 出边界即防御性拷贝（`binariesPool[refIndex].data.copyOf()`），消除「同一池条目多引用者共享可变数组」与「调用方按 `Closeable` 契约 `clear()` 会清零池内数据、连带损坏其他引用者并使保存去重指纹取自已清零数据」两条缺陷。回归锁 `KdbxAttachmentAliasIsolationTest` 4 例（含端到端往返：清零一份后保存/读取另一条目仍字节精确、去重语义保持、越界返回空数组）。 |
+| **P3-08** | 淘汰旧计划文件并统一单一真相源 | P3 | **达成（本批次开工前已满足）** | 核实：`docs/plans/` 目录、`STATUS.md`、`docs/HEALTH_CHECK_ROADMAP.md`、`docs/FINDINGS_TRACKER.md`、`plans/rust-enclave-poc.md` **均已不存在**；删除发生于 `7dba64d`（重构文档体系，删 `docs/plans/REPAIR_PLAN.md`）与 `d578df7`/`863d81c`（删 `bug-fix-plan.md`）。`AGENTS.md` 经全仓 grep **零悬空引用**。**如实登记条目滞后**：ISSUE-P3-08 与 P3-16 的正文前提（「文件尚未删除」）在 HEAD 上已不成立。 |
+| **P3-09** (ZT-20) | 供应链与构建加固批次 | P3 | **五条达成、一条部分达成** | ①签名：关 v1、启 v3/v4。**受控实验**证明 `enableV2Signing=true` 已生效但产物省略 v2 块（v3 与 v2 同开且 minSdk ≥ 28 时省略，minSdk 36 无缺口）；产出 `.idsig`。②R8：移除 `-dontwarn **`（移除后 `missing_rules.txt` 不存在，无需逐类规则）、收窄 passkey/autofill 与 model/file/session、删冗余 Room/WorkManager 规则（保留 1 条 `WorkDatabase_Impl` 无参构造）。实效：dex 字符串表中源文件名由 **12 → 0**，dex −196,816 B（−1.85%）。③依赖：material3 **无可降 stable**（Maven 元数据 + AAR 字节码双证据：`MotionScheme.expressive()` 在 1.4.0 被 mangle 为 Kotlin `internal`，降级必编译失败）→ 受控保留 alpha + 两处管控注释；删孤儿 `argon2kt`。④CI：`failBuildOnCVSS` 11.0f → **7.0f**、`failOnError` → **true**、7 个 Action 全部 SHA 钉死；新增 `build.yml` 三 job（fast-gate / native-gate（NDK 28.2.13676358 + Rust 1.97.1 + cargo-ndk 4.1.2 + 4 ABI）/ rust-supply-chain）。⑤`.gitignore` 补 `*.p12`/`*.pfx`/`*.pem`/`*.key`（`git check-ignore` 实测 7 条命中）。⑥`cargo deny check` 入 CI，**`advisories` 子检查本机实测复现 ISSUE 现象 6**（`curl 28 Failed to connect to github.com:443`）→ 判定逻辑未能本环境验证，如实登记。 |
+| **P3-10** (ZT-21) | 解析与计数器边界加固 | P3 | **达成** | ①解压上限 512 MiB → **128 MiB**（4× 收缩且不低于 `InnerHeader` 单字段 64 MiB 上限），补压缩炸弹拒绝/正常透传/区间契约三例。②`signCount`：`SIGN_COUNT_UNKNOWN=0`/`MAX_SIGN_COUNT=Int.MAX_VALUE-1` 命名常量，`parseSignCount`/`clampSignCount`/`nextSignCount` 三处收口，消除 `PasskeyAssertionActivity` 两处 `+1` 溢出；`PasskeyEntryCoordinator` 改 `updateDatabaseMeta` 受控事务 + 「库内现值+1」单调下界（并发两递增 = 2，无丢失更新）。③`setFeature` 失败改为**逐项告警、不 fail-fast**并论证：Expat 不支持 apache 特性，fail-fast 会导致用户打不开自己的库；改用 `startDTD` fail-closed 兜底，并修掉「首项失败致后三项从不尝试」的真实缺陷。④测试凭据：移除固定弱口令字面量，**单一真源**数据流 = 配置期求值一次 → `systemProperty` 下发 → 测试优先读属性 → 环境变量同名对齐（`WEBDAV_*`/`MINIO_ROOT_*`），日志只记来源不记值（避免客户端/服务端各自随机导致 12 例联调失配）。新增 database +4 / core +10 / app +6。 |
+| **P3-11** (P2-14 遗留) | Rust Argon2 原生内核真机 instrumented 验证 | P3 | **验收 1/3 在 x86_64 模拟器达成（arm64 未达成）；验收 2 未达成（阻塞与设备无关）** | 建立 `crypto` 模块 `androidTest` 源集（`testInstrumentationRunner` + `androidx.test.*`）。在 x86_64 模拟器（Android 16/API 36）实测 `connectedDebugAndroidTest` **7 例 0 失败 exit 0**：`.so` 自 APK 内加载（477,976 B、磁盘无解包副本）、`available==true`、与 BC 冻结向量逐字节一致；性能 p=2 **4.98×**、p=4 **8.42×**，R1 闸门通过。**arm64 真机未达成**（SDK 无 arm64 system-image）；**验收 2 完全未达成**，阻塞与设备无关：语料未入库 + `crypto` 不依赖 `database`（无 `.kdbx` 读写能力，该用例只能落 `database`，而 `database` 亦无 androidTest 源集）+ `src/test/resources` 不进 androidTest APK（设备侧须放 `androidTest/assets/`）。**查出顺序依赖坑**：`System.loadLibrary` 只在 `NativeArgon2.available` 的 `by lazy` 内，而 `deriveKey` 是 `external fun` → 在 `available` 求值前直接调 `deriveKey` 必抛 `UnsatisfiedLinkError`（首轮 6/7 失败即此因，已用 `@BeforeClass` 前置消除）。已核验生产路径不受影响（唯一消费方 `Argon2KdfEngine.transform` 必然先求值 `available`，且 `derive` 已 catch `UnsatisfiedLinkError`）。归档 `docs/原生Argon2真机验证记录.md`。 |
+| **P3-12** (P2-09 残余) | 主 App 敏感 Compose 屏遮挡触摸过滤 | P3 | **部分达成（真实缺口已补；真机交互未验证）** | **修正 ISSUE 两处前提**：①`MainActivity.kt:43` → `FlagSecureGuard.attach` → `:66` → `decorView.filterTouchesWhenObscured = true`，ComposeView 为其子孙，而 Android 触摸分发取「最近带该标志的祖先」→ **MainActivity 承载的全部屏早已被窗口级覆盖**，ISSUE 称「这些界面仍缺失防护」不成立；②该标志只作用于触摸分发路径，**不拦截无障碍 `ACTION_CLICK`/`performClick`**，ISSUE 把「无障碍注入点击」列为防护目标亦不准确。**真实缺口**：`BaseCredentialActivity` 四个子类（`PasskeyAssertionActivity`/`PasskeyCreateActivity`/`PasswordFillActivity`/`PasswordSaveActivity`）只设 `FLAG_SECURE` + `setHideOverlayWindows`，**无** decorView 过滤 → 已在 `CredentialVerificationLauncher`（覆盖三个手动确认窗口）与 `CredentialUnlockActivity` 的 Compose 根补接；另补 authenticator/conflict/database-picker/entry-edit 四屏。共接 8 窗口（6 新增 + 2 既有）。**强证据**：用工程同版 `kotlin-compiler-embeddable 2.4.10` 独立编译 + `JUnitCore` 运行 `ObscuredTouchWiringTest`（OK 2 tests），并做**反向对照**（把未接线的 `GeneratorScreen` 塞进清单 → 测试如期失败），证明断言非空转。 |
+| **P3-13** (P2-05 残余) | Windows 宿主下父目录 fsync 无运行时验证 | P3 | **达成（POSIX 支路待 Linux runner）** | 走验收标准 2（依赖倒置）：新增窄接口 `fun interface DirectorySync { fun sync(dir): DirectorySyncOutcome }`（`SYNCED`/`DEGRADED`，契约「禁止抛异常，不支持即降级」）+ 生产实现 `PosixDirectorySync`；`AtomicFileWriter` **保留原三参重载**（委托 `DirectorySync.default`）并新增四参注入重载 → 既有调用点（`DatabaseSession.kt:575` 等）零改动、无跨模块/DI 牵连。四条 fsync 路径经代码实测确认为：① `.bak` copy 后 ② 主路径 `Files.move(ATOMIC_MOVE)` 后 ③ 降级 `renameTo` 成功后 ④ 降级 `Files.copy` 覆盖后（任务描述括注的「写入临时文件」本身不是 fsync 点，已在交接说明）；假实现以「恰好 1 次/2 次」计数断言触达，另有负向断言（拒绝无保护覆盖时钩子 0 次）。**变异探针**：临时注释掉钩子② → 4 例精确失败，还原后复绿 → 断言非空转。Windows 实测 `AccessDeniedException` + 降级告警，同用例仍断言写盘成功（保持降级不阻断语义）。新增 11 例。 |
+| **P3-14** (P2-08 残余) | 生物识别完整性提示未使用已资源化文案 | P3 | **达成（真机渲染未验证）** | 逐一核查全 app **8 处 `errString` 消费点**，据实确认**无一处展示给用户**（2 处仅日志、2 处丢弃、3 处产生点、1 处字段定义）→ 采优先路线：`errString` 退化为内部诊断标识 `INTEGRITY_BLOCKED_DIAGNOSTIC`，消费侧按错误码映射 `R.string.sec_biometric_integrity_blocked`；硬编码常量 `INTEGRITY_BLOCKED_MESSAGE` 已删除（grep 0 命中）。新增 5 例。 |
+| **P3-15** (P2-07 残余) | 编辑页屏蔽非法绑定包名后的提示文案边界 | P3 | **达成** | 把「包名 → 屏蔽状态」由布尔升维为**三态** `AutofillBlockState`（`Blocked`/`NotBlocked`/`UnidentifiablePackage`）；`isBlocked` 保持公开签名与 fail-closed 语义**一字未改**（内部对三态穷尽 `when` 映射，`UnidentifiablePackage → true`），填充侧 5 个调用方零感知。`toggleAutofillBlockForApp` 在不可识别包名时**不执行任何写操作**、只发 `UiMessage(R.string.autofill_block_unidentifiable_package)`，不再产出「已屏蔽/已恢复」语义。回归锁对 8 个非法包名**同时**断言 `resolveBlockState == UnidentifiablePackage` 与 `isBlocked == true`。 |
+| **P3-16** | AGENTS.md/RESOLVED_LOG.md 中已下架文件的悬空引用 | P3 | **达成** | 修正 2 处真实悬空引用：`docs/RESOLVED_LOG.md` §2.11 的死链 `../plans/rust-enclave-poc.md` → 改写为「已随文档体系重构删除 + 残余去向 ISSUE-P3-11」；`docs/ARCHITECTURE.md` §3-6 指向已下架 README 路线图的悬空指引 → 改指 `ACTIVE_ISSUES.md`。`AGENTS.md` 经核查**本就不含**此类引用（ISSUE 原文「§4 仍出现 `STATUS.md` 引用」在 HEAD 上不成立，属条目建立时的滞后描述）。 |
+
+**新增生产代码文件（24 个）**：`app/.../ui/model/{EntryIcon,EntryIconPresenter,IconBitmapCache,EntryReferenceDisplayResolver,EntryDisplayPresenter}.kt`、
+`app/.../ui/components/EntryIconContent.kt`、`app/.../ui/screens/vault/VaultEntryCardLayouts.kt`、`app/.../ui/screens/detail/EntryDetailTopBar.kt`、
+`app/.../ui/screens/unlock/{BiometricAutoPrompt,BiometricFailureMessagePolicy,UnlockModePolicy,KeyFileAccess,SafKeyFileAccess,KeyFileAccessModule}.kt`、
+`app/.../data/logger/DiagnosticLogGate.kt`、`app/.../data/repository/AutofillBlockState.kt`、`app/.../autofill/{AutofillInlinePresentationFactory,AutofillTotpCopyPolicy}.kt`、
+`app/.../sync/ConflictStrategyMapping.kt`、`sync/.../network/SyncTransferOptions.kt`、`sync/.../webdav/WebDavUploadBody.kt`、`sync/.../merge/ConflictStrategy.kt`、
+`database/.../session/{DirectorySync,PosixDirectorySync}.kt`。
+
+### 3.3 本批次登记的过程缺陷与事实修正
+
+> 本节为**如实留痕**：以下问题均在整改过程中真实发生并被发现/修正，不美化、不隐去。
+
+**A. 生产代码缺陷（由本批次自身的验证门禁查出）**
+1. `PasskeyEntryCoordinator.kt` 新增 `KdbxGroup` 使用但**漏 import** → 导致 **app 模块整体编译失败**，阻塞多个并行组验证。由主控定位（`Unresolved reference 'KdbxGroup'/'entries'/'subgroups'`）并补齐 `import com.keepasskey.core.model.KdbxGroup`。
+2. `sync/build.gradle.kts` 用 `java.util.UUID` 全限定名 → Gradle **Kotlin DSL 脚本隐式导入集与项目源码不同**，报 `Unresolved reference 'util'`，**令全项目所有 Gradle 构建失败**。修法：脚本顶部 `import java.util.UUID`。
+3. `KeyFileAccessModule.kt` 的 KDoc 正文写入 `` `app/.../di/**` `` → **Kotlin 块注释可嵌套**，`/**` 开启嵌套注释致外层 KDoc 直到 EOF 未闭合（`Syntax error: Unclosed comment`，报在文件末行）。修法：改写为不含 `/*` 的表述。
+4. `BiometricAutoPrompt` 被声明为 `internal` 却经公开 `UnlockUiState` 暴露 → `'public' function exposes its 'internal' parameter type`。修法：改为 `public`（经公开 API 暴露者本就不能 internal）。
+5. `KdbxAttachmentAliasIsolationTest` 首版 **2 例失败**，根因是**测试自身共享可变状态**：`poolData`/`shared` 为类字段，而 `KdbxAttachment.clear()` 是 `data.fill(0)` **原地清零**，测试把同一数组既交给池又用作期望值 → 自清零后断言「池完好」必失败。**结论：生产实现（`copyOf()`）正确，测试有缺陷**——一条针对「别名」的回归测试被别名本身击败。修法：期望值独立 `copyOf()`。
+6. `UnlockViewModelBiometricAutoPromptTest` 1 例失败（expected `IDLE`, was `PENDING`），根因是**测试前提写错**：假定 `FakeSettingsRepository()` 默认 `biometricEnabled=false`，实际 `UserSettings.biometricEnabled` 出厂默认 **true**。修法：新增显式 `disabledSettings()` 并补前置断言，**未改期望值**（产品语义「开关关闭 → 不唤起」与 ISSUE 原文一致）。
+7. `SyncCoordinator` 强制冲突策略分支曾出现「结果为非 null 但未 return 而落入后续分支」的控制流缺陷，由该组交付前自查修正（改为整体 `return@withLock applyForced(...) ?: handleConflictMerge(...)`）。
+8. `WebDavUploadBodyTest` 首版 6 例因测试自身用 8 字节分块、被新加「≥1 MiB」构造期闸门拒绝 → 反向证明合法区间校验真实生效；已改用 `MIN_CHUNK_SIZE_BYTES`。
+9. `KdbxXmlParser` 原 `setFeature` 循环在首项失败时**后续三项从不尝试**（真实缺陷，非仅日志缺失），已随 P3-10 子项 3 修正。
+
+**B. 编排过程缺陷（主控自身，如实登记）**
+10. **并行构建耗尽内存**：9 组并行 + 多 Gradle 会话使本机 28 GB 内存仅剩 1 GB、15 个 JVM 占 12 GB，**多名执行者被系统 OOM 终止**（属编排失误，非任务设计失败）。处置：`gradlew --stop` 释放 10 GB；`gradle.properties` 增加 `org.gradle.workers.max=2` 与 `kotlin.daemon.jvmargs=-Xmx1536m`；全体改为串行构建。
+11. **并发构建破坏产物**：多个 Gradle 进程写同一 build 目录导致 `java.io.EOFException` / `Kryo Buffer underflow`（读回被截断的 `results-generic.bin`）、`NoSuchFileException: in-progress-results-generic.bin`、`app/build/generated/ksp/.../classes` 被并发删除（`StructureTransformAction` 失败）、`Could not close incremental caches`。**排除实验**：清空结果目录重跑仍失败、测试 JVM 堆提至 3g 仍失败 → 确证与测试缺陷、内存均无关。处置：引入文件锁包装器 `build/gw.ps1`（等待其它 Gradle 工作进程静默后再执行；**该脚本为会话临时协调工具，未入库**），最终门禁以 `--rerun-tasks` 强制真实执行通过。
+12. **条目前提滞后**：ISSUE-P3-08 / P3-16 正文声称的「文件尚未删除」「`AGENTS.md` 仍引用 `STATUS.md`」在 HEAD 上均不成立（删除早在 `7dba64d` 完成）。已如实标注，避免后人误以为仍有文件待删。
+13. **主控误判一次**：曾据会话初值 `adb devices` 为空而告知 P3-11 组「本环境无设备」，该组以 SDK 侧实测（`emulator.exe` + `android-36.1` x86_64 镜像 + AVD `Pixel_10`）反驳并启动模拟器，取得真实 instrumented 绿证。**主控已撤回误判**——本条登记为「不要以单一探测代替环境结论」。
+
+### 3.4 本批次新登记的遗留问题
+
+> 以上 16 项中**未完全达成验收标准**的残余面，已按「严禁只记聊天或脑中」纪律**全部回登 `docs/ACTIVE_ISSUES.md`**，编号与主题见下表。
+
+| 新条目 | 主题 | 来源 |
+|---|---|---|
+| ISSUE-P3-17 | 43c UI 显示偏好接线（7 键） | P3-03 残余（消费方全在并行组范围，本轮仅诚实标识 + 接线配方） |
+| ISSUE-P3-18 | 通知基础设施（`NotificationChannel` + `POST_NOTIFICATIONS`）并接线 2 键 | P3-03 残余（`showUnlockedNotification` / `autofillShowTotpNotification`） |
+| ISSUE-P3-19 | 明文导入框架与 4 源解析器（KeePass XML / Bitwarden / 浏览器 CSV / 1PUX） | P3-03 残余（43d；现仅有假提示，已改诚实说明） |
+| ISSUE-P3-20 | 子库挂载支持 | P3-03 残余（43e；建议独立立项，设计要点见交接 R-2） |
+| ISSUE-P3-21 | 建库侧「生成附属密钥文件」假开关（`RealVaultRepository.createDatabase` 忽略 `keyFile` 参数） | P3-04 残余（修复需改 `database` 层） |
+| ISSUE-P3-22 | 分组自定义图标渲染（`KdbxGroup` 的 `CustomIconUUID`） | P3-02 残余（本轮仅让删除路径清理分组引用以避免悬挂） |
+| ISSUE-P3-23 | arm64 真机 instrumented 验证 + Argon2 真实 `.kdbx` 语料端到端解锁 | P3-11 残余（验收 1 的 arm64 部分与验收 2 完全未达成） |
+| ISSUE-P3-24 | CI 首跑校准（`build.yml` 三 job 首次真实运行、`dependency-scan.yml` CVSS≥7 实际阻断、`cargo deny advisories` 联网拉取） | P3-09 残余（本环境无 GitHub runner 与 NVD/rustsec 通道） |
+| ISSUE-P3-25 | 巨型类拆分（`SyncCoordinator.kt` ~965 行、`UnlockViewModel.kt` ~979 行，均属接线前既存超标） | P3-03 / P3-04 残余 |
+| ISSUE-P3-26 | `AtomicFileWriter.deleteBackup` 删除 `.bak` 后未做目录 fsync（同类小缺口） | P3-13 残余 |

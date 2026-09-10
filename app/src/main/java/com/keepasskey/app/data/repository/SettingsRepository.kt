@@ -41,7 +41,13 @@ data class UserSettings(
     val syncOnColdStart: Boolean = true,
     // 底部导航项可见性配置
     val showAuthenticatorTab: Boolean = true,
-    val showGeneratorTab: Boolean = true
+    val showGeneratorTab: Boolean = true,
+    // ISSUE-P3-04：上次成功解锁使用的密钥文件「非密钥元数据」——SAF Uri 与文档显示名。
+    // 绝不承载密钥文件字节或派生密钥；是否记忆由用户偏好开关
+    // （ExtendedSettings.rememberKeyFileLocation，设置页「密钥文件策略」）控制，
+    // 偏好关闭 / 授权失效时调用方须清除本记录，不得残留过期 Uri。
+    val lastKeyFileUri: String = "",
+    val lastKeyFileName: String = ""
 )
 
 /**
@@ -70,4 +76,16 @@ interface SettingsRepository {
     suspend fun setSyncOnColdStart(enabled: Boolean)
     suspend fun setShowAuthenticatorTab(enabled: Boolean)
     suspend fun setShowGeneratorTab(enabled: Boolean)
+
+    /**
+     * ISSUE-P3-04：记住上次成功解锁使用的密钥文件（仅 SAF Uri 与文档显示名，
+     * 属非密钥元数据；密钥文件字节/派生密钥绝不经本通道持久化）。
+     */
+    suspend fun setRememberedKeyFile(uri: String, displayName: String)
+
+    /**
+     * ISSUE-P3-04：清除已记忆的密钥文件元数据——偏好开关关闭、持久化读授权失效
+     * 或本次解锁没有使用密钥文件时调用，杜绝过期 Uri 在下次冷启动被误恢复。
+     */
+    suspend fun clearRememberedKeyFile()
 }

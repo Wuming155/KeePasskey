@@ -1,6 +1,5 @@
 package com.keepasskey.app.ui.screens.settings
 
-import androidx.lifecycle.viewModelScope
 import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.ExtendedSettingsStore
 import com.keepasskey.app.sync.SyncCoordinator

@@ -2,6 +2,7 @@ package com.keepasskey.app.passkey
 
 import androidx.activity.compose.setContent
 import androidx.fragment.app.FragmentActivity
+import com.keepasskey.app.security.ApplyObscuredTouchFilter
 import com.keepasskey.app.security.BiometricAuthManager
 import com.keepasskey.app.security.BiometricResult
 
@@ -62,6 +63,8 @@ internal fun FragmentActivity.requestCredentialUserVerification(
 
         CredentialFillRequirement.MANUAL_CONFIRMATION -> {
             setContent {
+                // 遮挡触摸过滤（ISSUE-P2-09 / P3-12）
+                ApplyObscuredTouchFilter()
                 CredentialFillConfirmScreen(
                     title = title,
                     hint = manualHint,

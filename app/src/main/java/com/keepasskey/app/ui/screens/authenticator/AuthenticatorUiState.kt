@@ -1,7 +1,6 @@
 package com.keepasskey.app.ui.screens.authenticator
 
 import com.keepasskey.app.ui.model.UiMessage
-import com.keepasskey.app.ui.model.UiVaultEntry
 
 /**
  * 验证码页面 UI 条目模型

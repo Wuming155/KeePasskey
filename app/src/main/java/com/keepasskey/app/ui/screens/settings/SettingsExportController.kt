@@ -289,13 +289,16 @@ internal object ExportAuditSanitizer {
  *
  * 仅记录时间（由缓冲统一加时间戳）、导出类型与目标脱敏标识；绝不记录文件名、路径、
  * 字段值或任何明文内容。导出成功与失败都会留痕，便于事后回溯数据出域行为。
+ *
+ * ISSUE-P3-03 (43f)：改用 [DebugLogBuffer.audit] 审计通道——审计留痕是治理要求，
+ * 不能被用户侧「诊断日志」开关静默关闭（普通诊断事件才受该开关约束）。
  */
 internal class ExportAuditRecorder(private val debugLog: DebugLogBuffer) {
 
     fun record(kind: ExportArtifactKind, rawTarget: String, success: Boolean) {
         val resultLabel = if (success) RESULT_SUCCESS else RESULT_FAILURE
         val marker = ExportAuditSanitizer.targetMarker(rawTarget)
-        debugLog.info(AUDIT_TAG, "导出审计: 类型=${kind.auditLabel}, 目标=$marker, 结果=$resultLabel")
+        debugLog.audit(AUDIT_TAG, "导出审计: 类型=${kind.auditLabel}, 目标=$marker, 结果=$resultLabel")
     }
 
     private companion object {

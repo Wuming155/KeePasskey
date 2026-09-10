@@ -27,7 +27,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.model.UiVaultEntry
 import com.keepasskey.app.ui.model.VaultGroup
 import com.keepasskey.app.ui.model.resolveText
@@ -273,7 +272,9 @@ fun VaultListContent(
                         onCopyPassword = { onCopyPassword(entry) },
                         onCopyUsername = { onCopyUsername(entry) },
                         onRestore = { onRestoreEntry(entry.id) },
-                        onPurge = { onPurgeEntry(entry.id) }
+                        onPurge = { onPurgeEntry(entry.id) },
+                        // ISSUE-P3-02：状态层装配的图标投影与引用展开文案（UI 只做纯绘制）
+                        decorations = uiState.decorations
                     )
                 }
 

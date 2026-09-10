@@ -37,10 +37,23 @@ captures/
 .externalNativeBuild/
 .cxx/
 
-# Keystore files
+# Keystore files（ISSUE-P3-09 / ZT-20 AC5 补齐）
+# 已覆盖：*.jks / *.keystore / keystore.properties（keystore.properties.example 为模板，须入库，
+# 故此处只忽略精确文件名而不做 keystore.properties.* 通配）。
+# 本次补齐 PKCS#12（*.p12/*.pfx，含 release.jks 之外的常见发布密钥格式）与
+# PEM/*.key 私钥/证书容器扩展名，避免发布密钥或自签私钥误入库。
 *.jks
 *.keystore
 keystore.properties
+*.p12
+*.pfx
+*.pem
+*.key
+# 例外：仓库内两处**公开**本地联调自签证书（不含私钥）为既有 tracked 测试材料，
+# 显式保留可入库能力，避免重新生成后无法提交；
+# 对应私钥 certs/key.pem、certs/minio/private.key 由 tools/local-sync/.gitignore 单独忽略。
+!sync/src/test/resources/live/cert.pem
+!tools/local-sync/certs/cert.pem
 
 # Google Services (e.g. APIs or Firebase)
 google-services.json

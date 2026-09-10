@@ -312,8 +312,13 @@ private class BinaryNode(
         if (refAttribute == null && rawValue == null) return
         val refStr = refAttribute?.takeIf { it.isNotEmpty() } ?: rawValue.orEmpty()
         val refIndex = refStr.trim().toIntOrNull() ?: 0
+        // ISSUE-P3-07（P1-9 残余）：出边界交付给条目树的附件字节必须是独立副本。
+        // 直接引用池内数组会使「同一池条目的多个引用者共享同一可变 ByteArray」，
+        // 外部按 Closeable 契约 attachment.clear()/close() 即清零内层 Header 二进制池，
+        // 连带损坏其他引用者与后续保存（去重指纹取自已清零数据）——副本化后池仍为唯一权威源。
+        // 去重语义不受影响：保存侧按 flags + 字节内容指纹去重（KdbxBinaryDeduplicator），与实例身份无关。
         val data = if (refIndex in binariesPool.indices) {
-            binariesPool[refIndex].data
+            binariesPool[refIndex].data.copyOf()
         } else {
             ByteArray(0)
         }

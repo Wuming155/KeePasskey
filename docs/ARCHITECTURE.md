@@ -29,7 +29,7 @@ app ──> database ──> crypto ──> core
 3. **已解锁数据库的所有权**：app 层持有单例 `DatabaseSession`（进程内），生物识别解锁、自动填充、通行密钥认证先与主进程同进程访问；确有需要（如 autofill 独立进程）再调整。
 4. **同步模型**：kdbx 同步的本质是「整文件读 / 写 / 合并」。`sync` 层提供文件存储抽象（读取、事务式写、版本哈希检测）+ 本地缓存（对比 baseversion / version 哈希）；仅两端都修改时才报冲突，冲突合并下沉到 `database` 层的 KDBX merge（参考 keepass2android 的 `CachingFileStorage`）。
 5. **通行密钥路线**：先做「kdbx 内存储 WebAuthn 凭据 + 自动填充使用」（参考 KeePassDX 的 Signature/Passkey 实现）；Android 14+ `CredentialProviderService` 注册为系统凭据提供者列为远期目标。
-6. **UI 优先**：阶段 1 用静态假数据走通全部界面与导航，确认交互后再逐层接入 `database` / `sync` 真实逻辑（见 README 路线图）。
+6. **UI 优先**：阶段 1 用静态假数据走通全部界面与导航，确认交互后再逐层接入 `database` / `sync` 真实逻辑（原 README 路线图已下架，当前待办见 [**docs/ACTIVE_ISSUES.md**](ACTIVE_ISSUES.md)）。
 
 ## 4. app 内部结构（遵循 Google 官方 MVVM 架构）
 

@@ -98,4 +98,13 @@ class FakeSettingsRepository() : SettingsRepository {
     override suspend fun setShowGeneratorTab(enabled: Boolean) {
         settingsFlow.update { it.copy(showGeneratorTab = enabled) }
     }
+
+    /** ISSUE-P3-04：密钥文件「非密钥元数据」入内存流（与生产 DataStore 语义一致） */
+    override suspend fun setRememberedKeyFile(uri: String, displayName: String) {
+        settingsFlow.update { it.copy(lastKeyFileUri = uri, lastKeyFileName = displayName) }
+    }
+
+    override suspend fun clearRememberedKeyFile() {
+        settingsFlow.update { it.copy(lastKeyFileUri = "", lastKeyFileName = "") }
+    }
 }

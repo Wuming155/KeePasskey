@@ -38,6 +38,13 @@ class FakeVaultRepository(
     // M1 整改：密码明文不再进入 UiVaultEntry/StateFlow，改为按条目 id 独立存储的按需解密仓
     private val passwordStore = MutableStateFlow<Map<String, String>>(emptyMap())
 
+    /**
+     * ISSUE-P3-04：最近一次解锁调用实际收到的密钥文件字节（克隆副本，null 表示未携带）。
+     * 供「有 KeyFile / 无 KeyFile 走不同复合密钥通道」的透传断言使用。
+     */
+    var lastUnlockKeyFileData: ByteArray? = null
+        private set
+
     override fun getDatabases(): Flow<List<VaultDatabaseInfo>> = databasesFlow.asStateFlow()
 
     override suspend fun selectDatabase(id: String) {
@@ -52,6 +59,8 @@ class FakeVaultRepository(
         keyFileData: ByteArray?,
         readOnly: Boolean
     ): com.keepasskey.core.result.KdbxResult<Unit> {
+        // ISSUE-P3-04：记录实际收到的密钥文件因子（克隆语义，断言用）
+        lastUnlockKeyFileData = keyFileData?.copyOf()
         // ISSUE-P1-04：强制凭据错误——驱动 ViewModel 认证失败分支（节流计数 + 无条件清零）
         if (forceInvalidCredentials) {
             return com.keepasskey.core.result.KdbxResult.Failure(

@@ -14,16 +14,13 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.CreditCard
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteForever
-import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Key
@@ -33,13 +30,11 @@ import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -49,7 +44,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.res.stringResource
@@ -58,14 +52,15 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.keepasskey.app.R
+import com.keepasskey.app.ui.components.EntryIconContent
 import com.keepasskey.app.ui.components.PasskeyBadge
 import com.keepasskey.app.ui.components.TotpMiniGauge
 import com.keepasskey.app.ui.components.getVaultIcon
+import com.keepasskey.app.ui.model.BitmapEntryIcon
 import com.keepasskey.app.ui.model.EntryCategory
+import com.keepasskey.app.ui.model.EntryDecorations
 import com.keepasskey.app.ui.model.UiVaultEntry
 import com.keepasskey.app.ui.model.VaultGroup
-import com.keepasskey.app.ui.theme.CapsuleShape
-import com.keepasskey.app.ui.theme.MonospacePasswordStyle
 
 /**
  * 文件夹行组件
@@ -156,6 +151,9 @@ fun KeePassGroupRow(
 
 /**
  * 现代多形态条目卡片分发器 (普通密码、通行密钥、银行卡、安全便签)
+ *
+ * ISSUE-P3-02：[decorations] 为状态层装配的展示装饰——自定义图标已解码位图 +
+ * Notes/URL 字段引用展开文案（受保护字段恒为掩码）；缺省时回退标准图标与条目原文。
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -174,6 +172,7 @@ fun UnifiedVaultEntryRow(
     onCopyUsername: () -> Unit,
     onRestore: () -> Unit,
     onPurge: () -> Unit,
+    decorations: EntryDecorations = EntryDecorations.EMPTY,
     modifier: Modifier = Modifier
 ) {
     // M3 色调层级：常态用 surfaceContainerLow 表达容器感，描边仅保留给选中态强强调
@@ -182,6 +181,9 @@ fun UnifiedVaultEntryRow(
     } else {
         Modifier
     }
+
+    val icon = decorations.iconOf(entry)
+    val textDisplay = decorations.textOf(entry)
 
     Card(
         modifier = modifier
@@ -197,14 +199,28 @@ fun UnifiedVaultEntryRow(
     ) {
         when (entry.category) {
             EntryCategory.CARD -> {
-                CreditCardLayout(entry = entry, isBatchMode = isBatchMode, isSelected = isSelected, onCopyNumber = onCopyPassword)
+                CreditCardLayout(
+                    entry = entry,
+                    icon = icon,
+                    isBatchMode = isBatchMode,
+                    isSelected = isSelected,
+                    onCopyNumber = onCopyPassword
+                )
             }
             EntryCategory.NOTE -> {
-                SecureNoteLayout(entry = entry, isBatchMode = isBatchMode, isSelected = isSelected)
+                SecureNoteLayout(
+                    entry = entry,
+                    icon = icon,
+                    notesText = textDisplay.notes,
+                    isBatchMode = isBatchMode,
+                    isSelected = isSelected
+                )
             }
             else -> {
                 StandardEntryLayout(
                     entry = entry,
+                    icon = icon,
+                    urlText = textDisplay.url,
                     isRecycled = isRecycled,
                     isBatchMode = isBatchMode,
                     isSelected = isSelected,
@@ -225,6 +241,8 @@ fun UnifiedVaultEntryRow(
 @Composable
 private fun StandardEntryLayout(
     entry: UiVaultEntry,
+    icon: BitmapEntryIcon,
+    urlText: String,
     isRecycled: Boolean,
     isBatchMode: Boolean,
     isSelected: Boolean,
@@ -252,7 +270,8 @@ private fun StandardEntryLayout(
             Spacer(modifier = Modifier.width(6.dp))
         }
 
-        val (icon, iconTint, containerColor) = when {
+        // 通行密钥条目在无自定义图标时以钥匙图标强调（既有视觉语义）
+        val (placeholderIcon, iconTint, containerColor) = when {
             entry.isPasskey -> Triple(Icons.Default.Key, MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.primaryContainer)
             else -> Triple(getVaultIcon(entry.iconName), MaterialTheme.colorScheme.tertiary, MaterialTheme.colorScheme.tertiaryContainer)
         }
@@ -261,7 +280,7 @@ private fun StandardEntryLayout(
             modifier = Modifier.size(38.dp).clip(RoundedCornerShape(10.dp)).background(containerColor),
             contentAlignment = Alignment.Center
         ) {
-            Icon(icon, contentDescription = null, tint = iconTint, modifier = Modifier.size(20.dp))
+            EntryIconContent(icon = icon, tint = iconTint, placeholderIcon = placeholderIcon)
         }
 
         Spacer(modifier = Modifier.width(12.dp))
@@ -281,7 +300,7 @@ private fun StandardEntryLayout(
                 }
             }
 
-            if (showUsername || (showUrl && entry.url.isNotBlank())) {
+            if (showUsername || (showUrl && urlText.isNotBlank())) {
                 Spacer(modifier = Modifier.height(2.dp))
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     if (showUsername) {
@@ -294,12 +313,12 @@ private fun StandardEntryLayout(
                             modifier = Modifier.weight(1f, fill = false)
                         )
                     }
-                    if (showUsername && showUrl && entry.url.isNotBlank()) {
+                    if (showUsername && showUrl && urlText.isNotBlank()) {
                         Text("•", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
                     }
-                    if (showUrl && entry.url.isNotBlank()) {
+                    if (showUrl && urlText.isNotBlank()) {
                         Text(
-                            text = entry.url.removePrefix("https://").removePrefix("http://").trimEnd('/'),
+                            text = urlText.removePrefix("https://").removePrefix("http://").trimEnd('/'),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.primary.copy(alpha = 0.85f),
                             maxLines = 1,
@@ -356,132 +375,6 @@ private fun StandardEntryLayout(
                         Icon(Icons.Default.ContentCopy, contentDescription = stringResource(R.string.cd_copy_password), tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
                     }
                 }
-            }
-        }
-    }
-}
-
-/**
- * 银行卡/信用卡拟真卡片视图 (Monica 灵感)
- */
-@Composable
-private fun CreditCardLayout(
-    entry: UiVaultEntry,
-    isBatchMode: Boolean,
-    isSelected: Boolean,
-    onCopyNumber: () -> Unit
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        if (isBatchMode) {
-            Icon(
-                imageVector = if (isSelected) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
-                contentDescription = null,
-                tint = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
-                modifier = Modifier.size(22.dp)
-            )
-            Spacer(modifier = Modifier.width(10.dp))
-        }
-
-        Box(
-            modifier = Modifier.size(42.dp).clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.secondaryContainer),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(Icons.Default.CreditCard, contentDescription = null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(24.dp))
-        }
-
-        Spacer(modifier = Modifier.width(12.dp))
-
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = entry.title,
-                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold, fontSize = 15.sp),
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Spacer(modifier = Modifier.height(2.dp))
-            Text(
-                text = entry.cardNumberMasked ?: "**** **** **** ****",
-                style = MonospacePasswordStyle.copy(fontSize = 13.sp, fontWeight = FontWeight.SemiBold),
-                color = MaterialTheme.colorScheme.primary
-            )
-            Spacer(modifier = Modifier.height(2.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(
-                    text = stringResource(R.string.cardrow_card_holder, entry.cardHolder ?: entry.username),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                entry.cardExpiry?.let { exp ->
-                    Text(
-                        text = stringResource(R.string.cardrow_expiry, exp),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-        }
-
-        if (!isBatchMode) {
-            IconButton(onClick = onCopyNumber) {
-                Icon(Icons.Default.ContentCopy, contentDescription = stringResource(R.string.cardrow_copy_number), tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
-            }
-        }
-    }
-}
-
-/**
- * 安全便签卡片视图 (Monica 灵感)
- */
-@Composable
-private fun SecureNoteLayout(
-    entry: UiVaultEntry,
-    isBatchMode: Boolean,
-    isSelected: Boolean
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        if (isBatchMode) {
-            Icon(
-                imageVector = if (isSelected) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
-                contentDescription = null,
-                tint = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
-                modifier = Modifier.size(22.dp)
-            )
-            Spacer(modifier = Modifier.width(10.dp))
-        }
-
-        Box(
-            modifier = Modifier.size(40.dp).clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.tertiaryContainer),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(Icons.Default.Description, contentDescription = null, tint = MaterialTheme.colorScheme.tertiary, modifier = Modifier.size(22.dp))
-        }
-
-        Spacer(modifier = Modifier.width(12.dp))
-
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = entry.title,
-                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold, fontSize = 15.sp),
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            if (entry.notes.isNotBlank()) {
-                Spacer(modifier = Modifier.height(3.dp))
-                Text(
-                    text = entry.notes.replace("\n", " "),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
-                )
             }
         }
     }

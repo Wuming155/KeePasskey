@@ -19,6 +19,7 @@ import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -179,6 +180,83 @@ class EntryDetailViewModelTest {
         testScheduler.runCurrent()
 
         assertFalse(store.isBlocked("com.example.bank"))
+        assertFalse(viewModel.uiState.value.isAutofillBlockedForApp)
+        assertEquals(
+            com.keepasskey.app.R.string.detail_autofill_unblocked,
+            viewModel.uiState.value.userMessage?.resId
+        )
+    }
+
+    // ===== ISSUE-P3-15：非法/缺失绑定包名的提示文案边界（不得谎报已屏蔽/已恢复） =====
+
+    @Test
+    fun `非法绑定包名时 toggle 不写黑名单且提示无法识别应用标识`() = runTest {
+        val repository = FakeVaultRepository()
+        val store = AutofillBlocklistStore(null)
+        // 含连字符的包名可被 extractAndroidBoundPackage 解析（入口呈现），但 normalize 判定非法
+        val entryId = addAndroidBoundEntry(repository, "com-example-bank")
+        val viewModel = createViewModel(entryId, repository, store)
+
+        assertEquals("com-example-bank", viewModel.uiState.value.autofillBoundPackage)
+        // 前置事实：填充侧 fail-closed 已把不可识别包名判为「已屏蔽」——这正是文案会误报的根源
+        assertTrue(store.isBlocked("com-example-bank"))
+
+        viewModel.toggleAutofillBlockForApp()
+        testScheduler.runCurrent()
+
+        // 不执行任何写操作（既不 add 也不 remove）
+        assertTrue(store.blockedPackages.value.isEmpty())
+        // 三态语义：仍不可识别，且填充侧 fail-closed 判定未被改写
+        assertTrue(store.isBlocked("com-example-bank"))
+        val resId = viewModel.uiState.value.userMessage?.resId
+        assertEquals(com.keepasskey.app.R.string.autofill_block_unidentifiable_package, resId)
+        // 不得产出任何「已屏蔽 / 已恢复」语义的用户可见输出
+        assertNotEquals(com.keepasskey.app.R.string.detail_autofill_blocked, resId)
+        assertNotEquals(com.keepasskey.app.R.string.detail_autofill_unblocked, resId)
+    }
+
+    @Test
+    fun `缺失绑定包名时 toggle 不写黑名单且提示无法识别应用标识`() = runTest {
+        val repository = FakeVaultRepository()
+        val store = AutofillBlocklistStore(null)
+        // "android://" 绑定为空包名 → autofillBoundPackage 为 null（入口本不呈现，防御路径亦不得谎报）
+        val entryId = addAndroidBoundEntry(repository, "")
+        val viewModel = createViewModel(entryId, repository, store)
+
+        assertNull(viewModel.uiState.value.autofillBoundPackage)
+
+        viewModel.toggleAutofillBlockForApp()
+        testScheduler.runCurrent()
+
+        assertTrue(store.blockedPackages.value.isEmpty())
+        assertFalse(viewModel.uiState.value.isAutofillBlockedForApp)
+        assertEquals(
+            com.keepasskey.app.R.string.autofill_block_unidentifiable_package,
+            viewModel.uiState.value.userMessage?.resId
+        )
+    }
+
+    @Test
+    fun `合法绑定包名的 toggle 行为与文案保持改动前语义`() = runTest {
+        val repository = FakeVaultRepository()
+        val store = AutofillBlocklistStore(null)
+        val entryId = addAndroidBoundEntry(repository, "com.example.valid")
+        val viewModel = createViewModel(entryId, repository, store)
+
+        viewModel.toggleAutofillBlockForApp()
+        testScheduler.runCurrent()
+
+        assertEquals(listOf("com.example.valid"), store.blockedPackages.value)
+        assertTrue(viewModel.uiState.value.isAutofillBlockedForApp)
+        assertEquals(
+            com.keepasskey.app.R.string.detail_autofill_blocked,
+            viewModel.uiState.value.userMessage?.resId
+        )
+
+        viewModel.toggleAutofillBlockForApp()
+        testScheduler.runCurrent()
+
+        assertTrue(store.blockedPackages.value.isEmpty())
         assertFalse(viewModel.uiState.value.isAutofillBlockedForApp)
         assertEquals(
             com.keepasskey.app.R.string.detail_autofill_unblocked,

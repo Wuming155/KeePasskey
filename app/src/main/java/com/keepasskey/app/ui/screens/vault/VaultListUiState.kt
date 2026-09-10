@@ -2,6 +2,7 @@ package com.keepasskey.app.ui.screens.vault
 
 import androidx.annotation.StringRes
 import com.keepasskey.app.R
+import com.keepasskey.app.ui.model.EntryDecorations
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.model.UiVaultEntry
 import com.keepasskey.app.ui.model.VaultGroup
@@ -68,5 +69,8 @@ data class VaultListUiState(
     val showOtpInList: Boolean = true,
     val showPasskeyBadge: Boolean = true,
     val showUrlInList: Boolean = true,
-    val hideFabOnScroll: Boolean = false
+    val hideFabOnScroll: Boolean = false,
+    // ISSUE-P3-02：条目展示装饰（自定义图标投影 + Notes/URL 字段引用展开文案）。
+    // 图标解码与引用解析均在状态层完成，Composable 只做纯绘制（禁止在 UI 内做 IO/解码）。
+    val decorations: EntryDecorations = EntryDecorations.EMPTY
 )

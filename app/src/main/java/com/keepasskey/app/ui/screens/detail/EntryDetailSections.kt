@@ -248,22 +248,25 @@ internal fun RevisionsCard(
 
 /**
  * 备注区块
+ *
+ * ISSUE-P3-02：[notesText] 为状态层装配后的展示文案——`{REF:...}` 已按公开字段展开，
+ * 受保护字段保持掩码，本组件不做任何解析（展示层零业务逻辑）。
  */
 @Composable
-internal fun NotesCard(entry: UiVaultEntry) {
+internal fun NotesCard(notesText: String, updatedAt: String) {
     BentoCard(
         modifier = Modifier.fillMaxWidth(),
         backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow
     ) {
         Column {
             Text(
-                text = entry.notes,
+                text = notesText,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface
             )
             Spacer(modifier = Modifier.height(10.dp))
             Text(
-                text = stringResource(R.string.detail_updated_meta, entry.updatedAt),
+                text = stringResource(R.string.detail_updated_meta, updatedAt),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.outline
             )

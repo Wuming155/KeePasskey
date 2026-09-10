@@ -185,7 +185,9 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
                 setResult(RESULT_OK, resultIntent)
 
                 // 递增签名计数器并落盘（唯一 RESULT_OK 路径）
-                vaultRepository.patchPasskeySignCount(entryId, passkeyData.signCount + 1)
+                // ISSUE-P3-10 子项 2：递增经 PasskeyData.nextSignCount 饱和处理（恒非负、不溢出），
+                // 与 buildAssertionJson 内写入 AuthenticatorData 的值同源
+                vaultRepository.patchPasskeySignCount(entryId, PasskeyData.nextSignCount(passkeyData.signCount))
 
                 finish()
             } catch (t: Throwable) {
@@ -211,7 +213,8 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
         var dataToSign: ByteArray? = null
         try {
             // 1. 构造 AuthenticatorData (flags 由本次实际用户验证结果驱动，无 AT)
-            val nextSignCount = passkeyData.signCount + 1
+            // ISSUE-P3-10 子项 2：计数器递增统一走 PasskeyData.nextSignCount（上界饱和，绝不回绕为负）
+            val nextSignCount = PasskeyData.nextSignCount(passkeyData.signCount)
             val authDataLocal = PasskeyCryptoEngine.buildAuthenticatorData(
                 rpId = passkeyData.relyingPartyId,
                 flags = flags,

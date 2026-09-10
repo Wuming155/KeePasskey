@@ -105,7 +105,10 @@ class RealSettingsRepository @Inject constructor(
         clipboardTimeoutSeconds = prefs[KEY_CLIPBOARD_TIMEOUT] ?: 30,
         syncOnColdStart = prefs[KEY_SYNC_ON_COLD_START] ?: true,
         showAuthenticatorTab = prefs[KEY_SHOW_AUTHENTICATOR_TAB] ?: true,
-        showGeneratorTab = prefs[KEY_SHOW_GENERATOR_TAB] ?: true
+        showGeneratorTab = prefs[KEY_SHOW_GENERATOR_TAB] ?: true,
+        // ISSUE-P3-04：上次成功解锁使用的密钥文件元数据（仅 Uri/显示名，非密钥材料）
+        lastKeyFileUri = prefs[KEY_LAST_KEY_FILE_URI] ?: "",
+        lastKeyFileName = prefs[KEY_LAST_KEY_FILE_NAME] ?: ""
     )
 
     private suspend fun edit(block: (MutablePreferences) -> Unit) {
@@ -178,6 +181,17 @@ class RealSettingsRepository @Inject constructor(
     override suspend fun setShowGeneratorTab(enabled: Boolean) =
         edit { it[KEY_SHOW_GENERATOR_TAB] = enabled }
 
+    /** ISSUE-P3-04：仅持久化非密钥元数据（SAF Uri + 显示名），密钥字节永不落盘 */
+    override suspend fun setRememberedKeyFile(uri: String, displayName: String) = edit {
+        it[KEY_LAST_KEY_FILE_URI] = uri
+        it[KEY_LAST_KEY_FILE_NAME] = displayName
+    }
+
+    override suspend fun clearRememberedKeyFile() = edit {
+        it.remove(KEY_LAST_KEY_FILE_URI)
+        it.remove(KEY_LAST_KEY_FILE_NAME)
+    }
+
     private companion object {
         private const val LEGACY_PREFS_NAME = "keepasskey_settings"
 
@@ -202,5 +216,8 @@ class RealSettingsRepository @Inject constructor(
         private val KEY_SYNC_ON_COLD_START = booleanPreferencesKey("sync_on_cold_start")
         private val KEY_SHOW_AUTHENTICATOR_TAB = booleanPreferencesKey("show_authenticator_tab")
         private val KEY_SHOW_GENERATOR_TAB = booleanPreferencesKey("show_generator_tab")
+        // ISSUE-P3-04：密钥文件「非密钥元数据」（SAF Uri 与显示名），不含任何密钥材料
+        private val KEY_LAST_KEY_FILE_URI = stringPreferencesKey("last_key_file_uri")
+        private val KEY_LAST_KEY_FILE_NAME = stringPreferencesKey("last_key_file_name")
     }
 }

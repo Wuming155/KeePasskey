@@ -25,7 +25,26 @@ enum class BiometricStatus {
  */
 sealed interface BiometricResult {
     data class Success(val cipher: Cipher?) : BiometricResult
+
+    /**
+     * 认证失败结果。
+     *
+     * [errString] 是**内部诊断标识**——可能来自系统 [BiometricPrompt.AuthenticationCallback.onAuthenticationError]
+     * 的错误描述透传，也可能是本工程定义的稳定英文诊断码（如
+     * [BiometricAuthManager.INTEGRITY_BLOCKED_DIAGNOSTIC]）。它**仅**用于日志留痕与失败分型判据，
+     * **任何一处都不得直接展示给用户**（ISSUE-P3-14）。
+     *
+     * 用户可见文案一律由消费侧按 [errorCode] 映射到已资源化字符串
+     * （见 `com.keepasskey.app.ui.screens.unlock.BiometricFailureMessagePolicy`：
+     * [BiometricAuthManager.ERROR_INTEGRITY_BLOCKED] → `R.string.sec_biometric_integrity_blocked`），
+     * 从而保证中英双语一致，且文案不再随系统语言漂移。当前全部消费点（app 模块）：
+     * - `UnlockViewModel.handleBiometricResult`：按错误码映射资源后展示，诊断串仅落日志；
+     * - `UnlockViewModel.requestBiometricEnrollment`：登记失败为 fail-safe 静默语义，仅落日志；
+     * - `passkey/CredentialVerificationLauncher`、`autofill/AutofillConfirmActivity`：丢弃该字段，
+     *   仅按失败/取消分型改变控制流。
+     */
     data class Error(val errorCode: Int, val errString: String) : BiometricResult
+
     data object Failed : BiometricResult
     data object Cancelled : BiometricResult
 }
@@ -93,7 +112,7 @@ class BiometricAuthManager @Inject constructor(
         // ISSUE-P2-08：完整性风险态（含扫描未完成的未判定态）禁用生物快速解锁，
         // 以显式失败结果回落主密码路径，绝不静默放行
         if (runtimeIntegrityGate.currentEnforcement().disableBiometricQuickUnlock) {
-            onResult(BiometricResult.Error(ERROR_INTEGRITY_BLOCKED, INTEGRITY_BLOCKED_MESSAGE))
+            onResult(BiometricResult.Error(ERROR_INTEGRITY_BLOCKED, INTEGRITY_BLOCKED_DIAGNOSTIC))
             return
         }
 
@@ -183,8 +202,20 @@ class BiometricAuthManager @Inject constructor(
         /** ISSUE-P2-08：设备完整性风险导致生物快速解锁被禁用的结果码（区别于系统错误码） */
         const val ERROR_INTEGRITY_BLOCKED = -2
 
-        /** ISSUE-P2-08：完整性风险禁用提示（非敏感；仅作内部诊断与失败语义，正式文案由设置页承载） */
-        private const val INTEGRITY_BLOCKED_MESSAGE = "设备完整性风险，已禁用生物识别快速解锁"
+        /** ISSUE-P3-01/14：宿主 Activity 销毁等极端情形下系统不回调、登记侧超时熔断的结果码（区别于系统错误码） */
+        const val ERROR_AUTH_TIMEOUT = -3
+
+        /**
+         * ISSUE-P3-14：完整性风险禁用生物快速解锁的**内部诊断标识**（稳定英文码，非用户可见文案）。
+         *
+         * 用户可见文案统一经消费侧按 [ERROR_INTEGRITY_BLOCKED] 映射到
+         * `R.string.sec_biometric_integrity_blocked`（中英双语已具备），
+         * 本类不再持有任何硬编码中文文案，失败语义与 UI 完全解耦。
+         */
+        const val INTEGRITY_BLOCKED_DIAGNOSTIC = "INTEGRITY_BLOCKED"
+
+        /** ISSUE-P3-14：认证超时熔断的内部诊断标识（同 [INTEGRITY_BLOCKED_DIAGNOSTIC]，仅日志留痕，不对外展示） */
+        const val AUTH_TIMEOUT_DIAGNOSTIC = "AUTH_TIMEOUT"
 
         /**
          * 快速解锁统一认证器集合：仅 Class 3 强生物识别。

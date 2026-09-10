@@ -13,26 +13,15 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Block
-import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.Star
-import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -52,7 +41,6 @@ import com.keepasskey.app.ui.model.UiEntryRevision
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.model.resolveText
 import com.keepasskey.app.ui.theme.CapsuleShape
-import com.keepasskey.app.ui.theme.LocalSecurityColors
 
 /**
  * 有状态凭据详情页面（Route）
@@ -111,6 +99,8 @@ fun EntryDetailScreen(
         onToggleFavorite = viewModel::toggleFavorite,
         onDuplicateEntry = viewModel::duplicateEntry,
         onToggleAutofillBlock = viewModel::toggleAutofillBlockForApp,
+        // ISSUE-P3-02：自定义图标删除（经确认弹窗后调用，状态层负责清理 Meta 与回退引用）
+        onDeleteCustomIcon = viewModel::deleteCustomIcon,
         onTogglePasswordVisibility = viewModel::togglePasswordVisibility,
         onToggleCustomFieldVisibility = viewModel::toggleCustomFieldVisibility,
         onCopyCustomField = viewModel::copyCustomField,
@@ -186,6 +176,8 @@ fun EntryDetailContent(
     onDuplicateEntry: () -> Unit = {},
     // TASK-44：「为本应用禁用自动填充」开关（仅绑定了 Android 应用的条目呈现）
     onToggleAutofillBlock: () -> Unit = {},
+    // ISSUE-P3-02：自定义图标删除（确认弹窗确认后上行；ViewModel 负责库级清理与引用回退）
+    onDeleteCustomIcon: () -> Unit = {},
     onTogglePasswordVisibility: () -> Unit,
     onToggleCustomFieldVisibility: (String) -> Unit,
     onCopyCustomField: (String, String) -> Unit = { _, _ -> },
@@ -199,74 +191,25 @@ fun EntryDetailContent(
     modifier: Modifier = Modifier
 ) {
     val entry = uiState.entry
-    val securityColors = LocalSecurityColors.current
     var revisionToRollback by remember { mutableStateOf<UiEntryRevision?>(null) }
     var revisionToDiff by remember { mutableStateOf<UiEntryRevision?>(null) }
     var attachmentToPreview by remember { mutableStateOf<UiAttachment?>(null) }
+    // ISSUE-P3-02：自定义图标删除二次确认（库级共享资源，防误删）
+    var showDeleteIconConfirm by remember { mutableStateOf(false) }
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
         containerColor = MaterialTheme.colorScheme.background,
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         topBar = {
-            TopAppBar(
-                title = { Text(stringResource(R.string.detail_title), style = MaterialTheme.typography.titleLarge) },
-                navigationIcon = {
-                    IconButton(onClick = onBackClick) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = stringResource(R.string.cd_back)
-                        )
-                    }
-                },
-                actions = {
-                    IconButton(onClick = onToggleFavorite) {
-                        Icon(
-                            imageVector = if (uiState.isFavorite) Icons.Default.Star else Icons.Default.StarBorder,
-                            contentDescription = stringResource(R.string.cd_favorite),
-                            tint = if (uiState.isFavorite) securityColors.warning else MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    // TASK-16：条目克隆（只读会话隐藏）
-                    if (!uiState.isReadOnly) {
-                        IconButton(onClick = onDuplicateEntry) {
-                            Icon(
-                                imageVector = Icons.Default.ContentCopy,
-                                contentDescription = stringResource(R.string.cd_duplicate),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                    // TASK-44：为本应用禁用自动填充（仅条目绑定了 Android 应用时呈现；
-                    // 未绑定应用的条目无明确屏蔽对象，入口不出现，避免成为无意义开关）
-                    if (uiState.autofillBoundPackage != null) {
-                        IconButton(onClick = onToggleAutofillBlock) {
-                            Icon(
-                                imageVector = Icons.Default.Block,
-                                contentDescription = stringResource(R.string.cd_autofill_block),
-                                tint = if (uiState.isAutofillBlockedForApp) {
-                                    MaterialTheme.colorScheme.error
-                                } else {
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                }
-                            )
-                        }
-                    }
-                    // H4-只读整改：只读会话隐藏编辑入口
-                    if (!uiState.isReadOnly) {
-                        IconButton(onClick = onEditClick) {
-                            Icon(
-                                imageVector = Icons.Default.Edit,
-                                contentDescription = stringResource(R.string.cd_edit),
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    titleContentColor = MaterialTheme.colorScheme.onSurface
-                )
+            EntryDetailTopBar(
+                uiState = uiState,
+                onBackClick = onBackClick,
+                onToggleFavorite = onToggleFavorite,
+                onDuplicateEntry = onDuplicateEntry,
+                onToggleAutofillBlock = onToggleAutofillBlock,
+                onEditClick = onEditClick,
+                onRequestDeleteCustomIcon = { showDeleteIconConfirm = true }
             )
         }
     ) { innerPadding ->
@@ -288,8 +231,12 @@ fun EntryDetailContent(
                     .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                // 头部 Hero 区域
-                EntryHeaderSection(entry = entry)
+                // 头部 Hero 区域（ISSUE-P3-02：图标投影 + URL 引用展开文案均取自状态层装饰）
+                EntryHeaderSection(
+                    entry = entry,
+                    icon = uiState.decorations.iconOf(entry),
+                    urlText = uiState.decorations.textOf(entry).url
+                )
 
                 // 快捷操作磁贴组
                 QuickActionRow(
@@ -353,15 +300,27 @@ fun EntryDetailContent(
                     )
                 }
 
-                // 备注
-                if (entry.notes.isNotBlank()) {
+                // 备注（ISSUE-P3-02：展示文案经状态层展开 {REF:...} 引用，受保护字段为掩码）
+                val notesText = uiState.decorations.textOf(entry).notes
+                if (notesText.isNotBlank()) {
                     SectionTitle(textRes = R.string.detail_notes_section)
-                    NotesCard(entry = entry)
+                    NotesCard(notesText = notesText, updatedAt = entry.updatedAt)
                 }
 
                 Spacer(modifier = Modifier.height(30.dp))
             }
         }
+    }
+
+    // ISSUE-P3-02：自定义图标删除确认（库级共享资源，确认后才上行删除）
+    if (showDeleteIconConfirm) {
+        DeleteCustomIconDialog(
+            onConfirm = {
+                showDeleteIconConfirm = false
+                onDeleteCustomIcon()
+            },
+            onDismiss = { showDeleteIconConfirm = false }
+        )
     }
 
     // 版本回滚确认对话框

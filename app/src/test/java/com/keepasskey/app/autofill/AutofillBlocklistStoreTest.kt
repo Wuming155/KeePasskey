@@ -1,5 +1,6 @@
 package com.keepasskey.app.autofill
 
+import com.keepasskey.app.data.repository.AutofillBlockState
 import com.keepasskey.app.data.repository.AutofillBlocklistStore
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -130,5 +131,63 @@ class AutofillBlocklistStoreTest {
             listOf("com.alpha.app", "com.middle.app", "com.zebra.app"),
             store.blockedPackages.value
         )
+    }
+
+    // ===== ISSUE-P3-15：三态判定（安全语义与交互诚实性分离） =====
+
+    @Test
+    fun `非法包名三态判定为不可识别且 isBlocked 仍 fail-closed`() {
+        val store = store()
+
+        // 空串、纯空白、单段、以数字开头、含连字符、含路径、纯点号、双点
+        val invalid = listOf(
+            "",
+            "   ",
+            "bank",
+            "1com.example.bank",
+            "com-example-bank",
+            "com.example.bank/login",
+            "..",
+            "com..example"
+        )
+        invalid.forEach { pkg ->
+            assertEquals(
+                "非法包名必须三态判定为不可识别: $pkg",
+                AutofillBlockState.UnidentifiablePackage,
+                store.resolveBlockState(pkg)
+            )
+            // 回归断言：fail-closed 安全语义不因文案侧三态改造而放宽
+            assertTrue("非法包名必须保持 fail-closed: $pkg", store.isBlocked(pkg))
+        }
+
+        assertTrue(store.blockedPackages.value.isEmpty())
+    }
+
+    @Test
+    fun `合法包名三态判定区分已屏蔽与未屏蔽`() {
+        val store = store()
+
+        assertEquals(AutofillBlockState.NotBlocked, store.resolveBlockState("com.example.bank"))
+
+        store.add("com.example.bank")
+        assertEquals(AutofillBlockState.Blocked, store.resolveBlockState("com.example.bank"))
+
+        store.remove("com.example.bank")
+        assertEquals(AutofillBlockState.NotBlocked, store.resolveBlockState("com.example.bank"))
+    }
+
+    @Test
+    fun `三态判定对合法包名沿用归一化语义且不产生写入`() {
+        val store = store()
+        store.add("  Com.Example.Bank  ")
+
+        // 大小写与首尾空白归一后与 isBlocked 一致，且判定本身不改变黑名单内容
+        assertEquals(AutofillBlockState.Blocked, store.resolveBlockState("COM.EXAMPLE.BANK"))
+        assertEquals(listOf("com.example.bank"), store.blockedPackages.value)
+        assertEquals(
+            AutofillBlockState.NotBlocked,
+            store.resolveBlockState("com.example.other")
+        )
+        assertEquals(listOf("com.example.bank"), store.blockedPackages.value)
     }
 }

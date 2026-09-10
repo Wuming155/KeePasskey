@@ -70,6 +70,9 @@
     <string name="unlock_keyfile_selected">Key file loaded: %1$s</string>
     <string name="unlock_keyfile_none">No key file selected (Optional)</string>
     <string name="unlock_keyfile_read_failed">Failed to read the selected key file, please retry</string>
+    <string name="keyfile_or_password_mismatch">Incorrect master password or key file — make sure the key file is the one used to create this vault</string>
+    <string name="keyfile_permission_not_persisted">This file provider does not support persistent access, so the key file works for this session only and cannot be remembered</string>
+    <string name="keyfile_restored_from_memory">Remembered key file loaded: %1$s</string>
     <string name="unlock_btn_unlock">U N L O C K   V A U L T</string>
     <string name="unlock_btn_biometric">Quick unlock with Fingerprint or Face</string>
     <string name="unlock_switch_vault">Switch Vault</string>
@@ -876,5 +879,23 @@
     <string name="cred_error_vault_locked">Vault is locked, cannot perform this operation</string>
     <string name="cred_error_entry_not_found">Credential entry not found</string>
     <string name="cred_error_unknown">An error occurred while handling credential request</string>
+
+    <!-- ISSUE-P3-15: honest notice when the entry's bound package is invalid/missing (never claim blocked/restored) -->
+    <string name="autofill_block_unidentifiable_package">Cannot identify the app bound to this entry; the autofill blocking state was left unchanged</string>
+
+    <!-- ISSUE-P3-02 (TASK-49): custom icon missing placeholder and delete entry -->
+    <string name="vault_custom_icon_missing">Custom icon unavailable</string>
+    <string name="vault_icon_delete_action">Delete custom icon</string>
+    <string name="vault_icon_delete_title">Delete custom icon?</string>
+    <string name="vault_icon_delete_message">The icon will be removed from the vault icon pool and every referencing entry will revert to its default icon. This cannot be undone.</string>
+    <string name="vault_icon_delete_done">Custom icon deleted; referencing entries reverted to default icons</string>
+    <string name="vault_icon_delete_failed">Failed to delete the custom icon</string>
+
+    <!-- ===== ISSUE-P3-03: honest labels for not-yet-wired preferences ===== -->
+    <string name="settings_pref_reserved_suffix">%1$s (reserved, not yet active)</string>
+    <string name="autofill_totp_clip_label">TOTP code</string>
+    <string name="debug_verbose_depends"> (requires "Diagnostic log" to be enabled)</string>
+    <string name="dbset_import_reserved_note">Parser reserved, not yet active: the selected source is only recorded, no entries are imported</string>
+    <string name="dbset_child_db_reserved_note">Child database mounting reserved, not yet active: selecting a file will not mount any child database</string>
 
 </resources>

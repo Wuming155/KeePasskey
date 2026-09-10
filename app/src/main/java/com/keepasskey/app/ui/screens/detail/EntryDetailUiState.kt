@@ -1,6 +1,7 @@
 package com.keepasskey.app.ui.screens.detail
 
 import com.keepasskey.app.R
+import com.keepasskey.app.ui.model.EntryDecorations
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.model.UiVaultEntry
 
@@ -37,5 +38,9 @@ data class EntryDetailUiState(
     // null=条目未绑定具体应用（如纯 Web 凭据），此时详情页不提供「为本应用禁用填充」入口
     val autofillBoundPackage: String? = null,
     // TASK-44：该绑定应用是否已列入自动填充黑名单（fill-closed 判定的 UI 回显）
-    val isAutofillBlockedForApp: Boolean = false
+    val isAutofillBlockedForApp: Boolean = false,
+    // ISSUE-P3-02：条目展示装饰——自定义图标投影（已解码位图/缺图占位）与
+    // Notes/URL 字段引用展开文案（仅公开字段，受保护字段恒为掩码）。
+    // 图标解码与引用解析均在状态层完成，Composable 只做纯绘制。
+    val decorations: EntryDecorations = EntryDecorations.EMPTY
 )

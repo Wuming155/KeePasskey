@@ -8,12 +8,16 @@ import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.security.ClipboardSecurityManager
 import com.keepasskey.app.util.tickerFlow
 import com.keepasskey.core.result.KdbxResult
+import com.keepasskey.app.ui.model.EntryDecorations
+import com.keepasskey.app.ui.model.EntryDisplayDispatcher
+import com.keepasskey.app.ui.model.EntryDisplayPresenter
 import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.sync.engine.SyncCacheEvent
 import com.keepasskey.app.ui.model.UiVaultEntry
 import com.keepasskey.app.ui.model.VaultGroup
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.Flow
@@ -25,6 +29,7 @@ import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -45,7 +50,9 @@ class VaultListViewModel @Inject constructor(
     private val clipboardSecurityManager: ClipboardSecurityManager? = null,
     private val syncCoordinator: com.keepasskey.app.sync.SyncCoordinator,
     // TASK-21：非 Compose 层文案资源解析通道（生产 DI 注入真实现；单测注入假实现）
-    private val stringsProvider: StringsProvider? = null
+    private val stringsProvider: StringsProvider? = null,
+    // ISSUE-P3-02：展示装配调度器（生产 Dispatchers.Default；单测注入测试调度器保证断言确定性）
+    @EntryDisplayDispatcher private val displayDispatcher: CoroutineDispatcher = Dispatchers.Default
 ) : ViewModel() {
 
     // P3-23：null 时回退空串实现（生产 Hilt 恒注入 StringsProviderModule 真实现）
@@ -197,13 +204,38 @@ class VaultListViewModel @Inject constructor(
         SessionState(groupId, params, message, totpSeconds)
     }
 
+    // ISSUE-P3-02（TASK-49）：条目展示装饰装配器 —— 自定义图标投影（PNG 解码 + 有界缓存复用）
+    // 与 Notes/URL 字段引用展开（仅公开字段，受保护字段掩码）。装配属 CPU 工作，固定跑 Default。
+    private val entryDecorations = EntryDisplayPresenter(
+        loadIconBytes = { vaultRepository.getCustomIconBytes() },
+        loadEntries = { vaultRepository.getKdbxEntries() }
+    )
+
+    private val entryDecorationsFlow: Flow<EntryDecorations> = vaultRepository.getEntries()
+        .map { entries -> entryDecorations.decorate(entries) }
+        .flowOn(displayDispatcher)
+
+    /** 批量/同步状态与展示装饰的聚合体（避开 combine 五流上限的元组嵌套） */
+    private data class BatchSyncDecorations(
+        val batchAndSync: BatchAndSyncState,
+        val decorations: EntryDecorations
+    )
+
+    private val batchSyncDecorationsFlow = combine(
+        batchAndSyncFlow,
+        entryDecorationsFlow
+    ) { batchAndSync, decorations ->
+        BatchSyncDecorations(batchAndSync, decorations)
+    }
+
     val uiState: StateFlow<VaultListUiState> = combine(
         combine(vaultRepository.getDatabases(), vaultRepository.getGroups()) { dbs, groups -> Pair(dbs, groups) },
         vaultRepository.getEntries(),
         settingsRepository.getSettings(),
         sessionStateFlow,
-        batchAndSyncFlow
-    ) { (databases, allGroups), allEntries, settings, session, batchSync ->
+        batchSyncDecorationsFlow
+    ) { (databases, allGroups), allEntries, settings, session, batchSyncDecorations ->
+        val batchSync = batchSyncDecorations.batchAndSync
         val activeDb = databases.firstOrNull { it.isActive } ?: databases.firstOrNull()
         val isSearching = session.filterParams.query.isNotBlank()
 
@@ -304,7 +336,8 @@ class VaultListViewModel @Inject constructor(
             showOtpInList = settings.showOtpInList,
             showPasskeyBadge = settings.showPasskeyBadge,
             showUrlInList = settings.showUrlInList,
-            hideFabOnScroll = settings.hideFabOnScroll
+            hideFabOnScroll = settings.hideFabOnScroll,
+            decorations = batchSyncDecorations.decorations
         )
     }.stateIn(
         scope = viewModelScope,

@@ -44,10 +44,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.keepasskey.app.R
 import com.keepasskey.app.ui.components.BentoCard
+import com.keepasskey.app.ui.components.EntryIconContent
 import com.keepasskey.app.ui.components.PasskeyBadge
 import com.keepasskey.app.ui.components.PasswordStrengthBar
 import com.keepasskey.app.ui.components.TotpMiniGauge
 import com.keepasskey.app.ui.components.getVaultIcon
+import com.keepasskey.app.ui.model.BitmapEntryIcon
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.model.UiVaultEntry
 import com.keepasskey.app.ui.theme.LocalSecurityColors
@@ -69,9 +71,16 @@ internal fun SectionTitle(@StringRes textRes: Int, modifier: Modifier = Modifier
 
 /**
  * 头部 Hero 区域
+ *
+ * ISSUE-P3-02：[icon] 为状态层投影后的图标（自定义位图 / 缺图占位 / 标准图标），
+ * [urlText] 为 URL 字段引用展开后的展示文案；本组件只做纯绘制。
  */
 @Composable
-internal fun EntryHeaderSection(entry: UiVaultEntry) {
+internal fun EntryHeaderSection(
+    entry: UiVaultEntry,
+    icon: BitmapEntryIcon,
+    urlText: String
+) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically
@@ -83,11 +92,11 @@ internal fun EntryHeaderSection(entry: UiVaultEntry) {
                 .background(MaterialTheme.colorScheme.primaryContainer),
             contentAlignment = Alignment.Center
         ) {
-            Icon(
-                imageVector = getVaultIcon(entry.iconName),
-                contentDescription = null,
+            EntryIconContent(
+                icon = icon,
                 tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                modifier = Modifier.size(32.dp)
+                placeholderIcon = getVaultIcon(entry.iconName),
+                contentSize = 32.dp
             )
         }
 
@@ -107,7 +116,7 @@ internal fun EntryHeaderSection(entry: UiVaultEntry) {
             }
             Spacer(modifier = Modifier.height(2.dp))
             Text(
-                text = entry.url,
+                text = urlText,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.primary
             )

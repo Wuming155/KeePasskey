@@ -1,0 +1,241 @@
+# ISSUE-P3-09（ZT-20）AC4 / AC6：构建、测试与供应链门禁。
+#
+# 设计要点：
+# 1. **两个构建门禁并行存在**，各自真实可跑：
+#    - fast-gate：单元测试 + Android Lint，**不安装 NDK/Rust**（依据 AGENTS.md §5：
+#      纯 `test` 不触发 `:crypto:cargoNdkBuild`；原生内核仅由 `assemble*` 触发），
+#      目的是在 3~5 分钟内给出快速反馈；
+#    - native-gate：安装固定版本 NDK + Rust 工具链 + cargo-ndk 后执行 4 ABI 原生交叉编译
+#      与 `assembleDebug` / `assembleRelease`（后者让 R8 真实执行，是 ProGuard 收窄的硬校验）。
+# 2. **三方供应链闸门** rust-supply-chain：Rust 侧 `cargo test` + `cargo deny check`
+#    （advisories/bans/licenses/sources 四项，advisories 失败即阻断）。
+# 3. 全部 Action 以 **commit SHA 钉死**并保留 `# vX.Y.Z` 注释（Dependabot 会同步升级 SHA 与注释）。
+#    本次只做「SHA 钉死」，**不跨大版本升级**：检查时上游已有 actions/checkout v7.0.1 /
+#    actions/setup-java v6.0.1，但大版本升级涉及 Node 运行时与输入契约变更，无法在本批次
+#    本地验证，故沿用仓库在用的 v4 线，升级另立条目（见 docs/.handoff/ISSUE-P3-09.md）。
+# 4. 版本固定：NDK / Rust / cargo-ndk / cargo-deny 全部在 env 中写死，禁止漂移。
+#    - NDK 28.2.13676358 与 crypto/build.gradle.kts:13 的 ndkVersionStr 严格一致；
+#    - Rust 1.97.1 为本次整改在开发机实际验证通过的 stable 版本（crate 无 rust-toolchain.toml，
+#      故在 workflow 侧固定，升级需人工评审）。
+# 5. CI 环境的 release 构建**没有** keystore.properties / release.jks（两者均不入库），
+#    因此 native-gate 先现场生成一把**一次性 CI 密钥**用于验证签名方案，再断言
+#    「v1 关闭（包内无 META-INF/*.SF|*.RSA）、v2/v3/v4 全开」。该密钥仅存在于 runner 临时目录。
+name: build
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # === 构建工具链固定版本（禁止漂移）===
+  ANDROID_NDK_VERSION: "28.2.13676358"
+  ANDROID_PLATFORM: "android-37"
+  ANDROID_BUILD_TOOLS: "37.0.0"
+  RUST_TOOLCHAIN: "1.97.1"
+  CARGO_NDK_VERSION: "4.1.2"
+  CARGO_DENY_VERSION: "0.20.2"
+  # 一次性 CI 签名口令：仅用于 runner 临时生成的测试密钥，非机密、不可用于发布
+  CI_KEYSTORE_PASSWORD: "keepasskey-ci-ephemeral"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 门禁 1：快速门禁（不构建原生）
+  # ---------------------------------------------------------------------------
+  fast-gate:
+    name: Fast gate (unit tests + lint)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle (含依赖与构建缓存)
+        uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4.4.3
+
+      - name: 单元测试（全模块）
+        run: ./gradlew test --console=plain
+
+      - name: Android Lint
+        run: ./gradlew lint --console=plain
+
+      - name: 归档测试与 Lint 报告
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: fast-gate-reports
+          path: |
+            **/build/reports/tests/**
+            **/build/reports/lint-results-*.html
+            **/build/reports/lint-results-*.xml
+          if-no-files-found: warn
+
+  # ---------------------------------------------------------------------------
+  # 门禁 2：原生构建门禁（4 ABI Rust 内核 + Debug/Release 打包 + 签名方案断言）
+  # ---------------------------------------------------------------------------
+  native-gate:
+    name: Native gate (4 ABI Rust, assembleDebug + assembleRelease)
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle (含依赖与构建缓存)
+        uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4.4.3
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+
+      - name: 安装 NDK / 编译平台 / build-tools（版本与本仓库固定值一致）
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager --install \
+            "ndk;${ANDROID_NDK_VERSION}" \
+            "platforms;${ANDROID_PLATFORM}" \
+            "build-tools;${ANDROID_BUILD_TOOLS}" \
+            "platform-tools"
+          # crypto/build.gradle.kts 经 ANDROID_NDK_HOME 定位 cargo-ndk 所需链接器
+          {
+            echo "ANDROID_NDK_HOME=${ANDROID_SDK_ROOT}/ndk/${ANDROID_NDK_VERSION}"
+            echo "ANDROID_NDK_ROOT=${ANDROID_SDK_ROOT}/ndk/${ANDROID_NDK_VERSION}"
+          } >> "$GITHUB_ENV"
+          test -d "${ANDROID_SDK_ROOT}/ndk/${ANDROID_NDK_VERSION}"
+
+      - name: Set up Rust（固定版本 + 4 个 Android target）
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          # 与 env.RUST_TOOLCHAIN 保持一致（with: 不适于引用 workflow env，故此处为字面量）
+          toolchain: "1.97.1"
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android,i686-linux-android
+
+      - name: 打印实际工具链版本（可审计）
+        run: |
+          set -euo pipefail
+          rustc --version
+          cargo --version
+          java -version
+
+      - name: 安装 cargo-ndk（固定版本）
+        run: cargo install cargo-ndk --version "${CARGO_NDK_VERSION}" --locked
+
+      - name: 4 ABI Rust Argon2 内核交叉编译（libkeepasskey_argon2.so × 4）
+        run: ./gradlew :crypto:cargoNdkBuild --console=plain
+
+      - name: Assemble Debug（真实触发原生构建与 APK 打包）
+        run: ./gradlew :app:assembleDebug --console=plain
+
+      - name: 生成一次性 CI 发布密钥（仅用于校验签名方案）
+        run: |
+          set -euo pipefail
+          keytool -genkeypair -v \
+            -keystore "${RUNNER_TEMP}/ci-release.jks" \
+            -storetype PKCS12 -keyalg RSA -keysize 2048 -validity 3650 \
+            -alias ci -storepass "${CI_KEYSTORE_PASSWORD}" -keypass "${CI_KEYSTORE_PASSWORD}" \
+            -dname "CN=KeePasskey CI, OU=CI, O=KeePasskey, C=CN"
+          {
+            echo "KEYSTORE_FILE=${RUNNER_TEMP}/ci-release.jks"
+            echo "KEYSTORE_PASSWORD=${CI_KEYSTORE_PASSWORD}"
+            echo "KEY_ALIAS=ci"
+            echo "KEY_PASSWORD=${CI_KEYSTORE_PASSWORD}"
+          } >> "$GITHUB_ENV"
+
+      - name: Assemble Release（真实执行 R8 混淆与资源收缩）
+        run: ./gradlew :app:assembleRelease --console=plain
+
+      - name: 断言 Release 签名方案（v1 关闭 / v2 + v3 + v4 启用）
+        run: |
+          set -euo pipefail
+          apk=$(ls app/build/outputs/apk/release/*.apk | head -n 1)
+          echo "APK=${apk}"
+          apksigner="${ANDROID_SDK_ROOT}/build-tools/${ANDROID_BUILD_TOOLS}/apksigner"
+          "$apksigner" verify --verbose "$apk" | tee /tmp/apksigner-verify.txt
+          # v1（JAR 签名）必须缺席：包内不得存在 META-INF/*.SF 与 META-INF/*.RSA
+          # （注意 apksigner 在 minSdk>=24 时对 v1 恒报 false，故以包内条目为硬断言）
+          if unzip -l "$apk" | grep -Eq 'META-INF/.*\.(SF|RSA|DSA|EC)$'; then
+            echo "::error::检测到 v1 JAR 签名残留（META-INF/*.SF|*.RSA），v1 未关闭"
+            exit 1
+          fi
+          grep -q "Verified using v2 scheme (APK Signature Scheme v2): true" /tmp/apksigner-verify.txt
+          grep -q "Verified using v3 scheme (APK Signature Scheme v3): true" /tmp/apksigner-verify.txt
+          grep -q "Verified using v4 scheme (APK Signature Scheme v4): true" /tmp/apksigner-verify.txt
+          test -f "${apk}.idsig"
+
+      - name: 断言 4 ABI 原生库已入包
+        run: |
+          set -euo pipefail
+          apk=$(ls app/build/outputs/apk/release/*.apk | head -n 1)
+          unzip -l "$apk" | grep -E 'lib/(arm64-v8a|armeabi-v7a|x86|x86_64)/libkeepasskey_argon2\.so'
+          count=$(unzip -l "$apk" | grep -cE 'lib/(arm64-v8a|armeabi-v7a|x86|x86_64)/libkeepasskey_argon2\.so')
+          if [ "$count" -ne 4 ]; then
+            echo "::error::原生库 ABI 数量为 ${count}，期望 4"
+            exit 1
+          fi
+
+      - name: 归档 Release APK 与 R8 产物（mapping/seeds/usage 供崩溃还原与保留面审计）
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: native-gate-artifacts
+          path: |
+            app/build/outputs/apk/release/*.apk
+            app/build/outputs/apk/release/*.idsig
+            app/build/outputs/mapping/release/mapping.txt
+            app/build/outputs/mapping/release/seeds.txt
+            app/build/outputs/mapping/release/usage.txt
+            app/build/outputs/mapping/release/configuration.txt
+          if-no-files-found: warn
+
+  # ---------------------------------------------------------------------------
+  # 门禁 3：Rust 供应链（cargo test + cargo deny check，含 advisories）
+  # ---------------------------------------------------------------------------
+  rust-supply-chain:
+    name: Rust supply chain (cargo test + cargo deny)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: crypto/src/main/rust
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Rust（固定版本 + 4 个 Android target，deny.toml 的 graph.targets 需要）
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          toolchain: "1.97.1"
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android,i686-linux-android
+
+      - name: cargo test（Rust Argon2 内核单测，Cargo.lock 锁定的依赖树）
+        run: cargo test --locked
+
+      - name: 安装 cargo-deny（固定版本）
+        run: cargo install cargo-deny --version "${CARGO_DENY_VERSION}" --locked
+
+      # 阻断语义：deny.toml 的 [advisories] 未配置任何 ignore，且 yanked = "deny"，
+      # 因此**任何 RUSTSEC 漏洞公告或 yanked 依赖都会使本步骤失败并阻断流水线**；
+      # [licenses]/[bans]/[sources] 同样按 deny.toml 的允许清单从严判定。
+      # 本步骤需联网克隆 https://github.com/rustsec/advisory-db（GitHub 网络可达即可）。
+      - name: cargo deny check（advisories + bans + licenses + sources）
+        run: cargo deny check

@@ -168,6 +168,31 @@ class ExtendedSettingsStore @Inject constructor(
             .apply()
     }
 
+    /**
+     * ISSUE-P3-03 (43f)：诊断日志开关单键读取。
+     *
+     * 供 [com.keepasskey.app.data.logger.DiagnosticLogGate] 在每次日志写入时求值，
+     * 因此只读单个布尔键，不做全字段反序列化（避免为一行日志构造整个偏好对象）。
+     * 无持久化层（纯 JVM 单测注入 null 上下文）时按关闭处理，与默认值一致。
+     */
+    fun isDiagnosticLogEnabled(): Boolean =
+        prefs?.getBoolean(K_DEBUG_LOG_ENABLED, false) ?: false
+
+    /**
+     * ISSUE-P3-03 (43f)：详细同步日志开关单键读取（同 [isDiagnosticLogEnabled] 的轻量语义）。
+     * 与诊断日志开关相互独立：详细模式只追加同步过程细节，不解除普通诊断事件的记录约束。
+     */
+    fun isVerboseSyncLogEnabled(): Boolean =
+        prefs?.getBoolean(K_VERBOSE_SYNC_LOG, false) ?: false
+
+    /** ISSUE-P3-03 (43b)：自动填充内联建议开关单键读取（供自动填充服务高频判定）。 */
+    fun isInlineSuggestionsEnabled(): Boolean =
+        prefs?.getBoolean(K_INLINE_SUGGESTIONS_ENABLED, true) ?: true
+
+    /** ISSUE-P3-03 (43b)：填充后复制 TOTP 开关单键读取。 */
+    fun isAutofillCopyTotpEnabled(): Boolean =
+        prefs?.getBoolean(K_AUTOFILL_COPY_TOTP, true) ?: true
+
     /** wifiOnlySync 属 SyncUiState 域（周期同步的网络约束消费方），以独立键持久化 */
     fun loadWifiOnlySync(): Boolean = prefs?.getBoolean(K_WIFI_ONLY_SYNC, true) ?: true
 

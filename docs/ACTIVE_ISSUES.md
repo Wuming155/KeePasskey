@@ -17,6 +17,12 @@
 
 ---
 
+## P0 阻断级与致命安全漏洞（0 项）
+
+> 当前无待办。
+
+---
+
 ## P1 高危与核心功能问题（0 项）
 
 > 当前 P1 级别无待办。历史 P1 项（含 ISSUE-P1-10 / ZT-10）已全部闭环，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §2.5。
@@ -32,274 +38,286 @@
 
 ---
 
-## P3 低危问题、特性接线与体验优化（16 项）
+## P3 低危问题、特性接线与体验优化（10 项）
 
-### ISSUE-P3-01 (TASK-55): 生物识别解锁开关开启后第二次解锁不默认触发生物识别
-- **优先级**：P3（用户体验）
-- **分类**：解锁流程 / UX
+> **背景**：原 P3 批次 16 项（ISSUE-P3-01 ~ ISSUE-P3-16）已于 2026-09-10 整体整改完成并归档，
+> 见 [RESOLVED_LOG.md](RESOLVED_LOG.md) **§3「P3 批次整改归档」**（含逐项裁决、24 个新增生产文件、
+> 13 条过程缺陷与事实修正留痕、921 例测试门禁证据）。
+> 其中**未完全达成验收标准**的残余面已按「严禁只记聊天或脑中」纪律**全部回登为本节条目**（P3-17 ~ P3-26）。
+
+---
+
+### ISSUE-P3-17 (P3-03 残余): 43c UI 显示偏好接线（7 键）
+
+- **优先级**：P3（功能完整性 / 拒绝假开关）
+- **分类**：设置消费 / UI 偏好
 - **背景与现象**：
-  真机实测反馈：在设置中已开启「生物识别解锁」，首次保存凭据后，第二次打开应用解锁时未自动弹出系统的 BiometricPrompt，仍停留在主密码输入界面。
-- **期望行为**：
-  开关开启态下，进入解锁页时默认自动唤起生物识别认证（硬件支持且已登记）；认证取消或失败时平滑回退为主密码输入。
+  TASK-12 已完成下列 7 个 UI 偏好的持久化，但**消费方至今未接线**（接线前经全仓 grep 核实：仅有设置页自身回显，
+  无任何真实消费点）。ISSUE-P3-03 整改时因消费方全部落在**其他并行工作组的文件范围**内而一行未改，
+  仅在设置页补齐「（预留，暂未生效）」中英双语诚实标识——**该标识本身即「尚未接线」的用户可见凭据**。
+- **待接线的键与落点**（ISSUE-P3-03 交接文档 §四 R-0 已给出可直接执行的配方）：
+
+  | 键名 | 应落文件 |
+  |---|---|
+  | `maskPasswordsDefault` | `app/src/main/java/com/keepasskey/app/ui/screens/detail/**` |
+  | `maskTotpDefault` | 同上 |
+  | `showGroupInEntry` | 同上 |
+  | `listDensity` | `app/src/main/java/com/keepasskey/app/ui/screens/vault/**` |
+  | `autoActivateSearchOnOpen` | 同上 |
+  | `showGroupInSearchResult` | 同上 |
+  | `showKillAppOption` | `app/src/main/java/com/keepasskey/app/ui/KeePasskeyApp.kt` |
+
+- **整改依据**：各功能预留开关设计；避免「假开关」。参考既有正确接线范式：
+  `VaultListViewModel.kt:331-335`（`SettingsRepository` 的 `showUsernameInList` / `showOtpInList` / `hideFabOnScroll`
+  → `VaultListUiState` → `VaultListScreen` 消费）。
+- **⚠️ 语义红线（务必遵守）**：`maskPasswordsDefault` / `maskTotpDefault` 的语义是「**默认值**」而**非**「强制覆盖」——
+  实现为字段的**初始**遮掩态，**不得**覆盖用户本次会话的显式展开/收起操作。误实现为强制覆盖属功能回归。
+- **验收标准**：
+  1. 7 键各自具备真实消费点，且在 UI 上可观察生效（非仅状态字段赋值）；
+  2. **同步移除设置页对应开关的「（预留，暂未生效）」标识**——否则 UI 会反过来低报已生效功能，属反向的不诚实；
+  3. 每个键补对应单元测试（把决策抽为可测纯函数或断言 UiState 映射，避免仅靠 UI 交互验证）；
+  4. `.\gradlew.bat test` 全绿且用例数不低于本批基线（921 例）。
+
+---
+
+### ISSUE-P3-18 (P3-03 残余): 通知基础设施与 2 个通知类偏好接线
+
+- **优先级**：P3（特性接线）
+- **分类**：通知 / 设置消费
+- **背景与现象**：
+  `showUnlockedNotification`（解锁后显示通知）与 `autofillShowTotpNotification`（自动填充显示 TOTP 通知）
+  两个偏好已完成持久化，但**全仓不存在任何通知基础设施**（`app/src/main/java` 内零 `NotificationChannel` /
+  `NotificationManagerCompat`），且 manifest 未声明 `POST_NOTIFICATIONS`。ISSUE-P3-03 整改时如实登记为未接线，
+  并在设置页补齐诚实标识。
+- **整改依据**：Android 13+ 通知权限模型；拒绝「假开关」。
+- **验收标准**：
+  1. 建立通知通道（`NotificationChannel`，Android 8+ 必需）并声明 `POST_NOTIFICATIONS` 权限；
+  2. 运行时权限请求流程（用户拒绝时**不得**崩溃或反复弹窗）；
+  3. `showUnlockedNotification` 与 `autofillShowTotpNotification` 各自真实控制对应通知的发送；
+  4. **通知内容严禁出现敏感明文**（键名/条目名亦需评估，遵循 `.codebuddy/rules/engineering-rules.md`「防御性安全边界」）；
+  5. 同步移除设置页这两个开关的「（预留，暂未生效）」标识；
+  6. 补单元测试（通道建立、权限缺失时的降级、偏好关闭时不发送）。
+
+---
+
+### ISSUE-P3-19 (P3-03 残余): 明文导入框架与 4 源解析器
+
+- **优先级**：P3（功能缺口）
+- **分类**：数据导入 / 解析器
+- **背景与现象**：
+  设置页「导入数据源」提供 4 个选项（1PUX / Bitwarden / KeePass XML / 浏览器 CSV），但**没有任何解析实现**：
+  选中后仅执行 `operationFeedback = UiMessage(R.string.dbset_import_preparing, listOf(source))`
+  （提示「正在解析 X 数据...」），属**假回执**。ISSUE-P3-03 整改时未硬凑 5 个解析器，已把该提示改为
+  `dbset_import_reserved_note` 诚实说明（「解析器预留，暂未生效」）。
+- **口径修正（如实登记）**：ISSUE-P3-03 原文称「5 源码导入解析器」，实际 UI 只有 **4 个选项**；
+  归档时已按 4 源登记。
+- **整改依据**：既有 TASK-36「假数据/假回执如实化」先例；参考 keepass2android / KeePassDX 的导入架构分析（`docs/references/`）。
+- **拆分建议（每源一个子批，按工作量与依赖排序）**：
+  1. **导入框架**子批：`ImportSource` 密封类型 + `EntryImporter` 接口 + 落库适配（复用 `VaultRepository.saveEntry`）
+     + 冲突/重复策略 + 导入结果报告 UI；
+  2. **KeePass XML**（`<KeePassFile>` 结构，可与现有 `KeePassXmlExporter` 对称复用字段映射）；
+  3. **Bitwarden JSON**（`items[].login`）；
+  4. **浏览器 CSV**（Chrome/Edge 表头 `name,url,username,password`）；
+  5. **1PUX**（`.1pux` 实为 ZIP + `export.data` JSON，需先接 ZIP 解包）。
+- **验收标准**：
+  1. 每源独立单测：解析条目数、字段映射、编码/换行、**异常输入 fail-closed**；
+  2. 导入过程不得把密码明文落 `String`/日志（遵循敏感数据铁律）；
+  3. 导入完成后移除设置页的「预留，暂未生效」说明。
+
+---
+
+### ISSUE-P3-20 (P3-03 残余): 子库挂载支持
+
+- **优先级**：P3（大特性）
+- **分类**：多库 / 存储模型
+- **背景与现象**：
+  `DatabaseSettingsDialogs.kt:200` 的 `ChildDatabaseDialog.onSelectFile` **无落地实现**；
+  `SettingsViewModel.kt:134` 的 `childDatabasesCount` **硬编码为 `0`**（「已挂载子库数量」永远显示 0）。
+  ISSUE-P3-03 整改时判定属大特性、未实现，已加 `dbset_child_db_reserved_note` 诚实说明。
+- **整改依据**：KeePass2Android 的「子库/复合数据库」模式；`.codebuddy/rules/engineering-rules.md` 原子写盘与凭据隔离纪律。
+- **设计要点（须在开工前定案）**：
+  1. **挂载点抽象**：在根库 `KdbxGroup` 上定义挂载点（如专用分组 + 自定义属性记录子库 URI/别名），
+     与 `KdbxMerger` 的 UUID/墓碑语义**隔离**，避免子库条目被根库同步误删；
+  2. **只读/可写分级**：首版建议**只读挂载**（子库条目在根库中呈现为只读投影）；可写需解决
+     「一次保存写两个文件」的原子性（现有 `DatabaseSession` 单文件事务模型不覆盖）；
+  3. **凭据隔离**：子库主密码 / KeyFile 必须独立于根库会话（独立 `useCredentials` 通道 + 独立清零路径），
+     **严禁**与根库派生密钥混用；挂载期间的锁库 / 超时熔断需同时终止子库会话；
+  4. **同步交互**：根库同步**不得隐式上传子库文件**（`SyncCoordinator` 仅处理 `currentFile`）；
+     挂载元数据若写入根库需评估与 `KdbxMerger` 的兼容性。
+- **验收标准**：按上述四点逐项落地；`childDatabasesCount` 不再硬编码；挂载/卸载/凭据失效均有单测覆盖。
+
+---
+
+### ISSUE-P3-21 (P3-04 残余): 建库侧「生成附属密钥文件」为假开关
+
+- **优先级**：P3（功能缺口 / 诚实性）
+- **分类**：密钥管理 / 建库流程
+- **背景与现象**（ISSUE-P3-04 整改中实测发现，属该批次**第二个假开关**）：
+  新建库弹窗的「同时生成附属密钥文件」勾选项，把 `keyFile: Boolean` 传给
+  `DatabasePickerViewModel.createDatabase(..., keyFile, ...)`，但 **`RealVaultRepository.createDatabase`
+  完全未使用该参数**，且 `DatabaseSession.create` **无 `keyFileData` 形参** → 建库时无法落入密钥文件因子；
+  `DatabasePickerViewModel` 的 `SELECT_EXISTING` 路径选中的密钥文件同样被丢弃。
+  即：**勾选后产生的库实际不含密钥文件因子，用户以为有、实际没有**——属安全语义上的欺骗。
+- **整改依据**：复合密钥正确性（对齐官方 `CompositeKey` 三分支）；拒绝假开关。
 - **涉及核心文件**：
-  - `app/src/main/java/com/keepasskey/app/ui/unlock/UnlockScreen.kt`
-  - `app/src/main/java/com/keepasskey/app/ui/unlock/UnlockViewModel.kt`
-  - `app/src/main/java/com/keepasskey/app/security/BiometricAuthManager.kt`
+  - `app/src/main/java/com/keepasskey/app/data/repository/RealVaultRepository.kt`（`createDatabase` 的 `keyFile` 形参）
+  - `database/src/main/java/com/keepasskey/database/session/DatabaseSession.kt`（`create` 需新增密钥文件因子形参）
+  - `database/src/main/java/com/keepasskey/database/file/KdbxFile.kt`（`deriveKeys` 已支持三分支，应复用）
+  - `app/src/main/java/com/keepasskey/app/ui/screens/database/DatabasePickerViewModel.kt` / `DatabasePickerScreen.kt`
+- **注意事项**：KeyFile 解析**已有唯一实现** `database/.../file/KdbxKeyFile.kt`（`internal`，经 `KdbxFile.deriveKeys` 暴露），
+  **严禁在 app 层重写**；密钥文件字节全程 `ByteArray` 且用毕清零。
 - **验收标准**：
-  1. 开关开启 + 有已封印凭据时，进入 UnlockScreen 自动调起 BiometricPrompt；
-  2. 生物识别成功直接解密主密码并解锁；
-  3. 用户主动点击取消后停留在主密码输入框，不造成死循环。
+  1. 勾选「生成附属密钥文件」后，产出的 `.kdbx` 确实以「主密码 + 密钥文件」复合密钥加密，可用同一密钥文件解锁；
+  2. 生成的密钥文件经既有导出通道可交付给用户，且有明确的一次性保存提示（丢失即无法解锁）；
+  3. `SELECT_EXISTING` 选中的密钥文件真实参与复合密钥；
+  4. 补单测：建库后以（密码 + 密钥文件）解锁成功、（仅密码）解锁失败；
+  5. 若最终判定不实现，则**必须移除该勾选项**（不得保留误导性 UI）。
 
 ---
 
-### ISSUE-P3-02 (TASK-49): 自定义图标渲染删除与 Notes/URL 字段引用展示侧接线
-- **优先级**：P3（特性残余）
-- **分类**：UI 渲染 / 协议引用
+### ISSUE-P3-22 (P3-02 残余): 分组自定义图标渲染
+
+- **优先级**：P3（渲染完整性）
+- **分类**：UI 渲染 / KDBX Meta
 - **背景与现象**：
-  1. **图标侧（TASK-15 残余）**：`CustomIconCoordinator` 与 KDBX Meta 图标池数据通道已就绪，但条目列表行（`VaultListScreen`）和详情页（`EntryDetailScreen`）尚未根据 `customIconId` 渲染位图，且缺少自定义图标删除入口；
-  2. **引用侧（TASK-17 残余）**：`FieldReferenceEngine` 已就绪且已接入自动填充与复制，但 Notes 和 URL 展示侧尚未通过引擎解析 `{REF:...}`。
-- **整改依据**：
-  KeePass 2.x 自定义图标与字段引用展示规范（保持 M1 投影层不物化密码明文原则）。
-- **涉及核心文件**：
-  - `app/src/main/java/com/keepasskey/app/ui/vault/VaultListScreen.kt`
-  - `app/src/main/java/com/keepasskey/app/ui/vault/EntryDetailScreen.kt`
-  - `app/src/main/java/com/keepasskey/app/ui/vault/EntryDetailViewModel.kt`
+  ISSUE-P3-02 已让**条目**的自定义图标在列表与详情页渲染，并让删除路径清理全树引用（含分组）以避免悬挂引用；
+  但 `KeePassGroupRow` 仍只画标准矢量图标，**KDBX 分组同样支持的 `CustomIconUUID` 未渲染**。
+- **整改依据**：KeePass 2.x 自定义图标规范（分组与条目共用 Meta 图标池）。
 - **验收标准**：
-  1. 列表和详情页正常渲染条目绑定的自定义 PNG 图标；
-  2. 提供图标删除入口，删除时同步清理 Meta 并将引用条目回退为默认图标；
-  3. Notes / URL 中的 `{REF:...}` 在展示时正确展开对应条目的公开字段；
-  4. 循环引用深度限制生效，不崩溃。
+  1. 已绑定自定义图标的分组在分组列表中渲染对应位图，并与条目共用同一 `IconBitmapCache`（避免重复解码）；
+  2. 图标池中缺失时回退为缺图占位（**不谎报**为标准图标，沿用条目侧 `EntryIcon.Missing` 语义）；
+  3. 补单测覆盖分组投影判定。
 
 ---
 
-### ISSUE-P3-03 (TASK-43): 进阶偏好设置消费方接线（分批落地）
-- **优先级**：P3（功能完整性）
-- **分类**：设置消费 / 进阶特性
-- **背景与现象**：
-  设置页预留的进阶开关已随 TASK-12 完成持久化，但底层消费方尚未全面接线：
-  - **43a (同步)**：`webdavChunkedUpload` / `webdavChunkSizeMb` / `createBackupBeforeSave`（保存前 `.bak` 备份） / `checkRemoteChangesBeforeSave` / `conflictResolution` 默认策略；
-  - **43b (自动填充)**：`autofillCopyTotp` / `inlineSuggestionsEnabled` / `autoReturnFromQuery` / `autofillShowTotpNotification`（`skipDalVerification` 已随 ISSUE-P2-02 接线，见 RESOLVED_LOG §2.13）；
-  - **43c (UI 偏好)**：`maskPasswordsDefault` / `maskTotpDefault` / `listDensity` / `autoActivateSearchOnOpen` / `showGroupInSearchResult` / `showGroupInEntry` / `showUnlockedNotification` / `showKillAppOption`；
-  - **43d (导入解析器)**：1PUX / Bitwarden / KeePass XML / 浏览器 CSV 5 源码导入解析器；
-  - **43e (子库)**：子库挂载支持；
-  - **43f (调试)**：`debugLogEnabled` / `verboseSyncLog`。
-- **整改依据**：
-  各功能预留开关设计；避免「假开关」，每批接线必须真实生效。
-- **涉及核心文件**：
-  - `app/src/main/java/com/keepasskey/app/ui/settings/...`
-  - `sync/src/main/java/com/keepasskey/sync/...`
-  - `app/src/main/java/com/keepasskey/app/autofill/...`
-- **验收标准**：
-  按子批独立实现并提交，每批接线的功能具备对应单元测试或交互验证。
+### ISSUE-P3-23 (P3-11 残余): arm64 真机 instrumented 验证与 Argon2 真实语料端到端解锁
 
----
-
-### ISSUE-P3-04 (TASK-54): 导入密钥与 KeyFile 管理功能
-- **优先级**：P3（特性）
-- **分类**：文件导入 / 密钥管理
-- **背景与现象**：
-  真机实测反馈：缺少便捷导入外部 KeyFile 密钥文件并将其持久化关联到密码库的功能。
-- **整改依据**：
-  SAF `OpenDocument` 密钥文件导入与会话缓存管理。
-- **涉及核心文件**：
-  - `app/src/main/java/com/keepasskey/app/ui/unlock/UnlockScreen.kt`
-  - `app/src/main/java/com/keepasskey/app/repository/RealVaultRepository.kt`
-- **验收标准**：
-  1. 支持从系统文件管理器选取 KeyFile；
-  2. 记住上次成功解锁使用的密钥文件路径/URI（由用户偏好控制）；
-  3. 解锁流程对 KeyFile 校验正确。
-
----
-
-### ISSUE-P3-05 (TASK-19): zxing → CameraX + ML Kit 扫码迁移评估
-- **优先级**：P3（依赖治理）
-- **分类**：架构现代化 / 依赖评估
-- **背景与现象**：
-  当前 TOTP 二维码扫描采用 `zxing-android-embedded:4.3.0`，运行稳定。需评估迁移至现代 `CameraX + ML Kit Barcode Scanning` 的收益（更流畅对焦、更小体积、Compose 原生集成）与成本（Google Play 数据安全声明、依赖引入）。
-- **整改依据**：
-  Android 官方 CameraX 与 ML Kit 最佳实践。
-- **验收标准**：
-  输出清晰的评估结论与决策（迁移或维持当前稳定方案），回写记录。
-
----
-
-### ISSUE-P3-06 (P3-7 残余): UI 层冗余 import 清理
-- **优先级**：P3（代码整洁度）
-- **分类**：代码质量
-- **背景与现象**：
-  non-UI 层未使用的 import 已清理。UI 层剩余候选约 80 处，由于 Compose 委托语法（`by remember`、`getValue`/`setValue`）存在静态分析误报风险，需人工/IDE 辅助精准清理。
-- **涉及核心文件**：
-  - `app/src/main/java/com/keepasskey/app/ui/...`
-- **验收标准**：
-  清理无用 import，确保全模块编译与测试 100% 通过。
-
----
-
-### ISSUE-P3-07 (P1-9 残余): 附件读取侧别名共享消除
-- **优先级**：P3（内存安全）
-- **分类**：KDBX 二进制池
-- **背景与现象**：
-  保存侧已在去重时对附件字节做克隆保护；读取侧 SAX 解析时仍直接引用池中的 `ByteArray`。只读场景下风险很低，但为保持防御一致性可进行防御性拷贝。
-- **涉及核心文件**：
-  - `database/src/main/java/com/keepasskey/database/xml/KdbxXmlGroupReader.kt`
-- **验收标准**：
-  读取附件时返回独立副本，单元测试全绿。
-
----
-
-### ISSUE-P3-08 (文档梳理与归档): 淘汰旧计划文件并统一单一真相源
-- **优先级**：P3（文档治理）
-- **分类**：工程纪律
-- **背景与现象**：
-  随着本文件（`ACTIVE_ISSUES.md`）与 `RESOLVED_LOG.md` 的建立，原 `docs/plans/REPAIR_PLAN.md`、`docs/HEALTH_CHECK_ROADMAP.md` 及 `docs/FINDINGS_TRACKER.md` 已完成历史使命，需物理删除或整合，消除多头维护。
-- **验收标准**：
-  1. 删除 `docs/plans/REPAIR_PLAN.md` 等冗余计划；
-  2. `STATUS.md` 与 `AGENTS.md` 引用全面更新为 `ACTIVE_ISSUES.md` + `RESOLVED_LOG.md`。
-
----
-
-### ISSUE-P3-09 (ZT-20): 供应链与构建加固批次
-- **优先级**：P3（供应链安全）
-- **分类**：构建 / 依赖治理
-- **背景与现象**（2026-09-09 零信任审计）：
-  1. **签名方案不全**：`app/build.gradle.kts:56-57` 仅 `enableV1Signing/enableV2Signing`，minSdk 36 下 v1（JAR 签名）无必要且最弱，缺 v3/v3.1 无密钥轮换能力；
-  2. **R8 过度保留**：`proguard-rules.pro:50-51` 对 `passkey.**` / `autofill.**` 整包 `-keep { *; }`（实际只需保留组件类与无参构造），`:43-45` model/file/session 整包保留，`:9` `-dontwarn **` 全局压制警告，`:7` 保留 `SourceFile,LineNumberTable`，`:61-77` Room 规则冗余（本项目无 Room）；
-  3. **alpha 依赖进生产**：`material3 = 1.5.0-alpha27`（`app/build.gradle.kts:111` 覆盖 BOM）；`argon2kt 1.6.0` 为孤儿版本（TASK-52 后无消费方）；`zxing-android-embedded 4.3.0` 偏旧；
-  4. **CI 无门禁**：`dependency-check.init.gradle.kts:30` `failBuildOnCVSS = 11.0f` + `:39` `failOnError = false` + `dependency-scan.yml:81` `continue-on-error: true` → 扫描纯告警；Action 全部 tag 引用（`actions/checkout@v4` 等）未 SHA 钉死；**无 build / test / lint 流水线**；
-  5. `.gitignore:40-43` 缺 `*.p12` / `*.pfx` / `*.pem` / `*.key` 规则。
-  6. **Rust 侧供应链闸门未接入 CI**：`crypto/src/main/rust/deny.toml` 已落地且
-     `cargo deny check licenses bans sources` 通过，但 `advisories` 子检查需联网拉取
-     rustsec/advisory-db（本环境 github 连接被重置），且 CI 无该步骤。
-- **整改依据**：SLSA 供应链分级；Google Play 签名与 R8 最佳实践。
-- **验收标准**：
-  1. 关闭 v1、启用 v3/v4；
-  2. 收窄 keep 规则（保留组件与擦除方法即可）、移除 `-dontwarn **` 与冗余 Room 规则、补 Log 剥离；
-  3. alpha 依赖降级为稳定版或明确管控；清理孤儿版本；
-  4. CI 增加 build/test 门禁、Action SHA 钉死、扫描具备失败阻断阈值；
-  5. `.gitignore` 补齐密钥扩展名；
-  6. CI 增加 `cargo deny check`（含 advisories）与 4 ABI 原生构建步骤，并固定 Rust/NDK 版本。
-
----
-
-### ISSUE-P3-10 (ZT-21): 解析与计数器边界加固
-- **优先级**：P3（健壮性）
-- **分类**：输入验证
-- **背景与现象**：
-  1. `KdbxFile.kt:66` `MAX_DECOMPRESSED_PAYLOAD_BYTES = 512 MiB` 对移动端偏高，仍可能 OOM（建议 64–128 MiB）；
-  2. `PasskeyData.kt:122` `toIntOrNull() ?: 0` + `PasskeyAssertionActivity.kt:111` `signCount + 1` → 恶意 kdbx 置 `Int.MAX_VALUE` 可溢出为负；`PasskeyEntryCoordinator.kt:73-98` 读-改-写无 CAS；
-  3. `KdbxXmlParser.kt:46-48` 与 `WebDavSyncProvider.kt:395-398` 的 `setFeature` 失败被空 `catch` 静默吞掉（现有 `resolveEntity` 兜底风险有限）；
-  4. `sync/build.gradle.kts:29-41` 硬编码测试凭据默认值 `tester123` / `tester1234`。
-- **整改依据**：CWE-190 整数溢出；OWASP MASVS-CODE 输入验证。
-- **涉及核心文件**：
-  - `database/src/main/java/com/keepasskey/database/file/KdbxFile.kt`
-  - `core/src/main/java/com/keepasskey/core/model/PasskeyData.kt`
-  - `app/src/main/java/com/keepasskey/app/data/repository/PasskeyEntryCoordinator.kt`
-- **验收标准**：
-  1. 解压上限下调并单测；
-  2. signCount 做上界钳制与溢出防护，写入改为受控事务；
-  3. `setFeature` 失败至少落告警日志；
-  4. 测试凭据改为随机生成或必须由环境注入。
-
----
-
-### ISSUE-P3-11 (P2-14 遗留): Rust Argon2 原生内核的真机 instrumented 验证
-- **优先级**：P3（验证覆盖；依赖外部设备资源）
+- **优先级**：P3（验证覆盖；依赖外部设备与语料资源）
 - **分类**：crypto 原生 KDF / 测试基础设施
-- **背景与现象**：
-  ISSUE-P2-14 的 Argon2 内核 C→Rust 迁移已在**宿主侧**完成运行时验证（Batch 4：`cargoHostBuild` 产出宿主
-  cdylib，桌面单测经 `-Djava.library.path` 走原生路径，断言原生 ≡ BC 全参数域、≡ libargon2 参考基准，
-  并测得宿主侧性能对照）。但计划原定的**真机/模拟器 instrumented 验证**因本机 `adb devices` 为空、
-  工程无 `androidTest` 源集而未能执行，`NativeArgon2` 在 Android arm64 上的 JNI 加载与端到端解锁
-  目前仅有 `assemble*` 打包期证据（符号/ABI/strip 已核对），缺运行时证据。
-- **整改依据**：`plans/rust-enclave-poc.md` §2 Batch 4；风险 R6（桌面单测无 `.so`，原生路径不被覆盖）。
+- **背景与现象**（ISSUE-P3-11 整改后的**如实残余**）：
+  该批次已建立 `crypto/src/androidTest/` 源集，并在 **x86_64 模拟器（Android 16 / API 36）**取得真实绿证
+  （7 例 0 失败 exit 0：`.so` 自 APK 内加载 477,976 B、`available==true`、与 BC 冻结向量逐字节一致；
+  性能 p=2 **4.98×**、p=4 **8.42×**，R1 闸门通过）。但以下两项**仍未达成**：
+  1. **arm64 真机路径未验证**——本机 SDK 仅有 x86_64 system-image（`android-36.1` / `android-34`），
+     **无 arm64 镜像亦无真机**；x86_64 模拟器数据**不可冒充** arm64 真机数据。
+  2. **真实 `.kdbx` 语料端到端解锁完全未达成**——阻塞与设备无关：
+     - 语料未入库（`crypto/src/test/resources/argon2-interop/` 目前仅有生成方法 `README.md`）；
+     - **模块依赖单向**：`crypto` 不依赖 `database`，不具备 `.kdbx` 读写能力 → 该用例只能落 `database` 模块，
+       而 `database` 亦无 `androidTest` 源集；
+     - `src/test/resources` **不进** androidTest APK，设备侧语料须放 `androidTest/assets/`（与验收原文位置不可互替）。
+- **整改依据**：AGENTS.md §6 已知工程限界「原生 Argon2 为 Rust 内核…真机 arm64 instrumented 验证待设备可用时补」。
 - **涉及核心文件**：
-  - `crypto/src/androidTest/java/com/keepasskey/crypto/kdf/`（新增 `NativeArgon2InstrumentedTest`）
-  - `crypto/build.gradle.kts`（新增 `androidTestImplementation(androidx.test.*)` 与 `testInstrumentationRunner`）
-  - `crypto/src/main/java/com/keepasskey/crypto/kdf/NativeArgon2.kt`（被测对象，不改）
+  - `crypto/src/androidTest/java/com/keepasskey/crypto/kdf/`（既有 `NativeArgon2InstrumentedTest`，可扩展）
+  - `database/src/androidTest/**`（**需新建**，用于端到端 `.kdbx` 语料解锁）
+  - `crypto/src/test/resources/argon2-interop/`（语料存放约定）
 - **验收标准**：
-  1. 起模拟器或连真机后，`connectedAndroidTest` 能加载 APK 内 `libkeepasskey_argon2.so`，
-     断言 `NativeArgon2.available == true` 且派生结果与 BC 冻结向量逐字节一致；
-  2. 用真实 KeePass 2.61.1 / KeePassXC 生成的 Argon2d/id（0x10/0x13）`.kdbx` 语料端到端解锁成功
-     （语料需先补入 `crypto/src/test/resources/argon2-interop/`）；
-  3. 记录 arm64 真机性能数据（t=2/m=64MiB/p=2 与 p=4），与 Batch 4 宿主侧数据并列归档，
-     复核对 R1 决策闸门（原生不得慢于 BC 的 2 倍）。
+  1. 在 **arm64 真机或 arm64 模拟器镜像**上运行 `connectedDebugAndroidTest`，断言 `NativeArgon2.available == true`
+     且派生结果与 BC 冻结向量逐字节一致；
+  2. 取得 arm64 真机性能数据（t=2/m=64MiB/p=2 与 p=4），与 x86_64 模拟器及宿主侧 Batch 4 数据**并列归档**，
+     复核 R1 决策闸门（原生不得慢于 BC 的 2 倍）；
+  3. 用真实 KeePass 2.61.1 / KeePassXC 生成的 Argon2d/id（0x10/0x13）`.kdbx` 语料，在设备上完成端到端解锁；
+  4. 归档文件 `docs/原生Argon2真机验证记录.md` 中的「待填」表格补齐（**严禁编造数据**）。
 
 ---
 
-### ISSUE-P3-12 (P2-09 残余): 主 App 敏感 Compose 屏未接遮挡触摸过滤
+### ISSUE-P3-24 (P3-09 残余): CI 门禁首跑校准
 
-- **优先级**：P3（UI 防护纵深）
-- **分类**：点击劫持防护 / 接线完整性
-- **背景与现象**：
-  ISSUE-P2-09 已为 autofill 两屏接线遮挡触摸过滤（`autofill_dataset_item.xml` 三视图 + `FlagSecureGuard.applyObscuredTouchFilter` 的 `decorView.filterTouchesWhenObscured` + `SecureTouchCompose.ApplyObscuredTouchFilter`），但**主 App 的敏感 Compose 屏**（解锁页、条目详情、密码生成器、Passkey 相关屏）根节点尚未调用 `ApplyObscuredTouchFilter()`，同进程 overlay / 无障碍注入点击的防护在这些界面仍缺失。
-- **整改依据**：OWASP MASVS-PLATFORM-1；ISSUE-P2-09 验收标准 2 的完整覆盖。
-- **涉及核心文件**：
-  - `app/src/main/java/com/keepasskey/app/ui/...`（各敏感屏根 Composable）
-  - `app/src/main/java/com/keepasskey/app/security/SecureTouchCompose.kt`（现成 API，无需改动）
+- **优先级**：P3（供应链安全；依赖联网 CI 环境）
+- **分类**：构建 / CI
+- **背景与现象**（ISSUE-P3-09 整改后的**如实残余**）：
+  该批次已落地 `failBuildOnCVSS=7.0f` / `failOnError=true`、7 个 Action 全部 SHA 钉死、
+  新增 `.github/workflows/build.yml` 三 job（fast-gate / native-gate / rust-supply-chain）与版本固定
+  （NDK 28.2.13676358 / Rust 1.97.1 / cargo-ndk 4.1.2 / cargo-deny 0.20.2）。但**全部 CI 流程在本环境从未真实运行过**：
+  1. `build.yml` 三条 job 首次运行未验证（含一次性 CI 密钥签名断言、Action 拉取）；
+  2. `dependency-scan.yml` 在 CVSS≥7 下的真实阻断结果未验证（需完整 NVD 数据通道）；
+  3. `cargo deny check advisories` **本机实测复现 ISSUE-P3-09 现象 6**：
+     `curl 28 Failed to connect to github.com:443`（无法拉取 rustsec/advisory-db）→ 该子检查的判定逻辑
+     仅能以「CI 阻断语义」静态保证（`deny.toml` 无 ignore 列表、`yanked="deny"`）。
+- **⚠️ 可预判的首次运行风险**：fast-gate 在 **Linux** 上的行为与本机（Windows）不同——
+  `AtomicFileWriterTest` 的 POSIX 目录 fsync 断言、`sync` 的缓存权限断言在 Linux 上会**真实执行**而非跳过，
+  **存在首次即红的可能**（本机无法预判）。
+- **整改依据**：SLSA 供应链分级；CI 不得停留在「结构存在但从未运行」状态。
 - **验收标准**：
-  1. 在解锁页、条目详情页、生成器页与 Passkey 流程屏根节点调用 `ApplyObscuredTouchFilter()`；
-  2. 覆盖面无遗漏，且不引入正常场景下的触摸失效（需真机/交互验证）；
-  3. 若判定某些屏不属敏感场景，需在代码注释中写明理由。
+  1. `build.yml` 三 job 在 CI 上真实跑通（首次失败按实际结果校准 `sdkmanager` 组件名、Rust 版本可用性、
+     Linux 侧测试表现）；
+  2. `dependency-scan.yml` 首次以 CVSS≥7 运行后，按实际命中处置（修依赖或登记 suppression，**不得回调阈值**）；
+  3. `cargo deny check advisories` 在 CI 上真实执行并通过（或在确无可用通道时登记明确豁免理由）；
+  4. material3 alpha 退出条件复核：当 Google Maven 出现 **1.5.0 stable** 时，删除 `libs.versions.toml` 的
+     `material3` 版本项与 `compose-material3-alpha` 别名、删除 `app/build.gradle.kts` 中对应 `implementation` 一行，
+     回归 Compose BOM 托管（判据：`assembleDebug` 通过且 `Theme.kt` 的 `MotionScheme.expressive()` 无需改动即可编译）。
 
 ---
 
-### ISSUE-P3-13 (P2-05 残余): Windows 宿主下原子写盘父目录 fsync 无运行时验证
+### ISSUE-P3-25 (P3-03 / P3-04 残余): 巨型类拆分
 
-- **优先级**：P3（验证覆盖 / 平台差异）
-- **分类**：原子写 / 测试有效性
+- **优先级**：P3（代码整洁度）
+- **分类**：重构
 - **背景与现象**：
-  ISSUE-P2-05 新增的 `AtomicFileWriter.syncDirectory()` 在 Windows 上**必然降级**：目录 `FileChannel.open(dir, READ)` 抛 `AccessDeniedException`，被捕获后仅记告警。已在宿主单测中记录该事实，但意味着**目录项 fsync 这条崩溃安全路径在 Windows 宿主上从未被真实执行与断言**，仅靠 POSIX 语义与代码审查背书。
-- **整改依据**：POSIX crash-safety（rename 后需 fsync 父目录）；测试有效性缺口。
+  `.codebuddy/rules/engineering-rules.md` 规定单文件超过约 400 行必须拆分。以下文件在**本批次接线前即已超标**
+  （本批次新增逻辑刻意收敛为短方法、未加剧问题，但超标本身未解决）：
+  | 文件 | 行数（整改后） | 说明 |
+  |---|---:|---|
+  | `app/.../sync/SyncCoordinator.kt` | ~965 | 建议按「同步周期编排 / 冲突决策 / Provider 构建」三职责拆分 |
+  | `app/.../ui/screens/unlock/UnlockViewModel.kt` | ~979 | 建议拆出 `BiometricUnlockCoordinator` / `KeyFileSessionCoordinator` |
+  | `database/.../xml/KdbxXmlGroupReader.kt` | 407 | 轻微超标 |
+- **整改依据**：工程规则「拒绝巨型类 / 巨型函数」。
+- **验收标准**：
+  1. 上述文件均降至阈值内（或就「为何不可拆」给出经论证的例外说明并登记）；
+  2. 拆分为**纯结构性**改动，不改行为——`.\gradlew.bat test` 全绿且用例数不减；
+  3. 优先采用依赖倒置（抽接口 + Hilt 绑定），不得为拆分引入循环依赖。
+
+---
+
+### ISSUE-P3-26 (P3-13 残余): `deleteBackup` 删除 `.bak` 后未做目录 fsync
+
+- **优先级**：P3（崩溃安全完整性）
+- **分类**：原子写 / POSIX crash-safety
+- **背景与现象**：
+  ISSUE-P3-13 已把 `AtomicFileWriter` 的**四条**目录 fsync 路径（`.bak` copy 后、主路径 `Files.move(ATOMIC_MOVE)` 后、
+  降级 `renameTo` 成功后、降级 `Files.copy` 覆盖后）全部改为经可注入的 `DirectorySync` 抽象触达。
+  但 `deleteBackup` 在**删除 `.bak` 文件后未再执行目录 fsync**——同属「目录项变更后需 fsync 父目录」的崩溃安全面。
+- **整改依据**：POSIX crash-safety（rename/unlink 后均需 fsync 父目录）。
 - **涉及核心文件**：
   - `database/src/main/java/com/keepasskey/database/session/AtomicFileWriter.kt`
   - `database/src/test/java/com/keepasskey/database/session/AtomicFileWriterTest.kt`
 - **验收标准**：
-  1. 在 Linux/macOS 宿主（或 CI 的 Linux runner）上运行 `AtomicFileWriterTest`，断言 `syncDirectory` 未走降级分支（可通过可注入的告警/探针计数验证）；
-  2. 或引入可注入的目录同步抽象（依赖倒置），在单测中以假实现断言「四条路径均调用了目录 fsync」；
+  1. `deleteBackup` 删除 `.bak` 后调用注入的 `DirectorySync`；
+  2. 复用既有假实现计数断言「删除路径确实触达目录同步钩子」（沿用 ISSUE-P3-13 的断言范式）；
   3. 保持 Windows 上的降级不阻断语义不变。
 
 ---
 
-### ISSUE-P3-14 (P2-08 残余): 生物识别完整性提示未使用已资源化文案
+### ISSUE-P3-27 (P3-10 残余): 解压上限不自洽与并发签名计数器假说
 
-- **优先级**：P3（文案一致性 / 资源化）
-- **分类**：代码整洁度 / 国际化
-- **背景与现象**：
-  `BiometricAuthManager.kt:187` 仍以硬编码常量 `INTEGRITY_BLOCKED_MESSAGE = "设备完整性风险，已禁用生物识别快速解锁"` 作为 `BiometricResult.Error` 的 `errString`；集成阶段已补入 `strings.xml` / `values-en/strings.xml` 的 `sec_biometric_integrity_blocked`，但**尚无消费方**（该类无 `Context` 入参，需在调用方或结果消费侧解析资源）。
-- **整改依据**：TASK-21 硬编码文案资源化约定；中英双语一致性。
-- **涉及核心文件**：
-  - `app/src/main/java/com/keepasskey/app/security/BiometricAuthManager.kt`
-  - 结果消费侧（UnlockScreen/UnlockViewModel 等）
-  - `app/src/main/res/values{,-en}/strings.xml`
+- **优先级**：P3（健壮性 / 一致性）
+- **分类**：输入验证 / 并发
+- **背景与现象**（ISSUE-P3-10 整改中如实登记的残余）：
+  1. **上限不自洽**：`KdbxFile.MAX_DECOMPRESSED_PAYLOAD_BYTES` 本轮由 512 MiB 下调为 **128 MiB**，
+     而 `InnerHeader` 单字段上限为 **256 MiB** → 存在「单字段合法上限高于整包上限」的语义不自洽
+     （当前不构成缺陷，因整包必然包含多个字段；但两者的取值关系应显式定义并注释）；
+  2. **并发签名计数器**：`PasskeyEntryCoordinator` 已改为 `updateDatabaseMeta` 受控事务 + 「库内现值 + 1」单调下界，
+     但**并发递增时断言签名值可能重复**（两个并发递增得到同一值的情形未被完全排除），
+     该假说未经并发压力测试证实或证伪。
+- **整改依据**：CWE-190 整数溢出；WebAuthn 签名计数器单调性语义。
 - **验收标准**：
-  1. 风险态失败文案统一经 `R.string.sec_biometric_integrity_blocked` 输出（在具备 `Context` 的消费侧解析），移除硬编码常量；
-  2. 若确需保留与 UI 解耦的失败语义，则在 KDoc 写明「errString 仅内部诊断、不对外展示」并确保无一处将其直接展示给用户。
+  1. 显式定义并注释两级上限的取值关系（或收敛为单一真源常量），补边界单测；
+  2. 以并发用例（真实多协程并发递增）证实或证伪「签名值可能重复」；若确实可能重复，
+     改为真正原子的读-改-写（如会话级互斥 + 版本号），并补回归锁。
 
 ---
 
-### ISSUE-P3-15 (P2-07 残余): 编辑页屏蔽非法绑定包名后的提示文案边界
+### ISSUE-P3-28 (文档治理): 待办条目应附「核实时间点」以降低前提滞后
 
-- **优先级**：P3（交互边界 / 诚实化）
-- **分类**：自动填充 / 文案语义
+- **优先级**：P3（工程纪律）
+- **分类**：文档治理
 - **背景与现象**：
-  ISSUE-P2-07 把 `AutofillBlocklistStore.isBlocked` 改为 fail-closed（非法包名返回 true）。副作用：条目详情页「屏蔽/恢复自动填充」入口（`EntryDetailViewModel.toggleAutofillBlockForApp` 路径）在遇到**非法绑定包名**时会被判为「已屏蔽」，从而展示「已恢复」语义的文案，与真实状态不符（非安全回退，属交互诚实性问题）。
-- **整改依据**：零信任「宁可失败也不欺骗用户」；既有 TASK-36「假数据/假回执如实化」整改先例。
-- **涉及核心文件**：
-  - `app/src/main/java/com/keepasskey/app/ui/screens/detail/EntryDetailViewModel.kt`
-  - `app/src/main/java/com/keepasskey/app/data/repository/AutofillBlocklistStore.kt`
+  本批次发现 **ISSUE-P3-08 与 ISSUE-P3-16 的正文前提在开工时已不成立**——两者都声称
+  `docs/plans/`、`STATUS.md`、`plans/rust-enclave-poc.md` 等文件「需要删除」，但这些文件早在
+  `7dba64d`（重构文档体系）与 `d578df7` / `863d81c` 中就已删除；`AGENTS.md` 也已不含相关引用。
+  条目与代码库演进之间存在时间差，导致执行者可能去做已经完成的工作。
+- **整改依据**：单一真相源的可信度；避免「认领后发现无对象可改」的浪费。
 - **验收标准**：
-  1. 非法/缺失绑定包名时，屏蔽入口给出明确的「无法识别应用标识」提示，而非「已屏蔽/已恢复」；
-  2. 保证 `isBlocked` 的 fail-closed 安全语义不变（不得为文案改变判定）；
-  3. 单测覆盖该分支。
-
----
-
-### ISSUE-P3-16 (文档一致性): AGENTS.md 文档索引中已下架文件的引用
-
-- **优先级**：P3（文档治理）
-- **分类**：工程纪律
-- **背景与现象**：
-  ISSUE-P3-08 要求清理旧计划文件并统一单一真相源，但 `AGENTS.md` §4 仍出现对 `STATUS.md`（TASK-44 条目说明中）与历史 `plans/rust-enclave-poc.md` 的引用；`RESOLVED_LOG.md` §6/§2.17 亦引用 `plans/` 路径。这些文件如已删除，引用即为悬空指针。
-- **验收标准**：
-  1. 逐条核对 `AGENTS.md` 与 `RESOLVED_LOG.md` 中的 `docs/plans/`、`STATUS.md` 引用，删除或改写为现行文档路径；
-  2. 全仓 grep 确认无残留悬空引用。
+  1. `docs/ACTIVE_ISSUES.md` 顶部「维护规则」补充约定：**新增条目须附「核实时间点」与「核实方式」**
+     （例如「2026-09-10 经 `Test-Path` / 全仓 grep 核实」）；
+  2. 对现存条目做一次前提复核，把已不成立的前提就地修正或标注；
+  3. 该约定同步写入 `AGENTS.md` §3 极简闭环工作流（认领步骤）。

@@ -303,7 +303,11 @@ fun SecuritySettingsScreen(
                         SecuritySwitchRow(
                             icon = Icons.Default.PowerSettingsNew,
                             title = stringResource(R.string.sec_kill_app_title),
-                            subtitle = stringResource(R.string.sec_kill_app_sub),
+                            // ISSUE-P3-03 (43c)：消费方在主导航（KeePasskeyApp）属并行组文件范围，本轮未接线 → 如实标注
+                            subtitle = stringResource(
+                                R.string.settings_pref_reserved_suffix,
+                                stringResource(R.string.sec_kill_app_sub)
+                            ),
                             checked = uiState.showKillAppOption,
                             onCheckedChange = onShowKillAppOptionToggle
                         )

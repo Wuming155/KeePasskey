@@ -11,9 +11,11 @@ This file provides guidance to AI coding agents when working with code in this r
 
 | 维度 | 数值 / 状态 | 官方依据与说明 |
 |---|---|---|
-| **Git HEAD** | 代码基线 `da4dd1d`（ISSUE-P2-15 / P2-16 残余两项闭环：受保护值经 `readChars()` 字节通道收口、密码生成器出边界 CharArray 化；承接 P2-05 ~ P2-13 中危九项） | 分支 `main` 与 `origin/main` 同步 |
-| **测试基线** | **737 个单元测试用例**（app 295 / core 48 / crypto 61 / database 175 / sync 158，其中 sync 158 含 12 例联调跳过 + 1 例 Windows 无 POSIX 权限视图跳过）：**724 通过、0 失败、13 跳过**（另有 Rust 侧 `cargo test` 9 例，见 §5） | `./gradlew test` 全模块执行；跳过的 12 例为 `LiveSyncServersTest` 真实联调用例（需先起 `tools/local-sync` 服务并加 `-DliveSyncTest`）；crypto 61 含 4 例宿主侧原生 JNI 运行时验证（无 cargo 宿主库时 `Assume` 跳过，见 §5） |
+| **Git HEAD** | 代码基线 `7307f5f` → **P3 批次 16 项整体闭环**（ISSUE-P3-01 ~ P3-16：低危加固、特性接线与体验优化；含 4 个「假开关」实锤整改、13 条过程缺陷如实留痕） | 归档见 [RESOLVED_LOG.md](docs/RESOLVED_LOG.md) **§3**；未完全达标的残余面回登为 ISSUE-P3-17 ~ P3-28 |
+| **测试基线** | **921 个单元测试用例**（app 416 / core 58 / crypto 61 / database 207 / sync 179）：**908 通过、0 失败、13 跳过**（另有 Rust 侧 `cargo test` 9 例，见 §5；crypto 另有 7 例 instrumented 测试，见下） | `.\gradlew.bat test --rerun-tasks` 强制真实执行全模块；13 例跳过为 `LiveSyncServersTest` 真实联调用例（12 例，需先起 `tools/local-sync` 服务并加 `-DliveSyncTest`）+ `SyncCacheTest` 的 Windows 无 POSIX 权限视图断言（1 例） |
+| **instrumented 验证** | `crypto` 模块 `androidTest`：x86_64 模拟器（Android 16 / API 36）实测 **7 例 0 失败**——APK 内 `libkeepasskey_argon2.so`（477,976 B）运行时加载、`NativeArgon2.available == true`、与 BC 冻结向量逐字节一致；性能 p=2 **4.98×**、p=4 **8.42×** 于 BC，R1 闸门通过 | arm64 真机与真实 `.kdbx` 语料端到端解锁仍待办，见 ISSUE-P3-23 |
 | **构建状态** | `assembleDebug` + `assembleRelease` (R8) 全量通过 | **AGP 9.4.0 / Gradle 9.7.1** / Kotlin 2.4.10（经 buildscript classpath 锚定内置 KGP）/ Hilt 2.60.1 / **KSP 2.3.11** |
+| **签名与 R8** | 关闭 v1、启用 **v3 + v4**（`.idsig` 产出）；未配置签名时构建不失败。R8 收窄后 dex 字符串表内源文件名 **12 → 0**，dex −196,816 B（−1.85%） | v2 配置为 true 但 v3 与 v2 同开且 minSdk ≥ 28 时产物省略 v2 块（AGP 标准行为，无功能缺口）；`-dontwarn **` 已移除且无缺失类。见 RESOLVED_LOG §3.2 |
 | **系统基线** | **minSdk 36**, **compileSdk 37**, targetSdk 36 | 仅针对 Android 16+ 深度优化，固化无旧版垫片决策；compileSdk 37（Compose BOM 2026.08.00 + M3 Expressive） |
 | **传输安全防线** | 全站强制 HTTPS（`network_security_config.xml` 禁明文 + OkHttp TLS-only），零证书固定 | 对齐 Google Developer Knowledge `pinning not recommended` 指南 |
 | **PSL 与域名匹配** | 完整接入 Mozilla PSL（`public_suffix_list.dat`），IDN punycode 归一 | 消除 47 条硬编码漏判盲区，fail-closed |
@@ -72,6 +74,8 @@ KeePasskey 是一款使用原生 Kotlin 开发的现代化 Android 密码管理�
 | [**docs/reference-projects.md**](docs/reference-projects.md) | 参考项目地图：各功能应参照哪个项目的哪些文件 | **实现算法/格式兼容时** |
 | [**docs/references/**](docs/references/) | 5 个参考项目架构分析（KeePassDX / keepass2android / KeePass-2.61.1 / KeePassXC / Monica） | **实现思路借鉴前** |
 | [**docs/KDBX4与复合密钥实战互操作排查日志.md**](docs/KDBX4与复合密钥实战互操作排查日志.md) | KDBX4 + 复合密钥（密码+KeyFile）真机互操作排查记录 | **排查 KDBX 解析/密钥兼容性时** |
+| [**docs/扫码方案评估_ZXing与CameraXMLKit.md**](docs/扫码方案评估_ZXing与CameraXMLKit.md) | 扫码方案评估：**维持 zxing、转条件触发式迁移（T1~T6）** 的决策依据（实测体积/隐私/技术债 + 20 条来源） | **评估扫码依赖、或触发条件命中需迁移时** |
+| [**docs/原生Argon2真机验证记录.md**](docs/原生Argon2真机验证记录.md) | Rust Argon2 原生内核的**设备侧验证记录**（环境探测、测试命令、性能数据、arm64 待填表） | **复核原生 KDF 性能与 R1 闸门时** |
 | `.codebuddy/rules/engineering-rules.md` | **工程规则**：单一职责、敏感数据、Compose 规范、原子写盘、协程调度、防御性安全 | **编写/修改任何代码前** |
 
 ---
@@ -83,8 +87,11 @@ KeePasskey 是一款使用原生 Kotlin 开发的现代化 Android 密码管理�
 - `.\gradlew.bat assembleDebug` — 编译全部模块
 - `.\gradlew.bat :app:compileDebugKotlin` — 仅快速检查 Kotlin 编译
 - `.\gradlew.bat lint` — Android Lint
-- `.\gradlew.bat test` — 单元测试（全模块 `src/test`；当前 **737 例：724 通过 / 0 失败 / 13 跳过**，分布 app 295 / core 48 / crypto 61 / database 175 / sync 158，其中 12 例跳过项需 `-DliveSyncTest` 才启用，1 例为 Windows 无 POSIX 权限视图的缓存权限断言）
-- `.\gradlew.bat test -DliveSyncTest` — 追加启用 `LiveSyncServersTest` 真实联调用例（默认跳过 12 例，需先起 `tools/local-sync` 服务）
+- `.\gradlew.bat test` — 单元测试（全模块 `src/test`；当前 **921 例：908 通过 / 0 失败 / 13 跳过**，分布 app 416 / core 58 / crypto 61 / database 207 / sync 179，其中 12 例跳过项需 `-DliveSyncTest` 才启用，1 例为 Windows 无 POSIX 权限视图的缓存权限断言）
+  - **加 `--rerun-tasks` 可强制真实执行**（否则 Gradle 可能以 UP-TO-DATE 跳过而不产生新证据）
+  - **单会话内勿并发跑 Gradle**：多进程写同一 build 目录会互相截断产物，报 `java.io.EOFException` / `Kryo Buffer underflow` / `NoSuchFileException: in-progress-results-generic.bin`，或令 `app/build/generated/ksp/.../classes` 被并发删除。串行执行并加 `--max-workers=1` 可避免
+- `.\gradlew.bat test -DliveSyncTest` — 追加启用 `LiveSyncServersTest` 真实联调用例（默认跳过 12 例，需先起 `tools/local-sync` 服务；联调凭据为**随机一次性口令**，经 Gradle 配置期求值一次后由 `systemProperty` 下发，服务端需注入同名 `WEBDAV_USER`/`WEBDAV_PASSWORD` 或 `MINIO_ROOT_USER`/`MINIO_ROOT_PASSWORD`）
+- `.\gradlew.bat :crypto:connectedDebugAndroidTest` — **instrumented 测试**（需先起模拟器/真机；当前 x86_64 模拟器 7 例全绿；arm64 待补，见 ISSUE-P3-23）
 - `.\gradlew.bat assembleRelease` — R8 混淆 + 资源收缩发布包（签名配置见 `keystore.properties.example` / 环境变量，未配置时产出未签名包）
 - **Rust 原生内核（ISSUE-P2-14 PoC Batch 1+）**：`cd crypto/src/main/rust && cargo test` — Rust Argon2 内核单测（当前 **9 例全绿**：IETF 官方 KAT ×4 + BC 冻结向量等价 + 参数闸门 + 确定性 + JNI 签名/闸门）
 
@@ -108,6 +115,8 @@ KeePasskey 是一款使用原生 Kotlin 开发的现代化 Android 密码管理�
 - **KDBX 对象树仍整体驻留内存**：解析已流式化，但 `KdbxGroup`/`KdbxEntry` 树仍在内存（增量加载/进度 Flow 为远期项）。
 - **条件写依赖服务端**：AWS S3 原子生效，少数未实现 `If-Match` 覆写的兼容存储降级为 HEAD 预检 + 无条件 PUT；WebDAV `uploadAtomic` 预条件在个别极简 DAV 服务端可能被忽略。
 - **`ProtectedString` 驻留加密为纵深防御层**：对抗堆扫描与崩溃转储中的明文暴露；取得进程密钥或具备任意代码执行能力者仍可在读取瞬间截获明文。
-- **原生 Argon2 为 Rust 内核（体积代价）**：4 ABI 各含 Rust std + rayon + blake2，strip 后 `.so` 约 313~506KB/ABI（原 C 内核约 18~22KB/ABI）；收益是秘密确定性擦除与宿主侧实测 2.2~5.4× 于 BC 的派生速度。真机 arm64 instrumented 验证待设备可用时补（ISSUE-P3-11）。
+- **原生 Argon2 为 Rust 内核（体积代价）**：4 ABI 各含 Rust std + rayon + blake2，strip 后 `.so` 约 313~506KB/ABI（原 C 内核约 18~22KB/ABI）；收益是秘密确定性擦除与**设备侧实测 4.98×~8.42× 于 BC** 的派生速度（x86_64 模拟器，t=2/m=64MiB）。arm64 真机 instrumented 验证与真实 `.kdbx` 语料端到端解锁待补（ISSUE-P3-23）。
+- **`System.loadLibrary` 的顺序依赖**：原生库仅在 `NativeArgon2.available` 的 `by lazy` 内加载，而 `deriveKey` 是 `external fun` → **在 `available` 求值前直接调用 `deriveKey` 会抛 `UnsatisfiedLinkError`**。生产路径不受影响（唯一消费方 `Argon2KdfEngine.transform` 必然先求值 `available`，且 `derive` 已 catch 该错误归一为 `KdfException`）；新增消费方须先判 `available` 或在入口自行确保加载。
+- **窗口级遮挡触摸过滤的覆盖范围**：`FlagSecureGuard.applyObscuredTouchFilter` 作用于 `MainActivity` 的 `decorView`，Android 触摸分发取「最近带该标志的祖先」，故其**全部子屏（含各 ComposeView）已被窗口级覆盖**；真正需要单独接线的是**不经 `MainActivity` 的独立窗口**（如 `BaseCredentialActivity` 系）。另注意该标志**只作用于触摸分发路径**，不拦截无障碍 `ACTION_CLICK`/`performClick`。
 - **浏览器特权白名单**：内置 Chrome 稳定版签名指纹，证书轮换或白名单外浏览器 fail-closed 降级为 apk-key-hash 路径。
 - **外部库导入策略**：经导入复制进内部存储后原地编辑（不写回外部原文件），为当前设计取舍。

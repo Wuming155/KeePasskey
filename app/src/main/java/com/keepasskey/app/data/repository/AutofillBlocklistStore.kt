@@ -16,6 +16,8 @@ import javax.inject.Singleton
  * 黑名单的数据源、持久化与填充侧消费全部缺失（TASK-36 已诚实化下架写死示例条目）。
  * 本仓库补上完整生命周期的数据底座：以包名集合为单位持久化，并对外提供
  * 变更可观察的 [blockedPackages] 与决策用的 [isBlocked]。
+ * ISSUE-P3-15：另提供三态判定 [resolveBlockState]（区分「用户显式屏蔽」与「包名非法被保守拒绝」），
+ * 供交互侧做诚实文案；填充决策仍只认 fail-closed 的 [isBlocked]。
  *
  * 设计约束：
  * - **fail-closed**：仅用于「不填充」这一保守决策，命中即不下发数据集/凭据候选；
@@ -44,10 +46,33 @@ class AutofillBlocklistStore @Inject constructor(
     /** 黑名单快照（按包名升序），供设置页与详情页观察 */
     val blockedPackages: StateFlow<List<String>> = blockedFlow.asStateFlow()
 
-    /** 命中黑名单判定（fail-closed：包名非法一律按已屏蔽处理，绝不因非法输入放行） */
-    fun isBlocked(packageName: String): Boolean {
-        val normalized = normalize(packageName) ?: return true
-        return blockedFlow.value.contains(normalized)
+    /**
+     * 命中黑名单判定（fail-closed：包名非法一律按已屏蔽处理，绝不因非法输入放行）。
+     *
+     * 公开签名与语义一字未改（自动填充服务 / 凭据提供者等填充侧调用方无感知）；
+     * ISSUE-P3-15 起内部委托给三态判定 [resolveBlockState]，并把
+     * [AutofillBlockState.UnidentifiablePackage] 显式映射为 true——
+     * 从而**结构性**保证「文案侧改动不会放宽安全判定」。
+     */
+    fun isBlocked(packageName: String): Boolean = when (resolveBlockState(packageName)) {
+        AutofillBlockState.Blocked, AutofillBlockState.UnidentifiablePackage -> true
+        AutofillBlockState.NotBlocked -> false
+    }
+
+    /**
+     * ISSUE-P3-15：三态判定「包名 → 屏蔽状态」，供需要区分「用户显式屏蔽」与
+     * 「包名非法被保守拒绝」的交互侧使用（如详情页屏蔽入口的文案边界）。
+     *
+     * **严禁**用于放宽填充决策：填充 / 凭据下发链路必须继续调用 fail-closed 的 [isBlocked]。
+     * 本方法为纯读判定，不产生任何写入或持久化副作用。
+     */
+    fun resolveBlockState(packageName: String): AutofillBlockState {
+        val normalized = normalize(packageName) ?: return AutofillBlockState.UnidentifiablePackage
+        return if (blockedFlow.value.contains(normalized)) {
+            AutofillBlockState.Blocked
+        } else {
+            AutofillBlockState.NotBlocked
+        }
     }
 
     /**

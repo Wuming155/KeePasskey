@@ -17,7 +17,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
-import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.ContentPasteGo
@@ -31,8 +30,6 @@ import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.VpnKey
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -58,7 +55,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.keepasskey.app.R
 import com.keepasskey.app.ui.components.BentoCard
 import com.keepasskey.app.ui.screens.settings.SettingsUiState
@@ -204,7 +200,12 @@ fun AutofillSettingsScreen(
                         AutofillSwitchRow(
                             icon = Icons.AutoMirrored.Filled.Undo,
                             title = stringResource(R.string.autofill_auto_return_title),
-                            subtitle = stringResource(R.string.autofill_auto_return_sub),
+                            // ISSUE-P3-03 (43b)：本应用自动填充走系统框架，确认后必然返回原应用，
+                            // 无「查询界面停留」可开关，本轮未接线 → 如实标注
+                            subtitle = stringResource(
+                                R.string.settings_pref_reserved_suffix,
+                                stringResource(R.string.autofill_auto_return_sub)
+                            ),
                             checked = uiState.autoReturnFromQuery,
                             onCheckedChange = onAutoReturnFromQueryToggle
                         )
@@ -247,7 +248,11 @@ fun AutofillSettingsScreen(
                         AutofillSwitchRow(
                             icon = Icons.Default.NotificationsActive,
                             title = stringResource(R.string.autofill_totp_notif_title),
-                            subtitle = stringResource(R.string.autofill_totp_notif_sub),
+                            // ISSUE-P3-03 (43b)：通知通道与 POST_NOTIFICATIONS 声明尚不属本轮范围，未接线 → 如实标注
+                            subtitle = stringResource(
+                                R.string.settings_pref_reserved_suffix,
+                                stringResource(R.string.autofill_totp_notif_sub)
+                            ),
                             checked = uiState.autofillShowTotpNotification,
                             onCheckedChange = onAutofillShowTotpNotificationToggle
                         )

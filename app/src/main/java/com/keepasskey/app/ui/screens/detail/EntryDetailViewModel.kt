@@ -7,12 +7,17 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.keepasskey.app.R
 import com.keepasskey.app.data.logger.DebugLogBuffer
+import com.keepasskey.app.data.repository.AutofillBlockState
+import com.keepasskey.app.data.repository.CustomIconAdmin
 import com.keepasskey.app.data.repository.SettingsRepository
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.ui.screens.settings.ExportArtifactKind
 import com.keepasskey.app.ui.screens.settings.ExportAuditRecorder
 import com.keepasskey.app.ui.screens.settings.ExportConfirmationPolicy
 import com.keepasskey.app.passkey.DomainMatcher
+import com.keepasskey.app.ui.model.EntryDecorations
+import com.keepasskey.app.ui.model.EntryDisplayDispatcher
+import com.keepasskey.app.ui.model.EntryDisplayPresenter
 import com.keepasskey.app.ui.model.UiAttachment
 import com.keepasskey.app.ui.model.UiEntryRevision
 import com.keepasskey.app.ui.model.StringsProvider
@@ -20,7 +25,10 @@ import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.model.UiVaultEntry
 import com.keepasskey.app.util.tickerFlow
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -28,6 +36,8 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -51,7 +61,11 @@ class EntryDetailViewModel @Inject constructor(
     // TASK-21：非 Compose 层文案资源解析通道（生产 DI 注入真实现；单测注入假实现）
     private val stringsProvider: StringsProvider? = null,
     // ISSUE-P2-10 (ZT-15)：导出审计记录通道（生产 DI 注入；单测可缺省）
-    private val debugLog: DebugLogBuffer? = null
+    private val debugLog: DebugLogBuffer? = null,
+    // ISSUE-P3-02：库级自定义图标删除通道（生产 DI 经 CustomIconModule 注入；单测注入假实现）
+    private val customIconAdmin: CustomIconAdmin? = null,
+    // ISSUE-P3-02：展示装配调度器（生产 Dispatchers.Default；单测注入测试调度器保证断言确定性）
+    @EntryDisplayDispatcher private val displayDispatcher: CoroutineDispatcher = Dispatchers.Default
 ) : ViewModel() {
 
     // P3-23：文案解析通道（优先 stringsProvider，其次经 appContext 转发，均缺省时回退空串实现）
@@ -100,6 +114,26 @@ class EntryDetailViewModel @Inject constructor(
         val liveTotpCode: String? = null,
         val strengthBits: Int? = null
     )
+
+    // ISSUE-P3-02（TASK-49）：展示装饰装配器 —— 自定义图标投影（PNG 解码 + 有界缓存复用）
+    // 与 Notes/URL 字段引用展开（仅公开字段，受保护字段恒为掩码）。装配跑 Default 调度器。
+    private val entryDecorations = EntryDisplayPresenter(
+        loadIconBytes = { vaultRepository.getCustomIconBytes() },
+        loadEntries = { vaultRepository.getKdbxEntries() }
+    )
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private val decorationsFlow: Flow<EntryDecorations> = entryIdFlow
+        .flatMapLatest { id ->
+            if (id == null) {
+                flowOf(EntryDecorations.EMPTY)
+            } else {
+                vaultRepository.getEntry(id).map { entry ->
+                    if (entry == null) EntryDecorations.EMPTY else entryDecorations.decorate(entry)
+                }
+            }
+        }
+        .flowOn(displayDispatcher)
 
     @OptIn(ExperimentalCoroutinesApi::class)
     val uiState: StateFlow<EntryDetailUiState> = combine(
@@ -153,6 +187,10 @@ class EntryDetailViewModel @Inject constructor(
                 autofillBoundPackage = boundPackage,
                 isAutofillBlockedForApp = boundPackage != null && blockedPackages.contains(boundPackage)
             )
+        }
+        // ISSUE-P3-02：叠加图标投影与 Notes/URL 引用展开文案（状态层装配，UI 只做纯绘制）
+        .combine(decorationsFlow) { state, decorations ->
+            state.copy(decorations = decorations)
         }
         .stateIn(
             scope = viewModelScope,
@@ -268,22 +306,59 @@ class EntryDetailViewModel @Inject constructor(
      * TASK-44：切换「为本应用禁用自动填充」——写入/移出自动填充黑名单。
      *
      * 仅当条目 URL 携带 `android://<包名>` 绑定（即凭据确有明确归属应用）时可用；
-     * 未绑定应用的条目（如纯 Web 凭据）本入口不呈现，调用亦为 no-op。
+     * 未绑定应用的条目（如纯 Web 凭据）本入口不呈现。
      * 结果经 [userMessageFlow] 如实告知用户（屏蔽 / 恢复），不做乐观谎报。
+     *
+     * ISSUE-P3-15：判定改用三态 [AutofillBlockState]。绑定包名缺失或非法（不可识别）时，
+     * **不执行任何写操作**（不调 add / remove），亦不产出「已屏蔽 / 已恢复」语义，
+     * 只如实提示「无法识别应用标识」——填充侧 fail-closed 判定不受本改动影响。
      */
     fun toggleAutofillBlockForApp() {
-        val packageName = uiState.value.autofillBoundPackage ?: return
-        val nowBlocked = if (autofillBlocklistStore.isBlocked(packageName)) {
-            autofillBlocklistStore.remove(packageName)
-            false
-        } else {
-            autofillBlocklistStore.add(packageName)
-            true
+        val packageName = uiState.value.autofillBoundPackage
+        if (packageName == null) {
+            showUnidentifiablePackageMessage()
+            return
         }
-        userMessageFlow.value = if (nowBlocked) {
-            UiMessage(R.string.detail_autofill_blocked, listOf(packageName))
-        } else {
-            UiMessage(R.string.detail_autofill_unblocked, listOf(packageName))
+        when (autofillBlocklistStore.resolveBlockState(packageName)) {
+            AutofillBlockState.UnidentifiablePackage -> showUnidentifiablePackageMessage()
+            AutofillBlockState.Blocked -> {
+                autofillBlocklistStore.remove(packageName)
+                userMessageFlow.value = UiMessage(R.string.detail_autofill_unblocked, listOf(packageName))
+            }
+            AutofillBlockState.NotBlocked -> {
+                autofillBlocklistStore.add(packageName)
+                userMessageFlow.value = UiMessage(R.string.detail_autofill_blocked, listOf(packageName))
+            }
+        }
+    }
+
+    /** ISSUE-P3-15：不可识别包名的如实提示（不含任何「已屏蔽 / 已恢复」语义） */
+    private fun showUnidentifiablePackageMessage() {
+        userMessageFlow.value = UiMessage(R.string.autofill_block_unidentifiable_package)
+    }
+
+    /**
+     * ISSUE-P3-02（TASK-49）：删除当前条目绑定的库级自定义图标。
+     *
+     * 自定义图标是**库级共享资源**：删除会移除 KDBX Meta 图标池条目，并把全部引用该图标的
+     * 条目回退为默认图标，故 Screen 侧必须先经确认弹窗（[EntryDetailScreen] 的删除确认）；
+     * 只读会话、无绑定图标或缺少注入通道时为 no-op / 如实失败，绝不谎报成功。
+     */
+    fun deleteCustomIcon() {
+        val iconId = uiState.value.entry?.customIconId ?: return
+        if (uiState.value.isReadOnly) return
+        val admin = customIconAdmin
+        if (admin == null) {
+            userMessageFlow.value = UiMessage(R.string.vault_icon_delete_failed)
+            return
+        }
+        viewModelScope.launch {
+            when (val result = admin.deleteCustomIcon(iconId)) {
+                is com.keepasskey.core.result.KdbxResult.Success ->
+                    userMessageFlow.value = UiMessage(R.string.vault_icon_delete_done)
+                is com.keepasskey.core.result.KdbxResult.Failure ->
+                    userMessageFlow.value = UiMessage(R.string.vault_op_failed, listOf(result.message))
+            }
         }
     }
 

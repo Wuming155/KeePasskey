@@ -358,7 +358,12 @@ object KdbxMerger {
         )
     }
 
-    private fun isEntryModified(base: KdbxEntry?, current: KdbxEntry): Boolean {
+    /**
+     * 条目相对 base 是否被修改。
+     * ISSUE-P3-03 (43a)：由 private 放宽为 internal —— 「每次询问」策略的决策清单扩充
+     * （[BothModifiedEntryCollector]）必须复用同一修改判定，避免两处判定口径漂移。
+     */
+    internal fun isEntryModified(base: KdbxEntry?, current: KdbxEntry): Boolean {
         if (base == null) return true
         // ProtectedString.equals 为字节数组内容比较，直接用 Map 相等性判断，
         // 不经 readString() 将全库密码物化为不可清除的 String

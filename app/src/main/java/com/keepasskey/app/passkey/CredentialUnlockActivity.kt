@@ -10,6 +10,7 @@ import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
 import com.keepasskey.app.data.repository.SettingsRepository
 import com.keepasskey.app.data.repository.VaultRepository
+import com.keepasskey.app.security.ApplyObscuredTouchFilter
 import com.keepasskey.app.security.FlagSecureGuard
 import com.keepasskey.app.ui.screens.unlock.UnlockScreen
 import com.keepasskey.core.log.AppLog
@@ -86,6 +87,8 @@ class CredentialUnlockActivity : FragmentActivity() {
             if (completed) return@launch
             val settings = settingsRepository.getSettings().first()
             setContent {
+                // 遮挡触摸过滤（ISSUE-P2-09 / P3-12）
+                ApplyObscuredTouchFilter()
                 UnlockScreen(
                     currentTheme = settings.themeMode,
                     onThemeToggle = { /* 链式解锁场景不提供主题切换 */ },

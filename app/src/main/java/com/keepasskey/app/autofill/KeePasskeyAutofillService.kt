@@ -3,7 +3,6 @@ package com.keepasskey.app.autofill
 import android.app.PendingIntent
 import android.app.assist.AssistStructure
 import android.content.Intent
-import android.graphics.drawable.Icon
 import android.os.CancellationSignal
 import android.service.autofill.AutofillService
 import android.service.autofill.Dataset
@@ -19,11 +18,7 @@ import android.service.autofill.SaveRequest
 import android.view.autofill.AutofillId
 import android.view.autofill.AutofillValue
 import android.widget.RemoteViews
-import android.widget.inline.InlinePresentationSpec
 import android.view.inputmethod.InlineSuggestionsRequest
-import androidx.autofill.inline.UiVersions
-import androidx.autofill.inline.v1.InlineSuggestionUi
-import com.keepasskey.app.MainActivity
 import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.passkey.DomainMatcher
@@ -72,6 +67,10 @@ class KeePasskeyAutofillService : AutofillService() {
     // ISSUE-P2-07：webDomain 归属解析（受信浏览器白名单 / DAL 校验，无法验证即 fail-closed）
     @Inject
     lateinit var autofillOriginResolver: AutofillOriginResolver
+
+    // ISSUE-P3-03 (43b)：IME 内联建议展示构建器（受 inlineSuggestionsEnabled 偏好闸门约束）
+    @Inject
+    lateinit var inlinePresentationFactory: AutofillInlinePresentationFactory
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
@@ -274,13 +273,15 @@ class KeePasskeyAutofillService : AutofillService() {
                     .build()
             )
             // 每个数据集独立 requestCode，避免 PendingIntent 因 extras 相互覆盖
+            // ISSUE-P3-03 (43b)：随确认入口下传条目标识，供 autofillCopyTotp
+            // 在用户确认后按条目取 TOTP（不物化明文，仅传标识）
             val confirmPendingIntent = PendingIntent.getActivity(
                 this,
                 REQUEST_CODE_CONFIRM_BASE + index,
                 confirmIntent.putExtra(
                     AutofillConfirmActivity.EXTRA_CREDENTIAL_TITLE,
                     username.ifBlank { entry.title }
-                ),
+                ).putExtra(AutofillConfirmActivity.EXTRA_ENTRY_ID, entryIdHex),
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
             )
             if (usernameId != null && username.isNotEmpty()) {
@@ -312,40 +313,16 @@ class KeePasskeyAutofillService : AutofillService() {
 
     /**
      * 构建 IME 内联建议展示（官方 androidx.autofill.inline v1 内容模型 → Slice）。
-     * 请求侧未携带 [InlineSuggestionsRequest]、IME spec 未声明 v1 UI 模板或构建失败时
-     * 返回 null，调用方 Dataset 不携带内联展示，自动回退为下拉/填充对话框呈现。
+     *
+     * ISSUE-P3-03 (43b)：`inlineSuggestionsEnabled` 经 [AutofillInlinePresentationFactory]
+     * 真实生效——开关关闭时恒返回 null，调用方 Dataset 不携带内联展示，
+     * 自动回退为下拉/填充对话框呈现。构建细节已下沉至该工厂（单一职责）。
      */
     private fun buildInlinePresentation(
         inlineRequest: InlineSuggestionsRequest?,
         title: CharSequence,
         subtitle: CharSequence
-    ): InlinePresentation? {
-        if (inlineRequest == null) return null
-        val spec: InlinePresentationSpec = inlineRequest.inlinePresentationSpecs.firstOrNull()
-            ?: return null
-        return try {
-            // 官方裁决：仅当 IME spec 声明支持 v1 UI 模板时才构建 Slice
-            if (!UiVersions.getVersions(spec.style).contains(UiVersions.INLINE_UI_VERSION_1)) {
-                return null
-            }
-            // v1 内容构建器要求 attribution PendingIntent（系统内联卡片上打开提供方应用的入口）
-            val attribution = PendingIntent.getActivity(
-                this,
-                REQUEST_CODE_INLINE_ATTRIBUTION,
-                Intent(this, MainActivity::class.java),
-                PendingIntent.FLAG_IMMUTABLE
-            )
-            val content = InlineSuggestionUi.newContentBuilder(attribution)
-                .setTitle(title)
-                .setSubtitle(subtitle)
-                .setStartIcon(Icon.createWithResource(this, R.drawable.ic_launcher))
-                .build()
-            InlinePresentation(content.slice, spec, false)
-        } catch (t: Throwable) {
-            AppLog.w(TAG, "构建 InlinePresentation 失败，回退下拉展示", t)
-            null
-        }
-    }
+    ): InlinePresentation? = inlinePresentationFactory.build(inlineRequest, title, subtitle)
 
     override fun onSaveRequest(
         request: SaveRequest,
@@ -502,7 +479,6 @@ class KeePasskeyAutofillService : AutofillService() {
         private const val AUTOFILL_TIMEOUT_MS = 4_000L
         private const val MAX_DATASET_COUNT = 8
         private const val REQUEST_CODE_UNLOCK = 2001
-        private const val REQUEST_CODE_INLINE_ATTRIBUTION = 2002
         /** TASK-11：已解锁分支二次确认数据集的 PendingIntent requestCode 基址 */
         private const val REQUEST_CODE_CONFIRM_BASE = 2100
 

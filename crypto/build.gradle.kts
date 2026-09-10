@@ -32,6 +32,9 @@ android {
     compileSdk = 37
     defaultConfig {
         minSdk = 36
+        // ISSUE-P3-11：crypto 模块首次引入 androidTest（instrumented）源集，
+        // 用于在设备/模拟器上真实加载 APK 内 libkeepasskey_argon2.so 做运行时验证。
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk {
             // 与 cargo-ndk 产出的 4 ABI 对齐，显式声明避免歧义
             abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
@@ -83,6 +86,12 @@ dependencies {
     implementation(libs.bouncycastle)
 
     testImplementation(libs.junit)
+
+    // ISSUE-P3-11：androidTest（instrumented）源集依赖 —— 仅 androidx.test.*，不引入其他第三方库。
+    // 目的是把「APK 内 .so 能否在真实 Android 运行时加载并逐字节复现 BC 冻结向量」从打包期证据
+    // 升级为运行时证据（此前仅宿主侧 Batch 4 桌面单测覆盖，见风险 R6）。
+    androidTestImplementation(libs.androidx.test.ext.junit)
+    androidTestImplementation(libs.androidx.test.runner)
 }
 
 // Rust 迁移 PoC · Batch 4：宿主侧（桌面 JVM）原生运行时验证。

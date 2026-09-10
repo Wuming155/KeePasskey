@@ -69,6 +69,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 import com.keepasskey.app.R
+import com.keepasskey.app.security.ApplyObscuredTouchFilter
 import com.keepasskey.app.ui.components.BentoCard
 import com.keepasskey.app.ui.components.IconPickerDialog
 import com.keepasskey.app.ui.components.PasswordStrengthBar
@@ -131,6 +132,8 @@ fun EntryEditScreen(
     modifier: Modifier = Modifier,
     viewModel: EntryEditViewModel = hiltViewModel()
 ) {
+    // 遮挡触摸过滤（ISSUE-P2-09 / P3-12）
+    ApplyObscuredTouchFilter()
     LaunchedEffect(entryId) {
         if (entryId != null) {
             viewModel.loadEntry(entryId)

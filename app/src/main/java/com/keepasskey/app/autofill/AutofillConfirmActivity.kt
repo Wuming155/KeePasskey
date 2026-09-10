@@ -4,13 +4,20 @@ import android.os.Bundle
 import android.view.WindowManager
 import androidx.activity.compose.setContent
 import androidx.fragment.app.FragmentActivity
+import androidx.lifecycle.lifecycleScope
 import com.keepasskey.app.R
+import com.keepasskey.app.data.repository.ExtendedSettingsStore
+import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.passkey.CredentialFillConfirmScreen
 import com.keepasskey.app.security.ApplyObscuredTouchFilter
 import com.keepasskey.app.security.BiometricAuthManager
 import com.keepasskey.app.security.BiometricResult
 import com.keepasskey.app.security.BiometricStatus
+import com.keepasskey.app.security.ClipboardSecurityManager
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Inject
 
 /**
@@ -24,12 +31,25 @@ import javax.inject.Inject
  *
  * 安全窗口加固（对齐 AutofillUnlockActivity）：FLAG_SECURE 防截屏录屏 +
  * setHideOverlayWindows 屏蔽悬浮窗覆盖（反 overlay 攻击）。
+ *
+ * ISSUE-P3-03 (43b)：确认通过后按 `autofillCopyTotp` 偏好把该条目的 TOTP 动态码
+ * 写入受保护剪贴板（`EXTRA_IS_SENSITIVE` + 定时自动擦除），兑现设置页
+ * 「填充后自动将 TOTP 动态码复制到剪贴板」承诺。
  */
 @AndroidEntryPoint
 class AutofillConfirmActivity : FragmentActivity() {
 
     @Inject
     lateinit var biometricAuthManager: BiometricAuthManager
+
+    @Inject
+    lateinit var vaultRepository: VaultRepository
+
+    @Inject
+    lateinit var clipboardSecurityManager: ClipboardSecurityManager
+
+    @Inject
+    lateinit var settingsStore: ExtendedSettingsStore
 
     private var completed = false
 
@@ -81,15 +101,58 @@ class AutofillConfirmActivity : FragmentActivity() {
         }
     }
 
+    /**
+     * 完成认证并回传结果。
+     *
+     * ISSUE-P3-03 (43b)：先按偏好尝试复制 TOTP 动态码，再回传 RESULT_OK——复制带硬超时
+     * 兜底（[TOTP_COPY_TIMEOUT_MS]），任何异常/超时都不阻断填充；不复制时（开关关闭、
+     * 条目无 TOTP、库已锁定）不触碰剪贴板。
+     */
     private fun completeAuthResult() {
         if (completed) return
         completed = true
-        // 官方认证数据集语义：RESULT_OK 后框架才会把该数据集的值写入目标表单
-        setResult(RESULT_OK)
-        finish()
+        lifecycleScope.launch {
+            try {
+                copyTotpIfEnabled()
+            } finally {
+                // 官方认证数据集语义：RESULT_OK 后框架才会把该数据集的值写入目标表单
+                setResult(RESULT_OK)
+                finish()
+            }
+        }
+    }
+
+    private suspend fun copyTotpIfEnabled() {
+        val entryId = intent.getStringExtra(EXTRA_ENTRY_ID)?.takeIf { it.isNotBlank() } ?: return
+        if (!settingsStore.isAutofillCopyTotpEnabled()) return
+        // 硬超时：TOTP 计算属纯 HMAC 运算（毫秒级），超时即放弃复制，绝不拖住填充回传；
+        // 取消异常必须继续上抛（不得被结果兜底吞掉，否则协程取消语义被破坏）
+        val snapshot = withTimeoutOrNull(TOTP_COPY_TIMEOUT_MS) {
+            try {
+                vaultRepository.calculateEntryTotp(entryId)
+            } catch (c: CancellationException) {
+                throw c
+            } catch (t: Throwable) {
+                null
+            }
+        }
+        val code = snapshot
+            ?.takeIf { AutofillTotpCopyPolicy.shouldCopy(copyTotpEnabled = true, snapshot = it) }
+            ?.code
+            ?: return
+        clipboardSecurityManager.copySensitiveText(
+            label = getString(R.string.autofill_totp_clip_label),
+            text = code
+        )
     }
 
     companion object {
         const val EXTRA_CREDENTIAL_TITLE = "com.keepasskey.app.autofill.EXTRA_CREDENTIAL_TITLE"
+
+        /** ISSUE-P3-03 (43b)：被填充条目的标识，供确认后按条目取 TOTP */
+        const val EXTRA_ENTRY_ID = "com.keepasskey.app.autofill.EXTRA_ENTRY_ID"
+
+        /** 复制 TOTP 的硬超时预算：超出即放弃复制，保证填充回传不被拖慢 */
+        private const val TOTP_COPY_TIMEOUT_MS = 500L
     }
 }

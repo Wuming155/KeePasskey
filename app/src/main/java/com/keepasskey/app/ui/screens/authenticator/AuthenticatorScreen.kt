@@ -1,6 +1,5 @@
 package com.keepasskey.app.ui.screens.authenticator
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -25,7 +24,6 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.QrCode
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Card
@@ -49,7 +47,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -59,8 +56,8 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.keepasskey.app.R
+import com.keepasskey.app.security.ApplyObscuredTouchFilter
 import com.keepasskey.app.ui.model.resolveText
-import com.keepasskey.app.ui.components.BentoCard
 import com.keepasskey.app.ui.components.getVaultIcon
 import com.keepasskey.app.ui.theme.CapsuleShape
 import com.keepasskey.app.ui.theme.MonospaceTotpStyle
@@ -75,6 +72,8 @@ fun AuthenticatorScreen(
     modifier: Modifier = Modifier,
     viewModel: AuthenticatorViewModel = hiltViewModel()
 ) {
+    // 遮挡触摸过滤（ISSUE-P2-09 / P3-12）
+    ApplyObscuredTouchFilter()
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
 

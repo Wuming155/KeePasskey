@@ -3,7 +3,9 @@ package com.keepasskey.app.sync
 import android.content.Context
 import com.keepasskey.app.R
 import com.keepasskey.app.data.logger.DebugLogBuffer
+import com.keepasskey.app.data.repository.ExtendedSettingsStore
 import com.keepasskey.app.ui.screens.settings.CloudSyncProvider
+import com.keepasskey.app.ui.screens.settings.ExtendedSettings
 import com.keepasskey.core.model.DeletedObject
 import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.core.model.KdbxEntry
@@ -20,13 +22,18 @@ import com.keepasskey.sync.engine.SyncCacheEvent
 import com.keepasskey.sync.engine.SyncCommitResult
 import com.keepasskey.sync.engine.SyncEngine
 import com.keepasskey.sync.engine.SyncOpenResult
+import com.keepasskey.sync.merge.BothModifiedEntryCollector
+import com.keepasskey.sync.merge.ConflictDisposition
 import com.keepasskey.sync.merge.ConflictResolutionChoice
+import com.keepasskey.sync.merge.ConflictStrategyPolicy
 import com.keepasskey.sync.merge.ConflictedEntryPair
 import com.keepasskey.sync.merge.KdbxDatabaseLite
 import com.keepasskey.sync.merge.KdbxMerger
+import com.keepasskey.sync.merge.SyncConflictStrategy
 import com.keepasskey.sync.model.SyncException
 import com.keepasskey.sync.model.cleanEtag
 import com.keepasskey.sync.network.SyncNetworkOptions
+import com.keepasskey.sync.network.SyncTransferOptions
 import com.keepasskey.sync.provider.SyncProvider
 import com.keepasskey.sync.s3.S3SyncProvider
 import com.keepasskey.sync.webdav.WebDavSyncProvider
@@ -85,7 +92,13 @@ open class SyncCoordinator @Inject constructor(
     private val syncCredentialsStore: SyncCredentialsStore,
     private val debugLog: DebugLogBuffer,
     // TASK-21：用户可见错误消息经 StringsProvider 资源解析（P3-23；单测注入假实现）
-    private val strings: com.keepasskey.app.ui.model.StringsProvider? = null
+    private val strings: com.keepasskey.app.ui.model.StringsProvider? = null,
+    /**
+     * ISSUE-P3-03 (43a/43f)：进阶同步偏好源（分块上传、上传前远端比对、冲突策略、详细日志）。
+     * 可空 + 默认 null 仅为保持既有单测构造点兼容——null 时全部按 [ExtendedSettings] 默认值
+     * 处理（即接线前的行为），生产路径由 Hilt 注入真实偏好源。
+     */
+    private val extendedSettingsStore: ExtendedSettingsStore? = null
 ) : SessionLockObserver {
     private val effectiveStrings: com.keepasskey.app.ui.model.StringsProvider =
         strings ?: com.keepasskey.app.ui.model.StringsProvider { id, args -> context.getString(id, *args) }
@@ -172,6 +185,28 @@ open class SyncCoordinator @Inject constructor(
         isOfflineMode = enabled
     }
 
+    /** 当前生效的进阶偏好（无偏好源时回落默认值，语义等价于接线前的固定行为）。 */
+    private fun currentSettings(): ExtendedSettings = extendedSettingsStore?.load() ?: ExtendedSettings()
+
+    /**
+     * ISSUE-P3-03 (43f)：详细同步日志——仅在用户开启「详细日志模式」时追加过程细节。
+     *
+     * 依赖关系说明（与设置页文案一致）：日志总开关（诊断日志）独立生效，本模式是
+     * **叠加层**——总开关关闭时缓冲整条丢弃，详细模式不会单方面恢复记录。
+     */
+    private fun verbose(settings: ExtendedSettings, message: String) {
+        if (settings.verboseSyncLog) debugLog.debug(TAG, message)
+    }
+
+    /** ISSUE-P3-03 (43a)：偏好 → 传输层配置（依赖倒置；sync 模块不感知 app 偏好类型） */
+    private fun transferOptions(): SyncTransferOptions {
+        val settings = currentSettings()
+        return SyncTransferOptions.fromPreferences(
+            chunkedUploadEnabled = settings.webdavChunkedUpload,
+            chunkSizeMb = settings.webdavChunkSizeMb
+        )
+    }
+
     /**
      * 执行全量即时同步
      */
@@ -212,16 +247,28 @@ open class SyncCoordinator @Inject constructor(
         try {
         val remotePath = testRemotePath ?: resolveRemotePath(activeFile.name)
 
+        // ISSUE-P3-03 (43a)：本次同步周期使用的偏好快照与冲突策略（周期内恒定，避免中途偏好漂移）
+        val settings = currentSettings()
+        val conflictStrategy = settings.conflictResolution.toSyncStrategy()
+
         // ISSUE-P1-07：目录名与 SyncCacheEvictor 共用同一常量，杜绝两处字面量漂移
         val syncDir = File(context.cacheDir, SyncCache.CACHE_DIR_NAME).apply { if (!exists()) mkdirs() }
         val syncCache = SyncCache(syncDir)
         val syncEngine = SyncEngine(provider, syncCache)
         // 离线开关联动：设置页开关传导至引擎决策树
         syncEngine.isOffline = isOfflineMode
+        // ISSUE-P3-03 (43a)：关闭「同步前检查远程变更」= 上传前不比对方版本，本地修改直接覆盖远端
+        syncEngine.overwriteRemoteWithoutPrecondition = !settings.checkRemoteChangesBeforeSave
         lastSyncEngine = syncEngine
 
         val isCached = syncCache.isCached(remotePath)
         val cachedSnapshotBytes = if (isCached) syncCache.readCache(remotePath) else null
+        verbose(
+            settings,
+            "同步周期开始: cached=$isCached, dirty=${databaseSession.state.value}, " +
+                "远端比对=${settings.checkRemoteChangesBeforeSave}, 冲突策略=$conflictStrategy, " +
+                "分块上传=${settings.webdavChunkedUpload}(${settings.webdavChunkSizeMb}MB)"
+        )
         // A2 整改：三方合并的 base 必须取"最后确认与远端一致"的独立内容快照（basecache）。
         // 本地缓存会被工作副本反复覆盖，绝不能再兼任 base 内容来源——
         // 否则冲突会话中断后 base 会被本地修改版污染，后续合并退化为远端全胜
@@ -264,7 +311,16 @@ open class SyncCoordinator @Inject constructor(
 
         // 3. 若本地为未落盘的修改态且本地已存在历史缓存基线，尝试快速提交
         if (isDirty && syncCache.isCached(remotePath)) {
-            when (val commitResult = syncEngine.commitLocal(remotePath, localBytes)) {
+            verbose(settings, "命中快速提交路径（本地未落盘修改 + 已有缓存基线）")
+            // ISSUE-P3-03 (43a)：用户关闭「同步前检查远程变更」时走无预条件覆盖上传
+            // （不做 ETag 比对，本地版本直接覆盖远端）；默认开启时保持乐观锁语义不变
+            val commitResult = if (settings.checkRemoteChangesBeforeSave) {
+                syncEngine.commitLocal(remotePath, localBytes)
+            } else {
+                verbose(settings, "已关闭上传前远端比对：无 ETag 预条件覆盖上传")
+                syncEngine.commitLocalForce(remotePath, localBytes)
+            }
+            when (commitResult) {
                 is SyncCommitResult.Uploaded -> {
                     // H3 整改：缓存已上传云端但本地正式文件保存失败时如实报错，不再静默
                     val saveResult = databaseSession.save()
@@ -280,14 +336,24 @@ open class SyncCoordinator @Inject constructor(
                     // R3 整改：本地未同步修改必须先落盘正式库文件——冲突会话可能在
                     // 用户退出/进程被杀时中断，仅存于缓存与内存的本地修改会随重启丢失
                     databaseSession.save()
-                    return@withLock handleConflictMerge(
+                    // ISSUE-P3-03 (43a)：先应用「以云端为准 / 以本地为准」强制策略；
+                    // 返回 null（自动合并 / 每次询问）时继续走三方合并。
+                    // 必须整体 return —— 强制策略的结果就是本次同步结论，不得落入后续分支
+                    return@withLock applyForcedConflictStrategy(
+                        strategy = conflictStrategy,
+                        syncEngine = syncEngine,
+                        remotePath = remotePath,
+                        localBytes = localBytes,
+                        remoteBytes = commitResult.remoteBytes
+                    ) ?: handleConflictMerge(
                         syncEngine = syncEngine,
                         syncCache = syncCache,
                         remotePath = remotePath,
                         localBytes = localBytes,
                         remoteBytes = commitResult.remoteBytes,
                         baseSnapshotBytes = baseSnapshotBytes,
-                        remoteEtag = commitResult.remoteEtag
+                        remoteEtag = commitResult.remoteEtag,
+                        strategy = conflictStrategy
                     )
                 }
                 is SyncCommitResult.RemoteUnreachable -> {
@@ -325,7 +391,8 @@ open class SyncCoordinator @Inject constructor(
                             localBytes = localBytes,
                             remoteBytes = openResult.remoteBytes,
                             baseSnapshotBytes = baseSnapshotBytes,
-                            remoteEtag = openResult.etag
+                            remoteEtag = openResult.etag,
+                            strategy = conflictStrategy
                         )
                     } else {
                         val applied = loadAndApplyRemoteBytes(openResult.remoteBytes)
@@ -356,14 +423,22 @@ open class SyncCoordinator @Inject constructor(
                             effectiveStrings.get(R.string.sync_error_conflict_presave_failed, preSave.message)
                         )
                     }
-                    handleConflictMerge(
+                    // ISSUE-P3-03 (43a)：强制策略优先；null 表示继续三方合并
+                    applyForcedConflictStrategy(
+                        strategy = conflictStrategy,
+                        syncEngine = syncEngine,
+                        remotePath = remotePath,
+                        localBytes = openResult.localBytes,
+                        remoteBytes = openResult.remoteBytes
+                    ) ?: handleConflictMerge(
                         syncEngine = syncEngine,
                         syncCache = syncCache,
                         remotePath = remotePath,
                         localBytes = openResult.localBytes,
                         remoteBytes = openResult.remoteBytes,
                         baseSnapshotBytes = baseSnapshotBytes,
-                        remoteEtag = openResult.remoteEtag
+                        remoteEtag = openResult.remoteEtag,
+                        strategy = conflictStrategy
                     )
                 }
             }
@@ -458,6 +533,57 @@ open class SyncCoordinator @Inject constructor(
         }
     }
 
+    /**
+     * 冲突触达点上的强制策略应用（ISSUE-P3-03 43a）。
+     *
+     * 「以云端为准」/「以本地为准」是单方强制策略：不做三方合并，直接落到一侧，
+     * 用户在下拉选择时已由设置页文案明示「另一方修改将被覆盖」。
+     *
+     * @return 已处理的同步结果；返回 null 表示本策略不停机处理
+     *   （自动合并 / 每次询问），调用方继续走三方合并流程。
+     */
+    private suspend fun applyForcedConflictStrategy(
+        strategy: SyncConflictStrategy,
+        syncEngine: SyncEngine,
+        remotePath: String,
+        localBytes: ByteArray,
+        remoteBytes: ByteArray
+    ): SyncOutcome? = when (ConflictStrategyPolicy.dispositionOf(strategy)) {
+        ConflictDisposition.TakeRemote -> {
+            debugLog.warn(TAG, "冲突解决策略=以云端为准：放弃本地未同步修改，采用远端版本")
+            val applied = loadAndApplyRemoteBytes(remoteBytes)
+            if (!applied) {
+                SyncOutcome.Error(effectiveStrings.get(R.string.sync_error_load_remote_failed))
+            } else {
+                lastSyncedDb = databaseSession.databaseFlow.value
+                SyncOutcome.UpToDate
+            }
+        }
+        ConflictDisposition.TakeLocal -> {
+            debugLog.warn(TAG, "冲突解决策略=以本地为准：本地版本覆盖云端")
+            when (syncEngine.commitLocalForce(remotePath, localBytes)) {
+                is SyncCommitResult.Uploaded -> {
+                    val saveResult = databaseSession.save()
+                    if (saveResult is KdbxResult.Failure) {
+                        SyncOutcome.Error(
+                            effectiveStrings.get(
+                                R.string.sync_error_remote_updated_local_save_failed,
+                                saveResult.message
+                            )
+                        )
+                    } else {
+                        lastSyncedDb = databaseSession.databaseFlow.value
+                        SyncOutcome.UploadedLocal
+                    }
+                }
+                // 强制上传路径无冲突分支：上传失败只可能是远端不可达
+                is SyncCommitResult.RemoteUnreachable -> SyncOutcome.Offline
+                is SyncCommitResult.ConflictNeedsMerge -> SyncOutcome.Offline
+            }
+        }
+        ConflictDisposition.AutoMerge, ConflictDisposition.PromptUser -> null
+    }
+
     private fun clearPendingConflictSession() {
         _conflictFlow.value = emptyList()
         pendingRemoteEngine = null
@@ -494,10 +620,19 @@ open class SyncCoordinator @Inject constructor(
         val recent = engine.events.replayCache
         if (recent.isEmpty()) return
         _recentSyncEvents.value = recent
+        val settings = currentSettings()
         recent.forEach { event ->
             _syncEvents.tryEmit(event)
             debugLog.info(TAG, "缓存监督事件: ${describeCacheEvent(event)}")
+            verbose(settings, "缓存监督事件明细: ${describeCacheEventVerbose(event)}")
         }
+    }
+
+    /** ISSUE-P3-03 (43f)：详细模式下追加事件类型与远端路径（普通模式只记摘要行）。 */
+    private fun describeCacheEventVerbose(event: SyncCacheEvent): String = when (event) {
+        is SyncCacheEvent.CouldntSaveToRemote -> "CouldntSaveToRemote path=${event.remotePath} cause=${event.cause?.javaClass?.simpleName}"
+        is SyncCacheEvent.CouldntOpenFromRemote -> "CouldntOpenFromRemote path=${event.remotePath} cause=${event.cause?.javaClass?.simpleName}"
+        else -> describeCacheEvent(event)
     }
 
     private fun describeCacheEvent(event: SyncCacheEvent): String = when (event) {
@@ -521,7 +656,8 @@ open class SyncCoordinator @Inject constructor(
         localBytes: ByteArray,
         remoteBytes: ByteArray,
         baseSnapshotBytes: ByteArray? = null,
-        remoteEtag: String = ""
+        remoteEtag: String = "",
+        strategy: SyncConflictStrategy = SyncConflictStrategy.AUTO_MERGE
     ): SyncOutcome = withContext(Dispatchers.Default) {
         val localDb = parseKdbxBytes(localBytes)
             ?: return@withContext SyncOutcome.Error(effectiveStrings.get(R.string.sync_error_decrypt_local_conflict_failed))
@@ -538,16 +674,30 @@ open class SyncCoordinator @Inject constructor(
         val parsedBase = baseSnapshotBytes?.let { parseKdbxBytes(it) }
         val trustedBase = parsedBase?.takeIf { !baseSnapshotBytes.contentEquals(localBytes) }
 
-        val baseLite = trustedBase
-            ?.let { KdbxDatabaseLite(it.rootGroup, it.deletedObjects) }
-            ?: KdbxDatabaseLite(KdbxGroup(name = ""), emptyList())
+        val trustedBaseLite = trustedBase?.let { KdbxDatabaseLite(it.rootGroup, it.deletedObjects) }
+        val baseLite = trustedBaseLite ?: KdbxDatabaseLite(KdbxGroup(name = ""), emptyList())
         val localLite = KdbxDatabaseLite(localDb.rootGroup, localDb.deletedObjects)
         val remoteLite = KdbxDatabaseLite(remoteDb.rootGroup, remoteDb.deletedObjects)
 
         val mergeResult = KdbxMerger.mergeDatabases(baseLite, localLite, remoteLite)
 
-        if (mergeResult.conflicts.isNotEmpty()) {
-            _conflictFlow.value = mergeResult.conflicts
+        // ISSUE-P3-03 (43a)：PROMPT_USER（每次询问）把「双方各自修改过的条目」一并纳入决策清单，
+        // 而不是只问同字段分歧的条目；其余策略沿用合并引擎给出的冲突清单
+        val decisionConflicts = if (ConflictStrategyPolicy.dispositionOf(strategy) ==
+            ConflictDisposition.PromptUser
+        ) {
+            BothModifiedEntryCollector.collect(
+                trustedBase = trustedBaseLite,
+                local = localLite,
+                remote = remoteLite,
+                alreadyConflicted = mergeResult.conflicts
+            )
+        } else {
+            mergeResult.conflicts
+        }
+
+        if (decisionConflicts.isNotEmpty()) {
+            _conflictFlow.value = decisionConflicts
             pendingRemoteEngine = syncEngine
             pendingRemotePath = remotePath
             pendingLocalDb = localDb
@@ -555,7 +705,7 @@ open class SyncCoordinator @Inject constructor(
             pendingMergedRoot = mergeResult.mergedRoot
             pendingMergedTombstones = mergeResult.mergedDeletedObjects
             pendingRemoteEtag = cleanEtag(remoteEtag)
-            SyncOutcome.ConflictNeedsUser(mergeResult.conflicts)
+            SyncOutcome.ConflictNeedsUser(decisionConflicts)
         } else {
             // 无条目级冲突，自动合并
             val mergedDb = localDb.copy(
@@ -641,7 +791,9 @@ open class SyncCoordinator @Inject constructor(
                         passwordChars = cfg.password,
                         // Wave 14 传输安全：TLS-only + 显式超时；证书固定已整体移除，
                         // 证书验证完全依赖系统默认 CA 链（客户端由 sync 模块工厂构建）
-                        networkOptions = SyncNetworkOptions()
+                        networkOptions = SyncNetworkOptions(),
+                        // ISSUE-P3-03 (43a)：分块上传偏好经纯数据契约下传（依赖倒置）
+                        transferOptions = transferOptions()
                     )
                 } finally {
                     cfg.password.fill('0')

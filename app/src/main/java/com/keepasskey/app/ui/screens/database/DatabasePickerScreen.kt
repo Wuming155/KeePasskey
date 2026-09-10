@@ -32,8 +32,6 @@ import androidx.compose.material.icons.filled.FileOpen
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Storage
-import androidx.compose.material.icons.filled.Visibility
-import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -68,12 +66,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import com.keepasskey.app.ui.components.SecurePasswordField
-import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.keepasskey.app.R
+import com.keepasskey.app.security.ApplyObscuredTouchFilter
 import com.keepasskey.app.ui.model.resolveText
 import com.keepasskey.app.ui.model.VaultDatabaseInfo
 import com.keepasskey.app.ui.theme.CapsuleShape
@@ -86,6 +84,8 @@ fun DatabasePickerScreen(
     modifier: Modifier = Modifier,
     viewModel: DatabasePickerViewModel = hiltViewModel()
 ) {
+    // 遮挡触摸过滤（ISSUE-P2-09 / P3-12）
+    ApplyObscuredTouchFilter()
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
 

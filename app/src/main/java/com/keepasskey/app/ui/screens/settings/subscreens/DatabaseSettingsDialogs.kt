@@ -211,6 +211,12 @@ internal fun ChildDatabaseDialog(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                // ISSUE-P3-03 (43e)：子库挂载属大特性，本轮未实现，如实说明
+                Text(
+                    text = stringResource(R.string.dbset_child_db_reserved_note),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error
+                )
                 OutlinedButton(
                     onClick = {
                         onDismiss()
@@ -293,6 +299,12 @@ internal fun ImportSourceDialog(
         title = { Text(stringResource(R.string.dbset_import_dialog_title)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                // ISSUE-P3-03 (43d)：导入解析器尚未实现，如实说明——不得让用户以为选中即会导入
+                Text(
+                    text = stringResource(R.string.dbset_import_reserved_note),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error
+                )
                 listOf(
                     stringResource(R.string.dbset_src_1pux),
                     stringResource(R.string.dbset_src_bitwarden),

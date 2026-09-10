@@ -142,6 +142,19 @@ class SyncEngine(
     var isOffline: Boolean = false
 
     /**
+     * 「上传前不比对云端版本」开关（ISSUE-P3-03 43a：`checkRemoteChangesBeforeSave = false`）。
+     *
+     * 开启后，本地存在修改时**跳过远端一致性裁决与 ETag 预条件**，直接以本地内容覆盖远端，
+     * 语义退化为最后写入者胜——这正是用户关闭「同步前检查远程变更」时所表达的意图。
+     * 默认关闭：接线前的行为（乐观锁 + 冲突检测）保持不变。
+     *
+     * 与 [isOffline] 同构的单布尔跨协程可见性声明（调用方 SyncCoordinator 已用 mutex
+     * 串行化同步周期，此处仅补齐可见性防御）。
+     */
+    @Volatile
+    var overwriteRemoteWithoutPrecondition: Boolean = false
+
+    /**
      * 打开远程数据库决策树。
      *
      * 1. 未缓存 -> 下载 + 写缓存 + 基线设为远端 ETag -> [SyncOpenResult.RemoteSynced]
@@ -263,6 +276,23 @@ class SyncEngine(
             }
         } else {
             // 本地有修改
+            if (overwriteRemoteWithoutPrecondition) {
+                // ISSUE-P3-03 43a：用户关闭「上传前比对云端版本」→ 不做远端一致性裁决、
+                // 不带 ETag 预条件，本地内容直接覆盖远端（最后写入者胜）。
+                // 缓存已保存本地内容，上传失败时本地修改仍安全保留在缓存中。
+                val forcedUpload = provider.uploadAtomic(remotePath, cachedBytes, expectedEtag = null)
+                if (forcedUpload.isSuccess) {
+                    val newEtag = forcedUpload.getOrThrow()
+                    val localHash = state?.localVersion ?: SyncCache.sha256Hex(cachedBytes)
+                    cache.updateBase(remotePath, localHash, newEtag)
+                    cache.writeBaseContent(remotePath, cachedBytes)
+                    events.tryEmit(SyncCacheEvent.UpdatedRemoteFileOnLoad(remotePath))
+                    return@withContext SyncOpenResult.LocalWinAutoUploaded(newEtag)
+                }
+                val forcedEx = forcedUpload.exceptionOrNull()
+                events.tryEmit(SyncCacheEvent.CouldntSaveToRemote(remotePath, forcedEx))
+                return@withContext SyncOpenResult.RemoteUnreachableUsingCache(cachedBytes)
+            }
             if (isRemoteUnchanged()) {
                 // 本地有修改且远端未变 -> 本地赢，自动上传并基线前移
                 val uploadResult = provider.uploadAtomic(remotePath, cachedBytes, expectedEtag = baseEtag.ifEmpty { null })
@@ -342,6 +372,43 @@ class SyncEngine(
                 events.tryEmit(SyncCacheEvent.CouldntSaveToRemote(remotePath, ex))
                 SyncCommitResult.RemoteUnreachable(keptLocal = true)
             }
+        }
+    }
+
+    /**
+     * 强制提交本地修改（ISSUE-P3-03 43a：`checkRemoteChangesBeforeSave=false` 与
+     * `conflictResolution=KEEP_LOCAL` 的真实消费点）。
+     *
+     * 与 [commitLocal] 的唯一差异：**不带 ETag 乐观锁预条件**（`expectedEtag = null`），
+     * 即不做「上传前比对云端版本」——本地版本直接覆盖远端，语义退化为最后写入者胜。
+     * 本地缓存仍照常先行写入（本地数据安全第一），离线时同样保留本地并返回
+     * [SyncCommitResult.RemoteUnreachable]。
+     *
+     * 调用方必须已获得用户的显式偏好（这两个开关默认均不开启本路径），
+     * 即「用户主动选择放弃云端并发保护」，不是静默降级。
+     */
+    suspend fun commitLocalForce(
+        remotePath: String,
+        localBytes: ByteArray
+    ): SyncCommitResult = withContext(Dispatchers.IO) {
+        // 1. 先写缓存（与 commitLocal 同序：本地数据安全优先）
+        val localHash = cache.writeCache(remotePath, localBytes)
+
+        if (isOffline) {
+            return@withContext SyncCommitResult.RemoteUnreachable(keptLocal = true)
+        }
+
+        // 2. 无预条件上传：远端已有内容被本地整体覆盖
+        val uploadResult = provider.uploadAtomic(remotePath, localBytes, expectedEtag = null)
+        if (uploadResult.isSuccess) {
+            val newEtag = uploadResult.getOrThrow()
+            cache.updateBase(remotePath, localHash, newEtag)
+            cache.writeBaseContent(remotePath, localBytes)
+            SyncCommitResult.Uploaded(newEtag)
+        } else {
+            val ex = uploadResult.exceptionOrNull()
+            events.tryEmit(SyncCacheEvent.CouldntSaveToRemote(remotePath, ex))
+            SyncCommitResult.RemoteUnreachable(keptLocal = true)
         }
     }
 

@@ -1,10 +1,8 @@
 package com.keepasskey.app.ui.screens.conflict
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -16,19 +14,15 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CloudDone
-import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.WarningAmber
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -57,6 +51,7 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.keepasskey.app.R
+import com.keepasskey.app.security.ApplyObscuredTouchFilter
 import com.keepasskey.app.ui.model.resolveText
 import com.keepasskey.app.ui.components.BentoCard
 import com.keepasskey.app.ui.theme.CapsuleShape
@@ -73,6 +68,8 @@ fun ConflictResolutionScreen(
     modifier: Modifier = Modifier,
     viewModel: ConflictResolutionViewModel = hiltViewModel()
 ) {
+    // 遮挡触摸过滤（ISSUE-P2-09 / P3-12）
+    ApplyObscuredTouchFilter()
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
 

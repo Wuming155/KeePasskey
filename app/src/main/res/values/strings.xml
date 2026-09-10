@@ -70,6 +70,9 @@
     <string name="unlock_keyfile_selected">已加载密钥文件: %1$s</string>
     <string name="unlock_keyfile_none">未关联密钥文件 (可选)</string>
     <string name="unlock_keyfile_read_failed">无法读取所选密钥文件，请重试</string>
+    <string name="keyfile_or_password_mismatch">主密码或密钥文件不正确，请确认密钥文件与创建密码库时使用的一致</string>
+    <string name="keyfile_permission_not_persisted">该文件提供方不支持长期授权，密钥文件仅本次可用，无法记住</string>
+    <string name="keyfile_restored_from_memory">已自动载入记住的密钥文件: %1$s</string>
     <string name="unlock_btn_unlock">解 锁 密 码 库</string>
     <string name="unlock_btn_biometric">使用系统指纹或面容快速解锁</string>
     <string name="unlock_switch_vault">切换密码库</string>
@@ -941,5 +944,24 @@
     <string name="health_breach_error_unknown">未知错误</string>
     <string name="kdf_benchmark_failed">基准测试失败</string>
     <string name="export_saf_write_failed">SAF 写盘失败</string>
+
+    <!-- ISSUE-P3-15：条目绑定包名非法/缺失时的如实提示（不得声称已屏蔽或已恢复） -->
+    <string name="autofill_block_unidentifiable_package">无法识别该条目绑定的应用标识，未变更自动填充屏蔽状态</string>
+
+    <!-- ISSUE-P3-02 (TASK-49)：自定义图标缺失占位与删除入口 -->
+    <string name="vault_custom_icon_missing">自定义图标已缺失</string>
+    <string name="vault_icon_delete_action">删除自定义图标</string>
+    <string name="vault_icon_delete_title">删除自定义图标？</string>
+    <string name="vault_icon_delete_message">该图标将从密码库图标池中移除，所有引用它的条目会回退为默认图标。此操作不可撤销。</string>
+    <string name="vault_icon_delete_done">自定义图标已删除，引用条目已回退为默认图标</string>
+    <string name="vault_icon_delete_failed">删除自定义图标失败</string>
+
+    <!-- ===== ISSUE-P3-03：未接线偏好的诚实标识（禁止「看起来能用」的假开关） ===== -->
+    <!-- 统一后缀格式：拼接在原有副标题之后，中英双语语义一致 -->
+    <string name="settings_pref_reserved_suffix">%1$s（预留，暂未生效）</string>
+    <string name="autofill_totp_clip_label">TOTP 验证码</string>
+    <string name="debug_verbose_depends">（需先开启「诊断日志」）</string>
+    <string name="dbset_import_reserved_note">解析器预留，暂未生效：当前仅登记所选数据源，不会导入任何条目</string>
+    <string name="dbset_child_db_reserved_note">子库挂载预留，暂未生效：选择文件后不会挂载任何子库</string>
 
 </resources>

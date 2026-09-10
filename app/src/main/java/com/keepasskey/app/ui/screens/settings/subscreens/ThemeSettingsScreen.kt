@@ -24,14 +24,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.BrightnessAuto
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.DarkMode
-import androidx.compose.material.icons.filled.DensityMedium
-import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.LightMode
-import androidx.compose.material.icons.filled.Notifications
-import androidx.compose.material.icons.filled.Palette
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
@@ -56,7 +49,6 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.AppLanguage
 import com.keepasskey.app.ui.components.BentoCard
@@ -283,14 +275,21 @@ fun ThemeSettingsScreen(
                     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                         DisplayPrefRow(
                             title = stringResource(R.string.theme_mask_pwd_title),
-                            subtitle = stringResource(R.string.theme_mask_pwd_sub),
+                            // ISSUE-P3-03 (43c)：消费方在详情页，属并行组文件范围，本轮未接线 → 如实标注
+                            subtitle = stringResource(
+                                R.string.settings_pref_reserved_suffix,
+                                stringResource(R.string.theme_mask_pwd_sub)
+                            ),
                             checked = uiState.maskPasswordsDefault,
                             onCheckedChange = onMaskPasswordsDefaultToggle
                         )
 
                         DisplayPrefRow(
                             title = stringResource(R.string.theme_mask_totp_title),
-                            subtitle = stringResource(R.string.theme_mask_totp_sub),
+                            subtitle = stringResource(
+                                R.string.settings_pref_reserved_suffix,
+                                stringResource(R.string.theme_mask_totp_sub)
+                            ),
                             checked = uiState.maskTotpDefault,
                             onCheckedChange = onMaskTotpDefaultToggle
                         )
@@ -322,7 +321,10 @@ fun ThemeSettingsScreen(
                             )
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
-                                text = stringResource(R.string.theme_density_desc),
+                                text = stringResource(
+                                    R.string.settings_pref_reserved_suffix,
+                                    stringResource(R.string.theme_density_desc)
+                                ),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -430,28 +432,40 @@ fun ThemeSettingsScreen(
                     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                         DisplayPrefRow(
                             title = stringResource(R.string.theme_unlocked_notif_title),
-                            subtitle = stringResource(R.string.theme_unlocked_notif_sub),
+                            subtitle = stringResource(
+                                R.string.settings_pref_reserved_suffix,
+                                stringResource(R.string.theme_unlocked_notif_sub)
+                            ),
                             checked = uiState.showUnlockedNotification,
                             onCheckedChange = onShowUnlockedNotificationToggle
                         )
 
                         DisplayPrefRow(
                             title = stringResource(R.string.theme_auto_search_title),
-                            subtitle = stringResource(R.string.theme_auto_search_sub),
+                            subtitle = stringResource(
+                                R.string.settings_pref_reserved_suffix,
+                                stringResource(R.string.theme_auto_search_sub)
+                            ),
                             checked = uiState.autoActivateSearchOnOpen,
                             onCheckedChange = onAutoActivateSearchOnOpenToggle
                         )
 
                         DisplayPrefRow(
                             title = stringResource(R.string.theme_group_in_search_title),
-                            subtitle = stringResource(R.string.theme_group_in_search_sub),
+                            subtitle = stringResource(
+                                R.string.settings_pref_reserved_suffix,
+                                stringResource(R.string.theme_group_in_search_sub)
+                            ),
                             checked = uiState.showGroupInSearchResult,
                             onCheckedChange = onShowGroupInSearchResultToggle
                         )
 
                         DisplayPrefRow(
                             title = stringResource(R.string.theme_group_in_entry_title),
-                            subtitle = stringResource(R.string.theme_group_in_entry_sub),
+                            subtitle = stringResource(
+                                R.string.settings_pref_reserved_suffix,
+                                stringResource(R.string.theme_group_in_entry_sub)
+                            ),
                             checked = uiState.showGroupInEntry,
                             onCheckedChange = onShowGroupInEntryToggle
                         )

@@ -95,7 +95,7 @@ data class PasskeyData(
             KdbxCustomField(FIELD_ALGORITHM, ProtectedString(algorithmId.toString(), isProtected = false)),
             KdbxCustomField(FIELD_PUBLIC_KEY, ProtectedString(publicKeyBase64, isProtected = false)),
             KdbxCustomField(FIELD_PRIVATE_KEY, privateKey),
-            KdbxCustomField(FIELD_SIGN_COUNT, ProtectedString(signCount.toString(), isProtected = false)),
+            KdbxCustomField(FIELD_SIGN_COUNT, ProtectedString(clampSignCount(signCount).toString(), isProtected = false)),
             KdbxCustomField(FIELD_BACKUP_ELIGIBLE, ProtectedString(backupEligible.toString(), isProtected = false)),
             KdbxCustomField(FIELD_BACKUP_STATE, ProtectedString(backupState.toString(), isProtected = false)),
             KdbxCustomField(FIELD_CREATED_AT, ProtectedString(createdAtMillis.toString(), isProtected = false))
@@ -115,6 +115,28 @@ data class PasskeyData(
         const val ALGORITHM_ED25519 = -8 // EdDSA (Ed25519)
         const val ALGORITHM_RS256 = -257 // RSASSA-PKCS1-v1_5 with SHA-256
 
+        /**
+         * 签名计数器「未知 / 认证器不支持计数器」哨兵值。
+         *
+         * WebAuthn 规范：认证器不实现计数器时该值恒为 0，RP 据此跳过克隆检测。
+         * 字段缺失或文本非法同样归入该值——如实表达「无计数器」，绝不伪造成递增序列。
+         */
+        const val SIGN_COUNT_UNKNOWN: Int = 0
+
+        /**
+         * 签名计数器合法上界（ISSUE-P3-10 子项 2，CWE-190 整数溢出防护）。
+         *
+         * 取 `Int.MAX_VALUE - 1`：为递增运算预留 1 的余量，使**任何**经本契约产出的
+         * 计数器值（含 [nextSignCount] 的返回值、写入 KDBX 的文本、写入
+         * AuthenticatorData 的 uint32）都落在 `SIGN_COUNT_UNKNOWN..MAX_SIGN_COUNT` 闭区间内，
+         * `signCount + 1` 永无溢出为负的机会。
+         *
+         * 背景：KDBX 自定义字段属不可信输入，原实现 `toIntOrNull() ?: 0` 允许恶意库写入
+         * `Int.MAX_VALUE`，断言侧 `+1` 随即回绕为 `Int.MIN_VALUE`（负计数器），
+         * 向 RP 交出语义错乱的重放防护状态。
+         */
+        const val MAX_SIGN_COUNT: Int = Int.MAX_VALUE - 1
+
         // KDBX 自定义字段键名标准
         const val FIELD_PREFIX = "Passkey."
         const val FIELD_RP_ID = "${FIELD_PREFIX}RelyingParty"
@@ -129,6 +151,54 @@ data class PasskeyData(
         const val FIELD_BACKUP_ELIGIBLE = "${FIELD_PREFIX}BackupEligible"
         const val FIELD_BACKUP_STATE = "${FIELD_PREFIX}BackupState"
         const val FIELD_CREATED_AT = "${FIELD_PREFIX}CreatedAt"
+
+        /** 计数器上界 [MAX_SIGN_COUNT] 的十进制位数（用于解析超长数字串时短路钳制） */
+        private const val MAX_SIGN_COUNT_DECIMAL_DIGITS = 10
+
+        /** 十进制数字字符区间（拒绝正负号、小数点、空白等一切非纯数字文本） */
+        private val DECIMAL_DIGIT_RANGE = '0'..'9'
+
+        /**
+         * 把任意 Int 钳制到合法计数器区间 `[SIGN_COUNT_UNKNOWN], [MAX_SIGN_COUNT]`。
+         * 负数（含溢出产物）归 [SIGN_COUNT_UNKNOWN]，超上界归 [MAX_SIGN_COUNT]。
+         */
+        fun clampSignCount(value: Int): Int = value.coerceIn(SIGN_COUNT_UNKNOWN, MAX_SIGN_COUNT)
+
+        /**
+         * 解析持久化的计数器文本（KDBX 自定义字段为不可信输入）：
+         * - 缺失 / 空 / 含非数字字符（含负号）→ [SIGN_COUNT_UNKNOWN]；
+         * - 纯数字但超出 [MAX_SIGN_COUNT]（含位数超出 Int 表达范围的超长串）→ 钳制为 [MAX_SIGN_COUNT]。
+         */
+        fun parseSignCount(raw: String?): Int {
+            val text = raw?.trim().orEmpty()
+            if (text.isEmpty() || !text.all { it in DECIMAL_DIGIT_RANGE }) {
+                return SIGN_COUNT_UNKNOWN
+            }
+            // 位数超出 Int 十进制上限时无需构造数值即可判定超界（避免 toIntOrNull 溢出为 null
+            // 被静默降级为「未知」而丢失「超上界」语义）
+            if (text.length > MAX_SIGN_COUNT_DECIMAL_DIGITS) {
+                return MAX_SIGN_COUNT
+            }
+            // 位数已限定，Long 解析恒成功；再按上界钳制（"9999999999" 之类超 Int 值同样归上界）
+            val parsed = text.toLong()
+            return if (parsed > MAX_SIGN_COUNT.toLong()) MAX_SIGN_COUNT else parsed.toInt()
+        }
+
+        /**
+         * 读取条目自定义字段中的当前签名计数器（不构造完整 [PasskeyData]，
+         * 供断言侧的原子递增路径读取「库内现值」）。
+         */
+        fun readSignCount(fields: List<KdbxCustomField>): Int =
+            parseSignCount(fields.firstOrNull { it.key == FIELD_SIGN_COUNT }?.value?.readString())
+
+        /**
+         * 断言递增后的下一个计数器值：恒非负、恒不超过 [MAX_SIGN_COUNT]（饱和递增，绝不回绕）。
+         * 签名（写入 AuthenticatorData）与落库（写入自定义字段）必须共用本函数，保证两者一致。
+         */
+        fun nextSignCount(current: Int): Int {
+            val clamped = clampSignCount(current)
+            return if (clamped >= MAX_SIGN_COUNT) MAX_SIGN_COUNT else clamped + 1
+        }
 
         /**
          * 从条目自定义字段中解析还原 PasskeyData；若缺少关键字段则返回 null。
@@ -148,7 +218,9 @@ data class PasskeyData(
             val userDisplayName = map[FIELD_USER_DISPLAY_NAME]?.value?.readString() ?: ""
             val algorithmId = map[FIELD_ALGORITHM]?.value?.readString()?.toIntOrNull() ?: ALGORITHM_ES256
             val publicKeyBase64 = map[FIELD_PUBLIC_KEY]?.value?.readString() ?: ""
-            val signCount = map[FIELD_SIGN_COUNT]?.value?.readString()?.toIntOrNull() ?: 0
+            // ISSUE-P3-10 子项 2：计数器文本经统一解析边界收口（钳制 + 缺失归哨兵），
+            // 严禁裸 `toIntOrNull() ?: 0` 让不可信库直接注入溢出前值
+            val signCount = parseSignCount(map[FIELD_SIGN_COUNT]?.value?.readString())
             val backupEligible = map[FIELD_BACKUP_ELIGIBLE]?.value?.readString()?.toBooleanStrictOrNull() ?: true
             val backupState = map[FIELD_BACKUP_STATE]?.value?.readString()?.toBooleanStrictOrNull() ?: true
             val createdAt = map[FIELD_CREATED_AT]?.value?.readString()?.toLongOrNull() ?: System.currentTimeMillis()

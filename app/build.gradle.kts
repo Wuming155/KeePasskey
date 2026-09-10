@@ -53,8 +53,22 @@ android {
                 storePassword = releaseStorePassword
                 keyAlias = releaseKeyAlias
                 keyPassword = releaseKeyPassword
-                enableV1Signing = true
+                // ISSUE-P3-09（ZT-20）AC1：签名方案收敛为 v2 + v3 + v4，关闭 v1。
+                // - 关闭 v1（JAR 签名）：本应用 minSdk 36，Android 7.0(API 24) 起系统只认
+                //   APK Signature Scheme v2+，v1 对安装/校验毫无作用；它同时是三层里最弱的
+                //   一层（逐条目 SHA-1/SHA-256 摘要 + 与 ZIP 结构耦合，历史上有 Janus
+                //   CVE-2017-13156 一类绕过），保留只会白白扩大签名面与包体。
+                // - 启用 v3：携带 proof-of-rotation 签名谱系，支持**发布密钥轮换**——
+                //   将来换密钥时旧版本仍可验签升级，v2 方案不具备该能力（换钥匙即断更）。
+                // - 启用 v4：额外产出 .idsig 文件，供 adb 增量安装（--incremental）与商店
+                //   做安装前完整性校验；仅为附加产物，不改变 APK 本体。
+                // 说明：本块整体位于 hasReleaseSigning 判定内。未配置签名（既无
+                // keystore.properties 也无 KEYSTORE_* 环境变量）时不会创建该 signingConfig，
+                // AGP 照常产出未签名包，assembleRelease 不会因此失败。
+                enableV1Signing = false
                 enableV2Signing = true
+                enableV3Signing = true
+                enableV4Signing = true
             }
         }
     }
@@ -107,9 +121,16 @@ dependencies {
     implementation(libs.compose.ui.tooling.preview)
     implementation(libs.compose.foundation)
     implementation(libs.compose.material3)
-    // TASK-07：material3 1.5.0-alpha27 显式覆盖 BOM 映射——M3 Expressive 公开 API
-    // （MaterialExpressiveTheme/MotionScheme）在 1.4.0 stable 中仍为 internal，
-    // 1.5.0 stable 毕业后可移除本行回归 BOM 托管
+    // ISSUE-P3-09（ZT-20）AC3：material3 1.5.0-alpha27 显式覆盖 BOM 映射——**受控保留 alpha**。
+    // 依据（2026-09-10 核对 Google Maven androidx/compose/material3/material3/maven-metadata.xml）：
+    //   latest = release = 1.5.0-alpha28；1.5.0 线**尚无 stable**，稳定渠道最新为 1.4.0。
+    // 为何不能降级：本项目 ui/theme/Theme.kt 使用 MaterialExpressiveTheme 与
+    //   MotionScheme.expressive()（M3 Expressive 动效），这些公开 API 在 1.4.0 stable 中
+    //   仍为 internal，降级会直接编译失败。
+    // 风险：alpha 渠道存在 API 破坏性变更与回归缺陷，且不属于「稳定版生产依赖」。
+    // 退出条件：material3 1.5.0 正式版（stable）发布后，删除本行与
+    //   gradle/libs.versions.toml 的 compose-material3-alpha 别名 / material3 版本项，
+    //   回归 BOM 托管（届时 Theme.kt 无需改动，M3 Expressive API 已在 stable 中公开）。
     implementation(libs.compose.material3.alpha)
     implementation(libs.compose.material.icons.extended)
 

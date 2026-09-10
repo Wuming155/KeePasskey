@@ -15,7 +15,16 @@ hiltExt = "1.4.0"
 coreKtx = "1.19.0"
 composeBom = "2026.08.00"
 # TASK-07：M3 Expressive 公开 API（MaterialExpressiveTheme/MotionScheme）在 1.5.0 才毕业公开，
-# 1.4.0 stable 中仍为 internal；显式采用 1.5.0-alpha27（BOM 映射被显式依赖覆盖）
+# 1.4.0 stable 中仍为 internal。
+# ISSUE-P3-09（ZT-20）AC3 管控结论（2026-09-10 核对 Google Maven material3 maven-metadata.xml：
+# latest = release = 1.5.0-alpha28，1.5.0 线无 stable，稳定渠道最新 1.4.0）：
+#   **无法降级到 stable**——降级即失去 MaterialExpressiveTheme/MotionScheme，编译失败，
+#   故按「必须保留 alpha」处理，显式登记管控信息：
+#   - 必要性：ui/theme/Theme.kt 依赖 M3 Expressive 主题与弹性动效（产品级视觉规范）；
+#   - 风险：alpha 渠道存在 API 破坏性变更与未修复回归，不由稳定版语义背书；
+#   - 约束：本值仅允许在 1.5.0-alphaN 内部随安全修复上调，禁止跨 minor 跳跃；
+#   - 退出条件：material3 1.5.0 stable 发布后，删除本项与 compose-material3-alpha 别名，
+#     回归 Compose BOM 托管（升级判据与步骤见 docs/.handoff/ISSUE-P3-09.md）。
 material3 = "1.5.0-alpha27"
 lifecycle = "2.9.0"
 activityCompose = "1.10.0"
@@ -24,12 +33,23 @@ biometric = "1.1.0"
 credentials = "1.6.0"
 work = "2.10.0"
 autofill = "1.3.0"
+# TOTP 扫码（app/build.gradle.kts 的 zxing-embedded 消费方）。
+# ISSUE-P3-09（ZT-20）AC3：**保持 4.3.0 不变**——zxing → CameraX + ML Kit 的迁移评估
+# 由 ISSUE-P3-05（TASK-19）独立承接，本批次不做升级/迁移，仅登记现状（4.3.0 为
+# com.journeyapps:zxing-android-embedded 的最新稳定发布版）。
 zxing = "4.3.0"
 okhttp = "5.5.0"
 bouncycastle = "1.85.2"
-argon2kt = "1.6.0"
+# ISSUE-P3-09（ZT-20）AC3：原 argon2kt = "1.6.0" 为孤儿版本项——TASK-52（Argon2 内核
+# C→Rust 迁移）后全仓已无消费方，[libraries] 无别名、无模块声明依赖，全仓 grep 仅命中
+# 本文件自身，故整项删除（不引入任何构建影响）。
 coroutines = "1.11.0"
 junit = "4.13.2"
+# ISSUE-P3-11：crypto 模块 androidTest（instrumented）源集新增依赖的版本项（仅追加，不改既有版本）。
+# 货币性核对（2026-09-10 查 Google Maven maven-metadata.xml）：
+#   androidx.test.ext:junit latest = release = 1.3.0；androidx.test:runner release = 1.7.0。
+androidxTestExtJunit = "1.3.0"
+androidxTestRunner = "1.7.0"
 androidxAnnotation = "1.9.1"
 datastore = "1.2.1"
 profileinstaller = "1.4.1"
@@ -76,6 +96,9 @@ bouncycastle = { group = "org.bouncycastle", name = "bcprov-jdk18on", version.re
 coroutines-core = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-core", version.ref = "coroutines" }
 coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-test", version.ref = "coroutines" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
+# ISSUE-P3-11：androidTest 源集（在设备/模拟器上加载 APK 内 libkeepasskey_argon2.so 做运行时验证）
+androidx-test-ext-junit = { group = "androidx.test.ext", name = "junit", version.ref = "androidxTestExtJunit" }
+androidx-test-runner = { group = "androidx.test", name = "runner", version.ref = "androidxTestRunner" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

@@ -22,7 +22,6 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.NetworkCheck
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Public
-import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.VpnKey
 import androidx.compose.material3.Button

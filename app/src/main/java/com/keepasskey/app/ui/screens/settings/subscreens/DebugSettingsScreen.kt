@@ -23,13 +23,11 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.CloudSync
-import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -168,6 +166,8 @@ fun DebugSettingsScreen(
                         DebugSwitchRow(
                             icon = Icons.Default.BugReport,
                             title = stringResource(R.string.debug_log_title),
+                            // ISSUE-P3-03 (43f)：总开关——关闭后普通诊断事件与详细日志均不记录
+                            // （导出审计留痕不受影响，走独立审计通道）
                             subtitle = stringResource(R.string.debug_log_sub),
                             checked = uiState.debugLogEnabled,
                             onCheckedChange = onDebugLogToggle
@@ -176,7 +176,9 @@ fun DebugSettingsScreen(
                         DebugSwitchRow(
                             icon = Icons.Default.CloudSync,
                             title = stringResource(R.string.debug_verbose_title),
-                            subtitle = stringResource(R.string.debug_verbose_sub),
+                            // ISSUE-P3-03 (43f)：详细模式是叠加层——需总开关（诊断日志）开启才可见
+                            subtitle = stringResource(R.string.debug_verbose_sub) +
+                                stringResource(R.string.debug_verbose_depends),
                             checked = uiState.verboseSyncLog,
                             onCheckedChange = onVerboseSyncLogToggle
                         )

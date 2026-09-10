@@ -7,6 +7,7 @@ import com.keepasskey.sync.model.cleanEtag
 import com.keepasskey.sync.network.SyncEndpointGuard
 import com.keepasskey.sync.network.SyncHttpClientFactory
 import com.keepasskey.sync.network.SyncNetworkOptions
+import com.keepasskey.sync.network.SyncTransferOptions
 import com.keepasskey.sync.provider.SyncProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -44,6 +45,12 @@ class WebDavSyncProvider(
      * 由 app 层组装传入（纯数据契约，维持 sync 不依赖 app 的单向依赖）。
      */
     private val networkOptions: SyncNetworkOptions = SyncNetworkOptions(),
+    /**
+     * ISSUE-P3-03 (43a)：分块上传传输选项。由 app 层把 `webdavChunkedUpload` /
+     * `webdavChunkSizeMb` 偏好归一为 [SyncTransferOptions] 传入（依赖倒置，
+     * sync 不读取 app 偏好）。默认关闭 = 与接线前逐字节一致的单次定长 PUT。
+     */
+    private val transferOptions: SyncTransferOptions = SyncTransferOptions.DISABLED,
     // 测试注入口：HTTP 回环（MockWebServer）需显式传入默认规格客户端；生产恒为 null（走 TLS-only 工厂）
     client: OkHttpClient? = null
 ) : SyncProvider {
@@ -224,7 +231,7 @@ class WebDavSyncProvider(
             val fullUrl = buildUrl(remotePath)
             val requestBuilder = Request.Builder()
                 .url(fullUrl)
-                .put(data.toRequestBody("application/octet-stream".toMediaType()))
+                .put(WebDavUploadBody.create(data, transferOptions))
                 .header("Authorization", authHeader)
 
             if (!expectedEtag.isNullOrBlank()) {
@@ -397,10 +404,12 @@ class WebDavSyncProvider(
             // 防御恶意/被劫持的 WebDAV 服务端返回带 XXE payload 的 PROPFIND 响应
             val factory = DocumentBuilderFactory.newInstance().apply {
                 isNamespaceAware = true
-                runCatching { setFeature("http://apache.org/xml/features/disallow-doctype-decl", true) }
-                runCatching { setFeature("http://xml.org/sax/features/external-general-entities", false) }
-                runCatching { setFeature("http://xml.org/sax/features/external-parameter-entities", false) }
-                runCatching { setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false) }
+                // ISSUE-P3-10 子项 3：逐项设置并留痕——原 runCatching 空吞使「加固特性未生效」
+                // 完全不可观测，且首项失败会连带后续三项根本不被尝试
+                applyXxeGuardFeature(this, "http://apache.org/xml/features/disallow-doctype-decl", true)
+                applyXxeGuardFeature(this, "http://xml.org/sax/features/external-general-entities", false)
+                applyXxeGuardFeature(this, "http://xml.org/sax/features/external-parameter-entities", false)
+                applyXxeGuardFeature(this, "http://apache.org/xml/features/nonvalidating/load-external-dtd", false)
                 isXIncludeAware = false
                 isExpandEntityReferences = false
             }
@@ -445,6 +454,22 @@ class WebDavSyncProvider(
             // 由调用方按「缺失」回退 HTTP 头哨兵处理）
             AppLog.w(TAG, "PROPFIND 响应 XML 解析失败，回退空元数据", e)
             ParsedPropfind("", -1L, 0L, false)
+        }
+    }
+
+    /**
+     * ISSUE-P3-10 子项 3：逐项应用 DOM 解析器 XXE 加固特性，**失败即落告警且不中断**。
+     *
+     * 不 fail-fast 的理由：加固特性在部分实现（如 Android Expat 后端）上不受支持，
+     * 若因此判定 PROPFIND 响应非法，则一个实现差异会让所有 WebDAV 同步直接失败；
+     * 且 `isExpandEntityReferences = false` 与「不加载外部 DTD」的默认语义仍在，
+     * 解析失败路径另有外层 catch 留痕。故保留「尽力加固 + 可观测告警」语义。
+     */
+    private fun applyXxeGuardFeature(factory: DocumentBuilderFactory, feature: String, enabled: Boolean) {
+        try {
+            factory.setFeature(feature, enabled)
+        } catch (e: Exception) {
+            AppLog.w(TAG, "DOM 解析器 XXE 加固特性不受支持，已跳过该项: $feature=$enabled", e)
         }
     }
 

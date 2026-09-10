@@ -59,11 +59,29 @@ object KdbxFile {
     private const val PROBE_READ_BUFFER_SIZE = 8192
 
     /**
-     * 载荷解压输出（或未压缩载荷）累计字节数安全上限：512 MiB（Wave 12 解析炸弹防线）。
-     * 恶意 .kdbx（导入场景，用户持有其密码）可携带高压缩比 payload 解压出数 GB 明文；
-     * 该上限将解析期资源消耗约束在常数界内，合法库远低于该界（流式解析本就不整体物化）。
+     * 载荷解压输出（或未压缩载荷）累计字节数安全上限：128 MiB（Wave 12 解析炸弹防线；
+     * ISSUE-P3-10 子项 1 由原 512 MiB 下调）。
+     *
+     * 取值依据：
+     * - 恶意 .kdbx（导入场景，用户持有其密码）可携带高压缩比 payload 解压出数 GB 明文，
+     *   该上限把解析期峰值内存约束在移动端可承受的常数界内（原 512 MiB 已属高危水位）；
+     * - 下限约束：不得低于 [InnerHeader.MAX_INNER_FIELD_BYTES]（单字段 64 MiB，承载单个附件），
+     *   否则「一个合法大附件 + XML 正文」即被误拒；128 MiB 为单字段上限留出同等量级余量；
+     * - 正常 KDBX 库（含常见附件规模）远低于该界，且流式解析本就不整体物化载荷，
+     *   保留同一量级的正常库解析能力。
      */
-    private const val MAX_DECOMPRESSED_PAYLOAD_BYTES = 512L * 1024 * 1024
+    internal const val MAX_DECOMPRESSED_PAYLOAD_BYTES = 128L * 1024 * 1024
+
+    /**
+     * 为解密后的载荷流套上「解压输出尺寸护栏」。
+     *
+     * 独立成函数以便单测直接以生产常量（[MAX_DECOMPRESSED_PAYLOAD_BYTES]）验证
+     * 「超限被拒 / 限额内通过」，无需构造超大真实库（见 KdbxParsingResourceLimitsTest）。
+     */
+    internal fun guardPayloadSize(raw: InputStream, isGzipCompressed: Boolean): InputStream {
+        val decompressed = if (isGzipCompressed) GZIPInputStream(raw) else raw
+        return SizeBoundedInputStream(decompressed, MAX_DECOMPRESSED_PAYLOAD_BYTES)
+    }
 
     private val INNER_HEADER_FIELD_IDS = setOf(
         KdbxConstants.InnerHeaderFieldId.END.toInt(),
@@ -172,11 +190,10 @@ object KdbxFile {
         // 官方载荷顺序（对齐 KeePass 2.x Read.cs / KeePassDX DatabaseInputKDBX）：
         // 解密 → GZIP 解压 → 内层头部（在解压流内、XML 之前）→ XML
         // Wave 12 解析炸弹防线：对解压输出（及未压缩载荷）做累计字节数封顶
-        val xmlInputStream = if (header.compression == KdbxConstants.Compression.GZIP) {
-            SizeBoundedInputStream(GZIPInputStream(cipherIn), MAX_DECOMPRESSED_PAYLOAD_BYTES)
-        } else {
-            SizeBoundedInputStream(cipherIn, MAX_DECOMPRESSED_PAYLOAD_BYTES)
-        }
+        val xmlInputStream = guardPayloadSize(
+            cipherIn,
+            header.compression == KdbxConstants.Compression.GZIP
+        )
 
         val innerHeader = InnerHeader.deserialize(xmlInputStream)
 

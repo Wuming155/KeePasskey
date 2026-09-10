@@ -4,10 +4,8 @@ import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
 import java.io.OutputStream
-import java.nio.channels.FileChannel
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
-import java.nio.file.StandardOpenOption
 import java.util.logging.Level
 import java.util.logging.Logger
 
@@ -22,6 +20,11 @@ import java.util.logging.Logger
  *
  * 降级路径安全铁律：任何情况下严禁在替换成功之前无保护地删除原文件——
  * 一旦 delete 成功而后续 rename 失败，原文件将彻底丢失且无法恢复。
+ *
+ * ISSUE-P3-13：目录 fsync 经 [DirectorySync] 抽象注入，本类不再写死平台调用。
+ * 四条落盘路径均触达该钩子：① .bak 滚动备份 copy 后、② 主路径原子 move 后、
+ * ③ 降级标准 rename 成功后、④ 降级 copy 覆盖后；Windows 等不支持目录通道的平台
+ * 由实现返回降级结果，仅记告警，**绝不阻断写盘**。
  */
 object AtomicFileWriter {
 
@@ -34,16 +37,33 @@ object AtomicFileWriter {
     private const val BACKUP_SUFFIX = ".bak"
 
     /**
-     * 原子写入目标文件。
+     * 原子写入目标文件（生产默认目录同步实现）。
+     *
+     * 保留该重载是为了源码兼容：既有调用点（`DatabaseSession`）以位置参数传入 [writer]，
+     * 而注入重载把 [DirectorySync] 放在 [writer] 之前，无法用单一函数同时兼容两种调用形态。
+     */
+    fun writeAtomic(
+        targetFile: File,
+        createBackup: Boolean = true,
+        writer: (OutputStream) -> Unit
+    ) {
+        writeAtomic(targetFile, createBackup, DirectorySync.default, writer)
+    }
+
+    /**
+     * 原子写入目标文件（可注入目录同步实现）。
      *
      * @param createBackup 是否在替换前保留一份滚动备份 .bak（默认 true，保持既有调用行为）。
      *   ISSUE-P2-11 (ZT-16)：该开关由会话层偏好下发，关闭时不再生成备份；同时因缺少备份兜底，
      *   降级分支对已存在的原文件会拒绝无保护覆盖（宁可失败也不损坏数据）。
+     * @param directorySync 目录项 fsync 抽象（ISSUE-P3-13）。生产默认 [DirectorySync.default]；
+     *   单测注入假实现以断言四条落盘路径均触达目录 fsync 钩子（Windows 宿主无法真实执行目录通道）。
      * @param writer 向临时文件写入内容的回调
      */
     fun writeAtomic(
         targetFile: File,
         createBackup: Boolean = true,
+        directorySync: DirectorySync,
         writer: (OutputStream) -> Unit
     ) {
         val parentDir = targetFile.parentFile ?: File(".")
@@ -61,14 +81,11 @@ object AtomicFileWriter {
 
         try {
             // 步骤 1 & 2: 写入临时文件并强同步落盘
-            FileOutputStream(tmpFile).use { fos ->
-                writer(fos)
-                fos.flush()
-                fos.fd.sync()
-            }
+            writeAndSyncTmpFile(tmpFile, writer)
 
-            // 步骤 3: 备份当前稳定版本（按偏好可关闭）
-            val backupAvailable = backupStableVersion(targetFile, bakFile, parentDir, createBackup)
+            // 步骤 3: 备份当前稳定版本（内部含目录 fsync 钩子①，按偏好可关闭）
+            val backupAvailable =
+                backupStableVersion(targetFile, bakFile, parentDir, createBackup, directorySync)
 
             // 步骤 4: 原子重命名替换原文件
             try {
@@ -78,10 +95,10 @@ object AtomicFileWriter {
                     StandardCopyOption.ATOMIC_MOVE,
                     StandardCopyOption.REPLACE_EXISTING
                 )
-                // 步骤 5: rename 后 fsync 父目录，确保新目录项在崩溃/断电前已落盘
-                syncDirectory(parentDir)
+                // 步骤 5: rename 后 fsync 父目录（钩子②），确保新目录项在崩溃/断电前已落盘
+                syncDirectory(parentDir, directorySync)
             } catch (e: Exception) {
-                fallbackReplace(tmpFile, targetFile, backupAvailable, e)
+                fallbackReplace(tmpFile, targetFile, backupAvailable, e, directorySync)
             }
         } catch (t: Throwable) {
             // 异常退出时清理临时垃圾，绝不损坏原文件
@@ -93,7 +110,21 @@ object AtomicFileWriter {
     }
 
     /**
-     * 步骤 3：滚动备份当前稳定版本，并对父目录执行 fsync 固化备份目录项。
+     * 步骤 1 & 2：写入临时文件并强同步落盘（`flush` + `FileDescriptor.sync`）。
+     *
+     * 临时文件自身的目录项由后续 rename / copy 成功后的父目录 fsync 一并固化，
+     * 此处只需保证文件内容已落盘。
+     */
+    private fun writeAndSyncTmpFile(tmpFile: File, writer: (OutputStream) -> Unit) {
+        FileOutputStream(tmpFile).use { fos ->
+            writer(fos)
+            fos.flush()
+            fos.fd.sync()
+        }
+    }
+
+    /**
+     * 步骤 3：滚动备份当前稳定版本，并对父目录执行 fsync 固化备份目录项（钩子①）。
      *
      * @return 备份是否可用（作为降级覆盖的安全兜底）。原文件不存在（首次写入）视为无需备份，
      *   返回 true；偏好关闭时不生成备份，返回 false（降级分支据此拒绝无保护覆盖）。
@@ -102,7 +133,8 @@ object AtomicFileWriter {
         targetFile: File,
         bakFile: File,
         parentDir: File,
-        createBackup: Boolean
+        createBackup: Boolean,
+        directorySync: DirectorySync
     ): Boolean {
         if (!targetFile.exists()) {
             // 原文件不存在（首次写入），无需备份
@@ -118,8 +150,8 @@ object AtomicFileWriter {
                 bakFile.toPath(),
                 StandardCopyOption.REPLACE_EXISTING
             )
-            // ISSUE-P2-05：备份目录项变更同样需要 fsync 固化
-            syncDirectory(parentDir)
+            // ISSUE-P2-05：备份目录项变更同样需要 fsync 固化（钩子①）
+            syncDirectory(parentDir, directorySync)
             true
         } catch (e: Exception) {
             // 备份尝试若因权限受阻，记录但不阻断主流程（原子 move 主路径不依赖备份）。
@@ -144,21 +176,24 @@ object AtomicFileWriter {
      *    仍可自备份恢复，绝不因本分支单点丢失；无备份兜底时宁可失败也绝不冒险覆盖。
      *
      * ISSUE-P2-05：本方法为崩溃安全敏感路径——renameTo / Files.copy 成功后必须 fsync
-     * 父目录，否则目录项变更在断电时可能尚未落盘。
+     * 父目录，否则目录项变更在断电时可能尚未落盘；对应钩子③（标准 rename 成功后）
+     * 与钩子④（copy 覆盖后）。
      *
      * @param backupAvailable [writeAtomic] 步骤 3 的 .bak 备份是否成功（原文件不存在视为 true）
      * @param cause 触发降级的原子 move 异常
+     * @param directorySync 目录项 fsync 抽象（ISSUE-P3-13），默认生产实现以保持既有调用点源码兼容
      */
     internal fun fallbackReplace(
         tmpFile: File,
         targetFile: File,
         backupAvailable: Boolean,
-        cause: Exception
+        cause: Exception,
+        directorySync: DirectorySync = DirectorySync.default
     ) {
         val parentDir = targetFile.parentFile ?: tmpFile.parentFile ?: File(".")
         if (tmpFile.renameTo(targetFile)) {
-            // ISSUE-P2-05：rename 成功后 fsync 父目录，固化被替换的目录项
-            syncDirectory(parentDir)
+            // ISSUE-P2-05：rename 成功后 fsync 父目录，固化被替换的目录项（钩子③）
+            syncDirectory(parentDir, directorySync)
             return
         }
         if (targetFile.exists() && !backupAvailable) {
@@ -181,8 +216,8 @@ object AtomicFileWriter {
         if (tmpFile.exists() && !tmpFile.delete()) {
             logger.log(Level.WARNING, "原子写盘降级替换后清理临时文件失败: ${tmpFile.absolutePath}")
         }
-        // ISSUE-P2-05：copy 覆盖后 fsync 父目录，固化目录项变更
-        syncDirectory(parentDir)
+        // ISSUE-P2-05：copy 覆盖后 fsync 父目录，固化目录项变更（钩子④）
+        syncDirectory(parentDir, directorySync)
     }
 
     /**
@@ -215,21 +250,19 @@ object AtomicFileWriter {
     }
 
     /**
-     * ISSUE-P2-05：对目录本身执行 fsync，固化 rename/copy 造成的目录项变更。
+     * ISSUE-P2-05 / ISSUE-P3-13：经注入的 [DirectorySync] 固化目录项变更。
      *
-     * POSIX crash-safety 要求 rename 后 fsync 父目录：否则断电后新目录项可能未持久化，
-     * 造成文件丢失或回退到旧版本。平台/文件系统不支持目录通道（如 Windows）或只读挂载时，
-     * 捕获异常降级为告警日志，绝不阻断写盘主流程。
+     * 降级语义由实现自身决定并以告警日志记录（见 [PosixDirectorySync]）：平台/文件系统不支持时
+     * 返回 `DEGRADED`，本层不读取结果、更不据此失败——保持 Windows 上「降级不阻断」语义不变。
+     * 此处仅保留最后一道防御：实现若违反「禁止抛异常」契约，也只记告警，不影响已成功的写盘结果。
      */
-    private fun syncDirectory(directory: File) {
+    private fun syncDirectory(directory: File, directorySync: DirectorySync) {
         try {
-            FileChannel.open(directory.toPath(), StandardOpenOption.READ).use { channel ->
-                channel.force(true)
-            }
+            directorySync.sync(directory)
         } catch (e: Exception) {
             logger.log(
                 Level.WARNING,
-                "父目录 fsync 不受当前平台/文件系统支持（降级为告警，不阻断写盘）: ${directory.absolutePath}",
+                "目录项 fsync 调用异常（降级为告警，不阻断写盘）: ${directory.absolutePath}",
                 e
             )
         }
