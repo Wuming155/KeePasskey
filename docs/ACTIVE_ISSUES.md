@@ -223,8 +223,15 @@
   各族的依赖来源经 `.\gradlew.bat :app:dependencyInsight --configuration <cfg> --dependency <pkg>` 逐族确认。
 - **背景**：本批次已**实证** `failBuildOnCVSS = 7.0f` 在 `dependencyCheckAggregate` 上不生效
   （见 [RESOLVED_LOG.md](RESOLVED_LOG.md) **§7.4**），并已补硬断言
-  `.github/check_dependency_cvss.py`（接线于 `dependency-scan.yml`）。
-  **该断言接入后 `dependency-scan` 将按预期失败**，直到下列达阈条目被「修依赖」或「登记 suppression」。
+  `.github/check_dependency_cvss.py`（脚本本身已随 `d3b03ca` 推送）。
+  ⚠️ **接线尚未生效（需维护者授权）**：把该断言接为 `dependency-scan.yml` 的门禁步骤须更新工作流文件，
+  而**当前 GitHub PAT 缺少 `workflow` 权限**，push 被拒
+  （`refusing to allow a Personal Access Token to create or update workflow … without workflow scope`）；
+  SSH 通道亦不可用（`~/.ssh/config` 经本地代理 `127.0.0.1:38457` / `7890`，报
+  `failed to begin relaying via HTTP. Connection closed by UNKNOWN port 65535`）。
+  该改动已拆出主提交、暂存于**本地分支 `ci/cvss-hard-assertion`**（提交 `0b327f5`）
+  —— **在授权并推送前，本硬断言不会在 CI 中执行**。
+  **断言生效后 `dependency-scan` 将按预期失败**，直到下列达阈条目被「修依赖」或「登记 suppression」。
   已登记豁免 **1 族**（`androidx.sqlite`：构件内零 `.so`，不含原生 SQLite C 代码），
   以下为**未豁免残余**。
 - **未豁免残余（2026-09-10 核实）**：

@@ -1237,10 +1237,11 @@ app/src/main/java/com/keepasskey/app/ui/screens/generator/DicewareWordList.kt:37
 
 | 规则 | 数量 | 位置 | 处置 |
 |---|:---:|---|---|
-| `py/clear-text-logging-sensitive-data`（**error**） | 3 | `tools/local-sync/smoke_minio.py:36`、`run_lab.py:50`、`run_webdav.py:59` | **改代码**：新增 `_redact()` 在回显前擦除口令（同时覆盖子进程输出行），`run_webdav.py` 改为只提示凭据来源不回显口令。`py_compile` 5 个脚本全通过。 |
+| `py/clear-text-logging-sensitive-data`（**error**） | 3 | `tools/local-sync/smoke_minio.py`、`run_lab.py`、`run_webdav.py` | **改代码（两轮）**：首轮以 `_redact()`「先擦除再回显」，**推送后被 CodeQL 复跑证伪**（告警 189/190/191 → **199/200 同位置复发**），证明该规则**不把 `str.replace` 视为净化器**；第二轮改为**结构性隔离**——`run(cmd, display)` 只把调用方显式构造、**不含任何凭据**的摘要交给 `print`，机密值仅出现在传给 `subprocess` 的实参里；`_redact()` 降级为「子进程输出」路径的纵深防御，并在 docstring 写明其**不能**充当该规则的净化器。`run_webdav.py` 彻底移除口令回显（其告警 189 已真实关闭）。`py_compile` 5 个脚本全通过。 |
 | `rust/hard-coded-cryptographic-value`（warning） | 7 | `crypto/src/main/rust/src/lib.rs` 第 124/125/239/240/262/272/273 行 | **GitHub 侧以 `used in tests` 处置**（告警号 192~198）：逐行核对确认全部落在 `#[cfg(test)] mod tests`（110~292 行）内，是 IETF `draft-irtf-cfrg-argon2-12` §5 官方 KAT 向量与参数闸门负例，测试向量必须以字面常量硬编码方能充当第三方对照。 |
 
-- 3 条 py 告警的代码已修，**待 CodeQL 工作流在本次推送后复跑自动关闭**（不作人工处置）。
+- 3 条 py 告警中 `run_webdav.py` 的 1 条已由推后复跑**真实关闭**；另 2 条经首轮修复证伪后
+  改为**结构性隔离**（见 §7.6-8），**待第二轮推送后的复跑确认**。7 条 Rust 告警已人工处置完毕。
 
 ### 7.4 `dependency-scan`：CVSS 阻断语义**静默失效**的实证与硬断言补强
 
@@ -1306,4 +1307,21 @@ app/src/main/java/com/keepasskey/app/ui/screens/generator/DicewareWordList.kt:37
    本批次一度按「已验证 → 应合并」推进 PR #5，随后才查得 PR #1~#4 全部 `closed` 未合并、
    且 `build.yml` 明确「不跨大版本升级」。教训：**对默认分支的写操作前，必须先查该仓库对同类 PR
    的既往处置惯例与相关注释中的既定决策**，不能只凭「CI 通过」推断可以合并。
+8. **首轮 CodeQL 修复被推后复跑证伪（`str.replace` 不是净化器）**：
+   首轮把 `print("  $", cmd)` 改为 `print("  $", _redact(cmd))`，本地 `py_compile` 通过、
+   「人看也合理」，但推送后 **CodeQL 复跑（运行 34469401695）在同一位置以新编号复发**
+   （`smoke_minio.py` / `run_lab.py`：189/190/191 → **199/200**）。
+   教训：**「数据经过一次字符串替换」不等于「该数据流已被切断」**——静态污点分析按
+   **是否可达 `print` 的实参**判定，`replace` 不在其净化器名单内；正确的消除方式是**结构性隔离**
+   （让机密值根本不进入 `print` 的实参）。根本失误在于：预判时用「人读是否合理」而非
+   **「工具将如何判定」** 作为通过标准。
+9. **工作流文件推送被 PAT 权限拒止（环境限制，非代码缺陷）**：
+   `git push` 报 `refusing to allow a Personal Access Token to create or update workflow
+   .github/workflows/dependency-scan.yml without \`workflow\` scope`；
+   SSH 通道亦不可用（`~/.ssh/config` 经本地代理 `127.0.0.1:38457` / `7890`，
+   报 `failed to begin relaying via HTTP. Connection closed by UNKNOWN port 65535`，exit 255）。
+   处置：把工作流改动从主提交中拆出，暂存于**本地分支 `ci/cvss-hard-assertion`**（提交 `0b327f5`），
+   其余 12 个文件正常推送；**该硬断言在令牌授权前不会在 CI 中执行**，已在提交信息与
+   [ACTIVE_ISSUES.md](ACTIVE_ISSUES.md) ISSUE-P3-32 中显式声明。
+   教训：**改动 `.github/workflows/**` 前应先确认推送令牌具备 `workflow` 权限**，否则会在提交拆分上返工。
 
