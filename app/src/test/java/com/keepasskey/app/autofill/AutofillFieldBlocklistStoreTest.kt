@@ -9,12 +9,13 @@ import org.junit.Test
  * 字段签名级屏蔽仓库单元测试（ISSUE-P3-43 ② 验收标准 3：非法输入 fail-closed）。
  *
  * 覆盖内存语义下的完整生命周期：按「包名 + 域 + 角色」三维键屏蔽 → 命中 → 解除 → 清空，
- * 以及非法包名在**判定与写入两个方向**上的 fail-closed 语义。
- * （签名不可逆，故列表断言只能对**条数**进行——这本身就是设计约束的体现。）
+ * 以及非法包名与密钥不可用在**判定与写入两个方向**上的 fail-closed 语义。
+ * （签名不可逆，故列表断言只能对**条数**进行——这本身就是设计约束的体现。
+ * ISSUE-P3-46：密钥来源经 [HmacFieldSignatureSource] 注入测试密钥。）
  */
 class AutofillFieldBlocklistStoreTest {
 
-    private fun store() = AutofillFieldBlocklistStore(null)
+    private fun store() = AutofillFieldBlocklistStore(null, testHmacFieldSignatureSource())
 
     @Test
     fun `初始为空且任意上下文均未屏蔽`() {
@@ -77,6 +78,18 @@ class AutofillFieldBlocklistStoreTest {
         invalid.forEach { pkg ->
             assertTrue("非法包名必须 fail-closed: $pkg", store.isBlocked(pkg, "a.com", AutofillFieldRole.PASSWORD))
         }
+    }
+
+    @Test
+    fun `密钥不可用时写入失败且判定保持 fail-closed`() {
+        val store = AutofillFieldBlocklistStore(null, unavailableHmacFieldSignatureSource)
+
+        // 写入方向：密钥不可用 → 签名不可计算 → 拒绝入库
+        assertFalse(store.block("com.example.bank", "a.example.com", AutofillFieldRole.PASSWORD))
+        assertEquals(0, store.blockedSignatures.value.size)
+
+        // 判定方向：fail-closed——密钥不可用视为已屏蔽，绝不放行填充
+        assertTrue(store.isBlocked("com.example.bank", "a.example.com", AutofillFieldRole.PASSWORD))
     }
 
     @Test

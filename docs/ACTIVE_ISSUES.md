@@ -93,11 +93,17 @@
 > 三件套一次性交付，见 §11.3 / §11.4），本文件中该条目已移除；
 > 同批次顺带发现并修复一处既有生产缺陷（详情页 `passwordStrengthBits` 无写入方 → 强度条恒不渲染，见 §11.5），
 > 其签名抗枚举加固残余新登记为 **ISSUE-P3-46**。
-> 本节余 **4 项**（P3-23 / P3-24 / P3-31 / P3-32）+ 新登记 **P3-46**，共 **5 项**。
-> 归档门禁证据（2026-09-10 实测，`--rerun-tasks` 强制真实执行）：
+> **2026-09-10 追加九（P3-31 批次 D + P3-46 闭环）**：批次 D 三项
+> （`DatabaseSession` 697 → 393 / `SecuritySettingsScreen` 674 → 371 / `KeePasskeyAutofillService` 634 → 334）
+> 已完成并归档，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) **§12**；**ISSUE-P3-31 本条仍未闭环**
+> （残余真逻辑超阈值 **15 项**，清单已就地刷新）。
+> 同批次 **ISSUE-P3-46 全部闭环并归档**（§12）：字段签名密钥来源改为 Android Keystore 内
+> **不可导出 HMAC 密钥**，schema `v1 → v2`、盐不再落盘、旧数据一次性保守失效，本文件中该条目已移除。
+> 本节余 **4 项**（P3-23 / P3-24 / P3-31 / P3-32）。
+> 归档门禁证据（2026-09-10 批次 D 实测，`--rerun-tasks` 强制真实执行）：
 > `.\gradlew.bat test --rerun-tasks --max-workers=1 --continue` → **BUILD SUCCESSFUL**，
-> **1328 例 / 0 失败 / 13 跳过**（app 749 / core 58 / crypto 107 / database 235 / sync 179；
-> 较批次 B 基线 1291 例净增 37 例，全部为 §11 批次新增单测）；
+> **1329 例 / 0 失败 / 13 跳过**（app 750 / core 58 / crypto 107 / database 235 / sync 179；
+> 较批次 C 基线 1328 例净增 1 例，为 §12 的 P3-46 新增仓库层单测）；
 > `lint`（5 模块 **0 error**）通过；`:database:assembleDebugAndroidTest` 通过（ISSUE-P3-23 验收标准①）。
 
 ### 前提复核记录（2026-09-10，依「条目维护规则」第 2 条）
@@ -222,22 +228,30 @@
   `lint` 5 模块 0 error，敏感数据清零点 **9 → 9** 逐条对齐、公开 API 零丢失零新增。
   同批次顺带闭环 **ISSUE-P3-43**（§11.3 / §11.4）并修复一处既有生产缺陷（§11.5）。
   **残余清单已按批次 C 后实测刷新为 18 项**（见下）。
+- **2026-09-10 批次 D 进展（就地标注，本条未闭环）**：验收标准 1 点名的下一批三项
+  **全部降至阈值内并归档**，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) **§12**——
+  `DatabaseSession` **697 → 393**（拆 6 个 internal 协作单元：状态容器 / 凭据缓存 / 原子写盘 /
+  树变换 / 内容变更 / 会话建立）、`SecuritySettingsScreen` **674 → 371**（拆 2 文件）、
+  `KeePasskeyAutofillService` **634 → 334**（拆 2 文件）；
+  门禁 `test --rerun-tasks` **1329 例 / 0 失败 / 13 跳过**（app 750 / core 58 / crypto 107 / database 235 / sync 179）、
+  `lint` 5 模块 0 error，公开 API **零丢失零新增**。
+  **残余清单已按批次 D 后实测刷新为 15 项**（见下）。
 - **核实时间点与核实方式（2026-09-10）**：于本仓根执行
-  `for d in app database sync core crypto; do find $d/src/main/java -name '*.kt'; done | xargs wc -l`，
-  以 `awk '$1>400 && $2!="total"'` 筛出 `> 400` 行者并人工剔除纯常量例外；
-  **2026-09-10 批次 C 完成后以同一命令重测**，残余由 21 项降至 **18 项**。
+  `foreach ($d in app,database,sync,core,crypto) { Get-ChildItem -Recurse "$d/src/main/java" -Filter *.kt }`
+  并以 `(Get-Content $_.FullName).Count` 逐文件计数，筛出 `> 400` 行者并人工剔除纯常量例外
+  （命令等价于 `wc -l`，尾行不计换行的文件可能相差 1 行）；
+  **批次 C 完成后重测**残余 21 → 18 项；**批次 D 完成后重测**残余 18 → **15 项**。
 - **为何单独登记**：ISSUE-P3-29 正文的**优先级 8 项已于批次 A 全部降至阈值内并归档**（见
   [RESOLVED_LOG.md](RESOLVED_LOG.md) **§6**），但全仓扫描显示超阈值仍是**普遍性既有债务**；
   按「严禁只记聊天或脑中」纪律，残余面必须有独立条目承接，避免后人误以为「巨型类问题已解决」。
 
-- **清单（2026-09-10 批次 C 完成后实测 18 项）**：
+- **清单（2026-09-10 批次 D 完成后实测 15 项）**：
 
-  `697 DatabaseSession.kt` · `674 SecuritySettingsScreen.kt` ·
-  `634 KeePasskeyAutofillService.kt` · `629 S3SyncProvider.kt` · `596 PasskeyCryptoEngine.kt` ·
-  `578 KdbxMerger.kt` · `568 SettingsScreen.kt` · `562 UnlockScreen.kt` ·
-  `550 GeneratorScreen.kt` · `509 WebDavSyncProvider.kt` · `504 AutofillSettingsScreen.kt` ·
-  `494 EntryEditComponents.kt` · `481 CloudSyncComponents.kt` · `477 EntryDetailComponents.kt` ·
-  `470 EntryEditViewModel.kt` · `462 KeystoreManager.kt` · `453 HealthCheckScreen.kt` · `443 SyncEngine.kt`
+  `629 S3SyncProvider.kt` · `596 PasskeyCryptoEngine.kt` · `578 KdbxMerger.kt` ·
+  `569 SettingsScreen.kt` · `562 UnlockScreen.kt` · `550 GeneratorScreen.kt` ·
+  `510 WebDavSyncProvider.kt` · `504 AutofillSettingsScreen.kt` · `494 EntryEditComponents.kt` ·
+  `481 CloudSyncComponents.kt` · `477 EntryDetailComponents.kt` · `470 EntryEditViewModel.kt` ·
+  `462 KeystoreManager.kt` · `453 HealthCheckScreen.kt` · `443 SyncEngine.kt`
 
   > 路径简写：`app/.../` = `app/src/main/java/com/keepasskey/app/`；`database/.../`、`sync/.../`、`crypto/.../` 同理。
   > **功能性增量标注（2026-09-10 批次 C，非拆分遗漏）**：`KeePasskeyAutofillService` 595 → 634、
@@ -247,9 +261,9 @@
   > 按「是否含真实逻辑」分级属**经论证的纯常量例外**，不拆分（保留单文件可保证词表作为一个不可分割的整体被审查）。
 
 - **验收标准（未来分批）**：
-  1. 按模块分批拆分，**优先处理体量最大且耦合最高的文件**——批次 B 两项（§10）与批次 C 三项（§11）已完成；
-     下一批应指向 **`DatabaseSession`（697）/ `SecuritySettingsScreen`（674）/ `KeePasskeyAutofillService`（634）**；
-  2. 每批拆分为**纯结构性**改动：`.\gradlew.bat test` 全绿且用例数不减（当前 **1328 例**）；
+  1. 按模块分批拆分，**优先处理体量最大且耦合最高的文件**——批次 B（§10）/ C（§11）/ D（§12）已完成；
+     下一批应指向 **`S3SyncProvider`（629）/ `PasskeyCryptoEngine`（596）/ `KdbxMerger`（578）**；
+  2. 每批拆分为**纯结构性**改动：`.\gradlew.bat test` 全绿且用例数不减（当前 **1329 例**）；
   3. 拆分后**逐条对照敏感数据清零点与公开 API 可见性**（沿用批次 A 的验证范式：
      公开 API 零丢失零新增 + 清零点逐一对照）；
   4. 每批完成后按「极简闭环工作流」归档并更新本清单快照。
@@ -305,34 +319,4 @@
   3. 处置后 Code Scanning 依赖类 open 告警数与该族结论**一致**（禁止以 dismiss 替代修复依据）。
 - **禁止**：回调 `failBuildOnCVSS` 阈值以换取变绿；删除或注释掉硬断言步骤；
   在没有核实依据的情况下批量写入 suppression。
-
----
-
-### ISSUE-P3-46 (新登记): 字段签名的抗枚举加固（Keystore HMAC 盐）
-
-- **优先级**：P3（纵深防御加固；非当前可利用缺口）
-- **核实时间点与核实方式（2026-09-10）**：ISSUE-P3-43 批次交付 `AutofillFieldSignature`
-  （`app/src/main/java/com/keepasskey/app/autofill/AutofillFieldSignature.kt`）时逐行核实——
-  签名为 `SHA-256(salt‖"v1‖包名‖域‖角色")`，`salt` 为 `AutofillFieldBlocklistStore` 生成的
-  **32 字节 `SecureRandom` 随机数，与签名同库（SharedPreferences）持久化**。
-  归档依据见 [RESOLVED_LOG.md](RESOLVED_LOG.md) **§11.3**。
-- **背景**：字段签名级屏蔽（ISSUE-P3-43 ②）的持久化值满足**不可逆**（无法从签名读出包名/域名），
-  但**不具备抗枚举性**——攻击者若同时取得应用私有目录中的**盐**与**签名集合**
-  （需已获得任意代码执行或 root 读私有数据能力），可对候选「包名 × 域名 × 角色」逐一计算比对，
-  从而判断用户是否屏蔽过某个特定站点，得到「用户用过哪些网站」这一侧信道画像。
-- **威胁模型界定（如实）**：该攻击的**前提**是攻击者已能读应用私有目录——此时其本就可直接读取
-  整个 KDBX 缓存与偏好明文，本项属**纵深防御**而非修复可独立利用的漏洞；
-  但 KDBX 主库受主密码保护而签名库不受，二者暴露面不对称，故仍值得加固。
-- **整改方向**：把随机盐替换为 **Android Keystore 内不可导出密钥**的 HMAC-SHA256
-  （`HmacSpec`，`setUserAuthenticationRequired(false)` 保证服务进程可离线计算），
-  签名算法版本号 `v1` → `v2`（旧签名自然失效——等价于屏蔽记录保守清空，不产生误屏蔽）；
-  `AutofillFieldSignature` 的纯函数形态保留（新增 `HmacFieldSignatureSource` 抽象注入密钥来源），
-  现有 9 例单测迁移至 HMAC 实现并保持同一断言面。
-- **验收标准**：
-  1. 盐不再落盘（prefs 中无任何签名密钥材料），Keystore 密钥不可导出（`isInsideSecureHardware` 或非导出断言）；
-  2. 既有 `blocked_field_signatures` 数据在升级后按设计失效（清空或忽略），**不得**产生「旧签名误命中新目标」；
-  3. 纯 JVM 单测仍可对签名/判定/仓库三层断言（经密钥来源抽象注入测试密钥）；
-  4. KDoc 与本文件的**安全边界声明同步更新**——不得继续宣称 SHA-256+随机盐「抗枚举」。
-
----
 

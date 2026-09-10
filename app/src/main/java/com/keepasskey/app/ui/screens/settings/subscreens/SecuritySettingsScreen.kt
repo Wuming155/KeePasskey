@@ -1,6 +1,5 @@
 package com.keepasskey.app.ui.screens.settings.subscreens
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -14,7 +13,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Cancel
 import androidx.compose.material.icons.filled.ContentPasteGo
@@ -25,18 +23,12 @@ import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.ScreenLockPortrait
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.VisibilityOff
-import androidx.compose.material.icons.filled.Warning
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -46,12 +38,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.annotation.StringRes
 import com.keepasskey.app.R
 import com.keepasskey.app.security.RuntimeIntegrityReport
 import com.keepasskey.app.security.RuntimeRiskLevel
@@ -352,323 +342,30 @@ fun SecuritySettingsScreen(
 
     // 自动锁定超时选择弹窗
     if (showAutoLockDialog) {
-        val lockOptions = listOf(
-            0 to R.string.sec_lock_now,
-            30 to R.string.sec_30s,
-            60 to R.string.sec_1min,
-            300 to R.string.sec_5min,
-            900 to R.string.sec_15min,
-            -1 to R.string.sec_lock_never
-        )
-        AlertDialog(
-            onDismissRequest = { showAutoLockDialog = false },
-            title = {
-                Text(
-                    text = stringResource(R.string.sec_autolock_time_title),
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-                )
-            },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(
-                        text = stringResource(R.string.sec_autolock_dialog_desc),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    lockOptions.forEach { (seconds, label) ->
-                        val isSelected = uiState.autoLockTimeoutSeconds == seconds
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    onAutoLockTimeoutChange(seconds)
-                                    showAutoLockDialog = false
-                                }
-                                .padding(vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            RadioButton(
-                                selected = isSelected,
-                                onClick = {
-                                    onAutoLockTimeoutChange(seconds)
-                                    showAutoLockDialog = false
-                                }
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = stringResource(label),
-                                style = MaterialTheme.typography.bodyMedium.copy(
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                    color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
-                                )
-                            )
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { showAutoLockDialog = false }) {
-                    Text(stringResource(R.string.btn_cancel))
-                }
-            }
+        AutoLockTimeoutDialog(
+            selectedSeconds = uiState.autoLockTimeoutSeconds,
+            onSelect = onAutoLockTimeoutChange,
+            onDismiss = { showAutoLockDialog = false }
         )
     }
 
     // 剪贴板清空倒计时弹窗
     if (showClipboardDialog) {
-        val clipOptions = listOf(
-            15 to R.string.sec_clip_15s,
-            30 to R.string.sec_clip_30s,
-            60 to R.string.sec_1min,
-            120 to R.string.sec_2min,
-            -1 to R.string.sec_clip_no_clear
-        )
-        AlertDialog(
-            onDismissRequest = { showClipboardDialog = false },
-            title = {
-                Text(
-                    text = stringResource(R.string.sec_clipboard_countdown_title),
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-                )
-            },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(
-                        text = stringResource(R.string.sec_clipboard_dialog_desc),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    clipOptions.forEach { (seconds, label) ->
-                        val isSelected = uiState.clipboardTimeoutSeconds == seconds
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    onClipboardTimeoutChange(seconds)
-                                    showClipboardDialog = false
-                                }
-                                .padding(vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            RadioButton(
-                                selected = isSelected,
-                                onClick = {
-                                    onClipboardTimeoutChange(seconds)
-                                    showClipboardDialog = false
-                                }
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = stringResource(label),
-                                style = MaterialTheme.typography.bodyMedium.copy(
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                    color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
-                                )
-                            )
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { showClipboardDialog = false }) {
-                    Text(stringResource(R.string.btn_cancel))
-                }
-            }
+        ClipboardTimeoutDialog(
+            selectedSeconds = uiState.clipboardTimeoutSeconds,
+            onSelect = onClipboardTimeoutChange,
+            onDismiss = { showClipboardDialog = false }
         )
     }
 
     // ISSUE-P2-09 验收标准 1：关闭「禁止截屏与录屏」的风险确认（确认后才真正回调关闭）
     if (showFlagSecureRiskDialog) {
-        AlertDialog(
-            onDismissRequest = { showFlagSecureRiskDialog = false },
-            title = { Text(stringResource(R.string.sec_flag_secure_risk_title)) },
-            text = {
-                Text(
-                    text = stringResource(R.string.sec_flag_secure_risk_message),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.error
-                )
+        FlagSecureRiskDialog(
+            onConfirm = {
+                showFlagSecureRiskDialog = false
+                onFlagSecureToggle(false)
             },
-            confirmButton = {
-                TextButton(onClick = {
-                    showFlagSecureRiskDialog = false
-                    onFlagSecureToggle(false)
-                }) {
-                    Text(stringResource(R.string.sec_flag_secure_risk_confirm))
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showFlagSecureRiskDialog = false }) {
-                    Text(stringResource(R.string.sec_flag_secure_risk_cancel))
-                }
-            }
+            onDismiss = { showFlagSecureRiskDialog = false }
         )
-    }
-}
-
-/**
- * 将自动锁定秒数映射为对应的字符串资源 (0 = 立即锁定, -1 = 永不)
- */
-@StringRes
-private fun autoLockTimeoutLabelRes(seconds: Int): Int = when (seconds) {
-    0 -> R.string.sec_lock_now
-    30 -> R.string.sec_30s
-    60 -> R.string.sec_1min
-    120 -> R.string.sec_2min
-    300 -> R.string.sec_5min
-    900 -> R.string.sec_15min
-    else -> R.string.sec_never
-}
-
-/**
- * 将剪贴板清空秒数映射为对应的字符串资源 (-1 = 不清空)
- */
-@StringRes
-private fun clipboardTimeoutLabelRes(seconds: Int): Int = when (seconds) {
-    15 -> R.string.sec_clip_15s
-    30 -> R.string.sec_30s
-    60 -> R.string.sec_1min
-    120 -> R.string.sec_2min
-    else -> R.string.sec_clip_never
-}
-
-@Composable
-private fun SecuritySwitchRow(
-    icon: ImageVector,
-    title: String,
-    subtitle: String,
-    checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-        Row(
-            modifier = Modifier.weight(1f),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = if (checked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
-                modifier = Modifier.size(22.dp)
-            )
-            Spacer(modifier = Modifier.width(12.dp))
-            Column {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                Spacer(modifier = Modifier.height(2.dp))
-                Text(
-                    text = subtitle,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
-        Spacer(modifier = Modifier.width(8.dp))
-        Switch(
-            checked = checked,
-            onCheckedChange = onCheckedChange,
-            colors = SwitchDefaults.colors(
-                checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
-                checkedTrackColor = MaterialTheme.colorScheme.primary
-            )
-        )
-    }
-}
-
-@Composable
-private fun SecurityClickableRow(
-    icon: ImageVector,
-    title: String,
-    subtitle: String,
-    onClick: () -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-        Row(
-            modifier = Modifier.weight(1f),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(22.dp)
-            )
-            Spacer(modifier = Modifier.width(12.dp))
-            Column {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                Spacer(modifier = Modifier.height(2.dp))
-                Text(
-                    text = subtitle,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
-        Icon(
-            imageVector = Icons.AutoMirrored.Filled.ArrowForwardIos,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.outlineVariant,
-            modifier = Modifier.size(14.dp)
-        )
-    }
-}
-
-/**
- * ISSUE-P2-08 (ZT-13)：运行环境完整性风险提示卡。
- * 命中可疑 / 攻击特征时明确告知用户当前生效的降级策略，杜绝静默放行。
- */
-@Composable
-private fun IntegrityRiskCard(level: RuntimeRiskLevel) {
-    val messageRes = if (level == RuntimeRiskLevel.COMPROMISED) {
-        R.string.sec_integrity_risk_compromised
-    } else {
-        R.string.sec_integrity_risk_elevated
-    }
-    BentoCard(
-        modifier = Modifier.fillMaxWidth(),
-        backgroundColor = MaterialTheme.colorScheme.errorContainer
-    ) {
-        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    imageVector = Icons.Default.Warning,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.size(20.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = stringResource(R.string.sec_integrity_risk_title),
-                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                    color = MaterialTheme.colorScheme.onErrorContainer
-                )
-            }
-            Text(
-                text = stringResource(messageRes),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onErrorContainer,
-                lineHeight = 18.sp
-            )
-        }
     }
 }

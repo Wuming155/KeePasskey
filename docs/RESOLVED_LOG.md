@@ -20,8 +20,9 @@
 | §9 | 自动填充能力对标 | ISSUE-P3-39 ~ P3-45 |
 | §10 | P3-31 批次 B（超阈值债务） | ISSUE-P3-31 |
 | §11 | P3-31 批次 C + P3-43 闭环 | ISSUE-P3-31 / P3-43 |
+| §12 | P3-31 批次 D + P3-46 闭环 | ISSUE-P3-31 / P3-46 |
 
-> 各批次验收证据（用例数 / 通过 / 失败 / 跳过）分别见 §2.22、§3.1、§4.1、§5.1、§6.1、§7.1、§8.0、§9.5、§10.1、§11.7。
+> 各批次验收证据（用例数 / 通过 / 失败 / 跳过）分别见 §2.22、§3.1、§4.1、§5.1、§6.1、§7.1、§8.0、§9.5、§10.1、§11、§12。
 
 ---
 
@@ -249,11 +250,40 @@
 | P3-31 批次 C | `ThemeSettingsScreen 762→155` / `EntryEditScreen 712→388` / `EntryDetailViewModel 708→399` | 闭环；清单 21→18 项 |
 | P3-43 ② | 字段签名级屏蔽（UI 入口+不可逆持久化+填充判定三件套） | 闭环 |
 | P3-43 ③ | 保存侧独立黑名单（管理入口+持久化+`onSaveRequest` 判定三件套） | 闭环 |
-| （过程发现） | `passwordStrengthBits` 无写入方→强度条恒不渲染 | 顺带修复；抗枚举加固登记 ISSUE-P3-46（ACTIVE） |
+| （过程发现） | `passwordStrengthBits` 无写入方→强度条恒不渲染 | 顺带修复；抗枚举加固登记 ISSUE-P3-46（已于 §12 闭环） |
 
 - 清零点 9→9（`EntryDetailSecrets.clearAll()` 单点收口）；公开 API 零丢失零新增。+37 例全为本批新增单测。
 - **过程缺陷** 6 项已留痕（含 `passwordStrengthBits` 注释与事实相反的事实修正）。
 
 ---
 
-> **当前残余面（ACTIVE）**：ISSUE-P3-23（arm64 真机 + 真实 `.kdbx` 语料端到端）· P3-24（CI 首跑校准）· P3-31（超阈值 18 项）· P3-32（供应链 CVE 收尾）· P3-46（抗枚举加固）。
+## 12. ISSUE-P3-31 批次 D + ISSUE-P3-46 闭环归档
+
+**核实**：2026-09-10，逐文件 `(Get-Content …).Count` 复核；门禁 `test --rerun-tasks --max-workers=1` → **1329 例 / 0 失败 / 13 跳过**（app 750 / core 58 / crypto 107 / database 235 / sync 179；较批次 C 基线 1328 净增 1 例，为 P3-46 新增仓库层单测）；`lint` 5 模块 **0 error**。
+
+| 条目 | 内容 | 结论 |
+|---|---|:---:|
+| P3-31 批次 D | `DatabaseSession 697→393`（拆 6 协作单元）/ `SecuritySettingsScreen 674→371`（拆 2 文件）/ `KeePasskeyAutofillService 634→334`（拆 2 文件） | 闭环；清单 18→15 项 |
+| P3-46 | 字段签名密钥来源 `SHA-256(随机盐)` → `HMAC-SHA256(Keystore 不可导出密钥)`，schema `v1→v2` | 闭环 |
+
+### 12.1 批次 D（纯结构性拆分，零行为变更）
+
+- **公开 API 零丢失零新增**；`lint` 0 error；用例数不减（+1 来自 P3-46）。
+- `database` 模块新增 internal 协作类并归档：`SessionCore`（状态容器）/ `SessionCredentialCache`（凭据缓存，清零点逐处对齐，`synchronized` 语义不变）/ `SessionFileWriter`（原子写盘 + 滚动备份）/ `SessionTreeEditor`（copy-on-write 树变换）/ `SessionContentMutations`（条目/分组增删改与批量操作）/ `SessionOpener`（create/open/openStream）。`DatabaseSession` 收敛为门面，状态迁移、`clearSupersededSensitiveData` 调用点、`serialized.fill(0)`、调度器与异常文案均原样保留。
+- `app` 模块：`SecuritySettingsScreen` 拆出 `SecuritySettingsComponents.kt`（行组件 / 完整性风险卡 / 文案映射）与 `SecuritySettingsDialogs.kt`（三个超时/风险弹窗）；`KeePasskeyAutofillService` 拆出 `AutofillStructureScan.kt`（AssistStructure 遍历 + `ParsedAutofillNode` + `ScannedStructure`）与 `AutofillDatasetBuilders.kt`（解锁引导 / 候选 / 选择器 / SaveInfo 数据集构建，同包 `internal` 扩展函数）。服务类 companion 常量可见性 `private → internal`（数值逐字不变，无字面量双份）。
+- **过程缺陷（如实留痕）**：
+  1. `AutofillDatasetBuilders.appendUnlockedDatasets` 首版写为普通函数，调用 `resolveUsableWebDomain`/`getKdbxEntries`/`resolveFieldReferences` 三个 suspend 函数 → 编译报 `ILLEGAL_SUSPEND_FUNCTION_CALL`；已改为 `suspend fun` 后通过。
+  2. 强制全量重跑首轮 `SyncCacheEvictorTest.关闭密码库后同步缓存目录为空` 偶发失败：残留 `*.BASEVERSION.tmp`（Windows 下 `File.delete()` 被临时占用静默失败，`SyncCache.updateBase` 的 tmp 清理竞态，**与本批次改动无关**）；隔离重跑 **3/3 通过**、全量重跑转绿。
+
+### 12.2 ISSUE-P3-46（字段签名抗枚举加固）
+
+- 新增 `HmacFieldSignatureSource`（`fun interface`，只出 MAC 不入密钥）+ 生产实现 `KeystoreHmacFieldSignatureSource`（`AndroidKeyStore` 内 `HmacSHA256` 密钥，密钥不可导出；`setUserAuthenticationRequired(false)`，仅用于不可逆字段签名，不承载可解封密文），并由 `di/AutofillModule` 绑定。
+- `AutofillFieldSignature.of(source, …)` 以 `SCHEMA_VERSION = "v2"` 参与原文（v1 = `SHA-256(salt‖…)`）；`AutofillFieldBlocklistStore` 注入密钥来源，**删除随机盐的全部落盘逻辑**（`field_signature_salt` 仅在迁移时删除），并以 `field_signature_schema` 标记做一次性**保守迁移**：清空旧签名 + 删除旧盐 → 旧记录等价于清空，不产生误命中。
+- 单测：签名 9 例迁移至 HMAC（同一断言面 + 「密钥不可用 fail-closed」），仓库新增 1 例（密钥不可用时写入失败、判定 fail-closed）。
+- KDoc 与本文件安全边界声明同步更新：不再宣称 SHA-256+随机盐「抗枚举」。
+
+**未验证项（如实，不以静态结论冒充实测）**：验收标准 1 中「Keystore 密钥不可导出」属**设备侧性质**——本环境 `adb devices` 为空、无 arm64 镜像，无法运行 instrumented 断言；本批以**设计保证 + 代码事实**留痕（密钥生成于 `AndroidKeyStore`、全程不调用 `getEncoded()`、不落盘任何密钥材料），设备侧断言待真机可用时补（登记于 ISSUE-P3-23 同一外部设备缺口）。
+
+---
+
+> **当前残余面（ACTIVE）**：ISSUE-P3-23（arm64 真机 + 真实 `.kdbx` 语料端到端）· P3-24（CI 首跑校准）· P3-31（超阈值 15 项）· P3-32（供应链 CVE 收尾）。
