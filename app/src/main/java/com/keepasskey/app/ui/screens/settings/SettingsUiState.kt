@@ -206,7 +206,11 @@ data class SettingsUiState(
     // 9. 关于与系统信息 (About & Info)
     val appVersion: String = "v1.0.0-Preview (2026 Edition)",
     val buildNumber: String = "Build 2026.09.04",
-    val kdbxFormat: String = "KDBX 4.1 (Argon2id + ChaCha20)"
+    val kdbxFormat: String = "KDBX 4.1 (Argon2id + ChaCha20)",
+
+    // ISSUE-P2-08（ZT-13）：运行环境完整性扫描快照——风险提示卡片数据源。
+    // null = 尚未接入 / 未注入（不渲染风险卡片，也绝不回填「安全」假值）
+    val integrityReport: com.keepasskey.app.security.RuntimeIntegrityReport? = null
 )
 
 /**

@@ -446,6 +446,8 @@ fun KeePasskeyApp() {
                     val settingsState by settingsViewModel.uiState.collectAsStateWithLifecycle()
                     SecuritySettingsScreen(
                         uiState = settingsState,
+                        // ISSUE-P2-08：下发运行完整性快照，驱动风险提示卡片（不静默放行）
+                        integrityReport = settingsState.integrityReport,
                         onBackClick = { navController.popBackStack() },
                         onBiometricToggle = settingsViewModel::setBiometricEnabled,
                         onAutoLockToggle = settingsViewModel::setAutoLockBackground,

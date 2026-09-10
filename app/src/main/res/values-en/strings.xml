@@ -483,6 +483,10 @@
     <string name="dbset_export_kdbx_done">KDBX file exported</string>
     <string name="dbset_export_xml_btn">Export XML (plaintext)</string>
     <string name="dbset_export_xml_done">XML plaintext exported. Move it to a safe location immediately</string>
+    <!-- ISSUE-P2-10 (ZT-15): plaintext XML export confirmation (plaintext / unprotected / delete it yourself) -->
+    <string name="dbset_export_plain_warn_title">Confirm plaintext XML export</string>
+    <string name="dbset_export_plain_warn_message">You are about to export an unencrypted XML file containing every field value in the vault:\n- Plaintext: its contents are directly readable and are not protected by the master password;\n- Unprotected: once written to Downloads or a cloud drive, any app or person with access to that location can read it;\n- Delete it yourself: this app will not clean it up. Delete it immediately after use and empty the cloud recycle bin.</string>
+    <string name="dbset_export_plain_warn_confirm">I understand, export anyway</string>
     <string name="dbset_import_dialog_title">Choose import source</string>
     <string name="dbset_import_preparing">Parsing %1$s data...</string>
     <string name="dbset_src_1pux">1Password (1PUX)</string>
@@ -522,6 +526,23 @@
     <string name="sec_section_leak">Leak protection</string>
     <string name="sec_flag_secure_title">Block screenshots</string>
     <string name="sec_flag_secure_sub">Hide sensitive content from recents and split screen, block capture</string>
+    <!-- ISSUE-P2-10 (ZT-15): plaintext attachment export confirmation -->
+    <string name="detail_attachment_export_warn_title">Confirm plaintext attachment export</string>
+    <string name="detail_attachment_export_warn_message">You are about to export the decrypted attachment content, which is no longer protected by the master password:\n- Plaintext: anyone who obtains the file can read its contents directly;\n- Unprotected: the target is the Downloads or cloud location you picked, and the app cannot recall it;\n- Delete it yourself: this app will not clean it up. Delete it immediately after use and empty the cloud recycle bin.</string>
+    <string name="detail_attachment_export_warn_confirm">I understand, export anyway</string>
+    <!-- ISSUE-P2-09 acceptance 1: risk confirmation before disabling screenshot protection -->
+    <string name="sec_flag_secure_risk_title">Turn off screenshot protection?</string>
+    <string name="sec_flag_secure_risk_message">With it off, passwords, one-time codes and passkeys may be captured by screenshots or screen recording and shown in the recents preview, leaking credentials. Keeping it on is recommended.</string>
+    <string name="sec_flag_secure_risk_confirm">Turn it off anyway</string>
+    <string name="sec_flag_secure_risk_cancel">Keep it on</string>
+    <!-- ISSUE-P2-08 (ZT-13): runtime integrity risk notice (ELEVATED / COMPROMISED) -->
+    <string name="sec_integrity_risk_title">Runtime environment risk</string>
+    <string name="sec_integrity_risk_elevated">A suspicious runtime environment was detected (debuggable build or untrusted install source). Biometric quick unlock has been disabled; handle sensitive credentials with care.</string>
+    <string name="sec_integrity_risk_compromised">Clear signs of dynamic attack were detected (debugger attached, root/Magisk or an injection framework). Biometric quick unlock and autofill have been disabled; stop handling sensitive credentials on this device.</string>
+    <!-- ISSUE-P2-08 (ZT-13): non-sensitive system callback text for the degraded path -->
+    <string name="sec_biometric_integrity_blocked">This device is at risk, so biometric quick unlock is disabled. Use your master password instead.</string>
+    <string name="autofill_save_integrity_blocked">This device is at risk, so saving credentials is disabled.</string>
+    <string name="autofill_save_blocked">This app is on the autofill blocklist, so saving credentials was rejected.</string>
     <string name="sec_clipboard_title">Clipboard protection</string>
     <string name="sec_clipboard_sub">Copied secrets stay out of clipboard history and cloud sync</string>
     <string name="sec_clipboard_countdown_title">Clipboard retention</string>

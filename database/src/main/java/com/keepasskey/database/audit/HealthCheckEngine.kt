@@ -96,12 +96,12 @@ object HealthCheckEngine {
             // 检查常见弱口令与长度（单条临时读取并在 finally 中擦除）
             val passChars = passProtected.readChars()
             val passBytes = passProtected.readUtf8()
-            var passLength = passChars.size
+            val passLength = passChars.size
             var isWeak = false
             var hashHex = ""
             try {
-                val passStr = String(passChars)
-                if (passLength < 8 || COMMON_WEAK_PASSWORDS.contains(passStr.lowercase())) {
+                // ISSUE-P2-12：不再把密码物化为不可擦除的 String，改为字符数组大小写不敏感比较
+                if (passLength < 8 || matchesCommonWeakPassword(passChars)) {
                     isWeak = true
                 }
                 hashHex = com.keepasskey.crypto.hash.HashUtil.sha256(passBytes).toHexString()
@@ -139,4 +139,13 @@ object HealthCheckEngine {
 
         return issues
     }
+
+    /**
+     * 与 [COMMON_WEAK_PASSWORDS] 做大小写不敏感的全等比较。
+     * 直接比较字符数组，避免 String(passChars) 把密码明文固化为不可擦除的堆字符串。
+     */
+    private fun matchesCommonWeakPassword(chars: CharArray): Boolean =
+        COMMON_WEAK_PASSWORDS.any { weak ->
+            weak.length == chars.size && weak.indices.all { weak[it].equals(chars[it], ignoreCase = true) }
+        }
 }

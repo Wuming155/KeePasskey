@@ -349,9 +349,10 @@ object PasswordGenerationEngine {
     }
 
     /**
-     * 计算密码熵值 (Entropy Bits)
+     * 计算密码熵值 (Entropy Bits)。
+     * ISSUE-P2-12：改为字符数组实现，调用方可直接消费 CharArray 而不物化 String。
      */
-    fun calculateEntropy(password: String): Double {
+    fun calculateEntropy(password: CharArray): Double {
         if (password.isEmpty()) return 0.0
         var poolSize = 0
         if (password.any { it in CHARS_LOWER }) poolSize += 26
@@ -361,6 +362,16 @@ object PasswordGenerationEngine {
         if (poolSize == 0) poolSize = 26
 
         val bitsPerChar = kotlin.math.log2(poolSize.toDouble())
-        return password.length * bitsPerChar
+        return password.size * bitsPerChar
+    }
+
+    /** String 兼容入口：内部字符副本用毕显式清零 */
+    fun calculateEntropy(password: String): Double {
+        val chars = password.toCharArray()
+        return try {
+            calculateEntropy(chars)
+        } finally {
+            chars.fill('0')
+        }
     }
 }

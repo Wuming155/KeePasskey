@@ -25,6 +25,7 @@ import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.ScreenLockPortrait
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -52,6 +53,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.annotation.StringRes
 import com.keepasskey.app.R
+import com.keepasskey.app.security.RuntimeIntegrityReport
+import com.keepasskey.app.security.RuntimeRiskLevel
 import com.keepasskey.app.ui.components.BentoCard
 import com.keepasskey.app.ui.screens.settings.SettingsUiState
 
@@ -75,12 +78,19 @@ fun SecuritySettingsScreen(
     onRememberRecentFilesToggle: (Boolean) -> Unit = {},
     onRememberKeyFileLocationToggle: (Boolean) -> Unit = {},
     onShowKillAppOptionToggle: (Boolean) -> Unit = {},
+    // ISSUE-P2-08 (ZT-13)：运行环境完整性快照（宿主注入；缺省或 TRUSTED/UNDETERMINED 时不渲染提示）
+    integrityReport: RuntimeIntegrityReport? = null,
     modifier: Modifier = Modifier
 ) {
     var showAutoLockDialog by remember { mutableStateOf(false) }
     var showClipboardDialog by remember { mutableStateOf(false) }
+    // ISSUE-P2-09 验收标准 1：关闭「禁止截屏与录屏」前的风险确认态
+    var showFlagSecureRiskDialog by remember { mutableStateOf(false) }
     val autoLockLabel = stringResource(autoLockTimeoutLabelRes(uiState.autoLockTimeoutSeconds))
     val clipboardLabel = stringResource(clipboardTimeoutLabelRes(uiState.clipboardTimeoutSeconds))
+    // ISSUE-P2-08：仅「可疑 / 已妥协」两档需要明确风险提示（未判定不等于已判定为风险）
+    val integrityLevel = integrityReport?.level
+        ?.takeIf { it == RuntimeRiskLevel.ELEVATED || it == RuntimeRiskLevel.COMPROMISED }
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -210,6 +220,13 @@ fun SecuritySettingsScreen(
                 )
             }
 
+            // ISSUE-P2-08 (ZT-13)：运行环境完整性风险提示（不静默放行；仅风险档渲染）
+            integrityLevel?.let { level ->
+                item {
+                    IntegrityRiskCard(level = level)
+                }
+            }
+
             item {
                 BentoCard(
                     modifier = Modifier.fillMaxWidth(),
@@ -221,7 +238,14 @@ fun SecuritySettingsScreen(
                             title = stringResource(R.string.sec_flag_secure_title),
                             subtitle = stringResource(R.string.sec_flag_secure_sub),
                             checked = uiState.flagSecureEnabled,
-                            onCheckedChange = onFlagSecureToggle
+                            onCheckedChange = { enabled ->
+                                // ISSUE-P2-09 验收标准 1：FLAG_SECURE 属强制项，关闭前必须风险确认
+                                if (enabled) {
+                                    onFlagSecureToggle(true)
+                                } else {
+                                    showFlagSecureRiskDialog = true
+                                }
+                            }
                         )
 
                         SecuritySwitchRow(
@@ -452,6 +476,34 @@ fun SecuritySettingsScreen(
             }
         )
     }
+
+    // ISSUE-P2-09 验收标准 1：关闭「禁止截屏与录屏」的风险确认（确认后才真正回调关闭）
+    if (showFlagSecureRiskDialog) {
+        AlertDialog(
+            onDismissRequest = { showFlagSecureRiskDialog = false },
+            title = { Text(stringResource(R.string.sec_flag_secure_risk_title)) },
+            text = {
+                Text(
+                    text = stringResource(R.string.sec_flag_secure_risk_message),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.error
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showFlagSecureRiskDialog = false
+                    onFlagSecureToggle(false)
+                }) {
+                    Text(stringResource(R.string.sec_flag_secure_risk_confirm))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showFlagSecureRiskDialog = false }) {
+                    Text(stringResource(R.string.sec_flag_secure_risk_cancel))
+                }
+            }
+        )
+    }
 }
 
 /**
@@ -576,5 +628,45 @@ private fun SecurityClickableRow(
             tint = MaterialTheme.colorScheme.outlineVariant,
             modifier = Modifier.size(14.dp)
         )
+    }
+}
+
+/**
+ * ISSUE-P2-08 (ZT-13)：运行环境完整性风险提示卡。
+ * 命中可疑 / 攻击特征时明确告知用户当前生效的降级策略，杜绝静默放行。
+ */
+@Composable
+private fun IntegrityRiskCard(level: RuntimeRiskLevel) {
+    val messageRes = if (level == RuntimeRiskLevel.COMPROMISED) {
+        R.string.sec_integrity_risk_compromised
+    } else {
+        R.string.sec_integrity_risk_elevated
+    }
+    BentoCard(
+        modifier = Modifier.fillMaxWidth(),
+        backgroundColor = MaterialTheme.colorScheme.errorContainer
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Default.Warning,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = stringResource(R.string.sec_integrity_risk_title),
+                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                    color = MaterialTheme.colorScheme.onErrorContainer
+                )
+            }
+            Text(
+                text = stringResource(messageRes),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onErrorContainer,
+                lineHeight = 18.sp
+            )
+        }
     }
 }

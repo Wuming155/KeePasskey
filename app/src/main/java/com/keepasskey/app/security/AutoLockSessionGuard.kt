@@ -52,7 +52,10 @@ class AutoLockSessionGuard @Inject constructor(
      * [backgroundTimestamp] 为 0 表示进程从未退至后台，直接放行；
      * [now] 为可注入的当前时刻，供 JVM 单测消除时间依赖。
      *
-     * 注意：超时 ≤ 0 即锁定的「永不」档语义偏差由 ZT-18（ISSUE-P2-13）独立跟踪整改，本类保持既往行为。
+     * ISSUE-P2-13 (ZT-18) 语义修正：先判「永不」档（autoLockTimeoutSeconds < 0）直接放行，
+     * 修复旧实现 `timeoutMillis <= 0 → 立即锁定` 与 UI「从不」承诺完全相反的问题。
+     * 三档语义由 [AutoLockTimeoutPolicy] 统一裁决；「后台到点即锁」由 [AutoLockManager]
+     * 在 onStop 时调度的延迟任务负责，本方法只承担回前台的补偿判定。
      */
     suspend fun lockOnBackgroundResume(
         backgroundTimestamp: Long,
@@ -62,11 +65,17 @@ class AutoLockSessionGuard @Inject constructor(
         val settings = settingsRepository.getSettings().first()
         if (!settings.autoLockBackground) return
 
-        val elapsedMillis = now - backgroundTimestamp
-        val timeoutMillis = settings.autoLockTimeoutSeconds * 1000L
-
-        if (timeoutMillis <= 0 || elapsedMillis >= timeoutMillis) {
-            triggerLock("后台超时熔断 (已离开 ${elapsedMillis / 1000} 秒)")
+        when (AutoLockTimeoutPolicy.modeOf(settings.autoLockTimeoutSeconds)) {
+            // 「永不」档：真正的从不锁定，不得因 timeoutMillis <= 0 误判为立即锁定
+            AutoLockTimeoutMode.NEVER -> return
+            AutoLockTimeoutMode.IMMEDIATE -> triggerLock("后台立即锁定")
+            AutoLockTimeoutMode.AFTER_SECONDS -> {
+                val elapsedMillis = now - backgroundTimestamp
+                if (AutoLockTimeoutPolicy.isExpired(settings.autoLockTimeoutSeconds, elapsedMillis)) {
+                    val elapsedSeconds = elapsedMillis / AutoLockTimeoutPolicy.MILLIS_PER_SECOND
+                    triggerLock("后台超时熔断 (已离开 ${elapsedSeconds} 秒)")
+                }
+            }
         }
     }
 
@@ -97,5 +106,61 @@ class AutoLockSessionGuard @Inject constructor(
 
     companion object {
         private const val TAG = "AutoLockSessionGuard"
+    }
+}
+
+/**
+ * ISSUE-P2-13 (ZT-18)：自动锁定超时的三档语义。
+ *
+ * 与设置页（SecuritySettingsScreen 的自动锁定倒计时选项）严格对齐：
+ * - [NEVER]：`-1`（UI「从不」），真正的永不自动锁定——既不判超时，也不得启动任何定时器；
+ * - [IMMEDIATE]：`0`（UI「立即锁定」），退至后台即视为超时；
+ * - [AFTER_SECONDS]：`> 0`，退至后台满 N 秒后锁定。
+ *
+ * 旧实现将 `timeoutMillis <= 0` 一并判为立即锁定，导致「从不」档与 UI 承诺相反（ZT-18）。
+ */
+enum class AutoLockTimeoutMode {
+    NEVER,
+    IMMEDIATE,
+    AFTER_SECONDS
+}
+
+/**
+ * 自动锁定超时纯内核（无 Android 依赖，可在 JVM 单测中直接驱动三档语义）。
+ */
+object AutoLockTimeoutPolicy {
+
+    /** 「永不」档取值：与设置页 sec_lock_never（-1）一致 */
+    const val NEVER_SECONDS: Int = -1
+
+    /** 「立即」档取值：与设置页 sec_lock_now（0）一致 */
+    const val IMMEDIATE_SECONDS: Int = 0
+
+    /** 秒 → 毫秒换算基准，避免在多处复制 1000 字面量 */
+    const val MILLIS_PER_SECOND: Long = 1000L
+
+    /** 将设置中的秒数映射为明确的三档语义 */
+    fun modeOf(seconds: Int): AutoLockTimeoutMode = when {
+        seconds < 0 -> AutoLockTimeoutMode.NEVER
+        seconds == 0 -> AutoLockTimeoutMode.IMMEDIATE
+        else -> AutoLockTimeoutMode.AFTER_SECONDS
+    }
+
+    /**
+     * 后台延迟锁定任务应等待的毫秒数。
+     * [AutoLockTimeoutMode.NEVER] 返回 null，调用方据此禁止启动定时器；
+     * [AutoLockTimeoutMode.IMMEDIATE] 返回 0，表示退至后台即锁定。
+     */
+    fun delayMillis(seconds: Int): Long? = when (modeOf(seconds)) {
+        AutoLockTimeoutMode.NEVER -> null
+        AutoLockTimeoutMode.IMMEDIATE -> 0L
+        AutoLockTimeoutMode.AFTER_SECONDS -> seconds * MILLIS_PER_SECOND
+    }
+
+    /** 退至后台 [elapsedMillis] 毫秒后是否已达超时；「永不」档恒为 false */
+    fun isExpired(seconds: Int, elapsedMillis: Long): Boolean = when (modeOf(seconds)) {
+        AutoLockTimeoutMode.NEVER -> false
+        AutoLockTimeoutMode.IMMEDIATE -> true
+        AutoLockTimeoutMode.AFTER_SECONDS -> elapsedMillis >= seconds * MILLIS_PER_SECOND
     }
 }

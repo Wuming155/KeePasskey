@@ -83,4 +83,37 @@ data class KdbxGroup(
         entries.forEach { it.clearSensitiveData() }
         subgroups.forEach { it.clearSensitiveData() }
     }
+
+    /**
+     * ISSUE-P2-06：copy-on-write 版本切换前的定点擦除。
+     *
+     * 以 [surviving] 为存活树，收集其中（含条目 history）全部受保护实例的对象身份，
+     * 再遍历本树，**仅擦除未被存活树以同一对象引用（引用相等）的实例**。
+     * 这样既能清掉真正下线的旧节点密文，又不会误伤新树仍共享引用的
+     * [ProtectedString] / [KdbxAttachment]（例如 [KdbxEntry.withField] 只替换目标字段、
+     * KdbxEntry.copy(parentGroupId = ...) 的移动条目会共享全部字段实例）。
+     *
+     * **严禁**改用 [clearSensitiveData] 递归擦除：新树会共享未修改子树的引用，
+     * 递归擦除会造成存活数据丢失。
+     *
+     * 调用约定：在把旧树替换为 [surviving] 之前调用 oldRoot.clearSupersededSensitiveData(newRoot)。
+     */
+    fun clearSupersededSensitiveData(surviving: KdbxGroup) {
+        // IdentityHashMap 支撑的集合：contains 走引用相等而非 equals/hashCode
+        val live: MutableSet<Any> = java.util.Collections.newSetFromMap(java.util.IdentityHashMap())
+        surviving.collectSensitiveIdentities(live)
+        clearSensitiveIdentitiesNotIn(live)
+    }
+
+    /** 收集本子树（含条目 history）可达的全部敏感实例身份 */
+    internal fun collectSensitiveIdentities(into: MutableSet<Any>) {
+        entries.forEach { it.collectSensitiveIdentities(into) }
+        subgroups.forEach { it.collectSensitiveIdentities(into) }
+    }
+
+    /** 擦除本子树中未被身份集合 [live] 引用的敏感实例 */
+    internal fun clearSensitiveIdentitiesNotIn(live: Set<Any>) {
+        entries.forEach { it.clearSensitiveIdentitiesNotIn(live) }
+        subgroups.forEach { it.clearSensitiveIdentitiesNotIn(live) }
+    }
 }

@@ -24,6 +24,12 @@
    - [2.13 Passkey 注册 DAL 远程资产声明校验（P2-02）](#213-passkey-注册-dal-远程资产声明校验p2-02)
    - [2.14 App 模块 14 个测试用例消除 Fake 自测（P2-03）](#214-app-模块-14-个测试用例消除-fake-自测p2-03)
    - [2.15 Sync 与 Merger 边缘分支单元测试补齐（P2-04）](#215-sync-与-merger-边缘分支单元测试补齐p2-04)
+   - 2.16 原子写盘降级 fsync 与 `.bak` 生命周期闭环（P2-05 / P2-11）
+   - 2.17 锁定不等于销毁：copy-on-write 敏感字段定点擦除（P2-06）
+   - 2.18 Autofill 信任边界与运行时完整性防护（P2-07 / P2-08 / P2-09）
+   - 2.19 明文导出治理与自动锁定语义修正（P2-10 / P2-13）
+   - 2.20 OTP 种子与详情路径字节化（P2-12）
+   - 2.16 ~ 2.20 批次验收证据（P2 九项整体闭环）
 
 ---
 
@@ -629,3 +635,121 @@
     - `sync/src/test/java/com/keepasskey/sync/KdbxMergerV2Test.kt`
   - **测试证据**：`./gradlew.bat test` 全绿：全仓 **647 例（app 229 / core 36 / crypto 61 / database 163 / sync 158），
     634 通过 / 0 失败 / 13 跳过**（跳过项与既有基线一致）；净变化 +13 例边缘分支回归锁。
+
+---
+
+### 2.16 原子写盘降级 fsync 与 `.bak` 生命周期闭环（P2-05 / P2-11）
+
+> 来源：ISSUE-P2-05（P2-7 残余）、ISSUE-P2-11（ZT-16）。整改依据：工程规则「文件 IO 与原子写入」铁律——写入临时文件 → 同步落盘 → 原子重命名 → **目录项 fsync**；零信任「凭据轮换后旧材料必须失效」。
+
+- **ISSUE-P2-05（原子写盘降级分支 fsync 补齐）**：已完成。
+  - **缺陷 / 动机**：主路径已在关闭流前调用 `fos.fd.sync()`，但**父目录**未 fsync。POSIX crash-safety 要求 rename 后同步父目录：否则断电后新目录项可能未持久化，文件丢失或回退旧版本；降级替换（`renameTo` / `Files.copy`）与备份 copy 路径同样缺失。
+  - **整改实现**：
+    1. 新增 `AtomicFileWriter.syncDirectory()`（`FileChannel.open(dir, StandardOpenOption.READ).force(true)`），平台/文件系统不支持目录通道时（Windows 抛 `AccessDeniedException`）捕获降级为告警日志，绝不阻断写盘；
+    2. 四条路径全覆盖：原子 move 成功后、备份 copy 后、降级 `renameTo` 成功后、降级 `Files.copy` 后。
+  - **测试证据**：`AtomicFileWriterTest` 补 4 例——首次写抛异常不残留空目标与 `.tmp`、覆盖写失败原内容不变且清理 `.tmp`、关闭备份偏好不生成 `.bak`、以覆写 `renameTo` 恒 false 的 `File` 子类**确定性**进入 `Files.copy` 降级分支并断言替换成功/目标非空/`.tmp` 清理（不依赖平台 rename 语义）。
+- **ISSUE-P2-11（`.bak` 永久保留、开关未接线、改密后旧口令可解密文）**：已完成。
+  - **缺陷 / 动机**：`AtomicFileWriter` 无条件生成 `<name>.kdbx.bak` 且从无删除逻辑；`createBackupBeforeSave` 仅被持久化、无任何消费方；改主密码后 `.bak` 仍可被**旧口令**解开。
+  - **整改实现**：
+    1. `AtomicFileWriter.writeAtomic(target, createBackup = true, writer)` 增加可控入口（默认值保持既有行为，调用点全兼容）；关闭备份时**无备份兜底**，降级分支对已存在原文件拒绝无保护覆盖（宁可失败也不损坏数据，遵循原子写盘铁律）；
+    2. `DatabaseSession.createBackupBeforeSave`（`@Volatile`，默认 true）为会话级偏好；三处落盘统一经 `writeAtomicByBackupPreference()`，关闭时既不出备份、亦清理历史遗留 `.bak`；
+    3. `changeCredentials()` 成功后无条件删除活动文件的滚动备份（凭据轮换后旧密文快照失效）；
+    4. 装配接线：`DatabaseModule.provideDatabaseSession` 注入 `ExtendedSettingsStore.load()` 的持久化值；`SettingsViewModel.setCreateBackupBeforeSave` 实时下发到唯一会话实例。`database` 模块未反向依赖 `app`（§3.1 单向依赖保持）。
+  - **涉及文件**：
+    - `database/src/main/java/com/keepasskey/database/session/AtomicFileWriter.kt`
+    - `database/src/main/java/com/keepasskey/database/session/DatabaseSession.kt`
+    - `app/src/main/java/com/keepasskey/app/di/DatabaseModule.kt`
+    - `app/src/main/java/com/keepasskey/app/ui/screens/settings/SettingsViewModel.kt`
+    - `database/src/test/java/com/keepasskey/database/session/AtomicFileWriterTest.kt`（+4）
+    - `database/src/test/java/com/keepasskey/database/DatabaseSessionBackupPreferenceTest.kt`（新增 3）
+  - **测试证据**：新增用例覆盖「关闭不生成 + 清历史遗留」「开启按既有行为生成」「改密后 `.bak` 删除且旧口令不得再解开目标文件、新口令可解锁」。
+  - **如实记录的取舍**：`syncDirectory` 在 Windows 上确定性降级为告警（目录 `FileChannel` 抛 `AccessDeniedException`），故宿主单测无法断言目录 fsync 真实生效；该分支的正确性依赖 POSIX 语义，已由日志留痕。
+
+---
+
+### 2.17 锁定不等于销毁：copy-on-write 敏感字段定点擦除（P2-06）
+
+> 来源：ISSUE-P2-06（ZT-11）。整改依据：工程规则敏感数据铁律；「锁定即销毁」声明需与实现一致。
+
+- **缺陷 / 动机**：所有写操作走 `data class.copy()` 产生新树，旧树节点仅变为不可达、其 `ProtectedString` 密文从未清零；`InMemoryCipher` 的 `encKey`/`eqKey` 为 object 级常量、进程生命周期常驻。
+- **整改实现**：
+  1. `KdbxEntry.clearOwnSensitiveData()`（只清自身 fields/customFields/attachments，**不递归**）；
+  2. `KdbxGroup.clearSupersededSensitiveData(surviving)`：以 `Collections.newSetFromMap(IdentityHashMap())` 收集**存活树可达的敏感实例身份**（引用相等，而非 equals），再遍历旧树仅擦除未被存活树引用的实例——保证 copy-on-write 共享的未被修改字段（如 `withField` 只替换目标键、移动条目 `copy(parentGroupId=...)`）绝不被误擦；history 列表同样按身份处理；
+  3. `DatabaseSession` 在 `saveEntry` / `saveGroup` / `updateDatabaseMeta` / `batchMoveEntries` 及 `save()` 的历史修剪分支替换前调用该 API（**替换树已就绪**的写入路径）。
+- **集成阶段实测缺陷与修正（重要）**：初版在 `deleteEntry` / `deleteGroup` / `batchDeleteEntries` 也做了身份擦除，导致 app 层真实回归——回收站软删是「先 `deleteEntry`，再用与旧条目**共享同一 ProtectedString 实例**的 moved 副本重新 `saveEntry`」，此时 moved 尚未入树，身份集合把即将复用的存活字段判为下线并清零，条目成空壳、`save()` 序列化抛 `IllegalStateException`，回收站元数据无法落盘（`RealVaultRepositoryTest` 真实失败）。**修正原则：擦除只在替换树已就绪时安全；删除语义下不存在替换树，禁止身份擦除**（下线实例交由 GC 回收）。
+- **InMemoryCipher 评估结论（如实记录的边界）**：**不可**按锁定边界轮换进程内驻留密钥——`SyncCoordinator` 跨锁定持有含 `ProtectedString` 的整树快照，轮换会让存活实例永久无法解密。已在 KDoc 写明结论并配「lock 只擦除会话树_树外持有的实例仍需进程级密钥」回归锁佐证，不以隐蔽方式制造数据破坏。
+- **涉及文件**：
+  - `core/src/main/java/com/keepasskey/core/model/KdbxEntry.kt` / `KdbxGroup.kt`
+  - `core/src/main/java/com/keepasskey/core/security/InMemoryCipher.kt`（评估结论 KDoc）
+  - `database/src/main/java/com/keepasskey/database/session/DatabaseSession.kt`（4 处保留 + 3 处删除路径修正）
+  - `core/src/test/java/com/keepasskey/core/model/KdbxSensitiveErasureTest.kt`（新增）
+  - `database/src/test/java/com/keepasskey/database/DatabaseSessionSensitiveErasureTest.kt`（新增，含删除后再插入回归锁）
+- **测试证据**：身份集合语义、只清自身不递归、共享实例存活、锁定边界与「删除后再以共享字段副本重新插入不得被误擦且可落盘重开」回归锁全部覆盖。
+
+---
+
+### 2.18 Autofill 信任边界与运行时完整性防护（P2-07 / P2-08 / P2-09）
+
+> 来源：ISSUE-P2-07（ZT-12）、ISSUE-P2-08（ZT-13）、ISSUE-P2-09（ZT-14）。整改依据：Google Digital Asset Links 规范；NIST SP 800-207「设备健康状态作为访问决策输入」；OWASP MASVS-RESILIENCE / MASVS-PLATFORM-1。
+
+- **ISSUE-P2-07（域归属无校验 / 保存侧无黑名单 / isBlocked 实为 fail-open）**：已完成。
+  - 新增 `AutofillWebDomainPolicy` + `AutofillOriginResolver`：webDomain 参与匹配前必须通过归属裁决——受信浏览器包名白名单直放，非浏览器复用既有 `DigitalAssetLinksVerifier` 校验 `rpId ↔ webDomain` 声明，取不到调用方证书或 DAL 非 VERIFIED 一律返回 null（fail-closed，不下发该域候选；不提供 `skipDalVerification` 旁路以免重开伪造面）；
+  - `onSaveRequest` 前置 `AutofillAccessPolicy.rejectReason` 闸门：命中黑名单或完整性风险即拒绝落库并向系统回调非敏感提示；
+  - `AutofillBlocklistStore.isBlocked` 对非法包名改为 **fail-closed（return true）**，KDoc 与 `AutofillBlocklistStoreTest` 同步修正；
+  - 保存被拒提示文案已资源化（`autofill_save_blocked` / `autofill_save_integrity_blocked`，中英双语）。
+- **ISSUE-P2-08（无运行环境完整性 / 反调试 / 反篡改）**：已完成。
+  - 新增 `RuntimeIntegrityPolicy`（纯函数分级矩阵，JVM 可测）、`RuntimeIntegrityDetector`（后台 IO 探测：`Debug.isDebuggerConnected`、`FLAG_DEBUGGABLE`、root/`su` 路径、Magisk 痕迹、`/proc/self/maps` 中 Frida/Xposed、安装来源）、`RuntimeIntegrityGate` 抽象与 `RuntimeIntegrityModule` `@Binds` 绑定；
+  - 分级 fail-closed：COMPROMISED = 禁生物快速解锁 + 禁自动填充 + 风险提示；ELEVATED = 仅禁生物；UNDETERMINED = 保守双禁（不以「未检测到即安全」自证放行）；
+  - 消费点：`BiometricAuthManager`（风险态显式失败回落主密码）、`KeePasskeyAutofillService`（填充与保存双闸门）；
+  - UI 风险提示真实渲染：`RuntimeIntegrityDetector.report` → `SettingsViewModel` → `SettingsUiState.integrityReport` → `KeePasskeyApp` → `SecuritySettingsScreen` 的 `IntegrityRiskCard`（ELEVATED/COMPROMISED 才渲染），文案 `sec_integrity_risk_*`。
+- **ISSUE-P2-09（FLAG_SECURE 可关闭 + 无遮挡触摸过滤）**：已完成。
+  - `FlagSecurePolicy.shouldApplySecure` 改为「临时豁免」模型：锁定态无条件强制；解锁态用户关闭仍默认强制，仅在 UI 显式风险确认后由 `FlagSecureGuard.requestTemporaryExemption()` 授予 ≤5 分钟内存豁免，到期/锁库自动恢复；
+  - `SecuritySettingsScreen` 关闭开关前弹出风险确认（`sec_flag_secure_risk_*`），取消则保持开启（fail-closed）；
+  - 遮挡触摸过滤：`autofill_dataset_item.xml` 三视图 `filterTouchesWhenObscured="true"`；`FlagSecureGuard.applyObscuredTouchFilter` 与 `AutofillConfirmActivity` 使用 `window.decorView.filterTouchesWhenObscured = true`（**注意：`android.view.Window` 无此方法，经 `android-37.0/android.jar` javap 核验，必须落在 `View` 层**）；Compose 侧 `SecureTouchCompose.ApplyObscuredTouchFilter` 已接于 autofill 两屏。
+  - **如实记录的遗留**：主 App 其余敏感 Compose 屏未接遮挡过滤；非浏览器 webDomain 依赖联网 DAL，离线时不下发该域候选。
+- **涉及文件**：`app/src/main/java/com/keepasskey/app/security/{RuntimeIntegrityPolicy,RuntimeIntegrityDetector,RuntimeIntegrityGate,RuntimeIntegrityModule,FlagSecurePolicy,ObscuredTouchPolicy,SecureTouchCompose}.kt`、`app/.../autofill/{AutofillWebDomainPolicy,AutofillOriginResolver,AutofillAccessPolicy}.kt`、`KeePasskeyAutofillService.kt`、`AutofillBlocklistStore.kt`、`FlagSecureGuard.kt`、`BiometricAuthManager.kt`、`SettingsUiState.kt`、`SettingsViewModel.kt`、`KeePasskeyApp.kt`、`SecuritySettingsScreen.kt`、`res/layout/autofill_dataset_item.xml`、`res/values{,-en}/strings.xml` 及对应测试。
+- **测试证据**：`RuntimeIntegrityPolicyTest`(9)、`FlagSecurePolicyTest`(8)、`ObscuredTouchPolicyTest`(6)、`AutofillWebDomainPolicyTest`(6)、`AutofillAccessPolicyTest`(6)，`AutofillBlocklistStoreTest` / `SecurityTest` 同步修正，定向 `security.*` + `autofill.*` 全绿。
+
+---
+
+### 2.19 明文导出治理与自动锁定语义修正（P2-10 / P2-13）
+
+> 来源：ISSUE-P2-10（ZT-15）、ISSUE-P2-13（ZT-18/ZT-19）。整改依据：零信任「数据出域需显式授权与可审计」；「与 UI 契约一致 + 时间驱动的会话终止」。
+
+- **ISSUE-P2-10（明文 XML/附件导出沙箱外且无治理）**：已完成。
+  - 明文导出强制二次确认：`DatabaseSettingsScreen` 的 XML 导出与 `EntryDetailScreen` 的附件导出均先弹确认；确认弹窗的取消/点外部关闭分支不触发导出；
+  - **fail-closed**：`EntryDetailViewModel.exportAttachment` 的 `confirmed` 默认 false，未确认时不解析附件、不打开输出流、不写任何字节；
+  - 默认加密导出：`exportKdbxTo` 走 `exportKdbxBytes → DatabaseSession.exportToBytes`，明文 XML 降级为需显式确认的高级选项；
+  - 导出审计（不含内容）：`SettingsExportController` + `ExportAuditRecorder`/`ExportAuditSanitizer` 仅记录时间、导出类型、目标 URI 的 `scheme+authority+8 位摘要`，不含路径、文件名与任何明文。
+- **ISSUE-P2-13（AutoLock「永不」实为立即锁定 + 后台无定时器）**：已完成。
+  - 新增 `AutoLockTimeoutPolicy` 三档内核并与设置页取值严格对齐：`-1`=永不（`lockOnBackgroundResume` 直接放行、绝不启动定时器）、`0`=立即、`>0`=秒；
+  - 后台延迟熔断：`AutoLockManager.onStop` 调度延迟任务到点即锁（不再等回前台判定）；`onStart` / `onUnlockSuccess` / `triggerLock` / 超时设置变更（`map+distinctUntilChanged`，仅后台期间重排）均先取消旧任务，任意时刻至多一个存活定时器；受控 `SupervisorJob + Main` scope，无裸 `GlobalScope`；触发时先置 `backgroundTimestamp = 0` 再锁定，避免重复熔断。
+- **涉及文件**：`SettingsExportController.kt`、`DatabaseSettingsScreen.kt`、`EntryDetailViewModel.kt`、`EntryDetailScreen.kt`、`AutoLockSessionGuard.kt`、`AutoLockManager.kt`、`res/values{,-en}/strings.xml` 及对应测试。
+- **测试证据**：`AutoLockTimeoutPolicyTest`（-1/0/30/负值）+ `AutoLockSessionGuardTest`（永不档 24h 不锁、立即档 1ms 即锁）；`ExportConfirmationPolicyTest`（未确认不导出、加密为默认、审计不含敏感内容）。
+
+---
+
+### 2.20 OTP 种子与详情路径字节化（P2-12）
+
+> 来源：ISSUE-P2-12（ZT-17）。整改依据：工程规则敏感数据铁律（能用 Char/Byte 的地方绝不落到 String）。
+
+- **已完成子项**：
+  1. **解析层字节化**：`ParsedTotpConfig.secret` 由 `String` 改为 **Base32 文本字节（ASCII）**；新增 `TotpKeyUriParser.parse(ByteArray)` 全程字节语义（otpauth URI 与种子均不物化 String，仅 label/issuer/account 等非敏感描述转字符串），解析器只清自有中间量并返回全新副本；`OtpEngine` 增加 `Base32Decoder.decode(ByteArray)`；
+  2. **消费侧清零责任链**：`VaultEntryMapper.parseTotpConfig` 经 `ProtectedString.readUtf8()` 读取并在 finally 清 `rawBytes`；`mapKdbxEntryToUi` 清 `parsedTotp.secret`；`RealVaultRepository.calculateEntryTotp` 清 `config.secret`；`computeTotpCode` 仅清 Base32 解码出的二进制 key；`getEntryTotpSecretChars` 返回 CharArray 借出给调用方；
+  3. **GeneratorUiState 当前密码与 history**：容器已改 `ProtectedString`，淘汰项与 `onCleared` 显式清零；**部分完成**——生成引擎 `generateRandomPassword/generatePassphrase/generateMaskedPassword` 仍返回 `String`（生成边界），`GeneratorScreen` 渲染与剪贴板 `copySensitiveText` 边界仍会物化不可擦 String；
+  4. **健康扫描字节化**：`HealthCheckEngine` 删除 `String(passChars)`，改为字符数组大小写不敏感比较。
+- **如实保留的残余面**：`RealVaultRepository` 4 处 `readString()` 受仓库接口/UI String 模型限制未改；`TotpKeyUriParser.parse(String)` 兼容重载保留（生产路径不经该重载）。
+- **涉及文件**：`core/.../otp/TotpKeyUriParser.kt`、`core/.../otp/OtpEngine.kt`、`app/.../data/repository/VaultEntryMapper.kt`、`RealVaultRepository.kt`、`app/.../ui/screens/generator/{GeneratorUiState,GeneratorViewModel,GeneratorScreen,DicewareWordList}.kt`、`database/.../audit/HealthCheckEngine.kt` 及对应测试。
+- **测试证据**：新增 `Base32DecoderByteSemanticsTest`，`TotpKeyUriParserTest` / `VaultEntryMapperTotpTest` / `HealthCheckEngineTest` 按字节语义同步修正。
+
+---
+
+### 2.16 ~ 2.20 批次验收证据（P2 九项整体闭环）
+
+- **执行命令**：`.\.\gradlew.bat test`（全模块 `src/test`，单次串行执行；集成阶段以 `--project-cache-dir build/parent-verify` 隔离并发构建缓存）。
+- **结果**：**全仓 725 例，712 通过 / 0 失败 / 13 跳过**——
+  app 283 / core 48 / crypto 61 / database 175 / sync 158（跳过的 13 例与既有基线一致：12 例 `LiveSyncServersTest` 真实联调 + 1 例 Windows 无 POSIX 权限视图）。
+  相对本批基线（647 例，634 通过 / 13 跳过）**净增 78 例**。
+- **批次特有回归锁**：`database/src/test/.../DatabaseSessionSensitiveErasureTest.kt`
+  的 `删除后再以共享字段副本重新插入不得被误擦且可落盘重开`——固化集成阶段实测出的
+  「删除路径身份擦除误伤复用字段」缺陷（详见 §2.17），防止回退。

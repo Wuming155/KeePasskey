@@ -101,8 +101,7 @@ fun GeneratorScreen(
 
     // P0 整改：不再在 Composable 内直连 ClipboardManager（该路径缺失定时擦除，
     // 生成的明文密码会永久滞留剪贴板）；统一交给 ViewModel → ClipboardSecurityManager。
-    val onCopy: (String) -> Unit = viewModel::copyGeneratedPassword
-
+    // ISSUE-P2-12：状态持有 ProtectedString，UI 仅在渲染瞬间 readString() 物化明文
     Scaffold(
         modifier = modifier.fillMaxSize(),
         containerColor = MaterialTheme.colorScheme.background,
@@ -156,11 +155,11 @@ fun GeneratorScreen(
             // 2. 主展示卡片：生成的密码与快捷操作
             item {
                 GeneratorDisplayCard(
-                    password = uiState.currentPassword,
+                    password = uiState.currentPassword.readString(),
                     strengthLabel = uiState.strengthLabel,
                     entropyBits = uiState.entropyBits,
                     onRegenerate = viewModel::regenerate,
-                    onCopy = { onCopy(uiState.currentPassword) }
+                    onCopy = { viewModel.copyGeneratedPassword(uiState.currentPassword) }
                 )
             }
 
@@ -197,9 +196,9 @@ fun GeneratorScreen(
 
                 items(uiState.history) { historyItem ->
                     HistoryPasswordRow(
-                        password = historyItem,
+                        password = historyItem.readString(),
                         onSelect = { viewModel.selectHistoryPassword(historyItem) },
-                        onCopy = { onCopy(historyItem) }
+                        onCopy = { viewModel.copyGeneratedPassword(historyItem) }
                     )
                 }
             }

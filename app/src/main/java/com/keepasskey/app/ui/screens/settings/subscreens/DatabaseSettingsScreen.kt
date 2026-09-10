@@ -1,5 +1,6 @@
 package com.keepasskey.app.ui.screens.settings.subscreens
 
+import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -10,12 +11,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -30,6 +33,7 @@ import androidx.compose.ui.unit.dp
 import com.keepasskey.app.R
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.model.resolveText
+import com.keepasskey.app.ui.screens.settings.ExportConfirmationPolicy
 import com.keepasskey.app.ui.screens.settings.KdfBenchmarkUiState
 import com.keepasskey.app.ui.screens.settings.SettingsUiState
 
@@ -67,14 +71,23 @@ fun DatabaseSettingsScreen(
     var showExportDialog by remember { mutableStateOf(false) }
     var showImportDialog by remember { mutableStateOf(false) }
     var operationFeedback by remember { mutableStateOf<UiMessage?>(null) }
+    // ISSUE-P2-10 (ZT-15)：明文 XML 导出的待确认目标（SAF 选定后、写盘前强制二次确认）
+    var pendingPlaintextXmlUri by remember { mutableStateOf<Uri?>(null) }
+    var showPlaintextXmlConfirm by remember { mutableStateOf(false) }
 
     // TASK-13 整改：SAF CreateDocument 真实另存为（此前导出/密钥文件仅弹假成功提示）
     val exportKdbxLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("application/octet-stream")
     ) { uri -> uri?.let(onExportKdbx) }
+    // ISSUE-P2-10 (ZT-15)：明文 XML 不直接导出——SAF 选定目标后先弹二次确认
     val exportXmlLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("text/xml")
-    ) { uri -> uri?.let(onExportXml) }
+    ) { uri ->
+        if (uri != null) {
+            pendingPlaintextXmlUri = uri
+            showPlaintextXmlConfirm = true
+        }
+    }
     val exportKeyFileLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("application/octet-stream")
     ) { uri -> uri?.let(onExportKeyFile) }
@@ -245,6 +258,48 @@ fun DatabaseSettingsScreen(
             onExportKdbx = { exportKdbxLauncher.launch(it) },
             onExportXml = { exportXmlLauncher.launch(it) },
             onDismiss = { showExportDialog = false }
+        )
+    }
+
+    // 对话框 6b：明文 XML 导出二次确认（ISSUE-P2-10 / ZT-15）
+    if (showPlaintextXmlConfirm) {
+        AlertDialog(
+            onDismissRequest = {
+                showPlaintextXmlConfirm = false
+                pendingPlaintextXmlUri = null
+            },
+            title = { Text(stringResource(R.string.dbset_export_plain_warn_title)) },
+            text = {
+                Text(
+                    text = stringResource(R.string.dbset_export_plain_warn_message),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.error
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val target = pendingPlaintextXmlUri
+                    showPlaintextXmlConfirm = false
+                    pendingPlaintextXmlUri = null
+                    // 决策走可单测的 ExportConfirmationPolicy：确认后才放行，
+                    // 取消/未确认分支不调用 onExportXml（fail-closed）
+                    val allowed = ExportConfirmationPolicy.allows(
+                        risk = ExportConfirmationPolicy.Risk.PLAINTEXT,
+                        confirmed = true
+                    )
+                    if (target != null && allowed) onExportXml(target)
+                }) {
+                    Text(stringResource(R.string.dbset_export_plain_warn_confirm))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showPlaintextXmlConfirm = false
+                    pendingPlaintextXmlUri = null
+                }) {
+                    Text(stringResource(R.string.btn_cancel))
+                }
+            }
         )
     }
 

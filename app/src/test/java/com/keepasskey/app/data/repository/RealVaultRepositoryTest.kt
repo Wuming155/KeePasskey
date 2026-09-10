@@ -315,6 +315,7 @@ class RealVaultRepositoryTest {
         // 移入回收站
         repository.deleteEntry(newEntry.id)
 
+
         // 关闭会话
         session.close()
 

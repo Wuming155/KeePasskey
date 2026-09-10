@@ -2,6 +2,7 @@ package com.keepasskey.app
 
 import android.app.Application
 import com.keepasskey.app.security.AutoLockManager
+import com.keepasskey.app.security.RuntimeIntegrityDetector
 import com.keepasskey.app.sync.PeriodicSyncScheduler
 import com.keepasskey.core.log.AppLog
 import dagger.hilt.android.HiltAndroidApp
@@ -16,6 +17,9 @@ class MainApplication : Application() {
     @Inject
     lateinit var autoLockManager: AutoLockManager
 
+    @Inject
+    lateinit var runtimeIntegrityDetector: RuntimeIntegrityDetector
+
     override fun onCreate() {
         super.onCreate()
         // ISSUE-P1-10 (ZT-10)：统一日志包装器调试开关——debug 构建开放 v/d 与完整异常堆栈，
@@ -26,6 +30,10 @@ class MainApplication : Application() {
         // 的独立冷启动入口，守护（ProcessLifecycleOwner + 熄屏广播）必须在进程创建时注册，
         // 保证任意入口冷启动后熄屏熔断与后台超时锁定均全程生效（幂等守卫保留）。
         autoLockManager.initialize()
+        // ISSUE-P2-08 (ZT-13)：运行环境完整性探测在进程唯一冷启动点显式启动（幂等）——
+        // 组件 init 块已自动启动一次，此处显式接线保证任意冷启动入口都完成初始化；
+        // 探测结果经 RuntimeIntegrityGate 暴露给敏感通道（生物识别快速解锁 / 自动填充）做 fail-closed 裁决。
+        runtimeIntegrityDetector.start()
         // TASK-08 整改：冷启动按持久化偏好恢复周期后台同步调度
         // （默认关闭，未开启时行为与既往完全一致）
         periodicSyncScheduler.applySavedSchedule()

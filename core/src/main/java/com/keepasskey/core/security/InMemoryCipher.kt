@@ -32,6 +32,16 @@ import javax.crypto.spec.SecretKeySpec
  * 明文暴露；拥有进程任意代码执行能力的攻击者可在读取瞬间 hook 拿到明文——
  * 取得密钥后亦同（KeePassDX 同级取舍）。AES/CTR 无认证标签：驻留密文的防篡改不在
  * 本层目标内（篡改只会在解密侧产出垃圾明文，不产生权限提升）。
+ *
+ * ISSUE-P2-06 评估结论（锁库是否清空/轮换进程内密钥）：**不做轮换，保留进程级密钥**。
+ * 证据与理由：ProtectedString 实例并不都由 DatabaseSession 的会话树独占——
+ * app 侧 SyncCoordinator 在 DI 装配期注册为会话锁观察者，其 lastSyncedDb / pendingLocalDb /
+ * pendingRemoteDb 持有整棵 KdbxDatabase 树（含全部 ProtectedString，见
+ * app/.../sync/SyncCoordinator.kt:95-99）；copy-on-write 又会让多棵内存树共享同一
+ * ProtectedString 实例。若在 lock() 时轮换密钥，这些未被会话树覆盖的存活实例的旧密文
+ * 将永久不可解密（静默数据破坏）。在本层无法枚举/重封全部存活实例的前提下，
+ * 「安全 wipe + 惰性重建」不可实现（密文一旦换钥即不可逆），故如实记录为已评估的取舍：
+ * 密钥随进程存活，锁库只负责擦除会话树内的密文实例（由 DatabaseSession.clearSensitiveData 承担）。
  */
 internal object InMemoryCipher {
 

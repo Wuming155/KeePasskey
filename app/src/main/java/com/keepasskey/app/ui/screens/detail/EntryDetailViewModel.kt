@@ -6,8 +6,12 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.keepasskey.app.R
+import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.app.data.repository.SettingsRepository
 import com.keepasskey.app.data.repository.VaultRepository
+import com.keepasskey.app.ui.screens.settings.ExportArtifactKind
+import com.keepasskey.app.ui.screens.settings.ExportAuditRecorder
+import com.keepasskey.app.ui.screens.settings.ExportConfirmationPolicy
 import com.keepasskey.app.passkey.DomainMatcher
 import com.keepasskey.app.ui.model.UiAttachment
 import com.keepasskey.app.ui.model.UiEntryRevision
@@ -45,13 +49,18 @@ class EntryDetailViewModel @Inject constructor(
     // TASK-44：自动填充黑名单仓库（详情页「为本应用禁用自动填充」入口的写入方）
     private val autofillBlocklistStore: com.keepasskey.app.data.repository.AutofillBlocklistStore,
     // TASK-21：非 Compose 层文案资源解析通道（生产 DI 注入真实现；单测注入假实现）
-    private val stringsProvider: StringsProvider? = null
+    private val stringsProvider: StringsProvider? = null,
+    // ISSUE-P2-10 (ZT-15)：导出审计记录通道（生产 DI 注入；单测可缺省）
+    private val debugLog: DebugLogBuffer? = null
 ) : ViewModel() {
 
     // P3-23：文案解析通道（优先 stringsProvider，其次经 appContext 转发，均缺省时回退空串实现）
     private val strings: StringsProvider = stringsProvider
         ?: appContext?.let { ctx -> StringsProvider { id, args -> ctx.getString(id, *args) } }
         ?: StringsProvider { _, _ -> "" }
+
+    // ISSUE-P2-10 (ZT-15)：明文附件导出审计（复用进程内日志缓冲，仅记类型与脱敏目标标识）
+    private val exportAuditRecorder: ExportAuditRecorder? = debugLog?.let { ExportAuditRecorder(it) }
 
     private val entryIdFlow = MutableStateFlow<String?>(savedStateHandle.get<String>("entryId"))
     private val isPasswordVisibleFlow = MutableStateFlow(false)
@@ -367,29 +376,53 @@ class EntryDetailViewModel @Inject constructor(
     /**
      * 断点3 整改：真实附件导出——按需解析附件字节并写入 SAF 目标 Uri。
      * [targetUri] 由 Screen 层 CreateDocument 选择器产生；此前该方法仅发 Toast。
+     *
+     * ISSUE-P2-10 (ZT-15)：附件是解密后的明文，属高风险出域。调用方必须先经确认弹窗
+     * 取得用户显式授权并传 [confirmed] = true；缺省或缺失确认时 fail-closed——不解析、
+     * 不写出任何字节，仅提示用户（判定走可单测的 [ExportConfirmationPolicy]）。
      */
-    fun exportAttachment(attachment: UiAttachment, targetUri: Uri) {
+    fun exportAttachment(attachment: UiAttachment, targetUri: Uri, confirmed: Boolean = false) {
         val entryId = entryIdFlow.value ?: return
+        val allowed = ExportConfirmationPolicy.allows(
+            risk = ExportConfirmationPolicy.riskOf(ExportArtifactKind.ATTACHMENT),
+            confirmed = confirmed
+        )
+        if (!allowed) {
+            // fail-closed：确认缺失即不导出
+            userMessageFlow.value = UiMessage(R.string.detail_attachment_export_warn_title)
+            return
+        }
+        val rawTarget = targetUri.toString()
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             try {
                 val bytes = vaultRepository.getAttachmentData(entryId, attachment.fileName)
                 if (bytes == null) {
+                    exportAuditRecorder?.record(ExportArtifactKind.ATTACHMENT, rawTarget, success = false)
                     userMessageFlow.value = UiMessage(R.string.detail_attachment_export_failed)
                     return@launch
                 }
-                val resolver = appContext?.contentResolver ?: run {
+                val resolver = appContext?.contentResolver
+                if (resolver == null) {
+                    exportAuditRecorder?.record(ExportArtifactKind.ATTACHMENT, rawTarget, success = false)
                     userMessageFlow.value = UiMessage(R.string.detail_attachment_export_failed)
                     return@launch
                 }
-                resolver.openOutputStream(targetUri)?.use { os ->
+                val stream = resolver.openOutputStream(targetUri)
+                if (stream == null) {
+                    exportAuditRecorder?.record(ExportArtifactKind.ATTACHMENT, rawTarget, success = false)
+                    userMessageFlow.value = UiMessage(R.string.detail_attachment_export_failed)
+                    return@launch
+                }
+                stream.use { os ->
                     os.write(bytes)
                     os.flush()
-                } ?: run {
-                    userMessageFlow.value = UiMessage(R.string.detail_attachment_export_failed)
-                    return@launch
                 }
+                exportAuditRecorder?.record(ExportArtifactKind.ATTACHMENT, rawTarget, success = true)
                 userMessageFlow.value = UiMessage(R.string.detail_attachment_export_toast, listOf(attachment.fileName))
             } catch (e: Exception) {
+                // 只留痕异常类型，不落异常消息或附件名（防御性，避免敏感内容回流日志缓冲）
+                exportAuditRecorder?.record(ExportArtifactKind.ATTACHMENT, rawTarget, success = false)
+                debugLog?.warn(TAG, "附件导出失败: ${e.javaClass.simpleName}")
                 userMessageFlow.value = UiMessage(R.string.detail_attachment_export_failed)
             }
         }
@@ -442,5 +475,6 @@ class EntryDetailViewModel @Inject constructor(
     companion object {
         private const val SECONDS_PER_MINUTE = 60
         private const val TOTP_TICK_MS = 1000L
+        private const val TAG = "EntryDetailViewModel"
     }
 }

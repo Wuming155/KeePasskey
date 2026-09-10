@@ -27,6 +27,7 @@ import com.keepasskey.app.MainActivity
 import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.passkey.DomainMatcher
+import com.keepasskey.app.security.RuntimeIntegrityGate
 import com.keepasskey.core.log.AppLog
 import com.keepasskey.core.model.PasskeyData
 import dagger.hilt.android.AndroidEntryPoint
@@ -63,6 +64,14 @@ class KeePasskeyAutofillService : AutofillService() {
     // TASK-44：自动填充黑名单（命中即不下发任何数据集，fail-closed）
     @Inject
     lateinit var autofillBlocklistStore: com.keepasskey.app.data.repository.AutofillBlocklistStore
+
+    // ISSUE-P2-08：运行完整性风险闸门（风险态禁用自动填充，fail-closed）
+    @Inject
+    lateinit var runtimeIntegrityGate: RuntimeIntegrityGate
+
+    // ISSUE-P2-07：webDomain 归属解析（受信浏览器白名单 / DAL 校验，无法验证即 fail-closed）
+    @Inject
+    lateinit var autofillOriginResolver: AutofillOriginResolver
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
@@ -105,13 +114,23 @@ class KeePasskeyAutofillService : AutofillService() {
 
         val callingPkg = structure.activityComponent.packageName
 
-        // TASK-44：黑名单命中即 fail-closed——不下发数据集（含解锁引导与 SaveInfo），
-        // 等价于「该应用从未注册过本填充服务」，不降级已有填充语义也不返回错误。
-        if (autofillBlocklistStore.isBlocked(callingPkg)) {
-            // ISSUE-P1-10：日志不得携带调用包名等敏感标识（会暴露用户安装应用清单）
-            AppLog.i(TAG, "调用应用已列入自动填充黑名单，拒绝下发数据集")
-            callback.onSuccess(null)
-            return
+        // ISSUE-P2-08：完整性风险态禁用自动填充；TASK-44：黑名单命中 fail-closed——
+        // 两者均不下发数据集（含解锁引导与 SaveInfo），等价于「该应用从未注册过本填充服务」，
+        // 不降级已有填充语义也不返回错误。
+        val enforcement = runtimeIntegrityGate.awaitEnforcement()
+        when (AutofillAccessPolicy.rejectReason(enforcement, callingPkg, autofillBlocklistStore::isBlocked)) {
+            AutofillRejection.INTEGRITY_RISK -> {
+                // ISSUE-P1-10：日志不得携带调用包名等敏感标识
+                AppLog.i(TAG, "设备完整性风险，拒绝下发自动填充数据集")
+                callback.onSuccess(null)
+                return
+            }
+            AutofillRejection.BLOCKLISTED -> {
+                AppLog.i(TAG, "调用应用已列入自动填充黑名单，拒绝下发数据集")
+                callback.onSuccess(null)
+                return
+            }
+            null -> Unit
         }
 
         val parsedNodes = mutableListOf<ParsedViewNode>()
@@ -199,7 +218,12 @@ class KeePasskeyAutofillService : AutofillService() {
         }
 
         // 库已解锁：查找匹配凭据
-        val webDomain = scanResult.webDomain
+        // ISSUE-P2-07：webDomain 参与匹配前必须通过归属校验（受信浏览器白名单或 DAL 归属声明）；
+        // 无法验证时按 null 处理（不下发该域候选），绝不静默放行
+        val webDomain = autofillOriginResolver.resolveUsableWebDomain(callingPkg, scanResult.webDomain)
+        if (scanResult.webDomain != null && webDomain == null) {
+            AppLog.w(TAG, "webDomain 归属无法验证，已忽略该域候选（fail-closed）")
+        }
         val allEntries = vaultRepository.getKdbxEntries()
         val matchedEntries = allEntries.filter { entry ->
             val passkey = PasskeyData.fromCustomFields(entry.customFields)
@@ -335,6 +359,24 @@ class KeePasskeyAutofillService : AutofillService() {
         serviceScope.launch {
             try {
                 val callingPkg = structure.activityComponent.packageName
+
+                // ISSUE-P2-08 / TASK-44：保存侧同样前置于完整性闸门与黑名单检查——
+                // 命中即拒绝落库并向系统回调非敏感提示，绝不让被屏蔽/风险环境写入任何凭据
+                val enforcement = runtimeIntegrityGate.awaitEnforcement()
+                when (AutofillAccessPolicy.rejectReason(enforcement, callingPkg, autofillBlocklistStore::isBlocked)) {
+                    AutofillRejection.INTEGRITY_RISK -> {
+                        AppLog.i(TAG, "设备完整性风险，拒绝保存自动填充凭据")
+                        callback.onFailure(getString(R.string.autofill_save_integrity_blocked))
+                        return@launch
+                    }
+                    AutofillRejection.BLOCKLISTED -> {
+                        AppLog.i(TAG, "调用应用已列入自动填充黑名单，拒绝保存凭据")
+                        callback.onFailure(getString(R.string.autofill_save_blocked))
+                        return@launch
+                    }
+                    null -> Unit
+                }
+
                 val parsedNodes = mutableListOf<ParsedViewNode>()
                 val scanNodes = mutableListOf<ScanNode>()
 
@@ -357,6 +399,9 @@ class KeePasskeyAutofillService : AutofillService() {
                 val scanResult = AutofillFieldScanner.scan(scanNodes)
                 val username = scanResult.usernameId?.toIntOrNull()?.let { parsedNodes.getOrNull(it)?.text }.orEmpty()
                 val password = scanResult.passwordId?.toIntOrNull()?.let { parsedNodes.getOrNull(it)?.text }.orEmpty()
+                // ISSUE-P2-07：保存前同样做 webDomain 归属校验，避免把不可归属的域写进条目
+                val usableWebDomain =
+                    autofillOriginResolver.resolveUsableWebDomain(callingPkg, scanResult.webDomain)
 
                 if (password.isNotBlank()) {
                     // Wave 12 敏感数据卫生：调用方持有的密码 CharArray 在任何结果路径下用毕立即清零
@@ -366,7 +411,7 @@ class KeePasskeyAutofillService : AutofillService() {
                     try {
                         val result = vaultRepository.saveAutofillCredential(
                             packageName = callingPkg,
-                            webDomain = scanResult.webDomain,
+                            webDomain = usableWebDomain,
                             username = username,
                             passwordChars = passwordChars
                         )
@@ -460,5 +505,8 @@ class KeePasskeyAutofillService : AutofillService() {
         private const val REQUEST_CODE_INLINE_ATTRIBUTION = 2002
         /** TASK-11：已解锁分支二次确认数据集的 PendingIntent requestCode 基址 */
         private const val REQUEST_CODE_CONFIRM_BASE = 2100
+
+        // ISSUE-P2-07/08：保存被拒的提示文案已迁入 strings.xml
+        // （autofill_save_blocked / autofill_save_integrity_blocked），与填充侧同源资源化。
     }
 }

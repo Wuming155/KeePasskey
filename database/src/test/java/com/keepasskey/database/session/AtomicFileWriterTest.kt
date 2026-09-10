@@ -108,4 +108,71 @@ class AtomicFileWriterTest {
         assertEquals("saved-anyway", read(target))
         assertFalse(File(tempFolder.root, "vault.kdbx.tmp").exists())
     }
+
+    // ===== ISSUE-P2-05：异常/中断模拟与降级路径 fsync 回归 =====
+
+    @Test
+    fun testWriterFailureOnFirstWriteLeavesNoEmptyTarget() {
+        val target = File(tempFolder.root, "vault.kdbx")
+
+        assertThrows(IOException::class.java) {
+            AtomicFileWriter.writeAtomic(target) { throw IOException("模拟写入中断（断电/崩溃）") }
+        }
+
+        // 崩溃安全核心断言：中断后绝不残留空目标文件，也不残留 .tmp 垃圾
+        assertFalse("中断后不得残留空目标文件", target.exists())
+        assertFalse("中断后不得残留临时文件", File(tempFolder.root, "vault.kdbx.tmp").exists())
+    }
+
+    @Test
+    fun testWriterFailureKeepsOriginalContentAndCleansTmp() {
+        val target = File(tempFolder.root, "vault.kdbx")
+        target.writeBytes("stable-original".toByteArray())
+
+        assertThrows(IOException::class.java) {
+            AtomicFileWriter.writeAtomic(target) { os ->
+                os.write("partial-write".toByteArray())
+                throw IOException("模拟写入中途失败")
+            }
+        }
+
+        assertEquals("写入失败后原文件内容必须保持稳定版本", "stable-original", read(target))
+        assertFalse("异常退出后不得残留临时文件", File(tempFolder.root, "vault.kdbx.tmp").exists())
+    }
+
+    @Test
+    fun testWriteAtomicWithoutBackupDoesNotCreateBak() {
+        val target = File(tempFolder.root, "vault.kdbx")
+        target.writeBytes("old-stable".toByteArray())
+
+        AtomicFileWriter.writeAtomic(target, createBackup = false) { it.write("new-version".toByteArray()) }
+
+        assertEquals("new-version", read(target))
+        assertFalse("关闭备份偏好时不得生成 .bak", File(tempFolder.root, "vault.kdbx.bak").exists())
+        assertFalse(File(tempFolder.root, "vault.kdbx.tmp").exists())
+    }
+
+    @Test
+    fun testFallbackCopyBranchReplacesAndCleansTmpWithoutEmptyTarget() {
+        val target = File(tempFolder.root, "vault.kdbx")
+        target.writeBytes("old-stable".toByteArray())
+        val tmp = File(tempFolder.root, "vault.kdbx.tmp")
+        tmp.writeBytes("fresh-new".toByteArray())
+        // 确定性进入 Files.copy 降级分支：java.io.File 非 final，覆写 renameTo 恒返回 false
+        // （模拟跨卷 / 目标被占用等标准 rename 失败场景），避免依赖平台 rename 语义。
+        val renameFailingTmp = object : File(tmp.path) {
+            override fun renameTo(dest: File): Boolean = false
+        }
+
+        AtomicFileWriter.fallbackReplace(
+            renameFailingTmp,
+            target,
+            backupAvailable = true,
+            cause = IOException("atomic move failed")
+        )
+
+        assertEquals("fresh-new", read(target))
+        assertTrue("替换后目标文件不得为空", target.length() > 0)
+        assertFalse("降级 copy 成功后临时文件必须清理", tmp.exists())
+    }
 }

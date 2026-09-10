@@ -80,9 +80,14 @@ internal class VaultEntryMapper(private val strings: StringsProvider) {
         val totpAlgorithm = parsedTotp?.algorithm ?: "SHA1"
 
         val currentRemaining = OtpEngine.getRemainingSeconds(periodSeconds = totpPeriod)
-        // F2 整改：TOTP 种子不进 UiVaultEntry（种子 String 仅在本函数内瞬时存在，随 GC 回收），
-        // 列表展示用验证码在此即时计算；验证器页经 [RealVaultRepository.calculateEntryTotp] 按需重算
-        val liveTotpCode = parsedTotp?.let { computeTotpCode(it) }
+        // F2 整改：TOTP 种子不进 UiVaultEntry，列表展示用验证码在此即时计算；
+        // 验证器页经 [RealVaultRepository.calculateEntryTotp] 按需重算。
+        // ISSUE-P2-12：配置内的 Base32 种子字节用毕即擦（不再以 String 形态驻留）
+        val liveTotpCode = try {
+            parsedTotp?.let { computeTotpCode(it) }
+        } finally {
+            parsedTotp?.secret?.fill(0)
+        }
 
         val passkeyData = PasskeyData.fromCustomFields(entry.customFields)
         val icon = mapIconIdToName(entry.iconId)
@@ -144,13 +149,26 @@ internal class VaultEntryMapper(private val strings: StringsProvider) {
         )
     }
 
-    /** 解析条目中的 TOTP 配置（标准 otp 字段优先，回退 TOTP 开头的自定义字段） */
+    /**
+     * 解析条目中的 TOTP 配置（标准 otp 字段优先，回退 TOTP 开头的自定义字段）。
+     *
+     * ISSUE-P2-12：种子读取走 [ProtectedString.readUtf8] 字节语义，解析层不物化
+     * otpauth URI / 种子 String；[ProtectedString] 的明文副本用毕即擦。
+     * 返回配置的 secret 为调用方独占的 Base32 文本字节，消费后须显式清零。
+     */
     fun parseTotpConfig(entry: KdbxEntry): ParsedTotpConfig? {
-        val otpRaw = entry.fields["otp"]?.readString()
+        val source = entry.fields[KdbxConstants.Fields.OTP]
             ?: entry.customFields.firstOrNull {
-                it.key.equals("otp", ignoreCase = true) || it.key.startsWith("TOTP", ignoreCase = true)
-            }?.value?.readString()
-        return TotpKeyUriParser.parse(otpRaw)
+                it.key.equals(KdbxConstants.Fields.OTP, ignoreCase = true) ||
+                    it.key.startsWith(TOTP_CUSTOM_FIELD_PREFIX, ignoreCase = true)
+            }?.value
+            ?: return null
+        val rawBytes = source.readUtf8()
+        return try {
+            TotpKeyUriParser.parse(rawBytes)
+        } finally {
+            rawBytes.fill(0)
+        }
     }
 
     /** 按配置即时计算 TOTP 验证码，配置非法或计算失败返回 null */
@@ -340,6 +358,9 @@ internal class VaultEntryMapper(private val strings: StringsProvider) {
         const val CARD_FIELD_EXPIRY_ZH = "有效期"
         const val CARD_FIELD_EXPIRY_EN = "Expiry"
         const val CARD_FIELD_EXPIRY_EN_ALT = "Expiry Date"
+
+        /** 回退读取的 TOTP 自定义字段前缀（KDBX 自定义字段键，属格式契约不可本地化） */
+        const val TOTP_CUSTOM_FIELD_PREFIX = "TOTP"
     }
 }
 

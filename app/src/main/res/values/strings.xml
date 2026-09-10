@@ -489,6 +489,10 @@
     <string name="dbset_export_kdbx_done">KDBX 文件导出成功</string>
     <string name="dbset_export_xml_btn">导出 XML (明文)</string>
     <string name="dbset_export_xml_done">XML 明文导出成功，请立即转移至安全位置</string>
+    <!-- ISSUE-P2-10 (ZT-15)：明文 XML 导出二次确认（明示明文 / 不受保护 / 需自行删除） -->
+    <string name="dbset_export_plain_warn_title">确认导出明文 XML</string>
+    <string name="dbset_export_plain_warn_message">即将导出的是未加密的明文 XML，包含密码库的全部字段值：\n· 明文：文件内容可直接阅读，不受主密码保护；\n· 不受保护：写入下载目录或云盘后，任何可访问该位置的应用或人员都能读取；\n· 需自行删除：本应用不会代为清理，请用毕立即删除并清空云盘回收站。</string>
+    <string name="dbset_export_plain_warn_confirm">我已知悉，仍要导出</string>
     <string name="dbset_import_dialog_title">选择导入来源</string>
     <string name="dbset_import_preparing">正在解析 %1$s 数据...</string>
     <string name="dbset_src_1pux">1Password (1PUX)</string>
@@ -528,6 +532,22 @@
     <string name="sec_section_leak">隐私泄露防护</string>
     <string name="sec_flag_secure_title">禁止截屏与录屏</string>
     <string name="sec_flag_secure_sub">最近任务与分屏中隐藏敏感内容，阻止截屏</string>
+    <!-- ISSUE-P2-10 (ZT-15)：明文附件导出二次确认 -->
+    <string name="detail_attachment_export_warn_title">确认导出明文附件</string>
+    <string name="detail_attachment_export_warn_message">导出的是解密后的附件原文，不再受主密码保护：\n· 明文：任何拿到该文件的人都能直接查看其内容；\n· 不受保护：落点由你选择的下载目录或云盘决定，导出后本应用无法撤回；\n· 需自行删除：本应用不会代为清理，请用毕立即删除并清空云盘回收站。</string>
+    <string name="detail_attachment_export_warn_confirm">我已知悉，仍要导出</string>
+    <!-- ISSUE-P2-09 验收标准 1：关闭防截屏保护前的风险确认 -->
+    <string name="sec_flag_secure_risk_title">确认关闭防截屏保护？</string>
+    <string name="sec_flag_secure_risk_message">关闭后，密码明文、一次性验证码与通行密钥可能被截屏、录屏捕获，并出现在最近任务预览中，造成凭据泄露。建议保持开启。</string>
+    <string name="sec_flag_secure_risk_confirm">仍要关闭</string>
+    <string name="sec_flag_secure_risk_cancel">保持开启</string>
+    <!-- ISSUE-P2-08 (ZT-13)：运行环境完整性风险提示（ELEVATED / COMPROMISED 两档） -->
+    <string name="sec_integrity_risk_title">运行环境风险提示</string>
+    <string name="sec_integrity_risk_elevated">检测到可疑运行环境（可调试构建或非受信任安装来源）。出于安全考虑，已禁用生物识别快速解锁，请谨慎处理敏感凭据。</string>
+    <string name="sec_integrity_risk_compromised">检测到明确的动态攻击特征（调试器附加、Root/Magisk 或注入框架）。已禁用生物识别快速解锁与自动填充，请立即停止在本设备处理敏感凭据。</string>
+    <!-- ISSUE-P2-08 (ZT-13)：风险态降级路径对系统的非敏感回调文案 -->
+    <string name="sec_biometric_integrity_blocked">设备存在安全风险，已禁用生物识别快速解锁，请改用主密码解锁</string>
+    <string name="autofill_save_integrity_blocked">设备存在安全风险，已禁用凭据保存</string>
     <string name="sec_clipboard_title">剪贴板保护</string>
     <string name="sec_clipboard_sub">复制的敏感内容不进入剪贴板历史与云同步</string>
     <string name="sec_clipboard_countdown_title">剪贴板保留时长</string>
@@ -872,6 +892,8 @@
     <!-- ISSUE-P1-10 (ZT-10)：自动填充对外回调的预定义用户文案（禁止透传异常 message） -->
     <string name="autofill_fill_failed">自动填充请求处理失败，请重试</string>
     <string name="autofill_save_failed">保存凭据失败，请重试</string>
+    <!-- ISSUE-P2-07 (ZT-12)：保存侧黑名单命中时的非敏感提示 -->
+    <string name="autofill_save_blocked">该应用已列入自动填充黑名单，已拒绝保存凭据</string>
 
     <!-- TASK-21：数据仓库层用户可见消息（repo_*） -->
     <string name="repo_files_dir_unavailable">内部存储目录不可用</string>

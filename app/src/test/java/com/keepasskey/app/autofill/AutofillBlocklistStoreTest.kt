@@ -7,10 +7,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * 自动填充黑名单仓库单元测试（TASK-44）。
+ * 自动填充黑名单仓库单元测试（TASK-44 / ISSUE-P2-07）。
  *
  * 覆盖黑名单完整生命周期的数据底座：新增 → 命中判定 → 重复拒绝 → 删除，
- * 以及非法包名 fail-closed 拒绝与无持久化层（纯 JVM 注入 null Context）的内存语义。
+ * 以及非法包名 fail-closed 屏蔽语义与无持久化层（纯 JVM 注入 null Context）的内存语义。
  * 进程内 SharedPreferences 依赖 Android 框架，真实持久化由端到端/真机回归覆盖，
  * 本用例聚焦契约与边界（与 `ExtendedSettingsStore` 的可测性取舍一致）。
  */
@@ -19,12 +19,34 @@ class AutofillBlocklistStoreTest {
     private fun store() = AutofillBlocklistStore(null)
 
     @Test
-    fun `初始黑名单为空且任何包名均未命中`() {
+    fun `初始黑名单为空且合法包名均未命中`() {
         val store = store()
 
         assertTrue(store.blockedPackages.value.isEmpty())
         assertFalse(store.isBlocked("com.example.bank"))
-        assertFalse(store.isBlocked(""))
+    }
+
+    @Test
+    fun `非法包名按 fail-closed 一律判定为已屏蔽`() {
+        val store = store()
+
+        // 空串、单段、以数字开头、含连字符、含路径、纯点号、含空白
+        val invalid = listOf(
+            "",
+            "   ",
+            "bank",
+            "1com.example.bank",
+            "com-example-bank",
+            "com.example.bank/login",
+            "..",
+            "com..example"
+        )
+        invalid.forEach { pkg ->
+            assertTrue("非法包名必须 fail-closed 判定为屏蔽: $pkg", store.isBlocked(pkg))
+        }
+
+        // 非法判定不产生任何持久化条目
+        assertTrue(store.blockedPackages.value.isEmpty())
     }
 
     @Test

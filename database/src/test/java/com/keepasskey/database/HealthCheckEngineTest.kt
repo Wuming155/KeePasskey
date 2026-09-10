@@ -74,4 +74,22 @@ class HealthCheckEngineTest {
         assertTrue(issues.any { it.riskLevel == PasswordRiskLevel.EXPIRED && it.title == "Expired Site" })
         assertFalse(issues.any { it.riskLevel == PasswordRiskLevel.EXPIRED && it.title == "Fresh Site" })
     }
+
+    @Test
+    fun `常见弱口令按大小写不敏感字符数组匹配（不再物化 String）`() {
+        val upperWeak = KdbxEntry(
+            id = KdbxUuid(ByteArray(16) { 6 }),
+            fields = mapOf(
+                KdbxConstants.Fields.TITLE to ProtectedString("Upper Weak", isProtected = false),
+                KdbxConstants.Fields.PASSWORD to ProtectedString("PASSWORD", isProtected = true)
+            )
+        )
+
+        val issues = HealthCheckEngine.analyzeEntries(listOf(upperWeak))
+
+        assertTrue(
+            "大小写不敏感匹配必须识别 'PASSWORD' 为常见弱口令",
+            issues.any { it.riskLevel == PasswordRiskLevel.WEAK && it.title == "Upper Weak" }
+        )
+    }
 }

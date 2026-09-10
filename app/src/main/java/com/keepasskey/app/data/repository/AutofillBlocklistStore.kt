@@ -19,7 +19,7 @@ import javax.inject.Singleton
  *
  * 设计约束：
  * - **fail-closed**：仅用于「不填充」这一保守决策，命中即不下发数据集/凭据候选；
- *   包名不可信或无法解析时按未命中处理（不放大权限、不因异常放行数据）。
+ *   包名不可信或无法解析时**一律按已屏蔽处理**（fail-closed），绝不因非法输入放行数据。
  * - **包名严格校验**：仅接受 Android 官方包名形态（≥2 段、每段字母开头、仅 `[A-Za-z0-9_]`），
  *   非法输入拒绝入库并由返回值如实告知调用方，杜绝拼错包名静默写入导致的「假屏蔽」。
  * - **可测性**：`context` 为 null（纯 JVM 单元测试注入）时退化为内存语义，不破坏单测。
@@ -44,9 +44,9 @@ class AutofillBlocklistStore @Inject constructor(
     /** 黑名单快照（按包名升序），供设置页与详情页观察 */
     val blockedPackages: StateFlow<List<String>> = blockedFlow.asStateFlow()
 
-    /** 命中黑名单判定（fail-closed：包名非法或未命中一律按未屏蔽处理） */
+    /** 命中黑名单判定（fail-closed：包名非法一律按已屏蔽处理，绝不因非法输入放行） */
     fun isBlocked(packageName: String): Boolean {
-        val normalized = normalize(packageName) ?: return false
+        val normalized = normalize(packageName) ?: return true
         return blockedFlow.value.contains(normalized)
     }
 

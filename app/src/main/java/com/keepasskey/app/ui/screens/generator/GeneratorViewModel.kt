@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import com.keepasskey.app.R
 import com.keepasskey.app.security.ClipboardSecurityManager
 import com.keepasskey.app.ui.model.UiMessage
+import com.keepasskey.core.security.ProtectedString
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -19,6 +20,9 @@ class GeneratorViewModel @Inject constructor(
     companion object {
         /** 写入剪贴板时展示给系统的标签（不参与任何安全判定，仅作提示） */
         private const val GENERATED_PASSWORD_CLIP_LABEL = "Generated Password"
+
+        /** 内存历史最大保留条数（超出即淘汰并显式清零） */
+        private const val MAX_HISTORY_SIZE = 10
     }
 
     private val _uiState = MutableStateFlow(GeneratorUiState())
@@ -92,11 +96,15 @@ class GeneratorViewModel @Inject constructor(
         generateNewPassword()
     }
 
-    fun selectHistoryPassword(password: String) {
-        val entropy = PasswordGenerationEngine.calculateEntropy(password).toInt()
+    fun selectHistoryPassword(password: ProtectedString) {
+        // ISSUE-P2-12：熵值计算走字符数组通道，不把种子物化为额外 String
+        val entropy = password.useChars { PasswordGenerationEngine.calculateEntropy(it).toInt() }
         val strength = evaluateStrengthLabel(entropy)
-        _uiState.update {
-            it.copy(
+        _uiState.update { current ->
+            // 被替换的当前值若未被历史引用则显式擦除（历史项仍是同一实例，不能误清）
+            val previous = current.currentPassword
+            if (current.history.none { it === previous }) previous.clear()
+            current.copy(
                 currentPassword = password,
                 entropyBits = entropy,
                 strengthLabel = strength
@@ -113,8 +121,10 @@ class GeneratorViewModel @Inject constructor(
      * 现统一走受保护复制：注入官方 `ClipDescription.EXTRA_IS_SENSITIVE` 敏感标记 +
      * 按用户配置超时自动物理清空。
      */
-    fun copyGeneratedPassword(password: String) {
-        clipboardSecurityManager.copySensitiveText(GENERATED_PASSWORD_CLIP_LABEL, password)
+    fun copyGeneratedPassword(secret: ProtectedString) {
+        // ClipData 只接受 CharSequence，属不可消除的系统边界；明文 String 的终结
+        // 由 ClipboardSecurityManager 的定时擦除链路负责
+        clipboardSecurityManager.copySensitiveText(GENERATED_PASSWORD_CLIP_LABEL, secret.readString())
         _uiState.update { it.copy(userMessage = UiMessage(R.string.generator_password_copied)) }
     }
 
@@ -152,20 +162,36 @@ class GeneratorViewModel @Inject constructor(
 
         val entropy = PasswordGenerationEngine.calculateEntropy(newPassword).toInt()
         val strength = evaluateStrengthLabel(entropy)
+        // ISSUE-P2-12：状态改持受控容器；引擎返回的 String 属生成边界，无法原地擦除
+        val newSecret = ProtectedString(newPassword, isProtected = true)
 
         _uiState.update { current ->
-            val updatedHistory = if (current.currentPassword.isNotBlank() && current.currentPassword != newPassword) {
-                (listOf(current.currentPassword) + current.history).take(10)
+            val previous = current.currentPassword
+            val unchanged = previous.length > 0 && previous == newSecret
+            val historyWithPrevious = if (previous.length > 0 && !unchanged) {
+                listOf(previous) + current.history
             } else {
                 current.history
             }
+            val keptHistory = historyWithPrevious.take(MAX_HISTORY_SIZE)
+            // 淘汰项与未被引用的旧当前值显式清零
+            historyWithPrevious.drop(MAX_HISTORY_SIZE).forEach { it.clear() }
+            if (keptHistory.none { it === previous }) previous.clear()
             current.copy(
-                currentPassword = newPassword,
+                currentPassword = newSecret,
                 entropyBits = entropy,
                 strengthLabel = strength,
-                history = updatedHistory
+                history = keptHistory
             )
         }
+    }
+
+    override fun onCleared() {
+        // ISSUE-P2-12：ViewModel 销毁时显式擦除受控容器内的全部生成结果
+        val current = _uiState.value
+        current.currentPassword.clear()
+        current.history.forEach { it.clear() }
+        super.onCleared()
     }
 
     private fun evaluateStrengthLabel(entropyBits: Int): UiMessage = when {

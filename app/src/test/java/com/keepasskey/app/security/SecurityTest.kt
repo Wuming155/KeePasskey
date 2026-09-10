@@ -91,7 +91,8 @@ class SecurityTest {
     @Test
     fun `测试生物识别密钥别名生成规则`() {
         val keystoreManager = KeystoreManager(null)
-        val authManager = BiometricAuthManager(keystoreManager)
+        // ISSUE-P2-08：注入无风险完整性闸门假实现（本用例仅验证别名生成，不涉及风险降级）
+        val authManager = BiometricAuthManager(keystoreManager, FakeRuntimeIntegrityGate())
 
         val alias = authManager.getAliasForDatabase("my_vault_01")
         assertEquals("com.keepasskey.biometric_master_key_my_vault_01", alias)

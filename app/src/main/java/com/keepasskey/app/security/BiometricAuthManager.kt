@@ -43,11 +43,14 @@ sealed interface BiometricResult {
  *   官方硬性要求「解锁加密操作请求的认证器集合必须与密钥生成时一致」；
  * - 官方互斥约束：允许 DEVICE_CREDENTIAL 时系统以「使用锁屏凭据」入口取代负向按钮，
  *   此时调用 setNegativeButtonText 属于错误用法，本类强制规避；
- * - 纯解锁/封印场景默认免二次确认（confirmationRequired=false，仅影响生物识别路径）。
+ * - 纯解锁/封印场景默认免二次确认（confirmationRequired=false，仅影响生物识别路径）；
+ * - ISSUE-P2-08（ZT-13）：设备运行完整性风险态下禁用生物快速解锁（fail-closed）——
+ *   由 [RuntimeIntegrityGate] 注入裁决，风险态不弹生物识别、回落主密码路径。
  */
 @Singleton
 class BiometricAuthManager @Inject constructor(
-    private val keystoreManager: KeystoreManager
+    private val keystoreManager: KeystoreManager,
+    private val runtimeIntegrityGate: RuntimeIntegrityGate
 ) {
 
     /**
@@ -87,6 +90,13 @@ class BiometricAuthManager @Inject constructor(
         negativeButtonText: String? = null,
         onResult: (BiometricResult) -> Unit
     ) {
+        // ISSUE-P2-08：完整性风险态（含扫描未完成的未判定态）禁用生物快速解锁，
+        // 以显式失败结果回落主密码路径，绝不静默放行
+        if (runtimeIntegrityGate.currentEnforcement().disableBiometricQuickUnlock) {
+            onResult(BiometricResult.Error(ERROR_INTEGRITY_BLOCKED, INTEGRITY_BLOCKED_MESSAGE))
+            return
+        }
+
         val executor = ContextCompat.getMainExecutor(activity)
         val usesDeviceCredential =
             authenticators and BiometricManager.Authenticators.DEVICE_CREDENTIAL != 0
@@ -170,6 +180,12 @@ class BiometricAuthManager @Inject constructor(
     }
 
     companion object {
+        /** ISSUE-P2-08：设备完整性风险导致生物快速解锁被禁用的结果码（区别于系统错误码） */
+        const val ERROR_INTEGRITY_BLOCKED = -2
+
+        /** ISSUE-P2-08：完整性风险禁用提示（非敏感；仅作内部诊断与失败语义，正式文案由设置页承载） */
+        private const val INTEGRITY_BLOCKED_MESSAGE = "设备完整性风险，已禁用生物识别快速解锁"
+
         /**
          * 快速解锁统一认证器集合：仅 Class 3 强生物识别。
          * ISSUE-P1-08：设备锁屏凭据（PIN/图案/密码）不再可解封（弱凭据降级 + 生物录入失效标志被忽略）。

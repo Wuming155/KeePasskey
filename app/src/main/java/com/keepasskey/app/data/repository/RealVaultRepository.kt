@@ -784,7 +784,8 @@ class RealVaultRepository @Inject constructor(
         }
         val totpRaw = revision.fields[KdbxConstants.Fields.OTP]?.readString()
             ?: revision.customFields.firstOrNull {
-                it.key.equals("otp", ignoreCase = true) || it.key.startsWith("TOTP", ignoreCase = true)
+                it.key.equals(KdbxConstants.Fields.OTP, ignoreCase = true) ||
+                    it.key.startsWith(VaultEntryMapper.TOTP_CUSTOM_FIELD_PREFIX, ignoreCase = true)
             }?.value?.readString().orEmpty()
         return EntryRevisionSnapshot(
             entry = projection.copy(customFields = decryptedFields),
@@ -806,13 +807,18 @@ class RealVaultRepository @Inject constructor(
         val entry = currentDb.rootGroup.allEntries().firstOrNull { it.id == targetUuid } ?: return null
         // 种子仅在数据层内瞬时解析并参与计算，绝不随结果外泄
         val config = entryMapper.parseTotpConfig(entry) ?: return null
-        val code = entryMapper.computeTotpCode(config) ?: return null
-        return EntryTotpSnapshot(
-            code = code,
-            periodSeconds = config.period,
-            digits = config.digits,
-            algorithm = config.algorithm
-        )
+        return try {
+            val code = entryMapper.computeTotpCode(config) ?: return null
+            EntryTotpSnapshot(
+                code = code,
+                periodSeconds = config.period,
+                digits = config.digits,
+                algorithm = config.algorithm
+            )
+        } finally {
+            // ISSUE-P2-12：解析配置持有的 Base32 种子字节用毕即擦（成功/失败路径一致）
+            config.secret.fill(0)
+        }
     }
 
     override suspend fun getEntryTotpSecretChars(entryId: String): CharArray? {
@@ -824,7 +830,8 @@ class RealVaultRepository @Inject constructor(
         // 调用方按借用语义用毕清零
         return entry.fields[KdbxConstants.Fields.OTP]?.readChars()
             ?: entry.customFields.firstOrNull {
-                it.key.equals("otp", ignoreCase = true) || it.key.startsWith("TOTP", ignoreCase = true)
+                it.key.equals(KdbxConstants.Fields.OTP, ignoreCase = true) ||
+                    it.key.startsWith(VaultEntryMapper.TOTP_CUSTOM_FIELD_PREFIX, ignoreCase = true)
             }?.value?.readChars()
     }
 

@@ -1,6 +1,7 @@
 package com.keepasskey.core.otp
 
 import java.nio.ByteBuffer
+import java.nio.charset.StandardCharsets
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 import kotlin.math.pow
@@ -140,20 +141,34 @@ object OtpEngine {
 object Base32Decoder {
     private const val ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
 
+    private const val ASCII_LOWER_A = 'a'
+    private const val ASCII_LOWER_Z = 'z'
+    private const val ASCII_CASE_OFFSET = 32
+
     /**
      * 解码 Base32 文本为字节流。
      * 宽容策略：忽略 `=` 填充、空白与字母表外字符（与既有线上语义一致，避免存量
      * 库文件 TOTP 展示回退）；本方法不抛出异常，空/无效输入返回空数组。
      * @return 全新的字节数组，归调用方所有，用毕须 `fill(0)` 擦除
      */
-    fun decode(base32: String): ByteArray {
-        val clean = base32.trim().uppercase().replace("=", "").replace(" ", "")
+    fun decode(base32: String): ByteArray =
+        decode(base32.toByteArray(StandardCharsets.UTF_8))
+
+    /**
+     * ISSUE-P2-12 字节语义重载：直接按 ASCII 字节解析 Base32，
+     * 全程不物化不可擦除的种子 String；行为与原 String 版本一致
+     * （忽略空白、'=' 填充与字母表外字符，输出为全新字节数组）。
+     * @param base32Bytes 归调用方所有，本方法只读不写
+     */
+    fun decode(base32Bytes: ByteArray): ByteArray {
         var buffer = 0
         var bitsLeft = 0
         val output = mutableListOf<Byte>()
 
-        for (c in clean) {
-            val value = ALPHABET.indexOf(c)
+        for (raw in base32Bytes) {
+            val c = (raw.toInt() and 0xFF).toChar()
+            val upper = if (c in ASCII_LOWER_A..ASCII_LOWER_Z) c - ASCII_CASE_OFFSET else c
+            val value = ALPHABET.indexOf(upper)
             if (value < 0) continue
             buffer = (buffer shl 5) or value
             bitsLeft += 5

@@ -5,6 +5,7 @@ import androidx.activity.compose.setContent
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
 import com.keepasskey.app.data.repository.SettingsRepository
+import com.keepasskey.app.security.ApplyObscuredTouchFilter
 import com.keepasskey.app.security.FlagSecureGuard
 import com.keepasskey.app.ui.screens.unlock.UnlockScreen
 import dagger.hilt.android.AndroidEntryPoint
@@ -46,6 +47,8 @@ class AutofillUnlockActivity : FragmentActivity() {
         lifecycleScope.launch {
             val settings = settingsRepository.getSettings().first()
             setContent {
+                // ISSUE-P2-09：Compose 侧遮挡触摸过滤（点击劫持防护）
+                ApplyObscuredTouchFilter()
                 UnlockScreen(
                     currentTheme = settings.themeMode,
                     onThemeToggle = { /* 自动填充解锁场景不提供主题切换 */ },

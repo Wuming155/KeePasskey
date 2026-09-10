@@ -60,6 +60,45 @@ data class KdbxEntry(
         history.forEach { it.clearSensitiveData() }
     }
 
+    /**
+     * ISSUE-P2-06 定点擦除：只清本节点**直接持有**的受保护实例
+     * （fields / customFields / attachments），不递归。
+     *
+     * copy-on-write 会让新树与旧树共享未被修改的 [ProtectedString] / [KdbxAttachment]
+     * 实例（如 [withField] 仅在 fields 中替换目标键、copy() 保留其余引用），
+     * 因此**严禁**改用 [clearSensitiveData] 递归擦除下线旧树——那会连带清掉存活树
+     * 仍在引用的共享实例，造成数据丢失。跨树的下线擦除请使用
+     * [KdbxGroup.clearSupersededSensitiveData]，由身份集合判定真正的“下线”实例。
+     *
+     * history 不在本方法的无条件擦除范围内：copy() 会让新旧节点共享同一 history 列表，
+     * 无条件清会破坏存活条目；下线 history 项由 [clearSensitiveIdentitiesNotIn] 按身份处理。
+     */
+    fun clearOwnSensitiveData() {
+        fields.values.forEach { it.clear() }
+        customFields.forEach { it.value.clear() }
+        attachments.forEach { it.clear() }
+    }
+
+    /** 收集本节点（含 history）可达的全部敏感实例身份（配合身份集合使用，按引用相等判定） */
+    internal fun collectSensitiveIdentities(into: MutableSet<Any>) {
+        fields.values.forEach { into.add(it) }
+        customFields.forEach { into.add(it.value) }
+        attachments.forEach { into.add(it) }
+        history.forEach { it.collectSensitiveIdentities(into) }
+    }
+
+    /**
+     * 擦除本节点（含 history）中**未被身份集合 [live] 引用**的敏感实例。
+     * [live] 必须是身份集合（如 Collections.newSetFromMap(IdentityHashMap())），
+     * 其 contains 走引用相等，避免把共享同一对象的存活实例一并擦除。
+     */
+    internal fun clearSensitiveIdentitiesNotIn(live: Set<Any>) {
+        fields.values.forEach { if (it !in live) it.clear() }
+        customFields.forEach { if (it.value !in live) it.value.clear() }
+        attachments.forEach { if (it !in live) it.clear() }
+        history.forEach { it.clearSensitiveIdentitiesNotIn(live) }
+    }
+
     override fun toString(): String {
         // P2-4 整改：数据类默认 toString 会展开 fields/customFields/history 等集合，
         // 任何隐式字符串化（日志、调试、异常消息）都不该物化字段内容——

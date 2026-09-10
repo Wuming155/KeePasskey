@@ -160,7 +160,60 @@ class AutoLockSessionGuardTest {
         assertEquals("Banking", loadedEntries!!.single().title)
     }
 
+    // ===== ISSUE-P2-13 (ZT-18/ZT-19)：自动锁定超时三档语义 =====
+
+    @Test
+    fun `永不档（-1）后台停留任意时长回前台均不锁定`() = runBlocking {
+        val (session, _) = unlockViaUnlockEntry()
+        val settings = FakeSettingsRepository()
+        settings.setAutoLockBackground(true)
+        settings.setAutoLockTimeoutSeconds(AutoLockTimeoutPolicy.NEVER_SECONDS)
+        val guard = AutoLockSessionGuard(session, settings, DebugLogBuffer())
+
+        val now = System.currentTimeMillis()
+        // 停留 24 小时（旧实现因 timeoutMillis <= 0 会立即误锁，本断言锁定 ZT-18 回归）
+        guard.lockOnBackgroundResume(
+            backgroundTimestamp = now - ONE_DAY_MILLIS,
+            now = now
+        )
+
+        assertEquals(DatabaseSession.SessionState.OPENED, session.state.value)
+        assertFalse(guard.isLocked.value)
+    }
+
+    @Test
+    fun `立即档（0）退至后台即视为超时并立即锁定`() = runBlocking {
+        val (session, _) = unlockViaUnlockEntry()
+        val settings = FakeSettingsRepository()
+        settings.setAutoLockBackground(true)
+        settings.setAutoLockTimeoutSeconds(AutoLockTimeoutPolicy.IMMEDIATE_SECONDS)
+        val guard = AutoLockSessionGuard(session, settings, DebugLogBuffer())
+
+        val now = System.currentTimeMillis()
+        // 仅离开 1 毫秒也必须锁定：0 档语义 = 退后台即超时
+        guard.lockOnBackgroundResume(backgroundTimestamp = now - 1L, now = now)
+
+        assertEquals(DatabaseSession.SessionState.LOCKED, session.state.value)
+        assertTrue(guard.isLocked.value)
+    }
+
+    @Test
+    fun `后台锁定开关关闭时永不档与立即档均不锁定`() = runBlocking {
+        val (session, _) = unlockViaUnlockEntry()
+        val settings = FakeSettingsRepository()
+        settings.setAutoLockBackground(false)
+        settings.setAutoLockTimeoutSeconds(AutoLockTimeoutPolicy.IMMEDIATE_SECONDS)
+        val guard = AutoLockSessionGuard(session, settings, DebugLogBuffer())
+
+        val now = System.currentTimeMillis()
+        guard.lockOnBackgroundResume(backgroundTimestamp = now - ONE_DAY_MILLIS, now = now)
+
+        assertEquals(DatabaseSession.SessionState.OPENED, session.state.value)
+        assertFalse(guard.isLocked.value)
+    }
+
     companion object {
         private val ENTRY_PASSWORD = "EntryPass!42".toCharArray()
+        private const val ONE_DAY_MILLIS = 24L * 60L * 60L * 1000L
     }
 }

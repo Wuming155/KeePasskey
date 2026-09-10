@@ -1,8 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  ISSUE-P2-09 / ZT-14：敏感凭据数据集展示布局。
+  filterTouchesWhenObscured 使系统在窗口被其它窗口部分/完全遮挡时丢弃触摸事件
+  （点击劫持防护）；Autofill 相关窗口另经 Window.setFilterTouchesWhenObscured 施加窗口级过滤。
+-->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:orientation="vertical"
+    android:filterTouchesWhenObscured="true"
     android:paddingStart="16dp"
     android:paddingTop="10dp"
     android:paddingEnd="16dp"
@@ -12,6 +18,7 @@
         android:id="@+id/tv_username"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:filterTouchesWhenObscured="true"
         android:textColor="?android:attr/textColorPrimary"
         android:textSize="15sp"
         android:textStyle="bold" />
@@ -21,6 +28,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="2dp"
+        android:filterTouchesWhenObscured="true"
         android:textColor="?android:attr/textColorSecondary"
         android:textSize="12sp" />
 

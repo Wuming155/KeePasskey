@@ -20,7 +20,10 @@ import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileInputStream
+import java.io.OutputStream
 import java.util.Arrays
+import java.util.logging.Level
+import java.util.logging.Logger
 
 /**
  * 活动数据库会话状态机与生命周期管理者。
@@ -52,6 +55,17 @@ class DatabaseSession {
     private val observerLock = Any()
     // H4-只读整改：以只读模式打开的会话，一切落盘写操作硬拒绝
     private var readOnlyMode: Boolean = false
+    private val logger = Logger.getLogger(DatabaseSession::class.java.name)
+
+    /**
+     * ISSUE-P2-11 (ZT-16)：会话级「保存前创建 .bak 滚动备份」偏好。
+     *
+     * 默认 true 保持既有行为；关闭时全部落盘路径均不生成 `.bak`，并顺带清理历史遗留的
+     * `.bak`。由 app 侧 DI 装配期从持久化偏好注入初值，用户切换开关时实时同步。
+     * 以 [Volatile] 保证跨线程可见性（写盘可能发生在 IO 调度线程）。
+     */
+    @Volatile
+    var createBackupBeforeSave: Boolean = true
 
     val currentFile: File?
         get() = activeFile
@@ -138,9 +152,9 @@ class DatabaseSession {
                     rootGroup = rootGroup
                 )
 
-                // 原子写盘落盘
+                // 原子写盘落盘（ISSUE-P2-11：按会话备份偏好决定是否生成 .bak）
                 withContext(Dispatchers.IO) {
-                    AtomicFileWriter.writeAtomic(file) { os ->
+                    writeAtomicByBackupPreference(file) { os ->
                         KdbxFile.save(os, db, passwordChars)
                     }
                 }
@@ -150,7 +164,7 @@ class DatabaseSession {
                 activePathIdentifier = file.absolutePath
                 saveWriter = { bytes ->
                     withContext(Dispatchers.IO) {
-                        AtomicFileWriter.writeAtomic(file) { os ->
+                        writeAtomicByBackupPreference(file) { os ->
                             os.write(bytes)
                         }
                     }
@@ -185,7 +199,7 @@ class DatabaseSession {
         },
         saveWriter = { bytes ->
             withContext(Dispatchers.IO) {
-                AtomicFileWriter.writeAtomic(file) { os ->
+                writeAtomicByBackupPreference(file) { os ->
                     os.write(bytes)
                 }
             }
@@ -271,6 +285,8 @@ class DatabaseSession {
                 // 使该 Meta 字段真实生效；仅在确有修剪时重建内存树，避免每次保存无谓拷贝。
                 val prunedRoot = HistoryManager.pruneGroupHistoryByAge(db.rootGroup, db.maintenanceHistoryDays)
                 val dbToSave = if (prunedRoot !== db.rootGroup) {
+                    // ISSUE-P2-06：修剪下线了超期历史快照，替换前定点擦除其密文
+                    db.rootGroup.clearSupersededSensitiveData(prunedRoot)
                     db.copy(rootGroup = prunedRoot).also { _database.value = it }
                 } else {
                     db
@@ -301,6 +317,8 @@ class DatabaseSession {
         if (readOnlyMode) return@withLock
         val currentDb = _database.value ?: return@withLock
         val updatedRoot = updateOrAddEntry(currentDb.rootGroup, entry)
+        // ISSUE-P2-06：copy-on-write 替换前定点擦除——身份集合保证不误伤新树仍共享的受保护实例
+        currentDb.rootGroup.clearSupersededSensitiveData(updatedRoot)
         _database.value = currentDb.copy(rootGroup = updatedRoot)
         _state.value = SessionState.DIRTY
     }
@@ -312,6 +330,11 @@ class DatabaseSession {
         if (readOnlyMode) return@withLock
         val currentDb = _database.value ?: return@withLock
         val updatedRoot = removeEntry(currentDb.rootGroup, entryId)
+        // ISSUE-P2-06 修正：删除路径禁止身份擦除——删除没有「替换树」，而调用方（回收站软删）
+        // 会在 deleteEntry 之后用与旧条目**共享同一 ProtectedString 实例**的 moved 副本重新
+        // saveEntry；若按「新树未包含 = 已下线」判定，会把即将复用的存活字段一并清空，
+        // 条目遂成空壳、后续 save() 序列化抛 IllegalStateException（app 回归实测复现）。
+        // 下线实例交由 GC 回收；有替换树的写入路径（saveEntry/saveGroup/updateDatabaseMeta）仍照常擦除。
         _database.value = currentDb.copy(rootGroup = updatedRoot)
         _state.value = SessionState.DIRTY
     }
@@ -331,6 +354,8 @@ class DatabaseSession {
         } else {
             updateOrAddGroup(currentDb.rootGroup, group)
         }
+        // ISSUE-P2-06：分组保存可能下线旧条目/旧字段实例，替换前定点擦除
+        currentDb.rootGroup.clearSupersededSensitiveData(updatedRoot)
         _database.value = currentDb.copy(rootGroup = updatedRoot)
         _state.value = SessionState.DIRTY
     }
@@ -342,7 +367,10 @@ class DatabaseSession {
     suspend fun updateDatabaseMeta(transform: (KdbxDatabase) -> KdbxDatabase) = mutex.withLock {
         if (readOnlyMode) return@withLock
         val currentDb = _database.value ?: return@withLock
-        _database.value = transform(currentDb)
+        val updated = transform(currentDb)
+        // ISSUE-P2-06：元数据变换同样可能下线旧条目实例，替换前定点擦除
+        currentDb.rootGroup.clearSupersededSensitiveData(updated.rootGroup)
+        _database.value = updated
         _state.value = SessionState.DIRTY
     }
 
@@ -354,6 +382,7 @@ class DatabaseSession {
         val currentDb = _database.value ?: return@withLock
         if (groupId == currentDb.rootGroup.id) return@withLock
         val updatedRoot = removeGroup(currentDb.rootGroup, groupId)
+        // ISSUE-P2-06 修正：同 deleteEntry——删除路径无替换树，禁止身份擦除（会误伤调用方复用中的共享实例）
         _database.value = currentDb.copy(rootGroup = updatedRoot)
         _state.value = SessionState.DIRTY
     }
@@ -373,6 +402,8 @@ class DatabaseSession {
             val movedEntry = e.copy(parentGroupId = targetGroupId)
             currentRoot = updateOrAddEntry(currentRoot, movedEntry)
         }
+        // ISSUE-P2-06：批量移动经 remove+update 重建树，替换前定点擦除中间态下线实例
+        currentDb.rootGroup.clearSupersededSensitiveData(currentRoot)
         _database.value = currentDb.copy(rootGroup = currentRoot)
         _state.value = SessionState.DIRTY
     }
@@ -387,6 +418,7 @@ class DatabaseSession {
         for (id in entryIds) {
             currentRoot = removeEntry(currentRoot, id)
         }
+        // ISSUE-P2-06 修正：批量删除同样无替换树，禁止身份擦除（同 deleteEntry 说明）
         _database.value = currentDb.copy(rootGroup = currentRoot)
         _state.value = SessionState.DIRTY
     }
@@ -511,6 +543,10 @@ class DatabaseSession {
             }
             writer(serialized)
             serialized.fill(0)
+            // ISSUE-P2-11 (ZT-16)：凭据轮换后旧密文快照必须失效——
+            // 本次写盘可能生成了用「旧凭据」加密的 .bak，历史遗留的 .bak 同理，
+            // 旧口令仍可将其解开，故成功换密后一律删除活动文件的滚动备份（失败仅告警）。
+            deleteBackupQuietly(activeFile)
             _state.value = SessionState.OPENED
             oldPwd?.let { Arrays.fill(it, '0') }
             oldKey?.let { Arrays.fill(it, 0.toByte()) }
@@ -524,6 +560,42 @@ class DatabaseSession {
                 keyFileCache = oldKey
             }
             KdbxResult.Failure(t, "更新主密码失败: ${t.message}")
+        }
+    }
+
+    /**
+     * ISSUE-P2-11 (ZT-16)：按会话备份偏好执行原子写盘。
+     *
+     * 关闭偏好时既不再生成 `.bak`，也顺带清理历史遗留的 `.bak`——
+     * 用户关闭「保存前备份」后旧密文快照不应继续驻留磁盘。
+     * 在写盘前一次性读取偏好，保证同一次写入的「是否备份」与「是否清理」语义一致。
+     */
+    private fun writeAtomicByBackupPreference(targetFile: File, writer: (OutputStream) -> Unit) {
+        val createBackup = createBackupBeforeSave
+        AtomicFileWriter.writeAtomic(targetFile, createBackup, writer)
+        if (!createBackup) {
+            deleteBackupQuietly(targetFile)
+        }
+    }
+
+    /**
+     * ISSUE-P2-11 (ZT-16)：静默删除滚动备份。
+     *
+     * IO 异常/权限不足一律记录告警，绝不阻断主流程（备份清理失败不影响本次写盘结果）。
+     * [targetFile] 为 null 表示当前会话无本地文件（如 SAF 流式通道），无需清理。
+     */
+    private fun deleteBackupQuietly(targetFile: File?) {
+        if (targetFile == null) {
+            return
+        }
+        try {
+            AtomicFileWriter.deleteBackup(targetFile)
+        } catch (e: Exception) {
+            logger.log(
+                Level.WARNING,
+                "清理滚动备份失败（仅告警，不阻断主流程）: ${targetFile.absolutePath}",
+                e
+            )
         }
     }
 

@@ -6,6 +6,7 @@ import androidx.activity.compose.setContent
 import androidx.fragment.app.FragmentActivity
 import com.keepasskey.app.R
 import com.keepasskey.app.passkey.CredentialFillConfirmScreen
+import com.keepasskey.app.security.ApplyObscuredTouchFilter
 import com.keepasskey.app.security.BiometricAuthManager
 import com.keepasskey.app.security.BiometricResult
 import com.keepasskey.app.security.BiometricStatus
@@ -40,6 +41,8 @@ class AutofillConfirmActivity : FragmentActivity() {
         )
         // 官方反 overlay 攻击加固：屏蔽其它应用悬浮窗覆盖确认窗口
         window.setHideOverlayWindows(true)
+        // ISSUE-P2-09：遮挡触摸过滤（View 层；decorView 子树在窗口被遮挡时统一丢弃触摸，点击劫持防护）
+        window.decorView.filterTouchesWhenObscured = true
 
         val credentialTitle = intent.getStringExtra(EXTRA_CREDENTIAL_TITLE).orEmpty()
         val subtitle = getString(R.string.autofill_confirm_biometric_subtitle, credentialTitle)
@@ -63,6 +66,8 @@ class AutofillConfirmActivity : FragmentActivity() {
             }
             else -> {
                 setContent {
+                    // ISSUE-P2-09：Compose 侧遮挡触摸过滤（点击劫持防护）
+                    ApplyObscuredTouchFilter()
                     CredentialFillConfirmScreen(
                         title = getString(R.string.autofill_confirm_title),
                         hint = manualHint,

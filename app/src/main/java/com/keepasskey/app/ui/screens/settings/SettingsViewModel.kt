@@ -9,12 +9,15 @@ import com.keepasskey.app.R
 import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.app.data.repository.SettingsRepository
 import com.keepasskey.app.data.repository.VaultRepository
+import com.keepasskey.app.security.RuntimeIntegrityDetector
+import com.keepasskey.app.security.RuntimeIntegrityReport
 import com.keepasskey.app.sync.SyncCoordinator
 import com.keepasskey.app.sync.SyncCredentialsStore
 import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.theme.AppThemeMode
 import com.keepasskey.crypto.kdf.KdfBenchmark
+import com.keepasskey.database.session.DatabaseSession
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -22,6 +25,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
@@ -47,10 +51,17 @@ class SettingsViewModel @Inject constructor(
     private val autofillBlocklistStore: com.keepasskey.app.data.repository.AutofillBlocklistStore,
     // TASK-47 整改：已泄露密码检测（HIBP k-匿名范围查询，由 breachCheckEnabled 开关门控）
     private val breachCheckCoordinator: com.keepasskey.app.data.breach.BreachCheckCoordinator,
+    // ISSUE-P2-11 (ZT-16)：会话级「保存前创建 .bak 备份」偏好下发通道。
+    // 生产 DI 注入由 DatabaseModule 提供的唯一会话实例；允许为 null 仅用于既有单测注入
+    // （未提供时会话保持自身默认偏好 true，不影响其他断言）。
+    private val databaseSession: DatabaseSession? = null,
     // 允许为 null 仅用于单测注入；生产 DI 注入 @ApplicationContext
     @ApplicationContext private val appContext: Context? = null,
     // TASK-21：非 Compose 层文案资源解析通道（生产经 appContext 转发；单测注入假实现）
-    private val stringsProvider: StringsProvider? = null
+    private val stringsProvider: StringsProvider? = null,
+    // ISSUE-P2-08（ZT-13）：运行完整性扫描快照下发通道（UI 风险提示卡片）。
+    // 允许为 null 仅用于既有单测注入；生产 DI 注入单例 RuntimeIntegrityDetector。
+    private val runtimeIntegrityDetector: RuntimeIntegrityDetector? = null
 ) : ViewModel() {
 
     companion object {
@@ -170,13 +181,26 @@ class SettingsViewModel @Inject constructor(
         val autoLockTimeoutSeconds: Int
     )
 
+    /**
+     * ISSUE-P2-08：完整性扫描快照流。未注入检测器时恒为 null（UI 不渲染风险卡片），
+     * 绝不回填「安全」假值误导用户。
+     */
+    private val integrityReportFlow: Flow<RuntimeIntegrityReport?> =
+        runtimeIntegrityDetector?.report ?: MutableStateFlow<RuntimeIntegrityReport?>(null)
+
     val uiState: StateFlow<SettingsUiState> = combine(
         settingsRepository.getSettings(),
         syncController.state,
         healthController.state,
         combine(autofillStateFlow, databaseConfigStateFlow) { af, db -> Pair(af, db) },
-        combine(securityTimeoutStateFlow, extendedSettingsFlow, debugLogLinesFlow) { sec, ext, logs -> Triple(sec, ext, logs) }
-    ) { userSettings, syncState, healthState, (autofillState, dbState), (secState, extState, debugLogLines) ->
+        combine(
+            combine(securityTimeoutStateFlow, extendedSettingsFlow, debugLogLinesFlow) { sec, ext, logs ->
+                Triple(sec, ext, logs)
+            },
+            integrityReportFlow
+        ) { securityState, integrityReport -> Pair(securityState, integrityReport) }
+    ) { userSettings, syncState, healthState, (autofillState, dbState), (securityState, integrityReport) ->
+        val (secState, extState, debugLogLines) = securityState
         SettingsUiState(
             // 1. 密码库与加密设置
             databaseName = dbState.databaseName,
@@ -290,7 +314,10 @@ class SettingsViewModel @Inject constructor(
             // 8. 调试日志
             debugLogEnabled = extState.debugLogEnabled,
             verboseSyncLog = extState.verboseSyncLog,
-            debugLogLines = debugLogLines
+            debugLogLines = debugLogLines,
+
+            // 9. 运行环境完整性（ISSUE-P2-08 风险提示数据源）
+            integrityReport = integrityReport
         )
     }.stateIn(
         scope = viewModelScope,
@@ -740,6 +767,9 @@ class SettingsViewModel @Inject constructor(
 
     fun setCreateBackupBeforeSave(enabled: Boolean) {
         updateExtended { it.copy(createBackupBeforeSave = enabled) }
+        // ISSUE-P2-11 (ZT-16)：设置即下发到唯一会话实例，下一次写盘立即遵循新偏好
+        // （关闭时不再生成 .bak，并清理历史遗留 .bak）。
+        databaseSession?.createBackupBeforeSave = enabled
     }
 
     fun setCheckRemoteChangesBeforeSave(enabled: Boolean) {

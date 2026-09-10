@@ -1,5 +1,6 @@
 package com.keepasskey.app.ui.screens.detail
 
+import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -77,14 +78,20 @@ fun EntryDetailScreen(
 
     // 断点3 整改：SAF 导出挂起中的附件，选择目标后交给 ViewModel 真实写盘
     var pendingExportAttachment by remember { mutableStateOf<UiAttachment?>(null) }
+    // ISSUE-P2-10 (ZT-15)：附件为解密后明文，SAF 目标选定后必须先经风险确认才允许写盘
+    var pendingPlaintextExportUri by remember { mutableStateOf<Uri?>(null) }
+    var showPlaintextExportConfirm by remember { mutableStateOf(false) }
     val exportLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("*/*")
     ) { uri ->
         val att = pendingExportAttachment
         if (uri != null && att != null) {
-            viewModel.exportAttachment(att, uri)
+            // 不直接导出：保留待导出附件与目标，弹出明文风险确认后再决定是否写盘
+            pendingPlaintextExportUri = uri
+            showPlaintextExportConfirm = true
+        } else {
+            pendingExportAttachment = null
         }
-        pendingExportAttachment = null
     }
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -120,6 +127,49 @@ fun EntryDetailScreen(
         onCopyUsername = viewModel::copyUsername,
         modifier = modifier
     )
+
+    // ISSUE-P2-10 (ZT-15)：明文附件导出二次确认——取消分支不写盘（fail-closed），
+    // 仅确认后才以 confirmed = true 委托 ViewModel 落盘并写审计
+    if (showPlaintextExportConfirm) {
+        val attachment = pendingExportAttachment
+        val targetUri = pendingPlaintextExportUri
+        AlertDialog(
+            onDismissRequest = {
+                showPlaintextExportConfirm = false
+                pendingPlaintextExportUri = null
+                pendingExportAttachment = null
+            },
+            title = { Text(stringResource(R.string.detail_attachment_export_warn_title)) },
+            text = {
+                Text(
+                    text = stringResource(R.string.detail_attachment_export_warn_message),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.error
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showPlaintextExportConfirm = false
+                    pendingPlaintextExportUri = null
+                    pendingExportAttachment = null
+                    if (attachment != null && targetUri != null) {
+                        viewModel.exportAttachment(attachment, targetUri, confirmed = true)
+                    }
+                }) {
+                    Text(stringResource(R.string.detail_attachment_export_warn_confirm))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showPlaintextExportConfirm = false
+                    pendingPlaintextExportUri = null
+                    pendingExportAttachment = null
+                }) {
+                    Text(stringResource(R.string.btn_cancel))
+                }
+            }
+        )
+    }
 }
 
 /**
