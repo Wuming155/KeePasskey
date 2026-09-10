@@ -1,6 +1,6 @@
 package com.keepasskey.sync.webdav
 
-import android.util.Log
+import com.keepasskey.core.log.AppLog
 import com.keepasskey.sync.model.RemoteFileMetadata
 import com.keepasskey.sync.model.SyncException
 import com.keepasskey.sync.model.cleanEtag
@@ -443,7 +443,7 @@ class WebDavSyncProvider(
         } catch (e: Exception) {
             // P3-17 整改：解析失败至少落日志，不再静默吞掉（回退空元数据语义保留，
             // 由调用方按「缺失」回退 HTTP 头哨兵处理）
-            Log.w(TAG, "PROPFIND 响应 XML 解析失败，回退空元数据", e)
+            AppLog.w(TAG, "PROPFIND 响应 XML 解析失败，回退空元数据", e)
             ParsedPropfind("", -1L, 0L, false)
         }
     }

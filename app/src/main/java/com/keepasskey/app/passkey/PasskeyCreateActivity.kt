@@ -2,13 +2,13 @@ package com.keepasskey.app.passkey
 
 import android.content.Intent
 import android.os.Bundle
-import android.util.Log
 import androidx.credentials.CreatePublicKeyCredentialResponse
 import androidx.credentials.provider.PendingIntentHandler
 import androidx.lifecycle.lifecycleScope
 import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.security.BiometricAuthManager
+import com.keepasskey.core.log.AppLog
 import com.keepasskey.crypto.cbor.CborEncoder
 import com.keepasskey.crypto.passkey.PasskeyCryptoEngine
 import dagger.hilt.android.AndroidEntryPoint
@@ -73,7 +73,7 @@ class PasskeyCreateActivity : BaseCredentialActivity() {
                 if (userDisplayName.isBlank()) userDisplayName = userObj?.optString("displayName").orEmpty()
                 if (challenge.isBlank()) challenge = json.optString("challenge")
             } catch (e: Exception) {
-                Log.w(TAG, "解析 callingRequest.requestJson 失败", e)
+                AppLog.w(TAG, "解析 callingRequest.requestJson 失败", e)
             }
         }
         // H1 整改：不再从 candidateQueryData 读取调用方可控 origin（不可信）。
@@ -81,16 +81,17 @@ class PasskeyCreateActivity : BaseCredentialActivity() {
         // （P3-28 整改：移除仅含注释的空 if 块）
 
         if (rpId.isBlank() || userName.isBlank()) {
-            Log.e(TAG, "缺少必要注册参数: rpId=$rpId, userName=$userName")
-            failAndFinish(getString(R.string.passkey_error_missing_register_params))
+            // ISSUE-P1-10：日志不得携带 rpId / userName 等敏感标识
+            AppLog.e(TAG, "缺少必要注册参数（rpId 或 userName 为空）")
+            failAndFinish()
             return
         }
 
         lifecycleScope.launch {
             try {
                 if (vaultRepository.isLocked()) {
-                    Log.w(TAG, "密码库处于锁定状态，无法注册新 Passkey")
-                    failAndFinish(getString(R.string.cred_error_vault_locked))
+                    AppLog.w(TAG, "密码库处于锁定状态，无法注册新 Passkey")
+                    failAndFinish()
                     return@launch
                 }
 
@@ -99,8 +100,8 @@ class PasskeyCreateActivity : BaseCredentialActivity() {
                 val callerPackage = providerReq?.callingAppInfo?.packageName
                     ?: callingPackage?.ifBlank { null }
                 if (!CallingOriginResolver.isBrowserOrigin(origin) && callerPackage.isNullOrBlank()) {
-                    Log.e(TAG, "无法确定调用应用包名，拒绝创建应用内 Passkey")
-                    failAndFinish(getString(R.string.passkey_error_caller_unknown))
+                    AppLog.e(TAG, "无法确定调用应用包名，拒绝创建应用内 Passkey")
+                    failAndFinish()
                     return@launch
                 }
 
@@ -133,13 +134,13 @@ class PasskeyCreateActivity : BaseCredentialActivity() {
                     onRejected = {
                         if (settled) return@requestCredentialUserVerification
                         settled = true
-                        Log.w(TAG, "用户验证未通过，拒绝创建 Passkey")
+                        AppLog.w(TAG, "用户验证未通过，拒绝创建 Passkey")
                         failAndFinish()
                     }
                 )
             } catch (t: Throwable) {
-                Log.e(TAG, "Passkey 注册异常", t)
-                failAndFinish(t.message)
+                AppLog.e(TAG, "Passkey 注册异常", t)
+                failAndFinish()
             }
         }
     }
@@ -164,7 +165,7 @@ class PasskeyCreateActivity : BaseCredentialActivity() {
                 // fail-closed 兜底：凡不可签发的验证结果（理论不可达）一律拒绝创建
                 val flags = PasskeyAuthFlags.forRegistration(verification)
                 if (flags == null) {
-                    Log.e(TAG, "用户验证结果不可用于注册: verification=$verification")
+                    AppLog.e(TAG, "用户验证结果不可用于注册: verification=$verification")
                     failAndFinish()
                     return@launch
                 }
@@ -197,8 +198,8 @@ class PasskeyCreateActivity : BaseCredentialActivity() {
                 setResult(RESULT_OK, resultIntent)
                 finish()
             } catch (t: Throwable) {
-                Log.e(TAG, "Passkey 注册异常", t)
-                failAndFinish(t.message)
+                AppLog.e(TAG, "Passkey 注册异常", t)
+                failAndFinish()
             }
         }
     }

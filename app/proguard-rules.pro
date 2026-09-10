@@ -82,3 +82,15 @@
 -dontwarn com.google.zxing.**
 -dontwarn com.journeyapps.barcodescanner.**
 
+# 12. 日志剥离（ISSUE-P1-10 / ZT-10）
+#     release 直接剥离 verbose/debug 日志调用点（AppLog.v/d 与框架 Log.v/d 双重剥离）；
+#     Log.e/Log.w 经 AppLog 包装器在运行期脱敏（仅保留异常类名，不透 message 与堆栈）。
+-assumenosideeffects class android.util.Log {
+    public static int v(...);
+    public static int d(...);
+}
+-assumenosideeffects class com.keepasskey.core.log.AppLog {
+    public static void v(...);
+    public static void d(...);
+}
+

@@ -11,8 +11,8 @@ This file provides guidance to AI coding agents when working with code in this r
 
 | 维度 | 数值 / 状态 | 官方依据与说明 |
 |---|---|---|
-| **Git HEAD** | 代码基线 `4235f16`（TASK-53 Base64/Hex 整洁度） | 分支 `main` 与 `origin/main` 同步 |
-| **测试基线** | **620 个单元测试用例**（app 219 / core 32 / crypto 61 / database 163 / sync 145，其中 sync 145 含 12 例联调跳过 + 1 例 Windows 无 POSIX 权限视图跳过）：**607 通过、0 失败、13 跳过**（另有 Rust 侧 `cargo test` 9 例，见 §5） | `./gradlew test` 全模块执行；跳过的 12 例为 `LiveSyncServersTest` 真实联调用例（需先起 `tools/local-sync` 服务并加 `-DliveSyncTest`）；crypto 61 含 4 例宿主侧原生 JNI 运行时验证（无 cargo 宿主库时 `Assume` 跳过，见 §5） |
+| **Git HEAD** | 代码基线 `4235f16`（TASK-53 Base64/Hex 整洁度）+ ISSUE-P1-10 (ZT-10) 日志脱敏闭环 | 分支 `main` 与 `origin/main` 同步 |
+| **测试基线** | **627 个单元测试用例**（app 222 / core 36 / crypto 61 / database 163 / sync 145，其中 sync 145 含 12 例联调跳过 + 1 例 Windows 无 POSIX 权限视图跳过）：**614 通过、0 失败、13 跳过**（另有 Rust 侧 `cargo test` 9 例，见 §5） | `./gradlew test` 全模块执行；跳过的 12 例为 `LiveSyncServersTest` 真实联调用例（需先起 `tools/local-sync` 服务并加 `-DliveSyncTest`）；crypto 61 含 4 例宿主侧原生 JNI 运行时验证（无 cargo 宿主库时 `Assume` 跳过，见 §5） |
 | **构建状态** | `assembleDebug` + `assembleRelease` (R8) 全量通过 | **AGP 9.4.0 / Gradle 9.7.1** / Kotlin 2.4.10（经 buildscript classpath 锚定内置 KGP）/ Hilt 2.60.1 / **KSP 2.3.11** |
 | **系统基线** | **minSdk 36**, **compileSdk 37**, targetSdk 36 | 仅针对 Android 16+ 深度优化，固化无旧版垫片决策；compileSdk 37（Compose BOM 2026.08.00 + M3 Expressive） |
 | **传输安全防线** | 全站强制 HTTPS（`network_security_config.xml` 禁明文 + OkHttp TLS-only），零证书固定 | 对齐 Google Developer Knowledge `pinning not recommended` 指南 |

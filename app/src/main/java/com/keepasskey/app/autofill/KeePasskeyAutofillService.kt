@@ -16,7 +16,6 @@ import android.service.autofill.Presentations
 import android.service.autofill.SaveCallback
 import android.service.autofill.SaveInfo
 import android.service.autofill.SaveRequest
-import android.util.Log
 import android.view.autofill.AutofillId
 import android.view.autofill.AutofillValue
 import android.widget.RemoteViews
@@ -28,6 +27,7 @@ import com.keepasskey.app.MainActivity
 import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.passkey.DomainMatcher
+import com.keepasskey.core.log.AppLog
 import com.keepasskey.core.model.PasskeyData
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CancellationException
@@ -78,15 +78,16 @@ class KeePasskeyAutofillService : AutofillService() {
                 withTimeoutOrNull(AUTOFILL_TIMEOUT_MS) {
                     processFillRequest(request, callback)
                 } ?: run {
-                    Log.w(TAG, "onFillRequest 超时 ($AUTOFILL_TIMEOUT_MS ms)")
+                    AppLog.w(TAG, "onFillRequest 超时 ($AUTOFILL_TIMEOUT_MS ms)")
                     callback.onSuccess(null)
                 }
             } catch (c: CancellationException) {
                 // 系统侧已取消请求：静默退出，不再回调
                 throw c
             } catch (t: Throwable) {
-                Log.e(TAG, "onFillRequest 发生异常", t)
-                callback.onFailure(t.message)
+                // ISSUE-P1-10：对外回调一律使用预定义用户文案，禁止透传 t.message
+                AppLog.e(TAG, "onFillRequest 发生异常", t)
+                callback.onFailure(getString(R.string.autofill_fill_failed))
             }
         }
         // 生命周期接线：系统取消请求（界面切换/新聚焦事件）即级联取消协程，不空转至超时预算
@@ -107,7 +108,8 @@ class KeePasskeyAutofillService : AutofillService() {
         // TASK-44：黑名单命中即 fail-closed——不下发数据集（含解锁引导与 SaveInfo），
         // 等价于「该应用从未注册过本填充服务」，不降级已有填充语义也不返回错误。
         if (autofillBlocklistStore.isBlocked(callingPkg)) {
-            Log.i(TAG, "调用应用已列入自动填充黑名单，拒绝下发数据集: $callingPkg")
+            // ISSUE-P1-10：日志不得携带调用包名等敏感标识（会暴露用户安装应用清单）
+            AppLog.i(TAG, "调用应用已列入自动填充黑名单，拒绝下发数据集")
             callback.onSuccess(null)
             return
         }
@@ -316,7 +318,7 @@ class KeePasskeyAutofillService : AutofillService() {
                 .build()
             InlinePresentation(content.slice, spec, false)
         } catch (t: Throwable) {
-            Log.w(TAG, "构建 InlinePresentation 失败，回退下拉展示", t)
+            AppLog.w(TAG, "构建 InlinePresentation 失败，回退下拉展示", t)
             null
         }
     }
@@ -373,8 +375,9 @@ class KeePasskeyAutofillService : AutofillService() {
                                 callback.onSuccess()
                             }
                             is com.keepasskey.core.result.KdbxResult.Failure -> {
-                                Log.e(TAG, "onSaveRequest 保存凭据失败: ${result.message}", result.error)
-                                callback.onFailure(result.message)
+                                // ISSUE-P1-10：对外回调一律使用预定义用户文案，禁止透传异常 message
+                                AppLog.e(TAG, "onSaveRequest 保存凭据失败", result.error)
+                                callback.onFailure(getString(R.string.autofill_save_failed))
                             }
                         }
                     } finally {
@@ -387,8 +390,9 @@ class KeePasskeyAutofillService : AutofillService() {
                 // 服务解绑/协程取消：静默退出，不再回调
                 throw c
             } catch (t: Throwable) {
-                Log.e(TAG, "onSaveRequest 保存凭据失败", t)
-                callback.onFailure(t.message)
+                AppLog.e(TAG, "onSaveRequest 保存凭据失败", t)
+                // ISSUE-P1-10：对外回调一律使用预定义用户文案，禁止透传 t.message
+                callback.onFailure(getString(R.string.autofill_save_failed))
             }
         }
     }

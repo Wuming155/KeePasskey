@@ -25,7 +25,12 @@ abstract class BaseCredentialActivity : FragmentActivity() {
         window.setHideOverlayWindows(true)
     }
 
-    protected fun failAndFinish(message: String? = null) {
+    /**
+     * 统一失败收尾：回传 RESULT_CANCELED 并结束。
+     * ISSUE-P1-10：收尾不携带任何消息文本——失败原因只允许经 [com.keepasskey.core.log.AppLog]
+     * 脱敏记录，绝不透传异常 message（防敏感标识外泄）。
+     */
+    protected fun failAndFinish() {
         setResult(RESULT_CANCELED)
         finish()
     }

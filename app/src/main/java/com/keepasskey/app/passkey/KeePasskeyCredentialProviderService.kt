@@ -6,7 +6,6 @@ import android.graphics.drawable.Icon
 import android.os.Bundle
 import android.os.CancellationSignal
 import android.os.OutcomeReceiver
-import android.util.Log
 import androidx.credentials.exceptions.ClearCredentialException
 import androidx.credentials.exceptions.CreateCredentialCustomException
 import androidx.credentials.exceptions.CreateCredentialException
@@ -31,6 +30,7 @@ import androidx.credentials.provider.PublicKeyCredentialEntry
 import com.keepasskey.app.MainActivity
 import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.VaultRepository
+import com.keepasskey.core.log.AppLog
 import com.keepasskey.core.model.PasskeyData
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CancellationException
@@ -87,7 +87,7 @@ class KeePasskeyCredentialProviderService : CredentialProviderService() {
                 val response = withTimeoutOrNull(TIMEOUT_MS) {
                     buildBeginGetResponse(request)
                 } ?: run {
-                    Log.w(TAG, "onBeginGetCredential 超出超时预算 (${TIMEOUT_MS}ms)，返回空响应")
+                    AppLog.w(TAG, "onBeginGetCredential 超出超时预算 (${TIMEOUT_MS}ms)，返回空响应")
                     BeginGetCredentialResponse.Builder().build()
                 }
                 callback.onResult(response)
@@ -95,11 +95,12 @@ class KeePasskeyCredentialProviderService : CredentialProviderService() {
                 // 系统侧已取消请求：静默退出，不再回调
                 throw c
             } catch (t: Throwable) {
-                Log.e(TAG, "onBeginGetCredential 处理异常", t)
+                // ISSUE-P1-10：对外异常一律使用预定义用户文案，禁止透传 t.message
+                AppLog.e(TAG, "onBeginGetCredential 处理异常", t)
                 callback.onError(
                     GetCredentialCustomException(
                         "com.keepasskey.GET_CREDENTIAL_ERROR",
-                        t.message ?: getString(R.string.cred_error_unknown)
+                        getString(R.string.cred_error_unknown)
                     )
                 )
             }
@@ -117,7 +118,8 @@ class KeePasskeyCredentialProviderService : CredentialProviderService() {
         //    全部站点填充——此为「按应用屏蔽」语义的固有结果（KDoc 与 STATUS §6 已注明）。
         val callingPackage = request.callingAppInfo?.packageName.orEmpty()
         if (autofillBlocklistStore.isBlocked(callingPackage)) {
-            Log.i(TAG, "调用应用已列入自动填充黑名单，拒绝返回凭据候选: $callingPackage")
+            // ISSUE-P1-10：日志不得携带调用包名等敏感标识（会暴露用户安装应用清单）
+            AppLog.i(TAG, "调用应用已列入自动填充黑名单，拒绝返回凭据候选")
             return responseBuilder.build()
         }
 
@@ -157,7 +159,7 @@ class KeePasskeyCredentialProviderService : CredentialProviderService() {
                 val response = withTimeoutOrNull(TIMEOUT_MS) {
                     buildBeginCreateResponse(request)
                 } ?: run {
-                    Log.w(TAG, "onBeginCreateCredential 超出超时预算 (${TIMEOUT_MS}ms)，返回空响应")
+                    AppLog.w(TAG, "onBeginCreateCredential 超出超时预算 (${TIMEOUT_MS}ms)，返回空响应")
                     BeginCreateCredentialResponse.Builder().build()
                 }
                 callback.onResult(response)
@@ -165,11 +167,12 @@ class KeePasskeyCredentialProviderService : CredentialProviderService() {
                 // 系统侧已取消请求：静默退出，不再回调
                 throw c
             } catch (t: Throwable) {
-                Log.e(TAG, "onBeginCreateCredential 异常", t)
+                // ISSUE-P1-10：对外异常一律使用预定义用户文案，禁止透传 t.message
+                AppLog.e(TAG, "onBeginCreateCredential 异常", t)
                 callback.onError(
                     CreateCredentialCustomException(
                         "com.keepasskey.CREATE_CREDENTIAL_ERROR",
-                        t.message ?: getString(R.string.cred_error_unknown)
+                        getString(R.string.cred_error_unknown)
                     )
                 )
             }
@@ -200,7 +203,7 @@ class KeePasskeyCredentialProviderService : CredentialProviderService() {
                     userDisplayName = userObj?.optString("displayName").orEmpty()
                     challenge = json.optString("challenge")
                 } catch (e: Exception) {
-                    Log.w(TAG, "解析 BeginCreatePublicKeyCredentialRequest JSON 失败", e)
+                    AppLog.w(TAG, "解析 BeginCreatePublicKeyCredentialRequest JSON 失败", e)
                 }
 
                 if (rpId.isBlank()) {
@@ -210,7 +213,8 @@ class KeePasskeyCredentialProviderService : CredentialProviderService() {
                 // Wave 12 授权收紧（对齐官方「rp.id 须为 origin 可注册后缀」）：
                 // 创建分支与断言分支同等 fail-closed——rp.id 不可信时拒绝呈现创建入口
                 if (!DomainMatcher.isRpIdTrustedForCreation(rpId, callingOrigin)) {
-                    Log.w(TAG, "拒绝创建请求：rp.id 不可信（非调用方可注册后缀或为公共后缀） rpId=$rpId")
+                    // ISSUE-P1-10：日志不得携带 rpId 等敏感标识（会暴露用户注册的站点域）
+                    AppLog.w(TAG, "拒绝创建请求：rp.id 不可信（非调用方可注册后缀或为公共后缀）")
                     return responseBuilder.build()
                 }
 

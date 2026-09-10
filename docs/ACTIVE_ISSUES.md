@@ -17,24 +17,9 @@
 
 ---
 
-## P1 高危与核心功能问题（1 项）
+## P1 高危与核心功能问题（0 项）
 
-### ISSUE-P1-10 (ZT-10): release 包保留日志与异常 message 外传
-- **优先级**：P1（可见性侧信息泄漏）
-- **分类**：日志脱敏 / 错误处理
-- **背景与现象**：
-  1. `app/proguard-rules.pro` 全文**无** `-assumenosideeffects class android.util.Log`，全仓无 `BuildConfig.DEBUG` 闸门 → release 包仍输出 `Log.e`；
-  2. 泄漏内容实测：`PasskeyCreateActivity.kt:67` 输出 `userName`、`KeePasskeyCredentialProviderService.kt:216` 输出 `rpId`、`:124` 与 `KeePasskeyAutofillService.kt:110` 输出 `callingPackage`（用户安装应用清单）；多处 `Log.e(TAG, "...", t)` 输出完整堆栈；
-  3. `KeePasskeyAutofillService.kt:89,391` 与 `KeePasskeyCredentialProviderService.kt:106,175` 将裸 `t.message` 传给 `onFailure` / `GetCredentialCustomException`；`core/.../KdbxResult.kt:15` 未设 `userMessage` 时直接把异常 message 上浮 UI。
-- **整改依据**：OWASP MASVS-CODE-2 / MASVS-STORAGE-3；工程规则「日志严禁敏感明文」。
-- **涉及核心文件**：
-  - `app/proguard-rules.pro`
-  - `app/src/main/java/com/keepasskey/app/passkey/*.kt`
-  - `app/src/main/java/com/keepasskey/app/autofill/KeePasskeyAutofillService.kt`
-- **验收标准**：
-  1. 引入统一日志包装器，release 剥离 `Log.d/v`，`Log.e` 脱敏堆栈；R8 补 `-assumenosideeffects`；
-  2. 对外 `onFailure` / 异常一律使用预定义用户文案，禁止透传 `t.message`；
-  3. 单测/静态检查确认 release 产物无敏感标识日志。
+> 当前 P1 级别无待办。历史 P1 项（含 ISSUE-P1-10 / ZT-10）已全部闭环，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §2.5。
 
 ---
 

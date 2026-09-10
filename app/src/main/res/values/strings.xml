@@ -869,6 +869,9 @@
     <string name="cred_error_vault_locked">密码库处于锁定状态，无法执行此操作</string>
     <string name="cred_error_entry_not_found">未找到对应的凭据条目</string>
     <string name="cred_error_unknown">处理凭据请求时发生异常</string>
+    <!-- ISSUE-P1-10 (ZT-10)：自动填充对外回调的预定义用户文案（禁止透传异常 message） -->
+    <string name="autofill_fill_failed">自动填充请求处理失败，请重试</string>
+    <string name="autofill_save_failed">保存凭据失败，请重试</string>
 
     <!-- TASK-21：数据仓库层用户可见消息（repo_*） -->
     <string name="repo_files_dir_unavailable">内部存储目录不可用</string>

@@ -11,8 +11,13 @@ sealed interface KdbxResult<out T> {
         val error: Throwable,
         val userMessage: String? = null
     ) : KdbxResult<Nothing> {
+        /**
+         * ISSUE-P1-10 (ZT-10)：未显式提供 userMessage 时一律回退为固定通用文案——
+         * 裸异常 message 属不可信外部输入（可能携带主机地址、路径、协议细节等敏感标识），
+         * 绝不直接上浮 UI。需要具体原因时由调用方显式构造 userMessage。
+         */
         val message: String
-            get() = userMessage ?: error.message ?: "未知错误"
+            get() = userMessage ?: DEFAULT_USER_MESSAGE
     }
 
     val isSuccess: Boolean
@@ -47,6 +52,8 @@ sealed interface KdbxResult<out T> {
     }
 
     companion object {
+        private const val DEFAULT_USER_MESSAGE = "未知错误"
+
         inline fun <T> runCatching(block: () -> T): KdbxResult<T> {
             return try {
                 Success(block())

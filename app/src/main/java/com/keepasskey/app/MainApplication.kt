@@ -3,6 +3,7 @@ package com.keepasskey.app
 import android.app.Application
 import com.keepasskey.app.security.AutoLockManager
 import com.keepasskey.app.sync.PeriodicSyncScheduler
+import com.keepasskey.core.log.AppLog
 import dagger.hilt.android.HiltAndroidApp
 import javax.inject.Inject
 
@@ -17,6 +18,9 @@ class MainApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // ISSUE-P1-10 (ZT-10)：统一日志包装器调试开关——debug 构建开放 v/d 与完整异常堆栈，
+        // release 保持关闭（AppLog.e/w 自动脱敏，R8 另行剥离 v/d 调用点）
+        AppLog.debugEnabled = BuildConfig.DEBUG
         // ISSUE-P0-01 (ZT-01)：自动锁定守护下沉至进程级唯一冷启动点——
         // 应用存在 AutofillUnlockActivity / CredentialUnlockActivity 两条不经 MainActivity
         // 的独立冷启动入口，守护（ProcessLifecycleOwner + 熄屏广播）必须在进程创建时注册，

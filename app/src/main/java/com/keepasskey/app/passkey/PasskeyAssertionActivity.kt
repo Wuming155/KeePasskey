@@ -2,7 +2,6 @@ package com.keepasskey.app.passkey
 
 import android.content.Intent
 import android.os.Bundle
-import android.util.Log
 import androidx.credentials.GetCredentialResponse
 import androidx.credentials.PublicKeyCredential
 import androidx.credentials.provider.PendingIntentHandler
@@ -10,6 +9,7 @@ import androidx.lifecycle.lifecycleScope
 import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.security.BiometricAuthManager
+import com.keepasskey.core.log.AppLog
 import com.keepasskey.core.model.PasskeyData
 import com.keepasskey.crypto.passkey.PasskeyCryptoEngine
 import dagger.hilt.android.AndroidEntryPoint
@@ -59,38 +59,39 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
         val expectedPackage = intent.getStringExtra(EXTRA_EXPECTED_PACKAGE).orEmpty()
 
         if (entryId.isBlank()) {
-            Log.e(TAG, "缺少通行密钥 entryId")
-            failAndFinish(getString(R.string.passkey_error_missing_credential_id))
+            AppLog.e(TAG, "缺少通行密钥 entryId")
+            failAndFinish()
             return
         }
 
         lifecycleScope.launch {
             try {
                 if (vaultRepository.isLocked()) {
-                    Log.w(TAG, "密码库处于锁定状态，无法执行 Passkey 认证")
-                    failAndFinish(getString(R.string.cred_error_vault_locked))
+                    AppLog.w(TAG, "密码库处于锁定状态，无法执行 Passkey 认证")
+                    failAndFinish()
                     return@launch
                 }
 
                 val allEntries = vaultRepository.getKdbxEntries()
                 val entry = allEntries.firstOrNull { it.id.toHexString() == entryId }
                 if (entry == null) {
-                    Log.e(TAG, "未找到目标条目: entryId=$entryId")
-                    failAndFinish(getString(R.string.cred_error_entry_not_found))
+                    // ISSUE-P1-10：日志不得携带 entryId 等敏感标识
+                    AppLog.e(TAG, "未找到目标条目")
+                    failAndFinish()
                     return@launch
                 }
 
                 val passkeyData = PasskeyData.fromCustomFields(entry.customFields)
                 if (passkeyData == null) {
-                    Log.e(TAG, "条目不含有效的 Passkey 自定义字段")
-                    failAndFinish(getString(R.string.passkey_error_invalid_passkey_entry))
+                    AppLog.e(TAG, "条目不含有效的 Passkey 自定义字段")
+                    failAndFinish()
                     return@launch
                 }
 
                 // F4 整改：origin 缺失一律拒绝签发（fail-closed），不得以 RP ID 冒充 web origin
                 if (origin.isBlank()) {
-                    Log.e(TAG, "缺少调用来源 origin，拒绝签发断言")
-                    failAndFinish(getString(R.string.passkey_error_origin_missing))
+                    AppLog.e(TAG, "缺少调用来源 origin，拒绝签发断言")
+                    failAndFinish()
                     return@launch
                 }
 
@@ -101,8 +102,8 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
                     if (originHost.isEmpty() ||
                         !DomainMatcher.isDomainMatch(passkeyData.relyingPartyId, originHost)
                     ) {
-                        Log.e(TAG, "origin 与凭据 RP-ID 不匹配，拒绝签发断言")
-                        failAndFinish(getString(R.string.passkey_error_caller_mismatch))
+                        AppLog.e(TAG, "origin 与凭据 RP-ID 不匹配，拒绝签发断言")
+                        failAndFinish()
                         return@launch
                     }
                 } else {
@@ -112,8 +113,8 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
                     // 非应用绑定（https://<rpId>）的条目一律拒绝普通应用签发
                     val boundPackage = DomainMatcher.extractAndroidBoundPackage(entry.url)
                     if (expectedPackage.isBlank() || boundPackage != expectedPackage.trim().lowercase()) {
-                        Log.e(TAG, "调用包名与凭据绑定包名不一致，拒绝签发断言")
-                        failAndFinish(getString(R.string.passkey_error_caller_mismatch))
+                        AppLog.e(TAG, "调用包名与凭据绑定包名不一致，拒绝签发断言")
+                        failAndFinish()
                         return@launch
                     }
                 }
@@ -139,13 +140,13 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
                     onRejected = {
                         if (settled) return@requestCredentialUserVerification
                         settled = true
-                        Log.w(TAG, "用户验证未通过，拒绝签发 Passkey 断言")
+                        AppLog.w(TAG, "用户验证未通过，拒绝签发 Passkey 断言")
                         failAndFinish()
                     }
                 )
             } catch (t: Throwable) {
-                Log.e(TAG, "Passkey 认证执行失败", t)
-                failAndFinish(t.message)
+                AppLog.e(TAG, "Passkey 认证执行失败", t)
+                failAndFinish()
             }
         }
     }
@@ -168,7 +169,7 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
                 // fail-closed 兜底：凡不可签发的验证结果（理论不可达）一律拒绝产出断言
                 val flags = PasskeyAuthFlags.forAssertion(verification)
                 if (flags == null) {
-                    Log.e(TAG, "用户验证结果不可签发断言: verification=$verification")
+                    AppLog.e(TAG, "用户验证结果不可签发断言: verification=$verification")
                     failAndFinish()
                     return@launch
                 }
@@ -188,8 +189,8 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
 
                 finish()
             } catch (t: Throwable) {
-                Log.e(TAG, "Passkey 认证执行失败", t)
-                failAndFinish(t.message)
+                AppLog.e(TAG, "Passkey 认证执行失败", t)
+                failAndFinish()
             }
         }
     }

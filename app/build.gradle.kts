@@ -82,6 +82,8 @@ android {
 
     buildFeatures {
         compose = true
+        // ISSUE-P1-10 (ZT-10)：供 MainApplication 以 BuildConfig.DEBUG 置位 AppLog 调试开关
+        buildConfig = true
     }
 }
 

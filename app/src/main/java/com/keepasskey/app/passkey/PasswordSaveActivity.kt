@@ -2,12 +2,11 @@ package com.keepasskey.app.passkey
 
 import android.content.Intent
 import android.os.Bundle
-import android.util.Log
 import androidx.credentials.CreatePasswordResponse
 import androidx.credentials.provider.PendingIntentHandler
 import androidx.lifecycle.lifecycleScope
-import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.VaultRepository
+import com.keepasskey.core.log.AppLog
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -49,8 +48,8 @@ class PasswordSaveActivity : BaseCredentialActivity() {
         val webDomain = intent.getStringExtra(EXTRA_WEB_DOMAIN)
 
         if (password.isNullOrBlank()) {
-            Log.e(TAG, "缺少待保存的密码数据")
-            failAndFinish(getString(R.string.passkey_error_password_empty))
+            AppLog.e(TAG, "缺少待保存的密码数据")
+            failAndFinish()
             return
         }
 
@@ -61,8 +60,8 @@ class PasswordSaveActivity : BaseCredentialActivity() {
         lifecycleScope.launch {
             try {
                 if (vaultRepository.isLocked()) {
-                    Log.w(TAG, "密码库处于锁定状态，无法保存密码凭据")
-                    failAndFinish(getString(R.string.cred_error_vault_locked))
+                    AppLog.w(TAG, "密码库处于锁定状态，无法保存密码凭据")
+                    failAndFinish()
                     return@launch
                 }
 
@@ -79,8 +78,8 @@ class PasswordSaveActivity : BaseCredentialActivity() {
                 setResult(RESULT_OK, resultIntent)
                 finish()
             } catch (t: Throwable) {
-                Log.e(TAG, "保存密码凭据失败", t)
-                failAndFinish(t.message)
+                AppLog.e(TAG, "保存密码凭据失败", t)
+                failAndFinish()
             } finally {
                 passwordChars.fill('0')
             }

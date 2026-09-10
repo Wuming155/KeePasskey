@@ -2,7 +2,6 @@ package com.keepasskey.app.passkey
 
 import android.content.Intent
 import android.os.Bundle
-import android.util.Log
 import androidx.activity.compose.setContent
 import androidx.credentials.provider.BeginGetCredentialRequest
 import androidx.credentials.provider.BeginGetCredentialResponse
@@ -13,6 +12,7 @@ import com.keepasskey.app.data.repository.SettingsRepository
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.security.FlagSecureGuard
 import com.keepasskey.app.ui.screens.unlock.UnlockScreen
+import com.keepasskey.core.log.AppLog
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -65,7 +65,7 @@ class CredentialUnlockActivity : FragmentActivity() {
         val originalRequest = try {
             PendingIntentHandler.retrieveBeginGetCredentialRequest(intent)
         } catch (t: Throwable) {
-            Log.w(TAG, "解析原始 BeginGetCredentialRequest 失败", t)
+            AppLog.w(TAG, "解析原始 BeginGetCredentialRequest 失败", t)
             null
         }
 
@@ -108,7 +108,7 @@ class CredentialUnlockActivity : FragmentActivity() {
                 if (originalRequest == null) {
                     // 唯一成因：上游 AuthenticationAction 的 PendingIntent 未以 FLAG_MUTABLE 创建，
                     // 系统注入的 fillIn extras 被丢弃（ISSUE-P1-01）。fail-closed，绝不伪造候选。
-                    Log.w(TAG, "缺少原始凭据请求（AuthenticationAction PendingIntent 需 FLAG_MUTABLE），无法链式回传候选")
+                    AppLog.w(TAG, "缺少原始凭据请求（AuthenticationAction PendingIntent 需 FLAG_MUTABLE），无法链式回传候选")
                     failAndFinish()
                     return@launch
                 }
@@ -121,7 +121,7 @@ class CredentialUnlockActivity : FragmentActivity() {
                 setResult(RESULT_OK, resultIntent)
                 finish()
             } catch (t: Throwable) {
-                Log.e(TAG, "链式解锁回传候选失败", t)
+                AppLog.e(TAG, "链式解锁回传候选失败", t)
                 failAndFinish()
             }
         }

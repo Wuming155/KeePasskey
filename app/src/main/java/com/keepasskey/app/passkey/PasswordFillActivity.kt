@@ -2,7 +2,6 @@ package com.keepasskey.app.passkey
 
 import android.content.Intent
 import android.os.Bundle
-import android.util.Log
 import androidx.credentials.GetCredentialResponse
 import androidx.credentials.PasswordCredential
 import androidx.credentials.provider.PendingIntentHandler
@@ -11,6 +10,7 @@ import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.AutofillBlocklistStore
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.security.BiometricAuthManager
+import com.keepasskey.core.log.AppLog
 import com.keepasskey.core.model.KdbxEntry
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.launch
@@ -58,7 +58,7 @@ class PasswordFillActivity : BaseCredentialActivity() {
         val expectedDomain = intent.getStringExtra(EXTRA_EXPECTED_DOMAIN).orEmpty()
         val expectedPackage = intent.getStringExtra(EXTRA_EXPECTED_PACKAGE).orEmpty()
         if (entryId.isBlank()) {
-            Log.e(TAG, "缺少密码凭据 entryId")
+            AppLog.e(TAG, "缺少密码凭据 entryId")
             failAndFinish()
             return
         }
@@ -66,7 +66,7 @@ class PasswordFillActivity : BaseCredentialActivity() {
         // ISSUE-P0-02：与 Autofill 通道一致的 fail-closed 黑名单复核。
         // 候选组装侧已拦截一次；此处对回传路径再校验，杜绝「组装后被加入黑名单」的窗口被利用。
         if (expectedPackage.isNotBlank() && autofillBlocklistStore.isBlocked(expectedPackage)) {
-            Log.w(TAG, "调用应用已列入自动填充黑名单，拒绝回传密码")
+            AppLog.w(TAG, "调用应用已列入自动填充黑名单，拒绝回传密码")
             failAndFinish()
             return
         }
@@ -74,7 +74,7 @@ class PasswordFillActivity : BaseCredentialActivity() {
         lifecycleScope.launch {
             try {
                 if (vaultRepository.isLocked()) {
-                    Log.w(TAG, "密码库处于锁定状态，无法填充密码")
+                    AppLog.w(TAG, "密码库处于锁定状态，无法填充密码")
                     failAndFinish()
                     return@launch
                 }
@@ -82,7 +82,7 @@ class PasswordFillActivity : BaseCredentialActivity() {
                 val allEntries = vaultRepository.getKdbxEntries()
                 val entry = allEntries.firstOrNull { it.id.toHexString() == entryId }
                 if (entry == null) {
-                    Log.e(TAG, "未找到目标密码条目")
+                    AppLog.e(TAG, "未找到目标密码条目")
                     failAndFinish()
                     return@launch
                 }
@@ -94,7 +94,7 @@ class PasswordFillActivity : BaseCredentialActivity() {
                 val packageOk = expectedPackage.isNotBlank() && entry.url.isNotBlank() &&
                         DomainMatcher.isPackageMatch(entry.url, expectedPackage)
                 if (!domainOk && !packageOk) {
-                    Log.e(TAG, "条目与调用方不匹配，拒绝回传密码")
+                    AppLog.e(TAG, "条目与调用方不匹配，拒绝回传密码")
                     failAndFinish()
                     return@launch
                 }
@@ -118,7 +118,7 @@ class PasswordFillActivity : BaseCredentialActivity() {
                     onRejected = { failAndFinish() }
                 )
             } catch (t: Throwable) {
-                Log.e(TAG, "密码填充失败", t)
+                AppLog.e(TAG, "密码填充失败", t)
                 failAndFinish()
             }
         }
