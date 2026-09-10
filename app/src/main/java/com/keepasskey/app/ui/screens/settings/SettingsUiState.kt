@@ -86,11 +86,11 @@ data class SettingsUiState(
     val webdavRemotePath: String = "/keepasskey.kdbx",
     // S3 兼容协议专属字段（M2 整改：默认值一律空串）
     // Wave 15 整改：s3SecretKey 明文不再进 UiState/StateFlow（经 ViewModel CharArray 预填通道承载）；
-    // AccessKey ID 属标识符（随请求头明文传输），保留 String 投影
+    // ISSUE-P2-01：s3AccessKey 同步改造——AccessKey ID 亦不再以 String 驻留 UiState/StateFlow，
+    // 与 SecretKey 同走 CharArray 一次性预填通道（ViewModel.s3AccessKeyPrefill）
     val s3Endpoint: String = "",
     val s3Bucket: String = "",
     val s3Region: String = "auto",
-    val s3AccessKey: String = "",
     val s3ObjectKey: String = "keepasskey.kdbx",
     val s3UsePathStyle: Boolean = false,
     // 通用同步状态（H1 整改：默认值不再写死演示时间戳/假状态文案，由真实同步结果填充；

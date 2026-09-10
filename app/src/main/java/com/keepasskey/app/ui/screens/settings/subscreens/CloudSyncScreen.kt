@@ -65,15 +65,18 @@ fun CloudSyncScreen(
     onTriggerSync: () -> Unit,
     onTestConnection: () -> Unit = onTriggerSync,
     onProviderChange: (CloudSyncProvider) -> Unit = {},
-    // Wave 15 整改：密码/SecretKey 以 CharArray 借用语义提交，返回保存结果（false = 保存被拒绝或封印失败）
+    // Wave 15 整改：密码/SecretKey 以 CharArray 借用语义提交，返回保存结果（false = 保存被拒绝或封印失败）；
+    // ISSUE-P2-01：AccessKey ID 亦改为 CharArray 借用语义提交
     onUpdateWebDav: (url: String, username: String, password: CharArray, remotePath: String) -> Boolean = { _, _, _, _ -> false },
-    onUpdateS3: (endpoint: String, bucket: String, region: String, accessKey: String, secretKey: CharArray, objectKey: String, usePathStyle: Boolean) -> Boolean = { _, _, _, _, _, _, _ -> false },
+    onUpdateS3: (endpoint: String, bucket: String, region: String, accessKey: CharArray, secretKey: CharArray, objectKey: String, usePathStyle: Boolean) -> Boolean = { _, _, _, _, _, _, _ -> false },
     // Wave 15 整改：既有凭据经一次性预填通道下发（SecurePasswordField 消费后即清零）；
     // 用户开始编辑时经回调终结预填通道生命周期
     webdavPasswordPrefill: CharArray? = null,
     s3SecretKeyPrefill: CharArray? = null,
+    s3AccessKeyPrefill: CharArray? = null,
     onWebDavPasswordEdited: () -> Unit = {},
     onS3SecretKeyEdited: () -> Unit = {},
+    onS3AccessKeyEdited: () -> Unit = {},
     // KP2A 扩展文件处理操作
     onUseOfflineCacheToggle: (Boolean) -> Unit = {},
     onSyncOnColdStartToggle: (Boolean) -> Unit = {},
@@ -104,7 +107,10 @@ fun CloudSyncScreen(
     var s3Endpoint by remember(uiState.s3Endpoint) { mutableStateOf(uiState.s3Endpoint) }
     var s3Bucket by remember(uiState.s3Bucket) { mutableStateOf(uiState.s3Bucket) }
     var s3Region by remember(uiState.s3Region) { mutableStateOf(uiState.s3Region) }
-    var s3AccessKey by remember(uiState.s3AccessKey) { mutableStateOf(uiState.s3AccessKey) }
+    // ISSUE-P2-01：AccessKey ID 以 CharArray 本地承载（显示用 String 仅存活于 SecurePasswordField
+    // 组件内部），离开组合时立即擦除——不再从 UiState 的 String 回显
+    var s3AccessKeyChars by remember { mutableStateOf(CharArray(0)) }
+    var s3AccessKeyVisible by remember { mutableStateOf(false) }
     var s3SecretKeyChars by remember { mutableStateOf(CharArray(0)) }
     var s3ObjectKey by remember(uiState.s3ObjectKey) { mutableStateOf(uiState.s3ObjectKey) }
     var s3UsePathStyle by remember(uiState.s3UsePathStyle) { mutableStateOf(uiState.s3UsePathStyle) }
@@ -114,6 +120,7 @@ fun CloudSyncScreen(
     DisposableEffect(Unit) {
         onDispose {
             webdavPasswordChars.fill('0')
+            s3AccessKeyChars.fill('0')
             s3SecretKeyChars.fill('0')
         }
     }
@@ -223,8 +230,14 @@ fun CloudSyncScreen(
                                 onBucketChange = { s3Bucket = it },
                                 region = s3Region,
                                 onRegionChange = { s3Region = it },
-                                accessKey = s3AccessKey,
-                                onAccessKeyChange = { s3AccessKey = it },
+                                isAccessKeyVisible = s3AccessKeyVisible,
+                                onToggleAccessKeyVisibility = { s3AccessKeyVisible = !s3AccessKeyVisible },
+                                accessKeyPrefill = s3AccessKeyPrefill,
+                                onAccessKeyCharsChange = { chars ->
+                                    s3AccessKeyChars.fill('0')
+                                    s3AccessKeyChars = chars.copyOf()
+                                    onS3AccessKeyEdited()
+                                },
                                 isSecretKeyVisible = s3SecretKeyVisible,
                                 onToggleSecretKeyVisibility = { s3SecretKeyVisible = !s3SecretKeyVisible },
                                 secretKeyPrefill = s3SecretKeyPrefill,
@@ -251,9 +264,14 @@ fun CloudSyncScreen(
                                         webdavPasswordChars = CharArray(0)
                                     }
                                 } else {
-                                    val saved = onUpdateS3(s3Endpoint, s3Bucket, s3Region, s3AccessKey, s3SecretKeyChars, s3ObjectKey, s3UsePathStyle)
+                                    // ISSUE-P2-01：借用语义——调用后 AccessKey/SecretKey 数组均已被
+                                    // ViewModel 消费擦除；保存失败由 ViewModel 上浮反馈
+                                    val saved = onUpdateS3(s3Endpoint, s3Bucket, s3Region, s3AccessKeyChars, s3SecretKeyChars, s3ObjectKey, s3UsePathStyle)
                                     if (saved) {
                                         saveFeedbackMessage = UiMessage(R.string.sync_s3_saved)
+                                        s3AccessKeyChars.fill('0')
+                                        s3AccessKeyChars = CharArray(0)
+                                        s3SecretKeyChars.fill('0')
                                         s3SecretKeyChars = CharArray(0)
                                     }
                                 }

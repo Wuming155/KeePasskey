@@ -89,10 +89,16 @@ class SettingsViewModel @Inject constructor(
 
     val s3SecretKeyPrefill: StateFlow<CharArray?> get() = syncController.s3SecretKeyPrefill
 
+    // ISSUE-P2-01：S3 AccessKey ID 一次性预填通道（明文不进 UiState）
+    val s3AccessKeyPrefill: StateFlow<CharArray?> get() = syncController.s3AccessKeyPrefill
+
     /** Wave 15 整改：用户开始编辑密码后终结预填通道生命周期（防旋转后旧值回写覆盖用户输入） */
     fun clearWebDavPasswordPrefill() = syncController.clearWebDavPasswordPrefill()
 
     fun clearS3SecretKeyPrefill() = syncController.clearS3SecretKeyPrefill()
+
+    /** ISSUE-P2-01：用户开始编辑 AccessKey 后终结预填通道生命周期（语义同上） */
+    fun clearS3AccessKeyPrefill() = syncController.clearS3AccessKeyPrefill()
 
     private val autofillStateFlow = MutableStateFlow(
         AutofillUiState(
@@ -193,7 +199,6 @@ class SettingsViewModel @Inject constructor(
             s3Endpoint = syncState.s3Endpoint,
             s3Bucket = syncState.s3Bucket,
             s3Region = syncState.s3Region,
-            s3AccessKey = syncState.s3AccessKey,
             s3ObjectKey = syncState.s3ObjectKey,
             s3UsePathStyle = syncState.s3UsePathStyle,
             autoSyncEnabled = syncState.autoSyncEnabled,
@@ -397,12 +402,15 @@ class SettingsViewModel @Inject constructor(
         remotePath: String
     ): Boolean = syncController.updateWebDavConfig(url, username, password, remotePath)
 
-    /** Wave 15 整改：SecretKey 以 [CharArray] 借用语义提交（语义同 [updateWebDavConfig]） */
+    /**
+     * Wave 15 整改：SecretKey 以 [CharArray] 借用语义提交（语义同 [updateWebDavConfig]）；
+     * ISSUE-P2-01：AccessKey ID 亦改为 [CharArray] 借用语义（消费后即擦除，不驻留状态流）
+     */
     fun updateS3Config(
         endpoint: String,
         bucket: String,
         region: String,
-        accessKey: String,
+        accessKey: CharArray,
         secretKey: CharArray,
         objectKey: String,
         usePathStyle: Boolean = syncController.state.value.s3UsePathStyle
@@ -835,6 +843,8 @@ class SettingsViewModel @Inject constructor(
         // Wave 15 整改：ViewModel 销毁时擦除凭据预填通道中的明文驻留
         syncController.clearWebDavPasswordPrefill()
         syncController.clearS3SecretKeyPrefill()
+        // ISSUE-P2-01：AccessKey ID 预填通道随销毁一并擦除
+        syncController.clearS3AccessKeyPrefill()
         super.onCleared()
     }
 }

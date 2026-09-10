@@ -382,6 +382,8 @@ fun KeePasskeyApp() {
                     // Wave 15 整改：同步凭据一次性预填通道（明文不进 UiState）
                     val webdavPasswordPrefill by settingsViewModel.webdavPasswordPrefill.collectAsStateWithLifecycle()
                     val s3SecretKeyPrefill by settingsViewModel.s3SecretKeyPrefill.collectAsStateWithLifecycle()
+                    // ISSUE-P2-01：S3 AccessKey ID 一次性预填通道（明文不进 UiState）
+                    val s3AccessKeyPrefill by settingsViewModel.s3AccessKeyPrefill.collectAsStateWithLifecycle()
                     WebDavSyncScreen(
                         uiState = settingsState,
                         onBackClick = { navController.popBackStack() },
@@ -394,8 +396,10 @@ fun KeePasskeyApp() {
                         onUpdateS3 = settingsViewModel::updateS3Config,
                         webdavPasswordPrefill = webdavPasswordPrefill,
                         s3SecretKeyPrefill = s3SecretKeyPrefill,
+                        s3AccessKeyPrefill = s3AccessKeyPrefill,
                         onWebDavPasswordEdited = settingsViewModel::clearWebDavPasswordPrefill,
                         onS3SecretKeyEdited = settingsViewModel::clearS3SecretKeyPrefill,
+                        onS3AccessKeyEdited = settingsViewModel::clearS3AccessKeyPrefill,
                         onUseOfflineCacheToggle = settingsViewModel::setUseOfflineCache,
                         onSyncOnColdStartToggle = settingsViewModel::setSyncOnColdStart,
                         onPeriodicBackgroundSyncToggle = settingsViewModel::setPeriodicBackgroundSyncEnabled,

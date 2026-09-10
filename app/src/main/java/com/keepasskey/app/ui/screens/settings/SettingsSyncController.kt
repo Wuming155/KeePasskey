@@ -35,13 +35,14 @@ internal class SettingsSyncController(
         // 被静默保存为真实云端凭据
         // Wave 15 整改：webdavPassword/s3SecretKey 明文不再驻留本状态流
         // （经 CharArray 一次性预填通道下发，保存后即擦除）
+        // ISSUE-P2-01：s3AccessKey 同步改造——AccessKey ID 亦不再以 String 驻留本状态流，
+        // 与 SecretKey 同走 CharArray 一次性预填通道
         val webdavUrl: String = "",
         val webdavUsername: String = "",
         val webdavRemotePath: String = "/keepasskey.kdbx",
         val s3Endpoint: String = "",
         val s3Bucket: String = "",
         val s3Region: String = "auto",
-        val s3AccessKey: String = "",
         val s3ObjectKey: String = "keepasskey.kdbx",
         val s3UsePathStyle: Boolean = false,
         val autoSyncEnabled: Boolean = true,
@@ -73,6 +74,10 @@ internal class SettingsSyncController(
     private val _s3SecretKeyPrefill = MutableStateFlow<CharArray?>(null)
     val s3SecretKeyPrefill: StateFlow<CharArray?> = _s3SecretKeyPrefill.asStateFlow()
 
+    // ISSUE-P2-01：S3 AccessKey ID 预填通道（语义同 SecretKey 通道）
+    private val _s3AccessKeyPrefill = MutableStateFlow<CharArray?>(null)
+    val s3AccessKeyPrefill: StateFlow<CharArray?> = _s3AccessKeyPrefill.asStateFlow()
+
     /** Wave 15 整改：用户开始编辑密码后终结预填通道生命周期（防旋转后旧值回写覆盖用户输入） */
     fun clearWebDavPasswordPrefill() {
         _webdavPasswordPrefill.value?.fill('0')
@@ -84,10 +89,17 @@ internal class SettingsSyncController(
         _s3SecretKeyPrefill.value = null
     }
 
+    /** ISSUE-P2-01：用户开始编辑 AccessKey 后终结预填通道生命周期（语义同上） */
+    fun clearS3AccessKeyPrefill() {
+        _s3AccessKeyPrefill.value?.fill('0')
+        _s3AccessKeyPrefill.value = null
+    }
+
     /**
      * Wave 15 整改：凭据恢复改走 CharArray 一次性预填通道——解密出的密码/SecretKey
      * 不再以 String 驻留 syncStateFlow；WebDAV 密码与 S3 SecretKey 经预填通道下发至
-     * SecurePasswordField，AccessKey ID 属标识符（随请求头明文传输）保留 String 投影。
+     * SecurePasswordField。ISSUE-P2-01：S3 AccessKey ID 亦经独立 CharArray 预填通道下发，
+     * 不再以 String 投影驻留状态流。
      */
     fun restoreSyncCredentials() {
         val store = syncCredentialsStore
@@ -99,12 +111,10 @@ internal class SettingsSyncController(
             _webdavPasswordPrefill.value = cfg.password
         }
         savedS3?.let { cfg ->
+            _s3AccessKeyPrefill.value?.fill('0')
+            _s3AccessKeyPrefill.value = cfg.accessKey
             _s3SecretKeyPrefill.value?.fill('0')
             _s3SecretKeyPrefill.value = cfg.secretKey
-        }
-        // AccessKey ID 转 String 投影后擦除 CharArray 原件（标识符边界，非机密）
-        val s3AccessKeyText = savedS3?.accessKey?.let { chars ->
-            String(chars).also { chars.fill('0') }
         }
         syncStateFlow.update { cur ->
             cur.copy(
@@ -115,7 +125,6 @@ internal class SettingsSyncController(
                 s3Endpoint = savedS3?.endpoint ?: cur.s3Endpoint,
                 s3Bucket = savedS3?.bucket ?: cur.s3Bucket,
                 s3Region = savedS3?.region ?: cur.s3Region,
-                s3AccessKey = s3AccessKeyText ?: cur.s3AccessKey,
                 s3ObjectKey = savedS3?.objectKey ?: cur.s3ObjectKey,
                 s3UsePathStyle = savedS3?.usePathStyle ?: cur.s3UsePathStyle
             )
@@ -171,13 +180,14 @@ internal class SettingsSyncController(
 
     /**
      * Wave 15 整改：SecretKey 以 [CharArray] 借用语义提交（本方法消费后立即擦除），明文不再回写状态流；
-     * AccessKey ID 属标识符保留 String 参数。返回保存结果（语义同 [updateWebDavConfig]）。
+     * ISSUE-P2-01：AccessKey ID 亦改为 [CharArray] 借用语义（消费后即擦除，不再驻留状态流）。
+     * 返回保存结果（语义同 [updateWebDavConfig]）。
      */
     fun updateS3Config(
         endpoint: String,
         bucket: String,
         region: String,
-        accessKey: String,
+        accessKey: CharArray,
         secretKey: CharArray,
         objectKey: String,
         usePathStyle: Boolean = syncStateFlow.value.s3UsePathStyle
@@ -188,13 +198,15 @@ internal class SettingsSyncController(
             syncStateFlow.update {
                 it.copy(syncFeedbackMessage = UiMessage(R.string.sync_error_https_required, listOf("S3")))
             }
+            accessKey.fill('0')
             secretKey.fill('0')
             return false
         }
-        // AccessKey ID 属标识符：转 CharArray 提交（存储库封印后即擦除），SecretKey 借用语义直达
+        // AccessKey ID 与 SecretKey 均为借用语义：存储库封印后由库内统一擦除，此处兜底再擦一次
         val saved = syncCredentialsStore.saveS3Config(
-            normalizedEndpoint, bucket, region, accessKey.toCharArray(), secretKey, objectKey, usePathStyle
+            normalizedEndpoint, bucket, region, accessKey, secretKey, objectKey, usePathStyle
         )
+        accessKey.fill('0')
         secretKey.fill('0')
         if (!saved) {
             syncStateFlow.update {
@@ -207,11 +219,13 @@ internal class SettingsSyncController(
                 s3Endpoint = normalizedEndpoint,
                 s3Bucket = bucket,
                 s3Region = region,
-                s3AccessKey = accessKey,
                 s3ObjectKey = objectKey,
                 s3UsePathStyle = usePathStyle
             )
         }
+        // 保存成功后旧预填通道失效（最新凭据已由存储库持有，重进页面将重新恢复）
+        _s3AccessKeyPrefill.value?.fill('0')
+        _s3AccessKeyPrefill.value = null
         _s3SecretKeyPrefill.value?.fill('0')
         _s3SecretKeyPrefill.value = null
         return true

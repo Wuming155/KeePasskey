@@ -20,6 +20,7 @@
    - [2.9 主密码解锁失败节流与失败态清零（P1-04）](#29-主密码解锁失败节流与失败态清零p1-04)
    - [2.10 同步凭据认证绑定与 S3 密钥内存治理（P1-06）](#210-同步凭据认证绑定与-s3-密钥内存治理p1-06)
    - [2.11 Argon2 原生内核 C→Rust 迁移（P2-14）](#211-argon2-原生内核-crust-迁移p2-14)
+   - [2.12 S3 AccessKey 在 SettingsUiState 中的 String 留存改造（P2-01）](#212-s3-accesskey-在-settingsuistate-中的-string-留存改造p2-01)
 
 ---
 
@@ -481,3 +482,40 @@
     - 互操作：宿主原生路径复现 libargon2（C 参考实现）预计算基准 `4423de68…`（`Argon2InteropDiagnosticTest`）。
     - 供应链：`cargo deny check licenses bans sources` → **bans ok, licenses ok, sources ok**（仅「白名单许可未出现」
       级 warning）；`advisories` 子检查需联网拉取 rustsec/advisory-db，本环境 github 连接被重置未能执行，已并入 ISSUE-P3-09。
+
+---
+
+### 2.12 S3 AccessKey 在 SettingsUiState 中的 String 留存改造（P2-01）
+
+> 来源：ISSUE-P2-01（P2-18 残余）。整改依据：敏感数据治理铁律（凭据类字段避免在长期驻留的 UI 状态流中明文驻留）。
+
+- **ISSUE-P2-01（S3 AccessKey String 留存改造）**：已完成（2026-09-10）。
+  - **缺陷 / 动机**：WebDAV 密码与 S3 SecretKey 已于 Wave 15 改走 `CharArray?` 一次性预填通道，
+    但 S3 `accessKey` 仍在 `SettingsUiState` / `SettingsSyncController.SyncUiState` 中以不可变 `String`
+    长期驻留 StateFlow（凭据恢复后直至 ViewModel 销毁才释放），违背敏感数据治理铁律。
+  - **整改（完全对齐 Wave 15 既有预填通道模式）**：
+    1. `SettingsSyncController`：`SyncUiState` 移除 `s3AccessKey: String` 字段；新增
+       `_s3AccessKeyPrefill` / `s3AccessKeyPrefill` CharArray 一次性预填通道与 `clearS3AccessKeyPrefill()`；
+       `restoreSyncCredentials()` 将 `cfg.accessKey`（CharArray）直接下发预填通道，
+       删除原「转 String 投影」路径；`updateS3Config()` 的 `accessKey` 参数改为 `CharArray` 借用语义
+       （https 拒绝分支即时 `fill('0')`，存储库封印后兜底再擦一次；保存成功后与 SecretKey 通道一并终结）；
+    2. `SettingsViewModel`：透传 `s3AccessKeyPrefill` StateFlow 与 `clearS3AccessKeyPrefill()`；
+       `updateS3Config` 签名同步改为 CharArray 借用；`onCleared()` 销毁时擦除 AccessKey 预填通道；
+       uiState 映射移除 `s3AccessKey`；
+    3. `SettingsUiState`：移除 `s3AccessKey: String` 字段（UiState/StateFlow 不再有任何 AccessKey 明文驻留点）；
+    4. UI 侧（`CloudSyncScreen` / `S3ConfigFields` / `WebDavSyncScreen` / `KeePasskeyApp`）：
+       AccessKey ID 输入改走 `SecurePasswordField`（显示用 String 仅存活于组件内部，离场 DisposableEffect
+       与保存成功路径均清零本地 CharArray），既有 AccessKey 经 `s3AccessKeyPrefill` 一次性预填下发
+       （不触发脏标记），用户开始编辑时经 `onS3AccessKeyEdited` 终结预填通道生命周期。
+  - **语义说明**：AccessKey ID 虽随请求头明文传输属标识符，但作为云存储凭据对仍按凭据治理；
+    输入框默认圆点遮掩并提供可见性切换（与 SecretKey 输入一致），不影响正常配置读取与保存。
+  - **涉及文件**：
+    - `app/src/main/java/com/keepasskey/app/ui/screens/settings/SettingsSyncController.kt`
+    - `app/src/main/java/com/keepasskey/app/ui/screens/settings/SettingsViewModel.kt`
+    - `app/src/main/java/com/keepasskey/app/ui/screens/settings/SettingsUiState.kt`
+    - `app/src/main/java/com/keepasskey/app/ui/screens/settings/subscreens/CloudSyncScreen.kt`
+    - `app/src/main/java/com/keepasskey/app/ui/screens/settings/subscreens/CloudSyncComponents.kt`（`S3ConfigFields`）
+    - `app/src/main/java/com/keepasskey/app/ui/screens/settings/subscreens/WebDavSyncScreen.kt`
+    - `app/src/main/java/com/keepasskey/app/ui/KeePasskeyApp.kt`
+  - **测试证据**：`./gradlew.bat test` 全绿（app 222 例重跑通过 / 0 失败，其余模块 up-to-date 基线不变，
+    全仓 627 例 0 失败）；凭据存储层 CharArray 借用语义与往返由既有 `SyncCredentialsStoreTest` 锁定。

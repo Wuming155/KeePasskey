@@ -262,8 +262,12 @@ internal fun S3ConfigFields(
     onBucketChange: (String) -> Unit,
     region: String,
     onRegionChange: (String) -> Unit,
-    accessKey: String,
-    onAccessKeyChange: (String) -> Unit,
+    // ISSUE-P2-01：AccessKey ID 改走 SecurePasswordField——显示用 String 仅存活于组件内部，
+    // CharArray 直达本地状态；既有 AccessKey 经预填通道一次性下发（不触发脏标记）
+    isAccessKeyVisible: Boolean,
+    onToggleAccessKeyVisibility: () -> Unit,
+    accessKeyPrefill: CharArray?,
+    onAccessKeyCharsChange: (CharArray) -> Unit,
     isSecretKeyVisible: Boolean,
     onToggleSecretKeyVisibility: () -> Unit,
     secretKeyPrefill: CharArray?,
@@ -307,13 +311,15 @@ internal fun S3ConfigFields(
         )
     }
 
-    OutlinedTextField(
-        value = accessKey,
-        onValueChange = onAccessKeyChange,
-        label = { Text("Access Key ID") },
-        leadingIcon = { Icon(Icons.Default.VpnKey, contentDescription = null, modifier = Modifier.size(20.dp)) },
-        singleLine = true,
-        shape = RoundedCornerShape(12.dp),
+    // ISSUE-P2-01：AccessKey ID 输入走 SecurePasswordField（语义同 SecretKey）
+    SecurePasswordField(
+        label = "Access Key ID",
+        onPasswordChanged = onAccessKeyCharsChange,
+        isPasswordVisible = isAccessKeyVisible,
+        onToggleVisibility = onToggleAccessKeyVisibility,
+        initialPassword = accessKeyPrefill,
+        initialKey = accessKeyPrefill,
+        leadingIcon = Icons.Default.VpnKey,
         modifier = Modifier.fillMaxWidth()
     )
 

@@ -23,25 +23,7 @@
 
 ---
 
-## P2 中危缺陷与协议/测试缺口（14 项）
-
-### ISSUE-P2-01 (P2-18 残余): S3 AccessKey 在 SettingsUiState 中的 String 留存改造
-- **优先级**：P2（内存敏感度）
-- **分类**：敏感数据治理
-- **背景与现象**：
-  WebDAV / S3 的密码与 SecretKey 已改用 `CharArray?` 一次性预填通道；但 S3 `accessKey` 在 `SettingsUiState.kt` 中仍以不可变 `String` 留存。
-- **整改依据**：
-  敏感数据治理铁律（凭据类字段避免在长期驻留的 UI 状态流中明文驻留）。
-- **涉及核心文件**：
-  - `app/src/main/java/com/keepasskey/app/ui/settings/SettingsUiState.kt`
-  - `app/src/main/java/com/keepasskey/app/ui/settings/SettingsViewModel.kt`
-  - `app/src/main/java/com/keepasskey/app/ui/settings/CloudSyncScreen.kt`
-- **验收标准**：
-  1. `SettingsUiState` 移除长期持有的明文 accessKey String，改用预填通道或 CharArray 闭环；
-  2. ViewModel 保存时即时清空敏感输入；
-  3. 设置页 S3 配置读取与保存回归正常。
-
----
+## P2 中危缺陷与协议/测试缺口（12 项）
 
 ### ISSUE-P2-02 (P2-33 残余): Passkey 注册的完整 DAL 远程资产声明校验
 - **优先级**：P2（安全增强）
