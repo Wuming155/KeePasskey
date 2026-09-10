@@ -376,6 +376,8 @@ fun KeePasskeyApp() {
                     val exportFeedback by settingsViewModel.exportFeedback.collectAsStateWithLifecycle()
                     // ISSUE-P3-19：明文导入状态流（Idle / Parsing / Done / Failed）
                     val importState by settingsViewModel.importState.collectAsStateWithLifecycle()
+                    // ISSUE-P3-20：子库挂载状态流（真实挂载记录 + 运行时状态 + 操作反馈）
+                    val childDatabaseState by settingsViewModel.childDatabaseState.collectAsStateWithLifecycle()
                     DatabaseSettingsScreen(
                         uiState = settingsState,
                         onBackClick = { navController.popBackStack() },
@@ -398,7 +400,13 @@ fun KeePasskeyApp() {
                         // ISSUE-P3-19：导入链路（选源 → SAF 选文件 → 控制器解析/落库 → 报告对话框）
                         importState = importState,
                         onImportFileSelected = settingsViewModel::startImport,
-                        onImportReportDismiss = settingsViewModel::dismissImportReport
+                        onImportReportDismiss = settingsViewModel::dismissImportReport,
+                        // ISSUE-P3-20：子库挂载链路（真实挂载 / 凭据重录解锁 / 卸载）
+                        childDatabaseState = childDatabaseState,
+                        onMountChildDatabase = settingsViewModel::mountChildDatabase,
+                        onUnlockChildDatabase = settingsViewModel::unlockChildDatabase,
+                        onUnmountChildDatabase = settingsViewModel::unmountChildDatabase,
+                        onChildDatabaseFeedbackDismiss = settingsViewModel::dismissChildDatabaseFeedback
                     )
                 }
 

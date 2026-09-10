@@ -54,63 +54,30 @@
 ## P3 低危问题、特性接线与体验优化（4 项）
 
 > **背景**：P3 残余批次原 **12 项**（ISSUE-P3-17 ~ P3-28）已于 **2026-09-10** 整体整改。
-> 其中 **9 项完整闭环并归档**（P3-17 / 18 / 19 / 21 / 22 / **25** / 26 / 27 / 28，含逐项代码证据与 15 条过程缺陷留痕），
-> 见 [RESOLVED_LOG.md](RESOLVED_LOG.md) **§4**；**3 项部分达标**（P3-20 / P3-23 / P3-24）就地更新后保留于本节，
-> 另有 1 项由本轮全仓扫描**新登记**（**ISSUE-P3-29**，见下）。
+> 其中 **10 项完整闭环并归档**（P3-17 / 18 / 19 / **20** / 21 / 22 / 25 / 26 / 27 / 28，含逐项代码证据与 15 条过程缺陷留痕），
+> 见 [RESOLVED_LOG.md](RESOLVED_LOG.md) **§4**；**2 项部分达标**（P3-23 / P3-24 —— 均为**本环境物理不可达**的
+> 验证类条目：arm64 设备与 GitHub runner）就地更新后保留于本节；
+> 另有 **2 项新登记**（**ISSUE-P3-29** 全仓超阈值债务、**ISSUE-P3-30** 子库条目投影未并入根库列表）。
 > 归档门禁证据：`.\gradlew.bat test --rerun-tasks --max-workers=1 --continue` → **BUILD SUCCESSFUL**，
-> **1163 例 / 1150 通过 / 0 失败 / 13 跳过**（基线 921 → **+242 例，零退化**）；`assembleDebug` 通过。
+> **1189 例 / 1176 通过 / 0 失败 / 13 跳过**（基线 921 → **+268 例，零退化**）；`assembleDebug` 通过。
 
 ### 前提复核记录（2026-09-10，依「条目维护规则」第 2 条）
 
 | 条目 | 正文前提 | 核实方式 | 结论 |
 |:--:|---|---|:--:|
-| P3-20 | `childDatabasesCount` 硬编码 0；`ChildDatabaseDialog.onSelectFile` 无落地 | 读 `SettingsViewModel.kt:133`、`DatabaseSettingsDialogs.kt:198-239` | ✅ 成立（**两处至今未改**，故标识如实保留） |
 | P3-23 | 语料未入库；`database` 无 `androidTest` 源集 | 目录枚举 | ⚠️ **前半仍成立；后半已不成立**（`database/src/androidTest/` 已建立并接线） |
 | P3-24 | CI 从未真实运行 | 只读探测 + 联网核实 | ✅ 成立（**三 job 仍未真实执行**） |
-| P3-29 | （本轮新登记，前提即「全仓存在超阈值文件」） | `(Get-Content).Count` 全仓扫描 | ✅ 成立（**33 个生产文件 > 400 行**，清单见该条目） |
+| P3-29 | （新登记，前提即「全仓存在超阈值文件」） | `(Get-Content).Count` 全仓扫描 | ✅ 成立（**35 个生产文件 > 400 行**，清单见该条目） |
+| P3-30 | （新登记，前提即「`projectedEntries` 无消费方却已对外声明」） | 全仓 `grep projectedEntries app/src` | ✅ 成立（**生产消费方为零**，仅核心层自身与单测引用） |
 
+> **ISSUE-P3-20 已闭环**（子库挂载的 **UI 接线**完成：`childDatabasesCount` 去硬编码并接真实 `mountedCount`；
+> `ChildDatabaseDialog` 成为真实入口并调用核心层 `mount`/`open`/`unmount`；两条失真文案随能力上线删除；
+> 新增 26 例单测），归档见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §4.2。
+> 其接线过程中**由执行者如实发现的「过度声明」残余面**已作为 **ISSUE-P3-30** 另行登记。
+>
 > **ISSUE-P3-25 已闭环**（3 个点名文件全部降至阈值内：`SyncCoordinator` 965→254、`KdbxXmlGroupReader` 407→218、
-> `UnlockViewModel` 979→396），归档见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §4.2。
-> 但其「全仓扫描」暴露的整体债务已作为 **ISSUE-P3-29** 另行登记，**不代表巨型类问题已解决**。
-
----
-
-### ISSUE-P3-20 (P3-03 残余): 子库挂载 —— **仅剩 UI 接线**（核心层已完成）
-
-- **优先级**：P3（大特性收尾）
-- **核实时间点与核实方式（2026-09-10）**：经 `Test-Path` / 读 `SettingsViewModel.kt:133` /
-  `DatabaseSettingsDialogs.kt:198-239` 核实两处 UI 缺口仍在；经目录枚举核实
-  `app/src/main/java/com/keepasskey/app/data/childdb/` 6 个生产文件 + `di/ChildDatabaseModule.kt`
-  与 5 个测试类（37 例）**已落盘且经门禁编译通过**。
-- **本批次已完成（核心层，勿重做）**：
-  1. 数据模型 / 挂载注册表（非敏感元数据，独立偏好文件 `keepasskey_child_databases`）/ 凭据存储
-     （独立通道 + 闭包返回即清零，强于 `DatabaseSession.useCredentials`）/ 只读子库会话 /
-     流来源 / 会话管理器（`@Singleton`）；
-  2. **凭据隔离**：与根库 `passwordCache`/`keyFileCache` 零共享；`clearAll()` 统一清零；
-     会话世代号 + 根库锁定世代防「锁定后才解密完」的凭据回写竞态；
-  3. **锁库联动**：经 `DatabaseSession.addLockObserver`（与 `SyncCacheEvictor` **同一熔断触发点**），
-     覆盖手动锁定 / 熄屏熔断 / 后台超时 / 切换库；
-  4. **同步隔离**：子库来源绝不写库列表偏好、不改 `currentFile`，由结构断言守护；
-  5. **挂载点抽象有意降级为应用侧注册表**（理由与收敛路径已写入 KDoc：来源是设备本地量，
-     写进会同步的根库会产生悬挂挂载点；且挂载时根库可能处于锁定/只读态）。
-- **待接线（本条目剩余全部工作）**：
-  1. `SettingsViewModel`：注入 `ChildDatabaseSessionManager`，把 `mountedCount: StateFlow<Int>`
-     并入既有 `combine(...)`，替换 `SettingsViewModel.kt:133` 的 `childDatabasesCount = 0`
-     （语义 = **已挂载数**，非「已解锁数」；后者用 `mountStates.count { it.value is Opened }`）；
-  2. `ChildDatabaseDialog.onSelectFile`：接 `mount(alias, sourceUri, passwordChars, keyFileData)`，
-     并**在 SAF 选择后立即申请持久化读授权**（否则进程重启后如实报 `SOURCE_UNAVAILABLE`）；
-     密钥文件字节复用 `ui/screens/unlock/KeyFileAccess`（`SafKeyFileAccess`）；
-  3. 挂载/卸载/重新解锁的状态 UI（`ChildDatabaseMountState` = `Closed` / `Opening` / `Opened` /
-     `CredentialRejected` / `SourceUnavailable` / `Failed(reason)`），失败分型经
-     `ChildDatabaseFailureReason.of(error)` 自动穿透 cause 链；
-  4. 新增 23 条 strings.xml 资源，并**改写或删除两条已失真文案**：
-     `dbset_child_db_reserved_note`（`strings.xml:965`）、`dbset_child_db_not_supported`（`:486`，
-     同时 `DatabaseSettingsScreen.kt:248` 的 `UiMessage` 需替换为真实挂载反馈）。
-     资源清单见 P3-20 交付报告（别名/密码标签、挂载/卸载/解锁按钮、5 种状态、12 种错误分型）。
-- **诚实性红线**：在 UI 真正可挂载之前，**必须保留** `dbset_child_db_reserved_note` 标识——
-  「未接线却移除标识」与「未实现却显示可用」同属不诚实。
-- **验收标准**：`childDatabasesCount` 显示真实挂载数；挂载/卸载/凭据失效在 UI 上可观察；
-  移除两条失真文案；补 UI 层测试。
+> `UnlockViewModel` 979→396），但其「全仓扫描」暴露的整体债务已作为 **ISSUE-P3-29** 登记，
+> **不代表巨型类问题已解决**。
 
 ---
 
@@ -186,7 +153,7 @@
 - **优先级**：P3（代码整洁度）
 - **核实时间点与核实方式（2026-09-10）**：ISSUE-P3-25 整改完成后，对全仓生产源集执行
   `Get-ChildItem -Recurse -Include *.kt -Path {app,database,sync,core,crypto}/src/main/java`
-  并逐文件 `(Get-Content).Count` 统计，筛出 `> 400` 行者。**共 33 个文件超标**。
+  并逐文件 `(Get-Content).Count` 统计，筛出 `> 400` 行者。**共 35 个生产文件超标**（P3-20 接线令 2 个文件新增越界）。
 - **为何单独登记**：ISSUE-P3-25 的正文只点名了 **3 个文件**（`SyncCoordinator` / `UnlockViewModel` /
   `KdbxXmlGroupReader`），该 3 项均已降至阈值内并归档（见 `RESOLVED_LOG.md` §4.2）。
   但全仓扫描显示**超标是普遍性既有债务**，而非 3 个孤例——按「严禁只记聊天或脑中」纪律就地登记，
@@ -198,7 +165,8 @@
   |---:|---|---|
   | 1090 | `app/.../data/repository/RealVaultRepository.kt` | 既有 |
   | 968 | `app/.../ui/screens/database/DatabasePickerScreen.kt` | 既有 |
-  | 902 | `app/.../ui/screens/settings/SettingsViewModel.kt` | 既有 879 + **本批次导入接线（+23）** |
+  | 1120 | `app/.../ui/screens/settings/SettingsViewModel.kt` | 既有 879 + **P3-19 导入接线（+23）** + **P3-20 子库 UI 接线（+218）** |
+  | 617 | `app/.../ui/screens/settings/subscreens/DatabaseSettingsDialogs.kt` | 既有 338 + **P3-20 子库对话框真实化（+279）** ← **本批次新致超标** |
   | 762 | `app/.../ui/screens/settings/subscreens/ThemeSettingsScreen.kt` | 既有 |
   | 731 | `app/.../ui/screens/vault/VaultListViewModel.kt` | 既有 641 + **本批次 4 个偏好派生量（+90）** |
   | 712 | `app/.../ui/screens/edit/EntryEditScreen.kt` | 既有 |
@@ -230,8 +198,12 @@
   | 417 | `app/.../ui/screens/vault/VaultListScreen.kt` | 既有 + **本批次接线** |
   | 401 | `app/.../ui/screens/generator/DicewareWordList.kt` | 既有（**数据表**，属「纯查表常量」，建议豁免并登记例外） |
 
-- **诚实说明**：上表 33 项中，**绝大多数属本批次开工前即已超标**；本批次新增逻辑刻意收敛为短方法，
-  仅令 4 个文件因必要接线而增长（已在上表逐项标注）。ISSUE-P3-25 的闭环**不**代表整体债务已清。
+- **诚实说明**：上表 35 项中，**绝大多数属本批次开工前即已超标**；本批次新增逻辑刻意收敛为短方法，
+  但**必要接线**仍令 6 个文件增长（已在上表逐项标注），其中 **`SettingsViewModel.kt`（1120）与
+  `DatabaseSettingsDialogs.kt`（617）是本批次新致超标**，优先级应高于纯既有债务。
+  ⚠️ **P3-20 接线执行者已如实登记**：其可写清单**不含新建生产文件**，故无法抽出
+  `SettingsChildDatabaseController`（与既有 5 个 `Settings*Controller` 同款）或 `subscreens/ChildDatabaseDialogs.kt`。
+  ISSUE-P3-25 的闭环**不**代表整体债务已清。
 - **验收标准（未来分批）**：
   1. 按「是否含真实逻辑」分级——纯数据/常量表（如 `DicewareWordList.kt`）建议**登记为例外**并说明理由；
   2. 其余按模块分批拆分（建议优先 `RealVaultRepository` / `DatabasePickerScreen` / `SettingsViewModel` /
@@ -239,3 +211,32 @@
   3. 每批拆分为**纯结构性**改动：`.\gradlew.bat test` 全绿且用例数不减（当前 **1159 例**）；
   4. 拆分后**逐条对照敏感数据清零点与公开 API 可见性**（沿用 P3-25 对 `UnlockViewModel` 的验证范式：
      公开 API 零丢失零新增 + 清零点逐一对照）。
+### ISSUE-P3-30 (P3-20 后续 · 接线中如实发现的过度声明): 子库条目投影尚未合并进根库列表
+
+- **优先级**：P3（功能完整性 / 拒绝过度声明）
+- **分类**：多库展示 / UI 接线
+- **核实时间点与核实方式（2026-09-10）**：ISSUE-P3-20 的 UI 接线工作在收口自查时发现——
+  经全仓 `grep projectedEntries app/src`，该 Flow 的**生产消费方为零**（仅 `ChildDatabaseSessionManager`
+  自身与 `ChildDatabaseSessionManagerTest` 引用）；而对话框原说明文案
+  `dbset_child_db_dialog_desc` 原文写作「**挂载的子密码库将以只读分组形式出现在当前库中**」。
+  即：**挂载、真实解密、条目计数、状态流转、解锁/卸载全部为真，唯独「出现在当前库中」未接线**。
+- **本批次已做的诚实化处置**：该文案**已就地改写**为与实现一致——
+  「子库以独立凭据只读挂载：可查看条目数与解锁状态；**其条目暂未合并进当前库列表**」
+  （`values/strings.xml` / `values-en/strings.xml`）。同时删除两条随能力上线而失真的文案
+  `dbset_child_db_not_supported` 与 `dbset_child_db_reserved_note`（后者仅剩一处代码注释留痕）。
+- **仍未达成**：`ChildDatabaseSessionManager.projectedEntries`（`List<ChildDatabaseEntryProjection>`，
+  含 `mountId/mountAlias/entryUuid/title/username/url/notes/groupPath/tags/iconId/hasPassword`）
+  尚未接入 `VaultListViewModel` / `VaultListScreen` / 搜索 / 自动填充，故**子库条目在当前库中不可见**。
+- **施工要点（须先定案再动手）**：
+  1. **只读投影而非真实条目**：子库条目**不得**并入根库 `KdbxGroup`/`KdbxEntry` 对象树
+     （核心层已结构性保证此点，见 `ChildDatabaseSessionManager` KDoc 与同步隔离测试）；
+     根库列表需以**并列的只读数据源**呈现，任何编辑/删除入口都必须对投影条目 fail-closed 拒绝；
+  2. **同步与合并零交集**：投影条目**不得**进入 `SyncCoordinator` 的上传候选、`KdbxMerger` 的
+     UUID/墓碑语义、历史修订与回收站路径（否则会造成「根库保存时把子库条目写进根库」的数据事故）；
+  3. **锁库联动**：根库锁定时投影必须同步消失（核心层已终止子库会话并清零凭据，UI 只需停止展示）；
+  4. **搜索/自动填充**：子库条目是否参与全局搜索与自动填充须**显式裁决并写入 KDoc**——
+     若参与，需评估「子库未解锁时的检索降级」与凭据隔离边界；首版建议**不参与**并如实标注。
+- **验收标准**：① 已挂载且已解锁的子库条目在库列表中以其分组路径可见，且**编辑/删除入口被拒**；
+  ② 根库同步、合并、历史、回收站路径**零子库条目**（补结构断言）；
+  ③ 根库锁库后投影即时消失；④ 原「过度声明」文案无需再改（已诚实化）；
+  ⑤ 补单测覆盖投影装配、只读拒绝与锁库消失；⑥ `.\gradlew.bat test` 全绿且用例数不减。

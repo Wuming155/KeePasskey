@@ -481,9 +481,9 @@
     <string name="dbset_tpl_ssh">SSH 密钥</string>
     <string name="dbset_install_templates">立即安装</string>
     <string name="dbset_templates_installed">条目模板安装完成</string>
-    <string name="dbset_child_db_dialog_desc">挂载的子密码库将以只读分组形式出现在当前库中</string>
+    <string name="dbset_child_db_dialog_desc">子库以独立凭据只读挂载：可查看条目数与解锁状态；其条目暂未合并进当前库列表</string>
     <string name="dbset_child_db_mounted">子密码库挂载成功</string>
-    <string name="dbset_child_db_not_supported">子密码库挂载功能尚未实现</string>
+    <!-- ISSUE-P3-20：子库挂载已真实落地，「功能尚未实现」文案随之删除（零引用） -->
     <string name="dbset_child_db_select_file">选择 KDBX 文件</string>
     <string name="dbset_cd_modify">修改</string>
     <string name="dbset_export_dialog_title">导出密码库</string>
@@ -966,7 +966,9 @@
     <string name="autofill_totp_clip_label">TOTP 验证码</string>
     <string name="debug_verbose_depends">（需先开启「诊断日志」）</string>
     <string name="dbset_import_reserved_note">解析器预留，暂未生效：当前仅登记所选数据源，不会导入任何条目</string>
-    <string name="dbset_child_db_reserved_note">子库挂载预留，暂未生效：选择文件后不会挂载任何子库</string>
+    <!-- ISSUE-P3-20 收口（2026-09-10）：子库挂载已真实落地，两条失真文案随能力上线一并删除——
+         `dbset_child_db_not_supported`（「子密码库挂载功能尚未实现」，零引用）与
+         `dbset_child_db_reserved_note`（「预留，暂未生效」，仅剩一处代码注释留痕，无活渲染）。 -->
 
     <!-- ===== ISSUE-P3-18：通知通道与通知文案 ===== -->
     <!-- 硬约束（验收标准 4）：标题与正文一律为**固定通用文案**，严禁出现条目名、用户名、
@@ -1040,5 +1042,32 @@
     <!-- ===== ISSUE-P3-17：showKillAppOption 溢出菜单入口动作 ===== -->
     <!-- 原实现误用 sec_kill_app_title（「锁定时清杀进程内存」，语义不符），此处补齐专用动作文案 -->
     <string name="sec_kill_app_action">彻底退出应用</string>
+
+    <!-- ===== ISSUE-P3-20：子库挂载 UI（核心层已完成，本批次接线） ===== -->
+    <!-- 诚实性：凭据仅存内存、锁库即清零属**有意的安全语义**，文案须如实说明，不得表现为缺陷。 -->
+    <string name="dbset_child_db_alias_label">子库别名</string>
+    <string name="dbset_child_db_password_label">子库主密码</string>
+    <string name="dbset_child_db_credential_dialog_desc">子库凭据独立于当前库，仅存于内存；锁库后需重新输入</string>
+    <string name="dbset_child_db_btn_mount">挂载</string>
+    <string name="dbset_child_db_btn_unmount">卸载</string>
+    <string name="dbset_child_db_btn_unlock">解锁子库</string>
+    <string name="dbset_child_db_state_locked">未解锁</string>
+    <string name="dbset_child_db_state_rejected">凭据被拒</string>
+    <string name="dbset_child_db_state_unavailable">文件不可读</string>
+    <!-- %1$d = 已解锁子库的条目数 -->
+    <string name="dbset_child_db_opened_summary">已解锁，%1$d 条条目</string>
+    <string name="dbset_child_db_unmount_hint">卸载只解除关联，不删除子库文件</string>
+    <string name="dbset_child_db_err_invalid_alias">子库别名无效（1–64 个可见字符，不含控制字符）</string>
+    <string name="dbset_child_db_err_invalid_source">仅支持 content:// 或本地 .kdbx 文件</string>
+    <string name="dbset_child_db_err_duplicate">该文件已挂载</string>
+    <string name="dbset_child_db_err_mount_not_found">该子库未挂载</string>
+    <string name="dbset_child_db_err_credential_missing">需要重新输入子库凭据（锁定或重启后已清除）</string>
+    <string name="dbset_child_db_err_credential_rejected">子库主密码或密钥文件错误</string>
+    <string name="dbset_child_db_err_source_unavailable">无法读取子库文件（文件缺失或授权已撤销）</string>
+    <string name="dbset_child_db_err_corrupt">子库文件损坏或不是有效的 KDBX v4 文件</string>
+    <string name="dbset_child_db_err_unsupported_version">不支持的 KDBX 版本</string>
+    <string name="dbset_child_db_err_io">读取子库失败</string>
+    <string name="dbset_child_db_err_terminated">根库已锁定，本次操作已取消</string>
+    <string name="dbset_child_db_err_unknown">子库操作失败</string>
 
 </resources>

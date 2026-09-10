@@ -475,9 +475,9 @@
     <string name="dbset_tpl_ssh">SSH key</string>
     <string name="dbset_install_templates">Install now</string>
     <string name="dbset_templates_installed">Entry templates installed</string>
-    <string name="dbset_child_db_dialog_desc">Mounted child databases appear as read-only groups in the current database</string>
+    <string name="dbset_child_db_dialog_desc">Child databases are mounted read-only with their own credentials: entry count and unlock status are shown; their entries are not merged into the current database list yet</string>
     <string name="dbset_child_db_mounted">Child database mounted</string>
-    <string name="dbset_child_db_not_supported">Child database mounting is not implemented yet</string>
+    <!-- ISSUE-P3-20: mounting is implemented, so the "not implemented yet" string is removed (zero references) -->
     <string name="dbset_child_db_select_file">Choose a KDBX file</string>
     <string name="dbset_cd_modify">Modify</string>
     <string name="dbset_export_dialog_title">Export database</string>
@@ -900,7 +900,9 @@
     <string name="autofill_totp_clip_label">TOTP code</string>
     <string name="debug_verbose_depends"> (requires "Diagnostic log" to be enabled)</string>
     <string name="dbset_import_reserved_note">Parser reserved, not yet active: the selected source is only recorded, no entries are imported</string>
-    <string name="dbset_child_db_reserved_note">Child database mounting reserved, not yet active: selecting a file will not mount any child database</string>
+    <!-- ISSUE-P3-20 wrap-up (2026-09-10): child database mounting is real now, so the two
+         misleading strings are removed together with the capability landing:
+         `dbset_child_db_not_supported` and `dbset_child_db_reserved_note`. -->
 
     <!-- ===== ISSUE-P3-18: notification channels and notification copy ===== -->
     <!-- Hard constraint (acceptance 4): titles and bodies are FIXED generic text. Entry titles,
@@ -975,5 +977,33 @@
 
     <!-- ===== ISSUE-P3-17: overflow-menu action for showKillAppOption ===== -->
     <string name="sec_kill_app_action">Exit app completely</string>
+
+    <!-- ===== ISSUE-P3-20: child database mounting UI (core layer landed earlier) ===== -->
+    <!-- Honesty: credentials live in memory only and are cleared on lock. That is a deliberate
+         security semantic and the copy must say so rather than read like a defect. -->
+    <string name="dbset_child_db_alias_label">Child database alias</string>
+    <string name="dbset_child_db_password_label">Child database master password</string>
+    <string name="dbset_child_db_credential_dialog_desc">Child credentials are independent of the current vault and kept in memory only; they must be entered again after the vault locks</string>
+    <string name="dbset_child_db_btn_mount">Mount</string>
+    <string name="dbset_child_db_btn_unmount">Unmount</string>
+    <string name="dbset_child_db_btn_unlock">Unlock child database</string>
+    <string name="dbset_child_db_state_locked">Locked</string>
+    <string name="dbset_child_db_state_rejected">Credentials rejected</string>
+    <string name="dbset_child_db_state_unavailable">File unavailable</string>
+    <!-- %1$d = number of entries in the unlocked child database -->
+    <string name="dbset_child_db_opened_summary">Unlocked, %1$d entries</string>
+    <string name="dbset_child_db_unmount_hint">Unmounting only removes the link; the child database file is left untouched</string>
+    <string name="dbset_child_db_err_invalid_alias">Invalid child database alias (1-64 visible characters, no control characters)</string>
+    <string name="dbset_child_db_err_invalid_source">Only content:// or local .kdbx files are supported</string>
+    <string name="dbset_child_db_err_duplicate">This file is already mounted</string>
+    <string name="dbset_child_db_err_mount_not_found">Child database is not mounted</string>
+    <string name="dbset_child_db_err_credential_missing">Child credentials are required again (cleared on lock or restart)</string>
+    <string name="dbset_child_db_err_credential_rejected">Wrong child database master password or key file</string>
+    <string name="dbset_child_db_err_source_unavailable">Cannot read the child database file (missing, or the permission was revoked)</string>
+    <string name="dbset_child_db_err_corrupt">Child database file is corrupt or not a valid KDBX v4 file</string>
+    <string name="dbset_child_db_err_unsupported_version">Unsupported KDBX version</string>
+    <string name="dbset_child_db_err_io">Failed to read the child database</string>
+    <string name="dbset_child_db_err_terminated">Root vault locked; the operation was cancelled</string>
+    <string name="dbset_child_db_err_unknown">Child database operation failed</string>
 
 </resources>

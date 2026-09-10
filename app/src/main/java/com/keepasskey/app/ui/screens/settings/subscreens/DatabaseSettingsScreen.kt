@@ -36,6 +36,7 @@ import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.model.resolveText
 import com.keepasskey.app.ui.screens.importer.ImportReportDialog
 import com.keepasskey.app.ui.screens.importer.ImportUiState
+import com.keepasskey.app.ui.screens.settings.ChildDatabaseUiState
 import com.keepasskey.app.ui.screens.settings.ExportConfirmationPolicy
 import com.keepasskey.app.ui.screens.settings.KdfBenchmarkUiState
 import com.keepasskey.app.ui.screens.settings.SettingsUiState
@@ -69,6 +70,23 @@ fun DatabaseSettingsScreen(
     importState: ImportUiState = ImportUiState.Idle,
     onImportFileSelected: (ImportSource, Uri) -> Unit = { _, _ -> },
     onImportReportDismiss: () -> Unit = {},
+    // ISSUE-P3-20：子库挂载（核心层 ChildDatabaseSessionManager 已落地，本屏为真实入口）。
+    // 状态与动作全部上抬自 SettingsViewModel；本屏只维护 SAF 选择结果与表单开关，
+    // 不含任何解密/挂载业务逻辑。
+    childDatabaseState: ChildDatabaseUiState = ChildDatabaseUiState(),
+    onMountChildDatabase: (
+        alias: String,
+        sourceUri: String,
+        passwordChars: CharArray,
+        keyFileUri: String?
+    ) -> Unit = { _, _, _, _ -> },
+    onUnlockChildDatabase: (
+        mountId: String,
+        passwordChars: CharArray,
+        keyFileUri: String?
+    ) -> Unit = { _, _, _ -> },
+    onUnmountChildDatabase: (mountId: String) -> Unit = {},
+    onChildDatabaseFeedbackDismiss: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var showCipherDialog by remember { mutableStateOf(false) }
@@ -78,10 +96,14 @@ fun DatabaseSettingsScreen(
     var showChildDbDialog by remember { mutableStateOf(false) }
     var showExportDialog by remember { mutableStateOf(false) }
     var showImportDialog by remember { mutableStateOf(false) }
-    var operationFeedback by remember { mutableStateOf<UiMessage?>(null) }
     // ISSUE-P2-10 (ZT-15)：明文 XML 导出的待确认目标（SAF 选定后、写盘前强制二次确认）
     var pendingPlaintextXmlUri by remember { mutableStateOf<Uri?>(null) }
     var showPlaintextXmlConfirm by remember { mutableStateOf(false) }
+    // ISSUE-P3-20：子库 SAF 选择结果（非敏感元数据）+ 待解锁的挂载身份
+    var childDbSourceUri by remember { mutableStateOf<String?>(null) }
+    var childDbMountKeyFileUri by remember { mutableStateOf<String?>(null) }
+    var childDbUnlockKeyFileUri by remember { mutableStateOf<String?>(null) }
+    var childDbUnlockTargetId by remember { mutableStateOf<String?>(null) }
 
     // TASK-13 整改：SAF CreateDocument 真实另存为（此前导出/密钥文件仅弹假成功提示）
     val exportKdbxLauncher = rememberLauncherForActivityResult(
@@ -99,6 +121,18 @@ fun DatabaseSettingsScreen(
     val exportKeyFileLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("application/octet-stream")
     ) { uri -> uri?.let(onExportKeyFile) }
+
+    // ISSUE-P3-20：子库来源与（可选）密钥文件的 SAF 选择器。
+    // 选择器置于本屏而非对话框内：对话框在 SAF 交互期间保持组合，表单输入（别名/主密码）因此不丢失。
+    val childDbSourceLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri -> uri?.let { childDbSourceUri = it.toString() } }
+    val childDbMountKeyFileLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri -> uri?.let { childDbMountKeyFileUri = it.toString() } }
+    val childDbUnlockKeyFileLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri -> uri?.let { childDbUnlockKeyFileUri = it.toString() } }
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -187,12 +221,6 @@ fun DatabaseSettingsScreen(
                 )
             }
 
-            operationFeedback?.let { feedback ->
-                item {
-                    DatabaseFeedbackItem(message = feedback, isError = false)
-                }
-            }
-
             // TASK-13 整改：导出/模板动作结果反馈（点击清除），真实动作的结果如实上浮
             exportFeedback?.let { feedback ->
                 item {
@@ -247,15 +275,45 @@ fun DatabaseSettingsScreen(
         )
     }
 
-    // 对话框 5：子数据库挂载
+    // 对话框 5：子数据库挂载（ISSUE-P3-20：真实挂载/解锁/卸载；原「尚未实现」假提示已移除）
     if (showChildDbDialog) {
         ChildDatabaseDialog(
-            onSelectFile = {
-                // TASK-13 整改：如实告知未实现——子库挂载需独立功能开发，
-                // 不再谎报「挂载成功」（登记 STATUS TASK-43 预留功能清单）
-                operationFeedback = UiMessage(R.string.dbset_child_db_not_supported)
+            state = childDatabaseState,
+            selectedSourceUri = childDbSourceUri,
+            selectedKeyFileUri = childDbMountKeyFileUri,
+            onPickSource = { childDbSourceLauncher.launch(arrayOf("*/*")) },
+            onPickKeyFile = { childDbMountKeyFileLauncher.launch(arrayOf("*/*")) },
+            onMount = onMountChildDatabase,
+            onUnlockRequest = { mountId -> childDbUnlockTargetId = mountId },
+            onUnmount = onUnmountChildDatabase,
+            onDismiss = {
+                showChildDbDialog = false
+                childDbSourceUri = null
+                childDbMountKeyFileUri = null
+                onChildDatabaseFeedbackDismiss()
+            }
+        )
+    }
+
+    // 对话框 5b：子库凭据补录（凭据被清零后重新解锁；不卸载即重开）
+    val unlockTargetId = childDbUnlockTargetId
+    if (unlockTargetId != null) {
+        ChildDatabaseCredentialDialog(
+            alias = childDatabaseState.mounts
+                .firstOrNull { it.mountId == unlockTargetId }
+                ?.alias
+                .orEmpty(),
+            selectedKeyFileUri = childDbUnlockKeyFileUri,
+            onPickKeyFile = { childDbUnlockKeyFileLauncher.launch(arrayOf("*/*")) },
+            onConfirm = { passwordChars, keyFileUri ->
+                onUnlockChildDatabase(unlockTargetId, passwordChars, keyFileUri)
+                childDbUnlockTargetId = null
+                childDbUnlockKeyFileUri = null
             },
-            onDismiss = { showChildDbDialog = false }
+            onDismiss = {
+                childDbUnlockTargetId = null
+                childDbUnlockKeyFileUri = null
+            }
         )
     }
 

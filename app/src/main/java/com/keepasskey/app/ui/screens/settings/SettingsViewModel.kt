@@ -6,6 +6,9 @@ import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.keepasskey.app.R
+import com.keepasskey.app.data.childdb.ChildDatabaseLimits
+import com.keepasskey.app.data.childdb.ChildDatabaseMountState
+import com.keepasskey.app.data.childdb.ChildDatabaseSessionManager
 import com.keepasskey.app.data.importer.ImportSource
 import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.app.data.repository.SettingsRepository
@@ -18,7 +21,10 @@ import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.screens.importer.ImportUiState
 import com.keepasskey.app.ui.screens.importer.VaultImportController
+import com.keepasskey.app.ui.screens.unlock.KeyFileAccess
+import com.keepasskey.app.ui.screens.unlock.KeyFileReadResult
 import com.keepasskey.app.ui.theme.AppThemeMode
+import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.crypto.kdf.KdfBenchmark
 import com.keepasskey.database.session.DatabaseSession
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -67,7 +73,13 @@ class SettingsViewModel @Inject constructor(
     // ISSUE-P3-19（ZT-43d）：明文导入控制器（@Singleton，自带 StateFlow，内部完成
     // 「SAF 读字节 → 解析 → 落库 → 出报告」全链路）。允许为 null 仅用于既有单测注入；
     // 缺失时 [importState] 恒为 Idle —— 即不呈现任何导入反馈，绝不产生假进度/假回执。
-    private val vaultImportController: VaultImportController? = null
+    private val vaultImportController: VaultImportController? = null,
+    // ISSUE-P3-20：子库挂载会话管理器（@Singleton，核心层已完成）。允许为 null 仅用于既有
+    // 单测注入；缺失时 `childDatabasesCount` 回落 0（**不谎报**），子库对话框如实禁用全部控件。
+    private val childDatabaseSessionManager: ChildDatabaseSessionManager? = null,
+    // ISSUE-P3-20：SAF 持久化读授权 + 密钥文件字节读取通道（复用解锁特性既有契约，
+    // 生产 DI 经 KeyFileAccessModule 注入 SafKeyFileAccess）。允许为 null 仅用于既有单测注入。
+    private val keyFileAccess: KeyFileAccess? = null
 ) : ViewModel() {
 
     companion object {
@@ -75,6 +87,13 @@ class SettingsViewModel @Inject constructor(
 
         /** ActivityManager 不可得时的兜底应用堆上限（MiB） */
         private const val DEFAULT_HEAP_MB = 128
+
+        /** UI 状态流停止订阅后的保活窗口（毫秒）：与既有 [uiState] 保持一致 */
+        private const val STATE_SUBSCRIBE_TIMEOUT_MILLIS = 5_000L
+
+        /** 敏感序列擦除填充值（项目既有约定：`CharArray` 填 `'0'`、`ByteArray` 填 `0`） */
+        private const val ZERO_CHAR: Char = '0'
+        private const val ZERO_BYTE: Byte = 0
 
         // 标记当前应用进程生命周期内是否已执行过冷启动同步检测
         // 当软件被彻底杀死重启时，该静态字段重新变为 false，从而再次自动触发云端同步
@@ -102,6 +121,200 @@ class SettingsViewModel @Inject constructor(
     fun dismissImportReport() {
         vaultImportController?.reset()
     }
+
+    // ===================== ISSUE-P3-20：子库挂载（UI 接线） =====================
+
+    /**
+     * 已挂载子库计数（[SettingsUiState.childDatabasesCount] 的**真实数据源**），
+     * 替代原 `DatabaseConfigUiState` 中硬编码的 `0`。
+     *
+     * 语义 = **已挂载**（注册表长度，含未解锁者），非「已解锁数」；控制器缺失时恒为 0
+     * —— 回落而非谎报（不注入控制器时 UI 也同时被禁用，两者自洽）。
+     */
+    private val childDatabaseCountFlow: Flow<Int> =
+        childDatabaseSessionManager?.mountedCount ?: MutableStateFlow(0)
+
+    /** 子库操作反馈（挂载/解锁/卸载的成功与失败文案），由对话框消费后清除 */
+    private val childDatabaseFeedbackFlow = MutableStateFlow<ChildDatabaseFeedback?>(null)
+
+    /**
+     * 子库挂载面板状态：核心层挂载记录 + 运行时状态 → 展示态（无凭据、无条目明文）。
+     *
+     * 控制器缺失时如实下发 `available = false`（UI 整体禁用），不呈现任何假入口。
+     */
+    val childDatabaseState: StateFlow<ChildDatabaseUiState> =
+        childDatabaseSessionManager?.let { manager ->
+            combine(
+                manager.mounts,
+                manager.mountStates,
+                childDatabaseFeedbackFlow
+            ) { mounts, states, feedback ->
+                ChildDatabaseUiState(
+                    available = true,
+                    mounts = mounts.map { mount ->
+                        // 未纳入状态表一律回落 Closed（与 ChildDatabaseSessionManager.stateOf 同一口径）
+                        val state = states[mount.id] ?: ChildDatabaseMountState.Closed
+                        ChildDatabaseMountUiState(
+                            mountId = mount.id,
+                            alias = mount.alias,
+                            status = ChildDatabaseStatusText.of(state),
+                            canRetryWithCredentials = ChildDatabaseStatusText.allowsCredentialRetry(state)
+                        )
+                    },
+                    feedback = feedback
+                )
+            }.stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(STATE_SUBSCRIBE_TIMEOUT_MILLIS),
+                initialValue = ChildDatabaseUiState(available = true)
+            )
+        } ?: MutableStateFlow(ChildDatabaseUiState(available = false))
+
+    /**
+     * 挂载并首次打开一个子库（核心层原子语义：只有真实解密成功才登记挂载）。
+     *
+     * [passwordChars] / [keyFileUri] 为**借用语义**：密码数组在本次回调返回后即由输入组件擦除，
+     * 故本层先落自有副本并在用毕清零；密钥文件字节经 [keyFileAccess] 读取，同样用毕清零。
+     * `content://` 来源在 SAF 选择后**立即申请持久化读授权**，否则进程重启后核心层只能如实报
+     * `SOURCE_UNAVAILABLE`（授权申请失败不阻断本次挂载，但必须留痕，不静默）。
+     */
+    fun mountChildDatabase(
+        alias: String,
+        sourceUri: String,
+        passwordChars: CharArray,
+        keyFileUri: String?
+    ) {
+        val password = passwordChars.copyOf()
+        viewModelScope.launch {
+            var keyFileBytes: ByteArray? = null
+            try {
+                val manager = childDatabaseManagerOrReport() ?: return@launch
+                if (sourceUri.startsWith(ChildDatabaseLimits.CONTENT_SCHEME)) {
+                    persistChildSourcePermission(sourceUri)
+                }
+                keyFileBytes = readChildKeyFileBytes(keyFileUri)
+                if (keyFileUri != null && keyFileBytes == null) return@launch
+                when (val result = manager.mount(alias, sourceUri, password, keyFileBytes)) {
+                    is KdbxResult.Success ->
+                        childDatabaseFeedbackFlow.value = childDatabaseMountedFeedback()
+
+                    is KdbxResult.Failure ->
+                        childDatabaseFeedbackFlow.value = childDatabaseFailureFeedback(result.error)
+                }
+            } finally {
+                // 借用副本用毕即清零（无论成功、失败还是提前返回）
+                password.fill(ZERO_CHAR)
+                keyFileBytes?.fill(ZERO_BYTE)
+            }
+        }
+    }
+
+    /**
+     * 为已挂载子库**重新提供凭据**解锁。
+     *
+     * 覆盖三类真实场景：进程重启 / 根库锁定后凭据已被清零（须重新输入，属有意的安全语义）、
+     * 凭据被拒后重试、来源恢复后重试。挂载记录始终保留（非敏感配置不因解密失败丢失）。
+     */
+    fun unlockChildDatabase(
+        mountId: String,
+        passwordChars: CharArray,
+        keyFileUri: String?
+    ) {
+        val password = passwordChars.copyOf()
+        viewModelScope.launch {
+            var keyFileBytes: ByteArray? = null
+            try {
+                val manager = childDatabaseManagerOrReport() ?: return@launch
+                keyFileBytes = readChildKeyFileBytes(keyFileUri)
+                if (keyFileUri != null && keyFileBytes == null) return@launch
+                when (val result = manager.open(mountId, password, keyFileBytes)) {
+                    // 成功：清空反馈，条目数由状态文案（Opened 快照）如实呈现
+                    is KdbxResult.Success -> childDatabaseFeedbackFlow.value = null
+
+                    is KdbxResult.Failure ->
+                        childDatabaseFeedbackFlow.value = childDatabaseFailureFeedback(result.error)
+                }
+            } finally {
+                password.fill(ZERO_CHAR)
+                keyFileBytes?.fill(ZERO_BYTE)
+            }
+        }
+    }
+
+    /** 卸载子库：终止会话、清零其凭据并摘除登记（**不删除**来源文件，文案已如实说明） */
+    fun unmountChildDatabase(mountId: String) {
+        viewModelScope.launch {
+            val manager = childDatabaseManagerOrReport() ?: return@launch
+            when (val result = manager.unmount(mountId)) {
+                is KdbxResult.Success -> childDatabaseFeedbackFlow.value = null
+                is KdbxResult.Failure ->
+                    childDatabaseFeedbackFlow.value = childDatabaseFailureFeedback(result.error)
+            }
+        }
+    }
+
+    /** 清除子库操作反馈（对话框关闭或用户已读） */
+    fun dismissChildDatabaseFeedback() {
+        childDatabaseFeedbackFlow.value = null
+    }
+
+    /** 取核心层控制器；缺失（仅单测 / 异常装配）时上浮统一失败反馈并返回 null */
+    private fun childDatabaseManagerOrReport(): ChildDatabaseSessionManager? {
+        val manager = childDatabaseSessionManager
+        if (manager == null) {
+            childDatabaseFeedbackFlow.value = ChildDatabaseFeedback(
+                UiMessage(R.string.dbset_child_db_err_unknown),
+                isError = true
+            )
+        }
+        return manager
+    }
+
+    /**
+     * 申请来源的持久化读授权（SAF 选择后立即执行）。
+     *
+     * 失败**不阻断**本次挂载（本次会话仍可读，核心层已读到字节），但必须留痕：
+     * 授权失效只会在进程重启后才暴露为 `SOURCE_UNAVAILABLE`，静默会让该现象无法追溯。
+     * 日志不含 Uri（避免来源定位信息外泄）。
+     */
+    private suspend fun persistChildSourcePermission(sourceUri: String) {
+        val access = keyFileAccess
+        if (access == null) {
+            debugLogBuffer.warn(TAG, "子库来源持久化读授权通道缺失：进程重启后需重新选择来源")
+            return
+        }
+        if (!access.persistReadPermission(sourceUri)) {
+            debugLogBuffer.warn(TAG, "子库来源提供方不支持持久化读授权：仅本次会话可读")
+        }
+    }
+
+    /**
+     * 读取可选密钥文件字节：未选择返回 null；读取失败（含通道缺失）上浮反馈并返回 null，
+     * 调用方据此**中止**本次挂载 —— 绝不静默降级为「仅主密码」，那只会得到误导性的「凭据被拒」。
+     */
+    private suspend fun readChildKeyFileBytes(keyFileUri: String?): ByteArray? {
+        val requested = keyFileUri?.takeIf { it.isNotBlank() } ?: return null
+        val access = keyFileAccess
+        if (access == null) {
+            debugLogBuffer.warn(TAG, "子库密钥文件读取通道缺失，拒绝以缺失密钥文件继续")
+            childDatabaseFeedbackFlow.value = childDatabaseKeyFileFeedback()
+            return null
+        }
+        return when (val result = access.read(requested)) {
+            is KeyFileReadResult.Success -> result.bytes
+
+            else -> {
+                // 仅留痕分型名（Empty / TooLarge / Unreadable），不外传 Uri 与异常 message
+                debugLogBuffer.warn(TAG, "子库密钥文件不可用: ${result.javaClass.simpleName}")
+                childDatabaseFeedbackFlow.value = childDatabaseKeyFileFeedback()
+                null
+            }
+        }
+    }
+
+    /** 密钥文件不可用（未选/读不到/空文件/超限）的统一反馈：复用解锁特性既有文案 */
+    private fun childDatabaseKeyFileFeedback(): ChildDatabaseFeedback =
+        ChildDatabaseFeedback(UiMessage(R.string.unlock_keyfile_read_failed), isError = true)
 
     private val syncController = SettingsSyncController(
         syncCredentialsStore, syncCoordinator, extendedSettingsStore, strings, viewModelScope
@@ -152,8 +365,9 @@ class SettingsViewModel @Inject constructor(
             argon2Parallelism = 4,
             recycleBinEnabled = true,
             tanExpiresOnUse = true,
-            checkForDuplicateUuids = true,
-            childDatabasesCount = 0
+            checkForDuplicateUuids = true
+            // ISSUE-P3-20：childDatabasesCount 字段已整体移除——它原先承载的硬编码 0
+            // 会与真实挂载数冲突；真实值改由 childDatabaseCountFlow（核心层 mountedCount）下发
         )
     )
 
@@ -195,8 +409,7 @@ class SettingsViewModel @Inject constructor(
         val argon2Parallelism: Int,
         val recycleBinEnabled: Boolean,
         val tanExpiresOnUse: Boolean,
-        val checkForDuplicateUuids: Boolean,
-        val childDatabasesCount: Int
+        val checkForDuplicateUuids: Boolean
     )
 
     private data class SecurityTimeoutUiState(
@@ -219,9 +432,13 @@ class SettingsViewModel @Inject constructor(
             combine(securityTimeoutStateFlow, extendedSettingsFlow, debugLogLinesFlow) { sec, ext, logs ->
                 Triple(sec, ext, logs)
             },
-            integrityReportFlow
-        ) { securityState, integrityReport -> Pair(securityState, integrityReport) }
-    ) { userSettings, syncState, healthState, (autofillState, dbState), (securityState, integrityReport) ->
+            integrityReportFlow,
+            // ISSUE-P3-20：子库已挂载计数并入同一条 combine（替代原先硬编码的 0）
+            childDatabaseCountFlow
+        ) { securityState, integrityReport, mountedChildDatabases ->
+            Triple(securityState, integrityReport, mountedChildDatabases)
+        }
+    ) { userSettings, syncState, healthState, (autofillState, dbState), (securityState, integrityReport, mountedChildDatabases) ->
         val (secState, extState, debugLogLines) = securityState
         SettingsUiState(
             // 1. 密码库与加密设置
@@ -235,7 +452,8 @@ class SettingsViewModel @Inject constructor(
             recycleBinEnabled = dbState.recycleBinEnabled,
             tanExpiresOnUse = dbState.tanExpiresOnUse,
             checkForDuplicateUuids = dbState.checkForDuplicateUuids,
-            childDatabasesCount = dbState.childDatabasesCount,
+            // ISSUE-P3-20：真实已挂载计数（原为硬编码 0；语义为「已挂载」而非「已解锁」）
+            childDatabasesCount = mountedChildDatabases,
 
             // 2. 云端多协议同步与文件处理
             syncProvider = syncState.provider,
@@ -343,7 +561,7 @@ class SettingsViewModel @Inject constructor(
         )
     }.stateIn(
         scope = viewModelScope,
-        started = SharingStarted.WhileSubscribed(5000),
+        started = SharingStarted.WhileSubscribed(STATE_SUBSCRIBE_TIMEOUT_MILLIS),
         initialValue = SettingsUiState()
     )
 

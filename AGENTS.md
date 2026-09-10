@@ -11,8 +11,8 @@ This file provides guidance to AI coding agents when working with code in this r
 
 | 维度 | 数值 / 状态 | 官方依据与说明 |
 |---|---|---|
-| **Git HEAD** | 代码基线 `9c2a806` → `df9d20b` → **P3 残余批次整改收口**（ISSUE-P3-17 ~ P3-28：**9 项完整闭环 + 3 项部分达标**；含 1 处全框架致命缺陷、9 处生产代码缺陷、15 条过程缺陷与事实修正如实留痕）；本轮全仓扫描新登记 **ISSUE-P3-29**（33 个生产文件超 400 行阈值的整体债务） | 归档见 [RESOLVED_LOG.md](docs/RESOLVED_LOG.md) **§4**；残余面为 ISSUE-P3-20 / P3-23 / P3-24 / P3-29 |
-| **测试基线** | **1163 个单元测试用例**（app 641 / core 58 / crypto 61 / database 224 / sync 179）：**1150 通过、0 失败、13 跳过**（基线 921 → **+242 例，零退化**）（另有 Rust 侧 `cargo test` 9 例，见 §5；crypto 另有 7 例 instrumented 测试，见下） | `.\gradlew.bat test --rerun-tasks --max-workers=1` 强制真实执行全模块；13 例跳过为 `LiveSyncServersTest` 真实联调用例（12 例，需先起 `tools/local-sync` 服务并加 `-DliveSyncTest`）+ `SyncCacheTest` 的 Windows 无 POSIX 权限视图断言（1 例） |
+| **Git HEAD** | 代码基线 `9c2a806` → `df9d20b` → `8840feb` → **P3 残余批次整改**（ISSUE-P3-17 ~ P3-28：**10 项完整闭环 + 2 项部分达标**；含 1 处全框架致命缺陷、9 处生产代码缺陷、15 条过程缺陷与事实修正如实留痕）；另有 2 项新登记（**P3-29** 全仓 35 个生产文件超 400 行阈值的整体债务、**P3-30** 子库条目投影未并入根库列表） | 归档见 [RESOLVED_LOG.md](docs/RESOLVED_LOG.md) **§4**；残余面为 ISSUE-P3-23 / P3-24 / P3-29 / P3-30 |
+| **测试基线** | **1189 个单元测试用例**（app 667 / core 58 / crypto 61 / database 224 / sync 179）：**1176 通过、0 失败、13 跳过**（基线 921 → **+268 例，零退化**）（另有 Rust 侧 `cargo test` 9 例，见 §5；crypto 另有 7 例 instrumented 测试，见下） | `.\gradlew.bat test --rerun-tasks --max-workers=1` 强制真实执行全模块；13 例跳过为 `LiveSyncServersTest` 真实联调用例（12 例，需先起 `tools/local-sync` 服务并加 `-DliveSyncTest`）+ `SyncCacheTest` 的 Windows 无 POSIX 权限视图断言（1 例） |
 | **instrumented 验证** | `crypto` 模块 `androidTest`：x86_64 模拟器（Android 16 / API 36）实测 **7 例 0 失败**——APK 内 `libkeepasskey_argon2.so`（477,976 B）运行时加载、`NativeArgon2.available == true`、与 BC 冻结向量逐字节一致；性能 p=2 **4.98×**、p=4 **8.42×** 于 BC，R1 闸门通过。**`database` 模块本批次首次建立 `androidTest` 源集**（真实 `.kdbx` 语料端到端解锁用例，fail-closed：语料缺失即显式跳过、跳过不等于通过） | arm64 真机与真实 `.kdbx` 语料端到端解锁仍待办，见 ISSUE-P3-23 |
 | **构建状态** | `assembleDebug` + `assembleRelease` (R8) 全量通过 | **AGP 9.4.0 / Gradle 9.7.1** / Kotlin 2.4.10（经 buildscript classpath 锚定内置 KGP）/ Hilt 2.60.1 / **KSP 2.3.11** |
 | **签名与 R8** | 关闭 v1、启用 **v3 + v4**（`.idsig` 产出）；未配置签名时构建不失败。R8 收窄后 dex 字符串表内源文件名 **12 → 0**，dex −196,816 B（−1.85%） | v2 配置为 true 但 v3 与 v2 同开且 minSdk ≥ 28 时产物省略 v2 块（AGP 标准行为，无功能缺口）；`-dontwarn **` 已移除且无缺失类。见 RESOLVED_LOG §3.2 |
@@ -89,7 +89,7 @@ KeePasskey 是一款使用原生 Kotlin 开发的现代化 Android 密码管理�
 - `.\gradlew.bat assembleDebug` — 编译全部模块
 - `.\gradlew.bat :app:compileDebugKotlin` — 仅快速检查 Kotlin 编译
 - `.\gradlew.bat lint` — Android Lint
-- `.\gradlew.bat test` — 单元测试（全模块 `src/test`；当前 **1163 例：1150 通过 / 0 失败 / 13 跳过**，分布 app 641 / core 58 / crypto 61 / database 224 / sync 179，其中 12 例跳过项需 `-DliveSyncTest` 才启用，1 例为 Windows 无 POSIX 权限视图的缓存权限断言）
+- `.\gradlew.bat test` — 单元测试（全模块 `src/test`；当前 **1189 例：1176 通过 / 0 失败 / 13 跳过**，分布 app 667 / core 58 / crypto 61 / database 224 / sync 179，其中 12 例跳过项需 `-DliveSyncTest` 才启用，1 例为 Windows 无 POSIX 权限视图的缓存权限断言）
   - **加 `--rerun-tasks` 可强制真实执行**（否则 Gradle 可能以 UP-TO-DATE 跳过而不产生新证据）
   - **单会话内勿并发跑 Gradle**：多进程写同一 build 目录会互相截断产物，报 `java.io.EOFException` / `Kryo Buffer underflow` / `NoSuchFileException: in-progress-results-generic.bin`，或令 `app/build/generated/ksp/.../classes` 被并发删除。串行执行并加 `--max-workers=1` 可避免
 - `.\gradlew.bat test -DliveSyncTest` — 追加启用 `LiveSyncServersTest` 真实联调用例（默认跳过 12 例，需先起 `tools/local-sync` 服务；联调凭据为**随机一次性口令**，经 Gradle 配置期求值一次后由 `systemProperty` 下发，服务端需注入同名 `WEBDAV_USER`/`WEBDAV_PASSWORD` 或 `MINIO_ROOT_USER`/`MINIO_ROOT_PASSWORD`）
