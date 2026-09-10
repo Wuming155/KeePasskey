@@ -17,4 +17,34 @@
         <cve>CVE-YYYY-XXXXX</cve>
     </suppress>
     -->
+    <!-- ================= ISSUE-P3-32：已人工核实的误报（登记于 2026-09-10） ================= -->
+
+    <suppress>
+        <notes><![CDATA[
+            核实结论：误报（CPE 误配）。androidx.sqlite 的 Java 包装器被比对成 SQLite C 库本体，
+            因而继承了 SQLite C 库的全部 CVE（CVE-2025-6965 / CVE-2022-35737 / CVE-2023-7104 /
+            CVE-2015-5895 / CVE-2017-10989 / CVE-2018-20346 等，去重后 20 条 ≥ CVSS 7.0，
+            两个构件合计 40 条）。
+
+            核实依据（2026-09-10，逐条可复现）：
+            1. **构件内无原生 SQLite**：解包本机 Gradle 缓存中的
+               androidx.sqlite:sqlite:2.4.0 / sqlite-framework:2.4.0 两个 AAR，`.so` 文件数为 0，
+               且不存在 `jni/` 目录（仅有 classes.jar）——即不含任何 SQLite C 代码；
+               而所列 CVE 全部针对 SQLite C 库。
+            2. **构件语义**：`androidx.sqlite:sqlite-framework` 提供 FrameworkSQLiteOpenHelper，
+               它**委托给系统自带的 android.database.sqlite**（设备侧 SQLite 由系统更新）。
+               真正捆绑原生 SQLite 的变体是 `androidx.sqlite:sqlite-bundled`，本仓并未使用。
+            3. **依赖来源**：`:app:dependencyInsight --configuration debugRuntimeClasspath
+               --dependency androidx.sqlite:sqlite` 显示经
+               androidx.work:work-runtime:2.10.0 → androidx.room:room-runtime:2.6.1 传递引入
+               （app/build.gradle.kts:158 声明 work-runtime-ktx）。
+            4. **升级不可消除**：CPE 按产品名 + 版本区间比对，androidx.sqlite 的任何版本号都远小于
+               SQLite 的 3.50.2，故升级该依赖无法让告警消失——误报只能登记，不能靠升级"修掉"。
+
+            范围护栏：本 regex 只覆盖 `sqlite` 与 `sqlite-framework` 两个 artifactId。
+            **不含** `sqlite-bundled`——若将来改用捆绑原生 SQLite 的变体，本条 suppression 不生效，
+            其 CVE 会重新进入闸门（这正是期望行为）。
+        ]]></notes>
+        <packageUrl regex="true">^pkg:maven/androidx\.sqlite/sqlite(-framework)?@.*$</packageUrl>
+    </suppress>
 </suppressions>

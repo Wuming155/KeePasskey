@@ -32,12 +32,21 @@ def wait_port(host, port, timeout=30):
     return False
 
 
+def _redact(text):
+    """回显前擦除口令：本脚本的日志与子进程输出不得出现明文凭据
+    （CodeQL py/clear-text-logging-sensitive-data）。"""
+    for secret in (PASSWORD,):
+        if secret:
+            text = text.replace(secret, "***")
+    return text
+
+
 def run(cmd, **kw):
-    print("  $", " ".join(cmd))
+    print("  $", _redact(" ".join(cmd)))
     r = subprocess.run(cmd, cwd=HERE, capture_output=True, text=True, **kw)
     out = (r.stdout or "") + (r.stderr or "")
     for line in out.splitlines():
-        print("    >", line)
+        print("    >", _redact(line))
     return r.returncode == 0, out
 
 

@@ -16,6 +16,7 @@
 | §4 | P3 残余批次（12 项：假开关整改 / 特性接线 / 文档治理） | ISSUE-P3-17 ~ P3-28 |
 | §5 | P3-30 单条批次（子库条目只读投影接入库列表） | ISSUE-P3-30 |
 | §6 | P3-29 批次 A（全仓超阈值债务：优先级 8 项 + 增量 2 项 + 1 项例外登记） | ISSUE-P3-29 |
+| §7 | CI 首跑实测整改（lint 门禁 147 项清零 / CodeQL 10 条处置 / 供应链闸门静默失效补强） | ISSUE-P3-32 |
 
 > 本索引仅到**章节粒度**，因此不会随条目增删而过期；章节内的子条目按编号顺序排列。
 > 各批次的**验收证据**（用例数 / 通过 / 失败 / 跳过）分别见 §2.22、§3.1、§4.1、§5.1。
@@ -1155,4 +1156,154 @@
 8. **本批次实测快照与原条目 2026-09-10 登记快照存在行号漂移**（如 `VaultListViewModel` 731 → 803、
    `VaultListScreen` 417 → 448、`WebDavSyncProvider` 510 → 509），印证「条目维护规则」第 3 条
    「行号一律视为核实时刻的快照」；已在 ISSUE-P3-31 中以**开工实测**覆盖。
+
+---
+
+## 7. CI 首跑实测整改归档（lint 门禁 / CodeQL / 供应链闸门）
+
+> **触发**：2026-09-10 复核 GitHub 侧开放项（PR #5、Code Scanning 告警、Actions 实跑结果）。
+> **范围**：`Fast gate` 的 **147 个 lint error 清零**、**CodeQL 10 条告警处置**，
+> 以及**实证发现** `dependency-scan` 的「CVSS ≥ 7 阻断」语义**静默失效**并补硬断言。
+> **对照文档**：静态校准结论见 [docs/ci-静态校准记录.md](ci-静态校准记录.md) **§11**（实测校准追加节）。
+
+### 7.1 本批次整体验收证据
+
+| 门禁 | 命令 | 结果 |
+|---|---|---|
+| 单元测试（全模块） | `.\gradlew.bat test --rerun-tasks --max-workers=1 --continue` | **BUILD SUCCESSFUL**（114 tasks executed） |
+| 用例数 | 解析 `*/build/test-results/testDebugUnitTest/*.xml` | **1200 例 / 1187 通过 / 0 失败 / 0 错误 / 13 跳过** |
+| 分布 | 同上 | app 678 · core 58 · crypto 61 · database 224 · sync 179 |
+| Android Lint | `.\gradlew.bat lint` | **BUILD SUCCESSFUL**；`app`/`core`/`crypto`/`database`/`sync` **各 0 error**（187 warnings / 2 hints，不阻断） |
+| Python 语法 | `python -m py_compile tools/local-sync/*.py` | 5 个脚本全部通过 |
+| 新断言脚本自测 | `python .github/check_dependency_cvss.py <各场景>` | 真实报告 **exit 1**（138 实例 / 98 唯一组合）；缺报告 **exit 1**；无达阈 **exit 0**；缺分数但 CRITICAL **exit 1** |
+
+- 用例数 **1200 / 1187 / 0 / 13** 与 [AGENTS.md](../AGENTS.md) §1 基线**逐数一致 → 零退化**。
+
+### 7.2 CI lint 门禁：147 个 error 清零（三族根因，逐族证据）
+
+**实测现象**（核实方式：`gh run view 34463116293` + 本地 `.\gradlew.bat :app:lintDebug` 复现）：
+
+```
+Lint found 147 errors, 184 warnings and 2 hints. First failure:
+app/src/main/java/com/keepasskey/app/ui/screens/generator/DicewareWordList.kt:377:
+  Error: Call requires API level 37 (current min is 36): java.lang.StringBuilder#getChars [NewApi]
+```
+
+按规则分组后恰好三族，逐族整改如下。
+
+#### 7.2-① `MissingTranslation` × 144 —— `values-en` 英文翻译漂移
+
+- **根因**：`app/src/main/res/values-en/strings.xml` 于 `27317cd`（2026-09-04）建立，
+  此后 `strings.xml` / `strings_ui_messages.xml` / `strings_sync_passkey.xml` 三个默认文件随功能迭代
+  持续新增中文串，而英文侧未同步 → lint 以 `en` 为目标语言，逐条报缺。
+- **量化**：默认 `values/` 共 **1039** 条 `<string>`，`values-en` 原 **895** 条 → 缺 **144** 条
+  （`strings.xml` 55 / `strings_sync_passkey.xml` 36 / `strings_ui_messages.xml` 53）。
+- **处置**：按来源文件分组、按默认文件内顺序，向 `values-en/strings.xml` 补齐 **144 条**英文翻译，
+  含分节注释与占位符说明；24 条含 `%n$s`/`%n$d` 的条目**占位符逐条比对一致**。
+- **验收**：`values-en` 现 1039 条，与默认值**一一对应**；lint `MissingTranslation` 归零。
+
+#### 7.2-② `RestrictedApi` × 2（同一行）—— `SlicedContent` 类级受限
+
+- **位置**：`app/src/main/java/com/keepasskey/app/autofill/AutofillInlinePresentationFactory.kt:73`
+  （`InlinePresentation(content.slice, spec, false)`）。
+- **核实依据**（2026-09-10，`javap -v` 解包 `androidx.autofill:autofill:1.3.0` 的 aar 内 `classes.jar`）：
+  `androidx.autofill.inline.common.SlicedContent` 带**类级** `@RestrictTo(RestrictTo.Scope.LIBRARY)`
+  （`RuntimeInvisibleAnnotations` 可见 `value=[Landroidx/annotation/RestrictTo$Scope;.LIBRARY]`），
+  其 `getSlice()` 为 `public final`（方法自身只带 `@NonNull`）；而 `InlineSuggestionUi.Content`
+  继承 `SlicedContent` 且**未覆写** `getSlice()`。
+- **结论**：官方 v1 内容模型取 `Slice` 的**唯一入口**即该受限方法，框架构造器
+  `InlinePresentation(Slice, InlinePresentationSpec, boolean)` 又只接受 `Slice`，
+  官方**未提供公开替代** → 属 API 形态所迫的必要压制，非绕过检查。
+- **处置**：`@SuppressLint("RestrictedApi")` + 逐条依据注释（并注明「上游补出公开访问器后应立即移除」）。
+
+#### 7.2-③ `NewApi` × 1 —— lint 的 **API 数据库误报**（三向证据）
+
+- **现象**：lint 认为 `StringBuilder#getChars` 需要 API 37（minSdk 36）。
+- **证据链**（2026-09-10 全部可复现）：
+  1. `D:\Android\SDK\platforms\android-37.0\data\api-versions.xml:85987` 中
+     `<method name="getChars(II[CI)V" since="37.0"/>` 的**所属类是 `java/lang/CharSequence`**（向上回溯类声明确认），
+     而 `java/lang/StringBuilder` 类块（`since="1"`）**没有** `getChars` 条目；
+  2. `javap -classpath android-36/android.jar java.lang.StringBuilder` 与 android-37.0 同样输出
+     `public void getChars(int, int, char[], int);`，即**该调用在 API 36 运行时真实可用**；
+  3. 其真正提供者是**包私有**父类 `java.lang.AbstractStringBuilder`（`javap` 输出 `abstract class …` 无 `public`），
+     隐藏父类方法不受 API 数据库追踪 —— 这正是误报根因。
+- **处置（不采用压制）**：改写为下标运算符逐字符拷贝 `result[i] = sb[i]`（编译为 `CharSequence` 的
+  字符访问，稳定解析到 API 1），**同时**消除对隐藏父类方法的依赖。零化语义（不经 `toString()` 物化明文
+  `String`）与行为完全不变。
+- **副产品**：原 `@Suppress("DEPRECATION")` 及其注释（称 Kotlin 将 `getChars` 标记为冗余/弃用）
+  已随之删除——该注释在改用下标后不再成立，留着即误导。
+
+### 7.3 CodeQL 10 条告警处置
+
+| 规则 | 数量 | 位置 | 处置 |
+|---|:---:|---|---|
+| `py/clear-text-logging-sensitive-data`（**error**） | 3 | `tools/local-sync/smoke_minio.py:36`、`run_lab.py:50`、`run_webdav.py:59` | **改代码**：新增 `_redact()` 在回显前擦除口令（同时覆盖子进程输出行），`run_webdav.py` 改为只提示凭据来源不回显口令。`py_compile` 5 个脚本全通过。 |
+| `rust/hard-coded-cryptographic-value`（warning） | 7 | `crypto/src/main/rust/src/lib.rs` 第 124/125/239/240/262/272/273 行 | **GitHub 侧以 `used in tests` 处置**（告警号 192~198）：逐行核对确认全部落在 `#[cfg(test)] mod tests`（110~292 行）内，是 IETF `draft-irtf-cfrg-argon2-12` §5 官方 KAT 向量与参数闸门负例，测试向量必须以字面常量硬编码方能充当第三方对照。 |
+
+- 3 条 py 告警的代码已修，**待 CodeQL 工作流在本次推送后复跑自动关闭**（不作人工处置）。
+
+### 7.4 `dependency-scan`：CVSS 阻断语义**静默失效**的实证与硬断言补强
+
+- **实证（推翻既有文档结论）**：运行 `34335443660`（`dependency-scan`，conclusion=**success**）日志中
+  六个工程各自打印 `One or more dependencies were identified with known vulnerabilities in <project>:`，
+  末尾仍是 `BUILD SUCCESSFUL in 37m`；该次归档报告含 **188 条漏洞实例 / 138 条 CVSS ≥ 7.0**。
+  → `failBuildOnCVSS = 7.0f` 在 `dependencyCheckAggregate` 上**不生效**，
+  即「文档声称真实阻断、实际静默放行」。
+- **补强**：新增 `.github/check_dependency_cvss.py`（对**报告本身**断言：分数 ≥ 7.0 即失败；
+  无分数但 severity 为 CRITICAL/HIGH 亦失败；**报告缺失/不可解析同样失败**），
+  并在 `dependency-scan.yml` 扫描步骤之后接线为独立门禁步骤；豁免唯一通道是 suppression 白名单。
+- **误报登记（本批首条）**：`.github/owasp-dependency-suppressions.xml` 登记 `androidx.sqlite` 族
+  （`sqlite` / `sqlite-framework`），依据：解包 AAR **零 `.so`、无 `jni/`**（不含原生 SQLite C 代码）、
+  `sqlite-framework` 委托系统 `android.database.sqlite`、依赖经 `work-runtime-ktx` → `room-runtime` 传入、
+  且**升级无法消除**（CPE 按产品名 + 版本区间比对）。护栏：regex **不含** `sqlite-bundled`。
+- **残余（未豁免，已登记 ISSUE-P3-32）**：`CVE-2026-53914`（Kotlin < 2.4.20 构建缓存元数据反序列化，9.8）
+  与 jline / protobuf 构建工具链族 —— 前者正确处置是**升级 Kotlin 至 ≥ 2.4.20**（涉及 AGP/KSP 联调，
+  不可在本批次安全验证），后者属**风险接受决策**，均不由本批次单方面压制。
+
+### 7.5 PR #5（Actions 大版本升级）验证结论：**已核实可用，未合并**
+
+- **PR 内容**：6 个 Action 的跨大版本升级（`checkout` v4→v7.0.1、`setup-java` v4→v6.0.0、
+  `setup-gradle` v4.4.3→v6.3.0、`upload-artifact` v4→v7.0.1、`setup-android` v3→v4.0.1、
+  `codeql-action/upload-sarif` v3→v4.37.9），全部保持 SHA 钉死。
+- **验证证据**（PR 自身的 CI 运行 `34459521867`）：`Native gate` 与 `Rust supply chain` **均 success**
+  —— 即 `checkout@v7` / `setup-java@v6` / `setup-gradle@v6` / `setup-android@v4` / `upload-artifact@v7`
+  在真实 runner 上**已被跑通**；唯一失败点是**与本 PR 无关的既存 lint 门禁**（见 §7.2）。
+  同理，`build.yml` 的既存 Node 20 弃用告警与「setup-java v4 已弃用」告警亦由此印证。
+- **未合并的原因（如实登记）**：PR #1 ~ #4 **全部为 `closed` 且 `mergedAt = null`**（即关闭未合并），
+  且 `build.yml` 头注释明确「本次只做 SHA 钉死，**不跨大版本升级**……升级另立条目」。
+  合并 PR #5 属**变更已文档化的既定决策**，须由维护者拍板 → 本批次**不动 `main`**，
+  仅将验证结论登记为 ISSUE-P3-33 供决策。
+- **残留未验证**：`upload-sarif@v4` 仅出现在手动触发的 `dependency-scan.yml`，PR #5 的 CI **未覆盖**。
+
+### 7.6 本批次过程缺陷（如实留痕）
+
+1. **改动 `DicewareWordList` 首次使用 `sb.charAt(i)` → 编译失败**：
+   `:app:compileDebugKotlin` 报 `Unresolved reference 'charAt'`。
+   根因：Kotlin 对 `CharSequence` 的 `charAt` 做了运算符映射（`[]`），该名字在 Kotlin 侧不可见，
+   而 `setCharAt` 仍是普通方法（原文件 `finally` 块即直接调用它）。
+   教训：**Kotlin 下 `CharSequence` 系列的 `charAt` 必须写成下标 `sb[i]`**，
+   `setCharAt` 则可直接调用；两者暴露面不一致。
+2. **`values-en` 分节注释写成 `<!-- ---- 来源：… ---- -->` → XML 非法**：
+   `[xml]` 解析报 `An XML comment cannot contain '--', and '-' cannot be the last character`。
+   教训：**XML 注释体内禁止出现连续 `--`**，分节请用 `=====` 或其他字符；
+   该错误一度使文件整体不可解析（见第 3 条）。
+3. **校验脚本自身失效时其结论不可信**：上述非法注释令 `[xml]` 解析抛错、`$x` 为 `$null`，
+   于是首轮校验同时误报「144 条全部缺失」与「占位符全部不一致」。
+   教训：**校验脚本必须先自证有效性**（解析成功再统计），否则会把工具故障当成业务结论；
+   修正注释后重跑才得到真实结果（144 条全部就位、占位符全部一致）。
+4. **本环境 SSH 通道不可达**：`git fetch origin` 与 `ssh -T git@github.com` 均报
+   `failed to begin relaying via HTTP. Connection closed by UNKNOWN port 65535`（exit 255）。
+   处置：改用 HTTPS 通道（`gh auth setup-git` 后经 `https://github.com/...` 推送），
+   **未改动 `origin` 的 SSH URL 配置**，避免把环境限制固化进仓库。
+5. **本批次新增 6 条 lint warning（不阻断，如实登记）**：`values-en/strings.xml` 新增区块引入
+   5 条 `PluralsCandidate` + 1 条 `TypographyEllipsis`；前者与默认中文文件对**同一批字符串**的既存告警同类
+   （默认文件自身即有 4 条 `PluralsCandidate`），后者与既有 `Syncing...` 等同风格。
+   总数 181 → 187，**0 错误**。
+6. **告警计数口径差异需显式说明**：`dependency-check` 报告对同一 `(构件, CVE)` 会因
+   `*.aar` 与其内 `classes.jar` 各计一次（188 实例 vs **98 个唯一组合**）；
+   首版断言脚本因此打印重复条目，已改为按 `(构件, CVE)` 去重后输出。
+7. **动 `main` 前未先查既往处置惯例（未造成后果，但属流程失误）**：
+   本批次一度按「已验证 → 应合并」推进 PR #5，随后才查得 PR #1~#4 全部 `closed` 未合并、
+   且 `build.yml` 明确「不跨大版本升级」。教训：**对默认分支的写操作前，必须先查该仓库对同类 PR
+   的既往处置惯例与相关注释中的既定决策**，不能只凭「CI 通过」推断可以合并。
 

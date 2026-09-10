@@ -363,18 +363,25 @@ object PasswordGenerationEngine {
 
     /**
      * ISSUE-P2-16：把可擦除的字符构建过程收敛到 CharArray 出口。
-     * [StringBuilder] 仅作长度可变的中间缓冲，结果经 `getChars` 拷贝后立即覆盖为零并截断，
+     * [StringBuilder] 仅作长度可变的中间缓冲，结果经逐字符拷贝后立即覆盖为零并截断，
      * 避免生成明文以不可擦 String 形态在堆中驻留。
      */
-    // Kotlin 将 StringBuilder.getChars 标记为「冗余/弃用」，但 toString() 会物化不可擦 String，
-    // 与 ISSUE-P2-16 目标冲突；此处刻意保留 getChars 并显式压制告警
-    @Suppress("DEPRECATION")
+    // 刻意不用 `StringBuilder.getChars`：Android 的 API 数据库（api-versions.xml）**没有**
+    // `java.lang.StringBuilder` 自身的 getChars 条目——该方法是经包私有父类
+    // `AbstractStringBuilder` 暴露的（2026-09-10 经 javap 核对 android-36 与 android-37.0 的
+    // android.jar，两者均可见 `public void getChars(int,int,char[],int)`），故 lint 只能把调用
+    // 解析到 `java.lang.CharSequence#getChars(II[CI)V` 的 `since="37.0"` 版本，在 minSdk 36 下
+    // 误报 `NewApi`（本仓 CI 首跑即因此变红）。改用下标运算符 `sb[i]`（编译为 CharSequence 的
+    // 字符访问，稳定解析到 API 1），既保住「不经 toString() 物化明文 String」的零化语义，
+    // 又不依赖隐藏父类方法（隐藏方法不受 API 数据库追踪，正是本次误报的根因）。
     private inline fun buildChars(capacity: Int, block: StringBuilder.() -> Unit): CharArray {
         val sb = StringBuilder(capacity.coerceAtLeast(0))
         return try {
             sb.block()
             val result = CharArray(sb.length)
-            sb.getChars(0, sb.length, result, 0)
+            for (i in 0 until sb.length) {
+                result[i] = sb[i]
+            }
             result
         } finally {
             for (i in 0 until sb.length) sb.setCharAt(i, '\u0000')

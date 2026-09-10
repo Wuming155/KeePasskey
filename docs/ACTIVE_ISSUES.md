@@ -51,7 +51,7 @@
 > 密码生成引擎出边界仍返回 String）已整改并归档，见 §2.21。
 > 当前 P2 级别无待办。
 
-## P3 低危问题、特性接线与体验优化（3 项）
+## P3 低危问题、特性接线与体验优化（5 项）
 
 > **背景**：P3 残余批次原 **12 项**（ISSUE-P3-17 ~ P3-28）已于 **2026-09-10** 整体整改。
 > 其中 **10 项完整闭环并归档**（P3-17 / 18 / 19 / **20** / 21 / 22 / 25 / 26 / 27 / 28，含逐项代码证据与 15 条过程缺陷留痕），
@@ -64,7 +64,12 @@
 > `DatabaseSettingsDialogs` / `KdbxFile` / `KeePasskeyApp` / `VaultEntryRows` / `VaultRepository` / `VaultListScreen`），
 > 另**增量完成** `KdbxHeader` 与 `SyncCredentialsStore` 两项，并登记 `DicewareWordList` 为**经论证的纯常量例外**；
 > 仓库内残余的 **23 个**真逻辑超阈值文件**整体转入 ISSUE-P3-31** 重新登记（附 2026-09-10 实测快照与核实方式）。
-> 本节余 **3 项**（P3-23 / P3-24 / P3-31）。
+> **2026-09-10 追加三（CI 首跑实测）**：新增 **ISSUE-P3-32**（供应链达阈告警残余）与
+> **ISSUE-P3-33**（GitHub Actions 大版本升级决策）；同一批次内**已闭环**的工作
+> （`Fast gate` 147 个 lint error 清零、CodeQL 10 条告警处置、`dependency-scan` 的 CVSS 阻断语义
+> **静默失效**之实证与硬断言补强）见 [RESOLVED_LOG.md](RESOLVED_LOG.md) **§7**；
+> 实测校准追加节见 [docs/ci-静态校准记录.md](ci-静态校准记录.md) **§11**。
+> 本节余 **5 项**（P3-23 / P3-24 / P3-31 / P3-32 / P3-33）。
 > 归档门禁证据：`.\gradlew.bat test --rerun-tasks --max-workers=1 --continue` → **BUILD SUCCESSFUL**，
 > **1200 例 / 1187 通过 / 0 失败 / 13 跳过**（基线 921 → **+279 例，零退化**）；`assembleDebug` 通过；
 > `:database:assembleDebugAndroidTest` 通过（ISSUE-P3-23 验收标准①）。
@@ -145,10 +150,23 @@
   `material3` **1.5.0 stable 核实不存在** → 退出条件未满足、维持 `1.5.0-alpha27`（**未改** `libs.versions.toml`）；
   **`cargo deny check` 本机实跑通过**（`advisories/bans/licenses/sources ok`，advisory-db 当日真实拉取，
   `curl 28` **未复现**）；Linux 侧「疑似首次即红」静态判定 **0 例**。
-- **仍未达成**：**本环境从未运行 CI**，以下全部未验证——三 job 在 runner 上的真实执行（Action 拉取 /
-  SDK 安装 / NDK+Rust+cargo-ndk / 4 ABI 交叉编译 / Debug+Release 打包 / 全部断言）、
-  `dependency-scan.yml` 在 CVSS≥7 的真实阻断行为、CI 网络下 advisory-db 拉取、镜像实际预装 API 级别、
-  Code Scanning/GHAS 可用性与 `NVD_API_KEY` 是否已配、3 条 POSIX 断言的最终结果。
+- **2026-09-10 实测更新（原「仍未达成」条已部分取代）**：CI **已在 GitHub 托管 runner 上真实运行**，
+  核实方式 `gh run view 34463116293` / `gh run list --workflow dependency-scan.yml`：
+  1. `Rust supply chain` ✅ **success**（`cargo test` + `cargo deny check` 全绿）→「CI 网络下 advisory-db 拉取」**已验证通过**；
+  2. `Native gate` ✅ **success**（4 ABI 交叉编译、Debug/Release 打包、v1/v2/v3/v4 签名断言、4 ABI 入包断言全部通过）；
+  3. `Fast gate` ❌ **failure** —— 失败点为 **Android Lint 147 个 error**，**已整改并归档**
+     （见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §7.2）；`unit tests` 步骤自身通过；
+  4. `dependency-scan` 的「真实阻断行为」**已实测且结论为否定**：运行 `34335443660` conclusion=**success**，
+     而报告含 138 条 CVSS ≥ 7.0 → `failBuildOnCVSS` 在 aggregate 任务上**不生效**；
+     **已补硬断言**（`.github/check_dependency_cvss.py` + workflow 接线），见 §7.4。
+- **仍未达成（不得据此认为 CI 已跑通）**：
+  1. `Fast gate` 在 lint 修复后的**下一次真实 CI 运行**（本地已 5 模块 0 error，runner 侧未复跑）；
+  2. `dependency-scan` 在硬断言接入后的**首次运行**——按预期**将失败**，直至 ISSUE-P3-32 的达阈条目被处置；
+  3. `github/codeql-action/upload-sarif` **v4** 的真实执行（仅出现在手动触发的 `dependency-scan`）；
+  4. runner 镜像实际预装 API 级别（R2）、`ubuntu-latest` 指向的镜像版本（R1）；
+  5. Gradle 对 daemon JVM criteria 不满足时的失败/自动供给行为（§1#3 残留不确定性）；
+  6. 3 条 POSIX 断言的**最终结果**：`Fast gate` 的单元测试步骤确已通过，但该 job 整体因 lint 失败，
+     `N/A` 待转绿后的完整运行确认。
 - **已登记未改的风险点（含补丁草案，见留痕 §7）**：R1 `ubuntu-latest` 浮动标签（建议固定 `ubuntu-24.04`）；
   R2 fast-gate 不装 SDK；R3 runner 文件系统不支持目录 fd fsync；R4 wrapper 指向腾讯镜像且无
   `distributionSha256Sum`（**未改**：改动会影响国内网络下的本地构建，仅登记）；R5 `~/.cargo` 未缓存；
@@ -192,3 +210,65 @@
   3. 拆分后**逐条对照敏感数据清零点与公开 API 可见性**（沿用批次 A 的验证范式：
      公开 API 零丢失零新增 + 清零点逐一对照）；
   4. 每批完成后按「极简闭环工作流」归档并更新本清单快照。
+
+---
+
+### ISSUE-P3-32 (新登记): 供应链达阈告警残余处置
+
+- **优先级**：P3（供应链安全；阻断面仅在**手动触发**的 `dependency-scan`）
+- **核实时间点与核实方式（2026-09-10）**：以
+  `gh run download 34335443660 --name dependency-check-report` 取得 engine 13.0.0 的报告 JSON 后，
+  以脚本统计 `dependencies[].vulnerabilities[]`：**188 条实例 / 132 个唯一（构件 × CVE）组合**，
+  其中 **138 条实例、98 个唯一组合 CVSS ≥ 7.0**（47 条 `CRITICAL` 严重度；51 条分数 ≥ 9.0）；
+  各族的依赖来源经 `.\gradlew.bat :app:dependencyInsight --configuration <cfg> --dependency <pkg>` 逐族确认。
+- **背景**：本批次已**实证** `failBuildOnCVSS = 7.0f` 在 `dependencyCheckAggregate` 上不生效
+  （见 [RESOLVED_LOG.md](RESOLVED_LOG.md) **§7.4**），并已补硬断言
+  `.github/check_dependency_cvss.py`（接线于 `dependency-scan.yml`）。
+  **该断言接入后 `dependency-scan` 将按预期失败**，直到下列达阈条目被「修依赖」或「登记 suppression」。
+  已登记豁免 **1 族**（`androidx.sqlite`：构件内零 `.so`，不含原生 SQLite C 代码），
+  以下为**未豁免残余**。
+- **未豁免残余（2026-09-10 核实）**：
+  1. **`CVE-2026-53914`（CVSS 9.8）—— 30 个 `org.jetbrains.kotlin/*` 构件**：
+     NVD 描述为「JetBrains Kotlin < 2.4.20 经**构建缓存元数据**的不安全反序列化可致代码执行」；
+     报告中**实际受影响构件是 `compose-group-mapping@2.4.10`**，其余 29 个
+     （`kotlin-stdlib@1.6.10 ~ 2.4.10`、`kotlin-reflect`、`kotlin-daemon-*`、`kotlin-compiler-*` 等）
+     系 **CPE 按产品名过度匹配**。正确处置是**升级 Kotlin 至 ≥ 2.4.20**（本仓当前 2.4.10），
+     但该升级涉及 AGP 9.4.0 / KSP 2.3.11 / Compose 编译器插件联调，**不可在本环境安全验证**。
+  2. **构建工具链族（jline × 11 构件 / `protobuf-java@2.6.1` / `analytics-library:protos@32.4.0`）**：
+     报告路径显示其全部**被 shade 在 `kotlin-compiler-32.4.0.jar` 内**（AGP 内置 Kotlin 编译器），
+     属**构建期**而非 APK 运行面。是否接受该构建期暴露属**风险接受决策**，不由本批次单方面压制。
+  3. **Code Scanning 历史遗留**：依赖类 open 告警 **188 条**（创建于 2026-09-09），
+     待上述处置落地后按实际结果收敛；**不得**以批量 dismiss 清空。
+- **验收标准**：
+  1. `dependency-scan` 的硬断言步骤在**真实运行**中给出确定的 pass/fail（而非静默通过）；
+  2. 每个达阈族满足下列二者之一并留痕：**升级到修复版本**，或**写入 suppression 并附核实依据**
+     （按 `.github/owasp-dependency-suppressions.xml` 维护纪律 + 本文件登记）；
+  3. 处置后 Code Scanning 依赖类 open 告警数与该族结论**一致**（禁止以 dismiss 替代修复依据）。
+- **禁止**：回调 `failBuildOnCVSS` 阈值以换取变绿；删除或注释掉硬断言步骤；
+  在没有核实依据的情况下批量写入 suppression。
+
+---
+
+### ISSUE-P3-33 (ISSUE-P3-24 衍生): GitHub Actions 大版本升级决策（PR #5）
+
+- **优先级**：P3（构建供应链；不阻断构建）
+- **核实时间点与核实方式（2026-09-10）**：
+  `gh pr list --repo Wuming155/KeePasskey --state all --json number,state,mergedAt`
+  → PR #1 ~ #4 **全部 `CLOSED` 且 `mergedAt=null`**（关闭未合并）；
+  `gh pr diff 5` 取得逐行 diff；`gh run view 34459521867` 查看 PR #5 自身 CI。
+- **背景**：PR #5 把 6 个 Action 跨大版本升级并**保持 SHA 钉死**：
+  `checkout` v4→v7.0.1、`setup-java` v4→v6.0.0、`setup-gradle` v4.4.3→v6.3.0、
+  `upload-artifact` v4→v7.0.1、`setup-android` v3→v4.0.1、`codeql-action/upload-sarif` v3→v4.37.9。
+  `build.yml:12-15` 记载的**推迟理由**是「大版本升级涉及 Node 运行时与输入契约变更，无法在本批次本地验证」
+  —— **该理由现已由 CI 实测解除**：`build.yml` 内的 5 个 Action 已在真实 runner 上跑通
+  （PR #5 的 `Native gate` 与 `Rust supply chain` 均 success；唯一失败点是**与本 PR 无关的既存 lint 门禁**，
+  且该 lint 已在本批次清零）。既存的 Node 20 弃用告警与「setup-java v4 已弃用」告警亦印证升级必要性。
+- **待决策项**：
+  1. 是否合并 PR #5（**本批次未合并**：PR #1~#4 全部关闭未合并，且 `build.yml` 明确
+     「本次只做 SHA 钉死，**不跨大版本升级**……升级另立条目」，属**已文档化的既定决策**，须维护者拍板）；
+  2. `upload-sarif@v4` 的真实执行**尚未验证**（仅存在于手动触发的 `dependency-scan.yml`，
+     PR #5 的 CI 未覆盖）——建议合并前先手动触发一次 `dependency-scan`；
+  3. 若合并，须同步更新 `build.yml:12-15` 与 `dependency-scan.yml:7-8` 中「不跨大版本升级」的说明，
+     避免文档与事实再次脱节。
+- **验收标准**：维护者对 PR #5 明确给出「合并 / 关闭并另立升级条目」之一并留痕；
+  若合并，`upload-sarif@v4` 需有一次**真实运行记录**；相关注释同步更新。

@@ -1012,4 +1012,183 @@
     <string name="dbset_child_db_err_terminated">Root vault locked; the operation was cancelled</string>
     <string name="dbset_child_db_err_unknown">Child database operation failed</string>
 
+    <!-- ===== ISSUE-P3-32: CI fast-gate lint 首跑暴露的 144 条英文翻译漂移补齐 =====
+         values-en 于 2026-09-04 建立（27317cd），此后新增功能持续只写中文默认值，
+         导致 MissingTranslation 累计 144 条并使 :app:lintDebug 中断 CI。
+         下列条目按来源文件分组、按默认文件内顺序排列，占位符与默认值逐一对齐。 -->
+
+    <!-- 来源：values/strings.xml（55 条） -->
+    <string name="unlock_empty_vault_title">Welcome to KeePasskey</string>
+    <string name="unlock_empty_vault_subtitle">No vault selected or created yet. Choose how to start below:</string>
+    <string name="unlock_empty_create_btn">Create vault</string>
+    <string name="unlock_empty_open_btn">Open existing vault (.kdbx)</string>
+    <string name="unlock_empty_manage_btn">Go to vault management</string>
+    <string name="unlock_error_pin_length">Enter the 4-digit PIN</string>
+    <string name="autofill_fill_confirm_title">Confirm before filling</string>
+    <string name="autofill_fill_confirm_sub">Biometric or manual confirmation is always required before filling a password; this policy is mandatory</string>
+    <string name="cred_fill_confirm_title">Confirm credential fill</string>
+    <!-- %1$s = 凭据名称 -->
+    <string name="cred_fill_confirm_biometric_subtitle">Verify your identity to fill the credential %1$s into the current app</string>
+    <!-- %1$s = 凭据名称 -->
+    <string name="cred_fill_confirm_manual_hint">About to fill the credential %1$s into the current app. This device has no usable biometric or lock-screen credential, so confirm manually below to continue.</string>
+    <string name="autofill_fill_failed">Failed to handle the autofill request. Please try again</string>
+    <string name="autofill_save_failed">Failed to save the credential. Please try again</string>
+    <string name="repo_files_dir_unavailable">Internal storage directory unavailable</string>
+    <string name="repo_no_active_database">Select or create a vault first</string>
+    <string name="repo_file_missing_with_keyfile">Database file not found; cannot open with a composite key</string>
+    <string name="repo_db_locked">Database is locked</string>
+    <string name="repo_invalid_group_id">Invalid group ID</string>
+    <string name="repo_group_not_found">Group not found</string>
+    <string name="repo_invalid_entry_id">Invalid entry ID</string>
+    <string name="repo_entry_not_found">Entry not found</string>
+    <!-- %1$s = 失败原因 -->
+    <string name="repo_remove_failed">Failed to remove the vault: %1$s</string>
+    <!-- %1$s = 失败原因 -->
+    <string name="repo_import_failed">Failed to import the database: %1$s</string>
+    <string name="repo_not_unlocked_state">The database is not currently unlocked</string>
+    <string name="repo_revision_summary">Revision history</string>
+    <string name="repo_no_active_db_for_export">No active database (locked or not open)</string>
+    <!-- %1$s = 失败原因 -->
+    <string name="repo_export_xml_failed">Failed to export XML: %1$s</string>
+    <string name="repo_no_keyfile_to_export">This session has no key file in use, so there is nothing to export</string>
+    <!-- %1$s = 分组名 -->
+    <string name="repo_templates_already_installed">The template group %1$s already exists; no need to install it again</string>
+    <string name="repo_sync_type_local">Local storage</string>
+    <string name="repo_last_opened_not_created">Not created yet</string>
+    <string name="repo_sync_type_local_device">On-device storage</string>
+    <string name="repo_last_opened_in_use">Currently in use</string>
+    <string name="repo_last_opened_ready">Ready locally</string>
+    <string name="time_today">Today</string>
+    <string name="time_yesterday">Yesterday</string>
+    <string name="date_pattern_month_day">MMM d</string>
+    <string name="sync_last_time_never">Never synced</string>
+    <string name="sync_test_connection_failed">Connection failed</string>
+    <string name="health_status_not_scanned">Not scanned</string>
+    <string name="health_scan_hint_idle">Tap rescan to assess the security health of your vault</string>
+    <string name="health_status_excellent">Excellent</string>
+    <string name="health_status_good">Good</string>
+    <string name="health_status_fair">Fair</string>
+    <string name="health_status_needs_improvement">Needs improvement</string>
+    <!-- %1$d = 已过期凭据数，%2$d = 弱密码数，%3$d = 复用数 -->
+    <string name="health_msg_expired">Found %1$d expired credentials, %2$d weak passwords and %3$d reused ones</string>
+    <string name="health_msg_clean">Full vault scan complete: no weak or reused passwords found</string>
+    <!-- %1$d = 弱密码数，%2$d = 复用数 -->
+    <string name="health_msg_weak_and_reused">Found %1$d weak passwords and %2$d reused ones</string>
+    <!-- %1$d = 复用数 -->
+    <string name="health_msg_reused_only">Found %1$d reused passwords; use a unique password for every account</string>
+    <!-- %1$d = 弱密码数 -->
+    <string name="health_msg_weak_only">Found %1$d weak passwords; increase password complexity</string>
+    <!-- %1$s = 失败原因 -->
+    <string name="health_scan_failed">Health scan failed: %1$s</string>
+    <!-- %1$d = 命中泄露库的条目数，%2$d = 弱密码数，%3$d = 复用数 -->
+    <string name="health_msg_breach">Found %1$d entry passwords in public breach corpora; change them immediately (weak %2$d, reused %3$d)</string>
+    <string name="health_breach_error_unknown">Unknown error</string>
+    <string name="kdf_benchmark_failed">Benchmark failed</string>
+    <string name="export_saf_write_failed">Failed to write via SAF</string>
+
+    <!-- 来源：values/strings_sync_passkey.xml（36 条） -->
+    <string name="sync_error_no_open_vault_file">No vault file is currently open</string>
+    <string name="sync_error_vault_not_unlocked">The vault is locked or empty</string>
+    <string name="sync_error_invalid_endpoint">Invalid endpoint configuration</string>
+    <string name="sync_error_no_sync_credentials">Cloud sync credentials are not configured</string>
+    <string name="sync_error_test_no_credentials">Sync credentials are not configured</string>
+    <string name="sync_error_local_serialize_failed">Failed to serialize the local database</string>
+    <string name="sync_error_first_upload_failed">Failed to upload to the cloud on the first sync</string>
+    <!-- %1$s = 失败原因 -->
+    <string name="sync_error_remote_updated_local_save_failed">The cloud was updated but saving locally failed: %1$s</string>
+    <!-- %1$s = 失败原因 -->
+    <string name="sync_error_conflict_presave_failed">Failed to save before starting the conflict session: %1$s</string>
+    <string name="sync_error_load_remote_failed">Failed to load the cloud database: password or format mismatch</string>
+    <string name="sync_error_unknown">An unknown sync error occurred</string>
+    <string name="sync_error_no_pending_conflict">No pending conflict session</string>
+    <string name="sync_error_conflict_path_invalid">The conflict path is no longer valid</string>
+    <string name="sync_error_local_snapshot_lost">The local conflict snapshot is missing</string>
+    <string name="sync_error_remote_snapshot_lost">The remote conflict snapshot is missing</string>
+    <string name="sync_error_conflict_serialize_failed">Failed to serialize the conflict-merged database</string>
+    <!-- %1$s = 失败原因 -->
+    <string name="sync_error_merged_upload_local_save_failed">The merged version was uploaded to the cloud but saving locally failed: %1$s</string>
+    <string name="sync_error_remote_changed_during_resolve">The cloud changed again while resolving the conflict; sync again to re-merge</string>
+    <!-- %1$s = 失败原因 -->
+    <string name="sync_error_upload_resolved_failed">Failed to upload the resolved version: %1$s</string>
+    <string name="sync_error_decrypt_local_conflict_failed">Cannot decrypt the local conflict database</string>
+    <string name="sync_error_decrypt_remote_conflict_failed">Cannot decrypt the cloud conflict database</string>
+    <string name="sync_error_serialize_merged_failed">Failed to serialize the merged database</string>
+    <!-- %1$s = 失败原因 -->
+    <string name="sync_error_upload_merged_failed">Failed to upload the merged version: %1$s</string>
+    <string name="passkey_error_missing_credential_id">Missing credential entry ID</string>
+    <string name="passkey_error_invalid_passkey_entry">Invalid passkey entry</string>
+    <string name="passkey_error_origin_missing">Missing caller origin</string>
+    <string name="passkey_error_caller_mismatch">The credential does not match the caller</string>
+    <string name="passkey_error_missing_register_params">Missing required passkey registration parameters</string>
+    <string name="passkey_error_caller_unknown">Cannot determine the calling app identity</string>
+    <string name="passkey_error_password_empty">Password data is empty</string>
+    <string name="passkey_confirm_ok">Allow</string>
+    <string name="passkey_confirm_cancel">Cancel</string>
+    <!-- %1$s = 依赖方标识 -->
+    <string name="passkey_assert_biometric_subtitle">Verify your identity to sign a passkey assertion for %1$s</string>
+    <!-- %1$s = 依赖方标识 -->
+    <string name="passkey_assert_manual_hint">About to sign a passkey assertion for %1$s.\n\nThis device has no usable biometric or lock-screen credential, so this assertion will be honestly marked as not user-verified (UV=0). Some websites may refuse the sign-in or require a second factor.\n\nContinue only on a trusted device.</string>
+    <!-- %1$s = 依赖方标识 -->
+    <string name="passkey_create_biometric_subtitle">Verify your identity to create a passkey for %1$s</string>
+    <!-- %1$s = 依赖方标识 -->
+    <string name="passkey_create_manual_hint">About to create a passkey for %1$s.\n\nThis device has no usable biometric or lock-screen credential, so the new credential will be honestly marked as not user-verified at creation (UV=0). Some websites may later refuse sign-in with it.\n\nContinue only on a trusted device.</string>
+
+    <!-- 来源：values/strings_ui_messages.xml（53 条） -->
+    <string name="picker_open_vault_title">Open an existing KDBX vault</string>
+    <string name="picker_open_vault_source_hint">Choose where the existing vault file is stored:</string>
+    <string name="picker_chip_local">This device</string>
+    <string name="picker_chip_webdav">WebDAV</string>
+    <string name="picker_chip_s3">S3-compatible</string>
+    <string name="picker_local_desc">Import an existing .kdbx database from on-device storage or the system SAF picker:</string>
+    <string name="picker_vault_id_name">Vault identifier</string>
+    <string name="picker_local_path_label">Local absolute path / virtual URI</string>
+    <string name="picker_browse_file">Browse with the system file picker</string>
+    <string name="picker_webdav_desc">Connect to a private WebDAV server (Nextcloud / Nutstore / Synology) to open a remote vault:</string>
+    <string name="picker_vault_display_name">Vault display name</string>
+    <string name="picker_webdav_url_label">Full WebDAV server path (URL)</string>
+    <string name="picker_s3_desc">Connect to an AWS S3-compatible bucket (Cloudflare R2 / MinIO) to open an existing vault:</string>
+    <string name="picker_s3_endpoint_label">S3 endpoint URL</string>
+    <string name="picker_s3_bucket_label">Bucket name and path</string>
+    <string name="picker_open_and_load">Open and load</string>
+    <string name="picker_keyfile_toggle">Enable a key file (optional)</string>
+    <string name="picker_keyfile_toggle_desc">Combine the master password with a physical key file for genuine two-factor authentication</string>
+    <string name="picker_keyfile_generate">Generate a new key file</string>
+    <string name="picker_keyfile_select_existing">Select an existing key file</string>
+    <string name="picker_keyfile_generate_desc">Creating the vault generates a 256-bit high-entropy random .key file and stores it in secure storage.</string>
+    <string name="picker_keyfile_path_label">Existing key file path</string>
+    <string name="picker_keyfile_pick">Pick an existing key file from the device</string>
+    <string name="picker_empty_databases">No vault yet. Use the buttons above to create or open one</string>
+    <!-- %1$s = 文件路径 -->
+    <string name="picker_file_selected">Selected file: %1$s</string>
+    <string name="picker_file_not_selected">No file selected yet; tap the button to choose one</string>
+    <string name="picker_file_read_error">Failed to read the selected file; check its permissions and try again</string>
+    <string name="picker_source_local_desc">Open a .kdbx file from device storage or an SD card via the system file picker</string>
+    <string name="picker_source_webdav_desc">Import from Nextcloud / Nutstore / Synology NAS / ownCloud</string>
+    <string name="picker_source_s3_desc">Import from Cloudflare R2 / AWS S3 / MinIO / Alibaba Cloud OSS</string>
+    <string name="conflict_field_title">Title</string>
+    <string name="conflict_field_username">Username</string>
+    <string name="conflict_field_password">Password</string>
+    <string name="conflict_field_url">URL</string>
+    <string name="conflict_field_notes">Notes</string>
+    <string name="conflict_mask_local">•••••••• (local version)</string>
+    <string name="conflict_mask_remote">•••••••• (cloud version)</string>
+    <string name="conflict_group_path">Root / Sync conflicts</string>
+    <string name="conflict_time_unknown">Unknown</string>
+    <string name="conflict_merge_failed">Merge failed</string>
+    <!-- %1$s = 最近同步时间 -->
+    <string name="unlock_db_status_cloud">Cloud sync • %1$s</string>
+    <!-- %1$s = 最近同步时间 -->
+    <string name="unlock_db_status_local">Local storage • %1$s</string>
+    <string name="auth_search_hint">Search two-factor accounts...</string>
+    <string name="auth_empty_search_result">No matching two-factor account</string>
+    <string name="auth_empty_title">No two-factor codes yet</string>
+    <string name="auth_empty_subtitle">Create or edit an entry in your vault and add a TOTP seed to see its codes here</string>
+    <string name="cat_all">All</string>
+    <string name="cat_login">Logins</string>
+    <string name="cat_passkey">Passkeys</string>
+    <string name="cat_card">Cards</string>
+    <string name="cat_note">Secure notes</string>
+    <string name="time_just_now">Just now</string>
+    <string name="detail_rollback_updated_at">Just now (rolled back from a previous revision)</string>
+
 </resources>

@@ -1,5 +1,6 @@
 package com.keepasskey.app.autofill
 
+import android.annotation.SuppressLint
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
@@ -44,6 +45,14 @@ class AutofillInlinePresentationFactory @Inject constructor(
      * 构建官方 androidx.autofill.inline v1 内容模型（Slice）。
      * @return null 表示本次不下发内联展示（开关关闭 / 请求未携带 / IME 不支持 v1 / 构建失败）
      */
+    // lint 的 RestrictedApi 由官方 API 形态所迫，并非绕过检查：
+    // androidx.autofill:autofill:1.3.0 的 androidx.autofill.inline.common.SlicedContent 带**类级**
+    // @RestrictTo(RestrictTo.Scope.LIBRARY)（2026-09-10 经 `javap -v` 核对 aar 内 classes.jar 的
+    // RuntimeInvisibleAnnotations 确认），而 InlineSuggestionUi.Content 继承它却**未覆写**
+    // getSlice()——即「从官方 v1 内容模型取出 Slice」的唯一入口就是该受限方法；框架构造器
+    // InlinePresentation(Slice, InlinePresentationSpec, boolean) 又只接受 Slice，官方未提供任何
+    // 公开替代。故此处必须压制；一旦上游补出公开访问器，应立即移除本压制。
+    @SuppressLint("RestrictedApi")
     fun build(
         inlineRequest: InlineSuggestionsRequest?,
         title: CharSequence,

@@ -11,10 +11,11 @@ This file provides guidance to AI coding agents when working with code in this r
 
 | 维度 | 数值 / 状态 | 官方依据与说明 |
 |---|---|---|
-| **Git HEAD** | 代码基线 `9c2a806` → `df9d20b` → `8840feb` → **P3 残余批次整改**（ISSUE-P3-17 ~ P3-28：**10 项完整闭环 + 2 项部分达标**；含 1 处全框架致命缺陷、9 处生产代码缺陷、15 条过程缺陷与事实修正如实留痕）→ **ISSUE-P3-30 单条批次**（子库条目只读投影接入库列表：**闭环归档**，含 2 条过程缺陷如实留痕）→ **ISSUE-P3-29 批次 A**（全仓超阈值债务：正文点名的**优先级 8 项全部降至 400 行阈值内** + 增量完成 2 项 + 1 项纯常量例外登记；**纯结构性拆分零行为变更**，含 8 条过程缺陷如实留痕） | 归档见 [RESOLVED_LOG.md](docs/RESOLVED_LOG.md) **§4**（P3-17~P3-28）· **§5**（P3-30）· **§6**（P3-29 批次 A）；残余面为 ISSUE-P3-23 / P3-24 / **P3-31**（P3-29 残余 23 项已转入） |
+| **Git HEAD** | 代码基线 `9c2a806` → `df9d20b` → `8840feb` → **P3 残余批次整改**（ISSUE-P3-17 ~ P3-28：**10 项完整闭环 + 2 项部分达标**；含 1 处全框架致命缺陷、9 处生产代码缺陷、15 条过程缺陷与事实修正如实留痕）→ **ISSUE-P3-30 单条批次**（子库条目只读投影接入库列表：**闭环归档**，含 2 条过程缺陷如实留痕）→ **ISSUE-P3-29 批次 A**（全仓超阈值债务：正文点名的**优先级 8 项全部降至 400 行阈值内** + 增量完成 2 项 + 1 项纯常量例外登记；**纯结构性拆分零行为变更**，含 8 条过程缺陷如实留痕）→ **CI 首跑实测整改**（`Fast gate` **147 个 lint error 清零** + CodeQL 10 条告警处置 + **实证** `dependency-scan` 的 CVSS 阻断语义静默失效并补硬断言；未合并 PR #5，含 7 条过程缺陷如实留痕） | 归档见 [RESOLVED_LOG.md](docs/RESOLVED_LOG.md) **§4**（P3-17~P3-28）· **§5**（P3-30）· **§6**（P3-29 批次 A）· **§7**（CI 首跑实测整改）；残余面为 ISSUE-P3-23 / P3-24 / **P3-31** / **P3-32** / **P3-33** |
 | **测试基线** | **1200 个单元测试用例**（app 678 / core 58 / crypto 61 / database 224 / sync 179）：**1187 通过、0 失败、13 跳过**（基线 921 → **+279 例，零退化**）（另有 Rust 侧 `cargo test` 9 例，见 §5；crypto 另有 7 例 instrumented 测试，见下） | `.\gradlew.bat test --rerun-tasks --max-workers=1` 强制真实执行全模块；13 例跳过为 `LiveSyncServersTest` 真实联调用例（12 例，需先起 `tools/local-sync` 服务并加 `-DliveSyncTest`）+ `SyncCacheTest` 的 Windows 无 POSIX 权限视图断言（1 例） |
 | **instrumented 验证** | `crypto` 模块 `androidTest`：x86_64 模拟器（Android 16 / API 36）实测 **7 例 0 失败**——APK 内 `libkeepasskey_argon2.so`（477,976 B）运行时加载、`NativeArgon2.available == true`、与 BC 冻结向量逐字节一致；性能 p=2 **4.98×**、p=4 **8.42×** 于 BC，R1 闸门通过。**`database` 模块本批次首次建立 `androidTest` 源集**（真实 `.kdbx` 语料端到端解锁用例，fail-closed：语料缺失即显式跳过、跳过不等于通过） | arm64 真机与真实 `.kdbx` 语料端到端解锁仍待办，见 ISSUE-P3-23 |
 | **构建状态** | `assembleDebug` + `assembleRelease` (R8) 全量通过 | **AGP 9.4.0 / Gradle 9.7.1** / Kotlin 2.4.10（经 buildscript classpath 锚定内置 KGP）/ Hilt 2.60.1 / **KSP 2.3.11** |
+| **CI 实测状态** | `build.yml` 三 job **已在 GitHub 托管 runner 上真实运行**：`Rust supply chain` ✅ success / `Native gate` ✅ success / `Fast gate` ❌ failure（**Android Lint 147 errors**，已清零，本地 5 模块 **0 error**，runner 侧待复跑）。另**实证** `dependency-scan` 的 `failBuildOnCVSS = 7.0` 在 `dependencyCheckAggregate` 上**不生效**（报告含 138 条 CVSS ≥ 7.0 仍 `BUILD SUCCESSFUL`），已补硬断言 `.github/check_dependency_cvss.py`；该断言接入后 `dependency-scan` 首次运行**按预期将失败**，直至 ISSUE-P3-32 处置完毕 | 实测依据 `gh run view 34463116293` / `34335443660`；详见 [ci-静态校准记录 §11](docs/ci-静态校准记录.md)、[RESOLVED_LOG §7](docs/RESOLVED_LOG.md) |
 | **签名与 R8** | 关闭 v1、启用 **v3 + v4**（`.idsig` 产出）；未配置签名时构建不失败。R8 收窄后 dex 字符串表内源文件名 **12 → 0**，dex −196,816 B（−1.85%） | v2 配置为 true 但 v3 与 v2 同开且 minSdk ≥ 28 时产物省略 v2 块（AGP 标准行为，无功能缺口）；`-dontwarn **` 已移除且无缺失类。见 RESOLVED_LOG §3.2 |
 | **系统基线** | **minSdk 36**, **compileSdk 37**, targetSdk 36 | 仅针对 Android 16+ 深度优化，固化无旧版垫片决策；compileSdk 37（Compose BOM 2026.08.00 + M3 Expressive） |
 | **传输安全防线** | 全站强制 HTTPS（`network_security_config.xml` 禁明文 + OkHttp TLS-only），零证书固定 | 对齐 Google Developer Knowledge `pinning not recommended` 指南 |
@@ -88,7 +89,7 @@ KeePasskey 是一款使用原生 Kotlin 开发的现代化 Android 密码管理�
 
 - `.\gradlew.bat assembleDebug` — 编译全部模块
 - `.\gradlew.bat :app:compileDebugKotlin` — 仅快速检查 Kotlin 编译
-- `.\gradlew.bat lint` — Android Lint
+- `.\gradlew.bat lint` — Android Lint（全模块；当前 `app`/`core`/`crypto`/`database`/`sync` **各 0 error**，187 warnings / 2 hints 不阻断）
 - `.\gradlew.bat test` — 单元测试（全模块 `src/test`；当前 **1200 例：1187 通过 / 0 失败 / 13 跳过**，分布 app 678 / core 58 / crypto 61 / database 224 / sync 179，其中 12 例跳过项需 `-DliveSyncTest` 才启用，1 例为 Windows 无 POSIX 权限视图的缓存权限断言）
   - **加 `--rerun-tasks` 可强制真实执行**（否则 Gradle 可能以 UP-TO-DATE 跳过而不产生新证据）
   - **单会话内勿并发跑 Gradle**：多进程写同一 build 目录会互相截断产物，报 `java.io.EOFException` / `Kryo Buffer underflow` / `NoSuchFileException: in-progress-results-generic.bin`，或令 `app/build/generated/ksp/.../classes` 被并发删除。串行执行并加 `--max-workers=1` 可避免
@@ -96,6 +97,7 @@ KeePasskey 是一款使用原生 Kotlin 开发的现代化 Android 密码管理�
 - `.\gradlew.bat :crypto:connectedDebugAndroidTest` — **instrumented 测试**（需先起模拟器/真机；当前 x86_64 模拟器 7 例全绿；arm64 待补，见 ISSUE-P3-23）
 - `.\gradlew.bat :database:connectedDebugAndroidTest` — **`database` 模块 instrumented 测试**（本批次首次建立该源集）：消费 `database/src/androidTest/assets/argon2-interop/` 下的**真实 KeePass/KeePassXC `.kdbx` 语料**做端到端解锁；语料未入库时按设计**显式跳过**（跳过 ≠ 通过），生成方法见 `crypto/src/test/resources/argon2-interop/README.md`
 - `.\gradlew.bat assembleRelease` — R8 混淆 + 资源收缩发布包（签名配置见 `keystore.properties.example` / 环境变量，未配置时产出未签名包）
+- `python .github/check_dependency_cvss.py build/reports/dependency-check/dependency-check-report.json` — **供应链 CVSS 阈值硬断言（fail-closed）** 的本地复跑入口（CI 接线见 `.github/workflows/dependency-scan.yml`）；有分数则 ≥ 7.0 即失败、无分数但 `CRITICAL`/`HIGH` 亦失败、**报告缺失同样失败**；豁免唯一通道为 `.github/owasp-dependency-suppressions.xml`（**不得**回调阈值或删除该步骤）
 - **Rust 原生内核（ISSUE-P2-14 PoC Batch 1+）**：`cd crypto/src/main/rust && cargo test` — Rust Argon2 内核单测（当前 **9 例全绿**：IETF 官方 KAT ×4 + BC 冻结向量等价 + 参数闸门 + 确定性 + JNI 签名/闸门）
 
 > **原生构建前置（ISSUE-P2-14 PoC Batch 3 起，替代原 TASK-52 CMake 方案）**：crypto 模块的 Argon2 原生内核改由 **Rust + cargo-ndk 从源码交叉编译**（`crypto/src/main/rust/`，产出 4 ABI `libkeepasskey_argon2.so`）。前置工具链：

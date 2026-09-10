@@ -56,7 +56,9 @@ server = wsgi.Server(
 )
 server.ssl_adapter = BuiltinSSLAdapter(CERT, KEY)
 print(f"[WebDAV] HTTPS 监听 https://{HOST}:{PORT}  root={DAV_ROOT}")
-print(f"[WebDAV] 账号 {USER} / {PASSWORD}（Basic Auth）")
+# 刻意不回显口令（CodeQL py/clear-text-logging-sensitive-data）：只提示凭据来源与账号，
+# 实际口令由 WEBDAV_PASSWORD 环境变量或本文件内置的本地默认值决定。
+print(f"[WebDAV] 账号 {USER}（口令取自 WEBDAV_PASSWORD 环境变量或内置本地默认值，按安全策略不回显）")
 
 try:
     server.start()

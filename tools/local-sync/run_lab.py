@@ -46,12 +46,21 @@ def wait_port(host, port, timeout=40):
     return False
 
 
+def _redact(text):
+    """回显前擦除口令：本脚本的日志与子进程输出不得出现明文凭据
+    （CodeQL py/clear-text-logging-sensitive-data）。"""
+    for secret in (PASSWORD, S3_PASSWORD):
+        if secret:
+            text = text.replace(secret, "***")
+    return text
+
+
 def run(cmd):
-    print("  $", cmd)
+    print("  $", _redact(cmd))
     r = subprocess.run(cmd, cwd=HERE, capture_output=True, text=True, shell=True)
     out = (r.stdout or "") + (r.stderr or "")
     for line in out.splitlines()[-40:]:
-        print("    >", line)
+        print("    >", _redact(line))
     return r.returncode == 0, out
 
 

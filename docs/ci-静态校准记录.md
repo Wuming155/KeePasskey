@@ -197,3 +197,57 @@ val expectedOutcome = if (hostSupportsDirectoryChannel) DirectorySyncOutcome.SYN
   未修改 `app/**`、`database/**`、`sync/**`、`core/**`、`crypto/src/**`、`参考项目/**`。
 - 本记录写作时，`AtomicFileWriterTest.kt` / `AtomicFileWriter.kt` 正由 ISSUE-P3-26 负责人并行修改，
   本文 §6 已按**当前工作区**状态（15:35 复核）重新判定。
+
+---
+
+## 11. **实测校准**：CI 已在 GitHub 托管 runner 上真实运行（2026-09-10 追加）
+
+> §9 所列「无法在本环境验证」的结论，**已由真实 CI 运行部分取代**。本节只登记**实跑结果与核实命令**，
+> 不改变 §1 ~ §8 的静态校准结论。
+
+### 11.1 三条 job 的真实执行结果（`build.yml`）
+
+核实方式：`gh run view 34463116293 --repo Wuming155/KeePasskey`（该 run 对应基线提交 `171b160`，2026-09-10）
+
+| job | 实测结论 | 说明 |
+|---|:---:|---|
+| `Rust supply chain (cargo test + cargo deny)` | ✅ **success** | §9-3 的「CI 网络下 advisory-db 拉取」实测通过 |
+| `Native gate (4 ABI Rust, assembleDebug + assembleRelease)` | ✅ **success** | 4 ABI 交叉编译、Debug/Release 打包、v1 关闭/v2 缺席/v3+v4 启用断言、4 ABI 入包断言**全部通过** |
+| `Fast gate (unit tests + lint)` | ❌ **failure** → 已整改 | 单元测试步骤通过；**`Android Lint` 失败，147 errors**（详见 §11.3-1） |
+
+- 即 §9-1「三条 job 全部未运行」**不再成立**：三条均已真实运行，两条通过、一条暴露真实缺陷。
+- §9-6（Gradle 对 daemon JVM criteria 不满足时的失败/自动供给）：CI 显式安装 JDK 21 后**未进入**该分支，
+  该不确定性**仍未消除**，留待专项验证。
+- §9-7（3 条 POSIX 断言的最终结果）：`Fast gate` 的单元测试步骤确已通过，但该 job 整体因 lint 失败，
+  **不得**据此认定 Linux 侧全部用例已验收；`N/A` 待 `Fast gate` 转绿后的完整运行确认。
+
+### 11.2 §9-2 的实测答案：`dependency-scan.yml` 的「真实阻断行为」= **并未阻断**
+
+核实方式：`gh run view 34335443660 --log` + `gh run download 34335443660 --name dependency-check-report`
+
+- 运行 `34335443660`（`dependency-scan`，2026-09-09，**conclusion = success**）：
+  - 日志中六个工程各自打印 `One or more dependencies were identified with known vulnerabilities in <project>:`，
+    随后仍是 `BUILD SUCCESSFUL in 37m`；
+  - 该次运行归档的报告 JSON（engine 13.0.0）含 **188 条漏洞实例**，
+    其中 **138 条 CVSS ≥ 7.0**（47 条 `CRITICAL` 严重度；51 条分数 ≥ 9.0）。
+- **结论**：`failBuildOnCVSS = 7.0f` 在 `dependencyCheckAggregate` 任务上**不生效**。
+  §1 及 `dependency-scan.yml` 头注释所称「真实失败阻断能力」「不再被 `continue-on-error` 掩盖」
+  **与本仓实测结果不符** —— 属「文档声称阻断、实际静默放行」。已补硬断言，见 §11.3-2。
+
+### 11.3 本批次随之落地的整改（逐项证据见 RESOLVED_LOG **§7**）
+
+1. `Fast gate` 的 **147 个 lint error 清零**（144 `MissingTranslation` + 2 `RestrictedApi` + 1 `NewApi`）；
+   本地 `.\gradlew.bat lint` 实测 **5 个模块 0 error**；
+2. 新增 `.github/check_dependency_cvss.py`，并在 `dependency-scan.yml` 中接线为
+   **CVSS 阈值硬断言（fail-closed）**：对报告本身断言，不依赖插件语义；报告缺失同样失败；
+3. `.github/owasp-dependency-suppressions.xml` 登记**首条经人工核实的误报**
+   （`androidx.sqlite` 族：构件内零 `.so`，不含原生 SQLite C 代码）。
+
+### 11.4 仍未验证（**不得**据本节认为 CI 已全绿）
+
+1. `Fast gate` 在 lint 修复后的**下一次真实 CI 运行**（本地已 0 error，runner 侧未复跑）；
+2. `dependency-scan` 在硬断言接入后的**首次运行**：按预期**将失败**，
+   直至 Kotlin（`CVE-2026-53914`）与构建工具链（jline / protobuf）两族达阈条目被「修依赖或登记豁免」；
+3. `github/codeql-action/upload-sarif` **v4** 的真实执行——该 Action 仅出现在手动触发的
+   `dependency-scan`，PR #5 的 CI 未覆盖；
+4. `CodeQL` 工作流在本次改动推送后的复跑结果（3 条 `py/clear-text-logging-sensitive-data` 应自动关闭）。
