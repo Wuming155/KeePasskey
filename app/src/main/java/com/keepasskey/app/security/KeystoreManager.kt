@@ -315,8 +315,16 @@ class KeystoreManager @Inject constructor(
      * 获取或生成设备绑定「解锁通行密钥」ES256（P-256 ECDSA）密钥对（TASK-18）。
      *
      * 私钥生成于 Keystore 硬件内（StrongBox 优先，回退 TEE），**不可导出**；
-     * 不设 per-operation 用户认证门控——断言仅在生物识别授权完成 AES-GCM 解封之后
-     * 静默执行（认证门控由封印密钥承担，断言承担凭据持有性证明与 signCount 防克隆）。
+     * ISSUE-P1-09：私钥**绑定强生物识别用户认证**（认证时间窗
+     * [UNLOCK_PASSKEY_AUTH_VALIDITY_SECONDS] 内方可签名）——快速解锁流程中
+     * BiometricPrompt（Class 3 强生物识别）授权解封后，同一认证事件的时间窗内
+     * 即可完成断言签名；窗口外签名抛 UserNotAuthenticatedException，由调用方
+     * fail-closed 拒绝（认证门控由封印密钥承担，断言承担凭据持有性证明与
+     * signCount 防克隆，且不再存在「无认证即签名」的密钥形态）。
+     *
+     * 兼容轮换：旧规范（未绑定用户认证）的存量私钥一经发现立即删除重建——
+     * 新私钥公钥与已登记记录不再匹配，断言验证 fail-closed，用户以主密码完整
+     * 解锁后自动重新登记，杜绝旧密钥永久游离于认证门控之外。
      */
     @Synchronized
     fun getOrCreateUnlockPasskeyPair(alias: String): KeyPair? {
@@ -324,39 +332,94 @@ class KeystoreManager @Inject constructor(
             if (keyStore.containsAlias(alias)) {
                 val entry = keyStore.getEntry(alias, null) as? KeyStore.PrivateKeyEntry
                 if (entry != null) {
-                    return KeyPair(entry.certificate.publicKey, entry.privateKey)
+                    if (isAuthBoundUnlockPasskey(entry)) {
+                        return KeyPair(entry.certificate.publicKey, entry.privateKey)
+                    }
+                    // 旧规范密钥（未绑定用户认证）：轮换重建，登记记录随之失效（fail-closed 重登记）
+                    debugLog?.warn(TAG, "检测到未绑定用户认证的旧解锁通行密钥，执行轮换重建")
+                    keyStore.deleteEntry(alias)
                 }
             }
             val generator = KeyPairGenerator.getInstance(
                 KeyProperties.KEY_ALGORITHM_EC,
                 ANDROID_KEY_STORE
             )
-            val spec = KeyGenParameterSpec.Builder(
-                alias,
-                KeyProperties.PURPOSE_SIGN or KeyProperties.PURPOSE_VERIFY
-            )
-                .setDigests(KeyProperties.DIGEST_SHA256)
-                .setUserAuthenticationRequired(false)
-                .build()
+            val purposes = KeyProperties.PURPOSE_SIGN or KeyProperties.PURPOSE_VERIFY
             if (isStrongBoxSupported) {
                 try {
-                    generator.initialize(
-                        KeyGenParameterSpec.Builder(alias, KeyProperties.PURPOSE_SIGN or KeyProperties.PURPOSE_VERIFY)
-                            .setDigests(KeyProperties.DIGEST_SHA256)
-                            .setUserAuthenticationRequired(false)
-                            .setIsStrongBoxBacked(true)
-                            .build()
-                    )
+                    generator.initialize(buildUnlockPasskeySpec(alias, purposes, strongBox = true))
                     return generator.generateKeyPair()
                 } catch (_: StrongBoxUnavailableException) {
                     // StrongBox 缺席：回退 TEE 生成
                 }
             }
-            generator.initialize(spec)
+            generator.initialize(buildUnlockPasskeySpec(alias, purposes, strongBox = false))
             return generator.generateKeyPair()
         } catch (e: Exception) {
             debugLog?.warn(TAG, "解锁通行密钥生成/读取失败: ${e.javaClass.simpleName} - ${e.message}")
             return null
+        }
+    }
+
+    /** 判断存量私钥是否已按 ISSUE-P1-09 规范绑定用户认证（时间窗 > 0） */
+    private fun isAuthBoundUnlockPasskey(entry: KeyStore.PrivateKeyEntry): Boolean {
+        return try {
+            val factory = KeyFactory.getInstance(entry.privateKey.algorithm, ANDROID_KEY_STORE)
+            val keyInfo = factory.getKeySpec(entry.privateKey, KeyInfo::class.java)
+            keyInfo.isUserAuthenticationRequired &&
+                keyInfo.userAuthenticationValidityDurationSeconds > 0
+        } catch (e: Exception) {
+            // 特性探测失败按未绑定处理（fail-closed：宁可轮换，不可放行无认证密钥）
+            debugLog?.warn(TAG, "解锁通行密钥认证绑定探测失败: ${e.javaClass.simpleName}")
+            false
+        }
+    }
+
+    private fun buildUnlockPasskeySpec(alias: String, purposes: Int, strongBox: Boolean): KeyGenParameterSpec {
+        return KeyGenParameterSpec.Builder(alias, purposes)
+            .setDigests(KeyProperties.DIGEST_SHA256)
+            .setUserAuthenticationParameters(
+                UNLOCK_PASSKEY_AUTH_VALIDITY_SECONDS,
+                KeyProperties.AUTH_BIOMETRIC_STRONG
+            )
+            .setUnlockedDeviceRequired(true)
+            .apply { if (strongBox) setIsStrongBoxBacked(true) }
+            .build()
+    }
+
+    /**
+     * 获取或生成解锁通行密钥登记记录的**防篡改完整性 HMAC 密钥**（ISSUE-P1-09）。
+     *
+     * HmacSHA256，硬件内不可导出，无用户认证门控（完整性校验在解锁流程内执行，
+     * 设备必为解锁态）；用于对登记记录（公钥/credentialId/signCount）计算 MAC，
+     * 使「仅具备文件级写能力」（ADB 备份恢复 / 取证 / 同 UID 之外写入）的攻击者
+     * 无法在不触发校验失败的前提下篡改 signCount 或替换公钥——校验失败按记录
+     * 缺失处理（fail-closed，见 [BiometricCredentialStorage.getUnlockPasskey]）。
+     */
+    @Synchronized
+    fun getOrCreateUnlockPasskeyIntegrityMac(): javax.crypto.Mac? {
+        return try {
+            val alias = UNLOCK_PASSKEY_INTEGRITY_KEY_ALIAS
+            if (!keyStore.containsAlias(alias)) {
+                val generator = KeyGenerator.getInstance(
+                    KeyProperties.KEY_ALGORITHM_HMAC_SHA256,
+                    ANDROID_KEY_STORE
+                )
+                generator.init(
+                    KeyGenParameterSpec.Builder(
+                        alias,
+                        KeyProperties.PURPOSE_SIGN or KeyProperties.PURPOSE_VERIFY
+                    )
+                        .setKeySize(KEY_SIZE_BITS)
+                        .build()
+                )
+                generator.generateKey()
+            }
+            val entry = keyStore.getEntry(alias, null) as? KeyStore.SecretKeyEntry ?: return null
+            javax.crypto.Mac.getInstance("HmacSHA256").apply { init(entry.secretKey) }
+        } catch (e: Exception) {
+            debugLog?.warn(TAG, "解锁通行密钥完整性 HMAC 密钥获取失败: ${e.javaClass.simpleName} - ${e.message}")
+            null
         }
     }
 
@@ -369,6 +432,16 @@ class KeystoreManager @Inject constructor(
          * 现由设备凭据绑定密钥取代；常量仅供 BiometricCredentialStorage 启动期清理旧别名，不再生成新密钥。
          */
         const val LEGACY_QUICK_UNLOCK_KEY_ALIAS = "com.keepasskey.quick_unlock_key"
+
+        /**
+         * 解锁通行密钥断言签名的强生物识别认证时间窗（秒，ISSUE-P1-09）。
+         * 快速解锁流程内 BiometricPrompt 授权解封后立即执行断言签名，30s 窗口
+         * 覆盖正常流程；窗口外签名抛 UserNotAuthenticatedException，fail-closed。
+         */
+        const val UNLOCK_PASSKEY_AUTH_VALIDITY_SECONDS = 30
+
+        /** 解锁通行密钥登记记录防篡改 HMAC 密钥别名（ISSUE-P1-09） */
+        const val UNLOCK_PASSKEY_INTEGRITY_KEY_ALIAS = "com.keepasskey.unlock_passkey_integrity"
 
         /**
          * 快速解锁密钥的授权集合：仅 Class 3 强生物识别（per-operation）。

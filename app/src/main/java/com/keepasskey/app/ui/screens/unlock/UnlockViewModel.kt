@@ -14,6 +14,7 @@ import com.keepasskey.app.security.BiometricCredentialStorage
 import com.keepasskey.app.security.BiometricResult
 import com.keepasskey.app.security.ThrottleGate
 import com.keepasskey.app.security.UnlockAuthPolicy
+import com.keepasskey.app.security.UnlockPasskeyGate
 import com.keepasskey.app.security.UnlockPasskeyManager
 import com.keepasskey.app.security.UnlockThrottleManager
 import com.keepasskey.app.ui.model.StringsProvider
@@ -440,27 +441,29 @@ class UnlockViewModel @Inject constructor(
     }
 
     /**
-     * 解锁通行密钥断言验证（TASK-18）。
+     * 解锁通行密钥断言验证（TASK-18 / ISSUE-P1-09 fail-closed 化）。
      *
-     * 已登记（含本次功能上线后新登记）：断言未通过一律 fail-closed——清除封印凭据与
-     * 通行密钥登记（视为凭据被克隆/篡改），引导用户以主密码完整解锁后重新登记。
-     * 兼容策略：本功能上线前登记的旧凭据无通行密钥记录——本次跳过断言（不破坏既有
-     * 用户）并后台补登记，下次解锁起强制断言。
+     * 每次快速解锁生成一次性随机 challenge，要求硬件私钥（已绑定强生物识别认证
+     * 时间窗）对 AuthenticatorData || SHA-256(clientDataJSON) 签名，并本地复核
+     * clientDataJSON 规范性（type/challenge/origin）、rpIdHash 归属与 signCount
+     * 严格单调。
+     *
+     * 未登记（记录被删/被篡改/未登记，[UnlockPasskeyGate.NotEnrolled]）与硬件
+     * 签名失败一律 fail-closed——清除封印凭据与通行密钥登记（视为凭据被克隆/
+     * 篡改），引导用户以主密码完整解锁后重新登记。原「旧凭据兼容通道」（未登记
+     * 即跳过断言并后台补登记）已移除：任何能写应用私有数据者删除 3 个 key 即可
+     * 一步绕过反克隆断言，静默放行语义不可接受。
      */
-    private suspend fun verifyUnlockPasskeyOrCompat(
+    private suspend fun verifyUnlockPasskey(
         storage: BiometricCredentialStorage,
         dbId: String
     ): Boolean {
         val passkeyManager = unlockPasskeyManager ?: return true
-        if (!passkeyManager.isEnrolled(dbId)) {
-            // 旧凭据兼容通道：后台补登记，下次解锁起强制断言
-            debugLog.warn(TAG, "旧快速解锁凭据无通行密钥记录，本次跳过断言并后台补登记")
-            passkeyManager.enroll(dbId)
-            return true
-        }
-        val assertion = passkeyManager.assertUnlock(dbId)
-        if (assertion == null || !passkeyManager.verifyAndCommit(dbId, assertion)) {
-            debugLog.warn(TAG, "解锁通行密钥断言未通过，fail-closed 拒绝快速解锁")
+        val challenge = passkeyManager.newChallenge()
+        val gate = passkeyManager.assertUnlock(dbId, challenge)
+        val assertion = (gate as? UnlockPasskeyGate.AssertionReady)?.assertion
+        if (assertion == null || !passkeyManager.verifyAndCommit(dbId, assertion, challenge)) {
+            debugLog.warn(TAG, "解锁通行密钥断言不可用/未通过（gate=$gate），fail-closed 拒绝快速解锁")
             storage.clearCredential(dbId)
             passkeyManager.clear(dbId)
             _uiState.update {
@@ -557,9 +560,10 @@ class UnlockViewModel @Inject constructor(
                         viewModelScope.launch {
                             try {
                                 val decryptedBytes = cipher.doFinal(cred.second)
-                                // TASK-18：生物识别门控通过后，执行解锁通行密钥断言
-                                // （硬件私钥签名 + 公钥验证 + signCount 严格单调防克隆，fail-closed）
-                                if (!verifyUnlockPasskeyOrCompat(storage, dbId)) {
+                                // TASK-18 / ISSUE-P1-09：生物识别门控通过后，执行解锁通行密钥断言
+                                // （随机 challenge + clientDataJSON + 认证绑定私钥签名 + signCount
+                                // 严格单调防克隆；记录缺失/被删与签名失败均 fail-closed）
+                                if (!verifyUnlockPasskey(storage, dbId)) {
                                     return@launch
                                 }
                                 // P1-13 整改：精确按 CharBuffer.remaining() 拷贝字符，杜绝后备数组尾零残留导致非 ASCII 主密码解锁失败

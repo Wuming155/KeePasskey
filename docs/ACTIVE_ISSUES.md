@@ -17,25 +17,7 @@
 
 ---
 
-## P1 高危与核心功能问题（2 项）
-
-### ISSUE-P1-09 (ZT-09): 快速解锁反克隆断言可被一步绕过且自证同源
-- **优先级**：P1（验证可伪造）
-- **分类**：WebAuthn 本地断言 / 存储完整性
-- **背景与现象**：
-  `UnlockViewModel.kt:372-378`：`isEnrolled(dbId)` 为 false 时**直接 `return true` 跳过断言**并后台补登记。`isEnrolled()` 仅判断 SharedPreferences 中是否存在 passkey 记录（`UnlockPasskeyManager.kt:67-68`）。任何能写应用私有数据者（root / ADB 备份恢复 / 物理取证）删除 3 个 key 即可让断言层彻底失效并被静默重新登记——`signCount` 的 fail-closed 反克隆设计形同虚设。
-  此外该「断言」无 `challenge`、无 `clientDataJSON`，私钥 `setUserAuthenticationRequired(false)`（`KeystoreManager.kt:332,339`），证明方与验证方同进程同存储，**不构成第二因素**。
-- **整改依据**：FIDO2/WebAuthn 断言语义；零信任「验证不可被同一信任域内主体伪造」。
-- **涉及核心文件**：
-  - `app/src/main/java/com/keepasskey/app/ui/screens/unlock/UnlockViewModel.kt`
-  - `app/src/main/java/com/keepasskey/app/security/UnlockPasskeyManager.kt`
-  - `app/src/main/java/com/keepasskey/app/security/BiometricCredentialStorage.kt`
-- **验收标准**：
-  1. 未登记路径改为 fail-closed（拒绝快速解锁，引导主密码完整解锁），不得静默放行；
-  2. 断言引入随机 challenge 与 `clientDataJSON`，签名私钥绑定用户认证；
-  3. signCount 与登记状态写入防篡改存储，单测覆盖「记录被删 → 拒绝快速解锁」。
-
----
+## P1 高危与核心功能问题（1 项）
 
 ### ISSUE-P1-10 (ZT-10): release 包保留日志与异常 message 外传
 - **优先级**：P1（可见性侧信息泄漏）

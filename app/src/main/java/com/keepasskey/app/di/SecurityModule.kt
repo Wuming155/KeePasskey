@@ -1,6 +1,8 @@
 package com.keepasskey.app.di
 
+import com.keepasskey.app.security.BiometricCredentialStorage
 import com.keepasskey.app.security.SharedPrefsUnlockThrottleStore
+import com.keepasskey.app.security.UnlockPasskeyStore
 import com.keepasskey.app.security.UnlockThrottleStore
 import dagger.Binds
 import dagger.Module
@@ -14,6 +16,10 @@ import javax.inject.Singleton
  * ISSUE-P1-04：将主密码解锁失败节流存储 [UnlockThrottleStore] 绑定到持久化实现
  * [SharedPrefsUnlockThrottleStore]，确保失败计数与锁定截止跨冷启动持久化
  * （杜绝「杀进程即重置计数」的绕过路径）。内存实现仅供 JVM 单测直接构造使用。
+ *
+ * ISSUE-P1-09：将解锁通行密钥登记记录存储 [UnlockPasskeyStore] 绑定到
+ * [BiometricCredentialStorage]（含硬件 HMAC 防篡改封存）；
+ * JVM 单测注入内存实现直接构造 [UnlockPasskeyManager]。
  */
 @Module
 @InstallIn(SingletonComponent::class)
@@ -24,4 +30,10 @@ abstract class SecurityModule {
     abstract fun bindUnlockThrottleStore(
         impl: SharedPrefsUnlockThrottleStore
     ): UnlockThrottleStore
+
+    @Binds
+    @Singleton
+    abstract fun bindUnlockPasskeyStore(
+        impl: BiometricCredentialStorage
+    ): UnlockPasskeyStore
 }

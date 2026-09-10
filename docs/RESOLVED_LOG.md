@@ -277,6 +277,16 @@
     4. UI 文案同步：`unlock_biometric_primary_btn`「使用生物识别 / 锁屏凭据解锁」→「使用生物识别解锁」，相关注释与 KDoc 全量更新。
   - **测试证据**：新增 `app/src/test/java/com/keepasskey/app/security/UnlockAuthPolicyTest.kt` 8 例——认证器集合断言（密钥生成侧 / 认证请求侧均为纯 `BIOMETRIC_STRONG`、`AUTH_DEVICE_CREDENTIAL` / `DEVICE_CREDENTIAL` 位恒为 0、两侧「是否含设备凭据」语义一致）与封印闸门分支（AVAILABLE 放行；NO_HARDWARE / HARDWARE_UNAVAILABLE / NOT_ENROLLED / SECURITY_UPDATE_REQUIRED 一律拒绝）。全量回归 **610 例：597 通过 / 0 失败 / 13 跳过**（app 201 → 209）。
 
+- **ZT-09（ISSUE-P1-09，快速解锁反克隆断言可被一步绕过且自证同源）**：已修复（2026-09-10）。
+  - **缺陷**：`UnlockViewModel.verifyUnlockPasskeyOrCompat` 在 `isEnrolled(dbId)` 为 false 时**直接 `return true` 跳过断言**并后台补登记，而 `isEnrolled()` 仅判 SharedPreferences 中是否存在 passkey 记录（3 个 key）——任何能写应用私有数据者（root / ADB 备份恢复 / 物理取证）删除记录即让 signCount 反克隆断言彻底失效并被静默重新登记；此外断言无 `challenge` / 无 `clientDataJSON`，签名私钥 `setUserAuthenticationRequired(false)`，signCount 与登记记录落明文 XML 可被任意改写。
+  - **整改依据**：FIDO2/WebAuthn 断言语义；零信任「验证不可被同一信任域内主体伪造」。
+  - **整改**：
+    1. **未登记 fail-closed 化**：`UnlockViewModel` 移除「旧凭据兼容通道」，`verifyUnlockPasskey` 将 `UnlockPasskeyGate.NotEnrolled`（未登记 / 记录被删 / 记录被篡改）与 `UnlockPasskeyGate.SigningFailed`（硬件签名失败）一律 fail-closed——清除封印凭据与通行密钥登记，回退 STANDARD 模式并提示「请使用主密码解锁后重新登记」，绝不静默放行；
+    2. **断言引入随机 challenge 与 clientDataJSON**：`UnlockPasskeyManager` 新增 `newChallenge()`（32 字节一次性随机）与 `buildClientDataJson`（本地确定性序列化 `{"type":"webauthn.get","challenge":<Base64URL 无填充>,"origin":"https://keepasskey.local"}`）；签名覆盖范围升级为 `AuthenticatorData || SHA-256(clientDataJSON)`（对齐 WebAuthn），验证侧按预期 challenge 重建 clientDataJSON 逐字节比对（type/challenge/origin 全部不可变造），重放旧断言因 challenge 不匹配 fail-closed；`assertUnlock` / `verifyAndCommit` 均要求调用方（验证方）传入 challenge，门控结果以 `UnlockPasskeyGate` 封装（`AssertionReady` / `NotEnrolled` / `SigningFailed`）；
+    3. **签名私钥绑定用户认证**：`KeystoreManager.getOrCreateUnlockPasskeyPair` 改 `setUserAuthenticationParameters(UNLOCK_PASSKEY_AUTH_VALIDITY_SECONDS=30, AUTH_BIOMETRIC_STRONG)` + `setUnlockedDeviceRequired(true)`——快速解锁流程内 BiometricPrompt（Class 3）授权解封后的时间窗内方可签名，窗口外签名抛 `UserNotAuthenticatedException` fail-closed；存量「未绑定用户认证」旧密钥经 `KeyInfo` 探测自动轮换重建（公钥随之失效 → 断言 fail-closed → 主密码完整解锁后重登记），杜绝无认证密钥游离；
+    4. **signCount 与登记状态防篡改存储**：`KeystoreManager` 新增 `getOrCreateUnlockPasskeyIntegrityMac()`（硬件 HmacSHA256，不可导出）；`BiometricCredentialStorage` 登记记录（公钥/credentialId/signCount）落盘时计算绑定 databaseId 的完整性 MAC（`_passkey_mac`），读取时校验——MAC 缺失/不匹配一律按记录缺失处理（fail-closed）；`commitSignCount` 同步重算 MAC，杜绝「改计数留旧 MAC」；存储抽象为 `UnlockPasskeyStore` 接口（`SecurityModule` @Binds 绑定，对齐 `UnlockThrottleStore` 模式）。诚实边界：同 UID 任意代码执行者可调用 Keystore 重算 MAC，该威胁域本层不设防（与封印密钥同级），但文件级写入 / ADB 备份恢复已无法在绕过校验的前提下篡改或删除记录。
+  - **测试证据**：`UnlockPasskeyAssertionTest` 重构为 9 例（合法断言 / 签名篡改 / signCount 回退克隆信号 / rpIdHash 归属 / **challenge 不匹配重放拒绝** / **clientDataJSON 篡改拒绝（含改签后仍拒绝）** / clientDataJSON 规范格式 / AuthenticatorData 37 字节规范 / 非 EC 公钥 fail-closed）；新增 `UnlockPasskeyManagerGateTest.kt` 7 例 + `FakeUnlockPasskeyStore.kt`——**「登记记录被删 → 断言拒绝（NotEnrolled）」**、未登记库拒绝、记录缺失 `verifyAndCommit` 拒绝、记录存在但硬件签名不可用 SigningFailed（fail-closed 不回退放行）、challenge 长度非法拒绝、challenge 一次性随机、enroll 失败不落任何记录。全量回归 **620 例：607 通过 / 0 失败 / 13 跳过**（app 209 → 219）。
+
 ### 2.6 凭据提供者端到端契约（P1-01）
 
 > 来源：2026-09-09 Android 16+ 真机实测回归（系统设置内已可勾选启用 KeePasskey，但第三方应用调起后握手/响应失败）。
