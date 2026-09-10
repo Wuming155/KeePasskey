@@ -74,7 +74,7 @@
     <string name="unlock_btn_biometric">使用系统指纹或面容快速解锁</string>
     <string name="unlock_switch_vault">切换密码库</string>
     <string name="unlock_status_local">本地已加密存储 • 关联 WebDAV 云端备份</string>
-    <string name="unlock_biometric_primary_btn">使用生物识别 / 锁屏凭据解锁</string>
+    <string name="unlock_biometric_primary_btn">使用生物识别解锁</string>
     <string name="unlock_empty_vault_title">欢迎使用 KeePasskey</string>
     <string name="unlock_empty_vault_subtitle">尚未选择或创建密码库，请从下方选择开始方式：</string>
     <string name="unlock_empty_create_btn">新建密码库</string>
@@ -321,7 +321,7 @@
     <string name="edit_override_url_hint">Override URL（自动填充匹配覆盖）</string>
     <string name="edit_extra_section">高级属性</string>
 
-    <!-- 解锁页 快速解锁 (Wave 12：强生物识别或设备锁屏凭据经硬件密钥承载，自研 PIN 已移除) -->
+    <!-- 解锁页 快速解锁 (ISSUE-P1-08：仅强生物识别经硬件密钥承载，锁屏凭据与自研 PIN 均已移除) -->
     <string name="unlock_quick_title">QuickUnlock 极速解锁</string>
     <string name="unlock_quick_subtitle">已通过硬件 KeyStore 保全加密主密钥</string>
     <string name="unlock_readonly">只读打开</string>

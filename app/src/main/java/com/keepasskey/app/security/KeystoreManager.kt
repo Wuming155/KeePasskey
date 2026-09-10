@@ -27,10 +27,11 @@ import dagger.hilt.android.qualifiers.ApplicationContext
  * - 生物识别密钥启用 setUserAuthenticationRequired 要求 Class 3 强生物识别验证（per-operation 认证，
  *   无时间有效期，配合 BiometricPrompt CryptoObject 逐次授权）；
  * - 纯生物识别密钥启用 setInvalidatedByBiometricEnrollment(true)，系统录入/清空指纹时自动吊销密钥，防范物理设备攻击；
- * - Wave 12：快速解锁密钥改为「强生物识别 或 设备锁屏凭据」双重授权绑定
- *   （setUserAuthenticationParameters(0, AUTH_BIOMETRIC_STRONG | AUTH_DEVICE_CREDENTIAL)），
- *   取代旧版「非认证密钥 + 应用内 PIN 校验器」方案——爆破门槛从自选应用 PIN 提升到系统锁屏凭据强度，
- *   且用户认证约束可由安全硬件强制执行（isUserAuthenticationRequirementEnforcedBySecureHardware）；
+ * - Wave 12：快速解锁密钥改为统一认证绑定密钥。ISSUE-P1-08 起收敛为「**仅强生物识别**」授权
+ *   （setUserAuthenticationParameters(0, AUTH_BIOMETRIC_STRONG)）：
+ *   设备锁屏凭据（PIN/图案/密码）不再可解封（弱 PIN 拉低爆破门槛），
+ *   且纯生物识别密钥的 setInvalidatedByBiometricEnrollment(true) 得以生效——
+ *   系统录入/清空指纹时自动吊销密钥，新增指纹不会复用既有封印凭据；
  * - 认证绑定密钥启用 setUnlockedDeviceRequired(true)（设备须处于解锁态方可使用，官方推荐的
  *   与认证要求互补的纵深约束；Android 12–14 的已知缺陷在 15+ 修复，本项目 minSdk 36 恒安全）。
  *   非认证密钥（如 WebDAV 同步凭据封印密钥）不启用——后台同步需在锁屏态可用；
@@ -186,19 +187,22 @@ class KeystoreManager @Inject constructor(
     }
 
     /**
-     * 获取或生成「生物识别 + 设备锁屏凭据」双重授权绑定的硬件密钥（Wave 12 统一快速解锁专用）。
+     * 获取或生成快速解锁封印硬件密钥（Wave 12 统一；ISSUE-P1-08 起为「仅强生物识别」授权）。
      *
      * 官方语义（Android Keystore 文档）：
-     * - `setUserAuthenticationParameters(0, AUTH_BIOMETRIC_STRONG or AUTH_DEVICE_CREDENTIAL)`：
-     *   每次加解密操作均需经 BiometricPrompt 以强生物识别**或**设备锁屏凭据（PIN/图案/密码）单独授权；
+     * - `setUserAuthenticationParameters(0, AUTH_BIOMETRIC_STRONG)`：
+     *   每次加解密操作均需经 BiometricPrompt 以 Class 3 强生物识别单独授权；
+     *   设备锁屏凭据（PIN/图案/密码）不再可解封——锁屏弱 PIN 会拉低爆破门槛（OWASP MASVS-AUTH-8）；
      * - 解锁加密操作时请求的认证器集合必须与密钥生成时一致（官方硬性要求），
-     *   解封方须以 `BIOMETRIC_STRONG | DEVICE_CREDENTIAL` 发起（见 BiometricAuthManager.UNLOCK_AUTHENTICATORS）；
-     * - `setInvalidatedByBiometricEnrollment` 对含 AUTH_DEVICE_CREDENTIAL 的密钥被系统忽略
-     *   （锁屏凭据变更不触发失效），故本密钥不设置该标志，如实反映官方语义。
+     *   解封方须以 `BIOMETRIC_STRONG` 发起（见 BiometricAuthManager.UNLOCK_AUTHENTICATORS）；
+     * - `setInvalidatedByBiometricEnrollment(true)` 对纯生物识别密钥生效：
+     *   系统录入/清空指纹即吊销密钥（KeyPermanentlyInvalidated），新增指纹不会复用既有封印凭据
+     *   （该标志对含 AUTH_DEVICE_CREDENTIAL 的密钥被系统忽略，故必须收敛为纯生物识别授权）。
      *
-     * 密钥授权在生成后不可变（官方约束）→ 旧版本以仅 AUTH_BIOMETRIC_STRONG 生成的同名密钥
-     * 经 [KeyInfo.getUserAuthenticationType] 探测后自动删除重建，旧封印凭据随之失效
-     * （fail-safe 迁移：用户下次以主密码完整解锁后自动重新封印，对齐 Wave 11 H4 模式）。
+     * 密钥授权在生成后不可变（官方约束）→ 旧版本以 AUTH_BIOMETRIC_STRONG | AUTH_DEVICE_CREDENTIAL
+     * 生成的同名密钥经 [KeyInfo.getUserAuthenticationType] **全等**探测后自动删除重建，
+     * 旧封印凭据随之失效（fail-safe 迁移：解封失败由 UnlockViewModel 清除陈旧凭据，
+     * 用户下次以主密码完整解锁后自动重新封印，对齐 Wave 11 H4 模式）。
      */
     fun getOrCreateDeviceCredentialKey(alias: String): SecretKey {
         if (keyStore.containsAlias(alias)) {
@@ -207,8 +211,10 @@ class KeystoreManager @Inject constructor(
                 val matchesRequirement = try {
                     val factory = KeyFactory.getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEY_STORE)
                     val info = factory.getKeySpec(entry.secretKey, KeyInfo::class.java)
+                    // ISSUE-P1-08：全等比较（而非位包含）——旧「BIOMETRIC_STRONG | DEVICE_CREDENTIAL」密钥
+                    // 虽含所需位但允许锁屏凭据解封，必须判定为不匹配并迁移重建为纯生物识别密钥
                     info.isUserAuthenticationRequired &&
-                        (info.userAuthenticationType and REQUIRED_AUTHENTICATOR_TYPES) == REQUIRED_AUTHENTICATOR_TYPES
+                        info.userAuthenticationType == REQUIRED_AUTHENTICATOR_TYPES
                 } catch (_: Exception) {
                     // 规格探测失败按不匹配处理，触发迁移重建（fail-safe）
                     false
@@ -223,7 +229,8 @@ class KeystoreManager @Inject constructor(
     }
 
     /**
-     * 生成全新的设备凭据绑定硬件密钥：StrongBox 安全元件优先，不可用自动回退 TEE。
+     * 生成全新的快速解锁封印硬件密钥：StrongBox 安全元件优先，不可用自动回退 TEE。
+     * 纯生物识别授权 → setInvalidatedByBiometricEnrollment(true) 生效（ISSUE-P1-08）。
      */
     fun generateNewDeviceCredentialKey(alias: String): SecretKey {
         if (isStrongBoxSupported) {
@@ -231,7 +238,7 @@ class KeystoreManager @Inject constructor(
                 return generateKeyInternal(
                     alias,
                     requireUserAuth = true,
-                    invalidateOnBiometricEnrollment = false,
+                    invalidateOnBiometricEnrollment = true,
                     strongBox = true,
                     authenticatorTypes = REQUIRED_AUTHENTICATOR_TYPES
                 )
@@ -242,15 +249,15 @@ class KeystoreManager @Inject constructor(
         return generateKeyInternal(
             alias,
             requireUserAuth = true,
-            invalidateOnBiometricEnrollment = false,
+            invalidateOnBiometricEnrollment = true,
             strongBox = false,
             authenticatorTypes = REQUIRED_AUTHENTICATOR_TYPES
         )
     }
 
     /**
-     * 初始化快速解锁凭据封印（加密）Cipher——设备凭据绑定密钥，
-     * 返回的 Cipher 须经 BiometricPrompt（BIOMETRIC_STRONG | DEVICE_CREDENTIAL）授权后方可 doFinal。
+     * 初始化快速解锁凭据封印（加密）Cipher——纯生物识别授权密钥，
+     * 返回的 Cipher 须经 BiometricPrompt（BIOMETRIC_STRONG）授权后方可 doFinal。
      */
     fun initDeviceCredentialEncryptCipher(alias: String): Cipher {
         val key = getOrCreateDeviceCredentialKey(alias)
@@ -364,7 +371,8 @@ class KeystoreManager @Inject constructor(
         const val LEGACY_QUICK_UNLOCK_KEY_ALIAS = "com.keepasskey.quick_unlock_key"
 
         /**
-         * 快速解锁密钥的授权集合：强生物识别 或 设备锁屏凭据（per-operation）。
+         * 快速解锁密钥的授权集合：仅 Class 3 强生物识别（per-operation）。
+         * ISSUE-P1-08：设备锁屏凭据（PIN/图案/密码）不再可解封（弱凭据降级 + 生物录入失效标志被忽略）。
          *
          * P1 整改：不再在本处独立书写位或表达式，改由 [UnlockAuthPolicy] 单点声明语义——
          * 官方要求「解锁加密操作请求的认证器集合必须与密钥生成时一致」，

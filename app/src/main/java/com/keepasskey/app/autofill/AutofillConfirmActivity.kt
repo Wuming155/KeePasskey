@@ -45,7 +45,7 @@ class AutofillConfirmActivity : FragmentActivity() {
         val subtitle = getString(R.string.autofill_confirm_biometric_subtitle, credentialTitle)
         val manualHint = getString(R.string.autofill_confirm_manual_hint, credentialTitle)
 
-        // 优先系统级认证（强生物识别 或 设备锁屏凭据，与快速解锁同一认证器集合）；
+        // 优先系统级认证（强生物识别，与快速解锁同一认证器集合——ISSUE-P1-08 收敛为不含锁屏凭据）；
         // 设备无对应硬件/未录入时退化为受保护窗口内的手动确认（单次明确点选）
         when (biometricAuthManager.canAuthenticate(this, BiometricAuthManager.UNLOCK_AUTHENTICATORS)) {
             BiometricStatus.AVAILABLE -> {

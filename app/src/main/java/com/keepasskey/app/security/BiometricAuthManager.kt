@@ -34,9 +34,11 @@ sealed interface BiometricResult {
  * AndroidX 生物识别管理器。
  * 封装系统级 BiometricPrompt，支持硬件 CryptoObject 对接、免输主密码解封主数据库。
  *
- * Wave 12 统一快速解锁语义：
+ * Wave 12 统一快速解锁语义（ISSUE-P1-08 收敛为「仅强生物识别」）：
  * - 认证器集合参数化；快速解锁统一使用 [UNLOCK_AUTHENTICATORS]
- *   （`BIOMETRIC_STRONG | DEVICE_CREDENTIAL`）：强生物识别或设备锁屏凭据（PIN/图案/密码）任一即可授权，
+ *   （`BIOMETRIC_STRONG`，不含设备锁屏凭据——锁屏弱 PIN 会拉低解封门槛，
+ *   且含 AUTH_DEVICE_CREDENTIAL 的密钥被系统忽略生物录入失效标志）：
+ *   仅 Class 3 强生物识别可授权，
  *   与 KeystoreManager.REQUIRED_AUTHENTICATOR_TYPES（密钥生成侧授权集合）严格一致——
  *   官方硬性要求「解锁加密操作请求的认证器集合必须与密钥生成时一致」；
  * - 官方互斥约束：允许 DEVICE_CREDENTIAL 时系统以「使用锁屏凭据」入口取代负向按钮，
@@ -169,7 +171,8 @@ class BiometricAuthManager @Inject constructor(
 
     companion object {
         /**
-         * 快速解锁统一认证器集合：强生物识别 或 设备锁屏凭据（PIN/图案/密码）。
+         * 快速解锁统一认证器集合：仅 Class 3 强生物识别。
+         * ISSUE-P1-08：设备锁屏凭据（PIN/图案/密码）不再可解封（弱凭据降级 + 生物录入失效标志被忽略）。
          *
          * P1 整改：不再在本处独立书写位或表达式（原实现与密钥生成侧双写、靠注释维系），
          * 改由 [UnlockAuthPolicy] 统一声明语义后投影——两侧从此不可能漂移。

@@ -1,6 +1,7 @@
 package com.keepasskey.app.ui.screens.unlock
 
 import android.security.keystore.KeyPermanentlyInvalidatedException
+import androidx.biometric.BiometricManager
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -12,6 +13,7 @@ import com.keepasskey.app.security.BiometricAuthManager
 import com.keepasskey.app.security.BiometricCredentialStorage
 import com.keepasskey.app.security.BiometricResult
 import com.keepasskey.app.security.ThrottleGate
+import com.keepasskey.app.security.UnlockAuthPolicy
 import com.keepasskey.app.security.UnlockPasskeyManager
 import com.keepasskey.app.security.UnlockThrottleManager
 import com.keepasskey.app.ui.model.StringsProvider
@@ -44,7 +46,7 @@ sealed interface UnlockEvent {
 /**
  * 解锁页状态容器 ViewModel，遵循谷歌官方 Recommended app architecture 规范。
  * 支持主密码安全解锁（CharArray 显式擦除）与统一快速解锁
- * （强生物识别或设备锁屏凭据经硬件 Keystore 解封，Wave 12 起取代自研 PIN 体系）。
+ * （强生物识别经硬件 Keystore 解封，ISSUE-P1-08 起不再允许锁屏凭据解封）。
  */
 @HiltViewModel
 class UnlockViewModel @Inject constructor(
@@ -92,7 +94,7 @@ class UnlockViewModel @Inject constructor(
                 val active = databases.firstOrNull { it.isActive } ?: databases.firstOrNull()
                 if (active != null) {
                     activeDatabaseId = active.id
-                    // Wave 12：快速解锁可用性 = 统一封印存储中存在本库凭据（生物识别/设备锁屏凭据共用）
+                    // Wave 12：快速解锁可用性 = 统一封印存储中存在本库凭据（ISSUE-P1-08 起仅强生物识别路径）
                     val hasSealedCredential = biometricCredentialStorage?.hasEncryptedCredential(active.id) == true
                     _uiState.update {
                         it.copy(
@@ -329,13 +331,16 @@ class UnlockViewModel @Inject constructor(
     /**
      * 若开启生物识别且尚未登记，请求一次 BiometricPrompt 授权后封印主凭据。
      *
-     * 关键约束：快速解锁硬件密钥以
-     * `setUserAuthenticationParameters(0, AUTH_BIOMETRIC_STRONG | AUTH_DEVICE_CREDENTIAL)` 生成——
-     * **每次使用**（含加密）都必须先取得一次强生物识别或设备锁屏凭据授权（Wave 12 设备凭据绑定）。原实现直接对未授权 Cipher 调 `doFinal()`，
+     * 关键约束（ISSUE-P1-08）：快速解锁硬件密钥以
+     * `setUserAuthenticationParameters(0, AUTH_BIOMETRIC_STRONG)` 生成（**仅强生物识别**授权，
+     * 设备锁屏凭据不再可解封）——**每次使用**（含加密）都必须先取得一次 Class 3 强生物识别授权。
+     * 原实现直接对未授权 Cipher 调 `doFinal()`，
      * 真机必然抛 `UserNotAuthenticatedException` 并被 `catch (ignored)` 吞掉，
      * 导致「生物识别开关已开、凭据从未入库、下次冷启动无生物入口」的静默功能失效
      * （与 Wave 11 H4 QuickUnlock 同构故障）。
      * 故本方法改为：**先弹 BiometricPrompt 取得授权 Cipher，再在成功回调内执行封印**。
+     * 封印前另经 [UnlockAuthPolicy.canSeal] 校验设备具备「硬件存在且已录入」的强生物识别，
+     * 弱凭据设备禁用封印（fail-closed），绝不降级到锁屏凭据路径。
      *
      * 敏感数据设计考量与边界说明 (Wave 3-E P2-18)：
      * 消费 [CharArray]，经 CharBuffer 转为临时 UTF-8 字节并在 finally 块中立即显式清零，
@@ -361,6 +366,17 @@ class UnlockViewModel @Inject constructor(
 
         if (activity == null) {
             debugLog.warn(TAG, "生物识别凭据未登记：缺少宿主 Activity，本次跳过（fail-closed，不影响解锁）")
+            return
+        }
+
+        // ISSUE-P1-08：封印闸门——设备须具备「硬件存在且已录入」的 Class 3 强生物识别，
+        // 无强生物（含未录入）时禁用封印（fail-closed），不降级到弱锁屏凭据路径
+        val biometricStatus = authManager.canAuthenticate(
+            activity,
+            BiometricManager.Authenticators.BIOMETRIC_STRONG
+        )
+        if (!UnlockAuthPolicy.canSeal(biometricStatus)) {
+            debugLog.warn(TAG, "生物识别凭据未登记：设备无可用强生物识别（$biometricStatus），禁用封印（fail-closed）")
             return
         }
 
@@ -575,9 +591,16 @@ class UnlockViewModel @Inject constructor(
                                     decryptedBytes.fill(0)
                                 }
                             } catch (e: Exception) {
+                                // ISSUE-P1-08 迁移容错：密钥经生物录入变更吊销（KeyPermanentlyInvalidated）
+                                // 或旧「BIOMETRIC_STRONG|DEVICE_CREDENTIAL」密钥迁移重建后，
+                                // 旧封印密文解密必然失败（AEADBadTagException 等）——清除陈旧凭据，
+                                // 下次主密码解锁自动重新封印，杜绝「永远解不开又永不重登记」的死循环态
+                                storage.clearCredential(dbId)
+                                unlockPasskeyManager?.clear(dbId)
                                 _uiState.update {
                                     it.copy(
                                         isLoading = false,
+                                        isQuickUnlockAvailable = false,
                                         errorMessage = UiMessage(R.string.unlock_error_invalid_password)
                                     )
                                 }

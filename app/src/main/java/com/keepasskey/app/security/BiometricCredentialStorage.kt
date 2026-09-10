@@ -16,12 +16,13 @@ data class UnlockPasskeyRecord(
 /**
  * 经 Android Keystore 硬件加密的统一快速解锁主凭据安全存储仓库（Wave 12 收敛）。
  *
- * 强生物识别与设备锁屏凭据两条快速解锁路径共用本存储（与 per-database 硬件密钥别名一一对应），
+ * 快速解锁路径共用本存储（与 per-database 硬件密钥别名一一对应），
  * 存储内容为 AES-256-GCM 密文与初始化向量 (IV)——即使设备 root 或读取明文 XML 也无法解密，
- * 必须通过硬件 TEE/StrongBox 经 BiometricPrompt（强生物识别或设备锁屏凭据授权）后方可解包。
+ * 必须通过硬件 TEE/StrongBox 经 BiometricPrompt（Class 3 强生物识别授权，
+ * ISSUE-P1-08 起不含设备锁屏凭据）后方可解包。
  *
  * Wave 12 迁移说明：旧版 QuickUnlock PIN 体系（自研 PBKDF2 校验器 + 非认证密钥封印 + 应用级熔断）
- * 已整体移除，快速解锁安全门槛改由「设备凭据绑定硬件密钥 + 系统锁屏凭据」承载；
+ * 已整体移除，快速解锁安全门槛改由「纯生物识别授权硬件密钥 + 系统强生物识别」承载；
  * 首次构造时清理遗留 prefs 文件与遗留 Keystore 别名（fail-safe：旧封印凭据随之失效，
  * 用户下次以主密码完整解锁后自动重新封印）。
  *

@@ -12,7 +12,7 @@ This file provides guidance to AI coding agents when working with code in this r
 | 维度 | 数值 / 状态 | 官方依据与说明 |
 |---|---|---|
 | **Git HEAD** | 代码基线 `4235f16`（TASK-53 Base64/Hex 整洁度） | 分支 `main` 与 `origin/main` 同步 |
-| **测试基线** | **602 个单元测试用例**（app 201 / core 32 / crypto 61 / database 163 / sync 145，其中 sync 145 含 12 例联调跳过 + 1 例 Windows 无 POSIX 权限视图跳过）：**589 通过、0 失败、13 跳过**（另有 Rust 侧 `cargo test` 9 例，见 §5） | `./gradlew test` 全模块执行；跳过的 12 例为 `LiveSyncServersTest` 真实联调用例（需先起 `tools/local-sync` 服务并加 `-DliveSyncTest`）；crypto 61 含 4 例宿主侧原生 JNI 运行时验证（无 cargo 宿主库时 `Assume` 跳过，见 §5） |
+| **测试基线** | **610 个单元测试用例**（app 209 / core 32 / crypto 61 / database 163 / sync 145，其中 sync 145 含 12 例联调跳过 + 1 例 Windows 无 POSIX 权限视图跳过）：**597 通过、0 失败、13 跳过**（另有 Rust 侧 `cargo test` 9 例，见 §5） | `./gradlew test` 全模块执行；跳过的 12 例为 `LiveSyncServersTest` 真实联调用例（需先起 `tools/local-sync` 服务并加 `-DliveSyncTest`）；crypto 61 含 4 例宿主侧原生 JNI 运行时验证（无 cargo 宿主库时 `Assume` 跳过，见 §5） |
 | **构建状态** | `assembleDebug` + `assembleRelease` (R8) 全量通过 | **AGP 9.4.0 / Gradle 9.7.1** / Kotlin 2.4.10（经 buildscript classpath 锚定内置 KGP）/ Hilt 2.60.1 / **KSP 2.3.11** |
 | **系统基线** | **minSdk 36**, **compileSdk 37**, targetSdk 36 | 仅针对 Android 16+ 深度优化，固化无旧版垫片决策；compileSdk 37（Compose BOM 2026.08.00 + M3 Expressive） |
 | **传输安全防线** | 全站强制 HTTPS（`network_security_config.xml` 禁明文 + OkHttp TLS-only），零证书固定 | 对齐 Google Developer Knowledge `pinning not recommended` 指南 |
@@ -83,7 +83,7 @@ KeePasskey 是一款使用原生 Kotlin 开发的现代化 Android 密码管理�
 - `.\gradlew.bat assembleDebug` — 编译全部模块
 - `.\gradlew.bat :app:compileDebugKotlin` — 仅快速检查 Kotlin 编译
 - `.\gradlew.bat lint` — Android Lint
-- `.\gradlew.bat test` — 单元测试（全模块 `src/test`；当前 **602 例：589 通过 / 0 失败 / 13 跳过**，分布 app 201 / core 32 / crypto 61 / database 163 / sync 145，其中 12 例跳过项需 `-DliveSyncTest` 才启用，1 例为 Windows 无 POSIX 权限视图的缓存权限断言）
+- `.\gradlew.bat test` — 单元测试（全模块 `src/test`；当前 **610 例：597 通过 / 0 失败 / 13 跳过**，分布 app 209 / core 32 / crypto 61 / database 163 / sync 145，其中 12 例跳过项需 `-DliveSyncTest` 才启用，1 例为 Windows 无 POSIX 权限视图的缓存权限断言）
 - `.\gradlew.bat test -DliveSyncTest` — 追加启用 `LiveSyncServersTest` 真实联调用例（默认跳过 12 例，需先起 `tools/local-sync` 服务）
 - `.\gradlew.bat assembleRelease` — R8 混淆 + 资源收缩发布包（签名配置见 `keystore.properties.example` / 环境变量，未配置时产出未签名包）
 - **Rust 原生内核（ISSUE-P2-14 PoC Batch 1+）**：`cd crypto/src/main/rust && cargo test` — Rust Argon2 内核单测（当前 **9 例全绿**：IETF 官方 KAT ×4 + BC 冻结向量等价 + 参数闸门 + 确定性 + JNI 签名/闸门）

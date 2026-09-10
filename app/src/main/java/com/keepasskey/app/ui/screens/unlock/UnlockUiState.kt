@@ -31,7 +31,7 @@ data class UnlockUiState(
     // H4-只读整改：用户可选择以只读模式打开（会话期间写盘硬拒绝）
     val openReadOnly: Boolean = false,
 
-    // 快速解锁状态 (KP2A & KeePassDX 特性；Wave 12 起由强生物识别或设备锁屏凭据承载，自研 PIN 已移除)
+    // 快速解锁状态 (KP2A & KeePassDX 特性；ISSUE-P1-08 起仅由强生物识别承载，锁屏凭据不再可解封)
     // true 表示本库已封印快速解锁凭据（完整主密码解锁成功后自动登记）
     val isQuickUnlockAvailable: Boolean = false,
     // 是否存在已配置的可用数据库（无数据库时展示空状态开箱引导）

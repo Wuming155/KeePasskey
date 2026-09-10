@@ -265,6 +265,18 @@
     5. `SyncCache` 权限加固：新增 `clearAll()`（销毁全部远端路径的缓存内容），全部落盘文件（含 tmp）经 `restrictToOwnerOnly` 显式收敛——优先 POSIX 精确置位（文件 0600 / 目录 0700），非 POSIX 文件系统（Windows / FAT）降级为 `java.io` 仅属主语义；缓存目录名统一收口为 `SyncCache.CACHE_DIR_NAME`，`SyncCoordinator` 与 `SyncCacheEvictor` 共用，杜绝字面量漂移。
   - **测试证据**：新增 `app/src/test/java/com/keepasskey/app/sync/SyncCacheEvictorTest.kt` 5 例（锁库 / 关闭后缓存目录为空、未注册观察者时不越权清理、凭据清空连带销毁、目录缺失时幂等），`database/src/test/java/com/keepasskey/database/session/DatabaseSessionLockObserverTest.kt` 3 例（锁定与关闭均触发、重复注册幂等与注销、观察者抛异常不得阻断锁库），`SyncCacheTest` +3 例（单路径 `clear` 销毁全部后缀、`clearAll` 后目录为空、文件权限 0600 / 目录 0700，POSIX 视图不支持时按 `Assume` 跳过）。全量回归 **602 例：589 通过 / 0 失败 / 13 跳过**（app 196 → 201、database 160 → 163、sync 142 → 145；新增 1 例跳过为 Windows 无 POSIX 权限视图的权限断言）。
 
+- **ZT-08（ISSUE-P1-08，生物封印凭据可被系统 PIN 解封，且新增指纹不使既有凭据失效）**：已修复（2026-09-10）。
+  - **缺陷**：
+    1. `UnlockAuthPolicy` 认证器集合为 `BIOMETRIC_STRONG | DEVICE_CREDENTIAL`，且封存内容是主密码 UTF-8 明文 → 锁屏为 4/6 位 PIN 时解封门槛由 Class 3 生物识别退化为弱 PIN，攻破锁屏即等同获得主密码（OWASP MASVS-AUTH-8）；
+    2. `KeystoreManager` 快速解锁密钥 `setInvalidatedByBiometricEnrollment(false)`——官方对含 `AUTH_DEVICE_CREDENTIAL` 的密钥**忽略**该标志（锁屏凭据变更不触发失效），任何人新增自己的指纹后既有封印凭据照常可解密主密码。
+  - **整改依据**：Android Keystore 官方密钥失效语义；OWASP MASVS-AUTH-8。两条缺陷同源（DEVICE_CREDENTIAL 授权集合），收敛为「**仅强生物识别**」模式一并根治。
+  - **整改**：
+    1. `UnlockAuthPolicy`（`app/src/main/java/com/keepasskey/app/security/UnlockAuthPolicy.kt`）：`USE_DEVICE_CREDENTIAL = false`，密钥生成侧 `keystoreAuthTypes = AUTH_BIOMETRIC_STRONG`、认证请求侧 `promptAuthenticators = BIOMETRIC_STRONG`（自动填充确认页等复用 `UNLOCK_AUTHENTICATORS` 的路径同步收敛）；新增封印许可闸门 `canSeal(BiometricStatus)`——仅「硬件存在且已录入」的 Class 3 强生物识别可封印；
+    2. `KeystoreManager`（`app/src/main/java/com/keepasskey/app/security/KeystoreManager.kt`）：`generateNewDeviceCredentialKey` 改 `invalidateOnBiometricEnrollment = true`（纯生物识别密钥下该标志生效：录入/清空指纹即吊销密钥，新增指纹不再复用既有封印）；`getOrCreateDeviceCredentialKey` 迁移判据由「位包含」收紧为**全等** `info.userAuthenticationType == REQUIRED_AUTHENTICATOR_TYPES`，旧 `BIOMETRIC_STRONG|DEVICE_CREDENTIAL` 密钥自动删除重建（fail-safe：旧封印凭据随之失效，下次主密码解锁后重新封印）；
+    3. `UnlockViewModel`（`app/src/main/java/com/keepasskey/app/ui/screens/unlock/UnlockViewModel.kt`）：`requestBiometricEnrollment` 封印前经 `UnlockAuthPolicy.canSeal` 校验设备具备已录入强生物识别，弱凭据设备禁用封印（fail-closed，不降级锁屏凭据路径）；`unlockWithBiometric` 解密异常兜底分支补 `storage.clearCredential(dbId)`——密钥迁移重建后旧密文解密必然失败（AEADBadTagException），清除陈旧凭据使下次主密码解锁自动重登记，杜绝「永远解不开又永不重登记」死循环态；
+    4. UI 文案同步：`unlock_biometric_primary_btn`「使用生物识别 / 锁屏凭据解锁」→「使用生物识别解锁」，相关注释与 KDoc 全量更新。
+  - **测试证据**：新增 `app/src/test/java/com/keepasskey/app/security/UnlockAuthPolicyTest.kt` 8 例——认证器集合断言（密钥生成侧 / 认证请求侧均为纯 `BIOMETRIC_STRONG`、`AUTH_DEVICE_CREDENTIAL` / `DEVICE_CREDENTIAL` 位恒为 0、两侧「是否含设备凭据」语义一致）与封印闸门分支（AVAILABLE 放行；NO_HARDWARE / HARDWARE_UNAVAILABLE / NOT_ENROLLED / SECURITY_UPDATE_REQUIRED 一律拒绝）。全量回归 **610 例：597 通过 / 0 失败 / 13 跳过**（app 201 → 209）。
+
 ### 2.6 凭据提供者端到端契约（P1-01）
 
 > 来源：2026-09-09 Android 16+ 真机实测回归（系统设置内已可勾选启用 KeePasskey，但第三方应用调起后握手/响应失败）。

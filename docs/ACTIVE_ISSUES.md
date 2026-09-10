@@ -17,25 +17,7 @@
 
 ---
 
-## P1 高危与核心功能问题（3 项）
-
-### ISSUE-P1-08 (ZT-08): 生物封印凭据可被系统 PIN 解封，且新增指纹不使既有凭据失效
-- **优先级**：P1（认证强度 / 凭据失效）
-- **分类**：生物识别 / 密钥管理
-- **背景与现象**：
-  1. `UnlockAuthPolicy.kt:26-29,42-45` 认证器集合为 `BIOMETRIC_STRONG | DEVICE_CREDENTIAL`，且封存内容是**主密码 UTF-8 明文**（`UnlockViewModel.kt:336-342`）→ 若用户锁屏为 4/6 位 PIN，爆破门槛由 Class 3 生物降至弱 PIN，攻破锁屏即等同获得主密码；
-  2. `KeystoreManager.kt:234,245` `setInvalidatedByBiometricEnrollment(false)`（官方对含 `AUTH_DEVICE_CREDENTIAL` 的密钥忽略该标志）→ 攻击者（或已解锁设备的任何人）**新增自己的指纹后，既有封印凭据不失效**，新指纹可直接解密主密码。
-- **整改依据**：Android Keystore 官方密钥失效语义；OWASP MASVS-AUTH-8。
-- **涉及核心文件**：
-  - `app/src/main/java/com/keepasskey/app/security/UnlockAuthPolicy.kt`
-  - `app/src/main/java/com/keepasskey/app/security/KeystoreManager.kt`
-  - `app/src/main/java/com/keepasskey/app/ui/screens/unlock/UnlockViewModel.kt`
-- **验收标准**：
-  1. 提供「仅强生物识别」模式（不含 `DEVICE_CREDENTIAL`），或在 UI 明示 PIN 解封风险；
-  2. 检测设备是否具备强生物/锁屏凭据，弱凭据时禁用封印或要求更严格门控；
-  3. 单测覆盖封印策略选择分支。
-
----
+## P1 高危与核心功能问题（2 项）
 
 ### ISSUE-P1-09 (ZT-09): 快速解锁反克隆断言可被一步绕过且自证同源
 - **优先级**：P1（验证可伪造）

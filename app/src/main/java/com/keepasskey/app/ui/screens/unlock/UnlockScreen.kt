@@ -431,7 +431,7 @@ fun UnlockContent(
                             }
                             Spacer(modifier = Modifier.height(16.dp))
 
-                            // Wave 12 统一快速解锁：强生物识别或设备锁屏凭据（PIN/图案/密码）经硬件密钥解封——
+                            // ISSUE-P1-08 统一快速解锁：仅 Class 3 强生物识别经硬件密钥解封（锁屏凭据不再可解封）——
                             // 认证入口由系统 BiometricPrompt 承载，不再提供自研 PIN 输入
                             Button(
                                 onClick = onBiometricUnlock,
