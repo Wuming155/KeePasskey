@@ -101,6 +101,21 @@ ISSUE-P3-23 要求使用**真实 KeePass 2.61.1 / KeePassXC 生成的 Argon2d / 
 > ⚠️ 同一份 `.kdbx` 需要**各放一份**（或由构建脚本在打包前复制），**二者不可互替**。
 > 设备侧那份是 `RealKdbxCorpusUnlockTest` 唯一的读取来源。
 
+### 3.5 自动化入口（ISSUE-P3-38 起）
+
+`tools/kdbx-corpus/generate_corpus.py` 把上面 §3.1~§3.4 中**可自动化的部分**收敛为一条命令，
+并在**落盘前**用纯标准库解析 `.kdbx` 文件头，核对「文件名所声明的参数」与真实参数是否逐项相等
+（§6.1 规定「文件名就是声明」，靠人工回读极易出错）：
+
+```bash
+# 推荐路径：仍由官方 GUI 按 §3.1 / §3.2 建库（GUI 才能精确设定 KDF 参数），
+# 随后由脚本完成核验 + 规范命名 + 写伴生 JSON + 双落位：
+python tools/kdbx-corpus/generate_corpus.py --ingest <file.kdbx> --source keepassxc
+```
+
+脚本的能力边界、退出码与安全纪律见 [`tools/kdbx-corpus/README.md`](../../../../tools/kdbx-corpus/README.md)。
+**注意**：脚本产出的是**语料与元数据**，不是互操作证据——「验证通过」仍只能由设备侧用例跑出来。
+
 ---
 
 ## 4. 测试用口令（公开常量，**仅供测试向量**）
@@ -119,8 +134,12 @@ Test-Vector-Only-2026!
 
 ## 5. 为何尚未入库（如实登记，2026-09-10）
 
-1. **无 GUI / 无人工干预环境**：KeePass 2.61.1 与 KeePassXC 均需交互式 GUI 手工建库，
-   无法在无人值守流水线内自动产出，也不能由本仓库代码「生成」——自生成产物**不是**互操作证据。
+1. **建库仍需官方 GUI**：KeePass 2.61.1 与 KeePassXC 需交互式 GUI 才能**精确设定** KDF 参数
+   （KeePassXC 官方 CLI 的 `db-create` 不提供 Argon2 变体/版本与 `t`/`m`/`p` 开关，见
+   `tools/kdbx-corpus/README.md` §3 的实测说明），故建库这一步无法在无人值守流水线内完成，
+   也不能由本仓库代码「生成」——自生成产物**不是**互操作证据。
+   > ISSUE-P3-38 起，「复核 + 规范命名 + 写伴生 JSON + 双落位」这四步已自动化
+   > （`generate_corpus.py --ingest`，见 §3.5），剩余的唯一人工步骤是 GUI 建库本身。
 2. **不得使用本机既有的开发期测试库**：工作区内 `KeePasskey测试/测试.kdbx` 等属个人测试库，
    可能含真实数据，**禁止**入库（见 §7.1）。
 3. **`crypto` 模块不可能承载该用例（结构性原因）**：模块依赖严格单向

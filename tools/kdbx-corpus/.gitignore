@@ -1,0 +1,4 @@
+# `--generate` 的草稿目录：仅本机临时产物，严禁入库
+_drafts/
+__pycache__/
+*.pyc

@@ -24,7 +24,18 @@ app ──> database ──> crypto ──> core
 
 ## 3. 关键架构决策（方向级）
 
-1. **加密与解析分离**：`crypto` 只做纯加密，不感知 kdbx 格式，可独立测试。Argon2 已落地原生加速（TASK-52 立项；ISSUE-P2-14 起内核为 **Rust**：`crypto/src/main/rust/` 经 cargo-ndk 从源码交叉编译 4 ABI，秘密缓冲 `zeroize` 确定性擦除，BouncyCastle 保留兜底，宿主侧实测快于 BC 2.2~5.4×）；AES-KDF 原生加速仍为远期性能优化项。
+1. **加密与解析分离**：`crypto` 只做纯加密，不感知 kdbx 格式，可独立测试。原生加速已落地（TASK-52 立项；ISSUE-P2-14 起内核为 **Rust**：`crypto/src/main/rust/` 经 cargo-ndk 从源码交叉编译 4 ABI，秘密缓冲 `zeroize` 确定性擦除）：
+   - **Argon2**（ISSUE-P2-14）：RustCrypto `argon2`，宿主侧实测快于 BC 2.2~5.4×，兜底 BouncyCastle；
+   - **AES-KDF**（ISSUE-P3-34）：RustCrypto `aes` + `sha2`，消除「每轮一次 JCE `update`」，
+     兜底 JCE（`AesKdfJce`，同时充当原生探活的对照基准）；
+   - **Twofish-CBC**（ISSUE-P3-35）：RustCrypto `twofish`，**原生侧只做分组变换、不含填充**；
+     PKCS#7 与流式语义由 Kotlin（`Pkcs7` / `CbcStreams`）独占，使整型与流式共用同一份填充实现，
+     兜底 BouncyCastle；
+   - **口令强度评估**（ISSUE-P3-36）：`crypto/.../strength/`，模式惩罚型模型
+     （**非 zxcvbn 移植**），首要价值是秘密不经 JVM 托管堆；
+   - 四者同处**同一个 crate 与同一个 `.so`**（`[lib] name` 仍为历史的 `keepasskey_argon2`），
+     加载入口统一为 `NativeCryptoLibrary`；桌面单测经 `cargoHostBuild` + `-Djava.library.path` 注入
+     （`crypto` 与 `database` 两个模块均已接线），未装 cargo 时自动降级。
 2. **kdbx 版本兼容**：读取时按文件头双签名嗅探分派解析器，只比对主版本号（`0xFFFF0000` 掩码），次版本号递增自动兼容（参考 KeePassDX）。
 3. **已解锁数据库的所有权**：app 层持有单例 `DatabaseSession`（进程内），生物识别解锁、自动填充、通行密钥认证先与主进程同进程访问；确有需要（如 autofill 独立进程）再调整。
 4. **同步模型**：kdbx 同步的本质是「整文件读 / 写 / 合并」。`sync` 层提供文件存储抽象（读取、事务式写、版本哈希检测）+ 本地缓存（对比 baseversion / version 哈希）；仅两端都修改时才报冲突，冲突合并下沉到 `database` 层的 KDBX merge（参考 keepass2android 的 `CachingFileStorage`）。
@@ -100,7 +111,8 @@ app/src/main/java/com/keepasskey/app/
 | 依赖注入 | Hilt 2.60.1（KSP 2.3.11，AGP 9 内置 Kotlin） |
 | 本地缓存 | 自研 `SyncCache`（三哈希磁盘布局 + 原子写盘）；未引入 Room |
 | 数据库解析 | 自研 `database` 模块：KDBX v4 全链路流式解析 / 写回 |
-| 加密 | AES-256 / Twofish / ChaCha20，Argon2d/id / AES-KDF（SHA-256）派生（BouncyCastle） |
+| 加密 | AES-256 / Twofish / ChaCha20；KDF：Argon2d/id 与 AES-KDF（SHA-256）。**Argon2 / AES-KDF / Twofish-CBC 三个内核已 Rust 原生化**（同一个 `.so`），BouncyCastle / JCE 保留为兜底；ChaCha20 走 BouncyCastle |
+| 口令强度 | `crypto/.../strength/`：**模式惩罚型**评估（熵基线 + 重复/顺序/键盘行走/日期/周期等惩罚），Rust 原生优先、Kotlin 字节级近似兜底；**非 zxcvbn 移植** |
 | 网络 | OkHttp（TLS-only）；WebDAV 走 XML/PROPFIND，S3 走自研 AWS SigV4；未引入 ktor |
 | 生物识别 / 自动填充 / 通行密钥 | AndroidX Biometric / Autofill Framework / Credential Manager + FIDO2 |
 

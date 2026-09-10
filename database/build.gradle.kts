@@ -45,3 +45,22 @@ dependencies {
     androidTestImplementation(libs.androidx.test.ext.junit)
     androidTestImplementation(libs.androidx.test.runner)
 }
+
+// ISSUE-P3-34/35/36：把 :crypto 的**宿主原生库**注入 database 模块的单测 JVM。
+//
+// 动因：database 是 `PasswordStrengthEvaluator`（ISSUE-P3-36）的唯一消费方，也是
+// `KdbxFile` 端到端读写的宿主；若不注入，database 侧单测只会覆盖**降级路径**，
+// 原生内核在该层等于零集成覆盖。与 `crypto/build.gradle.kts` 的既有接线保持同一范式
+// （`cargoHostBuild` 未安装 cargo 时自跳过 → 目录为空 → 各绑定 `available=false` 自动降级，不阻断）。
+val cryptoNativeHostLibDir = rootProject.layout.projectDirectory
+    .dir("crypto/build/rust/host/release")
+
+tasks.withType<Test>().configureEach {
+    dependsOn(":crypto:cargoHostBuild")
+    jvmArgs(
+        "-Djava.library.path=" + listOfNotNull(
+            System.getProperty("java.library.path"),
+            cryptoNativeHostLibDir.asFile.absolutePath
+        ).joinToString(File.pathSeparator)
+    )
+}

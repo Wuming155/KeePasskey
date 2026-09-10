@@ -6,6 +6,7 @@ import com.keepasskey.crypto.exception.CryptoException
 import org.bouncycastle.jce.provider.BouncyCastleProvider
 import java.io.InputStream
 import java.io.OutputStream
+import java.security.Provider
 import java.security.Security
 import javax.crypto.Cipher
 import javax.crypto.CipherInputStream
@@ -82,7 +83,7 @@ class ChaCha20CipherEngine : CipherEngine {
     }
 
     private fun initCipher(mode: Int, key: ByteArray, iv: ByteArray): Cipher {
-        val cipher = Cipher.getInstance("ChaCha7539", BouncyCastleProvider.PROVIDER_NAME)
+        val cipher = Cipher.getInstance("ChaCha7539", bouncyCastleProvider())
         cipher.init(mode, SecretKeySpec(key, "ChaCha7539"), IvParameterSpec(iv))
         return cipher
     }
@@ -92,6 +93,22 @@ class ChaCha20CipherEngine : CipherEngine {
             if (Security.getProvider(BouncyCastleProvider.PROVIDER_NAME) == null) {
                 Security.addProvider(BouncyCastleProvider())
             }
+        }
+
+        /**
+         * 取得已注册的 BouncyCastle [Provider] **实例**，供本包引擎以
+         * `Cipher.getInstance(transformation, provider)` 形式取用。
+         *
+         * 相对按名取用（`Cipher.getInstance(transformation, "BC")`）的两个好处：
+         * 1. 避开 Android Lint `DeprecatedProvider`（按名取用在 Android P+ 上会抛
+         *    `NoSuchAlgorithmException`，官方建议改用 Provider 实例）；
+         * 2. Provider 缺失时在**这里**就 fail-fast，而不是在 `Cipher.getInstance` 内部
+         *    报出难以定位的 `NoSuchProviderException`。
+         */
+        fun bouncyCastleProvider(): Provider {
+            ensureBouncyCastle()
+            return Security.getProvider(BouncyCastleProvider.PROVIDER_NAME)
+                ?: error("BouncyCastle provider 未注册：${BouncyCastleProvider.PROVIDER_NAME}")
         }
     }
 }

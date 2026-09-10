@@ -2,7 +2,15 @@
 name = "keepasskey_argon2"
 version = "0.1.0"
 edition = "2021"
-description = "KeePasskey Argon2 native KDF kernel (Rust secret enclave PoC)"
+# 说明（ISSUE-P3-34/35/36）：crate 与 `[lib] name` 仍为历史的 `keepasskey_argon2`
+# （`System.loadLibrary`、Gradle `cargoNdkBuild`、CI `Native gate` 的 .so 名断言与 6 份文档
+# 均绑定该名），但本 crate 已扩展为**项目原生密码内核**：
+#   - `lib.rs`           Argon2 KDF（ISSUE-P2-14）
+#   - `aes_kdf.rs`       AES-KDF（ISSUE-P3-34）
+#   - `twofish_cbc.rs`   Twofish-CBC/PKCS7（ISSUE-P3-35）
+#   - `strength.rs`      口令强度评估（ISSUE-P3-36）
+# 改名会牵动 CI 与 6 份文档却零功能收益，故**有意保留**并以本注释消除歧义。
+description = "KeePasskey native crypto kernel (Argon2 KDF + AES-KDF + Twofish-CBC + password strength)"
 license = "Apache-2.0 OR MIT"
 publish = false
 
@@ -20,6 +28,14 @@ argon2 = { version = "0.6.0", default-features = false, features = ["alloc", "kd
 zeroize = { version = "1", default-features = false, features = ["alloc"] }
 # JNI 边界（Batch 2）：仅需原生方法实现侧，关闭默认 invocation（不创建 JVM）
 jni = { version = "0.21", default-features = false }
+# ISSUE-P3-34/35：分组密码与摘要。三者同处 RustCrypto 新 `hybrid-array` 线
+# （aes/twofish 共用 `cipher 0.5.2`，sha2 0.11 与 argon2 传递的 blake2 0.11 共用 `digest 0.11.3`），
+# 依赖树**无重复密码学实现**（`deny.toml [bans] wildcards = "deny"` 下零新增冲突）。
+# 一律 `default-features = false` 收敛面：sha2 默认 `oid` 会额外拉入 `const-oid`，此处不需要；
+# `zeroize` 开启后分组密码的**密钥调度随对象析构确定性归零**（对齐项目秘密治理纪律）。
+aes = { version = "0.9.3", default-features = false, features = ["zeroize"] }
+sha2 = { version = "0.11.0", default-features = false }
+twofish = { version = "0.8.0", default-features = false, features = ["zeroize"] }
 
 [dev-dependencies]
 serde_json = "1"

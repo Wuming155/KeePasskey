@@ -15,7 +15,11 @@
 //! - `secret`(K) / `ad`(X)：KDBX4 罕见可选参数；`ad` 受 RustCrypto `AssociatedData::MAX_LEN=32`
 //!   限制（风险 R2），> 32B 时 [`derive`] 返回 `None`（C/BC 则接受任意长度）。
 
+pub mod aes_kdf;
 mod jni_bridge;
+mod jni_bridge_ext;
+pub mod strength;
+pub mod twofish_cbc;
 
 use argon2::{Algorithm, AssociatedData, Argon2, ParamsBuilder, Version};
 use zeroize::Zeroizing;

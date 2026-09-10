@@ -17,6 +17,7 @@
 | §5 | P3-30 单条批次（子库条目只读投影接入库列表） | ISSUE-P3-30 |
 | §6 | P3-29 批次 A（全仓超阈值债务：优先级 8 项 + 增量 2 项 + 1 项例外登记） | ISSUE-P3-29 |
 | §7 | CI 首跑实测整改（lint 门禁 147 项清零 / CodeQL 10 条处置 / 供应链闸门静默失效补强） | ISSUE-P3-32 |
+| §8 | 原生内核扩展与工程化批次（AES-KDF / Twofish / 口令强度 / HMAC 摘要收敛 / 语料脚本） | ISSUE-P3-34 ~ P3-38 |
 
 > 本索引仅到**章节粒度**，因此不会随条目增删而过期；章节内的子条目按编号顺序排列。
 > 各批次的**验收证据**（用例数 / 通过 / 失败 / 跳过）分别见 §2.22、§3.1、§4.1、§5.1。
@@ -1389,4 +1390,264 @@ app/src/main/java/com/keepasskey/app/ui/screens/generator/DicewareWordList.kt:37
 - **残留未验证（如实登记）**：`github/codeql-action/upload-sarif@v4` 仅出现在手动触发的
   `dependency-scan.yml`，本环境无法触发该工作流（见 §7.6-11），
   故 **v4 的真实执行仍待一次 CI 运行确认**。
+
+---
+
+## 8. 原生内核扩展与工程化批次归档（ISSUE-P3-34 ~ P3-38）
+
+> **来源**：经一次全仓性能/架构评审（逐模块读源）后，把「值得用原生实现」与
+> 「值得工程化」的面登记为 5 条 P3 条目并一次性闭环。**5 项全部完成**，无部分达标项。
+
+### 8.0 本批次整体验收证据（2026-09-10 实测）
+
+| 门禁 | 命令 | 结果 |
+|---|---|---|
+| Rust 单测 | `cd crypto/src/main/rust && cargo test` | **43 passed / 0 failed**（基线 9 → **+34**） |
+| Rust 供应链 | `cd crypto/src/main/rust && cargo deny check` | `advisories ok, bans ok, licenses ok, sources ok` |
+| 全模块单测 | `.\gradlew.bat test --rerun-tasks --max-workers=1 --continue` | **BUILD SUCCESSFUL**，**1257 例 / 0 失败 / 13 跳过**（基线 1200 → **+57，零退化**） |
+| 用例分布 | 同上 | app 678 / core 58 / **crypto 107**（61→+46）/ **database 235**（224→+11）/ sync 179 |
+| Debug 构建 | `.\gradlew.bat assembleDebug` | BUILD SUCCESSFUL |
+| androidTest 编译 | `.\gradlew.bat :database:assembleDebugAndroidTest :crypto:assembleDebugAndroidTest` | BUILD SUCCESSFUL |
+| Android Lint | `.\gradlew.bat lint` | **5 模块 0 error**；警告 **186**（全部在 `app`）；`crypto` 告警**清零**（见 §8.6-5） |
+| 语料脚本实跑 | `python tools/kdbx-corpus/generate_corpus.py --check / --dry-run / --verify` | 见 §8.5（含 fail-closed 分支实跑留痕） |
+
+**原生路径真实覆盖说明**：`crypto/build.gradle.kts` 的 `cargoHostBuild` 把宿主 cdylib 经
+`-Djava.library.path` 注入单测 JVM；本批次**另把同一注入扩到 `database` 模块**
+（`database/build.gradle.kts`），使「唯一消费 `PasswordStrengthEvaluator` 的模块」与
+`KdbxFile` 端到端用例也走**原生路径**而非降级路径。故上表 1257 例中，凡标注 `Assume` 的原生
+差分类用例**均未跳过**（13 例跳过仍全部是 `sync` 的 `LiveSyncServersTest` 12 例 +
+`SyncCacheTest` 的 Windows 无 POSIX 权限视图 1 例，与本批次无关）。
+
+---
+
+### 8.1 ISSUE-P3-34 归档：AES-KDF 原生内核（Rust）
+
+**问题**：`AesKdfEngine.transform` 为 `for (r in 0 until rounds) { cipher.update(buffer, 0, 32, buffer, 0) }`——
+每轮一次 JCE `update`、每次仅 32 字节；官方默认 **600 万轮**（上界 `2^28`）。
+形态为严格串行链式依赖，无法并行，只能靠实现质量。
+
+**实现**：
+
+| 位置 | 内容 |
+|---|---|
+| `crypto/src/main/rust/src/aes_kdf.rs` | 纯函数 `aes_kdf(composite_key, seed, rounds)`；RustCrypto `aes` + `sha2`；明文缓冲 `Zeroizing` 全路径归零 |
+| `crypto/src/main/rust/src/jni_bridge_ext.rs` | `Java_com_keepasskey_crypto_kdf_NativeAesKdf_deriveKey`（有符号闸门先行、`catch_unwind`、失败归一 `null`） |
+| `crypto/.../kdf/NativeAesKdf.kt` | JNI 绑定；`available` 为**与 JCE 逐字节比对**的真实探活 |
+| `crypto/.../kdf/AesKdfJce.kt` | 原 JVM 实现**原样抽出**，同时充当兜底与探活对照基准（杜绝探活自递归） |
+| `crypto/.../kdf/AesKdfEngine.kt` | 原生优先、JCE 兜底；失败归一 `KdfException`（**不静默回退重算**） |
+
+**证据**：
+
+1. **独立第三方已知答案向量**：由 Python `cryptography` 的 AES-ECB 独立复算
+   （seed `0x00..0x1f`、明文 `0x20..0x3f`、`rounds=4` → `f836155ae7cb1d120da836de66f478ec1dbf042d041d9ca50b49f400d398eff5`），
+   **同一常量同时写入 Rust `known_answer_vector_matches_independent_recomputation` 与
+   Kotlin `JCE 参考实现命中独立复算的已知答案向量`**，两侧同源同值；
+2. **原生 ⇄ JCE 差分等价**：`rounds ∈ {1, 2, 7, 1000, 50000} × 3 组密钥` 逐字节一致
+   （`AesKdfNativeParityTest`，宿主 JVM 上真实走 JNI）；
+3. **防参数互换**：`seed_and_composite_key_are_not_interchangeable`（交换入参必须产出不同结果）；
+4. **闸门负例**：长度不符 / `rounds = 0` / 负数 / `u64::MAX` 一律 `null`；`rounds = 2^28 + 1` 立即拒绝
+   （**注意**：不得断言 `2^28` 本身成功——2.68 亿轮在 debug 下不可接受，测试中已注明）。
+
+**性能表述（如实）**：本批次**未取得**设备侧 A/B 实测数据，因此归档**不宣称任何倍数**。
+`KdfBenchmark.measureRealAesKdfMillis` 可直接复用来做 A/B，属后续可选项。
+
+---
+
+### 8.2 ISSUE-P3-35 归档：Twofish 原生内核（Rust CBC/PKCS7）
+
+**问题**：`CipherFactory` 三种 cipher 中，**只有 Twofish 走 BouncyCastle 纯 Java 实现**，
+而它作用于**整库数据流**（`createEncryptingStream` / `createDecryptingStream`）。
+
+**实现（分工是刻意的）**：
+
+- 原生侧 `twofish_cbc.rs` **只做分组变换**（CBC 链接 + Twofish 加/解密），
+  `iv` 为**输入输出参数**（返回时原地更新为下一链值），**不含填充**；
+- Kotlin 侧 `Pkcs7.kt` + `CbcStreams.kt` 独占 PKCS#7 与流式语义，
+  使**整型与流式两条路径共用同一份填充实现**（避免两份可能漂移的 padding 代码）；
+- `TwofishCipherEngine` 原生优先、BC 兜底。
+
+**证据**：
+
+1. **官方规格已知答案向量**：256 位全零密钥 / 全零明文 → `57ff739d4dc92c1bd7fc01700cc8216f`、
+   128 位 → `9f589f5cf6122c32b6bfec2f2ae8c35a`，由 RustCrypto `twofish`（**独立实现**）复现；
+2. **原生 ⇄ BC 差分等价**：整型路径在 **13 种长度**（0 / 1 / 15 / 16 / 17 / 31 / 32 / 33 / 1000 /
+   65535 / 65536 / 65537 / 131075）× 密钥 16/24/32 下密文逐字节一致，且**交叉解密**（BC 密文 → 原生解密）成功；
+3. **流式路径等价**：原生流式加/解密与 BC 的 `CipherOutputStream` / `CipherInputStream` 逐字节一致（同 13 种长度）；
+4. **分段调用等价性**（Rust 侧）：`chunked_calls_match_single_shot` 证明「按 chunk 多次调用」
+   与「一次性调用」逐字节相同——这是 JNI 层分块正确性的根据；
+5. **端到端**：`KdbxTwofishRoundTripTest` 以 Twofish 头部的库执行 `save → load`
+   （含错误密码拒绝、载荷篡改被 HMAC 拒绝、空库边界），并断言 `loaded.header.cipherUuid == TWOFISH`
+   （**防「以为测了 Twofish 实则走 AES」**）。
+
+**流式错误语义：先实测基线再对齐（本条目最重要的工程动作）**
+
+条目正文要求「必须先实测 `CipherInputStream` 基线」。实跑结论（2026-09-10，本机 JDK）与
+此前文档中的假设**相反**：
+
+| 输入 | 文档原本的假设 | **实测基线（`CipherInputStream`）** |
+|---|---|---|
+| 填充非法 | 静默 EOF | **抛 `IOException`（cause `BadPaddingException`）** |
+| 密文长度非分组整数倍 / 空输入 | 静默 EOF | **抛 `IOException`（cause `IllegalBlockSizeException`）** |
+| 底层流 `IOException` | 被吞掉伪装 EOF | **原样上抛** |
+
+因此 `CbcDecryptingInputStream` **改为在 `read` 到达尾部时抛 `IOException`**——这不仅是「对齐基线」，
+对既有代码更是**必需**：`KdbxCipherKeyResolver.isPlausibleInnerHeaderPrefix` 正是以
+`catch (_: java.io.IOException)` 截断「用首块做解密探针」时的收尾错误并保留已解出前缀；
+若实现为静默 EOF，该探针的控制流会随之改变。用例 `CbcStreamFramingTest` 以**真实 JCE 为参照**
+逐例断言「两侧同为 `IOException` 或结果逐字节相同」。
+
+**已知差异（如实声明，方向不影响正确性）**：若调用方**未读到尾部**即 `close`，基线可能仍在
+`close` 内触发填充校验并抛异常，本实现不做该收尾校验。理由：对合法库而言「提前 close」意味着
+解析器已按 GZip 结构自然停止，强行校验反而可能对正常数据误报；该路径下双方都不交付未校验明文。
+
+**未达成项（如实登记）**：**设备侧 instrumented 验证未做**——本机无可用设备/模拟器
+（与 ISSUE-P3-23 同一物理限制），故「APK 内 4 ABI `.so` 的 Twofish 内核在真实 Android 运行时
+逐字节复现 BC」**尚无设备证据**；宿主侧 JNI 通路的差分等价证据见上表第 2/3 条。
+
+---
+
+### 8.3 ISSUE-P3-36 归档：口令强度评估原生引擎（Rust）
+
+**问题**：`HealthCheckEngine` 原判据仅为 `passLength < 8 || matchesCommonWeakPassword(15 条表)`，
+对 `qwertyuiop` / `abcabcabc` / `20260101` / `aaaaaaaaaa` 一类完全无感。
+
+**实现**：`crypto/src/main/rust/src/strength.rs`——**自研模式惩罚型模型**：
+字符集熵基线（`len × log2(charset)`）+ 惩罚项（完全/近似命中常见口令、同字符重复段、
+单调顺序段、键盘相邻行走、日期/年份形状、周期重复块、字符集单一、字符唯一率过低），
+输出 `[score(0..4), log10×100, flags]` 定长 `IntArray`。
+
+**「不是 zxcvbn」的如实声明**：不引入 `zxcvbn` crate 及其数十万条频率语料——那与
+`Cargo.toml` 既定的「最小化依赖面（供应链收敛）」纪律及 `deny.toml` 审计面直接冲突；
+**所有对外描述一律称「模式惩罚型强度评估」**。选择原生的**首要理由是秘密治理**
+（口令以 UTF-8 字节进入原生侧 `Zeroizing` 缓冲，JVM 侧不新增任何 `String` 物化路径），
+**不是吞吐**。
+
+**证据**：
+
+1. Rust 侧 16 条用例：长度/类别单调性、9 类模式各自正例+反例、周期重复、`never_panics_on_arbitrary_bytes`
+   （非法 UTF-8 / 超长串 / 控制字符 / 非 ASCII / emoji）；
+2. **策略项显式化**：`length_cap`（不足 8 位不高于 2 档、不足 12 位不高于 3 档）在 KDoc 中
+   明示为「有意引入的策略约束，非熵推导结论」——纯字符集熵对短口令系统性高估
+   （6 位四类按熵算约 `10^11.9` 次猜测会落到最高档，现实中毫无门槛）；
+3. **判据不劣于接线前**：`legacyCommonPasswords` 15 条 + 长度规则**全部仍判弱**，
+   且 `qwertyuiop` / `abcabcabc` / `20260101` 三条新增识别（用例同时断言它们**不在**旧表内）；
+4. **跨语言位值契约**：`原生返回的标志位与 Kotlin 常量逐位一致` 用原生返回的**真实位值**锁定
+   9 个 `FLAG_*` 与 Kotlin `PasswordStrengthFlags` 相同；
+5. **降级路径**：原生不可用时 `PasswordStrengthFallback`（**字节级、不构造 `String`**、
+   词表以 ASCII 字节承载）保留四类判定；`降级路径不覆盖模式分析——差异如实锁定` 用例
+   把「降级不算顺序/重复段」这一**有意差异**固化为断言，防止后人静默改口径。
+
+---
+
+### 8.4 ISSUE-P3-37 归档：`HmacBlockStream` 摘要收敛
+
+**范围与定位（如实）**：本条目**以可维护性为主、性能只是附带项**。块尺寸恒为 1 MiB，
+每块 HMAC 自身即需约 1 MiB 的 SHA-256 压缩，而本改动省下的是「每块一次的 `Mac`/`MessageDigest`
+获取与 4 个小数组分配」，相对前者属**噪声量级**——归档**不宣称任何可测量提速**。
+真正的价值在于：原先 `writeAll` / `readAll` / `loadNextBlock` / `flushBlock` / `close`
+**五处各自手工拼装** `SHA-512(LE64(index) ‖ key)` + `HMAC(index ‖ LE32(size) ‖ data)`，
+字段顺序或长度写错不会有编译期提示；收敛后只有一份实现（`BlockHmac`）。
+
+**证据**：`BlockHmacTest` 用**接线前写法**（`HmacBlockStream.computeBlockKey` + `HashUtil.hmacSha256`
++ `LittleEndianUtil.longTo8Bytes`/`intTo4Bytes`）作对照，断言 `index ∈ {0,1,2,1023,Long.MAX_VALUE} ×
+size ∈ {0,1,16,1024}` 共 20 组**逐字节一致**；另断言偏移切片与副本等价、`wipe` 幂等、
+密钥长度非法 fail-closed、以及新增的 `writeIntTo4Bytes`/`writeLongTo8Bytes` 与既有分配式接口等价。
+
+**敏感数据**：`BlockHmac` 持有 SHA-512 派生中间量，复用会延长驻留期，故提供 `wipe()` 并在
+`HmacBlockOutputStream.close` / `HmacBlockInputStream.close` 调用；`HmacBlockOutputStream` 明文缓冲
+亦在 `close` 的 `finally` 中清零（**原实现未清零**，此为顺带的净改进）。
+另在 KDoc 中如实登记：`Mac` 对象内部 ipad/opad 无公开 API 可主动清零，只能随 GC 释放——
+这一点与原先「每块新建 `Mac`」无差别，**不构成本次改动引入的退化**。
+
+**块格式、块尺寸上限与异常语义完全未变**，由既有篡改 / 终止块 / EOF 三类用例锁定通过。
+
+---
+
+### 8.5 ISSUE-P3-38 归档：`.kdbx` 互操作语料生成脚本自动化
+
+**交付物**：`tools/kdbx-corpus/`
+
+| 文件 | 职责 |
+|---|---|
+| `kdbx_header.py` | KDBX4 外层头 + 变体字典的**只读**解析（纯标准库，零第三方依赖） |
+| `generate_corpus.py` | `--check` / `--dry-run` / `--verify` / `--ingest` / `--generate` 五模式 |
+| `README.md` | 用法、退出码、**能力限制**与安全纪律 |
+
+**关键设计**：脚本在**落盘前**用文件头**实测参数**推导规范文件名与伴生 JSON，
+从而消除 README §6.1「文件名就是声明」这一步人工回读的固有错误源。
+
+**实跑证据（2026-09-10）**：
+
+| 场景 | 结果 |
+|---|---|
+| `--check`（本机无 `keepassxc-cli`） | **EXIT=3**，输出安装指引与非零退出（fail-closed 达成） |
+| `--dry-run` | EXIT=0，打印两个落位目录与命名规则 |
+| `--verify <fixture>` | 解析 `database/src/test/resources/fixtures/test_vault.kdbx` → `argon2d / v19 / t=89 / m=65536KiB / p=4 / 32B 盐`，**与该夹具在 `argon2-interop/README.md` §5.1 中登记的参数逐项一致**（解析器被真实文件交叉验证） |
+| 伴生 JSON 参数不符 | **EXIT=4**，指出 `iterations JSON=2 文件头=89` |
+| 文件名与文件头不符的 `--ingest` | **EXIT=4**，指出「按文件头应为 `argon2d-v19-t89-m65536-p4-keepassxc.kdbx`」 |
+| `containsRealData=true` | **EXIT=4** |
+| 落位目录未被污染 | 两次拒绝路径后目录内仍只有既有的 `README.md` 与 `argon2-bc-vectors.json` |
+
+**未达成项（如实登记，**不得**据此认为 ISSUE-P3-23 已闭环）**：
+本机**未安装 `keepassxc-cli`**，故**任何 `.kdbx` 语料都未产出**；
+`_drafts/` 为空，两个落位目录内**仍无 `.kdbx`**。
+本条目消除的是「复核 / 命名 / 写 JSON / 双落位」四步人工风险，
+**剩余的 GUI 建库这一步仍无法自动化**（官方 CLI 的 `db-create` 不提供 Argon2 变体/版本与
+`t`/`m`/`p` 开关——脚本 `--check` 会如实打印它在帮助里实际看到的开关，**可能为空**）。
+
+---
+
+### 8.6 本批次过程缺陷与事实修正（如实留痕）
+
+1. **【测试】Kotlin 接收者作用域陷阱致 10 例假红**：`Cipher.getInstance(...).apply { init(..., IvParameterSpec(iv)) }`
+   写法下，`iv` **不**解析到测试类属性，而解析到接收者 `Cipher` 由 `getIV()` 合成的同名属性
+   （新建 Cipher 未 `init` 时恒为 `null`），使 `IvParameterSpec` 抛 NPE。
+   **该机制经探针实测确认**（`val r = cipher.run { iv }` → `r == null` 成立），
+   非推测；修法为改用局部变量。已把结论写入用例注释。
+2. **【生产缺陷】`Pkcs7` 单分组契约不适用于整型解密**：`TwofishCipherEngine.decryptNative` 把
+   **整段明文**交给只接受单分组的 `unpad`，导致**明文超过 16 字节时一律被判「填充非法」**。
+   由 `TwofishNativeParityTest` 的 `len=16` 用例捕获（`len ≤ 15` 与 `len=0` 恰好掩盖了它）。
+   修法：新增 `Pkcs7.unpaddedLength`（接受任意分组整数倍数据并只校验末块），`unpad` 委托之，
+   保持单一实现；并补 `Pkcs7Test` 直接锁定该场景。
+3. **【事实修正】`CipherInputStream` 的错误语义与文档记载相反**：`AGENTS.md`/条目正文此前
+   以「吞掉异常并伪装 EOF」描述该基线；**本机实测为抛出 `IOException`**（两类 cause 见 §8.2 表）。
+   `CbcDecryptingInputStream` 的契约与 KDoc 已按**实测**改写，不再沿用未经核实的假设。
+4. **【安全】`source` 子串校验存在冒充漏洞**：README §6.2 与设备侧用例原以「含子串 `keepass`」
+   判定来源，而 `pykeepass` / `kdbxweb` 等**第三方实现名同样含该子串**，可被放行。
+   **本批次双端加固**：脚本新增 `THIRD_PARTY_PRODUCERS` 拒绝名单（实跑验证）——
+   `RealKdbxCorpusUnlockTest` 同步新增 `THIRD_PARTY_PRODUCER_KEYWORDS` 同款拒绝逻辑。
+   > 首轮加固后自测发现 `source="pykeepass"` **仍被放行**（因判据是「含 keepass」），
+   > 遂改为「必须含 keepass **且** 不得命中第三方关键字」的合取式。
+5. **【整洁度】新增 lint 告警就地清零**：首轮整改后 `crypto` 出现 3 条 `DeprecatedProvider`
+   （BC 按名取 Cipher）。改以 `ChaCha20CipherEngine.bouncyCastleProvider()` 传 **Provider 实例**
+   （Lint 官方建议写法，且 Provider 缺失时 fail-fast），并顺带清掉同文件既有的一条；
+   `AesKdfJce` 的 `GetInstance`（ECB）**显式 `@Suppress` 并附理由**——ECB 是 KeePass AES-KDF 的
+   **规范定义**，若不抑制，后人极可能以「修复告警」为名改坏 KDF 互操作性。
+   结果：`crypto` 告警 **4 → 0**，全仓仍 **0 error**。
+6. **【构建】`database` 模块单测原先看不到原生库**：`-Djava.library.path` 注入只写在
+   `crypto/build.gradle.kts`，导致 `database`（`PasswordStrengthEvaluator` 的唯一消费方、
+   `KdbxFile` 端到端宿主）**只覆盖降级路径**。本批次把同一注入扩到 `database/build.gradle.kts`。
+7. **【工具链】Python f-string 嵌套引号在本机解释器上报 `SyntaxError`**：`f"{name[:-len('.kdbx')]}"`
+   改为先取变量再插值（`Path(target_name).with_suffix(".json").name`）。
+8. **【未验证项如实登记】** ① Twofish / AES-KDF / 口令强度的**设备侧 instrumented 验证未做**
+   （无设备/模拟器，与 ISSUE-P3-23 同一物理限制）；② AES-KDF 的**性能倍数未实测**，
+   故本批次不宣称任何提速；③ `cargo deny check` 输出含 5 条 `license-not-encountered` 类
+   **warning**（允许清单中的 `BSD-2-Clause`/`ISC`/`Zlib` 等未被命中），结论行仍为
+   `licenses ok`，未做清理（属 deny.toml 既有配置，非本批次引入）。
+9. **【事实】历史 crate 名未改**：本批次把 AES-KDF / Twofish / 口令强度并入**同一 crate 与同一
+   `.so`**，但 `[lib] name` 仍为历史的 `keepasskey_argon2`（`System.loadLibrary`、
+   `cargoNdkBuild`、CI `Native gate` 的 .so 名断言与 6 份文档均绑定该名）。改名牵动 CI 与
+   全部文档却零功能收益，故**有意保留**，并在 `Cargo.toml` 与 `NativeCryptoLibrary` KDoc 中
+   显式消除歧义。
+
+---
+
+### 8.7 本批次未闭环的残余面（不得据此认为相关目标已达成）
+
+| 残余 | 归属 |
+|---|---|
+| 真实 `.kdbx` 语料仍未产出（本机无 `keepassxc-cli`） | **ISSUE-P3-23**（本批次仅消除其四步人工风险） |
+| arm64 真机 instrumented 数据未取得 | **ISSUE-P3-23** |
+| Twofish / AES-KDF / 口令强度的**设备侧**验证未做 | 本批次新登记，随 ISSUE-P3-23 的设备就位一并补齐 |
+| AES-KDF 性能倍数未实测 | 本批次新登记（可用 `KdfBenchmark` 做 A/B） |
 

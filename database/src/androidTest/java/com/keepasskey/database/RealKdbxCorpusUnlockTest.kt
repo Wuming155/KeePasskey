@@ -85,6 +85,16 @@ class RealKdbxCorpusUnlockTest {
         private const val ARGON2D_NAME = "argon2d"
         private const val ARGON2ID_NAME = "argon2id"
 
+        /**
+         * 第三方实现关键字（ISSUE-P3-38 加固）。
+         *
+         * 这些名字**都含子串 `keepass`**，会被「source 必须含 keepass」的宽规则放行；
+         * 官方允许的语料来源只有 KeePass 2.61.1 与 KeePassXC（README §3），故显式拒绝。
+         */
+        private val THIRD_PARTY_PRODUCER_KEYWORDS = listOf(
+            "pykeepass", "kdbxweb", "keepass2android", "keepassxc-browser", "python-keepass"
+        )
+
         /** 语料缺失时的跳过原因（必须自解释到「照哪个文件生成、放到哪里」）。 */
         private const val SKIP_REASON_CORPUS_MISSING =
             "语料缺失：请按 crypto/src/test/resources/argon2-interop/README.md 生成真实 " +
@@ -216,6 +226,18 @@ class RealKdbxCorpusUnlockTest {
                 "伴生元数据 $metaAsset 的 source=\"$source\" 未声明为 KeePass / KeePassXC 产物 —— " +
                     "本工程自建夹具（如 database/src/test/resources/fixtures/test_vault.kdbx）" +
                     "不能充当验收标准 2 的互操作语料。"
+            )
+        }
+        // ISSUE-P3-38 加固：上面这条「含子串 keepass」的规则过宽——`pykeepass` / `kdbxweb` 一类
+        // **第三方实现**的名字同样含该子串，会被放行，从而以非官方实现产物冒充互操作证据。
+        // 官方允许来源只有 KeePass 2.61.1 与 KeePassXC（README §3），故显式拒绝命中项。
+        val loweredSource = source.lowercase()
+        val thirdPartyKeyword = THIRD_PARTY_PRODUCER_KEYWORDS.firstOrNull { loweredSource.contains(it) }
+        if (thirdPartyKeyword != null) {
+            failClosed(
+                "伴生元数据 $metaAsset 的 source=\"$source\" 命中第三方实现关键字 `$thirdPartyKeyword` —— " +
+                    "官方允许来源仅 KeePass 2.61.1 / KeePassXC（README §3），" +
+                    "第三方实现（pykeepass / kdbxweb 等）产物不得充当互操作证据。"
             )
         }
 

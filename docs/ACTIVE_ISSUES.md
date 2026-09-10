@@ -51,7 +51,7 @@
 > 密码生成引擎出边界仍返回 String）已整改并归档，见 §2.21。
 > 当前 P2 级别无待办。
 
-## P3 低危问题、特性接线与体验优化（5 项）
+## P3 低危问题、特性接线与体验优化（11 项）
 
 > **背景**：P3 残余批次原 **12 项**（ISSUE-P3-17 ~ P3-28）已于 **2026-09-10** 整体整改。
 > 其中 **10 项完整闭环并归档**（P3-17 / 18 / 19 / **20** / 21 / 22 / 25 / 26 / 27 / 28，含逐项代码证据与 15 条过程缺陷留痕），
@@ -70,10 +70,20 @@
 > **静默失效**之实证与硬断言补强、**Kotlin 2.4.20 真修复 `CVE-2026-53914` + 4 族豁免登记**
 > （本地真实扫描实测 **188 → 7 条实例、达阈 138 → 0 条**）、以及**合并 PR #5**
 > （原 ISSUE-P3-33，已闭环归档）；实测校准追加节见 [docs/ci-静态校准记录.md](ci-静态校准记录.md) **§11**。
-> 本节余 **4 项**（P3-23 / P3-24 / P3-31 / P3-32）。
+> **2026-09-10 追加四（原生内核与工程化扩展批次）**：经全仓性能/架构评审（逐模块读源）新登记的
+> **ISSUE-P3-34 ~ P3-38** 五项（AES-KDF 原生内核 / Twofish 原生内核 / 密码强度评估原生引擎 /
+> `HmacBlockStream` 摘要收敛 / `.kdbx` 互操作语料生成脚本自动化）**已于同批次全部闭环并归档**，
+> 见 [RESOLVED_LOG.md](RESOLVED_LOG.md) **§8**——Rust 单测 9 → **43**、全仓用例 1200 → **1257**、
+> `crypto` lint 告警 4 → **0**；该节如实留痕 **9 条过程缺陷/事实修正**（含 1 处生产缺陷、
+> 1 处安全校验冒充漏洞、1 处文档与实测相反的事实修正）与 **3 项未验证项**。
+> **2026-09-10 追加五（自动填充能力对标评估）**：经对照 `docs/references/Monica-架构分析.md`
+> 与 Monica 自动填充实现（`autofill_ng` 双通道策略层 + Credential Provider），并**逐文件读取本仓
+> 自动填充现状**后，新登记 **ISSUE-P3-39 ~ P3-45** 七项**能力补齐 / 可行性评估**条目
+> （对标差距，**非既有功能故障**；每条附核实时间点与核实方式，详见下方自包含正文）。
+> 本节余 **11 项**（P3-23 / P3-24 / P3-31 / P3-32 / P3-39 ~ P3-45）。
 > 归档门禁证据：`.\gradlew.bat test --rerun-tasks --max-workers=1 --continue` → **BUILD SUCCESSFUL**，
-> **1200 例 / 1187 通过 / 0 失败 / 13 跳过**（基线 921 → **+279 例，零退化**）；`assembleDebug` 通过；
-> `:database:assembleDebugAndroidTest` 通过（ISSUE-P3-23 验收标准①）。
+> **1257 例 / 1244 通过 / 0 失败 / 13 跳过**（基线 921 → **+336 例，零退化**）；`assembleDebug` 与
+> `lint`（5 模块 **0 error**）通过；`:database:assembleDebugAndroidTest` 通过（ISSUE-P3-23 验收标准①）。
 
 ### 前提复核记录（2026-09-10，依「条目维护规则」第 2 条）
 
@@ -267,3 +277,167 @@
   3. 处置后 Code Scanning 依赖类 open 告警数与该族结论**一致**（禁止以 dismiss 替代修复依据）。
 - **禁止**：回调 `failBuildOnCVSS` 阈值以换取变绿；删除或注释掉硬断言步骤；
   在没有核实依据的情况下批量写入 suppression。
+
+---
+
+### ISSUE-P3-39 (自动填充对标 ①): 字段识别与候选评分引擎升级
+
+- **优先级**：P3（特性覆盖与体验补齐；**不削弱**任何既有安全闸门）
+- **核实时间点与核实方式（2026-09-10）**：
+  1. 读 `app/src/main/java/com/keepasskey/app/autofill/AutofillFieldScanner.kt`（**139 行**）——
+     仅识别 `username` / `password` 两类框，评分仅「hint / inputType / htmlName」三档，
+     兜底为 `htmlName` 大小写不敏感**子串包含**（`isUsernameHtmlName` / `isPasswordHtmlName`）；
+  2. 读 `app/src/main/java/com/keepasskey/app/autofill/KeePasskeyAutofillService.kt`（**488 行**）——
+     候选匹配为**二元布尔** `matchDomain || matchPackage`，固定 `MAX_DATASET_COUNT = 8` 截断，
+     无打分、无子域/根域分级、无「上次填充优先」；
+  3. 对照 `docs/references/Monica-架构分析.md` §2.3 / §5.1 及 Monica `autofill_ng` 策略层
+     （多策略解析 + `Accuracy` 多档置信度 + `BitwardenLikeAutofillMatcherNg` 打分排序）。
+- **背景**：本仓自动填充的**匹配内核极为单薄**。`AutofillFieldScanner` 仅 139 行，无法解析
+  label 邻近文本、多语言登录词（`nickname` / `логин` / 中文「用户名」）、手机号登录、无 label 的
+  WebView 表单与 `importantForAutofill` 变体；候选排序缺失导致多候选时正确条目可能被挤出前 8 条。
+  此为**对标参考项目的能力差距**（非既有功能故障），主流「用户名+密码」表单当前可用。
+- **整改要点**：
+  1. 扩充字段扫描：新增 label 邻近文本、`idEntry` / `hint`、InputType 变体（电话/邮箱）与
+     **多语言登录词表**识别，引入**置信度评分**替代布尔判定；
+  2. 新增**候选打分器**（纯 Kotlin、JVM 可测）：精确域名 > 子域 > 根域 > 精确包名 > 包名 token，
+     叠加收藏状态与更新时间，输出排序后按可配置上限截断；
+  3. 新增**「上次填充优先」**（按交互上下文记忆，仅排序不影响放行判定）；
+  4. 处理搜索框排除、隐藏字段准入与 `importantForAutofill=no`（与 ISSUE-P3-43 联动）；
+  5. 涉及文件：`AutofillFieldScanner.kt`、`KeePasskeyAutofillService.kt`、新增 `AutofillCandidateRanker`
+     （暂定名）与 `AutofillMatchPolicy`（暂定名）。
+- **与 ISSUE-P3-31 的交互**：`KeePasskeyAutofillService.kt`（488 行）在 P3-31 超阈值债务清单内——
+  本条新增逻辑**应优先落在新文件**，避免加剧其体积；若本条顺带拆分了该文件，须同步更新 P3-31 清单快照。
+- **禁止**：借打分/召回之名放宽 `AutofillWebDomainPolicy` 与 `AutofillOriginResolver` 的
+  **DAL 归属校验**，或绕过 `AutofillAccessPolicy` 的完整性/黑名单闸门；
+  使「`webDomain` 未通过归属校验」的候选参与下发。
+- **验收标准**：新增纯 JVM 单测覆盖中英文/西里尔 label、手机号登录、无 label WebView、
+  多候选排序与上限截断；现有 `autofill` 单测零退化；`.\gradlew.bat test` 全绿且用例数不减。
+
+---
+
+### ISSUE-P3-40 (自动填充对标 ②): 手动选择器（全库搜索兜底入口）
+
+- **优先级**：P3（体验补齐）
+- **核实时间点与核实方式（2026-09-10）**：经 `search_file "*Autofill*"` / `"*Picker*"` 与
+  全仓 `grep AutofillPicker|EntrySelection|PickerActivity` 核实——本仓**无任何手动选择器**
+  （仅 `VaultList*` 命中，与自动填充无关）；`KeePasskeyAutofillService` 仅下发匹配到的 ≤ 8 条候选，
+  **无兜底入口**。
+- **背景**：Monica 提供 `AutofillPickerActivityV2` 与 `manual_selection_enabled`，自动匹配失败时
+  用户可手动打开填充面板搜索全库条目。本仓在弱域名 / 纯 App / 内嵌 WebView 场景下，一旦严格匹配
+  不命中即**无候选**，用户无任何补救路径。
+- **整改要点**：
+  1. 新增受保护的填充选择 Activity（Compose）：支持按标题/用户名搜索、展示最近填充、选中后
+     **经既有确认链路**回传；
+  2. 接入 `AutofillService`（`FillResponse` 增加手动入口项）与 Credential Manager 两通道；
+  3. 涉及文件：新增选择器 Activity + ViewModel、`KeePasskeyAutofillService.kt`、`CredentialResponseAssembler.kt`。
+- **安全要求**：
+  1. 列表热路径**严禁解密密码**（只展示标题/用户名等元数据，沿用既有投影约定）；
+  2. 选中后**必须**仍走 `AutofillConfirmActivity` / `CredentialFillVerifier` 二次确认，
+     选择器本身不构成放行；
+  3. 选择器窗口须 `FLAG_SECURE` + `setHideOverlayWindows(true)` + 遮挡触摸过滤。
+- **验收标准**：单测覆盖搜索过滤与「未确认不解密」；选择器窗口防护三项齐备。
+
+---
+
+### ISSUE-P3-41 (自动填充对标 ③): 服务健康自检与诊断
+
+- **优先级**：P3（可维护性 / 排障体验）
+- **核实时间点与核实方式（2026-09-10）**：读
+  `app/src/main/java/com/keepasskey/app/ui/screens/settings/subscreens/AutofillSettingsScreen.kt`
+  （**588 行**，且在 ISSUE-P3-31 债务清单内）——仅「provider 状态展示 + 开关 + 黑名单管理」；
+  全仓 `grep AutofillServiceChecker|AutofillDiagnostic` **零命中**。
+- **背景**：Monica 有 `AutofillServiceChecker` 六维检查（Manifest 声明 / 系统启用 / 应用启用 /
+  权限 / 兼容性问题 / 修复建议）与诊断输出。本仓用户遇到「为什么不出候选」时无任何自检入口，
+  只能靠猜。
+- **整改要点**：
+  1. 新增纯 Kotlin `AutofillHealthChecker`（JVM 可测）：检查本应用 `AutofillService` 是否
+     声明且带 `BIND_AUTOFILL_SERVICE`、`AutofillManager` 当前服务是否为本应用、应用内开关状态、
+     Credential Manager 可用性；
+  2. 设置页展示结论项与**修复指引**（可直接跳系统自动填充设置页）；
+  3. 涉及文件：新增 `AutofillHealthChecker`（暂定名），`AutofillSettingsScreen.kt`（若加剧体积需先拆分，见 P3-31）。
+- **禁止**：诊断输出**不得**包含用户安装应用清单、主密码、条目明文等敏感信息。
+- **验收标准**：单测覆盖各失败分支（未声明 / 未启用 / 未获权限 / 正常）；输出无敏感字段。
+
+---
+
+### ISSUE-P3-42 (自动填充对标 ④): 填充侧会话授权宽限与快速填充开关
+
+- **优先级**：P3（体验；**安全默认必须保守**）
+- **核实时间点与核实方式（2026-09-10）**：读
+  `app/src/main/java/com/keepasskey/app/autofill/AutofillConfirmActivity.kt`——
+  **每次**点选数据集均执行 `BiometricAuthManager` 生物识别或受保护窗口内手动确认，
+  **无 TTL / 无免重复认证**；设置页亦无对应开关。
+- **背景**：Monica 以 `AutofillSessionGrantStore`（30s TTL，绑定上下文）+ `biometric_quick_fill_enabled`
+  在**库已解锁**后免重复弹窗。本仓连续填充时**每次都弹确认**，安全更强但体验明显偏重。
+- **整改要点**：
+  1. 新增 `AutofillSessionGrantStore`（`SystemClock.elapsedRealtime` TTL，绑定「包名 + 域 + 字段签名」）；
+  2. **仅**在「库已解锁且存在匹配的有效授权」时跳过重复二次确认；
+  3. 设置页提供开关与 TTL 文案说明；**默认上限保守**（短 TTL，或默认关闭由用户开启）。
+- **禁止**：改变「库锁定时必须先解锁」语义；授权**仅**作用于已解锁后的**重复**确认，
+  绝不可使未解锁状态跳过解锁；不得让授权跨包名/跨域复用。
+- **验收标准**：单测覆盖「TTL 过期即失效」「上下文（包名/域/字段签名）不匹配即失效」
+  「库锁定态授权一律不适用」；默认配置不得放宽到「无任何确认」。
+
+---
+
+### ISSUE-P3-43 (自动填充对标 ⑤): 字段签名级屏蔽 + 保存侧独立黑名单 + 尊重 importantForAutofill
+
+- **优先级**：P3（粒度补齐）
+- **核实时间点与核实方式（2026-09-10）**：读
+  `app/src/main/java/com/keepasskey/app/data/repository/AutofillBlocklistStore.kt`——**仅包级**集合
+  （`blocked_packages`），无字段级、无保存侧独立控制；读 `KeePasskeyAutofillService.kt`——
+  无「尊重 `importantForAutofill=no`」策略。
+- **背景**：Monica 具备三级控制——`blacklist_packages`（包级，含默认微信/支付宝/云闪付）、
+  `blocked_field_signatures`（**字段签名级**，记住「该包该表单字段不填」）、
+  `save_blocked_targets`（**保存侧**独立黑名单），另有 `v2_respect_autofill_off` 开关。
+  本仓仅有「按应用屏蔽」一档。
+- **整改要点**：
+  1. 将黑名单扩展为**三级**：包级 / 字段签名级 / 保存侧目标级，**复用**现有 fail-closed 包名校验；
+  2. 新增「尊重 `importantForAutofill=no`」开关（关闭时不填充显式标记为禁用的字段）；
+  3. 涉及文件：`AutofillBlocklistStore.kt`、`KeePasskeyAutofillService.kt`、`AutofillSettingsScreen.kt`。
+- **安全要求**：字段签名须为**不可逆归一**值（包名 + 域 + 字段角色），**严禁**持久化明文表单内容；
+  保存侧黑名单命中必须与填充侧同等 fail-closed。
+- **验收标准**：单测覆盖三级判定、非法输入 fail-closed、保存侧命中不落库。
+
+---
+
+### ISSUE-P3-44 (自动填充对标 ⑥): 保存体验补齐（评估 + 按需实现）
+
+- **优先级**：P3（体验评估；受单库 KDBX 约束）
+- **核实时间点与核实方式（2026-09-10）**：读 `KeePasskeyAutofillService.kt` 的 `onSaveRequest`
+  （约 327-420 行）——已具备内容级**幂等查重**与失败回滚；**无**保存通知开关、无智能标题、
+  无重复密码更新提示、无保存目标选择。
+- **背景**：Monica 有 `show_save_notification` / `smart_title_generation` /
+  `auto_update_duplicate_passwords` / `AutofillSaveActivity` + `resolveAutofillSaveInitialTarget`
+  （记住上次保存分类）。本仓保存路径能力较基础（静默落库）。
+- **整改要点（评估为主）**：
+  1. 评估「保存通知 / 提示」的必要性（当前静默落库，用户可能不知已保存）；
+  2. 评估「重复密码时提示更新」与「智能标题生成」的收益与复杂度；
+  3. 保存目标：本仓为**单一 KDBX 库**，「选择保存到哪个库」**不适用**；仅评估「保存到分组」的可行性。
+- **禁止**：改变现有内容级幂等查重语义（防双通道重复落库）；为对齐参考项目引入多库/外部来源架构
+  （属 Monica 私有 MDBX/Bitwarden 设计，见 `docs/references/Monica-架构分析.md` §5.4，**不可直搬**）。
+- **验收标准**：产出评估结论（每子项：可行/不可行 + 依据），可行项独立实现并补单测；不可行项如实留痕。
+
+---
+
+### ISSUE-P3-45 (自动填充对标 ⑦): 结构化数据类型（银行卡/证件/地址）自动填充可行性评估
+
+- **优先级**：P3（**纯评估**；需先做数据模型落位决策，不含实现承诺）
+- **核实时间点与核实方式（2026-09-10）**：
+  1. 读 `AutofillFieldScanner.kt`——`ScanResult` **仅** `usernameId` / `passwordId` / `webDomain` / `packageName`，
+     无银行卡/证件/地址字段；
+  2. 读 `AutofillStructuredData*` 相关全仓检索——本仓**无** `SecureItem` / `BankCardData` /
+     `DocumentData` / `BillingAddressData` 等一等模型，`KdbxEntry` 亦无对应结构；
+  3. 对照 `docs/references/Monica-架构分析.md` §5.4——Monica 的结构化数据建立在**私有 MDBX 架构**上，
+     属**不可直搬**项。
+- **背景**：Monica 支持信用卡（卡号/有效期/安全码/持卡人）、证件号、账单地址填充，并含
+  `AutofillPickerRequestProfile` 请求类型判定、`evaluateStructuredConfidence` 结构化置信度闸门
+  与卡号/证件号脱敏展示。本仓在**结构化数据类型上完全空白**。
+- **整改要点（仅评估）**：
+  1. 评估数据落位：**KDBX 自定义字段**（须遵循 KPEX / 业界 schema 以保证互操作）vs 新增内部类型；
+  2. 评估 `FieldHint` 扩展至 `CREDIT_CARD_*` / `IDENTITY_NUMBER` / `POSTAL_*` 的可行性，
+     及脱敏展示、请求类型判定、置信度闸门的落位；
+  3. **产出决策记录后再决定是否实现**；若判定不可行，如实归档并说明理由。
+- **禁止**：为对齐参考项目而破坏标准 `.kdbx` 互操作（自定义字段须与 KeePassXC / KeePassDX 互通）；
+  在无决策依据时直接引入私有容器格式。
+- **验收标准**：产出评估结论（可行/不可行 + 依据 + 若可行的落位方案），据此决定后续是否新开实现条目。

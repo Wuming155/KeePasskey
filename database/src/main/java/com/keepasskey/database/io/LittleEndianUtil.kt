@@ -84,20 +84,36 @@ object LittleEndianUtil {
     }
 
     fun intTo4Bytes(value: Int): ByteArray {
-        return byteArrayOf(
-            (value and 0xFF).toByte(),
-            ((value ushr 8) and 0xFF).toByte(),
-            ((value ushr 16) and 0xFF).toByte(),
-            ((value ushr 24) and 0xFF).toByte()
-        )
+        val bytes = ByteArray(4)
+        writeIntTo4Bytes(bytes, 0, value)
+        return bytes
+    }
+
+    /**
+     * 小端写入 4 字节到既有缓冲（ISSUE-P3-37：供逐块热路径复用同一缓冲，免除逐块小数组分配）。
+     *
+     * 与 [intTo4Bytes] 共用同一份移位语义（后者即委托至本方法），不存在两份可能漂移的编码实现。
+     */
+    fun writeIntTo4Bytes(target: ByteArray, offset: Int, value: Int) {
+        target[offset] = (value and 0xFF).toByte()
+        target[offset + 1] = ((value ushr 8) and 0xFF).toByte()
+        target[offset + 2] = ((value ushr 16) and 0xFF).toByte()
+        target[offset + 3] = ((value ushr 24) and 0xFF).toByte()
     }
 
     fun longTo8Bytes(value: Long): ByteArray {
         val bytes = ByteArray(8)
-        for (i in 0 until 8) {
-            bytes[i] = ((value ushr (i * 8)) and 0xFF).toByte()
-        }
+        writeLongTo8Bytes(bytes, 0, value)
         return bytes
+    }
+
+    /**
+     * 小端写入 8 字节到既有缓冲（ISSUE-P3-37：意义同 [writeIntTo4Bytes]）。
+     */
+    fun writeLongTo8Bytes(target: ByteArray, offset: Int, value: Long) {
+        for (i in 0 until 8) {
+            target[offset + i] = ((value ushr (i * 8)) and 0xFF).toByte()
+        }
     }
 
     fun bytesToInt(bytes: ByteArray, offset: Int = 0): Int {

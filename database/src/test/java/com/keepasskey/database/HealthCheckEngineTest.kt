@@ -76,7 +76,7 @@ class HealthCheckEngineTest {
     }
 
     @Test
-    fun `常见弱口令按大小写不敏感字符数组匹配（不再物化 String）`() {
+    fun `常见弱口令按大小写不敏感匹配（经强度引擎，不物化 String）`() {
         val upperWeak = KdbxEntry(
             id = KdbxUuid(ByteArray(16) { 6 }),
             fields = mapOf(
@@ -90,6 +90,57 @@ class HealthCheckEngineTest {
         assertTrue(
             "大小写不敏感匹配必须识别 'PASSWORD' 为常见弱口令",
             issues.any { it.riskLevel == PasswordRiskLevel.WEAK && it.title == "Upper Weak" }
+        )
+    }
+
+    /**
+     * ISSUE-P3-36 回归锁：以下口令**不在**接线前的 15 条常见口令表内、长度也 >= 8，
+     * 旧实现（`长度 < 8 || 命中 15 条表`）会完全漏判；接入强度引擎后必须被识别。
+     */
+    @Test
+    fun `模式化弱口令被强度引擎识别（旧实现漏判面）`() {
+        val cases = listOf("qwertyuiop", "abcabcabc", "20260101")
+        val entries = cases.mapIndexed { index, pw ->
+            KdbxEntry(
+                id = KdbxUuid(ByteArray(16) { (index + 20).toByte() }),
+                fields = mapOf(
+                    KdbxConstants.Fields.TITLE to ProtectedString("Pattern $index", isProtected = false),
+                    KdbxConstants.Fields.PASSWORD to ProtectedString(pw, isProtected = true)
+                )
+            )
+        }
+
+        val issues = HealthCheckEngine.analyzeEntries(entries)
+
+        for ((index, pw) in cases.withIndex()) {
+            assertTrue(
+                "模式化弱口令 '$pw' 应被识别为 WEAK",
+                issues.any { it.riskLevel == PasswordRiskLevel.WEAK && it.title == "Pattern $index" }
+            )
+        }
+        // 描述文案应如实带上强度评分（不夸大、不省略）
+        assertTrue(
+            "WEAK 文案应包含强度评分",
+            issues.filter { it.riskLevel == PasswordRiskLevel.WEAK }.all { it.description.contains("/4") }
+        )
+    }
+
+    /** 强口令不得被误判为 WEAK（防止强度引擎接线引入假阳性）。 */
+    @Test
+    fun `强口令不被误判为弱口令`() {
+        val strong = KdbxEntry(
+            id = KdbxUuid(ByteArray(16) { 40 }),
+            fields = mapOf(
+                KdbxConstants.Fields.TITLE to ProtectedString("Strong Site", isProtected = false),
+                KdbxConstants.Fields.PASSWORD to ProtectedString("tR7#kL9@mQ2!xZ4&vB6*", isProtected = true)
+            )
+        )
+
+        val issues = HealthCheckEngine.analyzeEntries(listOf(strong))
+
+        assertFalse(
+            "长随机口令不应被判为 WEAK",
+            issues.any { it.riskLevel == PasswordRiskLevel.WEAK }
         )
     }
 }

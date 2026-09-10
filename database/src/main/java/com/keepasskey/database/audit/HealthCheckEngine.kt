@@ -1,6 +1,7 @@
 package com.keepasskey.database.audit
 
 import com.keepasskey.core.model.KdbxEntry
+import com.keepasskey.crypto.strength.PasswordStrengthEvaluator
 import java.time.Instant
 
 /**
@@ -27,17 +28,17 @@ data class EntryHealthIssue(
 /**
  * 离线密码健康检查与安全审计引擎。
  * 遵循本地优先原则，绝不向任何外部网络上传明文或哈希前缀：
- * 1. 弱口令模式匹配（长度 < 8、全数字、常见模式）；
+ * 1. **弱口令判定**——ISSUE-P3-36 起改由 `crypto` 的 [PasswordStrengthEvaluator] 承担
+ *    （原生 Rust 内核，模式惩罚型模型；原生不可用时降级为 `PasswordStrengthFallback`）。
+ *    判据为 [PasswordStrength.isWeak]，**保留**接线前的两条规则（长度 < 8、命中常见口令表）
+ *    并新增「强度分档 ≤ 1」，可识别 `qwertyuiop` / `abcabcabc` / `20260101` 等旧实现无感的口令；
  * 2. 跨条目密码重复使用 (Reused Passwords) 检测；
  * 3. 密码时效性与过期检查。
+ *
+ * 选择原生内核的首要理由是**秘密治理**：口令以 UTF-8 字节直接进入原生侧受管缓冲，
+ * JVM 侧不新增任何 `String` 物化路径（原生侧由 Rust `Zeroizing` 确定性擦除）。
  */
 object HealthCheckEngine {
-
-    private val COMMON_WEAK_PASSWORDS = setOf(
-        "123456", "password", "12345678", "qwerty", "123456789",
-        "12345", "1234", "111111", "1234567", "dragon",
-        "welcome", "admin", "admin123", "root", "pass123"
-    )
 
     /**
      * 对数据库全部条目执行健康安全扫描
@@ -93,17 +94,19 @@ object HealthCheckEngine {
                 continue
             }
 
-            // 检查常见弱口令与长度（单条临时读取并在 finally 中擦除）
+            // 检查弱口令与长度（单条临时读取并在 finally 中擦除）
             val passChars = passProtected.readChars()
             val passBytes = passProtected.readUtf8()
             val passLength = passChars.size
             var isWeak = false
+            var strengthScore = 0
             var hashHex = ""
             try {
-                // ISSUE-P2-12：不再把密码物化为不可擦除的 String，改为字符数组大小写不敏感比较
-                if (passLength < 8 || matchesCommonWeakPassword(passChars)) {
-                    isWeak = true
-                }
+                // ISSUE-P3-36：弱口令判定下沉至 crypto 强度引擎（原生优先，失败降级为字节级近似）。
+                // 该引擎只读 UTF-8 字节，不构造 String，符合敏感数据铁律。
+                val strength = PasswordStrengthEvaluator.evaluate(passBytes)
+                isWeak = strength.isWeak
+                strengthScore = strength.score
                 hashHex = com.keepasskey.crypto.hash.HashUtil.sha256(passBytes).toHexString()
             } finally {
                 java.util.Arrays.fill(passChars, '0')
@@ -117,7 +120,7 @@ object HealthCheckEngine {
                         title = entry.title,
                         username = entry.userName,
                         riskLevel = PasswordRiskLevel.WEAK,
-                        description = "密码过短或属于常见弱密码（长度: ${passLength}，建议 ≥ 12 位）"
+                        description = "密码过弱（长度: ${passLength}，强度评分 ${strengthScore}/4，建议 ≥ 12 位且避免常见词与规律结构）"
                     )
                 )
             }
@@ -139,13 +142,4 @@ object HealthCheckEngine {
 
         return issues
     }
-
-    /**
-     * 与 [COMMON_WEAK_PASSWORDS] 做大小写不敏感的全等比较。
-     * 直接比较字符数组，避免 String(passChars) 把密码明文固化为不可擦除的堆字符串。
-     */
-    private fun matchesCommonWeakPassword(chars: CharArray): Boolean =
-        COMMON_WEAK_PASSWORDS.any { weak ->
-            weak.length == chars.size && weak.indices.all { weak[it].equals(chars[it], ignoreCase = true) }
-        }
 }
