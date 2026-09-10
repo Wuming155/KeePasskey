@@ -770,9 +770,12 @@
     <string name="settings_action_failed">操作失败：%1$s</string>
     <string name="autofill_skip_dal_title">跳过浏览器兼容层</string>
     <string name="autofill_skip_dal_sub">不通过浏览器兼容适配直接填充原生表单</string>
-    <!-- ISSUE-P0-02：设置页明示「下发前二次确认」为强制策略（无开关，不可关闭） -->
+    <!-- ISSUE-P0-02：设置页明示「下发前二次确认」为默认强制策略；
+         ISSUE-P3-42：另提供默认关闭的「短时免重复确认」开关（不影响「库锁定必须先解锁」语义） -->
     <string name="autofill_fill_confirm_title">下发前二次确认</string>
-    <string name="autofill_fill_confirm_sub">填充密码前始终要求生物识别或手动确认，属强制安全策略</string>
+    <string name="autofill_fill_confirm_sub">填充密码前默认要求生物识别或手动确认（库锁定时必须先解锁）</string>
+    <string name="autofill_session_grant_title">短时免重复确认（30 秒）</string>
+    <string name="autofill_session_grant_sub">库已解锁时，对同一应用/站点 30 秒内仅需确认一次；默认关闭</string>
     <string name="autofill_blacklist_row_title">自动填充黑名单</string>
     <string name="autofill_blacklist_count">已屏蔽 %1$d 个应用</string>
     <string name="autofill_blacklist_empty">暂无屏蔽的应用</string>

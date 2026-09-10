@@ -304,6 +304,9 @@ class SettingsViewModel @Inject constructor(
 
     fun setSkipDalVerification(enabled: Boolean) = extendedPreferences.setSkipDalVerification(enabled)
     fun setOverrideNoAutofill(enabled: Boolean) = extendedPreferences.setOverrideNoAutofill(enabled)
+    // ISSUE-P3-42：会话授权宽限开关
+    fun setAutofillSessionGrantEnabled(enabled: Boolean) =
+        extendedPreferences.setAutofillSessionGrantEnabled(enabled)
 
     // ===== TASK-44：自动填充黑名单（真实条目生命周期） =====
     /** 自动填充黑名单快照（按包名升序）；独立于 [uiState] 单独下发，避免 combine 元组膨胀。 */

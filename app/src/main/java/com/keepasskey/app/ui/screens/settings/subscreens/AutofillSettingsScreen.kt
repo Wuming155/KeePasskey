@@ -81,6 +81,8 @@ fun AutofillSettingsScreen(
     onAutofillShowTotpNotificationToggle: (Boolean) -> Unit = {},
     onSkipDalVerificationToggle: (Boolean) -> Unit = {},
     onOverrideNoAutofillToggle: (Boolean) -> Unit = {},
+    // ISSUE-P3-42：会话授权宽限（默认关闭）
+    onAutofillSessionGrantToggle: (Boolean) -> Unit = {},
     // TASK-44：自动填充黑名单真实条目与增删通道（替代原无写入方的禁用计数）
     blockedPackages: List<String> = emptyList(),
     onBlockAutofillPackage: (String) -> Boolean = { false },
@@ -162,12 +164,22 @@ fun AutofillSettingsScreen(
                             onCheckedChange = onAutofillServiceToggle
                         )
 
-                        // ISSUE-P0-02：下发前二次确认为强制安全策略（无开关、不可关闭），
-                        // 此处仅如实告知用户该保证，避免设置页出现「看似可关」的假开关
+                        // ISSUE-P0-02：下发前二次确认为**默认强制**安全策略（库锁定必先解锁）。
+                        // 此处如实告知该保证，避免设置页出现「看似可关」的假开关。
                         AutofillInfoRow(
                             icon = Icons.Default.Lock,
                             title = stringResource(R.string.autofill_fill_confirm_title),
                             subtitle = stringResource(R.string.autofill_fill_confirm_sub)
+                        )
+
+                        // ISSUE-P3-42：会话授权宽限（默认关闭）。开启后仅在**库已解锁**且
+                        // 30 秒内已对同一「包名 + 域」确认过时跳过重复弹窗；不影响解锁语义。
+                        AutofillSwitchRow(
+                            icon = Icons.Default.Lock,
+                            title = stringResource(R.string.autofill_session_grant_title),
+                            subtitle = stringResource(R.string.autofill_session_grant_sub),
+                            checked = uiState.autofillSessionGrantEnabled,
+                            onCheckedChange = onAutofillSessionGrantToggle
                         )
                     }
                 }

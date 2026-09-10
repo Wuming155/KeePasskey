@@ -129,6 +129,7 @@ internal fun NavGraphBuilder.keepasskeySettingsNavGraph(
             onAutofillShowTotpNotificationToggle = settingsViewModel::setAutofillShowTotpNotification,
             onSkipDalVerificationToggle = settingsViewModel::setSkipDalVerification,
             onOverrideNoAutofillToggle = settingsViewModel::setOverrideNoAutofill,
+            onAutofillSessionGrantToggle = settingsViewModel::setAutofillSessionGrantEnabled,
             blockedPackages = blockedPackages,
             onBlockAutofillPackage = settingsViewModel::blockAutofillPackage,
             onUnblockAutofillPackage = settingsViewModel::unblockAutofillPackage

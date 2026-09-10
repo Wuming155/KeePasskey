@@ -84,6 +84,9 @@ class ExtendedSettingsStore @Inject constructor(
             ),
             skipDalVerification = p.getBoolean(K_SKIP_DAL_VERIFICATION, defaults.skipDalVerification),
             overrideNoAutofill = p.getBoolean(K_OVERRIDE_NO_AUTOFILL, defaults.overrideNoAutofill),
+            autofillSessionGrantEnabled = p.getBoolean(
+                K_AUTOFILL_SESSION_GRANT, defaults.autofillSessionGrantEnabled
+            ),
             // TASK-44：自动填充黑名单改由 AutofillBlocklistStore 持久化真实包名条目，
             // 原 disabledAutofillQueriesCount（无写入方计数）及其持久化键一并下架
 
@@ -150,6 +153,7 @@ class ExtendedSettingsStore @Inject constructor(
             .putBoolean(K_AUTOFILL_SHOW_TOTP_NOTIFICATION, settings.autofillShowTotpNotification)
             .putBoolean(K_SKIP_DAL_VERIFICATION, settings.skipDalVerification)
             .putBoolean(K_OVERRIDE_NO_AUTOFILL, settings.overrideNoAutofill)
+            .putBoolean(K_AUTOFILL_SESSION_GRANT, settings.autofillSessionGrantEnabled)
             .putBoolean(K_MASK_PASSWORDS_DEFAULT, settings.maskPasswordsDefault)
             .putBoolean(K_MASK_TOTP_DEFAULT, settings.maskTotpDefault)
             .putBoolean(K_SHOW_UNLOCKED_NOTIFICATION, settings.showUnlockedNotification)
@@ -193,6 +197,15 @@ class ExtendedSettingsStore @Inject constructor(
     fun isAutofillCopyTotpEnabled(): Boolean =
         prefs?.getBoolean(K_AUTOFILL_COPY_TOTP, true) ?: true
 
+    /**
+     * ISSUE-P3-42：会话授权宽限开关单键读取（默认关闭）。
+     *
+     * 供 [com.keepasskey.app.autofill.KeePasskeyAutofillService] 在每次填充请求时求值；
+     * 关闭时服务端**根本不查询**授权存储，行为与既有「每次强制二次确认」完全一致。
+     */
+    fun isAutofillSessionGrantEnabled(): Boolean =
+        prefs?.getBoolean(K_AUTOFILL_SESSION_GRANT, false) ?: false
+
     /** wifiOnlySync 属 SyncUiState 域（周期同步的网络约束消费方），以独立键持久化 */
     fun loadWifiOnlySync(): Boolean = prefs?.getBoolean(K_WIFI_ONLY_SYNC, true) ?: true
 
@@ -230,6 +243,8 @@ class ExtendedSettingsStore @Inject constructor(
         const val K_AUTOFILL_SHOW_TOTP_NOTIFICATION = "autofill_show_totp_notification"
         const val K_SKIP_DAL_VERIFICATION = "skip_dal_verification"
         const val K_OVERRIDE_NO_AUTOFILL = "override_no_autofill"
+        /** ISSUE-P3-42：会话授权宽限开关（默认 false，未持久化时按关闭处理） */
+        const val K_AUTOFILL_SESSION_GRANT = "autofill_session_grant_enabled"
         const val K_MASK_PASSWORDS_DEFAULT = "mask_passwords_default"
         const val K_MASK_TOTP_DEFAULT = "mask_totp_default"
         const val K_SHOW_UNLOCKED_NOTIFICATION = "show_unlocked_notification"

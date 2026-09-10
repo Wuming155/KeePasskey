@@ -135,6 +135,7 @@ data class SettingsUiState(
     val autofillShowTotpNotification: Boolean = false, // KP2A: 填充后在通知栏显示 TOTP 验证码
     val skipDalVerification: Boolean = false, // KP2A: 跳过数字资产链接 (DAL) 校验（ISSUE-P2-02 已接线：Passkey 注册门控）
     val overrideNoAutofill: Boolean = false, // KP2A: 强制忽略应用的禁止自动填充标记
+    val autofillSessionGrantEnabled: Boolean = false, // ISSUE-P3-42: 会话授权宽限（短时免重复二次确认，默认关闭）
     // 自动填充黑名单（TASK-44）：改为真实包名条目，由 AutofillBlocklistStore 经独立
     // StateFlow 下发（SettingsViewModel.autofillBlockedPackages）；原无写入方的
     // disabledAutofillQueriesCount 计数已下架

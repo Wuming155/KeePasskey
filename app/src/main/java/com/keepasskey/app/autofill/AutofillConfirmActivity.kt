@@ -59,6 +59,10 @@ class AutofillConfirmActivity : FragmentActivity() {
     @Inject
     lateinit var totpNotificationPublisher: TotpNotificationPublisher
 
+    // ISSUE-P3-39：「上次填充」记忆写入点——用户确认填充即真实填充落点
+    @Inject
+    lateinit var autofillLastFilledStore: AutofillLastFilledStore
+
     private var completed = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -120,6 +124,20 @@ class AutofillConfirmActivity : FragmentActivity() {
     private fun completeAuthResult() {
         if (completed) return
         completed = true
+        // ISSUE-P3-39：记录本次确认填充的条目，供下次同站点/应用填充时置顶
+        // （仅影响候选排序，不改变任何匹配与放行判定）
+        intent.getStringExtra(EXTRA_ENTRY_ID)?.takeIf { it.isNotBlank() }
+            ?.let { autofillLastFilledStore.record(it) }
+
+        // ISSUE-P3-42：开启会话授权宽限时，记录本次确认的「包名 + 域」，
+        // 使 30 秒内对同一站点/应用的重复填充免二次确认（库锁定态不适用）。
+        if (settingsStore.isAutofillSessionGrantEnabled()) {
+            intent.getStringExtra(EXTRA_GRANT_PACKAGE)?.takeIf { it.isNotBlank() }?.let { pkg ->
+                AutofillSessionGrants.grant(
+                    AutofillGrantContext(pkg, intent.getStringExtra(EXTRA_GRANT_DOMAIN))
+                )
+            }
+        }
         lifecycleScope.launch {
             try {
                 handleTotpAfterConfirm()
@@ -177,6 +195,12 @@ class AutofillConfirmActivity : FragmentActivity() {
 
         /** ISSUE-P3-03 (43b)：被填充条目的标识，供确认后按条目取 TOTP */
         const val EXTRA_ENTRY_ID = "com.keepasskey.app.autofill.EXTRA_ENTRY_ID"
+
+        /** ISSUE-P3-42：会话授权上下文——调用方包名（确认成功后写入授权） */
+        const val EXTRA_GRANT_PACKAGE = "com.keepasskey.app.autofill.EXTRA_GRANT_PACKAGE"
+
+        /** ISSUE-P3-42：会话授权上下文——目标域名（可为空串，表示纯按包名匹配） */
+        const val EXTRA_GRANT_DOMAIN = "com.keepasskey.app.autofill.EXTRA_GRANT_DOMAIN"
 
         /** TOTP 二次动作（复制 / 通知）的硬超时预算：超出即放弃，保证填充回传不被拖慢 */
         private const val TOTP_ACTION_TIMEOUT_MS = 500L

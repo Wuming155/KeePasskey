@@ -39,6 +39,9 @@ data class ExtendedSettings(
     val autofillShowTotpNotification: Boolean = false,
     val skipDalVerification: Boolean = false,
     val overrideNoAutofill: Boolean = false,
+    // ISSUE-P3-42：会话授权宽限（默认关闭）——开启后在库已解锁且短时间内已确认过的
+    // 同一「包名 + 域」上跳过重复二次确认；关闭时保持「每次下发前强制二次确认」不变。
+    val autofillSessionGrantEnabled: Boolean = false,
     // 自动填充黑名单已由 AutofillBlocklistStore 承载（TASK-44）：
     // 原 disabledAutofillQueriesCount 计数无任何写入方，随本次整改一并下架
 

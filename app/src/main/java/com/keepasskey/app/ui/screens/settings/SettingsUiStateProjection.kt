@@ -139,6 +139,7 @@ internal fun buildSettingsUiState(
     autofillShowTotpNotification = extState.autofillShowTotpNotification,
     skipDalVerification = extState.skipDalVerification,
     overrideNoAutofill = extState.overrideNoAutofill,
+    autofillSessionGrantEnabled = extState.autofillSessionGrantEnabled,
 
     // 4. 设备解锁与安全 (指纹识别与锁定规则)
     biometricEnabled = userSettings.biometricEnabled,

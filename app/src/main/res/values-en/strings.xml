@@ -1025,7 +1025,9 @@
     <string name="unlock_empty_manage_btn">Go to vault management</string>
     <string name="unlock_error_pin_length">Enter the 4-digit PIN</string>
     <string name="autofill_fill_confirm_title">Confirm before filling</string>
-    <string name="autofill_fill_confirm_sub">Biometric or manual confirmation is always required before filling a password; this policy is mandatory</string>
+    <string name="autofill_fill_confirm_sub">Biometric or manual confirmation is required before filling a password by default (unlock first while the vault is locked)</string>
+    <string name="autofill_session_grant_title">Skip repeat confirmation (30s)</string>
+    <string name="autofill_session_grant_sub">While the vault is unlocked, confirm only once per app/site within 30 seconds; disabled by default</string>
     <string name="cred_fill_confirm_title">Confirm credential fill</string>
     <!-- %1$s = 凭据名称 -->
     <string name="cred_fill_confirm_biometric_subtitle">Verify your identity to fill the credential %1$s into the current app</string>

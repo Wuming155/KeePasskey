@@ -21,10 +21,8 @@ import android.widget.RemoteViews
 import android.view.inputmethod.InlineSuggestionsRequest
 import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.VaultRepository
-import com.keepasskey.app.passkey.DomainMatcher
 import com.keepasskey.app.security.RuntimeIntegrityGate
 import com.keepasskey.core.log.AppLog
-import com.keepasskey.core.model.PasskeyData
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -71,6 +69,14 @@ class KeePasskeyAutofillService : AutofillService() {
     // ISSUE-P3-03 (43b)：IME 内联建议展示构建器（受 inlineSuggestionsEnabled 偏好闸门约束）
     @Inject
     lateinit var inlinePresentationFactory: AutofillInlinePresentationFactory
+
+    // ISSUE-P3-39：「上次填充」记忆（仅用于候选置顶排序，不改变放行判定）
+    @Inject
+    lateinit var autofillLastFilledStore: AutofillLastFilledStore
+
+    // ISSUE-P3-42：会话授权宽限开关（默认关闭；关闭时根本不查询授权存储）
+    @Inject
+    lateinit var settingsStore: com.keepasskey.app.data.repository.ExtendedSettingsStore
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
@@ -145,8 +151,10 @@ class KeePasskeyAutofillService : AutofillService() {
                     inputType = node.inputType,
                     isFocused = node.isFocused,
                     htmlName = node.htmlName,
+                    label = node.label,
                     webDomain = node.webDomain,
-                    packageName = callingPkg
+                    packageName = callingPkg,
+                    isVisible = node.isVisible
                 )
             )
         }
@@ -224,28 +232,40 @@ class KeePasskeyAutofillService : AutofillService() {
             AppLog.w(TAG, "webDomain 归属无法验证，已忽略该域候选（fail-closed）")
         }
         val allEntries = vaultRepository.getKdbxEntries()
-        val matchedEntries = allEntries.filter { entry ->
-            val passkey = PasskeyData.fromCustomFields(entry.customFields)
-            val matchDomain = webDomain != null && (
-                    (passkey != null && DomainMatcher.isDomainMatch(passkey.relyingPartyId, webDomain)) ||
-                            (entry.url.isNotBlank() && DomainMatcher.isDomainMatch(entry.url, webDomain))
-                    )
-            // L1 整改：包名匹配仅走 DomainMatcher 严格点号边界（含 android:// scheme 剥离），
-            // 移除 title/notes.contains 启发式，杜绝宽松包含导致的跨应用凭据泄露
-            val matchPackage = callingPkg.isNotBlank() && entry.url.isNotBlank() &&
-                    DomainMatcher.isPackageMatch(entry.url, callingPkg)
-            matchDomain || matchPackage
-        }
+        // ISSUE-P3-39：候选打分排序——严格匹配（DomainMatcher）通过的条目按
+        // 「精确域名 > 精确包名 > 父域」打分并截断；匹配条件一字未放宽，
+        // 未通过 isDomainMatch / isPackageMatch 的条目不会进入结果。
+        val rankedEntries = AutofillCandidateRanker.rank(
+            entries = allEntries,
+            callingPackage = callingPkg,
+            webDomain = webDomain,
+            lastFilledEntryId = autofillLastFilledStore.lastFilledEntryId(),
+            limit = MAX_DATASET_COUNT
+        )
 
         // TASK-11 整改（审核报告 P2-24）：已解锁分支的每个数据集必须携带 setAuthentication
         // 二次确认——否则任何前台应用都可静默拉起候选并完成明文密码填充（用户无感知泄露）。
         // 用户点选数据集 → 拉起 AutofillConfirmActivity（生物识别/锁屏凭据或受保护窗口内
         // 手动确认）→ RESULT_OK 后框架才将该数据集的值真正写入目标表单。
+        // ISSUE-P3-42：会话授权宽限（默认关闭）。本分支库已解锁；仅当开关开启且存在与
+        // 「包名 + 域」严格匹配的有效授权（30 秒 TTL，由上次确认写入）时跳过重复二次确认。
+        // 开关关闭时不查询授权存储，行为与既有「每次强制确认」完全一致。
+        val sessionGrantEnabled = settingsStore.isAutofillSessionGrantEnabled()
+        val grantActive = sessionGrantEnabled && AutofillSessionGrants.isGranted(
+            AutofillGrantContext(callingPkg, webDomain)
+        )
+        val skipRepeatConfirmation = AutofillAuthenticationPolicy.skipRepeatConfirmation(
+            sessionGrantEnabled = sessionGrantEnabled,
+            vaultLocked = vaultRepository.isLocked(),
+            grantActive = grantActive
+        )
+
         val confirmIntent = Intent(this, AutofillConfirmActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
 
-        for ((index, entry) in matchedEntries.take(MAX_DATASET_COUNT).withIndex()) {
+        for ((index, ranked) in rankedEntries.withIndex()) {
+            val entry = ranked.entry
             // TASK-17：下发前解析 {REF:...} 字段引用（仅在取值消费点展开，投影层不物化）
             val entryIdHex = entry.id.toHexString()
             val username = vaultRepository.resolveFieldReferences(entryIdHex, entry.userName)
@@ -272,18 +292,6 @@ class KeePasskeyAutofillService : AutofillService() {
                     }
                     .build()
             )
-            // 每个数据集独立 requestCode，避免 PendingIntent 因 extras 相互覆盖
-            // ISSUE-P3-03 (43b)：随确认入口下传条目标识，供 autofillCopyTotp
-            // 在用户确认后按条目取 TOTP（不物化明文，仅传标识）
-            val confirmPendingIntent = PendingIntent.getActivity(
-                this,
-                REQUEST_CODE_CONFIRM_BASE + index,
-                confirmIntent.putExtra(
-                    AutofillConfirmActivity.EXTRA_CREDENTIAL_TITLE,
-                    username.ifBlank { entry.title }
-                ).putExtra(AutofillConfirmActivity.EXTRA_ENTRY_ID, entryIdHex),
-                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-            )
             if (usernameId != null && username.isNotEmpty()) {
                 dsBuilder.setField(
                     usernameId,
@@ -296,7 +304,25 @@ class KeePasskeyAutofillService : AutofillService() {
                     Field.Builder().setValue(AutofillValue.forText(password)).build()
                 )
             }
-            dsBuilder.setAuthentication(confirmPendingIntent.intentSender)
+
+            if (!skipRepeatConfirmation) {
+                // 每个数据集独立 requestCode，避免 PendingIntent 因 extras 相互覆盖
+                // ISSUE-P3-03 (43b)：随确认入口下传条目标识，供 autofillCopyTotp
+                // 在用户确认后按条目取 TOTP（不物化明文，仅传标识）
+                // ISSUE-P3-42：下传授权上下文（包名 + 域），供确认成功后写入会话授权
+                val confirmPendingIntent = PendingIntent.getActivity(
+                    this,
+                    REQUEST_CODE_CONFIRM_BASE + index,
+                    confirmIntent.putExtra(
+                        AutofillConfirmActivity.EXTRA_CREDENTIAL_TITLE,
+                        username.ifBlank { entry.title }
+                    ).putExtra(AutofillConfirmActivity.EXTRA_ENTRY_ID, entryIdHex)
+                        .putExtra(AutofillConfirmActivity.EXTRA_GRANT_PACKAGE, callingPkg)
+                        .putExtra(AutofillConfirmActivity.EXTRA_GRANT_DOMAIN, webDomain.orEmpty()),
+                    PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+                )
+                dsBuilder.setAuthentication(confirmPendingIntent.intentSender)
+            }
             responseBuilder.addDataset(dsBuilder.build())
         }
 
@@ -452,7 +478,9 @@ class KeePasskeyAutofillService : AutofillService() {
                     inputType = node.inputType,
                     isFocused = node.isFocused,
                     htmlName = htmlName,
+                    label = node.hint,
                     webDomain = node.webDomain,
+                    isVisible = node.visibility == android.view.View.VISIBLE,
                     text = textVal
                 )
             )
@@ -470,7 +498,11 @@ class KeePasskeyAutofillService : AutofillService() {
         val inputType: Int,
         val isFocused: Boolean,
         val htmlName: String?,
+        /** ISSUE-P3-39：邻近 label / hint 文本（用于多语言兜底识别） */
+        val label: String?,
         val webDomain: String?,
+        /** ISSUE-P3-39：节点可见性（不可见账号框不参与，不可见密码框仍准入） */
+        val isVisible: Boolean,
         val text: String
     )
 

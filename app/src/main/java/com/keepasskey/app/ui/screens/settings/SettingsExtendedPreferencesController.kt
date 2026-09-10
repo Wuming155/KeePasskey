@@ -82,6 +82,10 @@ internal class SettingsExtendedPreferencesController(
 
     fun setOverrideNoAutofill(enabled: Boolean) = updateExtended { it.copy(overrideNoAutofill = enabled) }
 
+    /** ISSUE-P3-42：会话授权宽限开关（默认关闭；关闭时每次下发前仍需二次确认） */
+    fun setAutofillSessionGrantEnabled(enabled: Boolean) =
+        updateExtended { it.copy(autofillSessionGrantEnabled = enabled) }
+
     // ========== KP2A 扩展：显示与外观交互 ==========
     fun setMaskPasswordsDefault(enabled: Boolean) = updateExtended { it.copy(maskPasswordsDefault = enabled) }
 
