@@ -663,7 +663,7 @@
     - `database/src/test/java/com/keepasskey/database/session/AtomicFileWriterTest.kt`（+4）
     - `database/src/test/java/com/keepasskey/database/DatabaseSessionBackupPreferenceTest.kt`（新增 3）
   - **测试证据**：新增用例覆盖「关闭不生成 + 清历史遗留」「开启按既有行为生成」「改密后 `.bak` 删除且旧口令不得再解开目标文件、新口令可解锁」。
-  - **如实记录的取舍**：`syncDirectory` 在 Windows 上确定性降级为告警（目录 `FileChannel` 抛 `AccessDeniedException`），故宿主单测无法断言目录 fsync 真实生效；该分支的正确性依赖 POSIX 语义，已由日志留痕。
+  - **如实记录的取舍（已回登待办）**：`syncDirectory` 在 Windows 上确定性降级为告警（目录 `FileChannel` 抛 `AccessDeniedException`），故宿主单测无法断言目录 fsync 真实生效 → 见 [ACTIVE_ISSUES.md](ACTIVE_ISSUES.md) **ISSUE-P3-13**；正确性当前依赖 POSIX 语义与代码审查背书。
 
 ---
 
@@ -706,7 +706,7 @@
   - `FlagSecurePolicy.shouldApplySecure` 改为「临时豁免」模型：锁定态无条件强制；解锁态用户关闭仍默认强制，仅在 UI 显式风险确认后由 `FlagSecureGuard.requestTemporaryExemption()` 授予 ≤5 分钟内存豁免，到期/锁库自动恢复；
   - `SecuritySettingsScreen` 关闭开关前弹出风险确认（`sec_flag_secure_risk_*`），取消则保持开启（fail-closed）；
   - 遮挡触摸过滤：`autofill_dataset_item.xml` 三视图 `filterTouchesWhenObscured="true"`；`FlagSecureGuard.applyObscuredTouchFilter` 与 `AutofillConfirmActivity` 使用 `window.decorView.filterTouchesWhenObscured = true`（**注意：`android.view.Window` 无此方法，经 `android-37.0/android.jar` javap 核验，必须落在 `View` 层**）；Compose 侧 `SecureTouchCompose.ApplyObscuredTouchFilter` 已接于 autofill 两屏。
-  - **如实记录的遗留**：主 App 其余敏感 Compose 屏未接遮挡过滤；非浏览器 webDomain 依赖联网 DAL，离线时不下发该域候选。
+  - **如实记录的遗留（已回登待办）**：主 App 其余敏感 Compose 屏未接遮挡过滤 → 见 [ACTIVE_ISSUES.md](ACTIVE_ISSUES.md) **ISSUE-P3-12**；生物识别完整性提示未消费已资源化文案 → **ISSUE-P3-14**；`isBlocked` 改 fail-closed 带来的编辑页文案边界 → **ISSUE-P3-15**；非浏览器 webDomain 依赖联网 DAL，离线不下发候选（设计取舍，不登记）。
 - **涉及文件**：`app/src/main/java/com/keepasskey/app/security/{RuntimeIntegrityPolicy,RuntimeIntegrityDetector,RuntimeIntegrityGate,RuntimeIntegrityModule,FlagSecurePolicy,ObscuredTouchPolicy,SecureTouchCompose}.kt`、`app/.../autofill/{AutofillWebDomainPolicy,AutofillOriginResolver,AutofillAccessPolicy}.kt`、`KeePasskeyAutofillService.kt`、`AutofillBlocklistStore.kt`、`FlagSecureGuard.kt`、`BiometricAuthManager.kt`、`SettingsUiState.kt`、`SettingsViewModel.kt`、`KeePasskeyApp.kt`、`SecuritySettingsScreen.kt`、`res/layout/autofill_dataset_item.xml`、`res/values{,-en}/strings.xml` 及对应测试。
 - **测试证据**：`RuntimeIntegrityPolicyTest`(9)、`FlagSecurePolicyTest`(8)、`ObscuredTouchPolicyTest`(6)、`AutofillWebDomainPolicyTest`(6)、`AutofillAccessPolicyTest`(6)，`AutofillBlocklistStoreTest` / `SecurityTest` 同步修正，定向 `security.*` + `autofill.*` 全绿。
 
@@ -738,7 +738,7 @@
   2. **消费侧清零责任链**：`VaultEntryMapper.parseTotpConfig` 经 `ProtectedString.readUtf8()` 读取并在 finally 清 `rawBytes`；`mapKdbxEntryToUi` 清 `parsedTotp.secret`；`RealVaultRepository.calculateEntryTotp` 清 `config.secret`；`computeTotpCode` 仅清 Base32 解码出的二进制 key；`getEntryTotpSecretChars` 返回 CharArray 借出给调用方；
   3. **GeneratorUiState 当前密码与 history**：容器已改 `ProtectedString`，淘汰项与 `onCleared` 显式清零；**部分完成**——生成引擎 `generateRandomPassword/generatePassphrase/generateMaskedPassword` 仍返回 `String`（生成边界），`GeneratorScreen` 渲染与剪贴板 `copySensitiveText` 边界仍会物化不可擦 String；
   4. **健康扫描字节化**：`HealthCheckEngine` 删除 `String(passChars)`，改为字符数组大小写不敏感比较。
-- **如实保留的残余面**：`RealVaultRepository` 4 处 `readString()` 受仓库接口/UI String 模型限制未改；`TotpKeyUriParser.parse(String)` 兼容重载保留（生产路径不经该重载）。
+- **如实保留的残余面（已回登待办）**：`RealVaultRepository` **5 处** `readString()` 受仓库接口/UI String 模型限制未改、`TotpKeyUriParser.parse(String)` 兼容重载保留 → 见 [ACTIVE_ISSUES.md](ACTIVE_ISSUES.md) **ISSUE-P2-15**；生成引擎三函数仍返回 `String`（`DicewareWordList.kt:277/311/333`）→ 见 **ISSUE-P2-16**。
 - **涉及文件**：`core/.../otp/TotpKeyUriParser.kt`、`core/.../otp/OtpEngine.kt`、`app/.../data/repository/VaultEntryMapper.kt`、`RealVaultRepository.kt`、`app/.../ui/screens/generator/{GeneratorUiState,GeneratorViewModel,GeneratorScreen,DicewareWordList}.kt`、`database/.../audit/HealthCheckEngine.kt` 及对应测试。
 - **测试证据**：新增 `Base32DecoderByteSemanticsTest`，`TotpKeyUriParserTest` / `VaultEntryMapperTotpTest` / `HealthCheckEngineTest` 按字节语义同步修正。
 
