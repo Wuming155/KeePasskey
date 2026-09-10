@@ -9,6 +9,9 @@
          覆盖敏感窗口，防御 cloak-and-dagger 类 overlay 攻击——官方明确 FLAG_SECURE
          不覆盖该攻击面（developer.android.com/security/fraud-prevention/activities）。 -->
     <uses-permission android:name="android.permission.HIDE_OVERLAY_WINDOWS" />
+    <!-- ISSUE-P3-18：Android 13+（minSdk 36 全覆盖）通知为运行时权限，未声明则系统直接丢弃
+         全部通知；声明后由 MainActivity 经 RequestPermission 契约请求一次，拒绝即静默降级。 -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
         android:name=".MainApplication"

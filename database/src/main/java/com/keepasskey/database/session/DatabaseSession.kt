@@ -127,13 +127,21 @@ class DatabaseSession {
     }
 
     /**
-     * 创建全新密码库文件并打开会话
+     * 创建全新密码库文件并打开会话。
+     *
+     * ISSUE-P3-21（复合密钥三分支）：新增 [keyFileData] 形参——「主密码 + 密钥文件」的
+     * 第二因子，对齐官方 `CompositeKey`（仅密码 / 仅密钥文件 / 密码 + 密钥文件）。
+     * 字节为**借用语义**：本方法只在 [KdbxFile.save] 内参与复合密钥派生（解析唯一实现在
+     * `KdbxKeyFile`），并按会话保存需要克隆进 `keyFileCache`（供 [save] 与
+     * [exportKeyFileBytes] 复用）；不持有、不擦除调用方数组，调用方用毕自行清零。
+     * 传 null 即「仅主密码」库（既有行为完全不变）。
      */
     suspend fun create(
         file: File,
         name: String,
         passwordChars: CharArray,
-        useArgon2: Boolean = true
+        useArgon2: Boolean = true,
+        keyFileData: ByteArray? = null
     ): KdbxResult<Unit> = mutex.withLock {
         withContext(Dispatchers.Default) {
             try {
@@ -155,7 +163,7 @@ class DatabaseSession {
                 // 原子写盘落盘（ISSUE-P2-11：按会话备份偏好决定是否生成 .bak）
                 withContext(Dispatchers.IO) {
                     writeAtomicByBackupPreference(file) { os ->
-                        KdbxFile.save(os, db, passwordChars)
+                        KdbxFile.save(os, db, passwordChars, keyFileData)
                     }
                 }
 
@@ -171,6 +179,15 @@ class DatabaseSession {
                 }
                 readOnlyMode = false
                 cachePassword(passwordChars)
+                // ISSUE-P3-21：把建库时使用的密钥文件因子纳入会话缓存——保存时必须用同一
+                // 复合密钥重新派生（否则写出的库永远打不开），同时使既有导出通道
+                // （exportKeyFileBytes）能把这份密钥文件交付用户。
+                // 顺序不可颠倒：cachePassword 内部会先清空全部旧缓存。
+                if (keyFileData != null) {
+                    synchronized(credentialLock) {
+                        keyFileCache = keyFileData.clone()
+                    }
+                }
                 _database.value = db
                 _state.value = SessionState.OPENED
 

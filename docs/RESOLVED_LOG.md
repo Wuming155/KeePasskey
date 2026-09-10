@@ -898,3 +898,114 @@
 | ISSUE-P3-24 | CI 首跑校准（`build.yml` 三 job 首次真实运行、`dependency-scan.yml` CVSS≥7 实际阻断、`cargo deny advisories` 联网拉取） | P3-09 残余（本环境无 GitHub runner 与 NVD/rustsec 通道） |
 | ISSUE-P3-25 | 巨型类拆分（`SyncCoordinator.kt` ~965 行、`UnlockViewModel.kt` ~979 行，均属接线前既存超标） | P3-03 / P3-04 残余 |
 | ISSUE-P3-26 | `AtomicFileWriter.deleteBackup` 删除 `.bak` 后未做目录 fsync（同类小缺口） | P3-13 残余 |
+
+---
+
+## 4. P3 残余批次整改归档（ISSUE-P3-17 ~ P3-28）
+
+> 来源：`docs/ACTIVE_ISSUES.md` §P3 全量 **12 项**。完成日期：2026-09-10。
+> 提交基线：`9c2a806` → 本批次提交。**验收方式：全模块 `.\gradlew.bat test --rerun-tasks` 强制真实执行。**
+> 编排方式：**并行多代理团队**（9 名并行工作流 + 1 名拆分工作流 + 编排者统一集成与串行构建）。
+> 结果：**8 项完整闭环并归档**；**4 项（P3-20 / P3-23 / P3-24 / P3-25）部分达标**，残余面就地更新后留在 `ACTIVE_ISSUES.md`。
+
+### 4.1 本批次整体验收证据
+
+| 模块 | 用例 | 失败 | 跳过 |
+|---|---:|---:|---:|
+| app | 637 | 0 | 0 |
+| core | 58 | 0 | 0 |
+| crypto | 61 | 0 | 0 |
+| database | 224 | 0 | 0 |
+| sync | 179 | 0 | 13 |
+| **合计** | **1159** | **0** | **13** |
+
+**1146 通过 / 0 失败 / 13 跳过**（基线 921 → **1159，净增 +238 例，零退化**）。13 例跳过仍为
+`LiveSyncServersTest` 真实联调（12 例，需 `-DliveSyncTest` + `tools/local-sync`）与
+`SyncCacheTest` 的 Windows 无 POSIX 权限视图断言（1 例），均与本批次无关。
+
+命令：`.\gradlew.bat test --rerun-tasks --max-workers=1 --continue` → **BUILD SUCCESSFUL**；
+另 10 个编译任务（app/database/sync/core/crypto 的 `compileDebugKotlin` + `compileDebugUnitTestKotlin`）
+在 `--continue` 下全部通过。**`--rerun-tasks` 强制真实执行**；`--max-workers=1` 贯彻「单会话内勿并发跑 Gradle」。
+
+### 4.2 已闭环条目逐项归档（ISSUE-P3-17 / 18 / 19 / 21 / 22 / 26 / 27 / 28）
+
+| 条目 | 主题 | 裁决 | 核心实现与代码证据 |
+|---|---|:---:|---|
+| **P3-17** | 43c UI 显示偏好接线（7 键） | **达成（真机渲染未验证）** | 7 键全部接入真实消费点：`maskPasswordsDefault`/`maskTotpDefault` → `FieldMaskPolicy.initialMaskState(defaultMasked, override) = override ?: defaultMasked`（**「默认值」非「强制覆盖」**，用户显式展开/收起后偏好刷新不覆盖，有正反单测钉住）→ `EntryDetailViewModel` → `EntryDetailComponents`；`showGroupInEntry` → 详情页分组路径行；`listDensity` → `ListDensitySpec`/`ListDensityPresenter` 驱动三种行版式的行高/内边距/字号；`autoActivateSearchOnOpen` → 一次性意图 + `FocusRequester` + 输入法；`showGroupInSearchResult` → `GroupPathPresenter` 仅「搜索中且开启」时装配路径；`showKillAppOption` → `AppTerminationPolicy` + 溢出菜单「彻底退出应用」→ `finishAffinity()` + `exitProcess(0)`。**设置页 7 处「（预留，暂未生效）」标识全部移除**。新增 55 例单测（7 个测试类）。**过程缺陷**：`maskPasswordsDefault=false` 时原实现「不遮掩但无明文」（空字段），补按需解密——边界未放宽（单条 + 屏幕作用域 + 离开即清零；生产默认 `true` 时**零解密**），有正反两例断言。 |
+| **P3-18** | 通知基础设施与 2 个通知类偏好接线 | **达成（设备侧未验证）** | 新建 `notification/`（通道规格 / 纯决策闸门 / 权限流程 / 解锁常驻 / 验证码发布，5 文件 + DI + 4 测试文件 36 例）。`AndroidManifest.xml` 声明 `POST_NOTIFICATIONS`；`MainApplication` 冷启动**先建通道再 notify**（Android 8+ 向不存在通道发送会被静默丢弃）。权限三重闸门（已授权 ∨ 已询问过（跨冷启动持久化）∨ 需解释 → 不请求）且**先落「已询问」标志再弹窗**，杜绝反复弹窗；`SecurityException` 一律静默降级。`showUnlockedNotification` 经观察 `DatabaseSession.state`（**`OPENED` 与 `DIRTY` 均视为已解锁**——只认 OPENED 会让任何一次编辑令通知错误消失）双闸门控制常驻通知；`autofillShowTotpNotification` 在自动填充确认落点门控验证码通知。**验收标准 4（零敏感明文）在 API 层面即成立**：`publish(code, periodSeconds, nowMillis)` 形参中根本没有条目标识/用户名/密码/种子字段，文案全为固定 `R.string`，两条通知均 `VISIBILITY_SECRET`。**自查发现并修复自身缺陷**：进程在解锁态被杀后重启 `posted=false` 会致旧通知永不撤销（显示「已解锁」而实际已锁定）→ `start()` 先无条件 `cancel()` 一次。**诚实化修正**：`theme_unlocked_notif_sub` 原承诺「快捷锁定入口」、`autofill_totp_notif_sub` 原承诺「通知栏快捷复制」，而本轮通知**不含任何 action 按钮** → 两处文案改为与实现一致（反向的不诚实同样属违规）。设置页 2 处标识移除。 |
+| **P3-19** | 明文导入框架与 4 源解析器 | **达成（真机交互未验证）** | 新建 `data/importer/`（21 文件：契约 / 上限 / 警告编码 / 异常分型 / 失败归类 / 结果模型 / 严格 UTF-8 解码 / 敏感文本缓冲 / 解析闸门 / XXE 加固 SAX 读取器 / KeePass XML 处理器 / 4 源解析器 / CSV 记录读取器 / 分组路径解析 / 落库编排 / 注册表 / Hilt 多绑定）+ `ui/screens/importer/`（状态 / 控制器 / 报告对话框）。**「假回执」消除**：对话框删除 `dbset_import_reserved_note`，改为「选源 → SAF 打开文件 → 控制器（读字节 → 解析 → 落库 → 出报告）」，`ImportSourceDialog` 由传**本地化字符串**改为传 **`ImportSource` 枚举**（杜绝「改文案即静默失配」）。**解析器单测 83 例**（XML 21 / CSV 19 / Bitwarden 20 / 1PUX 23）。fail-closed：XXE（`startDTD` 拒 DOCTYPE + `resolveEntity` 拒外部实体 + 4 项特征关闭，**双保险**）、Zip Slip（`..`/绝对路径/盘符/NUL → 整包拒绝）、解压炸弹（归档体积/条目数/单条目/解压总量四道闸门）、条目数 10 000 / 文件 64 MiB / 嵌套深度 64、非法 UTF-8 与 UTF-16·32 BOM、JSON 损坏（消息只带字符偏移，不含输入片段）。敏感数据：XML 走 SAX 非 DOM，密码在 `characters(char[],start,len)` **第一现场**落 `SensitiveTextBuffer`；CSV 交出独占 `CharArray`；失败路径 `ImportedEntry.clear()` 立即清零；日志只记来源 id + 计数 + 异常**类名**。**框架级致命缺陷见 §4.4-A1**。 |
+| **P3-21** | 建库侧「生成附属密钥文件」假开关 | **达成（真机交互未验证）** | 消除安全语义欺骗：`DatabaseSession.create` 新增密钥文件因子形参，`RealVaultRepository.createDatabase` 真实下传，「生成附属密钥文件」产出的 `.kdbx` 确实以「主密码 + 密钥文件」复合密钥加密；`SELECT_EXISTING` 选中的密钥文件字节**真实参与**复合密钥（不再丢弃）；新增一次性交付提示（丢失即无法解锁，中英双语 8 条资源）。KeyFile 解析**复用既有唯一实现** `KdbxKeyFile`（未在 app 层重写）；新增生成器 `KdbxKeyFileGenerator`（`SecureRandom`，与解析实现 round-trip 自洽）。单测：建库后（密码 + 密钥文件）解锁成功、**（仅密码）解锁失败**。 |
+| **P3-22** | 分组自定义图标渲染 | **达成（真机渲染未验证）** | 链路摸清后补齐**两处真实缺口**（非条目原文所述「数据源缺失」——`core/.../KdbxGroup.kt:12` 早有 `customIconId`）：① UI 投影 `VaultGroup` 增 `customIconId: String? = null`（带默认值，`RECYCLE_BIN_GROUP` 等既有构造点不受影响）；② 投影构造点 `RealVaultRepository.getGroups()` 透传 `kdbxGroup.customIconId?.toHexString()`。渲染：`EntryIconPresenter.presentGroups()` 与条目侧**共用同一实例、同一 `IconBitmapCache`、同一失败登记表**（硬断言「同一图标只解码一次」）；判定为**唯一实现** `EntryIconProjection.of`（分组与条目共用，单测断言两侧一致）。池中缺失 → `EntryIcon.Missing` → 缺图占位，**不谎报**为标准图标。新增 9 例单测。 |
+| **P3-26** | `deleteBackup` 删除 `.bak` 后未做目录 fsync | **达成** | `AtomicFileWriter.deleteBackup` 新增可注入 `DirectorySync` 形参（**保留默认值**，故 `DatabaseSession` 单参调用点源码兼容零改动），unlink 后经父目录 fsync（钩子⑤，类 KDoc「四条路径」→「五条」）。复用既有假实现做**计数断言**（恰好 1 次且落在父目录；无目录项变更不得触达；删除失败不抛且不触达；`DEGRADED` 与「实现违约抛异常」均不阻断删除）。新增 5 例（另将 5 例与共享替身搬迁到 `AtomicFileWriterBackupDeletionTest.kt` / `DirectorySyncTestDoubles.kt` 以守住 ≤400 行阈值，**既有断言逐字未变**）。 |
+| **P3-27** | 解压上限不自洽 与 并发签名计数器假说 | **达成（并修正条目错误前提）** | **前提修正**：条目原文「`InnerHeader` 单字段上限 256 MiB」系**误读**——单字段实为 `MAX_INNER_FIELD_BYTES = 64 MiB`，256 MiB 是 `MAX_BINARY_POOL_TOTAL_BYTES`（二进制池**累计**上限）。故「单字段 ≤ 整包」本就自洽。**真实问题**是池累计上限 256 MiB > 整包 128 MiB → **永不生效的死守卫**（内层头部经 `guardPayloadSize` 读取，必在整包约束内）。整改：收敛为**单一真源**（`KdbxFile.MAX_DECOMPRESSED_PAYLOAD_BYTES` = 128 MiB；单字段 = 其 1/2；池累计 = `min(设计值 256 MiB, 整包)` = 128 MiB）+ 伴生对象初始化期 `require` 不变量（「单字段 ≤ 池累计 ≤ 整包」，常量漂移即 fail-fast）。**签名计数器**：协调器内部**证伪**（`updateDatabaseMeta` 读-改-写同处单一 `mutex.withLock` 临界区，32 路并发回归锁断言回传值互不相同且严格递增）；**调用方证实存在真实重复**——`PasskeyAssertionActivity` 原以**锁外快照自算** signCount 写入 `AuthenticatorData`，且先 `setResult(RESULT_OK)` 再落盘（进程中断致 RP 已收到 N+1 而库内仍 N → 跨时间重复）。新增原子 API `incrementPasskeySignCount`（回传**实际落库值**）并完成调用方接线：**先原子递增取唯一值 → 用它写入 AuthenticatorData → 再 setResult**。新增 4 例（含「自算值去重后 = 1（重复）vs 协调器回传去重后 = 8（唯一）」的并列锁定）。 |
+| **P3-28** | 待办条目应附「核实时间点」 | **达成** | `docs/ACTIVE_ISSUES.md` 新增「**条目维护规则**」章节（3 条：新增条目须附核实时间点与核实方式；开工前复核前提；行号仅为快照），并写入立规缘由（P3-08/P3-16 的前提滞后事故留痕）；`AGENTS.md` §3 认领步骤同步加入「**前提复核**」强制条款与「新条目须附核实时间点」要求。**并已对全部 12 条做一次前提复核**，产出「前提复核记录」表（核实时间点 2026-09-10 + 逐条核实方式 + 结论），就地修正 **2 条失准前提**（P3-27 见上；P3-22 的链路缺口位置），并更正本节标题计数（原写「10 项」，实际 12 项）。 |
+
+### 4.3 部分达标条目（残余面已就地更新，留在 `ACTIVE_ISSUES.md`）
+
+| 条目 | 本批次已完成 | 仍未达成 |
+|---|---|---|
+| **P3-20** 子库挂载 | 核心层落地：数据模型 / 挂载注册表（非敏感元数据持久化）/ 只读子库会话 / 凭据隔离 / 凭据存储 / 锁库联动 + 单测 | **UI 接线未完成**——`SettingsViewModel` 的 `childDatabasesCount` 仍硬编码 `0`，`ChildDatabaseDialog.onSelectFile` 仍无落地实现，故该对话框的「预留，暂未生效」说明**如实保留**（未接线却移除标识即反向不诚实） |
+| **P3-23** arm64 与真实语料 | `database` 模块**首次建立 androidTest 源集**与依赖接线；设备侧端到端解锁用例落地且 **fail-closed**（语料缺失 → `Assume` 显式跳过并声明「跳过不代表验收达成」；语料在而伴生元数据缺失/非法 → **硬失败**）；真实探测记录（已安装 system-image 仅 x86_64、`adb devices` 空、arm64 镜像**远端有发布但本机未安装**）；语料逐步生成清单写入 `crypto/src/test/resources/argon2-interop/README.md` | arm64 真机/模拟器数据（**未安装镜像**，且 x86_64 宿主上的 arm64 模拟器数据按纪律不得与真机同表登记）；真实 KeePass 2.61.1 / KeePassXC `.kdbx` 语料（需人工 GUI 建库，无人值守流程无法产出） |
+| **P3-24** CI 首跑校准 | **静态校准并修正 3 处「首次必红」缺陷**：① `platforms;android-37` 远端**不存在** → 改正为 `android-37.0`（证据：`sdkmanager --list` + 本机 `package.xml`）；② 签名断言两处必然误红 → `apksigner` 不自动读同目录 `.idsig`（v4 恒 `false`）故补 `--v4-signature-file`；minSdk 36≥28 且 v3 同开时 AGP **省略 v2 块**故「v2:true」断言不可能成立 → 改为「v2 块必须缺席」并新增 `v1: false` 断言（**未削弱**）；③ JDK 17 → 21 与 `gradle-daemon-jvm.properties: toolchainVersion=21` 对齐（**残留不确定性已如实标注**）。另：7 个 Action SHA 逐一核实存在且与声明版本一致（**未遇限流**）；Rust 1.97.1 **确认真实已发布**（推翻「未发布必红」担忧）；cargo-ndk 4.1.2 / cargo-deny 0.20.2 真实存在；material3 **1.5.0 stable 核实不存在** → 退出条件未满足、维持 alpha27（**未改** `libs.versions.toml`）；`cargo deny check` **本机实跑通过**（`advisories/bans/licenses/sources ok`，advisory-db 当日真实拉取，`curl 28` 未复现）；Linux 侧「疑似首次即红」静态判定 **0 例**。留痕 `docs/ci-静态校准记录.md` | 三 job 在 runner 上的**真实执行**、`dependency-scan.yml` 在 CVSS≥7 的真实阻断、CI 网络下 advisory-db 拉取、镜像实际预装 API 级别、GHAS 可用性——**本环境从未运行 CI，不得据此认为已跑通** |
+| **P3-25** 巨型类拆分 | `SyncCoordinator.kt` **965 → 254 行**（按「周期编排 / 冲突决策 / Provider 解析 / 缓存变更检测 / DB 编解码 / 会话状态 / 偏好 / 输出模型 / 日志标签」拆为 10 个新类，均 ≤400）；`KdbxXmlGroupReader.kt` **407 → 218 行**（拆出 AutoType / Binary / String / Times 四个节点文件）；**并验证 P3-07 的附件别名隔离回归锁语义完整保留**（`binariesPool[refIndex].data.copyOf()` 仍在新文件 `KdbxXmlBinaryNode.kt:50`）；全仓 12 处 `debugLog` 诊断点经逐一核对**全部无损迁移**（`SyncCycleRunner` 确无日志需求） | **`UnlockViewModel.kt` 仍 979 行未拆**（原计划第二波拆分因执行者不可达未完成）；另本批次新增代码令 `VaultListViewModel.kt`（731）与 `SettingsViewModel.kt`（902）超过 400 行阈值，一并登记 |
+
+### 4.4 本批次登记的过程缺陷与事实修正
+
+> 本节为**如实留痕**：以下问题均在本批次真实发生并被发现/修正，不美化、不隐去。
+
+**A. 生产代码缺陷（由本批次自身的验证门禁与队员互查查出）**
+
+1. **⚠️ 全框架致命缺陷 `ImportTextDecoder`（影响全部 4 个数据源）**：`decode()` 写作
+   `.decode(...).throwException()` / `.flush(...).throwException()`。`CoderResult.throwException()`
+   对 **UNDERFLOW**（三段式解码的**正常收尾**状态）抛出的是 `BufferUnderflowException`——一个
+   `RuntimeException`，**不是** `CharacterCodingException`，故 `catch (_: CharacterCodingException)` 根本接不住
+   → **任何输入（含纯 ASCII 合法文本）都会抛异常**，四个数据源全部解析失败，用户侧表现为「导入永远报格式非法」。
+   由解析器子批在离线直跑中复现定位，编排者落地修复（显式判定 `isError || isOverflow`）。
+   **该缺陷一度导致 25 例单测全红**，也解释了为何两个 JSON 源「全部用例同时失败」。
+2. **包名 `ui/screens/import` 令 KSP 整体失败**：`import` 是 **Java 关键字**，Kotlin 自身容忍，
+   但 KSP（JVM 侧）直接以 `The name 'import' cannot be used as a package name because it is a Java keyword`
+   拒绝整个注解处理阶段（比 Kotlin 编译更早失败）。**根因是编排者在任务书里建议了该路径**，
+   属编排失误；已改名 `ui/screens/importer` 并写入 `ARCHITECTURE.md` 的包名注意事项。
+3. **`SyncCoordinator` 拆分引入 2 处回归**：① 给 `SyncCycleRunner(...)` 传了其不存在的 `debugLog` 形参；
+   ② 把原「普通字段 `var isOfflineMode` + `private set`」改成「自定义 `get()`/`private set(value){}` 访问器」后，
+   Kotlin 为 `isXxx` 布尔属性生成 JVM 方法 `setOfflineMode(Z)V`，与公开的 `fun setOfflineMode` 构成
+   **Platform declaration clash**（编译期失败）。修法：改为只读 `val` + 函数写穿 `session.isOfflineMode`
+   （**公开 API 一字未变**，`@Volatile` 语义由 `SyncSessionState` 承接保留）。两处均由编排者在集中编译中定位并修复。
+4. **`OnePasswordPuxImporter` 以裸 `Any?` 当 `Map` 用**：`findTotp` 的 `flatMap` 后缺类型判定 →
+   补 `mapNotNull { ImportJson.asObject(it) }`（畸形节点跳过而非抛 `ClassCastException`）。
+5. **两个 JSON 解析器内部自调用未定义方法**：`Accumulator.clearEntries()` / `warningsSnapshot()` 未定义
+   → 补齐（失败路径**真实清零**半成品明文；快照返回不可变副本）。
+6. **`ChildDatabaseException` 属性名 `reason` 与调用点不一致**（`Unresolved reference 'reason'`），
+   且 `settleWithEpoch` 误用泛型擦除检查 `result is KdbxResult.Success`（应为 `result.isSuccess`）。
+7. **`BrowserCsvImporter` 对 `Char` 调 `String.removePrefix`**（该重载只接受 `CharSequence`）→ 补 `.toString()`。
+8. **`EntryReferenceDisplayResolver { ... }` 尾随 lambda 绑定错位**：该类**不是** `fun interface` 且
+   `protectedPlaceholder: String` 是末位形参，故尾随 lambda 被当作 `String` 传入 → 改为具名参数。
+
+**B. 测试缺陷（生产实现正确，测试自身有缺陷——与 §3.3 第 5 条同类）**
+
+9. **`DatabasePickerKeyFileCreateTest` 别名共享自击**：同一数组既作期望值又被断言「用毕已清零」
+   （`assertArrayEquals(keyFileBytes, ...)` 与 `keyFileBytes.all { it == 0 }` 互相矛盾）→
+   改为**独立 `copyOf()` 快照**作期望值。**生产实现正确**：既真实下传了用户选中的字节，也真实清零了调用方副本。
+10. **`KeePassXmlImporterTest` 3 例夹具缺陷**：① 多行拼接使 `trimIndent()` 退化为空操作 →
+    `<?xml?>` 声明前残留空白，JDK SAX 直接抛 `SAXParseException`（XML 规范要求声明位于文档起始处）；
+    ② otpauth URI 的裸 `&` 是非法 XML（须写 `&amp;`）。两处均为**夹具**问题，修法为 `.trimStart()` 与 `&amp;`，
+    **未削弱任何断言**。
+11. **两个 JSON 测试夹具的「JSON 字符串内裸换行」非法**（JSON 不允许字符串字面量含裸控制字符）→ 修正夹具。
+
+**C. 编排过程缺陷（编排者自身，如实登记）**
+
+12. **上游任务书缺陷传导**：编排者给导入 UI 指定的包名 `import` 违反 Java 关键字约束（见 A2），
+    且未预先把「Bitwarden/1PUX 的 Hilt 多绑定由谁写」写成单一归属 —— 两名队员各自按「对方会写 / 我不许写」
+    理解，导致**两个数据源一度处于「解析器就绪但 `find()` 恒返回 null」**的不可用状态。
+    修法：编排者在集成阶段就地补两条 `@Binds @IntoSet`（`ImporterModule.kt`）。
+13. **一次基于陈旧快照的误判并已自我纠正**：编排者据一轮**测试运行中途**的结果判定
+    「Bitwarden/1PUX 两个解析器对全部合法输入返回 Failure」，遂按「解析器系统性缺陷」方向排查；
+    实测用**与测试逐字等价的夹具**直接调用解析器**两次均成功**，证明那一轮失败反映的是**队员仍在写盘的中间态**，
+    而非解析器缺陷。**结论：集中编译/测试的结论必须与「执行期间是否有队员在写盘」一并解读**，
+    否则会把中间态误判为缺陷（本条登记为「不要以单次快照代替稳定态结论」）。
+14. **「单一 Gradle 会话」纪律有效规避了上一批次的事故**：本批次全程**明令禁止队员执行任何 Gradle 命令**，
+    由编排者串行构建并回传错误。实测全程仅 2 个 java 进程、可用内存 8.7 GB，
+    未复现 §3.3 第 10/11 条登记的 OOM 与 build 目录并发截断（`EOFException` / `Kryo Buffer underflow`）。
+15. **测试用例数显著增长**：921 → 1159（**+238**）。其中 app 416 → 637（+221）。
+    集中编译把队员的静态自检升级为**真实门禁证据**，是本批次能在 30 个初始编译错误、
+    25 例系统性测试失败、6 例残留失败中被逐层收敛到 0 的直接原因。

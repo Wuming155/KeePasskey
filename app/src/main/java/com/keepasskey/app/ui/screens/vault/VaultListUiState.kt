@@ -2,10 +2,12 @@ package com.keepasskey.app.ui.screens.vault
 
 import androidx.annotation.StringRes
 import com.keepasskey.app.R
+import com.keepasskey.app.ui.model.BitmapEntryIcon
 import com.keepasskey.app.ui.model.EntryDecorations
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.model.UiVaultEntry
 import com.keepasskey.app.ui.model.VaultGroup
+import com.keepasskey.app.ui.screens.settings.ListDensity
 
 /**
  * 排序方向：升序 / 降序
@@ -70,6 +72,25 @@ data class VaultListUiState(
     val showPasskeyBadge: Boolean = true,
     val showUrlInList: Boolean = true,
     val hideFabOnScroll: Boolean = false,
+    // ISSUE-P3-17：列表行密度（驱动行高 / 内边距 / 字号，映射见 ListDensityPresenter）
+    val listDensity: ListDensity = ListDensity.NORMAL,
+    // ISSUE-P3-17：搜索结果行是否展示完整分组路径（对应设置项 showGroupInSearchResult）
+    val showGroupInSearchResult: Boolean = true,
+    /**
+     * ISSUE-P3-17：条目 id → 所属分组完整路径。
+     * 仅「搜索中且 showGroupInSearchResult 开启」时装配，其余情况为空表（行组件不做路径计算）。
+     */
+    val entryGroupPaths: Map<String, String> = emptyMap(),
+    /**
+     * ISSUE-P3-17：进入库列表后自动聚焦搜索栏并弹出输入法的**一次性意图**；
+     * Screen 消费后立即经 consumeAutoActivateSearch 置回 false，避免重组重复弹输入法。
+     */
+    val autoActivateSearch: Boolean = false,
+    /**
+     * ISSUE-P3-22：分组 id → 分组图标投影（自定义位图 / 缺图占位 / 标准图标）。
+     * 与条目图标共用同一 [com.keepasskey.app.ui.model.EntryIconPresenter]（同一解码缓存）。
+     */
+    val groupIcons: Map<String, BitmapEntryIcon> = emptyMap(),
     // ISSUE-P3-02：条目展示装饰（自定义图标投影 + Notes/URL 字段引用展开文案）。
     // 图标解码与引用解析均在状态层完成，Composable 只做纯绘制（禁止在 UI 内做 IO/解码）。
     val decorations: EntryDecorations = EntryDecorations.EMPTY

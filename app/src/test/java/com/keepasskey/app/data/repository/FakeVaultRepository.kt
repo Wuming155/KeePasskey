@@ -411,6 +411,38 @@ class FakeVaultRepository(
         return newEntry
     }
 
+    /**
+     * ISSUE-P3-27：原子递增并回传**实际落库值**。
+     *
+     * 替身刻意**不写死返回值**：按 [PasskeyData.readSignCount] + [PasskeyData.nextSignCount]
+     * 的真实饱和语义递增，使「断言路径必须使用回传值」这一回归锁在替身上同样成立
+     * （若写死常量，回归用例会退化为空转，无法证伪）。
+     * 条目不存在时返回 null 且不写入（与 [RealVaultRepository] 的契约一致）。
+     */
+    override suspend fun incrementPasskeySignCount(entryId: String): Int? {
+        val current = extraKdbxEntries.value.toMutableList()
+        val index = current.indexOfFirst { it.id.toHexString() == entryId }
+        if (index < 0) return null
+
+        val entry = current[index]
+        val hasField = entry.customFields.any { it.key == PasskeyData.FIELD_SIGN_COUNT }
+        val next = PasskeyData.nextSignCount(PasskeyData.readSignCount(entry.customFields))
+        val written = KdbxCustomField(
+            PasskeyData.FIELD_SIGN_COUNT,
+            ProtectedString(next.toString(), isProtected = false)
+        )
+        val updated = if (hasField) {
+            entry.customFields.map { cf ->
+                if (cf.key == PasskeyData.FIELD_SIGN_COUNT) written else cf
+            }
+        } else {
+            entry.customFields + written
+        }
+        current[index] = entry.copy(customFields = updated)
+        extraKdbxEntries.value = current
+        return next
+    }
+
     override suspend fun patchPasskeySignCount(entryId: String, newCount: Int) {
         val current = extraKdbxEntries.value.toMutableList()
         val index = current.indexOfFirst { it.id.toHexString() == entryId }

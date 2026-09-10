@@ -22,9 +22,11 @@ import java.util.logging.Logger
  * 一旦 delete 成功而后续 rename 失败，原文件将彻底丢失且无法恢复。
  *
  * ISSUE-P3-13：目录 fsync 经 [DirectorySync] 抽象注入，本类不再写死平台调用。
- * 四条落盘路径均触达该钩子：① .bak 滚动备份 copy 后、② 主路径原子 move 后、
- * ③ 降级标准 rename 成功后、④ 降级 copy 覆盖后；Windows 等不支持目录通道的平台
- * 由实现返回降级结果，仅记告警，**绝不阻断写盘**。
+ * 五条目录项变更路径均触达该钩子：① .bak 滚动备份 copy 后、② 主路径原子 move 后、
+ * ③ 降级标准 rename 成功后、④ 降级 copy 覆盖后、
+ * ⑤ 删除滚动备份 `.bak` 后（ISSUE-P3-26：unlink 同属目录项变更，不 fsync 则断电后
+ * 「已删除的备份」可能随目录项回滚而复活，旧口令可解的密文快照重新出现）；
+ * Windows 等不支持目录通道的平台由实现返回降级结果，仅记告警，**绝不阻断写盘**。
  */
 object AtomicFileWriter {
 
@@ -235,18 +237,33 @@ object AtomicFileWriter {
      * ISSUE-P2-11 (ZT-16)：关闭「保存前备份」偏好时清理历史遗留 .bak；
      * 凭据轮换成功后旧密文快照（可被旧口令解开）必须失效。
      * 删除失败仅记录告警并返回 false，绝不在此抛出以阻断主流程。
+     *
+     * ISSUE-P3-26：unlink 与 rename/copy 同属「目录项变更」，删除成功后必须经
+     * [directorySync] 固化父目录目录项（钩子⑤）——否则断电/崩溃后该删除可能尚未落盘，
+     * 已清理的旧密文快照会重新出现。备份本就不存在时没有任何目录项变更，
+     * 不得触达钩子（诚实性：不伪报已同步）；删除失败同样无目录项变更，亦不触达。
+     *
+     * @param directorySync 目录项 fsync 抽象（ISSUE-P3-26）。生产默认 [DirectorySync.default]，
+     *   保留默认值使既有调用点（`DatabaseSession.deleteBackupQuietly`）源码兼容；
+     *   单测注入假实现以断言「删除路径确实触达目录同步钩子」。
+     * @return 备份是否已确认不存在（已删除或本就不存在均为 true）；删除失败返回 false 且仅告警。
      */
-    internal fun deleteBackup(targetFile: File): Boolean {
+    internal fun deleteBackup(
+        targetFile: File,
+        directorySync: DirectorySync = DirectorySync.default
+    ): Boolean {
         val bakFile = backupFileFor(targetFile)
         if (!bakFile.exists()) {
             return true
         }
-        return if (bakFile.delete()) {
-            true
-        } else {
+        if (!bakFile.delete()) {
             logger.log(Level.WARNING, "删除滚动备份失败（仅告警，不阻断主流程）: ${bakFile.absolutePath}")
-            false
+            return false
         }
+        // ISSUE-P3-26：删除成功后 fsync 父目录，固化 unlink 造成的目录项变更（钩子⑤）。
+        // 降级（Windows 无目录通道）由实现返回 DEGRADED，本层不读取结果、更不据此失败。
+        syncDirectory(bakFile.parentFile ?: File("."), directorySync)
+        return true
     }
 
     /**

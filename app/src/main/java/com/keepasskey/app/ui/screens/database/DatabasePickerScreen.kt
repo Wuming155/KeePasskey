@@ -87,6 +87,8 @@ fun DatabasePickerScreen(
     // 遮挡触摸过滤（ISSUE-P2-09 / P3-12）
     ApplyObscuredTouchFilter()
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    // ISSUE-P3-21：生成型密钥文件的一次性交付状态（复合密钥第二因子，丢失即无法解锁）
+    val keyFileDelivery by viewModel.keyFileDelivery.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
 
     LaunchedEffect(viewModel) {
@@ -110,11 +112,14 @@ fun DatabasePickerScreen(
     DatabasePickerContent(
         uiState = uiState,
         snackbarHostState = snackbarHostState,
+        keyFileDelivery = keyFileDelivery,
         onBackClick = onBackClick,
         onSelectDatabase = viewModel::selectDatabase,
         onOpenCreateDialog = viewModel::openCreateDialog,
         onCloseCreateDialog = viewModel::closeCreateDialog,
         onCreateDatabase = viewModel::createDatabase,
+        onSaveKeyFile = viewModel::saveGeneratedKeyFileTo,
+        onKeyFileDeliveryDismissed = viewModel::dismissKeyFileDelivery,
         onOpenExistingClick = viewModel::openOpenSourceDialog,
         onCloseOpenSourceDialog = viewModel::closeOpenSourceDialog,
         onImportFromSource = viewModel::importDatabaseFromSource,
@@ -132,14 +137,29 @@ fun DatabasePickerContent(
     onSelectDatabase: (String) -> Unit,
     onOpenCreateDialog: () -> Unit,
     onCloseCreateDialog: () -> Unit,
-    onCreateDatabase: (name: String, pwd: CharArray, keyFile: Boolean, preset: String) -> Unit,
+    onCreateDatabase: (
+        name: String,
+        pwd: CharArray,
+        keyFile: Boolean,
+        preset: String,
+        keyFileSourceUri: String?
+    ) -> Unit,
     onOpenExistingClick: () -> Unit,
     onCloseOpenSourceDialog: () -> Unit,
     onImportFromSource: (source: OpenVaultSourceType, name: String, path: String) -> Unit,
     onRemoveDatabase: (String) -> Unit,
+    // ISSUE-P3-21：生成型密钥文件的一次性交付（默认值便于预览与既有调用点复用）
+    keyFileDelivery: KeyFileDeliveryState = KeyFileDeliveryState.None,
+    onSaveKeyFile: (Uri) -> Unit = {},
+    onKeyFileDeliveryDismissed: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var dbToRemove by remember { mutableStateOf<VaultDatabaseInfo?>(null) }
+
+    // ISSUE-P3-21：SAF 另存为生成型密钥文件（仅传 Uri 上行，写盘由 ViewModel 复用既有导出通道完成）
+    val keyFileSaveLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/octet-stream")
+    ) { uri -> uri?.let(onSaveKeyFile) }
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -257,6 +277,15 @@ fun DatabasePickerContent(
         CreateVaultWizardDialog(
             onDismiss = onCloseCreateDialog,
             onConfirm = onCreateDatabase
+        )
+    }
+
+    // ISSUE-P3-21：生成型密钥文件的一次性保存提示——复合密钥第二因子必须当场交付
+    (keyFileDelivery as? KeyFileDeliveryState.PendingSave)?.let { pending ->
+        KeyFileOneTimeSaveDialog(
+            suggestedFileName = pending.suggestedFileName,
+            onSaveClick = { keyFileSaveLauncher.launch(pending.suggestedFileName) },
+            onSkipClick = onKeyFileDeliveryDismissed
         )
     }
 
@@ -646,10 +675,81 @@ private fun OpenExistingVaultDialog(
     )
 }
 
+/**
+ * 新建库向导中密钥文件来源的选择态（ISSUE-P3-21：替换原裸字符串 `"GENERATE"` / `"SELECT_EXISTING"`）。
+ */
+private enum class KeyFileSourceChoice {
+    /** 生成全新密钥文件（由 database 模块唯一生成器产出 KeePass 2.x XML v2.0） */
+    GENERATE,
+
+    /** 使用用户从设备选取的既有密钥文件 */
+    SELECT_EXISTING
+}
+
+/**
+ * 生成型密钥文件的一次性保存提示（ISSUE-P3-21 验收 2）。
+ *
+ * 该密钥文件是复合密钥的第二因子：**不保存即永久无法解锁**（会话锁定后内存副本立即清零，
+ * 且该文件不会被再次生成）。因此：
+ * - 主按钮直达 SAF 另存为（写盘复用既有导出通道 `exportKeyFileBytes`）；
+ * - 次按钮文案如实写出后果，不提供「假装已保存」的第三条路径；
+ * - 点击弹窗外部不关闭（`onDismissRequest` 不做任何事），杜绝误触导致第二因子静默丢失。
+ */
+@Composable
+private fun KeyFileOneTimeSaveDialog(
+    suggestedFileName: String,
+    onSaveClick: () -> Unit,
+    onSkipClick: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = {
+            // 必须显式选择：误触外部若静默关闭，用户将永久失去该密码库的第二因子
+        },
+        title = {
+            Text(
+                text = stringResource(R.string.db_picker_keyfile_backup_title),
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+            )
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = stringResource(R.string.db_picker_keyfile_backup_warning),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = suggestedFileName,
+                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+        },
+        confirmButton = {
+            Button(onClick = onSaveClick, shape = CapsuleShape) {
+                Text(stringResource(R.string.db_picker_keyfile_backup_save))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onSkipClick) {
+                Text(stringResource(R.string.db_picker_keyfile_backup_skip))
+            }
+        },
+        shape = RoundedCornerShape(20.dp)
+    )
+}
+
 @Composable
 private fun CreateVaultWizardDialog(
     onDismiss: () -> Unit,
-    onConfirm: (name: String, pwd: CharArray, keyFile: Boolean, preset: String) -> Unit
+    // 形参顺序与 DatabasePickerViewModel.createDatabase 严格一致，便于直接方法引用接线
+    onConfirm: (
+        name: String,
+        pwd: CharArray,
+        keyFile: Boolean,
+        preset: String,
+        keyFileSourceUri: String?
+    ) -> Unit
 ) {
     val context = LocalContext.current
     var vaultName by remember { mutableStateOf("passwords.kdbx") }
@@ -658,7 +758,7 @@ private fun CreateVaultWizardDialog(
     var confirmChars by remember { mutableStateOf(CharArray(0)) }
     var passwordVisible by remember { mutableStateOf(false) }
     var useKeyFile by remember { mutableStateOf(false) }
-    var keyFileMode by remember { mutableStateOf("GENERATE") } // "GENERATE" or "SELECT_EXISTING"
+    var keyFileChoice by remember { mutableStateOf(KeyFileSourceChoice.GENERATE) }
     var selectedKeyFilePath by remember { mutableStateOf("") }
     var selectedKeyFileName by remember { mutableStateOf("") }
     var selectedPreset by remember { mutableStateOf("ChaCha20 + Argon2id") }
@@ -674,7 +774,8 @@ private fun CreateVaultWizardDialog(
         }
     }
 
-    val isKeyFileValid = !useKeyFile || keyFileMode == "GENERATE" || selectedKeyFilePath.isNotBlank()
+    val isKeyFileValid = !useKeyFile || keyFileChoice == KeyFileSourceChoice.GENERATE ||
+        selectedKeyFilePath.isNotBlank()
     val isFormValid = vaultName.isNotBlank() && passwordChars.isNotEmpty() && passwordChars.contentEquals(confirmChars) && isKeyFileValid
 
     // 弹窗离场（确认 / 取消 / 进程回收）时擦除组件内持有的全部密码副本
@@ -766,22 +867,24 @@ private fun CreateVaultWizardDialog(
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             FilterChip(
-                                selected = keyFileMode == "GENERATE",
-                                onClick = { keyFileMode = "GENERATE" },
+                                selected = keyFileChoice == KeyFileSourceChoice.GENERATE,
+                                onClick = { keyFileChoice = KeyFileSourceChoice.GENERATE },
                                 label = { Text(stringResource(R.string.picker_keyfile_generate), fontSize = 11.sp) },
                                 shape = CapsuleShape
                             )
                             FilterChip(
-                                selected = keyFileMode == "SELECT_EXISTING",
-                                onClick = { keyFileMode = "SELECT_EXISTING" },
+                                selected = keyFileChoice == KeyFileSourceChoice.SELECT_EXISTING,
+                                onClick = { keyFileChoice = KeyFileSourceChoice.SELECT_EXISTING },
                                 label = { Text(stringResource(R.string.picker_keyfile_select_existing), fontSize = 11.sp) },
                                 shape = CapsuleShape
                             )
                         }
 
-                        if (keyFileMode == "GENERATE") {
+                        if (keyFileChoice == KeyFileSourceChoice.GENERATE) {
+                            // ISSUE-P3-21：原文案声称「自动保存至安全存储」，实际并无自动保存——
+                            // 现改为如实描述「生成后强制一次性交付」
                             Text(
-                                text = stringResource(R.string.picker_keyfile_generate_desc),
+                                text = stringResource(R.string.db_picker_keyfile_generate_desc),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.primary
                             )
@@ -839,7 +942,16 @@ private fun CreateVaultWizardDialog(
         confirmButton = {
             Button(
                 // H2 整改：直接移交组件持有的 CharArray（ViewModel 复制私有副本并自行擦除）
-                onClick = { onConfirm(vaultName, passwordChars, useKeyFile, selectedPreset) },
+                // ISSUE-P3-21：SELECT_EXISTING 时上行选中的密钥文件 Uri，其字节真实参与复合密钥
+                onClick = {
+                    onConfirm(
+                        vaultName,
+                        passwordChars,
+                        useKeyFile,
+                        selectedPreset,
+                        if (keyFileChoice == KeyFileSourceChoice.SELECT_EXISTING) selectedKeyFilePath else null
+                    )
+                },
                 enabled = isFormValid,
                 shape = CapsuleShape
             ) {

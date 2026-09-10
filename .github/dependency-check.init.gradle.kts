@@ -46,7 +46,8 @@ allprojects {
         // 若 CI 因数据源不可达而红，处置方式是补 NVD_API_KEY / 修数据源，而非回退本项。
         failOnError = true
 
-        // NVD 数据源双通道（本地验证中，暂不提交）：
+        // NVD 数据源双通道（**已入库生效**；原「本地验证中，暂不提交」的注释已随 ISSUE-P3-24
+        // CI 静态校准更正——该状态描述与库内代码不符，属滞后注释）：
         // ① 配置了环境变量 NVD_API_KEY（GitHub Secret 同名注入 workflow）→ 走
         //    NVD 官方 API 实时通道；
         // ② 未配置 → 回落 dependency-check 官方托管镜像 datafeed（24h 尽力而为

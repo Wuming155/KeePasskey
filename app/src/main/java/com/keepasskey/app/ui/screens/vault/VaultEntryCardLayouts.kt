@@ -42,6 +42,9 @@ import com.keepasskey.app.ui.theme.MonospacePasswordStyle
  *
  * 两版式均按 [icon] 绘制图标：绑定了自定义 PNG 图标时优先绘制位图，
  * 缺图/解码失败时绘制缺图占位，未绑定时回退各自的标准矢量图标。
+ *
+ * ISSUE-P3-17：[densitySpec] 驱动行密度；[groupPath] 非空时展示所属分组完整路径
+ * （仅搜索结果且开关开启时由状态层下发）。
  */
 
 /**
@@ -53,10 +56,15 @@ internal fun CreditCardLayout(
     icon: BitmapEntryIcon,
     isBatchMode: Boolean,
     isSelected: Boolean,
+    densitySpec: ListDensitySpec,
+    groupPath: String?,
     onCopyNumber: () -> Unit
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+        modifier = Modifier.fillMaxWidth().padding(
+            horizontal = densitySpec.rowHorizontalPaddingDp.dp,
+            vertical = densitySpec.rowVerticalPaddingDp.dp
+        ),
         verticalAlignment = Alignment.CenterVertically
     ) {
         if (isBatchMode) {
@@ -70,14 +78,17 @@ internal fun CreditCardLayout(
         }
 
         Box(
-            modifier = Modifier.size(42.dp).clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.secondaryContainer),
+            modifier = Modifier
+                .size(densitySpec.iconContainerSizeDp.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(MaterialTheme.colorScheme.secondaryContainer),
             contentAlignment = Alignment.Center
         ) {
             EntryIconContent(
                 icon = icon,
                 tint = MaterialTheme.colorScheme.secondary,
                 placeholderIcon = Icons.Default.CreditCard,
-                contentSize = 24.dp
+                contentSize = densitySpec.iconContentSizeDp.dp
             )
         }
 
@@ -86,28 +97,38 @@ internal fun CreditCardLayout(
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = entry.title,
-                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold, fontSize = 15.sp),
+                style = MaterialTheme.typography.titleMedium.copy(
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = densitySpec.titleFontSizeSp.sp
+                ),
                 color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
+            if (groupPath != null) {
+                Spacer(modifier = Modifier.height(2.dp))
+                GroupPathLine(groupPath = groupPath, fontSizeSp = densitySpec.secondaryFontSizeSp)
+            }
             Spacer(modifier = Modifier.height(2.dp))
             Text(
                 text = entry.cardNumberMasked ?: "**** **** **** ****",
-                style = MonospacePasswordStyle.copy(fontSize = 13.sp, fontWeight = FontWeight.SemiBold),
+                style = MonospacePasswordStyle.copy(
+                    fontSize = densitySpec.secondaryFontSizeSp.sp,
+                    fontWeight = FontWeight.SemiBold
+                ),
                 color = MaterialTheme.colorScheme.primary
             )
             Spacer(modifier = Modifier.height(2.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(
                     text = stringResource(R.string.cardrow_card_holder, entry.cardHolder ?: entry.username),
-                    style = MaterialTheme.typography.bodySmall,
+                    style = MaterialTheme.typography.bodySmall.copy(fontSize = densitySpec.secondaryFontSizeSp.sp),
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 entry.cardExpiry?.let { exp ->
                     Text(
                         text = stringResource(R.string.cardrow_expiry, exp),
-                        style = MaterialTheme.typography.bodySmall,
+                        style = MaterialTheme.typography.bodySmall.copy(fontSize = densitySpec.secondaryFontSizeSp.sp),
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
@@ -133,10 +154,15 @@ internal fun SecureNoteLayout(
     icon: BitmapEntryIcon,
     notesText: String,
     isBatchMode: Boolean,
-    isSelected: Boolean
+    isSelected: Boolean,
+    densitySpec: ListDensitySpec,
+    groupPath: String?
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+        modifier = Modifier.fillMaxWidth().padding(
+            horizontal = densitySpec.rowHorizontalPaddingDp.dp,
+            vertical = densitySpec.rowVerticalPaddingDp.dp
+        ),
         verticalAlignment = Alignment.CenterVertically
     ) {
         if (isBatchMode) {
@@ -150,14 +176,17 @@ internal fun SecureNoteLayout(
         }
 
         Box(
-            modifier = Modifier.size(40.dp).clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.tertiaryContainer),
+            modifier = Modifier
+                .size(densitySpec.iconContainerSizeDp.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(MaterialTheme.colorScheme.tertiaryContainer),
             contentAlignment = Alignment.Center
         ) {
             EntryIconContent(
                 icon = icon,
                 tint = MaterialTheme.colorScheme.tertiary,
                 placeholderIcon = Icons.Default.Description,
-                contentSize = 22.dp
+                contentSize = densitySpec.iconContentSizeDp.dp
             )
         }
 
@@ -166,16 +195,23 @@ internal fun SecureNoteLayout(
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = entry.title,
-                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold, fontSize = 15.sp),
+                style = MaterialTheme.typography.titleMedium.copy(
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = densitySpec.titleFontSizeSp.sp
+                ),
                 color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
+            if (groupPath != null) {
+                Spacer(modifier = Modifier.height(2.dp))
+                GroupPathLine(groupPath = groupPath, fontSizeSp = densitySpec.secondaryFontSizeSp)
+            }
             if (notesText.isNotBlank()) {
                 Spacer(modifier = Modifier.height(3.dp))
                 Text(
                     text = notesText.replace("\n", " "),
-                    style = MaterialTheme.typography.bodySmall,
+                    style = MaterialTheme.typography.bodySmall.copy(fontSize = densitySpec.secondaryFontSizeSp.sp),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis

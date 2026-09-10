@@ -333,6 +333,29 @@ class RealVaultRepository @Inject constructor(
         masterPassword: CharArray,
         keyFile: Boolean,
         preset: String
+    ): com.keepasskey.core.result.KdbxResult<Unit> = createDatabaseWithKeyFile(
+        name = name,
+        masterPassword = masterPassword,
+        // ISSUE-P3-21：历史 Boolean 入口如实映射——true 即「生成并绑定附属密钥文件」，
+        // 不再是被静默忽略的假开关
+        keyFileFactor = if (keyFile) CreateKeyFileFactor.Generate else CreateKeyFileFactor.None,
+        preset = preset
+    )
+
+    /**
+     * ISSUE-P3-21：以显式密钥文件因子建库——复合密钥第二因子真实落地。
+     *
+     * 生成型密钥文件由 database 模块的**唯一生成器** `KdbxKeyFileGenerator` 产出
+     * （app 层严禁重写 KeyFile 规范实现），随 [DatabaseSession.create] 的 `keyFileData`
+     * 形参进入 `KdbxFile.save → deriveKeys` 的官方解析梯子（`KdbxKeyFile`，internal）；
+     * 会话成功建库后按借用语义克隆持有该因子，使后续 `save()` 以同一复合密钥重加密、
+     * 且既有导出通道 `exportKeyFileBytes()` 能把这份密钥文件交付用户。
+     */
+    override suspend fun createDatabaseWithKeyFile(
+        name: String,
+        masterPassword: CharArray,
+        keyFileFactor: CreateKeyFileFactor,
+        preset: String
     ): com.keepasskey.core.result.KdbxResult<Unit> {
         val filesDir = context.filesDir ?: return KdbxResult.Failure(
             IllegalStateException("No filesDir"),
@@ -341,20 +364,41 @@ class RealVaultRepository @Inject constructor(
         val fileName = if (name.endsWith(".kdbx", ignoreCase = true)) name else "$name.kdbx"
         val targetFile = File(filesDir, fileName)
 
-        // H2 整改：主密码全程 CharArray（原实现接收 String 参数不可变驻留）；
-        // 数组为借用语义，session.create 内部克隆缓存，调用方负责最终擦除
-        val useArgon2 = !preset.contains("AES-KDF", ignoreCase = true)
-        val result = databaseSession.create(
-            file = targetFile,
-            name = name.removeSuffix(".kdbx"),
-            passwordChars = masterPassword,
-            useArgon2 = useArgon2
-        )
-        if (result is KdbxResult.Success) {
-            selectDatabase(fileName)
+        val generatedKeyFile = if (keyFileFactor is CreateKeyFileFactor.Generate) {
+            try {
+                com.keepasskey.database.file.KdbxKeyFileGenerator.generate()
+            } catch (t: Throwable) {
+                // 禁止静默失败：生成失败时**不创建任何库**（否则会留下无第二因子的库）
+                return KdbxResult.Failure(t, strings.get(R.string.repo_keyfile_generate_failed))
+            }
+        } else {
+            null
         }
-        refreshDatabases()
-        return result
+        val keyFileData: ByteArray? = when (keyFileFactor) {
+            is CreateKeyFileFactor.Existing -> keyFileFactor.bytes
+            is CreateKeyFileFactor.Generate -> generatedKeyFile
+            CreateKeyFileFactor.None -> null
+        }
+
+        return try {
+            val useArgon2 = !preset.contains("AES-KDF", ignoreCase = true)
+            val result = databaseSession.create(
+                file = targetFile,
+                name = name.removeSuffix(".kdbx"),
+                passwordChars = masterPassword,
+                useArgon2 = useArgon2,
+                keyFileData = keyFileData
+            )
+            if (result is KdbxResult.Success) {
+                selectDatabase(fileName)
+            }
+            refreshDatabases()
+            result
+        } finally {
+            // 生成副本用毕即擦：会话已克隆自己的副本供保存与导出复用
+            // （Existing 分支的字节归调用方所有，本层不得擦除）
+            generatedKeyFile?.fill(0)
+        }
     }
 
     override suspend fun removeDatabase(id: String): KdbxResult<Unit> {
@@ -437,6 +481,10 @@ class RealVaultRepository @Inject constructor(
                         id = kdbxGroup.id.toHexString(),
                         name = kdbxGroup.name,
                         parentId = kdbxGroup.parentGroupId?.toHexString(),
+                        // ISSUE-P3-22：分组自定义图标（KdbxGroup.CustomIconUUID → hex 投影）。
+                        // 与条目侧 UiVaultEntry.customIconId 同形态，供 KeePassGroupRow 渲染，
+                        // 并与条目共用同一 IconBitmapCache（避免同一图标重复解码）。
+                        customIconId = kdbxGroup.customIconId?.toHexString(),
                         iconName = if (isRecycle || kdbxGroup.iconId == 43) "delete" else "folder",
                         updatedAt = entryMapper.formatInstant(kdbxGroup.times.lastModificationTime),
                         createdAt = entryMapper.formatInstant(kdbxGroup.times.creationTime),
@@ -891,6 +939,14 @@ class RealVaultRepository @Inject constructor(
 
     override suspend fun patchPasskeySignCount(entryId: String, newCount: Int) =
         passkeyEntries.patchPasskeySignCount(entryId, newCount)
+
+    /**
+     * ISSUE-P3-27 子项 2：原子递增并回传**实际落库**的签名计数器。
+     * 委托 [PasskeyEntryCoordinator.incrementPasskeySignCount]（递增与落库同处一个受控变换），
+     * 使断言路径能取得唯一值而不必用锁外快照自算。
+     */
+    override suspend fun incrementPasskeySignCount(entryId: String): Int? =
+        passkeyEntries.incrementPasskeySignCount(entryId)
 
     override suspend fun saveAutofillCredential(
         packageName: String,

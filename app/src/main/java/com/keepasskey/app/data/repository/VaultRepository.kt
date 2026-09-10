@@ -32,6 +32,36 @@ data class EntryTotpSnapshot(
 )
 
 /**
+ * 新建密码库时的密钥文件因子（ISSUE-P3-21：对齐官方 `CompositeKey` 三分支）。
+ *
+ * 用 sealed 类型而非 `Boolean` 开关表达「不绑定 / 生成新密钥文件 / 使用既有密钥文件」三种意图：
+ * 原 `createDatabase(..., keyFile: Boolean, ...)` 的布尔形参在
+ * `RealVaultRepository` 内**从未被使用**（勾选后产出的库实际不含密钥文件因子），
+ * 属安全语义上的欺骗；sealed 类型让「哪种因子」在类型层面必需，无法再被静默忽略。
+ */
+sealed interface CreateKeyFileFactor {
+
+    /** 仅主密码（复合密钥只含密码分量） */
+    data object None : CreateKeyFileFactor
+
+    /**
+     * 生成全新合规密钥文件（KeePass 2.x XML v2.0，生成器为 database 模块的
+     * `KdbxKeyFileGenerator`）并作为第二因子绑定进会话，供既有导出通道交付用户。
+     */
+    data object Generate : CreateKeyFileFactor
+
+    /**
+     * 使用用户选定的既有密钥文件原始字节作为第二因子。
+     *
+     * [bytes] 为**借用语义**：实现方按借用契约克隆持有（派生复合密钥并缓存供保存使用），
+     * 不擦除入参数组；调用方用毕必须在 `finally` 中显式 `fill(0)`。
+     * 刻意不做 `data class`——避免对密钥字节生成基于内容的 `equals`/`hashCode` 与
+     * `copy` 语义歧义（密钥字节不是值对象）。
+     */
+    class Existing(val bytes: ByteArray) : CreateKeyFileFactor
+}
+
+/**
  * 密码库数据仓库接口，遵循谷歌官方 Recommended app architecture 数据层规范。
  * 屏蔽上层 UI/ViewModel 对具体存储技术（KDBX / 内存 / Room）的依赖。
  */
@@ -78,6 +108,11 @@ interface VaultRepository {
      * 创建新密码库（H3 整改：创建/写盘结果必须向上传播，禁止静默失败）。
      * H2 整改：主密码以 [CharArray] 承载（原 String 参数不可变驻留堆内存）；
      * 数组为借用语义——实现方不持有、不擦除，调用方用毕自行清零。
+     *
+     * ISSUE-P3-21：本方法是历史入口，[keyFile] = true 的真实语义为
+     * 「生成并绑定附属密钥文件」（等价于 [createDatabaseWithKeyFile] 的
+     * [CreateKeyFileFactor.Generate]）；携带**用户选定的既有密钥文件字节**必须改走
+     * [createDatabaseWithKeyFile]，本方法无法承载该意图。
      */
     suspend fun createDatabase(
         name: String,
@@ -85,6 +120,32 @@ interface VaultRepository {
         keyFile: Boolean,
         preset: String
     ): com.keepasskey.core.result.KdbxResult<Unit>
+
+    /**
+     * 以显式密钥文件因子创建新密码库（ISSUE-P3-21：复合密钥第二因子真实接线）。
+     *
+     * [masterPassword] 为借用语义（实现方不持有、不擦除）；[keyFileFactor] 中
+     * [CreateKeyFileFactor.Existing] 的字节同为借用语义，由调用方负责清零。
+     *
+     * 默认实现**仅供未覆盖本方法的测试替身沿用**：仅 [CreateKeyFileFactor.None] 可回退到
+     * [createDatabase]；一旦携带密钥文件因子而未覆盖本方法，必须**显式失败**——
+     * 静默丢弃第二因子正是 ISSUE-P3-21 要消除的假开关语义
+     * （生产实现 `RealVaultRepository` 已覆盖本方法）。
+     */
+    suspend fun createDatabaseWithKeyFile(
+        name: String,
+        masterPassword: CharArray,
+        keyFileFactor: CreateKeyFileFactor,
+        preset: String
+    ): com.keepasskey.core.result.KdbxResult<Unit> = when (keyFileFactor) {
+        CreateKeyFileFactor.None -> createDatabase(name, masterPassword, keyFile = false, preset)
+        else -> com.keepasskey.core.result.KdbxResult.Failure(
+            UnsupportedOperationException("实现方未支持携带密钥文件的建库通道"),
+            // 兜底文案留空：本分支在生产 DI 下不可达（RealVaultRepository 已覆盖），
+            // Failure.message 会回退为 KdbxResult 的固定通用文案，绝不谎报「创建成功」
+            userMessage = null
+        )
+    }
 
     /**
      * 移除密码库关联
@@ -300,9 +361,26 @@ interface VaultRepository {
     ): com.keepasskey.core.model.KdbxEntry
 
     /**
-     * 递增并写回 Passkey 条目的签名计数器 (SignCount)
+     * 递增并写回 Passkey 条目的签名计数器 (SignCount)。
+     *
+     * ISSUE-P3-27 子项 2：本入口不向调用方回传落库值，**断言路径不得使用它**——
+     * 需要把计数器写进 AuthenticatorData 的调用方必须改用 [incrementPasskeySignCount]。
      */
     suspend fun patchPasskeySignCount(entryId: String, newCount: Int)
+
+    /**
+     * 原子递增并返回**本次实际落库**的签名计数器（ISSUE-P3-27 子项 2）。
+     *
+     * 断言路径必须使用本返回值，禁止用锁外快照自行计算（`快照 + 1`）：
+     * 快照在进入断言时读取、与落库不在同一临界区，两个并发断言会算出同一个值并各自
+     * 向 RP 交出**重复**的 signCount（违反 WebAuthn 单调性）；「已签名回传、落盘前进程中断」
+     * 的重试同样会再交一次同值。本方法的递增与落库属同一受控原子变换，故返回值即「已提交」
+     * 的计数器，且返回值已写进响应时库内计数器必然已推进。
+     *
+     * @return 实际落库的计数器值；条目不存在 / entryId 非法时返回 null
+     *   （调用方此时必须 fail-closed 拒绝签发，不得回退为自算值）。
+     */
+    suspend fun incrementPasskeySignCount(entryId: String): Int?
 
     /**
      * 保存传统自动填充捕获的凭据：匹配既有条目则更新密码，否则新建条目。用毕显式擦除密码字符。

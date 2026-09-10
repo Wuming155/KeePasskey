@@ -248,11 +248,9 @@ fun AutofillSettingsScreen(
                         AutofillSwitchRow(
                             icon = Icons.Default.NotificationsActive,
                             title = stringResource(R.string.autofill_totp_notif_title),
-                            // ISSUE-P3-03 (43b)：通知通道与 POST_NOTIFICATIONS 声明尚不属本轮范围，未接线 → 如实标注
-                            subtitle = stringResource(
-                                R.string.settings_pref_reserved_suffix,
-                                stringResource(R.string.autofill_totp_notif_sub)
-                            ),
+                            // ISSUE-P3-18：通知通道与 POST_NOTIFICATIONS 已落地，本开关真实控制
+                            // 自动填充确认后的验证码通知 → 移除「（预留，暂未生效）」标识
+                            subtitle = stringResource(R.string.autofill_totp_notif_sub),
                             checked = uiState.autofillShowTotpNotification,
                             onCheckedChange = onAutofillShowTotpNotificationToggle
                         )

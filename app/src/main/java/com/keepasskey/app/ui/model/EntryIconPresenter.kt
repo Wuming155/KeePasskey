@@ -48,12 +48,15 @@ object AndroidBitmapIconDecoder : IconBitmapDecoder<ImageBitmap> {
 }
 
 /**
- * 自定义图标投影装配器（ISSUE-P3-02 / TASK-49）。
+ * 自定义图标投影装配器（ISSUE-P3-02 / TASK-49；ISSUE-P3-22 扩展到分组）。
  *
- * 职责：把「条目绑定的 customIconId」装配为可直接绘制的 [EntryIcon]：
- * 1. 判定形态（未绑定 / 命中 / 缺失）委托纯函数 [EntryIconProjection]；
+ * 职责：把「条目/分组绑定的 customIconId」装配为可直接绘制的 [EntryIcon]：
+ * 1. 判定形态（未绑定 / 命中 / 缺失）委托纯函数 [EntryIconProjection]（两侧同一实现）；
  * 2. 命中池内图标时经 [decoder] 解码，且同一 iconId **只解码一次**（[IconBitmapCache] 复用）；
  * 3. 解码失败不抛出、不谎报：载荷为 null，渲染侧按缺图占位，并记录失败 id 避免反复重试。
+ *
+ * 条目与分组**共用本实例**即共用同一图标池快照、同一解码缓存与同一失败登记表
+ * （见 [present] 与 [presentGroups]）。
  *
  * 线程约定：本类为挂起式装配，调用方须在后台调度器执行（见各 ViewModel 的 flowOn(Default)）；
  * 内部缓存自身线程安全。
@@ -86,6 +89,21 @@ class EntryIconPresenter<T : Any>(
     suspend fun present(customIconId: String?, iconName: String): EntryIcon<T> {
         val pool = loadPool(setOfNotNull(customIconId))
         return resolve(customIconId, iconName, pool)
+    }
+
+    /**
+     * 分组批量投影（ISSUE-P3-22，列表页文件夹区）。
+     *
+     * 与 [present] 走**同一** [loadPool] / [resolve] / [cache] 路径，仅键空间换成分组 id：
+     * 判定复用 [EntryIconProjection.of] 唯一实现，分组与条目引用同一自定义图标时只解码一次。
+     */
+    suspend fun presentGroups(groups: List<VaultGroup>): Map<String, EntryIcon<T>> {
+        if (groups.isEmpty()) return emptyMap()
+        val referenced = groups.mapNotNull { it.customIconId }.toSet()
+        val pool = loadPool(referenced)
+        return groups.associate { group ->
+            group.id to resolve(group.customIconId, group.iconName, pool)
+        }
     }
 
     /** 仅在确有引用时读取图标池；同时剔除缓存中已下线的图标载荷 */

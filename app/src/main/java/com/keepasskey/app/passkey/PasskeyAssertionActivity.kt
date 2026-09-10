@@ -174,20 +174,30 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
                     return@launch
                 }
 
-                // 密码学运算调度至 Default，杜绝在系统回调线程上执行 CPU 密集签名
-                val assertionJson = withContext(Dispatchers.Default) {
-                    buildAssertionJson(passkeyData, origin, challenge, flags)
+                // ISSUE-P3-27 子项 2：先把签名计数器**原子递增并落库**，再据其返回值签名。
+                // 返回值是本次唯一「已提交」的计数器（递增与落库同处会话 Mutex 内的单次受控
+                // 变换），并发断言因此拿到互不相同的值；且返回值写入响应时库内必然已推进。
+                // 条目缺失 / entryId 非法返回 null → fail-closed 拒绝签发，**绝不**回退为
+                // 「进入断言时的锁外快照 + 1」（那正是计数器重复缺陷本身）。
+                val signCount = vaultRepository.incrementPasskeySignCount(entryId)
+                if (signCount == null) {
+                    // ISSUE-P1-10：日志不得携带 entryId 等敏感标识
+                    AppLog.e(TAG, "签名计数器未能原子递增并落库，拒绝签发断言")
+                    failAndFinish()
+                    return@launch
                 }
 
+                // 密码学运算调度至 Default，杜绝在系统回调线程上执行 CPU 密集签名
+                val assertionJson = withContext(Dispatchers.Default) {
+                    buildAssertionJson(passkeyData, origin, challenge, flags, signCount)
+                }
+
+                // ISSUE-P3-27 子项 2：计数器已落库后才回传 RP——原实现先 setResult 再落盘，
+                // 进程若在两者之间中断，RP 已收到 N+1 而库内仍是 N，下次断言会再交一次 N+1。
                 val resultIntent = Intent()
                 val response = GetCredentialResponse(PublicKeyCredential(assertionJson))
                 PendingIntentHandler.setGetCredentialResponse(resultIntent, response)
                 setResult(RESULT_OK, resultIntent)
-
-                // 递增签名计数器并落盘（唯一 RESULT_OK 路径）
-                // ISSUE-P3-10 子项 2：递增经 PasskeyData.nextSignCount 饱和处理（恒非负、不溢出），
-                // 与 buildAssertionJson 内写入 AuthenticatorData 的值同源
-                vaultRepository.patchPasskeySignCount(entryId, PasskeyData.nextSignCount(passkeyData.signCount))
 
                 finish()
             } catch (t: Throwable) {
@@ -200,12 +210,18 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
     /**
      * 在 [Dispatchers.Default] 上构造完整断言响应 JSON（authData || clientDataHash 签名）。
      * 私钥仅经字节流解码、签名后立即清零，全程不产生不可变私钥 String。
+     *
+     * ISSUE-P3-27 子项 2：[signCount] 必须是调用方从
+     * [VaultRepository.incrementPasskeySignCount] 取得的**实际落库值**，本方法不再自行计算——
+     * 签名写入 AuthenticatorData 的计数器与库内计数器必须逐字节一致，否则 RP 侧防克隆校验
+     * 会与真实状态错位（并发断言或中断重试时表现为重复计数器）。
      */
     private fun buildAssertionJson(
         passkeyData: PasskeyData,
         origin: String,
         challenge: String,
-        flags: Byte
+        flags: Byte,
+        signCount: Int
     ): String {
         // 派生中间量统一在 finally 中擦除（ISSUE-P1-02：签名会话材料用毕即清零）
         var authData: ByteArray? = null
@@ -213,12 +229,11 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
         var dataToSign: ByteArray? = null
         try {
             // 1. 构造 AuthenticatorData (flags 由本次实际用户验证结果驱动，无 AT)
-            // ISSUE-P3-10 子项 2：计数器递增统一走 PasskeyData.nextSignCount（上界饱和，绝不回绕为负）
-            val nextSignCount = PasskeyData.nextSignCount(passkeyData.signCount)
+            // ISSUE-P3-27 子项 2：计数器取「本次已落库值」，不再由锁外快照递增推导
             val authDataLocal = PasskeyCryptoEngine.buildAuthenticatorData(
                 rpId = passkeyData.relyingPartyId,
                 flags = flags,
-                signCount = nextSignCount
+                signCount = signCount
             )
             authData = authDataLocal
 

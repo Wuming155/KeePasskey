@@ -64,6 +64,9 @@ fun EntryDetailScreen(
 
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
+    // ISSUE-P3-17：进入详情页时刷新进阶显示偏好快照（遮掩默认值 / 所属分组开关）
+    LaunchedEffect(Unit) { viewModel.onScreenEntered() }
+
     // 断点3 整改：SAF 导出挂起中的附件，选择目标后交给 ViewModel 真实写盘
     var pendingExportAttachment by remember { mutableStateOf<UiAttachment?>(null) }
     // ISSUE-P2-10 (ZT-15)：附件为解密后明文，SAF 目标选定后必须先经风险确认才允许写盘
@@ -102,6 +105,8 @@ fun EntryDetailScreen(
         // ISSUE-P3-02：自定义图标删除（经确认弹窗后调用，状态层负责清理 Meta 与回退引用）
         onDeleteCustomIcon = viewModel::deleteCustomIcon,
         onTogglePasswordVisibility = viewModel::togglePasswordVisibility,
+        // ISSUE-P3-17：TOTP 验证码显式展开/收起（默认态来自 maskTotpDefault）
+        onToggleTotpVisibility = viewModel::toggleTotpVisibility,
         onToggleCustomFieldVisibility = viewModel::toggleCustomFieldVisibility,
         onCopyCustomField = viewModel::copyCustomField,
         onExportAttachment = { att ->
@@ -179,6 +184,8 @@ fun EntryDetailContent(
     // ISSUE-P3-02：自定义图标删除（确认弹窗确认后上行；ViewModel 负责库级清理与引用回退）
     onDeleteCustomIcon: () -> Unit = {},
     onTogglePasswordVisibility: () -> Unit,
+    // ISSUE-P3-17：TOTP 验证码显式展开/收起（默认态来自 maskTotpDefault）
+    onToggleTotpVisibility: () -> Unit = {},
     onToggleCustomFieldVisibility: (String) -> Unit,
     onCopyCustomField: (String, String) -> Unit = { _, _ -> },
     onExportAttachment: (UiAttachment) -> Unit,
@@ -231,11 +238,13 @@ fun EntryDetailContent(
                     .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                // 头部 Hero 区域（ISSUE-P3-02：图标投影 + URL 引用展开文案均取自状态层装饰）
+                // 头部 Hero 区域（ISSUE-P3-02：图标投影 + URL 引用展开文案均取自状态层装饰；
+                // ISSUE-P3-17：groupPath 仅在 showGroupInEntry 开启时非空）
                 EntryHeaderSection(
                     entry = entry,
                     icon = uiState.decorations.iconOf(entry),
-                    urlText = uiState.decorations.textOf(entry).url
+                    urlText = uiState.decorations.textOf(entry).url,
+                    groupPath = uiState.groupPath
                 )
 
                 // 快捷操作磁贴组
@@ -259,7 +268,12 @@ fun EntryDetailContent(
                 // TOTP 卡片
                 if (entry.totpCode != null) {
                     SectionTitle(textRes = R.string.detail_totp_section)
-                    TotpCard(uiState = uiState, entry = entry, onShowMessage = onShowMessage)
+                    TotpCard(
+                        uiState = uiState,
+                        entry = entry,
+                        onToggleVisibility = onToggleTotpVisibility,
+                        onShowMessage = onShowMessage
+                    )
                 }
 
                 // Passkey 卡片

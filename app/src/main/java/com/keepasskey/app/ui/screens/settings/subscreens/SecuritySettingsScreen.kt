@@ -303,11 +303,9 @@ fun SecuritySettingsScreen(
                         SecuritySwitchRow(
                             icon = Icons.Default.PowerSettingsNew,
                             title = stringResource(R.string.sec_kill_app_title),
-                            // ISSUE-P3-03 (43c)：消费方在主导航（KeePasskeyApp）属并行组文件范围，本轮未接线 → 如实标注
-                            subtitle = stringResource(
-                                R.string.settings_pref_reserved_suffix,
-                                stringResource(R.string.sec_kill_app_sub)
-                            ),
+                            // ISSUE-P3-17：已真实消费——KeePasskeyApp 经 AppTerminationPolicy 判定，
+                            // 在库列表顶栏溢出菜单暴露「彻底退出应用」入口并真实终止进程 → 移除标识
+                            subtitle = stringResource(R.string.sec_kill_app_sub),
                             checked = uiState.showKillAppOption,
                             onCheckedChange = onShowKillAppOptionToggle
                         )

@@ -711,7 +711,9 @@
     <string name="theme_auto_search_title">自动聚焦搜索框</string>
     <string name="theme_auto_search_sub">进入密码库页面时自动唤起键盘搜索</string>
     <string name="theme_unlocked_notif_title">解锁状态常驻通知</string>
-    <string name="theme_unlocked_notif_sub">通知栏显示快捷锁定入口与当前状态</string>
+    <!-- ISSUE-P3-18 诚实化修正：原文案承诺「快捷锁定入口」，但本轮通知**不含任何 action 按钮**
+         （仅显示状态 + 点击返回应用）。文案已改为与实现一致，避免反向的不诚实。 -->
+    <string name="theme_unlocked_notif_sub">通知栏显示当前解锁状态，点击可返回应用</string>
     <string name="theme_section_iconset">图标风格</string>
     <string name="theme_iconset_material">Material</string>
     <string name="theme_iconset_material_desc">现代化圆润图标，与系统风格一致</string>
@@ -751,7 +753,9 @@
     <string name="autofill_copy_totp_title">填充时复制验证码</string>
     <string name="autofill_copy_totp_sub">自动填充账号密码的同时复制对应 TOTP 验证码</string>
     <string name="autofill_totp_notif_title">验证码通知提醒</string>
-    <string name="autofill_totp_notif_sub">登录页检测到需要验证码时在通知栏快捷复制</string>
+    <!-- ISSUE-P3-18 诚实化修正：原文案承诺「在通知栏快捷复制」，但本轮通知**不含复制 action**
+         （仅展示验证码与剩余秒数，到期自动消失）。文案已改为与实现一致。 -->
+    <string name="autofill_totp_notif_sub">自动填充确认后在通知栏显示该条目的验证码，到期自动消失</string>
     <string name="autofill_section_capture">密码捕获</string>
     <string name="autofill_save_prompt_title">新密码保存提示</string>
     <string name="autofill_save_prompt_sub">检测到新注册或修改的密码时询问是否保存</string>
@@ -963,5 +967,78 @@
     <string name="debug_verbose_depends">（需先开启「诊断日志」）</string>
     <string name="dbset_import_reserved_note">解析器预留，暂未生效：当前仅登记所选数据源，不会导入任何条目</string>
     <string name="dbset_child_db_reserved_note">子库挂载预留，暂未生效：选择文件后不会挂载任何子库</string>
+
+    <!-- ===== ISSUE-P3-18：通知通道与通知文案 ===== -->
+    <!-- 硬约束（验收标准 4）：标题与正文一律为**固定通用文案**，严禁出现条目名、用户名、
+         密码、库文件名等任何用户数据；验证码为短期动态值，仅出现在 TOTP 通知正文。 -->
+    <string name="notification_channel_unlocked_name">已解锁状态</string>
+    <string name="notification_channel_unlocked_desc">密码库处于解锁状态时的常驻提醒，点击可返回应用</string>
+    <string name="notification_unlocked_title">KeePasskey 密码库已解锁</string>
+    <string name="notification_unlocked_text">自动锁定计时进行中，点击返回应用</string>
+    <string name="notification_channel_totp_name">动态验证码</string>
+    <string name="notification_channel_totp_desc">自动填充后显示该条目的动态验证码，随有效期自动消失</string>
+    <string name="notification_totp_title">动态验证码</string>
+    <!-- %1$s = 验证码，%2$d = 剩余有效秒数（见 TotpNotificationPublisher） -->
+    <string name="notification_totp_text">%1$s（%2$d 秒后失效）</string>
+
+    <!-- ===== ISSUE-P3-21：建库密钥文件的一次性交付（丢失即无法解锁，必须明示） ===== -->
+    <string name="db_picker_keyfile_generate_desc">将生成新的密钥文件作为第二因子；生成后必须立即保存到安全位置——丢失将无法再解锁本库</string>
+    <string name="db_picker_keyfile_backup_title">请立即保存密钥文件</string>
+    <string name="db_picker_keyfile_backup_warning">该密钥文件是解锁本库的第二因子，本应用不会代为保管。请立即导出到安全位置；一旦丢失，即使记得主密码也无法再打开此库。</string>
+    <string name="db_picker_keyfile_backup_save">立即保存</string>
+    <string name="db_picker_keyfile_backup_skip">暂不保存</string>
+    <string name="db_picker_keyfile_saved">密钥文件已保存</string>
+    <string name="db_picker_keyfile_save_failed">密钥文件保存失败</string>
+    <string name="repo_keyfile_generate_failed">生成密钥文件失败</string>
+
+    <!-- ===== ISSUE-P3-19：导入失败的用户可读归类（非敏感，绝不含字段明文；见 ImportFailureReason） ===== -->
+    <string name="import_error_locked">密码库未解锁或当前会话不可写，无法导入</string>
+    <string name="import_error_source_unavailable">该数据源的解析器当前不可用</string>
+    <string name="import_error_unsupported_file">所选文件的扩展名与数据源不匹配</string>
+    <string name="import_error_encoding">文件编码不受支持（需要 UTF-8）</string>
+    <string name="import_error_missing_column">文件缺少必需的列，无法映射条目</string>
+    <string name="import_error_limit">文件超出安全上限（条目数或体积过大）</string>
+    <string name="import_error_malformed">文件结构非法或已损坏</string>
+    <string name="import_error_io">读取所选文件失败</string>
+    <string name="import_error_persist">导入的条目写入密码库失败</string>
+
+    <!-- ===== ISSUE-P3-19：导入结果报告与警告归类 ===== -->
+    <!-- 硬约束：报告只展示**计数**与**机器可读定位符**（doc / row:3 / entry:12 / path:A/B），
+         绝不出现条目标题、用户名、URL、备注、密码等任何字段明文。 -->
+    <string name="import_untitled_entry">未命名条目</string>
+    <string name="import_report_title">导入完成</string>
+    <string name="import_report_source">数据源：%1$s</string>
+    <!-- %1$d=新增 %2$d=更新 %3$d=跳过 %4$d=失败 -->
+    <string name="import_report_counts">新增 %1$d 条，更新 %2$d 条，跳过 %3$d 条，失败 %4$d 条</string>
+    <string name="import_report_source_skipped">源数据另有 %1$d 条未处理（如非登录类型）</string>
+    <string name="import_report_recycled">其中 %1$d 条已放入回收站</string>
+    <string name="import_report_empty">未导入任何条目：源数据中没有可映射的登录条目</string>
+    <string name="import_report_warnings_title">警告（%1$d 条）</string>
+    <!-- %1$s=定位符 %2$s=归类文案 -->
+    <string name="import_report_warning_item">[%1$s] %2$s</string>
+    <string name="import_warn_unknown">未知警告（升级应用后可能可识别）</string>
+    <string name="import_warn_empty_row">空记录，已忽略</string>
+    <string name="import_warn_missing_value">缺少标题、用户名与密码，已跳过</string>
+    <string name="import_warn_column_mismatch">列数与表头不一致：多出的列已忽略，缺失的列按空值处理</string>
+    <string name="import_warn_invalid_utf8">含非法 UTF-8 字节序列，已按替换字符处理</string>
+    <string name="import_warn_protected_value">该字段为受保护值且本次导入无法解密，已跳过</string>
+    <string name="import_warn_history_ignored">含历史修订，本次导入不包含历史记录</string>
+    <string name="import_warn_custom_field_dropped">含自定义字段，本次导入不包含自定义字段</string>
+    <string name="import_warn_duplicate_skipped">同分组已存在同名同用户名条目，已跳过（未覆盖既有密码）</string>
+    <string name="import_warn_group_create_failed">分组创建失败，该条目已回退至根分组（数据未丢失）</string>
+    <string name="import_warn_save_failed">条目落库或回收站归位失败</string>
+    <string name="import_warn_truncated">警告过多，其余条目已折叠</string>
+    <!-- ISSUE-P3-19 集成补齐：解析器子批（Bitwarden JSON / 1PUX）的跳过与降级面 -->
+    <string name="import_warn_non_login_item">非登录类型的条目已跳过</string>
+    <string name="import_warn_non_login_category">非登录类别的条目已跳过</string>
+    <string name="import_warn_folder_not_found">分组标识未匹配，该条目已落至根分组</string>
+    <string name="import_warn_item_not_object">条目节点结构非法，已跳过</string>
+    <string name="import_warn_optional_field_invalid">可选字段类型非法，已按空值处理</string>
+    <string name="import_warn_title_missing">条目标题为空，将使用默认名</string>
+    <string name="import_warn_group_name_missing">账户名与保险库名均为空，条目已落至根分组</string>
+
+    <!-- ===== ISSUE-P3-17：showKillAppOption 溢出菜单入口动作 ===== -->
+    <!-- 原实现误用 sec_kill_app_title（「锁定时清杀进程内存」，语义不符），此处补齐专用动作文案 -->
+    <string name="sec_kill_app_action">彻底退出应用</string>
 
 </resources>

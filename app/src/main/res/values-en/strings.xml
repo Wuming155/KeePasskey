@@ -705,7 +705,9 @@
     <string name="theme_auto_search_title">Auto-focus search</string>
     <string name="theme_auto_search_sub">Raise the keyboard for search when entering the vault</string>
     <string name="theme_unlocked_notif_title">Unlocked status notification</string>
-    <string name="theme_unlocked_notif_sub">Show a quick lock shortcut and status in the notification bar</string>
+    <!-- ISSUE-P3-18 honesty fix: the previous copy promised a "quick lock shortcut", but this
+         notification carries NO action button (status + tap-to-open only). Aligned with reality. -->
+    <string name="theme_unlocked_notif_sub">Show the current unlocked status in the notification bar; tap to return to the app</string>
     <string name="theme_section_iconset">Icon set</string>
     <string name="theme_iconset_material">Material</string>
     <string name="theme_iconset_material_desc">Modern rounded icons consistent with the system</string>
@@ -745,7 +747,9 @@
     <string name="autofill_copy_totp_title">Copy code when filling</string>
     <string name="autofill_copy_totp_sub">Copy the matching TOTP code while autofilling credentials</string>
     <string name="autofill_totp_notif_title">Code notification</string>
-    <string name="autofill_totp_notif_sub">Offer a quick copy notification when a login page asks for a code</string>
+    <!-- ISSUE-P3-18 honesty fix: the previous copy promised a quick-copy action, but this
+         notification carries NO copy action (code + remaining seconds only, auto-expiring). -->
+    <string name="autofill_totp_notif_sub">Show the entry code in the notification bar after an autofill confirmation; it disappears when the code expires</string>
     <string name="autofill_section_capture">Capture</string>
     <string name="autofill_save_prompt_title">New password prompt</string>
     <string name="autofill_save_prompt_sub">Ask to save when a new or changed password is detected</string>
@@ -897,5 +901,79 @@
     <string name="debug_verbose_depends"> (requires "Diagnostic log" to be enabled)</string>
     <string name="dbset_import_reserved_note">Parser reserved, not yet active: the selected source is only recorded, no entries are imported</string>
     <string name="dbset_child_db_reserved_note">Child database mounting reserved, not yet active: selecting a file will not mount any child database</string>
+
+    <!-- ===== ISSUE-P3-18: notification channels and notification copy ===== -->
+    <!-- Hard constraint (acceptance 4): titles and bodies are FIXED generic text. Entry titles,
+         usernames, passwords, database file names and any other user data are forbidden.
+         A TOTP code is a short-lived dynamic value and appears only in the TOTP body. -->
+    <string name="notification_channel_unlocked_name">Unlocked status</string>
+    <string name="notification_channel_unlocked_desc">Persistent reminder while the vault is unlocked; tap to return to the app</string>
+    <string name="notification_unlocked_title">KeePasskey vault is unlocked</string>
+    <string name="notification_unlocked_text">Auto-lock timer is running; tap to return to the app</string>
+    <string name="notification_channel_totp_name">Dynamic codes</string>
+    <string name="notification_channel_totp_desc">Shows the dynamic code of the autofilled entry; it disappears once the code expires</string>
+    <string name="notification_totp_title">Dynamic code</string>
+    <!-- %1$s = the code, %2$d = remaining seconds (see TotpNotificationPublisher) -->
+    <string name="notification_totp_text">%1$s (expires in %2$d s)</string>
+
+    <!-- ===== ISSUE-P3-21: one-time key file delivery when creating a database ===== -->
+    <string name="db_picker_keyfile_generate_desc">A new key file will be generated as a second factor. Save it to a safe location immediately - losing it makes this database impossible to unlock.</string>
+    <string name="db_picker_keyfile_backup_title">Save the key file now</string>
+    <string name="db_picker_keyfile_backup_warning">This key file is the second factor for unlocking this database, and this app does not keep a copy. Export it to a safe location now; once lost, the database cannot be opened again even with the correct master password.</string>
+    <string name="db_picker_keyfile_backup_save">Save now</string>
+    <string name="db_picker_keyfile_backup_skip">Skip for now</string>
+    <string name="db_picker_keyfile_saved">Key file saved</string>
+    <string name="db_picker_keyfile_save_failed">Failed to save the key file</string>
+    <string name="repo_keyfile_generate_failed">Failed to generate the key file</string>
+
+    <!-- ===== ISSUE-P3-19: user-readable import failure categories (non-sensitive; see ImportFailureReason) ===== -->
+    <string name="import_error_locked">The vault is locked or the session is not writable; cannot import</string>
+    <string name="import_error_source_unavailable">The parser for this data source is currently unavailable</string>
+    <string name="import_error_unsupported_file">The selected file extension does not match the data source</string>
+    <string name="import_error_encoding">Unsupported file encoding (UTF-8 required)</string>
+    <string name="import_error_missing_column">The file is missing required columns and cannot be mapped</string>
+    <string name="import_error_limit">The file exceeds the safety limits (too many entries or too large)</string>
+    <string name="import_error_malformed">The file is malformed or corrupted</string>
+    <string name="import_error_io">Failed to read the selected file</string>
+    <string name="import_error_persist">Failed to write the imported entries into the vault</string>
+
+    <!-- ===== ISSUE-P3-19: import result report and warning categories ===== -->
+    <!-- Hard constraint: the report shows COUNTS and MACHINE-READABLE locators only
+         (doc / row:3 / entry:12 / path:A/B). Entry titles, usernames, URLs, notes and
+         passwords must never appear. -->
+    <string name="import_untitled_entry">Untitled entry</string>
+    <string name="import_report_title">Import finished</string>
+    <string name="import_report_source">Source: %1$s</string>
+    <!-- %1$d=added %2$d=updated %3$d=skipped %4$d=failed -->
+    <string name="import_report_counts">%1$d added, %2$d updated, %3$d skipped, %4$d failed</string>
+    <string name="import_report_source_skipped">%1$d more item(s) in the source were not processed (for example non-login types)</string>
+    <string name="import_report_recycled">%1$d of them were moved to the recycle bin</string>
+    <string name="import_report_empty">Nothing was imported: the source has no mappable login items</string>
+    <string name="import_report_warnings_title">Warnings (%1$d)</string>
+    <!-- %1$s=locator %2$s=category text -->
+    <string name="import_report_warning_item">[%1$s] %2$s</string>
+    <string name="import_warn_unknown">Unknown warning (a newer app version may recognise it)</string>
+    <string name="import_warn_empty_row">Empty record; ignored</string>
+    <string name="import_warn_missing_value">No title, username or password; skipped</string>
+    <string name="import_warn_column_mismatch">Column count differs from the header: extra columns were ignored, missing ones treated as empty</string>
+    <string name="import_warn_invalid_utf8">Contains an invalid UTF-8 byte sequence; replaced with the replacement character</string>
+    <string name="import_warn_protected_value">The field is a protected value that this import cannot decrypt; skipped</string>
+    <string name="import_warn_history_ignored">Contains history revisions; this import does not carry history</string>
+    <string name="import_warn_custom_field_dropped">Contains custom fields; this import does not carry custom fields</string>
+    <string name="import_warn_duplicate_skipped">An entry with the same title and username already exists in this group; skipped (the existing password was not overwritten)</string>
+    <string name="import_warn_group_create_failed">Could not create the group; the entry fell back to the root group (no data lost)</string>
+    <string name="import_warn_save_failed">Failed to persist the entry or to restore it to the recycle bin</string>
+    <string name="import_warn_truncated">Too many warnings; the remaining ones were collapsed</string>
+    <!-- ISSUE-P3-19 integration: skip/degrade categories from the parser sub-batch (Bitwarden JSON / 1PUX) -->
+    <string name="import_warn_non_login_item">Non-login item skipped</string>
+    <string name="import_warn_non_login_category">Non-login category item skipped</string>
+    <string name="import_warn_folder_not_found">Folder id unmatched; the item was placed in the root group</string>
+    <string name="import_warn_item_not_object">Malformed item node skipped</string>
+    <string name="import_warn_optional_field_invalid">Invalid optional field treated as empty</string>
+    <string name="import_warn_title_missing">Item title is empty; a default name will be used</string>
+    <string name="import_warn_group_name_missing">Account and vault names are both empty; items were placed in the root group</string>
+
+    <!-- ===== ISSUE-P3-17: overflow-menu action for showKillAppOption ===== -->
+    <string name="sec_kill_app_action">Exit app completely</string>
 
 </resources>

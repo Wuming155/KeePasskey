@@ -19,8 +19,12 @@ import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SelectAll
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -29,10 +33,18 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -81,7 +93,12 @@ internal fun VaultListBatchModeTopBar(
 }
 
 /**
- * 主顶栏：标题位为胶囊形搜索框；进入回收站后操作区替换为「清空回收站」入口
+ * 主顶栏：标题位为胶囊形搜索框；进入回收站后操作区替换为「清空回收站」入口。
+ *
+ * ISSUE-P3-17：
+ * - [autoActivateSearch] 为 true 时聚焦搜索框并弹出输入法（一次性意图，消费后经
+ *   [onAutoActivateSearchConsumed] 回执，避免重组反复抢焦点）；
+ * - [onKillApp] 非空时在溢出菜单暴露「彻底退出应用」入口（偏好开启且宿主可终止才会非空）。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -93,8 +110,22 @@ internal fun VaultListSearchTopBar(
     onSortClick: () -> Unit,
     onLockClick: () -> Unit,
     onEmptyRecycleBinClick: () -> Unit,
+    autoActivateSearch: Boolean = false,
+    onAutoActivateSearchConsumed: () -> Unit = {},
+    onKillApp: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
+    var showOverflowMenu by remember { mutableStateOf(false) }
+    val searchFocusRequester = remember { FocusRequester() }
+    val keyboardController = LocalSoftwareKeyboardController.current
+
+    LaunchedEffect(autoActivateSearch) {
+        if (!autoActivateSearch) return@LaunchedEffect
+        searchFocusRequester.requestFocus()
+        keyboardController?.show()
+        onAutoActivateSearchConsumed()
+    }
+
     TopAppBar(
         modifier = modifier,
         title = {
@@ -137,7 +168,7 @@ internal fun VaultListSearchTopBar(
                                 color = MaterialTheme.colorScheme.onSurface
                             ),
                             cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier.fillMaxWidth().focusRequester(searchFocusRequester)
                         )
                     }
                     if (searchQuery.isNotEmpty()) {
@@ -179,6 +210,33 @@ internal fun VaultListSearchTopBar(
                         contentDescription = stringResource(R.string.cd_lock),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                }
+                // ISSUE-P3-17：showKillAppOption 开启且宿主可终止时的「彻底退出应用」入口
+                if (onKillApp != null) {
+                    Box {
+                        IconButton(onClick = { showOverflowMenu = true }) {
+                            Icon(
+                                imageVector = Icons.Default.MoreVert,
+                                contentDescription = stringResource(R.string.btn_more),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = showOverflowMenu,
+                            onDismissRequest = { showOverflowMenu = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.sec_kill_app_action)) },
+                                leadingIcon = {
+                                    Icon(Icons.Default.PowerSettingsNew, contentDescription = null)
+                                },
+                                onClick = {
+                                    showOverflowMenu = false
+                                    onKillApp()
+                                }
+                            )
+                        }
+                    }
                 }
             }
         },

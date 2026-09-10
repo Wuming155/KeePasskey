@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
@@ -40,6 +41,7 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.keepasskey.app.R
@@ -74,12 +76,16 @@ internal fun SectionTitle(@StringRes textRes: Int, modifier: Modifier = Modifier
  *
  * ISSUE-P3-02：[icon] 为状态层投影后的图标（自定义位图 / 缺图占位 / 标准图标），
  * [urlText] 为 URL 字段引用展开后的展示文案；本组件只做纯绘制。
+ *
+ * ISSUE-P3-17：[groupPath] 非空时在 URL 下方展示条目所属分组完整路径
+ * （仅 `showGroupInEntry` 开启时由状态层下发，UI 不做路径计算）。
  */
 @Composable
 internal fun EntryHeaderSection(
     entry: UiVaultEntry,
     icon: BitmapEntryIcon,
-    urlText: String
+    urlText: String,
+    groupPath: String? = null
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -120,6 +126,26 @@ internal fun EntryHeaderSection(
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.primary
             )
+            // ISSUE-P3-17：showGroupInEntry 开启时的所属分组路径
+            if (groupPath != null) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Folder,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(13.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = groupPath,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
         }
     }
 }
@@ -291,11 +317,16 @@ internal fun BasicCredentialsCard(
 
 /**
  * TOTP 卡片（动态验证码 + 剩余秒数仪表）
+ *
+ * ISSUE-P3-17：[EntryDetailUiState.isTotpVisible] 为 false 时验证码以掩码呈现，
+ * 用户可经眼睛按钮显式展开——`maskTotpDefault` 只决定**初始**遮掩态，不锁定字段。
+ * 遮掩不影响倒计时与换码：验证码始终按周期重算，展开即为当前有效码。
  */
 @Composable
 internal fun TotpCard(
     uiState: EntryDetailUiState,
     entry: UiVaultEntry,
+    onToggleVisibility: () -> Unit,
     onShowMessage: (UiMessage) -> Unit
 ) {
     BentoCard(
@@ -315,7 +346,11 @@ internal fun TotpCard(
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = uiState.liveTotpCode ?: entry.totpCode.orEmpty(),
+                    text = if (uiState.isTotpVisible) {
+                        uiState.liveTotpCode ?: entry.totpCode.orEmpty()
+                    } else {
+                        TOTP_MASK
+                    },
                     style = MonospaceTotpStyle.copy(color = MaterialTheme.colorScheme.primary)
                 )
             }
@@ -326,6 +361,14 @@ internal fun TotpCard(
                     modifier = Modifier.size(34.dp)
                 )
                 Spacer(modifier = Modifier.width(12.dp))
+                IconButton(onClick = onToggleVisibility) {
+                    Icon(
+                        imageVector = if (uiState.isTotpVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                        contentDescription = stringResource(R.string.cd_toggle_password_visibility),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
                 IconButton(onClick = { onShowMessage(UiMessage(R.string.detail_totp_copied)) }) {
                     Icon(
                         imageVector = Icons.Default.ContentCopy,
@@ -338,6 +381,11 @@ internal fun TotpCard(
         }
     }
 }
+
+/**
+ * TOTP 遮掩占位：纯符号，不含任何真实验证码信息（展开即为当前有效码）。
+ */
+private const val TOTP_MASK = "••••••"
 
 /**
  * Passkey 凭据卡片

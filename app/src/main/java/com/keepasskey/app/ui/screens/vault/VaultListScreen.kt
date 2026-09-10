@@ -41,11 +41,20 @@ fun VaultListScreen(
     onAddEntryClick: (String?) -> Unit,
     onLockClick: () -> Unit = {},
     onNavigateToConflictResolver: () -> Unit = {},
+    /**
+     * ISSUE-P3-17：`showKillAppOption` 开启且宿主可终止时非空——非空才呈现「彻底退出应用」入口。
+     * 动作本体由 host（KeePasskeyApp）持有 Activity 上下文执行，本页只负责呈现与上行。
+     */
+    onKillApp: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
     viewModel: VaultListViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
+
+    // ISSUE-P3-17：页面每次进入组合时刷新进阶显示偏好快照
+    // （ExtendedSettingsStore 只有同步快照 API，设置页改动返回本页即生效）
+    LaunchedEffect(Unit) { viewModel.onScreenEntered() }
 
     uiState.userMessage?.let { message ->
         val text = message.resolveText()
@@ -111,6 +120,8 @@ fun VaultListScreen(
         onClearBatch = viewModel::clearBatchSelection,
         onBatchDelete = viewModel::batchDeleteSelected,
         onBatchMove = viewModel::batchMoveSelected,
+        onKillApp = onKillApp,
+        onAutoActivateSearchConsumed = viewModel::consumeAutoActivateSearch,
         modifier = modifier
     )
 }
@@ -144,6 +155,10 @@ fun VaultListContent(
     onClearBatch: () -> Unit,
     onBatchDelete: () -> Unit,
     onBatchMove: (String?) -> Unit,
+    // ISSUE-P3-17：非空才呈现「彻底退出应用」入口（偏好开启且宿主可终止）
+    onKillApp: (() -> Unit)? = null,
+    // ISSUE-P3-17：自动聚焦搜索栏意图已被消费的回执
+    onAutoActivateSearchConsumed: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var showSortDialog by remember { mutableStateOf(false) }
@@ -153,6 +168,11 @@ fun VaultListContent(
     var showEmptyRecycleBinDialog by remember { mutableStateOf(false) }
     var showBatchMoveDialog by remember { mutableStateOf(false) }
     val pullRefreshState = rememberPullToRefreshState()
+
+    // ISSUE-P3-17：列表密度规格（偏好 → 行高 / 内边距 / 字号的唯一映射点）
+    val densitySpec = remember(uiState.listDensity) {
+        ListDensityPresenter.specOf(uiState.listDensity)
+    }
 
     // 文件夹上下文操作状态
     var groupToRename by remember { mutableStateOf<VaultGroup?>(null) }
@@ -180,7 +200,11 @@ fun VaultListContent(
                     sortOption = uiState.sortOption,
                     onSortClick = { showSortDialog = true },
                     onLockClick = onLockClick,
-                    onEmptyRecycleBinClick = { showEmptyRecycleBinDialog = true }
+                    onEmptyRecycleBinClick = { showEmptyRecycleBinDialog = true },
+                    // ISSUE-P3-17：进入列表页自动聚焦搜索栏（一次性意图，消费后回执清除）
+                    autoActivateSearch = uiState.autoActivateSearch,
+                    onAutoActivateSearchConsumed = onAutoActivateSearchConsumed,
+                    onKillApp = onKillApp
                 )
             }
         },
@@ -244,10 +268,12 @@ fun VaultListContent(
                     }
                 }
 
-                // 4. 文件夹列表
+                // 4. 文件夹列表（ISSUE-P3-22：分组图标与条目侧共用同一投影缓存）
                 items(uiState.currentGroups, key = { "group_${it.id}" }) { group ->
                     KeePassGroupRow(
                         group = group,
+                        icon = uiState.groupIcons[group.id],
+                        densitySpec = densitySpec,
                         onClick = { onGroupClick(group.id) },
                         onRename = { groupToRename = group },
                         onChangeIcon = { groupToChangeIcon = group },
@@ -267,6 +293,9 @@ fun VaultListContent(
                         showOtp = uiState.showOtpInList,
                         showPasskeyBadge = uiState.showPasskeyBadge,
                         showUrl = uiState.showUrlInList,
+                        densitySpec = densitySpec,
+                        // ISSUE-P3-17：搜索结果行的完整分组路径（非搜索态 / 开关关闭时为空表）
+                        groupPath = uiState.entryGroupPaths[entry.id],
                         onClick = { onEntryClick(entry.id) },
                         onLongClick = { onEntryLongClick(entry.id) },
                         onCopyPassword = { onCopyPassword(entry) },

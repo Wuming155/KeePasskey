@@ -31,8 +31,11 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.keepasskey.app.R
+import com.keepasskey.app.data.importer.ImportSource
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.model.resolveText
+import com.keepasskey.app.ui.screens.importer.ImportReportDialog
+import com.keepasskey.app.ui.screens.importer.ImportUiState
 import com.keepasskey.app.ui.screens.settings.ExportConfirmationPolicy
 import com.keepasskey.app.ui.screens.settings.KdfBenchmarkUiState
 import com.keepasskey.app.ui.screens.settings.SettingsUiState
@@ -61,6 +64,11 @@ fun DatabaseSettingsScreen(
     onExportXml: (android.net.Uri) -> Unit = {},
     onExportKeyFile: (android.net.Uri) -> Unit = {},
     onInstallTemplates: () -> Unit = {},
+    // ISSUE-P3-19：导入链路（对话框选源 → SAF 选文件 → 控制器解析/落库 → 报告对话框）。
+    // 状态由 VaultImportController 的 StateFlow 上抬，本屏只透传与呈现，不含业务逻辑。
+    importState: ImportUiState = ImportUiState.Idle,
+    onImportFileSelected: (ImportSource, Uri) -> Unit = { _, _ -> },
+    onImportReportDismiss: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var showCipherDialog by remember { mutableStateOf(false) }
@@ -303,13 +311,26 @@ fun DatabaseSettingsScreen(
         )
     }
 
-    // 对话框 7：导入数据源
+    // 对话框 7：导入数据源 → SAF 打开文件 → 交控制器（解析 / 落库 / 出报告）
+    var pendingImportSource by remember { mutableStateOf<ImportSource?>(null) }
+    val importFileLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        // 选源与选文件是两步：Uri 回调时把二者一并交给控制器（URI 过滤交给解析器的扩展名闸门）
+        val source = pendingImportSource
+        pendingImportSource = null
+        if (uri != null && source != null) onImportFileSelected(source, uri)
+    }
     if (showImportDialog) {
         ImportSourceDialog(
             onSourceSelected = { source ->
-                operationFeedback = UiMessage(R.string.dbset_import_preparing, listOf(source))
+                pendingImportSource = source
+                importFileLauncher.launch(arrayOf("*/*"))
             },
             onDismiss = { showImportDialog = false }
         )
     }
+
+    // 导入报告对话框：状态全来自控制器 StateFlow（Idle 时不渲染）
+    ImportReportDialog(state = importState, onDismiss = onImportReportDismiss)
 }

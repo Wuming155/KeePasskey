@@ -30,6 +30,11 @@ import org.junit.Test
  * 现实现把「读取库内现值 → 计算目标值 → 替换条目」整体收口到
  * [DatabaseSession.updateDatabaseMeta]（会话 Mutex 内单次受控变换），并以
  * `库内现值 + 1` 为单调下界、以 [PasskeyData.MAX_SIGN_COUNT] 为钳制上界。
+ *
+ * ISSUE-P3-27 子项 2（并发签名计数器假说）：追加 32 路真实并发用例，收集
+ * [PasskeyEntryCoordinator.incrementPasskeySignCount] 的全部返回值断言
+ * **互不相同且恰为 1..N**（证伪「协调器内部并发递增会得到同一值」），
+ * 并用例锁死唯一被证实的重复来源——调用方以锁外快照自行计算（见对应用例 KDoc）。
  */
 class PasskeyEntryCoordinatorSignCountTest {
 
@@ -152,5 +157,90 @@ class PasskeyEntryCoordinatorSignCountTest {
 
         assertEquals(3, storedSignCount(session))
         assertFalse(session.databaseFlow.value!!.rootGroup.allEntries().isEmpty())
+    }
+
+    // ===== ISSUE-P3-27 子项 2：并发递增的返回值唯一性 与 调用方自算的重复面 =====
+
+    @Test
+    fun `32 路并发递增返回的计数器互不相同且严格递增`() = runTest {
+        val session = newSession(signCountText = "0")
+        val coordinator = coordinatorOf(session)
+        val concurrency = 32
+
+        // 真实并行：32 个协程在 Default 线程池上同时进入原子递增路径
+        val applied = withContext(Dispatchers.Default) {
+            List(concurrency) { async { coordinator.incrementPasskeySignCount(entryId.toHexString()) } }.awaitAll()
+        }
+        val values = applied.filterNotNull()
+
+        assertEquals("每次并发递增都必须落账并回传落库值", concurrency, values.size)
+        assertEquals("并发递增回传的计数器不得重复", concurrency, values.toSet().size)
+        assertEquals(
+            "回传值必须恰为 1..N 的严格递增序列（无重复、无丢失更新、无回退）",
+            (1..concurrency).toList(),
+            values.sorted()
+        )
+        assertEquals("库内终态必须等于最大回传值", concurrency, storedSignCount(session))
+    }
+
+    @Test
+    fun `32 路并发递增经既有无返回值入口同样不丢失任何一次递增`() = runTest {
+        // 生产路径（RealVaultRepository → patchPasskeySignCount）同样必须逐次落账：
+        // 全部并发方传入同一个过期期望值 1，「库内现值 + 1」的单调下界仍应把它推进为 1..N
+        val session = newSession(signCountText = "0")
+        val coordinator = coordinatorOf(session)
+        val concurrency = 32
+
+        withContext(Dispatchers.Default) {
+            List(concurrency) { async { coordinator.patchPasskeySignCount(entryId.toHexString(), 1) } }.awaitAll()
+        }
+
+        assertEquals("并发递增不得丢失任何一次", concurrency, storedSignCount(session))
+    }
+
+    @Test
+    fun `以锁外快照自行计算计数器会产生重复值_断言路径必须使用协调器返回值`() = runTest {
+        // 唯一被证实的重复来源在**调用方口径**：生产断言路径（PasskeyAssertionActivity）在锁外
+        // 用进入断言前读到的 passkeyData.signCount 快照自行调用 PasskeyData.nextSignCount 写入
+        // AuthenticatorData；并发断言各方持有同一快照 → 交给 RP 的 signCount 全部相同。
+        // 本用例把该口径与协调器原子返回值口径并列，锁死「唯一安全的取值来源」。
+        val session = newSession(signCountText = "7")
+        val coordinator = coordinatorOf(session)
+        val concurrency = 8
+        val snapshot = storedSignCount(session)
+
+        val callerSide = withContext(Dispatchers.Default) {
+            List(concurrency) { async { PasskeyData.nextSignCount(snapshot) } }.awaitAll()
+        }
+        val coordinatorSide = withContext(Dispatchers.Default) {
+            List(concurrency) { async { coordinator.incrementPasskeySignCount(entryId.toHexString()) } }.awaitAll()
+        }
+
+        assertEquals(
+            "锁外快照自行计算在并发下必然重复（RP 侧观察到重复 signCount）",
+            1,
+            callerSide.toSet().size
+        )
+        assertEquals(
+            "协调器原子回传的落库值两两不同（并发断言各自可取得唯一计数器）",
+            concurrency,
+            coordinatorSide.filterNotNull().toSet().size
+        )
+        assertEquals("库内终态按原子返回值口径逐次推进", snapshot + concurrency, storedSignCount(session))
+    }
+
+    @Test
+    fun `计数器饱和于上界后不再递增_为唯一允许的重复来源`() = runTest {
+        // 诚实性留痕：上界饱和语义（防 CWE-190 回绕）决定计数器不可能无限严格递增，
+        // 到达 MAX_SIGN_COUNT 后重复是设计使然，与并发无关
+        val session = newSession(signCountText = PasskeyData.MAX_SIGN_COUNT.toString())
+        val coordinator = coordinatorOf(session)
+
+        val first = coordinator.incrementPasskeySignCount(entryId.toHexString())
+        val second = coordinator.incrementPasskeySignCount(entryId.toHexString())
+
+        assertEquals("饱和后不得回绕为负", PasskeyData.MAX_SIGN_COUNT, first)
+        assertEquals("上界处的重复是饱和语义的必然结果（非并发缺陷）", first, second)
+        assertEquals(PasskeyData.MAX_SIGN_COUNT, storedSignCount(session))
     }
 }

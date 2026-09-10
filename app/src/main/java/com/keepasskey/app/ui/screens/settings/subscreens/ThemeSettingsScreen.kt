@@ -275,21 +275,17 @@ fun ThemeSettingsScreen(
                     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                         DisplayPrefRow(
                             title = stringResource(R.string.theme_mask_pwd_title),
-                            // ISSUE-P3-03 (43c)：消费方在详情页，属并行组文件范围，本轮未接线 → 如实标注
-                            subtitle = stringResource(
-                                R.string.settings_pref_reserved_suffix,
-                                stringResource(R.string.theme_mask_pwd_sub)
-                            ),
+                            // ISSUE-P3-17：详情页密码**初始**遮掩态已由 FieldMaskPolicy 真实消费
+                            // （EntryDetailViewModel → EntryDetailUiState → EntryDetailComponents）→ 移除标识
+                            subtitle = stringResource(R.string.theme_mask_pwd_sub),
                             checked = uiState.maskPasswordsDefault,
                             onCheckedChange = onMaskPasswordsDefaultToggle
                         )
 
                         DisplayPrefRow(
                             title = stringResource(R.string.theme_mask_totp_title),
-                            subtitle = stringResource(
-                                R.string.settings_pref_reserved_suffix,
-                                stringResource(R.string.theme_mask_totp_sub)
-                            ),
+                            // ISSUE-P3-17：TOTP **初始**遮掩态已真实消费（同上链路；眼睛按钮可显式展开/收起）
+                            subtitle = stringResource(R.string.theme_mask_totp_sub),
                             checked = uiState.maskTotpDefault,
                             onCheckedChange = onMaskTotpDefaultToggle
                         )
@@ -321,10 +317,9 @@ fun ThemeSettingsScreen(
                             )
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
-                                text = stringResource(
-                                    R.string.settings_pref_reserved_suffix,
-                                    stringResource(R.string.theme_density_desc)
-                                ),
+                                // ISSUE-P3-17：listDensity 已由 ListDensityPresenter/ListDensitySpec 真实驱动
+                                // 列表行高、内边距与字号 → 移除标识
+                                text = stringResource(R.string.theme_density_desc),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -432,40 +427,36 @@ fun ThemeSettingsScreen(
                     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                         DisplayPrefRow(
                             title = stringResource(R.string.theme_unlocked_notif_title),
-                            subtitle = stringResource(
-                                R.string.settings_pref_reserved_suffix,
-                                stringResource(R.string.theme_unlocked_notif_sub)
-                            ),
+                            // ISSUE-P3-18：通知通道 + POST_NOTIFICATIONS + 权限流程已落地，
+                            // showUnlockedNotification 真实控制常驻通知的收发 → 移除「（预留，暂未生效）」标识
+                            subtitle = stringResource(R.string.theme_unlocked_notif_sub),
                             checked = uiState.showUnlockedNotification,
                             onCheckedChange = onShowUnlockedNotificationToggle
                         )
 
                         DisplayPrefRow(
                             title = stringResource(R.string.theme_auto_search_title),
-                            subtitle = stringResource(
-                                R.string.settings_pref_reserved_suffix,
-                                stringResource(R.string.theme_auto_search_sub)
-                            ),
+                            // ISSUE-P3-17：进库自动聚焦搜索栏已真实消费
+                            // （VaultListViewModel 一次性意图 → VaultListTopBars 请求焦点 + 弹输入法）→ 移除标识
+                            subtitle = stringResource(R.string.theme_auto_search_sub),
                             checked = uiState.autoActivateSearchOnOpen,
                             onCheckedChange = onAutoActivateSearchOnOpenToggle
                         )
 
                         DisplayPrefRow(
                             title = stringResource(R.string.theme_group_in_search_title),
-                            subtitle = stringResource(
-                                R.string.settings_pref_reserved_suffix,
-                                stringResource(R.string.theme_group_in_search_sub)
-                            ),
+                            // ISSUE-P3-17：搜索结果行完整分组路径已真实消费
+                            // （VaultListViewModel 仅「搜索中且开关开启」时装配 entryGroupPaths）→ 移除标识
+                            subtitle = stringResource(R.string.theme_group_in_search_sub),
                             checked = uiState.showGroupInSearchResult,
                             onCheckedChange = onShowGroupInSearchResultToggle
                         )
 
                         DisplayPrefRow(
                             title = stringResource(R.string.theme_group_in_entry_title),
-                            subtitle = stringResource(
-                                R.string.settings_pref_reserved_suffix,
-                                stringResource(R.string.theme_group_in_entry_sub)
-                            ),
+                            // ISSUE-P3-17：详情页所属分组路径已真实消费
+                            // （EntryDetailViewModel 按 showGroupInEntry 决定是否下发 groupPath）→ 移除标识
+                            subtitle = stringResource(R.string.theme_group_in_entry_sub),
                             checked = uiState.showGroupInEntry,
                             onCheckedChange = onShowGroupInEntryToggle
                         )

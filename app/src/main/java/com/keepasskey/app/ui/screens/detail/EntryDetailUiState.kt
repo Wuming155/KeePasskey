@@ -13,7 +13,22 @@ import com.keepasskey.app.ui.model.UiVaultEntry
 data class EntryDetailUiState(
     val entry: UiVaultEntry? = null,
     val isLoading: Boolean = false,
+    /**
+     * 密码明文是否可见。
+     * ISSUE-P3-17：由 `maskPasswordsDefault`（**默认值**）与用户本次会话的显式展开/收起
+     * 共同决定（见 [FieldMaskPolicy]）；偏好不得覆盖用户显式操作。
+     */
     val isPasswordVisible: Boolean = false,
+    /**
+     * TOTP 验证码是否可见。
+     * ISSUE-P3-17：语义同 [isPasswordVisible]，默认态来自 `maskTotpDefault`。
+     */
+    val isTotpVisible: Boolean = true,
+    /**
+     * ISSUE-P3-17：条目所属分组的完整路径（如「工作与生产力 / 研发与基础设施」）。
+     * 仅 `showGroupInEntry` 开启且分组可解析时非空；null 表示该行不展示。
+     */
+    val groupPath: String? = null,
     // 按需解密出的当前密码明文（仅在 isPasswordVisible 期间持有）
     val revealedPassword: String? = null,
     // 按需解密出的历史修订密码（对比弹窗打开期间持有），键为修订 id

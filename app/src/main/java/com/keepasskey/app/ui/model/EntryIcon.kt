@@ -38,11 +38,16 @@ typealias BitmapEntryIcon = EntryIcon<ImageBitmap>
 
 /**
  * 图标投影判定（纯函数、无 Android 依赖、无 IO，可 JVM 直测）。
+ *
+ * ISSUE-P3-22：**条目与分组共用本对象这唯一一处判定实现**——KDBX 中分组与条目
+ * 共享同一 `CustomIconUUID` 语义与同一 Meta 图标池，「未绑定 → 标准图标 /
+ * 命中池 → 自定义 / 未命中 → 缺图占位」逐字相同；不设分组专用副本，
+ * 从结构上杜绝两条判定路径漂移。
  */
 object EntryIconProjection {
 
     /**
-     * 依据「条目绑定的自定义图标 id + 标准图标名 + 库内图标池现有 id 集合」判定渲染形态。
+     * 依据「绑定的自定义图标 id + 标准图标名 + 库内图标池现有 id 集合」判定渲染形态。
      * 判定不涉及解码：命中池内图标时由 [EntryIconPresenter] 后续补入已解码载荷。
      */
     fun <T : Any> of(

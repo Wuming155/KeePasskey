@@ -23,6 +23,9 @@ import java.io.IOException
  * 断言四条落盘路径（① .bak 滚动备份 copy 后、② 主路径原子 move 后、
  * ③ 降级标准 rename 成功后、④ 降级 copy 覆盖后）**均触达目录 fsync 钩子**，
  * 从而在无法真实执行目录通道的 Windows 宿主上也能核验该崩溃安全路径。
+ * ISSUE-P3-26 追加的第五条路径（⑤ 删除滚动备份 .bak 后，unlink 同属目录项变更）由
+ * 同包测试类 `AtomicFileWriterBackupDeletionTest` 覆盖；本类与其共用
+ * `DirectorySyncTestDoubles.kt` 中的记录型替身，使两个测试文件均保持在行数阈值内。
  * 说明：本测试类不存在 `Assume` 跳过用例；测试基线中「Windows 无 POSIX 权限视图」
  * 的跳过项位于 sync 模块 `SyncCacheTest`，与本模块无关。
  */
@@ -359,29 +362,5 @@ class AtomicFileWriterTest {
     /** 构造标准 rename 恒失败的文件句柄（模拟跨卷 / 目标被占用），确定性进入 copy 降级分支。 */
     private fun renameFailing(file: File): File = object : File(file.path) {
         override fun renameTo(dest: File): Boolean = false
-    }
-
-    /** 记录型假实现：记录每次目录 fsync 的目标目录与结果，完全替代真实平台调用。 */
-    private class RecordingDirectorySync(
-        private val outcome: DirectorySyncOutcome = DirectorySyncOutcome.SYNCED
-    ) : DirectorySync {
-        val syncedDirectories = mutableListOf<File>()
-        val outcomes = mutableListOf<DirectorySyncOutcome>()
-
-        override fun sync(directory: File): DirectorySyncOutcome {
-            syncedDirectories += directory
-            outcomes += outcome
-            return outcome
-        }
-    }
-
-    /** 委派真实默认实现的探针：用于在真实宿主上核验目录 fsync 是否降级。 */
-    private class ProbingDirectorySync(
-        private val delegate: DirectorySync = DirectorySync.default
-    ) : DirectorySync {
-        val outcomes = mutableListOf<DirectorySyncOutcome>()
-
-        override fun sync(directory: File): DirectorySyncOutcome =
-            delegate.sync(directory).also { outcomes += it }
     }
 }

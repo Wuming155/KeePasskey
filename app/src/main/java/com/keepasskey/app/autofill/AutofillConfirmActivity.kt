@@ -8,6 +8,7 @@ import androidx.lifecycle.lifecycleScope
 import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.ExtendedSettingsStore
 import com.keepasskey.app.data.repository.VaultRepository
+import com.keepasskey.app.notification.TotpNotificationPublisher
 import com.keepasskey.app.passkey.CredentialFillConfirmScreen
 import com.keepasskey.app.security.ApplyObscuredTouchFilter
 import com.keepasskey.app.security.BiometricAuthManager
@@ -35,6 +36,9 @@ import javax.inject.Inject
  * ISSUE-P3-03 (43b)：确认通过后按 `autofillCopyTotp` 偏好把该条目的 TOTP 动态码
  * 写入受保护剪贴板（`EXTRA_IS_SENSITIVE` + 定时自动擦除），兑现设置页
  * 「填充后自动将 TOTP 动态码复制到剪贴板」承诺。
+ *
+ * ISSUE-P3-18：同一落点按 `autofillShowTotpNotification` 偏好发出验证码通知——本类是
+ * 「自动填充命中并真正下发凭据」的落点，通知只含验证码与剩余秒数，不含任何条目标识。
  */
 @AndroidEntryPoint
 class AutofillConfirmActivity : FragmentActivity() {
@@ -50,6 +54,10 @@ class AutofillConfirmActivity : FragmentActivity() {
 
     @Inject
     lateinit var settingsStore: ExtendedSettingsStore
+
+    // ISSUE-P3-18：验证码通知发布器（受 autofillShowTotpNotification 偏好与通知权限双闸门约束）
+    @Inject
+    lateinit var totpNotificationPublisher: TotpNotificationPublisher
 
     private var completed = false
 
@@ -104,16 +112,17 @@ class AutofillConfirmActivity : FragmentActivity() {
     /**
      * 完成认证并回传结果。
      *
-     * ISSUE-P3-03 (43b)：先按偏好尝试复制 TOTP 动态码，再回传 RESULT_OK——复制带硬超时
-     * 兜底（[TOTP_COPY_TIMEOUT_MS]），任何异常/超时都不阻断填充；不复制时（开关关闭、
-     * 条目无 TOTP、库已锁定）不触碰剪贴板。
+     * ISSUE-P3-03 (43b)：先按偏好尝试复制 TOTP 动态码，再回传 RESULT_OK。
+     * ISSUE-P3-18：同一落点按 `autofillShowTotpNotification` 偏好补发验证码通知。
+     * 两个动作均带硬超时兜底（[TOTP_ACTION_TIMEOUT_MS]），任何异常/超时都不阻断填充；
+     * 开关关闭、条目无 TOTP、库已锁定时不触碰剪贴板也不发通知。
      */
     private fun completeAuthResult() {
         if (completed) return
         completed = true
         lifecycleScope.launch {
             try {
-                copyTotpIfEnabled()
+                handleTotpAfterConfirm()
             } finally {
                 // 官方认证数据集语义：RESULT_OK 后框架才会把该数据集的值写入目标表单
                 setResult(RESULT_OK)
@@ -122,12 +131,23 @@ class AutofillConfirmActivity : FragmentActivity() {
         }
     }
 
-    private suspend fun copyTotpIfEnabled() {
+    /**
+     * 确认后的 TOTP 二次动作：复制到受保护剪贴板 与/或 发送验证码通知。
+     *
+     * 两个偏好相互独立（`autofillCopyTotp` / `autofillShowTotpNotification`），任一开启都会
+     * 触发一次 TOTP 计算；两者皆关时**不触达仓库**（零开销、零副作用）。
+     * `autofillCopyTotp` 沿用既有单键读取接口；`autofillShowTotpNotification` 暂无单键接口，
+     * 经整体读取取得——本路径每次用户确认仅执行一次，全量读取成本可忽略。
+     */
+    private suspend fun handleTotpAfterConfirm() {
         val entryId = intent.getStringExtra(EXTRA_ENTRY_ID)?.takeIf { it.isNotBlank() } ?: return
-        if (!settingsStore.isAutofillCopyTotpEnabled()) return
-        // 硬超时：TOTP 计算属纯 HMAC 运算（毫秒级），超时即放弃复制，绝不拖住填充回传；
+        val copyEnabled = settingsStore.isAutofillCopyTotpEnabled()
+        val notifyEnabled = settingsStore.load().autofillShowTotpNotification
+        if (!copyEnabled && !notifyEnabled) return
+
+        // 硬超时：TOTP 计算属纯 HMAC 运算（毫秒级），超时即放弃本次二次动作，绝不拖住填充回传；
         // 取消异常必须继续上抛（不得被结果兜底吞掉，否则协程取消语义被破坏）
-        val snapshot = withTimeoutOrNull(TOTP_COPY_TIMEOUT_MS) {
+        val snapshot = withTimeoutOrNull(TOTP_ACTION_TIMEOUT_MS) {
             try {
                 vaultRepository.calculateEntryTotp(entryId)
             } catch (c: CancellationException) {
@@ -135,15 +155,21 @@ class AutofillConfirmActivity : FragmentActivity() {
             } catch (t: Throwable) {
                 null
             }
+        } ?: return
+
+        if (AutofillTotpCopyPolicy.shouldCopy(copyTotpEnabled = copyEnabled, snapshot = snapshot)) {
+            clipboardSecurityManager.copySensitiveText(
+                label = getString(R.string.autofill_totp_clip_label),
+                text = snapshot.code
+            )
         }
-        val code = snapshot
-            ?.takeIf { AutofillTotpCopyPolicy.shouldCopy(copyTotpEnabled = true, snapshot = it) }
-            ?.code
-            ?: return
-        clipboardSecurityManager.copySensitiveText(
-            label = getString(R.string.autofill_totp_clip_label),
-            text = code
-        )
+        if (notifyEnabled) {
+            // 通知只含验证码与剩余秒数，不含任何条目标识（详见 TotpNotificationPublisher 注释）
+            totpNotificationPublisher.publish(
+                code = snapshot.code,
+                periodSeconds = snapshot.periodSeconds
+            )
+        }
     }
 
     companion object {
@@ -152,7 +178,7 @@ class AutofillConfirmActivity : FragmentActivity() {
         /** ISSUE-P3-03 (43b)：被填充条目的标识，供确认后按条目取 TOTP */
         const val EXTRA_ENTRY_ID = "com.keepasskey.app.autofill.EXTRA_ENTRY_ID"
 
-        /** 复制 TOTP 的硬超时预算：超出即放弃复制，保证填充回传不被拖慢 */
-        private const val TOTP_COPY_TIMEOUT_MS = 500L
+        /** TOTP 二次动作（复制 / 通知）的硬超时预算：超出即放弃，保证填充回传不被拖慢 */
+        private const val TOTP_ACTION_TIMEOUT_MS = 500L
     }
 }

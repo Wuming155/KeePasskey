@@ -37,26 +37,44 @@ app ──> database ──> crypto ──> core
 app/src/main/java/com/keepasskey/app/
 ├── MainApplication.kt / MainActivity.kt
 ├── data/
-│   └── repository/      # 数据仓库接口与实现（VaultRepository、SettingsRepository 等）
-├── di/                  # Hilt 依赖注入装配（RepositoryModule 等）
+│   ├── repository/      # 数据仓库接口与实现（VaultRepository、SettingsRepository 等）
+│   ├── logger/          # 诊断日志缓冲与偏好闸门（DebugLogBuffer、DiagnosticLogGate）
+│   ├── breach/          # 泄露检测（HIBP k-anonymity 范围查询）
+│   ├── childdb/         # 子库挂载（ISSUE-P3-20）：挂载注册表、只读子库会话、凭据隔离
+│   └── importer/        # 明文导入框架（ISSUE-P3-19）：契约、注册表、4 源解析器、落库编排
+├── di/                  # Hilt 依赖注入装配（RepositoryModule、ImporterModule 等）
+├── autofill/            # 系统自动填充（AutofillService 与表单解析）
+├── passkey/             # 通行密钥认证接入（Credential Manager / FIDO2）
+├── notification/        # 通知通道、权限闸门与发布器（ISSUE-P3-18）
+├── security/            # 运行时完整性、窗口防截屏、自动锁定、剪贴板治理
+├── sync/                # 同步协调（周期编排 / 冲突决策 / Provider 解析 / 缓存驱逐）
+├── util/                # 通用小工具（TickerFlow 等）
 └── ui/
     ├── KeePasskeyApp.kt # 顶层路由与主题宿主
-    ├── components/      # 共享 UI 组件（BentoCard、SecurityBadge 等）
+    ├── components/      # 共享 UI 组件（BentoCard、SecurityBadge、EntryIconContent 等）
     ├── navigation/      # 导航路线定义（Screen）
-    ├── model/           # UI 展现层数据模型（UiVaultEntry、EntryCategory）
+    ├── model/           # UI 展现层数据模型（UiVaultEntry、EntryCategory、EntryIcon 投影）
     ├── screens/         # 功能页面（MVVM 分层：UiState + ViewModel + Stateful Route + Stateless Content）
     │   ├── unlock/      # 解锁页（UnlockUiState, UnlockViewModel, UnlockScreen）
     │   ├── vault/       # 密码库列表（VaultListUiState, VaultListViewModel, VaultListScreen）
     │   ├── detail/      # 凭据详情（EntryDetailUiState, EntryDetailViewModel, EntryDetailScreen）
     │   ├── edit/        # 凭据添加/编辑（EntryEditUiState, EntryEditViewModel, EntryEditScreen）
+    │   ├── importer/    # 导入结果报告（ImportUiState, VaultImportController, ImportReportDialog）
+    │   ├── authenticator/ generator/ conflict/ database/   # TOTP、密码生成、冲突解决、建库/选库
     │   └── settings/    # 设置中心（SettingsUiState, SettingsViewModel, SettingsScreen）
     └── theme/           # Material 3 主题系统
 ```
 
+> **包名注意**：导入结果界面所在包为 `ui/screens/importer`（**不是** `import`）——
+> `import` 是 Java 关键字，KSP 会直接以
+> `The name 'import' cannot be used as a package name because it is a Java keyword` 拒绝掉整个注解处理阶段。
+
 - **数据层（Data Layer）**：由 `data/repository/` 提供响应式 `Flow` 数据流，屏蔽上层对底层数据库或内存缓存的具体实现细节。
 - **状态容器（State Holders）**：每个页面配备独立 `@HiltViewModel`，通过不可变 `UiState` 数据类与 `StateFlow` 承载页面完整状态，遵循单向数据流（UDF）。
 - **界面分离**：Screen 拆分为 Stateful 路由（收集状态、处理副作用与导航）与 Stateless 内容组件（纯渲染、高可预览与可测试）。
-- **平台集成**：后续按路线图在 app 内新增 `biometric/`（生物识别解锁）、`autofill/`（AutofillService 与表单解析）、`passkey/`（Credential Manager 接入），不再为它们单独建 Gradle 模块。
+- **平台集成**：`autofill/`（AutofillService 与表单解析）与 `passkey/`（Credential Manager 接入）已按既定方向在 app 内落位为**内部包**（不为它们单独建 Gradle 模块）；
+  **生物识别解锁不单独设包**，其状态机与策略落在 `ui/screens/unlock/`（`BiometricAutoPrompt` / `BiometricFailureMessagePolicy` / `UnlockModePolicy` 等）；
+  平台侧另设 `notification/`（通知通道、权限闸门与发布器）与 `security/`（运行时完整性、窗口防截屏）。
 
 ## 5. 参考项目
 
@@ -76,7 +94,7 @@ app/src/main/java/com/keepasskey/app/
 |------|------|
 | 系统基准 | Android API 36+（`minSdk 36`, `compileSdk 37`, `targetSdk 36`），仅 Android 16+ 深度优化 |
 | 语言 | Kotlin 2.4.10（Compose 编译器随 Kotlin 一同发布） |
-| 构建 | Gradle 9.4.1（Wrapper）+ AGP 9.2.1，依赖版本统一由 `gradle/libs.versions.toml` 管理 |
+| 构建 | Gradle 9.7.1（Wrapper）+ AGP 9.4.0，Kotlin 2.4.10，依赖版本统一由 `gradle/libs.versions.toml` 管理 |
 | UI | Jetpack Compose（Material 3 / M3 Expressive） |
 | 异步 | Kotlin Coroutines + Flow |
 | 依赖注入 | Hilt 2.60.1（KSP 2.3.11，AGP 9 内置 Kotlin） |

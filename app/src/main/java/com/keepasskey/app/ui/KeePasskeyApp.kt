@@ -51,6 +51,7 @@ import com.keepasskey.app.ui.screens.settings.subscreens.ThemeSettingsScreen
 import com.keepasskey.app.ui.screens.settings.subscreens.TotpSettingsScreen
 import com.keepasskey.app.ui.screens.settings.subscreens.WebDavSyncScreen
 import com.keepasskey.app.ui.screens.unlock.UnlockScreen
+import com.keepasskey.app.ui.screens.vault.AppTerminationPolicy
 import com.keepasskey.app.ui.screens.vault.VaultListScreen
 import com.keepasskey.app.ui.theme.AppThemeMode
 import com.keepasskey.app.ui.theme.KeePasskeyTheme
@@ -64,6 +65,24 @@ fun KeePasskeyApp() {
     val context = LocalContext.current
     val settingsViewModel: SettingsViewModel = hiltViewModel(context as ComponentActivity)
     val appSettings by settingsViewModel.uiState.collectAsStateWithLifecycle()
+
+    // ISSUE-P3-17：showKillAppOption 开启且宿主 Activity 可终止时，才向库列表下发「彻底退出应用」
+    // 入口（不可终止时如实不呈现，不做点了没反应的假入口）。
+    // 终止动作由本层持有 Activity 上下文执行：finishAffinity() 解除任务栈亲和性后终止进程。
+    val hostActivity = context as? ComponentActivity
+    val killAppAction: (() -> Unit)? = remember(appSettings.showKillAppOption, hostActivity) {
+        if (AppTerminationPolicy.showsEntry(appSettings.showKillAppOption, hostActivity != null)) {
+            val action: () -> Unit = {
+                AppTerminationPolicy.terminate(
+                    detachTask = { hostActivity?.finishAffinity() },
+                    exitProcess = { code -> kotlin.system.exitProcess(code) }
+                )
+            }
+            action
+        } else {
+            null
+        }
+    }
 
     // 动态国际化语言支持：默认中文，支持跟随系统、强制中文与英文热切换
     val appLanguage = appSettings.appLanguage
@@ -251,7 +270,9 @@ fun KeePasskeyApp() {
                         // H2 整改：冲突解决死路由接线——冲突横幅可直接进入冲突解决页
                         onNavigateToConflictResolver = {
                             navController.navigate(Screen.ConflictResolver.route)
-                        }
+                        },
+                        // ISSUE-P3-17：showKillAppOption 真实消费点（详见 killAppAction 注释）
+                        onKillApp = killAppAction
                     )
                 }
 
@@ -353,6 +374,8 @@ fun KeePasskeyApp() {
                     val kdfBenchmarkState by settingsViewModel.kdfBenchmark.collectAsStateWithLifecycle()
                     // TASK-13 整改：导出/模板动作反馈流
                     val exportFeedback by settingsViewModel.exportFeedback.collectAsStateWithLifecycle()
+                    // ISSUE-P3-19：明文导入状态流（Idle / Parsing / Done / Failed）
+                    val importState by settingsViewModel.importState.collectAsStateWithLifecycle()
                     DatabaseSettingsScreen(
                         uiState = settingsState,
                         onBackClick = { navController.popBackStack() },
@@ -371,7 +394,11 @@ fun KeePasskeyApp() {
                         onExportKdbx = settingsViewModel::exportKdbxTo,
                         onExportXml = settingsViewModel::exportVaultXmlTo,
                         onExportKeyFile = settingsViewModel::exportKeyFileTo,
-                        onInstallTemplates = settingsViewModel::installEntryTemplates
+                        onInstallTemplates = settingsViewModel::installEntryTemplates,
+                        // ISSUE-P3-19：导入链路（选源 → SAF 选文件 → 控制器解析/落库 → 报告对话框）
+                        importState = importState,
+                        onImportFileSelected = settingsViewModel::startImport,
+                        onImportReportDismiss = settingsViewModel::dismissImportReport
                     )
                 }
 

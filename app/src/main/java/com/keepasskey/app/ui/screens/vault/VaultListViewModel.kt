@@ -8,11 +8,14 @@ import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.security.ClipboardSecurityManager
 import com.keepasskey.app.util.tickerFlow
 import com.keepasskey.core.result.KdbxResult
+import com.keepasskey.app.ui.model.BitmapEntryIcon
 import com.keepasskey.app.ui.model.EntryDecorations
 import com.keepasskey.app.ui.model.EntryDisplayDispatcher
-import com.keepasskey.app.ui.model.EntryDisplayPresenter
+import com.keepasskey.app.ui.model.EntryIconPresenter
+import com.keepasskey.app.ui.model.EntryReferenceDisplayResolver
 import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.app.ui.model.UiMessage
+import com.keepasskey.app.ui.screens.settings.ExtendedSettings
 import com.keepasskey.sync.engine.SyncCacheEvent
 import com.keepasskey.app.ui.model.UiVaultEntry
 import com.keepasskey.app.ui.model.VaultGroup
@@ -52,7 +55,11 @@ class VaultListViewModel @Inject constructor(
     // TASK-21：非 Compose 层文案资源解析通道（生产 DI 注入真实现；单测注入假实现）
     private val stringsProvider: StringsProvider? = null,
     // ISSUE-P3-02：展示装配调度器（生产 Dispatchers.Default；单测注入测试调度器保证断言确定性）
-    @EntryDisplayDispatcher private val displayDispatcher: CoroutineDispatcher = Dispatchers.Default
+    @EntryDisplayDispatcher private val displayDispatcher: CoroutineDispatcher = Dispatchers.Default,
+    // ISSUE-P3-17：进阶显示偏好通道（列表密度 / 分组路径 / 自动聚焦搜索）。
+    // 该通道只有同步快照读取（无 Flow），故在此以 StateFlow 承载快照，页面进入时刷新；
+    // null 仅用于纯 JVM 单测（生产 DI 经 ExtendedSettingsSourceModule 恒注入）
+    private val extendedSettingsSource: ExtendedSettingsSource? = null
 ) : ViewModel() {
 
     // P3-23：null 时回退空串实现（生产 Hilt 恒注入 StringsProviderModule 真实现）
@@ -86,6 +93,17 @@ class VaultListViewModel @Inject constructor(
 
     // H4-只读整改：会话只读标志（解锁时刻确定，只读时禁用新增/批量编辑入口）
     private val isReadOnlyFlow = MutableStateFlow(vaultRepository.isSessionReadOnly())
+
+    // ISSUE-P3-17：进阶显示偏好快照（构造期读取一次；页面每次进入组合时经 onScreenEntered 刷新）。
+    // 无偏好通道（单测未注入）时回落到 ExtendedSettings 默认值，与生产未落库语义一致。
+    private val initialExtendedSettings: ExtendedSettings =
+        extendedSettingsSource?.load() ?: ExtendedSettings()
+    private val extendedSettingsFlow = MutableStateFlow(initialExtendedSettings)
+
+    // ISSUE-P3-17：autoActivateSearchOnOpen 是「打开数据库后」的一次性意图——仅在 ViewModel
+    // 构造（= 解锁后首次进入列表页）时装载，页面返回 / 重组不重复装载，避免反复抢焦点弹输入法
+    private val autoActivateSearchFlow =
+        MutableStateFlow(initialExtendedSettings.autoActivateSearchOnOpen)
 
     // 记录上一秒的剩余秒数，用于检测 TOTP 周期翻转
     private var previousTotpRemaining = -1
@@ -192,7 +210,11 @@ class VaultListViewModel @Inject constructor(
         val currentGroupId: String?,
         val filterParams: FilterParams,
         val userMessage: UiMessage?,
-        val totpRemainingSeconds: Int
+        val totpRemainingSeconds: Int,
+        // ISSUE-P3-17：进阶显示偏好快照（列表密度 / 搜索结果分组路径）
+        val extended: ExtendedSettings = ExtendedSettings(),
+        // ISSUE-P3-17：自动聚焦搜索栏的一次性意图（消费后置 false）
+        val autoActivateSearch: Boolean = false
     )
 
     private val sessionStateFlow = combine(
@@ -202,30 +224,51 @@ class VaultListViewModel @Inject constructor(
         totpRemainingSecondsFlow
     ) { groupId, params, message, totpSeconds ->
         SessionState(groupId, params, message, totpSeconds)
+    }.combine(extendedSettingsFlow) { state, extended ->
+        state.copy(extended = extended)
+    }.combine(autoActivateSearchFlow) { state, autoActivate ->
+        state.copy(autoActivateSearch = autoActivate)
     }
 
-    // ISSUE-P3-02（TASK-49）：条目展示装饰装配器 —— 自定义图标投影（PNG 解码 + 有界缓存复用）
-    // 与 Notes/URL 字段引用展开（仅公开字段，受保护字段掩码）。装配属 CPU 工作，固定跑 Default。
-    private val entryDecorations = EntryDisplayPresenter(
-        loadIconBytes = { vaultRepository.getCustomIconBytes() },
+    // ISSUE-P3-02（TASK-49）/ ISSUE-P3-22：条目与分组**共用同一个** EntryIconPresenter——
+    // 因而共用同一图标池快照、同一解码缓存（IconBitmapCache）与同一失败登记表，
+    // 分组与条目引用同一自定义图标时只解码一次。
+    // 注：EntryDisplayPresenter 内部私有持有自己的投影器，无法让分组与条目共用缓存，
+    // 故此处按「一个投影器 + 一个引用文案解析器」自行装配 EntryDecorations（公共数据类）。
+    private val iconPresenter = EntryIconPresenter.production { vaultRepository.getCustomIconBytes() }
+    // 注：EntryReferenceDisplayResolver 不是 fun interface，且 protectedPlaceholder 为末位形参，
+    // 故必须用具名参数装配（尾随 lambda 会被绑定到 protectedPlaceholder 上）
+    private val entryTexts = EntryReferenceDisplayResolver(
         loadEntries = { vaultRepository.getKdbxEntries() }
     )
 
     private val entryDecorationsFlow: Flow<EntryDecorations> = vaultRepository.getEntries()
-        .map { entries -> entryDecorations.decorate(entries) }
+        .map { entries ->
+            EntryDecorations(
+                icons = iconPresenter.present(entries),
+                texts = entryTexts.present(entries)
+            )
+        }
+        .flowOn(displayDispatcher)
+
+    /** ISSUE-P3-22：分组图标投影（同一 presenter → 同一解码缓存，不重复解码） */
+    private val groupIconsFlow: Flow<Map<String, BitmapEntryIcon>> = vaultRepository.getGroups()
+        .map { groups -> iconPresenter.presentGroups(groups) }
         .flowOn(displayDispatcher)
 
     /** 批量/同步状态与展示装饰的聚合体（避开 combine 五流上限的元组嵌套） */
     private data class BatchSyncDecorations(
         val batchAndSync: BatchAndSyncState,
-        val decorations: EntryDecorations
+        val decorations: EntryDecorations,
+        val groupIcons: Map<String, BitmapEntryIcon>
     )
 
     private val batchSyncDecorationsFlow = combine(
         batchAndSyncFlow,
-        entryDecorationsFlow
-    ) { batchAndSync, decorations ->
-        BatchSyncDecorations(batchAndSync, decorations)
+        entryDecorationsFlow,
+        groupIconsFlow
+    ) { batchAndSync, decorations, groupIcons ->
+        BatchSyncDecorations(batchAndSync, decorations, groupIcons)
     }
 
     val uiState: StateFlow<VaultListUiState> = combine(
@@ -312,6 +355,14 @@ class VaultListViewModel @Inject constructor(
             allGroups.filter { it.parentId == effectiveGroupId }
         }
 
+        // 5. ISSUE-P3-17：搜索结果行的分组路径（仅在「搜索中 + 开关开启」时装配）
+        val showGroupInSearchResult = session.extended.showGroupInSearchResult
+        val entryGroupPaths = if (isSearching && showGroupInSearchResult) {
+            buildEntryGroupPaths(allGroups, entriesWithLiveTotp)
+        } else {
+            emptyMap()
+        }
+
         VaultListUiState(
             searchQuery = session.filterParams.query,
             isSearchActive = session.filterParams.isSearchActive,
@@ -337,6 +388,11 @@ class VaultListViewModel @Inject constructor(
             showPasskeyBadge = settings.showPasskeyBadge,
             showUrlInList = settings.showUrlInList,
             hideFabOnScroll = settings.hideFabOnScroll,
+            listDensity = session.extended.listDensity,
+            showGroupInSearchResult = showGroupInSearchResult,
+            entryGroupPaths = entryGroupPaths,
+            autoActivateSearch = session.autoActivateSearch,
+            groupIcons = batchSyncDecorations.groupIcons,
             decorations = batchSyncDecorations.decorations
         )
     }.stateIn(
@@ -344,6 +400,40 @@ class VaultListViewModel @Inject constructor(
         started = SharingStarted.WhileSubscribed(5000),
         initialValue = VaultListUiState()
     )
+
+    /**
+     * ISSUE-P3-17：条目 id → 所属分组完整路径（搜索结果行）。
+     * 归属分组缺失（条目在根级或分组投影暂缺）时不产出条目，由行组件如实不展示路径。
+     */
+    private fun buildEntryGroupPaths(
+        allGroups: List<VaultGroup>,
+        entries: List<UiVaultEntry>
+    ): Map<String, String> {
+        val paths = GroupPathPresenter.pathsOf(allGroups)
+        return entries.mapNotNull { entry ->
+            val groupId = entry.groupId ?: return@mapNotNull null
+            paths[groupId]?.let { path -> entry.id to path }
+        }.toMap()
+    }
+
+    /**
+     * ISSUE-P3-17：页面每次进入组合时刷新进阶显示偏好快照。
+     *
+     * 偏好通道只有同步 `load()`（无 Flow），故由页面在进入时主动拉取一次：
+     * 用户在设置页改动后返回列表页即生效，且不引入轮询。
+     */
+    fun onScreenEntered() {
+        val source = extendedSettingsSource ?: return
+        extendedSettingsFlow.value = source.load()
+    }
+
+    /**
+     * ISSUE-P3-17：自动聚焦搜索栏的一次性意图已被 Screen 消费，立即置回，
+     * 避免列表重组或从详情页返回时反复抢焦点并弹出输入法。
+     */
+    fun consumeAutoActivateSearch() {
+        autoActivateSearchFlow.value = false
+    }
 
     fun enterGroup(groupId: String) {
         currentGroupIdFlow.value = groupId

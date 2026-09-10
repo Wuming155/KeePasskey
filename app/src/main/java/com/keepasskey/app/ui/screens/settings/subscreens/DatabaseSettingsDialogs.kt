@@ -30,6 +30,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import com.keepasskey.app.data.importer.ImportSource
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -289,28 +290,31 @@ internal fun ExportDatabaseDialog(
 }
 
 // 对话框 7：导入数据源
+//
+// ISSUE-P3-19：解析器（KeePass XML / Bitwarden JSON / 浏览器 CSV / 1PUX）已真实落地并经 40 例单测覆盖，
+// 故：
+// 1. 删除原 `dbset_import_reserved_note`（「解析器预留，暂未生效」）提示块——该提示已反向失真；
+// 2. `onSourceSelected` 由「本地化显示字符串」改为**传 `ImportSource` 枚举**：文案与枚举在同一处绑定，
+//    杜绝「拿本地化文案反查枚举」的脆弱映射（改文案就会静默失配）。
 @Composable
 internal fun ImportSourceDialog(
-    onSourceSelected: (String) -> Unit,
+    onSourceSelected: (ImportSource) -> Unit,
     onDismiss: () -> Unit
 ) {
+    // 选项与枚举同处绑定；顺序与用户心智一致（1PUX / Bitwarden / KeePass / 浏览器）
+    val options = listOf(
+        ImportSource.ONEPASSWORD_1PUX to R.string.dbset_src_1pux,
+        ImportSource.BITWARDEN_JSON to R.string.dbset_src_bitwarden,
+        ImportSource.KEEPASS_XML to R.string.dbset_src_keepass,
+        ImportSource.BROWSER_CSV to R.string.dbset_src_browser
+    )
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.dbset_import_dialog_title)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                // ISSUE-P3-03 (43d)：导入解析器尚未实现，如实说明——不得让用户以为选中即会导入
-                Text(
-                    text = stringResource(R.string.dbset_import_reserved_note),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error
-                )
-                listOf(
-                    stringResource(R.string.dbset_src_1pux),
-                    stringResource(R.string.dbset_src_bitwarden),
-                    stringResource(R.string.dbset_src_keepass),
-                    stringResource(R.string.dbset_src_browser)
-                ).forEach { source ->
+                options.forEach { (source, labelRes) ->
+                    val label = stringResource(labelRes)
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -324,7 +328,7 @@ internal fun ImportSourceDialog(
                     ) {
                         Icon(Icons.AutoMirrored.Filled.InsertDriveFile, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(10.dp))
-                        Text(source, style = MaterialTheme.typography.bodyMedium)
+                        Text(label, style = MaterialTheme.typography.bodyMedium)
                     }
                 }
             }

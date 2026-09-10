@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.MoreVert
@@ -59,11 +60,20 @@ import com.keepasskey.app.ui.components.getVaultIcon
 import com.keepasskey.app.ui.model.BitmapEntryIcon
 import com.keepasskey.app.ui.model.EntryCategory
 import com.keepasskey.app.ui.model.EntryDecorations
+import com.keepasskey.app.ui.model.EntryIcon
 import com.keepasskey.app.ui.model.UiVaultEntry
 import com.keepasskey.app.ui.model.VaultGroup
+import com.keepasskey.app.ui.screens.settings.ListDensity
 
 /**
  * 文件夹行组件
+ *
+ * ISSUE-P3-22：分组图标与条目侧共用同一投影结果（[EntryIconPresenter] 同一缓存）。
+ * - 命中图标池 → 绘制自定义位图；
+ * - 池中缺失（引用残留）→ 缺图占位，**不**回退标准图标谎报状态；
+ * - 未绑定（[icon] 为 null 或 [EntryIcon.Default]）→ 既有标准矢量图标语义。
+ *
+ * ISSUE-P3-17：[densitySpec] 驱动行高 / 内边距 / 字号，数值只在 [ListDensityPresenter] 定义。
  */
 @Composable
 fun KeePassGroupRow(
@@ -72,6 +82,8 @@ fun KeePassGroupRow(
     onRename: () -> Unit,
     onChangeIcon: () -> Unit,
     onDelete: () -> Unit,
+    icon: BitmapEntryIcon? = null,
+    densitySpec: ListDensitySpec = ListDensityPresenter.specOf(ListDensity.NORMAL),
     modifier: Modifier = Modifier
 ) {
     var showMenu by remember { mutableStateOf(false) }
@@ -85,21 +97,24 @@ fun KeePassGroupRow(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest)
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+            modifier = Modifier.fillMaxWidth().padding(
+                horizontal = densitySpec.rowHorizontalPaddingDp.dp,
+                vertical = densitySpec.rowVerticalPaddingDp.dp
+            ),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Box(
                 modifier = Modifier
-                    .size(38.dp)
+                    .size(densitySpec.iconContainerSizeDp.dp)
                     .clip(RoundedCornerShape(10.dp))
                     .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    imageVector = if (group.isRecycleBin) Icons.Default.Delete else getVaultIcon(group.iconName),
-                    contentDescription = null,
+                EntryIconContent(
+                    icon = icon ?: EntryIcon.Default(group.iconName),
                     tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(22.dp)
+                    placeholderIcon = if (group.isRecycleBin) Icons.Default.Delete else getVaultIcon(group.iconName),
+                    contentSize = densitySpec.iconContentSizeDp.dp
                 )
             }
 
@@ -107,7 +122,10 @@ fun KeePassGroupRow(
 
             Text(
                 text = group.name,
-                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold, fontSize = 15.sp),
+                style = MaterialTheme.typography.titleMedium.copy(
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = densitySpec.titleFontSizeSp.sp
+                ),
                 color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -154,6 +172,9 @@ fun KeePassGroupRow(
  *
  * ISSUE-P3-02：[decorations] 为状态层装配的展示装饰——自定义图标已解码位图 +
  * Notes/URL 字段引用展开文案（受保护字段恒为掩码）；缺省时回退标准图标与条目原文。
+ *
+ * ISSUE-P3-17：[densitySpec] 驱动行密度；[groupPath] 非空时展示所属分组完整路径
+ * （状态层仅在「搜索中 + showGroupInSearchResult 开启」时下发，UI 不做路径计算）。
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -172,6 +193,8 @@ fun UnifiedVaultEntryRow(
     onCopyUsername: () -> Unit,
     onRestore: () -> Unit,
     onPurge: () -> Unit,
+    densitySpec: ListDensitySpec = ListDensityPresenter.specOf(ListDensity.NORMAL),
+    groupPath: String? = null,
     decorations: EntryDecorations = EntryDecorations.EMPTY,
     modifier: Modifier = Modifier
 ) {
@@ -204,6 +227,8 @@ fun UnifiedVaultEntryRow(
                     icon = icon,
                     isBatchMode = isBatchMode,
                     isSelected = isSelected,
+                    densitySpec = densitySpec,
+                    groupPath = groupPath,
                     onCopyNumber = onCopyPassword
                 )
             }
@@ -213,7 +238,9 @@ fun UnifiedVaultEntryRow(
                     icon = icon,
                     notesText = textDisplay.notes,
                     isBatchMode = isBatchMode,
-                    isSelected = isSelected
+                    isSelected = isSelected,
+                    densitySpec = densitySpec,
+                    groupPath = groupPath
                 )
             }
             else -> {
@@ -228,6 +255,8 @@ fun UnifiedVaultEntryRow(
                     showOtp = showOtp,
                     showPasskeyBadge = showPasskeyBadge,
                     showUrl = showUrl,
+                    densitySpec = densitySpec,
+                    groupPath = groupPath,
                     onCopyPassword = onCopyPassword,
                     onCopyUsername = onCopyUsername,
                     onRestore = onRestore,
@@ -237,6 +266,40 @@ fun UnifiedVaultEntryRow(
         }
     }
 }
+
+/**
+ * ISSUE-P3-17：搜索结果行的「所属分组」行。
+ * 路径已由状态层拼好（[GroupPathPresenter]），本组件只做绘制。
+ */
+@Composable
+internal fun GroupPathLine(
+    groupPath: String,
+    fontSizeSp: Int,
+    modifier: Modifier = Modifier
+) {
+    Row(modifier = modifier, verticalAlignment = Alignment.CenterVertically) {
+        Icon(
+            imageVector = Icons.Default.Folder,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(GROUP_PATH_ICON_SIZE_DP.dp)
+        )
+        Spacer(modifier = Modifier.width(GROUP_PATH_ICON_GAP_DP.dp))
+        Text(
+            text = groupPath,
+            style = MaterialTheme.typography.labelSmall.copy(fontSize = fontSizeSp.sp),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+/** 分组路径行前导图标边长（dp） */
+private const val GROUP_PATH_ICON_SIZE_DP = 12
+
+/** 分组路径行前导图标与文案间距（dp） */
+private const val GROUP_PATH_ICON_GAP_DP = 4
 
 @Composable
 private fun StandardEntryLayout(
@@ -250,6 +313,8 @@ private fun StandardEntryLayout(
     showOtp: Boolean,
     showPasskeyBadge: Boolean,
     showUrl: Boolean,
+    densitySpec: ListDensitySpec,
+    groupPath: String?,
     onCopyPassword: () -> Unit,
     onCopyUsername: () -> Unit,
     onRestore: () -> Unit,
@@ -257,7 +322,10 @@ private fun StandardEntryLayout(
 ) {
     val haptic = LocalHapticFeedback.current
     Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+        modifier = Modifier.fillMaxWidth().padding(
+            horizontal = densitySpec.rowHorizontalPaddingDp.dp,
+            vertical = densitySpec.rowVerticalPaddingDp.dp
+        ),
         verticalAlignment = Alignment.CenterVertically
     ) {
         if (isBatchMode) {
@@ -277,10 +345,18 @@ private fun StandardEntryLayout(
         }
 
         Box(
-            modifier = Modifier.size(38.dp).clip(RoundedCornerShape(10.dp)).background(containerColor),
+            modifier = Modifier
+                .size(densitySpec.iconContainerSizeDp.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(containerColor),
             contentAlignment = Alignment.Center
         ) {
-            EntryIconContent(icon = icon, tint = iconTint, placeholderIcon = placeholderIcon)
+            EntryIconContent(
+                icon = icon,
+                tint = iconTint,
+                placeholderIcon = placeholderIcon,
+                contentSize = densitySpec.iconContentSizeDp.dp
+            )
         }
 
         Spacer(modifier = Modifier.width(12.dp))
@@ -289,7 +365,10 @@ private fun StandardEntryLayout(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     text = entry.title,
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold, fontSize = 15.sp),
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = densitySpec.titleFontSizeSp.sp
+                    ),
                     color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
@@ -300,13 +379,19 @@ private fun StandardEntryLayout(
                 }
             }
 
+            // ISSUE-P3-17：搜索结果行的所属分组完整路径（非搜索态不下发，恒不展示）
+            if (groupPath != null) {
+                Spacer(modifier = Modifier.height(2.dp))
+                GroupPathLine(groupPath = groupPath, fontSizeSp = densitySpec.secondaryFontSizeSp)
+            }
+
             if (showUsername || (showUrl && urlText.isNotBlank())) {
                 Spacer(modifier = Modifier.height(2.dp))
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     if (showUsername) {
                         Text(
                             text = if (entry.username.isNotBlank()) entry.username else stringResource(R.string.cardrow_no_username),
-                            style = MaterialTheme.typography.bodySmall,
+                            style = MaterialTheme.typography.bodySmall.copy(fontSize = densitySpec.secondaryFontSizeSp.sp),
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
@@ -319,7 +404,7 @@ private fun StandardEntryLayout(
                     if (showUrl && urlText.isNotBlank()) {
                         Text(
                             text = urlText.removePrefix("https://").removePrefix("http://").trimEnd('/'),
-                            style = MaterialTheme.typography.labelSmall,
+                            style = MaterialTheme.typography.labelSmall.copy(fontSize = densitySpec.secondaryFontSizeSp.sp),
                             color = MaterialTheme.colorScheme.primary.copy(alpha = 0.85f),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,

@@ -73,13 +73,29 @@ data class InnerHeader(
         private val secureRandom = SecureRandom()
 
         /**
-         * 内层 Header 单字段长度安全上限（64 MiB）。
+         * 单字段上限相对整包上限的份额分母（ISSUE-P3-27 子项 1）：单字段 = 整包上限 / 本分母。
+         */
+        private const val FIELD_CAP_SHARE_DIVISOR = 2L
+
+        /**
+         * 内层 Header 单字段长度安全上限（64 MiB = [KdbxFile.MAX_DECOMPRESSED_PAYLOAD_BYTES] / 2）。
+         *
+         * **取值关系（ISSUE-P3-27 子项 1 显式定义）**：单个字段必然整体包含在受整包上限约束的
+         * 解压载荷之内，因此「单字段上限 ≤ 整包上限」是恒真不变量；本上限由整包上限**派生**
+         * （而非各写一个字面量），使两者不可能互相矛盾（任意一方漂移都会同步生效或被
+         * 伴生对象的初始化期 `require` 拦下）。
+         *
+         * 取「整包的一半」的取舍：单个附件池条目最多可占整包预算的一半，另一半留给内层
+         * Header 其余字段与 XML 正文——上限过低会误拒含单个大附件的合法库，取满整包则
+         * 一个字段即可吃光预算、后续字段与 XML 必然解析失败，1/2 是既不误拒又保留解析余量的取值。
+         *
          * BINARY 字段承载附件二进制池，上限须远超一切正常附件体积；
          * 其余字段按各自语义另行收窄（见 [INNER_RANDOM_STREAM_ID_FIELD_SIZE] /
          * [MAX_INNER_RANDOM_STREAM_KEY_BYTES]）。内层数据虽位于 HMAC 认证之后，
          * 长度字段仍按不可信输入对待（P0-5 纵深防御）。
          */
-        internal const val MAX_INNER_FIELD_BYTES = 64 * 1024 * 1024
+        internal val MAX_INNER_FIELD_BYTES: Int =
+            (KdbxFile.MAX_DECOMPRESSED_PAYLOAD_BYTES / FIELD_CAP_SHARE_DIVISOR).toInt()
 
         /** InnerRandomStreamID 字段合法长度（小端 Int32，官方规范固定 4 字节） */
         private const val INNER_RANDOM_STREAM_ID_FIELD_SIZE = 4
@@ -95,11 +111,50 @@ data class InnerHeader(
         internal const val MAX_BINARY_POOL_ENTRIES = 1024
 
         /**
-         * 二进制池累计字节数安全上限（256 MiB，Wave 12 解析炸弹防线）。
+         * 二进制池累计字节数安全上限的**设计值**（256 MiB）：按「海量附件条目累计驻留」
+         * 独立评估的取值，保留在此作为设计意图留痕，实际生效上限见 [MAX_BINARY_POOL_TOTAL_BYTES]。
+         */
+        private const val BINARY_POOL_TOTAL_DESIGN_BYTES = 256L * 1024 * 1024
+
+        /**
+         * 二进制池累计字节数安全上限 = `min(设计值, 整包上限)` = 128 MiB（ISSUE-P3-27 子项 1 收敛后取值）。
+         *
+         * 为何收敛：池字节是整包（解压载荷）字节的**子集**——[deserialize] 的生产调用方
+         * `KdbxFile` 恒以 `guardPayloadSize` 包裹后的流驱动本方法（见 KdbxFile.kt 中
+         * `InnerHeader.deserialize(xmlInputStream)`），因此「池累计 > 整包上限」物理上不可能发生。
+         * 原实现把本上限硬编码为 256 MiB（> 整包 128 MiB），是一条**永不生效的死守卫**，
+         * 并使「内层上限 vs 整包上限」的取值关系无从判断；现改为由整包上限派生，
+         * 使二者不可能互相矛盾。
+         *
+         * 为何取 `min` 而非直接写整包上限：设计值（256 MiB）是独立评估的结论，保留它使未来
+         * 若放宽整包上限（例如支持超大库）时本上限自动跟随而无需再改一处；而当整包上限更严时
+         * 本上限自动收敛到整包上限，杜绝「内层上限高于整包上限」的不自洽重现。
+         *
+         * 防线定位：**本上限相对生产解析路径是 defense-in-depth（非 binding）**——整包上限
+         * 恒先于本上限触发（见 [KdbxFile.MAX_DECOMPRESSED_PAYLOAD_BYTES]）。它只在
+         * [deserialize] 被不经整包护栏的调用方直接使用时才可能成为 binding 守卫；
+         * 经 2026-09-10 全仓 grep 核实，当前生产代码仅 `KdbxFile.loadPayload` 一处调用本方法
+         * （恒在护栏内），其余调用方均为单测（直接喂 `ByteArrayInputStream`），
+         * 故本上限当前不构成任何生产文件的接受/拒绝判定依据，收敛它不改变任何库的可解析性。
+         *
          * 即使每条目均满足单字段上限，海量条目仍可累积出巨量内存驻留；
          * 总量封顶将恶意文件的资源消耗约束在常数界内。
          */
-        internal const val MAX_BINARY_POOL_TOTAL_BYTES = 256L * 1024 * 1024
+        internal val MAX_BINARY_POOL_TOTAL_BYTES: Long =
+            minOf(BINARY_POOL_TOTAL_DESIGN_BYTES, KdbxFile.MAX_DECOMPRESSED_PAYLOAD_BYTES)
+
+        init {
+            // ISSUE-P3-27 子项 1：上限取值关系不变量（初始化期 fail-fast，杜绝常量漂移悄悄制造语义不自洽）。
+            // 失败即代表常量被人为改坏（非用户输入所致），宁可启动即暴露，也不退化为永不生效的死守卫。
+            require(MAX_INNER_FIELD_BYTES.toLong() <= MAX_BINARY_POOL_TOTAL_BYTES) {
+                "内层 Header 单字段上限($MAX_INNER_FIELD_BYTES)必须 ≤ 二进制池累计上限($MAX_BINARY_POOL_TOTAL_BYTES)，" +
+                        "否则单个合法字段无法落入池预算"
+            }
+            require(MAX_BINARY_POOL_TOTAL_BYTES <= KdbxFile.MAX_DECOMPRESSED_PAYLOAD_BYTES) {
+                "二进制池累计上限($MAX_BINARY_POOL_TOTAL_BYTES)必须 ≤ 整包上限" +
+                        "(${KdbxFile.MAX_DECOMPRESSED_PAYLOAD_BYTES})，否则该守卫永不生效"
+            }
+        }
 
         fun createDefault(): InnerHeader {
             val key = ByteArray(64)

@@ -6,6 +6,7 @@ import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.keepasskey.app.R
+import com.keepasskey.app.data.importer.ImportSource
 import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.app.data.repository.SettingsRepository
 import com.keepasskey.app.data.repository.VaultRepository
@@ -15,6 +16,8 @@ import com.keepasskey.app.sync.SyncCoordinator
 import com.keepasskey.app.sync.SyncCredentialsStore
 import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.app.ui.model.UiMessage
+import com.keepasskey.app.ui.screens.importer.ImportUiState
+import com.keepasskey.app.ui.screens.importer.VaultImportController
 import com.keepasskey.app.ui.theme.AppThemeMode
 import com.keepasskey.crypto.kdf.KdfBenchmark
 import com.keepasskey.database.session.DatabaseSession
@@ -60,7 +63,11 @@ class SettingsViewModel @Inject constructor(
     private val stringsProvider: StringsProvider? = null,
     // ISSUE-P2-08（ZT-13）：运行完整性扫描快照下发通道（UI 风险提示卡片）。
     // 允许为 null 仅用于既有单测注入；生产 DI 注入单例 RuntimeIntegrityDetector。
-    private val runtimeIntegrityDetector: RuntimeIntegrityDetector? = null
+    private val runtimeIntegrityDetector: RuntimeIntegrityDetector? = null,
+    // ISSUE-P3-19（ZT-43d）：明文导入控制器（@Singleton，自带 StateFlow，内部完成
+    // 「SAF 读字节 → 解析 → 落库 → 出报告」全链路）。允许为 null 仅用于既有单测注入；
+    // 缺失时 [importState] 恒为 Idle —— 即不呈现任何导入反馈，绝不产生假进度/假回执。
+    private val vaultImportController: VaultImportController? = null
 ) : ViewModel() {
 
     companion object {
@@ -79,6 +86,22 @@ class SettingsViewModel @Inject constructor(
     private val strings: StringsProvider = stringsProvider
         ?: appContext?.let { ctx -> StringsProvider { id, args -> ctx.getString(id, *args) } }
         ?: StringsProvider { _, _ -> "" }
+
+    // ===== ISSUE-P3-19：明文导入状态与入口（全部委托 [VaultImportController]，本层不做业务） =====
+
+    /** 导入状态（Idle / Parsing / Done / Failed）。无控制器时恒为 Idle，UI 不渲染任何导入反馈。 */
+    val importState: StateFlow<ImportUiState> =
+        vaultImportController?.uiState ?: MutableStateFlow(ImportUiState.Idle)
+
+    /** 按数据源 + SAF Uri 启动一次导入：解析 → 落库 → 出报告，全部由控制器负责。 */
+    fun startImport(source: ImportSource, uri: Uri) {
+        vaultImportController?.startImport(source, uri)
+    }
+
+    /** 关闭导入结果报告对话框。 */
+    fun dismissImportReport() {
+        vaultImportController?.reset()
+    }
 
     private val syncController = SettingsSyncController(
         syncCredentialsStore, syncCoordinator, extendedSettingsStore, strings, viewModelScope

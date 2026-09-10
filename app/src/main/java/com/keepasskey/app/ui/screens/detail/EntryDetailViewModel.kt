@@ -14,10 +14,13 @@ import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.ui.screens.settings.ExportArtifactKind
 import com.keepasskey.app.ui.screens.settings.ExportAuditRecorder
 import com.keepasskey.app.ui.screens.settings.ExportConfirmationPolicy
+import com.keepasskey.app.ui.screens.settings.ExtendedSettings
 import com.keepasskey.app.passkey.DomainMatcher
 import com.keepasskey.app.ui.model.EntryDecorations
 import com.keepasskey.app.ui.model.EntryDisplayDispatcher
 import com.keepasskey.app.ui.model.EntryDisplayPresenter
+import com.keepasskey.app.ui.screens.vault.ExtendedSettingsSource
+import com.keepasskey.app.ui.screens.vault.GroupPathPresenter
 import com.keepasskey.app.ui.model.UiAttachment
 import com.keepasskey.app.ui.model.UiEntryRevision
 import com.keepasskey.app.ui.model.StringsProvider
@@ -65,7 +68,11 @@ class EntryDetailViewModel @Inject constructor(
     // ISSUE-P3-02：库级自定义图标删除通道（生产 DI 经 CustomIconModule 注入；单测注入假实现）
     private val customIconAdmin: CustomIconAdmin? = null,
     // ISSUE-P3-02：展示装配调度器（生产 Dispatchers.Default；单测注入测试调度器保证断言确定性）
-    @EntryDisplayDispatcher private val displayDispatcher: CoroutineDispatcher = Dispatchers.Default
+    @EntryDisplayDispatcher private val displayDispatcher: CoroutineDispatcher = Dispatchers.Default,
+    // ISSUE-P3-17：进阶显示偏好通道（遮掩默认值 / 详情页所属分组）。
+    // 该通道只有同步快照读取（无 Flow），故以 StateFlow 承载快照，页面进入时刷新；
+    // null 仅用于纯 JVM 单测（生产 DI 经 ExtendedSettingsSourceModule 恒注入）
+    private val extendedSettingsSource: ExtendedSettingsSource? = null
 ) : ViewModel() {
 
     // P3-23：文案解析通道（优先 stringsProvider，其次经 appContext 转发，均缺省时回退空串实现）
@@ -77,7 +84,16 @@ class EntryDetailViewModel @Inject constructor(
     private val exportAuditRecorder: ExportAuditRecorder? = debugLog?.let { ExportAuditRecorder(it) }
 
     private val entryIdFlow = MutableStateFlow<String?>(savedStateHandle.get<String>("entryId"))
-    private val isPasswordVisibleFlow = MutableStateFlow(false)
+    // ISSUE-P3-17：密码当前是否明文可见不再直接存布尔“状态”，而是存**用户的显式遮掩意图**：
+    // null = 本次会话尚未操作（遵从 maskPasswordsDefault 默认值），
+    // true = 用户显式收起，false = 用户显式展开——偏好流再次发射不得覆盖非 null 的用户意图
+    private val passwordMaskOverrideFlow = MutableStateFlow<Boolean?>(null)
+    // ISSUE-P3-17：TOTP 验证码的同构显式遮掩意图（默认值来自 maskTotpDefault）
+    private val totpMaskOverrideFlow = MutableStateFlow<Boolean?>(null)
+    // ISSUE-P3-17：进阶显示偏好快照（构造期读取一次；页面进入组合时经 onScreenEntered 刷新）
+    private val extendedSettingsFlow = MutableStateFlow(
+        extendedSettingsSource?.load() ?: ExtendedSettings()
+    )
     // 按需解密出的当前密码明文（仅在查看期间驻留，隐藏即清空）
     private val revealedPasswordFlow = MutableStateFlow<String?>(null)
     // 按需解密出的历史修订密码（对比弹窗打开期间驻留），键为修订 id
@@ -99,10 +115,21 @@ class EntryDetailViewModel @Inject constructor(
     /** combine 中间聚合体（避开 5 流以上的元组嵌套） */
     private data class DetailCore(
         val entry: UiVaultEntry?,
-        val isPasswordVisible: Boolean,
+        val passwordMaskOverride: Boolean?,
         val revealedPassword: String?,
         val revisionPasswords: Map<String, String>,
         val isFavorite: Boolean
+    )
+
+    /**
+     * ISSUE-P3-17：显示侧派生量聚合体。
+     * [isPasswordVisible] / [isTotpVisible] 是「偏好默认值 + 用户显式意图」的合成结果，
+     * [groupPath] 仅在 `showGroupInEntry` 开启时非空。
+     */
+    private data class DetailDisplayPrefs(
+        val isPasswordVisible: Boolean,
+        val isTotpVisible: Boolean,
+        val groupPath: String?
     )
 
     /** combine 中间聚合体：可见性 / 已揭示字段明文 / 用户消息 / TOTP 实时态 / 密码熵 */
@@ -135,17 +162,52 @@ class EntryDetailViewModel @Inject constructor(
         }
         .flowOn(displayDispatcher)
 
+    /**
+     * ISSUE-P3-17：条目所属分组的完整路径（仅在 `showGroupInEntry` 开启时需要）。
+     * 分组投影与条目各自独立变化，故与 entryIdFlow 组合后按 id 解析，避免依赖发射时序。
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private val groupPathFlow: Flow<String?> = combine(
+        entryIdFlow.flatMapLatest { id ->
+            if (id != null) vaultRepository.getEntry(id) else flowOf(null)
+        },
+        vaultRepository.getGroups()
+    ) { entry, groups ->
+        GroupPathPresenter.fullPathOf(groups, entry?.groupId)
+    }
+
+    /**
+     * ISSUE-P3-17：显示侧派生量——遮掩初始态决策（[FieldMaskPolicy]）+ 所属分组路径。
+     * 偏好快照每次刷新都会重算，但用户显式意图（override 非 null）恒优先。
+     */
+    private val displayPrefsFlow: Flow<DetailDisplayPrefs> = combine(
+        extendedSettingsFlow,
+        passwordMaskOverrideFlow,
+        totpMaskOverrideFlow,
+        groupPathFlow
+    ) { settings, passwordOverride, totpOverride, groupPath ->
+        DetailDisplayPrefs(
+            isPasswordVisible = !FieldMaskPolicy.initialMaskState(
+                settings.maskPasswordsDefault, passwordOverride
+            ),
+            isTotpVisible = !FieldMaskPolicy.initialMaskState(
+                settings.maskTotpDefault, totpOverride
+            ),
+            groupPath = groupPath.takeIf { settings.showGroupInEntry }
+        )
+    }
+
     @OptIn(ExperimentalCoroutinesApi::class)
     val uiState: StateFlow<EntryDetailUiState> = combine(
         entryIdFlow.flatMapLatest { id ->
             if (id != null) vaultRepository.getEntry(id) else flowOf(null)
         },
-        isPasswordVisibleFlow,
+        passwordMaskOverrideFlow,
         revealedPasswordFlow,
         revealedRevisionPasswordsFlow,
         isFavoriteFlow
-    ) { entry, isPassVisible, revealed, revPasswords, isFav ->
-        DetailCore(entry, isPassVisible, revealed, revPasswords, isFav)
+    ) { entry, passwordOverride, revealed, revPasswords, isFav ->
+        DetailCore(entry, passwordOverride, revealed, revPasswords, isFav)
     }
         .combine(
             combine(
@@ -165,7 +227,6 @@ class EntryDetailViewModel @Inject constructor(
         .combine(settingsRepository.getSettings()) { (core, extras), settings ->
             EntryDetailUiState(
                 entry = core.entry,
-                isPasswordVisible = core.isPasswordVisible,
                 revealedPassword = core.revealedPassword,
                 revealedRevisionPasswords = core.revisionPasswords,
                 isFavorite = core.isFavorite,
@@ -177,6 +238,14 @@ class EntryDetailViewModel @Inject constructor(
                 passwordStrengthBits = extras.strengthBits,
                 isReadOnly = vaultRepository.isSessionReadOnly(),
                 passwordCopyMessage = buildPasswordCopyMessage(settings.clipboardTimeoutSeconds)
+            )
+        }
+        // ISSUE-P3-17：叠加遮掩初始态决策（偏好的「默认值」语义）与所属分组路径
+        .combine(displayPrefsFlow) { state, prefs ->
+            state.copy(
+                isPasswordVisible = prefs.isPasswordVisible,
+                isTotpVisible = prefs.isTotpVisible,
+                groupPath = prefs.groupPath
             )
         }
         // TASK-44：黑名单状态叠加——条目绑定的应用包名 + 该包名当前是否被屏蔽
@@ -231,6 +300,8 @@ class EntryDetailViewModel @Inject constructor(
         if (id == entryIdFlow.value) return
         entryIdFlow.value = id
         clearAllRevealedSecrets()
+        // ISSUE-P3-17：偏好声明「默认不遮掩」时，新条目同样按默认态补齐明文
+        revealPasswordIfVisibleByDefault()
     }
 
     /**
@@ -245,20 +316,63 @@ class EntryDetailViewModel @Inject constructor(
         revealedPasswordFlow.value = null
         revealedRevisionPasswordsFlow.value = emptyMap()
         revealedProtectedFieldsFlow.value = emptyMap()
-        isPasswordVisibleFlow.value = false
+        // ISSUE-P3-17：清空「用户显式意图」而非直接置为遮掩——切换条目后回到偏好声明的默认态
+        passwordMaskOverrideFlow.value = null
+        totpMaskOverrideFlow.value = null
         protectedVisibilityFlow.value = emptyMap()
     }
 
     /**
+     * ISSUE-P3-17：页面每次进入组合时刷新进阶显示偏好快照
+     * （偏好通道只有同步 `load()`，无 Flow）。
+     *
+     * 刷新**不会**覆盖用户已做出的显式展开/收起：可见性由
+     * [FieldMaskPolicy.initialMaskState] 以 override 优先合成。
+     */
+    fun onScreenEntered() {
+        extendedSettingsSource?.let { source -> extendedSettingsFlow.value = source.load() }
+        // 覆盖「离开详情页已清零明文 → 再次进入」的路径（此时条目 id 未变化，setEntryId 提前返回）
+        revealPasswordIfVisibleByDefault()
+    }
+
+    /**
+     * ISSUE-P3-17：`maskPasswordsDefault = false` 是用户以偏好形式给出的**明文查看指令**，
+     * 此时进入详情页即按需解密当前条目，使「默认不遮掩」在 UI 上真实可见（而非空字段）。
+     *
+     * 安全边界不变：仍是单条、仍在屏幕生命周期内驻留（离开即清零），
+     * 且偏好为「默认遮掩」（生产默认值 true）时**不做任何解密**——绝不无授权预解密。
+     * TOTP 无需此路径：验证码由投影/countdown 流按周期下发，不涉及额外解密。
+     */
+    private fun revealPasswordIfVisibleByDefault() {
+        if (revealedPasswordFlow.value != null) return
+        val masked = currentMaskState(
+            defaultMasked = extendedSettingsFlow.value.maskPasswordsDefault,
+            override = passwordMaskOverrideFlow.value
+        )
+        if (!masked) decryptPasswordForDisplay()
+    }
+
+    /**
      * 切换密码可见性。展开时按需解密当前条目密码，收起时立即置空驻留明文。
+     *
+     * ISSUE-P3-17：切换写入的是**用户显式遮掩意图**（override），
+     * 因此后续任何偏好快照刷新都不会把手动展开的密码重新盖上。
      */
     fun togglePasswordVisibility() {
-        val becomingVisible = !isPasswordVisibleFlow.value
-        isPasswordVisibleFlow.value = becomingVisible
-        if (!becomingVisible) {
+        val currentlyMasked = currentMaskState(
+            defaultMasked = extendedSettingsFlow.value.maskPasswordsDefault,
+            override = passwordMaskOverrideFlow.value
+        )
+        passwordMaskOverrideFlow.value = !currentlyMasked
+        if (currentlyMasked) {
+            decryptPasswordForDisplay()
+        } else {
             revealedPasswordFlow.value = null
-            return
         }
+    }
+
+    /** 展开分支：按需解密（ISSUE-P2-15 CharArray 借用通道，String 物化收敛在展示边界） */
+    private fun decryptPasswordForDisplay() {
         val entryId = entryIdFlow.value ?: return
         viewModelScope.launch {
             // ISSUE-P2-15：仓库读取走 CharArray 借用通道；revealedPassword 为 Compose 展示态，
@@ -266,6 +380,21 @@ class EntryDetailViewModel @Inject constructor(
             revealedPasswordFlow.value = vaultRepository.getEntryPasswordChars(entryId).toDisplayString()
         }
     }
+
+    /**
+     * ISSUE-P3-17：切换 TOTP 验证码可见性（默认态来自 `maskTotpDefault`）。
+     * 与密码同构：只翻转用户显式意图，验证码本身仍由倒计时流驱动，不因遮掩而停算。
+     */
+    fun toggleTotpVisibility() {
+        val currentlyMasked = currentMaskState(
+            defaultMasked = extendedSettingsFlow.value.maskTotpDefault,
+            override = totpMaskOverrideFlow.value
+        )
+        totpMaskOverrideFlow.value = !currentlyMasked
+    }
+
+    private fun currentMaskState(defaultMasked: Boolean, override: Boolean?): Boolean =
+        FieldMaskPolicy.initialMaskState(defaultMasked, override)
 
     /**
      * ISSUE-P2-15：把仓库返回的 CharArray 独占副本转成 UI 展示 String。

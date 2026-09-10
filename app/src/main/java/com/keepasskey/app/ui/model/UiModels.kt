@@ -14,7 +14,14 @@ data class VaultGroup(
     val orderIndex: Int = 0,
     val updatedAt: String = "",
     val createdAt: String = "",
-    val isRecycleBin: Boolean = false
+    val isRecycleBin: Boolean = false,
+    /**
+     * ISSUE-P3-22：KDBX 分组 `CustomIconUUID` 的 hex 投影，
+     * 沿用条目侧 [UiVaultEntry.customIconId] 的同一形态（见本文件 UiVaultEntry）。
+     * null = 该分组未绑定自定义图标，渲染侧回退 [iconName] 标准矢量图标；
+     * 非 null 但不在库内图标池中时按缺图占位呈现（不谎报为标准图标）。
+     */
+    val customIconId: String? = null
 )
 
 /**
