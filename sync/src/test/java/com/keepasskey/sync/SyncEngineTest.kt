@@ -404,6 +404,63 @@ class SyncEngineTest {
     }
 
     @Test
+    fun `测试本地赢自动上传携带基线 ETag 预检`() = runTest {
+        val v1 = "content-v1".toByteArray()
+        fakeProvider.remoteFiles[remotePath] = FakeRemoteFile(v1, etag = "etag-1")
+        engine.openRemote(remotePath)
+
+        // 本地有修改且远端未变 → 本地赢自动上传
+        syncCache.writeCache(remotePath, "content-local-edited".toByteArray())
+        val result = engine.openRemote(remotePath)
+        assertTrue(result is SyncOpenResult.LocalWinAutoUploaded)
+
+        // 自动上传必须携带基线 ETag 走 If-Match 预检，而非无条件 PUT
+        assertEquals("etag-1", fakeProvider.lastExpectedEtag)
+    }
+
+    @Test
+    fun `测试 commitLocal 上传携带基线 ETag 预检`() = runTest {
+        val v1 = "content-v1".toByteArray()
+        fakeProvider.remoteFiles[remotePath] = FakeRemoteFile(v1, etag = "etag-1")
+        engine.openRemote(remotePath)
+
+        val result = engine.commitLocal(remotePath, "content-v2".toByteArray())
+        assertTrue(result is SyncCommitResult.Uploaded)
+
+        // 提交必须以缓存基线 ETag 做乐观锁预检，冲突时才能被 412 拦截
+        assertEquals("etag-1", fakeProvider.lastExpectedEtag)
+    }
+
+    @Test
+    fun `测试 FakeSyncProvider ETag 预检失败不得覆盖远端`() = runTest {
+        val v1 = "remote-content".toByteArray()
+        fakeProvider.remoteFiles[remotePath] = FakeRemoteFile(v1, etag = "etag-remote")
+
+        // 1. 期望 ETag 与远端不匹配 → ConflictError，且远端内容与 ETag 原样保留
+        val mismatch = fakeProvider.upload(remotePath, "malicious-overwrite".toByteArray(), expectedEtag = "etag-stale")
+        assertTrue("期望 ConflictError，实际: ${mismatch.exceptionOrNull()}", mismatch.isFailure)
+        assertTrue(mismatch.exceptionOrNull() is SyncException.ConflictError)
+        assertArrayEquals(v1, fakeProvider.remoteFiles[remotePath]?.data)
+        assertEquals("etag-remote", fakeProvider.remoteFiles[remotePath]?.etag)
+
+        // 2. uploadAtomic 事务路径走同一预检，失败同样不得覆盖远端
+        val atomicMismatch = fakeProvider.uploadAtomic(remotePath, "malicious-overwrite".toByteArray(), expectedEtag = "etag-stale")
+        assertTrue(atomicMismatch.isFailure)
+        assertArrayEquals(v1, fakeProvider.remoteFiles[remotePath]?.data)
+
+        // 3. 期望 ETag 匹配 → 预检通过，覆盖成功并前移 ETag
+        val matched = fakeProvider.uploadAtomic(remotePath, "content-v2".toByteArray(), expectedEtag = "etag-remote")
+        assertTrue(matched.isSuccess)
+        assertArrayEquals("content-v2".toByteArray(), fakeProvider.remoteFiles[remotePath]?.data)
+
+        // 4. 无期望 ETag（expectedEtag = null）为显式无条件 PUT 语义，
+        //    仅限远端 404 自愈恢复等无基线可校验的场景使用
+        val unconditional = fakeProvider.upload(remotePath, "restored-by-selfheal".toByteArray(), expectedEtag = null)
+        assertTrue(unconditional.isSuccess)
+        assertArrayEquals("restored-by-selfheal".toByteArray(), fakeProvider.remoteFiles[remotePath]?.data)
+    }
+
+    @Test
     fun `测试 markResolvedAndUpload 使用冲突时刻 etag 遭遇并发修改时失败`() = runTest {
         val v1 = "content-v1".toByteArray()
         fakeProvider.remoteFiles[remotePath] = FakeRemoteFile(v1, etag = "etag-1")
@@ -432,6 +489,10 @@ class SyncEngineTest {
         /** 仅令 download 失败（模拟 412 冲突响应后网络中断） */
         var downloadError: Boolean = false
         var uploadAtomicCalls: Int = 0
+
+        /** 最近一次 upload / uploadAtomic 收到的期望 ETag（用于断言预检参数真实传递） */
+        var lastExpectedEtag: String? = null
+            private set
 
         override suspend fun uploadAtomic(
             remotePath: String,
@@ -471,6 +532,7 @@ class SyncEngineTest {
             data: ByteArray,
             expectedEtag: String?
         ): Result<String> {
+            lastExpectedEtag = expectedEtag
             if (networkError) return Result.failure(SyncException.NetworkError("Network down"))
             val existing = remoteFiles[remotePath]
             if (expectedEtag != null && existing != null && existing.etag != expectedEtag) {

@@ -23,25 +23,7 @@
 
 ---
 
-## P2 中危缺陷与协议/测试缺口（10 项）
-
-### ISSUE-P2-04 (T-02 / T-06 残余): Sync 与 Merger 边缘分支单元测试补齐
-- **优先级**：P2（测试质量）
-- **分类**：同步与合并测试
-- **背景与现象**：
-  - `T-02`：FakeSyncProvider 在测试中缺少「无期望 ETag 时不得覆盖远端」的判定；
-  - `T-06`：`KdbxMergerV2Test` 仅覆盖了复活条目分支，对于丢失挂载点、子树冲突及字段级仲裁边缘场景缺少独立单测。
-- **整改依据**：
-  KeePassXC Merger 算法规范与双向同步测试要求。
-- **涉及核心文件**：
-  - `sync/src/test/java/com/keepasskey/sync/`
-  - `database/src/test/java/com/keepasskey/database/KdbxMergerV2Test.kt`
-- **验收标准**：
-  1. 补齐 FakeSyncProvider 的 ETag 预检断言；
-  2. 补齐 `KdbxMerger` 挂载丢失与多字段复杂冲突解决用例；
-  3. 测试套件全绿。
-
----
+## P2 中危缺陷与协议/测试缺口（9 项）
 
 ### ISSUE-P2-05 (P2-7 残余): 原子写盘降级分支 fsync 补齐
 - **优先级**：P2（数据安全）

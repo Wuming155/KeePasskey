@@ -23,6 +23,7 @@
    - [2.12 S3 AccessKey 在 SettingsUiState 中的 String 留存改造（P2-01）](#212-s3-accesskey-在-settingsuistate-中的-string-留存改造p2-01)
    - [2.13 Passkey 注册 DAL 远程资产声明校验（P2-02）](#213-passkey-注册-dal-远程资产声明校验p2-02)
    - [2.14 App 模块 14 个测试用例消除 Fake 自测（P2-03）](#214-app-模块-14-个测试用例消除-fake-自测p2-03)
+   - [2.15 Sync 与 Merger 边缘分支单元测试补齐（P2-04）](#215-sync-与-merger-边缘分支单元测试补齐p2-04)
 
 ---
 
@@ -594,3 +595,37 @@
     - `app/src/test/java/com/keepasskey/app/ui/screens/vault/VaultListViewModelTest.kt`
   - **测试证据**：`./gradlew.bat test` 全绿：全仓 **634 例（app 229 / core 36 / crypto 61 / database 163 / sync 145），
     621 通过 / 0 失败 / 13 跳过**（跳过项与既有基线一致）；净变化 −14 Fake 自测、+4 ViewModel 真行为用例。
+
+### 2.15 Sync 与 Merger 边缘分支单元测试补齐（P2-04）
+
+> 来源：ISSUE-P2-04（T-02 / T-06 残余）。整改依据：KeePassXC Merger 算法规范与双向同步测试要求；工程规则高质量测试要求。
+
+- **ISSUE-P2-04（Sync 与 Merger 边缘分支单元测试补齐）**：已完成（2026-09-10）。
+  - **缺陷 / 动机**：
+    1. `T-02`：FakeSyncProvider 缺少 ETag 预检（If-Match）行为断言——预检失败时不得覆盖远端、
+       预检参数是否随各上传路径真实传递均无回归锁；
+    2. `T-06`：`KdbxMergerV2Test` 仅覆盖复活条目回退分支，挂载点丢失自愈、分组子树冲突仲裁
+       与字段级边缘场景缺少独立单测。
+  - **整改实现**（新增 13 例回归锁）：
+    1. **SyncEngineTest（+3）**：
+       - `测试 FakeSyncProvider ETag 预检失败不得覆盖远端`：期望 ETag 不匹配 → ConflictError
+         且远端内容与 ETag 原样保留（upload 与 uploadAtomic 双路径验证）；匹配 → 覆盖成功并前移
+         ETag；`expectedEtag = null` 为显式无条件 PUT 语义（仅限远端 404 自愈恢复等无基线场景）；
+       - `测试本地赢自动上传携带基线 ETag 预检` / `测试 commitLocal 上传携带基线 ETag 预检`：
+         FakeSyncProvider 新增 `lastExpectedEtag` 预检参数记录，断言本地赢自动上传与 commitLocal
+         两条路径均真实携带基线 ETag 走乐观锁，而非无条件 PUT。
+    2. **KdbxMergerV2Test（+10）**：
+       - **挂载丢失自愈**：条目挂载组被删且无 previousParentGroup 移动史 → 自愈归属根组不静默丢弃
+         （`测试条目挂载点丢失且无移动史时归属根组`）；分组父组被删、parentGroupId 悬空 → 自愈归属根组
+         （`测试分组挂载点丢失自愈归属根组`）；双方互移形成 parentGroupId 互指环 → 环路打破且两组零丢失
+         （`测试分组互指环路检测回退根组且无对象丢失`）；
+       - **分组子树冲突**：同组不同属性修改自动合并保留双方变更（`测试双方修改同组不同属性自动合并`）；
+         同属性（重命名）冲突按时间戳晚者胜（`测试双方重命名同组时间戳晚者胜`）；
+       - **字段级仲裁边缘**：同字段冲突本地时间戳更晚采纳本地值且仍生成冲突清单；单侧字段删除生效
+         且不产生冲突；双方新增同名自定义字段冲突时间戳仲裁；单侧新建条目与分组完整保留不静默丢弃；
+         冲突条目历史三方并集按最后修改时间去重升序（5 例）。
+  - **涉及文件**：
+    - `sync/src/test/java/com/keepasskey/sync/SyncEngineTest.kt`
+    - `sync/src/test/java/com/keepasskey/sync/KdbxMergerV2Test.kt`
+  - **测试证据**：`./gradlew.bat test` 全绿：全仓 **647 例（app 229 / core 36 / crypto 61 / database 163 / sync 158），
+    634 通过 / 0 失败 / 13 跳过**（跳过项与既有基线一致）；净变化 +13 例边缘分支回归锁。
