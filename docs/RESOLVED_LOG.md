@@ -15,6 +15,7 @@
 | §3 | P3 批次（16 项：低危加固 / 特性接线 / 体验优化） | ISSUE-P3-01 ~ P3-16 |
 | §4 | P3 残余批次（12 项：假开关整改 / 特性接线 / 文档治理） | ISSUE-P3-17 ~ P3-28 |
 | §5 | P3-30 单条批次（子库条目只读投影接入库列表） | ISSUE-P3-30 |
+| §6 | P3-29 批次 A（全仓超阈值债务：优先级 8 项 + 增量 2 项 + 1 项例外登记） | ISSUE-P3-29 |
 
 > 本索引仅到**章节粒度**，因此不会随条目增删而过期；章节内的子条目按编号顺序排列。
 > 各批次的**验收证据**（用例数 / 通过 / 失败 / 跳过）分别见 §2.22、§3.1、§4.1、§5.1。
@@ -1053,3 +1054,105 @@
 2. **初稿在 `VaultChildDatabaseSections.kt` 留下一个仅为「用掉 import」而写的 `private val densityTypeAnchor`**
    死代码，自查时连同多余的 `ListDensity` import 一并删除。登记教训：**为迁就 import 而新增符号是本末倒置**，
    正确做法是删 import。
+
+---
+
+## 6. ISSUE-P3-29 归档（全仓超阈值债务 · 批次 A）
+
+> **归档日期**：2026-09-10。**范围**：条目正文点名的**优先级 8 项**（全部降至 400 行阈值内），
+> 另**增量完成** `KdbxHeader` / `SyncCredentialsStore` 两项，并登记 `DicewareWordList` 为**经论证的纯常量例外**。
+> **残余**：23 个真逻辑超阈值文件已按「新增条目须附核实时间点与核实方式」转入
+> [ACTIVE_ISSUES.md](ACTIVE_ISSUES.md) **ISSUE-P3-31**（2026-09-10 经 `wc -l` 全仓复核）。
+
+### 6.1 范围与门禁
+
+| 项 | 内容 |
+|---|---|
+| 整改类型 | **纯结构性拆分**（每一处均零行为变更） |
+| 门禁命令 | `.\gradlew.bat test --rerun-tasks --max-workers=1 --continue` |
+| 结果 | **BUILD SUCCESSFUL**，**1200 例 / 1187 通过 / 0 失败 / 13 跳过**（**与拆分前完全一致，零退化**） |
+| 附加门禁 | `:app:compileDebugKotlin` 通过；`:database:assembleDebugAndroidTest` 通过（ISSUE-P3-23 验收标准①） |
+
+### 6.2 逐项代码证据（行数前后与拆出单元）
+
+**① 优先级 8 项**
+
+| 文件 | 行数变化 | 拆出的新单元（均 ≤ 400 行） |
+|---|---|---|
+| `app/.../ui/screens/settings/SettingsViewModel.kt` | **1120 → 397** | `SettingsChildDatabaseController`(232) · `SettingsPreferencesController`(326) · `SettingsExtendedPreferencesController`(191) · `SettingsUiStateProjection`(206，含 `settingsUiStateFlow` 状态流装配) · `SettingsKdfBenchmarkController`(68) · `SettingsColdStartSyncGate`(39) · `SettingsImportPresenter`(36) |
+| `app/.../ui/screens/vault/VaultListViewModel.kt` | **803 → 349** | `VaultListProjection`(230，纯函数) · `VaultListSyncController`(122) · `VaultListTotpTracker`(81) · `VaultListActionController`(234) · `VaultListDecorationsProvider`(51) |
+| `app/.../ui/screens/settings/subscreens/DatabaseSettingsDialogs.kt` | **617 → 200** | `ChildDatabaseDialogs`(349) · `DatabaseAlgorithmDialogs`(127) |
+| `database/.../file/KdbxFile.kt` | **614 → 382** | `KdbxCipherKeyResolver`(154，派生变体裁决探针) · `KdbxKeyDerivation`(129)；`KdbxFile.deriveKeys` 保留为同签名门面委托 |
+| `app/.../ui/KeePasskeyApp.kt` | **590 → 220** | `KeePasskeyNavGraph`(183，一级路由) · `KeePasskeySettingsNavGraph`(244，二级设置路由) |
+| `app/.../ui/screens/vault/VaultEntryRows.kt` | **466 → 122** | `VaultGroupRow`(148) · `VaultEntryRowLayouts`(248)；`StandardEntryLayout` 由 `private` 提升为 `internal`（同包跨文件） |
+| `app/.../data/repository/VaultRepository.kt` | **435 → 382** | `VaultRepositoryTypes`(同包顶层值对象 `EntryRevisionSnapshot` / `EntryTotpSnapshot` / `CreateKeyFileFactor`，全限定名不变) |
+| `app/.../ui/screens/vault/VaultListScreen.kt` | **448 → 354** | `VaultListDialogHost`(147，8 个对话框的 `@Stable` 状态持有者 + 渲染) |
+
+**② 增量完成 2 项**
+
+| 文件 | 行数变化 | 拆出的新单元 |
+|---|---|---|
+| `database/.../file/KdbxHeader.kt` | **418 → 315** | `KdbxKdfParameterCodec`(130，KDF 变体字典编解码 + 上界裁决)；`validateArgon2Bounds` / `validateAesKdfBounds` 保留为同签名门面委托 |
+| `app/.../sync/SyncCredentialsStore.kt` | **421 → 320** | `SyncCredentialSealer`(137，封印/解封)；测试注入钩子 `customEncryptor` / `customDecryptor` 仍由 Store 持有并逐次传入，`@VisibleForTesting` 语义不变 |
+
+**③ 例外登记（验收标准 1）**
+
+- `app/.../ui/screens/generator/DicewareWordList.kt`（**401 行**）：内容为 EFF/KeePassDX 风格 Diceware
+  **词表**（约 300 行为不可压缩的字符串常量）+ 少量纯函数。按「是否含真实逻辑」分级属**经论证的纯常量例外**，
+  不拆分——保留单文件可保证词表作为不可分割的整体被审查。**不再列入债务清单**。
+
+### 6.3 敏感数据清零点与公开 API 可见性对照（验收标准 4）
+
+1. **`VaultListViewModel` 公开 API 零丢失零新增**：原 24 个公开成员全部保留；`uiState` 输出字段一字未改
+   （拆分仅移动「投影计算」与「写操作实现」到协作者，本类保留门面）。**`copyPassword` 的 CharArray 清零**
+   原在 `finally { chars.fill('0') }`，迁移后位于 `VaultListActionController.copyPassword` 的同一 `finally`，语义不变。
+2. **`SettingsViewModel` 公开 API 零丢失零新增**：约 100 个公开成员全部保留为门面委托。
+   **凭据预填通道清零**仍由本类 `onCleared()` 逐条调用（`clearWebDavPasswordPrefill` / `clearS3SecretKeyPrefill` /
+   `clearS3AccessKeyPrefill`）。**子库凭据借用副本清零**原在 `finally { password.fill('0'); keyFileBytes?.fill(0) }`，
+   迁移后位于 `SettingsChildDatabaseController.mount` / `unlock` 的同一 `finally`。
+   `SettingsColdStartSyncGate` 的 `hasCheckedColdStartSync` 保持 **process-static（伴生对象）**，
+   实例重建既不重复触发也不漏触发（与原 `SettingsViewModel.companion` 语义一致）。
+3. **`SyncCredentialsStore` 敏感链路**：`encrypt` 的明文字节 `bytes.fill(0)`、`decrypt` 的 `decryptedBytes?.fill(0)`
+   均在迁移后保留于 `finally`；Store 的 `password.fill('0')` / `accessKey.fill('0')` / `secretKey.fill('0')`
+   与原实现逐字一致。封印实现体（AES/GCM + `requireUserAuth=false` 决策 KDoc）原样迁移至 `SyncCredentialSealer`。
+4. **`KdbxFile` 密钥生命周期**：`deriveKeys` 的 `compositeKey` / `transformedKey` / `cmpKey` / `cipherKeyBytes`
+   清零点逐条保留在 `KdbxKeyDerivation`；旧派生裁决的「未选中密钥统一清零」由 `KdbxCipherKeyResolver.Resolution`
+   的 `legacyKeyToWipe` 契约承接，`loadPayload` 在原位置 `Arrays.fill(it, 0.toByte())`。`MAX_DECOMPRESSED_PAYLOAD_BYTES`
+   仍留在 `KdbxFile`（作为内层各级上限的唯一真源，`InnerHeader` 的派生与 `require` 不变量不受影响）。
+
+### 6.4 验收标准逐条对照
+
+| 验收标准 | 落实与证据 |
+|---|---|
+| ① 按「是否含真实逻辑」分级，纯数据表登记为例外 | `DicewareWordList.kt`（401）登记为经论证的纯常量例外（见 §6.2-③） |
+| ② 优先处理正文 ① 的 8 项 | **8/8 全部降至阈值内**（见 §6.2-①），另增量完成 2 项 |
+| ③ 纯结构性改动、`test` 全绿且用例数不减 | **1200 例 / 0 失败 / 13 跳过**，与拆分前逐数一致（见 §6.1） |
+| ④ 逐条对照敏感数据清零点与公开 API 可见性 | 见 §6.3（四个安全关键面逐条对照） |
+
+### 6.5 本批次过程缺陷（如实留痕）
+
+1. **改写 `VaultListViewModel` 时漏掉 `import com.keepasskey.app.ui.model.EntryDisplayDispatcher`**，
+   首轮 `:app:compileDebugKotlin` 报 KSP `NonExistentClass`（注解类型无法解析）。
+   登记教训：**重写含注解形参的构造函数时，须与原文件的 import 清单逐条比对**，不能只按新写入的代码补 import。
+2. **拆分 `KeePasskeyApp` 时 `KeePasskeyNavGraph` 形参类型写错**（写成 `UserSettings`，实际 `uiState` 是
+   `SettingsUiState`），且新文件漏 `androidx.compose.runtime.getValue`（`by` 委托报 17 处
+   "has no method getValue"）。登记教训：**迁移 Compose `by` 委托代码块时必须带上 `getValue` import**；
+   形参类型应直接以调用点实参类型为准，而非按语义猜测。
+3. **`KeePasskeyNavGraph.kt` 首拆后仍 408 行**（未达阈值）→ 追加第二轮拆出二级设置路由
+   （`KeePasskeySettingsNavGraph`）。登记教训：**拆分的粒度预判应以「迁移后剩余量」为准，
+   一次拆出一个自然边界后必须立即复测行数**，否则「拆了但仍超标」。
+4. **`SettingsViewModel` 首轮重写后仍 547 行**（远未达标）→ 追加四轮抽取（状态流工厂 / 导入门面 /
+   冷启动闸门 / 进阶偏好副作用下沉）并收紧排版，最终 **397 行**。登记教训：**近千行的「门面 + 全量 setter」
+   类，其 setter 样板本身即占数百行——拆分设计必须先把「有副作用的 setter」与「纯投影」分别下沉，
+   再评估剩余量**；同时如实登记：397 行距 400 阈值仅 3 行余量，属**贴线达标**，
+   后续若再向该类新增成员须同步拆解。
+5. **`SettingsUiStateProjection` 初稿引入不存在的 `EntryDecorationsExport` import 且以 5 个 `Boolean` 形参
+   代替 `UserSettings`**，编译期暴露后改为直接传 `UserSettings`。登记教训：**迁移投影函数时应保持入参类型
+   与原 combine 消费对象一致**，避免用散列布尔「抹平」类型。
+6. **`SettingsViewModel` 注释中 `Accesskey` 大小写笔误**（应为 `AccessKey`），自查时修正。
+7. **`VaultEntryRows` 拆分后残留未使用的 `BitmapEntryIcon` import**，自查时删除。登记教训同 §5.4-2：
+   **拆分后应立即清理失效 import，而非留待编译告警**。
+8. **本批次实测快照与原条目 2026-09-10 登记快照存在行号漂移**（如 `VaultListViewModel` 731 → 803、
+   `VaultListScreen` 417 → 448、`WebDavSyncProvider` 510 → 509），印证「条目维护规则」第 3 条
+   「行号一律视为核实时刻的快照」；已在 ISSUE-P3-31 中以**开工实测**覆盖。
+

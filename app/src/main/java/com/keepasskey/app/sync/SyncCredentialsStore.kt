@@ -6,12 +6,6 @@ import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.app.security.KeystoreManager
 import com.keepasskey.app.ui.screens.settings.CloudSyncProvider
 import dagger.hilt.android.qualifiers.ApplicationContext
-import java.nio.ByteBuffer
-import java.nio.CharBuffer
-import java.nio.charset.StandardCharsets
-import java.util.Base64
-import javax.crypto.Cipher
-import javax.crypto.spec.GCMParameterSpec
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -78,6 +72,10 @@ class SyncCredentialsStore @Inject constructor(
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     }
 
+    // ISSUE-P3-29：封印 / 解除封印已拆至 SyncCredentialSealer（同模块 internal）；
+    // 测试注入钩子仍由本类持有并逐次传入，语义不变。
+    private val sealer = SyncCredentialSealer(keystoreManager, debugLog, SYNC_KEY_ALIAS)
+
     fun saveProvider(provider: CloudSyncProvider) {
         prefs.edit().putString(KEY_PROVIDER, provider.name).apply()
     }
@@ -103,7 +101,7 @@ class SyncCredentialsStore @Inject constructor(
     ): Boolean {
         try {
             // 先封印：失败则整体不落盘（fail-fast）
-            val encrypted = if (password.isNotEmpty()) encrypt(password) ?: return false else null
+            val encrypted = if (password.isNotEmpty()) sealer.encrypt(password, customEncryptor) ?: return false else null
             val editor = prefs.edit()
             editor.putString(KEY_WEBDAV_URL, url)
             editor.putString(KEY_WEBDAV_USERNAME, username)
@@ -144,7 +142,7 @@ class SyncCredentialsStore @Inject constructor(
         // 时，原实现会把 password 退化为空串返回。上层据此会认为「用户主动清空了密码」，
         // 保存配置时进而把空密码写回云端，造成凭据不可逆丢失。现一律返回 null，交由 UI 显式重录。
         val password = if (isCipherTextPresent(iv, cipher)) {
-            decrypt(iv, cipher) ?: return null
+            sealer.decrypt(iv, cipher, customDecryptor) ?: return null
         } else {
             CharArray(0)
         }
@@ -173,8 +171,10 @@ class SyncCredentialsStore @Inject constructor(
         try {
             // 先封印：任一失败则整体不落盘（fail-fast）
             // L4 整改：AccessKey 与 SecretKey 同样经 Keystore AES-256-GCM 加密落盘，不再明文存储
-            val encryptedAccessKey = if (accessKey.isNotEmpty()) encrypt(accessKey) ?: return false else null
-            val encryptedSecretKey = if (secretKey.isNotEmpty()) encrypt(secretKey) ?: return false else null
+            val encryptedAccessKey =
+                if (accessKey.isNotEmpty()) sealer.encrypt(accessKey, customEncryptor) ?: return false else null
+            val encryptedSecretKey =
+                if (secretKey.isNotEmpty()) sealer.encrypt(secretKey, customEncryptor) ?: return false else null
 
             val editor = prefs.edit()
             editor.putString(KEY_S3_ENDPOINT, endpoint)
@@ -224,14 +224,14 @@ class SyncCredentialsStore @Inject constructor(
         // 直接返回 null 避免上层把失效凭据当作用户主动清空写回云端。
         val accessKey = when {
             isCipherTextPresent(accessIv, accessCipher) ->
-                decrypt(accessIv, accessCipher) ?: return null
+                sealer.decrypt(accessIv, accessCipher, customDecryptor) ?: return null
             !legacyPlainAccessKey.isNullOrBlank() -> legacyPlainAccessKey.toCharArray()
             else -> CharArray(0)
         }
         if (accessIv.isNullOrBlank() && !legacyPlainAccessKey.isNullOrBlank()) {
             // 旧版明文 AccessKey 残留清除：读取后立即转加密落盘并物理删除明文键，
             // 不再依赖「用户下次保存配置」才迁移
-            val migrated = encrypt(accessKey)
+            val migrated = sealer.encrypt(accessKey, customEncryptor)
             if (migrated != null) {
                 prefs.edit()
                     .putString(KEY_S3_ACCESS_KEY_IV, migrated.first)
@@ -245,7 +245,7 @@ class SyncCredentialsStore @Inject constructor(
         val cipher = prefs.getString(KEY_S3_SECRET_CIPHER, null)
         // P2 整改 fail-closed：同上，SecretKey 存在密文却解封失败一律让上层感知
         val secretKey = if (isCipherTextPresent(iv, cipher)) {
-            decrypt(iv, cipher) ?: return null
+            sealer.decrypt(iv, cipher, customDecryptor) ?: return null
         } else {
             CharArray(0)
         }
@@ -288,114 +288,13 @@ class SyncCredentialsStore @Inject constructor(
         prefs.edit().putLong(KEY_S3_CLOCK_OFFSET, offsetMillis).apply()
     }
 
-    /**
-     * Wave 15 整改：封印输入以 [CharArray] 承载，经 CharBuffer 直转 UTF-8 字节
-     * （对齐 Wave 11 H1 手法），明文字节在封印完成后立即擦除，全程不经 String。
-     *
-     * ISSUE-P1-06 安全取舍声明（requireUserAuth = false）：
-     * 同步凭据封印密钥 [SYNC_KEY_ALIAS] 不绑定用户认证——这是**有意为之的架构决策**：
-     * - **必要性**：后台周期同步（WorkManager）与冷启动自动同步需在设备锁屏态执行，
-     *   若密钥要求 per-operation 生物认证，则锁屏期间无法解封凭据，同步功能彻底瘫痪；
-     * - **风险**：进程内任意代码路径（含被注入的恶意线程）可无认证解封凭据；
-     * - **缓解措施**：
-     *   1. 凭据解封后以 CharArray 承载，借用语义要求调用方用毕立即 fill('0') 擦除；
-     *   2. S3 凭据在同步周期结束后经 [S3SyncProvider.clearCredentials] 显式清零；
-     *   3. SigV4 派生链（signingKey/kSecret/kDate/kRegion/kService）全程 finally 擦除；
-     *   4. UI 层（CloudSyncScreen ZeroKnowledgeCard）向用户明示此安全取舍；
-     * - **替代方案评估**：改为 requireUserAuth=true + 短时授权窗口（如 30s）会导致
-     *   后台同步频繁弹出 BiometricPrompt，用户体验不可接受；当前方案在「可用性」与
-     *   「安全性」间取得平衡，凭据暴露面已从「String 不可变驻留」收窄至「CharArray 可控生命周期」。
-     */
-    private fun encrypt(chars: CharArray): Pair<String, String>? {
-        if (chars.isEmpty()) return null
-        val bytes = chars.toUtf8Bytes()
-        return try {
-            val (iv, cipherBytes) = customEncryptor?.invoke(bytes) ?: run {
-                val km = keystoreManager ?: return null
-                // ISSUE-P1-06：requireUserAuth=false 为有意决策（见方法 KDoc 安全取舍声明）
-                val key = km.getOrCreateKey(SYNC_KEY_ALIAS, requireUserAuth = false)
-                val cipher = Cipher.getInstance(TRANSFORMATION)
-                cipher.init(Cipher.ENCRYPT_MODE, key)
-                Pair(cipher.iv, cipher.doFinal(bytes))
-            }
-            Pair(
-                Base64.getEncoder().encodeToString(iv),
-                Base64.getEncoder().encodeToString(cipherBytes)
-            )
-        } catch (e: Exception) {
-            // P2 整改：原实现 `catch (_: Exception) { null }` 全静默吞掉异常。
-            // 密钥失效（用户增删指纹触发 setInvalidatedByBiometricEnrollment）或 Keystore 暂不可用时，
-            // 封印失败会一路静默退化，运行期完全无从感知。现显式落调试日志——注意只记异常类型，绝不写明文。
-            debugLog?.error(TAG, "同步凭据封印失败，凭据未写入: ${e.javaClass.simpleName}")
-            null
-        } finally {
-            bytes.fill(0)
-        }
-    }
-
-    /**
-     * Wave 15 整改：解除封印以 [CharArray] 承载（UTF-8 直解码，全程不经 String），
-     * 中间字节用毕立即擦除。调用方对返回数组承担用毕清零义务（借用语义）。
-     */
-    private fun decrypt(ivBase64: String?, cipherBase64: String?): CharArray? {
-        if (ivBase64.isNullOrBlank() || cipherBase64.isNullOrBlank()) return null
-        var decryptedBytes: ByteArray? = null
-        return try {
-            val iv = Base64.getDecoder().decode(ivBase64)
-            val cipherBytes = Base64.getDecoder().decode(cipherBase64)
-            decryptedBytes = customDecryptor?.invoke(iv, cipherBytes) ?: run {
-                val km = keystoreManager ?: return null
-                val key = km.getOrCreateKey(SYNC_KEY_ALIAS, requireUserAuth = false)
-                val cipher = Cipher.getInstance(TRANSFORMATION)
-                val spec = GCMParameterSpec(GCM_TAG_LENGTH_BITS, iv)
-                cipher.init(Cipher.DECRYPT_MODE, key, spec)
-                cipher.doFinal(cipherBytes)
-            }
-            decryptedBytes.toUtf8Chars()
-        } catch (e: Exception) {
-            // P2 整改：同上，解除封印失败不得静默。返回 null 由调用方按 fail-closed 处理，
-            // 绝不退化为空字符串被上层误判为「用户主动清空了密码」。
-            debugLog?.warn(TAG, "同步凭据解除封印失败: ${e.javaClass.simpleName}")
-            null
-        } finally {
-            decryptedBytes?.fill(0)
-        }
-    }
-
-    /** CharArray → UTF-8 字节（CharBuffer 直转，缓冲区底层副本尽力擦除，不经 String） */
-    private fun CharArray.toUtf8Bytes(): ByteArray {
-        val bb = StandardCharsets.UTF_8.encode(CharBuffer.wrap(this))
-        return try {
-            val bytes = ByteArray(bb.remaining())
-            bb.get(bytes)
-            bytes
-        } finally {
-            if (bb.hasArray()) bb.array().fill(0)
-        }
-    }
-
-    /** UTF-8 字节 → CharArray（ByteBuffer 直解码，缓冲区底层副本尽力擦除，不经 String） */
-    private fun ByteArray.toUtf8Chars(): CharArray {
-        val cb = StandardCharsets.UTF_8.decode(ByteBuffer.wrap(this))
-        return try {
-            val chars = CharArray(cb.remaining())
-            cb.get(chars)
-            chars
-        } finally {
-            if (cb.hasArray()) cb.array().fill('0')
-        }
-    }
-
     /** 判定 iv + 密文二元组是否均已落盘（存在密文才意味着「曾成功封印过」，可用于区分空值与解封失败） */
     private fun isCipherTextPresent(ivBase64: String?, cipherBase64: String?): Boolean =
         !ivBase64.isNullOrBlank() && !cipherBase64.isNullOrBlank()
 
     companion object {
-        private const val TAG = "SyncCredentialsStore"
         const val PREFS_NAME = "sync_credentials_prefs"
         const val SYNC_KEY_ALIAS = "com.keepasskey.sync_credential_key"
-        private const val TRANSFORMATION = "AES/GCM/NoPadding"
-        private const val GCM_TAG_LENGTH_BITS = 128
 
         private const val KEY_PROVIDER = "sync_provider"
         private const val KEY_WEBDAV_URL = "webdav_url"

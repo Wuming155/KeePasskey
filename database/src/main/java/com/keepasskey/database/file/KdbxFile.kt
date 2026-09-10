@@ -1,10 +1,8 @@
 package com.keepasskey.database.file
 
 import com.keepasskey.core.model.KdbxConstants
-import com.keepasskey.crypto.cipher.CipherEngine
 import com.keepasskey.crypto.cipher.CipherFactory
 import com.keepasskey.crypto.hash.HashUtil
-import com.keepasskey.crypto.kdf.KdfFactory
 import com.keepasskey.crypto.kdf.KdfParameters
 import com.keepasskey.crypto.stream.InnerRandomStreamCipher
 import com.keepasskey.database.exception.KdbxCorruptFileException
@@ -20,7 +18,6 @@ import java.io.ByteArrayOutputStream
 import java.io.InputStream
 import java.io.OutputStream
 import java.io.SequenceInputStream
-import java.nio.charset.StandardCharsets
 import java.security.SecureRandom
 import java.util.Arrays
 import java.util.zip.GZIPInputStream
@@ -38,25 +35,17 @@ import java.util.zip.GZIPOutputStream
  * 全链路流式管线（对应官方 Read/Write 流栈：HmacBlockStream → Cipher → GZip → XML 状态机）：
  * 读写均不再将整条密文/明文/压缩数据物化为字节数组，大库加载与保存的峰值内存
  * 由「数倍库体积」降为「单个块缓冲 + 对象树」。
+ *
+ * ISSUE-P3-29：复合密钥派生与 cipherKey 派生裁决探针已分别拆至 `KdbxKeyDerivation.kt`
+ * 与 `KdbxCipherKeyResolver.kt`；本类保留读写管线本体与 `deriveKeys` 门面委托
+ * （同签名，既有调用方与单测零改动）。拆分为**纯结构性**，行为零变更。
  */
 object KdbxFile {
 
     private val secureRandom = SecureRandom()
 
-    /** 内层 Header 字段头大小：1 字节字段 ID + 4 字节小端长度 */
-    private const val FIELD_HEADER_SIZE = 5
-
     /** KDBX4 内层流密码密钥长度（官方 InnerRandomStreamKey 恒为 64 字节） */
     private const val INNER_RANDOM_STREAM_KEY_SIZE = 64
-
-    /** 主密钥派生时的种子缓冲长度（SHA-512 摘要长度） */
-    private const val SEED_HASH_BUFFER_SIZE = 64
-
-    /** 解密探针所需的最小块大小（一个 AES 分组） */
-    private const val MIN_PROBE_BLOCK_SIZE = 16
-
-    /** 解密探针的分块读取缓冲 */
-    private const val PROBE_READ_BUFFER_SIZE = 8192
 
     /**
      * 载荷解压输出（或未压缩载荷）累计字节数安全上限：128 MiB（Wave 12 解析炸弹防线；
@@ -95,18 +84,12 @@ object KdbxFile {
         return SizeBoundedInputStream(decompressed, MAX_DECOMPRESSED_PAYLOAD_BYTES)
     }
 
-    private val INNER_HEADER_FIELD_IDS = setOf(
-        KdbxConstants.InnerHeaderFieldId.END.toInt(),
-        KdbxConstants.InnerHeaderFieldId.INNER_RANDOM_STREAM_ID.toInt(),
-        KdbxConstants.InnerHeaderFieldId.INNER_RANDOM_STREAM_KEY.toInt(),
-        KdbxConstants.InnerHeaderFieldId.BINARY.toInt()
-    )
-
     /**
      * 打开并解密 KDBX v4 数据库。
      * 先采用官方标准密钥派生校验头部 HMAC（凭据正确性在解密前的最终裁决）；
      * 历史旧派生（SHA-256 cipherKey）与官方派生的 hmacKey64 完全一致，头部 HMAC 无法区分二者，
-     * 因此 cipherKey 变体由数据段首个块的解密探针裁决（见 [resolveCipherKey]），保存时自动迁移官方标准。
+     * 因此 cipherKey 变体由数据段首个块的解密探针裁决（见 [KdbxCipherKeyResolver.resolve]），
+     * 保存时自动迁移官方标准。
      *
      * [passwordChars] 允许为 null 或空数组（表示无主密码、仅密钥文件解锁，
      * 对齐官方 KeyUtil.CreateKey 对空密码不添加密码分量的语义，详见 [deriveKeys]）。
@@ -177,9 +160,9 @@ object KdbxFile {
         // 旧派生裁决：取首个数据块做解密探针，官方派生不合法时回退旧派生
         val firstBlock = hmacBlockIn.readBlock()
         val isGzip = header.compression == KdbxConstants.Compression.GZIP
-        val resolution = resolveCipherKey(cipherEngine, header, firstBlock, cipherKey, isGzip) {
+        val resolution = KdbxCipherKeyResolver.resolve(cipherEngine, header, firstBlock, cipherKey, isGzip) {
             // 旧派生重算：仅取 cipherKey 参与裁决，hmacKey64 属 transformedKey 直接派生物，用毕立即擦除
-            deriveKeys(header, passwordChars, keyFileData, isLegacy = true).let { (legacyCipherKey, legacyHmacKey) ->
+            KdbxKeyDerivation.deriveKeys(header, passwordChars, keyFileData, isLegacy = true).let { (legacyCipherKey, legacyHmacKey) ->
                 try {
                     Pair(legacyCipherKey, legacyHmacKey)
                 } finally {
@@ -195,8 +178,8 @@ object KdbxFile {
         }
         val cipherIn = cipherEngine.createDecryptingStream(payloadStream, resolution.activeKey, header.encryptionIv)
         // P2-10 整改（TASK-24）：解密流建立后（SecretKeySpec 构造时已克隆密钥材料），
-        // 被选中的旧派生密钥原数组立即擦除；未被选中的旧派生密钥已在 resolveCipherKey
-        // 内部任何结果路径（含裁决失败抛异常）统一清零——legacyCipherKey 不再残留 GC 堆。
+        // 被选中的旧派生密钥原数组立即擦除；未被选中的旧派生密钥已在 resolve 内部任何
+        // 结果路径（含裁决失败抛异常）统一清零——legacyCipherKey 不再残留 GC 堆。
         resolution.legacyKeyToWipe?.let { Arrays.fill(it, 0.toByte()) }
 
         // 官方载荷顺序（对齐 KeePass 2.x Read.cs / KeePassDX DatabaseInputKDBX）：
@@ -220,124 +203,6 @@ object KdbxFile {
         hmacBlockIn.verifyEndOfStream()
 
         return buildDatabase(header, innerHeader, parseResult)
-    }
-
-    /**
-     * cipherKey 派生裁决结果：
-     * [activeKey] 为本次解密实际使用的密钥（官方派生或旧派生）；
-     * [legacyKeyToWipe] 为被选中的旧派生密钥原数组——调用方在解密流建立（密钥材料已被
-     * SecretKeySpec 克隆）后必须立即擦除；官方派生被选中时为 null（由 [load] 的 finally 统一擦除）。
-     */
-    private class CipherKeyResolution(
-        val activeKey: ByteArray,
-        val legacyKeyToWipe: ByteArray?
-    )
-
-    /**
-     * 用首个数据块的解密结果裁决 cipherKey 派生变体：
-     * GZIP 压缩库（官方默认）解密产物以 GZIP 魔数 1F 8B 08 开始；未压缩库解密产物
-     * 呈现合法的内层 Header 字段序列。错误密钥的解密产物几乎不可能通过结构校验。
-     * 两种派生均不合法时按凭据错误处理。
-     *
-     * P2-10 整改（TASK-24）：旧派生密钥的生命周期由本方法全权管理——
-     * 未被选中的 legacyCipherKey 与裁决失败抛异常路径下的 legacyCipherKey
-     * 均在 finally 中统一清零，绝不残留 GC 堆。
-     */
-    private fun resolveCipherKey(
-        cipherEngine: CipherEngine,
-        header: KdbxHeader,
-        firstBlock: ByteArray?,
-        officialKey: ByteArray,
-        isGzipCompressed: Boolean,
-        deriveLegacyKeys: () -> Pair<ByteArray, ByteArray>
-    ): CipherKeyResolution {
-        if (firstBlock == null || firstBlock.size < MIN_PROBE_BLOCK_SIZE) {
-            // 块过小无法构成有效探针（正常 KDBX 负载远大于此），按官方派生继续，由后续解析暴露问题
-            return CipherKeyResolution(officialKey, null)
-        }
-        if (isPlausibleInnerHeaderPrefix(cipherEngine, header.encryptionIv, officialKey, firstBlock, isGzipCompressed)) {
-            return CipherKeyResolution(officialKey, null)
-        }
-        val (legacyCipherKey, legacyHmacKey) = deriveLegacyKeys()
-        var legacyAccepted = false
-        try {
-            if (isPlausibleInnerHeaderPrefix(cipherEngine, header.encryptionIv, legacyCipherKey, firstBlock, isGzipCompressed)) {
-                // 旧派生被选中：原数组交由调用方在解密流建立后擦除（见 CipherKeyResolution 契约）
-                legacyAccepted = true
-                return CipherKeyResolution(legacyCipherKey, legacyCipherKey)
-            }
-            throw KdbxInvalidCredentialsException("数据解密失败：主密码错误或文件已损坏")
-        } finally {
-            // 未被选中的旧派生密钥在任何结果路径（含裁决失败抛异常）下统一清零；
-            // hmacKey64 属 transformedKey 直接派生物，无论是否选中均立即擦除
-            if (!legacyAccepted) {
-                Arrays.fill(legacyCipherKey, 0.toByte())
-            }
-            Arrays.fill(legacyHmacKey, 0.toByte())
-        }
-    }
-
-    /**
-     * 试解密首块并校验其前缀结构：
-     * GZIP 压缩库校验魔数（1F 8B 08）；未压缩库校验内层 Header 字段序列前缀。
-     * 首块通常并非消息结尾，AES-PKCS5 在收尾 doFinal 时会触发 BadPadding——
-     * 逐块读取并在该异常处停止，已解出的前缀对结构校验依然有效。
-     */
-    private fun isPlausibleInnerHeaderPrefix(
-        cipherEngine: CipherEngine,
-        encryptionIv: ByteArray,
-        cipherKey: ByteArray,
-        firstBlock: ByteArray,
-        isGzipCompressed: Boolean
-    ): Boolean {
-        val prefix = try {
-            val probe = cipherEngine.createDecryptingStream(ByteArrayInputStream(firstBlock), cipherKey, encryptionIv)
-            probe.use { stream ->
-                val buffer = ByteArray(PROBE_READ_BUFFER_SIZE)
-                val collected = ByteArrayOutputStream()
-                try {
-                    while (true) {
-                        val count = stream.read(buffer)
-                        if (count < 0) break
-                        collected.write(buffer, 0, count)
-                    }
-                } catch (_: java.io.IOException) {
-                    // 解密流收尾异常：截取已解出的前缀继续校验
-                }
-                collected.toByteArray()
-            }
-        } catch (_: Exception) {
-            return false
-        }
-        return if (isGzipCompressed) {
-            prefix.size >= 3 &&
-                    prefix[0] == 0x1F.toByte() &&
-                    prefix[1] == 0x8B.toByte() &&
-                    prefix[2] == 0x08.toByte()
-        } else {
-            isPlausibleFieldSequence(prefix)
-        }
-    }
-
-    /**
-     * 校验字节序列是否为合法的内层 Header 字段序列前缀：
-     * 字段 ID 必须属于已知集合，字段长度非负且有界，END 字段正常终止；
-     * 仅 BINARY 字段允许「长度超出前缀剩余量」——大二进制池可合法跨越后续 HMAC 块延续。
-     */
-    private fun isPlausibleFieldSequence(prefix: ByteArray): Boolean {
-        var offset = 0
-        while (offset + FIELD_HEADER_SIZE <= prefix.size) {
-            val fieldId = prefix[offset].toInt() and 0xFF
-            if (fieldId !in INNER_HEADER_FIELD_IDS) return false
-            val length = LittleEndianUtil.bytesToInt(prefix, offset + 1)
-            if (length < 0) return false
-            offset += FIELD_HEADER_SIZE + length
-            if (fieldId == KdbxConstants.InnerHeaderFieldId.END.toInt()) return true
-            if (offset > prefix.size) {
-                return fieldId == KdbxConstants.InnerHeaderFieldId.BINARY.toInt()
-            }
-        }
-        return offset <= prefix.size
     }
 
     private fun buildDatabase(
@@ -504,111 +369,14 @@ object KdbxFile {
     /**
      * 派生用于数据加密的 cipherKey (32B) 与用于认证的 hmacKey (64B)。
      *
-     * 复合密钥（P1-10 整改，对齐官方 KeePass 2.61.1 CompositeKey.CreateRawCompositeKey32：
-     * 只拼接实际存在的凭据分量后整体 SHA-256；官方解锁框对空密码不添加密码分量 KeyUtil.CreateKey，
-     * 因此 [passwordChars] 为 null 或空数组时必须跳过密码分量，绝不把 SHA-256("") 拼入复合密钥）：
-     * - 仅主密码：SHA-256(SHA-256(password))（密码分量本身即 SHA-256(UTF-8 密码)，KcpPassword）
-     * - 仅密钥文件：SHA-256(keyFileKey)（keyFileKey 经 [KdbxKeyFile.extractKey] 官方解析梯子提取）
-     * - 密码 + 密钥文件：SHA-256(SHA-256(password) ‖ keyFileKey)
-     *
-     * 官方标准（KeePass 2.61.1 KdbxFile.ComputeKeys + CryptoUtil.ResizeKey，
-     * 与 pykeepass compute_master / KeePassDX DatabaseInputKDBX 交叉验证一致）：
-     * - cipherKey = SHA-256(masterSeed ‖ transformedKey)
-     * - hmacKey64 = SHA-512(masterSeed ‖ transformedKey ‖ 0x01)
-     *
-     * 历史兼容（isLegacy = true，本应用早期版本写出的文件）：
-     * - cipherKey = SHA-512(masterSeed ‖ transformedKey)[0..32)
-     * - hmacKey64 同官方
+     * ISSUE-P3-29：实现已拆至 [KdbxKeyDerivation.deriveKeys]；本门面保持同签名与可见性，
+     * 既有调用方（含单测）与 KDoc 契约（[KdbxKeyFile] 复合密钥一致性）零改动。
      */
     internal fun deriveKeys(
         header: KdbxHeader,
         passwordChars: CharArray?,
         keyFileData: ByteArray?,
         isLegacy: Boolean = false
-    ): Pair<ByteArray, ByteArray> {
-        val hasPassword = passwordChars != null && passwordChars.isNotEmpty()
-        val hasKeyFile = keyFileData != null && keyFileData.isNotEmpty()
-
-        val compositeKey = when {
-            hasPassword && hasKeyFile -> {
-                // 密码 + 密钥文件：SHA-256(SHA-256(password) ‖ keyFileKey)
-                val passwordHash = HashUtil.sha256(charsToUtf8(passwordChars))
-                try {
-                    // 按官方语义解析密钥文件（XML .keyx 取 <Data> / 裸 32 字节 /
-                    // 64 位 hex 文本 / 任意二进制整文件 SHA-256），
-                    // 原实现对 XML 密钥文件整文件哈希导致复合密钥错误（虚假开关整改）
-                    val keyFileKey = KdbxKeyFile.extractKey(keyFileData)
-                    try {
-                        HashUtil.sha256(passwordHash, keyFileKey)
-                    } finally {
-                        Arrays.fill(keyFileKey, 0.toByte())
-                    }
-                } finally {
-                    Arrays.fill(passwordHash, 0.toByte())
-                }
-            }
-            hasKeyFile -> {
-                // P1-10：仅密钥文件 —— 直接 SHA-256(keyFileKey)，不拼入空密码分量 SHA-256("")。
-                // 原实现恒拼入 SHA-256("")，官方仅密钥文件库 100% 派生错误密钥、报「主密码错误」
-                val keyFileKey = KdbxKeyFile.extractKey(keyFileData)
-                try {
-                    HashUtil.sha256(keyFileKey)
-                } finally {
-                    Arrays.fill(keyFileKey, 0.toByte())
-                }
-            }
-            else -> {
-                // 仅密码：SHA-256(SHA-256(password))。
-                // 密码与密钥文件均缺失时退化为 SHA-256(SHA-256(""))——本应用历史「空密码库」
-                // 语义（官方客户端无法创建此类库），保持既有空密码库读写兼容，
-                // 凭据校验由头部 HMAC 给出明确失败。
-                val passwordBytes = if (hasPassword) charsToUtf8(passwordChars) else ByteArray(0)
-                val passwordHash = HashUtil.sha256(passwordBytes)
-                Arrays.fill(passwordBytes, 0.toByte())
-                try {
-                    HashUtil.sha256(passwordHash)
-                } finally {
-                    Arrays.fill(passwordHash, 0.toByte())
-                }
-            }
-        }
-
-        val kdfEngine = KdfFactory.getEngine(header.kdfParameters.kdfUuid)
-        val transformedKey = kdfEngine.transform(compositeKey, header.kdfParameters)
-        Arrays.fill(compositeKey, 0.toByte())
-
-        // 组装 65 字节复合种子：MasterSeed (32B) + TransformedKey (32B) + 1 (1B)
-        val cmpKey = ByteArray(65)
-        System.arraycopy(header.masterSeed, 0, cmpKey, 0, 32)
-        System.arraycopy(transformedKey, 0, cmpKey, 32, 32)
-        Arrays.fill(transformedKey, 0.toByte())
-
-        // 官方 KDBX4 派生（对齐 KeePass 2.x / pykeepass / KeePassXC）：
-        // cipherKey  = SHA-256(masterSeed ‖ transformedKey)
-        // hmacKey64  = SHA-512(masterSeed ‖ transformedKey ‖ 0x01)
-        // 历史 bug 回放：本应用曾把 cipherKey 误实现为 SHA-512(seed‖tk)[0..32)（无尾部常量），
-        // 该错误公式保留为旧文件探针回退路径（isLegacy = true）
-        val cipherKeyBytes = ByteArray(SEED_HASH_BUFFER_SIZE)
-        System.arraycopy(cmpKey, 0, cipherKeyBytes, 0, 64)
-        val cipherKey = if (isLegacy) {
-            HashUtil.sha512(cipherKeyBytes).copyOfRange(0, 32)
-        } else {
-            HashUtil.sha256(cipherKeyBytes)
-        }
-        Arrays.fill(cipherKeyBytes, 0.toByte())
-
-        cmpKey[64] = 1.toByte()
-        val hmacKey64 = HashUtil.sha512(cmpKey)
-        Arrays.fill(cmpKey, 0.toByte())
-
-        return Pair(cipherKey, hmacKey64)
-    }
-
-    private fun charsToUtf8(chars: CharArray): ByteArray {
-        val charBuffer = java.nio.CharBuffer.wrap(chars)
-        val byteBuffer = StandardCharsets.UTF_8.encode(charBuffer)
-        val bytes = ByteArray(byteBuffer.remaining())
-        byteBuffer.get(bytes)
-        return bytes
-    }
+    ): Pair<ByteArray, ByteArray> =
+        KdbxKeyDerivation.deriveKeys(header, passwordChars, keyFileData, isLegacy)
 }

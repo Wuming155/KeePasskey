@@ -20,9 +20,7 @@ import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
@@ -161,12 +159,9 @@ fun VaultListContent(
     onAutoActivateSearchConsumed: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    var showSortDialog by remember { mutableStateOf(false) }
-    var showCreateTypeDialog by remember { mutableStateOf(false) }
+    // ISSUE-P3-29：8 个对话框的可见性 / 目标对象由独立状态持有者承接（见 VaultListDialogHost.kt）
+    val dialogs = rememberVaultListDialogController()
     val listState = rememberLazyListState()
-    var showCreateGroupDialog by remember { mutableStateOf(false) }
-    var showEmptyRecycleBinDialog by remember { mutableStateOf(false) }
-    var showBatchMoveDialog by remember { mutableStateOf(false) }
     val pullRefreshState = rememberPullToRefreshState()
 
     // ISSUE-P3-17：列表密度规格（偏好 → 行高 / 内边距 / 字号的唯一映射点）
@@ -178,11 +173,6 @@ fun VaultListContent(
     // 子库分区本身的可见性判定在状态层完成，见 VaultListUiState.childEntrySectionVisible）
     val isSearching = uiState.searchQuery.isNotBlank()
 
-    // 文件夹上下文操作状态
-    var groupToRename by remember { mutableStateOf<VaultGroup?>(null) }
-    var groupToChangeIcon by remember { mutableStateOf<VaultGroup?>(null) }
-    var groupToDelete by remember { mutableStateOf<VaultGroup?>(null) }
-
     Scaffold(
         modifier = modifier.fillMaxSize(),
         containerColor = MaterialTheme.colorScheme.background,
@@ -193,7 +183,7 @@ fun VaultListContent(
                     selectedCount = uiState.selectedEntryIds.size,
                     onClearBatch = onClearBatch,
                     onSelectAllBatch = onSelectAllBatch,
-                    onBatchMoveClick = { showBatchMoveDialog = true },
+                    onBatchMoveClick = { dialogs.showBatchMoveDialog = true },
                     onBatchDelete = onBatchDelete
                 )
             } else {
@@ -202,9 +192,9 @@ fun VaultListContent(
                     onSearchQueryChange = onSearchQueryChange,
                     isInsideRecycleBin = uiState.isInsideRecycleBin,
                     sortOption = uiState.sortOption,
-                    onSortClick = { showSortDialog = true },
+                    onSortClick = { dialogs.showSortDialog = true },
                     onLockClick = onLockClick,
-                    onEmptyRecycleBinClick = { showEmptyRecycleBinDialog = true },
+                    onEmptyRecycleBinClick = { dialogs.showEmptyRecycleBinDialog = true },
                     // ISSUE-P3-17：进入列表页自动聚焦搜索栏（一次性意图，消费后回执清除）
                     autoActivateSearch = uiState.autoActivateSearch,
                     onAutoActivateSearchConsumed = onAutoActivateSearchConsumed,
@@ -216,7 +206,7 @@ fun VaultListContent(
             VaultListFab(
                 visible = !uiState.isBatchMode && !uiState.isInsideRecycleBin && (!uiState.hideFabOnScroll || !listState.isScrollInProgress),
                 isReadOnly = uiState.isReadOnly,
-                onClick = { showCreateTypeDialog = true }
+                onClick = { dialogs.showCreateTypeDialog = true }
             )
         }
     ) { innerPadding ->
@@ -284,9 +274,9 @@ fun VaultListContent(
                         icon = uiState.groupIcons[group.id],
                         densitySpec = densitySpec,
                         onClick = { onGroupClick(group.id) },
-                        onRename = { groupToRename = group },
-                        onChangeIcon = { groupToChangeIcon = group },
-                        onDelete = { groupToDelete = group }
+                        onRename = { dialogs.groupToRename = group },
+                        onChangeIcon = { dialogs.groupToChangeIcon = group },
+                        onDelete = { dialogs.groupToDelete = group }
                     )
                 }
 
@@ -345,103 +335,19 @@ fun VaultListContent(
         }
     }
 
-    // 排序选择对话框
-    if (showSortDialog) {
-        VaultSortDialog(
-            currentOption = uiState.sortOption,
-            onSelect = { option ->
-                onSortOptionSelect(option)
-                showSortDialog = false
-            },
-            onDismiss = { showSortDialog = false }
-        )
-    }
-
-    // 新建分类选择对话框
-    if (showCreateTypeDialog) {
-        VaultCreateTypeDialog(
-            onDismiss = { showCreateTypeDialog = false },
-            onAddEntry = {
-                showCreateTypeDialog = false
-                onAddEntryClick()
-            },
-            onCreateFolder = {
-                showCreateTypeDialog = false
-                showCreateGroupDialog = true
-            }
-        )
-    }
-
-    // 批量移动文件夹选择对话框
-    if (showBatchMoveDialog) {
-        VaultBatchMoveDialog(
-            allGroups = uiState.allGroups,
-            onDismiss = { showBatchMoveDialog = false },
-            onMove = { targetGroupId ->
-                onBatchMove(targetGroupId)
-                showBatchMoveDialog = false
-            }
-        )
-    }
-
-    // 新建群组对话框
-    if (showCreateGroupDialog) {
-        CreateGroupDialog(
-            parentGroupName = uiState.breadcrumbs.lastOrNull()?.name,
-            onDismiss = { showCreateGroupDialog = false },
-            onConfirm = { name, icon ->
-                onCreateGroup(name, icon)
-                showCreateGroupDialog = false
-            }
-        )
-    }
-
-    // 重命名文件夹对话框
-    groupToRename?.let { grp ->
-        VaultRenameGroupDialog(
-            group = grp,
-            onDismiss = { groupToRename = null },
-            onConfirm = { newName ->
-                onRenameGroup(grp, newName)
-                groupToRename = null
-            }
-        )
-    }
-
-    // 更换文件夹图标对话框
-    groupToChangeIcon?.let { grp ->
-        VaultChangeGroupIconDialog(
-            group = grp,
-            onSelectIcon = { newIcon ->
-                onChangeGroupIcon(grp, newIcon)
-                groupToChangeIcon = null
-            },
-            onDismiss = { groupToChangeIcon = null }
-        )
-    }
-
-    // 删除文件夹确认对话框
-    groupToDelete?.let { grp ->
-        VaultDeleteGroupDialog(
-            group = grp,
-            onDismiss = { groupToDelete = null },
-            onConfirm = {
-                onDeleteGroup(grp.id)
-                groupToDelete = null
-            }
-        )
-    }
-
-    // 清空回收站确认对话框
-    if (showEmptyRecycleBinDialog) {
-        VaultEmptyRecycleBinDialog(
-            onDismiss = { showEmptyRecycleBinDialog = false },
-            onConfirm = {
-                onEmptyRecycleBin()
-                showEmptyRecycleBinDialog = false
-            }
-        )
-    }
+    // ISSUE-P3-29：8 个对话框统一由 VaultListDialogHost 渲染（编排见该文件）
+    VaultListDialogHost(
+        controller = dialogs,
+        uiState = uiState,
+        onSortOptionSelect = onSortOptionSelect,
+        onAddEntryClick = onAddEntryClick,
+        onCreateGroup = onCreateGroup,
+        onRenameGroup = onRenameGroup,
+        onChangeGroupIcon = onChangeGroupIcon,
+        onDeleteGroup = onDeleteGroup,
+        onEmptyRecycleBin = onEmptyRecycleBin,
+        onBatchMove = onBatchMove
+    )
 }
 
 /** ISSUE-P3-30：搜索态子库排除提示行的稳定 key（不同排序 / 筛选下不重建） */
