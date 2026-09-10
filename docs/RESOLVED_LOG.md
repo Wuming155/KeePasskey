@@ -1651,3 +1651,106 @@ size ∈ {0,1,16,1024}` 共 20 组**逐字节一致**；另断言偏移切片与
 | Twofish / AES-KDF / 口令强度的**设备侧**验证未做 | 本批次新登记，随 ISSUE-P3-23 的设备就位一并补齐 |
 | AES-KDF 性能倍数未实测 | 本批次新登记（可用 `KdfBenchmark` 做 A/B） |
 
+---
+
+## 9. 自动填充能力对标批次归档（ISSUE-P3-39 ~ P3-45）
+
+> **来源**：2026-09-10 对照 `docs/references/Monica-架构分析.md` 与 Monica 自动填充实现
+> （`autofill_ng` 双通道策略层 + Credential Provider），并**逐文件读取本仓自动填充现状**后
+> 登记的七项「能力补齐 / 可行性评估」条目（对标差距，**非既有功能故障**）。
+
+### 9.1 闭环总览
+
+| 条目 | 主题 | 结论 |
+|---|---|---|
+| **ISSUE-P3-39** | 字段识别与候选评分引擎升级 | ✅ 已闭环 |
+| **ISSUE-P3-40** | 手动选择器（全库搜索兜底） | ✅ 已闭环 |
+| **ISSUE-P3-41** | 服务健康自检与诊断 | ✅ 已闭环 |
+| **ISSUE-P3-42** | 填充侧会话授权宽限 | ✅ 已闭环 |
+| **ISSUE-P3-43** | 三级黑名单 + 尊重 `importantForAutofill` | ⚠️ **部分达标**（① 已闭环；②③ 保留待办） |
+| **ISSUE-P3-44** | 保存体验评估与按需实现 | ✅ 已闭环（评估 + 1 项实现） |
+| **ISSUE-P3-45** | 结构化数据填充可行性评估 | ✅ 已闭环（评估结论：暂不实现） |
+
+### 9.2 逐项代码证据
+
+**ISSUE-P3-39（字段识别 / 候选打分）**
+- `AutofillFieldScanner` 由「命中即布尔」升级为**多信号 + 置信度模型**：新增 `FieldConfidence`、
+  多语言登录词（中/英/法/西/俄/乌）label 匹配、搜索框与非凭据字段（验证码/评论/反馈）排除、
+  不可见字段的差异化准入（密码仍准入、账号不参与）、邮箱/电话 inputType 信号。
+- 新增 `AutofillCandidateRanker`：严格匹配（`DomainMatcher`）通过后按
+  「精确域名 140 > 精确包名 130 > 父域 120 > 组合 +30 > 收藏 +5」打分，排序键叠加最后修改时间，
+  按可配置上限截断。**匹配条件一字未放宽**，未通过严格匹配的条目不会进入结果。
+- 新增 `AutofillLastFilledStore`，确认落点（[`AutofillConfirmActivity`]）写入，下次同上下文置顶。
+- 接线：`KeePasskeyAutofillService` 改消费打分结果；`ScanNode` 新增 `label` / `isVisible`。
+- 测试：`AutofillFieldScannerTest` 扩至 9 例、`AutofillCandidateRankerTest` 7 例、
+  `AutofillLastFilledStoreTest` 4 例。
+
+**ISSUE-P3-40（手动选择器）**
+- 新增 `AutofillPickerActivity` + `AutofillPickerViewModel` + `AutofillPickerScreen` + `AutofillEntrySearch`；
+  Manifest 声明（`exported=false`）。
+- 回传机制：以**认证数据集**挂入 `FillResponse`，用户选中并经确认后由 Activity 构建真实 `Dataset`，
+  经 `AutofillManager.EXTRA_AUTHENTICATION_RESULT` 回传——未确认前不携带任何明文。
+- 零秘密热路径：列表/搜索只渲染标题/用户名/网址，密码仅在用户选中后按需解密
+  （`getEntryPasswordChars` → 转 String 后立即清零原数组）。
+- 窗口防护：`FLAG_SECURE` + `setHideOverlayWindows` + 遮挡触摸过滤。
+- 测试：`AutofillEntrySearchTest` 4 例。
+
+**ISSUE-P3-41（健康自检）**
+- 新增 `AutofillHealthPolicy`（纯逻辑：四项检查 + 修复优先级）+ `AutofillHealthProbe`
+  （真实系统状态：服务声明/系统启用/CM 可用性，全部 try/catch 兜底）+ `AutofillHealthViewModel`
+  （独立 VM，避免为 `SettingsViewModel` 增依赖以免影响其既有单测）+ `AutofillHealthCard`（设置页展示）。
+- 测试：`AutofillHealthPolicyTest` 4 例。
+
+**ISSUE-P3-42（会话授权宽限）**
+- 新增 `AutofillSessionGrantStore`（30s TTL，`elapsedRealtime` 单调时钟，作用域＝包名+域）
+  与 `AutofillAuthenticationPolicy`（三条件纯函数）。
+- 接线：填充服务仅在**开关开启 且 库已解锁 且 存在匹配授权**时跳过重复二次确认；
+  默认关闭 → 行为与既有「每次强制确认」完全一致；授权由确认 Activity 写入，跨包名/跨域/库锁定均不命中。
+- 测试：`AutofillSessionGrantStoreTest` 7 例。
+
+**ISSUE-P3-43（部分达标）**
+- ✅ ① 接线既有 `overrideNoAutofill`：`AutofillFieldScanner.scan(nodes, respectImportantForAutofill)`
+  跳过 `IMPORTANT_FOR_AUTOFILL_NO*` 字段；默认 false（尊重页面标记）。
+- ⏳ ②③ 字段签名级屏蔽 / 保存侧独立黑名单：**缺少用户交互写入入口**，为避免制造
+  「有存储无消费方」的假开关，未强行落地，已就地重写验收标准（见 ACTIVE_ISSUES）。
+
+**ISSUE-P3-44（保存体验评估 + 实现）**
+- **发现并修复假开关**：`offerSaveCredentials` 此前只在设置页/持久化链路流转、**无填充侧消费方**
+  （用户关闭后仍照常落库）。本批次接线：`onSaveRequest` 关闭时不落库；同时 `SaveInfo` 亦按该开关
+  注册（否则会出现「框架提示保存、保存侧却跳过」的矛盾语义）。
+- 评估结论（其余子项）：「重复密码更新」已由既有 `saveAutofillCredential` 的内容级幂等查重覆盖；
+  「智能标题生成」与「选择保存分组」收益/复杂度不划算，且单库 KDBX 无多库选择语义，**暂不实现**。
+
+**ISSUE-P3-45（结构化数据可行性评估结论）**
+- 核实：`ScanResult` 仅 username/password；`KdbxEntry` 无银行卡/证件/地址一等模型
+  （UI 层 `UiVaultEntry` 仅有 `cardNumberMasked/cardHolder/cardExpiry/cardCvv` 展示字段）。
+- 结论：**暂不实现**。依据：① 落位依赖 KDBX 自定义字段 schema，须先与 KeePassXC / KeePassDX
+  就互操作达成一致，否则会写入桌面端无法识别的私有数据；② 解析侧需扩展
+  `FieldHint` 至 `CREDIT_CARD_*` / `IDENTITY_NUMBER` / `POSTAL_*` 并配脱敏与置信度闸门，
+  属独立大项；③ Monica 该能力建立在**私有 MDBX 架构**上（见架构分析 §5.4，**不可直搬**）。
+  若后续决定实现，应新开条目并先交付 schema 决策记录。
+
+### 9.3 过程缺陷与事实修正（如实留痕）
+
+| # | 类型 | 内容 |
+|---|---|---|
+| 1 | 过程缺陷 | `AutofillGrantContext.normalized()` 初版手动 `lowercase + removePrefix("www.")`，**未剥离 scheme/路径**，导致「https://WWW.GitHub.com/login」与「github.com」不相等，单测 `上下文归一化后可命中` 失败。修正为复用 `DomainMatcher.extractDomain`（单一事实源）。 |
+| 2 | 过程缺陷 | `AutofillHealthProbe` 首版 import 写成 `android.app.autofill.AutofillManager`（正确为 `android.view.autofill.AutofillManager`），编译失败后修正。 |
+| 3 | **既有缺陷（本批次发现并修复）** | `overrideNoAutofill`（「强制忽略应用的禁止自动填充标记」）与 `offerSaveCredentials`（「新密码保存提示」）两个设置项**长期无任何填充侧消费方**，属假开关——用户关闭后行为不变。二者已分别由 P3-43① 与 P3-44 真实接线。 |
+| 4 | 决策留痕 | P3-43 的字段签名级/保存侧黑名单缺少用户写入入口，未采用「先落存储 API、后续再接 UI」的做法（那会重现本批次第 3 条同类问题），改为标注部分达标并先交付 P3-40 选择器作为未来交互落点。 |
+| 5 | 事实修正 | 设置页「下发前二次确认」原文案宣称「属强制安全策略（不可关闭）」；P3-42 引入默认关闭的宽限开关后，该表述已不准确，中英文案同步改为「默认要求…（库锁定时必须先解锁）」。 |
+
+### 9.4 未验证项（不得据此认为已真机验证）
+
+| 项 | 说明 |
+|---|---|
+| 手动选择器 / 健康自检 / 授权宽限的**设备侧**行为 | 本机无设备与模拟器，仅完成 JVM 单测与编译验证；`EXTRA_AUTHENTICATION_RESULT` 回传链路需 instrumented 或真机验证。 |
+| P3-40 的 CM（Credential Manager）通道接线 | 本批次选择器仅接入**传统 Autofill** 通道；CM 通道的手动搜索入口未接（需另开条目）。 |
+| P3-39 打分权重的实际召回效果 | 打分阈值与排序键为静态设定，无真实语料 A/B；上线后需按实际反馈调参。 |
+
+### 9.5 归档门禁证据
+
+`.\gradlew.bat :app:testDebugUnitTest` → **BUILD SUCCESSFUL**：app 模块 **712 例**（基线 678 → **+34 例**），
+**0 失败 / 0 跳过**（2026-09-10 实测，统计自 `app/build/test-results/testDebugUnitTest/*.xml`）；
+`AutofillManager` / `CredentialManager` / Compose 依赖编译通过；中英文 strings 同步。
+

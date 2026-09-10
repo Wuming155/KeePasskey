@@ -169,4 +169,30 @@ class AutofillFieldScannerTest {
         assertEquals("e", result.usernameId)
         assertEquals(FieldConfidence.MEDIUM, result.usernameConfidence)
     }
+
+    @Test
+    fun `尊重 importantForAutofill 时跳过页面禁用字段`() {
+        val nodes = listOf(
+            ScanNode(id = "u", autofillHints = listOf("username"), importantForAutofill = false),
+            ScanNode(id = "p", autofillHints = listOf("password"), importantForAutofill = false)
+        )
+
+        val result = AutofillFieldScanner.scan(nodes)
+
+        assertNull(result.usernameId)
+        assertNull(result.passwordId)
+    }
+
+    @Test
+    fun `覆盖开关开启时忽略 importantForAutofill 禁用标记`() {
+        val nodes = listOf(
+            ScanNode(id = "u", autofillHints = listOf("username"), importantForAutofill = false),
+            ScanNode(id = "p", autofillHints = listOf("password"), importantForAutofill = false)
+        )
+
+        val result = AutofillFieldScanner.scan(nodes, respectImportantForAutofill = false)
+
+        assertEquals("u", result.usernameId)
+        assertEquals("p", result.passwordId)
+    }
 }

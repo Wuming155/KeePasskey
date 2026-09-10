@@ -134,6 +134,11 @@ fun AutofillSettingsScreen(
                 )
             }
 
+            // ISSUE-P3-41：服务健康自检（实时探测系统侧与本应用侧链路状态并给出修复指引）
+            item {
+                AutofillHealthCard(appEnabled = uiState.autofillServiceEnabled)
+            }
+
             item {
                 BentoCard(
                     modifier = Modifier.fillMaxWidth(),

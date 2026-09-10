@@ -85,6 +85,13 @@
                 android:resource="@xml/credential_provider_service" />
         </service>
 
+        <!-- ISSUE-P3-40：自动填充「手动选择器」落地 Activity（全库搜索兜底；由填充数据集的
+             认证 PendingIntent 拉起，回传 AutofillManager.EXTRA_AUTHENTICATION_RESULT） -->
+        <activity
+            android:name=".autofill.AutofillPickerActivity"
+            android:exported="false"
+            android:theme="@style/Theme.KeePasskey" />
+
         <!-- 传统系统自动填充服务 (AutofillService) 兼容层 -->
         <service
             android:name=".autofill.KeePasskeyAutofillService"

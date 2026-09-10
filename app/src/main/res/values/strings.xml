@@ -776,6 +776,20 @@
     <string name="autofill_fill_confirm_sub">填充密码前默认要求生物识别或手动确认（库锁定时必须先解锁）</string>
     <string name="autofill_session_grant_title">短时免重复确认（30 秒）</string>
     <string name="autofill_session_grant_sub">库已解锁时，对同一应用/站点 30 秒内仅需确认一次；默认关闭</string>
+    <!-- ISSUE-P3-41：自动填充服务健康自检状态与修复指引 -->
+    <string name="autofill_health_ok">自动填充服务运行正常</string>
+    <string name="autofill_health_attention">自动填充服务需要处理</string>
+    <string name="autofill_health_issue_service_missing">自动填充服务未正确声明，请重新安装应用</string>
+    <string name="autofill_health_issue_app_disabled">应用内「旧版自动填充服务」已关闭</string>
+    <string name="autofill_health_issue_system_disabled">系统未选择本应用为自动填充服务，请前往系统设置启用</string>
+    <string name="autofill_health_issue_cm_unavailable">凭据管理器 (Credential Manager) 不可用</string>
+    <!-- ISSUE-P3-40：自动填充手动选择器（全库搜索兜底） -->
+    <string name="autofill_picker_title">选择要填充的凭据</string>
+    <string name="autofill_picker_query_hint">搜索标题、用户名或网址</string>
+    <string name="autofill_picker_empty">没有匹配的条目</string>
+    <string name="autofill_picker_confirm_sub">确认后填充所选凭据</string>
+    <string name="autofill_picker_entry_title">搜索全部条目…</string>
+    <string name="autofill_picker_entry_sub">手动选择要填充的凭据</string>
     <string name="autofill_blacklist_row_title">自动填充黑名单</string>
     <string name="autofill_blacklist_count">已屏蔽 %1$d 个应用</string>
     <string name="autofill_blacklist_empty">暂无屏蔽的应用</string>

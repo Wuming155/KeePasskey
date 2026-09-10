@@ -43,7 +43,13 @@ data class ScanNode(
      * 不可见的**密码**框仍按密码准入（部分应用聚焦账号框时密码框尚未可见，若整体丢弃会导致填充失效）；
      * 不可见的**账号**框一律不参与（避免隐藏的搜索/备注被误判为登录账号）。
      */
-    val isVisible: Boolean = true
+    val isVisible: Boolean = true,
+    /**
+     * ISSUE-P3-43：页面是否允许对该字段自动填充（对应 AssistStructure 的 `importantForAutofill`）。
+     * 仅当扫描方要求「尊重页面标记」（[scan] 的 `respectImportantForAutofill = true`）时，
+     * false 才会导致该字段被跳过；对应设置项 `overrideNoAutofill`（默认 false=尊重）。
+     */
+    val importantForAutofill: Boolean = true
 )
 
 /**
@@ -125,9 +131,13 @@ object AutofillFieldScanner {
     )
 
     /**
-     * 扫描节点列表并提取用户名框、密码框与来源信息
+     * 扫描节点列表并提取用户名框、密码框与来源信息。
+     *
+     * @param respectImportantForAutofill ISSUE-P3-43：true 时跳过页面显式声明
+     *   `importantForAutofill=no` 的字段（默认行为，对应 `overrideNoAutofill = false`）；
+     *   调用方传 false 表示用户选择「覆盖应用的禁止填充标记」。
      */
-    fun scan(nodes: List<ScanNode>): ScanResult {
+    fun scan(nodes: List<ScanNode>, respectImportantForAutofill: Boolean = true): ScanResult {
         var resolvedWebDomain: String? = null
         var resolvedPackageName: String? = null
 
@@ -144,6 +154,9 @@ object AutofillFieldScanner {
 
             // 搜索框与非凭据字段（验证码/评论等）一律不参与
             if (isSearchField(node) || isNonCredentialField(node)) continue
+            // ISSUE-P3-43：页面显式声明 importantForAutofill=no 的字段，
+            // 在「尊重页面标记」模式下跳过（设置项 overrideNoAutofill 可覆盖）
+            if (respectImportantForAutofill && !node.importantForAutofill) continue
 
             val passwordConfidence = passwordSignal(node)
             if (passwordConfidence != FieldConfidence.NONE) {

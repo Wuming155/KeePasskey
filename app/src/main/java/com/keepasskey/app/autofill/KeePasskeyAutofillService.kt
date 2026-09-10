@@ -154,12 +154,16 @@ class KeePasskeyAutofillService : AutofillService() {
                     label = node.label,
                     webDomain = node.webDomain,
                     packageName = callingPkg,
-                    isVisible = node.isVisible
+                    isVisible = node.isVisible,
+                    importantForAutofill = node.importantForAutofill
                 )
             )
         }
 
-        val scanResult = AutofillFieldScanner.scan(scanNodes)
+        val scanResult = AutofillFieldScanner.scan(
+            scanNodes,
+            respectImportantForAutofill = !settingsStore.isOverrideNoAutofillEnabled()
+        )
         val usernameParsed = scanResult.usernameId?.toIntOrNull()?.let { parsedNodes.getOrNull(it) }
         val passwordParsed = scanResult.passwordId?.toIntOrNull()?.let { parsedNodes.getOrNull(it) }
 
@@ -326,9 +330,47 @@ class KeePasskeyAutofillService : AutofillService() {
             responseBuilder.addDataset(dsBuilder.build())
         }
 
+        // ISSUE-P3-40：手动搜索兜底入口（自动匹配零候选/候选不含目标条目时使用）。
+        // 以「认证数据集」形式挂入：值在用户于选择器中选中并确认后才经
+        // AutofillManager.EXTRA_AUTHENTICATION_RESULT 回传——未确认前不携带任何明文。
+        val pickerIntent = Intent(this, AutofillPickerActivity::class.java).apply {
+            putExtra(AutofillPickerActivity.EXTRA_USERNAME_ID, usernameId)
+            putExtra(AutofillPickerActivity.EXTRA_PASSWORD_ID, passwordId)
+        }
+        val pickerPendingIntent = PendingIntent.getActivity(
+            this,
+            REQUEST_CODE_PICKER,
+            pickerIntent,
+            // 框架需注入 fillIn extras，必须 FLAG_MUTABLE
+            PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        val pickerViews = RemoteViews(packageName, R.layout.autofill_dataset_item).apply {
+            setTextViewText(R.id.tv_username, getString(R.string.autofill_picker_entry_title))
+            setTextViewText(R.id.tv_subtitle, getString(R.string.autofill_picker_entry_sub))
+        }
+        val pickerBuilder = Dataset.Builder(
+            Presentations.Builder()
+                .setMenuPresentation(pickerViews)
+                .setDialogPresentation(pickerViews)
+                .build()
+        )
+        if (usernameId != null) {
+            // 与解锁引导数据集同语义：value 为 null 表示值在认证后（选择器回传时）才可用
+            @Suppress("DEPRECATION")
+            pickerBuilder.setValue(usernameId, null)
+        }
+        if (passwordId != null) {
+            @Suppress("DEPRECATION")
+            pickerBuilder.setValue(passwordId, null)
+        }
+        pickerBuilder.setAuthentication(pickerPendingIntent.intentSender)
+        responseBuilder.addDataset(pickerBuilder.build())
+
         // 注册 SaveInfo 以便在用户提交时捕获新账密
+        // ISSUE-P3-44：仅在用户开启「新密码保存提示」时注册——否则框架会提示保存、
+        // 保存侧却又按开关跳过落库，形成「提示了但没保存」的矛盾语义。
         val requiredIds = listOfNotNull(usernameId, passwordId).toTypedArray()
-        if (requiredIds.isNotEmpty()) {
+        if (requiredIds.isNotEmpty() && settingsStore.isOfferSaveCredentialsEnabled()) {
             val saveFlags = SaveInfo.SAVE_DATA_TYPE_PASSWORD or SaveInfo.SAVE_DATA_TYPE_USERNAME
             val saveInfo = SaveInfo.Builder(saveFlags, requiredIds).build()
             responseBuilder.setSaveInfo(saveInfo)
@@ -380,6 +422,14 @@ class KeePasskeyAutofillService : AutofillService() {
                     null -> Unit
                 }
 
+                // ISSUE-P3-44：接线既有「新密码保存提示」开关（此前无填充侧消费方，属假开关）。
+                // 关闭时不落库、不打扰用户——向框架回调成功即表示「本次无需保存」。
+                if (!settingsStore.isOfferSaveCredentialsEnabled()) {
+                    AppLog.i(TAG, "已关闭新密码保存，跳过本次自动填充保存")
+                    callback.onSuccess()
+                    return@launch
+                }
+
                 val parsedNodes = mutableListOf<ParsedViewNode>()
                 val scanNodes = mutableListOf<ScanNode>()
 
@@ -393,13 +443,19 @@ class KeePasskeyAutofillService : AutofillService() {
                             inputType = node.inputType,
                             isFocused = node.isFocused,
                             htmlName = node.htmlName,
+                            label = node.label,
                             webDomain = node.webDomain,
-                            packageName = callingPkg
+                            packageName = callingPkg,
+                            isVisible = node.isVisible,
+                            importantForAutofill = node.importantForAutofill
                         )
                     )
                 }
 
-                val scanResult = AutofillFieldScanner.scan(scanNodes)
+                val scanResult = AutofillFieldScanner.scan(
+                    scanNodes,
+                    respectImportantForAutofill = !settingsStore.isOverrideNoAutofillEnabled()
+                )
                 val username = scanResult.usernameId?.toIntOrNull()?.let { parsedNodes.getOrNull(it)?.text }.orEmpty()
                 val password = scanResult.passwordId?.toIntOrNull()?.let { parsedNodes.getOrNull(it)?.text }.orEmpty()
                 // ISSUE-P2-07：保存前同样做 webDomain 归属校验，避免把不可归属的域写进条目
@@ -481,6 +537,7 @@ class KeePasskeyAutofillService : AutofillService() {
                     label = node.hint,
                     webDomain = node.webDomain,
                     isVisible = node.visibility == android.view.View.VISIBLE,
+                    importantForAutofill = isImportantForAutofill(node),
                     text = textVal
                 )
             )
@@ -490,6 +547,19 @@ class KeePasskeyAutofillService : AutofillService() {
             val child = node.getChildAt(i) ?: continue
             traverseViewNode(child, onNode)
         }
+    }
+
+    /**
+     * ISSUE-P3-43：页面是否允许对该节点自动填充。
+     *
+     * `IMPORTANT_FOR_AUTOFILL_NO` 与 `IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS`
+     * 视为页面显式禁止填充；其余（AUTO / YES / YES_EXCLUDE_DESCENDANTS）视为允许。
+     * 是否被跳过取决于扫描参数 `respectImportantForAutofill`（由 `overrideNoAutofill` 开关决定）。
+     */
+    private fun isImportantForAutofill(node: AssistStructure.ViewNode): Boolean {
+        val important = node.importantForAutofill
+        return important != android.view.View.IMPORTANT_FOR_AUTOFILL_NO &&
+                important != android.view.View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
     }
 
     private data class ParsedViewNode(
@@ -503,6 +573,8 @@ class KeePasskeyAutofillService : AutofillService() {
         val webDomain: String?,
         /** ISSUE-P3-39：节点可见性（不可见账号框不参与，不可见密码框仍准入） */
         val isVisible: Boolean,
+        /** ISSUE-P3-43：页面是否允许对该节点自动填充（`importantForAutofill`） */
+        val importantForAutofill: Boolean,
         val text: String
     )
 
@@ -513,6 +585,9 @@ class KeePasskeyAutofillService : AutofillService() {
         private const val REQUEST_CODE_UNLOCK = 2001
         /** TASK-11：已解锁分支二次确认数据集的 PendingIntent requestCode 基址 */
         private const val REQUEST_CODE_CONFIRM_BASE = 2100
+
+        /** ISSUE-P3-40：手动选择器入口数据集的 requestCode（与确认基址段无重叠） */
+        private const val REQUEST_CODE_PICKER = 2200
 
         // ISSUE-P2-07/08：保存被拒的提示文案已迁入 strings.xml
         // （autofill_save_blocked / autofill_save_integrity_blocked），与填充侧同源资源化。

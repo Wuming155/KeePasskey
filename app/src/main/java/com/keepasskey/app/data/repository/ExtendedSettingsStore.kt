@@ -206,6 +206,24 @@ class ExtendedSettingsStore @Inject constructor(
     fun isAutofillSessionGrantEnabled(): Boolean =
         prefs?.getBoolean(K_AUTOFILL_SESSION_GRANT, false) ?: false
 
+    /**
+     * ISSUE-P3-43：是否覆盖页面的 `importantForAutofill=no` 标记（默认 false = 尊重页面标记）。
+     *
+     * 供 [com.keepasskey.app.autofill.KeePasskeyAutofillService] 在每次填充/保存请求时求值；
+     * 默认值下，页面显式声明禁止自动填充的字段将被跳过（此前该开关无消费方，属假开关）。
+     */
+    fun isOverrideNoAutofillEnabled(): Boolean =
+        prefs?.getBoolean(K_OVERRIDE_NO_AUTOFILL, false) ?: false
+
+    /**
+     * ISSUE-P3-44：是否保存自动填充捕获的新密码（默认 true）。
+     *
+     * 此前该偏好（`offerSaveCredentials`）只在设置页与持久化链路中流转、**无任何填充侧消费方**，
+     * 属「假开关」——用户关闭后仍然照常落库。本方法为其提供真实判定入口。
+     */
+    fun isOfferSaveCredentialsEnabled(): Boolean =
+        prefs?.getBoolean(K_OFFER_SAVE_CREDENTIALS, true) ?: true
+
     /** wifiOnlySync 属 SyncUiState 域（周期同步的网络约束消费方），以独立键持久化 */
     fun loadWifiOnlySync(): Boolean = prefs?.getBoolean(K_WIFI_ONLY_SYNC, true) ?: true
 
