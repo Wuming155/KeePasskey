@@ -239,17 +239,50 @@ val expectedOutcome = if (hostSupportsDirectoryChannel) DirectorySyncOutcome.SYN
 ### 11.3 本批次随之落地的整改（逐项证据见 RESOLVED_LOG **§7**）
 
 1. `Fast gate` 的 **147 个 lint error 清零**（144 `MissingTranslation` + 2 `RestrictedApi` + 1 `NewApi`）；
-   本地 `.\gradlew.bat lint` 实测 **5 个模块 0 error**；
+   本地与 **CI runner 侧**均实测 **0 error**（复跑运行 `34470024328` 三 job 全绿、工作流 exit 0）；
 2. 新增 `.github/check_dependency_cvss.py`，并在 `dependency-scan.yml` 中接线为
    **CVSS 阈值硬断言（fail-closed）**：对报告本身断言，不依赖插件语义；报告缺失同样失败；
-3. `.github/owasp-dependency-suppressions.xml` 登记**首条经人工核实的误报**
-   （`androidx.sqlite` 族：构件内零 `.so`，不含原生 SQLite C 代码）。
+3. **供应链达阈条目处置**（ISSUE-P3-32 主要面）：
+   `androidx.sqlite` 族登记误报（构件内零 `.so`、AAR 无 `jni/`）；Kotlin **2.4.10 → 2.4.20**
+   真修复 `CVE-2026-53914`；`org.jline` / `protobuf-java@2.6.1` / `analytics-library` 登记为
+   **构建工具链专属**（实测均**不在** `:app:releaseRuntimeClasspath`）；
+4. **CodeQL 开放告警由 10 条归零**（7 条 rust 按 `used in tests` 处置；5 条 py **全部 FIXED**）；
+5. **合并 PR #5**（6 个 Action 跨大版本升级，squash 提交 `a9b838f`）——详见 §11.6。
+
+### 11.5 §9-2 与 §11.4 的最终实测答案：**本地真实扫描 → 硬断言通过**
+
+核实方式：本地 `.\gradlew.bat dependencyCheckAggregate -I .github/dependency-check.init.gradle.kts`
+（与 CI **同参数**、非 UP-TO-DATE，报告产出时间 2026-09-10 19:54），
+随后执行 `python .github/check_dependency_cvss.py build/reports/dependency-check/dependency-check-report.json`：
+
+| 指标 | 处置前（CI 报告 `34335443660`） | 处置后（本地实测） |
+|---|---|---|
+| 漏洞实例 | 188 | **7** |
+| 其中 CVSS ≥ 7.0 | 138 | **0** |
+| 硬断言退出码 | 1（98 个唯一达阈组合） | **0（通过）** |
+| `CVE-2026-53914` | 命中约 30 个构件 | **已消除** |
+
+- 残余 7 条均为 **CVSS 5.3 MEDIUM**（`commons-lang3@3.16.0`、`httpclient@4.5.6`、
+  `kotlin-reflect@1.6.10`、`kotlin-stdlib-jdk7/jdk8@1.8.x` 的 `CVE-2020-29582`），
+  皆属构建工具链、**不达阈值**，如实保留可见。
+- **该次本地实跑还捕获了一处真实缺陷**：上一轮写入的 `androidx.sqlite` 豁免**缺少 `<cve>` 元素、
+  违反插件 XSD**，插件报
+  `Unable to parse suppression xml file ... 元素 'suppress' 的内容不完整`——即该豁免**从未生效过**
+  （`dependency-scan` 为手动触发，此前无人执行过）。已补齐 28 个 `<cve>` 后复跑通过，
+  详见 RESOLVED_LOG **§7.6-10**。
+
+### 11.6 合并 PR #5（原 §11.4-3 的处置）
+
+- `gh pr merge 5 --squash` → 合并提交 **`a9b838f`**，PR 状态 `MERGED`（2026-09-10T11:49:05Z）。
+- 合并后 Action 版本：`checkout v7.0.1` / `setup-java v6.0.0` / `setup-gradle v6.3.0` /
+  `upload-artifact v7.0.1` / `setup-android v4.0.1` / `upload-sarif v4.37.9`，
+  且与 §11.3-2 的硬断言步骤**共存**（预演合并无冲突，合并后 YAML 经 `yaml.safe_load` 校验通过）。
 
 ### 11.4 仍未验证（**不得**据本节认为 CI 已全绿）
 
-1. `Fast gate` 在 lint 修复后的**下一次真实 CI 运行**（本地已 0 error，runner 侧未复跑）；
-2. `dependency-scan` 在硬断言接入后的**首次运行**：按预期**将失败**，
-   直至 Kotlin（`CVE-2026-53914`）与构建工具链（jline / protobuf）两族达阈条目被「修依赖或登记豁免」；
-3. `github/codeql-action/upload-sarif` **v4** 的真实执行——该 Action 仅出现在手动触发的
+1. `dependency-scan` **在 CI runner 上的首次运行**：`workflow_dispatch` 需 PAT 具备 Actions 写权限，
+   本环境被拒（HTTP 403 `Resource not accessible by personal access token`），
+   故 §11.5 以**本地同参数扫描**作为等价验证；CI 侧触发命令：`gh workflow run dependency-scan.yml`；
+2. `github/codeql-action/upload-sarif` **v4** 的真实执行——该 Action 仅出现在手动触发的
    `dependency-scan`，PR #5 的 CI 未覆盖；
-4. `CodeQL` 工作流在本次改动推送后的复跑结果（3 条 `py/clear-text-logging-sensitive-data` 应自动关闭）。
+3. §9-6（Gradle 对 daemon JVM criteria 不满足时的失败/自动供给行为）与 §9-7 的逐条 POSIX 断言结论。

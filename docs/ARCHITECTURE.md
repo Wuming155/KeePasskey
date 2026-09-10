@@ -93,8 +93,8 @@ app/src/main/java/com/keepasskey/app/
 | 领域 | 选型 |
 |------|------|
 | 系统基准 | Android API 36+（`minSdk 36`, `compileSdk 37`, `targetSdk 36`），仅 Android 16+ 深度优化 |
-| 语言 | Kotlin 2.4.10（Compose 编译器随 Kotlin 一同发布） |
-| 构建 | Gradle 9.7.1（Wrapper）+ AGP 9.4.0，Kotlin 2.4.10，依赖版本统一由 `gradle/libs.versions.toml` 管理 |
+| 语言 | Kotlin 2.4.20（Compose 编译器随 Kotlin 一同发布；`ISSUE-P3-32` 为修复 `CVE-2026-53914` 由 2.4.10 升至此版） |
+| 构建 | Gradle 9.7.1（Wrapper）+ AGP 9.4.0，Kotlin 2.4.20，依赖版本统一由 `gradle/libs.versions.toml` 管理 |
 | UI | Jetpack Compose（Material 3 / M3 Expressive） |
 | 异步 | Kotlin Coroutines + Flow |
 | 依赖注入 | Hilt 2.60.1（KSP 2.3.11，AGP 9 内置 Kotlin） |

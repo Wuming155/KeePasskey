@@ -46,6 +46,39 @@
             其 CVE 会重新进入闸门（这正是期望行为）。
         ]]></notes>
         <packageUrl regex="true">^pkg:maven/androidx\.sqlite/sqlite(-framework)?@.*$</packageUrl>
+        <!-- 插件 XSD（dependency-suppression.1.3.xsd）要求 suppress 至少含
+             cpe / cve / vulnerabilityName / cwe / cvssBelow 之一——
+             仅 packageUrl + notes 是**schema 非法**的（2026-09-10 经本地真实运行
+             `dependencyCheckAggregate` 捕获：Line=49 元素 'suppress' 的内容不完整）。
+             故此处逐条列出该族在报告中命中的全部 28 个 CVE（20 个 ≥ CVSS 7.0）。 -->
+        <cve>CVE-2015-3414</cve>
+        <cve>CVE-2015-3415</cve>
+        <cve>CVE-2015-3416</cve>
+        <cve>CVE-2015-3717</cve>
+        <cve>CVE-2015-5895</cve>
+        <cve>CVE-2015-6607</cve>
+        <cve>CVE-2016-6153</cve>
+        <cve>CVE-2017-10989</cve>
+        <cve>CVE-2018-8740</cve>
+        <cve>CVE-2018-20346</cve>
+        <cve>CVE-2018-20505</cve>
+        <cve>CVE-2018-20506</cve>
+        <cve>CVE-2019-19645</cve>
+        <cve>CVE-2019-19646</cve>
+        <cve>CVE-2020-11655</cve>
+        <cve>CVE-2020-11656</cve>
+        <cve>CVE-2020-13434</cve>
+        <cve>CVE-2020-13435</cve>
+        <cve>CVE-2020-13630</cve>
+        <cve>CVE-2020-13631</cve>
+        <cve>CVE-2020-13632</cve>
+        <cve>CVE-2020-15358</cve>
+        <cve>CVE-2022-35737</cve>
+        <cve>CVE-2023-7104</cve>
+        <cve>CVE-2025-6965</cve>
+        <cve>CVE-2025-70873</cve>
+        <cve>CVE-2026-11822</cve>
+        <cve>CVE-2026-11824</cve>
     </suppress>
 
     <!-- ============ ISSUE-P3-32：构建工具链专属构件（不进入发布产物，2026-09-10 核实） ============ -->

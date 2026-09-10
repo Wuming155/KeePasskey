@@ -64,12 +64,13 @@
 > `DatabaseSettingsDialogs` / `KdbxFile` / `KeePasskeyApp` / `VaultEntryRows` / `VaultRepository` / `VaultListScreen`），
 > 另**增量完成** `KdbxHeader` 与 `SyncCredentialsStore` 两项，并登记 `DicewareWordList` 为**经论证的纯常量例外**；
 > 仓库内残余的 **23 个**真逻辑超阈值文件**整体转入 ISSUE-P3-31** 重新登记（附 2026-09-10 实测快照与核实方式）。
-> **2026-09-10 追加三（CI 首跑实测）**：新增 **ISSUE-P3-32**（供应链达阈告警残余）与
-> **ISSUE-P3-33**（GitHub Actions 大版本升级决策）；同一批次内**已闭环**的工作
-> （`Fast gate` 147 个 lint error 清零、CodeQL 10 条告警处置、`dependency-scan` 的 CVSS 阻断语义
-> **静默失效**之实证与硬断言补强）见 [RESOLVED_LOG.md](RESOLVED_LOG.md) **§7**；
-> 实测校准追加节见 [docs/ci-静态校准记录.md](ci-静态校准记录.md) **§11**。
-> 本节余 **5 项**（P3-23 / P3-24 / P3-31 / P3-32 / P3-33）。
+> **2026-09-10 追加三（CI 首跑实测 + 供应链残余处置）**：新增 **ISSUE-P3-32**（供应链达阈告警残余）；
+> 同一批次内**已闭环**的工作见 [RESOLVED_LOG.md](RESOLVED_LOG.md) **§7**：
+> `Fast gate` 147 个 lint error 清零、CodeQL 10 条告警处置、`dependency-scan` 的 CVSS 阻断语义
+> **静默失效**之实证与硬断言补强、**Kotlin 2.4.20 真修复 `CVE-2026-53914` + 4 族豁免登记**
+> （本地真实扫描实测 **188 → 7 条实例、达阈 138 → 0 条**）、以及**合并 PR #5**
+> （原 ISSUE-P3-33，已闭环归档）；实测校准追加节见 [docs/ci-静态校准记录.md](ci-静态校准记录.md) **§11**。
+> 本节余 **4 项**（P3-23 / P3-24 / P3-31 / P3-32）。
 > 归档门禁证据：`.\gradlew.bat test --rerun-tasks --max-workers=1 --continue` → **BUILD SUCCESSFUL**，
 > **1200 例 / 1187 通过 / 0 失败 / 13 跳过**（基线 921 → **+279 例，零退化**）；`assembleDebug` 通过；
 > `:database:assembleDebugAndroidTest` 通过（ISSUE-P3-23 验收标准①）。
@@ -227,14 +228,23 @@
   各族的依赖来源经 `.\gradlew.bat :app:dependencyInsight --configuration <cfg> --dependency <pkg>` 逐族确认。
 - **背景**：本批次已**实证** `failBuildOnCVSS = 7.0f` 在 `dependencyCheckAggregate` 上不生效
   （见 [RESOLVED_LOG.md](RESOLVED_LOG.md) **§7.4**），并已补硬断言
-  `.github/check_dependency_cvss.py`（脚本本身已随 `d3b03ca` 推送）。
-  ⚠️ **接线尚未生效（需维护者授权）**：把该断言接为 `dependency-scan.yml` 的门禁步骤须更新工作流文件，
-  而**当前 GitHub PAT 缺少 `workflow` 权限**，push 被拒
-  （`refusing to allow a Personal Access Token to create or update workflow … without workflow scope`）；
-  SSH 通道亦不可用（`~/.ssh/config` 经本地代理 `127.0.0.1:38457` / `7890`，报
-  `failed to begin relaying via HTTP. Connection closed by UNKNOWN port 65535`）。
-  该改动已拆出主提交、暂存于**本地分支 `ci/cvss-hard-assertion`**（提交 `0b327f5`）
-  —— **在授权并推送前，本硬断言不会在 CI 中执行**。
+  `.github/check_dependency_cvss.py`，且**已接线为 `dependency-scan.yml` 的独立门禁步骤**（提交 `37e609d`）。
+- **2026-09-10 处置结果（本地真实扫描实测，本条主要面已消解）**：
+  1. **真修复（非豁免）**：Kotlin 2.4.10 → **2.4.20**（即 `CVE-2026-53914` 的修复版本）——
+     实测 `test --rerun-tasks` **1200/1187/0/13 零退化**、`lint` **5 模块 0 error**、
+     运行时面 `kotlin-stdlib` 解析为 **2.4.20**；
+  2. **豁免登记 4 族**（每族附血缘 + 运行面证据）：`org.jline/*@3.24.1`、`protobuf-java@2.6.1`、
+     `analytics-library:*@32.4.0`、`org.jetbrains.kotlin/*`（**仅绑定 `CVE-2026-53914` 单一 CVE**）；
+  3. **实测结果**：本地 `dependencyCheckAggregate -I .github/dependency-check.init.gradle.kts`
+     → 漏洞实例由 **188 条降为 7 条**，其中 **CVSS ≥ 7.0 由 138 条降为 0 条**，
+     硬断言 **exit 0 通过**，`CVE-2026-53914` **已消除**；
+  4. **残余 7 条**全部为 **CVSS 5.3 MEDIUM**（`commons-lang3@3.16.0`、`httpclient@4.5.6`、
+     `kotlin-reflect@1.6.10`、`kotlin-stdlib-jdk7/jdk8@1.8.x` 的 `CVE-2020-29582`），
+     皆属构建工具链且**不达阈值**，**如实保留可见**，不做无依据的批量豁免。
+- **仍未验证（不得据此认为 CI 侧已跑通）**：该断言在 **CI runner** 上的首次真实运行——
+  `workflow_dispatch` 需 PAT 具备 Actions 写权限，本环境被拒
+  （HTTP 403 `Resource not accessible by personal access token`），故本条以**本地同参数扫描**为等价验证；
+  CI 侧首次运行待维护者手动触发（触发命令：`gh workflow run dependency-scan.yml`）。
   **断言生效后 `dependency-scan` 将按预期失败**，直到下列达阈条目被「修依赖」或「登记 suppression」。
   已登记豁免 **1 族**（`androidx.sqlite`：构件内零 `.so`，不含原生 SQLite C 代码），
   以下为**未豁免残余**。
@@ -257,29 +267,3 @@
   3. 处置后 Code Scanning 依赖类 open 告警数与该族结论**一致**（禁止以 dismiss 替代修复依据）。
 - **禁止**：回调 `failBuildOnCVSS` 阈值以换取变绿；删除或注释掉硬断言步骤；
   在没有核实依据的情况下批量写入 suppression。
-
----
-
-### ISSUE-P3-33 (ISSUE-P3-24 衍生): GitHub Actions 大版本升级决策（PR #5）
-
-- **优先级**：P3（构建供应链；不阻断构建）
-- **核实时间点与核实方式（2026-09-10）**：
-  `gh pr list --repo Wuming155/KeePasskey --state all --json number,state,mergedAt`
-  → PR #1 ~ #4 **全部 `CLOSED` 且 `mergedAt=null`**（关闭未合并）；
-  `gh pr diff 5` 取得逐行 diff；`gh run view 34459521867` 查看 PR #5 自身 CI。
-- **背景**：PR #5 把 6 个 Action 跨大版本升级并**保持 SHA 钉死**：
-  `checkout` v4→v7.0.1、`setup-java` v4→v6.0.0、`setup-gradle` v4.4.3→v6.3.0、
-  `upload-artifact` v4→v7.0.1、`setup-android` v3→v4.0.1、`codeql-action/upload-sarif` v3→v4.37.9。
-  `build.yml:12-15` 记载的**推迟理由**是「大版本升级涉及 Node 运行时与输入契约变更，无法在本批次本地验证」
-  —— **该理由现已由 CI 实测解除**：`build.yml` 内的 5 个 Action 已在真实 runner 上跑通
-  （PR #5 的 `Native gate` 与 `Rust supply chain` 均 success；唯一失败点是**与本 PR 无关的既存 lint 门禁**，
-  且该 lint 已在本批次清零）。既存的 Node 20 弃用告警与「setup-java v4 已弃用」告警亦印证升级必要性。
-- **待决策项**：
-  1. 是否合并 PR #5（**本批次未合并**：PR #1~#4 全部关闭未合并，且 `build.yml` 明确
-     「本次只做 SHA 钉死，**不跨大版本升级**……升级另立条目」，属**已文档化的既定决策**，须维护者拍板）；
-  2. `upload-sarif@v4` 的真实执行**尚未验证**（仅存在于手动触发的 `dependency-scan.yml`，
-     PR #5 的 CI 未覆盖）——建议合并前先手动触发一次 `dependency-scan`；
-  3. 若合并，须同步更新 `build.yml:12-15` 与 `dependency-scan.yml:7-8` 中「不跨大版本升级」的说明，
-     避免文档与事实再次脱节。
-- **验收标准**：维护者对 PR #5 明确给出「合并 / 关闭并另立升级条目」之一并留痕；
-  若合并，`upload-sarif@v4` 需有一次**真实运行记录**；相关注释同步更新。

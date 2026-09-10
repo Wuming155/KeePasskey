@@ -1330,4 +1330,63 @@ app/src/main/java/com/keepasskey/app/ui/screens/generator/DicewareWordList.kt:37
    其余 12 个文件正常推送；**该硬断言在令牌授权前不会在 CI 中执行**，已在提交信息与
    [ACTIVE_ISSUES.md](ACTIVE_ISSUES.md) ISSUE-P3-32 中显式声明。
    教训：**改动 `.github/workflows/**` 前应先确认推送令牌具备 `workflow` 权限**，否则会在提交拆分上返工。
+10. **上一轮登记的 suppression 文件是 schema 非法的，且从未被真实执行过（本批次本地实跑才暴露）**：
+    上一轮为 `androidx.sqlite` 族写入的 `<suppress>` **只有 `<notes>` 与 `<packageUrl>`，
+    没有 `<cve>` / `<cpe>` / `<vulnerabilityName>` / `<cwe>` / `<cvssBelow>` 中任何一项**，
+    违反插件 XSD（`dependency-suppression.1.3.xsd`）。当时我只校验了 **XML 良构性**（`[xml]` 解析通过）
+    就当作合格，而该工作流是 `workflow_dispatch` 手动触发、本环境又无法触发，
+    **因此这份「豁免」从未真正生效过**，长期处于「看似已登记、实则解析失败」的状态。
+    本地实跑 `dependencyCheckAggregate` 时才报出：
+    `Unable to parse suppression xml file ... Line=49, Column=16: 元素 'suppress' 的内容不完整`。
+    教训：**配置类产物的验收标准必须是「目标工具能消费」，而不是「XML/JSON 语法正确」**；
+    对无法立即触发的流水线，应在本地以**同一入口**（同一 init 脚本）实跑一次。
+11. **`workflow_dispatch` 被 PAT 权限拒止（环境限制）**：`gh workflow run dependency-scan.yml` 报
+    HTTP 403 `Resource not accessible by personal access token`（该令牌缺 Actions 写权限）。
+    处置：改用**本地同参数扫描**（`-I .github/dependency-check.init.gradle.kts`）作为等价验证，
+    并在 ISSUE-P3-32 中显式声明「CI 侧首次运行仍待维护者手动触发」。
+
+### 7.7 供应链达阈告警的完整处置（ISSUE-P3-32 主要面闭环）
+
+> 承接 §7.4：硬断言补齐之后，本批次进一步**处置达阈条目本身**，而非仅补闸门。
+
+**处置前基线**（本地与 CI 报告一致）：188 条漏洞实例 / 132 个唯一（构件 × CVE）组合，
+其中 **138 条实例、98 个组合 CVSS ≥ 7.0**。
+
+| 族 | 处置方式 | 依据 |
+|---|---|---|
+| `androidx.sqlite`（`sqlite` / `sqlite-framework`@2.4.0） | **登记误报**（28 个 CVE，20 个 ≥ 7.0） | AAR 内**零 `.so`、无 `jni/`**；`sqlite-framework` 委托系统 `android.database.sqlite`；升级无法消除该 CPE 匹配 |
+| `CVE-2026-53914`（`org.jetbrains.kotlin/*`，约 30 个构件） | **真修复 + 单 CVE 豁免** | NVD CPE 为**产品级** `jetbrains:kotlin`（`<2.4.20`），实际受影响构件仅 `compose-group-mapping`；Kotlin **2.4.10 → 2.4.20**；厂商自评 6.7（`AV:L/AC:H/PR:H`），CISA SSVC `exploitation=none` |
+| `org.jline/*@3.24.1`（11 构件）、`protobuf-java@2.6.1`、`analytics-library:*@32.4.0` | **登记为构建工具链专属（不入 APK）** | 血缘：jline ×11 与 `protobuf-java@2.6.1` 全部 shade 在 AGP 的 `kotlin-compiler-32.4.0.jar` 内；运行面：三者均**不在** `:app:releaseRuntimeClasspath`（`dependencyInsight` 实测 **No dependencies matching**） |
+
+**处置后实测（本地真实扫描，2026-09-10）**：
+
+| 指标 | 处置前 | 处置后 |
+|---|---|---|
+| 漏洞实例 | 188 | **7** |
+| 其中 CVSS ≥ 7.0 | 138 | **0** |
+| 硬断言退出码 | 1（98 个唯一达阈组合） | **0（通过）** |
+| `CVE-2026-53914` | 命中约 30 个构件 | **已消除** |
+
+- 残余 7 条全部为 **CVSS 5.3 MEDIUM**：`commons-lang3@3.16.0`（`CVE-2025-48924`）、
+  `httpclient@4.5.6`（`CVE-2020-13956`）、`kotlin-reflect@1.6.10` 与 `kotlin-stdlib-jdk7/jdk8@1.8.x`
+  （`CVE-2020-29582`）——均属构建工具链且不达阈值，**如实保留可见**（不做无依据的批量豁免）。
+- **护栏自证有效**：残余的 Kotlin 命中是 `CVE-2020-29582`（**另一个 CVE**），
+  恰好证明 `org.jetbrains.kotlin/*` 的豁免**只绑定了 `CVE-2026-53914`**，未连带放过其它 CVE。
+- 升级回归证据：`test --rerun-tasks --max-workers=1 --continue` → **BUILD SUCCESSFUL**，
+  **1200 例 / 1187 通过 / 0 失败 / 13 跳过**（零退化）；`lint` → **5 个模块 0 error**。
+
+### 7.8 ISSUE-P3-33 归档：合并 PR #5（Actions 大版本升级）
+
+- **决策修正**：§7.5 曾以「PR #1~#4 全部关闭未合并 + `build.yml` 明确不跨大版本升级」为由**未合并**；
+  维护者随后指示由本批次自行处置 → 依 §7.5 已取得的 CI 证据（`build.yml` 内 5 个 Action 已在真实 runner
+  上跑通）**判定合并**。
+- **执行**：`gh pr merge 5 --squash` → 合并提交 **`a9b838f`**，PR #5 状态 `MERGED`
+  （2026-09-10T11:49:05Z）。合并后 `build.yml` 与 `dependency-scan.yml` 的 Action 版本为
+  `checkout v7.0.1` / `setup-java v6.0.0` / `setup-gradle v6.3.0` / `upload-artifact v7.0.1` /
+  `setup-android v4.0.1` / `upload-sarif v4.37.9`，且**与本节新增的 CVSS 硬断言步骤共存**
+  （本地 `git merge --no-commit --no-ff` 预演确认 `dependency-scan.yml` 自动合并**无冲突**，
+  合并后 YAML 经 `yaml.safe_load` 校验通过）。
+- **残留未验证（如实登记）**：`github/codeql-action/upload-sarif@v4` 仅出现在手动触发的
+  `dependency-scan.yml`，本环境无法触发该工作流（见 §7.6-11），
+  故 **v4 的真实执行仍待一次 CI 运行确认**。
 
