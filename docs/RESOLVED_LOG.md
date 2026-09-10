@@ -1168,12 +1168,18 @@
 
 ### 7.1 本批次整体验收证据
 
+**CI 复跑（决定性证据）**：整改推送后，`build` 工作流运行 `34470024328`（提交 `c25ac51`）
+**三 job 全部 success、工作流整体 exit 0** —— `Fast gate (unit tests + lint)` ✓（含 **`Android Lint` ✓**）、
+`Native gate` ✓（含 `Assemble Release`、v1/v2/v3/v4 签名断言、4 ABI 入包断言）、`Rust supply chain` ✓。
+这是本仓 CI 史上 `fast-gate` **首次转绿**；CodeQL 工作流同期复跑 success，**CodeQL 开放告警由 10 条归零**
+（7 条 rust 按 `used in tests` 处置 + 5 条 py **FIXED**）。
+
 | 门禁 | 命令 | 结果 |
 |---|---|---|
 | 单元测试（全模块） | `.\gradlew.bat test --rerun-tasks --max-workers=1 --continue` | **BUILD SUCCESSFUL**（114 tasks executed） |
 | 用例数 | 解析 `*/build/test-results/testDebugUnitTest/*.xml` | **1200 例 / 1187 通过 / 0 失败 / 0 错误 / 13 跳过** |
 | 分布 | 同上 | app 678 · core 58 · crypto 61 · database 224 · sync 179 |
-| Android Lint | `.\gradlew.bat lint` | **BUILD SUCCESSFUL**；`app`/`core`/`crypto`/`database`/`sync` **各 0 error**（187 warnings / 2 hints，不阻断） |
+| Android Lint | `.\gradlew.bat lint` | **BUILD SUCCESSFUL**；`app`/`core`/`crypto`/`database`/`sync` **各 0 error**（187 warnings / 2 hints，不阻断）；**CI runner 侧复跑同样转绿** |
 | Python 语法 | `python -m py_compile tools/local-sync/*.py` | 5 个脚本全部通过 |
 | 新断言脚本自测 | `python .github/check_dependency_cvss.py <各场景>` | 真实报告 **exit 1**（138 实例 / 98 唯一组合）；缺报告 **exit 1**；无达阈 **exit 0**；缺分数但 CRITICAL **exit 1** |
 

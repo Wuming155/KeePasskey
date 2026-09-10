@@ -207,19 +207,21 @@ val expectedOutcome = if (hostSupportsDirectoryChannel) DirectorySyncOutcome.SYN
 
 ### 11.1 三条 job 的真实执行结果（`build.yml`）
 
-核实方式：`gh run view 34463116293 --repo Wuming155/KeePasskey`（该 run 对应基线提交 `171b160`，2026-09-10）
+核实方式：`gh run view 34463116293 --repo Wuming155/KeePasskey`（首跑，对应基线提交 `171b160`，2026-09-10）
+与 `gh run view 34470024328`（整改后复跑，对应提交 `c25ac51`，2026-09-10）
 
 | job | 实测结论 | 说明 |
 |---|:---:|---|
 | `Rust supply chain (cargo test + cargo deny)` | ✅ **success** | §9-3 的「CI 网络下 advisory-db 拉取」实测通过 |
 | `Native gate (4 ABI Rust, assembleDebug + assembleRelease)` | ✅ **success** | 4 ABI 交叉编译、Debug/Release 打包、v1 关闭/v2 缺席/v3+v4 启用断言、4 ABI 入包断言**全部通过** |
-| `Fast gate (unit tests + lint)` | ❌ **failure** → 已整改 | 单元测试步骤通过；**`Android Lint` 失败，147 errors**（详见 §11.3-1） |
+| `Fast gate (unit tests + lint)` | ❌ failure → **✅ 已修复并复跑通过** | 首跑（`171b160`）失败于 **`Android Lint` 147 errors**（详见 §11.3-1）；整改后复跑（`c25ac51`，运行 `34470024328`）**该 job 整条 success**，含 `Android Lint` ✓ 与 `单元测试（全模块）` ✓ |
 
-- 即 §9-1「三条 job 全部未运行」**不再成立**：三条均已真实运行，两条通过、一条暴露真实缺陷。
+- 即 §9-1「三条 job 全部未运行」**不再成立**；且整改后**三条 job 全部 success**（`build` 工作流整体 exit 0）。
 - §9-6（Gradle 对 daemon JVM criteria 不满足时的失败/自动供给）：CI 显式安装 JDK 21 后**未进入**该分支，
   该不确定性**仍未消除**，留待专项验证。
-- §9-7（3 条 POSIX 断言的最终结果）：`Fast gate` 的单元测试步骤确已通过，但该 job 整体因 lint 失败，
-  **不得**据此认定 Linux 侧全部用例已验收；`N/A` 待 `Fast gate` 转绿后的完整运行确认。
+- §9-7（3 条 POSIX 断言的最终结果）：`Fast gate` 复跑**整条 success**，其 `单元测试（全模块）` 步骤 ✓，
+  Linux 侧用例已随该 job 真实执行通过（**注意**：具体到 3 条 POSIX 断言的逐条结论仍以测试报告为准，
+  不在本记录的静态校准范围内）。
 
 ### 11.2 §9-2 的实测答案：`dependency-scan.yml` 的「真实阻断行为」= **并未阻断**
 

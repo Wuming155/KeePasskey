@@ -160,7 +160,11 @@
      而报告含 138 条 CVSS ≥ 7.0 → `failBuildOnCVSS` 在 aggregate 任务上**不生效**；
      **已补硬断言**（`.github/check_dependency_cvss.py` + workflow 接线），见 §7.4。
 - **仍未达成（不得据此认为 CI 已跑通）**：
-  1. `Fast gate` 在 lint 修复后的**下一次真实 CI 运行**（本地已 5 模块 0 error，runner 侧未复跑）；
+  1. ~~`Fast gate` 在 lint 修复后的下一次真实 CI 运行~~ → **已于 2026-09-10 完成并转绿**：
+     运行 `34470024328`（提交 `c25ac51`）`build` 工作流**三 job 全 success、exit 0**，
+     其中 `Fast gate` 的 `Android Lint` ✓ 与 `单元测试（全模块）` ✓、`Native gate` 的
+     `Assemble Release` 与签名/入包断言 ✓、`Rust supply chain` ✓（**本仓 CI 史上 fast-gate 首次转绿**）；
+     CodeQL 同期复跑 success，**开放告警 10 → 0**；
   2. `dependency-scan` 在硬断言接入后的**首次运行**——按预期**将失败**，直至 ISSUE-P3-32 的达阈条目被处置；
   3. `github/codeql-action/upload-sarif` **v4** 的真实执行（仅出现在手动触发的 `dependency-scan`）；
   4. runner 镜像实际预装 API 级别（R2）、`ubuntu-latest` 指向的镜像版本（R1）；
