@@ -1754,3 +1754,79 @@ size ∈ {0,1,16,1024}` 共 20 组**逐字节一致**；另断言偏移切片与
 **0 失败 / 0 跳过**（2026-09-10 实测，统计自 `app/build/test-results/testDebugUnitTest/*.xml`）；
 `AutofillManager` / `CredentialManager` / Compose 依赖编译通过；中英文 strings 同步。
 
+---
+
+## 10. ISSUE-P3-31 批次 B 归档（残余超阈值债务 · `RealVaultRepository` / `DatabasePickerScreen`）
+
+> **归档日期**：2026-09-10　**性质**：纯结构性拆分，零行为变更。
+
+### 10.1 范围与门禁
+
+承接 [ACTIVE_ISSUES.md](ACTIVE_ISSUES.md) **ISSUE-P3-31** 验收标准 1——「优先处理体量最大且耦合最高的
+`RealVaultRepository` / `DatabasePickerScreen`」。本批次仅处理该两项，残余债务仍在 ISSUE-P3-31 内。
+
+| 门禁 | 命令 | 结果 |
+|---|---|---|
+| Kotlin 编译 | `.\gradlew.bat :app:compileDebugKotlin --max-workers=1` | ✅ 通过（拆分后逐轮验证） |
+| 全量单测 | `.\gradlew.bat test --rerun-tasks --max-workers=1 --continue` | ✅ **BUILD SUCCESSFUL**，**1291 例 / 1278 通过 / 0 失败 / 13 跳过**（app 712 / core 58 / crypto 107 / database 235 / sync 179，统计自各模块 `build/test-results/testDebugUnitTest/*.xml`），**与批次 B 前基线逐模块一致，零退化** |
+| Android Lint | `.\gradlew.bat lint --max-workers=1 --continue` | ✅ BUILD SUCCESSFUL（5 模块 0 error） |
+
+### 10.2 逐项代码证据（行数前后与拆出单元）
+
+| 原文件（拆分前） | 拆分后 | 新拆出单元 |
+|---|---|---|
+| `app/.../data/repository/RealVaultRepository.kt` **1090** | **372** | `VaultDatabaseCatalog.kt`（201，已知库注册表与列表构建）<br>`VaultLifecycleCoordinator.kt`（223，解锁/建库/移除/登记外部库）<br>`VaultEntryWriteCoordinator.kt`（260，条目合并保存 / 收藏 / 自动填充 upsert）<br>`VaultEntrySecretReader.kt`（165，密码·修订·受保护字段·TOTP·附件读取）<br>`VaultGroupCoordinator.kt`（89，分组投影与保存）<br>`VaultExportCoordinator.kt`（77，KDBX/XML/密钥文件导出与模板安装） |
+| `app/.../ui/screens/database/DatabasePickerScreen.kt` **968** | **319** | `CreateVaultWizardDialog.kt`（344，含 `KeyFileSourceChoice` 与 `KeyFileOneTimeSaveDialog`）<br>`OpenExistingVaultDialog.kt`（271）<br>`VaultDatabaseCard.kt`（157） |
+
+### 10.3 敏感数据清零点与公开 API 可见性对照（验收标准 3）
+
+**清零点逐一对照（9 → 9，UI 侧 4 → 4）**：
+
+| 原位置 | 语义 | 拆分后位置 |
+|---|---|---|
+| `RealVaultRepository.kt:400` `generatedKeyFile?.fill(0)` | 生成型密钥文件副本用毕即擦 | `VaultLifecycleCoordinator.kt:153` |
+| `:560/561/562` `saveEntry` finally 三处 | 密码 / TOTP / 受保护字段入参副本 | `RealVaultRepository.kt:200-202`（仍在仓库，契约未下移） |
+| `:599` `trimmedTotp.fill('0')` | TOTP 修剪副本 | `VaultEntryWriteCoordinator.kt:71` |
+| `:621` `backfillChars?.fill('0')` | 受保护字段回填副本 | `VaultEntryWriteCoordinator.kt:93` |
+| `:797` `readErasableString` 内 `chars.fill('0')` | String 中转通道中间副本 | `VaultEntrySecretReader.kt:36` |
+| `:907` `config.secret.fill(0)` | TOTP Base32 种子字节 | `VaultEntrySecretReader.kt:138` |
+| `:1006` `Arrays.fill(passwordChars,'0')` | 自动填充保存入参 | `VaultEntryWriteCoordinator.kt:257` |
+| `DatabasePickerScreen.kt` 4 处 `fill('0')` | 建库向导内主密码/确认密码副本 | `CreateVaultWizardDialog.kt` 4 处（`DisposableEffect` 离场擦除 + 两次 `onPasswordChanged` 旧值擦除） |
+
+**公开 API 可见性**：
+
+- `RealVaultRepository`：以正则抽取 `override suspend fun` / `override fun` / `const val` / `val` / `class RealVaultRepository` / `@Singleton` / `@Inject` 全部声明做前后 diff → **逐条完全一致**（`diff` 无输出）。
+  新增的 6 个协调器全部为 `internal`，不构成模块公开 ABI。
+- `DatabasePickerScreen`：public 顶层 `DatabasePickerScreen` / `DatabasePickerContent` **保留且签名不变**；
+  原 4 个 `private` 子组件迁至同包独立文件后可见性为 `internal`（跨文件复用所必需，仍非 public），
+  `queryDocumentDisplayName` 由 `private` 提升为 `internal`（两个对话框共用）。**无 public API 新增**。
+
+### 10.4 验收标准逐条对照
+
+| # | 标准 | 结论 |
+|---|---|---|
+| 1 | 优先处理体量最大且耦合最高的两项 | ✅ 本批次即为此二项（1090 / 968 → 372 / 319） |
+| 2 | 纯结构性改动：`test` 全绿且用例数不减 | ✅ 1291 例 / 0 失败，与基线逐模块一致 |
+| 3 | 逐条对照敏感数据清零点与公开 API 可见性 | ✅ 见 §10.3（清零点 9→9、UI 4→4；公开 API diff 为空） |
+| 4 | 每批完成后归档并更新清单快照 | ✅ 见 §10.5 与 ACTIVE_ISSUES 清单刷新 |
+
+### 10.5 清单快照刷新（ISSUE-P3-31 残余）
+
+2026-09-10 批次 B 完成后以同一命令重测，超阈值（> 400 行）文件由 **23 项降至 21 项**（已剔除本批次 2 项；
+`DicewareWordList.kt` 408 行仍为「纯常量例外」，不计入债务）：
+
+`762 ThemeSettingsScreen` · `712 EntryEditScreen` · `708 EntryDetailViewModel` · `697 DatabaseSession` ·
+`674 SecuritySettingsScreen` · `629 S3SyncProvider` · `605 AutofillSettingsScreen` · `596 PasskeyCryptoEngine` ·
+`595 KeePasskeyAutofillService` · `578 KdbxMerger` · `568 SettingsScreen` · `562 UnlockScreen` ·
+`550 GeneratorScreen` · `509 WebDavSyncProvider` · `494 EntryEditComponents` · `481 CloudSyncComponents` ·
+`477 EntryDetailComponents` · `470 EntryEditViewModel` · `462 KeystoreManager` · `453 HealthCheckScreen` ·
+`443 SyncEngine`
+
+### 10.6 本批次过程缺陷（如实留痕）
+
+| # | 类型 | 说明 |
+|---|---|---|
+| 1 | 编译缺陷（已修） | 拆出 `OpenExistingVaultDialog.kt` 时漏拷 `androidx.compose.foundation.shape.RoundedCornerShape` 的 import，首轮 `:app:compileDebugKotlin` 报 `Unresolved reference 'RoundedCornerShape'`；补 import 后通过。 |
+| 2 | 文档基线不一致（未改，登记） | `AGENTS.md` §1 记测试基线为 **1291 例**，而 §5 与 `ACTIVE_ISSUES.md` 记 **1257 例**；本批次实测各模块 XML 汇总为 **1291 例**（app 712 / core 58 / crypto 107 / database 235 / sync 179），与 §1 一致。1257 系更早快照，本批次未擅自改动 §5 数值（避免无依据改动历史记录），在此留痕待维护者统一。 |
+| 3 | 验证边界 | 本批次全部证据为**编译 + JVM 单测 + Lint**；Compose UI 侧（三个拆出的组件）无任何 instrumented / 真机渲染验证，本机无设备与模拟器。拆分虽为纯结构性，但 UI 重组的实际渲染未实测。 |
+

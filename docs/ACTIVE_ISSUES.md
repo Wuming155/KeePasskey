@@ -83,10 +83,16 @@
 > **P3-43 部分达标**：① 已接线既有 `overrideNoAutofill`（尊重 `importantForAutofill`，同时消除一处
 > 假开关），② 字段签名级屏蔽 与 ③ 保存侧独立黑名单 两项因**缺少用户交互写入入口**，
 > 就地保留待办并已重写验收标准（严禁先落库无写入方的存储 API）。
+> **2026-09-10 追加七（P3-31 批次 B）**：ISSUE-P3-31 验收标准 1 点名的两项
+> `RealVaultRepository`（1090 → 372）与 `DatabasePickerScreen`（968 → 319）已按纯结构性拆分完成并归档，
+> 见 [RESOLVED_LOG.md](RESOLVED_LOG.md) **§10**；**ISSUE-P3-31 本条未闭环**（残余 21 项），清单已就地刷新。
 > 本节余 **5 项**（P3-23 / P3-24 / P3-31 / P3-32 / P3-43）。
-> 归档门禁证据：`.\gradlew.bat test --rerun-tasks --max-workers=1 --continue` → **BUILD SUCCESSFUL**，
-> **1257 例 / 1244 通过 / 0 失败 / 13 跳过**（基线 921 → **+336 例，零退化**）；`assembleDebug` 与
-> `lint`（5 模块 **0 error**）通过；`:database:assembleDebugAndroidTest` 通过（ISSUE-P3-23 验收标准①）。
+> 归档门禁证据（2026-09-10 实测，`--rerun-tasks` 强制真实执行）：
+> `.\gradlew.bat test --rerun-tasks --max-workers=1 --continue` → **BUILD SUCCESSFUL**，
+> **1291 例 / 1278 通过 / 0 失败 / 13 跳过**（app 712 / core 58 / crypto 107 / database 235 / sync 179）
+> ——本处数值此前记为 1257 例，系更早快照，本次按各模块
+> `build/test-results/testDebugUnitTest/*.xml` 实测汇总修正（详见 RESOLVED_LOG §10.6 第 2 条）；
+> `assembleDebug` 与 `lint`（5 模块 **0 error**）通过；`:database:assembleDebugAndroidTest` 通过（ISSUE-P3-23 验收标准①）。
 
 ### 前提复核记录（2026-09-10，依「条目维护规则」第 2 条）
 
@@ -195,21 +201,28 @@
   **不得据此认为 CI 已跑通。**
 
 ---
-### ISSUE-P3-31 (P3-29 批次 A 后续): 残余 23 个真逻辑超阈值文件的**分批拆分债务**
+### ISSUE-P3-31 (P3-29 批次 A 后续): 残余 21 个真逻辑超阈值文件的**分批拆分债务**
 
 - **优先级**：P3（代码整洁度）
+- **2026-09-10 批次 B 进展（就地标注，本条未闭环）**：按验收标准 1「优先处理体量最大且耦合最高的」
+  两项已完成并**归档**，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) **§10**——
+  `RealVaultRepository` **1090 → 372**（拆出 6 个 internal 协调器）、
+  `DatabasePickerScreen` **968 → 319**（拆出 3 个组件文件）；
+  门禁 `test --rerun-tasks` **1291 例 / 0 失败 / 13 跳过**逐模块零退化、`lint` 5 模块 0 error，
+  敏感数据清零点 **9 → 9 / UI 4 → 4** 逐条对齐，公开 API diff 为空。
+  **残余清单已按批次 B 后实测刷新为 21 项**（见下）。
 - **核实时间点与核实方式（2026-09-10）**：ISSUE-P3-29 批次 A 完成后，于本仓根执行
   `for d in app database sync core crypto; do find $d/src/main/java -name '*.kt'; done | xargs wc -l`，
-  以 `awk '$1>400 && $2!="total"'` 筛出 `> 400` 行者并人工剔除纯常量例外。
-  **实测残余 23 项**（下列为逐文件实测行数，与批次 A 完成后快照一致）。
+  以 `awk '$1>400 && $2!="total"'` 筛出 `> 400` 行者并人工剔除纯常量例外；
+  **2026-09-10 批次 B 完成后以同一命令重测**，残余由 23 项降至 **21 项**。
 - **为何单独登记**：ISSUE-P3-29 正文的**优先级 8 项已于批次 A 全部降至阈值内并归档**（见
   [RESOLVED_LOG.md](RESOLVED_LOG.md) **§6**），但全仓扫描显示超阈值仍是**普遍性既有债务**；
   按「严禁只记聊天或脑中」纪律，残余面必须有独立条目承接，避免后人误以为「巨型类问题已解决」。
 
-- **清单（2026-09-10 批次 A 完成后实测 23 项）**：
+- **清单（2026-09-10 批次 B 完成后实测 21 项）**：
 
-  `1090 RealVaultRepository.kt` · `968 DatabasePickerScreen.kt` · `762 ThemeSettingsScreen.kt` ·
-  `712 EntryEditScreen.kt` · `708 EntryDetailViewModel.kt` · `697 DatabaseSession.kt` ·
+  `762 ThemeSettingsScreen.kt` · `712 EntryEditScreen.kt` ·
+  `708 EntryDetailViewModel.kt` · `697 DatabaseSession.kt` ·
   `674 SecuritySettingsScreen.kt` · `629 S3SyncProvider.kt` · `596 PasskeyCryptoEngine.kt` ·
   `588 AutofillSettingsScreen.kt` · `578 KdbxMerger.kt` · `568 SettingsScreen.kt` · `562 UnlockScreen.kt` ·
   `550 GeneratorScreen.kt` · `509 WebDavSyncProvider.kt` · `494 EntryEditComponents.kt` ·
@@ -222,9 +235,10 @@
   > 按「是否含真实逻辑」分级属**经论证的纯常量例外**，不拆分（保留单文件可保证词表作为一个不可分割的整体被审查）。
 
 - **验收标准（未来分批）**：
-  1. 按模块分批拆分，**优先处理体量最大且耦合最高的 `RealVaultRepository` / `DatabasePickerScreen` /
-     `ThemeSettingsScreen`**（拆解收益最大）；
-  2. 每批拆分为**纯结构性**改动：`.\gradlew.bat test` 全绿且用例数不减（当前 **1200 例**）；
+  1. 按模块分批拆分，**优先处理体量最大且耦合最高的文件**——`RealVaultRepository` / `DatabasePickerScreen`
+     已于**批次 B（2026-09-10）完成并归档**（见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §10）；
+     下一批应指向 **`ThemeSettingsScreen`（762）/ `EntryEditScreen`（712）/ `EntryDetailViewModel`（708）**；
+  2. 每批拆分为**纯结构性**改动：`.\gradlew.bat test` 全绿且用例数不减（当前 **1291 例**）；
   3. 拆分后**逐条对照敏感数据清零点与公开 API 可见性**（沿用批次 A 的验证范式：
      公开 API 零丢失零新增 + 清零点逐一对照）；
   4. 每批完成后按「极简闭环工作流」归档并更新本清单快照。
