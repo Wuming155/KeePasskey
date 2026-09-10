@@ -11,7 +11,7 @@ This file provides guidance to AI coding agents when working with code in this r
 
 | 维度 | 数值 / 状态 | 官方依据与说明 |
 |---|---|---|
-| **Git HEAD** | 代码基线 `4235f16`（TASK-53 Base64/Hex 整洁度）+ ISSUE-P2-02 (P2-33) DAL 远程资产声明校验闭环 | 分支 `main` 与 `origin/main` 同步 |
+| **Git HEAD** | 代码基线 `ff9609e`（ISSUE-P2-05 ~ P2-13 中危九项闭环：原子写盘 fsync/.bak、敏感擦除、Autofill 信任边界与运行时完整性、导出治理、AutoLock 语义、OTP 字节化） | 分支 `main` 与 `origin/main` 同步 |
 | **测试基线** | **725 个单元测试用例**（app 283 / core 48 / crypto 61 / database 175 / sync 158，其中 sync 158 含 12 例联调跳过 + 1 例 Windows 无 POSIX 权限视图跳过）：**712 通过、0 失败、13 跳过**（另有 Rust 侧 `cargo test` 9 例，见 §5） | `./gradlew test` 全模块执行；跳过的 12 例为 `LiveSyncServersTest` 真实联调用例（需先起 `tools/local-sync` 服务并加 `-DliveSyncTest`）；crypto 61 含 4 例宿主侧原生 JNI 运行时验证（无 cargo 宿主库时 `Assume` 跳过，见 §5） |
 | **构建状态** | `assembleDebug` + `assembleRelease` (R8) 全量通过 | **AGP 9.4.0 / Gradle 9.7.1** / Kotlin 2.4.10（经 buildscript classpath 锚定内置 KGP）/ Hilt 2.60.1 / **KSP 2.3.11** |
 | **系统基线** | **minSdk 36**, **compileSdk 37**, targetSdk 36 | 仅针对 Android 16+ 深度优化，固化无旧版垫片决策；compileSdk 37（Compose BOM 2026.08.00 + M3 Expressive） |
