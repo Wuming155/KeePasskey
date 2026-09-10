@@ -54,10 +54,11 @@
 ## P3 低危问题、特性接线与体验优化（4 项）
 
 > **背景**：P3 残余批次原 **12 项**（ISSUE-P3-17 ~ P3-28）已于 **2026-09-10** 整体整改。
-> 其中 **8 项完整闭环并归档**（P3-17 / 18 / 19 / 21 / 22 / 26 / 27 / 28，含逐项代码证据与 15 条过程缺陷留痕），
-> 见 [RESOLVED_LOG.md](RESOLVED_LOG.md) **§4**；**4 项部分达标**，其残余面就地更新后保留于本节。
+> 其中 **9 项完整闭环并归档**（P3-17 / 18 / 19 / 21 / 22 / **25** / 26 / 27 / 28，含逐项代码证据与 15 条过程缺陷留痕），
+> 见 [RESOLVED_LOG.md](RESOLVED_LOG.md) **§4**；**3 项部分达标**（P3-20 / P3-23 / P3-24）就地更新后保留于本节，
+> 另有 1 项由本轮全仓扫描**新登记**（**ISSUE-P3-29**，见下）。
 > 归档门禁证据：`.\gradlew.bat test --rerun-tasks --max-workers=1 --continue` → **BUILD SUCCESSFUL**，
-> **1159 例 / 1146 通过 / 0 失败 / 13 跳过**（基线 921 → **+238 例，零退化**）。
+> **1163 例 / 1150 通过 / 0 失败 / 13 跳过**（基线 921 → **+242 例，零退化**）；`assembleDebug` 通过。
 
 ### 前提复核记录（2026-09-10，依「条目维护规则」第 2 条）
 
@@ -66,7 +67,11 @@
 | P3-20 | `childDatabasesCount` 硬编码 0；`ChildDatabaseDialog.onSelectFile` 无落地 | 读 `SettingsViewModel.kt:133`、`DatabaseSettingsDialogs.kt:198-239` | ✅ 成立（**两处至今未改**，故标识如实保留） |
 | P3-23 | 语料未入库；`database` 无 `androidTest` 源集 | 目录枚举 | ⚠️ **前半仍成立；后半已不成立**（`database/src/androidTest/` 已建立并接线） |
 | P3-24 | CI 从未真实运行 | 只读探测 + 联网核实 | ✅ 成立（**三 job 仍未真实执行**） |
-| P3-25 | `SyncCoordinator` ~965 / `UnlockViewModel` ~979 / `KdbxXmlGroupReader` 407 行 | `(Get-Content).Count` | ⚠️ **部分不成立**：前两者已拆（965→254、407→218），**`UnlockViewModel` 仍 979** |
+| P3-29 | （本轮新登记，前提即「全仓存在超阈值文件」） | `(Get-Content).Count` 全仓扫描 | ✅ 成立（**33 个生产文件 > 400 行**，清单见该条目） |
+
+> **ISSUE-P3-25 已闭环**（3 个点名文件全部降至阈值内：`SyncCoordinator` 965→254、`KdbxXmlGroupReader` 407→218、
+> `UnlockViewModel` 979→396），归档见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §4.2。
+> 但其「全仓扫描」暴露的整体债务已作为 **ISSUE-P3-29** 另行登记，**不代表巨型类问题已解决**。
 
 ---
 
@@ -176,29 +181,61 @@
   **不得据此认为 CI 已跑通。**
 
 ---
-
-### ISSUE-P3-25 (P3-03 / P3-04 残余): 巨型类拆分（剩余部分）
+### ISSUE-P3-29 (P3-25 后续 · 全仓扫描发现): 生产 Kotlin 文件超 400 行阈值的**整体债务**
 
 - **优先级**：P3（代码整洁度）
-- **核实时间点与核实方式（2026-09-10）**：经 `(Get-Content <file>).Count` 逐文件统计。
-- **本批次已完成**：
-  - `app/.../sync/SyncCoordinator.kt` **965 → 254 行**，拆出 10 个新类（`SyncCycleRunner` /
-    `SyncConflictController` / `SyncProviderResolver` / `SyncContentChangeDetector` / `SyncDatabaseCodec` /
-    `SyncSessionState` / `SyncPreferences` / `SyncOutcome` / `SyncLogTag` / `SyncCacheEvictor` 系），均 ≤400；
-  - `database/.../xml/KdbxXmlGroupReader.kt` **407 → 218 行**，拆出 `KdbxXmlAutoTypeNode` /
-    `KdbxXmlBinaryNode` / `KdbxXmlStringNode` / `KdbxXmlTimesNode`，均 ≤400；
-  - **回归验证**：全仓 12 处 `debugLog` 诊断点**逐一核对全部无损迁移**（`SyncCycleRunner` 确无日志需求）；
-    **P3-07 的附件别名隔离语义完整保留**（`binariesPool[refIndex].data.copyOf()` 仍在
-    `KdbxXmlBinaryNode.kt:50`，回归锁 `KdbxAttachmentAliasIsolationTest` 4 例未改）。
-- **仍未达成（本条目剩余全部工作）**：
-  1. **`app/.../ui/screens/unlock/UnlockViewModel.kt` 仍 979 行未拆**（原计划第二波拆分因执行者不可达未完成）。
-     建议方向：`BiometricUnlockCoordinator`（生物识别状态机与自动唤起意图）/ `KeyFileSessionCoordinator`
-     （密钥文件借用与清零）/ 保留 `UnlockViewModel` 仅做状态编排；
-  2. **本批次新增代码令两个文件越过 400 行阈值**，一并登记：
-     `app/.../ui/screens/settings/SettingsViewModel.kt` **902 行**（既有 879 + 本批次导入接线；
-     建议按「同步 / 健康 / 导出 / 导入 / 显示偏好」五个已存在的 `Settings*Controller` 模式继续外移）、
-     `app/.../ui/screens/vault/VaultListViewModel.kt` **731 行**（既有 641 + 本批次 4 个偏好派生量与
-     「条目/分组共用图标投影器」装配；建议按「偏好派生 / 图标投影 / 分组路径」外移）。
-- **验收标准**：上述文件均降至阈值内（或就「为何不可拆」给出经论证的例外说明并登记）；
-  拆分为**纯结构性**改动——`.\gradlew.bat test` 全绿且用例数不减（当前 **1146 例**）；
-  优先依赖倒置（抽接口 + Hilt 绑定），不得引入循环依赖。
+- **核实时间点与核实方式（2026-09-10）**：ISSUE-P3-25 整改完成后，对全仓生产源集执行
+  `Get-ChildItem -Recurse -Include *.kt -Path {app,database,sync,core,crypto}/src/main/java`
+  并逐文件 `(Get-Content).Count` 统计，筛出 `> 400` 行者。**共 33 个文件超标**。
+- **为何单独登记**：ISSUE-P3-25 的正文只点名了 **3 个文件**（`SyncCoordinator` / `UnlockViewModel` /
+  `KdbxXmlGroupReader`），该 3 项均已降至阈值内并归档（见 `RESOLVED_LOG.md` §4.2）。
+  但全仓扫描显示**超标是普遍性既有债务**，而非 3 个孤例——按「严禁只记聊天或脑中」纪律就地登记，
+  避免后人误以为「巨型类问题已解决」。
+
+- **完整清单（2026-09-10 快照，行数降序）**：
+
+  | 行数 | 文件 | 备注 |
+  |---:|---|---|
+  | 1090 | `app/.../data/repository/RealVaultRepository.kt` | 既有 |
+  | 968 | `app/.../ui/screens/database/DatabasePickerScreen.kt` | 既有 |
+  | 902 | `app/.../ui/screens/settings/SettingsViewModel.kt` | 既有 879 + **本批次导入接线（+23）** |
+  | 762 | `app/.../ui/screens/settings/subscreens/ThemeSettingsScreen.kt` | 既有 |
+  | 731 | `app/.../ui/screens/vault/VaultListViewModel.kt` | 既有 641 + **本批次 4 个偏好派生量（+90）** |
+  | 712 | `app/.../ui/screens/edit/EntryEditScreen.kt` | 既有 |
+  | 708 | `app/.../ui/screens/detail/EntryDetailViewModel.kt` | 既有 |
+  | 697 | `database/.../session/DatabaseSession.kt` | 既有 |
+  | 674 | `app/.../ui/screens/settings/subscreens/SecuritySettingsScreen.kt` | 既有 |
+  | 629 | `sync/.../s3/S3SyncProvider.kt` | 既有 |
+  | 614 | `database/.../file/KdbxFile.kt` | 既有 602 + **本批次安全常量 KDoc（+12）** |
+  | 596 | `crypto/.../passkey/PasskeyCryptoEngine.kt` | 既有 |
+  | 588 | `app/.../ui/screens/settings/subscreens/AutofillSettingsScreen.kt` | 既有 |
+  | 582 | `app/.../ui/KeePasskeyApp.kt` | 既有 |
+  | 578 | `sync/.../merge/KdbxMerger.kt` | 既有 |
+  | 569 | `app/.../ui/screens/settings/SettingsScreen.kt` | 既有 |
+  | 562 | `app/.../ui/screens/unlock/UnlockScreen.kt` | 既有（**注**：`UnlockViewModel` 已拆分，同目录的 Screen 仍超标） |
+  | 550 | `app/.../ui/screens/generator/GeneratorScreen.kt` | 既有 |
+  | 510 | `sync/.../webdav/WebDavSyncProvider.kt` | 既有 |
+  | 494 | `app/.../ui/screens/edit/EntryEditComponents.kt` | 既有 |
+  | 488 | `app/.../autofill/KeePasskeyAutofillService.kt` | 既有 |
+  | 481 | `app/.../ui/screens/settings/subscreens/CloudSyncComponents.kt` | 既有 |
+  | 477 | `app/.../ui/screens/detail/EntryDetailComponents.kt` | 既有 |
+  | 470 | `app/.../ui/screens/edit/EntryEditViewModel.kt` | 既有 |
+  | 466 | `app/.../ui/screens/vault/VaultEntryRows.kt` | 既有 + **本批次分组图标接线** |
+  | 461 | `app/.../security/KeystoreManager.kt` | 既有 |
+  | 453 | `app/.../ui/screens/settings/subscreens/HealthCheckScreen.kt` | 既有 |
+  | 443 | `sync/.../engine/SyncEngine.kt` | 既有 |
+  | 435 | `app/.../data/repository/VaultRepository.kt` | 既有 + **本批次 `incrementPasskeySignCount` 等** |
+  | 421 | `app/.../sync/SyncCredentialsStore.kt` | 既有 |
+  | 418 | `database/.../file/KdbxHeader.kt` | 既有 |
+  | 417 | `app/.../ui/screens/vault/VaultListScreen.kt` | 既有 + **本批次接线** |
+  | 401 | `app/.../ui/screens/generator/DicewareWordList.kt` | 既有（**数据表**，属「纯查表常量」，建议豁免并登记例外） |
+
+- **诚实说明**：上表 33 项中，**绝大多数属本批次开工前即已超标**；本批次新增逻辑刻意收敛为短方法，
+  仅令 4 个文件因必要接线而增长（已在上表逐项标注）。ISSUE-P3-25 的闭环**不**代表整体债务已清。
+- **验收标准（未来分批）**：
+  1. 按「是否含真实逻辑」分级——纯数据/常量表（如 `DicewareWordList.kt`）建议**登记为例外**并说明理由；
+  2. 其余按模块分批拆分（建议优先 `RealVaultRepository` / `DatabasePickerScreen` / `SettingsViewModel` /
+     `VaultListViewModel`——**后两者是本批次新致超标的，优先级应高于纯既有债务**）；
+  3. 每批拆分为**纯结构性**改动：`.\gradlew.bat test` 全绿且用例数不减（当前 **1159 例**）；
+  4. 拆分后**逐条对照敏感数据清零点与公开 API 可见性**（沿用 P3-25 对 `UnlockViewModel` 的验证范式：
+     公开 API 零丢失零新增 + 清零点逐一对照）。

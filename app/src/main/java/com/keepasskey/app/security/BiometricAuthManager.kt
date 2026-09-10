@@ -39,7 +39,8 @@ sealed interface BiometricResult {
      * [BiometricAuthManager.ERROR_INTEGRITY_BLOCKED] → `R.string.sec_biometric_integrity_blocked`），
      * 从而保证中英双语一致，且文案不再随系统语言漂移。当前全部消费点（app 模块）：
      * - `UnlockViewModel.handleBiometricResult`：按错误码映射资源后展示，诊断串仅落日志；
-     * - `UnlockViewModel.requestBiometricEnrollment`：登记失败为 fail-safe 静默语义，仅落日志；
+     * - `BiometricEnrollmentCoordinator.requestBiometricEnrollment`：登记失败为 fail-safe 静默语义，仅落日志
+     *   （ISSUE-P3-25 结构拆分后该方法由 `UnlockViewModel` 外移至同包协作者）；
      * - `passkey/CredentialVerificationLauncher`、`autofill/AutofillConfirmActivity`：丢弃该字段，
      *   仅按失败/取消分型改变控制流。
      */

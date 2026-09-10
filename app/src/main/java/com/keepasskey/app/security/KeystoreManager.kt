@@ -201,7 +201,8 @@ class KeystoreManager @Inject constructor(
      *
      * 密钥授权在生成后不可变（官方约束）→ 旧版本以 AUTH_BIOMETRIC_STRONG | AUTH_DEVICE_CREDENTIAL
      * 生成的同名密钥经 [KeyInfo.getUserAuthenticationType] **全等**探测后自动删除重建，
-     * 旧封印凭据随之失效（fail-safe 迁移：解封失败由 UnlockViewModel 清除陈旧凭据，
+     * 旧封印凭据随之失效（fail-safe 迁移：解封失败由 `BiometricUnlockCoordinator` 清除陈旧凭据，
+     * ISSUE-P3-25 结构拆分后该逻辑由 `UnlockViewModel` 外移至同包协作者；
      * 用户下次以主密码完整解锁后自动重新封印，对齐 Wave 11 H4 模式）。
      */
     fun getOrCreateDeviceCredentialKey(alias: String): SecretKey {

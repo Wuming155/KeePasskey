@@ -912,14 +912,14 @@
 
 | 模块 | 用例 | 失败 | 跳过 |
 |---|---:|---:|---:|
-| app | 637 | 0 | 0 |
+| app | 641 | 0 | 0 |
 | core | 58 | 0 | 0 |
 | crypto | 61 | 0 | 0 |
 | database | 224 | 0 | 0 |
 | sync | 179 | 0 | 13 |
-| **合计** | **1159** | **0** | **13** |
+| **合计** | **1163** | **0** | **13** |
 
-**1146 通过 / 0 失败 / 13 跳过**（基线 921 → **1159，净增 +238 例，零退化**）。13 例跳过仍为
+**1150 通过 / 0 失败 / 13 跳过**（基线 921 → **1163，净增 +242 例，零退化**）。13 例跳过仍为
 `LiveSyncServersTest` 真实联调（12 例，需 `-DliveSyncTest` + `tools/local-sync`）与
 `SyncCacheTest` 的 Windows 无 POSIX 权限视图断言（1 例），均与本批次无关。
 
@@ -927,7 +927,7 @@
 另 10 个编译任务（app/database/sync/core/crypto 的 `compileDebugKotlin` + `compileDebugUnitTestKotlin`）
 在 `--continue` 下全部通过。**`--rerun-tasks` 强制真实执行**；`--max-workers=1` 贯彻「单会话内勿并发跑 Gradle」。
 
-### 4.2 已闭环条目逐项归档（ISSUE-P3-17 / 18 / 19 / 21 / 22 / 26 / 27 / 28）
+### 4.2 已闭环条目逐项归档（ISSUE-P3-17 / 18 / 19 / 21 / 22 / 25 / 26 / 27 / 28）
 
 | 条目 | 主题 | 裁决 | 核心实现与代码证据 |
 |---|---|:---:|---|
@@ -939,6 +939,11 @@
 | **P3-26** | `deleteBackup` 删除 `.bak` 后未做目录 fsync | **达成** | `AtomicFileWriter.deleteBackup` 新增可注入 `DirectorySync` 形参（**保留默认值**，故 `DatabaseSession` 单参调用点源码兼容零改动），unlink 后经父目录 fsync（钩子⑤，类 KDoc「四条路径」→「五条」）。复用既有假实现做**计数断言**（恰好 1 次且落在父目录；无目录项变更不得触达；删除失败不抛且不触达；`DEGRADED` 与「实现违约抛异常」均不阻断删除）。新增 5 例（另将 5 例与共享替身搬迁到 `AtomicFileWriterBackupDeletionTest.kt` / `DirectorySyncTestDoubles.kt` 以守住 ≤400 行阈值，**既有断言逐字未变**）。 |
 | **P3-27** | 解压上限不自洽 与 并发签名计数器假说 | **达成（并修正条目错误前提）** | **前提修正**：条目原文「`InnerHeader` 单字段上限 256 MiB」系**误读**——单字段实为 `MAX_INNER_FIELD_BYTES = 64 MiB`，256 MiB 是 `MAX_BINARY_POOL_TOTAL_BYTES`（二进制池**累计**上限）。故「单字段 ≤ 整包」本就自洽。**真实问题**是池累计上限 256 MiB > 整包 128 MiB → **永不生效的死守卫**（内层头部经 `guardPayloadSize` 读取，必在整包约束内）。整改：收敛为**单一真源**（`KdbxFile.MAX_DECOMPRESSED_PAYLOAD_BYTES` = 128 MiB；单字段 = 其 1/2；池累计 = `min(设计值 256 MiB, 整包)` = 128 MiB）+ 伴生对象初始化期 `require` 不变量（「单字段 ≤ 池累计 ≤ 整包」，常量漂移即 fail-fast）。**签名计数器**：协调器内部**证伪**（`updateDatabaseMeta` 读-改-写同处单一 `mutex.withLock` 临界区，32 路并发回归锁断言回传值互不相同且严格递增）；**调用方证实存在真实重复**——`PasskeyAssertionActivity` 原以**锁外快照自算** signCount 写入 `AuthenticatorData`，且先 `setResult(RESULT_OK)` 再落盘（进程中断致 RP 已收到 N+1 而库内仍 N → 跨时间重复）。新增原子 API `incrementPasskeySignCount`（回传**实际落库值**）并完成调用方接线：**先原子递增取唯一值 → 用它写入 AuthenticatorData → 再 setResult**。新增 4 例（含「自算值去重后 = 1（重复）vs 协调器回传去重后 = 8（唯一）」的并列锁定）。 |
 | **P3-28** | 待办条目应附「核实时间点」 | **达成** | `docs/ACTIVE_ISSUES.md` 新增「**条目维护规则**」章节（3 条：新增条目须附核实时间点与核实方式；开工前复核前提；行号仅为快照），并写入立规缘由（P3-08/P3-16 的前提滞后事故留痕）；`AGENTS.md` §3 认领步骤同步加入「**前提复核**」强制条款与「新条目须附核实时间点」要求。**并已对全部 12 条做一次前提复核**，产出「前提复核记录」表（核实时间点 2026-09-10 + 逐条核实方式 + 结论），就地修正 **2 条失准前提**（P3-27 见上；P3-22 的链路缺口位置），并更正本节标题计数（原写「10 项」，实际 12 项）。 |
+| **P3-25** | 巨型类拆分 | **达成（本条所列 3 个文件全部降至阈值内）** | ① `app/.../sync/SyncCoordinator.kt` **965 → 254 行**（按「周期编排 / 冲突决策 / Provider 解析 / 缓存变更检测 / DB 编解码 / 会话状态 / 偏好 / 输出模型 / 日志标签」拆为 10 个新类，均 ≤400）；② `database/.../xml/KdbxXmlGroupReader.kt` **407 → 218 行**（拆出 AutoType / Binary / String / Times 四个节点文件，均 ≤400）；③ `app/.../ui/screens/unlock/UnlockViewModel.kt` **979 → 396 行**（拆出 `BiometricUnlockCoordinator` 359 / `KeyFileSessionCoordinator` 249 / `BiometricEnrollmentCoordinator` 187，均 ≤400）。**三项独立回归验证**：⑴ 全仓 12 处 `debugLog` 诊断点逐一核对**全部无损迁移**（`SyncCycleRunner` 确无日志需求）；⑵ P3-07 的附件别名隔离语义完整保留（`binariesPool[refIndex].data.copyOf()` 仍在新文件 `KdbxXmlBinaryNode.kt:50`）；⑶ **`UnlockViewModel` 位于解锁安全关键路径**，故逐条对照验证：公开 API **14/14 完全保持**（签名与可见性一字未改、且**零新增对外接口**，证明是纯拆分）、`keyFileData` 原 **5 处清零点**全部落地（`wipe()` 在「解锁成功」与 `onCleared()` **两个调用点均存在**——该收敛把两处独立清零点变成一个函数 + 两个调用点，**漏任一处即为敏感数据泄漏**，已专门核验）、`passwordChars` **3/3 处 `fill('0')` 保持**。**门禁**：拆分后 `test` → **1163 例 / 1150 通过 / 0 失败 / 13 跳过**，其中拆分前为 **1159 例**，
+拆分后 **+4 例**（新增 `KeyFileSessionCoordinatorTest` 4 例，锁定搬迁后的密钥文件清零契约：独立副本 / 取消 /
+读取失败 / 解锁成功+销毁收尾）——即 **零丢失且用例数净增**，满足「用例数不减」的硬要求；`assembleDebug` 通过。
+另：拆分后 `BiometricAuthManager.kt` 与 `KeystoreManager.kt` 中 2 处指向 `UnlockViewModel` 的**陈旧 KDoc 引用**
+已由编排者就地更正（改指新协作者）。 |
 
 ### 4.3 部分达标条目（残余面已就地更新，留在 `ACTIVE_ISSUES.md`）
 
@@ -947,7 +952,6 @@
 | **P3-20** 子库挂载 | 核心层落地：数据模型 / 挂载注册表（非敏感元数据持久化）/ 只读子库会话 / 凭据隔离 / 凭据存储 / 锁库联动 + 单测 | **UI 接线未完成**——`SettingsViewModel` 的 `childDatabasesCount` 仍硬编码 `0`，`ChildDatabaseDialog.onSelectFile` 仍无落地实现，故该对话框的「预留，暂未生效」说明**如实保留**（未接线却移除标识即反向不诚实） |
 | **P3-23** arm64 与真实语料 | `database` 模块**首次建立 androidTest 源集**与依赖接线；设备侧端到端解锁用例落地且 **fail-closed**（语料缺失 → `Assume` 显式跳过并声明「跳过不代表验收达成」；语料在而伴生元数据缺失/非法 → **硬失败**）；真实探测记录（已安装 system-image 仅 x86_64、`adb devices` 空、arm64 镜像**远端有发布但本机未安装**）；语料逐步生成清单写入 `crypto/src/test/resources/argon2-interop/README.md` | arm64 真机/模拟器数据（**未安装镜像**，且 x86_64 宿主上的 arm64 模拟器数据按纪律不得与真机同表登记）；真实 KeePass 2.61.1 / KeePassXC `.kdbx` 语料（需人工 GUI 建库，无人值守流程无法产出） |
 | **P3-24** CI 首跑校准 | **静态校准并修正 3 处「首次必红」缺陷**：① `platforms;android-37` 远端**不存在** → 改正为 `android-37.0`（证据：`sdkmanager --list` + 本机 `package.xml`）；② 签名断言两处必然误红 → `apksigner` 不自动读同目录 `.idsig`（v4 恒 `false`）故补 `--v4-signature-file`；minSdk 36≥28 且 v3 同开时 AGP **省略 v2 块**故「v2:true」断言不可能成立 → 改为「v2 块必须缺席」并新增 `v1: false` 断言（**未削弱**）；③ JDK 17 → 21 与 `gradle-daemon-jvm.properties: toolchainVersion=21` 对齐（**残留不确定性已如实标注**）。另：7 个 Action SHA 逐一核实存在且与声明版本一致（**未遇限流**）；Rust 1.97.1 **确认真实已发布**（推翻「未发布必红」担忧）；cargo-ndk 4.1.2 / cargo-deny 0.20.2 真实存在；material3 **1.5.0 stable 核实不存在** → 退出条件未满足、维持 alpha27（**未改** `libs.versions.toml`）；`cargo deny check` **本机实跑通过**（`advisories/bans/licenses/sources ok`，advisory-db 当日真实拉取，`curl 28` 未复现）；Linux 侧「疑似首次即红」静态判定 **0 例**。留痕 `docs/ci-静态校准记录.md` | 三 job 在 runner 上的**真实执行**、`dependency-scan.yml` 在 CVSS≥7 的真实阻断、CI 网络下 advisory-db 拉取、镜像实际预装 API 级别、GHAS 可用性——**本环境从未运行 CI，不得据此认为已跑通** |
-| **P3-25** 巨型类拆分 | `SyncCoordinator.kt` **965 → 254 行**（按「周期编排 / 冲突决策 / Provider 解析 / 缓存变更检测 / DB 编解码 / 会话状态 / 偏好 / 输出模型 / 日志标签」拆为 10 个新类，均 ≤400）；`KdbxXmlGroupReader.kt` **407 → 218 行**（拆出 AutoType / Binary / String / Times 四个节点文件）；**并验证 P3-07 的附件别名隔离回归锁语义完整保留**（`binariesPool[refIndex].data.copyOf()` 仍在新文件 `KdbxXmlBinaryNode.kt:50`）；全仓 12 处 `debugLog` 诊断点经逐一核对**全部无损迁移**（`SyncCycleRunner` 确无日志需求） | **`UnlockViewModel.kt` 仍 979 行未拆**（原计划第二波拆分因执行者不可达未完成）；另本批次新增代码令 `VaultListViewModel.kt`（731）与 `SettingsViewModel.kt`（902）超过 400 行阈值，一并登记 |
 
 ### 4.4 本批次登记的过程缺陷与事实修正
 
@@ -1006,6 +1010,6 @@
 14. **「单一 Gradle 会话」纪律有效规避了上一批次的事故**：本批次全程**明令禁止队员执行任何 Gradle 命令**，
     由编排者串行构建并回传错误。实测全程仅 2 个 java 进程、可用内存 8.7 GB，
     未复现 §3.3 第 10/11 条登记的 OOM 与 build 目录并发截断（`EOFException` / `Kryo Buffer underflow`）。
-15. **测试用例数显著增长**：921 → 1159（**+238**）。其中 app 416 → 637（+221）。
+15. **测试用例数显著增长**：921 → 1163（**+242**）。其中 app 416 → 641（+225）。
     集中编译把队员的静态自检升级为**真实门禁证据**，是本批次能在 30 个初始编译错误、
     25 例系统性测试失败、6 例残留失败中被逐层收敛到 0 的直接原因。
