@@ -6,7 +6,8 @@ package com.keepasskey.app.ui.screens.settings
  * 经 SharedPreferences 持久化，冷启动不丢失）。
  *
  * 注意：本模型仅承载「用户偏好」本身；偏好是否有真实消费方属功能接线问题，
- * 已在 docs/ACTIVE_ISSUES.md ISSUE-P3-03 (TASK-43) 中规划说明（skipDalVerification 假开关已下架）。
+ * 已在 docs/ACTIVE_ISSUES.md ISSUE-P3-03 (TASK-43) 中规划说明
+ * （skipDalVerification 已随 ISSUE-P2-02 接入 PasskeyCreateActivity 注册门控）。
  */
 data class ExtendedSettings(
     // 文件处理与进阶同步

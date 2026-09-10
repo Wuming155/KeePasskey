@@ -76,10 +76,26 @@ object CallingOriginResolver {
             // signingInfo 为平台保证非空；apkContentsSigners 仍可能为空数组，保留安全调用
             val signer = callingAppInfo.signingInfo.apkContentsSigners?.firstOrNull()
                 ?: return ""
-            val digest = MessageDigest.getInstance("SHA-256").digest(signer.toByteArray())
-            APK_KEY_HASH_PREFIX + Base64UrlNoPadding.encode(digest)
+            APK_KEY_HASH_PREFIX + Base64UrlNoPadding.encode(sha256(signer.toByteArray()))
         } catch (_: Throwable) {
             ""
         }
     }
+
+    /**
+     * 调用方签名证书 SHA-256 十六进制摘要（大写、无冒号，ISSUE-P2-02）。
+     * 供 [DigitalAssetLinksVerifier] 与 DAL 声明中的 `sha256_cert_fingerprints` 比对；
+     * 无法确定签名时返回 null（调用方按 fail-closed 处理）。
+     */
+    fun certSha256Hex(callingAppInfo: CallingAppInfo): String? {
+        return try {
+            val signer = callingAppInfo.signingInfo.apkContentsSigners?.firstOrNull() ?: return null
+            sha256(signer.toByteArray()).joinToString("") { "%02X".format(it) }
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
+    private fun sha256(bytes: ByteArray): ByteArray =
+        MessageDigest.getInstance("SHA-256").digest(bytes)
 }

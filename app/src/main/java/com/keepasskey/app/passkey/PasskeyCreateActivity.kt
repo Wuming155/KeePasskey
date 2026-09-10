@@ -45,6 +45,14 @@ class PasskeyCreateActivity : BaseCredentialActivity() {
     @Inject
     lateinit var fillVerifier: CredentialFillVerifier
 
+    /** ISSUE-P2-02：DAL 远程资产声明校验器（普通应用注册的 RP ID 强绑定门控） */
+    @Inject
+    lateinit var dalVerifier: DigitalAssetLinksVerifier
+
+    /** ISSUE-P2-02：读取「跳过 DAL 校验」显式用户授权开关 */
+    @Inject
+    lateinit var extendedSettingsStore: com.keepasskey.app.data.repository.ExtendedSettingsStore
+
     /** 防止验证回调 / 取消回调 / 重复 finish 交错产生重复创建或重复收尾 */
     private var settled = false
 
@@ -99,10 +107,43 @@ class PasskeyCreateActivity : BaseCredentialActivity() {
                 // 供后续 GET 流程按严格包名边界匹配（H1/L1/P1-4 整改）
                 val callerPackage = providerReq?.callingAppInfo?.packageName
                     ?: callingPackage?.ifBlank { null }
-                if (!CallingOriginResolver.isBrowserOrigin(origin) && callerPackage.isNullOrBlank()) {
-                    AppLog.e(TAG, "无法确定调用应用包名，拒绝创建应用内 Passkey")
-                    failAndFinish()
-                    return@launch
+
+                // ISSUE-P2-02：普通应用注册的 DAL 远程资产声明强绑定校验。
+                // 浏览器委派调用豁免（rp.id ↔ web origin 归属已由 DomainMatcher 严格点号边界强制）；
+                // 普通应用必须通过 https://<rpId>/.well-known/assetlinks.json 的
+                // `delegate_permission/common.get_login_creds` 授权声明（包名 + 证书指纹双向绑定），
+                // 网络 / 声明 / 格式任一不满足一律 fail-closed 拒绝；用户可在设置中显式开启跳过。
+                if (!CallingOriginResolver.isBrowserOrigin(origin)) {
+                    val pkg = callerPackage ?: run {
+                        AppLog.e(TAG, "无法确定调用应用包名，拒绝创建应用内 Passkey")
+                        failAndFinish()
+                        return@launch
+                    }
+                    val skipDal = extendedSettingsStore.load().skipDalVerification
+                    if (skipDal) {
+                        AppLog.w(TAG, "用户已显式开启「跳过 DAL 校验」，本次注册不执行远程声明验证")
+                    } else {
+                        val callingAppInfo = providerReq?.callingAppInfo
+                        val certHex = callingAppInfo?.let { CallingOriginResolver.certSha256Hex(it) }
+                        if (callingAppInfo == null || certHex == null) {
+                            AppLog.e(TAG, "无法获取调用方签名证书，DAL 校验 fail-closed，拒绝创建")
+                            failAndFinish()
+                            return@launch
+                        }
+                        when (dalVerifier.verify(rpId, pkg, certHex)) {
+                            DigitalAssetLinksVerifier.DalResult.VERIFIED -> Unit
+                            DigitalAssetLinksVerifier.DalResult.NOT_VERIFIED -> {
+                                AppLog.w(TAG, "DAL 声明校验未通过（无匹配授权声明或格式错误），拒绝创建")
+                                failAndFinish()
+                                return@launch
+                            }
+                            DigitalAssetLinksVerifier.DalResult.NETWORK_UNAVAILABLE -> {
+                                AppLog.w(TAG, "DAL 校验网络不可用，fail-closed 拒绝创建")
+                                failAndFinish()
+                                return@launch
+                            }
+                        }
+                    }
                 }
 
                 // ISSUE-P0-03 (ZT-03)：生成并保存凭据前先执行「本次实际发生」的用户验证门控。

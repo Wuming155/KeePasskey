@@ -21,6 +21,7 @@
    - [2.10 同步凭据认证绑定与 S3 密钥内存治理（P1-06）](#210-同步凭据认证绑定与-s3-密钥内存治理p1-06)
    - [2.11 Argon2 原生内核 C→Rust 迁移（P2-14）](#211-argon2-原生内核-crust-迁移p2-14)
    - [2.12 S3 AccessKey 在 SettingsUiState 中的 String 留存改造（P2-01）](#212-s3-accesskey-在-settingsuistate-中的-string-留存改造p2-01)
+   - [2.13 Passkey 注册 DAL 远程资产声明校验（P2-02）](#213-passkey-注册-dal-远程资产声明校验p2-02)
 
 ---
 
@@ -519,3 +520,45 @@
     - `app/src/main/java/com/keepasskey/app/ui/KeePasskeyApp.kt`
   - **测试证据**：`./gradlew.bat test` 全绿（app 222 例重跑通过 / 0 失败，其余模块 up-to-date 基线不变，
     全仓 627 例 0 失败）；凭据存储层 CharArray 借用语义与往返由既有 `SyncCredentialsStoreTest` 锁定。
+
+---
+
+### 2.13 Passkey 注册 DAL 远程资产声明校验（P2-02）
+
+> 来源：ISSUE-P2-02（P2-33 残余）。整改依据：Google Digital Asset Links 规范与 FIDO2 CTAP2 规范；零信任「来源归属必须可验证」。
+
+- **ISSUE-P2-02（Passkey 注册的完整 DAL 远程资产声明校验）**：已完成（2026-09-10）。
+  - **缺陷 / 动机**：`DomainMatcher` 已有可注册域（eTLD+1 / PSL）白名单防线，但普通应用
+    （`android:apk-key-hash` origin）发起 Passkey 注册时，凭据侧仅有「rp.id 为可注册域名」的弱约束——
+    任意应用都可为任意域名生成注册响应，缺 Native App 与 RP ID 的强双向绑定。
+  - **离线与在线权衡（验收标准 1）**：
+    1. **校验时机**：`onBeginCreateCredentialRequest` 有系统 5s 硬超时预算且属查询阶段，在其中做网络拉取
+       会拖慢甚至阻塞系统弹窗；权威校验落在 `PasskeyCreateActivity`（用户显式确认创建的最终落地路径），
+       begin-create 阶段维持现有本地约束（`isRpIdTrustedForCreation`）不变；
+    2. **在线优先、缓存兜底**：带 TTL 的内存缓存吸收重复注册的重复拉取——正向 24h / 负向 10min
+       （负向短 TTL 保证站点补发声明或网络恢复后可及时收敛）；
+    3. **fail-closed 策略（验收标准 3）**：网络不可用 / DAL 格式错误 / 无匹配声明一律拒绝创建；
+       离线注册需求经设置中既有「跳过 DAL 校验」开关（`skipDalVerification`，默认关闭）显式授权降级
+       （用户主动操作 + 落告警日志，满足「显式用户告警/授权」替代路径）。
+  - **整改实现**：
+    1. 新增 `DigitalAssetLinksVerifier`（`@Singleton`）：经 OkHttp 拉取 `https://<rpId>/.well-known/assetlinks.json`
+       （connect/read 2s、call 3s 严格超时，响应体 256KB 防御性上限），按
+       `delegate_permission/common.get_login_creds` + `namespace=android_app` + 包名精确相等 +
+       证书 SHA-256 指纹（冒号/无冒号、大小写归一）匹配声明；`DalResult` 三态
+       （VERIFIED / NOT_VERIFIED / NETWORK_UNAVAILABLE）区分确定性失败与网络故障；
+    2. 内嵌 `DalStatementMatcher`（纯函数）与 `MinimalJson`（极简 JSON 解析器）：零 Android 框架依赖、
+       解析失败一律 fail-closed 返回 null（不引入 org.json 的原因：Android 单测 stub 不可用且工程无既有 JSON 测试依赖）；
+    3. `CallingOriginResolver` 新增 `certSha256Hex()`：调用方签名证书 SHA-256 大写无冒号摘要（与 apk-key-hash 共用摘要函数）；
+    4. `PasskeyCreateActivity` 注册门控：浏览器委派调用豁免（rp.id ↔ web origin 归属已由
+       `DomainMatcher.isDomainMatch` 严格点号边界强制）；普通应用必须通过 DAL 声明校验，且置于
+       用户验证门控（ZT-03）**之前** fail-fast；无法获取调用方签名证书同样 fail-closed；
+    5. `skipDalVerification` 假开关真实接线（ISSUE-P3-03 43b 部分闭环），设置侧注释同步更新。
+  - **涉及文件**：
+    - `app/src/main/java/com/keepasskey/app/passkey/DigitalAssetLinksVerifier.kt`（新增）
+    - `app/src/main/java/com/keepasskey/app/passkey/CallingOriginResolver.kt`
+    - `app/src/main/java/com/keepasskey/app/passkey/PasskeyCreateActivity.kt`
+    - `app/src/main/java/com/keepasskey/app/ui/screens/settings/ExtendedSettings.kt` / `SettingsUiState.kt`（注释同步）
+  - **测试证据**：新增 `DigitalAssetLinksVerifierTest` 17 例（MockWebServer 远程拉取、声明匹配核心、
+    JSON 解析容错、指纹跨格式归一、缓存命中/TTL 过期/负向可恢复、非法入参零网络请求）全部通过；
+    `./gradlew.bat test` 全绿：全仓 **644 例（app 239 / core 36 / crypto 61 / database 163 / sync 145），
+    631 通过 / 0 失败 / 13 跳过**（12 例联调 + 1 例 Windows 权限视图，跳过项与既有基线一致）。

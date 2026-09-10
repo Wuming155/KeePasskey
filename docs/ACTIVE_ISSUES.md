@@ -23,24 +23,7 @@
 
 ---
 
-## P2 中危缺陷与协议/测试缺口（12 项）
-
-### ISSUE-P2-02 (P2-33 残余): Passkey 注册的完整 DAL 远程资产声明校验
-- **优先级**：P2（安全增强）
-- **分类**：WebAuthn / 协议合规
-- **背景与现象**：
-  目前已加入 `DomainMatcher` 可注册域（eTLD+1 / PSL）白名单防线，但尚未支持通过网络拉取 `/.well-known/assetlinks.json`（Digital Asset Links）校验 Native App 与 RP ID 的强双向绑定。
-- **整改依据**：
-  Google Digital Asset Links 规范与 FIDO2 CTAP2 规范。
-- **涉及核心文件**：
-  - `core/src/main/java/com/keepasskey/core/domain/DomainMatcher.kt`
-  - `app/src/main/java/com/keepasskey/app/passkey/CallingOriginResolver.kt`
-- **验收标准**：
-  1. 评估离线环境与在线 DAL 获取的权衡；
-  2. 实现带缓存与超时的 DAL 远程声明拉取与验证器；
-  3. 网络不可用或 DAL 格式错误时提供 fail-closed 或显式用户告警策略。
-
----
+## P2 中危缺陷与协议/测试缺口（11 项）
 
 ### ISSUE-P2-03 (P2-36 残余): App 模块 14 个测试用例消除 Fake 自测
 - **优先级**：P2（测试质量）
@@ -272,7 +255,7 @@
 - **背景与现象**：
   设置页预留的进阶开关已随 TASK-12 完成持久化，但底层消费方尚未全面接线：
   - **43a (同步)**：`webdavChunkedUpload` / `webdavChunkSizeMb` / `createBackupBeforeSave`（保存前 `.bak` 备份） / `checkRemoteChangesBeforeSave` / `conflictResolution` 默认策略；
-  - **43b (自动填充)**：`autofillCopyTotp` / `inlineSuggestionsEnabled` / `autoReturnFromQuery` / `autofillShowTotpNotification` / `skipDalVerification`；
+  - **43b (自动填充)**：`autofillCopyTotp` / `inlineSuggestionsEnabled` / `autoReturnFromQuery` / `autofillShowTotpNotification`（`skipDalVerification` 已随 ISSUE-P2-02 接线，见 RESOLVED_LOG §2.13）；
   - **43c (UI 偏好)**：`maskPasswordsDefault` / `maskTotpDefault` / `listDensity` / `autoActivateSearchOnOpen` / `showGroupInSearchResult` / `showGroupInEntry` / `showUnlockedNotification` / `showKillAppOption`；
   - **43d (导入解析器)**：1PUX / Bitwarden / KeePass XML / 浏览器 CSV 5 源码导入解析器；
   - **43e (子库)**：子库挂载支持；
