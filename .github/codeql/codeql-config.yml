@@ -1,0 +1,26 @@
+# ISSUE-P3-57：code scanning 的 advanced setup 配置（仅在本仓的 CodeQL 工作流内生效）。
+#
+# 为什么要这个文件：
+#   1. GitHub 侧「默认设置（default setup）」不提供任何路径过滤能力（`gh api
+#      /repos/.../code-scanning/default-setup` 实测 403，官方文档亦将 `paths-ignore` /
+#      `query-filters` 归入 advanced setup 的配置项）；
+#   2. 于是默认设置把 `crypto/src/main/rust/src/{strength,twofish_cbc,aes_kdf}.rs` 内联
+#      `#[cfg(test)] mod tests` 里的**测试夹具**（`let seed = [0x11u8; 32]`、`[0u8; 32]`
+#      缓冲区、KAT 期望值等）当成生产代码里的硬编码密钥，逐条报
+#      `rust/hard-coded-cryptographic-value`（critical），2026-09-10 一次性产出 **77 条**误报；
+#   3. 该查询**不存在任何测试代码过滤**（查询源码 `HardcodedCryptographicValueConfig` 只定义
+#      `isSource` / `isSink` / `isBarrier`），因此「把测试挪走」必须挪进**独立文件**，
+#      再靠本文件的 `paths-ignore` 做**文件级**过滤——这正是 2026-09-11 把三个文件的单测
+#      外移到 `crypto/src/main/rust/src/tests/` 的原因。
+#
+# 维护纪律：
+#   - 本文件只允许排除「**纯测试**文件」，禁止排除任何含生产代码的文件（否则等于削弱覆盖面）；
+#   - 新增 Rust 单测时，请放进 `crypto/src/main/rust/src/tests/` 下，并在源文件中以
+#     `#[cfg(test)] #[path = "tests/<name>_tests.rs"] mod tests;` 引用（既有三处即此写法）；
+#   - 若某条告警来自**生产代码**，正确处置是修代码或按查询级 `query-filters` 精确豁免并留痕依据，
+#     **不得**扩大本文件的 `paths-ignore`（参照 .github/owasp-dependency-suppressions.xml 的纪律）。
+name: "KeePasskey CodeQL"
+
+paths-ignore:
+  # Rust 单元测试（纯测试文件，不进入发布产物）。外移见 ISSUE-P3-57 / docs/RESOLVED_LOG.md §23.4。
+  - "crypto/src/main/rust/src/tests/**"

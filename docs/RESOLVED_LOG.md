@@ -31,7 +31,7 @@
 | §20 | 功能完整性审计批次 A（全文搜索范围 / 详情页单条删除） | ISSUE-P3-47 / P3-48 |
 | §21 | 功能完整性审计批次 B（HOTP 端到端 / 便利入口 / 孤儿实现清理） | ISSUE-P3-49 / P3-50 / P3-51 |
 | §22 | 存量问题由易到难整改闭环批次（P1-11 / P2-17 / P2-18 / P3-52~P3-56） | ISSUE-P1-11 / P2-17 / P2-18 / P3-52 ~ P3-56 |
-| §23 | CI 侧真实跑通归档（dependency-scan 首绿 + CodeQL 新发现留痕） | ISSUE-P3-24 / P3-32（闭环）/ P3-57（新登记） |
+| §23 | CI 侧真实跑通归档 + CodeQL Rust 误报治理（P3-24 / P3-32 / P3-57 闭环） | ISSUE-P3-24 / P3-32 / P3-57 |
 
 > 各批次验收证据（用例数 / 通过 / 失败 / 跳过）分别见 §2.22、§3.1、§4.1、§5.1、§6.1、§7.1、§8.0、§9.5、§10.1、§11、§12、§13、§14、§15、§16、§17、§18、§19、§20.3、§21.4、§22.9、§23.1。
 
@@ -472,8 +472,8 @@
 
 ---
 
-> **当前残余面（ACTIVE）**：ISSUE-P3-23（arm64 真机 + 真实 `.kdbx` 语料端到端）· **ISSUE-P3-57**（CodeQL Rust 单测误报）。
-> ~~P3-24（CI 首跑校准）· P3-32（供应链 CVE 收尾）~~ → **已于 2026-09-11 闭环，见 §23**。
+> **当前残余面（ACTIVE）**：ISSUE-P3-23（arm64 真机 + 真实 `.kdbx` 语料端到端）。
+> ~~P3-24（CI 首跑校准）· P3-32（供应链 CVE 收尾）· P3-57（CodeQL Rust 单测误报）~~ → **已于 2026-09-11 闭环，见 §23**。
 
 ---
 
@@ -713,10 +713,9 @@
 4. P1-11 缩小受信浏览器集属**有意的安全取舍**（仅 Chrome + Firefox release/beta 已取证），其余浏览器域填充便利性下降，
    已在 §22.7 与代码注释留痕，非缺陷。
 
-> **当前残余面（ACTIVE，未归档）**：ISSUE-P3-23（arm64 真机 + 真实 `.kdbx` 语料）·
-> **ISSUE-P3-57**（CodeQL 默认设置对 Rust 单测内测试向量的 critical 误报）——2026-09-11 复核：
-> P3-23 阻塞前提不变（无 arm64 镜像 / 无设备 / `generate_corpus.py --check` 退出码 3）；
-> **ISSUE-P3-24 与 ISSUE-P3-32 已于同日闭环归档，见 §23**。
+> **当前残余面（ACTIVE，未归档）**：ISSUE-P3-23（arm64 真机 + 真实 `.kdbx` 语料）——2026-09-11 复核：
+> 阻塞前提不变（无 arm64 镜像 / 无设备 / `generate_corpus.py --check` 退出码 3）；
+> **ISSUE-P3-24 / P3-32 / P3-57 已于同日闭环归档，见 §23**。
 
 ---
 
@@ -773,4 +772,45 @@ Rust 单测模块 `#[cfg(test)] mod tests` 之内**（测试模块起始行：`s
 `aes_kdf.rs` L91）。查询源码（`github/codeql` 的 `HardcodedCryptographicValue.ql`）**无任何测试代码过滤**
 （`ConfigSig` 仅 `isSource`/`isSink`/`isBarrier`），故「把单测外移」**单独实施不生效**——该设想已被本批次**推翻并留痕**。
 候选处置与验收标准见 `ACTIVE_ISSUES.md` **ISSUE-P3-57**。
+
+### 23.5 ISSUE-P3-57 闭环：Code scanning 对 Rust 单测的 critical 误报治理
+
+- **问题**：Code Scanning open 告警 84 条 = CodeQL **77 条** `rust/hard-coded-cryptographic-value`
+  （critical，查询声明 `@security-severity 9.8`）+ dependency-check 7 条（未达阈，见 §23.3）。
+  CodeQL 77 条经**逐条**行号核对，**77/77 落在** 3 个 Rust 源文件的 `#[cfg(test)] mod tests` 内
+  （`strength.rs` 53 / `twofish_cbc.rs` 17 / `aes_kdf.rs` 7），全部为测试夹具与已知答案向量 → 判定**误报**。
+- **机制验证（先验证后动手；结论推翻了初始设想并留痕）**：
+  1. 查询源码（`github/codeql` 的 `HardcodedCryptographicValue.ql`）**无任何测试代码过滤**
+     （`ConfigSig` 仅 `isSource` / `isSink` / `isBarrier`）→ **仅把单测外移无效**；
+  2. `paths-ignore` 是**文件级**过滤 → 要拦住，测试必须拥有**独立文件路径**，即"外移"是**前提**而非方案本身；
+  3. `paths-ignore` / `query-filters` 属 **advanced setup** 能力；本仓此前为 GitHub 侧**默认设置**
+     （仓库内无 CodeQL 工作流），故必须切换。
+- **实施**（PR #6，提交 `4d45988`）：
+  1. 3 个源文件的内联 `#[cfg(test)] mod tests` 外移到 `crypto/src/main/rust/src/tests/`（3 个**纯测试**文件），
+     源文件侧改为 `#[cfg(test)] #[path = "tests/<name>_tests.rs"] mod tests;` —— 模块路径仍为 `<mod>::tests::*`，
+     `use super::*` 与私有项可见性不变；
+  2. 新增 `.github/codeql/codeql-config.yml`：`paths-ignore` **仅**排除 `crypto/src/main/rust/src/tests/**`，
+     并写明「禁止排除含生产代码的文件」的维护纪律；
+  3. 新增 `.github/workflows/codeql.yml`（advanced setup）：matrix `rust`（`build-mode: none`）/ `python` / `actions`，
+     与默认设置下**实际产出分析**的语言对齐；**未纳入** `java-kotlin` 与 `c-cpp`（二者在默认设置下为
+     `rules=0, results=0` 的空分析）——此为**有意的范围收缩**，已在工作流注释与 PR 说明中留痕；
+     未显式指定 `queries`，沿用默认套件（依据：三语言 rules 计数 26/43/17 与默认套件规模一致）；
+  4. **运维动作（人工）**：Settings → Code security → Code scanning → **Default setup → Disable**
+     （默认设置与 advanced 设置会互相覆盖：上传会被拒 `CodeQL analyses from advanced configurations cannot be
+     processed when the default setup is enabled`，首次运行已实测到该报错）。
+- **验证（双向实证，数据取自 `code-scanning/analyses`）**：
+
+  | 分析时刻 | 来源判据 | ref | rust `results` | `rules` |
+  |---|---|---|:---:|:---:|
+  | 08:29 | `environment.runner = ["ubuntu-latest"]` → **默认设置** | `refs/pull/6/head`（代码**已外移**） | **77** | 26 |
+  | 09:12 | 无 runner 键 + 工作流自带 category → **本仓 advanced setup** | `refs/pull/6/merge` | **0** | 26 |
+
+  第一行**证明「仅外移无效」**（外移后的代码在默认设置下仍报同样 77 条）；第二行证明配置级排除生效，
+  且 **`rules` 未变（26）= 查询套件照常运行，生产代码未被 `paths-ignore` 误伤**。
+  另：`cargo test`（Rust 1.97.1）**43 passed / 0 failed**，与改动前基线逐项一致；PR 的 `build` 工作流 **success**（9m12s）。
+- **合入后动作与最终验收**：合并至 `main` 后由 `codeql.yml` 的 `push` 触发默认分支分析，77 条 alert 应转为
+  closed、open 总数收敛至 **7 条（dependency-check）**；该收敛以合并后的实测为准。
+- **过程留痕（如实）**：「外移单测」是本次**被推翻**的初始处置设想（曾据同类项目经验认为其单独可行）；
+  且本轮曾把「首次 PR 运行的 77 条」误读为 advanced setup 未生效，经 `analyses.environment` 比对 `runner`
+  标签后才确认其属默认设置的分析——**假设错误、以证据更正**。
 

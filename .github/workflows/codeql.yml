@@ -1,0 +1,81 @@
+# ISSUE-P3-57：把 code scanning 从 GitHub 侧「默认设置」切到**仓库自管的 advanced setup**。
+#
+# 为什么必须切（2026-09-11 实测与源码核实）：
+#   - 默认设置（`analysis_key = dynamic/github-code-scanning/codeql:analyze`）**不支持任何配置**，
+#     无法排除测试路径；它把 Rust 单测夹具报成 77 条 `rust/hard-coded-cryptographic-value`
+#     critical 误报（详见 .github/codeql/codeql-config.yml 头部说明与 docs/RESOLVED_LOG.md §23.4）；
+#   - 该查询无测试代码过滤，故唯一不削弱生产代码覆盖的治本手段是：**单测外移为纯测试文件**
+#     （本批次已把 3 个源文件的内联 `#[cfg(test)] mod tests` 外移到
+#     `crypto/src/main/rust/src/tests/`）+ 本工作流用 `paths-ignore` 做文件级排除。
+#
+# !! 启用前置条件（运维动作，必须人工执行）!!
+#   本工作流上线前，必须在仓库
+#     Settings → Code security → Code scanning → CodeQL analysis → Default setup → Disable
+#   关闭默认设置。否则**两套设置会互相覆盖**（advanced 分析的上传会被 GitHub 拒绝：
+#   "CodeQL analyses from advanced configurations cannot be processed when the default setup
+#   is enabled"），告警也会被默认设置反复重新登记。
+#
+# 语言面（**有意与默认设置对齐到"实际产出分析的语言"**）：
+#   - rust / python / actions：三者是默认设置下**真实跑出规则**的语言
+#     （`gh api .../code-scanning/analyses` 实测 rules 分别 26 / 43 / 17）；
+#   - **不纳入 java-kotlin 与 c-cpp**：默认设置下二者的分析结果为 `rules=0, results=0`（构建失败后
+#     上传的空分析），即切过来并不减少**有效**覆盖面。若要重新纳入，需在本工作流内为其提供
+#     真实构建（Android/Gradle 需 SDK，C/C++ 需工具链），属后续独立事项。
+#   - 查询套件：不显式指定 `queries`，使用 CodeQL **默认套件**——依据是上述 rules 计数
+#     （python 43 / rust 26 / actions 17）与默认套件规模一致；显式写 `security-extended`
+#     会**扩大**告警面，属另一次变更，不应混在本次切换里。
+#
+# 结果去向：分析与既有 dependency-scan 的 SARIF 一并汇入 Security → Code scanning。
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "23 4 * * 1" # 每周一次兜底巡检（默认设置原有周期性分析由本项承接）
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write # 上传 SARIF
+  actions: read # actions 语言的分析需要读取工作流定义
+
+concurrency:
+  group: codeql-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        # 三个语言均为**源码抽取**（build-mode: none）：Rust 抽取器不走 cargo 构建，
+        # 故无需 Rust 工具链、Android SDK 或 cargo-ndk，工作流保持轻量、可稳定复现。
+        include:
+          - language: rust
+            build-mode: none
+          - language: python
+            build-mode: none
+          - language: actions
+            build-mode: none
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+          # 测试路径排除见该文件；禁止在其中排除含生产代码的文件
+          config-file: ./.github/codeql/codeql-config.yml
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        with:
+          category: "/language:${{ matrix.language }}"
