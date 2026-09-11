@@ -18,7 +18,7 @@ import org.junit.Test
  * ISSUE-P3-20：子库挂载「状态 → 文案」映射的纯函数单测（JVM 直测，无 Android 依赖）。
  *
  * 覆盖验收要点：
- * 1. **穷尽**：6 种运行时状态与 12 种失败分型全部有专用呈现，无静默回落；
+ * 1. **穷尽**：6 种运行时状态与 13 种失败分型全部有专用呈现，无静默回落；
  * 2. **不谎报**：`Opening` 不映射为「未解锁」或「已解锁」任何文案（无文案即事实）；
  * 3. **不混同**：「已挂载」与「已解锁」在展示态上是两件事——
  *    `Closed`（锁库/重启后仍是已挂载）如实呈现「未解锁」并提供真实的重试入口；
@@ -119,16 +119,16 @@ class ChildDatabaseStatusTextTest {
     // ===================== 失败分型 → 文案 =====================
 
     @Test
-    fun `十二种失败分型全部有专用文案且互不重复`() {
+    fun `十三种失败分型全部有专用文案且互不重复`() {
         val reasons = ChildDatabaseFailureReason.entries
         val mapped = reasons.associateWith { ChildDatabaseStatusText.of(it) }
 
-        assertEquals("分型数量基线（新增分型须同步补文案）", 12, reasons.size)
+        assertEquals("分型数量基线（新增分型须同步补文案）", 13, reasons.size)
         mapped.forEach { (reason, resId) ->
             assertNotEquals("分型 $reason 缺少文案", 0, resId)
         }
         assertEquals(
-            "12 种分型不得共用同一文案",
+            "13 种分型不得共用同一文案",
             reasons.size,
             mapped.values.toSet().size
         )

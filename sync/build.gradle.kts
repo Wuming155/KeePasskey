@@ -22,6 +22,8 @@ dependencies {
     implementation(project(":core"))
     implementation(libs.coroutines.core)
     implementation(libs.okhttp)
+    // ISSUE-P3-56 子项 3：Provider 测试注入口显式标注 @VisibleForTesting 所需（纯编译期注解，不改依赖拓扑）
+    implementation(libs.androidx.annotation)
 
     testImplementation(libs.junit)
     testImplementation(libs.coroutines.test)

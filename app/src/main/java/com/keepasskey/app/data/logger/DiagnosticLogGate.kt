@@ -1,5 +1,6 @@
 package com.keepasskey.app.data.logger
 
+import com.keepasskey.app.BuildConfig
 import com.keepasskey.app.data.repository.ExtendedSettingsStore
 import dagger.Module
 import dagger.Provides
@@ -41,6 +42,10 @@ fun interface DiagnosticLogGate {
  * 注：`verboseSyncLog`（详细同步日志）不需要独立闸门——它是**同步编排器私有**的
  * 日志详细度，由 `SyncCoordinator` 直接从 [ExtendedSettingsStore] 单键读取即可，
  * 少一层间接依赖。
+ *
+ * ISSUE-P3-56 子项 1：**release 下强制关闭**。诊断事件可能承载子库别名 / 异常 message 等
+ * 非凭据 PII，释放版不得落盘，故闸门恒以 [BuildConfig.DEBUG] 为前提；release 下用户偏好开关
+ * 不再具备开启能力（debug 版保留原有偏好语义与可观测性）。
  */
 @Module
 @InstallIn(SingletonComponent::class)
@@ -49,5 +54,5 @@ object DiagnosticLogModule {
     @Provides
     @Singleton
     fun provideDiagnosticLogGate(store: ExtendedSettingsStore): DiagnosticLogGate =
-        DiagnosticLogGate { store.isDiagnosticLogEnabled() }
+        DiagnosticLogGate { BuildConfig.DEBUG && store.isDiagnosticLogEnabled() }
 }

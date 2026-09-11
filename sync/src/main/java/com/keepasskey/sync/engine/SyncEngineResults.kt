@@ -67,6 +67,24 @@ sealed class SyncOpenResult {
     /** 远端 404 丢失，由本地缓存自愈恢复 */
     data class RemoteLostRestored(val etag: String) : SyncOpenResult()
 
+    /**
+     * 远端返回设备侧**曾接受过的历史版本**（回退 / 重放），已被拒绝应用（ISSUE-P2-18）。
+     * 调用方必须**保留本地/基准，不得应用远端**，并给出明确用户提示。
+     */
+    data class RollbackRejected(
+        val remoteBytes: ByteArray,
+        val remoteEtag: String
+    ) : SyncOpenResult() {
+        override fun equals(other: Any?): Boolean {
+            if (this === other) return true
+            if (javaClass != other?.javaClass) return false
+            other as RollbackRejected
+            return remoteBytes.contentEquals(other.remoteBytes) && remoteEtag == other.remoteEtag
+        }
+
+        override fun hashCode(): Int = 31 * remoteBytes.contentHashCode() + remoteEtag.hashCode()
+    }
+
     /** 离线模式命中本地缓存 */
     data class CacheHitOffline(val localBytes: ByteArray) : SyncOpenResult() {
         override fun equals(other: Any?): Boolean {
@@ -110,4 +128,10 @@ sealed class SyncCommitResult {
 
     /** 远端不可达，已将变更安全保存在本地缓存 */
     data class RemoteUnreachable(val keptLocal: Boolean) : SyncCommitResult()
+
+    /**
+     * 冲突路径下载到的远端内容为设备侧曾接受过的历史版本（回退 / 重放），
+     * 已拒绝其参与合并（ISSUE-P2-18）；本地缓存与修改安全保留。
+     */
+    data class RollbackRejected(val keptLocal: Boolean = true) : SyncCommitResult()
 }

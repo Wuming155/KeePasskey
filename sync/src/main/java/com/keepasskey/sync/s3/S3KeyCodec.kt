@@ -16,6 +16,12 @@ internal object S3KeyCodec {
     private const val PERCENT_SIGN = '%'
     private const val HEX_PAIR_FORMAT = "%02X"
 
+    /** 当前目录段（ISSUE-P3-56 子项 2：路径遍历过滤） */
+    private const val CURRENT_DIR_SEGMENT = "."
+
+    /** 上级目录段（ISSUE-P3-56 子项 2：路径遍历过滤） */
+    private const val PARENT_DIR_SEGMENT = ".."
+
     /**
      * TASK-26 整改：AWS SigV4 规范 URI 编码（对齐官方 `SignatureVersion4` 文档的
      * URI encode 规则）——保留集仅为 RFC 3986 unreserved 字符（`A-Za-z0-9 - _ . ~`），
@@ -24,11 +30,17 @@ internal object S3KeyCodec {
      * 此前实现使用 java.net.URLEncoder（表单编码语义）：`*` 属 URLEncoder 保留集不编码、
      * `~` 被强制编码为 %7E——两者均与 AWS 规范相反，含这两字符的对象键 canonicalUri
      * 与服务端期望不一致，签名必然不匹配（403 SignatureDoesNotMatch）。
+     *
+     * ISSUE-P3-56 子项 2：剔除 `.` 与 `..` 段（对齐 WebDAV 侧 [com.keepasskey.sync.webdav.WebDavUrlCodec]
+     * 的既有过滤语义），杜绝路径遍历序列直达自控 S3 端点。`buildUrl` 与 `canonicalUri`
+     * 均经本方法产出，故实际键路径与 SigV4 canonicalUri 恒一致，不产生签名不匹配。
      */
     fun encodePath(path: String): String {
-        return path.split(PATH_SEPARATOR).joinToString(PATH_SEPARATOR) { segment ->
-            awsUriEncode(segment)
-        }
+        return path.split(PATH_SEPARATOR)
+            .filter { it != CURRENT_DIR_SEGMENT && it != PARENT_DIR_SEGMENT }
+            .joinToString(PATH_SEPARATOR) { segment ->
+                awsUriEncode(segment)
+            }
     }
 
     /**

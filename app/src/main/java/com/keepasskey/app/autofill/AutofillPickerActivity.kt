@@ -20,8 +20,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import com.keepasskey.app.R
 import com.keepasskey.app.security.ApplyObscuredTouchFilter
+import com.keepasskey.app.security.AutofillAuthBindingPolicy
 import com.keepasskey.app.security.BiometricAuthManager
-import com.keepasskey.app.security.BiometricResult
 import com.keepasskey.app.security.BiometricStatus
 import com.keepasskey.core.log.AppLog
 import dagger.hilt.android.AndroidEntryPoint
@@ -113,26 +113,32 @@ class AutofillPickerActivity : FragmentActivity() {
                 finish()
                 return@launch
             }
-            when (
-                biometricAuthManager.canAuthenticate(
-                    this@AutofillPickerActivity,
-                    BiometricAuthManager.UNLOCK_AUTHENTICATORS
-                )
-            ) {
-                BiometricStatus.AVAILABLE -> biometricAuthManager.authenticate(
+            // ISSUE-P3-52：可用认证器时以 Keystore 认证绑定密钥的 Cipher 发起（CryptoObject），
+            // 本次放行与生物识别密码学绑定；无可用认证器 / 密钥不可用 / 结果未携带绑定 Cipher
+            // 时退化为受保护窗口内的显式点选确认（既有退化语义，不回归）。
+            val authStatus = biometricAuthManager.canAuthenticate(
+                this@AutofillPickerActivity,
+                BiometricAuthManager.UNLOCK_AUTHENTICATORS
+            )
+            val authCipher = if (authStatus == BiometricStatus.AVAILABLE) {
+                biometricAuthManager.prepareAutofillAuthCipher()
+            } else {
+                null
+            }
+            if (authStatus == BiometricStatus.AVAILABLE && authCipher != null) {
+                biometricAuthManager.authenticate(
                     activity = this@AutofillPickerActivity,
                     title = getString(R.string.autofill_confirm_title),
                     subtitle = getString(R.string.autofill_picker_confirm_sub),
-                    authenticators = BiometricAuthManager.UNLOCK_AUTHENTICATORS
+                    authenticators = BiometricAuthManager.UNLOCK_AUTHENTICATORS,
+                    cipher = authCipher
                 ) { result ->
-                    if (result is BiometricResult.Success) deliver(credentials) else finish()
+                    if (AutofillAuthBindingPolicy.isBound(result)) deliver(credentials) else finish()
                 }
-
-                else -> {
-                    // 无可用认证器：用户在受保护窗口内的点选本身即一次显式确认
-                    // （与 AutofillConfirmActivity 的退化策略一致）
-                    deliver(credentials)
-                }
+            } else {
+                // 无可用认证器 / 认证绑定不可用：用户在受保护窗口内的点选本身即一次显式确认
+                // （与 AutofillConfirmActivity 的退化策略一致）
+                deliver(credentials)
             }
         }
     }

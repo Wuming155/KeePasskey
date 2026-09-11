@@ -232,6 +232,8 @@ open class SyncCache(private val cacheDir: File) {
             SUFFIX_BASE_VERSION,
             SUFFIX_BASE_CACHE,
             SUFFIX_META,
+            // ISSUE-P2-18：防回滚高水位状态随缓存一并销毁
+            SyncRollbackGuard.SUFFIX_STATE,
             "$SUFFIX_CACHE$SUFFIX_TMP"
         ).forEach { suffix ->
             val file = getFile(remotePath, suffix)

@@ -321,7 +321,7 @@ internal object ChildDatabaseStatusText {
         is ChildDatabaseMountState.Failed -> ChildDatabaseStatus.Text(UiMessage(of(state.reason)))
     }
 
-    /** 12 种失败分型 → 专用文案资源 */
+    /** 13 种失败分型 → 专用文案资源 */
     @StringRes
     fun of(reason: ChildDatabaseFailureReason): Int = when (reason) {
         ChildDatabaseFailureReason.INVALID_ALIAS -> R.string.dbset_child_db_err_invalid_alias
@@ -330,6 +330,7 @@ internal object ChildDatabaseStatusText {
         ChildDatabaseFailureReason.MOUNT_NOT_FOUND -> R.string.dbset_child_db_err_mount_not_found
         ChildDatabaseFailureReason.CREDENTIAL_MISSING -> R.string.dbset_child_db_err_credential_missing
         ChildDatabaseFailureReason.CREDENTIAL_REJECTED -> R.string.dbset_child_db_err_credential_rejected
+        ChildDatabaseFailureReason.THROTTLED -> R.string.dbset_child_db_err_throttled
         ChildDatabaseFailureReason.SOURCE_UNAVAILABLE -> R.string.dbset_child_db_err_source_unavailable
         ChildDatabaseFailureReason.CORRUPT_FILE -> R.string.dbset_child_db_err_corrupt
         ChildDatabaseFailureReason.UNSUPPORTED_VERSION -> R.string.dbset_child_db_err_unsupported_version

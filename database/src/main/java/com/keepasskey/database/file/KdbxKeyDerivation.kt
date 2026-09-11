@@ -47,7 +47,14 @@ internal object KdbxKeyDerivation {
         val compositeKey = when {
             hasPassword && hasKeyFile -> {
                 // 密码 + 密钥文件：SHA-256(SHA-256(password) ‖ keyFileKey)
-                val passwordHash = HashUtil.sha256(charsToUtf8(passwordChars))
+                // ISSUE-P3-55：显式捕获 charsToUtf8 产出的中间字节副本并在用毕清零，
+                // 对齐同文件「仅密码」分支的既有写法（原实现未捕获 → 明文口令字节随 GC 驻留）
+                val passwordBytes = charsToUtf8(passwordChars)
+                val passwordHash = try {
+                    HashUtil.sha256(passwordBytes)
+                } finally {
+                    Arrays.fill(passwordBytes, 0.toByte())
+                }
                 try {
                     // 按官方语义解析密钥文件（XML .keyx 取 <Data> / 裸 32 字节 /
                     // 64 位 hex 文本 / 任意二进制整文件 SHA-256），

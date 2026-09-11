@@ -16,9 +16,23 @@ import kotlinx.coroutines.withContext
  */
 class SyncEngine(
     private val provider: SyncProvider,
-    private val cache: SyncCache
+    private val cache: SyncCache,
+    /**
+     * 防回滚守卫（ISSUE-P2-18）：由 app 层以 AndroidKeystore HMAC 认证实现注入；
+     * 默认 null 表示未接线（行为与接线前逐字节一致，既有单测不受影响）。
+     */
+    private val rollbackGuard: SyncRollbackGuard? = null
 ) {
     val events = MutableSharedFlow<SyncCacheEvent>(replay = 16, extraBufferCapacity = 64)
+
+    /** 远端内容是否为设备侧曾接受过的历史版本（回退 / 重放） */
+    private fun isReplay(remotePath: String, bytes: ByteArray): Boolean =
+        rollbackGuard?.inspect(remotePath, bytes) == RollbackVerdict.ReplayDetected
+
+    /** 记录一份已被设备接受的内容（前移防回滚高水位） */
+    private fun recordAccepted(remotePath: String, bytes: ByteArray) {
+        rollbackGuard?.recordAccepted(remotePath, bytes)
+    }
 
     /**
      * 离线模式开关。开启后直接从缓存读取，不触碰网络。
@@ -90,8 +104,14 @@ class SyncEngine(
                 throw ex
             }
 
+            // ISSUE-P2-18：若远端返回设备侧曾接受过的历史版本（回退/重放），拒绝写入缓存与基线
+            if (isReplay(remotePath, remoteBytes)) {
+                return@withContext SyncOpenResult.RollbackRejected(remoteBytes, meta.etag)
+            }
+
             val hash = cache.writeCache(remotePath, remoteBytes)
             advanceBaseAndPersist(cache, remotePath, meta.etag, hash, remoteBytes)
+            recordAccepted(remotePath, remoteBytes)
             events.tryEmit(SyncCacheEvent.LoadedFromRemoteInSync(remotePath))
             return@withContext SyncOpenResult.RemoteSynced(remoteBytes, meta.etag)
         }
@@ -113,6 +133,7 @@ class SyncEngine(
                     val uploadResult = provider.uploadAtomic(remotePath, cachedBytes, expectedEtag = null)
                     val newEtag = uploadResult.getOrThrow()
                     advanceBaseAndPersist(cache, remotePath, newEtag, state?.localVersion, cachedBytes)
+                    recordAccepted(remotePath, cachedBytes)
                     events.tryEmit(SyncCacheEvent.UpdatedRemoteFileOnLoad(remotePath))
                     return@withContext SyncOpenResult.RemoteLostRestored(newEtag)
                 }
@@ -148,9 +169,14 @@ class SyncEngine(
             } else {
                 // 远端有更新，拉取刷新
                 val remoteBytes = remoteProbe.remoteBytes()
+                // ISSUE-P2-18：重放的历史版本拒绝落地
+                if (isReplay(remotePath, remoteBytes)) {
+                    return@withContext SyncOpenResult.RollbackRejected(remoteBytes, remoteEtag)
+                }
                 val newHash = cache.writeCache(remotePath, remoteBytes)
                 cache.updateBase(remotePath, newHash, remoteEtag)
                 cache.writeBaseContent(remotePath, remoteBytes)
+                recordAccepted(remotePath, remoteBytes)
                 events.tryEmit(SyncCacheEvent.UpdatedCachedFileOnLoad(remotePath))
                 SyncOpenResult.RemoteSynced(remoteBytes, remoteEtag)
             }
@@ -164,6 +190,7 @@ class SyncEngine(
                 if (forcedUpload.isSuccess) {
                     val newEtag = forcedUpload.getOrThrow()
                     advanceBaseAndPersist(cache, remotePath, newEtag, state?.localVersion, cachedBytes)
+                    recordAccepted(remotePath, cachedBytes)
                     events.tryEmit(SyncCacheEvent.UpdatedRemoteFileOnLoad(remotePath))
                     return@withContext SyncOpenResult.LocalWinAutoUploaded(newEtag)
                 }
@@ -177,12 +204,20 @@ class SyncEngine(
                 if (uploadResult.isSuccess) {
                     val newEtag = uploadResult.getOrThrow()
                     advanceBaseAndPersist(cache, remotePath, newEtag, state?.localVersion, cachedBytes)
+                    recordAccepted(remotePath, cachedBytes)
                     events.tryEmit(SyncCacheEvent.UpdatedRemoteFileOnLoad(remotePath))
                     SyncOpenResult.LocalWinAutoUploaded(newEtag)
                 } else {
                     val uploadEx = uploadResult.exceptionOrNull()
                     if (uploadEx is SyncException.ConflictError) {
                         val remoteBytes = remoteProbe.remoteBytes()
+                        // ISSUE-P2-18：重放的历史版本不参与三方合并
+                        if (isReplay(remotePath, remoteBytes)) {
+                            return@withContext SyncOpenResult.RollbackRejected(
+                                remoteBytes,
+                                uploadEx.remoteEtag.ifEmpty { remoteEtag }
+                            )
+                        }
                         events.tryEmit(SyncCacheEvent.OpenedFromLocalDueToConflict(remotePath))
                         SyncOpenResult.ConflictDetected(
                             cachedBytes,
@@ -197,6 +232,10 @@ class SyncEngine(
             } else {
                 // 本地有修改且远端也有修改 -> 双方冲突
                 val remoteBytes = remoteProbe.remoteBytes()
+                // ISSUE-P2-18：重放的历史版本不参与三方合并
+                if (isReplay(remotePath, remoteBytes)) {
+                    return@withContext SyncOpenResult.RollbackRejected(remoteBytes, remoteEtag)
+                }
                 events.tryEmit(SyncCacheEvent.OpenedFromLocalDueToConflict(remotePath))
                 SyncOpenResult.ConflictDetected(cachedBytes, remoteBytes, remoteEtag)
             }
@@ -226,6 +265,7 @@ class SyncEngine(
         if (uploadResult.isSuccess) {
             val newEtag = uploadResult.getOrThrow()
             advanceBaseAndPersist(cache, remotePath, newEtag, localHash, localBytes)
+            recordAccepted(remotePath, localBytes)
             SyncCommitResult.Uploaded(newEtag)
         } else {
             val ex = uploadResult.exceptionOrNull()
@@ -233,7 +273,12 @@ class SyncEngine(
                 val downloadResult = provider.download(remotePath)
                 val remoteBytes = downloadResult.getOrNull()
                 if (remoteBytes != null) {
-                    SyncCommitResult.ConflictNeedsMerge(remoteBytes, ex.remoteEtag)
+                    // ISSUE-P2-18：远端冲突内容若为设备侧曾接受过的历史版本（回退/重放），拒绝合并
+                    if (isReplay(remotePath, remoteBytes)) {
+                        SyncCommitResult.RollbackRejected(keptLocal = true)
+                    } else {
+                        SyncCommitResult.ConflictNeedsMerge(remoteBytes, ex.remoteEtag)
+                    }
                 } else {
                     // 远端已确认冲突但拉取远端内容失败：严禁以 ByteArray(0) 伪造空冲突远端
                     // ——空字节会被当作合法远端版本参与三方合并，导致远端全部内容被静默丢弃。
@@ -278,6 +323,7 @@ class SyncEngine(
         if (uploadResult.isSuccess) {
             val newEtag = uploadResult.getOrThrow()
             advanceBaseAndPersist(cache, remotePath, newEtag, localHash, localBytes)
+            recordAccepted(remotePath, localBytes)
             SyncCommitResult.Uploaded(newEtag)
         } else {
             val ex = uploadResult.exceptionOrNull()
@@ -310,6 +356,7 @@ class SyncEngine(
                 .getOrThrow()
             val localHash = cache.writeCache(remotePath, mergedBytes)
             advanceBaseAndPersist(cache, remotePath, newEtag, localHash, mergedBytes)
+            recordAccepted(remotePath, mergedBytes)
             newEtag
         }
     }

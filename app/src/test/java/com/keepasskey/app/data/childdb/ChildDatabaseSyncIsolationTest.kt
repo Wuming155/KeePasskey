@@ -1,6 +1,8 @@
 package com.keepasskey.app.data.childdb
 
 import com.keepasskey.app.data.logger.DebugLogBuffer
+import com.keepasskey.app.security.FakeUnlockThrottleStore
+import com.keepasskey.app.security.UnlockThrottleManager
 import com.keepasskey.database.session.DatabaseSession
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -38,7 +40,8 @@ class ChildDatabaseSyncIsolationTest {
         credentials = credentials,
         streamSource = source,
         databaseSession = databaseSession,
-        debugLog = DebugLogBuffer()
+        debugLog = DebugLogBuffer(),
+        unlockThrottleManager = UnlockThrottleManager(FakeUnlockThrottleStore())
     )
 
     @Test

@@ -11,6 +11,7 @@ import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.notification.TotpNotificationPublisher
 import com.keepasskey.app.passkey.CredentialFillConfirmScreen
 import com.keepasskey.app.security.ApplyObscuredTouchFilter
+import com.keepasskey.app.security.AutofillAuthBindingPolicy
 import com.keepasskey.app.security.BiometricAuthManager
 import com.keepasskey.app.security.BiometricResult
 import com.keepasskey.app.security.BiometricStatus
@@ -80,36 +81,49 @@ class AutofillConfirmActivity : FragmentActivity() {
         val subtitle = getString(R.string.autofill_confirm_biometric_subtitle, credentialTitle)
         val manualHint = getString(R.string.autofill_confirm_manual_hint, credentialTitle)
 
-        // 优先系统级认证（强生物识别，与快速解锁同一认证器集合——ISSUE-P1-08 收敛为不含锁屏凭据）；
-        // 设备无对应硬件/未录入时退化为受保护窗口内的手动确认（单次明确点选）
-        when (biometricAuthManager.canAuthenticate(this, BiometricAuthManager.UNLOCK_AUTHENTICATORS)) {
-            BiometricStatus.AVAILABLE -> {
-                biometricAuthManager.authenticate(
-                    activity = this,
-                    title = getString(R.string.autofill_confirm_title),
-                    subtitle = subtitle,
-                    authenticators = BiometricAuthManager.UNLOCK_AUTHENTICATORS
-                ) { result ->
-                    when (result) {
-                        is BiometricResult.Success -> completeAuthResult()
-                        else -> finish()
-                    }
+        // ISSUE-P3-52：优先系统级认证（强生物识别，与快速解锁同一认证器集合——ISSUE-P1-08 收敛为不含锁屏凭据），
+        // 并以 Keystore 认证绑定密钥的 Cipher 发起（CryptoObject），使本次放行与生物识别密码学绑定；
+        // 认证成功但结果未携带绑定 Cipher → fail-closed 退化为受保护窗口内手动确认；
+        // 设备无对应硬件/未录入/密钥不可用 → 同样退化为手动确认（既有退化策略不回归）。
+        val authStatus = biometricAuthManager.canAuthenticate(this, BiometricAuthManager.UNLOCK_AUTHENTICATORS)
+        val authCipher = if (authStatus == BiometricStatus.AVAILABLE) {
+            biometricAuthManager.prepareAutofillAuthCipher()
+        } else {
+            null
+        }
+        if (authStatus == BiometricStatus.AVAILABLE && authCipher != null) {
+            biometricAuthManager.authenticate(
+                activity = this,
+                title = getString(R.string.autofill_confirm_title),
+                subtitle = subtitle,
+                authenticators = BiometricAuthManager.UNLOCK_AUTHENTICATORS,
+                cipher = authCipher
+            ) { result ->
+                when {
+                    AutofillAuthBindingPolicy.isBound(result) -> completeAuthResult()
+                    // 认证成功但未携带绑定 Cipher：不做无绑定放行，退化到受保护窗口内手动确认
+                    result is BiometricResult.Success -> showManualConfirm(manualHint)
+                    else -> finish()
                 }
             }
-            else -> {
-                setContent {
-                    // ISSUE-P2-09：Compose 侧遮挡触摸过滤（点击劫持防护）
-                    ApplyObscuredTouchFilter()
-                    CredentialFillConfirmScreen(
-                        title = getString(R.string.autofill_confirm_title),
-                        hint = manualHint,
-                        confirmText = getString(R.string.autofill_confirm_ok),
-                        cancelText = getString(R.string.autofill_confirm_cancel),
-                        onConfirm = { completeAuthResult() },
-                        onCancel = { finish() }
-                    )
-                }
-            }
+        } else {
+            showManualConfirm(manualHint)
+        }
+    }
+
+    /** 受保护窗口内的手动确认（无可用认证器 / 认证绑定不可用时的 fail-closed 退化路径） */
+    private fun showManualConfirm(manualHint: String) {
+        setContent {
+            // ISSUE-P2-09：Compose 侧遮挡触摸过滤（点击劫持防护）
+            ApplyObscuredTouchFilter()
+            CredentialFillConfirmScreen(
+                title = getString(R.string.autofill_confirm_title),
+                hint = manualHint,
+                confirmText = getString(R.string.autofill_confirm_ok),
+                cancelText = getString(R.string.autofill_confirm_cancel),
+                onConfirm = { completeAuthResult() },
+                onCancel = { finish() }
+            )
         }
     }
 

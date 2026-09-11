@@ -140,6 +140,17 @@ class KeystoreManager @Inject constructor(
     }
 
     /**
+     * 初始化**自动填充放行绑定** Cipher（ISSUE-P3-52）。
+     *
+     * 应用级、认证绑定的 AES 密钥（别名 [AUTOFILL_AUTH_KEY_ALIAS]，规格同快速解锁密钥），
+     * 仅供自动填充确认 / 选择器把 BiometricPrompt 认证密码学绑定到本次放行操作
+     * （`CryptoObject`），**不执行 doFinal**。
+     */
+    fun initAutofillAuthCipher(): Cipher {
+        return keyMaterial.initAutofillAuthCipher()
+    }
+
+    /**
      * 初始化快速解锁凭据解封（解密）Cipher。
      * 若检测到密钥已因生物识别特征变更而失效（KeyPermanentlyInvalidatedException），自动清除脏密钥并抛出异常
      */
@@ -209,6 +220,13 @@ class KeystoreManager @Inject constructor(
     companion object {
         const val ANDROID_KEY_STORE = "AndroidKeyStore"
         const val BIOMETRIC_KEY_ALIAS = "com.keepasskey.biometric_master_key"
+
+        /**
+         * 自动填充放行绑定密钥别名（ISSUE-P3-52）。
+         * 应用级单例密钥（非 per-database），仅供自动填充窗口把 BiometricPrompt 认证
+         * 密码学绑定到本次凭据放行（`CryptoObject`），不承载任何数据加解密。
+         */
+        const val AUTOFILL_AUTH_KEY_ALIAS = "com.keepasskey.autofill_auth_binding_key"
 
         /**
          * Wave 12 前遗留的 QuickUnlock 非认证密钥别名：该密钥不绑定用户认证（历史设计），

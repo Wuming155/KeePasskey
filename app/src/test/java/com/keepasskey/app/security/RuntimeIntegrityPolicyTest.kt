@@ -101,4 +101,62 @@ class RuntimeIntegrityPolicyTest {
         // 未判定不等同于已判定为风险，不触发风险提示，避免 UI 闪烁
         assertFalse(enforcement.requireRiskNotice)
     }
+
+    // ===== ISSUE-P3-53：一次性缓存的时变信号可由实时重扫升级 =====
+
+    @Test
+    fun `冷启动后附加调试器可被后续实时判定升级为最高风险`() {
+        // 缓存快照为干净（首次扫描发生在附加调试器之前）
+        val cached = RuntimeIntegrityPolicy.evaluate(IntegritySignals.NONE)
+        assertEquals(RuntimeRiskLevel.TRUSTED, cached.level)
+
+        val escalated = RuntimeIntegrityPolicy.escalateForLiveSignals(
+            base = cached,
+            debuggerAttached = true,
+            hookFrameworkDetected = false
+        )
+
+        assertEquals(RuntimeRiskLevel.COMPROMISED, escalated.level)
+        assertTrue(escalated.enforcement.disableBiometricQuickUnlock)
+        assertTrue(escalated.enforcement.disableAutofill)
+    }
+
+    @Test
+    fun `实时钩子框架信号同样升级为最高风险`() {
+        val cached = RuntimeIntegrityPolicy.evaluate(IntegritySignals.NONE)
+
+        val escalated = RuntimeIntegrityPolicy.escalateForLiveSignals(
+            base = cached,
+            debuggerAttached = false,
+            hookFrameworkDetected = true
+        )
+
+        assertEquals(RuntimeRiskLevel.COMPROMISED, escalated.level)
+    }
+
+    @Test
+    fun `无实时信号时维持缓存快照不变`() {
+        val cached = RuntimeIntegrityPolicy.evaluate(IntegritySignals(appDebuggable = true))
+
+        val unchanged = RuntimeIntegrityPolicy.escalateForLiveSignals(
+            base = cached,
+            debuggerAttached = false,
+            hookFrameworkDetected = false
+        )
+
+        assertEquals(cached, unchanged)
+    }
+
+    @Test
+    fun `未判定快照在无实时信号时保持未判定`() {
+        val unchanged = RuntimeIntegrityPolicy.escalateForLiveSignals(
+            base = RuntimeIntegrityReport.UNDETERMINED,
+            debuggerAttached = false,
+            hookFrameworkDetected = false
+        )
+
+        assertEquals(RuntimeRiskLevel.UNDETERMINED, unchanged.level)
+        assertTrue(unchanged.enforcement.disableBiometricQuickUnlock)
+        assertTrue(unchanged.enforcement.disableAutofill)
+    }
 }

@@ -30,8 +30,9 @@
 | §19 | dependency-scan CI 侧首跑留痕 + 断言可观测性修复 | ISSUE-P3-24 / P3-32 |
 | §20 | 功能完整性审计批次 A（全文搜索范围 / 详情页单条删除） | ISSUE-P3-47 / P3-48 |
 | §21 | 功能完整性审计批次 B（HOTP 端到端 / 便利入口 / 孤儿实现清理） | ISSUE-P3-49 / P3-50 / P3-51 |
+| §22 | 存量问题由易到难整改闭环批次（P1-11 / P2-17 / P2-18 / P3-52~P3-56） | ISSUE-P1-11 / P2-17 / P2-18 / P3-52 ~ P3-56 |
 
-> 各批次验收证据（用例数 / 通过 / 失败 / 跳过）分别见 §2.22、§3.1、§4.1、§5.1、§6.1、§7.1、§8.0、§9.5、§10.1、§11、§12、§13、§14、§15、§16、§17、§18、§19、§20.3、§21.4。
+> 各批次验收证据（用例数 / 通过 / 失败 / 跳过）分别见 §2.22、§3.1、§4.1、§5.1、§6.1、§7.1、§8.0、§9.5、§10.1、§11、§12、§13、§14、§15、§16、§17、§18、§19、§20.3、§21.4、§22.9。
 
 ---
 
@@ -584,3 +585,128 @@
 - HOTP 的真机 UI 交互（详情页 / 验证器页取码）未做 instrumented 验证（无设备），随 ISSUE-P3-23 的设备缺口一并待补。
 
 > **当前残余面（ACTIVE）**：ISSUE-P3-23（arm64 真机 + 真实 `.kdbx` 语料端到端）· P3-24（CI 首跑校准）· P3-32（供应链 CVE 收尾）。
+
+---
+
+## 22. 存量问题由易到难整改闭环批次归档（P1-11 / P2-17 / P2-18 / P3-52 ~ P3-56）
+
+**范围**：`ACTIVE_ISSUES.md` 2026-09-11 登记的 8 项**本地可整改**条目，按难度递增顺序整改并归档；
+外部阻塞项 P3-23 / P3-24 / P3-32 仅复核留痕（保留于 `ACTIVE_ISSUES.md`，**未归档**）。
+关键决策：P3-54 采用 **Keystore HMAC 完整性绑定**；P1-11 **只收录已取证指纹、其余 fail-closed 降级 DAL**。
+
+### 22.1 ISSUE-P3-55：复合密钥派生 UTF-8 密码副本清零（最易）
+
+- 整改前 `KdbxKeyDerivation.deriveKeys` 的「密码 + 密钥文件」分支中 `charsToUtf8(passwordChars)` 产出的
+  明文 UTF-8 字节副本未被捕获、随 GC 驻留（同文件「仅密码」分支已正确清零）。
+- 整改：捕获中间字节并在 `finally` 中 `Arrays.fill` 清零，对齐同文件既有写法；不引入 `String` 中间态。
+- 证据：`database/.../file/KdbxKeyDerivation.kt`；复合密钥正确性回归由既有
+  `database/.../KdbxCompatibilityAndSecurityTest.kt` 锁定（三分支不回归）。
+
+### 22.2 ISSUE-P3-56：零信任审计次要加固项打包（子项 1-5）
+
+1. **release 强制关闭诊断日志**：`DiagnosticLogModule.provideDiagnosticLogGate` 改为
+   `BuildConfig.DEBUG && store.isDiagnosticLogEnabled()`（释放版不落 PII；debug 版保留可观测性）。
+2. **S3 对象键过滤 `.`/`..`**：`S3KeyCodec.encodePath` 剔除纯点段（对齐 `WebDavUrlCodec` 既有语义），
+   `buildUrl` 与 SigV4 `canonicalUri` 同源一致，不产生签名不匹配；`S3SyncProviderTest` 增 1 例。
+3. **Provider 测试注入口标注**：`S3SyncProvider` / `WebDavSyncProvider` 的 `client` 参数改 `@VisibleForTesting private val` 并加 KDoc；
+   `sync/build.gradle.kts` 增 `implementation(libs.androidx.annotation)`（纯编译期注解，不改依赖拓扑）。
+4. **TOTP 复制默认开启——评估结论**：**维持默认开启**。TOTP 为 30 秒时效验证码，复制走
+   `ClipboardSecurityManager`（已带 `EXTRA_IS_SENSITIVE` + 按用户偏好定时擦除）；残余面（窗口内其他前台应用可读）
+   属 Android 平台固有限制，不做应用层对抗，改默认关闭无实质安全增益。
+5. **`skipDalVerification` / KDF 边界**：确认留痕无遗漏（显式降级开关默认关；Argon2 上界构成有界 DoS 但纵深防御缺口当前不可达），不强制整改。
+
+### 22.3 ISSUE-P3-52：自动填充确认/选择器生物识别绑定 `CryptoObject`
+
+- 整改前两 Activity 调 `BiometricAuthManager.authenticate` 未传 `Cipher`，生物识别仅证明「用户在场」。
+- 整改：新增应用级认证绑定 AES 密钥别名 `KeystoreManager.AUTOFILL_AUTH_KEY_ALIAS`
+  （规格同快速解锁密钥，仅用于 `CryptoObject` 绑定、不 `doFinal`）；`KeystoreManager.initAutofillAuthCipher()`、
+  `BiometricAuthManager.prepareAutofillAuthCipher(): Cipher?`（不可用返回 null，fail-closed）；
+  新增纯策略 `AutofillAuthBindingPolicy.isBound(result)`（`Success && cipher != null`）。
+  `AutofillConfirmActivity`：绑定认证成功但结果无 Cipher → 退化受保护窗口手动确认；`AutofillPickerActivity`：同样绑定，退化语义不变。
+- 证据：`security/{KeystoreManager,KeystoreKeyMaterial,BiometricAuthManager,AutofillAuthBindingPolicy}.kt`、
+  `autofill/{AutofillConfirmActivity,AutofillPickerActivity}.kt`；新增 `AutofillAuthBindingPolicyTest`（3 例）。
+
+### 22.4 ISSUE-P3-53：运行完整性探测时变信号实时化
+
+- 消费方复核：`RuntimeIntegrityGate` 生产消费方仅 `BiometricAuthManager.authenticate`（`currentEnforcement()`）
+  与 `KeePasskeyAutofillService`（`awaitEnforcement()`）两处。
+- 整改：新增纯函数 `RuntimeIntegrityPolicy.escalateForLiveSignals`（实时信号与缓存信号按「或」合并后重新裁决）；
+  `currentEnforcement()` 以实时 `Debug.isDebuggerConnected()` 升级缓存快照；`awaitEnforcement()` 前先 `refresh()` 重扫
+  （含钩子框架等 IO 信号），保留 UNDETERMINED fail-closed 兜底。
+- 证据：`security/{RuntimeIntegrityPolicy,RuntimeIntegrityDetector}.kt`；`RuntimeIntegrityPolicyTest` 增 4 例
+  （含「冷启动后附加调试器可被后续实时判定升级为 COMPROMISED」）。
+
+### 22.5 ISSUE-P3-54：解锁节流计数 Keystore HMAC 完整性绑定
+
+- 整改：新增 `UnlockThrottleIntegrity` 抽象 + `AndroidKeystoreUnlockThrottleIntegrity`（AndroidKeyStore `HmacSHA256`，
+  别名 `com.keepasskey.unlock_throttle_integrity`，**不绑用户认证**、锁屏态可用）+ 纯函数 `UnlockThrottleMacPayload.encode`。
+  `UnlockThrottleRecord` 增 `integrityIntact`；`SharedPrefsUnlockThrottleStore` 写入/校验 MAC；
+  `UnlockThrottleManager.gate` 在完整性失效时 **fail-closed**：落一条带有效 MAC 的**有界**锁定期记录（≤ `MAX_BACKOFF_MS`）并返回 `Locked`，
+  既不放过也不永久锁死；Hilt 绑定见 `SecurityModule`。
+- 证据：`security/{UnlockThrottle,UnlockThrottleIntegrity}.kt`、`di/SecurityModule.kt`；
+  `UnlockThrottleManagerTest` 增 1 例、新增 `UnlockThrottleIntegrityTest`（4 例）。
+
+### 22.6 ISSUE-P2-17：子库解锁接入节流
+
+- 整改：`ChildDatabaseSessionManager` 注入 `UnlockThrottleManager`；`open()` 内、进入 `loadProjection` **之前**
+  做 `gate(mountId)`，锁定期直接返回 `ChildDatabaseFailureReason.THROTTLED`（**不进入 `KdbxFile.load`**）；
+  结算保留主库语义——仅 `CREDENTIAL_REJECTED` 计次，IO/损坏/版本等非认证失败不计次。新增失败分型 `THROTTLED` +
+  中英文案 `dbset_child_db_err_throttled`。
+- **key 选择决策**：以持久化 `mountId` 为节流键；首次 `mount` 需 SAF 交互、非在线爆破向量，本批不额外门控 `mount`（已留痕）。
+- 证据：`data/childdb/{ChildDatabaseSessionManager,ChildDatabaseModels}.kt`、`ui/screens/settings/SettingsUiState.kt`、
+  `res/values*/strings*.xml`；`ChildDatabaseSessionManagerTest` 增 3 例（阈值锁定不计入解密 / 成功清零 / 非认证失败不计次），
+  其余 3 处测试构造点同步更新；`ChildDatabaseStatusTextTest` 基线 12 → 13。
+
+### 22.7 ISSUE-P1-11：受信浏览器「包名 + 签名证书指纹」
+
+- 整改前浏览器分支仅按包名放行——侧载占用未安装浏览器包名的 APK 可冒领 `webDomain` 触发跨应用凭据泄露。
+- 整改：新增 `BrowserSigningFingerprints`（包名 → 已取证 SHA-256 指纹集合），`AutofillWebDomainPolicy.isTrustedBrowser`
+  改「包名 + 指纹」二元组、`attribute(...)` 增 `certSha256Hex` 参数；`AutofillOriginResolver` 把证书指纹读取**上移**至浏览器判定之前，
+  指纹不匹配 / 未取证浏览器一律 fail-closed 降级 DAL 路径。
+- **指纹取证（只收录已取证者）**：`com.android.chrome`（2 个，来源＝仓库既有 passkey 白名单
+  `CallingOriginResolver.PRIVILEGED_BROWSER_ALLOWLIST`）；`org.mozilla.firefox` / `org.mozilla.firefox_beta`
+  （来源＝Mozilla 官方 `firefox-source-docs.mozilla.org/mobile/android/fenix/certificates.html`，2026-09-11 拉取）。
+  其余原「仅包名」列表浏览器（`org.mozilla.focus`、`com.brave.browser`、`com.microsoft.emmx`、`com.sec.android.app.sbrowser` 等）
+  **未取得可引用来源，一律不收录** → 回退 DAL fail-closed（安全优先的显式取舍）。
+- 证据：`security/BrowserSigningFingerprints.kt`（新增）、`autofill/{AutofillWebDomainPolicy,AutofillOriginResolver}.kt`；
+  `AutofillWebDomainPolicyTest` 重写并增「包名占位但签名不匹配 → REJECTED」等断言（9 例）。
+
+### 22.8 ISSUE-P2-18：同步防回滚绑定（设计 + 实现）
+
+- **威胁模型**：Assume Breach，云端不可信，可重放「旧的但仍能用主凭据解密的合法 `.kdbx`」；既有三哈希状态机不解决版本回退。
+- **方案（已按计划先出方案再实施）**：本地认证的「**已见内容摘要链**」——
+  `SyncIntegrityMac`（sync 定义抽象，app 以 AndroidKeyStore HMAC 实现 `KeystoreSyncIntegrityMac`，别名
+  `com.keepasskey.sync_rollback_integrity`、不绑用户认证、锁屏后台可用）；`SyncRollbackGuard` 为每 `remotePath` 维护
+  经 MAC 认证的状态（`current` + 有界 32 条 `recent`），裁决 `Unchanged` / `Accept` / `ReplayDetected`。
+  `SyncEngine` 在所有「即将接受远端字节」的落点（未缓存下载、远端更新下载、两类冲突下载）先 `inspect`，
+  命中重放返回新增结果 `SyncOpenResult.RollbackRejected` / `SyncCommitResult.RollbackRejected`；
+  接受/上传成功后 `recordAccepted` 前移高水位；`SyncCache.clear` 一并清理 `.rollback` 状态。
+  `SyncCycleRunner` 将 `RollbackRejected` 映射为 `SyncOutcome.Error(sync_error_rollback_rejected)`
+  ——**保留本地/基准、不应用远端**并给出明确用户提示。
+- **跨端兼容决策（留痕）**：采用「已见摘要链」而非纯单调序号——其他官方客户端（KeePass 2.x / KeePassDX / KeePassXC）
+  写入全新内容（新摘要）永远 `Accept`，**不误报**；仅与设备侧曾接受过的历史版本逐字节相同的重放才被拒。
+- 证据：`sync/engine/{SyncIntegrityMac,SyncRollbackGuard,SyncEngineResults,SyncEngine,SyncCache}.kt`、
+  `app/sync/{KeystoreSyncIntegrityMac,SyncIntegrityModule,SyncCycleRunner,SyncConflictController}.kt`、`res` 中英文案；
+  新增 `SyncRollbackGuardTest`（4 例）+ `SyncEngineTest` 增 2 例（旧库重放被拒 / 其他客户端全新内容不误报）。
+
+### 22.9 验收证据（2026-09-11，`--rerun-tasks` 强制真实执行）
+
+- `.\gradlew.bat test --rerun-tasks --max-workers=1 --continue` → **BUILD SUCCESSFUL**（114 任务全部 `executed`）；
+  聚合全部 `build/test-results/**/TEST-*.xml`（175 套件）得 **1370 例 / 0 失败 / 0 错误 / 13 跳过**
+  （= 批次 B 基线 1345 + 本批净增 25 例，逐一：`AutofillWebDomainPolicyTest` 净增 3、`AutofillAuthBindingPolicyTest` 3、
+  `RuntimeIntegrityPolicyTest` 4、`UnlockThrottleManagerTest` 1、`UnlockThrottleIntegrityTest` 4、`S3SyncProviderTest` 1、
+  `ChildDatabaseSessionManagerTest` 3、`SyncRollbackGuardTest` 4、`SyncEngineTest` 2）。
+- `.\gradlew.bat lint --max-workers=1` → **BUILD SUCCESSFUL（5 模块 0 error）**。
+
+### 22.10 过程缺陷 / 事实修正（如实留痕）
+
+1. `SyncRollbackGuard` 首次实现把 MAC 载荷写成**含尾随换行**，而 `load` 以 `readLines` 重组时丢失尾随空行，
+   导致 MAC 永不匹配、全部状态退化为「无历史」——`sync` 模块首跑 **4 例失败**暴露，改为载荷不含尾随换行后通过。
+2. 新增 `UnlockThrottleIntegrityTest` 初版对 `ByteArray` 误用 `assertEquals`/`assertNotEquals`（引用相等），
+   改用 `assertArrayEquals` / `contentEquals` 后语义正确。
+3. `@VisibleForTesting` 不能用于构造器值参数（Kotlin 目标不兼容），改为 `@VisibleForTesting private val client` 属性后编译通过。
+4. P1-11 缩小受信浏览器集属**有意的安全取舍**（仅 Chrome + Firefox release/beta 已取证），其余浏览器域填充便利性下降，
+   已在 §22.7 与代码注释留痕，非缺陷。
+
+> **当前残余面（ACTIVE，未归档）**：ISSUE-P3-23（arm64 真机 + 真实 `.kdbx` 语料）· P3-24（CI 首跑校准）·
+> P3-32（供应链 CVE 收尾）——2026-09-11 复核阻塞前提不变（无 arm64 镜像 / 无设备 / `generate_corpus.py --check` 退出码 3 / NVD 外部依赖）。

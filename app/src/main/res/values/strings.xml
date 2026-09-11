@@ -1124,6 +1124,7 @@
     <string name="dbset_child_db_err_mount_not_found">该子库未挂载</string>
     <string name="dbset_child_db_err_credential_missing">需要重新输入子库凭据（锁定或重启后已清除）</string>
     <string name="dbset_child_db_err_credential_rejected">子库主密码或密钥文件错误</string>
+    <string name="dbset_child_db_err_throttled">解锁失败次数过多，已暂时锁定，请稍后重试</string>
     <string name="dbset_child_db_err_source_unavailable">无法读取子库文件（文件缺失或授权已撤销）</string>
     <string name="dbset_child_db_err_corrupt">子库文件损坏或不是有效的 KDBX v4 文件</string>
     <string name="dbset_child_db_err_unsupported_version">不支持的 KDBX 版本</string>

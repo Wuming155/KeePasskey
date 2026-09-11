@@ -11,6 +11,8 @@ import com.keepasskey.app.data.childdb.validLocalSource
 import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.app.data.repository.FakeSettingsRepository
 import com.keepasskey.app.data.repository.FakeVaultRepository
+import com.keepasskey.app.security.FakeUnlockThrottleStore
+import com.keepasskey.app.security.UnlockThrottleManager
 import com.keepasskey.database.session.DatabaseSession
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -77,7 +79,8 @@ class VaultListChildDatabaseTest {
         credentials = ChildDatabaseCredentialStore(),
         streamSource = childSource,
         databaseSession = rootSession,
-        debugLog = DebugLogBuffer()
+        debugLog = DebugLogBuffer(),
+        unlockThrottleManager = UnlockThrottleManager(FakeUnlockThrottleStore())
     )
 
     /** 构造最小可用的 SyncCoordinator（假 Context + 空会话）；本测试不触发真实同步 */

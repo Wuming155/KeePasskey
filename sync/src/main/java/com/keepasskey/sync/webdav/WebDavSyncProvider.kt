@@ -1,5 +1,6 @@
 package com.keepasskey.sync.webdav
 
+import androidx.annotation.VisibleForTesting
 import com.keepasskey.sync.model.RemoteFileMetadata
 import com.keepasskey.sync.model.SyncException
 import com.keepasskey.sync.model.cleanEtag
@@ -44,8 +45,11 @@ class WebDavSyncProvider(
      * sync 不读取 app 偏好）。默认关闭 = 与接线前逐字节一致的单次定长 PUT。
      */
     private val transferOptions: SyncTransferOptions = SyncTransferOptions.DISABLED,
-    // 测试注入口：HTTP 回环（MockWebServer）需显式传入默认规格客户端；生产恒为 null（走 TLS-only 工厂）
-    client: OkHttpClient? = null
+    // 测试注入口：HTTP 回环（MockWebServer）需显式传入默认规格客户端；生产恒为 null（走 TLS-only 工厂）。
+    // ISSUE-P3-56 子项 3：本注入一经传入即跳过 TLS-only 与 SSRF 构造期校验，属潜在回归面，
+    // 故显式标注 @VisibleForTesting 且收敛为 private，杜绝被生产代码引用。
+    @VisibleForTesting
+    private val client: OkHttpClient? = null
 ) : SyncProvider {
 
     // Wave 12/14 传输安全：默认经 TLS-only 工厂构建（排除 CLEARTEXT + 显式超时 + 系统 CA 链验证），

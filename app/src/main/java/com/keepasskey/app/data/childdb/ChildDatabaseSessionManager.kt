@@ -1,6 +1,8 @@
 package com.keepasskey.app.data.childdb
 
 import com.keepasskey.app.data.logger.DebugLogBuffer
+import com.keepasskey.app.security.ThrottleGate
+import com.keepasskey.app.security.UnlockThrottleManager
 import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.core.session.SessionLockObserver
 import com.keepasskey.database.session.DatabaseSession
@@ -86,7 +88,9 @@ class ChildDatabaseSessionManager @Inject constructor(
     private val credentials: ChildDatabaseCredentialStore,
     private val streamSource: ChildDatabaseStreamSource,
     private val databaseSession: DatabaseSession,
-    private val debugLog: DebugLogBuffer
+    private val debugLog: DebugLogBuffer,
+    // ISSUE-P2-17：子库解锁失败节流（与主库共用同一状态机，按 mountId 计次）
+    private val unlockThrottleManager: UnlockThrottleManager
 ) : SessionLockObserver {
 
     /** 序列化全部挂起型变更（挂载 / 打开 / 卸载 / 刷新），避免并发挂载竞态 */
@@ -213,9 +217,17 @@ class ChildDatabaseSessionManager @Inject constructor(
     ): KdbxResult<ChildDatabaseSnapshot> = mutex.withLock {
         val registered = mountStore.findById(mountId)
             ?: return@withLock snapshotFailure(ChildDatabaseFailureReason.MOUNT_NOT_FOUND)
+
+        // ISSUE-P2-17：解锁节流闸门——锁定期内 fail-closed 直接拒绝，
+        // 绝不进入 ChildReadOnlySession.loadProjection（即不进入 KdbxFile.load）
+        if (unlockThrottleManager.gate(mountId) is ThrottleGate.Locked) {
+            return@withLock snapshotFailure(ChildDatabaseFailureReason.THROTTLED)
+        }
+
         val epoch = currentRootEpoch()
         val session = sessionFor(registered)
         val result = session.open(passwordChars, keyFileData)
+        settleThrottle(mountId, result)
         return@withLock settleWithEpoch(epoch, session, result)
     }
 
@@ -282,6 +294,23 @@ class ChildDatabaseSessionManager @Inject constructor(
         }
         publish()
         return result
+    }
+
+    /**
+     * 解锁节流结算（ISSUE-P2-17）：保留主库既有语义——**仅认证失败**（凭据被拒）计次，
+     * IO / 文件损坏 / 版本不支持 / 来源不可读等非认证错误不计次，避免瞬时故障误锁用户。
+     */
+    private fun settleThrottle(mountId: String, result: KdbxResult<ChildDatabaseSnapshot>) {
+        when (result) {
+            is KdbxResult.Success -> unlockThrottleManager.registerSuccess(mountId)
+            is KdbxResult.Failure -> {
+                if (ChildDatabaseFailureReason.of(result.error) ==
+                    ChildDatabaseFailureReason.CREDENTIAL_REJECTED
+                ) {
+                    unlockThrottleManager.registerFailure(mountId)
+                }
+            }
+        }
     }
 
     /** 终止全部会话（注册表不动）并清零凭据通道；同步路径，供锁定回调直接调用 */

@@ -211,6 +211,19 @@ internal class KeystoreKeyMaterial(
         return cipher
     }
 
+    /**
+     * [KeystoreManager.initAutofillAuthCipher] 实现（ISSUE-P3-52）。
+     *
+     * 复用与快速解锁一致的「纯强生物识别绑定」密钥规格：该 Cipher **仅用于** BiometricPrompt 的
+     * `CryptoObject` 绑定（证明本次放行操作经强生物识别授权），**不执行 doFinal**。
+     */
+    fun initAutofillAuthCipher(): Cipher {
+        val key = getOrCreateDeviceCredentialKey(KeystoreManager.AUTOFILL_AUTH_KEY_ALIAS)
+        val cipher = Cipher.getInstance(TRANSFORMATION)
+        cipher.init(Cipher.ENCRYPT_MODE, key)
+        return cipher
+    }
+
     /** [KeystoreManager.initDeviceCredentialDecryptCipher] 实现（含失效密钥清理）。 */
     fun initDeviceCredentialDecryptCipher(
         iv: ByteArray,

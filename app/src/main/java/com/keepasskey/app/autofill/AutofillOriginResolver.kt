@@ -10,13 +10,15 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * 自动填充 webDomain 归属解析器（ISSUE-P2-07 / ZT-12）。
+ * 自动填充 webDomain 归属解析器（ISSUE-P2-07 / ZT-12 / ISSUE-P1-11）。
  *
  * 复用既有 [DigitalAssetLinksVerifier]（ISSUE-P2-02）对非浏览器调用方做站点归属验证：
  * 拉取 `https://<webDomain>/.well-known/assetlinks.json`，要求站点显式声明授权
  * 「该调用包名 + 其签名证书指纹」，从而将调用应用与 webDomain 强绑定。
  *
- * 安全语义：受信任浏览器包名白名单直接放行；其余调用方必须通过 DAL 校验，
+ * 安全语义（ISSUE-P1-11）：受信任浏览器分支**不再仅按包名放行**——先读取调用方签名证书指纹，
+ * 仅「包名 + 已取证指纹」二元组匹配（[AutofillWebDomainPolicy.isTrustedBrowser]）才直接放行；
+ * 其余调用方（含未取证浏览器、指纹不匹配的冒名应用）必须通过 DAL 校验，
  * 无法取得证书指纹 / 校验失败 / 网络不可用一律返回 null（fail-closed，不下发该域候选）。
  */
 @Singleton
@@ -31,9 +33,11 @@ class AutofillOriginResolver @Inject constructor(
      */
     suspend fun resolveUsableWebDomain(callingPackage: String, rawWebDomain: String?): String? {
         val domain = AutofillWebDomainPolicy.normalizeDomain(rawWebDomain) ?: return null
-        if (AutofillWebDomainPolicy.isTrustedBrowser(callingPackage)) return domain
 
+        // ISSUE-P1-11：证书指纹必须在浏览器判定之前读取，使浏览器分支同样受「包名 + 指纹」约束
         val certSha256Hex = callingAppCertSha256Hex(callingPackage)
+        if (AutofillWebDomainPolicy.isTrustedBrowser(callingPackage, certSha256Hex)) return domain
+
         val dalVerified = if (certSha256Hex == null) {
             false
         } else {
@@ -47,7 +51,9 @@ class AutofillOriginResolver @Inject constructor(
             }
         }
 
-        return when (AutofillWebDomainPolicy.attribute(callingPackage, domain, dalVerified)) {
+        return when (
+            AutofillWebDomainPolicy.attribute(callingPackage, domain, certSha256Hex, dalVerified)
+        ) {
             WebDomainAttribution.BROWSER_DELEGATED,
             WebDomainAttribution.DAL_VERIFIED -> domain
             WebDomainAttribution.REJECTED -> null

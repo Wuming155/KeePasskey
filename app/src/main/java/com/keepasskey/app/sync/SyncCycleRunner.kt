@@ -6,10 +6,13 @@ import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.app.ui.screens.settings.ExtendedSettings
 import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.database.session.DatabaseSession
+import com.keepasskey.sync.engine.NoopSyncIntegrityMac
 import com.keepasskey.sync.engine.SyncCache
 import com.keepasskey.sync.engine.SyncCommitResult
 import com.keepasskey.sync.engine.SyncEngine
+import com.keepasskey.sync.engine.SyncIntegrityMac
 import com.keepasskey.sync.engine.SyncOpenResult
+import com.keepasskey.sync.engine.SyncRollbackGuard
 import com.keepasskey.sync.merge.SyncConflictStrategy
 import com.keepasskey.sync.model.SyncException
 import com.keepasskey.sync.provider.SyncProvider
@@ -42,7 +45,10 @@ class SyncCycleRunner @Inject constructor(
     private val conflicts: SyncConflictController,
     private val changes: SyncContentChangeDetector,
     private val preferences: SyncPreferences,
-    private val strings: StringsProvider
+    private val strings: StringsProvider,
+    // ISSUE-P2-18：防回滚状态认证密钥来源（生产由 Hilt 注入 KeystoreSyncIntegrityMac；
+    // 直接构造路径默认空实现 = 禁用防回滚，保持既有单测行为不变）
+    private val syncIntegrityMac: SyncIntegrityMac = NoopSyncIntegrityMac
 ) {
 
     /**
@@ -78,7 +84,9 @@ class SyncCycleRunner @Inject constructor(
             // ISSUE-P1-07：目录名与 SyncCacheEvictor 共用同一常量，杜绝两处字面量漂移
             val syncDir = File(context.cacheDir, SyncCache.CACHE_DIR_NAME).apply { if (!exists()) mkdirs() }
             val syncCache = SyncCache(syncDir)
-            val syncEngine = SyncEngine(provider, syncCache)
+            // ISSUE-P2-18：本地认证的防回滚守卫（高水位状态与缓存同目录；app 层注入 Keystore MAC）
+            val rollbackGuard = SyncRollbackGuard(syncDir, syncIntegrityMac)
+            val syncEngine = SyncEngine(provider, syncCache, rollbackGuard)
             // 离线开关联动：设置页开关传导至引擎决策树
             syncEngine.isOffline = session.isOfflineMode
             // ISSUE-P3-03 (43a)：关闭「同步前检查远程变更」= 上传前不比对方版本，本地修改直接覆盖远端
@@ -246,6 +254,10 @@ class SyncCycleRunner @Inject constructor(
                 )
             }
             is SyncCommitResult.RemoteUnreachable -> SyncOutcome.Offline
+            // ISSUE-P2-18：远端内容为设备侧曾接受过的旧版本（回退/重放）→ 拒绝应用并提示用户
+            is SyncCommitResult.RollbackRejected -> SyncOutcome.Error(
+                strings.get(R.string.sync_error_rollback_rejected)
+            )
         }
     }
 
@@ -343,6 +355,11 @@ class SyncCycleRunner @Inject constructor(
                         strategy = conflictStrategy
                     )
                 }
+                // ISSUE-P2-18：远端内容为设备侧曾接受过的旧版本（回退/重放）→
+                // 保留本地/基准、不应用远端，并给出明确用户提示
+                is SyncOpenResult.RollbackRejected -> SyncOutcome.Error(
+                    strings.get(R.string.sync_error_rollback_rejected)
+                )
             }
         } catch (e: com.keepasskey.sync.model.SyncException.NetworkError) {
             SyncOutcome.Offline

@@ -186,6 +186,19 @@ class BiometricAuthManager @Inject constructor(
     }
 
     /**
+     * 为自动填充放行操作准备认证绑定 Cipher（ISSUE-P3-52）。
+     *
+     * 该 Cipher 仅用于把 BiometricPrompt 认证密码学绑定到本次放行（`CryptoObject`），
+     * **不执行任何加解密**。Keystore 密钥不可用（无硬件 / 未录入 / 生成失败）时返回 null，
+     * 由调用方 fail-closed 退化为受保护窗口内手动确认（既有退化策略）。
+     */
+    fun prepareAutofillAuthCipher(): Cipher? = try {
+        keystoreManager.initAutofillAuthCipher()
+    } catch (_: Throwable) {
+        null
+    }
+
+    /**
      * 生成各数据库独立的硬件密钥别名
      */
     fun getAliasForDatabase(databaseId: String): String {

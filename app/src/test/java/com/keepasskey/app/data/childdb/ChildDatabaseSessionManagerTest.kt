@@ -3,6 +3,9 @@ package com.keepasskey.app.data.childdb
 import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.app.data.repository.FakeSettingsRepository
 import com.keepasskey.app.security.AutoLockSessionGuard
+import com.keepasskey.app.security.FakeUnlockThrottleStore
+import com.keepasskey.app.security.UnlockThrottleManager
+import com.keepasskey.app.security.UnlockThrottlePolicy
 import com.keepasskey.core.model.KdbxGroup
 import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.database.file.KdbxDatabase
@@ -37,12 +40,16 @@ class ChildDatabaseSessionManagerTest {
 
     private val password = "child-master-pw".toCharArray()
 
+    // ISSUE-P2-17：子库解锁节流状态机（复用主库同一实现，按 mountId 计次）
+    private val throttleStore = FakeUnlockThrottleStore()
+
     private fun newManager(): ChildDatabaseSessionManager = ChildDatabaseSessionManager(
         mountStore = mountStore,
         credentials = credentials,
         streamSource = source,
         databaseSession = databaseSession,
-        debugLog = DebugLogBuffer()
+        debugLog = DebugLogBuffer(),
+        unlockThrottleManager = UnlockThrottleManager(throttleStore)
     )
 
     private fun reasonOf(result: KdbxResult<*>): ChildDatabaseFailureReason =
@@ -220,7 +227,8 @@ class ChildDatabaseSessionManagerTest {
             credentials = ChildDatabaseCredentialStore(),
             streamSource = source,
             databaseSession = databaseSession,
-            debugLog = DebugLogBuffer()
+            debugLog = DebugLogBuffer(),
+            unlockThrottleManager = UnlockThrottleManager(throttleStore)
         )
 
         assertEquals(1, restarted.mountedCount.value)
@@ -257,5 +265,56 @@ class ChildDatabaseSessionManagerTest {
         assertNull(databaseSession.currentPathIdentifier)
         assertEquals(1, manager.mountedCount.value)
         assertFalse(record.id.isBlank())
+    }
+
+    // ===== ISSUE-P2-17：子库解锁节流 =====
+
+    @Test
+    fun `子库口令连续失败达阈值后锁定期内不再进入解密管线`() = runTest {
+        val manager = newManager()
+        val record = mountOnce(manager)
+
+        repeat(UnlockThrottlePolicy.FAILURE_THRESHOLD) {
+            assertEquals(
+                ChildDatabaseFailureReason.CREDENTIAL_REJECTED,
+                reasonOf(manager.open(record.id, "wrong-pw".toCharArray(), null))
+            )
+        }
+        assertEquals(
+            UnlockThrottlePolicy.FAILURE_THRESHOLD,
+            throttleStore.read(record.id).failureCount
+        )
+
+        // 锁定期内闸门 fail-closed：返回 THROTTLED 且绝不读取来源（不进入 KdbxFile.load）
+        val openedBefore = source.openCount
+        val throttled = manager.open(record.id, password, null)
+        assertEquals(ChildDatabaseFailureReason.THROTTLED, reasonOf(throttled))
+        assertEquals("锁定期内不得进入解密管线", openedBefore, source.openCount)
+    }
+
+    @Test
+    fun `子库成功解锁清零节流计数`() = runTest {
+        val manager = newManager()
+        val record = mountOnce(manager)
+
+        repeat(2) { manager.open(record.id, "wrong-pw".toCharArray(), null) }
+        assertEquals(2, throttleStore.read(record.id).failureCount)
+
+        val success = manager.open(record.id, password, null)
+
+        assertTrue("正确口令应解锁成功", success.isSuccess)
+        assertEquals(0, throttleStore.read(record.id).failureCount)
+    }
+
+    @Test
+    fun `子库非认证失败不计入节流`() = runTest {
+        val manager = newManager()
+        val record = mountOnce(manager)
+
+        source.failure = java.io.FileNotFoundException("测试：来源不可读")
+        val failed = manager.open(record.id, password, null)
+
+        assertEquals(ChildDatabaseFailureReason.SOURCE_UNAVAILABLE, reasonOf(failed))
+        assertEquals("IO / 来源失败不得计入节流", 0, throttleStore.read(record.id).failureCount)
     }
 }

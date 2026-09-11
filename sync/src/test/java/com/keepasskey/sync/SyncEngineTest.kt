@@ -4,7 +4,9 @@ import com.keepasskey.sync.engine.SyncCache
 import com.keepasskey.sync.engine.SyncCacheEvent
 import com.keepasskey.sync.engine.SyncCommitResult
 import com.keepasskey.sync.engine.SyncEngine
+import com.keepasskey.sync.engine.SyncIntegrityMac
 import com.keepasskey.sync.engine.SyncOpenResult
+import com.keepasskey.sync.engine.SyncRollbackGuard
 import com.keepasskey.sync.model.RemoteFileMetadata
 import com.keepasskey.sync.model.SyncException
 import com.keepasskey.sync.provider.SyncProvider
@@ -21,6 +23,9 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
+import java.security.MessageDigest
+import javax.crypto.Mac
+import javax.crypto.spec.SecretKeySpec
 
 /**
  * SyncEngine 三哈希状态机全路径单元测试。
@@ -474,6 +479,51 @@ class SyncEngineTest {
         assertTrue(res.exceptionOrNull() is SyncException.ConflictError)
         // 远端内容未被覆盖
         assertArrayEquals("concurrent-mod".toByteArray(), fakeProvider.remoteFiles[remotePath]?.data)
+    }
+
+    // ===== ISSUE-P2-18：防回滚（旧库重放拒绝 / 其他客户端不误报） =====
+
+    @Test
+    fun `ISSUE_P2_18 被入侵端点重放旧库被拒绝应用`() = runTest {
+        val guardedEngine = SyncEngine(fakeProvider, syncCache, SyncRollbackGuard(cacheDir, testMac()))
+
+        val v1 = "remote-v1".toByteArray()
+        fakeProvider.remoteFiles[remotePath] = FakeRemoteFile(v1, etag = "etag-1")
+        assertTrue(guardedEngine.openRemote(remotePath) is SyncOpenResult.RemoteSynced)
+
+        val v2 = "remote-v2".toByteArray()
+        fakeProvider.remoteFiles[remotePath] = FakeRemoteFile(v2, etag = "etag-2")
+        assertTrue(guardedEngine.openRemote(remotePath) is SyncOpenResult.RemoteSynced)
+
+        // 被入侵端点返回设备侧曾接受过的旧版本 v1（重放）
+        fakeProvider.remoteFiles[remotePath] = FakeRemoteFile(v1, etag = "etag-attacker")
+        val replayed = guardedEngine.openRemote(remotePath)
+
+        assertTrue("重放旧库必须被拒绝", replayed is SyncOpenResult.RollbackRejected)
+        assertArrayEquals(v1, (replayed as SyncOpenResult.RollbackRejected).remoteBytes)
+    }
+
+    @Test
+    fun `ISSUE_P2_18 其他客户端写入的全新内容不误报`() = runTest {
+        val guardedEngine = SyncEngine(fakeProvider, syncCache, SyncRollbackGuard(cacheDir, testMac()))
+
+        fakeProvider.remoteFiles[remotePath] = FakeRemoteFile("v1".toByteArray(), etag = "e1")
+        guardedEngine.openRemote(remotePath)
+
+        // 其他官方客户端写入的是全新内容（新摘要）→ 必须正常同步，不得判为回退
+        fakeProvider.remoteFiles[remotePath] = FakeRemoteFile("v2-from-keepassxc".toByteArray(), etag = "e2")
+        assertTrue(guardedEngine.openRemote(remotePath) is SyncOpenResult.RemoteSynced)
+    }
+
+    /** 固定密钥的等价 HMAC（JVM 可测） */
+    private fun testMac(): SyncIntegrityMac = object : SyncIntegrityMac {
+        private val key = SecretKeySpec("test-rollback-integrity-key".toByteArray(), "HmacSHA256")
+
+        override fun compute(data: ByteArray): ByteArray =
+            Mac.getInstance("HmacSHA256").apply { init(key) }.doFinal(data)
+
+        override fun verify(data: ByteArray, mac: ByteArray?): Boolean =
+            mac != null && MessageDigest.isEqual(compute(data), mac)
     }
 
     private class FakeRemoteFile(

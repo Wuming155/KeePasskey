@@ -164,6 +164,9 @@ enum class ChildDatabaseFailureReason {
     /** 凭据被拒：主密码或密钥文件错误；错误凭据已即时清零 */
     CREDENTIAL_REJECTED,
 
+    /** 解锁失败次数达阈值进入退避锁定（ISSUE-P2-17：锁定期内不进入解密管线） */
+    THROTTLED,
+
     /** 来源不可读：文件不存在、URI 无权限或 IO 失败 */
     SOURCE_UNAVAILABLE,
 

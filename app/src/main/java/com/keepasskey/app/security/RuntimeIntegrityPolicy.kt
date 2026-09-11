@@ -139,4 +139,29 @@ object RuntimeIntegrityPolicy {
             )
         }
     }
+
+    /**
+     * 以实时信号升级缓存的完整性快照（ISSUE-P3-53，纯函数）。
+     *
+     * 一次性扫描后缓存时变信号（调试器附加 / 钩子框架）必然失真——冷启动后再附加调试器不会
+     * 被既有快照捕获。敏感操作前把**实时求值**的信号与缓存信号按「或」合并后重新裁决，
+     * 保证「后续判定可捕获」且分级（COMPROMISED / ELEVATED / TRUSTED）与 fail-closed 语义一致。
+     *
+     * @param base 缓存快照（首次扫描结果）
+     * @param debuggerAttached 实时调试器信号（`Debug.isDebuggerConnected()` 等）
+     * @param hookFrameworkDetected 实时钩子框架信号（磁盘扫描结果；非 suspend 路径可不提供）
+     */
+    fun escalateForLiveSignals(
+        base: RuntimeIntegrityReport,
+        debuggerAttached: Boolean,
+        hookFrameworkDetected: Boolean
+    ): RuntimeIntegrityReport {
+        if (!debuggerAttached && !hookFrameworkDetected) return base
+        return evaluate(
+            base.signals.copy(
+                debuggerAttached = base.signals.debuggerAttached || debuggerAttached,
+                hookFrameworkDetected = base.signals.hookFrameworkDetected || hookFrameworkDetected
+            )
+        )
+    }
 }

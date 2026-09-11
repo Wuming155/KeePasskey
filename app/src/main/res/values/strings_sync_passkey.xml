@@ -15,6 +15,7 @@
     <string name="sync_error_local_serialize_failed">本地数据库序列化失败</string>
     <string name="sync_error_first_upload_failed">首次同步上传云端失败</string>
     <string name="sync_error_remote_updated_local_save_failed">云端已更新但本地保存失败: %1$s</string>
+    <string name="sync_error_rollback_rejected">云端内容疑似被回退到旧版本，已拒绝应用以保护本地数据，请检查云端</string>
     <string name="sync_error_conflict_presave_failed">冲突会话前置保存失败: %1$s</string>
     <string name="sync_error_load_remote_failed">加载云端数据库失败，密码或格式不匹配</string>
     <string name="sync_error_unknown">同步发生未知错误</string>

@@ -1,8 +1,10 @@
 package com.keepasskey.app.di
 
+import com.keepasskey.app.security.AndroidKeystoreUnlockThrottleIntegrity
 import com.keepasskey.app.security.BiometricCredentialStorage
 import com.keepasskey.app.security.SharedPrefsUnlockThrottleStore
 import com.keepasskey.app.security.UnlockPasskeyStore
+import com.keepasskey.app.security.UnlockThrottleIntegrity
 import com.keepasskey.app.security.UnlockThrottleStore
 import dagger.Binds
 import dagger.Module
@@ -30,6 +32,13 @@ abstract class SecurityModule {
     abstract fun bindUnlockThrottleStore(
         impl: SharedPrefsUnlockThrottleStore
     ): UnlockThrottleStore
+
+    /** ISSUE-P3-54：节流记录完整性校验绑定到 AndroidKeyStore HMAC 实现（fail-closed） */
+    @Binds
+    @Singleton
+    abstract fun bindUnlockThrottleIntegrity(
+        impl: AndroidKeystoreUnlockThrottleIntegrity
+    ): UnlockThrottleIntegrity
 
     @Binds
     @Singleton

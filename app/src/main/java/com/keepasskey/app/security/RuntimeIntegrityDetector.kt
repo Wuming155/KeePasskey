@@ -60,12 +60,34 @@ class RuntimeIntegrityDetector @Inject constructor(
         scanScope.launch { refresh() }
     }
 
-    override fun currentEnforcement(): IntegrityEnforcement = _report.value.enforcement
+    override fun currentEnforcement(): IntegrityEnforcement =
+        // ISSUE-P3-53：非 suspend 路径（如生物识别放行）以**实时**调试器信号升级缓存快照——
+        // `Debug.isDebuggerConnected()` 为廉价同步调用，可主线程安全求值；钩子框架为磁盘 IO，
+        // 此处不扫（由 suspend 的 awaitEnforcement 重扫覆盖）。
+        RuntimeIntegrityPolicy.escalateForLiveSignals(
+            base = _report.value,
+            debuggerAttached = liveDebuggerAttached(),
+            hookFrameworkDetected = false
+        ).enforcement
 
-    override suspend fun awaitEnforcement(): IntegrityEnforcement =
-        withTimeoutOrNull(SCAN_AWAIT_TIMEOUT_MS) {
-            report.first { it.level != RuntimeRiskLevel.UNDETERMINED }.enforcement
-        } ?: IntegrityEnforcement.UNDETERMINED
+    override suspend fun awaitEnforcement(): IntegrityEnforcement {
+        // ISSUE-P3-53：敏感操作（自动填充下发）前**重扫**，捕获冷启动后才出现的时变信号
+        // （调试器附加 / 钩子框架落点等）；重扫失败时回退为等待首次扫描完成，
+        // 超时同样返回 UNDETERMINED（fail-closed，绝不返回「默认放行」）。
+        val refreshed = runCatching { refresh() }.getOrNull()
+        val base = refreshed ?: withTimeoutOrNull(SCAN_AWAIT_TIMEOUT_MS) {
+            report.first { it.level != RuntimeRiskLevel.UNDETERMINED }
+        } ?: return IntegrityEnforcement.UNDETERMINED
+        return RuntimeIntegrityPolicy.escalateForLiveSignals(
+            base = base,
+            debuggerAttached = liveDebuggerAttached(),
+            hookFrameworkDetected = false
+        ).enforcement
+    }
+
+    /** 实时调试器附加信号（每次调用重新求值，不落缓存——ISSUE-P3-53） */
+    private fun liveDebuggerAttached(): Boolean =
+        Debug.isDebuggerConnected() || Debug.waitingForDebugger()
 
     /** 重新采集信号并刷新快照（供显式复检；默认由 [start] 触发一次） */
     suspend fun refresh(): RuntimeIntegrityReport {

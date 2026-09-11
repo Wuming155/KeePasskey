@@ -1042,6 +1042,7 @@
     <string name="dbset_child_db_err_mount_not_found">Child database is not mounted</string>
     <string name="dbset_child_db_err_credential_missing">Child credentials are required again (cleared on lock or restart)</string>
     <string name="dbset_child_db_err_credential_rejected">Wrong child database master password or key file</string>
+    <string name="dbset_child_db_err_throttled">Too many failed attempts. Temporarily locked, please try again later</string>
     <string name="dbset_child_db_err_source_unavailable">Cannot read the child database file (missing, or the permission was revoked)</string>
     <string name="dbset_child_db_err_corrupt">Child database file is corrupt or not a valid KDBX v4 file</string>
     <string name="dbset_child_db_err_unsupported_version">Unsupported KDBX version</string>
@@ -1148,6 +1149,7 @@
     <string name="sync_error_first_upload_failed">Failed to upload to the cloud on the first sync</string>
     <!-- %1$s = 失败原因 -->
     <string name="sync_error_remote_updated_local_save_failed">The cloud was updated but saving locally failed: %1$s</string>
+    <string name="sync_error_rollback_rejected">Cloud content appears to have been rolled back to an older version. It was rejected to protect your local data; please check your cloud storage.</string>
     <!-- %1$s = 失败原因 -->
     <string name="sync_error_conflict_presave_failed">Failed to save before starting the conflict session: %1$s</string>
     <string name="sync_error_load_remote_failed">Failed to load the cloud database: password or format mismatch</string>

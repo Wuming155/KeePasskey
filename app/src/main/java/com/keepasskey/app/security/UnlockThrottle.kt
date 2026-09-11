@@ -2,6 +2,7 @@ package com.keepasskey.app.security
 
 import android.content.Context
 import dagger.hilt.android.qualifiers.ApplicationContext
+import java.util.Base64
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -10,10 +11,14 @@ import javax.inject.Singleton
  *
  * @param failureCount        连续失败次数（成功解锁后归零）
  * @param lockoutUntilEpochMs 锁定截止时间戳（epoch millis，`0` 表示当前未锁定）
+ * @param integrityIntact     记录完整性是否通过校验（ISSUE-P3-54：false 表示被删除 / 篡改，
+ *                            由 [UnlockThrottleManager.gate] fail-closed 处理；
+ *                            默认 true 以兼容 JVM 测试用内存实现）
  */
 data class UnlockThrottleRecord(
     val failureCount: Int = 0,
-    val lockoutUntilEpochMs: Long = 0L
+    val lockoutUntilEpochMs: Long = 0L,
+    val integrityIntact: Boolean = true
 )
 
 /**
@@ -50,23 +55,39 @@ interface UnlockThrottleStore {
 /**
  * [UnlockThrottleStore] 的 SharedPreferences 实现：计数与锁定截止落盘，
  * 卸载应用或清除数据前持久有效。
+ *
+ * ISSUE-P3-54：追加 Keystore 密钥的 HMAC（[UnlockThrottleIntegrity]）完整性绑定——
+ * 记录被删除 / 篡改时 MAC 校验失败，由 [UnlockThrottleManager.gate] fail-closed 处置。
  */
 @Singleton
 class SharedPrefsUnlockThrottleStore @Inject constructor(
-    @ApplicationContext context: Context
+    @ApplicationContext context: Context,
+    private val integrity: UnlockThrottleIntegrity
 ) : UnlockThrottleStore {
 
     private val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
-    override fun read(databaseId: String): UnlockThrottleRecord = UnlockThrottleRecord(
-        failureCount = prefs.getInt(keyCount(databaseId), 0),
-        lockoutUntilEpochMs = prefs.getLong(keyLock(databaseId), 0L)
-    )
+    override fun read(databaseId: String): UnlockThrottleRecord {
+        val count = prefs.getInt(keyCount(databaseId), 0)
+        val lockUntil = prefs.getLong(keyLock(databaseId), 0L)
+        val storedMac = prefs.getString(keyMac(databaseId), null)
+        // 全新安装：无任何记录字段（含 MAC）——无可保护对象，视为完整
+        if (count == 0 && lockUntil == 0L && storedMac == null) return UnlockThrottleRecord()
+
+        val record = UnlockThrottleRecord(count, lockUntil)
+        val macBytes = storedMac?.takeIf { it.isNotEmpty() }
+            ?.let { runCatching { Base64.getDecoder().decode(it) }.getOrNull() }
+        return record.copy(integrityIntact = integrity.verify(databaseId, record, macBytes))
+    }
 
     override fun write(databaseId: String, record: UnlockThrottleRecord) {
+        val encodedMac = integrity.mac(databaseId, record)
+            ?.let { Base64.getEncoder().encodeToString(it) }
+            .orEmpty()
         prefs.edit()
             .putInt(keyCount(databaseId), record.failureCount)
             .putLong(keyLock(databaseId), record.lockoutUntilEpochMs)
+            .putString(keyMac(databaseId), encodedMac)
             .apply()
     }
 
@@ -74,11 +95,13 @@ class SharedPrefsUnlockThrottleStore @Inject constructor(
         prefs.edit()
             .remove(keyCount(databaseId))
             .remove(keyLock(databaseId))
+            .remove(keyMac(databaseId))
             .apply()
     }
 
     private fun keyCount(databaseId: String): String = "${databaseId}_unlock_fail_count"
     private fun keyLock(databaseId: String): String = "${databaseId}_unlock_lock_until"
+    private fun keyMac(databaseId: String): String = "${databaseId}_unlock_mac"
 
     private companion object {
         const val PREFS_NAME = "com.keepasskey.unlock_throttle"
@@ -143,6 +166,20 @@ class UnlockThrottleManager @Inject constructor(
      */
     fun gate(databaseId: String, now: Long = System.currentTimeMillis()): ThrottleGate {
         val record = store.read(databaseId)
+        // ISSUE-P3-54：记录完整性校验失败（被删除 / 篡改）→ fail-closed。
+        // 落一个带有效 MAC 的**有界**锁定期记录后返回 Locked：既不因记录被动过而放行，
+        // 也不永久锁死用户（锁定期上限 MAX_BACKOFF_MS）。
+        if (!record.integrityIntact) {
+            val locked = UnlockThrottleRecord(
+                failureCount = UnlockThrottlePolicy.FAILURE_THRESHOLD,
+                lockoutUntilEpochMs = now + UnlockThrottlePolicy.MAX_BACKOFF_MS
+            )
+            store.write(databaseId, locked)
+            return ThrottleGate.Locked(
+                UnlockThrottlePolicy.FAILURE_THRESHOLD,
+                UnlockThrottlePolicy.MAX_BACKOFF_MS
+            )
+        }
         val remaining = record.lockoutUntilEpochMs - now
         return if (remaining > 0L) {
             ThrottleGate.Locked(record.failureCount, remaining)

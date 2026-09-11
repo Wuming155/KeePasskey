@@ -194,6 +194,10 @@ class SyncConflictController @Inject constructor(
                 // 强制上传路径无冲突分支：上传失败只可能是远端不可达
                 is SyncCommitResult.RemoteUnreachable -> SyncOutcome.Offline
                 is SyncCommitResult.ConflictNeedsMerge -> SyncOutcome.Offline
+                // commitLocalForce 不下载远端，理论不可达；穷尽分支如实映射为拒绝回退提示（ISSUE-P2-18）
+                is SyncCommitResult.RollbackRejected -> SyncOutcome.Error(
+                    strings.get(R.string.sync_error_rollback_rejected)
+                )
             }
         }
         ConflictDisposition.AutoMerge, ConflictDisposition.PromptUser -> null

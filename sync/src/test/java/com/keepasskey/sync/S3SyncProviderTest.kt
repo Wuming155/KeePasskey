@@ -300,6 +300,22 @@ class S3SyncProviderTest {
     }
 
     @Test
+    fun `ISSUE_P3_56_对象键剔除点段与点点段`() {
+        val provider = S3SyncProvider(
+            endpoint = "https://s3.amazonaws.com",
+            bucketName = "my-vault",
+            accessKeyId = "TESTKEY".toCharArray(),
+            secretAccessKey = "TESTSECRET".toCharArray()
+        )
+
+        // ISSUE-P3-56 子项 2：`.` / `..` 段被剔除（对齐 WebDAV 既有过滤语义），杜绝路径遍历
+        assertEquals("keepasskey/vault.kdbx", provider.encodePath("keepasskey/../vault.kdbx"))
+        assertEquals("keepasskey/vault.kdbx", provider.encodePath("keepasskey/./vault.kdbx"))
+        // 含点但非纯点段的文件名不受影响
+        assertEquals("keepasskey/a.b.kdbx", provider.encodePath("keepasskey/a.b.kdbx"))
+    }
+
+    @Test
     fun `测试 SigV4 签名已知答案向量含星号波浪号与UTF8键`() {
         // 已知答案向量由独立参考实现（Python hmac/hashlib）离线预计算，与被测实现零共享代码
         val provider = S3SyncProvider(
