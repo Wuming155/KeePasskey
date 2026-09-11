@@ -808,8 +808,13 @@ Rust 单测模块 `#[cfg(test)] mod tests` 之内**（测试模块起始行：`s
   第一行**证明「仅外移无效」**（外移后的代码在默认设置下仍报同样 77 条）；第二行证明配置级排除生效，
   且 **`rules` 未变（26）= 查询套件照常运行，生产代码未被 `paths-ignore` 误伤**。
   另：`cargo test`（Rust 1.97.1）**43 passed / 0 failed**，与改动前基线逐项一致；PR 的 `build` 工作流 **success**（9m12s）。
-- **合入后动作与最终验收**：合并至 `main` 后由 `codeql.yml` 的 `push` 触发默认分支分析，77 条 alert 应转为
-  closed、open 总数收敛至 **7 条（dependency-check）**；该收敛以合并后的实测为准。
+- **合入与最终验收（2026-09-11 实测）**：以 squash 合并为 **`93b088f`**（PR #6）；`codeql.yml` 的 `push`
+  触发默认分支分析（运行 `34584389259`，**三个语言 job 全 success**）后实测：
+  `code-scanning/alerts?state=open` **84 → 7**，且 7 条**全部**为 dependency-check 未达阈中危项；
+  `rust/hard-coded-cryptographic-value` **open = 0**、**state=fixed = 77**（逐条关闭）。
+  验收标准 ①②③ 全部达成：① 该 rule 收敛到 0；② 处置依据与证据留痕于本节；
+  ③ **未削弱覆盖面**——`rules` 保持 26（查询套件照常运行）、`paths-ignore` 仅一条**不可能匹配生产文件**的
+  glob（`crypto/src/main/rust/src/tests/**`）、main 侧分析正常产出。
 - **过程留痕（如实）**：「外移单测」是本次**被推翻**的初始处置设想（曾据同类项目经验认为其单独可行）；
   且本轮曾把「首次 PR 运行的 77 条」误读为 advanced setup 未生效，经 `analyses.environment` 比对 `runner`
   标签后才确认其属默认设置的分析——**假设错误、以证据更正**。
