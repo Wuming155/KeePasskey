@@ -60,7 +60,7 @@
 > - **ISSUE-P2-18**（同步缺防回滚绑定）→ 引入本地认证的「已见内容摘要链」（Keystore HMAC + `SyncRollbackGuard`），
 >   重放旧库被拒并提示，跨端兼容结论留痕，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §22.8。
 
-## P3 低危问题、特性接线与体验优化（1 项）
+## P3 低危问题、特性接线与体验优化（2 项）
 
 > **背景**：P3 残余批次原 **12 项**（ISSUE-P3-17 ~ P3-28）已于 **2026-09-10** 整体整改。
 > 其中 **10 项完整闭环并归档**（P3-17 / 18 / 19 / **20** / 21 / 22 / 25 / 26 / 27 / 28，含逐项代码证据与 15 条过程缺陷留痕），
@@ -132,7 +132,7 @@
 > 公开 API **零丢失零新增**。**全仓重测后 `> 400` 仅剩 2 项，且均为经论证的例外**
 > （纯常量词表 `DicewareWordList` 408、因 ISSUE-P3-43 接线产生功能性增量的 `SettingsViewModel` 424），
 > 故 **ISSUE-P3-31 达成闭环并整条移出本文件**。
-> 本节余 **1 项**（P3-23）。
+> 本节余 **2 项**（P3-23 / **ISSUE-P3-58**）。
 > **2026-09-11 追加四（CodeQL Rust 误报治理）**：针对上一则登记的 **ISSUE-P3-57**（77 条
 > `rust/hard-coded-cryptographic-value` critical 误报）先行**机制验证**——查询源码无测试代码过滤、
 > `paths-ignore` 为文件级过滤、配置级排除需 advanced setup——据此把 Rust 单测外移为**纯测试文件**
@@ -162,6 +162,11 @@
 > 并附**机制验证结论：该查询无任何测试代码过滤，单纯「外移单测」无效**（详见条目内）。
 > 同时更正两处滞后前提：`NVD_API_KEY` **早已配置**（503 系 NVD 服务端间歇故障，非缺 Key），
 > 以及「CodeQL 开放告警 = 0」**已不再成立**。
+> **2026-09-11 追加五（CodeQL 语言覆盖面）**：核对 Code Scanning 语言面时发现 **`java-kotlin`（本仓主语言）**
+> 的默认设置分析**历来为空跑**（`rules=0 / results=0`），而切换 advanced setup 后该语言未纳入 matrix；
+> `c-cpp` 则经 `Glob` 核实本仓**无任何 C/C++ 源**（命中的文件全在 gitignore 的 `参考项目/`），无需纳入。
+> 就地登记 **ISSUE-P3-58**——含官方文档给出的构建模式边界（**Kotlin 无 `build-mode: none`**，
+> 必须提供真实 Gradle + Android SDK 构建）与 Kotlin 2.4.20 的版本支持风险（须先实测）。
 > 归档门禁证据（2026-09-10 批次 I 实测，`--rerun-tasks` 强制真实执行）：
 > `.\gradlew.bat test --rerun-tasks --max-workers=1 --continue` → **BUILD SUCCESSFUL**，
 > **1329 例 / 0 失败 / 13 跳过**（app 750 / core 58 / crypto 107 / database 235 / sync 179；
@@ -241,6 +246,48 @@
   ④ 归档文件「待填」表按实际情况回填（**严禁编造数据**）。
 - **禁止**：以 x86_64 模拟器或宿主侧数据填充 §4.3；把「用例就绪」表述为「验证通过」；
   用自生成 `.kdbx` 往返冒充互操作证据。
+
+---
+
+### ISSUE-P3-58 (新登记): Kotlin/Java 侧无 CodeQL 分析覆盖（默认设置时期即为空跑）
+
+- **优先级**：P3（静态分析**覆盖面**缺口；**非本批次引入的回归**——默认设置时期二者即为空分析）
+- **核实时间点与核实方式（2026-09-11）**：
+  1. `gh api "/repos/Wuming155/KeePasskey/code-scanning/analyses?per_page=100" --paginate` 逐条统计
+     `category` / `results_count` / `rules_count`：`/language:java-kotlin` 全部记录均为
+     **`rules=0` / `results=0`**（最近一条 `2026-09-09T14:31:13Z`）；`rules=0` 表示**没有任何查询运行**
+     （对照：正常语言为 rust 26 / python 43 / actions 17）；
+  2. 本仓源码面：`app` / `core` / `crypto` / `database` / `sync` 五模块**全为 Kotlin/Java**（本仓主语言），
+     故缺口的**绝对规模最大**；
+  3. `c-cpp` 面**已排除**：2026-09-11 经 `Glob` 核实
+     `{app,core,crypto,database,sync,tools}/**/*.{c,cc,cpp,cxx,h,hpp}` **零命中**；仓库内命中的 C/C++ 文件
+     **全部位于 `.gitignore` 忽略的 `参考项目/`**。历史 `c-cpp` 分析系 C Argon2 遗留（ISSUE-P2-14 已移除）之残留，
+     **无需纳入，也不应再纳入**；
+  4. 能力边界（GitHub 官方文档 `codeql-build-options-and-steps-for-compiled-languages`，2026-09-11 拉取原文）：
+     **Java 支持 `none` / `autobuild` / `manual`；Kotlin 仅支持 `autobuild` 或 `manual`**（**无 `none`**）
+     → 想真正覆盖 Kotlin，**必须提供真实构建**（Gradle + Android SDK），无构建抽取对 Kotlin 无效；
+  5. 版本风险：`codeql.github.com` 的「Supported languages」页对 Kotlin 的支持上界在不同文档版本下
+     分别写作 **2.3.2*x*** 与 **2.4.1*x***，而本仓为 **Kotlin 2.4.20**（`gradle/libs.versions.toml:13`）
+     → 即便补上构建，抽取器对 2.4.x 的支持程度**须先实测确认**，不得假定可用。
+- **影响**：`ISSUE-P3-57` 切换到 advanced setup 后，`.github/workflows/codeql.yml` 的 matrix 仅含
+  `rust` / `python` / `actions`。就**有效**覆盖面而言与默认设置时期持平（当时即为空跑），
+  但**名义覆盖**（Security 页不再有该语言的条目）属**需要显式决策**的范围收缩——
+  本条目即为该决策的载体。
+- **候选处置（均须留痕）**：
+  1. **补构建纳入 `java-kotlin`**：工作流内先装 Android SDK（`android-actions/setup-android`，与
+     `build.yml` Fast gate 同源做法），以 `build-mode: autobuild` 或 `manual`（显式 `./gradlew` 编译命令）驱动。
+     **收益最大**（覆盖本仓主语言）；**代价**：分析时长与脆弱点显著上升（AGP / JDK / NDK 版本链），
+     且需先实测 Kotlin 2.4.20 是否被抽取器支持。
+  2. **保持现状，显式登记为「已接受的风险」**：在 `docs/` 与工作流注释中写明「Kotlin 侧无 CodeQL 覆盖，
+     由 Android Lint + 1370 例单测 + 人工审计承接」，作为维护者决策留痕。成本最低，但缺口长期存在。
+  3. **先做可行性实测**：在特性分支上加一个 `java-kotlin` job（装 SDK + autobuild），
+     只求拿到「`rules>0` 且能产出分析」的证据；跑不通则记录**具体失败点**（缺 SDK / 版本不支持 / 超时）。
+- **建议顺序**：先做方案 3（成本可控、结论可判定），再据实测结果在方案 1 / 2 之间决策并留痕。
+- **验收标准**：① 对 `java-kotlin` 给出**明确的二选一结论**（纳入并跑出 `rules>0`，或登记为已接受的风险）
+  并在本文件 / `RESOLVED_LOG.md` 留痕；② 若纳入，须给出「分析真实产出」的证据（`rules>0`，
+  且能对照检出已知模式）；③ 不得以「默认设置当年也这样」为由跳过决策留痕。
+- **禁止**：为求「看起来有覆盖」而把 `java-kotlin` 加进 matrix 却任其 `rules=0` 空跑（**虚假覆盖**）；
+  在未实测的情况下宣称「CodeQL 已覆盖 Kotlin」；为纳入而弱化任何既有门禁。
 
 ---
 
