@@ -32,8 +32,9 @@
 | §21 | 功能完整性审计批次 B（HOTP 端到端 / 便利入口 / 孤儿实现清理） | ISSUE-P3-49 / P3-50 / P3-51 |
 | §22 | 存量问题由易到难整改闭环批次（P1-11 / P2-17 / P2-18 / P3-52~P3-56） | ISSUE-P1-11 / P2-17 / P2-18 / P3-52 ~ P3-56 |
 | §23 | CI 侧真实跑通归档 + CodeQL Rust 误报治理（P3-24 / P3-32 / P3-57 闭环） | ISSUE-P3-24 / P3-32 / P3-57 |
+| §24 | 设备侧实测发现的致命缺陷修复（Android 端 KDBX XML 解析全量失败） | ISSUE-P1-12 |
 
-> 各批次验收证据（用例数 / 通过 / 失败 / 跳过）分别见 §2.22、§3.1、§4.1、§5.1、§6.1、§7.1、§8.0、§9.5、§10.1、§11、§12、§13、§14、§15、§16、§17、§18、§19、§20.3、§21.4、§22.9、§23.1。
+> 各批次验收证据（用例数 / 通过 / 失败 / 跳过）分别见 §2.22、§3.1、§4.1、§5.1、§6.1、§7.1、§8.0、§9.5、§10.1、§11、§12、§13、§14、§15、§16、§17、§18、§19、§20.3、§21.4、§22.9、§23.1、§24.3。
 
 ---
 
@@ -713,9 +714,76 @@
 4. P1-11 缩小受信浏览器集属**有意的安全取舍**（仅 Chrome + Firefox release/beta 已取证），其余浏览器域填充便利性下降，
    已在 §22.7 与代码注释留痕，非缺陷。
 
-> **当前残余面（ACTIVE，未归档）**：ISSUE-P3-23（arm64 真机 + 真实 `.kdbx` 语料）——2026-09-11 复核：
-> 阻塞前提不变（无 arm64 镜像 / 无设备 / `generate_corpus.py --check` 退出码 3）；
-> **ISSUE-P3-24 / P3-32 / P3-57 已于同日闭环归档，见 §23**。
+> **当前残余面（ACTIVE，未归档）**：
+> - ISSUE-P3-23（真实 `.kdbx` 语料 + arm64 数据）——**设备侧链路已于 §24 实测验证可用**，阻塞项收窄为「语料」与「arm64 数据」；
+> - ISSUE-P3-58（CodeQL 的 Kotlin 抽取器不支持 Kotlin 2.4.20，**上游阻塞**，已登记为已接受的风险）。
+>
+> **ISSUE-P3-24 / P3-32 / P3-57（§23）与 ISSUE-P1-12（§24）已于 2026-09-11 闭环归档。**
+
+---
+
+## 24. 设备侧实测发现的致命缺陷修复（ISSUE-P1-12：Android 端 KDBX XML 解析全量失败）
+
+**发现方式（2026-09-11）**：为验证 ISSUE-P3-23 的「设备侧测试链路是否可用」，启动本机 AVD `Pixel_10`
+（x86_64，API 36）并实跑 `.\gradlew.bat :database:connectedDebugAndroidTest`——
+这是本仓**首次**在真实 Android 运行时上执行 `database` 设备侧用例（此前一直阻塞于设备/语料）。
+
+### 24.1 缺陷
+
+- **现象**：`SelfGeneratedRoundTripInstrumentedTest`（设备侧写入后读回）失败：
+  `KdbxCorruptFileException: KDBX XML 解析失败：文档结构非法或已损坏`，
+  根因异常为 `javax.xml.parsers.ParserConfigurationException: org.xml.sax.SAXNotRecognizedException:
+  http://xml.org/sax/features/resolve-dtd-uris`，抛出点为 `KdbxXmlParser.parse` 内的
+  **`factory.newSAXParser()`**（不是 `setFeature`）。
+- **根因**：Android（Harmony）的 `SAXParserFactoryImpl.setFeature` **不校验**特性名，仅记录；
+  真正应用与校验发生在 `newSAXParser()`。原实现仅把 try/catch 包在 `setFeature` 外，因此异常从
+  `newSAXParser()` 逃出、被上层包装为 `KdbxCorruptFileException` →
+  **设备端每一次 KDBX 解析都失败**。
+- **影响面（为何是致命级）**：`KdbxFile.load` 是**唯一**解析入口，生产调用方为
+  主库打开（`database/.../session/SessionOpener.kt:142`）、子库（`app/.../childdb/ChildReadOnlySession.kt:134`）、
+  同步（`app/.../sync/SyncDatabaseCodec.kt:55`）——即**设备端任何库都打不开**。
+  JVM 单测走 Xerces（支持该特性）故**从未暴露**；本仓此前从未在设备上跑过，缺陷得以长期潜伏。
+
+### 24.2 修复
+
+- 把「逐项 `setFeature` + 告警」改为**探测式应用**：对每一项在「已接受集合 + 该项」上实例化一次
+  `SAXParser` 作探针，平台不支持的项**跳过并留痕告警**
+  （新增 `buildHardenedParser` / `newFactory` / `XxeGuardFeature`，移除 `applyXxeGuardFeature`）。
+- **安全语义不削弱**：DTD 与外部实体的实际拦截由 handler 侧两道**与特性支持无关**的 fail-closed 兜底完成
+  （`DefaultHandler2.startDTD` 直接拒绝 DTD 声明、`resolveEntity` 直接拒绝外部实体，
+  见 `KdbxXmlParser.kt` 内 handler 定义）；工厂特性始终只是「尽力加固」层——与 ISSUE-P3-10 子项 3 的既有取舍一致。
+
+### 24.3 验收证据（2026-09-11，真实 AVD 实测）
+
+设备：`emulator-5554`（`sdk_gphone64_x86_64`，API 36）。
+
+| 项 | 修复前 | 修复后 |
+|---|---|---|
+| `SelfGeneratedRoundTripInstrumentedTest`（设备侧真实 KDBX 读写回环）| ❌ `SAXNotRecognizedException` | ✅ **pass（0.293s）** |
+| `:database:connectedDebugAndroidTest` | ❌ BUILD FAILED | ✅ **BUILD SUCCESSFUL** |
+| `:database:test`（JVM） | ✅ | ✅ 无退化 |
+| `test --rerun-tasks`（全量）| — | ✅ **1370 例 / 0 失败 / 0 错误 / 13 跳过**（174 套件，与基线持平） |
+| `lint`（5 模块）| — | ✅ 0 error |
+
+### 24.4 顺带纠正的事实（ISSUE-P3-23 相关）
+
+- **设备侧链路可用性：已验证**（见 24.3）——`RealKdbxCorpusUnlockTest` 之外的设备侧用例可真实执行，
+  P3-23 的阻塞项收窄为「真实语料」与「arm64 数据」两项（x86_64 AVD 已可承载语料就绪后的端到端用例）。
+- **「语料缺失 → Assume 显式跳过」的报告呈现与实情不符**：AGP 生成的
+  `build/outputs/androidTest-results/connected/debug/TEST-*.xml` 把 `AssumptionViolatedException`
+  记为 **`<failure>`（`skipped=0`）**，**但 task 级仍 `BUILD SUCCESSFUL`**。
+  即：**门禁语义正确**（语料缺失不会把任务弄红，也不代表 AC② 达成），但**报告会误导**读者以为 2 例失败。
+  该现象已就地写入 ACTIVE_ISSUES 的 P3-23 条目（措辞修订）。
+
+### 24.5 过程留痕（如实）
+
+1. 首次尝试以 `-Pandroid.testInstrumentationRunnerArguments.class=<类名>` 只跑单个用例，
+   **沙箱包装层吞掉了 `-Pandroid` 前缀**，Gradle 把残余参数当成任务名报
+   `Task '...class=...' not found`——改用整任务运行 + 从 XML 读单例结果。
+2. 统计用例数时首版 PowerShell 脚本恒返回 0：**PowerShell 的 XML 适配器让 `name` 属性遮蔽了
+   XmlElement 的 `Name` 属性**，使 `$root.Name -eq 'testsuite'` 判false 而走进空分支；
+   改用 Python `xml.etree` 统计后得到 1370/0/0/13。
+
 
 ---
 

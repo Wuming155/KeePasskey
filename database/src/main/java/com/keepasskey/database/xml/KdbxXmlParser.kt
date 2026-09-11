@@ -12,6 +12,7 @@ import org.xml.sax.ext.DefaultHandler2
 import java.io.InputStream
 import java.util.logging.Level
 import java.util.logging.Logger
+import javax.xml.parsers.SAXParser
 import javax.xml.parsers.SAXParserFactory
 
 /**
@@ -37,15 +38,11 @@ class KdbxXmlParser(
         inputStream: InputStream,
         binaries: List<InnerHeader.BinaryItem> = emptyList()
     ): ParseResult {
-        val factory = SAXParserFactory.newInstance()
-        factory.isNamespaceAware = false
         // 强化 XML 解析防御：禁用 DTD 与外部实体（XXE 防御）。
-        // ISSUE-P3-10 子项 3：逐项设置且单项失败即落告警——原实现四项共用一个空 catch，
-        // 首项失败会让后续三项根本不被尝试，且失败原因完全无迹可查。
-        applyXxeGuardFeature(factory, FEATURE_DISALLOW_DOCTYPE_DECL, true)
-        applyXxeGuardFeature(factory, FEATURE_EXTERNAL_GENERAL_ENTITIES, false)
-        applyXxeGuardFeature(factory, FEATURE_EXTERNAL_PARAMETER_ENTITIES, false)
-        applyXxeGuardFeature(factory, FEATURE_RESOLVE_DTD_URIS, false)
+        // ISSUE-P3-10 子项 3 的「逐项设置 + 单项失败落告警」语义由 [buildHardenedParser] 承接；
+        // ISSUE-P1-12 起改为**探测式**应用——Android 的 `setFeature` 不校验、延迟到
+        // `newSAXParser()` 才抛，仅在 `setFeature` 外套 try/catch 无法阻止设备端解析全量失败。
+        val parser = buildHardenedParser()
 
         var metaData = KdbxMetaData()
         var rootGroup: KdbxGroup? = null
@@ -98,7 +95,6 @@ class KdbxXmlParser(
         }
 
         try {
-            val parser = factory.newSAXParser()
             // 注册 LexicalHandler：DTD 声明（startDTD）由 handler 直接 fail-closed 拒绝。
             // 属性不受支持时仅告警——加固层级降级但绝不阻断合法库解析。
             try {
@@ -128,25 +124,67 @@ class KdbxXmlParser(
     }
 
     /**
-     * 逐项应用 XXE 加固特性：**单项失败仅告警，不中断也不拒绝解析**。
+     * 构造启用 XXE 加固的解析器：**逐项探测**平台是否真的接受该特性，不支持的项跳过并留痕告警。
      *
-     * 判定为「不 fail-fast」的理由：平台解析器对未识别特性会抛 `SAXNotRecognizedException`，
-     * 若因此拒绝打开密码库，则一个实现差异就会让用户完全无法读取自己的合法库（可用性代价
-     * 远高于收益）；且解析器已由 [DefaultHandler2.startDTD] 与 `resolveEntity` 两道
-     * 与特性支持无关的 fail-closed 兜底覆盖（DTD 直接拒绝、外部实体直接拒绝），
-     * 故这里保留「尽力加固 + 留痕告警」语义。
+     * 为什么必须探测（ISSUE-P1-12，设备侧实测缺陷，2026-09-11）：
+     * Android（Harmony）的 `SAXParserFactoryImpl.setFeature` **不校验**特性名，只做记录；
+     * 真正应用发生在 `newSAXParser()`，此时才抛 `SAXNotRecognizedException`。因此仅在
+     * `setFeature` 外面套 try/catch **完全无效**——异常会从 `newSAXParser()` 抛出、被上层包装为
+     * `KdbxCorruptFileException`，导致**每一次** KDBX 解析失败（emulator-5554 / API 36 实测：
+     * `http://xml.org/sax/features/resolve-dtd-uris` 命中该路径，设备端任何库都打不开）。
+     * 本方法对每一项都在「已接受集合 + 该项」上实例化一次解析器作探针，成功才纳入。
+     *
+     * 判定为「不 fail-fast」的理由（沿用 ISSUE-P3-10 子项 3 的既有取舍）：平台对未识别特性抛
+     * `SAXNotRecognizedException`，若因此拒绝打开密码库，则一个实现差异就会让用户完全无法读取
+     * 自己的合法库（可用性代价远高于收益）。
+     *
+     * **安全语义不削弱**：DTD 与外部实体的实际拦截由 handler 侧两道与特性支持无关的
+     * fail-closed 兜底完成（[DefaultHandler2.startDTD] 直接拒绝 DTD 声明、`resolveEntity`
+     * 直接拒绝外部实体，见 [parse] 内 handler 定义）；工厂特性始终只是「尽力加固」层。
      */
-    private fun applyXxeGuardFeature(factory: SAXParserFactory, feature: String, enabled: Boolean) {
-        try {
-            factory.setFeature(feature, enabled)
-        } catch (e: Exception) {
-            logger.log(
-                Level.WARNING,
-                "SAX 解析器 XXE 加固特性不受支持，已跳过该项（DTD/外部实体由 handler 兜底拒绝）: " +
-                        "$feature=$enabled",
-                e
-            )
+    private fun buildHardenedParser(): SAXParser {
+        val accepted = mutableListOf<XxeGuardFeature>()
+        for (feature in XXE_GUARD_FEATURES) {
+            val probe = runCatching { newFactory(accepted + feature).newSAXParser() }
+            if (probe.isSuccess) {
+                accepted += feature
+            } else {
+                logger.log(
+                    Level.WARNING,
+                    "SAX 解析器 XXE 加固特性不受支持，已跳过该项" +
+                            "（DTD/外部实体由 handler 兜底拒绝）: $feature",
+                    probe.exceptionOrNull()
+                )
+            }
         }
+        return newFactory(accepted).newSAXParser()
+    }
+
+    /**
+     * 新建 SAX 工厂并尽力应用给定加固特性。
+     *
+     * 单项 `setFeature` 失败仅告警：部分实现的失败会在 `newSAXParser()` 才显现，
+     * 该情形由 [buildHardenedParser] 的探针负责剔除。
+     */
+    private fun newFactory(features: List<XxeGuardFeature>): SAXParserFactory {
+        val factory = SAXParserFactory.newInstance()
+        factory.isNamespaceAware = false
+        for (feature in features) {
+            runCatching { factory.setFeature(feature.name, feature.enabled) }
+                .onFailure {
+                    logger.log(
+                        Level.WARNING,
+                        "SAX 解析器 XXE 加固特性设置失败，已跳过该项: $feature",
+                        it
+                    )
+                }
+        }
+        return factory
+    }
+
+    /** 一项 XXE 加固特性：`name` 为 SAX/Apache 特性名，`enabled` 为期望开关。 */
+    private data class XxeGuardFeature(val name: String, val enabled: Boolean) {
+        override fun toString(): String = "$name=$enabled"
     }
 
     fun parse(inputStream: InputStream): ParseResult {
@@ -171,6 +209,19 @@ class KdbxXmlParser(
         /** 禁止解析 DTD 的 URI */
         private const val FEATURE_RESOLVE_DTD_URIS =
             "http://xml.org/sax/features/resolve-dtd-uris"
+
+        /**
+         * XXE 加固特性清单（顺序即探测顺序）。
+         *
+         * 平台（尤其 Android/Harmony）不支持的项会在 [buildHardenedParser] 的探针中被自动剔除并告警，
+         * 绝不会因实现差异导致合法库无法解析（ISSUE-P1-12）。
+         */
+        private val XXE_GUARD_FEATURES = listOf(
+            XxeGuardFeature(FEATURE_DISALLOW_DOCTYPE_DECL, true),
+            XxeGuardFeature(FEATURE_EXTERNAL_GENERAL_ENTITIES, false),
+            XxeGuardFeature(FEATURE_EXTERNAL_PARAMETER_ENTITIES, false),
+            XxeGuardFeature(FEATURE_RESOLVE_DTD_URIS, false)
+        )
 
         /** LexicalHandler 注册属性名（用于接收 DTD 声明事件） */
         private const val LEXICAL_HANDLER_PROPERTY =

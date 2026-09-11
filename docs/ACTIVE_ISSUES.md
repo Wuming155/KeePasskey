@@ -45,6 +45,8 @@
 > 已整改归档——浏览器分支升级为「包名 + 已取证签名证书指纹」二元组，未取证浏览器 fail-closed 降级 DAL，
 > 见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §22.7。
 > 历史 P1 项（含 ISSUE-P1-10 / ZT-10）亦已全部闭环，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §2.5。
+> **2026-09-11 追加闭环**：**ISSUE-P1-12**（Android 端 KDBX XML 解析全量失败 —— 设备端**任何库都打不开**）
+> 由「设备侧链路验证」实测发现，同批次修复并在真实 AVD 上验证通过，见 §24。
 
 ---
 
@@ -173,6 +175,13 @@
 > （`Kotlin version 2.4.20 is too recent. CodeQL currently supports versions below 2.4.20`）。
 > 结论：**暂不纳入，登记为已接受的风险**（Kotlin 侧静态分析由 Android Lint + 1370 例单测 + 人工审计承接）；
 > 解除条件与可复现配方已留痕于条目内与 PR #7；**严禁以回退 Kotlin 版本换取分析覆盖**。证据见 ISSUE-P3-58 正文。
+> **2026-09-11 追加七（设备侧链路验证 · 连带修复致命缺陷）**：为验证 P3-23 的设备侧链路，启动本机 x86_64 AVD
+> 实跑 `:database:connectedDebugAndroidTest`——**本仓首次在真实 Android 运行时执行设备侧用例**：
+> 链路可用性得到验证，同时**发现并修复一处设备端致命缺陷 ISSUE-P1-12**
+> （Android 端 `SAXParserFactory.newSAXParser()` 因不支持的 XXE 加固特性抛异常 → **任何库都打不开**；
+> JVM 单测走 Xerces 故长期潜伏、从未暴露）。修复后设备侧用例 **pass**、全量门禁
+> **1370 例 / 0 失败 / 0 错误 / 13 跳过** 与 `lint` **0 error** 保持，见 §24。
+> 本节仍余 **2 项**（P3-23 / P3-58），但 **P3-23 的阻塞项已收窄为「真实语料 + arm64 数据」**。
 > 归档门禁证据（2026-09-10 批次 I 实测，`--rerun-tasks` 强制真实执行）：
 > `.\gradlew.bat test --rerun-tasks --max-workers=1 --continue` → **BUILD SUCCESSFUL**，
 > **1329 例 / 0 失败 / 13 跳过**（app 750 / core 58 / crypto 107 / database 235 / sync 179；
@@ -245,6 +254,18 @@
   `Get-ChildItem "$env:ANDROID_HOME\system-images" -Recurse | ? FullName -match 'arm64'` 仍**零命中**
   （无 arm64-v8a 镜像）；`python tools/kdbx-corpus/generate_corpus.py --check` 仍 **exit 3**（无 `keepassxc-cli`）。
   **阻塞前提不变，本条不归档。**
+- **2026-09-11 追加（设备侧链路验证；核实方式：启动本机 AVD `Pixel_10` / x86_64 / API 36，
+  实跑 `.\gradlew.bat :database:connectedDebugAndroidTest`）**：
+  **链路可用性已验证**——设备侧用例能真实安装并执行（**本仓首次在真实 Android 运行时跑数据库侧用例**），
+  并因此**发现并修复了一处设备端致命缺陷 ISSUE-P1-12**（见 [RESOLVED_LOG.md](RESOLVED_LOG.md) **§24**）；
+  修复后该任务 **BUILD SUCCESSFUL**、`SelfGeneratedRoundTripInstrumentedTest` **pass（0.293s）**。
+  据此**阻塞项收窄为两项**：① 真实语料（须官方 GUI 建库——本环境无 `keepassxc-cli`，且该 CLI 无法设定
+  Argon2 变体/版本与 t/m/p）；② arm64 真机数据（本机无 arm64-v8a 镜像、无设备）。**本条仍不归档。**
+- **措辞修订（同批实测，如实）**：原「语料缺失 → Assume 显式跳过」在**报告呈现**上与实情不符——
+  AGP 的 `build/outputs/androidTest-results/connected/debug/TEST-*.xml` 把 `AssumptionViolatedException`
+  记为 **`<failure>`（`skipped=0`）**，**但 task 级仍 `BUILD SUCCESSFUL`**。
+  即：门禁语义正确（语料缺失不会把任务弄红，也不代表验收标准②达成），但**报告会误导**读者以为用例失败；
+  验收标准②的「不再是 skip 且全绿」以该报告口径为准（语料就位后应转为 `pass`）。
 - **验收标准**：① `.\gradlew.bat :database:assembleDebugAndroidTest` 编译通过（**2026-09-10 已实测通过**，
   见批次 A 归档 §6.4 门禁证据）；② 真实语料（含同名 `.json`）
   入库两处后 `:database:connectedDebugAndroidTest` 中 `RealKdbxCorpusUnlockTest` **不再是 skip** 且全绿；
