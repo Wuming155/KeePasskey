@@ -8,10 +8,6 @@ import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.app.ui.model.UiMessage
-import com.keepasskey.app.ui.model.EntryCategory
-import com.keepasskey.app.ui.model.UiAttachment
-import com.keepasskey.app.ui.model.UiCustomField
-import com.keepasskey.app.ui.model.UiVaultEntry
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -150,26 +146,7 @@ class EntryEditViewModel @Inject constructor(
                 _loadedProtectedFields.value.values.forEach { it.fill('0') }
                 protectedFieldChars.putAll(loadedProtected.mapValues { (_, v) -> v.copyOf() })
                 _loadedProtectedFields.value = loadedProtected
-                _uiState.update {
-                    it.copy(
-                        entryId = entry.id,
-                        groupId = entry.groupId,
-                        iconName = entry.iconName,
-                        customIconId = entry.customIconId,
-                        title = entry.title,
-                        username = entry.username,
-                        passwordLength = password?.size ?: 0,
-                        url = entry.url,
-                        notes = entry.notes,
-                        isPasskey = entry.isPasskey,
-                        customFields = entry.customFields,
-                        attachments = entry.attachments,
-                        tagsInput = entry.tags.joinToString(", "),
-                        autoTypeSequence = entry.autoTypeSequence,
-                        overrideUrl = entry.overrideUrl.orEmpty(),
-                        isDirty = false
-                    )
-                }
+                _uiState.update { applyLoadedEntry(it, entry, password?.size ?: 0) }
             }
         }
     }
@@ -270,24 +247,8 @@ class EntryEditViewModel @Inject constructor(
     }
 
     fun generatePassword() {
-        val state = _uiState.value
-        val upper = "ABCDEFGHJKLMNPQRSTUVWXYZ"
-        val lower = "abcdefghijkmnopqrstuvwxyz"
-        val digits = "23456789"
-        val symbols = "!@#\$%^&*()_+-=[]{}|;:,.<>?"
-
-        var pool = ""
-        if (state.useUpper) pool += upper
-        if (state.useLower) pool += lower
-        if (state.useDigits) pool += digits
-        if (state.useSymbols) pool += symbols
-        if (pool.isEmpty()) pool = lower
-
-        val secureRandom = SecureRandom()
-        // M1 整改：生成结果直达 CharArray，不经 String 中转
-        val newPassword = CharArray(state.passLength.toInt()) {
-            pool[secureRandom.nextInt(pool.length)]
-        }
+        // M1 整改：生成结果直达 CharArray，不经 String 中转；清零点保留于本方法
+        val newPassword = generatePasswordChars(_uiState.value, SecureRandom())
         onPasswordChangeSecure(newPassword)
         newPassword.fill('0')
     }
@@ -295,12 +256,7 @@ class EntryEditViewModel @Inject constructor(
     fun onGroupChange(groupId: String?) = _uiState.update { it.copy(groupId = groupId, isDirty = true) }
 
     fun addCustomField() {
-        val newField = UiCustomField(
-            id = "field_${System.currentTimeMillis()}",
-            key = "",
-            value = "",
-            isProtected = false
-        )
+        val newField = buildNewCustomField("field_${System.currentTimeMillis()}")
         _uiState.update { it.copy(customFields = it.customFields + newField, isDirty = true) }
     }
 
@@ -328,10 +284,10 @@ class EntryEditViewModel @Inject constructor(
             }
         }
         _uiState.update { state ->
-            val updated = state.customFields.map { f ->
-                if (f.id == id) f.copy(key = key, value = effectiveValue, isProtected = isProtected) else f
-            }
-            state.copy(customFields = updated, isDirty = true)
+            state.copy(
+                customFields = withUpdatedCustomField(state.customFields, id, key, effectiveValue, isProtected),
+                isDirty = true
+            )
         }
     }
 
@@ -347,9 +303,7 @@ class EntryEditViewModel @Inject constructor(
 
     fun removeCustomField(id: String) {
         protectedFieldChars.remove(id)?.fill('0')
-        _uiState.update { state ->
-            state.copy(customFields = state.customFields.filter { it.id != id }, isDirty = true)
-        }
+        _uiState.update { state -> state.copy(customFields = withoutCustomField(state.customFields, id), isDirty = true) }
     }
 
     /**
@@ -361,11 +315,10 @@ class EntryEditViewModel @Inject constructor(
             _uiState.update { it.copy(userMessage = UiMessage(R.string.edit_attachment_empty)) }
             return
         }
-        val newAtt = UiAttachment(
+        val newAtt = buildNewAttachment(
             id = "att_${System.currentTimeMillis()}",
             fileName = fileName,
             fileSizeFormatted = fileSizeFormatted,
-            mimeType = "application/octet-stream",
             addedAt = strings.get(R.string.time_just_now),
             data = data
         )
@@ -375,42 +328,19 @@ class EntryEditViewModel @Inject constructor(
     }
 
     fun removeAttachment(id: String) {
-        _uiState.update { state ->
-            state.copy(attachments = state.attachments.filter { it.id != id }, isDirty = true)
-        }
+        _uiState.update { state -> state.copy(attachments = withoutAttachment(state.attachments, id), isDirty = true) }
     }
 
     fun saveEntry() {
         val state = _uiState.value
-        if (state.isReadOnly) {
-            _uiState.update { it.copy(userMessage = UiMessage(R.string.readonly_save_rejected)) }
-            return
-        }
-        if (state.title.isBlank()) {
-            _uiState.update { it.copy(userMessage = UiMessage(R.string.edit_title_required)) }
+        entrySaveRejectionRes(state)?.let { rejectionRes ->
+            _uiState.update { it.copy(userMessage = UiMessage(rejectionRes)) }
             return
         }
 
         viewModelScope.launch {
             val entryId = state.entryId ?: UUID.randomUUID().toString()
-            val entry = UiVaultEntry(
-                id = entryId,
-                title = state.title.trim(),
-                username = state.username.trim(),
-                url = state.url.trim(),
-                notes = state.notes.trim(),
-                isPasskey = state.isPasskey,
-                category = if (state.isPasskey) EntryCategory.PASSKEY else EntryCategory.LOGIN,
-                updatedAt = strings.get(R.string.time_just_now),
-                groupId = state.groupId,
-                iconName = state.iconName,
-                customIconId = state.customIconId,
-                customFields = state.customFields.filter { it.key.isNotBlank() },
-                attachments = state.attachments,
-                tags = state.tagsInput.split(',', '\uff0c', ' ').map { it.trim() }.filter { it.isNotEmpty() }.distinct(),
-                autoTypeSequence = state.autoTypeSequence,
-                overrideUrl = state.overrideUrl.trim().takeIf { it.isNotEmpty() }
-            )
+            val entry = buildEntrySaveSnapshot(state, entryId, strings.get(R.string.time_just_now))
             // M1 整改：密码以独立参数显式提交，不再随条目投影携带；提交副本归仓库擦除
             // （契约：仓库任何结果路径用毕清零），ViewModel 自有副本保留以支持失败后继续编辑
             // 断点4 整改 + TASK-10：TOTP 种子与受保护自定义字段明文以 CharArray 副本随保存显式提交

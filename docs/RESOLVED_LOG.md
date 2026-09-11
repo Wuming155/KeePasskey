@@ -24,8 +24,9 @@
 | §13 | P3-31 批次 E（超阈值债务） | ISSUE-P3-31 |
 | §14 | P3-31 批次 F（超阈值债务） | ISSUE-P3-31 |
 | §15 | P3-31 批次 G（超阈值债务） | ISSUE-P3-31 |
+| §16 | P3-31 批次 H（超阈值债务） | ISSUE-P3-31 |
 
-> 各批次验收证据（用例数 / 通过 / 失败 / 跳过）分别见 §2.22、§3.1、§4.1、§5.1、§6.1、§7.1、§8.0、§9.5、§10.1、§11、§12、§13、§14、§15。
+> 各批次验收证据（用例数 / 通过 / 失败 / 跳过）分别见 §2.22、§3.1、§4.1、§5.1、§6.1、§7.1、§8.0、§9.5、§10.1、§11、§12、§13、§14、§15、§16。
 
 ---
 
@@ -341,4 +342,20 @@
 
 ---
 
-> **当前残余面（ACTIVE）**：ISSUE-P3-23（arm64 真机 + 真实 `.kdbx` 语料端到端）· P3-24（CI 首跑校准）· P3-31（超阈值 6 项）· P3-32（供应链 CVE 收尾）。
+## 16. ISSUE-P3-31 批次 H 归档（超阈值债务 · `CloudSyncComponents` / `EntryDetailComponents` / `EntryEditViewModel`）
+
+**核实**：2026-09-10，逐文件 `(Get-Content …).Count` 复核；门禁 `test --rerun-tasks --max-workers=1` → **1329 例 / 0 失败 / 13 跳过**（app 750 / core 58 / crypto 107 / database 235 / sync 179；纯结构性拆分，用例数与批次 G 持平）；`lint` 5 模块 **0 error**。残余真逻辑超阈值清单 6 → **3 项**。
+
+| 文件 | 前 → 后 | 拆出单元 |
+|---|---|---|
+| `app/.../settings/subscreens/CloudSyncComponents.kt` | 481 → 291 | `CloudSyncConfigFields`（WebDAV / S3 凭据输入表单字段） |
+| `app/.../ui/screens/detail/EntryDetailComponents.kt` | 477 → 223 | `EntryDetailCards`（`BasicCredentialsCard` / `TotpCard` / `PasskeyCard` + `TOTP_MASK`） |
+| `app/.../ui/screens/edit/EntryEditViewModel.kt` | 470 → 400 | `EntryEditFormProjection`（加载投影 / 字段与附件映射 / 口令生成）/ `EntryEditSaveProjection`（保存校验 / 标签解析 / 保存快照组装） |
+
+- **公开 API 零丢失零新增**：`EntryEditViewModel` 全部 public 成员（构造、`uiState`/`events`/`loadedPassword`/`loadedTotpSecret`/`loadedProtectedFields`/`init`/31 个事件入口/`onCleared`）逐字未变；Compose 侧被搬移符号维持 `internal`（引用方仅 `EntryDetailScreen`/`CloudSyncScreen`/`CloudSyncSections`，同包可见），**未下调任何可见性**；新增单元一律 `internal`。
+- **敏感数据清零点**：`EntryEditViewModel` **26 → 26**（24 × `.fill('0')` + 2 × `.clear()`，逐条映射位置与条件不变）；密码/TOTP 揭示、`CharArray` 预填、剪贴板敏感标志等逻辑逐字保留。未新增 `String` 落地敏感值或日志；`EntryEditSaveProjection` 的快照组装**不含任何敏感明文**。
+- **过程事实（如实留痕）**：本批子代理同样报告本环境 `GetDiagnostics` 通道不可靠；一律以主流程 `gradlew test`/`lint` 实跑为唯一验收依据，并补做「逐符号人工核对（可见性满足引用方、import 全部被使用、公开成员逐条比对）」。
+
+---
+
+> **当前残余面（ACTIVE）**：ISSUE-P3-23（arm64 真机 + 真实 `.kdbx` 语料端到端）· P3-24（CI 首跑校准）· P3-31（超阈值 3 项）· P3-32（供应链 CVE 收尾）。
