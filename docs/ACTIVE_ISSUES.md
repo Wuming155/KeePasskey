@@ -60,7 +60,7 @@
 > - **ISSUE-P2-18**（同步缺防回滚绑定）→ 引入本地认证的「已见内容摘要链」（Keystore HMAC + `SyncRollbackGuard`），
 >   重放旧库被拒并提示，跨端兼容结论留痕，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §22.8。
 
-## P3 低危问题、特性接线与体验优化（2 项）
+## P3 低危问题、特性接线与体验优化（1 项）
 
 > **背景**：P3 残余批次原 **12 项**（ISSUE-P3-17 ~ P3-28）已于 **2026-09-10** 整体整改。
 > 其中 **10 项完整闭环并归档**（P3-17 / 18 / 19 / **20** / 21 / 22 / 25 / 26 / 27 / 28，含逐项代码证据与 15 条过程缺陷留痕），
@@ -132,7 +132,14 @@
 > 公开 API **零丢失零新增**。**全仓重测后 `> 400` 仅剩 2 项，且均为经论证的例外**
 > （纯常量词表 `DicewareWordList` 408、因 ISSUE-P3-43 接线产生功能性增量的 `SettingsViewModel` 424），
 > 故 **ISSUE-P3-31 达成闭环并整条移出本文件**。
-> 本节余 **2 项**（P3-23 / **ISSUE-P3-57**）。
+> 本节余 **1 项**（P3-23）。
+> **2026-09-11 追加四（CodeQL Rust 误报治理）**：针对上一则登记的 **ISSUE-P3-57**（77 条
+> `rust/hard-coded-cryptographic-value` critical 误报）先行**机制验证**——查询源码无测试代码过滤、
+> `paths-ignore` 为文件级过滤、配置级排除需 advanced setup——据此把 Rust 单测外移为**纯测试文件**
+> 并新增 `.github/workflows/codeql.yml` + `.github/codeql/codeql-config.yml`（PR #6）。
+> 验证：advanced 分析的 rust 结果 **77 → 0**（`rules` 仍为 26，生产代码未被误伤），
+> 而同一时刻默认设置的分析仍报 77 条 → **双向实证**。本文件该条目已移出，见
+> [RESOLVED_LOG.md](RESOLVED_LOG.md) **§23.5**。
 > **2026-09-11 追加（功能完整性审计批次 A + B）**：以「README 声称功能 → 引擎/仓库 → ViewModel/控制器 → UI 入口」
 > 四层逐项做端到端接线审计，两批共发现并**同日整改归档 5 项**（A：全文搜索范围、详情页单条删除；
 > B：HOTP 端到端、单条移动分组 / 从模板新建便利入口、`AttachmentManager` 孤儿实现清理），
@@ -256,59 +263,14 @@
 
 ---
 
-### ISSUE-P3-57 (新登记): Code scanning 默认设置对 Rust 单测内测试向量报 critical 误报
+### ISSUE-P3-57（Code scanning 对 Rust 单测的 critical 误报 · 2026-09-11 已闭环）
 
-- **优先级**：P3（静态分析误报治理；**不涉及运行时安全**，但对安全运营有实质损害——77 条 critical 常驻会淹没真告警）
-- **核实时间点与核实方式（2026-09-11）**：
-  1. 告警全量统计：`gh api "/repos/Wuming155/KeePasskey/code-scanning/alerts?state=open&per_page=100" --paginate`
-     （按 `tool.name` / `rule.security_severity_level` / `rule.id` 分组），并逐条取
-     `most_recent_instance.location.path` 与 `start_line`；
-  2. 与源码交叉核对：本地 `Grep` 取三个 Rust 源文件中 `#[cfg(test)]` / `mod tests` 的**起始行**，逐条比对行号落点；
-  3. 查询语义：`WebFetch` GitHub 官方仓库 `github/codeql` 的
-     `rust/ql/src/queries/security/CWE-798/HardcodedCryptographicValue.ql` **原文**（非二手描述）；
-  4. 运行归属：`gh api ".../code-scanning/alerts"` 取 `most_recent_instance.analysis_key`；并 `LS .github/workflows/` 确认仓库内无 CodeQL 工作流文件。
-- **实测现状（2026-09-11）**：Code Scanning open 告警 **84 条** = CodeQL **77 条** + dependency-check 7 条
-  （后者为未达阈的中危依赖项，见 §23.3，**不属本条范围**）。CodeQL 77 条**全部**为
-  rule `rust/hard-coded-cryptographic-value`、`security_severity_level = critical`
-  （查询源码声明 `@security-severity 9.8`、`@kind path-problem`），创建时刻同为 `2026-09-10T13:18:38Z`；分布：
-
-  | 文件 | 条数 | `#[cfg(test)] mod tests` 起始行 | 告警行号范围 |
-  |---|:---:|:---:|---|
-  | `crypto/src/main/rust/src/strength.rs` | 53 | L521 | L533 ~ L703 |
-  | `crypto/src/main/rust/src/twofish_cbc.rs` | 17 | L114 | L127 ~ L226 |
-  | `crypto/src/main/rust/src/aes_kdf.rs` | 7 | L91 | L121 ~ L190 |
-
-- **性质判定（**逐条**行号核对，非抽样）**：**77/77 的行号全部落在上述 `#[cfg(test)] mod tests` 之内**，
-  内容为测试夹具（如 `let seed = [0x11u8; 32]` / `let key = [0x22u8; 32]` / `[0u8; 32]` 缓冲区 / KAT 期望值），
-  该代码**不进入发布产物**（`#[cfg(test)]` 不参与非 test 构建）。→ 判定为**误报**。
-- **机制验证结论（2026-09-11，决定处置路径；已推翻一个初始设想并留痕）**：
-  1. **「把 Rust 单测外移」单独实施无效**——查询源码 `HardcodedCryptographicValueConfig` 只定义
-     `isSource` / `isSink` / `isBarrier`，**不存在任何 `isTest` / `TestFile` 过滤**，即该查询**没有"测试代码"这一概念**，
-     因此单测放在 `src/main/rust/src/` 内联、还是外移到 `tests/`、`src/tests/`，告警**都不会消失**；
-  2. 「内联抑制注释」不可用（外部项目实证**声明**，非本仓实测）：`// lgtm[...]` / `// codeql[...]` 类抑制
-     对该 Rust 规则**不被分析器识别**；本仓若采用需先自行验证；
-  3. **配置级排除需切换高级设置**：`paths-ignore` / `query-filters` 属 **advanced setup** 能力
-     （GitHub 官方文档明确「必须为 code scanning 使用高级设置」）。本仓当前为**默认设置**——
-     `analysis_key = dynamic/github-code-scanning/codeql:analyze`，且 `.github/workflows/` 仅有
-     `build.yml` 与 `dependency-scan.yml`，**无 CodeQL 工作流文件**，故**默认设置不提供此类配置**。
-- **候选处置（三选一，均须留痕；本批次未实施）**：
-  1. **逐条 dismiss（`used in tests`）+ 依据留痕**：与本仓既有先例一致（[RESOLVED_LOG.md](RESOLVED_LOG.md) §7：
-     此前 7 条 rust 同类告警即按 `used in tests` 处置）。成本最低，且本条已完成全量行号核对（满足"先核实再 dismiss"）；
-     **缺点**：新增测试会再次产生同类告警（周期性重复劳动），且告警总数不再反映真实风险面。
-  2. **切换 advanced setup + `paths-ignore` 精确排除**：需**先**把 Rust 单测外移到独立文件
-     （如 `crypto/src/main/rust/src/tests/*.rs`，使其拥有可被精确命中的**独立路径**），再新增
-     `.github/workflows/codeql.yml`（+ `.github/codeql/codeql-config.yml`）忽略该路径。
-     **优点**：一次配置长期生效、**不削弱**生产代码覆盖、新增测试不再冒告警；
-     **代价**：需自维护 CodeQL 工作流与语言矩阵，且 Rust 属 CodeQL 预览语言，切换存在
-     **破坏当前已工作的默认设置分析**的风险（须先在分支上验证）。
-  3. **仅登记、不处置**：**不推荐**——77 条常驻 critical 造成告警疲劳，与「不得让真告警被淹没」的既定纪律相悖。
-- **建议顺序**：先做方案 2 的**机制验证**（在分支上以 advanced setup + `paths-ignore` 重跑一次分析，
-  确认该 rule 告警归零且**生产代码仍被分析**）；验证通过则采用方案 2，否则回退方案 1 并留痕说明原因。
-- **禁止**：以**未经核实**的批量 dismiss 代替逐条判定；关闭 CodeQL 或移除 Rust 语言分析来「消除」告警；
-  删除/注释测试用例以规避告警。
-- **验收标准**：① 该 rule 的 open 告警数按所选方案收敛到位（方案 1 → 0 且逐条附依据；方案 2 → 0 且生产代码
-  仍被分析、新增测试不再产生同类告警）；② 处置方式与依据在 `docs/` 留痕（含本次 77 条的行号核对证据）；
-  ③ 不引入对生产代码覆盖面的削弱（方案 2 需给出「生产代码仍被分析」的证据）。
+> 已于 **2026-09-11** 闭环：77 条 `rust/hard-coded-cryptographic-value`（critical）经**逐条**行号核对确认
+> **77/77 全在 Rust 单测模块内**（误报）；按「单测外移为纯测试文件 + 切换 advanced setup 并以 `paths-ignore`
+> 精确排除」处置——advanced 分析的 rust 结果由 **77 → 0**（`rules` 仍为 26），
+> 且**同一时刻默认设置的分析仍报 77 条**，双向实证了「仅外移无效、必须叠加配置级排除」的机制结论。
+> 实施细节与原始证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md) **§23.5**。
+> 此处留索引，正文已移出本文件。
 
 ---
 
