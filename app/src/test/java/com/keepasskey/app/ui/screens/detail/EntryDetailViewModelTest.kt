@@ -52,7 +52,15 @@ class EntryDetailViewModelTest {
     ): EntryDetailViewModel {
         val handle = if (entryId != null) SavedStateHandle(mapOf("entryId" to entryId)) else SavedStateHandle()
         val viewModel = EntryDetailViewModel(
-            null, handle, repository, FakeSettingsRepository(), null, blocklistStore
+            appContext = null,
+            savedStateHandle = handle,
+            vaultRepository = repository,
+            settingsRepository = FakeSettingsRepository(),
+            clipboardSecurityManager = null,
+            autofillBlocklistStore = blocklistStore,
+            // 与其余详情页用例一致：注入测试调度器，避免 flowOn(Dispatchers.Default) 的真实线程
+            // 在校验结束后才回跳到已 resetMain 的 Main 上，产生跨用例的 UncaughtExceptionsBeforeTest
+            displayDispatcher = UnconfinedTestDispatcher(testScheduler)
         )
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
             viewModel.uiState.collect {}
