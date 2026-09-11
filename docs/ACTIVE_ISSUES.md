@@ -239,8 +239,15 @@
      其中 `Fast gate` 的 `Android Lint` ✓ 与 `单元测试（全模块）` ✓、`Native gate` 的
      `Assemble Release` 与签名/入包断言 ✓、`Rust supply chain` ✓（**本仓 CI 史上 fast-gate 首次转绿**）；
      CodeQL 同期复跑 success，**开放告警 10 → 0**；
-  2. `dependency-scan` 在硬断言接入后的**首次运行**——按预期**将失败**，直至 ISSUE-P3-32 的达阈条目被处置；
-  3. `github/codeql-action/upload-sarif` **v4** 的真实执行（仅出现在手动触发的 `dependency-scan`）；
+  2. ~~`dependency-scan` 在硬断言接入后的首次运行~~ → **已实测：该工作流确实运行过**
+     （2026-09-10 运行 `34477320673`，headSha `8131dcf`，`workflow_dispatch`）→ **失败**，
+     但失败点为**外部 NVD 数据源 503**（31 次重试后 `NvdApiException: 503` → `dependencyCheckAggregate FAILED`），
+     且因 GitHub 默认跳过后续步骤，**硬断言被 skip、无判定**；**已修复可观测性**（断言步骤加 `if: always()`，
+     无报告时按 fail-closed 明确判失败），见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §19。
+     原文「本环境被拒 403、从未运行」系滞后前提，**就地修正**。**仍未取得**：一次 aggregate 成功前提下的
+     断言 pass/fail（受 NVD 503 间歇性阻塞，需 `NVD_API_KEY` 或数据缓存，属维护者决策）；
+  3. ~~`github/codeql-action/upload-sarif` **v4** 的真实执行~~ → **已真实执行**（同上运行 `34477320673`），
+     因上游未产出 SARIF 而失败；**仍未取得**的是「有 SARIF 时的成功上传」；
   4. runner 镜像实际预装 API 级别（R2）、`ubuntu-latest` 指向的镜像版本（R1）；
   5. Gradle 对 daemon JVM criteria 不满足时的失败/自动供给行为（§1#3 残留不确定性）；
   6. 3 条 POSIX 断言的**最终结果**：`Fast gate` 的单元测试步骤确已通过，但该 job 整体因 lint 失败，
@@ -285,13 +292,16 @@
   报告缺 `dependencies` 字段 → **exit 1**；报告文件不存在 → **exit 1**（**无报告 ≠ 通过**）。
   即「达阈必红、无结论必红、未达阈放行」的闸门逻辑成立；
   **仍未验证的仅是它在 CI runner 上的首次真实执行**（需 Actions 写权限手动触发，见下）。
-- **仍未验证（不得据此认为 CI 侧已跑通）**：该断言在 **CI runner** 上的首次真实运行——
-  `workflow_dispatch` 需 PAT 具备 Actions 写权限，本环境被拒
-  （HTTP 403 `Resource not accessible by personal access token`），故本条以**本地同参数扫描**为等价验证；
-  CI 侧首次运行待维护者手动触发（触发命令：`gh workflow run dependency-scan.yml`）。
-  **断言生效后 `dependency-scan` 将按预期失败**，直到下列达阈条目被「修依赖」或「登记 suppression」。
-  已登记豁免 **1 族**（`androidx.sqlite`：构件内零 `.so`，不含原生 SQLite C 代码），
-  以下为**未豁免残余**。
+- **CI 侧首跑实测（2026-09-11 复核；更正原文「本环境被拒 403、从未运行」的滞后前提）**：
+  该工作流**已在托管 runner 上运行过**——2026-09-10 运行 `34477320673`（`workflow_dispatch`，headSha `8131dcf`）
+  **失败**，失败点为**外部 NVD 数据源 503**（31 次重试 → `NvdApiException: NVD Returned Status Code: 503`
+  → `dependencyCheckAggregate FAILED`，**未产出报告**），进而导致：
+  **硬断言被 GitHub 默认 skip（断言自身无判定）** + 报告/SARIF 上传二次失败。
+  详见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §19。
+  **已修复该可观测性缺陷**：硬断言步骤加 `if: always()`，无报告时按 fail-closed 明确判失败（**不削弱**闸门，只会增加失败信号）。
+  **仍未取得**：一次「aggregate 成功 + 报告产出」前提下的断言 pass/fail —— 受 NVD 503 间歇性阻塞；
+  处置路径为配置仓库 Secret `NVD_API_KEY` 或增强 NVD 数据缓存，属**维护者决策**，
+  **不得**回调阈值或关闭 `failOnError` 来换取变绿。
 - **未豁免残余（2026-09-10 核实 → 同日处置后已消解，结论以上方「处置结果」为准）**：
   1. `CVE-2026-53914` 的处置方式为**真修复**：Kotlin 已升级至 **2.4.20**
      （2026-09-11 复核 `gradle/libs.versions.toml`：`kotlin = "2.4.20"`），本地同参数扫描下该 CVE 已消除、

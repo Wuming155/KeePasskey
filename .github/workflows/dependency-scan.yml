@@ -80,7 +80,12 @@ jobs:
       # 豁免的唯一通道是 .github/owasp-dependency-suppressions.xml（插件在报告生成阶段剔除），
       # **不得**通过调低阈值或删除本步骤来变绿。
       # =====================================================================================
+      # `if: always()`：即使上游 aggregate 步骤失败（如 NVD 数据源 503 → 未产出报告），
+      # 本步仍必须执行并给出**明确判定**——「报告缺失 = 无结论 ≠ 通过」按 fail-closed 失败。
+      # 否则 GitHub Actions 会默认跳过本步，使断言自身「无判定」，与「不得静默通过」的初衷相悖
+      # （CI 侧实测留痕：运行 34477320673，aggregate 因 NVD 503 失败 → 本步被 skip）。
       - name: CVSS 阈值硬断言（fail-closed）
+        if: always()
         run: |
           python3 .github/check_dependency_cvss.py \
             build/reports/dependency-check/dependency-check-report.json

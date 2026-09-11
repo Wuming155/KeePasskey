@@ -27,8 +27,9 @@
 | §16 | P3-31 批次 H（超阈值债务） | ISSUE-P3-31 |
 | §17 | P3-31 批次 I（超阈值债务 · **本条闭环**） | ISSUE-P3-31 |
 | §18 | CI Fast gate 偶发红根因修复（测试调度器污染） | 测试基础设施 |
+| §19 | dependency-scan CI 侧首跑留痕 + 断言可观测性修复 | ISSUE-P3-24 / P3-32 |
 
-> 各批次验收证据（用例数 / 通过 / 失败 / 跳过）分别见 §2.22、§3.1、§4.1、§5.1、§6.1、§7.1、§8.0、§9.5、§10.1、§11、§12、§13、§14、§15、§16、§17、§18。
+> 各批次验收证据（用例数 / 通过 / 失败 / 跳过）分别见 §2.22、§3.1、§4.1、§5.1、§6.1、§7.1、§8.0、§9.5、§10.1、§11、§12、§13、§14、§15、§16、§17、§18、§19。
 
 ---
 
@@ -429,6 +430,38 @@
 
 **如实留痕**：该 flake 自批次 G 起即存在（G 恰好通过、H/I 命中），属**既有测试基础设施缺陷**，
 非批次 D~I 的结构性拆分引入；本地无法复现（时序/核数相关），完全依赖 CI 日志与工件定位。
+
+---
+
+## 19. dependency-scan 的 CI 侧首次真实运行留痕与断言可观测性修复（ISSUE-P3-24 / P3-32）
+
+**前提纠正（原文已不成立，就地修正）**：此前 `ACTIVE_ISSUES` 记载「`workflow_dispatch` 需 PAT 具备 Actions 写权限，
+本环境被拒（403），故 CI 侧从未运行」。经 `gh run list --workflow dependency-scan.yml` 复核（2026-09-11）：
+**该工作流确实已在托管 runner 上运行过** —— 运行 `34477320673`（`workflow_dispatch`，headSha `8131dcf`，
+2026-09-10T12:32Z，`OWASP Dependency-Check` job 56m15s）→ **conclusion=failure**。
+
+**该次运行的真实失败链（逐层证据：`gh run view 34477320673` / `--log-failed`）**：
+
+| # | 步骤 | 结果 | 说明 |
+|:--:|---|:--:|---|
+| 1 | `Run OWASP Dependency-Check (aggregate)` | ❌ | NVD API 连续 31 次重试后 `NvdApiException: NVD Returned Status Code: 503`；插件提示 “Unable to update 1 or more Cached Web DataSource, using local data instead”；随后 `dependencyCheckAggregate FAILED`（BUILD FAILED in 55m 38s） |
+| 2 | （无报告产出） | — | 因 init 脚本 `failOnError = true`（fail-closed 设计），扫描未完成即失败；`build/reports/dependency-check/dependency-check-report.*` 不存在 |
+| 3 | `CVSS 阈值硬断言（fail-closed）` | ⏭ **skip** | GitHub Actions 默认「前一步失败即跳过后续步骤」→ **断言自身无判定** |
+| 4 | `Upload report artifact` | ❌ | `if-no-files-found: error` → “No files were found …” |
+| 5 | `Upload SARIF to Code Scanning` | ❌ | “Path does not exist: …dependency-check-report.sarif” |
+
+**结论（如实）**：失败根因是**外部 NVD 数据源 503（可用性）**，非本仓代码 / 配置缺陷
+（init 脚本的 `formats`/`outputDirectory` 与 workflow 期望路径一致：`build/reports/dependency-check/dependency-check-report.{json,sarif,html}`）。
+但暴露出**一处可观测性缺陷**：硬断言被跳过，导致 P3-32 验收标准 1「在真实运行中给出确定的 pass/fail」**无法达成**。
+
+**修复（不削弱 fail-closed）**：为硬断言步骤加 `if: always()`。
+于是即使上游 aggregate 失败、报告缺失，本步仍执行；`check_dependency_cvss.py` 对「报告不存在」按 fail-closed
+返回 **exit 1**（该路径已本地逐例实测），从而**总是给出明确判定**。
+该改动只可能**增加**失败信号，不会让任何「达阈」或「无报告」情形变绿；YAML 已用 `yaml.safe_load` 校验通过。
+
+**仍未消除（外部资源，登记为残余）**：NVD 数据源 503 间歇性会导致 aggregate 步骤失败。
+按 §7 既定立场，**不得**回调阈值或关闭 `failOnError` 换取变绿；正确处置为配置仓库 Secret `NVD_API_KEY`
+（提升限额、绕开匿名限流）或增强 NVD 数据缓存（跨运行 cache）。属维护者决策，不由本批次单方面压制。
 
 ---
 
