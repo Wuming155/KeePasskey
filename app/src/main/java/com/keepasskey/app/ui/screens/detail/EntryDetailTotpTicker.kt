@@ -29,7 +29,9 @@ internal class EntryDetailTotpTicker(
     ) {
         var previous = -1
         tickerFlow(TOTP_TICK_MS).collect {
-            val snapshot = currentEntry()?.takeIf { it.totpCode != null } ?: return@collect
+            // ISSUE-P3-49：HOTP 无时间倒计时（码由持久化计数器决定），不由本节拍驱动，
+            // 否则会在用户取码后一秒内把显示覆盖成「下一码」而与刚交付的码不一致。
+            val snapshot = currentEntry()?.takeIf { it.totpCode != null && !it.isHotp } ?: return@collect
             val fresh = vaultRepository.calculateEntryTotp(snapshot.id)
             val period = fresh?.periodSeconds ?: snapshot.totpPeriod
             val remaining = if (fresh != null) {

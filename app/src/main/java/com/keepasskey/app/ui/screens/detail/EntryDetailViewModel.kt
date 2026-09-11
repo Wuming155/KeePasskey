@@ -75,6 +75,12 @@ class EntryDetailViewModel @Inject constructor(
 
     private val entryIdFlow = MutableStateFlow<String?>(savedStateHandle.get<String>("entryId"))
 
+    // ISSUE-P3-48：单条删除成功的一次性导航事件（Screen 消费即回退列表）
+    private val entryDeletedFlow = MutableStateFlow(false)
+
+    /** 条目已删除（移入回收站 / 站内彻底删除）的一次性信号 */
+    val entryDeleted: StateFlow<Boolean> = entryDeletedFlow
+
     /** 按需解密明文与用户显式遮掩意图的唯一持有者（含唯一清零入口）。 */
     private val secrets = EntryDetailSecrets()
 
@@ -157,6 +163,10 @@ class EntryDetailViewModel @Inject constructor(
         // 杜绝「查看 A 条目密码后切到 B，A 的明文仍驻留 ViewModel 状态」的跨条目残留
         if (id == entryIdFlow.value) return
         entryIdFlow.value = id
+        entryDeletedFlow.value = false
+        // ISSUE-P3-49：切换条目即清空上一 TOTP 条目的实时码，避免 HOTP 条目（不由节拍驱动）
+        // 误显上一条目的验证码
+        liveTotpCodeFlow.value = null
         clearAllRevealedSecrets()
         // ISSUE-P3-17：偏好声明「默认不遮掩」时，新条目同样按默认态补齐明文
         revealPasswordIfVisibleByDefault()
@@ -360,6 +370,66 @@ class EntryDetailViewModel @Inject constructor(
         }
         viewModelScope.launch(Dispatchers.IO) {
             userMessageFlow.value = attachmentExporter.export(entryId, attachment, targetUri)
+        }
+    }
+
+    /**
+     * ISSUE-P3-48：删除当前条目（单条入口）。
+     *
+     * 语义由仓库回收站分流决定：条目不在回收站内 → 软删移入回收站（可还原）；
+     * 条目已在回收站内或回收站被禁用 → 物理删除并记录墓碑。
+     * 只读会话 / 缺少条目 id 时为 no-op；成功置一次性 [entryDeleted] 供 Screen 回退导航，
+     * 失败经仓库 [KdbxResult.Failure] 如实上浮（不谎报成功）。
+     */
+    fun deleteEntry() {
+        val entryId = entryIdFlow.value ?: return
+        if (uiState.value.isReadOnly) return
+        viewModelScope.launch {
+            when (val result = vaultRepository.deleteEntry(entryId)) {
+                is com.keepasskey.core.result.KdbxResult.Success -> entryDeletedFlow.value = true
+                is com.keepasskey.core.result.KdbxResult.Failure ->
+                    userMessageFlow.value = UiMessage(R.string.vault_op_failed, listOf(result.message))
+            }
+        }
+    }
+
+    /**
+     * ISSUE-P3-51：把当前条目移动到目标分组（null = 根目录）。
+     * 复用仓库批量移动通道（单元素集合）；只读会话 / 缺条目 id 为 no-op；
+     * 成功 / 失败经 [userMessageFlow] 如实告知。
+     */
+    fun moveEntryToGroup(targetGroupId: String?) {
+        val entryId = entryIdFlow.value ?: return
+        if (uiState.value.isReadOnly) return
+        viewModelScope.launch {
+            when (val result = vaultRepository.batchMoveEntries(setOf(entryId), targetGroupId)) {
+                is com.keepasskey.core.result.KdbxResult.Success ->
+                    userMessageFlow.value = UiMessage(R.string.detail_move_success)
+                is com.keepasskey.core.result.KdbxResult.Failure ->
+                    userMessageFlow.value = UiMessage(R.string.vault_op_failed, listOf(result.message))
+            }
+        }
+    }
+
+    /**
+     * ISSUE-P3-49：HOTP 取码——推进计数器（**先落库成功**）并把本次所出之码写入受保护剪贴板。
+     *
+     * 语义对齐 KeePassXC：只有计数器成功推进后才交付验证码；失败经 [userMessageFlow] 如实上浮，
+     * **绝不**产出「未推进」的码（否则同一计数器会被重复使用）。只读会话 / 缺条目 id 为 no-op。
+     */
+    fun advanceHotp() {
+        val entryId = entryIdFlow.value ?: return
+        if (uiState.value.isReadOnly) return
+        viewModelScope.launch {
+            when (val result = vaultRepository.advanceEntryHotpCounter(entryId)) {
+                is com.keepasskey.core.result.KdbxResult.Success -> {
+                    val code = result.data.code
+                    clipboardSecurityManager?.copySensitiveText(uiState.value.entry?.title.orEmpty(), code)
+                    userMessageFlow.value = UiMessage(R.string.detail_hotp_copied, listOf(code))
+                }
+                is com.keepasskey.core.result.KdbxResult.Failure ->
+                    userMessageFlow.value = UiMessage(R.string.vault_op_failed, listOf(result.message))
+            }
         }
     }
 

@@ -17,6 +17,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteForever
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material3.AlertDialog
@@ -47,6 +48,7 @@ import androidx.compose.ui.unit.sp
 import com.keepasskey.app.R
 import com.keepasskey.app.ui.components.IconPickerDialog
 import com.keepasskey.app.ui.components.getVaultIcon
+import com.keepasskey.app.ui.model.UiVaultEntry
 import com.keepasskey.app.ui.model.VaultGroup
 import com.keepasskey.app.ui.theme.CapsuleShape
 
@@ -98,7 +100,10 @@ internal fun VaultSortDialog(
 internal fun VaultCreateTypeDialog(
     onDismiss: () -> Unit,
     onAddEntry: () -> Unit,
-    onCreateFolder: () -> Unit
+    onCreateFolder: () -> Unit,
+    // ISSUE-P3-51：库内模板数量 > 0 时呈现「从模板新建」入口
+    templateCount: Int = 0,
+    onCreateFromTemplate: () -> Unit = {}
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -136,6 +141,66 @@ internal fun VaultCreateTypeDialog(
                         }
                     }
                 }
+
+                // ISSUE-P3-51：库内已安装模板库时提供「从模板新建」
+                if (templateCount > 0) {
+                    Surface(
+                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable(onClick = onCreateFromTemplate),
+                        color = MaterialTheme.colorScheme.surfaceContainerLow
+                    ) {
+                        Row(modifier = Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Box(modifier = Modifier.size(36.dp).clip(CircleShape).background(MaterialTheme.colorScheme.tertiaryContainer), contentAlignment = Alignment.Center) {
+                                Icon(Icons.Default.Description, contentDescription = null, tint = MaterialTheme.colorScheme.tertiary, modifier = Modifier.size(20.dp))
+                            }
+                            Spacer(modifier = Modifier.width(14.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(stringResource(R.string.vault_new_from_template), style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, fontSize = 15.sp))
+                                Text(stringResource(R.string.vault_new_from_template_desc), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.btn_cancel)) }
+        },
+        shape = RoundedCornerShape(20.dp)
+    )
+}
+
+/**
+ * ISSUE-P3-51：从模板新建的模板选择对话框。
+ * 逐条列出库内「模板」分组条目，选中即携带模板 id 进入编辑页（预填为**新条目**）。
+ */
+@Composable
+internal fun VaultTemplatePickerDialog(
+    templates: List<UiVaultEntry>,
+    onDismiss: () -> Unit,
+    onSelect: (String) -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.vault_template_picker_title)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                templates.forEach { template ->
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceContainerLow,
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth().clickable { onSelect(template.id) }
+                    ) {
+                        Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(getVaultIcon(template.iconName), contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text(
+                                text = template.title.ifBlank { template.id },
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        }
+                    }
+                }
             }
         },
         confirmButton = {},
@@ -148,16 +213,19 @@ internal fun VaultCreateTypeDialog(
 
 /**
  * 批量移动文件夹选择对话框：支持移动到根目录或任一非回收站文件夹
+ *
+ * [titleRes] 供单条移动等复用场景替换标题（默认沿用批量移动标题）。
  */
 @Composable
 internal fun VaultBatchMoveDialog(
     allGroups: List<VaultGroup>,
     onDismiss: () -> Unit,
-    onMove: (String?) -> Unit
+    onMove: (String?) -> Unit,
+    @androidx.annotation.StringRes titleRes: Int = R.string.vault_batch_move_title
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.vault_batch_move_title)) },
+        title = { Text(stringResource(titleRes)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Surface(

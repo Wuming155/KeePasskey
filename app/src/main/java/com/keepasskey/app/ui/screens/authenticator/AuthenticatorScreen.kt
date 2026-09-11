@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Autorenew
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.QrCode
@@ -168,7 +169,9 @@ fun AuthenticatorScreen(
                 TotpLargeCard(
                     item = item,
                     onClick = { onEntryClick(item.entryId) },
-                    onCopy = { item.codeRaw?.let(copyCode) }
+                    onCopy = { item.codeRaw?.let(copyCode) },
+                    // ISSUE-P3-49：HOTP 取码需推进计数器（复制当前码会重复使用同一计数器）
+                    onAdvanceHotp = { viewModel.advanceHotpAndCopy(item.entryId) }
                 )
             }
 
@@ -218,9 +221,12 @@ fun AuthenticatorScreen(
 private fun TotpLargeCard(
     item: TotpCardItem,
     onClick: () -> Unit,
-    onCopy: () -> Unit
+    onCopy: () -> Unit,
+    // ISSUE-P3-49：HOTP 取码（推进计数器并复制）
+    onAdvanceHotp: () -> Unit = {}
 ) {
-    val isUrgent = item.remainingSeconds <= 5
+    // HOTP 无时间步长：不作紧迫着色、不显示倒计时环
+    val isUrgent = !item.isHotp && item.remainingSeconds <= 5
     val gaugeColor by animateColorAsState(
         targetValue = if (isUrgent) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
         label = "gaugeColor"
@@ -291,32 +297,36 @@ private fun TotpLargeCard(
                     }
                 }
 
-                // 微型环形倒计时器
-                Box(contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(
-                        progress = { item.remainingSeconds / 30f },
-                        modifier = Modifier.size(28.dp),
-                        color = gaugeColor,
-                        strokeWidth = 3.dp,
-                        trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
-                    )
-                    Text(
-                        text = "${item.remainingSeconds}",
-                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                        color = gaugeColor,
-                        fontSize = 10.sp
-                    )
+                // 微型环形倒计时器（HOTP 无时间步长，不呈现）
+                if (!item.isHotp) {
+                    Box(contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(
+                            progress = { item.remainingSeconds / 30f },
+                            modifier = Modifier.size(28.dp),
+                            color = gaugeColor,
+                            strokeWidth = 3.dp,
+                            trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
+                        )
+                        Text(
+                            text = "${item.remainingSeconds}",
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                            color = gaugeColor,
+                            fontSize = 10.sp
+                        )
+                    }
                 }
             }
 
-            // 中部：大号分段动态码 + 一键复制按钮（TASK-33：验证码不可用时复制通道整体禁用）
-            val canCopy = item.codeRaw != null
+            // 中部：大号分段动态码 + 动作按钮（TASK-33：验证码不可用时通道整体禁用）
+            // ISSUE-P3-49：HOTP 的动作是「取下一个码」（推进计数器并复制），TOTP 为「复制当前码」
+            val actionable = item.isHotp || item.codeRaw != null
+            val onAction: () -> Unit = { if (item.isHotp) onAdvanceHotp() else onCopy() }
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(10.dp))
                     .background(MaterialTheme.colorScheme.surfaceContainerLow)
-                    .clickable(enabled = canCopy) { onCopy() }
+                    .clickable(enabled = actionable) { onAction() }
                     .padding(horizontal = 14.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
@@ -327,29 +337,33 @@ private fun TotpLargeCard(
                         fontSize = 28.sp,
                         fontWeight = FontWeight.Bold,
                         letterSpacing = 3.sp,
-                        color = if (canCopy) gaugeColor else MaterialTheme.colorScheme.onSurfaceVariant
+                        color = if (actionable) gaugeColor else MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 )
 
                 Surface(
-                    color = if (canCopy) MaterialTheme.colorScheme.primaryContainer
+                    color = if (actionable) MaterialTheme.colorScheme.primaryContainer
                     else MaterialTheme.colorScheme.surfaceContainerHighest,
                     shape = CapsuleShape,
-                    modifier = Modifier.clickable(enabled = canCopy) { onCopy() }
+                    modifier = Modifier.clickable(enabled = actionable) { onAction() }
                 ) {
                     Row(
                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(
-                            imageVector = Icons.Default.ContentCopy,
-                            contentDescription = stringResource(R.string.cd_copy_totp),
+                            imageVector = if (item.isHotp) Icons.Default.Autorenew else Icons.Default.ContentCopy,
+                            contentDescription = stringResource(
+                                if (item.isHotp) R.string.cd_hotp_advance else R.string.cd_copy_totp
+                            ),
                             tint = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.size(16.dp)
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = stringResource(R.string.btn_copy),
+                            text = stringResource(
+                                if (item.isHotp) R.string.detail_hotp_advance else R.string.btn_copy
+                            ),
                             style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
                             color = MaterialTheme.colorScheme.primary
                         )

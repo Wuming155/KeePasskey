@@ -288,6 +288,20 @@ interface VaultRepository {
     suspend fun calculateEntryTotp(entryId: String): EntryTotpSnapshot?
 
     /**
+     * ISSUE-P3-49：推进 HOTP（RFC 4226）条目的计数器并返回**本次所出之码**。
+     *
+     * 语义（对齐 KeePassXC）：
+     * 1. 读取条目 `otp` 字段的 `otpauth://hotp/...&counter=N` 配置；
+     * 2. 计算计数器 N 对应的验证码并**先把计数器 N+1 落库**，成功后才返回该码——
+     *    落库失败则整体失败（绝不返回一个「未推进」的码，否则同一计数器会被重复使用）；
+     * 3. 计数器推进**不产生历史修订**（属口令取用而非内容修订）。
+     *
+     * 非 HOTP 条目（TOTP / 无 OTP）返回 [com.keepasskey.core.result.KdbxResult.Failure]；
+     * 计数器非法 / URI 非法时 fail-closed 失败，不落库。
+     */
+    suspend fun advanceEntryHotpCounter(entryId: String): com.keepasskey.core.result.KdbxResult<EntryTotpSnapshot>
+
+    /**
      * 根据依赖方标识 (RP ID) 或域名查询匹配的凭据条目
      */
     suspend fun findEntriesForRpId(rpId: String): List<com.keepasskey.core.model.KdbxEntry>

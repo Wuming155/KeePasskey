@@ -13,6 +13,7 @@ import com.keepasskey.core.model.KdbxCustomField
 import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.core.model.PasskeyData
+import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.core.security.ProtectedString
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -389,9 +390,17 @@ class FakeVaultRepository(
             code = code,
             periodSeconds = entry.totpPeriod,
             digits = entry.totpDigits,
-            algorithm = entry.totpAlgorithm
+            algorithm = entry.totpAlgorithm,
+            isHotp = entry.isHotp
         )
     }
+
+    /**
+     * ISSUE-P3-49：测试替身**不支持** HOTP 计数器写回——明确 fail-closed，
+     * 绝不谎报「已出码」（与生产实现同一诚实语义）。
+     */
+    override suspend fun advanceEntryHotpCounter(entryId: String): KdbxResult<EntryTotpSnapshot> =
+        KdbxResult.Failure(UnsupportedOperationException("fake repository does not support HOTP advance"))
 
     override suspend fun saveNewPasskeyEntry(data: PasskeyData, boundPackage: String?): KdbxEntry {
         val title = "${data.userName}@${data.relyingPartyId}"

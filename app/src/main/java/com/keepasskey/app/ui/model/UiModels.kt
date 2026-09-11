@@ -112,6 +112,9 @@ data class UiVaultEntry(
     val totpPeriod: Int = 30,
     val totpDigits: Int = 6,
     val totpAlgorithm: String = "SHA1",
+    // ISSUE-P3-49：HOTP（RFC 4226）条目——验证码基于持久化计数器而非时间步长，
+    // UI 据此隐藏倒计时环并以显式「取码」动作推进计数器
+    val isHotp: Boolean = false,
     val category: EntryCategory = EntryCategory.LOGIN,
     // TASK-32 整改：恒硬编码 112 bit 撤销——null 表示「未计算」（投影层不解密密码，
     // 真实熵由详情页 ViewModel 按需解密估算后经 EntryDetailUiState 下发）

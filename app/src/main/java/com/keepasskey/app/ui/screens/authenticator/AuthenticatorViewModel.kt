@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 @HiltViewModel
@@ -100,7 +101,8 @@ class AuthenticatorViewModel @Inject constructor(
                 codeRaw = raw,
                 remainingSeconds = remaining,
                 iconName = entry.iconName,
-                url = entry.url
+                url = entry.url,
+                isHotp = snapshot?.isHotp == true || entry.isHotp
             )
         }
 
@@ -133,6 +135,26 @@ class AuthenticatorViewModel @Inject constructor(
     fun copyTotpCode(code: String) {
         clipboardSecurityManager?.copySensitiveText(TOTP_CLIP_LABEL, code)
         userMessageFlow.value = UiMessage(R.string.auth_totp_copied, listOf(code))
+    }
+
+    /**
+     * ISSUE-P3-49：HOTP 取码——推进计数器（**先落库成功**）并复制本次所出之码。
+     *
+     * 与 TOTP 的 `copyTotpCode`（复制当前码、无副作用）语义不同：HOTP 每次取码都会消费一个
+     * 计数器值，故必须先持久化计数器推进、成功后才交付该码；失败如实上浮，不产出未推进的码。
+     */
+    fun advanceHotpAndCopy(entryId: String) {
+        viewModelScope.launch {
+            when (val result = vaultRepository.advanceEntryHotpCounter(entryId)) {
+                is com.keepasskey.core.result.KdbxResult.Success -> {
+                    val code = result.data.code
+                    clipboardSecurityManager?.copySensitiveText(TOTP_CLIP_LABEL, code)
+                    userMessageFlow.value = UiMessage(R.string.auth_totp_copied, listOf(code))
+                }
+                is com.keepasskey.core.result.KdbxResult.Failure ->
+                    userMessageFlow.value = UiMessage(R.string.vault_op_failed, listOf(result.message))
+            }
+        }
     }
 
     fun clearUserMessage() {

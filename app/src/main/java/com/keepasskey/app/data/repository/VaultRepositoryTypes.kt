@@ -33,7 +33,10 @@ data class EntryTotpSnapshot(
     val code: String,
     val periodSeconds: Int,
     val digits: Int,
-    val algorithm: String
+    val algorithm: String,
+    // ISSUE-P3-49：HOTP 标识与当前（出码所用）计数器；isHotp=false 时 counter 无意义
+    val isHotp: Boolean = false,
+    val counter: Long = 0
 )
 
 /**

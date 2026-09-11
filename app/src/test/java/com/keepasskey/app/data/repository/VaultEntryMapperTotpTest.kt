@@ -66,6 +66,19 @@ class VaultEntryMapperTotpTest {
     }
 
     @Test
+    fun `HOTP 按计数器出码且不随时间改变`() {
+        // ISSUE-P3-49：RFC 4226 附录 D 官方测试向量
+        // （secret = "12345678901234567890"，其 Base32 编码即 RFC_SECRET）
+        val counter0 = ParsedTotpConfig(secret = secretBytes(RFC_SECRET), isHotp = true, counter = 0)
+        assertEquals("755224", mapper.computeTotpCode(counter0))
+        counter0.secret.fill(0)
+
+        val counter1 = ParsedTotpConfig(secret = secretBytes(RFC_SECRET), isHotp = true, counter = 1)
+        assertEquals("287082", mapper.computeTotpCode(counter1))
+        counter1.secret.fill(0)
+    }
+
+    @Test
     fun `parseTotpConfig 走字节语义且不擦除库内受保护字段`() {
         val otpProtected = ProtectedString("JBSWY3DPEHPK3PXP", isProtected = true)
         val entry = KdbxEntry(fields = mapOf(KdbxConstants.Fields.OTP to otpProtected))

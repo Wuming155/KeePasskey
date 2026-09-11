@@ -14,7 +14,11 @@ class ParsedTotpConfig(
     val digits: Int = 6,
     val algorithm: String = "SHA1",
     val issuer: String? = null,
-    val account: String? = null
+    val account: String? = null,
+    // ISSUE-P3-49：HOTP（RFC 4226）支持——`otpauth://hotp/...` 类型段与 `counter` 参数。
+    // isHotp=false 时 [counter] 无意义（恒 0）。
+    val isHotp: Boolean = false,
+    val counter: Long = 0
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
@@ -24,7 +28,9 @@ class ParsedTotpConfig(
             digits == other.digits &&
             algorithm == other.algorithm &&
             issuer == other.issuer &&
-            account == other.account
+            account == other.account &&
+            isHotp == other.isHotp &&
+            counter == other.counter
     }
 
     override fun hashCode(): Int {
@@ -34,13 +40,16 @@ class ParsedTotpConfig(
         result = 31 * result + algorithm.hashCode()
         result = 31 * result + (issuer?.hashCode() ?: 0)
         result = 31 * result + (account?.hashCode() ?: 0)
+        result = 31 * result + isHotp.hashCode()
+        result = 31 * result + counter.hashCode()
         return result
     }
 
     override fun toString(): String {
         // 绝不输出种子内容，仅呈现长度（与 ProtectedString.toString 一致的安全约定）
         return "ParsedTotpConfig(secretLen=" + secret.size + ", period=" + period + ", digits=" + digits +
-            ", algorithm=" + algorithm + ", issuer=" + issuer + ", account=" + account + ")"
+            ", algorithm=" + algorithm + ", issuer=" + issuer + ", account=" + account +
+            ", isHotp=" + isHotp + ", counter=" + counter + ")"
     }
 }
 
@@ -63,6 +72,9 @@ object TotpKeyUriParser {
     private const val KEY_DIGITS = "digits"
     private const val KEY_ALGORITHM = "algorithm"
     private const val KEY_ISSUER = "issuer"
+    // ISSUE-P3-49：HOTP 计数器参数
+    private const val KEY_COUNTER = "counter"
+    private const val TYPE_HOTP = "hotp"
 
     private const val ASCII_CASE_OFFSET = 32
 
@@ -127,6 +139,10 @@ object TotpKeyUriParser {
     private fun parseOtpAuthUri(uri: ByteArray): ParsedTotpConfig? {
         // 形如 otpauth://<type>/<label>?<query>
         val slash = indexOfByte(uri, BYTE_SLASH, OTPAUTH_PREFIX.size)
+        // ISSUE-P3-49：类型段（totp / hotp）
+        val typeEnd = if (slash >= 0) slash else uri.size
+        val type = String(uri, OTPAUTH_PREFIX.size, typeEnd - OTPAUTH_PREFIX.size, StandardCharsets.US_ASCII)
+        val isHotp = type.equals(TYPE_HOTP, ignoreCase = true)
         val restStart = if (slash >= 0) slash + 1 else uri.size
         val question = indexOfByte(uri, BYTE_QUESTION, restStart)
         val labelEnd = if (question >= 0) question else uri.size
@@ -138,6 +154,7 @@ object TotpKeyUriParser {
         var digits = DEFAULT_DIGITS
         var algorithm = DEFAULT_ALGORITHM
         var issuerParam: String? = null
+        var counter = 0L
 
         try {
             var index = 0
@@ -164,6 +181,9 @@ object TotpKeyUriParser {
                             )
                         key.equals(KEY_ISSUER, ignoreCase = true) ->
                             issuerParam = String(query, valueStart, valueLength, StandardCharsets.UTF_8)
+                        key.equals(KEY_COUNTER, ignoreCase = true) ->
+                            counter = String(query, valueStart, valueLength, StandardCharsets.US_ASCII)
+                                .toLongOrNull()?.coerceAtLeast(0L) ?: 0L
                     }
                 }
                 if (nextAmp >= query.size) break
@@ -184,7 +204,9 @@ object TotpKeyUriParser {
                 digits = if (digits in 6..8) digits else DEFAULT_DIGITS,
                 algorithm = algorithm,
                 issuer = issuer.ifBlank { null },
-                account = account.ifBlank { null }
+                account = account.ifBlank { null },
+                isHotp = isHotp,
+                counter = if (isHotp) counter else 0L
             )
         } finally {
             query.fill(0)

@@ -90,8 +90,12 @@ class EntryEditViewModel @Inject constructor(
         _uiState.update { it.copy(isReadOnly = vaultRepository.isSessionReadOnly()) }
         val entryId: String? = savedStateHandle["entryId"]
         val groupId: String? = savedStateHandle["groupId"]
+        val templateId: String? = savedStateHandle["templateId"]
         if (entryId != null) {
             loadEntry(entryId)
+        } else if (templateId != null) {
+            // ISSUE-P3-51：从模板新建——预填字段但保持 entryId 为空（保存即新建）
+            loadTemplate(templateId, groupId)
         } else if (groupId != null) {
             _uiState.update { it.copy(groupId = groupId) }
         }
@@ -148,6 +152,17 @@ class EntryEditViewModel @Inject constructor(
                 _loadedProtectedFields.value = loadedProtected
                 _uiState.update { applyLoadedEntry(it, entry, password?.size ?: 0) }
             }
+        }
+    }
+
+    /**
+     * ISSUE-P3-51：以库内模板条目预填**新建**表单（不复制机密与大对象，见 [applyTemplateEntry]）。
+     * 模板不可用（被删除）时保持空白新建表单，不报错。
+     */
+    private fun loadTemplate(templateId: String, targetGroupId: String?) {
+        viewModelScope.launch {
+            val template = vaultRepository.getEntry(templateId).firstOrNull() ?: return@launch
+            _uiState.update { applyTemplateEntry(it, template, targetGroupId) }
         }
     }
 

@@ -4,6 +4,7 @@ import com.keepasskey.app.R
 import com.keepasskey.app.ui.model.EntryDecorations
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.model.UiVaultEntry
+import com.keepasskey.app.ui.model.VaultGroup
 
 /**
  * 凭据详情页面 UI 状态。
@@ -57,5 +58,7 @@ data class EntryDetailUiState(
     // ISSUE-P3-02：条目展示装饰——自定义图标投影（已解码位图/缺图占位）与
     // Notes/URL 字段引用展开文案（仅公开字段，受保护字段恒为掩码）。
     // 图标解码与引用解析均在状态层完成，Composable 只做纯绘制。
-    val decorations: EntryDecorations = EntryDecorations.EMPTY
+    val decorations: EntryDecorations = EntryDecorations.EMPTY,
+    // ISSUE-P3-51：单条「移动到分组」的目标候选（全部非回收站分组由对话框统一过滤）
+    val allGroups: List<VaultGroup> = emptyList()
 )

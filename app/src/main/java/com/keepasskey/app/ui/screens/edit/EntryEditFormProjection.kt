@@ -43,6 +43,38 @@ internal fun applyLoadedEntry(
     isDirty = false
 )
 
+/**
+ * ISSUE-P3-51：以库内模板条目预填**新建**表单。
+ *
+ * 与 [applyLoadedEntry] 的关键差异：**保持 [EntryEditUiState.entryId] 为空**——
+ * 保存即新建一条新条目，而非覆盖模板本身。
+ *
+ * 仅复制结构性字段：标题 / 用户名 / URL / 备注 / 图标（标准与自定义）/ 标签 /
+ * AutoType 序列 / Override URL / 自定义字段（键与保护标记，受保护值仍为空串）。
+ * **不复制**密码、TOTP、附件与历史——模板用于字段骨架，不携带任何机密或大对象。
+ * 落点分组取路由带入的 [targetGroupId]，缺省沿用模板所属分组。
+ */
+internal fun applyTemplateEntry(
+    state: EntryEditUiState,
+    template: UiVaultEntry,
+    targetGroupId: String?
+): EntryEditUiState = state.copy(
+    entryId = null,
+    groupId = targetGroupId ?: template.groupId,
+    iconName = template.iconName,
+    customIconId = template.customIconId,
+    title = template.title,
+    username = template.username,
+    url = template.url,
+    notes = template.notes,
+    isPasskey = false,
+    customFields = template.customFields,
+    tagsInput = template.tags.joinToString(", "),
+    autoTypeSequence = template.autoTypeSequence,
+    overrideUrl = template.overrideUrl.orEmpty(),
+    isDirty = false
+)
+
 /** 在自定义字段列表中就地替换指定 id 的键名 / 值 / 保护标记（未命中则原样返回）。 */
 internal fun withUpdatedCustomField(
     fields: List<UiCustomField>,

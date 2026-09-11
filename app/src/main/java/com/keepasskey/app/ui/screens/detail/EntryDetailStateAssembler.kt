@@ -199,6 +199,10 @@ internal class EntryDetailStateAssembler(
             .combine(decorationsFlow(inputs.entryId)) { state, decorations ->
                 state.copy(decorations = decorations)
             }
+            // ISSUE-P3-51：单条「移动到分组」的目标候选叠加（回收站分组由对话框统一过滤）
+            .combine(vaultRepository.getGroups()) { state, groups ->
+                state.copy(allGroups = groups)
+            }
     }
 
     /**

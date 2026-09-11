@@ -129,6 +129,7 @@ internal class VaultEntryMapper(private val strings: StringsProvider) {
             totpPeriod = totpPeriod,
             totpDigits = totpDigits,
             totpAlgorithm = totpAlgorithm,
+            isHotp = parsedTotp?.isHotp == true,
             category = if (isCardEntry) EntryCategory.CARD else EntryCategory.LOGIN,
             isFavorite = entry.customData[RealVaultRepository.FAVORITE_CUSTOM_DATA_KEY] == "true",
             notes = entry.notes,
@@ -187,12 +188,23 @@ internal class VaultEntryMapper(private val strings: StringsProvider) {
                 "SHA512" -> OtpEngine.HashAlgorithm.SHA512
                 else -> OtpEngine.HashAlgorithm.SHA1
             }
-            OtpEngine.calculateTotp(
-                secretKey = secretBytes,
-                periodSeconds = config.period,
-                digits = config.digits,
-                algorithm = algo
-            )
+            // ISSUE-P3-49：HOTP 按持久化计数器出码（本方法**不推进**计数器；
+            // 推进只在用户显式取码时经仓库写回，见 RealVaultRepository.advanceEntryHotpCounter）
+            if (config.isHotp) {
+                OtpEngine.calculateHotp(
+                    secretKey = secretBytes,
+                    counter = config.counter,
+                    digits = config.digits,
+                    algorithm = algo
+                )
+            } else {
+                OtpEngine.calculateTotp(
+                    secretKey = secretBytes,
+                    periodSeconds = config.period,
+                    digits = config.digits,
+                    algorithm = algo
+                )
+            }
         } catch (_: Exception) {
             null
         } finally {

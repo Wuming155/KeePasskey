@@ -123,5 +123,8 @@ data class VaultListUiState(
     val childEntrySectionVisible: Boolean = false,
     // ISSUE-P3-02：条目展示装饰（自定义图标投影 + Notes/URL 字段引用展开文案）。
     // 图标解码与引用解析均在状态层完成，Composable 只做纯绘制（禁止在 UI 内做 IO/解码）。
-    val decorations: EntryDecorations = EntryDecorations.EMPTY
+    val decorations: EntryDecorations = EntryDecorations.EMPTY,
+    // ISSUE-P3-51：「从模板新建」选择器的候选模板条目（库内「模板」分组内全部条目，按库内顺序）。
+    // 模板为空（未安装模板库）时为空表，创建对话框不呈现该入口。
+    val templateEntries: List<UiVaultEntry> = emptyList()
 )

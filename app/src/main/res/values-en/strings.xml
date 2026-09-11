@@ -60,6 +60,7 @@
     <string name="cd_password_generator">Password generator</string>
     <string name="cd_scan_qr">Scan QR</string>
     <string name="cd_regenerate">Regenerate</string>
+    <string name="cd_more_actions">More actions</string>
 
     <!-- Unlock Screen -->
     <string name="unlock_title">KeePasskey</string>
@@ -152,6 +153,18 @@
     <string name="detail_history_rollback_failed">History snapshot is no longer available (possibly pruned); rollback failed</string>
     <string name="detail_duplicate_success">Entry duplicate created</string>
     <string name="detail_notes_section">Notes &amp; Metadata</string>
+    <!-- ISSUE-P3-48: single-entry delete from the detail screen (moves to recycle bin; purges if already inside) -->
+    <string name="detail_delete_entry">Move to Recycle Bin</string>
+    <string name="detail_delete_entry_title">Move to Recycle Bin?</string>
+    <string name="detail_delete_entry_message">This entry will be moved to the recycle bin and can be restored later; if it is already in the recycle bin it will be permanently deleted.</string>
+    <!-- ISSUE-P3-51: single-entry "move to folder" from the detail screen -->
+    <string name="detail_move_to_group">Move to folder</string>
+    <string name="detail_move_dialog_title">Move to target folder</string>
+    <string name="detail_move_success">Entry moved to the target folder</string>
+    <!-- ISSUE-P3-49: HOTP code generation (advance counter and copy, KeePassXC semantics) -->
+    <string name="detail_hotp_advance">Next code</string>
+    <string name="detail_hotp_copied">Code generated and copied: %1$s</string>
+    <string name="cd_hotp_advance">Generate next HOTP code</string>
 
     <!-- Entry Edit Screen -->
     <string name="edit_title_new">New Entry</string>
@@ -237,6 +250,10 @@
     <string name="vault_batch_selected_count">%1$d selected</string>
     <string name="vault_new_entry_desc">Save accounts, passwords, URLs and passkeys</string>
     <string name="vault_new_folder_desc">Create category folders to organize entries</string>
+    <!-- ISSUE-P3-51: new entry from a template (templates live in the vault's "模板" group) -->
+    <string name="vault_new_from_template">New from template</string>
+    <string name="vault_new_from_template_desc">Prefill fields from a template</string>
+    <string name="vault_template_picker_title">Choose a template</string>
     <string name="vault_batch_move_title">Move selected to target folder</string>
     <string name="vault_move_to_root">Move to root</string>
     <string name="vault_create_location_with">Location: %1$s</string>
@@ -1080,6 +1097,7 @@
     <!-- %1$s = 失败原因 -->
     <string name="repo_import_failed">Failed to import the database: %1$s</string>
     <string name="repo_not_unlocked_state">The database is not currently unlocked</string>
+    <string name="repo_hotp_not_applicable">This entry is not configured with HOTP</string>
     <string name="repo_revision_summary">Revision history</string>
     <string name="repo_no_active_db_for_export">No active database (locked or not open)</string>
     <!-- %1$s = 失败原因 -->

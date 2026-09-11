@@ -13,11 +13,12 @@ sealed class Screen(val route: String) {
     data object EntryDetail : Screen("entry_detail/{entryId}") {
         fun createRoute(entryId: String): String = "entry_detail/$entryId"
     }
-    data object EntryEdit : Screen("entry_edit?entryId={entryId}&groupId={groupId}") {
-        fun createRoute(entryId: String? = null, groupId: String? = null): String {
+    data object EntryEdit : Screen("entry_edit?entryId={entryId}&groupId={groupId}&templateId={templateId}") {
+        fun createRoute(entryId: String? = null, groupId: String? = null, templateId: String? = null): String {
             val params = mutableListOf<String>()
             if (entryId != null) params.add("entryId=$entryId")
             if (groupId != null) params.add("groupId=$groupId")
+            if (templateId != null) params.add("templateId=$templateId")
             return if (params.isNotEmpty()) "entry_edit?${params.joinToString("&")}" else "entry_edit"
         }
     }

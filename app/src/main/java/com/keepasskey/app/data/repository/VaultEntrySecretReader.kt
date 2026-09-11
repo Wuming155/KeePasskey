@@ -131,7 +131,9 @@ internal class VaultEntrySecretReader(
                 code = code,
                 periodSeconds = config.period,
                 digits = config.digits,
-                algorithm = config.algorithm
+                algorithm = config.algorithm,
+                isHotp = config.isHotp,
+                counter = config.counter
             )
         } finally {
             // ISSUE-P2-12：解析配置持有的 Base32 种子字节用毕即擦（成功/失败路径一致）

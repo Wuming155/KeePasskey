@@ -196,6 +196,40 @@ internal class VaultEntryWriteCoordinator(
     }
 
     /**
+     * ISSUE-P3-49：仅改写条目 `otp` 字段（HOTP 计数器推进用），**不产生历史修订**。
+     *
+     * 计数器推进属「动态口令取用」而非用户对条目的内容修订；若走 [saveEntryInternal]
+     * 会为每次取码追加一条历史快照（无意义且污染历史）。本入口与 [setEntryFavorite]
+     * 同一语义：直接改内存树并落盘。
+     *
+     * [otpChars] 为新的 OTP 配置原文（`otpauth://` URI 或 Base32 种子），**借用语义**——
+     * 本方法用毕不清零，调用方负责。
+     */
+    suspend fun updateEntryOtpConfig(entryId: String, otpChars: CharArray): KdbxResult<Unit> {
+        val uuid = parseKdbxUuidOrNull(entryId)
+            ?: return KdbxResult.Failure(
+                IllegalArgumentException(strings.get(R.string.repo_invalid_entry_id)),
+                strings.get(R.string.repo_entry_not_found)
+            )
+        val db = databaseSession.databaseFlow.first()
+            ?: return KdbxResult.Failure(
+                IllegalStateException(strings.get(R.string.repo_db_locked)),
+                strings.get(R.string.repo_db_locked)
+            )
+        val entry = db.rootGroup.allEntries().firstOrNull { it.id == uuid }
+            ?: return KdbxResult.Failure(
+                IllegalArgumentException(strings.get(R.string.repo_entry_not_found)),
+                strings.get(R.string.repo_entry_not_found)
+            )
+        val updated = entry.copy(
+            fields = entry.fields + (KdbxConstants.Fields.OTP to ProtectedString(otpChars, isProtected = false)),
+            times = entry.times.copy(lastModificationTime = Instant.now())
+        )
+        databaseSession.saveEntry(updated)
+        return persistSession()
+    }
+
+    /**
      * 自动填充凭据保存（upsert）：命中同域/同包条目则更新，否则新建。
      *
      * 双通道防重（2026-09 共存审查）：Autofill SaveInfo 与 Credential Manager

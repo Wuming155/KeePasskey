@@ -40,6 +40,7 @@ import com.keepasskey.app.ui.model.UiAttachment
 import com.keepasskey.app.ui.model.UiEntryRevision
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.model.resolveText
+import com.keepasskey.app.ui.screens.vault.VaultBatchMoveDialog
 import com.keepasskey.app.ui.theme.CapsuleShape
 
 /**
@@ -63,6 +64,13 @@ fun EntryDetailScreen(
     }
 
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+
+    // ISSUE-P3-48：删除成功后返回列表——条目已移入回收站（或已在站内被彻底删除），
+    // 详情页不再有对应实体，停留会呈现「条目不存在」，故一次性回退导航。
+    val entryDeleted by viewModel.entryDeleted.collectAsStateWithLifecycle()
+    LaunchedEffect(entryDeleted) {
+        if (entryDeleted) onBackClick()
+    }
 
     // ISSUE-P3-17：进入详情页时刷新进阶显示偏好快照（遮掩默认值 / 所属分组开关）
     LaunchedEffect(Unit) { viewModel.onScreenEntered() }
@@ -104,9 +112,15 @@ fun EntryDetailScreen(
         onToggleAutofillBlock = viewModel::toggleAutofillBlockForApp,
         // ISSUE-P3-02：自定义图标删除（经确认弹窗后调用，状态层负责清理 Meta 与回退引用）
         onDeleteCustomIcon = viewModel::deleteCustomIcon,
+        // ISSUE-P3-48：单条删除（经确认弹窗后调用，语义为移入回收站 / 站内彻底删除）
+        onDeleteEntry = viewModel::deleteEntry,
+        // ISSUE-P3-51：单条移动到分组（null = 根目录）
+        onMoveEntry = viewModel::moveEntryToGroup,
         onTogglePasswordVisibility = viewModel::togglePasswordVisibility,
         // ISSUE-P3-17：TOTP 验证码显式展开/收起（默认态来自 maskTotpDefault）
         onToggleTotpVisibility = viewModel::toggleTotpVisibility,
+        // ISSUE-P3-49：HOTP 取码（推进计数器并复制）
+        onAdvanceHotp = viewModel::advanceHotp,
         onToggleCustomFieldVisibility = viewModel::toggleCustomFieldVisibility,
         onCopyCustomField = viewModel::copyCustomField,
         onExportAttachment = { att ->
@@ -183,9 +197,15 @@ fun EntryDetailContent(
     onToggleAutofillBlock: () -> Unit = {},
     // ISSUE-P3-02：自定义图标删除（确认弹窗确认后上行；ViewModel 负责库级清理与引用回退）
     onDeleteCustomIcon: () -> Unit = {},
+    // ISSUE-P3-48：单条删除（确认弹窗确认后上行；语义为移入回收站 / 站内彻底删除）
+    onDeleteEntry: () -> Unit = {},
+    // ISSUE-P3-51：单条移动到分组（目标分组 id，null = 根目录）
+    onMoveEntry: (String?) -> Unit = {},
     onTogglePasswordVisibility: () -> Unit,
     // ISSUE-P3-17：TOTP 验证码显式展开/收起（默认态来自 maskTotpDefault）
     onToggleTotpVisibility: () -> Unit = {},
+    // ISSUE-P3-49：HOTP 取码（推进计数器并复制本次所出之码）
+    onAdvanceHotp: () -> Unit = {},
     onToggleCustomFieldVisibility: (String) -> Unit,
     onCopyCustomField: (String, String) -> Unit = { _, _ -> },
     onExportAttachment: (UiAttachment) -> Unit,
@@ -203,6 +223,10 @@ fun EntryDetailContent(
     var attachmentToPreview by remember { mutableStateOf<UiAttachment?>(null) }
     // ISSUE-P3-02：自定义图标删除二次确认（库级共享资源，防误删）
     var showDeleteIconConfirm by remember { mutableStateOf(false) }
+    // ISSUE-P3-48：单条删除二次确认（移入回收站，防误删）
+    var showDeleteEntryConfirm by remember { mutableStateOf(false) }
+    // ISSUE-P3-51：单条移动到分组的分组选择器
+    var showMoveDialog by remember { mutableStateOf(false) }
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -216,6 +240,8 @@ fun EntryDetailContent(
                 onDuplicateEntry = onDuplicateEntry,
                 onToggleAutofillBlock = onToggleAutofillBlock,
                 onEditClick = onEditClick,
+                onRequestMoveEntry = { showMoveDialog = true },
+                onRequestDeleteEntry = { showDeleteEntryConfirm = true },
                 onRequestDeleteCustomIcon = { showDeleteIconConfirm = true }
             )
         }
@@ -272,6 +298,7 @@ fun EntryDetailContent(
                         uiState = uiState,
                         entry = entry,
                         onToggleVisibility = onToggleTotpVisibility,
+                        onAdvanceHotp = onAdvanceHotp,
                         onShowMessage = onShowMessage
                     )
                 }
@@ -334,6 +361,45 @@ fun EntryDetailContent(
                 onDeleteCustomIcon()
             },
             onDismiss = { showDeleteIconConfirm = false }
+        )
+    }
+
+    // ISSUE-P3-48：单条删除确认（确认后才上行；语义为移入回收站 / 站内彻底删除）
+    if (showDeleteEntryConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDeleteEntryConfirm = false },
+            title = { Text(stringResource(R.string.detail_delete_entry_title)) },
+            text = { Text(stringResource(R.string.detail_delete_entry_message)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    showDeleteEntryConfirm = false
+                    onDeleteEntry()
+                }) {
+                    Text(
+                        text = stringResource(R.string.btn_delete),
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteEntryConfirm = false }) {
+                    Text(stringResource(R.string.btn_cancel))
+                }
+            },
+            shape = RoundedCornerShape(18.dp)
+        )
+    }
+
+    // ISSUE-P3-51：单条移动到分组选择器（回收站分组由对话框统一过滤）
+    if (showMoveDialog) {
+        VaultBatchMoveDialog(
+            allGroups = uiState.allGroups,
+            onDismiss = { showMoveDialog = false },
+            onMove = { targetGroupId ->
+                showMoveDialog = false
+                onMoveEntry(targetGroupId)
+            },
+            titleRes = R.string.detail_move_dialog_title
         )
     }
 

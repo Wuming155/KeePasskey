@@ -28,8 +28,10 @@
 | §17 | P3-31 批次 I（超阈值债务 · **本条闭环**） | ISSUE-P3-31 |
 | §18 | CI Fast gate 偶发红根因修复（测试调度器污染） | 测试基础设施 |
 | §19 | dependency-scan CI 侧首跑留痕 + 断言可观测性修复 | ISSUE-P3-24 / P3-32 |
+| §20 | 功能完整性审计批次 A（全文搜索范围 / 详情页单条删除） | ISSUE-P3-47 / P3-48 |
+| §21 | 功能完整性审计批次 B（HOTP 端到端 / 便利入口 / 孤儿实现清理） | ISSUE-P3-49 / P3-50 / P3-51 |
 
-> 各批次验收证据（用例数 / 通过 / 失败 / 跳过）分别见 §2.22、§3.1、§4.1、§5.1、§6.1、§7.1、§8.0、§9.5、§10.1、§11、§12、§13、§14、§15、§16、§17、§18、§19。
+> 各批次验收证据（用例数 / 通过 / 失败 / 跳过）分别见 §2.22、§3.1、§4.1、§5.1、§6.1、§7.1、§8.0、§9.5、§10.1、§11、§12、§13、§14、§15、§16、§17、§18、§19、§20.3、§21.4。
 
 ---
 
@@ -464,5 +466,121 @@
 （提升限额、绕开匿名限流）或增强 NVD 数据缓存（跨运行 cache）。属维护者决策，不由本批次单方面压制。
 
 ---
+
+> **当前残余面（ACTIVE）**：ISSUE-P3-23（arm64 真机 + 真实 `.kdbx` 语料端到端）· P3-24（CI 首跑校准）· P3-32（供应链 CVE 收尾）。
+
+---
+
+## 20. 功能完整性审计批次 A 归档（全文搜索范围扩展 / 详情页单条删除）
+
+**发现方式（2026-09-11）**：以「README 声称功能 → 引擎/仓库 → ViewModel/控制器 → UI 入口」四层逐项做
+**只读**端到端接线审计（全仓 `app` / `core` / `crypto` / `database` / `sync` 五模块 `src/main`），
+发现两处 **README 契约与实现不一致**的真实缺口，同日整改并归档。另见 `ACTIVE_ISSUES.md` §P3
+就地登记同批审计发现、但仍未处理的条目（P3-49 ~ P3-51）。
+
+### 20.1 ISSUE-P3-47：全文搜索范围收窄（对照 README「全文搜索」）
+
+- **整改前**：`VaultListProjection` 的条目过滤仅匹配 `title / username / url`（分组另按名称匹配）；
+  备注 / 标签 / 自定义字段一律不参与，与 README「全功能：… 全文搜索」的声称不符。
+- **整改**：把内联谓词抽出为内部纯函数 `matchesSearchQuery(entry, query)`，命中范围扩展为
+  **标题 / 用户名 / URL / 备注 / 标签 / 自定义字段的键与「非受保护」值**；
+  受保护字段（`isProtected=true`）明文不进投影（`UiCustomField.value` 恒为空串），故**天然不参与命中**，
+  避免经搜索侧信道泄露机密；字段**键**属元数据（如 `TOTP Seed`）仍可命中。
+- **证据**：`app/src/main/java/com/keepasskey/app/ui/screens/vault/VaultListProjection.kt`
+  （新增 `matchesSearchQuery`，过滤调用点改为该函数）；
+  新增单测 `app/src/test/java/com/keepasskey/app/ui/screens/vault/VaultListProjectionSearchTest.kt`（7 例：
+  空查询 / 标题用户名 URL 大小写不敏感 / 备注 / 标签 / 自定义字段键与值 / 受保护值排除但键可命中 / 无命中）。
+
+### 20.2 ISSUE-P3-48：详情页缺单条「移入回收站」入口
+
+- **整改前**：`EntryDetailTopBar` 的溢出菜单**仅在**「条目绑定了自定义图标」时出现，且只含「删除自定义图标」一项；
+  单条条目删除只能通过列表长按进入批量模式再删。
+- **整改**：
+  1. 溢出菜单改为**非只读会话恒呈现**，首项为「移入回收站」；绑定自定义图标时追加「删除自定义图标」项（原逻辑保留）；
+  2. 新增确认弹窗；`EntryDetailViewModel.deleteEntry()` 复用仓库 `deleteEntry` 的**回收站分流语义**
+     （不在回收站内 → 软删移入回收站可还原；已在站内或回收站被禁用 → 物理删除 + 墓碑）；
+     只读会话 / 无条目 id 为 no-op，失败经 `vault_op_failed` 如实上浮（不谎报成功）；
+  3. 成功经一次性 `entryDeleted` 信号回退导航（条目已不在库中，停留会呈现「条目不存在」）；
+  4. 新增中英文案 `cd_more_actions` / `detail_delete_entry` / `detail_delete_entry_title` / `detail_delete_entry_message`。
+- **证据**：`EntryDetailTopBar.kt` / `EntryDetailScreen.kt` / `EntryDetailViewModel.kt` +
+  `res/values/strings.xml`、`res/values-en/strings.xml`。
+
+### 20.3 验收证据（2026-09-11，`--rerun-tasks` 强制真实执行）
+
+`.\gradlew.bat test --rerun-tasks --max-workers=1 --continue` → **BUILD SUCCESSFUL**（114 任务全部 `executed`），
+聚合全部 `build/test-results/**/TEST-*.xml` 得 **1336 例 / 0 失败 / 13 跳过**
+（较批次 I 的 1329 基线净增 7 例，即 20.1 新增用例；两处整改均为**纯增量**，不删改既有断言）。
+
+### 20.4 过程留痕（如实）
+
+- 本批次一次审计子代理误判「`AttachmentManager` 属孤儿实现」——经复核**属实**（`src/main` 无消费方，
+  仅其单测引用），但该判定**只是静态接线结论，不代表该能力构成用户可见缺口**（附件查看/导出另走
+  SAF 直写 + 隔离预览链路），故**未**据此改动代码，仅登记为待办（P3-50）。
+- 审计同时发现若干「README 未列举、但为体验便利」的缺口（单条移动到分组、新建条目套用模板），
+  两者均可经既有流程达成（批量移动 / 克隆模板条目），故**降级为 P3 便利项**登记，本批次不改代码。
+
+---
+
+## 21. 功能完整性审计批次 B 归档（HOTP 端到端 / 便利入口 / 孤儿实现清理）
+
+**范围**：批次 A 审计就地登记于 `ACTIVE_ISSUES.md` 的 **P3-49 ~ P3-51** 三项，同日整改并归档。
+
+### 21.1 ISSUE-P3-49：HOTP（RFC 4226）端到端接线（对照 README「TOTP·HOTP」）
+
+- **整改前**：应用层仅支持 TOTP——`OtpEngine.calculateHotp` 无生产消费方；`TotpKeyUriParser` **丢弃**
+  `otpauth://hotp/` 的类型段与 `counter` 参数（`ParsedTotpConfig` 无对应字段），`VaultEntryMapper` 恒走 `calculateTotp`。
+- **整改**：
+  1. **core**：`ParsedTotpConfig` 增 `isHotp` / `counter`（`equals`/`hashCode`/`toString` 同步）；
+     `TotpKeyUriParser.parseOtpAuthUri` 解析类型段与 `counter`；新增 **`HotpCounterSupport`**
+     （**字符语义**递增计数器：在 `CharArray` 上就地扫描/替换/追加，仅数值子串转 `Long`，
+     种子不物化为 `String`、不做编码转换；非 `otpauth://` / 非纯数字 / 已达 `Long.MAX_VALUE` 一律 fail-closed 返回 null）。
+  2. **app 数据层**：`UiVaultEntry.isHotp`；`VaultEntryMapper.computeTotpCode` 按 `isHotp` 分派 `calculateHotp`
+     （投影/展示路径**不推进**计数器）；`EntryTotpSnapshot` 增 `isHotp` / `counter`；
+     `VaultEntryWriteCoordinator.updateEntryOtpConfig`（仅改写 `otp` 字段，**不产生历史修订**——属口令取用而非内容修订）；
+     `VaultRepository.advanceEntryHotpCounter`（严格顺序：读取配置 → 算当前码 → 计数器 +1 **落库成功** → 才返回该码；
+     非 HOTP / 配置不可读 / 计数器非法一律 fail-closed，绝不交付「未推进」的码）。
+  3. **UI**：详情页 TOTP 卡片对 HOTP 以「取下一个码」动作（推进计数器并复制，对齐 KeePassXC）替代倒计时环与
+     「复制当前码」；本页倒计时节拍**跳过** HOTP（否则取码后 1 秒内会把显示覆盖为「下一码」而与刚交付的码不一致）；
+     验证器页同样以「取下一个码」动作出码、隐藏倒计时环与紧迫着色。
+- **证据**：`core/.../otp/TotpKeyUriParser.kt`、`core/.../otp/HotpCounterSupport.kt`（新增）、
+  `app/.../ui/model/UiModels.kt`、`app/.../data/repository/{VaultEntryMapper,VaultEntryWriteCoordinator,RealVaultRepository,VaultRepository,VaultRepositoryTypes,VaultEntrySecretReader}.kt`、
+  `app/.../ui/screens/detail/{EntryDetailCards,EntryDetailScreen,EntryDetailViewModel,EntryDetailTotpTicker}.kt`、
+  `app/.../ui/screens/authenticator/{AuthenticatorScreen,AuthenticatorViewModel,AuthenticatorUiState}.kt`；
+  新增测试 `core/.../otp/HotpSupportTest.kt`（10 例：类型/计数器解析、TOTP 不受影响、替换/末位/追加/非 ASCII 标签、
+  fail-closed、路径段 `counter=` 不误匹配）+ `VaultEntryMapperTotpTest` 追加 RFC 4226 附录 D 官方测试向量（1 例，counter 0/1 → `755224`/`287082`）。
+
+### 21.2 ISSUE-P3-51：单条「移动到分组」与「从模板新建」入口
+
+- **详情页单条移动**：溢出菜单新增「移动到分组」，复用 `VaultBatchMoveDialog`（新增可覆写 `titleRes`），
+  经单元素 `batchMoveEntries` 落库；只读会话隐藏入口；分组候选经 `EntryDetailStateAssembler` 叠加 `vaultRepository.getGroups()` 下发。
+- **新建条目套用模板**：新建分类对话框在库内已安装「模板」分组时呈现「从模板新建」→
+  `VaultTemplatePickerDialog` 选择模板 → 携带 `templateId` 进入编辑页；`EntryEdit` 路由新增可选 `templateId`；
+  `EntryEditViewModel.loadTemplate` + `applyTemplateEntry` 仅预填**结构性字段**（标题/用户名/URL/备注/图标/标签/
+  AutoType/Override URL/自定义字段键与保护标记），**不复制**密码、TOTP、附件与历史，且**保持 `entryId` 为空**（保存即新建而非覆盖模板）。
+- **证据**：`VaultListProjection.kt`（`templateEntries` 投影）、`VaultListUiState.kt`、`VaultListDialogs.kt`
+  （`VaultTemplatePickerDialog` + 创建对话框第三项）、`VaultListDialogHost.kt`、`VaultListScreen.kt`、
+  `Screen.kt`、`KeePasskeyNavGraph.kt`、`EntryEditFormProjection.kt`、`EntryEditViewModel.kt`；
+  新增测试 `EntryEditTemplateProjectionTest.kt`（4 例：entryId 为空 / 结构性字段复制 / 不复制附件与密码长度 / 落点分组优先级）。
+
+### 21.3 ISSUE-P3-50：`AttachmentManager` 孤儿实现清理
+
+- 经全仓复核（`src/main` 零消费方，仅其单测引用；附件查看/导出另走 `EntryDetailAttachmentExporter` SAF 直写 +
+  隔离预览），按仓库「不保留无消费方实现」纪律**连同单测删除**
+  `core/src/main/java/com/keepasskey/core/attachment/AttachmentManager.kt` 与
+  `core/src/test/java/com/keepasskey/core/attachment/AttachmentManagerTest.kt`（-6 例）。
+
+### 21.4 验收证据（2026-09-11，`--rerun-tasks` 强制真实执行）
+
+`.\gradlew.bat test --rerun-tasks --max-workers=1 --continue` → **BUILD SUCCESSFUL**（114 任务全部 `executed`），
+聚合全部 `build/test-results/**/TEST-*.xml` 得 **1345 例 / 0 失败 / 13 跳过**
+（= 批次 A 基线 1336 + 新增 15 例（HOTP 10 + 模板预填 4 + 映射向量 1）− 删除孤儿单测 6 例）。
+
+### 21.5 未自动化验证项（如实）
+
+- `RealVaultRepository.advanceEntryHotpCounter` 的**落库顺序**（先算码 → 计数器 +1 持久化 → 返回该码）与
+  `updateEntryOtpConfig` 不产生历史修订，属会话/落盘集成路径，本批次以**代码事实 + 设计保证**留痕，
+  未做仪器化断言（需真实 `.kdbx` 会话与设备/宿主 JNI 环境）；core 侧解析与计数器递增已由 `HotpSupportTest` 全覆盖，
+  映射层出码由 RFC 4226 官方向量锁定。
+- HOTP 的真机 UI 交互（详情页 / 验证器页取码）未做 instrumented 验证（无设备），随 ISSUE-P3-23 的设备缺口一并待补。
 
 > **当前残余面（ACTIVE）**：ISSUE-P3-23（arm64 真机 + 真实 `.kdbx` 语料端到端）· P3-24（CI 首跑校准）· P3-32（供应链 CVE 收尾）。

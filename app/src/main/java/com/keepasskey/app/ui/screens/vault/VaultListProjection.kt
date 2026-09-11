@@ -2,6 +2,7 @@ package com.keepasskey.app.ui.screens.vault
 
 import com.keepasskey.app.data.childdb.ChildDatabaseEntryProjection
 import com.keepasskey.app.data.repository.UserSettings
+import com.keepasskey.app.data.repository.VaultTemplateFactory
 import com.keepasskey.app.ui.model.BitmapEntryIcon
 import com.keepasskey.app.ui.model.ChildVaultEntryGroup
 import com.keepasskey.app.ui.model.EntryDecorations
@@ -125,10 +126,7 @@ internal fun buildVaultListUiState(
     }
 
     val filteredEntries = targetEntries.filter { entry ->
-        session.filterParams.query.isBlank() ||
-                entry.title.contains(session.filterParams.query, ignoreCase = true) ||
-                entry.username.contains(session.filterParams.query, ignoreCase = true) ||
-                entry.url.contains(session.filterParams.query, ignoreCase = true)
+        matchesSearchQuery(entry, session.filterParams.query)
     }
 
     // 2. 排序条目
@@ -177,6 +175,17 @@ internal fun buildVaultListUiState(
         session.currentGroupId == null &&
         childEntryGroups.isNotEmpty()
 
+    // 7. ISSUE-P3-51：库内「模板」分组内的条目（供「从模板新建」选择器）。
+    // 未安装模板库（无同名分组）时为空表，创建对话框据此隐藏该入口。
+    val templateGroupIds = allGroups
+        .filter { it.name == VaultTemplateFactory.TEMPLATE_GROUP_NAME }
+        .mapTo(mutableSetOf()) { it.id }
+    val templateEntries = if (templateGroupIds.isEmpty()) {
+        emptyList()
+    } else {
+        allEntries.filter { it.groupId in templateGroupIds }.sortedBy { it.orderIndex }
+    }
+
     return VaultListUiState(
         searchQuery = session.filterParams.query,
         isSearchActive = session.filterParams.isSearchActive,
@@ -210,8 +219,32 @@ internal fun buildVaultListUiState(
         decorations = batchSyncDecorations.decorations,
         childEntryGroups = childEntryGroups,
         mountedChildDatabaseCount = session.childDatabase.mountedCount,
-        childEntrySectionVisible = childEntrySectionVisible
+        childEntrySectionVisible = childEntrySectionVisible,
+        templateEntries = templateEntries
     )
+}
+
+/**
+ * 全文搜索匹配：命中条目任一处非受保护文本即算匹配。
+ *
+ * 覆盖范围（对齐 README「全文搜索」契约）：标题 / 用户名 / URL / 备注 / 标签 /
+ * 自定义字段的键与**非受保护**值。受保护字段（`isProtected=true`）的明文不进投影
+ * （见 [com.keepasskey.app.ui.model.UiCustomField]），故天然不参与命中，
+ * 避免搜索侧信道泄露机密；其字段**键**属元数据（如 `TOTP Seed`）仍可命中。
+ *
+ * 空查询恒为真（未搜索时不过滤）。
+ */
+internal fun matchesSearchQuery(entry: UiVaultEntry, query: String): Boolean {
+    if (query.isBlank()) return true
+    if (entry.title.contains(query, ignoreCase = true)) return true
+    if (entry.username.contains(query, ignoreCase = true)) return true
+    if (entry.url.contains(query, ignoreCase = true)) return true
+    if (entry.notes.contains(query, ignoreCase = true)) return true
+    if (entry.tags.any { it.contains(query, ignoreCase = true) }) return true
+    return entry.customFields.any { field ->
+        field.key.contains(query, ignoreCase = true) ||
+            (!field.isProtected && field.value.contains(query, ignoreCase = true))
+    }
 }
 
 /**

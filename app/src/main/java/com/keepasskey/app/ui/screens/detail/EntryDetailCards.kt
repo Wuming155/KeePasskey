@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Autorenew
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Visibility
@@ -179,6 +180,8 @@ internal fun TotpCard(
     uiState: EntryDetailUiState,
     entry: UiVaultEntry,
     onToggleVisibility: () -> Unit,
+    // ISSUE-P3-49：HOTP 取码（推进计数器并复制本次所出之码）
+    onAdvanceHotp: () -> Unit = {},
     onShowMessage: (UiMessage) -> Unit
 ) {
     BentoCard(
@@ -208,24 +211,38 @@ internal fun TotpCard(
             }
 
             Row(verticalAlignment = Alignment.CenterVertically) {
-                TotpMiniGauge(
-                    remainingSeconds = uiState.totpRemainingSeconds ?: entry.totpRemainingSeconds,
-                    modifier = Modifier.size(34.dp)
-                )
-                Spacer(modifier = Modifier.width(12.dp))
+                if (entry.isHotp) {
+                    // ISSUE-P3-49：HOTP 由持久化计数器决定，无时间倒计时——以「取下一个码」
+                    // 显式推进计数器（对齐 KeePassXC）；不提供「复制当前码」入口，
+                    // 因为复制而不推进会让同一计数器被重复使用
+                    IconButton(onClick = onAdvanceHotp) {
+                        Icon(
+                            imageVector = Icons.Default.Autorenew,
+                            contentDescription = stringResource(R.string.cd_hotp_advance),
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                } else {
+                    TotpMiniGauge(
+                        remainingSeconds = uiState.totpRemainingSeconds ?: entry.totpRemainingSeconds,
+                        modifier = Modifier.size(34.dp)
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    IconButton(onClick = { onShowMessage(UiMessage(R.string.detail_totp_copied)) }) {
+                        Icon(
+                            imageVector = Icons.Default.ContentCopy,
+                            contentDescription = stringResource(R.string.cd_copy_totp),
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
                 IconButton(onClick = onToggleVisibility) {
                     Icon(
                         imageVector = if (uiState.isTotpVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
                         contentDescription = stringResource(R.string.cd_toggle_password_visibility),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-                IconButton(onClick = { onShowMessage(UiMessage(R.string.detail_totp_copied)) }) {
-                    Icon(
-                        imageVector = Icons.Default.ContentCopy,
-                        contentDescription = stringResource(R.string.cd_copy_totp),
-                        tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(20.dp)
                     )
                 }

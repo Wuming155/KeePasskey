@@ -60,6 +60,7 @@
     <string name="cd_password_generator">密码生成器</string>
     <string name="cd_scan_qr">扫码</string>
     <string name="cd_regenerate">重新生成</string>
+    <string name="cd_more_actions">更多操作</string>
 
     <!-- 解锁页面 -->
     <string name="unlock_title">KeePasskey</string>
@@ -157,6 +158,18 @@
     <string name="detail_history_rollback_failed">历史快照已不可用（可能已被清理），无法回滚</string>
     <string name="detail_duplicate_success">已创建条目克隆</string>
     <string name="detail_notes_section">备注与元数据</string>
+    <!-- ISSUE-P3-48：详情页单条删除入口（移入回收站；已在回收站内则为彻底删除） -->
+    <string name="detail_delete_entry">移入回收站</string>
+    <string name="detail_delete_entry_title">移入回收站？</string>
+    <string name="detail_delete_entry_message">该条目将移入回收站，可随时还原；若条目已在回收站中将彻底删除。</string>
+    <!-- ISSUE-P3-51：详情页单条「移动到分组」入口 -->
+    <string name="detail_move_to_group">移动到分组</string>
+    <string name="detail_move_dialog_title">移动至目标文件夹</string>
+    <string name="detail_move_success">条目已移动至目标文件夹</string>
+    <!-- ISSUE-P3-49：HOTP 取码（推进计数器并复制，对齐 KeePassXC 语义） -->
+    <string name="detail_hotp_advance">取下一个码</string>
+    <string name="detail_hotp_copied">已取码并复制：%1$s</string>
+    <string name="cd_hotp_advance">取下一个动态口令</string>
 
     <!-- 凭据编辑页面 -->
     <string name="edit_title_new">新建条目</string>
@@ -241,6 +254,10 @@
     <string name="vault_batch_selected_count">已选中 %1$d 项</string>
     <string name="vault_new_entry_desc">保存账号、密码、网址及通行密钥</string>
     <string name="vault_new_folder_desc">创建分类文件夹，层级化整理密码条目</string>
+    <!-- ISSUE-P3-51：从模板新建条目（模板来自库内「模板」分组） -->
+    <string name="vault_new_from_template">从模板新建</string>
+    <string name="vault_new_from_template_desc">按模板预填字段，快速创建条目</string>
+    <string name="vault_template_picker_title">选择模板</string>
     <string name="vault_batch_move_title">批量移动至目标文件夹</string>
     <string name="vault_move_to_root">移动至根目录</string>
     <string name="vault_create_location_with">位置：%1$s</string>
@@ -957,6 +974,7 @@
     <string name="repo_remove_failed">移除密码库失败: %1$s</string>
     <string name="repo_import_failed">导入数据库失败: %1$s</string>
     <string name="repo_not_unlocked_state">当前数据库未处于已解锁状态</string>
+    <string name="repo_hotp_not_applicable">该条目未配置 HOTP 动态口令</string>
     <string name="repo_revision_summary">历史修订</string>
     <string name="repo_no_active_db_for_export">当前无活动数据库（已锁定或未打开）</string>
     <string name="repo_export_xml_failed">导出 XML 失败: %1$s</string>

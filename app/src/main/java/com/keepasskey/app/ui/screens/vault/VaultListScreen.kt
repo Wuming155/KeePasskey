@@ -37,6 +37,8 @@ fun VaultListScreen(
     onThemeToggle: () -> Unit = {},
     onEntryClick: (String) -> Unit,
     onAddEntryClick: (String?) -> Unit,
+    // ISSUE-P3-51：从模板新建（groupId 为新建落点，templateId 为选中模板）
+    onAddFromTemplateClick: (String?, String) -> Unit = { _, _ -> },
     onLockClick: () -> Unit = {},
     onNavigateToConflictResolver: () -> Unit = {},
     /**
@@ -104,6 +106,7 @@ fun VaultListScreen(
         onCopyPassword = viewModel::copyPassword,
         onCopyUsername = viewModel::copyUsername,
         onAddEntryClick = { onAddEntryClick(uiState.currentGroupId) },
+        onCreateFromTemplate = { templateId -> onAddFromTemplateClick(uiState.currentGroupId, templateId) },
         onCreateGroup = viewModel::createGroup,
         onRenameGroup = viewModel::renameGroup,
         onChangeGroupIcon = viewModel::changeGroupIcon,
@@ -139,6 +142,8 @@ fun VaultListContent(
     onCopyPassword: (UiVaultEntry) -> Unit,
     onCopyUsername: (UiVaultEntry) -> Unit,
     onAddEntryClick: () -> Unit,
+    // ISSUE-P3-51：从模板新建（入参为选中模板 id）
+    onCreateFromTemplate: (String) -> Unit = {},
     onCreateGroup: (name: String, icon: String) -> Unit,
     onRenameGroup: (VaultGroup, String) -> Unit,
     onChangeGroupIcon: (VaultGroup, String) -> Unit,
@@ -341,6 +346,7 @@ fun VaultListContent(
         uiState = uiState,
         onSortOptionSelect = onSortOptionSelect,
         onAddEntryClick = onAddEntryClick,
+        onCreateFromTemplate = onCreateFromTemplate,
         onCreateGroup = onCreateGroup,
         onRenameGroup = onRenameGroup,
         onChangeGroupIcon = onChangeGroupIcon,

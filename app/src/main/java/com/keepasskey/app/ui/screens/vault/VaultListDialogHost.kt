@@ -19,6 +19,8 @@ import com.keepasskey.app.ui.model.VaultGroup
 internal class VaultListDialogController {
     var showSortDialog by mutableStateOf(false)
     var showCreateTypeDialog by mutableStateOf(false)
+    // ISSUE-P3-51：从模板新建的模板选择对话框
+    var showTemplatePickerDialog by mutableStateOf(false)
     var showCreateGroupDialog by mutableStateOf(false)
     var showEmptyRecycleBinDialog by mutableStateOf(false)
     var showBatchMoveDialog by mutableStateOf(false)
@@ -40,6 +42,8 @@ internal fun VaultListDialogHost(
     uiState: VaultListUiState,
     onSortOptionSelect: (VaultSortOption) -> Unit,
     onAddEntryClick: () -> Unit,
+    // ISSUE-P3-51：从模板新建（入参为选中模板的条目 id）
+    onCreateFromTemplate: (String) -> Unit,
     onCreateGroup: (name: String, icon: String) -> Unit,
     onRenameGroup: (VaultGroup, String) -> Unit,
     onChangeGroupIcon: (VaultGroup, String) -> Unit,
@@ -70,6 +74,24 @@ internal fun VaultListDialogHost(
             onCreateFolder = {
                 controller.showCreateTypeDialog = false
                 controller.showCreateGroupDialog = true
+            },
+            // ISSUE-P3-51：库内已安装模板时呈现「从模板新建」并转入模板选择
+            templateCount = uiState.templateEntries.size,
+            onCreateFromTemplate = {
+                controller.showCreateTypeDialog = false
+                controller.showTemplatePickerDialog = true
+            }
+        )
+    }
+
+    // ISSUE-P3-51：模板选择对话框（选中即携带模板 id 进入编辑页）
+    if (controller.showTemplatePickerDialog) {
+        VaultTemplatePickerDialog(
+            templates = uiState.templateEntries,
+            onDismiss = { controller.showTemplatePickerDialog = false },
+            onSelect = { templateId ->
+                controller.showTemplatePickerDialog = false
+                onCreateFromTemplate(templateId)
             }
         )
     }

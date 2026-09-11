@@ -15,7 +15,9 @@ data class TotpCardItem(
     val codeRaw: String?,      // 例如 "582910"
     val remainingSeconds: Int,
     val iconName: String = "key",
-    val url: String = ""
+    val url: String = "",
+    // ISSUE-P3-49：HOTP 条目——无时间倒计时，取码为「推进计数器」显式动作
+    val isHotp: Boolean = false
 )
 
 /**

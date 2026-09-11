@@ -71,6 +71,10 @@ internal fun NavGraphBuilder.keepasskeyNavGraph(
             onAddEntryClick = { groupId ->
                 navController.navigate(Screen.EntryEdit.createRoute(groupId = groupId))
             },
+            // ISSUE-P3-51：从模板新建——携带模板 id 进入编辑页，由状态层预填为**新条目**
+            onAddFromTemplateClick = { groupId, templateId ->
+                navController.navigate(Screen.EntryEdit.createRoute(groupId = groupId, templateId = templateId))
+            },
             onLockClick = {
                 // P3-23：锁定原因仅供 AutoLockManager 内部 debugLog 留痕（非用户可见），保留原样
                 autoLockManager?.triggerLock("用户手动点击锁定")
@@ -141,6 +145,11 @@ internal fun NavGraphBuilder.keepasskeyNavGraph(
                 defaultValue = null
             },
             navArgument("groupId") {
+                type = NavType.StringType
+                nullable = true
+                defaultValue = null
+            },
+            navArgument("templateId") {
                 type = NavType.StringType
                 nullable = true
                 defaultValue = null
