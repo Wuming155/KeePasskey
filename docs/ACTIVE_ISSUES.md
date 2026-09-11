@@ -73,12 +73,13 @@
 
 ---
 
-## P3 低危问题、特性接线与体验优化（5 项）
+## P3 低危问题、特性接线与体验优化（6 项）
 
 > **状态（2026-09-11）**：历史 P3 批次 **ISSUE-P3-01 ~ P3-57 除下列 2 项外部资源依赖型残余外已全部
 > 闭环并归档**，逐条实现细节与验收证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md)（§3 ~ §25）。
 > 2026-09-11 设备侧批次新闭环 P3-59 / P3-60 / P3-61 / P3-62（见 §27.7 / §27.8），
 > 并新登记 **ISSUE-P3-63（升级为确认缺陷）** 与 **ISSUE-P3-65**。
+> 2026-09-12 外部审查报告核实批次新登记 **ISSUE-P3-67**（报告 P1 结论经核实修正为 P3）。
 
 ---
 
@@ -211,3 +212,38 @@
   （覆盖下发前二次确认与 30 秒免重复确认两分支）；② 完成一次 Passkey 创建 + 站点断言端到端；
   ③ TOTP 通知渠道创建与点击行为验证；④ 以上均有设备侧取证（uiautomator dump / dumpsys）。
 - **禁止**：以宿主 JVM 单测覆盖替代设备侧端到端验证；在未实测时宣称「自动填充已验证可用」。
+
+---
+
+### ISSUE-P3-67（新登记）：锁库事件导航守卫捕获过期 `currentRoute`（守卫恒真死代码，解锁页遭重复导航）
+
+- **优先级**：P3（行为目前恰好正确，但依赖巧合而非语义；附带解锁页表单被重复导航重置的轻微体验问题）
+- **来源（2026-09-12 外部审查报告核实）**：报告曾将其列为 P1「自动锁定后可能仍停留在已解锁页面」——
+  经代码路径核实该 P1 结论**不成立**，实际行为相反且依赖巧合，本条按真实后果降级登记。
+- **核实时间点与核实方式（2026-09-12，静态代码路径 + 依赖字节码/源码双重验证）**：
+  1. `KeePasskeyApp.kt:164` 的 `LaunchedEffect(autoLockManager)` 仅以 `autoLockManager` 为 key
+     （`@Singleton` 引用，组合期间恒定，effect 终生只启动一次），闭包捕获的 `currentRoute`
+     （`KeePasskeyApp.kt:124`）不随导航更新——异味属实；
+  2. 但捕获值**不是**报告所称「初始的 Unlock 路由」，而是 `null`：`currentBackStackEntryAsState()`
+     在 navigation-compose 2.10.0 中实现为 `collectAsState(initialValue = null)`（经 Gradle 缓存
+     字节码反汇编确认 `aconst_null`；2.9.0 源码同），且 124 行读取发生在 212 行 `NavHost` 设图之前，
+     返回栈为空，首值确定性为 `null`；
+  3. compose runtime（1.11.4 源码 / 1.12.0 字节码）确认 `remember(key)` 不重跑时新闭包被丢弃，
+     effect 协程终生持有首次组合捕获的 `null`；
+  4. 故锁库事件到达时 `currentRoute != Screen.Unlock.route` ≡ `null != "…"` **恒真** →
+     `navigate(Unlock) { popUpTo(0) }` 总会执行——「锁库后停留已解锁页面」不会发生，导航实际可靠；
+  5. 旁路排查：`RealVaultRepository.lockDatabase()`（不 `tryEmit` 的直接锁库）经全仓 grep
+     **无任何生产调用方**；所有锁库动作（熄屏 / 后台超时 / 返回键 / 手动）均经
+     `AutoLockSessionGuard.triggerLock` 发事件。
+- **真实影响**：
+  ① 守卫 `currentRoute != Screen.Unlock.route` 是恒真死代码，行为靠「捕获值为 null」的巧合兜底，
+     后续任何看似无关的重构（如给 effect 补充会变动的 key、或有人按报告假设「修复」捕获值）都可能
+     翻转行为；
+  ② 已处于解锁页时再收到锁库事件（如熄屏锁定开启时人在解锁页按电源键）会以 `popUpTo(0)` 重复导航，
+     重建解锁页并**清空已输入的主密码**。
+- **整改方向**：以 `rememberUpdatedState(currentRoute)` 供 effect 读取（或将 `currentRoute` 加入
+  effect key），使守卫恢复真实语义——已在解锁页则不重复导航（修复 ②），否则正常导航（保持现状）。
+- **验收标准（待整改）**：① 锁库事件在非解锁路由上必达解锁页（保留 JVM 侧导航契约测试或补齐）；
+  ② 已在解锁页时收到锁库事件不重建页面、表单输入保留；③ 守卫不再是恒真死代码（代码评审可证）。
+- **禁止**：以「删除守卫条件、无条件导航」的方式消除死代码（将固化影响 ②）；在未核实
+  `currentBackStackEntryAsState` 初值语义的情况下直接采信外部报告的 P1 结论。
