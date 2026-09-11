@@ -22,8 +22,9 @@
 | §11 | P3-31 批次 C + P3-43 闭环 | ISSUE-P3-31 / P3-43 |
 | §12 | P3-31 批次 D + P3-46 闭环 | ISSUE-P3-31 / P3-46 |
 | §13 | P3-31 批次 E（超阈值债务） | ISSUE-P3-31 |
+| §14 | P3-31 批次 F（超阈值债务） | ISSUE-P3-31 |
 
-> 各批次验收证据（用例数 / 通过 / 失败 / 跳过）分别见 §2.22、§3.1、§4.1、§5.1、§6.1、§7.1、§8.0、§9.5、§10.1、§11、§12、§13。
+> 各批次验收证据（用例数 / 通过 / 失败 / 跳过）分别见 §2.22、§3.1、§4.1、§5.1、§6.1、§7.1、§8.0、§9.5、§10.1、§11、§12、§13、§14。
 
 ---
 
@@ -306,4 +307,20 @@
 
 ---
 
-> **当前残余面（ACTIVE）**：ISSUE-P3-23（arm64 真机 + 真实 `.kdbx` 语料端到端）· P3-24（CI 首跑校准）· P3-31（超阈值 12 项）· P3-32（供应链 CVE 收尾）。
+## 14. ISSUE-P3-31 批次 F 归档（超阈值债务 · `SettingsScreen` / `UnlockScreen` / `GeneratorScreen`）
+
+**核实**：2026-09-10，逐文件 `(Get-Content …).Count` 复核；门禁 `test --rerun-tasks --max-workers=1` → **1329 例 / 0 失败 / 13 跳过**（app 750 / core 58 / crypto 107 / database 235 / sync 179；纯结构性拆分，用例数与批次 E 持平）；`lint` 5 模块 **0 error**。残余真逻辑超阈值清单 12 → **9 项**。
+
+| 文件 | 前 → 后 | 拆出单元 |
+|---|---|---|
+| `app/.../ui/screens/settings/SettingsScreen.kt` | 569 → 306 | `SettingsComponents`（分组卡 / 分隔线 / 设置行 / 分区标题）/ `MasterKeyChangeDialog`（改主密码对话框，含擦除语义） |
+| `app/.../ui/screens/unlock/UnlockScreen.kt` | 562 → 275 | `UnlockContentSections`（`UnlockVaultLogo` / `UnlockEmptyVaultContent` / `UnlockQuickUnlockCard` / `UnlockStandardUnlockContent`） |
+| `app/.../ui/screens/generator/GeneratorScreen.kt` | 550 → 177 | `GeneratorDisplayCard` / `GeneratorModeOptions`（三模式参数 + `OptionSwitchRow`）/ `HistoryPasswordRow` |
+
+- **公开 API 零丢失零新增**：`SettingsScreen` / `UnlockScreen`（含 `UnlockContent`）/ `GeneratorScreen` 的 `@Composable` 签名、参数顺序与默认值、KDoc 逐字未变；被抽组件均由 `private` 改为同包 `internal`，不进入公开面。UI 文案、布局参数、状态读取、事件回调、条件分支与导航意图逐字保留。
+- **敏感数据相关逻辑逐字保留**：改主密码对话框的 `pwdChars.fill('0')` / `wipeDialogPasswords` 与「确认/取消/点外部→擦除」语义；解锁页 `onPasswordChange: (CharArray) -> Unit` 链路、`SecurePasswordField` 全部参数（含 `wipeToken`）、密钥文件「关闭即擦除字节」语义；生成器 `currentPassword.readString()`、`copyGeneratedPassword` 剪贴板路径与 `P0 整改`/`ISSUE-P2-12`/`ISSUE-P2-16` 注释。均未新增 `String` 落地敏感值或日志。
+- **过程事实（如实留痕）**：本批三个子代理均报告**本环境 `GetDiagnostics` 诊断通道不可靠**（对故意注入的未解析符号亦返回空诊断，探针文件已删除）；故一律以主流程 `gradlew test`/`lint` 实跑为唯一验收依据，不采信静态诊断结论。子代理改用「逐符号人工核对（跨文件符号同包可见、import 全部被使用、无同名重定义）」作为自检补充。
+
+---
+
+> **当前残余面（ACTIVE）**：ISSUE-P3-23（arm64 真机 + 真实 `.kdbx` 语料端到端）· P3-24（CI 首跑校准）· P3-31（超阈值 9 项）· P3-32（供应链 CVE 收尾）。
