@@ -31,8 +31,9 @@
 | §20 | 功能完整性审计批次 A（全文搜索范围 / 详情页单条删除） | ISSUE-P3-47 / P3-48 |
 | §21 | 功能完整性审计批次 B（HOTP 端到端 / 便利入口 / 孤儿实现清理） | ISSUE-P3-49 / P3-50 / P3-51 |
 | §22 | 存量问题由易到难整改闭环批次（P1-11 / P2-17 / P2-18 / P3-52~P3-56） | ISSUE-P1-11 / P2-17 / P2-18 / P3-52 ~ P3-56 |
+| §23 | CI 侧真实跑通归档（dependency-scan 首绿 + CodeQL 新发现留痕） | ISSUE-P3-24 / P3-32（闭环）/ P3-57（新登记） |
 
-> 各批次验收证据（用例数 / 通过 / 失败 / 跳过）分别见 §2.22、§3.1、§4.1、§5.1、§6.1、§7.1、§8.0、§9.5、§10.1、§11、§12、§13、§14、§15、§16、§17、§18、§19、§20.3、§21.4、§22.9。
+> 各批次验收证据（用例数 / 通过 / 失败 / 跳过）分别见 §2.22、§3.1、§4.1、§5.1、§6.1、§7.1、§8.0、§9.5、§10.1、§11、§12、§13、§14、§15、§16、§17、§18、§19、§20.3、§21.4、§22.9、§23.1。
 
 ---
 
@@ -202,6 +203,9 @@
 **验收**：CI 运行 `34470024328` 三 job 全绿、exit 0；**1200 例 / 0 失败 / 13 跳过**；5 模块 lint 0 error。
 - **lint 三族**：`MissingTranslation`×144（补英文）、`RestrictedApi`×2（`SlicedContent` 必要压制）、`NewApi`×1（lint API 库误报，改为下标拷贝）。
 - **CodeQL 10 条**：3 条 py 改结构性隔离（非 `str.replace` 净化）；7 条 rust 按 `used in tests` 处置。
+  > **2026-09-11 更正（滞后前提）**：上句「开放告警归零」在写下时属实；但同日 `13:18:38Z` 的 GitHub 侧
+  > 默认设置分析又新产出 **77 条** `rust/hard-coded-cryptographic-value`（critical，全部落在 Rust 单测模块内），
+  > 故「CodeQL 开放告警 = 0」**已不再成立**，另立 **ISSUE-P3-57** 跟踪，见 §23.4。
 - **供应链**：实证 `failBuildOnCVSS=7.0` 在 `dependencyCheckAggregate` 不生效，补 `.github/check_dependency_cvss.py` 硬断言（≥7.0 即失败、缺报告亦失败）。
 - **PR #5（Actions 大版本升级）**：`a9b838f` 合并（checkout v7 / setup-java v6 / setup-gradle v6.3 / upload-artifact v7 / setup-android v4 / upload-sarif v4）。
 - **供应链达阈处置（ISSUE-P3-32 主要面）**：`androidx.sqlite` 登记误报、`CVE-2026-53914` Kotlin 2.4.10→2.4.20 真修复、jline/protobuf 构建链豁免；处置后 188→7 实例、CVSS≥7.0 138→0。残余 7 条 MEDIUM 如实保留。
@@ -468,7 +472,8 @@
 
 ---
 
-> **当前残余面（ACTIVE）**：ISSUE-P3-23（arm64 真机 + 真实 `.kdbx` 语料端到端）· P3-24（CI 首跑校准）· P3-32（供应链 CVE 收尾）。
+> **当前残余面（ACTIVE）**：ISSUE-P3-23（arm64 真机 + 真实 `.kdbx` 语料端到端）· **ISSUE-P3-57**（CodeQL Rust 单测误报）。
+> ~~P3-24（CI 首跑校准）· P3-32（供应链 CVE 收尾）~~ → **已于 2026-09-11 闭环，见 §23**。
 
 ---
 
@@ -708,5 +713,64 @@
 4. P1-11 缩小受信浏览器集属**有意的安全取舍**（仅 Chrome + Firefox release/beta 已取证），其余浏览器域填充便利性下降，
    已在 §22.7 与代码注释留痕，非缺陷。
 
-> **当前残余面（ACTIVE，未归档）**：ISSUE-P3-23（arm64 真机 + 真实 `.kdbx` 语料）· P3-24（CI 首跑校准）·
-> P3-32（供应链 CVE 收尾）——2026-09-11 复核阻塞前提不变（无 arm64 镜像 / 无设备 / `generate_corpus.py --check` 退出码 3 / NVD 外部依赖）。
+> **当前残余面（ACTIVE，未归档）**：ISSUE-P3-23（arm64 真机 + 真实 `.kdbx` 语料）·
+> **ISSUE-P3-57**（CodeQL 默认设置对 Rust 单测内测试向量的 critical 误报）——2026-09-11 复核：
+> P3-23 阻塞前提不变（无 arm64 镜像 / 无设备 / `generate_corpus.py --check` 退出码 3）；
+> **ISSUE-P3-24 与 ISSUE-P3-32 已于同日闭环归档，见 §23**。
+
+---
+
+## 23. CI 侧真实跑通归档（dependency-scan 首绿 · ISSUE-P3-24 / P3-32 闭环）
+
+**核实时间点与核实方式（2026-09-11）**：以 `gh workflow run dependency-scan.yml --ref main` 手动触发运行
+**`34575788016`**（`workflow_dispatch`，`headSha=dfda33d`），`gh run watch --interval 60` 全程盯守，
+`gh run view --log` 取原始日志（`gh` 日志缓存目录以 `LOCALAPPDATA` 重定向到工作区，绕开沙箱对
+`%LOCALAPPDATA%` 的写限制）；Code Scanning 侧以 `gh api "/repos/Wuming155/KeePasskey/code-scanning/alerts?state=open"
+--paginate` 全量统计并分组。
+
+### 23.1 运行事实（原始证据）
+
+| 项 | 实测值 |
+|---|---|
+| 运行 / 结论 / 耗时 | `34575788016` · **success** · 15m40s |
+| runner | `ubuntu-24.04`，image release `20260907.300`（一并回答 P3-24 风险点 R1）|
+| aggregate | 六个工程（root/app/core/crypto/database/sync）全部执行，`BUILD SUCCESSFUL in 15m 4s`；**未再出现 `NvdApiException` / 503** |
+| 硬断言 | `已扫描报告 1 份；漏洞实例 7 条；达阈（CVSS ≥ 7.0）实例 0 条，去重后（CVE × 构件）0 条。` + `CVSS 闸门通过：无未豁免的 HIGH/CRITICAL 依赖漏洞。`（步骤 exit 0）|
+| artifact / SARIF | 两步均 ✓；日志含 `Post-processing sarif files: ["build/reports/dependency-check/dependency-check-report.sarif"]` |
+| Code Scanning 依赖类 open | **7 条**（`CVE-2020-29582`×5 / `CVE-2020-13956`×1 / `CVE-2025-48924`×1，均 `medium`），**未做任何 dismiss** |
+
+与 2026-09-10 本地实测（188 → 7 实例、达阈 138 → 0）**逐项吻合**。
+
+### 23.2 ISSUE-P3-24 闭环
+
+- **残余 1**（Fast gate 转绿）此前已闭环（§18）；本次补全其余各项：
+  - **残余 2**「aggregate 成功前提下的断言 pass/fail」→ 已取得**确定判定**（exit 0，见 §23.1），不再是被 skip 的「无判定」；
+  - **残余 3**「有 SARIF 时的成功上传」→ 已取得（见 §23.1）；
+  - **残余 4** 的 R1（`ubuntu-latest` 实际指向）→ 实测为 `ubuntu-24.04`（image release `20260907.300`）；
+  - **残余 6**（3 条 POSIX 断言的最终结果）→ 随 Fast gate 转绿已取得。
+- **仍未消除（如实，不据此宣称已闭环）**：**残余 5**「Gradle daemon JVM criteria 不满足时的失败/自动供给行为」
+  本次**未被触发**（`Set up JDK 21` 已保证 criteria 满足），该不确定性保持登记。
+- **已登记未改的风险点**（R2 ~ R9，含 R4 wrapper 镜像与 `distributionSha256Sum`、R5 `~/.cargo` 未缓存、
+  R6 GHAS 前提等）按 §19 原状保留为**维护者决策项**，本批次不改。
+
+### 23.3 ISSUE-P3-32 闭环
+
+- **验收标准 1**（真实运行中给出确定的 pass/fail）→ **达成**：在 aggregate 成功前提下硬断言 exit 0，
+  给出明确通过判定；其 fail-closed 分支（报告缺失 / 结构非法 → exit 1）此前已在本地逐例实测。
+- **验收标准 2**（每个达阈族二选一处置并留痕）→ 本次达阈（CVSS ≥ 7.0）实例 **0 条**，无可处置族；
+  4 个豁免族仍按 §7 登记依据在册。
+- **验收标准 3**（Code Scanning 依赖类 open 告警数与该族结论一致）→ **7 条 = 未达阈残余 7 条**，一致，且未 dismiss。
+- **前置事实修正（如实留痕）**：此前条文中「处置路径为配置仓库 Secret `NVD_API_KEY`」的表述**前提不成立**——
+  本次实测证明 `NVD_API_KEY` **早已配置并生效**：上一次运行 `34477320673` 的 aggregate 走的是
+  `NvdApiDataSource.processApi`（该路径**仅在 Key 非空时**启用，否则走托管镜像 datafeed），
+  失败根因是 **NVD 服务端间歇 503**（重试 31 次），**并非缺 Key**。该前提已就地更正。
+
+### 23.4 过程留痕：CodeQL 侧新发现（登记为 ISSUE-P3-57，本批次未处置）
+
+本次核对 Code Scanning 时发现 **77 条** CodeQL `rust/hard-coded-cryptographic-value`（critical）open 告警，
+创建时刻同为 `2026-09-10T13:18:38Z`；对全部 77 条逐条取行号并与本地源文件交叉核对，**77/77 落在
+Rust 单测模块 `#[cfg(test)] mod tests` 之内**（测试模块起始行：`strength.rs` L521 / `twofish_cbc.rs` L114 /
+`aes_kdf.rs` L91）。查询源码（`github/codeql` 的 `HardcodedCryptographicValue.ql`）**无任何测试代码过滤**
+（`ConfigSig` 仅 `isSource`/`isSink`/`isBarrier`），故「把单测外移」**单独实施不生效**——该设想已被本批次**推翻并留痕**。
+候选处置与验收标准见 `ACTIVE_ISSUES.md` **ISSUE-P3-57**。
+

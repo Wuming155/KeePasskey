@@ -60,12 +60,13 @@
 > - **ISSUE-P2-18**（同步缺防回滚绑定）→ 引入本地认证的「已见内容摘要链」（Keystore HMAC + `SyncRollbackGuard`），
 >   重放旧库被拒并提示，跨端兼容结论留痕，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §22.8。
 
-## P3 低危问题、特性接线与体验优化（3 项）
+## P3 低危问题、特性接线与体验优化（2 项）
 
 > **背景**：P3 残余批次原 **12 项**（ISSUE-P3-17 ~ P3-28）已于 **2026-09-10** 整体整改。
 > 其中 **10 项完整闭环并归档**（P3-17 / 18 / 19 / **20** / 21 / 22 / 25 / 26 / 27 / 28，含逐项代码证据与 15 条过程缺陷留痕），
 > 见 [RESOLVED_LOG.md](RESOLVED_LOG.md) **§4**；**2 项部分达标**（P3-23 / P3-24 —— 均为**本环境物理不可达**的
-> 验证类条目：arm64 设备与 GitHub runner）就地更新后保留于本节；
+> 验证类条目：arm64 设备与 GitHub runner）就地更新后保留于本节
+> （**其中 P3-24 已于 2026-09-11 经真实 CI 运行实证闭环归档，见 §23；P3-23 仍保留**）；
 > 另有 **2 项新登记**（**ISSUE-P3-29** 全仓超阈值债务、**ISSUE-P3-30** 子库条目投影未并入根库列表）。
 > **2026-09-10 追加一**：**ISSUE-P3-30 已闭环并归档**（子库条目只读投影接入库列表，见 §5）。
 > **2026-09-10 追加二**：**ISSUE-P3-29 批次 A 已闭环并归档**（见 §6）——
@@ -131,7 +132,7 @@
 > 公开 API **零丢失零新增**。**全仓重测后 `> 400` 仅剩 2 项，且均为经论证的例外**
 > （纯常量词表 `DicewareWordList` 408、因 ISSUE-P3-43 接线产生功能性增量的 `SettingsViewModel` 424），
 > 故 **ISSUE-P3-31 达成闭环并整条移出本文件**。
-> 本节余 **3 项**（P3-23 / P3-24 / P3-32）。
+> 本节余 **2 项**（P3-23 / **ISSUE-P3-57**）。
 > **2026-09-11 追加（功能完整性审计批次 A + B）**：以「README 声称功能 → 引擎/仓库 → ViewModel/控制器 → UI 入口」
 > 四层逐项做端到端接线审计，两批共发现并**同日整改归档 5 项**（A：全文搜索范围、详情页单条删除；
 > B：HOTP 端到端、单条移动分组 / 从模板新建便利入口、`AttachmentManager` 孤儿实现清理），
@@ -143,8 +144,17 @@
 > **ISSUE-P1-11**（P1）、**ISSUE-P2-17 / P2-18**（P2）、**ISSUE-P3-52 ~ P3-55**（P3），
 > 次要加固项打包登记为 **ISSUE-P3-56**；各项核实时间点与核实方式见条目内。
 > **2026-09-11 同日闭环**：上述 8 项**本地可整改条目已按难度递增顺序全部整改归档**
-> （见 [RESOLVED_LOG.md](RESOLVED_LOG.md) **§22**），本文件正文已移出；本节现存条目**仅余** P3-23 / P3-24 / P3-32
-> 三项**外部资源依赖**的验证类残余。门禁：`test --rerun-tasks` **1370 例 / 0 失败 / 13 跳过**、`lint` 5 模块 0 error。
+> （见 [RESOLVED_LOG.md](RESOLVED_LOG.md) **§22**），本文件正文已移出；本节现存条目**仅余** P3-23
+> 一项**外部资源依赖**的验证类残余。门禁：`test --rerun-tasks` **1370 例 / 0 失败 / 13 跳过**、`lint` 5 模块 0 error。
+> **2026-09-11 追加三（CI 侧真实跑通 + CodeQL 新发现）**：以 `gh workflow run` 手动触发 `dependency-scan`
+> 运行 **`34575788016`** 并全程盯守，**首次全绿**（aggregate `BUILD SUCCESSFUL in 15m 4s`、
+> 硬断言 `达阈（CVSS ≥ 7.0）实例 0 条` 且 exit 0、artifact 与 SARIF 上传均成功），
+> **ISSUE-P3-24 与 ISSUE-P3-32 据此闭环归档**，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) **§23**；
+> 同批核对 Code Scanning 时**新发现 77 条** CodeQL `rust/hard-coded-cryptographic-value`（critical）
+> open 告警（全部落在 Rust 单测模块内、判定为误报），就地登记为 **ISSUE-P3-57**——
+> 并附**机制验证结论：该查询无任何测试代码过滤，单纯「外移单测」无效**（详见条目内）。
+> 同时更正两处滞后前提：`NVD_API_KEY` **早已配置**（503 系 NVD 服务端间歇故障，非缺 Key），
+> 以及「CodeQL 开放告警 = 0」**已不再成立**。
 > 归档门禁证据（2026-09-10 批次 I 实测，`--rerun-tasks` 强制真实执行）：
 > `.\gradlew.bat test --rerun-tasks --max-workers=1 --continue` → **BUILD SUCCESSFUL**，
 > **1329 例 / 0 失败 / 13 跳过**（app 750 / core 58 / crypto 107 / database 235 / sync 179；
@@ -227,127 +237,78 @@
 
 ---
 
-### ISSUE-P3-24 (P3-09 残余): CI 门禁首跑校准
+### ISSUE-P3-24（CI 门禁首跑校准 · 2026-09-11 已闭环）
 
-- **优先级**：P3（供应链安全；依赖联网 CI 环境）
-- **核实时间点与核实方式（2026-09-10）**：完整留痕见新建 **`docs/ci-静态校准记录.md`**
-  （每项结论均附核实时间点与核实方式）。本批次**已修 3 处「首次必红」缺陷**：
-  1. `build.yml:52` `platforms;android-37` → **`android-37.0`**（`sdkmanager --list --channel=0` 与本机
-     `platforms/android-37.0/package.xml` 双证据：远端**不存在** `platforms;android-37`）；
-  2. 签名断言**两处必然误红**：`apksigner` 不自动读同目录 `.idsig`（不传参时 v4 恒 `false`）→ 补
-     `--v4-signature-file "${apk}.idsig"`；且 minSdk 36≥28 且 v3 同开时 AGP **省略 v2 块**（`AGENTS.md` §1 基线）
-     → 原「v2:true」断言**不可能成立**，改为「v2 块必须缺席（出现即 error）」并新增 `v1: false` 断言（**未削弱**）；
-  3. JDK 17 → 21，与 `gradle/gradle-daemon-jvm.properties: toolchainVersion=21` 对齐
-     （**残留不确定性已如实标注**：Gradle 对 daemon JVM criteria 不满足时「失败还是自动供给」未实测）。
-  另经核实：7 个 Action SHA **全部真实存在**且与声明版本一致（**未遇 403/限流**）；
-  **Rust 1.97.1 确认真实已发布**（推翻「未发布必红」担忧）；`cargo-ndk 4.1.2` / `cargo-deny 0.20.2` 真实存在；
-  `material3` **1.5.0 stable 核实不存在** → 退出条件未满足、维持 `1.5.0-alpha27`（**未改** `libs.versions.toml`）；
-  **`cargo deny check` 本机实跑通过**（`advisories/bans/licenses/sources ok`，advisory-db 当日真实拉取，
-  `curl 28` **未复现**）；Linux 侧「疑似首次即红」静态判定 **0 例**。
-- **2026-09-10 实测更新（原「仍未达成」条已部分取代）**：CI **已在 GitHub 托管 runner 上真实运行**，
-  核实方式 `gh run view 34463116293` / `gh run list --workflow dependency-scan.yml`：
-  1. `Rust supply chain` ✅ **success**（`cargo test` + `cargo deny check` 全绿）→「CI 网络下 advisory-db 拉取」**已验证通过**；
-  2. `Native gate` ✅ **success**（4 ABI 交叉编译、Debug/Release 打包、v1/v2/v3/v4 签名断言、4 ABI 入包断言全部通过）；
-  3. `Fast gate` ❌ **failure** —— 失败点为 **Android Lint 147 个 error**，**已整改并归档**
-     （见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §7.2）；`unit tests` 步骤自身通过；
-  4. `dependency-scan` 的「真实阻断行为」**已实测且结论为否定**：运行 `34335443660` conclusion=**success**，
-     而报告含 138 条 CVSS ≥ 7.0 → `failBuildOnCVSS` 在 aggregate 任务上**不生效**；
-     **已补硬断言**（`.github/check_dependency_cvss.py` + workflow 接线），见 §7.4。
-- **2026-09-11 追加（Fast gate 偶发红根因修复，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §18）**：批次 H / I 推送后
-  CI `build` 的 **Fast gate 转红**（`UncaughtExceptionsBeforeTest`，根因为 `EntryDetailViewModelTest`
-  未注入测试调度器致真实 `Dispatchers.Default` 线程在 `resetMain()` 后回跳 Main）；
-  修复后 **连续两次** CI 运行 `34552887844`（提交 `6b09b6f`）与 `34554214053`（提交 `bc23cc8`）
-  **build 三 job 全 success**（`Fast gate` ✓ / `Native gate` ✓ / `Rust supply chain` ✓），CodeQL 同期 ✓。
-  该项证明 Fast gate 已可稳定转绿。
-- **2026-09-11（本批次收口复核）**：本环境无 Actions 写权限 / 无 CI 网络上下文，CI 侧残余前提
-  （aggregate 成功前提下的断言 pass/fail、有 SARIF 时的成功上传等）**不变**；本地可验证项已全部实测。
-  **本条为外部依赖，不归档。**
-- **仍未达成（不得据此认为 CI 已跑通）**：
-  1. ~~`Fast gate` 在 lint 修复后的下一次真实 CI 运行~~ → **已于 2026-09-10 完成并转绿**：
-     运行 `34470024328`（提交 `c25ac51`）`build` 工作流**三 job 全 success、exit 0**，
-     其中 `Fast gate` 的 `Android Lint` ✓ 与 `单元测试（全模块）` ✓、`Native gate` 的
-     `Assemble Release` 与签名/入包断言 ✓、`Rust supply chain` ✓（**本仓 CI 史上 fast-gate 首次转绿**）；
-     CodeQL 同期复跑 success，**开放告警 10 → 0**；
-  2. ~~`dependency-scan` 在硬断言接入后的首次运行~~ → **已实测：该工作流确实运行过**
-     （2026-09-10 运行 `34477320673`，headSha `8131dcf`，`workflow_dispatch`）→ **失败**，
-     但失败点为**外部 NVD 数据源 503**（31 次重试后 `NvdApiException: 503` → `dependencyCheckAggregate FAILED`），
-     且因 GitHub 默认跳过后续步骤，**硬断言被 skip、无判定**；**已修复可观测性**（断言步骤加 `if: always()`，
-     无报告时按 fail-closed 明确判失败），见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §19。
-     原文「本环境被拒 403、从未运行」系滞后前提，**就地修正**。**仍未取得**：一次 aggregate 成功前提下的
-     断言 pass/fail（受 NVD 503 间歇性阻塞，需 `NVD_API_KEY` 或数据缓存，属维护者决策）；
-  3. ~~`github/codeql-action/upload-sarif` **v4** 的真实执行~~ → **已真实执行**（同上运行 `34477320673`），
-     因上游未产出 SARIF 而失败；**仍未取得**的是「有 SARIF 时的成功上传」；
-  4. runner 镜像实际预装 API 级别（R2）、`ubuntu-latest` 指向的镜像版本（R1）；
-  5. Gradle 对 daemon JVM criteria 不满足时的失败/自动供给行为（§1#3 残留不确定性）；
-  6. 3 条 POSIX 断言的**最终结果**：`Fast gate` 的单元测试步骤确已通过，但该 job 整体因 lint 失败，
-     `N/A` 待转绿后的完整运行确认。
-- **已登记未改的风险点（含补丁草案，见留痕 §7）**：R1 `ubuntu-latest` 浮动标签（建议固定 `ubuntu-24.04`）；
-  R2 fast-gate 不装 SDK；R3 runner 文件系统不支持目录 fd fsync；R4 wrapper 指向腾讯镜像且无
-  `distributionSha256Sum`（**未改**：改动会影响国内网络下的本地构建，仅登记）；R5 `~/.cargo` 未缓存；
-  R6 GHAS 前提与 `if-no-files-found: error` 的二次失败；R7 `dependency-check.init.gradle.kts:49` 注释与代码不符
-  （**本批次已修正**）；R8 一次性 CI 密钥口令明文（自洽）；R9 `ls *.apk | head -n 1` 未来歧义。
-- **验收标准**：三 job 在 CI 上真实跑通并按实际结果校准；`dependency-scan.yml` 首次以 CVSS≥7 运行后
-  按实际命中处置（修依赖或登记 suppression，**不得回调阈值**）；`cargo deny check advisories` 在 CI 上真实通过。
-  **不得据此认为 CI 已跑通。**
+> 已于 **2026-09-11** 经真实 CI 运行 `34575788016` 实证闭环——aggregate `BUILD SUCCESSFUL in 15m 4s`、
+> 硬断言首次给出确定判定（`达阈 0 条`，exit 0）、SARIF 与 artifact 上传均成功；
+> 原始证据（含 runner 镜像版本）与逐条残余面结论见 [RESOLVED_LOG.md](RESOLVED_LOG.md) **§23.1 / §23.2**。
+> 此处留索引，正文已移出本文件。
+
 
 ---
 
-### ISSUE-P3-32 (新登记): 供应链达阈告警残余处置
+### ISSUE-P3-32（供应链达阈告警残余处置 · 2026-09-11 已闭环）
 
-- **优先级**：P3（供应链安全；阻断面仅在**手动触发**的 `dependency-scan`）
-- **核实时间点与核实方式（2026-09-10）**：以
-  `gh run download 34335443660 --name dependency-check-report` 取得 engine 13.0.0 的报告 JSON 后，
-  以脚本统计 `dependencies[].vulnerabilities[]`：**188 条实例 / 132 个唯一（构件 × CVE）组合**，
-  其中 **138 条实例、98 个唯一组合 CVSS ≥ 7.0**（47 条 `CRITICAL` 严重度；51 条分数 ≥ 9.0）；
-  各族的依赖来源经 `.\gradlew.bat :app:dependencyInsight --configuration <cfg> --dependency <pkg>` 逐族确认。
-- **背景**：本批次已**实证** `failBuildOnCVSS = 7.0f` 在 `dependencyCheckAggregate` 上不生效
-  （见 [RESOLVED_LOG.md](RESOLVED_LOG.md) **§7.4**），并已补硬断言
-  `.github/check_dependency_cvss.py`，且**已接线为 `dependency-scan.yml` 的独立门禁步骤**（提交 `37e609d`）。
-- **2026-09-10 处置结果（本地真实扫描实测，本条主要面已消解）**：
-  1. **真修复（非豁免）**：Kotlin 2.4.10 → **2.4.20**（即 `CVE-2026-53914` 的修复版本）——
-     实测 `test --rerun-tasks` **1200/1187/0/13 零退化**、`lint` **5 模块 0 error**、
-     运行时面 `kotlin-stdlib` 解析为 **2.4.20**；
-  2. **豁免登记 4 族**（每族附血缘 + 运行面证据）：`org.jline/*@3.24.1`、`protobuf-java@2.6.1`、
-     `analytics-library:*@32.4.0`、`org.jetbrains.kotlin/*`（**仅绑定 `CVE-2026-53914` 单一 CVE**）；
-  3. **实测结果**：本地 `dependencyCheckAggregate -I .github/dependency-check.init.gradle.kts`
-     → 漏洞实例由 **188 条降为 7 条**，其中 **CVSS ≥ 7.0 由 138 条降为 0 条**，
-     硬断言 **exit 0 通过**，`CVE-2026-53914` **已消除**；
-  4. **残余 7 条**全部为 **CVSS 5.3 MEDIUM**（`commons-lang3@3.16.0`、`httpclient@4.5.6`、
-     `kotlin-reflect@1.6.10`、`kotlin-stdlib-jdk7/jdk8@1.8.x` 的 `CVE-2020-29582`），
-     皆属构建工具链且**不达阈值**，**如实保留可见**，不做无依据的批量豁免。
-- **2026-09-11 追加（硬断言「fail-closed」逻辑本地实测；核实方式：以合成报告调用脚本并读退出码）**：
-  `python .github/check_dependency_cvss.py <report.json>` 语义已逐例验证——
-  CVSS 9.8 → **exit 1**；CVSS 5.3 → **exit 0**（未达阈）；仅 `severity=HIGH`（无 CVSS 分数）→ **exit 1**（fail-closed 兜底）；
-  报告缺 `dependencies` 字段 → **exit 1**；报告文件不存在 → **exit 1**（**无报告 ≠ 通过**）。
-  即「达阈必红、无结论必红、未达阈放行」的闸门逻辑成立；
-  **仍未验证的仅是它在 CI runner 上的首次真实执行**（需 Actions 写权限手动触发，见下）。
-- **CI 侧首跑实测（2026-09-11 复核；更正原文「本环境被拒 403、从未运行」的滞后前提）**：
-  该工作流**已在托管 runner 上运行过**——2026-09-10 运行 `34477320673`（`workflow_dispatch`，headSha `8131dcf`）
-  **失败**，失败点为**外部 NVD 数据源 503**（31 次重试 → `NvdApiException: NVD Returned Status Code: 503`
-  → `dependencyCheckAggregate FAILED`，**未产出报告**），进而导致：
-  **硬断言被 GitHub 默认 skip（断言自身无判定）** + 报告/SARIF 上传二次失败。
-  详见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §19。
-  **已修复该可观测性缺陷**：硬断言步骤加 `if: always()`，无报告时按 fail-closed 明确判失败（**不削弱**闸门，只会增加失败信号）。
-  **仍未取得**：一次「aggregate 成功 + 报告产出」前提下的断言 pass/fail —— 受 NVD 503 间歇性阻塞；
-  处置路径为配置仓库 Secret `NVD_API_KEY` 或增强 NVD 数据缓存，属**维护者决策**，
-  **不得**回调阈值或关闭 `failOnError` 来换取变绿。
-- **2026-09-11（本批次收口复核）**：硬断言脚本本地 fail-closed 语义已逐例实测；**CI 侧首次真实执行**
-  仍受 NVD 数据源外部依赖阻塞，本环境不可消除。**本条为外部依赖，不归档。**
-- **未豁免残余（2026-09-10 核实 → 同日处置后已消解，结论以上方「处置结果」为准）**：
-  1. `CVE-2026-53914` 的处置方式为**真修复**：Kotlin 已升级至 **2.4.20**
-     （2026-09-11 复核 `gradle/libs.versions.toml`：`kotlin = "2.4.20"`），本地同参数扫描下该 CVE 已消除、
-     达阈（CVSS ≥ 7.0）由 138 条降为 0 条。原先「本仓当前 2.4.10、不可在本环境安全验证」的**前提已不成立**，就地修正。
-  2. 构建工具链族（jline × 11 构件 / `protobuf-java@2.6.1` / `analytics-library:protos@32.4.0`）：
-     仍属构建期 shade 暴露，已按 [RESOLVED_LOG.md](RESOLVED_LOG.md) §7 登记 suppression（每族附血缘 + 运行面证据），
-     属**风险接受决策**，不由本批次单方面压制。
-  3. Code Scanning 依赖类 open 告警：待 CI 侧首次运行后按实际结果收敛；**不得**以批量 dismiss 清空。
-- **验收标准**：
-  1. `dependency-scan` 的硬断言步骤在**真实运行**中给出确定的 pass/fail（而非静默通过）；
-  2. 每个达阈族满足下列二者之一并留痕：**升级到修复版本**，或**写入 suppression 并附核实依据**
-     （按 `.github/owasp-dependency-suppressions.xml` 维护纪律 + 本文件登记）；
-  3. 处置后 Code Scanning 依赖类 open 告警数与该族结论**一致**（禁止以 dismiss 替代修复依据）。
-- **禁止**：回调 `failBuildOnCVSS` 阈值以换取变绿；删除或注释掉硬断言步骤；
-  在没有核实依据的情况下批量写入 suppression。
+> 已于 **2026-09-11** 经真实 CI 运行 `34575788016` 实证闭环——硬断言首次在 aggregate 成功前提下给出**确定判定**
+> （`漏洞实例 7 条；达阈（CVSS ≥ 7.0）实例 0 条`，exit 0），Code Scanning 依赖类 open 告警 **7 条**与该族
+> 未达阈结论**一致**且未 dismiss。原始证据与逐条验收标准核对见 [RESOLVED_LOG.md](RESOLVED_LOG.md) **§23.1 / §23.3**。
+> 此处留索引，正文已移出本文件。
+
+---
+
+### ISSUE-P3-57 (新登记): Code scanning 默认设置对 Rust 单测内测试向量报 critical 误报
+
+- **优先级**：P3（静态分析误报治理；**不涉及运行时安全**，但对安全运营有实质损害——77 条 critical 常驻会淹没真告警）
+- **核实时间点与核实方式（2026-09-11）**：
+  1. 告警全量统计：`gh api "/repos/Wuming155/KeePasskey/code-scanning/alerts?state=open&per_page=100" --paginate`
+     （按 `tool.name` / `rule.security_severity_level` / `rule.id` 分组），并逐条取
+     `most_recent_instance.location.path` 与 `start_line`；
+  2. 与源码交叉核对：本地 `Grep` 取三个 Rust 源文件中 `#[cfg(test)]` / `mod tests` 的**起始行**，逐条比对行号落点；
+  3. 查询语义：`WebFetch` GitHub 官方仓库 `github/codeql` 的
+     `rust/ql/src/queries/security/CWE-798/HardcodedCryptographicValue.ql` **原文**（非二手描述）；
+  4. 运行归属：`gh api ".../code-scanning/alerts"` 取 `most_recent_instance.analysis_key`；并 `LS .github/workflows/` 确认仓库内无 CodeQL 工作流文件。
+- **实测现状（2026-09-11）**：Code Scanning open 告警 **84 条** = CodeQL **77 条** + dependency-check 7 条
+  （后者为未达阈的中危依赖项，见 §23.3，**不属本条范围**）。CodeQL 77 条**全部**为
+  rule `rust/hard-coded-cryptographic-value`、`security_severity_level = critical`
+  （查询源码声明 `@security-severity 9.8`、`@kind path-problem`），创建时刻同为 `2026-09-10T13:18:38Z`；分布：
+
+  | 文件 | 条数 | `#[cfg(test)] mod tests` 起始行 | 告警行号范围 |
+  |---|:---:|:---:|---|
+  | `crypto/src/main/rust/src/strength.rs` | 53 | L521 | L533 ~ L703 |
+  | `crypto/src/main/rust/src/twofish_cbc.rs` | 17 | L114 | L127 ~ L226 |
+  | `crypto/src/main/rust/src/aes_kdf.rs` | 7 | L91 | L121 ~ L190 |
+
+- **性质判定（**逐条**行号核对，非抽样）**：**77/77 的行号全部落在上述 `#[cfg(test)] mod tests` 之内**，
+  内容为测试夹具（如 `let seed = [0x11u8; 32]` / `let key = [0x22u8; 32]` / `[0u8; 32]` 缓冲区 / KAT 期望值），
+  该代码**不进入发布产物**（`#[cfg(test)]` 不参与非 test 构建）。→ 判定为**误报**。
+- **机制验证结论（2026-09-11，决定处置路径；已推翻一个初始设想并留痕）**：
+  1. **「把 Rust 单测外移」单独实施无效**——查询源码 `HardcodedCryptographicValueConfig` 只定义
+     `isSource` / `isSink` / `isBarrier`，**不存在任何 `isTest` / `TestFile` 过滤**，即该查询**没有"测试代码"这一概念**，
+     因此单测放在 `src/main/rust/src/` 内联、还是外移到 `tests/`、`src/tests/`，告警**都不会消失**；
+  2. 「内联抑制注释」不可用（外部项目实证**声明**，非本仓实测）：`// lgtm[...]` / `// codeql[...]` 类抑制
+     对该 Rust 规则**不被分析器识别**；本仓若采用需先自行验证；
+  3. **配置级排除需切换高级设置**：`paths-ignore` / `query-filters` 属 **advanced setup** 能力
+     （GitHub 官方文档明确「必须为 code scanning 使用高级设置」）。本仓当前为**默认设置**——
+     `analysis_key = dynamic/github-code-scanning/codeql:analyze`，且 `.github/workflows/` 仅有
+     `build.yml` 与 `dependency-scan.yml`，**无 CodeQL 工作流文件**，故**默认设置不提供此类配置**。
+- **候选处置（三选一，均须留痕；本批次未实施）**：
+  1. **逐条 dismiss（`used in tests`）+ 依据留痕**：与本仓既有先例一致（[RESOLVED_LOG.md](RESOLVED_LOG.md) §7：
+     此前 7 条 rust 同类告警即按 `used in tests` 处置）。成本最低，且本条已完成全量行号核对（满足"先核实再 dismiss"）；
+     **缺点**：新增测试会再次产生同类告警（周期性重复劳动），且告警总数不再反映真实风险面。
+  2. **切换 advanced setup + `paths-ignore` 精确排除**：需**先**把 Rust 单测外移到独立文件
+     （如 `crypto/src/main/rust/src/tests/*.rs`，使其拥有可被精确命中的**独立路径**），再新增
+     `.github/workflows/codeql.yml`（+ `.github/codeql/codeql-config.yml`）忽略该路径。
+     **优点**：一次配置长期生效、**不削弱**生产代码覆盖、新增测试不再冒告警；
+     **代价**：需自维护 CodeQL 工作流与语言矩阵，且 Rust 属 CodeQL 预览语言，切换存在
+     **破坏当前已工作的默认设置分析**的风险（须先在分支上验证）。
+  3. **仅登记、不处置**：**不推荐**——77 条常驻 critical 造成告警疲劳，与「不得让真告警被淹没」的既定纪律相悖。
+- **建议顺序**：先做方案 2 的**机制验证**（在分支上以 advanced setup + `paths-ignore` 重跑一次分析，
+  确认该 rule 告警归零且**生产代码仍被分析**）；验证通过则采用方案 2，否则回退方案 1 并留痕说明原因。
+- **禁止**：以**未经核实**的批量 dismiss 代替逐条判定；关闭 CodeQL 或移除 Rust 语言分析来「消除」告警；
+  删除/注释测试用例以规避告警。
+- **验收标准**：① 该 rule 的 open 告警数按所选方案收敛到位（方案 1 → 0 且逐条附依据；方案 2 → 0 且生产代码
+  仍被分析、新增测试不再产生同类告警）；② 处置方式与依据在 `docs/` 留痕（含本次 77 条的行号核对证据）；
+  ③ 不引入对生产代码覆盖面的削弱（方案 2 需给出「生产代码仍被分析」的证据）。
 
 ---
 

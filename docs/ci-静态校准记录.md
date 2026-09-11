@@ -247,6 +247,9 @@ val expectedOutcome = if (hostSupportsDirectoryChannel) DirectorySyncOutcome.SYN
    真修复 `CVE-2026-53914`；`org.jline` / `protobuf-java@2.6.1` / `analytics-library` 登记为
    **构建工具链专属**（实测均**不在** `:app:releaseRuntimeClasspath`）；
 4. **CodeQL 开放告警由 10 条归零**（7 条 rust 按 `used in tests` 处置；5 条 py **全部 FIXED**）；
+   > **2026-09-11 更正（滞后前提）**：该结论在写下时属实，但同日 `13:18:38Z` 的 GitHub 侧默认设置分析
+   > 新产出 **77 条** `rust/hard-coded-cryptographic-value`（critical，全部落在 Rust 单测模块内），
+   > 「归零」已不再成立；见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §23.4 与 **ISSUE-P3-57**。
 5. **合并 PR #5**（6 个 Action 跨大版本升级，squash 提交 `a9b838f`）——详见 §11.6。
 
 ### 11.5 §9-2 与 §11.4 的最终实测答案：**本地真实扫描 → 硬断言通过**
