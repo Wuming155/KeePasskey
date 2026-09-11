@@ -183,6 +183,14 @@
      `docs/原生Argon2真机验证记录.md` §4.3 表格**保持待填**；
   2. **真实 KeePass 2.61.1 / KeePassXC `.kdbx` 语料仍未入库** —— 需人工 GUI 建库 + 逐条复核，无人值守流程无法产出；
      语料未入库前设备侧用例按设计**跳过**（注意：**该项不依赖 arm64**，现有 x86_64 AVD 即可执行）。
+- **2026-09-11 复核（阻塞前提再确认；核实方式：读 `tools/kdbx-corpus/README.md` §3 并实跑脚本）**：
+  1. `python tools/kdbx-corpus/generate_corpus.py --check` 实测 **exit 3**：本机无 `keepassxc-cli`；
+  2. 且即便安装，README §3 明确 **KeePassXC CLI `db-create` 无法设定 Argon2 变体/版本与 t/m/p**，
+     故真实语料**必须由官方 GUI 建库**（脚本 `--ingest` 只做复核 / 命名 / 写伴生 JSON / 双落位）——
+     「无人值守产出真实语料」在本环境**不成立**（推翻先前「脚本自动化已可产出」的期待）；
+  3. 脚本自身能力已本地实测通过：`--dry-run` 正常列出双落位目录；`--verify database/src/test/resources/fixtures/test_vault.kdbx`
+     正确解析 `argon2d / v19 / t=89 / m=65536KiB / p=4 / 32B salt`，与 `crypto/.../argon2-interop/README.md` §5.1 逐项一致。
+  **结论**：本条两处阻塞（GUI 语料、arm64 真机）均为**外部资源依赖**，本地不可消除。
 - **验收标准**：① `.\gradlew.bat :database:assembleDebugAndroidTest` 编译通过（**2026-09-10 已实测通过**，
   见批次 A 归档 §6.4 门禁证据）；② 真实语料（含同名 `.json`）
   入库两处后 `:database:connectedDebugAndroidTest` 中 `RealKdbxCorpusUnlockTest` **不再是 skip** 且全绿；
@@ -222,7 +230,9 @@
 - **2026-09-11 追加（Fast gate 偶发红根因修复，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §18）**：批次 H / I 推送后
   CI `build` 的 **Fast gate 转红**（`UncaughtExceptionsBeforeTest`，根因为 `EntryDetailViewModelTest`
   未注入测试调度器致真实 `Dispatchers.Default` 线程在 `resetMain()` 后回跳 Main）；
-  修复后 CI 运行 `34552887844` **build 三 job 全 success**。该项证明 Fast gate 已可稳定转绿。
+  修复后 **连续两次** CI 运行 `34552887844`（提交 `6b09b6f`）与 `34554214053`（提交 `bc23cc8`）
+  **build 三 job 全 success**（`Fast gate` ✓ / `Native gate` ✓ / `Rust supply chain` ✓），CodeQL 同期 ✓。
+  该项证明 Fast gate 已可稳定转绿。
 - **仍未达成（不得据此认为 CI 已跑通）**：
   1. ~~`Fast gate` 在 lint 修复后的下一次真实 CI 运行~~ → **已于 2026-09-10 完成并转绿**：
      运行 `34470024328`（提交 `c25ac51`）`build` 工作流**三 job 全 success、exit 0**，
@@ -276,18 +286,14 @@
   **断言生效后 `dependency-scan` 将按预期失败**，直到下列达阈条目被「修依赖」或「登记 suppression」。
   已登记豁免 **1 族**（`androidx.sqlite`：构件内零 `.so`，不含原生 SQLite C 代码），
   以下为**未豁免残余**。
-- **未豁免残余（2026-09-10 核实）**：
-  1. **`CVE-2026-53914`（CVSS 9.8）—— 30 个 `org.jetbrains.kotlin/*` 构件**：
-     NVD 描述为「JetBrains Kotlin < 2.4.20 经**构建缓存元数据**的不安全反序列化可致代码执行」；
-     报告中**实际受影响构件是 `compose-group-mapping@2.4.10`**，其余 29 个
-     （`kotlin-stdlib@1.6.10 ~ 2.4.10`、`kotlin-reflect`、`kotlin-daemon-*`、`kotlin-compiler-*` 等）
-     系 **CPE 按产品名过度匹配**。正确处置是**升级 Kotlin 至 ≥ 2.4.20**（本仓当前 2.4.10），
-     但该升级涉及 AGP 9.4.0 / KSP 2.3.11 / Compose 编译器插件联调，**不可在本环境安全验证**。
-  2. **构建工具链族（jline × 11 构件 / `protobuf-java@2.6.1` / `analytics-library:protos@32.4.0`）**：
-     报告路径显示其全部**被 shade 在 `kotlin-compiler-32.4.0.jar` 内**（AGP 内置 Kotlin 编译器），
-     属**构建期**而非 APK 运行面。是否接受该构建期暴露属**风险接受决策**，不由本批次单方面压制。
-  3. **Code Scanning 历史遗留**：依赖类 open 告警 **188 条**（创建于 2026-09-09），
-     待上述处置落地后按实际结果收敛；**不得**以批量 dismiss 清空。
+- **未豁免残余（2026-09-10 核实 → 同日处置后已消解，结论以上方「处置结果」为准）**：
+  1. `CVE-2026-53914` 的处置方式为**真修复**：Kotlin 已升级至 **2.4.20**
+     （2026-09-11 复核 `gradle/libs.versions.toml`：`kotlin = "2.4.20"`），本地同参数扫描下该 CVE 已消除、
+     达阈（CVSS ≥ 7.0）由 138 条降为 0 条。原先「本仓当前 2.4.10、不可在本环境安全验证」的**前提已不成立**，就地修正。
+  2. 构建工具链族（jline × 11 构件 / `protobuf-java@2.6.1` / `analytics-library:protos@32.4.0`）：
+     仍属构建期 shade 暴露，已按 [RESOLVED_LOG.md](RESOLVED_LOG.md) §7 登记 suppression（每族附血缘 + 运行面证据），
+     属**风险接受决策**，不由本批次单方面压制。
+  3. Code Scanning 依赖类 open 告警：待 CI 侧首次运行后按实际结果收敛；**不得**以批量 dismiss 清空。
 - **验收标准**：
   1. `dependency-scan` 的硬断言步骤在**真实运行**中给出确定的 pass/fail（而非静默通过）；
   2. 每个达阈族满足下列二者之一并留痕：**升级到修复版本**，或**写入 suppression 并附核实依据**
