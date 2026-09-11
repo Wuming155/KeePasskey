@@ -421,9 +421,11 @@
    `AuthenticatorViewModelTest`（其 ViewModel 无调度器注入点、上游硬编码 `flowOn(Dispatchers.Default)`）改为在 `@After`
    **先取消各 ViewModel 作用域、再 `resetMain()`**，终止真实线程上的在途回跳。
 
-**验收证据**：提交 `6b09b6f` 的 CI 运行 `34552887844` → `build` **三 job 全 success**
-（`Fast gate` ✓ / `Native gate` ✓ / `Rust supply chain` ✓），CodeQL 运行 `34552887540` ✓；
+**验收证据**：修复后 **连续三次** CI `build` 运行全部 **三 job success**——
+`34552887844`（提交 `6b09b6f`）、`34554214053`（提交 `bc23cc8`）、`34555156422`（提交 `9a0595f`），
+每次均为 `Fast gate` ✓ / `Native gate` ✓ / `Rust supply chain` ✓，CodeQL 同期三次 ✓；
 本地 `:app:testDebugUnitTest --rerun-tasks` 全绿。
+另：硬断言 `.github/check_dependency_cvss.py` 的 fail-closed 语义已本地逐例实测（见 ACTIVE_ISSUES ISSUE-P3-32）。
 
 **如实留痕**：该 flake 自批次 G 起即存在（G 恰好通过、H/I 命中），属**既有测试基础设施缺陷**，
 非批次 D~I 的结构性拆分引入；本地无法复现（时序/核数相关），完全依赖 CI 日志与工件定位。

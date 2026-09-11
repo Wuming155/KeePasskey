@@ -279,6 +279,12 @@
   4. **残余 7 条**全部为 **CVSS 5.3 MEDIUM**（`commons-lang3@3.16.0`、`httpclient@4.5.6`、
      `kotlin-reflect@1.6.10`、`kotlin-stdlib-jdk7/jdk8@1.8.x` 的 `CVE-2020-29582`），
      皆属构建工具链且**不达阈值**，**如实保留可见**，不做无依据的批量豁免。
+- **2026-09-11 追加（硬断言「fail-closed」逻辑本地实测；核实方式：以合成报告调用脚本并读退出码）**：
+  `python .github/check_dependency_cvss.py <report.json>` 语义已逐例验证——
+  CVSS 9.8 → **exit 1**；CVSS 5.3 → **exit 0**（未达阈）；仅 `severity=HIGH`（无 CVSS 分数）→ **exit 1**（fail-closed 兜底）；
+  报告缺 `dependencies` 字段 → **exit 1**；报告文件不存在 → **exit 1**（**无报告 ≠ 通过**）。
+  即「达阈必红、无结论必红、未达阈放行」的闸门逻辑成立；
+  **仍未验证的仅是它在 CI runner 上的首次真实执行**（需 Actions 写权限手动触发，见下）。
 - **仍未验证（不得据此认为 CI 侧已跑通）**：该断言在 **CI runner** 上的首次真实运行——
   `workflow_dispatch` 需 PAT 具备 Actions 写权限，本环境被拒
   （HTTP 403 `Resource not accessible by personal access token`），故本条以**本地同参数扫描**为等价验证；
