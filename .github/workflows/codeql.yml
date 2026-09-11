@@ -15,12 +15,18 @@
 #   "CodeQL analyses from advanced configurations cannot be processed when the default setup
 #   is enabled"），告警也会被默认设置反复重新登记。
 #
-# 语言面（**有意与默认设置对齐到"实际产出分析的语言"**）：
+# 语言面（**有意与默认设置对齐到"实际产出分析的语言"，并补齐主语言**）：
 #   - rust / python / actions：三者是默认设置下**真实跑出规则**的语言
 #     （`gh api .../code-scanning/analyses` 实测 rules 分别 26 / 43 / 17）；
-#   - **不纳入 java-kotlin 与 c-cpp**：默认设置下二者的分析结果为 `rules=0, results=0`（构建失败后
-#     上传的空分析），即切过来并不减少**有效**覆盖面。若要重新纳入，需在本工作流内为其提供
-#     真实构建（Android/Gradle 需 SDK，C/C++ 需工具链），属后续独立事项。
+#   - **java-kotlin（ISSUE-P3-58 补入）**：本仓五模块（app/core/crypto/database/sync）**全为 Kotlin/Java**，
+#     是**主语言**；但它在默认设置下**历来为空跑**（`rules=0 / results=0`，因 android 构建失败未产出编译单元）。
+#     官方文档 `codeql-build-options-and-steps-for-compiled-languages` 明确：
+#     **Java 支持 `none`/`autobuild`/`manual`，而 Kotlin 只支持 `autobuild` 或 `manual`（无 `none`）**，
+#     故 Kotlin 覆盖**必须提供真实构建** → 本工作流为其安装 Android SDK 并以 `build-mode: manual`
+#     执行**窄化 Kotlin 编译**（仅 `compileDebugKotlin`，不含打包，故**不触发** `cargoNdkBuild`——
+#     原生内核只挂在 `merge*NativeLibs` 上，见 crypto/build.gradle.kts:79-81）；
+#   - **不纳入 c-cpp**：2026-09-11 经 `Glob` 核实本仓（除 gitignore 的 `参考项目/`）**无任何 C/C++ 源文件**，
+#     历史 c-cpp 分析系 C Argon2 遗留（ISSUE-P2-14 已移除）之残留；
 #   - 查询套件：不显式指定 `queries`，使用 CodeQL **默认套件**——依据是上述 rules 计数
 #     （python 43 / rust 26 / actions 17）与默认套件规模一致；显式写 `security-extended`
 #     会**扩大**告警面，属另一次变更，不应混在本次切换里。
@@ -50,12 +56,15 @@ jobs:
   analyze:
     name: Analyze (${{ matrix.language }})
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    # java-kotlin 需要真实构建（Android SDK + Kotlin 编译 + 抽取），耗时显著高于源码抽取语言，
+    # 故整体放宽上限；实测（ISSUE-P3-58）见 docs/ACTIVE_ISSUES.md 条目内留痕。
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        # 三个语言均为**源码抽取**（build-mode: none）：Rust 抽取器不走 cargo 构建，
-        # 故无需 Rust 工具链、Android SDK 或 cargo-ndk，工作流保持轻量、可稳定复现。
+        # rust / python / actions 为**源码抽取**（build-mode: none）：Rust 抽取器不走 cargo 构建，
+        # 故这些 job 无需 Rust 工具链、Android SDK 或 cargo-ndk，保持轻量、可稳定复现。
+        # java-kotlin 为 **manual**：Kotlin 无 `none` 模式，必须提供真实编译（见文件头说明）。
         include:
           - language: rust
             build-mode: none
@@ -63,9 +72,36 @@ jobs:
             build-mode: none
           - language: actions
             build-mode: none
+          - language: java-kotlin
+            build-mode: manual
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # ---------------------------------------------------------------------------------
+      # java-kotlin 专用前置（其余语言跳过，避免无谓耗时）
+      # JDK 21：gradle/gradle-daemon-jvm.properties 声明 toolchainVersion=21（与 build.yml 一致）
+      # ---------------------------------------------------------------------------------
+      - name: Set up JDK 21
+        if: matrix.language == 'java-kotlin'
+        uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Android SDK
+        if: matrix.language == 'java-kotlin'
+        uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
+
+      # 平台包名必须带 minor 版本号（SDK 仓库中不存在 `platforms;android-37`，实测仅有 37.0/37.1/37.2，
+      # 与 build.yml 的 ANDROID_PLATFORM 同源结论）；仅装编译所需，**不装 NDK**——
+      # 本步骤只做 Kotlin 编译，不触发任何打包/原生任务（cargoNdkBuild 只挂在 merge*NativeLibs 上）。
+      - name: 安装编译平台与 build-tools
+        if: matrix.language == 'java-kotlin'
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager --install "platforms;android-37.0" "build-tools;37.0.0" "platform-tools"
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
@@ -74,6 +110,24 @@ jobs:
           build-mode: ${{ matrix.build-mode }}
           # 测试路径排除见该文件；禁止在其中排除含生产代码的文件
           config-file: ./.github/codeql/codeql-config.yml
+
+      # 窄化 Kotlin 编译（manual 构建模式要求把真实编译放在 init 与 analyze 之间）。
+      # 只跑五个模块的 compileDebugKotlin：给出抽取所需的编译单元，且**不做打包**，
+      # 因此不会拉起 NDK / Rust / cargo-ndk（见 crypto/build.gradle.kts:79-81 的挂载点）。
+      # --no-daemon：让编译发生在同一进程树内，便于抽取器正确跟踪 kotlinc/javac 调用。
+      # 本 job 故意**不接** gradle/actions/setup-gradle：一旦命中构建缓存，compile 任务会
+      # 变成 UP-TO-DATE / FROM-CACHE 而**不产生编译调用**，抽取器将拿不到编译单元
+      # （gradle.properties 未开 org.gradle.caching，全新 runner 上即无本地缓存，可保证真实编译）。
+      - name: Build（java-kotlin 抽取所需的真实编译）
+        if: matrix.build-mode == 'manual'
+        run: |
+          set -euo pipefail
+          ./gradlew --no-daemon --console=plain \
+            :app:compileDebugKotlin \
+            :core:compileDebugKotlin \
+            :crypto:compileDebugKotlin \
+            :database:compileDebugKotlin \
+            :sync:compileDebugKotlin
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
