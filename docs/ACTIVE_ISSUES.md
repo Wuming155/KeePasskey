@@ -99,11 +99,15 @@
 > （残余真逻辑超阈值 **15 项**，清单已就地刷新）。
 > 同批次 **ISSUE-P3-46 全部闭环并归档**（§12）：字段签名密钥来源改为 Android Keystore 内
 > **不可导出 HMAC 密钥**，schema `v1 → v2`、盐不再落盘、旧数据一次性保守失效，本文件中该条目已移除。
+> **2026-09-10 追加十（P3-31 批次 E）**：验收标准 1 点名的下一批三项
+> （`S3SyncProvider` 629 → 372 / `PasskeyCryptoEngine` 596 → 362 / `KdbxMerger` 578 → 207）
+> 已完成并归档，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) **§13**；**ISSUE-P3-31 本条仍未闭环**
+> （残余真逻辑超阈值 **12 项**，清单已就地刷新）。
 > 本节余 **4 项**（P3-23 / P3-24 / P3-31 / P3-32）。
-> 归档门禁证据（2026-09-10 批次 D 实测，`--rerun-tasks` 强制真实执行）：
+> 归档门禁证据（2026-09-10 批次 E 实测，`--rerun-tasks` 强制真实执行）：
 > `.\gradlew.bat test --rerun-tasks --max-workers=1 --continue` → **BUILD SUCCESSFUL**，
 > **1329 例 / 0 失败 / 13 跳过**（app 750 / core 58 / crypto 107 / database 235 / sync 179；
-> 较批次 C 基线 1328 例净增 1 例，为 §12 的 P3-46 新增仓库层单测）；
+> 纯结构性拆分，用例数与批次 D 基线持平）；
 > `lint`（5 模块 **0 error**）通过；`:database:assembleDebugAndroidTest` 通过（ISSUE-P3-23 验收标准①）。
 
 ### 前提复核记录（2026-09-10，依「条目维护规则」第 2 条）
@@ -236,18 +240,26 @@
   门禁 `test --rerun-tasks` **1329 例 / 0 失败 / 13 跳过**（app 750 / core 58 / crypto 107 / database 235 / sync 179）、
   `lint` 5 模块 0 error，公开 API **零丢失零新增**。
   **残余清单已按批次 D 后实测刷新为 15 项**（见下）。
+- **2026-09-10 批次 E 进展（就地标注，本条未闭环）**：验收标准 1 点名的下一批三项
+  **全部降至阈值内并归档**，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) **§13**——
+  `S3SyncProvider` **629 → 372**（拆 4 单元：SigV4 签名 / 时钟偏移守卫 / 对象键编码 / 日期解析）、
+  `PasskeyCryptoEngine` **596 → 362**（拆 2 单元：密钥编解码 / 断言签名）、
+  `KdbxMerger` **578 → 207**（拆 3 单元：分组合并 / 条目合并 / 墓碑合并）；
+  门禁 `test --rerun-tasks` **1329 例 / 0 失败 / 13 跳过**、`lint` 5 模块 0 error，
+  公开 API **零丢失零新增**、敏感数据清零点 **6 → 6 / 13 → 13** 逐处对齐。
+  **残余清单已按批次 E 后实测刷新为 12 项**（见下）。
 - **核实时间点与核实方式（2026-09-10）**：于本仓根执行
   `foreach ($d in app,database,sync,core,crypto) { Get-ChildItem -Recurse "$d/src/main/java" -Filter *.kt }`
   并以 `(Get-Content $_.FullName).Count` 逐文件计数，筛出 `> 400` 行者并人工剔除纯常量例外
   （命令等价于 `wc -l`，尾行不计换行的文件可能相差 1 行）；
-  **批次 C 完成后重测**残余 21 → 18 项；**批次 D 完成后重测**残余 18 → **15 项**。
+  **批次 C 完成后重测**残余 21 → 18 项；**批次 D 完成后重测**残余 18 → 15 项；
+  **批次 E 完成后重测**残余 15 → **12 项**。
 - **为何单独登记**：ISSUE-P3-29 正文的**优先级 8 项已于批次 A 全部降至阈值内并归档**（见
   [RESOLVED_LOG.md](RESOLVED_LOG.md) **§6**），但全仓扫描显示超阈值仍是**普遍性既有债务**；
   按「严禁只记聊天或脑中」纪律，残余面必须有独立条目承接，避免后人误以为「巨型类问题已解决」。
 
-- **清单（2026-09-10 批次 D 完成后实测 15 项）**：
+- **清单（2026-09-10 批次 E 完成后实测 12 项）**：
 
-  `629 S3SyncProvider.kt` · `596 PasskeyCryptoEngine.kt` · `578 KdbxMerger.kt` ·
   `569 SettingsScreen.kt` · `562 UnlockScreen.kt` · `550 GeneratorScreen.kt` ·
   `510 WebDavSyncProvider.kt` · `504 AutofillSettingsScreen.kt` · `494 EntryEditComponents.kt` ·
   `481 CloudSyncComponents.kt` · `477 EntryDetailComponents.kt` · `470 EntryEditViewModel.kt` ·
@@ -261,8 +273,8 @@
   > 按「是否含真实逻辑」分级属**经论证的纯常量例外**，不拆分（保留单文件可保证词表作为一个不可分割的整体被审查）。
 
 - **验收标准（未来分批）**：
-  1. 按模块分批拆分，**优先处理体量最大且耦合最高的文件**——批次 B（§10）/ C（§11）/ D（§12）已完成；
-     下一批应指向 **`S3SyncProvider`（629）/ `PasskeyCryptoEngine`（596）/ `KdbxMerger`（578）**；
+  1. 按模块分批拆分，**优先处理体量最大且耦合最高的文件**——批次 B（§10）/ C（§11）/ D（§12）/ E（§13）已完成；
+     下一批应指向 **`SettingsScreen`（569）/ `UnlockScreen`（562）/ `GeneratorScreen`（550）**；
   2. 每批拆分为**纯结构性**改动：`.\gradlew.bat test` 全绿且用例数不减（当前 **1329 例**）；
   3. 拆分后**逐条对照敏感数据清零点与公开 API 可见性**（沿用批次 A 的验证范式：
      公开 API 零丢失零新增 + 清零点逐一对照）；

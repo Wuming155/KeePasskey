@@ -21,8 +21,9 @@
 | §10 | P3-31 批次 B（超阈值债务） | ISSUE-P3-31 |
 | §11 | P3-31 批次 C + P3-43 闭环 | ISSUE-P3-31 / P3-43 |
 | §12 | P3-31 批次 D + P3-46 闭环 | ISSUE-P3-31 / P3-46 |
+| §13 | P3-31 批次 E（超阈值债务） | ISSUE-P3-31 |
 
-> 各批次验收证据（用例数 / 通过 / 失败 / 跳过）分别见 §2.22、§3.1、§4.1、§5.1、§6.1、§7.1、§8.0、§9.5、§10.1、§11、§12。
+> 各批次验收证据（用例数 / 通过 / 失败 / 跳过）分别见 §2.22、§3.1、§4.1、§5.1、§6.1、§7.1、§8.0、§9.5、§10.1、§11、§12、§13。
 
 ---
 
@@ -286,4 +287,23 @@
 
 ---
 
-> **当前残余面（ACTIVE）**：ISSUE-P3-23（arm64 真机 + 真实 `.kdbx` 语料端到端）· P3-24（CI 首跑校准）· P3-31（超阈值 15 项）· P3-32（供应链 CVE 收尾）。
+## 13. ISSUE-P3-31 批次 E 归档（超阈值债务 · `S3SyncProvider` / `PasskeyCryptoEngine` / `KdbxMerger`）
+
+**核实**：2026-09-10，逐文件 `(Get-Content …).Count` 复核；门禁 `test --rerun-tasks --max-workers=1` → **1329 例 / 0 失败 / 13 跳过**（app 750 / core 58 / crypto 107 / database 235 / sync 179；纯结构性拆分，用例数与批次 D 持平）；`lint` 5 模块 **0 error**。残余真逻辑超阈值清单 15 → **12 项**。
+
+| 文件 | 前 → 后 | 拆出单元 |
+|---|---|---|
+| `sync/.../s3/S3SyncProvider.kt` | 629 → 372 | `S3RequestSigner`（SigV4 签名）/ `S3ClockSkewGuard`（时钟偏移守卫）/ `S3KeyCodec`（对象键编码）/ `S3HttpDateCodec`（RFC1123 解析） |
+| `crypto/.../passkey/PasskeyCryptoEngine.kt` | 596 → 362 | `PasskeyKeyCodec`（密钥编解码）/ `PasskeyAssertionSigner`（ES256 / Ed25519 / RS256 断言签名） |
+| `sync/.../merge/KdbxMerger.kt` | 578 → 207 | `KdbxGroupMerger` / `KdbxEntryMerger` / `KdbxTombstoneMerger` |
+
+- **公开 API 零丢失零新增**：新增单元一律 `internal`；`S3SyncProvider` 的 `SyncProvider` 实现（`testConnection`/`getMetadata`/`download`/`upload`/`delete`）、`encodePath`/`signV4`/`EMPTY_SHA256`、`KdbxMerger` 的 `mergeDatabases`/`isEntryModified`/`resolveConflictByFields`/`resolveConflict` 与全部结果类型（`MergeResult`/`ConflictedEntryPair`/`KdbxDatabaseLite`/`ConflictResolutionChoice`）签名逐字未变；`PasskeyCryptoEngine` 仍为 `object`，`FLAG_*` 位值、`EC_SCALAR_HEX_CHARS`、`DEFAULT_AAGUID` 数值不变。
+- **敏感数据清零点逐处对照**：`PasskeyCryptoEngine`+`PasskeyKeyCodec` **6 → 6**；`S3SyncProvider`→`S3RequestSigner` **13 → 13**（含 `canonicalRequestBytes`/`signingKey`/`kSecret`/`kDate`/`kRegion`/`kService` 等）；合并链原本无清零点（**0 → 0**）。全部 `try/finally` 结构与清零条件原样保留，未新增 `String` 落地敏感值或日志；SigV4 凭据仍以**引用借用**持有，`clearCredentials()` 即时生效语义不变。
+- **过程缺陷 / 事实修正（如实留痕）**：
+  1. 委派子代理执行 S3 拆分时**误判**需新建 `S3XmlParser`；复核发现该 provider 不含任何 XML 解析逻辑（错误全部由 HTTP 状态码/头映射为 `SyncException`），已**不创建无消费方的空壳单元**。
+  2. 子代理报告本环境 `GetDiagnostics` 对**故意注入的类型错误**亦返回空诊断（诊断通道不可靠）；本批遂以主流程 `gradlew test`/`lint` 实跑为唯一验收依据，不采信静态诊断结论。
+  3. 复核中发现 `PasskeyCryptoEngine.sealedFromPrivateChars` 的 `Arrays.fill(chars, '0')` 为原文既有写法（以 `'0'` 覆盖明文，而非 `'\u0000'`）；该写法已足以覆盖明文，按「零行为变更」**未改**，如需统一为 NUL 应另开条目评审。
+
+---
+
+> **当前残余面（ACTIVE）**：ISSUE-P3-23（arm64 真机 + 真实 `.kdbx` 语料端到端）· P3-24（CI 首跑校准）· P3-31（超阈值 12 项）· P3-32（供应链 CVE 收尾）。

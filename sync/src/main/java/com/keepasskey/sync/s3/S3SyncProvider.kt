@@ -14,13 +14,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
-import java.security.MessageDigest
-import java.text.SimpleDateFormat
 import java.util.Date
-import java.util.Locale
-import java.util.TimeZone
-import javax.crypto.Mac
-import javax.crypto.spec.SecretKeySpec
 
 /**
  * AWS S3 兼容协议客户端实现。
@@ -31,6 +25,10 @@ import javax.crypto.spec.SecretKeySpec
  * 3. 级联 HMAC-SHA256 派生签名密钥 (Signing Key) 与最终 Authorization Header 构造；
  * 4. 对象键 URL 编码与 SigV4 canonicalUri 严格一致；
  * 5. 首传 If-None-Match: * 原子创建与覆盖 If-Match 条件写并发控制（无 TOCTOU 竞争窗口）。
+ *
+ * 结构拆分（纯结构调整，零行为/协议变更）：本类仅保留 [SyncProvider] 接口实现与请求编排，
+ * 签名、对象键编码、HTTP 日期解析、时钟偏斜自愈分别下沉至同包协作单元
+ * [S3RequestSigner]、[S3KeyCodec]、[S3HttpDateCodec]、[S3ClockSkewGuard]。
  */
 class S3SyncProvider(
     private val endpoint: String,
@@ -73,16 +71,13 @@ class S3SyncProvider(
     // 仅 HTTP 回环测试需显式注入明文客户端
     private val httpClient: OkHttpClient = client ?: SyncHttpClientFactory.createSyncClient(networkOptions)
 
-    // TASK-45：运行时时钟偏移（server - local）。@Volatile：Provider 实例可能被
-    // 并发上传/下载共享（SyncCoordinator 单次同步周期内复用同一实例）。
-    // 每次响应携带有效 Date 头即刷新，吸收 NTP 校正漂移。
-    @Volatile
-    private var clockOffsetMillis: Long = initialClockOffsetMillis
+    // SigV4 签名协作单元：与 Provider 共享同一凭据 CharArray 实例（借用语义），
+    // [clearCredentials] 的显式清零对本单元即时生效
+    private val signer = S3RequestSigner(accessKeyId, secretAccessKey, region)
 
-    // 上次已上报持久化的偏移量：仅当变化 ≥ 1s 才回调（HTTP Date 秒级精度，
-    // 抑制相邻请求亚秒抖动导致的重复刷盘）。
-    @Volatile
-    private var reportedClockOffsetMillis: Long = initialClockOffsetMillis
+    // TASK-45 时钟偏移协作单元：承载运行时偏移状态与 skew 自愈判定；
+    // Provider 实例可能被并发上传/下载共享（SyncCoordinator 单次同步周期内复用同一实例）
+    private val clockSkew = S3ClockSkewGuard(initialClockOffsetMillis, clockOffsetUpdater)
 
     init {
         // ISSUE-P1-05（ZT-05）主机注入防线：桶名恒常严格按 S3 命名规则校验（与是否回环无关），
@@ -118,56 +113,14 @@ class S3SyncProvider(
     }
 
     /**
-     * TASK-26 整改：AWS SigV4 规范 URI 编码（对齐官方 `SignatureVersion4` 文档的
-     * URI encode 规则）——保留集仅为 RFC 3986 unreserved 字符（`A-Za-z0-9 - _ . ~`），
-     * 其余全部百分号编码（大写十六进制，空格编码为 %20 而非 +）。
-     *
-     * 此前实现使用 java.net.URLEncoder（表单编码语义）：`*` 属 URLEncoder 保留集不编码、
-     * `~` 被强制编码为 %7E——两者均与 AWS 规范相反，含这两字符的对象键 canonicalUri
-     * 与服务端期望不一致，签名必然不匹配（403 SignatureDoesNotMatch）。
+     * TASK-26 整改：AWS SigV4 规范 URI 编码，委托 [S3KeyCodec.encodePath]。
      * internal 可见性仅供单元测试已知答案向量校验。
      */
-    internal fun encodePath(path: String): String {
-        return path.split('/').joinToString("/") { segment ->
-            awsUriEncode(segment)
-        }
-    }
+    internal fun encodePath(path: String): String = S3KeyCodec.encodePath(path)
 
-    private fun awsUriEncode(segment: String): String {
-        val bytes = segment.toByteArray(Charsets.UTF_8)
-        val sb = StringBuilder(bytes.size)
-        for (b in bytes) {
-            val c = b.toInt() and 0xFF
-            val isUnreserved = (c in 'A'.code..'Z'.code) ||
-                (c in 'a'.code..'z'.code) ||
-                (c in '0'.code..'9'.code) ||
-                c == '-'.code || c == '_'.code || c == '.'.code || c == '~'.code
-            if (isUnreserved) {
-                sb.append(c.toChar())
-            } else {
-                sb.append('%').append("%02X".format(c))
-            }
-        }
-        return sb.toString()
-    }
-
-    private fun buildUrl(remotePath: String): String {
-        val cleanEndpoint = endpoint.trimEnd('/')
-        val cleanKey = encodePath(remotePath.trimStart('/'))
-        val base = if (cleanEndpoint.contains("://")) cleanEndpoint else "https://$cleanEndpoint"
-        return if (usePathStyle) {
-            "$base/$bucketName/$cleanKey"
-        } else {
-            val scheme = base.substringBefore("://")
-            val host = base.substringAfter("://")
-            "$scheme://$bucketName.$host/$cleanKey"
-        }
-    }
-
-    private fun getHost(url: String): String {
-        val withoutScheme = url.substringAfter("://")
-        return withoutScheme.substringBefore('/')
-    }
+    /** 拼装对象访问 URL，委托 [S3KeyCodec.buildUrl]。 */
+    private fun buildUrl(remotePath: String): String =
+        S3KeyCodec.buildUrl(endpoint, bucketName, usePathStyle, remotePath)
 
     override suspend fun testConnection(): Result<Unit> = withContext(Dispatchers.IO) {
         runCatching {
@@ -212,7 +165,7 @@ class S3SyncProvider(
                     val etag = response.header("ETag").orEmpty().cleanEtag()
                     val contentLength = response.header("Content-Length")?.toLongOrNull() ?: 0L
                     val lastModifiedStr = response.header("Last-Modified").orEmpty()
-                    val lastModified = parseHttpDate(lastModifiedStr)
+                    val lastModified = S3HttpDateCodec.parse(lastModifiedStr)
 
                     RemoteFileMetadata(
                         path = remotePath,
@@ -307,7 +260,7 @@ class S3SyncProvider(
             }
 
             val url = buildUrl(remotePath)
-            val payloadHash = sha256Hex(data)
+            val payloadHash = signer.sha256Hex(data)
             executeSignedRequest(
                 send = { signDate ->
                     val headers = signV4("PUT", url, payloadHash, signDate)
@@ -368,58 +321,6 @@ class S3SyncProvider(
     }
 
     /**
-     * TASK-45：签名时间戳取「本地时间 + 已探测时钟偏移」。偏移为 0（未探测）时
-     * 退化为本地时间，与旧版行为一致（fail-closed）。
-     */
-    private fun signingDate(): Date = Date(System.currentTimeMillis() + clockOffsetMillis)
-
-    /**
-     * TASK-45：据响应 `Date` 头刷新运行时时钟偏移（服务端时间 - 本地时间）。
-     *
-     * 返回是否成功刷新：
-     * - 响应携带可解析的 RFC 1123 `Date` 头 → 更新内存偏移并（变化 ≥ 1s 时）回调
-     *   [clockOffsetUpdater] 持久化（尽力而为，失败静默容忍，仅丢失跨进程记忆）；
-     * - 无 `Date` 头 / 解析失败 → 返回 false，**fail-closed**：不补偿、保持现状。
-     */
-    private fun refreshClockOffset(response: Response): Boolean {
-        val dateHeader = response.header("Date") ?: return false
-        val serverMillis = parseHttpDate(dateHeader)
-        if (serverMillis <= 0L) return false
-        val newOffset = serverMillis - System.currentTimeMillis()
-        clockOffsetMillis = newOffset
-        // 节流：HTTP Date 头秒级精度，相邻请求亚秒抖动不触发重复刷盘
-        if (Math.abs(newOffset - reportedClockOffsetMillis) >= CLOCK_OFFSET_PERSIST_THRESHOLD_MS) {
-            reportedClockOffsetMillis = newOffset
-            runCatching { clockOffsetUpdater?.invoke(newOffset) }
-        }
-        return true
-    }
-
-    /**
-     * TASK-45：判断本次请求是否因时钟偏斜被 S3 拒绝（`403 RequestTimeTooSkewed`，
-     * SigV4 服务端容限 ±15 分钟）。**双信号任一命中即判定**：
-     * - 响应主体含偏斜错误码标记（仅 GET/PUT/DELETE 等带实体的方法可靠）——
-     *   [peekBody] 探测不消费实体，仅 403 读取前 4 KiB，其余状态码直接短路；
-     * - 响应刷新后的时钟偏移相对本次签名时发生了超过容限量级的跳变（对无实体的
-     *   HEAD 请求同样有效——HTTP 规范禁止 HEAD 携带错误主体，只能依赖 Date 头）。
-     *
-     * 无有效 `Date` 头（无法计算偏移）或两种信号均不满足时返回 false（fail-closed）。
-     */
-    private fun Response.isClockSkewRejection(
-        offsetBeforeSigningMillis: Long,
-        offsetAfterRefreshMillis: Long
-    ): Boolean {
-        if (code != 403) return false
-        val bodyMarked = runCatching { peekBody(4096).string().contains(REQUEST_TIME_TOO_SKEWED) }
-            .getOrDefault(false)
-        val offsetJump = Math.abs(offsetAfterRefreshMillis - offsetBeforeSigningMillis)
-        // 请求被拒仅因签名时间偏离服务端超过 15 分钟；此处跳变必然同量级。阈值取 14 分钟
-        // 吸收 HTTP Date 秒级截断与网络 RTT 造成的亚分钟偏差，杜绝在正常时钟下误判重试
-        val offsetJumpedSkewScale = offsetJump > CLOCK_SKEW_RETRY_THRESHOLD_MS
-        return bodyMarked || offsetJumpedSkewScale
-    }
-
-    /**
      * 执行一次 SigV4 签名请求并以 [consume] 消费响应。统一承载 TASK-45 时钟偏移自愈：
      * 1. **每响必刷新**：任何响应（含 4xx/5xx）携带有效 `Date` 头都会刷新内部时钟偏移
      *    （吸收 NTP 校正漂移，本会话后续请求签名立即受益）；
@@ -435,12 +336,12 @@ class S3SyncProvider(
     ): T {
         var skewRetried = false
         while (true) {
-            val offsetBeforeSigning = clockOffsetMillis
-            val response = send(signingDate())
+            val offsetBeforeSigning = clockSkew.clockOffsetMillis
+            val response = send(clockSkew.signingDate())
             response.use {
-                val refreshed = refreshClockOffset(it)
+                val refreshed = clockSkew.refreshFrom(it)
                 val skewRejected = !skewRetried && refreshed &&
-                    it.isClockSkewRejection(offsetBeforeSigning, clockOffsetMillis)
+                    clockSkew.isSkewRejection(it, offsetBeforeSigning, clockSkew.clockOffsetMillis)
                 if (skewRejected) {
                     skewRetried = true
                     // 偏移已按该 403 响应的 Date 头刷新，回到循环顶部用补偿后时间重签重试
@@ -452,178 +353,20 @@ class S3SyncProvider(
     }
 
     /**
-     * 实现 AWS Signature Version 4 鉴权。
+     * 实现 AWS Signature Version 4 鉴权，委托 [S3RequestSigner.signV4]。
      * canonicalUri 必须与实际请求 URL 经过相同路径编码后的 URI 严格一致。
      *
-     * TASK-45：生产调用方一律经 [signingDate] 传入补偿后时间戳；[dateTime] 保留默认值
-     * 仅供单元测试注入固定时间点（已知答案向量）使用。
-     *
-     * ISSUE-P1-06 整改：signingKey 派生链全程 ByteArray 承载，用毕 finally 逐一 fill(0)；
-     * accessKeyId 仅在构造 Authorization header 瞬间转 String（HTTP 协议边界不可避免），
-     * 该 String 为方法局部变量，随栈帧退出即不可达（对比旧版构造器字段级 String 驻留）。
+     * TASK-45：生产调用方一律经 [S3ClockSkewGuard.signingDate] 传入补偿后时间戳；
+     * [dateTime] 保留默认值仅供单元测试注入固定时间点（已知答案向量）使用。
      */
     internal fun signV4(
         method: String,
         url: String,
         payloadHash: String,
         dateTime: Date = Date()
-    ): Map<String, String> {
-        val isoFormat = SimpleDateFormat("yyyyMMdd'T'HHmmss'Z'", Locale.US).apply {
-            timeZone = TimeZone.getTimeZone("UTC")
-        }
-        val dateFormat = SimpleDateFormat("yyyyMMdd", Locale.US).apply {
-            timeZone = TimeZone.getTimeZone("UTC")
-        }
-
-        val amzDate = isoFormat.format(dateTime)
-        val dateStamp = dateFormat.format(dateTime)
-
-        val host = getHost(url)
-        val canonicalUri = "/" + url.substringAfter("://").substringAfter('/').substringBefore('?')
-
-        val canonicalHeaders = "host:$host\nx-amz-content-sha256:$payloadHash\nx-amz-date:$amzDate\n"
-        val signedHeaders = "host;x-amz-content-sha256;x-amz-date"
-
-        val canonicalRequest = "$method\n$canonicalUri\n\n$canonicalHeaders\n$signedHeaders\n$payloadHash"
-        val canonicalRequestBytes = canonicalRequest.toByteArray(Charsets.UTF_8)
-        val canonicalRequestHash = try {
-            sha256Hex(canonicalRequestBytes)
-        } finally {
-            canonicalRequestBytes.fill(0)
-        }
-
-        val credentialScope = "$dateStamp/$region/s3/aws4_request"
-        val stringToSign = "AWS4-HMAC-SHA256\n$amzDate\n$credentialScope\n$canonicalRequestHash"
-
-        // ISSUE-P1-06：signingKey 为敏感派生中间量，用毕必须擦除
-        val signingKey = getSignatureKey(secretAccessKey, dateStamp, region, "s3")
-        val signature = try {
-            hmacSha256Hex(signingKey, stringToSign)
-        } finally {
-            signingKey.fill(0)
-        }
-
-        // accessKeyId CharArray → String：仅存活于本方法栈帧（HTTP header 协议边界），
-        // 对比旧版构造器字段级 String 驻留，暴露面从「Provider 生命周期」收窄至「单次签名调用」
-        val accessKeyIdStr = String(accessKeyId)
-        val authorizationHeader = "AWS4-HMAC-SHA256 Credential=$accessKeyIdStr/$credentialScope, SignedHeaders=$signedHeaders, Signature=$signature"
-
-        return mapOf(
-            "Host" to host,
-            "x-amz-date" to amzDate,
-            "x-amz-content-sha256" to payloadHash,
-            "Authorization" to authorizationHeader
-        )
-    }
-
-    /**
-     * ISSUE-P1-06 整改：SigV4 签名密钥派生链（kSecret → kDate → kRegion → kService → signingKey）。
-     * 全链 ByteArray 中间量在 finally 中逐一 fill(0) 擦除——杜绝派生密钥材料残留堆内存。
-     *
-     * @param key Secret Access Key（CharArray 借用语义，本方法不擦除调用方数组，
-     *            仅在内部转为 UTF-8 字节并立即擦除该字节副本）
-     */
-    private fun getSignatureKey(key: CharArray, dateStamp: String, regionName: String, serviceName: String): ByteArray {
-        // CharArray → UTF-8 字节（"AWS4" 前缀拼接），用毕立即擦除
-        val kSecret = try {
-            val prefix = "AWS4".toByteArray(Charsets.UTF_8)
-            val keyBytes = key.toByteArrayUtf8()
-            val combined = ByteArray(prefix.size + keyBytes.size)
-            try {
-                prefix.copyInto(combined, 0)
-                keyBytes.copyInto(combined, prefix.size)
-                combined.copyOf() // 返回独立副本，prefix/keyBytes 可先擦除
-            } finally {
-                prefix.fill(0)
-                keyBytes.fill(0)
-            }
-        } catch (_: Exception) {
-            // 极端 OOM 下 combined 可能未初始化，fallback 空数组（后续 HMAC 必失败，如实上浮）
-            ByteArray(0)
-        }
-
-        val kDate: ByteArray
-        val kRegion: ByteArray
-        val kService: ByteArray
-        val signingKey: ByteArray
-        try {
-            kDate = hmacSha256(kSecret, dateStamp)
-            kRegion = hmacSha256(kDate, regionName)
-            kService = hmacSha256(kRegion, serviceName)
-            signingKey = hmacSha256(kService, "aws4_request")
-        } finally {
-            kSecret.fill(0)
-        }
-        // kDate/kRegion/kService 在 signingKey 派生完成后已无引用价值，逐一擦除
-        try {
-            return signingKey
-        } finally {
-            kDate.fill(0)
-            kRegion.fill(0)
-            kService.fill(0)
-        }
-    }
-
-    /** CharArray → UTF-8 ByteArray（CharBuffer 直转，不经 String，对齐 SyncCredentialsStore 手法） */
-    private fun CharArray.toByteArrayUtf8(): ByteArray {
-        val bb = java.nio.charset.StandardCharsets.UTF_8.encode(java.nio.CharBuffer.wrap(this))
-        return try {
-            val bytes = ByteArray(bb.remaining())
-            bb.get(bytes)
-            bytes
-        } finally {
-            if (bb.hasArray()) bb.array().fill(0)
-        }
-    }
-
-    private fun hmacSha256(key: ByteArray, data: String): ByteArray {
-        val dataBytes = data.toByteArray(Charsets.UTF_8)
-        return try {
-            val mac = Mac.getInstance("HmacSHA256")
-            mac.init(SecretKeySpec(key, "HmacSHA256"))
-            mac.doFinal(dataBytes)
-        } finally {
-            dataBytes.fill(0)
-        }
-    }
-
-    private fun hmacSha256Hex(key: ByteArray, data: String): String {
-        val result = hmacSha256(key, data)
-        return try {
-            result.toHexString()
-        } finally {
-            result.fill(0)
-        }
-    }
-
-    private fun sha256Hex(data: ByteArray): String {
-        val digest = MessageDigest.getInstance("SHA-256")
-        return digest.digest(data).toHexString()
-    }
-
-    private fun parseHttpDate(dateStr: String): Long {
-        if (dateStr.isBlank()) return 0L
-        try {
-            val sdf = SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss zzz", Locale.US).apply {
-                timeZone = TimeZone.getTimeZone("GMT")
-            }
-            return sdf.parse(dateStr)?.time ?: 0L
-        } catch (_: Exception) {
-            return 0L
-        }
-    }
+    ): Map<String, String> = signer.signV4(method, url, payloadHash, dateTime)
 
     companion object {
-        const val EMPTY_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-
-        // TASK-45：时钟偏移持久化节流阈值——HTTP Date 头秒级精度，变化 < 1s 不回调刷盘
-        private const val CLOCK_OFFSET_PERSIST_THRESHOLD_MS = 1000L
-
-        // TASK-45：skew 判定偏移跳变阈值——SigV4 服务端容限 ±15 分钟，取 14 分钟吸收
-        // HTTP Date 秒级截断与网络 RTT 的亚分钟偏差（正常时钟下绝无如此量级跳变）
-        private const val CLOCK_SKEW_RETRY_THRESHOLD_MS = 14L * 60 * 1000
-
-        // S3 时钟偏斜错误码主体标记（SigV4 ±15 分钟容限，设备时钟偏移超限时返回）
-        private const val REQUEST_TIME_TOO_SKEWED = "RequestTimeTooSkewed"
+        const val EMPTY_SHA256 = S3RequestSigner.EMPTY_SHA256
     }
 }

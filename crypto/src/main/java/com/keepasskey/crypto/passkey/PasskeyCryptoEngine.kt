@@ -4,11 +4,7 @@ import com.keepasskey.core.model.PasskeyData
 import com.keepasskey.core.security.ProtectedString
 import com.keepasskey.crypto.cose.CoseKey
 import com.keepasskey.crypto.exception.CryptoException
-import org.bouncycastle.asn1.ASN1InputStream
-import org.bouncycastle.asn1.pkcs.PrivateKeyInfo
-import org.bouncycastle.asn1.pkcs.RSAPublicKey
 import org.bouncycastle.asn1.sec.SECNamedCurves
-import org.bouncycastle.asn1.x509.SubjectPublicKeyInfo
 import org.bouncycastle.asn1.x9.X9ECParameters
 import org.bouncycastle.crypto.digests.SHA256Digest
 import org.bouncycastle.crypto.generators.ECKeyPairGenerator
@@ -24,11 +20,6 @@ import org.bouncycastle.crypto.params.Ed25519PublicKeyParameters
 import org.bouncycastle.crypto.params.RSAKeyGenerationParameters
 import org.bouncycastle.crypto.params.RSAKeyParameters
 import org.bouncycastle.crypto.params.RSAPrivateCrtKeyParameters
-import org.bouncycastle.crypto.signers.ECDSASigner
-import org.bouncycastle.crypto.signers.Ed25519Signer
-import org.bouncycastle.crypto.signers.HMacDSAKCalculator
-import org.bouncycastle.crypto.signers.RSADigestSigner
-import org.bouncycastle.crypto.util.PrivateKeyFactory
 import org.bouncycastle.crypto.util.PrivateKeyInfoFactory
 import org.bouncycastle.crypto.util.SubjectPublicKeyInfoFactory
 import java.io.ByteArrayOutputStream
@@ -51,6 +42,9 @@ import java.util.Base64
  * BigInteger 二进制形态编码为 hex [CharArray]，Ed25519/RS256 的 Base64 编码经 [CharArray] 通道
  * 封装，全部中间字节/字符副本用毕即 `fill(0)` 擦除。私钥文本形态的唯一长期持有者是
  * [ProtectedString]（InMemoryCipher 密文驻留），KDBX 受保护字段以文本承载属格式层不可消解边界。
+ *
+ * 纯结构性下沉：[PasskeyKeyCodec] 承载编解码/解析，[PasskeyAssertionSigner] 承载三类签名实现；
+ * 本对象保留生成、装配与统一签名入口，公开 API 与敏感清零点不变。
  */
 object PasskeyCryptoEngine {
 
@@ -95,7 +89,7 @@ object PasskeyCryptoEngine {
         // ISSUE-P1-02（生成侧脱敏）：私钥标量不落 String——直接从 BigInteger 二进制形态编码为
         // 定长 64 字符小写 hex CharArray（标量二进制副本与字符副本用毕即清零），再封装进
         // ProtectedString 密文驻留层供 KDBX 受保护字段存储。
-        val privHexChars = scalarToHexChars(priv.d, EC_SCALAR_HEX_CHARS)
+        val privHexChars = PasskeyKeyCodec.scalarToHexChars(priv.d, PasskeyKeyCodec.EC_SCALAR_HEX_CHARS)
         val privateKeyProtected = sealedFromPrivateChars(privHexChars)
 
         val handle = resolveUserHandle(userHandle)
@@ -139,7 +133,7 @@ object PasskeyCryptoEngine {
 
         // ISSUE-P1-02（生成侧脱敏）：Base64 编码结果不落 String，经 CharArray 通道封装进
         // ProtectedString，字符副本与原始种子字节副本用毕即清零。
-        val privChars = base64ToChars(privEncoded)
+        val privChars = PasskeyKeyCodec.base64ToChars(privEncoded)
         Arrays.fill(privEncoded, 0.toByte())
         val privateKey = sealedFromPrivateChars(privChars)
 
@@ -199,7 +193,7 @@ object PasskeyCryptoEngine {
 
         // ISSUE-P1-02（生成侧脱敏）：PKCS#8 DER 的 Base64 编码不落 String，经 CharArray 通道
         // 封装进 ProtectedString，字符副本与 DER 中间副本用毕即清零。
-        val privChars = base64ToChars(privEncoded)
+        val privChars = PasskeyKeyCodec.base64ToChars(privEncoded)
         Arrays.fill(privEncoded, 0.toByte())
         val privateKey = sealedFromPrivateChars(privChars)
 
@@ -234,9 +228,9 @@ object PasskeyCryptoEngine {
         val workingKey = privateKeyBytes.clone()
         try {
             return when (algorithmId) {
-                PasskeyData.ALGORITHM_ES256 -> signEs256(workingKey, dataToSign)
-                PasskeyData.ALGORITHM_ED25519 -> signEd25519(workingKey, dataToSign)
-                PasskeyData.ALGORITHM_RS256 -> signRs256(workingKey, dataToSign)
+                PasskeyData.ALGORITHM_ES256 -> PasskeyAssertionSigner.signEs256(workingKey, dataToSign)
+                PasskeyData.ALGORITHM_ED25519 -> PasskeyAssertionSigner.signEd25519(workingKey, dataToSign)
+                PasskeyData.ALGORITHM_RS256 -> PasskeyAssertionSigner.signRs256(workingKey, dataToSign)
                 else -> throw CryptoException.InvalidKeyException("不支持的 Passkey 签名算法标识: $algorithmId")
             }
         } finally {
@@ -320,15 +314,15 @@ object PasskeyCryptoEngine {
     fun coseKeyFor(algorithmId: Int, publicKeyBytes: ByteArray): ByteArray {
         return when (algorithmId) {
             PasskeyData.ALGORITHM_ES256 -> {
-                val (x, y) = extractEcPoint(publicKeyBytes)
+                val (x, y) = PasskeyKeyCodec.extractEcPoint(publicKeyBytes)
                 CoseKey.ec2P256(x, y)
             }
             PasskeyData.ALGORITHM_ED25519 -> {
-                val rawPub = extractEd25519PublicKey(publicKeyBytes)
+                val rawPub = PasskeyKeyCodec.extractEd25519PublicKey(publicKeyBytes)
                 CoseKey.ed25519(rawPub)
             }
             PasskeyData.ALGORITHM_RS256 -> {
-                val (n, e) = extractRsaModulusAndExponent(publicKeyBytes)
+                val (n, e) = PasskeyKeyCodec.extractRsaModulusAndExponent(publicKeyBytes)
                 CoseKey.rsa2048(n, e)
             }
             else -> throw CryptoException.InvalidKeyException("不支持的 COSE Key 算法标识: $algorithmId")
@@ -336,55 +330,6 @@ object PasskeyCryptoEngine {
     }
 
     // ================= 私有实现与辅助工具 =================
-
-    // ================= 生成侧敏感编码辅助（ISSUE-P1-02：全程零 String 中间量） =================
-
-    /** ES256 私钥标量的定长 hex 字符数（256 位 → 64 hex 字符，等价 String.format("%064x")） */
-    private const val EC_SCALAR_HEX_CHARS = 64
-
-    /** 小写 hex 字母表（公开字母表常量，非敏感数据） */
-    private const val HEX_DIGITS = "0123456789abcdef"
-
-    /**
-     * 将非负整数编码为定长 [digits] 位小写 hex 的 [CharArray]（零 String 中间量），
-     * 左侧不足补 '0'，结果等价于 `String.format("%0${digits}x", value)`。
-     * BigInteger 的二进制副本在 finally 中立即清零。
-     */
-    private fun scalarToHexChars(value: BigInteger, digits: Int): CharArray {
-        require(value.signum() >= 0) { "仅支持非负整数编码" }
-        val magnitude = value.toByteArray()
-        try {
-            // 去除 two's-complement 符号位前导 0x00（值本身非负，最高位字节 0x00 均为符号填充）
-            var start = 0
-            while (start < magnitude.size - 1 && magnitude[start] == 0.toByte()) start++
-            val magLen = magnitude.size - start
-            require(magLen * 2 <= digits) { "数值超出定长 hex 编码容量: 需 ${magLen * 2} 位 > $digits 位" }
-            val chars = CharArray(digits) { '0' }
-            var ci = digits - 1
-            for (i in magnitude.size - 1 downTo start) {
-                val b = magnitude[i].toInt() and 0xFF
-                // 自右向左回填：先写低半字节（占较高索引），再写高半字节（占较低索引）
-                chars[ci--] = HEX_DIGITS[b and 0x0F]
-                chars[ci--] = HEX_DIGITS[b ushr 4]
-            }
-            return chars
-        } finally {
-            Arrays.fill(magnitude, 0.toByte())
-        }
-    }
-
-    /**
-     * 将字节流以标准 Base64 编码为 [CharArray]（零 String 中间量；Base64 输出恒为 ASCII，
-     * 逐字节映射无损且可经 UTF-8 往还），中间编码字节副本在 finally 中立即清零。
-     */
-    private fun base64ToChars(bytes: ByteArray): CharArray {
-        val encoded = Base64.getEncoder().encode(bytes)
-        try {
-            return CharArray(encoded.size) { encoded[it].toInt().toChar() }
-        } finally {
-            Arrays.fill(encoded, 0.toByte())
-        }
-    }
 
     /**
      * 以 [CharArray] 承载的私钥文本封装受保护字段（InMemoryCipher 密文驻留），
@@ -397,161 +342,6 @@ object PasskeyCryptoEngine {
         } finally {
             Arrays.fill(chars, '0')
         }
-    }
-
-
-    private fun signEs256(privateKeyBytes: ByteArray, dataToSign: ByteArray): ByteArray {
-        val privKeyParams = parseEcPrivateKey(privateKeyBytes)
-
-        val digest = SHA256Digest()
-        digest.update(dataToSign, 0, dataToSign.size)
-        val hash = ByteArray(digest.digestSize)
-        digest.doFinal(hash, 0)
-
-        val signer = ECDSASigner(HMacDSAKCalculator(SHA256Digest()))
-        signer.init(true, privKeyParams)
-        val components = signer.generateSignature(hash)
-        val r = components[0]
-        val s = components[1]
-
-        return encodeDerSignature(r, s)
-    }
-
-    private fun signEd25519(privateKeyBytes: ByteArray, dataToSign: ByteArray): ByteArray {
-        val privParam = if (privateKeyBytes.size == 32) {
-            Ed25519PrivateKeyParameters(privateKeyBytes, 0)
-        } else {
-            PrivateKeyFactory.createKey(privateKeyBytes) as Ed25519PrivateKeyParameters
-        }
-
-        val signer = Ed25519Signer()
-        signer.init(true, privParam)
-        signer.update(dataToSign, 0, dataToSign.size)
-        return signer.generateSignature()
-    }
-
-    private fun signRs256(privateKeyBytes: ByteArray, dataToSign: ByteArray): ByteArray {
-        val privKey = PrivateKeyFactory.createKey(privateKeyBytes) as RSAKeyParameters
-        val signer = RSADigestSigner(SHA256Digest())
-        signer.init(true, privKey)
-        signer.update(dataToSign, 0, dataToSign.size)
-        return signer.generateSignature()
-    }
-
-    /**
-     * 解析 EC (ES256/P-256) 私钥字节流为签名参数。
-     * 兼容三种输入形态：32 字节原始标量 / 64 字节 hex 文本字节流 / PKCS#8 DER（失败回退 hex 文本）。
-     *
-     * P2-9 整改：标量必须满足 d ∈ [1, n-1]（SEC1 §3.2 私钥有效域），越界（含 d=0 / d≥n）
-     * 一律 fail-closed 抛出本模块类型化 [CryptoException.InvalidKeyException]——杜绝全零字节流
-     * 等病态输入生成非法私钥参与签名运算。显式范围校验为权威检查点，库层 IAE 统一归一为同一异常类型。
-     */
-    private fun parseEcPrivateKey(bytes: ByteArray): ECPrivateKeyParameters {
-        val privKey = when {
-            bytes.size == 32 -> {
-                newEcPrivateKey(BigInteger(1, bytes))
-            }
-            bytes.size == 64 -> {
-                // 兼容 hex 字符串对应的 ASCII 字节流
-                try {
-                    newEcPrivateKey(BigInteger(String(bytes, Charsets.UTF_8), 16))
-                } catch (e: CryptoException.InvalidKeyException) {
-                    throw e
-                } catch (e: Exception) {
-                    newEcPrivateKey(BigInteger(1, bytes))
-                }
-            }
-            else -> {
-                try {
-                    val keyParam = PrivateKeyFactory.createKey(bytes) as ECPrivateKeyParameters
-                    keyParam
-                } catch (e: Exception) {
-                    try {
-                        // 回退尝试当作 UTF-8 hex 文本
-                        newEcPrivateKey(BigInteger(String(bytes, Charsets.UTF_8), 16))
-                    } catch (e2: CryptoException.InvalidKeyException) {
-                        throw e2
-                    } catch (e2: Exception) {
-                        throw CryptoException.InvalidKeyException("无法从字节流解析 EC 私钥（所有形态均失败）", e2)
-                    }
-                }
-            }
-        }
-        // 权威检查点：显式标量范围校验（不依赖库层构造器的行为）
-        validateEcScalarRange(privKey.d)
-        return privKey
-    }
-
-    /**
-     * 构造 EC 私钥参数；库层对标量越界抛出的 IllegalArgumentException 统一归一为
-     * 本模块类型化的 [CryptoException.InvalidKeyException]（fail-closed，不作任何回退放行）。
-     */
-    private fun newEcPrivateKey(d: BigInteger): ECPrivateKeyParameters {
-        return try {
-            ECPrivateKeyParameters(d, domainParams)
-        } catch (e: IllegalArgumentException) {
-            throw CryptoException.InvalidKeyException("EC 私钥标量越界：d 须满足 [1, n-1]，实际值不合法，已拒绝签名运算", e)
-        }
-    }
-
-    /**
-     * EC 私钥标量有效性校验：d ∈ [1, n-1]，越界 fail-closed。
-     */
-    private fun validateEcScalarRange(d: BigInteger) {
-        if (d.signum() < 1 || d >= ecParams.n) {
-            throw CryptoException.InvalidKeyException(
-                "EC 私钥标量越界：d 须满足 [1, n-1]，实际值不合法，已拒绝签名运算"
-            )
-        }
-    }
-
-    private fun extractEcPoint(bytes: ByteArray): Pair<ByteArray, ByteArray> {
-        return when {
-            bytes.size == 65 && bytes[0] == 0x04.toByte() -> {
-                val x = bytes.copyOfRange(1, 33)
-                val y = bytes.copyOfRange(33, 65)
-                Pair(x, y)
-            }
-            bytes.size == 64 -> {
-                val x = bytes.copyOfRange(0, 32)
-                val y = bytes.copyOfRange(32, 64)
-                Pair(x, y)
-            }
-            else -> {
-                // 尝试解析 X.509 SubjectPublicKeyInfo DER
-                val spki = SubjectPublicKeyInfo.getInstance(bytes)
-                val pointBytes = spki.publicKeyData.bytes
-                if (pointBytes.size == 65 && pointBytes[0] == 0x04.toByte()) {
-                    Pair(pointBytes.copyOfRange(1, 33), pointBytes.copyOfRange(33, 65))
-                } else {
-                    throw CryptoException.InvalidKeyException("无法从公钥数据解析 EC 坐标点: 大小=${bytes.size}")
-                }
-            }
-        }
-    }
-
-    private fun extractEd25519PublicKey(bytes: ByteArray): ByteArray {
-        return when (bytes.size) {
-            32 -> bytes
-            else -> {
-                val spki = SubjectPublicKeyInfo.getInstance(bytes)
-                val raw = spki.publicKeyData.bytes
-                require(raw.size == 32) { "从 SPKI 提取的 Ed25519 公钥不是 32 字节: ${raw.size}" }
-                raw
-            }
-        }
-    }
-
-    private fun extractRsaModulusAndExponent(bytes: ByteArray): Pair<ByteArray, ByteArray> {
-        val rsaPub = try {
-            val spki = SubjectPublicKeyInfo.getInstance(bytes)
-            RSAPublicKey.getInstance(spki.parsePublicKey())
-        } catch (e: Exception) {
-            ASN1InputStream(bytes).use { stream ->
-                RSAPublicKey.getInstance(stream.readObject())
-            }
-        }
-        return Pair(rsaPub.modulus.toByteArray(), rsaPub.publicExponent.toByteArray())
     }
 
     private fun generateRandomCredentialId(): String {
@@ -568,29 +358,5 @@ object PasskeyCryptoEngine {
         } else {
             userHandle
         }
-    }
-
-    /**
-     * 将 R, S 组装为 ASN.1 DER 编码的 ECDSA 签名
-     */
-    private fun encodeDerSignature(r: BigInteger, s: BigInteger): ByteArray {
-        val rBytes = r.toByteArray()
-        val sBytes = s.toByteArray()
-
-        val innerLen = 2 + rBytes.size + 2 + sBytes.size
-        val der = ByteArray(2 + innerLen)
-
-        der[0] = 0x30 // SEQUENCE
-        der[1] = innerLen.toByte()
-        der[2] = 0x02 // INTEGER
-        der[3] = rBytes.size.toByte()
-        System.arraycopy(rBytes, 0, der, 4, rBytes.size)
-
-        val sOffset = 4 + rBytes.size
-        der[sOffset] = 0x02 // INTEGER
-        der[sOffset + 1] = sBytes.size.toByte()
-        System.arraycopy(sBytes, 0, der, sOffset + 2, sBytes.size)
-
-        return der
     }
 }
