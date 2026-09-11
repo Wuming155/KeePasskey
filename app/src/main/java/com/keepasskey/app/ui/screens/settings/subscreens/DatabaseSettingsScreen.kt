@@ -27,6 +27,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -39,6 +40,7 @@ import com.keepasskey.app.ui.screens.importer.ImportUiState
 import com.keepasskey.app.ui.screens.settings.ChildDatabaseUiState
 import com.keepasskey.app.ui.screens.settings.ExportConfirmationPolicy
 import com.keepasskey.app.ui.screens.settings.KdfBenchmarkUiState
+import com.keepasskey.app.ui.screens.settings.SafDocumentCleanup
 import com.keepasskey.app.ui.screens.settings.SettingsUiState
 
 /**
@@ -329,11 +331,17 @@ fun DatabaseSettingsScreen(
 
     // 对话框 6b：明文 XML 导出二次确认（ISSUE-P2-10 / ZT-15）
     if (showPlaintextXmlConfirm) {
+        // ISSUE-P2-20：取消分支清理 SAF 已创建的空目标文档，不留 0 字节残留
+        val localContext = LocalContext.current
+        fun cleanupCancelledXmlTarget() {
+            pendingPlaintextXmlUri?.let {
+                SafDocumentCleanup.deleteCreatedDocument(localContext, it)
+            }
+            showPlaintextXmlConfirm = false
+            pendingPlaintextXmlUri = null
+        }
         AlertDialog(
-            onDismissRequest = {
-                showPlaintextXmlConfirm = false
-                pendingPlaintextXmlUri = null
-            },
+            onDismissRequest = { cleanupCancelledXmlTarget() },
             title = { Text(stringResource(R.string.dbset_export_plain_warn_title)) },
             text = {
                 Text(
@@ -359,10 +367,7 @@ fun DatabaseSettingsScreen(
                 }
             },
             dismissButton = {
-                TextButton(onClick = {
-                    showPlaintextXmlConfirm = false
-                    pendingPlaintextXmlUri = null
-                }) {
+                TextButton(onClick = { cleanupCancelledXmlTarget() }) {
                     Text(stringResource(R.string.btn_cancel))
                 }
             }

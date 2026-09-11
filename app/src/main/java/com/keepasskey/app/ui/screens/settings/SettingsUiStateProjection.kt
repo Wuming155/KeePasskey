@@ -89,6 +89,8 @@ internal fun buildSettingsUiState(
     // 1. 密码库与加密设置
     databaseName = dbState.databaseName,
     databaseDefaultUsername = dbState.defaultUsername,
+    // ISSUE-P3-59：文件路径真实下发（活动库记录）
+    databasePath = dbState.databasePath,
     encryptionAlgorithm = dbState.encryptionAlgorithm,
     kdfAlgorithm = dbState.kdfAlgorithm,
     argon2Iterations = dbState.argon2Iterations,
@@ -196,6 +198,7 @@ internal fun buildSettingsUiState(
     breachCheckEnabled = extState.breachCheckEnabled,
     lastHealthScanTime = healthState.lastHealthScanTime,
     isHealthScanning = healthState.isHealthScanning,
+    hasHealthScanned = healthState.hasScanned,
 
     // 8. 调试日志
     debugLogEnabled = extState.debugLogEnabled,

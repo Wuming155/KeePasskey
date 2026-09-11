@@ -101,13 +101,25 @@ class VaultImportController @Inject constructor(
         var batch: ImportBatch? = null
         return try {
             when (val parsed = importer.parse(bytes, fileName ?: EMPTY_FILE_NAME)) {
-                is KdbxResult.Failure ->
+                is KdbxResult.Failure -> {
+                    // 异常类型 + 静态文案归入诊断日志（不含文件内容）：设备侧 SAX 行为差异
+                    // 只能靠此线索定位（宿主 JVM 与 Android 解析器实现不同）。
+                    debugLog.warn(
+                        TAG,
+                        "导入解析失败: ${parsed.error.javaClass.name}: ${parsed.error.message ?: "（无消息）"}"
+                    )
                     ImportUiState.Failed(source, ImportFailureReason.classify(parsed.error))
+                }
                 is KdbxResult.Success -> {
                     batch = parsed.data
                     when (val persisted = vaultImporter.persist(parsed.data, policy)) {
-                        is KdbxResult.Failure ->
+                        is KdbxResult.Failure -> {
+                            debugLog.warn(
+                                TAG,
+                                "导入落库失败: ${persisted.error.javaClass.name}: ${persisted.error.message ?: "（无消息）"}"
+                            )
                             ImportUiState.Failed(source, ImportFailureReason.classify(persisted.error))
+                        }
                         is KdbxResult.Success -> ImportUiState.Done(persisted.data)
                     }
                 }

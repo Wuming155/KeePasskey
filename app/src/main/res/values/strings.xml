@@ -64,7 +64,7 @@
 
     <!-- 解锁页面 -->
     <string name="unlock_title">KeePasskey</string>
-    <string name="unlock_subtitle">密码库已锁定 • KDBX v4 (Argon2d + AES-256)</string>
+    <string name="unlock_subtitle">密码库已锁定 • KDBX v4 加密库</string>
     <string name="unlock_master_password">主密码 (Master Password)</string>
     <string name="unlock_master_password_hint">输入主密码以解锁</string>
     <string name="unlock_keyfile">密钥文件</string>
@@ -212,7 +212,7 @@
     <string name="settings_title">设置</string>
     <string name="settings_cat_storage">密码库与存储</string>
     <string name="settings_database">密码库与加密</string>
-    <string name="settings_database_sub">KDBX 4.1 · Argon2id · 加密参数与回收站</string>
+    <string name="settings_database_sub">KDBX 4 · Argon2 / AES-KDF · 加密参数与回收站</string>
     <string name="settings_sync">云端同步</string>
     <string name="settings_sync_sub">WebDAV、兼容 S3 存储多协议自动同步</string>
     <string name="settings_change_master_key">更改主密钥</string>
@@ -451,7 +451,9 @@
     <string name="dbset_field_cipher">加密算法</string>
     <string name="dbset_field_kdf">密钥派生函数 (KDF)</string>
     <string name="dbset_field_argon2">Argon2 参数</string>
-    <string name="dbset_argon2_value">Argon2d · 64 MB / 8 轮</string>
+    <!-- ISSUE-P2-19：参数行改为真实值格式化（内存 MB / 迭代轮数 / 并行度），不再使用静态假值 -->
+    <string name="dbset_argon2_value">%1$d MB · %2$d 轮 · P=%3$d</string>
+    <string name="dbset_value_unset">未设置</string>
     <string name="dbset_section_extensions">扩展功能</string>
     <string name="dbset_templates_title">条目模板</string>
     <string name="dbset_templates_sub">预置网页登录、银行卡等常用模板</string>
@@ -750,7 +752,7 @@
     <!-- ===== 关于页 (AboutSettingsScreen) ===== -->
     <string name="about_section_spec">技术规格</string>
     <string name="about_spec_enc_title">加密规格</string>
-    <string name="about_spec_enc_desc">KDBX 4.1 · AES-256 / ChaCha20 · Argon2 密钥派生</string>
+    <string name="about_spec_enc_desc">KDBX 4 · AES-256 / ChaCha20 / Twofish · Argon2 / AES-KDF 密钥派生</string>
     <string name="about_spec_passkey_desc">端到端生成、存储与自动填充通行密钥，低版本平滑退化为传统密码填充</string>
     <string name="about_spec_arch_title">应用架构</string>
     <string name="about_spec_arch_desc">原生 Kotlin · Jetpack Compose · 模块化分层架构</string>

@@ -30,17 +30,39 @@ internal object HardenedXmlReader {
      * 同时避免 XML 声明中的 `encoding` 与实际字节不符带来的歧义。
      */
     fun parse(text: String, handler: DefaultHandler2) {
-        val factory = SAXParserFactory.newInstance()
-        factory.isNamespaceAware = false
-        applyGuardFeature(factory, FEATURE_DISALLOW_DOCTYPE_DECL, true)
-        applyGuardFeature(factory, FEATURE_EXTERNAL_GENERAL_ENTITIES, false)
-        applyGuardFeature(factory, FEATURE_EXTERNAL_PARAMETER_ENTITIES, false)
-        applyGuardFeature(factory, FEATURE_RESOLVE_DTD_URIS, false)
-        disableXInclude(factory)
-
-        val parser = factory.newSAXParser()
-        registerLexicalHandler(parser.xmlReader, handler)
+        val parser = newLenientParser(handler)
         parser.parse(InputSource(StringReader(text)), handler)
+    }
+
+    /**
+     * 构建带 XXE 加固特性的 SAX 解析器；任一特性被平台拒绝都**不得阻断导入**。
+     *
+     * ISSUE-P1-15（设备实测 2026-09-11）：Android Harmony SAX 对部分特性（如
+     * `resolve-dtd-uris`）**延迟到 `newSAXParser()` 才抛** `ParserConfigurationException`
+     * （宿主 JVM 的 Xerces 无此行为，宿主单测因此无法拦截）。处置：逐轮剔除最后一个
+     * 待用特性并重建解析器重试；全部剔除仍失败才放行异常——handler 侧
+     * `startDTD` / `resolveEntity` 兜底在任意轮次都保持 fail-closed。
+     */
+    private fun newLenientParser(handler: DefaultHandler2): javax.xml.parsers.SAXParser {
+        var features = GUARD_FEATURES
+        while (true) {
+            val factory = factoryProvider()
+            factory.isNamespaceAware = false
+            disableXInclude(factory)
+            features.forEach { (feature, enabled) -> applyGuardFeature(factory, feature, enabled) }
+            try {
+                return factory.newSAXParser().also { registerLexicalHandler(it.xmlReader, handler) }
+            } catch (e: javax.xml.parsers.ParserConfigurationException) {
+                val dropped = features.lastOrNull()?.first
+                logger.log(
+                    Level.WARNING,
+                    "SAX 解析器在构建阶段拒绝加固特性，剔除后重试: dropped=$dropped",
+                    e
+                )
+                if (dropped == null) throw e
+                features = features.dropLast(1)
+            }
+        }
     }
 
     /** 逐项加固：单项失败仅告警，不阻断（handler 侧兜底保证 fail-closed 语义不变）。 */
@@ -74,6 +96,20 @@ internal object HardenedXmlReader {
 
     private val logger = Logger.getLogger(HardenedXmlReader::class.java.name)
 
+    /**
+     * 平台工厂提供者（测试接缝）：默认走 SPI 发现；单测注入假工厂驱动
+     * 「newSAXParser 延迟拒绝加固特性」的设备端分支。
+     */
+    internal var factoryProvider: () -> SAXParserFactory = { SAXParserFactory.newInstance() }
+
+    /** 加固特性清单（按序逐项设置；顺序即降级剔除顺序的倒数）。 */
+    private val GUARD_FEATURES: List<Pair<String, Boolean>> = listOf(
+        FEATURE_DISALLOW_DOCTYPE_DECL to true,
+        FEATURE_EXTERNAL_GENERAL_ENTITIES to false,
+        FEATURE_EXTERNAL_PARAMETER_ENTITIES to false,
+        FEATURE_RESOLVE_DTD_URIS to false
+    )
+
     /** 完全禁止 DOCTYPE 声明（XXE 与内部实体炸弹的总闸）。 */
     private const val FEATURE_DISALLOW_DOCTYPE_DECL =
         "http://apache.org/xml/features/disallow-doctype-decl"
@@ -86,8 +122,8 @@ internal object HardenedXmlReader {
     private const val FEATURE_EXTERNAL_PARAMETER_ENTITIES =
         "http://xml.org/sax/features/external-parameter-entities"
 
-    /** 禁止解析 DTD 的 URI。 */
-    private const val FEATURE_RESOLVE_DTD_URIS =
+    /** 禁止解析 DTD 的 URI（同包单测可见；P1-15 延迟拒绝分支的回归锚点）。 */
+    internal const val FEATURE_RESOLVE_DTD_URIS =
         "http://xml.org/sax/features/resolve-dtd-uris"
 
     /** LexicalHandler 注册属性名（用于接收 DTD 声明事件）。 */

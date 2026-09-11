@@ -64,7 +64,7 @@
 
     <!-- Unlock Screen -->
     <string name="unlock_title">KeePasskey</string>
-    <string name="unlock_subtitle">Vault Locked • KDBX v4 (Argon2d + AES-256)</string>
+    <string name="unlock_subtitle">Vault Locked • KDBX v4</string>
     <string name="unlock_master_password">Master Password</string>
     <string name="unlock_master_password_hint">Enter master password to unlock</string>
     <string name="unlock_keyfile">Key File</string>
@@ -207,7 +207,7 @@
     <string name="settings_title">Settings</string>
     <string name="settings_cat_storage">Vault &amp; Storage</string>
     <string name="settings_database">Database &amp; Encryption</string>
-    <string name="settings_database_sub">KDBX 4.1 · Argon2id · Encryption parameters &amp; Recycle Bin</string>
+    <string name="settings_database_sub">KDBX 4 · Argon2 / AES-KDF · Encryption parameters &amp; Recycle Bin</string>
     <string name="settings_sync">Cloud Synchronization</string>
     <string name="settings_sync_sub">WebDAV &amp; S3 compatible multi-protocol sync</string>
     <string name="settings_change_master_key">Change Master Key</string>
@@ -445,7 +445,8 @@
     <string name="dbset_field_cipher">Cipher</string>
     <string name="dbset_field_kdf">Key derivation function (KDF)</string>
     <string name="dbset_field_argon2">Argon2 parameters</string>
-    <string name="dbset_argon2_value">Argon2d · 64 MB / 8 rounds</string>
+    <string name="dbset_argon2_value">%1$d MB · %2$d rounds · P=%3$d</string>
+    <string name="dbset_value_unset">Not set</string>
     <string name="dbset_section_extensions">Extensions</string>
     <string name="dbset_templates_title">Entry templates</string>
     <string name="dbset_templates_sub">Preset templates for logins, cards and more</string>
@@ -744,7 +745,7 @@
     <!-- ===== About subscreen ===== -->
     <string name="about_section_spec">Technical specs</string>
     <string name="about_spec_enc_title">Encryption specs</string>
-    <string name="about_spec_enc_desc">KDBX 4.1 · AES-256 / ChaCha20 · Argon2 key derivation</string>
+    <string name="about_spec_enc_desc">KDBX 4 · AES-256 / ChaCha20 / Twofish · Argon2 / AES-KDF key derivation</string>
     <string name="about_spec_passkey_desc">End-to-end passkey creation, storage and autofill, degrading gracefully on older systems</string>
     <string name="about_spec_arch_title">App architecture</string>
     <string name="about_spec_arch_desc">Native Kotlin · Jetpack Compose · modular layered design</string>

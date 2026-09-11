@@ -203,10 +203,11 @@ internal fun DatabaseBasicCard(
         backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            DatabaseFieldRow(label = stringResource(R.string.dbset_field_db_name), value = uiState.databaseName)
-            DatabaseFieldRow(label = stringResource(R.string.dbset_field_db_path), value = uiState.databasePath)
-            DatabaseFieldRow(label = stringResource(R.string.dbset_field_default_user), value = uiState.databaseDefaultUsername)
-            DatabaseFieldRow(label = stringResource(R.string.dbset_field_compression), value = uiState.compressionAlgorithm)
+            DatabaseFieldRow(label = stringResource(R.string.dbset_field_db_name), value = ifBlankOrUnset(uiState.databaseName))
+            // ISSUE-P3-59：文件路径/默认用户名真实下发，空值显示「未设置」占位（此前恒空白）
+            DatabaseFieldRow(label = stringResource(R.string.dbset_field_db_path), value = ifBlankOrUnset(uiState.databasePath))
+            DatabaseFieldRow(label = stringResource(R.string.dbset_field_default_user), value = ifBlankOrUnset(uiState.databaseDefaultUsername))
+            DatabaseFieldRow(label = stringResource(R.string.dbset_field_compression), value = ifBlankOrUnset(uiState.compressionAlgorithm))
 
             SettingsToggleRow(
                 title = stringResource(R.string.dbset_recycle_bin_title),
@@ -233,27 +234,40 @@ internal fun DatabaseCryptoCard(
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             DatabaseFieldRow(
                 label = stringResource(R.string.dbset_field_cipher),
-                value = uiState.encryptionAlgorithm,
+                // ISSUE-P2-19：值来自活动库文件头；无会话时空值显示「未设置」占位
+                value = ifBlankOrUnset(uiState.encryptionAlgorithm),
                 onClick = onCipherClick
             )
             DatabaseFieldRow(
                 label = stringResource(R.string.dbset_field_kdf),
-                value = uiState.kdfAlgorithm,
+                value = ifBlankOrUnset(uiState.kdfAlgorithm),
                 onClick = onKdfClick
             )
             DatabaseFieldRow(
                 label = stringResource(R.string.dbset_field_argon2),
-                value = stringResource(
-                    R.string.dbset_argon2_value,
-                    uiState.argon2MemoryMb,
-                    uiState.argon2Iterations,
-                    uiState.argon2Parallelism
-                ),
+                value = if (uiState.argon2MemoryMb > 0L || uiState.argon2Iterations > 0L) {
+                    stringResource(
+                        R.string.dbset_argon2_value,
+                        uiState.argon2MemoryMb,
+                        uiState.argon2Iterations,
+                        uiState.argon2Parallelism
+                    )
+                } else {
+                    unsetLabel()
+                },
                 onClick = onArgonClick
             )
         }
     }
 }
+
+/** ISSUE-P2-19/P3-59：空值统一显示「未设置」占位，绝不留空白也不显示与实际不符的假值 */
+@Composable
+private fun ifBlankOrUnset(value: String): String =
+    if (value.isBlank()) unsetLabel() else value
+
+@Composable
+private fun unsetLabel(): String = stringResource(R.string.dbset_value_unset)
 
 /** 3. 条目模板库与子数据库配置 (KP2A 特性) */
 @Composable

@@ -11,6 +11,8 @@
 ## 1. 版本基线（摘要）
 
 - 测试 / 构建 / CI 当前全绿（具体版本、例数、残余面见 [`RESOLVED_LOG.md`](docs/RESOLVED_LOG.md)）。
+  单测基线（2026-09-11，§27 批次后）：**1382 例 / 0 失败 / 0 错误 / 13 跳过**；写侧 Argon2 `P`
+  已按 KDBX4 规范以 UInt32 编码（官方 `generate_corpus.py --verify` 可解本仓产物）。
 - **平台**：minSdk 36 / compileSdk 37 / targetSdk 36；全站强制 HTTPS（TLS-only），零证书固定，接入 Mozilla PSL。
 
 ---

@@ -45,7 +45,10 @@ internal class SettingsHealthController(
         /** 失败原因等补充文案（仅 FAILED 态非空） */
         val breachCheckMessage: String,
         val lastHealthScanTime: String,
-        val isHealthScanning: Boolean
+        val isHealthScanning: Boolean,
+        /** ISSUE-P3-61：是否已完成过一次扫描——未扫描时审计行徽标必须保持中性「未扫描」，
+         *  不得以「安全 / 需注意」这类有数据才能支撑的结论误导用户 */
+        val hasScanned: Boolean = false
     )
 
     private val healthStateFlow = MutableStateFlow(initialState())
@@ -131,7 +134,8 @@ internal class SettingsHealthController(
                         ) breachedCount else null,
                         breachCheckStatus = breachOutcome.status,
                         breachCheckMessage = breachOutcome.errorMessage.orEmpty(),
-                        lastHealthScanTime = lastScanText
+                        lastHealthScanTime = lastScanText,
+                        hasScanned = true
                     )
                 }
             } catch (e: Exception) {

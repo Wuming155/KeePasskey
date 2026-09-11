@@ -25,6 +25,8 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.platform.LocalContext
+import com.keepasskey.app.ui.screens.settings.SafDocumentCleanup
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -142,12 +144,18 @@ fun EntryDetailScreen(
     if (showPlaintextExportConfirm) {
         val attachment = pendingExportAttachment
         val targetUri = pendingPlaintextExportUri
+        // ISSUE-P2-20：取消分支必须清理 SAF 已创建的空目标文档，不留 0 字节残留
+        val localContext = LocalContext.current
+        fun cleanupCancelledTarget() {
+            if (targetUri != null) {
+                SafDocumentCleanup.deleteCreatedDocument(localContext, targetUri)
+            }
+            showPlaintextExportConfirm = false
+            pendingPlaintextExportUri = null
+            pendingExportAttachment = null
+        }
         AlertDialog(
-            onDismissRequest = {
-                showPlaintextExportConfirm = false
-                pendingPlaintextExportUri = null
-                pendingExportAttachment = null
-            },
+            onDismissRequest = { cleanupCancelledTarget() },
             title = { Text(stringResource(R.string.detail_attachment_export_warn_title)) },
             text = {
                 Text(
@@ -169,11 +177,7 @@ fun EntryDetailScreen(
                 }
             },
             dismissButton = {
-                TextButton(onClick = {
-                    showPlaintextExportConfirm = false
-                    pendingPlaintextExportUri = null
-                    pendingExportAttachment = null
-                }) {
+                TextButton(onClick = { cleanupCancelledTarget() }) {
                     Text(stringResource(R.string.btn_cancel))
                 }
             }

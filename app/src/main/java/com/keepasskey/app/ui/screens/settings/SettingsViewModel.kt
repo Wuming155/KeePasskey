@@ -166,6 +166,8 @@ class SettingsViewModel @Inject constructor(
         autofillSaveBlocklistStore = autofillSaveBlocklistStore,
         autofillFieldBlocklistStore = autofillFieldBlocklistStore,
         debugLogBuffer = debugLogBuffer,
+        // ISSUE-P2-19 / P3-59：活动库会话（真实文件头/默认用户名下发）；单测可为 null
+        databaseSession = databaseSession,
         scope = viewModelScope
     )
 

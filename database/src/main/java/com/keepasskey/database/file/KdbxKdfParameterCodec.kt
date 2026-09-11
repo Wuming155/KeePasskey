@@ -43,7 +43,10 @@ internal object KdbxKdfParameterCodec {
             }
             is KdfParameters.Argon2 -> {
                 vd.setByteArray("S", params.salt)
-                vd.setUInt64("P", params.parallelism.toLong())
+                // ISSUE-P1-13：KDBX4 规范规定 Argon2 `P`（Parallelism）以 UInt32 写出——
+                // 官方 KeePass / KeePassXC 按严格 uint 读取，UInt64 编码会让官方客户端
+                // 以默认值派生密钥而无法解锁。I / M 保持 UInt64，V 与 P 同为 UInt32。
+                vd.setUInt32("P", params.parallelism.toLong())
                 vd.setUInt64("M", params.memoryInBytes)
                 vd.setUInt64("I", params.iterations)
                 vd.setUInt32("V", params.version.toLong())

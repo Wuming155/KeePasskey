@@ -37,11 +37,13 @@ internal fun CipherAlgorithmDialog(
     AlgorithmOptionDialog(
         titleRes = R.string.dbset_cipher_dialog_title,
         options = listOf(
+            // ISSUE-P2-19：标签与「密码库与加密」页显示值使用同一词汇表（真实 cipherId 映射），
+            // 去除「AES-256 (KDBX 4.1)」的错误版本绑定表述
             "ChaCha20-Poly1305 (256-bit)" to R.string.dbset_cipher_chacha_desc,
-            "AES-256 (KDBX 4.1)" to R.string.dbset_cipher_aes_desc,
-            "Twofish (256-bit)" to R.string.dbset_cipher_twofish_desc
+            "AES-256-CBC (256-bit)" to R.string.dbset_cipher_aes_desc,
+            "Twofish-CBC (256-bit)" to R.string.dbset_cipher_twofish_desc
         ),
-        isSelected = { currentAlgorithm.startsWith(it.split(" ")[0]) },
+        isSelected = { currentAlgorithm == it },
         onSelect = onSelect,
         onDismiss = onDismiss
     )

@@ -7,6 +7,9 @@ import com.keepasskey.app.ui.screens.settings.ExtendedSettings
 import com.keepasskey.app.ui.screens.settings.IconSetOption
 import com.keepasskey.app.ui.screens.settings.ListDensity
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -33,6 +36,25 @@ class ExtendedSettingsStore @Inject constructor(
 
     private val prefs: SharedPreferences? =
         context?.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+
+    /**
+     * 进程级唯一内存权威快照（ISSUE-P2-21 整改）。
+     *
+     * 此前各 ViewModel 作用域的控制器各自 `MutableStateFlow(store.load())`：设置二级页
+     * （导航域 ViewModel）改动偏好后，活动域 ViewModel（KeePasskeyApp 宿主）的内存快照
+     * **不会更新**——「返回键锁定」等依赖宿主域读值的特性因此读到的永远是旧值。
+     * 快照上移到 @Singleton 后，任一实例的写入对所有读者即时可见（XML 落盘仍由
+     * [save] 统一执行）。
+     */
+    private val settingsFlow = MutableStateFlow(load())
+
+    /** 进程内共享的进阶偏好快照（读侧唯一来源） */
+    val settings: StateFlow<ExtendedSettings> = settingsFlow.asStateFlow()
+
+    /** 更新共享快照（不改持久化；持久化请走 [save]） */
+    fun publish(settings: ExtendedSettings) {
+        settingsFlow.value = settings
+    }
 
     /** 读出全部持久化偏好（含 wifiOnlySync 独立键）；无持久化层时返回默认值 */
     fun load(): ExtendedSettings {

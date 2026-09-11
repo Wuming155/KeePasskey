@@ -2,6 +2,7 @@ package com.keepasskey.app.ui
 
 import android.content.res.Configuration
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.layout.Box
@@ -148,6 +149,17 @@ fun KeePasskeyApp() {
             val configuration = LocalConfiguration.current
             val isWideScreen = configuration.screenWidthDp >= 600
             val autoLockManager = (context as? com.keepasskey.app.MainActivity)?.autoLockManager
+
+            // ISSUE-P2-21：接线「返回键锁定」——主页（顶层路由）按返回键立即锁库。
+            // 本 BackHandler 先于 NavHost 组合：库列表内部的批量选择/搜索/子目录返回
+            // （后组合，优先级更高）仍先行消费；仅在内部无人处理且处于顶层路由时，
+            // 由本层熔断会话，锁库事件经 lockEvents 导航至解锁页。
+            val backLockEnabled = appSettings.lockWhenNavigateBack &&
+                autoLockManager != null &&
+                BottomNavItem.isTopLevelRoute(currentRoute)
+            BackHandler(enabled = backLockEnabled) {
+                autoLockManager?.triggerLock("返回键锁定")
+            }
 
             LaunchedEffect(autoLockManager) {
                 autoLockManager?.lockEvents?.collect {

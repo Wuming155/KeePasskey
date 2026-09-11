@@ -9,6 +9,7 @@ import com.keepasskey.app.ui.model.UiAttachment
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.screens.settings.ExportArtifactKind
 import com.keepasskey.app.ui.screens.settings.ExportAuditRecorder
+import com.keepasskey.app.ui.screens.settings.SafDocumentCleanup
 
 /**
  * 附件明文导出的写出与审计留痕（断点3 整改 / ISSUE-P2-10 (ZT-15)）。
@@ -36,10 +37,11 @@ internal class EntryDetailAttachmentExporter(
         val rawTarget = targetUri.toString()
         return try {
             val bytes = vaultRepository.getAttachmentData(entryId, attachment.fileName)
-            if (bytes == null) return recordFailure(rawTarget)
+            if (bytes == null) return recordFailure(rawTarget, targetUri)
 
-            val resolver = appContext?.contentResolver ?: return recordFailure(rawTarget)
-            val stream = resolver.openOutputStream(targetUri) ?: return recordFailure(rawTarget)
+            val resolver = appContext?.contentResolver ?: return recordFailure(rawTarget, targetUri)
+            val stream = resolver.openOutputStream(targetUri)
+                ?: return recordFailure(rawTarget, targetUri)
 
             stream.use { os ->
                 os.write(bytes)
@@ -51,12 +53,15 @@ internal class EntryDetailAttachmentExporter(
             // 只留痕异常类型，不落异常消息或附件名（防御性，避免敏感内容回流日志缓冲）
             exportAuditRecorder?.record(ExportArtifactKind.ATTACHMENT, rawTarget, success = false)
             debugLog?.warn(TAG, "附件导出失败: ${e.javaClass.simpleName}")
+            SafDocumentCleanup.deleteCreatedDocument(appContext, targetUri)
             UiMessage(R.string.detail_attachment_export_failed)
         }
     }
 
-    private fun recordFailure(rawTarget: String): UiMessage {
+    /** 失败收尾：审计留痕 + 清理 SAF 已创建的空目标文档（ISSUE-P2-20，不留 0 字节残留） */
+    private fun recordFailure(rawTarget: String, targetUri: Uri): UiMessage {
         exportAuditRecorder?.record(ExportArtifactKind.ATTACHMENT, rawTarget, success = false)
+        SafDocumentCleanup.deleteCreatedDocument(appContext, targetUri)
         return UiMessage(R.string.detail_attachment_export_failed)
     }
 

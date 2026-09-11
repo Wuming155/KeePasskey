@@ -202,6 +202,8 @@ data class SettingsUiState(
     val breachCheckEnabled: Boolean = false,
     val lastHealthScanTime: String = "",
     val isHealthScanning: Boolean = false,
+    /** ISSUE-P3-61：是否已完成过一次扫描（未扫描时审计行徽标保持中性「未扫描」） */
+    val hasHealthScanned: Boolean = false,
 
     // 8. 调试日志与系统诊断 (Debug & Diagnostics)
     val debugLogEnabled: Boolean = false, // KP2A: 启用调试日志

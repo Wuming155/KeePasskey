@@ -29,8 +29,11 @@ internal class SettingsExtendedPreferencesController(
     private val persistLockWhenScreenOff: (Boolean) -> Unit = {}
 ) {
 
-    // TASK-12 整改：初值自持久化仓库恢复（原为纯内存回显，冷启动静默回落默认值）
-    private val extendedSettingsFlow = MutableStateFlow(extendedSettingsStore.load())
+    // TASK-12 整改：初值自持久化仓库恢复（原为纯内存回显，冷启动静默回落默认值）。
+    // ISSUE-P2-21 整改：快照上移至 @Singleton 的 ExtendedSettingsStore——同一进程内的
+    // 多个 ViewModel 作用域（活动域宿主 / 各导航域设置页）共享同一份内存权威状态，
+    // 任一页面的偏好改动对全部读者即时可见，杜绝「改了开关、宿主域仍读旧值」的分裂。
+    private val extendedSettingsFlow = extendedSettingsStore.settings
 
     /** 进阶偏好当前快照（UI 状态投影与副作用读取共用） */
     val settings: StateFlow<ExtendedSettings> = extendedSettingsFlow
@@ -39,7 +42,7 @@ internal class SettingsExtendedPreferencesController(
      * TASK-12 整改：进阶偏好统一变更通道——内存 Flow 更新与持久化落盘原子完成。
      */
     private fun updateExtended(transform: (ExtendedSettings) -> ExtendedSettings) {
-        extendedSettingsFlow.update(transform)
+        extendedSettingsStore.publish(extendedSettingsFlow.value.let(transform))
         extendedSettingsStore.save(extendedSettingsFlow.value)
     }
 
@@ -169,14 +172,14 @@ internal class SettingsExtendedPreferencesController(
      * （未走 [updateExtended]）——这是拆分前的既有行为，本次拆分严格逐字保留，未借机改变语义。
      */
     fun updateTotpFieldMapping(seedField: String, settingsField: String, stepSeconds: Int, digits: Int) {
-        extendedSettingsFlow.update {
-            it.copy(
+        extendedSettingsStore.publish(
+            extendedSettingsFlow.value.copy(
                 totpSeedFieldName = seedField,
                 totpSettingsFieldName = settingsField,
                 defaultTotpStepSeconds = stepSeconds,
                 defaultTotpDigits = digits
             )
-        }
+        )
     }
 
     // ========== TASK-47：已泄露密码检测（联网，默认关闭） ==========

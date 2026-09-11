@@ -9,6 +9,10 @@ import com.keepasskey.app.data.repository.SettingsRepository
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.ui.theme.AppThemeMode
 import com.keepasskey.app.ui.theme.AppThemePalette
+import com.keepasskey.core.model.KdbxConstants
+import com.keepasskey.crypto.kdf.KdfParameters
+import com.keepasskey.database.file.KdbxDatabase
+import com.keepasskey.database.session.DatabaseSession
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -17,6 +21,45 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+
+/**
+ * 活动库文件头 → 设置页显示值的映射（ISSUE-P2-19 / P3-59）。
+ *
+ * 此前「密码库与加密」页的算法/KDF/参数全部来自 [DatabaseConfigUiState] 的硬编码占位默认值，
+ * 与真实文件头不符（ ChaCha20 显示 vs AES 实际 / Argon2d·8轮 vs Argon2id·2轮 等）。
+ * 本映射以活动库 [KdbxDatabase.header] 为单一真相源；未挂接会话时返回 null（UI 保持空态占位）。
+ */
+internal fun databaseConfigFromHeader(db: KdbxDatabase): DatabaseConfigUiState {
+    val header = db.header
+    val cipherLabel = when (header.cipherUuid) {
+        KdbxConstants.Cipher.AES_256_CBC -> "AES-256-CBC (256-bit)"
+        KdbxConstants.Cipher.CHACHA20 -> "ChaCha20-Poly1305 (256-bit)"
+        KdbxConstants.Cipher.TWOFISH -> "Twofish-CBC (256-bit)"
+        else -> ""
+    }
+    val kdf = header.kdfParameters
+    val kdfLabel = when (kdf) {
+        is KdfParameters.Aes -> "AES-KDF"
+        is KdfParameters.Argon2 -> if (kdf.type == KdfParameters.Argon2.Argon2Type.ARGON2D) "Argon2d" else "Argon2id"
+    }
+    val compressionLabel = when (header.compression) {
+        KdbxConstants.Compression.GZIP -> "GZip 压缩"
+        else -> "无压缩"
+    }
+    return DatabaseConfigUiState(
+        databaseName = db.databaseName,
+        defaultUsername = db.defaultUserName,
+        encryptionAlgorithm = cipherLabel,
+        kdfAlgorithm = kdfLabel,
+        argon2Iterations = if (kdf is KdfParameters.Argon2) kdf.iterations else 0L,
+        argon2MemoryMb = if (kdf is KdfParameters.Argon2) kdf.memoryInBytes / (1024L * 1024L) else 0L,
+        argon2Parallelism = if (kdf is KdfParameters.Argon2) kdf.parallelism else 0,
+        compressionAlgorithm = compressionLabel,
+        recycleBinEnabled = db.recycleBinEnabled,
+        tanExpiresOnUse = false,
+        checkForDuplicateUuids = false
+    )
+}
 
 /**
  * 基础偏好（`UserSettings` 仓库直写项）与本页局部 UI 状态（ISSUE-P3-29：自
@@ -36,6 +79,8 @@ internal class SettingsPreferencesController(
     // ISSUE-P3-43 ②：字段签名级屏蔽（写入方在手动选择器；此处仅计数回显与整体清除）
     private val autofillFieldBlocklistStore: AutofillFieldBlocklistStore,
     private val debugLogBuffer: DebugLogBuffer,
+    // ISSUE-P2-19 / P3-59：活动库会话（可为 null——单测注入；null 时加密配置保持空态占位）
+    private val databaseSession: DatabaseSession?,
     private val scope: CoroutineScope
 ) {
 
@@ -51,11 +96,13 @@ internal class SettingsPreferencesController(
         DatabaseConfigUiState(
             databaseName = "",
             defaultUsername = "",
-            encryptionAlgorithm = "ChaCha20-Poly1305 (256-bit)",
-            kdfAlgorithm = "Argon2id",
-            argon2Iterations = 3L,
-            argon2MemoryMb = 64L,
-            argon2Parallelism = 4,
+            // ISSUE-P2-19：算法/KDF/参数不再预置假值——空串代表「尚无活动库或会话未就绪」，
+            // 真实值由 init 中 databaseSession.databaseFlow 下发；UI 侧对空值显示「未设置」占位。
+            encryptionAlgorithm = "",
+            kdfAlgorithm = "",
+            argon2Iterations = 0L,
+            argon2MemoryMb = 0L,
+            argon2Parallelism = 0,
             recycleBinEnabled = true,
             tanExpiresOnUse = true,
             checkForDuplicateUuids = true
@@ -121,14 +168,37 @@ internal class SettingsPreferencesController(
     fun clearBlockedFields(): Int = autofillFieldBlocklistStore.clearAll()
 
     init {
-        // 动态订阅活动数据库，更新设置页数据库名称
+        // 动态订阅活动数据库，更新设置页数据库名称与文件路径（ISSUE-P3-59：路径此前恒空）
         scope.launch {
             vaultRepository.getDatabases().collect { databases ->
                 val active = databases.firstOrNull { it.isActive } ?: databases.firstOrNull()
                 databaseConfigStateFlow.update {
                     it.copy(
-                        databaseName = active?.name.orEmpty()
+                        databaseName = active?.name.orEmpty(),
+                        databasePath = active?.path.orEmpty()
                     )
+                }
+            }
+        }
+        // ISSUE-P2-19 / P3-59：订阅活动库会话，把真实文件头（加密算法 / KDF / Argon2 参数 /
+        // 压缩）与 Meta（默认用户名）下发到设置页，替换此前的硬编码占位值。
+        // 用 copy 合并而非整体替换：databasePath（来自库记录）与用户开关状态不被覆盖。
+        scope.launch {
+            databaseSession?.databaseFlow?.collect { db ->
+                if (db != null) {
+                    val header = databaseConfigFromHeader(db)
+                    databaseConfigStateFlow.update {
+                        it.copy(
+                            databaseName = header.databaseName,
+                            defaultUsername = header.defaultUsername,
+                            encryptionAlgorithm = header.encryptionAlgorithm,
+                            kdfAlgorithm = header.kdfAlgorithm,
+                            argon2Iterations = header.argon2Iterations,
+                            argon2MemoryMb = header.argon2MemoryMb,
+                            argon2Parallelism = header.argon2Parallelism,
+                            compressionAlgorithm = header.compressionAlgorithm
+                        )
+                    }
                 }
             }
         }
@@ -325,11 +395,15 @@ internal data class AutofillUiState(
 internal data class DatabaseConfigUiState(
     val databaseName: String,
     val defaultUsername: String,
+    /** 文件路径（ISSUE-P3-59：取自活动库记录；无活动库时为空，UI 显示「未设置」占位） */
+    val databasePath: String = "",
     val encryptionAlgorithm: String,
     val kdfAlgorithm: String,
     val argon2Iterations: Long,
     val argon2MemoryMb: Long,
     val argon2Parallelism: Int,
+    /** 压缩算法显示值（ISSUE-P2-19：真实值来自文件头 compressionFlags） */
+    val compressionAlgorithm: String = "",
     val recycleBinEnabled: Boolean,
     val tanExpiresOnUse: Boolean,
     val checkForDuplicateUuids: Boolean

@@ -196,24 +196,64 @@ fun HealthCheckScreen(
             }
 
             item {
+                // ISSUE-P3-61：未扫描时徽标保持中性「未扫描」——「安全 / 需注意」这类结论
+                // 只有真实扫描结果才能支撑；扫描后按实际计数给出对应徽标
+                val weakStatus = if (!uiState.hasHealthScanned) {
+                    Triple(
+                        Icons.Default.Security,
+                        MaterialTheme.colorScheme.outline,
+                        stringResource(R.string.health_status_not_scanned)
+                    )
+                } else if (uiState.weakPasswordCount > 0) {
+                    Triple(
+                        Icons.Default.WarningAmber,
+                        securityColors.warning,
+                        stringResource(R.string.health_status_warn)
+                    )
+                } else {
+                    Triple(
+                        Icons.Default.CheckCircle,
+                        securityColors.success,
+                        stringResource(R.string.health_status_pass)
+                    )
+                }
                 HealthAuditRowItem(
-                    icon = Icons.Default.CheckCircle,
-                    iconTint = securityColors.success,
+                    icon = weakStatus.first,
+                    iconTint = weakStatus.second,
                     title = stringResource(R.string.health_weak_title),
                     subtitle = stringResource(R.string.health_weak_sub),
-                    statusText = stringResource(R.string.health_status_pass),
-                    isWarning = false
+                    statusText = weakStatus.third,
+                    isWarning = uiState.hasHealthScanned && uiState.weakPasswordCount > 0
                 )
             }
 
             item {
+                val reuseStatus = if (!uiState.hasHealthScanned) {
+                    Triple(
+                        Icons.Default.Security,
+                        MaterialTheme.colorScheme.outline,
+                        stringResource(R.string.health_status_not_scanned)
+                    )
+                } else if (uiState.reusedPasswordCount > 0) {
+                    Triple(
+                        Icons.Default.WarningAmber,
+                        securityColors.warning,
+                        stringResource(R.string.health_status_warn)
+                    )
+                } else {
+                    Triple(
+                        Icons.Default.CheckCircle,
+                        securityColors.success,
+                        stringResource(R.string.health_status_pass)
+                    )
+                }
                 HealthAuditRowItem(
-                    icon = Icons.Default.WarningAmber,
-                    iconTint = securityColors.warning,
+                    icon = reuseStatus.first,
+                    iconTint = reuseStatus.second,
                     title = stringResource(R.string.health_reuse_title),
                     subtitle = stringResource(R.string.health_reuse_sub, uiState.reusedPasswordCount),
-                    statusText = stringResource(R.string.health_status_warn),
-                    isWarning = true
+                    statusText = reuseStatus.third,
+                    isWarning = uiState.hasHealthScanned && uiState.reusedPasswordCount > 0
                 )
             }
 

@@ -1007,3 +1007,138 @@ Rust 单测模块 `#[cfg(test)] mod tests` 之内**（测试模块起始行：`s
    也未在可视区找到「应用」控件（面板可能可滚动）。因未穷尽交互，此处只作观察登记；后续如需，
    可在 `app` 模块补设备侧用例详查。
 
+
+---
+
+## §27 批次：设备侧功能实测收口 + 9 项缺陷整改（2026-09-11，接手批次）
+
+> 依据 [`HANDOVER-20260911.md`](HANDOVER-20260911.md) 的未实测清单继续设备侧（AVD `Pixel_10`，
+> x86_64 / API 36）手工实操，补完 §3.1 ~ §3.7 全部条目；期间新发现 2 个 P1/P2 级缺陷并同批修复，
+> 原登记问题中 6 项整改闭环、2 项复核后确认为非缺陷、1 项升级为确认缺陷保留。
+> 本批次后全量单测 **1382 例 / 0 失败 / 0 错误 / 13 跳过**（基线 1370 + 新增 12）。
+
+### 27.1 ISSUE-P1-13：写侧 Argon2 `P` 改 UInt32（已整改闭环）
+
+- **整改**：`database/.../file/KdbxKdfParameterCodec.kt` 的 `serialize` 中 `P` 由
+  `vd.setUInt64("P", …)` 改为 `vd.setUInt32("P", …)`（`I`/`M` 保持 UInt64、`V` 保持 UInt32）。
+- **新增写侧契约断言**（验收标准 ②）：`database/src/test/.../KdbxKdfParameterCodecWriteContractTest.kt`
+  4 例——直接解析序列化字节流的类型 ID（不经本仓宽容读侧回读）逐键断言
+  `$UUID`/`S`=ByteArray(0x42)、`P`/`V`=UInt32(0x04) len 4、`I`/`M`=UInt64(0x05) len 8，与
+  `generate_corpus.py --verify` 的地面真值判定对齐；另含 `P` 值官方严格 uint 语义回读、AES-KDF `R` 类型与 KDF UUID 一致性。
+- **设备侧证据**（验收标准 ③）：修复后本 App 新导出 KDBX 经
+  `python tools/kdbx-corpus/generate_corpus.py --verify` **通过**：
+  `version=4.0 cipher=aes256-cbc kdf=argon2id t=2 m=65536KiB p=2 argon2Version=19`；
+  `build/vd.py` 逐字节确认 `P: type=0x04 len=4 raw=02000000`（修复前为 `type=0x05 len=8`）。
+- 验收标准 ④：全量单测无退化（见 §27.9）。
+
+### 27.2 ISSUE-P1-14：后台自动锁定复核——**行为符合设计，按非缺陷结案**
+
+- **复核结论**：上会话登记的「HOME 回前台不锁定」**无法以真实生效的偏好复现**。
+  以 DataStore 字节为地面真值确认 `auto_lock_background=true`（立即档）后：
+  HOME 回桌面 → 回前台 **已锁定** ✅；SAF（DocumentsUI）占前台 ~10s → 返回 **已锁定** ✅——
+  HOME 与 SAF 行为一致，「证据矛盾」消失。
+- **30 秒档语义验证**：倒计时切 30 秒档后，后台 5s 返回 **不锁** ✅、35s 返回 **锁定** ✅。
+- **熄屏锁定**：熄屏 → 亮屏 **已锁定** ✅。
+- **根因剖析（为何上会话误报）**：①偏好写入可能被中途弹出的对话框吞掉（本批次实测复现同款干扰：
+  「自动锁定倒计时」对话框开启期间，后续所有注入点击都被其吃掉）；②`uiautomator dump` 对 Compose
+  Switch 的 `checked` 属性**存在陈旧/失真**（本批次实测：开关真实渲染为 on 时 dump 报 false，
+  与 DataStore 字节互相矛盾；以「点击后读 DataStore 翻转方向」反推才还原真相）。
+  上会话据 dump 判定「已开启」并据 force-stop 后 dump 仍 true 判定「已持久化」，两步都被同一假象误导。
+- **方法论沉淀（交接文档 §2 已补）**：设备侧判定开关状态一律以 DataStore / SharedPreferences
+  字节为地面真值；Compose Switch 的注入点击用 `input motionevent DOWN/UP`（部分坐标 `input tap` 不生效）。
+
+### 27.3 ISSUE-P1-15（新发现）：明文导入 KeePass XML 在 Android 运行时全量失败（已整改闭环）
+
+- **发现**：交接文档 §3.3 导入实测中，4 个导入器里 Bitwarden JSON / 浏览器 CSV / 1Password PUX
+  全部导入成功，唯 **KeePass XML 100% 失败**（报「文件结构非法或已损坏」）；同一文件在宿主 JVM
+  `KeePassXmlImporterTest` 逻辑下解析成功——「宿主 JVM 过、Android 运行时挂」类缺陷再 +1。
+- **根因**（经应用内诊断日志 + `VaultImportController` 新增 WARN 留痕定位）：
+  Android Harmony SAX 把 `SAXParserFactory.setFeature("http://xml.org/sax/features/resolve-dtd-uris")`
+  的拒绝**延迟到 `newSAXParser()` 才抛** `ParserConfigurationException`（宿主 Xerces 无此行为）；
+  `HardenedXmlReader.parse` 中 `newSAXParser()` 未设防 → 异常被 `ImportParseGuard` 归一为 MALFORMED。
+- **整改**：`HardenedXmlReader` 解析器构建改为**逐轮剔除降级**——`newSAXParser()` 抛
+  `ParserConfigurationException` 时剔除最后一个待用加固特性并重建重试，全部剔除仍失败才放行；
+  handler 侧 `startDTD` / `resolveEntity` fail-closed 兜底在任意轮次不变（XXE 防护语义零弱化）。
+- **回归测试**：`HardenedXmlReaderTest` 3 例（注入假工厂复现「延迟拒绝」分支锁定降级契约；
+  普通合法 XML 全量特性解析；告警不打断解析）。
+- **设备侧验证**：修复后 kp_min.xml（1 条）与含分组/TOTP 的 keepass_import_test.xml（2 条，
+  中文标题 + otp 字段）均导入成功并落库（冷启动后列表可见）。
+
+### 27.4 ISSUE-P2-19：设置页加密参数改由真实文件头下发（已整改闭环）
+
+- **整改**：`SettingsPreferencesController` 注入 `DatabaseSession`，新增纯函数
+  `databaseConfigFromHeader(KdbxDatabase)`，订阅 `databaseFlow` 把**真实文件头**映射到
+  「密码库与加密」页：`cipherUuid` → 加密算法标签（AES-256-CBC / ChaCha20-Poly1305 / Twofish-CBC）、
+  KDF UUID → `Argon2d` / `Argon2id` / `AES-KDF`、真实 Argon2 I/M/P、`compression` → GZip/无压缩；
+  占位默认值全部清空（空值由 UI 显示「未设置」）。加密算法对话框标签与显示值统一词汇表
+  （去除「AES-256 (KDBX 4.1)」错误绑定）。
+- **静态文案纠偏**：解锁页副标题、设置主页副标题、关于页加密规格不再声明与单个文件不符的
+  「KDBX 4.1 / Argon2d」事实（改为能力口径 KDBX 4 · Argon2 / AES-KDF）。
+- **测试**：`DatabaseConfigHeaderMappingTest` 5 例锁定映射（AES 头显示 AES-256-CBC 而非 ChaCha20 等）。
+- **设备侧验证**：页面显示 `AES-256-CBC (256-bit)` / `Argon2id` / `64 MB · 2 轮 · P=2`（此前
+  `ChaCha20-Poly1305` / `Argon2d · 64 MB / 8 轮` 假值），与 `--verify` 解出的文件头逐项一致；
+  Argon2 参数对话框回显同真值。
+
+### 27.5 ISSUE-P2-20：导出取消/失败不再残留 0 字节文件（已整改闭环）
+
+- **复核结论**：附件导出**功能正常**——关闭自动锁定后完整走通「SAF 另存 → 明文确认 → 写盘」，
+  产物 md5（`21e7776188df217346fa104a40a6e60e`）与源文件一致。上会话 0 字节系「SAF 保存即建空文件 +
+  第二道确认前被自动锁定熔断」的流程中断遗留，同时本批次实测 KDBX 导出在立即档下也复现同款 0 字节。
+- **整改**（系统化，覆盖 4 个路径）：新增 `SafDocumentCleanup.deleteCreatedDocument`（best-effort
+  `DocumentsContract.deleteDocument`）：① `SettingsExportController.exportAndWrite` 序列化失败与
+  写盘失败两分支；② `EntryDetailAttachmentExporter` 三条失败分支；③ 附件导出确认对话框取消分支；
+  ④ 明文 XML 导出确认对话框取消分支。
+- **设备侧验证**：XML 导出确认框点「取消」后 `/sdcard/Download/` **不再出现** 0 字节 `passwords-export.xml`
+  （修复前同路径残留空文件）；失败路径同样给出可见错误反馈（既有 exportFeedback 机制）。
+
+### 27.6 ISSUE-P2-21（新发现）：「返回键锁定」开关从登记到接线（已整改闭环）
+
+- **发现**：设备实测开启「返回键锁定」后主页按返回键不锁定；代码核查确认 `lockWhenNavigateBack`
+  **没有任何消费方**（设置 → 持久化 → 投影齐全，行为层无接线），属「死设置」。
+- **整改**（双处）：① `KeePasskeyApp` 主脚手架新增 BackHandler——`lockWhenNavigateBack` 开启且
+  处于顶层路由时按返回键触发 `triggerLock("返回键锁定")`，先于 NavHost 组合以保持库列表内部
+  （批量选择/搜索/子目录）返回处理优先；② 根因排查中发现**活动域与导航域 SettingsViewModel 的
+  extendedSettings 内存快照互不同步**（导航域改开关、活动域永远读旧值）——把权威快照上移到
+  `@Singleton ExtendedSettingsStore.settings`，控制器改共享流，任一页面的偏好改动全进程即时可见。
+- **设备侧验证**：开启开关 → 主页按返回键 → 立即落在解锁页 ✅。
+
+### 27.7 ISSUE-P3-59：文件路径 / 默认用户名真实下发（已整改闭环）
+
+- **整改**：与 §27.4 同一批——`databasePath` 取自活动库记录（`VaultDatabaseInfo.path`）、
+  `defaultUsername` 取自 `KdbxDatabase.defaultUserName`（Meta），经投影下发；
+  UI 空值统一显示「未设置」占位（新增 `dbset_value_unset`，验收标准「不得留空白」）。
+- **设备侧验证**：文件路径显示 `/data/user/0/com.keepasskey/files/passwords.kdbx`、
+  默认用户名如实显示「未设置」（新库 Meta 为空）。
+
+### 27.8 P3-60 / P3-61 / P3-62 复核结案
+
+- **ISSUE-P3-60（搜索框注入不落字）→ 非缺陷结案**：本批次在开关注入上观察到同族现象
+  （`input tap` 对部分 Compose Switch 不生效、须 `input motionevent DOWN/UP`），证实是**自动化注入
+  路径限制**而非 App 缺陷；`VaultListTopBars` 的搜索框为标准 `BasicTextField` 直通绑定。
+- **ISSUE-P3-61（未扫描徽标语义）→ 已整改闭环**：原观察属实——「弱密码」恒显「安全」、
+  「重复密码」恒显「需注意」，与扫描状态无关，互相矛盾。整改：`HealthCheckUiState` 新增
+  `hasScanned`，未扫描时两行徽标均为中性「未扫描」（outline 色 Security 图标），扫描后按实际计数
+  显示「安全 / 需注意」。设备侧验证：未扫描两行均「未扫描」✅，扫描后「弱密码=安全（0）、
+  重复密码=需注意（实测库内确有复用）」语义一致 ✅。
+- **ISSUE-P3-62（诊断日志预览空）→ 行为符合设计结案**：开启「诊断日志」后执行一次导入（产生新
+  WARN 事件）再刷新，预览即显示真实事件（本批次正是靠它定位 §27.3 的异常类型）；
+  开关开启前发生的既有事件不回放属缓冲语义，非缺陷。
+
+### 27.9 全量回归与过程留痕
+
+- 全量 `test --rerun-tasks --max-workers=1`：**1382 例 / 0 失败 / 0 错误 / 13 跳过**
+  （基线 1370 + 新增 12：写侧契约 4、HardenedXmlReader 3、头映射 5）。
+- 交接文档 §3 未实测清单 **3.1 ~ 3.7 全部跑完**：3.3 四导入器全过（修复后）、3.4 KDBX/XML 导出
+  产物逐字节/结构验证（XML 含全部条目与「模板」分组——`VaultExportCoordinator` 两种导出均不跳过
+  模板分组，交接文档原表述更正）、3.5 子库挂载（KeePassXC 语料 + `111.keyx` 挂载解锁 14 条，
+  列表只读分区正常标注「只读子库条目，无编辑或复制入口」）、3.6 Argon2/KDF 对话框回显真值、
+  3.7 自动填充页如实反映系统服务未启用状态；解锁后常驻通知（`keepasskey_unlocked_status` 通道，
+  ONGOING）确认存在。
+- **方法论补充（已写回交接文档 §2）**：①开关状态判定以 DataStore/SharedPreferences 字节为地面真值，
+  `uiautomator` 的 `checked` 属性可能陈旧；②Compose Switch 注入用 `input motionevent DOWN/UP`；
+  ③对话框（如自动锁定倒计时）打开期间会吞掉后续注入点击，长流程每步 dump 定位；
+  ④`adb shell` 传输二进制必须走 base64（CRLF 转换会损坏 KDBX，本批次实测复现）。
+- **残余（转入 ACTIVE_ISSUES 继续跟踪）**：ISSUE-P3-63 升级为确认缺陷（导入亦触发列表陈旧，
+  保留待专项批次）；新增 ISSUE-P3-65（TAN/UUID 完整性校验开关无持久化、无消费方）；
+  自动填充 / Passkey 端到端填充与 Credential Manager 提供者接管未实测（需装浏览器测试页 +
+  系统服务配置，见交接文档 §3.7）。
