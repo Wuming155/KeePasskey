@@ -80,10 +80,11 @@ KeePasskey 是一款原生 Kotlin 开发的现代化 Android 密码管理器。�
 
 > 原生内核（`crypto/src/main/rust/`）由 Rust + cargo-ndk 交叉编译，`assembleDebug/Release` 自动触发；未装 cargo 或失败则自动降级跳过相关用例（`test` 不触发）。
 >
-> **设备侧（instrumented）用例注意（2026-09-11 实测基线）**：需先启动 AVD 或接真机。**语料缺失时**
-> `RealKdbxCorpusUnlockTest` 抛 `AssumptionViolatedException`：task 级仍 `BUILD SUCCESSFUL`，
-> 但 AGP 生成的 `build/outputs/androidTest-results/connected/debug/TEST-*.xml` 会把它
-> **记为 `<failure>`（`skipped=0`）**——别据此误判为用例失败；判定以 **task 结果**为准
+> **设备侧（instrumented）用例注意（2026-09-11 实测基线）**：需先启动 AVD 或接真机。
+> 真实互操作语料已入库（`ISSUE-P3-23` AC② 闭环，见 `docs/RESOLVED_LOG.md` §25），
+> `RealKdbxCorpusUnlockTest` 现为 **2/2 pass**。**若语料被移除**，该用例抛 `AssumptionViolatedException`：
+> task 级仍 `BUILD SUCCESSFUL`，但 AGP 生成的 `build/outputs/androidTest-results/connected/debug/TEST-*.xml`
+> 会把它 **记为 `<failure>`（`skipped=0`）**——别据此误判为用例失败；判定以 **task 结果**为准
 > （详见 `docs/RESOLVED_LOG.md` §24.4）。设备侧用例是**唯一**能覆盖 Android 运行时差异的层
 > （§24 的致命缺陷即由它发现，JVM 侧无法复现）。
 >

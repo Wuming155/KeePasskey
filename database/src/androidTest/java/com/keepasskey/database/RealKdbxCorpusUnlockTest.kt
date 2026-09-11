@@ -42,8 +42,9 @@ import java.io.IOException
  * - 本用例**不包含**任何「自生成库再自读回」的往返断言（那种往返不构成互操作证据）；
  *   设备侧往返另见 `SelfGeneratedRoundTripInstrumentedTest`（已显式标注非互操作证据）。
  *
- * 敏感数据：语料口令为**测试专用一次性口令**（见 [CORPUS_PASSPHRASE]），以 `CharArray` 承载并在
- * `finally` 中清零；断言与日志**只输出条目标题（占位内容）与非敏感 KDF 参数**，绝不输出密码明文。
+ * 敏感数据：语料口令为**测试专用一次性口令**（默认见 [CORPUS_PASSPHRASE]，亦可在伴生 `.json` 中
+ * 以可选字段 `passphrase` 声明本语料专用值），以 `CharArray` 承载并在 `finally` 中清零；
+ * 断言与日志**只输出条目标题（占位内容）与非敏感 KDF 参数**，绝不输出密码明文。
  */
 @RunWith(AndroidJUnit4::class)
 class RealKdbxCorpusUnlockTest {
@@ -60,9 +61,12 @@ class RealKdbxCorpusUnlockTest {
         private const val META_SUFFIX = ".json"
 
         /**
-         * 语料主密码：**公开测试向量专用的一次性口令**（约定见
+         * 语料主密码**默认值**：**公开测试向量专用的一次性口令**（约定见
          * `crypto/src/test/resources/argon2-interop/README.md` §3.1 / §4）。
-         * 生成语料时必须逐字使用该口令；**严禁**使用任何真实主密码。
+         * 生成语料时通常逐字使用该口令；**严禁**使用任何真实主密码。
+         *
+         * 若某份语料自带**专用**一次性口令，可在其同名伴生 `.json` 中以可选字段
+         * `passphrase` 覆盖本默认值（见 README §6.2）；未声明时回退到本常量。
          */
         private const val CORPUS_PASSPHRASE = "Test-Vector-Only-2026!"
 
@@ -167,6 +171,8 @@ class RealKdbxCorpusUnlockTest {
         val parallelism: Int,
         val entryCount: Int,
         val keyFileAsset: String?,
+        /** 本语料主口令（伴生 JSON `passphrase`，缺省回退到 [CORPUS_PASSPHRASE]）。 */
+        val passphrase: String,
         val saltHex: String?,
         val entryTitles: List<String>
     )
@@ -200,6 +206,8 @@ class RealKdbxCorpusUnlockTest {
             parallelism = json.getInt("parallelism"),
             entryCount = json.getInt("entryCount"),
             keyFileAsset = keyFileName?.let { "$CORPUS_ASSET_DIR/$it" },
+            // 可选 per-corpus 口令：仅限公开的一次性测试常量（README §4），未声明时回退默认常量
+            passphrase = json.optString("passphrase").takeIf { it.isNotBlank() } ?: CORPUS_PASSPHRASE,
             saltHex = json.optString("saltHex").takeIf { it.isNotBlank() },
             entryTitles = json.optJSONArray("entryTitles").asStringList()
         )
@@ -334,7 +342,7 @@ class RealKdbxCorpusUnlockTest {
             val meta = parseMetaOrFail(fileName)
             val (kdbxBytes, keyFileBytes) = loadCorpusBytes(meta)
 
-            val passphrase = CORPUS_PASSPHRASE.toCharArray()
+            val passphrase = meta.passphrase.toCharArray()
             val database = try {
                 KdbxFile.load(ByteArrayInputStream(kdbxBytes), passphrase, keyFileBytes)
             } finally {

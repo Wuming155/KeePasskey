@@ -1,0 +1,31 @@
+{
+  "source": "KeePassXC",
+  "kdf": "argon2d",
+  "version": 19,
+  "iterations": 89,
+  "memoryKib": 65536,
+  "parallelism": 4,
+  "entryCount": 14,
+  "entryTitles": [
+    "11",
+    "百度 模拟账号",
+    "QQ邮箱 模拟账号",
+    "微软账号 模拟账号",
+    "淘宝 模拟账号",
+    "京东 模拟账号",
+    "网易163邮箱 模拟账号",
+    "GitHub 模拟账号",
+    "知乎 模拟账号",
+    "哔哩哔哩 模拟账号",
+    "新浪微博 模拟账号",
+    "CSDN 模拟账号",
+    "豆瓣 模拟账号",
+    "飞书 模拟账号"
+  ],
+  "saltHex": "b027ebf29c05ab5a02c8a160da206b67c44f2932e7b200ca26f151524ba63737",
+  "keyFile": "111.keyx",
+  "passphrase": "xdqaCEGFEAHBETAH72732/*632.",
+  "passphraseIsThrowaway": true,
+  "containsRealData": false,
+  "note": "KeePassXC 官方产物（内层 Meta <Generator>=KeePassXC）；条目全部为「模拟账号」占位数据，零真实数据；口令为一次性测试常量，另配 XML KeyFile v2.0（111.keyx）。口令/密钥仅用于本测试，绝不可复用。"
+}

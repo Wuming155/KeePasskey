@@ -98,9 +98,16 @@ def canonical_name(info: kdbx_header.KdbxHeaderInfo, source_key: str) -> str:
     ):
         if value is None:
             raise CorpusError(f"文件头缺失 KDF 参数「{field}」，无法构造规范文件名", EXIT_MISMATCH)
+    # README §6.1 规定文件名中的内存单位为 **MiB**（例：64 MiB → `-m64`），故由 KiB 换算；
+    # 非整 MiB 无法按约定表达，fail-closed 拒绝（避免产出「文件名撒谎」的语料）。
+    if info.memory_kib % 1024 != 0:
+        raise CorpusError(
+            f"文件头内存 M={info.memory_kib}KiB 非整 MiB，无法按 README §6.1 命名",
+            EXIT_MISMATCH,
+        )
     return (
         f"{info.kdf}-v{info.argon2_version}-t{info.iterations}"
-        f"-m{info.memory_kib}-p{info.parallelism}-{source_key}.kdbx"
+        f"-m{info.memory_kib // 1024}-p{info.parallelism}-{source_key}.kdbx"
     )
 
 

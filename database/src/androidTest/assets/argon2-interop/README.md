@@ -1,9 +1,8 @@
 # 设备侧 Argon2 互操作语料落位目录（`database/src/androidTest/assets/argon2-interop/`）
 
 > 归属条目：**ISSUE-P3-23**（ISSUE-P3-11 验收标准 2 的残余面：真实 `.kdbx` 语料端到端解锁）
-> ⚠️ **本 README 不是语料**。截至本文件写入时，**本目录下没有任何 `.kdbx` 语料**，
-> 因此 `RealKdbxCorpusUnlockTest` 的两个用例会**整体跳过**（JUnit `Assume`），
-> **跳过 ≠ 通过**，验收标准 2 **尚未达成**。
+> ✅ **2026-09-11 起本目录已含真实 `.kdbx` 语料**，`RealKdbxCorpusUnlockTest` 由 skip 转为
+> **2/2 pass**（设备侧证据见 `docs/RESOLVED_LOG.md` §25）。⚠️ **本 README 本身不是语料**。
 
 ---
 
@@ -14,12 +13,12 @@
 
 ```
 database/src/androidTest/assets/argon2-interop/
-├── README.md                                  # 本文件（非语料，被测试过滤掉）
-├── argon2d-v19-t2-m64-p2-keepass2611.kdbx     # ← 真实语料（人工生成后放入）
-├── argon2d-v19-t2-m64-p2-keepass2611.json     # ← 同名伴生元数据（必需）
-├── argon2id-v19-t2-m64-p4-keepassxc.kdbx
-└── argon2id-v19-t2-m64-p4-keepassxc.json
+├── README.md                                        # 本文件（非语料，被测试过滤掉）
+├── argon2d-v19-t89-m64-p4-keepassxc.kdbx            # ← 真实语料（KeePassXC 官方产物）
+├── argon2d-v19-t89-m64-p4-keepassxc.json            # ← 同名伴生元数据（必需）
+└── 111.keyx                                         # ← 复合密钥的 XML KeyFile v2.0 分量
 ```
+
 
 AGP 默认的 androidTest assets 源目录就是 `src/androidTest/assets`，**无需**在
 `database/build.gradle.kts` 里额外声明。
@@ -71,4 +70,7 @@ fail-closed 语义：不允许「语料在、元数据糊」的假绿。
   `crypto/src/test/resources/argon2-interop/README.md` **§3.0** 的「一次性口令 + 零真实条目」硬前提，
   并在伴生 `.json` 中登记 `containsRealData: false`、`passphraseIsThrowaway: true`；
 - **严禁**把本工程自建夹具（如 `database/src/test/resources/fixtures/test_vault.kdbx`）
-  或参考项目资产（`参考项目/**/*.kdbx`）复制到本目录充当互操作语料。
+  或参考项目资产（`参考项目/**/*.kdbx`）复制到本目录充当互操作语料；
+- 本目录的语料为 **KeePassXC 官方产物**（`Meta/Generator=KeePassXC`），条目全为占位数据；
+  其口令为**公开的一次性测试常量**，在伴生 `.json` 的 `passphrase` 字段声明
+  （schema 与硬前提见 `crypto/.../README.md` §4 / §6.2），另配 `111.keyx` 复合密钥分量。

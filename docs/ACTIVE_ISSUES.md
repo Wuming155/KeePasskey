@@ -2,7 +2,7 @@
 
 > **文档定位**：本项目**唯一**的现存缺陷、功能缺口与待办任务清单。
 > **排序规则**：严格按优先级 **P0 → P1 → P2 → P3** 降序排列。每项均包含完整背景、整改依据、涉及文件与验收标准，**实现时直接依据本文件操作，无需额外制定计划文件**。
-> **闭环纪律**：任务完成后，将该条目从本文件**移入** [**docs/RESOLVED_LOG.md**](RESOLVED_LOG.md)，并执行 `git commit & push`。
+> **闭环纪律**：任务完成后，将该条目从本文件**整条移入** [**docs/RESOLVED_LOG.md**](RESOLVED_LOG.md)，并执行 `git commit & push`；本文件**不保留**已闭环条目的正文或索引段，历史实现与验收证据一律以归档库为单一真相源。
 
 ---
 
@@ -11,9 +11,8 @@
 1. **新增条目必须附「核实时间点」与「核实方式」**：任何声称「某文件需要删除 / 某处没有消费方 / 某硬编码为 0」
    一类**关于代码库现状的前提**，都必须写明**何时、以何种手段**核实过，例如
    「2026-09-10 经 `Test-Path` 核实」「2026-09-10 经全仓 `grep maskPasswordsDefault` 核实（仅设置页回显）」。
-   > 立规缘由：本批次发现 ISSUE-P3-08 与 ISSUE-P3-16 的正文前提在开工时**已不成立**——两者都声称
-   > `docs/plans/`、`STATUS.md`、`plans/rust-enclave-poc.md` 等文件「需要删除」，但这些文件早在
-   > `7dba64d`（重构文档体系）与 `d578df7` / `863d81c` 中就已删除；`AGENTS.md` 也已不含相关引用。
+   > 立规缘由：曾发现 ISSUE-P3-08 与 ISSUE-P3-16 的正文前提在开工时**已不成立**——两者都声称
+   > `docs/plans/`、`STATUS.md` 等文件「需要删除」，但这些文件早已先行删除，`AGENTS.md` 也已不含相关引用。
    > 条目与代码库演进之间存在时间差，会导致执行者去做已经完成的工作。
 2. **开工前复核前提**：认领条目时先复核其正文前提（路径是否存在、行号是否漂移、消费方是否已出现）。
    前提已不成立的，**就地修正或显式标注**后再动手；完全无对象可改的条目应直接归档并注明原因。
@@ -40,180 +39,28 @@
 
 ## P1 高危与核心功能问题（0 项）
 
-> 当前无待办。
-> **2026-09-11 闭环**：**ISSUE-P1-11**（自动填充「受信浏览器」仅按包名信任、未校验签名证书）
-> 已整改归档——浏览器分支升级为「包名 + 已取证签名证书指纹」二元组，未取证浏览器 fail-closed 降级 DAL，
-> 见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §22.7。
-> 历史 P1 项（含 ISSUE-P1-10 / ZT-10）亦已全部闭环，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §2.5。
-> **2026-09-11 追加闭环**：**ISSUE-P1-12**（Android 端 KDBX XML 解析全量失败 —— 设备端**任何库都打不开**）
-> 由「设备侧链路验证」实测发现，同批次修复并在真实 AVD 上验证通过，见 §24。
+> 当前无待办。历史 **ISSUE-P1-10 / P1-11 / P1-12** 均已闭环，分别见
+> [RESOLVED_LOG.md](RESOLVED_LOG.md) §2.5（ZT / P1 专项）、§22.7（受信浏览器「包名 + 签名证书指纹」）、
+> §24（设备端 KDBX XML 解析全量失败的致命缺陷）。
 
 ---
 
 ## P2 中危缺陷与协议/测试缺口（0 项）
 
-> 当前无待办。
-> ISSUE-P2-05 ~ ISSUE-P2-13 九项已全部整改并归档，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §2.16 ~ §2.20。
-> P2-12 整改中如实登记的残余面 ISSUE-P2-15 / ISSUE-P2-16（受保护值经 String 退化、
-> 密码生成引擎出边界仍返回 String）已整改并归档，见 §2.21。
-> **2026-09-11 闭环（零信任全量安全审计批次）**：
-> - **ISSUE-P2-17**（子库解锁未接入节流）→ 节流下沉至 `ChildDatabaseSessionManager.open()`，按 `mountId` 计次，
->   锁定期不进入 `KdbxFile.load`；仅认证失败计次，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §22.6。
-> - **ISSUE-P2-18**（同步缺防回滚绑定）→ 引入本地认证的「已见内容摘要链」（Keystore HMAC + `SyncRollbackGuard`），
->   重放旧库被拒并提示，跨端兼容结论留痕，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §22.8。
+> 当前无待办。历史 **ISSUE-P2-05 ~ P2-18** 均已闭环，见
+> [RESOLVED_LOG.md](RESOLVED_LOG.md) §2.16 ~ §2.21、§22.6（子库解锁接入节流）、§22.8（同步防回滚绑定）。
+
+---
 
 ## P3 低危问题、特性接线与体验优化（2 项）
 
-> **背景**：P3 残余批次原 **12 项**（ISSUE-P3-17 ~ P3-28）已于 **2026-09-10** 整体整改。
-> 其中 **10 项完整闭环并归档**（P3-17 / 18 / 19 / **20** / 21 / 22 / 25 / 26 / 27 / 28，含逐项代码证据与 15 条过程缺陷留痕），
-> 见 [RESOLVED_LOG.md](RESOLVED_LOG.md) **§4**；**2 项部分达标**（P3-23 / P3-24 —— 均为**本环境物理不可达**的
-> 验证类条目：arm64 设备与 GitHub runner）就地更新后保留于本节
-> （**其中 P3-24 已于 2026-09-11 经真实 CI 运行实证闭环归档，见 §23；P3-23 仍保留**）；
-> 另有 **2 项新登记**（**ISSUE-P3-29** 全仓超阈值债务、**ISSUE-P3-30** 子库条目投影未并入根库列表）。
-> **2026-09-10 追加一**：**ISSUE-P3-30 已闭环并归档**（子库条目只读投影接入库列表，见 §5）。
-> **2026-09-10 追加二**：**ISSUE-P3-29 批次 A 已闭环并归档**（见 §6）——
-> 条目正文点名的**优先级 8 项全部降至 400 行阈值内**（`SettingsViewModel` / `VaultListViewModel` /
-> `DatabaseSettingsDialogs` / `KdbxFile` / `KeePasskeyApp` / `VaultEntryRows` / `VaultRepository` / `VaultListScreen`），
-> 另**增量完成** `KdbxHeader` 与 `SyncCredentialsStore` 两项，并登记 `DicewareWordList` 为**经论证的纯常量例外**；
-> 仓库内残余的 **23 个**真逻辑超阈值文件**整体转入 ISSUE-P3-31** 重新登记（附 2026-09-10 实测快照与核实方式）。
-> **2026-09-10 追加三（CI 首跑实测 + 供应链残余处置）**：新增 **ISSUE-P3-32**（供应链达阈告警残余）；
-> 同一批次内**已闭环**的工作见 [RESOLVED_LOG.md](RESOLVED_LOG.md) **§7**：
-> `Fast gate` 147 个 lint error 清零、CodeQL 10 条告警处置、`dependency-scan` 的 CVSS 阻断语义
-> **静默失效**之实证与硬断言补强、**Kotlin 2.4.20 真修复 `CVE-2026-53914` + 4 族豁免登记**
-> （本地真实扫描实测 **188 → 7 条实例、达阈 138 → 0 条**）、以及**合并 PR #5**
-> （原 ISSUE-P3-33，已闭环归档）；实测校准追加节见 [docs/ci-静态校准记录.md](ci-静态校准记录.md) **§11**。
-> **2026-09-10 追加四（原生内核与工程化扩展批次）**：经全仓性能/架构评审（逐模块读源）新登记的
-> **ISSUE-P3-34 ~ P3-38** 五项（AES-KDF 原生内核 / Twofish 原生内核 / 密码强度评估原生引擎 /
-> `HmacBlockStream` 摘要收敛 / `.kdbx` 互操作语料生成脚本自动化）**已于同批次全部闭环并归档**，
-> 见 [RESOLVED_LOG.md](RESOLVED_LOG.md) **§8**——Rust 单测 9 → **43**、全仓用例 1200 → **1257**、
-> `crypto` lint 告警 4 → **0**；该节如实留痕 **9 条过程缺陷/事实修正**（含 1 处生产缺陷、
-> 1 处安全校验冒充漏洞、1 处文档与实测相反的事实修正）与 **3 项未验证项**。
-> **2026-09-10 追加六（自动填充能力对标批次整改）**：上述「追加五」登记的 P3-39 ~ P3-45 七项中，
-> **6 项已实现并归档**——P3-39（字段识别与候选打分/上次填充优先）、P3-40（手动选择器）、
-> P3-41（服务健康自检）、P3-42（会话授权宽限）、P3-44（保存开关真实接线 + 评估结论）、
-> P3-45（结构化数据可行性评估结论），见 [RESOLVED_LOG.md](RESOLVED_LOG.md) **§9**；
-> **P3-43 部分达标**：① 已接线既有 `overrideNoAutofill`（尊重 `importantForAutofill`，同时消除一处
-> 假开关），② 字段签名级屏蔽 与 ③ 保存侧独立黑名单 两项因**缺少用户交互写入入口**，
-> 就地保留待办并已重写验收标准（严禁先落库无写入方的存储 API）。
-> **2026-09-10 追加七（P3-31 批次 B）**：ISSUE-P3-31 验收标准 1 点名的两项
-> `RealVaultRepository`（1090 → 372）与 `DatabasePickerScreen`（968 → 319）已按纯结构性拆分完成并归档，
-> 见 [RESOLVED_LOG.md](RESOLVED_LOG.md) **§10**。
-> **2026-09-10 追加八（P3-31 批次 C + P3-43 闭环）**：批次 C 三项
-> （`ThemeSettingsScreen` 762 → 155 / `EntryEditScreen` 712 → 388 / `EntryDetailViewModel` 708 → 399）
-> 已完成并归档，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) **§11**；**ISSUE-P3-31 本条未闭环**（残余 18 项），清单已就地刷新。
-> 同批次 **ISSUE-P3-43 全部闭环并归档**（② 字段签名级屏蔽 / ③ 保存侧独立黑名单，
-> 三件套一次性交付，见 §11.3 / §11.4），本文件中该条目已移除；
-> 同批次顺带发现并修复一处既有生产缺陷（详情页 `passwordStrengthBits` 无写入方 → 强度条恒不渲染，见 §11.5），
-> 其签名抗枚举加固残余新登记为 **ISSUE-P3-46**。
-> **2026-09-10 追加九（P3-31 批次 D + P3-46 闭环）**：批次 D 三项
-> （`DatabaseSession` 697 → 393 / `SecuritySettingsScreen` 674 → 371 / `KeePasskeyAutofillService` 634 → 334）
-> 已完成并归档，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) **§12**；**ISSUE-P3-31 本条仍未闭环**
-> （残余真逻辑超阈值 **15 项**，清单已就地刷新）。
-> 同批次 **ISSUE-P3-46 全部闭环并归档**（§12）：字段签名密钥来源改为 Android Keystore 内
-> **不可导出 HMAC 密钥**，schema `v1 → v2`、盐不再落盘、旧数据一次性保守失效，本文件中该条目已移除。
-> **2026-09-10 追加十（P3-31 批次 E）**：验收标准 1 点名的下一批三项
-> （`S3SyncProvider` 629 → 372 / `PasskeyCryptoEngine` 596 → 362 / `KdbxMerger` 578 → 207）
-> 已完成并归档，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) **§13**；**ISSUE-P3-31 本条仍未闭环**
-> （残余真逻辑超阈值 **12 项**，清单已就地刷新）。
-> **2026-09-10 追加十一（P3-31 批次 F）**：验收标准 1 点名的下一批三项
-> （`SettingsScreen` 569 → 306 / `UnlockScreen` 562 → 275 / `GeneratorScreen` 550 → 177）
-> 已完成并归档，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) **§14**；**ISSUE-P3-31 本条仍未闭环**
-> （残余真逻辑超阈值 **9 项**，清单已就地刷新）。
-> **2026-09-10 追加十二（P3-31 批次 G）**：验收标准 1 点名的下一批三项
-> （`WebDavSyncProvider` 510 → 345 / `AutofillSettingsScreen` 504 → 216 / `EntryEditComponents` 494 → 296）
-> 已完成并归档，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) **§15**；**ISSUE-P3-31 本条仍未闭环**
-> （残余真逻辑超阈值 **6 项**，清单已就地刷新）。
-> **2026-09-10 追加十三（P3-31 批次 H）**：验收标准 1 点名的下一批三项
-> （`CloudSyncComponents` 481 → 291 / `EntryDetailComponents` 477 → 223 / `EntryEditViewModel` 470 → 400）
-> 已完成并归档，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) **§16**；**ISSUE-P3-31 本条仍未闭环**
-> （残余真逻辑超阈值 **3 项**，清单已就地刷新）。
-> **2026-09-10 追加十四（P3-31 批次 I · 本条闭环归档）**：验收标准点名的最后三项
-> （`KeystoreManager` 462 → 239 / `HealthCheckScreen` 453 → 315 / `SyncEngine` 443 → 316）
-> 已完成并归档，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) **§17**；
-> 门禁 `test --rerun-tasks` **1329 例 / 0 失败 / 13 跳过**、`lint` 5 模块 0 error，
-> 公开 API **零丢失零新增**。**全仓重测后 `> 400` 仅剩 2 项，且均为经论证的例外**
-> （纯常量词表 `DicewareWordList` 408、因 ISSUE-P3-43 接线产生功能性增量的 `SettingsViewModel` 424），
-> 故 **ISSUE-P3-31 达成闭环并整条移出本文件**。
-> 本节余 **2 项**（P3-23 / **ISSUE-P3-58**）。
-> **2026-09-11 追加四（CodeQL Rust 误报治理）**：针对上一则登记的 **ISSUE-P3-57**（77 条
-> `rust/hard-coded-cryptographic-value` critical 误报）先行**机制验证**——查询源码无测试代码过滤、
-> `paths-ignore` 为文件级过滤、配置级排除需 advanced setup——据此把 Rust 单测外移为**纯测试文件**
-> 并新增 `.github/workflows/codeql.yml` + `.github/codeql/codeql-config.yml`（PR #6）。
-> 验证：advanced 分析的 rust 结果 **77 → 0**（`rules` 仍为 26，生产代码未被误伤），
-> 而同一时刻默认设置的分析仍报 77 条 → **双向实证**。本文件该条目已移出，见
-> [RESOLVED_LOG.md](RESOLVED_LOG.md) **§23.5**。
-> **2026-09-11 追加（功能完整性审计批次 A + B）**：以「README 声称功能 → 引擎/仓库 → ViewModel/控制器 → UI 入口」
-> 四层逐项做端到端接线审计，两批共发现并**同日整改归档 5 项**（A：全文搜索范围、详情页单条删除；
-> B：HOTP 端到端、单条移动分组 / 从模板新建便利入口、`AttachmentManager` 孤儿实现清理），
-> 见 [RESOLVED_LOG.md](RESOLVED_LOG.md) **§20 / §21**（批次 B 验收 1345 例 / 0 失败 / 13 跳过）；
-> 本文件中 P3-47 ~ P3-51 均已移出。
-> **2026-09-11 追加二（零信任全量安全审计批次）**：对 `app/ core/ crypto/ database/ sync/` 全量
-> `src/main`（含 `crypto/src/main/rust/`）按零信任五支柱做静态审计（Assume Breach 威胁模型，
-> **未做动态/运行时验证**），7 项正式发现经逐条独立复读源码复核**全部属实、无误报**，按严重度分级登记：
-> **ISSUE-P1-11**（P1）、**ISSUE-P2-17 / P2-18**（P2）、**ISSUE-P3-52 ~ P3-55**（P3），
-> 次要加固项打包登记为 **ISSUE-P3-56**；各项核实时间点与核实方式见条目内。
-> **2026-09-11 同日闭环**：上述 8 项**本地可整改条目已按难度递增顺序全部整改归档**
-> （见 [RESOLVED_LOG.md](RESOLVED_LOG.md) **§22**），本文件正文已移出；本节现存条目**仅余** P3-23
-> 一项**外部资源依赖**的验证类残余。门禁：`test --rerun-tasks` **1370 例 / 0 失败 / 13 跳过**、`lint` 5 模块 0 error。
-> **2026-09-11 追加三（CI 侧真实跑通 + CodeQL 新发现）**：以 `gh workflow run` 手动触发 `dependency-scan`
-> 运行 **`34575788016`** 并全程盯守，**首次全绿**（aggregate `BUILD SUCCESSFUL in 15m 4s`、
-> 硬断言 `达阈（CVSS ≥ 7.0）实例 0 条` 且 exit 0、artifact 与 SARIF 上传均成功），
-> **ISSUE-P3-24 与 ISSUE-P3-32 据此闭环归档**，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) **§23**；
-> 同批核对 Code Scanning 时**新发现 77 条** CodeQL `rust/hard-coded-cryptographic-value`（critical）
-> open 告警（全部落在 Rust 单测模块内、判定为误报），就地登记为 **ISSUE-P3-57**——
-> 并附**机制验证结论：该查询无任何测试代码过滤，单纯「外移单测」无效**（详见条目内）。
-> 同时更正两处滞后前提：`NVD_API_KEY` **早已配置**（503 系 NVD 服务端间歇故障，非缺 Key），
-> 以及「CodeQL 开放告警 = 0」**已不再成立**。
-> **2026-09-11 追加五（CodeQL 语言覆盖面）**：核对 Code Scanning 语言面时发现 **`java-kotlin`（本仓主语言）**
-> 的默认设置分析**历来为空跑**（`rules=0 / results=0`），而切换 advanced setup 后该语言未纳入 matrix；
-> `c-cpp` 则经 `Glob` 核实本仓**无任何 C/C++ 源**（命中的文件全在 gitignore 的 `参考项目/`），无需纳入。
-> 就地登记 **ISSUE-P3-58**——含官方文档给出的构建模式边界（**Kotlin 无 `build-mode: none`**，
-> 必须提供真实 Gradle + Android SDK 构建）与 Kotlin 2.4.20 的版本支持风险（须先实测）。
-> **2026-09-11 追加六（ISSUE-P3-58 可行性实测收口）**：在草稿 PR #7 上实跑 `java-kotlin` 的 CodeQL 覆盖
-> （`build-mode: manual` + Android SDK + 窄化 Kotlin 编译）：**SDK 与构建链路全通、31 个任务真实执行**，
-> **唯一阻塞是 CodeQL 的 Kotlin 编译器插件直接拒绝 Kotlin 2.4.20**
-> （`Kotlin version 2.4.20 is too recent. CodeQL currently supports versions below 2.4.20`）。
-> 结论：**暂不纳入，登记为已接受的风险**（Kotlin 侧静态分析由 Android Lint + 1370 例单测 + 人工审计承接）；
-> 解除条件与可复现配方已留痕于条目内与 PR #7；**严禁以回退 Kotlin 版本换取分析覆盖**。证据见 ISSUE-P3-58 正文。
-> **2026-09-11 追加七（设备侧链路验证 · 连带修复致命缺陷）**：为验证 P3-23 的设备侧链路，启动本机 x86_64 AVD
-> 实跑 `:database:connectedDebugAndroidTest`——**本仓首次在真实 Android 运行时执行设备侧用例**：
-> 链路可用性得到验证，同时**发现并修复一处设备端致命缺陷 ISSUE-P1-12**
-> （Android 端 `SAXParserFactory.newSAXParser()` 因不支持的 XXE 加固特性抛异常 → **任何库都打不开**；
-> JVM 单测走 Xerces 故长期潜伏、从未暴露）。修复后设备侧用例 **pass**、全量门禁
-> **1370 例 / 0 失败 / 0 错误 / 13 跳过** 与 `lint` **0 error** 保持，见 §24。
-> 本节仍余 **2 项**（P3-23 / P3-58），但 **P3-23 的阻塞项已收窄为「真实语料 + arm64 数据」**。
-> 归档门禁证据（2026-09-10 批次 I 实测，`--rerun-tasks` 强制真实执行）：
-> `.\gradlew.bat test --rerun-tasks --max-workers=1 --continue` → **BUILD SUCCESSFUL**，
-> **1329 例 / 0 失败 / 13 跳过**（app 750 / core 58 / crypto 107 / database 235 / sync 179；
-> 纯结构性拆分，用例数与批次 H 基线持平）；
-> `lint`（5 模块 **0 error**）通过；`:database:assembleDebugAndroidTest` 通过（ISSUE-P3-23 验收标准①）。
+> **状态（2026-09-11）**：历史 P3 批次 **ISSUE-P3-01 ~ P3-57 除下列 2 项外已全部闭环并归档**，
+> 逐条目的实现细节与验收证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md)（§3 ~ §25）。
+> 现存 2 项均为**外部资源依赖型残余**，故保留于本文件**不归档**：
+> **ISSUE-P3-23**（**真实 `.kdbx` 语料已于 2026-09-11 入库并跑绿——AC② 闭环，见 §25**；仅余 **arm64 真机数据**）
+> 与 **ISSUE-P3-58**（CodeQL Kotlin 抽取器上游阻塞）。
 
-### 前提复核记录（2026-09-10，依「条目维护规则」第 2 条）
-
-> 已对本节全部条目完成一次前提复核：**核实时间点 2026-09-10**。**逐条的核实方式记录在各条目自身的
-> 「核实时间点与核实方式」段落内**（ISSUE-P3-28 确立的格式），此处不再重复列表。
-> **复核结论**：P3-23 的「语料未入库」成立，但其「`database` 无 `androidTest` 源集」已不成立
-> （该源集已建立并接线），已在条目内就地标注；P3-24 前提完整成立。
-> **2026-09-10 追加八复核结论**：P3-31 批次 C 前提成立（三项行数经 `wc -l` 复核与清单一致）；
-> P3-43 的两项待办前提成立（`AutofillBlocklistStore` 仍无字段级/保存侧能力，手动选择器已在位可作交互落点）。
-> **P3-43 已于同批次闭环归档**（见 §11），条目移出本文件。
-> **P3-30 已于 2026-09-10 归档**（前提「生产消费方为零」在开工时成立，整改后消费方落地，见 §5）。
-> **P3-29 已于 2026-09-10 批次 A 闭环归档**（见 §6）；其残余 23 项已按「新增条目须附核实时间点与核实方式」
-> 转入本节 **ISSUE-P3-31**（2026-09-10 经 `wc -l` 全仓复核）；**该条亦已于同批次 B~I 全部拆分闭环**
-> （见 §10~§17），本文件不再保留该条目。
-
-> **ISSUE-P3-20 已闭环**（子库挂载 **UI 接线**：`childDatabasesCount` 去硬编码并接真实 `mountedCount`；
-> `ChildDatabaseDialog` 成为真实入口并调用核心层 `mount`/`open`/`unmount`；两条失真文案随能力上线删除；
-> 新增 26 例单测），归档见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §4.2。
-> 其接线过程中**由执行者如实发现的「过度声明」残余面**即 **ISSUE-P3-30**，已于 §5 闭环归档
-> （投影接入库列表，且只读 / 不并入根库 / 不参与搜索与自动填充）。
->
-> **ISSUE-P3-25 已闭环**（3 个点名文件全部降至阈值内：`SyncCoordinator` 965→254、`KdbxXmlGroupReader`
-> 407→218、`UnlockViewModel` 979→396）；其「全仓扫描」暴露的整体债务经 **ISSUE-P3-29** 承接，
-> 该条**批次 A 已完成优先级 8 项并归档**（见 §6），残余 23 项由 **ISSUE-P3-31** 承接，
-> **该条已于 2026-09-10 批次 B~I 全部拆分闭环**（见 §10~§17）——巨型类债务至此清零，
-> 全仓 `> 400` 仅余两项**经论证的例外**。
-
+---
 
 ### ISSUE-P3-23 (P3-11 残余): arm64 真机 instrumented 验证与真实 `.kdbx` 语料端到端解锁
 
@@ -273,6 +120,23 @@
   ④ 归档文件「待填」表按实际情况回填（**严禁编造数据**）。
 - **禁止**：以 x86_64 模拟器或宿主侧数据填充 §4.3；把「用例就绪」表述为「验证通过」；
   用自生成 `.kdbx` 往返冒充互操作证据。
+- **2026-09-11 进展（AC② 闭环；核实方式：解密探针逐条核对 + 设备侧实跑 `:database:connectedDebugAndroidTest`）**：
+  1. **真实语料已入库**：本机既有 **KeePassXC 官方产物** `KeePasskey测试/测试.kdbx`
+     （内层 `Meta/Generator=KeePassXC`，Argon2d v19 t=89 m=64MiB p=4，AES-256-CBC，32B 盐）经
+     **解密探针逐条核对**——14 条条目**全部**为「模拟账号」占位数据、**零真实数据**、
+     KDF `secret(K)`/`associatedData(A)` 均为 `null`——后复制为规范名
+     `argon2d-v19-t89-m64-p4-keepassxc.kdbx`，连同 `111.keyx`（XML KeyFile v2.0）与同名伴生 `.json`
+     **双落位**（`crypto/src/test/resources/argon2-interop/` 与 `database/src/androidTest/assets/argon2-interop/`，不可互替）；
+     并已用 `generate_corpus.py --verify --json` 交叉校验「文件头 ↔ 伴生 JSON」逐字段一致；
+  2. **设备侧证据**：`RealKdbxCorpusUnlockTest` 由 skip 转为 **2/2 pass、0 skip、0 failure**
+     （设备 `emulator-5554`，x86_64 / API 36；报告 `build/outputs/androidTest-results/connected/debug/TEST-emulator-5554 - 16.xml`）；
+  3. **用例增强**：伴生 JSON 新增**可选**字段 `passphrase`（本语料自带专用一次性口令），缺省回退公开常量
+     `Test-Vector-Only-2026!`；同步修订 `crypto/.../argon2-interop/README.md` §4 / §6.2 与
+     `database/.../assets/argon2-interop/README.md`；
+  4. **工具修正**：`tools/kdbx-corpus/generate_corpus.py` 的 `canonical_name` 内存单位由 KiB 改为 **MiB**
+     （对齐 README §6.1「文件名即声明」，64MiB → `-m64`），非整 MiB 走 fail-closed 拒绝。
+  **本批次后 AC② 闭环；本条残余仅剩 AC③/④（arm64 真机数据），故仍保留不归档。**
+  （全量单测 `test --rerun-tasks`：**1370 例 / 0 失败 / 0 错误 / 13 跳过**，与基线持平。）
 
 ---
 
@@ -297,7 +161,7 @@
   5. 版本风险：`codeql.github.com` 的「Supported languages」页对 Kotlin 的支持上界在不同文档版本下
      分别写作 **2.3.2*x*** 与 **2.4.1*x***，而本仓为 **Kotlin 2.4.20**（`gradle/libs.versions.toml:13`）
      → 即便补上构建，抽取器对 2.4.x 的支持程度**须先实测确认**，不得假定可用。
-- **影响**：`ISSUE-P3-57` 切换到 advanced setup 后，`.github/workflows/codeql.yml` 的 matrix 仅含
+- **影响**：CodeQL 切换到 advanced setup 后，`.github/workflows/codeql.yml` 的 matrix 仅含
   `rust` / `python` / `actions`。就**有效**覆盖面而言与默认设置时期持平（当时即为空跑），
   但**名义覆盖**（Security 页不再有该语言的条目）属**需要显式决策**的范围收缩——
   本条目即为该决策的载体。
@@ -339,54 +203,3 @@
   保留于本文件**不归档**。
 - **禁止**：为求「看起来有覆盖」而把 `java-kotlin` 加进 matrix 却任其构建失败（`rules=0`）空跑（**虚假覆盖**）；
   在未实测的情况下宣称「CodeQL 已覆盖 Kotlin」；**以回退 Kotlin 版本**换取分析覆盖；为纳入而弱化任何既有门禁。
-
----
-
-### ISSUE-P3-24（CI 门禁首跑校准 · 2026-09-11 已闭环）
-
-> 已于 **2026-09-11** 经真实 CI 运行 `34575788016` 实证闭环——aggregate `BUILD SUCCESSFUL in 15m 4s`、
-> 硬断言首次给出确定判定（`达阈 0 条`，exit 0）、SARIF 与 artifact 上传均成功；
-> 原始证据（含 runner 镜像版本）与逐条残余面结论见 [RESOLVED_LOG.md](RESOLVED_LOG.md) **§23.1 / §23.2**。
-> 此处留索引，正文已移出本文件。
-
-
----
-
-### ISSUE-P3-32（供应链达阈告警残余处置 · 2026-09-11 已闭环）
-
-> 已于 **2026-09-11** 经真实 CI 运行 `34575788016` 实证闭环——硬断言首次在 aggregate 成功前提下给出**确定判定**
-> （`漏洞实例 7 条；达阈（CVSS ≥ 7.0）实例 0 条`，exit 0），Code Scanning 依赖类 open 告警 **7 条**与该族
-> 未达阈结论**一致**且未 dismiss。原始证据与逐条验收标准核对见 [RESOLVED_LOG.md](RESOLVED_LOG.md) **§23.1 / §23.3**。
-> 此处留索引，正文已移出本文件。
-
----
-
-### ISSUE-P3-57（Code scanning 对 Rust 单测的 critical 误报 · 2026-09-11 已闭环）
-
-> 已于 **2026-09-11** 闭环：77 条 `rust/hard-coded-cryptographic-value`（critical）经**逐条**行号核对确认
-> **77/77 全在 Rust 单测模块内**（误报）；按「单测外移为纯测试文件 + 切换 advanced setup 并以 `paths-ignore`
-> 精确排除」处置——advanced 分析的 rust 结果由 **77 → 0**（`rules` 仍为 26），
-> 且**同一时刻默认设置的分析仍报 77 条**，双向实证了「仅外移无效、必须叠加配置级排除」的机制结论。
-> 合并（`93b088f` / PR #6）后实测 open 告警 **84 → 7**（该 rule **open 0 / fixed 77**，余 7 条为依赖类未达阈项）。
-> 实施细节与原始证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md) **§23.5**。
-> 此处留索引，正文已移出本文件。
-
----
-
-### ISSUE-P3-49 ~ P3-51（2026-09-11 功能完整性审计批次 B · 已闭环）
-
-> 三项（HOTP 端到端 / 单条移动分组与从模板新建便利入口 / `AttachmentManager` 孤儿实现清理）
-> 已于 **2026-09-11** 同日整改并归档，实施细节与验收证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md) **§21**
-> （门禁：`test --rerun-tasks` **1345 例 / 0 失败 / 13 跳过**）。此处留索引，正文已移出本文件。
-
----
-
-### ISSUE-P3-52 ~ P3-56（2026-09-11 零信任审计批次 · 已闭环）
-
-> 五项（自动填充生物识别绑定 `CryptoObject` / 运行完整性时变信号实时化 / 解锁节流 Keystore HMAC
-> 完整性绑定 / 复合密钥派生 UTF-8 密码副本清零 / 零信任审计次要加固项打包）已于 **2026-09-11**
-> 同日整改并归档，实施细节与验收证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md) **§22.2 ~ §22.5**
-> （门禁：`test --rerun-tasks` **1370 例 / 0 失败 / 13 跳过**、`lint` 5 模块 0 error）。
-> 此处留索引，正文已移出本文件。
-
-

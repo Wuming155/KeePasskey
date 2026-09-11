@@ -12,28 +12,30 @@
 | 文件 | 性质 | 说明 |
 |---|---|---|
 | `argon2-bc-vectors.json` | **BC 冻结向量**（非 `.kdbx`） | Batch 0 由 BouncyCastle 1.85.2 `Argon2BytesGenerator` 生成，覆盖 Argon2d/id × version `0x10`/`0x13` × 含/不含 `secret`(K) + `associatedData`(A) × `p=1`/`p=4` × 现实内存档位，另有 2 条 64B 长 AD 探针（R2）。由 `crypto/src/test/java/com/keepasskey/crypto/kdf/Argon2BcVectorTest.kt` 以「防漂移锁」守护：默认只读并重算校验，`-DexportArgon2Vectors=true` 时才重写。 |
+| `argon2d-v19-t89-m64-p4-keepassxc.kdbx` | **真实 `.kdbx` 语料** | **KeePassXC 官方产物**（内层 `Meta/Generator=KeePassXC`）；Argon2d · v19 · t=89 · m=64 MiB · p=4 · AES-256-CBC；14 条条目**全部**为「模拟账号」占位数据。设备侧 `RealKdbxCorpusUnlockTest` 消费（双落位见 §3.4）。 |
+| `argon2d-v19-t89-m64-p4-keepassxc.json` | 伴生元数据（非语料） | 与 `.kdbx` **同名**；声明 KDF 参数 / 条目数与标题 / 口令来源；schema 见 §6.2。 |
+| `111.keyx` | **XML KeyFile v2.0**（密钥文件因子） | 与上述 `.kdbx` 配套的复合密钥分量，由伴生 `.json` 的 `keyFile` 字段引用。 |
 
 **该 JSON 是向量（参数 + 期望输出 hex），不是数据库文件**，不能用于「端到端解锁」验证。
 它已被 `NativeArgon2HostJniTest`（宿主侧）与 `NativeArgon2InstrumentedTest`（设备侧）作为冻结真相源复用。
 
 ---
 
-## 2. 缺口：真实 KeePass / KeePassXC Argon2 `.kdbx` 语料 —— **仍未入库**
+## 2. 真实 KeePass / KeePassXC Argon2 `.kdbx` 语料 —— **已入库（2026-09-11）**
 
 ISSUE-P3-23 要求使用**真实 KeePass 2.61.1 / KeePassXC 生成的 Argon2d / Argon2id `.kdbx`**
-完成端到端解锁验证。**截至本次交付（2026-09-10），本目录下仍无任何 `.kdbx` 语料，
-该验收标准仍未达成** —— 阻塞原因见 §5。
+完成端到端解锁验证。**2026-09-11 起本目录已入库一份真实 KeePassXC 语料**，验收标准 2 达成：
 
-本轮**已完成的是工程侧就绪**（不是验证通过）：
+| 语料 | 来源 | KDF（文件头实测） | 条目 |
+|---|---|---|---|
+| `argon2d-v19-t89-m64-p4-keepassxc.kdbx`（+ 同名 `.json` + `111.keyx`） | **KeePassXC 官方产物**（`Meta/Generator=KeePassXC`） | Argon2d · v19 · t=89 · m=64 MiB · p=4 | 14 条（全为「模拟账号」占位数据） |
 
-| 本轮完成项 | 位置 | 性质 |
-|---|---|---|
-| `database` 模块 androidTest 源集与 Gradle 接线 | `database/build.gradle.kts`（`defaultConfig.testInstrumentationRunner` + `androidTestImplementation`） | **工程就绪**（源集存在、依赖就位） |
-| 设备侧端到端解锁用例（fail-closed） | `database/src/androidTest/java/com/keepasskey/database/RealKdbxCorpusUnlockTest.kt` | **代码就绪**；语料缺失时**显式跳过**，跳过 ≠ 通过 |
-| 设备侧语料落位目录 | `database/src/androidTest/assets/argon2-interop/` | 目录已建（内含落位说明 README，**非语料**） |
+**设备侧证据**：`.\gradlew.bat :database:connectedDebugAndroidTest` 中 `RealKdbxCorpusUnlockTest`
+**2/2 pass、0 skip、0 failure**（此前为 skip）。原始证据见 `docs/RESOLVED_LOG.md` §25。
 
-> ⚠️ 「用例写好了」**不等于**「验证通过了」。在语料入库并真实跑出绿证之前，
-> 验收标准 2 一律记为**未达成**。
+> ⚠️ 仍然成立：**「用例写好了」不等于「验证通过了」**。本条的绿证由「语料在库 + 设备侧用例真实跑绿」
+> 两者同时成立才给出；若语料被移除，用例会退回 skip，届时验收标准 2 应重新记为**未达成**。
+
 
 ---
 
@@ -41,8 +43,9 @@ ISSUE-P3-23 要求使用**真实 KeePass 2.61.1 / KeePassXC 生成的 Argon2d / 
 
 ### 3.0 一次性前置：三条硬前提（违反即事故）
 
-1. **口令必须是公开的、一次性测试向量口令**：语料固定使用
-   `Test-Vector-Only-2026!`（**虚构口令**，见 §4 说明）。
+1. **口令必须是公开的、一次性测试向量口令**：语料默认使用
+   `Test-Vector-Only-2026!`（**虚构口令**，见 §4 说明）；某份语料若自带专用一次性口令，
+   可在其伴生 `.json` 以 `passphrase` 声明（见 §4 / §6.2）。
    **严禁**使用任何真实主密码，也**严禁**把任何真实库复制进来后「改个名」充当语料。
 2. **库内零真实数据**：只放 2~3 条占位条目（如标题 `Vector-Sample-1`），
    条目里的用户名/密码/备注一律写明显的假值（例如 `vector-user` / `vector-not-a-real-secret`）。
@@ -126,34 +129,36 @@ Test-Vector-Only-2026!
 
 - 该口令是**公开写入仓库的一次性测试口令**，由设备侧用例内常量提供
   （`RealKdbxCorpusUnlockTest.CORPUS_PASSPHRASE`，以 `CharArray` 承载、用后清零）；
-- 它**不写入**伴生 `.json`（伴生文件只登记非敏感元数据）；
-- **严禁**任何真实库使用该口令；**严禁**把真实库的口令替换成该口令后入库
+- **例外**：某份语料若自带**专用**一次性口令（例如由官方工具建库时即已设定），可在其同名伴生
+  `.json` 中以可选字段 `passphrase` 声明**该语料专用值**（见 §6.2）。该值**必须同为公开的一次性
+  测试常量**，执行时同样转 `CharArray` 并在 `finally` 中清零；它只对该份语料生效，不改变本默认值。
+- 它**默认不写入**伴生 `.json`（伴生文件默认只登记非敏感元数据）；仅上一条例外允许登记公开测试口令；
+- **严禁**任何真实库使用上述任一口令；**严禁**把真实库的口令替换成测试口令后入库
   （那会连带把真实条目数据带进仓库）。
 
 ---
 
-## 5. 为何尚未入库（如实登记，2026-09-10）
+## 5. 入库过程与残余（如实登记）
 
-1. **建库仍需官方 GUI**：KeePass 2.61.1 与 KeePassXC 需交互式 GUI 才能**精确设定** KDF 参数
-   （KeePassXC 官方 CLI 的 `db-create` 不提供 Argon2 变体/版本与 `t`/`m`/`p` 开关，见
-   `tools/kdbx-corpus/README.md` §3 的实测说明），故建库这一步无法在无人值守流水线内完成，
-   也不能由本仓库代码「生成」——自生成产物**不是**互操作证据。
-   > ISSUE-P3-38 起，「复核 + 规范命名 + 写伴生 JSON + 双落位」这四步已自动化
-   > （`generate_corpus.py --ingest`，见 §3.5），剩余的唯一人工步骤是 GUI 建库本身。
-2. **不得使用本机既有的开发期测试库**：工作区内 `KeePasskey测试/测试.kdbx` 等属个人测试库，
-   可能含真实数据，**禁止**入库（见 §7.1）。
+1. **语料来源已落实（2026-09-11）**：本仓**既有**一份由 **KeePassXC 官方建库**的真实 Argon2d `.kdbx`
+   （`KeePasskey测试/测试.kdbx`，工作区本地库，被 `.gitignore` 忽略），经**解密探针逐条核对**——
+   内层 `Meta/Generator=KeePassXC`、14 条条目**全部**为「模拟账号」占位数据、零真实数据——
+   后复制入本目录与 `database/src/androidTest/assets/argon2-interop/`（双落位，§3.4），并配同名伴生 `.json`。
+   本次**未**依赖 GUI 手工建库（既有真实语料已满足验收标准 2）。
+2. **「不得使用开发期测试库」这条前提被证据部分推翻**：`KeePasskey测试/测试.kdbx` 经逐条复核确为
+   **全占位测试数据**（并非含真实数据的个人库），故可用；但**仍严禁**把任何含真实数据或真实口令的库入库。
 3. **`crypto` 模块不可能承载该用例（结构性原因）**：模块依赖严格单向
    （`app → database → crypto → core`），**`crypto` 不依赖 `database`，因而不具备 `.kdbx` 读写能力**。
-   因此该用例只能落在 `database` 模块 —— 本轮已为其补齐 `androidTest` 源集与用例（见 §2 表）。
-4. **`database` 侧的 `androidTest` 已接线（本轮完成），故「工程阻塞」已消除**；
-   现在剩余的阻塞**只是语料本身**：需要人工用官方 GUI 工具生成并复核后入库。
+   因此该用例只能落在 `database` 模块 —— 其 `androidTest` 源集与用例已就位。
+4. **过程留痕（如实）**：语料落位前，本文档曾把「官方 GUI 建库」视为唯一不可自动化步骤；
+   本次因本机已有官方 KeePassXC 产出物，该步骤实际**无需**发生——「GUI 建库」不再是本条阻塞。
 
-### 5.1 仓库内既有的 `.kdbx` 现状（**不是**本次要补的语料）
+### 5.1 仓库内既有的 `.kdbx` 现状与本次处置
 
-| 文件 | KDF 实测 | 性质 | 能否充当验收标准 2 的语料 |
+| 文件 | KDF 实测 | 性质 | 本次处置 |
 |---|---|---|---|
-| `database/src/test/resources/fixtures/test_vault.kdbx` | **Argon2d**，`V=19`(`0x13`)、`I=89`、`M=67108864`(64MiB)、`P=4`、32B 盐 | **本工程自建的合成夹具**，非 KeePass/KeePassXC 官方产物 | **不能**。既非官方工具产出，也只覆盖 Argon2d 单一组合，且位于 `database` 模块的 `src/test/resources`（**不进** androidTest APK） |
-| `KeePasskey测试/测试.kdbx`、`KeePasskey测试_backup/测试.kdbx` | 头部同为 Argon2d（`0x13`） | 开发期手工测试库（**工作区未跟踪目录**，非测试资源） | **不能**。属个人测试库，可能含真实数据，禁止入库 |
+| `KeePasskey测试/测试.kdbx` + `111.keyx` | **Argon2d**，`V=19`(`0x13`)、`I=89`、`M=67108864`(64MiB)、`P=4`、32B 盐 | **KeePassXC 官方产物**（`Meta/Generator=KeePassXC`）；14 条条目**全部**为「模拟账号」占位数据；源文件位于 **gitignore 的工作区目录** | ✅ **已入库为验收标准 2 语料**（复制为 `argon2d-v19-t89-m64-p4-keepassxc.kdbx` + `111.keyx` + 同名 `.json`，双落位）。原件仍保持未跟踪 |
+| `database/src/test/resources/fixtures/test_vault.kdbx` + `111.keyx` | **Argon2d**，`V=19`、`I=89`、`M=67108864`(64MiB)、`P=4`、32B 盐 | 工程既有的真实 KeePass 4.0 夹具（复合密钥；据 `RealKdbxInteroperabilityTest` KDoc） | **未使用**：位于 `src/test/resources`（**不进** androidTest APK） |
 | `参考项目/keepassxc-develop/tests/data/*.kdbx` | 多数为 AES-KDF 旧格式 | **第三方参考项目**资产 | **不能**。许可证约束（AGENTS.md §3.3 严禁复制参考项目文件入库） |
 
 ---
@@ -191,6 +196,7 @@ argon2id-v16-t2-m64-p2-keepassxc.kdbx      # 0x10 版本只能由 KeePassXC 产�
   "entryTitles": ["Vector-Sample-1", "Vector-Sample-2", "Vector-Sample-3"],
   "saltHex": "<32B hex，可选；从文件头 KdfParameters 的 S 字段读出>",
   "keyFile": "<可选：与本 .kdbx 配套的密钥文件名（放同一目录）>",
+  "passphrase": "<可选：本语料专用的一次性测试口令；缺省即用 README §4 的默认常量>",
   "passphraseIsThrowaway": true,
   "containsRealData": false,
   "note": "一次性口令生成、库内仅占位条目；口令为公开测试常量，见 README §4"
@@ -209,6 +215,7 @@ argon2id-v16-t2-m64-p2-keepassxc.kdbx      # 0x10 版本只能由 KeePassXC 产�
 | `entryTitles` | 可选 | 非空时与解锁出的标题集合比对（标题是占位内容，非敏感） |
 | `saltHex` | 可选 | 非空时与文件头 KDF 盐比对（旁证「文件未被替换」） |
 | `keyFile` | 可选 | 非空时从同一 assets 目录读取该密钥文件并作为复合密钥分量传入 |
+| `passphrase` | 可选 | 非空时作为本语料主口令（**公开一次性测试常量**，见 §4）；缺省回退 `CORPUS_PASSPHRASE` |
 | `passphraseIsThrowaway` | ✅ | 必须为 `true`，否则**硬失败** |
 | `containsRealData` | ✅ | 必须为 `false`，否则**硬失败**（含真实数据的库严禁入库） |
 
