@@ -34,8 +34,9 @@
 | §23 | CI 侧真实跑通归档 + CodeQL Rust 误报治理（P3-24 / P3-32 / P3-57 闭环） | ISSUE-P3-24 / P3-32 / P3-57 |
 | §24 | 设备侧实测发现的致命缺陷修复（Android 端 KDBX XML 解析全量失败） | ISSUE-P1-12 |
 | §25 | 设备侧互操作语料入库与端到端解锁跑绿（真实 KeePassXC `.kdbx`） | ISSUE-P3-23 |
+| §26 | 设备侧手工实操发现的 P0 崩溃修复（字段引用正则在 Android ICU 上非法） | ISSUE-P0-04 |
 
-> 各批次验收证据（用例数 / 通过 / 失败 / 跳过）分别见 §2.22、§3.1、§4.1、§5、§6、§7、§8、§9、§10、§11、§12、§13、§14、§15、§16、§17、§18、§19、§20.3、§21.4、§22.9、§23.1、§24.3、§25.2。
+> 各批次验收证据（用例数 / 通过 / 失败 / 跳过）分别见 §2.22、§3.1、§4.1、§5、§6、§7、§8、§9、§10、§11、§12、§13、§14、§15、§16、§17、§18、§19、§20.3、§21.4、§22.9、§23.1、§24.3、§25.2、§26.3。
 
 ---
 
@@ -936,4 +937,73 @@ Rust 单测模块 `#[cfg(test)] mod tests` 之内**（测试模块起始行：`s
 - 曾评估「下载官方 KeePassXC 便携版另建一次性口令语料」方案，后因本机已有官方产物而**未采用**；
   最终按用户指示改用既有真实库，并以探针证据确认其零真实数据后方入库。
 - 命名单位分歧：文档（README §6.1）为 MiB，而脚本原实现按 KiB 生成文件名；本批次以文档为准修正脚本。
+
+---
+
+## 26. 设备侧手工实操发现的 P0 崩溃修复（ISSUE-P0-04：字段引用正则在 Android ICU 上非法）
+
+**发现方式（2026-09-11）**：在 AVD `Pixel_10`（`emulator-5554`，x86_64 / API 36）上安装 `:app:assembleDebug`
+后**手工实操主流程**（新建库 → 解锁 → 新建条目 → 保存）。这是本仓**首次在真实 Android 运行时上跑
+`app` 模块的端到端功能**——`app` / `sync` 无 `androidTest` 源集，此前设备侧只覆盖 `crypto` / `database`
+的库内逻辑用例。
+
+### 26.1 缺陷
+
+- **现象**：新建并保存条目后，App 立即崩溃退出到桌面。
+- **原始堆栈**（`adb shell logcat -d`）：
+  ```
+  E/AndroidRuntime: FATAL EXCEPTION: main
+  java.lang.ExceptionInInitializerError
+    at com.keepasskey.app.ui.model.EntryReferenceDisplayResolver.present(EntryReferenceDisplayResolver.kt:65)
+  Caused by: java.util.regex.PatternSyntaxException: Syntax error in regexp pattern near index 37
+    \{REF:([TUAPNI])@([TUAPNI]):([^{}]*)}          ← 结尾 } 未转义
+    at com.keepasskey.database.fieldref.FieldReferenceEngine.<clinit>(FieldReferenceEngine.kt:47)
+  ```
+- **根因**：`FieldReferenceEngine.REF_REGEX` 结尾 `}` 未转义。宿主 JVM 的 `java.util.regex` 宽容，
+  但 Android 运行时 regex 由 **ICU4C** 支撑——未转义 `}` 直接判语法错误，`<clinit>` 抛
+  `ExceptionInInitializerError`。
+- **影响面（P0 判定依据）**：`containsReference` 在**库列表逐条目投影**中被调用
+  （`VaultListDecorationsProvider` → `RealVaultRepository.getEntries` → `EntryReferenceDisplayResolver.present`）。
+  空库（0 条目）不触发类初始化，故「空列表看起来正常」；**库内 ≥1 条目即渲染崩溃** →
+  解锁后无法查看/管理任何条目，核心可用性归零。
+- **为何长期潜伏**：宿主单测的正则引擎更宽松（1370 例全绿），`app` / `sync` 又无设备侧源集——
+  与 §24 的 ISSUE-P1-12 同属「JVM 过、Android 运行时挂」类。
+
+### 26.2 修复
+
+1. `database/.../fieldref/FieldReferenceEngine.kt`：正则改为
+   `\{REF:([TUAPNI])@([TUAPNI]):([^\{\}]*)\}`（花括号全部转义），并在 KDoc 记录 ICU 差异与崩溃链路；
+2. 新增**设备侧回归锁**
+   `database/src/androidTest/java/com/keepasskey/database/fieldref/FieldReferenceEngineDeviceTest.kt`
+   （类初始化 ICU 兼容 + 取值解析 + 展示侧掩码不外泄），防同类复发；
+3. **语义零变更**（仅转义），宿主既有断言原样通过。
+
+### 26.3 验收证据（2026-09-11，真实 AVD 实测）
+
+设备：`emulator-5554`（`sdk_gphone64_x86_64`，API 36）。
+
+| 项 | 修复前 | 修复后 |
+|---|---|---|
+| `FieldReferenceEngineDeviceTest`（设备侧新用例 3 例） | 不存在（缺陷无从暴露） | ✅ **3/3 pass**（含 `<clinit>` ICU 兼容回归锁） |
+| `:database:connectedDebugAndroidTest` | 3/3（未覆盖该缺陷） | ✅ **6/6 pass、0 skip、0 failure** |
+| 手工实操：解锁 → 列表渲染（库内 1 条目） | ❌ FATAL 崩溃退出 | ✅ **列表正常渲染**（`GitHub-Test / tester`，含复制用户名/密码操作） |
+| 手工实操：详情页密码显示 | — | ✅ **明文回读 `GenPass2026`**（同时印证 KDBX 存取往返正确） |
+| 手工实操：生成器页 | — | ✅ 生成 `d*=6n{L@TxBF@*Z8`（16 位 / 104 bits） |
+| 手工实操：设置页 | — | ✅ 正常渲染（密码库与加密 / 云端同步 / 更改主密钥 / 安全与审计 …） |
+| 手工实操：验证码页 | — | ✅ 空态正常（「暂无双重验证码条目」） |
+| 全量 `test --rerun-tasks` | 1370/0/0/13 | ✅ **1370 例 / 0 失败 / 0 错误 / 13 跳过**（无退化） |
+| 全过程 logcat | — | ✅ 无 FATAL / `PatternSyntaxException` |
+
+### 26.4 过程留痕与未验证项（如实）
+
+1. **安装签名冲突**：首次 `adb install` 报 `INSTALL_FAILED_UPDATE_INCOMPATIBLE`（模拟器上已有旧签名包），
+   须先 `adb uninstall com.keepasskey` 再装。
+2. **截图不可用**：本机 gfxstream 下 `adb shell screencap` 产出**全黑图**，故设备侧证据一律改用
+   `uiautomator dump` 的文本 / bounds。
+3. **输入法遮挡**：向 Compose 密码框连续输入时，第二次 `input tap` 会因 IME 上浮而落空——改为
+   「每填一个字段先 `input keyevent 4` 收起键盘」；清空既有内容用 `input keycombination 113 29`（Ctrl+A）覆写更可靠。
+4. **未验证项（只登记观察，不臆断为缺陷）**：条目编辑页点「密码生成器」图标会展开内联面板并给出
+   长度 / 字符集 / 强度（实测「长度 20 / 中等 90 bits」），但本次**未观察到**生成的密码自动回填到密码字段，
+   也未在可视区找到「应用」控件（面板可能可滚动）。因未穷尽交互，此处只作观察登记；后续如需，
+   可在 `app` 模块补设备侧用例详查。
 

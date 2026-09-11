@@ -43,9 +43,15 @@ object FieldReferenceEngine {
     /**
      * `{REF:W@S:text}` 匹配：字段代码单字符、SearchText 不允许出现花括号
      * （KeePass 语义：SearchText 中如需引用须使用嵌套占位符，由递归展开处理其值侧）。
+     *
+     * **花括号必须全部转义（ISSUE-P0-04）**：JVM 的 `java.util.regex` 容忍未转义的 `}`，
+     * 但 Android 运行时走 ICU4C，会把结尾未转义的 `}` 判为语法错误 →
+     * `<clinit>` 抛 [ExceptionInInitializerError]，而本类在库列表逐条目投影中被初始化，
+     * 因此「库内 ≥1 条目」即导致列表渲染崩溃。设备侧回归见
+     * `database/src/androidTest/.../FieldReferenceEngineDeviceTest`。
      */
     private val REF_REGEX = Regex(
-        pattern = """\{REF:([TUAPNI])@([TUAPNI]):([^{}]*)}""",
+        pattern = """\{REF:([TUAPNI])@([TUAPNI]):([^\{\}]*)\}""",
         options = setOf(RegexOption.IGNORE_CASE)
     )
 
