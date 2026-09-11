@@ -167,6 +167,12 @@
 > `c-cpp` 则经 `Glob` 核实本仓**无任何 C/C++ 源**（命中的文件全在 gitignore 的 `参考项目/`），无需纳入。
 > 就地登记 **ISSUE-P3-58**——含官方文档给出的构建模式边界（**Kotlin 无 `build-mode: none`**，
 > 必须提供真实 Gradle + Android SDK 构建）与 Kotlin 2.4.20 的版本支持风险（须先实测）。
+> **2026-09-11 追加六（ISSUE-P3-58 可行性实测收口）**：在草稿 PR #7 上实跑 `java-kotlin` 的 CodeQL 覆盖
+> （`build-mode: manual` + Android SDK + 窄化 Kotlin 编译）：**SDK 与构建链路全通、31 个任务真实执行**，
+> **唯一阻塞是 CodeQL 的 Kotlin 编译器插件直接拒绝 Kotlin 2.4.20**
+> （`Kotlin version 2.4.20 is too recent. CodeQL currently supports versions below 2.4.20`）。
+> 结论：**暂不纳入，登记为已接受的风险**（Kotlin 侧静态分析由 Android Lint + 1370 例单测 + 人工审计承接）；
+> 解除条件与可复现配方已留痕于条目内与 PR #7；**严禁以回退 Kotlin 版本换取分析覆盖**。证据见 ISSUE-P3-58 正文。
 > 归档门禁证据（2026-09-10 批次 I 实测，`--rerun-tasks` 强制真实执行）：
 > `.\gradlew.bat test --rerun-tasks --max-workers=1 --continue` → **BUILD SUCCESSFUL**，
 > **1329 例 / 0 失败 / 13 跳过**（app 750 / core 58 / crypto 107 / database 235 / sync 179；
@@ -249,9 +255,10 @@
 
 ---
 
-### ISSUE-P3-58 (新登记): Kotlin/Java 侧无 CodeQL 分析覆盖（默认设置时期即为空跑）
+### ISSUE-P3-58: Kotlin/Java 侧无 CodeQL 分析覆盖（实测结论：阻塞于上游 CodeQL 的 Kotlin 版本支持）
 
-- **优先级**：P3（静态分析**覆盖面**缺口；**非本批次引入的回归**——默认设置时期二者即为空分析）
+- **优先级**：P3（静态分析**覆盖面**缺口；**非本批次引入的回归**——默认设置时期二者即为空分析；
+  2026-09-11 实测后登记为**已接受的风险**，见文末结论）
 - **核实时间点与核实方式（2026-09-11）**：
   1. `gh api "/repos/Wuming155/KeePasskey/code-scanning/analyses?per_page=100" --paginate` 逐条统计
      `category` / `results_count` / `rules_count`：`/language:java-kotlin` 全部记录均为
@@ -282,12 +289,35 @@
      由 Android Lint + 1370 例单测 + 人工审计承接」，作为维护者决策留痕。成本最低，但缺口长期存在。
   3. **先做可行性实测**：在特性分支上加一个 `java-kotlin` job（装 SDK + autobuild），
      只求拿到「`rules>0` 且能产出分析」的证据；跑不通则记录**具体失败点**（缺 SDK / 版本不支持 / 超时）。
-- **建议顺序**：先做方案 3（成本可控、结论可判定），再据实测结果在方案 1 / 2 之间决策并留痕。
-- **验收标准**：① 对 `java-kotlin` 给出**明确的二选一结论**（纳入并跑出 `rules>0`，或登记为已接受的风险）
-  并在本文件 / `RESOLVED_LOG.md` 留痕；② 若纳入，须给出「分析真实产出」的证据（`rules>0`，
-  且能对照检出已知模式）；③ 不得以「默认设置当年也这样」为由跳过决策留痕。
-- **禁止**：为求「看起来有覆盖」而把 `java-kotlin` 加进 matrix 却任其 `rules=0` 空跑（**虚假覆盖**）；
-  在未实测的情况下宣称「CodeQL 已覆盖 Kotlin」；为纳入而弱化任何既有门禁。
+- **实测结论（2026-09-11，方案 3 已执行）**：**当前不可纳入，阻塞在 CodeQL 上游**。
+  在特性分支以草稿 PR #7 试跑（run `34587552395` 的 `Analyze (java-kotlin)` job）：JDK 21 / Android SDK /
+  编译平台与 build-tools / CodeQL init **全部成功**，构建阶段 **31 个任务真实执行**，
+  失败点为 `:core:compileDebugKotlin`，日志原文：
+
+  ```text
+  > A failure occurred while executing org.jetbrains.kotlin.compilerRunner.btapi.BuildToolsApiCompilationWork
+     > Kotlin version 2.4.20 is too recent. CodeQL currently supports versions below 2.4.20
+  ```
+
+  即 CodeQL 在受跟踪构建中注入的 Kotlin 编译器插件**主动拒绝 Kotlin 2.4.20**，与官方文档给出的支持上界一致。
+  **非本仓配置问题**（SDK 安装、依赖解析、资源与 R 文件生成等均成功）。
+- **结论与风险接受**：`java-kotlin` **暂不纳入** CodeQL matrix，登记为**已接受的风险**——
+  Kotlin 侧静态安全分析由 **Android Lint + 1370 例单测 + 人工审计**承接。
+  **不得**为提高分析覆盖而回退 Kotlin 版本：本仓 2.4.20 承载 `CVE-2026-53914` 的**真修复**
+  （[RESOLVED_LOG.md](RESOLVED_LOG.md) §7），回退等于用真实漏洞换「看起来有覆盖」。
+- **解除条件（可复现配方，已留存于 PR #7 的 diff 与评论）**：CodeQL 的 Kotlin 抽取器支持 `>= 2.4.20` 后重试——
+  matrix 加 `java-kotlin` + `build-mode: manual`；前置 JDK 21 + Android SDK（`platforms;android-37.0` /
+  `build-tools;37.0.0`，**不装 NDK**）；构建仅跑五模块 `compileDebugKotlin`（不打包 → **不触发**
+  `cargoNdkBuild`）；**不接** `gradle/actions/setup-gradle`（避免构建缓存使 compile 变 UP-TO-DATE /
+  FROM-CACHE，导致抽取器拿不到编译单元）。判据：`code-scanning/analyses` 出现 `/language:java-kotlin`
+  且 **`rules > 0`**。
+- **验收标准（就本条而言已达成）**：① 给出明确二选一结论并留痕 → **已达成**（结论：不纳入 + 上游阻塞 + 解除条件）；
+  ② 若纳入须有 `rules>0` 证据 → **不适用**（结论为不纳入）；③ 不得以「默认设置当年也这样」跳过决策
+  → **已避免**（附本次实测证据）。
+- **本条状态**：**本仓无进一步动作，等待上游支持**——与 ISSUE-P3-23 同属**外部资源依赖型残余**，
+  保留于本文件**不归档**。
+- **禁止**：为求「看起来有覆盖」而把 `java-kotlin` 加进 matrix 却任其构建失败（`rules=0`）空跑（**虚假覆盖**）；
+  在未实测的情况下宣称「CodeQL 已覆盖 Kotlin」；**以回退 Kotlin 版本**换取分析覆盖；为纳入而弱化任何既有门禁。
 
 ---
 
