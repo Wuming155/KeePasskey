@@ -52,7 +52,7 @@ class VaultListViewModelTest {
      * 创建被测 ViewModel 并在后台订阅 uiState 以驱动 stateIn 的 WhileSubscribed 上游计算
      */
     private fun TestScope.createSubscribedViewModel(): VaultListViewModel {
-        val viewModel = VaultListViewModel(FakeVaultRepository(), FakeSettingsRepository(), null, buildTestCoordinator())
+        val viewModel = VaultListViewModel(FakeVaultRepository(), FakeSettingsRepository(), null, buildTestCoordinator(), displayDispatcher = UnconfinedTestDispatcher(testScheduler))
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
             viewModel.uiState.collect {}
         }
@@ -142,7 +142,7 @@ class VaultListViewModelTest {
     @Test
     fun `批量选择与批量移入回收站`() = runTest {
         val repository = FakeVaultRepository()
-        val viewModel = VaultListViewModel(repository, FakeSettingsRepository(), null, buildTestCoordinator())
+        val viewModel = VaultListViewModel(repository, FakeSettingsRepository(), null, buildTestCoordinator(), displayDispatcher = UnconfinedTestDispatcher(testScheduler))
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
             viewModel.uiState.collect {}
         }
@@ -173,7 +173,7 @@ class VaultListViewModelTest {
     @Test
     fun `回收站内还原条目`() = runTest {
         val repository = FakeVaultRepository()
-        val viewModel = VaultListViewModel(repository, FakeSettingsRepository(), null, buildTestCoordinator())
+        val viewModel = VaultListViewModel(repository, FakeSettingsRepository(), null, buildTestCoordinator(), displayDispatcher = UnconfinedTestDispatcher(testScheduler))
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
             viewModel.uiState.collect {}
         }
@@ -189,7 +189,7 @@ class VaultListViewModelTest {
     @Test
     fun `彻底删除回收站条目`() = runTest {
         val repository = FakeVaultRepository()
-        val viewModel = VaultListViewModel(repository, FakeSettingsRepository(), null, buildTestCoordinator())
+        val viewModel = VaultListViewModel(repository, FakeSettingsRepository(), null, buildTestCoordinator(), displayDispatcher = UnconfinedTestDispatcher(testScheduler))
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
             viewModel.uiState.collect {}
         }
@@ -204,7 +204,7 @@ class VaultListViewModelTest {
     @Test
     fun `批量移动选中条目到目标分组`() = runTest {
         val repository = FakeVaultRepository()
-        val viewModel = VaultListViewModel(repository, FakeSettingsRepository(), null, buildTestCoordinator())
+        val viewModel = VaultListViewModel(repository, FakeSettingsRepository(), null, buildTestCoordinator(), displayDispatcher = UnconfinedTestDispatcher(testScheduler))
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
             viewModel.uiState.collect {}
         }
@@ -223,7 +223,7 @@ class VaultListViewModelTest {
     @Test
     fun `删除分组将下属条目移入回收站`() = runTest {
         val repository = FakeVaultRepository()
-        val viewModel = VaultListViewModel(repository, FakeSettingsRepository(), null, buildTestCoordinator())
+        val viewModel = VaultListViewModel(repository, FakeSettingsRepository(), null, buildTestCoordinator(), displayDispatcher = UnconfinedTestDispatcher(testScheduler))
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
             viewModel.uiState.collect {}
         }
@@ -240,7 +240,7 @@ class VaultListViewModelTest {
     @Test
     fun `清空回收站`() = runTest {
         val repository = FakeVaultRepository()
-        val viewModel = VaultListViewModel(repository, FakeSettingsRepository(), null, buildTestCoordinator())
+        val viewModel = VaultListViewModel(repository, FakeSettingsRepository(), null, buildTestCoordinator(), displayDispatcher = UnconfinedTestDispatcher(testScheduler))
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
             viewModel.uiState.collect {}
         }
@@ -314,7 +314,7 @@ class VaultListViewModelTest {
     @Test
     fun `新建文件夹归属当前分组`() = runTest {
         val repository = FakeVaultRepository()
-        val viewModel = VaultListViewModel(repository, FakeSettingsRepository(), null, buildTestCoordinator())
+        val viewModel = VaultListViewModel(repository, FakeSettingsRepository(), null, buildTestCoordinator(), displayDispatcher = UnconfinedTestDispatcher(testScheduler))
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
             viewModel.uiState.collect {}
         }

@@ -219,6 +219,10 @@
   4. `dependency-scan` 的「真实阻断行为」**已实测且结论为否定**：运行 `34335443660` conclusion=**success**，
      而报告含 138 条 CVSS ≥ 7.0 → `failBuildOnCVSS` 在 aggregate 任务上**不生效**；
      **已补硬断言**（`.github/check_dependency_cvss.py` + workflow 接线），见 §7.4。
+- **2026-09-11 追加（Fast gate 偶发红根因修复，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §18）**：批次 H / I 推送后
+  CI `build` 的 **Fast gate 转红**（`UncaughtExceptionsBeforeTest`，根因为 `EntryDetailViewModelTest`
+  未注入测试调度器致真实 `Dispatchers.Default` 线程在 `resetMain()` 后回跳 Main）；
+  修复后 CI 运行 `34552887844` **build 三 job 全 success**。该项证明 Fast gate 已可稳定转绿。
 - **仍未达成（不得据此认为 CI 已跑通）**：
   1. ~~`Fast gate` 在 lint 修复后的下一次真实 CI 运行~~ → **已于 2026-09-10 完成并转绿**：
      运行 `34470024328`（提交 `c25ac51`）`build` 工作流**三 job 全 success、exit 0**，

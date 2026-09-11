@@ -26,8 +26,9 @@
 | §15 | P3-31 批次 G（超阈值债务） | ISSUE-P3-31 |
 | §16 | P3-31 批次 H（超阈值债务） | ISSUE-P3-31 |
 | §17 | P3-31 批次 I（超阈值债务 · **本条闭环**） | ISSUE-P3-31 |
+| §18 | CI Fast gate 偶发红根因修复（测试调度器污染） | 测试基础设施 |
 
-> 各批次验收证据（用例数 / 通过 / 失败 / 跳过）分别见 §2.22、§3.1、§4.1、§5.1、§6.1、§7.1、§8.0、§9.5、§10.1、§11、§12、§13、§14、§15、§16、§17。
+> 各批次验收证据（用例数 / 通过 / 失败 / 跳过）分别见 §2.22、§3.1、§4.1、§5.1、§6.1、§7.1、§8.0、§9.5、§10.1、§11、§12、§13、§14、§15、§16、§17、§18。
 
 ---
 
@@ -390,6 +391,42 @@
 - **保留的两项经论证例外（不再列入债务）**：`DicewareWordList.kt`（408，约 300 行为不可压缩词表常量）、
   `SettingsViewModel.kt`（424，系 ISSUE-P3-43 判定与接线导致的功能性增量，非拆分遗漏）。
 - **过程事实（如实留痕）**：批次 D~I 全部委派子代理执行机械拆分，子代理**一致报告本环境 `GetDiagnostics` 诊断通道不可靠**（对故意注入的未解析符号亦返回空诊断）；故所有批次**一律以主流程 `gradlew test`/`lint` 实跑为唯一验收依据**，不采信静态诊断结论，并要求子代理以「逐符号人工核对」自检。批次 D 曾出现一处 `suspend` 误标（`ILLEGAL_SUSPEND_FUNCTION_CALL`）已修复；`SyncCacheEvictorTest` 在 Windows 上存在 `.tmp` 清理竞态偶发（与本系列改动无关，隔离重跑稳定通过）。
+
+---
+
+## 18. CI Fast gate 偶发红根因修复（测试调度器跨用例污染）
+
+**背景（外部权威证据）**：批次 H / I 推送后，GitHub 托管 runner 的 `build` 工作流 **Fast gate 转红**
+（核实方式：`gh run list` + `gh run view <id> --job <id> --log` + `gh run download <id> -n fast-gate-reports`），
+而同一提交在本地 `test --rerun-tasks`（含 `--max-workers=1` 与默认并发）**均全绿**——典型「CI-only 偶发」。
+
+**失败形态**：`Fast gate → 单元测试（全模块）` 报
+`EntryDetailViewModelTest > …` / `EntryEditViewModelTest > 新建条目保存成功并发出 SaveSuccess 事件` FAILED
+（批次 H：2 例；批次 I：1 例，同为 `EntryEditViewModelTest`）。工件 HTML 显示失败类型为
+`kotlinx.coroutines.test.UncaughtExceptionsBeforeTest`，其 `Caused by` 为
+`IllegalStateException: Module with the Main dispatcher had failed to initialize`，
+抛出线程为 `DefaultDispatcher-worker-*`。
+
+**根因（逐层证据）**：`EntryDetailViewModel` 的 `uiState` 上游经 `flowOn(displayDispatcher)` 装配，
+而 `displayDispatcher` 默认 `Dispatchers.Default`（真实线程池）。
+`EntryDetailViewModelTest` 是详情页三组用例中**唯一未注入** `@EntryDisplayDispatcher` 测试调度器的一个
+（`EntryDetailDisplayPreferencesTest` / `CustomIconDeleteTest` 均已注入）。
+于是真实 Default 线程上的在途工作会在用例结束、`@After` 执行 `Dispatchers.resetMain()` **之后**才回跳
+已缺失的 Main → 抛异常并被协程测试记到「用例开始前已有未捕获异常」，**污染同一 JVM 中后续用例**
+（表现位置随执行顺序漂移，故呈现偶发与跨类）。
+
+**修复（生产代码零改动）**：
+1. `EntryDetailViewModelTest.createViewModel` 与同目录其余用例对齐，注入 `displayDispatcher = UnconfinedTestDispatcher(testScheduler)`；
+2. 同类隐患一并加固：`VaultListViewModelTest` 全部 8 处构造注入 `displayDispatcher`（其 ViewModel 同样以 `flowOn(displayDispatcher)` 装配）；
+   `AuthenticatorViewModelTest`（其 ViewModel 无调度器注入点、上游硬编码 `flowOn(Dispatchers.Default)`）改为在 `@After`
+   **先取消各 ViewModel 作用域、再 `resetMain()`**，终止真实线程上的在途回跳。
+
+**验收证据**：提交 `6b09b6f` 的 CI 运行 `34552887844` → `build` **三 job 全 success**
+（`Fast gate` ✓ / `Native gate` ✓ / `Rust supply chain` ✓），CodeQL 运行 `34552887540` ✓；
+本地 `:app:testDebugUnitTest --rerun-tasks` 全绿。
+
+**如实留痕**：该 flake 自批次 G 起即存在（G 恰好通过、H/I 命中），属**既有测试基础设施缺陷**，
+非批次 D~I 的结构性拆分引入；本地无法复现（时序/核数相关），完全依赖 CI 日志与工件定位。
 
 ---
 
