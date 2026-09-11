@@ -79,6 +79,14 @@ KeePasskey 是一款原生 Kotlin 开发的现代化 Android 密码管理器。�
 - `python tools/kdbx-corpus/generate_corpus.py --check` — `.kdbx` 语料校验
 
 > 原生内核（`crypto/src/main/rust/`）由 Rust + cargo-ndk 交叉编译，`assembleDebug/Release` 自动触发；未装 cargo 或失败则自动降级跳过相关用例（`test` 不触发）。
+>
+> **Rust 单测落位约定（ISSUE-P3-57，须遵守）**：单测一律放
+> `crypto/src/main/rust/src/tests/<name>_tests.rs`，并在源文件中以
+> `#[cfg(test)] #[path = "tests/<name>_tests.rs"] mod tests;` 引用。
+> 原因：Code scanning 走仓库自管的 advanced setup（`.github/workflows/codeql.yml`，
+> 配置见 `.github/codeql/codeql-config.yml`），其 `paths-ignore` **只能做文件级排除**，
+> 而 `rust/hard-coded-cryptographic-value` **没有任何测试代码过滤**——**内联** `mod tests`
+> 里的测试密钥/向量会被逐条报为 critical 误报（曾一次性产出 77 条）。
 
 ---
 

@@ -37,6 +37,10 @@ captures/
 .externalNativeBuild/
 .cxx/
 
+# AI 编码工具工作区（Plan / Spec 等本地过程文件，属工具产物，不入库；
+# 项目计划与结论一律落 docs/ 下的正式文档）
+.trae/
+
 # Keystore files（ISSUE-P3-09 / ZT-20 AC5 补齐）
 # 已覆盖：*.jks / *.keystore / keystore.properties（keystore.properties.example 为模板，须入库，
 # 故此处只忽略精确文件名而不做 keystore.properties.* 通配）。
