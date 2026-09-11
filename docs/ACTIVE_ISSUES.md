@@ -38,20 +38,87 @@
 
 ---
 
-## P1 高危与核心功能问题（0 项）
+## P1 高危与核心功能问题（1 项）
 
-> 当前 P1 级别无待办。历史 P1 项（含 ISSUE-P1-10 / ZT-10）已全部闭环，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §2.5。
+> **2026-09-11 追加（零信任全量安全审计批次）**：新登记 **ISSUE-P1-11**（自动填充「受信浏览器」
+> 白名单仅按包名信任，未校验签名证书——详见条目）。
+> 历史 P1 项（含 ISSUE-P1-10 / ZT-10）已全部闭环，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §2.5。
 
 ---
 
-## P2 中危缺陷与协议/测试缺口（0 项）
+### ISSUE-P1-11 (新登记): 自动填充「受信浏览器」白名单仅按包名匹配、未校验签名证书，可绕过 webDomain 归属校验泄露任意站点凭据
+
+- **优先级**：P1（高危安全缺陷：跨应用凭据泄露面；零信任审计 #1，严重度 HIGH）
+- **核实时间点与核实方式（2026-09-11）**：独立复读
+  `app/src/main/java/com/keepasskey/app/autofill/AutofillWebDomainPolicy.kt`（全文）与
+  `app/src/main/java/com/keepasskey/app/autofill/AutofillOriginResolver.kt`（全文）复核成立：
+  ① `AutofillWebDomainPolicy.kt:81-82` `isTrustedBrowser` 仅做包名精确匹配（大小写不敏感），
+  `:97` 命中即 `BROWSER_DELEGATED`；② `AutofillOriginResolver.kt:34` 在读取调用方签名证书指纹
+  （同类 `callingAppCertSha256Hex`，`:58-69` 已具备该能力）**之前**就对受信浏览器 `return domain`。
+- **背景与攻击链**：设计上非浏览器应用必须经 DAL（`assetlinks.json` 声明包名+证书指纹）才能认领
+  `webDomain`；但浏览器分支只看包名。Android 不阻拦侧载占用**未安装**浏览器包名（如 `com.chrome.beta`、
+  `org.chromium.chrome`、`com.heytap.browser`）的 APK：攻击者应用在其自控 WebView 中打开目标站点触发
+  自动填充 → `webDomain` 归属判定命中白名单 → 候选按域匹配下发 → 用户一次确认后明文凭据写入攻击者
+  WebView 表单。这与 Credential Manager 侧 `CallingOriginResolver` 的「包名+证书指纹」双校验形成同仓
+  明显落差。缓解事实：下发前有确认对话框展示凭据标题，但攻击者上下文内诱导确认门槛低，不足以降级。
+- **修复方向**：浏览器分支同样校验签名证书指纹，白名单升级为「包名+指纹」二元组；
+  对白名单外浏览器 fail-closed 降级为既有 DAL 路径。证书指纹初始值取各浏览器官方发布 APK 的
+  签名证书 SHA-256，**每个指纹须注明来源与核实方式**。
+- **验收标准**：① 新增单测：占用白名单包名但签名不匹配的调用方 → `resolveUsableWebDomain` 返回 null
+  （不下发域候选）；② 签名匹配的受信浏览器维持 `BROWSER_DELEGATED`；③ 白名单外浏览器未过 DAL 时
+  返回 null（既有行为不回归）；④ `.\gradlew.bat test` 全绿。
+- **禁止**：以「功能可用性」为由保留仅包名匹配的兜底分支；在未核实来源的情况下臆写指纹常量。
+
+---
+
+## P2 中危缺陷与协议/测试缺口（2 项）
 
 > ISSUE-P2-05 ~ ISSUE-P2-13 九项已全部整改并归档，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §2.16 ~ §2.20。
 > P2-12 整改中如实登记的残余面 ISSUE-P2-15 / ISSUE-P2-16（受保护值经 String 退化、
 > 密码生成引擎出边界仍返回 String）已整改并归档，见 §2.21。
-> 当前 P2 级别无待办。
+> **2026-09-11 追加（零信任全量安全审计批次）**：新登记 **ISSUE-P2-17**（子库解锁无节流）与
+> **ISSUE-P2-18**（同步防回滚缺失）——详见条目。
 
-## P3 低危问题、特性接线与体验优化（3 项）
+---
+
+### ISSUE-P2-17 (新登记): 子库解锁路径未接入解锁节流，构成针对子库口令的在线爆破面
+
+- **优先级**：P2（中危安全缺陷；零信任审计 #2，严重度 MEDIUM）
+- **核实时间点与核实方式（2026-09-11）**：全仓 `grep UnlockThrottle` 复核——生产消费方仅
+  `UnlockViewModel`（其余为 DI 接线与测试）；复读
+  `app/src/main/java/com/keepasskey/app/data/childdb/ChildReadOnlySession.kt:131-147`
+  （`loadProjection` 直接 `KdbxFile.load`，无闸门调用、失败不登记）成立。
+- **背景**：`UnlockThrottleManager`（gate / registerFailure / registerSuccess）全链路只被主库解锁
+  ViewModel 消费；子库口令输入 → `open()` → `loadProjection()` → `KdbxFile.load` 完全绕过节流与计次，
+  可对子库口令反复在线试探。缓解因素：KDF 计算成本构成物理节流，但尝试次数无界。
+- **修复方向**：节流下沉到领域层（`DatabaseSession`/仓库层），按 `mountId`（或子库标识）走
+  `UnlockThrottleManager` 三原子操作；UI 层仅保留提示职责。**保留既有语义**：仅认证失败
+  （凭据被拒）计次，IO/文件损坏等非认证错误不计次（分流由原 ViewModel 承担，下沉后不得丢失）。
+- **验收标准**：① 子库口令连续失败达 `FAILURE_THRESHOLD` 后触发指数退避，锁定期内不进入
+  `KdbxFile.load`；② 成功解锁清零计数；③ 非认证失败不计次；④ 单测覆盖上述三分支 + 全量 test 绿。
+
+---
+
+### ISSUE-P2-18 (新登记): 同步缺少防回滚绑定，被入侵云端可重放旧的合法 `.kdbx` 覆盖本地
+
+- **优先级**：P2（中危安全缺陷；零信任审计 #3，严重度 MEDIUM；**设计类任务，先出方案再实施**）
+- **核实时间点与核实方式（2026-09-11）**：复读
+  `sync/src/main/java/com/keepasskey/sync/engine/SyncEngine.kt` `openRemote`（约 L100-200）成立；
+  另对 sync 模块全文检索 `回滚|rollback|monoton|revision`——仅命中 WebDAV 事务写自身的临时文件回滚注释，
+  **无任何本地认证的单调版本校验机制**。
+- **背景**：`openRemote` 的「三哈希状态机」（baseEtag / baseVersionHash / 内容哈希）只解决并发一致性
+  与数据丢失，不解决**版本回退**：恶意/被入侵的 WebDAV/S3 端点返回一份「旧的但仍能用主凭据解密」的库
+  即被采纳（「远端 ≠ base 即下载应用」），可复活已删条目、回退已更新字段。在 Assume Breach 威胁模型下
+  「云端不可信」是既定假设，此为真实盲点。
+- **修复方向（须先评估再动手）**：引入由本地主密钥（或设备侧 Keystore 密钥）认证的单调版本/清单绑定，
+  拒绝低于设备侧已见版本的远端内容。**跨端兼容决策必须先行评估并留痕于本条目内**：其他官方客户端
+  （KeePass 2.x / KeePassDX / KeePassXC）写入的库如何处理（回退检测对它们降级为提示还是阻断）。
+- **验收标准**：① 旧库重放场景（模拟被入侵端点返回旧版本）被拒绝并给出明确用户提示；
+  ② 正常多端同步（含其他客户端写入）不误报；③ 方案与跨端兼容决策记录在本条目内（不另建计划文件）；
+  ④ 全量 test 绿。
+- **禁止**：以内容哈希或 ETag 冒充版本号；在未评估跨端兼容的情况下直接阻断其他客户端写入的合法更新。
+
+## P3 低危问题、特性接线与体验优化（8 项）
 
 > **背景**：P3 残余批次原 **12 项**（ISSUE-P3-17 ~ P3-28）已于 **2026-09-10** 整体整改。
 > 其中 **10 项完整闭环并归档**（P3-17 / 18 / 19 / **20** / 21 / 22 / 25 / 26 / 27 / 28，含逐项代码证据与 15 条过程缺陷留痕），
@@ -128,6 +195,11 @@
 > B：HOTP 端到端、单条移动分组 / 从模板新建便利入口、`AttachmentManager` 孤儿实现清理），
 > 见 [RESOLVED_LOG.md](RESOLVED_LOG.md) **§20 / §21**（批次 B 验收 1345 例 / 0 失败 / 13 跳过）；
 > 本文件中 P3-47 ~ P3-51 均已移出。
+> **2026-09-11 追加二（零信任全量安全审计批次）**：对 `app/ core/ crypto/ database/ sync/` 全量
+> `src/main`（含 `crypto/src/main/rust/`）按零信任五支柱做静态审计（Assume Breach 威胁模型，
+> **未做动态/运行时验证**），7 项正式发现经逐条独立复读源码复核**全部属实、无误报**，按严重度分级登记：
+> **ISSUE-P1-11**（P1）、**ISSUE-P2-17 / P2-18**（P2）、**ISSUE-P3-52 ~ P3-55**（P3），
+> 次要加固项打包登记为 **ISSUE-P3-56**；各项核实时间点与核实方式见条目内。
 > 归档门禁证据（2026-09-10 批次 I 实测，`--rerun-tasks` 强制真实执行）：
 > `.\gradlew.bat test --rerun-tasks --max-workers=1 --continue` → **BUILD SUCCESSFUL**，
 > **1329 例 / 0 失败 / 13 跳过**（app 750 / core 58 / crypto 107 / database 235 / sync 179；
@@ -330,4 +402,96 @@
 > 三项（HOTP 端到端 / 单条移动分组与从模板新建便利入口 / `AttachmentManager` 孤儿实现清理）
 > 已于 **2026-09-11** 同日整改并归档，实施细节与验收证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md) **§21**
 > （门禁：`test --rerun-tasks` **1345 例 / 0 失败 / 13 跳过**）。此处留索引，正文已移出本文件。
+
+---
+
+### ISSUE-P3-52 (新登记): 自动填充确认/选择器生物识别未绑定 `CryptoObject`
+
+- **优先级**：P3（低危安全缺陷；零信任审计 #4，严重度 LOW）
+- **核实时间点与核实方式（2026-09-11）**：复读
+  `app/src/main/java/com/keepasskey/app/security/BiometricAuthManager.kt:165-169`（`cipher == null`
+  分支走无 CryptoObject 的 `authenticate(promptInfo)`）成立；复读
+  `app/src/main/java/com/keepasskey/app/autofill/AutofillConfirmActivity.kt:87-97` 与
+  `AutofillPickerActivity.kt:122-135`——两处调用均未传 cipher，`Success` 分支直接
+  `completeAuthResult()` / `deliver(credentials)` 放行明文凭据。
+- **背景**：不绑 `CryptoObject` 时生物识别仅证明「用户在场」，未与本次放行操作密码学绑定；
+  与快速解锁路径（走 Keystore Cipher）不一致。缓解：两窗口已有 `FLAG_SECURE` + `setHideOverlayWindows`
+  + 遮挡触摸过滤，实际可利用性有限。
+- **修复方向**：两 Activity 改走 Keystore 密钥的 `init()` Cipher 认证（对齐快速解锁路径），
+  `Success` 分支校验 `cryptoObject?.cipher` 非空方放行；Keystore 密钥不可用时 fail-closed 退化为
+  受保护窗口内手动确认（既有退化策略）。
+- **验收标准**：① 两处认证均以 CryptoObject 绑定且校验非空；② 无硬件/未录入时退化行为不回归；
+  ③ 单测 + 全量 test 绿；④ 若经论证不绑定，须在本条目留痕理由（评估结论同样算闭环证据）。
+
+---
+
+### ISSUE-P3-53 (新登记): 运行完整性探测一次性执行、结果永久缓存，不门控主密码/通行密钥路径
+
+- **优先级**：P3（低危安全缺陷；零信任审计 #5，严重度 LOW，置信度 0.90）
+- **核实时间点与核实方式（2026-09-11）**：复读
+  `app/src/main/java/com/keepasskey/app/security/RuntimeIntegrityDetector.kt:58-76`——`refresh()`
+  存在但仅由 `start()`（单例 init 一次性）调用，`_report` 此后不再更新；`Debug.isDebuggerConnected()`
+  等时变信号缓存后必然失真（冷启动后附加调试器/Frida 无重扫）。**部分留痕**：「风险态仅禁用生物识别
+  与自动填充、不门控主密码路径」这半句未逐消费方追踪，实施前须先复核 `RuntimeIntegrityGate` 全部
+  消费方再动手。
+- **修复方向**：敏感操作（解锁、自动填充下发）前对关键时变信号（调试器附加、钩子框架）重扫或
+  定期刷新；`debuggerAttached` 类信号改为实时求值不落缓存。
+- **验收标准**：① 冷启动后附加调试器的场景能被后续判定捕获；② 首扫 fail-closed（UNDETERMINED）
+  语义不回归；③ 消费方清单经复核并留痕；④ 全量 test 绿。
+
+---
+
+### ISSUE-P3-54 (新登记): 解锁节流计数落普通 `SharedPreferences`，无完整性绑定
+
+- **优先级**：P3（低危安全缺陷；零信任审计 #6，严重度 LOW，置信度 0.90）
+- **核实时间点与核实方式（2026-09-11）**：复读
+  `app/src/main/java/com/keepasskey/app/security/UnlockThrottle.kt:59-84`——
+  `SharedPrefsUnlockThrottleStore` 使用普通 `MODE_PRIVATE` SharedPreferences（`com.keepasskey.unlock_throttle`），
+  无完整性保护，root/adb/备份恢复删除该文件即清零计数与锁定截止。
+- **背景与取舍**：威胁前提为 root/文件级写权限——该前提下攻击者本有更强手段（Hook 进程等），
+  本项属纵深防御卫生问题。且 `allowBackup=false` 已就位，备份恢复面已收窄。
+- **修复方向（二选一，均可闭环）**：① 计数文件经 Keystore 密钥加密或 HMAC 绑定，
+  删除/篡改后 fail-closed（视为已达阈值锁定或拒绝解锁）；② 经书面论证接受该残余面并在本条目留痕
+  （写明威胁模型边界），登记为「经论证的例外」。
+- **验收标准**：① 按选定方向实施或论证留痕；② 若实施，节流状态机既有单测不回归，跨进程重启
+  持久化语义（`UnlockThrottle.kt:41-42` 设计约束）保持。
+
+---
+
+### ISSUE-P3-55 (新登记): 复合密钥派生「密码+密钥文件」分支的 UTF-8 密码副本未清零
+
+- **优先级**：P3（低危安全缺陷；零信任审计 #7，严重度 LOW，置信度 0.90；**整改成本最低，可随手修**）
+- **核实时间点与核实方式（2026-09-11）**：复读
+  `database/src/main/java/com/keepasskey/database/file/KdbxKeyDerivation.kt:50`——
+  `HashUtil.sha256(charsToUtf8(passwordChars))` 中 `charsToUtf8` 产出的 UTF-8 中间字节数组
+  未被捕获、无法擦除（`passwordHash` 本身在 `:62` 已清零，但明文口令字节副本随 GC 驻留）。
+  同文件「仅密码」分支 `:80-82` 已正确捕获并 `Arrays.fill` 清零——同一文件内两种写法并存，
+  证明修复无障碍。**本项违反 AGENTS.md §3「敏感数据铁律」**。
+- **修复方向**：捕获 `charsToUtf8(passwordChars)` 中间字节数组，在 `finally` 中 `Arrays.fill` 清零，
+  对齐同文件仅密码分支的既有写法。
+- **验收标准**：① 中间口令字节副本全路径清零；② 不得引入 `String` 中间态；
+  ③ 既有 KDBX 派生单测不回归（含复合密钥正确性断言）+ 全量 test 绿。
+
+---
+
+### ISSUE-P3-56 (新登记): 零信任审计次要加固项打包（release 诊断日志 / S3 objectKey / Provider 测试参数 / TOTP 剪贴板等）
+
+- **优先级**：P3（次要 / 加固项打包；零信任审计「次要项」节，置信度低于正式阈值，仅供排期参考）
+- **核实时间点与核实方式（2026-09-11）**：来源为同一审计报告次要项节；**各项实施前须独立复核前提**
+  （按本文件「条目维护规则」第 2 条，行号以真实内容为准）。子项清单与处置方式：
+  1. **诊断日志未按构建类型硬关闭**：`DiagnosticLogGate` 仅由用户偏好门控，release 可开启并记录
+     子库别名/异常 message 等非凭据 PII。处置：release 下强制关闭或仅 `BuildConfig.DEBUG` 放行
+     （实施前复读 `app/src/main/java/com/keepasskey/app/data/logger/DiagnosticLogGate.kt` 复核现状）；
+  2. **S3 `objectKey` 未过滤 `.`/`..` 段**（WebDAV 侧已过滤），属自伤型配置问题。
+     处置：对齐 WebDAV 既有过滤逻辑；
+  3. **Provider 构造参数 `client: OkHttpClient? = null` 未标 `@VisibleForTesting`**：传入即跳过
+     TLS-only 与 SSRF 校验（当前生产 DI 不传，属潜在回归面）。处置：标注 + 注释声明仅测试用途；
+  4. **TOTP 复制默认开启**：`EXTRA_IS_SENSITIVE` 只影响系统预览，其他前台应用可在 30 秒窗口内
+     读取剪贴板（平台固有）。处置：**评估类**——出评估结论（默认关闭 / 缩短超时 / 维持现状+理由），
+     评估结论留痕于本条目即算该子项闭环；
+  5. **`skipDalVerification` 用户开关**（开启后任意应用可为任意可注册域注册 Passkey，默认关、
+     属显式降级）与 **KDF 边界**（Argon2 下限偏弱、上界构成有界 DoS、纵深防御缺口当前不可达）：
+     **登记留痕即可，不强制整改**；如后续整改须先评估兼容性影响。
+- **验收标准**：① 子项 1-3 完成代码整改；② 子项 4 出具评估结论并留痕；③ 子项 5 确认留痕无遗漏；
+  ④ 全量 test 绿。
 
