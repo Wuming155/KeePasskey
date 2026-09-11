@@ -107,11 +107,15 @@
 > （`SettingsScreen` 569 → 306 / `UnlockScreen` 562 → 275 / `GeneratorScreen` 550 → 177）
 > 已完成并归档，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) **§14**；**ISSUE-P3-31 本条仍未闭环**
 > （残余真逻辑超阈值 **9 项**，清单已就地刷新）。
+> **2026-09-10 追加十二（P3-31 批次 G）**：验收标准 1 点名的下一批三项
+> （`WebDavSyncProvider` 510 → 345 / `AutofillSettingsScreen` 504 → 216 / `EntryEditComponents` 494 → 296）
+> 已完成并归档，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) **§15**；**ISSUE-P3-31 本条仍未闭环**
+> （残余真逻辑超阈值 **6 项**，清单已就地刷新）。
 > 本节余 **4 项**（P3-23 / P3-24 / P3-31 / P3-32）。
-> 归档门禁证据（2026-09-10 批次 F 实测，`--rerun-tasks` 强制真实执行）：
+> 归档门禁证据（2026-09-10 批次 G 实测，`--rerun-tasks` 强制真实执行）：
 > `.\gradlew.bat test --rerun-tasks --max-workers=1 --continue` → **BUILD SUCCESSFUL**，
 > **1329 例 / 0 失败 / 13 跳过**（app 750 / core 58 / crypto 107 / database 235 / sync 179；
-> 纯结构性拆分，用例数与批次 E 基线持平）；
+> 纯结构性拆分，用例数与批次 F 基线持平）；
 > `lint`（5 模块 **0 error**）通过；`:database:assembleDebugAndroidTest` 通过（ISSUE-P3-23 验收标准①）。
 
 ### 前提复核记录（2026-09-10，依「条目维护规则」第 2 条）
@@ -260,19 +264,27 @@
   门禁 `test --rerun-tasks` **1329 例 / 0 失败 / 13 跳过**、`lint` 5 模块 0 error，
   公开 API **零丢失零新增**、敏感数据相关逻辑逐字保留。
   **残余清单已按批次 F 后实测刷新为 9 项**（见下）。
+- **2026-09-10 批次 G 进展（就地标注，本条未闭环）**：验收标准 1 点名的下一批三项
+  **全部降至阈值内并归档**，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) **§15**——
+  `WebDavSyncProvider` **510 → 345**（拆 `WebDavAuthHeader` / `WebDavPropfindParser` / `WebDavUrlCodec`）、
+  `AutofillSettingsScreen` **504 → 216**（拆 `AutofillSettingsComponents`）、
+  `EntryEditComponents` **494 → 296**（拆 `EntryEditListSections`）；
+  门禁 `test --rerun-tasks` **1329 例 / 0 失败 / 13 跳过**、`lint` 5 模块 0 error，
+  公开 API **零丢失零新增**、敏感数据相关逻辑逐字保留。
+  **残余清单已按批次 G 后实测刷新为 6 项**（见下）。
 - **核实时间点与核实方式（2026-09-10）**：于本仓根执行
   `foreach ($d in app,database,sync,core,crypto) { Get-ChildItem -Recurse "$d/src/main/java" -Filter *.kt }`
   并以 `(Get-Content $_.FullName).Count` 逐文件计数，筛出 `> 400` 行者并人工剔除纯常量例外
   （命令等价于 `wc -l`，尾行不计换行的文件可能相差 1 行）；
   **批次 C 完成后重测**残余 21 → 18 项；**批次 D 完成后重测**残余 18 → 15 项；
-  **批次 E 完成后重测**残余 15 → 12 项；**批次 F 完成后重测**残余 12 → **9 项**。
+  **批次 E 完成后重测**残余 15 → 12 项；**批次 F 完成后重测**残余 12 → 9 项；
+  **批次 G 完成后重测**残余 9 → **6 项**。
 - **为何单独登记**：ISSUE-P3-29 正文的**优先级 8 项已于批次 A 全部降至阈值内并归档**（见
   [RESOLVED_LOG.md](RESOLVED_LOG.md) **§6**），但全仓扫描显示超阈值仍是**普遍性既有债务**；
   按「严禁只记聊天或脑中」纪律，残余面必须有独立条目承接，避免后人误以为「巨型类问题已解决」。
 
-- **清单（2026-09-10 批次 F 完成后实测 9 项）**：
+- **清单（2026-09-10 批次 G 完成后实测 6 项）**：
 
-  `510 WebDavSyncProvider.kt` · `504 AutofillSettingsScreen.kt` · `494 EntryEditComponents.kt` ·
   `481 CloudSyncComponents.kt` · `477 EntryDetailComponents.kt` · `470 EntryEditViewModel.kt` ·
   `462 KeystoreManager.kt` · `453 HealthCheckScreen.kt` · `443 SyncEngine.kt`
 
@@ -284,8 +296,8 @@
   > 按「是否含真实逻辑」分级属**经论证的纯常量例外**，不拆分（保留单文件可保证词表作为一个不可分割的整体被审查）。
 
 - **验收标准（未来分批）**：
-  1. 按模块分批拆分，**优先处理体量最大且耦合最高的文件**——批次 B（§10）/ C（§11）/ D（§12）/ E（§13）/ F（§14）已完成；
-     下一批应指向 **`WebDavSyncProvider`（510）/ `AutofillSettingsScreen`（504）/ `EntryEditComponents`（494）**；
+  1. 按模块分批拆分，**优先处理体量最大且耦合最高的文件**——批次 B（§10）/ C（§11）/ D（§12）/ E（§13）/ F（§14）/ G（§15）已完成；
+     下一批应指向 **`CloudSyncComponents`（481）/ `EntryDetailComponents`（477）/ `EntryEditViewModel`（470）**；
   2. 每批拆分为**纯结构性**改动：`.\gradlew.bat test` 全绿且用例数不减（当前 **1329 例**）；
   3. 拆分后**逐条对照敏感数据清零点与公开 API 可见性**（沿用批次 A 的验证范式：
      公开 API 零丢失零新增 + 清零点逐一对照）；

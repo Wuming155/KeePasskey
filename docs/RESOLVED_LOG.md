@@ -23,8 +23,9 @@
 | §12 | P3-31 批次 D + P3-46 闭环 | ISSUE-P3-31 / P3-46 |
 | §13 | P3-31 批次 E（超阈值债务） | ISSUE-P3-31 |
 | §14 | P3-31 批次 F（超阈值债务） | ISSUE-P3-31 |
+| §15 | P3-31 批次 G（超阈值债务） | ISSUE-P3-31 |
 
-> 各批次验收证据（用例数 / 通过 / 失败 / 跳过）分别见 §2.22、§3.1、§4.1、§5.1、§6.1、§7.1、§8.0、§9.5、§10.1、§11、§12、§13、§14。
+> 各批次验收证据（用例数 / 通过 / 失败 / 跳过）分别见 §2.22、§3.1、§4.1、§5.1、§6.1、§7.1、§8.0、§9.5、§10.1、§11、§12、§13、§14、§15。
 
 ---
 
@@ -323,4 +324,21 @@
 
 ---
 
-> **当前残余面（ACTIVE）**：ISSUE-P3-23（arm64 真机 + 真实 `.kdbx` 语料端到端）· P3-24（CI 首跑校准）· P3-31（超阈值 9 项）· P3-32（供应链 CVE 收尾）。
+## 15. ISSUE-P3-31 批次 G 归档（超阈值债务 · `WebDavSyncProvider` / `AutofillSettingsScreen` / `EntryEditComponents`）
+
+**核实**：2026-09-10，逐文件 `(Get-Content …).Count` 复核；门禁 `test --rerun-tasks --max-workers=1` → **1329 例 / 0 失败 / 13 跳过**（app 750 / core 58 / crypto 107 / database 235 / sync 179；纯结构性拆分，用例数与批次 F 持平）；`lint` 5 模块 **0 error**。残余真逻辑超阈值清单 9 → **6 项**。
+
+| 文件 | 前 → 后 | 拆出单元 |
+|---|---|---|
+| `sync/.../webdav/WebDavSyncProvider.kt` | 510 → 345 | `WebDavAuthHeader`（Basic 认证头，敏感清零唯一落点）/ `WebDavPropfindParser`（multistatus + XXE 守卫 + HTTP 日期）/ `WebDavUrlCodec`（路径编码 / URL 构造 / ETag 头格式化） |
+| `app/.../settings/subscreens/AutofillSettingsScreen.kt` | 504 → 216 | `AutofillSettingsComponents`（4 个分区卡 + `AutofillInfoRow` / `AutofillSwitchRow`） |
+| `app/.../ui/screens/edit/EntryEditComponents.kt` | 494 → 296 | `EntryEditListSections`（自定义字段分节 / 附件分节） |
+
+- **公开 API 零丢失零新增**：`WebDavSyncProvider` 构造函数与 `SyncProvider` 六个方法（`testConnection`/`getMetadata`/`download`/`upload`/`uploadAtomic`/`delete`）、`ATOMIC_TMP_SUFFIX` 逐字未变；`AutofillSettingsScreen` 签名（29 参数）、`EntryEditComponents` 内各 `internal` @Composable 签名与可见性逐字未变（搬移符号仍 `internal`，外部引用方 `EntryEditScreen` 同包可见）。新增单元一律 `internal`，不进入公开面。
+- **协议/安全语义逐字保留**：WebDAV 的 `PROPFIND`+`Depth: 0`、`PUT`/`MOVE`（`Destination`/`Overwrite`）、RFC 4918 tagged-list `If:`、`If-Match`/ETag、XXE 四项 feature、状态码映射（401/403→`AuthenticationError`、404、412→`ConflictError`、其余→`ProtocolError`）原样；自动填充三级黑名单对话框（包级 / 保存侧 / 字段签名计数）与确认语义原样；条目编辑侧 `SecurePasswordField` 的 `CharArray` 链路与 `initialPassword`/`initialKey` 原样。
+- **敏感数据清零点**：WebDAV 认证头 **3 → 3**（`passwordChars.fill('0')`、`combined.fill(0)`、`passwordBuffer.array().fill(0)`，`try/finally` 与 `hasArray()` 条件不变）；其余两文件不承载清零点（**0 → 0**）。未新增 `String` 落地敏感值或日志。
+- **过程事实（如实留痕）**：本批子代理同样报告本环境 `GetDiagnostics` 通道不可靠；一律以主流程 `gradlew test`/`lint` 实跑为唯一验收依据，并补做「逐符号人工核对（可见性满足引用方、import 全部被使用）」。
+
+---
+
+> **当前残余面（ACTIVE）**：ISSUE-P3-23（arm64 真机 + 真实 `.kdbx` 语料端到端）· P3-24（CI 首跑校准）· P3-31（超阈值 6 项）· P3-32（供应链 CVE 收尾）。
