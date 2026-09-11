@@ -1,24 +1,15 @@
 package com.keepasskey.app.security
 
 import android.content.Context
-import android.content.pm.PackageManager
-import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyInfo
-import android.security.keystore.KeyPermanentlyInvalidatedException
 import android.security.keystore.KeyProperties
-import android.security.keystore.StrongBoxUnavailableException
 import com.keepasskey.app.data.logger.DebugLogBuffer
-import java.security.KeyFactory
+import dagger.hilt.android.qualifiers.ApplicationContext
 import java.security.KeyPair
-import java.security.KeyPairGenerator
-import java.security.KeyStore
 import javax.crypto.Cipher
-import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
-import javax.crypto.spec.GCMParameterSpec
 import javax.inject.Inject
 import javax.inject.Singleton
-import dagger.hilt.android.qualifiers.ApplicationContext
 
 /**
  * Android Keystore 硬件安全密钥管理器。
@@ -47,14 +38,10 @@ class KeystoreManager @Inject constructor(
     private val debugLog: DebugLogBuffer? = null
 ) {
 
-    private val keyStore: KeyStore by lazy {
-        KeyStore.getInstance(ANDROID_KEY_STORE).apply {
-            load(null)
-        }
-    }
-
-    private val isStrongBoxSupported: Boolean by lazy {
-        context?.packageManager?.hasSystemFeature(PackageManager.FEATURE_STRONGBOX_KEYSTORE) == true
+    // 密钥生成/探测/迁移实现下沉至同包 internal 协作者（ISSUE-P3-29 纯结构性拆分）；
+    // 迁移路径的删除经 onDeleteKey 回调至本类 @Synchronized deleteKey，保持原同步语义
+    private val keyMaterial: KeystoreKeyMaterial by lazy {
+        KeystoreKeyMaterial(context, debugLog, onDeleteKey = ::deleteKey)
     }
 
     /**
@@ -66,13 +53,7 @@ class KeystoreManager @Inject constructor(
         requireUserAuth: Boolean = true,
         invalidateOnBiometricEnrollment: Boolean = true
     ): SecretKey {
-        if (keyStore.containsAlias(alias)) {
-            val entry = keyStore.getEntry(alias, null) as? KeyStore.SecretKeyEntry
-            if (entry != null) {
-                return entry.secretKey
-            }
-        }
-        return generateNewKey(alias, requireUserAuth, invalidateOnBiometricEnrollment)
+        return keyMaterial.getOrCreateAesKey(alias, requireUserAuth, invalidateOnBiometricEnrollment)
     }
 
     /**
@@ -85,62 +66,7 @@ class KeystoreManager @Inject constructor(
         requireUserAuth: Boolean = true,
         invalidateOnBiometricEnrollment: Boolean = true
     ): SecretKey {
-        if (isStrongBoxSupported) {
-            try {
-                return generateKeyInternal(alias, requireUserAuth, invalidateOnBiometricEnrollment, strongBox = true)
-            } catch (_: StrongBoxUnavailableException) {
-                // StrongBox 缺席或临时繁忙：回退 TEE 生成
-            }
-        }
-        return generateKeyInternal(alias, requireUserAuth, invalidateOnBiometricEnrollment, strongBox = false)
-    }
-
-    private fun generateKeyInternal(
-        alias: String,
-        requireUserAuth: Boolean,
-        invalidateOnBiometricEnrollment: Boolean,
-        strongBox: Boolean,
-        authenticatorTypes: Int = KeyProperties.AUTH_BIOMETRIC_STRONG,
-        unlockedDeviceRequired: Boolean = requireUserAuth
-    ): SecretKey {
-        val keyGenerator = KeyGenerator.getInstance(
-            KeyProperties.KEY_ALGORITHM_AES,
-            ANDROID_KEY_STORE
-        )
-
-        val specBuilder = KeyGenParameterSpec.Builder(
-            alias,
-            KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
-        )
-            .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
-            .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-            .setKeySize(KEY_SIZE_BITS)
-            .setUserAuthenticationRequired(requireUserAuth)
-            .setInvalidatedByBiometricEnrollment(invalidateOnBiometricEnrollment)
-            .setUnlockedDeviceRequired(unlockedDeviceRequired)
-
-        if (requireUserAuth) {
-            // per-operation 授权（timeout=0）：认证器集合由 authenticatorTypes 决定——
-            // 纯生物识别密钥用 AUTH_BIOMETRIC_STRONG；快速解锁密钥用 AUTH_BIOMETRIC_STRONG | AUTH_DEVICE_CREDENTIAL
-            // （后者允许设备锁屏 PIN/图案/密码作为强认证授权来源，官方推荐的凭据绑定方式）
-            specBuilder.setUserAuthenticationParameters(0, authenticatorTypes)
-        }
-
-        if (strongBox) {
-            specBuilder.setIsStrongBoxBacked(true)
-        }
-
-        keyGenerator.init(specBuilder.build())
-        val key = keyGenerator.generateKey()
-        // 生成即校验硬件落位：诊断性告警（不硬失败，兼容模拟器/CI 的软件 Keystore）
-        val level = getKeySecurityLevel(alias)
-        if (level == KeySecurityLevel.SOFTWARE) {
-            debugLog?.warn(
-                TAG,
-                "密钥 $alias 落位软件 Keystore（非 TEE/StrongBox），硬件隔离未生效"
-            )
-        }
-        return key
+        return keyMaterial.generateNewAesKey(alias, requireUserAuth, invalidateOnBiometricEnrollment)
     }
 
     /**
@@ -165,24 +91,12 @@ class KeystoreManager @Inject constructor(
      * 注意：`setIsStrongBoxBacked(true)` 只是请求 StrongBox，实际落位须以本方法探测为准。
      */
     fun getKeySecurityLevel(alias: String): KeySecurityLevel {
-        return try {
-            if (!keyStore.containsAlias(alias)) return KeySecurityLevel.UNKNOWN
-            val entry = keyStore.getEntry(alias, null) as? KeyStore.SecretKeyEntry
-                ?: return KeySecurityLevel.UNKNOWN
-            val factory = KeyFactory.getInstance(
-                KeyProperties.KEY_ALGORITHM_AES,
-                ANDROID_KEY_STORE
-            )
-            val info = factory.getKeySpec(entry.secretKey, KeyInfo::class.java)
-            when (info.securityLevel) {
-                KeyProperties.SECURITY_LEVEL_STRONGBOX -> KeySecurityLevel.STRONGBOX
-                KeyProperties.SECURITY_LEVEL_TRUSTED_ENVIRONMENT -> KeySecurityLevel.TRUSTED_ENVIRONMENT
-                KeyProperties.SECURITY_LEVEL_SOFTWARE -> KeySecurityLevel.SOFTWARE
-                KeyProperties.SECURITY_LEVEL_UNKNOWN -> KeySecurityLevel.UNKNOWN
-                else -> KeySecurityLevel.UNKNOWN
-            }
-        } catch (_: Exception) {
-            KeySecurityLevel.UNKNOWN
+        return when (keyMaterial.probeSecurityLevel(alias)) {
+            KeyProperties.SECURITY_LEVEL_STRONGBOX -> KeySecurityLevel.STRONGBOX
+            KeyProperties.SECURITY_LEVEL_TRUSTED_ENVIRONMENT -> KeySecurityLevel.TRUSTED_ENVIRONMENT
+            KeyProperties.SECURITY_LEVEL_SOFTWARE -> KeySecurityLevel.SOFTWARE
+            KeyProperties.SECURITY_LEVEL_UNKNOWN -> KeySecurityLevel.UNKNOWN
+            else -> KeySecurityLevel.UNKNOWN
         }
     }
 
@@ -206,27 +120,7 @@ class KeystoreManager @Inject constructor(
      * 用户下次以主密码完整解锁后自动重新封印，对齐 Wave 11 H4 模式）。
      */
     fun getOrCreateDeviceCredentialKey(alias: String): SecretKey {
-        if (keyStore.containsAlias(alias)) {
-            val entry = keyStore.getEntry(alias, null) as? KeyStore.SecretKeyEntry
-            if (entry != null) {
-                val matchesRequirement = try {
-                    val factory = KeyFactory.getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEY_STORE)
-                    val info = factory.getKeySpec(entry.secretKey, KeyInfo::class.java)
-                    // ISSUE-P1-08：全等比较（而非位包含）——旧「BIOMETRIC_STRONG | DEVICE_CREDENTIAL」密钥
-                    // 虽含所需位但允许锁屏凭据解封，必须判定为不匹配并迁移重建为纯生物识别密钥
-                    info.isUserAuthenticationRequired &&
-                        info.userAuthenticationType == REQUIRED_AUTHENTICATOR_TYPES
-                } catch (_: Exception) {
-                    // 规格探测失败按不匹配处理，触发迁移重建（fail-safe）
-                    false
-                }
-                if (matchesRequirement) {
-                    return entry.secretKey
-                }
-                deleteKey(alias)
-            }
-        }
-        return generateNewDeviceCredentialKey(alias)
+        return keyMaterial.getOrCreateDeviceCredentialKey(alias)
     }
 
     /**
@@ -234,26 +128,7 @@ class KeystoreManager @Inject constructor(
      * 纯生物识别授权 → setInvalidatedByBiometricEnrollment(true) 生效（ISSUE-P1-08）。
      */
     fun generateNewDeviceCredentialKey(alias: String): SecretKey {
-        if (isStrongBoxSupported) {
-            try {
-                return generateKeyInternal(
-                    alias,
-                    requireUserAuth = true,
-                    invalidateOnBiometricEnrollment = true,
-                    strongBox = true,
-                    authenticatorTypes = REQUIRED_AUTHENTICATOR_TYPES
-                )
-            } catch (_: StrongBoxUnavailableException) {
-                // StrongBox 缺席或临时繁忙：回退 TEE 生成
-            }
-        }
-        return generateKeyInternal(
-            alias,
-            requireUserAuth = true,
-            invalidateOnBiometricEnrollment = true,
-            strongBox = false,
-            authenticatorTypes = REQUIRED_AUTHENTICATOR_TYPES
-        )
+        return keyMaterial.generateNewDeviceCredentialKey(alias)
     }
 
     /**
@@ -261,10 +136,7 @@ class KeystoreManager @Inject constructor(
      * 返回的 Cipher 须经 BiometricPrompt（BIOMETRIC_STRONG）授权后方可 doFinal。
      */
     fun initDeviceCredentialEncryptCipher(alias: String): Cipher {
-        val key = getOrCreateDeviceCredentialKey(alias)
-        val cipher = Cipher.getInstance(TRANSFORMATION)
-        cipher.init(Cipher.ENCRYPT_MODE, key)
-        return cipher
+        return keyMaterial.initDeviceCredentialEncryptCipher(alias)
     }
 
     /**
@@ -275,17 +147,7 @@ class KeystoreManager @Inject constructor(
         iv: ByteArray,
         alias: String
     ): Cipher {
-        try {
-            val key = getOrCreateDeviceCredentialKey(alias)
-            val cipher = Cipher.getInstance(TRANSFORMATION)
-            val spec = GCMParameterSpec(GCM_TAG_LENGTH_BITS, iv)
-            cipher.init(Cipher.DECRYPT_MODE, key, spec)
-            return cipher
-        } catch (e: KeyPermanentlyInvalidatedException) {
-            // 系统指纹增删导致密钥永久失效，立即移除已废弃的密钥别名
-            deleteKey(alias)
-            throw e
-        }
+        return keyMaterial.initDeviceCredentialDecryptCipher(iv, alias)
     }
 
     /**
@@ -307,9 +169,7 @@ class KeystoreManager @Inject constructor(
      */
     @Synchronized
     fun deleteKey(alias: String = BIOMETRIC_KEY_ALIAS) {
-        if (keyStore.containsAlias(alias)) {
-            keyStore.deleteEntry(alias)
-        }
+        keyMaterial.deleteKeyEntry(alias)
     }
 
     /**
@@ -329,63 +189,7 @@ class KeystoreManager @Inject constructor(
      */
     @Synchronized
     fun getOrCreateUnlockPasskeyPair(alias: String): KeyPair? {
-        try {
-            if (keyStore.containsAlias(alias)) {
-                val entry = keyStore.getEntry(alias, null) as? KeyStore.PrivateKeyEntry
-                if (entry != null) {
-                    if (isAuthBoundUnlockPasskey(entry)) {
-                        return KeyPair(entry.certificate.publicKey, entry.privateKey)
-                    }
-                    // 旧规范密钥（未绑定用户认证）：轮换重建，登记记录随之失效（fail-closed 重登记）
-                    debugLog?.warn(TAG, "检测到未绑定用户认证的旧解锁通行密钥，执行轮换重建")
-                    keyStore.deleteEntry(alias)
-                }
-            }
-            val generator = KeyPairGenerator.getInstance(
-                KeyProperties.KEY_ALGORITHM_EC,
-                ANDROID_KEY_STORE
-            )
-            val purposes = KeyProperties.PURPOSE_SIGN or KeyProperties.PURPOSE_VERIFY
-            if (isStrongBoxSupported) {
-                try {
-                    generator.initialize(buildUnlockPasskeySpec(alias, purposes, strongBox = true))
-                    return generator.generateKeyPair()
-                } catch (_: StrongBoxUnavailableException) {
-                    // StrongBox 缺席：回退 TEE 生成
-                }
-            }
-            generator.initialize(buildUnlockPasskeySpec(alias, purposes, strongBox = false))
-            return generator.generateKeyPair()
-        } catch (e: Exception) {
-            debugLog?.warn(TAG, "解锁通行密钥生成/读取失败: ${e.javaClass.simpleName} - ${e.message}")
-            return null
-        }
-    }
-
-    /** 判断存量私钥是否已按 ISSUE-P1-09 规范绑定用户认证（时间窗 > 0） */
-    private fun isAuthBoundUnlockPasskey(entry: KeyStore.PrivateKeyEntry): Boolean {
-        return try {
-            val factory = KeyFactory.getInstance(entry.privateKey.algorithm, ANDROID_KEY_STORE)
-            val keyInfo = factory.getKeySpec(entry.privateKey, KeyInfo::class.java)
-            keyInfo.isUserAuthenticationRequired &&
-                keyInfo.userAuthenticationValidityDurationSeconds > 0
-        } catch (e: Exception) {
-            // 特性探测失败按未绑定处理（fail-closed：宁可轮换，不可放行无认证密钥）
-            debugLog?.warn(TAG, "解锁通行密钥认证绑定探测失败: ${e.javaClass.simpleName}")
-            false
-        }
-    }
-
-    private fun buildUnlockPasskeySpec(alias: String, purposes: Int, strongBox: Boolean): KeyGenParameterSpec {
-        return KeyGenParameterSpec.Builder(alias, purposes)
-            .setDigests(KeyProperties.DIGEST_SHA256)
-            .setUserAuthenticationParameters(
-                UNLOCK_PASSKEY_AUTH_VALIDITY_SECONDS,
-                KeyProperties.AUTH_BIOMETRIC_STRONG
-            )
-            .setUnlockedDeviceRequired(true)
-            .apply { if (strongBox) setIsStrongBoxBacked(true) }
-            .build()
+        return keyMaterial.getOrCreateUnlockPasskeyPair(alias)
     }
 
     /**
@@ -399,29 +203,7 @@ class KeystoreManager @Inject constructor(
      */
     @Synchronized
     fun getOrCreateUnlockPasskeyIntegrityMac(): javax.crypto.Mac? {
-        return try {
-            val alias = UNLOCK_PASSKEY_INTEGRITY_KEY_ALIAS
-            if (!keyStore.containsAlias(alias)) {
-                val generator = KeyGenerator.getInstance(
-                    KeyProperties.KEY_ALGORITHM_HMAC_SHA256,
-                    ANDROID_KEY_STORE
-                )
-                generator.init(
-                    KeyGenParameterSpec.Builder(
-                        alias,
-                        KeyProperties.PURPOSE_SIGN or KeyProperties.PURPOSE_VERIFY
-                    )
-                        .setKeySize(KEY_SIZE_BITS)
-                        .build()
-                )
-                generator.generateKey()
-            }
-            val entry = keyStore.getEntry(alias, null) as? KeyStore.SecretKeyEntry ?: return null
-            javax.crypto.Mac.getInstance("HmacSHA256").apply { init(entry.secretKey) }
-        } catch (e: Exception) {
-            debugLog?.warn(TAG, "解锁通行密钥完整性 HMAC 密钥获取失败: ${e.javaClass.simpleName} - ${e.message}")
-            null
-        }
+        return keyMaterial.getOrCreateUnlockPasskeyIntegrityMac()
     }
 
     companion object {
@@ -453,10 +235,5 @@ class KeystoreManager @Inject constructor(
          * 该约束现由同一份策略同时喂给密钥生成侧与本常量，杜绝两侧漂移。
          */
         val REQUIRED_AUTHENTICATOR_TYPES: Int get() = UnlockAuthPolicy.keystoreAuthTypes
-
-        private const val TRANSFORMATION = "AES/GCM/NoPadding"
-        private const val KEY_SIZE_BITS = 256
-        private const val GCM_TAG_LENGTH_BITS = 128
-        private const val TAG = "KeystoreManager"
     }
 }

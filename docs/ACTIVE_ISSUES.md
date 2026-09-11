@@ -51,7 +51,7 @@
 > 密码生成引擎出边界仍返回 String）已整改并归档，见 §2.21。
 > 当前 P2 级别无待办。
 
-## P3 低危问题、特性接线与体验优化（4 项）
+## P3 低危问题、特性接线与体验优化（3 项）
 
 > **背景**：P3 残余批次原 **12 项**（ISSUE-P3-17 ~ P3-28）已于 **2026-09-10** 整体整改。
 > 其中 **10 项完整闭环并归档**（P3-17 / 18 / 19 / **20** / 21 / 22 / 25 / 26 / 27 / 28，含逐项代码证据与 15 条过程缺陷留痕），
@@ -115,11 +115,18 @@
 > （`CloudSyncComponents` 481 → 291 / `EntryDetailComponents` 477 → 223 / `EntryEditViewModel` 470 → 400）
 > 已完成并归档，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) **§16**；**ISSUE-P3-31 本条仍未闭环**
 > （残余真逻辑超阈值 **3 项**，清单已就地刷新）。
-> 本节余 **4 项**（P3-23 / P3-24 / P3-31 / P3-32）。
-> 归档门禁证据（2026-09-10 批次 H 实测，`--rerun-tasks` 强制真实执行）：
+> **2026-09-10 追加十四（P3-31 批次 I · 本条闭环归档）**：验收标准点名的最后三项
+> （`KeystoreManager` 462 → 239 / `HealthCheckScreen` 453 → 315 / `SyncEngine` 443 → 316）
+> 已完成并归档，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) **§17**；
+> 门禁 `test --rerun-tasks` **1329 例 / 0 失败 / 13 跳过**、`lint` 5 模块 0 error，
+> 公开 API **零丢失零新增**。**全仓重测后 `> 400` 仅剩 2 项，且均为经论证的例外**
+> （纯常量词表 `DicewareWordList` 408、因 ISSUE-P3-43 接线产生功能性增量的 `SettingsViewModel` 424），
+> 故 **ISSUE-P3-31 达成闭环并整条移出本文件**。
+> 本节余 **3 项**（P3-23 / P3-24 / P3-32）。
+> 归档门禁证据（2026-09-10 批次 I 实测，`--rerun-tasks` 强制真实执行）：
 > `.\gradlew.bat test --rerun-tasks --max-workers=1 --continue` → **BUILD SUCCESSFUL**，
 > **1329 例 / 0 失败 / 13 跳过**（app 750 / core 58 / crypto 107 / database 235 / sync 179；
-> 纯结构性拆分，用例数与批次 G 基线持平）；
+> 纯结构性拆分，用例数与批次 H 基线持平）；
 > `lint`（5 模块 **0 error**）通过；`:database:assembleDebugAndroidTest` 通过（ISSUE-P3-23 验收标准①）。
 
 ### 前提复核记录（2026-09-10，依「条目维护规则」第 2 条）
@@ -133,7 +140,8 @@
 > **P3-43 已于同批次闭环归档**（见 §11），条目移出本文件。
 > **P3-30 已于 2026-09-10 归档**（前提「生产消费方为零」在开工时成立，整改后消费方落地，见 §5）。
 > **P3-29 已于 2026-09-10 批次 A 闭环归档**（见 §6）；其残余 23 项已按「新增条目须附核实时间点与核实方式」
-> 转入本节 **ISSUE-P3-31**（2026-09-10 经 `wc -l` 全仓复核）。
+> 转入本节 **ISSUE-P3-31**（2026-09-10 经 `wc -l` 全仓复核）；**该条亦已于同批次 B~I 全部拆分闭环**
+> （见 §10~§17），本文件不再保留该条目。
 
 > **ISSUE-P3-20 已闭环**（子库挂载 **UI 接线**：`childDatabasesCount` 去硬编码并接真实 `mountedCount`；
 > `ChildDatabaseDialog` 成为真实入口并调用核心层 `mount`/`open`/`unmount`；两条失真文案随能力上线删除；
@@ -143,8 +151,9 @@
 >
 > **ISSUE-P3-25 已闭环**（3 个点名文件全部降至阈值内：`SyncCoordinator` 965→254、`KdbxXmlGroupReader`
 > 407→218、`UnlockViewModel` 979→396）；其「全仓扫描」暴露的整体债务经 **ISSUE-P3-29** 承接，
-> 该条**批次 A 已完成优先级 8 项并归档**（见 §6），残余 23 项现由 **ISSUE-P3-31** 承接，
-> **仍不代表巨型类问题已全部解决**。
+> 该条**批次 A 已完成优先级 8 项并归档**（见 §6），残余 23 项由 **ISSUE-P3-31** 承接，
+> **该条已于 2026-09-10 批次 B~I 全部拆分闭环**（见 §10~§17）——巨型类债务至此清零，
+> 全仓 `> 400` 仅余两项**经论证的例外**。
 
 
 ### ISSUE-P3-23 (P3-11 残余): arm64 真机 instrumented 验证与真实 `.kdbx` 语料端到端解锁
@@ -230,91 +239,6 @@
 - **验收标准**：三 job 在 CI 上真实跑通并按实际结果校准；`dependency-scan.yml` 首次以 CVSS≥7 运行后
   按实际命中处置（修依赖或登记 suppression，**不得回调阈值**）；`cargo deny check advisories` 在 CI 上真实通过。
   **不得据此认为 CI 已跑通。**
-
----
-### ISSUE-P3-31 (P3-29 批次 A 后续): 残余 18 个真逻辑超阈值文件的**分批拆分债务**
-
-- **优先级**：P3（代码整洁度）
-- **2026-09-10 批次 B 进展**：`RealVaultRepository` 1090 → 372、`DatabasePickerScreen` 968 → 319，
-  归档见 [RESOLVED_LOG.md](RESOLVED_LOG.md) **§10**。
-- **2026-09-10 批次 C 进展（就地标注，本条未闭环）**：验收标准 1 点名的下一批三项
-  **全部降至阈值内并归档**，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) **§11**——
-  `ThemeSettingsScreen` **762 → 155**、`EntryEditScreen` **712 → 388**、`EntryDetailViewModel` **708 → 399**；
-  门禁 `test --rerun-tasks` **1328 例 / 0 失败 / 13 跳过**（app 749 / core 58 / crypto 107 / database 235 / sync 179）、
-  `lint` 5 模块 0 error，敏感数据清零点 **9 → 9** 逐条对齐、公开 API 零丢失零新增。
-  同批次顺带闭环 **ISSUE-P3-43**（§11.3 / §11.4）并修复一处既有生产缺陷（§11.5）。
-  **残余清单已按批次 C 后实测刷新为 18 项**（见下）。
-- **2026-09-10 批次 D 进展（就地标注，本条未闭环）**：验收标准 1 点名的下一批三项
-  **全部降至阈值内并归档**，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) **§12**——
-  `DatabaseSession` **697 → 393**（拆 6 个 internal 协作单元：状态容器 / 凭据缓存 / 原子写盘 /
-  树变换 / 内容变更 / 会话建立）、`SecuritySettingsScreen` **674 → 371**（拆 2 文件）、
-  `KeePasskeyAutofillService` **634 → 334**（拆 2 文件）；
-  门禁 `test --rerun-tasks` **1329 例 / 0 失败 / 13 跳过**（app 750 / core 58 / crypto 107 / database 235 / sync 179）、
-  `lint` 5 模块 0 error，公开 API **零丢失零新增**。
-  **残余清单已按批次 D 后实测刷新为 15 项**（见下）。
-- **2026-09-10 批次 E 进展（就地标注，本条未闭环）**：验收标准 1 点名的下一批三项
-  **全部降至阈值内并归档**，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) **§13**——
-  `S3SyncProvider` **629 → 372**（拆 4 单元：SigV4 签名 / 时钟偏移守卫 / 对象键编码 / 日期解析）、
-  `PasskeyCryptoEngine` **596 → 362**（拆 2 单元：密钥编解码 / 断言签名）、
-  `KdbxMerger` **578 → 207**（拆 3 单元：分组合并 / 条目合并 / 墓碑合并）；
-  门禁 `test --rerun-tasks` **1329 例 / 0 失败 / 13 跳过**、`lint` 5 模块 0 error，
-  公开 API **零丢失零新增**、敏感数据清零点 **6 → 6 / 13 → 13** 逐处对齐。
-  **残余清单已按批次 E 后实测刷新为 12 项**（见下）。
-- **2026-09-10 批次 F 进展（就地标注，本条未闭环）**：验收标准 1 点名的下一批三项
-  **全部降至阈值内并归档**，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) **§14**——
-  `SettingsScreen` **569 → 306**（拆 `SettingsComponents` / `MasterKeyChangeDialog`）、
-  `UnlockScreen` **562 → 275**（拆 `UnlockContentSections`）、
-  `GeneratorScreen` **550 → 177**（拆 `GeneratorDisplayCard` / `GeneratorModeOptions` / `HistoryPasswordRow`）；
-  门禁 `test --rerun-tasks` **1329 例 / 0 失败 / 13 跳过**、`lint` 5 模块 0 error，
-  公开 API **零丢失零新增**、敏感数据相关逻辑逐字保留。
-  **残余清单已按批次 F 后实测刷新为 9 项**（见下）。
-- **2026-09-10 批次 G 进展（就地标注，本条未闭环）**：验收标准 1 点名的下一批三项
-  **全部降至阈值内并归档**，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) **§15**——
-  `WebDavSyncProvider` **510 → 345**（拆 `WebDavAuthHeader` / `WebDavPropfindParser` / `WebDavUrlCodec`）、
-  `AutofillSettingsScreen` **504 → 216**（拆 `AutofillSettingsComponents`）、
-  `EntryEditComponents` **494 → 296**（拆 `EntryEditListSections`）；
-  门禁 `test --rerun-tasks` **1329 例 / 0 失败 / 13 跳过**、`lint` 5 模块 0 error，
-  公开 API **零丢失零新增**、敏感数据相关逻辑逐字保留。
-  **残余清单已按批次 G 后实测刷新为 6 项**（见下）。
-- **2026-09-10 批次 H 进展（就地标注，本条未闭环）**：验收标准 1 点名的下一批三项
-  **全部降至阈值内并归档**，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) **§16**——
-  `CloudSyncComponents` **481 → 291**（拆 `CloudSyncConfigFields`）、
-  `EntryDetailComponents` **477 → 223**（拆 `EntryDetailCards`）、
-  `EntryEditViewModel` **470 → 400**（拆 `EntryEditFormProjection` / `EntryEditSaveProjection`）；
-  门禁 `test --rerun-tasks` **1329 例 / 0 失败 / 13 跳过**、`lint` 5 模块 0 error，
-  公开 API **零丢失零新增**、敏感数据清零点 **26 → 26**（ViewModel）逐处对齐。
-  **残余清单已按批次 H 后实测刷新为 3 项**（见下）。
-- **核实时间点与核实方式（2026-09-10）**：于本仓根执行
-  `foreach ($d in app,database,sync,core,crypto) { Get-ChildItem -Recurse "$d/src/main/java" -Filter *.kt }`
-  并以 `(Get-Content $_.FullName).Count` 逐文件计数，筛出 `> 400` 行者并人工剔除纯常量例外
-  （命令等价于 `wc -l`，尾行不计换行的文件可能相差 1 行）；
-  **批次 C 完成后重测**残余 21 → 18 项；**批次 D 完成后重测**残余 18 → 15 项；
-  **批次 E 完成后重测**残余 15 → 12 项；**批次 F 完成后重测**残余 12 → 9 项；
-  **批次 G 完成后重测**残余 9 → 6 项；**批次 H 完成后重测**残余 6 → **3 项**。
-- **为何单独登记**：ISSUE-P3-29 正文的**优先级 8 项已于批次 A 全部降至阈值内并归档**（见
-  [RESOLVED_LOG.md](RESOLVED_LOG.md) **§6**），但全仓扫描显示超阈值仍是**普遍性既有债务**；
-  按「严禁只记聊天或脑中」纪律，残余面必须有独立条目承接，避免后人误以为「巨型类问题已解决」。
-
-- **清单（2026-09-10 批次 H 完成后实测 3 项）**：
-
-  `462 KeystoreManager.kt` · `453 HealthCheckScreen.kt` · `443 SyncEngine.kt`
-
-  > 路径简写：`app/.../` = `app/src/main/java/com/keepasskey/app/`；`database/.../`、`sync/.../`、`crypto/.../` 同理。
-  > **功能性增量标注（2026-09-10 批次 C，非拆分遗漏）**：`KeePasskeyAutofillService` 595 → 634、
-  > `SettingsViewModel` 400 → 424，均系 **ISSUE-P3-43** 的判定与接线所致（见 [RESOLVED_LOG.md] §11.7）。
-  > **已登记为例外（不再列入债务）**：`app/.../ui/screens/generator/DicewareWordList.kt`（408 行）——
-  > 其内容为 EFF/KeePassDX 风格 Diceware **词表**（约 300 行为不可压缩的字符串常量）与少量纯函数，
-  > 按「是否含真实逻辑」分级属**经论证的纯常量例外**，不拆分（保留单文件可保证词表作为一个不可分割的整体被审查）。
-
-- **验收标准（未来分批）**：
-  1. 按模块分批拆分，**优先处理体量最大且耦合最高的文件**——批次 B（§10）/ C（§11）/ D（§12）/ E（§13）/ F（§14）/ G（§15）/ H（§16）已完成；
-     下一批应指向 **`KeystoreManager`（462）/ `HealthCheckScreen`（453）/ `SyncEngine`（443）**——
-     此三项完成即本条闭环（余下仅两项**经论证的例外**：纯常量词表 `DicewareWordList`、
-     因 ISSUE-P3-43 接线产生功能性增量的 `SettingsViewModel`）；
-  2. 每批拆分为**纯结构性**改动：`.\gradlew.bat test` 全绿且用例数不减（当前 **1329 例**）；
-  3. 拆分后**逐条对照敏感数据清零点与公开 API 可见性**（沿用批次 A 的验证范式：
-     公开 API 零丢失零新增 + 清零点逐一对照）；
-  4. 每批完成后按「极简闭环工作流」归档并更新本清单快照。
 
 ---
 

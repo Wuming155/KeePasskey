@@ -25,8 +25,9 @@
 | §14 | P3-31 批次 F（超阈值债务） | ISSUE-P3-31 |
 | §15 | P3-31 批次 G（超阈值债务） | ISSUE-P3-31 |
 | §16 | P3-31 批次 H（超阈值债务） | ISSUE-P3-31 |
+| §17 | P3-31 批次 I（超阈值债务 · **本条闭环**） | ISSUE-P3-31 |
 
-> 各批次验收证据（用例数 / 通过 / 失败 / 跳过）分别见 §2.22、§3.1、§4.1、§5.1、§6.1、§7.1、§8.0、§9.5、§10.1、§11、§12、§13、§14、§15、§16。
+> 各批次验收证据（用例数 / 通过 / 失败 / 跳过）分别见 §2.22、§3.1、§4.1、§5.1、§6.1、§7.1、§8.0、§9.5、§10.1、§11、§12、§13、§14、§15、§16、§17。
 
 ---
 
@@ -358,4 +359,38 @@
 
 ---
 
-> **当前残余面（ACTIVE）**：ISSUE-P3-23（arm64 真机 + 真实 `.kdbx` 语料端到端）· P3-24（CI 首跑校准）· P3-31（超阈值 3 项）· P3-32（供应链 CVE 收尾）。
+## 17. ISSUE-P3-31 批次 I 归档（**本条闭环** · `KeystoreManager` / `HealthCheckScreen` / `SyncEngine`）
+
+**核实**：2026-09-10，逐文件 `(Get-Content …).Count` 复核；门禁 `test --rerun-tasks --max-workers=1` → **1329 例 / 0 失败 / 13 跳过**（app 750 / core 58 / crypto 107 / database 235 / sync 179；纯结构性拆分，用例数与批次 H 持平）；`lint` 5 模块 **0 error**。**闭环判据**：全仓重测 `> 400` 者仅剩 **2 项**，且均为**经论证的例外**，真逻辑超阈值债务归零。
+
+| 文件 | 前 → 后 | 拆出单元 |
+|---|---|---|
+| `app/.../security/KeystoreManager.kt` | 462 → 239 | `KeystoreKeyMaterial`（AES / 设备凭据封印 / 解锁通行密钥 + 完整性 HMAC 的全部实现、spec 构造、`KeyInfo` 探测与 StrongBox 回退） |
+| `app/.../settings/subscreens/HealthCheckScreen.kt` | 453 → 315 | `HealthCheckComponents`（`LeakRowPresentation` / `BreachCheckToggleRow` / `HealthAuditRowItem`） |
+| `sync/.../engine/SyncEngine.kt` | 443 → 316 | `SyncEngineResults`（3 个 sealed 结果类型同包平移）/ `SyncEngineSupport`（`RemoteConsistencyProbe` 版本比较 + `advanceBaseAndPersist` 基线前移） |
+
+- **公开 API 零丢失零新增**：`KeystoreManager` 全部 public 成员与 companion 常量、`SyncEngine` 全部 public 成员、`HealthCheckScreen` 签名逐字未变；`SyncEngineResults` 三个 sealed 类型保持 public（仅同包平移，FQN 不变），其余新增单元一律 `internal`。
+- **密码学 / 协议语义逐字保留**：`KeystoreManager` 的密钥别名、`KeyGenParameterSpec` 各项（GCM/NoPadding/256/认证绑定/StrongBox/`UnlockedDeviceRequired`/`setUserAuthenticationParameters`）、`StrongBoxUnavailableException` 回退、`KeyPermanentlyInvalidatedException` 清理、`REQUIRED_AUTHENTICATOR_TYPES` 全等探测迁移均原样；`@Synchronized` 锁语义经 `onDeleteKey` 回调逐字保持（无反向锁序）。`SyncEngine` 的缓存写序（`writeCache` → `updateBase` → `writeBaseContent`）、ETag/内容哈希裁决、冲突与错误返回路径一一对应。
+- **敏感数据清零点**：本轮三文件 **0 → 0**（`SyncEngine` 原文无清零调用；`KeystoreManager`/`HealthCheckScreen` 不承载明文清零点）；未新增 `String` 落地敏感值或日志。
+
+### 17.1 ISSUE-P3-31 全周期闭环总览（批次 B ~ I）
+
+| 批次 | 归档 | 处理文件（前 → 后） |
+|:---:|---|---|
+| B | §10 | `RealVaultRepository` 1090→372 · `DatabasePickerScreen` 968→319 |
+| C | §11 | `ThemeSettingsScreen` 762→155 · `EntryEditScreen` 712→388 · `EntryDetailViewModel` 708→399 |
+| D | §12 | `DatabaseSession` 697→393 · `SecuritySettingsScreen` 674→371 · `KeePasskeyAutofillService` 634→334 |
+| E | §13 | `S3SyncProvider` 629→372 · `PasskeyCryptoEngine` 596→362 · `KdbxMerger` 578→207 |
+| F | §14 | `SettingsScreen` 569→306 · `UnlockScreen` 562→275 · `GeneratorScreen` 550→177 |
+| G | §15 | `WebDavSyncProvider` 510→345 · `AutofillSettingsScreen` 504→216 · `EntryEditComponents` 494→296 |
+| H | §16 | `CloudSyncComponents` 481→291 · `EntryDetailComponents` 477→223 · `EntryEditViewModel` 470→400 |
+| I | §17 | `KeystoreManager` 462→239 · `HealthCheckScreen` 453→315 · `SyncEngine` 443→316 |
+
+- 残余真逻辑超阈值清单演进：**23**（批次 A 后）→ 18 → 15 → 12 → 9 → 6 → 3 → **0**。
+- **保留的两项经论证例外（不再列入债务）**：`DicewareWordList.kt`（408，约 300 行为不可压缩词表常量）、
+  `SettingsViewModel.kt`（424，系 ISSUE-P3-43 判定与接线导致的功能性增量，非拆分遗漏）。
+- **过程事实（如实留痕）**：批次 D~I 全部委派子代理执行机械拆分，子代理**一致报告本环境 `GetDiagnostics` 诊断通道不可靠**（对故意注入的未解析符号亦返回空诊断）；故所有批次**一律以主流程 `gradlew test`/`lint` 实跑为唯一验收依据**，不采信静态诊断结论，并要求子代理以「逐符号人工核对」自检。批次 D 曾出现一处 `suspend` 误标（`ILLEGAL_SUSPEND_FUNCTION_CALL`）已修复；`SyncCacheEvictorTest` 在 Windows 上存在 `.tmp` 清理竞态偶发（与本系列改动无关，隔离重跑稳定通过）。
+
+---
+
+> **当前残余面（ACTIVE）**：ISSUE-P3-23（arm64 真机 + 真实 `.kdbx` 语料端到端）· P3-24（CI 首跑校准）· P3-32（供应链 CVE 收尾）。
