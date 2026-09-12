@@ -280,8 +280,8 @@ class SettingsViewModel @Inject constructor(
     fun setPasskeySupportEnabled(enabled: Boolean) = preferences.setPasskeySupportEnabled(enabled)
     fun setAutofillServiceEnabled(enabled: Boolean) = preferences.setAutofillServiceEnabled(enabled)
     fun setRecycleBinEnabled(enabled: Boolean) = preferences.setRecycleBinEnabled(enabled)
-    fun setTanExpiresOnUse(enabled: Boolean) = preferences.setTanExpiresOnUse(enabled)
-    fun setCheckForDuplicateUuids(enabled: Boolean) = preferences.setCheckForDuplicateUuids(enabled)
+    // ISSUE-P3-65：TAN 序列号 / 数据库 UUID 两开关的假 setter 已移除——UI 入口如实禁用，
+    // 待真实语义（TAN 用后标记 / 重复 UUID 扫描）落地后再以可持久化+可消费的形态恢复
 
     // ===== 列表显示（仓库直写） =====
     fun setShowUsernameInList(enabled: Boolean) = preferences.setShowUsernameInList(enabled)

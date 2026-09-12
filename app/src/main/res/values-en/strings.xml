@@ -463,9 +463,9 @@
     <string name="dbset_keyfile_exported">Key file exported</string>
     <string name="dbset_section_integrity">Integrity</string>
     <string name="dbset_tan_title">TAN sequence</string>
-    <string name="dbset_tan_desc">One-time password entries, marked automatically after use</string>
+    <string name="dbset_tan_desc">One-time password entries, marked automatically after use (coming soon)</string>
     <string name="dbset_uuid_title">Database UUID</string>
-    <string name="dbset_uuid_desc">Unique database identifier used for cross-device sync</string>
+    <string name="dbset_uuid_desc">Unique database identifier used for cross-device sync (coming soon)</string>
     <string name="dbset_cipher_dialog_title">Choose cipher</string>
     <string name="dbset_cipher_chacha_desc">ChaCha20 stream cipher, faster on devices without AES hardware acceleration</string>
     <string name="dbset_cipher_aes_desc">Industry-standard AES-256 with broad hardware acceleration</string>

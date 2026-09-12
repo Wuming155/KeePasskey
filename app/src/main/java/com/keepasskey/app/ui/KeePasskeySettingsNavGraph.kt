@@ -45,8 +45,6 @@ internal fun NavGraphBuilder.keepasskeySettingsNavGraph(
             onEncryptionAlgorithmChange = settingsViewModel::setEncryptionAlgorithm,
             onKdfAlgorithmChange = settingsViewModel::setKdfAlgorithm,
             onArgon2ParametersChange = settingsViewModel::setArgon2Parameters,
-            onTanExpiresOnUseToggle = settingsViewModel::setTanExpiresOnUse,
-            onCheckForDuplicateUuidsToggle = settingsViewModel::setCheckForDuplicateUuids,
             // M6 整改：真实 KDF 基准接线
             kdfBenchmarkState = kdfBenchmarkState,
             onRunKdfBenchmark = settingsViewModel::runKdfBenchmark,

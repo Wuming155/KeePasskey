@@ -55,9 +55,7 @@ internal fun databaseConfigFromHeader(db: KdbxDatabase): DatabaseConfigUiState {
         argon2MemoryMb = if (kdf is KdfParameters.Argon2) kdf.memoryInBytes / (1024L * 1024L) else 0L,
         argon2Parallelism = if (kdf is KdfParameters.Argon2) kdf.parallelism else 0,
         compressionAlgorithm = compressionLabel,
-        recycleBinEnabled = db.recycleBinEnabled,
-        tanExpiresOnUse = false,
-        checkForDuplicateUuids = false
+        recycleBinEnabled = db.recycleBinEnabled
     )
 }
 
@@ -103,9 +101,9 @@ internal class SettingsPreferencesController(
             argon2Iterations = 0L,
             argon2MemoryMb = 0L,
             argon2Parallelism = 0,
-            recycleBinEnabled = true,
-            tanExpiresOnUse = true,
-            checkForDuplicateUuids = true
+            recycleBinEnabled = true
+            // ISSUE-P3-65：tanExpiresOnUse / checkForDuplicateUuids 字段已移除——
+            // 假开关无真实语义与消费方，UI 入口已如实禁用
             // ISSUE-P3-20：childDatabasesCount 字段已整体移除——它原先承载的硬编码 0
             // 会与真实挂载数冲突；真实值改由 childDatabaseCountFlow（核心层 mountedCount）下发
         )
@@ -213,13 +211,38 @@ internal class SettingsPreferencesController(
         databaseConfigStateFlow.update { it.copy(kdfAlgorithm = kdf) }
     }
 
+    /**
+     * 应用 Argon2 KDF 参数（ISSUE-P2-22 整改：真实生效）。
+     *
+     * 此前仅回写 UI 内存回显（假闭环）：既不更新会话头也不落盘，冷启动即还原。
+     * 现接入 [DatabaseSession.updateDatabaseMeta] 更新活动库头的变体字典 I/M/P 并立即
+     * [DatabaseSession.save]——写侧 `KdbxFile.save` 以保存时的 `header.kdfParameters`
+     * （含全新随机 salt）重派生加密密钥并写出新外层头，语义与官方 KeePass「KDF 参数
+     * 保存时生效」一致。回显不再自持状态：会话 databaseFlow 重发后由 init 的头映射
+     * 通道统一下发（P2-19 单一真相源）。
+     *
+     * 无活动会话 / 库头非 Argon2 时如实 no-op（回显保持文件头真值，不产生假变更）。
+     */
     fun setArgon2Parameters(iterations: Long, memoryMb: Long, parallelism: Int) {
-        databaseConfigStateFlow.update {
-            it.copy(
-                argon2Iterations = iterations,
-                argon2MemoryMb = memoryMb,
-                argon2Parallelism = parallelism
-            )
+        val session = databaseSession ?: return
+        scope.launch {
+            session.updateDatabaseMeta { db ->
+                val kdf = db.header.kdfParameters
+                if (kdf is KdfParameters.Argon2) {
+                    db.copy(
+                        header = db.header.copy(
+                            kdfParameters = kdf.copy(
+                                iterations = iterations,
+                                memoryInBytes = memoryMb * 1024L * 1024L,
+                                parallelism = parallelism
+                            )
+                        )
+                    )
+                } else {
+                    db
+                }
+            }
+            session.save()
         }
     }
 
@@ -227,13 +250,8 @@ internal class SettingsPreferencesController(
         databaseConfigStateFlow.update { it.copy(recycleBinEnabled = enabled) }
     }
 
-    fun setTanExpiresOnUse(enabled: Boolean) {
-        databaseConfigStateFlow.update { it.copy(tanExpiresOnUse = enabled) }
-    }
-
-    fun setCheckForDuplicateUuids(enabled: Boolean) {
-        databaseConfigStateFlow.update { it.copy(checkForDuplicateUuids = enabled) }
-    }
+    // ISSUE-P3-65：setTanExpiresOnUse / setCheckForDuplicateUuids 已移除——
+    // 两者仅回写内存回显且无任何行为消费方（假开关），UI 入口已如实禁用。
 
     // ========== 自动填充启用开关 ==========
     fun setCredentialProviderEnabled(enabled: Boolean) {
@@ -404,9 +422,7 @@ internal data class DatabaseConfigUiState(
     val argon2Parallelism: Int,
     /** 压缩算法显示值（ISSUE-P2-19：真实值来自文件头 compressionFlags） */
     val compressionAlgorithm: String = "",
-    val recycleBinEnabled: Boolean,
-    val tanExpiresOnUse: Boolean,
-    val checkForDuplicateUuids: Boolean
+    val recycleBinEnabled: Boolean
 )
 
 /** 安全超时配置的局部投影（原 `SettingsViewModel` 私有嵌套类型，ISSUE-P3-29 上移为同包 internal） */

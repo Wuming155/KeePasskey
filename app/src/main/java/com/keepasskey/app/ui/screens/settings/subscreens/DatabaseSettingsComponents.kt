@@ -29,6 +29,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
@@ -156,16 +157,17 @@ internal fun SectionHeader(title: String) {
     )
 }
 
-/** 标题 + 描述 + 右侧开关的设置行 */
+/** 标题 + 描述 + 右侧开关的设置行（`enabled=false` 时整行降透明度且开关不可交互） */
 @Composable
 internal fun SettingsToggleRow(
     title: String,
     description: String,
     checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit
+    onCheckedChange: (Boolean) -> Unit,
+    enabled: Boolean = true
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().alpha(if (enabled) 1f else 0.5f),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
@@ -183,7 +185,7 @@ internal fun SettingsToggleRow(
         }
         Switch(
             checked = checked,
-            onCheckedChange = onCheckedChange,
+            onCheckedChange = onCheckedChange.takeIf { enabled },
             colors = SwitchDefaults.colors(
                 checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
                 checkedTrackColor = MaterialTheme.colorScheme.primary
@@ -338,14 +340,15 @@ internal fun DatabaseImportExportCard(
     }
 }
 
-/** 5. 完整性与高级规则 (KP2A 特性)：TAN 一次性失效与重复 UUID 检查 */
+/**
+ * 5. 完整性与高级规则 (KP2A 特性)：TAN 一次性失效与重复 UUID 检查
+ *
+ * ISSUE-P3-65 整改：两个开关此前可拨动但既无持久化也无任何行为消费方（假开关）。
+ * 在补齐真实语义前如实禁用交互并以「即将支持」标注，checked 恒为 false，
+ * 不再呈现「已开启」的假状态。
+ */
 @Composable
-internal fun DatabaseIntegrityCard(
-    tanExpiresOnUse: Boolean,
-    onTanExpiresOnUseToggle: (Boolean) -> Unit,
-    checkForDuplicateUuids: Boolean,
-    onCheckForDuplicateUuidsToggle: (Boolean) -> Unit
-) {
+internal fun DatabaseIntegrityCard() {
     BentoCard(
         modifier = Modifier.fillMaxWidth(),
         backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow
@@ -354,15 +357,17 @@ internal fun DatabaseIntegrityCard(
             SettingsToggleRow(
                 title = stringResource(R.string.dbset_tan_title),
                 description = stringResource(R.string.dbset_tan_desc),
-                checked = tanExpiresOnUse,
-                onCheckedChange = onTanExpiresOnUseToggle
+                checked = false,
+                onCheckedChange = {},
+                enabled = false
             )
 
             SettingsToggleRow(
                 title = stringResource(R.string.dbset_uuid_title),
                 description = stringResource(R.string.dbset_uuid_desc),
-                checked = checkForDuplicateUuids,
-                onCheckedChange = onCheckForDuplicateUuidsToggle
+                checked = false,
+                onCheckedChange = {},
+                enabled = false
             )
         }
     }

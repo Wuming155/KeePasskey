@@ -97,8 +97,7 @@ internal fun buildSettingsUiState(
     argon2MemoryMb = dbState.argon2MemoryMb,
     argon2Parallelism = dbState.argon2Parallelism,
     recycleBinEnabled = dbState.recycleBinEnabled,
-    tanExpiresOnUse = dbState.tanExpiresOnUse,
-    checkForDuplicateUuids = dbState.checkForDuplicateUuids,
+    // ISSUE-P3-65：tanExpiresOnUse / checkForDuplicateUuids 映射已随字段移除（假开关如实禁用）
     // ISSUE-P3-20：真实已挂载计数（原为硬编码 0；语义为「已挂载」而非「已解锁」）
     childDatabasesCount = mountedChildDatabases,
 

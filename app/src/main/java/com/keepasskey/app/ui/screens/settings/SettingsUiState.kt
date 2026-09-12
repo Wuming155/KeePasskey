@@ -75,8 +75,8 @@ data class SettingsUiState(
     // 资源化需先在 SettingsViewModel 补 strings 生产者（超出本任务改动面），保留原样
     val compressionAlgorithm: String = "GZip 压缩",
     val recycleBinEnabled: Boolean = true,
-    val tanExpiresOnUse: Boolean = true, // KP2A: TAN 一次性凭证使用后自动过期
-    val checkForDuplicateUuids: Boolean = true, // KP2A: 自动校验并修复重复 UUID
+    // ISSUE-P3-65：tanExpiresOnUse / checkForDuplicateUuids 字段已移除——假开关无行为消费方，
+    // 设置页入口已如实禁用（「即将支持」），真实语义落地时再以可持久化形态恢复
     // ISSUE-P3-20：挂载的子数据库数量。语义 = **已挂载**（含未解锁），非「已解锁数」；
     // 真实值由 SettingsViewModel 经核心层 mountedCount 下发，此处的 0 仅是
     // `uiState` 首次发射前的占位默认值（与本文件其余字段同一约定），不是硬编码真相源。

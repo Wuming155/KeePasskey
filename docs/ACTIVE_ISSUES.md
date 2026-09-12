@@ -47,64 +47,21 @@
 
 ---
 
-## P2 中危缺陷与协议/测试缺口（1 项）
+## P2 中危缺陷与协议/测试缺口（0 项）
 
-### ISSUE-P2-22（新发现）：「Argon2 参数」对话框「应用参数」无真实效果（同返回键锁定族的死设置）
-
-- **优先级**：P2（用户显式修改 KDF 强度的操作被静默丢弃——既不重派生密钥也不落盘，且 UI 回显造成「已生效」假象）
-- **核实时间点与核实方式（2026-09-11，设备实操 + 字节级地面真值）**：
-  1. 设备实操：设置 → 密码库与加密 → Argon2 参数 → 并行线程数选「4 线程」→ 「应用参数」→
-     页面回显立即变为 `64 MB · 2 轮 · P=4`；
-  2. `run-as` 取回 `files/passwords.kdbx` 经 `build/vd.py` 解析外层头：`P: type=0x05/0x04 raw=02000000`
-     ——**值仍为 2 且头未随 UI 改动重写**；该文件其后被 `generate_corpus.py` / keepassxc-cli 交叉确认
-     与 UI 显示不符；
-  3. 代码核查（2026-09-11，全仓 grep）：`setArgon2Parameters`（`SettingsPreferencesController.kt`）
-     仅 `databaseConfigStateFlow.update`（内存回显）——**无任何会话写入、无重派生、无持久化**；
-     `KdbxHeader.kt:137` 的建库默认 `parallelism = 2` 亦无运行时修改通道。
-- **影响**：用户据此调高 KDF 强度的操作完全无效，且参数显示（P2-19 修复后已与文件头一致）会被
-  内存回显再次污染，形成新的「显示与真实不符」。
-- **整改方向**：① `onApplyParameters` 接入 `DatabaseSession.updateDatabaseMeta { … }` 更新会话
-  KDF 参数并触发重派生 + `save()`（下次解锁生效或立即重加密，需对照 KeePassDX/KP2A 语义取舍）；
-  ② 回显流改由会话头下发（P2-19 已建通道），禁止 UI 层自持状态；③ 至少在落地前如实禁用入口。
-- **验收标准（待整改）**：① 应用参数后外层头变体字典 `I/M/P` 与所选值一致且经重派生后新旧密码
-  语义正确；② 冷启动后回显与文件头一致；③ 设备侧 + 契约测试覆盖。
-- **禁止**：只把参数写入 UI 状态流冒充生效（假闭环）；在不重派生密钥的情况下只改文件头。
-
+> 当前无待办。**ISSUE-P2-22**（「Argon2 参数」应用无真实效果）于 2026-09-12 整改归档，
+> 见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §28.1；P2-19 / P2-20 / P2-21 已于 §27 归档。
 
 ---
 
-## P3 低危问题、特性接线与体验优化（6 项）
+## P3 低危问题、特性接线与体验优化（3 项）
 
-> **状态（2026-09-11）**：历史 P3 批次 **ISSUE-P3-01 ~ P3-57 除下列 2 项外部资源依赖型残余外已全部
-> 闭环并归档**，逐条实现细节与验收证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md)（§3 ~ §25）。
-> 2026-09-11 设备侧批次新闭环 P3-59 / P3-60 / P3-61 / P3-62（见 §27.7 / §27.8），
-> 并新登记 **ISSUE-P3-63（升级为确认缺陷）** 与 **ISSUE-P3-65**。
-> 2026-09-12 外部审查报告核实批次新登记 **ISSUE-P3-67**（报告 P1 结论经核实修正为 P3）。
+> **状态（2026-09-12）**：历史 P3 批次 **ISSUE-P3-01 ~ P3-67 除下列 3 项外部资源依赖型残余外已全部
+> 闭环并归档**，逐条实现细节与验收证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md)（§3 ~ §28）。
+> 2026-09-12 存量修复批次闭环 P3-63 / P3-65 / P3-67（见 §28.2 ~ §28.4）。
 
 ---
 
-### ISSUE-P3-63（已升级为确认缺陷）：库内容变更后「密码库」列表不即时刷新（模板安装 / 导入均可复现）
-
-- **优先级**：P3（功能显示时序：数据已正确落库，仅 UI 快照陈旧；冷启动后数据完整可见）
-- **核实时间点与核实方式（2026-09-11 两次设备实测）**：
-  1. 原登记（同日前一批次）：「条目模板 → 立即安装」后切 Tab 回「密码库」列表仍无 `模板` 分组，
-     锁定→解锁（强制重载）后才出现；
-  2. 本批次新增复现：向新建空库导入 KeePass XML（导入报告「新增 1 条 / 2 条」）→ 返回列表仍显示
-     「当前目录下没有凭据或文件夹」→ `am force-stop` 冷启动解锁后条目**全部可见**——
-     证明数据已持久化、仅内存列表流未刷新。
-- **已排除的方向**：`SessionContentMutations.saveEntry/saveGroup` 均为 copy-on-write 替换
-  `databaseFlow.value`（StateFlow 会重发）；`VaultListViewModel.uiState` 的 combine 链路包含
-  `getEntries()`（映射自 `databaseSession.databaseFlow`）；同会话后续再次导入时列表**能**正常刷新
-  （2026-09-11 实测第二次导入返回即见新条目）——现象呈**条件性**（新建库后首轮导入必现，之后消失），
-  疑与 `WhileSubscribed(5000)` 首次订阅窗口 / `@EntryDisplayDispatcher` 装配调度 / 空态首帧组合有关。
-- **整改方向**：在 `VaultListViewModel`（`app/src/main/java/com/keepasskey/app/ui/screens/vault/`）
-  复现窗口期内检查上游流的订阅/重发时序；可考虑导入 / 模板安装完成后由 `VaultImportController` /
-  `VaultExportController` 显式触发列表装配刷新，或为 `buildVaultListUiState` 输入流去掉条件性去重。
-- **验收标准（待整改）**：① 新建库 → 立即导入 / 安装模板 → 返回列表，新条目与分组**无需重载**即显示；
-  ② 设备侧回归用例覆盖该时序。
-- **禁止**：以「重新解锁可见」替代修复；在未定位根因前用轮询刷新掩盖。
-
----
 
 ### ISSUE-P3-23 (P3-11 残余): arm64 真机 instrumented 验证与真实 `.kdbx` 语料端到端解锁
 
@@ -180,23 +137,6 @@
 
 ---
 
-### ISSUE-P3-65（新登记）：「完整性校验」区 TAN 序列号 / 数据库 UUID 开关无持久化、无消费方
-
-- **优先级**：P3（设置项诚实行：开关可拨动但只改内存回显，冷启动静默还原；无任何行为消费方）
-- **核实时间点与核实方式（2026-09-11，设备实操 + 全仓只读核查）**：
-  1. 设备实操：设置 → 密码库与加密 → 完整性校验区两个开关注入点击可切换（dump 中 `checked` 变化）；
-  2. `adb shell run-as com.keepasskey cat shared_prefs/keepasskey_extended_settings.xml` 与
-     `files/datastore/keepasskey_settings.preferences_pb` 均无对应键 → **未持久化**；
-  3. 全仓核查：`setTanExpiresOnUse` / `setCheckForDuplicateUuids`（`SettingsPreferencesController.kt`）
-     仅 `databaseConfigStateFlow.update`（内存回显）；`tanExpiresOnUse` / `checkForDuplicateUuids` 的
-     消费方仅有设置页自身回显——**无任何行为层消费**（grep 全仓，2026-09-11）。
-- **影响**：用户拨动开关得不到任何真实效果且重启后丢失，违背「设置项必须有真实语义」的一致性预期。
-- **验收标准（待整改）**：① 为两个开关补真实语义（TAN 序列号显示 / 重复 UUID 扫描提醒）或如实在
-  UI 标注「即将支持」并禁用交互（禁止可拨动但不生效的假开关）；② 若补语义，状态须持久化
-  （ExtendedSettingsStore 或库内 Meta）且有设备侧覆盖。
-- **禁止**：仅把开关值持久化而依旧无行为消费（假闭环）。
-
----
 
 ### ISSUE-P3-66（新登记）：自动填充 / Passkey 端到端链路缺设备侧实测（依赖外部环境）
 
@@ -215,35 +155,3 @@
 
 ---
 
-### ISSUE-P3-67（新登记）：锁库事件导航守卫捕获过期 `currentRoute`（守卫恒真死代码，解锁页遭重复导航）
-
-- **优先级**：P3（行为目前恰好正确，但依赖巧合而非语义；附带解锁页表单被重复导航重置的轻微体验问题）
-- **来源（2026-09-12 外部审查报告核实）**：报告曾将其列为 P1「自动锁定后可能仍停留在已解锁页面」——
-  经代码路径核实该 P1 结论**不成立**，实际行为相反且依赖巧合，本条按真实后果降级登记。
-- **核实时间点与核实方式（2026-09-12，静态代码路径 + 依赖字节码/源码双重验证）**：
-  1. `KeePasskeyApp.kt:164` 的 `LaunchedEffect(autoLockManager)` 仅以 `autoLockManager` 为 key
-     （`@Singleton` 引用，组合期间恒定，effect 终生只启动一次），闭包捕获的 `currentRoute`
-     （`KeePasskeyApp.kt:124`）不随导航更新——异味属实；
-  2. 但捕获值**不是**报告所称「初始的 Unlock 路由」，而是 `null`：`currentBackStackEntryAsState()`
-     在 navigation-compose 2.10.0 中实现为 `collectAsState(initialValue = null)`（经 Gradle 缓存
-     字节码反汇编确认 `aconst_null`；2.9.0 源码同），且 124 行读取发生在 212 行 `NavHost` 设图之前，
-     返回栈为空，首值确定性为 `null`；
-  3. compose runtime（1.11.4 源码 / 1.12.0 字节码）确认 `remember(key)` 不重跑时新闭包被丢弃，
-     effect 协程终生持有首次组合捕获的 `null`；
-  4. 故锁库事件到达时 `currentRoute != Screen.Unlock.route` ≡ `null != "…"` **恒真** →
-     `navigate(Unlock) { popUpTo(0) }` 总会执行——「锁库后停留已解锁页面」不会发生，导航实际可靠；
-  5. 旁路排查：`RealVaultRepository.lockDatabase()`（不 `tryEmit` 的直接锁库）经全仓 grep
-     **无任何生产调用方**；所有锁库动作（熄屏 / 后台超时 / 返回键 / 手动）均经
-     `AutoLockSessionGuard.triggerLock` 发事件。
-- **真实影响**：
-  ① 守卫 `currentRoute != Screen.Unlock.route` 是恒真死代码，行为靠「捕获值为 null」的巧合兜底，
-     后续任何看似无关的重构（如给 effect 补充会变动的 key、或有人按报告假设「修复」捕获值）都可能
-     翻转行为；
-  ② 已处于解锁页时再收到锁库事件（如熄屏锁定开启时人在解锁页按电源键）会以 `popUpTo(0)` 重复导航，
-     重建解锁页并**清空已输入的主密码**。
-- **整改方向**：以 `rememberUpdatedState(currentRoute)` 供 effect 读取（或将 `currentRoute` 加入
-  effect key），使守卫恢复真实语义——已在解锁页则不重复导航（修复 ②），否则正常导航（保持现状）。
-- **验收标准（待整改）**：① 锁库事件在非解锁路由上必达解锁页（保留 JVM 侧导航契约测试或补齐）；
-  ② 已在解锁页时收到锁库事件不重建页面、表单输入保留；③ 守卫不再是恒真死代码（代码评审可证）。
-- **禁止**：以「删除守卫条件、无条件导航」的方式消除死代码（将固化影响 ②）；在未核实
-  `currentBackStackEntryAsState` 初值语义的情况下直接采信外部报告的 P1 结论。

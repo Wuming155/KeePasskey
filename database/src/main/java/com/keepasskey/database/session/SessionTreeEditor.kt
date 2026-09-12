@@ -13,20 +13,26 @@ import com.keepasskey.core.model.KdbxUuid
 internal object SessionTreeEditor {
 
     fun updateOrAddEntry(group: KdbxGroup, entry: KdbxEntry): KdbxGroup {
-        val targetParentId = entry.parentGroupId ?: group.id
+        // ISSUE-P3-63：parentGroupId=null 的既定语义是「根组」（落树放置、同步合并均按
+        // `?: group.id` 处理；XML 重新解析时亦按结构归属还原为根组 id）。但此前落树时
+        // **不回写对象**，导致会话内存条目长期持有 null 父组——UI 投影按 groupId 过滤时
+        // 根级条目（新建/导入）在会话内不可见，冷启动后才出现。此处落树即规范化，
+        // 使内存模型与落盘解析模型保持同一取值。
+        val normalized = if (entry.parentGroupId == null) entry.copy(parentGroupId = group.id) else entry
+        val targetParentId = normalized.parentGroupId ?: group.id
         if (group.id == targetParentId) {
-            val existingIndex = group.entries.indexOfFirst { it.id == entry.id }
+            val existingIndex = group.entries.indexOfFirst { it.id == normalized.id }
             val newEntries = group.entries.toMutableList()
             if (existingIndex >= 0) {
-                newEntries[existingIndex] = entry
+                newEntries[existingIndex] = normalized
             } else {
-                newEntries.add(entry)
+                newEntries.add(normalized)
             }
             return group.copy(entries = newEntries)
         }
 
         val newSubgroups = group.subgroups.map { sub ->
-            updateOrAddEntry(sub, entry)
+            updateOrAddEntry(sub, normalized)
         }
         return group.copy(subgroups = newSubgroups)
     }
@@ -38,23 +44,48 @@ internal object SessionTreeEditor {
     }
 
     fun updateOrAddGroup(parent: KdbxGroup, groupToSave: KdbxGroup): KdbxGroup {
-        val targetParentId = groupToSave.parentGroupId ?: parent.id
+        // ISSUE-P3-63：与 updateOrAddEntry 同一规范化语义——null 父组的既定语义是根组
+        // （放置逻辑与冷启动结构解析均按此处理），落树前把组自身及其子树成员的 null
+        // 父组修正为结构真实父组 id（如模板分组及其条目以 null 构造后整组保存的场景）。
+        val normalized = if (groupToSave.parentGroupId == null) {
+            groupToSave.copy(parentGroupId = parent.id)
+        } else {
+            groupToSave
+        }
+        val targetParentId = normalized.parentGroupId ?: parent.id
         if (parent.id == targetParentId) {
-            val existingIndex = parent.subgroups.indexOfFirst { it.id == groupToSave.id }
+            val fixed = normalizeParentRefs(normalized)
+            val existingIndex = parent.subgroups.indexOfFirst { it.id == fixed.id }
             val newSubgroups = parent.subgroups.toMutableList()
             if (existingIndex >= 0) {
                 // P0-1 保护性合并：替换既有分组前保留其子项（详见 preserveChildrenIfMissing）
-                newSubgroups[existingIndex] = preserveChildrenIfMissing(parent.subgroups[existingIndex], groupToSave)
+                newSubgroups[existingIndex] = preserveChildrenIfMissing(parent.subgroups[existingIndex], fixed)
             } else {
-                newSubgroups.add(groupToSave)
+                newSubgroups.add(fixed)
             }
             return parent.copy(subgroups = newSubgroups)
         }
 
         val newSubgroups = parent.subgroups.map { sub ->
-            updateOrAddGroup(sub, groupToSave)
+            updateOrAddGroup(sub, normalized)
         }
         return parent.copy(subgroups = newSubgroups)
+    }
+
+    /**
+     * ISSUE-P3-63：递归修正子树内所有 `parentGroupId=null` 的成员，使其携带结构真实父组 id。
+     * 仅对「即将落树」的整组子树调用（updateOrAddGroup 的放置分支），根分组自身除外——
+     * 根的 parentGroupId=null 是合法表达（无父组）。
+     */
+    private fun normalizeParentRefs(group: KdbxGroup): KdbxGroup {
+        val normalizedEntries = group.entries.map { entry ->
+            if (entry.parentGroupId == null) entry.copy(parentGroupId = group.id) else entry
+        }
+        val normalizedSubgroups = group.subgroups.map { sub ->
+            val fixed = if (sub.parentGroupId == null) sub.copy(parentGroupId = group.id) else sub
+            normalizeParentRefs(fixed)
+        }
+        return group.copy(entries = normalizedEntries, subgroups = normalizedSubgroups)
     }
 
     /**

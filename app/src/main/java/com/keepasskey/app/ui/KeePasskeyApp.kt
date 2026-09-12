@@ -17,6 +17,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -161,9 +162,14 @@ fun KeePasskeyApp() {
                 autoLockManager?.triggerLock("返回键锁定")
             }
 
+            // ISSUE-P3-67：守卫必须读取**实时**路由——effect 以恒定的 autoLockManager 为 key，
+            // 闭包捕获的 currentRoute 不会随导航更新（此前恒捕获 null，守卫恒真，
+            // 已在解锁页时收到锁库事件仍会 popUpTo(0) 重建页面并清空已输入的主密码）。
+            // rememberUpdatedState 让 collect 每次读到最新路由，守卫恢复真实语义。
+            val latestRoute by rememberUpdatedState(currentRoute)
             LaunchedEffect(autoLockManager) {
                 autoLockManager?.lockEvents?.collect {
-                    if (currentRoute != Screen.Unlock.route) {
+                    if (latestRoute != Screen.Unlock.route) {
                         navController.navigate(Screen.Unlock.route) {
                             popUpTo(0) { inclusive = true }
                         }

@@ -1183,3 +1183,93 @@ Rust 单测模块 `#[cfg(test)] mod tests` 之内**（测试模块起始行：`s
    继承旧锁，二次清理节流后解锁正常。
 3. 环境恢复：两处 TEMP-DIAG 补丁已还原（`git diff` 仅剩行尾噪音，已 checkout 还原），最终 APK 为
    干净构建；新登记 **ISSUE-P2-22**（Argon2 参数对话框「应用参数」无真实效果，见 ACTIVE_ISSUES）。
+
+---
+
+## §28 存量问题修复批次（2026-09-12）：P2-22 / P3-63 / P3-65 / P3-67
+
+> 本批次目标「修复存量问题并模拟器实测通过」：AVD `Pixel_10`（Google APIs / Android 16 / x86_64，
+> `emulator-5554`）全程实测。全量回归 `test --rerun-tasks --max-workers=1`：
+> **1391 例 / 0 失败 / 0 错误 / 13 跳过**（基线 1382 → 1391，新增 9 例）。
+
+### 28.1 ISSUE-P2-22：「Argon2 参数」对话框「应用参数」真实化（已整改闭环）
+
+- **整改**：`SettingsPreferencesController.setArgon2Parameters` 从「仅回写 UI 内存回显」改为
+  接入 `DatabaseSession.updateDatabaseMeta { … }` 更新活动库头变体字典 `I/M/P` 并立即
+  `DatabaseSession.save()`——写侧 `KdbxFile.save` 本就以保存时 `header.kdfParameters`
+  （含全新随机 salt）重派生加密密钥并写出新外层头，与官方 KeePass「KDF 参数保存时生效」
+  语义一致。UI 回显不再自持状态：会话 `databaseFlow` 重发后由 P2-19 建立的头映射通道统一下发。
+  无活动会话 / 库头非 Argon2 时如实 no-op（回显保持文件头真值，不产生假变更）。
+- **契约测试**：新增 `app/src/test/.../settings/Argon2ParametersApplyTest.kt`（真实
+  `DatabaseSession` + 真实时间轮询）：① 应用后内存头 `I/M/P` 与所选值一致；② 落盘文件以同一
+  主密码重开成功且头参数一致；③ 错误主密码**无法**解开（证明密钥按新参数真实重派生，非只改头）；
+  ④ 无活动会话时如实不生效。
+- **设备侧验证（字节级地面真值，对照整改前 `P: raw=02000000` 且头不重写的实测）**：
+  新建测试库 `p2test.kdbx`（Argon2id，默认 64MB·2轮·P2）→ 设置 → 密码库与加密 → Argon2 参数
+  → 选「4 线程」→ 应用参数 → `run-as` 取回 `files/p2test.kdbx` 解析外层头 KdfParameters
+  变体字典：**`P=4（UInt32）、M=67108864（64MB）、I=2、V=0x13`**，与所选值一致 ✅；
+  `am force-stop` 冷启动后以同一主密码解锁成功（重派生语义正确）✅，设置页回显
+  `64 MB · 2 轮 · P=4` 与文件头一致 ✅。
+
+### 28.2 ISSUE-P3-65：「完整性校验」区假开关如实禁用（已整改闭环）
+
+- **整改**（AC① 的「如实禁用」路径）：`DatabaseIntegrityCard` 两个开关（TAN 序列号 /
+  数据库 UUID）改为 `enabled=false` + checked 恒 false + 行降透明度（`SettingsToggleRow`
+  增加 `enabled` 形参），描述文案追加「（即将支持）」（中英双语）；整链移除无行为消费方的
+  假 setter（`SettingsPreferencesController` / `SettingsViewModel` / 导航图接线 /
+  `DatabaseSettingsScreen` 参数）及 `DatabaseConfigUiState`、`SettingsUiState` 中对应字段。
+- **设备侧验证**：`uiautomator dump` 确认两行文案带「即将支持」、`checkable="true"` 元素为 0；
+  对两开关位置注入点击后 re-dump 无任何 `checked` 变化（不可交互）✅。
+
+### 28.3 ISSUE-P3-67：锁库事件导航守卫恢复真实语义（已整改闭环）
+
+- **整改**：`KeePasskeyApp.kt` 的 `LaunchedEffect(autoLockManager)` 闭包改经
+  `rememberUpdatedState(currentRoute)` 读取实时路由（effect key 恒定，闭包捕获值不随导航更新，
+  此前恒捕获 `null` 使守卫恒真、已在解锁页时仍 `popUpTo(0)` 重复导航并清空已输入主密码）。
+- **设备侧验证**（`p2test2.kdbx`，熄屏自动锁定开启）：
+  - 场景①（非解锁路由锁库必达解锁页）：解锁进入库列表 → 顶栏「锁定密码库」→ 立即落在解锁页 ✅；
+  - 场景②（解锁页收到锁库事件不重建页面）：解锁页主密码框输入 15 位 → 电源键熄屏（触发
+    `triggerLock` 锁库事件）→ 唤醒 → 字段仍显示 `●●●●●●●●●●●●●●●`，**输入保留、无重建**
+    （修复前该场景守卫恒真会 `popUpTo(0)` 重建并清空输入）✅；
+  - 守卫恒真死代码消除由代码评审可证（`rememberUpdatedState` 语义）。
+  - 注：AC① 所述 JVM 侧导航契约测试——锁库守卫位于宿主 Activity 组合层，`app` 模块无
+    Compose UI 测试基建（AGENTS §6 已知限界），本批次以设备侧两场景实测替代覆盖。
+
+### 28.4 ISSUE-P3-63：库内容变更后列表不即时刷新——根因定位与修复（已整改闭环）
+
+- **根因定位（本批次完成，此前仅知「条件性」现象）**：设备复现 + 临时插桩（各输入流计数日志，
+  已移除）证明数据层全程正常——导入落库后 `combine` 链路持续输出 `entries=1`，屏幕仍渲染空态。
+  真因在**内存模型与落盘解析模型的父组语义不一致**：
+  1. `GroupPathResolver.resolve(空路径)` 返回 `groupId=null`（语义「根分组」），导入条目以
+     `parentGroupId=null` 落库；`SessionTreeEditor.updateOrAddEntry` 仅按 `null=根组` 决定
+     **放置位置**、不回写对象——会话内存条目长期持有 null 父组；
+  2. UI 投影按 `entry.groupId == 根组id` 过滤 → null 不匹配 → 根级条目（新建/导入）会话内不可见；
+  3. 冷启动重新解析 XML 时按**结构归属**还原父组 id（`KdbxXmlGroupReader`）→ 条目可见——
+     与「数据已持久化、仅内存列表陈旧、冷启动后完整可见」的全部实测现象吻合；
+  4. 同族问题波及分组：`VaultTemplateFactory` 以 `parentGroupId=null` 构造「模板」分组整组保存，
+     `updateOrAddGroup` 同样不回写 → 会话内不可见。
+- **整改（三处）**：
+  1. `SessionTreeEditor.updateOrAddEntry`：落树时把 `parentGroupId=null` 规范化为真实根组 id；
+  2. `SessionTreeEditor.updateOrAddGroup`：放置分支对组自身及整棵子树做同一规范化
+     （`normalizeParentRefs`——模板分组及其条目以 null 构造后整组保存的场景）；
+  3. `GroupPathResolver.resolve`：以**根分组真实 id** 为匹配锚点与空路径返回值（顺带修复：
+     此前顶级路径段以 null 为父锚点、永远匹配不上既有顶级分组，重复导入会建出同名重复分组），
+     使重复导入的去重键（`EntryKey.groupId`）与规范化后的内存模型一致。
+  - 规范化安全性与 P2-06 擦除契约兼容：`copy` 仅改 parentGroupId，字段 `ProtectedString`
+    实例引用不变，`clearSupersededSensitiveData` 的身份集合判定不会误擦。
+- **回归测试**：`database` 新增 `SessionTreeEditorParentNormalizationTest`（3 例：条目落根/
+  落子组/既有更新；分组整树规范化/显式父组不受影响）；`app` 新增 `GroupPathResolverTest`
+  （3 例：空路径返回根组真实 id/顶级路径按根组锚点匹配既有分组/未知顶级路径以根组 id 建组）。
+- **设备侧验证**（`p2test2.kdbx`，修复后构建）：
+  - 导入带分组路径的 XML（`云服务` 组 + 条目）→ 关闭报告 → 返回密码库 Tab → **「云服务」分组
+    与组内条目「P3-63 修复验证条目」无需任何重载即时显示**（修复前同场景实测空态）✅；
+  - 此前安装的「模板」分组（旧代码以 null 父组落库）在修复后亦正常显示 ✅。
+
+### 28.5 全量回归与过程留痕
+
+- 全量 `test --rerun-tasks --max-workers=1`（收尾后终跑）：**1393 例 / 0 失败 / 0 错误 /
+  13 跳过**（+11：Argon2ParametersApplyTest 2、SessionTreeEditorParentNormalizationTest 5、
+  GroupPathResolverTest 4；基线 1382 全数保留）。
+- 调查期间的临时插桩（`VaultListViewModel` 各输入流 `Log.d` 计数）已完成使命后**整体移除**，
+  工作树最终状态不含任何诊断代码（`LogHygieneTest` 全绿佐证）。
+- 设备侧测试账号均为一次性公开测试值（`p2test*.kdbx` / `TestP2-2026!`）。

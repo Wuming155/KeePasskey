@@ -55,8 +55,6 @@ fun DatabaseSettingsScreen(
     onEncryptionAlgorithmChange: (String) -> Unit = {},
     onKdfAlgorithmChange: (String) -> Unit = {},
     onArgon2ParametersChange: (iterations: Long, memoryMb: Long, parallelism: Int) -> Unit = { _, _, _ -> },
-    onTanExpiresOnUseToggle: (Boolean) -> Unit = {},
-    onCheckForDuplicateUuidsToggle: (Boolean) -> Unit = {},
     // M6 整改：真实 KDF 基准状态与触发（原按钮仅展示假完成消息）
     kdfBenchmarkState: KdfBenchmarkUiState? = null,
     onRunKdfBenchmark: () -> Unit = {},
@@ -215,12 +213,7 @@ fun DatabaseSettingsScreen(
             // 5. 完整性与高级规则 (KP2A 特性)
             item { SectionHeader(title = stringResource(R.string.dbset_section_integrity)) }
             item {
-                DatabaseIntegrityCard(
-                    tanExpiresOnUse = uiState.tanExpiresOnUse,
-                    onTanExpiresOnUseToggle = onTanExpiresOnUseToggle,
-                    checkForDuplicateUuids = uiState.checkForDuplicateUuids,
-                    onCheckForDuplicateUuidsToggle = onCheckForDuplicateUuidsToggle
-                )
+                DatabaseIntegrityCard()
             }
 
             // TASK-13 整改：导出/模板动作结果反馈（点击清除），真实动作的结果如实上浮

@@ -470,9 +470,9 @@
     <string name="dbset_keyfile_exported">密钥文件已导出</string>
     <string name="dbset_section_integrity">完整性校验</string>
     <string name="dbset_tan_title">TAN 序列号</string>
-    <string name="dbset_tan_desc">一次性验证码条目列表，使用后自动标记</string>
+    <string name="dbset_tan_desc">一次性验证码条目列表，使用后自动标记（即将支持）</string>
     <string name="dbset_uuid_title">数据库 UUID</string>
-    <string name="dbset_uuid_desc">数据库的唯一标识符，用于跨设备同步识别</string>
+    <string name="dbset_uuid_desc">数据库的唯一标识符，用于跨设备同步识别（即将支持）</string>
     <string name="dbset_cipher_dialog_title">选择加密算法</string>
     <string name="dbset_cipher_chacha_desc">ChaCha20 流密码，无 AES 硬件加速的设备上性能更佳</string>
     <string name="dbset_cipher_aes_desc">行业标准 AES-256，具备广泛硬件加速支持</string>

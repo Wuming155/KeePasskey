@@ -7,7 +7,9 @@ import com.keepasskey.core.result.KdbxResult
 /**
  * 分组路径解析结果。
  *
- * @param groupId 命中的叶子分组 id；`null` 表示根分组（无分组条目 / 整链创建失败后的安全回退）。
+ * @param groupId 命中的叶子分组 id；空路径（根分组）时返回**根分组的真实 id**（ISSUE-P3-63：
+ * 此前返回 null，与会话树「条目落树后携带真实父组 id」的规范化语义不一致，导致重复导入
+ * 根级条目时去重键错配）；整链创建失败后的安全回退时亦尽可能给出最深已解析分组 id。
  * @param creationFailed 解析过程中至少有一次分组创建失败（调用方据此记警告，不静默降级）。
  */
 internal data class GroupResolution(val groupId: String?, val creationFailed: Boolean)
@@ -33,9 +35,16 @@ internal class GroupPathResolver(
 
     private val known = existingGroups.toMutableList()
 
-    /** 解析完整路径；空路径直接返回根分组（`null`）。 */
+    /**
+     * 解析完整路径（ISSUE-P3-63 语义修正）。
+     *
+     * 自根分组起逐段匹配：根级路径段以**根分组真实 id** 为父锚点（分组投影中顶级分组的
+     * `parentId` 即根组 id，此前以 null 为起点导致根级既有分组永远匹配不上、重复导入
+     * 会建出同名重复分组）；空路径返回根分组的真实 id（未知根组时回退 null）。
+     */
     suspend fun resolve(path: List<String>): GroupResolution {
-        var parentId: String? = null
+        val rootId = known.firstOrNull { it.parentId == null }?.id
+        var parentId: String? = rootId
         var failed = false
         for (segment in path.take(ImportLimits.MAX_GROUP_PATH_DEPTH)) {
             val name = segment.trim()
