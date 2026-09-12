@@ -47,21 +47,100 @@
 
 ---
 
-## P2 中危缺陷与协议/测试缺口（0 项）
+## P2 中危缺陷与协议/测试缺口（4 项）
 
-> 当前无待办。**ISSUE-P2-23**（带密钥文件解锁后指纹快速解锁不可用，复合封印整改）于 2026-09-12
+> **历史批次**：**ISSUE-P2-23**（带密钥文件解锁后指纹快速解锁不可用，复合封印整改）于 2026-09-12
 > 整改归档，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §29.1；**ISSUE-P2-22**（「Argon2 参数」应用无
 > 真实效果）同日归档于 §28.1；P2-19 / P2-20 / P2-21 已于 §27 归档。
+> **新增（2026-09-12）**：ISSUE-P2-24 ~ P2-27 由「参考项目（KeePassDX / keepass2android / Monica）
+> 对比分析」产出，分属性能瓶颈 / 协议互操作 / 测试有效性缺口。
 
 ---
 
-## P3 低危问题、特性接线与体验优化（3 项）
+### ISSUE-P2-24（新登记）：大附件整库常驻内存，无独立磁盘缓存池（潜在 OOM）
+
+- **优先级**：P2（性能瓶颈 / 内存占用；大附件库存在 OOM 与卡顿风险）
+- **核实时间点与核实方式（2026-09-12）**：
+  1. Read `core/src/main/java/com/keepasskey/core/model/KdbxAttachment.kt`：`data: ByteArray` 为常驻内存字段
+     （第 13 行），`resolveData(binaryPool)` 仅做池内引用解析（第 20 行），无落盘路径；
+  2. 全仓检索未见 `BinaryCache` 等价的大附件磁盘缓存实现；
+  3. `AGENTS.md` §6 自承「KDBX 对象树仍整体驻留内存（解析已流式化）」。
+- **问题描述**：附件字节随对象树整体驻留内存；大附件（数十 MB 级）或库内存在多个附件时，
+  列表 / 详情 / 同步 / 写回全链路都会携带整批字节，存在 OOM 与 GC 压力。
+- **参考做法（据 `docs/references/KeePassDX-架构分析.md`）**：KeePassDX 以 `BinaryPool`（引用）+
+  `BinaryCache`（按需落盘 `cacheDir`）分离「逻辑引用」与「物理字节」，并配
+  `Limits.isMemorySufficientForBinary` 内存门槛保护。
+- **验收标准（待整改）**：① 超过阈值（建议 1 MiB，可配）的附件在读取 / 写回时走磁盘缓存，不整入内存；
+  ② 会话锁定 / 关闭时对称清理缓存目录；③ 缓存文件权限与 `SyncCache` 同基线（文件 0600 / 目录 0700）；
+  ④ 有回归用例证明「不改动 KDBX 字节语义」（去重与引用池一致性）。
+- **禁止**：以「宿主侧未复现 OOM」为由判定无需整改；把附件字节改为 `String` 中转。
+
+---
+
+### ISSUE-P2-25（新登记）：S3 上传 / 下载以整块 `ByteArray` 为载荷，无流式 / 分段
+
+- **优先级**：P2（性能瓶颈 / 内存占用）
+- **核实时间点与核实方式（2026-09-12）**：Read `sync/src/main/java/com/keepasskey/sync/s3/S3SyncProvider.kt`
+  ——`download(remotePath): Result<ByteArray>`（第 186 行）、`upload(..., data: ByteArray, ...)`（第 225-227 行）；
+  对照 Read `app/.../sync/SyncProviderResolver.kt:31-37` 显示 WebDAV 侧已有
+  `chunkedUploadEnabled` / `chunkSizeMb` 分块传输配置。
+- **问题描述**：S3 路径将整库字节一次性物化于内存（上传与下载皆是），与 WebDAV 的分块能力不对称；
+  库体积增长时存在 OOM 风险，失败后亦无法续传。
+- **参考做法（据 `docs/references/keepass2android-架构分析.md`）**：其 WebDAV / 对象存储路径以
+  事务化分块写入为主，避免整块物化。
+- **验收标准（待整改）**：① `SyncProvider` 增加流式接口（如 `uploadStream(InputStream)`，
+  默认实现可回落现有 `ByteArray` 以保持兼容）；② S3 走 `InputStream` 直传或 Multipart Upload；
+  ③ 大库（建议 ≥ 50 MiB 构造用例）同步不产生整库内存峰值；④ 保持既有 ETag / 条件写语义不变。
+- **禁止**：为省事关闭边界校验；以降低现有 ETag 条件写强度换取流式。
+
+---
+
+### ISSUE-P2-26（新登记）：云同步后端仅 WebDAV + S3 两类，协议覆盖窄
+
+- **优先级**：P2（协议互操作 / 功能覆盖）
+- **核实时间点与核实方式（2026-09-12）**：Read `app/.../ui/screens/settings/SettingsUiState.kt:13-19`
+  （`CloudSyncProvider` 枚举仅 `WEBDAV` / `S3_COMPATIBLE`）；Read `app/.../sync/SyncProviderResolver.kt:39-103`
+  （`resolveProvider()` 仅两个分支）；`sync/provider/` 下仅 `SyncProvider` 接口 + `webdav/` + `s3/`。
+- **问题描述**：无法覆盖 SFTP / FTP / Dropbox / OneDrive / Google Drive 等主流后端，用户迁移成本高。
+- **参考做法（据 `docs/references/keepass2android-架构分析.md`）**：`IFileStorage` 插件化抽象 +
+  协议前缀路由，覆盖 Local / FTP / WebDAV / ownCloud / Nextcloud / SFTP / Dropbox / Google Drive /
+  OneDrive / pCloud / Mega / SMB / content:// 等 12+。
+- **验收标准（待整改）**：① 按 `@IntoMap @StringKey` 重构 Provider 注册表（保持开闭，不改调用方）；
+  ② **首批实现 SFTP**（自建 NAS 用户群与现有 WebDAV 群体重叠、无需 OAuth）；③ SFTP 凭据复用现有
+  `SyncCredentialsStore` + Keystore 封印通道，用毕清零；④ 同步周期 / 冲突 / 防回滚等既有不变量对
+  SFTP 同样成立（复用 `SyncEngine`，不改语义）。
+- **禁止**：为新增后端绕过 `SyncProvider` 抽象直接调用网络栈；在设置页以「即将支持」占位冒充可用。
+
+---
+
+### ISSUE-P2-27（新登记）：app 侧自动填充结构解析缺真实 `AssistStructure` 快照 fixture 回归
+
+- **优先级**：P2（测试有效性缺口）
+- **核实时间点与核实方式（2026-09-12）**：`AGENTS.md` §6 明示「`app` / `sync` 模块无 `androidTest`
+  源集……涉及正则 / XML / 平台 API 的静态逻辑不能仅凭宿主单测判定在 Android 上可用」；并核对既有条目
+  ISSUE-P3-66（其范围为**真实系统服务接管后的端到端实测**，依赖外部环境）。
+- **问题描述**：`AutofillFieldScanner` / 表单解析等逻辑依赖 Android 运行时对象（`AssistStructure`），
+  当前仅宿主 JVM 覆盖，无法拦截「JVM 过、Android 挂」类缺陷（§24 / §26 已有先例）。
+  与 ISSUE-P3-66 **互补不重复**：本条聚焦**解析层**的真实快照 fixture 回归，P3-66 聚焦端到端链路。
+- **参考做法（据 `docs/references/keepass2android-架构分析.md`）**：以真实视图树 JSON fixture
+  （chrome / firefox / 银行类页面等十余个）做自动填充解析回归。
+- **验收标准（待整改）**：① 采集若干真实应用 / 浏览器的 `AssistStructure` 快照固化为 fixture
+  （脱敏，禁止含真实口令）；② 在 Android 运行时（instrumented 或等价）对字段扫描 / 匹配做回归断言；
+  ③ 覆盖用户名 / 密码 / OTP / 多字段 / 隐藏字段等关键形态；④ 用例失败可复现具体字段判定路径。
+- **禁止**：以宿主 JVM 单测冒充 Android 运行时验证；把真实用户表单明文写入 fixture 仓库。
+
+---
+
+## P3 低危问题、特性接线与体验优化（6 项）
 
 > **状态（2026-09-12）**：历史 P3 批次 **ISSUE-P3-01 ~ P3-68 除下列外部资源依赖型残余外已全部
-> 闭环并归档**，逐条实现细节与验收证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md)（§3 ~ §30）。
+> 闭环并归档**，逐条实现细节与验收证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md)（§3 ~ §31）。
 > 2026-09-12 存量修复批次闭环 P3-63 / P3-65 / P3-67（§28.2 ~ §28.4）；
 > **ISSUE-P3-68**（重试节流开关与自定义最长锁定时长）同日闭环归档（§29.2）；
-> **外部安全审计整改批次 P3-69 ~ P3-72** 同日闭环归档（§30）。
+> **外部安全审计整改批次 P3-69 ~ P3-72** 同日闭环归档（§30）；
+> **文档类存量整改批次 P3-75 / P3-77** 同日闭环归档（§31）。
+> **新增（2026-09-12）**：ISSUE-P3-73 ~ P3-77 由「参考项目（KeePassDX / keepass2android / Monica）
+> 对比分析」产出，属特性补齐与长期评估项（**非外部资源依赖**）。
 
 ---
 
@@ -155,6 +234,57 @@
   （覆盖下发前二次确认与 30 秒免重复确认两分支）；② 完成一次 Passkey 创建 + 站点断言端到端；
   ③ TOTP 通知渠道创建与点击行为验证；④ 以上均有设备侧取证（uiautomator dump / dumpsys）。
 - **禁止**：以宿主 JVM 单测覆盖替代设备侧端到端验证；在未实测时宣称「自动填充已验证可用」。
+
+---
+
+### ISSUE-P3-73（新登记）：导入 / 导出格式覆盖不足（导入 4 种、导出无 CSV / HTML）
+
+- **优先级**：P3（特性补齐；迁移与互操作）
+- **核实时间点与核实方式（2026-09-12）**：Read `app/.../data/importer/ImporterModule.kt:29-47`
+  ——`@IntoSet` 仅注册 KeePass XML / 浏览器 CSV / Bitwarden JSON / 1Password 1PUX 四个解析器；
+  Read `app/.../data/repository/VaultExportCoordinator.kt:29-55`——导出仅 `.kdbx` 字节、KeePass XML、
+  密钥文件，无 CSV / HTML。
+- **问题描述**：导入源与导出目标覆盖窄，限制从其他管理器迁移与向通用工具导出。
+- **参考做法（据 `docs/references/keepass2android-架构分析.md`）**：`DataExchange/Formats/` 覆盖
+  KeePass XML、多类 CSV、1Password、KeePass1/kdb 等极多格式。
+- **验收标准（待整改）**：① 借 `ImporterRegistry` 的 `@IntoSet` 开闭机制追加 LastPass / Chrome / Edge
+  等 CSV 解析器（不改调用方）；② 导出补通用 CSV（含明文风险强制二次确认，文案须明确「明文」）；
+  ③ 每个新解析器有单测（表头变体 / 字段缺失 / 转义）。
+- **禁止**：新增解析器绕过 `EntryImporter` 契约直接落库；明文导出不加风险确认。
+
+---
+
+### ISSUE-P3-74（新登记）：条目模板机制僵化（硬编码 5 个，不可自定义 / 导入）
+
+- **优先级**：P3（进阶特性接线）
+- **核实时间点与核实方式（2026-09-12）**：Read `app/.../data/repository/VaultTemplateFactory.kt`
+  ——`internal object`，`buildTemplateGroup()` 硬编码「网页登录 / 信用卡 / WiFi / 安全笔记 / SSH 密钥」
+  5 条，无外部模板加载入口。
+- **问题描述**：用户无法定义、保存或导入模板，亦无「从当前条目另存为模板」通道。
+- **参考做法（据 `docs/references/KeePassDX-架构分析.md`）**：`element/template/*`
+  （Template / TemplateEngine / TemplateBuilder / TemplateField）以 `CustomData` 承载模板定义，
+  支持模板字段继承与实例化。
+- **验收标准（待整改）**：① 模板定义以 `KdbxGroup.customData`（键前缀建议 `KeePasskey.Template.`）
+  持久化，跨端同步不丢；② 支持「从当前条目另存为模板」与从模板实例化；③ 实例化复用既有字段映射，
+  不引入第二套字段语义；④ 保留内置 5 个模板作为初始内容（幂等安装语义不变）。
+- **禁止**：把模板改成本地偏好存储（会破坏跨端同步与库自包含性）。
+
+---
+
+### ISSUE-P3-76（新登记）：密码 / 主密码输入未禁用输入法个性化学习
+
+- **优先级**：P3（低危隐私加固）
+- **核实时间点与核实方式（2026-09-12）**：全仓 `app/src/main` 检索 `IME_FLAG_NO_PERSONALIZED_LEARNING`
+  与 `InputMethodService` **零命中**；敏感输入现仅依赖 `KeyboardType.Password` 等常规配置。
+- **问题描述**：第三方输入法可能对用户输入做个性化学习 / 候选记忆，主密码与条目口令存在被输入法
+  词库记录的风险面。
+- **参考做法（据 `docs/references/keepass2android-架构分析.md`）**：`Util.SetNoPersonalizedLearning`
+  显式关闭输入法学习。
+- **验收标准（待整改）**：① 主密码、条目口令、生成器口令预览等**全部敏感输入路径**显式禁用个性化学习
+  （`EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING`，Compose 侧经 `PlatformImeOptions` 等机制下发）；
+  ② 有回归断言覆盖各敏感输入组件；③ 非敏感输入（如搜索框）行为不变。
+- **禁止**：仅在部分页面接线导致旁路；以自定义 `VisualTransformation` 冒充已关闭输入法学习
+  （两者防的不是同一威胁）。
 
 ---
 

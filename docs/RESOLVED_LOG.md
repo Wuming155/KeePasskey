@@ -39,6 +39,7 @@
 | §28 | 存量问题修复批次（快捷脱敏 / 关闭校验 / 外部存储清理） | ISSUE-P2-22 / P3-63 / P3-65 / P3-67 |
 | §29 | 用户报告修复批次（复合封印指纹解锁 / 重试节流可配置 / FLAG_SECURE 语义修订） | ISSUE-P2-23 / P3-68 |
 | §30 | 外部安全审计核实与整改批次（Wrapper 哈希 / 字节清零 / 扫码防截屏 / 许可证注释） | ISSUE-P3-69 ~ P3-72 |
+| §31 | 文档类存量整改批次（隐私政策 / 同步层威胁建模） | ISSUE-P3-75 / P3-77 |
 
 > 各批次验收证据（用例数 / 通过 / 失败 / 跳过）分别见 §2.22、§3.1、§4.1、§5、§6、§7、§8、§9、§10、§11、§12、§13、§14、§15、§16、§17、§18、§19、§20.3、§21.4、§22.9、§23.1、§24.3、§25.2、§26.3。
 
@@ -1444,3 +1445,53 @@ Rust 单测模块 `#[cfg(test)] mod tests` 之内**（测试模块起始行：`s
   含 v4 签名 `.idsig`）。
 - **合并清单核验**：release 合并清单已含 `.security.SecureCaptureActivity` 声明。
 - **关联提交**：本批次文档与代码为**同一次** `git commit`（提交主题以 `ISSUE-P3-69 ~ P3-72` 引用）。
+
+---
+
+## §31 文档类存量整改批次（2026-09-12）：P3-75 / P3-77
+
+> **来源**：`ACTIVE_ISSUES.md` 中「参考项目对比分析」产出的 P3 项。两条均属**文档/评估型**交付：
+> 不新增代码路径，结论与承诺须与代码事实逐条可核。
+
+### 31.1 ISSUE-P3-75：独立隐私政策文档 + noNet 构建变体评估
+
+- **交付物**：新增 [`docs/Privacy-Policy.md`](Privacy-Policy.md)（AC①、AC③）。
+  逐条列明并经代码核实：无遥测 / 分析 / 广告 / 崩溃上报 SDK（`app/build.gradle.kts` 依赖列表，全仓检索
+  `firebase`/`analytics`/`crashlytics` 等仅命中文案与供应链抑制文件）；网络访问仅限「用户启用的云同步」
+  与「默认关闭的 HIBP k-匿名查询」（`ExtendedSettings.breachCheckEnabled` 默认 `false`；
+  `SettingsHealthController` 关闭态零外联；`HibpRangeClient` 仅送 SHA-1 前 5 位）；全站 TLS-only
+  （`network_security_config.xml` + OkHttp TLS-only ConnectionSpec）；日志脱敏（`AppLog` release 仅留异常类名）。
+- **AC② 结论：评估后暂不实施 `productFlavors { noNet }`**，理由（见政策 §7）：
+  1. flavor 化会使 `assembleRelease` 产物由 `app-release.apk` 变为 `app-<flavor>-release.apk`，
+     直接违反 `AGENTS.md` §3.8 的稳定版产物路径契约并波及 CI；
+  2. 同步 / 泄露检测已深入导航、Hilt、WorkManager 与自动填充链路，flavor 裁剪易在「看似禁网、
+     实则留旁路」方向引入隐蔽缺陷；
+  3. 默认配置下本应用本就不联网，禁网变体几无额外保护收益。
+  替代路径已写入政策（如需硬性禁网，建议独立分支 / 渠道维护）。
+- **禁止项核对**：政策未写入任何与实现不符的承诺；noNet 结论为「评估不实施」而非「已实施」。
+
+### 31.2 ISSUE-P3-77：同步层记录级密钥承诺威胁建模
+
+- **交付物**：新增 [`docs/同步层记录级完整性威胁建模.md`](同步层记录级完整性威胁建模.md)（AC①、AC③）。
+  在 Assume Breach（云端不可信、无主密钥）模型下，拆分「跨记录 / 跨上下文置换」为
+  **条目置换 / 块级置换 / 跨路径整文件置换**三类，逐类给出既有机制的覆盖边界。
+- **关键结论**：
+  - KDBX 是**单体加密流**，条目非独立 AEAD 记录；块 HMAC 的**块索引并入块密钥**
+    （`BlockHmac.compute`：`HMAC_{SHA512(LE64(index)‖hmacKey64)}(LE64(index)‖LE32(size)‖data)`），
+    故 mdbx 所关注的 key-commitment 置换攻击面在 KDBX 模型中**不成立或已被覆盖**；
+  - **不引入**记录级 AEAD 承诺、**不改动 KDBX 字节布局**（避免破坏与 KeePass 2.x / KeePassXC 互操作，
+    亦为本条 AC 明令禁止）；
+  - **不明示引入**「远端路径 + 版本 / epoch + 内容哈希」MAC 绑定（AC② 条件未触发）：现有同步 MAC
+    认证对象是**本地**高水位状态文件（本地文件级攻击者不在模型内），对远端混淆无直接拦截力，
+    且「同内容多路径」是合法场景、绑定会引入误报；
+  - **残余风险（明示接受）**：跨路径整文件混淆为**低危**（不触及机密性 / 完整性），由内容可见异常与
+    三哈希 / 防回滚链共同限制；重评估触发条件（转 per-record 架构）已写入文档 §5。
+- **禁止项核对**：未改动 KDBX 字节布局；未照搬 mdbx 草稿规范作为交付基线（仅作方向参考）。
+
+### 31.3 批次验收证据（2026-09-12）
+
+- **单元测试**：`.\gradlew.bat test --rerun-tasks --max-workers=1` → **BUILD SUCCESSFUL**
+  （本批次为纯文档交付，未改动代码，沿用 1402 例基线）。
+- **稳定版构建**：`.\gradlew.bat assembleRelease` → **BUILD SUCCESSFUL**。产物完整路径：
+  `D:\GithubWorkplace\KeePasskey\app\build\outputs\apk\release\app-release.apk`。
+- **关联提交**：本批次文档与代码为**同一次** `git commit`（提交主题以 `ISSUE-P3-75 / P3-77` 引用）。
