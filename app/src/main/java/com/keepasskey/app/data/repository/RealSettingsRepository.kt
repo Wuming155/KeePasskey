@@ -108,7 +108,10 @@ class RealSettingsRepository @Inject constructor(
         showGeneratorTab = prefs[KEY_SHOW_GENERATOR_TAB] ?: true,
         // ISSUE-P3-04：上次成功解锁使用的密钥文件元数据（仅 Uri/显示名，非密钥材料）
         lastKeyFileUri = prefs[KEY_LAST_KEY_FILE_URI] ?: "",
-        lastKeyFileName = prefs[KEY_LAST_KEY_FILE_NAME] ?: ""
+        lastKeyFileName = prefs[KEY_LAST_KEY_FILE_NAME] ?: "",
+        // ISSUE-P3-68：重试节流开关与最长锁定时长（安全默认：开启 + 30 分钟）
+        unlockThrottleEnabled = prefs[KEY_UNLOCK_THROTTLE_ENABLED] ?: true,
+        unlockLockoutMaxSeconds = prefs[KEY_UNLOCK_LOCKOUT_MAX] ?: 1800
     )
 
     private suspend fun edit(block: (MutablePreferences) -> Unit) {
@@ -192,6 +195,19 @@ class RealSettingsRepository @Inject constructor(
         it.remove(KEY_LAST_KEY_FILE_NAME)
     }
 
+    /** ISSUE-P3-68：重试节流总开关（默认开启，安全默认不放松） */
+    override suspend fun setUnlockThrottleEnabled(enabled: Boolean) = edit {
+        it[KEY_UNLOCK_THROTTLE_ENABLED] = enabled
+    }
+
+    /** ISSUE-P3-68：最长锁定时长（秒），写入前 coerce 到合法域 [60, 86400] */
+    override suspend fun setUnlockLockoutMaxSeconds(seconds: Int) = edit {
+        it[KEY_UNLOCK_LOCKOUT_MAX] = seconds.coerceIn(
+            com.keepasskey.app.security.UnlockThrottleConfigProvider.MIN_LOCKOUT_SECONDS,
+            com.keepasskey.app.security.UnlockThrottleConfigProvider.MAX_LOCKOUT_SECONDS
+        )
+    }
+
     private companion object {
         private const val LEGACY_PREFS_NAME = "keepasskey_settings"
 
@@ -219,5 +235,8 @@ class RealSettingsRepository @Inject constructor(
         // ISSUE-P3-04：密钥文件「非密钥元数据」（SAF Uri 与显示名），不含任何密钥材料
         private val KEY_LAST_KEY_FILE_URI = stringPreferencesKey("last_key_file_uri")
         private val KEY_LAST_KEY_FILE_NAME = stringPreferencesKey("last_key_file_name")
+        // ISSUE-P3-68：解锁失败重试节流配置
+        private val KEY_UNLOCK_THROTTLE_ENABLED = booleanPreferencesKey("unlock_throttle_enabled")
+        private val KEY_UNLOCK_LOCKOUT_MAX = intPreferencesKey("unlock_lockout_max_seconds")
     }
 }

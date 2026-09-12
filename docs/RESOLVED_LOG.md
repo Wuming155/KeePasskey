@@ -1273,3 +1273,68 @@ Rust 单测模块 `#[cfg(test)] mod tests` 之内**（测试模块起始行：`s
 - 调查期间的临时插桩（`VaultListViewModel` 各输入流 `Log.d` 计数）已完成使命后**整体移除**，
   工作树最终状态不含任何诊断代码（`LogHygieneTest` 全绿佐证）。
 - 设备侧测试账号均为一次性公开测试值（`p2test*.kdbx` / `TestP2-2026!`）。
+
+---
+
+## §29 用户报告修复批次（2026-09-12）：P2-23 复合封印指纹解锁 / P3-68 重试节流可配置
+
+> 本批次来源为用户报告两项：「输入密码和密钥解锁后，重新打开不能使用指纹解锁」（P2-23）、
+> 「30 分钟后重试功能希望加开关与自定义时间」（P3-68）。全量回归
+> `test --rerun-tasks --max-workers=1`：**1407 例 / 0 失败 / 0 错误 / 13 跳过**
+> （基线 1393 → 1407，新增 14 例：UnlockThrottleManagerTest +4、BiometricSealedPayloadCodecTest +9、
+> UnlockViewModelBiometricAutoPromptTest +1）。
+
+### 29.1 ISSUE-P2-23：带密钥文件解锁后指纹（快速解锁）不可用——复合封印（已整改闭环）
+
+- **根因**：封印载荷格式只承载主密码（纯 UTF-8），`BiometricEnrollmentCoordinator.requestBiometricEnrollment`
+  对携带密钥文件的解锁**整体跳过封印**（`if (hasKeyFile()) return`）→ `BiometricCredentialStorage`
+  永无本库凭据 → 解锁页不提供指纹入口；且解封收尾 `completeBiometricUnlock` 仅以明文主密码调用
+  `unlockActiveDatabase(chars)`，即便封印也无法解开复合密钥库——属载荷格式能力缺失。
+- **整改**：
+  1. 新增 `BiometricSealedPayloadCodec`（unlock 包，纯 JVM 可测）：版本化帧格式
+     `魔数 "KPB1" | 版本 | 标志位(bit0=携带密钥文件) | 密码长度+UTF-8字节 | [密钥文件长度+字节]`；
+     解码对不带魔数的载荷回落**历史格式**（纯主密码）——存量纯密码封印凭据零迁移成本继续可用；
+     帧结构损坏 fail-fast，由既有「清陈旧凭据 → 下次主密码解锁重新封印」死循环恢复通道承接；
+  2. `BiometricEnrollmentCoordinator`：移除带密钥文件即跳过的守卫，`hasKeyFile: () -> Boolean`
+     改为 `keyFileBytes: () -> ByteArray?`（封印前快照克隆 + 编码后立即清零），
+     复合因子一并封印；Keystore 密钥、强生物识别授权门控（P1-08 基线）与登记弹窗流程不变；
+  3. `BiometricUnlockCoordinator.completeBiometricUnlock`：载荷经编解码器解析后以
+     **两因子**送达既有 `unlockActiveDatabase(password, keyFileData)` 管线，不新造解锁通道；
+  4. 敏感数据铁律保持：全程 `ByteArray`/`CharArray`，UTF-8 中间缓冲与解码产物用毕 `fill(0)`；
+     密钥文件字节与主密码同受硬件 Keystore + `AUTH_BIOMETRIC_STRONG` 门控，不扩大攻击面。
+- **验收证据（JVM 单测）**：
+  - `BiometricSealedPayloadCodecTest`（9 例）：复合帧往返（含 emoji 主密码 + 257 字节密钥文件）、
+    纯密码往返、魔数/版本/标志位布局、**历史格式兼容解析**、未知版本与长度越界 fail-fast、
+    `wipe` 清零语义、空密钥文件按未携带语义、decode 不改调用方数组；
+  - `UnlockViewModelBiometricAutoPromptTest` 新增「复合封印载荷解封后以两因子送达既有解锁管线」：
+    生产同源编解码器 + 真实 JDK AES-GCM 封印 → `handleBiometricResult(Success)` →
+    Recording 仓库断言主密码与密钥文件因子**逐字节原样**送达且发出解锁成功事件；
+    既有「生物识别成功后经既有解锁管线解锁」用例（历史格式载荷）继续全绿 = 向后兼容回归锁；
+  - 登记链路的设备侧弹窗/封印环节依赖 `FragmentActivity` + 硬件 Keystore（AGENTS §6 已知限界，
+    `app` 模块无 androidTest 源集），JVM 单测对两条路径均 fail-closed 无法区分——整改有效性由
+    「守卫移除（代码可证）+ 载荷编解码/解封链路全绿（数据通路可证）」共同承载；
+    真机指纹端到端待补设备侧实测（与 §6 已知限界同源）。
+
+### 29.2 ISSUE-P3-68：解锁失败重试锁定可配置——总开关 + 自定义最长锁定时长（已整改闭环）
+
+- **整改**：
+  1. `UserSettings` 新增 `unlockThrottleEnabled`（默认 **true**，安全默认不放松）与
+     `unlockLockoutMaxSeconds`（默认 **1800**，合法域 [60, 86400]，仓库层写入 coerce）；
+     `SettingsRepository` / `RealSettingsRepository`（DataStore 键） / `FakeSettingsRepository` 同步接线；
+  2. `UnlockThrottlePolicy.backoffMillisFor` 增加 `ThrottleConfig` 参数（缺省值 = 现行编译期常量
+     行为，既有调用与测试零改动）：开关关闭恒不锁定，封顶值随配置；
+  3. 新增 `ThrottleConfigSource` 接口 + `UnlockThrottleConfigProvider`（进程级单例，独立协程收集
+     设置流缓存 `@Volatile` 快照，节流同步路径零挂起读取）；`UnlockThrottleManager` 构造注入
+     （nullable 缺省 null 仅用于 JVM 单测；生产经 `SecurityModule` `@Binds` 绑定）——
+     **主解锁（`UnlockViewModel`）与子库挂载（`ChildDatabaseSessionManager`）两条路径自动同时生效**；
+  4. 记录完整性 fail-closed 处置（ISSUE-P3-54 防篡改语义）**不受开关影响**，恒按上限锁定；
+  5. 设置页「设备解锁与安全 → 自动锁定规则」新增「解锁失败重试限制」开关（关闭时长行随之隐藏）
+     与「最长锁定时长」单选弹窗（1/5/15/30 分钟、1/6/24 小时），中英文案齐全；语义为指数退避
+     的**封顶值**（连续失败越多锁得越久，至多此时长），弹窗描述文案已明示。
+- **验收证据（JVM 单测，`UnlockThrottleManagerTest` 新增 4 例）**：
+  - 开关关闭：超阈值多次失败不锁定、预置锁定态被放行（计数保留）；
+  - 开关重开：再失败一次即按累计次数重新进入退避锁定；
+  - 自定义封顶 60s：第 5 次失败退避 30s（未触顶）、第 6 次起压至 60s（原策略 120s），
+    管理器侧 `registerFailure` 同步生效；
+  - 完整性失效（`integrityIntact=false`）在开关关闭时仍 fail-closed 锁定（防篡改不可旁路）；
+  - 全量回归 1407 例全绿（见批次头），既有节流用例（缺省配置路径）零改动全数保留。

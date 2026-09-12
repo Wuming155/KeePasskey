@@ -555,6 +555,12 @@
     <string name="sec_nav_back_sub">在主页按下返回键时立即锁定</string>
     <string name="sec_autolock_time_title">自动锁定倒计时</string>
     <string name="sec_autolock_time_current">当前：%1$s</string>
+    <string name="sec_throttle_title">解锁失败重试限制</string>
+    <string name="sec_throttle_sub">连续多次输错主密码后临时锁定，抵御暴力破解（关闭后可无限次重试）</string>
+    <string name="sec_throttle_time_title">最长锁定时长</string>
+    <string name="sec_throttle_time_current">当前：%1$d 分钟</string>
+    <string name="sec_throttle_minutes_value">%1$d 分钟</string>
+    <string name="sec_throttle_dialog_desc">连续输错次数越多锁定越久，至多不超过此处选择的时长。</string>
     <string name="sec_clear_input_title">自动清空输入</string>
     <string name="sec_clear_input_sub">复制的密码与验证码在超时后自动清除</string>
     <string name="sec_section_leak">隐私泄露防护</string>

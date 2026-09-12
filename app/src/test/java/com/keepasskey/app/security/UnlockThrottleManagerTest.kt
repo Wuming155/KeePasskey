@@ -139,4 +139,85 @@ class UnlockThrottleManagerTest {
         assertEquals(UnlockThrottlePolicy.FAILURE_THRESHOLD, persisted.failureCount)
         assertEquals(now + UnlockThrottlePolicy.MAX_BACKOFF_MS, persisted.lockoutUntilEpochMs)
     }
+
+    // ── ISSUE-P3-68：运行时配置（总开关 / 自定义封顶） ──────────────────
+
+    private fun sourceOf(config: ThrottleConfig) = object : ThrottleConfigSource {
+        override val current: ThrottleConfig = config
+    }
+
+    @Test
+    fun `开关关闭时失败不再触发锁定且既有锁定被放行`() {
+        val store = FakeUnlockThrottleStore()
+        val manager = UnlockThrottleManager(store, sourceOf(ThrottleConfig(enabled = false)))
+        val now = 40_000_000L
+
+        // 超阈值多次失败：不再锁定
+        var gate: ThrottleGate = ThrottleGate.Allowed(0)
+        repeat(UnlockThrottlePolicy.FAILURE_THRESHOLD + 3) {
+            gate = manager.registerFailure(dbId, now)
+        }
+        assertTrue("开关关闭时失败不得锁定", gate is ThrottleGate.Allowed)
+        assertEquals(UnlockThrottlePolicy.FAILURE_THRESHOLD + 3, gate.failureCount)
+
+        // 预置锁定态（开关打开期间留下）在关闭后同样放行
+        store.seed(dbId, UnlockThrottleRecord(failureCount = 9, lockoutUntilEpochMs = now + 600_000L))
+        val seededGate = manager.gate(dbId, now)
+        assertTrue("开关关闭时应忽略既有锁定截止", seededGate is ThrottleGate.Allowed)
+        assertEquals(9, seededGate.failureCount)
+    }
+
+    @Test
+    fun `开关重新打开后节流恢复生效`() {
+        val store = FakeUnlockThrottleStore()
+        val source = object : ThrottleConfigSource {
+            override var current: ThrottleConfig = ThrottleConfig(enabled = false)
+        }
+        val manager = UnlockThrottleManager(store, source)
+        val now = 50_000_000L
+
+        repeat(UnlockThrottlePolicy.FAILURE_THRESHOLD + 3) { manager.registerFailure(dbId, now) }
+        assertTrue(manager.gate(dbId, now) is ThrottleGate.Allowed)
+
+        // 开关恢复后再失败一次：按既有计数（含关闭期间累加的次数）重新进入退避锁定
+        source.current = ThrottleConfig(enabled = true)
+        val gate = manager.registerFailure(dbId, now)
+        assertTrue("开关恢复后应重新进入锁定期", gate is ThrottleGate.Locked)
+        assertTrue(manager.gate(dbId, now) is ThrottleGate.Locked)
+    }
+
+    @Test
+    fun `自定义封顶时长生效于退避策略`() {
+        val capMs = 60_000L
+        // 60 秒封顶：5 次失败退避 30 秒（未触顶），6 次即被压到 60 秒（原策略会到 120 秒）
+        assertEquals(30_000L, UnlockThrottlePolicy.backoffMillisFor(5, ThrottleConfig(maxBackoffMs = capMs)))
+        assertEquals(capMs, UnlockThrottlePolicy.backoffMillisFor(6, ThrottleConfig(maxBackoffMs = capMs)))
+        assertEquals(capMs, UnlockThrottlePolicy.backoffMillisFor(50, ThrottleConfig(maxBackoffMs = capMs)))
+
+        // 管理器侧：注入自定义封顶后 registerFailure 按新上限锁定
+        val store = FakeUnlockThrottleStore()
+        val manager = UnlockThrottleManager(store, sourceOf(ThrottleConfig(maxBackoffMs = capMs)))
+        val now = 60_000_000L
+
+        var gate: ThrottleGate = ThrottleGate.Allowed(0)
+        repeat(UnlockThrottlePolicy.FAILURE_THRESHOLD + 1) { gate = manager.registerFailure(dbId, now) }
+        assertTrue(gate is ThrottleGate.Locked)
+        assertEquals(capMs, (gate as ThrottleGate.Locked).remainingMs)
+    }
+
+    @Test
+    fun `完整性failClosed不受开关关闭影响`() {
+        val store = FakeUnlockThrottleStore()
+        val manager = UnlockThrottleManager(store, sourceOf(ThrottleConfig(enabled = false)))
+        val now = 70_000_000L
+        store.seed(
+            dbId,
+            UnlockThrottleRecord(failureCount = 0, lockoutUntilEpochMs = 0L, integrityIntact = false)
+        )
+
+        val gate = manager.gate(dbId, now)
+
+        assertTrue("防篡改语义不得被用户开关旁路", gate is ThrottleGate.Locked)
+        assertEquals(UnlockThrottlePolicy.MAX_BACKOFF_MS, (gate as ThrottleGate.Locked).remainingMs)
+    }
 }

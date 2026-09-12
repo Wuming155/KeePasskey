@@ -47,7 +47,11 @@ data class UserSettings(
     // （ExtendedSettings.rememberKeyFileLocation，设置页「密钥文件策略」）控制，
     // 偏好关闭 / 授权失效时调用方须清除本记录，不得残留过期 Uri。
     val lastKeyFileUri: String = "",
-    val lastKeyFileName: String = ""
+    val lastKeyFileName: String = "",
+    // ISSUE-P3-68：解锁失败重试节流总开关（默认 true，安全默认不放松）
+    val unlockThrottleEnabled: Boolean = true,
+    // ISSUE-P3-68：重试退避的最长锁定时长（秒，默认 1800 = 30 分钟；合法域 [60, 86400]）
+    val unlockLockoutMaxSeconds: Int = 1800
 )
 
 /**
@@ -88,4 +92,10 @@ interface SettingsRepository {
      * 或本次解锁没有使用密钥文件时调用，杜绝过期 Uri 在下次冷启动被误恢复。
      */
     suspend fun clearRememberedKeyFile()
+
+    /** ISSUE-P3-68：解锁失败重试节流总开关（关闭后失败不再触发退避锁定） */
+    suspend fun setUnlockThrottleEnabled(enabled: Boolean)
+
+    /** ISSUE-P3-68：重试退避的最长锁定时长（秒；仓库层负责 coerce 到合法域 [60, 86400]） */
+    suspend fun setUnlockLockoutMaxSeconds(seconds: Int)
 }

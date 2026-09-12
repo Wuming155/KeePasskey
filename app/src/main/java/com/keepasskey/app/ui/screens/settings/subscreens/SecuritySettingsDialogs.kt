@@ -166,6 +166,76 @@ internal fun ClipboardTimeoutDialog(
 }
 
 /**
+ * ISSUE-P3-68：解锁失败重试的**最长锁定时长**选择弹窗。
+ *
+ * 语义为指数退避的封顶值（连续失败越多锁得越久，至多此时长），非固定锁定时长。
+ * 备选项以分钟格式化（[R.string.sec_throttle_minutes_value]），任意自定义值无需枚举标签资源。
+ */
+@Composable
+internal fun LockoutMaxDurationDialog(
+    selectedSeconds: Int,
+    onSelect: (Int) -> Unit,
+    onDismiss: () -> Unit
+) {
+    // (秒值) —— 1 / 5 / 15 / 30 分钟、1 / 6 / 24 小时；域界见 UnlockThrottleConfigProvider
+    val lockoutOptions = listOf(60, 300, 900, 1800, 3600, 21600, 86400)
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = stringResource(R.string.sec_throttle_time_title),
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+            )
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    text = stringResource(R.string.sec_throttle_dialog_desc),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                lockoutOptions.forEach { seconds ->
+                    val isSelected = selectedSeconds == seconds
+                    val label = stringResource(R.string.sec_throttle_minutes_value, seconds / 60)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                onSelect(seconds)
+                                onDismiss()
+                            }
+                            .padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(
+                            selected = isSelected,
+                            onClick = {
+                                onSelect(seconds)
+                                onDismiss()
+                            }
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = label,
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                            )
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.btn_cancel))
+            }
+        }
+    )
+}
+
+/**
  * ISSUE-P2-09 验收标准 1：关闭「禁止截屏与录屏」的风险确认（确认后才真正回调关闭）
  */
 @Composable

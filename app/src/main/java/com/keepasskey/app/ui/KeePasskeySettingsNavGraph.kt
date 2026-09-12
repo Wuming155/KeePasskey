@@ -157,6 +157,8 @@ internal fun NavGraphBuilder.keepasskeySettingsNavGraph(
             onAutoClearClipboardToggle = settingsViewModel::setAutoClearClipboard,
             onAutoLockTimeoutChange = settingsViewModel::setAutoLockTimeout,
             onClipboardTimeoutChange = settingsViewModel::setClipboardTimeout,
+            onUnlockThrottleToggle = settingsViewModel::setUnlockThrottleEnabled,
+            onUnlockLockoutMaxChange = settingsViewModel::setUnlockLockoutMaxSeconds,
             onLockWhenScreenOffToggle = settingsViewModel::setLockWhenScreenOff,
             onLockWhenNavigateBackToggle = settingsViewModel::setLockWhenNavigateBack,
             onClearPasswordOnLeaveToggle = settingsViewModel::setClearPasswordOnLeave,

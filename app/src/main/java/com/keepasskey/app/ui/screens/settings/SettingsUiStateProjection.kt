@@ -155,6 +155,9 @@ internal fun buildSettingsUiState(
     rememberRecentFiles = extState.rememberRecentFiles,
     rememberKeyFileLocation = extState.rememberKeyFileLocation,
     showKillAppOption = extState.showKillAppOption,
+    // ISSUE-P3-68：重试节流开关与最长锁定时长（仓库直写项，userSettings 为单一真相源）
+    unlockThrottleEnabled = userSettings.unlockThrottleEnabled,
+    unlockLockoutMaxSeconds = userSettings.unlockLockoutMaxSeconds,
 
     // 5. 外观与显示偏好
     themeMode = userSettings.themeMode,

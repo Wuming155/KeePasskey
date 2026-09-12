@@ -26,6 +26,7 @@ import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -135,9 +136,11 @@ class UnlockViewModelBiometricAutoPromptTest {
         }
     }
 
-    /** 记录解封后送达仓库的主密码，用于断言生物识别成功确实走既有解锁管线（仅测试用） */
+    /** 记录解封后送达仓库的主密码与密钥文件因子，用于断言生物识别成功确实走既有解锁管线（仅测试用） */
     private class RecordingVaultRepository(private val delegate: VaultRepository) : VaultRepository by delegate {
         var lastUnlockPassword: String? = null
+            private set
+        var lastUnlockKeyFileData: ByteArray? = null
             private set
 
         override suspend fun unlockActiveDatabase(
@@ -146,6 +149,7 @@ class UnlockViewModelBiometricAutoPromptTest {
             readOnly: Boolean
         ): KdbxResult<Unit> {
             lastUnlockPassword = String(passwordChars)
+            lastUnlockKeyFileData = keyFileData?.copyOf()
             return delegate.unlockActiveDatabase(passwordChars, keyFileData, readOnly)
         }
     }
@@ -370,6 +374,53 @@ class UnlockViewModelBiometricAutoPromptTest {
 
         assertTrue("生物识别成功后必须发出解锁成功事件", unlocked)
         assertEquals("解封出的主密码必须送达既有解锁管线", secret, repository.lastUnlockPassword)
+        assertFalse(viewModel.uiState.value.isLoading)
+    }
+
+    /**
+     * ISSUE-P2-23 验收标准 ③：复合封印载荷（主密码 + 密钥文件）解封后，
+     * 两因子必须**原样**送达既有 `unlockActiveDatabase` 管线——
+     * 「带密钥文件解锁后指纹可用」的数据通路证明。
+     */
+    @Test
+    fun `复合封印载荷解封后以两因子送达既有解锁管线`() = runTest {
+        val secret = "Composite#Pass✓"
+        val keyFile = ByteArray(96) { (it * 11 + 5).toByte() }
+        // 以生产同源编解码器构造复合载荷明文，再以真实 JDK AES-GCM 封印
+        val payload = BiometricSealedPayloadCodec.encode(secret.toCharArray(), keyFile)
+        val key = KeyGenerator.getInstance("AES").apply { init(256) }.generateKey()
+        val encryptCipher = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.ENCRYPT_MODE, key) }
+        val iv = encryptCipher.iv
+        val sealedCiphertext = encryptCipher.doFinal(payload)
+        payload.fill(0)
+
+        val storage = InMemorySealedCredentialStore().also {
+            it.storage.saveEncryptedCredential(activeDbId, iv, sealedCiphertext)
+        }
+        val repository = RecordingVaultRepository(FakeVaultRepository())
+        val viewModel = createViewModel(enabledSettings(), storage.storage, repository)
+
+        var unlocked = false
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            viewModel.events.collect { event -> if (event is UnlockEvent.UnlockSuccess) unlocked = true }
+        }
+        testScheduler.runCurrent()
+        assertTrue(viewModel.onBiometricAutoPromptRequested(null))
+
+        val decryptCipher = Cipher.getInstance("AES/GCM/NoPadding").apply {
+            init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(128, iv))
+        }
+        viewModel.handleBiometricResult(
+            BiometricResult.Success(decryptCipher),
+            storage.storage,
+            activeDbId,
+            sealedCiphertext
+        )
+        testScheduler.advanceUntilIdle()
+
+        assertTrue("复合载荷解封后必须发出解锁成功事件", unlocked)
+        assertEquals("主密码因子必须原样送达", secret, repository.lastUnlockPassword)
+        assertArrayEquals("密钥文件因子必须原样送达", keyFile, repository.lastUnlockKeyFileData)
         assertFalse(viewModel.uiState.value.isLoading)
     }
 

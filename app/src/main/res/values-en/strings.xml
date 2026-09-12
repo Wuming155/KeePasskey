@@ -548,6 +548,12 @@
     <string name="sec_nav_back_sub">Lock immediately when back is pressed on the home screen</string>
     <string name="sec_autolock_time_title">Auto-lock countdown</string>
     <string name="sec_autolock_time_current">Current: %1$s</string>
+    <string name="sec_throttle_title">Unlock retry throttling</string>
+    <string name="sec_throttle_sub">Temporarily lock the vault after repeated wrong master passwords to resist brute force (turn off for unlimited retries)</string>
+    <string name="sec_throttle_time_title">Maximum lockout duration</string>
+    <string name="sec_throttle_time_current">Current: %1$d min</string>
+    <string name="sec_throttle_minutes_value">%1$d min</string>
+    <string name="sec_throttle_dialog_desc">Lockout grows with consecutive failures, capped at the duration chosen here.</string>
     <string name="sec_clear_input_title">Auto-clear input</string>
     <string name="sec_clear_input_sub">Copied passwords and codes are cleared automatically</string>
     <string name="sec_section_leak">Leak protection</string>

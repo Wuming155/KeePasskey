@@ -17,7 +17,6 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import java.nio.ByteBuffer
 import javax.crypto.Cipher
 
 /**
@@ -308,21 +307,24 @@ internal class BiometricUnlockCoordinator(
     }
 
     /**
-     * 解封出主密码后的解锁收尾（ISSUE-P3-01 可测性拆分）：
-     * 字节 → `CharArray` → 既有 [VaultRepository.unlockActiveDatabase] 管线，成功即发解锁事件。
-     * 全程 `ByteArray` / `CharArray` 承载，用毕在 `finally` 中显式清零，绝不落地为 `String`。
+     * 解封出凭据后的解锁收尾（ISSUE-P3-01 可测性拆分 / ISSUE-P2-23 复合载荷）：
+     * 载荷经 [BiometricSealedPayloadCodec] 解析（v1 复合帧 = 主密码 + 可选密钥文件；
+     * 不带魔数回落历史格式 = 纯主密码）→ 既有 [VaultRepository.unlockActiveDatabase]
+     * 管线（两因子原样送达），成功即发解锁事件。全程 `ByteArray` / `CharArray` 承载，
+     * 用毕在 `finally` 中显式清零，绝不落地为 `String`。
+     * 帧结构损坏（异常抛出）由调用方按「凭据陈旧」清除并引导重新封印。
      */
     internal suspend fun completeBiometricUnlock(
         decryptedBytes: ByteArray,
         storage: BiometricCredentialStorage,
         dbId: String
     ) {
-        // P1-13 整改：精确按 CharBuffer.remaining() 拷贝字符，杜绝后备数组尾零残留导致非 ASCII 主密码解锁失败
-        val charBuf = Charsets.UTF_8.decode(ByteBuffer.wrap(decryptedBytes))
-        val chars = CharArray(charBuf.remaining())
-        charBuf.get(chars)
+        val payload = BiometricSealedPayloadCodec.decode(decryptedBytes)
         try {
-            when (val unlockResult = vaultRepository.unlockActiveDatabase(chars)) {
+            when (val unlockResult = vaultRepository.unlockActiveDatabase(
+                payload.passwordChars,
+                keyFileData = payload.keyFileData
+            )) {
                 is KdbxResult.Success -> {
                     uiState.update {
                         it.copy(
@@ -335,7 +337,7 @@ internal class BiometricUnlockCoordinator(
                 }
                 is KdbxResult.Failure -> {
                     // 生物识别已授权且密文成功解密，却解库失败：
-                    // 极可能是主密码已变更导致入库凭据陈旧（死循环态）。
+                    // 极可能是主密码已变更（或密钥文件因子更换）导致入库凭据陈旧（死循环态）。
                     // 清除陈旧凭据，下次主密码解锁将自动重新登记。
                     storage.clearCredential(dbId)
                     uiState.update {
@@ -348,7 +350,7 @@ internal class BiometricUnlockCoordinator(
                 }
             }
         } finally {
-            chars.fill('0')
+            payload.wipe()
             decryptedBytes.fill(0)
         }
     }

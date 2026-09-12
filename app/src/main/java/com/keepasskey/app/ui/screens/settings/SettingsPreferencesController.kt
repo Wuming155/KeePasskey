@@ -282,6 +282,20 @@ internal class SettingsPreferencesController(
         }
     }
 
+    /** ISSUE-P3-68：解锁失败重试节流总开关（仓库直写项，UI 回显经设置流投影） */
+    fun setUnlockThrottleEnabled(enabled: Boolean) {
+        scope.launch {
+            settingsRepository.setUnlockThrottleEnabled(enabled)
+        }
+    }
+
+    /** ISSUE-P3-68：重试退避的最长锁定时长（秒；仓库层 coerce 合法域） */
+    fun setUnlockLockoutMaxSeconds(seconds: Int) {
+        scope.launch {
+            settingsRepository.setUnlockLockoutMaxSeconds(seconds)
+        }
+    }
+
     // ========== 仓库直写偏好 ==========
     fun setAppLanguage(language: AppLanguage) {
         scope.launch {

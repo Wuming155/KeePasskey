@@ -276,6 +276,9 @@ class SettingsViewModel @Inject constructor(
     fun runKdfBenchmark() = kdfBenchmarkController.run()
     fun setAutoLockTimeout(seconds: Int) = preferences.setAutoLockTimeout(seconds)
     fun setClipboardTimeout(seconds: Int) = preferences.setClipboardTimeout(seconds)
+    // ISSUE-P3-68：解锁失败重试节流开关与最长锁定时长
+    fun setUnlockThrottleEnabled(enabled: Boolean) = preferences.setUnlockThrottleEnabled(enabled)
+    fun setUnlockLockoutMaxSeconds(seconds: Int) = preferences.setUnlockLockoutMaxSeconds(seconds)
     fun setCredentialProviderEnabled(enabled: Boolean) = preferences.setCredentialProviderEnabled(enabled)
     fun setPasskeySupportEnabled(enabled: Boolean) = preferences.setPasskeySupportEnabled(enabled)
     fun setAutofillServiceEnabled(enabled: Boolean) = preferences.setAutofillServiceEnabled(enabled)

@@ -107,4 +107,16 @@ class FakeSettingsRepository() : SettingsRepository {
     override suspend fun clearRememberedKeyFile() {
         settingsFlow.update { it.copy(lastKeyFileUri = "", lastKeyFileName = "") }
     }
+
+    /** ISSUE-P3-68：重试节流开关入内存流（与生产 DataStore 语义一致） */
+    override suspend fun setUnlockThrottleEnabled(enabled: Boolean) {
+        settingsFlow.update { it.copy(unlockThrottleEnabled = enabled) }
+    }
+
+    /** ISSUE-P3-68：最长锁定时长入内存流（与生产一致的 coerce 域） */
+    override suspend fun setUnlockLockoutMaxSeconds(seconds: Int) {
+        settingsFlow.update {
+            it.copy(unlockLockoutMaxSeconds = seconds.coerceIn(60, 24 * 60 * 60))
+        }
+    }
 }

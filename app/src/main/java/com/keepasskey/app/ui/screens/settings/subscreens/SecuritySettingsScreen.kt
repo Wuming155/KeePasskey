@@ -20,6 +20,7 @@ import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.LockClock
 import androidx.compose.material.icons.filled.PowerSettingsNew
+import androidx.compose.material.icons.filled.Replay
 import androidx.compose.material.icons.filled.ScreenLockPortrait
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.VisibilityOff
@@ -62,6 +63,8 @@ fun SecuritySettingsScreen(
     onAutoClearClipboardToggle: (Boolean) -> Unit,
     onAutoLockTimeoutChange: (Int) -> Unit = {},
     onClipboardTimeoutChange: (Int) -> Unit = {},
+    onUnlockThrottleToggle: (Boolean) -> Unit = {},
+    onUnlockLockoutMaxChange: (Int) -> Unit = {},
     onLockWhenScreenOffToggle: (Boolean) -> Unit = {},
     onLockWhenNavigateBackToggle: (Boolean) -> Unit = {},
     onClearPasswordOnLeaveToggle: (Boolean) -> Unit = {},
@@ -74,10 +77,14 @@ fun SecuritySettingsScreen(
 ) {
     var showAutoLockDialog by remember { mutableStateOf(false) }
     var showClipboardDialog by remember { mutableStateOf(false) }
+    // ISSUE-P3-68：解锁失败重试最长锁定时长选择弹窗
+    var showLockoutMaxDialog by remember { mutableStateOf(false) }
     // ISSUE-P2-09 验收标准 1：关闭「禁止截屏与录屏」前的风险确认态
     var showFlagSecureRiskDialog by remember { mutableStateOf(false) }
     val autoLockLabel = stringResource(autoLockTimeoutLabelRes(uiState.autoLockTimeoutSeconds))
     val clipboardLabel = stringResource(clipboardTimeoutLabelRes(uiState.clipboardTimeoutSeconds))
+    // ISSUE-P3-68：最长锁定时长以「分钟」格式化呈现（任意自定义值无需枚举标签资源）
+    val lockoutMinutes = uiState.unlockLockoutMaxSeconds / 60
     // ISSUE-P2-08：仅「可疑 / 已妥协」两档需要明确风险提示（未判定不等于已判定为风险）
     val integrityLevel = integrityReport?.level
         ?.takeIf { it == RuntimeRiskLevel.ELEVATED || it == RuntimeRiskLevel.COMPROMISED }
@@ -188,6 +195,27 @@ fun SecuritySettingsScreen(
                             subtitle = stringResource(R.string.sec_autolock_time_current, autoLockLabel),
                             onClick = { showAutoLockDialog = true }
                         )
+
+                        // ISSUE-P3-68：解锁失败重试节流（总开关 + 自定义最长锁定时长）
+                        SecuritySwitchRow(
+                            icon = Icons.Default.Replay,
+                            title = stringResource(R.string.sec_throttle_title),
+                            subtitle = stringResource(R.string.sec_throttle_sub),
+                            checked = uiState.unlockThrottleEnabled,
+                            onCheckedChange = onUnlockThrottleToggle
+                        )
+
+                        if (uiState.unlockThrottleEnabled) {
+                            SecurityClickableRow(
+                                icon = Icons.Default.Replay,
+                                title = stringResource(R.string.sec_throttle_time_title),
+                                subtitle = stringResource(
+                                    R.string.sec_throttle_time_current,
+                                    lockoutMinutes
+                                ),
+                                onClick = { showLockoutMaxDialog = true }
+                            )
+                        }
 
                         SecuritySwitchRow(
                             icon = Icons.Default.VisibilityOff,
@@ -355,6 +383,15 @@ fun SecuritySettingsScreen(
             selectedSeconds = uiState.clipboardTimeoutSeconds,
             onSelect = onClipboardTimeoutChange,
             onDismiss = { showClipboardDialog = false }
+        )
+    }
+
+    // ISSUE-P3-68：解锁失败重试最长锁定时长弹窗（关闭节流时不渲染入口，自然不弹）
+    if (showLockoutMaxDialog) {
+        LockoutMaxDurationDialog(
+            selectedSeconds = uiState.unlockLockoutMaxSeconds,
+            onSelect = onUnlockLockoutMaxChange,
+            onDismiss = { showLockoutMaxDialog = false }
         )
     }
 

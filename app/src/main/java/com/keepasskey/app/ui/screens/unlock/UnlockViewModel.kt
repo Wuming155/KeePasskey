@@ -106,7 +106,8 @@ class UnlockViewModel @Inject constructor(
         uiState = _uiState,
         settingsRepository = settingsRepository,
         activeDbId = { activeDatabaseId },
-        hasKeyFile = { keyFileSession.keyFileData != null },
+        // ISSUE-P2-23：携带密钥文件时一并封印（复合载荷），不再整体跳过登记
+        keyFileBytes = { keyFileSession.keyFileData },
         biometricAuthManager = biometricAuthManager,
         biometricCredentialStorage = biometricCredentialStorage,
         unlockPasskeyManager = unlockPasskeyManager,

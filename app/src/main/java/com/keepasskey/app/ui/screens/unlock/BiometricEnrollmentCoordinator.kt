@@ -15,8 +15,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.withTimeoutOrNull
-import java.nio.CharBuffer
-import java.nio.charset.StandardCharsets
 import javax.crypto.Cipher
 
 /**
@@ -32,7 +30,8 @@ internal class BiometricEnrollmentCoordinator(
     private val uiState: MutableStateFlow<UnlockUiState>,
     private val settingsRepository: SettingsRepository,
     private val activeDbId: () -> String?,
-    private val hasKeyFile: () -> Boolean,
+    // ISSUE-P2-23：本次解锁使用的密钥文件字节提供者（null = 未携带；封印前快照克隆）
+    private val keyFileBytes: () -> ByteArray?,
     private val biometricAuthManager: BiometricAuthManager?,
     private val biometricCredentialStorage: BiometricCredentialStorage?,
     private val unlockPasskeyManager: UnlockPasskeyManager?,
@@ -53,9 +52,9 @@ internal class BiometricEnrollmentCoordinator(
      * 封印前另经 [UnlockAuthPolicy.canSeal] 校验设备具备「硬件存在且已录入」的强生物识别，
      * 弱凭据设备禁用封印（fail-closed），绝不降级到锁屏凭据路径。
      *
-     * 敏感数据设计考量与边界说明 (Wave 3-E P2-18)：
-     * 消费 [CharArray]，经 CharBuffer 转为临时 UTF-8 字节并在 finally 块中立即显式清零，
-     * 杜绝密码以持久明文字符串穿越硬件加密管线。
+     * 敏感数据设计考量与边界说明 (Wave 3-E P2-18 / ISSUE-P2-23)：
+     * 消费 [CharArray] 与可选密钥文件字节，经 [BiometricSealedPayloadCodec] 编为
+     * 临时复合载荷明文并在 finally 块中立即显式清零，杜绝秘密以持久明文穿越硬件加密管线。
      *
      * 失败语义：登记失败（用户取消 / 硬件缺失 / 无宿主 Activity）一律 fail-safe——
      * 仅留痕日志，**不影响本次主密码解锁**。
@@ -64,9 +63,11 @@ internal class BiometricEnrollmentCoordinator(
         activity: FragmentActivity?,
         passwordChars: CharArray
     ) {
-        // 修复虚假开关整改：复合密钥库（主密码 + 密钥文件）的密钥文件因子无法经
-        // Keystore 封印还原，持久化凭据将永远无法独立完成解锁——直接不保存，fail-safe
-        if (hasKeyFile()) return
+        // ISSUE-P2-23：复合密钥库（主密码 + 密钥文件）同样可登记快速解锁——
+        // 封印载荷升级为版本化帧格式（[BiometricSealedPayloadCodec]），把主密码与
+        // 密钥文件因子一并封印；解封后以两因子走既有解锁管线。密钥文件字节仅驻留
+        // Keystore 密文（受与主密码同级的强生物识别授权门控），不落地为 String/明文。
+        // 原实现「带密钥文件即整体跳过封印」使复合密钥库用户永久失去指纹解锁，已移除。
         val dbId = activeDbId() ?: return
         val storage = biometricCredentialStorage ?: return
         val authManager = biometricAuthManager ?: return
@@ -93,10 +94,12 @@ internal class BiometricEnrollmentCoordinator(
 
         val encrypted = try {
             val cipher = authManager.prepareEncryptCipher(dbId)
-            val charBuffer = CharBuffer.wrap(passwordChars)
-            val byteBuffer = StandardCharsets.UTF_8.encode(charBuffer)
-            val bytes = ByteArray(byteBuffer.remaining())
-            byteBuffer.get(bytes)
+            // ISSUE-P2-23：封印复合载荷（主密码 + 可选密钥文件因子）。
+            // 密钥文件先快照克隆（登记跨 BiometricPrompt 挂起，原字节归会话所有），
+            // 快照在载荷编码完成后立即清零；载荷明文在其自身 finally 中清零。
+            val keyFileSnapshot = keyFileBytes()?.copyOf()
+            val bytes = BiometricSealedPayloadCodec.encode(passwordChars, keyFileSnapshot)
+            keyFileSnapshot?.fill(0)
             try {
                 val authResult = awaitBiometricAuth(
                     authManager = authManager,
@@ -128,10 +131,6 @@ internal class BiometricEnrollmentCoordinator(
                 }?.let { cipher.iv to it }
             } finally {
                 bytes.fill(0)
-                byteBuffer.clear()
-                if (byteBuffer.hasArray()) {
-                    byteBuffer.array().fill(0)
-                }
             }
         } catch (e: Exception) {
             // 禁止静默失败：任何异常一律留痕，绝不 catch(ignored)

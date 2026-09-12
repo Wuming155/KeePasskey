@@ -3,7 +3,9 @@ package com.keepasskey.app.di
 import com.keepasskey.app.security.AndroidKeystoreUnlockThrottleIntegrity
 import com.keepasskey.app.security.BiometricCredentialStorage
 import com.keepasskey.app.security.SharedPrefsUnlockThrottleStore
+import com.keepasskey.app.security.ThrottleConfigSource
 import com.keepasskey.app.security.UnlockPasskeyStore
+import com.keepasskey.app.security.UnlockThrottleConfigProvider
 import com.keepasskey.app.security.UnlockThrottleIntegrity
 import com.keepasskey.app.security.UnlockThrottleStore
 import dagger.Binds
@@ -39,6 +41,13 @@ abstract class SecurityModule {
     abstract fun bindUnlockThrottleIntegrity(
         impl: AndroidKeystoreUnlockThrottleIntegrity
     ): UnlockThrottleIntegrity
+
+    /** ISSUE-P3-68：节流配置源绑定（设置流 → 进程级缓存快照，节流路径同步读取） */
+    @Binds
+    @Singleton
+    abstract fun bindUnlockThrottleConfigSource(
+        impl: UnlockThrottleConfigProvider
+    ): ThrottleConfigSource
 
     @Binds
     @Singleton
