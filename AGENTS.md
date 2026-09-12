@@ -52,6 +52,8 @@ KeePasskey 是一款原生 Kotlin 开发的现代化 Android 密码管理器。�
    - **Google 知识 MCP 服务器**（`google-developer-knowledge`）：凡涉及 Android / Jetpack / Kotlin / Gradle / 加密库 / Google 平台 API、SDK 用法、版本兼容、官方最佳实践等，先向其检索确认。
    - **Context7 MCP 服务器**：涉及第三方库、依赖、框架（如 Compose / Hilt / OkHttp / 加密库等）的 API 用法、版本特性与最佳实践时，先用 `resolve-library-id` + `query-docs` 检索权威文档与官方示例，避免凭旧记忆编写。
    - 调用前先用 `mcp_get_tool_description` 取得该服务器各工具的最新参数 schema，再发起调用；结果用于指导代码与文档，不改变本文件 §3 其余硬约束。
+8. **每批次收尾必须编译稳定版并回传产物完整路径（强制）**：每完成一批次代码修改（提交推送之前或同时），执行 `.\gradlew.bat assembleRelease` 编译稳定版本（R8 混淆 + 资源收缩 + release 签名），并在最终交付说明中**原样给出产物完整绝对路径**：
+   `D:\GithubWorkplace\KeePasskey\app\build\outputs\apk\release\app-release.apk`（未配置 release 签名时为同目录 `app-release-unsigned.apk`，须如实注明）。构建失败必须如实报告并修复，不得以 debug 包冒充稳定版，也不得引用旧产物路径充当本次构建结果。
 
 ---
 
