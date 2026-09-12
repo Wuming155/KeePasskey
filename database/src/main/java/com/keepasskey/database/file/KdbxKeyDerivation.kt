@@ -131,6 +131,9 @@ internal object KdbxKeyDerivation {
         val byteBuffer = StandardCharsets.UTF_8.encode(charBuffer)
         val bytes = ByteArray(byteBuffer.remaining())
         byteBuffer.get(bytes)
+        // ISSUE-P3-70：对齐 ProtectedString.charsToUtf8（P0-7 整改）——编码器内部 ByteBuffer
+        // 同样承载过明文口令，取用后必须一并清零，避免其底层堆数组驻留至 GC。
+        if (byteBuffer.hasArray()) Arrays.fill(byteBuffer.array(), 0.toByte())
         return bytes
     }
 }

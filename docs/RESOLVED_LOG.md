@@ -35,6 +35,10 @@
 | §24 | 设备侧实测发现的致命缺陷修复（Android 端 KDBX XML 解析全量失败） | ISSUE-P1-12 |
 | §25 | 设备侧互操作语料入库与端到端解锁跑绿（真实 KeePassXC `.kdbx`） | ISSUE-P3-23 |
 | §26 | 设备侧手工实操发现的 P0 崩溃修复（字段引用正则在 Android ICU 上非法） | ISSUE-P0-04 |
+| §27 | 设备侧功能实测收口 + 9 项缺陷整改（2026-09-11） | 见 §27 |
+| §28 | 存量问题修复批次（快捷脱敏 / 关闭校验 / 外部存储清理） | ISSUE-P2-22 / P3-63 / P3-65 / P3-67 |
+| §29 | 用户报告修复批次（复合封印指纹解锁 / 重试节流可配置 / FLAG_SECURE 语义修订） | ISSUE-P2-23 / P3-68 |
+| §30 | 外部安全审计核实与整改批次（Wrapper 哈希 / 字节清零 / 扫码防截屏 / 许可证注释） | ISSUE-P3-69 ~ P3-72 |
 
 > 各批次验收证据（用例数 / 通过 / 失败 / 跳过）分别见 §2.22、§3.1、§4.1、§5、§6、§7、§8、§9、§10、§11、§12、§13、§14、§15、§16、§17、§18、§19、§20.3、§21.4、§22.9、§23.1、§24.3、§25.2、§26.3。
 
@@ -1353,3 +1357,90 @@ Rust 单测模块 `#[cfg(test)] mod tests` 之内**（测试模块起始行：`s
      代码极简化为仅监听 `flagSecureEnabled` 与 `isSessionLocked` 两流；
   3. `FlagSecurePolicyTest` 单元测试同步更新为新语义断言；
   4. 设置页风险确认对话框保留（关闭前须用户二次确认，确认后真实写入偏好并解除遮蔽）。
+
+---
+
+## §30 外部安全审计核实与整改批次（2026-09-12）：P3-69 ~ P3-72
+
+> **来源**：外部安全审计报告（共 9 条，含 1 条「高危」）。处置原则：先逐条源码核实真伪与前提，
+> 再对**确实成立且可整改**的条目闭环；证伪条目如实作废，产品裁决条目维持不动。
+
+### 30.1 审计 9 条逐项核实结论（2026-09-12，静态源码核实）
+
+| 审计条目 | 核实结论 | 处置 |
+|---|---|:---:|
+| #1 `Cargo.lock` 缺失（审计列为**高危**） | **证伪（已入库并跟踪）** | 无动作 |
+| #2 解锁节流出厂默认关闭 | 事实属实，但为 2026-09-12 用户明示裁决 | 维持现状 |
+| #3 CodeQL 未覆盖 `java-kotlin` | 属实，已登记为已接受风险（ISSUE-P3-58） | 维持上游跟踪 |
+| #4 Wrapper 第三方镜像 + 无 SHA-256 | 属实 | **整改（30.2）** |
+| #5 `charsToUtf8` 中间 `ByteBuffer` 未清零 | 属实 | **整改（30.3）** |
+| #6 ZXing 扫码窗口无 `FLAG_SECURE` | 属实 | **整改（30.4）** |
+| #7 未接入 Play Integrity API | 属实 | 评估不采纳（30.5） |
+| #8 自动填充 / Passkey 缺真机 E2E | 属实（= ISSUE-P3-66） | 维持（外部环境依赖） |
+| #9 许可证元数据不一致 | 属实（信息级） | **整改（30.6）** |
+
+**#1 证伪证据（2026-09-12）**：`git ls-files --error-unmatch crypto/src/main/rust/Cargo.lock` 命中
+（exit 0，**已跟踪**）；`git check-ignore` exit 1（**未被忽略**）；`crypto/src/main/rust/.gitignore:1`
+明确注明「Cargo.lock 保留入库以锁定依赖树」；`git log --reverse` 首次入库为 `379f1e4`（2026-09-09）。
+故 [build.yml](../.github/workflows/build.yml) 的 `cargo test --locked` **不存在**审计所述缺失隐患。
+
+**#2 说明**：`SettingsRepository.kt:53` / `RealSettingsRepository.kt:113` / `UnlockThrottle.kt:199`
+的默认 `false` 系 **2026-09-12 用户裁决**（§29.2），非疏漏；本次**不予改动**。
+
+### 30.2 ISSUE-P3-69：Gradle Wrapper 分发内容完整性锁定
+
+- **整改**：
+  1. `gradle/wrapper/gradle-wrapper.properties` 新增 `distributionSha256Sum`
+     = `acd53f1edaf02f1a8ff99879f8a34b302661a057d9b063ae9e35b552f804d20a`
+     （Gradle **9.7.1 `-bin` ZIP** 官方校验和，来源 <https://gradle.org/release-checksums/>，2026-09-12 取得）；
+  2. `.github/workflows/build.yml` 的 `fast-gate` 新增 `gradle/actions/wrapper-validation`
+     （复用仓库既有 pin `9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0`）。
+- **前提实测（防误报）**：本仓 `gradle/wrapper/gradle-wrapper.jar` 的 SHA-256
+  = `7a9ce74cff467ca1bf60a4fcd9f05185acceda4d0f382434d393e17864262c5d`，与 Gradle 官方 9.7.1
+  Wrapper JAR 校验和**逐位一致** → 启用 wrapper-validation 不会误报。
+- **说明**：镜像源保留（国内可访问性），安全性由内容哈希锁定承担——镜像篡改/劫持将被 Wrapper 拒绝。
+
+### 30.3 ISSUE-P3-70：`KdbxKeyDerivation.charsToUtf8` 中间 `ByteBuffer` 清零
+
+- **根因**：`StandardCharsets.UTF_8.encode(charBuffer)` 内部新建的 `ByteBuffer` 承载明文口令字节，
+  原实现仅 `get()` 拷贝出 `bytes` 返回，其底层堆数组**未清零**（与 `ProtectedString.kt:224-225`
+  的 P0-7 处理不一致）。ISSUE-P3-55 修的是**返回副本**在调用方清零，未覆盖该中间缓冲。
+- **整改**：`charsToUtf8` 取用后追加 `if (byteBuffer.hasArray()) Arrays.fill(byteBuffer.array(), 0.toByte())`。
+
+### 30.4 ISSUE-P3-71：ZXing 扫码取景窗口纳入 FLAG_SECURE
+
+- **根因**：扫码走 zxing 默认 `CaptureActivity`（`ScanContract()` 未指定自定义窗口），该窗口游离于
+  `FlagSecureGuard`（仅 attach 至 MainActivity / `BaseCredentialActivity` 体系）之外 → 含密钥种子的
+  TOTP 二维码取景画面可被截屏 / 录屏 / 多任务缩略图捕获。
+- **整改**：
+  1. 新增 `app/src/main/java/com/keepasskey/app/security/SecureCaptureActivity.kt`——继承 zxing
+     `CaptureActivity`，`onCreate` 施加 `FLAG_SECURE` 与 `setHideOverlayWindows(true)`（与站内其余
+     敏感窗口一致的叠加防护）；
+  2. `AndroidManifest.xml` 显式声明该 Activity（属性对齐库默认声明，`exported=false`）；
+  3. `EntryEditPickers.kt` 扫码选项追加 `options.setCaptureActivity(SecureCaptureActivity::class.java)`。
+
+### 30.5 审计 #7（Play Integrity）评估结论：不采纳
+
+- 本 App 以 GPL-3.0 开源、支持侧载分发；Play Integrity API 依赖 Google Play 服务与 Play 后端校验，
+  对侧载/无 GMS 设备不可用，且会引入对 Google 闭源服务的运行时依赖，与离线密码管理器的分发模型不符。
+- 现有 `RuntimeIntegrityDetector` 已采用 **fail-closed**（首次扫描完成前 `UNDETERMINED` 保守策略），
+  与本地 Root/钩子探测共同构成纵深防御。故**本次不接入**，维持本地检测；如未来上架 Play 渠道，
+  可作为渠道专属增强另行评估。
+
+### 30.6 ISSUE-P3-72：Rust crate 许可证元数据注释对齐
+
+- **整改**：`crypto/src/main/rust/Cargo.toml` 在 `license` 字段上方注明：本 crate 为 `publish = false`
+  的**内部组件**，其源码随主工程（根 `LICENSE` = GPL-3.0）整体分发，对外生效许可即主工程许可；
+  `Apache-2.0 OR MIT` 仅为该 crate 源码的 Cargo 元数据声明、与主工程许可单向兼容。
+  **不改动**主工程许可与 `license` 字段值（避免影响传递声明）。
+
+### 30.7 批次验收证据（2026-09-12）
+
+- **单元测试**：`.\gradlew.bat test --rerun-tasks --max-workers=1` → **BUILD SUCCESSFUL**
+  （114 tasks executed；本批次未新增/删除用例，沿用 1402 例基线）。
+- **稳定版构建**：`.\gradlew.bat assembleRelease` → **BUILD SUCCESSFUL**（R8 混淆 + 资源收缩 +
+  v2/v3/v4 签名）。产物完整路径：
+  `D:\GithubWorkplace\KeePasskey\app\build\outputs\apk\release\app-release.apk`（已签名，15,379,879 B，
+  含 v4 签名 `.idsig`）。
+- **合并清单核验**：release 合并清单已含 `.security.SecureCaptureActivity` 声明。
+- **关联提交**：本批次文档与代码为**同一次** `git commit`（提交主题以 `ISSUE-P3-69 ~ P3-72` 引用）。

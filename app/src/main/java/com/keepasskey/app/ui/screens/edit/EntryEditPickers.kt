@@ -17,6 +17,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 import com.keepasskey.app.R
+import com.keepasskey.app.security.SecureCaptureActivity
 import com.keepasskey.app.ui.components.CustomIconItem
 import com.keepasskey.app.ui.model.UiMessage
 import kotlinx.coroutines.CoroutineScope
@@ -129,6 +130,9 @@ internal fun rememberEntryEditPickers(
             options.setPrompt(scanPrompt)
             options.setBeepEnabled(false)
             options.setOrientationLocked(true)
+            // ISSUE-P3-71：改用受保护取景窗口（FLAG_SECURE + 反悬浮窗覆盖），
+            // 避免密钥种子二维码取景画面被截屏 / 录屏 / 多任务缩略图捕获。
+            options.setCaptureActivity(SecureCaptureActivity::class.java)
             qrScanner.launch(options)
         },
         pickCustomIcon = {

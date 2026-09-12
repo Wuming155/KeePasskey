@@ -104,6 +104,18 @@
                 android:name="android.autofill"
                 android:resource="@xml/autofill_service" />
         </service>
+
+        <!-- ISSUE-P3-71：TOTP 扫码取景窗口——继承 zxing 默认 CaptureActivity 并强制 FLAG_SECURE +
+             反悬浮窗覆盖，防止含密钥种子的二维码取景画面被截屏 / 录屏 / 多任务缩略图捕获。
+             声明属性与 zxing 库默认声明保持一致（见合并清单）。 -->
+        <activity
+            android:name=".security.SecureCaptureActivity"
+            android:exported="false"
+            android:clearTaskOnLaunch="true"
+            android:screenOrientation="sensorLandscape"
+            android:stateNotNeeded="true"
+            android:theme="@style/zxing_CaptureTheme"
+            android:windowSoftInputMode="stateAlwaysHidden" />
     </application>
 
 </manifest>

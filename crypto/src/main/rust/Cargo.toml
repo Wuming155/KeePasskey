@@ -11,6 +11,10 @@ edition = "2021"
 #   - `strength.rs`      口令强度评估（ISSUE-P3-36）
 # 改名会牵动 CI 与 6 份文档却零功能收益，故**有意保留**并以本注释消除歧义。
 description = "KeePasskey native crypto kernel (Argon2 KDF + AES-KDF + Twofish-CBC + password strength)"
+# ISSUE-P3-72：本 crate 为 `publish = false` 的**内部组件**，不单独对外分发——其源码随主工程
+# （仓库根 LICENSE = GPL-3.0，见 README §「许可证」）整体分发，故对外生效许可即主工程许可。
+# 此处 `Apache-2.0 OR MIT` 仅为本 crate 源码的 Cargo 元数据声明，不改变主工程许可；
+# 与主工程许可单向兼容，无实质冲突。
 license = "Apache-2.0 OR MIT"
 publish = false
 
