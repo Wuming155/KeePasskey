@@ -109,8 +109,8 @@ class RealSettingsRepository @Inject constructor(
         // ISSUE-P3-04：上次成功解锁使用的密钥文件元数据（仅 Uri/显示名，非密钥材料）
         lastKeyFileUri = prefs[KEY_LAST_KEY_FILE_URI] ?: "",
         lastKeyFileName = prefs[KEY_LAST_KEY_FILE_NAME] ?: "",
-        // ISSUE-P3-68：重试节流开关与最长锁定时长（安全默认：开启 + 30 分钟）
-        unlockThrottleEnabled = prefs[KEY_UNLOCK_THROTTLE_ENABLED] ?: true,
+        // ISSUE-P3-68：重试节流开关与最长锁定时长（2026-09-12 用户裁决：默认关闭 + 30 分钟封顶）
+        unlockThrottleEnabled = prefs[KEY_UNLOCK_THROTTLE_ENABLED] ?: false,
         unlockLockoutMaxSeconds = prefs[KEY_UNLOCK_LOCKOUT_MAX] ?: 1800
     )
 

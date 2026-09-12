@@ -154,8 +154,8 @@ data class SettingsUiState(
     val rememberRecentFiles: Boolean = true, // 记住最近打开的数据库
     val rememberKeyFileLocation: Boolean = true, // 记住密钥文件关联位置
     val showKillAppOption: Boolean = false, // 提供彻底杀死/终止应用进程入口
-    // ISSUE-P3-68：解锁失败重试节流开关与最长锁定时长（安全默认：开启 + 30 分钟）
-    val unlockThrottleEnabled: Boolean = true,
+    // ISSUE-P3-68：解锁失败重试节流开关与最长锁定时长（2026-09-12 用户裁决：默认关闭 + 30 分钟封顶）
+    val unlockThrottleEnabled: Boolean = false,
     val unlockLockoutMaxSeconds: Int = 1800,
 
     // 5. 外观与显示偏好 (Appearance & Display)

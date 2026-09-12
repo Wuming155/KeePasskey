@@ -48,8 +48,9 @@ data class UserSettings(
     // 偏好关闭 / 授权失效时调用方须清除本记录，不得残留过期 Uri。
     val lastKeyFileUri: String = "",
     val lastKeyFileName: String = "",
-    // ISSUE-P3-68：解锁失败重试节流总开关（默认 true，安全默认不放松）
-    val unlockThrottleEnabled: Boolean = true,
+    // ISSUE-P3-68：解锁失败重试节流总开关（2026-09-12 用户裁决：默认**关闭**，
+    // 需要暴力破解防护的用户可在设置页显式开启）
+    val unlockThrottleEnabled: Boolean = false,
     // ISSUE-P3-68：重试退避的最长锁定时长（秒，默认 1800 = 30 分钟；合法域 [60, 86400]）
     val unlockLockoutMaxSeconds: Int = 1800
 )

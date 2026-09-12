@@ -187,7 +187,8 @@ interface ThrottleConfigSource {
  * 把当前 [ThrottleConfig] 缓存为 `@Volatile` 快照，供节流路径零挂起地同步读取——
  * 主解锁（`UnlockViewModel`）与子库挂载（`ChildDatabaseSessionManager`）两条路径自动同时生效。
  *
- * 进程启动初期设置尚未抵达的短窗内回落安全默认 [ThrottleConfig]（开启 + 30 分钟封顶）。
+ * 进程启动初期设置尚未抵达的短窗内回落 [UserSettings] 出厂默认（2026-09-12 用户裁决：关闭 + 30 分钟封顶）。
+ * （[ThrottleConfig] 无参构造的「开启」默认仅用于未接配置源的 JVM 单测场景。）
  */
 @Singleton
 class UnlockThrottleConfigProvider @Inject constructor(
@@ -195,7 +196,7 @@ class UnlockThrottleConfigProvider @Inject constructor(
 ) : ThrottleConfigSource {
 
     @Volatile
-    override var current: ThrottleConfig = ThrottleConfig()
+    override var current: ThrottleConfig = ThrottleConfig(enabled = false)
         private set
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -242,7 +243,7 @@ class UnlockThrottleManager @Inject constructor(
     private val configProvider: ThrottleConfigSource? = null
 ) {
 
-    /** 当前生效配置（source 缺省时回落安全默认：开启 + 30 分钟封顶） */
+    /** 当前生效配置（source 缺省仅见于 JVM 单测，回落 ThrottleConfig 无参默认：开启 + 30 分钟封顶） */
     private val config: ThrottleConfig
         get() = configProvider?.current ?: ThrottleConfig()
 

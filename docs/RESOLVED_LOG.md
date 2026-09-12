@@ -1278,11 +1278,11 @@ Rust 单测模块 `#[cfg(test)] mod tests` 之内**（测试模块起始行：`s
 
 ## §29 用户报告修复批次（2026-09-12）：P2-23 复合封印指纹解锁 / P3-68 重试节流可配置
 
-> 本批次来源为用户报告两项：「输入密码和密钥解锁后，重新打开不能使用指纹解锁」（P2-23）、
-> 「30 分钟后重试功能希望加开关与自定义时间」（P3-68）。全量回归
-> `test --rerun-tasks --max-workers=1`：**1407 例 / 0 失败 / 0 错误 / 13 跳过**
-> （基线 1393 → 1407，新增 14 例：UnlockThrottleManagerTest +4、BiometricSealedPayloadCodecTest +9、
-> UnlockViewModelBiometricAutoPromptTest +1）。
+> 本批次来源为用户报告：「输入密码和密钥解锁后，重新打开不能使用指纹解锁」（P2-23）、
+> 「30 分钟后重试功能希望加开关与自定义时间且默认关闭」（P3-68）、
+> 以及「关闭截屏限制后依然会有限制」（P2-09 修订）。全量回归
+> `test --rerun-tasks --max-workers=1`：**1402 例 / 0 失败 / 0 错误 / 13 跳过**
+> （FlagSecurePolicyTest 移除过时的临时豁免用例 8→4，净增 9 例）。
 
 ### 29.1 ISSUE-P2-23：带密钥文件解锁后指纹（快速解锁）不可用——复合封印（已整改闭环）
 
@@ -1318,8 +1318,9 @@ Rust 单测模块 `#[cfg(test)] mod tests` 之内**（测试模块起始行：`s
 ### 29.2 ISSUE-P3-68：解锁失败重试锁定可配置——总开关 + 自定义最长锁定时长（已整改闭环）
 
 - **整改**：
-  1. `UserSettings` 新增 `unlockThrottleEnabled`（默认 **true**，安全默认不放松）与
-     `unlockLockoutMaxSeconds`（默认 **1800**，合法域 [60, 86400]，仓库层写入 coerce）；
+  1. `UserSettings` 新增 `unlockThrottleEnabled`（**默认 false**，按用户裁决出厂关闭重试锁定；
+     需要防爆破的用户可在设置页显式开启）与 `unlockLockoutMaxSeconds`（默认 **1800**，
+     合法域 [60, 86400]，仓库层写入 coerce）；
      `SettingsRepository` / `RealSettingsRepository`（DataStore 键） / `FakeSettingsRepository` 同步接线；
   2. `UnlockThrottlePolicy.backoffMillisFor` 增加 `ThrottleConfig` 参数（缺省值 = 现行编译期常量
      行为，既有调用与测试零改动）：开关关闭恒不锁定，封顶值随配置；
@@ -1337,4 +1338,18 @@ Rust 单测模块 `#[cfg(test)] mod tests` 之内**（测试模块起始行：`s
   - 自定义封顶 60s：第 5 次失败退避 30s（未触顶）、第 6 次起压至 60s（原策略 120s），
     管理器侧 `registerFailure` 同步生效；
   - 完整性失效（`integrityIntact=false`）在开关关闭时仍 fail-closed 锁定（防篡改不可旁路）；
-  - 全量回归 1407 例全绿（见批次头），既有节流用例（缺省配置路径）零改动全数保留。
+  - 全量回归 1402 例全绿（见批次头），既有节流用例（缺省配置路径）零改动全数保留。
+
+### 29.3 FLAG_SECURE 防截屏设置真实生效（语义修订，消除假开关）
+
+- **根因**：原 ISSUE-P2-09 采用「临时豁免模型」——开关关闭后在解锁态下**默认仍强制遮蔽**，
+  仅当存在尚未过期的 5 分钟临时豁免才解除；而 UI 侧「关闭防截屏风险确认」对话框的确认回调
+  **从未调用** `requestTemporaryExemption`，导致即使在确认弹窗点了「仍要关闭」，
+  底层的 FlagSecureGuard 依然恒强制遮蔽（假开关，用户无法真正截屏）。
+- **整改**：
+  1. `FlagSecurePolicy` 修订为**开关即生效**模型：锁定态无条件强制遮蔽（fail-closed，
+     主密码输入与 Recents 预览绝不泄露）；解锁态只看用户开关——开启强制遮蔽，关闭**真实解除**；
+  2. `FlagSecureGuard` 移除过时的内存临时豁免状态机（`exemptionUntilMs`/`Job` 等全部下架），
+     代码极简化为仅监听 `flagSecureEnabled` 与 `isSessionLocked` 两流；
+  3. `FlagSecurePolicyTest` 单元测试同步更新为新语义断言；
+  4. 设置页风险确认对话框保留（关闭前须用户二次确认，确认后真实写入偏好并解除遮蔽）。
