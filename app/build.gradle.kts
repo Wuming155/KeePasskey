@@ -44,6 +44,9 @@ android {
         targetSdk = 36
         versionCode = 1
         versionName = "0.1.0"
+        // ISSUE-P2-27 / P3-66：app 层设备侧（instrumented）验证入口——此前 app 无 androidTest 源集，
+        // 导致「JVM 过、Android 运行时挂」类缺陷（§24 / §26）无设备侧拦截。
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     signingConfigs {
@@ -167,6 +170,10 @@ dependencies {
     // 单元测试
     testImplementation(libs.junit)
     testImplementation(libs.coroutines.test)
+    // ISSUE-P2-27 / P3-66：app 层设备侧（instrumented）测试依赖（与 crypto / database 同源版本）
+    androidTestImplementation(libs.androidx.test.ext.junit)
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.coroutines.test)
     // TASK-47：已泄露密码检测（HIBP k-匿名范围查询）——范围查询客户端与 MockWebServer 回归
     implementation(libs.okhttp)
     testImplementation(libs.mockwebserver)

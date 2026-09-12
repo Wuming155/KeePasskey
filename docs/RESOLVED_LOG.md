@@ -42,6 +42,7 @@
 | §31 | 文档类存量整改批次（隐私政策 / 同步层威胁建模） | ISSUE-P3-75 / P3-77 |
 | §32 | 存量功能整改批次（CSV 导入 / 导出扩充） | ISSUE-P3-73 |
 | §33 | 产品裁决：不排期 / Won't Do（对标项与外部依赖项） | ISSUE-P2-25 / P2-26 / P2-27 / P3-23 / P3-58 / P3-66 / P3-74 |
+| §34 | app 设备侧验证骨架与导入解析回归 | ISSUE-P2-27 / P3-66（部分收窄） |
 
 > 各批次验收证据（用例数 / 通过 / 失败 / 跳过）分别见 §2.22、§3.1、§4.1、§5、§6、§7、§8、§9、§10、§11、§12、§13、§14、§15、§16、§17、§18、§19、§20.3、§21.4、§22.9、§23.1、§24.3、§25.2、§26.3。
 
@@ -1578,3 +1579,40 @@ Rust 单测模块 `#[cfg(test)] mod tests` 之内**（测试模块起始行：`s
   应按上表「重新评估触发条件」重启评估，而非默认永久关闭。
 - **保留待办**：**ISSUE-P2-24**（附件磁盘缓存，已留存分阶段方案）与 **ISSUE-P3-76**（输入法个性化学习，
   框架阻塞）仍留在 [ACTIVE_ISSUES.md](ACTIVE_ISSUES.md) 跟踪，未纳入本节裁决。
+
+---
+
+## §34 app 设备侧验证骨架与导入解析回归（2026-09-12）
+
+> **动机**：本仓 `app` 模块此前**没有 `androidTest` 源集**，导致解锁 / 自动填充 / 通行密钥等核心链路
+> 从未在真实 Android 运行时被验证；而 §24（ISSUE-P1-12 KDBX XML 在 Android 全量失败）与
+> §26（ISSUE-P0-04 字段引用正则在 Android ICU 非法致崩）已**两次**证明该类「JVM 全绿、Android 挂」
+> 缺陷会真实逃逸。本节为**收窄该盲区的第一步**（对应 §33 中 P2-27 / P3-66 的解析层部分）。
+
+### 34.1 交付
+
+1. **`app` 设备侧源集接线**（`app/build.gradle.kts`）：新增
+   `testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"` 与
+   `androidTestImplementation`（`androidx.test.ext:junit` / `androidx.test:runner` / `coroutines-test`，
+   均复用既有版本目录）。
+2. **首个设备侧用例集** `app/src/androidTest/.../data/importer/ImporterAndroidRuntimeTest.kt`（3 例）——
+   把**导入解析**放回真实 Android 运行时执行（XML 解析器 / ICU 正则 / 字符集均是平台差异面）：
+   - KeePass XML 导入完整字段映射；
+   - 浏览器 CSV 按表头映射（列序无关）；
+   - 非 `KeePassFile` 根 **fail-closed**。
+
+### 34.2 验收证据（2026-09-12，x86_64 模拟器）
+
+- **编译**：`.\gradlew.bat :app:assembleDebugAndroidTest` → **BUILD SUCCESSFUL**。
+- **设备侧执行**：`.\gradlew.bat :app:connectedDebugAndroidTest`（`emulator-5554`，**x86_64 / API 36.1 /
+  google_apis**）→ **BUILD SUCCESSFUL**；结果 XML `app/build/outputs/androidTest-results/connected/debug/`
+  摘要：`tests="3" failures="0" errors="0" skipped="0"`（**真实执行，非跳过**）。
+- **环境说明**：使用 `Pixel_10` AVD 冷启动 + `-wipe-data`（首次尝试因模拟器存在旧签名残留报
+  `INSTALL_FAILED_UPDATE_INCOMPATIBLE`，清理并以干净实例重跑后通过——如实留痕）。
+
+### 34.3 边界与后续
+
+- 本节仅覆盖 **app 导入解析层**；`app` 端到端（自动填充域解析、解锁、Passkey、通知）与 `sync` 仍无设备侧覆盖。
+- **arm64 原生加密内核验证仍缺**：本机仅 x86_64 镜像，arm64 镜像在 x86_64 主机上属翻译模拟（未执行）。
+  该缺口对应 §33 的 ISSUE-P3-23，维持「不排期/外部依赖」。
+- **关联提交**：本批次代码与文档为**同一次** `git commit`（提交主题以 `ISSUE-P2-27 / P3-66` 引用）。

@@ -78,7 +78,7 @@ KeePasskey 是一款原生 Kotlin 开发的现代化 Android 密码管理器。�
 - `.\gradlew.bat lint` — Android Lint（warning 不阻断）
 - `.\gradlew.bat test --rerun-tasks --max-workers=1` — 单元测试（强制真实执行，单会话勿并发）
 - `.\gradlew.bat test -DliveSyncTest` — 追加真实联调（需先起 `tools/local-sync`）
-- `.\gradlew.bat :crypto:connectedDebugAndroidTest` / `:database:connectedDebugAndroidTest` — instrumented 测试（需设备）
+- `.\gradlew.bat :crypto:connectedDebugAndroidTest` / `:database:connectedDebugAndroidTest` / `:app:connectedDebugAndroidTest` — instrumented 测试（需设备）
 - `.\gradlew.bat assembleRelease` — R8 混淆 + 资源收缩发布包
 - `python .github/check_dependency_cvss.py build/reports/dependency-check/dependency-check-report.json` — 供应链 CVSS ≥ 7.0 硬断言（fail-closed）
 - `cd crypto/src/main/rust && cargo test` — 原生内核单测
@@ -113,7 +113,10 @@ KeePasskey 是一款原生 Kotlin 开发的现代化 Android 密码管理器。�
 - 原生侧 `System.loadLibrary` 经 `NativeCryptoLibrary.loaded` 统一懒加载；各绑定 `available` 须先求值该属性再发起原生调用。
 - `CipherInputStream` 对填充非法/长度非整数倍抛 `IOException`（非静默 EOF）；新增 CBC 流式实现须遵守同一基线。
 - 窗口级遮挡触摸过滤作用于 `MainActivity` 的 `decorView`；独立窗口（如 `BaseCredentialActivity` 系）需单独接线。
-- **`app` / `sync` 模块无 `androidTest` 源集**：设备侧（instrumented）覆盖目前只有 `crypto` / `database` 的库内
-  逻辑用例，`app` 端到端功能（UI、自动填充、Passkey、通知等）仅由宿主 JVM 单测覆盖。§24 的 ISSUE-P1-12 与
+- **`app` 设备侧（instrumented）源集已建立（2026-09-12，见 RESOLVED_LOG §34）**：新增 `app/src/androidTest`，
+  首个用例集为**导入解析回归** `ImporterAndroidRuntimeTest`（3 例），在 x86_64 / API 36.1 模拟器上
+  **3/3 pass、0 skip、0 failure**。**`sync` 模块仍无 `androidTest` 源集**；`app` 端到端功能
+  （UI、自动填充、Passkey、通知等）**尚未**补齐设备侧覆盖，仍主要依赖宿主 JVM 单测。§24 的 ISSUE-P1-12 与
   §26 的 ISSUE-P0-04 均属「JVM 过、Android 运行时挂」类缺陷逃逸，故**涉及正则 / XML / 平台 API 的静态逻辑
-  不能仅凭宿主单测判定在 Android 上可用**；收窄该缺口需为 `app` 关键流程补设备侧用例。
+  不能仅凭宿主单测判定在 Android 上可用**；继续收窄该缺口需为 `app` 关键流程（自动填充域解析、解锁、Passkey）
+  补更多设备侧用例。
