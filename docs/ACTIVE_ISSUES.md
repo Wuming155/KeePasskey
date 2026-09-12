@@ -74,6 +74,30 @@
   ② 会话锁定 / 关闭时对称清理缓存目录；③ 缓存文件权限与 `SyncCache` 同基线（文件 0600 / 目录 0700）；
   ④ 有回归用例证明「不改动 KDBX 字节语义」（去重与引用池一致性）。
 - **禁止**：以「宿主侧未复现 OOM」为由判定无需整改；把附件字节改为 `String` 中转。
+- **2026-09-12 深入评估（为什么本次不落半成品）**：经通读数据流后确认，本条的「去内存化」**不是加一层缓存即可**，
+  而必须改写被回归锁定的核心契约——当前附件字节在链路上被**反复整份拷贝**：
+  1. `InnerHeader.BinaryItem.data: ByteArray` 常驻（解析期整批物化）；
+  2. `KdbxXmlBinaryNode.end()` 出边界 `binariesPool[refIndex].data.copyOf()`（**被 `KdbxAttachmentAliasIsolationTest` 4 例锁死**，
+     文档明确「不得放宽或删除」）；
+  3. `KdbxBinaryDeduplicator` 再次 `dataBytes.clone()` 入池与交付 `KdbxAttachment`。
+  即「别名隔离 / 清零安全」当前是靠**拷贝**实现的；要「不整入内存」必须把 `KdbxAttachment` 的
+  `data: ByteArray` 常驻改为「引用 + 按需解析」，并同步改写解析器 / 去重器 / 写回器 / app 映射与上述锁定用例，
+  属**跨 5 模块、触及数据完整性契约**的架构重写。**本次不硬做半成品**（避免别名/清零回归与数据损坏），
+  改为登记下列分阶段方案，留待专项批次实施。
+- **分阶段整改方案（2026-09-12 评估产出，实施时按此推进）**：
+  - **阶段 1（契约与基础设施）**：`core` 新增 `BinaryStore` 抽象（`store(bytes)->key` / `load(key)` /
+    `openStream(key)` / `clear()`）与 `BinaryStorePolicy`（阈值默认 1 MiB、可配）；`app` 以
+    `Context.cacheDir` 实现 `FileBinaryStore`（POSIX 0600 / 目录 0700，与 `SyncCache` 同基线），经 DI 注入。
+  - **阶段 2（模型去拷贝，核心与高风险）**：重构 `KdbxAttachment`——去除常驻 `data`，改为 `refIndex` + 经
+    `BinaryStore` 懒加载（≤阈值仍可内存驻留）；同步改写 `KdbxXmlBinaryNode`（不再全量 `copyOf`）、
+    `KdbxBinaryDeduplicator`（按内容哈希指纹，池项持 store key）；**重新论证并改写**
+    `KdbxAttachmentAliasIsolationTest`——别名隔离目标不变，实现改为「store 为唯一权威源 + 不可变引用」。
+  - **阶段 3（读写与生命周期）**：`InnerHeader.deserialize/serialize` 增可选 `BinaryStore?`（`null` → 旧行为逐字不变），
+    `KdbxFile.load/save` 传入；app 附件读取/导出走 `openStream`；`DatabaseSession.close()/lock()` 经
+    `SessionLockObserver` 对称清理 store 目录。
+  - **验收回归（对应 AC④）**：>1 MiB 附件往返字节与阈值以下逐字节等价；去重与引用池一致性不变；
+    锁定后缓存目录清空；权限位实测 0600/0700。
+- **实施纪律**：阶段 2 触及被锁定的拷贝语义与核心契约，须**单独批次、逐项回归**，不得与其它改动混提。
 
 ---
 
