@@ -31,6 +31,14 @@ internal abstract class SaxNode {
 /**
  * 纯文本叶节点：收集自身全部字符数据并在闭合时回调。
  *
+ * **空元素语义（缺陷 D3 / P2）**：空元素（`<Value/>` 或 `<Value></Value>`）**不触发**
+ * `characters()`，SAX 会在 `startElement` 之后直接回调 `endElement`。本节点在 `end()`
+ * 时恒以累积内容（此时为空串）回调，使「从未收到字符」与「收到空串」对调用方等价——
+ * 与官方 `XmlReader.ReadElementString()`（KdbxFile.Read.Streamed.cs:776）对空元素返回
+ * `string.Empty` 的语义逐字对齐。官方 `/DataExchange/Sample.kdbx` 等真实夹具中
+ * Notes / URL / UserName 即写作 `<Value/>`，**字段不得因值为空而整条消失**
+ * （官方保留空 `ProtectedString`）。
+ *
  * Wave 12 解析炸弹防线：单节点字符数封顶（[MAX_TEXT_CHARS]）——
  * XML 文本层是此前唯一无长度限制的解析层，恶意文件可借单一字段
  * （如超大 Base64 受保护值/图标数据）耗尽内存。
@@ -51,6 +59,7 @@ internal class TextNode(
     }
 
     override fun end() {
+        // 空元素直接走到此处：buffer 为空 → 交付空串（而非不交付），语义见类 KDoc
         onText(buffer.toString())
     }
 

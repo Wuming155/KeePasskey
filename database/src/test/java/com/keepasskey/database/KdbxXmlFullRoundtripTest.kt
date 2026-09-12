@@ -16,6 +16,7 @@ import com.keepasskey.database.file.KdbxDatabase
 import com.keepasskey.database.file.KdbxFile
 import com.keepasskey.database.file.KdbxHeader
 import com.keepasskey.database.xml.KdbxXmlParser
+import com.keepasskey.database.xml.KdbxXmlTimeHelper
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -139,7 +140,14 @@ class KdbxXmlFullRoundtripTest {
         val entryTemplatesGroup = KdbxUuid.random()
         val entryTemplatesGroupChanged = Instant.parse("2024-03-02T12:00:00Z")
         val iconUuid = KdbxUuid.random()
-        val customIcon = CustomIcon(iconUuid, byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47))
+        val iconLastModificationTime = Instant.parse("2024-03-02T08:15:00Z")
+        val customIcon = CustomIcon(
+            uuid = iconUuid,
+            data = byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47),
+            // KDBX 4.1 追加字段（D13/D14）：图标名与最后修改时间须读写对称
+            name = "公司图标",
+            lastModificationTime = iconLastModificationTime
+        )
         val delUuid = KdbxUuid.random()
         val delTime = Instant.parse("2024-03-03T15:30:00Z")
         val deletedObject = DeletedObject(delUuid, delTime)
@@ -187,21 +195,24 @@ class KdbxXmlFullRoundtripTest {
         assertEquals(10 * 1024 * 1024L, loadedDb.historyMaxSize)
         assertEquals("KeePasskey-Test", loadedDb.generator)
 
-        // CustomIcons
+        // CustomIcons（含 KDBX 4.1 的 Name / LastModificationTime）
         assertEquals(1, loadedDb.customIcons.size)
         assertEquals(iconUuid, loadedDb.customIcons[0].uuid)
         assertArrayEquals(customIcon.data, loadedDb.customIcons[0].data)
+        assertEquals("公司图标", loadedDb.customIcons[0].name)
+        assertEquals(iconLastModificationTime, loadedDb.customIcons[0].lastModificationTime)
 
         // DeletedObjects
         assertEquals(1, loadedDb.deletedObjects.size)
         assertEquals(delUuid, loadedDb.deletedObjects[0].id)
         assertEquals(delTime, loadedDb.deletedObjects[0].deletionTime)
 
-        // MemoryProtection
-        assertEquals(true, loadedDb.memoryProtection.protectTitle)
+        // MemoryProtection：官方装载收尾整对象重置为默认值（KdbxFile.Read.cs:246-248），
+        // 文件里写的组合一律不采用（防恶意库改写本机保护策略）
+        assertEquals(false, loadedDb.memoryProtection.protectTitle)
         assertEquals(false, loadedDb.memoryProtection.protectUserName)
         assertEquals(true, loadedDb.memoryProtection.protectPassword)
-        assertEquals(true, loadedDb.memoryProtection.protectUrl)
+        assertEquals(false, loadedDb.memoryProtection.protectUrl)
         assertEquals(false, loadedDb.memoryProtection.protectNotes)
 
         // CustomData
@@ -381,11 +392,16 @@ class KdbxXmlFullRoundtripTest {
     }
 
     /**
-     * P3-2 回归：<Times> 子元素缺失时按「合理远古时间」（Instant.EPOCH）解析，
-     * 不再默认 now()——三方合并中缺失时间不得被误判为「刚刚修改」而虚假覆盖对端。
+     * 时间缺省回归：`<Times>` 子元素缺失时取「合理远古时间」
+     * [KdbxXmlTimeHelper.ANCIENT_INSTANT]（纪元原点 0001-01-01T00:00:00Z，对应官方未初始化时间
+     * 的 .NET `DateTime.MinValue`），绝不再默认 now()——三方合并中缺失时间不得被误判为
+     * 「刚刚修改」而虚假覆盖对端。
+     *
+     * 语义来源：并发代理的时间格式整改（KDBX 4 官方秒精度 + `ANCIENT_INSTANT` 缺省）；
+     * 本用例随之同步——缺省值由原先的 `Instant.EPOCH` 收敛为其上游的纪元原点。
      */
     @Test
-    fun testMissingTimesSubElementsDefaultToEpoch() {
+    fun testMissingTimesSubElementsDefaultToAncientInstant() {
         val groupUuidBase64 = java.util.Base64.getEncoder().encodeToString(ByteArray(16))
         val xml = """
             <KeePassFile>
@@ -404,11 +420,11 @@ class KdbxXmlFullRoundtripTest {
         val parser = KdbxXmlParser(null)
         val result = parser.parse(ByteArrayInputStream(xml.toByteArray()))
 
-        assertEquals(Instant.EPOCH, result.rootGroup.times.creationTime)
-        assertEquals(Instant.EPOCH, result.rootGroup.times.lastModificationTime)
-        assertEquals(Instant.EPOCH, result.rootGroup.times.lastAccessTime)
-        assertEquals(Instant.EPOCH, result.rootGroup.times.expiryTime)
-        assertEquals(Instant.EPOCH, result.rootGroup.times.locationChanged)
+        assertEquals(KdbxXmlTimeHelper.ANCIENT_INSTANT, result.rootGroup.times.creationTime)
+        assertEquals(KdbxXmlTimeHelper.ANCIENT_INSTANT, result.rootGroup.times.lastModificationTime)
+        assertEquals(KdbxXmlTimeHelper.ANCIENT_INSTANT, result.rootGroup.times.lastAccessTime)
+        assertEquals(KdbxXmlTimeHelper.ANCIENT_INSTANT, result.rootGroup.times.expiryTime)
+        assertEquals(KdbxXmlTimeHelper.ANCIENT_INSTANT, result.rootGroup.times.locationChanged)
         assertFalse(result.rootGroup.times.expires)
     }
 

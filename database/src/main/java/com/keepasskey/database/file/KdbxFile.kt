@@ -3,6 +3,7 @@ package com.keepasskey.database.file
 import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.core.security.BinaryStore
 import com.keepasskey.crypto.cipher.CipherFactory
+import com.keepasskey.crypto.exception.CryptoException
 import com.keepasskey.crypto.hash.HashUtil
 import com.keepasskey.crypto.kdf.KdfParameters
 import com.keepasskey.crypto.stream.InnerRandomStreamCipher
@@ -92,6 +93,15 @@ object KdbxFile {
      * 因此 cipherKey 变体由数据段首个块的解密探针裁决（见 [KdbxCipherKeyResolver.resolve]），
      * 保存时自动迁移官方标准。
      *
+     * D20 类型化异常三态（对齐官方 KeePass 2.61.1）：
+     * - 头部 SHA-256 不符 → [KdbxCorruptFileException]（官方 `InvalidDataException(FileHeaderCorrupted)`，Read.cs:150）；
+     * - **头部 HMAC 不符 → [KdbxInvalidCredentialsException]**（官方 `InvalidCompositeKeyException`，Read.cs:157；
+     *   凭据错误是唯一能让头部 HMAC 不符的原因，本方法在 :150 抛出，是**唯一**的凭据异常出口）；
+     * - 数据块/终止块 HMAC 不符、以及头部 HMAC 通过后的 cipherKey 探针失败 →
+     *   [KdbxCorruptFileException]（官方 `InvalidDataException(FileCorrupted)`，HmacBlockStream.cs:233/264）。
+     *   最后一条至关重要：篡改文件必须报「文件损坏或被篡改」，绝不能被上层显示为「主密码错误」
+     *   并计入解锁失败节流——否则用户永远无法得知库已被篡改。
+     *
      * [passwordChars] 允许为 null 或空数组（表示无主密码、仅密钥文件解锁，
      * 对齐官方 KeyUtil.CreateKey 对空密码不添加密码分量的语义，详见 [deriveKeys]）。
      */
@@ -135,6 +145,8 @@ object KdbxFile {
             Arrays.fill(headerHmacKey, 0.toByte())
 
             if (!java.security.MessageDigest.isEqual(actualHeaderHmac, storedHeaderHmac)) {
+                // D20：头部 HMAC 不符是本管线**唯一**的凭据错误出口——hmacKey64 由复合密钥派生，
+                // 凭据错误必然在此暴露；一旦越过本行，后续任何完整性失败都不得再报凭据错误。
                 throw KdbxInvalidCredentialsException("主密码错误或文件头部认证失败（HMAC 校验未通过）")
             }
 
@@ -196,10 +208,24 @@ object KdbxFile {
         // ISSUE-P2-24：大附件在解析期即流式落盘（binaryStore 为 null 时行为与既往逐字一致）
         val innerHeader = InnerHeader.deserialize(xmlInputStream, binaryStore)
 
-        val innerCipher = InnerRandomStreamCipher(
-            innerHeader.innerRandomStreamId,
-            innerHeader.innerRandomStreamKey
-        )
+        // D7 协调项：内层随机流算法由文件自述（属未认证字段），不支持时 crypto 侧抛
+        // CryptoException.CipherException；在本跨模块边界统一包装为类型化
+        // [KdbxCorruptFileException]，使上层得到「不支持的内层随机流算法」这一可行动语义，
+        // 而非泛化失败（crypto 侧行为不改动，由其归属代理负责）。
+        // 注：执行到此处时头部 SHA-256 / 头部 HMAC / 首个数据块 HMAC 均已校验通过，
+        // 故该算法标识只可能来自「格式不受支持的合法库」或「已通过认证后被篡改的库」。
+        val innerCipher = try {
+            InnerRandomStreamCipher(
+                innerHeader.innerRandomStreamId,
+                innerHeader.innerRandomStreamKey
+            )
+        } catch (e: CryptoException) {
+            // 跨模块异常包装：crypto 侧的泛化失败在此收敛为类型化「文件损坏/格式不受支持」
+            throw KdbxCorruptFileException(
+                "不支持的内层随机流算法: id=${innerHeader.innerRandomStreamId}（文件损坏或格式不受支持）",
+                e
+            )
+        }
 
         val parseResult = KdbxXmlParser(innerCipher).parse(xmlInputStream, innerHeader.binaries)
 
@@ -228,6 +254,9 @@ object KdbxFile {
             masterKeyChanged = meta.masterKeyChanged,
             masterKeyChangeRec = meta.masterKeyChangeRec,
             masterKeyChangeForce = meta.masterKeyChangeForce,
+            // KDBX 4.1 追加字段（官方 Read.Streamed.cs:250 / Write.cs:461-462）：
+            // XML 层已读写对称，此处补齐装配跳，否则该字段经 save/load 会丢失
+            masterKeyChangeForceOnce = meta.masterKeyChangeForceOnce,
             settingsChanged = meta.settingsChanged,
             rootGroup = parseResult.rootGroup,
             binaries = innerHeader.binaries,
@@ -240,6 +269,9 @@ object KdbxFile {
             deletedObjects = meta.deletedObjects,
             memoryProtection = meta.memoryProtection,
             customData = meta.customData,
+            // KDBX 4.1 追加字段：CustomData 各项的 LastModificationTime
+            //（并行字段方案，customData 保持 Map<String,String> 以免波及 app/sync 消费方）
+            customDataTimes = meta.customDataTimes,
             historyMaxItems = meta.historyMaxItems,
             historyMaxSize = meta.historyMaxSize,
             lastSelectedGroup = meta.lastSelectedGroup,

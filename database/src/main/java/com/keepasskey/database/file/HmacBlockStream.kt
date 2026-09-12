@@ -2,7 +2,6 @@ package com.keepasskey.database.file
 
 import com.keepasskey.crypto.hash.HashUtil
 import com.keepasskey.database.exception.KdbxCorruptFileException
-import com.keepasskey.database.exception.KdbxInvalidCredentialsException
 import com.keepasskey.database.io.LittleEndianUtil
 import java.io.ByteArrayOutputStream
 import java.io.EOFException
@@ -91,7 +90,11 @@ object HmacBlockStream {
     }
 
     /**
-     * 从输入流中读取并校验全部 HMAC 数据块，返回组装后的完整数据
+     * 从输入流中读取并校验全部 HMAC 数据块，返回组装后的完整数据。
+     *
+     * D20：块/终止块 HMAC 不符一律抛 [KdbxCorruptFileException]（完整性失败），
+     * 与流式路径完全一致；比较使用 [java.security.MessageDigest.isEqual]（非常时比较）。
+     * F-16：原 `contentEquals` 为非常时比较，已随本路径一并替换。
      */
     fun readAll(inputStream: InputStream, hmacKey64: ByteArray): ByteArray {
         val bos = ByteArrayOutputStream()
@@ -115,18 +118,26 @@ object HmacBlockStream {
                 }
 
                 if (blockSize == 0) {
-                    // 终止块校验
+                    // 终止块校验。
+                    // D20：数据块/终止块 HMAC 不符 = **完整性失败**，不得误判为凭据错误。
+                    // 依据官方三态语义（KeePass 2.61.1 KdbxFile.Read.cs:150/157 与
+                    // HmacBlockStream.cs:233/264）：头部 SHA 不符 → InvalidDataException(FileHeaderCorrupted)；
+                    // 头部 HMAC 不符 → InvalidCompositeKeyException（凭据错误）；**数据块/终止块 HMAC 不符
+                    // → InvalidDataException(FileCorrupted)**。此处已越过头部认证，凭据必然正确，
+                    // 故只能归因为「文件损坏或被篡改」。
                     val actualHmac = hmacer.compute(blockIndex, 0, EMPTY_BLOCK_DATA, 0, 0)
-                    if (!actualHmac.contentEquals(expectedHmac)) {
-                        throw KdbxInvalidCredentialsException("HMAC 终止块校验失败：主密码错误或文件末尾被篡改")
+                    if (!java.security.MessageDigest.isEqual(actualHmac, expectedHmac)) {
+                        throw KdbxCorruptFileException("HMAC 终止块校验失败：文件已损坏或被篡改（完整性认证未通过）")
                     }
                     break
                 }
 
                 val blockData = LittleEndianUtil.readBytes(inputStream, blockSize)
                 val actualHmac = hmacer.compute(blockIndex, blockSize, blockData, 0, blockData.size)
-                if (!actualHmac.contentEquals(expectedHmac)) {
-                    throw KdbxInvalidCredentialsException("HMAC 块 #$blockIndex 校验失败：主密码错误或数据块被篡改")
+                if (!java.security.MessageDigest.isEqual(actualHmac, expectedHmac)) {
+                    // D20：同上——块 HMAC 失败属完整性失败。此读取条目（readAll）无生产调用方，
+                    // 但异常语义必须与流式路径一致，避免离线工具把篡改误报为「主密码错误」。
+                    throw KdbxCorruptFileException("HMAC 块 #$blockIndex 校验失败：文件已损坏或被篡改（完整性认证未通过）")
                 }
 
                 bos.write(blockData)
@@ -147,8 +158,14 @@ object HmacBlockStream {
  *
  * TASK-01 整改：`terminated` 仅在终止块 HMAC 校验**通过后**置位；校验失败时先记录
  * [terminalValidationFailed] 再抛出。原因：javax.crypto.CipherInputStream 会把底层流
- * 抛出的 IOException（含本流的凭据异常）吞掉并伪装为 EOF，若解析期间（GZip 预读）
+ * 抛出的 IOException（含本流的完整性异常）吞掉并伪装为 EOF，若解析期间（GZip 预读）
  * 恰好拉取到终止块，异常将无法抵达上层——权威裁决以 [verifyEndOfStream] 为准。
+ *
+ * D20 异常语义：本流始终运行在**头部 HMAC 已通过之后**，此时凭据已被证明正确，
+ * 因此块/终止块 HMAC 校验失败一律抛 [KdbxCorruptFileException]（完整性失败，
+ * 对齐官方 HmacBlockStream.cs 抛 `InvalidDataException(FileCorrupted)` 的语义），
+ * **绝不抛凭据异常**——否则上层会把「文件被篡改」显示为「主密码错误」并计入解锁失败节流，
+ * 且用户永远无法得知库已被篡改。
  */
 class HmacBlockInputStream(
     private val source: InputStream,
@@ -195,7 +212,7 @@ class HmacBlockInputStream(
         // 导致本方法把「未校验通过」误判为「已通过」。此处作为权威检查点，
         // 必须重放已记录的校验失败，确保篡改文件在任何路径下都 fail-closed。
         if (terminalValidationFailed) {
-            throw KdbxInvalidCredentialsException("HMAC 终止块校验失败：主密码错误或文件末尾被篡改")
+            throw KdbxCorruptFileException("HMAC 终止块校验失败：文件已损坏或被篡改（完整性认证未通过）")
         }
         while (!terminated) {
             if (!loadNextBlock()) break
@@ -248,8 +265,10 @@ class HmacBlockInputStream(
                 // TASK-01 整改：先记账再抛出。绝不提前置 terminated=true——
                 // 若该异常被中间层（如 CipherInputStream）吞掉，[verifyEndOfStream]
                 // 必须能凭 terminalValidationFailed 重放失败，杜绝篡改文件静默通过。
+                // D20：重放的异常类型同时改为完整性失败（[KdbxCorruptFileException]），
+                // 与首次抛出保持一致——本流已越过头部认证，凭据必然正确。
                 terminalValidationFailed = true
-                throw KdbxInvalidCredentialsException("HMAC 终止块校验失败：主密码错误或文件末尾被篡改")
+                throw KdbxCorruptFileException("HMAC 终止块校验失败：文件已损坏或被篡改（完整性认证未通过）")
             }
             terminated = true
             return false
@@ -258,7 +277,10 @@ class HmacBlockInputStream(
         val blockData = LittleEndianUtil.readBytes(source, blockSize)
         val actualHmac = hmacer.compute(blockIndex, blockSize, blockData, 0, blockData.size)
         if (!java.security.MessageDigest.isEqual(actualHmac, expectedHmac)) {
-            throw KdbxInvalidCredentialsException("HMAC 块 #$blockIndex 校验失败：主密码错误或数据块被篡改")
+            // D20：数据块 HMAC 不符属**完整性失败**，不是凭据错误。官方三态语义见
+            // KeePass 2.61.1 HmacBlockStream.cs:233（官方抛 InvalidDataException(FileCorrupted)）：
+            // 头部 HMAC 已在上层通过，凭据已被证明正确，故不得让上层据此计入解锁失败节流。
+            throw KdbxCorruptFileException("HMAC 块 #$blockIndex 校验失败：文件已损坏或被篡改（完整性认证未通过）")
         }
 
         currentBlock = blockData

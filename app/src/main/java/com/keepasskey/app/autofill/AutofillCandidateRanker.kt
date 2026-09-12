@@ -10,7 +10,7 @@ import com.keepasskey.core.model.PasskeyData
  *
  * 设计前提（**安全不可退让**）：
  * - 本排序器**只决定候选之间的先后与截断**，**绝不放宽**任何匹配条件——
- *   入选项必须先通过既有的严格匹配（[DomainMatcher.isDomainMatch] / [DomainMatcher.isPackageMatch]，
+ *   入选项必须先通过既有的严格匹配（[DomainMatcher.isDomainMatch] / [DomainMatcher.isAndroidPackageMatch]，
  *   无任何 title/notes 启发式）。`webDomain` 的归属校验由调用方（[AutofillOriginResolver]）负责，
  *   进入本类时已被判定为可用；
  * - 打分仅用于「同一批已匹配候选」的排序，分数高低不改变「是否可填充」这一事实。
@@ -25,7 +25,7 @@ object AutofillCandidateRanker {
 
     /** 匹配原因（供诊断与单测断言；不参与安全判定） */
     enum class MatchReason {
-        /** 条目 url 以 android:// 绑定调用包名（严格精确，无父子关系） */
+        /** 条目 url 以 android:// 绑定调用包名（严格精确，无父子关系；https:// 等 Web 绑定条目不产生本原因） */
         EXACT_PACKAGE,
 
         /** 条目域名与目标域完全相等 */
@@ -117,7 +117,7 @@ object AutofillCandidateRanker {
         var score = 0
 
         val packageMatch = callingPackage.isNotBlank() && entry.url.isNotBlank() &&
-                DomainMatcher.isPackageMatch(entry.url, callingPackage)
+                DomainMatcher.isAndroidPackageMatch(entry.url, callingPackage)
         if (packageMatch) {
             score += SCORE_EXACT_PACKAGE
             reasons += MatchReason.EXACT_PACKAGE

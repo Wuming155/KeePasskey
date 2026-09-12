@@ -116,6 +116,38 @@ class SyncCacheTest {
     }
 
     @Test
+    fun `clear 与 clearAll 均不删除防回滚状态文件`() {
+        // F-23 回归锁：`.rollback` 是**跨会话安全状态**，不是缓存产物。
+        // 即便它出现在缓存目录（目录误配 / 升级前的历史残留），缓存清理也不得删除它——
+        // 整改前 clear() 把它列入删除清单，而 clear() 由锁库 / 凭据清空触发，
+        // 导致「用户锁定一次即状态归零」，云侧随即可以重放旧库。
+        val dir = tmpFolder.newFolder("rollback-state-cache")
+        val cache = SyncCache(dir)
+        val remotePath = "remote/vault.kdbx"
+        cache.writeCache(remotePath, "payload".toByteArray())
+        cache.writeBaseContent(remotePath, "base".toByteArray())
+
+        val key = SyncCache.sha256Hex(remotePath.toByteArray(Charsets.UTF_8))
+        val stateFile = File(dir, "$key${SyncRollbackGuard.SUFFIX_STATE}")
+        stateFile.writeBytes("current=deadbeef\n".toByteArray(Charsets.UTF_8))
+
+        cache.clear(remotePath)
+
+        assertTrue("SyncCache.clear 不得删除防回滚状态: ${stateFile.name}", stateFile.isFile)
+        assertNull(cache.readCache(remotePath))
+
+        cache.writeCache(remotePath, "payload-2".toByteArray())
+        assertTrue(cache.clearAll())
+
+        assertTrue("SyncCache.clearAll 不得删除防回滚状态: ${stateFile.name}", stateFile.isFile)
+        assertEquals(
+            "除防回滚状态外不得残留其他缓存文件",
+            listOf(stateFile.name),
+            dir.listFiles()?.map { it.name }?.sorted().orEmpty()
+        )
+    }
+
+    @Test
     fun `缓存文件权限收敛为仅属主可读写`() {
         // ISSUE-P1-07 验收标准 2：密文快照自落盘第一刻起即 0600，绝不依赖默认 umask
         Assume.assumeTrue(

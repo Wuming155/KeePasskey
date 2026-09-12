@@ -22,7 +22,9 @@ internal class AutoTypeNode(
 
     override fun startChild(name: String, attrs: Attributes): SaxNode {
         return when (name) {
-            KdbxConstants.Xml.ENABLED -> TextNode { enabled = it.lowercase() != "false" }
+            // 官方 ReadBool(xr, true)（Read.Streamed.cs:527）：精确 "True"/"False"，
+            // 非法值回落字段默认值 true；`<Enabled>1</Enabled>` 不得被当成 false
+            KdbxConstants.Xml.ENABLED -> TextNode { enabled = KdbxXmlScalarParsers.parseBool(it, true) }
             KdbxConstants.Xml.DATA_TRANSFER_OBFUSCATION -> TextNode { dataTransferObfuscation = it.trim().toIntOrNull() ?: 0 }
             KdbxConstants.Xml.DEFAULT_SEQUENCE -> TextNode { defaultSequence = it }
             KdbxConstants.Xml.ASSOCIATION -> AssociationNode { associations.add(it) }

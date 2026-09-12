@@ -24,6 +24,7 @@ private fun KdbxDatabase.toMetaData(): KdbxMetaData {
         masterKeyChanged = masterKeyChanged,
         masterKeyChangeRec = masterKeyChangeRec,
         masterKeyChangeForce = masterKeyChangeForce,
+        masterKeyChangeForceOnce = masterKeyChangeForceOnce,
         settingsChanged = settingsChanged,
         recycleBinEnabled = recycleBinEnabled,
         recycleBinUuid = recycleBinUuid,
@@ -37,7 +38,8 @@ private fun KdbxDatabase.toMetaData(): KdbxMetaData {
         memoryProtection = memoryProtection,
         customIcons = customIcons,
         deletedObjects = deletedObjects,
-        customData = customData
+        customData = customData,
+        customDataTimes = customDataTimes
     )
 }
 
@@ -63,8 +65,20 @@ class KdbxXmlSerializer(
         KdbxXmlMetaSerializer.serialize(writer, database.toMetaData())
 
         // 2. 流式写出 <Root> 包裹的根分组
+        //    缺陷 D7：透传数据库级 MemoryProtection（标准五字段 Protected 判定依据）
+        //    缺陷 D17：透传池条目数（池外附件索引须内联 Base64 写出，不得写出悬空 Ref）
         writer.startElement(KdbxConstants.Xml.ROOT_GROUP)
-        KdbxXmlGroupSerializer.serialize(writer, database.rootGroup, innerStreamCipher)
+        KdbxXmlGroupSerializer.serialize(
+            writer,
+            database.rootGroup,
+            innerStreamCipher,
+            memoryProtection = database.memoryProtection,
+            binaryPoolSize = database.binaries.size
+        )
+
+        // 3. 根作用域墓碑列表：官方写在 <Root> 内、根 Group 之后（KdbxFile.Write.cs:430）
+        KdbxXmlMetaSerializer.serializeDeletedObjects(writer, database.deletedObjects)
+
         writer.endElement()
 
         writer.endElement()

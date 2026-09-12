@@ -72,6 +72,30 @@ class AutofillCandidateRankerTest {
     }
 
     @Test
+    fun `域名形态包名不得按包名维度命中`() {
+        // P2-40 回归锁：https://<host> 条目不得因调用包名与 host 同形而入选
+        // （整改前 isPackageMatch 剥离任意 scheme → ("https://github.com", "github.com") == true）
+        val webBound = entry(hexIdOf(1), "https://github.com")
+        assertTrue(
+            "Web 绑定条目不得被同形包名命中",
+            AutofillCandidateRanker.rank(listOf(webBound), "github.com", null).isEmpty()
+        )
+
+        // 裸包名条目同样不再按包名命中（只认显式 android:// 绑定）
+        val bare = entry(hexIdOf(2), "com.example.app")
+        assertTrue(
+            "裸包名条目不得按包名命中",
+            AutofillCandidateRanker.rank(listOf(bare), "com.example.app", null).isEmpty()
+        )
+
+        // 同一批内：android:// 绑定条目仍正常入选，且仅它入选
+        val bound = entry(hexIdOf(3), "android://com.example.app")
+        val ranked = AutofillCandidateRanker.rank(listOf(webBound, bare, bound), "com.example.app", null)
+        assertEquals(1, ranked.size)
+        assertEquals(bound.id.toHexString(), ranked.first().entry.id.toHexString())
+    }
+
+    @Test
     fun `webDomain 为空时不做域名匹配`() {
         val e = entry(hexIdOf(1), "https://github.com")
         assertTrue(AutofillCandidateRanker.rank(listOf(e), "com.other", null).isEmpty())

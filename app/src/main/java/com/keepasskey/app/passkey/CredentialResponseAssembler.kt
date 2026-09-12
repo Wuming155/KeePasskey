@@ -98,7 +98,7 @@ class CredentialResponseAssembler @Inject constructor(
         // - 浏览器委派（可信 web origin）：requestJson 的 rp.id 必须等于浏览器 origin 域
         //   或为其可注册后缀（WebAuthn 规范），杜绝伪造 rp.id 骗取任意站点凭据；
         // - 普通应用（apk-key-hash origin）：不信任 requestJson 中的 web rp.id，
-        //   仅返回调用包名已绑定的凭据（严格包名匹配，无启发式）。
+        //   仅返回调用包名已绑定的凭据（P2-40：条目 url 必须是 android://<包名>，严格精确，无启发式）。
         val browserFlow = CallingOriginResolver.isBrowserOrigin(callingOrigin)
         val targetRpId: String
         if (browserFlow) {
@@ -113,7 +113,8 @@ class CredentialResponseAssembler @Inject constructor(
             val passkey = PasskeyData.fromCustomFields(entry.customFields) ?: return@filter false
             when {
                 browserFlow -> DomainMatcher.isDomainMatch(passkey.relyingPartyId, targetRpId)
-                else -> callingPackage.isNotBlank() && DomainMatcher.isPackageMatch(entry.url, callingPackage)
+                else -> callingPackage.isNotBlank() &&
+                    DomainMatcher.isAndroidPackageMatch(entry.url, callingPackage)
             }
         }
 
@@ -174,8 +175,9 @@ class CredentialResponseAssembler @Inject constructor(
         requestCodes: RequestCodeAllocator,
         responseBuilder: BeginGetCredentialResponse.Builder
     ) {
-        // H1/L1 整改：仅浏览器委派信任 web origin 域匹配；普通应用仅按严格包名边界匹配
-        // （条目 url 为 android://<包名> 时同样可匹配），移除 title/notes.contains 启发式。
+        // H1/L1 整改：仅浏览器委派信任 web origin 域匹配；普通应用仅按严格包名边界匹配，
+        // 且条目 url 必须显式为 `android://<包名>`（P2-40：`https://<host>` 条目不得再被同形包名命中，
+        // 否则域名形态包名可冒领 Web 绑定条目），移除 title/notes.contains 启发式。
         val browserFlow = CallingOriginResolver.isBrowserOrigin(callingOrigin)
         val targetDomain = if (browserFlow) DomainMatcher.extractDomain(callingOrigin) else ""
         val matchedPasswords = allEntries.filter { entry ->
@@ -183,7 +185,7 @@ class CredentialResponseAssembler @Inject constructor(
             val domainMatch = targetDomain.isNotBlank() && entry.url.isNotBlank() &&
                     DomainMatcher.isDomainMatch(entry.url, targetDomain)
             val packageMatch = callingPackage.isNotBlank() && entry.url.isNotBlank() &&
-                    DomainMatcher.isPackageMatch(entry.url, callingPackage)
+                    DomainMatcher.isAndroidPackageMatch(entry.url, callingPackage)
             hasPassword && (domainMatch || packageMatch)
         }
 

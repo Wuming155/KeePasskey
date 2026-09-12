@@ -207,7 +207,13 @@ KdfEngine (abstract)
 
 **`AesKdf`**（`AesKdf.cs`，305 行）：
 
-- UUID `C9D9F39A-...`；参数 `S`（32 字节种子）、`R`（轮数 UInt64，默认 `PwDefs.DefaultKeyEncryptionRounds` = 6 000 000）。
+- UUID `C9D9F39A-...`；参数 `S`（32 字节种子）、`R`（轮数 UInt64，默认 `PwDefs.DefaultKeyEncryptionRounds` = **600 000**）。
+  > **勘误（2026-09-12，直接读官方源码核实）**：本行原文写 `6 000 000`，实际常量是
+  > `KeePass-2.61.1-Source/KeePassLib/PwDefs.cs:116` 的 `DefaultKeyEncryptionRounds = 600000`。
+  > KeePass 的数据库设置页另提供**按目标耗时的基准校准**（`KdfEngine.GetBestParameters`，
+  > 见 `AesKdf.cs` / `Argon2Kdf.cs:181-189`），故真实库的轮数常远大于该出厂常量；
+  > 本仓 `KdbxConstants.DEFAULT_AES_KDF_ROUNDS = 6_000_000` 属偏保守的加固取值，
+  > 与该常量并不冲突（勿据本行把它"改正"为 600 000）。
 - `TransformKey`（`AesKdf.cs:116`）的三级降级链：原生 DLL（`NativeLib.TransformKey256`，AES-NI）→ GCrypt（Unix）→ **托管实现**（`TransformKeyManaged`，把 32 字节拆成两个 16 字节半块，各用一个工作线程 + 8192 块的大缓冲做 ECB 批量加密以摊薄开销，`AesKdf.cs:141-188`）；最后整体 SHA-256 一次。
 
 **`Argon2Kdf`**（`Argon2Kdf.cs` + `Argon2Kdf.Core.cs`，partial）：
@@ -303,7 +309,13 @@ cipherKey  = resize(masterSeed || transformed, cipherKeyLen) // 64B -> 32B (AES)
 hmacKey64  = SHA512(masterSeed || transformed || 0x01)
 ```
 
-HMAC 块密钥（`HmacBlockStream.GetHmacKey64`，`HmacBlockStream.cs:152-179`）：`SHA512(UInt64(blockIndex) || hmacKey64)` —— **每块密钥不同且块索引隐含在 HMAC 中不占空间**；头部 HMAC 用 `blockIndex = ulong.MaxValue`（`KdbxFile.ComputeHeaderHmac`，`KdbxFile.cs:479-491`），与数据块隔离。
+HMAC 块密钥（`HmacBlockStream.GetHmacKey64`，`HmacBlockStream.cs:152-179`）：`SHA512(UInt64(blockIndex) || hmacKey64)`（`hmacKey64` 恒 64 字节，`Debug.Assert(pbKey.Length == 64)`）—— **每块密钥不同且块索引隐含在 HMAC 中不占空间**；头部 HMAC 用 `blockIndex = ulong.MaxValue`（`KdbxFile.ComputeHeaderHmac`，`KdbxFile.cs:479-491`），与数据块隔离。
+
+> **补充（2026-09-12，以规范与官方读/写路径核实，避免误读本行）**：块 HMAC 的**摘要输入**为
+> `LE64(i) ‖ LE32(size) ‖ ciphertext`（规范 kdbx.html §"HMAC-Protected Block Stream"），
+> 即块索引**既参与密钥派生、也参与摘要输入**；本行"不占空间"指的是**索引不落地到文件**
+> （由块的先后位置隐含），不是说索引不进摘要。本仓实现见 `BlockHmac.kt`（密钥 64 字节、
+> 摘要输入含索引），与规范及 KeePassXC 一致。
 
 ### 4.2 打开数据库：完整读管线
 
@@ -554,5 +566,5 @@ ColumnProviderPool    // 主列表自定义列
 ### 附：阅读本文档时对应的版本事实
 
 - 文件签名常量：`FileSignature1 = 0x9AA2D903`、`FileSignature2 = 0xB54BFB67`；最高支持版本 `FileVersion32 = 0x00040001`（4.1）（`KdbxFile.cs:69-88`）。
-- KDF 默认参数：AES-KDF 6 000 000 轮；Argon2 默认 t=2、m=64MB、p=2（`Argon2Kdf.cs:70-72`）。
+- KDF 默认参数：AES-KDF **600 000** 轮（`PwDefs.cs:116`；原文误作 6 000 000，勘误见 §3.4）；Argon2 默认 t=2、m=64MB、p=2（`Argon2Kdf.cs:70-72`）。
 - 内置加密引擎池：AES-256-CBC 与 ChaCha20（`CipherPool.GlobalPool`，`CipherPool.cs:43-47`）；Twofish 需插件（官方源码内无 TwofishEngine——**这一点对 KeePasskey 尤其重要：v1 需支持的内置算法只有 AES 与 ChaCha20，Twofish 是头部 CipherID 指向的插件 UUID，遇见即提示不支持**）。

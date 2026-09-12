@@ -21,6 +21,10 @@ import javax.inject.Singleton
  * 1. **会话终止**：注册为 [SessionLockObserver]，由 `DatabaseSession` 在锁定/关闭时同步回调；
  * 2. **凭据销毁**：同步配置被清空（换服务器/退出同步）时由 `SyncCredentialsStore.clear()` 直接调用。
  *
+ * F-23 边界：本类只清 `cacheDir/sync` 的 **KDBX 密文快照**。防回滚高水位状态已迁至
+ * `filesDir/rollback`（`SyncRollbackGuard.STATE_DIR_NAME`），**不随锁定销毁**（它是安全状态，
+ * 不是缓存）；即便目录内有升级前遗留的 `SUFFIX_STATE` 文件，[SyncCache.clearAll] 也会保留它们。
+ *
  * 清理失败按「可用但不静默」处理：落调试日志并如实返回 false，绝不向上抛出——
  * 缓存清理失败不得阻断锁库或凭据清除主流程。
  */
@@ -41,7 +45,12 @@ class SyncCacheEvictor @Inject constructor(
     /**
      * 销毁全部同步缓存。
      *
-     * @return 缓存目录已不存在或内容已清空时返回 true；存在删除失败项返回 false
+     * F-23：防回滚状态**不在此目录**（生产为 `filesDir/rollback`，`SyncRollbackGuard.STATE_DIR_NAME`），
+     * 且 [SyncCache.clearAll] 亦不会删除 `SUFFIX_STATE` 命名的文件。因此「残留计数」必须把
+     * 这类文件排除在外，否则升级前落在本目录的历史状态文件会让每次锁库都误报
+     * 「密文可能仍可恢复」——该文件仅含 SHA-256 摘要 + Keystore HMAC，不是密文快照。
+     *
+     * @return 缓存目录已不存在或（应清理的）内容已清空时返回 true；存在删除失败项返回 false
      */
     fun evictAll(): Boolean {
         val dir = cacheDir
@@ -53,7 +62,7 @@ class SyncCacheEvictor @Inject constructor(
             false
         }
 
-        val remaining = dir.list()?.size ?: 0
+        val remaining = dir.list()?.count { !SyncCache.isRollbackStateFileName(it) } ?: 0
         if (!cleared || remaining > 0) {
             debugLog.warn(TAG, "同步缓存残留 $remaining 项，锁定后密文可能仍可恢复")
         } else {

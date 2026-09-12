@@ -2,6 +2,7 @@ package com.keepasskey.database.xml
 
 import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.core.model.KdbxGroup
+import com.keepasskey.core.model.MemoryProtectionConfig
 import com.keepasskey.crypto.stream.InnerRandomStreamCipher
 
 /**
@@ -12,7 +13,11 @@ object KdbxXmlGroupSerializer {
     fun serialize(
         writer: KdbxXmlStreamWriter,
         group: KdbxGroup,
-        innerStreamCipher: InnerRandomStreamCipher?
+        innerStreamCipher: InnerRandomStreamCipher?,
+        /** 数据库级内存保护配置（缺陷 D7），透传至条目写出器。 */
+        memoryProtection: MemoryProtectionConfig = MemoryProtectionConfig(),
+        /** 二进制池条目数（缺陷 D17 内联回退判定），透传至条目写出器。 */
+        binaryPoolSize: Int = 0
     ) {
         writer.startElement(KdbxConstants.Xml.GROUP)
 
@@ -62,11 +67,17 @@ object KdbxXmlGroupSerializer {
         }
 
         for (entry in group.entries) {
-            KdbxXmlEntrySerializer.serialize(writer, entry, innerStreamCipher)
+            KdbxXmlEntrySerializer.serialize(
+                writer,
+                entry,
+                innerStreamCipher,
+                memoryProtection = memoryProtection,
+                binaryPoolSize = binaryPoolSize
+            )
         }
 
         for (subgroup in group.subgroups) {
-            serialize(writer, subgroup, innerStreamCipher)
+            serialize(writer, subgroup, innerStreamCipher, memoryProtection, binaryPoolSize)
         }
 
         writer.endElement()

@@ -126,13 +126,18 @@ object DomainMatcher {
     }
 
     /**
-     * Android 应用包名匹配逻辑。
+     * Android 应用包名匹配逻辑（**宽松变体**）。
      * F1 整改（CWE-284 水平越权）：scheme 剥离后必须**精确相等**。
      * Android 包名之间不存在任何父子信任关系——"evil.com.victim.app" 与 "com.victim.app"
      * 是可由任意开发者分别注册的两个独立应用，任何后缀/前缀包含匹配都会让无关包名
      * 命中他人凭据（跨应用凭据读取）。对齐 Android 官方 Credential Provider 指南的包名精确匹配要求。
      * L1 整改保留：支持剥离条目 url 中的 android:// 等 scheme 前缀，
      * 使入库时记录为 android://<包名> 的凭据可与调用包名正确匹配。
+     *
+     * **本方法剥离任意 scheme**（`isPackageMatch("https://github.com", "github.com") == true`），
+     * 故**严禁用于密码 / 口令填充链路的放行判定**（P2-40 域名形态包名冒充）。
+     * 填充链路一律使用 [isAndroidPackageMatch]；本方法仅保留给「保存时条目去重 / 归一化」等
+     * 不构成放行决策的场景（如 `VaultEntryWriteCoordinator.saveAutofillCredential`）。
      */
     fun isPackageMatch(entryPackageHint: String, callingPackage: String): Boolean {
         var p1 = entryPackageHint.trim().lowercase()
@@ -164,5 +169,32 @@ object DomainMatcher {
         if (slashIdx >= 0) p = p.substring(0, slashIdx)
         val trimmed = p.trim().lowercase()
         return trimmed.ifEmpty { null }
+    }
+
+    /**
+     * 凭据包名绑定匹配（**密码 / 口令填充链路的唯一合法入口**，P2-40 整改）。
+     *
+     * 硬约束：仅当条目 url 显式声明 `android://<包名>` 时才允许按包名维度命中，
+     * 且剥离 scheme 后与调用包名**精确相等**（复用 [extractAndroidBoundPackage]，只认 android scheme）。
+     * `https://github.com` 之类的 Web 绑定条目即使与调用包名同形，也**绝不**按包名命中——
+     * 否则任意开发者只需注册一个与 Web 域同形的包名（Android 允许 `github.com` 这类反向域名形态），
+     * 即可冒领该站点的 Web 绑定凭据（跨应用凭据读取，CWE-284）。
+     *
+     * Web 绑定条目仍只经既有浏览器指纹白名单 / DAL 校验 / [isDomainMatch] 域匹配路径命中，
+     * 本入口不放宽也不参与那条链路（fail-closed 语义不变）。
+     *
+     * 与 [isPackageMatch] 的行为差异（后者服务保存侧去重，语义更宽）：
+     * - `("https://github.com", "github.com")` → 本方法 false，[isPackageMatch] true；
+     * - `("github.com", "github.com")`（裸包名）→ 本方法 false，[isPackageMatch] true；
+     * - `("android://com.example.app", "com.example.app")` → 两者均 true。
+     *
+     * @param entryUrl 条目 url（KDBX 条目 URL 字段原值）
+     * @param callingPackage 系统背书的调用方包名
+     */
+    fun isAndroidPackageMatch(entryUrl: String, callingPackage: String): Boolean {
+        val boundPackage = extractAndroidBoundPackage(entryUrl) ?: return false
+        val calling = callingPackage.trim().lowercase()
+        if (calling.isEmpty()) return false
+        return boundPackage == calling
     }
 }

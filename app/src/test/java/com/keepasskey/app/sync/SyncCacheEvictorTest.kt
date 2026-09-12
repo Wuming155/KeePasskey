@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.database.session.DatabaseSession
 import com.keepasskey.sync.engine.SyncCache
+import com.keepasskey.sync.engine.SyncRollbackGuard
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -19,6 +20,10 @@ import java.lang.reflect.Proxy
 /**
  * ISSUE-P1-07 端到端验收：锁库 / 关闭 / 同步凭据销毁后，`cacheDir/sync` 下不得残留
  * 任何 KDBX 密文快照（`.cache` 工作副本与 `.basecache` 三方合并基准）。
+ *
+ * F-23 例外：防回滚高水位状态（`.rollback`）**不属**可丢弃缓存——它已迁至
+ * `filesDir/<SyncRollbackGuard.STATE_DIR_NAME>`，且缓存销毁器不得删除该后缀的文件
+ * （见 `F23 锁库清理缓存不得删除防回滚状态文件`）。
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class SyncCacheEvictorTest {
@@ -99,6 +104,32 @@ class SyncCacheEvictorTest {
             syncDir.walkTopDown().filter { it.isFile }.toList()
         )
         assertEquals(DatabaseSession.SessionState.CLOSED, session.state.value)
+    }
+
+    @Test
+    fun `F23 锁库清理缓存不得删除防回滚状态文件`() = runTest {
+        // F-23 回归锁（真实锁库路径）：防回滚状态现已迁至 filesDir，缓存销毁器只清 cacheDir/sync
+        // 的 KDBX 密文快照；即便目录内存在升级前遗留 / 误配的 `.rollback` 状态文件，
+        // 锁库清理也必须保留它——整改前 SyncCache.clearAll() 会连同它一起删除，
+        // 导致「用户锁定一次即状态归零」，云侧随即可以重放旧库。
+        openVault()
+        val syncDir = seedCache()
+        val stateFile = File(
+            syncDir,
+            SyncCache.sha256Hex("/remote/vault.kdbx".toByteArray(Charsets.UTF_8)) +
+                SyncRollbackGuard.SUFFIX_STATE
+        ).apply { writeBytes("current=deadbeef\n".toByteArray(Charsets.UTF_8)) }
+
+        session.addLockObserver(evictor)
+        session.lock()
+
+        assertTrue("防回滚状态必须跨锁定保留: ${stateFile.name}", stateFile.isFile)
+        assertEquals(
+            "除防回滚状态外不得残留密文快照",
+            listOf(stateFile.name),
+            syncDir.walkTopDown().filter { it.isFile }.map { it.name }.toList()
+        )
+        assertTrue("残留计数必须排除防回滚状态（它不是密文快照）", evictor.evictAll())
     }
 
     @Test

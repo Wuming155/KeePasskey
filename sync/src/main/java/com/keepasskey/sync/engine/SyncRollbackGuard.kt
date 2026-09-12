@@ -41,22 +41,62 @@ sealed interface RollbackVerdict {
  * 裁决：`digest == current` → [RollbackVerdict.Unchanged]；`digest ∈ recent` →
  * [RollbackVerdict.ReplayDetected]；否则 [RollbackVerdict.Accept]。
  *
+ * ## 状态生命周期（F-23 整改后必须如实声明）
+ *
+ * [stateDir] 由调用方注入，**生产路径固定为 `filesDir/<STATE_DIR_NAME>`**（跨会话锁定保留的
+ * 持久目录），**绝不可指向 `cacheDir` 下的可丢弃缓存**。整改前状态与同步缓存同目录，而
+ * `SyncCache.clear()` 把 [SUFFIX_STATE] 列入删除清单、该方法又由 `SyncCacheEvictor.onSessionLocked()`
+ * 在每次锁库 / 关库 / 同步凭据清空时调用——状态一空 [inspect] 即因 `current == null` 返回
+ * [RollbackVerdict.Accept]，云侧只要等到用户**正常锁定一次**便可重放旧库，重放防线被降级为
+ * 「当前这次未锁定会话」。现由两侧共同保证该不变式：
+ * 1. 状态落在 [STATE_DIR_NAME]（`filesDir` 下），仅「卸载应用 / 清除应用数据」才会消失；
+ * 2. `SyncCache.clear` / `SyncCache.clearAll` **永不触碰** [SUFFIX_STATE] 命名的文件
+ *    （即便状态目录被误配到缓存目录，缓存清理也不得摧毁安全状态）。
+ *
+ * 状态文件内容为 SHA-256 摘要 + Keystore HMAC，**不含任何明文**，无逆推价值；
+ * 目录位于应用私有 `filesDir`，不随缓存回收策略被系统回收。
+ *
+ * **保留策略（刻意为之）**：状态不随会话锁定、同步凭据清空（换服务器 / 退出同步）而删除——
+ * 清理它等于重开重放窗口，而少量陈旧状态（按 remotePath 摘要键控）只会多占几百字节，
+ * 不会造成误判（只有与**曾接受过的**内容逐字节相同时才判回退）。
+ * 完整清除仅发生在卸载应用 / 清除应用数据。
+ *
+ * ## 状态缺失 / 被篡改时的裁决（fail-open，取舍已留痕）
+ *
+ * 状态文件缺失或 MAC 校验失败时一律按「无历史」处理（[load] 返回空 [State]）并继续接受远端内容：
+ * - 缺失：首次运行、以及**升级迁移后的首轮同步**——历史状态落在旧的 `cacheDir/sync`，本批
+ *   整改**不做搬运**（`inspect` 对旧目录一无所知），故升级后首轮按「无历史」放行，
+ *   由 [recordAccepted] 重新建立高水位；
+ * - MAC 失效：被篡改、Keystore 密钥轮换、或调用方注入 `NoopSyncIntegrityMac`（禁用防回滚）。
+ *
+ * 取舍理由：宁可漏判一次重放，也不制造**无法自愈的误报回退**把用户永久锁在同步之外
+ * （状态不可信时若判回退，用户将没有任何恢复路径）。代价是升级后首轮 / 状态被删时存在一次
+ * 重放窗口；本地文件级攻击者不在本威胁模型内（其本可 Hook 进程），远端攻击者无法触碰本地状态文件。
+ *
+ * ## `sequence` 字段现状（本批未启用，留作后续单调性依据）
+ *
+ * [State.sequence] 已随状态持久化（每次 [recordAccepted] 自增），但**当前不参与任何裁决**：
+ * [inspect] 只比对内容摘要，序号的单调性尚未作为回退判据（单看序号无法判定「未知但更旧」的版本，
+ * 故不能直接启用）。保留该字段以便后续接入序号单调校验；**启用前不得据此推断防回滚强度**。
+ *
  * ## 跨端兼容决策（必须留痕）
  *
  * 采用「已见摘要链」而非纯单调序号：其他官方客户端（KeePass 2.x / KeePassDX / KeePassXC）
  * 写入的是**全新内容**（新摘要），永远命中 [RollbackVerdict.Accept]，**不误报**；
  * 仅「与设备侧曾接受过的历史版本逐字节相同」的重放才判 [RollbackVerdict.ReplayDetected]。
  * 用户主动把本地备份回滚到旧版本再上传，会被判回退并提示（属可接受的显式确认代价，已留痕）。
- *
- * 状态文件被篡改 / MAC 校验失败时按「无历史」处理（不产生误报回退）；
- * 本地文件级攻击者不在本威胁模型内（其本可 Hook 进程），远端攻击者无法触碰本地状态文件。
  */
 class SyncRollbackGuard(
+    /** 防回滚状态目录；生产由调用方注入 `filesDir/<STATE_DIR_NAME>`（跨锁定保留），见类 KDoc */
     private val stateDir: File,
     private val integrityMac: SyncIntegrityMac
 ) {
 
-    /** 持久化状态快照（`current` 为 null 表示尚无已接受内容） */
+    /**
+     * 持久化状态快照（`current` 为 null 表示尚无已接受内容）。
+     *
+     * [sequence] 为已持久化但**尚未参与裁决**的单调序号（现状与后续用途见类 KDoc）。
+     */
     data class State(
         val sequence: Long = 0L,
         val current: String? = null,
@@ -71,6 +111,9 @@ class SyncRollbackGuard(
 
     /**
      * 裁决远端内容是否可接受。**不修改**状态；接受后须调用 [recordAccepted] 前移高水位。
+     *
+     * 状态文件缺失 / MAC 校验失败时按「无历史」处理 → 返回 [RollbackVerdict.Accept]
+     * （fail-open，取舍与代价见类 KDoc「状态缺失 / 被篡改时的裁决」）。
      */
     fun inspect(remotePath: String, content: ByteArray): RollbackVerdict {
         val digest = SyncCache.sha256Hex(content)
@@ -83,7 +126,11 @@ class SyncRollbackGuard(
         }
     }
 
-    /** 记录一份已被接受的内容：`recent` 有界去重，`current` 前移，`sequence` 自增。 */
+    /**
+     * 记录一份已被接受的内容：`recent` 有界去重，`current` 前移，`sequence` 自增。
+     *
+     * [State.sequence] 当前仅被持久化、不参与裁决（见类 KDoc「`sequence` 字段现状」）。
+     */
     fun recordAccepted(remotePath: String, content: ByteArray) {
         val digest = SyncCache.sha256Hex(content)
         val state = load(remotePath)
@@ -176,8 +223,22 @@ class SyncRollbackGuard(
         private const val PREFIX_MAC = "mac="
         private const val SUFFIX_TMP = ".tmp"
 
-        /** 状态文件后缀（与 [SyncCache.clear] 的清理后缀保持一致） */
+        /**
+         * 状态文件后缀（`<SHA-256(remotePath)>.rollback`）。
+         *
+         * ⚠ 该后缀标识**跨会话安全状态**，不是缓存产物：`SyncCache.clear` / `SyncCache.clearAll`
+         * 的删除清单与通配清理**一律不得包含**它（F-23 整改前它被列入 `clear()` 的删除清单，
+         * 而 `clear()` 由锁库 / 凭据清空触发，导致「锁定一次即清零」、重放防护失效）。
+         */
         const val SUFFIX_STATE = ".rollback"
+
+        /**
+         * 防回滚状态目录名（app 侧 `filesDir` 下的相对路径）。
+         *
+         * 由 DI（`DatabaseModule.provideRollbackStateDir`）与 `SyncCycleRunner` 共用，
+         * 确保状态目录不与 `cacheDir` 下的可丢弃缓存混居——这是 F-23 的根因约束。
+         */
+        const val STATE_DIR_NAME = "rollback"
 
         /** 历史已接受摘要的有界上限（防状态文件无限增长） */
         private const val MAX_RECENT_DIGESTS = 32

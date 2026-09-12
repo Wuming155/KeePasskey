@@ -11,12 +11,19 @@
 ## 1. 版本基线（摘要）
 
 - 测试 / 构建 / CI 当前全绿（具体版本、例数、残余面见 [`RESOLVED_LOG.md`](docs/RESOLVED_LOG.md)）。
-  单测基线（2026-09-12，§37 批次后）：**1423 例 / 0 失败 / 0 错误 / 13 跳过**；设备侧基线：
-  `app` **12 例** + `sync` **3 例**（x86_64 / API 36.1 模拟器，见 §36）；大附件（>1 MiB）已落盘
-  磁盘缓存、锁定即清（§35）；快速解锁封印载荷
+  单测基线（2026-09-12，§38 批次后）：**1557 例 / 0 失败 / 0 错误 / 13 跳过**
+  （app 832 / core 65 / crypto 116 / database 349 / sync 195；`--rerun-tasks --max-workers=1` 强制真实执行）；
+  设备侧基线：`app` **12 例** + `sync` **3 例**（x86_64 / API 36.1 模拟器，见 §36）；大附件（>1 MiB）已落盘
+  磁盘缓存，清理为**冷启动 + 会话锁定**两层（§35、§38）；快速解锁封印载荷
   已升级为复合帧格式（主密码 + 密钥文件一并封印，历史格式向后兼容，§29.1）；解锁失败重试节流
-  默认关闭并支持开关与自定义最长锁定时长（§29.2）；FLAG_SECURE 防截屏改为开关即生效模型（锁定态强制遮蔽，解锁态随开关关闭真实解除，§29.3）；外部安全审计整改：Gradle Wrapper 锁定分发 SHA-256 并启用 CI wrapper 校验、KDBX 口令中间缓冲清零、TOTP 扫码取景窗口纳入 FLAG_SECURE（§30）。写侧 Argon2 `P`
-  已按 KDBX4 规范以 UInt32 编码（官方 `generate_corpus.py --verify` 可解本仓产物）。
+  默认关闭并支持开关与自定义最长锁定时长（§29.2）；FLAG_SECURE 防截屏改为开关即生效模型
+  （锁定态强制遮蔽，解锁态随开关关闭真实解除，§29.3）并已覆盖敏感**对话框**独立窗口（§38）；
+  外部安全审计整改：Gradle Wrapper 锁定分发 SHA-256 并启用 CI wrapper 校验、KDBX 口令中间缓冲清零、
+  TOTP 扫码取景窗口纳入 FLAG_SECURE（§30）。写侧 Argon2 `P` 已按 KDBX4 规范以 UInt32 编码；
+  **KDBX4 时间已改为官方秒级 Base64**（§38 P0-05，此前误写 .NET ticks 致官方客户端读不了本仓产物）。
+- **互操作证据纪律（§38 立规）**：`.kdbx` 产物的互操作性以**官方实现端到端对拍**为准
+  （`OwnProductInteropProbeTest` 产出真实产物 + `PROBE.md` + `keepassxc-cli` / `pykeepass` 复现命令）；
+  `tools/kdbx-corpus/generate_corpus.py --verify` **仅证明外层文件头自洽，不构成互操作证据**（工具自述）。
 - **平台**：minSdk 36 / compileSdk 37 / targetSdk 36；全站强制 HTTPS（TLS-only），零证书固定，接入 Mozilla PSL。
 
 ---
@@ -68,7 +75,18 @@ KeePasskey 是一款原生 Kotlin 开发的现代化 Android 密码管理器。�
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | 模块依赖拓扑与关键架构决策 | 跨模块改动、新功能落位前 |
 | [`docs/reference-projects.md`](docs/reference-projects.md) | 参考项目地图 | 实现算法/格式兼容时 |
 | [`docs/references/`](docs/references/) | 5 个参考项目架构分析 | 实现思路借鉴前 |
+| [`docs/SECURITY_AUDIT_2026-09.md`](docs/SECURITY_AUDIT_2026-09.md) | 第三方安全审计（29 项发现：分类 / CWE / CVSS / 证据） | 安全整改认领、判定残余风险前 |
+| [`docs/SECURITY_AUDIT_REMEDIATION.md`](docs/SECURITY_AUDIT_REMEDIATION.md) | 上述发现的整改方案、修复顺序与验收基线 | 认领安全整改条目时 |
+| [`docs/THREAT-MODEL-AUDIT-d32f3e7.md`](docs/THREAT-MODEL-AUDIT-d32f3e7.md) | 威胁建模：攻击者模型、组合攻击链、残余风险 | 评估威胁面与已接受风险时 |
+| [`docs/security/REDTEAM_ATTACK_PATHS.md`](docs/security/REDTEAM_ATTACK_PATHS.md) | 红队攻击路径枚举 | 复核组合攻击链时 |
+| [`docs/同步层记录级完整性威胁建模.md`](docs/同步层记录级完整性威胁建模.md) | 同步层跨记录置换与防回滚威胁建模 | 改动同步 / 合并 / 防回滚前 |
+| [`docs/原生Argon2真机验证记录.md`](docs/原生Argon2真机验证记录.md) | 原生内核真机与模拟器实测登记（**禁混表**） | 声称性能或真机验证前 |
+| [`docs/KDBX4与复合密钥实战互操作排查日志.md`](docs/KDBX4与复合密钥实战互操作排查日志.md) | KDBX4 / 复合密钥互操作排障记录 | 排查互操作差异时 |
 | `.codebuddy/rules/engineering-rules.md` | 工程规则 | 编写/修改任何代码前 |
+
+> **索引纪律（ISSUE-P3-81 立规）**：任何记录**已确认缺陷 / 残余风险 / 验证结论**的文档，必须登记在本表内。
+> 反例代价：`docs/SECURITY_AUDIT_2026-09.md` 等 5 份安全文档曾长期不在索引与工作流入口内，
+> 其 29 项发现因无人流转而在 `RESOLVED_LOG.md` 中零引用、长期未闭环。
 
 ---
 
@@ -109,7 +127,10 @@ KeePasskey 是一款原生 Kotlin 开发的现代化 Android 密码管理器。�
 ## 6. 已知工程限界
 
 - KDBX 对象树仍整体驻留内存（解析已流式化）；**附件字节除外**——超过阈值（默认 1 MiB，可配）的附件
-  经 `BinaryStore` 落盘（`cacheDir/attachments`，0600/0700），池中只留引用，会话锁定 / 关闭时对称清空（§35）。
+  经 `BinaryStore` 落盘（`cacheDir/attachments`，0600/0700），池中只留引用。清理为**两层**：
+  ① 应用冷启动（`MainApplication.onCreate`，任何会话打开之前）② 会话锁定 / 关闭事件（§35、§38）。
+  **如实声明的边界（F-13 / ISSUE-P1-19）**：进程被 kill / force-stop 而未经过上述任一路径时，
+  已解密附件快照会留存至下次冷启动——**不得再单独使用「锁定即闭环」这类措辞**。
   `KdbxAttachment.clear()` 对**落盘项**不动作（其字节由多个引用者共享），生命周期由 store 统一收口。
 - 条件写依赖服务端：AWS S3 原子生效；少数兼容存储降级为 HEAD 预检 + 无条件 PUT。
 - `ProtectedString` 驻留加密为纵深防御层；持有进程密钥或任意代码执行者仍可在读取瞬间截获明文。

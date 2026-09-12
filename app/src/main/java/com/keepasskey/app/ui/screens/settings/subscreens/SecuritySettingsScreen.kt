@@ -44,8 +44,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.keepasskey.app.R
+import com.keepasskey.app.security.RuntimeIntegrityPolicy
 import com.keepasskey.app.security.RuntimeIntegrityReport
-import com.keepasskey.app.security.RuntimeRiskLevel
 import com.keepasskey.app.ui.components.BentoCard
 import com.keepasskey.app.ui.screens.settings.SettingsUiState
 
@@ -85,9 +85,14 @@ fun SecuritySettingsScreen(
     val clipboardLabel = stringResource(clipboardTimeoutLabelRes(uiState.clipboardTimeoutSeconds))
     // ISSUE-P3-68：最长锁定时长以「分钟」格式化呈现（任意自定义值无需枚举标签资源）
     val lockoutMinutes = uiState.unlockLockoutMaxSeconds / 60
-    // ISSUE-P2-08：仅「可疑 / 已妥协」两档需要明确风险提示（未判定不等于已判定为风险）
-    val integrityLevel = integrityReport?.level
-        ?.takeIf { it == RuntimeRiskLevel.ELEVATED || it == RuntimeRiskLevel.COMPROMISED }
+    // ISSUE-P2-08：是否提示由策略字段 requireRiskNotice 单一裁决（不再由 UI 自行按等级推断，
+    // 使「声明式判定 ⇄ 用户可见提示」真正闭环）；requireRiskNotice 为 true 时等级必为
+    // ELEVATED / COMPROMISED，文案仍按等级取字符串资源
+    val integrityLevel = if (RuntimeIntegrityPolicy.requiresRiskNotice(integrityReport)) {
+        integrityReport?.level
+    } else {
+        null
+    }
 
     Scaffold(
         modifier = modifier.fillMaxSize(),

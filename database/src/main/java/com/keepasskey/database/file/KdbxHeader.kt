@@ -105,6 +105,37 @@ data class KdbxHeader(
          */
         internal const val MAX_HEADER_FIELD_BYTES = 1024 * 1024
 
+        /**
+         * 外层 Header **累计字节数**安全上限（4 MiB，F-11 加固）。
+         *
+         * 取值依据：合法 KDBX4 头部仅数 KB 量级——本仓 [serialize] 写出的头部实测
+         * 恒 < 3 KiB（16B CipherID + 4B CompressionFlags + 32B MasterSeed + 12/16B IV +
+         * 数 KB KDF 参数 + 可选公有自定义数据 + 12B 签名版本 + 9B 收尾字段）；
+         * 即便第三方客户端塞入大块 PublicCustomData，距本上限仍有三个数量级余量。
+         * 因此本值是「合法库绝不触及、恶意库无法绕过」的紧界。
+         *
+         * 为什么必须有累计闸门（仅靠 [MAX_HEADER_FIELD_BYTES] 不足）：
+         * 单字段上限只约束「一个字段」，攻击者可用海量合法尺寸字段让记录流无界增长；
+         * 且**该检查发生在头部 SHA-256 / HMAC 认证之前**，不需要任何口令或密钥文件，
+         * 是本仓唯一免凭据的解析期内存耗尽（DoS）面。故此处按 fail-closed 加固：
+         * 一旦累计写入将越过本上限，立即以 [KdbxCorruptFileException] 拒绝，
+         * 且**绝不允许先写入再判定**（写入受同一预算约束，见 deserialize 内的 record 闸门）。
+         */
+        internal const val MAX_HEADER_TOTAL_BYTES = 4 * 1024 * 1024
+
+        /**
+         * 外层 Header **字段数**安全上限（F-11 加固）。
+         *
+         * 取值依据：官方 KeePass 2.61.1 写入的 KDBX4 头部字段数恒为 6
+         * （CipherID / CompressionFlags / MasterSeed / EncryptionIV / KdfParameters / EndOfHeader，
+         * 可选 PublicCustomData 时为 7）；本仓 [serialize] 恒写 6 或 7 个。
+         * 64 为两个数量级余量，足以容纳任何第三方客户端的合法扩展，同时使
+         * 「不写入数据、只靠 5 字节字段头反复堆积」的零成本内存放大攻击立即失效。
+         *
+         * 与本上限同源的 [MAX_HEADER_TOTAL_BYTES] 共同构成认证前的双闸门；语义与取值依据见该类 KDoc。
+         */
+        internal const val MAX_HEADER_FIELD_COUNT = 64
+
         /** MasterSeed 合法长度（官方规范：32 字节） */
         private const val MASTER_SEED_SIZE = 32
 
@@ -158,9 +189,33 @@ data class KdbxHeader(
         fun deserialize(inputStream: InputStream): Pair<KdbxHeader, ByteArray> {
             val recordingStream = ByteArrayOutputStream()
 
+            /**
+             * F-11：记录流写入的唯一闸门——先按「写入后」的总量裁决，通过才写入。
+             * 严禁先写后判：那是先分配再拒绝，闸门本身就成了 OOM 通道。
+             */
+            fun record(bytes: ByteArray) {
+                if (recordingStream.size() + bytes.size > MAX_HEADER_TOTAL_BYTES) {
+                    throw KdbxCorruptFileException(
+                        "外层 Header 累计字节数超过安全上限: 将达 ${recordingStream.size() + bytes.size}" +
+                                "（上限 $MAX_HEADER_TOTAL_BYTES 字节）——认证前 fail-closed 加固判定为损坏文件"
+                    )
+                }
+                recordingStream.write(bytes)
+            }
+
+            fun record(byte: Int) {
+                if (recordingStream.size() + 1 > MAX_HEADER_TOTAL_BYTES) {
+                    throw KdbxCorruptFileException(
+                        "外层 Header 累计字节数超过安全上限: 将达 ${recordingStream.size() + 1}" +
+                                "（上限 $MAX_HEADER_TOTAL_BYTES 字节）——认证前 fail-closed 加固判定为损坏文件"
+                    )
+                }
+                recordingStream.write(byte)
+            }
+
             fun readAndRecordInt(): Int {
                 val b = LittleEndianUtil.readBytes(inputStream, 4)
-                recordingStream.write(b)
+                record(b)
                 return LittleEndianUtil.bytesToInt(b)
             }
 
@@ -187,13 +242,25 @@ data class KdbxHeader(
             var kdfParams: KdfParameters? = null
             var publicCustomData: VariantDictionary? = null
 
+            /** F-11：已消费的字段数（含 EndOfHeader 字段），受 [MAX_HEADER_FIELD_COUNT] 约束 */
+            var fieldCount = 0
             while (true) {
+                // F-11：字段数闸门同样位于认证之前——5 字节字段头即可占一个字段位，
+                // 若不设限，攻击者可零成本构造海量空字段驱动解析循环与记录流无界增长
+                if (fieldCount + 1 > MAX_HEADER_FIELD_COUNT) {
+                    throw KdbxCorruptFileException(
+                        "外层 Header 字段数超过安全上限: ${fieldCount + 1}（上限 $MAX_HEADER_FIELD_COUNT）" +
+                                "——认证前 fail-closed 加固判定为损坏文件"
+                    )
+                }
+                fieldCount++
+
                 val fieldIdByte = inputStream.read()
                 if (fieldIdByte < 0) throw KdbxCorruptFileException("意外到达头部流末尾")
-                recordingStream.write(fieldIdByte)
+                record(fieldIdByte)
 
                 val fieldLenBytes = LittleEndianUtil.readBytes(inputStream, 4)
-                recordingStream.write(fieldLenBytes)
+                record(fieldLenBytes)
                 val fieldLen = LittleEndianUtil.bytesToInt(fieldLenBytes)
 
                 // P0-5：fieldLen 来自未认证输入，必须在 ByteArray 分配前通过边界裁决，
@@ -204,8 +271,17 @@ data class KdbxHeader(
                     )
                 }
 
+                // F-11：累计预算必须在**读取字段数据之前**裁决——fieldLen 是未认证声明值，
+                // 先按声明长度分配读取再判断预算，预算便失去约束分配的意义
+                if (recordingStream.size() + fieldLen > MAX_HEADER_TOTAL_BYTES) {
+                    throw KdbxCorruptFileException(
+                        "外层 Header 累计字节数超过安全上限: 字段数据前已达 ${recordingStream.size()} 字节，" +
+                                "本字段声明 $fieldLen 字节（上限 $MAX_HEADER_TOTAL_BYTES 字节）——认证前 fail-closed 加固判定为损坏文件"
+                    )
+                }
+
                 val fieldData = LittleEndianUtil.readBytes(inputStream, fieldLen, MAX_HEADER_FIELD_BYTES)
-                recordingStream.write(fieldData)
+                record(fieldData)
 
                 val fieldId = fieldIdByte.toByte()
                 if (fieldId == KdbxConstants.HeaderFieldId.END_OF_HEADER) {

@@ -88,11 +88,13 @@ class PasswordFillActivity : BaseCredentialActivity() {
                 }
 
                 // H1 整改：回传明文密码前二次校验条目与预期调用方（域名/包名）的严格绑定关系，
-                // 与候选组装逻辑（DomainMatcher）保持一致，杜绝候选与回传之间的窗口被利用
+                // 与候选组装逻辑（DomainMatcher）保持一致，杜绝候选与回传之间的窗口被利用。
+                // P2-40 整改：包名维度必须是 `android://<包名>` 硬约束，`https://<host>` 等
+                // Web 绑定条目不得经同形包名放行（Web 绑定只走域匹配）
                 val domainOk = expectedDomain.isNotBlank() && entry.url.isNotBlank() &&
                         DomainMatcher.isDomainMatch(entry.url, expectedDomain)
                 val packageOk = expectedPackage.isNotBlank() && entry.url.isNotBlank() &&
-                        DomainMatcher.isPackageMatch(entry.url, expectedPackage)
+                        DomainMatcher.isAndroidPackageMatch(entry.url, expectedPackage)
                 if (!domainOk && !packageOk) {
                     AppLog.e(TAG, "条目与调用方不匹配，拒绝回传密码")
                     failAndFinish()

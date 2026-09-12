@@ -39,6 +39,10 @@ data class SyncCacheState(
  *    cacheDir 虽位于应用私有目录，但绝不依赖系统默认 umask；
  * 2. 提供 [clear]（单远端路径）与 [clearAll]（全量）两级销毁入口，
  *    由会话锁定 / 同步凭据销毁时机驱动，杜绝密文快照无限期驻留。
+ *
+ * F-23 例外（必须遵守）：[SyncRollbackGuard] 的防回滚状态**不属本类管辖**——它已迁至
+ * `filesDir/<SyncRollbackGuard.STATE_DIR_NAME>`，且 [clear] / [clearAll] 永不删除
+ * [SyncRollbackGuard.SUFFIX_STATE] 命名的文件。本目录只放「锁库即可丢弃」的密文快照。
  */
 open class SyncCache(private val cacheDir: File) {
 
@@ -274,6 +278,14 @@ open class SyncCache(private val cacheDir: File) {
 
     /**
      * 清理指定远程路径的所有本地缓存文件。
+     *
+     * **不变量（F-23）**：本方法**永不删除** [SyncRollbackGuard.SUFFIX_STATE] 命名的防回滚状态文件。
+     * 该状态是跨会话安全状态（Assume Breach 下唯一的重放防线），语义上不属于「可丢弃缓存」；
+     * 生产路径它已迁至 `filesDir/<SyncRollbackGuard.STATE_DIR_NAME>`，此处再保证一次——
+     * 即便调用方把状态目录误配到缓存目录，缓存清理也不得摧毁重放防护
+     * （整改前它被列入下方删除清单，锁库即清零 → 云侧重放旧库得逞）。
+     * 边界：仅「已交付的状态文件」受保护；未交付的 `<...>.rollback.*.tmp` 残留仍按 tmp 规则清理
+     * （它不含任何已提交状态，删除不影响重放判定）。
      */
     fun clear(remotePath: String) {
         listOf(
@@ -282,8 +294,6 @@ open class SyncCache(private val cacheDir: File) {
             SUFFIX_BASE_VERSION,
             SUFFIX_BASE_CACHE,
             SUFFIX_META,
-            // ISSUE-P2-18：防回滚高水位状态随缓存一并销毁
-            SyncRollbackGuard.SUFFIX_STATE,
             "$SUFFIX_CACHE$SUFFIX_TMP"
         ).forEach { suffix ->
             val file = getFile(remotePath, suffix)
@@ -301,12 +311,17 @@ open class SyncCache(private val cacheDir: File) {
      * 设备失窃即可被离线无限期爆破主密码——「锁定」必须在数据生命周期上真正闭环。
      * 仅清空目录内容（目录本身保留，[SyncCache] 构造期保证其存在）。
      *
-     * @return 是否全部删除成功（存在删除失败项时返回 false，调用方可据此告警）
+     * **例外（F-23）**：命中 [isRollbackStateFileName] 的子项一律**保留**——防回滚状态是
+     * 跨会话安全状态（内容仅 SHA-256 摘要 + Keystore HMAC，无密文、无明文），
+     * 缓存销毁不得连带摧毁重放防护。生产布局下它不在此目录，此分支仅兜底误配 / 历史残留。
+     *
+     * @return 是否全部（应删除的）子项删除成功（存在删除失败项时返回 false，调用方可据此告警）
      */
     fun clearAll(): Boolean {
         val children = cacheDir.listFiles() ?: return true
         var allDeleted = true
         for (child in children) {
+            if (isRollbackStateFileName(child.name)) continue
             val removed = if (child.isDirectory) child.deleteRecursively() else child.delete()
             allDeleted = allDeleted && removed
         }
@@ -429,6 +444,14 @@ open class SyncCache(private val cacheDir: File) {
         )
 
         private val DIRECTORY_OWNER_ONLY = FILE_OWNER_ONLY + PosixFilePermission.OWNER_EXECUTE
+
+        /**
+         * 判断文件名是否属**跨会话防回滚安全状态**（[SyncRollbackGuard.SUFFIX_STATE]）。
+         *
+         * 由 [SyncCache.clearAll] 与 app 侧缓存销毁器共用：缓存清理的后缀知识保留在 `sync` 模块，
+         * 调用方无需各自枚举，也避免两处字面量漂移（F-23 整改的同源约束）。
+         */
+        fun isRollbackStateFileName(name: String): Boolean = name.endsWith(SyncRollbackGuard.SUFFIX_STATE)
 
         fun sha256Hex(data: ByteArray): String {
             val digest = MessageDigest.getInstance("SHA-256")

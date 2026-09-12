@@ -186,7 +186,9 @@ class UnlockViewModel @Inject constructor(
      * 输入的数组仅在本次回调内有效，此处立即复制持有并清零上一份。
      */
     fun onPasswordChangeSecure(password: CharArray) {
-        debugLog.info(TAG, "onPasswordChangeSecure: input length=${password.size}")
+        // F-25 同族整改（A6 报告「相邻发现」）：主密码**长度**亦属可导出调试缓冲的元数据，
+        // 与库 id / 密钥文件长度同口径收敛，只记录事件本身
+        debugLog.info(TAG, "onPasswordChangeSecure: input updated")
         passwordChars.fill('0')
         passwordChars = password.copyOf()
         _uiState.update { it.copy(errorMessage = null, infoMessage = null) }
@@ -290,7 +292,15 @@ class UnlockViewModel @Inject constructor(
                     is KdbxResult.Failure -> {
                         val invalidCredentials =
                             result.error is com.keepasskey.database.exception.KdbxInvalidCredentialsException
-                        debugLog.error(TAG, "主密码解锁失败: activeDb=$dbId, invalidCreds=$invalidCredentials, keyFileLen=${keyFileSession.keyFileData?.size}, err=${result.message}")
+                        // F-25 整改：失败留痕口径收敛为「异常类名 + 布尔判定」——原实现把库 id
+                        // （activeDb）、密钥文件长度（keyFileLen）与异常原文 message 一并写进可导出的
+                        // 调试日志缓冲，泄漏「用户在解锁哪个库 / 是否携带密钥文件及其大小」。
+                        // 与仓内其它调用点同一口径（如 SafKeyFileAccess「仅留痕异常类名，不外传异常 message」）。
+                        debugLog.error(
+                            TAG,
+                            "主密码解锁失败: errType=${result.error.javaClass.simpleName}, " +
+                                "invalidCreds=$invalidCredentials"
+                        )
                         // ISSUE-P1-04：仅「凭据错误」计入暴力破解节流；IO/文件损坏等非认证失败不计入，避免瞬时故障误锁
                         val newGate = if (invalidCredentials) {
                             dbId?.let { unlockThrottleManager?.registerFailure(it) }

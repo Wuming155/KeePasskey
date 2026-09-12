@@ -297,6 +297,8 @@ class KeePasskeyCredentialProviderService : CredentialProviderService() {
      * 根据调用来源 (Origin 或 Package) 严格安全匹配条目 (供既有单元测试与内部查询复用)。
      * L1 整改：包名匹配仅走 DomainMatcher 严格点号边界（含 android:// scheme 剥离），
      * 移除 title.contains 启发式，杜绝宽松包含导致的跨应用凭据泄露。
+     * P2-40 整改：包名维度改用 `android://` 硬约束（[DomainMatcher.isAndroidPackageMatch]）——
+     * `https://<host>` 等 Web 绑定条目不得再被同形包名命中，Web 绑定只经域匹配路径放行。
      */
     internal fun findMatchingEntries(
         entries: List<com.keepasskey.app.ui.model.UiVaultEntry>,
@@ -310,7 +312,7 @@ class KeePasskeyCredentialProviderService : CredentialProviderService() {
             val urlMatch = cleanOrigin.isNotEmpty() && entry.url.isNotBlank() &&
                     DomainMatcher.isDomainMatch(entry.url, cleanOrigin)
             val packageMatch = packageName.isNotEmpty() && entry.url.isNotBlank() &&
-                    DomainMatcher.isPackageMatch(entry.url, packageName)
+                    DomainMatcher.isAndroidPackageMatch(entry.url, packageName)
             rpMatch || urlMatch || packageMatch
         }
     }

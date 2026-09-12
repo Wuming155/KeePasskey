@@ -18,7 +18,7 @@ import java.util.zip.GZIPOutputStream
 
 /**
  * KDBX 解析资源防线单元测试（Wave 12 解析炸弹防护）：
- * 覆盖 XML 文本长度上限、嵌套深度上限、二进制池条目/总量封顶与解压输出护栏。
+ * 覆盖 XML 文本长度上限、嵌套深度上限、元素总数上限、二进制池条目/总量封顶与解压输出护栏。
  */
 class KdbxParsingResourceLimitsTest {
 
@@ -58,6 +58,29 @@ class KdbxParsingResourceLimitsTest {
             // 语义层拒绝（如缺少 UUID）不属于资源防线范畴，此处仅确保消息与深度无关
             assert(!e.message!!.contains("嵌套深度"))
         }
+    }
+
+    /**
+     * D23：XML 元素**总数**上限（文本长度与嵌套深度之外的第三个放大维度）。
+     * 海量小元素（`<A/>`）既不触发单节点字符上限、也不触发深度上限，必须在内存耗尽前被拒绝。
+     */
+    @Test
+    fun `XML 元素总数超出上限即拒绝`() {
+        val xml = buildString {
+            append("<KeePassFile><Root><Group>")
+            append("<Name>Bomb</Name>")
+            repeat(KdbxXmlParser.MAX_XML_ELEMENTS + 1) { append("<A/>") }
+            append("</Group></Root></KeePassFile>")
+        }
+
+        val error = assertThrows(KdbxCorruptFileException::class.java) {
+            KdbxXmlParser(null).parse(xml.byteInputStream())
+        }
+
+        assertTrue(
+            "异常信息须指向元素总数上限，实际为: ${error.message}",
+            error.message!!.contains("元素总数")
+        )
     }
 
     @Test

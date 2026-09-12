@@ -1,6 +1,7 @@
 package com.keepasskey.app
 
 import android.app.Application
+import com.keepasskey.app.data.binary.FileBinaryStore
 import com.keepasskey.app.notification.NotificationChannels
 import com.keepasskey.app.notification.UnlockedNotificationController
 import com.keepasskey.app.security.AutoLockManager
@@ -25,11 +26,26 @@ class MainApplication : Application() {
     @Inject
     lateinit var unlockedNotificationController: UnlockedNotificationController
 
+    // F-13（P1）：附件明文缓存的冷启动清理入口。注入既有 @Singleton 单例（不新建并行实现），
+    // 与 DatabaseModule 注册的同一实例（锁定观察者）共用一份 `cacheDir/attachments` 目录。
+    @Inject
+    lateinit var fileBinaryStore: FileBinaryStore
+
     override fun onCreate() {
         super.onCreate()
         // ISSUE-P1-10 (ZT-10)：统一日志包装器调试开关——debug 构建开放 v/d 与完整异常堆栈，
         // release 保持关闭（AppLog.e/w 自动脱敏，R8 另行剥离 v/d 调用点）
         AppLog.debugEnabled = BuildConfig.DEBUG
+        // F-13（P1）：附件落盘目录（cacheDir/attachments）存放的是**附件解密后的明文**，
+        // 仅靠 SessionLockObserver.onSessionLocked() 清理存在已确认缺口：进程被 kill /
+        // force-stop / OOM 回收时该回调不执行，明文会跨进程存活到下一次锁定，
+        // 构成目前唯一**已确认**的「无需口令即可读取库内容」路径（F-13）。
+        //
+        // 时序前提：本调用位于 Application.onCreate 起始段，此刻**尚无任何会话被打开**
+        // （解锁页 / 自动填充 / 凭据提供者等入口都晚于 Application.onCreate），
+        // 缓存目录内不存在仍被会话持有的条目，因此可安全整体清空。
+        // 契约：清理失败只在 FileBinaryStore 内部记脱敏日志（clear() 不外抛），绝不阻断冷启动。
+        fileBinaryStore.clear()
         // ISSUE-P0-01 (ZT-01)：自动锁定守护下沉至进程级唯一冷启动点——
         // 应用存在 AutofillUnlockActivity / CredentialUnlockActivity 两条不经 MainActivity
         // 的独立冷启动入口，守护（ProcessLifecycleOwner + 熄屏广播）必须在进程创建时注册，

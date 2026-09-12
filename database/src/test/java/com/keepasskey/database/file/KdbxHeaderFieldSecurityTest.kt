@@ -114,6 +114,93 @@ class KdbxHeaderFieldSecurityTest {
         assertThrows(EOFException::class.java) { deserialize(headerBytes(fields)) }
     }
 
+    // ================= F-11：头部累计总量 / 字段数闸门（认证前 fail-closed） =================
+
+    /**
+     * F-11 AC①：字段数超限必须在**认证之前**被类型化拒绝。
+     * 每个空 COMMENT 字段仅 5 字节，攻击者可零成本堆积海量字段驱动记录流无界增长。
+     */
+    @Test
+    fun `头部字段数超过安全上限被拒绝`() {
+        val emptyFields = (0 until KdbxHeader.MAX_HEADER_FIELD_COUNT).map {
+            Triple(KdbxConstants.HeaderFieldId.COMMENT.toInt(), 0, ByteArray(0))
+        }
+        assertThrows(KdbxCorruptFileException::class.java) {
+            deserialize(headerBytes(emptyFields))
+        }
+    }
+
+    /** F-11 反向闸门：字段数恰好等于上限（含 EndOfHeader）时不得误伤合法头部 */
+    @Test
+    fun `字段数恰在上限内的头部正常解析`() {
+        val fields = defaultValidFields() + (0 until KdbxHeader.MAX_HEADER_FIELD_COUNT - 6).map {
+            Triple(KdbxConstants.HeaderFieldId.COMMENT.toInt(), 0, ByteArray(0))
+        }
+        val (header, recordedBytes) = deserialize(headerBytes(fields))
+        assertEquals(KdbxConstants.Cipher.AES_256_CBC, header.cipherUuid)
+        assertTrue(recordedBytes.isNotEmpty())
+    }
+
+    /**
+     * F-11 AC①（总量）：单字段均在 1 MiB 单字段上限内，但累计写入将越过总上限——
+     * 必须在写入/分配前以 [KdbxCorruptFileException] 拒绝，而非驱动 OOM。
+     */
+    @Test
+    fun `头部累计字节数超过总上限被拒绝`() {
+        // 5 个 1 MiB 字段：每个都合法（== 单字段上限），累计却已越过 4 MiB 总上限
+        val bigFields = (0 until 5).map {
+            Triple(KdbxConstants.HeaderFieldId.COMMENT.toInt(), 1024 * 1024, ByteArray(1024 * 1024))
+        }
+        assertThrows(KdbxCorruptFileException::class.java) {
+            deserialize(headerBytes(bigFields))
+        }
+    }
+
+    /**
+     * F-11 关键语义：总量闸门必须在**读取字段数据之前**依据未认证的声明长度裁决。
+     *
+     * 构造按「声明长度与实际数据脱钩」的畸形头部：每个字段声明 1 MiB（单字段上限内），
+     * 但流中**完全没有**对应数据。若闸门写在读取之后，本用例只会抛 EOFException；
+     * 只有在读取前依据声明长度裁决，才会得到类型化 [KdbxCorruptFileException]。
+     */
+    @Test
+    fun `声明长度将使累计越界时在读取数据前即拒绝`() {
+        // 构造要点：前 3 个字段**带真实数据**（各 1 MiB）把累计预算推到 3 MiB 级，
+        // 第 4 个字段只声明 1 MiB 而流中没有任何数据：
+        //   累计 ≈ 12 + 3×(1+4+1 MiB) + (1+4) = 3,145,760，再加声明 1 MiB = 4,194,336 > 4 MiB 上限
+        // 若闸门在**读取数据之后**才判，第 4 个字段会先抛 EOFException；
+        // 只有"依据未认证声明长度、在读取前裁决"才会得到含「累计字节数」的类型化异常。
+        // （原用例让**每个**字段都声明 1 MiB 却零数据 → 第 1 个字段就读到流末尾，
+        //   累计预算根本没有机会推进，属测试构造错误。）
+        val realData = ByteArray(KdbxHeader.MAX_HEADER_FIELD_BYTES)
+        val overBudget = (0 until 3).map {
+            Triple(KdbxConstants.HeaderFieldId.COMMENT.toInt(), KdbxHeader.MAX_HEADER_FIELD_BYTES, realData)
+        } + Triple(KdbxConstants.HeaderFieldId.COMMENT.toInt(), KdbxHeader.MAX_HEADER_FIELD_BYTES, ByteArray(0))
+
+        val failure = assertThrows(KdbxCorruptFileException::class.java) {
+            deserialize(headerBytes(overBudget))
+        }
+        assertTrue(
+            "异常必须来自「累计字节数」预算闸门而非 EOF（证明裁决先于数据读取）：${failure.message}",
+            failure.message!!.contains("累计字节数")
+        )
+    }
+
+    /** F-11 反向闸门：合法头部（数 KB）距总上限有三个数量级余量，绝不误伤 */
+    @Test
+    fun `合法头部不受总量与字段数闸门影响`() {
+        // 一个 256 KiB 的 COMMENT 字段：远高于任何真实库的头部体积，仍在上限内
+        val bigComment = ByteArray(256 * 1024) { 0x5A }
+        val fields = defaultValidFields() + Triple(
+            KdbxConstants.HeaderFieldId.COMMENT.toInt(),
+            bigComment.size,
+            bigComment
+        )
+        val (header, recordedBytes) = deserialize(headerBytes(fields))
+        assertEquals(KdbxConstants.Cipher.AES_256_CBC, header.cipherUuid)
+        assertTrue("大块头部字段仍应完整进入认证覆盖范围", recordedBytes.size > bigComment.size)
+    }
+
     // ================= P2-8：字段语义校验 =================
 
     @Test

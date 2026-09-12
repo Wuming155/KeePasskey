@@ -41,7 +41,23 @@ data class KdbxDatabase(
     val masterKeyChanged: Instant? = null,
     val masterKeyChangeRec: Int = -1,
     val masterKeyChangeForce: Int = -1,
-    val settingsChanged: Instant? = null
+    val settingsChanged: Instant? = null,
+    /**
+     * 仅强制修改一次主密钥（官方 KDBX 4.1 `<MasterKeyChangeForceOnce>`）。
+     *
+     * 注意：本字段已就位，但 `KdbxFile.buildDatabase` 的透传赋值属跨文件协调项
+     * （`database/src/main/java/com/keepasskey/database/file/KdbxFile.kt`），
+     * 未接线前经 `KdbxFile` 往返会保持缺省值。
+     */
+    val masterKeyChangeForceOnce: Boolean = false,
+    /**
+     * Meta 级 `<CustomData><Item>` 的时间戳（官方 KDBX 4.1 `TCustomDataWithTimes`），
+     * 键集合与 [customData] 对齐；[customData] 的 `Map<String, String>` 类型保持不变以兼容 app/sync 消费方。
+     *
+     * 注意：与 [masterKeyChangeForceOnce] 相同，`KdbxFile.buildDatabase` 的透传赋值未在本批次接线
+     * （跨文件协调项）。
+     */
+    val customDataTimes: Map<String, Instant> = emptyMap()
 ) {
     fun clearSensitiveData() {
         rootGroup.clearSensitiveData()

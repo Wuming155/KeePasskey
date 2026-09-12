@@ -104,6 +104,24 @@ data class RuntimeIntegrityReport(
  */
 object RuntimeIntegrityPolicy {
 
+    /**
+     * 是否必须向用户给出明确风险提示——[IntegrityEnforcement.requireRiskNotice] 的**唯一消费点**
+     * （ISSUE-P2-08 验收：「不得静默放行」）。
+     *
+     * 生产接线：设置页安全分区（`SecuritySettingsScreen`）在返回 true 时渲染
+     * `IntegrityRiskCard` 风险说明。数据来源仍是既有 `SettingsViewModel` 下发的
+     * [RuntimeIntegrityReport] 快照，无并行数据源。
+     *
+     * 判定语义与 [evaluate] 的映射严格一致：
+     * - [RuntimeRiskLevel.COMPROMISED] / [RuntimeRiskLevel.ELEVATED] → true（此时 [RuntimeIntegrityReport.level]
+     *   必为这两档之一，UI 可安全按等级取文案）；
+     * - [RuntimeRiskLevel.TRUSTED] / [RuntimeRiskLevel.UNDETERMINED] → false
+     *   （未判定不等于已判定为风险，避免误报与 UI 闪烁）；
+     * - 未注入快照（null，仅单测/异常装配）→ false，绝不回填「有风险」假值。
+     */
+    fun requiresRiskNotice(report: RuntimeIntegrityReport?): Boolean =
+        report?.enforcement?.requireRiskNotice == true
+
     fun evaluate(signals: IntegritySignals): RuntimeIntegrityReport {
         val compromised = signals.debuggerAttached ||
             signals.rootArtifactsDetected ||

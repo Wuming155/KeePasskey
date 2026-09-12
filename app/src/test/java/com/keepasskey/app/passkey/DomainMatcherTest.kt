@@ -8,7 +8,8 @@ import org.junit.Test
 /**
  * DomainMatcher 严格域名匹配与 RP ID 可信校验单元测试。
  * 覆盖：WebAuthn 域名匹配点号边界、公共后缀下限拒绝（F5）、
- * 创建分支 rp.id↔origin 可注册后缀绑定（Wave 12）。
+ * 创建分支 rp.id↔origin 可注册后缀绑定（Wave 12）、
+ * 以及填充链路包名匹配的 `android://` 硬约束（P2-40）。
  */
 class DomainMatcherTest {
 
@@ -141,7 +142,7 @@ class DomainMatcherTest {
         assertFalse(PublicSuffixList.isRegistrableDomain("a..com"))
     }
 
-    // ===== isPackageMatch（F1 回归锁） =====
+    // ===== isPackageMatch（F1 回归锁，宽松变体：仅供保存侧去重） =====
 
     @Test
     fun `包名匹配_剥离 android scheme 后精确相等`() {
@@ -150,6 +151,42 @@ class DomainMatcherTest {
         // 后缀包名不做任何父子信任匹配（CWE-284）
         assertFalse(DomainMatcher.isPackageMatch("com.example.app", "evil.com.example.app"))
         assertFalse(DomainMatcher.isPackageMatch("com.example.app.pro", "com.example.app"))
+    }
+
+    // ===== isAndroidPackageMatch（P2-40：填充链路 android:// 硬约束） =====
+
+    @Test
+    fun `填充包名匹配_Web绑定条目不得被同形包名命中`() {
+        // 缺陷复现锚点：整改前 isPackageMatch("https://github.com", "github.com") == true，
+        // 任意开发者注册 github.com 形态包名即可冒领该站 Web 绑定凭据
+        assertFalse(DomainMatcher.isAndroidPackageMatch("https://github.com", "github.com"))
+        assertFalse(DomainMatcher.isAndroidPackageMatch("https://github.com/login", "github.com"))
+        assertFalse(DomainMatcher.isAndroidPackageMatch("http://github.com", "github.com"))
+        // 裸包名同样不再放行（只认显式 android:// 绑定）
+        assertFalse(DomainMatcher.isAndroidPackageMatch("github.com", "github.com"))
+        assertFalse(DomainMatcher.isAndroidPackageMatch("com.example.app", "com.example.app"))
+        // 其他 scheme 一律不构成包名绑定
+        assertFalse(DomainMatcher.isAndroidPackageMatch("webauthn://com.example.app", "com.example.app"))
+    }
+
+    @Test
+    fun `填充包名匹配_android 绑定条目正常命中`() {
+        assertTrue(DomainMatcher.isAndroidPackageMatch("android://com.example.app", "com.example.app"))
+        assertTrue(DomainMatcher.isAndroidPackageMatch("android://com.example.app/login", "com.example.app"))
+        // 大小写与首尾空白归一
+        assertTrue(DomainMatcher.isAndroidPackageMatch("ANDROID://Com.Example.App", " com.example.app "))
+        // 包名之间无父子信任：前缀 / 后缀一律拒绝（CWE-284）
+        assertFalse(DomainMatcher.isAndroidPackageMatch("android://com.example.app", "evil.com.example.app"))
+        assertFalse(DomainMatcher.isAndroidPackageMatch("android://com.example.app.pro", "com.example.app"))
+        assertFalse(DomainMatcher.isAndroidPackageMatch("android://evil.com.example.app", "com.example.app"))
+    }
+
+    @Test
+    fun `填充包名匹配_空白输入 fail-closed`() {
+        assertFalse(DomainMatcher.isAndroidPackageMatch("android://", "com.example.app"))
+        assertFalse(DomainMatcher.isAndroidPackageMatch("", "com.example.app"))
+        assertFalse(DomainMatcher.isAndroidPackageMatch("android://com.example.app", ""))
+        assertFalse(DomainMatcher.isAndroidPackageMatch("android://com.example.app", "   "))
     }
 
     // ===== extractAndroidBoundPackage（F4 回归锁） =====

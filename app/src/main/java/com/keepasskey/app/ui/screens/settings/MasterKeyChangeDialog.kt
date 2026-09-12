@@ -18,6 +18,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.keepasskey.app.R
+import com.keepasskey.app.security.SecureDialog
 import com.keepasskey.app.ui.components.SecurePasswordField
 import com.keepasskey.app.ui.theme.CapsuleShape
 import com.keepasskey.core.result.KdbxResult
@@ -68,32 +69,37 @@ internal fun MasterKeyChangeDialog(
             )
         },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(
-                    text = stringResource(R.string.set_master_key_dialog_desc, kdfAlgorithm),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+            // FLAG_SECURE 是窗口级属性：AlertDialog 由 Compose 创建独立窗口，Activity 窗口的
+            // flag 不会传播，必须在本对话框自身的内容里施加（否则主密码输入可被截图 / 录屏 /
+            // Recents 预览，见 SecureDialog KDoc 与官方 "Excluding views from assistants"）
+            SecureDialog {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        text = stringResource(R.string.set_master_key_dialog_desc, kdfAlgorithm),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
 
-                SecurePasswordField(
-                    label = stringResource(R.string.set_new_master_password),
-                    onPasswordChanged = { chars ->
-                        newPasswordChars.fill('0')
-                        newPasswordChars = chars.copyOf()
-                    },
-                    isPasswordVisible = passwordVisible,
-                    onToggleVisibility = { passwordVisible = !passwordVisible }
-                )
+                    SecurePasswordField(
+                        label = stringResource(R.string.set_new_master_password),
+                        onPasswordChanged = { chars ->
+                            newPasswordChars.fill('0')
+                            newPasswordChars = chars.copyOf()
+                        },
+                        isPasswordVisible = passwordVisible,
+                        onToggleVisibility = { passwordVisible = !passwordVisible }
+                    )
 
-                SecurePasswordField(
-                    label = stringResource(R.string.set_confirm_master_password),
-                    onPasswordChanged = { chars ->
-                        confirmPasswordChars.fill('0')
-                        confirmPasswordChars = chars.copyOf()
-                    },
-                    isPasswordVisible = passwordVisible,
-                    onToggleVisibility = { passwordVisible = !passwordVisible }
-                )
+                    SecurePasswordField(
+                        label = stringResource(R.string.set_confirm_master_password),
+                        onPasswordChanged = { chars ->
+                            confirmPasswordChars.fill('0')
+                            confirmPasswordChars = chars.copyOf()
+                        },
+                        isPasswordVisible = passwordVisible,
+                        onToggleVisibility = { passwordVisible = !passwordVisible }
+                    )
+                }
             }
         },
         confirmButton = {

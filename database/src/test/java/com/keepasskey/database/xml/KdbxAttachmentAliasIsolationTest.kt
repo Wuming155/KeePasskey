@@ -116,7 +116,11 @@ class KdbxAttachmentAliasIsolationTest {
         val pool = listOf(InnerHeader.BinaryItem(0, poolData))
         val entry = parseWithPool(entryXml(binaryBlock("ghost.bin", 7)), pool)
 
-        assertEquals(7, entry.attachments.single().refIndex)
+        // 缺陷 D9 对齐官方 `KdbxFile.Read.Streamed.cs:1004-1009`：池未命中即回退读内联正文
+        // （此处正文为空）→ 交付空字节，且索引改为内联哨兵（原始越界值不再保留，
+        // 否则写出侧无从区分「池内引用」与「内联正文」）。
+        // 越界绝不静默折叠为池索引 0（旧缺陷：张冠李戴到无关附件）。
+        assertEquals(BinaryNode.INLINE_REF_INDEX, entry.attachments.single().refIndex)
         assertTrue(entry.attachments.single().data.isEmpty())
     }
 

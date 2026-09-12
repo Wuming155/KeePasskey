@@ -1722,3 +1722,123 @@ Rust 单测模块 `#[cfg(test)] mod tests` 之内**（测试模块起始行：`s
 
 - **产品裁决项（本轮未动，如实留痕）**：`versionCode` / `versionName`（`1` / `0.1.0`）属**发布定型决策**，
   未经明确发布计划不改动（避免版本号与对外发布节奏脱节）。
+
+---
+
+## §38 KDBX 互操作与安全整改批次（P0×3 / P1×6 / P2×14 + 文档纪律）（2026-09-12）
+
+> **本批次缘起**：对「本仓实现 / 官方 KeePass 2.61.1 / KDBX 4.1 规范 / Android 安全模型」四方逐项对比后，
+> 确认 23 项缺陷（对应 `ACTIVE_ISSUES` 的 P0-05…P2-41）。**核心结论**：KDBX 格式兼容**不等于**安全属性等价——
+> 既能打开同一个库、又通过自家互操作用例的实现，仍可能整体错在官方**另一侧**：D1 即此类，本仓能读官方文件，
+> 官方**读不了本仓文件**，而既有互操作用例全是「自家写 → 自家读」，故长期全绿。
+>
+> **方法论立规（本批次）**：凡跨实现格式的「宽容读 / 回退默认值」分支，必须同时提交**以官方实现产物为 golden**
+> 的写侧或读侧对拍用例。理由：宽容读会系统性掩盖写侧错误，本仓已三度复发（P0-4 ChaCha20 IV、D1 时间单位、D9/D4/D15 回退默认值）。
+
+### 38.1 交付清单
+
+| 编号 | 级别 | 缺陷（一句话） | 关键改动 | 官方依据 |
+|---|:--:|---|---|---|
+| **P0-05** | P0 | KDBX4 时间写成 .NET **ticks**（官方与规范为**秒**）→ 本仓产物官方客户端不可正常打开 | `KdbxXmlTimeHelper`（`formatDate` 改秒、KDoc 勘误、保留 ticks 读兼容、新增 `ANCIENT_INSTANT`/`ancientTimes`）、`KdbxTimesTest` | `Write.cs:799`、`Read.Streamed.cs:935`、规范 Page History 0.2、KeePassXC `KdbxXmlWriter.cpp:561`、KeePassDX `toDotNetSeconds()` |
+| **P0-06** | P0 | Salsa20 内层流 nonce 常量错误 → 受保护字段静默乱码且保存即不可逆覆写 | `InnerRandomStreamCipher`（→ `E8 30 09 4B 97 20 5D 2A`，具名常量 + 三方出处）+ 真值 KAT 11 例 | 规范 §Inner Encryption、`CryptoRandomStream.cs:119-120`、KeePassXC `KeePass2.cpp:35` |
+| **P0-07** | P0 | `<DeletedObjects>` 写在 `<Meta>`（官方在 `<Root>`）→ 墓碑双向丢失、删除条目跨客户端复活 | `KdbxXmlSerializer`（Root 内、根 Group 之后）、`KdbxXmlMetaSerializer.serializeDeletedObjects`、`KdbxXmlParser`（Root 层接收 + **兼容 Meta 旧位置**合并去重） | `Write.cs:430`、`Read.Streamed.cs` 的 `KdbxContext.RootDeletedObjects` |
+| **P1-16** | P1 | `<Value Ref>` 非数字/缺 Ref/内联 base64 全被折叠为**池索引 0** → 静默交付错误附件；不识别 `Compressed` | `KdbxXmlBinaryNode`（池内命中才用池、否则回退内联、`Compressed` 解压含 128 MiB 防炸弹、内联 `Protected` 解密）+ `INLINE_REF_INDEX = -1` 不变量 | `Read.Streamed.cs:980-1024`、`Write.cs:930-978` |
+| **P1-17** | P1 | 数据块 HMAC 失败被判「主密码错误」并**计入解锁节流**（与官方相反） | `HmacBlockStream`/`KdbxCipherKeyResolver`：块与终止块失败 → `KdbxCorruptFileException`；头部 HMAC 失败仍为唯一凭据出口；异常 KDoc 重写 | `Read.cs:150/157`、`HmacBlockStream.cs:233,264` |
+| **P1-18** | P1 | 外层头部无总量/字段数上限（**认证之前**，唯一免口令 DoS 面） | `KdbxHeader`：`MAX_HEADER_TOTAL_BYTES = 4 MiB`、`MAX_HEADER_FIELD_COUNT = 64`；三处闸门**先裁决后写入/读取** | 本仓加固（无官方对应物，KDoc 注明） |
+| **P1-19** | P1 | 附件**解密后明文**缓存无冷启动清理（唯一「无需口令即可读库内容」路径） | `FileBinaryStore`（收敛为 `purgeAttachmentCache`，失败落脱敏告警）、`MainApplication.onCreate` 冷启动清理 + 保留锁定清理 | 本仓加固 |
+| **P1-20** | P1 | 防回滚状态随缓存被**锁库清除** → 云侧在用户锁定一次后即可重放旧库 | 状态迁至 `filesDir/rollback`（`@RollbackStateDir` + DI）、`SyncCache` 删除清单移除 `.rollback` 并加 `isRollbackStateFileName`、`SyncCycleRunner` 惰性解析（避开假 Context NPE） | 本仓加固（威胁建模文档同步补状态生命周期） |
+| **P1-21** | P1 | 敏感对话框窗口无 FLAG_SECURE（平台为窗口级属性，Compose 对话框是独立窗口） | 新增 `SecureDialog`/`SecureDialogWindowEffect` + 纯逻辑 `SecureDialogFlagPolicy`；落地 7 处（主密码修改、子库 ×2、修订差异、附件预览、**创建库向导 ×2**） | 官方 assistant 指南 "each window … including dialogs" |
+| **P2-28** | P2 | `Protected` 判定过宽（`lowercase()=="true"`）→ 消费非规范产物时密钥流错位 | `KdbxXmlStringNode`/`KdbxXmlBinaryNode` 改精确 `== "True"`；写侧恒写 `"True"` | `Read.Streamed.cs:1066-1068`、`Write.cs:858,949` |
+| **P2-29** | P2 | 空 `<Value/>` 使整条 `<String>` 丢失 | `KdbxXmlSaxNodes.TextNode.end()` 恒回调（空元素交付空串） | 官方空元素返回 `string.Empty` |
+| **P2-30** | P2 | 布尔/数值语义偏差（`Expires`/`IsExpanded`/`QualityCheck`/`AutoType.Enabled`/`RecycleBinEnabled`/`IconID`/`UsageCount`） | 新增 `KdbxXmlScalarParsers`（精确 bool + 字段级默认；`parseNullableBool` 大小写不敏感；IconID 钳制；UsageCount 饱和）；**Meta 与 AutoType 共 8 处宽松解析一并收敛** | `Read.Streamed.cs:250/256/266/282-291/382/388/441/459/501/503/527/834-851` |
+| **P2-31** | P2 | 时间缺省值错误（缺整个 `<Times>` → `now()` 虚假"刚修改"；子元素缺失 → 1970） | 一律 `ANCIENT_INSTANT`（0001-01-01，恒不可能在"越新越胜出"中虚假胜出） | 官方 `DateTime.MinValue` 语义 |
+| **P2-32** | P2 | `CustomData` 项时间戳、`CustomIcon` 的 `Name`/时间、`MasterKeyChangeForceOnce` 读写丢失；零 UUID/空 data 图标未按官方丢弃 | `KdbxMetaData`（新增 `customDataTimes` **并行字段**，`customData` 保持 `Map<String,String>` 以免波及 app/sync）、`CustomIcon`、`KdbxXmlMetaReader/Serializer`、`KdbxFile.buildDatabase` 装配补齐 | `Write.cs:461/697-703/808-825`、`Read.Streamed.cs:315/353` |
+| **P2-33** | P2 | `MemoryProtection` 读后未重置为默认；写侧未参与标准五字段的 `Protected` 决策 | 读后重置（`officialMemoryProtectionReset`）；写侧 `resolveProtectedFlag`：标准五字段由**库级配置无条件覆盖** per-value，非标准字段保留 per-value（KDoc 贴官方 C# 片段并禁止改回 OR） | `Read.cs:246-248`、`Write.cs:838-854`、`Write.cs:464` |
+| **P2-34** | P2 | KDF 参数缺 `M/I/P/V` 静默填默认（官方 fail-closed）；内存下界 1 MiB 严于规范 | `KdbxKdfParameterCodec`：缺参即抛并点名缺键、下界对齐 8192、上界保留防 DoS 并给「规范 vs 本仓」对照表 | `Argon2Kdf.cs:57-58,143-160` |
+| **P2-35** | P2 | XML 无元素计数上限 | `KdbxXmlParser.MAX_XML_ELEMENTS = 2_000_000` + 用例 | 本仓加固 |
+| **P2-36** | P2 | 受保护值解密后的明文副本未清零 | `KdbxXmlStringNode` 构造后立即 `plainBytes.fill(0)`（先核实 `ProtectedString` 为借用语义 + init 内密封） | 官方 `XorredBuffer` 用后清零 |
+| **P2-37** | P2 | 零/缺失 UUID 原样保留 | `KdbxXmlParser.normalizeZeroUuids`（含父引用与 History 同步） | 官方 `PwUuid(true)` 替换 |
+| **P2-38** | P2 | base64 内部空白不容忍（官方容忍） | `KdbxXmlValueUtil.decodeBase64LenientWhitespace`（**仅剥空白 + 严格基本解码器**；实测明确否决 `getMimeDecoder()`——它会静默接受非法串并错位 keystream） | `.NET Convert.FromBase64String` 行为 |
+| **P2-39** | P2 | `Ref` 附件路径误写 `Protected` | `KdbxXmlEntrySerializer` Ref 分支不写 Protected；池外索引回退内联 | `Write.cs:930-949` |
+| **P2-40** | P2 | `isPackageMatch` 剥离任意 scheme → 域名形态包名冒充（`https://github.com` ↔ 包名 `github.com`） | 新增 `DomainMatcher.isAndroidPackageMatch` 并替换 **5 处**放行决策；浏览器 allowlist / DAL / 域匹配路径**一行未改** | 官方包名精确匹配语义 |
+| **P2-41** | P2 | `requireRiskNotice` 声明式属性生产零消费 | `RuntimeIntegrityPolicy.requiresRiskNotice` 成为唯一消费点，设置页据此渲染风险卡 | 本仓策略自述 |
+| **P3-81** | P3 | 文档纪律与勘误（**本批次内建立并闭环**） | `AGENTS.md` §4 索引补 7 份安全文档 + 立"索引纪律"、§6 附件缓存措辞如实化；`docs/references/KeePass-2.61.1-架构分析.md` 勘误 AES-KDF 出厂常量（6 000 000 → **600 000**，`PwDefs.cs:116`）与块 HMAC 摘要输入（`LE64(i)‖LE32(size)‖C`，纠正"索引不进摘要"的误读）；`docs/同步层记录级完整性威胁建模.md` 补状态生命周期与异常分型 | 直接读官方源码核实 |
+
+### 38.2 验收证据
+
+#### (1) 单测全绿（权威强制重跑）
+```powershell
+.\gradlew.bat test --rerun-tasks --max-workers=1
+# → BUILD SUCCESSFUL in 2m 3s；114 actionable tasks: 114 executed（全部真实执行）
+```
+
+| 模块 | 测试类 | 用例 | 失败 | 错误 | 跳过 |
+|---|---:|---:|---:|---:|---:|
+| app | 111 | 832 | 0 | 0 | 0 |
+| core | 9 | 65 | 0 | 0 | 0 |
+| crypto | 15 | 116 | 0 | 0 | 0 |
+| database | 45 | 349 | 0 | 0 | 0 |
+| sync | 18 | 195 | 0 | 0 | 13 |
+| **合计** | **198** | **1557** | **0** | **0** | **13** |
+
+**基线变动**：1423 → **1557（+134 例）**；跳过数 13 与旧基线一致（`sync` 既有 live-sync 类跳过）。
+`crypto` 的 Rust 原生内核（`cargoHostBuild`）本轮成功构建。
+
+#### (2) D1 的**外部官方实现端到端对拍**（本批次新增的证据形式，决定性）
+探针 `OwnProductInteropProbeTest` 由本仓 writer 产出真实 `.kdbx`（1175 B，
+SHA-256 `c23ed3cfd9d68e3af45dc37cb64178c81c4b6eb9db40fc145617fd5555b2c3d8`，AES-KDF 6000 轮，口令 `interop-probe-password-2026`），
+并留 `PROBE.md` 记录复现命令。
+
+- **`keepassxc-cli 2.7.12`**（`db-info` / `ls -R`）→ **成功打开**：名称 / 描述 / 加密 AES-256 / KDF / 群组数 1 / 条目数 1 全部正确；
+  `数据库创建时间: 2026/9/12 14:01`、`保存时间: 2026/9/12 22:01` —— **时间正常**；
+- **`pykeepass 4.2.0`** → 读出条目 `Probe Entry / probe-user / Probe-P@ssw0rd-2026`，
+  `ctime = mtime = 2026-09-12 14:01:44+00:00` —— **与 `PROBE.md` 期望值逐秒一致，未抛 `OverflowError`**。
+
+**修复前对照（机理）**：本仓写出的 ticks 值是官方期望秒值的 10⁷ 倍，官方 `new DateTime(lSec * 10^7)` 在 long 回绕后
+仅约 1/6 概率落回 `DateTime` 合法区间 ⇒ 多数文件直接打不开、其余得到荒谬日期；pykeepass 则抛 `OverflowError`。
+
+#### (3) F-09 真值 KAT（跨实现，非自洽往返）
+- 向量来源：**pycryptodome 3.23.0**（独立于本仓）与 **BouncyCastle 1.85.2**（本仓生产引擎）**双实现逐字节一致**，
+  另经 Bernstein/ECRYPT 官方 Salsa20 向量校准工具可信度；
+- Salsa20（正确 nonce）前 32 B = `f9beb52962838a2c3c8227ceed909273277197ffafe66de4599f4ad62da69c1d`；
+  **错误 nonce** 对照流 = `739a24411659762d97ba9107082efe718ee8f793295f3666b48d72cf62642fd5`（与正确值无任何字节相同）；
+- ChaCha20 前 32 B = `8ce8bc610ac05ff2e3dd88b49a1404c2844f148037027476b83d58f5609adf65`；
+- KAT 另含「跨调用密钥流必须连续」用例，防「每次调用重置引擎」导致的**密钥流复用**（流密码致命缺陷）。
+
+#### (4) 集成期修出的真实缺陷（如实留痕，含 1 个生产缺陷）
+| # | 现象 | 定性 | 处置 |
+|---|---|---|---|
+| 1 | `KdbxXmlMetaSerializer` 对跨模块属性 smart cast → 编译失败 | 编译期 | 先取局部不可变副本 |
+| 2 | 测试 `failure is KdbxInvalidCredentialsException` 恒假 → 编译失败 | 编译期 | 向上转型到共同基类 `IOException` 后再判（语义不变） |
+| 3 | **`KdbxXmlEntrySerializer.writeInlineAttachmentValue` 在 `finally` 清零 `att.data`**，而 `KdbxAttachment.data` 对**内存附件返回自身数组（非副本）** ⇒ **写出即销毁调用方的附件字节**（同实例再次保存 / UI 读取全为 0） | **生产缺陷**（由新增用例暴露） | 写侧改为只借用不清零；`KdbxAttachment.data` KDoc 改为**按来源分类声明所有权**（内存=借用、落盘=独立副本），并注明该差异就是缺陷成因 |
+| 4 | 「声明长度越界须在读取前拒绝」用例构造错误（每个字段都声明 1 MiB 却零数据 ⇒ 第 1 个字段即 EOF，累计预算无法推进） | 测试缺陷 | 改为「前 3 个字段带真实 1 MiB 数据 + 第 4 个仅声明」使预算恰在**读取前**越界（算术与消息关键字均已核对） |
+
+> 首轮跑测为 **3 例失败**（上述 #3、#4，以及一处 KAT 期望未扣除"前序受保护字段已消耗密钥流偏移"），
+> 修正后复跑全绿。**失败过程一并留痕**，避免"一次就绿"的失真叙述。
+
+### 38.3 边界、未覆盖与有意偏离（如实声明）
+
+- **设备侧待验（JVM 无法闭环）**：① 对话框窗口真实带上 `FLAG_SECURE`（建议 `dumpsys window` 或截图实测，
+  覆盖本轮 7 处对话框）；② 附件缓存**冷启动清理端到端**（落盘 → force-stop → 冷启动 → 目录应为空）；
+  ③ `SecureDialog` 取到 `DialogWindowProvider` 的路径（理论上 `DialogLayout implements DialogWindowProvider` 已由
+  compose-ui 字节码核实，仍建议真机确认未静默 fail-safe 空操作）。
+- **F-23 未做**经真实 `SyncCoordinator.syncNow()` + 真 Keystore MAC 的端到端用例：单测装配路径固定注入
+  `NoopSyncIntegrityMac`（防回滚在单测路径天然禁用），端到端需大改装配脚手架，超出本批次范围；
+  已由 `SyncCache` + evictor 两级锁定 + 真实 `DatabaseSession.lock()` 路径覆盖。
+- **Salsa20 无真实语料**：本仓无「KDBX4 + `InnerRandomStreamID=2`」的官方产物（KeePass/KeePassXC 的 v4 恒写 ChaCha20，
+  v3 被版本门拒绝），故 KAT 以**跨实现真值**替代端到端语料；合成该语料的配方已写在用例 KDoc 内。
+- **有意偏离（留痕）**：① **未实施"F-09 拒存保护"**（既有整改文档建议的第一步）——修复常量后读 Salsa20 已正确，
+  拒存反而阻断合法迁移；改以 KAT 锁定常量。② KDF 上下界**保留比规范更严**的防 DoS 封顶（KDoc 给对照表），
+  仅下界与版本取值集对齐官方。③ 布尔解析**不 trim**（对齐官方裸字符串精确比较）。
+- **本批次新增登记、仍未闭环的待办**：`ISSUE-P3-78`（Argon2 `S` 长度未按官方 `MinSalt=8`/`MaxSalt=0x3FFFFFFF` 校验）、
+  `ISSUE-P3-79`（Compose Popup 系窗口未接线 `PopupProperties(securePolicy)`）、
+  `ISSUE-P3-80`（`KdbxConstants.Xml.COMPRESSED` 等属性常量未上收）。**同类已记录的接受域差异**：
+  `HistoryMaxItems` 缺省官方为 `-1`（本仓 10）、官方 `ReadTime` 对非 8 字节 base64 零填充宽容（本仓严格拒绝）。
+- **CodeQL 影响评估**：`java-kotlin` **不在** code scanning 语言矩阵内（`.github/workflows/codeql.yml:55-64`，
+  文件头 :21-23 说明理由），故新增 Kotlin 硬编码 KAT 向量不会产生 `hard-coded-cryptographic-value` 告警，
+  无需改 `.github/codeql/codeql-config.yml`。
+- **唯一功能收紧**：`isPackageMatch` 语义收窄后，URL 为「裸包名」（无 scheme）的条目不再按包名命中（fail-closed，已入 KDoc）。
+
+### 38.4 基线同步
+- `AGENTS.md` §1 单测基线：**1423 → 1557 例**（0 失败 / 0 错误 / 13 跳过）；
+- `AGENTS.md` §4 新增 7 份安全文档索引 + 索引纪律；§6 附件缓存清理改为「冷启动 + 锁定」两层并附如实边界。

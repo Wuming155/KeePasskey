@@ -83,6 +83,10 @@ internal fun KeyFileOneTimeSaveDialog(
         },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                // 对话框由 Compose 创建**独立窗口**，Activity 的 FLAG_SECURE 不会传播过来
+                // （官方："You must set FLAG_SECURE explicitly for every window created by the
+                // activity, including dialogs."）。本窗展示一次性密钥文件保存提示，属敏感面。
+                com.keepasskey.app.security.SecureDialogWindowEffect()
                 Text(
                     text = stringResource(R.string.db_picker_keyfile_backup_warning),
                     style = MaterialTheme.typography.bodySmall,
@@ -172,6 +176,9 @@ internal fun CreateVaultWizardDialog(
         },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                // 本窗内含**主密码 + 确认主密码**两个 SecurePasswordField：对话框是独立窗口，
+                // 必须在本窗内显式施加 FLAG_SECURE（同 SecureDialog KDoc 的官方依据）
+                com.keepasskey.app.security.SecureDialogWindowEffect()
                 OutlinedTextField(
                     value = vaultName,
                     onValueChange = { vaultName = it },

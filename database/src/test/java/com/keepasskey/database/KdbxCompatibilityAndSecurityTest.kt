@@ -154,8 +154,18 @@ class KdbxCompatibilityAndSecurityTest {
         }
     }
 
+    /**
+     * D20 回归锁：**数据块/终止块** HMAC 不符必须报「完整性失败」（[KdbxCorruptFileException]），
+     * 与官方语义一致（KeePass 2.61.1 `HmacBlockStream.cs:233/264` 抛
+     * `InvalidDataException(FileCorrupted)`）；同时**必须不是**凭据异常。
+     *
+     * 为什么「不是凭据异常」是独立的语义断言：头部 HMAC 与本块 HMAC 使用同一 hmacKey64，
+     * 头部 HMAC 通过即已证明凭据正确；若此处仍报凭据错误，上层
+     * （`UnlockViewModel`）会把「文件被篡改」显示为「主密码错误」**并计入解锁失败节流**，
+     * 用户永远无法得知库已被篡改。
+     */
     @Test
-    fun testCorruptHmacBlockThrowsKdbxInvalidCredentialsException() {
+    fun testCorruptHmacBlockThrowsCorruptFileNotInvalidCredentials() {
         val password = "Password123".toCharArray()
         val db = KdbxDatabase(
             header = KdbxHeader.createDefault(useArgon2 = false),
@@ -166,14 +176,112 @@ class KdbxCompatibilityAndSecurityTest {
         KdbxFile.save(bos, db, password)
         val bytes = bos.toByteArray()
 
-        // 篡改负载区的 HMAC 签名（在 Header 之后、第 0 个数据块的 32 字节 HMAC 签名区域）
-        // 头部大小约为几百字节，篡改倒数 32 字节处的终止块 HMAC 或中间数据块 HMAC
-        // 直接篡改倒数第 20 字节（处于终止块的 32 字节 HMAC 校验和之内）
+        // 篡改终止块 HMAC 校验和区域（文件末尾 36 字节 = 32B HMAC + 4B blockSize(0)）
         bytes[bytes.size - 20] = (bytes[bytes.size - 20].toInt() xor 0xFF).toByte()
 
-        assertThrows(KdbxInvalidCredentialsException::class.java) {
+        val failure = assertThrows(KdbxCorruptFileException::class.java) {
             KdbxFile.load(ByteArrayInputStream(bytes), password)
         }
+        // Kotlin 拒绝「对已定型的类型再判其兄弟类型」（IMPOSSIBLE_IS_CHECK_ERROR），
+        // 故先向上转型到二者共同基类 IOException 再判——语义与直接判 is 完全一致
+        val failureAsIo: java.io.IOException = failure
+        assertFalse(
+            "数据/终止块 HMAC 失败绝不能被判定为凭据错误（否则会被计入解锁失败节流）",
+            failureAsIo is KdbxInvalidCredentialsException
+        )
+        assertTrue(
+            "异常文案须体现文件损坏/篡改而非主密码错误：${failure.message}",
+            failure.message!!.contains("损坏") || failure.message!!.contains("篡改")
+        )
+    }
+
+    /**
+     * D20 回归锁：**首个数据块** HMAC 不符同样属完整性失败。
+     * 该路径在 `readBlock()`（旧派生裁决探针取首块）中即抛出，发生在
+     * cipherKey 探针与 XML 解析之前，但已在头部 HMAC 通过之后。
+     */
+    @Test
+    fun testCorruptFirstDataBlockHmacThrowsCorruptFile() {
+        val password = "FirstBlockPass#2026".toCharArray()
+        val db = KdbxDatabase(
+            header = KdbxHeader.createDefault(useArgon2 = false),
+            databaseName = "FirstBlockVault",
+            rootGroup = KdbxGroup(name = "Root")
+        )
+
+        val bos = ByteArrayOutputStream()
+        KdbxFile.save(bos, db, password)
+        val bytes = bos.toByteArray()
+
+        // 头部长度 = 序列化头部 + 32B SHA-256 + 32B HMAC；其后即第 0 个数据块的 32B HMAC
+        val (_, headerBytes) = KdbxHeader.deserialize(ByteArrayInputStream(bytes))
+        val firstBlockHmacOffset = headerBytes.size + 32 + 32
+        bytes[firstBlockHmacOffset] = (bytes[firstBlockHmacOffset].toInt() xor 0xFF).toByte()
+
+        assertThrows(KdbxCorruptFileException::class.java) {
+            KdbxFile.load(ByteArrayInputStream(bytes), password)
+        }
+    }
+
+    /**
+     * D20 回归锁（负向对照）：**错误口令**必须仍然得到 [KdbxInvalidCredentialsException]。
+     *
+     * 理由：hmacKey64 由复合密钥派生，错误凭据在**头部 HMAC**（唯一凭据出口）即失败，
+     * 永远走不到数据块校验。若本用例改为 `KdbxCorruptFileException`，说明
+     * 「凭据错误」与「文件篡改」的分型被倒置，上层将不再计入解锁失败节流——
+     * 暴力破解防线被静默拆除。真实官方语料侧的同类断言见
+     * [RealKdbxInteroperabilityTest.loadRealVaultWithWrongPassword_failsWithInvalidCredentials]。
+     */
+    @Test
+    fun testWrongPasswordStillThrowsInvalidCredentials() {
+        val password = "CorrectPassword#2026".toCharArray()
+        val db = KdbxDatabase(
+            header = KdbxHeader.createDefault(useArgon2 = false),
+            rootGroup = KdbxGroup(name = "Root")
+        )
+
+        val bos = ByteArrayOutputStream()
+        KdbxFile.save(bos, db, password)
+
+        val failure = assertThrows(KdbxInvalidCredentialsException::class.java) {
+            KdbxFile.load(ByteArrayInputStream(bos.toByteArray()), "WrongPassword#2026".toCharArray())
+        }
+        assertTrue(
+            "凭据错误必须仍是凭据异常：${failure::class.java.simpleName}",
+            failure is KdbxInvalidCredentialsException
+        )
+    }
+
+    /**
+     * D20：篡改**首个数据块的密文**（块 HMAC 随之不符）同样必须在头部 HMAC 通过后
+     * 以完整性异常收场，且不得退化为凭据异常。
+     */
+    @Test
+    fun testTamperedFirstBlockPayloadIsNotCredentialFailure() {
+        val password = "TamperPayload#2026".toCharArray()
+        val db = KdbxDatabase(
+            header = KdbxHeader.createDefault(useArgon2 = false),
+            databaseName = "TamperVault",
+            rootGroup = KdbxGroup(name = "Root")
+        )
+
+        val bos = ByteArrayOutputStream()
+        KdbxFile.save(bos, db, password)
+        val bytes = bos.toByteArray()
+
+        val (_, headerBytes) = KdbxHeader.deserialize(ByteArrayInputStream(bytes))
+        // 定位第 0 个数据块数据区：头部 + SHA(32) + HMAC(32) + 块 HMAC(32) + blockSize(4)
+        val firstBlockDataOffset = headerBytes.size + 32 + 32 + 32 + 4
+        bytes[firstBlockDataOffset] = (bytes[firstBlockDataOffset].toInt() xor 0xFF).toByte()
+
+        val failure = assertThrows(KdbxCorruptFileException::class.java) {
+            KdbxFile.load(ByteArrayInputStream(bytes), password)
+        }
+        val failureAsIo: java.io.IOException = failure
+        assertFalse(
+            "篡改数据块绝不能被判定为凭据错误",
+            failureAsIo is KdbxInvalidCredentialsException
+        )
     }
 
 

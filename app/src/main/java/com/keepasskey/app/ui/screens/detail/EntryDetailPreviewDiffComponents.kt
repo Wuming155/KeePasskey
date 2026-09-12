@@ -41,6 +41,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.keepasskey.app.R
+import com.keepasskey.app.security.SecureDialog
 import com.keepasskey.app.ui.model.UiAttachment
 import com.keepasskey.app.ui.model.UiEntryRevision
 import com.keepasskey.app.ui.model.UiVaultEntry
@@ -73,37 +74,41 @@ fun RevisionVisualDiffDialog(
             }
         },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                Text(
-                    text = stringResource(R.string.diff_compare_summary, revision.modifiedAt, revision.summary),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+            // FLAG_SECURE 是窗口级属性：AlertDialog 是独立窗口，其内容含密码明文差异，
+            // 必须在对话框自身内容里施加（见 SecureDialog KDoc 与官方说明）
+            SecureDialog {
+                Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    Text(
+                        text = stringResource(R.string.diff_compare_summary, revision.modifiedAt, revision.summary),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
 
-                // 密码差异字段
-                DiffFieldCard(
-                    fieldLabel = stringResource(R.string.diff_field_password),
-                    currentValue = currentPassword,
-                    historicalValue = revisionPassword,
-                    isSensitive = true
-                )
-
-                // 用户名差异字段
-                DiffFieldCard(
-                    fieldLabel = stringResource(R.string.diff_field_username),
-                    currentValue = currentEntry.username,
-                    historicalValue = revision.username,
-                    isSensitive = false
-                )
-
-                // 备注差异字段
-                if (currentEntry.notes != revision.notes) {
+                    // 密码差异字段
                     DiffFieldCard(
-                        fieldLabel = stringResource(R.string.diff_field_notes),
-                        currentValue = currentEntry.notes.ifBlank { stringResource(R.string.diff_notes_empty) },
-                        historicalValue = revision.notes.ifBlank { stringResource(R.string.diff_notes_empty) },
+                        fieldLabel = stringResource(R.string.diff_field_password),
+                        currentValue = currentPassword,
+                        historicalValue = revisionPassword,
+                        isSensitive = true
+                    )
+
+                    // 用户名差异字段
+                    DiffFieldCard(
+                        fieldLabel = stringResource(R.string.diff_field_username),
+                        currentValue = currentEntry.username,
+                        historicalValue = revision.username,
                         isSensitive = false
                     )
+
+                    // 备注差异字段
+                    if (currentEntry.notes != revision.notes) {
+                        DiffFieldCard(
+                            fieldLabel = stringResource(R.string.diff_field_notes),
+                            currentValue = currentEntry.notes.ifBlank { stringResource(R.string.diff_notes_empty) },
+                            historicalValue = revision.notes.ifBlank { stringResource(R.string.diff_notes_empty) },
+                            isSensitive = false
+                        )
+                    }
                 }
             }
         },
@@ -243,56 +248,59 @@ fun SafeAttachmentPreviewDialog(
             }
         },
         text = {
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(14.dp)
-            ) {
-                // 安全隔离提示
-                Surface(
-                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
-                    shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier.fillMaxWidth()
+            // 同上：附件预览对话框是独立窗口，预览区渲染库内敏感内容，须自带 FLAG_SECURE
+            SecureDialog {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
-                    Row(modifier = Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Shield, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = stringResource(R.string.diff_attachment_isolated),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary
-                        )
+                    // 安全隔离提示
+                    Surface(
+                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(modifier = Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Shield, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = stringResource(R.string.diff_attachment_isolated),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
                     }
-                }
 
-                // 预览区模拟
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(180.dp)
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(14.dp)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(
-                            imageVector = Icons.Default.Lock,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(40.dp)
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = attachment.mimeType,
-                            style = MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            text = stringResource(R.string.diff_attachment_size, attachment.fileSizeFormatted),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                    // 预览区模拟
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(180.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(14.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(
+                                imageVector = Icons.Default.Lock,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(40.dp)
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = attachment.mimeType,
+                                style = MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = stringResource(R.string.diff_attachment_size, attachment.fileSizeFormatted),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                 }
             }

@@ -8,6 +8,11 @@ import org.junit.Test
  * H5 整改回归：KDF 参数上界校验。
  * 恶意构造的 KDBX 可声明超大 Argon2 内存（分配期 OOM）、超大 AES 轮数/迭代数（无限期占用 CPU），
  * 参数必须在解析期被拒绝（对照 KeePassDX Limits / KeePassXC 参数封顶语义）。
+ *
+ * D7 整改补充：Argon2 内存**下界**对齐官方 `Argon2Kdf.MinMemory = 1024 * 8 = 8192` 字节。
+ * 原下界 1 MiB 严于规范 128 倍，会误拒官方客户端写出的合法小内存库（如 P=1 的低配配置）。
+ * 上界与迭代/并行度上界仍为本仓**更严的 fail-closed 防 DoS 封顶**（对照表见
+ * `KdbxKdfParameterCodec` 类 KDoc），宽于一切合法用户配置，正常文件不受影响。
  */
 class KdfParametersBoundsTest {
 
@@ -15,11 +20,36 @@ class KdfParametersBoundsTest {
 
     @Test
     fun `Argon2 内存低于下界被拒绝`() {
-        assertThrows(KdbxCorruptFileException::class.java) {
-            KdbxHeader.validateArgon2Bounds(
-                memoryInBytes = 1024L, iterations = 2L, parallelism = 2, version = 0x13
-            )
+        // 官方下界 8192：8191 与更小的 1024 均须拒绝
+        for (belowMin in listOf(1024L, 8191L)) {
+            assertThrows(
+                "memoryInBytes=$belowMin 低于官方下界 8192，必须拒绝",
+                KdbxCorruptFileException::class.java
+            ) {
+                KdbxHeader.validateArgon2Bounds(
+                    memoryInBytes = belowMin, iterations = 2L, parallelism = 2, version = 0x13
+                )
+            }
         }
+    }
+
+    /**
+     * D7 核心：官方下界 8192 字节（`Argon2Kdf.MinMemory`）必须**合法通过**。
+     * 这是「不误拒合法库」的判据——原 1 MiB 下界会在此失败。
+     */
+    @Test
+    fun `Argon2 内存等于官方下界 8192 合法通过`() {
+        KdbxHeader.validateArgon2Bounds(
+            memoryInBytes = 8192L, iterations = 1L, parallelism = 1, version = 0x10
+        )
+    }
+
+    /** 下界之上的常见小内存配置（如 16 KiB）亦须合法。 */
+    @Test
+    fun `Argon2 内存略高于官方下界合法通过`() {
+        KdbxHeader.validateArgon2Bounds(
+            memoryInBytes = 16L * 1024, iterations = 2L, parallelism = 1, version = 0x13
+        )
     }
 
     @Test

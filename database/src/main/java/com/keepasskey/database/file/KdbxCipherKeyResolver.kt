@@ -2,7 +2,7 @@ package com.keepasskey.database.file
 
 import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.crypto.cipher.CipherEngine
-import com.keepasskey.database.exception.KdbxInvalidCredentialsException
+import com.keepasskey.database.exception.KdbxCorruptFileException
 import com.keepasskey.database.io.LittleEndianUtil
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
@@ -14,9 +14,17 @@ import java.util.Arrays
  * 用首个数据块的解密结果裁决 cipherKey 派生变体：
  * GZIP 压缩库（官方默认）解密产物以 GZIP 魔数 1F 8B 08 开始；未压缩库解密产物
  * 呈现合法的内层 Header 字段序列。错误密钥的解密产物几乎不可能通过结构校验。
- * 两种派生均不合法时按凭据错误处理。
+ * 两种派生均不合法时抛 [KdbxCorruptFileException]（完整性失败）。
  *
- * 原实现逐字迁移，行为零变更。
+ * D20 异常语义依据：本裁决**只在 `KdbxFile.load` 的头部 HMAC 校验通过之后调用**，
+ * 而头部 HMAC 与数据块 HMAC 使用同一 `hmacKey64`——头部 HMAC 通过即证明凭据正确，
+ * 官方旧派生（SHA-256 cipherKey）与官方派生共享完全相同的 `hmacKey64`（见
+ * [KdbxKeyDerivation.deriveKeys]），故两种派生都解不出合法内层前缀时不可能是口令问题，
+ * 只能是文件内容损坏或被篡改。官方对应语义见 KeePass 2.61.1 KdbxFile.Read.cs:157
+ * （头部 HMAC 不符 → InvalidCompositeKeyException）与数据段
+ * HmacBlockStream.cs:233/264（数据/终止块不符 → InvalidDataException(FileCorrupted)）。
+ *
+ * 原实现逐字迁移，仅异常类型与文案按 D20 修正；裁决逻辑零变更。
  */
 internal object KdbxCipherKeyResolver {
 
@@ -78,7 +86,9 @@ internal object KdbxCipherKeyResolver {
                 legacyAccepted = true
                 return Resolution(legacyCipherKey, legacyCipherKey)
             }
-            throw KdbxInvalidCredentialsException("数据解密失败：主密码错误或文件已损坏")
+            throw KdbxCorruptFileException(
+                "数据解密探针失败：文件已损坏或被篡改（头部认证已通过，凭据正确，故非主密码错误）"
+            )
         } finally {
             // 未被选中的旧派生密钥在任何结果路径（含裁决失败抛异常）下统一清零；
             // hmacKey64 属 transformedKey 直接派生物，无论是否选中均立即擦除

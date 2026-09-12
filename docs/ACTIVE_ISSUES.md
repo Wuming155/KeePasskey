@@ -33,33 +33,27 @@
 
 ## P0 阻断级与致命安全漏洞（0 项）
 
-> 当前无待办。**ISSUE-P0-04**（库内 ≥1 条目时库列表渲染必崩）于 2026-09-11 修复归档，见
-> [RESOLVED_LOG.md](RESOLVED_LOG.md) §26。
+> 当前无待办。**ISSUE-P0-05 / P0-06 / P0-07**（KDBX4 时间单位、Salsa20 内层流 nonce、<DeletedObjects> 父节点）
+> 已于 2026-09-12 整改归档，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §38。
 
 ---
 
 ## P1 高危与核心功能问题（0 项）
 
-> 当前无待办。**ISSUE-P1-13**（写侧 Argon2 `P` UInt64 违反 KDBX4 规范）于 2026-09-11 整改归档，
-> 见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §27.1；**ISSUE-P1-14**（后台自动锁定）复核为行为符合
-> 设计结案，见 §27.2；**ISSUE-P1-15**（明文导入 KeePass XML 在 Android 运行时全量失败）同日
-> 发现并整改归档，见 §27.3。
+> 当前无待办。**ISSUE-P1-16 ~ P1-21**（附件 Ref/Compressed 解析、块 HMAC 异常分型、外层头部总量闸门、
+> 附件缓存冷启动清理、防回滚状态目录、敏感对话框 FLAG_SECURE）已于 2026-09-12 整改归档，见 §38。
 
 ---
 
 ## P2 中危缺陷与协议/测试缺口（0 项）
 
-> 当前无待办。**ISSUE-P2-24**（大附件整库常驻内存，无独立磁盘缓存池）于 2026-09-12 按分阶段方案
-> **阶段 1/2/3 全量落地**并归档，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §35；
-> **ISSUE-P2-27**（app / sync 无设备侧验证源集）由 §34 + §36 收口。
-> **历史批次**：**ISSUE-P2-23**（带密钥文件解锁后指纹快速解锁不可用，复合封印整改）于 2026-09-12
-> 整改归档，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §29.1；**ISSUE-P2-22**（「Argon2 参数」应用无
-> 真实效果）同日归档于 §28.1；P2-19 / P2-20 / P2-21 已于 §27 归档；
-> **ISSUE-P2-25 / P2-26** 经产品裁决为「不排期」，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §33。
+> 当前无待办。**ISSUE-P2-28 ~ P2-41**（往返丢字段与布尔/数值语义、MemoryProtection 读写语义、
+> KDF 缺参 fail-closed、isPackageMatch 的 android:// 硬约束、requireRiskNotice 接线、
+> XML 元素计数上限、明文副本清零等 14 项）已于 2026-09-12 整改归档，见 §38。
 
 ---
 
-## P3 低危问题、特性接线与体验优化（1 项）
+## P3 低危问题、特性接线与体验优化（4 项）
 
 > **状态（2026-09-12）**：历史 P3 批次 **ISSUE-P3-01 ~ P3-68** 除 P3-23（经产品裁决「不排期」）外
 > 已全部闭环并归档，逐条实现细节与验收证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md)（§3 ~ §32）。
@@ -116,5 +110,42 @@
 - **解除条件（可复现配方）**：若 Compose 后续版本在 `PlatformImeOptions` / `KeyboardOptions` 暴露
   `imeOptions` 位域（或提供 `IME_FLAG_NO_PERSONALIZED_LEARNING` 的公开入口），则在 `SecurePasswordField`
   统一接线并补回归断言（覆盖主密码 / 条目口令 / TOTP / 同步凭据各调用点），届时即可闭环本条。
+
+---
+
+### ISSUE-P3-78（新登记）：Argon2 KDF 的 `S`（salt）长度未按官方上下界校验
+
+- **优先级**：P3（同类 fail-closed 硬化）
+- **核实时间点与核实方式（2026-09-12）**：本轮 F-09/KDF 整改代理在实现 P2-34 时报告并经本会话复核——
+  `KdbxKdfParameterCodec.deserialize` 仅校验 `$UUID`/`S`存在性与 `P/M/I/V` 的范围，**未校验 `S` 长度**；
+  官方 `参考项目/KeePass-2.61.1-Source/KeePassLib/Cryptography/KeyDerivation/Argon2Kdf.cs:57-58`
+  为 `MinSalt = 8` / `MaxSalt = 0x3FFFFFFF`，`:143-144` 越界即抛 `ArgumentOutOfRangeException`。
+- **问题描述**：我们会接受官方拒绝的盐长（如 0 字节盐的退化文件）；`S` 的最大长度受 VariantDictionary
+  值上限（1 MiB）间接约束，故无内存风险，属**接受域不一致**而非可利用缺陷。
+- **本次未实施原因（留痕）**：会新增拒绝面且当轮无法运行构建/测试验证回归，故登记待办而非擅自扩大范围。
+- **验收标准**：① 按官方上下界校验 `S` 长度，越界抛 `KdbxCorruptFileException`；② 用例覆盖 `len=8` 通过、
+  `len=7` 拒绝，并加一条「本仓自身写出的 32 字节盐必须通过」防误拒。
+
+### ISSUE-P3-79（新登记）：Compose Popup 系窗口（`DropdownMenu` / `ExposedDropdownMenuBox`）未施加 FLAG_SECURE
+
+- **优先级**：P3（同类窗口缺口，本轮已修对话框窗口）
+- **核实时间点与核实方式（2026-09-12）**：ISSUE-P1-21 落地时由实现代理在 `SecureDialog` KDoc 中诚实登记——
+  Compose 的 Popup 窗口由 `PopupLayout` 承载，**不实现** `DialogWindowProvider`，故 `SecureDialog`
+  对其恒为 fail-safe 空操作；官方接线是
+  `PopupProperties(securePolicy = SecureFlagPolicy.SecureOn)`（`DropdownMenu` / `ExposedDropdownMenuBox`
+  的 `properties` 参数）。
+- **问题描述**：若某 Popup 内容出现敏感明文（如长按菜单显示口令），该窗口无 FLAG_SECURE。
+- **验收标准**：① 盘点所有 Popup 系窗口的敏感内容面；② 对确有敏感内容的调用点接线 `securePolicy`
+  并补回归断言；③ 无敏感内容的调用点留痕说明「无需接线」，避免"全量加 flag"的过度改动。
+
+### ISSUE-P3-80（新登记）：`KdbxConstants.Xml` 缺 `Compressed` 属性常量（实现内局部常量）
+
+- **优先级**：P3（常量归位 / 代码整洁）
+- **核实时间点与核实方式（2026-09-12）**：ISSUE-P1-16 落地时由实现代理在报告中提出——`Compressed`
+  属性名（官方 `KdbxFile.cs:194 AttrCompressed = "Compressed"`）当前以
+  `KdbxXmlBinaryNode.ATTR_COMPRESSED` 私有常量承载，未上收至 `KdbxConstants.Xml`（其余 XML 节点/属性名
+  均集中在该对象）。
+- **验收标准**：① 在 `KdbxConstants.Xml` 增加 `COMPRESSED` 并替换实现内局部常量；② 无行为变更；
+  ③ 若同期新增属性常量（如 `Ref` 已存在），保持命名风格一致。
 
 ---

@@ -3,8 +3,12 @@ package com.keepasskey.database.file
 import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.crypto.kdf.KdfParameters
+import com.keepasskey.database.crypto.VariantDictionary
+import com.keepasskey.database.exception.KdbxCorruptFileException
 import java.io.ByteArrayOutputStream
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -20,6 +24,13 @@ import org.junit.Test
  * - `P` / `V` → UInt32 (0x04)，长度 4
  * - `I` / `M` → UInt64 (0x05)，长度 8
  * - AES-KDF：`S` → ByteArray，`R` → UInt64
+ *
+ * ## D7 整改补充：读侧缺参数 fail-closed
+ * 官方 `Argon2Kdf.Transform`（KeePass 2.61.1 `Argon2Kdf.cs:146-160`）对 `P` / `M` / `I` / `V`
+ * 一律以 0 作默认再走范围检查 → **缺参数必然抛异常**。本仓原先静默填 `p=2 / m=64MiB / i=2 / v=0x13`，
+ * 掩盖了「变体字典被裁剪 / 损坏」这一事实。现改为缺失任一键即抛
+ * [KdbxCorruptFileException] 并点名缺键；下述用例锁定该 fail-closed 契约。
+ * 同时锁定 P1-13 的**读侧类型宽容**契约不得回退（以 UInt64 写出的 `P` / `V` 仍按 UInt32 语义读）。
  */
 class KdbxKdfParameterCodecWriteContractTest {
 
@@ -132,5 +143,154 @@ class KdbxKdfParameterCodecWriteContractTest {
         val entries = parseEntries(serializeToBytes(argon2id))
         val uuid = KdbxUuid(entries.getValue("\$UUID").second)
         assertEquals(KdbxConstants.Kdf.ARGON2ID, uuid)
+    }
+
+    // ================= D7：读侧缺参数 fail-closed =================
+
+    /**
+     * 构造 Argon2 变体字典（ARGON2ID）。
+     *
+     * - `null` 表示**故意缺该键**（用于 fail-closed 缺失参数用例）；
+     * - `pAsUInt64` / `vAsUInt64` 模拟「以 UInt64 写出 P/V」的非规范编码，
+     *   用于锁定读侧必须按 UInt32 语义窄化（P1-13 契约）。
+     */
+    private fun argon2VariantDict(
+        p: Long? = 2L,
+        m: Long? = 64L * 1024 * 1024,
+        i: Long? = 2L,
+        v: Long? = 0x13L,
+        salt: ByteArray? = ByteArray(32),
+        pAsUInt64: Boolean = false,
+        vAsUInt64: Boolean = false
+    ): ByteArray {
+        val vd = VariantDictionary()
+        vd.setByteArray("\$UUID", KdbxConstants.Kdf.ARGON2ID.toByteArray())
+        salt?.let { vd.setByteArray("S", it) }
+        p?.let { if (pAsUInt64) vd.setUInt64("P", it) else vd.setUInt32("P", it) }
+        m?.let { vd.setUInt64("M", it) }
+        i?.let { vd.setUInt64("I", it) }
+        v?.let { if (vAsUInt64) vd.setUInt64("V", it) else vd.setUInt32("V", it) }
+        return vd.toByteArray()
+    }
+
+    /**
+     * 缺失 `P` / `M` / `I` / `V` 任一者都必须以 [KdbxCorruptFileException] 拒绝，
+     * 且错误消息点名缺失的键。
+     *
+     * 回归意义：原实现为缺失项静默填入 `p=2 / m=64MiB / i=2 / v=0x13`（数据类默认值），
+     * 使「被裁剪 / 损坏的变体字典」被伪装成「口令错误」——本用例锁定 fail-closed 语义，
+     * 任何一处回退为默认值填充都会让对应用例失败。
+     */
+    @Test
+    fun `Argon2 缺失 P M I V 任一参数均被拒绝且消息点名缺键`() {
+        val cases = listOf(
+            "P" to argon2VariantDict(p = null),
+            "M" to argon2VariantDict(m = null),
+            "I" to argon2VariantDict(i = null),
+            "V" to argon2VariantDict(v = null)
+        )
+        for ((missingKey, bytes) in cases) {
+            val ex = assertThrows(
+                "缺失 Argon2 $missingKey 参数必须以损坏文件拒绝（官方 Argon2Kdf 为 fail-closed）",
+                KdbxCorruptFileException::class.java
+            ) { KdbxKdfParameterCodec.deserialize(bytes) }
+            assertTrue(
+                "错误消息须点名缺失的键 $missingKey，实际: ${ex.message}",
+                ex.message?.contains("Argon2") == true && ex.message?.contains(missingKey) == true
+            )
+        }
+    }
+
+    /** 缺失 `$UUID` / `S` 同样拒绝（既有契约回归，防止 fail-closed 改动波及这两条）。 */
+    @Test
+    fun `Argon2 缺失 UUID 或 S 参数被拒绝`() {
+        assertThrows(KdbxCorruptFileException::class.java) {
+            KdbxKdfParameterCodec.deserialize(argon2VariantDict(salt = null))
+        }
+        val noUuid = VariantDictionary().apply {
+            setByteArray("S", ByteArray(32))
+            setUInt32("P", 2L)
+            setUInt64("M", 8192L)
+            setUInt64("I", 1L)
+            setUInt32("V", 0x13L)
+        }.toByteArray()
+        assertThrows(KdbxCorruptFileException::class.java) {
+            KdbxKdfParameterCodec.deserialize(noUuid)
+        }
+    }
+
+    /**
+     * P1-13 读侧契约不得回退：`P` / `V` 即便以 UInt64（0x05）编码，
+     * 读侧仍按 **UInt32 语义**窄化取值（而非 Int64 直读）。
+     */
+    @Test
+    fun `P 与 V 以 UInt64 编码时仍按 UInt32 语义读取`() {
+        val params = KdbxKdfParameterCodec.deserialize(
+            argon2VariantDict(p = 3L, v = 0x10L, pAsUInt64 = true, vAsUInt64 = true)
+        ) as KdfParameters.Argon2
+
+        assertEquals("P 须按 UInt32 语义读为 3", 3, params.parallelism)
+        assertEquals("V 须按 UInt32 语义读为 0x10", 0x10, params.version)
+    }
+
+    /**
+     * D7：官方下界 `M = 8192` 字节（`Argon2Kdf.MinMemory`）的合法库必须能读入。
+     * 原下界 1 MiB 会在此误拒——本用例是该误拒缺陷的回归锁。
+     */
+    @Test
+    fun `M 为官方下界 8192 的 Argon2 库读取合法`() {
+        val params = KdbxKdfParameterCodec.deserialize(
+            argon2VariantDict(p = 1L, m = 8192L, i = 1L)
+        ) as KdfParameters.Argon2
+
+        assertEquals(8192L, params.memoryInBytes)
+        assertEquals(1L, params.iterations)
+        assertEquals(1, params.parallelism)
+    }
+
+    /** `M` 低于官方下界（8191）必须拒绝。 */
+    @Test
+    fun `M 低于官方下界 8192 被拒绝`() {
+        assertThrows(KdbxCorruptFileException::class.java) {
+            KdbxKdfParameterCodec.deserialize(argon2VariantDict(m = 8191L))
+        }
+    }
+
+    /**
+     * 严格读侧的配套回归：写侧 `serialize` 必然写出全部 `P` / `M` / `I` / `V`，
+     * 故「写 → 读」往返必须畅通——防止 fail-closed 改动把本仓自己的产物也拒掉。
+     */
+    @Test
+    fun `Argon2 写侧产物可被严格读侧完整回读`() {
+        val original = KdfParameters.Argon2(
+            type = KdfParameters.Argon2.Argon2Type.ARGON2ID,
+            salt = ByteArray(32) { it.toByte() },
+            parallelism = 3,
+            memoryInBytes = 8192L,
+            iterations = 5L,
+            version = KdfParameters.Argon2.ARGON2_VERSION_13
+        )
+
+        assertEquals(original, KdbxKdfParameterCodec.deserialize(serializeToBytes(original)))
+    }
+
+    /** AES-KDF 缺 `S` / `R` 亦为 fail-closed（既有契约回归）。 */
+    @Test
+    fun `AES-KDF 缺失 S 或 R 参数被拒绝`() {
+        val missingS = VariantDictionary().apply {
+            setByteArray("\$UUID", KdbxConstants.Kdf.AES_KDF.toByteArray())
+            setUInt64("R", 600_000L)
+        }.toByteArray()
+        val missingR = VariantDictionary().apply {
+            setByteArray("\$UUID", KdbxConstants.Kdf.AES_KDF.toByteArray())
+            setByteArray("S", ByteArray(32))
+        }.toByteArray()
+
+        assertThrows(KdbxCorruptFileException::class.java) {
+            KdbxKdfParameterCodec.deserialize(missingS)
+        }
+        assertThrows(KdbxCorruptFileException::class.java) {
+            KdbxKdfParameterCodec.deserialize(missingR)
+        }
     }
 }

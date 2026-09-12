@@ -2,6 +2,7 @@ package com.keepasskey.app.sync
 
 import android.content.Context
 import com.keepasskey.app.R
+import com.keepasskey.app.di.RollbackStateDir
 import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.app.ui.screens.settings.ExtendedSettings
 import com.keepasskey.core.result.KdbxResult
@@ -46,6 +47,17 @@ class SyncCycleRunner @Inject constructor(
     private val changes: SyncContentChangeDetector,
     private val preferences: SyncPreferences,
     private val strings: StringsProvider,
+    /**
+     * F-23 整改：防回滚状态目录，生产由 DI 注入 `filesDir/<SyncRollbackGuard.STATE_DIR_NAME>`
+     * （**跨会话锁定保留**，与可丢弃的 `cacheDir/sync` 语义彻底分离）。
+     *
+     * 可空 + 默认 null 沿用本仓既有模式（见 [SyncCoordinator] 的可空协作者），此处**只为惰性**：
+     * 手动装配路径（[SyncCoordinator] 的 `syncCycle == null` 回退分支）的假 Context 未必实现
+     * `getFilesDir()`，若在构造期求值 `context.filesDir` 会直接 NPE。null 时在 [runSyncCycle]
+     * 内按**同一生产落点**惰性解析；Hilt 恒注入真实目录（该路径同时禁用防回滚，见下）。
+     */
+    @RollbackStateDir
+    private val rollbackStateDir: File? = null,
     // ISSUE-P2-18：防回滚状态认证密钥来源（生产由 Hilt 注入 KeystoreSyncIntegrityMac；
     // 直接构造路径默认空实现 = 禁用防回滚，保持既有单测行为不变）
     private val syncIntegrityMac: SyncIntegrityMac = NoopSyncIntegrityMac
@@ -84,8 +96,15 @@ class SyncCycleRunner @Inject constructor(
             // ISSUE-P1-07：目录名与 SyncCacheEvictor 共用同一常量，杜绝两处字面量漂移
             val syncDir = File(context.cacheDir, SyncCache.CACHE_DIR_NAME).apply { if (!exists()) mkdirs() }
             val syncCache = SyncCache(syncDir)
-            // ISSUE-P2-18：本地认证的防回滚守卫（高水位状态与缓存同目录；app 层注入 Keystore MAC）
-            val rollbackGuard = SyncRollbackGuard(syncDir, syncIntegrityMac)
+            // F-23 整改：防回滚状态**不得**与可丢弃缓存同目录——此前它落在 cacheDir/sync，
+            // 而 SyncCache.clear() 把它列入删除清单且由锁库 / 凭据清空触发，导致「用户锁定一次
+            // 即可被云端重放旧库」。现注入 filesDir 下的持久目录（跨锁定保留），
+            // 状态仅含 SHA-256 摘要 + Keystore HMAC（无明文）。
+            // 注入缺失（手动装配路径）时按同一落点惰性兜底，保证两种装配方式落点一致。
+            val rollbackGuard = SyncRollbackGuard(
+                rollbackStateDir ?: File(context.filesDir, SyncRollbackGuard.STATE_DIR_NAME),
+                syncIntegrityMac
+            )
             val syncEngine = SyncEngine(provider, syncCache, rollbackGuard)
             // 离线开关联动：设置页开关传导至引擎决策树
             syncEngine.isOffline = session.isOfflineMode

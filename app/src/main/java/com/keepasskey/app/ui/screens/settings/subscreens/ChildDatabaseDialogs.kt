@@ -34,6 +34,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.keepasskey.app.R
+import com.keepasskey.app.security.SecureDialogWindowEffect
 import com.keepasskey.app.ui.components.SecurePasswordField
 import com.keepasskey.app.ui.model.resolveText
 import com.keepasskey.app.ui.screens.settings.ChildDatabaseMountUiState
@@ -83,6 +84,10 @@ internal fun ChildDatabaseDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.dbset_child_db_title)) },
         text = {
+            // FLAG_SECURE 是窗口级属性：AlertDialog 由 Compose 创建独立窗口，Activity 窗口的
+            // flag 不传播；子库凭据对话框含 SecurePasswordField，必须在对话框自身内容里施加。
+            // 本槽位内容已是单个大块，故用等价的 SecureDialogWindowEffect（见 SecureDialog KDoc）
+            SecureDialogWindowEffect()
             Column(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
@@ -287,6 +292,8 @@ internal fun ChildDatabaseCredentialDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.dbset_child_db_btn_unlock)) },
         text = {
+            // 同上：子库重新解锁对话框同样是独立窗口，必须自带 FLAG_SECURE
+            SecureDialogWindowEffect()
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 // 目标子库别名（非敏感展示字段），避免「解锁哪一个」无据可依
                 Text(

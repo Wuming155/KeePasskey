@@ -1,7 +1,10 @@
 package com.keepasskey.database.xml
 
+import com.keepasskey.core.model.DeletedObject
 import com.keepasskey.core.model.KdbxConstants
+import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.model.KdbxGroup
+import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.crypto.stream.InnerRandomStreamCipher
 import com.keepasskey.database.exception.KdbxCorruptFileException
 import com.keepasskey.database.exception.KdbxInvalidCredentialsException
@@ -47,6 +50,9 @@ class KdbxXmlParser(
         var metaData = KdbxMetaData()
         var rootGroup: KdbxGroup? = null
         val nodeStack = ArrayDeque<SaxNode>()
+        // Wave 12 / D23 解析炸弹防线：XML 元素**总数**封顶（此前仅约束深度与单节点文本长度，
+        // 海量小元素可绕过两者放大内存与 SAX 事件开销）
+        var elementCount = 0
 
         val handler = object : DefaultHandler2() {
             override fun resolveEntity(publicId: String?, systemId: String?): InputSource {
@@ -67,6 +73,13 @@ class KdbxXmlParser(
             }
 
             override fun startElement(uri: String?, localName: String?, qName: String, attributes: Attributes) {
+                // Wave 12 / D23 解析炸弹防线：XML 元素总数封顶（海量小元素放大）
+                elementCount++
+                if (elementCount > MAX_XML_ELEMENTS) {
+                    throw KdbxCorruptFileException(
+                        "KDBX XML 元素总数超出上限（$MAX_XML_ELEMENTS），疑似解析炸弹"
+                    )
+                }
                 // Wave 12 解析炸弹防线：XML 嵌套深度封顶（合法库远低于该界；深度受限同时
                 // 约束分组树嵌套与 IgnoredNode 未知子树的栈消耗）
                 if (nodeStack.size >= MAX_XML_DEPTH) {
@@ -119,7 +132,11 @@ class KdbxXmlParser(
 
         return ParseResult(
             meta = metaData,
-            rootGroup = rootGroup ?: KdbxGroup(name = "Root")
+            // 官方语义（KeePass 2.61.1 KdbxFile.Read.Streamed.cs:651,682）：
+            // Group/Entry 的 UUID 缺失或全零时替换为随机新 UUID（`if(Uuid.IsZero) new PwUuid(true)`）。
+            // 零 UUID 会让多个对象互相「撞名」，父引用与墓碑（DeletedObjects）随之失配，
+            // 删除条目在跨客户端合并时可能复活。
+            rootGroup = normalizeZeroUuids(rootGroup ?: KdbxGroup(name = "Root"), null)
         )
     }
 
@@ -233,6 +250,27 @@ class KdbxXmlParser(
          * 约在 40 层以内，64 为宽松上限；恶意深嵌套在内存耗尽前即被拒绝。
          */
         const val MAX_XML_DEPTH = 64
+
+        /**
+         * XML 元素**总数**安全上限（D23 解析炸弹防线：文本长度与嵌套深度之外的第三个维度）。
+         *
+         * 取值依据（200 万 = 2×10⁶）：
+         * - 合法库的元素数与条目数同阶：单条 Entry 约 20~40 个元素（UUID/Times/String×N/AutoType/CustomData…），
+         *   分组与图标再占少量；200 万元素对应「约 5~6 万条目」量级，已明显高于个人与团队库的实际规模。
+         * - 上界由解压预算约束：[KdbxFile.MAX_DECOMPRESSED_PAYLOAD_BYTES] = 128 MiB。若用最小元素
+         *   （`<a/>`，4 字节）放大，128 MiB 恰好可容纳约 3300 万元素——上限必须显著低于该极端值，
+         *   才能在「内存耗尽前」而不是「解压后」拒绝恶意文档。
+         * - 单元素在解析期的实际开销远大于其 XML 字节数（一次 SAX 事件 + 一个 [SaxNode] 实例），
+         *   200 万次分配在移动端即为可感知的峰值，故取该值作为「明显高于合法库、又能阻断放大」的折中。
+         *
+         * 已知取舍：按每 Entry 约 35 个元素估算，200 万元素约等于 5~6 万条目；
+         * 十万级条目的超大库（多为桌面端导出）可能触及该上限并被判为解析炸弹。
+         * 该常量是单一取值点，如后续确需支持更大库，可在保持「显著低于 128 MiB 最小元素容量
+         * （约 3300 万元素）」的前提下上调，并同步复核移动端峰值内存。
+         *
+         * 超限抛 [KdbxCorruptFileException]（与深度、文本长度防线一致的 fail-closed 语义）。
+         */
+        const val MAX_XML_ELEMENTS = 2_000_000
     }
 }
 
@@ -251,7 +289,14 @@ private class FileNode(
     override fun startChild(name: String, attrs: Attributes): SaxNode {
         return when (name) {
             KdbxConstants.Xml.META -> MetaNode { meta = it }
-            KdbxConstants.Xml.ROOT_GROUP -> RootNode(innerStreamCipher, binaries) { rootGroup = it }
+            KdbxConstants.Xml.ROOT_GROUP -> RootNode(innerStreamCipher, binaries) { group, rootDeletedObjects ->
+                rootGroup = group
+                if (rootDeletedObjects.isNotEmpty()) {
+                    meta = meta.copy(
+                        deletedObjects = mergeDeletedObjects(meta.deletedObjects, rootDeletedObjects)
+                    )
+                }
+            }
             else -> IgnoredNode()
         }
     }
@@ -262,25 +307,96 @@ private class FileNode(
 }
 
 /**
- * <Root> 包裹节点：包含唯一的根 <Group>。
+ * <Root> 包裹节点：包含唯一的根 <Group> 与根作用域 <DeletedObjects> 墓碑列表。
+ *
+ * 官方位置（KeePass 2.61.1 `KdbxFile.Write.cs:430` 写 / `Read.Streamed.cs:369,747` 读，
+ * 读侧专用上下文 `KdbContext.RootDeletedObjects`）：元素在 `<Group>` 之后、`</Root>` 之前。
+ *
+ * @param onDone 参数依次为「根分组」与「根作用域墓碑列表」
  */
 private class RootNode(
     private val innerStreamCipher: InnerRandomStreamCipher?,
     private val binaries: List<InnerHeader.BinaryItem>,
-    private val onDone: (KdbxGroup?) -> Unit
+    private val onDone: (KdbxGroup?, List<DeletedObject>) -> Unit
 ) : SaxNode() {
 
     private var rootGroup: KdbxGroup? = null
+    private var deletedObjects: List<DeletedObject> = emptyList()
 
     override fun startChild(name: String, attrs: Attributes): SaxNode {
-        return if (name == KdbxConstants.Xml.GROUP) {
-            GroupNode(null, innerStreamCipher, binaries) { rootGroup = it }
-        } else {
-            IgnoredNode()
+        return when (name) {
+            KdbxConstants.Xml.GROUP -> GroupNode(null, innerStreamCipher, binaries) { rootGroup = it }
+            KdbxConstants.Xml.DELETED_OBJECTS -> DeletedObjectsNode { deletedObjects = it }
+            else -> IgnoredNode()
         }
     }
 
     override fun end() {
-        onDone(rootGroup)
+        onDone(rootGroup, deletedObjects)
     }
+}
+
+/**
+ * 合并两处墓碑列表：Meta 内历史位置（本仓旧版本产物）+ Root 官方位置。
+ *
+ * 兼容取舍：读侧两处均接收，避免旧库墓碑丢失；同一 UUID 只保留首次出现者
+ * （历史位置在先，语义上等价——同一对象的删除时间以最早记录为准）。
+ */
+internal fun mergeDeletedObjects(
+    legacyMetaDeletedObjects: List<DeletedObject>,
+    rootDeletedObjects: List<DeletedObject>
+): List<DeletedObject> {
+    if (legacyMetaDeletedObjects.isEmpty()) return rootDeletedObjects
+    if (rootDeletedObjects.isEmpty()) return legacyMetaDeletedObjects
+    val merged = LinkedHashMap<KdbxUuid, DeletedObject>(
+        legacyMetaDeletedObjects.size + rootDeletedObjects.size
+    )
+    for (item in legacyMetaDeletedObjects) merged[item.id] = item
+    for (item in rootDeletedObjects) merged.putIfAbsent(item.id, item)
+    return merged.values.toList()
+}
+
+/**
+ * 官方零 UUID 修正（KeePass 2.61.1 `KdbxFile.Read.Streamed.cs:651,682`）：
+ * Group/Entry（含 History 快照）的 UUID 为全零时替换为随机新 UUID。
+ *
+ * 实现要点：
+ * 1. **快路径零开销**：整棵树不含零 UUID 时不重建任何节点（合法库必然走此路径）；
+ * 2. 父引用同步：父组 UUID 被重写时，子组/条目此前记录的 `parentGroupId` 仍是旧零值，
+ *    必须一并改写，否则父引用与墓碑依旧失配（这正是缺陷 5/D8 的失效根因）；
+ * 3. 零 UUID 属「导入/畸形」路径，代价为一次全树拷贝，可接受。
+ */
+private fun normalizeZeroUuids(group: KdbxGroup, parentId: KdbxUuid?): KdbxGroup {
+    if (!containsZeroUuid(group)) return group
+
+    val groupId = if (group.id == KdbxUuid.ZERO) KdbxUuid.random() else group.id
+    return group.copy(
+        id = groupId,
+        parentGroupId = parentId,
+        entries = group.entries.map { normalizeEntryZeroUuid(it, groupId) },
+        subgroups = group.subgroups.map { normalizeZeroUuids(it, groupId) }
+    )
+}
+
+/** 条目（含 History 快照）的零 UUID 修正；历史快照的父组引用与其宿主条目一致。 */
+private fun normalizeEntryZeroUuid(entry: KdbxEntry, parentGroupId: KdbxUuid?): KdbxEntry {
+    val entryId = if (entry.id == KdbxUuid.ZERO) KdbxUuid.random() else entry.id
+    return entry.copy(
+        id = entryId,
+        parentGroupId = parentGroupId,
+        history = entry.history.map { normalizeEntryZeroUuid(it, parentGroupId) }
+    )
+}
+
+/** 子树中是否存在零 UUID（分组/条目/历史快照任一层级）。 */
+private fun containsZeroUuid(group: KdbxGroup): Boolean {
+    if (group.id == KdbxUuid.ZERO) return true
+    if (group.entries.any { containsZeroUuid(it) }) return true
+    return group.subgroups.any { containsZeroUuid(it) }
+}
+
+/** 条目及其历史快照中是否存在零 UUID。 */
+private fun containsZeroUuid(entry: KdbxEntry): Boolean {
+    if (entry.id == KdbxUuid.ZERO) return true
+    return entry.history.any { containsZeroUuid(it) }
 }

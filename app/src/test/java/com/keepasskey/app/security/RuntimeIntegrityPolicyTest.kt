@@ -159,4 +159,64 @@ class RuntimeIntegrityPolicyTest {
         assertTrue(unchanged.enforcement.disableBiometricQuickUnlock)
         assertTrue(unchanged.enforcement.disableAutofill)
     }
+
+    // ===== 缺陷 3（P2）：requireRiskNotice 的生产消费点（设置页风险提示接线） =====
+    //
+    // 原状：requireRiskNotice 只在测试里被引用，生产零消费——「必须给出明确风险提示」不成立。
+    // 现由设置页安全分区经 RuntimeIntegrityPolicy.requiresRiskNotice(report) 单一判定渲染提示卡。
+
+    @Test
+    fun `可信档不要求风险提示`() {
+        val report = RuntimeIntegrityPolicy.evaluate(IntegritySignals.NONE)
+
+        assertFalse(RuntimeIntegrityPolicy.requiresRiskNotice(report))
+    }
+
+    @Test
+    fun `可疑档与已妥协档均要求风险提示`() {
+        val elevated = RuntimeIntegrityPolicy.evaluate(IntegritySignals(appDebuggable = true))
+        val compromised = RuntimeIntegrityPolicy.evaluate(IntegritySignals(rootArtifactsDetected = true))
+
+        assertTrue(RuntimeIntegrityPolicy.requiresRiskNotice(elevated))
+        assertTrue(RuntimeIntegrityPolicy.requiresRiskNotice(compromised))
+    }
+
+    @Test
+    fun `未判定快照不要求风险提示`() {
+        // 未判定不等于已判定为风险：避免 UI 闪烁与误报
+        assertFalse(RuntimeIntegrityPolicy.requiresRiskNotice(RuntimeIntegrityReport.UNDETERMINED))
+    }
+
+    @Test
+    fun `快照缺失时按不提示处理`() {
+        // 单测/异常装配下不得回填「有风险」假值
+        assertFalse(RuntimeIntegrityPolicy.requiresRiskNotice(null))
+    }
+
+    @Test
+    fun `提示判定与 UI 取文案的等级范围严格一致`() {
+        // requiresRiskNotice == true ⟺ level ∈ {ELEVATED, COMPROMISED}：
+        // 保证 UI 在提示分支内拿到的等级必然非空（按等级取字符串资源不会落空）
+        val signalMatrix = listOf(
+            IntegritySignals.NONE,
+            IntegritySignals(appDebuggable = true),
+            IntegritySignals(untrustedInstallSource = true),
+            IntegritySignals(debuggerAttached = true),
+            IntegritySignals(rootArtifactsDetected = true),
+            IntegritySignals(magiskDetected = true),
+            IntegritySignals(hookFrameworkDetected = true),
+            IntegritySignals(debuggerAttached = true, appDebuggable = true, untrustedInstallSource = true)
+        )
+
+        signalMatrix.forEach { signals ->
+            val report = RuntimeIntegrityPolicy.evaluate(signals)
+            val noticeRequired = RuntimeIntegrityPolicy.requiresRiskNotice(report)
+            val noticeLevel = report.level == RuntimeRiskLevel.ELEVATED ||
+                report.level == RuntimeRiskLevel.COMPROMISED
+            assertEquals("信号 $signals 的提示判定与风险等级不一致", noticeLevel, noticeRequired)
+        }
+
+        // 未判定档同样保持「不提示」的一致性
+        assertFalse(RuntimeIntegrityPolicy.requiresRiskNotice(RuntimeIntegrityReport.UNDETERMINED))
+    }
 }
