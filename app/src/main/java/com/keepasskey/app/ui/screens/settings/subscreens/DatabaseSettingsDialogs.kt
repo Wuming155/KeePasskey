@@ -103,6 +103,7 @@ internal fun ExportDatabaseDialog(
     databaseName: String,
     onExportKdbx: (String) -> Unit,
     onExportXml: (String) -> Unit,
+    onExportCsv: (String) -> Unit,
     onDismiss: () -> Unit
 ) {
     AlertDialog(
@@ -136,6 +137,18 @@ internal fun ExportDatabaseDialog(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(stringResource(R.string.dbset_export_xml_btn))
+                }
+                OutlinedButton(
+                    onClick = {
+                        onDismiss()
+                        // ISSUE-P3-73：通用明文 CSV（后续经二次确认对话框放行落盘）
+                        val baseName = databaseName.removeSuffix(".kdbx")
+                            .ifBlank { "keepasskey" }
+                        onExportCsv("$baseName-export.csv")
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(stringResource(R.string.dbset_export_csv_btn))
                 }
             }
         },

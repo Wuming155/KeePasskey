@@ -60,6 +60,20 @@ class ExportConfirmationPolicyTest {
     }
 
     @Test
+    fun `明文 CSV 亦归入明文风险等级且未确认时不放行`() {
+        assertEquals(
+            ExportConfirmationPolicy.Risk.PLAINTEXT,
+            ExportConfirmationPolicy.riskOf(ExportArtifactKind.PLAINTEXT_CSV)
+        )
+        assertFalse(
+            ExportConfirmationPolicy.allows(ExportConfirmationPolicy.Risk.PLAINTEXT, confirmed = false)
+        )
+        assertTrue(
+            ExportConfirmationPolicy.allows(ExportConfirmationPolicy.Risk.PLAINTEXT, confirmed = true)
+        )
+    }
+
+    @Test
     fun `目标脱敏只保留 scheme 与 authority 并剥离文件名`() {
         val marker = ExportAuditSanitizer.targetMarker(SENSITIVE_TARGET)
 

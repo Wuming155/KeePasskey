@@ -370,6 +370,8 @@ class RealVaultRepository @Inject constructor(
 
     override suspend fun exportVaultXmlBytes(): KdbxResult<ByteArray> = exporter.exportVaultXmlBytes()
 
+    override suspend fun exportVaultCsvBytes(): KdbxResult<ByteArray> = exporter.exportVaultCsvBytes()
+
     override suspend fun exportKeyFileBytes(): KdbxResult<ByteArray> = exporter.exportKeyFileBytes()
 
     override suspend fun installEntryTemplates(): KdbxResult<Unit> = exporter.installEntryTemplates()

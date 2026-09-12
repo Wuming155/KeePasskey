@@ -53,6 +53,7 @@ internal fun NavGraphBuilder.keepasskeySettingsNavGraph(
             onClearExportFeedback = settingsViewModel::clearExportFeedback,
             onExportKdbx = settingsViewModel::exportKdbxTo,
             onExportXml = settingsViewModel::exportVaultXmlTo,
+            onExportCsv = settingsViewModel::exportVaultCsvTo,
             onExportKeyFile = settingsViewModel::exportKeyFileTo,
             onInstallTemplates = settingsViewModel::installEntryTemplates,
             // ISSUE-P3-19：导入链路（选源 → SAF 选文件 → 控制器解析/落库 → 报告对话框）

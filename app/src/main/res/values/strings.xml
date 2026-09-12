@@ -517,10 +517,16 @@
     <string name="dbset_export_kdbx_done">KDBX 文件导出成功</string>
     <string name="dbset_export_xml_btn">导出 XML (明文)</string>
     <string name="dbset_export_xml_done">XML 明文导出成功，请立即转移至安全位置</string>
+    <!-- ISSUE-P3-73：通用明文 CSV 导出 -->
+    <string name="dbset_export_csv_btn">导出 CSV (明文)</string>
+    <string name="dbset_export_csv_done">CSV 明文导出成功，请立即转移至安全位置</string>
     <!-- ISSUE-P2-10 (ZT-15)：明文 XML 导出二次确认（明示明文 / 不受保护 / 需自行删除） -->
     <string name="dbset_export_plain_warn_title">确认导出明文 XML</string>
     <string name="dbset_export_plain_warn_message">即将导出的是未加密的明文 XML，包含密码库的全部字段值：\n· 明文：文件内容可直接阅读，不受主密码保护；\n· 不受保护：写入下载目录或云盘后，任何可访问该位置的应用或人员都能读取；\n· 需自行删除：本应用不会代为清理，请用毕立即删除并清空云盘回收站。</string>
     <string name="dbset_export_plain_warn_confirm">我已知悉，仍要导出</string>
+    <!-- ISSUE-P3-73：明文 CSV 导出二次确认（文案须明确「明文」） -->
+    <string name="dbset_export_csv_plain_warn_title">确认导出明文 CSV</string>
+    <string name="dbset_export_csv_plain_warn_message">即将导出的是未加密的明文 CSV，包含密码库的全部条目字段值：\n· 明文：文件内容可直接阅读，不受主密码保护；\n· 不受保护：写入下载目录或云盘后，任何可访问该位置的应用或人员都能读取；\n· 需自行删除：本应用不会代为清理，请用毕立即删除并清空云盘回收站。</string>
     <string name="dbset_import_dialog_title">选择导入来源</string>
     <string name="dbset_import_preparing">正在解析 %1$s 数据...</string>
     <string name="dbset_src_1pux">1Password (1PUX)</string>
@@ -986,6 +992,7 @@
     <string name="repo_revision_summary">历史修订</string>
     <string name="repo_no_active_db_for_export">当前无活动数据库（已锁定或未打开）</string>
     <string name="repo_export_xml_failed">导出 XML 失败: %1$s</string>
+    <string name="repo_export_csv_failed">导出 CSV 失败: %1$s</string>
     <string name="repo_no_keyfile_to_export">当前会话未使用密钥文件，无密钥文件可导出</string>
     <string name="repo_templates_already_installed">模板分组「%1$s」已存在，无需重复安装</string>
     <string name="repo_sync_type_local">本地存储</string>

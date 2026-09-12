@@ -63,6 +63,8 @@ fun DatabaseSettingsScreen(
     onClearExportFeedback: () -> Unit = {},
     onExportKdbx: (android.net.Uri) -> Unit = {},
     onExportXml: (android.net.Uri) -> Unit = {},
+    // ISSUE-P3-73：通用明文 CSV 导出（同明文 XML 语义，需二次确认）
+    onExportCsv: (android.net.Uri) -> Unit = {},
     onExportKeyFile: (android.net.Uri) -> Unit = {},
     onInstallTemplates: () -> Unit = {},
     // ISSUE-P3-19：导入链路（对话框选源 → SAF 选文件 → 控制器解析/落库 → 报告对话框）。
@@ -99,6 +101,9 @@ fun DatabaseSettingsScreen(
     // ISSUE-P2-10 (ZT-15)：明文 XML 导出的待确认目标（SAF 选定后、写盘前强制二次确认）
     var pendingPlaintextXmlUri by remember { mutableStateOf<Uri?>(null) }
     var showPlaintextXmlConfirm by remember { mutableStateOf(false) }
+    // ISSUE-P3-73：明文 CSV 导出的待确认目标（同明文 XML 的二次确认语义）
+    var pendingPlaintextCsvUri by remember { mutableStateOf<Uri?>(null) }
+    var showPlaintextCsvConfirm by remember { mutableStateOf(false) }
     // ISSUE-P3-20：子库 SAF 选择结果（非敏感元数据）+ 待解锁的挂载身份
     var childDbSourceUri by remember { mutableStateOf<String?>(null) }
     var childDbMountKeyFileUri by remember { mutableStateOf<String?>(null) }
@@ -116,6 +121,15 @@ fun DatabaseSettingsScreen(
         if (uri != null) {
             pendingPlaintextXmlUri = uri
             showPlaintextXmlConfirm = true
+        }
+    }
+    // ISSUE-P3-73：明文 CSV 同样不直接导出——SAF 选定目标后先弹二次确认
+    val exportCsvLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("text/csv")
+    ) { uri ->
+        if (uri != null) {
+            pendingPlaintextCsvUri = uri
+            showPlaintextCsvConfirm = true
         }
     }
     val exportKeyFileLauncher = rememberLauncherForActivityResult(
@@ -318,6 +332,7 @@ fun DatabaseSettingsScreen(
             databaseName = uiState.databaseName,
             onExportKdbx = { exportKdbxLauncher.launch(it) },
             onExportXml = { exportXmlLauncher.launch(it) },
+            onExportCsv = { exportCsvLauncher.launch(it) },
             onDismiss = { showExportDialog = false }
         )
     }
@@ -361,6 +376,51 @@ fun DatabaseSettingsScreen(
             },
             dismissButton = {
                 TextButton(onClick = { cleanupCancelledXmlTarget() }) {
+                    Text(stringResource(R.string.btn_cancel))
+                }
+            }
+        )
+    }
+
+    // 对话框 6c：明文 CSV 导出二次确认（ISSUE-P3-73，语义同明文 XML）
+    if (showPlaintextCsvConfirm) {
+        // ISSUE-P2-20：取消分支清理 SAF 已创建的空目标文档，不留 0 字节残留
+        val localContext = LocalContext.current
+        fun cleanupCancelledCsvTarget() {
+            pendingPlaintextCsvUri?.let {
+                SafDocumentCleanup.deleteCreatedDocument(localContext, it)
+            }
+            showPlaintextCsvConfirm = false
+            pendingPlaintextCsvUri = null
+        }
+        AlertDialog(
+            onDismissRequest = { cleanupCancelledCsvTarget() },
+            title = { Text(stringResource(R.string.dbset_export_csv_plain_warn_title)) },
+            text = {
+                Text(
+                    text = stringResource(R.string.dbset_export_csv_plain_warn_message),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.error
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val target = pendingPlaintextCsvUri
+                    showPlaintextCsvConfirm = false
+                    pendingPlaintextCsvUri = null
+                    // 决策走可单测的 ExportConfirmationPolicy：确认后才放行，
+                    // 取消/未确认分支不调用 onExportCsv（fail-closed）
+                    val allowed = ExportConfirmationPolicy.allows(
+                        risk = ExportConfirmationPolicy.Risk.PLAINTEXT,
+                        confirmed = true
+                    )
+                    if (target != null && allowed) onExportCsv(target)
+                }) {
+                    Text(stringResource(R.string.dbset_export_plain_warn_confirm))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { cleanupCancelledCsvTarget() }) {
                     Text(stringResource(R.string.btn_cancel))
                 }
             }

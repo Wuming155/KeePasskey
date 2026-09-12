@@ -112,6 +112,20 @@ internal class SettingsExportController(
         }
     }
 
+    /**
+     * ISSUE-P3-73：导出当前数据库为通用明文 CSV 并写入 SAF 目标 Uri。
+     *
+     * 与明文 XML 同属「高级选项」：调用前必须经 [ExportConfirmationPolicy] 取得用户显式二次确认
+     * （由 DatabaseSettingsScreen 的确认弹窗落地）；本方法只负责在确认后真实序列化落盘。
+     */
+    fun exportVaultCsvTo(targetUri: Uri) {
+        scope.launch(Dispatchers.IO) {
+            exportFeedbackFlow.value = exportAndWrite(
+                targetUri, ExportArtifactKind.PLAINTEXT_CSV, R.string.dbset_export_csv_done
+            ) { vaultRepository.exportVaultCsvBytes() }
+        }
+    }
+
     /** 导出会话绑定的密钥文件并写入 SAF 目标 Uri */
     fun exportKeyFileTo(targetUri: Uri) {
         scope.launch(Dispatchers.IO) {
@@ -191,6 +205,9 @@ internal enum class ExportArtifactKind(val auditLabel: String) {
     /** KeePass 2.x 兼容明文 XML：高级选项，必须先取得显式二次确认 */
     PLAINTEXT_XML("明文 XML"),
 
+    /** ISSUE-P3-73：通用明文 CSV：高级选项，必须先取得显式二次确认 */
+    PLAINTEXT_CSV("明文 CSV"),
+
     /** 会话绑定密钥文件：单独备份，泄漏即可配合密文开库 */
     KEY_FILE("密钥文件"),
 
@@ -243,6 +260,7 @@ internal object ExportConfirmationPolicy {
     fun riskOf(kind: ExportArtifactKind): Risk = when (kind) {
         ExportArtifactKind.ENCRYPTED_KDBX -> Risk.ENCRYPTED
         ExportArtifactKind.PLAINTEXT_XML,
+        ExportArtifactKind.PLAINTEXT_CSV,
         ExportArtifactKind.KEY_FILE,
         ExportArtifactKind.ATTACHMENT -> Risk.PLAINTEXT
     }

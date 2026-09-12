@@ -784,6 +784,12 @@ class FakeVaultRepository(
             "测试 Fake 不支持导出"
         )
 
+    override suspend fun exportVaultCsvBytes(): com.keepasskey.core.result.KdbxResult<ByteArray> =
+        com.keepasskey.core.result.KdbxResult.Failure(
+            UnsupportedOperationException("Fake 仓储不支持 CSV 导出"),
+            "测试 Fake 不支持导出"
+        )
+
     override suspend fun exportKeyFileBytes(): com.keepasskey.core.result.KdbxResult<ByteArray> =
         com.keepasskey.core.result.KdbxResult.Failure(
             UnsupportedOperationException("Fake 仓储不支持密钥文件导出"),

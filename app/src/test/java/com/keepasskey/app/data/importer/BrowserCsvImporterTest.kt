@@ -204,7 +204,7 @@ class BrowserCsvImporterTest {
 
     @Test
     fun `未识别的多余列被忽略而不是错位映射`() = runTest {
-        val csv = "name,extra,url,username,password\n" +
+        val csv = "name,ignored_col,url,username,password\n" +
             "站点,无关值,https://a.example,user,$FAKE_PASSWORD\n"
 
         val batch = parseSuccess(csv)
@@ -213,6 +213,34 @@ class BrowserCsvImporterTest {
         assertEquals("站点", entry.title)
         assertEquals("https://a.example", entry.url)
         assertEquals(FAKE_PASSWORD.length, entry.password.size)
+        assertTrue(entry.groupPath.isEmpty())
+        assertEquals("", entry.notes)
+    }
+
+    @Test
+    fun `LastPass 表头 extra 与 grouping 映射为备注与反斜杠分组路径`() = runTest {
+        val csv = "url,username,password,extra,name,grouping,fav\n" +
+            "https://a.example,user,$FAKE_PASSWORD,备注文本,站点甲,Social\\Facebook,0\n"
+
+        val batch = parseSuccess(csv)
+
+        val entry = batch.entries.single()
+        assertEquals("站点甲", entry.title)
+        assertEquals("备注文本", entry.notes)
+        assertEquals(listOf("Social", "Facebook"), entry.groupPath)
+        assertTrue(entry.password.contentEquals(FAKE_PASSWORD.toCharArray()))
+    }
+
+    @Test
+    fun `分组列支持斜杠分层且空分组落至根分组`() = runTest {
+        val csv = "name,url,username,password,group\n" +
+            "站点甲,https://a.example,user,$FAKE_PASSWORD,Work\\Email\n" +
+            "站点乙,https://b.example,user,$FAKE_PASSWORD,\n"
+
+        val batch = parseSuccess(csv)
+
+        assertEquals(listOf("Work", "Email"), batch.entries[0].groupPath)
+        assertTrue(batch.entries[1].groupPath.isEmpty())
     }
 
     @Test

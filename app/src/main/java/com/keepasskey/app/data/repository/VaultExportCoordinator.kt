@@ -4,6 +4,7 @@ import android.content.Context
 import com.keepasskey.app.R
 import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.core.result.KdbxResult
+import com.keepasskey.database.csv.KdbxCsvExporter
 import com.keepasskey.database.session.DatabaseSession
 import com.keepasskey.database.xml.KeePassXmlExporter
 import kotlinx.coroutines.Dispatchers
@@ -41,6 +42,26 @@ internal class VaultExportCoordinator(
             } catch (t: Throwable) {
                 KdbxResult.Failure(
                     t, strings.get(R.string.repo_export_xml_failed, t.message ?: "")
+                )
+            }
+        }
+
+    /**
+     * ISSUE-P3-73：将当前内存数据库导出为通用明文 CSV（设置页「导出 CSV」用）。
+     * 明文包含全部受保护字段（风险由导出二次确认对话框告知），锁定/关闭时返回 Failure。
+     */
+    suspend fun exportVaultCsvBytes(): KdbxResult<ByteArray> =
+        withContext(Dispatchers.Default) {
+            val db = databaseSession.databaseFlow.first()
+                ?: return@withContext KdbxResult.Failure(
+                    IllegalStateException("活动数据库为空"),
+                    strings.get(R.string.repo_no_active_db_for_export)
+                )
+            try {
+                KdbxResult.Success(KdbxCsvExporter.export(db))
+            } catch (t: Throwable) {
+                KdbxResult.Failure(
+                    t, strings.get(R.string.repo_export_csv_failed, t.message ?: "")
                 )
             }
         }

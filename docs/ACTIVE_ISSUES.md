@@ -131,15 +131,16 @@
 
 ---
 
-## P3 低危问题、特性接线与体验优化（6 项）
+## P3 低危问题、特性接线与体验优化（5 项）
 
 > **状态（2026-09-12）**：历史 P3 批次 **ISSUE-P3-01 ~ P3-68 除下列外部资源依赖型残余外已全部
-> 闭环并归档**，逐条实现细节与验收证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md)（§3 ~ §31）。
+> 闭环并归档**，逐条实现细节与验收证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md)（§3 ~ §32）。
 > 2026-09-12 存量修复批次闭环 P3-63 / P3-65 / P3-67（§28.2 ~ §28.4）；
 > **ISSUE-P3-68**（重试节流开关与自定义最长锁定时长）同日闭环归档（§29.2）；
 > **外部安全审计整改批次 P3-69 ~ P3-72** 同日闭环归档（§30）；
-> **文档类存量整改批次 P3-75 / P3-77** 同日闭环归档（§31）。
-> **新增（2026-09-12）**：ISSUE-P3-73 ~ P3-77 由「参考项目（KeePassDX / keepass2android / Monica）
+> **文档类存量整改批次 P3-75 / P3-77** 同日闭环归档（§31）；
+> **CSV 导入 / 导出扩充 P3-73** 同日闭环归档（§32）。
+> **新增（2026-09-12）**：ISSUE-P3-74 / P3-76 由「参考项目（KeePassDX / keepass2android / Monica）
 > 对比分析」产出，属特性补齐与长期评估项（**非外部资源依赖**）。
 
 ---
@@ -234,23 +235,6 @@
   （覆盖下发前二次确认与 30 秒免重复确认两分支）；② 完成一次 Passkey 创建 + 站点断言端到端；
   ③ TOTP 通知渠道创建与点击行为验证；④ 以上均有设备侧取证（uiautomator dump / dumpsys）。
 - **禁止**：以宿主 JVM 单测覆盖替代设备侧端到端验证；在未实测时宣称「自动填充已验证可用」。
-
----
-
-### ISSUE-P3-73（新登记）：导入 / 导出格式覆盖不足（导入 4 种、导出无 CSV / HTML）
-
-- **优先级**：P3（特性补齐；迁移与互操作）
-- **核实时间点与核实方式（2026-09-12）**：Read `app/.../data/importer/ImporterModule.kt:29-47`
-  ——`@IntoSet` 仅注册 KeePass XML / 浏览器 CSV / Bitwarden JSON / 1Password 1PUX 四个解析器；
-  Read `app/.../data/repository/VaultExportCoordinator.kt:29-55`——导出仅 `.kdbx` 字节、KeePass XML、
-  密钥文件，无 CSV / HTML。
-- **问题描述**：导入源与导出目标覆盖窄，限制从其他管理器迁移与向通用工具导出。
-- **参考做法（据 `docs/references/keepass2android-架构分析.md`）**：`DataExchange/Formats/` 覆盖
-  KeePass XML、多类 CSV、1Password、KeePass1/kdb 等极多格式。
-- **验收标准（待整改）**：① 借 `ImporterRegistry` 的 `@IntoSet` 开闭机制追加 LastPass / Chrome / Edge
-  等 CSV 解析器（不改调用方）；② 导出补通用 CSV（含明文风险强制二次确认，文案须明确「明文」）；
-  ③ 每个新解析器有单测（表头变体 / 字段缺失 / 转义）。
-- **禁止**：新增解析器绕过 `EntryImporter` 契约直接落库；明文导出不加风险确认。
 
 ---
 

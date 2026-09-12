@@ -10,7 +10,9 @@ import javax.inject.Singleton
  * ISSUE-P3-19 交付物 3：浏览器密码导出 CSV 解析器（`ImportSource.BROWSER_CSV`）。
  *
  * 输入形态：Chrome / Edge 的「密码 → 导出」CSV，表头 `name,url,username,password`（可能带 `note`），
- * 同时容忍同名近义表头（见 [NAME_HEADERS] 等别名集，含 Bitwarden CSV 的 `login_*` 命名）。
+ * 同时容忍同名近义表头（见 [NAME_HEADERS] 等别名集，含 Bitwarden CSV 的 `login_*` 命名，
+ * 以及 LastPass 的 `extra`（备注）/ `grouping`（分组路径）列）；
+ * 分组列以 `\` 或 `/` 分隔层级（LastPass 惯例为 `\`）。
  *
  * 映射规则（要求：大小写与列序不固定 → **按表头名映射，不按位置硬编码**）：
  * - 表头名去空白、剥离 BOM 后小写比较；
@@ -126,8 +128,9 @@ class BrowserCsvImporter @Inject constructor() : EntryImporter {
             password = password,
             url = cells.url,
             notes = cells.notes,
-            // 浏览器 CSV 不含分组信息，一律落至根分组
-            groupPath = emptyList(),
+            // ISSUE-P3-73：LastPass `grouping` 列（`\` 或 `/` 分层）映射为分组路径；
+            // Chrome/Edge CSV 无分组列 → 空路径落至根分组
+            groupPath = cells.groupPath,
             totpSecret = cells.totp
         )
         ImportParseGuard.requireEntryCapacity(produced.size)
@@ -145,6 +148,7 @@ class BrowserCsvImporter @Inject constructor() : EntryImporter {
                 CsvColumnRole.NOTE -> cells.notes = field.takeText()
                 CsvColumnRole.PASSWORD -> cells.password = field
                 CsvColumnRole.TOTP -> cells.totp = field
+                CsvColumnRole.GROUP -> cells.groupPath = field.takeGroupPath()
                 null -> field.fill(NUL_CHAR)
             }
         }
@@ -158,6 +162,7 @@ class BrowserCsvImporter @Inject constructor() : EntryImporter {
         in URL_HEADERS -> CsvColumnRole.URL
         in NOTE_HEADERS -> CsvColumnRole.NOTE
         in TOTP_HEADERS -> CsvColumnRole.TOTP
+        in GROUP_HEADERS -> CsvColumnRole.GROUP
         else -> null
     }
 
@@ -173,6 +178,19 @@ class BrowserCsvImporter @Inject constructor() : EntryImporter {
         val value = String(this).trim()
         fill(NUL_CHAR)
         return value
+    }
+
+    /**
+     * 分组单元格 → 分组路径段（`\` 或 `/` 分层，去空白、丢空段），并清零原数组。
+     * 例：`Social\Facebook` → `["Social", "Facebook"]`；空串 → 空列表（落至根分组）。
+     */
+    private fun CharArray.takeGroupPath(): List<String> {
+        val value = String(this).trim()
+        fill(NUL_CHAR)
+        if (value.isEmpty()) return emptyList()
+        return value.split('\\', '/')
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
     }
 
     private fun CharArray.isBlankField(): Boolean = all { it.isWhitespace() }
@@ -192,10 +210,11 @@ class BrowserCsvImporter @Inject constructor() : EntryImporter {
         var notes: String = ""
         var password: CharArray? = null
         var totp: CharArray? = null
+        var groupPath: List<String> = emptyList()
     }
 
     /** CSV 规范列角色（不以列位传状态）。 */
-    private enum class CsvColumnRole { NAME, USERNAME, PASSWORD, URL, NOTE, TOTP }
+    private enum class CsvColumnRole { NAME, USERNAME, PASSWORD, URL, NOTE, TOTP, GROUP }
 
     private companion object {
         const val EXTENSION_CSV = "csv"
@@ -208,7 +227,10 @@ class BrowserCsvImporter @Inject constructor() : EntryImporter {
         val USERNAME_HEADERS = setOf("username", "login_username", "user")
         val PASSWORD_HEADERS = setOf("password", "login_password")
         val URL_HEADERS = setOf("url", "login_uri", "website", "uri")
-        val NOTE_HEADERS = setOf("note", "notes", "comment")
+        // ISSUE-P3-73：`extra` 为 LastPass 导出 CSV 的备注列命名
+        val NOTE_HEADERS = setOf("note", "notes", "comment", "extra")
         val TOTP_HEADERS = setOf("totp", "login_totp", "otp")
+        // ISSUE-P3-73：LastPass `grouping` 及通用 `group`/`folder` 分组列（`\` 或 `/` 分层）
+        val GROUP_HEADERS = setOf("grouping", "group", "group_name", "folder")
     }
 }

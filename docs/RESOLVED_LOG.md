@@ -40,6 +40,7 @@
 | §29 | 用户报告修复批次（复合封印指纹解锁 / 重试节流可配置 / FLAG_SECURE 语义修订） | ISSUE-P2-23 / P3-68 |
 | §30 | 外部安全审计核实与整改批次（Wrapper 哈希 / 字节清零 / 扫码防截屏 / 许可证注释） | ISSUE-P3-69 ~ P3-72 |
 | §31 | 文档类存量整改批次（隐私政策 / 同步层威胁建模） | ISSUE-P3-75 / P3-77 |
+| §32 | 存量功能整改批次（CSV 导入 / 导出扩充） | ISSUE-P3-73 |
 
 > 各批次验收证据（用例数 / 通过 / 失败 / 跳过）分别见 §2.22、§3.1、§4.1、§5、§6、§7、§8、§9、§10、§11、§12、§13、§14、§15、§16、§17、§18、§19、§20.3、§21.4、§22.9、§23.1、§24.3、§25.2、§26.3。
 
@@ -1495,3 +1496,49 @@ Rust 单测模块 `#[cfg(test)] mod tests` 之内**（测试模块起始行：`s
 - **稳定版构建**：`.\gradlew.bat assembleRelease` → **BUILD SUCCESSFUL**。产物完整路径：
   `D:\GithubWorkplace\KeePasskey\app\build\outputs\apk\release\app-release.apk`。
 - **关联提交**：本批次文档与代码为**同一次** `git commit`（提交主题以 `ISSUE-P3-75 / P3-77` 引用）。
+
+---
+
+## §32 存量功能整改批次（2026-09-12）：P3-73 CSV 导入 / 导出扩充
+
+### 32.1 AC① CSV 解析器覆盖扩充（LastPass / Chrome / Edge）
+
+- **开工核实**：`BrowserCsvImporter` 已按表头名映射 `name/url/username/password/note` 及 Bitwarden
+  的 `login_*` 别名 → **Chrome / Edge 已被覆盖**，无需新增解析器；真正缺口是 **LastPass** 的
+  `extra`（备注）与 `grouping`（分组路径）列未被映射。据此在既有 `@IntoSet` 开闭框架内**扩展同一边界**
+  （不新增数据源枚举、不改调用方），符合 AC① 的「追加 CSV 解析器（不改调用方）」意图。
+- **整改**（`app/src/main/java/com/keepasskey/app/data/importer/BrowserCsvImporter.kt`）：
+  1. `NOTE_HEADERS` 增补 `extra`（LastPass 备注列）；
+  2. 新增 `CsvColumnRole.GROUP` 与 `GROUP_HEADERS = {grouping, group, group_name, folder}`，
+     单元格以 `\` 或 `/` 分层解析为 `groupPath`（`CsvCells.groupPath` → `ImportedEntry.groupPath`）；
+  3. 空分组列 → 空路径（落至根分组），Chrome / Edge 行为不变。
+- **回归用例**（`BrowserCsvImporterTest`）：新增「LastPass 表头 extra/grouping 映射」「斜杠分层与空分组落根」
+  两例；并将原「未识别多余列」用例的列名由 `extra` 改为 `ignored_col`（因 `extra` 已升格为备注别名，
+  原用例前提失效，就地修正）。
+
+### 32.2 AC② 通用明文 CSV 导出 + 强制二次确认
+
+- **新增导出器**（`database/src/main/java/com/keepasskey/database/csv/KdbxCsvExporter.kt`）：
+  列固定 `name,url,username,password,notes,group`，RFC 4180 引号语义（含分隔符 / 引号 / 换行的字段整体
+  加引号、内部 `"` 双写转义），分组列以 `\` 分层（与导入侧互为往返）；逐行流式写出，不构造整份明文字符串。
+- **接线**：`VaultRepository.exportVaultCsvBytes()` → `VaultExportCoordinator`（`Dispatchers.Default`）→
+  `RealVaultRepository` → `SettingsExportController.exportVaultCsvTo` → `SettingsViewModel` →
+  设置页导出对话框按钮 + **明文二次确认弹窗**。
+- **风险门禁**：新增 `ExportArtifactKind.PLAINTEXT_CSV` 并纳入 `ExportConfirmationPolicy.riskOf` 的
+  `PLAINTEXT` 分支 → 未确认一律 fail-closed（不放行任何字节）；确认文案 `dbset_export_csv_plain_warn_title/
+  message` **显式写明「明文 CSV」**（中英双语文案齐备）。
+- **对称清理**：取消 / 未确认分支复用 `SafDocumentCleanup` 删除 SAF 已创建的空文档（ISSUE-P2-20 同语义）。
+
+### 32.3 AC③ 新增单测
+
+- `database`：`KdbxCsvExporterTest`（4 例：表头与根条目、引号 / 逗号 / 换行转义、子分组 `\` 分层、空分组与明文口令）。
+- `app`：`BrowserCsvImporterTest` 增 2 例；`ExportConfirmationPolicyTest` 增 1 例
+  （`PLAINTEXT_CSV` 归入明文风险且未确认不放行）。
+
+### 32.4 批次验收证据（2026-09-12）
+
+- **单元测试**：`.\gradlew.bat test --max-workers=1` → **BUILD SUCCESSFUL**（全模块 `testDebugUnitTest`
+  全绿；本次新增/改动用例均通过）。
+- **稳定版构建**：`.\gradlew.bat assembleRelease` → **BUILD SUCCESSFUL**（R8 混淆 + 资源收缩 + 签名）。
+  产物完整路径：`D:\GithubWorkplace\KeePasskey\app\build\outputs\apk\release\app-release.apk`。
+- **关联提交**：本批次文档与代码为**同一次** `git commit`（提交主题以 `ISSUE-P3-73` 引用）。

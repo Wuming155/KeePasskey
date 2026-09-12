@@ -409,6 +409,9 @@ class SettingsViewModel @Inject constructor(
     /** 导出当前数据库为 KeePass 2.x 兼容明文 XML 并写入 SAF 目标 Uri */
     fun exportVaultXmlTo(targetUri: Uri) = exportController.exportVaultXmlTo(targetUri)
 
+    /** ISSUE-P3-73：导出当前数据库为通用明文 CSV 并写入 SAF 目标 Uri */
+    fun exportVaultCsvTo(targetUri: Uri) = exportController.exportVaultCsvTo(targetUri)
+
     /** 导出会话绑定的密钥文件并写入 SAF 目标 Uri */
     fun exportKeyFileTo(targetUri: Uri) = exportController.exportKeyFileTo(targetUri)
 

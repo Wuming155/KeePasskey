@@ -510,10 +510,16 @@
     <string name="dbset_export_kdbx_done">KDBX file exported</string>
     <string name="dbset_export_xml_btn">Export XML (plaintext)</string>
     <string name="dbset_export_xml_done">XML plaintext exported. Move it to a safe location immediately</string>
+    <!-- ISSUE-P3-73: generic plaintext CSV export -->
+    <string name="dbset_export_csv_btn">Export CSV (plaintext)</string>
+    <string name="dbset_export_csv_done">CSV plaintext exported. Move it to a safe location immediately</string>
     <!-- ISSUE-P2-10 (ZT-15): plaintext XML export confirmation (plaintext / unprotected / delete it yourself) -->
     <string name="dbset_export_plain_warn_title">Confirm plaintext XML export</string>
     <string name="dbset_export_plain_warn_message">You are about to export an unencrypted XML file containing every field value in the vault:\n- Plaintext: its contents are directly readable and are not protected by the master password;\n- Unprotected: once written to Downloads or a cloud drive, any app or person with access to that location can read it;\n- Delete it yourself: this app will not clean it up. Delete it immediately after use and empty the cloud recycle bin.</string>
     <string name="dbset_export_plain_warn_confirm">I understand, export anyway</string>
+    <!-- ISSUE-P3-73: plaintext CSV export confirmation (wording must say "plaintext") -->
+    <string name="dbset_export_csv_plain_warn_title">Confirm plaintext CSV export</string>
+    <string name="dbset_export_csv_plain_warn_message">You are about to export an unencrypted CSV file containing every entry field value in the vault:\n- Plaintext: its contents are directly readable and are not protected by the master password;\n- Unprotected: once written to Downloads or a cloud drive, any app or person with access to that location can read it;\n- Delete it yourself: this app will not clean it up. Delete it immediately after use and empty the cloud recycle bin.</string>
     <string name="dbset_import_dialog_title">Choose import source</string>
     <string name="dbset_import_preparing">Parsing %1$s data...</string>
     <string name="dbset_src_1pux">1Password (1PUX)</string>
@@ -1110,6 +1116,7 @@
     <string name="repo_no_active_db_for_export">No active database (locked or not open)</string>
     <!-- %1$s = 失败原因 -->
     <string name="repo_export_xml_failed">Failed to export XML: %1$s</string>
+    <string name="repo_export_csv_failed">Failed to export CSV: %1$s</string>
     <string name="repo_no_keyfile_to_export">This session has no key file in use, so there is nothing to export</string>
     <!-- %1$s = 分组名 -->
     <string name="repo_templates_already_installed">The template group %1$s already exists; no need to install it again</string>
