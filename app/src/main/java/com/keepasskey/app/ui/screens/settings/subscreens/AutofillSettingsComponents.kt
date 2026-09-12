@@ -30,6 +30,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -140,13 +141,14 @@ internal fun AutofillUxCard(
                 icon = Icons.AutoMirrored.Filled.Undo,
                 title = stringResource(R.string.autofill_auto_return_title),
                 // ISSUE-P3-03 (43b)：本应用自动填充走系统框架，确认后必然返回原应用，
-                // 无「查询界面停留」可开关，本轮未接线 → 如实标注
+                // 无「查询界面停留」可开关，本轮未接线 → 如实标注并禁用交互（杜绝假开关）。
                 subtitle = stringResource(
                     R.string.settings_pref_reserved_suffix,
                     stringResource(R.string.autofill_auto_return_sub)
                 ),
                 checked = uiState.autoReturnFromQuery,
-                onCheckedChange = onAutoReturnFromQueryToggle
+                onCheckedChange = onAutoReturnFromQueryToggle,
+                enabled = false
             )
 
             AutofillSwitchRow(
@@ -323,10 +325,12 @@ internal fun AutofillSwitchRow(
     title: String,
     subtitle: String,
     checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit
+    onCheckedChange: (Boolean) -> Unit,
+    enabled: Boolean = true
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        // ISSUE-P3-03（43b）：未接线的偏好禁用交互并降透明度，杜绝「可拨动但无行为」的假开关。
+        modifier = Modifier.fillMaxWidth().alpha(if (enabled) 1f else 0.5f),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
@@ -359,6 +363,7 @@ internal fun AutofillSwitchRow(
         Switch(
             checked = checked,
             onCheckedChange = onCheckedChange,
+            enabled = enabled,
             colors = SwitchDefaults.colors(
                 checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
                 checkedTrackColor = MaterialTheme.colorScheme.primary

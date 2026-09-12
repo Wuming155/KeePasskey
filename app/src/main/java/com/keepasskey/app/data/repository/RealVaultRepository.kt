@@ -176,7 +176,7 @@ class RealVaultRepository @Inject constructor(
                 emptyList()
             } else {
                 db.rootGroup.allEntries().map { kdbxEntry ->
-                    entryMapper.mapKdbxEntryToUi(kdbxEntry, db)
+                    entryMapper.mapKdbxEntryToUi(kdbxEntry)
                 }
             }
         }

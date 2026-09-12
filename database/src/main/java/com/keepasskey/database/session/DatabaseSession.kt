@@ -4,6 +4,7 @@ import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.model.KdbxGroup
 import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.core.result.KdbxResult
+import com.keepasskey.core.security.BinaryStore
 import com.keepasskey.core.session.SessionLockObserver
 import com.keepasskey.database.file.KdbxDatabase
 import com.keepasskey.database.file.KdbxFile
@@ -27,7 +28,14 @@ import java.util.Arrays
  * 树变换 [SessionTreeEditor]、内容变更 [SessionContentMutations]、会话建立 [SessionOpener]。
  * 公开 API 与行为逐字保持不变。
  */
-class DatabaseSession {
+class DatabaseSession(
+    /**
+     * ISSUE-P2-24：大附件落盘存储（可选）。非空时，超过阈值的附件在解析期即落盘，
+     * 内层二进制池只保留引用，不再整批常驻内存；为空时行为与既往逐字一致。
+     * 由 app 侧 DI 注入（`cacheDir/attachments`），并同时注册为 [SessionLockObserver]。
+     */
+    private val binaryStore: BinaryStore? = null
+) {
 
     enum class SessionState {
         CLOSED,
@@ -58,7 +66,7 @@ class DatabaseSession {
 
     private val fileWriter = SessionFileWriter { createBackupBeforeSave }
 
-    private val opener = SessionOpener(core, credentials, fileWriter, mutex)
+    private val opener = SessionOpener(core, credentials, fileWriter, mutex, binaryStore)
 
     private val mutations = SessionContentMutations(mutex, core.database, core.state) { core.readOnlyMode }
 

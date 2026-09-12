@@ -1,8 +1,11 @@
 package com.keepasskey.sync.engine
 
 import com.keepasskey.sync.model.cleanEtag
+import java.io.EOFException
 import java.io.File
+import java.io.FileInputStream
 import java.io.FileOutputStream
+import java.io.InputStream
 import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
@@ -113,6 +116,53 @@ open class SyncCache(private val cacheDir: File) {
             writeStringSafely(versionFile, sha256)
         }
         return sha256
+    }
+
+    /**
+     * 以**流式**方式写入缓存内容（ISSUE-P2-24：大附件落盘不整份物化）。
+     *
+     * 落盘路径与权限收敛同 [writeCache]（.tmp → flush/fsync → 原子 rename，0600），
+     * 区别只在内容来源是 [input] + [size]，全程以固定缓冲搬运。
+     *
+     * @return 写入内容的 SHA-256 十六进制小写摘要
+     * @throws EOFException 输入流实际字节不足 [size]
+     */
+    open fun writeCacheStreaming(remotePath: String, input: InputStream, size: Long): String {
+        val cacheFile = getFile(remotePath, SUFFIX_CACHE)
+        val tmpFile = tmpFileFor(cacheFile)
+        val digest = MessageDigest.getInstance("SHA-256")
+        FileOutputStream(tmpFile).use { fos ->
+            val buffer = ByteArray(STREAM_BUFFER_BYTES)
+            var remaining = size
+            while (remaining > 0) {
+                val toRead = minOf(buffer.size.toLong(), remaining).toInt()
+                val read = input.read(buffer, 0, toRead)
+                if (read < 0) throw EOFException("输入流数据不足：期望 $size 字节，尚缺 $remaining")
+                fos.write(buffer, 0, read)
+                digest.update(buffer, 0, read)
+                remaining -= read
+            }
+            fos.flush()
+            fos.fd.sync()
+        }
+        restrictToOwnerOnly(tmpFile, isDirectory = false)
+        moveAtomically(tmpFile, cacheFile)
+
+        val sha256 = digest.digest().toHexString()
+        writeStringSafely(getFile(remotePath, SUFFIX_VERSION), sha256)
+        return sha256
+    }
+
+    /** 以流式打开缓存内容（不存在返回 null，ISSUE-P2-24）。 */
+    open fun openCacheStream(remotePath: String): InputStream? {
+        val file = getFile(remotePath, SUFFIX_CACHE)
+        return if (file.exists() && file.isFile) FileInputStream(file) else null
+    }
+
+    /** 缓存内容字节数（不存在返回 0，ISSUE-P2-24）。 */
+    open fun cacheSize(remotePath: String): Long {
+        val file = getFile(remotePath, SUFFIX_CACHE)
+        return if (file.exists() && file.isFile) file.length() else 0L
     }
 
     /**
@@ -359,6 +409,9 @@ open class SyncCache(private val cacheDir: File) {
         private const val SUFFIX_BASE_CACHE = ".basecache"
         private const val SUFFIX_META = ".meta"
         private const val SUFFIX_TMP = ".tmp"
+
+        /** 流式搬运缓冲（64 KiB，兼顾吞吐与内存占用）。 */
+        private const val STREAM_BUFFER_BYTES = 64 * 1024
 
         private const val KEY_REMOTE_PATH = "remotePath"
         private const val KEY_ETAG = "etag"

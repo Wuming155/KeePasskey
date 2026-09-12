@@ -470,9 +470,9 @@
     <string name="dbset_keyfile_exported">密钥文件已导出</string>
     <string name="dbset_section_integrity">完整性校验</string>
     <string name="dbset_tan_title">TAN 序列号</string>
-    <string name="dbset_tan_desc">一次性验证码条目列表，使用后自动标记（即将支持）</string>
+    <string name="dbset_tan_desc">一次性验证码条目列表，使用后自动标记（暂不支持）</string>
     <string name="dbset_uuid_title">数据库 UUID</string>
-    <string name="dbset_uuid_desc">数据库的唯一标识符，用于跨设备同步识别（即将支持）</string>
+    <string name="dbset_uuid_desc">数据库的唯一标识符，用于跨设备同步识别（暂不支持）</string>
     <string name="dbset_cipher_dialog_title">选择加密算法</string>
     <string name="dbset_cipher_chacha_desc">ChaCha20 流密码，无 AES 硬件加速的设备上性能更佳</string>
     <string name="dbset_cipher_aes_desc">行业标准 AES-256，具备广泛硬件加速支持</string>
@@ -1041,7 +1041,6 @@
     <string name="settings_pref_reserved_suffix">%1$s（预留，暂未生效）</string>
     <string name="autofill_totp_clip_label">TOTP 验证码</string>
     <string name="debug_verbose_depends">（需先开启「诊断日志」）</string>
-    <string name="dbset_import_reserved_note">解析器预留，暂未生效：当前仅登记所选数据源，不会导入任何条目</string>
     <!-- ISSUE-P3-20 收口（2026-09-10）：子库挂载已真实落地，两条失真文案随能力上线一并删除——
          `dbset_child_db_not_supported`（「子密码库挂载功能尚未实现」，零引用）与
          `dbset_child_db_reserved_note`（「预留，暂未生效」，仅剩一处代码注释留痕，无活渲染）。 -->

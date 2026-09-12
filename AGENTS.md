@@ -11,7 +11,9 @@
 ## 1. 版本基线（摘要）
 
 - 测试 / 构建 / CI 当前全绿（具体版本、例数、残余面见 [`RESOLVED_LOG.md`](docs/RESOLVED_LOG.md)）。
-  单测基线（2026-09-12，§30 批次后）：**1402 例 / 0 失败 / 0 错误 / 13 跳过**；快速解锁封印载荷
+  单测基线（2026-09-12，§37 批次后）：**1423 例 / 0 失败 / 0 错误 / 13 跳过**；设备侧基线：
+  `app` **12 例** + `sync` **3 例**（x86_64 / API 36.1 模拟器，见 §36）；大附件（>1 MiB）已落盘
+  磁盘缓存、锁定即清（§35）；快速解锁封印载荷
   已升级为复合帧格式（主密码 + 密钥文件一并封印，历史格式向后兼容，§29.1）；解锁失败重试节流
   默认关闭并支持开关与自定义最长锁定时长（§29.2）；FLAG_SECURE 防截屏改为开关即生效模型（锁定态强制遮蔽，解锁态随开关关闭真实解除，§29.3）；外部安全审计整改：Gradle Wrapper 锁定分发 SHA-256 并启用 CI wrapper 校验、KDBX 口令中间缓冲清零、TOTP 扫码取景窗口纳入 FLAG_SECURE（§30）。写侧 Argon2 `P`
   已按 KDBX4 规范以 UInt32 编码（官方 `generate_corpus.py --verify` 可解本仓产物）。
@@ -106,17 +108,23 @@ KeePasskey 是一款原生 Kotlin 开发的现代化 Android 密码管理器。�
 
 ## 6. 已知工程限界
 
-- KDBX 对象树仍整体驻留内存（解析已流式化）。
+- KDBX 对象树仍整体驻留内存（解析已流式化）；**附件字节除外**——超过阈值（默认 1 MiB，可配）的附件
+  经 `BinaryStore` 落盘（`cacheDir/attachments`，0600/0700），池中只留引用，会话锁定 / 关闭时对称清空（§35）。
+  `KdbxAttachment.clear()` 对**落盘项**不动作（其字节由多个引用者共享），生命周期由 store 统一收口。
 - 条件写依赖服务端：AWS S3 原子生效；少数兼容存储降级为 HEAD 预检 + 无条件 PUT。
 - `ProtectedString` 驻留加密为纵深防御层；持有进程密钥或任意代码执行者仍可在读取瞬间截获明文。
 - 原生内核为 Rust（代价是体积，收益是秘密确定性擦除、Argon2 优于纯 Java 路径）；arm64 真机 + 真实 `.kdbx` 端到端解锁待补（见 ACTIVE_ISSUES）。
 - 原生侧 `System.loadLibrary` 经 `NativeCryptoLibrary.loaded` 统一懒加载；各绑定 `available` 须先求值该属性再发起原生调用。
 - `CipherInputStream` 对填充非法/长度非整数倍抛 `IOException`（非静默 EOF）；新增 CBC 流式实现须遵守同一基线。
-- 窗口级遮挡触摸过滤作用于 `MainActivity` 的 `decorView`；独立窗口（如 `BaseCredentialActivity` 系）需单独接线。
-- **`app` 设备侧（instrumented）源集已建立（2026-09-12，见 RESOLVED_LOG §34）**：新增 `app/src/androidTest`，
-  首个用例集为**导入解析回归** `ImporterAndroidRuntimeTest`（3 例），在 x86_64 / API 36.1 模拟器上
-  **3/3 pass、0 skip、0 failure**。**`sync` 模块仍无 `androidTest` 源集**；`app` 端到端功能
-  （UI、自动填充、Passkey、通知等）**尚未**补齐设备侧覆盖，仍主要依赖宿主 JVM 单测。§24 的 ISSUE-P1-12 与
-  §26 的 ISSUE-P0-04 均属「JVM 过、Android 运行时挂」类缺陷逃逸，故**涉及正则 / XML / 平台 API 的静态逻辑
-  不能仅凭宿主单测判定在 Android 上可用**；继续收窄该缺口需为 `app` 关键流程（自动填充域解析、解锁、Passkey）
-  补更多设备侧用例。
+- 窗口级遮挡触摸过滤（`setFilterTouchesWhenObscured`）在 `MainActivity` 经 `FlagSecureGuard` 施加于 `decorView`；
+  独立窗口按各自威胁面分别接线，**无未接线盲区**：自动填充窗口（`AutofillConfirmActivity` / `AutofillPickerActivity` /
+  `AutofillUnlockActivity`）与通行密钥窗口（`CredentialUnlockActivity` / `CredentialVerificationLauncher`）调用
+  `ApplyObscuredTouchFilter()`；`BaseCredentialActivity` 体系（`PasswordSaveActivity` / `PasswordFillActivity` /
+  `PasskeyAssertionActivity` / `PasskeyCreateActivity`）则直接 `setHideOverlayWindows(true)` 屏蔽悬浮窗覆盖
+  （API 31+ 强于触摸过滤，覆盖被完全阻断故无需再叠触摸过滤）。
+- **设备侧（instrumented）覆盖（2026-09-12，见 RESOLVED_LOG §34 / §36）**：`app` 与 `sync` 均已建立
+  `androidTest` 源集；当前 `app` **12 例**（导入解析 3 + 域解析 7 + 解锁落盘 2）、`sync` **3 例**（落盘权限基线），
+  在 x86_64 / API 36.1 模拟器上 **0 failure / 0 skip**。**仍未覆盖**：Passkey 系统级交互、
+  `AssistStructure` 结构树扫描、通知渲染（依赖系统凭据对话框 / 真实自动填充会话 / 通知栏），以及 arm64 真机。
+  §24 的 ISSUE-P1-12 与 §26 的 ISSUE-P0-04 均属「JVM 过、Android 运行时挂」类缺陷逃逸，故**涉及正则 / XML /
+  平台 API 的静态逻辑不能仅凭宿主单测判定在 Android 上可用**。

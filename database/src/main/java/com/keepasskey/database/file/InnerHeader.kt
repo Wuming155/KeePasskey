@@ -1,9 +1,12 @@
 package com.keepasskey.database.file
 
 import com.keepasskey.core.model.KdbxConstants
+import com.keepasskey.core.security.BinarySource
+import com.keepasskey.core.security.BinaryStore
+import com.keepasskey.core.security.BinaryStorePolicy
 import com.keepasskey.database.exception.KdbxCorruptFileException
 import com.keepasskey.database.io.LittleEndianUtil
-import java.io.ByteArrayOutputStream
+import java.io.ByteArrayInputStream
 import java.io.InputStream
 import java.io.OutputStream
 import java.security.SecureRandom
@@ -16,21 +19,108 @@ data class InnerHeader(
     val innerRandomStreamKey: ByteArray = ByteArray(64),
     val binaries: List<BinaryItem> = emptyList()
 ) {
-    data class BinaryItem(
+    /**
+     * 内层二进制池条目（ISSUE-P2-24）。
+     *
+     * 字节来源二选一：
+     * - **内存副本**（≤ 落盘阈值）：[data] 直接返回常驻数组，逐字保留既有语义；
+     * - **落盘引用**（> 阈值）：只保留 [BinaryStore] 的 key，[data] 按需流式读回独立副本，
+     *   使大附件库的二进制池不再整批常驻 GC 堆。
+     *
+     * 无论哪种来源，[data] / [openStream] 交付的字节都与池内状态、与其它引用者保持别名隔离。
+     * 构造签名 `(flags, data)` 与既有调用方（去重器 / 单测）逐字兼容。
+     */
+    class BinaryItem private constructor(
         val flags: Byte,
+        private val inlineData: ByteArray,
+        private val store: BinaryStore?,
+        private val spillKey: String?,
+        private val spilledSize: Long
+    ) : BinarySource {
+
+        constructor(flags: Byte, data: ByteArray) : this(flags, data, null, null, 0L)
+
+        /** 落盘条目：仅持 key，字节按需读回。 */
+        internal constructor(flags: Byte, store: BinaryStore, spillKey: String, size: Long) :
+                this(flags, ByteArray(0), store, spillKey, size)
+
+        internal val isSpilled: Boolean
+            get() = spillKey != null
+
+        /** 内容字节数（落盘条目不触发读取）。 */
+        override val size: Long
+            get() = if (spillKey == null) inlineData.size.toLong() else spilledSize
+
+        /** 内容字节（落盘条目每次返回独立副本；内存条目返回常驻副本，语义同既往）。 */
         val data: ByteArray
-    ) {
+            get() = load()
+
+        override fun load(): ByteArray =
+            spillKey?.let { store!!.load(it) } ?: inlineData
+
+        override fun openStream(): InputStream =
+            spillKey?.let { store!!.openStream(it) } ?: ByteArrayInputStream(inlineData)
+
+        override fun contentHash(): Int = hashCache
+
+        private val hashCache: Int by lazy(LazyThreadSafetyMode.NONE) {
+            if (spillKey == null) {
+                inlineData.contentHashCode()
+            } else {
+                // 与 java.util.Arrays.hashCode(byte[]) 逐位等价，但流式计算，不整份物化
+                var result = 1
+                asStream().use { stream ->
+                    val buffer = ByteArray(HASH_BUFFER_BYTES)
+                    while (true) {
+                        val read = stream.read(buffer)
+                        if (read < 0) break
+                        for (i in 0 until read) {
+                            result = 31 * result + buffer[i]
+                        }
+                    }
+                }
+                result
+            }
+        }
+
+        /**
+         * 仅改写保护标志位并复用同一字节来源（ISSUE-P2-24）：
+         * 落盘条目保持 store key 不变（零读取），内存条目复用同数组。
+         * 供去重器按「条目声明的保护标志」归池，避免为改一个字节标志而整份读回大附件。
+         */
+        internal fun withFlags(newFlags: Byte): BinaryItem =
+            if (spillKey != null) BinaryItem(newFlags, store!!, spillKey, spilledSize)
+            else BinaryItem(newFlags, inlineData)
+
+        /** 序列化时直接写出（落盘条目流式拷贝，不整份物化）。 */
+        internal fun writeTo(outputStream: OutputStream) {
+            if (spillKey == null) {
+                if (inlineData.isNotEmpty()) outputStream.write(inlineData)
+            } else {
+                openStream().use { it.copyTo(outputStream) }
+            }
+        }
+
+        private fun asStream(): InputStream = openStream()
+
         override fun equals(other: Any?): Boolean {
             if (this === other) return true
             if (other !is BinaryItem) return false
             if (flags != other.flags) return false
-            return data.contentEquals(other.data)
+            if (size != other.size) return false
+            if (spillKey != null || other.spillKey != null) return contentHash() == other.contentHash()
+            return inlineData.contentEquals(other.inlineData)
         }
 
         override fun hashCode(): Int {
             var result = flags.toInt()
-            result = 31 * result + data.contentHashCode()
+            result = 31 * result + contentHash()
             return result
+        }
+
+        private companion object {
+            /** 流式哈希缓冲（8 KiB，与常见页大小对齐，避免逐字节 I/O）。 */
+            const val HASH_BUFFER_BYTES = 8 * 1024
         }
     }
 
@@ -57,12 +147,11 @@ data class InnerHeader(
         // 字段 2: InnerRandomStreamKey
         writeField(outputStream, KdbxConstants.InnerHeaderFieldId.INNER_RANDOM_STREAM_KEY, innerRandomStreamKey)
 
-        // 字段 3: Binaries
+        // 字段 3: Binaries —— 落盘条目流式写出（字段长度 = 1(flags) + 内容字节数），不整份物化
         for (bin in binaries) {
-            val bos = ByteArrayOutputStream()
-            bos.write(bin.flags.toInt())
-            bos.write(bin.data)
-            writeField(outputStream, KdbxConstants.InnerHeaderFieldId.BINARY, bos.toByteArray())
+            writeFieldHeader(outputStream, KdbxConstants.InnerHeaderFieldId.BINARY, bin.size + FLAGS_FIELD_BYTES)
+            outputStream.write(bin.flags.toInt())
+            bin.writeTo(outputStream)
         }
 
         // 字段 0: EndOfHeader
@@ -102,6 +191,9 @@ data class InnerHeader(
 
         /** InnerRandomStreamKey 字段长度安全上限（官方写入 64 字节） */
         private const val MAX_INNER_RANDOM_STREAM_KEY_BYTES = 1024
+
+        /** BINARY 字段内 flags 前缀长度（1 字节），用于序列化时计算字段总长度。 */
+        private const val FLAGS_FIELD_BYTES = 1L
 
         /**
          * 二进制池条目数安全上限（Wave 12 解析炸弹防线）。
@@ -165,7 +257,18 @@ data class InnerHeader(
             )
         }
 
-        fun deserialize(inputStream: InputStream): InnerHeader {
+        /**
+         * 解析内层 Header。
+         *
+         * ISSUE-P2-24：[binaryStore] 非空时，超过 [spillThresholdBytes] 的 BINARY 字段
+         * **流式落盘**，池中仅保留 store key，不再整份驻留内存；传 null（或字段不超阈值）
+         * 时行为与既往逐字一致。落盘字段的长度校验、条目数与累计字节数封顶守卫全部保留。
+         */
+        fun deserialize(
+            inputStream: InputStream,
+            binaryStore: BinaryStore? = null,
+            spillThresholdBytes: Long = BinaryStorePolicy.DEFAULT_THRESHOLD_BYTES
+        ): InnerHeader {
             var streamId = KdbxConstants.InnerRandomStream.CHACHA20
             var streamKey = ByteArray(64)
             val binaries = mutableListOf<BinaryItem>()
@@ -185,11 +288,33 @@ data class InnerHeader(
                                 "length=$fieldLen（允许 0 ~ $MAX_INNER_FIELD_BYTES）"
                     )
                 }
-                val fieldData = LittleEndianUtil.readBytes(inputStream, fieldLen, MAX_INNER_FIELD_BYTES)
 
                 if (fieldId == KdbxConstants.InnerHeaderFieldId.END) {
                     break
                 }
+
+                // 大附件字段：长度已知，直接流式落盘，不整份物化（ISSUE-P2-24）
+                if (fieldId == KdbxConstants.InnerHeaderFieldId.BINARY &&
+                    fieldLen > FLAGS_FIELD_BYTES.toInt()
+                ) {
+                    enforceBinaryPoolEntryLimit(binaries.size)
+                    val flag = readFlagByte(inputStream)
+                    val payloadLen = fieldLen - FLAGS_FIELD_BYTES.toInt()
+                    binaryPoolTotalBytes += payloadLen
+                    enforceBinaryPoolTotalLimit(binaryPoolTotalBytes)
+                    if (binaryStore != null &&
+                        BinaryStorePolicy.shouldSpill(payloadLen.toLong(), spillThresholdBytes)
+                    ) {
+                        val key = binaryStore.storeFromStream(inputStream, payloadLen.toLong())
+                        binaries.add(BinaryItem(flag, binaryStore, key, payloadLen.toLong()))
+                    } else {
+                        val data = LittleEndianUtil.readBytes(inputStream, payloadLen, MAX_INNER_FIELD_BYTES)
+                        binaries.add(BinaryItem(flag, data))
+                    }
+                    continue
+                }
+
+                val fieldData = LittleEndianUtil.readBytes(inputStream, fieldLen, MAX_INNER_FIELD_BYTES)
 
                 when (fieldId) {
                     KdbxConstants.InnerHeaderFieldId.INNER_RANDOM_STREAM_ID -> {
@@ -212,20 +337,11 @@ data class InnerHeader(
                     }
                     KdbxConstants.InnerHeaderFieldId.BINARY -> {
                         if (fieldData.isNotEmpty()) {
-                            if (binaries.size >= MAX_BINARY_POOL_ENTRIES) {
-                                throw KdbxCorruptFileException(
-                                    "二进制池条目数超出安全上限: ${binaries.size + 1}" +
-                                            "（允许 ≤ $MAX_BINARY_POOL_ENTRIES），疑似解析炸弹"
-                                )
-                            }
+                            enforceBinaryPoolEntryLimit(binaries.size)
                             val flag = fieldData[0]
                             val data = fieldData.copyOfRange(1, fieldData.size)
                             binaryPoolTotalBytes += data.size
-                            if (binaryPoolTotalBytes > MAX_BINARY_POOL_TOTAL_BYTES) {
-                                throw KdbxCorruptFileException(
-                                    "二进制池累计字节超出安全上限（允许 ≤ $MAX_BINARY_POOL_TOTAL_BYTES），疑似解析炸弹"
-                                )
-                            }
+                            enforceBinaryPoolTotalLimit(binaryPoolTotalBytes)
                             binaries.add(BinaryItem(flag, data))
                         }
                     }
@@ -239,12 +355,43 @@ data class InnerHeader(
             )
         }
 
+        private fun enforceBinaryPoolEntryLimit(currentCount: Int) {
+            if (currentCount >= MAX_BINARY_POOL_ENTRIES) {
+                throw KdbxCorruptFileException(
+                    "二进制池条目数超出安全上限: ${currentCount + 1}" +
+                            "（允许 ≤ $MAX_BINARY_POOL_ENTRIES），疑似解析炸弹"
+                )
+            }
+        }
+
+        private fun enforceBinaryPoolTotalLimit(totalBytes: Long) {
+            if (totalBytes > MAX_BINARY_POOL_TOTAL_BYTES) {
+                throw KdbxCorruptFileException(
+                    "二进制池累计字节超出安全上限（允许 ≤ $MAX_BINARY_POOL_TOTAL_BYTES），疑似解析炸弹"
+                )
+            }
+        }
+
+        private fun readFlagByte(inputStream: InputStream): Byte {
+            val value = inputStream.read()
+            if (value < 0) throw java.io.EOFException("意外到达流末尾")
+            return value.toByte()
+        }
+
         private fun writeField(outputStream: OutputStream, fieldId: Byte, data: ByteArray) {
-            outputStream.write(fieldId.toInt())
-            LittleEndianUtil.writeInt(outputStream, data.size)
+            writeFieldHeader(outputStream, fieldId, data.size.toLong())
             if (data.isNotEmpty()) {
                 outputStream.write(data)
             }
+        }
+
+        /** 仅写字段头（fieldId + 小端 Int32 长度）；后续内容由调用方自行流式写出。 */
+        private fun writeFieldHeader(outputStream: OutputStream, fieldId: Byte, length: Long) {
+            require(length in 0..Int.MAX_VALUE.toLong()) {
+                "内层 Header 字段长度超出可编码范围: $length"
+            }
+            outputStream.write(fieldId.toInt())
+            LittleEndianUtil.writeInt(outputStream, length.toInt())
         }
     }
 }

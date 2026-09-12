@@ -1,6 +1,7 @@
 package com.keepasskey.database.file
 
 import com.keepasskey.core.model.KdbxConstants
+import com.keepasskey.core.security.BinaryStore
 import com.keepasskey.crypto.cipher.CipherFactory
 import com.keepasskey.crypto.hash.HashUtil
 import com.keepasskey.crypto.kdf.KdfParameters
@@ -97,7 +98,8 @@ object KdbxFile {
     fun load(
         inputStream: InputStream,
         passwordChars: CharArray?,
-        keyFileData: ByteArray? = null
+        keyFileData: ByteArray? = null,
+        binaryStore: BinaryStore? = null
     ): KdbxDatabase {
         // 1. 读取并解析外层 Header
         val (header, headerBytes) = KdbxHeader.deserialize(inputStream)
@@ -136,7 +138,7 @@ object KdbxFile {
                 throw KdbxInvalidCredentialsException("主密码错误或文件头部认证失败（HMAC 校验未通过）")
             }
 
-            return loadPayload(inputStream, header, passwordChars, keyFileData, cipherKey, hmacKey64)
+            return loadPayload(inputStream, header, passwordChars, keyFileData, cipherKey, hmacKey64, binaryStore)
         } finally {
             Arrays.fill(cipherKey, 0.toByte())
             Arrays.fill(hmacKey64, 0.toByte())
@@ -152,7 +154,8 @@ object KdbxFile {
         passwordChars: CharArray?,
         keyFileData: ByteArray?,
         cipherKey: ByteArray,
-        hmacKey64: ByteArray
+        hmacKey64: ByteArray,
+        binaryStore: BinaryStore?
     ): KdbxDatabase {
         val hmacBlockIn = HmacBlockInputStream(NonClosingInputStream(inputStream), hmacKey64)
         val cipherEngine = CipherFactory.getEngine(header.cipherUuid)
@@ -190,7 +193,8 @@ object KdbxFile {
             header.compression == KdbxConstants.Compression.GZIP
         )
 
-        val innerHeader = InnerHeader.deserialize(xmlInputStream)
+        // ISSUE-P2-24：大附件在解析期即流式落盘（binaryStore 为 null 时行为与既往逐字一致）
+        val innerHeader = InnerHeader.deserialize(xmlInputStream, binaryStore)
 
         val innerCipher = InnerRandomStreamCipher(
             innerHeader.innerRandomStreamId,

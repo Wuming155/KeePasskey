@@ -1616,3 +1616,109 @@ Rust 单测模块 `#[cfg(test)] mod tests` 之内**（测试模块起始行：`s
 - **arm64 原生加密内核验证仍缺**：本机仅 x86_64 镜像，arm64 镜像在 x86_64 主机上属翻译模拟（未执行）。
   该缺口对应 §33 的 ISSUE-P3-23，维持「不排期/外部依赖」。
 - **关联提交**：本批次代码与文档为**同一次** `git commit`（提交主题以 `ISSUE-P2-27 / P3-66` 引用）。
+
+---
+
+## §35 ISSUE-P2-24 大附件磁盘缓存池（2026-09-12，阶段 1/2/3 全量落地）
+
+> **闭环声明**：`ACTIVE_ISSUES.md` 中 ISSUE-P2-24 的正文（含「为什么本次不落半成品」评估与分阶段方案）
+> 已整条移入本节；该条目从待办清单移除。
+
+### 35.1 问题与设计
+
+- **问题**：附件字节「内层二进制池常驻 + 逐附件副本」双份驻留 GC 堆，大附件库存在 OOM / GC 压力。
+- **设计**：分离「逻辑引用」与「物理字节」——超过阈值（默认 **1 MiB**，可配）的附件在解析期即
+  **流式落盘**，池中只保留 store key；[KdbxAttachment.data] 按需读回**独立副本**，
+  别名隔离契约（ISSUE-P3-07）逐条保持。
+- **关键取舍（诚实留痕）**：落盘附件的字节由**多个引用者共享**（去重复用同一 store 条目），
+  故 [KdbxAttachment.clear] 对落盘项**不动作**（清零会连带损坏其它引用者）——
+  其生命周期改由会话锁定时的 `BinaryStore.clear()` 统一收口。经全仓核实**生产代码无 `clear()` 调用方**
+  （仅测试使用内存副本路径），故该语义变化无生产影响。
+
+### 35.2 交付清单
+
+1. **`core`**：新增 `BinaryStore`（`store` / `storeFromStream` / `load` / `openStream` / `sizeOf` / `clear`）、
+   `BinaryStorePolicy`（阈值策略）、`BinarySource`（附件字节来源抽象）；`KdbxAttachment` 增可选
+   `source: BinarySource?`（构造签名向后兼容）与 `size` / `openStream()`。
+2. **`database`**：`InnerHeader.BinaryItem` 支持落盘引用（`data` 按需读回、`size` 不触发读取、
+   `contentHash()` **流式**计算且与 `Arrays.hashCode(byte[])` 逐位等价、`writeTo` 流式写出、`withFlags` 零读取改标志）；
+   `InnerHeader.deserialize(stream, store?, threshold)` 大字段**流式落盘**（长度/条目数/累计字节数三重守卫保留）、
+   `serialize` 流式写出；`KdbxXmlBinaryNode` 落盘项不再 `copyOf`（挂引用）；`KdbxBinaryDeduplicator`
+   指纹改为 `(flags, size, 内容哈希)` + **同指纹碰撞时流式逐字节复核**（绝不误合并），并复用落盘 store key；
+   `KdbxFile.load(..., binaryStore = null)`（`null` → 旧行为逐字不变）。
+3. **`app`**：`FileBinaryStore`（`cacheDir/attachments`，实现 `BinaryStore` + `SessionLockObserver`）；
+   `SessionOpener` / `DatabaseSession(binaryStore)` 接线；`DatabaseModule` 注入并注册锁库观察者；
+   `VaultEntryMapper` 改用 `attachment.size`（**不再把整池 map 成字节数组**）、`VaultEntrySecretReader`
+   改用 `attachment.data` 按需读取。
+4. **`sync`**：`SyncCache` 增 `writeCacheStreaming` / `openCacheStream` / `cacheSize`
+   （复用既有 0600 / 0700 落盘基线，供 `FileBinaryStore` 组合）。
+
+### 35.3 验收证据
+
+| AC | 内容 | 证据 |
+|:--:|---|---|
+| ① | >1 MiB 附件走磁盘缓存、不整入内存 | `InnerHeaderBinarySpillTest`（7 例）+ `KdbxFile` 往返用例；设备侧 `DatabaseSessionAndroidRuntimeTest` 实测落盘 |
+| ② | 锁定 / 关闭时对称清理 | `SessionLockObserver` 接线 + 设备侧用例断言锁定后缓存目录清空 |
+| ③ | 权限 0600 / 0700 | `SyncCacheAndroidRuntimeTest`（设备侧 **POSIX 实测**，非降级分支） |
+| ④ | KDBX 字节语义不变 | `KdbxAttachmentAliasIsolationTest` **4 例原样通过（未改写）**；`KdbxBinaryDeduplicatorTest` 3 例通过；`InnerHeaderBinarySpillTest` 往返逐字节等价 + 去重/池一致性 |
+
+- **单测**：`.\gradlew.bat test` → **BUILD SUCCESSFUL**；debug 单测 **1423 例 / 0 失败 / 0 错误 / 13 跳过**
+  （本批次新增 14 例：`core` 3 / `database` 7 / `sync` 4）。
+- **设备侧**：见 §36。
+
+### 35.4 边界
+
+- KDBX 对象树**其余部分**仍整体驻留内存（本次只解决附件字节）；`AGENTS.md` §6 已同步修订。
+- 阈值为**编译期默认 + 参数可配**（`BinaryStorePolicy.DEFAULT_THRESHOLD_BYTES`），暂无用户可视开关。
+
+---
+
+## §36 ISSUE-P2-27 设备侧验证缺口收口（2026-09-12，app + sync）
+
+> **动机**：§34 建立了 `app` 设备侧骨架但仅覆盖导入解析，`sync` 仍无 `androidTest` 源集。
+> 本节把「域解析（正则 / PSL / IDN）」「解锁落盘」「落盘权限」三类**平台运行时相关**逻辑
+> 放回真实 Android 运行时执行，收窄「JVM 全绿、Android 挂」缺陷类（§24 / §26 已两度逃逸）的盲区。
+
+### 36.1 交付
+
+1. **`app`**（新增 9 例，累计 12 例）：
+   - `DomainMatcherAndroidRuntimeTest`（7 例）：主机名剥离、严格点号边界、公共后缀下限、
+     私有段后缀、**IDN ↔ punycode 跨形式匹配**（`java.net.IDN`）、webDomain 归一化与归属 fail-closed。
+   - `DatabaseSessionAndroidRuntimeTest`（2 例）：生产管线产出 `.kdbx` → 生产 `DatabaseSession` 解锁 →
+     大附件落盘 / 权限 0600 / 目录 0700 / 字节往返 / 锁定即清空；阈值以下不落盘。
+2. **`sync`**（新源集 + 3 例）：`sync/build.gradle.kts` 接线 `testInstrumentationRunner` 与
+   `androidTestImplementation`；`SyncCacheAndroidRuntimeTest` 验证落盘权限收敛（0600 / 0700）与
+   流式落盘读回一致、`clearAll` 清空。
+
+### 36.2 验收证据（2026-09-12，x86_64 / API 36.1，`emulator-5554`）
+
+- `.\gradlew.bat :sync:connectedDebugAndroidTest` → **BUILD SUCCESSFUL**；
+  `sync/build/outputs/androidTest-results/connected/debug/TEST-*.xml`：
+  `tests="3" failures="0" errors="0" skipped="0"`。
+- `.\gradlew.bat :app:connectedDebugAndroidTest` → **BUILD SUCCESSFUL**；
+  `app/build/outputs/androidTest-results/connected/debug/TEST-*.xml`：
+  `tests="12" failures="0" errors="0" skipped="0"`。
+- **过程留痕（如实）**：首轮 app 侧 2 处失败——① 测试方法因 `runBlocking` 返回非 `Unit` 触发
+  `InvalidTestClassError`；② 误将 `extractDomain` 期望为剥离子域。均已修正后复跑通过。
+
+### 36.3 边界
+
+- **Passkey 系统级交互、`AssistStructure` 结构树扫描、通知渲染**仍未设备侧覆盖：
+  前三者依赖系统凭据对话框 / 真实自动填充会话 / 通知栏，超出常规 instrumented 用例的可控范围，
+  维持宿主 JVM 覆盖 + 如实留痕。
+- **arm64 真机**仍缺（沿用 §33 ISSUE-P3-23「不排期/外部依赖」）。
+
+---
+
+## §37 工程整洁与文档准确性收口（2026-09-12）
+
+| 项 | 问题 | 处置 |
+|---|---|---|
+| D1 | `dbset_import_reserved_note`（「解析器预留，暂未生效」）为**死文案且与现状相反**（导入已落地、零渲染点） | 从 `values` / `values-en` 删除；保留 `DatabaseSettingsDialogs.kt` 的历史说明注释 |
+| D2 | TAN 序列号 / 数据库 UUID 两个**永久禁用**开关标注「即将支持」，隐含无计划兑现的路线图承诺 | 文案改为「暂不支持 / not supported yet」（`values` + `values-en`），实现侧仍是如实禁用态 |
+| D3 | 「填充后自动返回」开关可持久化但**无任何行为消费方**（假开关） | `AutofillSwitchRow` 增 `enabled` 参数；该行实测禁用交互并降透明度（保留「预留，暂未生效」标注） |
+| D5 | lint 是否具阻断力 | `.\gradlew.bat :app:lintRelease` → **BUILD SUCCESSFUL（EXIT 0）**：无配置豁免即默认 `abortOnError`，当前无阻断项 |
+| D6 | `AGENTS.md` §6 称「独立窗口（如 `BaseCredentialActivity` 系）需单独接线」——**已过时** | 更正为按窗口分类如实描述：自动填充 / 通行密钥窗口调用 `ApplyObscuredTouchFilter()`；`BaseCredentialActivity` 体系以 `setHideOverlayWindows(true)` 屏蔽悬浮窗（强于触摸过滤），**无未接线盲区** |
+
+- **产品裁决项（本轮未动，如实留痕）**：`versionCode` / `versionName`（`1` / `0.1.0`）属**发布定型决策**，
+  未经明确发布计划不改动（避免版本号与对外发布节奏脱节）。

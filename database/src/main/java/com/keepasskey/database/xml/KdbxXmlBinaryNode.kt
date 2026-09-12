@@ -46,18 +46,40 @@ internal class BinaryNode(
         // 外部按 Closeable 契约 attachment.clear()/close() 即清零内层 Header 二进制池，
         // 连带损坏其他引用者与后续保存（去重指纹取自已清零数据）——副本化后池仍为唯一权威源。
         // 去重语义不受影响：保存侧按 flags + 字节内容指纹去重（KdbxBinaryDeduplicator），与实例身份无关。
-        val data = if (refIndex in binariesPool.indices) {
-            binariesPool[refIndex].data.copyOf()
+        //
+        // ISSUE-P2-24：池中落盘的大附件不再 copyOf（那会立刻整份物化、抹掉落盘收益），
+        // 改为挂 [BinarySource] 引用——attachment.data 按需读回**独立副本**，
+        // 每次调用互不共享引用，别名隔离契约（上述 P3-07）逐条保持。
+        if (refIndex in binariesPool.indices) {
+            val item = binariesPool[refIndex]
+            if (item.isSpilled) {
+                onDone(
+                    KdbxAttachment(
+                        name = key,
+                        refIndex = refIndex,
+                        isProtected = isProtected,
+                        source = item
+                    )
+                )
+            } else {
+                onDone(
+                    KdbxAttachment(
+                        name = key,
+                        refIndex = refIndex,
+                        isProtected = isProtected,
+                        data = item.data.copyOf()
+                    )
+                )
+            }
         } else {
-            ByteArray(0)
-        }
-        onDone(
-            KdbxAttachment(
-                name = key,
-                refIndex = refIndex,
-                isProtected = isProtected,
-                data = data
+            onDone(
+                KdbxAttachment(
+                    name = key,
+                    refIndex = refIndex,
+                    isProtected = isProtected,
+                    data = ByteArray(0)
+                )
             )
-        )
+        }
     }
 }

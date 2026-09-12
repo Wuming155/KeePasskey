@@ -344,8 +344,9 @@ internal fun DatabaseImportExportCard(
  * 5. 完整性与高级规则 (KP2A 特性)：TAN 一次性失效与重复 UUID 检查
  *
  * ISSUE-P3-65 整改：两个开关此前可拨动但既无持久化也无任何行为消费方（假开关）。
- * 在补齐真实语义前如实禁用交互并以「即将支持」标注，checked 恒为 false，
+ * 在补齐真实语义前如实禁用交互并以「暂不支持」标注，checked 恒为 false，
  * 不再呈现「已开启」的假状态。
+ * （2026-09-12 文案收口：原「即将支持」隐含路线图承诺但无实施计划，改为「暂不支持」如实陈述现状。）
  */
 @Composable
 internal fun DatabaseIntegrityCard() {

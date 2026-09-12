@@ -9,7 +9,13 @@ plugins {
 android {
     namespace = "com.keepasskey.sync"
     compileSdk = 37
-    defaultConfig { minSdk = 36 }
+    defaultConfig {
+        minSdk = 36
+        // ISSUE-P2-27：sync 模块首次引入 androidTest（instrumented）源集。
+        // 动因：SyncCache 的落盘权限收敛（0600 / 0700）与流式落盘只能在真实 POSIX 文件系统上验证，
+        // 宿主 JVM（Windows）走的是降级分支，验不到真实权限位；同时补上 sync 层的设备侧看门缺口。
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -28,6 +34,10 @@ dependencies {
     testImplementation(libs.junit)
     testImplementation(libs.coroutines.test)
     testImplementation(libs.mockwebserver)
+
+    // ISSUE-P2-27：androidTest（instrumented）源集依赖（与 crypto / database / app 同源版本）
+    androidTestImplementation(libs.androidx.test.ext.junit)
+    androidTestImplementation(libs.androidx.test.runner)
 }
 
 /**

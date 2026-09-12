@@ -1,5 +1,6 @@
 package com.keepasskey.app.di
 
+import com.keepasskey.app.data.binary.FileBinaryStore
 import com.keepasskey.app.data.repository.ExtendedSettingsStore
 import com.keepasskey.app.sync.SyncCacheEvictor
 import com.keepasskey.database.session.DatabaseSession
@@ -30,10 +31,13 @@ object DatabaseModule {
     @Singleton
     fun provideDatabaseSession(
         cacheEvictor: SyncCacheEvictor,
-        extendedSettingsStore: ExtendedSettingsStore
+        extendedSettingsStore: ExtendedSettingsStore,
+        binaryStore: FileBinaryStore
     ): DatabaseSession {
-        return DatabaseSession().apply {
+        return DatabaseSession(binaryStore).apply {
             addLockObserver(cacheEvictor)
+            // ISSUE-P2-24：大附件磁盘缓存同属会话派生敏态数据，锁定/关闭时一并清空
+            addLockObserver(binaryStore)
             createBackupBeforeSave = extendedSettingsStore.load().createBackupBeforeSave
         }
     }

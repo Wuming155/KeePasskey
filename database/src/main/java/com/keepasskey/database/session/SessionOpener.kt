@@ -3,6 +3,7 @@ package com.keepasskey.database.session
 import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.core.model.KdbxGroup
 import com.keepasskey.core.result.KdbxResult
+import com.keepasskey.core.security.BinaryStore
 import com.keepasskey.database.file.KdbxDatabase
 import com.keepasskey.database.file.KdbxFile
 import com.keepasskey.database.file.KdbxHeader
@@ -25,7 +26,9 @@ internal class SessionOpener(
     private val core: SessionCore,
     private val credentials: SessionCredentialCache,
     private val fileWriter: SessionFileWriter,
-    private val mutex: Mutex
+    private val mutex: Mutex,
+    /** ISSUE-P2-24：大附件落盘存储（可选）；为空时解析行为与既往逐字一致。 */
+    private val binaryStore: BinaryStore? = null
 ) {
 
     /**
@@ -139,7 +142,8 @@ internal class SessionOpener(
         withContext(Dispatchers.Default) {
             try {
                 val db = inputStreamProvider().use { fis ->
-                    KdbxFile.load(fis, passwordChars, keyFileData)
+                    // ISSUE-P2-24：大附件在解析期流式落盘（binaryStore 为空则行为与既往一致）
+                    KdbxFile.load(fis, passwordChars, keyFileData, binaryStore)
                 }
 
                 core.activeFile = associatedFile

@@ -82,7 +82,7 @@ internal class VaultEntrySecretReader(
         val revision = entry.history.firstOrNull { it.id == revisionUuid } ?: return null
         // 断点8 整改：整修订快照投影 + 受保护字段解密回填（仅驻留回滚会话），
         // 使回滚保存时 title/url/自定义字段/TOTP/密码全字段真实还原
-        val projection = entryMapper.mapKdbxEntryToUi(revision, currentDb)
+        val projection = entryMapper.mapKdbxEntryToUi(revision)
         // ISSUE-P2-15：受保护字段经 CharArray 独占副本中转（用毕清零）；UiCustomField.value 仍为
         // String（UI 投影模型已知约束），此处物化的 String 属投影边界、不可擦，见 ISSUE-P2-15 备注
         val decryptedFields = projection.customFields.map { cf ->
@@ -159,9 +159,10 @@ internal class VaultEntrySecretReader(
         val targetUuid = parseKdbxUuidOrNull(entryId) ?: return null
         val currentDb = databaseSession.databaseFlow.first() ?: return null
         val entry = currentDb.rootGroup.allEntries().firstOrNull { it.id == targetUuid } ?: return null
-        val binaryPool = currentDb.binaries.map { it.data }
         val attachment = entry.attachments.firstOrNull { it.name == fileName } ?: return null
-        val bytes = attachment.resolveData(binaryPool)
+        // ISSUE-P2-24：按需读取本附件字节（落盘大附件由 source 流式读回），
+        // 不再把整个二进制池 map 成字节数组把全库附件拉回内存。
+        val bytes = attachment.data
         return if (bytes.isEmpty()) null else bytes.copyOf()
     }
 }

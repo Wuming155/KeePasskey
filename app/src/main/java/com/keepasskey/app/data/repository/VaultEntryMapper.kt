@@ -38,7 +38,7 @@ internal class VaultEntryMapper(private val strings: StringsProvider) {
      * F2 整改：受保护自定义字段（Passkey 私钥/TOTP 种子/恢复码等）同样不进投影，
      * 仅在用户显式查看/编辑时按需单条解密
      */
-    fun mapKdbxEntryToUi(entry: KdbxEntry, db: KdbxDatabase?): UiVaultEntry {
+    fun mapKdbxEntryToUi(entry: KdbxEntry): UiVaultEntry {
         val uiCustomFields = entry.customFields.map { cf ->
             UiCustomField(
                 id = "${entry.id.toHexString()}_${cf.key}",
@@ -58,11 +58,12 @@ internal class VaultEntryMapper(private val strings: StringsProvider) {
             )
         }
 
-        val binaryPool = db?.binaries?.map { it.data } ?: emptyList()
+        // ISSUE-P2-24：投影只需字节数，直接取 attachment.size——
+        // 不再把整个二进制池 map 成字节数组（那会令落盘大附件被整批读回内存）。
         val uiAttachments = entry.attachments.map { att ->
-            val dataBytes = att.resolveData(binaryPool)
-            val sizeKb = (dataBytes.size / 1024).coerceAtLeast(if (dataBytes.isNotEmpty()) 1 else 0)
-            val sizeFormatted = if (dataBytes.size < 1024) "${dataBytes.size} B" else "$sizeKb KB"
+            val byteCount = att.size
+            val sizeKb = (byteCount / 1024).coerceAtLeast(if (byteCount > 0) 1L else 0L)
+            val sizeFormatted = if (byteCount < 1024) "$byteCount B" else "$sizeKb KB"
             UiAttachment(
                 id = "${entry.id.toHexString()}_${att.name}",
                 fileName = att.name,
