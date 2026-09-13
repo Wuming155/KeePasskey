@@ -2761,12 +2761,12 @@ sync +8（`SyncDownloadLimitsTest` ×5 + `WebDavPropfindParserTest` ×3）。
 
 | 编号 | 级别 | 缺陷（一句话） | 关键改动 | 回归 |
 |---|:--:|---|---|---|
-| **P1-22** | P1（LOW / DESIGN WEAKNESS） | 封印密钥落位等级（SOFTWARE / UNKNOWN）不影响任何行为——软件级 Keystore 上封印照常建立且无任何提示，封印载荷可被离线解出主密码 | ① **策略单点**：`UnlockAuthPolicy.requiresDowngradeConsent(level)`——SOFTWARE 与 UNKNOWN（无法证明硬件落位）一律须「显式降级确认」（AC① 第四轮修正：不取「无条件禁用」，保住模拟器 / CI 生物识别路径）；② **探测接线**：`BiometricAuthManager.getKeySecurityLevelForDatabase`（封印路径唯一消费点），封印协调器新增 `SealedKeyProvision` 供给链——**先经 `prepareEncryptCipher` 建钥、后探测实际落位**（密钥不存在时探测恒 UNKNOWN，次序不可颠倒）；③ **确认闸门**：`BiometricEnrollmentCoordinator` 在落位须降级且 `quickUnlockDowngradeAcknowledged == false` 时挂起解锁流程、经 UI 状态 `quickUnlockDowngradeConsentPending` 驱动解锁页 `QuickUnlockDowngradeConsentDialog`（60s 超时未决 → fail-closed 跳过封印；确认 → `SettingsRepository.setQuickUnlockDowngradeAcknowledged(true)` 持久化留痕（AC②）；拒绝 → 关闭 `biometricEnabled` 不封印不留痕）；④ **常驻声明**：确认记录驱动解锁页快速解锁卡片与安全设置页生物识别开关下方常驻渲染「本机快速解锁降级为软件密钥，不提供硬件级保护」（中英双语资源），并带自愈逻辑（确认记录残留但实际落位为 TEE/StrongBox 时自动清除）；⑤ strings.xml / values-en 新增 5 条 | `QuickUnlockSealDowngradeTest` 新增 8 例（策略纯函数 1 + JVM 全流程 7：SOFTWARE 未确认拒绝 / UNKNOWN 同策略 / 确认后持久化 / 拒绝关开关 / 已确认不重复弹窗 / TEE 直放 / 超时 fail-closed，均注入假探测结果）；`QuickUnlockSealDowngradeDeviceTest` 设备侧 2 例（见 46.4） |
+| **P1-22** | P1（LOW / DESIGN WEAKNESS） | 封印密钥落位等级（SOFTWARE / UNKNOWN）不影响任何行为——软件级 Keystore 上封印照常建立且无任何提示，封印载荷可被离线解出主密码 | ① **策略单点**：`UnlockAuthPolicy.requiresDowngradeConsent(level)`——SOFTWARE 与 UNKNOWN（无法证明硬件落位）一律须「显式降级确认」（AC① 第四轮修正：不取「无条件禁用」，保住模拟器 / CI 生物识别路径）；② **探测接线**：`BiometricAuthManager.getKeySecurityLevelForDatabase`（封印路径唯一消费点），封印协调器新增 `SealedKeyProvision` 供给链——**先经 `prepareEncryptCipher` 建钥、后探测实际落位**（密钥不存在时探测恒 UNKNOWN，次序不可颠倒）；③ **确认闸门**：`BiometricEnrollmentCoordinator` 在落位须降级且 `quickUnlockDowngradeAcknowledged == false` 时挂起解锁流程、经 UI 状态 `quickUnlockDowngradeConsentPending` 驱动解锁页 `QuickUnlockDowngradeConsentDialog`（60s 超时未决 → fail-closed 跳过封印；确认 → `SettingsRepository.setQuickUnlockDowngradeAcknowledged(true)` 持久化留痕（AC②）；拒绝 → 关闭 `biometricEnabled` 不封印不留痕）；④ **常驻声明**：确认记录驱动解锁页快速解锁卡片与安全设置页生物识别开关下方常驻渲染「本机快速解锁降级为软件密钥，不提供硬件级保护」（中英双语资源），并带自愈逻辑（确认记录残留但实际落位为 TEE/StrongBox 时自动清除）；⑤ strings.xml / values-en 新增 5 条 | `QuickUnlockSealDowngradeTest` 新增 8 例（策略纯函数 1 + JVM 全流程 7：SOFTWARE 未确认拒绝 / UNKNOWN 同策略 / 确认后持久化 / 拒绝关开关 / 已确认不重复弹窗 / TEE 直放 / 超时 fail-closed，均注入假探测结果）；`QuickUnlockSealDowngradeDeviceTest` 设备侧 3 例（见 46.4） |
 | **P1-23** | P1（INFO–LOW / P2 产品告知项） | 重打包 APK 无检测且 `installer==null` 判为无风险——应用内自检对该威胁无效，需应用外信任根告知 | ① **AC①**：README 新增「官方签名指纹」节——公布 release 签名证书 SHA-256（`F3:A6:F0:92:…:84:2E`，本批经 `keytool -list` 对 `release.jks` 实算）+ `apksigner verify` / `keytool -printcert` 可复跑核对命令 + 安全须知（应用内自检不能证明 APK 未被篡改）；② **AC②**：`RuntimeIntegrityDetector.detectUntrustedInstallSource` KDoc 显式决策留痕（`installer==null` 不升级风险系显式产品决策及其三条理由，并明确「不引入无效的应用内签名自校验」）；③ **AC③**：尚未上架任何商店（README「已知局限」已声明），登记为上架前置项（Play Integrity 或同等平台完整性证明），暂不适用 | 无代码行为变更（文档 + KDoc 留痕）；指纹核对命令本身即 AC① 的可复跑校验路径 |
 
 ### 46.2 AC 逐条核对
 
-- **P1-22**：AC①（修正版）✓——SOFTWARE / UNKNOWN 一律「显式降级确认 + 常驻声明」（`UnlockAuthPolicy.requiresDowngradeConsent` 单点语义，模拟器 / CI 生物识别路径不被打断）；AC② ✓——封印建立前弹窗风险提示、确认经 `setQuickUnlockDowngradeAcknowledged` 持久化留痕、解锁页 + 安全设置页常驻声明；AC③ ✓——JVM 8 例注入假探测结果断言「SOFTWARE 未经确认 → 封印被拒」等分支 + 设备侧 2 例实测（见 46.4）。
+- **P1-22**：AC①（修正版）✓——SOFTWARE / UNKNOWN 一律「显式降级确认 + 常驻声明」（`UnlockAuthPolicy.requiresDowngradeConsent` 单点语义，模拟器 / CI 生物识别路径不被打断）；AC② ✓——封印建立前弹窗风险提示、确认经 `setQuickUnlockDowngradeAcknowledged` 持久化留痕、解锁页 + 安全设置页常驻声明；AC③ ✓——JVM 8 例注入假探测结果断言「SOFTWARE 未经确认 → 封印被拒」等分支 + 设备侧 3 例实测（见 46.4）。
 - **P1-23**：AC① ✓（README 公布指纹 + 核对命令）；AC② ✓（`installer==null` 语义在 KDoc 显式决策留痕，未以应用内自检充当整改）；AC③ ✓（未上架 → 如实登记为上架前置项）。
 
 ### 46.3 附带发现并修复：AndroidKeyStore SecretKey 探针 API 误用（P1 级功能缺陷）
@@ -2778,13 +2778,14 @@ sync +8（`SyncDownloadLimitsTest` ×5 + `WebDavPropfindParserTest` ×3）。
 - **修复**：两处改用 `SecretKeyFactory`（EC 私钥探针的 `KeyFactory` 用法合法，保留）。修复后设备侧探测实返回 `SOFTWARE`（模拟器）。
 - **登记说明**：本缺陷随 P1-22 同批发现、同批修复，不单独占编号；其修复由设备侧用例 `模拟器AndroidKeyStore真实密钥落位实测为SOFTWARE` 长期回归锁定。
 
-### 46.4 设备侧实测记录（x86_64 / API 36.1 模拟器 Pixel_10，`emulator-5554`）
+### 46.4 设备侧实测记录（x86_64 / API 36.1 模拟器 Pixel_10，`emulator-5554`，`OK (3 tests)`）
 
 | 用例 | 结果 | 说明 |
 |---|---|---|
 | `模拟器AndroidKeyStore真实密钥落位实测为SOFTWARE` | PASS | 真实 AndroidKeyStore 密钥实测落位 = SOFTWARE（P1-22 问题前提在 Android 运行时成立，非推算）；同时锁定 46.3 的 `SecretKeyFactory` 修复 |
 | `未录入强生物识别时封印fail-closed且不请求降级确认` | PASS | 生产默认供给链（真实建钥）在未录入 Class 3 生物识别时抛 `InvalidAlgorithmParameterException` → 供给失败 → 不请求确认、不封印、不改用户设置（fail-closed 闭环） |
-| **环境边界（如实声明）** | — | 模拟器**无法录入** Class 3 强生物识别（emulator console 无 enroll 子命令），「SOFTWARE → 确认弹窗 → 确认后封印」的完整链路须在已录入生物识别的设备实测；该流程的闸门逻辑已由 JVM 8 例（注入假探测结果）覆盖 |
+| `SOFTWARE落位降级确认闸门在设备侧闭环` | PASS | 注入假 `SOFTWARE` 落位，在真实 Android 运行时验证闸门三条分支：**拒绝** → 关闭 `biometricEnabled` 且不留确认记录、不建立封印；**确认** → 确认记录持久化、开关不被改写；**已有记录** → 不再重复请求确认 |
+| **环境边界（如实声明）** | — | 模拟器**无法录入** Class 3 强生物识别（emulator console 无 enroll 子命令），故「SOFTWARE 确认后经真实 BiometricPrompt 授权并落盘封印密文」的**端到端**链路仍须在已录入生物识别的设备实测；该链路的封装逻辑（`BiometricSealedPayloadCodec` / 登记弹窗）已有既有设备侧与 JVM 覆盖 |
 
 ### 46.5 已知边界与设计取舍
 
@@ -2800,13 +2801,13 @@ sync +8（`SyncDownloadLimitsTest` ×5 + `WebDavPropfindParserTest` ×3）。
 # → BUILD SUCCESSFUL；全量 1595 例 / 0 失败 / 0 错误 / 13 跳过（app 852 / core 65 / crypto 116 / database 359 / sync 203）
 $ adb shell am instrument -w -e class com.keepasskey.app.security.QuickUnlockSealDowngradeDeviceTest \
     com.keepasskey.test/androidx.test.runner.AndroidJUnitRunner
-# → OK (2 tests)
+# → OK (3 tests)
 .\gradlew.bat assembleRelease
 # → BUILD SUCCESSFUL；产物 app\build\outputs\apk\release\app-release.apk（已签名）
 ```
 
 **基线变动**：1587 → **1595（+8 例）**；跳过数 13 与旧基线一致。新增分布：app +8
-（`QuickUnlockSealDowngradeTest`）+ 设备侧 app 14 例（+2：`QuickUnlockSealDowngradeDeviceTest`）。
+（`QuickUnlockSealDowngradeTest`）+ 设备侧 app 15 例（+3：`QuickUnlockSealDowngradeDeviceTest`）。
 `AGENTS.md` §1 / §6 基线已同步。
 
 **过程缺陷（如实留痕）**：全量回归首跑 `SyncCacheTest > clear 与 clearAll 均不删除防回滚状态文件`
