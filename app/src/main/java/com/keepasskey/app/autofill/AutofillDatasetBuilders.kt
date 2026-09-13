@@ -19,6 +19,7 @@ import com.keepasskey.app.autofill.KeePasskeyAutofillService.Companion.REQUEST_C
 import com.keepasskey.app.autofill.KeePasskeyAutofillService.Companion.REQUEST_CODE_UNLOCK
 import com.keepasskey.app.autofill.KeePasskeyAutofillService.Companion.TAG
 import com.keepasskey.core.log.AppLog
+import com.keepasskey.database.fieldref.FieldReferenceEngine.RefField
 
 /**
  * 自动填充数据集构建（自 [KeePasskeyAutofillService] 原样抽出为同包扩展函数）。
@@ -151,11 +152,14 @@ internal suspend fun KeePasskeyAutofillService.appendUnlockedDatasets(
     for ((index, ranked) in rankedEntries.withIndex()) {
         val entry = ranked.entry
         // TASK-17：下发前解析 {REF:...} 字段引用（仅在取值消费点展开，投影层不物化）
+        // ISSUE-P0-08：消费点面白名单——username 通道为非口令消费点，{REF:P@…} 一律掩码，
+        // 口令明文不得经用户名通道进入 RemoteViews / IME 内联建议 / 确认页 extra / 请求方输入框；
+        // password 通道（:158）为口令消费点，按 KDBX 语义展开
         val entryIdHex = entry.id.toHexString()
-        val username = vaultRepository.resolveFieldReferences(entryIdHex, entry.userName)
+        val username = vaultRepository.resolveFieldReferences(entryIdHex, entry.userName, RefField.USER_NAME)
             ?: entry.userName
         val password = entry.password?.readString()
-            ?.let { raw -> vaultRepository.resolveFieldReferences(entryIdHex, raw) }
+            ?.let { raw -> vaultRepository.resolveFieldReferences(entryIdHex, raw, RefField.PASSWORD) }
             .orEmpty()
 
         val views = RemoteViews(packageName, R.layout.autofill_dataset_item).apply {

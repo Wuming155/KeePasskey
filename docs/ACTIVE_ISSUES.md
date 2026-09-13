@@ -31,54 +31,6 @@
 
 ---
 
-## P0 阻断级与致命安全漏洞（2 项）
-
-> **历史**：**ISSUE-P0-05 / P0-06 / P0-07**（KDBX4 时间单位、Salsa20 内层流 nonce、<DeletedObjects> 父节点）
-> 已于 2026-09-12 整改归档，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §38。
->
-> **2026-09-13 新增（第四轮独立复核定版）**：以下 2 项来自《[SECURITY_RECHECK_2026-09.md](SECURITY_RECHECK_2026-09.md)》
-> 经四轮对抗审核后的**定版结论**（终态口径：HIGH×1 + CONFIRMED×24 附成员清单；报告自洽经
-> `bash tools/audit/check_recheck_consistency.sh` 可复跑验证，勿直接引用历史版本的计数与 HIGH 清单）。
-
-### ISSUE-P0-08（新登记）：`resolveFieldReferences` 取值模式无消费点白名单 —— `{REF:P@…}` 口令经 4 个泄漏出口离开应用
-
-- **优先级**：P0（**HIGH / 机密性**：新增能力等级——口令可落入攻击者控件，不可逆、无法自救）
-- **核实时间点与核实方式（2026-09-13，对 HEAD `a669a48`）**：读取 `FieldReferenceEngine.kt`——
-  `resolveForDisplay`（展示模式，`:110-113`）对受保护字段（`P` 面）一律输出 `PROTECTED_PLACEHOLDER` 掩码；
-  而取值模式 `resolve` / `resolveFieldReferences`（`:72-73`；`valueOf` 的 `:149`
-  `RefField.PASSWORD -> entry.password?.readString()`）**无任何消费点约束**。全仓消费点穷尽式枚举为 **5 处**：
-  `AutofillDatasetBuilders.kt:155`（username 通道）、`:158`（password 通道，填入 `:185-190` 的 `passwordId`，
-  属**意图行为、非泄漏出口**）、`EntryDetailViewModel.kt:450`（copyPassword）、`:460`（copyUsername）、
-  `AutofillPickerViewModel.kt:69`（选择器）。
-- **问题描述**：当条目 `UserName` 含 `{REF:P@<检索面>:<检索文本>}`（KeePass 标准语法，本仓主动支持）时，
-  解析出的**口令明文**经 4 个泄漏出口离开应用：① 剪贴板（= `ISSUE-P1-25`）；①' 确认页 extra
-  （`EXTRA_CREDENTIAL_TITLE`，`AutofillDatasetBuilders.kt:200-202`）；② 数据集菜单 / 对话框 RemoteViews
-  （`:162`，**无需用户交互**——系统渲染候选即可见）；③ IME 内联建议（`:173`，受 `ISSUE-P2-71` 默认开启放大）；
-  ④ 请求方应用的"用户名"输入框（`:180-183`，需用户确认填充）。**一条根因、四个出口；修复成本极低**。
-- **涉及文件**：`database/src/main/java/com/keepasskey/database/fieldref/FieldReferenceEngine.kt` 及上述 5 处调用点。
-- **验收标准**：① 为取值模式引入**消费点面白名单**——非口令消费点只允许 `T/U/A/N/I`，遇 `wantField == P`
-  或 `searchField == P` 复用既有 `PROTECTED_PLACEHOLDER` 掩码；② **5 处调用点同批覆盖**（缺一即留活性出口）；
-  ③ 回归：构造 `UserName = {REF:P@A:target}` 断言各出口不含被引用口令；负例 `{REF:U@…}` / `{REF:T@…}`
-  行为不变；外部工具写入的明文 `otp` 仍可读。
-- **禁止**：只修 4 处（原报告 AC 的字面版本漏 `:158`）；以"入口校验"替代"消费点白名单"（展示路径与投影层会旁路）。
-
----
-
-### ISSUE-P0-09（新登记）：`ISSUE-P2-75` 升格 P0 —— 远端把"同步失败"提升为"进程崩溃"（遏制绕过）
-
-- **优先级**：P0（**MEDIUM 严重度 / P0 修复级**。定版判据 = 复核报告 §15.3 第 11 条两道检验：
-  ① 绕过应用自身的错误遏制；② 能力等级提升）
-- **来源**：`ISSUE-P2-75`（威胁建模批次登记，见 P2 节表格行）经第四轮复核升格——
-  `SyncCycleRunner.kt:383-387` 仅捕 `Exception`；provider 的 `runCatching` 捕到 `Error` 后包成
-  `Result.failure`，经 `SyncEngine.kt:95/:102` 的 `getOrThrow()` 原样重抛，在 `:385` 脱网 →
-  超深 XML 的 `StackOverflowError` / 超大响应的 OOM **直接杀死进程**，且每个同步周期自动复发。
-  （对照：`P2-49` 的 KDF 燃烧被遏制在既有错误处理框架内，故仅 P1——两道检验见 `ISSUE-P2-49` 批注。）
-- **验收标准（在 `ISSUE-P2-75` 原 AC 之上收紧）**：① **必须同时**改捕获面 + `findNodes` 迭代化 / 显式深度上限 +
-  下载体入口封顶；② **必须改 `SyncCycleRunner.kt:383-387`**（只改 provider 无效——重抛链在引擎层）；
-  ③ 负例：超大响应与超深 XML 均被拒绝且不 OOM / 不崩溃；④ 正常尺寸同步不受影响。
-
----
-
 ## P1 高危与核心功能问题（4 项）
 
 > **历史**：**ISSUE-P1-16 ~ P1-21**（附件 Ref/Compressed 解析、块 HMAC 异常分型、外层头部总量闸门、
@@ -178,14 +130,15 @@
 - **验收标准**：① `copyUsername` 在解析结果源自 `P`（口令）面时**必须**走 `copySensitiveChars` / `copySensitiveText`
   （设 `EXTRA_IS_SENSITIVE` + 调度自动擦除）；② 任何路径**不得**无条件 `cancelScheduledClear()`；
   ③ 回归断言覆盖「UserName 含 `{REF:P@…}` → 剪贴板带敏感标记且已调度擦除」与「UserName 无引用 → 行为不变」。
-- **第四轮定版批注（2026-09-13）**：终评 **MEDIUM** / 修 **P1**。根因治理升格 **ISSUE-P0-08**（消费点白名单
-  上线后本出口自动消除），但 AC①②（敏感标记 + 擦除调度）独立成立仍须实施。复核更正两处论证：
+- **第四轮定版批注（2026-09-13）**：终评 **MEDIUM** / 修 **P1**。根因治理升格 **ISSUE-P0-08**
+  （**已闭环归档**，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §44——消费点白名单上线后本出口自动消除），
+  但 AC①②（敏感标记 + 擦除调度）独立成立仍须实施。复核更正两处论证：
   「任意前台应用可读」应为「**仅有输入焦点**的应用 / 默认 IME / 特权应用」；`cancelScheduledClear()`
   取消的是**上一次**的计划，本次复制**从未被调度擦除**（非"无时间窗约束"）。
 
 ---
 
-## P2 中危缺陷与协议/测试缺口（40 项）
+## P2 中危缺陷与协议/测试缺口（39 项）
 
 > **历史**：**ISSUE-P2-28 ~ P2-41**（往返丢字段与布尔/数值语义、MemoryProtection 读写语义、
 > KDF 缺参 fail-closed、isPackageMatch 的 android:// 硬约束、requireRiskNotice 接线、
@@ -198,7 +151,7 @@
 > ① **升格 P1 排期**（条目编号留原地、闭环按编号归档）：`P2-48 / P2-49 / P2-51 / P2-53 / P2-61 / P2-63 /
 > P2-65 / P2-72 / P2-76 / P2-77`，及 P3 节的 `P3-109 / P3-116 / P3-117 / P3-120` 与 P1 节 `P1-22` 批注——
 > 其中 **`P2-53` 与 `P2-63` 互为前提，必须同批**（若 `P2-53` 收口点取非 suspend 的 `currentEnforcement()`，
-> 修复会被 `P2-63` 完全抵消）；② **升格 P0**：`P2-75` → `ISSUE-P0-09`；③ 新增 `ISSUE-P2-80`（M-1/M-2
+> 修复会被 `P2-63` 完全抵消）；② **升格 P0**：`P2-75` → `ISSUE-P0-09`（**已整改闭环**，连同 `P2-75` 原行一并归档，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §44）；③ 新增 `ISSUE-P2-80`（M-1/M-2
 > 设备实测）与 `ISSUE-P2-81`；④ 各行内「第四轮批注」为定版结论与 AC 修正，**实施前必读**；
 > ⑤ 摘要：六项原审计让步 + `P2-49` 定级论证，全过程见该报告 §15.2(a)–(r)。
 
@@ -396,7 +349,6 @@
 
 | 编号 | 来源 | 问题与位置（核实于 2026-09-13，对 HEAD `a669a48`） | 验收标准 |
 |---|---|---|---|
-| ISSUE-P2-75 | 威胁建模 T-8b / Q-14 | **远端读取无尺寸上限**：`response.body?.bytes()` 把下载体整体物化（`WebDavSyncProvider.kt:170`、`S3SyncProvider.kt:204`），而 `RemoteFileMetadata.contentLength`（`SyncModels.kt:20`）**只作元数据传递、从不作为守卫**（核实：全仓无消费方）；PROPFIND 响应体整体入 `String`（`WebDavSyncProvider.kt:125`），且 `WebDavPropfindParser.findNodes` 为**递归**遍历（`:50-59`）、外层仅 `catch (e: Exception)`（`:82`）→ 超深 XML 抛 `StackOverflowError`（属 `Error`，**不被捕获**）→ 进程崩溃。KDBX 内部解压上限**不覆盖下载阶段**。**这是唯一可由远端（或系统 CA 级 MITM，本项目零证书固定）单方面触发的崩溃面** | ① 对下载体加**流式 + 声明尺寸双重封顶**（超限即拒绝，不物化）；② PROPFIND 遍历改迭代 / 显式深度上限，并把捕获面扩到 `Throwable`；③ 负例：超大响应与超深 XML 均被拒绝且不 OOM / 不崩溃 |
 | ISSUE-P2-76 | 威胁建模 Q-2 | **两条凭据通道认证强度不对称**：自动填充通道已做 Keystore `CryptoObject` 密码学绑定（`AutofillAuthBindingPolicy.kt:20-21`、`AutofillConfirmActivity.kt:88-107`），而 CM / Passkey 通道 `requestCredentialUserVerification` 直接调 `biometricAuthManager.authenticate(activity, title, subtitle, authenticators) { … }`——**不传 Cipher**（`CredentialVerificationLauncher.kt:43-62`），`CredentialFillVerifier.isSatisfied` 仅凭 `BiometricSucceeded` 放行 → 该通道的"验证"只是 UI 回调契约（hook 可伪造），与自动填充通道不同级；自动填充通道已证明绑定可行 | ① 复核能否复用自动填充的 `prepareAutofillAuthCipher()` 做 CryptoObject 绑定；② 若**确不可行**，须在 KDoc 与 UI **如实声明**"CM 通道验证为回调级、非密码学绑定"，不得让用户误以为与自动填充同级；③ 断言「无 CryptoObject 时验证不通过」或留存降级理由证据 |
 | ISSUE-P2-77 | 威胁建模 Q-16 / T-9c | **（升格 P1）** **切换 / 新建密码库不擦除旧库、不通知锁观察者**：`SessionOpener.create()` 与 `openStream()` 直接替换 `core.database.value`（`SessionOpener.kt:89` / `:156`），该类内 `clearSensitiveData` / `SessionLockObserver` **零命中** → 旧库全部 `ProtectedString` 密文滞留至 GC；旧库的同步缓存与**明文附件缓存**亦不被驱逐、继续留在磁盘上。与 `lock()` 的严格擦除语义（`DatabaseSession.kt:325-349`）明显不一致（模式：`ISSUE-P2-65` 同族，但根因在会话切换路径） | ① 切换 / 新建库前对旧库执行 `clearSensitiveData()` 并通知锁观察者（或引入显式"换库"生命周期事件，语义与 `lock()` 对齐）——**顺序硬约束（陷阱 #3）：必须先通知旧库会话锁定、再 load / 落盘新库**；`SessionOpener.kt:144-147` 落盘新库附件早于 `:156` 替换会话，若在 load 之后才通知，`FileBinaryStore.onSessionLocked()` 会删掉刚为新库落盘的附件 → 静默数据损坏；② 断言「换库后旧库树已擦除、`cacheDir/sync` 与 `cacheDir/attachments` 已被驱逐」**且新库附件未被误删**；③ 不得回归 `lock()` 既有语义 |
 | ISSUE-P2-78 | 威胁建模 T-10 | **CM 保存路径写入畸形 URL → 条目永久无法被域匹配**：`KeePasskeyCredentialProviderService.kt:249` 把 `callingOrigin` 作为 `EXTRA_WEB_DOMAIN` 下传（浏览器委派为 `https://…`，普通应用为 `android:apk-key-hash:…`，形态见 `CallingOriginResolver.kt:57-83`），`PasswordSaveActivity.kt:48,68-73` 原样透传，`VaultEntryWriteCoordinator.kt:274` **无条件**拼 `"https://$domain"` → 落库为 `https://https://host` 或 `https://android:apk-key-hash:…`；条目此后既不匹配 web 域也不匹配 `android://` 包名（无口令泄露，属完整性 / 可用性缺陷） | ① 按 origin 形态分流：web origin 直接入库、`apk-key-hash` origin 落 `android://<调用包名>`（与自动填充保存路径语义对齐）；② 断言两类 origin 落库 URL 合法且可被 `DomainMatcher` 命中；③ 负例：不得允许 `https://` 前缀重复叠加 |

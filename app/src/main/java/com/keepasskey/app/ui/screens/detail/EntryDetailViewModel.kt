@@ -446,8 +446,12 @@ class EntryDetailViewModel @Inject constructor(
             // TASK-17：复制前解析 {REF:...} 引用（密码可能指向其他条目的字段）。
             // ISSUE-P2-15：先经 CharArray 借用通道读取；{REF:...} 引擎为 String 文本语义，
             // 此处的 String 物化属引用解析边界，副本已即时清零
+            // ISSUE-P0-08：口令消费点声明 P 面（白名单放行受保护引用展开）
             val raw = vaultRepository.getEntryPasswordChars(entryId).toDisplayString().orEmpty()
-            val password = vaultRepository.resolveFieldReferences(entryId, raw) ?: raw
+            val password = vaultRepository.resolveFieldReferences(
+                entryId, raw,
+                com.keepasskey.database.fieldref.FieldReferenceEngine.RefField.PASSWORD
+            ) ?: raw
             clipboardSecurityManager?.copySensitiveText(title, password)
             userMessageFlow.value = uiState.value.passwordCopyMessage
         }
@@ -457,7 +461,12 @@ class EntryDetailViewModel @Inject constructor(
         val entryId = entryIdFlow.value ?: return
         viewModelScope.launch {
             // TASK-17：用户名可能为 {REF:U@...} 引用，复制前解析
-            val resolved = vaultRepository.resolveFieldReferences(entryId, username) ?: username
+            // ISSUE-P0-08：非口令消费点声明 U 面——UserName 中的 {REF:P@…} 掩码输出，
+            // 被引用条目的口令明文绝不写入剪贴板
+            val resolved = vaultRepository.resolveFieldReferences(
+                entryId, username,
+                com.keepasskey.database.fieldref.FieldReferenceEngine.RefField.USER_NAME
+            ) ?: username
             clipboardSecurityManager?.copyPlainText(title, resolved)
             userMessageFlow.value = UiMessage(R.string.detail_username_copied_short)
         }

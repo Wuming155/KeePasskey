@@ -17,9 +17,14 @@ import com.keepasskey.core.model.KdbxGroup
  * 未命中的引用保持原文（保守策略：宁缺毋错，不静默吞掉用户数据）。
  *
  * 两条解析通道（ISSUE-P3-02 / TASK-49）：
- * - [resolve]：**取值消费点**（自动填充下发、详情页复制）——受保护字段可按 KDBX 语义展开；
- * - [resolveForDisplay]：**展示侧**（Notes / URL 渲染）——受保护字段（取值面或检索面为 `P`）
- *   一律输出 [PROTECTED_PLACEHOLDER] 掩码，**任何递归深度都不物化受保护值**，
+ * - [resolve]：**取值消费点**（自动填充下发、详情页复制）——**必须显式声明消费点面**
+ *   （[consumerField]）：口令消费点（`P`）可按 KDBX 语义展开受保护字段；**非口令消费点
+ *   （`T/U/A/N/I`）命中受保护字段（取值面或检索面为 `P`）时一律输出
+ *   [PROTECTED_PLACEHOLDER] 掩码**（ISSUE-P0-08 消费点面白名单）——否则 `UserName` 里的
+ *   `{REF:P@…}` 会把被引用条目的口令明文经用户名通道送出应用（RemoteViews / IME 内联建议 /
+ *   确认页 extra / 请求方输入框），一条根因四个泄漏出口；
+ * - [resolveForDisplay]：**展示侧**（Notes / URL 渲染）——受保护字段一律输出
+ *   [PROTECTED_PLACEHOLDER] 掩码，**任何递归深度都不物化受保护值**，
  *   以维持 M1 投影层「不把密码明文物化进 UI 状态流」的约束。
  *
  * 调用时机约定：投影层不做展开（投影只下发原文），展开结果由状态层按需装配。
@@ -68,9 +73,16 @@ object FieldReferenceEngine {
     fun containsReference(text: String): Boolean =
         text.contains("{REF:", ignoreCase = true)
 
-    /** 解析 [text] 中全部字段引用；[root] 为库根分组 */
-    fun resolve(text: String, root: KdbxGroup): String =
-        resolveWith(text, root, ResolveMode.VALUE, PROTECTED_PLACEHOLDER)
+    /**
+     * 解析 [text] 中全部字段引用；[root] 为库根分组。
+     *
+     * [consumerField] 为**消费点面白名单**（ISSUE-P0-08）：声明本次解析结果将进入哪个字段通道。
+     * 口令消费点（[RefField.PASSWORD]）可展开受保护字段；其余消费点（`T/U/A/N/I`）在
+     * 取值面或检索面命中 [RefField.PASSWORD] 时输出 [PROTECTED_PLACEHOLDER] 掩码
+     * （递归展开的任何深度同此约束），绝不物化被引用条目的口令明文。
+     */
+    fun resolve(text: String, root: KdbxGroup, consumerField: RefField): String =
+        resolveWith(text, root, ResolveMode.VALUE, PROTECTED_PLACEHOLDER, consumerField)
 
     /**
      * 展示侧解析（ISSUE-P3-02）：仅展开**公开字段**引用。
@@ -83,23 +95,28 @@ object FieldReferenceEngine {
         text: String,
         root: KdbxGroup,
         protectedPlaceholder: String = PROTECTED_PLACEHOLDER
-    ): String = resolveWith(text, root, ResolveMode.DISPLAY, protectedPlaceholder)
+    ): String = resolveWith(text, root, ResolveMode.DISPLAY, protectedPlaceholder, consumerField = null)
 
     private fun resolveWith(
         text: String,
         root: KdbxGroup,
         mode: ResolveMode,
-        protectedPlaceholder: String
+        protectedPlaceholder: String,
+        consumerField: RefField?
     ): String =
         if (!containsReference(text)) text
-        else resolveInternal(text, root, depth = 0, mode = mode, protectedPlaceholder = protectedPlaceholder)
+        else resolveInternal(
+            text, root, depth = 0, mode = mode,
+            protectedPlaceholder = protectedPlaceholder, consumerField = consumerField
+        )
 
     private fun resolveInternal(
         text: String,
         root: KdbxGroup,
         depth: Int,
         mode: ResolveMode,
-        protectedPlaceholder: String
+        protectedPlaceholder: String,
+        consumerField: RefField?
     ): String {
         if (depth > MAX_DEPTH) return text
         return REF_REGEX.replace(text) { match ->
@@ -107,8 +124,12 @@ object FieldReferenceEngine {
             val searchField = fieldOf(match.groupValues[2])
             val searchText = match.groupValues[3]
 
-            if (mode == ResolveMode.DISPLAY && isProtected(wantField, searchField)) {
-                // 展示侧不物化受保护值：掩码占位后不再递归（掩码本身不含引用）
+            val protectedHit = isProtected(wantField, searchField)
+            if (mode == ResolveMode.DISPLAY && protectedHit ||
+                mode == ResolveMode.VALUE && consumerField != RefField.PASSWORD && protectedHit
+            ) {
+                // 展示侧：受保护值一律不物化；取值侧非口令消费点（ISSUE-P0-08 白名单）：同不物化。
+                // 掩码占位后不再递归（掩码本身不含引用）
                 return@replace protectedPlaceholder
             }
 
@@ -118,19 +139,20 @@ object FieldReferenceEngine {
             when {
                 // 未命中：保持原文（保守不吞）
                 target == null -> match.value
-                // 命中：取值并递归展开（值本身可能仍是引用链）
+                // 命中：取值并递归展开（值本身可能仍是引用链；消费点面白名单随通道全程传递）
                 else -> resolveInternal(
                     valueOf(target, wantField).orEmpty(),
                     root,
                     depth + 1,
                     mode,
-                    protectedPlaceholder
+                    protectedPlaceholder,
+                    consumerField
                 )
             }
         }
     }
 
-    /** 展示侧受保护判定：取值面或检索面命中受保护字段即为真 */
+    /** 受保护判定：取值面或检索面命中受保护字段即为真（展示侧与取值侧白名单共用） */
     private fun isProtected(wantField: RefField, searchField: RefField): Boolean =
         wantField == RefField.PASSWORD || searchField == RefField.PASSWORD
 

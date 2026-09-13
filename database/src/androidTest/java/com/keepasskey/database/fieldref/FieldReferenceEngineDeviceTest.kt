@@ -72,8 +72,21 @@ class FieldReferenceEngineDeviceTest {
     fun `设备上字段引用按标题检索解析正确`() {
         val github = entry(title = "GitHub", username = "octocat", password = "gh_secret")
         val consumer = entry(title = "消费条目", username = "{REF:U@T:GitHub}")
-        val resolved = FieldReferenceEngine.resolve(consumer.userName, rootWith(github, consumer))
+        val resolved = FieldReferenceEngine.resolve(
+            consumer.userName, rootWith(github, consumer), FieldReferenceEngine.RefField.USER_NAME
+        )
         assertEquals("octocat", resolved)
+    }
+
+    @Test
+    fun `设备上非口令消费点遇密码引用输出掩码（ISSUE-P0-08 回归锁）`() {
+        val github = entry(title = "GitHub", username = "octocat", password = "gh_secret")
+        val consumer = entry(title = "消费条目", username = "{REF:P@T:GitHub}")
+        val resolved = FieldReferenceEngine.resolve(
+            consumer.userName, rootWith(github, consumer), FieldReferenceEngine.RefField.USER_NAME
+        )
+        assertEquals(FieldReferenceEngine.PROTECTED_PLACEHOLDER, resolved)
+        assertFalse("用户名通道不得包含被引用口令明文", resolved.contains("gh_secret"))
     }
 
     @Test

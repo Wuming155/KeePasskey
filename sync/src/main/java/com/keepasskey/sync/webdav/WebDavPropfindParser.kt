@@ -18,6 +18,13 @@ internal object WebDavPropfindParser {
 
     private const val TAG = "WebDavSyncProvider"
 
+    /**
+     * PROPFIND DOM 遍历深度上限（ISSUE-P0-09）。
+     * 合法 multistatus 报文嵌套不超过 ~8 层，64 已留足裕量；
+     * 超过该深度的节点不遍历、内容不采信（等价拒绝）。
+     */
+    private const val MAX_XML_DEPTH = 64
+
     data class ParsedPropfind(
         val etag: String,
         val contentLength: Long,
@@ -47,44 +54,60 @@ internal object WebDavPropfindParser {
             val doc = builder.parse(xml.byteInputStream())
             val root = doc.documentElement
 
-            fun findNodes(node: Node, targetLocalName: String, results: MutableList<Node>) {
-                val name = node.localName ?: node.nodeName.substringAfter(':')
-                if (name.equals(targetLocalName, ignoreCase = true)) {
-                    results.add(node)
-                }
-                val children = node.childNodes
-                for (i in 0 until children.length) {
-                    findNodes(children.item(i), targetLocalName, results)
-                }
-            }
-
-            val etagNodes = mutableListOf<Node>()
-            findNodes(root, "getetag", etagNodes)
+            val etagNodes = findNodes(root, "getetag")
             val etag = etagNodes.firstOrNull()?.textContent?.trim().orEmpty().cleanEtag()
 
-            val lengthNodes = mutableListOf<Node>()
-            findNodes(root, "getcontentlength", lengthNodes)
+            val lengthNodes = findNodes(root, "getcontentlength")
             // 节点缺失以 -1 哨兵标记（回退 HTTP 头）；节点存在（含 0，零字节文件）必须如实采信——
             // 207 响应的 HTTP Content-Length 是 XML 报文自身大小，误当文件大小会让零字节文件
             // 元数据撒谎并污染同步基线比较
             val contentLength = lengthNodes.firstOrNull()?.textContent?.trim()?.toLongOrNull() ?: -1L
 
-            val modNodes = mutableListOf<Node>()
-            findNodes(root, "getlastmodified", modNodes)
+            val modNodes = findNodes(root, "getlastmodified")
             val lastModifiedStr = modNodes.firstOrNull()?.textContent?.trim().orEmpty()
             val lastModifiedMillis = parseHttpDate(lastModifiedStr)
 
-            val collectionNodes = mutableListOf<Node>()
-            findNodes(root, "collection", collectionNodes)
+            val collectionNodes = findNodes(root, "collection")
             val isDirectory = collectionNodes.isNotEmpty()
 
             ParsedPropfind(etag, contentLength, lastModifiedMillis, isDirectory)
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             // P3-17 整改：解析失败至少落日志，不再静默吞掉（回退空元数据语义保留，
-            // 由调用方按「缺失」回退 HTTP 头哨兵处理）
+            // 由调用方按「缺失」回退 HTTP 头哨兵处理）。
+            // ISSUE-P0-09：捕获面扩到 Throwable——超深 XML 的 StackOverflowError 等属于
+            // Error 而非 Exception，仅捕 Exception 时 Error 穿透 provider 的 runCatching
+            // （会包成 Result.failure）经引擎 getOrThrow 原样重抛、杀死进程；远端（或
+            // 系统 CA 级 MITM）可单方面构造该响应，必须在解析边界就地遏制为「回退空元数据」
             AppLog.w(TAG, "PROPFIND 响应 XML 解析失败，回退空元数据", e)
             ParsedPropfind("", -1L, 0L, false)
         }
+    }
+
+    /**
+     * 遍历 DOM 子树，按文档序收集 `localName` 等于 [targetLocalName]（忽略大小写）的节点。
+     *
+     * ISSUE-P0-09：**显式栈迭代实现 + 深度上限 [MAX_XML_DEPTH]**——原递归实现对超深嵌套
+     * XML（远端可单方面构造）抛 `StackOverflowError`；迭代实现遍历深度恒有界，
+     * 超过上限的更深层节点直接跳过（该内容不被采信，等价拒绝）。
+     * 按逆序压栈保持与递归版一致的先序文档序，`firstOrNull()` 语义不变。
+     */
+    private fun findNodes(root: Node, targetLocalName: String): List<Node> {
+        val results = mutableListOf<Node>()
+        val stack = ArrayDeque<Pair<Node, Int>>()
+        stack.addLast(root to 0)
+        while (stack.isNotEmpty()) {
+            val (node, depth) = stack.removeLast()
+            val name = node.localName ?: node.nodeName.substringAfter(':')
+            if (name.equals(targetLocalName, ignoreCase = true)) {
+                results.add(node)
+            }
+            if (depth >= MAX_XML_DEPTH) continue
+            val children = node.childNodes
+            for (i in children.length - 1 downTo 0) {
+                stack.addLast(children.item(i) to depth + 1)
+            }
+        }
+        return results
     }
 
     /**

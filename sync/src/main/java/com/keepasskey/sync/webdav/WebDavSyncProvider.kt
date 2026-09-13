@@ -4,6 +4,7 @@ import androidx.annotation.VisibleForTesting
 import com.keepasskey.sync.model.RemoteFileMetadata
 import com.keepasskey.sync.model.SyncException
 import com.keepasskey.sync.model.cleanEtag
+import com.keepasskey.sync.network.SyncDownloadLimits
 import com.keepasskey.sync.network.SyncEndpointGuard
 import com.keepasskey.sync.network.SyncHttpClientFactory
 import com.keepasskey.sync.network.SyncNetworkOptions
@@ -122,7 +123,18 @@ class WebDavSyncProvider(
                         throw SyncException.ProtocolError(response.code, response.message)
                 }
 
-                val xml = response.body?.string().orEmpty()
+                // ISSUE-P0-09：PROPFIND 元数据响应有界读取——「流式 + 声明尺寸」双重封顶，
+                // 超大响应被拒绝而非整体物化（Depth:0 报文极小，16 MiB 上限极宽裕）。
+                // XML 以 UTF-8 解码（OkHttp 无 charset 时的默认行为一致；本仓 WebDAV 端点均为 UTF-8）
+                val xml = String(
+                    SyncDownloadLimits.readBounded(
+                        input = response.body.byteStream(),
+                        declaredLength = response.body.contentLength(),
+                        maxBytes = SyncDownloadLimits.MAX_PROPFIND_BYTES,
+                        label = "PROPFIND"
+                    ),
+                    Charsets.UTF_8
+                )
                 val parsed = WebDavPropfindParser.parse(xml)
 
                 val etag = parsed.etag.ifBlank {
@@ -167,7 +179,13 @@ class WebDavSyncProvider(
                     !response.isSuccessful -> throw SyncException.ProtocolError(response.code, response.message)
                 }
 
-                response.body?.bytes() ?: throw SyncException.NetworkError("响应体为空")
+                // ISSUE-P0-09：下载体「流式 + 声明尺寸」双重封顶——超大响应被拒绝而非
+                // `bytes()` 整体物化致 OOM（远端或系统 CA 级 MITM 是唯一可单方面触发的一方）
+                SyncDownloadLimits.readBounded(
+                    input = response.body.byteStream(),
+                    declaredLength = response.body.contentLength(),
+                    label = "WebDAV"
+                )
             }
         }
     }

@@ -257,7 +257,11 @@ class FakeVaultRepository(
     override suspend fun getCustomIconBytes(): Map<String, ByteArray> = customIconPool.value
 
     // TASK-17 Fake 语义：不模拟字段引用，原样返回
-    override suspend fun resolveFieldReferences(entryId: String, rawText: String): String? = rawText
+    override suspend fun resolveFieldReferences(
+        entryId: String,
+        rawText: String,
+        consumerField: com.keepasskey.database.fieldref.FieldReferenceEngine.RefField
+    ): String? = rawText
 
     override suspend fun deleteEntry(id: String): com.keepasskey.core.result.KdbxResult<Unit> {
         val current = entriesFlow.value.toMutableList()

@@ -57,6 +57,10 @@ class SyncCoordinatorTest {
         val remoteStorage = mutableMapOf<String, Pair<ByteArray, String>>()
         var isReachable = true
 
+        // ISSUE-P0-09：模拟「provider 的 runCatching 捕到 Error 后包成 Result.failure」——
+        // 与真实 WebDavSyncProvider/S3SyncProvider 在超深 XML / 超大响应下的失败形态同构
+        var downloadFailure: Throwable? = null
+
         override suspend fun testConnection(): Result<Unit> {
             return if (isReachable) Result.success(Unit) else Result.failure(IOException("Server unreachable"))
         }
@@ -77,6 +81,7 @@ class SyncCoordinatorTest {
         }
 
         override suspend fun download(remotePath: String): Result<ByteArray> {
+            downloadFailure?.let { return Result.failure(it) }
             if (!isReachable) return Result.failure(SyncException.NetworkError("Network error"))
             val item = remoteStorage[remotePath] ?: return Result.failure(
                 SyncException.FileNotFound("File not found")
@@ -170,6 +175,28 @@ class SyncCoordinatorTest {
 
         val outcome = coordinator.syncNow()
         assertTrue("断网且有本地缓存时应降级为 Offline: $outcome", outcome is SyncOutcome.Offline)
+    }
+
+    @Test
+    fun `测试provider重抛的Error被遏制为同步失败而非进程崩溃（ISSUE-P0-09）`() = runTest(testDispatcher) {
+        val memoryProvider = MemorySyncProvider()
+        val remotePath = "/remote/vault_p0_09.kdbx"
+        coordinator.testSyncProvider = memoryProvider
+        coordinator.testRemotePath = remotePath
+
+        // 1. 建立基线（首传路径不触发下载）
+        val baseline = coordinator.syncNow()
+        assertTrue("首传应建立远端基线: $baseline", baseline is SyncOutcome.UploadedLocal)
+
+        // 2. 远端 ETag 变化触发「远端有更新，拉取刷新」下载路径；provider 的 runCatching
+        //    把 Error（真实形态：超深 XML 的 StackOverflowError / 超大响应 OOM）包成 Result.failure
+        memoryProvider.remoteStorage[remotePath] = Pair(ByteArray(0), "etag_remote_changed")
+        memoryProvider.downloadFailure = StackOverflowError("simulated deep-xml stack overflow")
+
+        // 3. 整改前：Error 经引擎 getOrThrow 原样重抛并穿透 handleOpenRemote 的 catch(Exception)
+        //    → 直接杀死进程且每个同步周期自动复发；整改后：遏制为本次同步失败
+        val outcome = coordinator.syncNow()
+        assertTrue("Error 必须被遏制为 SyncOutcome.Error 而非脱网崩溃: $outcome", outcome is SyncOutcome.Error)
     }
 
     @Test

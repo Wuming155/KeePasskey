@@ -174,6 +174,14 @@ class SyncCycleRunner @Inject constructor(
                 hasLocalContentChanged = hasLocalContentChanged,
                 conflictStrategy = conflictStrategy
             )
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            // 协程取消原样重抛（结构化并发契约）
+            throw e
+        } catch (e: Throwable) {
+            // ISSUE-P0-09：openRemote 之外的周期步骤（本地序列化 / 首传基线 / 快速提交与冲突合并）
+            // 同样存在 provider-引擎重抛链未覆盖的 Error 面（如合并超深结构栈溢出），
+            // 一律遏制为「本次同步失败」而非进程崩溃，与 handleOpenRemote 的归一口径一致
+            SyncOutcome.Error(e.message ?: strings.get(R.string.sync_error_unknown))
         } finally {
             // ISSUE-P1-06：同步周期结束（无论成功/失败/异常），显式擦除 S3 凭据 CharArray。
             // WebDAV 侧密码已在 resolveProvider() 构造完成后即时擦除（passwordChars 借用语义），
@@ -380,9 +388,17 @@ class SyncCycleRunner @Inject constructor(
                     strings.get(R.string.sync_error_rollback_rejected)
                 )
             }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            // 协程取消必须原样重抛，绝不可归一为同步失败（结构化并发契约）
+            throw e
         } catch (e: com.keepasskey.sync.model.SyncException.NetworkError) {
             SyncOutcome.Offline
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
+            // ISSUE-P0-09：捕获面扩到 Throwable——provider 的 runCatching 会把 Error
+            // （超深 XML 的 StackOverflowError / 超大响应 OOM）包成 Result.failure，
+            // 经引擎 getOrThrow 原样重抛；仅捕 Exception 时 Error 在此脱网并杀死进程，
+            // 且每个同步周期自动复发。远端可单方面触发该链路，必须在同步边界
+            // 遏制为「本次同步失败」，不允许绕过应用自身的错误遏制框架。
             SyncOutcome.Error(e.message ?: strings.get(R.string.sync_error_unknown))
         }
     }

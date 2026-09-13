@@ -66,7 +66,11 @@ class AutofillPickerViewModel @Inject constructor(
         } ?: return Credentials(username, "")
 
         val password = try {
-            vaultRepository.resolveFieldReferences(entryId, String(chars)) ?: String(chars)
+            // ISSUE-P0-08：选择器按选取下发**口令**，声明口令消费点（P 面）——受保护引用按 KDBX 语义展开
+            vaultRepository.resolveFieldReferences(
+                entryId, String(chars),
+                com.keepasskey.database.fieldref.FieldReferenceEngine.RefField.PASSWORD
+            ) ?: String(chars)
         } catch (t: Throwable) {
             AppLog.w(TAG, "解析字段引用失败，按原值下发", t)
             String(chars)

@@ -185,9 +185,17 @@ interface VaultRepository {
      * 解析 [rawText] 中的 KeePass 字段引用 `{REF:...}`（TASK-17）。
      * 仅在取值消费点调用（详情复制 / 自动填充下发），投影层不展开——
      * 引用指向的密码明文不得提前物化进 UI 状态流。
+     *
+     * [consumerField] 为**消费点面白名单**（ISSUE-P0-08）：调用方必须显式声明解析结果
+     * 将进入哪个字段通道（`P`=口令通道 / 其余=非口令通道）。非口令通道命中
+     * 受保护字段（取值面或检索面为 `P`）时输出掩码占位，绝不物化口令明文。
      * 条目或库会话不可用时返回 null（调用方回退原文）。
      */
-    suspend fun resolveFieldReferences(entryId: String, rawText: String): String?
+    suspend fun resolveFieldReferences(
+        entryId: String,
+        rawText: String,
+        consumerField: com.keepasskey.database.fieldref.FieldReferenceEngine.RefField
+    ): String?
 
     /**
      * 切换条目收藏状态并持久化落库（TASK-34 整改：原实现仅翻转内存 Flow 不落库）。

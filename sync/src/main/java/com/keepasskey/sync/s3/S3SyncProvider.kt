@@ -4,6 +4,7 @@ import androidx.annotation.VisibleForTesting
 import com.keepasskey.sync.model.RemoteFileMetadata
 import com.keepasskey.sync.model.SyncException
 import com.keepasskey.sync.model.cleanEtag
+import com.keepasskey.sync.network.SyncDownloadLimits
 import com.keepasskey.sync.network.SyncEndpointGuard
 import com.keepasskey.sync.network.SyncHttpClientFactory
 import com.keepasskey.sync.network.SyncNetworkOptions
@@ -201,7 +202,13 @@ class S3SyncProvider(
                         !response.isSuccessful -> throw SyncException.ProtocolError(response.code, response.message)
                     }
 
-                    response.body?.bytes() ?: throw SyncException.NetworkError("S3 响应为空")
+                    // ISSUE-P0-09：下载体「流式 + 声明尺寸」双重封顶——超大响应被拒绝而非
+                    // `bytes()` 整体物化致 OOM（远端或系统 CA 级 MITM 是唯一可单方面触发的一方）
+                    SyncDownloadLimits.readBounded(
+                        input = response.body.byteStream(),
+                        declaredLength = response.body.contentLength(),
+                        label = "S3"
+                    )
                 }
             )
         }

@@ -186,7 +186,10 @@ class FieldReferenceDisplayModeTest {
         val github = entry(title = "GitHub", username = "octocat", password = "gh_secret")
         val root = rootWith(github)
 
-        assertEquals("gh_secret", FieldReferenceEngine.resolve("{REF:P@T:GitHub}", root))
+        assertEquals(
+            "gh_secret",
+            FieldReferenceEngine.resolve("{REF:P@T:GitHub}", root, FieldReferenceEngine.RefField.PASSWORD)
+        )
     }
 
     @Test
@@ -195,7 +198,7 @@ class FieldReferenceDisplayModeTest {
         val root = rootWith(github)
 
         assertEquals(
-            FieldReferenceEngine.resolve("{REF:U@T:GitHub}", root),
+            FieldReferenceEngine.resolve("{REF:U@T:GitHub}", root, FieldReferenceEngine.RefField.USER_NAME),
             FieldReferenceEngine.resolveForDisplay("{REF:U@T:GitHub}", root)
         )
     }

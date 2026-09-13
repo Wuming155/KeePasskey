@@ -2627,3 +2627,56 @@ SHA-256 `c23ed3cfd9d68e3af45dc37cb64178c81c4b6eb9db40fc145617fd5555b2c3d8`，AES
 2. **待复核区（未逐条复核的线索）不得以"不计入统计"为由直接丢弃**：应转为**待办条目**
    （本批次即把 `IPC-01/02/05/10`、`SUPPLY-02/04/06/07/08`、`mapping.txt` 转为 `P3-122` / `P3-123` / `P3-124`），
    或在核实后写明证否依据——**"未经复核"不是"不作处置"的理由**。
+
+---
+
+## §44 P0 双项整改批次：字段引用消费点白名单 + 同步崩溃面遏制（2026-09-13）
+
+> **本批次缘起**：第四轮独立复核定版（`SECURITY_RECHECK_2026-09.md`）转登的两项 P0——
+> `ISSUE-P0-08`（`{REF:P@…}` 口令经用户名通道 4 个泄漏出口离开应用）与 `ISSUE-P0-09`
+> （远端把"同步失败"提升为"进程崩溃"的遏制绕过）同批整改闭环；`ISSUE-P0-09` 的整改
+> **同时覆盖 `ISSUE-P2-75` 全部 AC**（后者为其降级前的原始条目，本批一并闭环归档）。
+
+### 44.1 交付清单
+
+| 编号 | 级别 | 缺陷（一句话） | 关键改动 | 回归 |
+|---|:--:|---|---|---|
+| **P0-08** | P0 | `FieldReferenceEngine` 取值模式无消费点白名单：条目 `UserName` 含 `{REF:P@…}` 时，被引用条目的**口令明文**经用户名通道离开应用（剪贴板 / 确认页 extra / 数据集 RemoteViews / IME 内联建议 / 请求方输入框） | 引擎 `resolve` 强制显式 `consumerField`（**消费点面白名单**）：口令消费点（`P`）保持 KDBX 语义展开；非口令消费点（`T/U/A/N/I`）遇 `wantField == P` 或 `searchField == P` 输出既有 `PROTECTED_PLACEHOLDER` 掩码，**递归链全程约束**。`VaultRepository.resolveFieldReferences` 签名加 `consumerField`（无默认值，编译期强制声明意图），**5 处调用点同批覆盖**：`AutofillDatasetBuilders.kt` username 通道→`USER_NAME`、password 通道→`PASSWORD`；`EntryDetailViewModel` copyPassword→`PASSWORD`、copyUsername→`USER_NAME`；`AutofillPickerViewModel`→`PASSWORD`。展示侧 `resolveForDisplay` 语义不变 | `FieldReferenceEngineTest` 新增 4 例（P 取值面掩码不外泄 / P 检索面掩码 / `U@`、`T@` 负例行为不变 / 掩码随递归链全程约束）；`FieldReferenceDisplayModeTest`、`FieldReferenceEngineDeviceTest`（含新增设备侧 P0-08 回归锁）同批更新；既有 `FieldReferenceEngineTest` 全部调用点补声明消费点面 |
+| **P0-09** | P0 | 远端（或系统 CA 级 MITM）可单方面把"同步失败"提升为"进程崩溃"：provider `runCatching` 捕到 `Error`（超深 XML 的 `StackOverflowError` / 超大响应 OOM）包成 `Result.failure`，经引擎 `getOrThrow()` 原样重抛，`SyncCycleRunner` 仅捕 `Exception` → `Error` 脱网杀死进程且每周期复发 | 三道防线同批落地（AC①"必须同时"）：① **下载体入口封顶**——新增 `SyncDownloadLimits`（声明尺寸预检 + 流式累积双重封顶，超限抛 `ProtocolError(413)`；数据库 128 MiB / PROPFIND 16 MiB），WebDAV / S3 的 `download` 与 PROPFIND `getMetadata` 全部改有界读取；② **`WebDavPropfindParser.findNodes` 递归 → 显式栈迭代 + `MAX_XML_DEPTH = 64` 深度上限**（超深节点不采信），parse 捕获面扩到 `Throwable`；③ **`SyncCycleRunner` 捕获面**：`handleOpenRemote` 与 `runSyncCycle` 外层均 `catch (Throwable)` 归一为 `SyncOutcome.Error`（`CancellationException` 原样重抛保结构化并发） | `SyncDownloadLimitsTest` 5 例（声明超限拒收不消费流 / 声明缺失流式封顶 / 声明撒谎中途拒绝 / 正常尺寸完整读取 / 常量量级）；`WebDavPropfindParserTest` 3 例（正常解析行为不变 / **5000 层超深 XML 遏制为回退元数据不栈溢出** / 上限内正常解析）；`SyncCoordinatorTest` 新增端到端用例——模拟 provider 重抛 `StackOverflowError`，断言遏制为 `SyncOutcome.Error` 而非进程崩溃 |
+| P2-75 | P2（P0-09 前身） | 远端读取无尺寸上限（P0-09 的降级前原始条目） | **随 P0-09 一并闭环**——其 AC①②③ 与 P0-09 完全同构（下载体双重封顶 / PROPFIND 迭代化+深度上限+`Throwable` 捕获 / 超大响应与超深 XML 负例），无剩余独立面 | 同 P0-09 |
+
+### 44.2 验收证据
+
+#### (1) 单测全绿（权威强制重跑，2026-09-13）
+
+```powershell
+.\gradlew.bat test --rerun-tasks --max-workers=1
+# → BUILD SUCCESSFUL in 2m 38s；114 actionable tasks: 114 executed（全部真实执行）
+```
+
+| 模块 | 测试类 | 用例 | 失败 | 错误 | 跳过 |
+|---|---:|---:|---:|---:|---:|
+| app | 111 | 833 | 0 | 0 | 0 |
+| core | 9 | 65 | 0 | 0 | 0 |
+| crypto | 15 | 116 | 0 | 0 | 0 |
+| database | 45 | 353 | 0 | 0 | 0 |
+| sync | 20 | 203 | 0 | 0 | 13 |
+| **合计** | **200** | **1570** | **0** | **0** | **13** |
+
+**基线变动**：1557 → **1570（+13 例）**；跳过数 13 与旧基线一致（`sync` 既有 live-sync 类跳过）。
+新增分布：app +1（`SyncCoordinatorTest` P0-09 端到端）、database +4（`FieldReferenceEngineTest` 白名单）、
+sync +8（`SyncDownloadLimitsTest` ×5 + `WebDavPropfindParserTest` ×3）。
+
+#### (2) AC 逐条核对
+
+- **P0-08**：AC① 白名单落在引擎取值通道且 `consumerField` 为无默认值参数（不存在无约束取值入口）✓；
+  AC② 全仓 `resolveFieldReferences` 消费点穷尽复核恰 5 处、同批全覆盖 ✓；AC③ 正例 `UserName = {REF:P@A:target}`
+  断言掩码且不含明文、负例 `{REF:U@…}` / `{REF:T@…}` 行为不变 ✓（外部工具明文 `otp` 走自定义字段通道，
+  不经本引擎，天然不受影响）。
+- **P0-09**：AC① 捕获面 + `findNodes` 迭代化/深度上限 + 下载体封顶三道同批 ✓；AC② `SyncCycleRunner`
+  两处捕获均已改（provider 之外的重抛链在引擎层）✓；AC③ 超大响应（`SyncDownloadLimitsTest` 三种形态）与
+  超深 XML（`WebDavPropfindParserTest` 负例）均被拒绝且不 OOM / 不崩溃 ✓；AC④ 正常尺寸同步
+  （`SyncCoordinatorTest` 既有 5 例 + `SyncDownloadLimitsTest` 正常读取例）不受影响 ✓。
+- **附注（设备侧）**：P0-08 新增 1 例设备侧回归锁
+  （`FieldReferenceEngineDeviceTest.设备上非口令消费点遇密码引用输出掩码`），计入 `database`
+  androidTest 源集，待下次设备批次随基线实测（本批 JVM 侧已覆盖同语义用例）。
