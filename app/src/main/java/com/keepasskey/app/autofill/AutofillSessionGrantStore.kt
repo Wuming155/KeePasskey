@@ -89,11 +89,16 @@ object AutofillSessionGrants {
  * 授权门限策略（纯函数，便于单测）：是否因存在有效授权而**跳过**重复二次确认。
  *
  * 仅当「用户开启开关」且「库已解锁」且「存在匹配的有效授权」三者同时成立才为 true。
+ *
+ * ISSUE-P1-24 AC③：**口令字段不得经无 UI 的自动途径下发**——即使授权宽限命中，
+ * 只要本次数据集将携带口令值，仍必须走显式确认（`setAuthentication`）；用户名字段
+ * 可例外（授权宽限对纯用户名表单继续生效）。
  */
 object AutofillAuthenticationPolicy {
     fun skipRepeatConfirmation(
         sessionGrantEnabled: Boolean,
         vaultLocked: Boolean,
-        grantActive: Boolean
-    ): Boolean = sessionGrantEnabled && !vaultLocked && grantActive
+        grantActive: Boolean,
+        datasetCarriesPassword: Boolean
+    ): Boolean = sessionGrantEnabled && !vaultLocked && grantActive && !datasetCarriesPassword
 }

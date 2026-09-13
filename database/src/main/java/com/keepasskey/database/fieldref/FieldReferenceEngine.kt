@@ -74,6 +74,21 @@ object FieldReferenceEngine {
         text.contains("{REF:", ignoreCase = true)
 
     /**
+     * 检测 [text] 是否含**口令面**引用（取值面或检索面为 `P`，ISSUE-P1-25 AC①）。
+     *
+     * 取值消费点白名单（ISSUE-P0-08）会在引擎内把此类引用掩码输出，但**复制通道**仍须
+     * 据此选择敏感复制路径（`EXTRA_IS_SENSITIVE` + 调度自动擦除）：即便内容已是掩码，
+     * 「该字段携有指向口令的引用」这一事实本身就应触发敏感数据处理，作为白名单被
+     * 未来改动削弱时的纵深防线。
+     */
+    fun containsPasswordFaceReference(text: String): Boolean {
+        if (!containsReference(text)) return false
+        return REF_REGEX.findAll(text).any { match ->
+            isProtected(fieldOf(match.groupValues[1]), fieldOf(match.groupValues[2]))
+        }
+    }
+
+    /**
      * 解析 [text] 中全部字段引用；[root] 为库根分组。
      *
      * [consumerField] 为**消费点面白名单**（ISSUE-P0-08）：声明本次解析结果将进入哪个字段通道。

@@ -60,8 +60,14 @@ class AutofillOriginResolver @Inject constructor(
         }
     }
 
-    /** 读取调用方 APK 签名证书 SHA-256（大写无冒号）；失败返回 null（调用方 fail-closed） */
-    private fun callingAppCertSha256Hex(packageName: String): String? = try {
+    /**
+     * 读取调用方 APK 签名证书 SHA-256（大写无冒号）；失败返回 null（调用方 fail-closed）。
+     *
+     * ISSUE-P1-24 AC①：确认页归属展示复用同一读取通道——包名 + 签名摘要是不可伪造锚点
+     * （label / icon 应用可自声明）；包可见性受限（Android 11+ 无 `<queries>`）时读取失败，
+     * 展示侧须如实标注「不可读」，不得以占位摘要冒充。
+     */
+    internal fun callingAppCertSha256Hex(packageName: String): String? = try {
         val info = context.packageManager.getPackageInfo(
             packageName,
             PackageManager.PackageInfoFlags.of(PackageManager.GET_SIGNING_CERTIFICATES.toLong())

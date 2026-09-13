@@ -78,25 +78,47 @@ class AutofillSessionGrantStoreTest {
     fun `仅当开关开启且库已解锁且有授权时才跳过重复确认`() {
         assertTrue(
             AutofillAuthenticationPolicy.skipRepeatConfirmation(
-                sessionGrantEnabled = true, vaultLocked = false, grantActive = true
+                sessionGrantEnabled = true, vaultLocked = false, grantActive = true,
+                datasetCarriesPassword = false
             )
         )
         // 开关关闭：不跳过（保持每次强制确认）
         assertFalse(
             AutofillAuthenticationPolicy.skipRepeatConfirmation(
-                sessionGrantEnabled = false, vaultLocked = false, grantActive = true
+                sessionGrantEnabled = false, vaultLocked = false, grantActive = true,
+                datasetCarriesPassword = false
             )
         )
         // 库锁定：授权一律不适用（必须先解锁）
         assertFalse(
             AutofillAuthenticationPolicy.skipRepeatConfirmation(
-                sessionGrantEnabled = true, vaultLocked = true, grantActive = true
+                sessionGrantEnabled = true, vaultLocked = true, grantActive = true,
+                datasetCarriesPassword = false
             )
         )
         // 无有效授权：不跳过
         assertFalse(
             AutofillAuthenticationPolicy.skipRepeatConfirmation(
-                sessionGrantEnabled = true, vaultLocked = false, grantActive = false
+                sessionGrantEnabled = true, vaultLocked = false, grantActive = false,
+                datasetCarriesPassword = false
+            )
+        )
+    }
+
+    @Test
+    fun `ISSUE-P1-24 AC3 数据集携带口令值时授权宽限不生效`() {
+        // 口令字段不得经无 UI 的自动途径下发：即便授权宽限全部命中，携带口令值的数据集
+        // 仍必须走显式确认；用户名字段可例外（不携带口令值时宽限照常生效）
+        assertTrue(
+            AutofillAuthenticationPolicy.skipRepeatConfirmation(
+                sessionGrantEnabled = true, vaultLocked = false, grantActive = true,
+                datasetCarriesPassword = false
+            )
+        )
+        assertFalse(
+            AutofillAuthenticationPolicy.skipRepeatConfirmation(
+                sessionGrantEnabled = true, vaultLocked = false, grantActive = true,
+                datasetCarriesPassword = true
             )
         )
     }

@@ -48,7 +48,8 @@ class EntryDetailViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val vaultRepository: VaultRepository,
     private val settingsRepository: SettingsRepository,
-    private val clipboardSecurityManager: com.keepasskey.app.security.ClipboardSecurityManager? = null,
+    // ISSUE-P1-25：注入复制通道接口（生产绑定 ClipboardSecurityManager；单测注入记录桩）
+    private val clipboardSecurityManager: com.keepasskey.app.security.ClipboardSecurityChannel? = null,
     // TASK-44：自动填充黑名单仓库（详情页「为本应用禁用自动填充」入口的写入方）
     private val autofillBlocklistStore: com.keepasskey.app.data.repository.AutofillBlocklistStore,
     // TASK-21：非 Compose 层文案资源解析通道（生产 DI 注入真实现；单测注入假实现）
@@ -467,7 +468,15 @@ class EntryDetailViewModel @Inject constructor(
                 entryId, username,
                 com.keepasskey.database.fieldref.FieldReferenceEngine.RefField.USER_NAME
             ) ?: username
-            clipboardSecurityManager?.copyPlainText(title, resolved)
+            // ISSUE-P1-25 AC①：UserName 含口令面引用（{REF:P@…} 或检索面为 P）时，
+            // 即便引擎已掩码输出，复制通道仍按敏感数据处理（EXTRA_IS_SENSITIVE + 调度自动擦除）
+            if (com.keepasskey.database.fieldref.FieldReferenceEngine
+                    .containsPasswordFaceReference(username)
+            ) {
+                clipboardSecurityManager?.copySensitiveText(title, resolved)
+            } else {
+                clipboardSecurityManager?.copyPlainText(title, resolved)
+            }
             userMessageFlow.value = UiMessage(R.string.detail_username_copied_short)
         }
     }

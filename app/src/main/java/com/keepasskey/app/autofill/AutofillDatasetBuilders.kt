@@ -135,6 +135,8 @@ internal suspend fun KeePasskeyAutofillService.appendUnlockedDatasets(
     // ISSUE-P3-42：会话授权宽限（默认关闭）。本分支库已解锁；仅当开关开启且存在与
     // 「包名 + 域」严格匹配的有效授权（30 秒 TTL，由上次确认写入）时跳过重复二次确认。
     // 开关关闭时不查询授权存储，行为与既有「每次强制确认」完全一致。
+    // ISSUE-P1-24 AC③：宽限**不得**作用于携带口令值的数据集——口令仅在显式确认后下发，
+    // 用户名字段可例外（见 [AutofillAuthenticationPolicy.skipRepeatConfirmation]）。
     val sessionGrantEnabled = settingsStore.isAutofillSessionGrantEnabled()
     val grantActive = sessionGrantEnabled && AutofillSessionGrants.isGranted(
         AutofillGrantContext(callingPkg, webDomain)
@@ -142,7 +144,12 @@ internal suspend fun KeePasskeyAutofillService.appendUnlockedDatasets(
     val skipRepeatConfirmation = AutofillAuthenticationPolicy.skipRepeatConfirmation(
         sessionGrantEnabled = sessionGrantEnabled,
         vaultLocked = vaultRepository.isLocked(),
-        grantActive = grantActive
+        grantActive = grantActive,
+        // 首个候选即代表本批数据集的口令承载面（同批候选口径一致：口令通道同为
+        // passwordId + 非空口令才携带值），逐数据集计算无增量信息
+        datasetCarriesPassword = passwordId != null && rankedEntries.any { ranked ->
+            ranked.entry.password?.readString()?.isNotEmpty() == true
+        }
     )
 
     val confirmIntent = Intent(this, AutofillConfirmActivity::class.java).apply {

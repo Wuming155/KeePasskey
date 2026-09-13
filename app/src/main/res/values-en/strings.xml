@@ -932,6 +932,16 @@
     <string name="autofill_confirm_manual_hint">Credential \"%1$s\" is about to be filled into the current app. Confirm below to continue.</string>
     <string name="autofill_confirm_ok">Confirm Fill</string>
     <string name="autofill_confirm_cancel">Cancel</string>
+    <!-- ISSUE-P1-24: unforgeable caller attribution on the confirm page (package + signing cert SHA-256 + domain) -->
+    <string name="autofill_confirm_caller_package">Target app (package): %1$s</string>
+    <string name="autofill_confirm_caller_cert">Caller signing certificate SHA-256: %1$s</string>
+    <string name="autofill_confirm_cert_unreadable">Caller signing certificate: unreadable (app not visible to the system or signature read failed)</string>
+    <string name="autofill_confirm_caller_domain">Target domain: %1$s (attribution verified)</string>
+    <string name="autofill_confirm_domain_none">Target domain: none (app-only form)</string>
+    <!-- ISSUE-P1-24 AC2: explicit authorization required for first-time targets -->
+    <string name="autofill_confirm_first_occurrence">This is the first time you fill credentials into this app. Verify the attribution above to avoid spoofed login pages.</string>
+    <string name="autofill_confirm_remember_trust">I have verified the attribution — remember this app and authorize filling</string>
+    <string name="autofill_confirm_already_trusted">This app was explicitly authorized by you before (a re-signed APK of the same package will require authorization again).</string>
     <string name="cred_passkey_create_title">Create Passkey</string>
     <string name="cred_passkey_assert_title">Verify Passkey</string>
     <string name="cred_password_save_title">Save Password</string>

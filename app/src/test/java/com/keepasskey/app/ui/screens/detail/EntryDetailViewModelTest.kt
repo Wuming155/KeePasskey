@@ -48,7 +48,8 @@ class EntryDetailViewModelTest {
     private fun TestScope.createViewModel(
         entryId: String?,
         repository: FakeVaultRepository = FakeVaultRepository(),
-        blocklistStore: AutofillBlocklistStore = AutofillBlocklistStore(null)
+        blocklistStore: AutofillBlocklistStore = AutofillBlocklistStore(null),
+        clipboardSecurityManager: com.keepasskey.app.security.ClipboardSecurityChannel? = null
     ): EntryDetailViewModel {
         val handle = if (entryId != null) SavedStateHandle(mapOf("entryId" to entryId)) else SavedStateHandle()
         val viewModel = EntryDetailViewModel(
@@ -56,7 +57,7 @@ class EntryDetailViewModelTest {
             savedStateHandle = handle,
             vaultRepository = repository,
             settingsRepository = FakeSettingsRepository(),
-            clipboardSecurityManager = null,
+            clipboardSecurityManager = clipboardSecurityManager,
             autofillBlocklistStore = blocklistStore,
             // 与其余详情页用例一致：注入测试调度器，避免 flowOn(Dispatchers.Default) 的真实线程
             // 在校验结束后才回跳到已 resetMain 的 Main 上，产生跨用例的 UncaughtExceptionsBeforeTest
@@ -270,5 +271,74 @@ class EntryDetailViewModelTest {
             com.keepasskey.app.R.string.detail_autofill_unblocked,
             viewModel.uiState.value.userMessage?.resId
         )
+    }
+
+    // ===== ISSUE-P1-25：用户名复制的通道分流（口令面引用 → 敏感通道） =====
+
+    /** 记录桩：断言复制走了哪条通道（纯 JVM，不触碰 Android 剪贴板） */
+    private class RecordingClipboardChannel : com.keepasskey.app.security.ClipboardSecurityChannel {
+        var sensitiveCopies = 0
+        var plainCopies = 0
+        var lastPlain: CharSequence? = null
+
+        override fun copySensitiveText(
+            label: CharSequence,
+            text: CharSequence,
+            customTimeoutSeconds: Int?
+        ) {
+            sensitiveCopies++
+        }
+
+        override fun copySensitiveChars(
+            label: CharSequence,
+            chars: CharArray,
+            customTimeoutSeconds: Int?
+        ) {
+            sensitiveCopies++
+        }
+
+        override fun copyPlainText(label: CharSequence, text: CharSequence) {
+            plainCopies++
+            lastPlain = text
+        }
+    }
+
+    @Test
+    fun `UserName 含口令面引用的复制走敏感通道并调度擦除`() = runTest {
+        // ISSUE-P1-25 AC③：{REF:P@…} 即便被 P0-08 白名单掩码，复制也必须走敏感通道
+        // （EXTRA_IS_SENSITIVE + 自动擦除调度由真实 ClipboardSecurityManager 在敏感通道内完成）
+        val channel = RecordingClipboardChannel()
+        val viewModel = createViewModel("1", clipboardSecurityManager = channel)
+
+        viewModel.copyUsername("标题", "{REF:P@T:Secret}")
+        testScheduler.runCurrent()
+
+        assertEquals(1, channel.sensitiveCopies)
+        assertEquals(0, channel.plainCopies)
+    }
+
+    @Test
+    fun `UserName 检索面为P的引用同样走敏感通道`() = runTest {
+        val channel = RecordingClipboardChannel()
+        val viewModel = createViewModel("1", clipboardSecurityManager = channel)
+
+        viewModel.copyUsername("标题", "{REF:U@P:secret}")
+        testScheduler.runCurrent()
+
+        assertEquals(1, channel.sensitiveCopies)
+        assertEquals(0, channel.plainCopies)
+    }
+
+    @Test
+    fun `UserName 无引用的复制行为不变走明文通道`() = runTest {
+        val channel = RecordingClipboardChannel()
+        val viewModel = createViewModel("1", clipboardSecurityManager = channel)
+
+        viewModel.copyUsername("标题", "octocat")
+        testScheduler.runCurrent()
+
+        assertEquals(0, channel.sensitiveCopies)
+        assertEquals(1, channel.plainCopies)
+        assertEquals("octocat", channel.lastPlain)
     }
 }

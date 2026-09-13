@@ -959,6 +959,16 @@
     <string name="autofill_confirm_manual_hint">即将向当前应用填充凭据「%1$s」。请在下方确认后继续。</string>
     <string name="autofill_confirm_ok">确认填充</string>
     <string name="autofill_confirm_cancel">取消</string>
+    <!-- ISSUE-P1-24：确认页强制展示不可伪造的调用方归属（包名 + 签名证书 SHA-256 + 域） -->
+    <string name="autofill_confirm_caller_package">目标应用（包名）：%1$s</string>
+    <string name="autofill_confirm_caller_cert">调用方签名证书 SHA-256：%1$s</string>
+    <string name="autofill_confirm_cert_unreadable">调用方签名证书：不可读（应用对系统不可见或签名读取失败）</string>
+    <string name="autofill_confirm_caller_domain">目标域名：%1$s（已经归属校验）</string>
+    <string name="autofill_confirm_domain_none">目标域名：无（纯应用表单）</string>
+    <!-- ISSUE-P1-24 AC②：首次出现的目标须显式授权 -->
+    <string name="autofill_confirm_first_occurrence">这是你首次向该应用填充凭据：请核对以上归属信息，谨防仿冒登录页。</string>
+    <string name="autofill_confirm_remember_trust">我已核对归属，记住此应用并授权填充</string>
+    <string name="autofill_confirm_already_trusted">此应用此前已获你显式授权（同包名换签名将重新要求授权）。</string>
     <!-- ISSUE-P0-02：Credential Manager 密码下发前的强制用户验证（PasswordFillActivity） -->
     <string name="cred_fill_confirm_title">确认填充凭据</string>
     <string name="cred_fill_confirm_biometric_subtitle">验证身份后向当前应用填充凭据「%1$s」</string>

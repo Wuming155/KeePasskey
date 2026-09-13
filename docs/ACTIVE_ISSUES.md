@@ -31,14 +31,18 @@
 
 ---
 
-## P1 高危与核心功能问题（4 项）
+## P1 高危与核心功能问题（2 项）
 
 > **历史**：**ISSUE-P1-16 ~ P1-21**（附件 Ref/Compressed 解析、块 HMAC 异常分型、外层头部总量闸门、
 > 附件缓存冷启动清理、防回滚状态目录、敏感对话框 FLAG_SECURE）已于 2026-09-12 整改归档，见 §38。
 >
-> **2026-09-13 新增（红队攻击路径批次）**：下列 3 项由红队批次对拍后**留存为开放项**转登。
+> **2026-09-13 新增（红队攻击路径批次）**：下列条目由红队批次对拍后**留存为开放项**转登。
 > 该批次文档已于同日处置归档并**删除**，来源证据、已撤回项与纪律见
 > [RESOLVED_LOG.md](RESOLVED_LOG.md) §39。
+>
+> **2026-09-13 P1 双项整改批次闭环**：`ISSUE-P1-24`（确认页归属展示 + 首次绑定授权 + 口令
+> 无 UI 下发禁止）与 `ISSUE-P1-25`（`copyUsername` 口令面引用敏感通道 + 擦除调度保全）同批
+> 整改归档，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §45。
 
 ### ISSUE-P1-22（新登记）：软件级 Keystore 下快速解锁封印未 fail-closed
 
@@ -87,54 +91,6 @@
   ③ 若上架，接入平台完整性证明并登记为一条可复跑的校验路径。
 - **第四轮定版批注（2026-09-13）**：终评 **INFO–LOW**，整改降为 **P2（产品告知项）**——复核维持
   "应用内签名自校验对该威胁无效"（自证不可由应用内修复）；以 ①③ 为主，② 的处置语义留痕即可。
-
----
-
-### ISSUE-P1-24（新登记）：自动填充确认页可伪造归属信息，且无"首次绑定"显式授权
-
-- **优先级**：P1（社会工程 + 平台机制组合，无需任何权限）
-- **核实时间点与核实方式（2026-09-13）**：读取 `AutofillConfirmActivity`（L80-111）与
-  `AutofillDatasetBuilders`（L197-208）——确认页文案 `EXTRA_CREDENTIAL_TITLE` **由填充方传入**
-  （即受攻击者控制），页面**未展示**调用方应用名、签名指纹摘要或域名，且**不存在**
-  "该目标首次出现 → 要求显式授权"的机制。
-- **问题描述**：恶意应用渲染高仿登录页并正确标注 `autofillHints`，用户从系统自动填充 UI 中
-  主动选中候选后，明文经框架写入**攻击者进程的控件**；确认页显示的条目名可被攻击者设置成
-  与受害者预期一致，降低戒心。
-- **涉及文件**：`app/src/main/java/com/keepasskey/app/autofill/AutofillConfirmActivity.kt`、
-  `AutofillDatasetBuilders.kt`、`AutofillPickerActivity.kt`、`AutofillSessionGrants.kt`。
-- **验收标准**：① 确认页**强制展示不可伪造的归属信息**（调用方应用名 + 签名证书 SHA-256 摘要 + 域）；
-  ② 对"首次出现的目标"要求"记住此应用"式显式授权；③ 禁止在无 UI 的自动途径下发口令字段
-  （口令仅在显式确认后下发，用户名可例外）；④ 上述三条各有回归断言。
-- **说明**：本项**不能被完全消除**（平台把明文写入调用方控件是自动填充的设计语义），
-  目标是**把诱导成本提高到必须让用户看到真实归属**；验收以"归属信息不可伪造且必展示"为准，不以"阻断"为准。
-- **第四轮定版批注（2026-09-13）**：终评 **MEDIUM** / 修 **P1**。复核更正原记录三处论证：
-  `EXTRA_CREDENTIAL_TITLE` 由本应用 `AutofillService` 写入（`AutofillDatasetBuilders.kt:200-202`），**非填充方**；
-  `AutofillConfirmActivity.kt:88-107` 的 Keystore `CryptoObject` 绑定**确实存在**且"认证成功未携带绑定 Cipher"
-  不放行（`:104-105`）；不可伪造锚点只有**包名 + 签名证书 SHA-256**（label / icon 应用可自声明）——
-  AC① 平台可实现（官方 `AutofillService.java:335-373` 明确要求 / 允许展示"请求方⇄域"归属并检查签名证书）。
-
----
-
-### ISSUE-P1-25（新登记）：`copyUsername` 把 `{REF:P@…}` 解析出的**口令**写入剪贴板，未标敏感且取消自动擦除
-
-- **优先级**：P1（`{REF:P@…}` 是本仓主动支持的 KeePass 标准字段引用语法；触发后明文口令可被任意前台应用读取）
-- **核实时间点与核实方式（2026-09-13，对 HEAD `a669a48`）**：读取 `EntryDetailViewModel.kt:456-463`
-  （`copyUsername` 先 `vaultRepository.resolveFieldReferences(entryId, username)`，再 `clipboardSecurityManager.copyPlainText(...)`）；
-  读取 `FieldReferenceEngine.valueOf`（`RefField.PASSWORD -> entry.password?.readString()`）；
-  读取 `ClipboardSecurityManager.copyPlainText`（`:97-101`）—— **既不设** `EXTRA_IS_SENSITIVE`，**又调用** `cancelScheduledClear()`（`:98`）。
-- **问题描述**：当条目的 `UserName` 字段含 `{REF:P@<检索面>:<检索文本>}` 时，复制用户名会把**被引用条目的口令明文**
-  写入系统剪贴板：无敏感标记（无系统气泡保护、进入剪贴板历史）、且取消既有的自动擦除计划 → 任意前台应用可读取，且无时间窗约束。
-- **涉及文件**：`app/src/main/java/com/keepasskey/app/ui/screens/detail/EntryDetailViewModel.kt`、
-  `app/src/main/java/com/keepasskey/app/security/ClipboardSecurityManager.kt`、
-  `database/src/main/java/com/keepasskey/database/fieldref/FieldReferenceEngine.kt`。
-- **验收标准**：① `copyUsername` 在解析结果源自 `P`（口令）面时**必须**走 `copySensitiveChars` / `copySensitiveText`
-  （设 `EXTRA_IS_SENSITIVE` + 调度自动擦除）；② 任何路径**不得**无条件 `cancelScheduledClear()`；
-  ③ 回归断言覆盖「UserName 含 `{REF:P@…}` → 剪贴板带敏感标记且已调度擦除」与「UserName 无引用 → 行为不变」。
-- **第四轮定版批注（2026-09-13）**：终评 **MEDIUM** / 修 **P1**。根因治理升格 **ISSUE-P0-08**
-  （**已闭环归档**，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §44——消费点白名单上线后本出口自动消除），
-  但 AC①②（敏感标记 + 擦除调度）独立成立仍须实施。复核更正两处论证：
-  「任意前台应用可读」应为「**仅有输入焦点**的应用 / 默认 IME / 特权应用」；`cancelScheduledClear()`
-  取消的是**上一次**的计划，本次复制**从未被调度擦除**（非"无时间窗约束"）。
 
 ---
 
@@ -324,7 +280,7 @@
 | ISSUE-P2-67 | 审计 L9 | 同步下载路径**绕过附件落盘**：`SyncDatabaseCodec.parseKdbxBytes` 调 `KdbxFile.load(...)` **未传** `binaryStore`（`SyncDatabaseCodec.kt:55`；默认 `null`）→ 远程库全部附件无论多大都内联进堆，随后仅置空引用，从不零化（**第四轮批注**：锁定清理已由 `SyncCoordinator.onSessionLocked` + `SyncCacheEvictor` 覆盖，残余面 = binaryStore 未传 + 同步解析产物不调 `clearSensitiveData()`——后者见 `ISSUE-P3-119` 批注） | ① 传入与主会话一致的 `BinaryStore`；② 断言「>1 MiB 远程附件解析后落盘而非内联」；③ 与 `ISSUE-P3-119`（NEW-B01-4）同批（清理语义须一致） |
 | ISSUE-P2-68 | 审计 M6 | `data class` 默认 `toString()` 会打印明文：`EntryDetailUiState`（`:14,34,36,40`，含 `revealedPassword` / `revealedRevisionPasswords` / `revealedProtectedFields`）、`UiVaultEntry`（`UiModels.kt:102,105,110,135`，含 `username` / `totpCode` / `cardCvv`）、`AutofillPickerViewModel.Credentials`（`:79`，含明文口令）、`ParsedAutofillNode`（`AutofillStructureScan.kt:24`）。**当前零字符串化调用点**（核实于 HEAD）→ 属「一行 `log("$state")` 即漏」的潜在缺陷 | ① 逐个覆写 `toString()`（对齐 `ProtectedString` / `KdbxEntry` / `KdbxAttachment` 既有做法）；② 或加静态检查禁止对上述类型整对象插值；③ 不改语义 |
 | ISSUE-P2-69 | 审计 M7 | `LogHygieneTest.kt:88` 的日志抽样正则 `\b(Log\|AppLog)\.[edviw]\(` **匹配不到** `debugLog.warn(` / `debugLogBuffer.error(` 通道 → 该通道不在「敏感标识 / 裸异常 message」脱敏测试覆盖内 | ① 正则扩到 `debugLog` / `debugLogBuffer`（或统一按「日志调用」特征抽取）；② 顺带复核该通道现存 `${e.message}` / endpoint URL / 子库别名插值点；③ 断言扩展后既有违规为 0 |
-| ISSUE-P2-70 | 审计 E1 | 手动选择器把**任意**条目凭据交给请求方，且**不显示请求方身份**（`AutofillPickerActivity` / `AutofillPickerViewModel.kt:54-77`）；自动匹配路径有严格边界，手动兜底路径无提示。（与 `ISSUE-P1-24` **部分重合**：P1-24 验收针对**确认页**，本项针对**选择器页**） | ① 选择器页强制展示请求方应用名 + 签名指纹摘要 + 域；② 断言覆盖展示内容；③ 与 `ISSUE-P3-93`（多签名者遍历）同批 |
+| ISSUE-P2-70 | 审计 E1 | 手动选择器把**任意**条目凭据交给请求方，且**不显示请求方身份**（`AutofillPickerActivity` / `AutofillPickerViewModel.kt:54-77`）；自动匹配路径有严格边界，手动兜底路径无提示。（与 `ISSUE-P1-24`（**已闭环归档**，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §45）**部分重合**：P1-24 验收针对**确认页**，本项针对**选择器页**） | ① 选择器页强制展示请求方应用名 + 签名指纹摘要 + 域；② 断言覆盖展示内容；③ 与 `ISSUE-P3-93`（多签名者遍历）同批 |
 | ISSUE-P2-71 | 审计 E2 | IME 内联建议把候选显示串（用户名 / 条目标题）送入输入法，且 `inlineSuggestionsEnabled` **默认 true**（`ExtendedSettings.kt:36`；`AutofillDatasetBuilders.kt:171-175 buildInlinePresentation(...)`） | ① 默认改 false，或把内容改为不含用户名 / 标题的固定文案；② 设置页如实说明该通道把候选名送入 IME；③ 断言覆盖默认值与关闭后行为 |
 | ISSUE-P2-72 | 审计 E4（**已收窄**） | `clientDataJSON.androidPackageName` 归属可能错误：`PasskeyAssertionActivity.kt:245` 用 `Activity.getCallingPackage()`（PendingIntent 拉起时为 null → 回退本包名）。**Create 侧不成立**：`PasskeyCreateActivity.kt:296` 已优先取 `providerReq.callingAppInfo.packageName`（`:108-109`）—— 审计原断言「未被用于该字段」对 Create 侧为**误报**（**第四轮批注**：回退仅写入 `clientDataJSON` **展示字段**，授权判定 `:114-119` 无回退、空值即拒绝——定性为"归属字段可回退"而非授权缺陷；另 `PasskeyCreateActivity.kt:108-109` 的 `?: callingPackage` 回退在系统 PendingIntent 场景**可产生 `android://android` 绑定**，属可行路径，一并治理） | ① Assertion 侧改取系统认证的 `CallingAppInfo`；② 断言「RP 收到真实调用方包名」；③ 保留 Create 侧现有正确实现，并收窄 `?: callingPackage` 回退（禁 `android://android` 形态落库） |
 | ISSUE-P2-73 | 审计 E5 | 自动填充认证流两处协议漂移：① `AutofillUnlockActivity.kt:65` / `AutofillConfirmActivity.kt:160` 用裸 `setResult(RESULT_OK)`，**不带** `AutofillManager.EXTRA_AUTHENTICATION_RESULT`（官方要求经该 extra 回传数据集）；② `AutofillDatasetBuilders.kt:69,206` 创建认证 `PendingIntent` 用 `FLAG_IMMUTABLE`，而平台需向其中填认证参数（picker 路径 `:240` 用 `FLAG_MUTABLE` 是对的） | ① 按官方以 `EXTRA_AUTHENTICATION_RESULT` 回传；② 认证 `PendingIntent` 改 `FLAG_MUTABLE`（并保持 base intent 显式 + `Intent.fillIn` 覆盖语义）；③ 设备侧实测认证填充链路 |

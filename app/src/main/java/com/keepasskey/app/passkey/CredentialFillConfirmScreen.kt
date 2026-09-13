@@ -26,6 +26,10 @@ import androidx.compose.ui.unit.dp
  * 由 [PasswordFillActivity] 与 [com.keepasskey.app.autofill.AutofillConfirmActivity]
  * 在自身已施加 FLAG_SECURE + 反 overlay 加固的受保护窗口内渲染，
  * 保证「无生物识别设备」这一弱能力场景同样存在显式的用户意图确认，而非静默放行。
+ *
+ * ISSUE-P1-24 AC①：[attributionContent] 槽位用于在确认按钮前渲染调用方归属信息
+ * （包名 + 签名证书 SHA-256 + 域），由调用方按需传入；[confirmEnabled] 供
+ * 「首次出现目标须显式授权」等门控使用（默认恒可点，不影响既有调用方）。
  */
 @Composable
 fun CredentialFillConfirmScreen(
@@ -34,7 +38,9 @@ fun CredentialFillConfirmScreen(
     confirmText: String,
     cancelText: String,
     onConfirm: () -> Unit,
-    onCancel: () -> Unit
+    onCancel: () -> Unit,
+    confirmEnabled: Boolean = true,
+    attributionContent: (@Composable () -> Unit)? = null
 ) {
     Surface(modifier = Modifier.fillMaxSize()) {
         Column(
@@ -55,6 +61,10 @@ fun CredentialFillConfirmScreen(
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            attributionContent?.let { content ->
+                Spacer(modifier = Modifier.height(20.dp))
+                content()
+            }
             Spacer(modifier = Modifier.height(28.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -63,7 +73,7 @@ fun CredentialFillConfirmScreen(
                 OutlinedButton(onClick = onCancel) {
                     Text(cancelText)
                 }
-                Button(onClick = onConfirm) {
+                Button(onClick = onConfirm, enabled = confirmEnabled) {
                     Text(confirmText)
                 }
             }

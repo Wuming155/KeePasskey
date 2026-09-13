@@ -2,6 +2,8 @@ package com.keepasskey.app.di
 
 import com.keepasskey.app.security.AndroidKeystoreUnlockThrottleIntegrity
 import com.keepasskey.app.security.BiometricCredentialStorage
+import com.keepasskey.app.security.ClipboardSecurityChannel
+import com.keepasskey.app.security.ClipboardSecurityManager
 import com.keepasskey.app.security.SharedPrefsUnlockThrottleStore
 import com.keepasskey.app.security.ThrottleConfigSource
 import com.keepasskey.app.security.UnlockPasskeyStore
@@ -54,4 +56,11 @@ abstract class SecurityModule {
     abstract fun bindUnlockPasskeyStore(
         impl: BiometricCredentialStorage
     ): UnlockPasskeyStore
+
+    /** ISSUE-P1-25：剪贴板复制通道绑定（ViewModel 层依赖接口，便于纯 JVM 单测断言通道决策） */
+    @Binds
+    @Singleton
+    abstract fun bindClipboardSecurityChannel(
+        impl: ClipboardSecurityManager
+    ): ClipboardSecurityChannel
 }

@@ -200,4 +200,40 @@ class FieldReferenceEngineTest {
         assertEquals(FieldReferenceEngine.PROTECTED_PLACEHOLDER, resolved)
         assertFalse(resolved.contains("deep_secret"))
     }
+
+    // ===== ISSUE-P1-25 AC①：口令面引用检测（复制通道敏感分流依据） =====
+
+    @Test
+    fun `口令面检测取值面为P时命中`() {
+        assertTrue(FieldReferenceEngine.containsPasswordFaceReference("{REF:P@T:GitHub}"))
+    }
+
+    @Test
+    fun `口令面检测检索面为P时命中`() {
+        assertTrue(FieldReferenceEngine.containsPasswordFaceReference("{REF:U@P:secret}"))
+    }
+
+    @Test
+    fun `口令面检测大小写不敏感`() {
+        assertTrue(FieldReferenceEngine.containsPasswordFaceReference("{ref:p@t:GitHub}"))
+    }
+
+    @Test
+    fun `口令面检测公开字段引用不命中`() {
+        assertFalse(FieldReferenceEngine.containsPasswordFaceReference("{REF:U@T:GitHub}"))
+        assertFalse(FieldReferenceEngine.containsPasswordFaceReference("{REF:T@A:example.com}"))
+        assertFalse(FieldReferenceEngine.containsPasswordFaceReference("{REF:I@T:GitHub}"))
+    }
+
+    @Test
+    fun `口令面检测混合文本中逐引用判定`() {
+        val mixed = "前缀 {REF:U@T:GitHub} 中缀 {REF:P@T:Secret} 后缀"
+        assertTrue(FieldReferenceEngine.containsPasswordFaceReference(mixed))
+    }
+
+    @Test
+    fun `口令面检测无引用文本零开销直返`() {
+        assertFalse(FieldReferenceEngine.containsPasswordFaceReference("plain_username"))
+        assertFalse(FieldReferenceEngine.containsPasswordFaceReference(""))
+    }
 }
