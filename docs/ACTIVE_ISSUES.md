@@ -31,7 +31,7 @@
 
 ---
 
-## P1 高危与核心功能问题（2 项）
+## P1 高危与核心功能问题（0 项）
 
 > **历史**：**ISSUE-P1-16 ~ P1-21**（附件 Ref/Compressed 解析、块 HMAC 异常分型、外层头部总量闸门、
 > 附件缓存冷启动清理、防回滚状态目录、敏感对话框 FLAG_SECURE）已于 2026-09-12 整改归档，见 §38。
@@ -43,54 +43,11 @@
 > **2026-09-13 P1 双项整改批次闭环**：`ISSUE-P1-24`（确认页归属展示 + 首次绑定授权 + 口令
 > 无 UI 下发禁止）与 `ISSUE-P1-25`（`copyUsername` 口令面引用敏感通道 + 擦除调度保全）同批
 > 整改归档，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §45。
-
-### ISSUE-P1-22（新登记）：软件级 Keystore 下快速解锁封印未 fail-closed
-
-- **优先级**：P1（安全默认放松：软件级 Keystore 下封印载荷可被离线解出主密码）
-- **核实时间点与核实方式（2026-09-13）**：读取 `KeystoreManager.kt`
-  （L29-31 注释明载"软件级 Keystore 时记录警告（诊断 API：`getKeySecurityLevel`），不硬失败以兼容模拟器/CI"；
-  `getKeySecurityLevel` L93-101 仅做探测），并**全仓检索其消费点** —— `app/src/main` 中除
-  `KeystoreManager.kt` 自身外**零命中**，即该等级**从未被任何放行 / 拒绝逻辑读取**。
-- **问题描述**：快速解锁封印载荷（主密码 + 密钥文件复合帧）的 AES 密钥落位等级**不影响任何行为**——
-  在无 TEE / 无 StrongBox 的环境上，`getKeySecurityLevel() == SOFTWARE` 只记一条日志，封印照常建立。
-  此类环境下的密钥不具备硬件不可导出性，攻击者可离线解出封印载荷中的**主密码明文**。
-  该"不硬失败"是**有意的兼容取舍**，但取舍的安全后果当前未在策略层或 UI 层体现。
-- **涉及文件**：`app/src/main/java/com/keepasskey/app/security/KeystoreManager.kt`（`getKeySecurityLevel` /
-  `getOrCreateDeviceCredentialKey`）、`KeystoreKeyMaterial`、封印建立侧调用点
-  （`UnlockViewModel` / `BiometricUnlockCoordinator` 体系）。
-- **验收标准**：① 生产策略为「软件级 → **禁用快速解锁封印**（fail-closed），回落为主密码解锁」；
-  ② 若允许用户显式降级使用，必须在建立封印前给出**明确风险提示并记录用户确认**，
-  且 UI 常驻声明"本机快速解锁降级为软件密钥，不提供硬件级保护"；
-  ③ 有回归断言覆盖「`SOFTWARE` 等级 → 封印被拒」分支（JVM 单测注入假探测结果 + 一次设备侧实测）。
-- **禁止**：仅把日志级别从 warn 提到 error 而行为不变；以"兼容模拟器/CI"为由绕过 fail-closed 且不留显式开关与提示。
-- **第四轮定版批注（2026-09-13）**：复核证实封印建立路径**不存在任何拒绝分支**——`SOFTWARE` 写日志后放行
-  （`KeystoreKeyMaterial.kt:119-127`）、`UNKNOWN` **连日志都没有**并放行；且 `getKeySecurityLevel` 在封印路径
-  无人调用。**AC① 修正（陷阱 #8）**：「无条件禁用封印」会打断全部模拟器 / CI 生物识别路径——改为
-  「`SOFTWARE` 与 `UNKNOWN` 一律**显式降级确认 + 常驻声明**」。终评 **LOW（DESIGN WEAKNESS）** / 修 P2，
-  条目留本节至闭环。
-
----
-
-### ISSUE-P1-23（新登记）：篡改 / 重打包 APK 无检测；`installer==null` 判为无风险
-
-- **优先级**：P1（**无需 root** 即可完成的高危路径）
-- **核实时间点与核实方式（2026-09-13）**：全仓 `app/src/main` 检索 `GET_SIGNING_CERTIFICATES` /
-  `getApkContentsSigners` —— 仅 2 处命中且**均为校验「调用方」**（`AutofillOriginResolver`、
-  `CallingOriginResolver`），**无任何校验自身 APK 签名**的代码；读取
-  `RuntimeIntegrityDetector.detectUntrustedInstallSource`（L141-149）确认 `installer == null` 时
-  **返回 false（不升级风险）**。
-- **问题描述**：用户经非商店渠道安装自签重打包版（`apktool d` + 注入 + 自签）时，
-  应用自身的完整性体系不产生任何告警（`installer==null` + 无 root / Magisk 痕迹 → `TRUSTED`），
-  攻击者可长期获得主密码与全库。
-- **整改边界（重要）**：**应用内签名自校验对该威胁无效**——能重打包的对手可一并 patch 掉自检。
-  唯一有效缓解在**应用外信任根**：① 公布官方签名 SHA-256 指纹供用户 / 第三方核对；
-  ② 上架后接入 Play Integrity 或自建证明服务；③ 应用内 `SecurityBadge` 明确标注
-  "本机自检不能证明 APK 未被篡改"。
-- **验收标准**：① 官方签名指纹以可引用形式对外公布（README / 设置页"关于"）；
-  ② `installer==null` 的处置语义经**显式决策并留痕**（**不得**以"加入应用内自检"充当整改）；
-  ③ 若上架，接入平台完整性证明并登记为一条可复跑的校验路径。
-- **第四轮定版批注（2026-09-13）**：终评 **INFO–LOW**，整改降为 **P2（产品告知项）**——复核维持
-  "应用内签名自校验对该威胁无效"（自证不可由应用内修复）；以 ①③ 为主，② 的处置语义留痕即可。
+>
+> **2026-09-13 P1 双项整改批次闭环（第二批）**：`ISSUE-P1-22`（软件级 Keystore 快速解锁
+> 显式降级确认 + 常驻声明；附带发现并整改 `SecretKeyFactory` 探针误用致快速解锁必然失败的
+> 隐藏缺陷）与 `ISSUE-P1-23`（官方签名指纹对外公布 + `installer==null` 决策留痕）同批
+> 整改归档，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §46。**P1 节暂无开放项。**
 
 ---
 

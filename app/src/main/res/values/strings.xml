@@ -337,6 +337,12 @@
     <string name="unlock_biometric_enroll_subtitle">请验证指纹或面容，以安全保存免密解锁凭据</string>
     <string name="sec_biometric_auth_failed">生物识别验证未通过或已取消</string>
     <string name="sec_biometric_key_invalidated">系统生物特征发生变更，安全密钥已失效，请使用主密码重新登录</string>
+    <!-- ISSUE-P1-22：软件级 Keystore 快速解锁降级（显式确认 + 常驻声明） -->
+    <string name="quick_unlock_software_key_notice">本机快速解锁降级为软件密钥，不提供硬件级保护</string>
+    <string name="unlock_downgrade_dialog_title">快速解锁安全降级</string>
+    <string name="unlock_downgrade_dialog_body">本机 Keystore 为软件级（无 TEE / StrongBox 硬件隔离），快速解锁封印的主密码与密钥文件将以软件密钥加密，攻击者可离线解出。是否仍要启用？</string>
+    <string name="unlock_downgrade_confirm">仍要启用（软件密钥）</string>
+    <string name="unlock_downgrade_decline">不启用</string>
 <string name="edit_scan_totp_qr">呼起相机扫描 TOTP 二维码</string>
     <string name="edit_attachment_empty">附件内容为空，未添加</string>
     <string name="edit_save_failed">保存失败：%1$s</string>

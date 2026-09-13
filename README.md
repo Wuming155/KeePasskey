@@ -57,6 +57,24 @@ Argon2 原生内核位于 `crypto/src/main/rust/`，由 **Rust + cargo-ndk 从�
 
 自定义键盘（Magikeyboard 式）未实现（已提供 IME 内联建议 + 自动填充替代）；`KDBX v3` 及以下明确拒绝；应用尚未发布至 F-Droid / GitHub Release。
 
+## 官方签名指纹（ISSUE-P1-23）
+
+本应用**尚未上架任何应用商店**。无论从本仓库 Release 下载还是自行 `assembleRelease` 构建，官方 release 签名证书的 SHA-256 指纹为：
+
+```
+F3:A6:F0:92:4D:12:1E:27:3B:E0:22:58:9F:A6:87:24:70:3C:B7:D9:06:CA:A3:3F:E4:CD:ED:19:2C:CA:84:2E
+```
+
+安装前核对 APK 签名（可复跑的校验路径）：
+
+```bash
+apksigner verify --print-certs app-release.apk
+# 或
+keytool -printcert -jarfile app-release.apk
+```
+
+> **安全须知**：应用内运行完整性自检（root / 调试器 / 钩子框架探测）**不能**证明 APK 未被篡改——能重打包 APK 的攻击者可一并移除应用内自检逻辑，该威胁的有效缓解只在应用外信任根（签名指纹核对；上架后接入 Play Integrity 或同等平台完整性证明）。安装来源无法判定（`installer == null`，如 adb 直装 / 侧载）既不构成风险升级判据、也不构成安全证明，请以上述指纹为准。
+
 ## 许可证
 
 以 **GPL-3.0** 开源发布，完整文本见 [`LICENSE`](LICENSE)。

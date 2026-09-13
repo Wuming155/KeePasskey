@@ -53,5 +53,11 @@ data class UnlockUiState(
     val throttleLockoutRemainingMs: Long = 0L,
     // 递增令牌：失败/锁定后通知 SecurePasswordField 同步擦除显示态，
     // 与 ViewModel 内 passwordChars 无条件清零保持一致，杜绝「字段有点、VM 已空」的重试错配
-    val clearPasswordFieldToken: Long = 0L
+    val clearPasswordFieldToken: Long = 0L,
+
+    // ISSUE-P1-22：软件级 Keystore 快速解锁降级确认弹窗挂起中（true 时解锁页渲染确认对话框）
+    val quickUnlockDowngradeConsentPending: Boolean = false,
+    // ISSUE-P1-22：本机快速解锁封印为软件密钥（无硬件隔离）——
+    // 解锁页常驻声明「不提供硬件级保护」的渲染依据
+    val quickUnlockDowngraded: Boolean = false
 )

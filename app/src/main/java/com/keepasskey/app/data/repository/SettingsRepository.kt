@@ -52,7 +52,13 @@ data class UserSettings(
     // 需要暴力破解防护的用户可在设置页显式开启）
     val unlockThrottleEnabled: Boolean = false,
     // ISSUE-P3-68：重试退避的最长锁定时长（秒，默认 1800 = 30 分钟；合法域 [60, 86400]）
-    val unlockLockoutMaxSeconds: Int = 1800
+    val unlockLockoutMaxSeconds: Int = 1800,
+    // ISSUE-P1-22：用户对「软件级 Keystore 快速解锁降级」的显式确认记录。
+    // 仅在封印密钥实际落位为 SOFTWARE / UNKNOWN 且用户在风险提示弹窗中明确选择
+    // 「仍要启用」时置位；硬件落位（TEE / StrongBox）不依赖本标记。
+    // 该标记同时驱动解锁页与安全设置页的常驻声明
+    // 「本机快速解锁降级为软件密钥，不提供硬件级保护」。
+    val quickUnlockDowngradeAcknowledged: Boolean = false
 )
 
 /**
@@ -99,4 +105,10 @@ interface SettingsRepository {
 
     /** ISSUE-P3-68：重试退避的最长锁定时长（秒；仓库层负责 coerce 到合法域 [60, 86400]） */
     suspend fun setUnlockLockoutMaxSeconds(seconds: Int)
+
+    /**
+     * ISSUE-P1-22：记录/清除用户对「软件级 Keystore 快速解锁降级」的显式确认。
+     * 置位即代表用户已在风险提示弹窗中明确选择在无硬件隔离的软件密钥上继续使用快速解锁。
+     */
+    suspend fun setQuickUnlockDowngradeAcknowledged(acknowledged: Boolean)
 }

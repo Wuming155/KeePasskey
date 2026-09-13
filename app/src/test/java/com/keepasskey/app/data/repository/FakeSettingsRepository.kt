@@ -119,4 +119,9 @@ class FakeSettingsRepository() : SettingsRepository {
             it.copy(unlockLockoutMaxSeconds = seconds.coerceIn(60, 24 * 60 * 60))
         }
     }
+
+    /** ISSUE-P1-22：软件级快速解锁降级确认入内存流（与生产 DataStore 语义一致） */
+    override suspend fun setQuickUnlockDowngradeAcknowledged(acknowledged: Boolean) {
+        settingsFlow.update { it.copy(quickUnlockDowngradeAcknowledged = acknowledged) }
+    }
 }

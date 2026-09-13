@@ -206,6 +206,18 @@ class BiometricAuthManager @Inject constructor(
     }
 
     /**
+     * 查询指定数据库封印密钥的实际硬件落位等级（ISSUE-P1-22）。
+     *
+     * 封印路径唯一消费点：封印建立前据此裁决是否须取得用户「软件级降级显式确认」
+     * （见 [UnlockAuthPolicy.requiresDowngradeConsent]）。注意「密钥不存在时返回
+     * `UNKNOWN`」——故消费方必须在封印密钥已创建（`prepareEncryptCipher` 亦会按需建钥）
+     * 之后调用，探测才有真实落位等级。
+     */
+    fun getKeySecurityLevelForDatabase(databaseId: String): KeystoreManager.KeySecurityLevel {
+        return keystoreManager.getKeySecurityLevel(getAliasForDatabase(databaseId))
+    }
+
+    /**
      * 删除特定数据库的硬件密钥别名
      */
     fun deleteKeyForDatabase(databaseId: String) {

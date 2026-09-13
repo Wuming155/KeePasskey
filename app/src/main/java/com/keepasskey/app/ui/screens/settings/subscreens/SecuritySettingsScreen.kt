@@ -150,6 +150,17 @@ fun SecuritySettingsScreen(
                             checked = uiState.biometricEnabled,
                             onCheckedChange = onBiometricToggle
                         )
+
+                        // ISSUE-P1-22：软件级快速解锁降级的常驻声明（AC②：
+                        // 用户确认降级后，设置页持续声明「不提供硬件级保护」）
+                        if (uiState.biometricEnabled && uiState.quickUnlockDowngradeAcknowledged) {
+                            Text(
+                                text = stringResource(R.string.quick_unlock_software_key_notice),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.padding(start = 4.dp)
+                            )
+                        }
                     }
                 }
             }

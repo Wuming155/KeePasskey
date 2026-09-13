@@ -178,6 +178,27 @@ internal fun UnlockQuickUnlockCard(
                 }
                 Spacer(modifier = Modifier.height(4.dp))
             }
+
+            // ISSUE-P1-22：本机快速解锁封印为软件密钥时的常驻声明（AC②：
+            // UI 常驻声明「不提供硬件级保护」，与降级确认记录绑定，非一次性提示）
+            if (uiState.quickUnlockDowngraded) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Security,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = stringResource(R.string.quick_unlock_software_key_notice),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+            }
+
             Spacer(modifier = Modifier.height(16.dp))
 
             // ISSUE-P1-08 统一快速解锁：仅 Class 3 强生物识别经硬件密钥解封（锁屏凭据不再可解封）——

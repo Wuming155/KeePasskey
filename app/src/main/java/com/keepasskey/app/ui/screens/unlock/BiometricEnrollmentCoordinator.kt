@@ -8,6 +8,7 @@ import com.keepasskey.app.data.repository.SettingsRepository
 import com.keepasskey.app.security.BiometricAuthManager
 import com.keepasskey.app.security.BiometricCredentialStorage
 import com.keepasskey.app.security.BiometricResult
+import com.keepasskey.app.security.KeystoreManager
 import com.keepasskey.app.security.UnlockAuthPolicy
 import com.keepasskey.app.security.UnlockPasskeyManager
 import kotlinx.coroutines.CompletableDeferred
@@ -39,6 +40,34 @@ internal class BiometricEnrollmentCoordinator(
 ) {
 
     /**
+     * ISSUE-P1-22：封印密钥供给与落位探测替身（可空仅用于 JVM 单测注入假探测结果，
+     * 经 [UnlockViewModel.installSealKeyProvisionForTest] 写入；生产恒 null → 走
+     * [defaultSealKeyProvision] 真实供给）。在每次登记调用时求值，支持登记前注入。
+     */
+    internal var sealKeyProvisionOverride: ((String) -> SealedKeyProvision?)? = null
+
+    /** 生产默认封印密钥供给：创建/复用密钥 + 探测实际落位，任何异常按不可用处理（fail-closed） */
+    private val defaultSealKeyProvision: (String) -> SealedKeyProvision? = { dbId ->
+        val authManager = biometricAuthManager
+        try {
+            if (authManager == null) {
+                null
+            } else {
+                SealedKeyProvision(
+                    cipher = authManager.prepareEncryptCipher(dbId),
+                    securityLevel = authManager.getKeySecurityLevelForDatabase(dbId)
+                )
+            }
+        } catch (e: Throwable) {
+            debugLog.warn(TAG, "封印密钥不可用: ${e.javaClass.simpleName} - ${e.message}")
+            null
+        }
+    }
+
+    // ISSUE-P1-22：降级确认弹窗的用户决定回调挂起点（同一时刻至多一个挂起中的确认）
+    private var downgradeConsentDeferred: CompletableDeferred<Boolean>? = null
+
+    /**
      * 若开启生物识别且尚未登记，请求一次 BiometricPrompt 授权后封印主凭据。
      *
      * 关键约束（ISSUE-P1-08）：快速解锁硬件密钥以
@@ -51,6 +80,11 @@ internal class BiometricEnrollmentCoordinator(
      * 故本方法改为：**先弹 BiometricPrompt 取得授权 Cipher，再在成功回调内执行封印**。
      * 封印前另经 [UnlockAuthPolicy.canSeal] 校验设备具备「硬件存在且已录入」的强生物识别，
      * 弱凭据设备禁用封印（fail-closed），绝不降级到锁屏凭据路径。
+     *
+     * ISSUE-P1-22 降级确认闸门：封印密钥落位为 SOFTWARE / UNKNOWN（无法证明硬件隔离）时，
+     * 未经用户在风险提示弹窗中显式确认，**不建立封印**（fail-closed）；确认记录持久化
+     * （[UserSettings.quickUnlockDowngradeAcknowledged]），确认后解锁页与安全设置页常驻声明
+     * 「本机快速解锁降级为软件密钥，不提供硬件级保护」。硬件落位（TEE / StrongBox）不受影响。
      *
      * 敏感数据设计考量与边界说明 (Wave 3-E P2-18 / ISSUE-P2-23)：
      * 消费 [CharArray] 与可选密钥文件字节，经 [BiometricSealedPayloadCodec] 编为
@@ -69,12 +103,51 @@ internal class BiometricEnrollmentCoordinator(
         // Keystore 密文（受与主密码同级的强生物识别授权门控），不落地为 String/明文。
         // 原实现「带密钥文件即整体跳过封印」使复合密钥库用户永久失去指纹解锁，已移除。
         val dbId = activeDbId() ?: return
-        val storage = biometricCredentialStorage ?: return
-        val authManager = biometricAuthManager ?: return
         val settings = settingsRepository.getSettings().first()
         if (!settings.biometricEnabled) return
         // 已登记过则不再重复弹窗（仅首次 + 凭据被清除后重新登记）
-        if (storage.hasEncryptedCredential(dbId)) return
+        biometricCredentialStorage?.let { storage ->
+            if (storage.hasEncryptedCredential(dbId)) return
+        }
+
+        // ISSUE-P1-22：封印密钥供给 + 实际落位探测（先建钥后探测，见类 KDoc 次序约束）。
+        // 软件级 / 未知落位 → 显式降级确认闸门：未经确认不封印（fail-closed）。
+        val provision = (sealKeyProvisionOverride ?: defaultSealKeyProvision)(dbId)
+        if (provision == null) {
+            debugLog.warn(TAG, "生物识别凭据未登记：封印密钥不可用，跳过封印（fail-closed）")
+            return
+        }
+        var downgradedSeal = false
+        if (UnlockAuthPolicy.requiresDowngradeConsent(provision.securityLevel)) {
+            if (!settings.quickUnlockDowngradeAcknowledged) {
+                debugLog.warn(
+                    TAG,
+                    "封印密钥落位 ${provision.securityLevel}：请求用户显式降级确认（未确认不封印）"
+                )
+                when (awaitDowngradeConsent()) {
+                    null -> {
+                        debugLog.info(TAG, "降级确认超时未决，本次跳过封印（fail-closed）")
+                        return
+                    }
+                    false -> {
+                        // 用户拒绝软件级降级路径：关闭生物识别开关（用户唯一可用路径已拒绝，
+                        // 关闭可避免后续每次解锁重复弹窗），不封印、不留确认记录
+                        debugLog.info(TAG, "用户拒绝软件级快速解锁，关闭生物识别并不封印")
+                        settingsRepository.setBiometricEnabled(false)
+                        uiState.update { it.copy(isBiometricEnabled = false) }
+                        return
+                    }
+                    true -> {
+                        // 显式记录用户确认（AC②：建立封印前提示并留痕），后续解锁不再重复询问
+                        settingsRepository.setQuickUnlockDowngradeAcknowledged(true)
+                    }
+                }
+            }
+            downgradedSeal = true
+        }
+
+        val storage = biometricCredentialStorage ?: return
+        val authManager = biometricAuthManager ?: return
 
         if (activity == null) {
             debugLog.warn(TAG, "生物识别凭据未登记：缺少宿主 Activity，本次跳过（fail-closed，不影响解锁）")
@@ -93,7 +166,7 @@ internal class BiometricEnrollmentCoordinator(
         }
 
         val encrypted = try {
-            val cipher = authManager.prepareEncryptCipher(dbId)
+            val cipher = provision.cipher
             // ISSUE-P2-23：封印复合载荷（主密码 + 可选密钥文件因子）。
             // 密钥文件先快照克隆（登记跨 BiometricPrompt 挂起，原字节归会话所有），
             // 快照在载荷编码完成后立即清零；载荷明文在其自身 finally 中清零。
@@ -144,8 +217,39 @@ internal class BiometricEnrollmentCoordinator(
             if (unlockPasskeyManager?.enroll(dbId) == false) {
                 debugLog.warn(TAG, "解锁通行密钥登记未成功，本次快速解锁回退为纯封印语义")
             }
-            uiState.update { it.copy(isQuickUnlockAvailable = true) }
+            uiState.update {
+                it.copy(
+                    isQuickUnlockAvailable = true,
+                    // ISSUE-P1-22：软件密钥封印 → 常驻声明随本次登记即刻生效（冷启动由确认记录推导）
+                    quickUnlockDowngraded = downgradedSeal
+                )
+            }
             debugLog.info(TAG, "生物识别凭据登记成功")
+        }
+    }
+
+    /**
+     * ISSUE-P1-22：解锁页对「软件级快速解锁降级」确认弹窗的用户决定上行
+     * （true = 仍要启用；false = 不启用）。无挂起中的确认时幂等空操作。
+     */
+    fun completeDowngradeConsent(confirmed: Boolean) {
+        downgradeConsentDeferred?.complete(confirmed)
+    }
+
+    /**
+     * ISSUE-P1-22：挂起等待用户对软件级降级的显式决定。
+     * 置位 `quickUnlockDowngradeConsentPending` 驱动解锁页渲染确认弹窗；
+     * 返回 null = 超时未决（fail-closed，跳过封印）。
+     */
+    private suspend fun awaitDowngradeConsent(): Boolean? {
+        val deferred = CompletableDeferred<Boolean>()
+        downgradeConsentDeferred = deferred
+        uiState.update { it.copy(quickUnlockDowngradeConsentPending = true) }
+        return try {
+            withTimeoutOrNull(DOWNGRADE_CONSENT_TIMEOUT_MS) { deferred.await() }
+        } finally {
+            downgradeConsentDeferred = null
+            uiState.update { it.copy(quickUnlockDowngradeConsentPending = false) }
         }
     }
 
@@ -182,5 +286,20 @@ internal class BiometricEnrollmentCoordinator(
         private const val TAG = "Unlock"
         // 生物识别登记弹窗挂起等待上限：超时按失败处理，避免协程永久悬挂卡死解锁流程
         private const val BIOMETRIC_ENROLL_TIMEOUT_MS = 60_000L
+        // ISSUE-P1-22：降级确认弹窗挂起等待上限（与登记弹窗同一量级；超时按未决 fail-closed 处理，
+        // 避免确认弹窗长期驻留导致主密码明文滞留窗口无界）
+        private const val DOWNGRADE_CONSENT_TIMEOUT_MS = 60_000L
     }
 }
+
+/**
+ * ISSUE-P1-22：封印密钥供给结果——授权用加密 Cipher 与封印密钥**实际硬件落位等级**。
+ *
+ * 等级探测必须在封印密钥就绪之后执行（`prepareEncryptCipher` 按需建钥；
+ * 密钥不存在时探测恒返回 UNKNOWN，无法反映真实落位）。
+ * 注：因出现在公开的 [UnlockViewModel] 构造参数类型中，本类须为 public（仅数据承载，无行为面）。
+ */
+class SealedKeyProvision(
+    val cipher: Cipher,
+    val securityLevel: KeystoreManager.KeySecurityLevel
+)

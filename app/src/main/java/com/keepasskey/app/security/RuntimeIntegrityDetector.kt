@@ -137,6 +137,14 @@ class RuntimeIntegrityDetector @Inject constructor(
     /**
      * 安装来源判定：仅当能确定 installer 且不在受信任分发方集合中时升级风险；
      * 无法确定（installer 为 null，如 adb 直装 / 部分 ROM）一律不升级，避免误报。
+     *
+     * **ISSUE-P1-23 显式决策留痕（2026-09-13）**：`installer == null` → 不升级风险，系**显式产品决策**，非遗漏——
+     * 1. 该信号只能证明「非商店渠道安装」，**无法证明「APK 未被篡改」**：自签重打包版的 installer
+     *    同样为 null，且应用内任何自校验逻辑都可被重打包者一并 patch 掉——应用内无法建立该信任根；
+     * 2. 对该威胁的有效缓解在应用外：README「官方签名指纹」公布 release 证书 SHA-256 供安装前核对；
+     *    上架商店后接入平台完整性证明（Play Integrity 或同等服务，尚未上架，暂不适用）；
+     * 3. 故本信号维持「仅可判定来源时才参与升级」语义：null 不当可疑（避免 adb / 企业分发误报），
+     *    也不当安全（篡改防护交由签名指纹核对，不引入无效的「应用内签名自校验」）。
      */
     private fun detectUntrustedInstallSource(ctx: Context): Boolean {
         val installer = try {

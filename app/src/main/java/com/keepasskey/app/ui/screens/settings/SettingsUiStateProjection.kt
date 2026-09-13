@@ -158,6 +158,8 @@ internal fun buildSettingsUiState(
     // ISSUE-P3-68：重试节流开关与最长锁定时长（仓库直写项，userSettings 为单一真相源）
     unlockThrottleEnabled = userSettings.unlockThrottleEnabled,
     unlockLockoutMaxSeconds = userSettings.unlockLockoutMaxSeconds,
+    // ISSUE-P1-22：软件级快速解锁降级的用户确认记录（常驻声明渲染依据）
+    quickUnlockDowngradeAcknowledged = userSettings.quickUnlockDowngradeAcknowledged,
 
     // 5. 外观与显示偏好
     themeMode = userSettings.themeMode,

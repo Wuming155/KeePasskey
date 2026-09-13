@@ -10,6 +10,7 @@ import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.security.BiometricAuthManager
 import com.keepasskey.app.security.BiometricCredentialStorage
 import com.keepasskey.app.security.BiometricResult
+import com.keepasskey.app.security.KeystoreManager
 import com.keepasskey.app.security.ThrottleGate
 import com.keepasskey.app.security.UnlockPasskeyManager
 import com.keepasskey.app.security.UnlockThrottleManager
@@ -122,6 +123,11 @@ class UnlockViewModel @Inject constructor(
                     activeDatabaseId = active.id
                     // Wave 12：快速解锁可用性 = 统一封印存储中存在本库凭据（ISSUE-P1-08 起仅强生物识别路径）
                     val hasSealedCredential = biometricCredentialStorage?.hasEncryptedCredential(active.id) == true
+                    if (hasSealedCredential) {
+                        // ISSUE-P1-22：常驻声明自愈——确认记录残留而封印密钥实际已为硬件落位时清除标记，
+                        // 避免「降级声明」在硬件设备上误报（null 探测 = 无法证明，保持原状不误清）
+                        refreshQuickUnlockDowngradeFlag(active.id)
+                    }
                     _uiState.update {
                         it.copy(
                             databaseName = active.name,
@@ -152,7 +158,13 @@ class UnlockViewModel @Inject constructor(
 
         viewModelScope.launch {
             val settings = settingsRepository.getSettings().first()
-            _uiState.update { state -> state.copy(isBiometricEnabled = settings.biometricEnabled) }
+            _uiState.update { state ->
+                state.copy(
+                    isBiometricEnabled = settings.biometricEnabled,
+                    // ISSUE-P1-22：常驻声明随确认记录推导（封印时同样会置位，两路汇合幂等）
+                    quickUnlockDowngraded = settings.quickUnlockDowngradeAcknowledged
+                )
+            }
             // ISSUE-P3-01：设置抵达后同样统一重算，不再由「谁先到」决定解锁模式终态
             biometricUnlock.refreshUnlockModeAndAutoPrompt()
         }
@@ -368,6 +380,40 @@ class UnlockViewModel @Inject constructor(
      */
     fun unlockWithBiometric(activity: FragmentActivity? = null) =
         biometricUnlock.unlockWithBiometric(activity)
+
+    /**
+     * ISSUE-P1-22：解锁页对「软件级快速解锁降级」确认弹窗的用户决定上行
+     * （true = 仍要启用并持久化确认记录；false = 不启用）。
+     * 无挂起中的确认时幂等空操作。
+     */
+    fun onQuickUnlockDowngradeDecision(confirmed: Boolean) =
+        biometricEnrollment.completeDowngradeConsent(confirmed)
+
+    /**
+     * ISSUE-P1-22：注入封印密钥落位探测替身（**仅 JVM 单测使用**——AC③ 要求注入假探测结果；
+     * 生产代码不得调用，封印协调器恒走默认真实供给：建钥后探测实际落位）。
+     */
+    internal fun installSealKeyProvisionForTest(provision: (String) -> SealedKeyProvision?) {
+        biometricEnrollment.sealKeyProvisionOverride = provision
+    }
+
+    /**
+     * ISSUE-P1-22：常驻声明自愈——确认记录残留而封印密钥实际已落位硬件（TEE / StrongBox）时
+     * 清除确认记录与声明标记；探测失败（null / UNKNOWN）保持原状（不误清、不误报）。
+     */
+    private fun refreshQuickUnlockDowngradeFlag(dbId: String) {
+        viewModelScope.launch {
+            val settings = settingsRepository.getSettings().first()
+            if (!settings.quickUnlockDowngradeAcknowledged) return@launch
+            val level = biometricAuthManager?.getKeySecurityLevelForDatabase(dbId)
+            if (level == KeystoreManager.KeySecurityLevel.STRONGBOX ||
+                level == KeystoreManager.KeySecurityLevel.TRUSTED_ENVIRONMENT
+            ) {
+                settingsRepository.setQuickUnlockDowngradeAcknowledged(false)
+                _uiState.update { it.copy(quickUnlockDowngraded = false) }
+            }
+        }
+    }
 
     /**
      * 生物识别结果统一处理入口（ISSUE-P3-01 可测性拆分）：与 Android `BiometricPrompt`

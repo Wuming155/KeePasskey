@@ -331,6 +331,12 @@
     <string name="unlock_biometric_enroll_subtitle">Verify your fingerprint or face to securely store the passwordless unlock credential</string>
     <string name="sec_biometric_auth_failed">Biometric authentication failed or was cancelled</string>
     <string name="sec_biometric_key_invalidated">Biometric credentials changed, security key invalidated. Please use master password.</string>
+    <!-- ISSUE-P1-22: software-level Keystore quick unlock downgrade (explicit consent + resident notice) -->
+    <string name="quick_unlock_software_key_notice">Quick unlock on this device falls back to a software key without hardware-level protection</string>
+    <string name="unlock_downgrade_dialog_title">Quick unlock security downgrade</string>
+    <string name="unlock_downgrade_dialog_body">This device\'s Keystore is software-level (no TEE / StrongBox hardware isolation). Quick unlock seals your master password and key file with a software key that can be extracted offline. Enable anyway?</string>
+    <string name="unlock_downgrade_confirm">Enable anyway (software key)</string>
+    <string name="unlock_downgrade_decline">Don\'t enable</string>
 <string name="edit_scan_totp_qr">Open camera to scan TOTP QR code</string>
     <string name="edit_attachment_empty">Attachment is empty, not added</string>
     <string name="edit_save_failed">Save failed: %1$s</string>

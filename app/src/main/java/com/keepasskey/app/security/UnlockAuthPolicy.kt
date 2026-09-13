@@ -62,4 +62,20 @@ internal object UnlockAuthPolicy {
      */
     fun canSeal(strongBiometricStatus: BiometricStatus): Boolean =
         strongBiometricStatus == BiometricStatus.AVAILABLE
+
+    /**
+     * 封印密钥落位降级判定（ISSUE-P1-22，唯一语义声明点）。
+     *
+     * `SOFTWARE`（软件 Keystore，无 TEE/StrongBox 硬件隔离，封印载荷可被同 UID 离线解出）与
+     * `UNKNOWN`（密钥不存在或探测异常，**无法证明**硬件落位）均须先取得用户
+     * 「显式降级确认」方可建立快速解锁封印；`STRONGBOX` / `TRUSTED_ENVIRONMENT`
+     * 属硬件隔离，直接放行。
+     *
+     * 第四轮定版 AC① 修正（陷阱 #8）：「无条件禁用封印」会打断全部模拟器 / CI 生物识别路径，
+     * 故取「显式降级确认 + 常驻声明」而非硬失败——确认记录持久化于
+     * `UserSettings.quickUnlockDowngradeAcknowledged`，常驻声明随确认态在解锁页与安全设置页展示。
+     */
+    fun requiresDowngradeConsent(level: KeystoreManager.KeySecurityLevel): Boolean =
+        level == KeystoreManager.KeySecurityLevel.SOFTWARE ||
+            level == KeystoreManager.KeySecurityLevel.UNKNOWN
 }

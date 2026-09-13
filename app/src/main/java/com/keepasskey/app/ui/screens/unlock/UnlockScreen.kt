@@ -23,6 +23,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.SwapHoriz
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -114,6 +115,7 @@ fun UnlockScreen(
         onSwitchMode = viewModel::switchUnlockMode,
         onUnlock = { viewModel.unlock(activity) },
         onBiometricUnlock = { viewModel.unlockWithBiometric(activity) },
+        onDowngradeDecision = viewModel::onQuickUnlockDowngradeDecision,
         onNavigateToDatabasePicker = onNavigateToDatabasePicker,
         onOpenExistingVault = { kdbxImportLauncher.launch(arrayOf("*/*")) },
         modifier = modifier
@@ -136,6 +138,7 @@ fun UnlockContent(
     onSwitchMode: (UnlockMode) -> Unit,
     onUnlock: () -> Unit,
     onBiometricUnlock: () -> Unit,
+    onDowngradeDecision: (Boolean) -> Unit = {},
     onNavigateToDatabasePicker: () -> Unit,
     onOpenExistingVault: () -> Unit,
     modifier: Modifier = Modifier
@@ -272,4 +275,38 @@ fun UnlockContent(
             }
         }
     }
+
+    // ISSUE-P1-22：软件级 Keystore 快速解锁降级确认弹窗——未经用户显式确认不建立封印
+    if (uiState.quickUnlockDowngradeConsentPending) {
+        QuickUnlockDowngradeConsentDialog(
+            onConfirm = { onDowngradeDecision(true) },
+            onDecline = { onDowngradeDecision(false) }
+        )
+    }
+}
+
+/**
+ * ISSUE-P1-22：软件级 Keystore 快速解锁降级确认弹窗（AC②：建立封印前给出明确风险提示，
+ * 用户显式选择后方可封印；取消 / 关闭弹窗一律按「不启用」处理，fail-closed 不留确认记录）。
+ */
+@Composable
+private fun QuickUnlockDowngradeConsentDialog(
+    onConfirm: () -> Unit,
+    onDecline: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDecline,
+        title = { Text(text = stringResource(R.string.unlock_downgrade_dialog_title)) },
+        text = { Text(text = stringResource(R.string.unlock_downgrade_dialog_body)) },
+        confirmButton = {
+            TextButton(onClick = onConfirm) {
+                Text(text = stringResource(R.string.unlock_downgrade_confirm))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDecline) {
+                Text(text = stringResource(R.string.unlock_downgrade_decline))
+            }
+        }
+    )
 }

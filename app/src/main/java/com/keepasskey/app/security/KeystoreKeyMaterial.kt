@@ -16,6 +16,7 @@ import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.Mac
 import javax.crypto.SecretKey
+import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.GCMParameterSpec
 
 /**
@@ -130,17 +131,26 @@ internal class KeystoreKeyMaterial(
     /**
      * 查询指定别名的密钥实际硬件落位等级（原始 `KeyInfo.securityLevel`）。
      * 密钥不存在或查询异常时返回 [KeyProperties.SECURITY_LEVEL_UNKNOWN]。
+     *
+     * P1-22 批次设备侧实测整改（ISSUE-P1-22 附带发现）：密钥条目为 **SecretKey**，
+     * 官方取 [KeyInfo] 的 API 是 **[SecretKeyFactory]**（`SecretKeyFactory.getInstance("AES", "AndroidKeyStore")`）；
+     * 原实现误用 `java.security.KeyFactory`——AndroidKeyStore provider 仅注册
+     * EC/RSA/XDH/ED25519 的 KeyFactory（API 36.1 模拟器实测，含诊断输出），
+     * `KeyFactory.getInstance("AES", …)` 恒抛 `NoSuchAlgorithmException` → 本方法恒返回
+     * UNKNOWN、[getOrCreateDeviceCredentialKey] 的规格探针恒判「不匹配」→ **每次解封前删钥重建**，
+     * 快速解锁必然失败（典型「JVM 过、Android 运行时挂」缺陷，宿主 JVM 无法触及 AndroidKeyStore）。
      */
     fun probeSecurityLevel(alias: String): Int {
         return try {
             if (!keyStore.containsAlias(alias)) return KeyProperties.SECURITY_LEVEL_UNKNOWN
             val entry = keyStore.getEntry(alias, null) as? KeyStore.SecretKeyEntry
                 ?: return KeyProperties.SECURITY_LEVEL_UNKNOWN
-            val factory = KeyFactory.getInstance(
+            val factory = SecretKeyFactory.getInstance(
                 KeyProperties.KEY_ALGORITHM_AES,
                 KeystoreManager.ANDROID_KEY_STORE
             )
-            val info = factory.getKeySpec(entry.secretKey, KeyInfo::class.java)
+            val info =
+                factory.getKeySpec(entry.secretKey, KeyInfo::class.java) as KeyInfo
             info.securityLevel
         } catch (_: Exception) {
             KeyProperties.SECURITY_LEVEL_UNKNOWN
@@ -160,8 +170,13 @@ internal class KeystoreKeyMaterial(
             val entry = keyStore.getEntry(alias, null) as? KeyStore.SecretKeyEntry
             if (entry != null) {
                 val matchesRequirement = try {
-                    val factory = KeyFactory.getInstance(KeyProperties.KEY_ALGORITHM_AES, KeystoreManager.ANDROID_KEY_STORE)
-                    val info = factory.getKeySpec(entry.secretKey, KeyInfo::class.java)
+                    // P1-22 批次整改：SecretKey 规格探针须用 SecretKeyFactory（见 [probeSecurityLevel] KDoc）
+                    val factory = SecretKeyFactory.getInstance(
+                        KeyProperties.KEY_ALGORITHM_AES,
+                        KeystoreManager.ANDROID_KEY_STORE
+                    )
+                    val info =
+                        factory.getKeySpec(entry.secretKey, KeyInfo::class.java) as KeyInfo
                     // ISSUE-P1-08：全等比较（而非位包含）——旧「BIOMETRIC_STRONG | DEVICE_CREDENTIAL」密钥
                     // 虽含所需位但允许锁屏凭据解封，必须判定为不匹配并迁移重建为纯生物识别密钥
                     info.isUserAuthenticationRequired &&

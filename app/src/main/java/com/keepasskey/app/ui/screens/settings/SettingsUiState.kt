@@ -157,6 +157,9 @@ data class SettingsUiState(
     // ISSUE-P3-68：解锁失败重试节流开关与最长锁定时长（2026-09-12 用户裁决：默认关闭 + 30 分钟封顶）
     val unlockThrottleEnabled: Boolean = false,
     val unlockLockoutMaxSeconds: Int = 1800,
+    // ISSUE-P1-22：用户已显式确认「软件级 Keystore 快速解锁降级」——
+    // 安全设置页常驻声明「本机快速解锁降级为软件密钥，不提供硬件级保护」的渲染依据
+    val quickUnlockDowngradeAcknowledged: Boolean = false,
 
     // 5. 外观与显示偏好 (Appearance & Display)
     val themeMode: AppThemeMode = AppThemeMode.SYSTEM,

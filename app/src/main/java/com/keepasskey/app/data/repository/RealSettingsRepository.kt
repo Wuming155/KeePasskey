@@ -111,7 +111,10 @@ class RealSettingsRepository @Inject constructor(
         lastKeyFileName = prefs[KEY_LAST_KEY_FILE_NAME] ?: "",
         // ISSUE-P3-68：重试节流开关与最长锁定时长（2026-09-12 用户裁决：默认关闭 + 30 分钟封顶）
         unlockThrottleEnabled = prefs[KEY_UNLOCK_THROTTLE_ENABLED] ?: false,
-        unlockLockoutMaxSeconds = prefs[KEY_UNLOCK_LOCKOUT_MAX] ?: 1800
+        unlockLockoutMaxSeconds = prefs[KEY_UNLOCK_LOCKOUT_MAX] ?: 1800,
+        // ISSUE-P1-22：软件级快速解锁降级的用户显式确认（默认未确认 → 未确认不封印）
+        quickUnlockDowngradeAcknowledged =
+            prefs[KEY_QUICK_UNLOCK_DOWNGRADE_ACKNOWLEDGED] ?: false
     )
 
     private suspend fun edit(block: (MutablePreferences) -> Unit) {
@@ -208,6 +211,11 @@ class RealSettingsRepository @Inject constructor(
         )
     }
 
+    /** ISSUE-P1-22：软件级快速解锁降级的用户显式确认记录 */
+    override suspend fun setQuickUnlockDowngradeAcknowledged(acknowledged: Boolean) = edit {
+        it[KEY_QUICK_UNLOCK_DOWNGRADE_ACKNOWLEDGED] = acknowledged
+    }
+
     private companion object {
         private const val LEGACY_PREFS_NAME = "keepasskey_settings"
 
@@ -238,5 +246,8 @@ class RealSettingsRepository @Inject constructor(
         // ISSUE-P3-68：解锁失败重试节流配置
         private val KEY_UNLOCK_THROTTLE_ENABLED = booleanPreferencesKey("unlock_throttle_enabled")
         private val KEY_UNLOCK_LOCKOUT_MAX = intPreferencesKey("unlock_lockout_max_seconds")
+        // ISSUE-P1-22：软件级快速解锁降级的用户显式确认
+        private val KEY_QUICK_UNLOCK_DOWNGRADE_ACKNOWLEDGED =
+            booleanPreferencesKey("quick_unlock_downgrade_acknowledged")
     }
 }
