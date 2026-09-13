@@ -147,5 +147,7 @@ KeePasskey 是一款原生 Kotlin 开发的现代化 Android 密码管理器。�
   `androidTest` 源集；当前 `app` **12 例**（导入解析 3 + 域解析 7 + 解锁落盘 2）、`sync` **3 例**（落盘权限基线），
   在 x86_64 / API 36.1 模拟器上 **0 failure / 0 skip**。**仍未覆盖**：Passkey 系统级交互、
   `AssistStructure` 结构树扫描、通知渲染（依赖系统凭据对话框 / 真实自动填充会话 / 通知栏），以及 arm64 真机。
+  另：**§38 新接线但未在设备侧验证的 3 项**（敏感对话框 `FLAG_SECURE` 实效、附件缓存冷启动清理端到端、
+  `SecureDialog` 是否取到 `DialogWindowProvider`）已登记为 **ISSUE-P2-42**，含逐项复现配方与验收标准。
   §24 的 ISSUE-P1-12 与 §26 的 ISSUE-P0-04 均属「JVM 过、Android 运行时挂」类缺陷逃逸，故**涉及正则 / XML /
   平台 API 的静态逻辑不能仅凭宿主单测判定在 Android 上可用**。

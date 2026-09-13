@@ -1818,7 +1818,7 @@ SHA-256 `c23ed3cfd9d68e3af45dc37cb64178c81c4b6eb9db40fc145617fd5555b2c3d8`，AES
 
 ### 38.3 边界、未覆盖与有意偏离（如实声明）
 
-- **设备侧待验（JVM 无法闭环）**：① 对话框窗口真实带上 `FLAG_SECURE`（建议 `dumpsys window` 或截图实测，
+- **设备侧待验（JVM 无法闭环）**（已登记为 `ISSUE-P2-42`，含逐项复现配方与验收标准）：① 对话框窗口真实带上 `FLAG_SECURE`（建议 `dumpsys window` 或截图实测，
   覆盖本轮 7 处对话框）；② 附件缓存**冷启动清理端到端**（落盘 → force-stop → 冷启动 → 目录应为空）；
   ③ `SecureDialog` 取到 `DialogWindowProvider` 的路径（理论上 `DialogLayout implements DialogWindowProvider` 已由
   compose-ui 字节码核实，仍建议真机确认未静默 fail-safe 空操作）。
