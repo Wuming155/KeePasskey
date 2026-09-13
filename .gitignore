@@ -108,3 +108,6 @@ __pycache__/
 *.py[cod]
 .venv/
 venv/
+
+# 第二轮安全复核证据暂存（不随仓库分发）
+.audit-recheck/

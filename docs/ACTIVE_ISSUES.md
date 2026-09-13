@@ -38,18 +38,104 @@
 
 ---
 
-## P1 高危与核心功能问题（0 项）
+## P1 高危与核心功能问题（4 项）
 
-> 当前无待办。**ISSUE-P1-16 ~ P1-21**（附件 Ref/Compressed 解析、块 HMAC 异常分型、外层头部总量闸门、
+> **历史**：**ISSUE-P1-16 ~ P1-21**（附件 Ref/Compressed 解析、块 HMAC 异常分型、外层头部总量闸门、
 > 附件缓存冷启动清理、防回滚状态目录、敏感对话框 FLAG_SECURE）已于 2026-09-12 整改归档，见 §38。
+>
+> **2026-09-13 新增（红队攻击路径批次）**：下列 3 项由红队批次对拍后**留存为开放项**转登。
+> 该批次文档已于同日处置归档并**删除**，来源证据、已撤回项与纪律见
+> [RESOLVED_LOG.md](RESOLVED_LOG.md) §39。
+
+### ISSUE-P1-22（新登记）：软件级 Keystore 下快速解锁封印未 fail-closed
+
+- **优先级**：P1（安全默认放松：软件级 Keystore 下封印载荷可被离线解出主密码）
+- **核实时间点与核实方式（2026-09-13）**：读取 `KeystoreManager.kt`
+  （L29-31 注释明载"软件级 Keystore 时记录警告（诊断 API：`getKeySecurityLevel`），不硬失败以兼容模拟器/CI"；
+  `getKeySecurityLevel` L93-101 仅做探测），并**全仓检索其消费点** —— `app/src/main` 中除
+  `KeystoreManager.kt` 自身外**零命中**，即该等级**从未被任何放行 / 拒绝逻辑读取**。
+- **问题描述**：快速解锁封印载荷（主密码 + 密钥文件复合帧）的 AES 密钥落位等级**不影响任何行为**——
+  在无 TEE / 无 StrongBox 的环境上，`getKeySecurityLevel() == SOFTWARE` 只记一条日志，封印照常建立。
+  此类环境下的密钥不具备硬件不可导出性，攻击者可离线解出封印载荷中的**主密码明文**。
+  该"不硬失败"是**有意的兼容取舍**，但取舍的安全后果当前未在策略层或 UI 层体现。
+- **涉及文件**：`app/src/main/java/com/keepasskey/app/security/KeystoreManager.kt`（`getKeySecurityLevel` /
+  `getOrCreateDeviceCredentialKey`）、`KeystoreKeyMaterial`、封印建立侧调用点
+  （`UnlockViewModel` / `BiometricUnlockCoordinator` 体系）。
+- **验收标准**：① 生产策略为「软件级 → **禁用快速解锁封印**（fail-closed），回落为主密码解锁」；
+  ② 若允许用户显式降级使用，必须在建立封印前给出**明确风险提示并记录用户确认**，
+  且 UI 常驻声明"本机快速解锁降级为软件密钥，不提供硬件级保护"；
+  ③ 有回归断言覆盖「`SOFTWARE` 等级 → 封印被拒」分支（JVM 单测注入假探测结果 + 一次设备侧实测）。
+- **禁止**：仅把日志级别从 warn 提到 error 而行为不变；以"兼容模拟器/CI"为由绕过 fail-closed 且不留显式开关与提示。
 
 ---
 
-## P2 中危缺陷与协议/测试缺口（1 项）
+### ISSUE-P1-23（新登记）：篡改 / 重打包 APK 无检测；`installer==null` 判为无风险
+
+- **优先级**：P1（**无需 root** 即可完成的高危路径）
+- **核实时间点与核实方式（2026-09-13）**：全仓 `app/src/main` 检索 `GET_SIGNING_CERTIFICATES` /
+  `getApkContentsSigners` —— 仅 2 处命中且**均为校验「调用方」**（`AutofillOriginResolver`、
+  `CallingOriginResolver`），**无任何校验自身 APK 签名**的代码；读取
+  `RuntimeIntegrityDetector.detectUntrustedInstallSource`（L141-149）确认 `installer == null` 时
+  **返回 false（不升级风险）**。
+- **问题描述**：用户经非商店渠道安装自签重打包版（`apktool d` + 注入 + 自签）时，
+  应用自身的完整性体系不产生任何告警（`installer==null` + 无 root / Magisk 痕迹 → `TRUSTED`），
+  攻击者可长期获得主密码与全库。
+- **整改边界（重要）**：**应用内签名自校验对该威胁无效**——能重打包的对手可一并 patch 掉自检。
+  唯一有效缓解在**应用外信任根**：① 公布官方签名 SHA-256 指纹供用户 / 第三方核对；
+  ② 上架后接入 Play Integrity 或自建证明服务；③ 应用内 `SecurityBadge` 明确标注
+  "本机自检不能证明 APK 未被篡改"。
+- **验收标准**：① 官方签名指纹以可引用形式对外公布（README / 设置页"关于"）；
+  ② `installer==null` 的处置语义经**显式决策并留痕**（**不得**以"加入应用内自检"充当整改）；
+  ③ 若上架，接入平台完整性证明并登记为一条可复跑的校验路径。
+
+---
+
+### ISSUE-P1-24（新登记）：自动填充确认页可伪造归属信息，且无"首次绑定"显式授权
+
+- **优先级**：P1（社会工程 + 平台机制组合，无需任何权限）
+- **核实时间点与核实方式（2026-09-13）**：读取 `AutofillConfirmActivity`（L80-111）与
+  `AutofillDatasetBuilders`（L197-208）——确认页文案 `EXTRA_CREDENTIAL_TITLE` **由填充方传入**
+  （即受攻击者控制），页面**未展示**调用方应用名、签名指纹摘要或域名，且**不存在**
+  "该目标首次出现 → 要求显式授权"的机制。
+- **问题描述**：恶意应用渲染高仿登录页并正确标注 `autofillHints`，用户从系统自动填充 UI 中
+  主动选中候选后，明文经框架写入**攻击者进程的控件**；确认页显示的条目名可被攻击者设置成
+  与受害者预期一致，降低戒心。
+- **涉及文件**：`app/src/main/java/com/keepasskey/app/autofill/AutofillConfirmActivity.kt`、
+  `AutofillDatasetBuilders.kt`、`AutofillPickerActivity.kt`、`AutofillSessionGrants.kt`。
+- **验收标准**：① 确认页**强制展示不可伪造的归属信息**（调用方应用名 + 签名证书 SHA-256 摘要 + 域）；
+  ② 对"首次出现的目标"要求"记住此应用"式显式授权；③ 禁止在无 UI 的自动途径下发口令字段
+  （口令仅在显式确认后下发，用户名可例外）；④ 上述三条各有回归断言。
+- **说明**：本项**不能被完全消除**（平台把明文写入调用方控件是自动填充的设计语义），
+  目标是**把诱导成本提高到必须让用户看到真实归属**；验收以"归属信息不可伪造且必展示"为准，不以"阻断"为准。
+
+---
+
+### ISSUE-P1-25（新登记）：`copyUsername` 把 `{REF:P@…}` 解析出的**口令**写入剪贴板，未标敏感且取消自动擦除
+
+- **优先级**：P1（`{REF:P@…}` 是本仓主动支持的 KeePass 标准字段引用语法；触发后明文口令可被任意前台应用读取）
+- **核实时间点与核实方式（2026-09-13，对 HEAD `a669a48`）**：读取 `EntryDetailViewModel.kt:456-463`
+  （`copyUsername` 先 `vaultRepository.resolveFieldReferences(entryId, username)`，再 `clipboardSecurityManager.copyPlainText(...)`）；
+  读取 `FieldReferenceEngine.valueOf`（`RefField.PASSWORD -> entry.password?.readString()`）；
+  读取 `ClipboardSecurityManager.copyPlainText`（`:97-101`）—— **既不设** `EXTRA_IS_SENSITIVE`，**又调用** `cancelScheduledClear()`（`:98`）。
+- **问题描述**：当条目的 `UserName` 字段含 `{REF:P@<检索面>:<检索文本>}` 时，复制用户名会把**被引用条目的口令明文**
+  写入系统剪贴板：无敏感标记（无系统气泡保护、进入剪贴板历史）、且取消既有的自动擦除计划 → 任意前台应用可读取，且无时间窗约束。
+- **涉及文件**：`app/src/main/java/com/keepasskey/app/ui/screens/detail/EntryDetailViewModel.kt`、
+  `app/src/main/java/com/keepasskey/app/security/ClipboardSecurityManager.kt`、
+  `database/src/main/java/com/keepasskey/database/fieldref/FieldReferenceEngine.kt`。
+- **验收标准**：① `copyUsername` 在解析结果源自 `P`（口令）面时**必须**走 `copySensitiveChars` / `copySensitiveText`
+  （设 `EXTRA_IS_SENSITIVE` + 调度自动擦除）；② 任何路径**不得**无条件 `cancelScheduledClear()`；
+  ③ 回归断言覆盖「UserName 含 `{REF:P@…}` → 剪贴板带敏感标记且已调度擦除」与「UserName 无引用 → 行为不变」。
+
+---
+
+## P2 中危缺陷与协议/测试缺口（38 项）
 
 > **历史**：**ISSUE-P2-28 ~ P2-41**（往返丢字段与布尔/数值语义、MemoryProtection 读写语义、
 > KDF 缺参 fail-closed、isPackageMatch 的 android:// 硬约束、requireRiskNotice 接线、
 > XML 元素计数上限、明文副本清零等 14 项）已于 2026-09-12 整改归档，见 §38。
+>
+> **2026-09-13 新增（红队攻击路径批次）**：P2-43 ~ P2-47 五项由红队批次对拍后留存为开放项转登，
+> 来源与已撤回项见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §39。
 
 ### ISSUE-P2-42（新登记）：§38 批次的 3 项「JVM 不可闭环」行为未在设备侧验证
 
@@ -80,7 +166,171 @@
 
 ---
 
-## P3 低危问题、特性接线与体验优化（4 项）
+### ISSUE-P2-43（新登记）：`autofillCopyTotp` 默认开启 —— TOTP 动态码默认写入剪贴板
+
+- **优先级**：P2（默认配置即开启的第二因素泄露通道）
+- **核实时间点与核实方式（2026-09-13）**：读取 `ExtendedSettings.kt` L38（`autofillCopyTotp = true`）
+  与 `SettingsUiState.kt` L134（同默认），并核对消费点 `AutofillConfirmActivity.handleTotpAfterConfirm`
+  （L192-197：`AutofillTotpCopyPolicy.shouldCopy(...)` 通过即 `clipboardSecurityManager.copySensitiveText(...)`）。
+- **问题描述**：每次自动填充确认后**默认**把该条目的 TOTP 动态码写入剪贴板（受 `EXTRA_IS_SENSITIVE`
+  + 默认 30 秒定时擦除保护）。剪贴板擦除可被用户关闭（见 ISSUE-P3-84），且在擦除窗口内前台应用可读；
+  与口令泄露组合即可在有效期内完成第二因素绕过。
+  （对照：`autofillShowTotpNotification` 默认**已关闭**，故通知栏面无需整改。）
+- **验收标准**：① `autofillCopyTotp` 默认改为 **false**（或改为"开启时明示动态码将进入剪贴板"
+  并在敏感复制路径强制不可关闭的短擦除）；② 设置页文案如实说明该通道的安全代价；
+  ③ 回归断言覆盖"默认值"与"关闭后不触达剪贴板"。
+
+---
+
+### ISSUE-P2-44（新登记）：无障碍服务信号未纳入运行完整性体系
+
+- **优先级**：P2（无需 root、覆盖面广：安卓恶意软件主流手法）
+- **核实时间点与核实方式（2026-09-13）**：读取 `IntegritySignals` / `RuntimeIntegrityPolicy.evaluate`
+  （L29-41 / L125-159）——信号集**不含任何无障碍字段**；读取 `SecurePasswordField.kt`
+  确认其仅用 `PasswordVisualTransformation` + `KeyboardType.Password`，**未**设置 Compose 的
+  `Modifier.semantics { password() }`。
+- **问题描述**：`AccessibilityManager.getEnabledAccessibilityServiceList()` 可枚举已开启的无障碍服务，
+  但当前完整性体系与敏感通道策略**完全未考虑该信号**；非无障碍路径下的语义树暴露程度亦尚未实测。
+- **验收标准**：① 把"已启用第三方无障碍服务"纳入 `IntegritySignals`，并在（至少）主密码输入页
+  给出风险提示或降级策略；② 主密码 / 条目口令输入显式设置 `password` 语义并补回归；
+  ③ **设备侧实测**记录语义树实际暴露面（宿主 JVM 不构成证据，见 `AGENTS.md` §6）。
+
+---
+
+### ISSUE-P2-45（新登记）：解锁失败节流默认关闭，且记录可被"删键复位"
+
+- **优先级**：P2（配置即削弱 + 完整性校验存在复位旁路）
+- **核实时间点与核实方式（2026-09-13）**：读取 `RealSettingsRepository.kt` L113
+  （`unlockThrottleEnabled = prefs[KEY_UNLOCK_THROTTLE_ENABLED] ?: false`，出厂默认关闭）
+  与 `UnlockThrottle.kt` 的 `SharedPrefsUnlockThrottleStore.read()`（L80-82：
+  `count == 0 && lockUntil == 0L && storedMac == null` 时直接返回"完整"记录）。
+- **问题描述**：① 出厂默认不启用退避锁定，在线主密码爆破无应用层限速；
+  ② 即便用户开启，删除 prefs 中三个键（计数 / 锁定截止 / MAC）即可命中"**全新安装**"分支、
+  **被判定为记录完整**，从而复位计数 —— **不需要**重算 MAC
+  （`UnlockThrottleIntegrity` 的 HMAC 并不能防该类删除）。
+- **验收标准**：① 默认值改为**开启**（安全默认不放松），保留用户显式关闭的开关；
+  ② 修复"删键复位"：区分"从未有过记录"与"记录被删除"（例如以 Keystore 保护的**存在标记**
+  或首启写入的哨兵值判定），删除后应 fail-closed 而非视为完整；③ 两条各有回归断言
+  （含"删除三键后仍受节流 / 锁定"的负向用例）。
+
+---
+
+### ISSUE-P2-46（新登记）：`android://` 包名绑定条目缺调用方签名指纹绑定
+
+- **优先级**：P2（自动填充包名维度的残余越权面）
+- **核实时间点与核实方式（2026-09-13）**：读取 `DomainMatcher.isAndroidPackageMatch`（L194-199）——
+  仅做"条目 `android://` 绑定包名 == 调用包名"的**精确字符串相等**，**无签名指纹校验**；
+  对照浏览器维度的 `BrowserSigningFingerprints.isTrusted`（包名 + 已取证 SHA-256 二元组）。
+- **问题描述**：当条目以 `android://<包名>` 绑定、而该真实应用**未安装**时，任意应用只需以同
+  `applicationId` 侧载即可命中并取得候选。
+  （原红队报告所述"Web 域冒充包名"的命名空间混同路径，已由 `ISSUE-P2-40` 闭环，**不在本项范围内**。）
+- **验收标准**：① 对 `android://` 维度引入**首次绑定 + 调用方签名指纹**校验（与浏览器维度同语义），
+  或对"绑定应用当前未安装"的情形降级为需人工二次确认的弱候选；
+  ② 回归断言覆盖"同包名不同签名 → 不命中"与"未安装包名 → 弱候选 / 不命中"。
+
+---
+
+### ISSUE-P2-47（新登记）：同步与封印凭据的回滚防护不足
+
+- **优先级**：P2（数据新鲜性；需后端写权限或同 UID 能力）
+- **核实时间点与核实方式（2026-09-13）**：确认 `sync/src/main/.../SyncRollbackGuard.kt` +
+  `SyncIntegrityMac.kt` 存在且由回滚路径消费（`SyncEngine` / `SyncCache` / `KeystoreSyncIntegrityMac`）；
+  读取 `KeystoreManager.kt` L206-218 注释确认其完整性 MAC 密钥**无用户认证门控**（"锁屏态亦可用"）。
+- **问题描述**：① **同步回滚** —— 服务端（或 MITM）提供一个**合法的旧 `.kdbx`** 时，
+  防护取决于本地"已见版本"记录是否单调且不可回滚；因 MAC 密钥无认证门控，同 UID 可重算，回滚可能不被拦住；
+  ② **封印凭据回滚** —— 封印载荷未绑定"库 header 摘要 + 封印序号"，攻击者可把快速解锁
+  回滚到旧主密码版本（价值有限，除非用户复用旧口令）。
+- **验收标准**：① 把"已见库版本"绑定到**远端不可回滚信道**（如 S3 Object Versioning / ETag 单调性），
+  或对远端 header 摘要做本地单调记录，并对回退**强制走冲突裁决 UI 而非静默覆盖**；
+  ② 封印载荷内绑定"库 header 摘要 + 封印序号"，解封时与当前库比对，不匹配即失效并要求主密码解锁；
+  ③ 两条各有回归用例（含"远端回退 → 拒绝自动合并"）。
+
+---
+
+> **2026-09-13 新增（外部安全审计批次）**：`docs/SECURITY_AUDIT_2026-09.md` 主报告已于同日本批次
+> **退役删除**（处置归档见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §40）。下表为在该报告基线 `d32f3e7`
+> 与当前 `a669a48` **双向对拍后仍成立**的条目转登，逐项附核实结果；详细修复方案、误报排除论证、
+> 待复核区、无法确认项与 CVSS↔CWE 对照见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §43
+> （承载该轮审计结论的 `SECURITY_AUDIT_REMEDIATION.md` 亦已于 2026-09-13 退役，其附录 A–F 全部留存于该节）。
+> **重合声明**：审计 `F-01`（解锁节流默认关闭）已由本轮红队批次的 `ISSUE-P2-45` 覆盖，**不重复登记**。
+
+| 编号 | 来源 | 问题与位置（核实于 2026-09-13） | 验收标准 |
+|---|---|---|---|
+| ISSUE-P2-48 | 审计 F-10 | 附件引用放大无累计预算：内存条目逐引用 `item.load().copyOf()`（`KdbxXmlBinaryNode.kt:199`）；`MAX_XML_ELEMENTS` 只封元素数，不封同一池条目被引用 N 次的副本乘法 | ① 按**累计被引用字节**做解析预算，超限抛 `KdbxCorruptFileException`；② 取消逐引用物化（复用 `source` 按需读取）；③ 负例：单池条目 + 数千引用被拒而非 OOM；④ `KdbxAttachmentAliasIsolationTest` 4 例保持通过 |
+| ISSUE-P2-49 | 审计 F-12 | KDF 仅逐项封顶（`ARGON2_MAX_ITERATIONS = 2²⁴`、`AES_KDF_MAX_ROUNDS = 2²⁸`），无 `I×M` 工作量 / 墙钟预算（`KdbxKdfParameterCodec.kt:60,66`） | ① 对 Argon2 `I×M` 与 AES-KDF `R` 设联合预算，使最坏墙钟有界；② 解锁派生加超时 / 取消；③ 不误拒合法库（附官方参数域对照） |
+| ISSUE-P2-50 | 审计 F-14 | DAL 响应体先 `body?.string()` 整份物化，之后才比较 `length`（且为**字符数**）（`DigitalAssetLinksVerifier.kt:107-111`） | ① 改有界流式读取并按**字节数**裁决；② MockWebServer 单测断言超大响应不被物化且返回 `NOT_VERIFIED` |
+| ISSUE-P2-51 | 审计 F-18 | ① `clearClipboard()` 仅由 `performClearIfMatching` 调用，未接锁定 / `ACTION_SCREEN_OFF` / 冷启动；② 后台读不到剪贴板时 `lastSensitiveHash` 陈旧匹配会**误清他处内容**（`ClipboardSecurityManager.kt:106-136`） | ① 注册 `SessionLockObserver` + 订阅熄屏 + 冷启动对账；② 空读分支仅在"已观察到变化或仍在窗口内"才清；③ 两条各有回归；④ 与 `ISSUE-P3-84` 的风险明示同批做产品确认 |
+| ISSUE-P2-52 | 审计 F-22 | 选择器缓存**活** `KdbxEntry` 树，且在 `try` 之外读 `userName`；锁定时 `ProtectedString` 就地清零 → 抛 `IllegalStateException`（`AutofillPickerViewModel.kt:26-40,56-59`） | ① 选择器观察会话状态（锁定清空 / 解锁重载）或改为按选取经仓库读取；② 补回归断言；③ **不得**削弱 `ProtectedString.clear()`（就地清零是该设计的负载承载点） |
+| ISSUE-P2-53 | 审计 F-24 | CM 主通道（`passkey/`）对 `RuntimeIntegrityGate` **零命中**：完整性裁决在自动填充 fail-closed，却在 CM 通道 fail-open（`RuntimeIntegrityPolicy.kt:47` 自述含"禁止下发数据集"） | ① 在 `onBeginGet/CreateCredentialRequest` 或 `CredentialResponseAssembler` 统一收口；② 用例断言风险态下两条通道均拒绝下发；③ 不影响 CM 响应预算 |
+| ISSUE-P2-54 | 审计 F-05 | 依赖 CVSS 闸门仅 `workflow_dispatch` 触发，PR / push 路径不含依赖扫描（`.github/workflows/dependency-scan.yml:21-22`） | ① `on:` 补 `pull_request` 与 `push{branches:[main]}`（或拆"PR 快速任务 + main 全量"以控耗时）；② 设为分支保护必需检查；③ 验证缺失报告时 fail-closed |
+| ISSUE-P2-55 | 审计 F-06 | 发布签名口令等于仓库公开的示例值（`keystore.properties.example:6,8`） | ① 高熵口令对既有 PKCS#12 **只 re-key、不换密钥**（换密钥将使已安装用户无法覆盖升级）；② 示例改为不可误用占位符；③ `app/build.gradle.kts` 加构建期断言拒绝示例 / 弱口令 |
+| ISSUE-P2-56 | 审计 RUST-01 | Argon2 工作内存（m_cost 秘密派生状态）释放前不擦除：`lib.rs:108-111` 仍用 `hash_password_into`，而 `Cargo.toml:30` 宣称已擦除 | ① 改 `hash_password_into_with_memory` + 自持 `Zeroizing<Vec<Block>>`；**或**更正宣称；② 二者必择其一，不得都不做 |
+| ISSUE-P2-57 | 审计 RUST-02 | 派生密钥栈副本残留：`sha2` 未启用 `zeroize`（`Cargo.toml:41`）；`Some(*out)`（`lib.rs:111`）产生普通栈副本 | ① `sha2` 加 `zeroize` feature；② 改 `derive_into(&mut Zeroizing<[u8;32]>)` 消除普通副本；③ 仅增加清零 `Drop`，无算法变更 |
+| ISSUE-P2-58 | 审计 RUST-03 | 口令强度评估 Θ(n²)（`strength.rs:406` `longest_keyboard_walk`）与非上限输入，且两个生产调用方运行在**主线程**（`SettingsHealthController.kt:73-77`、`EntryDetailRevealController.kt:137-139`） | ① `estimate` 入口加长度上限（超出只按长度评分）；② `longest_keyboard_walk` 单趟化（保持"同排且列差绝对值为 1"语义）；③ `unique_char_count` 改 O(n)；④ 调用方移出主线程；⑤ 保留既有 `keyboard_walk_does_not_bridge_rows` 负例 |
+| ISSUE-P2-59 | 审计 RUST-05 | 原生 Argon2 路径缺内存上界预检（`Argon2KdfEngine.kt:52-64` 直接返回；`isMemoryParamFeasible` 仅覆盖 `transformJvm:73`），且 `(memoryInBytes / 1024).toInt()` 存在静默窄化 | ① `derive` 内镜像 Kotlin 上界（内存 / 迭代 / 并行度）；② `.toInt()` 越界抛异常而非截断；③ 上界须 ≥ 一切合法用户配置 |
+| ISSUE-P2-60 | 审计 RUST-06 | KDF secret `K` 以普通 `ByteArray` 常驻头部且全仓无清零点（`crypto/src/main/java/com/keepasskey/crypto/kdf/KdfParameters.kt:35`；`equals/hashCode` 刻意忽略该字段） | ① 新增 `clearSensitive()` 擦除 `secretKey`；② 接入会话锁定 / 关闭路径；③ 仅在最后一次需要 `K` 的派生之后调用（保存时会以同一头部重新派生） |
+
+> **2026-09-13 新增（敏感数据流审计批次）**：`docs/SENSITIVE_DATA_FLOW_AUDIT_2026-09.md` 已于同日
+> **退役删除**（处置归档见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §41）。该文档为**未跟踪文件**，
+> 原文**不可**经 `git show` 取回，故其结论已按 §41 完成分流。下表为在该报告基线 `d32f3e7`
+> 与当前 `a669a48` **双向对拍后仍成立**的条目转登，逐项附核实结果。
+>
+> **重合声明（不重复登记）**：`H-new-1`（CM 主通道不受完整性门控）→ 已由 `ISSUE-P2-53` 覆盖；
+> `S1`（发布签名口令 = 示例值）→ 已由 `ISSUE-P2-55` 覆盖；`E3`（自动填充后 TOTP 默认进剪贴板）→
+> 已由 `ISSUE-P2-43` 覆盖；`M9`（剪贴板不随锁定 / 熄屏清理）→ 已由 `ISSUE-P2-51` + `ISSUE-P3-84` 覆盖；
+> `M5`（明文导出缓冲未清零）→ 已由 `ISSUE-P3-86` 覆盖；`M2`（主密码在 Compose 中为不可擦 `String`）→
+> 其**输入法通道**已由 `ISSUE-P3-76` 覆盖，其余属已接受残余风险（见 `AGENTS.md` §6）。
+>
+> **已撤回 / 非缺陷（不转登）**：`H-new-3`（`requireRiskNotice` 无消费者）经复核实为**误报**——
+> 基线与 HEAD 均已在设置页渲染 `IntegrityRiskCard`（`SecuritySettingsScreen.kt`）；`H1 附注`
+> （`VaultEntryMapperTotpTest` "虚假安全感"）系误读测试意图（该用例测**读取**路径兼容性）；
+> `M8`（`flagSecureEnabled=false` 解除截屏保护）为产品裁决的有意设计（`RESOLVED_LOG` §29.3 / §38）。
+
+| 编号 | 来源 | 问题与位置（核实于 2026-09-13，对 HEAD `a669a48`） | 验收标准 |
+|---|---|---|---|
+| ISSUE-P2-61 | 审计 H1 | TOTP 种子在所有生产写入路径恒 `isProtected = false`（`VaultEntryMapper.kt:321`、`VaultEntryWriteCoordinator.kt:69,225`）→ `KdbxXmlEntrySerializer.serializeField` 走非保护分支 `writer.text(value.readString())`（**不写** `Protected="True"`、**不做**内层流 XOR）；且 `VaultEntryMapper.kt:46` 因 `isProtected == false` 把种子 `readString()` 投影进 `UiCustomField.value` | ① 三处写入改 `isProtected = true`；② 断言「保存 → 重载后 `otp` 字段 `isProtected == true` 且 XML 含 `Protected="True"`」；③ 兼容性负例：外部工具写入的**明文** `otp` 仍须可读 |
+| ISSUE-P2-62 | 审计 H2 | `KdbxKeyFile.extractKey` 把**整个密钥文件**转为不可擦 `String`（`KdbxKeyFile.kt:40 raw.toString(Charsets.UTF_8)`，后续 `:41/:46/:61/:86/:137`），每次解锁尝试（含口令错误）与保存都重放；副本数论断成立，但寿命上界为**下次 GC**（非进程生命） | ① 改纯字节解析（Base64 / hex 在 `ByteArray` 上做，`toString` 仅留 ASCII 校验）；② 无法避免的 String 须显式标注并评估；③ 回归：`.keyx` v1/v2、裸 32B、64-hex、任意二进制四类解析结果不变 |
+| ISSUE-P2-63 | 审计 H-new-2 | 生物识别快速解锁门控只用**冷启动快照**：`RuntimeIntegrityDetector.currentEnforcement()`（`:63-71`）以 `hookFrameworkDetected = false` 升级快照，磁盘钩子重扫仅在 suspend `awaitEnforcement()`（`:73-86`）→ 启动后附加 Frida 不触发实时信号，门控不拦（`BiometricAuthManager.kt:115` 经 `runtimeIntegrityGate.currentEnforcement()`） | ① 把「快照已过期 / 实时 hook 信号」纳入非 suspend 路径判定；② 或如实声明「本门控为启动态判定」并在 UI 体现；③ 断言「快照建立后出现 hook 信号 → 生物快速解锁被拒」 |
+| ISSUE-P2-64 | 审计 M1 | 库级 `MemoryProtectionConfig` **不影响内存密封**：`ProtectedString.isProtected` 仅来自 XML 属性（`KdbxXmlStringNode.isProtectedAttribute`）与写入侧硬编码（非口令字段恒 `false`）；库级配置只决定**写出侧** `Protected` 标志（`KdbxXmlEntrySerializer.resolveProtectedFlag:221-235`，实现官方语义）→ `Title`/`UserName`/`URL`/`Notes`/`otp` 在内存中是**未密封明文** | ① 明确「内存密封」与「写出标志」两条独立口径并在 KDoc 声明；② 若采纳「库级开启即内存密封」，须同步写入侧构造；③ 防回归：打开 `ProtectUserName=True` 的库并保存后**不得**被降级为未保护 |
+| ISSUE-P2-65 | 审计 M3 | 多处持有明文的 StateFlow / ViewModel **未注册 `SessionLockObserver`**：`EntryDetailSecrets.kt:19-28`（`revealedPassword` / `revealedRevisionPasswords` / `revealedProtectedFields`，`clearAll()` 仅由 `setEntryId` / `onScreenDisposed` 触发，见 `EntryDetailViewModel.kt:170,180`）；另 `EntryEditViewModel` / `GeneratorViewModel` / `SettingsSyncController` / `IconBitmapCache` | ① 为上述组件注册锁观察者（机制已存在且被 4 处正确使用，见 `DatabaseModule.kt:55-57`）；② 断言「锁库 → 明文 StateFlow 清空」；③ 端到端影响（锁库 → 导航 → `onScreenDisposed` 是否已间接覆盖）须动态验证 |
+| ISSUE-P2-66 | 审计 M4 | 落盘清理为 **unlink-only**（`SyncCache.kt` 用 `File.delete` / `deleteRecursively`）；`clearAll()` **不清** `<name>.<uuid>.tmp`（仅 `clear(remotePath)` 走 `deleteOrphanTmpFiles`）；已 unlink 扇区在 TRIM 前可恢复 | ① `clearAll()` 补 `deleteOrphanTmpFiles`；② 评估对落盘条目的覆写擦除，或如实登记「仅 unlink」为已接受边界（对齐 `AGENTS.md` §6）；③ 断言 `clearAll()` 后目录内无 `.tmp` 残留 |
+| ISSUE-P2-67 | 审计 L9 | 同步下载路径**绕过附件落盘**：`SyncDatabaseCodec.parseKdbxBytes` 调 `KdbxFile.load(...)` **未传** `binaryStore`（`SyncDatabaseCodec.kt:55`；默认 `null`）→ 远程库全部附件无论多大都内联进堆，随后仅置空引用，从不零化 | ① 传入与主会话一致的 `BinaryStore`；② 断言「>1 MiB 远程附件解析后落盘而非内联」；③ 与 `ISSUE-P2-66` 同批（清理语义须一致） |
+| ISSUE-P2-68 | 审计 M6 | `data class` 默认 `toString()` 会打印明文：`EntryDetailUiState`（`:14,34,36,40`，含 `revealedPassword` / `revealedRevisionPasswords` / `revealedProtectedFields`）、`UiVaultEntry`（`UiModels.kt:102,105,110,135`，含 `username` / `totpCode` / `cardCvv`）、`AutofillPickerViewModel.Credentials`（`:79`，含明文口令）、`ParsedAutofillNode`（`AutofillStructureScan.kt:24`）。**当前零字符串化调用点**（核实于 HEAD）→ 属「一行 `log("$state")` 即漏」的潜在缺陷 | ① 逐个覆写 `toString()`（对齐 `ProtectedString` / `KdbxEntry` / `KdbxAttachment` 既有做法）；② 或加静态检查禁止对上述类型整对象插值；③ 不改语义 |
+| ISSUE-P2-69 | 审计 M7 | `LogHygieneTest.kt:88` 的日志抽样正则 `\b(Log\|AppLog)\.[edviw]\(` **匹配不到** `debugLog.warn(` / `debugLogBuffer.error(` 通道 → 该通道不在「敏感标识 / 裸异常 message」脱敏测试覆盖内 | ① 正则扩到 `debugLog` / `debugLogBuffer`（或统一按「日志调用」特征抽取）；② 顺带复核该通道现存 `${e.message}` / endpoint URL / 子库别名插值点；③ 断言扩展后既有违规为 0 |
+| ISSUE-P2-70 | 审计 E1 | 手动选择器把**任意**条目凭据交给请求方，且**不显示请求方身份**（`AutofillPickerActivity` / `AutofillPickerViewModel.kt:54-77`）；自动匹配路径有严格边界，手动兜底路径无提示。（与 `ISSUE-P1-24` **部分重合**：P1-24 验收针对**确认页**，本项针对**选择器页**） | ① 选择器页强制展示请求方应用名 + 签名指纹摘要 + 域；② 断言覆盖展示内容；③ 与 `ISSUE-P3-93`（多签名者遍历）同批 |
+| ISSUE-P2-71 | 审计 E2 | IME 内联建议把候选显示串（用户名 / 条目标题）送入输入法，且 `inlineSuggestionsEnabled` **默认 true**（`ExtendedSettings.kt:36`；`AutofillDatasetBuilders.kt:171-175 buildInlinePresentation(...)`） | ① 默认改 false，或把内容改为不含用户名 / 标题的固定文案；② 设置页如实说明该通道把候选名送入 IME；③ 断言覆盖默认值与关闭后行为 |
+| ISSUE-P2-72 | 审计 E4（**已收窄**） | `clientDataJSON.androidPackageName` 归属可能错误：`PasskeyAssertionActivity.kt:245` 用 `Activity.getCallingPackage()`（PendingIntent 拉起时为 null → 回退本包名）。**Create 侧不成立**：`PasskeyCreateActivity.kt:296` 已优先取 `providerReq.callingAppInfo.packageName`（`:108-109`）—— 审计原断言「未被用于该字段」对 Create 侧为**误报** | ① Assertion 侧改取系统认证的 `CallingAppInfo`；② 断言「RP 收到真实调用方包名」；③ 保留 Create 侧现有正确实现 |
+| ISSUE-P2-73 | 审计 E5 | 自动填充认证流两处协议漂移：① `AutofillUnlockActivity.kt:65` / `AutofillConfirmActivity.kt:160` 用裸 `setResult(RESULT_OK)`，**不带** `AutofillManager.EXTRA_AUTHENTICATION_RESULT`（官方要求经该 extra 回传数据集）；② `AutofillDatasetBuilders.kt:69,206` 创建认证 `PendingIntent` 用 `FLAG_IMMUTABLE`，而平台需向其中填认证参数（picker 路径 `:240` 用 `FLAG_MUTABLE` 是对的） | ① 按官方以 `EXTRA_AUTHENTICATION_RESULT` 回传；② 认证 `PendingIntent` 改 `FLAG_MUTABLE`（并保持 base intent 显式 + `Intent.fillIn` 覆盖语义）；③ 设备侧实测认证填充链路 |
+| ISSUE-P2-74 | 审计 E6 | 清单**未声明** `<queries>` / `QUERY_ALL_PACKAGES`（核实：0 命中），而 `AutofillOriginResolver.kt:65-68` 用 `getPackageInfo(..., GET_SIGNING_CERTIFICATES)` 解析任意调用包 → Android 11+ 包可见性下可能抛异常 → 证书指纹为 null → **所有 webDomain 候选被丢弃**（方向 fail-closed，无泄露） | ① **先在设备侧复现**（判定是否真实失效）；② 若失效，改用平台下发的 `CallingAppInfo` 或声明最小 `<queries>`；③ 断言浏览器域自动填充在真机可用 |
+
+---
+
+> **2026-09-13 新增（威胁建模报告退役批次）**：`docs/THREAT-MODEL-AUDIT-d32f3e7.md` 已于同日
+> **退役删除**（处置归档见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §42）。下表为在该报告基线 `d32f3e7`
+> 与当前 `a669a48` 对拍后**仍成立、且此前未登记**的开放项。
+>
+> **核实时间点与核实方式（2026-09-13，对 HEAD `a669a48`）**：逐条读取源码复核——
+> `WebDavSyncProvider.kt` / `WebDavPropfindParser.kt` / `CredentialVerificationLauncher.kt` /
+> `SessionOpener.kt` / `KeePasskeyCredentialProviderService.kt` / `PasswordSaveActivity.kt` /
+> `VaultEntryWriteCoordinator.kt` / `KdbxHeader.kt` / `SyncProviderResolver.kt`（均为直读，非 grep 片段推断）。
+>
+> **已覆盖（不重复登记）**：`Q-1→ISSUE-P2-53`、`Q-4→§38 ISSUE-P2-36`、`Q-5→ISSUE-P2-62`、
+> `Q-7→ISSUE-P1-25`、`Q-9→ISSUE-P3-107`、`Q-12→ISSUE-P2-69`、`Q-13`/`T-8→§38 ISSUE-P1-20`、
+> `Q-17 前半→ISSUE-P3-100`、`T-4→ISSUE-P1-24`/`ISSUE-P2-70`、`T-11→ISSUE-P1-25`、
+> `T-12→ISSUE-P3-103`、`T-13→ISSUE-P1-22`、`T-14→ISSUE-P3-92`、`T-15 部分→ISSUE-P2-60`、
+> `Q-6→ISSUE-P3-82`、`T-3→ISSUE-P3-76`。
+
+| 编号 | 来源 | 问题与位置（核实于 2026-09-13，对 HEAD `a669a48`） | 验收标准 |
+|---|---|---|---|
+| ISSUE-P2-75 | 威胁建模 T-8b / Q-14 | **远端读取无尺寸上限**：`response.body?.bytes()` 把下载体整体物化（`WebDavSyncProvider.kt:170`、`S3SyncProvider.kt:204`），而 `RemoteFileMetadata.contentLength`（`SyncModels.kt:20`）**只作元数据传递、从不作为守卫**（核实：全仓无消费方）；PROPFIND 响应体整体入 `String`（`WebDavSyncProvider.kt:125`），且 `WebDavPropfindParser.findNodes` 为**递归**遍历（`:50-59`）、外层仅 `catch (e: Exception)`（`:82`）→ 超深 XML 抛 `StackOverflowError`（属 `Error`，**不被捕获**）→ 进程崩溃。KDBX 内部解压上限**不覆盖下载阶段**。**这是唯一可由远端（或系统 CA 级 MITM，本项目零证书固定）单方面触发的崩溃面** | ① 对下载体加**流式 + 声明尺寸双重封顶**（超限即拒绝，不物化）；② PROPFIND 遍历改迭代 / 显式深度上限，并把捕获面扩到 `Throwable`；③ 负例：超大响应与超深 XML 均被拒绝且不 OOM / 不崩溃 |
+| ISSUE-P2-76 | 威胁建模 Q-2 | **两条凭据通道认证强度不对称**：自动填充通道已做 Keystore `CryptoObject` 密码学绑定（`AutofillAuthBindingPolicy.kt:20-21`、`AutofillConfirmActivity.kt:88-107`），而 CM / Passkey 通道 `requestCredentialUserVerification` 直接调 `biometricAuthManager.authenticate(activity, title, subtitle, authenticators) { … }`——**不传 Cipher**（`CredentialVerificationLauncher.kt:43-62`），`CredentialFillVerifier.isSatisfied` 仅凭 `BiometricSucceeded` 放行 → 该通道的"验证"只是 UI 回调契约（hook 可伪造），与自动填充通道不同级；自动填充通道已证明绑定可行 | ① 复核能否复用自动填充的 `prepareAutofillAuthCipher()` 做 CryptoObject 绑定；② 若**确不可行**，须在 KDoc 与 UI **如实声明**"CM 通道验证为回调级、非密码学绑定"，不得让用户误以为与自动填充同级；③ 断言「无 CryptoObject 时验证不通过」或留存降级理由证据 |
+| ISSUE-P2-77 | 威胁建模 Q-16 / T-9c | **切换 / 新建密码库不擦除旧库、不通知锁观察者**：`SessionOpener.create()` 与 `openStream()` 直接替换 `core.database.value`（`SessionOpener.kt:89` / `:156`），该类内 `clearSensitiveData` / `SessionLockObserver` **零命中** → 旧库全部 `ProtectedString` 密文滞留至 GC；旧库的同步缓存与**明文附件缓存**亦不被驱逐、继续留在磁盘上。与 `lock()` 的严格擦除语义（`DatabaseSession.kt:325-349`）明显不一致（模式：`ISSUE-P2-65` 同族，但根因在会话切换路径） | ① 切换 / 新建库前对旧库执行 `clearSensitiveData()` 并通知锁观察者（或引入显式"换库"生命周期事件，语义与 `lock()` 对齐）；② 断言「换库后旧库树已擦除、`cacheDir/sync` 与 `cacheDir/attachments` 已被驱逐」；③ 不得回归 `lock()` 既有语义 |
+| ISSUE-P2-78 | 威胁建模 T-10 | **CM 保存路径写入畸形 URL → 条目永久无法被域匹配**：`KeePasskeyCredentialProviderService.kt:249` 把 `callingOrigin` 作为 `EXTRA_WEB_DOMAIN` 下传（浏览器委派为 `https://…`，普通应用为 `android:apk-key-hash:…`，形态见 `CallingOriginResolver.kt:57-83`），`PasswordSaveActivity.kt:48,68-73` 原样透传，`VaultEntryWriteCoordinator.kt:274` **无条件**拼 `"https://$domain"` → 落库为 `https://https://host` 或 `https://android:apk-key-hash:…`；条目此后既不匹配 web 域也不匹配 `android://` 包名（无口令泄露，属完整性 / 可用性缺陷） | ① 按 origin 形态分流：web origin 直接入库、`apk-key-hash` origin 落 `android://<调用包名>`（与自动填充保存路径语义对齐）；② 断言两类 origin 落库 URL 合法且可被 `DomainMatcher` 命中；③ 负例：不得允许 `https://` 前缀重复叠加 |
+| ISSUE-P2-79 | 威胁建模 Q-3 / 审计 A-1、A-2（**需产品确认**） | **KDF 强度基线未对齐**（唯一纯密码学边界的强度参数）：① 建库默认 `Argon2id m=64 MiB / t=2 / p=2`（`KdbxHeader.kt:162-171`），而仓库已具备设备自适应推荐 `KdfBenchmark`（`SettingsKdfBenchmarkController.kt:17-49`）——**仅设置页展示，建库路径零消费**（核实：`SessionOpener.create` 直接走 `KdbxHeader.createDefault`）；② 读取路径接受极弱参数（`m=1 MiB, t=1, p=1`；AES-KDF `R=1`）并在保存时**原样保留**（仅刷新盐） | ① 产品确认目标强度口径（如"设备实测约 1 秒"）；② 建库路径消费 `KdfBenchmark` 建议值（或提供"使用推荐参数"默认）；③ 对过低工作量的导入给出告警或升级选项；④ 参数变更不得破坏既有库可解锁性与官方客户端互操作 |
+
+---
+
+## P3 低危问题、特性接线与体验优化（47 项）
 
 > **状态（2026-09-12）**：历史 P3 批次 **ISSUE-P3-01 ~ P3-68** 除 P3-23（经产品裁决「不排期」）外
 > 已全部闭环并归档，逐条实现细节与验收证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md)（§3 ~ §32）。
@@ -93,6 +343,11 @@
 > sync 权限基线）同日闭环；**工程整洁收口批次**（死文案 / 假开关 / `AGENTS` §6 更正）同日归档（§37）。
 > **产品裁决「不排期」**：P3-58 / P3-66 / P3-74（见 §33）。
 > **保留待办**：**ISSUE-P3-76**（框架阻塞的已接受残余风险，保留跟踪与解除条件）。
+> **2026-09-13 新增（红队攻击路径批次）**：P3-82 ~ P3-85 四项由红队批次对拍后留存为开放项转登，
+> 来源与已撤回项见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §39。
+> **2026-09-13 新增（威胁建模 / 安全整改报告退役批次）**：P3-116 ~ P3-124 九项由
+> `THREAT-MODEL-AUDIT-d32f3e7.md` 与 `SECURITY_AUDIT_REMEDIATION.md` 的对拍结果转登
+> （两份报告同日退役删除，处置归档见 §42 / §43）。
 
 ---
 
@@ -174,5 +429,150 @@
   均集中在该对象）。
 - **验收标准**：① 在 `KdbxConstants.Xml` 增加 `COMPRESSED` 并替换实现内局部常量；② 无行为变更；
   ③ 若同期新增属性常量（如 `Ref` 已存在），保持命名风格一致。
+
+---
+
+### ISSUE-P3-82（新登记）：内层 XML DTD 拦截缺设备侧回归用例
+
+- **优先级**：P3（测试有效性缺口：代码侧已 fail-closed，缺可复跑的设备侧证据）
+- **核实时间点与核实方式（2026-09-13）**：全仓检索 `app/src/androidTest`、`database/src/androidTest`
+  内的 `DOCTYPE` / DTD 用例 —— **零命中**。
+- **背景（含已证否结论，避免重复排查）**：内层 XML 的 DTD / 外部实体拦截由
+  `KdbxXmlParser.buildHardenedParser` 的**特性探针**（逐特性试建 parser，建不起来才剔除）
+  + `parser.parse(inputStream, handler)` 把 `DefaultHandler2` **同时注册为 `EntityResolver`**
+  （`resolveEntity` 必被调用并抛异常）双重保证。**原红队条目"两层可能同时失效 → XXE"经对拍已证否**
+  （`FEATURE_DISALLOW_DOCTYPE_DECL` 是否受支持不影响外部实体的拒绝路径）。
+  仍需补的是**设备侧证据**，而非新增防护。
+- **验收标准**：① 在 `database/src/androidTest` 增加"注入 `<!DOCTYPE>` / `<!ENTITY>` 的合法口令 KDBX
+  必抛 `KdbxCorruptFileException`"的 instrumented 用例；② 该用例在真机 / 模拟器上计入可复跑基线。
+
+---
+
+### ISSUE-P3-83（新登记）：`TracerPid` / 内存取证门控缺失
+
+- **优先级**：P3（root 边界内的"提高成本"项，**非阻断承诺**）
+- **核实时间点与核实方式（2026-09-13）**：全仓（`*.kt` / `*.rs`）检索 `TracerPid` —— **零命中**；
+  `RuntimeIntegrityDetector` 仅检查 `Debug.isDebuggerConnected()` / `waitingForDebugger()`、
+  `/proc/self/maps` 特征串与磁盘路径。
+- **问题描述**：`ptrace` / `process_vm_readv` / `/proc/<pid>/mem` **不产生新映射**，
+  现有探测无感。**本项属"同 UID / root 可截获"设计边界**（不承诺阻断），仅争取提高攻击成本。
+- **验收标准**：① 关键解密路径前后**同步**读取 `/proc/self/status` 的 `TracerPid`，非 0 即
+  `clearSensitiveCache()` 并拒绝解锁；② 评估 `prctl(PR_SET_DUMPABLE, 0)` / `MADV_DONTDUMP`
+  的可行性与代价（需 native 支持，**不得**以牺牲稳定性换取纸面加固）；
+  ③ 明确记录"本项仅为提高成本，不改变设计边界"。
+
+---
+
+### ISSUE-P3-84（新登记）：剪贴板"可关闭擦除 / 延时窗口"的风险明示
+
+- **优先级**：P3（产品设置的安全代价未显式告知）
+- **核实时间点与核实方式（2026-09-13）**：读取 `ClipboardSecurityManager.armScheduledClear`（L81-92）——
+  `autoClearClipboard == false` 或 `timeoutSec <= 0` 时**直接 return（不调度擦除）**；
+  出厂默认 `autoClearClipboard = true` / `clipboardTimeoutSeconds = 30`
+  （`RealSettingsRepository.kt` L98 / L105）。
+- **问题描述**：用户关闭自动擦除后剪贴板长期驻留；即便开启，默认 30 秒窗口内前台应用可读。
+- **验收标准**：① 设置页对"关闭自动擦除"给出**显式风险说明**（或在关闭态禁止复制口令、仅允许复制用户名）；
+  ② 敏感复制后监听前台变化，一旦切换应用立即清空；③ 优先引导"自动填充直填"替代剪贴板通道。
+- **说明**：关闭开关本身是**用户可见的产品选择**，本项**不以"取消该开关"为验收**，
+  而以"代价被显式告知 + 窗口尽量缩短"为准（与 `FlagSecurePolicy` 的产品裁决语义保持一致）。
+
+---
+
+### ISSUE-P3-85（新登记）：自动填充 / 组件面低危硬化（3 小项）
+
+- **优先级**：P3（单条收益有限，合并登记）
+- **核实时间点与核实方式（2026-09-13）**：
+  1. `AutofillDatasetBuilders.buildPickerDataset`（L235-241）选择器 `PendingIntent` 为
+     `FLAG_MUTABLE | FLAG_UPDATE_CURRENT`（框架注入 fillIn extras 所需，不可改 IMMUTABLE）；
+  2. `AndroidManifest.xml` L24-33 的 `MainActivity` **未声明** `launchMode` / `taskAffinity`；
+  3. `.github/` 内检索 `exported` —— **无任何断言** exported 组件必须受权限保护。
+- **问题描述**：① 选择器 `PendingIntent` 可被重复拉起（DoS / UI 干扰）——
+     **注入面已排除**：base intent 已显式设置全部安全关键 extra，且 `Intent.fillIn` 为
+     "base 覆盖 fillIn"，攻击者无法改写既有键；
+  ② `MainActivity` 可被任意应用反复拉起 / 清任务栈（**未发现直接泄密**，`onCreate` 不消费外部 extra）；
+  ③ 未来依赖可能引入无权限保护的 `exported` 组件而 CI 不告警。
+- **验收标准**：① `MainActivity` 加 `launchMode="singleTask"` + `taskAffinity=""`，
+  并**保持 `onCreate` 不消费外部 extra**（当前正确，须作为回归约束）；
+  ② CI 增加"合并清单断言：所有 `exported=true` 组件必须带 `permission` 或来自白名单"；
+  ③ 对选择器 / 确认页入口评估一次性 nonce（可延后）。
+
+---
+
+> **2026-09-13 新增（外部安全审计批次）**：转登自已退役的 `docs/SECURITY_AUDIT_2026-09.md`
+> （处置归档见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §41）。以下各项均为在 `d32f3e7` 与 `a669a48`
+> 双向对拍后仍成立、且**不改变安全承诺**的低危 / 卫生项；该报告的逐条分流结论见 §41。
+
+| 编号 | 来源 | 问题与位置（核实于 2026-09-13） | 验收标准 |
+|---|---|---|---|
+| ISSUE-P3-86 | 审计 F-02 | 明文导出（XML / CSV）字节缓冲写盘后未清零（`SettingsExportController.kt:169-184`） | `finally { bytes?.fill(0) }`；或改流式签名从源头消除整库明文物化 |
+| ISSUE-P3-87 | 审计 F-03 | 明文导出二次确认仅在 UI 层（`ExportConfirmationPolicy.allows(..., confirmed = true)` 为恒真调用） | 确认令牌下沉到仓库层（构造器 `internal`）；直接调用仓库导出应编译失败或返回 `Failure` |
+| ISSUE-P3-88 | 审计 F-04 | `BrowserSigningFingerprints.kt:35` 首条 Chrome 指纹为 **65** hex（SHA-256 恒 64）→ 该条目永不匹配；`AutofillWebDomainPolicyTest` 复用同一 65 字符值致**测试假绿** | ① 按官方 `gpm-passkeys-privileged-apps/apps.json` **sourced** 核对后修正（禁止 retype）；② 新增格式断言单测（全部指纹 `length == 64` 且为大写 hex）；③ 修正测试复用。方向 fail-closed，无机密性影响 |
+| ISSUE-P3-89 | 审计 F-07 | `ExportAuditSanitizer.shortDigest` 每字节仅取低 4 位、只取前 4 字节 ⇒ 实际 **32 位**（`SettingsExportController.kt:298-307`，注释暗示更长） | 改用完整 64 hex，或如实改写注释与命名（无安全影响，属语义一致性） |
+| ISSUE-P3-90 | 审计 F-08 | 公开死函数 `OtpEngine.parseOtpAuthUri` 对 `period` / `digits` 无钳制（`OtpEngine.kt:88-121`，零调用点；生产走 `TotpKeyUriParser` 已钳制） | 删除该函数，或改 `internal` 并补齐同等钳制（防未来误接入） |
+| ISSUE-P3-91 | 审计 F-16 | `HmacBlockStream.readAll` 用短路 `contentEquals`（`:120,128`；生产流式路径已正确用 `MessageDigest.isEqual`） | 改用 `MessageDigest.isEqual`，或标注为测试专用（当前无生产调用者） |
+| ISSUE-P3-92 | 审计 F-17 | UI 把 KDBX 的 ChaCha20 标注为「ChaCha20-Poly1305」（`DatabaseAlgorithmDialogs.kt:42`、`SettingsUiState.kt:69`、`SettingsPreferencesController.kt:36`），而该 AEAD 在本仓不存在 | 改为「ChaCha20 (RFC 8439，无 AEAD 标签)」，同步修正 `RESOLVED_LOG.md` 与相关单测 |
+| ISSUE-P3-93 | 审计 F-19 | 调用方证书仅取 `apkContentsSigners.firstOrNull()`（`AutofillOriginResolver.kt:69`、`CallingOriginResolver.kt:77,92`），签名轮换期结果随顺序变化（方向 fail-closed） | 遍历全部签名者（含 `signingCertificateHistory`），任一匹配即通过。**注**：本项是 `ISSUE-P2-46`（`android://` 签名绑定）的前置条件 |
+| ISSUE-P3-94 | 审计 F-20 | 合并清单冗余 / 废弃权限，且无 `tools:node="remove"`（源清单 `AndroidManifest.xml:5-6` 声明 `ACCESS_NETWORK_STATE` / `USE_BIOMETRIC`，二者亦由库注入；`USE_FINGERPRINT` 仅来自 `androidx.biometric`） | 删除冗余声明；对废弃权限加 `tools:node="remove"`；保留 zxing 注入的 `CAMERA` |
+| ISSUE-P3-95 | 审计 F-21 | 自动填充确认返回 `RESULT_OK` 前不校验会话是否已锁定（`AutofillConfirmActivity.kt:138-164`；CM 各路径均有该判定） | `RESULT_OK` 前加 `if (vaultRepository.isLocked()) { finish(); return }`，并在会话锁定时丢弃未决响应 |
+| ISSUE-P3-96 | 审计 RUST-07 | Kotlin CBC **加密**流的明文中转副本未清零（`crypto/src/main/java/com/keepasskey/crypto/cipher/CbcStreams.kt:80` 的 `buffer.copyOf(filled)`、`:99` 的 `val chunk = buffer.copyOf(aligned)`）；解密流侧已修 | 两处均加 `finally { Arrays.fill(..., 0) }`，对齐该类 `:27` 的 KDoc 宣称 |
+| ISSUE-P3-97 | 审计 RUST-09 | CI 三个 job 无一同时具备 Rust 工具链与 `test`；`jni_bridge.rs` 声称的 `.so` 符号表核对未实现 | `native-gate` 中 `cargoNdkBuild` 后追加 `:crypto:test` 与导出符号数断言（实测若实现将通过：恰好 5 个 `Java_com_keepasskey` 导出） |
+
+---
+
+> **2026-09-13 新增（敏感数据流审计批次）**：转登自已退役的 `docs/SENSITIVE_DATA_FLOW_AUDIT_2026-09.md`
+> （处置归档见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §41）。以下为在基线 `d32f3e7` 与当前 `a669a48`
+> 对拍后**仍成立**、且**不改变安全承诺**的低危 / 卫生项，逐项附核实结果。
+>
+> **不转登**：`L11`（`KdbxKeyFileGenerator` 的 hex `String` 为交付物）属**格式边界且设计接受**，非缺陷；
+> `L12`（口令长度进日志）经复核**在 HEAD 已不存在**（`UnlockViewModel.kt:191` 文案为 `input updated`，不含长度）——
+> 该条在报告基线之后已由代码变更消除；`L22`（`_gitobj/` 未被 `.gitignore` 覆盖）为**空目录**，
+> git 本不跟踪空目录，非问题。
+
+| 编号 | 来源 | 问题与位置（核实于 2026-09-13，对 HEAD `a669a48`） | 验收标准 |
+|---|---|---|---|
+| ISSUE-P3-98 | 审计 L1 | `proguard-rules.pro:144-147` 的 `AppLog` 剥离规则写作 `public static void v/d(...)`，而 `AppLog.kt` 的 `v/d` 是**实例方法**（`object AppLog`，无 `@JvmStatic`）→ 规则为 no-op（影响为零：生产零 `AppLog.v/d` 调用点 + 运行期 `debugEnabled` 守卫） | 改为实例方法签名，或删除该误导性规则；如保留须注明「双保险不成立」 |
+| ISSUE-P3-99 | 审计 L2 | `DatabaseSession.changeCredentials` 的默认参数 clone 未清零（`:357 newKeyFileData = credentials.keyFileSnapshot()`；方法内仅擦 `oldPwd` / `oldKey`，`:392-393`） | 方法内补 `newKeyFileData?.fill(0)`；断言「换密后无未擦密钥文件副本」 |
+| ISSUE-P3-100 | 审计 L3 | `SyncProviderResolver.resolveRemotePath` 解密同步凭据后不清零（`:105-121` 的 `cfg.password` / `cfg.accessKey` / `cfg.secretKey`）；对照 `resolveProvider` 已清零（`:57,98-99`） | 对齐 `resolveProvider` 的 finally 清零；断言两侧一致 |
+| ISSUE-P3-101 | 审计 L4 | `S3RequestSigner.getSignatureKey` 漏擦 `combined`（含 `"AWS4"‖secretAccessKey`），仅擦 `prefix` / `keyBytes`（`:110-118`） | 补擦 `combined`；断言签名后无残留 |
+| ISSUE-P3-102 | 审计 L5 | 全量 SHA-1 口令哈希作为 `String` 驻留堆（`BreachCheckCoordinator.kt:63-65`）；虽仅出网前 5 位前缀（`BreachHasher.kt:31-32` → `queryRange(prefix)`），无盐 SHA-1 仍是口令等价物 | 改字节态计算 + 显式清零；断言「全量哈希不物化为 String」 |
+| ISSUE-P3-103 | 审计 L6 | `SecureCaptureActivity`（TOTP 扫码取景）设了 `FLAG_SECURE` + `setHideOverlayWindows(true)`，但**未** `setFilterTouchesWhenObscured`（`:24-28`） | 接线遮挡触摸过滤（与自动填充 / 通行密钥窗口一致）；或留痕说明「`setHideOverlayWindows` 已覆盖，无需叠加」 |
+| ISSUE-P3-104 | 审计 L7 | `KdbxAttachment.data` 对内存附件**直接返回内部 `inlineData`**（`:41 get() = source?.load() ?: inlineData`），与类 KDoc（`:17-18`「不与任何持有者共享可变引用」）矛盾（属性 KDoc `:33-34` 已如实修正） | 统一 KDoc 与实现口径（改类 KDoc 或返回副本）；若改返回副本须评估清零责任归属 |
+| ISSUE-P3-105 | 审计 L8 | `VaultEntrySecretReader.getAttachmentData` 落盘路径**双重拷贝**（`:165-166`：`BinarySource.load()` 已返回独立副本，再 `.copyOf()`），第一份未擦 | 去掉冗余 `.copyOf()`；或对第一份补清零 |
+| ISSUE-P3-106 | 审计 L10 | `res/xml/data_extraction_rules.xml:3-14` 未排除 `external` / `device_*` 域（当前暴露为零，因外部存储 API 全仓零使用） | 补排除域（纵深防御）；或留痕「已核实外部存储 API 零使用，无需排除」 |
+| ISSUE-P3-107 | 审计 L13 | `.kdbx.bak` 默认保留（`ExtendedSettings.kt:18 createBackupBeforeSave = true`），内容为**用「上一个」口令加密**的完整库；仅换密成功后删（`DatabaseSession.kt:390`） | 明确文档化该行为与保留期；或对「换密」之外的口令变更路径同样处置 |
+| ISSUE-P3-108 | 审计 L14 | `AtomicFileWriter` 的 `<vault>.kdbx.tmp` 残留窗口（`:76`），同步流式搬运时附件明文也经该路径 | 评估写失败 / 中断后的 `.tmp` 清理时机；断言异常路径无残留 |
+| ISSUE-P3-109 | 审计 L15 | `AutofillLastFilledStore.clear()` 在 `app/src/main` **零调用方**（`:49`），与其 KDoc（「换库 / 锁库时清」）矛盾 → 最近填充条目 UUID 在明文 prefs 长期驻留 | 接线到换库 / 锁库，或修正 KDoc 如实描述 |
+| ISSUE-P3-110 | 审计 L16 | `ExportConfirmationPolicy` 对**明文 XML / CSV** 导出**仅在 UI 层**强制（`DatabaseSettingsScreen.kt:368,413`；`SettingsExportController.kt:107-127` 与 `SettingsViewModel.kt:409-413` 未校验，`confirmed = true` 恒真）。注：**附件**导出已在 VM 层校验（`EntryDetailViewModel.kt:362`） | 确认令牌下沉到仓库层（构造器 `internal`）；直接调用仓库导出应失败；断言覆盖 |
+| ISSUE-P3-111 | 审计 L17 | `PasswordFillActivity` / `PasskeyAssertionActivity` 不检索系统下发的 provider 请求（全仓无 `retrieveProviderGetCredentialRequest` 调用；对照 `PasswordSaveActivity.kt:27` / `PasskeyCreateActivity.kt:69` / `CredentialUnlockActivity.kt:67` 分别检索 create / begin 请求）→ 系统认证的 `CallingAppInfo` 未与 `expectedPackage` 交叉核对 | 确认是否需要交叉核对（结合 `ISSUE-P3-93` / `ISSUE-P2-46`）；若需，补检索 + 断言 |
+| ISSUE-P3-112 | 审计 L18 | `SafDocumentCleanup.deleteCreatedDocument` **无条件**删除（`:20-25`）；当前安全仅因全部调用方使用 `CreateDocument` | 改为按结果码 / URI 归属判定；或显式断言「仅 `CreateDocument` 产物可调用」 |
+| ISSUE-P3-113 | 审计 L19 | `AutofillFieldBlocklistStore.isBlocked` 在签名无法计算时返回 **true**（`:54`）→ Keystore HMAC 失败会**静默禁用自动填充**（方向 fail-closed，但故障模式对用户不透明） | 保持 fail-closed 但补可观测性（日志 / UI 提示）；断言失败路径行为 |
+| ISSUE-P3-114 | 审计 L20 | `values/strings.xml:592`（及 `values-en`）承诺「不进入剪贴板历史与云同步」，而实现仅设 `EXTRA_IS_SENSITIVE`（`ClipboardSecurityManager.kt:51`） | 核实该标记在目标 API 级别的确切语义后二者取其一：修正文案或补足实现；断言文案-实现一致 |
+| ISSUE-P3-115 | 审计 L21 | `gradle/wrapper/gradle-wrapper.properties:3` 的 `distributionUrl` 指向第三方镜像 `mirrors.cloud.tencent.com`（非 `services.gradle.org`），完整性仅靠 `:7` 锁定的 SHA-256；`AGENTS.md` §1 只记哈希锁定、未记镜像来源 | 在 `AGENTS.md` §1 补记镜像来源与锁定哈希；或评估改回官方分发源 |
+
+---
+
+> **2026-09-13 新增（威胁建模 / 安全整改报告退役批次）**：转登自同日退役删除的
+> `THREAT-MODEL-AUDIT-d32f3e7.md` 与 `SECURITY_AUDIT_REMEDIATION.md`
+> （处置归档见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §42 / §43）。以下为对拍后仍成立、
+> 且**不改变安全承诺**的低危 / 卫生 / 核实缺口项。
+>
+> **核实时间点与核实方式（2026-09-13，对 HEAD `a669a48`）**：直读源码 + 全仓检索双证据——
+> `AppTerminationPolicy.kt` / `KeePasskeyApp.kt`（退出路径）、全仓 `clearPasswordOnLeave` 检索（9 处命中均为
+> 持久化 / 投影 / UI 回调）、`DatabaseSession.kt`（`save` / `exportToBytes`）、`KdbxDatabase.kt`、
+> `RuntimeIntegrityDetector.kt`、`SyncNetworkOptions.kt` / `SyncProviderResolver.kt`（SSRF 逃生通道）、
+> `DigitalAssetLinksVerifier.kt`（HTTP 客户端构造）、`git ls-files gradle/`（无 `verification-metadata.xml`）、
+> `.github/workflows/`（无 `connectedAndroidTest`）。
+
+| 编号 | 来源 | 问题与位置（核实于 2026-09-13，对 HEAD `a669a48`） | 验收标准 |
+|---|---|---|---|
+| ISSUE-P3-116 | 威胁建模 T-9b | **「彻底退出应用」不清缓存**：`AppTerminationPolicy.terminate` 仅执行 `detachTask + exitProcess(0)`（`AppTerminationPolicy.kt:29-32`，调用点 `KeePasskeyApp.kt:57-69`），**不经** `SessionLockObserver` → `cacheDir/attachments`（明文附件）、`cacheDir/sync`（密文快照）与 `.kdbx.bak` 留在磁盘上；用户以为"退出即安全"，实际不是 | ① 退出前执行与锁库等价的清理（缓存驱逐 + 树擦除），或 ② 如实声明"退出 ≠ 清理"并在 UI 提示；③ 断言退出路径触发清理（或断言已如实提示） |
+| ISSUE-P3-117 | 威胁建模 Q-15 / T-9d | **`clearPasswordOnLeave` 为死开关**：全仓 9 处命中均为持久化 / 投影 / UI 回调（`ExtendedSettings.kt:29`、`ExtendedSettingsStore.kt:90,167`、`SettingsUiState.kt:153`、`SettingsUiStateProjection.kt:154`、`SettingsViewModel.kt:303`、`SettingsExtendedPreferencesController.kt:64`、`SecuritySettingsScreen.kt:70,229-230`、`KeePasskeySettingsNavGraph.kt:165`），**零行为消费方**；同时 `UnlockViewModel.passwordChars` 全程持有**未提交**主密码，仅在提交结果 / `onCleared` 时擦除 → 跨后台 / 旋转长期驻留 | ① 接线行为（离开解锁页即清空已输入主密码），或按既有"假开关"处置（禁用并标注"预留，暂未生效"）；② 缩短未提交主密码驻留窗口（如 `onStop` 即清）；③ 断言"开关开启 → 离开页面后缓冲区已清零" |
+| ISSUE-P3-118 | 威胁建模 T-16（残余） | **序列化缓冲只擦最终数组**：`DatabaseSession.save()` 以 `ByteArrayOutputStream().also { … }.toByteArray()` 产出字节（`DatabaseSession.kt:219-223`），仅对**返回的数组** `fill(0)`（`:226`）——产生它的 `ByteArrayOutputStream` **内部缓冲**（第二份完整序列化密文）从不擦除；`exportToBytes()` 同型（`:303-307`）。内容为密文，影响有限 | ① 复用同一 `ByteArrayOutputStream` 并显式擦除 / `reset()`，或改流式签名从源头消除整库物化；② 断言写入后无未擦缓冲（可用具名缓冲替代匿名链式调用） |
+| ISSUE-P3-119 | 威胁建模 Q-10 / T-15（残余） | **内存附件池无擦除入口**：`KdbxDatabase.clearSensitiveData()` 只调 `rootGroup.clearSensitiveData()`（`KdbxDatabase.kt:62-64`），`binaries: List<InnerHeader.BinaryItem>`（`:19`）无清零 API → ≤1 MiB 附件明文仅随引用丢弃并期待 GC；`AGENTS.md` §6 只声明了 `KdbxAttachment.clear()` 对**落盘项**不动作，未声明内存池语义 | ① 明确并文档化"内存池生命周期 + 可达性"（树外引用者 `SyncCoordinator.lastSyncedDb` 等已由 `ISSUE-P1-07` 的锁库释放收口，须逐点确认后写入 `AGENTS.md` §6）；② 评估让 `clearSensitiveData()` 覆盖 `binaries`（须处理共享引用者，防误伤）或如实登记为已接受边界；③ 结论须与 `ProtectedString` 密钥不可轮换的论证保持一致 |
+| ISSUE-P3-120 | 威胁建模 Q-11 | **`RuntimeIntegrityDetector` 拦截力无实测**：检测为"磁盘路径存在性 + `/proc/self/maps` 特征串"启发式（`RuntimeIntegrityDetector.kt:100-149`），非完整性证明；真实 Frida（默认 gadget 名、改名、内存加载）下的命中率未知。若命中率低，则"COMPROMISED 时禁用生物解锁 + 自动填充"的政策在真实攻击下形同虚设，却给用户"已被保护"的错觉 | ① 真机以 Frida 实测三种形态（默认 / 改名 / 内存加载），记录命中率并写入设备侧基线；② 按结果决定加强检测**或**在 `RuntimeIntegrityPolicy` / UI 如实声明"启发式、非证明"；③ 结论与 `ISSUE-P2-63`（快照门控）统一口径 |
+| ISSUE-P3-121 | 威胁建模 T-17 | **自建内网 WebDAV / NAS 在出厂配置下不可用**：`SyncNetworkOptions.ssrfAllowedHosts` 默认空集（`SyncNetworkOptions.kt:25`），`SyncProviderResolver` 两处均传默认 `SyncNetworkOptions()`（`:52,77`）→ RFC1918 / `.local` 主机一律被 `SyncEndpointGuard` 拒绝，且**无生产逃生通道**；与 `README` 宣称支持 WebDAV（Nextcloud / ownCloud 等常见家用自建形态）存在张力 | ① 明确产品口径（"支持内网自建"或"明确不支持"）；② 若支持，提供**受控**逃生通道（用户显式声明内网主机 + 风险二次确认，默认仍为拒绝）；③ 文档与实现必须一致，不得只改其一 |
+| ISSUE-P3-122 | 审计附录 C（T6 待复核区） | **IPC 面待复核 4 项**（报告自述"未经首席审计员逐条复核"，故此前未立案）：`IPC-01` 跨响应复用 `requestCode` 致 PendingIntent extras 串扰 · `IPC-02` 凭据落地 Activity 以**可变 extras** 作身份来源 · `IPC-05` `CallingOriginResolver` 白名单 JSON 偏离官方 schema · `IPC-10` `onSaveRequest` 无超时预算 | ① 逐条复核并给出「成立 / 不成立 / 需设备侧验证」结论并留痕（不得只记"待复核"）；② 成立项补回归断言；③ 不成立项写明证否依据（防重复上报，对齐 §39.10 纪律 2） |
+| ISSUE-P3-123 | 审计附录 C（T7）+ `AGENTS.md` §6 | **CI / 供应链硬化遗留 4 项**（均于 2026-09-13 直读核实）：① `gradle/verification-metadata.xml` **不存在**（依赖校验元数据 / 版本锁定缺失，`gradle/` 仅含 `gradle-daemon-jvm.properties` / `libs.versions.toml` / `wrapper`）；② `gradle/gradle-daemon-jvm.properties` 仅 `toolchainVersion=21`，**无分发校验和**；③ `.github/workflows/` 三个工作流（`build.yml` / `codeql.yml` / `dependency-scan.yml`）**均不运行** instrumented 用例（`connectedAndroidTest` 零命中）——设备侧 15 例目前只能本地跑；④ `mapping.txt`（77.5 MB）CI 产物**可见范围未确认**（对公众开放等同公开去混淆映射） | ① 评估引入依赖校验 / 版本锁定（或如实登记为已知限界）；② Daemon JVM 分发补校验和；③ 至少为 `:crypto` / `:database` 建立可复跑的托管设备任务，使设备侧用例进入 CI 基线；④ 确认 `mapping.txt` 可见性并留痕 |
+| ISSUE-P3-124 | 审计附录 C（`SUPPLY-06` / `AC-06`） | **DAL 出口未接纵深防御**：`DigitalAssetLinksVerifier` 自建裸 `OkHttpClient.Builder()`，仅设连接 / 读 / 调用三个超时（`:61-64`），**无** SSRF / DNS 重绑定守卫（对照 `SyncEndpointGuard`）、**无** TLS-only `ConnectionSpec` 声明（对照 `SyncHttpClientFactory`）；目标 host 来自调用方影响面（webDomain / origin），属纵深防御缺口（方向 fail-closed：验签失败即不授权，无机密性影响） | ① 复用 `SyncEndpointGuard` 的主机判定与 TLS-only 配置，或**如实登记**"仅请求 https 固定路径、未做内网可达性防护"；② 断言非 https / 内网目标请求被拒绝；③ 与 `ISSUE-P2-74`（包可见性）同批评估，避免重复排查 |
 
 ---
