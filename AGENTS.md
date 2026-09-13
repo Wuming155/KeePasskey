@@ -75,18 +75,26 @@ KeePasskey 是一款原生 Kotlin 开发的现代化 Android 密码管理器。�
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | 模块依赖拓扑与关键架构决策 | 跨模块改动、新功能落位前 |
 | [`docs/reference-projects.md`](docs/reference-projects.md) | 参考项目地图 | 实现算法/格式兼容时 |
 | [`docs/references/`](docs/references/) | 5 个参考项目架构分析 | 实现思路借鉴前 |
-| [`docs/SECURITY_AUDIT_2026-09.md`](docs/SECURITY_AUDIT_2026-09.md) | 第三方安全审计（29 项发现：分类 / CWE / CVSS / 证据） | 安全整改认领、判定残余风险前 |
-| [`docs/SECURITY_AUDIT_REMEDIATION.md`](docs/SECURITY_AUDIT_REMEDIATION.md) | 上述发现的整改方案、修复顺序与验收基线 | 认领安全整改条目时 |
-| [`docs/THREAT-MODEL-AUDIT-d32f3e7.md`](docs/THREAT-MODEL-AUDIT-d32f3e7.md) | 威胁建模：攻击者模型、组合攻击链、残余风险 | 评估威胁面与已接受风险时 |
-| [`docs/security/REDTEAM_ATTACK_PATHS.md`](docs/security/REDTEAM_ATTACK_PATHS.md) | 红队攻击路径枚举 | 复核组合攻击链时 |
 | [`docs/同步层记录级完整性威胁建模.md`](docs/同步层记录级完整性威胁建模.md) | 同步层跨记录置换与防回滚威胁建模 | 改动同步 / 合并 / 防回滚前 |
 | [`docs/原生Argon2真机验证记录.md`](docs/原生Argon2真机验证记录.md) | 原生内核真机与模拟器实测登记（**禁混表**） | 声称性能或真机验证前 |
 | [`docs/KDBX4与复合密钥实战互操作排查日志.md`](docs/KDBX4与复合密钥实战互操作排查日志.md) | KDBX4 / 复合密钥互操作排障记录 | 排查互操作差异时 |
+| [`docs/SECURITY_RECHECK_2026-09.md`](docs/SECURITY_RECHECK_2026-09.md) | **第二轮独立安全复核裁决报告**（对 89 项开放项 + 第一轮全部"已排除"结论的独立复核：真伪 / 重评严重度 / 攻击链 / Root Cause / 放行裁决） | 认领任何安全条目、重评 severity、准备发布前 |
 | `.codebuddy/rules/engineering-rules.md` | 工程规则 | 编写/修改任何代码前 |
+| `tools/audit/check_recheck_consistency.sh` | **复核报告一致性扫描**（由"已撤销/已更正断言清单"驱动；防止更正节与正文打架。对应 `docs/SECURITY_RECHECK_2026-09.md` 定稿前必跑） | 修改任何审计/复核报告后 |
 
 > **索引纪律（ISSUE-P3-81 立规）**：任何记录**已确认缺陷 / 残余风险 / 验证结论**的文档，必须登记在本表内。
-> 反例代价：`docs/SECURITY_AUDIT_2026-09.md` 等 5 份安全文档曾长期不在索引与工作流入口内，
+> 反例代价：本索引曾长期漏登 `docs/SECURITY_AUDIT_2026-09.md` 等 5 份安全文档，
 > 其 29 项发现因无人流转而在 `RESOLVED_LOG.md` 中零引用、长期未闭环。
+> **退役纪律（2026-09-13 补充）**：`docs/SECURITY_AUDIT_2026-09.md`、`docs/SENSITIVE_DATA_FLOW_AUDIT_2026-09.md`、
+> `docs/SECURITY_AUDIT_REMEDIATION.md` 与 `docs/THREAT-MODEL-AUDIT-d32f3e7.md` **均已退役删除**
+> （处置归档见 `RESOLVED_LOG.md` §40 / §41 / §42 / §43）——**仍成立项已全部转登 `ACTIVE_ISSUES.md`**，
+> 误报排除 / 待复核区 / 无法确认 / 已确认强项 / CVSS↔CWE 对照 / 威胁建模结论由 `RESOLVED_LOG.md`
+> **§42**（信任边界 TB、15 类对手、信任假设 TA、条件化生存性、开放问题与威胁清单状态）与
+> **§43**（附录 A–F、产品决策 A-1~A-4）承接。
+> 任何文档退役前，其结论必须完成分流并同步本表，**不得随文件删除而脱离索引与工作流入口**（§40.8 纪律 4）。
+> **另记（§41 立规）**：审计报告须在**开始阅读时即纳入 git 跟踪**——未跟踪文档退役后**无法**经 `git show` 取回。
+> **另记（§42 立规）**：同批提交的多份审计文档必须**在同一退役批次内逐份处置**——本仓曾只处置主报告与
+> 敏感数据流报告，致配套威胁建模文档的 `Q-2` / `Q-11` / `Q-14` / `Q-15` / `Q-16` 等开放问题长期无人流转。
 
 ---
 
@@ -103,6 +111,7 @@ KeePasskey 是一款原生 Kotlin 开发的现代化 Android 密码管理器。�
 - `python .github/check_dependency_cvss.py build/reports/dependency-check/dependency-check-report.json` — 供应链 CVSS ≥ 7.0 硬断言（fail-closed）
 - `cd crypto/src/main/rust && cargo test` — 原生内核单测
 - `python tools/kdbx-corpus/generate_corpus.py --check` — `.kdbx` 语料校验
+- `bash tools/audit/check_recheck_consistency.sh` — **复核报告一致性扫描**（fail-closed：发现残留禁用短语即退出码 1）。**修改任何审计 / 复核报告后必须跑**
 
 > 原生内核（`crypto/src/main/rust/`）由 Rust + cargo-ndk 交叉编译，`assembleDebug/Release` 自动触发；未装 cargo 或失败则自动降级跳过相关用例（`test` 不触发）。
 >
