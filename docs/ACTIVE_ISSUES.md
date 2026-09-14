@@ -51,7 +51,7 @@
 
 ---
 
-## P2 中危缺陷与协议/测试缺口（27 项）
+## P2 中危缺陷与协议/测试缺口（26 项）
 
 > **历史**：**ISSUE-P2-28 ~ P2-41**（往返丢字段与布尔/数值语义、MemoryProtection 读写语义、
 > KDF 缺参 fail-closed、isPackageMatch 的 android:// 硬约束、requireRiskNotice 接线、
@@ -68,8 +68,8 @@
 > **AC② 未闭环仍保留**（见该行 2026-09-14 进展批注）。
 >
 > **2026-09-15 闭环**：**ISSUE-P2-62**（密钥文件纯字节解析）、**ISSUE-P2-50**（DAL 响应有界流式读取 +
-> 字节数裁决）与 **ISSUE-P2-52**（选择器会话锁定对齐 + 空读 fail-safe）随存量安全整改批次（续）
-> 归档，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §49。
+> 字节数裁决）、**ISSUE-P2-52**（选择器会话锁定对齐 + 空读 fail-safe）与 **ISSUE-P2-78**
+> （CM 保存 URL 形态分流）随存量安全整改批次（续）归档，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §49。
 >
 > **2026-09-13 第四轮独立复核定版（《SECURITY_RECHECK_2026-09.md》1272 行定版稿）**：
 > ① **升格 P1 排期**（条目编号留原地、闭环按编号归档）：`P2-48 / P2-49 / P2-51 / P2-53 / P2-61 / P2-63 /
@@ -265,7 +265,6 @@
 
 | 编号 | 来源 | 问题与位置（核实于 2026-09-13，对 HEAD `a669a48`） | 验收标准 |
 |---|---|---|---|
-| ISSUE-P2-78 | 威胁建模 T-10 | **CM 保存路径写入畸形 URL → 条目永久无法被域匹配**：`KeePasskeyCredentialProviderService.kt:249` 把 `callingOrigin` 作为 `EXTRA_WEB_DOMAIN` 下传（浏览器委派为 `https://…`，普通应用为 `android:apk-key-hash:…`，形态见 `CallingOriginResolver.kt:57-83`），`PasswordSaveActivity.kt:48,68-73` 原样透传，`VaultEntryWriteCoordinator.kt:274` **无条件**拼 `"https://$domain"` → 落库为 `https://https://host` 或 `https://android:apk-key-hash:…`；条目此后既不匹配 web 域也不匹配 `android://` 包名（无口令泄露，属完整性 / 可用性缺陷） | ① 按 origin 形态分流：web origin 直接入库、`apk-key-hash` origin 落 `android://<调用包名>`（与自动填充保存路径语义对齐）；② 断言两类 origin 落库 URL 合法且可被 `DomainMatcher` 命中；③ 负例：不得允许 `https://` 前缀重复叠加 |
 | ISSUE-P2-79 | 威胁建模 Q-3 / 审计 A-1、A-2（**需产品确认**） | **KDF 强度基线未对齐**（唯一纯密码学边界的强度参数）：① 建库默认 `Argon2id m=64 MiB / t=2 / p=2`（`KdbxHeader.kt:162-171`），而仓库已具备设备自适应推荐 `KdfBenchmark`（`SettingsKdfBenchmarkController.kt:17-49`）——**仅设置页展示，建库路径零消费**（核实：`SessionOpener.create` 直接走 `KdbxHeader.createDefault`）；② 读取路径接受极弱参数（`m=1 MiB, t=1, p=1`；AES-KDF `R=1`）并在保存时**原样保留**（仅刷新盐） | ① 产品确认目标强度口径（如"设备实测约 1 秒"）；② 建库路径消费 `KdfBenchmark` 建议值（或提供"使用推荐参数"默认）；③ 对过低工作量的导入给出告警或升级选项；④ 参数变更不得破坏既有库可解锁性与官方客户端互操作 |
 
 > **2026-09-13 新增（第四轮独立复核定版批次）**：以下 2 项为《SECURITY_RECHECK_2026-09.md》定版稿的

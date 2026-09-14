@@ -245,11 +245,12 @@ internal class VaultEntryWriteCoordinator(
         passwordChars: CharArray
     ): KdbxResult<Unit> {
         try {
-            val domain = webDomain?.takeIf { it.isNotBlank() }
+            val binding = resolveCredentialUrlBinding(webDomain, packageName)
             val allEntries = databaseSession.databaseFlow.first()?.rootGroup?.allEntries() ?: emptyList()
 
             val matchedEntry = allEntries.firstOrNull { entry ->
-                val matchDomain = domain != null && entry.url.isNotBlank() && DomainMatcher.isDomainMatch(entry.url, domain)
+                val matchDomain = binding.isWebBinding && entry.url.isNotBlank() &&
+                        DomainMatcher.isDomainMatch(entry.url, binding.displayDomain)
                 // L1 整改：包名匹配仅走 DomainMatcher 严格点号边界（含 android:// scheme 剥离），
                 // 移除 title/notes.contains 启发式
                 val matchPackage = entry.url.isNotBlank() && DomainMatcher.isPackageMatch(entry.url, packageName)
@@ -269,14 +270,12 @@ internal class VaultEntryWriteCoordinator(
                 }
                 databaseSession.saveEntry(updated)
             } else {
-                val titleDomain = domain ?: packageName
-                val title = if (username.isNotBlank()) "$username@$titleDomain" else titleDomain
-                val url = if (domain != null) "https://$domain" else "android://$packageName"
+                val title = if (username.isNotBlank()) "$username@${binding.displayDomain}" else binding.displayDomain
                 val fields = mapOf(
                     KdbxConstants.Fields.TITLE to ProtectedString(title, isProtected = false),
                     KdbxConstants.Fields.USER_NAME to ProtectedString(username, isProtected = false),
                     KdbxConstants.Fields.PASSWORD to pwdProtected,
-                    KdbxConstants.Fields.URL to ProtectedString(url, isProtected = false),
+                    KdbxConstants.Fields.URL to ProtectedString(binding.entryUrl, isProtected = false),
                     KdbxConstants.Fields.NOTES to ProtectedString("Package: $packageName", isProtected = false)
                 )
                 val newEntry = KdbxEntry(
@@ -289,6 +288,46 @@ internal class VaultEntryWriteCoordinator(
             return persistSession()
         } finally {
             Arrays.fill(passwordChars, '0')
+        }
+    }
+
+    companion object {
+
+        /**
+         * ISSUE-P2-78（威胁建模 T-10）：凭据保存的 **URL 绑定形态分流**（纯函数，JVM 可测）。
+         *
+         * CM 保存通道把调用方 **origin**（而非裸域名）作为 `webDomain` 下传：
+         * 浏览器委派为 `https://…`，普通应用为 `android:apk-key-hash:…`。原实现无条件拼
+         * `"https://$domain"` → 落库为 `https://https://host` / `https://android:apk-key-hash:…`，
+         * 条目此后既不匹配 web 域也不匹配 `android://` 包名（完整性 / 可用性缺陷）。
+         *
+         * 分流规则（自动填充与 CM 双保存通道共用本收口，语义对齐）：
+         * - 空白 / `android:apk-key-hash:` origin → `android://<调用包名>`（无 web 域可绑定）；
+         * - `https://`（含 `http://`）web origin → **原样入库**（不再二次拼前缀）；
+         * - 其余按自动填充既有形态视为裸域名 → `https://<裸域名>`。
+         *
+         * @property entryUrl 落库 URL 字段值
+         * @property displayDomain 展示域名（标题用）与域匹配判定输入
+         * @property isWebBinding 是否为 web 域绑定（false 时域匹配维度不参与新凭据去重）
+         */
+        internal data class CredentialUrlBinding(
+            val entryUrl: String,
+            val displayDomain: String,
+            val isWebBinding: Boolean
+        )
+
+        internal fun resolveCredentialUrlBinding(webDomain: String?, packageName: String): CredentialUrlBinding {
+            val pkg = packageName.trim()
+            val raw = webDomain?.trim()?.trimEnd('/')
+            return when {
+                raw.isNullOrEmpty() -> CredentialUrlBinding("android://$pkg", pkg, isWebBinding = false)
+                raw.startsWith(com.keepasskey.app.passkey.CallingOriginResolver.APK_KEY_HASH_PREFIX) ->
+                    CredentialUrlBinding("android://$pkg", pkg, isWebBinding = false)
+                raw.startsWith("https://", ignoreCase = true) || raw.startsWith("http://", ignoreCase = true) ->
+                    CredentialUrlBinding(raw, DomainMatcher.extractDomain(raw), isWebBinding = true)
+                // 自动填充保存路径的既有形态：裸域名
+                else -> CredentialUrlBinding("https://$raw", raw, isWebBinding = true)
+            }
         }
     }
 }
