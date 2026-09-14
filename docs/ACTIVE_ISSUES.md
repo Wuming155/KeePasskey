@@ -51,7 +51,7 @@
 
 ---
 
-## P2 中危缺陷与协议/测试缺口（28 项）
+## P2 中危缺陷与协议/测试缺口（27 项）
 
 > **历史**：**ISSUE-P2-28 ~ P2-41**（往返丢字段与布尔/数值语义、MemoryProtection 读写语义、
 > KDF 缺参 fail-closed、isPackageMatch 的 android:// 硬约束、requireRiskNotice 接线、
@@ -67,8 +67,9 @@
 > （CM 通道验证升级为密码学绑定）随存量安全整改批次归档，见 §48；**ISSUE-P2-49** 的 AC①③ 同批完成、
 > **AC② 未闭环仍保留**（见该行 2026-09-14 进展批注）。
 >
-> **2026-09-15 闭环**：**ISSUE-P2-62**（密钥文件纯字节解析）与 **ISSUE-P2-50**（DAL 响应有界流式读取 +
-> 字节数裁决）随存量安全整改批次（续）归档，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §49。
+> **2026-09-15 闭环**：**ISSUE-P2-62**（密钥文件纯字节解析）、**ISSUE-P2-50**（DAL 响应有界流式读取 +
+> 字节数裁决）与 **ISSUE-P2-52**（选择器会话锁定对齐 + 空读 fail-safe）随存量安全整改批次（续）
+> 归档，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §49。
 >
 > **2026-09-13 第四轮独立复核定版（《SECURITY_RECHECK_2026-09.md》1272 行定版稿）**：
 > ① **升格 P1 排期**（条目编号留原地、闭环按编号归档）：`P2-48 / P2-49 / P2-51 / P2-53 / P2-61 / P2-63 /
@@ -208,7 +209,6 @@
 | 编号 | 来源 | 问题与位置（核实于 2026-09-13） | 验收标准 |
 |---|---|---|---|
 | ISSUE-P2-49 | 审计 F-12 | **（升格 MEDIUM·P1，第四轮定版）** KDF 逐项封顶为：内存 ≤4 GiB **且 ≤50% 动态堆**（`KdbxKdfParameterCodec.kt:171-174`；无 `largeHeap`，真机实际 M 上界 ≈128–256 MiB）、迭代 ≤2²⁴（**仅静态上界**）、并行度 ≤64、AES-KDF 轮数 ≤2²⁸；**无 `I×M` 联合预算**；派生（`KdbxFile.kt:135`）先于 Header HMAC（`:147`）⇒ **无需口令可达**（同步路径 `SyncDatabaseCodec.kt:55`）。墙钟量级待 `ISSUE-P2-80` 实测，**不得以推算替代** | ① codec 加 Argon2 `I×M` 与 AES-KDF `R` 联合预算（成本约一行，**可与 P0 批次同批实施**，但不改定级）；② 解锁派生加超时 / 取消；③ 不误拒合法库（附**官方参数域对照**——仓内现有 `EQUIVALENCE_MATRIX` 是"原生≡BC"交叉等价，非官方域对照）。**【2026-09-14 进展，见 `RESOLVED_LOG.md` §48.2】AC① 与 AC③ 已完成**（`validateArgon2Bounds` 加 `I×M` 联合预算 2^40 + 官方参数域对照 + 2 例单测，全量 1609 例全绿）；**AC② 未闭环**——阻塞式原生派生不可被协程 `withTimeout` 打断（等于无效纸面加固），且墙钟量级须 `ISSUE-P2-80` 真机实测，本轮**不引入**无效超时，**本条仍开放** |
-| ISSUE-P2-52 | 审计 F-22 | 选择器缓存**活** `KdbxEntry` 树，且在 `try` 之外读 `userName`；锁定时 `ProtectedString` 就地清零 → 抛 `IllegalStateException`（`AutofillPickerViewModel.kt:26-40,56-59`） | ① 选择器观察会话状态（锁定清空 / 解锁重载）或改为按选取经仓库读取；② 补回归断言；③ **不得**削弱 `ProtectedString.clear()`（就地清零是该设计的负载承载点） |
 | ISSUE-P2-53 | 审计 F-24 | CM 主通道（`passkey/`）对 `RuntimeIntegrityGate` **零命中**：完整性裁决在自动填充 fail-closed，却在 CM 通道 fail-open（`RuntimeIntegrityPolicy.kt:47` 自述含"禁止下发数据集"） | ① 在 `onBeginGet/CreateCredentialRequest` 或 `CredentialResponseAssembler` 统一收口；② 用例断言风险态下两条通道均拒绝下发；③ 不影响 CM 响应预算 |
 | ISSUE-P2-54 | 审计 F-05 | 依赖 CVSS 闸门仅 `workflow_dispatch` 触发，PR / push 路径不含依赖扫描（`.github/workflows/dependency-scan.yml:21-22`） | ① `on:` 补 `pull_request` 与 `push{branches:[main]}`（或拆"PR 快速任务 + main 全量"以控耗时）；② 设为分支保护必需检查；③ 验证缺失报告时 fail-closed |
 | ISSUE-P2-55 | 审计 F-06 | 发布签名口令等于仓库公开的示例值（`keystore.properties.example:6,8`） | ① 高熵口令对既有 PKCS#12 **只 re-key、不换密钥**（换密钥将使已安装用户无法覆盖升级）；② 示例改为不可误用占位符；③ `app/build.gradle.kts` 加构建期断言拒绝示例 / 弱口令 |

@@ -2993,11 +2993,11 @@ $ adb shell am instrument -w -e class com.keepasskey.app.security.QuickUnlockSea
 
 ---
 
-## §49 存量安全整改批次（续）：密钥文件纯字节解析 + DAL 有界流式读取（2026-09-15）
+## §49 存量安全整改批次（续）：密钥文件纯字节解析 + DAL 有界流式读取 + 选择器会话锁定对齐（2026-09-15）
 
-> **本批次缘起**：认领外部审计转登项 `ISSUE-P2-62`（审计 H2，敏感数据流批次）与
-> `ISSUE-P2-50`（审计 F-14）。两处均为「敏感数据 / 恶意输入面」的确定性缺口，
-> JVM 侧即可闭环（不涉 Android 运行时差异），无需设备。
+> **本批次缘起**：认领外部审计转登项 `ISSUE-P2-62`（审计 H2，敏感数据流批次）、
+> `ISSUE-P2-50`（审计 F-14）与 `ISSUE-P2-52`（审计 F-22）。三处均为「敏感数据 / 恶意输入面」
+> 的确定性缺口，JVM 侧即可闭环（不涉 Android 运行时差异），无需设备。
 
 ### 49.1 交付清单
 
@@ -3005,22 +3005,24 @@ $ adb shell am instrument -w -e class com.keepasskey.app.security.QuickUnlockSea
 |---|:--:|---|---|---|
 | **ISSUE-P2-62** | P2 | `KdbxKeyFile.extractKey` 把**整个密钥文件**转为不可擦 `String`（`raw.toString(Charsets.UTF_8)`），每次解锁尝试与保存都重放；寿命上界为下次 GC | 改**纯字节解析**：`extractKey(raw: ByteArray)` 全链路零 `String` 物化——ASCII 头探测（`<?xml` / `<KeyFile`）、XML 元素定位、v1.0 Base64 / v2.0 Hex 剥离与解码均在 `ByteArray` 上进行，hex 解码走 `kotlin.io.encoding.Base64`/自实现字节 hex；`toString` 仅保留 ASCII 分类校验（无法避免的 String 显式标注）；四类解析梯子（XML v1.0 / v2.0 / 裸 32B / 64-hex / 任意二进制 SHA-256）结果与原实现逐字一致 | 审计 H2；敏感数据铁律（`AGENTS.md` §3.2） |
 | **ISSUE-P2-50** | P2 | DAL 响应体先 `body?.string()` **整份物化**，之后才比较 `length`（且为**字符数**，多字节字符下与字节上限错位）→ 恶意端点可借超大响应撑爆内存 | `DigitalAssetLinksVerifier` 改**有界流式读取**：新增 `readBounded(input, limit)`（`MAX_BODY_BYTES = 256 KiB` 封顶，读到上限 +1 即判越界、立即中止、不继续消费剩余字节），并按**字节数**裁决（消除字符数/字节数错位）；空响应体显式拒绝 | 审计 F-14；fail-closed 语义保持（越界 / 空 → `NOT_VERIFIED`） |
+| **ISSUE-P2-52** | P2 | 选择器缓存**活** `KdbxEntry` 树：锁定时 `ProtectedString` 就地清零后，缓存条目的任何 `title`/`userName`/`url` 读取都会抛 `IllegalStateException`；且 `resolveCredentials` 在 `try` 之外读 `userName` | `AutofillPickerViewModel` ① 注册 `SessionLockObserver`（锁定即清空缓存列表；选择器为一次性 Activity，解锁后重开即重新拉取，无需解锁重载）；② `search` 与 `resolveCredentials` 的非敏感字段读取 `runCatching` fail-safe（清零→通知观察者的固有竞态窗口内按空结果 / 空用户名降级）；③ `onCleared` 注销观察者。**不削弱** `ProtectedString.clear()`（只调缓存持有与读取侧容错） | 审计 F-22；机制对齐 §48 `P2-65` 四处 ViewModel 的观察者模式 |
 
 ### 49.2 验收证据
 
 ```powershell
 .\gradlew.bat test --rerun-tasks --max-workers=1
-# → BUILD SUCCESSFUL in 4m 32s；114 actionable tasks: 114 executed（全部真实执行）
-#   结果汇总（build/test-results/**/TEST-*.xml）：tests=1631 failures=0 errors=0 skipped=13
-#   （app 879 / core 65 / crypto 116 / database 368 / sync 203）
+# → BUILD SUCCESSFUL in 4m 52s；114 actionable tasks: 114 executed（全部真实执行）
+#   结果汇总（build/test-results/**/TEST-*.xml）：tests=1633 failures=0 errors=0 skipped=13
+#   （app 881 / core 65 / crypto 116 / database 368 / sync 203）
 ```
 
-**新增用例（共 +5 例）**：
+**新增用例（共 +7 例）**：
 
 | 模块 | 用例 | 覆盖 |
 |---|---|---|
 | `database` | `KdbxKeyFileTest`（+2） | ① v1.0 跨行 + 大量空白 Base64 的字节解析与原 String 版逐字一致（回归锁）；② 非法 Base64 `Data` 抛 `KdbxCorruptFileException` |
 | `app` | `DigitalAssetLinksVerifierTest`（+3） | ① 2 MiB 响应（> 256 KiB 上限）被拒且不被整体物化 → `NOT_VERIFIED`；② **恰好等于**字节上限且内容合法仍可校验通过（边界不误拒，字节数断言精确抵平 `MAX_BODY_BYTES`）；③ 空响应体拒绝 |
+| `app` | `AutofillPickerViewModelSessionLockTest`（+2，新文件） | ① 会话锁定 → 选择器缓存条目清空；② 锁定竞态窗口内已清零条目：`search` 按空结果降级、`resolveCredentials` 按空用户名降级（均不抛 `IllegalStateException`，核心负例） |
 
 ### 49.3 已知边界与口径（如实声明）
 
@@ -3034,4 +3036,8 @@ $ adb shell am instrument -w -e class com.keepasskey.app.security.QuickUnlockSea
 3. **测试字节对齐**：边界用例的填充公式为 `pad = MAX − len(dalJson)`（`body = "[" + pad空格 + dalJson().substring(1)`
    的总字节数 = `pad + len`），曾因误写 `− 2` 偏差 2 字节（`expected:<262144> but was:<262142>`），
    已修正并留公式注释防回归。
+4. **`P2-52` 的容错边界**：fail-safe 只覆盖**非敏感投影字段**（`title` / `userName` / `url`）的
+   读取侧；`resolveCredentials` 的密码解密路径本就在 `try` 内（`getEntryPasswordChars` 失败按
+   空密码降级，既有语义）。锁定后选择器清空列表意味着「锁定瞬间打开的选择器」呈现空列表——
+   用户解锁后重开即恢复，属 fail-closed 的预期 UX。
 

@@ -11,8 +11,8 @@
 ## 1. 版本基线（摘要）
 
 - 测试 / 构建 / CI 当前全绿（具体版本、例数、残余面见 [`RESOLVED_LOG.md`](docs/RESOLVED_LOG.md)）。
-  单测基线（2026-09-15，§49 批次后）：**1631 例 / 0 失败 / 0 错误 / 13 跳过**
-  （app 879 / core 65 / crypto 116 / database 368 / sync 203；`--rerun-tasks --max-workers=1` 强制真实执行）；
+  单测基线（2026-09-15，§49 批次后）：**1633 例 / 0 失败 / 0 错误 / 13 跳过**
+  （app 881 / core 65 / crypto 116 / database 368 / sync 203；`--rerun-tasks --max-workers=1` 强制真实执行）；
   设备侧基线（2026-09-14，§47 批次后）：**32 例 / 0 失败 / 0 跳过**（`app` 15 + `database` 7 +
   `sync` 3 + `crypto` 7），已在 **arm64 真机**（Redmi 4X / LineageOS / Android 17 / **API 37**）全量复跑通过；
   此前既定环境为 x86_64 / API 36.1 模拟器（§34 / §36 / §46）。`app` 15 例含 `QuickUnlockSealDowngradeDeviceTest`

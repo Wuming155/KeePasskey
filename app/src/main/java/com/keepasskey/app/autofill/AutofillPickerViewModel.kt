@@ -17,10 +17,25 @@ import javax.inject.Inject
  *
  * 职责：一次性拉取库内条目（**仅非敏感投影**，不含密码）供搜索，并在用户选中后
  * **按需单条解密**该条目的密码（零秘密热路径：列表与搜索期间不解密任何密码）。
+ *
+ * ### ISSUE-P2-52（审计 F-22）：会话状态观察 + 空读 fail-safe
+ * - **缓存的是「活」`KdbxEntry` 树**：锁定时 `DatabaseSession` 会对库树 `ProtectedString`
+ *   就地清零（**先清零、后通知观察者**，顺序见 `DatabaseSession.lock()`），本 VM 缓存的
+ *   活树在锁定后任何 `title` / `userName` / `url` 读取都会抛 `IllegalStateException`。
+ *   故本 VM 注册 [com.keepasskey.core.session.SessionLockObserver]：锁定即清空缓存列表
+ *   （选择器为一次性 Activity，解锁后重开即重新拉取，无需「解锁重载」）。
+ * - **空读 fail-safe**：观察者清空列表与 `clearSensitiveData()` 之间存在固有竞态窗口
+ *   （清零在前、通知在后），选中回调可能读到已清零条目——`search` 与
+ *   `resolveCredentials` 的非敏感字段读取一律 `runCatching` 兜底（空结果 / 空用户名），
+ *   绝不让锁定竞态演变为选择器崩溃。
+ * - **不削弱** `ProtectedString.clear()`（就地清零是该设计的负载承载点）——本整改只调整
+ *   缓存持有与读取侧容错，不触碰清零语义。
  */
 @HiltViewModel
 class AutofillPickerViewModel @Inject constructor(
-    private val vaultRepository: VaultRepository
+    private val vaultRepository: VaultRepository,
+    // ISSUE-P2-52：会话锁定观察者注册点（null 仅用于纯 JVM 单测）
+    private val databaseSession: com.keepasskey.database.session.DatabaseSession? = null
 ) : ViewModel() {
 
     private val _entries = MutableStateFlow<List<KdbxEntry>>(emptyList())
@@ -28,7 +43,14 @@ class AutofillPickerViewModel @Inject constructor(
     /** 库内条目光栅（Core 层直出，密码仍为 [com.keepasskey.core.security.ProtectedString] 密文态） */
     val entries: StateFlow<List<KdbxEntry>> = _entries.asStateFlow()
 
+    /** ISSUE-P2-52：锁定即清空缓存活树（清零后的条目任何字段读取都会抛异常） */
+    private val sessionLockObserver = com.keepasskey.core.session.SessionLockObserver {
+        _entries.value = emptyList()
+    }
+
     init {
+        // ISSUE-P2-52：注册会话锁定观察者（须在 [sessionLockObserver] 声明之后）
+        databaseSession?.addLockObserver(sessionLockObserver)
         viewModelScope.launch {
             _entries.value = try {
                 vaultRepository.getKdbxEntries()
@@ -39,7 +61,16 @@ class AutofillPickerViewModel @Inject constructor(
         }
     }
 
-    fun search(query: String): List<KdbxEntry> = AutofillEntrySearch.filter(_entries.value, query)
+    override fun onCleared() {
+        databaseSession?.removeLockObserver(sessionLockObserver)
+        super.onCleared()
+    }
+
+    fun search(query: String): List<KdbxEntry> =
+        // ISSUE-P2-52：锁定竞态下缓存条目可能已清零（title/userName 读取抛异常）→ 按空结果处理
+        runCatching { AutofillEntrySearch.filter(_entries.value, query) }
+            .onFailure { AppLog.w(TAG, "选择器检索命中已清零条目，按空结果处理", it) }
+            .getOrDefault(emptyList())
 
     /**
      * 按需解密单个条目的用户名与密码（用户显式选中后调用）。
@@ -53,10 +84,14 @@ class AutofillPickerViewModel @Inject constructor(
      */
     suspend fun resolveCredentials(entryId: String): Credentials? {
         if (entryId.isBlank()) return null
-        val username = _entries.value
-            .firstOrNull { it.id.toHexString() == entryId }
-            ?.userName
-            .orEmpty()
+        // ISSUE-P2-52：用户名读取 fail-safe——锁定竞态窗口内条目可能已清零
+        // （readString 抛 IllegalStateException），按空用户名降级而非崩溃
+        val username = runCatching {
+            _entries.value
+                .firstOrNull { it.id.toHexString() == entryId }
+                ?.userName
+                .orEmpty()
+        }.getOrDefault("")
 
         val chars = try {
             vaultRepository.getEntryPasswordChars(entryId)

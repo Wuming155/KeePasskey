@@ -1,0 +1,85 @@
+package com.keepasskey.app.autofill
+
+import com.keepasskey.app.data.repository.FakeVaultRepository
+import com.keepasskey.app.data.repository.VaultRepository
+import com.keepasskey.core.model.KdbxConstants
+import com.keepasskey.core.model.KdbxEntry
+import com.keepasskey.core.model.KdbxUuid
+import com.keepasskey.core.security.ProtectedString
+import com.keepasskey.database.session.DatabaseSession
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+/**
+ * ISSUE-P2-52（审计 F-22）回归：选择器缓存的「活」`KdbxEntry` 树与会话生命周期的对齐。
+ *
+ * - 锁定时 `DatabaseSession` 先对库树 `ProtectedString` 就地清零、后通知观察者——
+ *   VM 必须注册 [com.keepasskey.core.session.SessionLockObserver] 在锁定时清空缓存，
+ *   否则锁定后任何 `title` / `userName` 读取都会抛 `IllegalStateException`。
+ * - 清零与通知之间存在固有竞态窗口：`search` / `resolveCredentials` 的非敏感字段读取
+ *   必须 fail-safe（空结果 / 空用户名），不得让锁定竞态演变为选择器崩溃。
+ */
+class AutofillPickerViewModelSessionLockTest {
+
+    @Test
+    fun `会话锁定后选择器缓存条目被清空`() {
+        val session = DatabaseSession()
+        val vm = AutofillPickerViewModel(FakeVaultRepository(), session)
+
+        // init 异步拉取（Fake 即时返回）→ 先等待列表就绪
+        runBlocking {
+            withContext(Dispatchers.IO) {
+                var waited = 0L
+                while (vm.entries.value.isEmpty() && waited < 5_000) {
+                    Thread.sleep(10)
+                    waited += 10
+                }
+            }
+        }
+        assertTrue("测试前提：选择器应已缓存条目", vm.entries.value.isNotEmpty())
+
+        runBlocking { session.lock() }
+
+        assertTrue("锁定后选择器缓存必须清空（活树已清零，继续持有即读即炸）", vm.entries.value.isEmpty())
+    }
+
+    @Test
+    fun `锁定竞态下读取已清零条目_search与用户名按空降级而非崩溃`() = runBlocking {
+        // 直接构造「已被锁定清零」的条目，模拟清零→通知窗口内的缓存内容
+        val clearedEntry = KdbxEntry(
+            id = KdbxUuid.random(),
+            fields = mapOf(
+                KdbxConstants.Fields.TITLE to ProtectedString("Title").apply { clear() },
+                KdbxConstants.Fields.USER_NAME to ProtectedString("user@example.com").apply { clear() },
+                KdbxConstants.Fields.URL to ProtectedString("https://example.com").apply { clear() }
+            )
+        )
+        val repo = object : VaultRepository by FakeVaultRepository() {
+            override suspend fun getKdbxEntries(): List<KdbxEntry> = listOf(clearedEntry)
+        }
+        val vm = AutofillPickerViewModel(repo, null)
+
+        // 等待 init 异步拉取完成
+        withContext(Dispatchers.IO) {
+            var waited = 0L
+            while (vm.entries.value.isEmpty() && waited < 5_000) {
+                Thread.sleep(10)
+                waited += 10
+            }
+        }
+        assertEquals(1, vm.entries.value.size)
+
+        // search 命中已清零条目：title/userName 读取本会抛 IllegalStateException → 按空结果降级
+        assertEquals(emptyList<KdbxEntry>(), vm.search("Title"))
+
+        // resolveCredentials 读取已清零条目的 userName：按空用户名降级而非崩溃
+        val entryId = vm.entries.value.first().id.toHexString()
+        val creds = vm.resolveCredentials(entryId)
+        assertEquals("", creds?.username)
+        assertEquals("", creds?.password)
+    }
+}
