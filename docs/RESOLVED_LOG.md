@@ -2993,12 +2993,12 @@ $ adb shell am instrument -w -e class com.keepasskey.app.security.QuickUnlockSea
 
 ---
 
-## §49 存量安全整改批次（续）：密钥文件纯字节解析 + DAL 有界流式读取 + 选择器会话锁定对齐 + CM 保存 URL 分流（2026-09-15）
+## §49 存量安全整改批次（续）：密钥文件纯字节解析 + DAL 有界流式读取 + 选择器会话锁定对齐 + CM 保存 URL 分流 + 依赖扫描触发面（2026-09-15）
 
 > **本批次缘起**：认领外部审计转登项 `ISSUE-P2-62`（审计 H2，敏感数据流批次）、
-> `ISSUE-P2-50`（审计 F-14）、`ISSUE-P2-52`（审计 F-22）与威胁建模项 `ISSUE-P2-78`（T-10）。
-> 四处均为「敏感数据 / 恶意输入面 / 完整性」的确定性缺口，JVM 侧即可闭环
-> （不涉 Android 运行时差异），无需设备。
+> `ISSUE-P2-50`（审计 F-14）、`ISSUE-P2-52`（审计 F-22）、威胁建模项 `ISSUE-P2-78`（T-10）
+> 与审计项 `ISSUE-P2-54`（F-05，CI 变更）。前四项为「敏感数据 / 恶意输入面 / 完整性」的确定性缺口，
+> JVM 侧即可闭环（不涉 Android 运行时差异），无需设备；`P2-54` 为工作流触发面整改。
 
 ### 49.1 交付清单
 
@@ -3008,6 +3008,7 @@ $ adb shell am instrument -w -e class com.keepasskey.app.security.QuickUnlockSea
 | **ISSUE-P2-50** | P2 | DAL 响应体先 `body?.string()` **整份物化**，之后才比较 `length`（且为**字符数**，多字节字符下与字节上限错位）→ 恶意端点可借超大响应撑爆内存 | `DigitalAssetLinksVerifier` 改**有界流式读取**：新增 `readBounded(input, limit)`（`MAX_BODY_BYTES = 256 KiB` 封顶，读到上限 +1 即判越界、立即中止、不继续消费剩余字节），并按**字节数**裁决（消除字符数/字节数错位）；空响应体显式拒绝 | 审计 F-14；fail-closed 语义保持（越界 / 空 → `NOT_VERIFIED`） |
 | **ISSUE-P2-52** | P2 | 选择器缓存**活** `KdbxEntry` 树：锁定时 `ProtectedString` 就地清零后，缓存条目的任何 `title`/`userName`/`url` 读取都会抛 `IllegalStateException`；且 `resolveCredentials` 在 `try` 之外读 `userName` | `AutofillPickerViewModel` ① 注册 `SessionLockObserver`（锁定即清空缓存列表；选择器为一次性 Activity，解锁后重开即重新拉取，无需解锁重载）；② `search` 与 `resolveCredentials` 的非敏感字段读取 `runCatching` fail-safe（清零→通知观察者的固有竞态窗口内按空结果 / 空用户名降级）；③ `onCleared` 注销观察者。**不削弱** `ProtectedString.clear()`（只调缓存持有与读取侧容错） | 审计 F-22；机制对齐 §48 `P2-65` 四处 ViewModel 的观察者模式 |
 | **ISSUE-P2-78** | P2 | **CM 保存路径写入畸形 URL**：`KeePasskeyCredentialProviderService` 把调用方 **origin**（浏览器委派 `https://…` / 普通应用 `android:apk-key-hash:…`）作为 `EXTRA_WEB_DOMAIN` 下传，`PasswordSaveActivity` 原样透传，`VaultEntryWriteCoordinator.saveAutofillCredential` **无条件**拼 `"https://$domain"` → 落库 `https://https://host` / `https://android:apk-key-hash:…`，条目此后既不匹配 web 域也不匹配 `android://` 包名 | 新增纯函数收口 `VaultEntryWriteCoordinator.resolveCredentialUrlBinding`（自动填充与 CM 双保存通道共用）：空白 / apk-key-hash origin → `android://<调用包名>`；`https://`（含 `http://`）origin → **原样入库**不二次拼前缀；裸域名（自动填充既有形态）→ `https://<裸域名>`；`displayDomain` 归一为裸域名供标题与域匹配；负例断言任何形态不得产生 `https://` 二次叠加或 apk-key-hash 尾巴混入 | 威胁建模 T-10；与自动填充保存路径语义对齐（AC①） |
+| **ISSUE-P2-54** | P2 | 依赖 CVSS 闸门仅 `workflow_dispatch` 触发，PR / push 路径不含依赖扫描 | `dependency-scan.yml` 的 `on:` 补 `pull_request` 与 `push{branches:[main]}`（AC①，采纳「直接补触发」路线，扫描完整性优先于耗时）；CVSS 缺失报告 fail-closed 经本地实测复核：对不存在路径执行 `check_dependency_cvss.py` → `[FATAL] 报告不存在…fail-closed` 退出码 1（AC③，`if: always()` + `if-no-files-found: error` 既有机制不变） | 审计 F-05；AC② 留痕见 49.3.6 |
 
 ### 49.2 验收证据
 
@@ -3047,4 +3048,17 @@ $ adb shell am instrument -w -e class com.keepasskey.app.security.QuickUnlockSea
    历史上已被写坏的 `https://https://host` 条目不在本批做数据迁移（`extractDomain` 会把它
    归一为 `https`，本就无法可靠还原原域）——用户可在条目编辑页手动修正 URL。
    `FakeVaultRepository` 中的同形测试替身逻辑**未同步**（测试假数据通道，不承载 AC 语义）。
+6. **`P2-54` 的 AC②（分支保护必需检查）未闭环——本环境无权限，如实留痕**：本地 `gh` PAT
+   对 `repos/.../branches/main/protection` 返回 HTTP 403（Resource not accessible by personal
+   access token），分支保护属仓库管理面动作、无法经工作流文件声明。**待仓库所有者**在
+   GitHub → Settings → Branches → Branch protection rule（main）中把
+   `OWASP Dependency-Check` 设为必需状态检查（并按需把 `build.yml` 各 job 一并纳入）。
+   该子项不因留痕而视为完成；后续持管理员凭据的环境应补做并把本行闭环。
+7. **本批 ⑤（P2-54）为纯 CI 工作流变更**：未触碰任何 Kotlin / 资源代码，单测基线
+   （1639 / 0 / 0 / 13）与 release 产物不受影响，未重跑全量测试与 `assembleRelease`；
+   验证手段为 YAML 解析（`workflow_dispatch / pull_request / push` 三触发齐备）+
+   fail-closed 脚本实测（见交付清单行）。
+8. **顺带修正上批漏删行**：`ISSUE-P2-53`（§48 已闭环）的正文行在 `ACTIVE_ISSUES.md`
+   审计表内漏删，本批发现后补删并把 P2 计数修正为 24（前序批注的 2026-09-14 闭环
+   声明与 RESOLVED_LOG §48.1 为准，非重新闭环）。
 

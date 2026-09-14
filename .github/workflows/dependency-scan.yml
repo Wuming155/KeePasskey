@@ -8,9 +8,10 @@
 #    不跨大版本升级（上游已有新 major，升级需另行验证，见 docs/.handoff/ISSUE-P3-09.md）。
 # 3. 除本巡检外，构建/测试/Lint 门禁与 Rust 供应链闸门见 .github/workflows/build.yml。
 #
-# 触发策略（**手动优先**，保持既有取舍）：
-# - 仅 `workflow_dispatch`：云端定时扫描已停用，需要时到 Actions 页手动 Run workflow；
-#   如需自动巡检，在本文件 `on:` 下补回 `schedule` / `push` / `pull_request` 段即可。
+# 触发策略（ISSUE-P2-54 整改：PR / push 路径纳入依赖扫描）：
+# - `pull_request` + `push{branches:[main]}`：PR 与主干推送均触发全量扫描
+#   （首次 NVD 缓存被 runner 缓存吸收后增量扫描耗时可控；扫描完整性优先于耗时）；
+# - `workflow_dispatch`：随时可到 Actions 页手动 Run workflow；
 # - 报告以 artifact 归档并按 CVSS 阈值阻断；SARIF 上传 GitHub Code Scanning
 #   （Security 页可视化）；误报登记 suppression 白名单
 #   （.github/owasp-dependency-suppressions.xml，当前为空白名单）。
@@ -20,6 +21,9 @@ name: dependency-scan
 
 on:
   workflow_dispatch:
+  pull_request:
+  push:
+    branches: [main]
 
 permissions:
   contents: read
