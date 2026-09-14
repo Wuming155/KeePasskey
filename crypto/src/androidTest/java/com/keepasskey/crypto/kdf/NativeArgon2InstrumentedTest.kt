@@ -71,6 +71,21 @@ class NativeArgon2InstrumentedTest {
             "argon2"
         )
 
+        /**
+         * 把平台**短 ABI 目录名**（`ApplicationInfo.nativeLibraryDir` 末段）归一为 APK 内
+         * **完整 ABI 目录名**（zip 条目 `lib/<abi>/`）。
+         *
+         * 依据 AOSP `VMRuntime.getInstructionSet()`：`arm64-v8a → arm64`、`armeabi-v7a / armeabi → arm`，
+         * `x86` / `x86_64` 与自身同名。二者**不是同一命名空间**——x86_64 模拟器上恰好同名（故此前一直为绿），
+         * arm64 真机上不同名（2026-09-14 真机实测：本机 `nativeLibraryDir` 末段为 `arm64`，
+         * 而 APK 条目为 `lib/arm64-v8a/libkeepasskey_argon2.so`）。
+         */
+        private fun apkAbiDirNameFor(nativeLibraryDirName: String): String = when (nativeLibraryDirName) {
+            "arm64" -> "arm64-v8a"
+            "arm" -> "armeabi-v7a"
+            else -> nativeLibraryDirName
+        }
+
         // ---------- 冻结向量输入（来源：crypto/src/test/resources/argon2-interop/argon2-bc-vectors.json
         //            与 Argon2BcVectorTest.kt / NativeArgon2HostJniTest.kt 的 private 常量）----------
 
@@ -326,7 +341,10 @@ class NativeArgon2InstrumentedTest {
         //      故「磁盘上 exists()」不是有效判据——只作信息记录，不作断言。
         val appInfo = InstrumentationRegistry.getInstrumentation().targetContext.applicationInfo
         val nativeDir = File(appInfo.nativeLibraryDir)
-        val loadedAbi = nativeDir.name
+        // nativeLibraryDir 末段是平台短 ABI 名（arm64 / arm / x86 / x86_64），
+        // 须经 apkAbiDirNameFor 归一为 APK zip 条目使用的完整 ABI 名
+        val nativeDirAbi = nativeDir.name
+        val loadedAbi = apkAbiDirNameFor(nativeDirAbi)
         val libFileName = System.mapLibraryName(NATIVE_LIB_NAME)
         val apkPath = appInfo.sourceDir
         val apkEntryName = "lib/$loadedAbi/$libFileName"
@@ -336,7 +354,8 @@ class NativeArgon2InstrumentedTest {
             zip.getInputStream(requireNotNull(entry)).use { it.readBytes().size }
         }
         println(
-            "[NativeArgon2 设备侧加载证据] loadedAbi=$loadedAbi" +
+            "[NativeArgon2 设备侧加载证据] nativeLibraryDir末段=$nativeDirAbi" +
+                ", apkAbiDir=$loadedAbi" +
                 ", supportedAbis=${Build.SUPPORTED_ABIS.joinToString()}" +
                 ", nativeLibraryDir=${nativeDir.absolutePath}" +
                 ", apk=$apkPath" +

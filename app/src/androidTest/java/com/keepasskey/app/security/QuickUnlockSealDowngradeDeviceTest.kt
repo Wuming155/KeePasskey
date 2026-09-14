@@ -1,5 +1,6 @@
 package com.keepasskey.app.security
 
+import android.os.Build
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.biometric.BiometricManager
@@ -40,8 +41,11 @@ import org.junit.runner.RunWith
  * 模拟器**未录入** Class 3 强生物识别，而生产封印密钥规范
  * （`setUserAuthenticationParameters(0, AUTH_BIOMETRIC_STRONG)`）在**生成时**即要求设备已录入
  * 强生物识别——故本用例在设备侧实测三件事：
- * 1. **落位探测基线**：真实 AndroidKeyStore 密钥在模拟器上的实测落位为 `SOFTWARE`
- *    （本条目问题前提在 Android 运行时成立，非推算）；
+ * 1. **落位探测基线（环境分支）**：真实 AndroidKeyStore 密钥的实测落位必须与设备硬件能力一致——
+ *    模拟器（无 TEE / StrongBox）为 `SOFTWARE`（本条目问题前提在 Android 运行时成立，非推算），
+ *    真机（有 TEE）为 `TRUSTED_ENVIRONMENT` / `STRONGBOX`。**原实现硬编码 `SOFTWARE`**，
+ *    等于把模拟器环境语义当成设备侧通用语义，在真机上必然失败（2026-09-14 arm64 真机实测：
+ *    `expected:<SOFTWARE> but was:<TRUSTED_ENVIRONMENT>`），已改为环境分支断言；
  * 2. **fail-closed 封印拒绝**：未录入强生物识别时，生产默认供给链（建钥）失败 →
  *    不请求降级确认、不建立封印（与 [UnlockAuthPolicy.canSeal] 的 fail-closed 结论一致）；
  * 3. **降级确认闸门**（注入假 `SOFTWARE` 落位）：真实 Android 运行时下「确认 → 记录持久化」
@@ -77,7 +81,7 @@ class QuickUnlockSealDowngradeDeviceTest {
     )
 
     @Test
-    fun `模拟器AndroidKeyStore真实密钥落位实测为SOFTWARE`() {
+    fun `AndroidKeyStore真实密钥落位在设备侧返回真实等级`() {
         val keystoreManager = KeystoreManager(context, DebugLogBuffer())
         val authManager = BiometricAuthManager(keystoreManager, AllowAllIntegrityGate())
         try {
@@ -89,12 +93,33 @@ class QuickUnlockSealDowngradeDeviceTest {
                 invalidateOnBiometricEnrollment = false
             )
             val level = authManager.getKeySecurityLevelForDatabase(PROBE_DB_ID)
-            assertEquals(
-                "模拟器（软件 Keystore）真实密钥落位实测应为 SOFTWARE（ISSUE-P1-22 设备侧基线；" +
-                    "探测经 SecretKeyFactory——原 KeyFactory 误用恒 UNKNOWN 已同批整改）",
-                KeystoreManager.KeySecurityLevel.SOFTWARE,
+            val softwareKeystore = isSoftwareKeystoreEnvironment()
+            println(
+                "[Keystore 落位设备侧实测] level=$level, 软件Keystore环境=$softwareKeystore" +
+                    ", MODEL=${Build.MODEL}, PRODUCT=${Build.PRODUCT}, HARDWARE=${Build.HARDWARE}" +
+                    ", SDK=${Build.VERSION.SDK_INT}, ABI=${Build.SUPPORTED_ABIS.joinToString()}"
+            )
+            assertNotEquals(
+                "落位探测不得为 UNKNOWN（UNKNOWN 即探测链路失效——原 KeyFactory 误用恒 UNKNOWN 的回归锁；" +
+                    "探测经 SecretKeyFactory 已同批整改）",
+                KeystoreManager.KeySecurityLevel.UNKNOWN,
                 level
             )
+            if (softwareKeystore) {
+                assertEquals(
+                    "软件 Keystore 环境（模拟器）真实密钥落位实测应为 SOFTWARE" +
+                        "（ISSUE-P1-22 问题前提的设备侧证据）",
+                    KeystoreManager.KeySecurityLevel.SOFTWARE,
+                    level
+                )
+            } else {
+                assertTrue(
+                    "真机（非模拟器）真实密钥落位应为硬件级 TEE / StrongBox，实测 $level" +
+                        "（若落位为 SOFTWARE，须先核实该机是否确无硬件密钥库，不得直接放宽断言）",
+                    level == KeystoreManager.KeySecurityLevel.TRUSTED_ENVIRONMENT ||
+                        level == KeystoreManager.KeySecurityLevel.STRONGBOX
+                )
+            }
         } finally {
             keystoreManager.deleteKey(PROBE_ALIAS)
         }
@@ -233,5 +258,18 @@ class QuickUnlockSealDowngradeDeviceTest {
         // 落位探测用：与封印密钥同一别名规则（KEY_ALIAS + "_" + dbId），dbId 专用于本用例
         const val PROBE_DB_ID = "db_p1_22_probe"
         const val PROBE_ALIAS = "${KeystoreManager.BIOMETRIC_KEY_ALIAS}_$PROBE_DB_ID"
+
+        /**
+         * 判定当前是否为「软件 Keystore 环境」（模拟器 / 无硬件密钥库）：决定落位断言分支。
+         *
+         * 平台**未**提供「本机是否具备 TEE」的公开查询（仅有 `FEATURE_STRONGBOX_KEYSTORE`），
+         * 故以模拟器特征判定：`PRODUCT` / `HARDWARE` 为 AOSP 模拟器取值（`sdk*` / `ranchu` / `goldfish`），
+         * `FINGERPRINT` 含 `generic`（旧版 AOSP 镜像）。真机三者均不命中。
+         */
+        fun isSoftwareKeystoreEnvironment(): Boolean =
+            Build.PRODUCT.contains("sdk", ignoreCase = true) ||
+                Build.HARDWARE.contains("ranchu", ignoreCase = true) ||
+                Build.HARDWARE.contains("goldfish", ignoreCase = true) ||
+                Build.FINGERPRINT.contains("generic", ignoreCase = true)
     }
 }

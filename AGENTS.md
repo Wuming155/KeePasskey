@@ -13,8 +13,10 @@
 - 测试 / 构建 / CI 当前全绿（具体版本、例数、残余面见 [`RESOLVED_LOG.md`](docs/RESOLVED_LOG.md)）。
   单测基线（2026-09-13，§46 批次后）：**1595 例 / 0 失败 / 0 错误 / 13 跳过**
   （app 852 / core 65 / crypto 116 / database 359 / sync 203；`--rerun-tasks --max-workers=1` 强制真实执行）；
-  设备侧基线：`app` **15 例**（+3：`QuickUnlockSealDowngradeDeviceTest` 软件级 Keystore 落位实测 /
-  fail-closed 封印拒绝 / 降级确认闸门，见 §46） + `sync` **3 例**（x86_64 / API 36.1 模拟器，见 §36）；大附件（>1 MiB）已落盘
+  设备侧基线（2026-09-14，§47 批次后）：**32 例 / 0 失败 / 0 跳过**（`app` 15 + `database` 7 +
+  `sync` 3 + `crypto` 7），已在 **arm64 真机**（Redmi 4X / LineageOS / Android 17 / **API 37**）全量复跑通过；
+  此前既定环境为 x86_64 / API 36.1 模拟器（§34 / §36 / §46）。`app` 15 例含 `QuickUnlockSealDowngradeDeviceTest`
+  软件级 Keystore 落位实测 / fail-closed 封印拒绝 / 降级确认闸门（见 §46；该用例经 §47 更名与断言口径更正）；大附件（>1 MiB）已落盘
   磁盘缓存，清理为**冷启动 + 会话锁定**两层（§35、§38）；快速解锁封印载荷
   已升级为复合帧格式（主密码 + 密钥文件一并封印，历史格式向后兼容，§29.1）；解锁失败重试节流
   默认关闭并支持开关与自定义最长锁定时长（§29.2）；FLAG_SECURE 防截屏改为开关即生效模型
@@ -144,7 +146,10 @@ KeePasskey 是一款原生 Kotlin 开发的现代化 Android 密码管理器。�
   `KdbxAttachment.clear()` 对**落盘项**不动作（其字节由多个引用者共享），生命周期由 store 统一收口。
 - 条件写依赖服务端：AWS S3 原子生效；少数兼容存储降级为 HEAD 预检 + 无条件 PUT。
 - `ProtectedString` 驻留加密为纵深防御层；持有进程密钥或任意代码执行者仍可在读取瞬间截获明文。
-- 原生内核为 Rust（代价是体积，收益是秘密确定性擦除、Argon2 优于纯 Java 路径）；arm64 真机 + 真实 `.kdbx` 端到端解锁待补（见 ACTIVE_ISSUES）。
+- 原生内核为 Rust（代价是体积，收益是秘密确定性擦除、Argon2 优于纯 Java 路径）；**arm64 真机已验证**
+  （2026-09-14：原生内核 JNI 通路 / 与 BouncyCastle 逐字节一致 / R1 性能闸门 + 真实语料端到端解锁 2/2，
+  见 RESOLVED_LOG §47）。**仍未覆盖**：官方客户端（`keepassxc-cli` / `pykeepass`）对**本仓产物**的端到端
+  互操作对拍（该口径以 §1 互操作证据纪律为准），以及 `ISSUE-P2-80` 的 KDF 墙钟 / 内存闸门**真机分路径实测**。
 - 原生侧 `System.loadLibrary` 经 `NativeCryptoLibrary.loaded` 统一懒加载；各绑定 `available` 须先求值该属性再发起原生调用。
 - `CipherInputStream` 对填充非法/长度非整数倍抛 `IOException`（非静默 EOF）；新增 CBC 流式实现须遵守同一基线。
 - 窗口级遮挡触摸过滤（`setFilterTouchesWhenObscured`）在 `MainActivity` 经 `FlagSecureGuard` 施加于 `decorView`；
@@ -153,11 +158,13 @@ KeePasskey 是一款原生 Kotlin 开发的现代化 Android 密码管理器。�
   `ApplyObscuredTouchFilter()`；`BaseCredentialActivity` 体系（`PasswordSaveActivity` / `PasswordFillActivity` /
   `PasskeyAssertionActivity` / `PasskeyCreateActivity`）则直接 `setHideOverlayWindows(true)` 屏蔽悬浮窗覆盖
   （API 31+ 强于触摸过滤，覆盖被完全阻断故无需再叠触摸过滤）。
-- **设备侧（instrumented）覆盖（2026-09-13，见 RESOLVED_LOG §34 / §36 / §46）**：`app` 与 `sync` 均已建立
-  `androidTest` 源集；当前 `app` **15 例**（导入解析 3 + 域解析 7 + 解锁落盘 2 + 软件级 Keystore 封印 3 例，见 §46）、
-  `sync` **3 例**（落盘权限基线），
-  在 x86_64 / API 36.1 模拟器上 **0 failure / 0 skip**。**仍未覆盖**：Passkey 系统级交互、
-  `AssistStructure` 结构树扫描、通知渲染（依赖系统凭据对话框 / 真实自动填充会话 / 通知栏），以及 arm64 真机。
+- **设备侧（instrumented）覆盖（2026-09-14，见 RESOLVED_LOG §34 / §36 / §46 / §47）**：`app` / `database` /
+  `sync` / `crypto` 四模块均已建立 `androidTest` 源集，当前共 **32 例**——`app` 15（导入解析 3 + 域解析 7 +
+  解锁落盘 2 + 软件级 Keystore 封印 3，见 §46）、`database` 7（真实语料解锁 2 + 自生成往返 1 + 字段引用 4）、
+  `sync` 3（落盘权限基线）、`crypto` 7（原生内核 JNI 通路 / 与 BouncyCastle 逐字节一致 / R1 性能闸门），
+  在 **arm64 真机**（Redmi 4X / LineageOS / Android 17 / API 37）与 x86_64 / API 36.1 模拟器上均
+  **0 failure / 0 skip**。**仍未覆盖**：Passkey 系统级交互、
+  `AssistStructure` 结构树扫描、通知渲染（依赖系统凭据对话框 / 真实自动填充会话 / 通知栏）。
   另：**§38 新接线但未在设备侧验证的 3 项**（敏感对话框 `FLAG_SECURE` 实效、附件缓存冷启动清理端到端、
   `SecureDialog` 是否取到 `DialogWindowProvider`）已登记为 **ISSUE-P2-42**，含逐项复现配方与验收标准。
   §24 的 ISSUE-P1-12 与 §26 的 ISSUE-P0-04 均属「JVM 过、Android 运行时挂」类缺陷逃逸，故**涉及正则 / XML /
