@@ -2991,3 +2991,47 @@ $ adb shell am instrument -w -e class com.keepasskey.app.security.QuickUnlockSea
 10. **本批未触及**：`ISSUE-P2-49` AC②（见 48.2）、`ISSUE-P3-116 / P3-120`（需真机实测，
     本环境无设备）等升格 P1 开放项仍在 `ACTIVE_ISSUES.md`。
 
+---
+
+## §49 存量安全整改批次（续）：密钥文件纯字节解析 + DAL 有界流式读取（2026-09-15）
+
+> **本批次缘起**：认领外部审计转登项 `ISSUE-P2-62`（审计 H2，敏感数据流批次）与
+> `ISSUE-P2-50`（审计 F-14）。两处均为「敏感数据 / 恶意输入面」的确定性缺口，
+> JVM 侧即可闭环（不涉 Android 运行时差异），无需设备。
+
+### 49.1 交付清单
+
+| 编号 | 级别 | 缺陷（一句话） | 关键改动 | 依据 |
+|---|:--:|---|---|---|
+| **ISSUE-P2-62** | P2 | `KdbxKeyFile.extractKey` 把**整个密钥文件**转为不可擦 `String`（`raw.toString(Charsets.UTF_8)`），每次解锁尝试与保存都重放；寿命上界为下次 GC | 改**纯字节解析**：`extractKey(raw: ByteArray)` 全链路零 `String` 物化——ASCII 头探测（`<?xml` / `<KeyFile`）、XML 元素定位、v1.0 Base64 / v2.0 Hex 剥离与解码均在 `ByteArray` 上进行，hex 解码走 `kotlin.io.encoding.Base64`/自实现字节 hex；`toString` 仅保留 ASCII 分类校验（无法避免的 String 显式标注）；四类解析梯子（XML v1.0 / v2.0 / 裸 32B / 64-hex / 任意二进制 SHA-256）结果与原实现逐字一致 | 审计 H2；敏感数据铁律（`AGENTS.md` §3.2） |
+| **ISSUE-P2-50** | P2 | DAL 响应体先 `body?.string()` **整份物化**，之后才比较 `length`（且为**字符数**，多字节字符下与字节上限错位）→ 恶意端点可借超大响应撑爆内存 | `DigitalAssetLinksVerifier` 改**有界流式读取**：新增 `readBounded(input, limit)`（`MAX_BODY_BYTES = 256 KiB` 封顶，读到上限 +1 即判越界、立即中止、不继续消费剩余字节），并按**字节数**裁决（消除字符数/字节数错位）；空响应体显式拒绝 | 审计 F-14；fail-closed 语义保持（越界 / 空 → `NOT_VERIFIED`） |
+
+### 49.2 验收证据
+
+```powershell
+.\gradlew.bat test --rerun-tasks --max-workers=1
+# → BUILD SUCCESSFUL in 4m 32s；114 actionable tasks: 114 executed（全部真实执行）
+#   结果汇总（build/test-results/**/TEST-*.xml）：tests=1631 failures=0 errors=0 skipped=13
+#   （app 879 / core 65 / crypto 116 / database 368 / sync 203）
+```
+
+**新增用例（共 +5 例）**：
+
+| 模块 | 用例 | 覆盖 |
+|---|---|---|
+| `database` | `KdbxKeyFileTest`（+2） | ① v1.0 跨行 + 大量空白 Base64 的字节解析与原 String 版逐字一致（回归锁）；② 非法 Base64 `Data` 抛 `KdbxCorruptFileException` |
+| `app` | `DigitalAssetLinksVerifierTest`（+3） | ① 2 MiB 响应（> 256 KiB 上限）被拒且不被整体物化 → `NOT_VERIFIED`；② **恰好等于**字节上限且内容合法仍可校验通过（边界不误拒，字节数断言精确抵平 `MAX_BODY_BYTES`）；③ 空响应体拒绝 |
+
+### 49.3 已知边界与口径（如实声明）
+
+1. **`P2-62` 的残留 String 面**：`extractXmlElementContent` 内部对**标签名/属性名**等非秘密骨架
+   仍存在短命 `String`（仅用于 ASCII 结构定位，不含密钥材料字节）；密钥材料
+   （Base64 / Hex 数据段）全程 `ByteArray`，无可擦 `String` 路径。`KdbxKeyFile` 产物 `ByteArray`
+   由调用方（复合密钥装配）按既有契约清零，本批未改变所有权。
+2. **`P2-50` 的字节裁决口径**：上限 256 KiB 为防御性预算（官方 `assetlinks.json` 实际远小于该值）；
+   越界响应**不整体物化**（读到上限 +1 即中止），但 OkHttp 连接层缓冲（响应头 + 前 8 KiB 读取窗）
+   不在本裁决可控范围——该残余面与既有 `AGENTS.md` §6 口径一致。
+3. **测试字节对齐**：边界用例的填充公式为 `pad = MAX − len(dalJson)`（`body = "[" + pad空格 + dalJson().substring(1)`
+   的总字节数 = `pad + len`），曾因误写 `− 2` 偏差 2 字节（`expected:<262144> but was:<262142>`），
+   已修正并留公式注释防回归。
+

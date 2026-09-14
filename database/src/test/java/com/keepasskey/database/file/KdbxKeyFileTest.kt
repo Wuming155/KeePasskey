@@ -126,4 +126,42 @@ class KdbxKeyFileTest {
         val key = KdbxKeyFile.extractKey(withBom)
         assertEquals(TEST_V2_KEY_HEX, key.joinToString("") { "%02X".format(it) })
     }
+
+    // ===== ISSUE-P2-62：纯字节解析（零不可擦 String），解析结果与原 String 版逐字一致 =====
+
+    @Test
+    fun `v1_0 xml keyfile with multiline base64 data still decodes`() {
+        // 跨行 + 大量空白的 Base64 Data：原实现先整文件转 String 再剥离空白；
+        // 现实现直接在字节上剥离——两侧解析结果必须一致（回归锁）。
+        val keyBytes = ByteArray(32) { (it * 5 + 1).toByte() }
+        val base64 = java.util.Base64.getEncoder().encodeToString(keyBytes)
+        val chunked = base64.chunked(8).joinToString("\r\n        ")
+        val xml = """<?xml version="1.0" encoding="UTF-8"?>
+<KeyFile>
+    <Meta>
+        <Version>1.0</Version>
+    </Meta>
+    <Key>
+        <Data>
+            $chunked
+        </Data>
+    </Key>
+</KeyFile>
+"""
+        val key = KdbxKeyFile.extractKey(xml.toByteArray(Charsets.UTF_8))
+        assertArrayEquals(keyBytes, key)
+    }
+
+    @Test
+    fun `v1_0 xml keyfile with invalid base64 data is rejected`() {
+        val xml = """<?xml version="1.0" encoding="UTF-8"?>
+<KeyFile>
+    <Meta><Version>1.0</Version></Meta>
+    <Key><Data>not-base64!!!</Data></Key>
+</KeyFile>
+"""
+        assertThrows(KdbxCorruptFileException::class.java) {
+            KdbxKeyFile.extractKey(xml.toByteArray(Charsets.UTF_8))
+        }
+    }
 }

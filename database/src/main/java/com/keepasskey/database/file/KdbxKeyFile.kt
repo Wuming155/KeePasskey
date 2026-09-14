@@ -19,6 +19,15 @@ import java.util.Arrays
  *
  * 注意：[extractKey] 为确定性纯函数——同一密钥文件恒得同一密钥，
  * 读取侧与保存侧（经 [KdbxFile.deriveKeys]）使用同一解析路径保证复合密钥一致。
+ *
+ * ## ISSUE-P2-62（审计 H2）：全程**纯字节解析**，零不可擦 String
+ *
+ * 原实现把**整个密钥文件** `toString(Charsets.UTF_8)`（不可变、不可清零，寿命上界为下次 GC），
+ * 且每次解锁尝试（含口令错误）与保存都会重放。现全部改为 `ByteArray` 上的标签定位与解码：
+ * - Base64 / hex 直接在字节区间上解码（`Base64.getDecoder().decode(ByteArray)`）；
+ * - 元素文本以字节区间 `[contentStart, childTagEnd)` 承载，压缩空白也在字节上进行；
+ * - 版本号 / Hash 属性均为**非敏感标记**（版本常量与密钥摘要前缀），但仍按字节比较 / 解码，
+ *   全路径不产生任何含密钥（编码形态）材料的 `String`。
  */
 internal object KdbxKeyFile {
 
@@ -37,14 +46,13 @@ internal object KdbxKeyFile {
             return raw.copyOf()
         }
 
-        val text = raw.toString(Charsets.UTF_8)
-        val trimmed = text.trimStart('\uFEFF', ' ', '\r', '\n', '\t')
-        if (trimmed.startsWith("<?xml") || trimmed.startsWith("<KeyFile")) {
-            return extractFromXmlKeyFile(trimmed)
+        val headOffset = firstContentOffset(raw)
+        if (startsWithAscii(raw, headOffset, "<?xml") || startsWithAscii(raw, headOffset, "<KeyFile")) {
+            return extractFromXmlKeyFile(raw)
         }
 
-        val compact = stripWhitespace(text)
-        if (compact.length == HEX_KEY_TEXT_LENGTH && compact.all { isHexDigit(it) }) {
+        val compact = stripWhitespace(raw)
+        if (compact.size == HEX_KEY_TEXT_LENGTH && compact.all { isHexDigit(it) }) {
             return decodeHex(compact)
         }
         return HashUtil.sha256(raw)
@@ -56,38 +64,42 @@ internal object KdbxKeyFile {
      * KeyFile 结构受规范约束（单 `<Meta><Version>` + `<Key><Data>` 节点），
      * 定位式解析足够且天然规避 XXE 攻击面。
      */
-    private fun extractFromXmlKeyFile(xml: String): ByteArray {
-        val version = extractXmlElementText(xml, "Meta", "Version")
-        val dataContent = extractXmlElementText(xml, "Key", "Data")
+    private fun extractFromXmlKeyFile(raw: ByteArray): ByteArray {
+        val versionContent = extractXmlElementContent(raw, "Meta", "Version")
+        val dataContent = extractXmlElementContent(raw, "Key", "Data")
             ?: throw KdbxCorruptFileException("密钥文件格式无效: 缺少 <Data> 元素")
         val compact = stripWhitespace(dataContent)
 
         return when {
-            version == null || version.startsWith(XML_VERSION_1_0) ->
+            // 版本缺失或 v1.x → Base64；v2.x → hex + Hash 校验（与原 String 版语义逐字一致）
+            versionContent == null || startsWithAscii(versionContent, 0, XML_VERSION_1_0) ->
                 decodeBase64Key(compact)
-            version.startsWith(XML_VERSION_2_0) ->
-                decodeHexKeyWithHash(xml, compact)
+            startsWithAscii(versionContent, 0, XML_VERSION_2_0) ->
+                decodeHexKeyWithHash(raw, compact)
             else ->
-                throw KdbxCorruptFileException("密钥文件格式无效: 不支持的版本 [$version]")
+                throw KdbxCorruptFileException(
+                    "密钥文件格式无效: 不支持的版本 [${asciiPreview(versionContent)}]"
+                )
         }
     }
 
-    /** 提取 `<parent ...><child ...>文本</child></parent>` 的文本内容，找不到时返回 null */
-    private fun extractXmlElementText(xml: String, parentTag: String, childTag: String): String? {
-        val parentStart = xml.indexOf("<$parentTag")
-        if (parentStart < 0) return null
-        val childTagStart = xml.indexOf("<$childTag", parentStart)
-        if (childTagStart < 0) return null
-        val contentStart = xml.indexOf('>', childTagStart)
-        val childTagEnd = xml.indexOf("</$childTag>", childTagStart)
-        if (contentStart < 0 || childTagEnd < 0 || contentStart >= childTagEnd) {
+    /**
+     * 提取 `<parent ...><child ...>文本</child></parent>` 的文本内容（字节区间副本），
+     * 找不到父/子标签时返回 null（与原 String 版语义一致）。
+     */
+    private fun extractXmlElementContent(raw: ByteArray, parentTag: String, childTag: String): ByteArray? {
+        val parentStart = findAscii(raw, "<$parentTag", 0) ?: return null
+        val childTagStart = findAscii(raw, "<$childTag", parentStart) ?: return null
+        val contentStart = indexOfAsciiByte(raw, '>', childTagStart)
+        val childTagEnd = findAscii(raw, "</$childTag>", childTagStart)
+        if (contentStart < 0 || childTagEnd == null || contentStart >= childTagEnd) {
             throw KdbxCorruptFileException("密钥文件格式无效: <$childTag> 元素结构不完整")
         }
-        return xml.substring(contentStart + 1, childTagEnd)
+        return raw.copyOfRange(contentStart + 1, childTagEnd)
     }
 
-    /** v1.0：Data 为 Base64 编码的 32 字节密钥 */
-    private fun decodeBase64Key(content: String): ByteArray {
+    /** v1.0：Data 为 Base64 编码的 32 字节密钥（直接在字节上解码） */
+    private fun decodeBase64Key(content: ByteArray): ByteArray {
         val key = runCatching { java.util.Base64.getDecoder().decode(content) }.getOrElse {
             throw KdbxCorruptFileException("密钥文件格式无效: v1.0 <Data> 不是合法 Base64", it)
         }
@@ -100,17 +112,17 @@ internal object KdbxKeyFile {
     }
 
     /** v2.0：Data 为十六进制编码的 32 字节密钥，`Hash` 属性 = 密钥 SHA-256 前 4 字节 */
-    private fun decodeHexKeyWithHash(xml: String, compact: String): ByteArray {
-        if (compact.length != HEX_KEY_TEXT_LENGTH || compact.any { !isHexDigit(it) }) {
+    private fun decodeHexKeyWithHash(raw: ByteArray, compact: ByteArray): ByteArray {
+        if (compact.size != HEX_KEY_TEXT_LENGTH || compact.any { !isHexDigit(it) }) {
             throw KdbxCorruptFileException(
-                "密钥文件格式无效: v2.0 <Data> 应为 $HEX_KEY_TEXT_LENGTH 位十六进制（实际 ${compact.length} 字符）"
+                "密钥文件格式无效: v2.0 <Data> 应为 $HEX_KEY_TEXT_LENGTH 位十六进制（实际 ${compact.size} 字符）"
             )
         }
         val key = decodeHex(compact)
 
-        val hashStart = xml.indexOf("Hash=")
-        if (hashStart >= 0) {
-            val hashHex = extractQuotedAttributeValue(xml, hashStart)
+        val hashStart = findAscii(raw, "Hash=", 0)
+        if (hashStart != null) {
+            val hashHex = extractQuotedAttributeValue(raw, hashStart)
             if (hashHex != null) {
                 val expected = runCatching { decodeHex(hashHex) }.getOrElse {
                     throw KdbxCorruptFileException("密钥文件格式无效: Hash 属性不是合法十六进制", it)
@@ -128,27 +140,101 @@ internal object KdbxKeyFile {
         return key
     }
 
-    /** 提取 `Hash="..."` 形式的属性值，无引号或空值时返回 null（与官方一致：Hash 缺省不校验） */
-    private fun extractQuotedAttributeValue(xml: String, valueStart: Int): String? {
-        val open = xml.indexOf('"', valueStart)
+    /** 提取 `Hash="..."` 形式的属性值字节（hex 内容），无引号或空值时返回 null（与官方一致：Hash 缺省不校验） */
+    private fun extractQuotedAttributeValue(raw: ByteArray, valueStart: Int): ByteArray? {
+        val open = indexOfAsciiByte(raw, '"', valueStart)
         if (open < 0) return null
-        val close = xml.indexOf('"', open + 1)
+        val close = indexOfAsciiByte(raw, '"', open + 1)
         if (close < 0) return null
-        return xml.substring(open + 1, close).takeIf { it.isNotEmpty() }
+        return raw.copyOfRange(open + 1, close).takeIf { it.isNotEmpty() }
     }
 
-    private fun stripWhitespace(text: String): String = buildString(text.length) {
-        for (ch in text) {
-            if (!ch.isWhitespace()) append(ch)
+    /** 首个「非 BOM / 非空白」字节偏移；全空白返回 `raw.size`（后续 startsWith 均不命中） */
+    private fun firstContentOffset(raw: ByteArray): Int {
+        var i = 0
+        // UTF-8 BOM（EF BB BF）
+        if (raw.size >= 3 && raw[0] == 0xEF.toByte() && raw[1] == 0xBB.toByte() && raw[2] == 0xBF.toByte()) {
+            i = 3
+        }
+        while (i < raw.size && raw[i].toInt().toChar().isWhitespace()) {
+            i++
+        }
+        return i
+    }
+
+    /** 去除全部空白字节（含 BOM 已在定位阶段跳过；此处按原语义仅去空白） */
+    private fun stripWhitespace(raw: ByteArray): ByteArray {
+        val out = ByteArray(raw.size)
+        var n = 0
+        for (b in raw) {
+            if (!b.toInt().toChar().isWhitespace()) {
+                out[n++] = b
+            }
+        }
+        return if (n == raw.size) out else out.copyOf(n)
+    }
+
+    /** 在 [raw] 自 [from] 起查找 ASCII 字节 [b]，找不到返回 -1 */
+    private fun indexOfAsciiByte(raw: ByteArray, b: Char, from: Int): Int {
+        var i = from
+        while (i < raw.size) {
+            if (raw[i].toInt() == b.code) return i
+            i++
+        }
+        return -1
+    }
+
+    /** 在 [raw] 自 [from] 起查找 ASCII 串 [needle]，返回起始偏移或 null */
+    private fun findAscii(raw: ByteArray, needle: String, from: Int): Int? {
+        if (needle.isEmpty()) return from
+        var i = maxOf(from, 0)
+        val limit = raw.size - needle.length
+        while (i <= limit) {
+            if (raw[i].toInt() == needle[0].code && matchesAt(raw, i, needle)) return i
+            i++
+        }
+        return null
+    }
+
+    private fun matchesAt(raw: ByteArray, offset: Int, needle: String): Boolean {
+        for (j in needle.indices) {
+            if (raw[offset + j].toInt() != needle[j].code) return false
+        }
+        return true
+    }
+
+    private fun startsWithAscii(raw: ByteArray, offset: Int, needle: String): Boolean =
+        offset >= 0 && offset + needle.length <= raw.size && matchesAt(raw, offset, needle)
+
+    /** 仅用于异常消息的版本预览（版本标记非敏感，不落密钥材料） */
+    private fun asciiPreview(bytes: ByteArray): String {
+        val sanitized = stripWhitespace(bytes).take(16)
+        return buildString(sanitized.size) {
+            for (b in sanitized) {
+                val c = b.toInt().toChar()
+                append(if (c in ' '..'~') c else '?')
+            }
         }
     }
 
-    private fun isHexDigit(ch: Char): Boolean =
-        (ch in '0'..'9') || (ch in 'a'..'f') || (ch in 'A'..'F')
+    private fun isHexDigit(b: Byte): Boolean {
+        val c = b.toInt().toChar()
+        return (c in '0'..'9') || (c in 'a'..'f') || (c in 'A'..'F')
+    }
 
-    private fun decodeHex(hex: String): ByteArray = ByteArray(hex.length / 2) { i ->
-        val high = Character.digit(hex[i * 2], 16)
-        val low = Character.digit(hex[i * 2 + 1], 16)
+    private fun hexDigit(b: Byte): Int {
+        val c = b.toInt().toChar()
+        return when (c) {
+            in '0'..'9' -> c - '0'
+            in 'a'..'f' -> c - 'a' + 10
+            in 'A'..'F' -> c - 'A' + 10
+            else -> -1
+        }
+    }
+
+    private fun decodeHex(hex: ByteArray): ByteArray = ByteArray(hex.size / 2) { i ->
+        val high = hexDigit(hex[i * 2])
+        val low = hexDigit(hex[i * 2 + 1])
         check(high >= 0 && low >= 0) { "非法十六进制字符" }
         ((high shl 4) or low).toByte()
     }

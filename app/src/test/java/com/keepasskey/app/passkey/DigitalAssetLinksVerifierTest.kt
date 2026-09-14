@@ -125,6 +125,39 @@ class DigitalAssetLinksVerifierTest {
         assertEquals(DigitalAssetLinksVerifier.DalResult.NOT_VERIFIED, verify())
     }
 
+    // ===== ISSUE-P2-50（审计 F-14）：有界流式读取 + 字节数裁决 =====
+
+    @Test
+    fun `远程声明_超出字节上限的响应被拒且不被物化`() = runBlocking {
+        // 2 MiB 响应（> 256 KiB 上限）：原实现会先整体 string() 物化再比较字符数；
+        // 现实现流式读到上限 +1 即中止，结果一律 NOT_VERIFIED。
+        val oversized = " ".repeat(2 * 1024 * 1024)
+        server.enqueue(MockResponse().setBody(oversized))
+        assertEquals(DigitalAssetLinksVerifier.DalResult.NOT_VERIFIED, verify())
+    }
+
+    @Test
+    fun `远程声明_恰好等于字节上限且内容合法_仍可校验通过`() = runBlocking {
+        // 边界：填充空白使字节数恰好 = MAX_BODY_BYTES，其后缀为合法声明 → 不误拒。
+        // body = "[" + pad + dalJson().substring(1)，总字节数 = pad + len(dalJson)，
+        // 故 pad = MAX - len 恰好抵平上限。
+        val pad = DigitalAssetLinksVerifier.MAX_BODY_BYTES - dalJson().toByteArray(Charsets.UTF_8).size
+        assertTrue("测试前提：填充后恰为上限", pad >= 0)
+        val body = "[" + " ".repeat(pad) + dalJson().substring(1)
+        assertEquals(
+            DigitalAssetLinksVerifier.MAX_BODY_BYTES.toLong(),
+            body.toByteArray(Charsets.UTF_8).size.toLong()
+        )
+        server.enqueue(MockResponse().setBody(body))
+        assertEquals(DigitalAssetLinksVerifier.DalResult.VERIFIED, verify())
+    }
+
+    @Test
+    fun `远程声明_空响应体_拒绝`() = runBlocking {
+        server.enqueue(MockResponse().setBody(""))
+        assertEquals(DigitalAssetLinksVerifier.DalResult.NOT_VERIFIED, verify())
+    }
+
     @Test
     fun `远程声明_网络不可用_返回NETWORK_UNAVAILABLE`() = runBlocking {
         server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AT_START))

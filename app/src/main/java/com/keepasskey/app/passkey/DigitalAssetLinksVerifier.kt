@@ -104,18 +104,50 @@ class DigitalAssetLinksVerifier @Inject constructor() {
                     AppLog.w(TAG, "DAL 响应非 2xx，视为无声明")
                     return DalResult.NOT_VERIFIED
                 }
-                val body = response.body?.string()
-                if (body.isNullOrEmpty() || body.length > MAX_BODY_BYTES) {
-                    AppLog.w(TAG, "DAL 响应体缺失或超出大小上限")
+                // ISSUE-P2-50（审计 F-14）：有界流式读取并按**字节数**裁决——
+                // 原实现 `body?.string()` 先整份物化（恶意端点可借超大响应撑爆内存），
+                // 且 `body.length` 为字符数（多字节字符下与字节上限错位）。现以
+                // `MAX_BODY_BYTES` 封顶流式搬运：读到上限 +1 即判越界、立即中止，
+                // 绝不把超出上限的响应整体读入内存。
+                val body = response.body
+                if (body == null) {
+                    AppLog.w(TAG, "DAL 响应体缺失")
                     return DalResult.NOT_VERIFIED
                 }
-                DalStatementMatcher.match(body, callingPackage, certSha256Hex)
+                val bytes = readBounded(body.byteStream(), MAX_BODY_BYTES)
+                if (bytes == null) {
+                    AppLog.w(TAG, "DAL 响应体超出大小上限")
+                    return DalResult.NOT_VERIFIED
+                }
+                if (bytes.isEmpty()) {
+                    AppLog.w(TAG, "DAL 响应体为空")
+                    return DalResult.NOT_VERIFIED
+                }
+                DalStatementMatcher.match(String(bytes, Charsets.UTF_8), callingPackage, certSha256Hex)
             }
         } catch (t: Throwable) {
             // ISSUE-P1-10：不透传 URL（含 rpId 站点域）到日志
             AppLog.w(TAG, "DAL 拉取失败（网络不可用或超时），按 fail-closed 处理")
             DalResult.NETWORK_UNAVAILABLE
         }
+    }
+
+    /**
+     * 有界读取：最多消费 [limit] 字节；流超过 [limit]（读出第 `limit + 1` 个字节）时
+     * 返回 null（调用方按越界拒绝），**不**继续读取剩余字节。
+     */
+    private fun readBounded(input: java.io.InputStream, limit: Int): ByteArray? {
+        val out = java.io.ByteArrayOutputStream(minOf(limit, 64 * 1024))
+        val buffer = ByteArray(8 * 1024)
+        var total = 0
+        while (true) {
+            val read = input.read(buffer)
+            if (read < 0) break
+            if (total + read > limit) return null
+            out.write(buffer, 0, read)
+            total += read
+        }
+        return out.toByteArray()
     }
 
     companion object {
