@@ -160,6 +160,41 @@ class RuntimeIntegrityPolicyTest {
         assertTrue(unchanged.enforcement.disableAutofill)
     }
 
+    // ===== ISSUE-P2-63：非 suspend 门控的快照新鲜度（陈旧即 fail-closed） =====
+
+    @Test
+    fun `从未扫描的快照视为陈旧`() {
+        assertTrue(
+            RuntimeIntegrityPolicy.isSnapshotStale(
+                snapshotAtMillis = 0L, nowMillis = 1_000L, freshnessWindowMillis = 500L
+            )
+        )
+    }
+
+    @Test
+    fun `超出新鲜度窗口的快照视为陈旧`() {
+        assertTrue(
+            RuntimeIntegrityPolicy.isSnapshotStale(
+                snapshotAtMillis = 1_000L, nowMillis = 1_501L, freshnessWindowMillis = 500L
+            )
+        )
+    }
+
+    @Test
+    fun `窗口内（含边界）的快照不视为陈旧`() {
+        assertFalse(
+            RuntimeIntegrityPolicy.isSnapshotStale(
+                snapshotAtMillis = 1_000L, nowMillis = 1_400L, freshnessWindowMillis = 500L
+            )
+        )
+        assertFalse(
+            "恰好等于窗口宽度不应判为陈旧",
+            RuntimeIntegrityPolicy.isSnapshotStale(
+                snapshotAtMillis = 1_000L, nowMillis = 1_500L, freshnessWindowMillis = 500L
+            )
+        )
+    }
+
     // ===== 缺陷 3（P2）：requireRiskNotice 的生产消费点（设置页风险提示接线） =====
     //
     // 原状：requireRiskNotice 只在测试里被引用，生产零消费——「必须给出明确风险提示」不成立。

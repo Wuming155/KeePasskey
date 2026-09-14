@@ -61,7 +61,10 @@ class UnlockViewModel @Inject constructor(
     private val unlockThrottleManager: UnlockThrottleManager? = null,
     // ISSUE-P3-04：密钥文件（复合密钥第二因子）SAF 访问通道。nullable 仅用于单测注入空实现；
     // 生产 DI 经 KeyFileAccessModule 恒注入 SafKeyFileAccess（SAF 读取 + 持久化授权 + 记忆）
-    private val keyFileAccess: KeyFileAccess? = null
+    private val keyFileAccess: KeyFileAccess? = null,
+    // ISSUE-P3-117：进阶偏好通道（`clearPasswordOnLeave` 的行为消费方）。
+    // nullable 仅用于纯 JVM 单测；生产 DI 经 ExtendedSettingsSourceModule 恒注入
+    private val extendedSettingsStore: com.keepasskey.app.data.repository.ExtendedSettingsStore? = null
 ) : ViewModel() {
 
     // P3-23：null 时回退空串实现（生产 Hilt 恒注入 StringsProviderModule 真实现）
@@ -357,6 +360,23 @@ class UnlockViewModel @Inject constructor(
     private fun wipeMasterPassword() {
         passwordChars.fill('0')
         passwordChars = CharArray(0)
+    }
+
+    /**
+     * ISSUE-P3-117：离开解锁页（导航离开 / 页面进入后台）时的清理。
+     *
+     * 开关 `clearPasswordOnLeave`（设置页「离开密码页清空已输入字符」，默认关闭）**此前零行为
+     * 消费方**——本方法即其唯一行为接线：开启时清空**未提交**的主密码缓冲区与输入框显示态，
+     * 使「已输入但未提交」的主密码不再跨后台驻留（缩短明文驻留窗口）。
+     */
+    fun onScreenLeft() {
+        // 读进程内共享快照（ExtendedSettingsStore KDoc 声明的「读侧唯一来源」），
+        // 与设置页写入具备即时可见性；未注入（纯 JVM 单测）时按默认关闭处理。
+        val clearOnLeave = extendedSettingsStore?.settings?.value?.clearPasswordOnLeave ?: false
+        if (!clearOnLeave) return
+        wipeMasterPassword()
+        // 同步驱动输入组件擦除显示态（复用 ISSUE-P1-04 的令牌机制）
+        _uiState.update { it.copy(clearPasswordFieldToken = it.clearPasswordFieldToken + 1) }
     }
 
     /**

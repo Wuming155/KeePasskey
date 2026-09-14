@@ -43,4 +43,26 @@ class AutofillLastFilledStoreTest {
         store.clear()
         assertNull(store.lastFilledEntryId())
     }
+
+    // ===== ISSUE-P3-109：会话锁定 / 关闭 / 换库即清 =====
+    // 原缺陷：KDoc 声明「库切换/锁定后不再跨会话置顶」，但 clear() 全仓零调用方。
+
+    @Test
+    fun `会话锁定回调清空记忆`() {
+        val store = AutofillLastFilledStore(null)
+        store.record("ABC")
+
+        store.onSessionLocked()
+
+        assertNull("锁定 / 换库必须清除上次填充记忆", store.lastFilledEntryId())
+    }
+
+    @Test
+    fun `锁定回调可重复调用且幂等`() {
+        val store = AutofillLastFilledStore(null)
+        store.record("ABC")
+        store.onSessionLocked()
+        store.onSessionLocked()
+        assertNull(store.lastFilledEntryId())
+    }
 }

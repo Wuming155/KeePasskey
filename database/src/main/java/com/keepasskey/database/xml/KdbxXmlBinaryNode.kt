@@ -50,6 +50,14 @@ internal class BinaryNode(
      * 默认 null 以保持既有构造调用点（含单测）源码兼容。
      */
     private val innerStreamCipher: InnerRandomStreamCipher? = null,
+    /**
+     * ISSUE-P2-48（审计 F-10）：本次解析共享的「池引用物化累计字节」预算。
+     *
+     * 逐引用 `item.load().copyOf()` 是 ISSUE-P3-07 的别名隔离契约防线（**不得取消**），
+     * 但同一池条目被引用 N 次即产生 N 份副本——元素数与整包上限都只**间接**约束它。
+     * 故此处按累计物化字节 fail-closed。默认不限（仅供不经 `KdbxXmlParser` 的直接构造）。
+     */
+    private val referenceBudget: BinaryReferenceBudget = BinaryReferenceBudget.unlimited(),
     private val onDone: (KdbxAttachment) -> Unit
 ) : SaxNode() {
 
@@ -191,6 +199,9 @@ internal class BinaryNode(
                 )
             )
         } else if (item != null) {
+            // ISSUE-P2-48：先计入累计预算再物化——同一池条目被 N 次引用即 N 份副本，
+            // 超出预算即 fail-closed，避免以「单条目 + 海量引用」放大内存（拒绝服务）。
+            referenceBudget.account(item.size)
             onDone(
                 KdbxAttachment(
                     name = key,
@@ -253,5 +264,53 @@ internal class BinaryNode(
 
         /** 解压拷贝缓冲（8 KiB）。 */
         private const val GZIP_COPY_BUFFER_BYTES = 8 * 1024
+    }
+}
+
+/**
+ * 附件池引用「累计物化字节」预算（ISSUE-P2-48 / 审计 F-10）。
+ *
+ * ## 为什么需要专用预算
+ * 逐引用 `item.load().copyOf()`（[BinaryNode.emit]）是 ISSUE-P3-07 的别名隔离契约防线，
+ * **不得取消**——但它意味着同一池条目被引用 N 次即产生 N 份独立副本。既有的
+ * `KdbxXmlParser.MAX_XML_ELEMENTS`（元素数）与 `KdbxFile.MAX_DECOMPRESSED_PAYLOAD_BYTES`
+ * （整包字节）都只**间接**约束该乘积，缺的是按累计被引用字节的专用闸门。
+ *
+ * ## 上界取值（诚实文件不受影响）
+ * `2 × 池内条目字节总和 + 1 MiB 余量`：
+ * - 池总字节由 `InnerHeader.MAX_BINARY_POOL_TOTAL_BYTES`（≤128 MiB）封顶；
+ * - 诚实文件中每条池条目通常被引用 1 次（去重后共享时可达 2 次，如
+ *   `KdbxAttachmentAliasIsolationTest` 的「两条目引用同一池条目」）→ 累计 ≈ 池总字节；
+ * - 1 MiB 余量覆盖极小池（如总字节仅数字节）与边界用例，避免误拒。
+ *
+ * 超限抛 [KdbxCorruptFileException]（fail-closed），视同文件损坏 / 疑似放大攻击。
+ */
+internal class BinaryReferenceBudget(private val maxTotalBytes: Long) {
+
+    private var accountedBytes = 0L
+
+    /** 计入本次池引用将物化的字节数；超预算即 fail-closed。 */
+    fun account(bytes: Long) {
+        accountedBytes += bytes
+        if (accountedBytes > maxTotalBytes) {
+            throw KdbxCorruptFileException(
+                "附件池引用累计物化字节超出预算（$accountedBytes > $maxTotalBytes），疑似引用放大攻击"
+            )
+        }
+    }
+
+    internal companion object {
+
+        /** 池引用余量：覆盖极小池与边界用例，避免误拒合法文件。 */
+        const val BUDGET_SLACK_BYTES: Long = 1L * 1024 * 1024
+
+        /** 依池内容构造预算：`2 × 池总字节 + 余量`（见类 KDoc）。 */
+        fun forPool(pool: List<InnerHeader.BinaryItem>): BinaryReferenceBudget {
+            val poolTotal = pool.sumOf { it.size }
+            return BinaryReferenceBudget(2 * poolTotal + BUDGET_SLACK_BYTES)
+        }
+
+        /** 不设上限（仅供不经 [KdbxXmlParser] 的直接构造 / 单测）。 */
+        fun unlimited(): BinaryReferenceBudget = BinaryReferenceBudget(Long.MAX_VALUE / 2)
     }
 }

@@ -3,6 +3,7 @@ package com.keepasskey.app.di
 import android.content.Context
 import com.keepasskey.app.data.binary.FileBinaryStore
 import com.keepasskey.app.data.repository.ExtendedSettingsStore
+import com.keepasskey.app.autofill.AutofillLastFilledStore
 import com.keepasskey.app.security.ClipboardSecurityManager
 import com.keepasskey.app.sync.SyncCacheEvictor
 import com.keepasskey.database.session.DatabaseSession
@@ -51,7 +52,8 @@ object DatabaseModule {
         cacheEvictor: SyncCacheEvictor,
         extendedSettingsStore: ExtendedSettingsStore,
         binaryStore: FileBinaryStore,
-        clipboardSecurityManager: ClipboardSecurityManager
+        clipboardSecurityManager: ClipboardSecurityManager,
+        autofillLastFilledStore: AutofillLastFilledStore
     ): DatabaseSession {
         return DatabaseSession(binaryStore).apply {
             addLockObserver(cacheEvictor)
@@ -59,6 +61,8 @@ object DatabaseModule {
             addLockObserver(binaryStore)
             // ISSUE-P2-51：锁定/关闭时清理仍驻留的敏感剪贴板值（对齐 ISSUE-P3-84 的代价明示）
             addLockObserver(clipboardSecurityManager)
+            // ISSUE-P3-109：「上次填充条目」记忆不得跨会话/换库残留（KDoc 早已如此声明，此前零调用方）
+            addLockObserver(autofillLastFilledStore)
             createBackupBeforeSave = extendedSettingsStore.load().createBackupBeforeSave
         }
     }

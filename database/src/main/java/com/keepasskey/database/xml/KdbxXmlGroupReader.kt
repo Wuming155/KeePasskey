@@ -44,6 +44,7 @@ internal class GroupNode(
     private val parentGroupIdRef: LateRef<KdbxUuid>?,
     private val innerStreamCipher: InnerRandomStreamCipher?,
     private val binariesPool: List<InnerHeader.BinaryItem>,
+    private val referenceBudget: BinaryReferenceBudget,
     private val onDone: (KdbxGroup) -> Unit
 ) : SaxNode() {
 
@@ -82,8 +83,8 @@ internal class GroupNode(
             KdbxConstants.Xml.PREVIOUS_PARENT_GROUP -> TextNode { previousParentGroup = KdbxXmlValueUtil.parseOptionalUuid(it) }
             KdbxConstants.Xml.TAGS -> TextNode { tagsStr = it }
             KdbxConstants.Xml.CUSTOM_DATA -> CustomDataItemsNode { customData.putAll(it) }
-            KdbxConstants.Xml.ENTRY -> EntryNode(selfUuid, innerStreamCipher, binariesPool) { entries.add(it) }
-            KdbxConstants.Xml.GROUP -> GroupNode(selfUuid, innerStreamCipher, binariesPool) { subgroups.add(it) }
+            KdbxConstants.Xml.ENTRY -> EntryNode(selfUuid, innerStreamCipher, binariesPool, referenceBudget) { entries.add(it) }
+            KdbxConstants.Xml.GROUP -> GroupNode(selfUuid, innerStreamCipher, binariesPool, referenceBudget) { subgroups.add(it) }
             else -> IgnoredNode()
         }
     }
@@ -126,6 +127,7 @@ internal class EntryNode(
     private val parentGroupId: LateRef<KdbxUuid>,
     private val innerStreamCipher: InnerRandomStreamCipher?,
     private val binariesPool: List<InnerHeader.BinaryItem>,
+    private val referenceBudget: BinaryReferenceBudget,
     private val onDone: (KdbxEntry) -> Unit
 ) : SaxNode() {
 
@@ -168,10 +170,10 @@ internal class EntryNode(
                     customFields.add(KdbxCustomField(key, value, value.isProtected))
                 }
             }
-            KdbxConstants.Xml.BINARY -> BinaryNode(binariesPool, innerStreamCipher) { attachments.add(it) }
+            KdbxConstants.Xml.BINARY -> BinaryNode(binariesPool, innerStreamCipher, referenceBudget) { attachments.add(it) }
             KdbxConstants.Xml.AUTO_TYPE -> AutoTypeNode { autoType = it }
             KdbxConstants.Xml.CUSTOM_DATA -> CustomDataItemsNode { customData.putAll(it) }
-            KdbxConstants.Xml.HISTORY -> HistoryNode(parentGroupId, innerStreamCipher, binariesPool) { history.add(it) }
+            KdbxConstants.Xml.HISTORY -> HistoryNode(parentGroupId, innerStreamCipher, binariesPool, referenceBudget) { history.add(it) }
             else -> IgnoredNode()
         }
     }
@@ -221,12 +223,13 @@ internal class HistoryNode(
     private val parentGroupId: LateRef<KdbxUuid>,
     private val innerStreamCipher: InnerRandomStreamCipher?,
     private val binariesPool: List<InnerHeader.BinaryItem>,
+    private val referenceBudget: BinaryReferenceBudget,
     private val onDone: (KdbxEntry) -> Unit
 ) : SaxNode() {
 
     override fun startChild(name: String, attrs: Attributes): SaxNode {
         return if (name == KdbxConstants.Xml.ENTRY) {
-            EntryNode(parentGroupId, innerStreamCipher, binariesPool) { onDone(it) }
+            EntryNode(parentGroupId, innerStreamCipher, binariesPool, referenceBudget) { onDone(it) }
         } else {
             IgnoredNode()
         }

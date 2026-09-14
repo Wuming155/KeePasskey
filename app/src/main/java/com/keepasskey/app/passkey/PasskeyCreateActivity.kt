@@ -105,8 +105,12 @@ class PasskeyCreateActivity : BaseCredentialActivity() {
 
                 // 普通应用（apk-key-hash origin）创建的凭据额外记录调用包绑定（android://<包名>），
                 // 供后续 GET 流程按严格包名边界匹配（H1/L1/P1-4 整改）
-                val callerPackage = providerReq?.callingAppInfo?.packageName
-                    ?: callingPackage?.ifBlank { null }
+                //
+                // ISSUE-P2-72：仅接受**系统背书**的 CallingAppInfo 包名。原实现回退
+                // `callingPackage`（Activity.getCallingPackage）在系统经 PendingIntent 拉起时为
+                // `"android"`/null → 会落出 `android://android` 绑定（可被同包名侧载应用命中）；
+                // 取不到即返回 null，由下方 DAL 门控 fail-closed 拒绝。
+                val callerPackage = CallingOriginResolver.systemAttestedPackageName(providerReq?.callingAppInfo)
 
                 // ISSUE-P2-02：普通应用注册的 DAL 远程资产声明强绑定校验。
                 // 浏览器委派调用豁免（rp.id ↔ web origin 归属已由 DomainMatcher 严格点号边界强制）；
@@ -293,7 +297,11 @@ class PasskeyCreateActivity : BaseCredentialActivity() {
                 put("type", "webauthn.create")
                 put("challenge", challenge)
                 put("origin", origin.ifBlank { "https://$rpId" })
-                put("androidPackageName", callerPackage ?: packageName)
+                // ISSUE-P2-72：归属字段只写**系统背书**的调用方包名；取不到即省略该字段——
+                // 绝不回退为本应用包名（那会把 RP 收到的归属伪造成我们）。
+                CallingOriginResolver.clientDataAndroidPackageName(callerPackage)?.let {
+                    put("androidPackageName", it)
+                }
             }.toString()
 
             val clientDataBase64 = Base64.getUrlEncoder().withoutPadding()

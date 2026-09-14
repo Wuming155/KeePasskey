@@ -56,7 +56,7 @@
 | §45 | P1 双项整改批次：确认页调用方归属与首次绑定授权 + 剪贴板口令面引用敏感通道 | ISSUE-P1-24 / ISSUE-P1-25 |
 | §46 | P1 双项整改批次：软件级 Keystore 快速解锁降级确认 + 重打包威胁告知留痕 | ISSUE-P1-22 / ISSUE-P1-23 |
 | §47 | 设备侧真机基线批次：两条「模拟器环境假设」用例整改 + arm64 真机全量实测 | 设备侧用例缺陷（无编号） |
-| §48 | 存量安全整改批次：KDF 工作量预算 + TOTP 种子保护 + 剪贴板清理闭环 + 明文持有者锁观察者 | ISSUE-P2-61 / P2-51 / P2-65 / P3-84（+ P2-49 AC①③ 进展） |
+| §48 | 存量安全整改批次：KDF 预算 + TOTP 保护 + 剪贴板闭环 + 明文持有者锁观察者 + 换库前置释放 + 附件引用预算 + 完整性门控对称化 + Passkey 归属与验证绑定 | ISSUE-P2-48 / P2-51 / P2-53 / P2-61 / P2-63 / P2-65 / P2-72 / P2-76 / P2-77 / P3-84 / P3-109 / P3-117（+ P2-49 AC①③ 进展） |
 
 > 各批次验收证据（用例数 / 通过 / 失败 / 跳过）分别见 §2.22、§3.1、§4.1、§5、§6、§7、§8、§9、§10、§11、§12、§13、§14、§15、§16、§17、§18、§19、§20.3、§21.4、§22.9、§23.1、§24.3、§25.2、§26.3。
 
@@ -2894,11 +2894,13 @@ $ adb shell am instrument -w -e class com.keepasskey.app.security.QuickUnlockSea
 
 ---
 
-## §48 存量安全整改批次：KDF 工作量预算 + TOTP 种子保护 + 剪贴板清理闭环 + 明文持有者锁观察者（2026-09-14）
+## §48 存量安全整改批次：KDF 预算 + TOTP 保护 + 剪贴板闭环 + 明文持有者锁观察者 + 换库前置释放 + 附件引用预算 + 完整性门控对称化 + Passkey 归属与验证绑定（2026-09-14）
 
-> **本批次缘起**：认领 `ISSUE-P2-49 / P2-51 / P2-61 / P2-65`（均为第四轮独立复核后**升格 P1 排期**的开放项）
-> 与联动项 `ISSUE-P3-84`。整改落在 `app/src/main` / `database/src/main`，配套单测同步补齐；
-> `P2-49` 的 AC② 因墙钟量级未实测（挂 `ISSUE-P2-80`）**未闭环**，条目仍留在 `ACTIVE_ISSUES.md`。
+> **本批次缘起**：认领 `ISSUE-P2-48 / P2-49 / P2-51 / P2-53 / P2-61 / P2-63 / P2-65 / P2-72 / P2-76 / P2-77`
+> 与 P3 升格项 `P3-109 / P3-117`（均为第四轮独立复核后**升格 P1 排期**的开放项）及联动项 `ISSUE-P3-84`。
+> 整改落在 `app/src/main` / `database/src/main`，配套单测同步补齐；
+> `P2-49` 的 AC② 因墙钟量级未实测（挂 `ISSUE-P2-80`）**未闭环**，条目仍留在 `ACTIVE_ISSUES.md`；
+> `P3-116 / P3-120` 涉及真机实测，本环境无设备，仍保留。
 
 ### 48.1 交付清单
 
@@ -2908,6 +2910,14 @@ $ adb shell am instrument -w -e class com.keepasskey.app.security.QuickUnlockSea
 | **ISSUE-P2-51** | P2（升格 P1） | ① `clearClipboard()` 仅由定时器调用，未接锁定 / 熄屏 / 冷启动；② 后台读不到剪贴板时 `lastSensitiveHash` **陈旧匹配**会误清他处内容 | `ClipboardSecurityManager`：实现 `SessionLockObserver`（`DatabaseModule` 注册）+ 熄屏广播 + `ProcessLifecycleOwner` 切后台即清（P3-84）+ 冷启动对账（跨进程仅存**布尔**待清标记）；新增 `clipboardSuperseded` 标志 + 纯裁决 `ClipboardClearPolicy` 消除误清 | 审计 F-18；`AGENTS.md` §6 冷启动缺口同族 |
 | **ISSUE-P3-84** | P3 | 关闭「自动擦除」无风险明示；敏感值无前台切走即清机制 | 设置页关闭态渲染 `sec_clipboard_risk_notice`（中英双语）；切后台即清（见上）；文案引导「改用自动填充直填」 | 审计 M9 / 产品裁决语义（对齐 `FlagSecurePolicy`） |
 | **ISSUE-P2-65** | P2（升格 P1） | 多处持有明文的 ViewModel/控制器**未注册 `SessionLockObserver`**：锁库后明文继续驻留（原仅靠 `onCleared` / 导航离开擦除） | `EntryDetailViewModel`（按需解密明文 + 实时 TOTP 码）、`GeneratorViewModel`（生成结果，参数由 `ClipboardSecurityManager` 收窄为 `ClipboardSecurityChannel` 以便注入断言）、`EntryEditViewModel`（口令 / 种子 / 受保护字段编辑态）、`SettingsViewModel`（WebDAV 口令 / S3 SecretKey / AccessKey 预填通道）四处注册锁观察者并在 `onCleared` 注销；断言「锁库 → 明文已清零」 | 审计 M3；机制对齐 `DatabaseModule` / `SyncCoordinator` 既有 4 处用法 |
+| **ISSUE-P2-77** | P2（升格 P1） | **切换 / 新建密码库不擦除旧库、不通知锁观察者**：`SessionOpener.create/openStream` 直接替换 `core.database.value` → 旧库全部 `ProtectedString` 密文滞留至 GC；旧库的同步缓存与**明文附件缓存**不被驱逐 | `DatabaseSession.releaseSessionStateForReplacement()`（语义对齐 `lock()`，但不取互斥锁避免重入）+ `SessionOpener` 新增 `releaseCurrentSession` 回调，在 `create` / `openStream` **装载新库之前**调用；回归断言「换库事件序 = `clear`→`store`」+「旧库受保护字段已擦除」+「新库附件存活」 | 威胁建模 Q-16 / T-9c；顺序硬约束见 `SessionOpener` KDoc |
+| **ISSUE-P2-48** | P2（升格 P1） | **附件引用放大无累计预算**：同一池条目被引用 N 次即 N 份 `copyOf()` 副本；`MAX_XML_ELEMENTS` 与整包上限只**间接**约束该乘积 | 新增 `BinaryReferenceBudget`（`2 × 池总字节 + 1 MiB` 余量，fail-closed），经 `KdbxXmlParser` → `FileNode/RootNode/GroupNode/EntryNode/HistoryNode` → `BinaryNode` 逐层传入；**不取消**逐引用物化（ISSUE-P3-07 契约防线） | 审计 F-10；`KdbxAttachmentAliasIsolationTest` 4 例保持通过 |
+| **ISSUE-P2-53** | P2（升格 P1，与 P2-63 同批） | **CM 主通道（`passkey/`）对 `RuntimeIntegrityGate` 零命中**：完整性裁决在自动填充 fail-closed，CM 通道 fail-open（风险态仍下发候选 / 保存入口） | `KeePasskeyCredentialProviderService` 注入门控，在 `buildBeginGetResponse` / `buildBeginCreateResponse` 两条入口**最先**裁决 `awaitEnforcement().disableAutofill`，风险态返回**空响应**；静态接线回归断言「两入口各裁决一次 + 自动填充通道同判据」 | 审计 F-24；通道对称性与自动填充对齐 |
+| **ISSUE-P2-63** | P2（升格 P1，与 P2-53 同批） | **生物快速解锁门控只用冷启动快照**：非 suspend `currentEnforcement()` 把 `hookFrameworkDetected` 硬编码为 `false`，钩子重扫仅存在于 suspend 路径 → 启动后附加 Frida 不触发信号、门控不拦 | `RuntimeIntegrityDetector`：① 由「一次性扫描」改为**后台周期重扫**（30s，注入信号进入快照）；② `currentEnforcement()` 显式并入快照内的钩子信号；③ 新增 `RuntimeIntegrityPolicy.isSnapshotStale`——快照陈旧（默认窗口 120s）或未判定即返回保守策略并触发重扫（fail-closed） | 审计 H-new-2；`RuntimeIntegrityPolicyTest` 既有「实时钩子升级」用例 + 新增 3 例新鲜度用例 |
+| **ISSUE-P2-72** | P2（升格 P1，审计 E4 已收窄） | `clientDataJSON.androidPackageName` 归属可错：Assertion 侧用 `Activity.getCallingPackage()`（PendingIntent 拉起时为 `android`/null → 回退**本应用包名**，向 RP 虚假归属）；Create 侧 `?: callingPackage` 回退可产生 `android://android` 绑定 | `CallingOriginResolver` 新增 `systemAttestedPackageName`（仅接受平台 `CallingAppInfo`，排除 `android`/空白，**禁止回退**）与 `clientDataAndroidPackageName`（候选过滤，全不可用即**省略字段**）；Assertion 侧改取系统认证包名并与 `EXTRA_EXPECTED_PACKAGE` 交叉核对（不一致即 fail-closed）；Create 侧回退收窄、DAL 门控对 null fail-closed 拒绝；两侧 `clientDataJSON` 均不再回退本包名 | 审计 E4（收窄）；`CallingOriginResolverAttributionTest`（6 例，含核心负例「android 候选被跳过」） |
+| **ISSUE-P2-76** | P2（升格 P1，威胁建模 Q-2） | **两条凭据通道认证强度不对称**：自动填充通道有 Keystore `CryptoObject` 密码学绑定，CM / Passkey 通道只凭 `BiometricSucceeded` 回调放行（hook 可伪造） | `CredentialVerificationLauncher` 复用自动填充已验证的同一机制：`prepareAutofillAuthCipher()` 准备绑定 Cipher 并以 `CryptoObject` 发起认证，放行条件升级为 `isSatisfied && AutofillAuthBindingPolicy.isBound(result)`（**无 CryptoObject 不放行**）；Cipher 不可用时**降级为受保护窗口内手动确认**（与自动填充同策略），绝不回落回调级放行 | 威胁建模 Q-2；静态接线回归 `CredentialVerificationBindingWiringTest`（4 断言）；`AutofillAuthBindingPolicyTest` 既有 3 例复用 |
+| **ISSUE-P3-109** | P3（升格 P1） | `AutofillLastFilledStore.clear()` 全仓**零调用方**，与 KDoc「换库 / 锁库时清」矛盾 → 上次填充条目 UUID 在明文 prefs 长期驻留 | 该类实现 `SessionLockObserver`，`DatabaseModule` 注册——锁定 / 关闭 / **换库**（`releaseSessionStateForReplacement`）统一清除；新增静态装配清单回归（`DatabaseModuleLockObserversWiringTest`）防「装配被静默移除」 | 审计 L15；`AutofillLastFilledStoreTest`（+2：锁定回调清空 / 幂等） |
+| **ISSUE-P3-117** | P3（升格 P1，威胁建模 Q-15 / T-9d） | `clearPasswordOnLeave` 为**死开关**（9 处命中全为持久化 / 投影 / UI 回调，零行为消费方）；未提交主密码跨后台 / 旋转长期驻留 | `UnlockViewModel` 注入 `ExtendedSettingsStore` 并新增 `onScreenLeft()`（开关开启 → `wipeMasterPassword` + 递增擦除令牌）；`UnlockScreen` 经 `DisposableEffect`（ON_STOP / onDispose）接线；断言以「清空后提交必命中空密码拦截」为可观测证据（不引入测试后门） | 威胁建模 Q-15 / T-9d；`UnlockViewModelClearOnLeaveTest`（3 例：开启清空 / 关闭保留 / 令牌递增） |
 
 ### 48.2 ISSUE-P2-49 进展（**部分完成，条目保留在 `ACTIVE_ISSUES.md`**）
 
@@ -2926,20 +2936,29 @@ $ adb shell am instrument -w -e class com.keepasskey.app.security.QuickUnlockSea
 
 ```powershell
 .\gradlew.bat test --rerun-tasks --max-workers=1
-# → BUILD SUCCESSFUL in 2m 8s；114 actionable tasks: 114 executed（全部真实执行）
-#   结果汇总（build/test-results/**/TEST-*.xml）：tests=1606 failures=0 errors=0 skipped=13
+# → BUILD SUCCESSFUL in 4m 13s；114 actionable tasks: 114 executed（全部真实执行）
+#   结果汇总（build/test-results/**/TEST-*.xml）：tests=1626 failures=0 errors=0 skipped=13
 ```
 
-**新增 / 修改用例**（共 +11 例）：
+**新增 / 修改用例**（共 +31 例）：
 
 | 模块 | 用例 | 覆盖 |
 |---|---|---|
 | `database` | `KdfParametersBoundsTest`（+2） | 联合预算边界通过 / 越界拒绝 |
 | `database` | `KdbxEntrySerializerProtectedFlagTest`（+1） | `otp` per-value 受保护 → 写出 `Protected="True"` |
 | `database` | `KdbxEmptyFieldRoundTripTest`（+1） | `otp` 全链路往返后仍受保护、值不变 |
+| `database` | `SessionReplacementReleaseTest`（+1，新文件） | 换库事件序 `clear`→`store`（新库附件不被误删）+ 旧库受保护字段已擦除 |
+| `database` | `AttachmentReferenceBudgetTest`（+2，新文件） | 单池条目 × 5000 引用被累计预算拒绝（非 OOM）+ 共享池条目少量引用不误拒 |
 | `app` | `VaultEntryMapperTotpTest`（+2） | 新建路径写出受保护 / 明文 `otp` 兼容可读 |
 | `app` | `ClipboardClearPolicyTest`（+4，新文件） | 空读裁决：未覆盖写且匹配→清；已覆盖写→不清（核心负例）；无记录 / 摘要不匹配→不清 |
 | `app` | `GeneratorViewModelSessionLockTest`（+1，新文件） | 锁库 → 生成结果已清零（`readString` 抛 `IllegalStateException`） |
+| `app` | `RuntimeIntegrityPolicyTest`（+3） | 快照新鲜度：从未扫描 / 超出窗口 → 陈旧；窗口内（含边界）→ 不陈旧 |
+| `app` | `CredentialProviderIntegrityWiringTest`（+1，新文件） | 静态接线：CM get/create 两入口各消费门控一次 + 自动填充通道同判据 |
+| `app` | `CallingOriginResolverAttributionTest`（+6，新文件） | 归属过滤：系统包名 / 空白被排除、android 候选跳过后回退 extras 记录、无可用即省略字段（核心负例）、无系统背书返回 null |
+| `app` | `CredentialVerificationBindingWiringTest`（+1，新文件） | 静态接线：CM 通道认证传绑定 Cipher + 放行前校验 isBound + 不可绑定降级手动确认 |
+| `app` | `AutofillLastFilledStoreTest`（+2） | 锁定回调清空记忆 / 幂等 |
+| `app` | `DatabaseModuleLockObserversWiringTest`（+1，新文件） | 静态装配清单：4 个会话终止观察者全部注册 |
+| `app` | `UnlockViewModelClearOnLeaveTest`（+3，新文件） | 开关开启清空未提交主密码（可观测证据）/ 关闭保留 / 擦除令牌递增 |
 
 ### 48.4 已知边界与口径（如实声明）
 
@@ -2952,6 +2971,23 @@ $ adb shell am instrument -w -e class com.keepasskey.app.security.QuickUnlockSea
    （由 `EntryIconPresenter` 持有，随组合销毁），其内容为派生**图像**而非明文口令 / 种子；且无进程级单例持有点，
    故不注册锁观察者（与 `AGENTS.md` §6 对「已接受边界」的处置口径一致）。AC③ 的「锁库 → 明文清空」
    已以 `GeneratorViewModelSessionLockTest` 在宿主 JVM 断言（该判定不涉平台 API，JVM 即权威）。
-5. **本批未触及**：`ISSUE-P2-49` AC②（见 48.2）、`ISSUE-P2-48 / P2-53 / P2-63 / P2-72 / P2-76 / P2-77`
-   等其余升格 P1 开放项仍在 `ACTIVE_ISSUES.md`。
+5. **`P2-77` 带来的有意行为变更（fail-closed）**：换库前置释放发生在**装载新库之前**，因此
+   「已开库 A → 尝试打开库 B 但口令错误」现在会**保持锁定态**（旧库 A 已被释放），
+   而不再是「保留 A」。这是 AC 明确要求的顺序（"必须先通知旧库会话锁定、再 load / 落盘新库"）的必然结果，
+   方向 fail-closed（错误口令不会让上一库继续在内存中可用）。同理，`create()` 建库亦会先释放旧会话。
+6. **`P2-63` 的周期重扫代价与口径**：后台每 30s 重扫一次（`/proc/self/maps` 读取 + 若干
+   `File.exists()`，均在 `Dispatchers.IO`），快照新鲜度窗口 120s；窗口内为正常放行，
+   超出窗口（进程挂起 / IO 受限）即转保守（fail-closed）。**注入框架探测仍是启发式**
+   （磁盘落点 + maps 特征串），命中率真机实测见 `ISSUE-P3-120`，本项只消除「快照陈旧」这一确定性缺口。
+7. **`P2-53` 与 CM 响应预算**：门控走 suspend `awaitEnforcement()`（含一次重扫，自带 1s 兜底超时），
+   仍在服务既有的 5s `TIMEOUT_MS` 预算内；风险态返回**空响应**而非错误，系统弹窗表现为「无候选」。
+8. **`P2-72` 的口径收窄**：审计原断言对 Create 侧为误报（该侧本就优先取系统 `CallingAppInfo`），
+   本批仅治理「回退链」——两侧 `clientDataJSON` 与 Create 侧 `boundPackage` 均不再回退本应用包名 /
+   `Activity.getCallingPackage()`；归属字段全不可用时**省略**而非回退。`PasskeyCreateActivity` 对
+   `callerPackage == null` 的 fail-closed 拒绝沿用既有 DAL 门控，未新增行为。
+9. **`P2-76` 的验证预算影响**：绑定 Cipher 准备为同步 Keystore 调用（微秒级）；无强认证器设备
+   （原走手动确认）行为不变；Keystore 可用但 Cipher 初始化失败的场景**新增**降级到手动确认
+   （此前会以无绑定认证放行——这正是缺陷本身）。
+10. **本批未触及**：`ISSUE-P2-49` AC②（见 48.2）、`ISSUE-P3-116 / P3-120`（需真机实测，
+    本环境无设备）等升格 P1 开放项仍在 `ACTIVE_ISSUES.md`。
 

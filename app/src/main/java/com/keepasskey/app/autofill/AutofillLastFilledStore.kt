@@ -2,6 +2,7 @@ package com.keepasskey.app.autofill
 
 import android.content.Context
 import android.content.SharedPreferences
+import com.keepasskey.core.session.SessionLockObserver
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -15,11 +16,17 @@ import javax.inject.Singleton
  *
  * 存储：仅保存条目的 hex 标识（UUID，非敏感数据），不落任何明文、域名或账号。
  * `context` 为 null（纯 JVM 单元测试注入）时退化为进程内存语义，保证可测性。
+ *
+ * ## ISSUE-P3-109：本类实现 [SessionLockObserver]，由 `DatabaseModule` 注册
+ *
+ * 原实现声明 `clear()` 语义为「库切换 / 锁定后不再跨会话置顶」，但**全仓零调用方**——
+ * 记忆会在明文 prefs 中长期驻留。现注册为会话终止观察者：锁定 / 关闭 / **换库**
+ * （`DatabaseSession.releaseSessionStateForReplacement`）时统一清除，KDoc 与实现一致。
  */
 @Singleton
 class AutofillLastFilledStore @Inject constructor(
     @ApplicationContext private val context: Context?
-) {
+) : SessionLockObserver {
 
     private val prefs: SharedPreferences? =
         context?.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -45,11 +52,14 @@ class AutofillLastFilledStore @Inject constructor(
         p.edit().putString(K_LAST_FILLED_ENTRY_ID, normalized).apply()
     }
 
-    /** 清除记忆（如库切换/锁定后不再跨会话置顶） */
+    /** 清除记忆（库切换 / 锁定 / 关闭后不再跨会话置顶） */
     fun clear() {
         memoryEntryId = null
         prefs?.edit()?.remove(K_LAST_FILLED_ENTRY_ID)?.apply()
     }
+
+    /** ISSUE-P3-109：会话锁定 / 关闭 / 换库回调（[SessionLockObserver] 契约：非阻塞、幂等）。 */
+    override fun onSessionLocked() = clear()
 
     private companion object {
         const val PREFS_NAME = "keepasskey_autofill_last_filled"

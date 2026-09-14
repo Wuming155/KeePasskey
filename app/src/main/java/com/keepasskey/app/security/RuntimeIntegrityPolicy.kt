@@ -182,4 +182,21 @@ object RuntimeIntegrityPolicy {
             )
         )
     }
+
+    /**
+     * ISSUE-P2-63：非 suspend 门控读到的快照是否已「陈旧」。
+     *
+     * 快照由一次性扫描（冷启动）与后台周期重扫共同维护；超过新鲜度窗口仍未重扫，
+     * 说明后台重扫未能推进（进程被挂起 / IO 受限），此时**不得**用旧快照为敏感通道放行——
+     * 否则「启动后附加注入框架」的窗口会被静默放过（本项即该缺陷）。
+     *
+     * @param snapshotAtMillis 上次扫描完成时刻（0 = 从未扫描）
+     * @param nowMillis 当前时刻
+     * @param freshnessWindowMillis 新鲜度窗口
+     */
+    fun isSnapshotStale(
+        snapshotAtMillis: Long,
+        nowMillis: Long,
+        freshnessWindowMillis: Long
+    ): Boolean = snapshotAtMillis <= 0L || nowMillis - snapshotAtMillis > freshnessWindowMillis
 }

@@ -28,7 +28,15 @@ internal class SessionOpener(
     private val fileWriter: SessionFileWriter,
     private val mutex: Mutex,
     /** ISSUE-P2-24：大附件落盘存储（可选）；为空时解析行为与既往逐字一致。 */
-    private val binaryStore: BinaryStore? = null
+    private val binaryStore: BinaryStore? = null,
+    /**
+     * ISSUE-P2-77：换库前置释放（由 `DatabaseSession` 注入，语义与 `lock()` 的清理部分对齐）。
+     *
+     * **顺序硬约束**：必须在 `KdbxFile.load` / 落盘新库**之前**调用——否则
+     * `FileBinaryStore.onSessionLocked()` 会把刚为新库落盘的附件一并删除（静默数据损坏）。
+     * 由调用方在 [mutex] 临界区内同步执行（不取锁，避免 `lock()` 的互斥重入）。
+     */
+    private val releaseCurrentSession: () -> Unit = {}
 ) {
 
     /**
@@ -46,6 +54,10 @@ internal class SessionOpener(
         keyFileData: ByteArray? = null
     ): KdbxResult<Unit> = mutex.withLock {
         withContext(Dispatchers.Default) {
+            // ISSUE-P2-77：建库即换库——先释放旧会话（擦除旧库明文树 + 驱逐派生缓存，
+            // 与 `lock()` 语义对齐），再落盘新库。顺序不可颠倒：`FileBinaryStore.onSessionLocked()`
+            // 会清空 `cacheDir/attachments`，若在新库附件落盘之后通知即造成静默数据损坏。
+            releaseCurrentSession()
             try {
                 val header = KdbxHeader.createDefault(
                     cipherUuid = KdbxConstants.Cipher.AES_256_CBC,
@@ -140,6 +152,9 @@ internal class SessionOpener(
         associatedFile: File? = null
     ): KdbxResult<Unit> = mutex.withLock {
         withContext(Dispatchers.Default) {
+            // ISSUE-P2-77：换库前置释放（顺序硬约束见 [releaseCurrentSession] KDoc）——
+            // 必须在 `KdbxFile.load` 之前执行，否则新库附件会被 `FileBinaryStore.onSessionLocked()` 删除。
+            releaseCurrentSession()
             try {
                 val db = inputStreamProvider().use { fis ->
                     // ISSUE-P2-24：大附件在解析期流式落盘（binaryStore 为空则行为与既往一致）

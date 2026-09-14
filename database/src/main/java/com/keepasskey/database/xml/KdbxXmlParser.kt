@@ -47,6 +47,10 @@ class KdbxXmlParser(
         // `newSAXParser()` 才抛，仅在 `setFeature` 外套 try/catch 无法阻止设备端解析全量失败。
         val parser = buildHardenedParser()
 
+        // ISSUE-P2-48（审计 F-10）：本次解析共享的「池引用累计物化字节」预算——
+        // 逐引用 copyOf() 是别名隔离契约防线（不得取消），须以累计预算封住副本乘法。
+        val referenceBudget = BinaryReferenceBudget.forPool(binaries)
+
         var metaData = KdbxMetaData()
         var rootGroup: KdbxGroup? = null
         val nodeStack = ArrayDeque<SaxNode>()
@@ -89,7 +93,7 @@ class KdbxXmlParser(
                     if (qName != KdbxConstants.Xml.ROOT) {
                         throw KdbxCorruptFileException("KDBX XML 根节点必须是 <${KdbxConstants.Xml.ROOT}>，实际为 <$qName>")
                     }
-                    nodeStack.addLast(FileNode(innerStreamCipher, binaries) {
+                    nodeStack.addLast(FileNode(innerStreamCipher, binaries, referenceBudget) {
                         metaData = it.first
                         rootGroup = it.second
                     })
@@ -280,6 +284,7 @@ class KdbxXmlParser(
 private class FileNode(
     private val innerStreamCipher: InnerRandomStreamCipher?,
     private val binaries: List<InnerHeader.BinaryItem>,
+    private val referenceBudget: BinaryReferenceBudget,
     private val onDone: (Pair<KdbxMetaData, KdbxGroup?>) -> Unit
 ) : SaxNode() {
 
@@ -289,7 +294,7 @@ private class FileNode(
     override fun startChild(name: String, attrs: Attributes): SaxNode {
         return when (name) {
             KdbxConstants.Xml.META -> MetaNode { meta = it }
-            KdbxConstants.Xml.ROOT_GROUP -> RootNode(innerStreamCipher, binaries) { group, rootDeletedObjects ->
+            KdbxConstants.Xml.ROOT_GROUP -> RootNode(innerStreamCipher, binaries, referenceBudget) { group, rootDeletedObjects ->
                 rootGroup = group
                 if (rootDeletedObjects.isNotEmpty()) {
                     meta = meta.copy(
@@ -317,6 +322,7 @@ private class FileNode(
 private class RootNode(
     private val innerStreamCipher: InnerRandomStreamCipher?,
     private val binaries: List<InnerHeader.BinaryItem>,
+    private val referenceBudget: BinaryReferenceBudget,
     private val onDone: (KdbxGroup?, List<DeletedObject>) -> Unit
 ) : SaxNode() {
 
@@ -325,7 +331,7 @@ private class RootNode(
 
     override fun startChild(name: String, attrs: Attributes): SaxNode {
         return when (name) {
-            KdbxConstants.Xml.GROUP -> GroupNode(null, innerStreamCipher, binaries) { rootGroup = it }
+            KdbxConstants.Xml.GROUP -> GroupNode(null, innerStreamCipher, binaries, referenceBudget) { rootGroup = it }
             KdbxConstants.Xml.DELETED_OBJECTS -> DeletedObjectsNode { deletedObjects = it }
             else -> IgnoredNode()
         }

@@ -8,6 +8,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -43,6 +44,11 @@ class RuntimeIntegrityDetector @Inject constructor(
 
     private val scanScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val started = AtomicBoolean(false)
+    private val rescanInFlight = AtomicBoolean(false)
+
+    /** ISSUE-P2-63：上次扫描完成时刻（毫秒）；0 = 尚未扫描。由后台周期重扫与显式 refresh 推进。 */
+    @Volatile
+    private var lastScanAtMillis: Long = 0L
 
     private val _report = MutableStateFlow(RuntimeIntegrityReport.UNDETERMINED)
 
@@ -54,21 +60,62 @@ class RuntimeIntegrityDetector @Inject constructor(
         start()
     }
 
-    /** 幂等启动扫描；可被宿主 Application 重复调用 */
+    /**
+     * 幂等启动**周期重扫**；可被宿主 Application 重复调用。
+     *
+     * ISSUE-P2-63：原实现只扫一次，导致「冷启动后附加注入框架」不产生任何实时信号——
+     * 非 suspend 门控（生物识别快速解锁）读到的是启动态快照。现改为周期重扫（后台 IO），
+     * 使注入信号在 [LIVE_RESCAN_INTERVAL_MS] 内进入快照。
+     */
     fun start() {
         if (!started.compareAndSet(false, true)) return
-        scanScope.launch { refresh() }
+        scanScope.launch {
+            while (true) {
+                runCatching { refresh() }
+                delay(LIVE_RESCAN_INTERVAL_MS)
+            }
+        }
     }
 
-    override fun currentEnforcement(): IntegrityEnforcement =
-        // ISSUE-P3-53：非 suspend 路径（如生物识别放行）以**实时**调试器信号升级缓存快照——
-        // `Debug.isDebuggerConnected()` 为廉价同步调用，可主线程安全求值；钩子框架为磁盘 IO，
-        // 此处不扫（由 suspend 的 awaitEnforcement 重扫覆盖）。
-        RuntimeIntegrityPolicy.escalateForLiveSignals(
-            base = _report.value,
+    /**
+     * ISSUE-P2-63：非 suspend 门控裁决。
+     *
+     * 与旧实现的差异：
+     * 1. **不再把钩子信号硬编码为 false**——快照内的钩子信号即最近一次（周期）重扫结果，
+     *    显式并入实时升级，使「启动后附加 Frida」在重扫周期内即被捕获；
+     * 2. **快照陈旧即 fail-closed**——超过 [SNAPSHOT_STALE_AFTER_MS] 未重扫（或首次扫描未完成）
+     *    时返回保守策略 [IntegrityEnforcement.UNDETERMINED]，并顺带触发一次后台重扫，
+     *    绝不用陈旧快照为高价值通道（解封主密码）放行。
+     */
+    override fun currentEnforcement(): IntegrityEnforcement {
+        val snapshot = _report.value
+        val stale = RuntimeIntegrityPolicy.isSnapshotStale(
+            snapshotAtMillis = lastScanAtMillis,
+            nowMillis = System.currentTimeMillis(),
+            freshnessWindowMillis = SNAPSHOT_STALE_AFTER_MS
+        )
+        if (snapshot.level == RuntimeRiskLevel.UNDETERMINED || stale) {
+            requestRescan()
+            return IntegrityEnforcement.UNDETERMINED
+        }
+        return RuntimeIntegrityPolicy.escalateForLiveSignals(
+            base = snapshot,
             debuggerAttached = liveDebuggerAttached(),
-            hookFrameworkDetected = false
+            hookFrameworkDetected = snapshot.signals.hookFrameworkDetected
         ).enforcement
+    }
+
+    /** 触发一次后台重扫（去重：已有重扫在飞行中则不重复发起）。 */
+    private fun requestRescan() {
+        if (!rescanInFlight.compareAndSet(false, true)) return
+        scanScope.launch {
+            try {
+                runCatching { refresh() }
+            } finally {
+                rescanInFlight.set(false)
+            }
+        }
+    }
 
     override suspend fun awaitEnforcement(): IntegrityEnforcement {
         // ISSUE-P3-53：敏感操作（自动填充下发）前**重扫**，捕获冷启动后才出现的时变信号
@@ -89,10 +136,12 @@ class RuntimeIntegrityDetector @Inject constructor(
     private fun liveDebuggerAttached(): Boolean =
         Debug.isDebuggerConnected() || Debug.waitingForDebugger()
 
-    /** 重新采集信号并刷新快照（供显式复检；默认由 [start] 触发一次） */
+    /** 重新采集信号并刷新快照（供显式复检；由 [start] 的周期重扫与敏感通道 await 触发） */
     suspend fun refresh(): RuntimeIntegrityReport {
         val report = RuntimeIntegrityPolicy.evaluate(detectSignals())
         _report.value = report
+        // ISSUE-P2-63：记录扫描时刻，供非 suspend 门控判定快照新鲜度
+        lastScanAtMillis = System.currentTimeMillis()
         AppLog.i(TAG, "运行完整性扫描完成: level=${report.level}")
         return report
     }
@@ -161,6 +210,18 @@ class RuntimeIntegrityDetector @Inject constructor(
 
         /** 等待首次扫描完成的兜底超时（超时按未判定保守策略处理） */
         private const val SCAN_AWAIT_TIMEOUT_MS = 1_000L
+
+        /**
+         * ISSUE-P2-63：后台周期重扫间隔。注入框架落点 / 内存映射变化在此间隔内进入快照，
+         * 使非 suspend 门控（生物识别快速解锁）不再依赖启动态判定。
+         */
+        private const val LIVE_RESCAN_INTERVAL_MS = 30_000L
+
+        /**
+         * ISSUE-P2-63：快照新鲜度窗口。超过该时长未完成任何重扫（如进程挂起、IO 受限）
+         * 即视为陈旧 → 非 suspend 门控转保守（fail-closed），容忍 4 次周期重扫缺失。
+         */
+        private const val SNAPSHOT_STALE_AFTER_MS = 120_000L
 
         private const val PROC_SELF_MAPS = "/proc/self/maps"
 

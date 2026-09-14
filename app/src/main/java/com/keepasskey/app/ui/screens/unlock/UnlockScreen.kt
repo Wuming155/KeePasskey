@@ -29,6 +29,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -67,6 +68,21 @@ fun UnlockScreen(
             when (event) {
                 is UnlockEvent.UnlockSuccess -> onUnlockSuccess()
             }
+        }
+    }
+
+    // ISSUE-P3-117：接线「离开密码页清空已输入字符」开关——页面进入后台（ON_STOP）或离开组合
+    // （onDispose）时通知 ViewModel 清空**未提交**的主密码缓冲区；是否真的清由该开关与
+    // ViewModel 内的偏好判定决定（Screen 不做业务判断，只透传生命周期事件）。
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, viewModel) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_STOP) viewModel.onScreenLeft()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            viewModel.onScreenLeft()
         }
     }
 

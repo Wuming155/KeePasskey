@@ -58,6 +58,33 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
         val origin = intent.getStringExtra(EXTRA_ORIGIN).orEmpty()
         val expectedPackage = intent.getStringExtra(EXTRA_EXPECTED_PACKAGE).orEmpty()
 
+        // ISSUE-P2-72：归属字段取**系统认证**的 CallingAppInfo 包名——系统把原始
+        // BeginGetCredentialRequest 注入本窗口的 PendingIntent，其中 `callingAppInfo.packageName`
+        // 由平台背书（凭据组装阶段亦用它做严格匹配）。原实现用 `Activity.getCallingPackage()`，
+        // 在 PendingIntent 拉起场景为 `"android"`/null，随后 `?: packageName` 又回退成
+        // **本应用包名**——等于向 RP 谎报调用方。
+        val providerReq = try {
+            PendingIntentHandler.retrieveProviderGetCredentialRequest(intent)
+        } catch (_: Exception) {
+            null
+        }
+        val attestedPackage = CallingOriginResolver.systemAttestedPackageName(providerReq?.callingAppInfo)
+
+        // 交叉核对：系统认证包名 vs 我们自己在 PendingIntent extras 里记录的预期包名（不可伪造）。
+        // 两者均可得且不一致 → fail-closed（组装阶段与本窗口看到的调用方不是同一个，拒绝签发）。
+        if (attestedPackage != null &&
+            expectedPackage.isNotBlank() &&
+            attestedPackage != expectedPackage.trim()
+        ) {
+            AppLog.e(TAG, "系统认证调用方与预期包名不一致，拒绝签发断言")
+            failAndFinish()
+            return
+        }
+        val clientDataPackage = CallingOriginResolver.clientDataAndroidPackageName(
+            attestedPackage,
+            expectedPackage
+        )
+
         if (entryId.isBlank()) {
             AppLog.e(TAG, "缺少通行密钥 entryId")
             failAndFinish()
@@ -135,7 +162,7 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
                     onVerified = { verification ->
                         if (settled) return@requestCredentialUserVerification
                         settled = true
-                        signAndReturn(entryId, passkeyData, origin, challenge, verification)
+                        signAndReturn(entryId, passkeyData, origin, challenge, clientDataPackage, verification)
                     },
                     onRejected = {
                         if (settled) return@requestCredentialUserVerification
@@ -162,6 +189,7 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
         passkeyData: PasskeyData,
         origin: String,
         challenge: String,
+        clientDataPackage: String?,
         verification: CredentialUserVerification
     ) {
         lifecycleScope.launch {
@@ -189,7 +217,7 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
 
                 // 密码学运算调度至 Default，杜绝在系统回调线程上执行 CPU 密集签名
                 val assertionJson = withContext(Dispatchers.Default) {
-                    buildAssertionJson(passkeyData, origin, challenge, flags, signCount)
+                    buildAssertionJson(passkeyData, origin, challenge, clientDataPackage, flags, signCount)
                 }
 
                 // ISSUE-P3-27 子项 2：计数器已落库后才回传 RP——原实现先 setResult 再落盘，
@@ -220,6 +248,7 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
         passkeyData: PasskeyData,
         origin: String,
         challenge: String,
+        clientDataPackage: String?,
         flags: Byte,
         signCount: Int
     ): String {
@@ -242,7 +271,9 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
                 put("type", "webauthn.get")
                 put("challenge", challenge)
                 put("origin", origin)
-                put("androidPackageName", callingPackage ?: packageName)
+                // ISSUE-P2-72：只写系统认证（或不可伪造 extras 记录）的调用方包名；
+                // 取不到即省略——绝不再回退为本应用包名（原实现 `?: packageName` 属虚假归属）。
+                clientDataPackage?.let { put("androidPackageName", it) }
             }.toString()
             val clientDataBytesLocal = clientDataJson.toByteArray(Charsets.UTF_8)
             clientDataBytes = clientDataBytesLocal

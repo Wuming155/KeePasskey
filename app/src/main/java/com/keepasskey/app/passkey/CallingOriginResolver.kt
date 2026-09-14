@@ -70,6 +70,40 @@ object CallingOriginResolver {
     fun isBrowserOrigin(origin: String): Boolean =
         origin.startsWith("https://")
 
+    /**
+     * Android 系统自身包名。
+     *
+     * ISSUE-P2-72：`Activity.getCallingPackage()` 在「系统经 PendingIntent 拉起」场景返回
+     * `"android"`（或 null）——把该值当作调用方归属，会落出 `android://android` 这种
+     * 无意义（且可被同包名侧载应用命中）的绑定，故一律排除。
+     */
+    const val SYSTEM_PACKAGE_ANDROID = "android"
+
+    /**
+     * ISSUE-P2-72：**系统背书**的调用方包名。
+     *
+     * 仅接受平台经 [CallingAppInfo] 下发的包名（由系统在凭据请求中背书），
+     * 排除系统自身包名（[SYSTEM_PACKAGE_ANDROID]）与空白值；取不到即返回 null。
+     *
+     * **禁止回退**：不得回退 `Activity.getCallingPackage()`（PendingIntent 场景下为 `android`）
+     * 或本应用包名——前者制造 `android://android` 绑定，后者把归属错误地写成我们自己。
+     */
+    fun systemAttestedPackageName(callingAppInfo: CallingAppInfo?): String? =
+        callingAppInfo?.packageName
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() && it != SYSTEM_PACKAGE_ANDROID }
+
+    /**
+     * ISSUE-P2-72：`clientDataJSON.androidPackageName` 的归属值。
+     *
+     * 按 [candidates] 顺序取首个「非空白且非系统包名」者；全部不合格时返回 null——
+     * 调用方应**省略该字段**，而不是回退为本应用包名（那是对 RP 的虚假归属）。
+     */
+    fun clientDataAndroidPackageName(vararg candidates: String?): String? =
+        candidates.asSequence()
+            .mapNotNull { it?.trim() }
+            .firstOrNull { it.isNotEmpty() && it != SYSTEM_PACKAGE_ANDROID }
+
     /** 普通应用固定颁发 apk-key-hash origin（签名证书 SHA-256，base64url 无填充） */
     private fun apkKeyHashOrigin(callingAppInfo: CallingAppInfo): String {
         return try {

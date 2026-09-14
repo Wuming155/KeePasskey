@@ -59,6 +59,9 @@ import javax.inject.Inject
  * 5. ISSUE-P1-01：全部条目的 PendingIntent 统一使用 [CredentialPendingIntents.ENTRY_FLAGS]
  *    （`FLAG_MUTABLE`）——系统以 fillIn Intent 注入最终请求，误用 `FLAG_IMMUTABLE` 会让注入的
  *    extras 被静默丢弃，链式解锁与密码保存全链路握手失败（详见该常量 KDoc）。
+ * 6. ISSUE-P2-53（审计 F-24）：**运行完整性门控在两条入口统一收口**——get / create 均在最先
+ *    裁决 [com.keepasskey.app.security.RuntimeIntegrityGate.awaitEnforcement]，风险态返回空响应；
+ *    此前 CM 主通道零命中完整性门控（自动填充 fail-closed 而 CM fail-open，构成策略绕过）。
  */
 @AndroidEntryPoint
 class KeePasskeyCredentialProviderService : CredentialProviderService() {
@@ -72,6 +75,16 @@ class KeePasskeyCredentialProviderService : CredentialProviderService() {
     // TASK-44：自动填充黑名单（命中即不返回任何凭据候选，fail-closed）
     @Inject
     lateinit var autofillBlocklistStore: com.keepasskey.app.data.repository.AutofillBlocklistStore
+
+    /**
+     * ISSUE-P2-53（审计 F-24）：运行完整性门控——CM 主通道与自动填充通道统一收口。
+     *
+     * 此前完整性裁决只在自动填充 fail-closed，CM 通道（本服务）**零命中**：
+     * 风险态下系统凭据弹窗仍可取得候选，等于绕过策略。现于两条入口（get / create）
+     * 各做一次 await 裁决，风险态一律返回**空响应**（不下发任何数据集 / 解锁引导 / 保存入口）。
+     */
+    @Inject
+    lateinit var runtimeIntegrityGate: com.keepasskey.app.security.RuntimeIntegrityGate
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
@@ -111,6 +124,13 @@ class KeePasskeyCredentialProviderService : CredentialProviderService() {
 
     private suspend fun buildBeginGetResponse(request: BeginGetCredentialRequest): BeginGetCredentialResponse {
         val responseBuilder = BeginGetCredentialResponse.Builder()
+
+        // ISSUE-P2-53：完整性门控收口（最先裁决）——风险态一律不下发任何数据集 / 解锁引导。
+        // 与自动填充通道（KeePasskeyAutofillService.awaitEnforcement）同一判据，消除通道不对称。
+        if (runtimeIntegrityGate.awaitEnforcement().disableAutofill) {
+            AppLog.i(TAG, "运行环境完整性风险态，拒绝返回凭据候选")
+            return responseBuilder.build()
+        }
 
         // 0. TASK-44 黑名单：命中即 fail-closed 返回空响应（不产出解锁引导，也不产出凭据候选）。
         //    Android 16+ 上 Credential Manager 是主通道，仅屏蔽传统 Autofill 服务等于形同虚设，
@@ -183,6 +203,13 @@ class KeePasskeyCredentialProviderService : CredentialProviderService() {
 
     private suspend fun buildBeginCreateResponse(request: BeginCreateCredentialRequest): BeginCreateCredentialResponse {
         val responseBuilder = BeginCreateCredentialResponse.Builder()
+
+        // ISSUE-P2-53：完整性门控收口——风险态不下发保存入口（与 get 通道同判据）。
+        if (runtimeIntegrityGate.awaitEnforcement().disableAutofill) {
+            AppLog.i(TAG, "运行环境完整性风险态，拒绝返回凭据保存入口")
+            return responseBuilder.build()
+        }
+
         val callingAppInfo = request.callingAppInfo
         val callingPackage = callingAppInfo?.packageName.orEmpty()
         val callingOrigin = extractOrigin(callingAppInfo)

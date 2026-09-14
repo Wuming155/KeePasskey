@@ -66,7 +66,10 @@ class DatabaseSession(
 
     private val fileWriter = SessionFileWriter { createBackupBeforeSave }
 
-    private val opener = SessionOpener(core, credentials, fileWriter, mutex, binaryStore)
+    private val opener = SessionOpener(core, credentials, fileWriter, mutex, binaryStore) {
+        // ISSUE-P2-77：换库前置释放（由本次调用持有互斥锁，故不能走 lock()——会重入死锁）
+        releaseSessionStateForReplacement()
+    }
 
     private val mutations = SessionContentMutations(mutex, core.database, core.state) { core.readOnlyMode }
 
@@ -116,6 +119,27 @@ class DatabaseSession(
                 // 隔离：清理失败不得阻断锁定流程
             }
         }
+    }
+
+    /**
+     * ISSUE-P2-77：换库前置释放——语义与 [lock] 的清理部分**对齐**
+     * （擦除旧库明文树、清空凭据缓存、置 `LOCKED`、通知锁观察者驱逐派生数据），
+     * 但不取互斥锁（由 [SessionOpener] 在其临界区内调用，避免重入死锁）。
+     *
+     * 触发点：`SessionOpener.create` / `openStream` 在装载新库**之前**调用，
+     * 使「切换 / 新建密码库」与「锁库」在数据生命周期上取得一致——旧库的
+     * `ProtectedString` 密文、`cacheDir/sync` 快照与明文附件缓存不再滞留至 GC。
+     *
+     * **顺序硬约束**：必须在 `KdbxFile.load` / 落盘新库之前执行，否则
+     * `FileBinaryStore.onSessionLocked()` 会删除刚为新库落盘的附件（静默数据损坏）。
+     */
+    private fun releaseSessionStateForReplacement() {
+        core.readOnlyMode = false
+        credentials.clear()
+        core.database.value?.clearSensitiveData()
+        core.database.value = null
+        core.state.value = SessionState.LOCKED
+        notifySessionLockObservers()
     }
 
     /**
