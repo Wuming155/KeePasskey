@@ -110,6 +110,49 @@ class KdfParametersBoundsTest {
         )
     }
 
+    // ================= Argon2 I×M 联合预算（ISSUE-P2-49 / 审计 F-12） =================
+
+    /**
+     * AC③「不误拒合法库」：官方默认（`I=2 / M=64 MiB`）、`KdfBenchmark` 迭代上限
+     * （`I=20`，内存上限 512 MiB 受测试 JVM 动态堆门槛约束故取 128 MiB）与联合预算边界值
+     * （`64 MiB × 16384 = 2^40`）均须合法通过。
+     */
+    @Test
+    fun `Argon2 联合预算内合法配置通过`() {
+        // 官方默认乘积 ≈ 2^27
+        KdbxHeader.validateArgon2Bounds(
+            memoryInBytes = 64L * 1024 * 1024, iterations = 2L, parallelism = 2, version = 0x13
+        )
+        // KdfBenchmark 迭代上限 20（内存取 128 MiB，远小于预算上界）
+        KdbxHeader.validateArgon2Bounds(
+            memoryInBytes = 128L * 1024 * 1024, iterations = 20L, parallelism = 4, version = 0x13
+        )
+        // 边界：64 MiB × 16384 = 2^40，恰好等于上界（判定为「不大于」）须通过
+        KdbxHeader.validateArgon2Bounds(
+            memoryInBytes = 64L * 1024 * 1024, iterations = 1L shl 14, parallelism = 2, version = 0x13
+        )
+    }
+
+    /**
+     * 逐项均合法、仅「迭代 × 内存」放大到越界的组合必须被拒：
+     * `I=2^24`（迭代上界内）与 `M=64 MiB`（内存上界内）乘积达 `2^50`，远超上界 `2^40`。
+     */
+    @Test
+    fun `Argon2 联合预算越界被拒绝`() {
+        // 逐项合法但乘积 2^50 远超上界
+        assertThrows(KdbxCorruptFileException::class.java) {
+            KdbxHeader.validateArgon2Bounds(
+                memoryInBytes = 64L * 1024 * 1024, iterations = 1L shl 24, parallelism = 2, version = 0x13
+            )
+        }
+        // 边界 + 1：64 MiB × 16385 > 2^40
+        assertThrows(KdbxCorruptFileException::class.java) {
+            KdbxHeader.validateArgon2Bounds(
+                memoryInBytes = 64L * 1024 * 1024, iterations = (1L shl 14) + 1, parallelism = 2, version = 0x13
+            )
+        }
+    }
+
     // ================= AES-KDF 边界 =================
 
     @Test

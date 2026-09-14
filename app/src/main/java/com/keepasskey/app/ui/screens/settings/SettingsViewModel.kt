@@ -135,6 +135,16 @@ class SettingsViewModel @Inject constructor(
         syncCredentialsStore, syncCoordinator, extendedSettingsStore, strings, viewModelScope
     )
 
+    /**
+     * ISSUE-P2-65：会话锁定 / 关闭时擦除同步凭据的明文预填通道
+     * （WebDAV 口令 / S3 SecretKey / AccessKey 均为 CharArray 借用副本，锁定后不得继续驻留）。
+     */
+    private val sessionLockObserver = com.keepasskey.core.session.SessionLockObserver {
+        syncController.clearWebDavPasswordPrefill()
+        syncController.clearS3SecretKeyPrefill()
+        syncController.clearS3AccessKeyPrefill()
+    }
+
     private val extendedPreferences = SettingsExtendedPreferencesController(
         extendedSettingsStore = extendedSettingsStore,
         syncCoordinator = syncCoordinator,
@@ -222,6 +232,8 @@ class SettingsViewModel @Inject constructor(
         // TASK-12 整改：wifiOnlySync 持久化恢复（周期同步网络约束的消费方）
         syncController.updateWifiOnlySync(extendedSettingsStore.loadWifiOnlySync())
         syncController.restoreSyncCredentials()
+        // ISSUE-P2-65：注册会话锁定观察者（须在 [sessionLockObserver] 声明之后）
+        databaseSession?.addLockObserver(sessionLockObserver)
         // 离线开关联动：冷启动时把默认/持久化的离线偏好传导至同步协调器
         syncCoordinator.setOfflineMode(extendedPreferences.settings.value.useOfflineCache)
         coldStartSyncGate.checkAndTrigger()
@@ -427,6 +439,7 @@ class SettingsViewModel @Inject constructor(
         syncController.clearS3SecretKeyPrefill()
         // ISSUE-P2-01：AccessKey ID 预填通道随销毁一并擦除
         syncController.clearS3AccessKeyPrefill()
+        databaseSession?.removeLockObserver(sessionLockObserver)
         super.onCleared()
     }
 }

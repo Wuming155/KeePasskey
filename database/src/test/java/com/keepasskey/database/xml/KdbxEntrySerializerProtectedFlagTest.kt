@@ -236,6 +236,26 @@ class KdbxEntrySerializerProtectedFlagTest {
         )
     }
 
+    /**
+     * ISSUE-P2-61：标准 `otp` 字段（**非**标准五字段）走 per-value 分支，
+     * `isProtected = true` 时写出侧必须落 `Protected="True"`（否则种子明文落盘）。
+     */
+    @Test
+    fun `标准 otp 字段 per-value 受保护时写出 Protected 属性`() {
+        val xml = serializeEntry(
+            KdbxEntry(
+                fields = linkedMapOf(
+                    KdbxConstants.Fields.OTP to ProtectedString("JBSWY3DPEHPK3PXP", isProtected = true)
+                )
+            )
+        )
+
+        assertTrue(
+            "otp 非标准字段，per-value=true 必须写 Protected=\"True\"（ISSUE-P2-61）",
+            valueStartTag(xml, KdbxConstants.Fields.OTP).contains("Protected=\"True\"")
+        )
+    }
+
     @Test
     fun `库级开启时标准字段即使 per-value 为 false 也写 Protected`() {
         val xml = serializeEntry(

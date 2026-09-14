@@ -2,7 +2,7 @@ package com.keepasskey.app.ui.screens.generator
 
 import androidx.lifecycle.ViewModel
 import com.keepasskey.app.R
-import com.keepasskey.app.security.ClipboardSecurityManager
+import com.keepasskey.app.security.ClipboardSecurityChannel
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.core.security.ProtectedString
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -14,7 +14,10 @@ import javax.inject.Inject
 
 @HiltViewModel
 class GeneratorViewModel @Inject constructor(
-    private val clipboardSecurityManager: ClipboardSecurityManager
+    private val clipboardSecurityManager: ClipboardSecurityChannel,
+    // ISSUE-P2-65：会话锁定观察者注册点（null 仅用于纯 JVM 单测）；
+    // 生成结果属明文，锁库 / 关库时必须立即擦除，不得仅依赖 ViewModel 销毁（`onCleared`）。
+    private val databaseSession: com.keepasskey.database.session.DatabaseSession? = null
 ) : ViewModel() {
 
     companion object {
@@ -197,10 +200,25 @@ class GeneratorViewModel @Inject constructor(
 
     override fun onCleared() {
         // ISSUE-P2-12：ViewModel 销毁时显式擦除受控容器内的全部生成结果
+        clearGeneratedSecrets()
+        databaseSession?.removeLockObserver(sessionLockObserver)
+        super.onCleared()
+    }
+
+    /** ISSUE-P2-65：会话锁定 / 关闭时擦除全部生成结果（当前 + 历史）。 */
+    private val sessionLockObserver = com.keepasskey.core.session.SessionLockObserver {
+        clearGeneratedSecrets()
+    }
+
+    init {
+        // ISSUE-P2-65：注册会话锁定观察者（须在 [sessionLockObserver] 声明之后）
+        databaseSession?.addLockObserver(sessionLockObserver)
+    }
+
+    private fun clearGeneratedSecrets() {
         val current = _uiState.value
         current.currentPassword.clear()
         current.history.forEach { it.clear() }
-        super.onCleared()
     }
 
     private fun evaluateStrengthLabel(entropyBits: Int): UiMessage = when {

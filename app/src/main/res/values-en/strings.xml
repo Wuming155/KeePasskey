@@ -592,6 +592,7 @@
     <string name="sec_clipboard_sub">Copied secrets stay out of clipboard history and cloud sync</string>
     <string name="sec_clipboard_countdown_title">Clipboard retention</string>
     <string name="sec_clipboard_countdown_current">Current: %1$s</string>
+    <string name="sec_clipboard_risk_notice">Auto-clear is off: copied passwords/one-time codes stay in the system clipboard and any foreground app can read them until overwritten or the device reboots. Keep it on, or use autofill to fill forms directly.</string>
     <string name="sec_section_memory">Memory &amp; key protection</string>
     <string name="sec_keyfile_title">Key file policy</string>
     <string name="sec_keyfile_sub">The key file stays in memory only while unlocked and is wiped on lock</string>

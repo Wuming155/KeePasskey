@@ -63,7 +63,11 @@ class EntryDetailViewModel @Inject constructor(
     // ISSUE-P3-17：进阶显示偏好通道（遮掩默认值 / 详情页所属分组）。
     // 该通道只有同步快照读取（无 Flow），故以 StateFlow 承载快照，页面进入时刷新；
     // null 仅用于纯 JVM 单测（生产 DI 经 ExtendedSettingsSourceModule 恒注入）
-    private val extendedSettingsSource: ExtendedSettingsSource? = null
+    private val extendedSettingsSource: ExtendedSettingsSource? = null,
+    // ISSUE-P2-65：会话锁定观察者注册点（null 仅用于纯 JVM 单测）。
+    // 本 ViewModel 持有按需解密明文（密码 / 修订密码 / 受保护字段）与实时 TOTP 码，
+    // 锁定 / 关闭时必须立即擦除，不得仅依赖导航离开（`onScreenDisposed`）。
+    private val databaseSession: com.keepasskey.database.session.DatabaseSession? = null
 ) : ViewModel() {
 
     // P3-23：文案解析通道（优先 stringsProvider，其次经 appContext 转发，均缺省时回退空串实现）
@@ -148,6 +152,16 @@ class EntryDetailViewModel @Inject constructor(
             initialValue = EntryDetailUiState(isLoading = true)
         )
 
+    /**
+     * ISSUE-P2-65：会话锁定 / 关闭回调——擦除全部明文驻留点
+     * （[SessionLockObserver] 契约：非阻塞、幂等、自容错）。
+     * 声明必须在 [init] 之前：Kotlin 按类体顺序执行初始化器。
+     */
+    private val sessionLockObserver = com.keepasskey.core.session.SessionLockObserver {
+        liveTotpCodeFlow.value = null
+        clearAllRevealedSecrets()
+    }
+
     init {
         // 断点6 整改：每秒驱动 TOTP 倒计时；周期翻转（剩余秒数不降反升）时重算实时验证码
         viewModelScope.launch(Dispatchers.Default) {
@@ -157,6 +171,14 @@ class EntryDetailViewModel @Inject constructor(
                 onLiveCode = { liveTotpCodeFlow.value = it }
             )
         }
+        // ISSUE-P2-65：注册会话锁定观察者——锁库 / 关库（含切库、后台超时、熄屏熔断）时
+        // 立即擦除按需解密明文与实时 TOTP 码，不依赖导航离开时机。
+        databaseSession?.addLockObserver(sessionLockObserver)
+    }
+
+    override fun onCleared() {
+        databaseSession?.removeLockObserver(sessionLockObserver)
+        super.onCleared()
     }
 
     fun setEntryId(id: String?) {

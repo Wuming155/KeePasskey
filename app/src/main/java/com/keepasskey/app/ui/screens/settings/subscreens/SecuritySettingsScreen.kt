@@ -297,6 +297,15 @@ fun SecuritySettingsScreen(
                                 subtitle = stringResource(R.string.sec_clipboard_countdown_current, clipboardLabel),
                                 onClick = { showClipboardDialog = true }
                             )
+                        } else {
+                            // ISSUE-P3-84 AC①：关闭自动擦除是用户可见的产品选择，但代价必须显式告知
+                            // （与 FlagSecurePolicy 的风险确认语义保持一致）
+                            Text(
+                                text = stringResource(R.string.sec_clipboard_risk_notice),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp)
+                            )
                         }
                     }
                 }

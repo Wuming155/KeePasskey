@@ -598,6 +598,7 @@
     <string name="sec_clipboard_sub">复制的敏感内容不进入剪贴板历史与云同步</string>
     <string name="sec_clipboard_countdown_title">剪贴板保留时长</string>
     <string name="sec_clipboard_countdown_current">当前：%1$s</string>
+    <string name="sec_clipboard_risk_notice">已关闭自动擦除：复制的口令/验证码将一直留在系统剪贴板中，任何前台应用都能读取，直至被下次复制覆盖或设备重启。建议保持开启，或改用自动填充直接填表。</string>
     <string name="sec_section_memory">内存与密钥保护</string>
     <string name="sec_keyfile_title">密钥文件策略</string>
     <string name="sec_keyfile_sub">密钥文件仅在解锁期间驻留内存，锁定后立即擦除</string>

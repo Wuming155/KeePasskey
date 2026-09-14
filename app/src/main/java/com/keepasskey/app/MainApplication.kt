@@ -5,6 +5,7 @@ import com.keepasskey.app.data.binary.FileBinaryStore
 import com.keepasskey.app.notification.NotificationChannels
 import com.keepasskey.app.notification.UnlockedNotificationController
 import com.keepasskey.app.security.AutoLockManager
+import com.keepasskey.app.security.ClipboardSecurityManager
 import com.keepasskey.app.security.RuntimeIntegrityDetector
 import com.keepasskey.app.sync.PeriodicSyncScheduler
 import com.keepasskey.core.log.AppLog
@@ -31,6 +32,10 @@ class MainApplication : Application() {
     @Inject
     lateinit var fileBinaryStore: FileBinaryStore
 
+    // ISSUE-P2-51：剪贴板敏感值冷启动对账入口（同一 @Singleton，亦在 DatabaseModule 注册为锁定观察者）
+    @Inject
+    lateinit var clipboardSecurityManager: ClipboardSecurityManager
+
     override fun onCreate() {
         super.onCreate()
         // ISSUE-P1-10 (ZT-10)：统一日志包装器调试开关——debug 构建开放 v/d 与完整异常堆栈，
@@ -46,6 +51,11 @@ class MainApplication : Application() {
         // 缓存目录内不存在仍被会话持有的条目，因此可安全整体清空。
         // 契约：清理失败只在 FileBinaryStore 内部记脱敏日志（clear() 不外抛），绝不阻断冷启动。
         fileBinaryStore.clear()
+        // ISSUE-P2-51：剪贴板冷启动对账——若上一次进程在敏感值驻留窗口内被 kill / force-stop，
+        // 自动擦除协程未执行，此处按跨进程布尔待清标记 fail-safe 清空（无明文 / 摘要留存）。
+        // ISSUE-P3-84：同时注册熄屏广播与「切到后台即清空」观察者（主线程冷启动点，幂等）。
+        clipboardSecurityManager.initialize()
+        clipboardSecurityManager.reconcileOnColdStart()
         // ISSUE-P0-01 (ZT-01)：自动锁定守护下沉至进程级唯一冷启动点——
         // 应用存在 AutofillUnlockActivity / CredentialUnlockActivity 两条不经 MainActivity
         // 的独立冷启动入口，守护（ProcessLifecycleOwner + 熄屏广播）必须在进程创建时注册，

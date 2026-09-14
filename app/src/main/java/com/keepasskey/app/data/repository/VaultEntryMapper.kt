@@ -318,7 +318,7 @@ internal class VaultEntryMapper(private val strings: StringsProvider) {
         if (totpSecretChars != null) {
             val trimmedTotp = totpSecretChars.trimmedCopy()
             if (trimmedTotp.isNotEmpty()) {
-                fields[KdbxConstants.Fields.OTP] = ProtectedString(trimmedTotp, isProtected = false)
+                fields[KdbxConstants.Fields.OTP] = ProtectedString(trimmedTotp, isProtected = true)
             }
             trimmedTotp.fill('0')
         }

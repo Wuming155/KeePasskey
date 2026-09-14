@@ -41,9 +41,30 @@ import com.keepasskey.database.exception.KdbxCorruptFileException
  * | Argon2 `V` 取值集 | `{0x10, 0x13}`（`MinVersion` / `MaxVersion`） | **{0x10, 0x13}** | 与官方一致 |
  * | AES-KDF `R` 下界 | 1 | **1** | 与官方一致 |
  * | AES-KDF `R` 上界 | 无（规范未封顶） | **2^28** | 本仓封顶（合法偏执配置通常 ≤ 1 亿轮） |
+ * | Argon2 `I×M` 联合预算 | 无（官方仅逐项校验，见 `AreParametersWeak`） | **2^40 字节·轮** | 本仓封顶（ISSUE-P2-49，见下） |
  *
  * **凡标注「本仓更严」的封顶均属 fail-closed 加固**：取值宽于一切合法用户配置
  * （合法范围见 KdfBenchmark / 各引擎默认值），正常文件不受影响，仅恶意构造文件被提前裁决。
+ *
+ * ## Argon2 `I×M` 联合预算（ISSUE-P2-49，审计 F-12）
+ *
+ * 逐项封顶（`I ≤ 2^24`、`M ≤ 4 GiB`）**不足以约束总工作量**：单项均合法时二者乘积可达
+ * `2^24 × 4 GiB = 2^58` 字节·轮，单线程 Argon2 派生可占用 CPU 数十年（拒绝服务），
+ * 且该派生发生在 Header HMAC 校验**之前**（`KdbxFile.load` 第 3 步早于第 4 步）——
+ * **无需正确口令即可触发**（同步路径同样受影响，见 `SyncDatabaseCodec`）。
+ *
+ * 官方参数域（KeePass 2.61.1 `Argon2Kdf.cs:53-71`）**只做逐项范围检查，无联合预算**：
+ * `M ∈ [8192, int.MaxValue]`、`I ∈ [1, uint.MaxValue]`、`P ∈ [1, 2^24-1]`，
+ * 默认 `I=2 / M=64 MiB / P=2`（乘积 ≈ `2^27`）；其 `AreParametersWeak` 仅以
+ * 「`I×M < 默认乘积`」判弱，不设上界。故本预算属**本仓更严的 fail-closed 加固**。
+ *
+ * 取值 `2^40 ≈ 1.1×10^12` 字节·轮，宽于本仓 `KdfBenchmark` 自荐上限
+ * （`≤512 MiB × 20 ≈ 2^33.3`）约 **100 倍**，亦远高于官方默认乘积（约 `2^27`）
+ * —— 正常文件（含官方默认与偏执配置）不受影响；仅「畸形放大」文件被提前裁决。
+ *
+ * **本预算即「解锁派生的工作量上界」**：阻塞式原生派生不可被协程 `withTimeout` 打断
+ * （`withTimeout` 只在阻塞调用返回后的挂起点生效），故不引入无效的墙钟超时；
+ * 墙钟量级的真机实测见 `ISSUE-P2-80`。
  */
 internal object KdbxKdfParameterCodec {
 
@@ -64,6 +85,14 @@ internal object KdbxKdfParameterCodec {
 
     /** AES-KDF 轮数上界：合法偏执配置通常 ≤ 1 亿轮，此处封顶 2^28 防无限期占用 CPU。本仓封顶。 */
     private const val AES_KDF_MAX_ROUNDS = 1L shl 28
+
+    /**
+     * Argon2 工作量联合预算（`I × M` 上界，单位「字节·轮」）：ISSUE-P2-49 / 审计 F-12。
+     *
+     * 逐项封顶不足以约束总工作量；`2^40` 宽于本仓 `KdfBenchmark` 自荐上限约 100 倍，
+     * 正常文件不受影响。取舍与官方参数域对照见本对象类 KDoc。
+     */
+    private const val ARGON2_MAX_TOTAL_WORK = 1L shl 40
 
     fun serialize(params: KdfParameters): VariantDictionary {
         val vd = VariantDictionary()
@@ -165,6 +194,14 @@ internal object KdbxKdfParameterCodec {
             // 否则日志会打印 "0x-1" 这类不可读的错误消息
             throw KdbxCorruptFileException(
                 "不支持的 Argon2 版本: 0x${(version.toLong() and 0xFFFFFFFFL).toString(16)}"
+            )
+        }
+        // 联合预算：逐项封顶不约束总工作量（见类 KDoc）。以除法判定规避乘法溢出；
+        // 上行已保证 memoryInBytes ≥ 8192 > 0，除数安全。
+        if (iterations > ARGON2_MAX_TOTAL_WORK / memoryInBytes) {
+            throw KdbxCorruptFileException(
+                "Argon2 工作量（迭代 × 内存）越界: $iterations × $memoryInBytes" +
+                    " 超过上界 $ARGON2_MAX_TOTAL_WORK 字节·轮"
             )
         }
         // 动态内存门槛：请求内存超过 JVM 堆一半时按损坏文件拒绝（分配发生在 Java 堆上）

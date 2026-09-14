@@ -66,7 +66,7 @@ internal class VaultEntryWriteCoordinator(
                     if (trimmedTotp.isEmpty()) {
                         remove(KdbxConstants.Fields.OTP)
                     } else {
-                        put(KdbxConstants.Fields.OTP, ProtectedString(trimmedTotp, isProtected = false))
+                        put(KdbxConstants.Fields.OTP, ProtectedString(trimmedTotp, isProtected = true))
                     }
                     trimmedTotp.fill('0')
                 }
@@ -222,7 +222,7 @@ internal class VaultEntryWriteCoordinator(
                 strings.get(R.string.repo_entry_not_found)
             )
         val updated = entry.copy(
-            fields = entry.fields + (KdbxConstants.Fields.OTP to ProtectedString(otpChars, isProtected = false)),
+            fields = entry.fields + (KdbxConstants.Fields.OTP to ProtectedString(otpChars, isProtected = true)),
             times = entry.times.copy(lastModificationTime = Instant.now())
         )
         databaseSession.saveEntry(updated)

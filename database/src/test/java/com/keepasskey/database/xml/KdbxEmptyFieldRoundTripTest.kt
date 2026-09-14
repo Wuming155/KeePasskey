@@ -133,4 +133,29 @@ class KdbxEmptyFieldRoundTripTest {
         assertEquals("NonEmptySite", loaded.fields[KdbxConstants.Fields.TITLE]!!.readString())
         assertEquals("Secret#1", loaded.fields[KdbxConstants.Fields.PASSWORD]!!.readString())
     }
+
+    /**
+     * ISSUE-P2-61 全链路回归：写出侧对非标准 `otp` 字段保留 per-value 受保护标志，
+     * 往返后必须仍为 `isProtected == true`（即 XML 里确实写了 `Protected="True"` 且内层流 XOR 生效），
+     * 种子内容须逐字往返。
+     *
+     * 注：读侧把非标准 `<String>` 收进 `customFields`（`KdbxXmlGroupReader` 仅五字段进 `fields`），
+     * 故此处按 `customFields` 断言。
+     */
+    @Test
+    fun `TOTP 种子字段往返后仍受保护且值不变`() {
+        val secret = "JBSWY3DPEHPK3PXP"
+        val loaded = roundTrip(
+            KdbxEntry(
+                fields = linkedMapOf(
+                    KdbxConstants.Fields.OTP to ProtectedString(secret, isProtected = true)
+                )
+            )
+        )
+
+        val otp = loaded.customFields.firstOrNull { it.key == KdbxConstants.Fields.OTP }
+        assertNotNull("otp 字段往返后不得消失", otp)
+        assertTrue("otp 字段往返后应仍受保护（ISSUE-P2-61）", otp!!.value.isProtected)
+        assertEquals("otp 种子须逐字往返", secret, otp.value.readString())
+    }
 }

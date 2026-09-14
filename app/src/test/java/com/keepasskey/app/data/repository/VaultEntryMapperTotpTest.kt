@@ -1,6 +1,7 @@
 package com.keepasskey.app.data.repository
 
 import com.keepasskey.app.ui.model.StringsProvider
+import com.keepasskey.app.ui.model.UiVaultEntry
 import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.otp.ParsedTotpConfig
@@ -95,6 +96,39 @@ class VaultEntryMapperTotpTest {
     @Test
     fun `parseTotpConfig 无 TOTP 字段返回 null`() {
         assertNull(mapper.parseTotpConfig(KdbxEntry(fields = emptyMap())))
+    }
+
+    /**
+     * ISSUE-P2-61：新建路径写出的标准 `otp` 字段必须标记为受保护
+     * （否则 XML 走非保护分支、种子以明文落盘）。
+     */
+    @Test
+    fun `mapUiEntryToKdbx 写出的 TOTP 字段受保护`() {
+        val entry = mapper.mapUiEntryToKdbx(
+            entry = UiVaultEntry(id = "0".repeat(32), title = "t", username = "u", url = "https://x"),
+            passwordChars = null,
+            totpSecretChars = RFC_SECRET.toCharArray(),
+            protectedFieldChars = emptyMap()
+        )
+        val otp = entry.fields[KdbxConstants.Fields.OTP]
+        assertNotNull(otp)
+        assertTrue("标准 otp 字段必须为受保护", otp!!.isProtected)
+    }
+
+    /**
+     * ISSUE-P2-61 AC③：外部工具写入的**明文** `otp` 字段（`isProtected == false`）
+     * 仍须可被解析读取（向后兼容，不得因本项加固而拒绝明文库）。
+     */
+    @Test
+    fun `parseTotpConfig 兼容外部写入的明文 otp 字段`() {
+        val plain = ProtectedString("JBSWY3DPEHPK3PXP", isProtected = false)
+        val entry = KdbxEntry(fields = mapOf(KdbxConstants.Fields.OTP to plain))
+
+        val config = mapper.parseTotpConfig(entry)
+
+        assertNotNull(config)
+        assertEquals("JBSWY3DPEHPK3PXP", secretText(config!!))
+        config.secret.fill(0)
     }
 
     private companion object {

@@ -54,6 +54,9 @@
 | §43 | 安全问题与整改方案报告退役批次（`SECURITY_AUDIT_REMEDIATION.md` 退役 + 附录 A–F 留存） | 处置归档（正文 32 项核对无缺口，附录 A–F 留存 §43.3 ~ §43.8） |
 | §44 | P0 双项整改批次：字段引用消费点白名单 + 同步崩溃面遏制 | ISSUE-P0-08 / ISSUE-P0-09 / ISSUE-P2-75 |
 | §45 | P1 双项整改批次：确认页调用方归属与首次绑定授权 + 剪贴板口令面引用敏感通道 | ISSUE-P1-24 / ISSUE-P1-25 |
+| §46 | P1 双项整改批次：软件级 Keystore 快速解锁降级确认 + 重打包威胁告知留痕 | ISSUE-P1-22 / ISSUE-P1-23 |
+| §47 | 设备侧真机基线批次：两条「模拟器环境假设」用例整改 + arm64 真机全量实测 | 设备侧用例缺陷（无编号） |
+| §48 | 存量安全整改批次：KDF 工作量预算 + TOTP 种子保护 + 剪贴板清理闭环 + 明文持有者锁观察者 | ISSUE-P2-61 / P2-51 / P2-65 / P3-84（+ P2-49 AC①③ 进展） |
 
 > 各批次验收证据（用例数 / 通过 / 失败 / 跳过）分别见 §2.22、§3.1、§4.1、§5、§6、§7、§8、§9、§10、§11、§12、§13、§14、§15、§16、§17、§18、§19、§20.3、§21.4、§22.9、§23.1、§24.3、§25.2、§26.3。
 
@@ -2888,4 +2891,67 @@ $ adb shell am instrument -w -e class com.keepasskey.app.security.QuickUnlockSea
 4. **仍未覆盖**（沿用既有登记，不因本批而消解）：`ISSUE-P2-42`（敏感对话框 `FLAG_SECURE` 实效 /
    附件缓存冷启动清理 / `SecureDialog` provider 命中）与 `ISSUE-P2-80`（KDF 墙钟与内存闸门分路径实测）
    仍为开放项——本批只证明「既有设备侧用例在 arm64 真机可复跑且全绿」，**不构成**上述两项的验收。
+
+---
+
+## §48 存量安全整改批次：KDF 工作量预算 + TOTP 种子保护 + 剪贴板清理闭环 + 明文持有者锁观察者（2026-09-14）
+
+> **本批次缘起**：认领 `ISSUE-P2-49 / P2-51 / P2-61 / P2-65`（均为第四轮独立复核后**升格 P1 排期**的开放项）
+> 与联动项 `ISSUE-P3-84`。整改落在 `app/src/main` / `database/src/main`，配套单测同步补齐；
+> `P2-49` 的 AC② 因墙钟量级未实测（挂 `ISSUE-P2-80`）**未闭环**，条目仍留在 `ACTIVE_ISSUES.md`。
+
+### 48.1 交付清单
+
+| 编号 | 级别 | 缺陷（一句话） | 关键改动 | 依据 |
+|---|:--:|---|---|---|
+| **ISSUE-P2-61** | P2（升格 P1） | TOTP 种子在**三处生产写入路径**恒 `isProtected = false` → XML 走非保护分支、种子以明文落盘（无 `Protected="True"`、无内层流 XOR） | `VaultEntryMapper.mapUiEntryToKdbx`、`VaultEntryWriteCoordinator`（合并更新 + `saveTotpSecret`）三处改 `isProtected = true`；回归锁「新建路径写出受保护 + 往返后仍受保护 + 明文 `otp` 仍可读（兼容外部库）」 | 官方 `Write.cs:838-854`（非标准字段保留 per-value `IsProtected`） |
+| **ISSUE-P2-51** | P2（升格 P1） | ① `clearClipboard()` 仅由定时器调用，未接锁定 / 熄屏 / 冷启动；② 后台读不到剪贴板时 `lastSensitiveHash` **陈旧匹配**会误清他处内容 | `ClipboardSecurityManager`：实现 `SessionLockObserver`（`DatabaseModule` 注册）+ 熄屏广播 + `ProcessLifecycleOwner` 切后台即清（P3-84）+ 冷启动对账（跨进程仅存**布尔**待清标记）；新增 `clipboardSuperseded` 标志 + 纯裁决 `ClipboardClearPolicy` 消除误清 | 审计 F-18；`AGENTS.md` §6 冷启动缺口同族 |
+| **ISSUE-P3-84** | P3 | 关闭「自动擦除」无风险明示；敏感值无前台切走即清机制 | 设置页关闭态渲染 `sec_clipboard_risk_notice`（中英双语）；切后台即清（见上）；文案引导「改用自动填充直填」 | 审计 M9 / 产品裁决语义（对齐 `FlagSecurePolicy`） |
+| **ISSUE-P2-65** | P2（升格 P1） | 多处持有明文的 ViewModel/控制器**未注册 `SessionLockObserver`**：锁库后明文继续驻留（原仅靠 `onCleared` / 导航离开擦除） | `EntryDetailViewModel`（按需解密明文 + 实时 TOTP 码）、`GeneratorViewModel`（生成结果，参数由 `ClipboardSecurityManager` 收窄为 `ClipboardSecurityChannel` 以便注入断言）、`EntryEditViewModel`（口令 / 种子 / 受保护字段编辑态）、`SettingsViewModel`（WebDAV 口令 / S3 SecretKey / AccessKey 预填通道）四处注册锁观察者并在 `onCleared` 注销；断言「锁库 → 明文已清零」 | 审计 M3；机制对齐 `DatabaseModule` / `SyncCoordinator` 既有 4 处用法 |
+
+### 48.2 ISSUE-P2-49 进展（**部分完成，条目保留在 `ACTIVE_ISSUES.md`**）
+
+- **AC①（已完成）**：`KdbxKdfParameterCodec.validateArgon2Bounds` 增加 **`I×M` 联合预算** `2^40` 字节·轮
+  （逐项封顶不约束总工作量，单项均合法时乘积可达 `2^58`；该派生**先于** Header HMAC，**无需口令即可触发**）。
+  取值宽于本仓 `KdfBenchmark` 自荐上限（≤512 MiB × 20 ≈ 2^33.3）约 100 倍；官方参数域对照
+  （`Argon2Kdf.cs:53-71`：`M ≤ int.MaxValue`、`I ≤ uint.MaxValue`、默认乘积 ≈ 2^27）已写入类 KDoc。
+  AES-KDF `R` 已由既有 `AES_KDF_MAX_ROUNDS = 2^28` 封顶（无联合项）。
+- **AC③（已完成）**：`KdfParametersBoundsTest` 新增「预算内合法配置通过（官方默认 / 自荐迭代上限 / 边界值 2^40）」
+  与「逐项均合法但乘积越界被拒」两例。
+- **AC②（未闭环）**：阻塞式原生派生**不可被协程 `withTimeout` 打断**（超时仅在阻塞调用返回后的挂起点生效，
+  等于无效的纸面加固），且墙钟量级须真机实测（`ISSUE-P2-80` 明令「不得以推算替代」）。故本轮**不引入**
+  无效超时，如实留痕并挂 `ISSUE-P2-80`；`P2-49` 条目保留为开放项。
+
+### 48.3 验收证据
+
+```powershell
+.\gradlew.bat test --rerun-tasks --max-workers=1
+# → BUILD SUCCESSFUL in 2m 8s；114 actionable tasks: 114 executed（全部真实执行）
+#   结果汇总（build/test-results/**/TEST-*.xml）：tests=1606 failures=0 errors=0 skipped=13
+```
+
+**新增 / 修改用例**（共 +11 例）：
+
+| 模块 | 用例 | 覆盖 |
+|---|---|---|
+| `database` | `KdfParametersBoundsTest`（+2） | 联合预算边界通过 / 越界拒绝 |
+| `database` | `KdbxEntrySerializerProtectedFlagTest`（+1） | `otp` per-value 受保护 → 写出 `Protected="True"` |
+| `database` | `KdbxEmptyFieldRoundTripTest`（+1） | `otp` 全链路往返后仍受保护、值不变 |
+| `app` | `VaultEntryMapperTotpTest`（+2） | 新建路径写出受保护 / 明文 `otp` 兼容可读 |
+| `app` | `ClipboardClearPolicyTest`（+4，新文件） | 空读裁决：未覆盖写且匹配→清；已覆盖写→不清（核心负例）；无记录 / 摘要不匹配→不清 |
+| `app` | `GeneratorViewModelSessionLockTest`（+1，新文件） | 锁库 → 生成结果已清零（`readString` 抛 `IllegalStateException`） |
+
+### 48.4 已知边界与口径（如实声明）
+
+1. **冷启动对账不留口令等价物**：跨进程仅留存一处**布尔**待清标记（`clipboard_security` prefs），
+   不含明文、不含摘要；正常路径 30 秒窗口内定时器已清空，故该分支极少触发。
+2. **切后台即清为产品语义收紧**：切走应用即擦除待清敏感值（`ProcessLifecycleOwner` ON_STOP），
+   与「自动擦除开关」独立生效；关闭自动擦除者亦受此保护，代价是切后台后无法粘贴。
+3. **`P2-51` 与 `P3-84` 同批**（AC④「产品确认」以设置页风险明示落地），二者互相引用。
+4. **`P2-65` 的 `IconBitmapCache` 未接线（评估留痕）**：该类为**屏幕级**自定义图标解码位图 LRU 缓存
+   （由 `EntryIconPresenter` 持有，随组合销毁），其内容为派生**图像**而非明文口令 / 种子；且无进程级单例持有点，
+   故不注册锁观察者（与 `AGENTS.md` §6 对「已接受边界」的处置口径一致）。AC③ 的「锁库 → 明文清空」
+   已以 `GeneratorViewModelSessionLockTest` 在宿主 JVM 断言（该判定不涉平台 API，JVM 即权威）。
+5. **本批未触及**：`ISSUE-P2-49` AC②（见 48.2）、`ISSUE-P2-48 / P2-53 / P2-63 / P2-72 / P2-76 / P2-77`
+   等其余升格 P1 开放项仍在 `ACTIVE_ISSUES.md`。
 

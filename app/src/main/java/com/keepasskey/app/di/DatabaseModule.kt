@@ -3,6 +3,7 @@ package com.keepasskey.app.di
 import android.content.Context
 import com.keepasskey.app.data.binary.FileBinaryStore
 import com.keepasskey.app.data.repository.ExtendedSettingsStore
+import com.keepasskey.app.security.ClipboardSecurityManager
 import com.keepasskey.app.sync.SyncCacheEvictor
 import com.keepasskey.database.session.DatabaseSession
 import com.keepasskey.sync.engine.SyncRollbackGuard
@@ -49,12 +50,15 @@ object DatabaseModule {
     fun provideDatabaseSession(
         cacheEvictor: SyncCacheEvictor,
         extendedSettingsStore: ExtendedSettingsStore,
-        binaryStore: FileBinaryStore
+        binaryStore: FileBinaryStore,
+        clipboardSecurityManager: ClipboardSecurityManager
     ): DatabaseSession {
         return DatabaseSession(binaryStore).apply {
             addLockObserver(cacheEvictor)
             // ISSUE-P2-24：大附件磁盘缓存同属会话派生敏态数据，锁定/关闭时一并清空
             addLockObserver(binaryStore)
+            // ISSUE-P2-51：锁定/关闭时清理仍驻留的敏感剪贴板值（对齐 ISSUE-P3-84 的代价明示）
+            addLockObserver(clipboardSecurityManager)
             createBackupBeforeSave = extendedSettingsStore.load().createBackupBeforeSave
         }
     }

@@ -44,7 +44,9 @@ class EntryEditViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val vaultRepository: VaultRepository,
     // TASK-21：非 Compose 层文案资源解析通道（生产 DI 注入真实现；单测注入假实现）
-    private val stringsProvider: StringsProvider? = null
+    private val stringsProvider: StringsProvider? = null,
+    // ISSUE-P2-65：会话锁定观察者注册点（null 仅用于纯 JVM 单测）
+    private val databaseSession: com.keepasskey.database.session.DatabaseSession? = null
 ) : ViewModel() {
 
     // P3-23：null 时回退空串实现（生产 Hilt 恒注入 StringsProviderModule 真实现）
@@ -397,6 +399,24 @@ class EntryEditViewModel @Inject constructor(
 
     override fun onCleared() {
         // M1 整改：ViewModel 销毁时彻底擦除密码驻留（预填通道与编辑副本）
+        clearAllSecrets()
+        databaseSession?.removeLockObserver(sessionLockObserver)
+        super.onCleared()
+    }
+
+    /**
+     * ISSUE-P2-65：会话锁定 / 关闭时擦除全部编辑态明文（口令 / TOTP 种子 / 受保护字段），
+     * 不得仅依赖 ViewModel 销毁（`onCleared`）——锁定后 ViewModel 可能仍被导航栈持有。
+     */
+    private val sessionLockObserver = com.keepasskey.core.session.SessionLockObserver {
+        clearAllSecrets()
+    }
+
+    init {
+        databaseSession?.addLockObserver(sessionLockObserver)
+    }
+
+    private fun clearAllSecrets() {
         passwordChars.fill('0')
         passwordChars = CharArray(0)
         _loadedPassword.value?.fill('0')
@@ -410,6 +430,5 @@ class EntryEditViewModel @Inject constructor(
         protectedFieldChars.clear()
         _loadedProtectedFields.value.values.forEach { it.fill('0') }
         _loadedProtectedFields.value = emptyMap()
-        super.onCleared()
     }
 }

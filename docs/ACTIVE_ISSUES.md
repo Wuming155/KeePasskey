@@ -51,7 +51,7 @@
 
 ---
 
-## P2 中危缺陷与协议/测试缺口（39 项）
+## P2 中危缺陷与协议/测试缺口（36 项）
 
 > **历史**：**ISSUE-P2-28 ~ P2-41**（往返丢字段与布尔/数值语义、MemoryProtection 读写语义、
 > KDF 缺参 fail-closed、isPackageMatch 的 android:// 硬约束、requireRiskNotice 接线、
@@ -59,6 +59,10 @@
 >
 > **2026-09-13 新增（红队攻击路径批次）**：P2-43 ~ P2-47 五项由红队批次对拍后留存为开放项转登，
 > 来源与已撤回项见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §39。
+>
+> **2026-09-14 闭环**：**ISSUE-P2-51**（剪贴板清理接线 + 空读误清修复）、**ISSUE-P2-61**
+> （TOTP 种子写入恒非保护）与 **ISSUE-P2-65**（明文持有者注册锁观察者）随存量安全整改批次归档，
+> 见 §48；**ISSUE-P2-49** 的 AC①③ 同批完成、**AC② 未闭环仍保留**（见该行 2026-09-14 进展批注）。
 >
 > **2026-09-13 第四轮独立复核定版（《SECURITY_RECHECK_2026-09.md》1272 行定版稿）**：
 > ① **升格 P1 排期**（条目编号留原地、闭环按编号归档）：`P2-48 / P2-49 / P2-51 / P2-53 / P2-61 / P2-63 /
@@ -197,9 +201,8 @@
 | 编号 | 来源 | 问题与位置（核实于 2026-09-13） | 验收标准 |
 |---|---|---|---|
 | ISSUE-P2-48 | 审计 F-10 | **（升格 P1）** 附件引用放大无累计预算：内存条目逐引用 `item.load().copyOf()`（`KdbxXmlBinaryNode.kt:199`）；`MAX_XML_ELEMENTS` 只封元素数，不封同一池条目被引用 N 次的副本乘法（第四轮批注：放大受 2M 元素帽与整包帽**间接**约束，非数学无界，缺的是专用累计预算） | ① 按**累计被引用字节**做解析预算，超限抛 `KdbxCorruptFileException`；② **不得**取消逐引用物化——`:199` 的 `copyOf()` 是 ISSUE-P3-07 契约防线（别名池内数组会使 `clear()` 清零二进制池、保存写坏库；回归 `KdbxBinaryNodeValueFormTest:170`）；③ 负例：单池条目 + 数千引用被拒而非 OOM；④ `KdbxAttachmentAliasIsolationTest` 4 例保持通过 |
-| ISSUE-P2-49 | 审计 F-12 | **（升格 MEDIUM·P1，第四轮定版）** KDF 逐项封顶为：内存 ≤4 GiB **且 ≤50% 动态堆**（`KdbxKdfParameterCodec.kt:171-174`；无 `largeHeap`，真机实际 M 上界 ≈128–256 MiB）、迭代 ≤2²⁴（**仅静态上界**）、并行度 ≤64、AES-KDF 轮数 ≤2²⁸；**无 `I×M` 联合预算**；派生（`KdbxFile.kt:135`）先于 Header HMAC（`:147`）⇒ **无需口令可达**（同步路径 `SyncDatabaseCodec.kt:55`）。墙钟量级待 `ISSUE-P2-80` 实测，**不得以推算替代** | ① codec 加 Argon2 `I×M` 与 AES-KDF `R` 联合预算（成本约一行，**可与 P0 批次同批实施**，但不改定级）；② 解锁派生加超时 / 取消；③ 不误拒合法库（附**官方参数域对照**——仓内现有 `EQUIVALENCE_MATRIX` 是"原生≡BC"交叉等价，非官方域对照） |
+| ISSUE-P2-49 | 审计 F-12 | **（升格 MEDIUM·P1，第四轮定版）** KDF 逐项封顶为：内存 ≤4 GiB **且 ≤50% 动态堆**（`KdbxKdfParameterCodec.kt:171-174`；无 `largeHeap`，真机实际 M 上界 ≈128–256 MiB）、迭代 ≤2²⁴（**仅静态上界**）、并行度 ≤64、AES-KDF 轮数 ≤2²⁸；**无 `I×M` 联合预算**；派生（`KdbxFile.kt:135`）先于 Header HMAC（`:147`）⇒ **无需口令可达**（同步路径 `SyncDatabaseCodec.kt:55`）。墙钟量级待 `ISSUE-P2-80` 实测，**不得以推算替代** | ① codec 加 Argon2 `I×M` 与 AES-KDF `R` 联合预算（成本约一行，**可与 P0 批次同批实施**，但不改定级）；② 解锁派生加超时 / 取消；③ 不误拒合法库（附**官方参数域对照**——仓内现有 `EQUIVALENCE_MATRIX` 是"原生≡BC"交叉等价，非官方域对照）。**【2026-09-14 进展，见 `RESOLVED_LOG.md` §48.2】AC① 与 AC③ 已完成**（`validateArgon2Bounds` 加 `I×M` 联合预算 2^40 + 官方参数域对照 + 2 例单测，全量 1605 例全绿）；**AC② 未闭环**——阻塞式原生派生不可被协程 `withTimeout` 打断（等于无效纸面加固），且墙钟量级须 `ISSUE-P2-80` 真机实测，本轮**不引入**无效超时，**本条仍开放** |
 | ISSUE-P2-50 | 审计 F-14 | DAL 响应体先 `body?.string()` 整份物化，之后才比较 `length`（且为**字符数**）（`DigitalAssetLinksVerifier.kt:107-111`） | ① 改有界流式读取并按**字节数**裁决；② MockWebServer 单测断言超大响应不被物化且返回 `NOT_VERIFIED` |
-| ISSUE-P2-51 | 审计 F-18 | ① `clearClipboard()` 仅由 `performClearIfMatching` 调用，未接锁定 / `ACTION_SCREEN_OFF` / 冷启动；② 后台读不到剪贴板时 `lastSensitiveHash` 陈旧匹配会**误清他处内容**（`ClipboardSecurityManager.kt:106-136`） | ① 注册 `SessionLockObserver` + 订阅熄屏 + 冷启动对账；② 空读分支仅在"已观察到变化或仍在窗口内"才清；③ 两条各有回归；④ 与 `ISSUE-P3-84` 的风险明示同批做产品确认 |
 | ISSUE-P2-52 | 审计 F-22 | 选择器缓存**活** `KdbxEntry` 树，且在 `try` 之外读 `userName`；锁定时 `ProtectedString` 就地清零 → 抛 `IllegalStateException`（`AutofillPickerViewModel.kt:26-40,56-59`） | ① 选择器观察会话状态（锁定清空 / 解锁重载）或改为按选取经仓库读取；② 补回归断言；③ **不得**削弱 `ProtectedString.clear()`（就地清零是该设计的负载承载点） |
 | ISSUE-P2-53 | 审计 F-24 | CM 主通道（`passkey/`）对 `RuntimeIntegrityGate` **零命中**：完整性裁决在自动填充 fail-closed，却在 CM 通道 fail-open（`RuntimeIntegrityPolicy.kt:47` 自述含"禁止下发数据集"） | ① 在 `onBeginGet/CreateCredentialRequest` 或 `CredentialResponseAssembler` 统一收口；② 用例断言风险态下两条通道均拒绝下发；③ 不影响 CM 响应预算 |
 | ISSUE-P2-54 | 审计 F-05 | 依赖 CVSS 闸门仅 `workflow_dispatch` 触发，PR / push 路径不含依赖扫描（`.github/workflows/dependency-scan.yml:21-22`） | ① `on:` 补 `pull_request` 与 `push{branches:[main]}`（或拆"PR 快速任务 + main 全量"以控耗时）；② 设为分支保护必需检查；③ 验证缺失报告时 fail-closed |
@@ -228,11 +231,9 @@
 
 | 编号 | 来源 | 问题与位置（核实于 2026-09-13，对 HEAD `a669a48`） | 验收标准 |
 |---|---|---|---|
-| ISSUE-P2-61 | 审计 H1 | TOTP 种子在所有生产写入路径恒 `isProtected = false`（`VaultEntryMapper.kt:321`、`VaultEntryWriteCoordinator.kt:69,225`）→ `KdbxXmlEntrySerializer.serializeField` 走非保护分支 `writer.text(value.readString())`（**不写** `Protected="True"`、**不做**内层流 XOR）；且 `VaultEntryMapper.kt:46` 因 `isProtected == false` 把种子 `readString()` 投影进 `UiCustomField.value` | ① 三处写入改 `isProtected = true`；② 断言「保存 → 重载后 `otp` 字段 `isProtected == true` 且 XML 含 `Protected="True"`」；③ 兼容性负例：外部工具写入的**明文** `otp` 仍须可读 |
 | ISSUE-P2-62 | 审计 H2 | `KdbxKeyFile.extractKey` 把**整个密钥文件**转为不可擦 `String`（`KdbxKeyFile.kt:40 raw.toString(Charsets.UTF_8)`，后续 `:41/:46/:61/:86/:137`），每次解锁尝试（含口令错误）与保存都重放；副本数论断成立，但寿命上界为**下次 GC**（非进程生命） | ① 改纯字节解析（Base64 / hex 在 `ByteArray` 上做，`toString` 仅留 ASCII 校验）；② 无法避免的 String 须显式标注并评估；③ 回归：`.keyx` v1/v2、裸 32B、64-hex、任意二进制四类解析结果不变 |
 | ISSUE-P2-63 | 审计 H-new-2 | **（升格 P1，须与 `ISSUE-P2-53` 同批）** 生物识别快速解锁门控只用**冷启动快照**：`RuntimeIntegrityDetector.currentEnforcement()`（`:63-71`）以 `hookFrameworkDetected = false`（`:70`，硬编码）升级快照，磁盘钩子重扫仅在 suspend `awaitEnforcement()`（`:73-86`）→ 启动后附加 Frida 不触发实时信号，门控不拦（`BiometricAuthManager.kt:115` 经 `runtimeIntegrityGate.currentEnforcement()`） | ① 把「快照已过期 / 实时 hook 信号」纳入非 suspend 路径判定；② 或如实声明「本门控为启动态判定」并在 UI 体现；③ 断言「快照建立后出现 hook 信号 → 生物快速解锁被拒」；④ **与 `P2-53` 同批实施**，否则 `P2-53` 的修复被完全抵消 |
 | ISSUE-P2-64 | 审计 M1 | 库级 `MemoryProtectionConfig` **不影响内存密封**：`ProtectedString.isProtected` 仅来自 XML 属性（`KdbxXmlStringNode.isProtectedAttribute`）与写入侧硬编码（非口令字段恒 `false`）；库级配置只决定**写出侧** `Protected` 标志（`KdbxXmlEntrySerializer.resolveProtectedFlag:221-235`，实现官方语义）→ `Title`/`UserName`/`URL`/`Notes`/`otp` 在内存中是**未密封明文** | ① 明确「内存密封」与「写出标志」两条独立口径并在 KDoc 声明；② 若采纳「库级开启即内存密封」，须同步写入侧构造；③ 防回归：打开 `ProtectUserName=True` 的库并保存后**不得**被降级为未保护 |
-| ISSUE-P2-65 | 审计 M3 | 多处持有明文的 StateFlow / ViewModel **未注册 `SessionLockObserver`**：`EntryDetailSecrets.kt:19-28`（`revealedPassword` / `revealedRevisionPasswords` / `revealedProtectedFields`，`clearAll()` 仅由 `setEntryId` / `onScreenDisposed` 触发，见 `EntryDetailViewModel.kt:170,180`）；另 `EntryEditViewModel` / `GeneratorViewModel` / `SettingsSyncController` / `IconBitmapCache` | ① 为上述组件注册锁观察者（机制已存在且被 4 处正确使用，见 `DatabaseModule.kt:55-57`）；② 断言「锁库 → 明文 StateFlow 清空」；③ 端到端影响（锁库 → 导航 → `onScreenDisposed` 是否已间接覆盖）须动态验证 |
 | ISSUE-P2-66 | 审计 M4 | 落盘清理为 **unlink-only**（`SyncCache.kt` 用 `File.delete` / `deleteRecursively`）；已 unlink 扇区在 TRIM 前可恢复。~~`clearAll()` 不清 `<name>.<uuid>.tmp`~~ **（第四轮证伪**：`clearAll()` `:320-329` 遍历 `cacheDir` 全部直接子项，仅跳过 `.rollback` 状态文件，`.tmp` 必被一并删除——该子断言为误报，防回滚状态生产布局在 `filesDir/rollback` 不受影响**）** | ① ~~`clearAll()` 补 `deleteOrphanTmpFiles`~~ **撤销**（冗余无害，不实施）；② 登记「仅 unlink」为已接受边界（对齐 `AGENTS.md` §6）并留痕；③ ~~断言 `clearAll()` 后无 `.tmp` 残留~~ **撤销**（被证伪断言的派生） |
 | ISSUE-P2-67 | 审计 L9 | 同步下载路径**绕过附件落盘**：`SyncDatabaseCodec.parseKdbxBytes` 调 `KdbxFile.load(...)` **未传** `binaryStore`（`SyncDatabaseCodec.kt:55`；默认 `null`）→ 远程库全部附件无论多大都内联进堆，随后仅置空引用，从不零化（**第四轮批注**：锁定清理已由 `SyncCoordinator.onSessionLocked` + `SyncCacheEvictor` 覆盖，残余面 = binaryStore 未传 + 同步解析产物不调 `clearSensitiveData()`——后者见 `ISSUE-P3-119` 批注） | ① 传入与主会话一致的 `BinaryStore`；② 断言「>1 MiB 远程附件解析后落盘而非内联」；③ 与 `ISSUE-P3-119`（NEW-B01-4）同批（清理语义须一致） |
 | ISSUE-P2-68 | 审计 M6 | `data class` 默认 `toString()` 会打印明文：`EntryDetailUiState`（`:14,34,36,40`，含 `revealedPassword` / `revealedRevisionPasswords` / `revealedProtectedFields`）、`UiVaultEntry`（`UiModels.kt:102,105,110,135`，含 `username` / `totpCode` / `cardCvv`）、`AutofillPickerViewModel.Credentials`（`:79`，含明文口令）、`ParsedAutofillNode`（`AutofillStructureScan.kt:24`）。**当前零字符串化调用点**（核实于 HEAD）→ 属「一行 `log("$state")` 即漏」的潜在缺陷 | ① 逐个覆写 `toString()`（对齐 `ProtectedString` / `KdbxEntry` / `KdbxAttachment` 既有做法）；② 或加静态检查禁止对上述类型整对象插值；③ 不改语义 |
@@ -277,7 +278,7 @@
 
 ---
 
-## P3 低危问题、特性接线与体验优化（49 项）
+## P3 低危问题、特性接线与体验优化（48 项）
 
 > **状态（2026-09-12）**：历史 P3 批次 **ISSUE-P3-01 ~ P3-68** 除 P3-23（经产品裁决「不排期」）外
 > 已全部闭环并归档，逐条实现细节与验收证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md)（§3 ~ §32）。
@@ -292,6 +293,8 @@
 > **保留待办**：**ISSUE-P3-76**（框架阻塞的已接受残余风险，保留跟踪与解除条件）。
 > **2026-09-13 新增（红队攻击路径批次）**：P3-82 ~ P3-85 四项由红队批次对拍后留存为开放项转登，
 > 来源与已撤回项见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §39。
+> **2026-09-14 闭环**：**ISSUE-P3-84**（剪贴板风险明示 + 切后台即清 + 自动填充引导）随
+> 存量安全整改批次归档，见 §48。
 > **2026-09-13 新增（威胁建模 / 安全整改报告退役批次）**：P3-116 ~ P3-124 九项由
 > `THREAT-MODEL-AUDIT-d32f3e7.md` 与 `SECURITY_AUDIT_REMEDIATION.md` 的对拍结果转登
 > （两份报告同日退役删除，处置归档见 §42 / §43）。
@@ -410,21 +413,6 @@
   `clearSensitiveCache()` 并拒绝解锁；② 评估 `prctl(PR_SET_DUMPABLE, 0)` / `MADV_DONTDUMP`
   的可行性与代价（需 native 支持，**不得**以牺牲稳定性换取纸面加固）；
   ③ 明确记录"本项仅为提高成本，不改变设计边界"。
-
----
-
-### ISSUE-P3-84（新登记）：剪贴板"可关闭擦除 / 延时窗口"的风险明示
-
-- **优先级**：P3（产品设置的安全代价未显式告知）
-- **核实时间点与核实方式（2026-09-13）**：读取 `ClipboardSecurityManager.armScheduledClear`（L81-92）——
-  `autoClearClipboard == false` 或 `timeoutSec <= 0` 时**直接 return（不调度擦除）**；
-  出厂默认 `autoClearClipboard = true` / `clipboardTimeoutSeconds = 30`
-  （`RealSettingsRepository.kt` L98 / L105）。
-- **问题描述**：用户关闭自动擦除后剪贴板长期驻留；即便开启，默认 30 秒窗口内前台应用可读。
-- **验收标准**：① 设置页对"关闭自动擦除"给出**显式风险说明**（或在关闭态禁止复制口令、仅允许复制用户名）；
-  ② 敏感复制后监听前台变化，一旦切换应用立即清空；③ 优先引导"自动填充直填"替代剪贴板通道。
-- **说明**：关闭开关本身是**用户可见的产品选择**，本项**不以"取消该开关"为验收**，
-  而以"代价被显式告知 + 窗口尽量缩短"为准（与 `FlagSecurePolicy` 的产品裁决语义保持一致）。
 
 ---
 
