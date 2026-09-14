@@ -2993,12 +2993,13 @@ $ adb shell am instrument -w -e class com.keepasskey.app.security.QuickUnlockSea
 
 ---
 
-## §49 存量安全整改批次（续）：密钥文件纯字节解析 + DAL 有界流式读取 + 选择器会话锁定对齐 + CM 保存 URL 分流 + 依赖扫描触发面（2026-09-15）
+## §49 存量安全整改批次（续）：密钥文件纯字节解析 + DAL 有界流式读取 + 选择器会话锁定对齐 + CM 保存 URL 分流 + KDF secret 生命周期契约 + 依赖扫描触发面（2026-09-15）
 
 > **本批次缘起**：认领外部审计转登项 `ISSUE-P2-62`（审计 H2，敏感数据流批次）、
-> `ISSUE-P2-50`（审计 F-14）、`ISSUE-P2-52`（审计 F-22）、威胁建模项 `ISSUE-P2-78`（T-10）
-> 与审计项 `ISSUE-P2-54`（F-05，CI 变更）。前四项为「敏感数据 / 恶意输入面 / 完整性」的确定性缺口，
-> JVM 侧即可闭环（不涉 Android 运行时差异），无需设备；`P2-54` 为工作流触发面整改。
+> `ISSUE-P2-50`（审计 F-14）、`ISSUE-P2-52`（审计 F-22）、`ISSUE-P2-60`（审计 RUST-06）、
+> 威胁建模项 `ISSUE-P2-78`（T-10）与审计项 `ISSUE-P2-54`（F-05，CI 变更）。
+> 前五项为「敏感数据 / 恶意输入面 / 完整性」的确定性缺口，JVM 侧即可闭环
+> （不涉 Android 运行时差异），无需设备；`P2-54` 为工作流触发面整改。
 
 ### 49.1 交付清单
 
@@ -3009,17 +3010,18 @@ $ adb shell am instrument -w -e class com.keepasskey.app.security.QuickUnlockSea
 | **ISSUE-P2-52** | P2 | 选择器缓存**活** `KdbxEntry` 树：锁定时 `ProtectedString` 就地清零后，缓存条目的任何 `title`/`userName`/`url` 读取都会抛 `IllegalStateException`；且 `resolveCredentials` 在 `try` 之外读 `userName` | `AutofillPickerViewModel` ① 注册 `SessionLockObserver`（锁定即清空缓存列表；选择器为一次性 Activity，解锁后重开即重新拉取，无需解锁重载）；② `search` 与 `resolveCredentials` 的非敏感字段读取 `runCatching` fail-safe（清零→通知观察者的固有竞态窗口内按空结果 / 空用户名降级）；③ `onCleared` 注销观察者。**不削弱** `ProtectedString.clear()`（只调缓存持有与读取侧容错） | 审计 F-22；机制对齐 §48 `P2-65` 四处 ViewModel 的观察者模式 |
 | **ISSUE-P2-78** | P2 | **CM 保存路径写入畸形 URL**：`KeePasskeyCredentialProviderService` 把调用方 **origin**（浏览器委派 `https://…` / 普通应用 `android:apk-key-hash:…`）作为 `EXTRA_WEB_DOMAIN` 下传，`PasswordSaveActivity` 原样透传，`VaultEntryWriteCoordinator.saveAutofillCredential` **无条件**拼 `"https://$domain"` → 落库 `https://https://host` / `https://android:apk-key-hash:…`，条目此后既不匹配 web 域也不匹配 `android://` 包名 | 新增纯函数收口 `VaultEntryWriteCoordinator.resolveCredentialUrlBinding`（自动填充与 CM 双保存通道共用）：空白 / apk-key-hash origin → `android://<调用包名>`；`https://`（含 `http://`）origin → **原样入库**不二次拼前缀；裸域名（自动填充既有形态）→ `https://<裸域名>`；`displayDomain` 归一为裸域名供标题与域匹配；负例断言任何形态不得产生 `https://` 二次叠加或 apk-key-hash 尾巴混入 | 威胁建模 T-10；与自动填充保存路径语义对齐（AC①） |
 | **ISSUE-P2-54** | P2 | 依赖 CVSS 闸门仅 `workflow_dispatch` 触发，PR / push 路径不含依赖扫描 | `dependency-scan.yml` 的 `on:` 补 `pull_request` 与 `push{branches:[main]}`（AC①，采纳「直接补触发」路线，扫描完整性优先于耗时）；CVSS 缺失报告 fail-closed 经本地实测复核：对不存在路径执行 `check_dependency_cvss.py` → `[FATAL] 报告不存在…fail-closed` 退出码 1（AC③，`if: always()` + `if-no-files-found: error` 既有机制不变） | 审计 F-05；AC② 留痕见 49.3.6 |
+| **ISSUE-P2-60** | P2 | KDF secret `K` 以普通 `ByteArray` 常驻头部且全仓无清零点，会话锁定 / 关闭后仍滞留至 GC | ① `KdfParameters` 新增 `clearSensitive()`（基类 no-op；Argon2 覆写为「就地 fill(0) + 置 null」——只 fill 不置 null 会让引擎把全零数组当合法 secret 参与派生，故 `secretKey` 改 `var`）；② 统一收口 `KdbxDatabase.clearSensitiveData()`：`lock()` / `close()` / 换库前置释放 / 子库只读投影全部既有调用点自动覆盖；③ **显式生命周期契约**（类 KDoc）：仅限会话终止路径调用（互斥锁内、随后 `database = null`，不可能再发起保存派生），`KdbxHeader.copy()` 浅拷贝共享引用的**就地清零**语义与所有权约定成文；④ `Argon2KdfEngine` 对 `var secretKey` 取局部快照消除 smart-cast 编译错误与并发中间态。清零后引擎按「无 secret」跳过、序列化按「缺 K」不写出——可观测失效而非静默错密钥 | 审计 RUST-06；敏感数据铁律（`AGENTS.md` §3.2） |
 
 ### 49.2 验收证据
 
 ```powershell
 .\gradlew.bat test --rerun-tasks --max-workers=1
-# → BUILD SUCCESSFUL in 4m 36s；114 actionable tasks: 114 executed（全部真实执行）
-#   结果汇总（build/test-results/**/TEST-*.xml）：tests=1639 failures=0 errors=0 skipped=13
-#   （app 887 / core 65 / crypto 116 / database 368 / sync 203）
+# → BUILD SUCCESSFUL in 4m 52s；114 actionable tasks: 114 executed（全部真实执行）
+#   结果汇总（build/test-results/**/TEST-*.xml）：tests=1646 failures=0 errors=0 skipped=13
+#   （app 887 / core 65 / crypto 121 / database 370 / sync 203）
 ```
 
-**新增用例（共 +13 例）**：
+**新增用例（共 +20 例）**：
 
 | 模块 | 用例 | 覆盖 |
 |---|---|---|
@@ -3027,6 +3029,8 @@ $ adb shell am instrument -w -e class com.keepasskey.app.security.QuickUnlockSea
 | `app` | `DigitalAssetLinksVerifierTest`（+3） | ① 2 MiB 响应（> 256 KiB 上限）被拒且不被整体物化 → `NOT_VERIFIED`；② **恰好等于**字节上限且内容合法仍可校验通过（边界不误拒，字节数断言精确抵平 `MAX_BODY_BYTES`）；③ 空响应体拒绝 |
 | `app` | `AutofillPickerViewModelSessionLockTest`（+2，新文件） | ① 会话锁定 → 选择器缓存条目清空；② 锁定竞态窗口内已清零条目：`search` 按空结果降级、`resolveCredentials` 按空用户名降级（均不抛 `IllegalStateException`，核心负例） |
 | `app` | `VaultEntryWriteCoordinatorUrlBindingTest`（+6，新文件） | ① web origin 原样入库且 `DomainMatcher` 可命中（含子域正例 / 仿冒域负例）；② apk-key-hash origin 落 `android://<包名>` 且 `isPackageMatch` / `isAndroidPackageMatch` 均命中；③ 空白域回落包名绑定；④ 裸域名保持既有 `https://` 拼接；⑤ 负例：任何形态不得 `https://` 二次叠加或混入 apk-key-hash 尾巴；⑥ 带路径 / 端口 origin 的归一（AC②③） |
+| `crypto` | `KdfParametersSensitiveClearingTest`（+5，新文件） | ① `clearSensitive` 清零原数组并置 null（浅拷贝共享者同步失效）；② 不触碰 `associatedData` / `salt`（非秘密）；③ 重复调用幂等；④ AES no-op；⑤ `equals`/`hashCode` 忽略 K（既有语义防回归） |
+| `database` | `KdbxDatabaseSensitiveWipeTest`（+2，新文件） | ① `clearSensitiveData()` 擦除头部 KDF secret（收口回归锁：退化为只清条目树即失败）；② AES-KDF 头部安全 no-op |
 
 ### 49.3 已知边界与口径（如实声明）
 
@@ -3061,4 +3065,11 @@ $ adb shell am instrument -w -e class com.keepasskey.app.security.QuickUnlockSea
 8. **顺带修正上批漏删行**：`ISSUE-P2-53`（§48 已闭环）的正文行在 `ACTIVE_ISSUES.md`
    审计表内漏删，本批发现后补删并把 P2 计数修正为 24（前序批注的 2026-09-14 闭环
    声明与 RESOLVED_LOG §48.1 为准，非重新闭环）。
+9. **`P2-60` 的残余面与互操作口径**：① `clearSensitive()` 收口于 `KdbxDatabase` 层，
+   但 `KdbxHeader` 若被**外部代码深拷贝出独立 K 数组**（当前全仓无此用法，核实于本批）
+   则不在清零范围——契约已在 KDoc 声明「浅拷贝共享同一逻辑所有者」；② 清零仅发生在
+   会话终止，**解锁存续期**内 `K` 仍以 `ByteArray` 驻留（保存派生必需，AC③ 明示的
+   时机约束）——与 `ProtectedString` 驻留加密同族的既定边界；③ 带真实 `K` 的库
+   （`K` ≠ null）在真实语料中为零（`RealKdbxCorpusUnlockTest` 断言语料不带 K），
+   故本整改对既有解锁 / 互操作路径零行为变化。
 

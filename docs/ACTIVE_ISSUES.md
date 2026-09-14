@@ -51,7 +51,7 @@
 
 ---
 
-## P2 中危缺陷与协议/测试缺口（24 项）
+## P2 中危缺陷与协议/测试缺口（23 项）
 
 > **历史**：**ISSUE-P2-28 ~ P2-41**（往返丢字段与布尔/数值语义、MemoryProtection 读写语义、
 > KDF 缺参 fail-closed、isPackageMatch 的 android:// 硬约束、requireRiskNotice 接线、
@@ -69,8 +69,9 @@
 >
 > **2026-09-15 闭环**：**ISSUE-P2-62**（密钥文件纯字节解析）、**ISSUE-P2-50**（DAL 响应有界流式读取 +
 > 字节数裁决）、**ISSUE-P2-52**（选择器会话锁定对齐 + 空读 fail-safe）、**ISSUE-P2-78**
-> （CM 保存 URL 形态分流）与 **ISSUE-P2-54**（依赖扫描补 PR / push 触发；AC② 分支保护留痕待
-> 仓库所有者配置）随存量安全整改批次（续）归档，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §49。
+> （CM 保存 URL 形态分流）、**ISSUE-P2-60**（KDF secret 清零生命周期契约）与 **ISSUE-P2-54**
+> （依赖扫描补 PR / push 触发；AC② 分支保护留痕待仓库所有者配置）随存量安全整改批次（续）
+> 归档，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §49。
 >
 > **2026-09-13 第四轮独立复核定版（《SECURITY_RECHECK_2026-09.md》1272 行定版稿）**：
 > ① **升格 P1 排期**（条目编号留原地、闭环按编号归档）：`P2-48 / P2-49 / P2-51 / P2-53 / P2-61 / P2-63 /
@@ -215,7 +216,6 @@
 | ISSUE-P2-57 | 审计 RUST-02 | 派生密钥栈副本残留：`sha2` 未启用 `zeroize`（`Cargo.toml:41`）；`Some(*out)`（`lib.rs:111`）产生普通栈副本 | ① `sha2` 加 `zeroize` feature；② 改 `derive_into(&mut Zeroizing<[u8;32]>)` 消除普通副本；③ 仅增加清零 `Drop`，无算法变更 |
 | ISSUE-P2-58 | 审计 RUST-03 | 口令强度评估 **两条平方级路径**（`strength.rs:491-499` `unique_char_count` 线性扫描嵌套循环、`:406-424` `longest_keyboard_walk`）；`MAX_TEXT_CHARS = 8 shl 20` 是 XML 节点封顶、**对该热路径不构成约束**；`HealthCheckEngine` 对**全库每条口令**循环评估（恶意库 DoS 面乘性放大）；两个生产调用方运行在**主线程**（`SettingsHealthController.kt:73-77`、`EntryDetailRevealController.kt:137-139`，均 viewModelScope 裸 launch） | ① `estimate` 入口加长度上限 **+ 线性惩罚**（陷阱 #7：原"超出只按长度评分"会把 `'1234…'×N` 长数字串误判为极强）；② `longest_keyboard_walk` 单趟化（保持"同排且列差绝对值为 1"语义）；③ `unique_char_count` 改 O(n)；④ 调用方移出主线程；⑤ 保留既有 `keyboard_walk_does_not_bridge_rows` 负例 |
 | ISSUE-P2-59 | 审计 RUST-05 | 原生 Argon2 路径缺内存上界预检（`Argon2KdfEngine.kt:52-64` 直接返回；`isMemoryParamFeasible` 仅覆盖 `transformJvm:73`），且 `(memoryInBytes / 1024).toInt()` 存在静默窄化 | ① `derive` 内镜像 Kotlin 上界（内存 / 迭代 / 并行度）；② `.toInt()` 越界抛异常而非截断；③ 上界须 ≥ 一切合法用户配置 |
-| ISSUE-P2-60 | 审计 RUST-06 | KDF secret `K` 以普通 `ByteArray` 常驻头部且全仓无清零点（`crypto/src/main/java/com/keepasskey/crypto/kdf/KdfParameters.kt:35`；`equals/hashCode` 刻意忽略该字段） | ① 新增 `clearSensitive()` 擦除 `secretKey`；② 接入会话锁定 / 关闭路径；③ 仅在最后一次需要 `K` 的派生之后调用（保存时会以同一头部重新派生）——**时机不可静态确定，须显式生命周期契约**（清早了保存会**静默写出用错误密钥加密的库**）；另 `KdbxHeader.copy()` 为 data class 浅拷贝，`masterSeed` / `encryptionIv` 等 ByteArray **共享引用**，任何"就地清零头部"方案须先解决所有权（深拷贝或显式约定） |
 
 > **2026-09-13 新增（敏感数据流审计批次）**：`docs/SENSITIVE_DATA_FLOW_AUDIT_2026-09.md` 已于同日
 > **退役删除**（处置归档见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §41）。该文档为**未跟踪文件**，

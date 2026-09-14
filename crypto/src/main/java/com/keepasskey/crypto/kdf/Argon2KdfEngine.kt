@@ -91,8 +91,11 @@ class Argon2KdfEngine(
                 .withIterations(argonParams.iterations.toInt())
                 .withVersion(argonParams.version)
 
-            if (argonParams.secretKey != null && argonParams.secretKey.isNotEmpty()) {
-                builder.withSecret(argonParams.secretKey)
+            // ISSUE-P2-60：secretKey 为 var（clearSensitive 可置 null）——取局部快照避免并发清零
+            // 与派生交错时读到中间态；null（已清零）按「无 secret」跳过
+            val kdfSecret = argonParams.secretKey
+            if (kdfSecret != null && kdfSecret.isNotEmpty()) {
+                builder.withSecret(kdfSecret)
             }
             if (argonParams.associatedData != null && argonParams.associatedData.isNotEmpty()) {
                 builder.withAdditional(argonParams.associatedData)

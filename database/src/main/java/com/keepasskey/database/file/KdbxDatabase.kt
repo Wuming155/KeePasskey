@@ -59,7 +59,17 @@ data class KdbxDatabase(
      */
     val customDataTimes: Map<String, Instant> = emptyMap()
 ) {
+    /**
+     * 擦除库内全部敏感驻留：明文条目树 + 外层头部的 KDF secret `K`。
+     *
+     * ISSUE-P2-60（审计 RUST-06）：`header.kdfParameters`（Argon2）的 `secretKey`
+     * 原先全仓无清零点，会话锁定 / 关闭后仍以普通 `ByteArray` 滞留至 GC。
+     * 本方法即其**统一收口**——`DatabaseSession.lock()` / `close()` / 换库前置释放
+     * 与子库只读投影均经此处触发，擦除时机契约见 `KdfParameters.clearSensitive` KDoc
+     * （仅限会话终止路径：此后 `database = null`，不可能再以该头部发起保存派生）。
+     */
     fun clearSensitiveData() {
         rootGroup.clearSensitiveData()
+        header.kdfParameters.clearSensitive()
     }
 }
