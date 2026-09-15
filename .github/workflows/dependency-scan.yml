@@ -5,7 +5,7 @@
 #    且 failOnError=true（扫描无法完成同样失败，fail-closed）；workflow 侧不再有任何
 #    continue-on-error 吞掉失败。
 # 2. 全部 Action 以 **commit SHA 钉死**（保留 `# vX.Y.Z` 注释）；本次只做 SHA 钉死，
-#    不跨大版本升级（上游已有新 major，升级需另行验证，见 docs/.handoff/ISSUE-P3-09.md）。
+#    不跨大版本升级（上游已有新 major，升级需另行验证，见 docs/records/退役依据承接-ISSUE-P3-09.md）。
 # 3. 除本巡检外，构建/测试/Lint 门禁与 Rust 供应链闸门见 .github/workflows/build.yml。
 #
 # 触发策略（ISSUE-P2-54 整改：PR / push 路径纳入依赖扫描）：

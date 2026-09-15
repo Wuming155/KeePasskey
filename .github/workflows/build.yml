@@ -12,7 +12,7 @@
 # 3. 全部 Action 以 **commit SHA 钉死**并保留 `# vX.Y.Z` 注释（Dependabot 会同步升级 SHA 与注释）。
 #    本次只做「SHA 钉死」，**不跨大版本升级**：检查时上游已有 actions/checkout v7.0.1 /
 #    actions/setup-java v6.0.1，但大版本升级涉及 Node 运行时与输入契约变更，无法在本批次
-#    本地验证，故沿用仓库在用的 v4 线，升级另立条目（见 docs/.handoff/ISSUE-P3-09.md）。
+#    本地验证，故沿用仓库在用的 v4 线，升级另立条目（见 docs/records/退役依据承接-ISSUE-P3-09.md）。
 # 4. 版本固定：NDK / Rust / cargo-ndk / cargo-deny 全部在 env 中写死，禁止漂移。
 #    - NDK 28.2.13676358 与 crypto/build.gradle.kts:13 的 ndkVersionStr 严格一致；
 #    - Rust 1.97.1 为本次整改在开发机实际验证通过的 stable 版本（crate 无 rust-toolchain.toml，

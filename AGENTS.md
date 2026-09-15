@@ -101,7 +101,7 @@ KeePasskey 是一款原生 Kotlin 开发的现代化 Android 密码管理器。�
 | [`docs/README.md`](docs/README.md) | **文档地图**：六分区总览与「新增文档放哪里」 | 找文档、新增文档前 |
 | [`docs/ACTIVE_ISSUES.md`](docs/ACTIVE_ISSUES.md) | 现存问题与待办清单（P0→P3） | 认领与开始新工作前 |
 | [`docs/RESOLVED_LOG.md`](docs/RESOLVED_LOG.md) | 已整改归档**总索引**（≤100 行：全量批次索引，**直达每个批次文件**） | 确认历史 Bug 是否已修 |
-| [`docs/resolved/`](docs/resolved/) | **历史批次归档**：4 份分册索引（各 ≤100 行）+ `batches/` 下**一批次一文件**的正文（65 份，原样迁移） | 查 §1 ~ §67 任一批次的验收证据 / 裁决 / 过程缺陷 |
+| [`docs/resolved/`](docs/resolved/) | **历史批次归档**：4 份分册索引（各 ≤100 行）+ `batches/` 下**一批次一文件**的正文（67 份；§42 / §43 两份按「退役承接」体例存于 `docs/security/`） | 查 §1 ~ §69 任一批次的验收证据 / 裁决 / 过程缺陷 |
 | [`docs/architecture/ARCHITECTURE.md`](docs/architecture/ARCHITECTURE.md) | 模块依赖拓扑与关键架构决策 | 跨模块改动、新功能落位前 |
 | [`docs/architecture/reference-projects.md`](docs/architecture/reference-projects.md) | 参考项目地图 | 实现算法/格式兼容时 |
 | [`docs/architecture/扫码方案评估_ZXing与CameraXMLKit.md`](docs/architecture/扫码方案评估_ZXing与CameraXMLKit.md) | 扫码方案选型评估（结论为「维持 ZXing」） | 评估 / 更换扫码库前 |
@@ -112,15 +112,16 @@ KeePasskey 是一款原生 Kotlin 开发的现代化 Android 密码管理器。�
 | [`docs/records/原生Argon2真机验证记录.md`](docs/records/原生Argon2真机验证记录.md) | 原生内核真机与模拟器实测登记（**禁混表**） | 声称性能或真机验证前 |
 | [`docs/records/KDBX4与复合密钥实战互操作排查日志.md`](docs/records/KDBX4与复合密钥实战互操作排查日志.md) | KDBX4 / 复合密钥互操作排障记录 | 排查互操作差异时 |
 | [`docs/records/ci-静态校准记录.md`](docs/records/ci-静态校准记录.md) | CI 配置与静态分析的校准留痕 | 改 CI / 静态分析配置前 |
-| [`docs/SECURITY_RECHECK_2026-09.md`](docs/SECURITY_RECHECK_2026-09.md) | **第二轮独立安全复核裁决报告**（对 89 项开放项 + 第一轮全部"已排除"结论的独立复核：真伪 / 重评严重度 / 攻击链 / Root Cause / 放行裁决） | 认领任何安全条目、重评 severity、准备发布前 |
+| [`docs/records/退役依据承接-ISSUE-P3-09.md`](docs/records/退役依据承接-ISSUE-P3-09.md) | **ISSUE-P3-09 依据承接**（Action 大版本升级 / ProGuard 收窄 / Compose BOM 回归判据）：原指向 `docs/.handoff/ISSUE-P3-09.md`，该目录**从未入库**故不可复原，本文件登记现存可复核入口 | 改 CI Action 版本 / R8 规则 / material3 alpha 前 |
+| [`docs/security/SECURITY_RECHECK_2026-09.md`](docs/security/SECURITY_RECHECK_2026-09.md) | **第二轮独立安全复核裁决报告**（对 89 项开放项 + 第一轮全部"已排除"结论的独立复核：真伪 / 重评严重度 / 攻击链 / Root Cause / 放行裁决）。**2026-09-15 由 `523d0fd^` 恢复入库**（曾于 `523d0fd` 整份删除且退役未登记，见 §69） | 认领任何安全条目、重评 severity、准备发布前 |
 | `.codebuddy/rules/engineering-rules.md` | 工程规则 | 编写/修改任何代码前 |
-| `tools/audit/check_recheck_consistency.sh` | **复核报告一致性扫描**（由"已撤销/已更正断言清单"驱动；防止更正节与正文打架。对应 `docs/SECURITY_RECHECK_2026-09.md` 定稿前必跑） | 修改任何审计/复核报告后 |
+| `tools/audit/check_recheck_consistency.sh` | **复核报告一致性扫描**（由"已撤销/已更正断言清单"驱动；防止更正节与正文打架。默认报告路径 `docs/security/SECURITY_RECHECK_2026-09.md`，定稿前必跑） | 修改任何审计/复核报告后 |
 
-> **悬空索引（2026-09-15 核实，未整改）**：本表所列 `docs/SECURITY_RECHECK_2026-09.md` **当前在 `HEAD` 中不存在**
-> （于 `523d0fd` 删除且**退役未登记**，提交信息未载明事由）；§5 的 `bash tools/audit/check_recheck_consistency.sh`
-> 因其为默认报告路径而**恒以 exit 2「报告不存在」结束**，该「定稿前必跑」纪律事实上停摆。
-> 同类悬空引用另有两处（归档缺 §68 小节、4 处 `docs/.handoff/ISSUE-P3-09.md`）。
-> 结论裁定与处置口径见 `docs/ACTIVE_ISSUES.md` **ISSUE-P3-129**；该条闭环后请一并移除本注记。
+> **悬空索引（2026-09-15 已全部收口，见 §69）**：此前三处指向不存在文件的引用已同批处置——
+> ① 归档缺 §68 正文 → **补录** `docs/resolved/batches/68-退出前清理易失缓存批次.md`；
+> ② `docs/SECURITY_RECHECK_2026-09.md` 于 `523d0fd` 被整份删除且退役未登记 → **由 `523d0fd^` 恢复入库**
+> 至 `docs/security/`，一致性闸门复效（复跑 PASS）；③ 4 处 `docs/.handoff/ISSUE-P3-09.md` 引用
+> （该目录**从未入库**）→ **承接**为 `docs/records/退役依据承接-ISSUE-P3-09.md`。
 > **索引纪律（ISSUE-P3-81 立规）**：任何记录**已确认缺陷 / 残余风险 / 验证结论**的文档，必须登记在本表内。
 > 反例代价：本索引曾长期漏登 `docs/SECURITY_AUDIT_2026-09.md` 等 5 份安全文档，
 > 其 29 项发现因无人流转而在 `RESOLVED_LOG.md` 中零引用、长期未闭环。

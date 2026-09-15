@@ -26,6 +26,7 @@
 | [`records/原生Argon2真机验证记录.md`](records/原生Argon2真机验证记录.md) | 原生内核真机 / 模拟器实测登记（**禁混表**） |
 | [`records/KDBX4与复合密钥实战互操作排查日志.md`](records/KDBX4与复合密钥实战互操作排查日志.md) | KDBX4 / 复合密钥互操作排障留痕 |
 | [`records/ci-静态校准记录.md`](records/ci-静态校准记录.md) | CI 配置与静态分析的校准留痕 |
+| [`records/退役依据承接-ISSUE-P3-09.md`](records/退役依据承接-ISSUE-P3-09.md) | `ISSUE-P3-09` 依据承接（Action 升级 / ProGuard 收窄 / Compose BOM 回归判据）；原 `.handoff` 依据从未入库 |
 
 ## security/ — 安全、威胁建模与合规
 
@@ -35,6 +36,7 @@
 | [`security/退役审计承接-42-威胁建模与架构评估.md`](security/退役审计承接-42-威胁建模与架构评估.md) | 已退役威胁建模报告的**结论承接处**（信任边界 / 对手 / 假设 / 开放问题） |
 | [`security/退役审计承接-43-安全整改方案与附录.md`](security/退役审计承接-43-安全整改方案与附录.md) | 已退役整改报告的**结论承接处**（附录 A–F、产品决策 A-1 ~ A-4） |
 | [`security/Privacy-Policy.md`](security/Privacy-Policy.md) | 隐私政策（对外交付物） |
+| [`security/SECURITY_RECHECK_2026-09.md`](security/SECURITY_RECHECK_2026-09.md) | **第二轮独立安全复核裁决报告**（89 项开放项逐条复核 + 第一轮「已排除」结论反证）；2026-09-15 由 `523d0fd^` 恢复入库 |
 
 ## references/ — 参考项目架构分析（只读借鉴）
 
@@ -48,6 +50,6 @@
 |---|---|
 | [`resolved/README.md`](resolved/README.md) | 分册体系说明与维护规则 |
 | [`resolved/BATCH_01_30.md`](resolved/BATCH_01_30.md) 等 **4 册** | 分册级索引（各 ≤100 行） |
-| `resolved/batches/` | **一批次一文件**的批次正文（当前 65 份；§42 / §43 已归入 `security/`） |
+| `resolved/batches/` | **一批次一文件**的批次正文（当前 67 份；§42 / §43 已归入 `security/`） |
 
 > **回溯约定**：归档正文只搬迁、不改写。拆分前的完整版本见 git `a144d21`。

@@ -11,9 +11,13 @@
 #
 # 用法：bash tools/audit/check_recheck_consistency.sh [报告路径]
 # 退出码：0 = PASS / 1 = 有残留 / 2 = 报告不存在
+#
+# 【2026-09-15 路径更正，ISSUE-P3-129 ②】报告曾于提交 `523d0fd` 被整份删除（退役未登记），
+# 致本脚本以默认路径调用时恒为 exit 2「报告不存在」、闸门停摆。现按 `docs/` 分区纪律将报告
+# 恢复至 `docs/security/`，默认路径随之下沉；调用方若显式传路径，仍以传入值为准。
 
 set -uo pipefail
-REPORT="${1:-docs/SECURITY_RECHECK_2026-09.md}"
+REPORT="${1:-docs/security/SECURITY_RECHECK_2026-09.md}"
 
 if [[ ! -f "$REPORT" ]]; then
   echo "FAIL: 报告不存在: $REPORT" >&2

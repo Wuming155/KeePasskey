@@ -286,7 +286,7 @@
 
 ---
 
-## P3 低危问题、特性接线与体验优化（18 项）
+## P3 低危问题、特性接线与体验优化（16 项）
 
 > **状态（2026-09-12）**：历史 P3 批次 **ISSUE-P3-01 ~ P3-68** 除 P3-23（经产品裁决「不排期」）外
 > 已全部闭环并归档，逐条实现细节与验收证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md)（§3 ~ §32）。
@@ -353,14 +353,14 @@
 > 否则永远不执行），退出前统一清理 `cacheDir/attachments`（附件解密明文）与 `cacheDir/sync`
 > （KDBX 密文快照），⇒ 行已移出本表；`.kdbx.bak` 与 `filesDir/rollback` **不在**清理面内，
 > 口径已写入 `AGENTS.md` §6，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §68。
-> **2026-09-15 新增（文档归档重构批次）**：登记 **`ISSUE-P3-129`**——**文档索引悬空引用三处**：
-> ① 归档库 **无 §68 批次文件**，而 `AGENTS.md` §1 / §6 与本节「续 15」三处均引用 §68
-> （ISSUE-P3-116 的闭环与基线数字），致该闭环条目证据链悬空、版本基线无法在归档库复核；
-> ② `AGENTS.md` §4 列为**必读**、§5 闸门默认报告路径的 `docs/SECURITY_RECHECK_2026-09.md`
-> **在 `HEAD` 中不存在**（`523d0fd` 删除且退役未登记），闸门 `check_recheck_consistency.sh` 恒 exit 2；
-> ③ **4 处**引用 `docs/.handoff/ISSUE-P3-09.md`（2 个 workflow、`app/proguard-rules.pro`、
-> `gradle/libs.versions.toml`），而该目录/文件在 `HEAD` 与 git 历史中**均不存在**（不可 `git show` 取回）。
-> 三处均**先于**本次重构存在；详见本节该条目。
+> **2026-09-15 闭环（续 16，§69 批次）**：**ISSUE-P3-129**（文档索引悬空引用三处）与 **ISSUE-P3-127**
+> （复核报告退役未登记；与 `P3-129` ② 为**同根因重复登记**）**同批收口**——① 补录 §68 批次正文
+> `docs/resolved/batches/68-退出前清理易失缓存批次.md`；② `docs/SECURITY_RECHECK_2026-09.md`
+> 由 `523d0fd^` **恢复入库**至 `docs/security/`，一致性闸门 `check_recheck_consistency.sh` 复效
+> （复跑 `PASS`，扫描 1272 行 / 11 条禁用短语），`AGENTS.md` §4 索引、§5 命令与脚本默认路径同步更正；
+> ③ 4 处 `docs/.handoff/ISSUE-P3-09.md` 引用（该目录**从未入库**、不可 `git show` 取回）
+> 改为承接文档 `docs/records/退役依据承接-ISSUE-P3-09.md`。两条已移出本表，
+> 见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §69。
 > **2026-09-13 新增（威胁建模 / 安全整改报告退役批次）**：P3-116 ~ P3-124 九项由
 > `THREAT-MODEL-AUDIT-d32f3e7.md` 与 `SECURITY_AUDIT_REMEDIATION.md` 的对拍结果转登
 > （两份报告同日退役删除，处置归档见 §42 / §43）。
@@ -502,67 +502,6 @@
 
 ---
 
-### ISSUE-P3-129（新登记）：文档索引悬空引用三处——归档缺 §68 + 复核报告退役未登记 + `.handoff` 早已不存在
-
-- **优先级**：P3（文档 / 可追溯性缺陷，不涉产品行为；但三处引用在 `AGENTS.md` / 代码注释中
-  分别被列为**必读**、**闸门**与**依据**，故实际影响面高于普通笔误）
-- **核实时间点与核实方式（2026-09-15；全仓相对链接扫描 + 批次计数核对 + git 历史比对）**：
-  - **① 归档缺 §68 批次文件**：对 `docs/RESOLVED_LOG.md` 及其分册、`batches/` 全文扫描 `^## §` 得
-    **67 个批次（§1 ~ §67）**；全文检索 `§68` **零命中**（`1770` / `PrimaryTabRow` / `Kotlin 编译告警`
-    同样零命中）。而以下三处均指向 §68：`AGENTS.md` §1「单测基线（2026-09-15，§68 批次后）：
-    **1770 例 / 0 失败 / 0 错误 / 13 跳过**」、`AGENTS.md` §6「用户显式「彻底退出应用」的清理面与边界
-    （ISSUE-P3-116，§68）」、`ACTIVE_ISSUES.md` 本节 P3 状态「续 15，§68 批次」末句
-    `见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §68`。
-  - **② 复核报告退役未登记**：`docs/SECURITY_RECHECK_2026-09.md` —— `AGENTS.md` §4 将其标注为
-    「**第二轮独立安全复核裁决报告**……认领任何安全条目、重评 severity、准备发布前」的**必读**，
-    `AGENTS.md` §5 的闸门 `bash tools/audit/check_recheck_consistency.sh` 又以其为**默认报告路径**
-    ——**该文件在 `HEAD` 中不存在**（`git cat-file -e HEAD:docs/SECURITY_RECHECK_2026-09.md` exit 128；
-    全仓 `Test-Path` / 文件名检索均零命中）。`git log --diff-filter=D` 显示其于
-    **`523d0fd`（2026-09-13，提交信息 "Refactor code structure for improved readability and
-    maintainability"）删除**，该提交信息**未记载退役事由**；而归档 §44 / §45 仍以
-    「第四轮独立复核定版（`SECURITY_RECHECK_2026-09.md`）」作为其 P0 / P1 裁决依据。
-    **可恢复性（区别于 §41 的不可取回情形）**：该文件曾入库，`git show 5fc9922:docs/SECURITY_RECHECK_2026-09.md`
-    可取回全文。
-  - **③ `docs/.handoff/ISSUE-P3-09.md` 全仓不存在**：4 处引用——`.github/workflows/build.yml:15`、
-    `.github/workflows/dependency-scan.yml:8`、`app/proguard-rules.pro:6`、`gradle/libs.versions.toml:30`
-    （均为「依据 / 判据见该文件」式注释）。核实：`Test-Path docs\.handoff` = False；全仓目录检索
-    `.handoff` **零命中**；`git log --all -- docs/.handoff/` **无任何提交** —— 即该目录**从未入库**，
-    按 §41 立规属**不可经 `git show` 取回**的情形，注释所指向的依据已无留痕。
-- **问题描述**：三处同属 `AGENTS.md` §4「索引纪律 / 退役纪律」所针对的**同一失效模式——结论脱离索引
-  与工作流入口**（该纪律正是因 5 份安全文档 29 项发现长期零流转而立）。具体后果：
-  ① `ISSUE-P3-116` 已随 §68 批次闭环并「行已移出本表」，但其正文、整改实现与验收证据**从未落入
-  归档**，按头部「闭环纪律」（历史实现与验收证据一律以归档库为**单一真相源**）该条目**无单一真相源**；
-  `AGENTS.md` §1 的版本基线（1770 例 / Kotlin 编译告警清零）亦**无法在归档库复核**。
-  ② 「复核报告一致性扫描」闸门因报告缺失而**恒以 exit 2「报告不存在」结束**，`AGENTS.md` §5 要求的
-  「修改任何审计 / 复核报告后必须跑」在当前仓库状态下**不可执行**——即该纪律事实上处于停摆。
-  ③ ProGuard 收窄依据、CI 依赖升级判据、Compose BOM 回归判据**三处工程决策的依据文档缺失**，
-  下一代维护者无法复核当时取舍。
-- **验收标准**：
-  - **①（§68）** 按归档维护规则补录 **§68**：在 `docs/resolved/batches/` 新增 `68-<中文短名>.md`
-    并在 `RESOLVED_LOG.md` 总索引**加一行**（编号续用、不复用）。内容至少含：「退栈 → **清理易失缓存** →
-    `exitProcess(0)`」的固定顺序与其必要性（清理必须早于退出）、
-    `MainApplication.purgeVolatileCachesBeforeExit()` 覆盖 `cacheDir/attachments` 与 `cacheDir/sync`
-    两个面及其**不覆盖**面（`.kdbx.bak` / `filesDir/rollback`）的如实声明、`.\gradlew.bat test`
-    实测结论（**1770 例 / 0 失败 / 0 错误 / 13 跳过**，app 980 / core 68 / crypto 131 / database 388 /
-    sync 203）、**Kotlin 编译告警清零（全量重编译零 `w:` 输出）**的证据、`assembleRelease` 产物完整路径；
-    若不补录，则须把上述三处 `§68` 引用**就地更正**为实际留痕位置并同步更正 `AGENTS.md` §1
-    基线数字的来源标注（**不得**保留指向不存在批次的引用）。
-  - **②（复核报告）** 二选一并同步本表：**恢复** `docs/SECURITY_RECHECK_2026-09.md` 入手
-    （`git show 5fc9922:docs/…`，并按新分区放入 `docs/security/`）并如实登记其版本口径；
-    **或**按「退役纪律」完成**结论分流**后，在 `docs/security/` 立承接文档（体例对齐
-    `退役审计承接-42/43`），同时更新 `AGENTS.md` §4 索引与 §5 的闸门说明（含脚本对「报告缺失」的
-    处置口径）。**不得**保留指向不存在文件的「必读」条目。
-  - **③（`.handoff`）** 二选一：**补录**该依据文档（若内容仍可从上游 PR / 提交信息复原）并按分区存放；
-    **或**把 4 处注释改为指向现存依据（例如把「见 `docs/.handoff/ISSUE-P3-09.md`」改为指向
-    `docs/records/ci-静态校准记录.md` 或对应批次文件），**不得**保留指向不存在文件的「依据」。
-- **备注**：三处均为 **2026-09-15 文档归档重构**（批次拆为**一批次一文件** + `docs/` 按用途分
-  `architecture/` / `records/` / `security/` 四组）过程中由「全仓相对链接扫描（354 条）+ 批次计数核对
-  + git 历史比对」发现，**均先于本次重构存在**；该重构本身**未删除任何批次内容**——67 个批次正文
-  与拆分前逐行字节比对**全部一致**（67/67），仅 §20 / §21 / §22 / §28 在上一轮按「保守精简」
-  压缩过重复的验收记录。
-
----
-
 > **2026-09-13 新增（外部安全审计批次）**：转登自已退役的 `docs/SECURITY_AUDIT_2026-09.md`
 > （处置归档见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §41）。以下各项均为在 `d32f3e7` 与 `a669a48`
 > 双向对拍后仍成立、且**不改变安全承诺**的低危 / 卫生项；该报告的逐条分流结论见 §41。
@@ -609,18 +548,9 @@
 | ISSUE-P3-123 | 审计附录 C（T7）+ `AGENTS.md` §6 | **CI / 供应链硬化遗留 4 项**（均于 2026-09-13 直读核实；**第四轮更新**）：① `gradle/verification-metadata.xml` **不存在**（依赖校验元数据 / 版本锁定缺失，`gradle/` 仅 4 文件；全仓 `dependencyLocking` / `lockAllConfigurations` 零命中）；② `gradle/gradle-daemon-jvm.properties` 仅 `toolchainVersion=21`，**无分发校验和**（对照 `gradle-wrapper.properties:7` 已锁）；③ 三个工作流**均不运行** instrumented 用例（7 个关键词零命中）——设备侧实测 **28 例**（app 12 / database 6 / sync 3 / crypto 7，`@Test` 注解计数，第四轮更正原记 15 例）目前只能本地跑；④ `mapping.txt`（77.5 MB）**已确证** CI 无条件上传（`build.yml:226-238`，`if: always()` 无可见性限制）→ 公开仓库等同公开去混淆映射 | ① 评估引入依赖校验 / 版本锁定（或如实登记为已知限界）；② Daemon JVM 分发补校验和；③ 至少为 `:crypto` / `:database` 建立可复跑的托管设备任务，使设备侧用例进入 CI 基线（注意陷阱 #21：Linux runner 无 KVM，`AssumptionViolatedException` 会被 AGP 记为 `<failure>`，须改 `macos-latest` 并接受计费）；④ 按"公开 artifact"处置 `mapping.txt`（可见性收窄或上传前剔除）并留痕 |
 | ISSUE-P3-124 | 审计附录 C（`SUPPLY-06` / `AC-06`） | **DAL 出口未接纵深防御**：`DigitalAssetLinksVerifier` 自建裸 `OkHttpClient.Builder()`，仅设连接 / 读 / 调用三个超时（`:61-64`），**无** SSRF / DNS 重绑定守卫（对照 `SyncEndpointGuard`）、**无** TLS-only `ConnectionSpec` 声明（对照 `SyncHttpClientFactory`）；目标 host 来自调用方影响面（webDomain / origin），属纵深防御缺口（方向 fail-closed：验签失败即不授权，无机密性影响）（**第四轮批注**：作为漏洞为**误报**——scheme 硬编码 `https://`、路径固定、结果不回流三值枚举，可利用性为零，维持 HARDENING；另 `SUPPLY-04` 补出 `dalVerifier.verify` **第二个**生产出口 `AutofillOriginResolver.kt:45`，且自动填充侧**无** skip 开关而 Passkey 侧有 `skipDalVerification` → 隐私控制不对称，一并治理） | ① 复用 `SyncEndpointGuard` 的主机判定与 TLS-only 配置，或**如实登记**"仅请求 https 固定路径、未做内网可达性防护"；② 断言非 https / 内网目标请求被拒绝；③ 与 `ISSUE-P2-74`（包可见性）同批评估，避免重复排查；④ 评估两侧 skip 开关对称化或留痕 |
 
-> **2026-09-13 新增（第四轮独立复核定版批次）**：以下 2 项为复核新发现低危项合并登记
-> （来源 SECURITY_RECHECK §11 / §6.8，附核实行号）。
+> **2026-09-13 新增（第四轮独立复核定版批次）**：以下 1 项为复核新发现低危项
+> （来源 SECURITY_RECHECK §11，附核实行号）。
 
 | 编号 | 来源 | 问题与位置（核实于 2026-09-13） | 验收标准 |
 |---|---|---|---|
 | ISSUE-P3-125 | 复核 `NEW-N2` / `NEW-B09-x` / `B03-N1` | ① **选择器零匹配仍无条件挂入**：`buildPickerDataset` 在 `appendUnlockedDatasets` 之后无条件调用（`KeePasskeyAutofillService.kt:196-203`），无候选数门槛 → 严格匹配设计对任意应用失效；② ~~**生产可重定向出口**~~ **【2026-09-15 §67 已闭环】**：`DigitalAssetLinksVerifier` 的 `endpointOverride` / `clockMs` 原为 `@Singleton` 上的 `@Volatile internal var`（`internal` 只限制模块外，同模块生产代码可把 DAL 拉取改写到任意 URL ⇒ 整体架空 RP↔应用绑定校验），现改为**构造注入的只读策略**（`DalEndpointResolver` / `MillisClock`，生产由 `DalVerifierModule` 提供唯一实现）；③ ~~**cargo 失败与缺失不可区分**~~ **【2026-09-15 §66 已闭环】**：`crypto/build.gradle.kts` 的 `cargoHostBuild` 原设 `isIgnoreExitValue = true`（吞掉编译失败）已移除——**缺失**走 `onlyIf` 跳过（有意降级），**失败**则任务直接失败（fail-closed）；已用「注入非法 cargo 参数 ⇒ `BUILD FAILED`」实测该分支 | ① 评估零匹配时改挂"无可信候选"占位数据集，或留痕接受现设计；~~② `endpointOverride` 改构造注入 / 测试专用隔离（防生产重定向）~~ **② 已完成（§67）**：构造注入 + 生产策略唯一 + `DalVerifierNoRuntimeOverrideTest` 守卫（含行为断言：Official 解析到官方路径、SystemClock 与系统时钟偏差 <5s）；~~③ 构建失败 fail-closed…~~ **③ 已完成（§66）** |
-
-> **2026-09-15 新增（整改 `ISSUE-P2-69` 时跨文件检索附带发现）**：以下 1 项为**文档治理缺陷**
-> （非代码缺陷），与本批两项均无因果关系，独立登记。
-
-| 编号 | 来源 | 问题与位置（核实于 2026-09-15，对 HEAD `e9412f3`） | 验收标准 |
-|---|---|---|---|
-| ISSUE-P3-127 | 本仓文档治理（复核报告退役纪律） | **`docs/SECURITY_RECHECK_2026-09.md` 已从仓库消失，但索引 / 工具 / 正式断言仍指向它**：**核实方式** = `git ls-tree -r HEAD -- docs`（无该文件）+ `git log --diff-filter=D -- docs/SECURITY_RECHECK_2026-09.md`（显示由提交 `523d0fd`，2026-09-13，**整份删除**）+ `git show --stat 523d0fd`（该提交仅改 2 文件：`ACTIVE_ISSUES.md` +118 行、该报告 **−1272 行**，提交信息为 **"Refactor code structure for improved readability and maintainability"**，与其实际动作语义不符）+ 全仓检索文件名（**9 处**点名：`AGENTS.md` 3 / `ACTIVE_ISSUES.md` 4 / `RESOLVED_LOG.md` 2，另有更多处仅以"第四轮独立复核定版"指代）。具体缺口：① `AGENTS.md` §4 文档索引仍把该报告列为**在册文档**（"认领任何安全条目、重评 severity、准备发布前"必读）；② `AGENTS.md` §4 收录的 `tools/audit/check_recheck_consistency.sh` 其**驱动对象即该报告**，现无对象可扫（fail-closed 脚本退化为空转）；③ `RESOLVED_LOG.md` **无该报告的退役归档节**——对照 §40 / §41 / §42 / §43 对另 4 份审计文档均有明确退役处置与分流，本报告的消失**零留痕**（违反 §40.8 纪律 4「任何文档退役前，其结论必须完成分流并同步本表」与 §41 立规「审计报告须在开始阅读时即纳入 git 跟踪」，后者恰是本报告可救回的原因）；④ `ACTIVE_ISSUES.md` 中多个条目的 **severity 定级与 AC 修正**以该报告为唯一权威依据（如 P2-49 / P3-122 / P3-123 / P3-124 的"第四轮批注"）。**可救回**：该文档曾在 git 跟踪内，原文可经 `git show 523d0fd^:docs/SECURITY_RECHECK_2026-09.md` 完整取回 | ① **产品裁决退役去向**（二选一）：**(a) 恢复入库**——按上述 git 对象取回并 commit，`AGENTS.md` §4 索引与一致性脚本即刻恢复有效；**(b) 确认退役**——则须**三处同步**：`AGENTS.md` §4 该索引行删除或改注"已退役，处置见 `RESOLVED_LOG.md` §xx"、`RESOLVED_LOG.md` 补退役归档节（逐条处置其结论、开放问题与"已撤销/已更正断言清单"）、`tools/audit/check_recheck_consistency.sh` 改指承接文档或随之退役；② 无论选 (a)/(b)，均须逐条核对 `ACTIVE_ISSUES.md` / `RESOLVED_LOG.md` 中**以该报告为依据的断言**在新口径下仍成立（不得出现"依据消失但结论照旧"）；③ **提交信息纪律**：不得以"重构 / 可读性 / 可维护性"类信息承载整份审计文档的删除（本次误删未被任何流程拦截，正因提交信息未提示语义变更） |
-
----
