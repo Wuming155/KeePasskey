@@ -359,3 +359,54 @@ adb shell getprop ro.product.cpu.abi   # 应输出 arm64-v8a
 > （原 ISSUE-P3-11 交付批次），证据为 `crypto/build/outputs/androidTest-results/connected/debug/` 下的
 > logcat 产物与本文档逐字摘录，本轮**未重新执行**、**未改动**。
 
+---
+
+## 9. KDF 墙钟与内存闸门 · 真机分路径实测（2026-09-15，ISSUE-P2-80 M-1 / M-2）
+
+> **环境（与原表禁混）**：**Redmi 4X（Xiaomi Mi8937 / `santoni`）/ LineageOS / Android 17 / API 37 /
+> `arm64-v8a`**；APK `maxHeap = 192 MiB`（无 `largeHeap`）。
+> **采集方式（可复跑）**：`database/src/androidTest/java/com/keepasskey/database/kdf/KdfWallClockDeviceTest.kt`，
+> 经 `.\gradlew.bat :database:connectedDebugAndroidTest` **真实执行**（`build=SUCCESSFUL`，
+> database 模块 **9 例 / 0 失败**），日志前缀 `KDF-MEASURE|`（`adb logcat -s KdfWallClock`）。
+> **两次独立运行的复现性**：默认配置 0.609 s / 0.635 s；重载配置 2.470 s / 2.537 s；吞吐
+> 2.204×10⁸ / 2.115×10⁸ 字节·轮/秒 —— 同表内并列，不取平均、不择优。
+
+### 9.1 内存闸门与分路径接受性（**M-2**）
+
+| 观测项 | 实测值（首次运行 / 复跑） |
+|---|---|
+| `Runtime.maxMemory()` | **192 MiB** |
+| `maxHeap / 2`（codec 的动态堆门槛） | **96 MiB** |
+| codec 接受 `M = 堆/2` | **是** |
+| codec 拒绝 `M = 堆/2 + 1 MiB` | **是**（`KdbxCorruptFileException`，边界双向核对） |
+| JVM 兜底闸门（`0.6 × maxHeap` = 115 MiB）接受 `M = 堆/2` | **是** ⇒ 对 JVM 路径而言 **codec 那道更紧** |
+| **原生路径无第二道闸**（以 `M = 堆/2` 真实派生成功为证） | **是**（耗时 0.750 / 0.748 s，I=1） |
+| **实际到达内核的内存** | **98 304 KiB（= 96 MiB）** |
+| 本机**有效内存上界** | **96 MiB**（静态封顶 4 GiB 在本机不可达） |
+| `M = 512 MiB × I = 20`（本仓 `KdfBenchmark` 自荐上界量级）可否解锁 | **否**（被动态堆门槛拒绝） |
+
+> **更正一处既有推定**：`ISSUE-P2-49` 原记「真机实际 M 上界 ≈128–256 MiB」为推算值；
+> 本机实测为 **96 MiB**（= `maxHeap/2`，`maxHeap` 192 MiB）。不同机型随 `maxHeap` 变化。
+
+### 9.2 墙钟（**M-1**）
+
+| 配置 | 实测秒数（首次 / 复跑） |
+|---|---|
+| 默认（`M = 64 MiB` / `I = 2` / `P = 2`，本仓 `KdbxHeader.createDefault`） | **0.609 / 0.635 s** |
+| 重载（`M = 96 MiB` / `I = 8` / `P = 2`） | **2.470 / 2.537 s** |
+| **实测吞吐（单位工作量 = M × I）** | **2.204×10⁸ / 2.115×10⁸ 字节·轮/秒** |
+| 当前联合预算上界（`I × M = 2^40`，codec **实测接受**）的墙钟 | **≈4 988 / 5 198 s ≈ 1.39 / 1.44 小时** |
+| 该最坏配置在预算内的迭代数（`M = 堆/2`） | `I = 10 922` |
+
+> **方法学声明**：`2^40` 那一行是**按本机实测吞吐换算**得出的量级（用例日志已标注
+> `extrapolated_`），**不是**独立推算，也**未**实跑该配置（会让设备满载数小时）。
+> 其余各行均为**真实执行的秒数**。
+
+### 9.3 题面更正（如实登记）
+
+条目原文要求实测「合法 Header（`I = 2²⁴`、`M = 堆/2`）」的耗时。**该组合自 `ISSUE-P2-49` AC①
+（`I × M ≤ 2^40` 联合预算，§48 落地）起已不是合法 Header**——实测断言
+`originalPremise_i2pow24_mHeapHalf_rejected=true`（`2²⁴ × 堆/2 ≈ 2^51 > 2^40` 被拒）。
+故 M-1 改为实测「**当前预算内最坏合法配置**」的墙钟量级，并给出若干可行点的真实秒数。
+
+
