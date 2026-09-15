@@ -84,6 +84,7 @@
 | §70 | KDF 盐长边界与 XML 常量归位批次：Argon2 `S` 按官方 `MinSalt/MaxSalt` 校验 + `Compressed` 常量的唯一权威定义上收至 `KdbxConstants.Xml` | ISSUE-P3-78 / ISSUE-P3-80 | [`70-KDF盐长边界与XML常量归位批次.md`](resolved/batches/70-KDF盐长边界与XML常量归位批次.md) |
 | §71 | 设备侧验证缺口收口批次：arm64 真机（API 37）经 ADB 逐项实测 3 项「已接线未验证」行为（敏感对话框 `FLAG_SECURE` / 附件冷启动清理 / `DialogWindowProvider` 取到），并补 2 例设备侧易失缓存清理用例 | ISSUE-P2-42 | [`71-设备侧验证缺口收口批次.md`](resolved/batches/71-设备侧验证缺口收口批次.md) |
 | §72 | 无障碍信号纳入完整性体系与口令语义显式声明批次：启用无障碍服务纳入 `IntegritySignals`（**只提示不降级**）+ 主密码页提示 + `password` 语义显式化；附 AC 前提更正与真机正负对照 | ISSUE-P2-44 | [`72-无障碍信号与口令语义显式声明批次.md`](resolved/batches/72-无障碍信号与口令语义显式声明批次.md) |
+| §73 | CI 原生门禁与清单导出面硬化批次：`native-gate` 真实执行 `:crypto:test` + 零跳过断言 + 4 ABI 导出符号 nm 核对；启动器入口 `singleTask`/空 `taskAffinity` + 导出面守卫 | ISSUE-P3-97 / ISSUE-P3-85 | [`73-CI原生门禁与清单导出面硬化批次.md`](resolved/batches/73-CI原生门禁与清单导出面硬化批次.md) |
 | §74 | 缓存清理幂等契约批次（§73 施工中的附带发现）：`SyncCache.clearAll` 以「删除后目标是否仍存在」判定成功，消除并发/连续清理的失败误报与自相矛盾告警 | ISSUE-P2-82（同轮登记并闭环，不在表内留行） | [`74-缓存清理幂等契约批次.md`](resolved/batches/74-缓存清理幂等契约批次.md) |
 
 ## 分册导航

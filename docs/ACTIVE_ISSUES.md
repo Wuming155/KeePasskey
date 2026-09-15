@@ -306,7 +306,7 @@
 
 ---
 
-## P3 低危问题、特性接线与体验优化（14 项）
+## P3 低危问题、特性接线与体验优化（12 项）
 
 > **状态（2026-09-12）**：历史 P3 批次 **ISSUE-P3-01 ~ P3-68** 除 P3-23（经产品裁决「不排期」）外
 > 已全部闭环并归档，逐条实现细节与验收证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md)（§3 ~ §32）。
@@ -388,6 +388,16 @@
 > `KdbxConstants.Xml.COMPRESSED`（取值不变），实现内私有常量删除。新增 4 例回归（走
 > 「写侧序列化 → 读侧反序列化」真实字节流）；全量 **1774 例 / 0 失败 / 0 错误 / 13 跳过**。
 > 两条已移出本表，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §70。
+> **2026-09-15 闭环（续 21，§73 批次）**：**ISSUE-P3-97**（CI 无一 job 同时具备 Rust 工具链与
+> 原生用例真实执行）与 **ISSUE-P3-85**（自动填充 / 组件面低危硬化）**同批收口**——
+> ① `native-gate` 在 `cargoNdkBuild` 后**真实执行** `:crypto:test`，并新增「用例数 > 0 且跳过数 == 0」
+> 断言与 **4 ABI `.so` 导出符号核对**（恰好 5 个 `Java_com_keepasskey`；期望值以本机
+> NDK `llvm-nm` 对已构建产物**实测**为准，非引用条目原文）；
+> ② `MainActivity` 置 `launchMode="singleTask"` + `taskAffinity=""`，并新增
+> `ExportedComponentHygieneTest`（5 例）锁定导出面：导出组件须带 `BIND_*` 权限或在白名单内、
+> **白名单与实际无权限导出集合双向相等**、启动器入口不得消费任何外部 intent 数据。
+> **`ISSUE-P3-85 ③`（一次性 nonce）按条目 AC 明示「可延后」未实施**，如实登记为残余。
+> 两条已移出本表，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §73。
 > **2026-09-15 补登（§69 附带）**：依 `ISSUE-P3-127` AC②「依据恢复 ⇒ 逐条对齐」，已按恢复入库的
 > 复核报告 §10 / §11 逐条核对本表 AC，并在本文件开头新增
 > **「第四轮独立复核定版结论：对本表 AC 的更正（实施前必读）」** 一节（18 行）。
@@ -486,36 +496,6 @@
   `clearSensitiveCache()` 并拒绝解锁；② 评估 `prctl(PR_SET_DUMPABLE, 0)` / `MADV_DONTDUMP`
   的可行性与代价（需 native 支持，**不得**以牺牲稳定性换取纸面加固）；
   ③ 明确记录"本项仅为提高成本，不改变设计边界"。
-
----
-
-### ISSUE-P3-85（新登记）：自动填充 / 组件面低危硬化（3 小项）
-
-- **优先级**：P3（单条收益有限，合并登记）
-- **核实时间点与核实方式（2026-09-13）**：
-  1. `AutofillDatasetBuilders.buildPickerDataset`（L235-241）选择器 `PendingIntent` 为
-     `FLAG_MUTABLE | FLAG_UPDATE_CURRENT`（框架注入 fillIn extras 所需，不可改 IMMUTABLE）；
-  2. `AndroidManifest.xml` L24-33 的 `MainActivity` **未声明** `launchMode` / `taskAffinity`；
-  3. `.github/` 内检索 `exported` —— **无任何断言** exported 组件必须受权限保护。
-- **问题描述**：① 选择器 `PendingIntent` 可被重复拉起（DoS / UI 干扰）——
-     **注入面已排除**：base intent 已显式设置全部安全关键 extra，且 `Intent.fillIn` 为
-     "base 覆盖 fillIn"，攻击者无法改写既有键；
-  ② `MainActivity` 可被任意应用反复拉起 / 清任务栈（**未发现直接泄密**，`onCreate` 不消费外部 extra）；
-  ③ 未来依赖可能引入无权限保护的 `exported` 组件而 CI 不告警。
-- **验收标准**：① `MainActivity` 加 `launchMode="singleTask"` + `taskAffinity=""`，
-  并**保持 `onCreate` 不消费外部 extra**（当前正确，须作为回归约束）；
-  ② CI 增加"合并清单断言：所有 `exported=true` 组件必须带 `permission` 或来自白名单"；
-  ③ 对选择器 / 确认页入口评估一次性 nonce（可延后）。
-
----
-
-> **2026-09-13 新增（外部安全审计批次）**：转登自已退役的 `docs/SECURITY_AUDIT_2026-09.md`
-> （处置归档见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §41）。以下各项均为在 `d32f3e7` 与 `a669a48`
-> 双向对拍后仍成立、且**不改变安全承诺**的低危 / 卫生项；该报告的逐条分流结论见 §41。
-
-| 编号 | 来源 | 问题与位置（核实于 2026-09-13） | 验收标准 |
-|---|---|---|---|
-| ISSUE-P3-97 | 审计 RUST-09 | CI 无一 job 同时具备 Rust 工具链与**原生用例真实执行**（**第四轮表述更正**：fast-gate `./gradlew test` 实际运行 `:crypto:test`，但未装 cargo → JNI 用例经 `Assume` 整类跳过；native-gate 装 cargo 但只跑 `cargoNdkBuild` + assemble 不跑 test。**编译期**符号签名核对已存在——`jni_bridge.rs:152-170` 由 `cargo test` 覆盖；缺的是 readelf / nm 级 `.so` 导出核对） | `native-gate` 中 `cargoNdkBuild` 后追加 `:crypto:test` 与导出符号数断言（实测若实现将通过：恰好 5 个 `Java_com_keepasskey` 导出）；如保留 Assume 跳过机制，须在 CI 汇总显式输出"原生用例 N 例被跳过"防假绿 |
 
 ---
 

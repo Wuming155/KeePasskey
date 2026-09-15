@@ -159,6 +159,48 @@ jobs:
       - name: 4 ABI Rust Argon2 内核交叉编译（libkeepasskey_argon2.so × 4）
         run: ./gradlew :crypto:cargoNdkBuild --console=plain
 
+      # ISSUE-P3-97：本 job 是**唯一**同时具备 Rust 工具链与本机原生产物的 job，必须在此真实执行
+      # Gradle 侧原生用例并对 .so 导出符号做 nm 级核对。否则「cargo 缺失 ⇒ JNI 用例经 Assume
+      # 整类跳过」会再次退化为「构建全绿」的假绿通道（fast-gate 不装 cargo，正是该形态）。
+      - name: 原生内核单测真实执行（Gradle :crypto:test）
+        run: ./gradlew :crypto:test --console=plain
+
+      - name: 断言原生用例零跳过 + 4 ABI 导出符号核对（ISSUE-P3-97）
+        run: |
+          set -euo pipefail
+          # 1) 用例数与跳过数：本 job 具备 cargo 与 4 ABI 产物，**没有任何**「有意的降级」理由，
+          #    故跳过数必须为 0（历史形态：整类跳过而 task 级仍 BUILD SUCCESSFUL）。
+          python3 - <<'PY'
+          import glob, sys, xml.etree.ElementTree as ET
+          total = skipped = 0
+          for f in glob.glob("crypto/build/test-results/testDebugUnitTest/*.xml"):
+              root = ET.parse(f).getroot()
+              suites = [root] if root.tag == "testsuite" else list(root)
+              for suite in suites:
+                  total += int(suite.get("tests", 0))
+                  skipped += int(suite.get("skipped", 0))
+          print(f"原生用例：总数={total} 跳过={skipped}")
+          if total == 0:
+              print("::error::未发现任何原生用例结果——:crypto:test 未真实执行"); sys.exit(1)
+          if skipped != 0:
+              print(f"::error::原生用例被跳过 {skipped} 例；本 job 已装 cargo 与 4 ABI 产物，不得跳过"); sys.exit(1)
+          PY
+          # 2) 导出符号核对：JNI 定长契约要求每个 ABI 的 .so 恰好导出 5 个 Java_com_keepasskey 符号
+          #    （Twofish ×2 / AES-KDF / Argon2 / 口令强度）。
+          #    实测（本机 NDK 28.2.13676358 llvm-nm，2026-09-15，arm64-v8a 产物）：恰好 5 个。
+          nm="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm"
+          test -x "$nm"
+          for abi in arm64-v8a armeabi-v7a x86_64 x86; do
+            so="crypto/build/rust/jniLibs/${abi}/libkeepasskey_argon2.so"
+            test -f "$so"
+            count=$("$nm" --dynamic --defined-only "$so" | grep -c 'Java_com_keepasskey' || true)
+            echo "${abi}: Java_com_keepasskey 导出数 = ${count}"
+            if [ "$count" -ne 5 ]; then
+              echo "::error::${abi} 的 JNI 导出符号数异常（期望 5，实际 ${count}）——契约变更或符号被剥离"
+              exit 1
+            fi
+          done
+
       - name: Assemble Debug（真实触发原生构建与 APK 打包）
         run: ./gradlew :app:assembleDebug --console=plain
 
