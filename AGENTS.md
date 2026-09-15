@@ -11,8 +11,9 @@
 ## 1. 版本基线（摘要）
 
 - 测试 / 构建 / CI 当前全绿（具体版本、例数、残余面见 [`RESOLVED_LOG.md`](docs/RESOLVED_LOG.md)）。
-  单测基线（2026-09-15，§49 批次后）：**1646 例 / 0 失败 / 0 错误 / 13 跳过**
-  （app 887 / core 65 / crypto 121 / database 370 / sync 203；`--rerun-tasks --max-workers=1` 强制真实执行）；
+  单测基线（2026-09-15，§49 批次后）：**1659 例 / 0 失败 / 0 错误 / 13 跳过**
+  （app 887 / core 65 / crypto 127 / database 377 / sync 203；`--rerun-tasks --max-workers=1` 强制真实执行）；
+  原生内核基线（同日，§49 批次后）：`cargo test` **50 例 / 0 失败**（含 ISSUE-P2-56 工作内存清零 4 例 + ISSUE-P2-57 受管缓冲与 sha2 状态擦除 3 例）；
   设备侧基线（2026-09-14，§47 批次后）：**32 例 / 0 失败 / 0 跳过**（`app` 15 + `database` 7 +
   `sync` 3 + `crypto` 7），已在 **arm64 真机**（Redmi 4X / LineageOS / Android 17 / **API 37**）全量复跑通过；
   此前既定环境为 x86_64 / API 36.1 模拟器（§34 / §36 / §46）。`app` 15 例含 `QuickUnlockSealDowngradeDeviceTest`
@@ -48,6 +49,11 @@ KeePasskey 是一款原生 Kotlin 开发的现代化 Android 密码管理器。�
    ```
 2. **敏感数据铁律**：主密码、密钥用 `CharArray`/`ByteArray` 并显式清零，绝不落地为 `String`，日志严禁敏感明文。
    - 原生侧 `crypto/src/main/rust/` 四个内核（Argon2 / AES-KDF / Twofish-CBC / 口令强度）敏感缓冲经 `Zeroizing` RAII 全路径确定性擦除；禁止再引入手写 C/C++ 秘密缓冲管理。
+     **Argon2 `m_cost` 工作内存除外项已闭环（ISSUE-P2-56，§49）**：argon2 crate 的 `zeroize` feature **不覆盖** `hash_password_into` 内部 `Blocks::drop`（实证：`block.rs:190-200` 仅 dealloc），
+     故主工作内存改由本 crate 自持 `Zeroizing<Vec<Block>>` + `hash_password_into_with_memory` 承担擦除；新增原生内核不得再依赖「启用 `zeroize` feature 即已擦除」的推定。
+     **派生输出与摘要状态亦须走受管缓冲（ISSUE-P2-57，§49）**：`sha2` 已启用 `zeroize`（`Sha256` 满足 `ZeroizeOnDrop`）；
+     生产路径（JNI 桥）一律用 `derive_into` / `aes_kdf_into` 把结果**直接写入** `Zeroizing` 缓冲，
+     不得以 `Option<[u8; 32]>` 返回值形态把派生密钥拷成不可擦栈副本（`derive` / `aes_kdf` 门面仅限测试与非秘密比对）。
    - JNI 定长布局契约：跨 FFI 只传基本类型与数组；口令强度评估返回定长 3 元 `IntArray [score, log10×100, flags]`，`FLAG_*` 位值在 Rust 与 Kotlin 两侧逐位对齐。
 3. **参考项目只读与文档优先铁律（禁止盲目翻看源码）**：
    - 严禁对 `参考项目/` 目录无目标 `grep`/扫源码；5 个参考项目的架构分析集中在 `docs/references/`。

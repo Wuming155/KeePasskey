@@ -22,7 +22,7 @@ use aes::cipher::consts::U16;
 use aes::cipher::{BlockCipherEncrypt, KeyInit};
 use aes::Aes256;
 use sha2::{Digest, Sha256};
-use zeroize::Zeroizing;
+use zeroize::{Zeroize, Zeroizing};
 
 /// 128 位分组类型（与 `cipher::Block<Aes256>` 为同一类型）。
 type Block = Array<u8, U16>;
@@ -57,8 +57,25 @@ pub const MAX_ROUNDS: u64 = 1 << 28;
 /// `composite_key` 与 `seed` 均须为 32 字节；`rounds` 须落在 `[1, MAX_ROUNDS]`。
 /// 任一条件不满足返回 `None`（对应 JNI 层的 `null` → Kotlin `KdfException`）。
 ///
-/// 秘密擦除：`buf` 为 [`Zeroizing<[u8; 32]>`]，任何返回路径（含下方所有 `?`）均确定性归零。
+/// ISSUE-P2-57：本门面保留 `Option<[u8; OUT_LEN]>` 返回形态，**仅供测试与非秘密比对**；
+/// 生产路径须走 [`aes_kdf_into`]（避免返回值拷出为不可擦栈副本）。
 pub fn aes_kdf(composite_key: &[u8], seed: &[u8], rounds: u64) -> Option<[u8; OUT_LEN]> {
+    let mut out = Zeroizing::new([0u8; OUT_LEN]);
+    aes_kdf_into(composite_key, seed, rounds, &mut out)?;
+    Some(*out)
+}
+
+/// 同 [`aes_kdf`]，但把派生结果**直接写入调用方提供的受管缓冲**（ISSUE-P2-57）。
+///
+/// 秘密擦除：`buf` 为 [`Zeroizing<[u8; 32]>`]，任何返回路径（含下方所有 `?`）均确定性归零；
+/// `Sha256` 的内部 state 与 finalize 返回的摘要副本亦在写毕后即时擦除
+/// （前者由 `sha2/zeroize` feature 承担，后者由本函数显式 `zeroize` 兜底）。
+pub fn aes_kdf_into(
+    composite_key: &[u8],
+    seed: &[u8],
+    rounds: u64,
+    out: &mut Zeroizing<[u8; OUT_LEN]>,
+) -> Option<()> {
     // —— 参数闸门 ——
     if composite_key.len() != COMPOSITE_KEY_LEN || seed.len() != COMPOSITE_KEY_LEN {
         return None;
@@ -81,11 +98,12 @@ pub fn aes_kdf(composite_key: &[u8], seed: &[u8], rounds: u64) -> Option<[u8; OU
 
     let mut hasher = Sha256::new();
     hasher.update(&buf[..]);
-    let digest = hasher.finalize();
-
-    let mut out = [0u8; OUT_LEN];
-    out.copy_from_slice(&digest);
-    Some(out)
+    let mut digest = Zeroizing::new(hasher.finalize());
+    out.copy_from_slice(&digest[..]);
+    // 显式擦除摘要副本的原始存储（`Zeroizing` 的 Drop 仅在其作用域结束生效，
+    // 此处提前擦除以压缩明文驻留窗口）
+    digest.as_mut_slice().zeroize();
+    Some(())
 }
 
 #[cfg(test)]

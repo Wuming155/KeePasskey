@@ -62,7 +62,12 @@ pub extern "system" fn Java_com_keepasskey_crypto_kdf_NativeAesKdf_deriveKey<'lo
             return None;
         }
 
-        let out = Zeroizing::new(aes_kdf::aes_kdf(&key, &seed_buf, rounds as u64)?);
+        let out = {
+            // ISSUE-P2-57：直接写入受管缓冲，避免返回值拷出为不可擦栈副本
+            let mut buf = Zeroizing::new([0u8; OUT_LEN]);
+            aes_kdf::aes_kdf_into(&key, &seed_buf, rounds as u64, &mut buf)?;
+            buf
+        };
         let java_out = env.new_byte_array(OUT_LEN as jint).ok()?;
         // SAFETY：out 长度恒为 OUT_LEN 且为有效内存
         env.set_byte_array_region(&java_out, 0, unsafe { as_jbyte(&out[..]) })

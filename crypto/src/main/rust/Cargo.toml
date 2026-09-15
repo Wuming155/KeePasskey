@@ -27,7 +27,10 @@ crate-type = ["cdylib", "rlib"]
 # - alloc：hash_password_into 所需
 # - kdf：argon2 0.6.0 低层 KDF API（hash_password_into 系列）
 # - parallel：启用 rayon 多线程 lanes 计算，保住 p=2/p=4 多核收益（对齐 C 侧 threads=parallelism，缓解 R1）
-# - zeroize：argon2 内部秘密缓冲擦除
+# - zeroize：argon2 内部秘密缓冲擦除——**实证口径（ISSUE-P2-56）**：该 feature 在 argon2 0.6.0
+#   中只覆盖 initial_hash / finalize 的 blockhash（lib.rs:389-390 / 570-573），**不覆盖**
+#   hash_password_into 内部分配的 m_cost 主工作内存（Blocks::drop 仅 dealloc）；
+#   主工作内存的清零由本 crate 自持 `Zeroizing<Vec<Block>>` + hash_password_into_with_memory 实现。
 argon2 = { version = "0.6.0", default-features = false, features = ["alloc", "kdf", "parallel", "zeroize"] }
 zeroize = { version = "1", default-features = false, features = ["alloc"] }
 # JNI 边界（Batch 2）：仅需原生方法实现侧，关闭默认 invocation（不创建 JVM）
@@ -37,8 +40,11 @@ jni = { version = "0.21", default-features = false }
 # 依赖树**无重复密码学实现**（`deny.toml [bans] wildcards = "deny"` 下零新增冲突）。
 # 一律 `default-features = false` 收敛面：sha2 默认 `oid` 会额外拉入 `const-oid`，此处不需要；
 # `zeroize` 开启后分组密码的**密钥调度随对象析构确定性归零**（对齐项目秘密治理纪律）。
+# ISSUE-P2-57（审计 RUST-02）追加：sha2 亦启用 `zeroize`（= `digest/zeroize`）——
+# 该 feature 使 `Sha256` 类型满足 `zeroize::ZeroizeOnDrop`，且 `Sha256VarCore::finalize_*_core`
+# 在收尾时**显式擦除内部 state / block_len**（AES-KDF 的 composite key 即驻留其中）。
 aes = { version = "0.9.3", default-features = false, features = ["zeroize"] }
-sha2 = { version = "0.11.0", default-features = false }
+sha2 = { version = "0.11.0", default-features = false, features = ["zeroize"] }
 twofish = { version = "0.8.0", default-features = false, features = ["zeroize"] }
 
 [dev-dependencies]

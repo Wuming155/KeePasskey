@@ -21,7 +21,7 @@ mod jni_bridge_ext;
 pub mod strength;
 pub mod twofish_cbc;
 
-use argon2::{Algorithm, AssociatedData, Argon2, ParamsBuilder, Version};
+use argon2::{Algorithm, AssociatedData, Argon2, Block, ParamsBuilder, Version};
 use zeroize::Zeroizing;
 
 /// 派生输出长度（对齐 C 桥 `KP_OUT_LEN`）。
@@ -46,6 +46,8 @@ pub const MAX_AD_LEN: usize = 32;
 /// 或 AD 超过 [`MAX_AD_LEN`] 均返回 `None`（对应 JNI 层返回 `null` → Kotlin `KdfException`）。
 ///
 /// 秘密擦除：派生输出经 [`Zeroizing`] 包装，函数返回（含提前 `?`/错误路径）即确定性归零；
+/// **m_cost 工作内存**自持 `Zeroizing<Vec<Block>>` 同样全路径确定性归零（ISSUE-P2-56，
+/// crate 的 `zeroize` feature 不覆盖 `Blocks::drop`——实证记录见 [`derive`] 内注释）；
 /// 入参 `password/salt/secret/ad` 为借用切片，其擦除责任在调用方（JNI 层用 `Zeroizing<Vec<u8>>`）。
 #[allow(clippy::too_many_arguments)]
 pub fn derive(
@@ -59,6 +61,42 @@ pub fn derive(
     version: u32,
     alg_type: u32,
 ) -> Option<[u8; OUT_LEN]> {
+    // ISSUE-P2-57（审计 RUST-02）：本门面保留 `Option<[u8; OUT_LEN]>` 返回形态，**仅供测试与
+    // 非秘密比对**（KAT / BC 冻结向量）——返回值是普通栈副本，调用方无法擦除。
+    // **生产路径（JNI）必须走 [`derive_into`]**，把输出直接写进调用方的 `Zeroizing` 缓冲。
+    let mut out = Zeroizing::new([0u8; OUT_LEN]);
+    derive_into(
+        password,
+        salt,
+        secret,
+        ad,
+        iterations,
+        memory_kib,
+        parallelism,
+        version,
+        alg_type,
+        &mut out,
+    )?;
+    Some(*out)
+}
+
+/// 同 [`derive`]，但把派生结果**直接写入调用方提供的受管缓冲**（ISSUE-P2-57）。
+///
+/// 消除原实现的普通栈副本残留（`Some(*out)` 会把 `Zeroizing` 缓冲整份拷出为不可擦数组）；
+/// 生产调用方（JNI 桥）持 `Zeroizing<[u8; OUT_LEN]>` 直至写入 Java 数组，全程确定性归零。
+#[allow(clippy::too_many_arguments)]
+pub fn derive_into(
+    password: &[u8],
+    salt: &[u8],
+    secret: Option<&[u8]>,
+    ad: Option<&[u8]>,
+    iterations: u32,
+    memory_kib: u32,
+    parallelism: u32,
+    version: u32,
+    alg_type: u32,
+    out: &mut Zeroizing<[u8; OUT_LEN]>,
+) -> Option<()> {
     // —— 参数闸门（逐条对齐 C 桥 keepasskey_argon2_jni.c:55-58）——
     let algorithm = match alg_type {
         TYPE_ARGON2D => Algorithm::Argon2d,
@@ -98,6 +136,8 @@ pub fn derive(
         }
     }
     let params = builder.build().ok()?;
+    // ISSUE-P2-56：工作内存块数须在 `params` 被 move 进 Argon2 上下文**之前**取出
+    let block_count = params.block_count();
 
     // —— secret(K) 经 new_with_secret 注入 H0 的 K 段；空 secret 等价于无 secret（H0 均为 len=0）——
     let ctx = match secret {
@@ -105,11 +145,30 @@ pub fn derive(
         _ => Argon2::new(algorithm, version, params),
     };
 
-    let mut out = Zeroizing::new([0u8; OUT_LEN]);
-    ctx.hash_password_into(password, salt, out.as_mut_slice())
+    // ISSUE-P2-56（审计 RUST-01）整改：m_cost 工作内存**自持确定性清零**。
+    //
+    // 实证（2026-09-15，读 argon2 0.6.0 源码 block.rs:190-200）：crate 的 `zeroize`
+    // feature 只覆盖 `initial_hash`（lib.rs:389-390）与 finalize 的 `blockhash` /
+    // `blockhash_bytes`（lib.rs:570-573）；`hash_password_into` 内部分配的 m_cost 主工作
+    // 内存 `Blocks` 其 `Drop` **仅 dealloc、不清零**（`Zeroize for Block` 实现存在但
+    // 从未被 `Blocks::drop` 调用）——派生中间态滞留已释放堆内存。
+    //
+    // 故改为 `hash_password_into_with_memory` + 自持 `Zeroizing<Vec<Block>>`：析构
+    // （含提前错误路径）时经 `Zeroize for Vec<Block>` → `Block::zeroize` 全量归零。
+    // 分配失败走 `try_reserve_exact` → `None`（对齐原 `Blocks::new → Error::OutOfMemory`
+    // 的优雅失败，绝不 panic/abort——超大 m_cost 下 abort 比现状更坏）。
+    let mut blocks = Vec::new();
+    blocks.try_reserve_exact(block_count).ok()?;
+    blocks.resize(block_count, Block::default());
+    let mut blocks = Zeroizing::new(blocks);
+    ctx.hash_password_into_with_memory(password, salt, out.as_mut_slice(), blocks.as_mut_slice())
         .ok()?;
-    Some(*out)
+    Some(())
 }
+
+#[cfg(test)]
+#[path = "tests/argon2_memory_tests.rs"]
+mod memory_tests;
 
 #[cfg(test)]
 mod tests {

@@ -109,3 +109,58 @@ fn gate_rejects_invalid_params() {
     // 合法下界
     assert!(aes_kdf(&key, &seed, 1).is_some());
 }
+
+// ===== ISSUE-P2-57（审计 RUST-02）：受管缓冲输出 + sha2 状态擦除 =====
+
+/// `aes_kdf_into` 与 `aes_kdf` 输出**逐字节一致**：证明「改走受管缓冲」是纯内存管理替换，
+/// 零算法漂移（AC③「无算法变更」的可执行证据）。
+#[test]
+fn into_variant_matches_wrapper_byte_for_byte() {
+    let mut seed = [0u8; 32];
+    let mut key = [0u8; 32];
+    for i in 0..32 {
+        seed[i] = i as u8;
+        key[i] = (i + 32) as u8;
+    }
+
+    let via_wrapper = aes_kdf(&key, &seed, 4).expect("合法参数应派生成功");
+    let mut buf = Zeroizing::new([0u8; OUT_LEN]);
+    aes_kdf_into(&key, &seed, 4, &mut buf).expect("合法参数应派生成功");
+
+    assert_eq!(
+        &buf[..],
+        &via_wrapper[..],
+        "受管缓冲路径输出必须与门面路径逐字节一致"
+    );
+    // 与独立第三方 KAT 同步锚定（防两路径同时偏移而互证通过）
+    assert_eq!(
+        hex(&buf[..]),
+        "f836155ae7cb1d120da836de66f478ec1dbf042d041d9ca50b49f400d398eff5"
+    );
+}
+
+/// `aes_kdf_into` 的闸门语义与门面完全一致：非法参数返回 None 且**不写坏**调用方缓冲。
+#[test]
+fn into_variant_keeps_gates_and_leaves_buffer_untouched_on_failure() {
+    let seed = [0u8; 32];
+    let key = [0u8; 32];
+    let mut buf = Zeroizing::new([0xAAu8; OUT_LEN]);
+
+    assert!(aes_kdf_into(&key[..31], &seed, 1, &mut buf).is_none());
+    assert!(aes_kdf_into(&key, &seed, 0, &mut buf).is_none());
+    assert!(aes_kdf_into(&key, &seed, u64::MAX, &mut buf).is_none());
+    assert_eq!(
+        &buf[..],
+        &[0xAAu8; OUT_LEN][..],
+        "闸门拒绝路径不得写入任何派生结果"
+    );
+}
+
+/// ISSUE-P2-57 AC①：`sha2/zeroize` feature 已启用（**编译期锁定**）——
+/// `Sha256` 满足 `zeroize::ZeroizeOnDrop`，且 sha2 在 finalize 收尾显式擦除内部 state。
+/// 若有人回退该 feature，本用例立即编译失败（比运行时断言更早暴露）。
+#[test]
+fn sha256_satisfies_zeroize_on_drop() {
+    fn assert_zeroize_on_drop<T: zeroize::ZeroizeOnDrop>() {}
+    assert_zeroize_on_drop::<Sha256>();
+}

@@ -49,27 +49,51 @@ class Argon2KdfEngine(
         // AD>32 时强制走 BC 兜底（真实 KeePass/KeePassXC 生成库不设 KDF 的 A 字段，此路径极罕见）。
         val adExceedsNativeLimit = argonParams.associatedData?.let { it.size > NATIVE_MAX_AD_LEN } == true
 
-        if (NativeArgon2.available && versionSupported && !adExceedsNativeLimit) {
+        // ISSUE-P2-59（审计 RUST-05）AC②：可表达性预检**先于**一切派生 / 兜底判定——
+        // 原实现 `(memoryInBytes / 1024).toInt()` / `iterations.toInt()` 在超 Int 范围时**静默窄化**
+        // （如回绕为负数），随后或被 JNI 有符号闸门当作非法参数、或在 BC 侧拼出错误参数。
+        // 现改为显式越界抛异常（fail-closed），杜绝「参数被静默改写」这一类不可观测失效。
+        val memoryKib = requireExpressibleAsInt(argonParams.memoryInBytes, "内存", 1024L)
+        val nativeIterations = requireExpressibleAsInt(argonParams.iterations, "迭代")
+
+        // ISSUE-P2-59 AC①：原生路径参数上界镜像（与 `KdbxKdfParameterCodec` 同值）。
+        // 越界即**不**进入原生路径（回落到既有 BC 兜底，其自带 `isMemoryParamFeasible` 堆预检），
+        // 语义与原「原生 derive 返回 null → KdfException」一致，且不放松任何既有拒绝。
+        val withinKdfBounds = isWithinKdfBounds(
+            argonParams.memoryInBytes,
+            argonParams.iterations,
+            argonParams.parallelism
+        )
+
+        if (NativeArgon2.available && versionSupported && !adExceedsNativeLimit && withinKdfBounds) {
             return NativeArgon2.derive(
                 password = compositeKey,
                 salt = argonParams.salt,
                 secret = argonParams.secretKey,
                 associatedData = argonParams.associatedData,
-                iterations = argonParams.iterations.toInt(),
-                memoryKib = (argonParams.memoryInBytes / 1024L).toInt(),
+                iterations = nativeIterations,
+                memoryKib = memoryKib,
                 parallelism = argonParams.parallelism,
                 version = argonParams.version,
                 type = nativeType
             )
         }
 
-        return transformJvm(compositeKey, argonParams)
+        return transformJvm(compositeKey, argonParams, memoryKib, nativeIterations)
     }
 
     /**
-     * BouncyCastle 纯 JVM 兜底实现（桌面单测 / 原生不可用场景）
+     * BouncyCastle 纯 JVM 兜底实现（桌面单测 / 原生不可用场景）。
+     *
+     * [memoryKib] / [iterations] 为 [transform] 已完成可表达性预检的窄化结果
+     * （ISSUE-P2-59 AC②：不再在本方法内以 `toInt()` 静默截断）。
      */
-    private fun transformJvm(compositeKey: ByteArray, argonParams: KdfParameters.Argon2): ByteArray {
+    private fun transformJvm(
+        compositeKey: ByteArray,
+        argonParams: KdfParameters.Argon2,
+        memoryKib: Int,
+        iterations: Int
+    ): ByteArray {
         if (!isMemoryParamFeasible(argonParams.memoryInBytes)) {
             // P0 防闪退预检：JVM 实现内存块为整段 long[]，堆上限不足时直接失败而非 OOM
             throw CryptoException.KdfException(
@@ -83,12 +107,11 @@ class Argon2KdfEngine(
         }
 
         return try {
-            val memoryKb = (argonParams.memoryInBytes / 1024L).toInt()
             val builder = Argon2Parameters.Builder(bcType)
                 .withSalt(argonParams.salt)
                 .withParallelism(argonParams.parallelism)
-                .withMemoryAsKB(memoryKb)
-                .withIterations(argonParams.iterations.toInt())
+                .withMemoryAsKB(memoryKib)
+                .withIterations(iterations)
                 .withVersion(argonParams.version)
 
             // ISSUE-P2-60：secretKey 为 var（clearSensitive 可置 null）——取局部快照避免并发清零
@@ -134,5 +157,51 @@ class Argon2KdfEngine(
             val maxHeap = Runtime.getRuntime().maxMemory()
             return memoryInBytes > 0 && memoryInBytes <= maxHeap * 0.6
         }
+
+        /**
+         * ISSUE-P2-59（审计 RUST-05）AC①：原生路径参数上界**镜像**。
+         *
+         * 与 `KdbxKdfParameterCodec.validateArgon2Bounds` **同值**——模块依赖单向
+         * （`database → crypto`），crypto 侧不可反向引用 database 常量，故此处同值声明并
+         * 以本 KDoc 与本仓单测双向锁定（值漂移即用例失败）。
+         *
+         * 语义：原生内核自身只做下界闸门（`memoryKib ≥ 8 × parallelism`），无逐项上界，
+         * 故上界裁决须在引擎侧补齐；越界时**不进入**原生路径，回落 BC 兜底（其自带堆预检）。
+         * 取值宽于一切合法用户配置（本仓 `KdfBenchmark` 自荐上限 ≤512 MiB × 20，远小于 4 GiB / 2²⁴）。
+         */
+        fun isWithinKdfBounds(memoryInBytes: Long, iterations: Long, parallelism: Int): Boolean =
+            memoryInBytes >= ARGON2_MIN_MEMORY_BYTES &&
+                memoryInBytes <= ARGON2_MAX_MEMORY_BYTES &&
+                iterations in 1..ARGON2_MAX_ITERATIONS &&
+                parallelism in 1..ARGON2_MAX_PARALLELISM
+
+        /**
+         * ISSUE-P2-59 AC②：受检窄化——超 [Int] 可表达范围时**抛异常**，绝不静默截断。
+         *
+         * 原实现 `(memoryInBytes / 1024).toInt()` 与 `iterations.toInt()` 在越界时回绕为
+         * 任意值（含负数），使「被静默改写的参数」参与派生 / 被 JNI 有符号闸门拒绝——
+         * 两类结果都不可从异常信息中辨识根因。本函数把该失效面收敛为可读的 fail-closed 异常。
+         */
+        internal fun requireExpressibleAsInt(value: Long, field: String, scale: Long = 1L): Int {
+            val scaled = value / scale
+            if (scaled > Int.MAX_VALUE) {
+                throw CryptoException.KdfException(
+                    "KDF $field 参数超出可表达范围: $value（上限 ${Int.MAX_VALUE.toLong() * scale}），拒绝静默截断"
+                )
+            }
+            return scaled.toInt()
+        }
+
+        /** 镜像 `KdbxKdfParameterCodec.ARGON2_MIN_MEMORY_BYTES`（官方语义下界 8192 字节）。 */
+        private const val ARGON2_MIN_MEMORY_BYTES = 8192L
+
+        /** 镜像 `KdbxKdfParameterCodec.ARGON2_MAX_MEMORY_BYTES`（4 GiB 防 DoS 封顶）。 */
+        private const val ARGON2_MAX_MEMORY_BYTES = 4L * 1024 * 1024 * 1024
+
+        /** 镜像 `KdbxKdfParameterCodec.ARGON2_MAX_ITERATIONS`（2²⁴ 防 DoS 封顶）。 */
+        private const val ARGON2_MAX_ITERATIONS = 1L shl 24
+
+        /** 镜像 `KdbxKdfParameterCodec.ARGON2_MAX_PARALLELISM`。 */
+        private const val ARGON2_MAX_PARALLELISM = 64
     }
 }

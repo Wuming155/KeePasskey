@@ -2993,13 +2993,14 @@ $ adb shell am instrument -w -e class com.keepasskey.app.security.QuickUnlockSea
 
 ---
 
-## §49 存量安全整改批次（续）：密钥文件纯字节解析 + DAL 有界流式读取 + 选择器会话锁定对齐 + CM 保存 URL 分流 + KDF secret 生命周期契约 + 依赖扫描触发面（2026-09-15）
+## §49 存量安全整改批次（续）：密钥文件纯字节解析 + DAL 有界流式读取 + 选择器会话锁定对齐 + CM 保存 URL 分流 + KDF 参数与秘密治理 + 依赖扫描触发面（2026-09-15）
 
 > **本批次缘起**：认领外部审计转登项 `ISSUE-P2-62`（审计 H2，敏感数据流批次）、
 > `ISSUE-P2-50`（审计 F-14）、`ISSUE-P2-52`（审计 F-22）、`ISSUE-P2-60`（审计 RUST-06）、
+> `ISSUE-P2-56`（审计 RUST-01）、`ISSUE-P2-57`（审计 RUST-02）、`ISSUE-P2-59`（审计 RUST-05）、
 > 威胁建模项 `ISSUE-P2-78`（T-10）与审计项 `ISSUE-P2-54`（F-05，CI 变更）。
-> 前五项为「敏感数据 / 恶意输入面 / 完整性」的确定性缺口，JVM 侧即可闭环
-> （不涉 Android 运行时差异），无需设备；`P2-54` 为工作流触发面整改。
+> 除 `P2-56` / `P2-57`（原生 Rust 内核，`cargo test` 验证）、`P2-59`（派生入口 Kotlin 侧）与
+> `P2-54`（工作流触发面）外，其余五项的整改落在 Kotlin/JVM 侧，无需设备。
 
 ### 49.1 交付清单
 
@@ -3011,17 +3012,25 @@ $ adb shell am instrument -w -e class com.keepasskey.app.security.QuickUnlockSea
 | **ISSUE-P2-78** | P2 | **CM 保存路径写入畸形 URL**：`KeePasskeyCredentialProviderService` 把调用方 **origin**（浏览器委派 `https://…` / 普通应用 `android:apk-key-hash:…`）作为 `EXTRA_WEB_DOMAIN` 下传，`PasswordSaveActivity` 原样透传，`VaultEntryWriteCoordinator.saveAutofillCredential` **无条件**拼 `"https://$domain"` → 落库 `https://https://host` / `https://android:apk-key-hash:…`，条目此后既不匹配 web 域也不匹配 `android://` 包名 | 新增纯函数收口 `VaultEntryWriteCoordinator.resolveCredentialUrlBinding`（自动填充与 CM 双保存通道共用）：空白 / apk-key-hash origin → `android://<调用包名>`；`https://`（含 `http://`）origin → **原样入库**不二次拼前缀；裸域名（自动填充既有形态）→ `https://<裸域名>`；`displayDomain` 归一为裸域名供标题与域匹配；负例断言任何形态不得产生 `https://` 二次叠加或 apk-key-hash 尾巴混入 | 威胁建模 T-10；与自动填充保存路径语义对齐（AC①） |
 | **ISSUE-P2-54** | P2 | 依赖 CVSS 闸门仅 `workflow_dispatch` 触发，PR / push 路径不含依赖扫描 | `dependency-scan.yml` 的 `on:` 补 `pull_request` 与 `push{branches:[main]}`（AC①，采纳「直接补触发」路线，扫描完整性优先于耗时）；CVSS 缺失报告 fail-closed 经本地实测复核：对不存在路径执行 `check_dependency_cvss.py` → `[FATAL] 报告不存在…fail-closed` 退出码 1（AC③，`if: always()` + `if-no-files-found: error` 既有机制不变） | 审计 F-05；AC② 留痕见 49.3.6 |
 | **ISSUE-P2-60** | P2 | KDF secret `K` 以普通 `ByteArray` 常驻头部且全仓无清零点，会话锁定 / 关闭后仍滞留至 GC | ① `KdfParameters` 新增 `clearSensitive()`（基类 no-op；Argon2 覆写为「就地 fill(0) + 置 null」——只 fill 不置 null 会让引擎把全零数组当合法 secret 参与派生，故 `secretKey` 改 `var`）；② 统一收口 `KdbxDatabase.clearSensitiveData()`：`lock()` / `close()` / 换库前置释放 / 子库只读投影全部既有调用点自动覆盖；③ **显式生命周期契约**（类 KDoc）：仅限会话终止路径调用（互斥锁内、随后 `database = null`，不可能再发起保存派生），`KdbxHeader.copy()` 浅拷贝共享引用的**就地清零**语义与所有权约定成文；④ `Argon2KdfEngine` 对 `var secretKey` 取局部快照消除 smart-cast 编译错误与并发中间态。清零后引擎按「无 secret」跳过、序列化按「缺 K」不写出——可观测失效而非静默错密钥 | 审计 RUST-06；敏感数据铁律（`AGENTS.md` §3.2） |
+| **ISSUE-P2-56** | P2 | Argon2 `m_cost` 工作内存（派生中间态）释放前不擦除：`lib.rs` 用 `hash_password_into`，而 `Cargo.toml:30` 宣称 `zeroize` feature 已擦除 | ① **实证**（2026-09-15 读 argon2 0.6.0 源码）：`zeroize` feature 只覆盖 `initial_hash`（`lib.rs:389-390`）与 finalize 的 `blockhash` / `blockhash_bytes`（`lib.rs:570-573`）；`hash_password_into` 内部分配的 `Blocks` 其 `Drop` **仅 dealloc、不清零**（`block.rs:190-200`，`Zeroize for Block` 存在但从未被调用）→ 原宣称不成立；② 改 `hash_password_into_with_memory` + 自持 `Zeroizing<Vec<Block>>`（析构含提前错误路径经 `Vec<Block>: Zeroize` → `Block::zeroize` 全量归零）；③ 分配失败走 `try_reserve_exact` → `None`，**保留** `Error::OutOfMemory` 的优雅失败语义（严禁 `resize` panic / abort——超大 m_cost 下 abort 比现状更坏）；④ `Cargo.toml` 注释更正宣称口径 | 审计 RUST-01；`AGENTS.md` §3.2 原生内核擦除纪律 |
+| **ISSUE-P2-57** | P2 | 派生密钥**栈副本**残留：① `sha2` 未启用 `zeroize`（`Cargo.toml`）→ `Sha256` 内部 state（AES-KDF 的 composite key 即驻留其中）析构不清零；② `Some(*out)`（`lib.rs`）把 `Zeroizing` 缓冲整份拷出为**不可擦栈副本** | ① `sha2` 启用 `zeroize`（= `digest/zeroize`）：`Sha256` 满足 `zeroize::ZeroizeOnDrop`，且 `Sha256VarCore::finalize_*_core` 收尾显式擦除 `state` / `block_len`；② 新增 `derive_into(..., out: &mut Zeroizing<[u8; OUT_LEN]>)`（Argon2）与 `aes_kdf_into(...)`（AES-KDF），**输出直接写入调用方受管缓冲**；JNI 两桥（`jni_bridge` / `jni_bridge_ext`）改走 `_into` 变体；`derive` / `aes_kdf` 门面**保留**供 KAT / BC 向量比对（KDoc 明示「仅测试与非秘密比对，生产必须走 `_into`」）；③ AES-KDF 额外显式 `zeroize` finalize 返回的摘要副本（`Zeroizing` 包裹 + 提前擦除）；④ **无算法变更**——三条独立证据锁定：IETF KAT 4 例 + BC 冻结向量 12 例 + 新增「`_into` 与门面逐字节一致」2 例 | 审计 RUST-02；`AGENTS.md` §3.2 |
+| **ISSUE-P2-59** | P2 | 原生 Argon2 路径**缺内存上界预检**（`Argon2KdfEngine.transform` 直调 JNI，`isMemoryParamFeasible` 仅覆盖 BC 分支），且 `(memoryInBytes / 1024).toInt()` / `iterations.toInt()` 存在**静默窄化** | ① 新增 `Argon2KdfEngine.isWithinKdfBounds(memoryInBytes, iterations, parallelism)`：镜像 `KdbxKdfParameterCodec.validateArgon2Bounds` 的**逐项上界**（8 KiB ~ 4 GiB / 2²⁴ 迭代 / 64 并行度；crypto 不可反向依赖 database，故同值声明 + 跨模块用例锁）；原生入口前置该裁决，越界即不进原生路径（回落既有 BC 兜底，其自带堆预检）；② 新增受检窄化 `requireExpressibleAsInt(value, field, scale)`：超 `Int` 范围**抛 `KdfException`** 并指明字段与上限，**取代**两处 `.toInt()`（BC 分支同步改用已预检的窄化值）；③ 边界值宽于一切合法用户配置（官方默认 64 MiB / 本仓自荐 ≤512 MiB × 20 均远小于封顶），并附跨模块「越界值双侧一致拒绝」用例防两侧漂移 | 审计 RUST-05；`AGENTS.md` §3.2 |
 
 ### 49.2 验收证据
 
 ```powershell
 .\gradlew.bat test --rerun-tasks --max-workers=1
-# → BUILD SUCCESSFUL in 4m 52s；114 actionable tasks: 114 executed（全部真实执行）
-#   结果汇总（build/test-results/**/TEST-*.xml）：tests=1646 failures=0 errors=0 skipped=13
-#   （app 887 / core 65 / crypto 121 / database 370 / sync 203）
+# → BUILD SUCCESSFUL in 4m 46s；114 actionable tasks: 114 executed（全部真实执行）
+#   结果汇总（build/test-results/**/TEST-*.xml）：tests=1659 failures=0 errors=0 skipped=13
+#   （app 887 / core 65 / crypto 127 / database 377 / sync 203）
+
+cd crypto/src/main/rust; cargo test
+# → test result: ok. 50 passed; 0 failed; 0 ignored（原生内核，含本批新增 7 例）
+.\gradlew.bat assembleRelease
+# → BUILD SUCCESSFUL；产物 D:\GithubWorkplace\KeePasskey\app\build\outputs\apk\release\app-release.apk
 ```
 
-**新增用例（共 +20 例）**：
+**新增用例（共 +40 例：JVM +33 / 原生 +7）**：
 
 | 模块 | 用例 | 覆盖 |
 |---|---|---|
@@ -3031,6 +3040,10 @@ $ adb shell am instrument -w -e class com.keepasskey.app.security.QuickUnlockSea
 | `app` | `VaultEntryWriteCoordinatorUrlBindingTest`（+6，新文件） | ① web origin 原样入库且 `DomainMatcher` 可命中（含子域正例 / 仿冒域负例）；② apk-key-hash origin 落 `android://<包名>` 且 `isPackageMatch` / `isAndroidPackageMatch` 均命中；③ 空白域回落包名绑定；④ 裸域名保持既有 `https://` 拼接；⑤ 负例：任何形态不得 `https://` 二次叠加或混入 apk-key-hash 尾巴；⑥ 带路径 / 端口 origin 的归一（AC②③） |
 | `crypto` | `KdfParametersSensitiveClearingTest`（+5，新文件） | ① `clearSensitive` 清零原数组并置 null（浅拷贝共享者同步失效）；② 不触碰 `associatedData` / `salt`（非秘密）；③ 重复调用幂等；④ AES no-op；⑤ `equals`/`hashCode` 忽略 K（既有语义防回归） |
 | `database` | `KdbxDatabaseSensitiveWipeTest`（+2，新文件） | ① `clearSensitiveData()` 擦除头部 KDF secret（收口回归锁：退化为只清条目树即失败）；② AES-KDF 头部安全 no-op |
+| `crypto`(原生) | `argon2_memory_tests`（+4，新文件，按 ISSUE-P3-57 落在 `rust/src/tests/`） | ① 自持 `Zeroizing<Vec<Block>>` 路径与 crate 内部分配路径输出**逐字节一致**（纯内存管理替换、零算法漂移）；② `Zeroizing<Vec<Block>>` 全量归零链路（8 块 × 1024B 填 0xAA 后清零，逐字断言无残留）；③ 超大 m_cost（2^31 KiB）分配失败**优雅返回 None**（不得 panic/abort）；④ **`derive_into` 与 `derive` 逐字节一致**（P2-57 AC②，含 secret + AD 路径） |
+| `crypto`(原生) | `aes_kdf_tests`（+3，追加至既有文件） | ① `aes_kdf_into` 与 `aes_kdf` **逐字节一致** + 同步锚定独立第三方 KAT（防两路径同时偏移而互证通过）；② `_into` 闸门语义与门面一致且拒绝路径**不写坏**调用方缓冲；③ **编译期锁定** `sha2/zeroize` 已启用（`assert_zeroize_on_drop::<sha2::Sha256>()`，回退该 feature 即编译失败） |
+| `crypto` | `Argon2KdfEngineBoundsTest`（+6，新文件） | ① 上界镜像内存边界（8192B / 8191B / 4 GiB / 4 GiB+1）；② 迭代与并行度边界（2²⁴、0、64、65）；③ 不误拒合法配置（官方默认 / 本仓自荐上限 512 MiB×20 / 界内大内存）；④ 超 `Int` 可表达范围的内存参数**抛异常而非静默截断**（断言异常信息指明字段与「超出可表达范围」）；⑤ 同型迭代越界；⑥ 受检窄化边界值（`Int.MAX_VALUE` 恰好放行、+1 抛异常） |
+| `database` | `Argon2KdfBoundsMirrorTest`（+7，新文件） | **跨模块上界锁**：内存 / 迭代 / 并行度三类**越界值双侧一致拒绝**（解码侧 `KdbxKdfParameterCodec` ⇔ 派生入口 `isWithinKdfBounds`，不依赖堆环境）；界内且堆可容纳时两侧一致放行；**显式区分口径**——4 GiB 逐项界内但解码侧受动态堆门槛裁决（按实际 `maxMemory()/2` 分支断言，不做环境依赖的硬编码预期）；合法用户配置不得被派生入口误拒 |
 
 ### 49.3 已知边界与口径（如实声明）
 
@@ -3072,4 +3085,46 @@ $ adb shell am instrument -w -e class com.keepasskey.app.security.QuickUnlockSea
    时机约束）——与 `ProtectedString` 驻留加密同族的既定边界；③ 带真实 `K` 的库
    （`K` ≠ null）在真实语料中为零（`RealKdbxCorpusUnlockTest` 断言语料不带 K），
    故本整改对既有解锁 / 互操作路径零行为变化。
+10. **`P2-56` 的口径与代价**：① 原 `Cargo.toml` 关于 `zeroize` 的宣称**经源码实证不成立**
+    （详见交付清单），本批以「自持 `Zeroizing<Vec<Block>>` + `hash_password_into_with_memory`」
+   **择一实施整改**，并同步更正该注释；② 该改动**只替换工作内存的分配与释放方式**，
+   算法、参数与输出**逐字节不变**（已由 `bc_frozen_vectors_equivalence` 12 条 BC 冻结向量
+   + 4 条 IETF KAT + 新增「自持路径 vs crate 路径逐字节一致」用例三重锁定）；③ 代价是多一次
+   `Zeroizing` 包装（无额外拷贝，`Vec` 直接 move 入守卫），**R1 性能面不受影响**；④ 分配路径
+   由 crate 的 `alloc_zeroed + Drop(dealloc)` 改为 `try_reserve_exact + resize + zeroize Drop`，
+   失败语义保持 `None`（JNI → Kotlin `KdfException`），与 C 桥「非法参数返回 NULL」契约一致；
+   ⑤ 本机未安装 `clippy` 组件（`cargo-clippy.exe` 缺失），静态检查由 CI 承担，本地以
+   `cargo test`（50/50）与 `assembleRelease` 双通过为验收。
+11. **`P2-57` 的改动范围与口径**：① `${...}` 门面（`derive` / `aes_kdf`）**保留**是**有意的**——
+   IETF KAT 与 BC 冻结向量用例以「返回值」形态断言，且 JNI 之外无生产消费方；
+   KDoc 已明示其「仅测试与非秘密比对」定位，生产路径（JNI 两桥）一律走 `_into` 变体；
+   ② 除 AC 点名的 Argon2 `derive` 外，**同型缺陷一并整改** AES-KDF（`aes_kdf` 同样以
+   `Option<[u8; 32]>` 返回普通栈副本，属同一条目「派生密钥栈副本残留」的同一缺陷类），
+   并在 `jni_bridge_ext` 同步改走受管缓冲；③ `sha2` 0.11.0 的 `zeroize` feature 定义在
+   `Cargo.toml:52`（`zeroize = ["digest/zeroize"]`），启用后 `digest/zeroize` → `block-buffer/zeroize`
+   使 `Sha256`（`CtOutWrapper<Sha256VarCore, U32>`）满足 `zeroize::ZeroizeOnDrop`，
+   且 sha2 在 `finalize_variable_core` 中显式 `state.zeroize()`（`block_api.rs:91-95`）；
+   ④ 残余面：JNI 边界把 32 字节派生密钥写入 Java 数组后，Kotlin 侧由 `NativeArgon2` /
+   `NativeAesKdf` 既有 `CharArray`/`ByteArray` 契约负责擦除（本批未改变该契约）；
+   ⑤ 本批原生侧改动只影响分配 / 擦除路径，Kotlin 侧 JNI 签名与语义**零改动**
+   （JVM 基线 1659 例在全量重跑后保持全绿即为证据）。
+12. **`P2-59` 的口径与边界**：① **镜像范围 = 逐项上界**（AC① 枚举的内存 / 迭代 / 并行度），
+   **不含**解码侧的 `I×M` 联合预算与动态堆门槛——后者分别由 `KdbxKdfParameterCodec`（deserialize 阶段）
+   与 BC 分支的 `isMemoryParamFeasible` 承担；跨模块用例**显式区分**该口径（越界值严格同界断言，
+   界内值按实际堆容量分支断言），不制造「两侧完全等价」的假承诺；
+   ② **行为变更（fail-closed 方向）**：逐项越界的参数此前会直送原生内核（其无上界，仅靠 JNI 有符号闸门
+   与派生失败兜底），现改为**不进入原生路径**并回落 BC 兜底（BC 自带堆预检，越界即异常）。
+   合法库不受影响——`validateArgon2Bounds` 已在反序列化阶段拒绝同一批参数，
+   故两侧同时越界仅可能出现在「绕过 codec 的内部构造」场景，此时前置拒绝正是期望语义；
+   ③ **`P2-56`/`P2-57`/`P2-59` 三条同属原生 KDF 治理链**，本批一并闭环：工作内存擦除（`P2-56`）→
+   输出与摘要状态的受管缓冲（`P2-57`）→ 参数上界与受检窄化（`P2-59`），
+   三者的失败语义均保持 `KdfException` / `null`（不向 Kotlin 抛出裸 `Error`）；
+   ④ 本批**未触及** `ISSUE-P2-49` AC②（KDF 墙钟超时，须 `ISSUE-P2-80` 真机实测）与
+   `ISSUE-P2-58`（口令强度平方级路径，属独立条目）。
+13. **`ACTIVE_ISSUES.md` 的 P2 计数校正（本批顺带发现并修正）**：该节开放条目存在两种承载形式——
+   表格行（`| ISSUE-P2-xx |`）与标题条目（`### ISSUE-P2-xx（新登记）`，即 P2-42 ~ P2-47 六项）。
+   核对现状（2026-09-15）：表行 **15** + 标题条目 **6** = **21**，而前序批次递减时**只按表行**计算
+   （HEAD 处 18 行 + 6 标题 = 24，却记 23），故存在**继承性 off-by-one**。本批按
+   「表行 + 标题条目」统一口径校正为 **21**；同法核对 P3 节为 **39 + 7 = 46**，与声明一致（无需修正）。
+   **纪律补充**：后续任何增删条目，均须按此双形式口径复算节标题计数。
 

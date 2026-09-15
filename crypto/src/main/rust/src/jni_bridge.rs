@@ -5,16 +5,19 @@
 //! （库名 `keepasskey_argon2`、`external fun deriveKey(...)`、null 语义）**零改动** drop-in。
 //!
 //! 相对 C 桥的安全增益：
-//! 1. **秘密确定性擦除**：password/salt/secret/AD 拷入 `Zeroizing<Vec<u8>>`，派生输出拷入
-//!    `Zeroizing<[u8;32]>`——无论正常返回还是任一 `?` 提前返回/错误路径，RAII 保证归零，
-//!    消除 C 侧「忘记 kp_wipe / 错误路径漏擦」隐患。
+//! 1. **秘密确定性擦除**：password/salt/secret/AD 拷入 `Zeroizing<Vec<u8>>`，派生输出由调用方
+//!    提供 `Zeroizing<[u8;32]>` 缓冲**直接写入**（ISSUE-P2-57：改走 [`crate::derive_into`]，
+//!    不再经 `Option<[u8;32]>` 返回普通栈副本）——无论正常返回还是任一 `?` 提前返回/错误路径，
+//!    RAII 保证归零，消除 C 侧「忘记 kp_wipe / 错误路径漏擦」隐患。
 //! 2. **panic 不跨 FFI**：整个函数体裹 `catch_unwind`，任何 Rust panic 归一为返回 `null`
 //!    （对齐 C 的失败返回 NULL），绝不 unwind 过 JNI 边界（那会直接 abort App 进程）。
 //! 3. **有符号闸门先行**：C 桥在 `(uint32_t)` 转换**之前**以 `jint` 判负；此处同样先以有符号
-//!    `jint` 复刻闸门（`params_valid`），再转 `u32` 调 [`crate::derive`]，杜绝负值经 `as u32`
+//!    `jint` 复刻闸门（`params_valid`），再转 `u32` 调 [`crate::derive_into`]，杜绝负值经 `as u32`
 //!    变巨值绕过下界检查。
 
-use crate::{derive, ARGON2_VERSION_10, ARGON2_VERSION_13, OUT_LEN, TYPE_ARGON2D, TYPE_ARGON2ID};
+use crate::{
+    derive_into, ARGON2_VERSION_10, ARGON2_VERSION_13, OUT_LEN, TYPE_ARGON2D, TYPE_ARGON2ID,
+};
 use jni::objects::{JByteArray, JObject};
 use jni::sys::{jbyteArray, jint};
 use jni::JNIEnv;
@@ -92,8 +95,10 @@ pub extern "system" fn Java_com_keepasskey_crypto_kdf_NativeArgon2_deriveKey<'lo
             Some(Zeroizing::new(env.convert_byte_array(&associated_data).ok()?))
         };
 
-        // 闸门已在上面以有符号 jint 通过，此处 as u32 安全；derive 内部另有冗余闸门。
-        let out_bytes = derive(
+        // 闸门已在上面以有符号 jint 通过，此处 as u32 安全；derive_into 内部另有冗余闸门。
+        // ISSUE-P2-57：输出直接写入受管缓冲，消除「返回值拷出为普通栈副本」的残留面。
+        let mut out = Zeroizing::new([0u8; OUT_LEN]);
+        derive_into(
             &pwd,
             &salt_buf,
             secret_buf.as_deref().map(Vec::as_slice),
@@ -103,10 +108,10 @@ pub extern "system" fn Java_com_keepasskey_crypto_kdf_NativeArgon2_deriveKey<'lo
             parallelism as u32,
             version as u32,
             alg_type as u32,
+            &mut out,
         )?;
 
-        // 输出缓冲同样受管：写入 Java 数组后，Zeroizing 在闭包返回时归零本地副本。
-        let out = Zeroizing::new(out_bytes);
+        // 输出缓冲受管：写入 Java 数组后，Zeroizing 在闭包返回时归零本地副本。
         let java_out = env.new_byte_array(OUT_LEN as jint).ok()?;
         // u8 → jbyte(i8)：同宽同对齐的位重解释（SetByteArrayRegion 需要 &[i8]）。
         // SAFETY: out 为 [u8; 32] 有效内存，i8 与 u8 布局一致，长度取自 out.len()。

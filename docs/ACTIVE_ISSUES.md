@@ -51,7 +51,7 @@
 
 ---
 
-## P2 中危缺陷与协议/测试缺口（23 项）
+## P2 中危缺陷与协议/测试缺口（21 项）
 
 > **历史**：**ISSUE-P2-28 ~ P2-41**（往返丢字段与布尔/数值语义、MemoryProtection 读写语义、
 > KDF 缺参 fail-closed、isPackageMatch 的 android:// 硬约束、requireRiskNotice 接线、
@@ -69,7 +69,10 @@
 >
 > **2026-09-15 闭环**：**ISSUE-P2-62**（密钥文件纯字节解析）、**ISSUE-P2-50**（DAL 响应有界流式读取 +
 > 字节数裁决）、**ISSUE-P2-52**（选择器会话锁定对齐 + 空读 fail-safe）、**ISSUE-P2-78**
-> （CM 保存 URL 形态分流）、**ISSUE-P2-60**（KDF secret 清零生命周期契约）与 **ISSUE-P2-54**
+> （CM 保存 URL 形态分流）、**ISSUE-P2-60**（KDF secret 清零生命周期契约）、**ISSUE-P2-56**
+> （Argon2 `m_cost` 工作内存自持清零，附 crate 宣称不成立的源码实证）、**ISSUE-P2-57**
+> （派生密钥栈副本消除 + `sha2/zeroize` 启用）、**ISSUE-P2-59**（派生入口逐项上界镜像 +
+> 受检窄化，附跨模块上界锁）与 **ISSUE-P2-54**
 > （依赖扫描补 PR / push 触发；AC② 分支保护留痕待仓库所有者配置）随存量安全整改批次（续）
 > 归档，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §49。
 >
@@ -212,10 +215,7 @@
 |---|---|---|---|
 | ISSUE-P2-49 | 审计 F-12 | **（升格 MEDIUM·P1，第四轮定版）** KDF 逐项封顶为：内存 ≤4 GiB **且 ≤50% 动态堆**（`KdbxKdfParameterCodec.kt:171-174`；无 `largeHeap`，真机实际 M 上界 ≈128–256 MiB）、迭代 ≤2²⁴（**仅静态上界**）、并行度 ≤64、AES-KDF 轮数 ≤2²⁸；**无 `I×M` 联合预算**；派生（`KdbxFile.kt:135`）先于 Header HMAC（`:147`）⇒ **无需口令可达**（同步路径 `SyncDatabaseCodec.kt:55`）。墙钟量级待 `ISSUE-P2-80` 实测，**不得以推算替代** | ① codec 加 Argon2 `I×M` 与 AES-KDF `R` 联合预算（成本约一行，**可与 P0 批次同批实施**，但不改定级）；② 解锁派生加超时 / 取消；③ 不误拒合法库（附**官方参数域对照**——仓内现有 `EQUIVALENCE_MATRIX` 是"原生≡BC"交叉等价，非官方域对照）。**【2026-09-14 进展，见 `RESOLVED_LOG.md` §48.2】AC① 与 AC③ 已完成**（`validateArgon2Bounds` 加 `I×M` 联合预算 2^40 + 官方参数域对照 + 2 例单测，全量 1609 例全绿）；**AC② 未闭环**——阻塞式原生派生不可被协程 `withTimeout` 打断（等于无效纸面加固），且墙钟量级须 `ISSUE-P2-80` 真机实测，本轮**不引入**无效超时，**本条仍开放** |
 | ISSUE-P2-55 | 审计 F-06 | 发布签名口令等于仓库公开的示例值（`keystore.properties.example:6,8`） | ① 高熵口令对既有 PKCS#12 **只 re-key、不换密钥**（换密钥将使已安装用户无法覆盖升级）；② 示例改为不可误用占位符；③ `app/build.gradle.kts` 加构建期断言拒绝示例 / 弱口令 |
-| ISSUE-P2-56 | 审计 RUST-01 | Argon2 工作内存（m_cost 秘密派生状态）释放前不擦除：`lib.rs:108-111` 仍用 `hash_password_into`，而 `Cargo.toml:30` 宣称已擦除 | ① **先实证** `Cargo.toml:30-31` 已启用的 argon2 `zeroize` feature 是否覆盖 m_cost 工作内存（读 argon2 0.6.0 源码——第四轮复核发现原论证中"initial_hash 已擦"在仓内无对应缓冲、不可靠），再择一：改 `hash_password_into_with_memory` + 自持 `Zeroizing<Vec<Block>>`（须保留 `Error::OutOfMemory` 优雅失败，否则超大 m_cost 会 abort、比现状更坏）**或**更正宣称；② 二者必择其一，不得都不做 |
-| ISSUE-P2-57 | 审计 RUST-02 | 派生密钥栈副本残留：`sha2` 未启用 `zeroize`（`Cargo.toml:41`）；`Some(*out)`（`lib.rs:111`）产生普通栈副本 | ① `sha2` 加 `zeroize` feature；② 改 `derive_into(&mut Zeroizing<[u8;32]>)` 消除普通副本；③ 仅增加清零 `Drop`，无算法变更 |
 | ISSUE-P2-58 | 审计 RUST-03 | 口令强度评估 **两条平方级路径**（`strength.rs:491-499` `unique_char_count` 线性扫描嵌套循环、`:406-424` `longest_keyboard_walk`）；`MAX_TEXT_CHARS = 8 shl 20` 是 XML 节点封顶、**对该热路径不构成约束**；`HealthCheckEngine` 对**全库每条口令**循环评估（恶意库 DoS 面乘性放大）；两个生产调用方运行在**主线程**（`SettingsHealthController.kt:73-77`、`EntryDetailRevealController.kt:137-139`，均 viewModelScope 裸 launch） | ① `estimate` 入口加长度上限 **+ 线性惩罚**（陷阱 #7：原"超出只按长度评分"会把 `'1234…'×N` 长数字串误判为极强）；② `longest_keyboard_walk` 单趟化（保持"同排且列差绝对值为 1"语义）；③ `unique_char_count` 改 O(n)；④ 调用方移出主线程；⑤ 保留既有 `keyboard_walk_does_not_bridge_rows` 负例 |
-| ISSUE-P2-59 | 审计 RUST-05 | 原生 Argon2 路径缺内存上界预检（`Argon2KdfEngine.kt:52-64` 直接返回；`isMemoryParamFeasible` 仅覆盖 `transformJvm:73`），且 `(memoryInBytes / 1024).toInt()` 存在静默窄化 | ① `derive` 内镜像 Kotlin 上界（内存 / 迭代 / 并行度）；② `.toInt()` 越界抛异常而非截断；③ 上界须 ≥ 一切合法用户配置 |
 
 > **2026-09-13 新增（敏感数据流审计批次）**：`docs/SENSITIVE_DATA_FLOW_AUDIT_2026-09.md` 已于同日
 > **退役删除**（处置归档见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §41）。该文档为**未跟踪文件**，
