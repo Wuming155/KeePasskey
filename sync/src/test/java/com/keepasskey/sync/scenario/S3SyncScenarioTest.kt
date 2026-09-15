@@ -338,7 +338,7 @@ class S3SyncScenarioTest {
             S3SyncProvider.EMPTY_SHA256,
             putReq.getHeader("x-amz-content-sha256")
         )
-        assertEquals(0L, putReq.bodySize ?: -1L)
+        assertEquals(0L, putReq.bodySize)
 
         val downloaded = p.download("empty.kdbx").getOrThrow()
         assertEquals("零字节对象必须下载为空数组而非失败", 0, downloaded.size)

@@ -15,11 +15,11 @@ import androidx.compose.material.icons.filled.History
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -90,7 +90,10 @@ fun GeneratorScreen(
 
             // 1. 模式切换 Tab
             item {
-                TabRow(
+                // Material3 已将 TabRow 弃用（官方替代 PrimaryTabRow / SecondaryTabRow）。
+                // 容器色 / 内容色沿用原显式指定；唯一外观差异是选中指示器由下划线变为
+                // 药丸式高亮——该视觉效果**未经真机/模拟器验证**（本仓当前无渲染侧证据）。
+                PrimaryTabRow(
                     selectedTabIndex = uiState.mode.ordinal,
                     containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
                     contentColor = MaterialTheme.colorScheme.primary,

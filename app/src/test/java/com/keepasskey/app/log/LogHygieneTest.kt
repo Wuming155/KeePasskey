@@ -29,7 +29,7 @@ class LogHygieneTest {
             "crypto/src/main/java",
             "sync/src/main/java"
         )
-        var dir: File? = File(System.getProperty("user.dir")).absoluteFile
+        var dir: File? = File(System.getProperty("user.dir").orEmpty()).absoluteFile
         repeat(4) {
             val candidate = dir ?: return@repeat
             if (File(candidate, "app/src/main/java").isDirectory &&

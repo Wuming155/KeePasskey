@@ -35,6 +35,7 @@ class SyncCacheEvictorTest {
     // 对象表达式内的 `cacheDir` 会优先解析为自身合成属性，导致 getter 无限递归
     private lateinit var appCacheDir: File
     private lateinit var fakeContext: Context
+    private lateinit var debugLog: DebugLogBuffer
     private lateinit var evictor: SyncCacheEvictor
     private lateinit var session: DatabaseSession
 
@@ -50,7 +51,8 @@ class SyncCacheEvictorTest {
             override fun getSharedPreferences(name: String?, mode: Int): SharedPreferences = fakePrefs()
         }
 
-        evictor = SyncCacheEvictor(fakeContext, DebugLogBuffer())
+        debugLog = DebugLogBuffer()
+        evictor = SyncCacheEvictor(fakeContext, debugLog)
         session = DatabaseSession()
     }
 
@@ -129,7 +131,17 @@ class SyncCacheEvictorTest {
             listOf(stateFile.name),
             syncDir.walkTopDown().filter { it.isFile }.map { it.name }.toList()
         )
-        assertTrue("残留计数必须排除防回滚状态（它不是密文快照）", evictor.evictAll())
+        // 清点必须把防回滚状态排除（否则每次锁库都会误报「密文可能仍可恢复」）。
+        // 本用例曾在全量跑中**偶发红**（观测 3 次全量 / 1 次失败，独立复跑 4 次全绿）。
+        // 由于 `SyncCacheEvictor.evictAll()` 的 false 只可能来自「删除失败」或
+        // 「`runCatching` 吞掉了 Throwable」，失败信息必须同时带上**销毁器自己的日志**
+        // （它会记录被吞异常的类名）与**清理后的实际目录内容**，否则下次偶发红无法定位。
+        val cleared = evictor.evictAll()
+        assertTrue(
+            "残留计数必须排除防回滚状态（它不是密文快照）；" +
+                "清理后目录内容=${syncDir.list()?.toList()}；销毁器日志=${debugLog.snapshot()}",
+            cleared
+        )
     }
 
     @Test

@@ -286,7 +286,7 @@
 
 ---
 
-## P3 低危问题、特性接线与体验优化（19 项）
+## P3 低危问题、特性接线与体验优化（17 项）
 
 > **状态（2026-09-12）**：历史 P3 批次 **ISSUE-P3-01 ~ P3-68** 除 P3-23（经产品裁决「不排期」）外
 > 已全部闭环并归档，逐条实现细节与验收证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md)（§3 ~ §32）。
@@ -343,6 +343,16 @@
 > 与 **ISSUE-P3-126 ③**（KDBX 版本策略显式声明「仅校验 major」+ 删除死常量 `VERSION_4_1`
 > 与死字段 `SettingsUiState.kdbxFormat`）**子项闭环**，两行的 ①② 子项仍开放——故两条**保留在表内**，
 > 见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §66。
+> **2026-09-15 闭环（续 14，§67 批次）**：**ISSUE-P3-126** 整体闭环（① CI 产物明确标注「非发布签名」：
+> artifact 更名 + `NOT-FOR-RELEASE.txt`；② 更正 `dependency-scan.yml` 的「清单为空」失真说明并改为只声明纪律，
+> 新增 `SupplyChainSuppressionPolicyTest` 守卫）⇒ 行已移出本表；**ISSUE-P3-125 ②** 子项闭环
+> （DAL 端点/时钟由「可写 internal var」改为**构造注入只读策略**，生产不可重定向）——该行保留
+> （仅剩 ① 选择器零匹配门槛），见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §67。
+> **2026-09-15 闭环（续 15，§68 批次）**：**ISSUE-P3-116**（「彻底退出应用」不清缓存）闭环——
+> 终止动作改为「退栈 → **清理易失缓存** → 退出进程」固定顺序（清理必须早于 `exitProcess`，
+> 否则永远不执行），退出前统一清理 `cacheDir/attachments`（附件解密明文）与 `cacheDir/sync`
+> （KDBX 密文快照），⇒ 行已移出本表；`.kdbx.bak` 与 `filesDir/rollback` **不在**清理面内，
+> 口径已写入 `AGENTS.md` §6，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §68。
 > **2026-09-13 新增（威胁建模 / 安全整改报告退役批次）**：P3-116 ~ P3-124 九项由
 > `THREAT-MODEL-AUDIT-d32f3e7.md` 与 `SECURITY_AUDIT_REMEDIATION.md` 的对拍结果转登
 > （两份报告同日退役删除，处置归档见 §42 / §43）。
@@ -524,7 +534,6 @@
 
 | 编号 | 来源 | 问题与位置（核实于 2026-09-13，对 HEAD `a669a48`） | 验收标准 |
 |---|---|---|---|
-| ISSUE-P3-116 | 威胁建模 T-9b | **「彻底退出应用」不清缓存**：`AppTerminationPolicy.terminate` 仅执行 `detachTask + exitProcess(0)`（`AppTerminationPolicy.kt:29-32`，调用点 `KeePasskeyApp.kt:57-69`），**不经** `SessionLockObserver` → `cacheDir/attachments`（明文附件）、`cacheDir/sync`（密文快照）与 `.kdbx.bak` 留在磁盘上；用户以为"退出即安全"，实际不是 | ① 退出前执行与锁库等价的清理（缓存驱逐 + 树擦除），或 ② 如实声明"退出 ≠ 清理"并在 UI 提示；③ 断言退出路径触发清理（或断言已如实提示） |
 | ISSUE-P3-120 | 威胁建模 Q-11 | **`RuntimeIntegrityDetector` 拦截力无实测**：检测为"磁盘路径存在性 + `/proc/self/maps` 特征串"启发式（`RuntimeIntegrityDetector.kt:100-149`），非完整性证明；真实 Frida（默认 gadget 名、改名、内存加载）下的命中率未知。若命中率低，则"COMPROMISED 时禁用生物解锁 + 自动填充"的政策在真实攻击下形同虚设，却给用户"已被保护"的错觉 | ① 真机以 Frida 实测三种形态（默认 / 改名 / 内存加载），记录命中率并写入设备侧基线；② 按结果决定加强检测**或**在 `RuntimeIntegrityPolicy` / UI 如实声明"启发式、非证明"；③ 结论与 `ISSUE-P2-63`（快照门控）统一口径 |
 | ISSUE-P3-121 | 威胁建模 T-17 | **自建内网 WebDAV / NAS 在出厂配置下不可用**：`SyncNetworkOptions.ssrfAllowedHosts` 默认空集（`SyncNetworkOptions.kt:25`），`SyncProviderResolver` 两处均传默认 `SyncNetworkOptions()`（`:52,77`）→ RFC1918 / `.local` 主机一律被 `SyncEndpointGuard` 拒绝，且**无生产逃生通道**；与 `README` 宣称支持 WebDAV（Nextcloud / ownCloud 等常见家用自建形态）存在张力 | ① 明确产品口径（"支持内网自建"或"明确不支持"）；② 若支持，提供**受控**逃生通道（用户显式声明内网主机 + 风险二次确认，默认仍为拒绝）；③ 文档与实现必须一致，不得只改其一 |
 | ISSUE-P3-122 | 审计附录 C（T6 待复核区） | **IPC 面 4 项——第四轮已逐条裁定**（`SECURITY_RECHECK` §6.8，留痕完整）：`IPC-01` **成立（部分）**——4 个 PendingIntent 的 requestCode 全为常量、3/4 带 `FLAG_UPDATE_CURRENT`，成立面为「TOTP 错配 + 30 秒授权串扰（需 `P3-42`，默认关）+ 确认页文案」，"凭据值串扰"不成立；CM 通道同构（`CredentialResponseAssembler.kt:66` 每响应局部分配器，`:234` 注释自认历史缺陷表现）；`IPC-02` **不成立**——落地 Activity 全部 `exported="false"`（7 个），第三方无法伪造 extras；`IPC-05` **误报**——`javap` 直读 `credentials-1.6.0` 证实 JSON 层级与字段完全对应；`IPC-10` **成立（LOW）**——`onSaveRequest` 无超时且平台不提供 `CancellationSignal`（后果有界，仅 Availability） | ① ~~逐条复核~~ **已完成**（防重复上报依据即上述裁定）；② 残余整改两项：`IPC-01` 的 requestCode 单调化（与 `CredentialResponseAssembler` 同构修复）+ `IPC-10` 的 `onSaveRequest` 超时预算；③ 各补回归断言 |
@@ -536,8 +545,7 @@
 
 | 编号 | 来源 | 问题与位置（核实于 2026-09-13） | 验收标准 |
 |---|---|---|---|
-| ISSUE-P3-125 | 复核 `NEW-N2` / `NEW-B09-x` / `B03-N1` | ① **选择器零匹配仍无条件挂入**：`buildPickerDataset` 在 `appendUnlockedDatasets` 之后无条件调用（`KeePasskeyAutofillService.kt:196-203`），无候选数门槛 → 严格匹配设计对任意应用失效；② **生产可重定向出口**：`DigitalAssetLinksVerifier.endpointOverride` 为 `@Singleton` 上的 `@Volatile internal var`（`:57-59`），自称测试注入点但生产可达；③ ~~**cargo 失败与缺失不可区分**~~ **【2026-09-15 §66 已闭环】**：`crypto/build.gradle.kts` 的 `cargoHostBuild` 原设 `isIgnoreExitValue = true`（吞掉编译失败）已移除——**缺失**走 `onlyIf` 跳过（有意降级），**失败**则任务直接失败（fail-closed）；已用「注入非法 cargo 参数 ⇒ `BUILD FAILED`」实测该分支 | ① 评估零匹配时改挂"无可信候选"占位数据集，或留痕接受现设计；② `endpointOverride` 改构造注入 / 测试专用隔离（防生产重定向）；~~③ 构建失败 fail-closed，或区分"缺失降级"与"构建失败"两级日志 + CI 断言~~ **③ 已完成（§66）**：fail-closed + `NativeBuildFailClosedTest` 回归守卫 + `AGENTS.md` §5 口径更正 |
-| ISSUE-P3-126 | 复核 `B07-N1` / `B07-N2` / `NEW-B02-2` | ① **一次性 CI 密钥签 release 形态 APK**：`build.yml:165-178` `keytool -genkeypair` 生成临时密钥签 `assembleRelease` 并上传 artifact（发布身份混淆，注释自称非发布密钥）；② **suppression 白名单文案不实**：`dependency-scan.yml:15-16` 称"当前为空白名单"，实测 `.github/owasp-dependency-suppressions.xml` 有 **5 条** `<suppress>`（豁免 36 条 CVE）；③ ~~**KDBX minor 版本不校验**~~ **【2026-09-15 §66 已闭环】**：`KdbxHeader` 现**显式声明**「仅校验 major」策略；死常量 `KdbxConstants.Version.VERSION_4_1` 已删除；`SettingsUiState.kdbxFormat`（零消费方的死字段，字面量声称 "KDBX 4.1" 而写侧恒为 4.0）已整体删除 | ① CI 签名产物明确标注"非发布签名"或停传 release APK（防下游误当官方构建）；② 修正 workflow 文案；~~③ 明确 minor 版本策略（校验或如实声明"仅 major"），并处理死常量与 UI 文案三者一致性~~ **③ 已完成（§66）**：策略声明 + 死常量与死字段删除 + `KdbxHeaderFieldSecurityTest` 双向用例（4.1 接受 / 3.1 拒绝） |
+| ISSUE-P3-125 | 复核 `NEW-N2` / `NEW-B09-x` / `B03-N1` | ① **选择器零匹配仍无条件挂入**：`buildPickerDataset` 在 `appendUnlockedDatasets` 之后无条件调用（`KeePasskeyAutofillService.kt:196-203`），无候选数门槛 → 严格匹配设计对任意应用失效；② ~~**生产可重定向出口**~~ **【2026-09-15 §67 已闭环】**：`DigitalAssetLinksVerifier` 的 `endpointOverride` / `clockMs` 原为 `@Singleton` 上的 `@Volatile internal var`（`internal` 只限制模块外，同模块生产代码可把 DAL 拉取改写到任意 URL ⇒ 整体架空 RP↔应用绑定校验），现改为**构造注入的只读策略**（`DalEndpointResolver` / `MillisClock`，生产由 `DalVerifierModule` 提供唯一实现）；③ ~~**cargo 失败与缺失不可区分**~~ **【2026-09-15 §66 已闭环】**：`crypto/build.gradle.kts` 的 `cargoHostBuild` 原设 `isIgnoreExitValue = true`（吞掉编译失败）已移除——**缺失**走 `onlyIf` 跳过（有意降级），**失败**则任务直接失败（fail-closed）；已用「注入非法 cargo 参数 ⇒ `BUILD FAILED`」实测该分支 | ① 评估零匹配时改挂"无可信候选"占位数据集，或留痕接受现设计；~~② `endpointOverride` 改构造注入 / 测试专用隔离（防生产重定向）~~ **② 已完成（§67）**：构造注入 + 生产策略唯一 + `DalVerifierNoRuntimeOverrideTest` 守卫（含行为断言：Official 解析到官方路径、SystemClock 与系统时钟偏差 <5s）；~~③ 构建失败 fail-closed…~~ **③ 已完成（§66）** |
 
 > **2026-09-15 新增（整改 `ISSUE-P2-69` 时跨文件检索附带发现）**：以下 1 项为**文档治理缺陷**
 > （非代码缺陷），与本批两项均无因果关系，独立登记。

@@ -40,7 +40,7 @@ class HibpRangeClient(
             .build()
 
         httpClient.newCall(request).execute().use { response ->
-            val body = response.body?.string().orEmpty()
+            val body = response.body.string()
             if (!response.isSuccessful) {
                 throw BreachCheckException("泄露库返回 HTTP ${response.code}")
             }

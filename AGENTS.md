@@ -11,9 +11,13 @@
 ## 1. 版本基线（摘要）
 
 - 测试 / 构建 / CI 当前全绿（具体版本、例数、残余面见 [`RESOLVED_LOG.md`](docs/RESOLVED_LOG.md)）。
-  单测基线（2026-09-15，§66 批次后）：**1763 例 / 0 失败 / 0 错误 / 13 跳过**
-  （app 973 / core 68 / crypto 131 / database 388 / sync 203；`--rerun-tasks --max-workers=1` 强制真实执行）；
-  原生内核基线（同日，§66 批次后）：`cargo test` **57 例 / 0 失败**（§66 未触碰原生内核，基线保持；含 ISSUE-P2-56 工作内存清零 4 例 + ISSUE-P2-57 受管缓冲与 sha2 状态擦除 3 例 + ISSUE-P2-58 强度评估线性化 6 例）；
+  单测基线（2026-09-15，§68 批次后）：**1770 例 / 0 失败 / 0 错误 / 13 跳过**
+  （app 980 / core 68 / crypto 131 / database 388 / sync 203；`--rerun-tasks --max-workers=1` 强制真实执行）；
+  **Kotlin 编译告警已清零（§68）**：`.\gradlew.bat test` 全量重编译**零 `w:` 输出**（此前 39 条：
+  35 条守卫测试的 `System.getProperty("user.dir")` 平台类型告警 + 生产侧 `HibpRangeClient` 多余安全调用、
+  `DigitalAssetLinksVerifier` 恒假分支 + `SyncCoordinatorTest` 的 `@OptIn` 挂错位置 + `GeneratorScreen`
+  弃用 `TabRow`）；**唯一未验证面**：`PrimaryTabRow` 替换后的**视觉效果未在真机/模拟器核对**。
+  原生内核基线（同日，§67 批次后）：`cargo test` **57 例 / 0 失败**（§67 / §68 均未触碰原生内核，基线保持；含 ISSUE-P2-56 工作内存清零 4 例 + ISSUE-P2-57 受管缓冲与 sha2 状态擦除 3 例 + ISSUE-P2-58 强度评估线性化 6 例）；
   设备侧基线（2026-09-14，§47 批次后）：**32 例 / 0 失败 / 0 跳过**（`app` 15 + `database` 7 +
   `sync` 3 + `crypto` 7），已在 **arm64 真机**（Redmi 4X / LineageOS / Android 17 / **API 37**）全量复跑通过；
   此前既定环境为 x86_64 / API 36.1 模拟器（§34 / §36 / §46）。`app` 15 例含 `QuickUnlockSealDowngradeDeviceTest`
@@ -165,6 +169,14 @@ KeePasskey 是一款原生 Kotlin 开发的现代化 Android 密码管理器。�
   **如实声明的边界（F-13 / ISSUE-P1-19）**：进程被 kill / force-stop 而未经过上述任一路径时，
   已解密附件快照会留存至下次冷启动——**不得再单独使用「锁定即闭环」这类措辞**。
   `KdbxAttachment.clear()` 对**落盘项**不动作（其字节由多个引用者共享），生命周期由 store 统一收口。
+- **用户显式「彻底退出应用」的清理面与边界（ISSUE-P3-116，§68）**：该入口（`showKillAppOption` 开启时呈现）
+  的执行顺序固定为「退栈 → **清理易失缓存** → `exitProcess(0)`」——清理**必须早于**退出，
+  否则进程终止后无任何代码可执行。清理动作收敛在 `MainApplication.purgeVolatileCachesBeforeExit()`，
+  覆盖 `cacheDir/attachments`（附件解密明文）与 `cacheDir/sync`（KDBX 密文快照）**两个面**。
+  **不覆盖（如实声明）**：`<库文件>.kdbx.bak`（滚动备份，属用户数据非缓存，口径见下条）与
+  `filesDir/rollback`（防回滚安全状态，**不得**随退出销毁，否则云侧可重放旧库）。
+  清理为**同步 best-effort**：任一实现失败只落脱敏日志、**不阻断退出**；与反取证无关
+  （落盘清理仍是 unlink-only），**不得**据此断言「退出即不可恢复」。
 - 条件写依赖服务端：AWS S3 原子生效；少数兼容存储降级为 HEAD 预检 + 无条件 PUT。
 - **落盘清理为 unlink-only（ISSUE-P2-66，已接受边界）**：`SyncCache` / 附件缓存的清理走
   `File.delete` / `deleteRecursively`，已 unlink 的扇区在介质 TRIM 前仍可能被恢复（取证级威胁，

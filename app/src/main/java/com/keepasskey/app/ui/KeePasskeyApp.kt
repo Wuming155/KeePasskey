@@ -27,6 +27,7 @@ import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.keepasskey.app.MainApplication
 import com.keepasskey.app.data.repository.AppLanguage
 import com.keepasskey.app.ui.components.AppBottomBar
 import com.keepasskey.app.ui.components.AppNavigationRail
@@ -47,18 +48,29 @@ import java.util.Locale
 @Composable
 fun KeePasskeyApp() {
     val context = LocalContext.current
+    // 宿主必为 ComponentActivity（本 Composable 仅由 MainActivity 承载），但**先**按可空承接：
+    // ISSUE-P3-17 要求「宿主不可终止时如实不呈现入口」，故必须保留可空判定而非硬转。
+    // 声明顺序有意如此——若先做非空硬转，`context` 会被智能转换为 ComponentActivity，
+    // 使此处的 `as?` 变为冗余转换（编译器告警）。
+    val hostActivity = context as? ComponentActivity
     val settingsViewModel: SettingsViewModel = hiltViewModel(context as ComponentActivity)
     val appSettings by settingsViewModel.uiState.collectAsStateWithLifecycle()
 
     // ISSUE-P3-17：showKillAppOption 开启且宿主 Activity 可终止时，才向库列表下发「彻底退出应用」
     // 入口（不可终止时如实不呈现，不做点了没反应的假入口）。
     // 终止动作由本层持有 Activity 上下文执行：finishAffinity() 解除任务栈亲和性后终止进程。
-    val hostActivity = context as? ComponentActivity
     val killAppAction: (() -> Unit)? = remember(appSettings.showKillAppOption, hostActivity) {
         if (AppTerminationPolicy.showsEntry(appSettings.showKillAppOption, hostActivity != null)) {
             val action: () -> Unit = {
                 AppTerminationPolicy.terminate(
                     detachTask = { hostActivity?.finishAffinity() },
+                    // ISSUE-P3-116：退出前清理易失缓存（`cacheDir/attachments` 附件明文 +
+                    // `cacheDir/sync` 密文快照）。取 Application 单例上的统一入口，避免此处
+                    // 直接依赖 Hilt 图（Composable 内无法字段注入）；清理为同步 best-effort，
+                    // 失败只落日志、不阻断退出。
+                    purgeCaches = {
+                        (context.applicationContext as? MainApplication)?.purgeVolatileCachesBeforeExit()
+                    },
                     exitProcess = { code -> kotlin.system.exitProcess(code) }
                 )
             }

@@ -13,8 +13,11 @@
 #   （首次 NVD 缓存被 runner 缓存吸收后增量扫描耗时可控；扫描完整性优先于耗时）；
 # - `workflow_dispatch`：随时可到 Actions 页手动 Run workflow；
 # - 报告以 artifact 归档并按 CVSS 阈值阻断；SARIF 上传 GitHub Code Scanning
-#   （Security 页可视化）；误报登记 suppression 白名单
-#   （.github/owasp-dependency-suppressions.xml，当前为空白名单）。
+#   （Security 页可视化）；误报经**逐条人工核实**后登记 suppression 白名单
+#   （.github/owasp-dependency-suppressions.xml；**此处不复述条目数**——本注释曾断言该清单没有条目，
+#   与文件实际内容（多条已核实豁免）不符，属典型的「声明漂移」，故改为只声明**纪律**）：
+#   每条 `<suppress>` 必须附 `<notes>`（核实人 / 核实方式 / 归属）且不得使用通配豁免；
+#   该纪律由 `SupplyChainSuppressionPolicyTest` 守卫（在 `:app:test` 内执行）。
 # - NVD API Key 可选：配置仓库 Secret `NVD_API_KEY`（https://nvd.nist.gov/developers/vulnerabilities）
 #   可显著提升 NVD 数据同步速率；未配置时插件走官方托管镜像 datafeed（见 init 脚本 nvd{}）。
 name: dependency-scan

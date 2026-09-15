@@ -131,10 +131,6 @@ class DigitalAssetLinksVerifier @Inject constructor(
                 // `MAX_BODY_BYTES` 封顶流式搬运：读到上限 +1 即判越界、立即中止，
                 // 绝不把超出上限的响应整体读入内存。
                 val body = response.body
-                if (body == null) {
-                    AppLog.w(TAG, "DAL 响应体缺失")
-                    return DalResult.NOT_VERIFIED
-                }
                 val bytes = readBounded(body.byteStream(), MAX_BODY_BYTES)
                 if (bytes == null) {
                     AppLog.w(TAG, "DAL 响应体超出大小上限")

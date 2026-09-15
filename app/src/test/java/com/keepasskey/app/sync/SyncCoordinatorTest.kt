@@ -33,13 +33,17 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.IOException
 
-/**
- * SyncCoordinator 全分支同步状态机测试 (Wave 3-E P0-5 与 E5 验收标准)
- */
-@OptIn(ExperimentalCoroutinesApi::class)
 /** TASK-21：用户可见消息已资源化；单测无资源环境，注入返回占位文本的假 StringsProvider */
 private val TEST_STRINGS = com.keepasskey.app.ui.model.StringsProvider { _, _ -> "" }
 
+/**
+ * SyncCoordinator 全分支同步状态机测试 (Wave 3-E P0-5 与 E5 验收标准)。
+ *
+ * `@OptIn` 必须落在**类**上：`Dispatchers.setMain` / `resetMain` 为
+ * `@ExperimentalCoroutinesApi`；此前注解误挂在顶层 `TEST_STRINGS` 属性上，
+ * 故 `setUp` / `tearDown` 两处调用各产生一条 opt-in 告警。
+ */
+@OptIn(ExperimentalCoroutinesApi::class)
 class SyncCoordinatorTest {
 
     @get:Rule

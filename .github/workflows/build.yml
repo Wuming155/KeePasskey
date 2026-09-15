@@ -162,7 +162,7 @@ jobs:
       - name: Assemble Debug（真实触发原生构建与 APK 打包）
         run: ./gradlew :app:assembleDebug --console=plain
 
-      - name: 生成一次性 CI 发布密钥（仅用于校验签名方案）
+      - name: 生成一次性 CI 测试密钥（**非发布签名**，仅用于校验签名方案）
         run: |
           set -euo pipefail
           keytool -genkeypair -v \
@@ -223,14 +223,33 @@ jobs:
             exit 1
           fi
 
-      - name: 归档 Release APK 与 R8 产物（mapping/seeds/usage 供崩溃还原与保留面审计）
+      - name: 标注 CI 产物性质（**非发布签名**，ISSUE-P3-126①）
+        run: |
+          set -euo pipefail
+          cat > app/build/outputs/apk/release/NOT-FOR-RELEASE.txt <<'EOF'
+          KeePasskey —— CI 产物说明：非发布签名
+          =====================================
+          本目录中的 app-release.apk 由 CI 用**一次性临时密钥**现场生成并签名，仅用于在流水线中
+          校验「R8 混淆 + 资源收缩 + 签名方案（v1 关闭 / v3 + v4 启用）」是否成立。
+
+          · 它**不是**官方发布构建：签名证书与官方发布证书**无关**，无法覆盖安装官方版本，
+            也不代表任何发布身份；
+          · 官方发布包由维护者以 release keystore 构建（口令来自本地 keystore.properties
+            或 CI Secret），见 AGENTS.md §3.8 与 keystore.properties.example；
+          · mapping.txt 一并归档仅用于崩溃还原与保留面审计，属公开去混淆信息（见 ISSUE-P3-123④）；
+          · 如你基于本产物对外分发，请先以正式密钥重新签名并自担后果。
+          EOF
+          cat app/build/outputs/apk/release/NOT-FOR-RELEASE.txt
+
+      - name: 归档 Release APK 与 R8 产物（**CI 临时签名**，非官方发布包；mapping/seeds/usage 供崩溃还原与保留面审计）
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: native-gate-artifacts
+          name: native-gate-artifacts-ci-signed-NOT-FOR-RELEASE
           path: |
             app/build/outputs/apk/release/*.apk
             app/build/outputs/apk/release/*.idsig
+            app/build/outputs/apk/release/NOT-FOR-RELEASE.txt
             app/build/outputs/mapping/release/mapping.txt
             app/build/outputs/mapping/release/seeds.txt
             app/build/outputs/mapping/release/usage.txt

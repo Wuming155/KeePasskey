@@ -190,7 +190,7 @@ class CborEncoderTest {
         // 但 CBOR 编码同为 0x01——确定性编码要求键唯一，必须 fail-fast
         val map = LinkedHashMap<Any, Any>().apply {
             put(1L, "long")
-            put(1 as Int, "int")
+            put(1.toInt(), "int")
         }
         try {
             CborEncoder.encodeMap(map)

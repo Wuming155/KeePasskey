@@ -91,7 +91,7 @@ class AutofillConfirmDeliveryLockTest {
 
         /** 仓库根：同时具备 app 与 core 模块源码目录的最近祖先 */
         val repositoryRoot: File by lazy {
-            var dir: File? = File(System.getProperty("user.dir")).absoluteFile
+            var dir: File? = File(System.getProperty("user.dir").orEmpty()).absoluteFile
             repeat(ROOT_SEARCH_DEPTH) {
                 val candidate = dir ?: return@repeat
                 if (File(candidate, "app/src/main/java").isDirectory &&

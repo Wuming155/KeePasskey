@@ -75,8 +75,9 @@
 | §64 | 第一轮审计 F 系列收尾批次：整库导出缓冲清零 + 明文导出令牌下沉（同根因）+ 审计短摘要熵修正 + 删除未加固 OTP URI 解析副本 + ChaCha20 标签纠偏 | ISSUE-P3-86 / P3-87 / P3-89 / P3-90 / P3-91 / P3-92 |
 | §65 | 浏览器指纹格式守卫批次：Chrome 签名指纹 65-hex 笔误三处同批修正 + 格式与双写法一致性断言 | ISSUE-P3-88 |
 | §66 | 构建 fail-closed 与版本策略声明批次（**两条目的 ③ 子项**）：原生内核构建失败不再静默降级 + KDBX 版本策略显式声明与死常量/死字段清理 | ISSUE-P3-125 ③ / P3-126 ③ |
+| §67 | CI 声明一致性与 DAL 不可重定向批次：CI 产物标注「非发布签名」+ 豁免清单说明去数字漂移 + DAL 端点/时钟改构造注入只读策略 | ISSUE-P3-126（整体）/ P3-125 ② |
 
-> 各批次验收证据（用例数 / 通过 / 失败 / 跳过）分别见 §2.22、§3.1、§4.1、§5、§6、§7、§8、§9、§10、§11、§12、§13、§14、§15、§16、§17、§18、§19、§20.3、§21.4、§22.9、§23.1、§24.3、§25.2、§26.3、§49.2、§50.2、§51.2、§52.2、§53.2、§54.2、§55.2、§56.2、§57.2、§58.2、§59.2、§60.2、§61.2、§62.2、§63.2、§64.2、§65.2、§66.2。
+> 各批次验收证据（用例数 / 通过 / 失败 / 跳过）分别见 §2.22、§3.1、§4.1、§5、§6、§7、§8、§9、§10、§11、§12、§13、§14、§15、§16、§17、§18、§19、§20.3、§21.4、§22.9、§23.1、§24.3、§25.2、§26.3、§49.2、§50.2、§51.2、§52.2、§53.2、§54.2、§55.2、§56.2、§57.2、§58.2、§59.2、§60.2、§61.2、§62.2、§63.2、§64.2、§65.2、§66.2、§67.2。
 
 ---
 
@@ -4563,4 +4564,76 @@ $env:ANDROID_HOME\build-tools\<ver>\apksigner.bat verify --print-certs <产物>
    **未**在本批核查——不属本条目范围，不据此扩大结论。
 6. **计数**：本批 `ACTIVE_ISSUES.md` 的 P3 **条数不变（19 项）**——两条目为**部分闭环**、
    行保留在表内；本批无新增条目。P2 计数不变（9）。
+
+---
+
+## §67 CI 声明一致性与 DAL 不可重定向批次（2026-09-15）：ISSUE-P3-126（整体）/ P3-125 ②
+
+> **本批次缘起**：认领两组「声明与实现/可达性不一致」项——`ISSUE-P3-126` 的 ①②（CI 用**一次性密钥**
+> 签出并上传「release 形态」APK，且 workflow 说明与豁免清单实际内容**互相矛盾**）、
+> `ISSUE-P3-125 ②`（DAL 校验器的「测试注入点」在生产同模块内**可写**，即可把校验整体导流到任意端点）。
+> 本批后：`ISSUE-P3-126` **整体闭环**（行移出待办表），`ISSUE-P3-125` 仅剩 ①（选择器零匹配门槛）。
+
+### 67.1 交付清单
+
+| 编号 | 子项 | 缺陷（一句话） | 关键改动 | 依据 |
+|---|:--:|---|---|---|
+| **ISSUE-P3-126** | ① | CI 用 `keytool -genkeypair` 生成**一次性临时密钥**签出 `assembleRelease` 产物并作为 artifact 上传（名为 `native-gate-artifacts`），**没有任何标注**——下游取用者极易把它当作官方发布包（签名身份完全混淆） | ① 签名步骤更名并前置标注「**非发布签名**」；② 新增步骤在 APK 同目录写出 `NOT-FOR-RELEASE.txt`（说明其用途、与官方证书无关、无法覆盖安装官方版本、重新签名的要求），并纳入归档路径；③ artifact 更名为 `native-gate-artifacts-ci-signed-NOT-FOR-RELEASE`（**不删产物**——签名方案断言仍依赖它，仅消除身份混淆） | 复核 `B07-N1` |
+| **ISSUE-P3-126** | ② | `dependency-scan.yml` 说明称 suppression 白名单**没有条目**，而 `.github/owasp-dependency-suppressions.xml` 实际含 **6 条** `<suppress>`（豁免 **37** 条 CVE，逐条计数见下）——声明与事实相反，任何人据此核对都会得出错误结论 | ① 说明改为**只声明纪律**（每条豁免必须附 `<notes>` 核实说明、不得通配豁免）并**明确不复述条目数**（数字必然漂移）；② 新增 `SupplyChainSuppressionPolicyTest` 守卫两条不变式：workflow 不得再出现「清单为空」式断言、清单内每个 `<suppress>` 必须带动 `<notes>`。**实测（2026-09-15）**：`<suppress>` 6 / `<cve>` 37 / `<notes>` 6（原审计记「5 条 / 36 条 CVE」系其基线时刻的快照，已漂移） | 复核 `B07-N2` |
+| **ISSUE-P3-125** | ② | `DigitalAssetLinksVerifier` 把「测试注入点」做成 `@Singleton` 上的 `@Volatile internal var endpointOverride` / `clockMs`——`internal` 只限制**模块外**可见，本模块内任意生产代码都可把 DAL 拉取改写到任意 URL，从而整体架空「RP 站点显式声明授权该应用」的唯一依据 | ① 抽出 `DalEndpointResolver` / `MillisClock` 两个 `fun interface` 策略；② 校验器改为**构造注入**且**无任何 setter**（运行期无改写入口）；③ 新增 `DalVerifierModule` 提供**唯一生产实现**（官方 well-known 路径 / 系统时钟）；④ 单测改为构造时注入 fake；⑤ `DalVerifierNoRuntimeOverrideTest` 守卫：不得再出现可写字段、必须构造注入、生产策略**行为**正确（Official 解析到官方路径、SystemClock 偏差 <5s） | 复核 `NEW-N2 ②` |
+
+### 67.2 验收证据
+
+```powershell
+# ① 定向验证
+.\gradlew.bat :app:testDebugUnitTest --tests "com.keepasskey.app.passkey.DigitalAssetLinksVerifierTest" --tests "com.keepasskey.app.passkey.DalVerifierNoRuntimeOverrideTest" --tests "com.keepasskey.app.security.SupplyChainSuppressionPolicyTest"
+# → BUILD SUCCESSFUL；tests=20 + 2 + 2 = 24 failures=0 errors=0
+
+# ② 全量单测（强制真实执行）
+.\gradlew.bat test --rerun-tasks --max-workers=1
+# → BUILD SUCCESSFUL in 2m 12s；114 actionable tasks: 114 executed
+#   结果汇总（build/test-results/**/TEST-*.xml）：
+#   tests=1767 failures=0 errors=0 skipped=13
+#   （app 977 / core 68 / crypto 131 / database 388 / sync 203）——较上批 +4
+cd crypto/src/main/rust; cargo test
+# → test result: ok. 57 passed; 0 failed; 0 ignored（本批未触碰原生内核）
+.\gradlew.bat assembleRelease
+# → BUILD SUCCESSFUL in 3m 1s；216 actionable tasks: 18 executed, 198 up-to-date
+#   产物：D:\GithubWorkplace\KeePasskey\app\build\outputs\apk\release\app-release.apk
+#         （15,466,567 字节，2026-09-15 17:34:31）
+$env:ANDROID_HOME\build-tools\<ver>\apksigner.bat verify --print-certs <产物>
+# → V3.0 Signer: certificate SHA-256 digest: f3a6f0924d121e273be022589fa68724703cb7d906caa33fe4cded192cca842e
+#   注：DAL 构造注入的**Hilt 图连通性**由本次 release 构建（含 Hilt 代码生成）与单测装配共同保证。
+```
+
+**新增用例（本批 +4 例）**：
+
+| 文件 | 用例 | 覆盖 |
+|---|---|---|
+| `DalVerifierNoRuntimeOverrideTest`（+2，新文件） | 不得再存在可写的端点或时钟注入点 | 剔除注释后断言源码**不含** `var endpointOverride` / `var clockMs`。**非空跑**：改动前该断言必红 |
+| | 端点与时钟必须为构造注入且生产策略唯一 | 断言构造参数形态存在、生产策略常量存在、`DalVerifierModule` 存在；并以**行为断言**收尾（`Official.resolve("example.com") == "https://example.com/.well-known/assetlinks.json"`、`SystemClock.now()` 与系统时钟偏差 <5s）——比源码文本断言更强 |
+| `SupplyChainSuppressionPolicyTest`（+2，新文件） | 工作流说明不得再断言豁免清单为空 | 断言 `dependency-scan.yml` 不含「清单为空」式短语（正则覆盖中英变体）且指向清单文件 |
+| | 每条豁免必须附带人工核实说明 | 解析清单全部 `<suppress>` 块，逐一取出 `<notes>`（剥 CDATA）断言非空白——杜绝静默豁免 |
+
+### 67.3 已知边界与口径（如实声明）
+
+1. **CI 改动无法在本地执行验证（如实登记）**：本批对 `build.yml` / `dependency-scan.yml` 的修改
+   只能由 CI 运行时验证；本地证据为**语法与静态断言**（YAML 内容断言 + 新增的守卫用例），
+   **未**在真实 Actions 上跑过。`NOT-FOR-RELEASE.txt` 的写入使用 GitHub Actions `run` 块的
+   heredoc（`<<'EOF'`），其块缩进依赖 YAML 块标量语义——**该形态未经 CI 实跑**，
+   如首次运行失败，属形态问题而非逻辑问题，修正成本为一次缩进调整。
+2. **artifact 改名是向后不兼容的接口变更（如实声明）**：`native-gate-artifacts` →
+   `native-gate-artifacts-ci-signed-NOT-FOR-RELEASE`；本仓内检索确认**无其它工作流或脚本**按名消费。
+   若外部（如维护者本地脚本）按旧名下载，需同步改名。
+3. **P3-125② 的可见性边界**：改为构造注入后，**运行期**已无改写入口；但**构建期**仍可
+   通过替换 `DalVerifierModule` 的 `@Provides` 改变生产行为——这是 DI 的固有性质，
+   与「同模块任意生产代码一行赋值即可重定向」相比已是数量级收紧，**不得**表述为「绝对不可改」。
+4. **测试夹持（seam）保留在构造参数**：单测仍需指向 MockWebServer，故策略接口本身是公开类型；
+   `DalEndpointResolver.Official` 是唯一生产实现，但**类型**公开意味着代码仍可自行 `DalEndpointResolver { … }`
+   并在**自己的**调用点构造校验器——本批只保证「Spring/DI 装配出来的那一个实例」不可被重定向，
+   **不**保证「任何人不得构造自定义校验器实例」（后者需收窄构造函数可见性，属独立议题）。
+5. **P3-126 的 ①② 已在同一批次内闭环**（不同于 §66 的部分闭环），故该行已从待办表移出；
+   `ISSUE-P3-125` 因 ① 仍未整改而**保留**在表内，且其 ② ③ 已在 §66/§67 分别标注闭环。
+6. **计数**：本批 `ACTIVE_ISSUES.md` 的 P3 由 **19 → 18**（表行 12 → 11，标题条目仍 7），
+   按「表行 + 标题条目」双形式口径复算；P2 计数不变（9）。
 

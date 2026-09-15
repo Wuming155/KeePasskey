@@ -62,7 +62,7 @@ class BreachHasherTest {
 
         /** 仓库根：同时具备 app 与 core 模块源码目录的最近祖先 */
         val repositoryRoot: java.io.File by lazy {
-            var dir: java.io.File? = java.io.File(System.getProperty("user.dir")).absoluteFile
+            var dir: java.io.File? = java.io.File(System.getProperty("user.dir").orEmpty()).absoluteFile
             repeat(ROOT_SEARCH_DEPTH) {
                 val candidate = dir ?: return@repeat
                 if (java.io.File(candidate, "app/src/main/java").isDirectory &&
