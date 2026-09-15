@@ -1,5 +1,6 @@
 package com.keepasskey.app.autofill
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.compose.setContent
 import androidx.fragment.app.FragmentActivity
@@ -62,7 +63,13 @@ class AutofillUnlockActivity : FragmentActivity() {
     private fun completeAuthResult() {
         if (completed) return
         completed = true
-        setResult(RESULT_OK)
+        // ISSUE-P2-73 AC①：**必须**用双参 `setResult(int, Intent)` 且 extras 非空。
+        // 官方 `FillResponse.Builder#setAuthentication` 明文要求：Android 12 起 extras 为 null
+        // 会**崩溃**，并点名「Do not use Activity.setResult(int), instead use
+        // Activity.setResult(int, Intent) with non-null extras」；官方同时给出
+        // 「或使用 Bundle.EMPTY」的等价做法——本路径不产出数据集（解锁后由框架重发
+        // onFillRequest 取真实候选），故取 Bundle.EMPTY 而非伪造一个空 Dataset。
+        setResult(RESULT_OK, Intent().putExtras(Bundle.EMPTY))
         finish()
     }
 }

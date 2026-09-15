@@ -14,9 +14,7 @@ import android.view.inputmethod.InlineSuggestionsRequest
 import android.widget.RemoteViews
 import com.keepasskey.app.R
 import com.keepasskey.app.autofill.KeePasskeyAutofillService.Companion.MAX_DATASET_COUNT
-import com.keepasskey.app.autofill.KeePasskeyAutofillService.Companion.REQUEST_CODE_CONFIRM_BASE
-import com.keepasskey.app.autofill.KeePasskeyAutofillService.Companion.REQUEST_CODE_PICKER
-import com.keepasskey.app.autofill.KeePasskeyAutofillService.Companion.REQUEST_CODE_UNLOCK
+import java.util.concurrent.atomic.AtomicInteger
 import com.keepasskey.app.autofill.KeePasskeyAutofillService.Companion.TAG
 import com.keepasskey.core.log.AppLog
 import com.keepasskey.database.fieldref.FieldReferenceEngine.RefField
@@ -42,6 +40,29 @@ internal fun KeePasskeyAutofillService.buildInlinePresentation(
 ): InlinePresentation? = inlinePresentationFactory.build(inlineRequest, title, subtitle)
 
 /**
+ * ISSUE-P3-122（IPC-01）：认证 `PendingIntent` 的 requestCode **进程级单调分配器**。
+ *
+ * ## 缺陷形态
+ *
+ * 整改前三条认证入口各自使用**常量** requestCode（解锁 100 / 确认 100+index / 选择器 200），
+ * 且一律带 `FLAG_UPDATE_CURRENT`。两次不同的 `onFillRequest` 一旦落到同一 requestCode，
+ * 后一次会**就地更新**前一次 PendingIntent 的 extras——用户点中的是旧候选，实际拉起的却是
+ * 新上下文的 Activity（TOTP 错配、以及 `ISSUE-P3-42` 会话授权开启时的 30 秒授权串扰）。
+ *
+ * ## 修复口径
+ *
+ * 与 CM 通道的 `CredentialResponseAssembler.RequestCodeAllocator` **同构**：每次分配取新值，
+ * 从根上消除「不同响应共用 requestCode」这一前提；`FLAG_UPDATE_CURRENT` 随之不再有覆盖对象。
+ * 计数器为进程级单调，无需随响应重置（重置反而会重新引入复用）。
+ */
+private val authRequestCodeAllocator = AtomicInteger(AUTH_REQUEST_CODE_BASE)
+
+private fun nextAuthRequestCode(): Int = authRequestCodeAllocator.getAndIncrement()
+
+/** 分配基线（刻意避开既有常量区间，便于日志与抓包中辨认） */
+private const val AUTH_REQUEST_CODE_BASE = 100
+
+/**
  * 库已锁定时构建解锁引导数据集。
  *
  * @return 库锁定时返回仅含解锁引导数据集的响应；库已解锁时返回 null（由调用方继续走已解锁分支）
@@ -65,7 +86,7 @@ internal fun KeePasskeyAutofillService.buildLockedUnlockDataset(
     }
     val pendingIntent = PendingIntent.getActivity(
         this,
-        REQUEST_CODE_UNLOCK,
+        nextAuthRequestCode(),
         unlockIntent,
         PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
     )
@@ -221,7 +242,7 @@ internal suspend fun KeePasskeyAutofillService.appendUnlockedDatasets(
             // ISSUE-P3-42：下传授权上下文（包名 + 域），供确认成功后写入会话授权
             val confirmPendingIntent = PendingIntent.getActivity(
                 this,
-                REQUEST_CODE_CONFIRM_BASE + index,
+                nextAuthRequestCode(),
                 confirmIntent.putExtra(
                     AutofillConfirmActivity.EXTRA_CREDENTIAL_TITLE,
                     username.ifBlank { entry.title }
@@ -259,7 +280,7 @@ internal fun KeePasskeyAutofillService.buildPickerDataset(
     }
     val pickerPendingIntent = PendingIntent.getActivity(
         this,
-        REQUEST_CODE_PICKER,
+        nextAuthRequestCode(),
         pickerIntent,
         // 框架需注入 fillIn extras，必须 FLAG_MUTABLE
         PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT

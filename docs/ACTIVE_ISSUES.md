@@ -252,6 +252,31 @@
 > 已在真机以**真实绑定存储 + 候选层判据**覆盖两条链路的入选/不入选。见 §82。
 > **本项不得读作「`UNBOUND` 也已加固」**——从未绑定过的包名仍按既有包名维度放行，
 > 其边界与理由写在门控 KDoc 中。
+>
+> **2026-09-16 进展（§84 批次，`ISSUE-P2-73` 与 `ISSUE-P3-122` 的 IPC-01 **同批**，本行均仍留表内）**：
+> 第四轮定版批注要求本项与 `IPC-01`「**须同批实测**」，故两项合并为 §84 批次。
+> - **`P2-73` AC① 已完成（且发现原条文低估了严重性）**：官方 `FillResponse.Builder#setAuthentication`
+>   明文写着「**IMPORTANT: Extras must be non-null on the intent being set for Android 12 otherwise it
+>   will cause a crash. Do not use `Activity.setResult(int)`, instead use `Activity.setResult(int, Intent)`
+>   with non-null extras**」。两处裸 `setResult(RESULT_OK)` 因此不只是「协议漂移」，而是
+>   **Android 12+ 上的崩溃级缺陷**（minSdk 36 ⇒ 恒在该区间）。已按官方给出的等价做法改为
+>   `setResult(RESULT_OK, Intent().putExtras(Bundle.EMPTY))`（extras 非空、载荷语义不变）。
+> - **AC① 的「回传数据集」部分与 AC② 存在硬冲突，已登记为决策点（本批不自行择一）**：要让框架
+>   真正写入数据集，活动需构造并回传 `Dataset`；而活动拿到字段 `AutofillId` 的正规途径是框架
+>   注入的 `EXTRA_ASSIST_STRUCTURE`，**该注入要求 PendingIntent 为 `FLAG_MUTABLE`**——正是第四轮
+>   批注明令**不得**改的那一项（「为对齐文档而降低安全性」）。另一条路是让服务把已填充的
+>   `Dataset` 经自家 Intent 传给活动，代价是**新增一份明文 Parcel 副本**，与「敏感数据铁律」相抵。
+>   两条路各有代价，**须由定版方在「AC② 撤销」与「AC① 数据集回传」之间裁决**。
+> - **AC② 未实施**（遵循第四轮定版批注）；并由接线守卫**反向锁定** FLAG 口径：选择器恒
+>   `FLAG_MUTABLE`（1 处）、解锁与确认恒 `FLAG_IMMUTABLE`（2 处），防止后人「顺手统一」。
+> - **AC③（设备侧实测认证填充链路）未完成**：需要真实 autofill 客户端触发认证流；
+>   本机无 ADB 侧入口（与 `P2-83` AC③ 同类边界），已登记残余。
+> - **`P3-122` IPC-01 已完成**：认证 `PendingIntent` 的 requestCode 由**常量**改为**进程级单调
+>   分配器**（与 CM 通道 `RequestCodeAllocator` 同构），从根上消除「两次 `onFillRequest` 共用
+>   requestCode + `FLAG_UPDATE_CURRENT` ⇒ 点旧候选拉起新上下文」的 TOTP 错配 / 会话授权串扰面。
+> - **`P3-122` IPC-10 未完成**：`onSaveRequest` 的超时预算涉及整段协程体包裹与收尾语义，
+>   本批未动（该条**仍在表内**）。
+> - 详见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §84。
 
 ### ISSUE-P2-47（新登记）：同步与封印凭据的回滚防护不足
 
@@ -559,6 +584,12 @@
 > 同时按定版建议**直接喂 XML 给 `KdbxXmlParser`**（绕过需要重新加密的外层 KDBX），
 > 使断言精确落在被保护的那一层；并补**反向对照**（无 DTD 文档不得被 DTD 兜底误伤）。
 > 详见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §83。
+>
+> **2026-09-16 进展（§84 批次）**：**`ISSUE-P3-122` 的 `IPC-01` 已完成**（认证 `PendingIntent`
+> 的 requestCode 由常量改为**进程级单调分配器**，与 CM 通道同构）；**`IPC-10`（`onSaveRequest`
+> 超时预算）未完成**。本批与 `ISSUE-P2-73` **同批**（第四轮定版批注要求二者「须同批实测」），
+> 该条 AC① 已完成、AC② 依定版批注**未实施**、AC③ 未完成。**两条目均仍在表内**，
+> 逐项进展与决策点见本文件 P2 节前言（§84 段）与 [RESOLVED_LOG.md](RESOLVED_LOG.md) §84。
 
 ---
 

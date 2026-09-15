@@ -34,18 +34,23 @@ class AutofillConfirmDeliveryLockTest {
 
     @Test
     fun `每一处回传 RESULT_OK 之前必须经过锁定门控`() {
-        val marker = "setResult(RESULT_OK)"
-        val indices = Regex(Regex.escape(marker)).findAll(activitySource).map { it.range.first }.toList()
+        // 锚点只认「调用形态」而不认具体实参：ISSUE-P2-73 AC① 起回传改为双参
+        // `setResult(RESULT_OK, Intent…)`，若把 marker 写死成单参形态，本守卫会**静默失效**
+        // （找不到 marker 时若只断言 isNotEmpty 尚可发现，但一旦源码里还有别的单参回传就会漏判）。
+        val marker = Regex("""setResult\(\s*RESULT_OK\b""")
+        val indices = marker.findAll(activitySource).map { it.range.first }.toList()
 
-        assertTrue("确认页必须存在回传路径（未找到 $marker）", indices.isNotEmpty())
+        assertTrue("确认页必须存在回传路径（未找到 ${marker.pattern}）", indices.isNotEmpty())
         for (index in indices) {
-            // 取回传点前的一段窗口：门控判定必须出现在其中（即回传不得无条件发生）
-            val windowStart = (index - 400).coerceAtLeast(0)
-            val window = activitySource.substring(windowStart, index)
+            // 判据刻意**不用固定字符窗口**：窗口长度会被注释长度左右（加一段说明就可能把门控
+            // 挤出窗口，令守卫误红；反过来缩短窗口又会漏判）。改为结构化判定——
+            // 「回传点之前、且与回传点处于同一个函数体内」必须出现过门控调用。
+            val gateIndex = activitySource.lastIndexOf("canDeliverAuthResult(", index)
+            val functionStart = activitySource.lastIndexOf("private fun ", index)
             assertTrue(
-                "回传 $marker 之前必须调用 AutofillAuthenticationPolicy.canDeliverAuthResult 门控" +
+                "回传 RESULT_OK 之前必须调用 AutofillAuthenticationPolicy.canDeliverAuthResult 门控" +
                     "（否则锁定后框架仍会写入凭据值）",
-                window.contains("canDeliverAuthResult(")
+                gateIndex > functionStart
             )
         }
     }

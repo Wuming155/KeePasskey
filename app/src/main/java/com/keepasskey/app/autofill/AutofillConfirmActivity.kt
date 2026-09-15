@@ -1,5 +1,6 @@
 package com.keepasskey.app.autofill
 
+import android.content.Intent
 import android.os.Bundle
 import android.view.WindowManager
 import androidx.activity.compose.setContent
@@ -259,8 +260,13 @@ class AutofillConfirmActivity : FragmentActivity() {
                 // ISSUE-P3-95：**回传前再次校验**——TOTP 二次动作（含超时等待）期间会话可能刚被
                 // 自动锁定 / 手动锁定；锁定即丢弃未决响应，否则框架仍会把凭据值写入目标表单
                 if (AutofillAuthenticationPolicy.canDeliverAuthResult(vaultRepository.isLocked())) {
-                    // 官方认证数据集语义：RESULT_OK 后框架才会把该数据集的值写入目标表单
-                    setResult(RESULT_OK)
+                    // 官方认证数据集语义：RESULT_OK 后框架才会把该数据集的值写入目标表单。
+                    // ISSUE-P2-73 AC①：**必须**双参 `setResult(int, Intent)` 且 extras 非空——
+                    // 官方 `FillResponse.Builder#setAuthentication` 明文要求 Android 12 起
+                    // extras 为 null 会**崩溃**，并点名不得使用单参 `setResult(int)`。
+                    // 本路径不自行构造 Dataset（框架侧已缓存该数据集），故按官方给的等价做法
+                    // 取 Bundle.EMPTY，保持「回传成功、不改动载荷」的既有语义。
+                    setResult(RESULT_OK, Intent().putExtras(Bundle.EMPTY))
                 } else {
                     AppLog.w(TAG, "会话在确认过程中被锁定，丢弃未决响应（不回传 RESULT_OK）")
                     setResult(RESULT_CANCELED)
