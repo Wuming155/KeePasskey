@@ -1,7 +1,6 @@
 package com.keepasskey.app.data.repository
 
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -27,12 +26,14 @@ class ExtendedSettingsStoreSingleKeyTest {
     }
 
     @Test
-    fun `内联建议默认开启`() {
-        assertTrue(store.isInlineSuggestionsEnabled())
+    fun `内联建议默认关闭`() {
+        // ISSUE-P2-71：该通道把候选用户名 / 条目标题交给系统 IME，默认必须关闭
+        assertFalse(store.isInlineSuggestionsEnabled())
     }
 
     @Test
-    fun `填充后复制 TOTP 默认开启`() {
-        assertTrue(store.isAutofillCopyTotpEnabled())
+    fun `填充后复制 TOTP 默认关闭`() {
+        // ISSUE-P2-43：开启后 TOTP 动态码默认入剪贴板，默认必须关闭
+        assertFalse(store.isAutofillCopyTotpEnabled())
     }
 }

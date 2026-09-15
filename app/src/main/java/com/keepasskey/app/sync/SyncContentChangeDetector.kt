@@ -40,7 +40,14 @@ class SyncContentChangeDetector @Inject constructor(
         }
         if (cachedSnapshotBytes != null) {
             val cachedDb = codec.parseKdbxBytes(cachedSnapshotBytes) ?: return true
-            return hasDatabaseContentChanged(currentDb, cachedDb)
+            // ISSUE-P3-119：该解析产物**仅用于内容比较**，比较结束即被丢弃——必须显式擦除，
+            // 否则整棵解密树（含 ≤ 落盘阈值的附件内联明文）只能静默等待 GC 回收。
+            // 此处的安全性依据：比较函数只读遍历，不向任何存活对象转移引用。
+            return try {
+                hasDatabaseContentChanged(currentDb, cachedDb)
+            } finally {
+                cachedDb.clearSensitiveData()
+            }
         }
         return true
     }

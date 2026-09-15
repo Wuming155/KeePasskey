@@ -33,9 +33,18 @@ data class ExtendedSettings(
 
     // 自动填充进阶
     val offerSaveCredentials: Boolean = true,
-    val inlineSuggestionsEnabled: Boolean = true,
+    // ISSUE-P2-71（审计 E2）：默认 **关闭**。内联建议会把**候选的用户名 / 条目标题**
+    // 作为文案交给系统 IME（`AutofillInlinePresentationFactory.build(title = username
+    // ifBlank entry.title, subtitle = entry.title)`），而 IME 可能是第三方 / 云端联想键盘，
+    // 该通道一旦开启即等于把条目名与账号名持续送出应用边界。故按「安全默认不放松」改为
+    // 显式开启（关闭时不影响自动填充本身——数据集仍经下拉 / 填充对话框呈现）。
+    val inlineSuggestionsEnabled: Boolean = false,
     val autoReturnFromQuery: Boolean = true,
-    val autofillCopyTotp: Boolean = true,
+    // ISSUE-P2-43：默认 **关闭**。开启后每次自动填充确认都会把该条目的 TOTP 动态码写入
+    // 系统剪贴板（`AutofillConfirmActivity` → `AutofillTotpCopyPolicy` → `copySensitiveText`）：
+    // 剪贴板在擦除窗口内可被前台应用读取，而用户可关闭定时擦除（见 ISSUE-P3-84）——
+    // 与口令泄露组合即可在有效期内完成第二因素绕过。故改为用户显式开启。
+    val autofillCopyTotp: Boolean = false,
     val autofillShowTotpNotification: Boolean = false,
     val skipDalVerification: Boolean = false,
     val overrideNoAutofill: Boolean = false,

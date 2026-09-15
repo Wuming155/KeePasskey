@@ -11,9 +11,9 @@
 ## 1. 版本基线（摘要）
 
 - 测试 / 构建 / CI 当前全绿（具体版本、例数、残余面见 [`RESOLVED_LOG.md`](docs/RESOLVED_LOG.md)）。
-  单测基线（2026-09-15，§50 批次后）：**1668 例 / 0 失败 / 0 错误 / 13 跳过**
-  （app 896 / core 65 / crypto 127 / database 377 / sync 203；`--rerun-tasks --max-workers=1` 强制真实执行）；
-  原生内核基线（同日，§50 批次后）：`cargo test` **57 例 / 0 失败**（§50 未触碰原生内核，基线保持；含 ISSUE-P2-56 工作内存清零 4 例 + ISSUE-P2-57 受管缓冲与 sha2 状态擦除 3 例 + ISSUE-P2-58 强度评估线性化 6 例）；
+  单测基线（2026-09-15，§52 批次后）：**1678 例 / 0 失败 / 0 错误 / 13 跳过**
+  （app 902 / core 65 / crypto 127 / database 381 / sync 203；`--rerun-tasks --max-workers=1` 强制真实执行）；
+  原生内核基线（同日，§52 批次后）：`cargo test` **57 例 / 0 失败**（§52 未触碰原生内核，基线保持；含 ISSUE-P2-56 工作内存清零 4 例 + ISSUE-P2-57 受管缓冲与 sha2 状态擦除 3 例 + ISSUE-P2-58 强度评估线性化 6 例）；
   设备侧基线（2026-09-14，§47 批次后）：**32 例 / 0 失败 / 0 跳过**（`app` 15 + `database` 7 +
   `sync` 3 + `crypto` 7），已在 **arm64 真机**（Redmi 4X / LineageOS / Android 17 / **API 37**）全量复跑通过；
   此前既定环境为 x86_64 / API 36.1 模拟器（§34 / §36 / §46）。`app` 15 例含 `QuickUnlockSealDowngradeDeviceTest`
@@ -155,6 +155,20 @@ KeePasskey 是一款原生 Kotlin 开发的现代化 Android 密码管理器。�
   已解密附件快照会留存至下次冷启动——**不得再单独使用「锁定即闭环」这类措辞**。
   `KdbxAttachment.clear()` 对**落盘项**不动作（其字节由多个引用者共享），生命周期由 store 统一收口。
 - 条件写依赖服务端：AWS S3 原子生效；少数兼容存储降级为 HEAD 预检 + 无条件 PUT。
+- **落盘清理为 unlink-only（ISSUE-P2-66，已接受边界）**：`SyncCache` / 附件缓存的清理走
+  `File.delete` / `deleteRecursively`，已 unlink 的扇区在介质 TRIM 前仍可能被恢复（取证级威胁，
+  需物理介质访问能力）。本仓**不**实施应用层覆写擦除——对现代闪存无确定语义且显著拖慢锁定路径；
+  该层面的收窄由平台全盘加密 / FBE 承担。**不得**据此断言「锁定即不可恢复」。
+- **KDBX 内存池的擦除边界与树外可达性（ISSUE-P3-119，如实声明）**：`KdbxDatabase.clearSensitiveData()`
+  擦除**条目树**（受保护字段 / 自定义字段 / 附件 / 历史）与头部 KDF secret，但**不擦内层二进制池**
+  （`InnerHeader.binaries`）——≤ 落盘阈值的附件明文在池中仅随引用丢弃、等待 GC。
+  **树外可达性已逐点核实并收口**：整树引用者只有 `SyncSessionState.lastSyncedDb`（锁库经 `clear()` 释放）
+  与 `SyncConflictController` 的 `pendingLocalDb` / `pendingRemoteDb` / `pendingMergedRoot`
+  （随 `clearPendingConflictSession()` 释放）；同步路径上**仅服务单次内容判定 / 一次性合并**的解析产物
+  已显式擦除（`SyncContentChangeDetector` 的缓存快照树、`SyncConflictController.wipeDiscarded` 的三处丢弃点）。
+  **未实施池内擦除的原因与解除条件**：`KdbxDatabase.copy()` 会**共享同一 `binaries` 列表**
+  （合并路径常态发生），池项擦除须先为 `InnerHeader.BinaryItem` 定义「谁拥有该数组」的所有权规则
+  （对齐 R-CLEAR-2 所有权约定），否则会误伤存活树仍在引用的同一数组；补齐该规则前按已接受边界登记。
 - `ProtectedString` 驻留加密为纵深防御层；持有进程密钥或任意代码执行者仍可在读取瞬间截获明文。
 - 原生内核为 Rust（代价是体积，收益是秘密确定性擦除、Argon2 优于纯 Java 路径）；**arm64 真机已验证**
   （2026-09-14：原生内核 JNI 通路 / 与 BouncyCastle 逐字节一致 / R1 性能闸门 + 真实语料端到端解锁 2/2，

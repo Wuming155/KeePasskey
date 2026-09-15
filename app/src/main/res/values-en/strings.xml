@@ -781,14 +781,14 @@
     <string name="autofill_legacy_sub">Accessibility-based filling compatible with older Android versions</string>
     <string name="autofill_section_ux">Filling experience</string>
     <string name="autofill_inline_title">Inline keyboard suggestions</string>
-    <string name="autofill_inline_sub">Show account suggestions right in the input method bar</string>
+    <string name="autofill_inline_sub">Show account suggestions right in the input method bar; this passes the candidate username and entry title to the input method (which may be a third-party keyboard). Off by default</string>
     <string name="autofill_auto_return_title">Return after filling</string>
     <string name="autofill_auto_return_sub">Go back to the original app once filling completes</string>
     <string name="autofill_clear_clipboard_title">Clear clipboard after fill</string>
     <string name="autofill_clear_clipboard_sub">Remove pasted secrets from the clipboard immediately</string>
     <string name="autofill_section_totp">Code assistance</string>
     <string name="autofill_copy_totp_title">Copy code when filling</string>
-    <string name="autofill_copy_totp_sub">Copy the matching TOTP code while autofilling credentials</string>
+    <string name="autofill_copy_totp_sub">Write the matching TOTP code to the system clipboard while autofilling credentials (readable by foreground apps during the erase window). Off by default</string>
     <string name="autofill_totp_notif_title">Code notification</string>
     <!-- ISSUE-P3-18 honesty fix: the previous copy promised a quick-copy action, but this
          notification carries NO copy action (code + remaining seconds only, auto-expiring). -->

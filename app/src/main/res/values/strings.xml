@@ -788,14 +788,14 @@
     <string name="autofill_legacy_sub">兼容低版本 Android 的无障碍填充方式</string>
     <string name="autofill_section_ux">填充体验</string>
     <string name="autofill_inline_title">键盘内联建议</string>
-    <string name="autofill_inline_sub">在输入法候选栏直接展示账号建议</string>
+    <string name="autofill_inline_sub">在输入法候选栏直接展示账号建议；该通道会把候选的用户名与条目标题交给输入法（可能为第三方键盘），默认关闭</string>
     <string name="autofill_auto_return_title">填充后自动返回</string>
     <string name="autofill_auto_return_sub">完成填充后自动回到原应用</string>
     <string name="autofill_clear_clipboard_title">填充后清空剪贴板</string>
     <string name="autofill_clear_clipboard_sub">粘贴完成即清除剪贴板中的敏感内容</string>
     <string name="autofill_section_totp">验证码辅助</string>
     <string name="autofill_copy_totp_title">填充时复制验证码</string>
-    <string name="autofill_copy_totp_sub">自动填充账号密码的同时复制对应 TOTP 验证码</string>
+    <string name="autofill_copy_totp_sub">自动填充账号密码的同时把对应 TOTP 验证码写入系统剪贴板（擦除窗口内前台应用可读取），默认关闭</string>
     <string name="autofill_totp_notif_title">验证码通知提醒</string>
     <!-- ISSUE-P3-18 诚实化修正：原文案承诺「在通知栏快捷复制」，但本轮通知**不含复制 action**
          （仅展示验证码与剩余秒数，到期自动消失）。文案已改为与实现一致。 -->

@@ -211,13 +211,24 @@ class ExtendedSettingsStore @Inject constructor(
     fun isVerboseSyncLogEnabled(): Boolean =
         prefs?.getBoolean(K_VERBOSE_SYNC_LOG, false) ?: false
 
-    /** ISSUE-P3-03 (43b)：自动填充内联建议开关单键读取（供自动填充服务高频判定）。 */
+    /**
+     * ISSUE-P3-03 (43b)：自动填充内联建议开关单键读取（供自动填充服务高频判定）。
+     *
+     * ISSUE-P2-71：兜底值由 `true` 改为 `false`——同 [isAutofillCopyTotpEnabled]，
+     * 硬编码缺省会让数据类默认值的修改在「无持久化层 / 键缺失」路径失效。
+     */
     fun isInlineSuggestionsEnabled(): Boolean =
-        prefs?.getBoolean(K_INLINE_SUGGESTIONS_ENABLED, true) ?: true
+        prefs?.getBoolean(K_INLINE_SUGGESTIONS_ENABLED, false) ?: false
 
-    /** ISSUE-P3-03 (43b)：填充后复制 TOTP 开关单键读取。 */
+    /**
+     * ISSUE-P3-03 (43b)：填充后复制 TOTP 开关单键读取。
+     *
+     * ISSUE-P2-43：兜底值由 `true` 改为 `false`——该方法自带硬编码缺省（不读
+     * [ExtendedSettings] 默认值），此前仅改数据类默认会让「无持久化层 / 键缺失」路径
+     * 继续按「开启」判定，等于默认关闭形同虚设。
+     */
     fun isAutofillCopyTotpEnabled(): Boolean =
-        prefs?.getBoolean(K_AUTOFILL_COPY_TOTP, true) ?: true
+        prefs?.getBoolean(K_AUTOFILL_COPY_TOTP, false) ?: false
 
     /**
      * ISSUE-P3-42：会话授权宽限开关单键读取（默认关闭）。

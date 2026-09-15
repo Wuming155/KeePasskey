@@ -59,8 +59,10 @@
 | §48 | 存量安全整改批次：KDF 预算 + TOTP 保护 + 剪贴板闭环 + 明文持有者锁观察者 + 换库前置释放 + 附件引用预算 + 完整性门控对称化 + Passkey 归属与验证绑定 | ISSUE-P2-48 / P2-51 / P2-53 / P2-61 / P2-63 / P2-65 / P2-72 / P2-76 / P2-77 / P3-84 / P3-109 / P3-117（+ P2-49 AC①③ 进展） |
 | §49 | 存量安全整改批次（续）：密钥文件纯字节解析 + DAL 有界流式读取 + 选择器会话锁定对齐 + CM 保存 URL 分流 + KDF 参数与秘密治理 + 依赖扫描触发面 | ISSUE-P2-50 / P2-52 / P2-54 / P2-55 / P2-56 / P2-57 / P2-58 / P2-59 / P2-60 / P2-62 / P2-78 |
 | §50 | 日志与对象字符串化卫生批次：四类 `toString()` 明文泄漏面 + 日志抽样口径按「日志调用」特征跨行抽取 | ISSUE-P2-68 / ISSUE-P2-69 |
+| §51 | 自动填充默认值与内存保护口径批次：TOTP 复制 / IME 内联建议默认关闭 + 内存密封与写出标志口径分离 + unlink-only 边界登记 | ISSUE-P2-43 / P2-64 / P2-66 / P2-71 |
+| §52 | 同步解析落盘与内存池擦除边界批次：远端大附件解析期落盘 + 树外可达性收口 + 单次解析产物显式擦除 | ISSUE-P2-67 / P3-119 |
 
-> 各批次验收证据（用例数 / 通过 / 失败 / 跳过）分别见 §2.22、§3.1、§4.1、§5、§6、§7、§8、§9、§10、§11、§12、§13、§14、§15、§16、§17、§18、§19、§20.3、§21.4、§22.9、§23.1、§24.3、§25.2、§26.3、§49.2、§50.2。
+> 各批次验收证据（用例数 / 通过 / 失败 / 跳过）分别见 §2.22、§3.1、§4.1、§5、§6、§7、§8、§9、§10、§11、§12、§13、§14、§15、§16、§17、§18、§19、§20.3、§21.4、§22.9、§23.1、§24.3、§25.2、§26.3、§49.2、§50.2、§51.2、§52.2。
 
 ---
 
@@ -3266,4 +3268,169 @@ $env:ANDROID_HOME\build-tools\<ver>\apksigner.bat verify --print-certs <产物>
    若后续设备侧需要更细线索，应在**解析层**产出结构化错误码（而非恢复 message 透传）。
 7. **`ACTIVE_ISSUES.md` 的 P2 计数**：本批按「表行 + 标题条目」双形式口径复核后由 **19 → 17**
    （表行 13 → 11，标题条目仍 6），与 §49 第 13 条确立的复算纪律一致。
+
+---
+
+## §51 自动填充默认值与内存保护口径批次（2026-09-15）：P2-43 / P2-64 / P2-66 / P2-71
+
+> **本批次缘起**：认领四项开放条目——`ISSUE-P2-43`（红队转登：`autofillCopyTotp` 默认开启）、
+> `ISSUE-P2-71`（敏感数据流审计 E2：IME 内联建议默认开启）、
+> `ISSUE-P2-64`（审计 M1：MemoryProtection 的「内存密封」与「写出标志」被混为一谈）、
+> `ISSUE-P2-66`（审计 M4：落盘清理 unlink-only 未登记为已接受边界）。
+> 前三项落在 JVM 侧并可完全由单测覆盖，第四项为文档登记（其 AC①/③ 已在第四轮复核中被撤销）。
+
+### 51.1 交付清单
+
+| 编号 | 级别 | 缺陷（一句话） | 关键改动 | 依据 |
+|---|:--:|---|---|---|
+| **ISSUE-P2-43** | P2 | `autofillCopyTotp` **默认开启**：每次自动填充确认都把该条目的 TOTP 动态码写入系统剪贴板（`AutofillConfirmActivity` → `AutofillTotpCopyPolicy` → `ClipboardSecurityManager.copySensitiveText`）；擦除窗口内前台应用可读，且定时擦除可由用户关闭（`ISSUE-P3-84`）→ 与口令泄露组合可在有效期内完成第二因素绕过 | ① **三处默认值同步翻转为关闭**：数据类 `ExtendedSettings.autofillCopyTotp`、UI 投影 `SettingsUiState.autofillCopyTotp`，**以及**单键读取 `ExtendedSettingsStore.isAutofillCopyTotpEnabled()` 的硬编码兜底（原 `prefs?.getBoolean(K, true) ?: true`——**只改前两处无效**，该路径才是自动填充运行期真正读的值）；② 设置页文案（中 / 英）如实说明「会写入系统剪贴板，擦除窗口内前台应用可读，默认关闭」；③ 新增回归断言（默认值 / 单键兜底 / 默认配置下对"确有 TOTP 的条目"也不触达剪贴板 / 显式开启后仍生效） | 红队 `AP-22′`；敏感数据铁律（`AGENTS.md` §3.2） |
+| **ISSUE-P2-71** | P2 | `inlineSuggestionsEnabled` **默认开启**：IME 内联建议把**候选用户名 / 条目标题**作为文案交给系统输入法（`AutofillInlinePresentationFactory.build(title = username.ifBlank { entry.title }, subtitle = entry.title)`），而 IME 可能是第三方 / 云端联想键盘 → 条目名与账号名持续越过应用边界 | ① 同型三处默认值翻转（数据类 / UI 投影 / 单键读取硬编码兜底）；② 设置页文案如实说明该通道把候选名交给输入法；③ 断言覆盖默认值、单键兜底、构建器「开关为前置门控」的顺序证据；④ 明确**未**采用「改为固定文案」方案（那会使该特性彻底失去价值，而默认关闭已消除默认外泄） | 审计 E2；`AGENTS.md` §3.2 |
+| **ISSUE-P2-64** | P2 | 「内存密封」与「写出标志」两条口径被混为一谈：审计表述把「库级 `MemoryProtectionConfig` 不影响内存密封」当作缺陷，而实际上内存密封由**字段自身的** `ProtectedString.isProtected` 决定（读侧取 XML `Protected` 属性），库级配置只决定写出侧 `Protected` 标志（`KdbxXmlEntrySerializer.resolveProtectedFlag`，官方 `=` 语义） | ① 在 [MemoryProtectionConfig](../../core/src/main/java/com/keepasskey/core/model/MemoryProtectionConfig.kt) 的 KDoc **显式分离两条口径**（内存密封 = per-field；写出标志 = 库级覆盖标准五字段），并点名「Title / UserName / URL / Notes 在内存中未密封」属既定的有意口径；② **AC② 裁决：不采纳「库级开启即内存密封」**（官方不以本配置作内存密封开关；采纳会与官方客户端语义分叉；内存密封已有 per-field 契约）；③ 新增 `MemoryProtectionSemanticsTest`（3 例）锁定：**恶意库写 `<ProtectPassword>False</ProtectPassword>` 不得削弱口令的驻留密封，也不得让产物把口令降级为未保护**；内存密封与库级配置无关；标准字段 `Protected` 的官方归一化行为 | 审计 M1；`AGENTS.md` §3.3（官方实现为格式裁决者） |
+| **ISSUE-P2-66** | P2 | 落盘清理为 **unlink-only**（`File.delete` / `deleteRecursively`），已 unlink 扇区在介质 TRIM 前可恢复；此前未在任何"已知工程限界"中登记 | 按第四轮复核后的收敛 AC 执行：**登记为已接受边界**并写入 `AGENTS.md` §6（说明威胁条件 = 需物理介质访问能力；不实施应用层覆写擦除的理由：对现代闪存无确定语义且显著拖慢锁定路径；该层收窄由平台 FBE 承担），并显式禁止据此断言「锁定即不可恢复」。**AC①/③ 不实施代码改动**（原「`clearAll()` 不清 `.tmp`」子断言已被第四轮证伪并撤销） | 审计 M4；第四轮复核更正 |
+
+### 51.2 验收证据
+
+```powershell
+# ① 定向验证（三个新增 / 改动用例类）
+.\gradlew.bat :app:testDebugUnitTest --tests "com.keepasskey.app.autofill.*"
+# → BUILD SUCCESSFUL；AutofillPrivacyDefaultsTest tests=6 skipped=0 failures=0 errors=0
+.\gradlew.bat :database:testDebugUnitTest --tests "*MemoryProtectionSemanticsTest"
+# → BUILD SUCCESSFUL；MemoryProtectionSemanticsTest tests=3 skipped=0 failures=0 errors=0
+
+# ② 全量单测（强制真实执行）
+.\gradlew.bat test --rerun-tasks --max-workers=1
+# → BUILD SUCCESSFUL in 2m 42s；114 actionable tasks: 114 executed
+#   结果汇总（build/test-results/**/TEST-*.xml）：
+#   tests=1677 failures=0 errors=0 skipped=13
+#   （app 902 / core 65 / crypto 127 / database 380 / sync 203）——较上批 +9（app +6 / database +3）
+cd crypto/src/main/rust; cargo test
+# → test result: ok. 57 passed; 0 failed; 0 ignored（本批未触碰原生内核）
+.\gradlew.bat assembleRelease
+# → BUILD SUCCESSFUL in 2m 1s；216 actionable tasks: 40 executed, 176 up-to-date
+#   产物：D:\GithubWorkplace\KeePasskey\app\build\outputs\apk\release\app-release.apk
+#         （15,460,647 字节，2026-09-15 11:24:46）
+$env:ANDROID_HOME\build-tools\<ver>\apksigner.bat verify --print-certs <产物>
+# → V3.0 Signer: certificate SHA-256 digest: f3a6f0924d121e273be022589fa68724703cb7d906caa33fe4cded192cca842e
+```
+
+**新增 / 改动用例（本批 +9 例 + 2 例既有断言反转）**：
+
+| 模块 | 用例 | 覆盖 |
+|---|---|---|
+| `app` | `AutofillPrivacyDefaultsTest`（+6，新文件） | ① 两通道默认值在数据类与 UI 状态两处均为 false；② **单键读取不得回退为开启**（正则断言源码中不存在 `K_AUTOFILL_COPY_TOTP, true` / `K_INLINE_SUGGESTIONS_ENABLED, true` 形式的兜底——本批修复的真实陷阱）；③ **端到端**：默认配置 × 真实决策层 `AutofillTotpCopyPolicy.shouldCopy` 对"确有 TOTP 的条目"仍为 false（不触达剪贴板）；④ 显式开启后两通道仍可持久化并生效（防「默认关闭」退化为「功能被删」）；⑤ 构建器以开关为**前置**门控（`if (!isEnabled()) return null` 出现在读取 `inlineRequest` 之前）；⑥ 中英双语文案须分别点明「剪贴板」/「输入法」与「默认关闭」/「Off by default」 |
+| `app` | `ExtendedSettingsStoreSingleKeyTest`（2 例**断言反转**） | 原为「内联建议默认开启」「填充后复制 TOTP 默认开启」——该文件本身的契约即「单键读取默认值必须与数据类字段默认值逐项一致」，故随语义变更同步反转为 `assertFalse`（这两条正是本批缺陷的"守护性误锁"，是全量重跑才暴露的，见 51.3.1） |
+| `database` | `MemoryProtectionSemanticsTest`（+3，新文件） | ① **不可降级不变式**：文件写 `<ProtectPassword>False</ProtectPassword>` + 口令字段 `Protected="True"` → 解析后 `memoryProtection == MemoryProtectionConfig()`（读侧整对象重置）、字段 per-value 密封未被改写、重写产物仍写 `<ProtectPassword>True</ProtectPassword>` 且口令带 `Protected="True"`；② **两条口径独立**：`ProtectUserName` 无论文件写 True 还是缺失，`UserName` 字段的 per-value 密封恒保持（内存密封不由库级配置驱动）；③ **官方归一化如实声明**：标准字段 `Protected` 属性按库级配置（读侧恒为默认）无条件覆盖，故重写**不写回** `UserName` 的 per-value `Protected`——与既有锁「库级关闭时标准字段必须覆盖 per-value 不写 Protected」同源，属官方裁决而非缺陷 |
+
+### 51.3 已知边界与口径（如实声明）
+
+1. **本批最实质的发现：默认值翻转必须同时改「单键读取的硬编码兜底」**。
+   `ExtendedSettingsStore.isAutofillCopyTotpEnabled()` / `isInlineSuggestionsEnabled()` 各自带
+   `prefs?.getBoolean(K, true) ?: true`——这两个方法**不读**数据类默认值，且正是自动填充运行期
+   （`AutofillConfirmActivity` / `AutofillInlinePresentationFactory`）真正调用的入口。
+   若只改 `ExtendedSettings` / `SettingsUiState` 的字段默认值，则「无持久化层 / 键缺失」路径仍按
+   **开启**判定——即「默认关闭」会被静默抵消，且**该失效不会在设置页显示上体现**（UI 显示关闭、
+   行为却开启）。本批把该陷阱写成显式回归断言（含源码正则），防止后人只改一处。
+   该陷阱的守护性误锁（`ExtendedSettingsStoreSingleKeyTest` 里两条断言旧的"默认开启"）在全量
+   重跑时暴露，已随语义同步反转。
+2. **`ISSUE-P2-64` 的 AC③ 前提经官方语义更正（如实声明）**：AC③ 原文为「打开 `ProtectUserName=True`
+   的库并保存后**不得**被降级为未保护」。经核实，本仓对标准五字段的 `Protected` 属性按官方
+   `KdbxFile.Write.cs:844-853` 的 `=`（无条件覆盖）语义处理，而库级配置读侧**恒定重置为默认值**
+   （官方 `KdbxFile.Read.cs:246-248`），故 `UserName` 的 per-value `Protected` 在重写时**确实不会写回**
+   ——这是**官方归一化行为**，且已被既有回归锁
+   `KdbxEntrySerializerProtectedFlagTest.库级关闭时标准字段必须覆盖 per-value 不写 Protected`
+   （含"请勿按直觉改回 OR"注释）明确固定；按 `AGENTS.md` §3.3（官方实现为格式裁决者），本批**不改**
+   该行为。**真正需要防的回归**是本批新锁的口令面：库级默认 `protectPassword=true` 使口令**恒受保护**，
+   恶意库无法通过文件内容关闭口令的驻留密封或把产物降级。AC③ 的其余可证部分已由该用例覆盖，
+   未覆盖面（`UserName` 等非口令标准字段的 per-value 保留）属官方语义取舍，不单独立项。
+3. **`ISSUE-P2-66` 的 AC 收敛**：本批只做文档登记（`AGENTS.md` §6），**无代码改动、无新增用例**——
+   其 AC①（给 `clearAll()` 补 `deleteOrphanTmpFiles`）与 AC③（断言无 `.tmp` 残留）已在第四轮复核中
+   因「`clearAll()` 遍历全部直接子项、`.tmp` 必被删除」被证伪而**撤销**，强行实施属冗余改动。
+4. **未采用的替代方案（`ISSUE-P2-71` AC① 的另一分支）**：未把内联展示内容改为「不含用户名 / 标题的
+   固定文案」——该方案会让内联建议退化为无信息量的占位卡片（特性价值归零），而"默认关闭 + 显式
+   开启 + 文案披露"在保留特性可用性的同时消除了默认外泄；两者对"默认不外泄"的效力等价。
+5. **两项默认值变更的用户可见影响**：升级后**未显式开启过**这两个开关的用户，行为变为
+   「TOTP 不再自动入剪贴板」「键盘上方不再出现建议条」；自动填充本身（下拉 / 填充对话框路径）
+   **完全不受影响**。已显式开启过的用户不受影响（持久化值为 `true`，单键读取命中持久化分支）。
+   README 的「含 IME 内联建议」表述仍成立（特性存在，只是默认关闭），未改动。
+6. **本批未触及的相邻项**：`autofillShowTotpNotification`（默认已关闭，无需整改）、
+   `AutofillTotpCopyPolicy` 的决策逻辑本身（未改语义，仅其输入默认值变化）、
+   以及 `ISSUE-P3-84`（剪贴板擦除可被用户关闭）——后者仍是独立的既有条目。
+7. **`ACTIVE_ISSUES.md` 的 P2 计数**：本批按「表行 + 标题条目」双形式口径复核后由 **17 → 13**
+   （表行 11 → 8，标题条目 6 → 5；`P2-43` 以标题条目形式承载），与 §49 第 13 条确立的复算纪律一致。
+
+---
+
+## §52 同步解析落盘与内存池擦除边界批次（2026-09-15）：P2-67 / P3-119
+
+> **本批次缘起**：认领 `ISSUE-P2-67`（审计 L9：同步下载路径绕过附件落盘），其 AC③ 明示须与
+> `ISSUE-P3-119`（威胁建模 Q-10 / T-15 残余：内存附件池无擦除入口 + 三处同步路径不调
+> `clearSensitiveData()`）**同批**——两项改的正是同一套「解密树生命周期与擦除语义」。
+
+### 52.1 交付清单
+
+| 编号 | 级别 | 缺陷（一句话） | 关键改动 | 依据 |
+|---|:--:|---|---|---|
+| **ISSUE-P2-67** | P2 | 同步路径解析远端库时**未传 `binaryStore`**：`SyncDatabaseCodec.parseKdbxBytes` 直调 `KdbxFile.load(...)`（`binaryStore` 默认 `null`）→ 远端库里**超过落盘阈值的附件无论多大都内联进 `InnerHeader` 池**（解密态明文整批常驻），随后仅置空引用、从不零化 | ① 解析**收口到会话层**：新增 `DatabaseSession.parseExternalDatabase(bytes)`，内部用**本会话同一个** `binaryStore` 调 `KdbxFile.load`（凭据克隆 + `finally` 清零同既有契约；**不取会话互斥锁**——同步调用方已持 `SyncSessionState.mutex`，再加锁必自死锁）；② `SyncDatabaseCodec.parseKdbxBytes` 改为委托该 API，失败仍只落「异常类型」日志；③ **由构造关系保证「与主会话一致」**——`SyncCoordinator` 的 `SyncDatabaseCodec(databaseSession, debugLog)` 兜底构造路径也自动获得 store，**新增调用方无法再忘记传参**（这是相对「给 codec 加注入参数」的关键取舍：后者可被兜底构造绕过）；④ **AC② 断言**：新增 `ExternalDatabaseParseSpillTest`（1 例）用真实写入管线生成含 1.2 MB 附件的库，断言解析期 store 收到写入、解析树附件 `inlineBytes()` 为空且 `binarySource() != null`、读回字节逐字一致 | 审计 L9；`AGENTS.md` §6 附件落盘边界 |
+| **ISSUE-P3-119** | P3 | ① 内存附件池（`InnerHeader.binaries`）无擦除入口 → ≤1 MiB 附件明文仅随引用丢弃、等待 GC；② 三处同步路径（`SyncConflictController` / `SyncContentChangeDetector` / `loadAndApplyRemoteBytes`）**从不调用** `clearSensitiveData()`，解析出的整棵解密树只靠 GC | ① **树外可达性逐点核实并写入文档**（`AGENTS.md` §6）：整树引用者只有 `SyncSessionState.lastSyncedDb`（锁库经 `clear()` 释放）与 `SyncConflictController` 的 `pendingLocalDb` / `pendingRemoteDb` / `pendingMergedRoot`（随 `clearPendingConflictSession()` 释放）；② **仅服务单次判定 / 一次性合并**的解析产物**显式擦除**：`SyncContentChangeDetector` 的缓存快照树（`finally` 擦除）、`SyncConflictController` 的三处丢弃点（远端解析失败 ⇒ 擦 localDb；不可信 base ⇒ 擦 parsedBase；合并序列化失败 ⇒ 同批擦三方树），并经 `wipeDiscarded()` 集中声明**使用前提**；③ **池内擦除按已接受边界登记**（含解除条件，见 52.3.2）；④ `loadAndApplyRemoteBytes` 明确**不**擦除——其产物被采用为会话库，所有权随之下移 | 威胁建模 Q-10 / T-15；`AGENTS.md` §3.2 / §6 |
+
+### 52.2 验收证据
+
+```powershell
+# ① 定向验证（新增用例 + 受影响模块编译）
+.\gradlew.bat :database:testDebugUnitTest --tests "*ExternalDatabaseParseSpillTest" :app:compileDebugKotlin
+# → BUILD SUCCESSFUL；ExternalDatabaseParseSpillTest tests=1 skipped=0 failures=0 errors=0
+
+# ② 全量单测（强制真实执行）
+.\gradlew.bat test --rerun-tasks --max-workers=1
+# → BUILD SUCCESSFUL in 2m 10s；114 actionable tasks: 114 executed
+#   结果汇总（build/test-results/**/TEST-*.xml）：
+#   tests=1678 failures=0 errors=0 skipped=13
+#   （app 902 / core 65 / crypto 127 / database 381 / sync 203）——较上批 +1（database）
+cd crypto/src/main/rust; cargo test
+# → test result: ok. 57 passed; 0 failed; 0 ignored（本批未触碰原生内核）
+.\gradlew.bat assembleRelease
+# → BUILD SUCCESSFUL in 1m 45s；216 actionable tasks: 27 executed, 189 up-to-date
+#   产物：D:\GithubWorkplace\KeePasskey\app\build\outputs\apk\release\app-release.apk
+#         （15,460,647 字节，2026-09-15 11:39:32 —— 晚于本批最后一次源码修改 11:32:25，确为本批产物）
+$env:ANDROID_HOME\build-tools\<ver>\apksigner.bat verify --print-certs <产物>
+# → V3.0 Signer: certificate SHA-256 digest: f3a6f0924d121e273be022589fa68724703cb7d906caa33fe4cded192cca842e
+```
+
+**新增 / 改动用例（本批 +1 例）**：
+
+| 模块 | 用例 | 覆盖 |
+|---|---|---|
+| `database` | `ExternalDatabaseParseSpillTest`（+1，新文件） | **AC② 直接证据**：用生产写入管线（`KdbxFile.save`）生成含 1.2 MB 附件（> `BinaryStorePolicy.DEFAULT_THRESHOLD_BYTES` 的 1 MiB）的库 → 建立会话凭据 → 清空记录后调用 `session.parseExternalDatabase(bytes)` → 断言 ① 解析期 store **确实收到写入**（未落盘即失败，**非空跑**：旧实现不传 store，此断言必红）；② 解析树中附件 `inlineBytes()` 为空且 `binarySource() != null`（树内不留 1.2 MB 内联副本）；③ 落盘读回字节与原文逐字一致（落盘不损坏内容） |
+
+### 52.3 已知边界与口径（如实声明）
+
+1. **为什么把解析收口到会话层，而不是给 codec 加一个注入参数**：`SyncCoordinator` 保留了一条
+   `?? SyncDatabaseCodec(databaseSession, debugLog)` 的**兜底构造**（测试 / 非 Hilt 装配）。
+   若把 store 做成 codec 的构造参数，该兜底路径会以 `null` 传入，**缺陷在这些路径原样复现**；
+   收口到 `DatabaseSession.parseExternalDatabase` 后，store 取自会话自身，
+   **「与主会话一致」成为不可绕过的构造事实**。这是本批最关键的设计取舍。
+2. **`ISSUE-P3-119` ② 的池内擦除为何按「已接受边界」登记而非实施**（含解除条件）：
+   `KdbxDatabase.copy()`（合并路径**常态**发生，如 `localDb.copy(rootGroup = mergedRoot, …)`）
+   会**共享同一 `binaries` 列表**，故「擦池」必须先把「谁拥有该数组」写成所有权规则
+   （对齐 `R-CLEAR-2`），否则会误伤仍在存活树中引用的同一数组——这与本仓已有的
+   `KdbxGroup.clearSensitiveData` / `clearSensitiveIdentitiesNotIn` 身份判据是同一类问题。
+   解除条件：为 `InnerHeader.BinaryItem` 补「所有权 + 身份判据」后即可实施。
+   现状（≤1 MiB 附件明文在池中等 GC）已如实写入 `AGENTS.md` §6，**不得**据此推断「锁定即已全部擦除」。
+3. **`ISSUE-P3-119` ②' 的「三处」并非同质**（逐点核实结论）：
+   - `SyncContentChangeDetector` 的缓存快照树：**纯只读比较后丢弃** → 已显式擦除 ✅；
+   - `SyncConflictController`：**仅三处「确定丢弃」**可擦（远端解析失败 / base 不可信 / 合并序列化失败）；
+     `pendingLocalDb` / `pendingRemoteDb` / `pendingMergedRoot` 会在用户决策阶段再次被读取，
+     且成功路径下其节点**已被 `updateDatabaseMeta` 采用为会话库**（合并器复用原对象、非深拷贝）——
+     **在这些位置擦除会静默清空活动库**，故明确不擦，改由会话生命周期收口（已写入 `AGENTS.md` §6）；
+   - `loadAndApplyRemoteBytes`：产物即会话库 → **设计上不应擦除**（已在代码注释中注明原因）。
+   即：AC②' 的「补 `clearSensitiveData()`」在**语义安全的位置全部已补**，另两处属「不可擦」而非「漏擦」。
+4. **`parseExternalDatabase` 的并发语义**：不加会话互斥锁是**有意**（避免与
+   `SyncCycleRunner.runSyncCycle` / `SyncCoordinator.resolveConflicts` 已持有的
+   `SyncSessionState.mutex` 自死锁）。它只读凭据克隆、不改任何会话状态，
+   因此与「会话正在被并发改写」不冲突；但**不得**据此把它当作可替换当前库的操作
+   （替换当前库仍必须走 `openStream` / `updateDatabaseMeta` 等持锁路径）。
+5. **本批未触及的相邻项**：`ISSUE-P3-118`（`ByteArrayOutputStream` 内部缓冲不擦除）、
+   `ISSUE-P3-116`（彻底退出不清缓存）仍为独立开放条目，未在本批一并整改。
+6. **计数**：本批 `ACTIVE_ISSUES.md` 的 P2 由 **13 → 12**（表行 8 → 7，标题条目仍 5）、
+   P3 由 **47 → 46**（表行 40 → 39，标题条目仍 7），均按「表行 + 标题条目」双形式口径复算。
 

@@ -9,12 +9,14 @@ import com.keepasskey.core.session.SessionLockObserver
 import com.keepasskey.database.file.KdbxDatabase
 import com.keepasskey.database.file.KdbxFile
 import com.keepasskey.database.history.HistoryManager
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.Arrays
@@ -150,6 +152,47 @@ class DatabaseSession(
      * 调用方在使用完毕后必须显式清零返回数组（例如 `Arrays.fill(...)`），绝不可长期驻留堆内存。
      */
     fun <T> useCredentials(block: (CharArray?, ByteArray?) -> T): T = credentials.useCredentials(block)
+
+    /**
+     * ISSUE-P2-67：以**本会话同一个**附件存储解析外来 KDBX 字节（同步远端 / 缓存快照 / 合并底版）。
+     *
+     * 存在意义：同步路径此前直接调 `KdbxFile.load(...)` 而**未传** `binaryStore`，导致远端库里
+     * 超过落盘阈值的附件无论多大都内联进堆（`InnerHeader` 池持有全部明文），随后仅置空引用、
+     * 从不零化。把解析收口到会话层后，「与主会话一致」由**构造关系**保证，
+     * 任何新增调用方都不可能再忘记传 store。
+     *
+     * 语义边界（**改动前必读**）：
+     * 1. **不获取会话互斥锁**——同步周期的调用方（`SyncCycleRunner` / `SyncConflictController`）
+     *    本就持有 `SyncSessionState.mutex`，此处再加锁必然自死锁；本方法只借用凭据克隆，
+     *    不改动任何会话状态（不替换当前库、不写凭据缓存、不改 [state]）；
+     * 2. 凭据克隆在 `finally` 中显式清零，与 [useCredentials] 的契约一致；
+     * 3. **返回值所有权归调用方**：除「采用为会话库」的情形外，调用方在丢弃返回的
+     *    [KdbxDatabase] 之前**必须**调用 `clearSensitiveData()`（≤ 落盘阈值的附件仍为内联明文）。
+     */
+    suspend fun parseExternalDatabase(bytes: ByteArray): KdbxResult<KdbxDatabase> =
+        withContext(Dispatchers.Default) {
+            useCredentials { pwd, key ->
+                val pwdClone = pwd?.clone()
+                val keyClone = key?.clone()
+                try {
+                    KdbxResult.Success(
+                        KdbxFile.load(
+                            ByteArrayInputStream(bytes),
+                            pwdClone,
+                            keyClone,
+                            binaryStore
+                        )
+                    )
+                } catch (cancellation: CancellationException) {
+                    throw cancellation
+                } catch (t: Throwable) {
+                    KdbxResult.Failure(t)
+                } finally {
+                    pwdClone?.let { Arrays.fill(it, '0') }
+                    keyClone?.let { Arrays.fill(it, 0.toByte()) }
+                }
+            }
+        }
 
     /**
      * 创建全新密码库文件并打开会话（ISSUE-P3-21 复合密钥三分支）。

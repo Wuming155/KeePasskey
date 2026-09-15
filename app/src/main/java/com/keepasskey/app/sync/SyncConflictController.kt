@@ -227,7 +227,12 @@ class SyncConflictController @Inject constructor(
         val localDb = codec.parseKdbxBytes(localBytes)
             ?: return@withContext SyncOutcome.Error(strings.get(R.string.sync_error_decrypt_local_conflict_failed))
         val remoteDb = codec.parseKdbxBytes(remoteBytes)
-            ?: return@withContext SyncOutcome.Error(strings.get(R.string.sync_error_decrypt_remote_conflict_failed))
+            ?: run {
+                // ISSUE-P3-119：远端解析失败即整体放弃，localDb 无处可去（未被任何存活对象引用），
+                // 显式擦除而非留给 GC。
+                wipeDiscarded(localDb)
+                return@withContext SyncOutcome.Error(strings.get(R.string.sync_error_decrypt_remote_conflict_failed))
+            }
 
         // F2 修复：base 快照必须通过三重可信检验——存在、可解析、且内容与本地字节不同
         // （本地工作副本污染判定：KDBX4 随机 IV 使同一内容的两次序列化字节必然不同，
@@ -238,6 +243,9 @@ class SyncConflictController @Inject constructor(
         // 同字段分叉进入冲突清单交用户决策（宁多冲突不静默丢数据）。
         val parsedBase = baseSnapshotBytes?.let { codec.parseKdbxBytes(it) }
         val trustedBase = parsedBase?.takeIf { !baseSnapshotBytes.contentEquals(localBytes) }
+        // ISSUE-P3-119：被判为「不可信 base」的解析产物随即被丢弃（baseSnapshotBytes 已被本地
+        // 内容顶替），不再被任何存活对象引用 → 显式擦除。
+        if (parsedBase != null && trustedBase == null) wipeDiscarded(parsedBase)
 
         val trustedBaseLite = trustedBase?.let { KdbxDatabaseLite(it.rootGroup, it.deletedObjects) }
         val baseLite = trustedBaseLite ?: KdbxDatabaseLite(KdbxGroup(name = ""), emptyList())
@@ -278,7 +286,14 @@ class SyncConflictController @Inject constructor(
                 deletedObjects = mergeResult.mergedDeletedObjects
             )
             val mergedBytes = codec.serializeLocalDatabase(mergedDb)
-                ?: return@withContext SyncOutcome.Error(strings.get(R.string.sync_error_serialize_merged_failed))
+                ?: run {
+                    // ISSUE-P3-119：序列化失败即整体放弃本次合并（mergedDb / 双方树均不被采用），
+                    // 三棵解析产物同批显式擦除（合并产物本身也在此丢弃，不存在共享引用者）。
+                    wipeDiscarded(localDb)
+                    wipeDiscarded(remoteDb)
+                    wipeDiscarded(trustedBase)
+                    return@withContext SyncOutcome.Error(strings.get(R.string.sync_error_serialize_merged_failed))
+                }
 
             val uploadResult = syncEngine.markResolvedAndUpload(remotePath, mergedBytes)
             if (uploadResult.isSuccess) {
@@ -297,6 +312,21 @@ class SyncConflictController @Inject constructor(
                 )
             }
         }
+    }
+
+    /**
+     * ISSUE-P3-119：丢弃「仅服务本次判定 / 合并、且不被任何存活对象引用」的解析产物前**显式擦除**。
+     *
+     * 使用前提（**逐点确认，不可套用**）：
+     * - 该树的节点**没有**被 [KdbxMerger] 产物或会话库继续引用——合并器对「远端独有 / 本地独有」
+     *   条目**复用原对象**（非深拷贝），因此
+     *   「已被 [DatabaseSession.updateDatabaseMeta] 采用为会话库的树」与
+     *   「其节点进入待决合并底版 / pending 快照的树」**一律不得擦除**，否则会静默清空活动库内容；
+     * - 该树也不会在本次调用返回后被读取（如 `pendingLocalDb` / `pendingRemoteDb` 会在用户决策阶段
+     *   再次被读取，故其释放只能随冲突会话结束由会话生命周期收口）。
+     */
+    private fun wipeDiscarded(db: KdbxDatabase?) {
+        db?.clearSensitiveData()
     }
 
     private fun applyResolvedEntryToGroup(

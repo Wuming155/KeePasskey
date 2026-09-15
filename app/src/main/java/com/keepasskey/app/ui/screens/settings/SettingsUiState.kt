@@ -129,9 +129,11 @@ data class SettingsUiState(
     val passkeySupportEnabled: Boolean = true,
     val autofillServiceEnabled: Boolean = true,
     val offerSaveCredentials: Boolean = true, // KP2A: 提示保存新登录凭证
-    val inlineSuggestionsEnabled: Boolean = true, // KP2A: 键盘上方内联候选条 (Android 11+)
+    // ISSUE-P2-71：默认关闭——该通道把候选用户名 / 条目标题交给输入法（见 ExtendedSettings 同名字段）
+    val inlineSuggestionsEnabled: Boolean = false, // KP2A: 键盘上方内联候选条 (Android 11+)
     val autoReturnFromQuery: Boolean = true, // KP2A: 填充或选定条目后自动返回原应用
-    val autofillCopyTotp: Boolean = true, // KP2A: 填充后自动将 TOTP 动态码复制到剪贴板
+    // ISSUE-P2-43：默认关闭——开启后 TOTP 动态码会被写入剪贴板（见 ExtendedSettings 同名字段）
+    val autofillCopyTotp: Boolean = false, // KP2A: 填充后自动将 TOTP 动态码复制到剪贴板
     val autofillShowTotpNotification: Boolean = false, // KP2A: 填充后在通知栏显示 TOTP 验证码
     val skipDalVerification: Boolean = false, // KP2A: 跳过数字资产链接 (DAL) 校验（ISSUE-P2-02 已接线：Passkey 注册门控）
     val overrideNoAutofill: Boolean = false, // KP2A: 强制忽略应用的禁止自动填充标记
