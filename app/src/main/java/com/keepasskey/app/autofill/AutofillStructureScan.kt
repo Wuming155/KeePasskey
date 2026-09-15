@@ -22,7 +22,20 @@ internal data class ParsedAutofillNode(
     /** ISSUE-P3-43：页面是否允许对该节点自动填充（`importantForAutofill`） */
     val importantForAutofill: Boolean,
     val text: String
-)
+) {
+    /**
+     * ISSUE-P2-68（审计 M6）：**覆写默认 `toString()`**。
+     *
+     * `text` 为页面字段的**当前内容**（可能是用户刚输入的明文，如密码框），
+     * `htmlName` / `label` 亦可能含私密标识；默认数据类实现会把三者整份展开。
+     * 此处只出结构摘要与非秘密属性（节点 id、提示数、输入类型、可见性、域）。
+     */
+    override fun toString(): String =
+        "ParsedAutofillNode(autofillId=$autofillId, autofillHints=${autofillHints.size}, " +
+            "inputType=$inputType, isFocused=$isFocused, hasHtmlName=${htmlName != null}, " +
+            "hasLabel=${label != null}, webDomain=$webDomain, isVisible=$isVisible, " +
+            "importantForAutofill=$importantForAutofill, textLength=${text.length})"
+}
 
 /**
  * 结构树扫描结果：原始解析节点与投影扫描节点按同一顺序一一对应。

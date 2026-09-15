@@ -57,8 +57,10 @@
 | §46 | P1 双项整改批次：软件级 Keystore 快速解锁降级确认 + 重打包威胁告知留痕 | ISSUE-P1-22 / ISSUE-P1-23 |
 | §47 | 设备侧真机基线批次：两条「模拟器环境假设」用例整改 + arm64 真机全量实测 | 设备侧用例缺陷（无编号） |
 | §48 | 存量安全整改批次：KDF 预算 + TOTP 保护 + 剪贴板闭环 + 明文持有者锁观察者 + 换库前置释放 + 附件引用预算 + 完整性门控对称化 + Passkey 归属与验证绑定 | ISSUE-P2-48 / P2-51 / P2-53 / P2-61 / P2-63 / P2-65 / P2-72 / P2-76 / P2-77 / P3-84 / P3-109 / P3-117（+ P2-49 AC①③ 进展） |
+| §49 | 存量安全整改批次（续）：密钥文件纯字节解析 + DAL 有界流式读取 + 选择器会话锁定对齐 + CM 保存 URL 分流 + KDF 参数与秘密治理 + 依赖扫描触发面 | ISSUE-P2-50 / P2-52 / P2-54 / P2-55 / P2-56 / P2-57 / P2-58 / P2-59 / P2-60 / P2-62 / P2-78 |
+| §50 | 日志与对象字符串化卫生批次：四类 `toString()` 明文泄漏面 + 日志抽样口径按「日志调用」特征跨行抽取 | ISSUE-P2-68 / ISSUE-P2-69 |
 
-> 各批次验收证据（用例数 / 通过 / 失败 / 跳过）分别见 §2.22、§3.1、§4.1、§5、§6、§7、§8、§9、§10、§11、§12、§13、§14、§15、§16、§17、§18、§19、§20.3、§21.4、§22.9、§23.1、§24.3、§25.2、§26.3。
+> 各批次验收证据（用例数 / 通过 / 失败 / 跳过）分别见 §2.22、§3.1、§4.1、§5、§6、§7、§8、§9、§10、§11、§12、§13、§14、§15、§16、§17、§18、§19、§20.3、§21.4、§22.9、§23.1、§24.3、§25.2、§26.3、§49.2、§50.2。
 
 ---
 
@@ -3179,4 +3181,89 @@ $env:KEYSTORE_PASSWORD='__REPLACE_WITH_HIGH_ENTROPY_PASSWORD__'; .\gradlew.bat :
     `hasReleaseSigning` 为真时生效）。
     ④ **未做的取舍**：未把闸门做成可在 CI 上独立运行的任务（构建期断言已覆盖同一不变式）；
     未引入 `keytool` 的程序化封装（re-key 属一次性运维动作，示例文件内已给出可直接执行的命令）。
+
+---
+
+## §50 日志与对象字符串化卫生批次（2026-09-15）：ISSUE-P2-68 / P2-69（审计 M6 / M7）
+
+> **本批次缘起**：认领敏感数据流审计转登项 `ISSUE-P2-68`（审计 **M6**，`data class` 默认 `toString()`
+> 展开明文）与 `ISSUE-P2-69`（审计 **M7**，`LogHygieneTest` 抽样正则漏掉注入型日志通道）。
+> 两项同属**「潜在缺陷」类**——当前零触发点，但**一步之遥**：一次 `log("$obj")`、一次异常消息插值、
+> 一次 IDE 调试求值即漏明文。整改全部落在 JVM 侧，无需设备。
+
+### 50.1 交付清单
+
+| 编号 | 级别 | 缺陷（一句话） | 关键改动 | 依据 |
+|---|:--:|---|---|---|
+| **ISSUE-P2-68** | P2 | 四个 `data class` 的默认 `toString()` 展开全部属性，而它们分别持有**条目明文**（`EntryDetailUiState.revealedPassword` / `revealedRevisionPasswords` / `revealedProtectedFields`、`liveTotpCode`）、**凭据内容**（`UiVaultEntry.username` / `totpCode` / `cardCvv` / `notes` / `customFields.value`）、**自动填充明文口令**（`AutofillPickerViewModel.Credentials.password`）与**页面字段当前值**（`ParsedAutofillNode.text`） | 逐个覆写 `toString()` 为**结构摘要**：只出计数（`revealedRevisionPasswords.size` / `customFields.size` / `attachments.size` / `tags.size`）、布尔（`hasTotpCode` / `hasRevealedPassword` / `hasCardFields`）、长度（`textLength=`）与非秘密元数据（条目 id / `groupId` / `category` / 强度位 / 调用方包名），**零内容展开**；对齐 `ProtectedString` / `KdbxEntry` / `KdbxAttachment` 既有做法（AC①）；**不改任何语义**（AC③：字段定义、可空性、默认值、`equals`/`hashCode` 一律未动） | 审计 M6；`AGENTS.md` §3.2 敏感数据铁律 |
+| **ISSUE-P2-69** | P2 | `LogHygieneTest` 的抽样口径为**逐行**正则 `\b(Log\|AppLog)\.[edviw]\(`：① 注入型日志字段 `debugLog` / `debugLogBuffer`（全仓 40+ 个 @Inject 日志出口）与委托型 `preferences.verbose(` **完全不在覆盖内**；② 只匹配单行，**换行书写**的调用体（`debugLog.warn(\n TAG,\n "…${e.message}"\n)`）即使通道被覆盖也会逃逸 | ① 抽样口径改为**统一按「日志调用」特征抽取完整调用体**：接收者标识**含 `log`/`Log` 段**（覆盖 `AppLog` / `debugLog` / `debugLogBuffer` / 未来新增 `*Log` 字段）或委托通道 `preferences.verbose(`，后接级别方法（长名 `error/warn/info/debug/verbose/audit/wtf` 与 `AppLog` 短名 `e/w/i/d/v`）；② **括号配对跨行**取完整调用体（跳过字符串字面量内的括号，消息含半角括号不误判配对）；③ AC② 复核该通道现存插值点，**整改 9 处**（见 50.3.3）；④ 新增**防空跑护栏**用例（第 4 例）：断言抽样确曾命中 `debugLog` 通道，且合成源码中跨行调用体的续行插值点被完整抽取——否则前两条断言会在「抽样恒为空」时**伪绿** | 审计 M7；`AGENTS.md` §3.2 日志脱敏纪律 |
+
+**AC② 复核结论（ISSUE-P2-69，三类插值点逐类处置）**：
+
+| 插值点类别 | 复核结果 | 处置 |
+|---|---|---|
+| `${e.message}`（裸异常 message） | 该通道现存 **8 处**：`KeystoreKeyMaterial`×2 / `UnlockPasskeyManager`×2 / `BiometricEnrollmentCoordinator`×2（均为 `${e.javaClass.simpleName} - ${e.message}`）与 `VaultImportController`×2（跨行，`${error.javaClass.name}: ${error.message ?: "（无消息）"}`）。导入解析失败那两处原注释自称「异常类型 + **静态**文案」——该推定不成立：解析器消息属**不可信外部输入**（JSON/XML 解析器错误消息可回显文档片段，而导入对象是含明文的导出文件） | 全部**去掉 message 分量**，只保留**异常类型**（`javaClass.name` / `simpleName`）——设备侧 SAX 解析器实现差异线索由**类型**承载（JVM 与 Android 解析器异常类不同），诊断能力保留、内容面归零 |
+| **endpoint URL** | `SyncCoordinator.describeOutcome` 的 `is SyncOutcome.Error -> "Error(${outcome.message})"` 会把 **原始端点 URL / 主机 / 桶名**写进调试缓冲——其上游 `SyncOutcome.Error(e.message)` 直接取自 `SyncException.InvalidEndpointError`，而该异常消息由 `SyncEndpointGuard` / Provider 构造期**逐字拼接 `"$rawEndpoint"` / `"$host"` / `"$bucketName"`**（`:86` / `:97` / `:121` / `:127`、`WebDavSyncProvider:73`、`S3SyncProvider:98`、`SyncEndpointGuard:67`） | 该分支改为**不含 message 的固定摘要**（`"Error(同步失败，详情见界面提示)"`）——失败详情已由 UI 提示承载（用户自己填的端点），日志只留结果类型。**保留** `remotePath` 记录（`describeCacheEvent*` 的 `path=`）：经复核其为**远端相对路径 / 对象键**（`resolveRemotePath` 返回 `cfg.remotePath` 或 `objectKey`），非 endpoint，且 URL 形态另有 `DebugLogBuffer.exportSanitizedText()` 导出脱敏兜底 |
+| **子库别名** | `ChildDatabaseSessionManager` 两处 `"子库挂载成功（别名=${mount.alias}）"` / `"子库已卸载（别名=${it.alias}）"` | 改为 `${mount.alias.length}` / `${it.alias.length}`（沿用「只出长度」口径） |
+
+### 50.2 验收证据
+
+```powershell
+# ① 定向验证扩展后的抽样口径（含新增防空跑护栏）
+.\gradlew.bat :app:testDebugUnitTest --tests "com.keepasskey.app.log.LogHygieneTest"
+# → BUILD SUCCESSFUL；tests=4 skipped=0 failures=0 errors=0（AC③：扩展后既有违规为 0）
+
+# ② 全量单测（强制真实执行，单会话勿并发）
+.\gradlew.bat test --rerun-tasks --max-workers=1
+# → BUILD SUCCESSFUL in 5m 51s；114 actionable tasks: 114 executed
+#   结果汇总（build/test-results/**/TEST-*.xml）：
+#   tests=1668 failures=0 errors=0 skipped=13
+#   （app 896 / core 65 / crypto 127 / database 377 / sync 203）——较上批 +5（app）
+cd crypto/src/main/rust; cargo test
+# → test result: ok. 57 passed; 0 failed; 0 ignored（本批未触碰原生内核，基线保持）
+.\gradlew.bat assembleRelease
+# → BUILD SUCCESSFUL in 4m 7s；216 actionable tasks: 17 executed, 199 up-to-date
+#   产物：D:\GithubWorkplace\KeePasskey\app\build\outputs\apk\release\app-release.apk
+#         （15,460,235 字节，2026-09-15 10:20:18）
+$env:ANDROID_HOME\build-tools\<ver>\apksigner.bat verify --print-certs <产物>
+# → V3.0 Signer: certificate SHA-256 digest: f3a6f0924d121e273be022589fa68724703cb7d906caa33fe4cded192cca842e
+#   （与 §49 re-key 后指纹逐字一致 → 稳定版签名链路未受影响）
+```
+
+**新增 / 改动用例（本批 +5 例，全部落在 `app` 模块 JVM 侧）**：
+
+| 模块 | 用例 | 覆盖 |
+|---|---|---|
+| `app` | `SensitiveToStringRedactionTest`（+4，新文件） | ① `UiVaultEntry`：以**唯一哨兵串** `S3NT1N3L-D0-N0T-LEAK` 填满 title / username / passwordMasked / url / rpId / totpCode / notes / 卡字段 / tags / customFields / attachments / revisions 后断言 `toString()` **不含哨兵**；② `EntryDetailUiState`：`revealedPassword` / `revealedRevisionPasswords` / `revealedProtectedFields` / `liveTotpCode` 填哨兵断言不泄漏，**同时正向断言**非秘密元数据（调用方包名、条目 id）仍保留以便排障；③ `Credentials`：用户名与口令填哨兵断言不泄漏且摘要含 `redacted`；④ 静态源码断言：四类型所在文件均须存在 `override fun toString(): String`，且 `ParsedAutofillNode.toString()` 体内**不得**出现 `${text}` / `$text` / `${label}` / `${htmlName}` 插值（该类型持 Android `AutofillId`，JVM 无法构造实例，故退化为源码断言） |
+| `app` | `LogHygieneTest`（+1，扩展既有文件） | **防空跑护栏**：「抽样须覆盖注入通道与跨行调用体」——① 真实源码抽样结果中至少一条命中 `debugLog`（防抽样恒空）；② 合成跨行源码 `debugLogBuffer.warn(\n TAG,\n "落盘失败: ${saved.error.message}"\n)` 必须被抽取为**恰好 1 条**且调用体含续行插值（防窗口截断） |
+
+### 50.3 已知边界与口径（如实声明）
+
+1. **`P2-68` 有意保留的「非秘密元数据」**：`EntryDetailUiState.toString()` 保留 `autofillBoundPackage`
+   （调用方包名）与 `entryId`；`ParsedAutofillNode.toString()` 保留 `webDomain` / `inputType` /
+   `autofillHints.size`。契约口径为「**不展开条目内容 / 凭据明文 / 页面字段值**」，
+   不追求「一律打印 `<redacted>`」——后者会让 `toString()` 在排障中失去全部价值。
+   用例**正向断言**该保留（防止后人「一刀切全遮掩」把排障线索也抹掉）。
+2. **`P2-68` 未采用的替代方案**（AC② 允许二选一）：未引入「禁止对上述类型整对象插值」的全局静态检查——
+   同型检查需类型解析（正则无法可靠判定 `"$state"` 的静态类型），而逐类 `toString()` 覆写已把
+   防线放在**类型自身**（任何插值点、任何调用方、含 IDE 求值与崩溃报告全自动受益），
+   属更强且零维护的落点。
+3. **`P2-69` 的抽样口径性质（启发式，非类型感知）**：以「**接收者标识名含 `log`/`Log` 段**」+
+   「级别方法名」为特征。边界面：① 标识名不含 `log` 字样且非 `preferences.verbose(` 的日志出口
+   不在覆盖内——**当前全仓无此形态**（核实于本批：日志出口只有统一包装器 `AppLog` 与
+   Hilt 注入的 `DebugLogBuffer` 字段，字段名一律 `debugLog` / `debugLogBuffer`）；
+   ② 单字母级别名（`e/w/i/d/v`）仅 `AppLog` 提供，其余通道用长名（此设计使 `$catalog.warn(`
+   之类的**非日志同形调用**不会被误判为日志或漏判，全仓零误报已由 50.2 ① 实测证明）。
+4. **跨行调用体抽取的依赖**：靠「括号配对 + 字符串字面量跳过」实现。已知不构成风险的理论边界：
+   字符串模板 `${...}` 内若出现**失衡**括号会使窗口提前收口——此类写法在可编译的 Kotlin 源码中不存在；
+   日志消息内的**半角**括号（如 `"（fail-closed）"` 用的是全角）已由字面量跳过逻辑正确忽略。
+5. **`P2-69` 唯一的行为改动面**：`SyncCoordinator.describeOutcome` 的 `Error` 分支文案。该函数为
+   **private 且仅被一行调试日志消费**（核实：全仓唯一调用点 `SyncCoordinator.kt:179`），
+   不影响返回给 UI 的 `SyncOutcome.Error.message`（用户提示文案与错误语义**零改动**）。
+6. **本批未纳入的相邻项（留给后续条目）**：① `DebugLogBuffer.exportSanitizedText()` 的 URL / 邮箱
+   正则脱敏维持原样（本批未扩大其覆盖面，`remotePath` 等**非 URL 形态**的路径串仍会出现在导出文本中）；
+   ② `VaultImportController` 去掉 message 后，导入失败的**细节定位**退化为「异常类型 + UI 分类文案」，
+   若后续设备侧需要更细线索，应在**解析层**产出结构化错误码（而非恢复 message 透传）。
+7. **`ACTIVE_ISSUES.md` 的 P2 计数**：本批按「表行 + 标题条目」双形式口径复核后由 **19 → 17**
+   （表行 13 → 11，标题条目仍 6），与 §49 第 13 条确立的复算纪律一致。
 

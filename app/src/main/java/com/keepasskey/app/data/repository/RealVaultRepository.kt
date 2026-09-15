@@ -388,7 +388,7 @@ class RealVaultRepository @Inject constructor(
     private suspend fun persistSession(): KdbxResult<Unit> {
         val result = databaseSession.save()
         if (result is KdbxResult.Failure) {
-            debugLog.error(TAG, "数据库保存失败: ${result.message}")
+            debugLog.error(TAG, "数据库保存失败: ${result.error.javaClass.simpleName}")
         }
         return result
     }

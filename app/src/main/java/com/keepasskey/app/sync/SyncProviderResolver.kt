@@ -84,7 +84,7 @@ class SyncProviderResolver @Inject constructor(
                             } catch (e: Exception) {
                                 // 持久化失败仅丢失跨进程记忆：本会话内存偏移仍即时生效，
                                 // 下次同步按 fail-closed 重新学习，不阻断本次同步
-                                debugLog.warn(SYNC_LOG_TAG, "S3 时钟偏移持久化失败: ${e.message}")
+                                debugLog.warn(SYNC_LOG_TAG, "S3 时钟偏移持久化失败: ${e.javaClass.simpleName}")
                             }
                         }
                     )

@@ -200,7 +200,7 @@ class ChildDatabaseSessionManager @Inject constructor(
             return@withLock mountFailure(ChildDatabaseFailureReason.DUPLICATE_MOUNT)
         }
         publish()
-        debugLog.info(TAG, "子库挂载成功: ${mount.alias}")
+        debugLog.info(TAG, "子库挂载成功（别名长度=${mount.alias.length}）")
         KdbxResult.Success(mount)
     }
 
@@ -258,7 +258,7 @@ class ChildDatabaseSessionManager @Inject constructor(
         if (session == null && !existed) {
             KdbxResult.Failure(ChildDatabaseException(ChildDatabaseFailureReason.MOUNT_NOT_FOUND))
         } else {
-            registered?.let { debugLog.info(TAG, "子库已卸载: ${it.alias}") }
+            registered?.let { debugLog.info(TAG, "子库已卸载（别名长度=${it.alias.length}）") }
             KdbxResult.Success(Unit)
         }
     }

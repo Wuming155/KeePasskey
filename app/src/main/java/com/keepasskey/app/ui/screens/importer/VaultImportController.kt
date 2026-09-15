@@ -102,11 +102,12 @@ class VaultImportController @Inject constructor(
         return try {
             when (val parsed = importer.parse(bytes, fileName ?: EMPTY_FILE_NAME)) {
                 is KdbxResult.Failure -> {
-                    // 异常类型 + 静态文案归入诊断日志（不含文件内容）：设备侧 SAX 行为差异
-                    // 只能靠此线索定位（宿主 JVM 与 Android 解析器实现不同）。
+                    // 只归入异常**类型**：设备侧 SAX 解析器实现差异只能靠异常类型定位
+                    // （宿主 JVM 与 Android 解析器实现不同）；异常 message 可能回显文件片段 /
+                    // 路径等外部输入内容，按日志卫生铁律不得写入日志（ISSUE-P2-69）。
                     debugLog.warn(
                         TAG,
-                        "导入解析失败: ${parsed.error.javaClass.name}: ${parsed.error.message ?: "（无消息）"}"
+                        "导入解析失败: ${parsed.error.javaClass.name}"
                     )
                     ImportUiState.Failed(source, ImportFailureReason.classify(parsed.error))
                 }
@@ -116,7 +117,7 @@ class VaultImportController @Inject constructor(
                         is KdbxResult.Failure -> {
                             debugLog.warn(
                                 TAG,
-                                "导入落库失败: ${persisted.error.javaClass.name}: ${persisted.error.message ?: "（无消息）"}"
+                                "导入落库失败: ${persisted.error.javaClass.name}"
                             )
                             ImportUiState.Failed(source, ImportFailureReason.classify(persisted.error))
                         }

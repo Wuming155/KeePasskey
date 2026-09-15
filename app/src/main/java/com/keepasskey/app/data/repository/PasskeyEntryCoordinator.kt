@@ -65,7 +65,7 @@ internal class PasskeyEntryCoordinator(
         databaseSession.saveEntry(newEntry)
         val saved = persistSession()
         if (saved is KdbxResult.Failure) {
-            debugLog.warn(TAG, "Passkey 条目创建成功但落盘失败: ${saved.message}")
+            debugLog.warn(TAG, "Passkey 条目创建成功但落盘失败: ${saved.error.javaClass.simpleName}")
         }
         return newEntry
     }
@@ -135,7 +135,7 @@ internal class PasskeyEntryCoordinator(
         if (applied != null) {
             val saved = persistSession()
             if (saved is KdbxResult.Failure) {
-                debugLog.warn(TAG, "签名计数器已更新但落盘失败: ${saved.message}")
+                debugLog.warn(TAG, "签名计数器已更新但落盘失败: ${saved.error.javaClass.simpleName}")
             }
         }
         return applied

@@ -59,7 +59,7 @@ internal class BiometricEnrollmentCoordinator(
                 )
             }
         } catch (e: Throwable) {
-            debugLog.warn(TAG, "封印密钥不可用: ${e.javaClass.simpleName} - ${e.message}")
+            debugLog.warn(TAG, "封印密钥不可用: ${e.javaClass.simpleName}")
             null
         }
     }
@@ -207,7 +207,7 @@ internal class BiometricEnrollmentCoordinator(
             }
         } catch (e: Exception) {
             // 禁止静默失败：任何异常一律留痕，绝不 catch(ignored)
-            debugLog.warn(TAG, "生物识别凭据登记异常: ${e.javaClass.simpleName} - ${e.message}")
+            debugLog.warn(TAG, "生物识别凭据登记异常: ${e.javaClass.simpleName}")
             null
         }
 

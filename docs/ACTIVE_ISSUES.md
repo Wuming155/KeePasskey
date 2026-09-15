@@ -51,7 +51,7 @@
 
 ---
 
-## P2 中危缺陷与协议/测试缺口（19 项）
+## P2 中危缺陷与协议/测试缺口（17 项）
 
 > **历史**：**ISSUE-P2-28 ~ P2-41**（往返丢字段与布尔/数值语义、MemoryProtection 读写语义、
 > KDF 缺参 fail-closed、isPackageMatch 的 android:// 硬约束、requireRiskNotice 接线、
@@ -77,6 +77,12 @@
 > 既有 PKCS#12 re-key，同证书指纹）与 **ISSUE-P2-54**
 > （依赖扫描补 PR / push 触发；AC② 分支保护留痕待仓库所有者配置）随存量安全整改批次（续）
 > 归档，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §49。
+>
+> **2026-09-15 闭环（续）**：**ISSUE-P2-68**（四个数据类覆写 `toString()`，消除「一行 `log("$obj")` 即漏明文」面）
+> 与 **ISSUE-P2-69**（日志抽样口径改为「按日志调用特征跨行抽取」，覆盖注入型 `debugLog` / `debugLogBuffer`
+> 通道与委托型 `preferences.verbose(`；并顺带整改该通道 9 处插值点，含 `SyncCoordinator` 把
+> `InvalidEndpointError` 内嵌的原始 endpoint URL 写入调试缓冲一项）随日志与对象字符串化卫生批次归档，
+> 见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §50。
 >
 > **2026-09-13 第四轮独立复核定版（《SECURITY_RECHECK_2026-09.md》1272 行定版稿）**：
 > ① **升格 P1 排期**（条目编号留原地、闭环按编号归档）：`P2-48 / P2-49 / P2-51 / P2-53 / P2-61 / P2-63 /
@@ -237,8 +243,6 @@
 | ISSUE-P2-64 | 审计 M1 | 库级 `MemoryProtectionConfig` **不影响内存密封**：`ProtectedString.isProtected` 仅来自 XML 属性（`KdbxXmlStringNode.isProtectedAttribute`）与写入侧硬编码（非口令字段恒 `false`）；库级配置只决定**写出侧** `Protected` 标志（`KdbxXmlEntrySerializer.resolveProtectedFlag:221-235`，实现官方语义）→ `Title`/`UserName`/`URL`/`Notes`/`otp` 在内存中是**未密封明文** | ① 明确「内存密封」与「写出标志」两条独立口径并在 KDoc 声明；② 若采纳「库级开启即内存密封」，须同步写入侧构造；③ 防回归：打开 `ProtectUserName=True` 的库并保存后**不得**被降级为未保护 |
 | ISSUE-P2-66 | 审计 M4 | 落盘清理为 **unlink-only**（`SyncCache.kt` 用 `File.delete` / `deleteRecursively`）；已 unlink 扇区在 TRIM 前可恢复。~~`clearAll()` 不清 `<name>.<uuid>.tmp`~~ **（第四轮证伪**：`clearAll()` `:320-329` 遍历 `cacheDir` 全部直接子项，仅跳过 `.rollback` 状态文件，`.tmp` 必被一并删除——该子断言为误报，防回滚状态生产布局在 `filesDir/rollback` 不受影响**）** | ① ~~`clearAll()` 补 `deleteOrphanTmpFiles`~~ **撤销**（冗余无害，不实施）；② 登记「仅 unlink」为已接受边界（对齐 `AGENTS.md` §6）并留痕；③ ~~断言 `clearAll()` 后无 `.tmp` 残留~~ **撤销**（被证伪断言的派生） |
 | ISSUE-P2-67 | 审计 L9 | 同步下载路径**绕过附件落盘**：`SyncDatabaseCodec.parseKdbxBytes` 调 `KdbxFile.load(...)` **未传** `binaryStore`（`SyncDatabaseCodec.kt:55`；默认 `null`）→ 远程库全部附件无论多大都内联进堆，随后仅置空引用，从不零化（**第四轮批注**：锁定清理已由 `SyncCoordinator.onSessionLocked` + `SyncCacheEvictor` 覆盖，残余面 = binaryStore 未传 + 同步解析产物不调 `clearSensitiveData()`——后者见 `ISSUE-P3-119` 批注） | ① 传入与主会话一致的 `BinaryStore`；② 断言「>1 MiB 远程附件解析后落盘而非内联」；③ 与 `ISSUE-P3-119`（NEW-B01-4）同批（清理语义须一致） |
-| ISSUE-P2-68 | 审计 M6 | `data class` 默认 `toString()` 会打印明文：`EntryDetailUiState`（`:14,34,36,40`，含 `revealedPassword` / `revealedRevisionPasswords` / `revealedProtectedFields`）、`UiVaultEntry`（`UiModels.kt:102,105,110,135`，含 `username` / `totpCode` / `cardCvv`）、`AutofillPickerViewModel.Credentials`（`:79`，含明文口令）、`ParsedAutofillNode`（`AutofillStructureScan.kt:24`）。**当前零字符串化调用点**（核实于 HEAD）→ 属「一行 `log("$state")` 即漏」的潜在缺陷 | ① 逐个覆写 `toString()`（对齐 `ProtectedString` / `KdbxEntry` / `KdbxAttachment` 既有做法）；② 或加静态检查禁止对上述类型整对象插值；③ 不改语义 |
-| ISSUE-P2-69 | 审计 M7 | `LogHygieneTest.kt:88` 的日志抽样正则 `\b(Log\|AppLog)\.[edviw]\(` **匹配不到** `debugLog.warn(` / `debugLogBuffer.error(` 通道 → 该通道不在「敏感标识 / 裸异常 message」脱敏测试覆盖内 | ① 正则扩到 `debugLog` / `debugLogBuffer`（或统一按「日志调用」特征抽取）；② 顺带复核该通道现存 `${e.message}` / endpoint URL / 子库别名插值点；③ 断言扩展后既有违规为 0 |
 | ISSUE-P2-70 | 审计 E1 | 手动选择器把**任意**条目凭据交给请求方，且**不显示请求方身份**（`AutofillPickerActivity` / `AutofillPickerViewModel.kt:54-77`）；自动匹配路径有严格边界，手动兜底路径无提示。（与 `ISSUE-P1-24`（**已闭环归档**，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §45）**部分重合**：P1-24 验收针对**确认页**，本项针对**选择器页**） | ① 选择器页强制展示请求方应用名 + 签名指纹摘要 + 域；② 断言覆盖展示内容；③ 与 `ISSUE-P3-93`（多签名者遍历）同批 |
 | ISSUE-P2-71 | 审计 E2 | IME 内联建议把候选显示串（用户名 / 条目标题）送入输入法，且 `inlineSuggestionsEnabled` **默认 true**（`ExtendedSettings.kt:36`；`AutofillDatasetBuilders.kt:171-175 buildInlinePresentation(...)`） | ① 默认改 false，或把内容改为不含用户名 / 标题的固定文案；② 设置页如实说明该通道把候选名送入 IME；③ 断言覆盖默认值与关闭后行为 |
 | ISSUE-P2-73 | 审计 E5 | 自动填充认证流两处协议漂移：① `AutofillUnlockActivity.kt:65` / `AutofillConfirmActivity.kt:160` 用裸 `setResult(RESULT_OK)`，**不带** `AutofillManager.EXTRA_AUTHENTICATION_RESULT`（官方要求经该 extra 回传数据集）；② `AutofillDatasetBuilders.kt:69,206` 创建认证 `PendingIntent` 用 `FLAG_IMMUTABLE`，而平台需向其中填认证参数（picker 路径 `:240` 用 `FLAG_MUTABLE` 是对的） | ① 按官方以 `EXTRA_AUTHENTICATION_RESULT` 回传；② 认证 `PendingIntent` 改 `FLAG_MUTABLE`（并保持 base intent 显式 + `Intent.fillIn` 覆盖语义）；③ 设备侧实测认证填充链路 |
@@ -275,7 +279,7 @@
 
 ---
 
-## P3 低危问题、特性接线与体验优化（46 项）
+## P3 低危问题、特性接线与体验优化（47 项）
 
 > **状态（2026-09-12）**：历史 P3 批次 **ISSUE-P3-01 ~ P3-68** 除 P3-23（经产品裁决「不排期」）外
 > 已全部闭环并归档，逐条实现细节与验收证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md)（§3 ~ §32）。
@@ -515,5 +519,12 @@
 |---|---|---|---|
 | ISSUE-P3-125 | 复核 `NEW-N2` / `NEW-B09-x` / `B03-N1` | ① **选择器零匹配仍无条件挂入**：`buildPickerDataset` 在 `appendUnlockedDatasets` 之后无条件调用（`KeePasskeyAutofillService.kt:196-203`），无候选数门槛 → 严格匹配设计对任意应用失效；② **生产可重定向出口**：`DigitalAssetLinksVerifier.endpointOverride` 为 `@Singleton` 上的 `@Volatile internal var`（`:57-59`），自称测试注入点但生产可达；③ **cargo 失败与缺失不可区分**：`crypto/build.gradle.kts:111-120` `isIgnoreExitValue = true`，`cargo --version` 探活只区分"缺失" → 构建失败静默降级、JNI 用例假绿而构建保持绿色 | ① 评估零匹配时改挂"无可信候选"占位数据集，或留痕接受现设计；② `endpointOverride` 改构造注入 / 测试专用隔离（防生产重定向）；③ 构建失败 fail-closed，或区分"缺失降级"与"构建失败"两级日志 + CI 断言 |
 | ISSUE-P3-126 | 复核 `B07-N1` / `B07-N2` / `NEW-B02-2` | ① **一次性 CI 密钥签 release 形态 APK**：`build.yml:165-178` `keytool -genkeypair` 生成临时密钥签 `assembleRelease` 并上传 artifact（发布身份混淆，注释自称非发布密钥）；② **suppression 白名单文案不实**：`dependency-scan.yml:15-16` 称"当前为空白名单"，实测 `.github/owasp-dependency-suppressions.xml` 有 **5 条** `<suppress>`（豁免 36 条 CVE）；③ **KDBX minor 版本不校验**：`KdbxHeader.kt:232-236` 只查 major 位，minor 原样放行；`KdbxConstants.kt:28` `VERSION_4_1` 为死常量（全仓零引用）；`SettingsUiState.kt:220` UI 仍标注"KDBX 4.1" | ① CI 签名产物明确标注"非发布签名"或停传 release APK（防下游误当官方构建）；② 修正 workflow 文案；③ 明确 minor 版本策略（校验或如实声明"仅 major"），并处理死常量与 UI 文案三者一致性 |
+
+> **2026-09-15 新增（整改 `ISSUE-P2-69` 时跨文件检索附带发现）**：以下 1 项为**文档治理缺陷**
+> （非代码缺陷），与本批两项均无因果关系，独立登记。
+
+| 编号 | 来源 | 问题与位置（核实于 2026-09-15，对 HEAD `e9412f3`） | 验收标准 |
+|---|---|---|---|
+| ISSUE-P3-127 | 本仓文档治理（复核报告退役纪律） | **`docs/SECURITY_RECHECK_2026-09.md` 已从仓库消失，但索引 / 工具 / 正式断言仍指向它**：**核实方式** = `git ls-tree -r HEAD -- docs`（无该文件）+ `git log --diff-filter=D -- docs/SECURITY_RECHECK_2026-09.md`（显示由提交 `523d0fd`，2026-09-13，**整份删除**）+ `git show --stat 523d0fd`（该提交仅改 2 文件：`ACTIVE_ISSUES.md` +118 行、该报告 **−1272 行**，提交信息为 **"Refactor code structure for improved readability and maintainability"**，与其实际动作语义不符）+ 全仓检索文件名（**9 处**点名：`AGENTS.md` 3 / `ACTIVE_ISSUES.md` 4 / `RESOLVED_LOG.md` 2，另有更多处仅以"第四轮独立复核定版"指代）。具体缺口：① `AGENTS.md` §4 文档索引仍把该报告列为**在册文档**（"认领任何安全条目、重评 severity、准备发布前"必读）；② `AGENTS.md` §4 收录的 `tools/audit/check_recheck_consistency.sh` 其**驱动对象即该报告**，现无对象可扫（fail-closed 脚本退化为空转）；③ `RESOLVED_LOG.md` **无该报告的退役归档节**——对照 §40 / §41 / §42 / §43 对另 4 份审计文档均有明确退役处置与分流，本报告的消失**零留痕**（违反 §40.8 纪律 4「任何文档退役前，其结论必须完成分流并同步本表」与 §41 立规「审计报告须在开始阅读时即纳入 git 跟踪」，后者恰是本报告可救回的原因）；④ `ACTIVE_ISSUES.md` 中多个条目的 **severity 定级与 AC 修正**以该报告为唯一权威依据（如 P2-49 / P3-122 / P3-123 / P3-124 的"第四轮批注"）。**可救回**：该文档曾在 git 跟踪内，原文可经 `git show 523d0fd^:docs/SECURITY_RECHECK_2026-09.md` 完整取回 | ① **产品裁决退役去向**（二选一）：**(a) 恢复入库**——按上述 git 对象取回并 commit，`AGENTS.md` §4 索引与一致性脚本即刻恢复有效；**(b) 确认退役**——则须**三处同步**：`AGENTS.md` §4 该索引行删除或改注"已退役，处置见 `RESOLVED_LOG.md` §xx"、`RESOLVED_LOG.md` 补退役归档节（逐条处置其结论、开放问题与"已撤销/已更正断言清单"）、`tools/audit/check_recheck_consistency.sh` 改指承接文档或随之退役；② 无论选 (a)/(b)，均须逐条核对 `ACTIVE_ISSUES.md` / `RESOLVED_LOG.md` 中**以该报告为依据的断言**在新口径下仍成立（不得出现"依据消失但结论照旧"）；③ **提交信息纪律**：不得以"重构 / 可读性 / 可维护性"类信息承载整份审计文档的删除（本次误删未被任何流程拦截，正因提交信息未提示语义变更） |
 
 ---

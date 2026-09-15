@@ -140,7 +140,22 @@ data class UiVaultEntry(
     val tags: List<String> = emptyList(),
     val autoTypeSequence: String = "",
     val overrideUrl: String? = null
-)
+) {
+    /**
+     * ISSUE-P2-68（审计 M6）：**覆写默认 `toString()`**。
+     *
+     * 默认实现会展开 `title` / `username` / `url` / `notes` / `totpCode` / `cardCvv` 等
+     * **凭据与私密内容**（本类型随列表/详情快照整体驻留 StateFlow，覆盖面极广），
+     * 一次字符串插值即泄漏。此处只出**结构摘要**：标识、分类、布尔开关与集合规模。
+     */
+    override fun toString(): String =
+        "UiVaultEntry(id=$id, category=$category, isPasskey=$isPasskey, isHotp=$isHotp, " +
+            "isFavorite=$isFavorite, strengthBits=$strengthBits, hasTotpCode=${totpCode != null}, " +
+            "hasPasskeyRpId=${passkeyRpId != null}, customFields=${customFields.size}, " +
+            "attachments=${attachments.size}, revisions=${revisions.size}, tags=${tags.size}, " +
+            "hasCardFields=${cardNumberMasked != null || cardHolder != null || cardCvv != null}, " +
+            "groupId=$groupId, orderIndex=$orderIndex)"
+}
 
 /**
  * 条目分类（P3-23：显示标签资源化为 [labelRes]，Compose 层经 stringResource 解析；

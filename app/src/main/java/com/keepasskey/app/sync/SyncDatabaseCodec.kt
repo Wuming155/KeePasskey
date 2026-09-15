@@ -37,7 +37,7 @@ class SyncDatabaseCodec @Inject constructor(
                 baos.toByteArray()
             } catch (e: Exception) {
                 // P3-31 整改：序列化失败不再静默吞掉，至少落调试日志保留异常细节
-                debugLog.warn(SYNC_LOG_TAG, "本地数据库序列化失败（合并上传中断）: ${e.message}")
+                debugLog.warn(SYNC_LOG_TAG, "本地数据库序列化失败（合并上传中断）: ${e.javaClass.simpleName}")
                 null
             } finally {
                 pwdClone?.let { Arrays.fill(it, '0') }
@@ -55,7 +55,7 @@ class SyncDatabaseCodec @Inject constructor(
                 KdbxFile.load(ByteArrayInputStream(bytes), pwdClone, keyClone)
             } catch (e: Exception) {
                 // P3-31 整改：解析失败不再静默吞掉，至少落调试日志保留异常细节
-                debugLog.warn(SYNC_LOG_TAG, "远端数据库字节解析失败: ${e.message}")
+                debugLog.warn(SYNC_LOG_TAG, "远端数据库字节解析失败: ${e.javaClass.simpleName}")
                 null
             } finally {
                 pwdClone?.let { Arrays.fill(it, '0') }

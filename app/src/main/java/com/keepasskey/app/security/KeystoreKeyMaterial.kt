@@ -287,7 +287,7 @@ internal class KeystoreKeyMaterial(
             generator.initialize(buildUnlockPasskeySpec(alias, purposes, strongBox = false))
             return generator.generateKeyPair()
         } catch (e: Exception) {
-            debugLog?.warn(TAG, "解锁通行密钥生成/读取失败: ${e.javaClass.simpleName} - ${e.message}")
+            debugLog?.warn(TAG, "解锁通行密钥生成/读取失败: ${e.javaClass.simpleName}")
             return null
         }
     }
@@ -340,7 +340,7 @@ internal class KeystoreKeyMaterial(
             val entry = keyStore.getEntry(alias, null) as? KeyStore.SecretKeyEntry ?: return null
             Mac.getInstance("HmacSHA256").apply { init(entry.secretKey) }
         } catch (e: Exception) {
-            debugLog?.warn(TAG, "解锁通行密钥完整性 HMAC 密钥获取失败: ${e.javaClass.simpleName} - ${e.message}")
+            debugLog?.warn(TAG, "解锁通行密钥完整性 HMAC 密钥获取失败: ${e.javaClass.simpleName}")
             null
         }
     }

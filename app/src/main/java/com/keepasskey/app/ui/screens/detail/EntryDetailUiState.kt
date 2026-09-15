@@ -61,4 +61,27 @@ data class EntryDetailUiState(
     val decorations: EntryDecorations = EntryDecorations.EMPTY,
     // ISSUE-P3-51：单条「移动到分组」的目标候选（全部非回收站分组由对话框统一过滤）
     val allGroups: List<VaultGroup> = emptyList()
-)
+) {
+    /**
+     * ISSUE-P2-68（审计 M6）：**覆写默认 `toString()`**。
+     *
+     * 数据类默认实现会把 `revealedPassword` / `revealedRevisionPasswords` /
+     * `revealedProtectedFields` 等**明文与条目内容**整份展开——一次
+     * `AppLog.d("$state")`、一次异常消息插值、一次 IDE 求值就会把明文写进日志/堆快照。
+     * 本实现只呈现**结构摘要**（条目 id、可见性开关、集合规模、是否存在明文），
+     * 与 [com.keepasskey.core.model.KdbxEntry] / `ProtectedString` 既有做法一致：
+     * 内容一律经显式读取通道按需取得，绝不隐式物化。
+     */
+    override fun toString(): String =
+        "EntryDetailUiState(entryId=${entry?.id}, isLoading=$isLoading, " +
+            "isPasswordVisible=$isPasswordVisible, isTotpVisible=$isTotpVisible, " +
+            "hasRevealedPassword=${revealedPassword != null}, " +
+            "revealedRevisionPasswords=${revealedRevisionPasswords.size}, " +
+            "isFavorite=$isFavorite, protectedFieldsVisibility=${protectedFieldsVisibility.size}, " +
+            "revealedProtectedFields=${revealedProtectedFields.size}, " +
+            "hasUserMessage=${userMessage != null}, isReadOnly=$isReadOnly, " +
+            "totpRemainingSeconds=$totpRemainingSeconds, hasLiveTotpCode=${liveTotpCode != null}, " +
+            "passwordStrengthBits=$passwordStrengthBits, " +
+            "autofillBoundPackage=$autofillBoundPackage, " +
+            "isAutofillBlockedForApp=$isAutofillBlockedForApp, allGroups=${allGroups.size})"
+}

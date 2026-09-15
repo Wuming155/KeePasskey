@@ -157,7 +157,7 @@ open class SyncCoordinator @Inject constructor(
         return try {
             testSyncProvider != null || providers.resolveProvider() != null
         } catch (e: Exception) {
-            debugLog.warn(SYNC_LOG_TAG, "探测同步配置失败，按未配置处理: ${e.message}")
+            debugLog.warn(SYNC_LOG_TAG, "探测同步配置失败，按未配置处理: ${e.javaClass.simpleName}")
             false
         }
     }
@@ -186,7 +186,10 @@ open class SyncCoordinator @Inject constructor(
         is SyncOutcome.MergedAndUploaded -> "MergedAndUploaded(合并后已上传)"
         is SyncOutcome.ConflictNeedsUser -> "ConflictNeedsUser(条目冲突数=${outcome.conflicts.size})"
         is SyncOutcome.Offline -> "Offline(离线/网络不可达)"
-        is SyncOutcome.Error -> "Error(${outcome.message})"
+        // ISSUE-P2-69：Error.message 可能内嵌端点 URL / 主机 / 桶名（如 InvalidEndpointError
+        // 直接拼接原始 endpoint），属敏感插值，不得进入调试日志缓冲；
+        // 失败详情已由 UI 提示承载，日志只保留结果类型。
+        is SyncOutcome.Error -> "Error(同步失败，详情见界面提示)"
     }
 
     /**

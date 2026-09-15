@@ -89,7 +89,7 @@ class AutoLockSessionGuard @Inject constructor(
         if (state == DatabaseSession.SessionState.DIRTY) {
             val saveResult = databaseSession.save()
             if (saveResult is KdbxResult.Failure) {
-                debugLog.error(TAG, "锁库前补存失败: ${saveResult.message}")
+                debugLog.error(TAG, "锁库前补存失败: ${saveResult.error.javaClass.simpleName}")
             }
         }
         databaseSession.lock()

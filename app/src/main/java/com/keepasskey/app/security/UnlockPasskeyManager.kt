@@ -85,7 +85,7 @@ class UnlockPasskeyManager @Inject constructor(
             debugLog?.info(TAG, "解锁通行密钥登记成功")
             true
         } catch (e: Exception) {
-            debugLog?.warn(TAG, "解锁通行密钥登记失败: ${e.javaClass.simpleName} - ${e.message}")
+            debugLog?.warn(TAG, "解锁通行密钥登记失败: ${e.javaClass.simpleName}")
             false
         }
     }
@@ -122,7 +122,7 @@ class UnlockPasskeyManager @Inject constructor(
                 )
             )
         } catch (e: Exception) {
-            debugLog?.warn(TAG, "解锁通行密钥断言失败: ${e.javaClass.simpleName} - ${e.message}")
+            debugLog?.warn(TAG, "解锁通行密钥断言失败: ${e.javaClass.simpleName}")
             UnlockPasskeyGate.SigningFailed
         }
     }

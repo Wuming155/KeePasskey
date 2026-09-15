@@ -115,7 +115,15 @@ class AutofillPickerViewModel @Inject constructor(
         return Credentials(username = username, password = password)
     }
 
-    data class Credentials(val username: String, val password: String)
+    data class Credentials(val username: String, val password: String) {
+        /**
+         * ISSUE-P2-68（审计 M6）：**覆写默认 `toString()`**——本类型**同时持有明文口令与用户名**，
+         * 默认数据类实现会把两者整份展开（一次日志/异常插值即泄漏）。
+         * 仅呈现长度，内容一律不物化。
+         */
+        override fun toString(): String =
+            "Credentials(username=<redacted len=${username.length}>, password=<redacted len=${password.length}>)"
+    }
 
     private companion object {
         const val TAG = "AutofillPickerVM"
