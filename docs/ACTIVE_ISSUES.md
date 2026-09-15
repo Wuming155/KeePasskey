@@ -186,6 +186,20 @@
 > `MainApplication.purgeVolatileCachesBeforeExit()`（§68 的退出清理面）。
 > 已改为「**删除后目标是否仍存在**」判定，并补 3 例回归（含 4 实例并发清理）。
 > 详见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §74。
+>
+> **2026-09-15 闭环（续 22，§75 批次）**：**ISSUE-P2-46**（`android://` 包名绑定缺调用方签名指纹绑定）
+> 已按定版口径闭环**自动填充通道**——① 新增纯函数 `AndroidPackageBindingPolicy`（**包名 + 签名摘要**
+> 已绑定 **且摘要可读** 才放行；摘要不可读 **不得**退化到「仅包名」）；② `AutofillCandidateRanker.rank(...)`
+> 新增**无默认值**的 `packageDimensionAuthorized`，`EXACT_PACKAGE` 只在授权为真时成立
+> （**未授权一律「不命中」**，非报告所否决的「弱候选」）；③ 首次绑定**写入**落在选择器
+> `AutofillPickerActivity.deliver()`——它是唯一由用户在受保护窗口内显式指认调用方的入口
+> （该页已展示包名 / 应用名 / 签名摘要），否则会形成「候选被拦 ⇒ 无法绑定 ⇒ 永久失效」的死锁；
+> ④ 服务注入与确认页 / 选择器**同一份**信任存储（写入面 = 判定面）。新增 11 例回归
+> （策略 8 + 接线 3）并补齐排序器门控用例。
+> **同根因拆分**：**Credential Manager 通道**的 4 处调用点（`CredentialResponseAssembler:117/188`、
+> `KeePasskeyCredentialProviderService:342`、`PasswordFillActivity:97`）仍无签名绑定 ⇒ 已登记
+> **`ISSUE-P2-83`** 独立跟踪（**不得**把本行闭环读作「`android://` 维度整体已加固」）。
+> 该行已移出本表，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §75。
 
 ### ISSUE-P2-45（新登记）：解锁失败节流默认关闭，且记录可被"删键复位"
 
@@ -209,18 +223,29 @@
 
 ---
 
-### ISSUE-P2-46（新登记）：`android://` 包名绑定条目缺调用方签名指纹绑定
+### ISSUE-P2-83（新登记）：`android://` 维度在 Credential Manager 通道仍无签名绑定
 
-- **优先级**：P2（自动填充包名维度的残余越权面）
-- **核实时间点与核实方式（2026-09-13）**：读取 `DomainMatcher.isAndroidPackageMatch`（L194-199）——
-  仅做"条目 `android://` 绑定包名 == 调用包名"的**精确字符串相等**，**无签名指纹校验**；
-  对照浏览器维度的 `BrowserSigningFingerprints.isTrusted`（包名 + 已取证 SHA-256 二元组）。
-- **问题描述**：当条目以 `android://<包名>` 绑定、而该真实应用**未安装**时，任意应用只需以同
-  `applicationId` 侧载即可命中并取得候选。
-  （原红队报告所述"Web 域冒充包名"的命名空间混同路径，已由 `ISSUE-P2-40` 闭环，**不在本项范围内**。）
-- **验收标准**：① 对 `android://` 维度引入**首次绑定 + 调用方签名指纹**校验（与浏览器维度同语义），
-  或对"绑定应用当前未安装"的情形降级为需人工二次确认的弱候选；
-  ② 回归断言覆盖"同包名不同签名 → 不命中"与"未安装包名 → 弱候选 / 不命中"。
+- **优先级**：P2（与 `ISSUE-P2-46` 同根因、不同通道的残余越权面）
+- **核实时间点与核实方式（2026-09-15，对 HEAD `f8645cb`）**：全仓检索 `isAndroidPackageMatch`
+  并**逐一分类全部调用点**——`AutofillCandidateRanker.kt:120`（自动填充候选，§75 已整改）、
+  `CredentialResponseAssembler.kt:117`（通行密钥断言候选）、`:188`（密码填充候选）、
+  `KeePasskeyCredentialProviderService.kt:342`（`findMatchingEntries`）、
+  `PasswordFillActivity.kt:97`（回传前二次校验）。**后四处均在 Credential Manager（CM）通道**，
+  与整改前一样只做「条目 `android://` 绑定包名 == 调用包名」的精确字符串相等，**不比对签名**。
+- **与自动填充通道的差异（为何未在 §75 同批处置）**：
+  1. CM 通道**每次放行都需用户验证**（生物识别 / 受保护窗口内显式确认，见 `PasswordFillActivity`
+     的 ISSUE-P0-02 整改），故不属「静默下发」——风险等级低于自动填充通道，但**候选面**仍对
+     「以同 `applicationId` 侧载的应用」开放；
+  2. **不得**直接复用 `AutofillCallerTrustStore`：该存储在自动填充侧的语义是「用户在确认页
+     勾选『记住此应用』」，而 CM 的生物识别路径**没有勾选位**（系统 `BiometricPrompt` 不可承载
+     UI 控件）。直接复用会导致两种坏结果——CM 侧永不写入（首次绑定后仍不命中，功能回归）
+     或为写入而放宽自动填充侧的严格性（反向削弱 ISSUE-P1-24）。故须独立设计并写明语义边界。
+- **验收标准**：① 为 CM 通道的 `android://` 维度引入签名绑定（复用既有存储或新建设计，
+  **必须**写明与 `AutofillCallerTrustStore` / `ISSUE-P1-24` 的语义边界，**不得**削弱后者）；
+  ② 回归断言覆盖「同包名不同签名 → 不命中」与「未安装绑定包 + 侧载同 applicationId → 不命中」；
+  ③ 设备侧实测 CM 的密码填充与通行密钥断言两条链路（ADB）。
+- **备注**：本条**不是**新发现的独立缺陷，而是 `ISSUE-P2-46` 在**同一根因**下未覆盖的通道；
+  登记的正是为了避免「按通道部分闭环 = 整体闭环」的误读（体例同 `ISSUE-P2-49` 的 AC 分步进展）。
 
 ---
 

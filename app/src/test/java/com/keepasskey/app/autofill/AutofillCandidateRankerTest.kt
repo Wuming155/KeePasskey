@@ -7,6 +7,7 @@ import com.keepasskey.core.model.KdbxTimes
 import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.core.security.ProtectedString
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.Instant
@@ -45,7 +46,7 @@ class AutofillCandidateRankerTest {
         val parent = entry(hexIdOf(1), "https://github.com")
         val exact = entry(hexIdOf(2), "https://login.github.com")
 
-        val ranked = AutofillCandidateRanker.rank(listOf(parent, exact), "", "login.github.com")
+        val ranked = AutofillCandidateRanker.rank(listOf(parent, exact), "", "login.github.com", packageDimensionAuthorized = false)
 
         assertEquals(2, ranked.size)
         assertEquals(exact.id.toHexString(), ranked.first().entry.id.toHexString())
@@ -56,19 +57,19 @@ class AutofillCandidateRankerTest {
     @Test
     fun `相似恶意域名不得匹配`() {
         val evil = entry(hexIdOf(1), "https://evilgithub.com")
-        assertTrue(AutofillCandidateRanker.rank(listOf(evil), "", "github.com").isEmpty())
+        assertTrue(AutofillCandidateRanker.rank(listOf(evil), "", "github.com", packageDimensionAuthorized = false).isEmpty())
     }
 
     @Test
     fun `包名精确匹配且不得前缀匹配`() {
         val ok = entry(hexIdOf(1), "android://com.example.app")
-        val ranked = AutofillCandidateRanker.rank(listOf(ok), "com.example.app", null)
+        val ranked = AutofillCandidateRanker.rank(listOf(ok), "com.example.app", null, packageDimensionAuthorized = true)
 
         assertEquals(1, ranked.size)
         assertTrue(AutofillCandidateRanker.MatchReason.EXACT_PACKAGE in ranked.first().reasons)
 
         val prefix = entry(hexIdOf(2), "android://com.example.app.evil")
-        assertTrue(AutofillCandidateRanker.rank(listOf(prefix), "com.example.app", null).isEmpty())
+        assertTrue(AutofillCandidateRanker.rank(listOf(prefix), "com.example.app", null, packageDimensionAuthorized = true).isEmpty())
     }
 
     @Test
@@ -78,19 +79,19 @@ class AutofillCandidateRankerTest {
         val webBound = entry(hexIdOf(1), "https://github.com")
         assertTrue(
             "Web 绑定条目不得被同形包名命中",
-            AutofillCandidateRanker.rank(listOf(webBound), "github.com", null).isEmpty()
+            AutofillCandidateRanker.rank(listOf(webBound), "github.com", null, packageDimensionAuthorized = true).isEmpty()
         )
 
         // 裸包名条目同样不再按包名命中（只认显式 android:// 绑定）
         val bare = entry(hexIdOf(2), "com.example.app")
         assertTrue(
             "裸包名条目不得按包名命中",
-            AutofillCandidateRanker.rank(listOf(bare), "com.example.app", null).isEmpty()
+            AutofillCandidateRanker.rank(listOf(bare), "com.example.app", null, packageDimensionAuthorized = true).isEmpty()
         )
 
         // 同一批内：android:// 绑定条目仍正常入选，且仅它入选
         val bound = entry(hexIdOf(3), "android://com.example.app")
-        val ranked = AutofillCandidateRanker.rank(listOf(webBound, bare, bound), "com.example.app", null)
+        val ranked = AutofillCandidateRanker.rank(listOf(webBound, bare, bound), "com.example.app", null, packageDimensionAuthorized = true)
         assertEquals(1, ranked.size)
         assertEquals(bound.id.toHexString(), ranked.first().entry.id.toHexString())
     }
@@ -98,13 +99,13 @@ class AutofillCandidateRankerTest {
     @Test
     fun `webDomain 为空时不做域名匹配`() {
         val e = entry(hexIdOf(1), "https://github.com")
-        assertTrue(AutofillCandidateRanker.rank(listOf(e), "com.other", null).isEmpty())
+        assertTrue(AutofillCandidateRanker.rank(listOf(e), "com.other", null, packageDimensionAuthorized = false).isEmpty())
     }
 
     @Test
     fun `上限截断`() {
         val entries = (1..5).map { entry(hexIdOf(it), "https://github.com") }
-        val ranked = AutofillCandidateRanker.rank(entries, "", "github.com", limit = 2)
+        val ranked = AutofillCandidateRanker.rank(entries, "", "github.com", packageDimensionAuthorized = false, limit = 2)
         assertEquals(2, ranked.size)
     }
 
@@ -117,6 +118,7 @@ class AutofillCandidateRankerTest {
             listOf(a, b),
             "",
             "github.com",
+            packageDimensionAuthorized = false,
             lastFilledEntryId = b.id.toHexString()
         )
 
@@ -128,8 +130,64 @@ class AutofillCandidateRankerTest {
         val plain = entry(hexIdOf(1), "https://github.com")
         val favorite = entry(hexIdOf(2), "https://github.com", favorite = true)
 
-        val ranked = AutofillCandidateRanker.rank(listOf(plain, favorite), "", "github.com")
+        val ranked = AutofillCandidateRanker.rank(listOf(plain, favorite), "", "github.com", packageDimensionAuthorized = false)
 
         assertEquals(favorite.id.toHexString(), ranked.first().entry.id.toHexString())
+    }
+
+    // ===== ISSUE-P2-46：`android://` 维度必须经「包名 + 签名」首次绑定 =====
+
+    @Test
+    fun `包名维度未授权时 android 绑定条目不命中`() {
+        val bound = entry(hexIdOf(1), "android://com.example.app")
+
+        val ranked = AutofillCandidateRanker.rank(
+            listOf(bound),
+            "com.example.app",
+            null,
+            packageDimensionAuthorized = false
+        )
+
+        assertTrue(
+            "未完成包名 + 签名首次绑定时必须「不命中」（不得降级为弱候选：" +
+                "那仍会把凭据交给以同 applicationId 侧载的应用）",
+            ranked.isEmpty()
+        )
+    }
+
+    @Test
+    fun `未授权时仅失去包名维度，域名维度仍可入选`() {
+        val packageBoundOnly = entry(hexIdOf(1), "android://com.example.app")
+        val webBound = entry(hexIdOf(2), "https://github.com")
+
+        val ranked = AutofillCandidateRanker.rank(
+            listOf(packageBoundOnly, webBound),
+            "com.example.app",
+            "github.com",
+            packageDimensionAuthorized = false
+        )
+
+        assertEquals(1, ranked.size)
+        assertEquals(webBound.id.toHexString(), ranked.first().entry.id.toHexString())
+        assertFalse(
+            "未授权时不得出现 EXACT_PACKAGE 匹配原因",
+            AutofillCandidateRanker.MatchReason.EXACT_PACKAGE in ranked.first().reasons
+        )
+    }
+
+    @Test
+    fun `包名维度未授权不改变域名维度的排序与截断`() {
+        val parent = entry(hexIdOf(1), "https://github.com")
+        val exact = entry(hexIdOf(2), "https://login.github.com")
+
+        val ranked = AutofillCandidateRanker.rank(
+            listOf(parent, exact),
+            "com.example.app",
+            "login.github.com",
+            packageDimensionAuthorized = false
+        )
+
+        assertEquals(2, ranked.size)
+        assertEquals(exact.id.toHexString(), ranked.first().entry.id.toHexString())
     }
 }

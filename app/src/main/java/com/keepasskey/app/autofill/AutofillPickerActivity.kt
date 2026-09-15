@@ -186,6 +186,10 @@ class AutofillPickerActivity : FragmentActivity() {
 
     private fun deliver(credentials: AutofillPickerViewModel.Credentials) {
         completed = true
+        // ISSUE-P2-46：用户已在受保护窗口内**显式指认**「把这条凭据填给该调用方」（该页展示
+        // 包名 / 应用名 / 签名摘要，见 ISSUE-P2-70），故此处写入首次绑定——它是 `android://`
+        // 维度后续自动命中的唯一前提，也是未绑定调用方唯一的补救路径。
+        bindCallerForPackageDimension()
         val usernameId = readAutofillId(EXTRA_USERNAME_ID)
         val passwordId = readAutofillId(EXTRA_PASSWORD_ID)
 
@@ -224,6 +228,26 @@ class AutofillPickerActivity : FragmentActivity() {
     private fun intentOfResult(dataset: Dataset) =
         android.content.Intent()
             .putExtra(AutofillManager.EXTRA_AUTHENTICATION_RESULT, dataset)
+
+    /**
+     * ISSUE-P2-46：写入调用方「首次绑定」（包名 + 主签名摘要），供 `android://` 维度后续放行。
+     *
+     * **fail-closed**：签名摘要不可读（空集）时**不写入**降级键（`pkg|`）——「只认包名」正是
+     * 本项要消灭的形态；包名非法时存储自身拒绝写入（返回 false）。两种情况一律保持「未绑定」，
+     * 该调用方的 `android://` 候选继续不命中。
+     */
+    private fun bindCallerForPackageDimension() {
+        val callingPackage = intent.getStringExtra(EXTRA_CALLING_PACKAGE).orEmpty()
+        if (callingPackage.isBlank()) return
+        val digests = autofillOriginResolver.callingAppCertDigests(callingPackage)
+        if (digests.isEmpty) {
+            // 日志不携带包名 / 摘要等调用方标识（ISSUE-P1-10 语义）
+            AppLog.w(TAG, "调用方签名摘要不可读，android:// 维度保持未绑定（fail-closed）")
+            return
+        }
+        val written = callerTrustStore.trust(callingPackage, digests.primary)
+        AppLog.i(TAG, "android:// 维度首次绑定写入结果=$written")
+    }
 
     private fun readAutofillId(key: String): AutofillId? =
         intent.getParcelableExtra(key, AutofillId::class.java)
