@@ -1,5 +1,7 @@
 package com.keepasskey.app.security
 
+import java.util.Locale
+
 /**
  * 受信浏览器「包名 + 签名证书指纹」白名单（ISSUE-P1-11）。
  *
@@ -47,11 +49,20 @@ object BrowserSigningFingerprints {
 
     /**
      * 调用方是否为「包名 + 已取证签名指纹」匹配的受信浏览器。
-     * 包名大小写不敏感；指纹为空 / 未取证包名 / 指纹不匹配一律 false（fail-closed）。
+     *
+     * ISSUE-P3-93：判定按**摘要集合**做，**任一**调用方签名摘要命中即通过——
+     * 签名轮换期调用方同时持有当前与历史签名者，只比对单个摘要会随系统返回顺序误判未授权。
+     * 包名大小写不敏感；集合为空 / 未取证包名 / 无任何摘要命中一律 false（fail-closed）。
      */
-    fun isTrusted(callingPackage: String, certSha256Hex: String?): Boolean {
-        if (certSha256Hex.isNullOrBlank()) return false
-        val fingerprints = TRUSTED[callingPackage.trim().lowercase()] ?: return false
-        return certSha256Hex.trim().uppercase() in fingerprints
+    fun isTrusted(callingPackage: String, certDigests: CallerCertDigests): Boolean {
+        val fingerprints = TRUSTED[callingPackage.trim().lowercase(Locale.ROOT)] ?: return false
+        return certDigests.anyMatch { it in fingerprints }
     }
+
+    /**
+     * 单摘要入口（兼容既有调用点与测试）：语义等价于「只含该摘要的集合」。
+     * 放行判定请优先使用集合入口，避免在签名轮换期退化回「只看一个摘要」。
+     */
+    fun isTrusted(callingPackage: String, certSha256Hex: String?): Boolean =
+        isTrusted(callingPackage, CallerCertDigests.ofSingle(certSha256Hex))
 }

@@ -2,6 +2,7 @@ package com.keepasskey.app.autofill
 
 import com.keepasskey.app.passkey.DomainMatcher
 import com.keepasskey.app.security.BrowserSigningFingerprints
+import com.keepasskey.app.security.CallerCertDigests
 
 /**
  * webDomain 归属判定（ISSUE-P2-07 / ZT-12 / ISSUE-P1-11）。
@@ -47,28 +48,47 @@ object AutofillWebDomainPolicy {
 
     /**
      * 调用方是否为受信任浏览器：**包名 + 已取证签名证书指纹**二元组均匹配（ISSUE-P1-11）。
-     * 指纹来源与核实纪律见 [BrowserSigningFingerprints]。
+     *
+     * ISSUE-P3-93：按**摘要集合**判定，**任一**调用方摘要命中即通过（签名轮换期调用方同时持有
+     * 当前与历史签名者）。指纹来源与核实纪律见 [BrowserSigningFingerprints]。
      */
+    fun isTrustedBrowser(callingPackage: String, certDigests: CallerCertDigests): Boolean =
+        BrowserSigningFingerprints.isTrusted(callingPackage, certDigests)
+
+    /** 单摘要入口（兼容既有调用点；放行判定优先用集合入口） */
     fun isTrustedBrowser(callingPackage: String, certSha256Hex: String?): Boolean =
         BrowserSigningFingerprints.isTrusted(callingPackage, certSha256Hex)
 
     /**
-     * 裁决 webDomain 归属。
+     * 裁决 webDomain 归属（ISSUE-P3-93：以调用方**全部**签名摘要参与判定）。
      *
      * @param callingPackage 系统背书的调用方包名（AssistStructure.activityComponent）
      * @param rawWebDomain 结构树中的原始 webDomain（调用方可控，不可直接信任）
-     * @param certSha256Hex 调用方签名证书 SHA-256（大写无冒号）；无法取得时传 null（fail-closed）
+     * @param certDigests 调用方签名证书摘要集合；不可读时为空集（fail-closed）
      * @param dalVerified 非浏览器调用方是否已通过 DAL 归属校验
+     */
+    fun attribute(
+        callingPackage: String,
+        rawWebDomain: String?,
+        certDigests: CallerCertDigests,
+        dalVerified: Boolean
+    ): WebDomainAttribution {
+        if (normalizeDomain(rawWebDomain) == null) return WebDomainAttribution.REJECTED
+        if (isTrustedBrowser(callingPackage, certDigests)) return WebDomainAttribution.BROWSER_DELEGATED
+        if (dalVerified) return WebDomainAttribution.DAL_VERIFIED
+        return WebDomainAttribution.REJECTED
+    }
+
+    /**
+     * 单摘要入口（兼容既有调用点与测试）：等价于「只含该摘要的集合」。
+     *
+     * @param certSha256Hex 调用方签名证书 SHA-256（大写无冒号）；无法取得时传 null（fail-closed）
      */
     fun attribute(
         callingPackage: String,
         rawWebDomain: String?,
         certSha256Hex: String?,
         dalVerified: Boolean
-    ): WebDomainAttribution {
-        if (normalizeDomain(rawWebDomain) == null) return WebDomainAttribution.REJECTED
-        if (isTrustedBrowser(callingPackage, certSha256Hex)) return WebDomainAttribution.BROWSER_DELEGATED
-        if (dalVerified) return WebDomainAttribution.DAL_VERIFIED
-        return WebDomainAttribution.REJECTED
-    }
+    ): WebDomainAttribution =
+        attribute(callingPackage, rawWebDomain, CallerCertDigests.ofSingle(certSha256Hex), dalVerified)
 }

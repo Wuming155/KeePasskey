@@ -51,7 +51,7 @@
 
 ---
 
-## P2 中危缺陷与协议/测试缺口（12 项）
+## P2 中危缺陷与协议/测试缺口（9 项）
 
 > **历史**：**ISSUE-P2-28 ~ P2-41**（往返丢字段与布尔/数值语义、MemoryProtection 读写语义、
 > KDF 缺参 fail-closed、isPackageMatch 的 android:// 硬约束、requireRiskNotice 接线、
@@ -98,6 +98,21 @@
 > 随「同步解析落盘与内存池擦除边界」批次归档，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §52；同批一并处置
 > **ISSUE-P3-119**（内存池擦除边界与树外可达性）。整改要点：解析**收口到会话层**
 > `DatabaseSession.parseExternalDatabase`（「与主会话同一个 store」由构造关系保证，新增调用方无法再忘记传参）。
+>
+> **2026-09-15 闭环（续 4）**：**ISSUE-P2-70**（选择器页强制展示请求方身份：包名 / 应用名 / 签名摘要 / 表单自报域）
+> 与 **ISSUE-P2-81**（会话授权宽限的匹配域收窄：域不可归属时既不写入也不匹配授权）随
+> 「自动填充请求方归属与授权宽限收窄」批次归档，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §53。
+> **注**：`P2-70` 的 AC③（与 `ISSUE-P3-93` 同批）**未采纳**——该条要把「单摘要」模型改为「摘要集合」，
+> 牵动信任存储键语义（`AutofillCallerTrustStore` 按「包名 + 证书」记录）与浏览器白名单比较，
+> 属独立批次；`P3-93` 仍在表内，理由见 §53.3.4。
+>
+> **2026-09-15 闭环（续 5）**：**ISSUE-P2-74**（清单补**最小 `<queries>`**：`https` VIEW intent +
+> 与 `BrowserSigningFingerprints.TRUSTED` 逐一对应的显式 `<package>`，使 Android 11+ 下调用方
+> 证书指纹可读，恢复「浏览器委派」web 域归属判定）随「包可见性与序列化缓冲擦除」批次归档，
+> 见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §54；同批一并处置 **ISSUE-P3-118**（整库序列化缓冲擦除）。
+> **残余（如实声明）**：P2-74 的 AC①（设备侧复现）与 AC③（真机验证浏览器域自动填充）
+> **仍需设备**——本批以官方文档为据（`getPackageInfo` 受包可见性过滤、无 autofill 豁免），
+> 且修复为**纯增量声明**（不改变既有匹配逻辑），已写入 §54.3 待设备侧补验。
 >
 > **2026-09-13 第四轮独立复核定版（《SECURITY_RECHECK_2026-09.md》1272 行定版稿）**：
 > ① **升格 P1 排期**（条目编号留原地、闭环按编号归档）：`P2-48 / P2-49 / P2-51 / P2-53 / P2-61 / P2-63 /
@@ -239,9 +254,7 @@
 
 | 编号 | 来源 | 问题与位置（核实于 2026-09-13，对 HEAD `a669a48`） | 验收标准 |
 |---|---|---|---|
-| ISSUE-P2-70 | 审计 E1 | 手动选择器把**任意**条目凭据交给请求方，且**不显示请求方身份**（`AutofillPickerActivity` / `AutofillPickerViewModel.kt:54-77`）；自动匹配路径有严格边界，手动兜底路径无提示。（与 `ISSUE-P1-24`（**已闭环归档**，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §45）**部分重合**：P1-24 验收针对**确认页**，本项针对**选择器页**） | ① 选择器页强制展示请求方应用名 + 签名指纹摘要 + 域；② 断言覆盖展示内容；③ 与 `ISSUE-P3-93`（多签名者遍历）同批 |
 | ISSUE-P2-73 | 审计 E5 | 自动填充认证流两处协议漂移：① `AutofillUnlockActivity.kt:65` / `AutofillConfirmActivity.kt:160` 用裸 `setResult(RESULT_OK)`，**不带** `AutofillManager.EXTRA_AUTHENTICATION_RESULT`（官方要求经该 extra 回传数据集）；② `AutofillDatasetBuilders.kt:69,206` 创建认证 `PendingIntent` 用 `FLAG_IMMUTABLE`，而平台需向其中填认证参数（picker 路径 `:240` 用 `FLAG_MUTABLE` 是对的） | ① 按官方以 `EXTRA_AUTHENTICATION_RESULT` 回传；② 认证 `PendingIntent` 改 `FLAG_MUTABLE`（并保持 base intent 显式 + `Intent.fillIn` 覆盖语义）；③ 设备侧实测认证填充链路 |
-| ISSUE-P2-74 | 审计 E6 | 清单**未声明** `<queries>` / `QUERY_ALL_PACKAGES`（核实：0 命中），而 `AutofillOriginResolver.kt:65-68` 用 `getPackageInfo(..., GET_SIGNING_CERTIFICATES)` 解析任意调用包 → Android 11+ 包可见性下抛异常 → 证书指纹为 null → **所有 webDomain 候选被丢弃**（方向 fail-closed，无泄露）（**第四轮根因更正**："指纹读取先于浏览器判定"不是因——白名单本就要求非空指纹（`BrowserSigningFingerprints.kt:53`）；真因即缺 `<queries>`，且后果**强于原记录**：指纹为 null 同时使浏览器白名单**与** DAL 验证（`:41-42`）**双双恒 false**，web 域路径整体失效） | ① **先在设备侧复现**（判定是否真实失效）；② 若失效，改用平台下发的 `CallingAppInfo` 或**声明最小 `<queries>`**（与 `ISSUE-P3-94` 同文件同批，修复方向由"调整判定顺序"改为"补 `<queries>`"）；③ 断言浏览器域自动填充在真机可用 |
 
 ---
 
@@ -270,11 +283,10 @@
 | 编号 | 来源 | 问题与位置（核实于 2026-09-13） | 验收标准 |
 |---|---|---|---|
 | ISSUE-P2-80 | 复核 §10.1 `M-1` / `M-2` | **KDF 墙钟与闸门分路径实测缺口**：`ISSUE-P2-49` 的墙钟量级与 `M = 堆/2` 的实际可达性均为**未实测推算**（推演已四方三错，报告已删除一切墙钟断言）；且两处内存闸门**不在同一路径**——native 路径（真机默认）只有 codec「堆/2」一道闸（`KdbxKdfParameterCodec.kt:171-174`），`M = 堆/2` 直达 Rust 内核（`Argon2KdfEngine.kt:52-64` native 分支**无第二道闸**）；JVM 兜底路径才有 `transformJvm`（`:73`）的 `0.6×maxHeap` 二次拦截 | ① **M-1**：构造合法 Header（`I = 2²⁴`、`M = 堆/2`）在设备实测一次 KDF 耗时，记录 API / ABI / 机型 / 实测秒数并写入设备侧基线；② **M-2**：**分路径**实测 `M = 堆/2` 是否被接受、实际到达内核的 `M` 值（不得按"两处阈值哪处先触发"的旧题面测——会误判）；③ 实测值回填 `P2-49` 验收口径，不得再以推算替代 |
-| ISSUE-P2-81 | 复核 `NEW-N5` | **会话授权宽限的匹配域过宽**：宽限开启后 `webDomain.orEmpty()`（`AutofillDatasetBuilders.kt:205`）把空域经 `AutofillConfirmActivity:151` 传入，`AutofillSessionGrantStore.normalized()`（`:17-24`）把 `""` 归一为 `null` → 30 秒 TTL（`DEFAULT_TTL_MILLIS = 30_000L`）内该应用**所有无域 / 域不可归属的表单**免二次确认（含攻击者伪造的不可归属域）。默认关闭（`ExtendedSettings.kt:44`）；grant 按 `(包名, 域)` 整体相等匹配，已验证真实域不命中 | ① grant 匹配对"域不可归属"情形收窄（要求域非空，或宽限仅对同域生效）；② 或在开启开关的设置页如实说明该代价；③ 断言「宽限期内伪造不可归属域 → 仍需确认」或留痕接受 |
 
 ---
 
-## P3 低危问题、特性接线与体验优化（46 项）
+## P3 低危问题、特性接线与体验优化（45 项）
 
 > **状态（2026-09-12）**：历史 P3 批次 **ISSUE-P3-01 ~ P3-68** 除 P3-23（经产品裁决「不排期」）外
 > 已全部闭环并归档，逐条实现细节与验收证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md)（§3 ~ §32）。
@@ -503,7 +515,6 @@
 | 编号 | 来源 | 问题与位置（核实于 2026-09-13，对 HEAD `a669a48`） | 验收标准 |
 |---|---|---|---|
 | ISSUE-P3-116 | 威胁建模 T-9b | **「彻底退出应用」不清缓存**：`AppTerminationPolicy.terminate` 仅执行 `detachTask + exitProcess(0)`（`AppTerminationPolicy.kt:29-32`，调用点 `KeePasskeyApp.kt:57-69`），**不经** `SessionLockObserver` → `cacheDir/attachments`（明文附件）、`cacheDir/sync`（密文快照）与 `.kdbx.bak` 留在磁盘上；用户以为"退出即安全"，实际不是 | ① 退出前执行与锁库等价的清理（缓存驱逐 + 树擦除），或 ② 如实声明"退出 ≠ 清理"并在 UI 提示；③ 断言退出路径触发清理（或断言已如实提示） |
-| ISSUE-P3-118 | 威胁建模 T-16（残余） | **序列化缓冲只擦最终数组**：`DatabaseSession.save()` 以 `ByteArrayOutputStream().also { … }.toByteArray()` 产出字节（`DatabaseSession.kt:219-223`），仅对**返回的数组** `fill(0)`（`:226`）——产生它的 `ByteArrayOutputStream` **内部缓冲**（第二份完整序列化密文）从不擦除；`exportToBytes()` 同型（`:303-307`）。内容为密文，影响有限 | ① 复用同一 `ByteArrayOutputStream` 并显式擦除 / `reset()`，或改流式签名从源头消除整库物化；② 断言写入后无未擦缓冲（可用具名缓冲替代匿名链式调用） |
 | ISSUE-P3-120 | 威胁建模 Q-11 | **`RuntimeIntegrityDetector` 拦截力无实测**：检测为"磁盘路径存在性 + `/proc/self/maps` 特征串"启发式（`RuntimeIntegrityDetector.kt:100-149`），非完整性证明；真实 Frida（默认 gadget 名、改名、内存加载）下的命中率未知。若命中率低，则"COMPROMISED 时禁用生物解锁 + 自动填充"的政策在真实攻击下形同虚设，却给用户"已被保护"的错觉 | ① 真机以 Frida 实测三种形态（默认 / 改名 / 内存加载），记录命中率并写入设备侧基线；② 按结果决定加强检测**或**在 `RuntimeIntegrityPolicy` / UI 如实声明"启发式、非证明"；③ 结论与 `ISSUE-P2-63`（快照门控）统一口径 |
 | ISSUE-P3-121 | 威胁建模 T-17 | **自建内网 WebDAV / NAS 在出厂配置下不可用**：`SyncNetworkOptions.ssrfAllowedHosts` 默认空集（`SyncNetworkOptions.kt:25`），`SyncProviderResolver` 两处均传默认 `SyncNetworkOptions()`（`:52,77`）→ RFC1918 / `.local` 主机一律被 `SyncEndpointGuard` 拒绝，且**无生产逃生通道**；与 `README` 宣称支持 WebDAV（Nextcloud / ownCloud 等常见家用自建形态）存在张力 | ① 明确产品口径（"支持内网自建"或"明确不支持"）；② 若支持，提供**受控**逃生通道（用户显式声明内网主机 + 风险二次确认，默认仍为拒绝）；③ 文档与实现必须一致，不得只改其一 |
 | ISSUE-P3-122 | 审计附录 C（T6 待复核区） | **IPC 面 4 项——第四轮已逐条裁定**（`SECURITY_RECHECK` §6.8，留痕完整）：`IPC-01` **成立（部分）**——4 个 PendingIntent 的 requestCode 全为常量、3/4 带 `FLAG_UPDATE_CURRENT`，成立面为「TOTP 错配 + 30 秒授权串扰（需 `P3-42`，默认关）+ 确认页文案」，"凭据值串扰"不成立；CM 通道同构（`CredentialResponseAssembler.kt:66` 每响应局部分配器，`:234` 注释自认历史缺陷表现）；`IPC-02` **不成立**——落地 Activity 全部 `exported="false"`（7 个），第三方无法伪造 extras；`IPC-05` **误报**——`javap` 直读 `credentials-1.6.0` 证实 JSON 层级与字段完全对应；`IPC-10` **成立（LOW）**——`onSaveRequest` 无超时且平台不提供 `CancellationSignal`（后果有界，仅 Availability） | ① ~~逐条复核~~ **已完成**（防重复上报依据即上述裁定）；② 残余整改两项：`IPC-01` 的 requestCode 单调化（与 `CredentialResponseAssembler` 同构修复）+ `IPC-10` 的 `onSaveRequest` 超时预算；③ 各补回归断言 |

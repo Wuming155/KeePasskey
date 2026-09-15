@@ -52,6 +52,10 @@ class AutofillPickerActivity : FragmentActivity() {
     @Inject
     lateinit var autofillFieldBlocklistStore: AutofillFieldBlocklistStore
 
+    // ISSUE-P2-70：请求方签名证书读取通道（与确认页归属展示复用同一实现）
+    @Inject
+    lateinit var autofillOriginResolver: AutofillOriginResolver
+
     private val viewModel: AutofillPickerViewModel by viewModels()
 
     private var completed = false
@@ -65,6 +69,8 @@ class AutofillPickerActivity : FragmentActivity() {
         window.setHideOverlayWindows(true)
         window.decorView.filterTouchesWhenObscured = true
 
+        val requester = resolveRequester()
+
         setContent {
             var query by remember { mutableStateOf("") }
             val entries by viewModel.entries.collectAsStateWithLifecycle()
@@ -77,12 +83,41 @@ class AutofillPickerActivity : FragmentActivity() {
                 results = results,
                 onPick = ::confirmAndFill,
                 onCancel = ::finish,
+                // ISSUE-P2-70：强制展示请求方身份（包名 / 应用名 / 签名摘要 / 表单自报域）
+                requester = requester,
                 // 仅在本次请求确实识别到对应框时提供屏蔽入口（否则是无对象的假按钮）
                 canBlockUsername = readAutofillId(EXTRA_USERNAME_ID) != null,
                 canBlockPassword = readAutofillId(EXTRA_PASSWORD_ID) != null,
                 onBlockField = ::blockFieldAndFinish
             )
         }
+    }
+
+    /**
+     * ISSUE-P2-70：解析本次填充的请求方身份。
+     *
+     * - 包名取自 extra（系统结构树下发，**不可伪造锚点**）；缺失 → 返回 null（不展示归属块）；
+     * - 应用名经 PackageManager 读取，**可被应用自声明**，仅作辅助识别，读取失败按无名称处理；
+     * - 签名证书 SHA-256 经 [AutofillOriginResolver] 读取（与确认页同一通道），不可读时如实标注；
+     * - 域为**表单自报且未经归属校验**（本页不据其放行，仅如实展示给用户）。
+     */
+    private fun resolveRequester(): AutofillPickerRequester? {
+        val callingPackage = intent.getStringExtra(EXTRA_CALLING_PACKAGE)
+        if (callingPackage.isNullOrBlank()) return null
+        val label = try {
+            val appInfo = packageManager.getApplicationInfo(callingPackage, 0)
+            packageManager.getApplicationLabel(appInfo).toString()
+        } catch (t: Throwable) {
+            // 包可见性受限 / 应用已卸载：按「无名称」处理，绝不伪造名称
+            AppLog.w(TAG, "读取请求方应用名称失败，按无名称处理: ${t.javaClass.simpleName}")
+            null
+        }
+        return buildAutofillPickerRequester(
+            packageName = callingPackage,
+            appLabel = label,
+            certSha256Hex = autofillOriginResolver.callingAppCertSha256Hex(callingPackage),
+            reportedDomain = intent.getStringExtra(EXTRA_WEB_DOMAIN)
+        )
     }
 
     /**

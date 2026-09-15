@@ -9,6 +9,7 @@ import com.keepasskey.core.session.SessionLockObserver
 import com.keepasskey.database.file.KdbxDatabase
 import com.keepasskey.database.file.KdbxFile
 import com.keepasskey.database.history.HistoryManager
+import com.keepasskey.database.io.WipableByteArrayOutputStream
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.StateFlow
@@ -17,7 +18,6 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayInputStream
-import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.Arrays
 
@@ -283,10 +283,16 @@ class DatabaseSession(
 
                 // TASK-42 整改（P2-2）：Argon2 派生与流加密为 CPU 密集，序列化走 Default；
                 // 仅字节落盘（writeAtomic + fsync）走 IO——对齐 exportToBytes 的既有调度先例
-                val serialized = withContext(Dispatchers.Default) {
-                    ByteArrayOutputStream().also { buffer ->
+                // ISSUE-P3-118：序列化缓冲必须**具名**并在用毕后清零——`toByteArray()` 只返回副本，
+                // 内部缓冲是第二份整库密文，等待 GC 不构成擦除（`reset()` 也不清内容）
+                val buffer = WipableByteArrayOutputStream()
+                val serialized = try {
+                    withContext(Dispatchers.Default) {
                         KdbxFile.save(buffer, dbToSave, pwd, credentials.currentKeyFile())
-                    }.toByteArray()
+                        buffer.toByteArray()
+                    }
+                } finally {
+                    buffer.wipe()
                 }
                 writer(serialized)
                 // 序列化缓冲即整库密文（头部外全加密），写毕即擦，避免缓冲滞留
@@ -368,13 +374,16 @@ class DatabaseSession(
             )
         }
         withContext(Dispatchers.Default) {
+            // ISSUE-P3-118：内部缓冲（第二份整库密文）用毕即擦——返回给调用方的字节数组
+            // 由调用方按既有契约清零，但产生它的缓冲此前从未被擦除
+            val buffer = WipableByteArrayOutputStream()
             try {
-                val bytes = ByteArrayOutputStream().also { baos ->
-                    KdbxFile.save(baos, db, pwd, credentials.currentKeyFile())
-                }.toByteArray()
-                KdbxResult.Success(bytes)
+                KdbxFile.save(buffer, db, pwd, credentials.currentKeyFile())
+                KdbxResult.Success(buffer.toByteArray())
             } catch (t: Throwable) {
                 KdbxResult.Failure(t, "导出数据库失败: ${t.message}")
+            } finally {
+                buffer.wipe()
             }
         }
     }
@@ -444,10 +453,15 @@ class DatabaseSession(
         credentials.rotateCredentials(newPasswordChars, newKeyFileData)
 
         try {
-            val serialized = withContext(Dispatchers.Default) {
-                ByteArrayOutputStream().also { buffer ->
+            // ISSUE-P3-118：同型第三处（换密路径）——序列化缓冲同样须具名并在用毕后清零
+            val buffer = WipableByteArrayOutputStream()
+            val serialized = try {
+                withContext(Dispatchers.Default) {
                     KdbxFile.save(buffer, db, newPasswordChars, newKeyFileData)
-                }.toByteArray()
+                    buffer.toByteArray()
+                }
+            } finally {
+                buffer.wipe()
             }
             writer(serialized)
             serialized.fill(0)

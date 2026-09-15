@@ -31,6 +31,10 @@ data class AutofillGrantContext(
  * - 仅在**密码库已解锁**后生效：授权的作用是「避免短时间内对同一包名+域重复弹出二次确认」，
  *   **绝不**作用于「库锁定时跳过解锁」——库锁定时一律先解锁，与授权无关；
  * - 授权按「包名 + 域」严格匹配，跨包名 / 跨域一律不命中；
+ * - **域必须可归属**（ISSUE-P2-81）：归一化后域为空的请求**既不写入授权、也不匹配授权**。
+ *   此前 `null == null` 会被判为「同上下文」→ 开关开启后，TTL 内同包名的一切「域不可归属」
+ *   表单（含攻击者伪造的不可归属域）都会免二次确认，属过宽匹配；现收窄为「仅可归属域
+ *   才享受宽限」（代价：无域表单恢复为每次都确认，见设置页文案）。
  * - TTL 到期即失效（`elapsedRealtime` 单调时钟，不受系统时间调整影响）。
  *
  * 默认 TTL 保守（[DEFAULT_TTL_MILLIS]），且**总开关默认关闭**——关闭时调用方根本不查询本存储，
@@ -47,7 +51,13 @@ class AutofillSessionGrantStore(
     private var activeGrant: Grant? = null
 
     fun grant(context: AutofillGrantContext) {
-        activeGrant = Grant(context.normalized(), elapsedRealtime() + ttlMillis)
+        val normalized = context.normalized()
+        // ISSUE-P2-81：域不可归属时**不建立授权**——否则该授权会在 TTL 内对同包名的一切
+        // 「域不可归属」表单（含攻击者伪造）免二次确认。
+        // 不触碰既有授权：既有授权只可能绑定某个可归属域，而查询侧已要求域可归属，
+        // 故无域请求无论如何都拿不到它（无需额外清除，避免无谓地牺牲已获得的宽限）。
+        if (normalized.webDomain == null) return
+        activeGrant = Grant(normalized, elapsedRealtime() + ttlMillis)
     }
 
     fun isGranted(context: AutofillGrantContext): Boolean {
@@ -56,7 +66,11 @@ class AutofillSessionGrantStore(
             clear()
             return false
         }
-        return grant.context == context.normalized()
+        val normalized = context.normalized()
+        // ISSUE-P2-81：查询侧同样要求域可归属——`null == null` 的相等判断正是要消除的
+        // 过宽匹配（域不可归属的请求一律走显式确认）。
+        if (normalized.webDomain == null) return false
+        return grant.context == normalized
     }
 
     fun clear() {

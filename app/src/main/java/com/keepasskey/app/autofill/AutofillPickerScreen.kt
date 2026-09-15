@@ -1,6 +1,7 @@
 package com.keepasskey.app.autofill
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -35,12 +36,57 @@ import com.keepasskey.app.R
 import com.keepasskey.core.model.KdbxEntry
 
 /**
+ * ISSUE-P2-70（审计 E1）：选择器页强制展示的**请求方身份**。
+ *
+ * 缺陷形态：自动匹配路径有严格边界（域 / 包名匹配 + 指纹白名单 / DAL 校验），而**手动兜底选择器**
+ * 可把**任意条目**的凭据交给请求方，且页面上不显示「谁在请求」——用户在无任何归属信息的情况下
+ * 完成一次填充授权。
+ *
+ * 字段的可信度分层（与 `AutofillCallerAttribution` 一致，展示文案必须如实区分）：
+ * - [packageName] / [certSha256Hex]：**不可伪造锚点**（系统结构树提供 + 本应用经 PackageManager 读取）；
+ * - [appLabel]：**可被应用自声明**，仅作辅助识别，不构成归属依据；
+ * - [reportedDomain]：**表单自报且未经归属校验**（本页只是把所有权的判断交还用户），
+ *   与确认页展示的「已经归属校验」的域**语义不同**，故文案单独区分。
+ */
+data class AutofillPickerRequester(
+    val packageName: String,
+    val appLabel: String?,
+    val certSha256Hex: String?,
+    val reportedDomain: String?
+)
+
+/**
+ * 构造请求方展示模型（纯函数，便于单测）。
+ *
+ * @return 包名为空（异常启动路径 / extra 缺失）时返回 null——此时无归属可展示，
+ *   调用方应保持既有流程（不展示归属块，也不伪造「未知应用」这类占位锚点）。
+ */
+fun buildAutofillPickerRequester(
+    packageName: String?,
+    appLabel: String?,
+    certSha256Hex: String?,
+    reportedDomain: String?
+): AutofillPickerRequester? {
+    val pkg = packageName?.trim().orEmpty()
+    if (pkg.isEmpty()) return null
+    return AutofillPickerRequester(
+        packageName = pkg,
+        appLabel = appLabel?.trim()?.takeIf { it.isNotEmpty() },
+        certSha256Hex = certSha256Hex?.trim()?.takeIf { it.isNotEmpty() },
+        reportedDomain = reportedDomain?.trim()?.takeIf { it.isNotEmpty() }
+    )
+}
+
+/**
  * 自动填充「手动选择器」界面（ISSUE-P3-40）。
  *
  * 自动匹配无候选或候选不含目标条目时的兜底入口：用户可搜索全库条目并选择填充。
  *
  * 零秘密热路径：列表只渲染标题 / 用户名 / 网址等**非敏感元数据**，
  * 密码在用户点选某一行后才由 [AutofillPickerViewModel.resolveCredentials] 按需解密。
+ *
+ * ISSUE-P2-70：顶部**强制**展示 [requester]（请求方包名 + 应用名 + 签名摘要 + 表单自报域）——
+ * 兜底路径下用户至少能看到「谁在要凭据」再决定是否放行。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -50,6 +96,8 @@ fun AutofillPickerScreen(
     results: List<KdbxEntry>,
     onPick: (String) -> Unit,
     onCancel: () -> Unit,
+    // ISSUE-P2-70：请求方身份（null = 无法识别归属，不展示归属块）
+    requester: AutofillPickerRequester? = null,
     // ISSUE-P3-43 ②：字段签名级屏蔽入口。仅在本次请求识别到对应框时可用，
     // 否则不呈现（杜绝无对象的假按钮）
     canBlockUsername: Boolean = false,
@@ -77,6 +125,9 @@ fun AutofillPickerScreen(
                     }
                 }
             )
+
+            // ISSUE-P2-70：请求方身份**强制展示**（置于搜索框之前，无需滚动即可见）
+            requester?.let { AutofillPickerRequesterBlock(it) }
 
             OutlinedTextField(
                 value = query,
@@ -167,5 +218,59 @@ fun AutofillPickerScreen(
                 }
             }
         )
+    }
+}
+
+/**
+ * ISSUE-P2-70：请求方身份展示块（不可伪造锚点优先，非权威信息显式降级标注）。
+ *
+ * 行序即可信度序：包名（系统背书）→ 应用名（应用可自声明）→ 签名证书 SHA-256（不可读时如实标注）
+ * → 表单自报域（**未**通过归属校验，故文案不沿用确认页的「已经归属校验」措辞）。
+ */
+@Composable
+private fun AutofillPickerRequesterBlock(requester: AutofillPickerRequester) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLow
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            Text(
+                text = stringResource(R.string.autofill_picker_requester_title),
+                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold)
+            )
+            Text(
+                text = stringResource(R.string.autofill_confirm_caller_package, requester.packageName),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            requester.appLabel?.let {
+                Text(
+                    text = stringResource(R.string.autofill_picker_requester_label, it),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Text(
+                text = requester.certSha256Hex
+                    ?.let { stringResource(R.string.autofill_confirm_caller_cert, it) }
+                    ?: stringResource(R.string.autofill_confirm_cert_unreadable),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = requester.reportedDomain
+                    ?.let { stringResource(R.string.autofill_picker_requester_domain, it) }
+                    ?: stringResource(R.string.autofill_picker_requester_domain_none),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
     }
 }

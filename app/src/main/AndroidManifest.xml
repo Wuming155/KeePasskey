@@ -13,6 +13,30 @@
          全部通知；声明后由 MainActivity 经 RequestPermission 契约请求一次，拒绝即静默降级。 -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- ISSUE-P2-74（审计 E6）：**最小包可见性声明**。
+         本应用以「浏览器委派」判定自动填充的 webDomain 归属，需读取**调用方包名**对应的签名证书指纹
+         （`AutofillOriginResolver.callingAppCertSha256Hex` → `BrowserSigningFingerprints` / DAL 校验）。
+         Android 11+ 的包可见性默认过滤 `getPackageInfo()`（官方《软件包可见性过滤》：受影响方法含
+         `getPackageInfo()`，非自动可见包须经 `<queries>` 声明），未声明即抛 `NameNotFoundException`
+         → 指纹恒为 null → 浏览器白名单与 DAL 校验**双双恒 false**，web 域候选整体失效
+         （方向 fail-closed，无泄露，但功能不可用）。
+         声明口径（**最小必要，不使用 `QUERY_ALL_PACKAGES`**）：
+         ① `https` VIEW intent —— 按官方推荐的「intent 签名」方式使全部浏览器可见；
+         ② 与 `BrowserSigningFingerprints.TRUSTED` **逐一对应**的显式 `<package>`（白名单新增浏览器时
+            必须同步本清单，该一致性由单测 `PackageVisibilityQueriesWiringTest` 锁定）。
+         边界（如实声明）：**非浏览器**调用方（任意应用）无法枚举，其指纹读取仍会失败并按 fail-closed
+         处理，展示侧如实标注「不可读」而不伪造摘要。 -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <category android:name="android.intent.category.BROWSABLE" />
+            <data android:scheme="https" />
+        </intent>
+        <package android:name="com.android.chrome" />
+        <package android:name="org.mozilla.firefox" />
+        <package android:name="org.mozilla.firefox_beta" />
+    </queries>
+
     <application
         android:name=".MainApplication"
         android:allowBackup="false"

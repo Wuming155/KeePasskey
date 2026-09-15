@@ -61,8 +61,10 @@
 | §50 | 日志与对象字符串化卫生批次：四类 `toString()` 明文泄漏面 + 日志抽样口径按「日志调用」特征跨行抽取 | ISSUE-P2-68 / ISSUE-P2-69 |
 | §51 | 自动填充默认值与内存保护口径批次：TOTP 复制 / IME 内联建议默认关闭 + 内存密封与写出标志口径分离 + unlink-only 边界登记 | ISSUE-P2-43 / P2-64 / P2-66 / P2-71 |
 | §52 | 同步解析落盘与内存池擦除边界批次：远端大附件解析期落盘 + 树外可达性收口 + 单次解析产物显式擦除 | ISSUE-P2-67 / P3-119 |
+| §53 | 自动填充请求方归属与授权宽限收窄批次：选择器页强制展示请求方身份 + 不可归属域不再享受免重复确认 | ISSUE-P2-70 / P2-81 |
+| §54 | 包可见性与序列化缓冲擦除批次：最小 `<queries>` 恢复调用方指纹可读 + 整库序列化缓冲具名擦除 | ISSUE-P2-74 / P3-118 |
 
-> 各批次验收证据（用例数 / 通过 / 失败 / 跳过）分别见 §2.22、§3.1、§4.1、§5、§6、§7、§8、§9、§10、§11、§12、§13、§14、§15、§16、§17、§18、§19、§20.3、§21.4、§22.9、§23.1、§24.3、§25.2、§26.3、§49.2、§50.2、§51.2、§52.2。
+> 各批次验收证据（用例数 / 通过 / 失败 / 跳过）分别见 §2.22、§3.1、§4.1、§5、§6、§7、§8、§9、§10、§11、§12、§13、§14、§15、§16、§17、§18、§19、§20.3、§21.4、§22.9、§23.1、§24.3、§25.2、§26.3、§49.2、§50.2、§51.2、§52.2、§53.2、§54.2。
 
 ---
 
@@ -3433,4 +3435,160 @@ $env:ANDROID_HOME\build-tools\<ver>\apksigner.bat verify --print-certs <产物>
    `ISSUE-P3-116`（彻底退出不清缓存）仍为独立开放条目，未在本批一并整改。
 6. **计数**：本批 `ACTIVE_ISSUES.md` 的 P2 由 **13 → 12**（表行 8 → 7，标题条目仍 5）、
    P3 由 **47 → 46**（表行 40 → 39，标题条目仍 7），均按「表行 + 标题条目」双形式口径复算。
+
+---
+
+## §53 自动填充请求方归属与授权宽限收窄批次（2026-09-15）：P2-70 / P2-81
+
+> **本批次缘起**：认领 `ISSUE-P2-70`（审计 E1：手动选择器把任意条目凭据交给请求方且不显示请求方身份）
+> 与 `ISSUE-P2-81`（第四轮复核 `NEW-N5`：会话授权宽限的匹配域过宽）。两项同属**自动填充放行面的
+> 「用户不知情」问题**：前者是「不知道谁在要」，后者是「不知道为何不再问」。
+
+### 53.1 交付清单
+
+| 编号 | 级别 | 缺陷（一句话） | 关键改动 | 依据 |
+|---|:--:|---|---|---|
+| **ISSUE-P2-70** | P2 | **手动选择器不显示请求方身份**：自动匹配路径有严格边界（域 / 包名匹配 + 指纹白名单 / DAL 校验），而手动兜底选择器可把**任意条目**凭据交给请求方，页面上却只有「选择要填充的凭据」——用户在零归属信息下完成一次填充授权 | ① 新增展示模型 [AutofillPickerRequester](../../app/src/main/java/com/keepasskey/app/autofill/AutofillPickerScreen.kt)（包名 / 应用名 / 签名证书 SHA-256 / 表单自报域）+ 纯函数构造 `buildAutofillPickerRequester`（包名缺失返回 null，**不伪造「未知应用」占位**）；② 选择器页在**搜索框之前**（无需滚动即可见）渲染归属块，行序即可信度序：包名（系统背书）→ 应用名（**可被应用自声明**，文案明示「仅作辅助识别」）→ 签名证书（不可读时如实标注）→ 表单自报域；③ Activity 侧解析：包名取 extra、应用名经 `PackageManager`（失败降级为「无名称」）、证书经 `AutofillOriginResolver.callingAppCertSha256Hex`（**与确认页同一读取通道**）；④ 域文案**与确认页区分**——选择器拿到的是表单自报且**未经归属校验**的域，故新文案明示「未通过归属校验」，**不**沿用确认页的「已经归属校验」 | 审计 E1；`AGENTS.md` §3.2 |
+| **ISSUE-P2-81** | P2 | **授权宽限的匹配域过宽**：`normalized()` 把空 / 不可归属域归一为 `null`，而 `AutofillGrantContext` 用整体 `==` 比较 → `null == null` 成立 ⇒ 开关开启后 30 秒 TTL 内，同包名的一切「域不可归属」表单（**含攻击者伪造的不可归属域**）免二次确认 | ① **收窄到「域必须可归属」**（在授权存储单点实现，写入与匹配两侧同时收窄）：域归一后为 `null` 时 **`grant()` 不建立授权**、**`isGranted()` 一律返回 false**；② 设置页文案（中 / 英）如实披露代价：宽限**仅对能确定域名的表单生效**，无法归属域名的表单每次仍需确认；③ 新增 2 例断言：伪造 / 空白 / 仅 scheme 的不可归属域**均不得命中**；无域确认既不新增授权也不能替无域请求冒领既有域授权 | 第四轮复核 `NEW-N5`；`AGENTS.md` §3.2 |
+
+### 53.2 验收证据
+
+```powershell
+# ① 定向验证（自动填充包全部用例）
+.\gradlew.bat :app:testDebugUnitTest --tests "com.keepasskey.app.autofill.*"
+# → BUILD SUCCESSFUL；AutofillPickerRequesterDisplayTest tests=7 skipped=0 failures=0 errors=0
+
+# ② 全量单测（强制真实执行）
+.\gradlew.bat test --rerun-tasks --max-workers=1
+# → BUILD SUCCESSFUL in 2m 33s；114 actionable tasks: 114 executed
+#   结果汇总（build/test-results/**/TEST-*.xml）：
+#   tests=1687 failures=0 errors=0 skipped=13
+#   （app 911 / core 65 / crypto 127 / database 381 / sync 203）——较上批 +9（app）
+cd crypto/src/main/rust; cargo test
+# → test result: ok. 57 passed; 0 failed; 0 ignored（本批未触碰原生内核）
+.\gradlew.bat assembleRelease
+# → BUILD SUCCESSFUL in 1m 51s；216 actionable tasks: 28 executed, 188 up-to-date
+#   产物：D:\GithubWorkplace\KeePasskey\app\build\outputs\apk\release\app-release.apk
+#         （15,462,983 字节，2026-09-15 11:57:46）
+$env:ANDROID_HOME\build-tools\<ver>\apksigner.bat verify --print-certs <产物>
+# → V3.0 Signer: certificate SHA-256 digest: f3a6f0924d121e273be022589fa68724703cb7d906caa33fe4cded192cca842e
+```
+
+**新增 / 改动用例（本批 +9 例）**：
+
+| 模块 | 用例 | 覆盖 |
+|---|---|---|
+| `app` | `AutofillPickerRequesterDisplayTest`（+7，新文件） | ① 展示模型：包名缺失 / 空白 → **不构造归属**（不伪造占位锚点）；空白应用名 / 证书 / 域按「无」处理；四项齐备时逐项保留；② **渲染完整性**：选择器页必须渲染包名、应用名、证书（含不可读分支）、域（含无域分支）六处字符串资源；③ **位置证据**：归属块在源码中的位置必须**早于**搜索框（否则小屏上「强制展示」不可见）；④ **语义诚实性**：选择器页**不得**引用确认页的「已经归属校验」文案，且中英文域文案须分别含「未通过归属校验」/`not ownership-verified`、应用名文案须含「可自声明」；⑤ **接线证据**：Activity 必须调用 `resolveRequester()` 并传入界面，且证书读取必须走 `AutofillOriginResolver`（与确认页同一通道），应用名失败必须如实降级 |
+| `app` | `AutofillSessionGrantStoreTest`（+2，扩展既有文件） | ① `域不可归属时不建立授权也不命中`：`null` / 空白 / 仅 scheme（`https://`，无主机）三种形态写入后**均不得命中**（旧实现下三者都会命中，故本用例是**非空跑**的边界锁）；② `无域确认不建立授权且不得冒领可归属域授权`：无域确认既不新增授权，也不能替无域请求冒领既有域授权，且既有域授权不受影响（避免无谓牺牲已获得的宽限） |
+
+### 53.3 已知边界与口径（如实声明）
+
+1. **应用名（label）不是归属锚点**：`appLabel` 可被应用自声明，展示文案已明示「仅作辅助识别」；
+   真正的不可伪造锚点是包名（系统结构树提供）与签名证书 SHA-256（本应用经 `PackageManager` 读取）。
+   读取失败（包可见性受限 / 已卸载）时按「无名称」处理并记调试日志（仅异常类名），**绝不伪造名称**。
+2. **选择器域的语义与确认页不同（故不复用文案）**：确认页的域来自 `resolveUsableWebDomain`
+   （受信浏览器白名单 / DAL 归属声明**校验通过**）；而选择器的 `EXTRA_WEB_DOMAIN` 是
+   `scanResult.webDomain`（**表单自报**，仅用于字段签名屏蔽）。两者可信度不同，故本批新增
+   「表单自报域名：…（未通过归属校验）」文案并加**静态断言**禁止混用确认页措辞。
+3. **不展示「首次出现 / 未授权」状态**：确认页有信任存储支撑的显式授权流程（`ISSUE-P1-24`），
+   选择器是**兜底入口**且同样携带 `setAuthentication` 二次确认链；本批只补齐「谁在请求」这一
+   最低必要信息，不引入第二套授权状态机（避免两处状态各自漂移）。
+4. **`P2-70` 的 AC③（与 `ISSUE-P3-93` 同批）未采纳——如实声明**：`P3-93` 要把调用方证书从
+   「取 `apkContentsSigners.firstOrNull()` 的**单摘要**」改为「遍历全部签名者（含
+   `signingCertificateHistory`）的**摘要集合**」。这不是局部替换：现有比较面（浏览器指纹白名单
+   `BrowserSigningFingerprints`、DAL 校验、以及 `AutofillCallerTrustStore` 以「包名 + 证书」
+   为键的信任记录）都建立在单摘要之上，「任一匹配即通过」会同时改变**信任记录的键语义**
+   （签名轮换期同一条目可能对应多个摘要）。故该条按独立批次实施并在 `ACTIVE_ISSUES.md` 保留
+   （其 AC 已注明是 `ISSUE-P2-46` 的前置条件），本批不夹带。
+5. **`P2-81` 的行为变更（fail-closed 方向）**：开关开启时，**无法归属域名的表单**（原生应用内表单、
+   内嵌 WebView 未上报域、域被上游判为不可用等）恢复为「每次都确认」——这是本项的有意代价，
+   已在设置页文案如实说明；对可归属域（如浏览器站点表单）30 秒宽限**完全不变**。
+6. **`P2-81` 的残余面（不掩盖）**：TTL（30 秒）内、同一「包名 + 域」的重复请求仍免二次确认——
+   这是产品裁决的宽限设计（`ISSUE-P3-42`），本批只消除「域不可归属也享受宽限」这一过宽情形；
+   口令字段的宽限豁免（`ISSUE-P1-24` AC③：携带口令值的数据集恒需确认）不受影响。
+7. **计数**：本批 `ACTIVE_ISSUES.md` 的 P2 由 **12 → 10**（表行 7 → 5，标题条目仍 5），
+   按「表行 + 标题条目」双形式口径复算。
+
+---
+
+## §54 包可见性与序列化缓冲擦除批次（2026-09-15）：P2-74 / P3-118
+
+> **本批次缘起**：认领 `ISSUE-P2-74`（审计 E6：清单缺 `<queries>` 致 web 域归属判定整体失效）
+> 与 `ISSUE-P3-118`（威胁建模 T-16 残余：整库序列化缓冲只擦「返回数组」）。
+> 两项分别落在清单（调用方可见性）与 `database`（序列化缓冲生命周期），JVM 侧可完整验证。
+
+### 54.1 交付清单
+
+| 编号 | 级别 | 缺陷（一句话） | 关键改动 | 依据 |
+|---|:--:|---|---|---|
+| **ISSUE-P2-74** | P2 | 清单**未声明 `<queries>`**（核实：0 命中），而 `AutofillOriginResolver.callingAppCertSha256Hex` 用 `getPackageInfo(..., GET_SIGNING_CERTIFICATES)` 读取**任意调用方**的签名证书 → Android 11+ 包可见性下抛 `NameNotFoundException` → 指纹恒 null → `BrowserSigningFingerprints.isTrusted`（要求非空指纹）**与** DAL 校验（`:41-42`）**双双恒 false** → web 域候选整体失效（fail-closed 无泄露，但 minSdk 36 ⇒ **全部支持设备**功能不可用） | ① 清单补**最小 `<queries>`**：`https` VIEW + `BROWSABLE` intent（按官方推荐的 intent 签名方式使全部浏览器可见）+ 与 `BrowserSigningFingerprints.TRUSTED` **逐一对应**的显式 `<package>`（`com.android.chrome` / `org.mozilla.firefox` / `org.mozilla.firefox_beta`）；② **不使用** `QUERY_ALL_PACKAGES`（Play 需审核 + 违反最小必要）；③ 新增 `PackageVisibilityQueriesWiringTest`（3 例）把「intent 声明齐备 / 白名单包名逐一在册 / 无 QUERY_ALL_PACKAGES」固化，并**剔除 XML 注释后再断言**（本项说明本身写在清单注释里，否则注释会把"未声明"误判为"已声明"） | 审计 E6；官方《软件包可见性过滤》（`getPackageInfo` 受过滤、非自动可见包须声明） |
+| **ISSUE-P3-118** | P3 | **整库序列化缓冲只擦返回值**：`save()` / `exportToBytes()` / `changeCredentials()` 均以 `ByteArrayOutputStream().also { … }.toByteArray()` 产出字节，之后只对**返回的数组** `fill(0)`——产生它的内部缓冲（**第二份完整整库密文**）在 GC 前从不擦除；`reset()` 只置计数不清内容，JDK 亦无清零 API | ① 新增 [WipableByteArrayOutputStream](../../database/src/main/java/com/keepasskey/database/io/WipableByteArrayOutputStream.kt)（子类化以访问父类 `protected buf`，`wipe()` 逐字节清零 + 复位，幂等）；② **三条路径全部改为具名缓冲 + `finally { buffer.wipe() }`**（含 AC 未点名的**同型第三处** `changeCredentials`）；③ 新增 `WipableByteArrayOutputStreamTest`（3 例）：以 `@VisibleForTesting` 探针断言 `wipe()` **逐字节清零**（而非仅计数复位——那正是本缺陷的定义）、幂等与擦后可复用、并静态守卫三条路径均具名且无匿名链式残留 | 威胁建模 T-16 残余；`AGENTS.md` §3.2 敏感数据铁律 |
+
+### 54.2 验收证据
+
+```powershell
+# ① 定向验证
+.\gradlew.bat :app:testDebugUnitTest --tests "com.keepasskey.app.security.PackageVisibilityQueriesWiringTest"
+# → BUILD SUCCESSFUL；tests=3 skipped=0 failures=0 errors=0
+.\gradlew.bat :database:testDebugUnitTest --tests "*WipableByteArrayOutputStreamTest"
+# → BUILD SUCCESSFUL；tests=3 skipped=0 failures=0 errors=0
+
+# ② 全量单测（强制真实执行）
+.\gradlew.bat test --rerun-tasks --max-workers=1
+# → BUILD SUCCESSFUL in 2m 16s；114 actionable tasks: 114 executed
+#   结果汇总（build/test-results/**/TEST-*.xml）：
+#   tests=1693 failures=0 errors=0 skipped=13
+#   （app 914 / core 65 / crypto 127 / database 384 / sync 203）——较上批 +6（app +3 / database +3）
+cd crypto/src/main/rust; cargo test
+# → test result: ok. 57 passed; 0 failed; 0 ignored（本批未触碰原生内核）
+.\gradlew.bat assembleRelease
+# → BUILD SUCCESSFUL in 2m 18s；216 actionable tasks: 33 executed, 183 up-to-date
+#   产物：D:\GithubWorkplace\KeePasskey\app\build\outputs\apk\release\app-release.apk
+#         （15,463,191 字节，2026-09-15 12:16:13）
+```
+
+**新增用例（本批 +6 例）**：
+
+| 模块 | 用例 | 覆盖 |
+|---|---|---|
+| `app` | `PackageVisibilityQueriesWiringTest`（+3，新文件） | ① 清单必须有 `<queries>` 且含 `VIEW` + `BROWSABLE` + `https` scheme；② **跨文件一致性**：直接遍历 `BrowserSigningFingerprints.TRUSTED.keys`，每个受信浏览器包名都必须在清单中以 `<package>` 声明（白名单新增浏览器而清单漏同步即失败——这正是本缺陷的复发形态）；③ 不得声明 `QUERY_ALL_PACKAGES`。断言前**剔除 XML 注释**（否则整改说明自身含有的关键字会造成假通过） |
+| `database` | `WipableByteArrayOutputStreamTest`（+3，新文件） | ① `wipe()` 必须**逐字节清零**内部缓冲（以 `@VisibleForTesting` 探针读父类 `buf` 断言——「计数复位但字节仍在」正是本项缺陷，仅断言 `size()==0` 会漏判）；② `wipe()` 幂等且擦除后仍可继续写入（避免实现退化为「一次性销毁」）；③ **接线守卫**：`DatabaseSession` 三条序列化路径均须使用具名可擦缓冲、每处均有 `buffer.wipe()`，且不得残留 `ByteArrayOutputStream().also { … }` 匿名链式写法 |
+
+### 54.3 已知边界与口径（如实声明）
+
+1. **`ISSUE-P2-74` 的 AC①（设备侧复现）与 AC③（真机验证）本批未执行——如实声明，待设备补验**：
+   本批以**官方文档**为据（《软件包可见性过滤》明列 `getPackageInfo()` 受可见性过滤；未检索到
+   autofill 服务的可见性豁免），且修复为**纯增量声明**（只增加可见性，不改变任何匹配/放行逻辑：
+   浏览器委派仍必须通过 `BrowserSigningFingerprints` 的**指纹白名单**，DAL 仍必须声明匹配），
+   故不存在「修不好反倒放松」的方向性风险。**但**「真机上浏览器域自动填充是否恢复」仍属
+   `AGENTS.md` §6 所指的「涉及平台 API 的静态逻辑不能仅凭宿主单测判定」范畴，故：
+   该条目的设备侧验证（构造浏览器调用 + 观察候选是否下发）仍列为**待设备项**，不得据本批声明其已可用。
+2. **非浏览器调用方仍不可见（无法枚举）**：任意应用的包名不可预测，逐个 `<package>` 声明不可行，
+   而 `QUERY_ALL_PACKAGES` 在 Play 上需审核且违反最小必要。故其证书指纹读取会继续失败
+   → 相关放行路径保持 fail-closed（`webDomain` 归属判 `REJECTED`、确认页与选择器如实标注
+   「不可读」而**不伪造摘要**）。这也是 `ISSUE-P2-46`（`android://` 签名绑定）的前置约束之一。
+3. **`https` VIEW intent 的可见性范围**：该声明使「能处理 https URL 的应用」（即全部浏览器）可见。
+   这是官方推荐的「按 intent 签名声明」方式，属**用例驱动**的最小扩展（本应用的浏览器委派判定
+   必须先确认调用方是浏览器）；它不会让应用获取已安装应用清单（未使用 `getInstalledApplications()`
+   等全量查询 API）。
+4. **白名单与清单的一致性由单测强制**：`BrowserSigningFingerprints.TRUSTED` 是唯一权威白名单，
+   清单里的 `<package>` 只是「可见性」的镜像。二者漂移会导致「白名单已加但指纹读不到」的静默失效，
+   故用例直接以生产常量为准遍历断言（而非在测试里重复硬编码包名）。
+5. **`ISSUE-P3-118` 覆盖三处（含 AC 未点名的同型第三处）**：AC 只点名 `save()` 与 `exportToBytes()`，
+   实际 `changeCredentials()`（换密路径）为**同一缺陷类的第三处**，本批一并整改——
+   该类缺陷的判据是「匿名 `ByteArrayOutputStream().also{…}.toByteArray()` 链式写法」，
+   故静态守卫直接针对该写法。
+6. **`wipe()` 的语义边界**：`wipe()` 只清零**本实例**的内部缓冲。返回给调用方的字节数组
+   仍按既有契约由调用方清零（`save()` 在写盘后 `serialized.fill(0)`；`exportToBytes()` 的字节
+   归调用方所有）。本批**未**改变该所有权契约。
+7. **`@VisibleForTesting` 探针的必要性**：`buf` 是 JDK `ByteArrayOutputStream` 的 `protected` 字段、
+   本类为 Kotlin final（默认不可继承），JDK 又无读取内部缓冲的公开 API——若不提供探针，
+   测试只能断言「计数已复位」，而本项缺陷的定义恰恰是「**计数复位、字节仍在**」。
+   按仓库既有惯例（`DatabaseSession.setDatabaseForTesting` / `WebDavSyncProvider` 等）标注
+   `@VisibleForTesting` 并收敛为 `internal`。
+8. **本批未触及的相邻项**：`ISSUE-P3-93`（多签名者遍历，独立批次，见 §53.3.4）、
+   `ISSUE-P3-94`（合并清单冗余 / 废弃权限 / `tools:node="remove"`）仍为开放条目；
+   本批只动 `<queries>`，未触碰权限与 Activity 声明（避免与 P3-94 冲突）。
+9. **计数**：本批 `ACTIVE_ISSUES.md` 的 P2 由 **10 → 9**（表行 5 → 4，标题条目仍 5）、
+   P3 由 **46 → 45**（表行 39 → 38，标题条目仍 7），均按「表行 + 标题条目」双形式口径复算。
 

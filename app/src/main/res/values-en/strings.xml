@@ -1094,7 +1094,7 @@
     <string name="autofill_fill_confirm_title">Confirm before filling</string>
     <string name="autofill_fill_confirm_sub">Biometric or manual confirmation is required before filling a password by default (unlock first while the vault is locked)</string>
     <string name="autofill_session_grant_title">Skip repeat confirmation (30s)</string>
-    <string name="autofill_session_grant_sub">While the vault is unlocked, confirm only once per app/site within 30 seconds; disabled by default</string>
+    <string name="autofill_session_grant_sub">While the vault is unlocked, confirm only once per app/site within 30 seconds; applies only to forms with an identifiable domain (forms without one still require confirmation every time); disabled by default</string>
     <string name="autofill_health_ok">Autofill service is working</string>
     <string name="autofill_health_attention">Autofill service needs attention</string>
     <string name="autofill_health_issue_service_missing">Autofill service is not declared correctly; reinstall the app</string>
@@ -1102,6 +1102,11 @@
     <string name="autofill_health_issue_system_disabled">This app is not selected as the autofill service; enable it in system settings</string>
     <string name="autofill_health_issue_cm_unavailable">Credential Manager is unavailable</string>
     <string name="autofill_picker_title">Choose a credential to fill</string>
+    <!-- ISSUE-P2-70: the picker must always show who is requesting the fill -->
+    <string name="autofill_picker_requester_title">Requesting app for this fill</string>
+    <string name="autofill_picker_requester_label">App name (self-declared, for reference only): %1$s</string>
+    <string name="autofill_picker_requester_domain">Form-reported domain: %1$s (not ownership-verified)</string>
+    <string name="autofill_picker_requester_domain_none">Form-reported domain: none (in-app form)</string>
     <string name="autofill_picker_query_hint">Search by title, username or URL</string>
     <string name="autofill_picker_empty">No matching entries</string>
     <string name="autofill_picker_confirm_sub">Confirm to fill the selected credential</string>
