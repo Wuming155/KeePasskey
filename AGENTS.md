@@ -4,7 +4,8 @@
 
 > **双文档敏捷驱动体系**：
 > 1. **待办清单**：[`docs/ACTIVE_ISSUES.md`](docs/ACTIVE_ISSUES.md) — 按优先级（P0 → P1 → P2 → P3）降序排列，自包含背景与验收标准，**拿起来直接做，无需额外计划文件**。
-> 2. **历史归档**：[`docs/RESOLVED_LOG.md`](docs/RESOLVED_LOG.md) — 已整改任务与批次验收证据。
+> 2. **历史归档**：[`docs/RESOLVED_LOG.md`](docs/RESOLVED_LOG.md) — 已整改任务与批次验收证据
+>    （主文件=全量批次索引 + 最近 10 个批次正文；更早批次见分册 [`docs/resolved/`](docs/resolved/)）。
 
 ---
 
@@ -94,7 +95,8 @@ KeePasskey 是一款原生 Kotlin 开发的现代化 Android 密码管理器。�
 | 文件 | 内容 | 何时阅读 |
 |------|------|----------|
 | [`docs/ACTIVE_ISSUES.md`](docs/ACTIVE_ISSUES.md) | 现存问题与待办清单（P0→P3） | 认领与开始新工作前 |
-| [`docs/RESOLVED_LOG.md`](docs/RESOLVED_LOG.md) | 已整改任务与历史批次证据 | 确认历史 Bug 是否已修 |
+| [`docs/RESOLVED_LOG.md`](docs/RESOLVED_LOG.md) | 已整改任务与历史批次证据（**全量批次索引 + 最近 10 个批次正文**） | 确认历史 Bug 是否已修 |
+| [`docs/resolved/`](docs/resolved/) | **历史批次分册**（分册 01 = §1~§30 / 分册 02 = §31~§45 / 分册 03 = §46~§57）；各册自带章节索引与锚点，主文件索引可直接跳转 | 查 §1~§57 任一批次的原始验收证据 / 裁决 / 过程缺陷时 |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | 模块依赖拓扑与关键架构决策 | 跨模块改动、新功能落位前 |
 | [`docs/reference-projects.md`](docs/reference-projects.md) | 参考项目地图 | 实现算法/格式兼容时 |
 | [`docs/references/`](docs/references/) | 5 个参考项目架构分析 | 实现思路借鉴前 |
@@ -105,6 +107,11 @@ KeePasskey 是一款原生 Kotlin 开发的现代化 Android 密码管理器。�
 | `.codebuddy/rules/engineering-rules.md` | 工程规则 | 编写/修改任何代码前 |
 | `tools/audit/check_recheck_consistency.sh` | **复核报告一致性扫描**（由"已撤销/已更正断言清单"驱动；防止更正节与正文打架。对应 `docs/SECURITY_RECHECK_2026-09.md` 定稿前必跑） | 修改任何审计/复核报告后 |
 
+> **悬空索引（2026-09-15 核实，未整改）**：本表所列 `docs/SECURITY_RECHECK_2026-09.md` **当前在 `HEAD` 中不存在**
+> （于 `523d0fd` 删除且**退役未登记**，提交信息未载明事由）；§5 的 `bash tools/audit/check_recheck_consistency.sh`
+> 因其为默认报告路径而**恒以 exit 2「报告不存在」结束**，该「定稿前必跑」纪律事实上停摆。
+> 结论裁定与处置口径（**恢复文档** 或 **按退役纪律完成分流并补写退役小节**）见
+> `docs/ACTIVE_ISSUES.md` **ISSUE-P3-129**；该条闭环后请一并移除本注记。
 > **索引纪律（ISSUE-P3-81 立规）**：任何记录**已确认缺陷 / 残余风险 / 验证结论**的文档，必须登记在本表内。
 > 反例代价：本索引曾长期漏登 `docs/SECURITY_AUDIT_2026-09.md` 等 5 份安全文档，
 > 其 29 项发现因无人流转而在 `RESOLVED_LOG.md` 中零引用、长期未闭环。

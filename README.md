@@ -46,7 +46,7 @@ Argon2 原生内核位于 `crypto/src/main/rust/`，由 **Rust + cargo-ndk 从�
 | 文档 | 内容 |
 |------|------|
 | [`docs/ACTIVE_ISSUES.md`](docs/ACTIVE_ISSUES.md) | **现存问题与待办清单**：按 P0 → P1 → P2 → P3 排序，自包含背景与验收标准 |
-| [`docs/RESOLVED_LOG.md`](docs/RESOLVED_LOG.md) | **已整改问题与历史任务归档**：已完成核心任务与 120+ 审查项代码证据 |
+| [`docs/RESOLVED_LOG.md`](docs/RESOLVED_LOG.md) 与 [`docs/resolved/`](docs/resolved/) | **已整改问题与历史任务归档**：主文件保留全量批次索引 + 最近 10 个批次正文；§1 ~ §57 按分册（§1~§30 / §31~§45 / §46~§57）下沉 `docs/resolved/` |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | 模块依赖拓扑、技术栈、关键架构决策与目录约定 |
 | [`docs/reference-projects.md`](docs/reference-projects.md) 与 [`docs/references/`](docs/references/) | 5 个参考项目的定位地图与深度架构分析 |
 | `AGENTS.md` | 给 AI 协作代理的项目约束、版本基线与闭环纪律 |
