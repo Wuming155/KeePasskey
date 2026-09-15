@@ -4,8 +4,8 @@
 
 > **双文档敏捷驱动体系**：
 > 1. **待办清单**：[`docs/ACTIVE_ISSUES.md`](docs/ACTIVE_ISSUES.md) — 按优先级（P0 → P1 → P2 → P3）降序排列，自包含背景与验收标准，**拿起来直接做，无需额外计划文件**。
-> 2. **历史归档**：[`docs/RESOLVED_LOG.md`](docs/RESOLVED_LOG.md) — 已整改任务与批次验收证据
->    （主文件=全量批次索引 + 最近 10 个批次正文；更早批次见分册 [`docs/resolved/`](docs/resolved/)）。
+> 2. **历史归档**：[`docs/RESOLVED_LOG.md`](docs/RESOLVED_LOG.md) — 已整改归档**总索引**（≤100 行，逐批次直达正文）；
+>    批次正文见 [`docs/resolved/`](docs/resolved/)（**一批次一文件**，4 份分册索引各 ≤100 行）。
 
 ---
 
@@ -78,7 +78,8 @@ KeePasskey 是一款原生 Kotlin 开发的现代化 Android 密码管理器。�
 6. **极简闭环工作流（认领 → 整改+验证 → 流转归档 → 提交推送）**：
    1. **认领**：从 `ACTIVE_ISSUES.md` 顶部按优先级认领；发现新问题即时补登（**严禁只记聊天或脑中**）。认领后先复核条目前提（路径/行号/消费方是否仍成立），新条目须附「核实时间点」与「核实方式」。
    2. **整改 + 验证**：修改代码，且 `.\gradlew.bat test` 全绿（含相关回归）方准入库。
-   3. **流转归档**：整条从 `ACTIVE_ISSUES.md` **剪切移入** `RESOLVED_LOG.md`；基线变动同步更新本文件 §1。
+   3. **流转归档**：整条从 `ACTIVE_ISSUES.md` **剪切移入**归档——在 `RESOLVED_LOG.md` 总索引**加一行**，
+      并在 `docs/resolved/batches/` **新增 `<NN>-<中文短名>.md`**（原样收录，不改写；编号续用不复用）；基线变动同步更新本文件 §1。
    4. **提交推送**：文档与代码**同一次 `git commit`**，并**立即 `git push`**。提交信息以 `TASK-xx` / `ISSUE-xx` 引用任务并简述主题。
 7. **善用 MCP 知识服务器辅助开发（强制）**：遇到以下情形时，**优先调用对应 MCP 服务器**获取权威、时效性强的资料，不得仅凭记忆臆测或盲改：
    - **Google 知识 MCP 服务器**（`google-developer-knowledge`）：凡涉及 Android / Jetpack / Kotlin / Gradle / 加密库 / Google 平台 API、SDK 用法、版本兼容、官方最佳实践等，先向其检索确认。
@@ -92,17 +93,25 @@ KeePasskey 是一款原生 Kotlin 开发的现代化 Android 密码管理器。�
 
 ## 4. 文档索引
 
+> **文档地图**：[`docs/README.md`](docs/README.md) —— 分区总览（入口 / 架构 / 记录 / 安全 / 参考 / 归档）。
+> **存放纪律**：新增文档**必须**归入 `docs/` 下某一分区并登记到本表，**不得平铺在 `docs/` 根**。
+
 | 文件 | 内容 | 何时阅读 |
 |------|------|----------|
+| [`docs/README.md`](docs/README.md) | **文档地图**：六分区总览与「新增文档放哪里」 | 找文档、新增文档前 |
 | [`docs/ACTIVE_ISSUES.md`](docs/ACTIVE_ISSUES.md) | 现存问题与待办清单（P0→P3） | 认领与开始新工作前 |
-| [`docs/RESOLVED_LOG.md`](docs/RESOLVED_LOG.md) | 已整改任务与历史批次证据（**全量批次索引 + 最近 10 个批次正文**） | 确认历史 Bug 是否已修 |
-| [`docs/resolved/`](docs/resolved/) | **历史批次分册**（分册 01 = §1~§30 / 分册 02 = §31~§45 / 分册 03 = §46~§57）；各册自带章节索引与锚点，主文件索引可直接跳转 | 查 §1~§57 任一批次的原始验收证据 / 裁决 / 过程缺陷时 |
-| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | 模块依赖拓扑与关键架构决策 | 跨模块改动、新功能落位前 |
-| [`docs/reference-projects.md`](docs/reference-projects.md) | 参考项目地图 | 实现算法/格式兼容时 |
+| [`docs/RESOLVED_LOG.md`](docs/RESOLVED_LOG.md) | 已整改归档**总索引**（≤100 行：全量批次索引，**直达每个批次文件**） | 确认历史 Bug 是否已修 |
+| [`docs/resolved/`](docs/resolved/) | **历史批次归档**：4 份分册索引（各 ≤100 行）+ `batches/` 下**一批次一文件**的正文（65 份，原样迁移） | 查 §1 ~ §67 任一批次的验收证据 / 裁决 / 过程缺陷 |
+| [`docs/architecture/ARCHITECTURE.md`](docs/architecture/ARCHITECTURE.md) | 模块依赖拓扑与关键架构决策 | 跨模块改动、新功能落位前 |
+| [`docs/architecture/reference-projects.md`](docs/architecture/reference-projects.md) | 参考项目地图 | 实现算法/格式兼容时 |
+| [`docs/architecture/扫码方案评估_ZXing与CameraXMLKit.md`](docs/architecture/扫码方案评估_ZXing与CameraXMLKit.md) | 扫码方案选型评估（结论为「维持 ZXing」） | 评估 / 更换扫码库前 |
 | [`docs/references/`](docs/references/) | 5 个参考项目架构分析 | 实现思路借鉴前 |
-| [`docs/同步层记录级完整性威胁建模.md`](docs/同步层记录级完整性威胁建模.md) | 同步层跨记录置换与防回滚威胁建模 | 改动同步 / 合并 / 防回滚前 |
-| [`docs/原生Argon2真机验证记录.md`](docs/原生Argon2真机验证记录.md) | 原生内核真机与模拟器实测登记（**禁混表**） | 声称性能或真机验证前 |
-| [`docs/KDBX4与复合密钥实战互操作排查日志.md`](docs/KDBX4与复合密钥实战互操作排查日志.md) | KDBX4 / 复合密钥互操作排障记录 | 排查互操作差异时 |
+| [`docs/security/同步层记录级完整性威胁建模.md`](docs/security/同步层记录级完整性威胁建模.md) | 同步层跨记录置换与防回滚威胁建模 | 改动同步 / 合并 / 防回滚前 |
+| [`docs/security/退役审计承接-42-威胁建模与架构评估.md`](docs/security/退役审计承接-42-威胁建模与架构评估.md) | 已退役威胁建模报告的**结论承接处**（信任边界 TB / 15 类对手 / 假设 TA / 开放问题） | 认领安全条目、威胁建模相关改动前 |
+| [`docs/security/退役审计承接-43-安全整改方案与附录.md`](docs/security/退役审计承接-43-安全整改方案与附录.md) | 已退役整改报告的**结论承接处**（附录 A–F、产品决策 A-1 ~ A-4） | 同上 |
+| [`docs/records/原生Argon2真机验证记录.md`](docs/records/原生Argon2真机验证记录.md) | 原生内核真机与模拟器实测登记（**禁混表**） | 声称性能或真机验证前 |
+| [`docs/records/KDBX4与复合密钥实战互操作排查日志.md`](docs/records/KDBX4与复合密钥实战互操作排查日志.md) | KDBX4 / 复合密钥互操作排障记录 | 排查互操作差异时 |
+| [`docs/records/ci-静态校准记录.md`](docs/records/ci-静态校准记录.md) | CI 配置与静态分析的校准留痕 | 改 CI / 静态分析配置前 |
 | [`docs/SECURITY_RECHECK_2026-09.md`](docs/SECURITY_RECHECK_2026-09.md) | **第二轮独立安全复核裁决报告**（对 89 项开放项 + 第一轮全部"已排除"结论的独立复核：真伪 / 重评严重度 / 攻击链 / Root Cause / 放行裁决） | 认领任何安全条目、重评 severity、准备发布前 |
 | `.codebuddy/rules/engineering-rules.md` | 工程规则 | 编写/修改任何代码前 |
 | `tools/audit/check_recheck_consistency.sh` | **复核报告一致性扫描**（由"已撤销/已更正断言清单"驱动；防止更正节与正文打架。对应 `docs/SECURITY_RECHECK_2026-09.md` 定稿前必跑） | 修改任何审计/复核报告后 |
@@ -110,17 +119,19 @@ KeePasskey 是一款原生 Kotlin 开发的现代化 Android 密码管理器。�
 > **悬空索引（2026-09-15 核实，未整改）**：本表所列 `docs/SECURITY_RECHECK_2026-09.md` **当前在 `HEAD` 中不存在**
 > （于 `523d0fd` 删除且**退役未登记**，提交信息未载明事由）；§5 的 `bash tools/audit/check_recheck_consistency.sh`
 > 因其为默认报告路径而**恒以 exit 2「报告不存在」结束**，该「定稿前必跑」纪律事实上停摆。
-> 结论裁定与处置口径（**恢复文档** 或 **按退役纪律完成分流并补写退役小节**）见
-> `docs/ACTIVE_ISSUES.md` **ISSUE-P3-129**；该条闭环后请一并移除本注记。
+> 同类悬空引用另有两处（归档缺 §68 小节、4 处 `docs/.handoff/ISSUE-P3-09.md`）。
+> 结论裁定与处置口径见 `docs/ACTIVE_ISSUES.md` **ISSUE-P3-129**；该条闭环后请一并移除本注记。
 > **索引纪律（ISSUE-P3-81 立规）**：任何记录**已确认缺陷 / 残余风险 / 验证结论**的文档，必须登记在本表内。
 > 反例代价：本索引曾长期漏登 `docs/SECURITY_AUDIT_2026-09.md` 等 5 份安全文档，
 > 其 29 项发现因无人流转而在 `RESOLVED_LOG.md` 中零引用、长期未闭环。
 > **退役纪律（2026-09-13 补充）**：`docs/SECURITY_AUDIT_2026-09.md`、`docs/SENSITIVE_DATA_FLOW_AUDIT_2026-09.md`、
 > `docs/SECURITY_AUDIT_REMEDIATION.md` 与 `docs/THREAT-MODEL-AUDIT-d32f3e7.md` **均已退役删除**
-> （处置归档见 `RESOLVED_LOG.md` §40 / §41 / §42 / §43）——**仍成立项已全部转登 `ACTIVE_ISSUES.md`**，
-> 误报排除 / 待复核区 / 无法确认 / 已确认强项 / CVSS↔CWE 对照 / 威胁建模结论由 `RESOLVED_LOG.md`
-> **§42**（信任边界 TB、15 类对手、信任假设 TA、条件化生存性、开放问题与威胁清单状态）与
-> **§43**（附录 A–F、产品决策 A-1~A-4）承接。
+> （处置归档见 `docs/resolved/batches/40-*.md` / `41-*.md` 与两份**承接文档**）——**仍成立项已全部转登 `ACTIVE_ISSUES.md`**，
+> 误报排除 / 待复核区 / 无法确认 / 已确认强项 / CVSS↔CWE 对照 / 威胁建模结论由
+> [`docs/security/退役审计承接-42-威胁建模与架构评估.md`](docs/security/退役审计承接-42-威胁建模与架构评估.md)
+> （信任边界 TB、15 类对手、信任假设 TA、条件化生存性、开放问题与威胁清单状态）与
+> [`docs/security/退役审计承接-43-安全整改方案与附录.md`](docs/security/退役审计承接-43-安全整改方案与附录.md)
+> （附录 A–F、产品决策 A-1~A-4）承接；两者在 `RESOLVED_LOG.md` 索引中仍占 §42 / §43 两行。
 > 任何文档退役前，其结论必须完成分流并同步本表，**不得随文件删除而脱离索引与工作流入口**（§40.8 纪律 4）。
 > **另记（§41 立规）**：审计报告须在**开始阅读时即纳入 git 跟踪**——未跟踪文档退役后**无法**经 `git show` 取回。
 > **另记（§42 立规）**：同批提交的多份审计文档必须**在同一退役批次内逐份处置**——本仓曾只处置主报告与

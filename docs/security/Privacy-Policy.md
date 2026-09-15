@@ -55,10 +55,10 @@ KeePasskey 是一款**纯本地**的密码管理器：默认情况下不联网�
 - 请求仅发往 HIBP 官方基址 `https://api.pwnedpasswords.com`（HTTPS）。
 
 **可核对落点**：默认值 `breachCheckEnabled: Boolean = false`
-（[`ExtendedSettings.kt`](../app/src/main/java/com/keepasskey/app/ui/screens/settings/ExtendedSettings.kt)、
-[`SettingsUiState.kt`](../app/src/main/java/com/keepasskey/app/ui/screens/settings/SettingsUiState.kt)）；
-关闭态零外联（[`SettingsHealthController.kt`](../app/src/main/java/com/keepasskey/app/ui/screens/settings/SettingsHealthController.kt)）；
-k-匿名实现（[`HibpRangeClient.kt`](../app/src/main/java/com/keepasskey/app/data/breach/HibpRangeClient.kt)）。
+（[`ExtendedSettings.kt`](../../app/src/main/java/com/keepasskey/app/ui/screens/settings/ExtendedSettings.kt)、
+[`SettingsUiState.kt`](../../app/src/main/java/com/keepasskey/app/ui/screens/settings/SettingsUiState.kt)）；
+关闭态零外联（[`SettingsHealthController.kt`](../../app/src/main/java/com/keepasskey/app/ui/screens/settings/SettingsHealthController.kt)）；
+k-匿名实现（[`HibpRangeClient.kt`](../../app/src/main/java/com/keepasskey/app/data/breach/HibpRangeClient.kt)）。
 
 **除以上两类外，本应用不存在任何其他网络访问。**
 
@@ -90,9 +90,9 @@ k-匿名实现（[`HibpRangeClient.kt`](../app/src/main/java/com/keepasskey/app/
 
 - **内存**：主密码、密钥、条目口令等敏感数据一律以 `CharArray` / `ByteArray` 承载并**显式清零**，
   绝不落地为长期存活的 `String`（Compose 文本输入等框架边界妥协已收敛到唯一的
-  [`SecurePasswordField`](../app/src/main/java/com/keepasskey/app/ui/components/SecurePasswordField.kt) 封装点）。
+  [`SecurePasswordField`](../../app/src/main/java/com/keepasskey/app/ui/components/SecurePasswordField.kt) 封装点）。
 - **日志脱敏**：全仓业务代码统一经
-  [`AppLog`](../core/src/main/java/com/keepasskey/core/log/AppLog.kt) 输出日志——
+  [`AppLog`](../../core/src/main/java/com/keepasskey/core/log/AppLog.kt) 输出日志——
   - `v` / `d` 级别**仅调试构建**输出，release 构建由 R8 直接剥离；
   - `e` / `w` 级别在 release 下**只保留异常类名**，不透出异常 message 与堆栈（避免携带主机地址、用户名等敏感标识）；
   - 日志**严禁**包含主密码、口令、TOTP 种子等明文。

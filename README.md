@@ -45,10 +45,11 @@ Argon2 原生内核位于 `crypto/src/main/rust/`，由 **Rust + cargo-ndk 从�
 
 | 文档 | 内容 |
 |------|------|
+| [`docs/README.md`](docs/README.md) | **文档地图**：六分区总览（入口 / 架构 / 记录 / 安全 / 参考 / 归档） |
 | [`docs/ACTIVE_ISSUES.md`](docs/ACTIVE_ISSUES.md) | **现存问题与待办清单**：按 P0 → P1 → P2 → P3 排序，自包含背景与验收标准 |
-| [`docs/RESOLVED_LOG.md`](docs/RESOLVED_LOG.md) 与 [`docs/resolved/`](docs/resolved/) | **已整改问题与历史任务归档**：主文件保留全量批次索引 + 最近 10 个批次正文；§1 ~ §57 按分册（§1~§30 / §31~§45 / §46~§57）下沉 `docs/resolved/` |
-| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | 模块依赖拓扑、技术栈、关键架构决策与目录约定 |
-| [`docs/reference-projects.md`](docs/reference-projects.md) 与 [`docs/references/`](docs/references/) | 5 个参考项目的定位地图与深度架构分析 |
+| [`docs/RESOLVED_LOG.md`](docs/RESOLVED_LOG.md) 与 [`docs/resolved/`](docs/resolved/) | **已整改问题归档**：总索引（≤100 行）逐批次直达正文；正文按**一批次一文件**存放于 `docs/resolved/batches/` |
+| [`docs/architecture/ARCHITECTURE.md`](docs/architecture/ARCHITECTURE.md) | 模块依赖拓扑、技术栈、关键架构决策与目录约定 |
+| [`docs/architecture/reference-projects.md`](docs/architecture/reference-projects.md) 与 [`docs/references/`](docs/references/) | 5 个参考项目的定位地图与深度架构分析 |
 | `AGENTS.md` | 给 AI 协作代理的项目约束、版本基线与闭环纪律 |
 
 ## 已知局限
