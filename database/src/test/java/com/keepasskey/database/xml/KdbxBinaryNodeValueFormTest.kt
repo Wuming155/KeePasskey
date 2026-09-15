@@ -257,6 +257,10 @@ class KdbxBinaryNodeValueFormTest {
     @Test
     fun `内联附件常量与池索引语义一致`() {
         assertTrue("INLINE_REF_INDEX 必须是负哨兵，恒不可能成为合法池索引", BinaryNode.INLINE_REF_INDEX < 0)
-        assertEquals("Compressed 属性名须与官方 KdbxFile.cs 一致", "Compressed", BinaryNode.ATTR_COMPRESSED)
+        assertEquals(
+            "Compressed 属性名须与官方 KdbxFile.cs 一致，且唯一权威定义在 KdbxConstants.Xml（ISSUE-P3-80）",
+            "Compressed",
+            KdbxConstants.Xml.COMPRESSED
+        )
     }
 }

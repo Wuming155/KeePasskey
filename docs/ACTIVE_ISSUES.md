@@ -31,6 +31,39 @@
 
 ---
 
+## 第四轮独立复核定版结论：对本表 AC 的更正（实施前必读）
+
+> **依据**：[`docs/security/SECURITY_RECHECK_2026-09.md`](security/SECURITY_RECHECK_2026-09.md)
+> （**2026-09-15 由 `523d0fd^` 恢复入库**，见 `RESOLVED_LOG.md` §69）的 §10 定级表与
+> §11「不可照做的 AC」清单，以及各行处的逐条裁定。
+> **效力**：凡本表与下方条目正文的 AC 冲突，**以本表为准**——下文逐项给出**更正后的实施口径**，
+> 照原文 AC 实施者可能**降低安全性**或**引入数据损坏**。
+> **登记缘由**：本表多条目的 AC 早于该报告定版、且此前虽有部分行内批注，仍有 16 条未同步；
+> 该报告入库后按「依据恢复 ⇒ 逐条对齐」补登（`ISSUE-P3-127` AC② 的落地形式）。
+
+| 条目 | 第四轮定级 | 更正后的实施口径（与正文 AC 冲突时以本行为准） |
+|---|---|---|
+| `P2-42` | P2 / **UNVERIFIED** | AC③ 有**前置**：新补的 instrumented 用例**不会在 CI 跑**（= `P3-123③`），只能本地跑；3 项均需设备侧实测 |
+| `P2-44` | P2 / LOW | 设备侧判据：TalkBack + `uiautomator dump` 检查 **`isPassword`** 语义（宿主 JVM 不构成证据） |
+| `P2-45` | P2 / LOW | **AC① 撤销**——默认关闭系 2026-09-12 用户裁决（有留痕），非缺陷；**AC② 原「哨兵」方案原理上不可闭环**（哨兵可被同路径删除），须改用 Keystore 绑定的存在性证明，或登记为已接受边界 |
+| `P2-46` | P2 / **MEDIUM** | 原 AC 的「未安装 → **弱候选**」**仍会把凭据交给侧载应用** ⇒ 必须选「**不命中**」（不得降级为弱候选） |
+| `P2-47` | P2 / MEDIUM | 原 AC① 依赖的「S3 Versioning / ETag 单调性」**作为客户端可信信道不成立** ⇒ 须改**本地单调记录**；另 `SyncRollbackGuard.State.sequence` **已持久化但不参与裁决**，勿据「sequence 已持久化」推断防回滚强度 |
+| `P2-49` | **P1** / MEDIUM | 无 `I×M` 联合预算（AC①**已完成**）；**AC② 不引入协程 `withTimeout`**——阻塞式原生派生不可被打断，属无效纸面加固；墙钟量级须 `P2-80` 真机实测，**不得以推算替代** |
+| `P2-73` | P3 / **INFO** | **AC② 是负向变更，不可照做**：改 `FLAG_MUTABLE` 是「为对齐文档而降低安全性」——本仓这两条路径**不消费**平台 fillIn extras；AC①/③ 仍有效，且本项与 `IPC-01`（`P3-122`）**互斥**，**须同批实测** |
+| `P2-79` | P2 / LOW | AC① **仓库已满足**（`KdfBenchmark` 已存在）；**AC② 含削弱陷阱**：直接接入建议值会出现 `8 MiB < 64 MiB` 的**降强**，须取 `max(建议值, 现默认)` |
+| `P3-79` | — / **NOT REPRODUCIBLE** | 7 处 Popup 菜单项**全部为静态文案 / provider 名称**，无口令 / TOTP 明文 ⇒ 按 AC③ 留痕「**无需接线**」即可闭环，**不得**「全量加 flag」 |
+| `P3-82` | P3 / HARDENING | 用例须**分别**断言 D-1 / D-2 / D-3；「合法口令 KDBX + 注入 DTD」需重新加密 ⇒ 推荐**直接喂 XML 给 `KdbxXmlParser`** 绕过外层 |
+| `P3-85` | P3 / HARDENING | ② 的 CI 白名单**过窄会立即误红**（须逐条登记豁免，勿一刀切） |
+| `P3-97` | P3 / LOW | 前提修正：`rust-supply-chain` **确实**跑 `cargo test --locked`；真实缺口是 **Gradle 侧 `:crypto:test` 从不运行** + `.so` 导出符号核对未实现 |
+| `P3-108` | P3 / **部分误报** → HARDENING | 「附件明文经 `AtomicFileWriter`」**无据**（该部分为误报）；`.tmp` 残留口径**仍须判定**后再改断言，不得静默放宽 |
+| `P3-111` | P3 / LOW | 与 `IPC-02` 为**同一整改项**，**顺序不可颠倒**：先保证 `retrieve*` 非 null，否则交叉核对**恒失败**、把「能填充」变成「不能填充」 |
+| `P3-120` | **P1** / UNVERIFIED | 本项是 `P2-53` / `P2-63` / `P2-76` / `P1-23` 的**共同前提**，排期须先行 |
+| `P3-121` | P3 / INFO | 原表述「与 `README` 矛盾」**过强**（须先定产品口径再谈文档一致性） |
+| `P3-123` | P3 / **MEDIUM**（升格） | ①②③ 成立；④ `mapping.txt`（77.5 MB）由 CI **无条件上传**（公开仓库等同公开去混淆映射） |
+| `P3-124` | P3 / INFO | 作为漏洞 = **误报**（维持 HARDENING）：scheme 硬编码 `https://`、路径固定、结果不回流三值枚举，可利用性为零 |
+
+---
+
 ## P1 高危与核心功能问题（0 项）
 
 > **历史**：**ISSUE-P1-16 ~ P1-21**（附件 Ref/Compressed 解析、块 HMAC 异常分型、外层头部总量闸门、
@@ -286,7 +319,7 @@
 
 ---
 
-## P3 低危问题、特性接线与体验优化（16 项）
+## P3 低危问题、特性接线与体验优化（14 项）
 
 > **状态（2026-09-12）**：历史 P3 批次 **ISSUE-P3-01 ~ P3-68** 除 P3-23（经产品裁决「不排期」）外
 > 已全部闭环并归档，逐条实现细节与验收证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md)（§3 ~ §32）。
@@ -361,6 +394,18 @@
 > ③ 4 处 `docs/.handoff/ISSUE-P3-09.md` 引用（该目录**从未入库**、不可 `git show` 取回）
 > 改为承接文档 `docs/records/退役依据承接-ISSUE-P3-09.md`。两条已移出本表，
 > 见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §69。
+> **2026-09-15 闭环（续 17，§70 批次）**：**ISSUE-P3-78**（Argon2 `S` 长度未按官方上下界校验）
+> 与 **ISSUE-P3-80**（`KdbxConstants.Xml` 缺 `Compressed` 常量）**同批收口**——① 解码侧新增
+> `validateArgon2SaltBounds()`（官方 `Argon2Kdf.cs:57-58` 的 `MinSalt=8` / `MaxSalt=0x3FFFFFFF`，
+> **2026-09-15 定点直读该文件核实**）并接线到 Argon2 解码分支；② `Compressed` 上收为
+> `KdbxConstants.Xml.COMPRESSED`（取值不变），实现内私有常量删除。新增 4 例回归（走
+> 「写侧序列化 → 读侧反序列化」真实字节流）；全量 **1774 例 / 0 失败 / 0 错误 / 13 跳过**。
+> 两条已移出本表，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §70。
+> **2026-09-15 补登（§69 附带）**：依 `ISSUE-P3-127` AC②「依据恢复 ⇒ 逐条对齐」，已按恢复入库的
+> 复核报告 §10 / §11 逐条核对本表 AC，并在本文件开头新增
+> **「第四轮独立复核定版结论：对本表 AC 的更正（实施前必读）」** 一节（18 行）。
+> **实施对应条目前必须先读该节**——其中 `P2-73` AC②、`P2-79` AC②、`P2-46` AC 按原文实施会
+> **降低安全性**或**仍把凭据交给侧载应用**。
 > **2026-09-13 新增（威胁建模 / 安全整改报告退役批次）**：P3-116 ~ P3-124 九项由
 > `THREAT-MODEL-AUDIT-d32f3e7.md` 与 `SECURITY_AUDIT_REMEDIATION.md` 的对拍结果转登
 > （两份报告同日退役删除，处置归档见 §42 / §43）。
@@ -414,19 +459,6 @@
 
 ---
 
-### ISSUE-P3-78（新登记）：Argon2 KDF 的 `S`（salt）长度未按官方上下界校验
-
-- **优先级**：P3（同类 fail-closed 硬化）
-- **核实时间点与核实方式（2026-09-12）**：本轮 F-09/KDF 整改代理在实现 P2-34 时报告并经本会话复核——
-  `KdbxKdfParameterCodec.deserialize` 仅校验 `$UUID`/`S`存在性与 `P/M/I/V` 的范围，**未校验 `S` 长度**；
-  官方 `参考项目/KeePass-2.61.1-Source/KeePassLib/Cryptography/KeyDerivation/Argon2Kdf.cs:57-58`
-  为 `MinSalt = 8` / `MaxSalt = 0x3FFFFFFF`，`:143-144` 越界即抛 `ArgumentOutOfRangeException`。
-- **问题描述**：我们会接受官方拒绝的盐长（如 0 字节盐的退化文件）；`S` 的最大长度受 VariantDictionary
-  值上限（1 MiB）间接约束，故无内存风险，属**接受域不一致**而非可利用缺陷。
-- **本次未实施原因（留痕）**：会新增拒绝面且当轮无法运行构建/测试验证回归，故登记待办而非擅自扩大范围。
-- **验收标准**：① 按官方上下界校验 `S` 长度，越界抛 `KdbxCorruptFileException`；② 用例覆盖 `len=8` 通过、
-  `len=7` 拒绝，并加一条「本仓自身写出的 32 字节盐必须通过」防误拒。
-
 ### ISSUE-P3-79（新登记）：Compose Popup 系窗口（`DropdownMenu` / `ExposedDropdownMenuBox`）未施加 FLAG_SECURE
 
 - **优先级**：P3（同类窗口缺口，本轮已修对话框窗口）
@@ -438,18 +470,6 @@
 - **问题描述**：若某 Popup 内容出现敏感明文（如长按菜单显示口令），该窗口无 FLAG_SECURE。
 - **验收标准**：① 盘点所有 Popup 系窗口的敏感内容面；② 对确有敏感内容的调用点接线 `securePolicy`
   并补回归断言；③ 无敏感内容的调用点留痕说明「无需接线」，避免"全量加 flag"的过度改动。
-
-### ISSUE-P3-80（新登记）：`KdbxConstants.Xml` 缺 `Compressed` 属性常量（实现内局部常量）
-
-- **优先级**：P3（常量归位 / 代码整洁）
-- **核实时间点与核实方式（2026-09-12）**：ISSUE-P1-16 落地时由实现代理在报告中提出——`Compressed`
-  属性名（官方 `KdbxFile.cs:194 AttrCompressed = "Compressed"`）当前以
-  `KdbxXmlBinaryNode.ATTR_COMPRESSED` 私有常量承载，未上收至 `KdbxConstants.Xml`（其余 XML 节点/属性名
-  均集中在该对象）。
-- **验收标准**：① 在 `KdbxConstants.Xml` 增加 `COMPRESSED` 并替换实现内局部常量；② 无行为变更；
-  ③ 若同期新增属性常量（如 `Ref` 已存在），保持命名风格一致。
-
----
 
 ### ISSUE-P3-82（新登记）：内层 XML DTD 拦截缺设备侧回归用例
 

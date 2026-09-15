@@ -76,7 +76,7 @@ internal class BinaryNode(
             KdbxConstants.Xml.VALUE -> {
                 refAttribute = attrs.getValue(KdbxConstants.Xml.REF)
                 isProtected = isProtectedAttribute(attrs)
-                isCompressed = attrs.getValue(ATTR_COMPRESSED) == PROTECTED_ATTR_TRUE
+                isCompressed = attrs.getValue(KdbxConstants.Xml.COMPRESSED) == PROTECTED_ATTR_TRUE
                 valueElementSeen = true
                 TextNode { rawValue = it }
             }
@@ -231,11 +231,9 @@ internal class BinaryNode(
 
     internal companion object {
         /**
-         * `Compressed` 属性名（官方 `KdbxFile.cs:194 AttrCompressed = "Compressed"`）。
-         * 本仓 [KdbxConstants.Xml] 暂未收录该常量（不在本任务名下文件），故就近提为常量；
-         * 见交付报告「需要协调的跨文件改动」——建议后续上收至 `KdbxConstants.Xml.COMPRESSED`。
+         * `Compressed` 属性名已上收至 [KdbxConstants.Xml.COMPRESSED]（ISSUE-P3-80）——
+         * 与其余 XML 节点 / 属性名同处，避免同一官方常量在多处漂移。
          */
-        const val ATTR_COMPRESSED = "Compressed"
 
         /**
          * 内联附件在 [KdbxAttachment.refIndex] 上的占位索引。

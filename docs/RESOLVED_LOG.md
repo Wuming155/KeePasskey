@@ -4,11 +4,11 @@
 > **维护规则**：`ACTIVE_ISSUES.md` 中的条目整改并测试通过后，整条移入本归档——**新批次追加一行索引 + 新增一个批次文件**，编号续 §68 起。
 > **如实留痕**：整改中真实发生的生产 / 测试 / 编排缺陷不美化、不隐去（各批次文件的「过程缺陷」小节）。
 > **引用约定**：仓内其它文档写「`RESOLVED_LOG.md` §NN」时，按本表「正文」列跳转到该批次的独立文件。
-> **分册体系**：见 [`resolved/README.md`](resolved/README.md)；分册级索引 4 份（各 ≤100 行）：[`01`](resolved/BATCH_01_30.md) · [`02`](resolved/BATCH_31_45.md) · [`03`](resolved/BATCH_46_57.md) · [`04`](resolved/BATCH_58_69.md)。
+> **分册体系**：见 [`resolved/README.md`](resolved/README.md)；分册级索引 4 份（各 ≤100 行）：[`01`](resolved/BATCH_01_30.md) · [`02`](resolved/BATCH_31_45.md) · [`03`](resolved/BATCH_46_57.md) · [`04`](resolved/BATCH_58_PLUS.md)（§58 起，滚动）。
 
 ---
 
-## 全量批次索引（§1 ~ §69）
+## 全量批次索引（§1 ~ §70）
 
 | § | 批次主题 | 条目范围 | 正文 |
 |:--:|---|---|---|
@@ -81,6 +81,7 @@
 | §67 | CI 声明一致性与 DAL 不可重定向批次：CI 产物标注「非发布签名」+ 豁免清单说明去数字漂移 + DAL 端点/时钟改构造注入只读策略 | ISSUE-P3-126（整体）/ P3-125 ② | [`67-声明一致性与-不可重定向批次-整体.md`](resolved/batches/67-声明一致性与-不可重定向批次-整体.md) |
 | §68 | 退出前清理易失缓存批次：终止动作固定为「退栈 → **清理易失缓存** → 退出进程」，覆盖 `cacheDir/attachments`（附件明文）与 `cacheDir/sync`（KDBX 密文快照）两个面（**2026-09-15 补录**，见 §69 ①） | ISSUE-P3-116 | [`68-退出前清理易失缓存批次.md`](resolved/batches/68-退出前清理易失缓存批次.md) |
 | §69 | 文档索引悬空引用收口批次：§68 正文补录 + 第二轮独立复核报告恢复入库（一致性闸门复效）+ `.handoff` 依据承接 | ISSUE-P3-129 / ISSUE-P3-127 | [`69-文档索引悬空引用收口批次.md`](resolved/batches/69-文档索引悬空引用收口批次.md) |
+| §70 | KDF 盐长边界与 XML 常量归位批次：Argon2 `S` 按官方 `MinSalt/MaxSalt` 校验 + `Compressed` 常量的唯一权威定义上收至 `KdbxConstants.Xml` | ISSUE-P3-78 / ISSUE-P3-80 | [`70-KDF盐长边界与XML常量归位批次.md`](resolved/batches/70-KDF盐长边界与XML常量归位批次.md) |
 
 ## 分册导航
 
@@ -89,5 +90,5 @@
 | 01 | §1 ~ §30 | 2026-09-07 ~ 2026-09-12 | [`resolved/BATCH_01_30.md`](resolved/BATCH_01_30.md) |
 | 02 | §31 ~ §45 | 2026-09-12 ~ 2026-09-13 | [`resolved/BATCH_31_45.md`](resolved/BATCH_31_45.md) |
 | 03 | §46 ~ §57 | 2026-09-13 ~ 2026-09-15 | [`resolved/BATCH_46_57.md`](resolved/BATCH_46_57.md) |
-| 04 | §58 ~ §69 | 2026-09-15 | [`resolved/BATCH_58_69.md`](resolved/BATCH_58_69.md) |
+| 04 | §58 起（滚动） | 2026-09-15 | [`resolved/BATCH_58_PLUS.md`](resolved/BATCH_58_PLUS.md) |
 

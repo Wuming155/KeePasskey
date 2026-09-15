@@ -83,6 +83,18 @@ internal object KdbxKdfParameterCodec {
     /** Argon2 并行度上界（合法配置通常 ≤ CPU 核数）。本仓更严封顶。 */
     private const val ARGON2_MAX_PARALLELISM = 64
 
+    /**
+     * Argon2 盐长下界：对齐官方 `Argon2Kdf.cs:57-58` 的 `MinSalt = 8`（ISSUE-P3-78）。
+     * 属规范语义，**不得上调**——上调会误拒官方客户端写出的短盐库。
+     */
+    private const val ARGON2_MIN_SALT_BYTES = 8
+
+    /**
+     * Argon2 盐长上界：官方 `MaxSalt = 0x3FFFFFFF`。实际不可达——`S` 受变体字典
+     * 值长度上限（1 MiB）间接约束，故本项**无内存风险**，仅为接受域对齐。
+     */
+    private const val ARGON2_MAX_SALT_BYTES = 0x3FFFFFFF
+
     /** AES-KDF 轮数上界：合法偏执配置通常 ≤ 1 亿轮，此处封顶 2^28 防无限期占用 CPU。本仓封顶。 */
     private const val AES_KDF_MAX_ROUNDS = 1L shl 28
 
@@ -138,6 +150,7 @@ internal object KdbxKdfParameterCodec {
                 else
                     KdfParameters.Argon2.Argon2Type.ARGON2ID
                 val salt = vd.getByteArray("S") ?: throw KdbxCorruptFileException("Argon2 缺少 S 参数")
+                validateArgon2SaltBounds(salt.size)
                 // 官方语义（KeePass 2.61.1 Argon2Kdf.cs:146-160）：P/M/I/V 一律以 0 为默认再走范围检查，
                 // 故缺参数必然越界抛异常 —— 本仓与官方同为 fail-closed，**不填任何工厂默认值**。
                 // 对齐 KeePassDX / 官方规范：P 与 V 在 KDBX4 变体字典中以 UInt32 类型写出，
@@ -208,6 +221,23 @@ internal object KdbxKdfParameterCodec {
         val heapCap = Runtime.getRuntime().maxMemory() / 2
         if (memoryInBytes > heapCap) {
             throw KdbxCorruptFileException("Argon2 内存参数超出本设备可用内存上限")
+        }
+    }
+
+    /**
+     * Argon2 盐长边界校验（ISSUE-P3-78）。
+     *
+     * 官方 `Argon2Kdf.cs:143-144` 越界即抛 `ArgumentOutOfRangeException`；本仓此前**不校验**
+     * 盐长，会接受官方拒绝的退化盐（如 0 字节）——属**接受域不一致**，非可利用缺陷
+     * （`S` 的最大长度已由变体字典值上限 1 MiB 间接约束，无内存风险）。
+     *
+     * 边界取官方值，故不会误拒任何官方客户端写出的库；本仓自身写出的 32 字节盐亦必然通过。
+     */
+    fun validateArgon2SaltBounds(saltLength: Int) {
+        if (saltLength < ARGON2_MIN_SALT_BYTES || saltLength > ARGON2_MAX_SALT_BYTES) {
+            throw KdbxCorruptFileException(
+                "Argon2 盐长度越界: $saltLength 字节（允许 $ARGON2_MIN_SALT_BYTES ~ $ARGON2_MAX_SALT_BYTES）"
+            )
         }
     }
 

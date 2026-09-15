@@ -145,6 +145,14 @@ object KdbxConstants {
         const val PROTECTED = "Protected"
         const val BINARY = "Binary"
         const val REF = "Ref"
+
+        /**
+         * 附件 `<Value>` 的压缩标志属性名（官方 `KdbxFile.cs:194 AttrCompressed = "Compressed"`）。
+         *
+         * ISSUE-P3-80：原以实现内私有常量（`KdbxXmlBinaryNode.ATTR_COMPRESSED`）就近承载，
+         * 现按「XML 节点 / 属性名统一收敛于本对象」的既有约定上收至此处；语义与取值**不变**。
+         */
+        const val COMPRESSED = "Compressed"
         const val HISTORY = "History"
         const val AUTO_TYPE = "AutoType"
         const val ENABLED = "Enabled"
