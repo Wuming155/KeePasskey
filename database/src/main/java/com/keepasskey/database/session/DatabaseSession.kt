@@ -62,6 +62,15 @@ class DatabaseSession(
      * 默认 true 保持既有行为；关闭时全部落盘路径均不生成 `.bak`，并顺带清理历史遗留的
      * `.bak`。由 app 侧 DI 装配期从持久化偏好注入初值，用户切换开关时实时同步。
      * 以 [Volatile] 保证跨线程可见性（写盘可能发生在 IO 调度线程）。
+     *
+     * **语义与保留期（ISSUE-P3-107 明确化）**：开启时，每次**成功写入**都会把写入前的稳定版本
+     * 另存为**同目录**的 `<库文件名>.kdbx.bak`——即滚动保留**恰好一份**（上一次成功写入的版本），
+     * 每次写入覆盖之，不做多代累积、也**不迁移到其它目录**。该 `.bak` 是用**写入当时生效的凭据**
+     * 加密的**完整库副本**，故：
+     * - 成功 [changeCredentials]（换主密码 / 换密钥文件）后**一律删除**——否则旧口令仍可解开它
+     *   （见 [changeCredentials] 内注释与 `DatabaseSessionBackupPreferenceTest`）；
+     * - 用户若在**本应用之外**（如其它 KDBX 客户端）更换口令，本应用无从知晓，该 `.bak` 会在
+     *   下次在本应用内写入前一直可用**旧口令**解开（如实登记为残余，见 `AGENTS.md` §6）。
      */
     @Volatile
     var createBackupBeforeSave: Boolean = true

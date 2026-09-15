@@ -10,6 +10,11 @@ import kotlin.math.pow
  * 纯 Kotlin 实现的 RFC 6238 (TOTP) 与 RFC 4226 (HOTP) 动态令牌计算引擎。
  * 支持 SHA-1, SHA-256, SHA-512，6位/8位代码，以及标准的 30s/60s 步长。
  * 遵循严格的敏感数据原则：Base32 解码与密钥计算直接使用 ByteArray。
+ *
+ * **职责边界（ISSUE-P3-90）**：本引擎**只**做令牌计算；`otpauth://` URI 的解析在
+ * [TotpKeyUriParser]（含 period / digits 钳制与 PSL 域校验）。此前本类另有一份公开的
+ * `parseOtpAuthUri` 副本，对 `period` / `digits` **无任何钳制**且零调用点——
+ * 为避免后来者误接入该未加固副本，已整体删除（连同其 `OtpParameters` 类型）。
  */
 object OtpEngine {
 
@@ -81,54 +86,6 @@ object OtpEngine {
         val otp = binary % 10.0.pow(digits).toInt()
         return otp.toString().padStart(digits, '0')
     }
-
-    /**
-     * 解析 KeyUri 格式 (otpauth://totp/Example:alice@google.com?secret=JBSWY3DPEHPK3PXP&issuer=Example)
-     */
-    fun parseOtpAuthUri(uriString: String): OtpParameters? {
-        if (!uriString.startsWith("otpauth://")) return null
-        val type = uriString.substringAfter("otpauth://").substringBefore('/')
-        val rest = uriString.substringAfter("otpauth://$type/")
-        val label = rest.substringBefore('?')
-        val query = rest.substringAfter('?', "")
-
-        val params = query.split('&').associate {
-            val key = it.substringBefore('=')
-            val value = it.substringAfter('=', "")
-            key to value
-        }
-
-        val secret = params["secret"] ?: return null
-        val period = params["period"]?.toIntOrNull() ?: 30
-        val digits = params["digits"]?.toIntOrNull() ?: 6
-        val algorithmStr = params["algorithm"]?.uppercase() ?: "SHA1"
-        val algorithm = when (algorithmStr) {
-            "SHA256" -> HashAlgorithm.SHA256
-            "SHA512" -> HashAlgorithm.SHA512
-            else -> HashAlgorithm.SHA1
-        }
-        val issuer = params["issuer"] ?: label.substringBefore(':', "")
-
-        return OtpParameters(
-            type = type,
-            label = label,
-            issuer = issuer,
-            secretBase32 = secret,
-            periodSeconds = period,
-            digits = digits,
-            algorithm = algorithm
-        )
-    }
-
-    data class OtpParameters(
-        val type: String,
-        val label: String,
-        val issuer: String,
-        val secretBase32: String,
-        val periodSeconds: Int = 30,
-        val digits: Int = 6,
-        val algorithm: HashAlgorithm = HashAlgorithm.SHA1
-    )
 }
 
 /**

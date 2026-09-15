@@ -124,4 +124,44 @@ class AutofillFieldBlocklistStoreTest {
         // 空库清除是无害 no-op
         assertEquals(0, store.clearAll())
     }
+
+    // ===== ISSUE-P3-113：fail-closed 故障的可观测性 =====
+
+    @Test
+    fun `密钥不可用时置位可观测标志而判定仍 fail-closed`() {
+        val store = AutofillFieldBlocklistStore(null, unavailableHmacFieldSignatureSource)
+
+        assertFalse("初始态不得误报", store.signatureUnavailable.value)
+
+        assertTrue(store.isBlocked("com.example.bank", "a.example.com", AutofillFieldRole.PASSWORD))
+        assertTrue(
+            "密钥不可用必须置位标志（否则填充被静默放弃、用户无从归因）",
+            store.signatureUnavailable.value
+        )
+    }
+
+    @Test
+    fun `非法包名不置位可观测标志`() {
+        val store = store() // 密钥可用
+
+        // 判定方向仍是 fail-closed（视为已屏蔽）
+        assertTrue(store.isBlocked("", "a.example.com", AutofillFieldRole.PASSWORD))
+        assertTrue(store.isBlocked("com..example", "a.example.com", AutofillFieldRole.PASSWORD))
+
+        // 但「输入非法」是查询侧的正常干扰项，不得据此对用户报出密钥故障告警
+        assertFalse(
+            "非法包名不得置位密钥不可用标志（否则健康卡片会误报）",
+            store.signatureUnavailable.value
+        )
+    }
+
+    @Test
+    fun `正常判定路径不置位可观测标志`() {
+        val store = store()
+        store.block("com.example.bank", "a.example.com", AutofillFieldRole.PASSWORD)
+
+        assertTrue(store.isBlocked("com.example.bank", "a.example.com", AutofillFieldRole.PASSWORD))
+        assertFalse(store.isBlocked("com.example.bank", null, AutofillFieldRole.USERNAME))
+        assertFalse(store.signatureUnavailable.value)
+    }
 }

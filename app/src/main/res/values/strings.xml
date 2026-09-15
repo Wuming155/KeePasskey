@@ -533,6 +533,9 @@
     <!-- ISSUE-P3-73：明文 CSV 导出二次确认（文案须明确「明文」） -->
     <string name="dbset_export_csv_plain_warn_title">确认导出明文 CSV</string>
     <string name="dbset_export_csv_plain_warn_message">即将导出的是未加密的明文 CSV，包含密码库的全部条目字段值：\n· 明文：文件内容可直接阅读，不受主密码保护；\n· 不受保护：写入下载目录或云盘后，任何可访问该位置的应用或人员都能读取；\n· 需自行删除：本应用不会代为清理，请用毕立即删除并清空云盘回收站。</string>
+    <!-- ISSUE-P3-128：密钥文件导出二次确认（密钥文件是开库第二因子） -->
+    <string name="dbset_keyfile_export_warn_title">确认导出密钥文件</string>
+    <string name="dbset_keyfile_export_warn_message">即将导出的是本库的密钥文件（第二重凭据）：\n· 单文件即可配合库文件尝试开库，请与 .kdbx 分开存放；\n· 写入下载目录或云盘后，任何可访问该位置的应用或人员都能取得该因子；\n· 需自行删除：本应用不会代为清理。</string>
     <string name="dbset_import_dialog_title">选择导入来源</string>
     <string name="dbset_import_preparing">正在解析 %1$s 数据...</string>
     <string name="dbset_src_1pux">1Password (1PUX)</string>
@@ -595,7 +598,7 @@
     <string name="sec_biometric_integrity_blocked">设备存在安全风险，已禁用生物识别快速解锁，请改用主密码解锁</string>
     <string name="autofill_save_integrity_blocked">设备存在安全风险，已禁用凭据保存</string>
     <string name="sec_clipboard_title">剪贴板保护</string>
-    <string name="sec_clipboard_sub">复制的敏感内容不进入剪贴板历史与云同步</string>
+    <string name="sec_clipboard_sub">复制的敏感内容标记为敏感：系统复制提示不显示明文，并在设定时长后自动擦除</string>
     <string name="sec_clipboard_countdown_title">剪贴板保留时长</string>
     <string name="sec_clipboard_countdown_current">当前：%1$s</string>
     <string name="sec_clipboard_risk_notice">已关闭自动擦除：复制的口令/验证码将一直留在系统剪贴板中，任何前台应用都能读取，直至被下次复制覆盖或设备重启。建议保持开启，或改用自动填充直接填表。</string>
@@ -664,8 +667,8 @@
     <string name="sync_interval_120">每 2 小时</string>
     <string name="sync_interval_360">每 6 小时</string>
     <string name="sync_section_file_safety">文件同步安全</string>
-    <string name="sync_backup_title">同步前自动备份</string>
-    <string name="sync_backup_sub">上传前将本地数据库备份至安全目录</string>
+    <string name="sync_backup_title">保存前保留上一版备份</string>
+    <string name="sync_backup_sub">每次保存前把上一版本留为同目录的 .kdbx.bak（成功更换主密码后自动删除）</string>
     <string name="sync_check_remote_title">同步前检查远程变更</string>
     <string name="sync_check_remote_sub">上传前先比对云端版本，避免覆盖他人修改</string>
     <string name="sync_file_tx_title">事务化写入</string>
@@ -821,6 +824,7 @@
     <string name="autofill_health_issue_app_disabled">应用内「旧版自动填充服务」已关闭</string>
     <string name="autofill_health_issue_system_disabled">系统未选择本应用为自动填充服务，请前往系统设置启用</string>
     <string name="autofill_health_issue_cm_unavailable">凭据管理器 (Credential Manager) 不可用</string>
+    <string name="autofill_health_issue_field_signature_unavailable">字段屏蔽校验暂不可用（系统密钥库不可用），自动填充已按「保守不填充」处理；重启设备后重试，若持续存在请检查系统安全设置</string>
     <!-- ISSUE-P3-40：自动填充手动选择器（全库搜索兜底） -->
     <string name="autofill_picker_title">选择要填充的凭据</string>
     <!-- ISSUE-P2-70：选择器页强制展示请求方身份（此前手动兜底路径可把任意条目凭据交给请求方而无任何提示） -->
@@ -1046,6 +1050,7 @@
     <string name="health_breach_error_unknown">未知错误</string>
     <string name="kdf_benchmark_failed">基准测试失败</string>
     <string name="export_saf_write_failed">SAF 写盘失败</string>
+    <string name="export_confirmation_missing">缺少有效的导出确认，已拒绝本次明文导出</string>
 
     <!-- ISSUE-P3-15：条目绑定包名非法/缺失时的如实提示（不得声称已屏蔽或已恢复） -->
     <string name="autofill_block_unidentifiable_package">无法识别该条目绑定的应用标识，未变更自动填充屏蔽状态</string>

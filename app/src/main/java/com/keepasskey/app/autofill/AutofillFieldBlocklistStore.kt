@@ -22,6 +22,8 @@ import javax.inject.Singleton
  *   [KeystoreHmacFieldSignatureSource]）；安全边界详见 [AutofillFieldSignature] KDoc；
  * - **fail-closed**：签名无法计算（包名非法 / 密钥不可用）时 [isBlocked] 返回 **true**——
  *   宁可少填一次，也不因非法输入把凭据下发到无法识别的目标；
+ *   同时区分两类原因（ISSUE-P3-113）：**密钥不可用**会置位 [signatureUnavailable]，
+ *   由自动填充健康自检卡片把「静默不填充」转为可归因的显式告警，而非仅靠用户自行猜测；
  * - **不可枚举回显**：签名不可逆，故设置页只能展示**条数**与「全部清除」，
  *   不存在「显示已屏蔽的站点列表」这一选项（如实呈现能力边界，不伪造列表）；
  * - **保守迁移**：从 v1（随机盐 + SHA-256）升级到 v2（Keystore HMAC）时，
@@ -42,16 +44,35 @@ class AutofillFieldBlocklistStore @Inject constructor(
 
     private val blockedFlow = MutableStateFlow(loadPersisted())
 
+    /**
+     * 签名密钥不可用标志（ISSUE-P3-113）。
+     *
+     * 判定为「已屏蔽」的 **fail-closed** 方向不变；但该方向的副作用是**静默放弃填充**——
+     * 用户只看到「不出候选」而无从归因。本标志把该故障显式化，由自动填充健康自检卡片
+     * （`AutofillHealthIssue.FIELD_BLOCK_SIGNATURE_UNAVAILABLE`）呈现修复指引。
+     *
+     * **只对「密钥不可用」置位，不对「输入非法」置位**：后者（包名不符合规范）是查询侧
+     * 的正常干扰项，若一并置位会让 UI 报出与用户无关的告警。两者由 [hmacKeyUnavailable] 探针区分。
+     */
+    private val signatureUnavailableFlow = MutableStateFlow(false)
+
     /** 已屏蔽签名快照（升序，仅用于计数与清除；签名不可逆，无法回显为可读目标）。 */
     val blockedSignatures: StateFlow<List<String>> = blockedFlow.asStateFlow()
+
+    /** 字段签名密钥是否不可用（ISSUE-P3-113；仅供健康自检与 UI 呈现，不改变 fail-closed 判定）。 */
+    val signatureUnavailable: StateFlow<Boolean> = signatureUnavailableFlow.asStateFlow()
 
     /**
      * 该「包名 + 域 + 角色」是否已被用户屏蔽。
      *
-     * **fail-closed**：签名不可计算时返回 true（视为已屏蔽）。
+     * **fail-closed**：签名不可计算时返回 true（视为已屏蔽），并（若为密钥不可用）
+     * 置位 [signatureUnavailable] 使故障对用户可见。
      */
     fun isBlocked(packageName: String, webDomain: String?, role: AutofillFieldRole): Boolean {
-        val signature = signatureOf(packageName, webDomain, role) ?: return true
+        val signature = signatureOf(packageName, webDomain, role) ?: run {
+            if (hmacKeyUnavailable()) signatureUnavailableFlow.value = true
+            return true
+        }
         return blockedFlow.value.contains(signature)
     }
 
@@ -91,6 +112,20 @@ class AutofillFieldBlocklistStore @Inject constructor(
 
     private fun signatureOf(packageName: String, webDomain: String?, role: AutofillFieldRole): String? =
         AutofillFieldSignature.of(signatureSource, packageName, webDomain, role)
+
+    /**
+     * 密钥可用性探针（ISSUE-P3-113）：对**非秘密**常量原文做一次 MAC。
+     *
+     * [AutofillFieldSignature.of] 把「输入非法」与「密钥不可用」都折叠为 `null`，
+     * 而二者对用户的意义完全不同（前者无需告警，后者意味着填充被保守放弃）。
+     * 探针把两者区分开：只有本探针也失败时，才认定**密钥**不可用。
+     *
+     * 仅在签名已返回 `null` 的路径上调用，且置位后不再重复探测——正常路径零额外开销。
+     */
+    private fun hmacKeyUnavailable(): Boolean {
+        if (signatureUnavailableFlow.value) return true
+        return signatureSource.hmacSha256(KEY_PROBE) == null
+    }
 
     private fun persist(list: List<String>) {
         val sorted = list.sorted()
@@ -140,5 +175,12 @@ class AutofillFieldBlocklistStore @Inject constructor(
         const val K_SCHEMA = "field_signature_schema"
 
         const val HEX_ALPHABET = "0123456789abcdef"
+
+        /**
+         * 密钥可用性探针原文（ISSUE-P3-113）：**非秘密**常量，仅用于判定密钥能否完成 MAC。
+         * 取值参与不了任何签名语义（不进 [AutofillFieldSignature] 的规范化原文），
+         * 故不构成跨设备可关联的固定特征。
+         */
+        val KEY_PROBE = "keepasskey.field_signature.probe".toByteArray(Charsets.UTF_8)
     }
 }

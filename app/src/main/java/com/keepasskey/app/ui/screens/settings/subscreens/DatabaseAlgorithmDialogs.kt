@@ -22,6 +22,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.keepasskey.app.R
+import com.keepasskey.app.ui.screens.settings.CipherLabels
 
 /**
  * 加密算法 / KDF 派生算法选择对话框（ISSUE-P3-29：自 `DatabaseSettingsDialogs.kt` 拆出，纯结构性拆分）。
@@ -39,9 +40,10 @@ internal fun CipherAlgorithmDialog(
         options = listOf(
             // ISSUE-P2-19：标签与「密码库与加密」页显示值使用同一词汇表（真实 cipherId 映射），
             // 去除「AES-256 (KDBX 4.1)」的错误版本绑定表述
-            "ChaCha20-Poly1305 (256-bit)" to R.string.dbset_cipher_chacha_desc,
-            "AES-256-CBC (256-bit)" to R.string.dbset_cipher_aes_desc,
-            "Twofish-CBC (256-bit)" to R.string.dbset_cipher_twofish_desc
+            // ISSUE-P3-92：词汇表收敛到 CipherLabels（ChaCha20 无 Poly1305 AEAD 标签）
+            CipherLabels.CHACHA20 to R.string.dbset_cipher_chacha_desc,
+            CipherLabels.AES_256_CBC to R.string.dbset_cipher_aes_desc,
+            CipherLabels.TWOFISH_CBC to R.string.dbset_cipher_twofish_desc
         ),
         isSelected = { currentAlgorithm == it },
         onSelect = onSelect,

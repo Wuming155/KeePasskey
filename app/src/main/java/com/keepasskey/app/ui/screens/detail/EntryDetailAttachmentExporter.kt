@@ -39,16 +39,23 @@ internal class EntryDetailAttachmentExporter(
             val bytes = vaultRepository.getAttachmentData(entryId, attachment.fileName)
             if (bytes == null) return recordFailure(rawTarget, targetUri)
 
-            val resolver = appContext?.contentResolver ?: return recordFailure(rawTarget, targetUri)
-            val stream = resolver.openOutputStream(targetUri)
-                ?: return recordFailure(rawTarget, targetUri)
+            // ISSUE-P3-105 归口：`getAttachmentData` 交付的是调用方独占副本，用毕必须清零——
+            // 否则解密后的附件明文会随局部变量出栈、静默留存至 GC。
+            // try/finally 覆盖全部出口（三条早退分支与写出成功路径），且**晚于**写出动作。
+            try {
+                val resolver = appContext?.contentResolver ?: return recordFailure(rawTarget, targetUri)
+                val stream = resolver.openOutputStream(targetUri)
+                    ?: return recordFailure(rawTarget, targetUri)
 
-            stream.use { os ->
-                os.write(bytes)
-                os.flush()
+                stream.use { os ->
+                    os.write(bytes)
+                    os.flush()
+                }
+                exportAuditRecorder?.record(ExportArtifactKind.ATTACHMENT, rawTarget, success = true)
+                UiMessage(R.string.detail_attachment_export_toast, listOf(attachment.fileName))
+            } finally {
+                bytes.fill(0)
             }
-            exportAuditRecorder?.record(ExportArtifactKind.ATTACHMENT, rawTarget, success = true)
-            UiMessage(R.string.detail_attachment_export_toast, listOf(attachment.fileName))
         } catch (e: Exception) {
             // 只留痕异常类型，不落异常消息或附件名（防御性，避免敏感内容回流日志缓冲）
             exportAuditRecorder?.record(ExportArtifactKind.ATTACHMENT, rawTarget, success = false)

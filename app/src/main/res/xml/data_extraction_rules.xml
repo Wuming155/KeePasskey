@@ -1,15 +1,37 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  云备份 / 设备迁移的排除域（ISSUE-P2-19、ISSUE-P3-106）。
+
+  排除「全部域」是刻意的**保守默认**：本应用的数据面只有密码库与设置，
+  不承担任何「换机后需自动恢复」的义务（恢复路径是用户显式选择 `.kdbx` 文件）。
+
+  ISSUE-P3-106 补全：此前仅排除 root / file / database / sharedpref 四域，
+  未排除 external 与 device_* 五个域。当前外部存储 API 全仓零使用（故实际暴露为零），
+  但**纵深防御**要求按域穷举，否则未来任一处 `getExternalFilesDir()` 或
+  device-protected 存储接入即静默进入备份面。
+  域取值以官方文档为准（`<include>`/`<exclude>` 的 domain 允许值）。
+-->
 <data-extraction-rules>
     <cloud-backup>
-        <exclude domain="sharedpref" path="." />
+        <exclude domain="root" path="." />
         <exclude domain="file" path="." />
         <exclude domain="database" path="." />
-        <exclude domain="root" path="." />
+        <exclude domain="sharedpref" path="." />
+        <exclude domain="external" path="." />
+        <exclude domain="device_root" path="." />
+        <exclude domain="device_file" path="." />
+        <exclude domain="device_database" path="." />
+        <exclude domain="device_sharedpref" path="." />
     </cloud-backup>
     <device-transfer>
-        <exclude domain="sharedpref" path="." />
+        <exclude domain="root" path="." />
         <exclude domain="file" path="." />
         <exclude domain="database" path="." />
-        <exclude domain="root" path="." />
+        <exclude domain="sharedpref" path="." />
+        <exclude domain="external" path="." />
+        <exclude domain="device_root" path="." />
+        <exclude domain="device_file" path="." />
+        <exclude domain="device_database" path="." />
+        <exclude domain="device_sharedpref" path="." />
     </device-transfer>
 </data-extraction-rules>

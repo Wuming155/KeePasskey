@@ -93,4 +93,7 @@ private fun AutofillHealthIssue.labelRes(): Int = when (this) {
     AutofillHealthIssue.APP_DISABLED -> R.string.autofill_health_issue_app_disabled
     AutofillHealthIssue.SYSTEM_NOT_ENABLED -> R.string.autofill_health_issue_system_disabled
     AutofillHealthIssue.CREDENTIAL_MANAGER_UNAVAILABLE -> R.string.autofill_health_issue_cm_unavailable
+    // ISSUE-P3-113：字段屏蔽签名密钥不可用（fail-closed 的静默故障出口）
+    AutofillHealthIssue.FIELD_BLOCK_SIGNATURE_UNAVAILABLE ->
+        R.string.autofill_health_issue_field_signature_unavailable
 }

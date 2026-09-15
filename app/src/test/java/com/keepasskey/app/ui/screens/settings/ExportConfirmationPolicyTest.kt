@@ -3,6 +3,8 @@ package com.keepasskey.app.ui.screens.settings
 import com.keepasskey.app.data.logger.DebugLogBuffer
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -70,6 +72,69 @@ class ExportConfirmationPolicyTest {
         )
         assertTrue(
             ExportConfirmationPolicy.allows(ExportConfirmationPolicy.Risk.PLAINTEXT, confirmed = true)
+        )
+    }
+
+    // ===== ISSUE-P3-110：确认令牌（下沉到导出控制器层的必填参数） =====
+
+    @Test
+    fun `未确认时不签发明文导出令牌`() {
+        assertNull(
+            "明文制品在未获显式确认时不得签发令牌（fail-closed）",
+            ExportConfirmationPolicy.confirm(ExportArtifactKind.PLAINTEXT_XML, userConfirmed = false)
+        )
+        assertNull(ExportConfirmationPolicy.confirm(ExportArtifactKind.PLAINTEXT_CSV, userConfirmed = false))
+    }
+
+    @Test
+    fun `确认后签发的令牌绑定制品类型`() {
+        val xml = ExportConfirmationPolicy.confirm(ExportArtifactKind.PLAINTEXT_XML, userConfirmed = true)
+        val csv = ExportConfirmationPolicy.confirm(ExportArtifactKind.PLAINTEXT_CSV, userConfirmed = true)
+
+        assertNotNull(xml)
+        assertNotNull(csv)
+        assertEquals(ExportArtifactKind.PLAINTEXT_XML, xml!!.artifactKind)
+        assertEquals(ExportArtifactKind.PLAINTEXT_CSV, csv!!.artifactKind)
+
+        assertTrue(ExportConfirmationPolicy.ticketMatches(xml, ExportArtifactKind.PLAINTEXT_XML))
+        assertFalse(
+            "令牌必须绑定制品类型：XML 令牌不得用于 CSV 导出",
+            ExportConfirmationPolicy.ticketMatches(xml, ExportArtifactKind.PLAINTEXT_CSV)
+        )
+    }
+
+    @Test
+    fun `加密制品的免确认令牌不得用于明文导出`() {
+        val encrypted = ExportConfirmationPolicy.confirm(ExportArtifactKind.ENCRYPTED_KDBX, userConfirmed = false)
+
+        assertNotNull("加密制品无需确认即可签发令牌", encrypted)
+        assertFalse(
+            "提权路径必须被封堵：拿免确认的加密令牌套明文导出应被拒",
+            ExportConfirmationPolicy.ticketMatches(encrypted, ExportArtifactKind.PLAINTEXT_XML)
+        )
+        assertTrue(ExportConfirmationPolicy.ticketMatches(encrypted, ExportArtifactKind.ENCRYPTED_KDBX))
+    }
+
+    @Test
+    fun `缺失令牌即视为不匹配`() {
+        assertFalse(
+            "未确认路径（返回 null）必须被视为不匹配，使控制器 fail-closed",
+            ExportConfirmationPolicy.ticketMatches(null, ExportArtifactKind.PLAINTEXT_XML)
+        )
+    }
+
+    /** ISSUE-P3-128：密钥文件属 PLAINTEXT 风险等级，同样必须经确认才签发令牌 */
+    @Test
+    fun `未确认时不签发密钥文件导出令牌`() {
+        assertNull(
+            ExportConfirmationPolicy.confirm(ExportArtifactKind.KEY_FILE, userConfirmed = false)
+        )
+        val keyFile = ExportConfirmationPolicy.confirm(ExportArtifactKind.KEY_FILE, userConfirmed = true)
+        assertNotNull(keyFile)
+        assertTrue(ExportConfirmationPolicy.ticketMatches(keyFile, ExportArtifactKind.KEY_FILE))
+        assertFalse(
+            "密钥文件令牌不得用于明文 XML 导出（反之亦然）",
+            ExportConfirmationPolicy.ticketMatches(keyFile, ExportArtifactKind.PLAINTEXT_XML)
         )
     }
 

@@ -11,9 +11,9 @@
 ## 1. 版本基线（摘要）
 
 - 测试 / 构建 / CI 当前全绿（具体版本、例数、残余面见 [`RESOLVED_LOG.md`](docs/RESOLVED_LOG.md)）。
-  单测基线（2026-09-15，§57 批次后）：**1716 例 / 0 失败 / 0 错误 / 13 跳过**
-  （app 933 / core 65 / crypto 129 / database 386 / sync 203；`--rerun-tasks --max-workers=1` 强制真实执行）；
-  原生内核基线（同日，§57 批次后）：`cargo test` **57 例 / 0 失败**（§57 未触碰原生内核，基线保持；含 ISSUE-P2-56 工作内存清零 4 例 + ISSUE-P2-57 受管缓冲与 sha2 状态擦除 3 例 + ISSUE-P2-58 强度评估线性化 6 例）；
+  单测基线（2026-09-15，§66 批次后）：**1763 例 / 0 失败 / 0 错误 / 13 跳过**
+  （app 973 / core 68 / crypto 131 / database 388 / sync 203；`--rerun-tasks --max-workers=1` 强制真实执行）；
+  原生内核基线（同日，§66 批次后）：`cargo test` **57 例 / 0 失败**（§66 未触碰原生内核，基线保持；含 ISSUE-P2-56 工作内存清零 4 例 + ISSUE-P2-57 受管缓冲与 sha2 状态擦除 3 例 + ISSUE-P2-58 强度评估线性化 6 例）；
   设备侧基线（2026-09-14，§47 批次后）：**32 例 / 0 失败 / 0 跳过**（`app` 15 + `database` 7 +
   `sync` 3 + `crypto` 7），已在 **arm64 真机**（Redmi 4X / LineageOS / Android 17 / **API 37**）全量复跑通过；
   此前既定环境为 x86_64 / API 36.1 模拟器（§34 / §36 / §46）。`app` 15 例含 `QuickUnlockSealDowngradeDeviceTest`
@@ -23,7 +23,13 @@
   默认关闭并支持开关与自定义最长锁定时长（§29.2）；FLAG_SECURE 防截屏改为开关即生效模型
   （锁定态强制遮蔽，解锁态随开关关闭真实解除，§29.3）并已覆盖敏感**对话框**独立窗口（§38）；
   外部安全审计整改：Gradle Wrapper 锁定分发 SHA-256 并启用 CI wrapper 校验、KDBX 口令中间缓冲清零、
-  TOTP 扫码取景窗口纳入 FLAG_SECURE（§30）。写侧 Argon2 `P` 已按 KDBX4 规范以 UInt32 编码；
+  TOTP 扫码取景窗口纳入 FLAG_SECURE（§30）。**Gradle 分发来源与锁定值（ISSUE-P3-115 补记）**：
+  `gradle/wrapper/gradle-wrapper.properties` 的 `distributionUrl` 指向**第三方镜像**
+  `mirrors.cloud.tencent.com`（非 `services.gradle.org`），完整性由同文件 `distributionSha256Sum`
+  锁定的官方 `-bin` ZIP 摘要承担——Gradle **9.7.1**：`acd53f1edaf02f1a8ff99879f8a34b302661a057d9b063ae9e35b552f804d20a`
+  （来源 <https://gradle.org/release-checksums/>，2026-09-12 核实）。镜像被劫持 / 篡改时 Wrapper 因哈希不符拒绝使用；
+  若要彻底消除第三方镜像依赖，把 `distributionUrl` 改回 `https\://services.gradle.org/distributions/gradle-9.7.1-bin.zip` 即可（哈希不变）。
+  写侧 Argon2 `P` 已按 KDBX4 规范以 UInt32 编码；
   **KDBX4 时间已改为官方秒级 Base64**（§38 P0-05，此前误写 .NET ticks 致官方客户端读不了本仓产物）。
 - **互操作证据纪律（§38 立规）**：`.kdbx` 产物的互操作性以**官方实现端到端对拍**为准
   （`OwnProductInteropProbeTest` 产出真实产物 + `PROBE.md` + `keepassxc-cli` / `pykeepass` 复现命令）；
@@ -126,7 +132,12 @@ KeePasskey 是一款原生 Kotlin 开发的现代化 Android 密码管理器。�
 - `python tools/kdbx-corpus/generate_corpus.py --check` — `.kdbx` 语料校验
 - `bash tools/audit/check_recheck_consistency.sh` — **复核报告一致性扫描**（fail-closed：发现残留禁用短语即退出码 1）。**修改任何审计 / 复核报告后必须跑**
 
-> 原生内核（`crypto/src/main/rust/`）由 Rust + cargo-ndk 交叉编译，`assembleDebug/Release` 自动触发；未装 cargo 或失败则自动降级跳过相关用例（`test` 不触发）。
+> 原生内核（`crypto/src/main/rust/`）由 Rust + cargo-ndk 交叉编译，`assembleDebug/Release` 自动触发。
+> **降级与 fail-closed 的边界（ISSUE-P3-125，§66 更正）**：`cargo` **缺失**（离线 / 无工具链）时
+> 宿主库任务经 `onlyIf` **跳过**，相关 JNI 用例经 `Assume` 跳过（有意的降级路径）；
+> `cargo` **存在但构建失败**时任务**直接失败**（fail-closed）——此前 `isIgnoreExitValue = true`
+> 会把编译失败吞成「用例跳过、构建全绿」的假绿通道，现已移除；`assembleDebug/Release` 的
+> `cargoNdkBuild` 本就不吞退出码，故同样 fail-closed。
 >
 > **设备侧（instrumented）用例注意（2026-09-11 实测基线）**：需先启动 AVD 或接真机。
 > 真实互操作语料已入库（`ISSUE-P3-23` AC② 闭环，见 `docs/RESOLVED_LOG.md` §25），
@@ -159,6 +170,17 @@ KeePasskey 是一款原生 Kotlin 开发的现代化 Android 密码管理器。�
   `File.delete` / `deleteRecursively`，已 unlink 的扇区在介质 TRIM 前仍可能被恢复（取证级威胁，
   需物理介质访问能力）。本仓**不**实施应用层覆写擦除——对现代闪存无确定语义且显著拖慢锁定路径；
   该层面的收窄由平台全盘加密 / FBE 承担。**不得**据此断言「锁定即不可恢复」。
+- **`.kdbx.bak` 滚动备份的语义与保留期（ISSUE-P3-107，如实登记）**：`createBackupBeforeSave`
+  （默认 **true**）开启时，每次**成功写入**都会把写入前的稳定版本另存为**同目录**的
+  `<库文件名>.kdbx.bak`——滚动保留**恰好一份**（上一次成功写入的版本），逐次覆盖，**不**多代累积、
+  **不**迁往其它目录。该文件是用**写入当时生效的凭据**加密的**完整库副本**，因此：
+  ① 成功换密（`DatabaseSession.changeCredentials`，含换密钥文件）后**一律删除**——否则旧口令仍可解开；
+  ② 关闭开关时不生成并清理历史遗留 `.bak`。
+  **残余（如实声明）**：若用户在**本应用之外**（其它 KDBX 客户端）更换口令，本应用无从知晓，
+  该 `.bak` 会一直可用**旧口令**解开，直至下次在本应用内写入（滚动覆盖或被换密路径删除）。
+  行为与保留期同时写在该偏好的 KDoc（`DatabaseSession.createBackupBeforeSave`）与设置页文案
+  （`sync_backup_title` / `sync_backup_sub`，2026-09-15 由「同步前自动备份 / 备份至安全目录」
+  更正——原文案描述的「同步前上传到安全目录」在全仓**无对应实现**）。
 - **KDBX 内存池的擦除边界与树外可达性（ISSUE-P3-119，如实声明）**：`KdbxDatabase.clearSensitiveData()`
   擦除**条目树**（受保护字段 / 自定义字段 / 附件 / 历史）与头部 KDF secret，但**不擦内层二进制池**
   （`InnerHeader.binaries`）——≤ 落盘阈值的附件明文在池中仅随引用丢弃、等待 GC。

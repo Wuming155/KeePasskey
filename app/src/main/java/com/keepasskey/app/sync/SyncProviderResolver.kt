@@ -102,20 +102,37 @@ class SyncProviderResolver @Inject constructor(
         }
     }
 
+    /**
+     * 解析远端库路径。
+     *
+     * ISSUE-P3-100（审计 L3）：本方法只需 `remotePath` / `objectKey`，但 `loadWebDavConfig()` /
+     * `loadS3Config()` 会**解密**出完整凭据（WebDAV 口令、S3 AK/SK）。此前这些派生敏态数据
+     * 被直接丢弃、从不清零（对照 [resolveProvider] 已在 finally 中收口）。
+     * 现按同一口径收口：用毕立即擦除解密得到的凭据。
+     */
     fun resolveRemotePath(defaultFileName: String): String {
         return when (syncCredentialsStore.loadProvider()) {
             CloudSyncProvider.WEBDAV -> {
                 val cfg = syncCredentialsStore.loadWebDavConfig()
-                val path = cfg?.remotePath?.trim()
-                if (!path.isNullOrBlank()) {
-                    if (path.startsWith("/")) path else "/$path"
-                } else {
-                    "/$defaultFileName"
+                try {
+                    val path = cfg?.remotePath?.trim()
+                    if (!path.isNullOrBlank()) {
+                        if (path.startsWith("/")) path else "/$path"
+                    } else {
+                        "/$defaultFileName"
+                    }
+                } finally {
+                    cfg?.password?.fill('0')
                 }
             }
             CloudSyncProvider.S3_COMPATIBLE -> {
                 val cfg = syncCredentialsStore.loadS3Config()
-                cfg?.objectKey?.trim()?.ifBlank { defaultFileName } ?: defaultFileName
+                try {
+                    cfg?.objectKey?.trim()?.ifBlank { defaultFileName } ?: defaultFileName
+                } finally {
+                    cfg?.accessKey?.fill('0')
+                    cfg?.secretKey?.fill('0')
+                }
             }
         }
     }

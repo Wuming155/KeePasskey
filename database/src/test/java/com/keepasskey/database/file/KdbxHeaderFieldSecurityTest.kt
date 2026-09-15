@@ -3,6 +3,7 @@ package com.keepasskey.database.file
 import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.database.crypto.VariantDictionary
 import com.keepasskey.database.exception.KdbxCorruptFileException
+import com.keepasskey.database.exception.KdbxUnsupportedVersionException
 import com.keepasskey.database.io.LittleEndianUtil
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
@@ -33,12 +34,17 @@ class KdbxHeaderFieldSecurityTest {
     /**
      * 构造头部字节流。字段以 (fieldId, 声明长度, 实际数据) 三元组描述，
      * 声明长度可与实际数据脱钩以模拟畸形文件。
+     *
+     * [version] 可覆盖版本字（ISSUE-P3-126③ 的 minor 策略用例需要构造 4.1 / 3.1 头）。
      */
-    private fun headerBytes(fields: List<Triple<Int, Int, ByteArray>>): ByteArray {
+    private fun headerBytes(
+        fields: List<Triple<Int, Int, ByteArray>>,
+        version: Int = KdbxConstants.Version.VERSION_4_0
+    ): ByteArray {
         val bos = ByteArrayOutputStream()
         LittleEndianUtil.writeInt(bos, KdbxConstants.Signature.SIGNATURE_1)
         LittleEndianUtil.writeInt(bos, KdbxConstants.Signature.SIGNATURE_2_KDBX)
-        LittleEndianUtil.writeInt(bos, KdbxConstants.Version.VERSION_4_0)
+        LittleEndianUtil.writeInt(bos, version)
         for ((fieldId, declaredLength, data) in fields) {
             bos.write(fieldId)
             LittleEndianUtil.writeInt(bos, declaredLength)
@@ -298,5 +304,37 @@ class KdbxHeaderFieldSecurityTest {
         )
         assertEquals(KdbxConstants.Cipher.CHACHA20, header.cipherUuid)
         assertEquals(12, header.encryptionIv.size)
+    }
+
+    // ================= ISSUE-P3-126③：minor 版本策略 =================
+
+    /**
+     * 策略＝**仅校验 major**：4.x 的 minor 必须被接受（本仓读取路径对 4.0 / 4.1 完全一致）。
+     *
+     * 旧状态是「minor 原样放行但没有任何声明」——易被误读为「已校验版本」，
+     * 且 `KdbxConstants.Version.VERSION_4_1` 死常量并存。本条把策略**固化为可执行断言**：
+     * 若将来有人加上 minor 白名单（只认 4.0），本用例会立刻失败而迫使其显式决策。
+     */
+    @Test
+    fun `4_1 头部的 minor 版本被接受（策略：仅校验 major）`() {
+        val minorOne = KdbxConstants.Version.VERSION_4_0 or 0x0001
+        val (header, _) = deserialize(headerBytes(defaultValidFields(), version = minorOne))
+
+        assertEquals(KdbxConstants.Cipher.AES_256_CBC, header.cipherUuid)
+        assertEquals(
+            "读取侧不应因 minor 拒文件（minor 递增只带来本仓未使用的可选特性）",
+            KdbxConstants.Version.VERSION_4_0,
+            header.version and KdbxConstants.Version.VERSION_MAJOR_MASK
+        )
+    }
+
+    /** 反向边界：major 非 4（此处为 3.1）必须仍被拒绝 */
+    @Test
+    fun `3_1 头部的 major 版本被拒绝`() {
+        assertThrows(KdbxUnsupportedVersionException::class.java) {
+            deserialize(
+                headerBytes(defaultValidFields(), version = KdbxConstants.Version.VERSION_3_1)
+            )
+        }
     }
 }

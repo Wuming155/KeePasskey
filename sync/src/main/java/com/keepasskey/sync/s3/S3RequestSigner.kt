@@ -115,6 +115,9 @@ internal class S3RequestSigner(
             } finally {
                 prefix.fill(0)
                 keyBytes.fill(0)
+                // ISSUE-P3-101（审计 L4）：combined 含 `"AWS4" ‖ secretAccessKey`，属派生密钥材料，
+                // 此前只擦 prefix/keyBytes 而漏擦它（返回的是 copyOf 独立副本，故此处擦除安全）
+                combined.fill(0)
             }
         } catch (_: Exception) {
             // 极端 OOM 下 combined 可能未初始化，fallback 空数组（后续 HMAC 必失败，如实上浮）

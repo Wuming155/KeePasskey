@@ -32,9 +32,10 @@ import kotlinx.coroutines.launch
 internal fun databaseConfigFromHeader(db: KdbxDatabase): DatabaseConfigUiState {
     val header = db.header
     val cipherLabel = when (header.cipherUuid) {
-        KdbxConstants.Cipher.AES_256_CBC -> "AES-256-CBC (256-bit)"
-        KdbxConstants.Cipher.CHACHA20 -> "ChaCha20-Poly1305 (256-bit)"
-        KdbxConstants.Cipher.TWOFISH -> "Twofish-CBC (256-bit)"
+        KdbxConstants.Cipher.AES_256_CBC -> CipherLabels.AES_256_CBC
+        // ISSUE-P3-92：ChaCha20 无 Poly1305 AEAD 标签（词汇表见 CipherLabels）
+        KdbxConstants.Cipher.CHACHA20 -> CipherLabels.CHACHA20
+        KdbxConstants.Cipher.TWOFISH -> CipherLabels.TWOFISH_CBC
         else -> ""
     }
     val kdf = header.kdfParameters

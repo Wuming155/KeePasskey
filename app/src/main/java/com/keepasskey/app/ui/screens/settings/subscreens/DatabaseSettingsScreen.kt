@@ -38,7 +38,9 @@ import com.keepasskey.app.ui.model.resolveText
 import com.keepasskey.app.ui.screens.importer.ImportReportDialog
 import com.keepasskey.app.ui.screens.importer.ImportUiState
 import com.keepasskey.app.ui.screens.settings.ChildDatabaseUiState
+import com.keepasskey.app.ui.screens.settings.ExportArtifactKind
 import com.keepasskey.app.ui.screens.settings.ExportConfirmationPolicy
+import com.keepasskey.app.ui.screens.settings.ExportTicket
 import com.keepasskey.app.ui.screens.settings.KdfBenchmarkUiState
 import com.keepasskey.app.ui.screens.settings.SafDocumentCleanup
 import com.keepasskey.app.ui.screens.settings.SettingsUiState
@@ -62,10 +64,11 @@ fun DatabaseSettingsScreen(
     exportFeedback: UiMessage? = null,
     onClearExportFeedback: () -> Unit = {},
     onExportKdbx: (android.net.Uri) -> Unit = {},
-    onExportXml: (android.net.Uri) -> Unit = {},
+    // ISSUE-P3-110：明文导出必须携带确认令牌（由本屏二次确认弹窗经 ExportConfirmationPolicy 签发）
+    onExportXml: (android.net.Uri, ExportTicket) -> Unit = { _, _ -> },
     // ISSUE-P3-73：通用明文 CSV 导出（同明文 XML 语义，需二次确认）
-    onExportCsv: (android.net.Uri) -> Unit = {},
-    onExportKeyFile: (android.net.Uri) -> Unit = {},
+    onExportCsv: (android.net.Uri, ExportTicket) -> Unit = { _, _ -> },
+    onExportKeyFile: (android.net.Uri, ExportTicket) -> Unit = { _, _ -> },
     onInstallTemplates: () -> Unit = {},
     // ISSUE-P3-19：导入链路（对话框选源 → SAF 选文件 → 控制器解析/落库 → 报告对话框）。
     // 状态由 VaultImportController 的 StateFlow 上抬，本屏只透传与呈现，不含业务逻辑。
@@ -104,6 +107,9 @@ fun DatabaseSettingsScreen(
     // ISSUE-P3-73：明文 CSV 导出的待确认目标（同明文 XML 的二次确认语义）
     var pendingPlaintextCsvUri by remember { mutableStateOf<Uri?>(null) }
     var showPlaintextCsvConfirm by remember { mutableStateOf(false) }
+    // ISSUE-P3-128：密钥文件导出的待确认目标（同属明文风险等级）
+    var pendingKeyFileUri by remember { mutableStateOf<Uri?>(null) }
+    var showKeyFileExportConfirm by remember { mutableStateOf(false) }
     // ISSUE-P3-20：子库 SAF 选择结果（非敏感元数据）+ 待解锁的挂载身份
     var childDbSourceUri by remember { mutableStateOf<String?>(null) }
     var childDbMountKeyFileUri by remember { mutableStateOf<String?>(null) }
@@ -132,9 +138,16 @@ fun DatabaseSettingsScreen(
             showPlaintextCsvConfirm = true
         }
     }
+    // ISSUE-P3-128：密钥文件导出同属明文风险等级——SAF 选定目标后**先弹二次确认**，
+    // 确认时经 ExportConfirmationPolicy 签发令牌，未确认分支清理空目标文档且不导出
     val exportKeyFileLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("application/octet-stream")
-    ) { uri -> uri?.let(onExportKeyFile) }
+    ) { uri ->
+        if (uri != null) {
+            pendingKeyFileUri = uri
+            showKeyFileExportConfirm = true
+        }
+    }
 
     // ISSUE-P3-20：子库来源与（可选）密钥文件的 SAF 选择器。
     // 选择器置于本屏而非对话框内：对话框在 SAF 交互期间保持组合，表单输入（别名/主密码）因此不丢失。
@@ -147,6 +160,50 @@ fun DatabaseSettingsScreen(
     val childDbUnlockKeyFileLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri -> uri?.let { childDbUnlockKeyFileUri = it.toString() } }
+
+    // 对话框 6d：密钥文件导出二次确认（ISSUE-P3-128，语义同明文 XML：同属 PLAINTEXT 风险等级）
+    if (showKeyFileExportConfirm) {
+        // ISSUE-P2-20：取消分支清理 SAF 已创建的空目标文档，不留 0 字节残留
+        val localContext = LocalContext.current
+        fun cleanupCancelledKeyFileTarget() {
+            pendingKeyFileUri?.let {
+                SafDocumentCleanup.deleteCreatedDocument(localContext, it)
+            }
+            showKeyFileExportConfirm = false
+            pendingKeyFileUri = null
+        }
+        AlertDialog(
+            onDismissRequest = { cleanupCancelledKeyFileTarget() },
+            title = { Text(stringResource(R.string.dbset_keyfile_export_warn_title)) },
+            text = {
+                Text(
+                    text = stringResource(R.string.dbset_keyfile_export_warn_message),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.error
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val target = pendingKeyFileUri
+                    showKeyFileExportConfirm = false
+                    pendingKeyFileUri = null
+                    // 确认后签发令牌再放行：令牌是控制器入口的必填参数，UI 无法绕过确认直接调用
+                    val ticket = ExportConfirmationPolicy.confirm(
+                        kind = ExportArtifactKind.KEY_FILE,
+                        userConfirmed = true
+                    )
+                    if (target != null && ticket != null) onExportKeyFile(target, ticket)
+                }) {
+                    Text(stringResource(R.string.dbset_export_plain_warn_confirm))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { cleanupCancelledKeyFileTarget() }) {
+                    Text(stringResource(R.string.btn_cancel))
+                }
+            }
+        )
+    }
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -363,13 +420,14 @@ fun DatabaseSettingsScreen(
                     val target = pendingPlaintextXmlUri
                     showPlaintextXmlConfirm = false
                     pendingPlaintextXmlUri = null
-                    // 决策走可单测的 ExportConfirmationPolicy：确认后才放行，
+                    // 决策走可单测的 ExportConfirmationPolicy：确认后**签发令牌**再放行
+                    // （ISSUE-P3-110：令牌是导出控制器层的必填参数，UI 无法绕过确认直接调用）
                     // 取消/未确认分支不调用 onExportXml（fail-closed）
-                    val allowed = ExportConfirmationPolicy.allows(
-                        risk = ExportConfirmationPolicy.Risk.PLAINTEXT,
-                        confirmed = true
+                    val ticket = ExportConfirmationPolicy.confirm(
+                        kind = ExportArtifactKind.PLAINTEXT_XML,
+                        userConfirmed = true
                     )
-                    if (target != null && allowed) onExportXml(target)
+                    if (target != null && ticket != null) onExportXml(target, ticket)
                 }) {
                     Text(stringResource(R.string.dbset_export_plain_warn_confirm))
                 }
@@ -408,13 +466,14 @@ fun DatabaseSettingsScreen(
                     val target = pendingPlaintextCsvUri
                     showPlaintextCsvConfirm = false
                     pendingPlaintextCsvUri = null
-                    // 决策走可单测的 ExportConfirmationPolicy：确认后才放行，
+                    // 决策走可单测的 ExportConfirmationPolicy：确认后**签发令牌**再放行
+                    // （ISSUE-P3-110：令牌是导出控制器层的必填参数，UI 无法绕过确认直接调用）
                     // 取消/未确认分支不调用 onExportCsv（fail-closed）
-                    val allowed = ExportConfirmationPolicy.allows(
-                        risk = ExportConfirmationPolicy.Risk.PLAINTEXT,
-                        confirmed = true
+                    val ticket = ExportConfirmationPolicy.confirm(
+                        kind = ExportArtifactKind.PLAINTEXT_CSV,
+                        userConfirmed = true
                     )
-                    if (target != null && allowed) onExportCsv(target)
+                    if (target != null && ticket != null) onExportCsv(target, ticket)
                 }) {
                     Text(stringResource(R.string.dbset_export_plain_warn_confirm))
                 }

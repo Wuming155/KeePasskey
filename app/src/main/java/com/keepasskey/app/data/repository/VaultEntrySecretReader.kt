@@ -162,7 +162,13 @@ internal class VaultEntrySecretReader(
         val attachment = entry.attachments.firstOrNull { it.name == fileName } ?: return null
         // ISSUE-P2-24：按需读取本附件字节（落盘大附件由 source 流式读回），
         // 不再把整个二进制池 map 成字节数组把全库附件拉回内存。
-        val bytes = attachment.data
-        return if (bytes.isEmpty()) null else bytes.copyOf()
+        // ISSUE-P3-105：按来源分流，消除落盘路径的双重拷贝——`source.load()` 已返回独立副本，
+        // 原实现再 `.copyOf()` 一次，第一份副本无人持有 / 无人清零，随 GC 静默留存。
+        // - 落盘来源：`load()` 的独立副本直接交出（所有权归调用方）；
+        // - 内存来源：`attachment.data` 是实例内部数组的**借用视图**，必须复制后交出，
+        //   否则调用方清零会连带清空库内附件字节（ISSUE-P3-07 借用语义）。
+        val source = attachment.binarySource()
+        val bytes = if (source != null) source.load() else attachment.data.copyOf()
+        return if (bytes.isEmpty()) null else bytes
     }
 }

@@ -109,14 +109,25 @@ val cargoHostBuild = tasks.register<Exec>("cargoHostBuild") {
     // 产物落 build/ 下，避免污染源码树（Cargo.toml/Cargo.lock 仍入库）
     environment("CARGO_TARGET_DIR", rustHostTargetDir.get().asFile.absolutePath)
     commandLine("cargo", "build", "--release")
-    // 未安装 cargo / 离线构建失败时降级为「不产出宿主库」：相关用例 Assume 跳过，不阻断主流程
-    isIgnoreExitValue = true
+    // ISSUE-P3-125③：**不再** `isIgnoreExitValue = true`。
+    // 「cargo 缺失」与「cargo 构建失败」必须区分对待：
+    //   · 缺失（离线 / 无工具链）→ `onlyIf` 跳过任务 ⇒ 宿主库不产出 ⇒ JNI 用例经 `Assume` 跳过
+    //     （有意的降级路径，保留）；
+    //   · 失败（工具链在、代码编译不过）→ 任务**直接失败**（fail-closed），
+    //     此前被 `isIgnoreExitValue` 吞掉非零退出码后，用例同样「跳过」而使构建保持绿色——
+    //     即「Rust 内核编译失败但全绿」的假绿通道。
     onlyIf {
         try {
             ProcessBuilder("cargo", "--version").redirectErrorStream(true).start().waitFor() == 0
         } catch (t: Throwable) {
             false
         }
+    }
+    doFirst {
+        logger.lifecycle(
+            "[cargoHostBuild] 宿主 cargo 构建 $hostLibName：失败将**终止构建**（不再降级跳过），" +
+                "见 ISSUE-P3-125"
+        )
     }
 }
 

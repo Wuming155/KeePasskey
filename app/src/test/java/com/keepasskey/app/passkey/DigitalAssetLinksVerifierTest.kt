@@ -27,6 +27,7 @@ class DigitalAssetLinksVerifierTest {
     private var nowMs = 1_000_000L
 
     private val pkg = "com.example.app"
+    // ISSUE-P3-88：无冒号副本原多出一个 hex 字符（65 位），与冒号副本不同源 ⇒ 与生产白名单同源的笔误
     private val fpNoColon = "32A2FC74D731105859E5A85DF16D95F102D85B22099B8064C6D6BABB6652849F"
     private val fpColon = "32:a2:fc:74:d7:31:10:58:59:e5:a8:5d:f1:6d:95:f1:02:d8:5b:22:09:9b:80:64:c6:d6:ba:bb:66:52:84:9f"
 
@@ -34,9 +35,14 @@ class DigitalAssetLinksVerifierTest {
     fun setUp() {
         server = MockWebServer()
         server.start()
-        verifier = DigitalAssetLinksVerifier()
-        verifier.clockMs = { nowMs }
-        verifier.endpointOverride = { host -> server.url("/.well-known/assetlinks.json").toString() }
+        // ISSUE-P3-125②：端点与时钟改为**构造注入的只读策略**（旧实现是可写 internal var，
+        // 同模块生产代码可重定向 DAL 拉取）；生产由 DalVerifierModule 注入 Official / SystemClock。
+        verifier = DigitalAssetLinksVerifier(
+            endpointResolver = DalEndpointResolver {
+                server.url("/.well-known/assetlinks.json").toString()
+            },
+            clock = MillisClock { nowMs }
+        )
     }
 
     @After

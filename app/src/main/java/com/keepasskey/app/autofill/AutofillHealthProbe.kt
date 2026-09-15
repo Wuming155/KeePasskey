@@ -18,10 +18,15 @@ import javax.inject.Singleton
  *
  * 隐私约定：本类只检查本应用自身链路状态，**不**枚举用户安装的应用清单，
  * 也不读取任何条目/凭据数据。
+ *
+ * ISSUE-P3-113：另采集字段屏蔽签名密钥的可用性（来自
+ * [AutofillFieldBlocklistStore.signatureUnavailable]，属本应用自身运行时状态）。
  */
 @Singleton
 class AutofillHealthProbe @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    // ISSUE-P3-113：字段屏蔽签名密钥的可用性（用户可感知的静默故障来源之一）
+    private val fieldBlocklistStore: AutofillFieldBlocklistStore
 ) {
 
     /** 采集一次健康报告；[appEnabled] 由调用方从偏好状态传入 */
@@ -29,7 +34,8 @@ class AutofillHealthProbe @Inject constructor(
         serviceDeclared = isServiceDeclared(),
         appEnabled = appEnabled,
         systemEnabled = isSystemAutofillServiceEnabled(),
-        credentialManagerAvailable = isCredentialManagerAvailable()
+        credentialManagerAvailable = isCredentialManagerAvailable(),
+        fieldBlockSignatureUnavailable = fieldBlocklistStore.signatureUnavailable.value
     )
 
     /** 服务是否在 Manifest 声明且带 `BIND_AUTOFILL_SERVICE` 权限 */

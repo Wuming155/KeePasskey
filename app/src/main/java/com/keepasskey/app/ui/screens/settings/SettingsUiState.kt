@@ -66,7 +66,7 @@ data class SettingsUiState(
     val databaseName: String = "",
     val databasePath: String = "",
     val databaseDefaultUsername: String = "",
-    val encryptionAlgorithm: String = "ChaCha20-Poly1305 (256-bit)",
+    val encryptionAlgorithm: String = CipherLabels.CHACHA20,
     val kdfAlgorithm: String = "Argon2id",
     val argon2Iterations: Long = 3L,
     val argon2MemoryMb: Long = 64L,
@@ -222,7 +222,12 @@ data class SettingsUiState(
     // 9. 关于与系统信息 (About & Info)
     val appVersion: String = "v1.0.0-Preview (2026 Edition)",
     val buildNumber: String = "Build 2026.09.04",
-    val kdbxFormat: String = "KDBX 4.1 (Argon2id + ChaCha20)",
+    // ISSUE-P3-126③：此处原有 `kdbxFormat = "KDBX 4.1 (Argon2id + ChaCha20)"` 字段——
+    // 经全仓检索确认**零消费方**（死字段），且其字面量向用户声明了一个本仓并不写入的
+    // 具体版本（写侧恒为 4.0：`KdbxConstants.Version.VERSION_4_0`；读取侧仅校验 major，
+    // 见 `KdbxHeader` 的版本策略声明）。故整体删除，避免「声明 4.1 / 实写 4.0」的失真。
+    // 若将来确需展示格式行，**必须**取自活动库真实文件头（`KdbxDatabase.header.version`），
+    // 不得再写为静态字面量。
 
     // ISSUE-P2-08（ZT-13）：运行环境完整性扫描快照——风险提示卡片数据源。
     // null = 尚未接入 / 未注入（不渲染风险卡片，也绝不回填「安全」假值）

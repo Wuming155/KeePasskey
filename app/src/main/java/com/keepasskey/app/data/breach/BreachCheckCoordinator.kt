@@ -60,9 +60,9 @@ class BreachCheckCoordinator(
             val passwordBytes = password.readUtf8()
             try {
                 if (passwordBytes.isEmpty()) continue
-                val (prefix, suffix) = BreachHasher.splitPrefixSuffix(
-                    BreachHasher.sha1HexUpper(passwordBytes)
-                )
+                // ISSUE-P3-102：字节态计算 + 就地拆分——完整 40 位摘要不物化为 String，
+                // 摘要字节由 BreachHasher 内部 finally 清零（密码明文字节由本方法 finally 清零）
+                val (prefix, suffix) = BreachHasher.splitPrefixSuffixOfSha1(passwordBytes)
                 grouped.getOrPut(prefix) { mutableListOf() }.add(
                     Candidate(entryId = entry.id.toHexString(), suffix = suffix)
                 )

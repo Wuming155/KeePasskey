@@ -526,6 +526,9 @@
     <!-- ISSUE-P3-73: plaintext CSV export confirmation (wording must say "plaintext") -->
     <string name="dbset_export_csv_plain_warn_title">Confirm plaintext CSV export</string>
     <string name="dbset_export_csv_plain_warn_message">You are about to export an unencrypted CSV file containing every entry field value in the vault:\n- Plaintext: its contents are directly readable and are not protected by the master password;\n- Unprotected: once written to Downloads or a cloud drive, any app or person with access to that location can read it;\n- Delete it yourself: this app will not clean it up. Delete it immediately after use and empty the cloud recycle bin.</string>
+    <!-- ISSUE-P3-128: key file export confirmation (the key file is the second unlock factor) -->
+    <string name="dbset_keyfile_export_warn_title">Confirm key file export</string>
+    <string name="dbset_keyfile_export_warn_message">You are about to export this vault\u2019s key file (the second unlock factor):\n- This single file can be combined with the vault file to attempt an unlock, so store it separately from the .kdbx;\n- Once written to Downloads or a cloud drive, any app or person with access to that location can obtain the factor;\n- Delete it yourself: this app will not clean it up.</string>
     <string name="dbset_import_dialog_title">Choose import source</string>
     <string name="dbset_import_preparing">Parsing %1$s data...</string>
     <string name="dbset_src_1pux">1Password (1PUX)</string>
@@ -589,7 +592,7 @@
     <string name="autofill_save_integrity_blocked">This device is at risk, so saving credentials is disabled.</string>
     <string name="autofill_save_blocked">This app is on the autofill blocklist, so saving credentials was rejected.</string>
     <string name="sec_clipboard_title">Clipboard protection</string>
-    <string name="sec_clipboard_sub">Copied secrets stay out of clipboard history and cloud sync</string>
+    <string name="sec_clipboard_sub">Copied secrets are marked sensitive: the system copy confirmation hides them, and they are auto-cleared after the set duration</string>
     <string name="sec_clipboard_countdown_title">Clipboard retention</string>
     <string name="sec_clipboard_countdown_current">Current: %1$s</string>
     <string name="sec_clipboard_risk_notice">Auto-clear is off: copied passwords/one-time codes stay in the system clipboard and any foreground app can read them until overwritten or the device reboots. Keep it on, or use autofill to fill forms directly.</string>
@@ -657,8 +660,8 @@
     <string name="sync_interval_120">Every 2 hours</string>
     <string name="sync_interval_360">Every 6 hours</string>
     <string name="sync_section_file_safety">File sync safety</string>
-    <string name="sync_backup_title">Back up before sync</string>
-    <string name="sync_backup_sub">Back up the local database to a safe folder before uploading</string>
+    <string name="sync_backup_title">Keep previous version on save</string>
+    <string name="sync_backup_sub">Keeps the previous version as a .kdbx.bak file next to the vault before each save (deleted after a successful master password change)</string>
     <string name="sync_check_remote_title">Check remote before sync</string>
     <string name="sync_check_remote_sub">Compare the cloud version before uploading to avoid overwriting other changes</string>
     <string name="sync_file_tx_title">Transactional writes</string>
@@ -1101,6 +1104,7 @@
     <string name="autofill_health_issue_app_disabled">Legacy autofill service is turned off in the app</string>
     <string name="autofill_health_issue_system_disabled">This app is not selected as the autofill service; enable it in system settings</string>
     <string name="autofill_health_issue_cm_unavailable">Credential Manager is unavailable</string>
+    <string name="autofill_health_issue_field_signature_unavailable">Field-block verification is temporarily unavailable (system keystore unavailable), so autofill is conservatively not filling; retry after rebooting, and check your system security settings if it persists</string>
     <string name="autofill_picker_title">Choose a credential to fill</string>
     <!-- ISSUE-P2-70: the picker must always show who is requesting the fill -->
     <string name="autofill_picker_requester_title">Requesting app for this fill</string>
@@ -1173,6 +1177,7 @@
     <string name="health_breach_error_unknown">Unknown error</string>
     <string name="kdf_benchmark_failed">Benchmark failed</string>
     <string name="export_saf_write_failed">Failed to write via SAF</string>
+    <string name="export_confirmation_missing">Missing a valid export confirmation; the plaintext export was rejected</string>
 
     <!-- 来源：values/strings_sync_passkey.xml（36 条） -->
     <string name="sync_error_no_open_vault_file">No vault file is currently open</string>

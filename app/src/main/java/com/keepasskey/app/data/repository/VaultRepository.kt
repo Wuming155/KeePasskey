@@ -371,6 +371,9 @@ interface VaultRepository {
     /**
      * 按需解析单条凭据指定附件的二进制内容（断点3 整改，SAF 导出用）。
      * 附件不存在或名称不匹配时返回 null。
+     *
+     * 返回的是**调用方独占的独立副本**（内存附件走 `copyOf()`，落盘附件走 `source.load()`，
+     * 见 ISSUE-P3-105）；调用方用毕应自行 `fill(0)` 清零，勿长期持有。
      */
     suspend fun getAttachmentData(entryId: String, fileName: String): ByteArray?
 

@@ -15,9 +15,14 @@ import org.junit.Test
  */
 class AutofillWebDomainPolicyTest {
 
-    /** Chrome 已取证指纹（大写无冒号，与 BrowserSigningFingerprints 一致） */
+    /**
+     * Chrome 已取证指纹（大写无冒号，与 `BrowserSigningFingerprints.TRUSTED` 一致）。
+     *
+     * ISSUE-P3-88：本常量原多写一个 hex 字符（65 位）——与生产白名单**同源笔误**，
+     * 使两处错误互相印证而测试恒绿；发现其一即发现全部，故修正必须**同批**完成。
+     */
     private val chromeFingerprint =
-        "32A2FC74D731105859E5A85DF16D95F102D85B22099B8064C6D6BABBB6652849F"
+        "32A2FC74D731105859E5A85DF16D95F102D85B22099B8064C6D6BABB6652849F"
 
     /** Firefox 正式版已取证指纹（Mozilla 官方 sources） */
     private val firefoxFingerprint =

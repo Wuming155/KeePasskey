@@ -36,7 +36,18 @@ import javax.inject.Singleton
  * 纯匹配逻辑与 JSON 解析零 Android 框架依赖（对齐 [DomainMatcher] 纯函数设计），单测全覆盖。
  */
 @Singleton
-class DigitalAssetLinksVerifier @Inject constructor() {
+class DigitalAssetLinksVerifier @Inject constructor(
+    /**
+     * DAL 端点解析策略（ISSUE-P3-125②：由「可写字段」改为**构造注入的只读策略**）。
+     * 生产恒为 [DalEndpointResolver.Official]（`https://<host>/.well-known/assetlinks.json`）——
+     * 运行期任何代码都无法把已注入的实例改写成任意 URL（旧实现是 `@Singleton` 上的
+     * `@Volatile internal var endpointOverride`，同模块任意生产代码可重定向 DAL 拉取，
+     * 从而整体架空「RP 站点显式声明授权」的校验）。
+     */
+    private val endpointResolver: DalEndpointResolver,
+    /** 时钟策略（同上：只读注入，单测据此推进 TTL；生产为系统时钟） */
+    private val clock: MillisClock
+) {
 
     enum class DalResult {
         /** DAL 存在且存在匹配（relation + 包名 + 证书指纹）的声明 */
@@ -50,14 +61,6 @@ class DigitalAssetLinksVerifier @Inject constructor() {
     private data class CacheEntry(val result: DalResult, val cachedAtMs: Long)
 
     private val cache = ConcurrentHashMap<String, CacheEntry>()
-
-    /** 测试注入点：可 fake 时钟推进 TTL 过期（生产为系统时钟） */
-    @Volatile
-    internal var clockMs: () -> Long = { System.currentTimeMillis() }
-
-    /** 测试注入点：端点覆盖（单测指向 MockWebServer；生产恒为官方 well-known 路径） */
-    @Volatile
-    internal var endpointOverride: ((host: String) -> String)? = null
 
     private val http: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(CONNECT_TIMEOUT_MS, TimeUnit.MILLISECONDS)
@@ -84,14 +87,14 @@ class DigitalAssetLinksVerifier @Inject constructor() {
 
         // 缓存键包含**完整摘要集合**：不同集合的判定结果不得互相命中
         val key = "$host|$callingPackage|${certDigests.values.joinToString(",")}"
-        val now = clockMs()
+        val now = clock.now()
         cache[key]?.let { entry ->
             val ttl = if (entry.result == DalResult.VERIFIED) POSITIVE_TTL_MS else NEGATIVE_TTL_MS
             if (now - entry.cachedAtMs < ttl) return entry.result
             cache.remove(key, entry)
         }
 
-        val url = endpointOverride?.invoke(host) ?: "https://$host/.well-known/assetlinks.json"
+        val url = endpointResolver.resolve(host)
         val result = withContext(Dispatchers.IO) { fetchAndMatch(url, callingPackage, certDigests) }
         cache[key] = CacheEntry(result, now)
         AppLog.i(TAG, "DAL 校验完成: result=$result")
@@ -239,6 +242,39 @@ internal object DalStatementMatcher {
         certSha256Hex: String
     ): DigitalAssetLinksVerifier.DalResult =
         match(json, expectedPackage, CallerCertDigests.ofSingle(certSha256Hex))
+}
+
+/**
+ * DAL 端点解析策略（ISSUE-P3-125②）。
+ *
+ * **为什么是策略对象而不是可写字段**：旧实现把「测试注入点」做成 `@Singleton` 上的
+ * `@Volatile internal var endpointOverride`——`internal` 只限制在**模块外**不可见，
+ * 本模块内任何生产代码都能把它改写成任意 URL，从而把 DAL 校验整体导流到攻击者端点
+ * （等于取消 RP↔应用绑定校验）。改为**构造注入的只读策略**后，运行期没有改写入口：
+ * 生产由 Hilt 注入 [Official]，单测在构造时传入指向 MockWebServer 的实现。
+ */
+fun interface DalEndpointResolver {
+
+    /** 由 rp.id 主机名解析出 DAL 文档 URL */
+    fun resolve(host: String): String
+
+    companion object {
+        /** 唯一生产策略：官方 well-known 路径（本常量之外无运行期改写入口） */
+        val Official = DalEndpointResolver { host -> "https://$host/.well-known/assetlinks.json" }
+    }
+}
+
+/**
+ * 毫秒时钟策略（ISSUE-P3-125②，与 [DalEndpointResolver] 同因同改）：
+ * 旧实现为可写 `internal var`，现改为构造注入，生产为系统时钟、单测可注入可推进的假时钟。
+ */
+fun interface MillisClock {
+
+    fun now(): Long
+
+    companion object {
+        val SystemClock = MillisClock { java.lang.System.currentTimeMillis() }
+    }
 }
 
 /**

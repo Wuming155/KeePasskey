@@ -16,7 +16,16 @@ enum class AutofillHealthIssue {
     SYSTEM_NOT_ENABLED,
 
     /** Credential Manager 通道不可用（依赖缺失 / 运行环境异常） */
-    CREDENTIAL_MANAGER_UNAVAILABLE
+    CREDENTIAL_MANAGER_UNAVAILABLE,
+
+    /**
+     * 字段屏蔽签名密钥不可用（ISSUE-P3-113）。
+     *
+     * 该状态下 `AutofillFieldBlocklistStore.isBlocked` 按 fail-closed 视为「已屏蔽」，
+     * 结果是**整条字段级屏蔽判定恒为真** ⇒ 填充侧静态放弃下发候选；用户只看到「不出候选」，
+     * 无从归因。此项即为该静默故障的显式化出口。
+     */
+    FIELD_BLOCK_SIGNATURE_UNAVAILABLE
 }
 
 /**
@@ -28,7 +37,9 @@ data class AutofillHealthReport(
     val serviceDeclared: Boolean,
     val appEnabled: Boolean,
     val systemEnabled: Boolean,
-    val credentialManagerAvailable: Boolean
+    val credentialManagerAvailable: Boolean,
+    /** 字段屏蔽签名密钥是否不可用（ISSUE-P3-113）；默认 false 以兼容既有调用与用例 */
+    val fieldBlockSignatureUnavailable: Boolean = false
 ) {
 
     /** 全部检查项逐条列出（顺序即建议修复优先级） */
@@ -38,6 +49,9 @@ data class AutofillHealthReport(
             if (!appEnabled) add(AutofillHealthIssue.APP_DISABLED)
             if (!systemEnabled) add(AutofillHealthIssue.SYSTEM_NOT_ENABLED)
             if (!credentialManagerAvailable) add(AutofillHealthIssue.CREDENTIAL_MANAGER_UNAVAILABLE)
+            if (fieldBlockSignatureUnavailable) {
+                add(AutofillHealthIssue.FIELD_BLOCK_SIGNATURE_UNAVAILABLE)
+            }
         }
 
     /**
@@ -62,11 +76,13 @@ object AutofillHealthPolicy {
         serviceDeclared: Boolean,
         appEnabled: Boolean,
         systemEnabled: Boolean,
-        credentialManagerAvailable: Boolean
+        credentialManagerAvailable: Boolean,
+        fieldBlockSignatureUnavailable: Boolean = false
     ): AutofillHealthReport = AutofillHealthReport(
         serviceDeclared = serviceDeclared,
         appEnabled = appEnabled,
         systemEnabled = systemEnabled,
-        credentialManagerAvailable = credentialManagerAvailable
+        credentialManagerAvailable = credentialManagerAvailable,
+        fieldBlockSignatureUnavailable = fieldBlockSignatureUnavailable
     )
 }

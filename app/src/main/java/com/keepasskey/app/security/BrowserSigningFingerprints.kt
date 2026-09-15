@@ -33,8 +33,11 @@ object BrowserSigningFingerprints {
     /** 包名（小写）→ 已取证签名证书 SHA-256 指纹集合（大写、无冒号） */
     val TRUSTED: Map<String, Set<String>> = mapOf(
         // 来源 1：仓库内既有 passkey 白名单（CallingOriginResolver.PRIVILEGED_BROWSER_ALLOWLIST）
+        // ISSUE-P3-88：原值多出一个 hex 字符（65 位）⇒ 该条目**永不匹配**（SHA-256 恒 64 位）。
+        // 已按同一白名单中的**冒号分隔规范副本**收敛为此处的无冒号大写形式（非 retype），
+        // 并由 `BrowserFingerprintFormatTest` 的「全部指纹恒为 64 位大写 hex」断言兜底。
         "com.android.chrome" to setOf(
-            "32A2FC74D731105859E5A85DF16D95F102D85B22099B8064C6D6BABBB6652849F",
+            "32A2FC74D731105859E5A85DF16D95F102D85B22099B8064C6D6BABB6652849F",
             "F0FD6C5B410F25CB25C3B53346C8972FAE30F8EE7411DF910480AD6B2D60DB83"
         ),
         // 来源 2：Mozilla 官方 Fenix certificates 文档（Production）

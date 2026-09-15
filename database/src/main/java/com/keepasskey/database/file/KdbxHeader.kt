@@ -231,6 +231,11 @@ data class KdbxHeader(
 
             val version = readAndRecordInt()
             val major = version and KdbxConstants.Version.VERSION_MAJOR_MASK
+            // ISSUE-P3-126③：**版本策略在此显式声明为「仅校验 major」**。
+            // 4.x 的 minor 递增只引入本仓不依赖的可选特性（本仓读取路径对 4.0 / 4.1 完全一致），
+            // 故 minor 原样接受、**不**据此拒绝文件——拒之反而会打不开官方新写的库。
+            // 该声明用于消除「看起来校验了版本」的误读：`KdbxConstants.Version` 亦不保留
+            // 未被引用的 `VERSION_4_1` 死常量（详见该处 KDoc）。
             if (major != KdbxConstants.Version.VERSION_4_0) {
                 throw KdbxUnsupportedVersionException("不支持 KDBX v4 之前的版本")
             }

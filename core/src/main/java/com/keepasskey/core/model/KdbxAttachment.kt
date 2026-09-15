@@ -14,8 +14,15 @@ import java.io.InputStream
  * - **落盘按需读取**（> 阈值）：仅持 [BinarySource] 引用，[data] 按需读回独立副本，
  *   使大附件库不再「整池 + 逐附件副本」双份常驻 GC 堆。
  *
- * 别名隔离契约（ISSUE-P3-07）不变：无论哪种来源，[data] / [openStream] 交付的字节都不与
- * 内层二进制池、也不与其它附件共享可变引用；[clear] 只作用于本实例自身。
+ * 别名隔离契约（ISSUE-P3-07；口径经 **ISSUE-P3-104** 更正，逐项如实声明）：
+ * - 与**内层二进制池**隔离：内存附件本就未持有池数组（池由 `InnerHeader` 独占，本类仅持克隆副本），
+ *   落盘附件每次按需读回独立副本——两种来源都不与池共享可变引用；
+ * - 与**其它持有者**隔离：**仅落盘附件成立**（每次读回新副本）；内存附件的 [data] / [resolveData]
+ *   返回的是**本实例持有的数组本身**（借用视图，详见其各自 KDoc），属刻意的零拷贝设计，
+ *   代价是调用方必须遵守借用语义——不得修改 / 清零，需要独立副本请自行 `copyOf()`；
+ * - [openStream] 两种来源下都不交出可变视图（内存走 `ByteArrayInputStream`，落盘走 source 流）。
+ *
+ * [clear] 只作用于本实例自身（且对落盘附件不动作，见其 KDoc）。
  */
 class KdbxAttachment(
     val name: String,
@@ -50,6 +57,9 @@ class KdbxAttachment(
     /**
      * 获取附件实际二进制数据。
      * 若当前实例已绑定内存副本且非空则优先返回，否则从提供的 [binaryPool] 中根据 [refIndex] 解析。
+     *
+     * **返回所有权与 [data] 一致**（ISSUE-P3-104）：落盘来源按需读回独立副本；
+     * 内存来源返回本实例持有的数组本身或池中数组（均为**借用视图**，调用方不得修改 / 清零）。
      */
     fun resolveData(binaryPool: List<ByteArray>): ByteArray {
         source?.let { return it.load() }

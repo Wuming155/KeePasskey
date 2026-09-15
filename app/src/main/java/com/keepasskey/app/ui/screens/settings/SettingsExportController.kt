@@ -100,38 +100,66 @@ internal class SettingsExportController(
     /**
      * 导出当前数据库为 KeePass 2.x 兼容明文 XML 并写入 SAF 目标 Uri。
      *
-     * ISSUE-P2-10 (ZT-15)：明文路径属「高级选项」，调用前必须经
-     * [ExportConfirmationPolicy] 取得用户显式二次确认（由 DatabaseSettingsScreen 的确认弹窗落地）；
-     * 本方法只负责在确认后真实序列化落盘，并记录脱敏审计条目。
+     * ISSUE-P2-10 (ZT-15) / ISSUE-P3-110：明文路径属「高级选项」，**必须**携带
+     * [ExportTicket]——该令牌只能由 [ExportConfirmationPolicy.confirm] 在用户显式二次确认后签发，
+     * 故此签名本身即「未确认不可调用」的编译期闸门；令牌与制品类型不匹配时 fail-closed 拒绝。
      */
-    fun exportVaultXmlTo(targetUri: Uri) {
-        scope.launch(Dispatchers.IO) {
-            exportFeedbackFlow.value = exportAndWrite(
-                targetUri, ExportArtifactKind.PLAINTEXT_XML, R.string.dbset_export_xml_done
-            ) { vaultRepository.exportVaultXmlBytes() }
+    fun exportVaultXmlTo(targetUri: Uri, ticket: ExportTicket) {
+        exportPlaintextTo(targetUri, ExportArtifactKind.PLAINTEXT_XML, ticket, R.string.dbset_export_xml_done) {
+            vaultRepository.exportVaultXmlBytes()
         }
     }
 
     /**
      * ISSUE-P3-73：导出当前数据库为通用明文 CSV 并写入 SAF 目标 Uri。
      *
-     * 与明文 XML 同属「高级选项」：调用前必须经 [ExportConfirmationPolicy] 取得用户显式二次确认
-     * （由 DatabaseSettingsScreen 的确认弹窗落地）；本方法只负责在确认后真实序列化落盘。
+     * 与明文 XML 同属「高级选项」：令牌要求见 [exportVaultXmlTo]（ISSUE-P3-110）。
      */
-    fun exportVaultCsvTo(targetUri: Uri) {
-        scope.launch(Dispatchers.IO) {
-            exportFeedbackFlow.value = exportAndWrite(
-                targetUri, ExportArtifactKind.PLAINTEXT_CSV, R.string.dbset_export_csv_done
-            ) { vaultRepository.exportVaultCsvBytes() }
+    fun exportVaultCsvTo(targetUri: Uri, ticket: ExportTicket) {
+        exportPlaintextTo(targetUri, ExportArtifactKind.PLAINTEXT_CSV, ticket, R.string.dbset_export_csv_done) {
+            vaultRepository.exportVaultCsvBytes()
         }
     }
 
-    /** 导出会话绑定的密钥文件并写入 SAF 目标 Uri */
-    fun exportKeyFileTo(targetUri: Uri) {
+    /**
+     * 明文制品导出的统一入口（ISSUE-P3-110）：**先校验令牌，再序列化**。
+     *
+     * 校验失败（令牌缺失或与制品不匹配，例如拿免确认的加密导出令牌套明文导出）时
+     * **不调用** `bytesProvider`——即不产生任何明文字节，并按失败路径写审计 + 清理空目标文档。
+     */
+    private fun exportPlaintextTo(
+        targetUri: Uri,
+        artifactKind: ExportArtifactKind,
+        ticket: ExportTicket,
+        successMessageRes: Int,
+        bytesProvider: suspend () -> com.keepasskey.core.result.KdbxResult<ByteArray>
+    ) {
         scope.launch(Dispatchers.IO) {
-            exportFeedbackFlow.value = exportAndWrite(
-                targetUri, ExportArtifactKind.KEY_FILE, R.string.dbset_keyfile_exported
-            ) { vaultRepository.exportKeyFileBytes() }
+            if (!ExportConfirmationPolicy.ticketMatches(ticket, artifactKind)) {
+                exportFeedbackFlow.value = rejectTicket(artifactKind, targetUri)
+                return@launch
+            }
+            exportFeedbackFlow.value = exportAndWrite(targetUri, artifactKind, successMessageRes, bytesProvider)
+        }
+    }
+
+    /** 令牌校验失败收尾：失败审计 + 清理 SAF 已创建的空目标文档 + 面向用户的失败提示 */
+    private fun rejectTicket(artifactKind: ExportArtifactKind, targetUri: Uri): UiMessage {
+        exportAuditRecorder.record(artifactKind, targetUri.toString(), success = false)
+        SafDocumentCleanup.deleteCreatedDocument(appContext, targetUri)
+        return UiMessage(R.string.settings_action_failed, listOf(strings.get(R.string.export_confirmation_missing)))
+    }
+
+    /**
+     * 导出会话绑定的密钥文件并写入 SAF 目标 Uri（ISSUE-P3-128）。
+     *
+     * `riskOf(KEY_FILE)` 早已把密钥文件归入 `PLAINTEXT` 风险等级（泄漏即可配合密文开库），
+     * 故本入口与明文 XML / CSV 同口径：**必须**携带 [ExportConfirmationPolicy.confirm] 签发的令牌，
+     * 未确认不可调用、令牌类型不符一律 fail-closed。
+     */
+    fun exportKeyFileTo(targetUri: Uri, ticket: ExportTicket) {
+        exportPlaintextTo(targetUri, ExportArtifactKind.KEY_FILE, ticket, R.string.dbset_keyfile_exported) {
+            vaultRepository.exportKeyFileBytes()
         }
     }
 
@@ -168,19 +196,26 @@ internal class SettingsExportController(
         }
         val bytes = result.getOrNull()
         val resolver = appContext?.contentResolver
-        val written = if (bytes != null && resolver != null) {
-            try {
-                resolver.openOutputStream(targetUri)?.use { os ->
-                    os.write(bytes)
-                    os.flush()
-                    true
-                } ?: false
-            } catch (e: Exception) {
-                debugLogBuffer.warn(TAG, "SAF 导出写盘失败: ${e.javaClass.simpleName}")
+        // ISSUE-P3-86（审计 F-02，MEDIUM）：整库序列化缓冲用毕必须清零——明文 XML / CSV 尤甚
+        // （该数组是**整库全部字段值**的明文副本）。清零置于 finally，覆盖「写盘成功 / 写盘失败 /
+        // 解析器抛异常」三态，且**晚于** `os.write(bytes)`（写前清零会导出全零内容）。
+        val written = try {
+            if (bytes != null && resolver != null) {
+                try {
+                    resolver.openOutputStream(targetUri)?.use { os ->
+                        os.write(bytes)
+                        os.flush()
+                        true
+                    } ?: false
+                } catch (e: Exception) {
+                    debugLogBuffer.warn(TAG, "SAF 导出写盘失败: ${e.javaClass.simpleName}")
+                    false
+                }
+            } else {
                 false
             }
-        } else {
-            false
+        } finally {
+            bytes?.fill(0)
         }
         // ISSUE-P2-10 (ZT-15)：审计留痕——只记时间（缓冲统一加戳）、导出类型与目标脱敏标识
         exportAuditRecorder.record(artifactKind, rawTarget, success = written)
@@ -197,8 +232,12 @@ internal class SettingsExportController(
 
 /**
  * ISSUE-P2-10 (ZT-15)：导出制品类型（审计分类与风险分级共用）。
+ *
+ * ISSUE-P3-110：随 [ExportTicket] 一并公开——确认令牌需作为 Compose 回调的参数类型
+ * （公开 composable 不得暴露 module-internal 类型），而令牌的**不可伪造性**由
+ * 「唯一实现类文件私有」承担，与本枚举的可见性无关。
  */
-internal enum class ExportArtifactKind(val auditLabel: String) {
+enum class ExportArtifactKind(val auditLabel: String) {
     /** 加密 KDBX：默认导出路径，受主密码保护 */
     ENCRYPTED_KDBX("加密 KDBX"),
 
@@ -216,10 +255,34 @@ internal enum class ExportArtifactKind(val auditLabel: String) {
 }
 
 /**
+ * 敏感制品导出的**确认令牌**（ISSUE-P3-110）。
+ *
+ * 令牌只能由 [ExportConfirmationPolicy.confirm] 签发：其唯一实现类 [IssuedExportTicket]
+ * 是本文件的 `private class`（文件外**不可见**，比 `internal` 构造器更强——同模块其它文件
+ * 也无法自行构造令牌）。「控制器层要求令牌」于是等价于「调用方必须真的走过确认决策」，
+ * 而非「某处约定要记得先问用户」。
+ *
+ * 令牌**绑定制品类型**：拿「免确认的加密导出令牌」去套明文导出会在控制器侧被拒（fail-closed）。
+ */
+sealed interface ExportTicket {
+
+    /** 本令牌授权的导出制品类型 */
+    val artifactKind: ExportArtifactKind
+}
+
+/** [ExportTicket] 的唯一实现（文件私有 ⇒ 只能经 [ExportConfirmationPolicy.confirm] 获得） */
+private class IssuedExportTicket(
+    override val artifactKind: ExportArtifactKind
+) : ExportTicket
+
+/**
  * ISSUE-P2-10 (ZT-15)：明文导出二次确认决策内核（纯 Kotlin，可 JVM 单测）。
  *
  * 加密 KDBX 属默认安全路径，无需确认；明文 XML / 明文附件必须先取得显式确认，
  * 缺失确认一律 fail-closed（不导出）。
+ *
+ * ISSUE-P3-110：确认结果不再只是布尔判断，而是**签发 [ExportTicket]**——
+ * 令牌下沉到导出控制器层，`SettingsExportController` 的明文导出入口以「必须传令牌」表达该约束。
  */
 internal object ExportConfirmationPolicy {
 
@@ -264,6 +327,24 @@ internal object ExportConfirmationPolicy {
         ExportArtifactKind.KEY_FILE,
         ExportArtifactKind.ATTACHMENT -> Risk.PLAINTEXT
     }
+
+    /**
+     * 按制品类型签发确认令牌（ISSUE-P3-110）。
+     *
+     * @param kind 本次要导出的制品类型
+     * @param userConfirmed 用户是否已完成显式二次确认（明文制品必填 true）
+     * @return 放行时返回绑定 [kind] 的令牌；未确认且属明文制品时返回 **null**（fail-closed）
+     */
+    fun confirm(kind: ExportArtifactKind, userConfirmed: Boolean): ExportTicket? =
+        if (allows(riskOf(kind), userConfirmed)) IssuedExportTicket(kind) else null
+
+    /**
+     * 控制器侧令牌校验（ISSUE-P3-110）：令牌须存在且与本次导出制品**类型一致**。
+     *
+     * 缺失或类型不符即拒绝——后者封堵「用免确认制品（加密 KDBX）的令牌套明文导出」的提权路径。
+     */
+    fun ticketMatches(ticket: ExportTicket?, kind: ExportArtifactKind): Boolean =
+        ticket?.artifactKind == kind
 }
 
 /**
@@ -272,6 +353,11 @@ internal object ExportConfirmationPolicy {
  * 审计条目严禁出现完整路径、文件名或任何明文内容：仅保留 scheme 与 authority
  * （存储提供方标识，便于判断落点类型），其余部分折叠为定长短摘要，
  * 既可用于同一目的事件关联，又不泄露用户目录/文件名。
+ *
+ * **短摘要的有效熵（ISSUE-P3-89 修正后）**：取 SHA-256 的**前 4 字节**全 8 bit，
+ * 合计 **32 bit**（8 个 hex 字符）。修正前实现把每字节先截成低 4 bit，使 8 个字符中
+ * 4 个恒为 `'0'`、有效熵仅 ≤16 bit——用途不变（关联同一目标、区分不同目标），
+ * **非**抗碰撞用途，故不扩为完整 64 hex（审计缓冲每行长度受限）。
  */
 internal object ExportAuditSanitizer {
 
@@ -282,6 +368,9 @@ internal object ExportAuditSanitizer {
     private const val HEX_DIGITS = "0123456789abcdef"
     private const val NIBBLE_BITS = 4
     private const val NIBBLE_MASK = 0x0F
+
+    /** 无符号字节掩码：取字节的**全部 8 bit**（ISSUE-P3-89，替代原先的低 4 bit 截断） */
+    private const val BYTE_MASK = 0xFF
 
     /** 生成形如 content://provider.authority#1a2b3c4d 的脱敏标识 */
     fun targetMarker(rawTarget: String): String {
@@ -299,7 +388,11 @@ internal object ExportAuditSanitizer {
         val bytes = MessageDigest.getInstance("SHA-256").digest(raw.toByteArray(Charsets.UTF_8))
         val builder = StringBuilder(DIGEST_HEX_LENGTH)
         for (byte in bytes) {
-            val value = byte.toInt() and NIBBLE_MASK
+            // ISSUE-P3-89（审计 F-07）：每字节须贡献 **8 bit**（高/低半字节各 4 bit）。
+            // 原实现先 `and NIBBLE_MASK` 再 `ushr NIBBLE_BITS` ⇒ 高半字节恒为 0，
+            // 8 个 hex 字符中有 4 个恒为 '0'，有效熵被削到 ≤16 bit，与本方法的
+            // 「同一目标稳定、不同目标可区分」用途不符（第四轮更正：原记 32 bit 系算错）。
+            val value = byte.toInt() and BYTE_MASK
             builder.append(HEX_DIGITS[value ushr NIBBLE_BITS]).append(HEX_DIGITS[value and NIBBLE_MASK])
             if (builder.length >= DIGEST_HEX_LENGTH) break
         }

@@ -418,14 +418,27 @@ class SettingsViewModel @Inject constructor(
     /** 导出当前数据库为 KDBX 完整副本并写入 SAF 目标 Uri */
     fun exportKdbxTo(targetUri: Uri) = exportController.exportKdbxTo(targetUri)
 
-    /** 导出当前数据库为 KeePass 2.x 兼容明文 XML 并写入 SAF 目标 Uri */
-    fun exportVaultXmlTo(targetUri: Uri) = exportController.exportVaultXmlTo(targetUri)
+    /**
+     * 导出当前数据库为 KeePass 2.x 兼容明文 XML 并写入 SAF 目标 Uri。
+     *
+     * ISSUE-P3-110：必须携带由 [ExportConfirmationPolicy.confirm] 在用户二次确认后签发的令牌。
+     */
+    fun exportVaultXmlTo(targetUri: Uri, ticket: ExportTicket) =
+        exportController.exportVaultXmlTo(targetUri, ticket)
 
-    /** ISSUE-P3-73：导出当前数据库为通用明文 CSV 并写入 SAF 目标 Uri */
-    fun exportVaultCsvTo(targetUri: Uri) = exportController.exportVaultCsvTo(targetUri)
+    /**
+     * ISSUE-P3-73：导出当前数据库为通用明文 CSV 并写入 SAF 目标 Uri。
+     * ISSUE-P3-110：令牌要求同 [exportVaultXmlTo]。
+     */
+    fun exportVaultCsvTo(targetUri: Uri, ticket: ExportTicket) =
+        exportController.exportVaultCsvTo(targetUri, ticket)
 
-    /** 导出会话绑定的密钥文件并写入 SAF 目标 Uri */
-    fun exportKeyFileTo(targetUri: Uri) = exportController.exportKeyFileTo(targetUri)
+    /**
+     * 导出会话绑定的密钥文件并写入 SAF 目标 Uri。
+     * ISSUE-P3-128：令牌要求同 [exportVaultXmlTo]（密钥文件同属 PLAINTEXT 风险等级）。
+     */
+    fun exportKeyFileTo(targetUri: Uri, ticket: ExportTicket) =
+        exportController.exportKeyFileTo(targetUri, ticket)
 
     /** 安装条目模板库（真实创建「模板」分组与 5 个模板条目） */
     fun installEntryTemplates() = exportController.installEntryTemplates()
