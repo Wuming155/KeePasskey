@@ -1,5 +1,9 @@
 package com.keepasskey.sync.engine
 
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -180,5 +184,58 @@ class SyncCacheTest {
                 Files.getPosixFilePermissions(it.toPath())
             )
         }
+    }
+
+    // ===== ISSUE-P2-82：清理的幂等契约（重复 / 并发清理不得误报失败） =====
+
+    @Test
+    fun `deleteCacheChild 幂等：目标已不存在时按成功处理`() {
+        val dir = tmpFolder.newFolder("idempotent-cache")
+        val cache = SyncCache(dir)
+        // 直接放置一个子项（不经 writeCache：后者会同时产出 base/version 等多个文件，
+        // 与本用例「同一目标被删两次」的语义无关）
+        val child = File(dir, "probe.cache").apply { writeBytes("x".toByteArray()) }
+
+        assertTrue("首次删除应成功", cache.deleteCacheChild(child))
+        assertTrue(
+            "目标已被删除（并发/连续清理）时不得误报失败——否则会产出「残留 0 项」的自相矛盾告警",
+            cache.deleteCacheChild(child)
+        )
+        assertTrue(
+            "从未存在的路径同样按成功处理",
+            cache.deleteCacheChild(File(dir, "never-existed.kdbx"))
+        )
+    }
+
+    @Test
+    fun `连续两次 clearAll 均返回成功且保留防回滚状态`() {
+        val dir = tmpFolder.newFolder("twice-cache")
+        val cache = SyncCache(dir)
+        cache.writeCache("remote/a.kdbx", "a".toByteArray())
+        val stateFile = File(dir, "deadbeef${SyncRollbackGuard.SUFFIX_STATE}")
+            .apply { writeBytes("current=deadbeef\n".toByteArray()) }
+
+        assertTrue("首次清理应成功", cache.clearAll())
+        assertTrue(
+            "目录仅剩防回滚状态时再次清理也必须成功（不得因「无物可删」而报失败）",
+            cache.clearAll()
+        )
+        assertTrue("防回滚状态必须跨清理保留", stateFile.isFile)
+    }
+
+    @Test
+    fun `多实例并发清理同一目录不得互相误报失败`() = runBlocking {
+        val dir = tmpFolder.newFolder("concurrent-cache")
+        val seeder = SyncCache(dir)
+        repeat(24) { seeder.writeCache("remote/$it.kdbx", "x".toByteArray()) }
+
+        val results = List(4) {
+            async(Dispatchers.IO) { SyncCache(dir).clearAll() }
+        }.awaitAll()
+
+        assertTrue(
+            "并发清理中任一执行都不得因「目标已被他者删除」而误报失败：$results",
+            results.all { it }
+        )
     }
 }

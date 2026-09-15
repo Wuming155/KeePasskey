@@ -322,10 +322,29 @@ open class SyncCache(private val cacheDir: File) {
         var allDeleted = true
         for (child in children) {
             if (isRollbackStateFileName(child.name)) continue
-            val removed = if (child.isDirectory) child.deleteRecursively() else child.delete()
-            allDeleted = allDeleted && removed
+            allDeleted = deleteCacheChild(child) && allDeleted
         }
         return allDeleted
+    }
+
+    /**
+     * 删除单个缓存子项（ISSUE-P2-82）。
+     *
+     * **幂等契约**：`File.delete()` 对**已不存在**的目标返回 `false`，故「先列目录、再逐个删除」
+     * 的清理在**并发或连续两次**执行时会误判失败——后一次 `delete()` 因目标已被先者删除而返回
+     * `false`，调用方 [`com.keepasskey.app.sync.SyncCacheEvictor`] 据此记录
+     * **「残留 0 项，锁定后密文可能仍可恢复」这一自相矛盾的 WARN**，并把 `false` 一路传回
+     * `MainApplication.purgeVolatileCachesBeforeExit()`（该入口的返回值被当作「两个清理面是否都成功」）。
+     * 故此处以「删除动作结束后目标是否仍存在」为准：**已不存在即视为成功**。
+     *
+     * 实测形态（2026-09-15）：`SyncCacheEvictorTest` 的 F-23 用例在 `session.lock()` 的观察者回调与
+     * 用例内显式 `evictAll()` 竞态时偶发红，失败信息同时出现 `INFO 已随会话终止销毁` 与
+     * `WARN 残留 0 项` 两条互相矛盾的日志——即本缺陷的可观测形态。
+     */
+    internal fun deleteCacheChild(child: File): Boolean {
+        if (!child.exists()) return true
+        val removed = if (child.isDirectory) child.deleteRecursively() else child.delete()
+        return removed || !child.exists()
     }
 
     /**
