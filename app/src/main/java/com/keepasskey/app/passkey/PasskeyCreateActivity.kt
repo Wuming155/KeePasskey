@@ -57,6 +57,10 @@ class PasskeyCreateActivity : BaseCredentialActivity() {
     /** 防止验证回调 / 取消回调 / 重复 finish 交错产生重复创建或重复收尾 */
     private var settled = false
 
+    /** ISSUE-P2-83：CM 通道调用方「包名 + 主签名摘要」首次绑定存储（`android://` 维度放行依据） */
+    @Inject
+    lateinit var callerTrustStore: CredentialManagerCallerTrustStore
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -169,6 +173,19 @@ class PasskeyCreateActivity : BaseCredentialActivity() {
                     onVerified = { verification ->
                         if (settled) return@requestCredentialUserVerification
                         settled = true
+                        // ISSUE-P2-83：注册流程是「用户在受保护窗口内把凭据显式交给该调用方」的
+                        // 两个入口之一（另一个是保存），故在验证通过后、落库前写入 CM 通道绑定。
+                        // 仅在确有**系统背书**包名（普通应用路径）时写入；fail-closed：包名不可得或
+                        // 摘要不可读一律**不写入**（保持未绑定），不落「仅包名」降级键。
+                        val attestedPkg = callerPackage
+                        val callerDigests = providerReq?.callingAppInfo
+                            ?.let { CallingOriginResolver.certDigests(it) }
+                            ?: CallerCertDigests.EMPTY
+                        if (attestedPkg.isNullOrBlank() || callerDigests.isEmpty) {
+                            AppLog.w(TAG, "调用方包名或签名摘要不可读，CM 通道保持未绑定（fail-closed）")
+                        } else {
+                            callerTrustStore.trust(attestedPkg, callerDigests.primary)
+                        }
                         createAndReturn(
                             rpId = rpId,
                             userName = userName,

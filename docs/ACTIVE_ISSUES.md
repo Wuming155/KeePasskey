@@ -233,6 +233,13 @@
 > **施工中的附带发现**：登记并同日闭环 **`ISSUE-P0-10`**——`Mac.getInstance(..., "AndroidKeyStore")`
 > 在实机必然抛 `NoSuchAlgorithmException`（该 provider 不注册 Mac 服务）⇒ 节流 MAC 恒为空 ⇒
 > **单次输错主密码即永久 fail-closed**。两项并入 §80，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §80。
+>
+> **2026-09-16 闭环（§81 批次，施工中的附带发现）**：登记并同日闭环 **`ISSUE-P2-84`**
+> ——`PasswordSaveActivity` 丢弃 `saveAutofillCredential` 的 `KdbxResult` 后**无条件回传
+> `RESULT_OK`**，落盘失败（磁盘满 / 会话 save 失败）被谎报为保存成功，系统据此认为凭据已入库
+> 并**可能不再提示保存**，用户口令静默丢失。已改为失败即 `failAndFinish()`，并加接线守卫锁定
+> 「失败判定前置于成功回传」。体例同 §74（同轮登记并闭环，不在本表留存行）。
+> **本批同时推进 `ISSUE-P2-83`（AC 分步，本行仍留表内）与闭环 `ISSUE-P3-111`**，见 §81。
 
 ### ISSUE-P2-83（新登记）：`android://` 维度在 Credential Manager 通道仍无签名绑定
 
@@ -257,6 +264,24 @@
   ③ 设备侧实测 CM 的密码填充与通行密钥断言两条链路（ADB）。
 - **备注**：本条**不是**新发现的独立缺陷，而是 `ISSUE-P2-46` 在**同一根因**下未覆盖的通道；
   登记的正是为了避免「按通道部分闭环 = 整体闭环」的误读（体例同 `ISSUE-P2-49` 的 AC 分步进展）。
+- **进展（2026-09-16，§81 批次，AC 分步，本行仍留表内）**：
+  - **AC① 已完成**：新增 `CredentialManagerCallerTrustStore`（CM 专属信任存储，独立 prefs 文件
+    `keepasskey_cm_caller_trust`），并在其 KDoc 逐条写明与 `AutofillCallerTrustStore` /
+    `ISSUE-P1-24` 的三条语义边界——**刻意不共用存储**（共用会让一次 CM 授权使自动填充侧首现闸门
+    静默不再询问，即削弱 P1-24）。判定复用通道无关的纯函数
+    `AndroidPackageBindingPolicy.isPackageDimensionAuthorized`，保证两通道包名维度同口径。
+  - **写入口已完成**：`PasswordSaveActivity`（保存）与 `PasskeyCreateActivity`（注册）在用户显式
+    发起、受保护窗口内的流程中写入「包名 + 主签名摘要」绑定；摘要不可读一律**不写入**（不落
+    `pkg|` 降级键）。
+  - **AC② 存储层判据已完成**（11 例宿主用例，含「同包名不同签名 → 不命中」与
+    「摘要不可读 → 不命中」）；**候选层判据未完成**——CM 通道 4 处
+    `DomainMatcher.isAndroidPackageMatch` 调用点尚未接入该门控，故端到端「不命中」**未达成**。
+  - **未完成且不得略过**：① 候选层放行门控（`CredentialResponseAssembler` 的两处匹配 +
+    `PasswordFillActivity` / `PasskeyAssertionActivity` 的回传前二次校验）；② **无绑定调用方的
+    恢复路径**——CM 没有自动填充那样的「选择器」中立面，直接按「未授权即不产出候选」实施会让
+    存量 `android://` 条目在 CM 通道**无路可走**（功能回归），须在受保护窗口内提供**首现显式授权**
+    面（复用既有 `CredentialFillConfirmScreen` 的 `attributionContent` 槽位）；③ AC③ 设备侧实测。
+  - 详见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §81。**本行不得因①已完成而按「整体闭环」归档。**
 
 ---
 
@@ -337,7 +362,7 @@
 
 ---
 
-## P3 低危问题、特性接线与体验优化（10 项）
+## P3 低危问题、特性接线与体验优化（9 项）
 
 > **状态（2026-09-12）**：历史 P3 批次 **ISSUE-P3-01 ~ P3-68** 除 P3-23（经产品裁决「不排期」）外
 > 已全部闭环并归档，逐条实现细节与验收证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md)（§3 ~ §32）。
@@ -548,9 +573,13 @@
 > 该条在报告基线之后已由代码变更消除；`L22`（`_gitobj/` 未被 `.gitignore` 覆盖）为**空目录**，
 > git 本不跟踪空目录，非问题。
 
-| 编号 | 来源 | 问题与位置（核实于 2026-09-13，对 HEAD `a669a48`） | 验收标准 |
-|---|---|---|---|
-| ISSUE-P3-111 | 审计 L17 | `PasswordFillActivity` / `PasskeyAssertionActivity` 不检索系统下发的 provider 请求（全仓无 `retrieveProviderGetCredentialRequest` 调用；对照 `PasswordSaveActivity.kt:27` / `PasskeyCreateActivity.kt:69` / `CredentialUnlockActivity.kt:67` 分别检索 create / begin 请求）→ 系统认证的 `CallingAppInfo` 未与 `expectedPackage` 交叉核对 | 确认是否需要交叉核对（结合 `ISSUE-P3-93` / `ISSUE-P2-46`）；若需，补检索 + 断言 |
+> **（该表已于 2026-09-16 清空）** 本批次唯一在册条目 **`ISSUE-P3-111`** 已随 **§81 批次闭环**并移出本表。
+> **前提更正（`AGENTS.md` §3.6 规则 2：开工前复核前提）**：原正文称「全仓无
+> `retrieveProviderGetCredentialRequest` 调用」——该前提在 HEAD 上**已部分不成立**：
+> `PasskeyAssertionActivity.kt:67` 自 **ISSUE-P2-72**（§48）起已检索系统请求并与 `expectedPackage`
+> 交叉核对。故本项**实际残留只有 `PasswordFillActivity` 一条**，已按第四轮复核对 P3-111 的定版提醒
+> （「先保证 `retrieve*` 非 null，否则交叉核对恒失败，把『能填充』变成『不能填充』」）补齐，
+> 并加接线守卫锁定。详见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §81。
 
 ---
 

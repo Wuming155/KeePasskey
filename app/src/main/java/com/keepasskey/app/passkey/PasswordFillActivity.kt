@@ -57,6 +57,30 @@ class PasswordFillActivity : BaseCredentialActivity() {
         val entryId = intent.getStringExtra(EXTRA_ENTRY_ID).orEmpty()
         val expectedDomain = intent.getStringExtra(EXTRA_EXPECTED_DOMAIN).orEmpty()
         val expectedPackage = intent.getStringExtra(EXTRA_EXPECTED_PACKAGE).orEmpty()
+
+        // ISSUE-P3-111：检索系统在本窗口 PendingIntent 上注入的**原始请求**，取平台背书的
+        // `CallingAppInfo` 包名，与组装阶段写入 extras 的预期包名交叉核对——与
+        // [PasskeyAssertionActivity]（ISSUE-P2-72 起已具备）对称，补齐密码填充这条滞后链路。
+        //
+        // 第四轮复核对 P3-111 的定版提醒必须遵守：`retrieve*` 取不到（例如系统未以 fillIn
+        // 方式注入）时**不得**据此拒绝——否则会把「能填充」变成「不能填充」。故仅在
+        // **两者均可得且不一致**时 fail-closed；取不到即保持既有判定面不变。
+        val attestedPackage = try {
+            CallingOriginResolver.systemAttestedPackageName(
+                PendingIntentHandler.retrieveProviderGetCredentialRequest(intent)?.callingAppInfo
+            )
+        } catch (_: Exception) {
+            null
+        }
+        if (attestedPackage != null &&
+            expectedPackage.isNotBlank() &&
+            attestedPackage != expectedPackage.trim()
+        ) {
+            AppLog.e(TAG, "系统认证调用方与预期包名不一致，拒绝回填密码")
+            failAndFinish()
+            return
+        }
+
         if (entryId.isBlank()) {
             AppLog.e(TAG, "缺少密码凭据 entryId")
             failAndFinish()

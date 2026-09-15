@@ -6,7 +6,9 @@ import androidx.credentials.CreatePasswordResponse
 import androidx.credentials.provider.PendingIntentHandler
 import androidx.lifecycle.lifecycleScope
 import com.keepasskey.app.data.repository.VaultRepository
+import com.keepasskey.app.security.CallerCertDigests
 import com.keepasskey.core.log.AppLog
+import com.keepasskey.core.result.KdbxResult
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -19,6 +21,9 @@ class PasswordSaveActivity : BaseCredentialActivity() {
 
     @Inject
     lateinit var vaultRepository: VaultRepository
+
+    @Inject
+    lateinit var callerTrustStore: CredentialManagerCallerTrustStore
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -65,12 +70,38 @@ class PasswordSaveActivity : BaseCredentialActivity() {
                     return@launch
                 }
 
-                vaultRepository.saveAutofillCredential(
-                    packageName = targetPackage.ifBlank { callingPackage ?: packageName },
+                val boundPackage = targetPackage.ifBlank { callingPackage ?: packageName }
+                val saveResult = vaultRepository.saveAutofillCredential(
+                    packageName = boundPackage,
                     webDomain = webDomain,
                     username = username,
                     passwordChars = passwordChars
                 )
+
+                // ISSUE-P2-84：保存失败**不得**回传成功结果。原实现丢弃 `KdbxResult` 后无条件回传
+                // `RESULT_OK`，于是落盘失败（磁盘满 / 会话 save 失败）被谎报为保存成功，
+                // 系统据此认为凭据已入库并**可能不再提示保存**——用户口令静默丢失。
+                // 与 `RealVaultRepository.persistSession`「禁止磁盘写失败被静默吞掉」同一原则；
+                // 失败原因经脱敏日志留痕（P1-10：不外传异常 message）。
+                if (saveResult is KdbxResult.Failure) {
+                    AppLog.e(TAG, "保存密码凭据失败: ${saveResult.error.javaClass.simpleName}")
+                    failAndFinish()
+                    return@launch
+                }
+
+                // ISSUE-P2-83：保存流程是「用户在受保护窗口内把凭据显式交给该调用方」的两个入口之一
+                // （另一个是 Passkey 注册），故在**确认入库成功后**写入 CM 通道的调用方
+                // 「包名 + 主签名摘要」绑定——CM 的生物识别路径没有勾选位，绑定只能落在用户主动
+                // 发起的保存 / 注册流程里。fail-closed：摘要不可读则**不写入**（保持未绑定），
+                // 不得落「仅包名」降级键。
+                val callerDigests = providerReq?.callingAppInfo
+                    ?.let { CallingOriginResolver.certDigests(it) }
+                    ?: CallerCertDigests.EMPTY
+                if (callerDigests.isEmpty) {
+                    AppLog.w(TAG, "调用方签名摘要不可读，CM 通道保持未绑定（fail-closed）")
+                } else {
+                    callerTrustStore.trust(boundPackage, callerDigests.primary)
+                }
 
                 val response = CreatePasswordResponse()
                 val resultIntent = Intent()

@@ -5,6 +5,11 @@ import com.keepasskey.app.security.CallerCertDigests
 /**
  * `android://` 包名维度的放行判定（ISSUE-P2-46）。
  *
+ * **与通道无关的纯函数**：判定逻辑本身不绑定自动填充通道，Credential Manager 通道
+ * （`ISSUE-P2-83`）以同一函数 + 各自的信任存储复用，保证两条通道的包名维度**同口径**。
+ * 通道差异只体现在 `isTrusted` 的**存储与写入点**上（见
+ * [com.keepasskey.app.passkey.CredentialManagerCallerTrustStore] 的语义边界一节）。
+ *
  * ## 缺陷形态（整改前）
  *
  * 条目以 `android://<包名>` 绑定真实应用、而该应用**未安装**时，任意应用只需以同 `applicationId`
