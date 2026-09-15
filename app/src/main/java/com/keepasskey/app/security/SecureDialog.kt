@@ -52,9 +52,22 @@ import androidx.compose.ui.window.DialogWindowProvider
  *
  * Compose 的 Popup 窗口由 `PopupLayout` 承载，它**不实现** [DialogWindowProvider]，
  * 因此本包装对其恒为 fail-safe 空操作。Popup 系窗口的官方接线是
- * [`PopupProperties(securePolicy = SecureFlagPolicy.SecureOn)`](https://developer.android.com/reference/kotlin/androidx/compose/ui/window/SecureFlagPolicy)
- * （`DropdownMenu` / `ExposedDropdownMenuBox` 的 `properties` 参数）；本批不改动无关 UI
- * 的调用点，仅在此登记为后续接线项。
+ * [`PopupProperties(securePolicy = SecureFlagPolicy.SecureOn)`](https://developer.android.com/reference/kotlin/androidx/compose/ui/window/securePolicy)
+ * （`DropdownMenu` / `ExposedDropdownMenuBox` 的 `properties` 参数）。
+ *
+ * **ISSUE-P3-79 盘点结论（2026-09-15 逐点直读源码核实，**无需接线**）**：
+ * 全仓 Popup 调用点**恰好 4 处**——`VaultListTopBars`（顶栏溢出，1 项）、`VaultGroupRow`（分组操作，3 项）、
+ * `EntryDetailTopBar`（条目操作，3 项）、`CloudSyncComponents`（`ExposedDropdownMenuBox` + `DropdownMenu`，
+ * 1 项 × provider 数）。上述 **8 个 `DropdownMenuItem` 全部为静态动作文案 / provider 名称**
+ * （彻底退出应用 / 重命名 / 更改图标 / 删除分组 / 移动到分组 / 删除条目 / 删除共享图标 /
+ * WebDAV·S3 provider 名与描述），**无任何口令、TOTP、密钥或用户数据插值**；
+ * 全仓亦无其它 `Popup(` / `TooltipBox(` / `ModalBottomSheet(` 调用点。
+ *
+ * ⇒ **不接线**（避免「全量加 flag」的过度改动）。**接线条件（须遵守）**：一旦任一 Popup
+ * 的菜单项开始渲染**凭据类内容**（口令 / TOTP / 密钥 / 用户名等用户数据插值），
+ * **必须**为该调用点补 `PopupProperties(securePolicy = SecureFlagPolicy.SecureOn)`；
+ * 该条件由 `PopupSecureFlagInventoryTest` 以「调用点清单锁 + 菜单块内敏感记号扫描」自动守护——
+ * 新增 Popup 调用点或菜单内出现敏感记号都会**当场报红**。
  *
  * 官方等价 API：Compose 自 1.0 起在 `DialogProperties` 上提供
  * [`securePolicy`](https://developer.android.com/reference/kotlin/androidx/compose/ui/window/DialogProperties#securePolicy())

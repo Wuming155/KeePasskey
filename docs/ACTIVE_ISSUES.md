@@ -337,7 +337,7 @@
 
 ---
 
-## P3 低危问题、特性接线与体验优化（12 项）
+## P3 低危问题、特性接线与体验优化（11 项）
 
 > **状态（2026-09-12）**：历史 P3 批次 **ISSUE-P3-01 ~ P3-68** 除 P3-23（经产品裁决「不排期」）外
 > 已全部闭环并归档，逐条实现细节与验收证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md)（§3 ~ §32）。
@@ -429,6 +429,16 @@
 > **白名单与实际无权限导出集合双向相等**、启动器入口不得消费任何外部 intent 数据。
 > **`ISSUE-P3-85 ③`（一次性 nonce）按条目 AC 明示「可延后」未实施**，如实登记为残余。
 > 两条已移出本表，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §73。
+> **2026-09-15 闭环（续 24，§77 批次）**：**ISSUE-P3-79**（Compose Popup 系窗口未施加 `FLAG_SECURE`）
+> 已收口——**逐点直读源码独立复核**（非引用复核报告结论）确认全仓 Popup 调用点**恰好 4 处、菜单项 8 个**
+> （`VaultListTopBars` 1 / `VaultGroupRow` 3 / `EntryDetailTopBar` 3 / `CloudSyncComponents` 1），
+> **全部为静态动作文案或 provider 名称，无任何凭据类插值**；全仓亦无其它
+> `Popup(` / `TooltipBox(` / `ModalBottomSheet(` 调用点 ⇒ 按 AC③ **留痕「无需接线」**，
+> 不采用「全量加 flag」的过度改动。新增 `PopupSecureFlagInventoryTest`（3 例）把「今天无需接线」
+> 变成可执行守卫：**调用点清单锁**（新增未复核的 Popup 即报红）+ **菜单块敏感记号扫描**
+> （`readString(` / `password` / `totp` / `otpauth` / `secret` / `userName`）+
+> **防空扫断言**（抽取到的菜单项数必须恰为 8，防止「扫描通过但其实什么都没扫到」的假绿）。
+> 结论与接线条件同步写入 `SecureDialog` 的 KDoc。该行已移出本表，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §77。
 > **2026-09-15 补登（§69 附带）**：依 `ISSUE-P3-127` AC②「依据恢复 ⇒ 逐条对齐」，已按恢复入库的
 > 复核报告 §10 / §11 逐条核对本表 AC，并在本文件开头新增
 > **「第四轮独立复核定版结论：对本表 AC 的更正（实施前必读）」** 一节（18 行）。
@@ -486,18 +496,6 @@
   统一接线并补回归断言（覆盖主密码 / 条目口令 / TOTP / 同步凭据各调用点），届时即可闭环本条。
 
 ---
-
-### ISSUE-P3-79（新登记）：Compose Popup 系窗口（`DropdownMenu` / `ExposedDropdownMenuBox`）未施加 FLAG_SECURE
-
-- **优先级**：P3（同类窗口缺口，本轮已修对话框窗口）
-- **核实时间点与核实方式（2026-09-12）**：ISSUE-P1-21 落地时由实现代理在 `SecureDialog` KDoc 中诚实登记——
-  Compose 的 Popup 窗口由 `PopupLayout` 承载，**不实现** `DialogWindowProvider`，故 `SecureDialog`
-  对其恒为 fail-safe 空操作；官方接线是
-  `PopupProperties(securePolicy = SecureFlagPolicy.SecureOn)`（`DropdownMenu` / `ExposedDropdownMenuBox`
-  的 `properties` 参数）。
-- **问题描述**：若某 Popup 内容出现敏感明文（如长按菜单显示口令），该窗口无 FLAG_SECURE。
-- **验收标准**：① 盘点所有 Popup 系窗口的敏感内容面；② 对确有敏感内容的调用点接线 `securePolicy`
-  并补回归断言；③ 无敏感内容的调用点留痕说明「无需接线」，避免"全量加 flag"的过度改动。
 
 ### ISSUE-P3-82（新登记）：内层 XML DTD 拦截缺设备侧回归用例
 
