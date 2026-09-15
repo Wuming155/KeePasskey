@@ -515,6 +515,69 @@ class SyncEngineTest {
         assertTrue(guardedEngine.openRemote(remotePath) is SyncOpenResult.RemoteSynced)
     }
 
+    @Test
+    fun `ISSUE_P2_18 重放被拒后本地缓存与基线不被覆盖`() = runTest {
+        val guardedEngine = SyncEngine(fakeProvider, syncCache, SyncRollbackGuard(cacheDir, testMac()))
+
+        val v1 = "remote-v1".toByteArray()
+        fakeProvider.remoteFiles[remotePath] = FakeRemoteFile(v1, etag = "etag-1")
+        guardedEngine.openRemote(remotePath)
+
+        val v2 = "remote-v2".toByteArray()
+        fakeProvider.remoteFiles[remotePath] = FakeRemoteFile(v2, etag = "etag-2")
+        guardedEngine.openRemote(remotePath)
+        assertArrayEquals("前置：本地已缓存 v2", v2, syncCache.readCache(remotePath))
+
+        // 被入侵端点重放设备侧曾接受过的 v1
+        fakeProvider.remoteFiles[remotePath] = FakeRemoteFile(v1, etag = "etag-attacker")
+        val replayed = guardedEngine.openRemote(remotePath)
+
+        assertTrue("重放旧库必须被拒绝", replayed is SyncOpenResult.RollbackRejected)
+        // 「拒绝」的意义全在这两行：无守卫时 openRemote 会把 v1 写进缓存与基线（RemoteSynced），
+        // 用户随后打开的就是被复活/回退的旧库——而任务本身会「看起来成功」。
+        assertArrayEquals(
+            "重放被拒后本地缓存必须仍是 v2，不得被重放内容覆盖",
+            v2, syncCache.readCache(remotePath)
+        )
+        assertArrayEquals(
+            "基线内容同样不得回退到 v1（否则下一次同步会以旧库为新基线）",
+            v2, syncCache.readBaseContent(remotePath)
+        )
+    }
+
+    @Test
+    fun `ISSUE_P2_18 上传路径遇远端重放拒绝合并并保留本地`() = runTest {
+        val guardedEngine = SyncEngine(fakeProvider, syncCache, SyncRollbackGuard(cacheDir, testMac()))
+
+        val v1 = "remote-v1".toByteArray()
+        fakeProvider.remoteFiles[remotePath] = FakeRemoteFile(v1, etag = "etag-1")
+        guardedEngine.openRemote(remotePath)
+
+        val v2 = "remote-v2".toByteArray()
+        fakeProvider.remoteFiles[remotePath] = FakeRemoteFile(v2, etag = "etag-2")
+        guardedEngine.openRemote(remotePath)
+        // 此时 v1 已进入「曾接受」历史
+
+        // 本地修改后上传：预期 etag-2，远端却被换成 v1（重放）⇒ ETag 预检冲突 → 下载到 v1
+        val local = "local-edit".toByteArray()
+        fakeProvider.remoteFiles[remotePath] = FakeRemoteFile(v1, etag = "etag-attacker")
+        val result = guardedEngine.commitLocal(remotePath, local)
+
+        assertTrue(
+            "远端冲突内容为曾接受过的历史版本时必须拒绝合并（而非进入三方合并，" +
+                "否则被命中的旧库会参与合并、把已删条目复活）",
+            result is SyncCommitResult.RollbackRejected
+        )
+        assertTrue(
+            "拒绝合并必须保留本地",
+            (result as SyncCommitResult.RollbackRejected).keptLocal
+        )
+        assertArrayEquals(
+            "本地缓存必须保留本次本地内容，不得被重放内容覆盖",
+            local, syncCache.readCache(remotePath)
+        )
+    }
+
     /** 固定密钥的等价 HMAC（JVM 可测） */
     private fun testMac(): SyncIntegrityMac = object : SyncIntegrityMac {
         private val key = SecretKeySpec("test-rollback-integrity-key".toByteArray(), "HmacSHA256")
