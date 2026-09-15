@@ -109,7 +109,7 @@ KeePasskey 是一款原生 Kotlin 开发的现代化 Android 密码管理器。�
 | [`docs/README.md`](docs/README.md) | **文档地图**：六分区总览与「新增文档放哪里」 | 找文档、新增文档前 |
 | [`docs/ACTIVE_ISSUES.md`](docs/ACTIVE_ISSUES.md) | 现存问题与待办清单（P0→P3） | 认领与开始新工作前 |
 | [`docs/RESOLVED_LOG.md`](docs/RESOLVED_LOG.md) | 已整改归档**总索引**（≤100 行：全量批次索引，**直达每个批次文件**） | 确认历史 Bug 是否已修 |
-| [`docs/resolved/`](docs/resolved/) | **历史批次归档**：4 份分册索引（各 ≤100 行；分册 04 为 **§58 起滚动册**）+ `batches/` 下**一批次一文件**的正文（75 份；§42 / §43 两份按「退役承接」体例存于 `docs/security/`） | 查 §1 ~ §76 任一批次的验收证据 / 裁决 / 过程缺陷 |
+| [`docs/resolved/`](docs/resolved/) | **历史批次归档**：4 份分册索引（各 ≤100 行；分册 04 为 **§58 起滚动册**）+ `batches/` 下**一批次一文件**的正文（74 份；§42 / §43 两份按「退役承接」体例存于 `docs/security/`） | 查 §1 ~ §76 任一批次的验收证据 / 裁决 / 过程缺陷 |
 | [`docs/architecture/ARCHITECTURE.md`](docs/architecture/ARCHITECTURE.md) | 模块依赖拓扑与关键架构决策 | 跨模块改动、新功能落位前 |
 | [`docs/architecture/reference-projects.md`](docs/architecture/reference-projects.md) | 参考项目地图 | 实现算法/格式兼容时 |
 | [`docs/architecture/扫码方案评估_ZXing与CameraXMLKit.md`](docs/architecture/扫码方案评估_ZXing与CameraXMLKit.md) | 扫码方案选型评估（结论为「维持 ZXing」） | 评估 / 更换扫码库前 |
