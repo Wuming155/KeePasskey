@@ -374,7 +374,7 @@
 
 ---
 
-## P3 低危问题、特性接线与体验优化（6 项）
+## P3 低危问题、特性接线与体验优化（5 项）
 
 > **状态（2026-09-12）**：历史 P3 批次 **ISSUE-P3-01 ~ P3-68** 除 P3-23（经产品裁决「不排期」）外
 > 已全部闭环并归档，逐条实现细节与验收证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md)（§3 ~ §32）。
@@ -603,6 +603,28 @@
 > **域归属**（决定凭据可被送往哪个域名），提供跳过开关等于在无逐次可见确认的情况下把 web 域
 > 匹配降级为「表单自报域」，是**放松放行面**而非隐私让步。已写入校验器 KDoc。
 > 见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §86。
+>
+> **2026-09-16 闭环（§87 批次）**：**`ISSUE-P3-123`**（CI / 供应链硬化 4 项）已收口，逐项处置如下
+> （**④ 为实质整改，①②③ 为取证后的如实登记**）：
+> - **④ `mapping.txt`（第四轮升格 MEDIUM）——已整改**：公开仓库的 artifact 上传等同公开文件，
+>   整改前 `build.yml` 在 `if: always()` 的归档步骤里一并上传 `mapping/seeds/usage/configuration`
+>   ⇒ 对密码管理器而言等于公开**类 / 方法 / 字段命名全貌**。现**移出产物集**，改为把四份映射的
+>   **体积 / 行数 / SHA-256** 写入 `$GITHUB_STEP_SUMMARY`——保留「保留面审计」能力而不公开内容；
+>   完整映射的获取路径写进 `NOT-FOR-RELEASE.txt`（本地 / 私有制品库）。新增
+>   `CiArtifactVisibilityGuardTest`（4 例）逐个 `upload-artifact` 步骤扫描，防回加。
+> - **① 依赖校验 / 版本锁定——登记为已知限界（AC 的「或如实登记」分支）**：生成
+>   `gradle/verification-metadata.xml` 需在干净环境以 `--write-verification-metadata` 重写全量
+>   依赖图哈希，属独立工程；且它防的是「依赖被替换 / 投毒」，与既有 `dependency-scan.yml`
+>   （CVSS ≥ 7.0 硬断言）＋ Dependabot 覆盖的 **advisory 面是不同威胁**，不可互相替代。
+> - **② Daemon JVM 分发校验和——登记为已知限界**：`gradle/gradle-daemon-jvm.properties` 由
+>   `updateDaemonJvm` 生成，当前内容**仅** `toolchainVersion=21`（无校验和落点）；而
+>   **Gradle wrapper 的分发校验和已锁定**（`gradle-wrapper.properties:7`
+>   `distributionSha256Sum=acd53f1e…`）⇒ 「分发被替换」这一层已有校验，不为凑 AC 新增无落点的配置。
+> - **③ CI 跑设备侧用例——登记为需仓库所有者裁决的成本项**：三份工作流对
+>   `connectedAndroidTest` **零命中**（实测）；AC 自身指出 Linux runner 无 KVM 且
+>   `AssumptionViolatedException` 会被 AGP 记为 `<failure>`（陷阱 #21），须改 `macos-latest`
+>   并**接受计费**——属付费额度决策，**不擅自引入**。
+> 见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §87。
 
 ---
 
@@ -623,7 +645,6 @@
 | ISSUE-P3-120 | 威胁建模 Q-11 | **`RuntimeIntegrityDetector` 拦截力无实测**：检测为"磁盘路径存在性 + `/proc/self/maps` 特征串"启发式（`RuntimeIntegrityDetector.kt:100-149`），非完整性证明；真实 Frida（默认 gadget 名、改名、内存加载）下的命中率未知。若命中率低，则"COMPROMISED 时禁用生物解锁 + 自动填充"的政策在真实攻击下形同虚设，却给用户"已被保护"的错觉 | ① 真机以 Frida 实测三种形态（默认 / 改名 / 内存加载），记录命中率并写入设备侧基线；② 按结果决定加强检测**或**在 `RuntimeIntegrityPolicy` / UI 如实声明"启发式、非证明"；③ 结论与 `ISSUE-P2-63`（快照门控）统一口径 |
 | ISSUE-P3-121 | 威胁建模 T-17 | **自建内网 WebDAV / NAS 在出厂配置下不可用**：`SyncNetworkOptions.ssrfAllowedHosts` 默认空集（`SyncNetworkOptions.kt:25`），`SyncProviderResolver` 两处均传默认 `SyncNetworkOptions()`（`:52,77`）→ RFC1918 / `.local` 主机一律被 `SyncEndpointGuard` 拒绝，且**无生产逃生通道**；与 `README` 宣称支持 WebDAV（Nextcloud / ownCloud 等常见家用自建形态）存在张力 | ① 明确产品口径（"支持内网自建"或"明确不支持"）；② 若支持，提供**受控**逃生通道（用户显式声明内网主机 + 风险二次确认，默认仍为拒绝）；③ 文档与实现必须一致，不得只改其一 |
 | ISSUE-P3-122 | 审计附录 C（T6 待复核区） | **IPC 面 4 项——第四轮已逐条裁定**（`SECURITY_RECHECK` §6.8，留痕完整）：`IPC-01` **成立（部分）**——4 个 PendingIntent 的 requestCode 全为常量、3/4 带 `FLAG_UPDATE_CURRENT`，成立面为「TOTP 错配 + 30 秒授权串扰（需 `P3-42`，默认关）+ 确认页文案」，"凭据值串扰"不成立；CM 通道同构（`CredentialResponseAssembler.kt:66` 每响应局部分配器，`:234` 注释自认历史缺陷表现）；`IPC-02` **不成立**——落地 Activity 全部 `exported="false"`（7 个），第三方无法伪造 extras；`IPC-05` **误报**——`javap` 直读 `credentials-1.6.0` 证实 JSON 层级与字段完全对应；`IPC-10` **成立（LOW）**——`onSaveRequest` 无超时且平台不提供 `CancellationSignal`（后果有界，仅 Availability） | ① ~~逐条复核~~ **已完成**（防重复上报依据即上述裁定）；② 残余整改两项：`IPC-01` 的 requestCode 单调化（与 `CredentialResponseAssembler` 同构修复）+ `IPC-10` 的 `onSaveRequest` 超时预算；③ 各补回归断言 |
-| ISSUE-P3-123 | 审计附录 C（T7）+ `AGENTS.md` §6 | **CI / 供应链硬化遗留 4 项**（均于 2026-09-13 直读核实；**第四轮更新**）：① `gradle/verification-metadata.xml` **不存在**（依赖校验元数据 / 版本锁定缺失，`gradle/` 仅 4 文件；全仓 `dependencyLocking` / `lockAllConfigurations` 零命中）；② `gradle/gradle-daemon-jvm.properties` 仅 `toolchainVersion=21`，**无分发校验和**（对照 `gradle-wrapper.properties:7` 已锁）；③ 三个工作流**均不运行** instrumented 用例（7 个关键词零命中）——设备侧实测 **28 例**（app 12 / database 6 / sync 3 / crypto 7，`@Test` 注解计数，第四轮更正原记 15 例）目前只能本地跑；④ `mapping.txt`（77.5 MB）**已确证** CI 无条件上传（`build.yml:226-238`，`if: always()` 无可见性限制）→ 公开仓库等同公开去混淆映射 | ① 评估引入依赖校验 / 版本锁定（或如实登记为已知限界）；② Daemon JVM 分发补校验和；③ 至少为 `:crypto` / `:database` 建立可复跑的托管设备任务，使设备侧用例进入 CI 基线（注意陷阱 #21：Linux runner 无 KVM，`AssumptionViolatedException` 会被 AGP 记为 `<failure>`，须改 `macos-latest` 并接受计费）；④ 按"公开 artifact"处置 `mapping.txt`（可见性收窄或上传前剔除）并留痕 |
 
 > **2026-09-13 新增（第四轮独立复核定版批次）**：以下 1 项为复核新发现低危项
 > （来源 SECURITY_RECHECK §11，附核实行号）。

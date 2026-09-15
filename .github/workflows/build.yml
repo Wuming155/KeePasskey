@@ -278,12 +278,41 @@ jobs:
             也不代表任何发布身份；
           · 官方发布包由维护者以 release keystore 构建（口令来自本地 keystore.properties
             或 CI Secret），见 AGENTS.md §3.8 与 keystore.properties.example；
-          · mapping.txt 一并归档仅用于崩溃还原与保留面审计，属公开去混淆信息（见 ISSUE-P3-123④）；
+          · R8 去混淆映射（mapping/seeds/usage/configuration）**不随本产物归档**——公开仓库的
+            artifact 上传等同**公开去混淆映射**（ISSUE-P3-123④ 整改）；
+          · 本流水线改为只把映射的**摘要**（体积 / 行数 / SHA-256）写入 step summary：
+            保留「保留面审计」能力，又不公开映射内容；
+          · 需要完整映射做崩溃还原时，请在**本地或私有环境**复跑 assembleRelease，或经私有
+            制品库传递——不要粘贴进公开 issue / PR；
           · 如你基于本产物对外分发，请先以正式密钥重新签名并自担后果。
           EOF
           cat app/build/outputs/apk/release/NOT-FOR-RELEASE.txt
 
-      - name: 归档 Release APK 与 R8 产物（**CI 临时签名**，非官方发布包；mapping/seeds/usage 供崩溃还原与保留面审计）
+      - name: 输出去混淆映射摘要（ISSUE-P3-123④：不公开映射本体，只留可审计摘要）
+        if: always()
+        run: |
+          set -euo pipefail
+          MAP_DIR=app/build/outputs/mapping/release
+          {
+            echo "## R8 去混淆映射摘要（**不随产物归档**）"
+            echo ""
+            echo "映射本体**不得**作为公开 artifact 上传：公开仓库的上传等同公开去混淆映射，"
+            echo "对本应用（密码管理器）而言等于交出类 / 方法 / 字段命名全貌。"
+            echo "以下摘要用于保留面审计（体积 / 行数 / 指纹），可安全公开。"
+            echo ""
+            echo "| 文件 | 体积(字节) | 行数 | SHA-256 |"
+            echo "|---|---|---|---|"
+            for f in mapping.txt seeds.txt usage.txt configuration.txt; do
+              p="$MAP_DIR/$f"
+              if [ -f "$p" ]; then
+                echo "| $f | $(wc -c < "$p") | $(wc -l < "$p") | $(sha256sum "$p" | cut -d' ' -f1) |"
+              else
+                echo "| $f | (缺失) | - | - |"
+              fi
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 归档 Release APK 与说明（**CI 临时签名**，非官方发布包；**不含** R8 去混淆映射）
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -292,10 +321,6 @@ jobs:
             app/build/outputs/apk/release/*.apk
             app/build/outputs/apk/release/*.idsig
             app/build/outputs/apk/release/NOT-FOR-RELEASE.txt
-            app/build/outputs/mapping/release/mapping.txt
-            app/build/outputs/mapping/release/seeds.txt
-            app/build/outputs/mapping/release/usage.txt
-            app/build/outputs/mapping/release/configuration.txt
           if-no-files-found: warn
 
   # ---------------------------------------------------------------------------
