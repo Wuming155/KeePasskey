@@ -76,6 +76,11 @@ class KeePasskeyAutofillService : AutofillService() {
     @Inject
     lateinit var autofillSaveBlocklistStore: AutofillSaveBlocklistStore
 
+    // ISSUE-P2-46：调用方「包名 + 签名摘要」首次绑定信任存储——`android://` 包名维度的放行依据。
+    // 同一实例亦由确认页（写入）与选择器（写入）复用，保证「写入面 = 判定面」是同一份记录。
+    @Inject
+    lateinit var callerTrustStore: AutofillCallerTrustStore
+
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     override fun onFillRequest(

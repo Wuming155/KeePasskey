@@ -13,6 +13,8 @@ import com.keepasskey.core.model.PasskeyData
  *   入选项必须先通过既有的严格匹配（[DomainMatcher.isDomainMatch] / [DomainMatcher.isAndroidPackageMatch]，
  *   无任何 title/notes 启发式）。`webDomain` 的归属校验由调用方（[AutofillOriginResolver]）负责，
  *   进入本类时已被判定为可用；
+ * - **包名维度另受 ISSUE-P2-46 门控**：`android://` 绑定只有在调用方完成「包名 + 签名摘要」首次绑定后
+ *   才参与放行（判定由调用方经 `packageDimensionAuthorized` 显式传入，见 [rank]）；
  * - 打分仅用于「同一批已匹配候选」的排序，分数高低不改变「是否可填充」这一事实。
  *
  * 排序键（降序）：匹配强度分 → 收藏 → 最后修改时间；
@@ -56,6 +58,12 @@ object AutofillCandidateRanker {
      * @param entries 库内全部条目（Core 层直出）
      * @param callingPackage 系统背书的调用方包名
      * @param webDomain **已通过归属校验**的目标域名（null 表示本次不使用域名维度）
+     * @param packageDimensionAuthorized `android://` 包名维度是否可用于本次放行（ISSUE-P2-46）。
+     *   **必须由调用方逐次显式给出**（无默认值）：判定口径为「该调用方的**包名 + 签名摘要**已被用户
+     *   显式绑定过」（`AutofillCallerTrustStore.isTrusted` 且摘要**非空**）。为 false 时
+     *   `android://` 绑定条目**一律不入选**——条目仍可经域名维度入选，未绑定的调用方则需用户
+     *   经选择器**显式指认**（该动作即首次绑定写入，见 `AutofillPickerActivity`）。
+     *   **不得**在这里传常量 true：那等于取消本条整改。
      * @param lastFilledEntryId 上次填充条目 id（hex），命中则置顶
      * @param limit 返回上限（≥1）
      * @return 按优先级降序排列的候选，长度 ≤ [limit]
@@ -64,6 +72,7 @@ object AutofillCandidateRanker {
         entries: List<KdbxEntry>,
         callingPackage: String,
         webDomain: String?,
+        packageDimensionAuthorized: Boolean,
         lastFilledEntryId: String? = null,
         limit: Int = DEFAULT_LIMIT
     ): List<Ranked> {
@@ -73,7 +82,9 @@ object AutofillCandidateRanker {
             ?.let { DomainMatcher.extractDomain(it) }
             ?.takeIf { it.isNotEmpty() }
 
-        val scored = entries.mapNotNull { scoreEntry(it, callingPackage, normalizedDomain) }
+        val scored = entries.mapNotNull {
+            scoreEntry(it, callingPackage, normalizedDomain, packageDimensionAuthorized)
+        }
         if (scored.isEmpty()) return emptyList()
 
         // 防御性去重：同一条目 id 保留最高分
@@ -111,13 +122,19 @@ object AutofillCandidateRanker {
     private fun scoreEntry(
         entry: KdbxEntry,
         callingPackage: String,
-        webDomain: String?
+        webDomain: String?,
+        packageDimensionAuthorized: Boolean
     ): Ranked? {
         val reasons = linkedSetOf<MatchReason>()
         var score = 0
 
-        val packageMatch = callingPackage.isNotBlank() && entry.url.isNotBlank() &&
-                DomainMatcher.isAndroidPackageMatch(entry.url, callingPackage)
+        // ISSUE-P2-46：包名维度必须同时满足「条目显式 android:// 绑定」与「调用方已按
+        // 包名 + 签名摘要完成首次绑定」。仅有前者时，任意以同 applicationId 侧载的应用
+        // 都能命中（原缺陷）；仅有后者时，条目并未声明对该包的绑定，同样不得入选。
+        val packageMatch = packageDimensionAuthorized &&
+            callingPackage.isNotBlank() &&
+            entry.url.isNotBlank() &&
+            DomainMatcher.isAndroidPackageMatch(entry.url, callingPackage)
         if (packageMatch) {
             score += SCORE_EXACT_PACKAGE
             reasons += MatchReason.EXACT_PACKAGE

@@ -117,6 +117,19 @@ internal suspend fun KeePasskeyAutofillService.appendUnlockedDatasets(
         AppLog.w(TAG, "webDomain 归属无法验证，已忽略该域候选（fail-closed）")
     }
     val allEntries = vaultRepository.getKdbxEntries()
+    // ISSUE-P2-46：`android://` 包名维度必须先通过「调用方包名 + 签名摘要」首次绑定校验。
+    // 未绑定 / 签名不可读时该维度一律不命中（fail-closed），条目仍可经域名维度入选；
+    // 未绑定调用方的补救路径是选择器显式指认（该动作即首次绑定写入，见 AutofillPickerActivity）。
+    val callerCertDigests = autofillOriginResolver.callingAppCertDigests(callingPkg)
+    val packageDimensionAuthorized = AndroidPackageBindingPolicy.isPackageDimensionAuthorized(
+        callingPackage = callingPkg,
+        callingCertDigests = callerCertDigests,
+        isTrusted = { pkg, digests -> callerTrustStore.isTrusted(pkg, digests) }
+    )
+    if (!packageDimensionAuthorized && callingPkg.isNotBlank()) {
+        // 日志不携带包名 / 摘要等调用方标识（ISSUE-P1-10 语义）
+        AppLog.i(TAG, "android:// 维度未授权（未完成包名+签名首次绑定），本次不提供包名维度候选")
+    }
     // ISSUE-P3-39：候选打分排序——严格匹配（DomainMatcher）通过的条目按
     // 「精确域名 > 精确包名 > 父域」打分并截断；匹配条件一字未放宽，
     // 未通过 isDomainMatch / isPackageMatch 的条目不会进入结果。
@@ -124,6 +137,7 @@ internal suspend fun KeePasskeyAutofillService.appendUnlockedDatasets(
         entries = allEntries,
         callingPackage = callingPkg,
         webDomain = webDomain,
+        packageDimensionAuthorized = packageDimensionAuthorized,
         lastFilledEntryId = autofillLastFilledStore.lastFilledEntryId(),
         limit = MAX_DATASET_COUNT
     )

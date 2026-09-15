@@ -56,6 +56,12 @@ class AutofillPickerActivity : FragmentActivity() {
     @Inject
     lateinit var autofillOriginResolver: AutofillOriginResolver
 
+    // ISSUE-P2-46：调用方「包名 + 签名摘要」首次绑定存储。选择器是**唯一**由用户显式指认
+    // 「把这条凭据填给这个调用方」的入口（受保护窗口 + 已展示包名 / 应用名 / 签名摘要），
+    // 故首次绑定写入落在此处；写入后 `android://` 维度才对同签名调用方参与自动匹配。
+    @Inject
+    lateinit var callerTrustStore: AutofillCallerTrustStore
+
     private val viewModel: AutofillPickerViewModel by viewModels()
 
     private var completed = false
