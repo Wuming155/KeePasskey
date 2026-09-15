@@ -5,6 +5,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assume
@@ -237,5 +238,60 @@ class SyncCacheTest {
             "并发清理中任一执行都不得因「目标已被他者删除」而误报失败：$results",
             results.all { it }
         )
+    }
+
+    // ===== ISSUE-P3-108：`.tmp` 残留的语义判定与覆盖 =====
+
+    /**
+     * **语义判定（先判定再定口径，不静默放宽断言）**：`cacheDir/sync` 下的 `.tmp` 是
+     * **原子写的中间产物**，其内容为 KDBX 密文快照（或防回滚状态）的**片段**；
+     * 锁定 / 退出的清理语义是「销毁密文快照」，**残留 .tmp 即构成可观测缺陷**
+     * （清理不彻底 + 磁盘无界增长）。故本项**不从断言中排除 .tmp**，
+     * 而是修「瞬时句柄未释放导致的删除失败」这一根因（`SyncCache.deleteCacheChild` 有界重试）。
+     */
+    @Test
+    fun `updateBase 原子写的临时文件在 clearAll 后不得残留`() {
+        val dir = tmpFolder.newFolder("tmp-residue-base")
+        val cache = SyncCache(dir)
+        val remotePath = "remote/vault.kdbx"
+        cache.writeCache(remotePath, "payload".toByteArray())
+        cache.writeBaseContent(remotePath, "base".toByteArray())
+        cache.updateBase(remotePath, baseVersion = "v1", etag = "\"e1\"")
+
+        assertTrue(cache.clearAll())
+
+        val remaining = dir.listFiles()?.map { it.name }?.sorted().orEmpty()
+        assertTrue(
+            "清理后不得残留任何 .tmp（承载密文快照片段）：$remaining",
+            remaining.none { it.endsWith(".tmp") }
+        )
+        assertEquals(
+            "除防回滚状态外应清空: $remaining",
+            emptyList<String>(),
+            remaining.filterNot { it.endsWith(".rollback") }
+        )
+    }
+
+    @Test
+    fun `异常路径残留的 tmp（写中断）必须被 clearAll 清理`() {
+        val dir = tmpFolder.newFolder("tmp-residue-crash")
+        val cache = SyncCache(dir)
+        // 模拟「写中断 / 进程被杀」留下的原子写临时文件
+        // （命名与 `SyncCache.tmpFileFor` 同构：`<key><suffix>.<uuid>.tmp`）
+        val crashedCacheTmp = File(dir, "deadbeef.cache.11111111-2222-3333-4444-555555555555.tmp")
+            .apply { writeBytes("partial-ciphertext".toByteArray()) }
+        // 未交付的状态 tmp：按 `clear()` KDoc 的边界声明，仍按 tmp 规则清理
+        // （它不含任何已提交状态，删除不影响重放判定）
+        val undeliveredStateTmp = File(dir, "deadbeef.rollback.11111111-2222-3333-4444-555555555555.tmp")
+            .apply { writeBytes("partial-state".toByteArray()) }
+        // 已交付的状态文件：必须保留（F-23）
+        val deliveredState = File(dir, "deadbeef.rollback")
+            .apply { writeBytes("current=deadbeef\n".toByteArray()) }
+
+        assertTrue(cache.clearAll())
+
+        assertFalse("写中断残留的 .tmp 必须被清理: ${crashedCacheTmp.name}", crashedCacheTmp.exists())
+        assertFalse("未交付的状态 .tmp 亦按 tmp 规则清理: ${undeliveredStateTmp.name}", undeliveredStateTmp.exists())
+        assertTrue("已交付的防回滚状态必须保留", deliveredState.isFile)
     }
 }

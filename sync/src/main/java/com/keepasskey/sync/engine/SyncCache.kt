@@ -298,7 +298,9 @@ open class SyncCache(private val cacheDir: File) {
         ).forEach { suffix ->
             val file = getFile(remotePath, suffix)
             if (file.exists()) {
-                file.delete()
+                // ISSUE-P3-108：与 clearAll 共用同一「有界重试 + 幂等」删除原语，
+                // 消除「瞬时句柄未释放即视为删除失败」的路径差异（原先此处直接 delete() 且丢弃返回值）。
+                deleteCacheChild(file)
             }
         }
         deleteOrphanTmpFiles(remotePath)
@@ -343,9 +345,22 @@ open class SyncCache(private val cacheDir: File) {
      */
     internal fun deleteCacheChild(child: File): Boolean {
         if (!child.exists()) return true
-        val removed = if (child.isDirectory) child.deleteRecursively() else child.delete()
+        var removed = deleteOnce(child)
+        // ISSUE-P3-108：平台层「句柄尚未释放」会**瞬时**让 delete() 返回 false
+        // （Windows 桌面调试环境与写入方刚结束时的固有延迟；Android 上同理但概率更低）。
+        // 有界重试把「稍后即可删除」的瞬时失败与「真的删不掉」区分开：
+        // 前者不再被当作清理失败上报（也不必因此放宽任何断言），后者仍如实返回 false。
+        var attempt = 0
+        while (!removed && child.exists() && attempt < DELETE_RETRIES) {
+            attempt++
+            Thread.sleep(DELETE_RETRY_GAP_MS)
+            removed = deleteOnce(child)
+        }
         return removed || !child.exists()
     }
+
+    private fun deleteOnce(child: File): Boolean =
+        if (child.isDirectory) child.deleteRecursively() else child.delete()
 
     /**
      * 生成唯一临时文件路径。
@@ -443,6 +458,10 @@ open class SyncCache(private val cacheDir: File) {
         private const val SUFFIX_BASE_CACHE = ".basecache"
         private const val SUFFIX_META = ".meta"
         private const val SUFFIX_TMP = ".tmp"
+
+        /** ISSUE-P3-108：瞬时删除失败的有界重试次数与间隔（见 [deleteCacheChild]） */
+        private const val DELETE_RETRIES = 3
+        private const val DELETE_RETRY_GAP_MS = 15L
 
         /** 流式搬运缓冲（64 KiB，兼顾吞吐与内存占用）。 */
         private const val STREAM_BUFFER_BYTES = 64 * 1024

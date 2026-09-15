@@ -349,7 +349,7 @@
 
 ---
 
-## P3 低危问题、特性接线与体验优化（11 项）
+## P3 低危问题、特性接线与体验优化（10 项）
 
 > **状态（2026-09-12）**：历史 P3 批次 **ISSUE-P3-01 ~ P3-68** 除 P3-23（经产品裁决「不排期」）外
 > 已全部闭环并归档，逐条实现细节与验收证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md)（§3 ~ §32）。
@@ -451,6 +451,17 @@
 > （`readString(` / `password` / `totp` / `otpauth` / `secret` / `userName`）+
 > **防空扫断言**（抽取到的菜单项数必须恰为 8，防止「扫描通过但其实什么都没扫到」的假绿）。
 > 结论与接线条件同步写入 `SecureDialog` 的 KDoc。该行已移出本表，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §77。
+>
+> **2026-09-15 闭环（续 26，§79 批次）**：**ISSUE-P3-108**（`AtomicFileWriter` / `SyncCache.updateBase`
+> 的 `.tmp` 残留窗口）已收口——**先判定再定口径**：`.tmp` 承载 KDBX 密文快照片段，
+> 「锁定即销毁密文快照」的语义下**残留 `.tmp` 构成可观测缺陷**，故**不放宽任何断言**，改修根因。
+> **根因**：`File.delete()` 在句柄尚未释放的瞬间返回 false，原实现把该**瞬时**失败当作清理失败
+> （`clearAll()` 返回 false → 产出「残留 N 项，密文可能仍可恢复」告警 → 传回退出清理入口）。
+> **修复**：`SyncCache.deleteCacheChild` 增**有界重试**（3 次 × 15 ms，仅在真的删除失败时等待），
+> 并把 `clear(remotePath)` 也改走同一原语（原先丢弃返回值、行为不一致）。
+> **新增覆盖**：`updateBase` 路径清理后**无任何 `.tmp`** + 异常路径残留（写中断的 `.cache.<uuid>.tmp`、
+> 未交付的 `.rollback.<uuid>.tmp`）必须被清且已交付的 `.rollback` 必须保留。
+> 该行已移出本表，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §79。
 > **2026-09-15 补登（§69 附带）**：依 `ISSUE-P3-127` AC②「依据恢复 ⇒ 逐条对齐」，已按恢复入库的
 > 复核报告 §10 / §11 逐条核对本表 AC，并在本文件开头新增
 > **「第四轮独立复核定版结论：对本表 AC 的更正（实施前必读）」** 一节（18 行）。
@@ -551,7 +562,6 @@
 
 | 编号 | 来源 | 问题与位置（核实于 2026-09-13，对 HEAD `a669a48`） | 验收标准 |
 |---|---|---|---|
-| ISSUE-P3-108 | 审计 L14 | `AtomicFileWriter` 的 `<vault>.kdbx.tmp` 残留窗口（`:76`），同步流式搬运时附件明文也经该路径。**新增实测证据（2026-09-15，§58 批次全量单测）**：`SyncCache.updateBase` 的原子写同样有该窗口——`SyncCacheTest.clearAll 清空全部远端路径的缓存且目录为空` 实测失败，残留物为 `cache/<hash>.BASEVERSION.tmp`（`SyncCacheTest.kt:112` 断言「锁定后目录必须为空」），**单独复跑即通过** ⇒ 时序相关（Windows 文件句柄延迟释放 / rename 与 delete 竞态），非确定性缺陷 | 评估写失败 / 中断后的 `.tmp` 清理时机；**并**覆盖 `SyncCache.updateBase` 路径；断言异常路径无残留。**测试侧最小收口**：该断言应改为「重试若干次后为空」或明确排除 `.tmp`（须先判定「残留 `.tmp` 是否属可观测缺陷」再定口径，不得静默放宽断言） |
 | ISSUE-P3-111 | 审计 L17 | `PasswordFillActivity` / `PasskeyAssertionActivity` 不检索系统下发的 provider 请求（全仓无 `retrieveProviderGetCredentialRequest` 调用；对照 `PasswordSaveActivity.kt:27` / `PasskeyCreateActivity.kt:69` / `CredentialUnlockActivity.kt:67` 分别检索 create / begin 请求）→ 系统认证的 `CallingAppInfo` 未与 `expectedPackage` 交叉核对 | 确认是否需要交叉核对（结合 `ISSUE-P3-93` / `ISSUE-P2-46`）；若需，补检索 + 断言 |
 
 ---
