@@ -169,11 +169,13 @@ class AutofillConfirmActivity : FragmentActivity() {
         val callerPackage = intent.getStringExtra(EXTRA_GRANT_PACKAGE)?.takeIf { it.isNotBlank() }
             ?: return null
         val callerDomain = intent.getStringExtra(EXTRA_GRANT_DOMAIN)?.takeIf { it.isNotBlank() }
-        val certSha256Hex = autofillOriginResolver.callingAppCertSha256Hex(callerPackage)
-        val firstOccurrence = !callerTrustStore.isTrusted(callerPackage, certSha256Hex)
+        // ISSUE-P3-93：读取**全部**签名摘要参与判定；展示与信任记录仍用主摘要
+        val certDigests = autofillOriginResolver.callingAppCertDigests(callerPackage)
+        val firstOccurrence = !callerTrustStore.isTrusted(callerPackage, certDigests)
         return AutofillCallerAttribution(
             packageName = callerPackage,
-            certSha256Hex = certSha256Hex,
+            // 展示与信任记录用主摘要（不可读时为 null，展示侧如实标注「不可读」）
+            certSha256Hex = certDigests.primary,
             webDomain = callerDomain,
             firstOccurrence = firstOccurrence
         )

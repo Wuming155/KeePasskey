@@ -11,9 +11,9 @@
 ## 1. 版本基线（摘要）
 
 - 测试 / 构建 / CI 当前全绿（具体版本、例数、残余面见 [`RESOLVED_LOG.md`](docs/RESOLVED_LOG.md)）。
-  单测基线（2026-09-15，§54 批次后）：**1693 例 / 0 失败 / 0 错误 / 13 跳过**
-  （app 914 / core 65 / crypto 127 / database 384 / sync 203；`--rerun-tasks --max-workers=1` 强制真实执行）；
-  原生内核基线（同日，§54 批次后）：`cargo test` **57 例 / 0 失败**（§54 未触碰原生内核，基线保持；含 ISSUE-P2-56 工作内存清零 4 例 + ISSUE-P2-57 受管缓冲与 sha2 状态擦除 3 例 + ISSUE-P2-58 强度评估线性化 6 例）；
+  单测基线（2026-09-15，§55 批次后）：**1701 例 / 0 失败 / 0 错误 / 13 跳过**
+  （app 922 / core 65 / crypto 127 / database 384 / sync 203；`--rerun-tasks --max-workers=1` 强制真实执行）；
+  原生内核基线（同日，§55 批次后）：`cargo test` **57 例 / 0 失败**（§55 未触碰原生内核，基线保持；含 ISSUE-P2-56 工作内存清零 4 例 + ISSUE-P2-57 受管缓冲与 sha2 状态擦除 3 例 + ISSUE-P2-58 强度评估线性化 6 例）；
   设备侧基线（2026-09-14，§47 批次后）：**32 例 / 0 失败 / 0 跳过**（`app` 15 + `database` 7 +
   `sync` 3 + `crypto` 7），已在 **arm64 真机**（Redmi 4X / LineageOS / Android 17 / **API 37**）全量复跑通过；
   此前既定环境为 x86_64 / API 36.1 模拟器（§34 / §36 / §46）。`app` 15 例含 `QuickUnlockSealDowngradeDeviceTest`

@@ -2,6 +2,7 @@ package com.keepasskey.app.autofill
 
 import android.content.Context
 import android.content.SharedPreferences
+import com.keepasskey.app.security.CallerCertDigests
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -52,6 +53,28 @@ class AutofillCallerTrustStore @Inject constructor(
     /** 是否已获用户显式授权（fail-closed：包名非法一律按未授权处理） */
     fun isTrusted(packageName: String, certSha256Hex: String?): Boolean {
         val key = trustKey(packageName, certSha256Hex) ?: return false
+        return prefs?.getBoolean(key, false) ?: memoryTrusted.contains(key)
+    }
+
+    /**
+     * ISSUE-P3-93：按调用方**全部**签名摘要判定「已获显式授权」——任一摘要命中既有信任记录即通过。
+     *
+     * 语义依据：用户授权的是「这个应用」，而应用在签名轮换期会同时持有当前签名者
+     * （`apkContentsSigners`）与历史签名者（`signingCertificateHistory`）；只比对单个摘要会
+     * 随系统返回顺序误判「首次出现」，导致签名轮换期反复要求显式授权。
+     *
+     * **降级分支保持原样（ISSUE-P1-24 的既有取舍）**：摘要**全部不可读**时退回「仅按包名」记录
+     * （键为 `pkg|`），确认页会如实标注「不可读」；摘要可读时**不**回退到该降级键——
+     * 与整改前 `isTrusted(pkg, 单摘要)` 的判定面逐字一致。
+     */
+    fun isTrusted(packageName: String, certDigests: CallerCertDigests): Boolean {
+        val normalized = AutofillPackageNames.normalize(packageName) ?: return false
+        if (certDigests.isEmpty) return isTrustedKey(normalized, "")
+        return certDigests.anyMatch { isTrustedKey(normalized, it) }
+    }
+
+    private fun isTrustedKey(normalizedPackage: String, certSha256Hex: String): Boolean {
+        val key = "$normalizedPackage|$certSha256Hex"
         return prefs?.getBoolean(key, false) ?: memoryTrusted.contains(key)
     }
 

@@ -8,6 +8,7 @@ import androidx.lifecycle.lifecycleScope
 import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.security.BiometricAuthManager
+import com.keepasskey.app.security.CallerCertDigests
 import com.keepasskey.core.log.AppLog
 import com.keepasskey.crypto.cbor.CborEncoder
 import com.keepasskey.crypto.passkey.PasskeyCryptoEngine
@@ -128,13 +129,15 @@ class PasskeyCreateActivity : BaseCredentialActivity() {
                         AppLog.w(TAG, "用户已显式开启「跳过 DAL 校验」，本次注册不执行远程声明验证")
                     } else {
                         val callingAppInfo = providerReq?.callingAppInfo
-                        val certHex = callingAppInfo?.let { CallingOriginResolver.certSha256Hex(it) }
-                        if (callingAppInfo == null || certHex == null) {
+                        // ISSUE-P3-93：以调用方**全部**签名摘要参与 DAL 校验（签名轮换期任一命中即通过）
+                        val certDigests = callingAppInfo?.let { CallingOriginResolver.certDigests(it) }
+                            ?: CallerCertDigests.EMPTY
+                        if (callingAppInfo == null || certDigests.isEmpty) {
                             AppLog.e(TAG, "无法获取调用方签名证书，DAL 校验 fail-closed，拒绝创建")
                             failAndFinish()
                             return@launch
                         }
-                        when (dalVerifier.verify(rpId, pkg, certHex)) {
+                        when (dalVerifier.verify(rpId, pkg, certDigests)) {
                             DigitalAssetLinksVerifier.DalResult.VERIFIED -> Unit
                             DigitalAssetLinksVerifier.DalResult.NOT_VERIFIED -> {
                                 AppLog.w(TAG, "DAL 声明校验未通过（无匹配授权声明或格式错误），拒绝创建")

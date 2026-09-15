@@ -286,7 +286,7 @@
 
 ---
 
-## P3 低危问题、特性接线与体验优化（45 项）
+## P3 低危问题、特性接线与体验优化（44 项）
 
 > **状态（2026-09-12）**：历史 P3 批次 **ISSUE-P3-01 ~ P3-68** 除 P3-23（经产品裁决「不排期」）外
 > 已全部闭环并归档，逐条实现细节与验收证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md)（§3 ~ §32）。
@@ -461,7 +461,6 @@
 | ISSUE-P3-90 | 审计 F-08 | 公开死函数 `OtpEngine.parseOtpAuthUri` 对 `period` / `digits` 无钳制（`OtpEngine.kt:88-121`，零调用点；生产走 `TotpKeyUriParser` 已钳制） | 删除该函数，或改 `internal` 并补齐同等钳制（防未来误接入） |
 | ISSUE-P3-91 | 审计 F-16 | `HmacBlockStream.readAll` 用短路 `contentEquals`（`:120,128`；生产流式路径已正确用 `MessageDigest.isEqual`） | 改用 `MessageDigest.isEqual`，或标注为测试专用（当前无生产调用者） |
 | ISSUE-P3-92 | 审计 F-17 | UI 把 KDBX 的 ChaCha20 标注为「ChaCha20-Poly1305」（`DatabaseAlgorithmDialogs.kt:42`、`SettingsUiState.kt:69`、`SettingsPreferencesController.kt:36`），而该 AEAD 在本仓不存在 | 改为「ChaCha20 (RFC 8439，无 AEAD 标签)」，同步修正 `RESOLVED_LOG.md` 与相关单测 |
-| ISSUE-P3-93 | 审计 F-19 | 调用方证书仅取 `apkContentsSigners.firstOrNull()`（`AutofillOriginResolver.kt:69`、`CallingOriginResolver.kt:77,92`），签名轮换期结果随顺序变化（方向 fail-closed） | 遍历全部签名者（含 `signingCertificateHistory`），任一匹配即通过。**注**：本项是 `ISSUE-P2-46`（`android://` 签名绑定）的前置条件 |
 | ISSUE-P3-94 | 审计 F-20 | 合并清单冗余 / 废弃权限，且无 `tools:node="remove"`（源清单 `AndroidManifest.xml:5-6` 声明 `ACCESS_NETWORK_STATE` / `USE_BIOMETRIC`，二者亦由库注入；`USE_FINGERPRINT` 仅来自 `androidx.biometric`） | 删除冗余声明；对废弃权限加 `tools:node="remove"`；保留 zxing 注入的 `CAMERA` |
 | ISSUE-P3-95 | 审计 F-21 | 自动填充确认返回 `RESULT_OK` 前不校验会话是否已锁定（`AutofillConfirmActivity.kt:138-164`；CM 各路径均有该判定） | `RESULT_OK` 前加 `if (vaultRepository.isLocked()) { finish(); return }`，并在会话锁定时丢弃未决响应 |
 | ISSUE-P3-96 | 审计 RUST-07 | Kotlin CBC **加密**流的明文中转副本未清零（`crypto/src/main/java/com/keepasskey/crypto/cipher/CbcStreams.kt:80` 的 `buffer.copyOf(filled)`、`:99` 的 `val chunk = buffer.copyOf(aligned)`）；解密流侧已修 | 两处均加 `finally { Arrays.fill(..., 0) }`，对齐该类 `:27` 的 KDoc 宣称 |

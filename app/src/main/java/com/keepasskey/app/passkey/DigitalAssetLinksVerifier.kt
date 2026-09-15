@@ -1,5 +1,6 @@
 package com.keepasskey.app.passkey
 
+import com.keepasskey.app.security.CallerCertDigests
 import com.keepasskey.core.log.AppLog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -65,19 +66,24 @@ class DigitalAssetLinksVerifier @Inject constructor() {
         .build()
 
     /**
-     * 校验 `<rpId>` 站点的 DAL 是否声明授权 [callingPackage]（签名证书 [certSha256Hex]）。
+     * ISSUE-P3-93（审计 F-19）：以调用方**全部**签名摘要校验 DAL。
+     *
+     * 判定语义：声明语句中的任一 `sha256_cert_fingerprints` 命中调用方的**任一**签名摘要即
+     * [DalResult.VERIFIED]——与官方「应用可由多签名者之一签署 / 签名轮换期同时持有历史签名者」的
+     * 模型一致；只比对单个摘要会随系统返回顺序误判未授权（方向 fail-closed）。
      *
      * @param rpId 注册请求中的 RP ID（任意 URL/域名形态，内部归一化）
      * @param callingPackage 调用方应用包名
-     * @param certSha256Hex 调用方签名证书 SHA-256（大小写与冒号格式不敏感）
+     * @param certDigests 调用方签名摘要集合；为空（不可读）时按 [DalResult.NOT_VERIFIED]（fail-closed）
      */
-    suspend fun verify(rpId: String, callingPackage: String, certSha256Hex: String): DalResult {
+    suspend fun verify(rpId: String, callingPackage: String, certDigests: CallerCertDigests): DalResult {
         val host = DomainMatcher.extractDomain(rpId)
-        if (host.isEmpty() || callingPackage.isBlank() || certSha256Hex.isBlank()) {
+        if (host.isEmpty() || callingPackage.isBlank() || certDigests.isEmpty) {
             return DalResult.NOT_VERIFIED
         }
 
-        val key = "$host|$callingPackage|${normalizeFingerprint(certSha256Hex)}"
+        // 缓存键包含**完整摘要集合**：不同集合的判定结果不得互相命中
+        val key = "$host|$callingPackage|${certDigests.values.joinToString(",")}"
         val now = clockMs()
         cache[key]?.let { entry ->
             val ttl = if (entry.result == DalResult.VERIFIED) POSITIVE_TTL_MS else NEGATIVE_TTL_MS
@@ -86,13 +92,25 @@ class DigitalAssetLinksVerifier @Inject constructor() {
         }
 
         val url = endpointOverride?.invoke(host) ?: "https://$host/.well-known/assetlinks.json"
-        val result = withContext(Dispatchers.IO) { fetchAndMatch(url, callingPackage, certSha256Hex) }
+        val result = withContext(Dispatchers.IO) { fetchAndMatch(url, callingPackage, certDigests) }
         cache[key] = CacheEntry(result, now)
         AppLog.i(TAG, "DAL 校验完成: result=$result")
         return result
     }
 
-    private fun fetchAndMatch(url: String, callingPackage: String, certSha256Hex: String): DalResult {
+    /**
+     * 单摘要入口（兼容既有调用点与测试）：语义等价于「只含该摘要的集合」。
+     *
+     * @param certSha256Hex 调用方签名证书 SHA-256（大小写与冒号格式不敏感）
+     */
+    suspend fun verify(rpId: String, callingPackage: String, certSha256Hex: String): DalResult =
+        verify(rpId, callingPackage, CallerCertDigests.ofSingle(certSha256Hex))
+
+    private fun fetchAndMatch(
+        url: String,
+        callingPackage: String,
+        certDigests: CallerCertDigests
+    ): DalResult {
         return try {
             val request = Request.Builder()
                 .url(url)
@@ -123,7 +141,7 @@ class DigitalAssetLinksVerifier @Inject constructor() {
                     AppLog.w(TAG, "DAL 响应体为空")
                     return DalResult.NOT_VERIFIED
                 }
-                DalStatementMatcher.match(String(bytes, Charsets.UTF_8), callingPackage, certSha256Hex)
+                DalStatementMatcher.match(String(bytes, Charsets.UTF_8), callingPackage, certDigests)
             }
         } catch (t: Throwable) {
             // ISSUE-P1-10：不透传 URL（含 rpId 站点域）到日志
@@ -176,10 +194,21 @@ internal object DalStatementMatcher {
     /** Credential Manager 通行密钥授权关系（Google 官方约定） */
     internal const val RELATION_GET_LOGIN_CREDS = "delegate_permission/common.get_login_creds"
 
-    fun match(json: String, expectedPackage: String, certSha256Hex: String): DigitalAssetLinksVerifier.DalResult {
+    /**
+     * ISSUE-P3-93：以调用方**全部**签名摘要匹配 DAL 声明。
+     * 声明的 `sha256_cert_fingerprints` 中**任一**指纹命中调用方的**任一**签名摘要即 VERIFIED
+     * （签名轮换期调用方同时持有当前与历史签名者）。
+     */
+    fun match(
+        json: String,
+        expectedPackage: String,
+        certDigests: CallerCertDigests
+    ): DigitalAssetLinksVerifier.DalResult {
         val root = MinimalJson.parse(json) as? List<*> ?: return DigitalAssetLinksVerifier.DalResult.NOT_VERIFIED
-        val wantFp = DigitalAssetLinksVerifier.normalizeFingerprint(certSha256Hex)
-        if (wantFp.isEmpty()) return DigitalAssetLinksVerifier.DalResult.NOT_VERIFIED
+        val wantFps = certDigests.values
+            .map { DigitalAssetLinksVerifier.normalizeFingerprint(it) }
+            .filter { it.isNotEmpty() }
+        if (wantFps.isEmpty()) return DigitalAssetLinksVerifier.DalResult.NOT_VERIFIED
 
         for (statement in root) {
             val obj = statement as? Map<*, *> ?: continue
@@ -193,12 +222,23 @@ internal object DalStatementMatcher {
             if (pkg != expectedPackage.trim()) continue
 
             val fingerprints = target["sha256_cert_fingerprints"] as? List<*> ?: continue
-            if (fingerprints.any { it is String && DigitalAssetLinksVerifier.normalizeFingerprint(it) == wantFp }) {
+            if (fingerprints.any { fp ->
+                    fp is String && DigitalAssetLinksVerifier.normalizeFingerprint(fp) in wantFps
+                }
+            ) {
                 return DigitalAssetLinksVerifier.DalResult.VERIFIED
             }
         }
         return DigitalAssetLinksVerifier.DalResult.NOT_VERIFIED
     }
+
+    /** 单摘要入口（兼容既有调用点与测试）：等价于「只含该摘要的集合」。 */
+    fun match(
+        json: String,
+        expectedPackage: String,
+        certSha256Hex: String
+    ): DigitalAssetLinksVerifier.DalResult =
+        match(json, expectedPackage, CallerCertDigests.ofSingle(certSha256Hex))
 }
 
 /**

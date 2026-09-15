@@ -1,6 +1,7 @@
 package com.keepasskey.app.passkey
 
 import androidx.credentials.provider.CallingAppInfo
+import com.keepasskey.app.security.CallerCertDigests
 import java.security.MessageDigest
 import kotlin.io.encoding.Base64
 
@@ -104,15 +105,33 @@ object CallingOriginResolver {
             .mapNotNull { it?.trim() }
             .firstOrNull { it.isNotEmpty() && it != SYSTEM_PACKAGE_ANDROID }
 
-    /** 普通应用固定颁发 apk-key-hash origin（签名证书 SHA-256，base64url 无填充） */
-    private fun apkKeyHashOrigin(callingAppInfo: CallingAppInfo): String {
+    /**
+     * 普通应用固定颁发 apk-key-hash origin（签名证书 SHA-256，base64url 无填充）。
+     *
+     * ISSUE-P3-93：取**主 origin**（有序集合的首项，即当前有效签名者）；多签名者 / 签名轮换期
+     * 的完整 origin 集合见 [apkKeyHashOrigins]（需要按 origin 匹配的路径应遍历该集合）。
+     */
+    private fun apkKeyHashOrigin(callingAppInfo: CallingAppInfo): String =
+        apkKeyHashOrigins(callingAppInfo).firstOrNull().orEmpty()
+
+    /**
+     * ISSUE-P3-93（审计 F-19）：调用方**全部**签名者对应的 apk-key-hash origin。
+     *
+     * 取值口径：`apkContentsSigners`（当前有效，在前）+ `signingCertificateHistory`（历史轮换，在后），
+     * 逐个计算 `android:apk-key-hash:<base64url(sha256(cert))>`。只取首个会随系统返回顺序变化，
+     * 在签名轮换期把合法调用方误判为未授权（方向 fail-closed）。
+     * 全部签名者不可读时返回空列表（调用方按 fail-closed 处理）。
+     */
+    fun apkKeyHashOrigins(callingAppInfo: CallingAppInfo): List<String> {
         return try {
-            // signingInfo 为平台保证非空；apkContentsSigners 仍可能为空数组，保留安全调用
-            val signer = callingAppInfo.signingInfo.apkContentsSigners?.firstOrNull()
-                ?: return ""
-            APK_KEY_HASH_PREFIX + Base64UrlNoPadding.encode(sha256(signer.toByteArray()))
+            val info = callingAppInfo.signingInfo
+            val signers = info.apkContentsSigners.orEmpty().toList() +
+                info.signingCertificateHistory.orEmpty().toList()
+            signers.map { signer ->
+                APK_KEY_HASH_PREFIX + Base64UrlNoPadding.encode(sha256(signer.toByteArray()))
+            }.distinct()
         } catch (_: Throwable) {
-            ""
+            emptyList()
         }
     }
 
@@ -120,15 +139,34 @@ object CallingOriginResolver {
      * 调用方签名证书 SHA-256 十六进制摘要（大写、无冒号，ISSUE-P2-02）。
      * 供 [DigitalAssetLinksVerifier] 与 DAL 声明中的 `sha256_cert_fingerprints` 比对；
      * 无法确定签名时返回 null（调用方按 fail-closed 处理）。
+     *
+     * ISSUE-P3-93：本方法只返回**首个**摘要，语义已收敛为「主摘要（展示/记录用）」；
+     * 放行判定请改用 [certDigests]（遍历全部签名者，任一命中即通过）。
      */
-    fun certSha256Hex(callingAppInfo: CallingAppInfo): String? {
+    fun certSha256Hex(callingAppInfo: CallingAppInfo): String? = certDigests(callingAppInfo).primary
+
+    /**
+     * ISSUE-P3-93（审计 F-19）：调用方**全部**签名证书摘要。
+     *
+     * 缺陷形态：此前各处只取 `apkContentsSigners?.firstOrNull()`，签名轮换期结果**随系统返回顺序
+     * 变化**（应用同时持有当前与历史签名者）→ 白名单 / DAL 可能误判未授权。
+     *
+     * 取值口径：`apkContentsSigners`（当前有效，在前）+ `signingCertificateHistory`（历史轮换，在后），
+     * 去重后归一化为大写十六进制。平台保证 `signingInfo` 非空；数组仍可能为空 → 空集合（fail-closed）。
+     * 无过去签名证书时 `signingCertificateHistory` 与 `apkContentsSigners` 内容相同，去重后无重复。
+     */
+    fun certDigests(callingAppInfo: CallingAppInfo): CallerCertDigests {
         return try {
-            val signer = callingAppInfo.signingInfo.apkContentsSigners?.firstOrNull() ?: return null
-            sha256(signer.toByteArray()).joinToString("") { "%02X".format(it) }
+            val info = callingAppInfo.signingInfo
+            val signers = info.apkContentsSigners.orEmpty().toList() +
+                info.signingCertificateHistory.orEmpty().toList()
+            CallerCertDigests.of(signers.map { sha256(it.toByteArray()).toHex() })
         } catch (_: Throwable) {
-            null
+            CallerCertDigests.EMPTY
         }
     }
+
+    private fun ByteArray.toHex(): String = joinToString("") { "%02X".format(it) }
 
     private fun sha256(bytes: ByteArray): ByteArray =
         MessageDigest.getInstance("SHA-256").digest(bytes)
