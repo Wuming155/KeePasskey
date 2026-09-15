@@ -3,6 +3,7 @@ package com.keepasskey.database.kdf
 import android.os.Build
 import android.util.Log
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.keepasskey.crypto.kdf.AesKdfEngine
 import com.keepasskey.crypto.kdf.Argon2KdfEngine
 import com.keepasskey.crypto.kdf.KdfParameters
 import com.keepasskey.crypto.kdf.NativeArgon2
@@ -132,12 +133,14 @@ class KdfWallClockDeviceTest {
         val throughput = defaultWork / (defaultNanos / 1_000_000_000.0)
         report("throughputByteRoundsPerSecond", String.format("%.3e", throughput))
 
-        // 联合预算上界（`KdbxKdfParameterCodec.ARGON2_MAX_TOTAL_WORK = 2^40`）的墙钟量级：
-        // **按实测吞吐换算**（非独立推算；已明确标注）。
-        val budget = Math.pow(2.0, 40.0)
+        // 联合预算上界（`KdbxKdfParameterCodec.ARGON2_MAX_TOTAL_WORK`）的墙钟量级：
+        // **按实测吞吐换算**（非独立推算；已明确标注）。该常量于 §78 由 2^40 收紧为 2^33，
+        // 故此处**直接读取常量**而非复制字面量（避免两处漂移）。
+        val budget = KdbxKdfParameterCodec.ARGON2_MAX_TOTAL_WORK.toDouble()
+        report("jointBudgetByteRounds", budget)
         val worstSeconds = budget / throughput
-        report("extrapolated_worstCaseSeconds_at2pow40", String.format("%.0f", worstSeconds))
-        report("extrapolated_worstCaseHours_at2pow40", String.format("%.2f", worstSeconds / 3600.0))
+        report("extrapolated_worstCaseSeconds_atJointBudget", String.format("%.0f", worstSeconds))
+        report("extrapolated_worstCaseHours_atJointBudget", String.format("%.3f", worstSeconds / 3600.0))
 
         // 题面更正：条目原文的「I = 2^24, M = 堆/2」已不是合法 Header（联合预算拒绝）。
         val jointRejected = runCatching {
@@ -176,6 +179,35 @@ class KdfWallClockDeviceTest {
         report("worstCaseWithinBudget_acceptedByCodec", true)
 
         assertEquals("默认配置耗时应为正数", true, defaultNanos > 0)
+    }
+
+    /**
+     * AES-KDF 轮数上界（`2^28`，KDBX3 路径）的墙钟量级——与 Argon2 同一方法学：
+     * 实测 1/256 的轮数（`R = 2^20`）后按实测速率换算到封顶轮数。
+     *
+     * 该上界**不在** §78 的收紧范围内（本次只调 Argon2 联合预算），本用例只补上此前缺失的
+     * **数量级证据**，供产品决定是否同样收紧。
+     */
+    @Test
+    fun `AES-KDF 封顶轮数的墙钟量级`() {
+        val rounds = 1L shl 20
+        val params = KdfParameters.Aes(seed = ByteArray(32) { 0x11 }, rounds = rounds)
+        val composite = ByteArray(32) { 0x33 }
+        val startedAt = System.nanoTime()
+        val out = AesKdfEngine().transform(composite, params)
+        val elapsed = System.nanoTime() - startedAt
+        out.fill(0)
+        composite.fill(0)
+
+        val rate = rounds.toDouble() / (elapsed / 1_000_000_000.0)
+        val atCapSeconds = (1L shl 28).toDouble() / rate
+        report("aesKdfRounds", rounds)
+        report("aesKdfSeconds", nanosToSeconds(elapsed))
+        report("aesKdfRoundsPerSecond", String.format("%.3e", rate))
+        report("aesKdfAtCap2pow28Seconds", String.format("%.0f", atCapSeconds))
+        report("aesKdfDefault6MSeconds_estimated", String.format("%.2f", 6_000_000.0 / rate))
+
+        assertEquals("AES-KDF 实测耗时应为正数", true, elapsed > 0)
     }
 
     private companion object {

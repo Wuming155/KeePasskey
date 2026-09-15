@@ -110,7 +110,7 @@ KeePasskey 是一款原生 Kotlin 开发的现代化 Android 密码管理器。�
 | [`docs/README.md`](docs/README.md) | **文档地图**：六分区总览与「新增文档放哪里」 | 找文档、新增文档前 |
 | [`docs/ACTIVE_ISSUES.md`](docs/ACTIVE_ISSUES.md) | 现存问题与待办清单（P0→P3） | 认领与开始新工作前 |
 | [`docs/RESOLVED_LOG.md`](docs/RESOLVED_LOG.md) | 已整改归档**总索引**（≤100 行：全量批次索引，**直达每个批次文件**） | 确认历史 Bug 是否已修 |
-| [`docs/resolved/`](docs/resolved/) | **历史批次归档**：4 份分册索引（各 ≤100 行；分册 04 为 **§58 起滚动册**）+ `batches/` 下**一批次一文件**的正文（75 份；§42 / §43 两份按「退役承接」体例存于 `docs/security/`） | 查 §1 ~ §77 任一批次的验收证据 / 裁决 / 过程缺陷 |
+| [`docs/resolved/`](docs/resolved/) | **历史批次归档**：4 份分册索引（各 ≤100 行；分册 04 为 **§58 起滚动册**）+ `batches/` 下**一批次一文件**的正文（76 份；§42 / §43 两份按「退役承接」体例存于 `docs/security/`） | 查 §1 ~ §78 任一批次的验收证据 / 裁决 / 过程缺陷 |
 | [`docs/architecture/ARCHITECTURE.md`](docs/architecture/ARCHITECTURE.md) | 模块依赖拓扑与关键架构决策 | 跨模块改动、新功能落位前 |
 | [`docs/architecture/reference-projects.md`](docs/architecture/reference-projects.md) | 参考项目地图 | 实现算法/格式兼容时 |
 | [`docs/architecture/扫码方案评估_ZXing与CameraXMLKit.md`](docs/architecture/扫码方案评估_ZXing与CameraXMLKit.md) | 扫码方案选型评估（结论为「维持 ZXing」） | 评估 / 更换扫码库前 |
@@ -231,6 +231,14 @@ KeePasskey 是一款原生 Kotlin 开发的现代化 Android 密码管理器。�
   **未实施池内擦除的原因与解除条件**：`KdbxDatabase.copy()` 会**共享同一 `binaries` 列表**
   （合并路径常态发生），池项擦除须先为 `InnerHeader.BinaryItem` 定义「谁拥有该数组」的所有权规则
   （对齐 R-CLEAR-2 所有权约定），否则会误伤存活树仍在引用的同一数组；补齐该规则前按已接受边界登记。
+- **KDF 工作量上界为「按实测速率锚定的有界值」（ISSUE-P2-49 AC②，§78）**：Argon2 的 `I×M` 联合预算
+  为 **`2^33` 字节·轮**（原 `2^40`），依据是 §76 的 arm64 真机实测吞吐 ≈2.1×10⁸ 字节·轮/秒
+  ⇒ **最坏合法配置的墙钟 ≈40 s**（原 ≈1.4 小时）；AES-KDF 的 `R ≤ 2^28` 封顶对应实测 ≈35 s
+  （默认 `R = 6×10⁶` ≈0.79 s）。**残余（如实声明）**：**不支持派生中途取消**——
+  RustCrypto 的 `hash_password_into_with_memory` 不暴露逐 pass 回调，协程 `withTimeout` 对阻塞式
+  原生派生**无效**（复核定版已确认），故本仓以「有界工作量」而非「墙钟超时」控制最坏耗时；
+  **解除条件**：若需秒级上界或取消能力，须在原生内核引入可取消派生（pass 之间检查取消标志）。
+  边界双向锁与覆盖性核对（官方默认 / 真机可达上界 / 桌面偏执档）见 `RESOLVED_LOG.md` §78。
 - `ProtectedString` 驻留加密为纵深防御层；持有进程密钥或任意代码执行者仍可在读取瞬间截获明文。
 - 原生内核为 Rust（代价是体积，收益是秘密确定性擦除、Argon2 优于纯 Java 路径）；**arm64 真机已验证**
   （2026-09-14：原生内核 JNI 通路 / 与 BouncyCastle 逐字节一致 / R1 性能闸门 + 真实语料端到端解锁 2/2，

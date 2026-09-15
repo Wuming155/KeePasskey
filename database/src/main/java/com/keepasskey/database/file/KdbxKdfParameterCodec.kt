@@ -41,7 +41,7 @@ import com.keepasskey.database.exception.KdbxCorruptFileException
  * | Argon2 `V` 取值集 | `{0x10, 0x13}`（`MinVersion` / `MaxVersion`） | **{0x10, 0x13}** | 与官方一致 |
  * | AES-KDF `R` 下界 | 1 | **1** | 与官方一致 |
  * | AES-KDF `R` 上界 | 无（规范未封顶） | **2^28** | 本仓封顶（合法偏执配置通常 ≤ 1 亿轮） |
- * | Argon2 `I×M` 联合预算 | 无（官方仅逐项校验，见 `AreParametersWeak`） | **2^40 字节·轮** | 本仓封顶（ISSUE-P2-49，见下） |
+ * | Argon2 `I×M` 联合预算 | 无（官方仅逐项校验，见 `AreParametersWeak`） | **2^33 字节·轮** | 本仓封顶（ISSUE-P2-49，**测量锚定**，见下） |
  *
  * **凡标注「本仓更严」的封顶均属 fail-closed 加固**：取值宽于一切合法用户配置
  * （合法范围见 KdfBenchmark / 各引擎默认值），正常文件不受影响，仅恶意构造文件被提前裁决。
@@ -58,13 +58,28 @@ import com.keepasskey.database.exception.KdbxCorruptFileException
  * 默认 `I=2 / M=64 MiB / P=2`（乘积 ≈ `2^27`）；其 `AreParametersWeak` 仅以
  * 「`I×M < 默认乘积`」判弱，不设上界。故本预算属**本仓更严的 fail-closed 加固**。
  *
- * 取值 `2^40 ≈ 1.1×10^12` 字节·轮，宽于本仓 `KdfBenchmark` 自荐上限
- * （`≤512 MiB × 20 ≈ 2^33.3`）约 **100 倍**，亦远高于官方默认乘积（约 `2^27`）
- * —— 正常文件（含官方默认与偏执配置）不受影响；仅「畸形放大」文件被提前裁决。
+ * 取值 `2^33 ≈ 8.6×10^9` 字节·轮，**由真机实测速率锚定**（ISSUE-P2-80 实测 → ISSUE-P2-49 AC②）：
+ * arm64 真机（Redmi 4X / API 37 / `maxHeap` 192 MiB）实测吞吐 **≈2.1×10⁸ 字节·轮/秒**
+ * （默认 `64 MiB × I=2` 实测 0.609 / 0.635 s；重载 `96 MiB × I=8` 实测 2.470 / 2.537 s），
+ * 故本预算在该机的**最坏耗时 ≈39–41 s**；在更快的设备上按比例更短。
+ * 原取值 `2^40` 经同批实测换算最坏耗时 **≈1.39–1.44 小时**——即「无需口令即可触发」的
+ * 可用性拒绝服务（DoS），故予收紧。
+ *
+ * **覆盖性核对（AC④「不误拒合法库」）**：
+ * 1. 本仓默认 `64 MiB × 2 = 2^27` ✓（余量 64 倍）；
+ * 2. 本机**有效内存上界** `M ≤ maxHeap/2`（`ISSUE-P2-80` 实测 96 MiB）——即 `M` 早已被
+ *    动态堆门槛压到 `≤2^28`（按 Android 非 `largeHeap` 应用的常见上限 512 MiB 堆估）；
+ *    叠加本仓 `KdfBenchmark` 自荐的 `I ≤ 20`，本机可达的最大配置 ≈ `2^32.3 < 2^33` ✓；
+ * 3. 官方**桌面**偏执配置（如 `1 GiB × 10 = 2^33.3`）会超出本预算——但其 `M = 1 GiB`
+ *    **在本仓任何设备上都先被 `M ≤ maxHeap/2` 拒绝**（Android 非 `largeHeap` 堆上限远小于 2 GiB），
+ *    故本预算**不新增**任何「本可解锁却被拒」的情形；
+ * 4. AES-KDF 的 `R` 上界（`2^28`）**不在本次调整范围**，其墙钟实测见
+ *    `docs/records/原生Argon2真机验证记录.md` §9.4。
  *
  * **本预算即「解锁派生的工作量上界」**：阻塞式原生派生不可被协程 `withTimeout` 打断
  * （`withTimeout` 只在阻塞调用返回后的挂起点生效），故不引入无效的墙钟超时；
- * 墙钟量级的真机实测见 `ISSUE-P2-80`。
+ * 本仓以「**按实测速率锚定的工作量上界**」把最坏耗时压到分钟以内（实测 ≈41 s），
+ * 残余（无中途取消）登记于 `AGENTS.md` §6。
  */
 internal object KdbxKdfParameterCodec {
 
@@ -101,10 +116,12 @@ internal object KdbxKdfParameterCodec {
     /**
      * Argon2 工作量联合预算（`I × M` 上界，单位「字节·轮」）：ISSUE-P2-49 / 审计 F-12。
      *
-     * 逐项封顶不足以约束总工作量；`2^40` 宽于本仓 `KdfBenchmark` 自荐上限约 100 倍，
-     * 正常文件不受影响。取舍与官方参数域对照见本对象类 KDoc。
+     * `2^33` 由**真机实测速率锚定**（详见本对象类 KDoc 的「Argon2 `I×M` 联合预算」一节）：
+     * 实测吞吐 ≈2.1×10⁸ 字节·轮/秒 ⇒ 最坏耗时 ≈39–41 s（原 `2^40` 为 ≈1.4 小时）。
+     * **可见性**：`internal` 而非 `private` —— 设备侧实测用例需读取该值构造边界样本
+     * （`KdfWallClockDeviceTest`），避免在测试里复制字面量造成两处漂移。
      */
-    private const val ARGON2_MAX_TOTAL_WORK = 1L shl 40
+    internal const val ARGON2_MAX_TOTAL_WORK = 1L shl 33
 
     fun serialize(params: KdfParameters): VariantDictionary {
         val vd = VariantDictionary()

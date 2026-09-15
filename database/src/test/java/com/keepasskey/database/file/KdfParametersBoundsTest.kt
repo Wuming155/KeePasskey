@@ -114,8 +114,10 @@ class KdfParametersBoundsTest {
 
     /**
      * AC③「不误拒合法库」：官方默认（`I=2 / M=64 MiB`）、`KdfBenchmark` 迭代上限
-     * （`I=20`，内存上限 512 MiB 受测试 JVM 动态堆门槛约束故取 128 MiB）与联合预算边界值
-     * （`64 MiB × 16384 = 2^40`）均须合法通过。
+     * （`I=20`）与联合预算边界值（`64 MiB × 128 = 2^33`）均须合法通过。
+     *
+     * **边界于 §78 由 `2^40` 收紧为 `2^33`**（由 `ISSUE-P2-80` 真机实测速率锚定：
+     * 实测吞吐 ≈2.1×10⁸ 字节·轮/秒 ⇒ 最坏耗时 ≈39–41 s；原 `2^40` 实测换算 ≈1.4 小时）。
      */
     @Test
     fun `Argon2 联合预算内合法配置通过`() {
@@ -127,15 +129,15 @@ class KdfParametersBoundsTest {
         KdbxHeader.validateArgon2Bounds(
             memoryInBytes = 128L * 1024 * 1024, iterations = 20L, parallelism = 4, version = 0x13
         )
-        // 边界：64 MiB × 16384 = 2^40，恰好等于上界（判定为「不大于」）须通过
+        // 边界：64 MiB × 128 = 2^33，恰好等于上界（判定为「不大于」）须通过
         KdbxHeader.validateArgon2Bounds(
-            memoryInBytes = 64L * 1024 * 1024, iterations = 1L shl 14, parallelism = 2, version = 0x13
+            memoryInBytes = 64L * 1024 * 1024, iterations = 128L, parallelism = 2, version = 0x13
         )
     }
 
     /**
-     * 逐项均合法、仅「迭代 × 内存」放大到越界的组合必须被拒：
-     * `I=2^24`（迭代上界内）与 `M=64 MiB`（内存上界内）乘积达 `2^50`，远超上界 `2^40`。
+     * 逐项均合法、仅「迭代 × 内存」放大到越界的组合必须被拒，**含原 `2^40` 边界档**——
+     * 该档在 §78 收紧后必须由「通过」变为「拒绝」，本用例双向锁定该政策变更。
      */
     @Test
     fun `Argon2 联合预算越界被拒绝`() {
@@ -145,10 +147,16 @@ class KdfParametersBoundsTest {
                 memoryInBytes = 64L * 1024 * 1024, iterations = 1L shl 24, parallelism = 2, version = 0x13
             )
         }
-        // 边界 + 1：64 MiB × 16385 > 2^40
+        // 边界 + 1：64 MiB × 129 > 2^33
         assertThrows(KdbxCorruptFileException::class.java) {
             KdbxHeader.validateArgon2Bounds(
-                memoryInBytes = 64L * 1024 * 1024, iterations = (1L shl 14) + 1, parallelism = 2, version = 0x13
+                memoryInBytes = 64L * 1024 * 1024, iterations = 129L, parallelism = 2, version = 0x13
+            )
+        }
+        // **原 2^40 边界档（64 MiB × 16384）在收紧后必须被拒**——ISSUE-P2-49 AC② 的政策变更锁
+        assertThrows(KdbxCorruptFileException::class.java) {
+            KdbxHeader.validateArgon2Bounds(
+                memoryInBytes = 64L * 1024 * 1024, iterations = 1L shl 14, parallelism = 2, version = 0x13
             )
         }
     }
