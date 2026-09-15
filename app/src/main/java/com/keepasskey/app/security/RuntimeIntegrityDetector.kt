@@ -41,7 +41,9 @@ import javax.inject.Singleton
  */
 @Singleton
 class RuntimeIntegrityDetector @Inject constructor(
-    @ApplicationContext private val context: Context?
+    @ApplicationContext private val context: Context?,
+    /** ISSUE-P3-83：实时 ptrace 探测（`/proc/self/status` 的 `TracerPid`） */
+    private val tracedProcessProbe: TracedProcessProbe
 ) : RuntimeIntegrityGate {
 
     private val scanScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -103,7 +105,11 @@ class RuntimeIntegrityDetector @Inject constructor(
         return RuntimeIntegrityPolicy.escalateForLiveSignals(
             base = snapshot,
             debuggerAttached = liveDebuggerAttached(),
-            hookFrameworkDetected = snapshot.signals.hookFrameworkDetected
+            hookFrameworkDetected = snapshot.signals.hookFrameworkDetected,
+            // ISSUE-P3-83：TracerPid 是**瞬时**信号，周期重扫会漏掉「附加→读取→脱离」窗口，
+            // 故在此（非 suspend 门控的唯一入口）同步求值——生物快速解锁与 CM/自动填充
+            // 两条通道因此同时获得 ptrace 信号。
+            beingTraced = liveBeingTraced()
         ).enforcement
     }
 
@@ -130,13 +136,24 @@ class RuntimeIntegrityDetector @Inject constructor(
         return RuntimeIntegrityPolicy.escalateForLiveSignals(
             base = base,
             debuggerAttached = liveDebuggerAttached(),
-            hookFrameworkDetected = false
+            hookFrameworkDetected = false,
+            beingTraced = liveBeingTraced()
         ).enforcement
     }
 
     /** 实时调试器附加信号（每次调用重新求值，不落缓存——ISSUE-P3-53） */
     private fun liveDebuggerAttached(): Boolean =
         Debug.isDebuggerConnected() || Debug.waitingForDebugger()
+
+    /**
+     * 实时 ptrace 信号（每次调用重新求值——ISSUE-P3-83）。
+     *
+     * 同步读 `/proc/self/status`：一次 KB 级 `/proc` 读，施加在解锁 / 填充这类低频入口上可接受。
+     * 读不到即 `null` ⇒ [RuntimeIntegrityPolicy.isTraced] 判为「未检测到」（明示 fail-open 取舍，
+     * 见 [IntegritySignals.beingTraced] KDoc）。
+     */
+    private fun liveBeingTraced(): Boolean =
+        RuntimeIntegrityPolicy.isTraced(tracedProcessProbe.tracerPid())
 
     /** 重新采集信号并刷新快照（供显式复检；由 [start] 的周期重扫与敏感通道 await 触发） */
     suspend fun refresh(): RuntimeIntegrityReport {

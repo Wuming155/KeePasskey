@@ -374,7 +374,7 @@
 
 ---
 
-## P3 低危问题、特性接线与体验优化（8 项）
+## P3 低危问题、特性接线与体验优化（7 项）
 
 > **状态（2026-09-12）**：历史 P3 批次 **ISSUE-P3-01 ~ P3-68** 除 P3-23（经产品裁决「不排期」）外
 > 已全部闭环并归档，逐条实现细节与验收证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md)（§3 ~ §32）。
@@ -545,21 +545,6 @@
 
 ---
 
-### ISSUE-P3-83（新登记）：`TracerPid` / 内存取证门控缺失
-
-- **优先级**：P3（root 边界内的"提高成本"项，**非阻断承诺**）
-- **核实时间点与核实方式（2026-09-13）**：全仓（`*.kt` / `*.rs`）检索 `TracerPid` —— **零命中**；
-  `RuntimeIntegrityDetector` 仅检查 `Debug.isDebuggerConnected()` / `waitingForDebugger()`、
-  `/proc/self/maps` 特征串与磁盘路径。
-- **问题描述**：`ptrace` / `process_vm_readv` / `/proc/<pid>/mem` **不产生新映射**，
-  现有探测无感。**本项属"同 UID / root 可截获"设计边界**（不承诺阻断），仅争取提高攻击成本。
-- **验收标准**：① 关键解密路径前后**同步**读取 `/proc/self/status` 的 `TracerPid`，非 0 即
-  `clearSensitiveCache()` 并拒绝解锁；② 评估 `prctl(PR_SET_DUMPABLE, 0)` / `MADV_DONTDUMP`
-  的可行性与代价（需 native 支持，**不得**以牺牲稳定性换取纸面加固）；
-  ③ 明确记录"本项仅为提高成本，不改变设计边界"。
-
----
-
 > **2026-09-13 新增（敏感数据流审计批次）**：转登自已退役的 `docs/SENSITIVE_DATA_FLOW_AUDIT_2026-09.md`
 > （处置归档见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §41）。以下为在基线 `d32f3e7` 与当前 `a669a48`
 > 对拍后**仍成立**、且**不改变安全承诺**的低危 / 卫生项，逐项附核实结果。
@@ -590,6 +575,19 @@
 > 超时预算）未完成**。本批与 `ISSUE-P2-73` **同批**（第四轮定版批注要求二者「须同批实测」），
 > 该条 AC① 已完成、AC② 依定版批注**未实施**、AC③ 未完成。**两条目均仍在表内**，
 > 逐项进展与决策点见本文件 P2 节前言（§84 段）与 [RESOLVED_LOG.md](RESOLVED_LOG.md) §84。
+>
+> **2026-09-16 闭环（§85 批次）**：**`ISSUE-P3-83`**（`TracerPid` / 内存取证门控缺失）已收口——
+> ① **AC①**：新增 `ProcTracerPid`（纯解析）+ `TracedProcessProbe`（生产实现**同步**读
+> `/proc/self/status`，有界 8 KiB），并把 `beingTraced` 作为**实时信号**并入既有
+> `RuntimeIntegrityPolicy.escalateForLiveSignals` ⇒ 命中即 `COMPROMISED`，
+> **生物快速解锁与自动填充（CM 通道）两条既有门控同时获得该信号**（`currentEnforcement()` /
+> `awaitEnforcement()` 两个入口均已接线）。之所以必须**同步**求值而非并入周期重扫：
+> `TracerPid` 是瞬时信号，「附加 → 读取 → 脱离」窗口会被重扫间隔整个漏掉。
+> ② **AC②（`prctl(PR_SET_DUMPABLE,0)` / `MADV_DONTDUMP`）评估结论：不实施**，理由见 §85.3
+> ——不得以牺牲稳定性换取纸面加固。③ **AC③**：边界已写入两处 KDoc 与批次文档
+> （**非阻断承诺**；读不到 `/proc/self/status` 时按「未检测到」处理为**明示 fail-open**，
+> 并由用例锁定）。
+> 真机 `tests=33` 全绿，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §85。
 
 ---
 

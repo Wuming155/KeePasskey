@@ -45,7 +45,23 @@ data class IntegritySignals(
      * 若因此降级生物解锁 / 自动填充，等于用安全名义剥夺可及性。故本信号只置
      * [IntegrityEnforcement.requireAccessibilityNotice]，**不改变** [RuntimeRiskLevel]。
      */
-    val thirdPartyAccessibilityEnabled: Boolean = false
+    val thirdPartyAccessibilityEnabled: Boolean = false,
+    /**
+     * 正被其他进程 `ptrace`（`/proc/self/status` 的 `TracerPid > 0`，ISSUE-P3-83）。
+     *
+     * **口径**：由 [ProcTracerPid] 解析、[TracedProcessProbe] 同步读取。该信号覆盖
+     * `Debug.isDebuggerConnected()` / JDWP 位**看不到**的一类注入——`ptrace` 系
+     * （`process_vm_readv` / `/proc/<pid>/mem`、Frida inject）不产生新映射也不置调试位。
+     *
+     * **参与等级判定**：与 [debuggerAttached] 同属「动态攻击特征」⇒ 命中即
+     * [RuntimeRiskLevel.COMPROMISED]（禁用生物快速解锁 + 自动填充 + 风险提示）。
+     *
+     * **非阻断承诺**（ISSUE-P3-83 定级依据）：拦不住不依赖 ptrace 的攻击，且可被 hook
+     * `open`/`read` 伪造为 `0`。本信号只**提高攻击成本**，不改变既有设计边界；
+     * 探测失败（`null`）按「未检测到」处理，**不** fail-closed——否则一个读不到
+     * `/proc/self/status` 的 ROM 就会以「纸面加固」换掉整机可用性。
+     */
+    val beingTraced: Boolean = false
 ) {
     companion object {
         /** 全无命中的干净信号 */
@@ -154,6 +170,7 @@ object RuntimeIntegrityPolicy {
 
     fun evaluate(signals: IntegritySignals): RuntimeIntegrityReport {
         val compromised = signals.debuggerAttached ||
+            signals.beingTraced ||
             signals.rootArtifactsDetected ||
             signals.magiskDetected ||
             signals.hookFrameworkDetected
@@ -198,29 +215,44 @@ object RuntimeIntegrityPolicy {
     }
 
     /**
-     * 以实时信号升级缓存的完整性快照（ISSUE-P3-53，纯函数）。
+     * 以实时信号升级缓存的完整性快照（ISSUE-P3-53 / ISSUE-P3-83，纯函数）。
      *
-     * 一次性扫描后缓存时变信号（调试器附加 / 钩子框架）必然失真——冷启动后再附加调试器不会
-     * 被既有快照捕获。敏感操作前把**实时求值**的信号与缓存信号按「或」合并后重新裁决，
-     * 保证「后续判定可捕获」且分级（COMPROMISED / ELEVATED / TRUSTED）与 fail-closed 语义一致。
+     * 一次性扫描后缓存时变信号（调试器附加 / 钩子框架 / **ptrace**）必然失真——冷启动后再附加
+     * 调试器或 tracer 不会被既有快照捕获。敏感操作前把**实时求值**的信号与缓存信号按「或」合并
+     * 后重新裁决，保证「后续判定可捕获」且分级（COMPROMISED / ELEVATED / TRUSTED）与 fail-closed
+     * 语义一致。
      *
      * @param base 缓存快照（首次扫描结果）
      * @param debuggerAttached 实时调试器信号（`Debug.isDebuggerConnected()` 等）
      * @param hookFrameworkDetected 实时钩子框架信号（磁盘扫描结果；非 suspend 路径可不提供）
+     * @param beingTraced 实时 ptrace 信号（ISSUE-P3-83；`TracerPid > 0`）。
+     *   **刻意无默认值**：安全信号不允许「忘记传参即放行」。
      */
     fun escalateForLiveSignals(
         base: RuntimeIntegrityReport,
         debuggerAttached: Boolean,
-        hookFrameworkDetected: Boolean
+        hookFrameworkDetected: Boolean,
+        beingTraced: Boolean
     ): RuntimeIntegrityReport {
-        if (!debuggerAttached && !hookFrameworkDetected) return base
+        if (!debuggerAttached && !hookFrameworkDetected && !beingTraced) return base
         return evaluate(
             base.signals.copy(
                 debuggerAttached = base.signals.debuggerAttached || debuggerAttached,
-                hookFrameworkDetected = base.signals.hookFrameworkDetected || hookFrameworkDetected
+                hookFrameworkDetected = base.signals.hookFrameworkDetected || hookFrameworkDetected,
+                beingTraced = base.signals.beingTraced || beingTraced
             )
         )
     }
+
+    /**
+     * ISSUE-P3-83：`TracerPid` 原始值 → 「是否正被 trace」的判定（纯函数）。
+     *
+     * **边界即在此处**：`null`（读不到 / 字段缺失）按「未检测到」处理并**不**判为被 trace——
+     * 这是明示的 fail-open 取舍，理由见 [IntegritySignals.beingTraced] KDoc。
+     * 之所以不把 `!= 0` 写成判据：内核对未被 trace 的进程填 `0`，若实现返回负值（非标准），
+     * `!= 0` 会把它误判为被 trace。
+     */
+    fun isTraced(tracerPid: Int?): Boolean = tracerPid != null && tracerPid > 0
 
     /**
      * ISSUE-P2-63：非 suspend 门控读到的快照是否已「陈旧」。

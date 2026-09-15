@@ -114,6 +114,8 @@ class RuntimeIntegrityPolicyTest {
             base = cached,
             debuggerAttached = true,
             hookFrameworkDetected = false
+        ,
+            beingTraced = false
         )
 
         assertEquals(RuntimeRiskLevel.COMPROMISED, escalated.level)
@@ -129,6 +131,8 @@ class RuntimeIntegrityPolicyTest {
             base = cached,
             debuggerAttached = false,
             hookFrameworkDetected = true
+        ,
+            beingTraced = false
         )
 
         assertEquals(RuntimeRiskLevel.COMPROMISED, escalated.level)
@@ -142,6 +146,8 @@ class RuntimeIntegrityPolicyTest {
             base = cached,
             debuggerAttached = false,
             hookFrameworkDetected = false
+        ,
+            beingTraced = false
         )
 
         assertEquals(cached, unchanged)
@@ -153,6 +159,8 @@ class RuntimeIntegrityPolicyTest {
             base = RuntimeIntegrityReport.UNDETERMINED,
             debuggerAttached = false,
             hookFrameworkDetected = false
+        ,
+            beingTraced = false
         )
 
         assertEquals(RuntimeRiskLevel.UNDETERMINED, unchanged.level)
@@ -304,5 +312,42 @@ class RuntimeIntegrityPolicyTest {
                 RuntimeIntegrityPolicy.evaluate(IntegritySignals.NONE)
             )
         )
+    }
+
+    // ===== ISSUE-P3-83：ptrace（TracerPid）实时信号 =====
+
+    @Test
+    fun `实时 ptrace 信号升级为最高风险并同时禁用两条通道`() {
+        val cached = RuntimeIntegrityPolicy.evaluate(IntegritySignals.NONE)
+
+        val escalated = RuntimeIntegrityPolicy.escalateForLiveSignals(
+            base = cached,
+            debuggerAttached = false,
+            hookFrameworkDetected = false,
+            beingTraced = true
+        )
+
+        assertEquals(RuntimeRiskLevel.COMPROMISED, escalated.level)
+        assertTrue(escalated.enforcement.disableBiometricQuickUnlock)
+        assertTrue(escalated.enforcement.disableAutofill)
+        assertTrue(escalated.enforcement.requireRiskNotice)
+    }
+
+    @Test
+    fun `缓存快照自带 ptrace 信号时同样判最高风险`() {
+        val report = RuntimeIntegrityPolicy.evaluate(IntegritySignals(beingTraced = true))
+
+        assertEquals(RuntimeRiskLevel.COMPROMISED, report.level)
+    }
+
+    @Test
+    fun `TracerPid 判定只认正数`() {
+        assertFalse("0 = 未被 trace", RuntimeIntegrityPolicy.isTraced(0))
+        assertTrue("正数 = 正被该 pid trace", RuntimeIntegrityPolicy.isTraced(4242))
+        assertFalse(
+            "读不到 → 不判为被 trace：ISSUE-P3-83 是提高成本项，不得因读不到就换掉整机可用性",
+            RuntimeIntegrityPolicy.isTraced(null)
+        )
+        assertFalse("非标准负值不得误判（判据是 > 0 而非 != 0）", RuntimeIntegrityPolicy.isTraced(-1))
     }
 }
