@@ -374,7 +374,7 @@
 
 ---
 
-## P3 低危问题、特性接线与体验优化（4 项）
+## P3 低危问题、特性接线与体验优化（2 项）
 
 > **状态（2026-09-12）**：历史 P3 批次 **ISSUE-P3-01 ~ P3-68** 除 P3-23（经产品裁决「不排期」）外
 > 已全部闭环并归档，逐条实现细节与验收证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md)（§3 ~ §32）。
@@ -501,49 +501,6 @@
 
 ---
 
-### ISSUE-P3-76（新登记）：密码 / 主密码输入未禁用输入法个性化学习
-
-- **优先级**：P3（低危隐私加固）
-- **核实时间点与核实方式（2026-09-12）**：全仓 `app/src/main` 检索 `IME_FLAG_NO_PERSONALIZED_LEARNING`
-  与 `InputMethodService` **零命中**；敏感输入现仅依赖 `KeyboardType.Password` 等常规配置。
-- **问题描述**：第三方输入法可能对用户输入做个性化学习 / 候选记忆，主密码与条目口令存在被输入法
-  词库记录的风险面。
-- **参考做法（据 `docs/references/keepass2android-架构分析.md`）**：`Util.SetNoPersonalizedLearning`
-  显式关闭输入法学习。
-- **验收标准（待整改）**：① 主密码、条目口令、生成器口令预览等**全部敏感输入路径**显式禁用个性化学习
-  （`EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING`，Compose 侧经 `PlatformImeOptions` 等机制下发）；
-  ② 有回归断言覆盖各敏感输入组件；③ 非敏感输入（如搜索框）行为不变。
-- **禁止**：仅在部分页面接线导致旁路；以自定义 `VisualTransformation` 冒充已关闭输入法学习
-  （防的不是同一威胁）。
-- **框架阻塞实测（2026-09-12，读取本机 Compose 源码核实）**：本仓 `androidx.compose.*` 为
-  **1.11.4**（BOM 2026.08.00）。逐一核对 Compose 的 `EditorInfo` 构造链后确认**无任何公开 API 可下发
-  该整型标志**：
-  1. `foundation/androidMain/.../text/input/internal/EditorInfo.android.kt` 的 `EditorInfo.update(...)`
-     仅由 `imeAction` 枚举构造 `this.imeOptions`，并附加 `IME_FLAG_FORCE_ASCII` / `IME_FLAG_NO_ENTER_ACTION` /
-     `IME_FLAG_NO_FULLSCREEN`，**不设也无可传入 `IME_FLAG_NO_PERSONALIZED_LEARNING` 的入口**；
-  2. `ui-text/androidMain/.../input/PlatformImeOptions.android.kt` 的 `PlatformImeOptions` **仅**暴露
-     `privateImeOptions: String?`（映射 `EditorInfo.privateImeOptions` 自由字符串，主流输入法**不解析**该
-     字符串来禁用学习），**无 imeOptions 位域**；
-  3. `KeyboardOptions.toImeOptions()`（`foundation/commonMain`）亦仅承载 `ImeAction` / `singleLine` 等，
-     不含原始位域；
-  4. 官方路线（`ui/androidMain/.../platform/PlatformTextInputMethodRequest.android.kt` 的
-     `createInputConnection(outAttributes: EditorInfo)`）允许拦截 `EditorInfo`，但它属**平台文本输入会话**
-     私有扩展点，需以 `PlatformTextInputSession.startInputMethod` 自行实现整个输入会话，**无法与
-     M3 `OutlinedTextField` 组合**（等于重造文本输入控件）；
-  5. 参考项目外证：开源项目 spela（PR #1114）对同类诉求的结论一致——「Compose 不在公开 Kotlin API 暴露
-     这些 int 标志，只能下沉到 Android View 系统包裹真实 `EditText`」。
-- **本次处置：登记为框架阻塞的已接受残余风险，不实施**（与 ISSUE-P3-58 同属「本地不可消除、保留跟踪」）：
-  - **残余风险已部分缓解**：敏感输入经 [SecurePasswordField](../app/src/main/java/com/keepasskey/app/ui/components/SecurePasswordField.kt)
-    统一走 `KeyboardType.Password`（→ `TYPE_TEXT_VARIATION_PASSWORD`），主流输入法（Gboard / SwiftKey /
-    Samsung / HeliBoard）对该 inputType **默认不做个性化学习**；显式标志只是更强一层的提示。
-  - **不采用高风险代偿**：把安全关键的 `SecurePasswordField` 整体改写为 `AndroidView(EditText)`
-    会牺牲 M3 外观 / 无障碍 / 现有 CharArray 桥接与擦除契约，风险与 P3 收益不成比例，**本次不做**。
-  - **AC③ 语义**：因未接线，非敏感输入行为天然不变（未产生任何旁路）。
-- **解除条件（可复现配方）**：若 Compose 后续版本在 `PlatformImeOptions` / `KeyboardOptions` 暴露
-  `imeOptions` 位域（或提供 `IME_FLAG_NO_PERSONALIZED_LEARNING` 的公开入口），则在 `SecurePasswordField`
-  统一接线并补回归断言（覆盖主密码 / 条目口令 / TOTP / 同步凭据各调用点），届时即可闭环本条。
-
----
 
 > **2026-09-13 新增（敏感数据流审计批次）**：转登自已退役的 `docs/SENSITIVE_DATA_FLOW_AUDIT_2026-09.md`
 > （处置归档见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §41）。以下为在基线 `d32f3e7` 与当前 `a669a48`
@@ -641,6 +598,23 @@
 > **回归断言**：新增 `AutofillSaveTimeoutWiringTest`（4 例）钉住「必须受预算约束 / 超时必须回调
 > 且留痕 / 处理体必须抽为普通 suspend 函数且不得残留 `return@launch` / 解绑仍不得回调」。
 > 见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §88。
+>
+> **2026-09-16 闭环（§89 批次，两项）**：
+> - **`ISSUE-P3-125` ①（选择器零匹配仍无条件挂入）——留痕接受现设计，并把该设计固化为可执行不变量**。
+>   复核结论：该「无条件」是**设计**而非疏漏。选择器是**用户显式指认调用方**的唯一入口，
+>   也正是 `ISSUE-P1-24`（首现授权）与 `ISSUE-P2-46`（`android://` 首次绑定）的**写入点**；
+>   若按「零匹配就不挂」或「零匹配才挂」设门槛，它会**在最需要的时候（零匹配）不可达**——
+>   零匹配正是用户唯一需要手动搜索的场景。严格匹配保护的是**自动下发**，那一条**一字未放宽**：
+>   候选层仍先过域归属（`ISSUE-P2-07`）与包名维度签名绑定（`ISSUE-P2-46`）；
+>   选择器路径在用户显式点选前**不携带任何明文**（数据集值恒为 `null`），点选后由
+>   `AutofillPickerActivity` 在受保护窗口内展示调用方归属（`ISSUE-P2-70`）并记录绑定。
+>   新增 `AutofillPickerEntryInvariantTest`（4 例）把上述不变量钉住：入口**必须无条件挂入**、
+>   文案**不得自称命中**、点选前**不得携带明文**、自动候选**仍须经严格匹配与绑定门控**。
+> - **`ISSUE-P3-76`（IME 个性化学习）——按其已定处置归档**：该条已在正文中完成处置与留痕
+>   （框架阻塞实测：Compose 1.11.4 无公开 API 可下发 `IME_FLAG_NO_PERSONALIZED_LEARNING`；
+>   登记为**已接受残余风险、不实施**，并给出**可复现的解除条件**）。
+>   处置已定 ⇒ 按 `ISSUE-P3-79` 的先例归档；解除条件原样收录于 §89 批次文档。
+> 见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §89。
 
 ---
 
@@ -666,4 +640,3 @@
 
 | 编号 | 来源 | 问题与位置（核实于 2026-09-13） | 验收标准 |
 |---|---|---|---|
-| ISSUE-P3-125 | 复核 `NEW-N2` / `NEW-B09-x` / `B03-N1` | ① **选择器零匹配仍无条件挂入**：`buildPickerDataset` 在 `appendUnlockedDatasets` 之后无条件调用（`KeePasskeyAutofillService.kt:196-203`），无候选数门槛 → 严格匹配设计对任意应用失效；② ~~**生产可重定向出口**~~ **【2026-09-15 §67 已闭环】**：`DigitalAssetLinksVerifier` 的 `endpointOverride` / `clockMs` 原为 `@Singleton` 上的 `@Volatile internal var`（`internal` 只限制模块外，同模块生产代码可把 DAL 拉取改写到任意 URL ⇒ 整体架空 RP↔应用绑定校验），现改为**构造注入的只读策略**（`DalEndpointResolver` / `MillisClock`，生产由 `DalVerifierModule` 提供唯一实现）；③ ~~**cargo 失败与缺失不可区分**~~ **【2026-09-15 §66 已闭环】**：`crypto/build.gradle.kts` 的 `cargoHostBuild` 原设 `isIgnoreExitValue = true`（吞掉编译失败）已移除——**缺失**走 `onlyIf` 跳过（有意降级），**失败**则任务直接失败（fail-closed）；已用「注入非法 cargo 参数 ⇒ `BUILD FAILED`」实测该分支 | ① 评估零匹配时改挂"无可信候选"占位数据集，或留痕接受现设计；~~② `endpointOverride` 改构造注入 / 测试专用隔离（防生产重定向）~~ **② 已完成（§67）**：构造注入 + 生产策略唯一 + `DalVerifierNoRuntimeOverrideTest` 守卫（含行为断言：Official 解析到官方路径、SystemClock 与系统时钟偏差 <5s）；~~③ 构建失败 fail-closed…~~ **③ 已完成（§66）** |
