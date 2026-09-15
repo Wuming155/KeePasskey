@@ -133,15 +133,19 @@
 -dontwarn com.google.zxing.**
 -dontwarn com.journeyapps.barcodescanner.**
 
-# 12. 日志剥离（ISSUE-P1-10 / ZT-10）
+# 12. 日志剥离（ISSUE-P1-10 / ZT-10；ISSUE-P3-98 修正签名）
 #     release 直接剥离 verbose/debug 日志调用点（AppLog.v/d 与框架 Log.v/d 双重剥离）；
 #     Log.e/Log.w 经 AppLog 包装器在运行期脱敏（仅保留异常类名，不透 message 与堆栈），
 #     因此**只剥 v/d，不剥 i/w/e**——剥掉 e/w 会让 release 包在故障时彻底失声。
+#     ISSUE-P3-98（审计 L1）：`AppLog` 是 Kotlin `object`，其 `v/d` 为**实例方法**
+#     （JVM 签名 `public final void v(String, String)`，未标 `@JvmStatic`）。
+#     原规则写作 `public static void v(...)` 因此**永不匹配（no-op）**——本批改为实例方法签名；
+#     该规则与 `AppLog.kt` 的声明形态由单测 `AppLogProguardRuleTest` 交叉锁定，防再次漂移。
 -assumenosideeffects class android.util.Log {
     public static int v(...);
     public static int d(...);
 }
 -assumenosideeffects class com.keepasskey.core.log.AppLog {
-    public static void v(...);
-    public static void d(...);
+    public void v(...);
+    public void d(...);
 }

@@ -427,10 +427,34 @@ class DatabaseSession(
     /**
      * P0-3 更改主凭据：更新内存中的主密码/密钥文件缓存，并立即触发全量重加密写盘。
      * KDBX4 规范在每次保存时均生成全新的随机 MasterSeed 与 Salt，因此更换凭据等价于以新凭据重新序列化保存。
+     *
+     * **密钥文件保持不变**（沿用当前会话的密钥文件快照）。
+     *
+     * ISSUE-P3-99（审计 L2）：此前快照以**默认参数表达式**（`= credentials.keyFileSnapshot()`）
+     * 形态注入调用栈——该克隆副本归本方法所有却**无处可擦**，换密后随局部变量出栈静默留存至 GC。
+     * 现改为显式重载：快照由本方法自持，并在返回前 `finally` 清零。
+     * **顺序硬约束**：清零只发生在**写盘与可能回滚之后**——写前擦会静默写出「用全零密钥文件加密」的库。
+     */
+    suspend fun changeCredentials(newPasswordChars: CharArray?): KdbxResult<Unit> {
+        val keyFileSnapshot = credentials.keyFileSnapshot()
+        return try {
+            changeCredentials(newPasswordChars, keyFileSnapshot)
+        } finally {
+            keyFileSnapshot?.fill(0)
+        }
+    }
+
+    /**
+     * 更换主凭据（显式指定新密钥文件）。
+     *
+     * @param newPasswordChars 新主密码（null = 仅密钥文件会话）
+     * @param newKeyFileData 新密钥文件字节（null = 不使用密钥文件）；
+     *   **该数组归调用方所有**——本方法只读取它（`rotateCredentials` 内部克隆写入缓存、
+     *   `KdbxFile.save` 读取用于派生），不持有引用、**不擦除**；调用方可在返回后安全复用或自行清零。
      */
     suspend fun changeCredentials(
         newPasswordChars: CharArray?,
-        newKeyFileData: ByteArray? = credentials.keyFileSnapshot()
+        newKeyFileData: ByteArray?
     ): KdbxResult<Unit> = mutex.withLock {
         if (core.readOnlyMode) {
             return@withLock KdbxResult.Failure(

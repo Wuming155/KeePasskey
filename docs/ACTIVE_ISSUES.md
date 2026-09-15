@@ -286,7 +286,7 @@
 
 ---
 
-## P3 低危问题、特性接线与体验优化（44 项）
+## P3 低危问题、特性接线与体验优化（39 项）
 
 > **状态（2026-09-12）**：历史 P3 批次 **ISSUE-P3-01 ~ P3-68** 除 P3-23（经产品裁决「不排期」）外
 > 已全部闭环并归档，逐条实现细节与验收证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md)（§3 ~ §32）。
@@ -461,9 +461,6 @@
 | ISSUE-P3-90 | 审计 F-08 | 公开死函数 `OtpEngine.parseOtpAuthUri` 对 `period` / `digits` 无钳制（`OtpEngine.kt:88-121`，零调用点；生产走 `TotpKeyUriParser` 已钳制） | 删除该函数，或改 `internal` 并补齐同等钳制（防未来误接入） |
 | ISSUE-P3-91 | 审计 F-16 | `HmacBlockStream.readAll` 用短路 `contentEquals`（`:120,128`；生产流式路径已正确用 `MessageDigest.isEqual`） | 改用 `MessageDigest.isEqual`，或标注为测试专用（当前无生产调用者） |
 | ISSUE-P3-92 | 审计 F-17 | UI 把 KDBX 的 ChaCha20 标注为「ChaCha20-Poly1305」（`DatabaseAlgorithmDialogs.kt:42`、`SettingsUiState.kt:69`、`SettingsPreferencesController.kt:36`），而该 AEAD 在本仓不存在 | 改为「ChaCha20 (RFC 8439，无 AEAD 标签)」，同步修正 `RESOLVED_LOG.md` 与相关单测 |
-| ISSUE-P3-94 | 审计 F-20 | 合并清单冗余 / 废弃权限，且无 `tools:node="remove"`（源清单 `AndroidManifest.xml:5-6` 声明 `ACCESS_NETWORK_STATE` / `USE_BIOMETRIC`，二者亦由库注入；`USE_FINGERPRINT` 仅来自 `androidx.biometric`） | 删除冗余声明；对废弃权限加 `tools:node="remove"`；保留 zxing 注入的 `CAMERA` |
-| ISSUE-P3-95 | 审计 F-21 | 自动填充确认返回 `RESULT_OK` 前不校验会话是否已锁定（`AutofillConfirmActivity.kt:138-164`；CM 各路径均有该判定） | `RESULT_OK` 前加 `if (vaultRepository.isLocked()) { finish(); return }`，并在会话锁定时丢弃未决响应 |
-| ISSUE-P3-96 | 审计 RUST-07 | Kotlin CBC **加密**流的明文中转副本未清零（`crypto/src/main/java/com/keepasskey/crypto/cipher/CbcStreams.kt:80` 的 `buffer.copyOf(filled)`、`:99` 的 `val chunk = buffer.copyOf(aligned)`）；解密流侧已修 | 两处均加 `finally { Arrays.fill(..., 0) }`，对齐该类 `:27` 的 KDoc 宣称 |
 | ISSUE-P3-97 | 审计 RUST-09 | CI 无一 job 同时具备 Rust 工具链与**原生用例真实执行**（**第四轮表述更正**：fast-gate `./gradlew test` 实际运行 `:crypto:test`，但未装 cargo → JNI 用例经 `Assume` 整类跳过；native-gate 装 cargo 但只跑 `cargoNdkBuild` + assemble 不跑 test。**编译期**符号签名核对已存在——`jni_bridge.rs:152-170` 由 `cargo test` 覆盖；缺的是 readelf / nm 级 `.so` 导出核对） | `native-gate` 中 `cargoNdkBuild` 后追加 `:crypto:test` 与导出符号数断言（实测若实现将通过：恰好 5 个 `Java_com_keepasskey` 导出）；如保留 Assume 跳过机制，须在 CI 汇总显式输出"原生用例 N 例被跳过"防假绿 |
 
 ---
@@ -479,8 +476,6 @@
 
 | 编号 | 来源 | 问题与位置（核实于 2026-09-13，对 HEAD `a669a48`） | 验收标准 |
 |---|---|---|---|
-| ISSUE-P3-98 | 审计 L1 | `proguard-rules.pro:144-147` 的 `AppLog` 剥离规则写作 `public static void v/d(...)`，而 `AppLog.kt` 的 `v/d` 是**实例方法**（`object AppLog`，无 `@JvmStatic`）→ 规则为 no-op（影响为零：生产零 `AppLog.v/d` 调用点 + 运行期 `debugEnabled` 守卫） | 改为实例方法签名，或删除该误导性规则；如保留须注明「双保险不成立」 |
-| ISSUE-P3-99 | 审计 L2 | `DatabaseSession.changeCredentials` 的默认参数 clone 未清零（`:357 newKeyFileData = credentials.keyFileSnapshot()`；方法内仅擦 `oldPwd` / `oldKey`，`:392-393`）。**第四轮机制更正**：会话缓存持**独立** clone（`SessionCredentialCache.kt:29-30` / `:41` / `:44` / `:69` 多重克隆，非"接管别名"）——**补擦可行且必要**（当前确漏一份冗余副本，RC-02 族） | **在 save 与 `restoreCredentials` 之后的 `finally` 中**补 `newKeyFileData?.fill(0)`（**不得**写在默认参数表达式或 `rotateCredentials` 之前——写前擦会静默写出用全零密钥文件加密的库）；断言「换密后无未擦密钥文件副本」**且**换密后库仍可正常解锁 |
 | ISSUE-P3-100 | 审计 L3 | `SyncProviderResolver.resolveRemotePath` 解密同步凭据后不清零（`:105-121` 的 `cfg.password` / `cfg.accessKey` / `cfg.secretKey`）；对照 `resolveProvider` 已清零（`:57,98-99`） | 对齐 `resolveProvider` 的 finally 清零；断言两侧一致 |
 | ISSUE-P3-101 | 审计 L4 | `S3RequestSigner.getSignatureKey` 漏擦 `combined`（含 `"AWS4"‖secretAccessKey`），仅擦 `prefix` / `keyBytes`（`:110-118`） | 补擦 `combined`；断言签名后无残留 |
 | ISSUE-P3-102 | 审计 L5 | 全量 SHA-1 口令哈希作为 `String` 驻留堆（`BreachCheckCoordinator.kt:63-65`）；虽仅出网前 5 位前缀（`BreachHasher.kt:31-32` → `queryRange(prefix)`），无盐 SHA-1 仍是口令等价物 | 改字节态计算 + 显式清零；断言「全量哈希不物化为 String」 |

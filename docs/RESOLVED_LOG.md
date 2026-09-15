@@ -64,8 +64,10 @@
 | §53 | 自动填充请求方归属与授权宽限收窄批次：选择器页强制展示请求方身份 + 不可归属域不再享受免重复确认 | ISSUE-P2-70 / P2-81 |
 | §54 | 包可见性与序列化缓冲擦除批次：最小 `<queries>` 恢复调用方指纹可读 + 整库序列化缓冲具名擦除 | ISSUE-P2-74 / P3-118 |
 | §55 | 多签名者匹配批次：签名轮换期以「调用方全部签名摘要」参与判定（任一命中即通过） | ISSUE-P3-93 |
+| §56 | 清单权限口径与确认回传门控批次：弃用权限 `tools:node="remove"` + 会话锁定即丢弃未决响应 | ISSUE-P3-94 / P3-95 |
+| §57 | 清零与规则一致性批次：CBC 加密流明文副本清零 + `AppLog` 剥离规则签名修正 + 换密密钥快照副本清零 | ISSUE-P3-96 / P3-98 / P3-99 |
 
-> 各批次验收证据（用例数 / 通过 / 失败 / 跳过）分别见 §2.22、§3.1、§4.1、§5、§6、§7、§8、§9、§10、§11、§12、§13、§14、§15、§16、§17、§18、§19、§20.3、§21.4、§22.9、§23.1、§24.3、§25.2、§26.3、§49.2、§50.2、§51.2、§52.2、§53.2、§54.2、§55.2。
+> 各批次验收证据（用例数 / 通过 / 失败 / 跳过）分别见 §2.22、§3.1、§4.1、§5、§6、§7、§8、§9、§10、§11、§12、§13、§14、§15、§16、§17、§18、§19、§20.3、§21.4、§22.9、§23.1、§24.3、§25.2、§26.3、§49.2、§50.2、§51.2、§52.2、§53.2、§54.2、§55.2、§56.2、§57.2。
 
 ---
 
@@ -3669,5 +3671,153 @@ $env:ANDROID_HOME\build-tools\<ver>\apksigner.bat verify --print-certs <产物>
    （多签名者摘要集合 + 信任记录集合判定），其本体（首次绑定 + 未安装包名降级策略）
    涉及产品口径与设备侧验证，仍为开放条目；`ISSUE-P3-94`（合并清单冗余权限）亦未触及。
 9. **计数**：本批 `ACTIVE_ISSUES.md` 的 P3 由 **45 → 44**（表行 38 → 37，标题条目仍 7），
+   按「表行 + 标题条目」双形式口径复算；P2 计数不变（9）。
+
+---
+
+## §56 清单权限口径与确认回传门控批次（2026-09-15）：P3-94 / P3-95
+
+> **本批次缘起**：认领 `ISSUE-P3-94`（审计 F-20：合并清单冗余 / 废弃权限 / 无 `tools:node="remove"`）
+> 与 `ISSUE-P3-95`（审计 F-21：自动填充确认返回 `RESULT_OK` 前不校验会话锁定）。
+
+### 56.1 交付清单
+
+| 编号 | 级别 | 缺陷（一句话） | 关键改动 | 依据 |
+|---|:--:|---|---|---|
+| **P3-94** | P3 | 源清单声明 `ACCESS_NETWORK_STATE` / `USE_BIOMETRIC`（审计称与库注入重复），且 `USE_FINGERPRINT`（API 28 起弃用，由 `androidx.biometric` 旧兼容路径注入）未被移除、清单亦无 `tools` 命名空间 | 按 **AC 逐条裁决**（依据写入清单注释）：① **AC①「删除冗余声明」未采纳**——二者是本模块**自身**运行期需求，改依赖第三方库传递声明属脆弱耦合，且 release 合并清单证据显示**各权限只出现一次**（合并器已去重），「冗余」仅在源文件层面；② **AC② 采纳**：`USE_FINGERPRINT` 加 `tools:node="remove"`（minSdk 36 ⇒ 旧 FingerprintManager 路径永不执行），并补 `xmlns:tools`；③ **AC③ 保留** `CAMERA`（zxing 扫码） | 审计 F-20；**合并清单实测证据**见 56.2 |
+| **P3-95** | P3 | 自动填充确认页在生物识别 / 手动确认成功后**无条件** `setResult(RESULT_OK)`，**不**校验会话是否已锁定（凭据管理器各路径均有该判定）→ 用户确认期间库被自动/手动锁定后，框架仍会把**已解密的数据集值写入目标表单**，形成「库已锁定但仍完成一次填充」的语义漏洞 | ① 新增纯策略 [AutofillAuthenticationPolicy.canDeliverAuthResult(vaultLocked)](../../app/src/main/java/com/keepasskey/app/autofill/AutofillSessionGrantStore.kt)（锁定即不允许回传）；② `AutofillConfirmActivity.completeAuthResult()` 在**进入时**与**回传前**各校验一次（后者覆盖 TOTP 二次动作与超时等待期间发生的锁定），锁定即走 `discardPendingResult()`（显式 `RESULT_CANCELED`）且**不**写「上次填充条目」记忆、**不**记录会话授权宽限；③ 新增 `AutofillConfirmDeliveryLockTest`（4 例） | 审计 F-21；与 CM 各路径对齐 |
+
+### 56.2 验收证据
+
+```powershell
+# ① 定向验证
+.\gradlew.bat :app:testDebugUnitTest --tests "com.keepasskey.app.autofill.AutofillConfirmDeliveryLockTest"
+# → BUILD SUCCESSFUL；tests=4 skipped=0 failures=0 errors=0
+.\gradlew.bat :app:testDebugUnitTest --tests "com.keepasskey.app.security.ManifestPermissionHygieneTest"
+# → BUILD SUCCESSFUL；tests=4 skipped=0 failures=0 errors=0
+
+# ② 全量单测（强制真实执行）
+.\gradlew.bat test --rerun-tasks --max-workers=1
+# → BUILD SUCCESSFUL in 2m 6s；114 actionable tasks: 114 executed
+#   结果汇总（build/test-results/**/TEST-*.xml）：
+#   tests=1709 failures=0 errors=0 skipped=13
+#   （app 930 / core 65 / crypto 127 / database 384 / sync 203）——较上批 +8（app）
+cd crypto/src/main/rust; cargo test
+# → test result: ok. 57 passed; 0 failed; 0 ignored（本批未触碰原生内核）
+.\gradlew.bat assembleRelease
+# → BUILD SUCCESSFUL in 2m 9s；216 actionable tasks: 23 executed, 193 up-to-date
+
+# ③ P3-94 的**合并产物级**证据（release 合并清单；整改前 USE_FINGERPRINT 位于 :57）
+Select-String -Path "app\build\intermediates\merged_manifests\release\processReleaseManifest\AndroidManifest.xml" `
+  -Pattern "android.permission.(USE_FINGERPRINT|CAMERA|USE_BIOMETRIC|ACCESS_NETWORK_STATE)"
+# → :12 ACCESS_NETWORK_STATE（本模块声明，单条）
+# → :13 USE_BIOMETRIC（本模块声明，单条）
+# → :65 CAMERA（zxing 注入，按 AC③ 保留）
+# → **USE_FINGERPRINT 已不出现在合并产物中**（AC② 达成）
+
+# ④ 产物与签名
+#   产物：D:\GithubWorkplace\KeePasskey\app\build\outputs\apk\release\app-release.apk
+#         （15,463,159 字节，2026-09-15 12:45:23）
+$env:ANDROID_HOME\build-tools\<ver>\apksigner.bat verify --print-certs <产物>
+# → V3.0 Signer: certificate SHA-256 digest: f3a6f0924d121e273be022589fa68724703cb7d906caa33fe4cded192cca842e
+```
+
+**新增用例（本批 +8 例）**：
+
+| 模块 | 用例 | 覆盖 |
+|---|---|---|
+| `app` | `AutofillConfirmDeliveryLockTest`（+4，新文件） | ① 策略：锁定 → 不允许回传、未锁定 → 允许；② **接线守卫**：每一处 `setResult(RESULT_OK)` 之前 400 字符窗口内必须出现 `canDeliverAuthResult(`（防「无条件回传」复发）；③ 必须有显式的 `setResult(RESULT_CANCELED)` 丢弃路径与集中收口 `discardPendingResult()`；④ 门控必须覆盖**进入与回传两个时点**（≥2 处），且「上次填充条目」记忆的写入位置必须晚于首次门控（防锁定后误记录） |
+| `app` | `ManifestPermissionHygieneTest`（+4，新文件） | ① 必须声明 `xmlns:tools`；② `USE_FINGERPRINT` 必须以 `tools:node="remove"` 移除；③ `CAMERA` **不得**被移除；④ 本模块自身运行期依赖的 5 项权限必须保留声明且不得被 `remove`（AC① 未采纳的回归守卫）。断言前剔除 XML 注释（整改说明自身含权限名与 `tools:node` 字样） |
+
+### 56.3 已知边界与口径（如实声明）
+
+1. **P3-94 的 AC① 未采纳，依据是「实测 + 耦合风险」双证据**：审计称「合并清单冗余」，
+   但 release 合并清单显示 `ACCESS_NETWORK_STATE` / `USE_BIOMETRIC` **各只出现一次**
+   （manifest merger 已按 `uses-permission` 去重）——即**产物中并无冗余**；若删除本模块声明，
+   本应用的运行期权限将依赖第三方库清单的传递声明，库一旦调整即**静默失去权限**并在运行期抛
+   `SecurityException`（且这类失败无法由任何单测捕获）。故保留声明并写入回归守卫。
+2. **P3-94 的 AC② 只在合并产物级验证**：单测锁「源清单写法」，真正的行为证据是**合并清单中
+   `USE_FINGERPRINT` 消失**（见 56.2 ③）。该权限在 minSdk 36 下无执行路径，
+   移除不影响生物识别（`USE_BIOMETRIC` 保留且为 androidx.biometric 的现代路径所需）。
+3. **P3-95 的双时点门控是有意为之**：只在「进入时」校验会漏掉「TOTP 二次动作 + 超时等待」期间
+   发生的自动锁定（该窗口可达秒级）；只在「回传前」校验则会漏掉锁定后仍写入
+   「上次填充条目」记忆与会话授权宽限的副作用。两处均以同一纯策略判定，语义唯一。
+4. **`RESULT_CANCELED` 与 `finish()` 的组合语义**：框架只在收到 `RESULT_OK` 时把数据集值写入目标
+   表单；显式 `RESULT_CANCELED` 是「丢弃未决响应」的明确表达（避免依赖默认值语义）。
+5. **本批未触及的相邻项**：`ISSUE-P3-96`（CBC 加密流明文中转副本清零）、
+   `ISSUE-P3-97`（CI 原生用例真实执行）、`ISSUE-P3-98`（`AppLog` proguard 规则 no-op）等仍为开放条目。
+6. **计数**：本批 `ACTIVE_ISSUES.md` 的 P3 由 **44 → 42**（表行 37 → 35，标题条目仍 7），
+   按「表行 + 标题条目」双形式口径复算；P2 计数不变（9）。
+
+---
+
+## §57 清零与规则一致性批次（2026-09-15）：P3-96 / P3-98 / P3-99
+
+> **本批次缘起**：认领三条「单点改动 + 静态/行为断言」类存量项——`ISSUE-P3-96`（CBC 加密流明文
+> 中转副本未清零）、`ISSUE-P3-98`（`AppLog` 剥离规则签名与声明形态不符，规则为 no-op）、
+> `ISSUE-P3-99`（换密路径密钥文件快照副本无处可擦）。
+
+### 57.1 交付清单
+
+| 编号 | 级别 | 缺陷（一句话） | 关键改动 | 依据 |
+|---|:--:|---|---|---|
+| **ISSUE-P3-96** | P3 | `CbcEncryptingOutputStream` 两处**明文中转副本**未清零：`emitAlignedBlocks()` 的 `buffer.copyOf(aligned)`（交给变换的 `chunk`）与 `close()` 的 `buffer.copyOf(filled)`（补齐前残余），与类 KDoc「明文缓冲在 close 时显式归零」的宣称不符 | ① `chunk` 改为 `try { sink.write(transform(key, chain, chunk)) } finally { Arrays.fill(chunk, 0) }`（**先写后擦**，避免擦掉即将写出的内容）；② `close()` 的残余副本改为**具名** `plainSource`，在 `Pkcs7.pad(...)` 返回后**立即**清零（该副本唯一用途就是 pad 入参——`Pkcs7.pad` 内部会再复制一份并返回新数组） | 审计 RUST-07；`AGENTS.md` §3.2 |
+| **ISSUE-P3-98** | P3 | `proguard-rules.pro` 把 `AppLog` 剥离规则写作 `public static void v/d(...)`，而 `AppLog` 是 Kotlin `object`、其 `v/d` 为**实例方法**（`public final void v(String, String)`，未标 `@JvmStatic`）→ 规则**永不匹配**（no-op），「双重剥离」实际只有运行期 `debugEnabled` 一重 | 规则改为实例方法签名（`public void v(...); public void d(...);`），并在规则文件与用例中**交叉锁定**「规则签名 ⇔ 声明形态」：任一侧改形态而另一侧未同步即失败；同时用例断言 `e/w/i` **不得**被剥离（release 故障时不得失声） | 审计 L1 |
+| **ISSUE-P3-99** | P3 | `changeCredentials` 的密钥文件快照以**默认参数表达式**（`= credentials.keyFileSnapshot()`）注入调用栈——`keyFileSnapshot()` 返回**克隆副本**，而 `rotateCredentials` 内部再克隆写入缓存、`KdbxFile.save` 只读取，故该副本归方法所有却**无处可擦**（换密后随局部变量出栈静默留存至 GC） | ① 拆为**显式重载**：单参 `changeCredentials(newPasswordChars)` 自持快照并在 `finally` 中清零；② 双参重载**移除默认值**（默认值形态正是「副本无处可擦」的成因），并在 KDoc 声明「`newKeyFileData` 归**调用方**所有，本方法不擦除」（`rotateCredentials` 只克隆读取）；③ 清零位置**晚于**写盘与可能回滚（写前擦会静默写出「用全零密钥文件加密」的库） | 审计 L2 + 第四轮机制更正 |
+
+### 57.2 验收证据
+
+```powershell
+# ① 定向验证
+.\gradlew.bat :crypto:testDebugUnitTest --tests "*CbcEncryptPlaintextWipeTest"
+# → BUILD SUCCESSFUL；tests=2 skipped=0 failures=0 errors=0
+.\gradlew.bat :database:testDebugUnitTest --tests "*ChangeCredentialsKeyFileWipeTest"
+# → BUILD SUCCESSFUL；tests=2 skipped=0 failures=0 errors=0
+.\gradlew.bat :app:testDebugUnitTest --tests "com.keepasskey.app.log.AppLogProguardRuleTest"
+# → BUILD SUCCESSFUL；tests=3 skipped=0 failures=0 errors=0
+
+# ② 全量单测（强制真实执行）
+.\gradlew.bat test --rerun-tasks --max-workers=1
+# → BUILD SUCCESSFUL in 2m 1s；114 actionable tasks: 114 executed
+#   结果汇总（build/test-results/**/TEST-*.xml）：
+#   tests=1716 failures=0 errors=0 skipped=13
+#   （app 933 / core 65 / crypto 129 / database 386 / sync 203）——较上批 +7
+cd crypto/src/main/rust; cargo test
+# → test result: ok. 57 passed; 0 failed; 0 ignored（本批未触碰原生内核）
+.\gradlew.bat assembleRelease
+# → BUILD SUCCESSFUL in 2m 47s；216 actionable tasks: 38 executed, 178 up-to-date
+#   产物：D:\GithubWorkplace\KeePasskey\app\build\outputs\apk\release\app-release.apk
+#         （15,463,159 字节，2026-09-15 13:44:10）
+$env:ANDROID_HOME\build-tools\<ver>\apksigner.bat verify --print-certs <产物>
+# → V3.0 Signer: certificate SHA-256 digest: f3a6f0924d121e273be022589fa68724703cb7d906caa33fe4cded192cca842e
+```
+
+**新增用例（本批 +7 例）**：
+
+| 模块 | 用例 | 覆盖 |
+|---|---|---|
+| `crypto` | `CbcEncryptPlaintextWipeTest`（+2，新文件） | **行为级**：注入记录型变换，捕获它收到的数组**引用**与**当时快照**——① 快照证明该副本原本确为明文（**非空跑**：旧实现下 `chunk` 在 close 后仍为明文，断言必红）；② 引用在 `close()` 后必须逐字节为 0（覆盖对齐块路径与末尾补齐块路径）；③ 断言写出的密文字节数不受清零动作影响（清零不得破坏写出语义）。含「恰好整块对齐 → 追加整填充块」分支 |
+| `database` | `ChangeCredentialsKeyFileWipeTest`（+2，新文件） | ① **行为级（非空跑）**：换密后产出的库必须能用「新主密码 + **原密钥文件**」重新解锁——若把快照清零写在**写盘之前**，产物将使用全零密钥文件派生，该断言必红（同时证明生效中的凭据缓存未被误擦）；② **静态接线**：单参重载必须自持快照并在 `finally` 中清零、双参重载**不得**再有默认值、且清零点必须位于写盘之后 |
+| `app` | `AppLogProguardRuleTest`（+3，新文件） | ① 规则必须用实例方法签名且不得出现 `public static void v/d(`；② **交叉锁定**：`AppLog.kt` 的 `v/d` 必须确为实例方法（无 `@JvmStatic`），任一侧改形态即失败；③ `e/w/i` 不得被剥离。断言前剔除注释（规则文件中大段说明含关键字） |
+
+### 57.3 已知边界与口径（如实声明）
+
+1. **P3-96 的残余可观测性缺口**：`close()` 路径中的 `plainSource`（`buffer.copyOf(filled)`）
+   **不会**传给变换实现，故行为级断言无法直接观察它——本批以「具名 + pad 返回后立即清零」的结构
+   保证其无泄漏窗口，并由代码审查（而非用例）兜底。传给变换的 `chunk` 与 `finalBlock` 均可被用例观察。
+2. **P3-99 的所有权边界（重要）**：单参重载自持快照（克隆）→ **由本方法擦除**；
+   双参重载的 `newKeyFileData` 归**调用方**所有 → **不擦除**（否则会破坏调用方的长期引用）。
+   该差异已在 KDoc 逐条声明；`SessionCredentialCache.rotateCredentials` 内部 `clone()` 写入缓存，
+   故本方法擦除入参不会影响生效凭据——这一点由行为级用例（换密后仍可解锁）独立证明。
+3. **P3-99 的失败路径不受影响**：`restoreCredentials(oldPwd, oldKey)` 是**接管引用**
+   （`passwordCache = oldPassword`），故 `oldPwd` / `oldKey` 在失败路径**不得**清零——
+   这与成功路径清零（`rotateCredentials` 已克隆新凭据）的差异是既有正确行为，本批未改动。
+4. **P3-98 的效果面为「零行为变更」，且产物大小可佐证**：生产代码**没有** `AppLog.v/d` 调用点
+   （审计已核），故规则改为可匹配后 R8 输出**不变**——本批 release 产物字节数与上一批完全一致
+   （均为 15,463,159 字节），与该判断一致。规则修正的价值在于：消除「看似有双重保险、实则单重」
+   的**误导性声明**，并把两侧形态用用例锁死，防未来新增 `AppLog.v/d` 调用点时误以为已被剥离。
+5. **本批未触及的相邻项**：`ISSUE-P3-97`（CI 原生用例真实执行）、`ISSUE-P3-100`（同步凭据解密后不清零）、
+   `ISSUE-P3-101`（S3 签名中间缓冲）、`ISSUE-P3-102`（口令 SHA-1 哈希 String 驻留）等同族清零项仍为开放条目。
+6. **计数**：本批 `ACTIVE_ISSUES.md` 的 P3 由 **42 → 39**（表行 35 → 32，标题条目仍 7），
    按「表行 + 标题条目」双形式口径复算；P2 计数不变（9）。
 

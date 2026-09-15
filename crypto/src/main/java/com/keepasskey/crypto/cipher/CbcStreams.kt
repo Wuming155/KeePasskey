@@ -77,7 +77,14 @@ internal class CbcEncryptingOutputStream(
         try {
             emitAlignedBlocks()
             // 残余不足一整块（filled == 0 时补齐一整个填充块）
-            val finalBlock = Pkcs7.pad(buffer.copyOf(filled))
+            // ISSUE-P3-96：`buffer.copyOf(filled)` 是明文的**中转副本**——`Pkcs7.pad` 内部会再复制
+            // 一份（返回新数组），故该副本的唯一用途就是作为 pad 的入参，用毕**立即**清零
+            val plainSource = buffer.copyOf(filled)
+            val finalBlock = try {
+                Pkcs7.pad(plainSource)
+            } finally {
+                Arrays.fill(plainSource, 0)
+            }
             try {
                 sink.write(transform(key, chain, finalBlock))
             } finally {
@@ -96,8 +103,14 @@ internal class CbcEncryptingOutputStream(
     private fun emitAlignedBlocks() {
         val aligned = filled - (filled % Pkcs7.BLOCK_SIZE)
         if (aligned == 0) return
+        // ISSUE-P3-96：`chunk` 是交给变换的**明文副本**（原地加密与否由变换实现决定），
+        // 写出后必须显式清零——否则该明文副本会随局部变量出栈后静默留存至 GC
         val chunk = buffer.copyOf(aligned)
-        sink.write(transform(key, chain, chunk))
+        try {
+            sink.write(transform(key, chain, chunk))
+        } finally {
+            Arrays.fill(chunk, 0)
+        }
         val rest = filled - aligned
         if (rest > 0) System.arraycopy(buffer, aligned, buffer, 0, rest)
         filled = rest

@@ -1,5 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- ISSUE-P3-94（审计 F-20）：清单权限口径的三条裁决（逐条附核实证据）。
+         ① **不删除** `ACCESS_NETWORK_STATE` / `USE_BIOMETRIC`（AC① 未采纳）：
+            二者是**本模块自身**的运行期需求（网络状态读取 / 生物识别），若改为依赖第三方库的
+            传递声明，库一旦调整清单本应用即静默失去权限并在运行期抛 `SecurityException`
+            ——属脆弱耦合；且证据表明**合并产物中并无重复条目**（release 合并清单中各出现一次，
+            合并器已去重），故「冗余」只存在于源文件层面，删除无收益而有风险。
+         ② `USE_FINGERPRINT` 加 `tools:node="remove"`（AC② 采纳）：该权限已被 API 28 弃用，
+            仅由 `androidx.biometric` 的**旧版 FingerprintManager 兼容路径**注入；
+            minSdk 36 ⇒ 该路径永不执行，保留只会扩大「已弃用权限」面。
+         ③ **保留** `CAMERA`（AC③）：由 zxing 注入用于扫码取景，不在本清单干涉。 -->
+    <uses-permission
+        android:name="android.permission.USE_FINGERPRINT"
+        tools:node="remove" />
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />

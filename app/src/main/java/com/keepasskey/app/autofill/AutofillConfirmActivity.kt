@@ -36,6 +36,7 @@ import com.keepasskey.app.security.BiometricAuthManager
 import com.keepasskey.app.security.BiometricResult
 import com.keepasskey.app.security.BiometricStatus
 import com.keepasskey.app.security.ClipboardSecurityManager
+import com.keepasskey.core.log.AppLog
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
@@ -230,6 +231,13 @@ class AutofillConfirmActivity : FragmentActivity() {
     private fun completeAuthResult() {
         if (completed) return
         completed = true
+        // ISSUE-P3-95：库已锁定 → **丢弃**未决响应（绝不回传 RESULT_OK），
+        // 且不写入「上次填充条目」记忆、不记录会话授权宽限（锁定后这些副作用均不应发生）
+        if (!AutofillAuthenticationPolicy.canDeliverAuthResult(vaultRepository.isLocked())) {
+            AppLog.w(TAG, "会话已锁定，丢弃本次自动填充确认响应")
+            discardPendingResult()
+            return
+        }
         // ISSUE-P3-39：记录本次确认填充的条目，供下次同站点/应用填充时置顶
         // （仅影响候选排序，不改变任何匹配与放行判定）
         intent.getStringExtra(EXTRA_ENTRY_ID)?.takeIf { it.isNotBlank() }
@@ -248,11 +256,26 @@ class AutofillConfirmActivity : FragmentActivity() {
             try {
                 handleTotpAfterConfirm()
             } finally {
-                // 官方认证数据集语义：RESULT_OK 后框架才会把该数据集的值写入目标表单
-                setResult(RESULT_OK)
+                // ISSUE-P3-95：**回传前再次校验**——TOTP 二次动作（含超时等待）期间会话可能刚被
+                // 自动锁定 / 手动锁定；锁定即丢弃未决响应，否则框架仍会把凭据值写入目标表单
+                if (AutofillAuthenticationPolicy.canDeliverAuthResult(vaultRepository.isLocked())) {
+                    // 官方认证数据集语义：RESULT_OK 后框架才会把该数据集的值写入目标表单
+                    setResult(RESULT_OK)
+                } else {
+                    AppLog.w(TAG, "会话在确认过程中被锁定，丢弃未决响应（不回传 RESULT_OK）")
+                    setResult(RESULT_CANCELED)
+                }
                 finish()
             }
         }
+    }
+
+    /**
+     * ISSUE-P3-95：丢弃未决响应——显式以 `RESULT_CANCELED` 结束，令框架不写入任何凭据值。
+     */
+    private fun discardPendingResult() {
+        setResult(RESULT_CANCELED)
+        finish()
     }
 
     /**
@@ -297,6 +320,8 @@ class AutofillConfirmActivity : FragmentActivity() {
     }
 
     companion object {
+        private const val TAG = "AutofillConfirm"
+
         const val EXTRA_CREDENTIAL_TITLE = "com.keepasskey.app.autofill.EXTRA_CREDENTIAL_TITLE"
 
         /** ISSUE-P3-03 (43b)：被填充条目的标识，供确认后按条目取 TOTP */

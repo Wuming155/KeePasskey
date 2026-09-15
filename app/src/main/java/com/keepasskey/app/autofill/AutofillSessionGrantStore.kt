@@ -115,4 +115,16 @@ object AutofillAuthenticationPolicy {
         grantActive: Boolean,
         datasetCarriesPassword: Boolean
     ): Boolean = sessionGrantEnabled && !vaultLocked && grantActive && !datasetCarriesPassword
+
+    /**
+     * ISSUE-P3-95（审计 F-21）：确认页**是否允许把认证结果回传给框架**。
+     *
+     * 缺陷形态：`AutofillConfirmActivity` 在生物识别 / 手动确认成功后无条件 `setResult(RESULT_OK)`，
+     * 而**不**校验会话是否已锁定（凭据管理器各路径均有该判定）——用户确认期间库被自动锁定 /
+     * 手动锁定后，框架仍会收到 RESULT_OK 并把**已解密的数据集值写入目标表单**，
+     * 形成「库已锁定但仍完成了一次填充」的语义漏洞（锁定本应立即终止一切下发）。
+     *
+     * 判定语义：会话已锁定 → **丢弃**未决响应（不回 RESULT_OK，框架不写入任何凭据值）。
+     */
+    fun canDeliverAuthResult(vaultLocked: Boolean): Boolean = !vaultLocked
 }
