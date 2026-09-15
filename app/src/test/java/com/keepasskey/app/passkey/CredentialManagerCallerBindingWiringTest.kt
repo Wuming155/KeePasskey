@@ -113,6 +113,52 @@ class CredentialManagerCallerBindingWiringTest {
         )
     }
 
+    // ── ISSUE-P2-83：候选层与回传层的门控必须真的接上 ────────────────
+
+    @Test
+    fun `候选组装与两处回传前校验均接入签名绑定门控`() {
+        listOf(ASSEMBLER, PASSWORD_FILL, PASSKEY_ASSERT).forEach { path ->
+            assertTrue(
+                "$path 未接入 CredentialManagerPackageBindingGate",
+                readSource(path).contains("CredentialManagerPackageBindingGate.")
+            )
+        }
+    }
+
+    @Test
+    fun `候选层包名维度必须以门控判定为前置`() {
+        val matcher = readSource(CANDIDATE_MATCHER)
+
+        assertTrue(
+            "通行密钥候选：普通应用分支必须以 packageDimensionAllowed 为前置",
+            matcher.contains("packageDimensionAllowed && callingPackage.isNotBlank() &&")
+        )
+        assertTrue(
+            "密码候选：包名维度必须以 packageDimensionAllowed 为前置",
+            matcher.contains("val packageMatch = packageDimensionAllowed && callingPackage.isNotBlank()")
+        )
+        assertTrue(
+            "组装器必须经抽取出的候选判定器收口（不得再内联一份各自漂移的判据）",
+            readSource(ASSEMBLER).contains("CredentialCandidateMatcher.matchesPassword(") &&
+                readSource(ASSEMBLER).contains("CredentialCandidateMatcher.matchesPasskey(")
+        )
+    }
+
+    @Test
+    fun `findMatchingEntries 的门控入参不得有默认值`() {
+        val source = readSource(PROVIDER_SERVICE)
+
+        assertTrue(
+            "包名维度必须显式接收门控判定结果",
+            source.contains("packageDimensionAuthorized: Boolean")
+        )
+        assertFalse(
+            "包名维度是越权面：给默认值等于留一个「忘记传参 = 放行」的 fail-open 口子",
+            source.contains("packageDimensionAuthorized: Boolean = true") ||
+                source.contains("packageDimensionAuthorized: Boolean = false")
+        )
+    }
+
     // ── ISSUE-P2-84：保存失败不得谎报成功 ─────────────────────────────
 
     @Test
@@ -143,6 +189,10 @@ class CredentialManagerCallerBindingWiringTest {
         const val PASSWORD_FILL = "app/src/main/java/com/keepasskey/app/passkey/PasswordFillActivity.kt"
         const val PASSWORD_SAVE = "app/src/main/java/com/keepasskey/app/passkey/PasswordSaveActivity.kt"
         const val PASSKEY_CREATE = "app/src/main/java/com/keepasskey/app/passkey/PasskeyCreateActivity.kt"
+        const val PASSKEY_ASSERT = "app/src/main/java/com/keepasskey/app/passkey/PasskeyAssertionActivity.kt"
+        const val ASSEMBLER = "app/src/main/java/com/keepasskey/app/passkey/CredentialResponseAssembler.kt"
+        const val CANDIDATE_MATCHER = "app/src/main/java/com/keepasskey/app/passkey/CredentialCandidateMatcher.kt"
+        const val PROVIDER_SERVICE = "app/src/main/java/com/keepasskey/app/passkey/KeePasskeyCredentialProviderService.kt"
 
         const val CM_PREFS_NAME = "keepasskey_cm_caller_trust"
         const val AUTOFILL_PREFS_NAME = "keepasskey_autofill_caller_trust"

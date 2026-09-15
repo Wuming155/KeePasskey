@@ -14,6 +14,8 @@ import androidx.credentials.provider.PublicKeyCredentialEntry
 import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.AutofillBlocklistStore
 import com.keepasskey.app.data.repository.VaultRepository
+import com.keepasskey.app.security.CallerCertDigests
+import com.keepasskey.core.log.AppLog
 import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.model.PasskeyData
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -41,7 +43,9 @@ import javax.inject.Inject
 class CredentialResponseAssembler @Inject constructor(
     @ApplicationContext private val context: Context,
     private val vaultRepository: VaultRepository,
-    private val autofillBlocklistStore: AutofillBlocklistStore
+    private val autofillBlocklistStore: AutofillBlocklistStore,
+    /** ISSUE-P2-83：CM 通道 `android://` 包名维度的调用方「包名 + 签名摘要」绑定存储 */
+    private val callerTrustStore: CredentialManagerCallerTrustStore
 ) {
 
     /**
@@ -53,6 +57,23 @@ class CredentialResponseAssembler @Inject constructor(
         val callingPackage = callingAppInfo?.packageName.orEmpty()
         val callingOrigin = extractOrigin(callingAppInfo)
         val responseBuilder = BeginGetCredentialResponse.Builder()
+
+        // ISSUE-P2-83：`android://` 包名维度的**签名绑定门控**（本类是全部候选的唯一出口，
+        // 直查与链式解锁两条路径都经此，故门控只需在此一处收口）。
+        // 三值判定的依据与 `UNBOUND` 的边界见 [CredentialManagerPackageBindingGate] KDoc。
+        val callingCertDigests = callingAppInfo
+            ?.let { CallingOriginResolver.certDigests(it) }
+            ?: CallerCertDigests.EMPTY
+        val packageDimensionAllowed = CredentialManagerPackageBindingGate.allowsPackageDimension(
+            callingPackage = callingPackage,
+            certDigests = callingCertDigests,
+            isTrusted = callerTrustStore::isTrusted,
+            hasAnyBinding = callerTrustStore::hasAnyBindingFor
+        )
+        if (!packageDimensionAllowed) {
+            // P1-10：日志不得携带包名 / 摘要等调用方标识，仅记录事实
+            AppLog.i(TAG, "android:// 维度未放行（该包名已绑定但本次签名不匹配），本次不提供包名维度候选")
+        }
 
         // ISSUE-P0-02：候选出口处的 fail-closed 黑名单复核（命中即不产出任何候选，
         // 语义等价于本应用从未注册过凭据服务）。包名空白时交由下游严格匹配兜底为「无候选」。
@@ -68,11 +89,27 @@ class CredentialResponseAssembler @Inject constructor(
         for (option in request.beginGetCredentialOptions) {
             when (option) {
                 is BeginGetPublicKeyCredentialOption -> {
-                    buildPasskeyEntries(option, callingOrigin, callingPackage, allEntries, requestCodes, responseBuilder)
+                    buildPasskeyEntries(
+                        option,
+                        callingOrigin,
+                        callingPackage,
+                        packageDimensionAllowed,
+                        allEntries,
+                        requestCodes,
+                        responseBuilder
+                    )
                 }
 
                 is BeginGetPasswordOption -> {
-                    buildPasswordEntries(option, callingPackage, callingOrigin, allEntries, requestCodes, responseBuilder)
+                    buildPasswordEntries(
+                        option,
+                        callingPackage,
+                        callingOrigin,
+                        packageDimensionAllowed,
+                        allEntries,
+                        requestCodes,
+                        responseBuilder
+                    )
                 }
             }
         }
@@ -84,6 +121,7 @@ class CredentialResponseAssembler @Inject constructor(
         option: BeginGetPublicKeyCredentialOption,
         callingOrigin: String,
         callingPackage: String,
+        packageDimensionAllowed: Boolean,
         allEntries: List<KdbxEntry>,
         requestCodes: RequestCodeAllocator,
         responseBuilder: BeginGetCredentialResponse.Builder
@@ -110,12 +148,13 @@ class CredentialResponseAssembler @Inject constructor(
         }
 
         val matchedPasskeys = allEntries.filter { entry ->
-            val passkey = PasskeyData.fromCustomFields(entry.customFields) ?: return@filter false
-            when {
-                browserFlow -> DomainMatcher.isDomainMatch(passkey.relyingPartyId, targetRpId)
-                else -> callingPackage.isNotBlank() &&
-                    DomainMatcher.isAndroidPackageMatch(entry.url, callingPackage)
-            }
+            CredentialCandidateMatcher.matchesPasskey(
+                entry = entry,
+                browserFlow = browserFlow,
+                targetRpId = targetRpId,
+                callingPackage = callingPackage,
+                packageDimensionAllowed = packageDimensionAllowed
+            )
         }
 
         for (entry in matchedPasskeys) {
@@ -171,6 +210,7 @@ class CredentialResponseAssembler @Inject constructor(
         option: BeginGetPasswordOption,
         callingPackage: String,
         callingOrigin: String,
+        packageDimensionAllowed: Boolean,
         allEntries: List<KdbxEntry>,
         requestCodes: RequestCodeAllocator,
         responseBuilder: BeginGetCredentialResponse.Builder
@@ -181,12 +221,12 @@ class CredentialResponseAssembler @Inject constructor(
         val browserFlow = CallingOriginResolver.isBrowserOrigin(callingOrigin)
         val targetDomain = if (browserFlow) DomainMatcher.extractDomain(callingOrigin) else ""
         val matchedPasswords = allEntries.filter { entry ->
-            val hasPassword = entry.password != null
-            val domainMatch = targetDomain.isNotBlank() && entry.url.isNotBlank() &&
-                    DomainMatcher.isDomainMatch(entry.url, targetDomain)
-            val packageMatch = callingPackage.isNotBlank() && entry.url.isNotBlank() &&
-                    DomainMatcher.isAndroidPackageMatch(entry.url, callingPackage)
-            hasPassword && (domainMatch || packageMatch)
+            CredentialCandidateMatcher.matchesPassword(
+                entry = entry,
+                targetDomain = targetDomain,
+                callingPackage = callingPackage,
+                packageDimensionAllowed = packageDimensionAllowed
+            )
         }
 
         for (entry in matchedPasswords) {

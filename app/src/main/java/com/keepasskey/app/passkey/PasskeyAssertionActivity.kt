@@ -9,6 +9,7 @@ import androidx.lifecycle.lifecycleScope
 import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.security.BiometricAuthManager
+import com.keepasskey.app.security.CallerCertDigests
 import com.keepasskey.core.log.AppLog
 import com.keepasskey.core.model.PasskeyData
 import com.keepasskey.crypto.passkey.PasskeyCryptoEngine
@@ -46,6 +47,10 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
 
     @Inject
     lateinit var fillVerifier: CredentialFillVerifier
+
+    /** ISSUE-P2-83：CM 通道调用方签名绑定存储（`android://` 维度签发前二次校验） */
+    @Inject
+    lateinit var callerTrustStore: CredentialManagerCallerTrustStore
 
     /** 防止验证回调 / 取消回调 / 重复 finish 交错产生多重签发或重复收尾 */
     private var settled = false
@@ -139,8 +144,20 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
                     // 经不可伪造的 PendingIntent extras 传入，同 PasswordFillActivity 模式）；
                     // 非应用绑定（https://<rpId>）的条目一律拒绝普通应用签发
                     val boundPackage = DomainMatcher.extractAndroidBoundPackage(entry.url)
-                    if (expectedPackage.isBlank() || boundPackage != expectedPackage.trim().lowercase()) {
-                        AppLog.e(TAG, "调用包名与凭据绑定包名不一致，拒绝签发断言")
+                    // ISSUE-P2-83：包名维度还须通过调用方**签名绑定**门控——绑定过的包名若本次
+                    // 调用方签名不匹配（换签名 / 同 applicationId 侧载顶替），一律拒绝签发。
+                    val packageDimensionAllowed = CredentialManagerPackageBindingGate.allowsPackageDimension(
+                        callingPackage = expectedPackage,
+                        certDigests = providerReq?.callingAppInfo
+                            ?.let { CallingOriginResolver.certDigests(it) }
+                            ?: CallerCertDigests.EMPTY,
+                        isTrusted = callerTrustStore::isTrusted,
+                        hasAnyBinding = callerTrustStore::hasAnyBindingFor
+                    )
+                    if (expectedPackage.isBlank() || !packageDimensionAllowed ||
+                        boundPackage != expectedPackage.trim().lowercase()
+                    ) {
+                        AppLog.e(TAG, "调用包名与凭据绑定包名不一致或签名未绑定，拒绝签发断言")
                         failAndFinish()
                         return@launch
                     }

@@ -10,6 +10,7 @@ import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.AutofillBlocklistStore
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.security.BiometricAuthManager
+import com.keepasskey.app.security.CallerCertDigests
 import com.keepasskey.core.log.AppLog
 import com.keepasskey.core.model.KdbxEntry
 import dagger.hilt.android.AndroidEntryPoint
@@ -49,6 +50,10 @@ class PasswordFillActivity : BaseCredentialActivity() {
     @Inject
     lateinit var autofillBlocklistStore: AutofillBlocklistStore
 
+    /** ISSUE-P2-83：CM 通道调用方签名绑定存储（`android://` 维度回传前二次校验） */
+    @Inject
+    lateinit var callerTrustStore: CredentialManagerCallerTrustStore
+
     private var settled = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -65,13 +70,12 @@ class PasswordFillActivity : BaseCredentialActivity() {
         // 第四轮复核对 P3-111 的定版提醒必须遵守：`retrieve*` 取不到（例如系统未以 fillIn
         // 方式注入）时**不得**据此拒绝——否则会把「能填充」变成「不能填充」。故仅在
         // **两者均可得且不一致**时 fail-closed；取不到即保持既有判定面不变。
-        val attestedPackage = try {
-            CallingOriginResolver.systemAttestedPackageName(
-                PendingIntentHandler.retrieveProviderGetCredentialRequest(intent)?.callingAppInfo
-            )
+        val providerReq = try {
+            PendingIntentHandler.retrieveProviderGetCredentialRequest(intent)
         } catch (_: Exception) {
             null
         }
+        val attestedPackage = CallingOriginResolver.systemAttestedPackageName(providerReq?.callingAppInfo)
         if (attestedPackage != null &&
             expectedPackage.isNotBlank() &&
             attestedPackage != expectedPackage.trim()
@@ -117,7 +121,18 @@ class PasswordFillActivity : BaseCredentialActivity() {
                 // Web 绑定条目不得经同形包名放行（Web 绑定只走域匹配）
                 val domainOk = expectedDomain.isNotBlank() && entry.url.isNotBlank() &&
                         DomainMatcher.isDomainMatch(entry.url, expectedDomain)
-                val packageOk = expectedPackage.isNotBlank() && entry.url.isNotBlank() &&
+                // ISSUE-P2-83：包名维度除严格 `android://` 匹配外，还须通过调用方**签名绑定**门控
+                // （与候选组装同一判据，杜绝组装与回传之间的窗口被利用）。
+                val packageDimensionAllowed = CredentialManagerPackageBindingGate.allowsPackageDimension(
+                    callingPackage = expectedPackage,
+                    certDigests = providerReq?.callingAppInfo
+                        ?.let { CallingOriginResolver.certDigests(it) }
+                        ?: CallerCertDigests.EMPTY,
+                    isTrusted = callerTrustStore::isTrusted,
+                    hasAnyBinding = callerTrustStore::hasAnyBindingFor
+                )
+                val packageOk = packageDimensionAllowed &&
+                        expectedPackage.isNotBlank() && entry.url.isNotBlank() &&
                         DomainMatcher.isAndroidPackageMatch(entry.url, expectedPackage)
                 if (!domainOk && !packageOk) {
                     AppLog.e(TAG, "条目与调用方不匹配，拒绝回传密码")

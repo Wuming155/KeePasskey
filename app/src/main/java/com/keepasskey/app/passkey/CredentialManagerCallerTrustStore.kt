@@ -72,6 +72,24 @@ class CredentialManagerCallerTrustStore @Inject constructor(
     }
 
     /**
+     * 该包名是否**已有任一签名绑定**（ISSUE-P2-83 AC② 的判定支点）。
+     *
+     * 用于区分两种「[isTrusted] 返回 false」——它们的安全含义**完全相反**：
+     * - **已有绑定但摘要不匹配** ⇒ 绑定过的应用被换签名 / 被同 `applicationId` 侧载应用顶替
+     *   ⇒ 必须**不命中**；
+     * - **从未绑定** ⇒ 无法判定（无参照），退回包名维度的既有行为（见
+     *   [com.keepasskey.app.passkey.CredentialManagerPackageBindingGate] 的边界说明）。
+     *
+     * 只看键的**存在性**，不读值，故不泄露任何摘要内容。
+     */
+    fun hasAnyBindingFor(packageName: String): Boolean {
+        val normalized = AutofillPackageNames.normalize(packageName) ?: return false
+        val prefix = "$normalized|"
+        val persisted = prefs?.all?.keys?.any { it.startsWith(prefix) } ?: false
+        return persisted || memoryTrusted.any { it.startsWith(prefix) }
+    }
+
+    /**
      * 记录显式授权（用户在保存 / 注册流程中把凭据交给该调用方）。
      *
      * @return true=写入成功；false=包名非法或摘要不可读（**均保持未绑定**，调用方不得据此放行）

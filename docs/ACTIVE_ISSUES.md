@@ -84,7 +84,7 @@
 
 ---
 
-## P2 中危缺陷与协议/测试缺口（4 项）
+## P2 中危缺陷与协议/测试缺口（3 项）
 
 > **历史**：**ISSUE-P2-28 ~ P2-41**（往返丢字段与布尔/数值语义、MemoryProtection 读写语义、
 > KDF 缺参 fail-closed、isPackageMatch 的 android:// 硬约束、requireRiskNotice 接线、
@@ -240,50 +240,18 @@
 > 并**可能不再提示保存**，用户口令静默丢失。已改为失败即 `failAndFinish()`，并加接线守卫锁定
 > 「失败判定前置于成功回传」。体例同 §74（同轮登记并闭环，不在本表留存行）。
 > **本批同时推进 `ISSUE-P2-83`（AC 分步，本行仍留表内）与闭环 `ISSUE-P3-111`**，见 §81。
-
-### ISSUE-P2-83（新登记）：`android://` 维度在 Credential Manager 通道仍无签名绑定
-
-- **优先级**：P2（与 `ISSUE-P2-46` 同根因、不同通道的残余越权面）
-- **核实时间点与核实方式（2026-09-15，对 HEAD `f8645cb`）**：全仓检索 `isAndroidPackageMatch`
-  并**逐一分类全部调用点**——`AutofillCandidateRanker.kt:120`（自动填充候选，§75 已整改）、
-  `CredentialResponseAssembler.kt:117`（通行密钥断言候选）、`:188`（密码填充候选）、
-  `KeePasskeyCredentialProviderService.kt:342`（`findMatchingEntries`）、
-  `PasswordFillActivity.kt:97`（回传前二次校验）。**后四处均在 Credential Manager（CM）通道**，
-  与整改前一样只做「条目 `android://` 绑定包名 == 调用包名」的精确字符串相等，**不比对签名**。
-- **与自动填充通道的差异（为何未在 §75 同批处置）**：
-  1. CM 通道**每次放行都需用户验证**（生物识别 / 受保护窗口内显式确认，见 `PasswordFillActivity`
-     的 ISSUE-P0-02 整改），故不属「静默下发」——风险等级低于自动填充通道，但**候选面**仍对
-     「以同 `applicationId` 侧载的应用」开放；
-  2. **不得**直接复用 `AutofillCallerTrustStore`：该存储在自动填充侧的语义是「用户在确认页
-     勾选『记住此应用』」，而 CM 的生物识别路径**没有勾选位**（系统 `BiometricPrompt` 不可承载
-     UI 控件）。直接复用会导致两种坏结果——CM 侧永不写入（首次绑定后仍不命中，功能回归）
-     或为写入而放宽自动填充侧的严格性（反向削弱 ISSUE-P1-24）。故须独立设计并写明语义边界。
-- **验收标准**：① 为 CM 通道的 `android://` 维度引入签名绑定（复用既有存储或新建设计，
-  **必须**写明与 `AutofillCallerTrustStore` / `ISSUE-P1-24` 的语义边界，**不得**削弱后者）；
-  ② 回归断言覆盖「同包名不同签名 → 不命中」与「未安装绑定包 + 侧载同 applicationId → 不命中」；
-  ③ 设备侧实测 CM 的密码填充与通行密钥断言两条链路（ADB）。
-- **备注**：本条**不是**新发现的独立缺陷，而是 `ISSUE-P2-46` 在**同一根因**下未覆盖的通道；
-  登记的正是为了避免「按通道部分闭环 = 整体闭环」的误读（体例同 `ISSUE-P2-49` 的 AC 分步进展）。
-- **进展（2026-09-16，§81 批次，AC 分步，本行仍留表内）**：
-  - **AC① 已完成**：新增 `CredentialManagerCallerTrustStore`（CM 专属信任存储，独立 prefs 文件
-    `keepasskey_cm_caller_trust`），并在其 KDoc 逐条写明与 `AutofillCallerTrustStore` /
-    `ISSUE-P1-24` 的三条语义边界——**刻意不共用存储**（共用会让一次 CM 授权使自动填充侧首现闸门
-    静默不再询问，即削弱 P1-24）。判定复用通道无关的纯函数
-    `AndroidPackageBindingPolicy.isPackageDimensionAuthorized`，保证两通道包名维度同口径。
-  - **写入口已完成**：`PasswordSaveActivity`（保存）与 `PasskeyCreateActivity`（注册）在用户显式
-    发起、受保护窗口内的流程中写入「包名 + 主签名摘要」绑定；摘要不可读一律**不写入**（不落
-    `pkg|` 降级键）。
-  - **AC② 存储层判据已完成**（11 例宿主用例，含「同包名不同签名 → 不命中」与
-    「摘要不可读 → 不命中」）；**候选层判据未完成**——CM 通道 4 处
-    `DomainMatcher.isAndroidPackageMatch` 调用点尚未接入该门控，故端到端「不命中」**未达成**。
-  - **未完成且不得略过**：① 候选层放行门控（`CredentialResponseAssembler` 的两处匹配 +
-    `PasswordFillActivity` / `PasskeyAssertionActivity` 的回传前二次校验）；② **无绑定调用方的
-    恢复路径**——CM 没有自动填充那样的「选择器」中立面，直接按「未授权即不产出候选」实施会让
-    存量 `android://` 条目在 CM 通道**无路可走**（功能回归），须在受保护窗口内提供**首现显式授权**
-    面（复用既有 `CredentialFillConfirmScreen` 的 `attributionContent` 槽位）；③ AC③ 设备侧实测。
-  - 详见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §81。**本行不得因①已完成而按「整体闭环」归档。**
-
----
+>
+> **2026-09-16 闭环（§82 批次）**：**`ISSUE-P2-83`** 剩余部分（AC② 候选层 + AC③ 设备侧）已收口——
+> ① 新增**三值**门控 `CredentialManagerPackageBindingGate`：把「已绑定但签名不匹配」（**拒绝**）
+> 与「从未绑定」（退回既有行为）分开；二元判据会因 CM **没有选择器中立面**而使存量
+> `android://` 条目无路可走。② 候选层判据抽为纯函数 `CredentialCandidateMatcher`，
+> 使「不命中」可在宿主与真机**两条**上断言。③ 四处调用点全部接入（组装器两处、
+> 密码填充与通行密钥断言的回传/签发前二次校验），`findMatchingEntries` 的入参**无默认值**。
+> **残余（如实声明）**：AC③ 的「系统 CM UI 全链路」**未**由 ADB 驱动——本机
+> `cmd credential` 返回 `No shell command implementation`，无入口构造 `BeginGetCredentialRequest`；
+> 已在真机以**真实绑定存储 + 候选层判据**覆盖两条链路的入选/不入选。见 §82。
+> **本项不得读作「`UNBOUND` 也已加固」**——从未绑定过的包名仍按既有包名维度放行，
+> 其边界与理由写在门控 KDoc 中。
 
 ### ISSUE-P2-47（新登记）：同步与封印凭据的回滚防护不足
 

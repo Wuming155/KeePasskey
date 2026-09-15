@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.content.SharedPreferences
 import com.keepasskey.app.security.CallerCertDigests
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -166,6 +167,66 @@ class CredentialManagerCallerTrustStoreTest {
         assertTrue(store.isTrusted(pkg, CallerCertDigests.ofSingle(digestA)))
         assertFalse(store.isTrusted(pkg, digestB))
         assertFalse(store.isTrusted(pkg, null))
+    }
+
+    // ── ISSUE-P2-83 AC②：绑定存在性判定（区分「已绑定不匹配」与「从未绑定」） ──
+
+    @Test
+    fun `hasAnyBindingFor 仅在确有绑定时为真`() {
+        assertFalse(store.hasAnyBindingFor(pkg))
+
+        store.trust(pkg, digestA)
+
+        assertTrue(store.hasAnyBindingFor(pkg))
+        assertTrue("换签名后仍须认为该包名『已绑定』——这正是要拦下的形态", store.hasAnyBindingFor(pkg))
+    }
+
+    @Test
+    fun `hasAnyBindingFor 不受其他包名影响`() {
+        store.trust(pkg, digestA)
+
+        assertFalse(store.hasAnyBindingFor("com.example.other"))
+    }
+
+    @Test
+    fun `hasAnyBindingFor 对非法包名一律为假`() {
+        store.trust(pkg, digestA)
+
+        assertFalse(store.hasAnyBindingFor("not a package"))
+        assertFalse(store.hasAnyBindingFor(""))
+    }
+
+    @Test
+    fun `存储与门控集成：已绑定包名的异签名调用方被拒`() {
+        store.trust(pkg, digestA)
+
+        fun decide(callingPackage: String, digests: CallerCertDigests) =
+            CredentialManagerPackageBindingGate.decide(
+                callingPackage = callingPackage,
+                certDigests = digests,
+                isTrusted = store::isTrusted,
+                hasAnyBinding = store::hasAnyBindingFor
+            )
+
+        assertEquals(
+            CredentialManagerPackageBindingGate.Decision.AUTHORIZED,
+            decide(pkg, CallerCertDigests.ofSingle(digestA))
+        )
+        assertEquals(
+            "AC②：同包名不同签名 ⇒ 不命中",
+            CredentialManagerPackageBindingGate.Decision.REJECTED,
+            decide(pkg, CallerCertDigests.ofSingle(digestB))
+        )
+        assertEquals(
+            "摘要不可读且已绑定 ⇒ fail-closed",
+            CredentialManagerPackageBindingGate.Decision.REJECTED,
+            decide(pkg, CallerCertDigests.EMPTY)
+        )
+        assertEquals(
+            "从未绑定 ⇒ 退回既有行为，不得拒绝",
+            CredentialManagerPackageBindingGate.Decision.UNBOUND,
+            decide("com.example.other", CallerCertDigests.ofSingle(digestA))
+        )
     }
 
     /** 供断言「无降级键」的实现细节：键空间必须始终为 `pkg|digest` 形态 */

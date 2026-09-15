@@ -326,11 +326,20 @@ class KeePasskeyCredentialProviderService : CredentialProviderService() {
      * 移除 title.contains 启发式，杜绝宽松包含导致的跨应用凭据泄露。
      * P2-40 整改：包名维度改用 `android://` 硬约束（[DomainMatcher.isAndroidPackageMatch]）——
      * `https://<host>` 等 Web 绑定条目不得再被同形包名命中，Web 绑定只经域匹配路径放行。
+     * ISSUE-P2-83：包名维度追加**调用方签名绑定门控**（[CredentialManagerPackageBindingGate]）——
+     * 严格 `android://` 匹配只解决「scheme 形态」，不解决「同 `applicationId` 侧载顶替」。
      */
     internal fun findMatchingEntries(
         entries: List<com.keepasskey.app.ui.model.UiVaultEntry>,
         origin: String,
-        packageName: String
+        packageName: String,
+        /**
+         * `android://` 包名维度是否已通过签名绑定门控。
+         *
+         * **刻意不设默认值**：包名维度是越权面，给默认值等于留一个「忘记传参 = 放行」的
+         * fail-open 口子；调用方必须显式给出判定结果。
+         */
+        packageDimensionAuthorized: Boolean
     ): List<com.keepasskey.app.ui.model.UiVaultEntry> {
         val cleanOrigin = DomainMatcher.extractDomain(origin)
         return entries.filter { entry ->
@@ -338,7 +347,7 @@ class KeePasskeyCredentialProviderService : CredentialProviderService() {
                     DomainMatcher.isDomainMatch(entry.passkeyRpId, cleanOrigin)
             val urlMatch = cleanOrigin.isNotEmpty() && entry.url.isNotBlank() &&
                     DomainMatcher.isDomainMatch(entry.url, cleanOrigin)
-            val packageMatch = packageName.isNotEmpty() && entry.url.isNotBlank() &&
+            val packageMatch = packageDimensionAuthorized && packageName.isNotEmpty() && entry.url.isNotBlank() &&
                     DomainMatcher.isAndroidPackageMatch(entry.url, packageName)
             rpMatch || urlMatch || packageMatch
         }
