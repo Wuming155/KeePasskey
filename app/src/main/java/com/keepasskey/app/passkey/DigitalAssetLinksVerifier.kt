@@ -1,5 +1,6 @@
 package com.keepasskey.app.passkey
 
+import com.keepasskey.app.di.DalHttpClient
 import com.keepasskey.app.security.CallerCertDigests
 import com.keepasskey.core.log.AppLog
 import kotlinx.coroutines.Dispatchers
@@ -7,7 +8,6 @@ import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -30,6 +30,11 @@ import javax.inject.Singleton
  * - **fail-closed 策略（验收标准 3）**：网络不可用 / DAL 格式错误 / 无匹配声明一律拒绝创建；
  *   用户如确有离线注册需求，可经设置中「跳过 DAL 校验」（`skipDalVerification`，默认关闭）
  *   **显式**授权降级——该开关是用户主动操作，满足「显式用户告警/授权」替代路径，且落告警日志。
+ *   **该开关刻意只作用于 Passkey 注册侧，不适用于自动填充侧**（`ISSUE-P3-124` ④ 的留痕结论）：
+ *   两侧虽共用本校验器，但语义不同——注册侧是「用户显式创建凭据」，用户能看见并接受降级风险；
+ *   自动填充侧判的是「**域归属**」（决定凭据可被送往哪个域名），若提供跳过开关，等于让用户在
+ *   无逐次可见确认的情况下把 web 域匹配降级为「表单自报域」，是**放松放行面**而非隐私让步。
+ *   故两侧不对称是**安全性驱动的有意设计**，不追求「对称化」。
  * - 浏览器委派调用（https web origin）豁免：rp.id ↔ origin 归属已由
  *   [DomainMatcher.isDomainMatch] 严格点号边界强制，DAL 无增量安全收益。
  *
@@ -46,7 +51,19 @@ class DigitalAssetLinksVerifier @Inject constructor(
      */
     private val endpointResolver: DalEndpointResolver,
     /** 时钟策略（同上：只读注入，单测据此推进 TTL；生产为系统时钟） */
-    private val clock: MillisClock
+    private val clock: MillisClock,
+    /**
+     * DAL 出口 HTTP 客户端（ISSUE-P3-124）。
+     *
+     * 生产由 `DalVerifierModule` 以 `@DalHttpClient` 提供**加固客户端**
+     * （[SyncHttpClientFactory.createSyncClient]：TLS-only `connectionSpecs` + `SsrfGuardDns`）；
+     * 单测注入自建客户端——DAL 单测面向 `MockWebServer`（明文本地回环），
+     * 而加固客户端**必然**拒绝明文与回环目标，两者不可共存。
+     * 该拆分使「生产出口是否加固」由 `DalVerifierModule` 的提供方法**单独断言**，
+     * 而不是被逻辑用例的测试替身悄悄替代掉。
+     */
+    @DalHttpClient
+    private val http: OkHttpClient
 ) {
 
     enum class DalResult {
@@ -61,12 +78,6 @@ class DigitalAssetLinksVerifier @Inject constructor(
     private data class CacheEntry(val result: DalResult, val cachedAtMs: Long)
 
     private val cache = ConcurrentHashMap<String, CacheEntry>()
-
-    private val http: OkHttpClient = OkHttpClient.Builder()
-        .connectTimeout(CONNECT_TIMEOUT_MS, TimeUnit.MILLISECONDS)
-        .readTimeout(READ_TIMEOUT_MS, TimeUnit.MILLISECONDS)
-        .callTimeout(CALL_TIMEOUT_MS, TimeUnit.MILLISECONDS)
-        .build()
 
     /**
      * ISSUE-P3-93（审计 F-19）：以调用方**全部**签名摘要校验 DAL。

@@ -41,7 +41,12 @@ class DigitalAssetLinksVerifierTest {
             endpointResolver = DalEndpointResolver {
                 server.url("/.well-known/assetlinks.json").toString()
             },
-            clock = MillisClock { nowMs }
+            clock = MillisClock { nowMs },
+            // ISSUE-P3-124：DAL 的**生产**出口是加固客户端（TLS-only + SSRF 守卫），而本套用例面向
+            // MockWebServer（明文本地回环）——两者在传输层必然冲突（明文与回环都会被拒），故注入
+            // 自建客户端。「生产出口是否真的加固」由 `DigitalAssetLinksEgressHardeningTest`
+            // **单独断言**，不会被这里的测试替身掩盖。
+            http = okhttp3.OkHttpClient.Builder().build()
         )
     }
 
