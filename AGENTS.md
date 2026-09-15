@@ -20,9 +20,11 @@
   `DigitalAssetLinksVerifier` 恒假分支 + `SyncCoordinatorTest` 的 `@OptIn` 挂错位置 + `GeneratorScreen`
   弃用 `TabRow`）；**唯一未验证面**：`PrimaryTabRow` 替换后的**视觉效果未在真机/模拟器核对**。
   原生内核基线（同日，§67 批次后）：`cargo test` **57 例 / 0 失败**（§67 / §68 均未触碰原生内核，基线保持；含 ISSUE-P2-56 工作内存清零 4 例 + ISSUE-P2-57 受管缓冲与 sha2 状态擦除 3 例 + ISSUE-P2-58 强度评估线性化 6 例）；
-  设备侧基线（2026-09-14，§47 批次后）：**32 例 / 0 失败 / 0 跳过**（`app` 15 + `database` 7 +
-  `sync` 3 + `crypto` 7），已在 **arm64 真机**（Redmi 4X / LineageOS / Android 17 / **API 37**）全量复跑通过；
-  此前既定环境为 x86_64 / API 36.1 模拟器（§34 / §36 / §46）。`app` 15 例含 `QuickUnlockSealDowngradeDeviceTest`
+  设备侧基线（2026-09-15，§71 批次后）：**34 例 / 0 失败 / 0 跳过**（`app` **17** + `database` 7 +
+  `sync` 3 + `crypto` 7）——§71 在 **arm64 真机**（Redmi 4X / LineageOS / Android 17 / **API 37**）
+  经 `:app:connectedDebugAndroidTest` 复跑 `app` 模块 **17 例全绿**（新增 2 例易失缓存清理），
+  其余三模块**沿用 §47 真机基线**（§71 未触碰其代码）；此前 §47 基线为 32 例（`app` 15），
+  更早既定环境为 x86_64 / API 36.1 模拟器（§34 / §36 / §46）。`app` 用例含 `QuickUnlockSealDowngradeDeviceTest`
   软件级 Keystore 落位实测 / fail-closed 封印拒绝 / 降级确认闸门（见 §46；该用例经 §47 更名与断言口径更正）；大附件（>1 MiB）已落盘
   磁盘缓存，清理为**冷启动 + 会话锁定**两层（§35、§38）；快速解锁封印载荷
   已升级为复合帧格式（主密码 + 密钥文件一并封印，历史格式向后兼容，§29.1）；解锁失败重试节流
@@ -102,7 +104,7 @@ KeePasskey 是一款原生 Kotlin 开发的现代化 Android 密码管理器。�
 | [`docs/README.md`](docs/README.md) | **文档地图**：六分区总览与「新增文档放哪里」 | 找文档、新增文档前 |
 | [`docs/ACTIVE_ISSUES.md`](docs/ACTIVE_ISSUES.md) | 现存问题与待办清单（P0→P3） | 认领与开始新工作前 |
 | [`docs/RESOLVED_LOG.md`](docs/RESOLVED_LOG.md) | 已整改归档**总索引**（≤100 行：全量批次索引，**直达每个批次文件**） | 确认历史 Bug 是否已修 |
-| [`docs/resolved/`](docs/resolved/) | **历史批次归档**：4 份分册索引（各 ≤100 行；分册 04 为 **§58 起滚动册**）+ `batches/` 下**一批次一文件**的正文（68 份；§42 / §43 两份按「退役承接」体例存于 `docs/security/`） | 查 §1 ~ §70 任一批次的验收证据 / 裁决 / 过程缺陷 |
+| [`docs/resolved/`](docs/resolved/) | **历史批次归档**：4 份分册索引（各 ≤100 行；分册 04 为 **§58 起滚动册**）+ `batches/` 下**一批次一文件**的正文（69 份；§42 / §43 两份按「退役承接」体例存于 `docs/security/`） | 查 §1 ~ §71 任一批次的验收证据 / 裁决 / 过程缺陷 |
 | [`docs/architecture/ARCHITECTURE.md`](docs/architecture/ARCHITECTURE.md) | 模块依赖拓扑与关键架构决策 | 跨模块改动、新功能落位前 |
 | [`docs/architecture/reference-projects.md`](docs/architecture/reference-projects.md) | 参考项目地图 | 实现算法/格式兼容时 |
 | [`docs/architecture/扫码方案评估_ZXing与CameraXMLKit.md`](docs/architecture/扫码方案评估_ZXing与CameraXMLKit.md) | 扫码方案选型评估（结论为「维持 ZXing」） | 评估 / 更换扫码库前 |
@@ -236,14 +238,15 @@ KeePasskey 是一款原生 Kotlin 开发的现代化 Android 密码管理器。�
   `ApplyObscuredTouchFilter()`；`BaseCredentialActivity` 体系（`PasswordSaveActivity` / `PasswordFillActivity` /
   `PasskeyAssertionActivity` / `PasskeyCreateActivity`）则直接 `setHideOverlayWindows(true)` 屏蔽悬浮窗覆盖
   （API 31+ 强于触摸过滤，覆盖被完全阻断故无需再叠触摸过滤）。
-- **设备侧（instrumented）覆盖（2026-09-14，见 RESOLVED_LOG §34 / §36 / §46 / §47）**：`app` / `database` /
-  `sync` / `crypto` 四模块均已建立 `androidTest` 源集，当前共 **32 例**——`app` 15（导入解析 3 + 域解析 7 +
+- **设备侧（instrumented）覆盖（2026-09-15，见 RESOLVED_LOG §34 / §36 / §46 / §47 / §71）**：`app` / `database` /
+  `sync` / `crypto` 四模块均已建立 `androidTest` 源集，当前共 **34 例**——`app` **17**（导入解析 3 + 域解析 7 +
   解锁落盘 2 + 软件级 Keystore 封印 3，见 §46）、`database` 7（真实语料解锁 2 + 自生成往返 1 + 字段引用 4）、
   `sync` 3（落盘权限基线）、`crypto` 7（原生内核 JNI 通路 / 与 BouncyCastle 逐字节一致 / R1 性能闸门），
   在 **arm64 真机**（Redmi 4X / LineageOS / Android 17 / API 37）与 x86_64 / API 36.1 模拟器上均
   **0 failure / 0 skip**。**仍未覆盖**：Passkey 系统级交互、
   `AssistStructure` 结构树扫描、通知渲染（依赖系统凭据对话框 / 真实自动填充会话 / 通知栏）。
-  另：**§38 新接线但未在设备侧验证的 3 项**（敏感对话框 `FLAG_SECURE` 实效、附件缓存冷启动清理端到端、
-  `SecureDialog` 是否取到 `DialogWindowProvider`）已登记为 **ISSUE-P2-42**，含逐项复现配方与验收标准。
+  另：**§38 新接线但原本未验证的 3 项**（敏感对话框 `FLAG_SECURE` 实效、附件缓存冷启动清理端到端、
+  `SecureDialog` 是否取到 `DialogWindowProvider`）已由 **§71 在 arm64 真机（API 37）经 ADB 逐项实测通过**
+  （`ISSUE-P2-42` 闭环）；**Recents 缩略图与 `PrimaryTabRow` 视觉效果仍未核对**（如实登记，见 §71.3）。
   §24 的 ISSUE-P1-12 与 §26 的 ISSUE-P0-04 均属「JVM 过、Android 运行时挂」类缺陷逃逸，故**涉及正则 / XML /
   平台 API 的静态逻辑不能仅凭宿主单测判定在 Android 上可用**。

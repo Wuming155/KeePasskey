@@ -84,7 +84,7 @@
 
 ---
 
-## P2 中危缺陷与协议/测试缺口（9 项）
+## P2 中危缺陷与协议/测试缺口（8 项）
 
 > **历史**：**ISSUE-P2-28 ~ P2-41**（往返丢字段与布尔/数值语义、MemoryProtection 读写语义、
 > KDF 缺参 fail-closed、isPackageMatch 的 android:// 硬约束、requireRiskNotice 接线、
@@ -155,35 +155,14 @@
 > 余下 `P2-49`（AC② 未闭环）与四项 P3 升格项（`P3-109` / `P3-117` 已于 2026-09-14 闭环）仍在表内；② **升格 P0**：`P2-75` → `ISSUE-P0-09`（**已整改闭环**，连同 `P2-75` 原行一并归档，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §44）；③ 新增 `ISSUE-P2-80`（M-1/M-2
 > 设备实测）与 `ISSUE-P2-81`；④ 各行内「第四轮批注」为定版结论与 AC 修正，**实施前必读**；
 > ⑤ 摘要：六项原审计让步 + `P2-49` 定级论证，全过程见该报告 §15.2(a)–(r)。
-
-### ISSUE-P2-42（新登记）：§38 批次的 3 项「JVM 不可闭环」行为未在设备侧验证
-
-- **优先级**：P2（测试有效性缺口——宿主 JVM 全绿**不构成**这些行为的证据）
-- **核实时间点与核实方式（2026-09-12）**：§38 收尾时逐项确认「无法在宿主 JVM 闭环」并写入
-  `docs/RESOLVED_LOG.md` §38.3；随后复核 `docs/ACTIVE_ISSUES.md`（`Select-String` 检索 `设备侧|真机|冷启动|FLAG_SECURE`）
-  **发现零命中** —— 即该 3 项当时只落在归档日志、**未进入待办入口**。本条即为补登，
-  以避免重演既有失效模式：「结论只进归档文档 → 无人流转 → 长期不闭环」。
-- **问题描述（3 项，均属"代码已接线、行为未在 Android 运行时验证"）**：
-  1. **敏感对话框窗口的 `FLAG_SECURE` 是否真实生效**：`SecureDialog` / `SecureDialogWindowEffect` 已在 7 处
-     对话框接线（主密码修改、子库凭据、子库挂载、修订差异、附件预览、创建库向导 ×2）；平台语义上
-     `FLAG_SECURE` 是**窗口级**属性，结论依赖 `DialogLayout` 确实实现 `DialogWindowProvider` 这一实现细节。
-  2. **附件缓存冷启动清理端到端**：`MainApplication.onCreate`（任何会话打开之前）调用 `FileBinaryStore.clear()`；
-     需验证「大附件落盘 → force-stop → 冷启动 → 目录为空」这一真实时序。
-  3. **`SecureDialog` 是否静默 fail-safe 空操作**：取不到 provider 时不设 flag 且不崩溃——需确认真机上确实取到了 provider。
-- **复现配方（三项独立判定 PASS/FAIL）**：
-  1. 打开任一敏感对话框 → 系统截图 / 录屏 / Recents 快照应为黑屏或不可截；关闭对话框后 Activity 窗口 flags
-     不得被误清（`adb shell dumpsys window | Select-String FLAG_SECURE`，或前后比对）。
-  2. 导入 >1 MiB 附件使其落盘 → `adb shell am force-stop <pkg>` → 冷启动（不解锁）→
-     `adb shell run-as <pkg> ls cache/attachments` 应为空。
-  3. 真机打开对话框并确认 flag 已置（同上 dumpsys）；若为空操作，应能观测到未命中 provider（补日志或插桩断言）。
-- **验收标准**：① 3 项各有一次设备侧实测记录（模拟器或真机，注明 API / ABI）并写入 `RESOLVED_LOG` 新批次；
-  ② 任一项 FAIL 即按缺陷整改（**不得只标注"待验证"**）；③ 建议照
-  `app/src/androidTest/java/com/keepasskey/app/data/session/DatabaseSessionAndroidRuntimeTest.kt` 的既有模式
-  为第 2 项补 instrumented 用例，使其进入可复跑的层。
-- **为什么不能省**：`AGENTS.md` §6 已明示「涉及正则 / XML / 平台 API 的静态逻辑不能仅凭宿主单测判定在 Android 上可用」，
-  且 §24（ISSUE-P1-12）与 §26（ISSUE-P0-04）两次「JVM 过、Android 挂」逃逸均出在此类断言上。
-
----
+>
+> **2026-09-15 闭环（续 18，§71 批次）**：**ISSUE-P2-42**（§38 批次遗留的 3 项「JVM 不可闭环」行为）
+> 已由 **arm64 真机**（Redmi 4X / LineageOS / Android 17 / **API 37**）**经 ADB 逐项实测**收口——
+> ① 敏感对话框窗口 `FLAG_SECURE` 真实生效（`dumpsys window` 证对话框窗口 `fl= DIM_BEHIND SECURE …`，
+> 且 `screencap` meanLuma≈0.43/255 全黑）；② 附件缓存冷启动清理端到端（探针落盘 → `force-stop` 后**仍在**
+> → 冷启动后**目录为空**）；③ `SecureDialog` **确实取到** `DialogWindowProvider`
+> （非 fail-safe 空操作）。并按 AC③ 新增 2 例设备侧用例（`app` 15 → **17 例**，真机复跑
+> 17 tests / 0 failures / 0 skipped）。该行已移出本表，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §71。
 
 ### ISSUE-P2-44（新登记）：无障碍服务信号未纳入运行完整性体系
 
