@@ -374,7 +374,7 @@
 
 ---
 
-## P3 低危问题、特性接线与体验优化（5 项）
+## P3 低危问题、特性接线与体验优化（4 项）
 
 > **状态（2026-09-12）**：历史 P3 批次 **ISSUE-P3-01 ~ P3-68** 除 P3-23（经产品裁决「不排期」）外
 > 已全部闭环并归档，逐条实现细节与验收证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md)（§3 ~ §32）。
@@ -625,6 +625,22 @@
 >   `AssumptionViolatedException` 会被 AGP 记为 `<failure>`（陷阱 #21），须改 `macos-latest`
 >   并**接受计费**——属付费额度决策，**不擅自引入**。
 > 见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §87。
+>
+> **2026-09-16 闭环（§88 批次）**：**`ISSUE-P3-122`**（IPC 面 4 项裁定后的残余整改）已收口——
+> **IPC-01** 见 §84（认证 requestCode 单调化）；本批完成 **IPC-10：`onSaveRequest` 超时预算**。
+> **缺陷后果比原记更重**：平台对该回调**不提供** `CancellationSignal`，故「无上限」直接等于
+> **系统保存 UI 永久等待**（不只是 Availability 降级）——而 `awaitEnforcement()` 在首次扫描未完成时
+> 可等待一整个扫描周期。
+> **修复**：`onSaveRequest` 经 `withTimeoutOrNull(SAVE_REQUEST_TIMEOUT_MS = 5_000L)` 包裹，
+> 超时按「本次无需保存」收尾（`onSuccess`）——给系统明确答复、不落库、不报错，
+> 与「用户关闭保存提示」同一收敛语义；服务解绑仍原样重抛 `CancellationException`（不得回调）。
+> **一处编译期硬约束（值得留痕）**：处理体**必须**抽为 `private suspend fun handleSaveRequest`——
+> `withTimeoutOrNull` **不是** inline 函数，处理体若留在 lambda 内，其中的 `return@launch` 属
+> 非局部返回、**无法编译**（本批首版就地包裹即因此编译失败）。抽取后各早退分支的
+> `return@launch` 改为普通 `return`，语义逐字不变。
+> **回归断言**：新增 `AutofillSaveTimeoutWiringTest`（4 例）钉住「必须受预算约束 / 超时必须回调
+> 且留痕 / 处理体必须抽为普通 suspend 函数且不得残留 `return@launch` / 解绑仍不得回调」。
+> 见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §88。
 
 ---
 
@@ -644,7 +660,6 @@
 |---|---|---|---|
 | ISSUE-P3-120 | 威胁建模 Q-11 | **`RuntimeIntegrityDetector` 拦截力无实测**：检测为"磁盘路径存在性 + `/proc/self/maps` 特征串"启发式（`RuntimeIntegrityDetector.kt:100-149`），非完整性证明；真实 Frida（默认 gadget 名、改名、内存加载）下的命中率未知。若命中率低，则"COMPROMISED 时禁用生物解锁 + 自动填充"的政策在真实攻击下形同虚设，却给用户"已被保护"的错觉 | ① 真机以 Frida 实测三种形态（默认 / 改名 / 内存加载），记录命中率并写入设备侧基线；② 按结果决定加强检测**或**在 `RuntimeIntegrityPolicy` / UI 如实声明"启发式、非证明"；③ 结论与 `ISSUE-P2-63`（快照门控）统一口径 |
 | ISSUE-P3-121 | 威胁建模 T-17 | **自建内网 WebDAV / NAS 在出厂配置下不可用**：`SyncNetworkOptions.ssrfAllowedHosts` 默认空集（`SyncNetworkOptions.kt:25`），`SyncProviderResolver` 两处均传默认 `SyncNetworkOptions()`（`:52,77`）→ RFC1918 / `.local` 主机一律被 `SyncEndpointGuard` 拒绝，且**无生产逃生通道**；与 `README` 宣称支持 WebDAV（Nextcloud / ownCloud 等常见家用自建形态）存在张力 | ① 明确产品口径（"支持内网自建"或"明确不支持"）；② 若支持，提供**受控**逃生通道（用户显式声明内网主机 + 风险二次确认，默认仍为拒绝）；③ 文档与实现必须一致，不得只改其一 |
-| ISSUE-P3-122 | 审计附录 C（T6 待复核区） | **IPC 面 4 项——第四轮已逐条裁定**（`SECURITY_RECHECK` §6.8，留痕完整）：`IPC-01` **成立（部分）**——4 个 PendingIntent 的 requestCode 全为常量、3/4 带 `FLAG_UPDATE_CURRENT`，成立面为「TOTP 错配 + 30 秒授权串扰（需 `P3-42`，默认关）+ 确认页文案」，"凭据值串扰"不成立；CM 通道同构（`CredentialResponseAssembler.kt:66` 每响应局部分配器，`:234` 注释自认历史缺陷表现）；`IPC-02` **不成立**——落地 Activity 全部 `exported="false"`（7 个），第三方无法伪造 extras；`IPC-05` **误报**——`javap` 直读 `credentials-1.6.0` 证实 JSON 层级与字段完全对应；`IPC-10` **成立（LOW）**——`onSaveRequest` 无超时且平台不提供 `CancellationSignal`（后果有界，仅 Availability） | ① ~~逐条复核~~ **已完成**（防重复上报依据即上述裁定）；② 残余整改两项：`IPC-01` 的 requestCode 单调化（与 `CredentialResponseAssembler` 同构修复）+ `IPC-10` 的 `onSaveRequest` 超时预算；③ 各补回归断言 |
 
 > **2026-09-13 新增（第四轮独立复核定版批次）**：以下 1 项为复核新发现低危项
 > （来源 SECURITY_RECHECK §11，附核实行号）。

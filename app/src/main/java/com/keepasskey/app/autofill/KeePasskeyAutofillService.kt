@@ -227,92 +227,117 @@ class KeePasskeyAutofillService : AutofillService() {
         }
 
         serviceScope.launch {
-            try {
-                val callingPkg = structure.activityComponent.packageName
-
-                // ISSUE-P2-08 / TASK-44：保存侧同样前置于完整性闸门与黑名单检查——
-                // 命中即拒绝落库并向系统回调非敏感提示，绝不让被屏蔽/风险环境写入任何凭据
-                val enforcement = runtimeIntegrityGate.awaitEnforcement()
-                when (AutofillAccessPolicy.rejectReason(enforcement, callingPkg, autofillBlocklistStore::isBlocked)) {
-                    AutofillRejection.INTEGRITY_RISK -> {
-                        AppLog.i(TAG, "设备完整性风险，拒绝保存自动填充凭据")
-                        callback.onFailure(getString(R.string.autofill_save_integrity_blocked))
-                        return@launch
-                    }
-                    AutofillRejection.BLOCKLISTED -> {
-                        AppLog.i(TAG, "调用应用已列入自动填充黑名单，拒绝保存凭据")
-                        callback.onFailure(getString(R.string.autofill_save_blocked))
-                        return@launch
-                    }
-                    null -> Unit
-                }
-
-                // ISSUE-P3-44：接线既有「新密码保存提示」开关（此前无填充侧消费方，属假开关）。
-                // 关闭时不落库、不打扰用户——向框架回调成功即表示「本次无需保存」。
-                if (!settingsStore.isOfferSaveCredentialsEnabled()) {
-                    AppLog.i(TAG, "已关闭新密码保存，跳过本次自动填充保存")
-                    callback.onSuccess()
-                    return@launch
-                }
-
-                // ISSUE-P3-43 ③：保存侧独立黑名单（与填充黑名单分离）。
-                // 命中即**静默**跳过：不落库、不向用户报错（onSuccess 表示「本次无需保存」），
-                // 且不影响该应用的填充能力。包名非法时 store 侧 fail-closed 同样跳过。
-                if (autofillSaveBlocklistStore.isSaveBlocked(callingPkg)) {
-                    AppLog.i(TAG, "调用应用已列入保存黑名单，静默跳过本次保存")
-                    callback.onSuccess()
-                    return@launch
-                }
-
-                val scanned = AutofillStructureScanner.scan(structure, callingPkg)
-                val parsedNodes = scanned.viewNodes
-
-                val scanResult = AutofillFieldScanner.scan(
-                    scanned.scanNodes,
-                    respectImportantForAutofill = !settingsStore.isOverrideNoAutofillEnabled()
-                )
-                val username = scanResult.usernameId?.toIntOrNull()?.let { parsedNodes.getOrNull(it)?.text }.orEmpty()
-                val password = scanResult.passwordId?.toIntOrNull()?.let { parsedNodes.getOrNull(it)?.text }.orEmpty()
-                // ISSUE-P2-07：保存前同样做 webDomain 归属校验，避免把不可归属的域写进条目
-                val usableWebDomain =
-                    autofillOriginResolver.resolveUsableWebDomain(callingPkg, scanResult.webDomain)
-
-                if (password.isNotBlank()) {
-                    // Wave 12 敏感数据卫生：调用方持有的密码 CharArray 在任何结果路径下用毕立即清零
-                    // （注：来源 node.text 的 String 由系统 AssistStructure 提供，应用侧无法擦除，
-                    //  已尽量缩短其存活期——本回调结束即失去引用，绝不进入日志/StateFlow/成员变量）
-                    val passwordChars = password.toCharArray()
-                    try {
-                        val result = vaultRepository.saveAutofillCredential(
-                            packageName = callingPkg,
-                            webDomain = usableWebDomain,
-                            username = username,
-                            passwordChars = passwordChars
-                        )
-                        when (result) {
-                            is com.keepasskey.core.result.KdbxResult.Success -> {
-                                callback.onSuccess()
-                            }
-                            is com.keepasskey.core.result.KdbxResult.Failure -> {
-                                // ISSUE-P1-10：对外回调一律使用预定义用户文案，禁止透传异常 message
-                                AppLog.e(TAG, "onSaveRequest 保存凭据失败", result.error)
-                                callback.onFailure(getString(R.string.autofill_save_failed))
-                            }
-                        }
-                    } finally {
-                        passwordChars.fill('0')
-                    }
-                } else {
-                    callback.onSuccess()
-                }
-            } catch (c: CancellationException) {
-                // 服务解绑/协程取消：静默退出，不再回调
-                throw c
-            } catch (t: Throwable) {
-                AppLog.e(TAG, "onSaveRequest 保存凭据失败", t)
-                // ISSUE-P1-10：对外回调一律使用预定义用户文案，禁止透传 t.message
-                callback.onFailure(getString(R.string.autofill_save_failed))
+            // ISSUE-P3-122（IPC-10）：保存请求整体加**超时预算**。
+            // 平台对 onSaveRequest **不提供** CancellationSignal，故无上限即「系统保存 UI 永久等待」：
+            // `runtimeIntegrityGate.awaitEnforcement()` 在首次扫描未完成时可等待一整个扫描周期，
+            // 库侧 Save 亦可能长时间不返回。超时按「本次无需保存」收尾（onSuccess）：给系统明确答复，
+            // 不落库、不报错——与「用户关闭保存提示」同一收敛语义。
+            // 注：处理体抽为 [handleSaveRequest] 而非就地包一层——`withTimeoutOrNull` **不是** inline，
+            // 内部不允许 `return@launch`（非局部返回），就地包裹无法编译。
+            val handled = withTimeoutOrNull(SAVE_REQUEST_TIMEOUT_MS) {
+                handleSaveRequest(structure, callback)
             }
+            if (handled == null) {
+                AppLog.w(TAG, "保存请求超出 ${SAVE_REQUEST_TIMEOUT_MS}ms 预算，按『本次无需保存』收尾")
+                callback.onSuccess()
+            }
+        }
+    }
+
+    /**
+     * `onSaveRequest` 的实际处理体（**ISSUE-P3-122 IPC-10** 自该回调抽取）。
+     *
+     * 抽取的唯一动因是让调用方能在其外层施加超时预算：`withTimeoutOrNull` 不是 inline 函数，
+     * 处理体若留在 lambda 内，其中的 `return@launch` 属非局部返回、**无法编译**。
+     * 抽取后语义逐字不变：各早退分支仍各自回调，`CancellationException` 仍原样重抛
+     * （服务解绑时不得回调；超时则由外层 `withTimeoutOrNull` 收敛为 `onSuccess`）。
+     */
+    private suspend fun handleSaveRequest(structure: AssistStructure, callback: SaveCallback) {
+        try {
+            val callingPkg = structure.activityComponent.packageName
+
+            // ISSUE-P2-08 / TASK-44：保存侧同样前置于完整性闸门与黑名单检查——
+            // 命中即拒绝落库并向系统回调非敏感提示，绝不让被屏蔽/风险环境写入任何凭据
+            val enforcement = runtimeIntegrityGate.awaitEnforcement()
+            when (AutofillAccessPolicy.rejectReason(enforcement, callingPkg, autofillBlocklistStore::isBlocked)) {
+                AutofillRejection.INTEGRITY_RISK -> {
+                    AppLog.i(TAG, "设备完整性风险，拒绝保存自动填充凭据")
+                    callback.onFailure(getString(R.string.autofill_save_integrity_blocked))
+                    return
+                }
+                AutofillRejection.BLOCKLISTED -> {
+                    AppLog.i(TAG, "调用应用已列入自动填充黑名单，拒绝保存凭据")
+                    callback.onFailure(getString(R.string.autofill_save_blocked))
+                    return
+                }
+                null -> Unit
+            }
+
+            // ISSUE-P3-44：接线既有「新密码保存提示」开关（此前无填充侧消费方，属假开关）。
+            // 关闭时不落库、不打扰用户——向框架回调成功即表示「本次无需保存」。
+            if (!settingsStore.isOfferSaveCredentialsEnabled()) {
+                AppLog.i(TAG, "已关闭新密码保存，跳过本次自动填充保存")
+                callback.onSuccess()
+                return
+            }
+
+            // ISSUE-P3-43 ③：保存侧独立黑名单（与填充黑名单分离）。
+            // 命中即**静默**跳过：不落库、不向用户报错（onSuccess 表示「本次无需保存」），
+            // 且不影响该应用的填充能力。包名非法时 store 侧 fail-closed 同样跳过。
+            if (autofillSaveBlocklistStore.isSaveBlocked(callingPkg)) {
+                AppLog.i(TAG, "调用应用已列入保存黑名单，静默跳过本次保存")
+                callback.onSuccess()
+                return
+            }
+
+            val scanned = AutofillStructureScanner.scan(structure, callingPkg)
+            val parsedNodes = scanned.viewNodes
+
+            val scanResult = AutofillFieldScanner.scan(
+                scanned.scanNodes,
+                respectImportantForAutofill = !settingsStore.isOverrideNoAutofillEnabled()
+            )
+            val username = scanResult.usernameId?.toIntOrNull()?.let { parsedNodes.getOrNull(it)?.text }.orEmpty()
+            val password = scanResult.passwordId?.toIntOrNull()?.let { parsedNodes.getOrNull(it)?.text }.orEmpty()
+            // ISSUE-P2-07：保存前同样做 webDomain 归属校验，避免把不可归属的域写进条目
+            val usableWebDomain =
+                autofillOriginResolver.resolveUsableWebDomain(callingPkg, scanResult.webDomain)
+
+            if (password.isNotBlank()) {
+                // Wave 12 敏感数据卫生：调用方持有的密码 CharArray 在任何结果路径下用毕立即清零
+                // （注：来源 node.text 的 String 由系统 AssistStructure 提供，应用侧无法擦除，
+                //  已尽量缩短其存活期——本回调结束即失去引用，绝不进入日志/StateFlow/成员变量）
+                val passwordChars = password.toCharArray()
+                try {
+                    val result = vaultRepository.saveAutofillCredential(
+                        packageName = callingPkg,
+                        webDomain = usableWebDomain,
+                        username = username,
+                        passwordChars = passwordChars
+                    )
+                    when (result) {
+                        is com.keepasskey.core.result.KdbxResult.Success -> {
+                            callback.onSuccess()
+                        }
+                        is com.keepasskey.core.result.KdbxResult.Failure -> {
+                            // ISSUE-P1-10：对外回调一律使用预定义用户文案，禁止透传异常 message
+                            AppLog.e(TAG, "onSaveRequest 保存凭据失败", result.error)
+                            callback.onFailure(getString(R.string.autofill_save_failed))
+                        }
+                    }
+                } finally {
+                    passwordChars.fill('0')
+                }
+            } else {
+                callback.onSuccess()
+            }
+        } catch (c: CancellationException) {
+            // 服务解绑/协程取消：静默退出，不再回调
+            throw c
+        } catch (t: Throwable) {
+            AppLog.e(TAG, "onSaveRequest 保存凭据失败", t)
+            // ISSUE-P1-10：对外回调一律使用预定义用户文案，禁止透传 t.message
+            callback.onFailure(getString(R.string.autofill_save_failed))
         }
     }
 
@@ -325,6 +350,15 @@ class KeePasskeyAutofillService : AutofillService() {
     companion object {
         internal const val TAG = "KeePasskeyAutofill"
         private const val AUTOFILL_TIMEOUT_MS = 4_000L
+
+        /**
+         * 保存请求（`onSaveRequest`）的整体超时预算（**ISSUE-P3-122 IPC-10**）。
+         *
+         * 比填充预算（[AUTOFILL_TIMEOUT_MS]）宽 1 秒：保存路径含一次库写入与落盘，
+         * 但同样**必须有上限**——平台不提供 `CancellationSignal`，无上限即「系统保存 UI 永久等待」。
+         * `internal` 以便接线守卫断言该常量确实被用于包裹。
+         */
+        internal const val SAVE_REQUEST_TIMEOUT_MS = 5_000L
         internal const val MAX_DATASET_COUNT = 8
         internal const val REQUEST_CODE_UNLOCK = 2001
         /** TASK-11：已解锁分支二次确认数据集的 PendingIntent requestCode 基址 */
