@@ -84,7 +84,7 @@
 
 ---
 
-## P2 中危缺陷与协议/测试缺口（5 项）
+## P2 中危缺陷与协议/测试缺口（4 项）
 
 > **历史**：**ISSUE-P2-28 ~ P2-41**（往返丢字段与布尔/数值语义、MemoryProtection 读写语义、
 > KDF 缺参 fail-closed、isPackageMatch 的 android:// 硬约束、requireRiskNotice 接线、
@@ -223,28 +223,16 @@
 > 两个 KDF 族的最坏墙钟已收敛到同一量级。边界双向锁（新边界通过 / 原 `2^40` 档必须被拒）
 > 与覆盖性核对（官方默认、真机可达上界、桌面偏执档）见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §78。
 > 残余（无中途取消）登记于 `AGENTS.md` §6。该行已移出本表。
-
-### ISSUE-P2-45（新登记）：解锁失败节流默认关闭，且记录可被"删键复位"
-
-- **优先级**：P2（配置即削弱 + 完整性校验存在复位旁路）
-- **核实时间点与核实方式（2026-09-13）**：读取 `RealSettingsRepository.kt` L113
-  （`unlockThrottleEnabled = prefs[KEY_UNLOCK_THROTTLE_ENABLED] ?: false`，出厂默认关闭）
-  与 `UnlockThrottle.kt` 的 `SharedPrefsUnlockThrottleStore.read()`（L80-82：
-  `count == 0 && lockUntil == 0L && storedMac == null` 时直接返回"完整"记录）。
-- **问题描述**：① 出厂默认不启用退避锁定，在线主密码爆破无应用层限速；
-  ② 即便用户开启，删除 prefs 中三个键（计数 / 锁定截止 / MAC）即可命中"**全新安装**"分支、
-  **被判定为记录完整**，从而复位计数 —— **不需要**重算 MAC
-  （`UnlockThrottleIntegrity` 的 HMAC 并不能防该类删除）。
-- **验收标准**：① 默认值改为**开启**（安全默认不放松），保留用户显式关闭的开关；
-  ② 修复"删键复位"：区分"从未有过记录"与"记录被删除"（例如以 Keystore 保护的**存在标记**
-  或首启写入的哨兵值判定），删除后应 fail-closed 而非视为完整；  ③ 两条各有回归断言
-  （含"删除三键后仍受节流 / 锁定"的负向用例）。
-- **第四轮定版批注（2026-09-13）**：终评 **LOW（DESIGN WEAKNESS）**。① **撤销**——默认关闭系
-  2026-09-12 用户裁决（`UnlockThrottle.kt:190` / `SettingsRepository.kt:51-53` 均有留痕），非缺陷；
-  ② **维持但须重新设计**——复核证实原"存在标记哨兵"方案**原理上不可闭环**（哨兵本身可被同路径删除），
-  须改用 Keystore 绑定的存在性证明或登记为已接受边界并留痕。
-
----
+>
+> **2026-09-16 闭环（§80 批次）**：**ISSUE-P2-45**（解锁失败节流的「删键复位」旁路）已收口——
+> ① **AC① 维持撤销**（默认关闭系 2026-09-12 用户裁决，非缺陷），故本批只做 AC②；
+> ② **AC② 按第四轮定版批注重新设计**（原「哨兵值」方案原理上不可闭环）：引入**每库一条
+> AndroidKeyStore 存在性标记**（MAC 只能证明「在案记录未被改动」，标记才能证明「记录本应存在」），
+> 并令 `reset()` 改写**带有效 MAC 的零值记录**而非删键 ⇒「三键全缺」在首次写入后不再有合法来源；
+> ③ 新增 17 例宿主用例 + 5 例**真机** Keystore 回归（`UnlockThrottleDeletionBypassDeviceTest`）。
+> **施工中的附带发现**：登记并同日闭环 **`ISSUE-P0-10`**——`Mac.getInstance(..., "AndroidKeyStore")`
+> 在实机必然抛 `NoSuchAlgorithmException`（该 provider 不注册 Mac 服务）⇒ 节流 MAC 恒为空 ⇒
+> **单次输错主密码即永久 fail-closed**。两项并入 §80，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §80。
 
 ### ISSUE-P2-83（新登记）：`android://` 维度在 Credential Manager 通道仍无签名绑定
 

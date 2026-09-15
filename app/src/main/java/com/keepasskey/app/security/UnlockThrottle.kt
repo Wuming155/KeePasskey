@@ -63,7 +63,14 @@ interface UnlockThrottleStore {
  * 卸载应用或清除数据前持久有效。
  *
  * ISSUE-P3-54：追加 Keystore 密钥的 HMAC（[UnlockThrottleIntegrity]）完整性绑定——
- * 记录被删除 / 篡改时 MAC 校验失败，由 [UnlockThrottleManager.gate] fail-closed 处置。
+ * 记录被篡改时 MAC 校验失败，由 [UnlockThrottleManager.gate] fail-closed 处置。
+ *
+ * ISSUE-P2-45：HMAC 只能证明**在案**记录未被改动，对「三个键被整组删除」无能为力
+ * （整改前把该状态直接等同于全新安装，等于留了一条「删键复位」旁路）。现以两条改动封堵：
+ * ① [reset] 不再删键，改写一条带有效 MAC 的**零值记录**——于是「三键全缺」在首次写入之后
+ * 不再有任何合法来源；
+ * ② 「三键全缺」改由 Keystore 内的**存在性标记**裁决（见 [UnlockThrottleIntegrity]）：
+ * 标记在案 ⇒ 该库曾写入过记录 ⇒ 键是被删除的，按篡改 fail-closed；标记不案 ⇒ 真正的全新安装。
  */
 @Singleton
 class SharedPrefsUnlockThrottleStore @Inject constructor(
@@ -77,8 +84,10 @@ class SharedPrefsUnlockThrottleStore @Inject constructor(
         val count = prefs.getInt(keyCount(databaseId), 0)
         val lockUntil = prefs.getLong(keyLock(databaseId), 0L)
         val storedMac = prefs.getString(keyMac(databaseId), null)
-        // 全新安装：无任何记录字段（含 MAC）——无可保护对象，视为完整
-        if (count == 0 && lockUntil == 0L && storedMac == null) return UnlockThrottleRecord()
+        // 三键全缺：由存在性标记区分「从未写入过」与「记录被删除」（ISSUE-P2-45）
+        if (count == 0 && lockUntil == 0L && storedMac == null) {
+            return UnlockThrottleRecord(integrityIntact = !existenceMarkerPresent(databaseId))
+        }
 
         val record = UnlockThrottleRecord(count, lockUntil)
         val macBytes = storedMac?.takeIf { it.isNotEmpty() }
@@ -87,6 +96,21 @@ class SharedPrefsUnlockThrottleStore @Inject constructor(
     }
 
     override fun write(databaseId: String, record: UnlockThrottleRecord) {
+        // 标记必须先于记录落定：若两步之间进程终止，留下「标记在案 + 记录缺失」，
+        // 后续 read 按篡改 fail-closed（有界锁定）；反序则会留下「记录在案 + 标记缺失」
+        // 那种「日后被删除即复位」的 fail-open 残局。
+        integrity.ensureExistenceMarker(databaseId)
+        persist(databaseId, record)
+    }
+
+    override fun reset(databaseId: String) {
+        // 成功解锁：写零值记录而非删键——保留「该库曾在案」这一事实，
+        // 使「三键全缺」重新成为只可能由外部删除产生的状态（ISSUE-P2-45 ①）。
+        integrity.ensureExistenceMarker(databaseId)
+        persist(databaseId, UnlockThrottleRecord())
+    }
+
+    private fun persist(databaseId: String, record: UnlockThrottleRecord) {
         val encodedMac = integrity.mac(databaseId, record)
             ?.let { Base64.getEncoder().encodeToString(it) }
             .orEmpty()
@@ -97,13 +121,13 @@ class SharedPrefsUnlockThrottleStore @Inject constructor(
             .apply()
     }
 
-    override fun reset(databaseId: String) {
-        prefs.edit()
-            .remove(keyCount(databaseId))
-            .remove(keyLock(databaseId))
-            .remove(keyMac(databaseId))
-            .apply()
-    }
+    /**
+     * 存在性标记查询（ISSUE-P2-45）。与 [UnlockThrottleIntegrity.existenceMarkerPresent] 的契约一致：
+     * 异常**不得**被吞成「标记不存在」（那会把 Keystore 故障变成复位旁路），故按「标记在案」
+     * fail-closed 处置——代价是 Keystore 故障时首启也会遇到一次有界锁定（上限 `MAX_BACKOFF_MS`）。
+     */
+    private fun existenceMarkerPresent(databaseId: String): Boolean =
+        runCatching { integrity.existenceMarkerPresent(databaseId) }.getOrDefault(true)
 
     private fun keyCount(databaseId: String): String = "${databaseId}_unlock_fail_count"
     private fun keyLock(databaseId: String): String = "${databaseId}_unlock_lock_until"

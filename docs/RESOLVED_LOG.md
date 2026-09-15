@@ -91,6 +91,7 @@
 | §77 | Popup 窗口敏感内容面盘点批次：4 处调用点 / 8 个菜单项全为静态文案 ⇒ 留痕「无需接线」+ 清单锁与敏感记号扫描守卫（含防空扫断言） | ISSUE-P3-79 | [`77-Popup窗口敏感内容面盘点批次.md`](resolved/batches/77-Popup窗口敏感内容面盘点批次.md) |
 | §78 | KDF 联合预算收紧批次：Argon2 `I×M` 由 `2^40` 收紧为 **`2^33`**（§76 实测速率锚定：最坏 ≈1.4 h → ≈40 s）+ AES-KDF 封顶轮数墙钟实测（`R=2^28` ≈35 s）⇒ `P2-49` AC② 收口 | ISSUE-P2-49 | [`78-KDF联合预算收紧批次.md`](resolved/batches/78-KDF联合预算收紧批次.md) |
 | §79 | 缓存 `.tmp` 残留语义与瞬时删除失败批次：判定「残留 `.tmp` = 可观测缺陷」并修根因（删除原语有界重试 + `clear` 与 `clearAll` 统一），补 `updateBase` / 异常路径覆盖 | ISSUE-P3-108 | [`79-缓存tmp残留语义与瞬时删除失败批次.md`](resolved/batches/79-缓存tmp残留语义与瞬时删除失败批次.md) |
+| §80 | 解锁节流「删键复位」与 Keystore HMAC 真机失效批次：以**每库一条 AndroidKeyStore 存在性标记**封住「删掉三个 prefs 键即复位计数」（并令 `reset` 改**写零值记录**而非删键）；**施工中撞出并同日闭环** `ISSUE-P0-10`——`Mac.getInstance(..., "AndroidKeyStore")` 在实机必然抛 `NoSuchAlgorithmException`（该 provider 不注册 Mac 服务）⇒ MAC 恒为空 ⇒ **单次输错主密码即永久 fail-closed**，改用官方默认 provider 写法 | ISSUE-P2-45 / **ISSUE-P0-10**（同轮登记并闭环，不在表内留行，体例同 §74） | [`80-解锁节流删键复位与Keystore-HMAC真机失效批次.md`](resolved/batches/80-解锁节流删键复位与Keystore-HMAC真机失效批次.md) |
 
 ## 分册导航
 
