@@ -32,7 +32,20 @@ data class IntegritySignals(
     val rootArtifactsDetected: Boolean = false,
     val magiskDetected: Boolean = false,
     val hookFrameworkDetected: Boolean = false,
-    val untrustedInstallSource: Boolean = false
+    val untrustedInstallSource: Boolean = false,
+    /**
+     * 已启用**本应用以外**的无障碍服务（ISSUE-P2-44）。
+     *
+     * **判定口径（保守、如实声明）**：`AccessibilityManager.getEnabledAccessibilityServiceList()`
+     * 返回的任一服务，其包名 **≠ 本应用包名** 即为真——**包含系统预装的 TalkBack 等**。
+     * 之所以不排除系统应用：无障碍服务**同等具备读取（乃至代填）任意输入内容的能力**，
+     * 系统签名并不改变这一能力；对密码管理器而言这是必须向用户披露的信号。
+     *
+     * **不参与风险等级判定**：启用无障碍是**合法且必要的可及性配置**（视障用户依赖它），
+     * 若因此降级生物解锁 / 自动填充，等于用安全名义剥夺可及性。故本信号只置
+     * [IntegrityEnforcement.requireAccessibilityNotice]，**不改变** [RuntimeRiskLevel]。
+     */
+    val thirdPartyAccessibilityEnabled: Boolean = false
 ) {
     companion object {
         /** 全无命中的干净信号 */
@@ -50,7 +63,15 @@ data class IntegritySignals(
 data class IntegrityEnforcement(
     val disableBiometricQuickUnlock: Boolean,
     val disableAutofill: Boolean,
-    val requireRiskNotice: Boolean
+    val requireRiskNotice: Boolean,
+    /**
+     * 是否需在主密码输入页提示「已启用无障碍服务」（ISSUE-P2-44）。
+     *
+     * 与 [requireRiskNotice] **分离**：后者由完整性等级（ELEVATED / COMPROMISED）驱动并伴随通道降级；
+     * 本项由**合法可及性配置**驱动，**只提示、不降级**——判据见
+     * [IntegritySignals.thirdPartyAccessibilityEnabled] 的 KDoc。
+     */
+    val requireAccessibilityNotice: Boolean = false
 ) {
     companion object {
         /** 无风险：全部通道放行 */
@@ -122,12 +143,23 @@ object RuntimeIntegrityPolicy {
     fun requiresRiskNotice(report: RuntimeIntegrityReport?): Boolean =
         report?.enforcement?.requireRiskNotice == true
 
+    /**
+     * 是否必须在**主密码输入页**提示「已启用无障碍服务」（ISSUE-P2-44 的唯一消费点）。
+     *
+     * 与 [requiresRiskNotice] 正交：本项**不**随等级变化，故 `TRUSTED` 等级下也可能为 true；
+     * 未注入快照（null，仅单测 / 异常装配）恒为 false，绝不回填「有风险」假值。
+     */
+    fun requiresAccessibilityNotice(report: RuntimeIntegrityReport?): Boolean =
+        report?.enforcement?.requireAccessibilityNotice == true
+
     fun evaluate(signals: IntegritySignals): RuntimeIntegrityReport {
         val compromised = signals.debuggerAttached ||
             signals.rootArtifactsDetected ||
             signals.magiskDetected ||
             signals.hookFrameworkDetected
         val elevated = signals.appDebuggable || signals.untrustedInstallSource
+        // ISSUE-P2-44：无障碍信号只影响「是否提示」，不影响等级与通道降级
+        val accessibilityNotice = signals.thirdPartyAccessibilityEnabled
 
         return when {
             compromised -> RuntimeIntegrityReport(
@@ -136,7 +168,8 @@ object RuntimeIntegrityPolicy {
                 enforcement = IntegrityEnforcement(
                     disableBiometricQuickUnlock = true,
                     disableAutofill = true,
-                    requireRiskNotice = true
+                    requireRiskNotice = true,
+                    requireAccessibilityNotice = accessibilityNotice
                 )
             )
 
@@ -146,14 +179,20 @@ object RuntimeIntegrityPolicy {
                 enforcement = IntegrityEnforcement(
                     disableBiometricQuickUnlock = true,
                     disableAutofill = false,
-                    requireRiskNotice = true
+                    requireRiskNotice = true,
+                    requireAccessibilityNotice = accessibilityNotice
                 )
             )
 
             else -> RuntimeIntegrityReport(
                 level = RuntimeRiskLevel.TRUSTED,
                 signals = signals,
-                enforcement = IntegrityEnforcement.ALLOWED
+                enforcement = IntegrityEnforcement(
+                    disableBiometricQuickUnlock = false,
+                    disableAutofill = false,
+                    requireRiskNotice = false,
+                    requireAccessibilityNotice = accessibilityNotice
+                )
             )
         }
     }

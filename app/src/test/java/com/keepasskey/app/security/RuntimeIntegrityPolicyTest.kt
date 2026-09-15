@@ -240,7 +240,9 @@ class RuntimeIntegrityPolicyTest {
             IntegritySignals(rootArtifactsDetected = true),
             IntegritySignals(magiskDetected = true),
             IntegritySignals(hookFrameworkDetected = true),
-            IntegritySignals(debuggerAttached = true, appDebuggable = true, untrustedInstallSource = true)
+            IntegritySignals(debuggerAttached = true, appDebuggable = true, untrustedInstallSource = true),
+            // ISSUE-P2-44：无障碍信号置位时等级仍为 TRUSTED，且**不**要求风险卡
+            IntegritySignals(thirdPartyAccessibilityEnabled = true)
         )
 
         signalMatrix.forEach { signals ->
@@ -253,5 +255,54 @@ class RuntimeIntegrityPolicyTest {
 
         // 未判定档同样保持「不提示」的一致性
         assertFalse(RuntimeIntegrityPolicy.requiresRiskNotice(RuntimeIntegrityReport.UNDETERMINED))
+    }
+
+    // ===== ISSUE-P2-44：无障碍信号「只提示、不降级」 =====
+
+    @Test
+    fun `启用第三方无障碍服务时提示位为真但等级与通道均不变`() {
+        val report = RuntimeIntegrityPolicy.evaluate(
+            IntegritySignals(thirdPartyAccessibilityEnabled = true)
+        )
+
+        assertTrue(RuntimeIntegrityPolicy.requiresAccessibilityNotice(report))
+        // 核心不变量：无障碍是**合法可及性配置**，不得据此降级任何敏感通道
+        assertEquals(RuntimeRiskLevel.TRUSTED, report.level)
+        assertFalse(report.enforcement.disableBiometricQuickUnlock)
+        assertFalse(report.enforcement.disableAutofill)
+        // 与「完整性风险提示」正交：不得因此渲染风险卡
+        assertFalse(RuntimeIntegrityPolicy.requiresRiskNotice(report))
+    }
+
+    @Test
+    fun `无障碍提示位与风险等级正交`() {
+        val withA11y = RuntimeIntegrityPolicy.evaluate(
+            IntegritySignals(rootArtifactsDetected = true, thirdPartyAccessibilityEnabled = true)
+        )
+        val withoutA11y = RuntimeIntegrityPolicy.evaluate(
+            IntegritySignals(rootArtifactsDetected = true)
+        )
+
+        assertTrue(RuntimeIntegrityPolicy.requiresAccessibilityNotice(withA11y))
+        assertFalse(RuntimeIntegrityPolicy.requiresAccessibilityNotice(withoutA11y))
+        // 等级与通道降级不因无障碍信号而改变
+        assertEquals(withoutA11y.level, withA11y.level)
+        assertEquals(
+            withoutA11y.enforcement.disableAutofill,
+            withA11y.enforcement.disableAutofill
+        )
+    }
+
+    @Test
+    fun `未注入快照或无该信号时无障碍提示为假`() {
+        assertFalse(RuntimeIntegrityPolicy.requiresAccessibilityNotice(null))
+        assertFalse(
+            RuntimeIntegrityPolicy.requiresAccessibilityNotice(RuntimeIntegrityReport.UNDETERMINED)
+        )
+        assertFalse(
+            RuntimeIntegrityPolicy.requiresAccessibilityNotice(
+                RuntimeIntegrityPolicy.evaluate(IntegritySignals.NONE)
+            )
+        )
     }
 }

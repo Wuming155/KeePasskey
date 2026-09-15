@@ -8,7 +8,7 @@
 
 ---
 
-## 全量批次索引（§1 ~ §71）
+## 全量批次索引（§1 ~ §72）
 
 | § | 批次主题 | 条目范围 | 正文 |
 |:--:|---|---|---|
@@ -83,6 +83,7 @@
 | §69 | 文档索引悬空引用收口批次：§68 正文补录 + 第二轮独立复核报告恢复入库（一致性闸门复效）+ `.handoff` 依据承接 | ISSUE-P3-129 / ISSUE-P3-127 | [`69-文档索引悬空引用收口批次.md`](resolved/batches/69-文档索引悬空引用收口批次.md) |
 | §70 | KDF 盐长边界与 XML 常量归位批次：Argon2 `S` 按官方 `MinSalt/MaxSalt` 校验 + `Compressed` 常量的唯一权威定义上收至 `KdbxConstants.Xml` | ISSUE-P3-78 / ISSUE-P3-80 | [`70-KDF盐长边界与XML常量归位批次.md`](resolved/batches/70-KDF盐长边界与XML常量归位批次.md) |
 | §71 | 设备侧验证缺口收口批次：arm64 真机（API 37）经 ADB 逐项实测 3 项「已接线未验证」行为（敏感对话框 `FLAG_SECURE` / 附件冷启动清理 / `DialogWindowProvider` 取到），并补 2 例设备侧易失缓存清理用例 | ISSUE-P2-42 | [`71-设备侧验证缺口收口批次.md`](resolved/batches/71-设备侧验证缺口收口批次.md) |
+| §72 | 无障碍信号纳入完整性体系与口令语义显式声明批次：启用无障碍服务纳入 `IntegritySignals`（**只提示不降级**）+ 主密码页提示 + `password` 语义显式化；附 AC 前提更正与真机正负对照 | ISSUE-P2-44 | [`72-无障碍信号与口令语义显式声明批次.md`](resolved/batches/72-无障碍信号与口令语义显式声明批次.md) |
 
 ## 分册导航
 

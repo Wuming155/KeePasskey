@@ -84,7 +84,7 @@
 
 ---
 
-## P2 中危缺陷与协议/测试缺口（8 项）
+## P2 中危缺陷与协议/测试缺口（7 项）
 
 > **历史**：**ISSUE-P2-28 ~ P2-41**（往返丢字段与布尔/数值语义、MemoryProtection 读写语义、
 > KDF 缺参 fail-closed、isPackageMatch 的 android:// 硬约束、requireRiskNotice 接线、
@@ -163,21 +163,18 @@
 > → 冷启动后**目录为空**）；③ `SecureDialog` **确实取到** `DialogWindowProvider`
 > （非 fail-safe 空操作）。并按 AC③ 新增 2 例设备侧用例（`app` 15 → **17 例**，真机复跑
 > 17 tests / 0 failures / 0 skipped）。该行已移出本表，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §71。
-
-### ISSUE-P2-44（新登记）：无障碍服务信号未纳入运行完整性体系
-
-- **优先级**：P2（无需 root、覆盖面广：安卓恶意软件主流手法）
-- **核实时间点与核实方式（2026-09-13）**：读取 `IntegritySignals` / `RuntimeIntegrityPolicy.evaluate`
-  （L29-41 / L125-159）——信号集**不含任何无障碍字段**；读取 `SecurePasswordField.kt`
-  确认其仅用 `PasswordVisualTransformation` + `KeyboardType.Password`，**未**设置 Compose 的
-  `Modifier.semantics { password() }`。
-- **问题描述**：`AccessibilityManager.getEnabledAccessibilityServiceList()` 可枚举已开启的无障碍服务，
-  但当前完整性体系与敏感通道策略**完全未考虑该信号**；非无障碍路径下的语义树暴露程度亦尚未实测。
-- **验收标准**：① 把"已启用第三方无障碍服务"纳入 `IntegritySignals`，并在（至少）主密码输入页
-  给出风险提示或降级策略；② 主密码 / 条目口令输入显式设置 `password` 语义并补回归；
-  ③ **设备侧实测**记录语义树实际暴露面（宿主 JVM 不构成证据，见 `AGENTS.md` §6）。
-
----
+>
+> **2026-09-15 闭环（续 19，§72 批次）**：**ISSUE-P2-44**（无障碍服务信号未纳入运行完整性体系
+> + 敏感输入未显式声明 `password` 语义）已收口——① `IntegritySignals` 新增
+> `thirdPartyAccessibilityEnabled`（官方 `AccessibilityManager` 枚举，口径为「服务包名 ≠ 本应用」，
+> **含系统预装 TalkBack**）；② 策略新增 `requireAccessibilityNotice`，**只提示、不降级**
+> （不因合法可及性配置禁用生物解锁 / 自动填充）；③ 主密码输入页渲染无障碍提示；
+> ④ `SecurePasswordField` 显式 `semantics { password() }`。
+> **AC② 前提经实测更正**（详见 §72.3）：改动**前**设备侧两类状态已报 `password="true"`
+> （Compose 由 `PasswordVisualTransformation` 隐式推导），故本项为**显式化 + 回归锁定**，
+> 而非修复已观测缺失——**改动前后无障碍树逐项一致**。
+> **真机正负对照**（arm64 / API 37）：启用无障碍服务 → 提示出现且主密码框 `password="true"`；
+> 关闭 → 提示消失、语义仍为真。该行已移出本表，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §72。
 
 ### ISSUE-P2-45（新登记）：解锁失败节流默认关闭，且记录可被"删键复位"
 

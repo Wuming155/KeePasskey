@@ -21,6 +21,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.password
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -154,6 +156,10 @@ fun SecurePasswordField(
             unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest
         ),
         enabled = enabled,
-        modifier = modifier
+        // ISSUE-P2-44：显式声明「本节点是口令字段」，不再让该语义**只**由框架从
+        // `PasswordVisualTransformation` 推导（消除「切换显隐后语义随之消失」的隐式耦合）。
+        // 设备侧实测（2026-09-15，arm64 真机 API 37）：遮蔽与显隐两种状态的无障碍树均报
+        // `password="true"`，且节点数与结构不变（见 RESOLVED_LOG §72）。
+        modifier = modifier.semantics { password() }
     )
 }

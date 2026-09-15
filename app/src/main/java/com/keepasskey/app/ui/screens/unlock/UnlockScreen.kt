@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Accessibility
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material3.AlertDialog
@@ -277,6 +278,12 @@ fun UnlockContent(
                         onSwitchMode = onSwitchMode
                     )
                 } else {
+                    // ISSUE-P2-44：已启用本应用以外的无障碍服务 → 主密码输入页常驻提示。
+                    // **只提示、不降级**（不得因此禁用生物解锁 / 自动填充，见该信号 KDoc）。
+                    if (uiState.accessibilityRiskNotice) {
+                        AccessibilityInputNotice()
+                        Spacer(modifier = Modifier.height(12.dp))
+                    }
                     UnlockStandardUnlockContent(
                         uiState = uiState,
                         onPasswordChange = onPasswordChange,
@@ -298,6 +305,43 @@ fun UnlockContent(
             onConfirm = { onDowngradeDecision(true) },
             onDecline = { onDowngradeDecision(false) }
         )
+    }
+}
+
+/**
+ * ISSUE-P2-44：已启用本应用以外无障碍服务时，主密码输入页的常驻提示。
+ *
+ * **语义边界（不得扩写）**：本卡片**只做告知**，不降级任何通道——启用无障碍是合法且必要的
+ * 可及性配置（视障用户依赖），故不因该信号禁用生物快速解锁 / 自动填充，也不阻止输入。
+ */
+@Composable
+private fun AccessibilityInputNotice() {
+    BentoCard(
+        modifier = Modifier.fillMaxWidth(),
+        backgroundColor = MaterialTheme.colorScheme.tertiaryContainer
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                imageVector = Icons.Default.Accessibility,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onTertiaryContainer,
+                modifier = Modifier.size(18.dp)
+            )
+            Spacer(modifier = Modifier.width(10.dp))
+            Column {
+                Text(
+                    text = stringResource(R.string.unlock_accessibility_notice_title),
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onTertiaryContainer
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = stringResource(R.string.unlock_accessibility_notice_body),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onTertiaryContainer
+                )
+            }
+        }
     }
 }
 

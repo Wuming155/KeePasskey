@@ -12,8 +12,9 @@
 ## 1. 版本基线（摘要）
 
 - 测试 / 构建 / CI 当前全绿（具体版本、例数、残余面见 [`RESOLVED_LOG.md`](docs/RESOLVED_LOG.md)）。
-  单测基线（2026-09-15，§70 批次后）：**1774 例 / 0 失败 / 0 错误 / 13 跳过**
-  （app 980 / core 68 / crypto 131 / database 392 / sync 203；§70 新增 4 例 Argon2 盐长边界回归；
+  单测基线（2026-09-15，§72 批次后）：**1780 例 / 0 失败 / 0 错误 / 13 跳过**
+  （app **986** / core 68 / crypto 131 / database 392 / sync 203；§72 新增 6 例：
+  无障碍信号策略 3 例 + 接线守卫 3 例；
   `--rerun-tasks --max-workers=1` 强制真实执行）；
   **Kotlin 编译告警已清零（§68）**：`.\gradlew.bat test` 全量重编译**零 `w:` 输出**（此前 39 条：
   35 条守卫测试的 `System.getProperty("user.dir")` 平台类型告警 + 生产侧 `HibpRangeClient` 多余安全调用、
@@ -104,7 +105,7 @@ KeePasskey 是一款原生 Kotlin 开发的现代化 Android 密码管理器。�
 | [`docs/README.md`](docs/README.md) | **文档地图**：六分区总览与「新增文档放哪里」 | 找文档、新增文档前 |
 | [`docs/ACTIVE_ISSUES.md`](docs/ACTIVE_ISSUES.md) | 现存问题与待办清单（P0→P3） | 认领与开始新工作前 |
 | [`docs/RESOLVED_LOG.md`](docs/RESOLVED_LOG.md) | 已整改归档**总索引**（≤100 行：全量批次索引，**直达每个批次文件**） | 确认历史 Bug 是否已修 |
-| [`docs/resolved/`](docs/resolved/) | **历史批次归档**：4 份分册索引（各 ≤100 行；分册 04 为 **§58 起滚动册**）+ `batches/` 下**一批次一文件**的正文（69 份；§42 / §43 两份按「退役承接」体例存于 `docs/security/`） | 查 §1 ~ §71 任一批次的验收证据 / 裁决 / 过程缺陷 |
+| [`docs/resolved/`](docs/resolved/) | **历史批次归档**：4 份分册索引（各 ≤100 行；分册 04 为 **§58 起滚动册**）+ `batches/` 下**一批次一文件**的正文（70 份；§42 / §43 两份按「退役承接」体例存于 `docs/security/`） | 查 §1 ~ §72 任一批次的验收证据 / 裁决 / 过程缺陷 |
 | [`docs/architecture/ARCHITECTURE.md`](docs/architecture/ARCHITECTURE.md) | 模块依赖拓扑与关键架构决策 | 跨模块改动、新功能落位前 |
 | [`docs/architecture/reference-projects.md`](docs/architecture/reference-projects.md) | 参考项目地图 | 实现算法/格式兼容时 |
 | [`docs/architecture/扫码方案评估_ZXing与CameraXMLKit.md`](docs/architecture/扫码方案评估_ZXing与CameraXMLKit.md) | 扫码方案选型评估（结论为「维持 ZXing」） | 评估 / 更换扫码库前 |

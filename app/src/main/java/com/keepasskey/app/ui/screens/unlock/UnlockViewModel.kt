@@ -64,7 +64,10 @@ class UnlockViewModel @Inject constructor(
     private val keyFileAccess: KeyFileAccess? = null,
     // ISSUE-P3-117：进阶偏好通道（`clearPasswordOnLeave` 的行为消费方）。
     // nullable 仅用于纯 JVM 单测；生产 DI 经 ExtendedSettingsSourceModule 恒注入
-    private val extendedSettingsStore: com.keepasskey.app.data.repository.ExtendedSettingsStore? = null
+    private val extendedSettingsStore: com.keepasskey.app.data.repository.ExtendedSettingsStore? = null,
+    // ISSUE-P2-44：运行完整性快照（主密码页无障碍提示的唯一数据源）。
+    // nullable 仅用于纯 JVM 单测（未注入时恒不提示，绝不回填假值）
+    private val runtimeIntegrityDetector: com.keepasskey.app.security.RuntimeIntegrityDetector? = null
 ) : ViewModel() {
 
     // P3-23：null 时回退空串实现（生产 Hilt 恒注入 StringsProviderModule 真实现）
@@ -119,6 +122,20 @@ class UnlockViewModel @Inject constructor(
     )
 
     init {
+        // ISSUE-P2-44：运行完整性快照 → 主密码页「已启用无障碍服务」提示位。
+        // 与风险等级解耦（**只提示、不降级通道**，避免以安全名义剥夺可及性）；
+        // 未注入检测器（纯 JVM 单测）时不订阅，提示位恒为默认 false。
+        runtimeIntegrityDetector?.let { detector ->
+            viewModelScope.launch {
+                detector.report.collect { report ->
+                    _uiState.value = _uiState.value.copy(
+                        accessibilityRiskNotice =
+                            com.keepasskey.app.security.RuntimeIntegrityPolicy
+                                .requiresAccessibilityNotice(report)
+                    )
+                }
+            }
+        }
         viewModelScope.launch {
             vaultRepository.getDatabases().collect { databases ->
                 val active = databases.firstOrNull { it.isActive } ?: databases.firstOrNull()

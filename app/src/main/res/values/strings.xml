@@ -343,6 +343,8 @@
     <string name="unlock_downgrade_dialog_body">本机 Keystore 为软件级（无 TEE / StrongBox 硬件隔离），快速解锁封印的主密码与密钥文件将以软件密钥加密，攻击者可离线解出。是否仍要启用？</string>
     <string name="unlock_downgrade_confirm">仍要启用（软件密钥）</string>
     <string name="unlock_downgrade_decline">不启用</string>
+    <string name="unlock_accessibility_notice_title">已启用无障碍服务</string>
+    <string name="unlock_accessibility_notice_body">本机已启用无障碍服务（非本应用）。该类服务可读取你在屏幕上输入的内容，包括主密码。若非你本人因可及性需要而开启，建议先在系统设置中关闭再输入。</string>
 <string name="edit_scan_totp_qr">呼起相机扫描 TOTP 二维码</string>
     <string name="edit_attachment_empty">附件内容为空，未添加</string>
     <string name="edit_save_failed">保存失败：%1$s</string>

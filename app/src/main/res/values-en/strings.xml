@@ -337,6 +337,8 @@
     <string name="unlock_downgrade_dialog_body">This device\'s Keystore is software-level (no TEE / StrongBox hardware isolation). Quick unlock seals your master password and key file with a software key that can be extracted offline. Enable anyway?</string>
     <string name="unlock_downgrade_confirm">Enable anyway (software key)</string>
     <string name="unlock_downgrade_decline">Don\'t enable</string>
+    <string name="unlock_accessibility_notice_title">Accessibility service enabled</string>
+    <string name="unlock_accessibility_notice_body">An accessibility service (not from this app) is enabled on this device. Such services can read what you type on screen, including your master password. If you did not enable it for accessibility reasons, turn it off in system settings before typing.</string>
 <string name="edit_scan_totp_qr">Open camera to scan TOTP QR code</string>
     <string name="edit_attachment_empty">Attachment is empty, not added</string>
     <string name="edit_save_failed">Save failed: %1$s</string>

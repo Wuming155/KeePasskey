@@ -3,6 +3,8 @@ package com.keepasskey.app.security
 import android.content.Context
 import android.content.pm.ApplicationInfo
 import android.os.Debug
+import android.view.accessibility.AccessibilityManager
+import android.accessibilityservice.AccessibilityServiceInfo
 import com.keepasskey.core.log.AppLog
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
@@ -154,8 +156,40 @@ class RuntimeIntegrityDetector @Inject constructor(
             rootArtifactsDetected = ROOT_ARTIFACT_PATHS.any { File(it).exists() },
             magiskDetected = MAGISK_TRACE_PATHS.any { File(it).exists() },
             hookFrameworkDetected = detectHookFramework(),
-            untrustedInstallSource = detectUntrustedInstallSource(ctx)
+            untrustedInstallSource = detectUntrustedInstallSource(ctx),
+            thirdPartyAccessibilityEnabled = detectThirdPartyAccessibility(ctx)
         )
+    }
+
+    /**
+     * 无障碍服务探测（ISSUE-P2-44）。
+     *
+     * **口径**：`getEnabledAccessibilityServiceList(FEEDBACK_ALL_MASK)` 返回的任一服务，
+     * 其包名 ≠ 本应用包名即为真（**含系统预装的 TalkBack**）——无障碍服务同等具备读取任意
+     * 输入内容的能力，系统签名不改变该能力。只用官方 API，**无需任何权限**。
+     *
+     * **不参与等级判定**：仅驱动主密码输入页的提示（见 [IntegritySignals] 该字段 KDoc）。
+     *
+     * 失败（服务不可用 / ROM 限制）一律按「未检测到」处理并落脱敏日志——
+     * 该信号只影响提示，不构成 fail-closed 门控，故不上行异常。
+     */
+    private fun detectThirdPartyAccessibility(ctx: Context): Boolean {
+        val manager = try {
+            ctx.getSystemService(Context.ACCESSIBILITY_SERVICE) as? AccessibilityManager
+        } catch (t: Throwable) {
+            AppLog.w(TAG, "获取 AccessibilityManager 失败，按未检测到处理", t)
+            null
+        } ?: return false
+        return try {
+            manager.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
+                .any { info ->
+                    val pkg = info.resolveInfo?.serviceInfo?.packageName
+                    !pkg.isNullOrEmpty() && pkg != ctx.packageName
+                }
+        } catch (t: Throwable) {
+            AppLog.w(TAG, "枚举无障碍服务失败，按未检测到处理", t)
+            false
+        }
     }
 
     /**
