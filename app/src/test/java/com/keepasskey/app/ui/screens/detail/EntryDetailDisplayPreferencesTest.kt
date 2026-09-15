@@ -4,6 +4,7 @@ import androidx.lifecycle.SavedStateHandle
 import com.keepasskey.app.data.repository.AutofillBlocklistStore
 import com.keepasskey.app.data.repository.FakeSettingsRepository
 import com.keepasskey.app.data.repository.FakeVaultRepository
+import com.keepasskey.app.testutil.awaitOffMainComputation
 import com.keepasskey.app.ui.model.UiVaultEntry
 import com.keepasskey.app.ui.screens.settings.ExtendedSettings
 import com.keepasskey.app.ui.screens.vault.ExtendedSettingsSource
@@ -113,6 +114,10 @@ class EntryDetailDisplayPreferencesTest {
 
         viewModel.onScreenEntered()
         testScheduler.runCurrent()
+        // ISSUE-P2-58 AC④：按需解密 + 熵估算已移出主线程，须等真实线程回写后再断言
+        testScheduler.awaitOffMainComputation {
+            viewModel.uiState.value.revealedPassword == FAKE_PASSWORD
+        }
 
         assertTrue(viewModel.uiState.value.isPasswordVisible)
         assertEquals(
@@ -145,6 +150,9 @@ class EntryDetailDisplayPreferencesTest {
 
         viewModel.onScreenEntered()
         testScheduler.runCurrent()
+        // ISSUE-P2-58 AC④：解密已移出主线程——须让真实线程跑完再断言「无预解密」，
+        // 否则该负例会被「尚未回写」的空窗期蒙混通过（`condition` 恒 false，等待到超时为止）
+        testScheduler.awaitOffMainComputation(timeoutMs = 200) { false }
 
         assertFalse(viewModel.uiState.value.isPasswordVisible)
         assertNull(

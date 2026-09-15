@@ -2997,10 +2997,10 @@ $ adb shell am instrument -w -e class com.keepasskey.app.security.QuickUnlockSea
 
 > **本批次缘起**：认领外部审计转登项 `ISSUE-P2-62`（审计 H2，敏感数据流批次）、
 > `ISSUE-P2-50`（审计 F-14）、`ISSUE-P2-52`（审计 F-22）、`ISSUE-P2-60`（审计 RUST-06）、
-> `ISSUE-P2-56`（审计 RUST-01）、`ISSUE-P2-57`（审计 RUST-02）、`ISSUE-P2-59`（审计 RUST-05）、
-> 威胁建模项 `ISSUE-P2-78`（T-10）与审计项 `ISSUE-P2-54`（F-05，CI 变更）。
-> 除 `P2-56` / `P2-57`（原生 Rust 内核，`cargo test` 验证）、`P2-59`（派生入口 Kotlin 侧）与
-> `P2-54`（工作流触发面）外，其余五项的整改落在 Kotlin/JVM 侧，无需设备。
+> `ISSUE-P2-56`（审计 RUST-01）、`ISSUE-P2-57`（审计 RUST-02）、`ISSUE-P2-58`（审计 RUST-03）、
+> `ISSUE-P2-59`（审计 RUST-05）、威胁建模项 `ISSUE-P2-78`（T-10）与审计项 `ISSUE-P2-54`（F-05，CI 变更）。
+> 除 `P2-56` / `P2-57`（原生 Rust 内核，`cargo test` 验证）、`P2-58`（原生内核 + 两个 Kotlin 调用点）、
+> `P2-59`（派生入口 Kotlin 侧）与 `P2-54`（工作流触发面）外，其余五项的整改落在 Kotlin/JVM 侧，无需设备。
 
 ### 49.1 交付清单
 
@@ -3015,22 +3015,38 @@ $ adb shell am instrument -w -e class com.keepasskey.app.security.QuickUnlockSea
 | **ISSUE-P2-56** | P2 | Argon2 `m_cost` 工作内存（派生中间态）释放前不擦除：`lib.rs` 用 `hash_password_into`，而 `Cargo.toml:30` 宣称 `zeroize` feature 已擦除 | ① **实证**（2026-09-15 读 argon2 0.6.0 源码）：`zeroize` feature 只覆盖 `initial_hash`（`lib.rs:389-390`）与 finalize 的 `blockhash` / `blockhash_bytes`（`lib.rs:570-573`）；`hash_password_into` 内部分配的 `Blocks` 其 `Drop` **仅 dealloc、不清零**（`block.rs:190-200`，`Zeroize for Block` 存在但从未被调用）→ 原宣称不成立；② 改 `hash_password_into_with_memory` + 自持 `Zeroizing<Vec<Block>>`（析构含提前错误路径经 `Vec<Block>: Zeroize` → `Block::zeroize` 全量归零）；③ 分配失败走 `try_reserve_exact` → `None`，**保留** `Error::OutOfMemory` 的优雅失败语义（严禁 `resize` panic / abort——超大 m_cost 下 abort 比现状更坏）；④ `Cargo.toml` 注释更正宣称口径 | 审计 RUST-01；`AGENTS.md` §3.2 原生内核擦除纪律 |
 | **ISSUE-P2-57** | P2 | 派生密钥**栈副本**残留：① `sha2` 未启用 `zeroize`（`Cargo.toml`）→ `Sha256` 内部 state（AES-KDF 的 composite key 即驻留其中）析构不清零；② `Some(*out)`（`lib.rs`）把 `Zeroizing` 缓冲整份拷出为**不可擦栈副本** | ① `sha2` 启用 `zeroize`（= `digest/zeroize`）：`Sha256` 满足 `zeroize::ZeroizeOnDrop`，且 `Sha256VarCore::finalize_*_core` 收尾显式擦除 `state` / `block_len`；② 新增 `derive_into(..., out: &mut Zeroizing<[u8; OUT_LEN]>)`（Argon2）与 `aes_kdf_into(...)`（AES-KDF），**输出直接写入调用方受管缓冲**；JNI 两桥（`jni_bridge` / `jni_bridge_ext`）改走 `_into` 变体；`derive` / `aes_kdf` 门面**保留**供 KAT / BC 向量比对（KDoc 明示「仅测试与非秘密比对，生产必须走 `_into`」）；③ AES-KDF 额外显式 `zeroize` finalize 返回的摘要副本（`Zeroizing` 包裹 + 提前擦除）；④ **无算法变更**——三条独立证据锁定：IETF KAT 4 例 + BC 冻结向量 12 例 + 新增「`_into` 与门面逐字节一致」2 例 | 审计 RUST-02；`AGENTS.md` §3.2 |
 | **ISSUE-P2-59** | P2 | 原生 Argon2 路径**缺内存上界预检**（`Argon2KdfEngine.transform` 直调 JNI，`isMemoryParamFeasible` 仅覆盖 BC 分支），且 `(memoryInBytes / 1024).toInt()` / `iterations.toInt()` 存在**静默窄化** | ① 新增 `Argon2KdfEngine.isWithinKdfBounds(memoryInBytes, iterations, parallelism)`：镜像 `KdbxKdfParameterCodec.validateArgon2Bounds` 的**逐项上界**（8 KiB ~ 4 GiB / 2²⁴ 迭代 / 64 并行度；crypto 不可反向依赖 database，故同值声明 + 跨模块用例锁）；原生入口前置该裁决，越界即不进原生路径（回落既有 BC 兜底，其自带堆预检）；② 新增受检窄化 `requireExpressibleAsInt(value, field, scale)`：超 `Int` 范围**抛 `KdfException`** 并指明字段与上限，**取代**两处 `.toInt()`（BC 分支同步改用已预检的窄化值）；③ 边界值宽于一切合法用户配置（官方默认 64 MiB / 本仓自荐 ≤512 MiB × 20 均远小于封顶），并附跨模块「越界值双侧一致拒绝」用例防两侧漂移 | 审计 RUST-05；`AGENTS.md` §3.2 |
+| **ISSUE-P2-58** | P2 | 口令强度评估三条**平方级路径**（`unique_char_count` 用 `Vec::contains`、`longest_keyboard_walk` 逐起点内扫、`minimal_period` 逐周期长度试探）；`MAX_TEXT_CHARS`（XML 节点封顶）对**该热路径不构成约束**，而 `HealthCheckEngine` 对**全库每条口令**循环评估（恶意库 CPU DoS 面乘性放大）；两个生产调用方运行在**主线程**（`SettingsHealthController` / `EntryDetailRevealController`，均 `viewModelScope` 裸 `launch`） | ① `estimate` 入口加**长度上限 `MAX_ANALYZED_CHARS = 256`**：熵基线与模式识别只用前缀、未分析尾部**不获熵信用**且按 `EXCESS_PENALTY_PER_CHAR = 0.05` **线性惩罚**（陷阱 #7：原「超出只按长度评分」会把 `'1234'×100` 判为极强）；② `longest_keyboard_walk` 改**单趟 O(n)**（与前驱比较递推，保持「同排且列差绝对值 1」与跨排负例语义）；③ `unique_char_count` 改 **O(n)**（ASCII 128 位图 + 非 ASCII 小表）；④ **额外**将 `minimal_period` 改 **KMP 前缀函数 O(n)**（全模块最后一条平方级路径）并让周期判据跑**全量字符**（截断会使 `abc × 100` 因不整除漏判周期而被抬到高档）；⑤ 两个调用方的 CPU 段（整库投影 + 审计扫描 / 解密 + 原生强度内核）移入 `withContext(Dispatchers.Default)` | 审计 RUST-03；`AGENTS.md` §3.2 |
+| **ISSUE-P2-55** | P2 | 发布签名口令等于仓库公开的示例值：`keystore.properties.example` 把 `storePassword` / `keyPassword` 写成 `keepasskey123`，而本地与流水线直接照抄该值签名——示例值随公开仓库泄露，等于把发布密钥公开（任何人可签出被系统认可的「官方」包，签名校验永远通过） | ① **示例改为不可误用占位符**：`__REPLACE_WITH_HIGH_ENTROPY_PASSWORD__`，并在示例内写明硬性要求与 **re-key（只换口令不换密钥）** 的完整 `keytool -importkeystore` 命令；② **构建期断言（fail-closed，无豁免开关）**：`app/build.gradle.kts` 在配置阶段校验已启用的签名口令——命中**已公开弱口令黑名单**（含 `keepasskey123`）或**模板占位符**或**长度 < 16** 即 `error(...)` 终止构建（未配置签名的未签名构建不受影响）；判定顺序为「黑名单/占位符 → 长度」，以便对 F-06 场景给出精确诊断；③ **本机既有 PKCS#12 已 re-key**（`keytool -importkeystore` 换口令），并用 `apksigner verify --print-certs` 证明产物签名证书 SHA-256 与旧库**逐字一致**（已安装用户仍可覆盖升级） | 审计 F-06；`AGENTS.md` §1 发布链路 |
 
 ### 49.2 验收证据
 
 ```powershell
 .\gradlew.bat test --rerun-tasks --max-workers=1
-# → BUILD SUCCESSFUL in 4m 46s；114 actionable tasks: 114 executed（全部真实执行）
-#   结果汇总（build/test-results/**/TEST-*.xml）：tests=1659 failures=0 errors=0 skipped=13
-#   （app 887 / core 65 / crypto 127 / database 377 / sync 203）
+# → BUILD SUCCESSFUL in 5m 49s；114 actionable tasks: 114 executed（全部真实执行）
+#   结果汇总（build/test-results/**/TEST-*.xml）：tests=1663 failures=0 errors=0 skipped=13
+#   （app 891 / core 65 / crypto 127 / database 377 / sync 203）
 
 cd crypto/src/main/rust; cargo test
-# → test result: ok. 50 passed; 0 failed; 0 ignored（原生内核，含本批新增 7 例）
+# → test result: ok. 57 passed; 0 failed; 0 ignored（原生内核，含本批新增 14 例）
 .\gradlew.bat assembleRelease
 # → BUILD SUCCESSFUL；产物 D:\GithubWorkplace\KeePasskey\app\build\outputs\apk\release\app-release.apk
+
+# —— ISSUE-P2-55 构建期闸门的**现场实测**（三条规则各跑一次，配置阶段即裁决）——
+# 1) 已公开弱口令（经环境变量注入，模拟"照抄示例值"）：
+$env:KEYSTORE_PASSWORD='changeme'; $env:KEY_PASSWORD='changeme'; .\gradlew.bat :app:help
+#   → BUILD FAILED in 2s：发布签名口令命中**已公开的示例 / 弱口令**（storePassword…）…
+# 2) 模板占位符原样拷贝：
+$env:KEYSTORE_PASSWORD='__REPLACE_WITH_HIGH_ENTROPY_PASSWORD__'; .\gradlew.bat :app:help
+#   → BUILD FAILED in 2s：发布签名口令仍为模板占位符（storePassword…）…
+# 3) 真实高熵口令（本机 re-key 后的 keystore.properties）：
+.\gradlew.bat assembleRelease
+#   → BUILD SUCCESSFUL in 51s（正向：闸门不误伤）
+& $env:ANDROID_HOME\build-tools\<ver>\apksigner.bat verify --print-certs app\build\outputs\apk\release\app-release.apk
+#   → V3.0 Signer: certificate SHA-256 digest: f3a6f0924d121e273be022589fa68724703cb7d906caa33fe4cded192cca842e
+#     （与 re-key 前旧库指纹 F3:A6:F0:92:…:84:2E 逐字一致 → 同密钥、可覆盖升级）
 ```
 
-**新增用例（共 +40 例：JVM +33 / 原生 +7）**：
+**新增用例（共 +49 例：JVM +35 / 原生 +14）**：
 
 | 模块 | 用例 | 覆盖 |
 |---|---|---|
@@ -3044,6 +3060,11 @@ cd crypto/src/main/rust; cargo test
 | `crypto`(原生) | `aes_kdf_tests`（+3，追加至既有文件） | ① `aes_kdf_into` 与 `aes_kdf` **逐字节一致** + 同步锚定独立第三方 KAT（防两路径同时偏移而互证通过）；② `_into` 闸门语义与门面一致且拒绝路径**不写坏**调用方缓冲；③ **编译期锁定** `sha2/zeroize` 已启用（`assert_zeroize_on_drop::<sha2::Sha256>()`，回退该 feature 即编译失败） |
 | `crypto` | `Argon2KdfEngineBoundsTest`（+6，新文件） | ① 上界镜像内存边界（8192B / 8191B / 4 GiB / 4 GiB+1）；② 迭代与并行度边界（2²⁴、0、64、65）；③ 不误拒合法配置（官方默认 / 本仓自荐上限 512 MiB×20 / 界内大内存）；④ 超 `Int` 可表达范围的内存参数**抛异常而非静默截断**（断言异常信息指明字段与「超出可表达范围」）；⑤ 同型迭代越界；⑥ 受检窄化边界值（`Int.MAX_VALUE` 恰好放行、+1 抛异常） |
 | `database` | `Argon2KdfBoundsMirrorTest`（+7，新文件） | **跨模块上界锁**：内存 / 迭代 / 并行度三类**越界值双侧一致拒绝**（解码侧 `KdbxKdfParameterCodec` ⇔ 派生入口 `isWithinKdfBounds`，不依赖堆环境）；界内且堆可容纳时两侧一致放行；**显式区分口径**——4 GiB 逐项界内但解码侧受动态堆门槛裁决（按实际 `maxMemory()/2` 分支断言，不做环境依赖的硬编码预期）；合法用户配置不得被派生入口误拒 |
+| `crypto`(原生) | `strength_tests`（+6，追加至既有文件） | ① **陷阱 #7 防线**：超长重复串（`1234`×100 / `abc`×100）必须命中周期标志且 `score ≤ 1`；② 白名单：300 字符杂乱串仍为最高档（长度上限不得误伤）；③ 10 万字符输入**线性完成**且语义合理（原三条平方级路径在此规模为 `10^10` 量级）；④ ASCII 位图计数（95 互异字符、唯一率恰 0.5 不触发低唯一率）；⑤ 非 ASCII 计数分支语义不变（互异不触发 / 全同触发）；⑥ 键盘行走单趟化等价性（整排列行走命中、非键盘字符打断、跨排负例）+ 长度上限边界单调性 |
+| `app` | `HealthScanOffMainThreadTest`（+1，新文件） | **AC④ 真实运行现场断言**：`Dispatchers.Main` 指向测试派发器后记录仓库真被调用的**线程名**，必须落在 `DefaultDispatcher-worker-*`（摘掉 `withContext(Dispatchers.Default)` 即失败） |
+| `app` | `EntryRevealEntropyOffMainThreadWiringTest`（+1，新文件） | **AC④ 第二调用点接线检查**（静态源码比对，沿既有 `*WiringTest` 先例）：`getEntryPasswordChars` + `PasswordEntropyEstimator.estimateBits` 必须同处 `withContext(Dispatchers.Default)` 块内 |
+| `app` | `OffMainComputation.kt`（+0 例，新测试工具） | 等待「已移出主线程的纯 CPU 工作」完成（真实时间轮询 + 虚拟时间推进），供 3 个既有用例在并发位置变更后确定性断言（见 49.3.14） |
+| `app` | `ReleaseSigningPasswordGateTest`（+2，新文件） | ① 示例文件的口令字段必须是占位符且不得命中任一已公开弱口令（同时要求示例显式警示 `keepasskey123` 不可复用）；② 构建脚本须保留闸门三要素（弱口令黑名单 / 长度下限 / 占位符检测）且以 `error(...)` fail-closed（防「被人删掉」，动态行为见 49.2 实测） |
 
 ### 49.3 已知边界与口径（如实声明）
 
@@ -3127,4 +3148,35 @@ cd crypto/src/main/rust; cargo test
    （HEAD 处 18 行 + 6 标题 = 24，却记 23），故存在**继承性 off-by-one**。本批按
    「表行 + 标题条目」统一口径校正为 **21**；同法核对 P3 节为 **39 + 7 = 46**，与声明一致（无需修正）。
    **纪律补充**：后续任何增删条目，均须按此双形式口径复算节标题计数。
+14. **`P2-58` 的口径、代价与既有用例适配（如实声明）**：
+    ① **模型局限（有意保留，非本批引入）**：`estimate` 的熵基线为
+    `已分析长度 × log2(字符集)`，故「长但低熵」的来源若前缀本身形如长随机串
+    （例：`qwertyuiop × 26`，全长 260 恰好整周期）仍可能落在最高档——原实现同样如此
+    （周期项按「单元自身随机 + 重复次数」计 credit），本批**未**改动该建模取舍；
+    本批消除的是**确定性缺陷**：三条平方级路径 + 超长输入的 DoS 面 + 「超出只按长度评分」陷阱。
+    ② **长度上限的语义**：`len`（真实长度）仍决定 `FLAG_TOO_SHORT` 与长度分档上限（口径不变）；
+    `analyzed`（≤256 前缀）承担熵基线与模式识别；`excess` 尾部不获熵信用且按 0.05/字符线性扣减。
+    ③ **周期判据跑全量字符**：这是与②的必要例外——KMP 版本为 O(n)（常数极小），
+    而截断会让 `abc × 100` 这类重复块因 256 不整除 3 而漏判，反而被抬到高档。
+    ④ **既有用例适配（4 例，语义未变）**：`HealthCheckViewModelTest`（1）/ `BreachCheckHealthTest`（2）/
+    `EntryDetailDisplayPreferencesTest`（1）原先依赖「CPU 工作在主线程 + 虚拟时间」同步完成，
+    AC④ 后须等待真实线程回写——新增测试工具 `app/src/test/.../testutil/OffMainComputation.kt`
+    （真实时间轮询 + 虚拟时间推进）补齐等待；其中「默认遮掩不预解密」负例**同时加强**：
+    显式等待一个空窗期后再断言为空（否则该负例会被「尚未回写」蒙混通过）。
+    ⑤ **未覆盖面**：`HealthCheckEngine` 内部若有其他调用方（核实于本批：仅此两处生产调用方）
+    仍须各自确认线程归属；本批未引入统一的「CPU 工作派发器」抽象（避免过度设计）。
+15. **`P2-55` 的口径、凭据处置与流水线影响（如实声明）**：
+    ① **密钥库本体不在仓库内**：`release.jks` 与 `keystore.properties` 均被 `.gitignore` 忽略、
+    从未被 git 跟踪（核实：`git check-ignore -v` 命中 `.gitignore:49` / `:51`）；因此本项治理的
+    是「**示例值即真实口令**」这一发布链路缺陷，而非仓库内的凭据泄露。
+    ② **re-key 已在本机对既有 PKCS#12 执行**（原口令即示例值）：`keytool -importkeystore` 生成
+    新库后以**指纹逐字相等**校验（`SHA256: F3:A6:…:84:2E` 前后一致），随后替换 `release.jks` 并更新
+    本地 `keystore.properties`（未跟踪）；**新口令仅存在于该未跟踪文件与构建产物签名中，未写入仓库、
+    未写入本报告、未出现在命令文本或终端回显中**（生成 → 立即落盘 → 变量与临时文件即时清除）。
+    ③ **流水线影响（预期行为）**：CI 若曾用示例值作为 `KEYSTORE_PASSWORD` / `KEY_PASSWORD` Secret，
+    现会在配置阶段直接失败——需把 Secret 换成高熵口令（与本地 re-key 同步）；**这是本 AC 期望的
+    fail-closed 行为，不提供任何豁免开关**。发布链路的「无签名构建」路径不受影响（闸门仅在
+    `hasReleaseSigning` 为真时生效）。
+    ④ **未做的取舍**：未把闸门做成可在 CI 上独立运行的任务（构建期断言已覆盖同一不变式）；
+    未引入 `keytool` 的程序化封装（re-key 属一次性运维动作，示例文件内已给出可直接执行的命令）。
 

@@ -185,3 +185,119 @@ fn flags_are_within_defined_bitmask() {
         assert_eq!(f & !ALL, 0, "[{pw}] 出现未定义标志位");
     }
 }
+
+// ================= ISSUE-P2-58（审计 RUST-03）：长度上限 + 线性惩罚 + 平方级路径线性化 =====
+
+/// 陷阱 #7 防线：**超长重复串不得被评为强口令**。
+///
+/// 若按「超出上限只按长度评分」实现（原审计点名的错误做法），`1234 × 100`（400 字符）
+/// 会因 400 字符的长度而落在最高档；正确实现须让模式识别与线性惩罚共同压住它。
+#[test]
+fn oversized_repetitive_password_is_not_rated_strong() {
+    let long_digits = "1234".repeat(100); // 400 字符
+    let e = estimate(long_digits.as_bytes());
+    assert_ne!(e.flags & FLAG_PERIODIC_REPEAT, 0, "超长重复串必须命中周期标志");
+    assert!(e.score <= 1, "超长重复数字串不得被评为强口令（实际 {}）", e.score);
+
+    // 同类：长重复字母块（截断会让 `abc` × 100 因不整除而漏判，须靠全长 O(n) 周期检测捕获）
+    let long_alpha = "abc".repeat(100); // 300 字符
+    let e2 = estimate(long_alpha.as_bytes());
+    assert_ne!(e2.flags & FLAG_PERIODIC_REPEAT, 0, "超长重复字母块必须命中周期标志");
+    assert!(e2.score <= 1, "超长重复字母块不得被评为强口令（实际 {}）", e2.score);
+}
+
+/// 白名单：真随机的长口令不得被长度上限**误伤**（线性惩罚不得把长随机串降档）。
+#[test]
+fn oversized_random_like_password_is_not_penalized() {
+    // 300 字符、四类字符、无周期/无长重复段（构造为逐字符递增的混合族，避免意外命中模式）
+    let mut pw = String::new();
+    for i in 0..300u32 {
+        let c = match i % 4 {
+            0 => char::from(b'a' + (i % 26) as u8),
+            1 => char::from(b'A' + ((i * 7) % 26) as u8),
+            2 => char::from(b'0' + ((i * 3) % 10) as u8),
+            _ => ['#', '$', '!', '%'][(i % 4) as usize],
+        };
+        pw.push(c);
+    }
+    assert_eq!(
+        estimate(pw.as_bytes()).score,
+        SCORE_MAX,
+        "长且杂的随机串应保持最高档（长度上限不得误伤）"
+    );
+}
+
+/// 超长输入（10 万字符）必须**迅速返回**且语义合理——原实现的三条平方级路径在此规模下
+/// 是 `10^10` 量级操作（本用例会直接超时）；线性化后为毫秒级。
+#[test]
+fn very_long_input_is_handled_in_linear_time() {
+    let e = estimate(&vec![b'a'; 100_000]);
+    assert!(e.score <= 1, "10 万字符单字重复串不得被评为强口令（实际 {}）", e.score);
+    assert_ne!(e.flags & FLAG_PERIODIC_REPEAT, 0);
+
+    // 95 个可打印 ASCII 循环 1000 次（95000 字符）：全长 O(n) 周期检测须命中，
+    // 且超长线性惩罚把分档压到最低——**不得**因长度冲分
+    let printable: Vec<u8> = (0x20u8..0x7Fu8).collect();
+    let long: Vec<u8> = printable.iter().copied().cycle().take(95_000).collect();
+    let e2 = estimate(&long);
+    assert_ne!(e2.flags & FLAG_PERIODIC_REPEAT, 0, "95 字符周期块须被全长周期检测捕获");
+    assert!(e2.score <= 1, "超长周期串不得被评为强口令（实际 {}）", e2.score);
+}
+
+/// ASCII 位图计数路径（`unique_char_count` 的 128 位图分支）：95 个互异可打印字符全部计入。
+/// 唯一率**恰为 0.5**（95/190）时不触发低唯一率（判据为严格小于），借此确认位图无漏计。
+#[test]
+fn ascii_bitmap_counts_all_distinct_printable_chars() {
+    let printable: Vec<u8> = (0x20u8..0x7Fu8).collect();
+    let two_rounds: Vec<u8> = printable.iter().copied().chain(printable.iter().copied()).collect();
+    assert_eq!(two_rounds.len(), 190);
+    let e = estimate(&two_rounds);
+    assert_eq!(
+        e.flags & FLAG_LOW_UNIQUE_RATIO,
+        0,
+        "唯一率恰为 0.5 时不得触发低唯一率（若位图漏计会误触发）"
+    );
+}
+
+/// 非 ASCII 计数分支（`unique_char_count` 的 `others` 小表）语义不变：
+/// 全部互异 → 唯一率 1.0（不触发低唯一率）；全同 → 唯一率 1/n（触发）。
+#[test]
+fn non_ascii_unique_count_semantics_preserved() {
+    assert_eq!(estimate("αβγδεζηθ".as_bytes()).flags & FLAG_LOW_UNIQUE_RATIO, 0);
+    assert_ne!(estimate("αααααααα".as_bytes()).flags & FLAG_LOW_UNIQUE_RATIO, 0);
+    // 混合：ASCII 与非 ASCII 互异字符均计入
+    assert_eq!(estimate("aαbβcγdδeε".as_bytes()).flags & FLAG_LOW_UNIQUE_RATIO, 0);
+}
+
+/// 键盘行走单趟化的语义等价性：长同排行走进阶仍被识别，跨排组合仍不命中。
+#[test]
+fn keyboard_walk_single_pass_equivalence() {
+    // 数字行整排（同排列号相邻，长度 12）→ 命中
+    assert_ne!(estimate(b"1234567890-=").flags & FLAG_KEYBOARD_WALK, 0);
+    // 字母行 `asdfghjkl`（同排相邻 9 个）→ 命中
+    assert_ne!(estimate(b"asdfghjkl").flags & FLAG_KEYBOARD_WALK, 0);
+    // 非键盘字符打断行走段：`qwe` + 空格 + `rty` 应为 3（< KEYBOARD_WALK_MIN=4）→ 不命中
+    assert_eq!(estimate(b"qwe rty").flags & FLAG_KEYBOARD_WALK, 0);
+    // 跨排负例（既有用例的同型复核）：`p`（上排末）与 `a`（中排首）不同排
+    assert_eq!(estimate(b"pa").flags & FLAG_KEYBOARD_WALK, 0);
+}
+
+/// 恰好等于 / 超过长度上限的边界语义：上限内不触发线性惩罚，超 1 字符即开始扣减。
+#[test]
+fn analyzed_length_boundary_semantics() {
+    let at_cap: String = "aB3$kLmQ7#xZ".chars().cycle().take(MAX_ANALYZED_CHARS).collect();
+    let over_cap: String = format!("{at_cap}Z");
+    assert_eq!(at_cap.chars().count(), MAX_ANALYZED_CHARS);
+    assert_eq!(over_cap.chars().count(), MAX_ANALYZED_CHARS + 1);
+
+    let at = estimate(at_cap.as_bytes());
+    let over = estimate(over_cap.as_bytes());
+    // 超限 1 字符的惩罚为 0.05（log10），定点量级 < 10，且分档不因此上升
+    assert!(over.score <= at.score, "超限输入不得比上限内同内容更强");
+    assert!(
+        over.guesses_log10_x100 <= at.guesses_log10_x100,
+        "超限惩罚须单调扣减（{} vs {}）",
+        over.guesses_log10_x100,
+        at.guesses_log10_x100
+    );
+}

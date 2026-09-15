@@ -19,6 +19,14 @@
 //! 跨语言契约：本模块的 [`FLAG_*`] 位值必须与 Kotlin 侧
 //! `com.keepasskey.crypto.strength.PasswordStrengthFlags` **逐位一致**，
 //! 且 JNI 层返回 `IntArray[score, guessesLog10X100, flags]` 的**定长 3 元布局**。
+//!
+//! **热路径预算（ISSUE-P2-58，审计 RUST-03）**：全库审计会对**每条口令**调用本模块，
+//! 恶意库可用超长字符串放大耗时。故：
+//! - [`estimate`] 只对前 [`MAX_ANALYZED_CHARS`] 个字符做模式识别与熵基线（超额部分线性惩罚）；
+//! - 三条原平方级路径均已线性化：[`longest_keyboard_walk`]（单趟）、[`unique_char_count`]
+//!   （ASCII 位图）、[`minimal_period`]（KMP 前缀函数）；
+//! - 结果：单条口令的耗时上界为 `O(MAX_ANALYZED_CHARS)` + 周期检测 `O(真实长度)`，
+//!   与恶意输入的规模**脱钩**（周期检测为线性且常数极小，故不受截断影响，跑全量字符）。
 
 use zeroize::Zeroizing;
 
@@ -62,6 +70,24 @@ const KEYBOARD_WALK_MIN: usize = 4;
 const PERIODIC_MIN_REPEATS: usize = 3;
 /// 唯一率惩罚阈值。
 const LOW_UNIQUE_RATIO: f64 = 0.5;
+
+/// **热路径分析长度上限**（ISSUE-P2-58，审计 RUST-03）。
+///
+/// 为何需要：`MAX_TEXT_CHARS`（XML 节点封顶）对本模块的**热路径不构成约束**——
+/// `HealthCheckEngine` 会对**全库每条口令**循环评估，恶意库可塞入超长口令字符串把
+/// 平方级路径（周期检测 / 键盘行走 / 唯一字符统计）乘性放大成 CPU DoS。
+///
+/// 语义：超过该长度的输入**只分析前 N 个字符**，未分析尾部
+/// ① **不获得任何熵信用**（熵基线按已分析长度计）、② 另按 [`EXCESS_PENALTY_PER_CHAR`]
+/// **线性扣减**。两项合起来确保超长重复串（如 `'1234' × N`）**不会**因"超出只按长度评分"
+/// 被误判为极强（陷阱 #7）。
+pub const MAX_ANALYZED_CHARS: usize = 256;
+
+/// 超出 [`MAX_ANALYZED_CHARS`] 的每个字符的**线性惩罚**（`log10(猜测次数)` 维度）。
+///
+/// 取 `0.05`：约每 60 个超额字符扣掉一个分档（分档间距约 `3`），
+/// 既不让超长输入被轻视（真随机长口令仍会落在最高档），也不让其被高估。
+const EXCESS_PENALTY_PER_CHAR: f64 = 0.05;
 
 /// `log2(10)`——用于把「比特」换算为「log10(猜测次数)」。
 const LOG2_10: f64 = 3.321_928_092_440_296;
@@ -146,22 +172,32 @@ pub fn estimate(password: &[u8]) -> Estimate {
         };
     }
 
+    // ISSUE-P2-58（审计 RUST-03）：热路径长度上限 + 线性惩罚。
+    // - `len`（真实长度）仍用于长度分档上限与 `FLAG_TOO_SHORT`（口径不变）；
+    // - `analyzed`（≤ MAX_ANALYZED_CHARS 的前缀）承担**全部模式识别与熵基线**，
+    //   使本函数对任意输入长度的最坏耗时被封顶（恶意库的 CPU DoS 面收敛）；
+    // - `excess` 尾部既不计熵信用、又按线性惩罚扣减（见估算末尾）。
+    let analyzed: &[char] = &chars[..len.min(MAX_ANALYZED_CHARS)];
+    let excess = len.saturating_sub(MAX_ANALYZED_CHARS);
+    let analyzed_len = analyzed.len();
+
     let mut flags: i32 = 0;
     if len < MIN_RECOMMENDED_LEN {
         flags |= FLAG_TOO_SHORT;
     }
 
     // —— 字符集规模与类别计数 ——
-    let (charset_size, class_count) = charset_profile(&chars);
+    let (charset_size, class_count) = charset_profile(analyzed);
     if class_count == 1 {
         flags |= FLAG_SINGLE_CHAR_CLASS;
     }
 
-    // —— 基线：len × log2(charset) 比特 → log10(猜测次数) ——
-    let mut log10 = (len as f64) * (charset_size as f64).log2() / LOG2_10;
+    // —— 基线：已分析长度 × log2(charset) 比特 → log10(猜测次数) ——
+    // 未分析尾部不参与基线（不给"未经审视的长度"任何熵信用）
+    let mut log10 = (analyzed_len as f64) * (charset_size as f64).log2() / LOG2_10;
 
     // —— 完全/近似命中常见口令表 ——
-    let lowered: Zeroizing<String> = Zeroizing::new(chars.iter().flat_map(|c| c.to_lowercase()).collect());
+    let lowered: Zeroizing<String> = Zeroizing::new(analyzed.iter().flat_map(|c| c.to_lowercase()).collect());
     if COMMON_PASSWORDS.contains(&lowered.as_str()) {
         flags |= FLAG_COMMON_PASSWORD;
         log10 = 1.0_f64.min(log10);
@@ -180,6 +216,8 @@ pub fn estimate(password: &[u8]) -> Estimate {
     }
 
     // —— 整串周期性（须先于单段惩罚，因为它把整串按「一个单元」重估）——
+    // 注意：本判据跑**全量字符**（KMP 版本为 O(n)，见 `minimal_period` KDoc）——
+    // 截断会让 `abc` × 100 一类超长重复块因不整除而漏判，进而被熵基线抬到高档。
     if let Some((unit_len, repeats)) = minimal_period(&chars) {
         if repeats >= PERIODIC_MIN_REPEATS {
             flags |= FLAG_PERIODIC_REPEAT;
@@ -190,40 +228,48 @@ pub fn estimate(password: &[u8]) -> Estimate {
     }
 
     // —— 同字符重复段 ——
-    let repeat_run = longest_repeat_run(&chars);
+    let repeat_run = longest_repeat_run(analyzed);
     if repeat_run >= REPEAT_RUN_MIN {
         flags |= FLAG_REPEATED_RUN;
         log10 -= 0.8 * (repeat_run as f64);
     }
 
     // —— 单调顺序段 ——
-    let seq_run = longest_sequence_run(&chars);
+    let seq_run = longest_sequence_run(analyzed);
     if seq_run >= SEQUENCE_RUN_MIN {
         flags |= FLAG_SEQUENCE;
         log10 -= 0.7 * (seq_run as f64);
     }
 
     // —— 键盘相邻行走 ——
-    let walk = longest_keyboard_walk(&chars);
+    let walk = longest_keyboard_walk(analyzed);
     if walk >= KEYBOARD_WALK_MIN {
         flags |= FLAG_KEYBOARD_WALK;
         log10 -= 0.9 * (walk as f64);
     }
 
     // —— 日期/年份形状 ——
-    if let Some(weight) = date_like_weight(&chars) {
+    if let Some(weight) = date_like_weight(analyzed) {
         flags |= FLAG_DATE_LIKE;
         log10 -= weight;
     }
 
     // —— 字符唯一率过低 ——
-    let unique = unique_char_count(&chars);
-    let unique_ratio = unique as f64 / len as f64;
+    let unique = unique_char_count(analyzed);
+    let unique_ratio = unique as f64 / analyzed_len as f64;
     if unique_ratio < LOW_UNIQUE_RATIO {
         flags |= FLAG_LOW_UNIQUE_RATIO;
         log10 -= (LOW_UNIQUE_RATIO - unique_ratio) * 8.0;
     }
 
+    // —— 超长输入的线性惩罚（ISSUE-P2-58 陷阱 #7 防线）——
+    // 未分析尾部已不获熵信用（基线按 analyzed_len 计），此处再对其线性扣减：
+    // 既不为"未经审视的长度"付溢价，也让超长重复串无法靠长度冲分。
+    if excess > 0 {
+        log10 -= EXCESS_PENALTY_PER_CHAR * excess as f64;
+    }
+
+    // 分档上限与 `FLAG_TOO_SHORT` 仍按**真实长度**裁决（口径不变）
     let log10 = log10.max(0.0);
     Estimate {
         score: score_of(log10).min(length_cap(len)),
@@ -401,32 +447,36 @@ fn class_index(c: char) -> Option<(CharClass, i32)> {
 
 /// 最长键盘相邻行走段长度（**同排内**横向相邻，如 `qwert`；大小写不敏感）。
 ///
-/// 逐起点扫描「同排且列号相邻」的最长连续段。**必须判排**：展平拼接后上一排末位与下一排
-/// 首位索引也相邻，若不判排会把 `-=`+`q` 一类跨排组合误判为行走（本模块自测已锁定该负例）。
+/// **单趟 O(n)**（ISSUE-P2-58 AC②：原实现逐起点内扫，最坏 O(n²)）：顺序扫描时只需与
+/// **前一个**字符比较即可递推当前段长——「同排且列号相邻」是**相邻字符间**的关系，
+/// 故单趟扫描与逐起点扫描在语义上完全等价（既有负例 `keyboard_walk_does_not_bridge_rows`
+/// 与 `-=` + `q` 跨排组合的判定保持不变）。
+///
+/// **必须判排**：展平拼接后上一排末位与下一排首位索引也相邻，若不判排会把跨排组合误判为行走。
 fn longest_keyboard_walk(chars: &[char]) -> usize {
-    let idx: Vec<Option<(usize, usize)>> = chars.iter().map(|c| keyboard_index(*c)).collect();
-    let mut best = 1usize;
-    for start in 0..idx.len() {
-        let Some((row, mut col)) = idx[start] else {
-            continue;
-        };
-        let mut len = 1usize;
-        for item in idx.iter().skip(start + 1) {
-            match item {
-                Some((r, c)) if *r == row && c.abs_diff(col) == 1 => {
-                    len += 1;
-                    col = *c;
-                }
-                _ => break,
+    let mut best = 0usize;
+    let mut cur = 0usize;
+    let mut prev: Option<(usize, usize)> = None;
+    for &c in chars {
+        match keyboard_index(c) {
+            Some((row, col)) => {
+                cur = match prev {
+                    Some((prev_row, prev_col)) if prev_row == row && prev_col.abs_diff(col) == 1 => {
+                        cur + 1
+                    }
+                    _ => 1,
+                };
+                best = best.max(cur);
+                prev = Some((row, col));
+            }
+            None => {
+                // 非键盘字符打断当前行走段（与逐起点扫描的 `break` 语义一致）
+                cur = 0;
+                prev = None;
             }
         }
-        best = best.max(len);
     }
-    if chars.is_empty() {
-        0
-    } else {
-        best
-    }
+    best
 }
 
 /// 字符在键盘中的（排号, 列号）；不在任何排则 `None`。
@@ -487,35 +537,68 @@ fn is_year(text: &str) -> bool {
     }
 }
 
-/// 不同字符个数。
+/// 不同字符个数（**O(n)**，ISSUE-P2-58 AC③）。
+///
+/// 原实现用 `Vec::contains` 去重（最坏 O(n²)）；现改为「ASCII 位图 + 非 ASCII 小表」：
+/// - ASCII（`U+0000..=U+007F`）用 `[bool; 128]` 位图，O(1) 判定；
+/// - 非 ASCII 字符收集进 `Vec<char>`，逐个 `contains`——其长度受 [`MAX_ANALYZED_CHARS`]
+///   封顶且远小于 ASCII 占比，故整体为 O(n)。
 fn unique_char_count(chars: &[char]) -> usize {
-    let mut seen = Vec::with_capacity(chars.len());
+    let mut ascii_seen = [false; 128];
+    let mut others: Vec<char> = Vec::new();
+    let mut count = 0usize;
     for &c in chars {
-        if !seen.contains(&c) {
-            seen.push(c);
+        let code = c as u32;
+        if code < 128 {
+            let slot = &mut ascii_seen[code as usize];
+            if !*slot {
+                *slot = true;
+                count += 1;
+            }
+        } else if !others.contains(&c) {
+            others.push(c);
+            count += 1;
         }
     }
-    seen.len()
+    count
 }
 
 /// 最小周期 `p` 与重复次数 `len / p`；非周期串返回 `None`。
 ///
-/// 仅接受**恰好整周期**（`len % p == 0` 且逐字符相等），避免把「偶然重复前缀」误判为周期串。
+/// **O(n)**（ISSUE-P2-58：原实现逐周期长度试探为最坏 O(n²)，是全模块最后一条平方级路径）：
+/// 以 KMP 前缀函数求最小整周期——`p = len - pi[len-1]`，且仅当 `len % p == 0` 时成立。
+/// 语义与原实现一致：只接受**恰好整周期**（`len % p == 0` 且逐字符相等），
+/// 不把「偶然重复前缀」误判为周期串；`repeats < 2` 返回 `None`。
+///
+/// 因已线性化，本函数在 [`estimate`] 中对**全量字符**调用（不受
+/// [`MAX_ANALYZED_CHARS`] 截断影响）——否则超长重复块（如 `abc` × 100）会因截断后
+/// 不再整除而漏判周期，被熵基线抬到高档（正是陷阱 #7 的一种形态）。
 fn minimal_period(chars: &[char]) -> Option<(usize, usize)> {
     let len = chars.len();
-    for p in 1..len {
-        if len % p != 0 {
-            continue;
-        }
-        let repeats = len / p;
-        if repeats < 2 {
-            continue;
-        }
-        if (p..len).all(|i| chars[i] == chars[i - p]) {
-            return Some((p, repeats));
-        }
+    if len < 2 {
+        return None;
     }
-    None
+    // KMP 前缀函数：pi[i] = chars[..=i] 的最长真前缀=真后缀长度
+    let mut pi = vec![0usize; len];
+    for i in 1..len {
+        let mut k = pi[i - 1];
+        while k > 0 && chars[i] != chars[k] {
+            k = pi[k - 1];
+        }
+        if chars[i] == chars[k] {
+            k += 1;
+        }
+        pi[i] = k;
+    }
+    let p = len - pi[len - 1];
+    if p == 0 || len % p != 0 {
+        return None;
+    }
+    let repeats = len / p;
+    if repeats < 2 {
+        return None;
+    }
+    Some((p, repeats))
 }
 
 #[cfg(test)]

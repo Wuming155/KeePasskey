@@ -4,10 +4,12 @@ import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.ui.model.UiVaultEntry
 import com.keepasskey.app.ui.screens.settings.ExtendedSettings
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * 详情页「按需揭示 / 遮掩」的行为控制器。
@@ -135,8 +137,14 @@ internal class EntryDetailRevealController(
     private fun decryptPasswordForDisplay() {
         val entryId = currentEntryId() ?: return
         scope.launch {
-            val chars = vaultRepository.getEntryPasswordChars(entryId)
-            passwordStrengthBitsFlow.value = PasswordEntropyEstimator.estimateBits(chars)
+            // ISSUE-P2-58 AC④：解密读取 + 熵估算（`PasswordEntropyEstimator` → 原生强度内核，
+            // 属纯 CPU 工作）原在 `scope`（= `viewModelScope`，Main 派发器）上执行，
+            // 会阻塞主线程；现移入 `Dispatchers.Default`，仅结果回写留在主线程。
+            val (chars, bits) = withContext(Dispatchers.Default) {
+                val plain = vaultRepository.getEntryPasswordChars(entryId)
+                plain to PasswordEntropyEstimator.estimateBits(plain)
+            }
+            passwordStrengthBitsFlow.value = bits
             secrets.revealedPassword.value = chars.toDisplayString()
         }
     }

@@ -9,11 +9,13 @@ import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.database.audit.HealthCheckEngine
 import com.keepasskey.database.audit.PasswordRiskLevel
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * TASK-21 拆分：设置页「密码库健康度检查」状态控制器。
@@ -73,8 +75,14 @@ internal class SettingsHealthController(
         scope.launch {
             healthStateFlow.update { it.copy(isHealthScanning = true) }
             try {
-                val entries = vaultRepository.getKdbxEntries()
-                val issues = HealthCheckEngine.analyzeEntries(entries)
+                // ISSUE-P2-58 AC④：`getKdbxEntries()`（全库投影）与 `HealthCheckEngine.analyzeEntries`
+                // （对**每条口令**跑一遍模式扫描）都是纯 CPU 工作——原先在 `scope`（调用方为
+                // `viewModelScope`，即 Main 派发器）上直接执行，会阻塞主线程直至整库扫描完毕。
+                // 现整体移入 `Dispatchers.Default`：仅结果回写发生在原派发器上。
+                val (entries, issues) = withContext(Dispatchers.Default) {
+                    val fetched = vaultRepository.getKdbxEntries()
+                    fetched to HealthCheckEngine.analyzeEntries(fetched)
+                }
 
                 val weakCount = issues.count { it.riskLevel == PasswordRiskLevel.WEAK }
                 val reusedCount = issues.count { it.riskLevel == PasswordRiskLevel.REUSED }

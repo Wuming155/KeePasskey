@@ -4,6 +4,7 @@ import com.keepasskey.app.autofill.testHmacFieldSignatureSource
 import com.keepasskey.app.data.repository.FakeSettingsRepository
 import com.keepasskey.app.data.repository.FakeVaultRepository
 import com.keepasskey.app.data.repository.VaultRepository
+import com.keepasskey.app.testutil.awaitOffMainComputation
 import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.model.KdbxUuid
@@ -134,6 +135,9 @@ class HealthCheckViewModelTest {
         // 触发真实审计扫描
         viewModel.rescanHealth()
         testScheduler.runCurrent()
+        // ISSUE-P2-58 AC④：整库扫描已移出主线程，须等真实线程回写后再断言
+        // （初态 healthScore 恒为 0，扫描完成后为真实分值，可作完成信号）
+        testScheduler.awaitOffMainComputation { viewModel.uiState.value.healthScore != 0 }
 
         val scannedHealth = viewModel.uiState.value
         assertFalse(scannedHealth.isHealthScanning)

@@ -11,6 +11,7 @@ import com.keepasskey.app.data.repository.FakeVaultRepository
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.sync.SyncCoordinator
 import com.keepasskey.app.sync.SyncCredentialsStore
+import com.keepasskey.app.testutil.awaitOffMainComputation
 import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.model.KdbxUuid
@@ -156,6 +157,10 @@ class BreachCheckHealthTest {
 
         viewModel.rescanHealth()
         runCurrent()
+        // ISSUE-P2-58 AC④：整库扫描已移出主线程，须等真实线程回写后再断言
+        testScheduler.awaitOffMainComputation {
+            viewModel.uiState.value.breachCheckStatus == BreachCheckStatus.BREACHED
+        }
 
         val state = viewModel.uiState.value
         assertEquals(BreachCheckStatus.BREACHED, state.breachCheckStatus)
@@ -180,6 +185,10 @@ class BreachCheckHealthTest {
         runCurrent()
         viewModel.rescanHealth()
         runCurrent()
+        // ISSUE-P2-58 AC④：整库扫描已移出主线程，须等真实线程回写后再断言
+        testScheduler.awaitOffMainComputation {
+            viewModel.uiState.value.breachCheckStatus == BreachCheckStatus.FAILED
+        }
 
         val state = viewModel.uiState.value
         assertEquals(BreachCheckStatus.FAILED, state.breachCheckStatus)

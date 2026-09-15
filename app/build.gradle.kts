@@ -34,6 +34,58 @@ val hasReleaseSigning = releaseStoreResolvedFile?.exists() == true &&
     !releaseKeyAlias.isNullOrBlank() &&
     !releaseKeyPassword.isNullOrBlank()
 
+// =============================================================================================
+// ISSUE-P2-55（审计 F-06）AC③：**发布签名口令的构建期断言**（fail-closed，不可绕过）。
+//
+// 缺陷背景：`keystore.properties.example` 曾公开示例口令 `keepasskey123`，而本地/流水线
+// 直接照抄该值签名 —— 示例值随公开仓库泄露，等于把发布密钥交给任何人（可用任意 APK
+// 冒充官方渠道包，且签名校验永远通过）。
+//
+// 断言策略（仅在实际配置了签名时生效；未配置签名的未签名构建不受影响）：
+//   1. 口令长度 ≥ `MIN_RELEASE_PASSWORD_LENGTH`（16）——排除"随手敲"的低熵值；
+//   2. 不得命中 `FORBIDDEN_RELEASE_PASSWORDS`（历史公开示例值与常见弱口令，比较时忽略大小写）；
+//   3. 不得包含模板占位符标记（防止有人直接把 example 拷过来）。
+// 违例即 `error(...)`：**构建在配置阶段直接失败**，绝不产出用泄露口令签名的"稳定版"。
+//
+// 豁免通道：**不存在**——不得通过调低阈值、删断言或改用示例值来变绿；口令只能来自
+// 本地 `keystore.properties`（已 gitignore）或 CI Secret（KEYSTORE_PASSWORD / KEY_PASSWORD）。
+// =============================================================================================
+val minReleasePasswordLength = 16
+val forbiddenReleasePasswords = setOf(
+    "keepasskey123", // 历史公开示例值（审计 F-06 的直接对象）
+    "password", "passw0rd", "changeme", "changeit", "secret", "admin", "123456", "12345678",
+)
+val releasePasswordPlaceholderMarker = "__REPLACE_WITH"
+
+if (hasReleaseSigning) {
+    listOf(
+        "storePassword（keystore.properties / KEYSTORE_PASSWORD）" to releaseStorePassword!!,
+        "keyPassword（keystore.properties / KEY_PASSWORD）" to releaseKeyPassword!!,
+    ).forEach { (label, password) ->
+        val normalized = password.trim()
+        // 顺序有意为之：先判「是否命中已公开值 / 占位符」（F-06 的精确场景），
+        // 再判长度——否则历史示例值会先被"过短"吞掉，丢失"该口令已随仓库泄露"这一关键诊断。
+        if (normalized.lowercase() in forbiddenReleasePasswords) {
+            error(
+                "发布签名口令命中**已公开的示例 / 弱口令**（$label）——该值随公开仓库泄露，" +
+                    "用它签名等于发布密钥失控。请对既有密钥库**只 re-key、不换密钥**" +
+                    "（keystore.properties.example 内有完整 keytool 命令），再更新本地配置（ISSUE-P2-55）。",
+            )
+        }
+        if (normalized.contains(releasePasswordPlaceholderMarker)) {
+            error(
+                "发布签名口令仍为模板占位符（$label）——请复制 keystore.properties.example 后填入真实高熵口令（ISSUE-P2-55）。",
+            )
+        }
+        if (normalized.length < minReleasePasswordLength) {
+            error(
+                "发布签名口令过短（$label 长度 ${normalized.length} < $minReleasePasswordLength）——" +
+                    "请使用高熵口令；见 keystore.properties.example 的 re-key 说明（ISSUE-P2-55）。",
+            )
+        }
+    }
+}
+
 android {
     namespace = "com.keepasskey.app"
     compileSdk = 37

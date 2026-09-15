@@ -11,9 +11,9 @@
 ## 1. 版本基线（摘要）
 
 - 测试 / 构建 / CI 当前全绿（具体版本、例数、残余面见 [`RESOLVED_LOG.md`](docs/RESOLVED_LOG.md)）。
-  单测基线（2026-09-15，§49 批次后）：**1659 例 / 0 失败 / 0 错误 / 13 跳过**
-  （app 887 / core 65 / crypto 127 / database 377 / sync 203；`--rerun-tasks --max-workers=1` 强制真实执行）；
-  原生内核基线（同日，§49 批次后）：`cargo test` **50 例 / 0 失败**（含 ISSUE-P2-56 工作内存清零 4 例 + ISSUE-P2-57 受管缓冲与 sha2 状态擦除 3 例）；
+  单测基线（2026-09-15，§49 批次后）：**1663 例 / 0 失败 / 0 错误 / 13 跳过**
+  （app 891 / core 65 / crypto 127 / database 377 / sync 203；`--rerun-tasks --max-workers=1` 强制真实执行）；
+  原生内核基线（同日，§49 批次后）：`cargo test` **57 例 / 0 失败**（含 ISSUE-P2-56 工作内存清零 4 例 + ISSUE-P2-57 受管缓冲与 sha2 状态擦除 3 例 + ISSUE-P2-58 强度评估线性化 6 例）；
   设备侧基线（2026-09-14，§47 批次后）：**32 例 / 0 失败 / 0 跳过**（`app` 15 + `database` 7 +
   `sync` 3 + `crypto` 7），已在 **arm64 真机**（Redmi 4X / LineageOS / Android 17 / **API 37**）全量复跑通过；
   此前既定环境为 x86_64 / API 36.1 模拟器（§34 / §36 / §46）。`app` 15 例含 `QuickUnlockSealDowngradeDeviceTest`
@@ -54,6 +54,9 @@ KeePasskey 是一款原生 Kotlin 开发的现代化 Android 密码管理器。�
      **派生输出与摘要状态亦须走受管缓冲（ISSUE-P2-57，§49）**：`sha2` 已启用 `zeroize`（`Sha256` 满足 `ZeroizeOnDrop`）；
      生产路径（JNI 桥）一律用 `derive_into` / `aes_kdf_into` 把结果**直接写入** `Zeroizing` 缓冲，
      不得以 `Option<[u8; 32]>` 返回值形态把派生密钥拷成不可擦栈副本（`derive` / `aes_kdf` 门面仅限测试与非秘密比对）。
+     **口令强度评估为全库热路径（ISSUE-P2-58，§49）**：`estimate` 只分析前 `MAX_ANALYZED_CHARS`（256）字符，
+     超额部分不给熵信用且线性惩罚（防「超出只按长度评分」陷阱）；三条原平方级路径（键盘行走 / 唯一字符 / 周期检测）已线性化。
+     **新增调用方（如新的健康检查 / 熵估算入口）必须把 CPU 段放在 `Dispatchers.Default`**，不得在 `viewModelScope` 主线程裸 `launch`。
    - JNI 定长布局契约：跨 FFI 只传基本类型与数组；口令强度评估返回定长 3 元 `IntArray [score, log10×100, flags]`，`FLAG_*` 位值在 Rust 与 Kotlin 两侧逐位对齐。
 3. **参考项目只读与文档优先铁律（禁止盲目翻看源码）**：
    - 严禁对 `参考项目/` 目录无目标 `grep`/扫源码；5 个参考项目的架构分析集中在 `docs/references/`。
@@ -72,6 +75,7 @@ KeePasskey 是一款原生 Kotlin 开发的现代化 Android 密码管理器。�
    - 调用前先用 `mcp_get_tool_description` 取得该服务器各工具的最新参数 schema，再发起调用；结果用于指导代码与文档，不改变本文件 §3 其余硬约束。
 8. **每批次收尾必须编译稳定版并回传产物完整路径（强制）**：每完成一批次代码修改（提交推送之前或同时），执行 `.\gradlew.bat assembleRelease` 编译稳定版本（R8 混淆 + 资源收缩 + release 签名），并在最终交付说明中**原样给出产物完整绝对路径**：
    `D:\GithubWorkplace\KeePasskey\app\build\outputs\apk\release\app-release.apk`（未配置 release 签名时为同目录 `app-release-unsigned.apk`，须如实注明）。构建失败必须如实报告并修复，不得以 debug 包冒充稳定版，也不得引用旧产物路径充当本次构建结果。
+   - **发布签名口令有构建期闸门（ISSUE-P2-55，§49）**：`app/build.gradle.kts` 在配置阶段拒绝**已公开的示例 / 弱口令**（含历史泄露值 `keepasskey123`）、**模板占位符**与**长度 < 16** 的口令，直接 `error(...)` 终止。口令只能来自本地 `keystore.properties`（gitignore）或 CI Secret（`KEYSTORE_PASSWORD` / `KEY_PASSWORD`，须为高熵值）；**该闸门无豁免开关**。既有密钥库若为弱口令，按 `keystore.properties.example` 内的 `keytool -importkeystore` 说明**只 re-key、不换密钥**（换密钥将导致已安装用户无法覆盖升级）。
 
 ---
 
