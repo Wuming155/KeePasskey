@@ -248,7 +248,7 @@ internal fun VaultListSearchTopBar(
 @androidx.compose.ui.tooling.preview.Preview(name = "列表搜索顶栏 - 浅色", showBackground = true)
 @androidx.compose.ui.tooling.preview.Preview(name = "列表搜索顶栏 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
 @Composable
-private fun VaultListSearchTopBarPreview() {
+internal fun VaultListSearchTopBarPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         VaultListSearchTopBar(
             searchQuery = "预览",

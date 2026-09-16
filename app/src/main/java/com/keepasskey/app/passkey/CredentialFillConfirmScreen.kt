@@ -85,7 +85,7 @@ fun CredentialFillConfirmScreen(
 @androidx.compose.ui.tooling.preview.Preview(name = "凭据填充确认页 - 浅色", showBackground = true)
 @androidx.compose.ui.tooling.preview.Preview(name = "凭据填充确认页 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
 @Composable
-private fun CredentialFillConfirmScreenPreview() {
+internal fun CredentialFillConfirmScreenPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         CredentialFillConfirmScreen(
             title = "预览确认标题",

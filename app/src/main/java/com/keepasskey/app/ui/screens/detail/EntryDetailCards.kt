@@ -320,7 +320,7 @@ private fun <T> previewStateOf(value: T): androidx.compose.runtime.MutableState<
 @Preview(name = "基础凭据卡片 - 浅色", showBackground = true)
 @Preview(name = "基础凭据卡片 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
 @Composable
-private fun BasicCredentialsCardPreview() {
+internal fun BasicCredentialsCardPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         val previewEntry = com.keepasskey.app.ui.preview.PreviewEntryLogin
         val previewUiState = previewStateOf(

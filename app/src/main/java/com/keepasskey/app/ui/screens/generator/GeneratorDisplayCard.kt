@@ -144,10 +144,10 @@ internal fun GeneratorDisplayCard(
 @androidx.compose.ui.tooling.preview.Preview(name = "密码生成结果卡片 - 浅色", showBackground = true)
 @androidx.compose.ui.tooling.preview.Preview(name = "密码生成结果卡片 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
 @Composable
-private fun GeneratorDisplayCardPreview() {
+internal fun GeneratorDisplayCardPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         GeneratorDisplayCard(
-            password = "预览-示例-口令-A1b2C3d4",
+            password = "Preview-Example-Pass-A1b2C3d4",
             strengthLabel = com.keepasskey.app.ui.model.UiMessage(
                 resId = com.keepasskey.app.R.string.generator_strength_extreme,
                 args = listOf(112)

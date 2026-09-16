@@ -135,7 +135,7 @@ private fun AlgorithmOptionDialog(
 @androidx.compose.ui.tooling.preview.Preview(name = "加密算法选择对话框 - 浅色", showBackground = true)
 @androidx.compose.ui.tooling.preview.Preview(name = "加密算法选择对话框 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
 @Composable
-private fun CipherAlgorithmDialogPreview() {
+internal fun CipherAlgorithmDialogPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         CipherAlgorithmDialog(
             currentAlgorithm = CipherLabels.CHACHA20,

@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -169,7 +170,8 @@ fun CloudSyncScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .padding(horizontal = 16.dp, vertical = 12.dp),
+                .padding(horizontal = 16.dp, vertical = 12.dp)
+                .navigationBarsPadding(),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             // 1. 同步协议提供商选择
@@ -369,7 +371,7 @@ fun CloudSyncScreen(
 @androidx.compose.ui.tooling.preview.Preview(name = "云端同步设置页 - 浅色", showBackground = true)
 @androidx.compose.ui.tooling.preview.Preview(name = "云端同步设置页 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
 @Composable
-private fun CloudSyncScreenPreview() {
+internal fun CloudSyncScreenPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         CloudSyncScreen(
             uiState = com.keepasskey.app.ui.screens.settings.SettingsUiState(),

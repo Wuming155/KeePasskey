@@ -270,6 +270,7 @@
 
     <!-- Cloud sync status & sort options -->
     <string name="sync_status_synced">Synced</string>
+    <string name="sync_status_unverified">Not verified</string>
     <string name="sync_status_syncing">Syncing...</string>
     <string name="sync_status_offline">Offline cache</string>
     <string name="sync_status_conflict">Conflict</string>

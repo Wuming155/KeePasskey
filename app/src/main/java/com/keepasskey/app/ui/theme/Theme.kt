@@ -165,7 +165,7 @@ fun KeePasskeyTheme(
 @Preview(name = "主题调色盘总览 - 浅色", showBackground = true)
 @Preview(name = "主题调色盘总览 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
 @Composable
-private fun KeePasskeyThemePreview() {
+internal fun KeePasskeyThemePreview() {
     KeePasskeyTheme {
         // 主角色语义色抽样：用于在 Preview 面板中逐目比对浅色 / 深色两套观感
         val swatches = listOf(

@@ -392,7 +392,7 @@ fun EntryEditContent(
 @Preview(name = "凭据编辑内容 - 浅色", showBackground = true)
 @Preview(name = "凭据编辑内容 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
 @Composable
-private fun EntryEditContentPreview() {
+internal fun EntryEditContentPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         val previewSnackbar = remember { SnackbarHostState() }
 

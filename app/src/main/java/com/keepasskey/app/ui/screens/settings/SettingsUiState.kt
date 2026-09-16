@@ -72,8 +72,8 @@ data class SettingsUiState(
     val argon2MemoryMb: Long = 64L,
     val argon2Parallelism: Int = 4,
     // P3-23：展示型默认值，无任何生产者覆写（DatabaseSettingsScreen 直读）；
-    // 资源化需先在 SettingsViewModel 补 strings 生产者（超出本任务改动面），保留原样
-    val compressionAlgorithm: String = "GZip 压缩",
+    // 只用算法短名，避免中文硬编码在英文界面泄漏
+    val compressionAlgorithm: String = "GZip",
     val recycleBinEnabled: Boolean = true,
     // ISSUE-P3-65：tanExpiresOnUse / checkForDuplicateUuids 字段已移除——假开关无行为消费方，
     // 设置页入口已如实禁用（「即将支持」），真实语义落地时再以可持久化形态恢复
@@ -101,9 +101,11 @@ data class SettingsUiState(
     // 通用同步状态（H1 整改：默认值不再写死演示时间戳/假状态文案，由真实同步结果填充；
     // P3-23：syncLastTime 空串占位，真实值由 SettingsViewModel 经 strings.get(sync_last_time_never) 填充）
     val syncLastTime: String = "",
-    // P3-23：展示型默认值，无任何生产者覆写（CloudSyncComponents 直读）；资源化需先在
-    // SettingsViewModel 补 strings 生产者（超出本任务改动面），保留原样
-    val syncStatusText: String = "未验证",
+    // P3-23：展示型默认值；生产路径由 SettingsUiStateProjection 按连接验证结果覆盖。
+    // 默认空串 + isConnectionVerified=false，避免英文界面硬编码中文「未验证」
+    val syncStatusText: String = "",
+    /** 连接是否已通过测试/成功同步验证；未验证时「立即同步」禁用，防误触 */
+    val isConnectionVerified: Boolean = false,
     val autoSyncEnabled: Boolean = true,
     val wifiOnlySync: Boolean = true,
     val isSyncing: Boolean = false,

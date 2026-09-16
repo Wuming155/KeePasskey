@@ -209,7 +209,7 @@ fun AppNavigationRail(
 @Preview(name = "AppBottomBar - Light", showBackground = true)
 @Preview(name = "AppBottomBar - Dark", uiMode = Configuration.UI_MODE_NIGHT_YES, showBackground = true)
 @Composable
-private fun AppBottomBarPreview() {
+internal fun AppBottomBarPreview() {
     KeePasskeyTheme {
         AppBottomBar(
             currentRoute = Screen.VaultList.route,

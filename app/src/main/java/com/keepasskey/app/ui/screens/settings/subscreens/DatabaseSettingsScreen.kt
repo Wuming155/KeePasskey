@@ -515,7 +515,7 @@ fun DatabaseSettingsScreen(
 @androidx.compose.ui.tooling.preview.Preview(name = "密码库属性设置页 - 浅色", showBackground = true)
 @androidx.compose.ui.tooling.preview.Preview(name = "密码库属性设置页 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
 @Composable
-private fun DatabaseSettingsScreenPreview() {
+internal fun DatabaseSettingsScreenPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         DatabaseSettingsScreen(
             uiState = com.keepasskey.app.ui.screens.settings.SettingsUiState().copy(

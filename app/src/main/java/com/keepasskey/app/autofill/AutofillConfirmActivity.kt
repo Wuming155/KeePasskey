@@ -418,7 +418,7 @@ private fun AutofillCallerAttributionBlock(
 @androidx.compose.ui.tooling.preview.Preview(name = "填充确认调用方归属块 - 浅色", showBackground = true)
 @androidx.compose.ui.tooling.preview.Preview(name = "填充确认调用方归属块 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
 @Composable
-private fun AutofillCallerAttributionBlockPreview() {
+internal fun AutofillCallerAttributionBlockPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         AutofillCallerAttributionBlock(
             attribution = AutofillCallerAttribution(

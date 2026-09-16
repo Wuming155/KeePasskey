@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -90,7 +91,8 @@ fun HealthCheckScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .padding(horizontal = 16.dp, vertical = 12.dp),
+                .padding(horizontal = 16.dp, vertical = 12.dp)
+                .navigationBarsPadding(),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             // 总体健康分仪表卡片
@@ -103,6 +105,8 @@ fun HealthCheckScreen(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
+                        // 仪表盘内只放分数：英文 “Overall health score” 放不进 96dp 圆，
+                        // 强行内嵌会导致换行/重叠（用户反馈 score 错位为 ‘ore）
                         Box(
                             modifier = Modifier
                                 .size(96.dp)
@@ -110,24 +114,25 @@ fun HealthCheckScreen(
                                 .background(MaterialTheme.colorScheme.primaryContainer),
                             contentAlignment = Alignment.Center
                         ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text(
-                                    text = "${uiState.healthScore}",
-                                    style = MaterialTheme.typography.headlineLarge.copy(
-                                        fontWeight = FontWeight.Black,
-                                        fontSize = 36.sp
-                                    ),
-                                    color = MaterialTheme.colorScheme.onPrimaryContainer
-                                )
-                                Text(
-                                    text = stringResource(R.string.health_total_score),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
-                                )
-                            }
+                            Text(
+                                text = "${uiState.healthScore}",
+                                style = MaterialTheme.typography.headlineLarge.copy(
+                                    fontWeight = FontWeight.Black,
+                                    fontSize = 36.sp
+                                ),
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
                         }
 
-                        Spacer(modifier = Modifier.height(12.dp))
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        Text(
+                            text = stringResource(R.string.health_total_score),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+
+                        Spacer(modifier = Modifier.height(6.dp))
 
                         Text(
                             text = stringResource(R.string.health_rating, uiState.healthStatus),
@@ -359,13 +364,14 @@ fun HealthCheckScreen(
 @androidx.compose.ui.tooling.preview.Preview(name = "密码库健康度检查页 - 浅色", showBackground = true)
 @androidx.compose.ui.tooling.preview.Preview(name = "密码库健康度检查页 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
 @Composable
-private fun HealthCheckScreenPreview() {
+internal fun HealthCheckScreenPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         HealthCheckScreen(
             uiState = com.keepasskey.app.ui.screens.settings.SettingsUiState().copy(
                 healthScore = 82,
-                healthStatus = "良好",
-                healthMessage = "预览用健康度摘要文案（示例数据）",
+                // 预览文案与界面语言一致（默认英文资源路径），避免中英混排
+                healthStatus = "Good",
+                healthMessage = "Sample health summary for layout preview only.",
                 weakPasswordCount = 2,
                 reusedPasswordCount = 1,
                 hasHealthScanned = true,

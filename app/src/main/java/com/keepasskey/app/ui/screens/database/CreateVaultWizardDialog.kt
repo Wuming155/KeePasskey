@@ -355,7 +355,7 @@ internal fun CreateVaultWizardDialog(
 @androidx.compose.ui.tooling.preview.Preview(name = "新建密码库向导 - 浅色", showBackground = true)
 @androidx.compose.ui.tooling.preview.Preview(name = "新建密码库向导 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
 @Composable
-private fun CreateVaultWizardDialogPreview() {
+internal fun CreateVaultWizardDialogPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         CreateVaultWizardDialog(
             onDismiss = {},

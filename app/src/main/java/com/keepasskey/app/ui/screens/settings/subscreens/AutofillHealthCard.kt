@@ -124,7 +124,7 @@ private fun AutofillHealthIssue.labelRes(): Int = when (this) {
     uiMode = 0x20 /* UI_MODE_NIGHT_YES */
 )
 @Composable
-private fun AutofillHealthCardPreview() {
+internal fun AutofillHealthCardPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         AutofillHealthCardContent(
             report = AutofillHealthReport(
@@ -145,7 +145,7 @@ private fun AutofillHealthCardPreview() {
     uiMode = 0x20 /* UI_MODE_NIGHT_YES */
 )
 @Composable
-private fun AutofillHealthCardIssuesPreview() {
+internal fun AutofillHealthCardIssuesPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         AutofillHealthCardContent(
             report = AutofillHealthReport(

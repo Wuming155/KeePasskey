@@ -238,7 +238,7 @@ internal fun EntryEditAttachmentsSection(
 @Preview(name = "编辑页字段与附件列表 - 浅色", showBackground = true)
 @Preview(name = "编辑页字段与附件列表 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
 @Composable
-private fun EntryEditCustomFieldsSectionPreview() {
+internal fun EntryEditCustomFieldsSectionPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         Column(
             modifier = Modifier

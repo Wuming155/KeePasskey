@@ -19,6 +19,8 @@ enum class UnlockMode {
  */
 data class UnlockUiState(
     val isPasswordVisible: Boolean = false,
+    /** 主密码输入框是否有内容（仅布尔，不含长度——长度属可导出元数据） */
+    val hasPassword: Boolean = false,
     val hasKeyFile: Boolean = false,
     // 修复虚假开关整改：仅在选择真实密钥文件后由 ViewModel 填充真实文件名，不再写死假名
     val keyFileName: String = "",

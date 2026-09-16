@@ -296,7 +296,7 @@ private fun rememberAppLabel(packageName: String): String {
 @androidx.compose.ui.tooling.preview.Preview(name = "包名黑名单管理对话框 - 浅色", showBackground = true)
 @androidx.compose.ui.tooling.preview.Preview(name = "包名黑名单管理对话框 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
 @Composable
-private fun PackageBlocklistManageDialogPreview() {
+internal fun PackageBlocklistManageDialogPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         PackageBlocklistManageDialog(
             title = "预览：应用填充黑名单",

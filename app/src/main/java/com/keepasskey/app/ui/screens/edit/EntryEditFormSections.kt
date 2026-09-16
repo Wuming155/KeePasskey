@@ -330,7 +330,7 @@ private const val PASSWORD_BITS_PER_CHAR = 4.5
 @Preview(name = "编辑页基础表单分节 - 浅色", showBackground = true)
 @Preview(name = "编辑页基础表单分节 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
 @Composable
-private fun EntryEditBasicInfoSectionPreview() {
+internal fun EntryEditBasicInfoSectionPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         val previewUiState = com.keepasskey.app.ui.screens.edit.EntryEditUiState(
             entryId = "preview-entry-edit",

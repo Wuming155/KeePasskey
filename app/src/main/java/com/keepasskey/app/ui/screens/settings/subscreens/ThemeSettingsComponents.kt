@@ -17,6 +17,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
@@ -234,10 +235,17 @@ internal fun ThemePaletteItemCard(
             }
         }
 
-        RadioButton(
-            selected = isSelected,
-            onClick = onClick
-        )
+        // 与主题亮度卡片同一选中语义（边框 + 勾选角标），不再混用 RadioButton
+        if (isSelected) {
+            Icon(
+                imageVector = Icons.Default.CheckCircle,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(22.dp)
+            )
+        } else {
+            Spacer(modifier = Modifier.size(22.dp))
+        }
     }
 }
 
@@ -285,7 +293,7 @@ internal fun ThemeRadioOptionRow(
 @androidx.compose.ui.tooling.preview.Preview(name = "调色盘条目卡片 - 浅色", showBackground = true)
 @androidx.compose.ui.tooling.preview.Preview(name = "调色盘条目卡片 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
 @Composable
-private fun ThemePaletteItemCardPreview() {
+internal fun ThemePaletteItemCardPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         ThemePaletteItemCard(
             palette = com.keepasskey.app.ui.theme.AppThemePalette.SAPPHIRE,

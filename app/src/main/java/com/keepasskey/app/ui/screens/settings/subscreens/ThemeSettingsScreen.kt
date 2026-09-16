@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
@@ -95,7 +96,8 @@ fun ThemeSettingsScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .padding(horizontal = 16.dp, vertical = 12.dp),
+                .padding(horizontal = 16.dp, vertical = 12.dp)
+                .navigationBarsPadding(),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             themeModeSection(
@@ -158,7 +160,7 @@ fun ThemeSettingsScreen(
 @androidx.compose.ui.tooling.preview.Preview(name = "外观设置页 - 浅色", showBackground = true)
 @androidx.compose.ui.tooling.preview.Preview(name = "外观设置页 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
 @Composable
-private fun ThemeSettingsScreenPreview() {
+internal fun ThemeSettingsScreenPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         ThemeSettingsScreen(
             uiState = com.keepasskey.app.ui.screens.settings.SettingsUiState(),

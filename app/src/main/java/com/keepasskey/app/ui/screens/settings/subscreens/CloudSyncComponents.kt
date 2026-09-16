@@ -207,16 +207,24 @@ internal fun SyncStatusCard(
                 text = stringResource(R.string.sync_connection_status),
                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
             )
+            val statusVerified = uiState.isConnectionVerified
+            val statusColor = when {
+                uiState.isSyncing -> MaterialTheme.colorScheme.primary
+                statusVerified -> securityColors.success
+                else -> securityColors.warning
+            }
             Box(
                 modifier = Modifier
                     .clip(CircleShape)
-                    .background(securityColors.success.copy(alpha = 0.15f))
+                    .background(statusColor.copy(alpha = 0.15f))
                     .padding(horizontal = 10.dp, vertical = 4.dp)
             ) {
                 Text(
-                    text = uiState.syncStatusText,
+                    text = uiState.syncStatusText.ifEmpty {
+                        stringResource(R.string.sync_status_unverified)
+                    },
                     style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                    color = securityColors.success
+                    color = statusColor
                 )
             }
         }
@@ -258,7 +266,8 @@ internal fun SyncStatusCard(
         ) {
             Button(
                 onClick = onTriggerSync,
-                enabled = !uiState.isSyncing,
+                // 未验证连接时禁用主同步，先走「测试连接」防误触
+                enabled = !uiState.isSyncing && uiState.isConnectionVerified,
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier.weight(1f)
             ) {
@@ -295,12 +304,13 @@ internal fun SyncStatusCard(
 @androidx.compose.ui.tooling.preview.Preview(name = "同步状态卡片 - 浅色", showBackground = true)
 @androidx.compose.ui.tooling.preview.Preview(name = "同步状态卡片 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
 @Composable
-private fun SyncStatusCardPreview() {
+internal fun SyncStatusCardPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         SyncStatusCard(
             uiState = com.keepasskey.app.ui.screens.settings.SettingsUiState().copy(
-                syncStatusText = "预览：连接正常",
-                syncLastTime = "预览：最近同步于 2026-01-02 12:00"
+                syncStatusText = "Connected",
+                syncLastTime = "Last sync 2026-01-02 12:00",
+                isConnectionVerified = true
             ),
             onTriggerSync = {},
             onTestConnection = {}

@@ -233,7 +233,8 @@ fun VaultListContent(
             LazyColumn(
                 state = listState,
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+                // 底部预留 FAB + 系统导航栏高度，避免最后一条与悬浮按钮/手势条重叠
+                contentPadding = PaddingValues(horizontal = 14.dp, top = 8.dp, bottom = 96.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 if (uiState.hasPendingConflict) {
@@ -363,11 +364,11 @@ private const val CHILD_DB_SEARCH_HINT_KEY = "child_db_search_exclusion"
 @androidx.compose.ui.tooling.preview.Preview(name = "密码库列表 - 浅色", showBackground = true)
 @androidx.compose.ui.tooling.preview.Preview(name = "密码库列表 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
 @Composable
-private fun VaultListContentPreview() {
+internal fun VaultListContentPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         VaultListContent(
             uiState = VaultListUiState().copy(
-                databaseName = "预览密码库.kdbx",
+                databaseName = "Preview Vault.kdbx",
                 currentGroups = com.keepasskey.app.ui.preview.PreviewGroups,
                 entries = com.keepasskey.app.ui.preview.PreviewEntries,
                 totalEntriesCount = 4,

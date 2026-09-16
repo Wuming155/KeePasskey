@@ -203,7 +203,7 @@ internal fun IntegrityRiskCard(level: RuntimeRiskLevel) {
 @androidx.compose.ui.tooling.preview.Preview(name = "运行环境完整性风险卡 - 浅色", showBackground = true)
 @androidx.compose.ui.tooling.preview.Preview(name = "运行环境完整性风险卡 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
 @Composable
-private fun SecuritySettingsComponentsPreview() {
+internal fun SecuritySettingsComponentsPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         IntegrityRiskCard(
             level = com.keepasskey.app.security.RuntimeRiskLevel.ELEVATED

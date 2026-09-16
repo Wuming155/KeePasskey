@@ -279,7 +279,7 @@ private fun AutofillPickerRequesterBlock(requester: AutofillPickerRequester) {
 @androidx.compose.ui.tooling.preview.Preview(name = "自动填充手动选择器 - 浅色", showBackground = true)
 @androidx.compose.ui.tooling.preview.Preview(name = "自动填充手动选择器 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
 @Composable
-private fun AutofillPickerScreenPreview() {
+internal fun AutofillPickerScreenPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         AutofillPickerScreen(
             query = "预览",

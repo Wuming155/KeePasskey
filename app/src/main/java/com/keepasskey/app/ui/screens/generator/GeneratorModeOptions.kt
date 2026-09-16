@@ -242,11 +242,11 @@ internal fun OptionSwitchRow(
 @androidx.compose.ui.tooling.preview.Preview(name = "密码生成选项开关行 - 浅色", showBackground = true)
 @androidx.compose.ui.tooling.preview.Preview(name = "密码生成选项开关行 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
 @Composable
-private fun GeneratorModeOptionsPreview() {
+internal fun GeneratorModeOptionsPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         OptionSwitchRow(
             title = "排除易混淆字符",
-            subtitle = "预览用说明文案：不使用 0/O、1/l 等易混淆字符",
+            subtitle = "Skip look-alike characters (0/O, 1/l, …)",
             checked = true,
             onCheckedChange = {}
         )

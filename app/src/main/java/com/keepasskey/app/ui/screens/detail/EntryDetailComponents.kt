@@ -227,7 +227,7 @@ internal fun QuickActionTile(
 @Preview(name = "详情页头部与快捷操作 - 浅色", showBackground = true)
 @Preview(name = "详情页头部与快捷操作 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
 @Composable
-private fun EntryHeaderSectionPreview() {
+internal fun EntryHeaderSectionPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         Column(
             modifier = Modifier

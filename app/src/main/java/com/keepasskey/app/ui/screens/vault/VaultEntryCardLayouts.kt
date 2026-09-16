@@ -225,7 +225,7 @@ internal fun SecureNoteLayout(
 @androidx.compose.ui.tooling.preview.Preview(name = "银行卡卡片版式 - 浅色", showBackground = true)
 @androidx.compose.ui.tooling.preview.Preview(name = "银行卡卡片版式 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
 @Composable
-private fun CreditCardLayoutPreview() {
+internal fun CreditCardLayoutPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         CreditCardLayout(
             entry = com.keepasskey.app.ui.preview.PreviewEntryCard,

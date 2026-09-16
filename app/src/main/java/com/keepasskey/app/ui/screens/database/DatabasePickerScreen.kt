@@ -323,7 +323,7 @@ internal fun queryDocumentDisplayName(context: android.content.Context, uri: Uri
 @Preview(name = "密码库选择内容 - 浅色", showBackground = true)
 @Preview(name = "密码库选择内容 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
 @Composable
-private fun DatabasePickerContentPreview() {
+internal fun DatabasePickerContentPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         val previewSnackbar = remember { SnackbarHostState() }
 

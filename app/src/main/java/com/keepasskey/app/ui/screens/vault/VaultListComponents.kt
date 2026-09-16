@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.SearchOff
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -137,6 +138,11 @@ internal fun VaultListFab(
                 onClick = onClick,
                 containerColor = MaterialTheme.colorScheme.primary,
                 contentColor = MaterialTheme.colorScheme.onPrimary,
+                // 显式 elevation，保证浅色背景上的阴影层次（M3 默认在部分主题下过弱）
+                elevation = FloatingActionButtonDefaults.elevation(
+                    defaultElevation = 6.dp,
+                    pressedElevation = 12.dp
+                ),
                 shape = CapsuleShape,
                 icon = { Icon(Icons.Default.Add, contentDescription = stringResource(R.string.cd_create)) },
                 text = { Text(stringResource(R.string.btn_create), fontWeight = FontWeight.SemiBold) }
@@ -348,7 +354,7 @@ internal fun VaultEmptyState(
 @androidx.compose.ui.tooling.preview.Preview(name = "面包屑导航 - 浅色", showBackground = true)
 @androidx.compose.ui.tooling.preview.Preview(name = "面包屑导航 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
 @Composable
-private fun VaultBreadcrumbBarPreview() {
+internal fun VaultBreadcrumbBarPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         VaultBreadcrumbBar(
             breadcrumbs = listOf(

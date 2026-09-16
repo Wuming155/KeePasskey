@@ -223,7 +223,13 @@ class UnlockViewModel @Inject constructor(
         debugLog.info(TAG, "onPasswordChangeSecure: input updated")
         passwordChars.fill('0')
         passwordChars = password.copyOf()
-        _uiState.update { it.copy(errorMessage = null, infoMessage = null) }
+        _uiState.update {
+            it.copy(
+                errorMessage = null,
+                infoMessage = null,
+                hasPassword = passwordChars.isNotEmpty()
+            )
+        }
     }
 
     fun onTogglePasswordVisibility() {
@@ -377,6 +383,7 @@ class UnlockViewModel @Inject constructor(
     private fun wipeMasterPassword() {
         passwordChars.fill('0')
         passwordChars = CharArray(0)
+        _uiState.update { it.copy(hasPassword = false) }
     }
 
     /**

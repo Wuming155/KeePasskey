@@ -484,7 +484,7 @@ private fun <T> previewStateOf(value: T): androidx.compose.runtime.MutableState<
 @Preview(name = "凭据详情内容 - 浅色", showBackground = true)
 @Preview(name = "凭据详情内容 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
 @Composable
-private fun EntryDetailContentPreview() {
+internal fun EntryDetailContentPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         val previewUiState = previewStateOf(
             com.keepasskey.app.ui.screens.detail.EntryDetailUiState(

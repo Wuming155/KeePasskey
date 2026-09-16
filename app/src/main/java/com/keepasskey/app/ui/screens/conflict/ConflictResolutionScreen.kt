@@ -363,7 +363,7 @@ private fun FieldDiffRow(
 @androidx.compose.ui.tooling.preview.Preview(name = "冲突条目对比卡片 - 浅色", showBackground = true)
 @androidx.compose.ui.tooling.preview.Preview(name = "冲突条目对比卡片 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
 @Composable
-private fun ConflictedEntryCardPreview() {
+internal fun ConflictedEntryCardPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         ConflictedEntryCard(
             entry = com.keepasskey.app.ui.screens.conflict.ConflictedEntryItem(

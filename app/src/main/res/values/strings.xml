@@ -274,6 +274,7 @@
 
     <!-- 云端同步状态与排序选项 -->
     <string name="sync_status_synced">已同步</string>
+    <string name="sync_status_unverified">未验证</string>
     <string name="sync_status_syncing">正在同步...</string>
     <string name="sync_status_offline">离线缓存</string>
     <string name="sync_status_conflict">存在冲突</string>

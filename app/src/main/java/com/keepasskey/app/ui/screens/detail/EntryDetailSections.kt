@@ -291,7 +291,7 @@ private fun <T> previewStateOf(value: T): androidx.compose.runtime.MutableState<
 @Preview(name = "详情页字段与附件区块 - 浅色", showBackground = true)
 @Preview(name = "详情页字段与附件区块 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
 @Composable
-private fun CustomFieldsCardPreview() {
+internal fun CustomFieldsCardPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         val previewEntry = com.keepasskey.app.ui.preview.PreviewEntryLogin
         val previewUiState = previewStateOf(

@@ -173,7 +173,7 @@ internal fun VaultListDialogHost(
 @androidx.compose.ui.tooling.preview.Preview(name = "新建分类对话框宿主 - 浅色", showBackground = true)
 @androidx.compose.ui.tooling.preview.Preview(name = "新建分类对话框宿主 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
 @Composable
-private fun VaultListDialogHostPreview() {
+internal fun VaultListDialogHostPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         // 显式打开「新建分类」对话框：其余对话框的可见性开关保持默认关闭（互相独立，不叠加渲染）
         val controller = remember { VaultListDialogController() }.apply { showCreateTypeDialog = true }
@@ -181,7 +181,7 @@ private fun VaultListDialogHostPreview() {
         VaultListDialogHost(
             controller = controller,
             uiState = com.keepasskey.app.ui.screens.vault.VaultListUiState(
-                databaseName = "预览密码库.kdbx"
+                databaseName = "Preview Vault.kdbx"
             ),
             onSortOptionSelect = {},
             onAddEntryClick = {},

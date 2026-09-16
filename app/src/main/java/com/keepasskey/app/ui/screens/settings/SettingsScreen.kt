@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -166,7 +167,8 @@ fun SettingsContent(
                 .fillMaxSize()
                 .padding(innerPadding)
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 10.dp),
+                .padding(horizontal = 16.dp, vertical = 10.dp)
+                .navigationBarsPadding(),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             // 分类 1: 密码库与存储 (Vault & Storage)
@@ -288,7 +290,7 @@ fun SettingsContent(
 @Preview(name = "浅色模式", showBackground = true)
 @Preview(name = "深色模式", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
 @Composable
-private fun SettingsContentPreview() {
+internal fun SettingsContentPreview() {
     KeePasskeyTheme {
         SettingsContent(
             uiState = SettingsUiState(),

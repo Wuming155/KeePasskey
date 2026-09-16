@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -161,7 +162,7 @@ fun AuthenticatorScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding),
-            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+            contentPadding = PaddingValues(horizontal = 14.dp, top = 8.dp, bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             // TOTP 账号卡片列表
@@ -317,8 +318,9 @@ private fun TotpLargeCard(
                 }
             }
 
-            // 中部：大号分段动态码 + 动作按钮（TASK-33：验证码不可用时通道整体禁用）
+            // 中部：大号分段动态码 + 独立复制按钮
             // ISSUE-P3-49：HOTP 的动作是「取下一个码」（推进计数器并复制），TOTP 为「复制当前码」
+            // 防误触：整行不再作为点击热区，仅右侧复制胶囊按钮可点（48dp 触控）
             val actionable = item.isHotp || item.codeRaw != null
             val onAction: () -> Unit = { if (item.isHotp) onAdvanceHotp() else onCopy() }
             Row(
@@ -326,7 +328,6 @@ private fun TotpLargeCard(
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(10.dp))
                     .background(MaterialTheme.colorScheme.surfaceContainerLow)
-                    .clickable(enabled = actionable) { onAction() }
                     .padding(horizontal = 14.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
@@ -345,7 +346,9 @@ private fun TotpLargeCard(
                     color = if (actionable) MaterialTheme.colorScheme.primaryContainer
                     else MaterialTheme.colorScheme.surfaceContainerHighest,
                     shape = CapsuleShape,
-                    modifier = Modifier.clickable(enabled = actionable) { onAction() }
+                    modifier = Modifier
+                        .defaultMinSize(minWidth = 48.dp, minHeight = 40.dp)
+                        .clickable(enabled = actionable) { onAction() }
                 ) {
                     Row(
                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
@@ -378,7 +381,7 @@ private fun TotpLargeCard(
 @androidx.compose.ui.tooling.preview.Preview(name = "验证码卡片 - 浅色", showBackground = true)
 @androidx.compose.ui.tooling.preview.Preview(name = "验证码卡片 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
 @Composable
-private fun TotpLargeCardPreview() {
+internal fun TotpLargeCardPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         TotpLargeCard(
             item = com.keepasskey.app.ui.screens.authenticator.TotpCardItem(

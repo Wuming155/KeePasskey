@@ -116,6 +116,12 @@ internal fun buildSettingsUiState(
     isSyncing = syncState.isSyncing,
     syncFeedbackMessage = syncState.syncFeedbackMessage,
     syncLastTime = syncState.lastSyncTimeText.ifEmpty { strings.get(R.string.sync_last_time_never) },
+    isConnectionVerified = syncState.isConnectionVerified,
+    syncStatusText = when {
+        syncState.isSyncing -> strings.get(R.string.sync_status_syncing)
+        syncState.isConnectionVerified -> strings.get(R.string.sync_status_synced)
+        else -> strings.get(R.string.sync_status_unverified)
+    },
     useOfflineCache = extState.useOfflineCache,
     syncOnColdStart = userSettings.syncOnColdStart,
     periodicBackgroundSyncEnabled = extState.periodicBackgroundSyncEnabled,

@@ -26,7 +26,8 @@ data class GeneratorUiState(
      */
     val currentPassword: ProtectedString = ProtectedString.EMPTY,
     val entropyBits: Int = 96,
-    val strengthLabel: UiMessage = UiMessage(R.string.generator_strength_extreme, listOf(112)),
+    // 默认值须与 entropyBits 自洽（否则首帧会出现「极强 112」徽标 + 「中等 96」强度条）
+    val strengthLabel: UiMessage = UiMessage(R.string.generator_strength_extreme, listOf(96)),
 
     // 模式 1: 随机密码参数
     val randomLength: Int = 16,

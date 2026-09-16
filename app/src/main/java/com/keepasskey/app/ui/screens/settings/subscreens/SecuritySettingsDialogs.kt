@@ -271,7 +271,7 @@ internal fun FlagSecureRiskDialog(
 @androidx.compose.ui.tooling.preview.Preview(name = "自动锁定超时选择对话框 - 浅色", showBackground = true)
 @androidx.compose.ui.tooling.preview.Preview(name = "自动锁定超时选择对话框 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
 @Composable
-private fun SecuritySettingsDialogsPreview() {
+internal fun SecuritySettingsDialogsPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         AutoLockTimeoutDialog(
             selectedSeconds = 300,

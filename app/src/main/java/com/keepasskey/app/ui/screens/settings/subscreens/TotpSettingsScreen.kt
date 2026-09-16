@@ -312,7 +312,7 @@ fun TotpSettingsScreen(
 @androidx.compose.ui.tooling.preview.Preview(name = "两步验证设置页 - 浅色", showBackground = true)
 @androidx.compose.ui.tooling.preview.Preview(name = "两步验证设置页 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
 @Composable
-private fun TotpSettingsScreenPreview() {
+internal fun TotpSettingsScreenPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         TotpSettingsScreen(
             uiState = com.keepasskey.app.ui.screens.settings.SettingsUiState(),

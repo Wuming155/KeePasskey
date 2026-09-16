@@ -49,7 +49,9 @@ internal class SettingsSyncController(
         val isSyncing: Boolean = false,
         val syncFeedbackMessage: UiMessage? = null,
         // H1 整改：真实同步完成时刻文案（空串=本会话尚未同步成功过）
-        val lastSyncTimeText: String = ""
+        val lastSyncTimeText: String = "",
+        // 连接是否已验证（测试连接或同步成功后置位；配置变更后复位）
+        val isConnectionVerified: Boolean = false
     )
 
     private val syncStateFlow = MutableStateFlow(
@@ -132,7 +134,8 @@ internal class SettingsSyncController(
 
     fun setSyncProvider(provider: CloudSyncProvider) {
         syncCredentialsStore.saveProvider(provider)
-        syncStateFlow.update { it.copy(provider = provider) }
+        // 切换提供商后旧连接验证结论不再适用
+        syncStateFlow.update { it.copy(provider = provider, isConnectionVerified = false) }
     }
 
     /**
@@ -168,7 +171,9 @@ internal class SettingsSyncController(
             it.copy(
                 webdavUrl = normalizedUrl,
                 webdavUsername = username,
-                webdavRemotePath = remotePath
+                webdavRemotePath = remotePath,
+                // 配置变更后须重新验证连接
+                isConnectionVerified = false
             )
         }
         // 保存成功后旧预填通道失效（最新凭据已由存储库持有，重进页面将重新恢复）
@@ -219,7 +224,9 @@ internal class SettingsSyncController(
                 s3Bucket = bucket,
                 s3Region = region,
                 s3ObjectKey = objectKey,
-                s3UsePathStyle = usePathStyle
+                s3UsePathStyle = usePathStyle,
+                // 配置变更后须重新验证连接
+                isConnectionVerified = false
             )
         }
         // 保存成功后旧预填通道失效（最新凭据已由存储库持有，重进页面将重新恢复）
@@ -281,7 +288,9 @@ internal class SettingsSyncController(
                 it.copy(
                     isSyncing = false,
                     syncFeedbackMessage = feedback,
-                    lastSyncTimeText = if (syncedNow) formatSyncTimestamp() else syncStateFlow.value.lastSyncTimeText
+                    lastSyncTimeText = if (syncedNow) formatSyncTimestamp() else syncStateFlow.value.lastSyncTimeText,
+                    // 成功同步即视为连接可用；失败/冲突/离线不置位
+                    isConnectionVerified = if (syncedNow) true else it.isConnectionVerified
                 )
             }
         }
@@ -311,7 +320,8 @@ internal class SettingsSyncController(
                 )
             }
             val result = syncCoordinator.testConnection()
-            val feedback = if (result.isSuccess) {
+            val verified = result.isSuccess
+            val feedback = if (verified) {
                 UiMessage(R.string.sync_feedback_done, listOf(provider.protocol))
             } else {
                 UiMessage(
@@ -322,7 +332,8 @@ internal class SettingsSyncController(
             syncStateFlow.update {
                 it.copy(
                     isSyncing = false,
-                    syncFeedbackMessage = feedback
+                    syncFeedbackMessage = feedback,
+                    isConnectionVerified = verified
                 )
             }
         }

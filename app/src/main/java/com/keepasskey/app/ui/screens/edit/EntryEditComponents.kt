@@ -312,7 +312,7 @@ private fun <T> previewStateOf(value: T): androidx.compose.runtime.MutableState<
 @Preview(name = "编辑页配置区块 - 浅色", showBackground = true)
 @Preview(name = "编辑页配置区块 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
 @Composable
-private fun EntryEditTotpSectionPreview() {
+internal fun EntryEditTotpSectionPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         val previewTags = previewStateOf("预览标签")
         val previewAutoType = previewStateOf("{USERNAME}{TAB}{PASSWORD}{ENTER}")

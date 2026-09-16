@@ -329,7 +329,7 @@ fun SafeAttachmentPreviewDialog(
 @Preview(name = "历史版本差异对比 - 浅色", showBackground = true)
 @Preview(name = "历史版本差异对比 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
 @Composable
-private fun RevisionVisualDiffDialogPreview() {
+internal fun RevisionVisualDiffDialogPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         Column(verticalArrangement = Arrangement.spacedBy(24.dp)) {
             RevisionVisualDiffDialog(

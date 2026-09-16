@@ -51,7 +51,7 @@ fun BentoCard(
 @androidx.compose.ui.tooling.preview.Preview(name = "Bento 结构卡片 - 浅色", showBackground = true)
 @androidx.compose.ui.tooling.preview.Preview(name = "Bento 结构卡片 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
 @Composable
-private fun BentoCardPreview() {
+internal fun BentoCardPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         BentoCard(
             modifier = Modifier,

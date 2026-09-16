@@ -229,7 +229,7 @@ fun AutofillSettingsScreen(
 @Preview(name = "自动填充设置页 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun AutofillSettingsScreenPreview() {
+internal fun AutofillSettingsScreenPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         AutofillSettingsScreen(
             uiState = SettingsUiState(),

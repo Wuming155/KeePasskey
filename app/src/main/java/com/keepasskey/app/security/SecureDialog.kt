@@ -171,7 +171,7 @@ internal object SecureDialogFlagPolicy {
 @androidx.compose.ui.tooling.preview.Preview(name = "受保护对话框内容 - 浅色", showBackground = true)
 @androidx.compose.ui.tooling.preview.Preview(name = "受保护对话框内容 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
 @Composable
-private fun SecureDialogPreview() {
+internal fun SecureDialogPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         SecureDialog {
             androidx.compose.material3.Text(text = "预览受保护对话框内容")

@@ -220,7 +220,7 @@ internal fun warningReasonRes(reason: ImportWarningReason): Int = when (reason) 
 @Preview(name = "ImportReport - Light", showBackground = true)
 @Preview(name = "ImportReport - Dark", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
 @Composable
-private fun ImportOutcomeReportPreview() {
+internal fun ImportOutcomeReportPreview() {
     KeePasskeyTheme {
         ImportOutcomeReport(
             outcome = ImportOutcome(

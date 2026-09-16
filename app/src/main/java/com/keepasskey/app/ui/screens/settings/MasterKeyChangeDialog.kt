@@ -149,7 +149,7 @@ internal fun MasterKeyChangeDialog(
 @androidx.compose.ui.tooling.preview.Preview(name = "主密钥更改对话框 - 浅色", showBackground = true)
 @androidx.compose.ui.tooling.preview.Preview(name = "主密钥更改对话框 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
 @Composable
-private fun MasterKeyChangeDialogPreview() {
+internal fun MasterKeyChangeDialogPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         MasterKeyChangeDialog(
             kdfAlgorithm = "Argon2id",

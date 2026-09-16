@@ -183,7 +183,7 @@ internal fun ModernSectionHeader(
 @androidx.compose.ui.tooling.preview.Preview(name = "现代设置行 - 浅色", showBackground = true)
 @androidx.compose.ui.tooling.preview.Preview(name = "现代设置行 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
 @Composable
-private fun ModernSettingsRowPreview() {
+internal fun ModernSettingsRowPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         ModernSettingsRow(
             icon = Icons.AutoMirrored.Filled.ArrowForwardIos,

@@ -1,0 +1,154 @@
+"""
+从 main 源集扫描 @Preview 预览函数：
+1) 将 private 预览函数提升为 internal（供 screenshotTest 调用）
+2) 按 package 生成 screenshotTest wrapper（带相同 @Preview 注解 + 统一 locale）
+
+用法:
+  python tools/export_previews/generate_screenshot_test_wrappers.py
+  PREVIEW_LOCALE=en python tools/export_previews/generate_screenshot_test_wrappers.py
+
+默认 locale=zh-CN（导出中文界面）；PREVIEW_LOCALE=en 则资源串走英文。
+夹具里硬编码的中文文案不受 locale 影响。
+"""
+from __future__ import annotations
+
+import os
+import re
+import sys
+from collections import defaultdict
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+MAIN_ROOT = ROOT / "app" / "src" / "main" / "java"
+OUT_ROOT = ROOT / "app" / "src" / "screenshotTest" / "kotlin"
+DEFAULT_LOCALE = "zh-CN"
+
+# 匹配：@Preview（可跨行）+ 可选中间注解（@OptIn 等）+ @Composable + private/internal fun Name() {
+PREVIEW_BLOCK = re.compile(
+    r"(?P<ann>(?:[ \t]*(?:@androidx\.compose\.ui\.tooling\.preview\.Preview|@Preview)"
+    r"(?:\((?:[^()\n]|\([^()\n]*\))*\))?\n)+)"
+    r"(?P<extra>(?:[ \t]*@\w+(?:\([^)\n]*\))?[^\n]*\n)*?)"
+    r"(?P<composable>[ \t]*@Composable\n)"
+    r"(?P<vis>[ \t]*)(?P<mods>private|internal)\s+fun\s+(?P<name>\w+)\s*\(\s*\)\s*\{",
+    re.MULTILINE,
+)
+PACKAGE_RE = re.compile(r"^package\s+([\w.]+)", re.MULTILINE)
+PREVIEW_LINE_RE = re.compile(r"^@Preview\s*\(", re.MULTILINE)
+
+
+def inject_locale(ann_text: str, locale: str) -> str:
+    """给每条 @Preview(...) 注入 locale="xx"，若已有 locale 则替换。"""
+    out_lines: list[str] = []
+    i = 0
+    lines = ann_text.splitlines()
+    while i < len(lines):
+        line = lines[i]
+        stripped = line.strip()
+        if not (
+            stripped.startswith("@Preview(")
+            or stripped.startswith("@androidx.compose.ui.tooling.preview.Preview(")
+        ):
+            # 单行收尾或其它内容
+            out_lines.append(line)
+            i += 1
+            continue
+        # 收集完整注解（可能跨多行，直到括号平衡）
+        block = [line]
+        balance = line.count("(") - line.count(")")
+        i += 1
+        while balance > 0 and i < len(lines):
+            block.append(lines[i])
+            balance += lines[i].count("(") - lines[i].count(")")
+            i += 1
+        joined = "\n".join(block)
+        # 统一短名
+        joined = joined.replace(
+            "@androidx.compose.ui.tooling.preview.Preview", "@Preview"
+        )
+        joined = joined.replace("Configuration.UI_MODE_NIGHT_YES", "0x20")
+        # 去掉已有 locale
+        joined = re.sub(r"\s*locale\s*=\s*\"[^\"]*\"\s*,?", "", joined)
+        # 在 @Preview( 后插入 locale
+        joined = re.sub(
+            r"(@Preview\s*\(\s*)",
+            r'\1locale = "' + locale + r'", ',
+            joined,
+            count=1,
+        )
+        # 若变成 @Preview(locale = "zh-CN", ) 这类尾逗号，收一下
+        joined = re.sub(r",\s*\)", ")", joined)
+        for bl in joined.splitlines():
+            out_lines.append("    " + bl.strip() if bl.strip() else bl)
+    return "\n".join(out_lines)
+
+
+def normalize_ann(block: str, locale: str) -> str:
+    return inject_locale(block, locale)
+
+
+def main() -> int:
+    locale = os.environ.get("PREVIEW_LOCALE", DEFAULT_LOCALE).strip() or DEFAULT_LOCALE
+    by_pkg: dict[str, list[str]] = defaultdict(list)
+    promoted = 0
+
+    for kt in sorted(MAIN_ROOT.rglob("*.kt")):
+        text = kt.read_text(encoding="utf-8")
+        if "@Preview" not in text and "tooling.preview.Preview" not in text:
+            continue
+        pkg_m = PACKAGE_RE.search(text)
+        if not pkg_m:
+            continue
+        pkg = pkg_m.group(1)
+
+        def repl(m: re.Match[str]) -> str:
+            nonlocal promoted
+            name = m.group("name")
+            ann = normalize_ann(m.group("ann"), locale)
+            by_pkg[pkg].append(
+                f"// 源: {kt.relative_to(ROOT).as_posix()}\n"
+                f"{ann}\n"
+                f"    @PreviewTest\n"
+                f"    @Composable\n"
+                f"    internal fun {name}ScreenshotExport() = {name}()\n"
+            )
+            promoted += 1
+            # 保留 @Preview / @OptIn / @Composable，只把 private 提升为 internal
+            return (
+                f"{m.group('ann')}"
+                f"{m.group('extra')}"
+                f"{m.group('composable')}"
+                f"{m.group('vis')}internal fun {name}() {{"
+            )
+
+        new_text, n = PREVIEW_BLOCK.subn(repl, text)
+        if n:
+            kt.write_text(new_text, encoding="utf-8")
+
+    # 清掉旧生成物
+    if OUT_ROOT.exists():
+        for old in OUT_ROOT.rglob("Generated*PreviewWrappers.kt"):
+            old.unlink()
+
+    count = 0
+    for pkg, chunks in sorted(by_pkg.items()):
+        rel = Path(*pkg.split(".")) / "GeneratedPreviewWrappers.kt"
+        out = OUT_ROOT / rel
+        out.parent.mkdir(parents=True, exist_ok=True)
+        body = (
+            "// 自动生成：勿手改。tools/export_previews/generate_screenshot_test_wrappers.py\n"
+            f"// preview-screenshot-test-engine 用；locale={locale}\n\n"
+            f"package {pkg}\n\n"
+            "import androidx.compose.runtime.Composable\n"
+            "import androidx.compose.ui.tooling.preview.Preview\n"
+            "import com.android.tools.screenshot.PreviewTest\n\n"
+            + "\n".join(chunks)
+        )
+        out.write_text(body, encoding="utf-8")
+        count += len(chunks)
+
+    print(f"locale={locale} promoted={promoted} wrappers={count} packages={len(by_pkg)}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

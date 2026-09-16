@@ -169,7 +169,7 @@ internal fun HealthAuditRowItem(
 @androidx.compose.ui.tooling.preview.Preview(name = "泄露密码检测开关行 - 浅色", showBackground = true)
 @androidx.compose.ui.tooling.preview.Preview(name = "泄露密码检测开关行 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
 @Composable
-private fun HealthCheckComponentsPreview() {
+internal fun HealthCheckComponentsPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         BreachCheckToggleRow(
             enabled = true,

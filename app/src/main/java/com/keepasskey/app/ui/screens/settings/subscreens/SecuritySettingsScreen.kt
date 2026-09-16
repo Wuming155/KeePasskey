@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -124,7 +125,8 @@ fun SecuritySettingsScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .padding(horizontal = 16.dp, vertical = 12.dp),
+                .padding(horizontal = 16.dp, vertical = 12.dp)
+                .navigationBarsPadding(),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             // 1. 生物识别验证（指纹识别解密）
@@ -437,7 +439,7 @@ fun SecuritySettingsScreen(
 @androidx.compose.ui.tooling.preview.Preview(name = "安全策略设置页 - 浅色", showBackground = true)
 @androidx.compose.ui.tooling.preview.Preview(name = "安全策略设置页 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
 @Composable
-private fun SecuritySettingsScreenPreview() {
+internal fun SecuritySettingsScreenPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         SecuritySettingsScreen(
             uiState = com.keepasskey.app.ui.screens.settings.SettingsUiState().copy(

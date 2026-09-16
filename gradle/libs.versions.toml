@@ -67,6 +67,9 @@ androidxAnnotation = "1.9.1"
 datastore = "1.2.1"
 profileinstaller = "1.4.1"
 foojayResolver = "1.0.0"
+# Compose Preview 截图导出（本地开发工具，非生产依赖）：
+# 官方插件发现 main 源集全部 @Preview 并渲染为 PNG；最新稳定 alpha 见 Google Maven。
+composeScreenshot = "0.0.1-alpha16"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -120,3 +123,5 @@ android-library = { id = "com.android.library", version.ref = "agp" }
 compose-compiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 hilt = { id = "com.google.dagger.hilt.android", version.ref = "hilt" }
 ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
+# Compose Preview → 截图导出（GUI 导航配套；仅 app 模块 apply）
+compose-screenshot = { id = "com.android.compose.screenshot", version.ref = "composeScreenshot" }

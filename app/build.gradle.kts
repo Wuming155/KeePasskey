@@ -5,6 +5,8 @@ plugins {
     alias(libs.plugins.compose.compiler)
     alias(libs.plugins.hilt)
     alias(libs.plugins.ksp)
+    // 本地开发：把 main 源集全部 @Preview 渲染为 PNG（与 GUI导航.md 配套）
+    alias(libs.plugins.compose.screenshot)
 }
 
 // 自动签名的发布密钥库配置：支持从 keystore.properties 或环境变量加载
@@ -154,6 +156,11 @@ android {
         // ISSUE-P1-10 (ZT-10)：供 MainApplication 以 BuildConfig.DEBUG 置位 AppLog 调试开关
         buildConfig = true
     }
+
+    // Compose Preview 截图测试（AGP 实验特性）。
+    // 旗标必须同时满足两处：根 gradle.properties（插件 apply 早期读取）
+    // + 本 android 块（插件校验模块级开关）。
+    experimentalProperties["android.experimental.enableScreenshotTest"] = true
 }
 
 // TASK-03：内置 Kotlin 下 jvmTarget 默认取 android.compileOptions.targetCompatibility
@@ -219,6 +226,11 @@ dependencies {
 
     debugImplementation(libs.compose.ui.tooling)
 
+    // Compose Preview 截图测试渲染依赖（仅 screenshotTest 源集；与 debug tooling 同源）
+    screenshotTestImplementation(libs.compose.ui.tooling)
+    // 引擎 MethodSelectorResolver 只认 @PreviewTest（screenshot-validation-api）
+    screenshotTestImplementation("com.android.tools.screenshot:screenshot-validation-api:0.0.1-alpha16")
+
     // 单元测试
     testImplementation(libs.junit)
     testImplementation(libs.coroutines.test)
@@ -230,3 +242,76 @@ dependencies {
     implementation(libs.okhttp)
     testImplementation(libs.mockwebserver)
 }
+
+// =============================================================================================
+// 本地开发：Compose @Preview 截图导出（gitignore）。两个入口，按需选择：
+//   全部  → preview-exports/all/     保留包路径（与 GUI导航.md 全量对应）
+//   主页面 → preview-exports/main/   仅整屏，拍平到单目录
+// 命令：`.\gradlew.bat :app:exportAllPreviewScreenshots` / `:app:exportMainPreviewScreenshots`
+// 或双击根目录「导出预览图-全部.bat」/「导出预览图-主页面.bat」
+// =============================================================================================
+val previewExportsAllDir = rootProject.layout.projectDirectory.dir("preview-exports/all")
+val previewExportsMainDir = rootProject.layout.projectDirectory.dir("preview-exports/main")
+val previewRenderedDir = layout.buildDirectory.dir("outputs/screenshotTest-results/preview/debug/rendered")
+
+// 主页面预览函数名（整屏 / 主内容；浅色+深色各一张）
+val mainScreenPreviewPrefixes = listOf(
+    "UnlockContentPreviewScreenshotExport",
+    "DatabasePickerContentPreviewScreenshotExport",
+    "VaultListContentPreviewScreenshotExport",
+    "EntryDetailContentPreviewScreenshotExport",
+    "EntryEditContentPreviewScreenshotExport",
+    "GeneratorContentPreviewScreenshotExport",
+    "TotpLargeCardPreviewScreenshotExport",
+    "SettingsContentPreviewScreenshotExport",
+    "DatabaseSettingsScreenPreviewScreenshotExport",
+    "CloudSyncScreenPreviewScreenshotExport",
+    "WebDavSyncScreenPreviewScreenshotExport",
+    "AutofillSettingsScreenPreviewScreenshotExport",
+    "SecuritySettingsScreenPreviewScreenshotExport",
+    "ThemeSettingsScreenPreviewScreenshotExport",
+    "TotpSettingsScreenPreviewScreenshotExport",
+    "HealthCheckScreenPreviewScreenshotExport",
+    "DebugSettingsScreenPreviewScreenshotExport",
+    "AboutSettingsScreenPreviewScreenshotExport",
+    "AutofillPickerScreenPreviewScreenshotExport",
+    "CredentialFillConfirmScreenPreviewScreenshotExport",
+)
+
+tasks.register<Sync>("exportAllPreviewScreenshots") {
+    group = "verification"
+    description = "导出全部 @Preview 截图到 preview-exports/all/（按包路径分层）"
+    dependsOn("updateDebugScreenshotTest")
+    duplicatesStrategy = DuplicatesStrategy.INCLUDE
+    from(previewRenderedDir) {
+        include("**/*.png", "**/*.webp")
+        includeEmptyDirs = false
+    }
+    into(previewExportsAllDir)
+    doLast {
+        val count = previewExportsAllDir.asFile.walkTopDown()
+            .count { it.isFile && it.extension.equals("png", true) }
+        logger.lifecycle("已导出 $count 张（全部）→ ${previewExportsAllDir.asFile.absolutePath}")
+    }
+}
+
+tasks.register<Sync>("exportMainPreviewScreenshots") {
+    group = "verification"
+    description = "导出主页面 @Preview 截图到 preview-exports/main/（扁平单目录）"
+    dependsOn("updateDebugScreenshotTest")
+    duplicatesStrategy = DuplicatesStrategy.INCLUDE
+    from(previewRenderedDir) {
+        mainScreenPreviewPrefixes.forEach { prefix ->
+            include("**/${prefix}_*.png")
+        }
+        includeEmptyDirs = false
+        eachFile { path = name }
+    }
+    into(previewExportsMainDir)
+    doLast {
+        val count = previewExportsMainDir.asFile.walkTopDown()
+            .count { it.isFile && it.extension.equals("png", true) }
+        logger.lifecycle("已导出 $count 张（主页面）→ ${previewExportsMainDir.asFile.absolutePath}")
+    }
+}
+

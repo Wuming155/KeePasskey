@@ -275,7 +275,7 @@ internal fun OpenExistingVaultDialog(
 @androidx.compose.ui.tooling.preview.Preview(name = "打开已有密码库 - 浅色", showBackground = true)
 @androidx.compose.ui.tooling.preview.Preview(name = "打开已有密码库 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
 @Composable
-private fun OpenExistingVaultDialogPreview() {
+internal fun OpenExistingVaultDialogPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         OpenExistingVaultDialog(
             onDismiss = {},

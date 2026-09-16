@@ -161,7 +161,7 @@ internal fun VaultDatabaseCard(
 @Preview(name = "密码库卡片 - 浅色", showBackground = true)
 @Preview(name = "密码库卡片 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
 @Composable
-private fun VaultDatabaseCardPreview() {
+internal fun VaultDatabaseCardPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         Column(
             modifier = Modifier

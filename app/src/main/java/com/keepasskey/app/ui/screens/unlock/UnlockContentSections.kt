@@ -15,7 +15,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.FlashOn
 import androidx.compose.material.icons.filled.Lock
@@ -289,7 +291,7 @@ internal fun UnlockStandardUnlockContent(
 
     Spacer(modifier = Modifier.height(12.dp))
 
-    // 附加密钥文件切换（修复虚假开关整改：开启即唤起真实 SAF 选择器，关闭即擦除字节）
+    // 附加密钥文件：文件选择行为（非布尔开关）——点击唤起 SAF；已选时展示文件名并提供清除
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -297,7 +299,7 @@ internal fun UnlockStandardUnlockContent(
             .clickable {
                 if (uiState.hasKeyFile) onClearKeyFile() else onSelectKeyFile()
             }
-            .padding(vertical = 8.dp, horizontal = 4.dp),
+            .padding(vertical = 10.dp, horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Icon(
@@ -319,13 +321,19 @@ internal fun UnlockStandardUnlockContent(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.primary
                 )
+            } else {
+                Text(
+                    text = stringResource(R.string.unlock_keyfile_none),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
-        androidx.compose.material3.Switch(
-            checked = uiState.hasKeyFile,
-            onCheckedChange = { checked ->
-                if (checked) onSelectKeyFile() else onClearKeyFile()
-            }
+        Icon(
+            imageVector = if (uiState.hasKeyFile) Icons.Default.CheckCircle else Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            contentDescription = null,
+            tint = if (uiState.hasKeyFile) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(20.dp)
         )
     }
 
@@ -359,10 +367,10 @@ internal fun UnlockStandardUnlockContent(
 
     Spacer(modifier = Modifier.height(16.dp))
 
-    // 解锁主操作按钮
+    // 解锁主操作按钮：无密码且无密钥文件时禁用（密钥文件单独解锁时允许空密码）
     Button(
         onClick = onUnlock,
-        enabled = !uiState.isLoading,
+        enabled = !uiState.isLoading && (uiState.hasPassword || uiState.hasKeyFile),
         shape = CapsuleShape,
         colors = ButtonDefaults.buttonColors(
             containerColor = MaterialTheme.colorScheme.primary,
@@ -400,13 +408,13 @@ internal fun UnlockStandardUnlockContent(
 @androidx.compose.ui.tooling.preview.Preview(name = "快速解锁卡片 - 浅色", showBackground = true)
 @androidx.compose.ui.tooling.preview.Preview(name = "快速解锁卡片 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
 @Composable
-private fun UnlockQuickUnlockCardPreview() {
+internal fun UnlockQuickUnlockCardPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         UnlockQuickUnlockCard(
             uiState = UnlockUiState().copy(
                 hasDatabase = true,
                 unlockMode = UnlockMode.QUICK_UNLOCK,
-                hardwareBackedSecurity = "预览：硬件级密钥保护（示例文案）"
+                hardwareBackedSecurity = "Hardware-backed key protection"
             ),
             onBiometricUnlock = {},
             onSwitchMode = {}

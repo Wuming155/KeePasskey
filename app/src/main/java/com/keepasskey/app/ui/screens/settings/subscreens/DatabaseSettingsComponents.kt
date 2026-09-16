@@ -402,7 +402,7 @@ internal fun DatabaseFeedbackItem(
 @androidx.compose.ui.tooling.preview.Preview(name = "密码库基础信息卡片 - 浅色", showBackground = true)
 @androidx.compose.ui.tooling.preview.Preview(name = "密码库基础信息卡片 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
 @Composable
-private fun DatabaseSettingsComponentsPreview() {
+internal fun DatabaseSettingsComponentsPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         DatabaseBasicCard(
             uiState = com.keepasskey.app.ui.screens.settings.SettingsUiState().copy(

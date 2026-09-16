@@ -397,7 +397,7 @@ internal fun ConflictResolutionDialog(
 @androidx.compose.ui.tooling.preview.Preview(name = "离线缓存与定时同步区块 - 浅色", showBackground = true)
 @androidx.compose.ui.tooling.preview.Preview(name = "离线缓存与定时同步区块 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
 @Composable
-private fun OfflineSyncSectionPreview() {
+internal fun OfflineSyncSectionPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         OfflineSyncSection(
             // 打开周期同步，以覆盖「同步间隔」子行的渲染分支

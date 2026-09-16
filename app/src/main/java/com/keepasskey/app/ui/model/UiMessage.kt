@@ -25,7 +25,7 @@ fun UiMessage.resolveText(): String = stringResource(resId, *args.toTypedArray()
 @androidx.compose.ui.tooling.preview.Preview(name = "界面消息文案解析 - 浅色", showBackground = true)
 @androidx.compose.ui.tooling.preview.Preview(name = "界面消息文案解析 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
 @Composable
-private fun UiMessagePreview() {
+internal fun UiMessagePreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         androidx.compose.material3.Text(
             text = com.keepasskey.app.ui.model.UiMessage(

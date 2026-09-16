@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -154,7 +155,8 @@ private fun GeneratorContent(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .padding(horizontal = 16.dp),
+                .padding(horizontal = 16.dp)
+                .navigationBarsPadding(),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             item { Spacer(modifier = Modifier.height(4.dp)) }
@@ -273,16 +275,16 @@ private object NoOpGeneratorActions : GeneratorActions {
 @Preview(name = "密码生成器 - 浅色", showBackground = true)
 @Preview(name = "密码生成器 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
 @Composable
-private fun GeneratorContentPreview() {
+internal fun GeneratorContentPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         GeneratorContent(
             uiState = GeneratorUiState(
                 // 预览专用假口令：仅用于界面排版展示，非任何真实生成的密码
-                currentPassword = ProtectedString("预览-示例-口令-A1b2C3d4"),
+                currentPassword = ProtectedString("Preview-Example-A1b2C3d4"),
                 entropyBits = 96,
                 history = listOf(
-                    ProtectedString("预览-历史-口令-1"),
-                    ProtectedString("预览-历史-口令-2")
+                    ProtectedString("Preview-History-1"),
+                    ProtectedString("Preview-History-2")
                 )
             ),
             snackbarHostState = remember { SnackbarHostState() },

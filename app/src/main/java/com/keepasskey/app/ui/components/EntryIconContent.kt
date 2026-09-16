@@ -67,7 +67,7 @@ fun EntryIconContent(
 @androidx.compose.ui.tooling.preview.Preview(name = "条目图标绘制槽 - 浅色", showBackground = true)
 @androidx.compose.ui.tooling.preview.Preview(name = "条目图标绘制槽 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
 @Composable
-private fun EntryIconContentPreview() {
+internal fun EntryIconContentPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         EntryIconContent(
             icon = com.keepasskey.app.ui.preview.PreviewDefaultIcon,

@@ -377,7 +377,7 @@ internal fun AutofillSwitchRow(
 @androidx.compose.ui.tooling.preview.Preview(name = "自动填充凭据提供程序卡 - 浅色", showBackground = true)
 @androidx.compose.ui.tooling.preview.Preview(name = "自动填充凭据提供程序卡 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
 @Composable
-private fun AutofillProviderCardPreview() {
+internal fun AutofillProviderCardPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         AutofillProviderCard(
             uiState = com.keepasskey.app.ui.screens.settings.SettingsUiState(),

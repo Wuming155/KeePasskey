@@ -70,9 +70,11 @@ fun PasswordStrengthBar(
 ) {
     if (entropyBits == null) return
     val securityColors = LocalSecurityColors.current
+    // 与 GeneratorViewModel.evaluateStrengthLabel 同一阈值分档，杜绝徽标与强度条文案矛盾
     val (color, label, progress) = when {
-        entropyBits >= 100 -> Triple(securityColors.success, stringResource(R.string.generator_strength_extreme, entropyBits), 1.0f)
-        entropyBits >= 64 -> Triple(securityColors.warning, stringResource(R.string.generator_strength_medium, entropyBits), 0.65f)
+        entropyBits >= 96 -> Triple(securityColors.success, stringResource(R.string.generator_strength_extreme, entropyBits), 1.0f)
+        entropyBits >= 64 -> Triple(securityColors.success.copy(alpha = 0.85f), stringResource(R.string.generator_strength_strong, entropyBits), 0.85f)
+        entropyBits >= 40 -> Triple(securityColors.warning, stringResource(R.string.generator_strength_medium, entropyBits), 0.65f)
         else -> Triple(securityColors.danger, stringResource(R.string.generator_strength_weak, entropyBits), 0.35f)
     }
     // 与页面内其他动效（如 TOTP 进度环）保持一致的平滑过渡
@@ -148,7 +150,7 @@ fun TotpMiniGauge(
 @androidx.compose.ui.tooling.preview.Preview(name = "通行密钥徽章 - 浅色", showBackground = true)
 @androidx.compose.ui.tooling.preview.Preview(name = "通行密钥徽章 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
 @Composable
-private fun PasskeyBadgePreview() {
+internal fun PasskeyBadgePreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         PasskeyBadge(modifier = Modifier)
     }

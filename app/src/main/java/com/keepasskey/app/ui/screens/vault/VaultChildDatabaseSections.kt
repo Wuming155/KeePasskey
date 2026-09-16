@@ -244,7 +244,7 @@ private const val CHILD_ENTRY_LOCK_ICON_DP = 16
 @androidx.compose.ui.tooling.preview.Preview(name = "子库只读条目行 - 浅色", showBackground = true)
 @androidx.compose.ui.tooling.preview.Preview(name = "子库只读条目行 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
 @Composable
-private fun ChildVaultEntryRowViewPreview() {
+internal fun ChildVaultEntryRowViewPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         ChildVaultEntryRowView(
             row = com.keepasskey.app.ui.model.ChildVaultEntryRow(

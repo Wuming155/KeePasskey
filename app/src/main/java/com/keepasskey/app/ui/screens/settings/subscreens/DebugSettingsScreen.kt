@@ -402,7 +402,7 @@ private fun DebugSwitchRow(
 @androidx.compose.ui.tooling.preview.Preview(name = "调试日志设置页 - 浅色", showBackground = true)
 @androidx.compose.ui.tooling.preview.Preview(name = "调试日志设置页 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
 @Composable
-private fun DebugSettingsScreenPreview() {
+internal fun DebugSettingsScreenPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         DebugSettingsScreen(
             uiState = com.keepasskey.app.ui.screens.settings.SettingsUiState().copy(

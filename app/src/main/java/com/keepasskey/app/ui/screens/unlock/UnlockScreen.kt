@@ -376,13 +376,13 @@ private fun QuickUnlockDowngradeConsentDialog(
 @androidx.compose.ui.tooling.preview.Preview(name = "解锁页 - 浅色", showBackground = true)
 @androidx.compose.ui.tooling.preview.Preview(name = "解锁页 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
 @Composable
-private fun UnlockContentPreview() {
+internal fun UnlockContentPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         UnlockContent(
             uiState = UnlockUiState().copy(
                 hasDatabase = true,
-                databaseName = "预览密码库.kdbx",
-                databaseStatus = "预览状态：已就绪（示例文案）",
+                databaseName = "Preview Vault.kdbx",
+                databaseStatus = "Ready",
                 unlockMode = UnlockMode.STANDARD,
                 isQuickUnlockAvailable = true,
                 accessibilityRiskNotice = true

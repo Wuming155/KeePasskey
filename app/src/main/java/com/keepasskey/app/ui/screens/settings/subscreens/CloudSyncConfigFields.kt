@@ -215,7 +215,7 @@ internal fun S3ConfigFields(
 @androidx.compose.ui.tooling.preview.Preview(name = "WebDAV 同步配置字段 - 浅色", showBackground = true)
 @androidx.compose.ui.tooling.preview.Preview(name = "WebDAV 同步配置字段 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
 @Composable
-private fun WebDavConfigFieldsPreview() {
+internal fun WebDavConfigFieldsPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         Column {
             WebDavConfigFields(

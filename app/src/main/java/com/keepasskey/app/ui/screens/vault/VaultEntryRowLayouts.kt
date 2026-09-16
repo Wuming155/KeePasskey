@@ -251,7 +251,7 @@ internal fun StandardEntryLayout(
 @androidx.compose.ui.tooling.preview.Preview(name = "条目标准行 - 浅色", showBackground = true)
 @androidx.compose.ui.tooling.preview.Preview(name = "条目标准行 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
 @Composable
-private fun StandardEntryLayoutPreview() {
+internal fun StandardEntryLayoutPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         StandardEntryLayout(
             entry = com.keepasskey.app.ui.preview.PreviewEntryLogin,
