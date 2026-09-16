@@ -44,7 +44,7 @@ fun UnifiedVaultEntryRow(
     onClick: () -> Unit,
     onLongClick: () -> Unit,
     onCopyPassword: () -> Unit,
-    onCopyUsername: () -> Unit,
+    onCopyUsername: () -> Unit = {},
     onRestore: () -> Unit,
     onPurge: () -> Unit,
     densitySpec: ListDensitySpec = ListDensityPresenter.specOf(ListDensity.NORMAL),
@@ -112,7 +112,6 @@ fun UnifiedVaultEntryRow(
                     densitySpec = densitySpec,
                     groupPath = groupPath,
                     onCopyPassword = onCopyPassword,
-                    onCopyUsername = onCopyUsername,
                     onRestore = onRestore,
                     onPurge = onPurge
                 )

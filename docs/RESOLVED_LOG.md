@@ -109,6 +109,7 @@
 | §95 | MD3 可访问性与交互一致性批次：元信息文本对比度统一 `onSurfaceVariant`；搜索清出热区 40dp；分组行去冗余箭头；TOTP 互斥参数改 SegmentedButton；路径/时间戳补 Ellipsis；解锁/重扫/同步禁用态显式 MD3 色；凭据填充确认 bottom padding 收紧。如实声明：表单已用原生 OutlinedTextField、顶栏胶囊搜索不整页替换 DockedSearchBar | ISSUE-P3-130 | [`95-MD3可访问性与交互一致性批次.md`](resolved/batches/95-MD3可访问性与交互一致性批次.md) |
 | §96 | FAB 收缩 / Slider 手感 / Segmented 选中态 / 热区批次：Extended FAB 滚动中 Auto-collapse 为图标态；新增 `ValueSlider`（连续宽轨 + 拖拽数值气泡 + 触感）；Segmented 选中显式勾选图标；TOTP 复制与 QuickUnlock 热区补至 48dp | ISSUE-P3-131 | [`96-FAB收缩与Slider手感批次.md`](resolved/batches/96-FAB收缩与Slider手感批次.md) |
 | §97 | 外部 UI 评审「边界定义 / 弹窗规范 / 竖向空间」批次：**核实先行**（预览图逐像素取样 + M3 1.5.0-alpha27 源码核对 + 全仓 grep）——**5 类主张中 3 类不成立**（滑动条粗细 / 字符开关 48dp 热区 / 调试代码块对比度）并逐条留痕；**成立项**全部整改：13 处弹窗 `shape` 覆盖删除（回到 MD3 `CornerExtraLarge`）、`outline` 语义色由半透明改不透明（OutlinedTextField 未聚焦边框 **1.26:1 → 4.26:1**）、禁用态主按钮补可见边界（落在 background 上 **1.28:1** ⇒ 改 `surfaceContainerHighest` + 1dp `outline`）、详情页快捷操作由三张竖向磁贴（实测 173px）改紧凑 `AssistChip` 行、长路径改中段省略（`middleEllipsize`，保文件名）；新增 14 例回归（含**全仓 AlertDialog 调用点扫描**与防空扫断言） | ISSUE-P3-132 | [`97-UI评审边界与紧凑化批次.md`](resolved/batches/97-UI评审边界与紧凑化批次.md) |
+| §98 | 上一会话遗留界面改动落盘批次：施工期间发现工作区存在**上一会话未提交**的 8 个界面/构建文件与预览脚本重命名（生成器主操作改整行按钮、编辑页保存与设置页锁定改文字按钮、无障碍提示降权为 Banner、选择器候选改 `ListItem`+分隔线、**库列表行移除「复制用户名」**、预览导出任务重构为 main/secondary × light/dark）。经**用户裁决**原样落盘为独立一笔提交；本批**如实声明「原作者文档与设计依据均不存在，只为『改了什么』负责」**，核验为编译 + 全量单测绿（2060/0/13）+ 新导出工具链真实执行 | 无既有 ISSUE 编号（遗留未提交改动） | [`98-上一会话遗留界面改动落盘批次.md`](resolved/batches/98-上一会话遗留界面改动落盘批次.md) |
 
 ## 分册导航
 

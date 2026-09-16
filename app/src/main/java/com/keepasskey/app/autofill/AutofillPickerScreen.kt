@@ -4,18 +4,26 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -170,28 +178,53 @@ fun AutofillPickerScreen(
             } else {
                 LazyColumn(modifier = Modifier.fillMaxSize()) {
                     items(items = results, key = { it.id.toHexString() }) { entry ->
-                        Column(
+                        val title = entry.title.ifBlank { entry.userName }
+                        val subtitle = buildList {
+                            if (entry.userName.isNotBlank()) add(entry.userName)
+                            val host = entry.url
+                                .removePrefix("https://")
+                                .removePrefix("http://")
+                                .trimEnd('/')
+                                .substringBefore('/')
+                            if (host.isNotBlank() && host != entry.userName) add(host)
+                        }.joinToString(" · ").ifBlank { null }
+                        ListItem(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickable { onPick(entry.id.toHexString()) }
-                                .padding(horizontal = 16.dp, vertical = 12.dp)
+                                .clickable { onPick(entry.id.toHexString()) },
+                            supportingContent = subtitle?.let {
+                                {
+                                    Text(
+                                        text = it,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            },
+                            leadingContent = {
+                                Icon(
+                                    imageVector = Icons.Default.Lock,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            },
+                            colors = ListItemDefaults.colors(
+                                containerColor = MaterialTheme.colorScheme.surface
+                            )
                         ) {
                             Text(
-                                text = entry.title.ifBlank { entry.userName },
-                                style = MaterialTheme.typography.bodyMedium.copy(
+                                text = title,
+                                style = MaterialTheme.typography.bodyLarge.copy(
                                     fontWeight = FontWeight.SemiBold
                                 ),
                                 color = MaterialTheme.colorScheme.onSurface
                             )
-                            val subtitle = entry.userName.ifBlank { entry.url }
-                            if (subtitle.isNotBlank()) {
-                                Text(
-                                    text = subtitle,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
                         }
+                        HorizontalDivider(
+                            modifier = Modifier.padding(horizontal = 16.dp),
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)
+                        )
                     }
                 }
             }
@@ -233,44 +266,59 @@ private fun AutofillPickerRequesterBlock(requester: AutofillPickerRequester) {
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 4.dp),
+        shape = RoundedCornerShape(16.dp),
         color = MaterialTheme.colorScheme.surfaceContainerLow
     ) {
-        Column(
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(2.dp)
+                .padding(16.dp),
+            verticalAlignment = Alignment.Top
         ) {
-            Text(
-                text = stringResource(R.string.autofill_picker_requester_title),
-                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold)
+            Icon(
+                imageVector = Icons.Default.Lock,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier
+                    .padding(top = 2.dp)
+                    .size(18.dp)
             )
-            Text(
-                text = stringResource(R.string.autofill_confirm_caller_package, requester.packageName),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-            requester.appLabel?.let {
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
                 Text(
-                    text = stringResource(R.string.autofill_picker_requester_label, it),
+                    text = stringResource(R.string.autofill_picker_requester_title),
+                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold)
+                )
+                Text(
+                    text = stringResource(R.string.autofill_confirm_caller_package, requester.packageName),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                requester.appLabel?.let {
+                    Text(
+                        text = stringResource(R.string.autofill_picker_requester_label, it),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Text(
+                    text = requester.certSha256Hex
+                        ?.let { stringResource(R.string.autofill_confirm_caller_cert, it) }
+                        ?: stringResource(R.string.autofill_confirm_cert_unreadable),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = requester.reportedDomain
+                        ?.let { stringResource(R.string.autofill_picker_requester_domain, it) }
+                        ?: stringResource(R.string.autofill_picker_requester_domain_none),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            Text(
-                text = requester.certSha256Hex
-                    ?.let { stringResource(R.string.autofill_confirm_caller_cert, it) }
-                    ?: stringResource(R.string.autofill_confirm_cert_unreadable),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
-                text = requester.reportedDomain
-                    ?.let { stringResource(R.string.autofill_picker_requester_domain, it) }
-                    ?: stringResource(R.string.autofill_picker_requester_domain_none),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
         }
     }
 }

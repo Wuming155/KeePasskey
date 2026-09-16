@@ -20,8 +20,8 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -85,19 +85,6 @@ internal fun GeneratorDisplayCard(
                     )
                 }
 
-                IconButton(onClick = {
-                    // 重新生成：ContextClick 轻震对应「新值产生」时刻，与旋转动画同步
-                    haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
-                    rotationAngle += 360f
-                    onRegenerate()
-                }) {
-                    Icon(
-                        imageVector = Icons.Default.Refresh,
-                        contentDescription = stringResource(R.string.cd_regenerate),
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.rotate(animatedRotation)
-                    )
-                }
             }
 
             // 大字号密码展示区域
@@ -122,14 +109,32 @@ internal fun GeneratorDisplayCard(
 
             PasswordStrengthBar(entropyBits = entropyBits, modifier = Modifier.fillMaxWidth())
 
+            // 核心动作是「重新生成」；「复制」降为次级，避免高亮按钮语义与生成器主业颠倒
             Button(
-                onClick = onCopy,
+                onClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
+                    rotationAngle += 360f
+                    onRegenerate()
+                },
                 modifier = Modifier.fillMaxWidth().height(48.dp),
                 shape = CapsuleShape,
                 colors = ButtonDefaults.buttonColors(
                     containerColor = MaterialTheme.colorScheme.primary,
                     contentColor = MaterialTheme.colorScheme.onPrimary
                 )
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Refresh,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp).rotate(animatedRotation)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(stringResource(R.string.cd_regenerate), fontWeight = FontWeight.SemiBold)
+            }
+            OutlinedButton(
+                onClick = onCopy,
+                modifier = Modifier.fillMaxWidth().height(48.dp),
+                shape = CapsuleShape
             ) {
                 Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(modifier = Modifier.width(8.dp))

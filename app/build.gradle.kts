@@ -244,14 +244,14 @@ dependencies {
 }
 
 // =============================================================================================
-// 本地开发：Compose @Preview 截图导出（gitignore）。两个入口，按需选择：
-//   全部  → preview-exports/all/     保留包路径（与 GUI导航.md 全量对应）
-//   主页面 → preview-exports/main/   仅整屏，拍平到单目录
-// 命令：`.\gradlew.bat :app:exportAllPreviewScreenshots` / `:app:exportMainPreviewScreenshots`
-// 或双击根目录「导出预览图-全部.bat」/「导出预览图-主页面.bat」
+// 本地开发：Compose @Preview 截图导出（gitignore）。两个入口：
+//   主页面 → preview-exports/main/{light,dark}/         20 整屏 × 明暗
+//   次要   → preview-exports/secondary/{light,dark}/    其余（卡片/对话框/分节等），扁平文件名
+// 命令：`:app:exportMainPreviewScreenshots` / `:app:exportSecondaryPreviewScreenshots`
+// 或双击根目录「导出预览图-主页面.bat」/「导出预览图-次要.bat」
 // =============================================================================================
-val previewExportsAllDir = rootProject.layout.projectDirectory.dir("preview-exports/all")
 val previewExportsMainDir = rootProject.layout.projectDirectory.dir("preview-exports/main")
+val previewExportsSecondaryDir = rootProject.layout.projectDirectory.dir("preview-exports/secondary")
 val previewRenderedDir = layout.buildDirectory.dir("outputs/screenshotTest-results/preview/debug/rendered")
 
 // 主页面预览函数名（整屏 / 主内容；浅色+深色各一张）
@@ -278,26 +278,20 @@ val mainScreenPreviewPrefixes = listOf(
     "CredentialFillConfirmScreenPreviewScreenshotExport",
 )
 
-tasks.register<Sync>("exportAllPreviewScreenshots") {
-    group = "verification"
-    description = "导出全部 @Preview 截图到 preview-exports/all/（按包路径分层）"
-    dependsOn("updateDebugScreenshotTest")
-    duplicatesStrategy = DuplicatesStrategy.INCLUDE
-    from(previewRenderedDir) {
-        include("**/*.png", "**/*.webp")
-        includeEmptyDirs = false
+/** 依文件名中的浅色/深色（或 Light/Dark）归入 light/ 或 dark/ 子目录 */
+fun org.gradle.api.file.FileCopyDetails.routeByTheme() {
+    val n = name
+    val theme = when {
+        n.contains("深色") || n.contains("Dark", ignoreCase = true) -> "dark"
+        n.contains("浅色") || n.contains("Light", ignoreCase = true) -> "light"
+        else -> "light"
     }
-    into(previewExportsAllDir)
-    doLast {
-        val count = previewExportsAllDir.asFile.walkTopDown()
-            .count { it.isFile && it.extension.equals("png", true) }
-        logger.lifecycle("已导出 $count 张（全部）→ ${previewExportsAllDir.asFile.absolutePath}")
-    }
+    path = "$theme/$n"
 }
 
 tasks.register<Sync>("exportMainPreviewScreenshots") {
     group = "verification"
-    description = "导出主页面 @Preview 截图到 preview-exports/main/（扁平单目录）"
+    description = "导出主页面 @Preview 到 preview-exports/main/{light,dark}/（扁平文件名）"
     dependsOn("updateDebugScreenshotTest")
     duplicatesStrategy = DuplicatesStrategy.INCLUDE
     from(previewRenderedDir) {
@@ -305,13 +299,39 @@ tasks.register<Sync>("exportMainPreviewScreenshots") {
             include("**/${prefix}_*.png")
         }
         includeEmptyDirs = false
-        eachFile { path = name }
+        eachFile { routeByTheme() }
     }
     into(previewExportsMainDir)
     doLast {
-        val count = previewExportsMainDir.asFile.walkTopDown()
+        val light = previewExportsMainDir.dir("light").asFile.walkTopDown()
             .count { it.isFile && it.extension.equals("png", true) }
-        logger.lifecycle("已导出 $count 张（主页面）→ ${previewExportsMainDir.asFile.absolutePath}")
+        val dark = previewExportsMainDir.dir("dark").asFile.walkTopDown()
+            .count { it.isFile && it.extension.equals("png", true) }
+        logger.lifecycle("已导出 主页面: light=$light dark=$dark → ${previewExportsMainDir.asFile.absolutePath}")
+    }
+}
+
+tasks.register<Sync>("exportSecondaryPreviewScreenshots") {
+    group = "verification"
+    description = "导出次要界面（非 20 主屏）@Preview 到 preview-exports/secondary/{light,dark}/"
+    dependsOn("updateDebugScreenshotTest")
+    duplicatesStrategy = DuplicatesStrategy.INCLUDE
+    from(previewRenderedDir) {
+        include("**/*.png", "**/*.webp")
+        // 排除主页面白名单
+        mainScreenPreviewPrefixes.forEach { prefix ->
+            exclude("**/${prefix}_*.png")
+        }
+        includeEmptyDirs = false
+        eachFile { routeByTheme() }
+    }
+    into(previewExportsSecondaryDir)
+    doLast {
+        val light = previewExportsSecondaryDir.dir("light").asFile.walkTopDown()
+            .count { it.isFile && it.extension.equals("png", true) }
+        val dark = previewExportsSecondaryDir.dir("dark").asFile.walkTopDown()
+            .count { it.isFile && it.extension.equals("png", true) }
+        logger.lifecycle("已导出 次要: light=$light dark=$dark → ${previewExportsSecondaryDir.asFile.absolutePath}")
     }
 }
 

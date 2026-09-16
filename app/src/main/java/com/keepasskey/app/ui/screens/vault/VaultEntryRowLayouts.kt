@@ -18,7 +18,6 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Key
-import androidx.compose.material.icons.filled.PersonOutline
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material3.Icon
@@ -98,7 +97,6 @@ internal fun StandardEntryLayout(
     densitySpec: ListDensitySpec,
     groupPath: String?,
     onCopyPassword: () -> Unit,
-    onCopyUsername: () -> Unit,
     onRestore: () -> Unit,
     onPurge: () -> Unit
 ) {
@@ -226,21 +224,12 @@ internal fun StandardEntryLayout(
                     }
                 }
             } else {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (entry.username.isNotBlank()) {
-                        IconButton(onClick = {
-                            haptic.performHapticFeedback(HapticFeedbackType.Confirm)
-                            onCopyUsername()
-                        }) {
-                            Icon(Icons.Default.PersonOutline, contentDescription = stringResource(R.string.cd_copy_username), tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
-                        }
-                    }
-                    IconButton(onClick = {
-                        haptic.performHapticFeedback(HapticFeedbackType.Confirm)
-                        onCopyPassword()
-                    }) {
-                        Icon(Icons.Default.ContentCopy, contentDescription = stringResource(R.string.cd_copy_password), tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
-                    }
+                // 列表行仅保留核心「复制密码」，降低误触；用户名复制仍在详情页可用
+                IconButton(onClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.Confirm)
+                    onCopyPassword()
+                }) {
+                    Icon(Icons.Default.ContentCopy, contentDescription = stringResource(R.string.cd_copy_password), tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
                 }
             }
         }
@@ -267,7 +256,6 @@ internal fun StandardEntryLayoutPreview() {
             densitySpec = ListDensityPresenter.specOf(com.keepasskey.app.ui.screens.settings.ListDensity.NORMAL),
             groupPath = null,
             onCopyPassword = {},
-            onCopyUsername = {},
             onRestore = {},
             onPurge = {}
         )

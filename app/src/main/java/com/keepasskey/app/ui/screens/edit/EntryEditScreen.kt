@@ -13,7 +13,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -223,11 +222,10 @@ fun EntryEditContent(
                     }
                 },
                 actions = {
-                    IconButton(onClick = onSaveClick, enabled = !uiState.isReadOnly) {
-                        Icon(
-                            imageVector = Icons.Default.Check,
-                            contentDescription = stringResource(R.string.cd_save),
-                            tint = MaterialTheme.colorScheme.primary
+                    TextButton(onClick = onSaveClick, enabled = !uiState.isReadOnly) {
+                        Text(
+                            text = stringResource(R.string.cd_save),
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold)
                         )
                     }
                 },

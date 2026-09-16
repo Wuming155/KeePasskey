@@ -1,17 +1,15 @@
 @echo off
 setlocal
-chcp 65001 >nul
-title KeePasskey — 导出主页面 @Preview 截图
-
+title KeePasskey - Export Main Preview Screenshots
 cd /d "%~dp0"
 
 echo ============================================
-echo  仅导出主页面 Compose @Preview 截图
-echo  输出: preview-exports\main\  （扁平单目录）
+echo  Export MAIN Compose @Preview screenshots
+echo  Output: preview-exports\main\{light,dark}
 echo ============================================
 echo.
 
-echo [1/3] 生成 screenshotTest wrapper（locale 默认 zh-CN）...
+echo [1/3] Generate screenshotTest wrappers (locale zh-CN)...
 where python >nul 2>nul
 if %errorlevel%==0 (
   python tools\export_previews\generate_screenshot_test_wrappers.py
@@ -20,32 +18,31 @@ if %errorlevel%==0 (
   if %errorlevel%==0 (
     py -3 tools\export_previews\generate_screenshot_test_wrappers.py
   ) else (
-    echo [警告] 未找到 python，跳过 wrapper 重新生成
+    echo [WARN] python not found, skip wrapper regen
   )
 )
 if errorlevel 1 (
-  echo [失败] wrapper 生成出错
+  echo [FAIL] wrapper generation failed
   pause
   exit /b 1
 )
 
 echo.
-echo [2/3] 渲染并导出主页面预览图...
+echo [2/3] Render and export main previews...
 call gradlew.bat :app:exportMainPreviewScreenshots --console=plain
 if errorlevel 1 (
   echo.
-  echo [失败] 导出未完成，请查看上方 Gradle 日志
+  echo [FAIL] export failed, see Gradle log above
   pause
   exit /b 1
 )
 
 echo.
-echo [3/3] 完成
+echo [3/3] Done
 if exist "preview-exports\main" (
   start "" explorer "%CD%\preview-exports\main"
 ) else (
-  echo 未找到 preview-exports\main
+  echo preview-exports\main not found
 )
-
 echo.
 pause
