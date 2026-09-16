@@ -315,7 +315,7 @@ fun TotpSettingsScreen(
 private fun TotpSettingsScreenPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         TotpSettingsScreen(
-            uiState = com.keepasskey.app.ui.screens.settings.SettingsUiState(),
+            uiState = SettingsUiState(),
             onBackClick = {}
         )
     }

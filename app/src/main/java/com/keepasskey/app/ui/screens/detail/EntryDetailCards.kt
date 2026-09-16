@@ -324,7 +324,7 @@ private fun BasicCredentialsCardPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         val previewEntry = com.keepasskey.app.ui.preview.PreviewEntryLogin
         val previewUiState = previewStateOf(
-            com.keepasskey.app.ui.screens.detail.EntryDetailUiState(
+            EntryDetailUiState(
                 entry = previewEntry,
                 isPasswordVisible = true,
                 revealedPassword = "预览用假密码",

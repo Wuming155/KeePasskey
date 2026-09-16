@@ -271,7 +271,7 @@ internal fun OpenExistingVaultDialog(
 }
 
 // IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
-@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @androidx.compose.ui.tooling.preview.Preview(name = "打开已有密码库 - 浅色", showBackground = true)
 @androidx.compose.ui.tooling.preview.Preview(name = "打开已有密码库 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
 @Composable

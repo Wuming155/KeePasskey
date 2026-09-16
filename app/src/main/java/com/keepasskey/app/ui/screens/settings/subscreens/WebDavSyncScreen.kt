@@ -79,7 +79,7 @@ fun WebDavSyncScreen(
 private fun WebDavSyncScreenPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         WebDavSyncScreen(
-            uiState = com.keepasskey.app.ui.screens.settings.SettingsUiState(),
+            uiState = SettingsUiState(),
             onBackClick = {},
             onAutoSyncToggle = {},
             onWifiOnlyToggle = {},

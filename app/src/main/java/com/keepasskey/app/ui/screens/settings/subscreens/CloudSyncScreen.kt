@@ -372,7 +372,7 @@ fun CloudSyncScreen(
 private fun CloudSyncScreenPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         CloudSyncScreen(
-            uiState = com.keepasskey.app.ui.screens.settings.SettingsUiState(),
+            uiState = SettingsUiState(),
             onBackClick = {},
             onAutoSyncToggle = {},
             onWifiOnlyToggle = {},

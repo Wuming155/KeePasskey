@@ -280,7 +280,7 @@ fun interface MillisClock {
     fun now(): Long
 
     companion object {
-        val SystemClock = MillisClock { java.lang.System.currentTimeMillis() }
+        val SystemClock = MillisClock { System.currentTimeMillis() }
     }
 }
 

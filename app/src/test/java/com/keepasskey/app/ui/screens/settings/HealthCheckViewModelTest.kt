@@ -116,7 +116,7 @@ class HealthCheckViewModelTest {
             com.keepasskey.app.autofill.AutofillFieldBlocklistStore(null, testHmacFieldSignatureSource()),
             // TASK-47：已泄露密码检测协调器（测试用假客户端：无真实外联）
             com.keepasskey.app.data.breach.BreachCheckCoordinator(
-                com.keepasskey.app.ui.screens.settings.NoOpBreachRangeClient
+                NoOpBreachRangeClient
             ),
             stringsProvider = fakeStrings
         )

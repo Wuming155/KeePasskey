@@ -170,7 +170,7 @@ private fun VaultDatabaseCardPreview() {
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             VaultDatabaseCard(
-                database = com.keepasskey.app.ui.model.VaultDatabaseInfo(
+                database = VaultDatabaseInfo(
                     id = "preview-db-local",
                     name = "预览本地密码库",
                     path = "/storage/emulated/0/Documents/preview.kdbx",
@@ -184,7 +184,7 @@ private fun VaultDatabaseCardPreview() {
                 onDelete = {}
             )
             VaultDatabaseCard(
-                database = com.keepasskey.app.ui.model.VaultDatabaseInfo(
+                database = VaultDatabaseInfo(
                     id = "preview-db-remote",
                     name = "预览云端密码库",
                     path = "https://dav.example.com/preview.kdbx",

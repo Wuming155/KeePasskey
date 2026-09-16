@@ -295,7 +295,7 @@ private fun CustomFieldsCardPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         val previewEntry = com.keepasskey.app.ui.preview.PreviewEntryLogin
         val previewUiState = previewStateOf(
-            com.keepasskey.app.ui.screens.detail.EntryDetailUiState(
+            EntryDetailUiState(
                 entry = previewEntry,
                 protectedFieldsVisibility = mapOf("preview-field-2" to false),
                 revealedProtectedFields = mapOf("preview-field-2" to "预览受保护字段值")

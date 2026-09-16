@@ -440,7 +440,7 @@ fun SecuritySettingsScreen(
 private fun SecuritySettingsScreenPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         SecuritySettingsScreen(
-            uiState = com.keepasskey.app.ui.screens.settings.SettingsUiState().copy(
+            uiState = SettingsUiState().copy(
                 biometricEnabled = true,
                 autoLockBackground = true,
                 flagSecureEnabled = true,

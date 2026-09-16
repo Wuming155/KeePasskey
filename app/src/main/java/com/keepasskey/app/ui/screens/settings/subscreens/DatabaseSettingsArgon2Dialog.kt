@@ -207,9 +207,9 @@ internal fun Argon2ParametersDialog(
 private fun Argon2ParametersDialogPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         Argon2ParametersDialog(
-            uiState = com.keepasskey.app.ui.screens.settings.SettingsUiState(),
+            uiState = SettingsUiState(),
             // 构造一份「基准已完成」的展示态，覆盖推荐参数结果分支
-            kdfBenchmarkState = com.keepasskey.app.ui.screens.settings.KdfBenchmarkUiState(
+            kdfBenchmarkState = KdfBenchmarkUiState(
                 recommendedIterations = 6L,
                 recommendedMemoryMb = 128L,
                 recommendedParallelism = 4

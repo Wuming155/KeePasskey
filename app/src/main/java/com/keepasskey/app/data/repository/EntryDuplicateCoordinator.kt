@@ -56,8 +56,7 @@ internal class EntryDuplicateCoordinator(
 
         val clone = source.toFreshClone()
         databaseSession.saveEntry(clone)
-        val persistResult = persistSession()
-        return when (persistResult) {
+        return when (val persistResult = persistSession()) {
             is KdbxResult.Success -> KdbxResult.Success(clone.id.toHexString())
             is KdbxResult.Failure -> persistResult
         }

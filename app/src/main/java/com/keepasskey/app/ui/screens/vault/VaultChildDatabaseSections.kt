@@ -247,7 +247,7 @@ private const val CHILD_ENTRY_LOCK_ICON_DP = 16
 private fun ChildVaultEntryRowViewPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         ChildVaultEntryRowView(
-            row = com.keepasskey.app.ui.model.ChildVaultEntryRow(
+            row = ChildVaultEntryRow(
                 mountId = "preview-mount-1",
                 mountAlias = "预览子库",
                 entryUuid = "preview-entry-uuid-1",

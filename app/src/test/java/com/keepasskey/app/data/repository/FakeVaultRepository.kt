@@ -59,26 +59,26 @@ class FakeVaultRepository(
         passwordChars: CharArray,
         keyFileData: ByteArray?,
         readOnly: Boolean
-    ): com.keepasskey.core.result.KdbxResult<Unit> {
+    ): KdbxResult<Unit> {
         // ISSUE-P3-04：记录实际收到的密钥文件因子（克隆语义，断言用）
         lastUnlockKeyFileData = keyFileData?.copyOf()
         // ISSUE-P1-04：强制凭据错误——驱动 ViewModel 认证失败分支（节流计数 + 无条件清零）
         if (forceInvalidCredentials) {
-            return com.keepasskey.core.result.KdbxResult.Failure(
+            return KdbxResult.Failure(
                 com.keepasskey.database.exception.KdbxInvalidCredentialsException("主密码错误"),
                 "主密码错误"
             )
         }
         // P1-10 语义：仅密钥文件（空密码 + 密钥文件）亦为合法复合密钥
         return if (passwordChars.isNotEmpty() || keyFileData != null) {
-            com.keepasskey.core.result.KdbxResult.Success(Unit)
+            KdbxResult.Success(Unit)
         } else {
-            com.keepasskey.core.result.KdbxResult.Failure(IllegalArgumentException("密码为空"), "密码不能为空")
+            KdbxResult.Failure(IllegalArgumentException("密码为空"), "密码不能为空")
         }
     }
 
-    override suspend fun changeMasterPassword(newPassword: CharArray): com.keepasskey.core.result.KdbxResult<Unit> {
-        return com.keepasskey.core.result.KdbxResult.Success(Unit)
+    override suspend fun changeMasterPassword(newPassword: CharArray): KdbxResult<Unit> {
+        return KdbxResult.Success(Unit)
     }
 
     override suspend fun lockDatabase() {
@@ -92,7 +92,7 @@ class FakeVaultRepository(
         masterPassword: CharArray,
         keyFile: Boolean,
         preset: String
-    ): com.keepasskey.core.result.KdbxResult<Unit> {
+    ): KdbxResult<Unit> {
         val fileName = if (name.endsWith(".kdbx")) name else "$name.kdbx"
         val newDb = VaultDatabaseInfo(
             id = "db_${System.currentTimeMillis()}",
@@ -108,15 +108,15 @@ class FakeVaultRepository(
         val current = databasesFlow.value.map { it.copy(isActive = false) }.toMutableList()
         current.add(0, newDb)
         databasesFlow.value = current
-        return com.keepasskey.core.result.KdbxResult.Success(Unit)
+        return KdbxResult.Success(Unit)
     }
 
-    override suspend fun removeDatabase(id: String): com.keepasskey.core.result.KdbxResult<Unit> {
+    override suspend fun removeDatabase(id: String): KdbxResult<Unit> {
         databasesFlow.value = databasesFlow.value.filter { it.id != id }
-        return com.keepasskey.core.result.KdbxResult.Success(Unit)
+        return KdbxResult.Success(Unit)
     }
 
-    override suspend fun importExternalDatabase(name: String, path: String, syncType: String): com.keepasskey.core.result.KdbxResult<Unit> {
+    override suspend fun importExternalDatabase(name: String, path: String, syncType: String): KdbxResult<Unit> {
         val newDb = VaultDatabaseInfo(
             id = "db_${System.currentTimeMillis()}",
             name = name,
@@ -131,12 +131,12 @@ class FakeVaultRepository(
         val current = databasesFlow.value.map { it.copy(isActive = false) }.toMutableList()
         current.add(0, newDb)
         databasesFlow.value = current
-        return com.keepasskey.core.result.KdbxResult.Success(Unit)
+        return KdbxResult.Success(Unit)
     }
 
     override fun getGroups(): Flow<List<VaultGroup>> = groupsFlow.asStateFlow()
 
-    override suspend fun saveGroup(group: VaultGroup): com.keepasskey.core.result.KdbxResult<Unit> {
+    override suspend fun saveGroup(group: VaultGroup): KdbxResult<Unit> {
         val current = groupsFlow.value.toMutableList()
         val index = current.indexOfFirst { it.id == group.id }
         if (index >= 0) {
@@ -145,16 +145,16 @@ class FakeVaultRepository(
             current.add(0, group)
         }
         groupsFlow.value = current
-        return com.keepasskey.core.result.KdbxResult.Success(Unit)
+        return KdbxResult.Success(Unit)
     }
 
-    override suspend fun deleteGroup(id: String): com.keepasskey.core.result.KdbxResult<Unit> {
+    override suspend fun deleteGroup(id: String): KdbxResult<Unit> {
         // 删除文件夹及其下属条目或移入回收站
         groupsFlow.value = groupsFlow.value.filter { it.id != id }
         entriesFlow.value = entriesFlow.value.map { entry ->
             if (entry.groupId == id) entry.copy(groupId = "group_recycle_bin") else entry
         }
-        return com.keepasskey.core.result.KdbxResult.Success(Unit)
+        return KdbxResult.Success(Unit)
     }
 
     override fun getEntries(): Flow<List<UiVaultEntry>> = entriesFlow.map { list ->
@@ -175,7 +175,7 @@ class FakeVaultRepository(
         passwordChars: CharArray?,
         totpSecretChars: CharArray?,
         protectedFieldChars: Map<String, CharArray>
-    ): com.keepasskey.core.result.KdbxResult<Unit> {
+    ): KdbxResult<Unit> {
         passwordChars?.let { pwd ->
             passwordStore.value = passwordStore.value + (entry.id to String(pwd))
         }
@@ -214,13 +214,13 @@ class FakeVaultRepository(
         passwordChars?.fill('0')
         totpSecretChars?.fill('0')
         protectedFieldChars.values.forEach { it.fill('0') }
-        return com.keepasskey.core.result.KdbxResult.Success(Unit)
+        return KdbxResult.Success(Unit)
     }
 
     override suspend fun setEntryFavorite(
         entryId: String,
         favorite: Boolean
-    ): com.keepasskey.core.result.KdbxResult<Unit> {
+    ): KdbxResult<Unit> {
         // TASK-34：与 RealVaultRepository 同语义——收藏状态落进条目投影
         val current = entriesFlow.value.toMutableList()
         val index = current.indexOfFirst { it.id == entryId }
@@ -228,30 +228,30 @@ class FakeVaultRepository(
             current[index] = current[index].copy(isFavorite = favorite)
             entriesFlow.value = current
         }
-        return com.keepasskey.core.result.KdbxResult.Success(Unit)
+        return KdbxResult.Success(Unit)
     }
 
     // TASK-16 Fake 语义：克隆 = 同字段复制 + 新 id + 清历史修订
-    override suspend fun duplicateEntry(id: String): com.keepasskey.core.result.KdbxResult<String> {
+    override suspend fun duplicateEntry(id: String): KdbxResult<String> {
         val source = entriesFlow.value.firstOrNull { it.id == id }
-            ?: return com.keepasskey.core.result.KdbxResult.Failure(
+            ?: return KdbxResult.Failure(
                 IllegalArgumentException("条目不存在"), "条目不存在"
             )
         val cloneId = "dup_${System.currentTimeMillis()}"
         entriesFlow.value = entriesFlow.value + source.copy(id = cloneId, revisions = emptyList())
-        return com.keepasskey.core.result.KdbxResult.Success(cloneId)
+        return KdbxResult.Success(cloneId)
     }
 
     // TASK-15 Fake 语义：内存图标池 + 引用上传
     private val customIconPool = MutableStateFlow<Map<String, ByteArray>>(emptyMap())
 
-    override suspend fun addCustomIcon(pngBytes: ByteArray): com.keepasskey.core.result.KdbxResult<String> {
+    override suspend fun addCustomIcon(pngBytes: ByteArray): KdbxResult<String> {
         val existing = customIconPool.value.entries.firstOrNull { it.value.contentEquals(pngBytes) }
         val id = existing?.key ?: "icon_${System.currentTimeMillis()}"
         if (existing == null) {
             customIconPool.value = customIconPool.value + (id to pngBytes.copyOf())
         }
-        return com.keepasskey.core.result.KdbxResult.Success(id)
+        return KdbxResult.Success(id)
     }
 
     override suspend fun getCustomIconBytes(): Map<String, ByteArray> = customIconPool.value
@@ -261,9 +261,9 @@ class FakeVaultRepository(
         entryId: String,
         rawText: String,
         consumerField: com.keepasskey.database.fieldref.FieldReferenceEngine.RefField
-    ): String? = rawText
+    ): String = rawText
 
-    override suspend fun deleteEntry(id: String): com.keepasskey.core.result.KdbxResult<Unit> {
+    override suspend fun deleteEntry(id: String): KdbxResult<Unit> {
         val current = entriesFlow.value.toMutableList()
         val index = current.indexOfFirst { it.id == id }
         if (index >= 0) {
@@ -277,38 +277,38 @@ class FakeVaultRepository(
             }
             entriesFlow.value = current
         }
-        return com.keepasskey.core.result.KdbxResult.Success(Unit)
+        return KdbxResult.Success(Unit)
     }
 
-    override suspend fun restoreEntry(id: String): com.keepasskey.core.result.KdbxResult<Unit> {
+    override suspend fun restoreEntry(id: String): KdbxResult<Unit> {
         val current = entriesFlow.value.toMutableList()
         val index = current.indexOfFirst { it.id == id }
         if (index >= 0) {
             current[index] = current[index].copy(groupId = null)
             entriesFlow.value = current
         }
-        return com.keepasskey.core.result.KdbxResult.Success(Unit)
+        return KdbxResult.Success(Unit)
     }
 
-    override suspend fun emptyRecycleBin(): com.keepasskey.core.result.KdbxResult<Unit> {
+    override suspend fun emptyRecycleBin(): KdbxResult<Unit> {
         entriesFlow.value = entriesFlow.value.filter { it.groupId != "group_recycle_bin" }
-        return com.keepasskey.core.result.KdbxResult.Success(Unit)
+        return KdbxResult.Success(Unit)
     }
 
-    override suspend fun batchMoveEntries(entryIds: Set<String>, targetGroupId: String?): com.keepasskey.core.result.KdbxResult<Unit> {
+    override suspend fun batchMoveEntries(entryIds: Set<String>, targetGroupId: String?): KdbxResult<Unit> {
         val current = entriesFlow.value.map { entry ->
             if (entry.id in entryIds) entry.copy(groupId = targetGroupId) else entry
         }
         entriesFlow.value = current
-        return com.keepasskey.core.result.KdbxResult.Success(Unit)
+        return KdbxResult.Success(Unit)
     }
 
-    override suspend fun batchDeleteEntries(entryIds: Set<String>): com.keepasskey.core.result.KdbxResult<Unit> {
+    override suspend fun batchDeleteEntries(entryIds: Set<String>): KdbxResult<Unit> {
         val current = entriesFlow.value.map { entry ->
             if (entry.id in entryIds) entry.copy(groupId = "group_recycle_bin") else entry
         }
         entriesFlow.value = current
-        return com.keepasskey.core.result.KdbxResult.Success(Unit)
+        return KdbxResult.Success(Unit)
     }
 
     private val extraKdbxEntries = MutableStateFlow<List<KdbxEntry>>(emptyList())
@@ -478,7 +478,7 @@ class FakeVaultRepository(
         webDomain: String?,
         username: String,
         passwordChars: CharArray
-    ): com.keepasskey.core.result.KdbxResult<Unit> {
+    ): KdbxResult<Unit> {
         try {
             val domain = webDomain?.takeIf { it.isNotBlank() }
             val pwdString = String(passwordChars)
@@ -514,7 +514,7 @@ class FakeVaultRepository(
                 currentList.add(newEntry)
             }
             entriesFlow.value = currentList
-            return com.keepasskey.core.result.KdbxResult.Success(Unit)
+            return KdbxResult.Success(Unit)
         } finally {
             Arrays.fill(passwordChars, '0')
         }
@@ -776,30 +776,30 @@ class FakeVaultRepository(
     override fun isSessionReadOnly(): Boolean = false
 
     // TASK-13 新契约：Fake 仓储不支持导出（如实失败），模板安装幂等成功
-    override suspend fun exportKdbxBytes(): com.keepasskey.core.result.KdbxResult<ByteArray> =
-        com.keepasskey.core.result.KdbxResult.Failure(
+    override suspend fun exportKdbxBytes(): KdbxResult<ByteArray> =
+        KdbxResult.Failure(
             UnsupportedOperationException("Fake 仓储不支持 KDBX 导出"),
             "测试 Fake 不支持导出"
         )
 
-    override suspend fun exportVaultXmlBytes(): com.keepasskey.core.result.KdbxResult<ByteArray> =
-        com.keepasskey.core.result.KdbxResult.Failure(
+    override suspend fun exportVaultXmlBytes(): KdbxResult<ByteArray> =
+        KdbxResult.Failure(
             UnsupportedOperationException("Fake 仓储不支持 XML 导出"),
             "测试 Fake 不支持导出"
         )
 
-    override suspend fun exportVaultCsvBytes(): com.keepasskey.core.result.KdbxResult<ByteArray> =
-        com.keepasskey.core.result.KdbxResult.Failure(
+    override suspend fun exportVaultCsvBytes(): KdbxResult<ByteArray> =
+        KdbxResult.Failure(
             UnsupportedOperationException("Fake 仓储不支持 CSV 导出"),
             "测试 Fake 不支持导出"
         )
 
-    override suspend fun exportKeyFileBytes(): com.keepasskey.core.result.KdbxResult<ByteArray> =
-        com.keepasskey.core.result.KdbxResult.Failure(
+    override suspend fun exportKeyFileBytes(): KdbxResult<ByteArray> =
+        KdbxResult.Failure(
             UnsupportedOperationException("Fake 仓储不支持密钥文件导出"),
             "测试 Fake 不支持导出"
         )
 
-    override suspend fun installEntryTemplates(): com.keepasskey.core.result.KdbxResult<Unit> =
-        com.keepasskey.core.result.KdbxResult.Success(Unit)
+    override suspend fun installEntryTemplates(): KdbxResult<Unit> =
+        KdbxResult.Success(Unit)
 }

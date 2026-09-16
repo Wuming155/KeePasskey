@@ -55,7 +55,7 @@ internal class TextNode(
         if (buffer.length + length > maxChars) {
             throw KdbxCorruptFileException("XML 文本节点超出长度上限（$maxChars 字符），疑似解析炸弹")
         }
-        buffer.append(ch, start, length)
+        buffer.appendRange(ch, start, start + length)
     }
 
     override fun end() {

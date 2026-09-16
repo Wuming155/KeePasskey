@@ -152,9 +152,7 @@ internal object KdbxKdfParameterCodec {
     fun deserialize(bytes: ByteArray): KdfParameters {
         val vd = VariantDictionary.deserialize(bytes)
         val uuidBytes = vd.getByteArray("\$UUID") ?: throw KdbxCorruptFileException("KDF 参数中缺失 \$UUID")
-        val uuid = KdbxUuid(uuidBytes)
-
-        return when (uuid) {
+        return when (val uuid = KdbxUuid(uuidBytes)) {
             KdbxConstants.Kdf.AES_KDF -> {
                 val seed = vd.getByteArray("S") ?: throw KdbxCorruptFileException("AES-KDF 缺少 S 参数")
                 val rounds = vd.getUInt64("R") ?: throw KdbxCorruptFileException("AES-KDF 缺少 R 参数")

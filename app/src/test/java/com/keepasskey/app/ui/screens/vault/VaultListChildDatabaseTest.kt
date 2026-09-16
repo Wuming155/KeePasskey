@@ -94,7 +94,7 @@ class VaultListChildDatabaseTest {
         }
         return com.keepasskey.app.sync.SyncCoordinator(
             context,
-            com.keepasskey.database.session.DatabaseSession(),
+            DatabaseSession(),
             com.keepasskey.app.sync.SyncCredentialsStore(context, null),
             DebugLogBuffer()
         )

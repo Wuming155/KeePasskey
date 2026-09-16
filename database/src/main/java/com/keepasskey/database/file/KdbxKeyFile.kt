@@ -223,8 +223,7 @@ internal object KdbxKeyFile {
     }
 
     private fun hexDigit(b: Byte): Int {
-        val c = b.toInt().toChar()
-        return when (c) {
+        return when (val c = b.toInt().toChar()) {
             in '0'..'9' -> c - '0'
             in 'a'..'f' -> c - 'a' + 10
             in 'A'..'F' -> c - 'A' + 10

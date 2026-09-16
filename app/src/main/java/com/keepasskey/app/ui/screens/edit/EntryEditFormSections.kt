@@ -332,7 +332,7 @@ private const val PASSWORD_BITS_PER_CHAR = 4.5
 @Composable
 private fun EntryEditBasicInfoSectionPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
-        val previewUiState = com.keepasskey.app.ui.screens.edit.EntryEditUiState(
+        val previewUiState = EntryEditUiState(
             entryId = "preview-entry-edit",
             groupId = com.keepasskey.app.ui.preview.PreviewGroupLogins.id,
             availableGroups = com.keepasskey.app.ui.preview.PreviewGroups,

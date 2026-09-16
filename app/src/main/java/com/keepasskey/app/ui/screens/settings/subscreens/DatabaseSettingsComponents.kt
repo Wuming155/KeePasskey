@@ -405,7 +405,7 @@ internal fun DatabaseFeedbackItem(
 private fun DatabaseSettingsComponentsPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         DatabaseBasicCard(
-            uiState = com.keepasskey.app.ui.screens.settings.SettingsUiState().copy(
+            uiState = SettingsUiState().copy(
                 databaseName = "预览示例密码库",
                 databasePath = "/预览目录/预览示例.kdbx",
                 databaseDefaultUsername = "demo@example.com"

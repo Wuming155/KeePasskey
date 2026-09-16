@@ -397,7 +397,7 @@ private fun EntryEditContentPreview() {
         val previewSnackbar = remember { SnackbarHostState() }
 
         EntryEditContent(
-            uiState = com.keepasskey.app.ui.screens.edit.EntryEditUiState(
+            uiState = EntryEditUiState(
                 entryId = "preview-entry-edit",
                 groupId = com.keepasskey.app.ui.preview.PreviewGroupLogins.id,
                 availableGroups = com.keepasskey.app.ui.preview.PreviewGroups,

@@ -232,7 +232,7 @@ private fun CreditCardLayoutPreview() {
             icon = com.keepasskey.app.ui.preview.PreviewDefaultIcon,
             isBatchMode = false,
             isSelected = false,
-            densitySpec = com.keepasskey.app.ui.screens.vault.ListDensitySpec(
+            densitySpec = ListDensitySpec(
                 rowVerticalPaddingDp = 10,
                 rowHorizontalPaddingDp = 12,
                 iconContainerSizeDp = 38,

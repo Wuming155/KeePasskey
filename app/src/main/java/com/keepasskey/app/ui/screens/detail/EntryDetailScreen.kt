@@ -487,7 +487,7 @@ private fun <T> previewStateOf(value: T): androidx.compose.runtime.MutableState<
 private fun EntryDetailContentPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         val previewUiState = previewStateOf(
-            com.keepasskey.app.ui.screens.detail.EntryDetailUiState(
+            EntryDetailUiState(
                 entry = com.keepasskey.app.ui.preview.PreviewEntryLogin,
                 isFavorite = true,
                 groupPath = "网站登录 / 预览分组路径",

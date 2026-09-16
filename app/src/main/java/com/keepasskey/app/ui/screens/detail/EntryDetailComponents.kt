@@ -257,7 +257,7 @@ private fun EntryHeaderSectionPreview() {
                 label = "预览磁贴",
                 onClick = {}
             )
-            SectionTitle(textRes = com.keepasskey.app.R.string.detail_basic_section)
+            SectionTitle(textRes = R.string.detail_basic_section)
         }
     }
 }

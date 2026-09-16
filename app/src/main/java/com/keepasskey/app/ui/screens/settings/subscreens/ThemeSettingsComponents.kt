@@ -288,7 +288,7 @@ internal fun ThemeRadioOptionRow(
 private fun ThemePaletteItemCardPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         ThemePaletteItemCard(
-            palette = com.keepasskey.app.ui.theme.AppThemePalette.SAPPHIRE,
+            palette = AppThemePalette.SAPPHIRE,
             isSelected = true,
             isDarkTheme = false,
             onClick = {}

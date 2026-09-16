@@ -286,13 +286,13 @@ private fun AutofillPickerScreenPreview() {
             onQueryChange = {},
             // 预览夹具就地构造：仅标题 / 用户名等非敏感元数据，凭据字段一律不构造
             results = listOf(
-                com.keepasskey.core.model.KdbxEntry()
+                KdbxEntry()
                     .withField(com.keepasskey.core.model.KdbxConstants.Fields.TITLE, "预览登录条目")
                     .withField(
                         com.keepasskey.core.model.KdbxConstants.Fields.USER_NAME,
                         "demo@example.com"
                     ),
-                com.keepasskey.core.model.KdbxEntry()
+                KdbxEntry()
                     .withField(com.keepasskey.core.model.KdbxConstants.Fields.TITLE, "预览便签条目")
             ),
             onPick = {},

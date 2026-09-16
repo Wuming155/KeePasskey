@@ -248,12 +248,12 @@ private fun EntryEditCustomFieldsSectionPreview() {
         ) {
             EntryEditCustomFieldsSection(
                 customFields = listOf(
-                    com.keepasskey.app.ui.model.UiCustomField(
+                    UiCustomField(
                         id = "preview-field-1",
                         key = "预览自定义字段",
                         value = "预览值"
                     ),
-                    com.keepasskey.app.ui.model.UiCustomField(
+                    UiCustomField(
                         id = "preview-field-2",
                         key = "预览受保护字段",
                         value = "",

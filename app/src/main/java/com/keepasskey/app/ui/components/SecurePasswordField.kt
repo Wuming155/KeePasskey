@@ -176,7 +176,7 @@ private fun SecurePasswordFieldPreview() {
             modifier = Modifier,
             placeholder = "预览输入占位提示",
             isError = false,
-            supportingText = { androidx.compose.material3.Text(text = "预览辅助说明文案") },
+            supportingText = { Text(text = "预览辅助说明文案") },
             isPasswordVisible = false,
             onToggleVisibility = {},
             enabled = true,

@@ -401,7 +401,7 @@ private fun OfflineSyncSectionPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         OfflineSyncSection(
             // 打开周期同步，以覆盖「同步间隔」子行的渲染分支
-            uiState = com.keepasskey.app.ui.screens.settings.SettingsUiState(
+            uiState = SettingsUiState(
                 periodicBackgroundSyncEnabled = true
             ),
             onUseOfflineCacheToggle = {},
