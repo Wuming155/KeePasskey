@@ -572,8 +572,8 @@
     <string name="sec_throttle_time_current">Current: %1$d min</string>
     <string name="sec_throttle_minutes_value">%1$d min</string>
     <string name="sec_throttle_dialog_desc">Lockout grows with consecutive failures, capped at the duration chosen here.</string>
-    <string name="sec_clear_input_title">Auto-clear input</string>
-    <string name="sec_clear_input_sub">Copied passwords and codes are cleared automatically</string>
+    <string name="sec_clear_input_title">Clear master password on leave</string>
+    <string name="sec_clear_input_sub">Wipe uncommitted master-password characters when leaving the unlock screen</string>
     <string name="sec_section_leak">Leak protection</string>
     <string name="sec_flag_secure_title">Block screenshots</string>
     <string name="sec_flag_secure_sub">Hide sensitive content from recents and split screen, block capture</string>

@@ -100,13 +100,18 @@ internal fun HealthAuditRowItem(
     isWarning: Boolean,
     modifier: Modifier = Modifier
 ) {
+    // 「需注意」属 warning 语义，不用 error 红，避免与真正的错误/危险态混淆
+    val securityColors = com.keepasskey.app.ui.theme.LocalSecurityColors.current
+    val warningBorder = securityColors.warning.copy(alpha = 0.35f)
+    val warningChipBg = securityColors.warning.copy(alpha = 0.14f)
+    val warningChipFg = securityColors.warning
     Box(
         modifier = modifier
             .fillMaxWidth()
             .clip(MaterialTheme.shapes.large)
             .border(
                 width = 1.dp,
-                color = if (isWarning) MaterialTheme.colorScheme.error.copy(alpha = 0.3f)
+                color = if (isWarning) warningBorder
                 else MaterialTheme.colorScheme.outlineVariant,
                 shape = MaterialTheme.shapes.large
             )
@@ -146,7 +151,7 @@ internal fun HealthAuditRowItem(
                 modifier = Modifier
                     .clip(CircleShape)
                     .background(
-                        if (isWarning) MaterialTheme.colorScheme.errorContainer
+                        if (isWarning) warningChipBg
                         else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
                     )
                     .padding(horizontal = 10.dp, vertical = 4.dp)
@@ -154,7 +159,7 @@ internal fun HealthAuditRowItem(
                 Text(
                     text = statusText,
                     style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                    color = if (isWarning) MaterialTheme.colorScheme.onErrorContainer
+                    color = if (isWarning) warningChipFg
                     else MaterialTheme.colorScheme.primary
                 )
             }

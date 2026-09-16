@@ -227,9 +227,11 @@ private fun TotpLargeCard(
     onAdvanceHotp: () -> Unit = {}
 ) {
     // HOTP 无时间步长：不作紧迫着色、不显示倒计时环
+    // 与 TotpMiniGauge 同一色语义：常规=success，紧迫（≤5s）=danger，避免跨页蓝/绿混用
     val isUrgent = !item.isHotp && item.remainingSeconds <= 5
+    val securityColors = com.keepasskey.app.ui.theme.LocalSecurityColors.current
     val gaugeColor by animateColorAsState(
-        targetValue = if (isUrgent) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+        targetValue = if (isUrgent) securityColors.danger else securityColors.success,
         label = "gaugeColor"
     )
 

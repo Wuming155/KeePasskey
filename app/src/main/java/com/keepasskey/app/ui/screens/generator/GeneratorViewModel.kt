@@ -102,15 +102,13 @@ class GeneratorViewModel @Inject constructor(
     fun selectHistoryPassword(password: ProtectedString) {
         // ISSUE-P2-12：熵值计算走字符数组通道，不把种子物化为额外 String
         val entropy = password.useChars { PasswordGenerationEngine.calculateEntropy(it).toInt() }
-        val strength = evaluateStrengthLabel(entropy)
         _uiState.update { current ->
             // 被替换的当前值若未被历史引用则显式擦除（历史项仍是同一实例，不能误清）
             val previous = current.currentPassword
             if (current.history.none { it === previous }) previous.clear()
             current.copy(
                 currentPassword = password,
-                entropyBits = entropy,
-                strengthLabel = strength
+                entropyBits = entropy
             )
         }
     }
@@ -175,7 +173,6 @@ class GeneratorViewModel @Inject constructor(
         } finally {
             newPasswordChars.fill('0')
         }
-        val strength = evaluateStrengthLabel(entropy)
 
         _uiState.update { current ->
             val previous = current.currentPassword
@@ -192,7 +189,6 @@ class GeneratorViewModel @Inject constructor(
             current.copy(
                 currentPassword = newSecret,
                 entropyBits = entropy,
-                strengthLabel = strength,
                 history = keptHistory
             )
         }
@@ -219,12 +215,5 @@ class GeneratorViewModel @Inject constructor(
         val current = _uiState.value
         current.currentPassword.clear()
         current.history.forEach { it.clear() }
-    }
-
-    private fun evaluateStrengthLabel(entropyBits: Int): UiMessage = when {
-        entropyBits < 40 -> UiMessage(R.string.generator_strength_weak, listOf(entropyBits))
-        entropyBits < 64 -> UiMessage(R.string.generator_strength_medium, listOf(entropyBits))
-        entropyBits < 96 -> UiMessage(R.string.generator_strength_strong, listOf(entropyBits))
-        else -> UiMessage(R.string.generator_strength_extreme, listOf(entropyBits))
     }
 }

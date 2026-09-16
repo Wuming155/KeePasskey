@@ -88,7 +88,7 @@
     <string name="db_picker_title">密码库管理</string>
     <string name="db_picker_subtitle">管理并切换本地存储或云端同步的 KDBX 密码库</string>
     <string name="db_picker_current_active">当前激活</string>
-    <string name="db_picker_open_external">打开已有 KDBX 文件</string>
+    <string name="db_picker_open_external">打开已有 KDBX</string>
     <string name="db_picker_create_new">新建密码库</string>
     <string name="db_picker_create_title">新建密码库向导</string>
     <string name="db_picker_vault_name">密码库名称</string>
@@ -579,8 +579,8 @@
     <string name="sec_throttle_time_current">当前：%1$d 分钟</string>
     <string name="sec_throttle_minutes_value">%1$d 分钟</string>
     <string name="sec_throttle_dialog_desc">连续输错次数越多锁定越久，至多不超过此处选择的时长。</string>
-    <string name="sec_clear_input_title">自动清空输入</string>
-    <string name="sec_clear_input_sub">复制的密码与验证码在超时后自动清除</string>
+    <string name="sec_clear_input_title">离开时清空主密码输入</string>
+    <string name="sec_clear_input_sub">离开解锁页时清空已输入但未提交的主密码字符</string>
     <string name="sec_section_leak">隐私泄露防护</string>
     <string name="sec_flag_secure_title">禁止截屏与录屏</string>
     <string name="sec_flag_secure_sub">最近任务与分屏中隐藏敏感内容，阻止截屏</string>

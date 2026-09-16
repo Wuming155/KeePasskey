@@ -25,9 +25,8 @@ data class GeneratorUiState(
      * 替换/销毁时由 [GeneratorViewModel] 显式清零；UI 仅在渲染瞬间 readString() 物化。
      */
     val currentPassword: ProtectedString = ProtectedString.EMPTY,
+    // 强度标签由 PasswordStrengthBar 依据 entropyBits 现场分档，状态层不再重复持有
     val entropyBits: Int = 96,
-    // 默认值须与 entropyBits 自洽（否则首帧会出现「极强 112」徽标 + 「中等 96」强度条）
-    val strengthLabel: UiMessage = UiMessage(R.string.generator_strength_extreme, listOf(96)),
 
     // 模式 1: 随机密码参数
     val randomLength: Int = 16,

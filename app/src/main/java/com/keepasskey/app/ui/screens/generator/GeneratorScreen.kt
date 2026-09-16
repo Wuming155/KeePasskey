@@ -198,7 +198,6 @@ private fun GeneratorContent(
                 }
                 GeneratorDisplayCard(
                     password = displayPassword,
-                    strengthLabel = uiState.strengthLabel,
                     entropyBits = uiState.entropyBits,
                     onRegenerate = actions::regenerate,
                     onCopy = { actions.copyGeneratedPassword(uiState.currentPassword) }
@@ -279,9 +278,10 @@ internal fun GeneratorContentPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         GeneratorContent(
             uiState = GeneratorUiState(
-                // 预览专用假口令：仅用于界面排版展示，非任何真实生成的密码
-                currentPassword = ProtectedString("Preview-Example-A1b2C3d4"),
+                // 预览专用假口令（16 位）：与 randomLength 默认值自洽，避免「长度滑杆 16」与「示例密码 24 位」并存
+                currentPassword = ProtectedString("Preview-A1b2C3d4X"),
                 entropyBits = 96,
+                randomLength = 16,
                 history = listOf(
                     ProtectedString("Preview-History-1"),
                     ProtectedString("Preview-History-2")

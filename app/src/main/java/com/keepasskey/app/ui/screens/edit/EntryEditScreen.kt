@@ -402,7 +402,8 @@ internal fun EntryEditContentPreview() {
                 iconName = "key",
                 title = "预览编辑条目",
                 username = "demo@example.com",
-                passwordLength = 16,
+                // 与 loadedPassword 长度一致，避免「空密码框 + 强度条」并存的假状态
+                passwordLength = 8,
                 url = "https://example.com",
                 notes = "预览用备注文本",
                 isPasskey = false,
@@ -428,7 +429,7 @@ internal fun EntryEditContentPreview() {
                 passLength = 20f,
                 isDirty = true
             ),
-            loadedPassword = "预览".toCharArray(),
+            loadedPassword = "Passw0rd".toCharArray(),
             loadedTotpSecret = null,
             loadedProtectedFields = mapOf("preview-field-2" to "预览受保护字段值".toCharArray()),
             isDirty = true,

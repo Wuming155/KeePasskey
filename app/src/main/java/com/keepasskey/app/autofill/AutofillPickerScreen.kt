@@ -41,6 +41,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.keepasskey.app.R
+import com.keepasskey.app.ui.components.getVaultIcon
 import com.keepasskey.core.model.KdbxEntry
 
 /**
@@ -202,8 +203,9 @@ fun AutofillPickerScreen(
                                 }
                             },
                             leadingContent = {
+                                // 与主列表一致：按 KDBX iconId 映射矢量图标，便于区分登录/便签等条目类型
                                 Icon(
-                                    imageVector = Icons.Default.Lock,
+                                    imageVector = getVaultIcon(pickerIconNameOf(entry.iconId)),
                                     contentDescription = null,
                                     tint = MaterialTheme.colorScheme.primary,
                                     modifier = Modifier.size(22.dp)
@@ -321,6 +323,33 @@ private fun AutofillPickerRequesterBlock(requester: AutofillPickerRequester) {
             }
         }
     }
+}
+
+/**
+ * KDBX 标准 iconId → UI 图标名（与 VaultEntryMapper.mapIconIdToName 同源取值；
+ * 选择器仅需展示矢量名，不引入仓库层依赖）。
+ */
+private fun pickerIconNameOf(iconId: Int): String = when (iconId) {
+    0, 58 -> "key"
+    1, 8, 16 -> "public"
+    3 -> "wifi"
+    5 -> "forum"
+    4, 27, 47, 48, 49, 50 -> "folder"
+    7, 22, 41, 44 -> "description"
+    13 -> "vpn_key"
+    19, 25, 40 -> "email"
+    20, 34 -> "dns"
+    26, 36 -> "database"
+    29, 30, 33 -> "terminal"
+    32 -> "code"
+    35 -> "cloud"
+    37, 66 -> "credit_card"
+    43 -> "delete"
+    51 -> "lock"
+    52 -> "security"
+    67 -> "work"
+    68 -> "phone"
+    else -> "key"
 }
 
 // IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI

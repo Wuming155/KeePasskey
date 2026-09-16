@@ -6,7 +6,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -22,7 +21,6 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -42,15 +40,12 @@ import androidx.compose.ui.unit.sp
 import com.keepasskey.app.R
 import com.keepasskey.app.ui.components.BentoCard
 import com.keepasskey.app.ui.components.PasswordStrengthBar
-import com.keepasskey.app.ui.model.UiMessage
-import com.keepasskey.app.ui.model.resolveText
 import com.keepasskey.app.ui.theme.CapsuleShape
 import com.keepasskey.app.ui.theme.MonospacePasswordStyle
 
 @Composable
 internal fun GeneratorDisplayCard(
     password: String,
-    strengthLabel: UiMessage,
     entropyBits: Int,
     onRegenerate: () -> Unit,
     onCopy: () -> Unit
@@ -68,26 +63,7 @@ internal fun GeneratorDisplayCard(
         backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Surface(
-                    color = MaterialTheme.colorScheme.primaryContainer,
-                    shape = CapsuleShape
-                ) {
-                    Text(
-                        text = strengthLabel.resolveText(),
-                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                        color = MaterialTheme.colorScheme.onPrimaryContainer,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-                    )
-                }
-
-            }
-
-            // 大字号密码展示区域
+            // 大字号密码展示区域（强度标签由下方 PasswordStrengthBar 唯一呈现，避免双处重复）
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -152,11 +128,7 @@ internal fun GeneratorDisplayCard(
 internal fun GeneratorDisplayCardPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         GeneratorDisplayCard(
-            password = "Preview-Example-Pass-A1b2C3d4",
-            strengthLabel = com.keepasskey.app.ui.model.UiMessage(
-                resId = com.keepasskey.app.R.string.generator_strength_extreme,
-                args = listOf(112)
-            ),
+            password = "Preview-A1b2C3d4X",
             entropyBits = 112,
             onRegenerate = {},
             onCopy = {}

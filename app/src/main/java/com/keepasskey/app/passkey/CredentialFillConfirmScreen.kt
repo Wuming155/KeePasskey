@@ -131,7 +131,29 @@ internal fun CredentialFillConfirmScreenPreview() {
             onConfirm = {},
             onCancel = {},
             confirmEnabled = true,
-            attributionContent = null
+            // 预览带上归属摘要，避免「空 BottomSheet」假象；生产路径由 AutofillConfirmActivity 注入
+            attributionContent = {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    Text(
+                        text = "包名：com.example.preview",
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = "签名摘要：预览签名摘要（占位）",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = "目标域：example.com",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
         )
     }
 }

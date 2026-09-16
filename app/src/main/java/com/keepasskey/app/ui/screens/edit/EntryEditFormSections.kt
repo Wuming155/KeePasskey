@@ -339,7 +339,8 @@ internal fun EntryEditBasicInfoSectionPreview() {
             iconName = "key",
             title = "预览编辑条目",
             username = "demo@example.com",
-            passwordLength = 16,
+            // 与调用方传入的 loadedPassword 长度一致，避免「空密码 + 强度条」假状态
+            passwordLength = 8,
             url = "https://example.com",
             notes = "预览用备注文本",
             isReadOnly = false,
@@ -366,8 +367,9 @@ internal fun EntryEditBasicInfoSectionPreview() {
                 onTitleChange = { _ -> },
                 onUrlChange = { _ -> }
             )
+            // 空密码态：passwordLength 必须为 0，避免强度条在无密码时误显示
             EntryEditAccountSection(
-                uiState = previewUiState,
+                uiState = previewUiState.copy(passwordLength = 0),
                 loadedPassword = null,
                 onUsernameChange = { _ -> },
                 onPasswordChangeSecure = { _ -> },
@@ -380,9 +382,14 @@ internal fun EntryEditBasicInfoSectionPreview() {
                 onToggleDigits = {},
                 onToggleSymbols = {}
             )
+            // 有密码态：loadedPassword 长度与 passwordLength 必须一致
             EntryEditAccountSection(
-                uiState = previewUiState.copy(showGenerator = true, isPasswordVisible = true),
-                loadedPassword = "预览".toCharArray(),
+                uiState = previewUiState.copy(
+                    showGenerator = true,
+                    isPasswordVisible = true,
+                    passwordLength = 8
+                ),
+                loadedPassword = "Passw0rd".toCharArray(),
                 onUsernameChange = { _ -> },
                 onPasswordChangeSecure = { _ -> },
                 onTogglePasswordVisibility = {},

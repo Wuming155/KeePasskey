@@ -70,7 +70,7 @@ fun PasswordStrengthBar(
 ) {
     if (entropyBits == null) return
     val securityColors = LocalSecurityColors.current
-    // 与 GeneratorViewModel.evaluateStrengthLabel 同一阈值分档，杜绝徽标与强度条文案矛盾
+    // 与 GeneratorUiState 默认 entropyBits 及历史分档阈值同一套分档，杜绝文案矛盾
     val (color, label, progress) = when {
         entropyBits >= 96 -> Triple(securityColors.success, stringResource(R.string.generator_strength_extreme, entropyBits), 1.0f)
         entropyBits >= 64 -> Triple(securityColors.success.copy(alpha = 0.85f), stringResource(R.string.generator_strength_strong, entropyBits), 0.85f)
