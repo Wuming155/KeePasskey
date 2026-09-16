@@ -54,7 +54,9 @@ Argon2 原生内核位于 `crypto/src/main/rust/`，由 **Rust + cargo-ndk 从�
 
 ## 已知局限
 
-> 完整实时清单见 [`docs/ACTIVE_ISSUES.md`](docs/ACTIVE_ISSUES.md) 与 `AGENTS.md` §6。
+> 已知工程限界 / 已接受残余风险的**唯一登记表**：[`docs/architecture/已知工程限界.md`](docs/architecture/已知工程限界.md)
+> （原 `AGENTS.md` §6，已于提交 `215ea82` 迁移至该文件）；未闭环的现存缺陷见
+> [`docs/ACTIVE_ISSUES.md`](docs/ACTIVE_ISSUES.md)。
 
 自定义键盘（Magikeyboard 式）未实现（已提供 IME 内联建议 + 自动填充替代）；`KDBX v3` 及以下明确拒绝；应用尚未发布至 F-Droid / GitHub Release。
 

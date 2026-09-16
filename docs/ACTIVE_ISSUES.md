@@ -121,7 +121,8 @@
 > **ISSUE-P2-71**（`inlineSuggestionsEnabled` 默认关闭，候选用户名 / 标题不再默认交给 IME）、
 > **ISSUE-P2-64**（「内存密封」与「写出标志」两条口径在 KDoc 明确分离 + 口令密封不可降级回归锁；
 > AC② 裁决不采纳「库级开启即内存密封」、AC③ 前提经官方语义更正）、
-> **ISSUE-P2-66**（落盘清理 unlink-only 登记为已接受边界，`AGENTS.md` §6）随自动填充默认值与
+> **ISSUE-P2-66**（落盘清理 unlink-only 登记为已接受边界，见
+> [已知工程限界](architecture/已知工程限界.md) §1.5）随自动填充默认值与
 > 外泄通道批次归档，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §51。
 > 其中 P2-43 / P2-71 的整改**必须同时改单键读取的硬编码兜底**（`ExtendedSettingsStore` 的
 > `isAutofillCopyTotpEnabled` / `isInlineSuggestionsEnabled` 原为 `?: true`），否则数据类默认值改动
@@ -222,7 +223,7 @@
 > `R = 2^28` 实测换算 **≈35 s**（默认 `R = 6×10⁶` ≈0.79 s）⇒ 该封顶**无需调整**，
 > 两个 KDF 族的最坏墙钟已收敛到同一量级。边界双向锁（新边界通过 / 原 `2^40` 档必须被拒）
 > 与覆盖性核对（官方默认、真机可达上界、桌面偏执档）见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §78。
-> 残余（无中途取消）登记于 `AGENTS.md` §6。该行已移出本表。
+> 残余（无中途取消）登记于 [已知工程限界](architecture/已知工程限界.md) §2.1。该行已移出本表。
 >
 > **2026-09-16 闭环（§80 批次）**：**ISSUE-P2-45**（解锁失败节流的「删键复位」旁路）已收口——
 > ① **AC① 维持撤销**（默认关闭系 2026-09-12 用户裁决，非缺陷），故本批只做 AC②；
@@ -356,7 +357,8 @@
 > **（该表已于 2026-09-15 清空）** 本批次唯一在册条目 **`ISSUE-P2-49`** 已随 **§78 批次闭环**并移出本表：
 > AC①（`I×M` 联合预算）与 AC③（官方参数域对照）见 `RESOLVED_LOG.md` §48；
 > **AC② 见 §78**——依 §76 真机实测速率把联合预算由 `2^40` 收紧为 **`2^33`**（最坏耗时由 ≈1.4 小时降至 ≈40 s），
-> 并以「有界工作量」替代被否决的协程 `withTimeout`；残余（无中途取消）登记于 `AGENTS.md` §6。
+> 并以「有界工作量」替代被否决的协程 `withTimeout`；残余（无中途取消）登记于
+> [已知工程限界](architecture/已知工程限界.md) §2.1。
 
 > **2026-09-13 新增（敏感数据流审计批次）**：`docs/SENSITIVE_DATA_FLOW_AUDIT_2026-09.md` 已于同日
 > **退役删除**（处置归档见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §41）。该文档为**未跟踪文件**，
@@ -367,7 +369,8 @@
 > `S1`（发布签名口令 = 示例值）→ 已由 `ISSUE-P2-55` 覆盖；`E3`（自动填充后 TOTP 默认进剪贴板）→
 > 已由 `ISSUE-P2-43` 覆盖；`M9`（剪贴板不随锁定 / 熄屏清理）→ 已由 `ISSUE-P2-51` + `ISSUE-P3-84` 覆盖；
 > `M5`（明文导出缓冲未清零）→ 已由 `ISSUE-P3-86` 覆盖；`M2`（主密码在 Compose 中为不可擦 `String`）→
-> 其**输入法通道**已由 `ISSUE-P3-76` 覆盖，其余属已接受残余风险（见 `AGENTS.md` §6）。
+> 其**输入法通道**已由 `ISSUE-P3-76` 覆盖，其余属已接受残余风险
+> （见 [已知工程限界](architecture/已知工程限界.md) §2.4）。
 >
 > **已撤回 / 非缺陷（不转登）**：`H-new-3`（`requireRiskNotice` 无消费者）经复核实为**误报**——
 > 基线与 HEAD 均已在设置页渲染 `IntegrityRiskCard`（`SecuritySettingsScreen.kt`）；`H1 附注`
@@ -421,14 +424,15 @@
 > **2026-09-15 闭环（续）**：**ISSUE-P3-119**（内存附件池擦除边界 + 树外可达性 + 同步路径解析产物显式擦除）
 > 随同批 §52 归档——三处同步路径中，**仅服务单次内容判定 / 一次性合并**的解析产物已显式擦除；
 > 池内擦除（`InnerHeader.binaries`）因 `KdbxDatabase.copy()` 共享列表需先定所有权规则，
-> 按已接受边界登记于 `AGENTS.md` §6（含解除条件）。
+> 按已接受边界登记于 [已知工程限界](architecture/已知工程限界.md) §1.6（含解除条件）。
 > **2026-09-15 闭环（续 6）**：**ISSUE-P3-103**（TOTP 取景窗口接线遮挡触摸过滤）、
 > **ISSUE-P3-104**（`KdbxAttachment` 类 KDoc 与实现口径统一）、**ISSUE-P3-105**（附件读取双拷贝消除 +
 > 写出侧交付副本用毕清零）随「附件字节所有权与敏感窗口接线」批次归档，见
 > [RESOLVED_LOG.md](RESOLVED_LOG.md) §59。
 > **2026-09-15 闭环（续 7）**：**ISSUE-P3-106**（备份 / 迁移排除域穷举补全 `external` 与 `device_*`）、
 > **ISSUE-P3-112**（`SafDocumentCleanup` 删除前补文档 URI 归属判定）、**ISSUE-P3-115**
-> （Gradle 分发镜像来源与锁定哈希补记入 `AGENTS.md` §1）随「退路面加固与来源登记」批次归档，见
+> （Gradle 分发镜像来源与锁定哈希补记入 `AGENTS.md` §1——该节已于提交 `215ea82` 删除，
+> 现登记于 `gradle/wrapper/gradle-wrapper.properties` 注释与 §60 批次文档）随「退路面加固与来源登记」批次归档，见
 > [RESOLVED_LOG.md](RESOLVED_LOG.md) §60。
 > **2026-09-15 闭环（续 8）**：**ISSUE-P3-113**（字段屏蔽签名密钥不可用的 fail-closed 故障显式化：
 > 密钥探针区分「输入非法」与「密钥不可用」，后者经自动填充健康自检卡片对用户可见）随
@@ -467,7 +471,7 @@
 > 终止动作改为「退栈 → **清理易失缓存** → 退出进程」固定顺序（清理必须早于 `exitProcess`，
 > 否则永远不执行），退出前统一清理 `cacheDir/attachments`（附件解密明文）与 `cacheDir/sync`
 > （KDBX 密文快照），⇒ 行已移出本表；`.kdbx.bak` 与 `filesDir/rollback` **不在**清理面内，
-> 口径已写入 `AGENTS.md` §6，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §68。
+> 口径已写入 [已知工程限界](architecture/已知工程限界.md) §1.2，见 [RESOLVED_LOG.md](RESOLVED_LOG.md) §68。
 > **2026-09-15 闭环（续 16，§69 批次）**：**ISSUE-P3-129**（文档索引悬空引用三处）与 **ISSUE-P3-127**
 > （复核报告退役未登记；与 `P3-129` ② 为**同根因重复登记**）**同批收口**——① 补录 §68 批次正文
 > `docs/resolved/batches/68-退出前清理易失缓存批次.md`；② `docs/SECURITY_RECHECK_2026-09.md`

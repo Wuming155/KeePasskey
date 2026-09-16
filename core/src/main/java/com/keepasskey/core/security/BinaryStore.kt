@@ -7,7 +7,8 @@ import java.io.InputStream
  *
  * 设计目标：把「逻辑引用」与「物理字节」分离——超过 [BinaryStorePolicy.DEFAULT_THRESHOLD_BYTES]
  * 的附件在内层二进制池中只保留 store key，不再整批常驻 GC 堆，从根源上消除大附件密码库的
- * OOM 与 GC 压力（KDBX 对象树其余部分仍整体驻留内存，见 AGENTS.md §6）。
+ * OOM 与 GC 压力（KDBX 对象树其余部分仍整体驻留内存，
+ * 见 `docs/architecture/已知工程限界.md` §1.1）。
  *
  * 契约（实现必须逐条满足）：
  * 1. **内容不可变**：同一 key 反复 [load] / [openStream] 必须读到同一份字节；实现不得就地改写。

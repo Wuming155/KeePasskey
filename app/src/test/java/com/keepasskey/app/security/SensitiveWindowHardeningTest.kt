@@ -13,7 +13,7 @@ import java.io.File
  * 该类防护的失效形态是「接线被静默删除」——JVM 无法构造真实取景窗口，
  * 故本用例以静态守卫锁定三处调用形态（断言前剔除注释，避免整改说明自身命中）。
  *
- * 三层防护各自不可替代（详见 `AGENTS.md` §6）：
+ * 三层防护各自不可替代（详见 `docs/architecture/已知工程限界.md` §3.3）：
  * - `FLAG_SECURE`：取景画面（可能含密钥种子二维码）禁截屏 / 录屏 / 多任务缩略图；
  * - `setHideOverlayWindows(true)`：阻断其它应用**新绘制** TYPE_APPLICATION_OVERLAY 悬浮窗；
  * - `decorView.filterTouchesWhenObscured = true`：遮挡态下丢弃整棵视图子树的触摸（反点击劫持），

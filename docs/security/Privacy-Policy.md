@@ -119,7 +119,8 @@ k-匿名实现（[`HibpRangeClient.kt`](../../app/src/main/java/com/keepasskey/a
 **当前结论：暂不实施**，原因如下（属可复核的工程权衡，非隐私承诺弱化）：
 
 1. **与发布产物契约冲突**：引入 flavor 会使 `assembleRelease` 产物路径由
-   `app-release.apk` 变为 `app-<flavor>-release.apk`，直接违反 `AGENTS.md` §3.8 约定的稳定版产物路径，
+   `app-release.apk` 变为 `app-<flavor>-release.apk`，直接违反既有的稳定版产物路径契约
+   （`AGENTS.md` 原 §3.8 的约定；该节已于提交 `215ea82` 随「过时构建规则」精简删除，约定本身仍由发布链路与 CI 断言承担），
    并波及 CI 与既有安装/升级链路。
 2. **裁剪面极大、回归风险高**：同步与泄露检测已深入设置导航、Hilt 注入、WorkManager 后台任务与
    自动填充 / Passkey 链路，flavor 化需要成体系的 `BuildConfig` 条件编译与源集隔离，

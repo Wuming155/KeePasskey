@@ -18,7 +18,7 @@ package com.keepasskey.core.model
  *    `protectUserName = true` **不会**让内存中的 `UserName` 变成密封态，反之亦然。
  *    故「Title / UserName / URL / Notes 在内存中是未密封明文」是既定的**有意口径**，
  *    与 `ProtectedString` 驻留加密同属纵深防御层（持密钥者仍可在读取瞬间获得明文，
- *    见 `AGENTS.md` §6）。
+ *    见 `docs/architecture/已知工程限界.md` §2.2）。
  * 2. **写出标志**（产物里的 `Protected` 属性）由 [isProtectEnabledFor] 经
  *    `KdbxXmlEntrySerializer.resolveProtectedFlag` **无条件覆盖**标准五字段
  *    （官方 `KdbxFile.Write.cs:844-853` 的 `=` 而非 `|=` 语义）；非标准 / 自定义字段

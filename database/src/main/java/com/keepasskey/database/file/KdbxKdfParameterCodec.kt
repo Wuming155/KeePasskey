@@ -79,7 +79,7 @@ import com.keepasskey.database.exception.KdbxCorruptFileException
  * **本预算即「解锁派生的工作量上界」**：阻塞式原生派生不可被协程 `withTimeout` 打断
  * （`withTimeout` 只在阻塞调用返回后的挂起点生效），故不引入无效的墙钟超时；
  * 本仓以「**按实测速率锚定的工作量上界**」把最坏耗时压到分钟以内（实测 ≈41 s），
- * 残余（无中途取消）登记于 `AGENTS.md` §6。
+ * 残余（无中途取消）登记于 `docs/architecture/已知工程限界.md` §2.1。
  */
 internal object KdbxKdfParameterCodec {
 

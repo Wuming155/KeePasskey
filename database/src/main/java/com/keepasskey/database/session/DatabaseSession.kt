@@ -70,7 +70,8 @@ class DatabaseSession(
      * - 成功 [changeCredentials]（换主密码 / 换密钥文件）后**一律删除**——否则旧口令仍可解开它
      *   （见 [changeCredentials] 内注释与 `DatabaseSessionBackupPreferenceTest`）；
      * - 用户若在**本应用之外**（如其它 KDBX 客户端）更换口令，本应用无从知晓，该 `.bak` 会在
-     *   下次在本应用内写入前一直可用**旧口令**解开（如实登记为残余，见 `AGENTS.md` §6）。
+     *   下次在本应用内写入前一直可用**旧口令**解开（如实登记为残余，
+     *   见 `docs/architecture/已知工程限界.md` §1.4）。
      */
     @Volatile
     var createBackupBeforeSave: Boolean = true

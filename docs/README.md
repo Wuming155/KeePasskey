@@ -7,7 +7,7 @@
 
 | 文档 | 用途 |
 |---|---|
-| [`../AGENTS.md`](../AGENTS.md) | 给 AI 协作代理的硬约束、版本基线、闭环纪律 |
+| [`../AGENTS.md`](../AGENTS.md) | 给 AI 协作代理的硬约束与闭环纪律（版本基线、工程限界已下沉至 `docs/`） |
 | [`ACTIVE_ISSUES.md`](ACTIVE_ISSUES.md) | **唯一**待办清单（P0 → P3），自包含背景与验收标准 |
 | [`RESOLVED_LOG.md`](RESOLVED_LOG.md) | 已整改问题归档**总索引**（一页纸，直达每个批次文件） |
 
@@ -16,6 +16,7 @@
 | 文档 | 用途 |
 |---|---|
 | [`architecture/ARCHITECTURE.md`](architecture/ARCHITECTURE.md) | 模块依赖拓扑与关键架构决策 |
+| [`architecture/已知工程限界.md`](architecture/已知工程限界.md) | **已接受工程限界 / 残余风险的唯一登记表**（原 `AGENTS.md` §6，`215ea82` 删除后由本文件承接）：事实 / 边界 / 依据 / 解除条件 |
 | [`architecture/reference-projects.md`](architecture/reference-projects.md) | 参考项目地图与优先级层级 |
 | [`architecture/扫码方案评估_ZXing与CameraXMLKit.md`](architecture/扫码方案评估_ZXing与CameraXMLKit.md) | 扫码方案选型评估（ZXing vs CameraX/ML Kit） |
 

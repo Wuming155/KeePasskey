@@ -52,9 +52,10 @@ class MainApplication : Application() {
      *
      * 语义边界（如实声明）：
      * - 只清**缓存目录**；`<库>.kdbx.bak`（滚动备份，属用户数据而非缓存）与
-     *   防回滚状态（`filesDir/rollback`）**不在**清理面内，其口径见 `AGENTS.md` §6；
+     *   防回滚状态（`filesDir/rollback`）**不在**清理面内，其口径见
+     *   `docs/architecture/已知工程限界.md` §1.2；
      * - 清理为 best-effort：任一实现内部失败只落脱敏日志，**不**阻断退出；
-     * - 与反取证无关：落盘清理仍是 unlink-only（`AGENTS.md` §6），
+     * - 与反取证无关：落盘清理仍是 unlink-only（`docs/architecture/已知工程限界.md` §1.5），
      *   **不得**据此断言「退出即不可恢复」。
      *
      * @return 两个清理面均成功时为 true（仅用于日志与单测观察，调用方无须据此决策）

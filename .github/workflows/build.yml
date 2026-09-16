@@ -244,11 +244,11 @@ jobs:
           fi
           grep -q "Verified using v1 scheme (JAR signing): false" /tmp/apksigner-verify.txt
           # v2 块：AGP 在「v3 与 v2 同开且 minSdk ≥ 28」时**省略 v2 块**（本项目 minSdk 36，
-          # 不存在 v2-only 设备，无功能缺口；基线见 AGENTS.md §1「签名与 R8」行）。故此处断言
+          # 不存在 v2-only 设备，无功能缺口；基线见 docs/records/ci-静态校准记录.md 第 2 行）。故此处断言
           # 的是「v2 块必须缺席」——若产物重新出现 v2 块，说明签名方案语义已变更，必须人工复核。
           # 实测（build-tools 37.0.0，2026-09-10，本机签名产物 app-release.apk）：v2: false。
           if grep -q "Verified using v2 scheme (APK Signature Scheme v2): true" /tmp/apksigner-verify.txt; then
-            echo "::error::产物意外包含 v2 签名块——签名方案语义已变更，需人工复核（AGENTS.md §1 基线为省略）"
+            echo "::error::产物意外包含 v2 签名块——签名方案语义已变更，需人工复核（基线为省略，见 docs/records/ci-静态校准记录.md）"
             exit 1
           fi
           grep -q "Verified using v3 scheme (APK Signature Scheme v3): true" /tmp/apksigner-verify.txt
@@ -277,7 +277,8 @@ jobs:
           · 它**不是**官方发布构建：签名证书与官方发布证书**无关**，无法覆盖安装官方版本，
             也不代表任何发布身份；
           · 官方发布包由维护者以 release keystore 构建（口令来自本地 keystore.properties
-            或 CI Secret），见 AGENTS.md §3.8 与 keystore.properties.example；
+            或 CI Secret），见 keystore.properties.example 与 app/build.gradle.kts 的构建期口令闸门
+            （ISSUE-P2-55：黑名单 / 占位符 / 长度 < 16 一律终止配置）；
           · R8 去混淆映射（mapping/seeds/usage/configuration）**不随本产物归档**——公开仓库的
             artifact 上传等同**公开去混淆映射**（ISSUE-P3-123④ 整改）；
           · 本流水线改为只把映射的**摘要**（体积 / 行数 / SHA-256）写入 step summary：

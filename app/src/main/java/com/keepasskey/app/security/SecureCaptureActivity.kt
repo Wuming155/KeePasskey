@@ -16,7 +16,8 @@ import com.journeyapps.barcodescanner.CaptureActivity
  * - `decorView.filterTouchesWhenObscured = true`（ISSUE-P3-103）：窗口被其它窗口部分遮挡时
  *   丢弃整棵视图子树的触摸事件（反点击劫持）。与 `setHideOverlayWindows` 叠加而非替代——
  *   前者只阻断**新绘制**的悬浮窗，对**已存在**的遮挡窗口（如系统级无障碍覆盖、旧式 overlay）
- *   不生效；两者共同构成与自动填充 / 通行密钥窗口一致的加固面（见 AGENTS.md §6）。
+ *   不生效；两者共同构成与自动填充 / 通行密钥窗口一致的加固面
+ *   （见 `docs/architecture/已知工程限界.md` §3.3）。
  *
  * 通过 [com.journeyapps.barcodescanner.ScanOptions.setCaptureActivity] 在发起扫码时指定，
  * 并在 `AndroidManifest.xml` 显式声明。

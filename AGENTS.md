@@ -5,6 +5,9 @@
 > **双文档体系**：待办 [`docs/ACTIVE_ISSUES.md`](docs/ACTIVE_ISSUES.md)（P0→P3，自包含背景与验收标准）；
 > 归档 [`docs/RESOLVED_LOG.md`](docs/RESOLVED_LOG.md) + [`docs/resolved/`](docs/resolved/)；文档全貌见 [`docs/README.md`](docs/README.md)。
 > **章节编号沿用历史**（原 §1 版本基线、§6 已知工程限界已删除），以免破坏代码与文档中的既有 `§` 引用。
+> 两节结论均已分流：**§6 已迁移至 [`docs/architecture/已知工程限界.md`](docs/architecture/已知工程限界.md)**
+> （代码 KDoc 的「见 `AGENTS.md` §6」一律改指该文件）；§1 的版本基线落于
+> [`docs/RESOLVED_LOG.md`](docs/RESOLVED_LOG.md) 各批次与 [`docs/records/`](docs/records/)（规则 9）。
 
 ## 2. 项目概述
 
@@ -53,6 +56,7 @@ Coroutines + Flow；**文档与代码注释使用简体中文**。
 > **不得平铺在 `docs/` 根**）。本节只列**动工前必读**，其余按需查文档地图。
 
 - [`docs/ACTIVE_ISSUES.md`](docs/ACTIVE_ISSUES.md) — 待办（P0→P3）；[`docs/RESOLVED_LOG.md`](docs/RESOLVED_LOG.md) — 归档总索引
+- [`docs/architecture/已知工程限界.md`](docs/architecture/已知工程限界.md) — **已接受工程限界 / 残余风险登记表**（改这些面之前必读；判「是否为已知限界」只认此表）
 - `.codebuddy/rules/engineering-rules.md` — 工程规则；写代码前
 - [`docs/security/同步层记录级完整性威胁建模.md`](docs/security/同步层记录级完整性威胁建模.md) — 改同步 / 合并 / 防回滚前
 - [`docs/security/SECURITY_RECHECK_2026-09.md`](docs/security/SECURITY_RECHECK_2026-09.md) — 认领安全条目 / 重评 severity / 发布前
@@ -76,7 +80,8 @@ Coroutines + Flow；**文档与代码注释使用简体中文**。
 - `cd crypto/src/main/rust && cargo test` — 原生内核单测
 - `python tools/kdbx-corpus/generate_corpus.py --check` — `.kdbx` 语料校验
 - `bash tools/audit/check_recheck_consistency.sh` — 复核报告一致性扫描（**改审计 / 复核报告后必跑**）
-- `"$env:USERPROFILE\.android\bin\android-cli.exe" studio <子命令>` — IDE / 设备侧调试首选入口（Android CLI，见下条约定）
+- `"$env:USERPROFILE\.android\bin\android-cli.exe" studio <子命令>` — IDE / 设备侧调试首选入口（Android CLI，见下条约定；
+  **PowerShell 写法**；Git Bash / MSYS 下同义写法为 `"$USERPROFILE/.android/bin/android-cli.exe"`）
 
 > **Android CLI 调试约定（2026-09-15 立规，强制）**：IDE 侧与设备侧调试**统一走 Android CLI，不得直接使用 `adb`**；IDE 能力一律在
 > `android studio` 之下（sync / build / Compose 预览 / PSI 代码分析 / IDE Lint），设备操作由该 CLI 内部调用 ADB，无对应能力时**如实说明并给出退路**。

@@ -286,7 +286,7 @@ Phase 5  Final Board → 最终裁决 + Finding Matrix + 修复优先级 + 验�
 | `P3-113` | P3 | LOW | DESIGN WEAKNESS | P3 | `[V]` fail-closed 正确，缺可观测性 |
 | `P3-114` | P3 | LOW | DESIGN WEAKNESS（**文档不实**） | P2 | `[V]` **决定性证据**：平台 `ClipDescription.java:156-159` javadoc 原文 "does not change clipboard behavior or add additional security" |
 | `P3-115` | P3 | INFO | HARDENING | P3 | `[V][R]` **完整性风险不成立**：锁定哈希与 wrapper JAR 哈希**均与 Gradle 官方 9.7.1 逐字节一致** |
-| `P3-116` | P3 | LOW | DESIGN WEAKNESS | P1 | `[V]` **已在 `AGENTS.md` §6 声明内** |
+| `P3-116` | P3 | LOW | DESIGN WEAKNESS | P1 | `[V]` **已在 `docs/architecture/已知工程限界.md` §1.2 声明内** |
 | `P3-117` | P3 | **MEDIUM** | CONFIRMED VULNERABILITY | P2 | `[V]` **升格** |
 | `P3-118` | P3 | INFO | HARDENING | P3 | `[V]` |
 | `P3-119` | P3 | LOW | DESIGN WEAKNESS | P3 | `[V]` |
@@ -779,7 +779,7 @@ RC-09  ★★ 字段引用的解析面未按消费点收敛
 
 # 10. Verification Plan
 
-> 对每个 Confirmed Vulnerability 给出**可复跑的证明方式**。项目 `AGENTS.md` §1 互操作证据纪律：
+> 对每个 Confirmed Vulnerability 给出**可复跑的证明方式**。项目 `AGENTS.md` §3.8 互操作证据纪律：
 > `.kdbx` 产物的互操作性**必须以官方实现端到端对拍为准**（`keepassxc-cli` / `pykeepass` / KeePass 2.61.1 C#），
 > `tools/kdbx-corpus/generate_corpus.py --verify` **仅证明外层文件头自洽，不构成互操作证据**。
 
@@ -955,7 +955,7 @@ Rust FFI 5 个导出函数 panic 不外泄；备份面封堵；签名私钥从�
 | Root Cause / Attack Chain 工作稿 | `.audit-recheck/batches/00-cross-analysis.md` |
 
 > `.audit-recheck/` 已加入 `.gitignore`（证据暂存，不随仓库分发）；**本报告已纳入 git 跟踪**
-> （2026-09-13），依 `AGENTS.md` §41 立规——审计报告须在开始阅读时即纳入跟踪，否则退役后**无法**经 `git show` 取回。
+> （2026-09-13），依 `AGENTS.md` §4 索引纪律（退役纪律）立规——审计报告须在开始阅读时即纳入跟踪，否则退役后**无法**经 `git show` 取回。
 
 ## 15.2 **第二次全量审核的更正（2026-09-13，报告发布后）**
 
