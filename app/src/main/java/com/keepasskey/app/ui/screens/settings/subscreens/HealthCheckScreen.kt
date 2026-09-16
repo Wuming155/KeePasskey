@@ -109,20 +109,37 @@ fun HealthCheckScreen(
                         // 仪表盘内只放分数：英文 “Overall health score” 放不进 96dp 圆，
                         // 强行内嵌会导致换行/重叠（用户反馈 score 错位为 ‘ore）
                         Box(
-                            modifier = Modifier
-                                .size(96.dp)
-                                .clip(CircleShape)
-                                .background(MaterialTheme.colorScheme.primaryContainer),
+                            modifier = Modifier.size(96.dp),
                             contentAlignment = Alignment.Center
                         ) {
-                            Text(
-                                text = "${uiState.healthScore}",
-                                style = MaterialTheme.typography.headlineLarge.copy(
-                                    fontWeight = FontWeight.Black,
-                                    fontSize = 36.sp
-                                ),
-                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                            // M3 环形进度：分数映射 0–100，紧迫/良好经色阶表达
+                            CircularProgressIndicator(
+                                progress = { (uiState.healthScore.coerceIn(0, 100)) / 100f },
+                                modifier = Modifier.size(96.dp),
+                                color = when {
+                                    uiState.healthScore >= 80 -> MaterialTheme.colorScheme.primary
+                                    uiState.healthScore >= 50 -> MaterialTheme.colorScheme.tertiary
+                                    else -> MaterialTheme.colorScheme.error
+                                },
+                                strokeWidth = 6.dp,
+                                trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
                             )
+                            Box(
+                                modifier = Modifier
+                                    .size(78.dp)
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.primaryContainer),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "${uiState.healthScore}",
+                                    style = MaterialTheme.typography.headlineLarge.copy(
+                                        fontWeight = FontWeight.Black,
+                                        fontSize = 36.sp
+                                    ),
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                            }
                         }
 
                         Spacer(modifier = Modifier.height(10.dp))

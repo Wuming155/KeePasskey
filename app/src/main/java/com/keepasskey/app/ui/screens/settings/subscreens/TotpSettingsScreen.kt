@@ -14,8 +14,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Password
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Button
@@ -184,7 +184,14 @@ fun TotpSettingsScreen(
                             onValueChange = { seedField = it },
                             label = { Text(stringResource(R.string.totp_seed_label)) },
                             placeholder = { Text("TOTP Seed") },
-                            leadingIcon = { Icon(Icons.Default.Password, contentDescription = null, modifier = Modifier.size(20.dp)) },
+                            // 字段名映射不是密钥本体，用编辑/命名语义图标，避免 *** 密码点误导
+                            leadingIcon = {
+                                Icon(
+                                    Icons.Default.EditNote,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            },
                             singleLine = true,
                             shape = RoundedCornerShape(12.dp),
                             modifier = Modifier.fillMaxWidth()

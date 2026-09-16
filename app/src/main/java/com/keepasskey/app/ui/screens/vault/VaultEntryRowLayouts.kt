@@ -42,6 +42,7 @@ import com.keepasskey.app.ui.components.TotpMiniGauge
 import com.keepasskey.app.ui.components.getVaultIcon
 import com.keepasskey.app.ui.model.BitmapEntryIcon
 import com.keepasskey.app.ui.model.UiVaultEntry
+import com.keepasskey.app.ui.theme.LocalSecurityColors
 
 /**
  * 条目行内部布局组件（ISSUE-P3-29：自 `VaultEntryRows.kt` 拆出，同包同可见性，
@@ -197,11 +198,13 @@ internal fun StandardEntryLayout(
             if (showOtp && entry.totpCode != null) {
                 Spacer(modifier = Modifier.height(3.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    // 与验证码大卡 / 详情页同一色语义：常规=success，紧迫由 TotpMiniGauge 表达
+                    val totpCodeColor = LocalSecurityColors.current.success
                     Text(
                         text = entry.totpCode,
                         style = MaterialTheme.typography.labelSmall.copy(
                             fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary,
+                            color = totpCodeColor,
                             letterSpacing = 1.sp
                         )
                     )

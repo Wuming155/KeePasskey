@@ -212,7 +212,8 @@ internal fun TotpCard(
                     } else {
                         TOTP_MASK
                     },
-                    style = MonospaceTotpStyle.copy(color = MaterialTheme.colorScheme.primary)
+                    // 与验证码大卡 / 列表同一色语义（success），避免跨页蓝/绿混用
+                    style = MonospaceTotpStyle.copy(color = LocalSecurityColors.current.success)
                 )
             }
 

@@ -138,8 +138,8 @@ fun AboutSettingsScreen(
             item {
                 Text(
                     text = stringResource(R.string.about_section_spec),
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                    color = MaterialTheme.colorScheme.onSurface,
+                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                    color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.padding(start = 4.dp)
                 )
             }
@@ -240,10 +240,8 @@ private fun AboutSpecRow(
 internal fun AboutSettingsScreenPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         AboutSettingsScreen(
-            uiState = com.keepasskey.app.ui.screens.settings.SettingsUiState().copy(
-                appVersion = "预览版本 v0.0.0-Preview",
-                buildNumber = "预览构建 Build 0000.00.00"
-            ),
+            // 与 SettingsUiState 默认值保持一致，避免设置列表与关于页版本号对不上
+            uiState = com.keepasskey.app.ui.screens.settings.SettingsUiState(),
             onBackClick = {}
         )
     }

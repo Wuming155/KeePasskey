@@ -371,6 +371,7 @@
     <string name="gen_opt_lower">包含小写字母 (a-z)</string>
     <string name="gen_opt_digits">包含数字 (0-9)</string>
     <string name="gen_opt_symbols">包含特殊符号 (!@#$)</string>
+    <string name="gen_opt_symbols_chip">!@#$</string>
     <string name="gen_opt_exclude_ambiguous">排除易混淆字符</string>
     <string name="gen_opt_exclude_ambiguous_sub">过滤 0, O, l, 1, I 等极易视错字符</string>
     <string name="gen_word_count">单词数量: %1$d 个单词</string>
@@ -701,7 +702,7 @@
     <!-- ===== 主题设置子页 (ThemeSettingsScreen) ===== -->
     <string name="theme_section_mode">外观模式</string>
     <string name="theme_mode_light">浅色模式</string>
-    <string name="theme_mode_light_sub">明亮清爽的日间配色</string>
+    <string name="theme_mode_light_sub">明亮清爽，适合日间</string>
     <string name="theme_mode_dark">深色模式</string>
     <string name="theme_mode_dark_sub">低亮度夜间配色，护眼省电</string>
     <string name="theme_mode_system_sub">自动跟随系统昼夜切换</string>
@@ -818,6 +819,7 @@
          ISSUE-P3-42：另提供默认关闭的「短时免重复确认」开关（不影响「库锁定必须先解锁」语义） -->
     <string name="autofill_fill_confirm_title">下发前二次确认</string>
     <string name="autofill_fill_confirm_sub">填充密码前默认要求生物识别或手动确认（库锁定时必须先解锁）</string>
+    <string name="settings_always_on_badge">始终开启</string>
     <string name="autofill_session_grant_title">短时免重复确认（30 秒）</string>
     <string name="autofill_session_grant_sub">库已解锁时，对同一应用/站点 30 秒内仅需确认一次；仅对能确定域名的表单生效（无法归属域名的表单每次仍需确认）；默认关闭</string>
     <!-- ISSUE-P3-41：自动填充服务健康自检状态与修复指引 -->
@@ -951,8 +953,8 @@
     <string name="totp_preset_traytotp">TrayTotp ·otp</string>
     <string name="totp_preset_keeotp">KeeOtp ·otp</string>
     <string name="totp_section_fields">条目字段</string>
-    <string name="totp_seed_label">TOTP 种子 (Secret)</string>
-    <string name="totp_settings_label">字段名映射</string>
+    <string name="totp_seed_label">TOTP 种子字段名</string>
+    <string name="totp_settings_label">设置字段名</string>
     <string name="totp_mapping_saved">TOTP 字段映射已保存</string>
     <string name="totp_section_defaults">默认参数</string>
     <string name="totp_digits_label">验证码位数</string>

@@ -91,7 +91,21 @@ fun CredentialFillConfirmScreen(
                 )
                 attributionContent?.let { content ->
                     Spacer(modifier = Modifier.height(16.dp))
-                    content()
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = MaterialTheme.shapes.medium,
+                        color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.55f)
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            content()
+                        }
+                    }
                 }
                 Spacer(modifier = Modifier.height(20.dp))
                 Row(

@@ -369,8 +369,10 @@ internal fun AutofillPickerScreenPreview() {
                         com.keepasskey.core.model.KdbxConstants.Fields.USER_NAME,
                         "demo@example.com"
                     ),
-                com.keepasskey.core.model.KdbxEntry()
-                    .withField(com.keepasskey.core.model.KdbxConstants.Fields.TITLE, "预览便签条目")
+                com.keepasskey.core.model.KdbxEntry(
+                    // 7 = KDBX Note 图标，避免便签条目误用默认钥匙图标
+                    iconId = 7
+                ).withField(com.keepasskey.core.model.KdbxConstants.Fields.TITLE, "预览便签条目")
             ),
             onPick = {},
             onCancel = {},

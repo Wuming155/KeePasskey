@@ -365,6 +365,7 @@
     <string name="gen_opt_lower">Include lowercase (a-z)</string>
     <string name="gen_opt_digits">Include digits (0-9)</string>
     <string name="gen_opt_symbols">Include symbols (!@#$)</string>
+    <string name="gen_opt_symbols_chip">!@#$</string>
     <string name="gen_opt_exclude_ambiguous">Exclude ambiguous characters</string>
     <string name="gen_opt_exclude_ambiguous_sub">Filters easily misread characters like 0, O, l, 1, I</string>
     <string name="gen_word_count">Word count: %1$d words</string>
@@ -694,7 +695,7 @@
     <!-- ===== Theme settings subscreen ===== -->
     <string name="theme_section_mode">Appearance</string>
     <string name="theme_mode_light">Light</string>
-    <string name="theme_mode_light_sub">Bright and clean daytime palette</string>
+    <string name="theme_mode_light_sub">Bright and clean for daytime</string>
     <string name="theme_mode_dark">Dark</string>
     <string name="theme_mode_dark_sub">Low-brightness night palette, easy on the eyes</string>
     <string name="theme_mode_system_sub">Follow the system day/night setting</string>
@@ -918,8 +919,8 @@
     <string name="totp_preset_traytotp">TrayTotp ·otp</string>
     <string name="totp_preset_keeotp">KeeOtp ·otp</string>
     <string name="totp_section_fields">Entry fields</string>
-    <string name="totp_seed_label">TOTP seed (Secret)</string>
-    <string name="totp_settings_label">Field name mapping</string>
+    <string name="totp_seed_label">TOTP seed field name</string>
+    <string name="totp_settings_label">Settings field name</string>
     <string name="totp_mapping_saved">TOTP field mapping saved</string>
     <string name="totp_section_defaults">Defaults</string>
     <string name="totp_digits_label">Code length</string>
@@ -1099,6 +1100,7 @@
     <string name="unlock_error_pin_length">Enter the 4-digit PIN</string>
     <string name="autofill_fill_confirm_title">Confirm before filling</string>
     <string name="autofill_fill_confirm_sub">Biometric or manual confirmation is required before filling a password by default (unlock first while the vault is locked)</string>
+    <string name="settings_always_on_badge">Always on</string>
     <string name="autofill_session_grant_title">Skip repeat confirmation (30s)</string>
     <string name="autofill_session_grant_sub">While the vault is unlocked, confirm only once per app/site within 30 seconds; applies only to forms with an identifiable domain (forms without one still require confirmation every time); disabled by default</string>
     <string name="autofill_health_ok">Autofill service is working</string>

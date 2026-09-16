@@ -15,13 +15,13 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Bookmark
-import androidx.compose.material.icons.filled.Cancel
 import androidx.compose.material.icons.filled.ContentPasteGo
 import androidx.compose.material.icons.filled.Fingerprint
+import androidx.compose.material.icons.filled.GppBad
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.HourglassBottom
 import androidx.compose.material.icons.filled.LockClock
 import androidx.compose.material.icons.filled.PowerSettingsNew
-import androidx.compose.material.icons.filled.Replay
 import androidx.compose.material.icons.filled.ScreenLockPortrait
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.VisibilityOff
@@ -200,7 +200,8 @@ fun SecuritySettingsScreen(
                         )
 
                         SecuritySwitchRow(
-                            icon = Icons.Default.Cancel,
+                            // 返回语义用系统返回箭头，避免 ×（Cancel）被读成「关闭本项」
+                            icon = Icons.AutoMirrored.Filled.ArrowBack,
                             title = stringResource(R.string.sec_nav_back_title),
                             subtitle = stringResource(R.string.sec_nav_back_sub),
                             checked = uiState.lockWhenNavigateBack,
@@ -216,7 +217,7 @@ fun SecuritySettingsScreen(
 
                         // ISSUE-P3-68：解锁失败重试节流（总开关 + 自定义最长锁定时长）
                         SecuritySwitchRow(
-                            icon = Icons.Default.Replay,
+                            icon = Icons.Default.GppBad,
                             title = stringResource(R.string.sec_throttle_title),
                             subtitle = stringResource(R.string.sec_throttle_sub),
                             checked = uiState.unlockThrottleEnabled,
@@ -225,7 +226,7 @@ fun SecuritySettingsScreen(
 
                         if (uiState.unlockThrottleEnabled) {
                             SecurityClickableRow(
-                                icon = Icons.Default.Replay,
+                                icon = Icons.Default.HourglassBottom,
                                 title = stringResource(R.string.sec_throttle_time_title),
                                 subtitle = stringResource(
                                     R.string.sec_throttle_time_current,

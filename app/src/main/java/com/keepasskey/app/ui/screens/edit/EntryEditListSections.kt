@@ -65,8 +65,9 @@ internal fun EntryEditCustomFieldsSection(
 ) {
     Text(
         text = stringResource(R.string.edit_custom_fields),
-        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
-        color = MaterialTheme.colorScheme.onSurface
+        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(start = 4.dp)
     )
 
     BentoCard(
@@ -175,8 +176,9 @@ internal fun EntryEditAttachmentsSection(
 ) {
     Text(
         text = stringResource(R.string.edit_attachments),
-        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
-        color = MaterialTheme.colorScheme.onSurface
+        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(start = 4.dp)
     )
 
     BentoCard(

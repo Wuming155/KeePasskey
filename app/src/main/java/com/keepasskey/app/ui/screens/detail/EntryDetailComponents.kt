@@ -43,15 +43,18 @@ import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.model.UiVaultEntry
 
 /**
- * 详情页区块标题（统一 titleMedium + SemiBold 样式）
+ * 详情页区块标题。
+ *
+ * 与设置二级页分节标题对齐（titleSmall + Bold + primary + 4dp 起始缩进），
+ * 保证全应用内容页 / 设置页分节层级一致（Material 3 分区标签）。
  */
 @Composable
 internal fun SectionTitle(@StringRes textRes: Int, modifier: Modifier = Modifier) {
     Text(
         text = stringResource(textRes),
-        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
-        color = MaterialTheme.colorScheme.onSurface,
-        modifier = modifier
+        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+        color = MaterialTheme.colorScheme.primary,
+        modifier = modifier.padding(start = 4.dp)
     )
 }
 

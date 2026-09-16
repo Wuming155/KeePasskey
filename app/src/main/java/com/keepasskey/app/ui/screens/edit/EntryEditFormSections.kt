@@ -63,8 +63,9 @@ internal fun ColumnScope.EntryEditGroupSection(
 
     Text(
         text = stringResource(R.string.edit_group_label),
-        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
-        color = MaterialTheme.colorScheme.onSurface
+        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(start = 4.dp)
     )
     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         item {
@@ -132,8 +133,9 @@ internal fun ColumnScope.EntryEditBasicInfoSection(
 ) {
     Text(
         text = stringResource(R.string.edit_basic_info),
-        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
-        color = MaterialTheme.colorScheme.onSurface
+        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(start = 4.dp)
     )
 
     BentoCard(
@@ -218,8 +220,9 @@ internal fun ColumnScope.EntryEditAccountSection(
 ) {
     Text(
         text = stringResource(R.string.edit_account_pwd),
-        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
-        color = MaterialTheme.colorScheme.onSurface
+        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(start = 4.dp)
     )
 
     BentoCard(
@@ -259,7 +262,9 @@ internal fun ColumnScope.EntryEditAccountSection(
                             )
                         }
                     }
-                }
+                },
+                // 与同卡片内用户名/URL 满宽对齐（Material 3 表单列等宽）
+                modifier = Modifier.fillMaxWidth()
             )
 
             if (uiState.passwordLength > 0) {
@@ -297,8 +302,9 @@ internal fun ColumnScope.EntryEditNotesSection(
 ) {
     Text(
         text = stringResource(R.string.edit_notes),
-        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
-        color = MaterialTheme.colorScheme.onSurface
+        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(start = 4.dp)
     )
 
     BentoCard(

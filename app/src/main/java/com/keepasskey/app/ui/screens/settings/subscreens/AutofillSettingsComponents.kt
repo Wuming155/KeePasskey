@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.VpnKey
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
@@ -100,7 +101,8 @@ internal fun AutofillProviderCard(
             AutofillInfoRow(
                 icon = Icons.Default.Lock,
                 title = stringResource(R.string.autofill_fill_confirm_title),
-                subtitle = stringResource(R.string.autofill_fill_confirm_sub)
+                subtitle = stringResource(R.string.autofill_fill_confirm_sub),
+                badgeText = stringResource(R.string.settings_always_on_badge)
             )
 
             // ISSUE-P3-42：会话授权宽限（默认关闭）。开启后仅在**库已解锁**且
@@ -279,12 +281,14 @@ internal fun AutofillCaptureCard(
 
 /**
  * 只读策略说明行：用于展示**不可关闭**的安全保证（不提供 Switch，杜绝「假开关」）。
+ * 可选 [badgeText] 在行尾以 M3 辅助徽标声明「始终开启」，避免与可开关行视觉混淆。
  */
 @Composable
 internal fun AutofillInfoRow(
     icon: ImageVector,
     title: String,
-    subtitle: String
+    subtitle: String,
+    badgeText: String? = null
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -313,6 +317,20 @@ internal fun AutofillInfoRow(
                     text = subtitle,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+        if (badgeText != null) {
+            Spacer(modifier = Modifier.width(8.dp))
+            Surface(
+                color = MaterialTheme.colorScheme.primaryContainer,
+                shape = MaterialTheme.shapes.small
+            ) {
+                Text(
+                    text = badgeText,
+                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                 )
             }
         }

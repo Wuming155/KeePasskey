@@ -51,6 +51,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -180,7 +181,9 @@ fun DebugSettingsScreen(
                             subtitle = stringResource(R.string.debug_verbose_sub) +
                                 stringResource(R.string.debug_verbose_depends),
                             checked = uiState.verboseSyncLog,
-                            onCheckedChange = onVerboseSyncLogToggle
+                            onCheckedChange = onVerboseSyncLogToggle,
+                            // 依赖「诊断日志」总开关：关闭时禁用交互并降透明度（M3 disabled 态）
+                            enabled = uiState.debugLogEnabled
                         )
                     }
                 }
@@ -353,10 +356,13 @@ private fun DebugSwitchRow(
     title: String,
     subtitle: String,
     checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit
+    onCheckedChange: (Boolean) -> Unit,
+    enabled: Boolean = true
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .alpha(if (enabled) 1f else 0.5f),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
@@ -389,6 +395,7 @@ private fun DebugSwitchRow(
         Switch(
             checked = checked,
             onCheckedChange = onCheckedChange,
+            enabled = enabled,
             colors = SwitchDefaults.colors(
                 checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
                 checkedTrackColor = MaterialTheme.colorScheme.primary

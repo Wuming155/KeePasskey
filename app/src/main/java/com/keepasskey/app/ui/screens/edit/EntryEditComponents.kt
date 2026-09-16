@@ -72,8 +72,9 @@ internal fun EntryEditTotpSection(
 ) {
     Text(
         text = stringResource(R.string.edit_totp_section),
-        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
-        color = MaterialTheme.colorScheme.onSurface
+        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(start = 4.dp)
     )
 
     BentoCard(
@@ -119,8 +120,9 @@ internal fun EntryEditPasskeySection(
     val securityColors = LocalSecurityColors.current
     Text(
         text = stringResource(R.string.edit_passkey_section),
-        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
-        color = MaterialTheme.colorScheme.onSurface
+        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(start = 4.dp)
     )
 
     BentoCard(
@@ -174,8 +176,9 @@ internal fun EntryEditExtraSection(
 ) {
     Text(
         text = stringResource(R.string.edit_extra_section),
-        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
-        color = MaterialTheme.colorScheme.onSurface
+        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(start = 4.dp)
     )
 
     BentoCard(
@@ -272,7 +275,12 @@ internal fun PasswordGeneratorWidget(
             CharacterClassChip(label = "A-Z", selected = useUpper, onClick = onToggleUpper)
             CharacterClassChip(label = "a-z", selected = useLower, onClick = onToggleLower)
             CharacterClassChip(label = "0-9", selected = useDigits, onClick = onToggleDigits)
-            CharacterClassChip(label = "#$%", selected = useSymbols, onClick = onToggleSymbols)
+            // 与生成器页 gen_opt_symbols 示例符号保持一致（!@#$）
+            CharacterClassChip(
+                label = stringResource(R.string.gen_opt_symbols_chip),
+                selected = useSymbols,
+                onClick = onToggleSymbols
+            )
         }
     }
 }
