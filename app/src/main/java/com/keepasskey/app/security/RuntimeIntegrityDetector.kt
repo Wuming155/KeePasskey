@@ -330,8 +330,15 @@ class RuntimeIntegrityDetector @Inject constructor(
             "/dev/.magisk"
         )
 
-        /** Frida 服务端 / gadget 常见落点 */
-        private val HOOK_TRACE_PATHS = listOf(
+        /**
+         * Frida 服务端 / gadget 常见落点。
+         *
+         * **改动须知（ISSUE-P3-120）**：本清单与 [HOOK_MARKERS] 是
+         * `docs/records/运行完整性检测Frida实测基线.md` 那份**真机实测矩阵的判据本身**——
+         * 增删任何一项都会使「命中率 3/3」的结论**不再适用**，须重跑实测并更新该文档。
+         * `internal` 供 `RuntimeIntegrityDetectionSurfaceTest` 逐项锁定。
+         */
+        internal val HOOK_TRACE_PATHS = listOf(
             "/data/local/tmp/frida-server",
             "/data/local/tmp/re.frida.server",
             "/data/local/tmp/frida",
@@ -339,8 +346,15 @@ class RuntimeIntegrityDetector @Inject constructor(
             "/system/lib64/libfrida-gadget.so"
         )
 
-        /** 内存映射中的注入框架特征串 */
-        private val HOOK_MARKERS = listOf("frida", "xposed", "substrate", "edxposed", "lsposed", "libhook")
+        /**
+         * 内存映射中的注入框架特征串。
+         *
+         * **改动须知（ISSUE-P3-120）**：同 [HOOK_TRACE_PATHS]——本清单是实测基线的判据，
+         * 变更须重跑真机实测（尤其注意：实测已证实「agent 的 memfd 名」是唯一泄漏点，
+         * 若想收紧应针对它，而不是无靶地扩充本清单）。
+         */
+        internal val HOOK_MARKERS =
+            listOf("frida", "xposed", "substrate", "edxposed", "lsposed", "libhook")
 
         /** 受信任安装来源（官方商店与主流开源分发渠道） */
         private val TRUSTED_INSTALLERS = setOf(
