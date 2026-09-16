@@ -42,6 +42,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.keepasskey.app.R
+import com.keepasskey.app.data.repository.CreateVaultPreset
 import com.keepasskey.app.ui.components.SecurePasswordField
 import com.keepasskey.app.ui.components.disabledPrimaryButtonBorder
 import com.keepasskey.app.ui.components.disabledPrimaryButtonColors
@@ -128,7 +129,7 @@ internal fun CreateVaultWizardDialog(
         name: String,
         pwd: CharArray,
         keyFile: Boolean,
-        preset: String,
+        preset: CreateVaultPreset,
         keyFileSourceUri: String?
     ) -> Unit
 ) {
@@ -142,8 +143,10 @@ internal fun CreateVaultWizardDialog(
     var keyFileChoice by remember { mutableStateOf(KeyFileSourceChoice.GENERATE) }
     var selectedKeyFilePath by remember { mutableStateOf("") }
     var selectedKeyFileName by remember { mutableStateOf("") }
-    var selectedPreset by remember { mutableStateOf("ChaCha20 + Argon2id") }
-    val presets = listOf("ChaCha20 + Argon2id", "AES-256 + Argon2id", "Twofish + AES-KDF")
+    // ISSUE-P2-85：预设改为类型化枚举——芯片与落盘共用 `CreateVaultPreset` 单一真相源，
+    // 消除「裸字符串标签 + 落盘侧只按 contains("AES-KDF") 反推」导致的算法静默丢失。
+    var selectedPreset by remember { mutableStateOf(CreateVaultPreset.DEFAULT) }
+    val presets = CreateVaultPreset.entries
 
     val keyPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
@@ -316,7 +319,7 @@ internal fun CreateVaultWizardDialog(
                         FilterChip(
                             selected = selectedPreset == preset,
                             onClick = { selectedPreset = preset },
-                            label = { Text(preset.split(" ")[0], fontSize = 11.sp) },
+                            label = { Text(preset.chipLabel, fontSize = 11.sp) },
                             shape = CapsuleShape
                         )
                     }

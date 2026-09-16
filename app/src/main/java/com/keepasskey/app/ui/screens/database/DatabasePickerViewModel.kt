@@ -6,6 +6,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.CreateKeyFileFactor
+import com.keepasskey.app.data.repository.CreateVaultPreset
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.screens.unlock.KeyFileAccess
@@ -123,12 +124,15 @@ class DatabasePickerViewModel @Inject constructor(
      *   「生成型」或「仅主密码」，否则用户以为在用旧密钥文件、实际因子已被替换。
      *
      * 主密码副本在 `finally` 中显式擦除；借用给数据层的密钥文件字节副本在数据层用毕后立即擦除。
+     *
+     * ISSUE-P2-85：[preset] 为类型化加密预设（外层算法 + KDF），由向导直接传入枚举，
+     * 不再经过「字符串标签」这一可静默失配的中转。
      */
     fun createDatabase(
         name: String,
         masterPassword: CharArray,
         keyFile: Boolean,
-        preset: String,
+        preset: CreateVaultPreset,
         keyFileSourceUri: String? = null
     ) {
         viewModelScope.launch {

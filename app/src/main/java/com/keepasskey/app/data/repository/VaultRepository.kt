@@ -60,12 +60,14 @@ interface VaultRepository {
      * 「生成并绑定附属密钥文件」（等价于 [createDatabaseWithKeyFile] 的
      * [CreateKeyFileFactor.Generate]）；携带**用户选定的既有密钥文件字节**必须改走
      * [createDatabaseWithKeyFile]，本方法无法承载该意图。
+     *
+     * ISSUE-P2-85：[preset] 为类型化的整组加密预设（外层算法 + KDF），二者都真实落到文件头。
      */
     suspend fun createDatabase(
         name: String,
         masterPassword: CharArray,
         keyFile: Boolean,
-        preset: String
+        preset: CreateVaultPreset
     ): com.keepasskey.core.result.KdbxResult<Unit>
 
     /**
@@ -83,7 +85,7 @@ interface VaultRepository {
         name: String,
         masterPassword: CharArray,
         keyFileFactor: CreateKeyFileFactor,
-        preset: String
+        preset: CreateVaultPreset
     ): com.keepasskey.core.result.KdbxResult<Unit> = when (keyFileFactor) {
         CreateKeyFileFactor.None -> createDatabase(name, masterPassword, keyFile = false, preset)
         else -> com.keepasskey.core.result.KdbxResult.Failure(

@@ -1,5 +1,6 @@
 package com.keepasskey.database.session
 
+import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.model.KdbxGroup
 import com.keepasskey.core.model.KdbxUuid
@@ -207,14 +208,18 @@ class DatabaseSession(
     /**
      * 创建全新密码库文件并打开会话（ISSUE-P3-21 复合密钥三分支）。
      * 详见 [SessionOpener.create]。
+     *
+     * ISSUE-P2-85：[cipherUuid] 为外层加密算法——此前该值在会话层被硬编码为 AES-256-CBC，
+     * 使建库向导选择的 ChaCha20 / Twofish 静默失效（详见 `CreateVaultPreset`）。
      */
     suspend fun create(
         file: File,
         name: String,
         passwordChars: CharArray,
         useArgon2: Boolean = true,
-        keyFileData: ByteArray? = null
-    ): KdbxResult<Unit> = opener.create(file, name, passwordChars, useArgon2, keyFileData)
+        keyFileData: ByteArray? = null,
+        cipherUuid: KdbxUuid = KdbxConstants.Cipher.AES_256_CBC
+    ): KdbxResult<Unit> = opener.create(file, name, passwordChars, useArgon2, keyFileData, cipherUuid)
 
     /**
      * 打开并解密已有 KDBX 文件（支持直接传入 File）。

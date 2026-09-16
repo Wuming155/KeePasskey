@@ -91,7 +91,7 @@ class FakeVaultRepository(
         name: String,
         masterPassword: CharArray,
         keyFile: Boolean,
-        preset: String
+        preset: CreateVaultPreset
     ): com.keepasskey.core.result.KdbxResult<Unit> {
         val fileName = if (name.endsWith(".kdbx")) name else "$name.kdbx"
         val newDb = VaultDatabaseInfo(
@@ -103,7 +103,7 @@ class FakeVaultRepository(
             lastOpenedAt = "刚刚",
             fileSizeFormatted = "32 KB",
             isActive = true,
-            encryptionPreset = preset
+            encryptionPreset = preset.label
         )
         val current = databasesFlow.value.map { it.copy(isActive = false) }.toMutableList()
         current.add(0, newDb)

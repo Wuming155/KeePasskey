@@ -2,6 +2,7 @@ package com.keepasskey.database.session
 
 import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.core.model.KdbxGroup
+import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.core.security.BinaryStore
 import com.keepasskey.database.file.KdbxDatabase
@@ -45,13 +46,19 @@ internal class SessionOpener(
      * ISSUE-P3-21（复合密钥三分支）：[keyFileData] 为「主密码 + 密钥文件」的第二因子，
      * 字节为**借用语义**：本方法只在 `KdbxFile.save` 内参与复合密钥派生，并按会话保存需要
      * 克隆进凭据缓存；不持有、不擦除调用方数组，调用方用毕自行清零。传 null 即「仅主密码」库。
+     *
+     * ISSUE-P2-85：新增 [cipherUuid]（外层加密算法）。此前外层算法**恒为** `AES_256_CBC`
+     * 硬编码，建库向导选择的 ChaCha20 / Twofish 被静默丢弃（详见 `CreateVaultPreset`）。
+     * 默认值保持 `AES_256_CBC`（KDBX4 官方默认）以便「文件缺失即初始化」等无预设入口沿用；
+     * **带用户预设的建库路径必须显式传入**。
      */
     suspend fun create(
         file: File,
         name: String,
         passwordChars: CharArray,
         useArgon2: Boolean = true,
-        keyFileData: ByteArray? = null
+        keyFileData: ByteArray? = null,
+        cipherUuid: KdbxUuid = KdbxConstants.Cipher.AES_256_CBC
     ): KdbxResult<Unit> = mutex.withLock {
         withContext(Dispatchers.Default) {
             // ISSUE-P2-77：建库即换库——先释放旧会话（擦除旧库明文树 + 驱逐派生缓存，
@@ -60,7 +67,7 @@ internal class SessionOpener(
             releaseCurrentSession()
             try {
                 val header = KdbxHeader.createDefault(
-                    cipherUuid = KdbxConstants.Cipher.AES_256_CBC,
+                    cipherUuid = cipherUuid,
                     useArgon2 = useArgon2
                 )
                 val rootGroup = KdbxGroup(

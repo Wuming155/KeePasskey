@@ -6,6 +6,7 @@ import android.net.Uri
 import com.keepasskey.app.R
 import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.app.ui.model.VaultDatabaseInfo
+import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.database.file.KdbxKeyFileGenerator
 import com.keepasskey.database.session.DatabaseSession
@@ -76,12 +77,16 @@ internal class VaultLifecycleCoordinator(
                         strings.get(R.string.repo_file_missing_with_keyfile)
                     )
                 }
-                // 文件尚不存在时初始化创建
+                // 文件尚不存在时初始化创建。
+                // ISSUE-P2-85：本入口**无用户预设**（库已在目录中登记、只是文件缺失），
+                // 故显式取 KDBX4 官方默认算法 AES-256-CBC + Argon2id；
+                // 带预设的建库路径见 [createDatabaseWithKeyFile]（必须显式传算法）。
                 val createResult = databaseSession.create(
                     file = targetFile,
                     name = activeDb.name.removeSuffix(".kdbx"),
                     passwordChars = passwordChars,
-                    useArgon2 = true
+                    useArgon2 = true,
+                    cipherUuid = KdbxConstants.Cipher.AES_256_CBC
                 )
                 refresh()
                 return createResult
@@ -103,12 +108,15 @@ internal class VaultLifecycleCoordinator(
      * 形参进入 `KdbxFile.save → deriveKeys` 的官方解析梯子（`KdbxKeyFile`，internal）；
      * 会话成功建库后按借用语义克隆持有该因子，使后续 `save()` 以同一复合密钥重加密、
      * 且既有导出通道 `exportKeyFileBytes()` 能把这份密钥文件交付用户。
+     *
+     * ISSUE-P2-85：[preset] 为**类型化的整组选择**（外层算法 + KDF），两者都真实落到文件头。
+     * 此前它只是字符串且仅用 `contains("AES-KDF")` 反推 KDF，外层算法被整段丢弃。
      */
     suspend fun createDatabaseWithKeyFile(
         name: String,
         masterPassword: CharArray,
         keyFileFactor: CreateKeyFileFactor,
-        preset: String
+        preset: CreateVaultPreset
     ): KdbxResult<Unit> {
         val filesDir = context.filesDir ?: return KdbxResult.Failure(
             IllegalStateException("No filesDir"),
@@ -134,13 +142,13 @@ internal class VaultLifecycleCoordinator(
         }
 
         return try {
-            val useArgon2 = !preset.contains("AES-KDF", ignoreCase = true)
             val result = databaseSession.create(
                 file = targetFile,
                 name = name.removeSuffix(".kdbx"),
                 passwordChars = masterPassword,
-                useArgon2 = useArgon2,
-                keyFileData = keyFileData
+                useArgon2 = preset.useArgon2,
+                keyFileData = keyFileData,
+                cipherUuid = preset.cipherUuid
             )
             if (result is KdbxResult.Success) {
                 selectDatabase(fileName)

@@ -130,7 +130,7 @@ class RealVaultRepository @Inject constructor(
         name: String,
         masterPassword: CharArray,
         keyFile: Boolean,
-        preset: String
+        preset: CreateVaultPreset
     ): KdbxResult<Unit> = createDatabaseWithKeyFile(
         name = name,
         masterPassword = masterPassword,
@@ -144,7 +144,7 @@ class RealVaultRepository @Inject constructor(
         name: String,
         masterPassword: CharArray,
         keyFileFactor: CreateKeyFileFactor,
-        preset: String
+        preset: CreateVaultPreset
     ): KdbxResult<Unit> = lifecycle.createDatabaseWithKeyFile(
         name = name,
         masterPassword = masterPassword,

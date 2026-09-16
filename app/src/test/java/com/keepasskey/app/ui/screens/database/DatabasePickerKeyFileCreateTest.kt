@@ -2,6 +2,7 @@ package com.keepasskey.app.ui.screens.database
 
 import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.CreateKeyFileFactor
+import com.keepasskey.app.data.repository.CreateVaultPreset
 import com.keepasskey.app.data.repository.FakeVaultRepository
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.ui.screens.unlock.KeyFileAccess
@@ -65,7 +66,7 @@ class DatabasePickerKeyFileCreateTest {
             name: String,
             masterPassword: CharArray,
             keyFileFactor: CreateKeyFileFactor,
-            preset: String
+            preset: CreateVaultPreset
         ): KdbxResult<Unit> {
             lastCreatedName = name
             lastFactor = keyFileFactor
@@ -241,7 +242,7 @@ class DatabasePickerKeyFileCreateTest {
     }
 
     private companion object {
-        const val PRESET = "ChaCha20 + Argon2id"
+        val PRESET = CreateVaultPreset.CHACHA20_ARGON2ID
         const val KEY_FILE_URI = "content://test.docs/keyfile/seed.keyx"
     }
 }

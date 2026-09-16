@@ -1,6 +1,7 @@
 package com.keepasskey.app.ui.screens.database
 
 import com.keepasskey.app.R
+import com.keepasskey.app.data.repository.CreateVaultPreset
 import com.keepasskey.app.data.repository.FakeVaultRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -79,7 +80,12 @@ class DatabasePickerViewModelTest {
         assertTrue(viewModel.uiState.value.showCreateDialog)
 
         val pwd = "TestPassword#2026".toCharArray()
-        viewModel.createDatabase("new_secure_vault.kdbx", pwd, keyFile = false, preset = "ChaCha20 + Argon2id")
+        viewModel.createDatabase(
+            "new_secure_vault.kdbx",
+            pwd,
+            keyFile = false,
+            preset = CreateVaultPreset.CHACHA20_ARGON2ID
+        )
         testScheduler.runCurrent()
 
         assertFalse(viewModel.uiState.value.showCreateDialog)

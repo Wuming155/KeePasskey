@@ -363,11 +363,20 @@ class HmacBlockOutputStream(
     private fun flushBlock() {
         if (filled == 0) return
         val sizeBytes = LittleEndianUtil.intTo4Bytes(filled)
-        // 写满的块直接引用缓冲，末尾残块才拷贝切片
-        val chunk = if (filled == blockSize) buffer else buffer.copyOf(filled)
-        sink.write(hmacer.compute(blockIndex, filled, chunk, 0, chunk.size))
-        sink.write(sizeBytes)
-        sink.write(chunk)
+        // 写满的块直接引用缓冲（其清零由 close() 的 finally 承担）；末尾残块才拷贝切片。
+        // ISSUE-P3-140：该切片是**明文的独立副本**（`buffer.copyOf(filled)` 不受 close() 的
+        // `buffer.fill(0)` 影响），写出后必须显式清零——否则这段明文随局部变量出栈后
+        // 静默留存至 GC，属「补一处、漏一处」的同型缺口（对齐 ISSUE-P3-96 的处理口径）。
+        val isFullBlock = filled == blockSize
+        val chunk = if (isFullBlock) buffer else buffer.copyOf(filled)
+        try {
+            sink.write(hmacer.compute(blockIndex, filled, chunk, 0, chunk.size))
+            sink.write(sizeBytes)
+            sink.write(chunk)
+        } finally {
+            // 满块时 chunk 即 buffer，清零会波及缓冲本身——那由 close() 收口，此处只清副本
+            if (!isFullBlock) chunk.fill(0)
+        }
         blockIndex++
         filled = 0
     }

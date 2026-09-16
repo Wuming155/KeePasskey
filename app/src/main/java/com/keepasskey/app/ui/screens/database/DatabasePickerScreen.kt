@@ -52,6 +52,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.keepasskey.app.R
+import com.keepasskey.app.data.repository.CreateVaultPreset
 import com.keepasskey.app.security.ApplyObscuredTouchFilter
 import com.keepasskey.app.ui.model.VaultDatabaseInfo
 import com.keepasskey.app.ui.model.resolveText
@@ -125,7 +126,7 @@ fun DatabasePickerContent(
         name: String,
         pwd: CharArray,
         keyFile: Boolean,
-        preset: String,
+        preset: CreateVaultPreset,
         keyFileSourceUri: String?
     ) -> Unit,
     onOpenExistingClick: () -> Unit,
