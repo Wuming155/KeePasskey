@@ -11,7 +11,7 @@ echo  输出: preview-exports\main\  （扁平单目录）
 echo ============================================
 echo.
 
-echo [1/3] 生成 screenshotTest wrapper...
+echo [1/3] 生成 screenshotTest wrapper（locale 默认 zh-CN）...
 where python >nul 2>nul
 if %errorlevel%==0 (
   python tools\export_previews\generate_screenshot_test_wrappers.py

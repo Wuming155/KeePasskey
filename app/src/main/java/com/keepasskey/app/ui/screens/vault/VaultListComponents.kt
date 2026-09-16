@@ -267,10 +267,13 @@ internal fun VaultBreadcrumbBar(
 }
 
 /**
- * 回收站模式警示横幅
+ * 回收站模式警示横幅（含当前已删条目数）
  */
 @Composable
-internal fun RecycleBinBanner(modifier: Modifier = Modifier) {
+internal fun RecycleBinBanner(
+    deletedCount: Int,
+    modifier: Modifier = Modifier
+) {
     Surface(
         color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f),
         shape = RoundedCornerShape(12.dp),
@@ -279,7 +282,18 @@ internal fun RecycleBinBanner(modifier: Modifier = Modifier) {
         Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Default.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error)
             Spacer(modifier = Modifier.width(10.dp))
-            Text(stringResource(R.string.vault_recycle_bin_banner), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onErrorContainer)
+            Column {
+                Text(
+                    text = stringResource(R.string.vault_recycle_bin_banner),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onErrorContainer
+                )
+                Text(
+                    text = stringResource(R.string.vault_recycle_bin_count, deletedCount),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.9f)
+                )
+            }
         }
     }
 }

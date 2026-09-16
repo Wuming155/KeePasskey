@@ -25,6 +25,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -90,12 +91,13 @@ internal fun ModernSettingsRow(
             .padding(horizontal = 16.dp, vertical = 13.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // 柔和色调 Squircle 图标胶囊
+        // 柔和色调 Squircle 图标胶囊；深色模式提高容器不透明度，避免低饱和对比导致细节丢失
+        val iconContainerAlpha = if (isSystemInDarkTheme()) 0.28f else 0.12f
         Box(
             modifier = Modifier
                 .size(40.dp)
                 .clip(RoundedCornerShape(12.dp))
-                .background(iconTint.copy(alpha = 0.12f)),
+                .background(iconTint.copy(alpha = iconContainerAlpha)),
             contentAlignment = Alignment.Center
         ) {
             Icon(

@@ -126,6 +126,7 @@
     <string name="vault_folder_delete_desc">删除该文件夹将会一并移除其包含的子项目，确定继续吗？</string>
     <string name="vault_recycle_bin_title">回收站</string>
     <string name="vault_recycle_bin_banner">当前处于回收站目录。条目处于归档待清理状态，可随时还原或彻底永久删除。</string>
+    <string name="vault_recycle_bin_count">已删除条目：%1$d</string>
     <string name="vault_empty_recycle_bin">清空回收站</string>
     <string name="vault_empty_recycle_bin_confirm">确定彻底清空回收站内的所有条目吗？此操作不可逆！</string>
     <string name="vault_entry_restored">凭据条目已成功还原至原目录</string>

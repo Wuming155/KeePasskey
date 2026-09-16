@@ -234,7 +234,7 @@ fun VaultListContent(
                 state = listState,
                 modifier = Modifier.fillMaxSize(),
                 // 底部预留 FAB + 系统导航栏高度，避免最后一条与悬浮按钮/手势条重叠
-                contentPadding = PaddingValues(horizontal = 14.dp, top = 8.dp, bottom = 96.dp),
+                contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 8.dp, bottom = 96.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 if (uiState.hasPendingConflict) {
@@ -253,9 +253,9 @@ fun VaultListContent(
                     }
                 }
 
-                // 回收站模式警示
+                // 回收站模式警示（含已删条目数）
                 if (uiState.isInsideRecycleBin) {
-                    item { RecycleBinBanner() }
+                    item { RecycleBinBanner(deletedCount = uiState.entries.size) }
                 }
 
                 // 3. 当前非默认排序状态轻量提示

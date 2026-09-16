@@ -121,6 +121,7 @@
     <string name="vault_folder_delete_desc">Deleting this folder will remove all child items inside. Continue?</string>
     <string name="vault_recycle_bin_title">Recycle Bin</string>
     <string name="vault_recycle_bin_banner">Currently in the Recycle Bin. Items can be restored or purged permanently.</string>
+    <string name="vault_recycle_bin_count">Deleted items: %1$d</string>
     <string name="vault_empty_recycle_bin">Empty Recycle Bin</string>
     <string name="vault_empty_recycle_bin_confirm">Are you sure you want to permanently delete all items in the Recycle Bin? This cannot be undone!</string>
     <string name="vault_entry_restored">Entry restored to original folder successfully</string>
