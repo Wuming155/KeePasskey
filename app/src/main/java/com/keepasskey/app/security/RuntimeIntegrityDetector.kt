@@ -212,6 +212,35 @@ class RuntimeIntegrityDetector @Inject constructor(
     /**
      * 钩子框架探测：优先扫描进程内存映射中已加载的可疑注入库，
      * 再兜底检查常见 Frida 服务端落点文件（均属磁盘 IO，已在 IO 调度器内执行）。
+     *
+     * ## 真机实测基线（**ISSUE-P3-120**，2026-09-16，Redmi 4X / LineageOS / Android 17 / API 37）
+     *
+     * 以 frida-server **17.15.3**（与宿主 frida 客户端同版本）实测三种形态，**3/3 全部命中**
+     * ——完整性等级由基线 `ELEVATED` 升为 `COMPROMISED`：
+     *
+     * - **默认落点**：`/data/local/tmp/frida-server` **仅在案、未运行**即命中。本层是「落点存在性」
+     *   检查，**不要求进程已注入**；
+     * - **改名**：服务端改名到清单外路径并运行后，本层**漏报**（实测等级仍为 `ELEVATED`）；
+     *   但一旦 attach，`/proc/self/maps` 出现 `/memfd:frida-agent-64.so (deleted)` ⇒ **maps 层命中**；
+     * - **内存加载**：同一次实测中 agent 本就是以 **memfd** 载入、磁盘零落点（`(deleted)`），
+     *   仍被 maps 层命中。
+     *
+     * 两条防线**互补**：落点层只在默认路径命中、但无需注入即可发现；maps 层覆盖「改名 + 已注入」。
+     * 脱离 attach 后周期重扫可恢复为 `ELEVATED`（不误报残留）。
+     *
+     * ## **未经实测**的规避面（如实声明，不得读作已覆盖）
+     *
+     * 1. 把 agent 的 memfd 名一并改掉（如 `/memfd:agent-64.so`）⇒ 六条特征串均不命中——**未测**；
+     * 2. 不产生**具名**映射的注入（匿名映射；或纯 `process_vm_readv` 读取、根本无需注入）⇒ maps
+     *    无迹可寻——**未测**（该层固有边界另由 `ISSUE-P3-83` 的 `TracerPid` 信号部分补足）；
+     * 3. hook 本进程的 `open`/`read`，使本函数读到空 maps 或伪造内容——**未测**，且原理上不可在
+     *    应用层完全防御；
+     * 4. **时序窗口**：周期重扫间隔为 30 秒（`LIVE_RESCAN_INTERVAL_MS`），若 `attach → 撤销 → 脱离`
+     *    完整落在两次扫描之间，可不被捕获——**由实测矩阵推断的残余**（实测中 attach 持续约 75 秒，
+     *    故被下一轮重扫覆盖）。
+     *
+     * 完整实测矩阵、原始证据与复现步骤见
+     * `docs/records/运行完整性检测Frida实测基线.md`。
      */
     private fun detectHookFramework(): Boolean {
         val mapsHit = try {
