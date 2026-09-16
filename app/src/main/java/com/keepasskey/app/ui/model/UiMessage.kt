@@ -28,7 +28,7 @@ fun UiMessage.resolveText(): String = stringResource(resId, *args.toTypedArray()
 private fun UiMessagePreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         androidx.compose.material3.Text(
-            text = UiMessage(
+            text = com.keepasskey.app.ui.model.UiMessage(
                 resId = com.keepasskey.app.R.string.btn_close
             ).resolveText()
         )

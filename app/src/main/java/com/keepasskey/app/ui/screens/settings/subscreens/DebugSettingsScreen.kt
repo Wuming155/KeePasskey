@@ -405,7 +405,7 @@ private fun DebugSwitchRow(
 private fun DebugSettingsScreenPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         DebugSettingsScreen(
-            uiState = SettingsUiState().copy(
+            uiState = com.keepasskey.app.ui.screens.settings.SettingsUiState().copy(
                 debugLogEnabled = true,
                 verboseSyncLog = true,
                 debugLogLines = listOf(

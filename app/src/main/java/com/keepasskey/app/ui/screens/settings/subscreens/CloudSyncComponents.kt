@@ -298,7 +298,7 @@ internal fun SyncStatusCard(
 private fun SyncStatusCardPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         SyncStatusCard(
-            uiState = SettingsUiState().copy(
+            uiState = com.keepasskey.app.ui.screens.settings.SettingsUiState().copy(
                 syncStatusText = "预览：连接正常",
                 syncLastTime = "预览：最近同步于 2026-01-02 12:00"
             ),

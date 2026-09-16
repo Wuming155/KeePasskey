@@ -161,7 +161,7 @@ fun ThemeSettingsScreen(
 private fun ThemeSettingsScreenPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         ThemeSettingsScreen(
-            uiState = SettingsUiState(),
+            uiState = com.keepasskey.app.ui.screens.settings.SettingsUiState(),
             onBackClick = {},
             onThemeSelected = {},
             onOledOptimizationToggle = {}

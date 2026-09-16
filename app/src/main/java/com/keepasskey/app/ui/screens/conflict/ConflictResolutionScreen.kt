@@ -366,23 +366,23 @@ private fun FieldDiffRow(
 private fun ConflictedEntryCardPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         ConflictedEntryCard(
-            entry = ConflictedEntryItem(
+            entry = com.keepasskey.app.ui.screens.conflict.ConflictedEntryItem(
                 id = "preview-conflict-1",
                 title = "预览冲突条目",
                 groupPath = "预览根目录 / 网站登录",
                 fields = listOf(
-                    ConflictedField(
+                    com.keepasskey.app.ui.screens.conflict.ConflictedField(
                         fieldKey = "Title",
                         fieldName = "标题",
                         localValue = "预览标题（本地）",
                         remoteValue = "预览标题（云端）"
                     ),
-                    ConflictedField(
+                    com.keepasskey.app.ui.screens.conflict.ConflictedField(
                         fieldKey = "Password",
                         fieldName = "密码",
                         localValue = "预览掩码值（本地）",
                         remoteValue = "预览掩码值（云端）",
-                        selectedChoice = FieldChoice.REMOTE,
+                        selectedChoice = com.keepasskey.app.ui.screens.conflict.FieldChoice.REMOTE,
                         isSensitive = true
                     )
                 )

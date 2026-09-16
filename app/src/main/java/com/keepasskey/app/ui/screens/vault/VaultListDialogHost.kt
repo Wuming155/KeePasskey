@@ -180,7 +180,7 @@ private fun VaultListDialogHostPreview() {
 
         VaultListDialogHost(
             controller = controller,
-            uiState = VaultListUiState(
+            uiState = com.keepasskey.app.ui.screens.vault.VaultListUiState(
                 databaseName = "预览密码库.kdbx"
             ),
             onSortOptionSelect = {},

@@ -380,7 +380,7 @@ internal fun AutofillSwitchRow(
 private fun AutofillProviderCardPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         AutofillProviderCard(
-            uiState = SettingsUiState(),
+            uiState = com.keepasskey.app.ui.screens.settings.SettingsUiState(),
             onCredentialProviderToggle = {},
             onPasskeySupportToggle = {},
             onAutofillServiceToggle = {},

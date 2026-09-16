@@ -97,12 +97,12 @@ internal class KeePassXmlImportHandler(
     override fun characters(ch: CharArray, start: Int, length: Int) {
         if (captureKind == CaptureKind.NONE || length <= 0) return
         if (captureSensitive) {
-            secretBuffer().appendRange(ch, start, start + length)
+            secretBuffer().append(ch, start, length)
         } else {
             if (captureText.length + length > ImportLimits.MAX_FIELD_CHARS) {
                 throw ImportLimitExceededException("XML 文本节点超出长度上限")
             }
-            captureText.appendRange(ch, start, start + length)
+            captureText.append(ch, start, length)
         }
     }
 

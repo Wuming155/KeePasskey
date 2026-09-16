@@ -240,7 +240,7 @@ private fun AboutSpecRow(
 private fun AboutSettingsScreenPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         AboutSettingsScreen(
-            uiState = SettingsUiState().copy(
+            uiState = com.keepasskey.app.ui.screens.settings.SettingsUiState().copy(
                 appVersion = "预览版本 v0.0.0-Preview",
                 buildNumber = "预览构建 Build 0000.00.00"
             ),

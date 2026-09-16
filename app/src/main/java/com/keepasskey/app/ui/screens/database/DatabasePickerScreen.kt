@@ -328,9 +328,9 @@ private fun DatabasePickerContentPreview() {
         val previewSnackbar = remember { SnackbarHostState() }
 
         DatabasePickerContent(
-            uiState = DatabasePickerUiState(
+            uiState = com.keepasskey.app.ui.screens.database.DatabasePickerUiState(
                 databases = listOf(
-                    VaultDatabaseInfo(
+                    com.keepasskey.app.ui.model.VaultDatabaseInfo(
                         id = "preview-db-local",
                         name = "预览本地密码库",
                         path = "/storage/emulated/0/Documents/preview.kdbx",
@@ -340,7 +340,7 @@ private fun DatabasePickerContentPreview() {
                         fileSizeFormatted = "128.0 KB",
                         isActive = true
                     ),
-                    VaultDatabaseInfo(
+                    com.keepasskey.app.ui.model.VaultDatabaseInfo(
                         id = "preview-db-remote",
                         name = "预览云端密码库",
                         path = "https://dav.example.com/preview.kdbx",
@@ -365,7 +365,7 @@ private fun DatabasePickerContentPreview() {
             onCloseOpenSourceDialog = {},
             onImportFromSource = { _, _, _ -> },
             onRemoveDatabase = { _ -> },
-            keyFileDelivery = KeyFileDeliveryState.PendingSave(
+            keyFileDelivery = com.keepasskey.app.ui.screens.database.KeyFileDeliveryState.PendingSave(
                 suggestedFileName = "预览密钥文件.keyx"
             ),
             onSaveKeyFile = { _ -> },

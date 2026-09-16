@@ -84,7 +84,8 @@ internal class CustomIconCoordinator(
         databaseSession.updateDatabaseMeta { current ->
             current.copy(customIcons = current.customIcons + icon)
         }
-        return when (val persistResult = persistSession()) {
+        val persistResult = persistSession()
+        return when (persistResult) {
             is KdbxResult.Success -> KdbxResult.Success(icon.uuid.toHexString())
             is KdbxResult.Failure -> persistResult
         }

@@ -362,7 +362,7 @@ fun HealthCheckScreen(
 private fun HealthCheckScreenPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         HealthCheckScreen(
-            uiState = SettingsUiState().copy(
+            uiState = com.keepasskey.app.ui.screens.settings.SettingsUiState().copy(
                 healthScore = 82,
                 healthStatus = "良好",
                 healthMessage = "预览用健康度摘要文案（示例数据）",

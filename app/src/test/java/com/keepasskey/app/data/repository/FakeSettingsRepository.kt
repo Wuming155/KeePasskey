@@ -9,7 +9,7 @@ import kotlinx.coroutines.flow.update
 /**
  * 仅供 JVM 单元测试使用的内存设置仓库假实现（H4 整改：移出生产 source set）。
  */
-class FakeSettingsRepository : SettingsRepository {
+class FakeSettingsRepository() : SettingsRepository {
 
     private val settingsFlow = MutableStateFlow(UserSettings())
 

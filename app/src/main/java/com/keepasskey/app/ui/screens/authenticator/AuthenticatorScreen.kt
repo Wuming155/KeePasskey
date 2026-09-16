@@ -381,7 +381,7 @@ private fun TotpLargeCard(
 private fun TotpLargeCardPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         TotpLargeCard(
-            item = TotpCardItem(
+            item = com.keepasskey.app.ui.screens.authenticator.TotpCardItem(
                 entryId = "preview-totp-1",
                 title = "预览站点",
                 account = "demo@example.com",

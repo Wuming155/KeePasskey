@@ -278,12 +278,12 @@ class CbcStreamFramingTest {
     private class FailingAfterInputStream(private val data: ByteArray, private val failAfter: Int) : InputStream() {
         private var position = 0
         override fun read(): Int {
-            if (position >= failAfter) throw IOException("模拟底层流中断")
+            if (position >= failAfter) throw java.io.IOException("模拟底层流中断")
             return if (position >= data.size) -1 else data[position++].toInt() and 0xFF
         }
 
         override fun read(b: ByteArray, off: Int, len: Int): Int {
-            if (position >= failAfter) throw IOException("模拟底层流中断")
+            if (position >= failAfter) throw java.io.IOException("模拟底层流中断")
             if (position >= data.size) return -1
             val count = minOf(len, failAfter - position, data.size - position)
             System.arraycopy(data, position, b, off, count)

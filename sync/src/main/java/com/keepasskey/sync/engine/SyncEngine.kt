@@ -126,7 +126,8 @@ class SyncEngine(
 
         val metaResult = provider.getMetadata(remotePath)
         if (metaResult.isFailure) {
-            when (val ex = metaResult.exceptionOrNull()) {
+            val ex = metaResult.exceptionOrNull()
+            when (ex) {
                 is SyncException.FileNotFound -> {
                     // 远端 404 且有缓存 -> 上传恢复远端
                     val uploadResult = provider.uploadAtomic(remotePath, cachedBytes, expectedEtag = null)

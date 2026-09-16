@@ -79,6 +79,7 @@ obj/
 .kotlin
 
 # OS Files
+.DS_Store
 Thumbs.db
 ehthumbs.db
 Desktop.ini

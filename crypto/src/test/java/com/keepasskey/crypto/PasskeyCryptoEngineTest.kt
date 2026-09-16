@@ -251,11 +251,11 @@ class PasskeyCryptoEngineTest {
 
         val dataToSign = authData + clientDataHash
         // 私钥以定长 64 字符 hex 存于 ProtectedString；签名一律经 ByteArray 通道（敏感铁律）
-        val privBytes = BigInteger(passkey.privateKey.readString(), 16).toByteArray()
+        val privBytes = java.math.BigInteger(passkey.privateKey.readString(), 16).toByteArray()
             .let { raw -> if (raw.size > 32 && raw[0] == 0.toByte()) raw.copyOfRange(1, raw.size) else raw }
         try {
             val signature = PasskeyCryptoEngine.signAssertion(
-                PasskeyData.ALGORITHM_ES256,
+                com.keepasskey.core.model.PasskeyData.ALGORITHM_ES256,
                 privBytes,
                 dataToSign
             )

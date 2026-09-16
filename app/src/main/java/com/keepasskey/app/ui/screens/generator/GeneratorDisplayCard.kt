@@ -148,8 +148,8 @@ private fun GeneratorDisplayCardPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         GeneratorDisplayCard(
             password = "预览-示例-口令-A1b2C3d4",
-            strengthLabel = UiMessage(
-                resId = R.string.generator_strength_extreme,
+            strengthLabel = com.keepasskey.app.ui.model.UiMessage(
+                resId = com.keepasskey.app.R.string.generator_strength_extreme,
                 args = listOf(112)
             ),
             entropyBits = 112,

@@ -107,7 +107,7 @@ private class DeferredRejectFactory(
 
     fun freshInstance(): SAXParserFactory = object : SAXParserFactory() {
         val requested = linkedMapOf<String, Boolean>()
-        val delegate = newInstance().also {
+        val delegate = SAXParserFactory.newInstance().also {
             it.isNamespaceAware = false
         }
 
@@ -129,17 +129,13 @@ private class DeferredRejectFactory(
             return delegate.newSAXParser()
         }
 
-        override fun isNamespaceAware(): Boolean = delegate.isNamespaceAware
-        override fun isXIncludeAware(): Boolean = delegate.isXIncludeAware
-        override fun setNamespaceAware(awareness: Boolean) {
-            delegate.isNamespaceAware = awareness
-        }
-        override fun setValidating(validating: Boolean) {
-            delegate.isValidating = validating
-        }
-        override fun isValidating(): Boolean = delegate.isValidating
+        override fun isNamespaceAware(): Boolean = delegate.isNamespaceAware()
+        override fun isXIncludeAware(): Boolean = delegate.isXIncludeAware()
+        override fun setNamespaceAware(awareness: Boolean) = delegate.setNamespaceAware(awareness)
+        override fun setValidating(validating: Boolean) = delegate.setValidating(validating)
+        override fun isValidating(): Boolean = delegate.isValidating()
         override fun setXIncludeAware(state: Boolean) {
-            runCatching { delegate.isXIncludeAware = state }
+            runCatching { delegate.setXIncludeAware(state) }
         }
     }
 }

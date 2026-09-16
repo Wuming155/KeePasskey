@@ -57,7 +57,7 @@ object HmacBlockStream {
         data: ByteArray,
         outputStream: OutputStream,
         hmacKey64: ByteArray,
-        blockSize: Int = DEFAULT_BLOCK_SIZE
+        blockSize: Int = HmacBlockStream.DEFAULT_BLOCK_SIZE
     ) {
         // ISSUE-P3-37：块摘要统一由 BlockHmac 计算（原先五处手工拼装收敛为一份实现）
         val hmacer = BlockHmac(hmacKey64)
@@ -113,8 +113,8 @@ object HmacBlockStream {
                 if (blockSize < 0) {
                     throw KdbxCorruptFileException("非法的负数块大小: $blockSize")
                 }
-                if (blockSize > MAX_READ_BLOCK_SIZE) {
-                    throw KdbxCorruptFileException("HMAC 块大小超出安全上限: $blockSize（上限 ${MAX_READ_BLOCK_SIZE}）")
+                if (blockSize > HmacBlockStream.MAX_READ_BLOCK_SIZE) {
+                    throw KdbxCorruptFileException("HMAC 块大小超出安全上限: $blockSize（上限 ${HmacBlockStream.MAX_READ_BLOCK_SIZE}）")
                 }
 
                 if (blockSize == 0) {

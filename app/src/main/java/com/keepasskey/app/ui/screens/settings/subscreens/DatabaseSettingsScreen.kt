@@ -63,12 +63,12 @@ fun DatabaseSettingsScreen(
     // TASK-13 整改：导出/模板动作经 ViewModel 真实序列化与 SAF 落盘
     exportFeedback: UiMessage? = null,
     onClearExportFeedback: () -> Unit = {},
-    onExportKdbx: (Uri) -> Unit = {},
+    onExportKdbx: (android.net.Uri) -> Unit = {},
     // ISSUE-P3-110：明文导出必须携带确认令牌（由本屏二次确认弹窗经 ExportConfirmationPolicy 签发）
-    onExportXml: (Uri, ExportTicket) -> Unit = { _, _ -> },
+    onExportXml: (android.net.Uri, ExportTicket) -> Unit = { _, _ -> },
     // ISSUE-P3-73：通用明文 CSV 导出（同明文 XML 语义，需二次确认）
-    onExportCsv: (Uri, ExportTicket) -> Unit = { _, _ -> },
-    onExportKeyFile: (Uri, ExportTicket) -> Unit = { _, _ -> },
+    onExportCsv: (android.net.Uri, ExportTicket) -> Unit = { _, _ -> },
+    onExportKeyFile: (android.net.Uri, ExportTicket) -> Unit = { _, _ -> },
     onInstallTemplates: () -> Unit = {},
     // ISSUE-P3-19：导入链路（对话框选源 → SAF 选文件 → 控制器解析/落库 → 报告对话框）。
     // 状态由 VaultImportController 的 StateFlow 上抬，本屏只透传与呈现，不含业务逻辑。
@@ -518,7 +518,7 @@ fun DatabaseSettingsScreen(
 private fun DatabaseSettingsScreenPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         DatabaseSettingsScreen(
-            uiState = SettingsUiState().copy(
+            uiState = com.keepasskey.app.ui.screens.settings.SettingsUiState().copy(
                 databaseName = "预览示例密码库",
                 databasePath = "/预览目录/预览示例.kdbx",
                 databaseDefaultUsername = "demo@example.com"

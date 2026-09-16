@@ -193,11 +193,11 @@ class EntryEditViewModel @Inject constructor(
     fun onCustomIconUploaded(pngBytes: ByteArray) {
         viewModelScope.launch {
             when (val result = vaultRepository.addCustomIcon(pngBytes)) {
-                is KdbxResult.Success -> {
+                is com.keepasskey.core.result.KdbxResult.Success -> {
                     _customIconOptions.value = vaultRepository.getCustomIconBytes()
                     _uiState.update { it.copy(customIconId = result.data, isDirty = true) }
                 }
-                is KdbxResult.Failure ->
+                is com.keepasskey.core.result.KdbxResult.Failure ->
                     _uiState.update {
                         it.copy(userMessage = UiMessage(R.string.edit_save_failed, listOf(result.message)))
                     }

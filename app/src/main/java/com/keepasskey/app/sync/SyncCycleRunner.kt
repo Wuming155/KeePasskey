@@ -204,7 +204,7 @@ class SyncCycleRunner @Inject constructor(
         val metaResult = provider.getMetadata(remotePath)
         if (metaResult.isFailure) {
             val ex = metaResult.exceptionOrNull()
-            if (ex is SyncException.FileNotFound) {
+            if (ex is com.keepasskey.sync.model.SyncException.FileNotFound) {
                 val uploadResult = syncEngine.commitLocal(remotePath, localBytes)
                 return when (uploadResult) {
                     is SyncCommitResult.Uploaded -> {
@@ -391,7 +391,7 @@ class SyncCycleRunner @Inject constructor(
         } catch (e: kotlinx.coroutines.CancellationException) {
             // 协程取消必须原样重抛，绝不可归一为同步失败（结构化并发契约）
             throw e
-        } catch (e: SyncException.NetworkError) {
+        } catch (e: com.keepasskey.sync.model.SyncException.NetworkError) {
             SyncOutcome.Offline
         } catch (e: Throwable) {
             // ISSUE-P0-09：捕获面扩到 Throwable——provider 的 runCatching 会把 Error

@@ -47,7 +47,9 @@ internal fun FragmentActivity.requestCredentialUserVerification(
         this,
         BiometricAuthManager.UNLOCK_AUTHENTICATORS
     )
-    when (val requirement = fillVerifier.requirementFor(status)) {
+    val requirement = fillVerifier.requirementFor(status)
+
+    when (requirement) {
         CredentialFillRequirement.BIOMETRIC -> {
             // ISSUE-P2-76：先准备密码学绑定 Cipher；取不到即按既有退化策略走手动确认
             val authCipher = biometricAuthManager.prepareAutofillAuthCipher()

@@ -363,22 +363,22 @@ internal fun ChildDatabaseCredentialDialog(
 private fun ChildDatabaseDialogPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         ChildDatabaseDialog(
-            state = ChildDatabaseUiState(
+            state = com.keepasskey.app.ui.screens.settings.ChildDatabaseUiState(
                 available = true,
                 // 仅非敏感展示字段（别名 + 状态）：预览不构造任何子库凭据
                 mounts = listOf(
-                    ChildDatabaseMountUiState(
+                    com.keepasskey.app.ui.screens.settings.ChildDatabaseMountUiState(
                         mountId = "preview-mount-1",
                         alias = "预览子库（未解锁）",
-                        status = ChildDatabaseStatus.Text(
+                        status = com.keepasskey.app.ui.screens.settings.ChildDatabaseStatus.Text(
                             com.keepasskey.app.ui.model.UiMessage(R.string.dbset_child_db_state_locked)
                         ),
                         canRetryWithCredentials = true
                     ),
-                    ChildDatabaseMountUiState(
+                    com.keepasskey.app.ui.screens.settings.ChildDatabaseMountUiState(
                         mountId = "preview-mount-2",
                         alias = "预览子库（正在打开）",
-                        status = ChildDatabaseStatus.Opening,
+                        status = com.keepasskey.app.ui.screens.settings.ChildDatabaseStatus.Opening,
                         canRetryWithCredentials = false
                     )
                 )

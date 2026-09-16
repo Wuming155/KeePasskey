@@ -330,9 +330,9 @@ class SyncConflictController @Inject constructor(
     }
 
     private fun applyResolvedEntryToGroup(
-        group: KdbxGroup,
+        group: com.keepasskey.core.model.KdbxGroup,
         entry: KdbxEntry
-    ): KdbxGroup {
+    ): com.keepasskey.core.model.KdbxGroup {
         val targetParentId = entry.parentGroupId ?: group.id
         if (group.id == targetParentId) {
             val idx = group.entries.indexOfFirst { it.id == entry.id }

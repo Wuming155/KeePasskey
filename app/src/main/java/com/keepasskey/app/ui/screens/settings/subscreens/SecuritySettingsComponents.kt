@@ -206,7 +206,7 @@ internal fun IntegrityRiskCard(level: RuntimeRiskLevel) {
 private fun SecuritySettingsComponentsPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         IntegrityRiskCard(
-            level = RuntimeRiskLevel.ELEVATED
+            level = com.keepasskey.app.security.RuntimeRiskLevel.ELEVATED
         )
     }
 }

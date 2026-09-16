@@ -111,7 +111,8 @@ internal fun MasterKeyChangeDialog(
                         onDismiss()
                         coroutineScope.launch {
                             try {
-                                when (val result = onChangeMasterPassword(pwdChars)) {
+                                val result = onChangeMasterPassword(pwdChars)
+                                when (result) {
                                     is KdbxResult.Success<*> -> {
                                         snackbarHostState.showSnackbar(masterKeyUpdatedMsg)
                                     }
