@@ -24,7 +24,6 @@ import androidx.compose.material.icons.filled.FlashOn
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -46,6 +45,8 @@ import com.keepasskey.app.ui.model.resolveText
 import com.keepasskey.app.ui.theme.CapsuleShape
 import com.keepasskey.app.ui.theme.HeroTitleStyle
 import com.keepasskey.app.ui.components.SecurePasswordField
+import com.keepasskey.app.ui.components.disabledPrimaryButtonBorder
+import com.keepasskey.app.ui.components.disabledPrimaryButtonColors
 
 /**
  * 密码库锁 Logo 与呼吸光晕底座
@@ -373,12 +374,11 @@ internal fun UnlockStandardUnlockContent(
         onClick = onUnlock,
         enabled = !uiState.isLoading && (uiState.hasPassword || uiState.hasKeyFile),
         shape = CapsuleShape,
-        colors = ButtonDefaults.buttonColors(
-            containerColor = MaterialTheme.colorScheme.primary,
-            contentColor = MaterialTheme.colorScheme.onPrimary,
-            disabledContainerColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f),
-            disabledContentColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
-        ),
+        // ISSUE-P3-132 ③：§95 只把禁用态显式化为 MD3 默认（onSurface @12%）；
+        // 该取值落在 background 画布上实测仅 1.28:1，按钮形同消失。
+        // 现改用 surfaceContainerHighest 填充 + 1dp outline 边界（共用组件，见 ButtonStyles.kt）。
+        colors = disabledPrimaryButtonColors(),
+        border = disabledPrimaryButtonBorder(),
         modifier = Modifier
             .fillMaxWidth()
             .height(50.dp)

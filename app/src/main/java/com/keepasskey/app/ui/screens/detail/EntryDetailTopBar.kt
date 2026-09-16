@@ -1,7 +1,6 @@
 package com.keepasskey.app.ui.screens.detail
 
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.DriveFileMove
@@ -219,8 +218,7 @@ internal fun DeleteCustomIconDialog(
             TextButton(onClick = onDismiss) {
                 Text(stringResource(R.string.btn_cancel))
             }
-        },
-        shape = RoundedCornerShape(18.dp)
+        }
     )
 }
 

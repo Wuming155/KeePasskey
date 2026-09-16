@@ -256,9 +256,7 @@ fun IconPickerDialog(
             TextButton(onClick = onDismiss) {
                 Text(stringResource(R.string.btn_close))
             }
-        },
-        shape = RoundedCornerShape(20.dp),
-        containerColor = MaterialTheme.colorScheme.surface
+        }
     )
 }
 

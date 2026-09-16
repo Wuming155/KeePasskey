@@ -22,7 +22,13 @@ val SurfaceContainerLowLight = Color(0xFFF1F4F9)
 val SurfaceContainerLight = Color(0xFFEBEFF5)
 val SurfaceContainerHighLight = Color(0xFFE5E9EF)
 val SurfaceContainerHighestLight = Color(0xFFE0E4EB)
-val OutlineLight = Color(0x3374777F)
+// Outline 语义色（ISSUE-P3-132 ①）：原值 `0x3374777F` 为 **20% alpha**，不是 MD3 的
+// outline 角色——OutlinedTextField 未聚焦边框 / OutlinedButton 描边 / 次要图标全部取该令牌，
+// 浅色下实测栅格化为 `#D8DBE1`，对 `surfaceContainerLow` 仅 **1.26:1**（等于「看不出边界」）。
+// 改为不透明 `#74777F`（与 `TextTertiaryLight` 同色相），实测 4.26:1，对齐 MD3 基线
+// `#79747E` 对 `#FFFBFE` 的 4.44:1；深色侧同理由 `0x408E9199` 改为不透明 `#8E9199`
+// （5.87:1）。`outlineVariant` 维持原值（分隔线角色，实测 1.24:1，仍在 MD3 量级内）。
+val OutlineLight = Color(0xFF74777F)
 val OutlineVariantLight = Color(0xFFDCE2EC)
 
 val BackgroundDark = Color(0xFF101418)
@@ -31,7 +37,7 @@ val SurfaceContainerLowDark = Color(0xFF181C20)
 val SurfaceContainerDark = Color(0xFF1D2024)
 val SurfaceContainerHighDark = Color(0xFF272A2E)
 val SurfaceContainerHighestDark = Color(0xFF32353A)
-val OutlineDark = Color(0x408E9199)
+val OutlineDark = Color(0xFF8E9199)
 val OutlineVariantDark = Color(0xFF33373B)
 
 // 文字色彩

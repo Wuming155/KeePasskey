@@ -2,7 +2,6 @@ package com.keepasskey.app.ui.screens.settings
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
@@ -60,8 +59,6 @@ internal fun MasterKeyChangeDialog(
             wipeDialogPasswords()
             onDismiss()
         },
-        shape = RoundedCornerShape(22.dp),
-        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         title = {
             Text(
                 text = stringResource(R.string.settings_change_master_key),

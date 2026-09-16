@@ -2,7 +2,7 @@ package com.keepasskey.app.ui.screens.detail
 
 import androidx.annotation.StringRes
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,13 +13,13 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Key
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -27,7 +27,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
@@ -136,7 +135,14 @@ internal fun EntryHeaderSection(
 }
 
 /**
- * 快捷操作磁贴组
+ * 快捷操作行（ISSUE-P3-132 ④）
+ *
+ * 原实现是三张竖向磁贴卡片（每张约 76dp 高，合计占去首屏近 1/3 竖向空间），外部 UI 评审指出
+ * 它把核心凭据内容推到折叠线以下、加重滚动疲劳。现改为**单行可横向滚动的 MD3 `AssistChip` 组**：
+ * 同一组动作只占约 32dp（chip 容器高）+ 间距，三个动作、图标与触感反馈全部保留。
+ *
+ * 选横向滚动而非等分挤压的原因：文案在窄屏（360dp）下三等分会触发截断
+ * （英文 “Copy username” 就放不进约 104dp），而滚动行的 chip 按内容自适应宽度。
  */
 @Composable
 internal fun QuickActionRow(
@@ -147,81 +153,55 @@ internal fun QuickActionRow(
 ) {
     val haptic = LocalHapticFeedback.current
     Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(10.dp)
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        QuickActionTile(
-            icon = Icons.AutoMirrored.Filled.OpenInNew,
-            label = stringResource(R.string.detail_btn_open_url),
-            modifier = Modifier.weight(1f),
-            onClick = { onShowMessage(UiMessage(R.string.detail_opening_browser)) }
+        AssistChip(
+            onClick = { onShowMessage(UiMessage(R.string.detail_opening_browser)) },
+            label = { Text(stringResource(R.string.detail_btn_open_url)) },
+            leadingIcon = {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.OpenInNew,
+                    contentDescription = null,
+                    modifier = Modifier.size(QUICK_ACTION_ICON_SIZE)
+                )
+            }
         )
-        QuickActionTile(
-            icon = Icons.Default.ContentCopy,
-            label = stringResource(R.string.detail_btn_copy_user),
-            modifier = Modifier.weight(1f),
+        AssistChip(
             onClick = {
                 haptic.performHapticFeedback(HapticFeedbackType.Confirm)
                 onCopyUsername(entry.title, entry.username)
+            },
+            label = { Text(stringResource(R.string.detail_btn_copy_user)) },
+            leadingIcon = {
+                Icon(
+                    imageVector = Icons.Default.ContentCopy,
+                    contentDescription = null,
+                    modifier = Modifier.size(QUICK_ACTION_ICON_SIZE)
+                )
             }
         )
-        QuickActionTile(
-            icon = Icons.Default.Key,
-            label = stringResource(R.string.detail_btn_copy_pwd),
-            modifier = Modifier.weight(1f),
+        AssistChip(
             onClick = {
                 haptic.performHapticFeedback(HapticFeedbackType.Confirm)
                 onCopyPassword(entry.title)
+            },
+            label = { Text(stringResource(R.string.detail_btn_copy_pwd)) },
+            leadingIcon = {
+                Icon(
+                    imageVector = Icons.Default.Key,
+                    contentDescription = null,
+                    modifier = Modifier.size(QUICK_ACTION_ICON_SIZE)
+                )
             }
         )
     }
 }
 
-/**
- * 快捷操作磁贴小组件
- */
-@Composable
-internal fun QuickActionTile(
-    icon: ImageVector,
-    label: String,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Card(
-        onClick = onClick,
-        modifier = modifier
-            .border(
-                width = 1.dp,
-                color = MaterialTheme.colorScheme.outlineVariant,
-                shape = MaterialTheme.shapes.medium
-            ),
-        shape = MaterialTheme.shapes.medium,
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
-        )
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 12.dp, horizontal = 8.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = label,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(20.dp)
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Medium),
-                color = MaterialTheme.colorScheme.onSurface
-            )
-        }
-    }
-}
+/** 快捷操作 chip 的图标尺寸（M3 chip 内图标标准档） */
+private val QUICK_ACTION_ICON_SIZE = 18.dp
 
 // IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
 @Preview(name = "详情页头部与快捷操作 - 浅色", showBackground = true)
@@ -251,11 +231,6 @@ internal fun EntryHeaderSectionPreview() {
                 onShowMessage = { _ -> },
                 onCopyUsername = { _, _ -> },
                 onCopyPassword = { _ -> }
-            )
-            QuickActionTile(
-                icon = Icons.Default.Key,
-                label = "预览磁贴",
-                onClick = {}
             )
             SectionTitle(textRes = com.keepasskey.app.R.string.detail_basic_section)
         }

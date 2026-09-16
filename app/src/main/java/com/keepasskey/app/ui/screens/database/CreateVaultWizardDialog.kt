@@ -108,8 +108,7 @@ internal fun KeyFileOneTimeSaveDialog(
             TextButton(onClick = onSkipClick) {
                 Text(stringResource(R.string.db_picker_keyfile_backup_skip))
             }
-        },
-        shape = RoundedCornerShape(20.dp)
+        }
     )
 }
 
@@ -345,8 +344,7 @@ internal fun CreateVaultWizardDialog(
             TextButton(onClick = onDismiss) {
                 Text(stringResource(R.string.btn_cancel))
             }
-        },
-        shape = RoundedCornerShape(20.dp)
+        }
     )
 }
 

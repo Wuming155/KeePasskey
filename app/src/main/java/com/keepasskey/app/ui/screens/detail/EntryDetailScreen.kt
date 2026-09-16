@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -391,8 +390,7 @@ fun EntryDetailContent(
                 TextButton(onClick = { showDeleteEntryConfirm = false }) {
                     Text(stringResource(R.string.btn_cancel))
                 }
-            },
-            shape = RoundedCornerShape(18.dp)
+            }
         )
     }
 
@@ -430,8 +428,7 @@ fun EntryDetailContent(
                 TextButton(onClick = { revisionToRollback = null }) {
                     Text(stringResource(R.string.btn_cancel))
                 }
-            },
-            shape = RoundedCornerShape(18.dp)
+            }
         )
     }
 

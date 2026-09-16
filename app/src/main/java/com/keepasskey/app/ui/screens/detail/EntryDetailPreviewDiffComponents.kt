@@ -128,8 +128,7 @@ fun RevisionVisualDiffDialog(
             TextButton(onClick = onDismiss) {
                 Text(stringResource(R.string.btn_cancel))
             }
-        },
-        shape = RoundedCornerShape(20.dp)
+        }
     )
 }
 
@@ -320,8 +319,7 @@ fun SafeAttachmentPreviewDialog(
             TextButton(onClick = onDismiss) {
                 Text(stringResource(R.string.btn_close))
             }
-        },
-        shape = RoundedCornerShape(20.dp)
+        }
     )
 }
 

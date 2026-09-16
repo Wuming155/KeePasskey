@@ -35,7 +35,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.keepasskey.app.R
+import com.keepasskey.app.ui.model.DATABASE_PATH_MAX_CHARS
 import com.keepasskey.app.ui.model.VaultDatabaseInfo
+import com.keepasskey.app.ui.model.middleEllipsize
 import com.keepasskey.app.ui.theme.CapsuleShape
 import com.keepasskey.app.ui.theme.LocalSecurityColors
 
@@ -141,7 +143,9 @@ internal fun VaultDatabaseCard(
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Text(
-                    text = database.path,
+                    // ISSUE-P3-132 ②：中段省略保住文件名（末端省略会把最有辨识度的部分砍掉），
+                    // 并保证长路径单行不折行；`Ellipsis` 仅作更窄屏幕上的最后兜底
+                    text = middleEllipsize(database.path, DATABASE_PATH_MAX_CHARS),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.weight(1f),

@@ -9,12 +9,15 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -266,28 +269,42 @@ internal fun PasswordGeneratorWidget(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            FilterChip(
-                selected = useUpper,
-                onClick = onToggleUpper,
-                label = { Text("A-Z") }
-            )
-            FilterChip(
-                selected = useLower,
-                onClick = onToggleLower,
-                label = { Text("a-z") }
-            )
-            FilterChip(
-                selected = useDigits,
-                onClick = onToggleDigits,
-                label = { Text("0-9") }
-            )
-            FilterChip(
-                selected = useSymbols,
-                onClick = onToggleSymbols,
-                label = { Text("#$%") }
-            )
+            CharacterClassChip(label = "A-Z", selected = useUpper, onClick = onToggleUpper)
+            CharacterClassChip(label = "a-z", selected = useLower, onClick = onToggleLower)
+            CharacterClassChip(label = "0-9", selected = useDigits, onClick = onToggleDigits)
+            CharacterClassChip(label = "#$%", selected = useSymbols, onClick = onToggleSymbols)
         }
     }
+}
+
+/**
+ * 字符集开关 chip（ISSUE-P3-132 ⑤）
+ *
+ * 原实现是裸 `FilterChip`：选中态仅靠容器色区分。现按 MD3「选择态 chip 应带选择标记」的
+ * 官方建议补一枚 `Check` 前置图标，使选中/未选中在色觉障碍与低亮度下同样可辨。
+ *
+ * 触控热区无需额外补：`FilterChip` 内部经 `Surface(onClick)` 施加
+ * `minimumInteractiveComponentSize()`，实测（material3 1.5.0-alpha27 源码）容器高 32dp
+ * 但触控热区为 48dp。
+ */
+@Composable
+private fun CharacterClassChip(label: String, selected: Boolean, onClick: () -> Unit) {
+    FilterChip(
+        selected = selected,
+        onClick = onClick,
+        label = { Text(label) },
+        leadingIcon = if (selected) {
+            {
+                Icon(
+                    imageVector = Icons.Default.Check,
+                    contentDescription = null,
+                    modifier = Modifier.size(FilterChipDefaults.IconSize)
+                )
+            }
+        } else {
+            null
+        }
+    )
 }
 
 /**

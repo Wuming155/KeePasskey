@@ -241,7 +241,8 @@ fun VaultListContent(
                 state = listState,
                 modifier = Modifier.fillMaxSize(),
                 // 底部预留 FAB + 系统导航栏高度，避免最后一条与悬浮按钮/手势条重叠
-                contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 8.dp, bottom = 96.dp),
+                // 水平 16dp：与 FAB（Scaffold 默认 16dp）、顶栏标题内缩（TopAppBar 16dp）对齐同一网格
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 96.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 if (uiState.hasPendingConflict) {

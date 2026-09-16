@@ -22,7 +22,6 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.WarningAmber
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -43,6 +42,8 @@ import androidx.compose.ui.unit.sp
 import com.keepasskey.app.R
 import com.keepasskey.app.data.breach.BreachCheckStatus
 import com.keepasskey.app.ui.components.BentoCard
+import com.keepasskey.app.ui.components.disabledPrimaryButtonBorder
+import com.keepasskey.app.ui.components.disabledPrimaryButtonColors
 import com.keepasskey.app.ui.screens.settings.SettingsUiState
 import com.keepasskey.app.ui.theme.LocalSecurityColors
 
@@ -162,12 +163,9 @@ fun HealthCheckScreen(
                             onClick = onRescanClick,
                             enabled = !uiState.isHealthScanning,
                             shape = CircleShape,
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = MaterialTheme.colorScheme.primary,
-                                contentColor = MaterialTheme.colorScheme.onPrimary,
-                                disabledContainerColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f),
-                                disabledContentColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
-                            ),
+                            // ISSUE-P3-132 ③：禁用态补可见边界（共用组件，理由见 ButtonStyles.kt）
+                            colors = disabledPrimaryButtonColors(),
+                            border = disabledPrimaryButtonBorder(),
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             if (uiState.isHealthScanning) {

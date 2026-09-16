@@ -165,8 +165,7 @@ internal fun VaultCreateTypeDialog(
         confirmButton = {},
         dismissButton = {
             TextButton(onClick = onDismiss) { Text(stringResource(R.string.btn_cancel)) }
-        },
-        shape = RoundedCornerShape(20.dp)
+        }
     )
 }
 
@@ -206,8 +205,7 @@ internal fun VaultTemplatePickerDialog(
         confirmButton = {},
         dismissButton = {
             TextButton(onClick = onDismiss) { Text(stringResource(R.string.btn_cancel)) }
-        },
-        shape = RoundedCornerShape(20.dp)
+        }
     )
 }
 
