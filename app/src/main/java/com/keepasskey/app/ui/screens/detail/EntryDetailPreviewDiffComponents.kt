@@ -324,25 +324,34 @@ fun SafeAttachmentPreviewDialog(
 }
 
 // IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
+// ISSUE-P3-135：两个对话框各自独立成图——此前把二者堆进同一张预览，
+// 导出图观感成了「同一个对话框底部两排按钮」，无法辨识各自的操作区
 @Preview(name = "历史版本差异对比 - 浅色", showBackground = true)
 @Preview(name = "历史版本差异对比 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
 @Composable
 internal fun RevisionVisualDiffDialogPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
-        Column(verticalArrangement = Arrangement.spacedBy(24.dp)) {
-            RevisionVisualDiffDialog(
-                currentEntry = com.keepasskey.app.ui.preview.PreviewEntryLogin,
-                revision = com.keepasskey.app.ui.preview.PreviewRevisions.first(),
-                currentPassword = "预览当前假密码",
-                revisionPassword = "预览历史假密码",
-                onDismiss = {},
-                onRollback = {}
-            )
-            SafeAttachmentPreviewDialog(
-                attachment = com.keepasskey.app.ui.preview.PreviewAttachments.first(),
-                onDismiss = {},
-                onExport = {}
-            )
-        }
+        RevisionVisualDiffDialog(
+            currentEntry = com.keepasskey.app.ui.preview.PreviewEntryLogin,
+            revision = com.keepasskey.app.ui.preview.PreviewRevisions.first(),
+            currentPassword = "预览当前假密码",
+            revisionPassword = "预览历史假密码",
+            onDismiss = {},
+            onRollback = {}
+        )
+    }
+}
+
+// IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
+@Preview(name = "安全附件预览对话框 - 浅色", showBackground = true)
+@Preview(name = "安全附件预览对话框 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
+@Composable
+internal fun SafeAttachmentPreviewDialogPreview() {
+    com.keepasskey.app.ui.theme.KeePasskeyTheme {
+        SafeAttachmentPreviewDialog(
+            attachment = com.keepasskey.app.ui.preview.PreviewAttachments.first(),
+            onDismiss = {},
+            onExport = {}
+        )
     }
 }

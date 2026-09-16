@@ -19,6 +19,8 @@ import androidx.compose.ui.unit.dp
 import com.keepasskey.app.R
 import com.keepasskey.app.security.SecureDialog
 import com.keepasskey.app.ui.components.SecurePasswordField
+import com.keepasskey.app.ui.components.disabledPrimaryButtonBorder
+import com.keepasskey.app.ui.components.disabledPrimaryButtonColors
 import com.keepasskey.app.ui.theme.CapsuleShape
 import com.keepasskey.core.result.KdbxResult
 import kotlinx.coroutines.CoroutineScope
@@ -125,7 +127,11 @@ internal fun MasterKeyChangeDialog(
                     }
                 },
                 enabled = passwordsMatch,
-                shape = CapsuleShape
+                shape = CapsuleShape,
+                // ISSUE-P3-134：两次输入未一致时「保存更改」须仍可辨识——接入禁用态共用
+                // 配色 / 描边，而非 MD3 默认的 onSurface @12%（同 ButtonStyles.kt 的口径）
+                colors = disabledPrimaryButtonColors(),
+                border = disabledPrimaryButtonBorder()
             ) {
                 Text(stringResource(R.string.set_save_changes))
             }

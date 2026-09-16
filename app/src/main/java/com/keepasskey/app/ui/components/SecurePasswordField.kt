@@ -3,6 +3,7 @@ package com.keepasskey.app.ui.components
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Icon
@@ -19,6 +20,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.password
@@ -149,11 +151,15 @@ fun SecurePasswordField(
             color = MaterialTheme.colorScheme.onSurface
         ),
         shape = MaterialTheme.shapes.medium,
+        // ISSUE-P3-133：未聚焦边框取 `outline` 而非 `outlineVariant`——后者在本仓按
+        // `Color.kt` 的既有裁决（ISSUE-P3-132）仅承载「分隔线」角色（对浅色底实测 1.24:1），
+        // 用作输入框描边即近乎隐形；容器回归 MD3 outlined 默认（透明），避免在对话框
+        // （surfaceContainerHigh）上落成一块不透明白底，与同表单紧邻的 OutlinedTextField 割裂。
         colors = OutlinedTextFieldDefaults.colors(
             focusedBorderColor = MaterialTheme.colorScheme.primary,
-            unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
-            focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
-            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest
+            unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+            focusedContainerColor = Color.Transparent,
+            unfocusedContainerColor = Color.Transparent
         ),
         enabled = enabled,
         // ISSUE-P2-44：显式声明「本节点是口令字段」，不再让该语义**只**由框架从
@@ -180,7 +186,9 @@ internal fun SecurePasswordFieldPreview() {
             isPasswordVisible = false,
             onToggleVisibility = {},
             enabled = true,
-            leadingIcon = Icons.Default.Visibility,
+            // ISSUE-P3-135：前置槽必须换用与生产一致的语义图标（锁）——此前传 Visibility，
+            // 与右侧显隐切换按钮重合，导出预览图呈现为「左右两个眼睛」，误导界面复核
+            leadingIcon = Icons.Default.Lock,
             trailingIcon = null,
             initialPassword = null,
             initialKey = null,

@@ -37,6 +37,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.keepasskey.app.R
+import com.keepasskey.app.ui.components.disabledPrimaryButtonBorder
+import com.keepasskey.app.ui.components.disabledPrimaryButtonColors
 import com.keepasskey.app.ui.theme.CapsuleShape
 
 /**
@@ -255,7 +257,11 @@ internal fun OpenExistingVaultDialog(
                     }
                 },
                 enabled = isConfirmEnabled,
-                shape = CapsuleShape
+                shape = CapsuleShape,
+                // ISSUE-P3-134：接入禁用态共用配色——未选文件 / 未填必填项时「打开并加载」
+                // 不得再落成 MD3 默认的 1.29:1 灰块（同 ButtonStyles.kt 的口径）
+                colors = disabledPrimaryButtonColors(),
+                border = disabledPrimaryButtonBorder()
             ) {
                 Text(stringResource(R.string.picker_open_and_load))
             }

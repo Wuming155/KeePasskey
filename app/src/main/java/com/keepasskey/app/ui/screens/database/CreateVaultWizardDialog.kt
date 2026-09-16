@@ -43,6 +43,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.keepasskey.app.R
 import com.keepasskey.app.ui.components.SecurePasswordField
+import com.keepasskey.app.ui.components.disabledPrimaryButtonBorder
+import com.keepasskey.app.ui.components.disabledPrimaryButtonColors
 import com.keepasskey.app.ui.theme.CapsuleShape
 
 /**
@@ -335,7 +337,11 @@ internal fun CreateVaultWizardDialog(
                     )
                 },
                 enabled = isFormValid,
-                shape = CapsuleShape
+                shape = CapsuleShape,
+                // ISSUE-P3-134：接入禁用态共用配色——MD3 默认 onSurface @12% 在 background
+                // 画布上仅 1.29:1（见 ButtonStyles.kt），未填完表单时「创建」形同消失
+                colors = disabledPrimaryButtonColors(),
+                border = disabledPrimaryButtonBorder()
             ) {
                 Text(stringResource(R.string.btn_create))
             }

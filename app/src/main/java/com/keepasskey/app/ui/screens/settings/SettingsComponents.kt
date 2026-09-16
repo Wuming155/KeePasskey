@@ -17,6 +17,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -188,7 +189,9 @@ internal fun ModernSectionHeader(
 internal fun ModernSettingsRowPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         ModernSettingsRow(
-            icon = Icons.AutoMirrored.Filled.ArrowForwardIos,
+            // ISSUE-P3-135：前置槽必须是业务分类图标。此前传 ArrowForwardIos，与行尾的
+            // 前进指示同形，导出预览图呈现为「一行两个同向箭头」，误导界面复核
+            icon = Icons.Default.Lock,
             iconTint = MaterialTheme.colorScheme.primary,
             title = "预览设置项标题",
             subtitle = "预览设置项说明文本",

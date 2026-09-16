@@ -250,7 +250,10 @@ internal fun VaultBreadcrumbBar(
                     Text(
                         text = "/",
                         style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.outlineVariant,
+                        // ISSUE-P3-137：分隔符是**承载层级信息的字形**，不是装饰线。
+                        // `outlineVariant` 按 Color.kt 的裁决（ISSUE-P3-132）仅供分隔线角色，
+                        // 对浅色底仅 1.24:1，用作路径分隔符时几乎不可见
+                        color = MaterialTheme.colorScheme.outline,
                         modifier = Modifier.padding(horizontal = 2.dp)
                     )
                     val isCurrent = grp.id == currentGroupId

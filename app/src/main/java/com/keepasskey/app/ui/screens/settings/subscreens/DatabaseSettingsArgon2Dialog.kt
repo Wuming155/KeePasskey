@@ -2,6 +2,8 @@ package com.keepasskey.app.ui.screens.settings.subscreens
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -39,6 +41,7 @@ import com.keepasskey.app.ui.screens.settings.KdfBenchmarkUiState
 import com.keepasskey.app.ui.screens.settings.SettingsUiState
 
 // 对话框 3：Argon2 参数详细调节
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun Argon2ParametersDialog(
     uiState: SettingsUiState,
@@ -67,43 +70,53 @@ internal fun Argon2ParametersDialog(
         },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                Column {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(stringResource(R.string.dbset_argon2_iterations_label), style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium))
-                        Text(stringResource(R.string.dbset_argon2_rounds_value, tempIterations), style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary))
-                    }
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        IconButton(
-                            onClick = { if (tempIterations > 1) tempIterations-- },
-                            modifier = Modifier.size(32.dp)
-                        ) {
-                            Icon(Icons.Default.Remove, contentDescription = stringResource(R.string.dbset_cd_decrease_rounds))
-                        }
-                        Spacer(modifier = Modifier.width(8.dp))
+                // ISSUE-P3-136：说明文案与标题同列，步进器（− / 数值 / +）独占右侧——
+                // 原先把说明挤在 − 与 + 之间，操作动线被大段小字拦断
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = stringResource(R.string.dbset_argon2_iterations_label),
+                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium)
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
                         Text(
                             text = stringResource(R.string.dbset_argon2_rounds_hint),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                        Spacer(modifier = Modifier.weight(1f))
-                        IconButton(
-                            onClick = { if (tempIterations < 50) tempIterations++ },
-                            modifier = Modifier.size(32.dp)
-                        ) {
-                            Icon(Icons.Default.Add, contentDescription = stringResource(R.string.dbset_cd_increase_rounds))
-                        }
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    // 触及 1 / 50 边界时置灰：否则按钮仍可点却无任何反馈
+                    IconButton(
+                        onClick = { tempIterations-- },
+                        enabled = tempIterations > ITERATIONS_MIN,
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(Icons.Default.Remove, contentDescription = stringResource(R.string.dbset_cd_decrease_rounds))
+                    }
+                    Text(
+                        text = stringResource(R.string.dbset_argon2_rounds_value, tempIterations),
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    )
+                    IconButton(
+                        onClick = { tempIterations++ },
+                        enabled = tempIterations < ITERATIONS_MAX,
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = stringResource(R.string.dbset_cd_increase_rounds))
                     }
                 }
 
                 Column {
                     Text(stringResource(R.string.dbset_argon2_memory_label, tempMemoryMb), style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium))
                     Spacer(modifier = Modifier.height(6.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         listOf(16L, 32L, 64L, 128L, 256L).forEach { mb ->
                             FilterChip(
                                 selected = tempMemoryMb == mb,
@@ -121,7 +134,7 @@ internal fun Argon2ParametersDialog(
                 Column {
                     Text(stringResource(R.string.dbset_argon2_parallelism_label, tempParallelism), style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium))
                     Spacer(modifier = Modifier.height(6.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         listOf(1, 2, 4, 8).forEach { threads ->
                             FilterChip(
                                 selected = tempParallelism == threads,
@@ -220,3 +233,7 @@ internal fun Argon2ParametersDialogPreview() {
         )
     }
 }
+
+/** ISSUE-P3-136：迭代轮数合法域（沿用原实现的 1..50，仅把魔法数字提到一处） */
+private const val ITERATIONS_MIN = 1L
+private const val ITERATIONS_MAX = 50L
