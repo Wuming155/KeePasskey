@@ -71,3 +71,19 @@ fun WebDavSyncScreen(
         modifier = modifier
     )
 }
+
+// IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
+@androidx.compose.ui.tooling.preview.Preview(name = "WebDAV 同步页 - 浅色", showBackground = true)
+@androidx.compose.ui.tooling.preview.Preview(name = "WebDAV 同步页 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
+@Composable
+private fun WebDavSyncScreenPreview() {
+    com.keepasskey.app.ui.theme.KeePasskeyTheme {
+        WebDavSyncScreen(
+            uiState = com.keepasskey.app.ui.screens.settings.SettingsUiState(),
+            onBackClick = {},
+            onAutoSyncToggle = {},
+            onWifiOnlyToggle = {},
+            onTriggerSync = {}
+        )
+    }
+}

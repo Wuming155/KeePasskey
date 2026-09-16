@@ -44,6 +44,10 @@ import java.util.Locale
  *
  * ISSUE-P3-29：各路由定义已拆至同包 `KeePasskeyNavGraph.kt`（`keepasskeyNavGraph` 扩展函数），
  * 本文件只保留主题 / 语言 / 外层 Scaffold 与 NavHost 装配，为纯结构性拆分。
+ *
+ * **@Preview 标注说明**：本文件仅含 [KeePasskeyApp] 一个 Composable，它经 `hiltViewModel()` 取
+ * SettingsViewModel、依赖 `ComponentActivity` 宿主与完整导航图，且 `keepasskeyNavGraph` 的各路由
+ * 入口同样有状态/注入依赖，无法在 Preview 面板独立渲染，故按约定**不添加**预览标注。
  */
 @Composable
 fun KeePasskeyApp() {

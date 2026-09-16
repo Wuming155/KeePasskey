@@ -18,3 +18,19 @@ data class UiMessage(
  */
 @Composable
 fun UiMessage.resolveText(): String = stringResource(resId, *args.toTypedArray())
+
+// IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI。
+// 本文件唯一的 Composable 是「资源 ID → 当前语言文案」的解析函数（返回 String，无自绘 UI），
+// 故预览用最小 Text 承载其解析结果，验证多语言文案解析链路
+@androidx.compose.ui.tooling.preview.Preview(name = "界面消息文案解析 - 浅色", showBackground = true)
+@androidx.compose.ui.tooling.preview.Preview(name = "界面消息文案解析 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
+@Composable
+private fun UiMessagePreview() {
+    com.keepasskey.app.ui.theme.KeePasskeyTheme {
+        androidx.compose.material3.Text(
+            text = com.keepasskey.app.ui.model.UiMessage(
+                resId = com.keepasskey.app.R.string.btn_close
+            ).resolveText()
+        )
+    }
+}

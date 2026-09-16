@@ -31,6 +31,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.keepasskey.app.R
 import com.keepasskey.app.ui.model.VaultDatabaseInfo
@@ -152,6 +153,50 @@ internal fun VaultDatabaseCard(
                     color = MaterialTheme.colorScheme.outline
                 )
             }
+        }
+    }
+}
+
+// IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
+@Preview(name = "密码库卡片 - 浅色", showBackground = true)
+@Preview(name = "密码库卡片 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
+@Composable
+private fun VaultDatabaseCardPreview() {
+    com.keepasskey.app.ui.theme.KeePasskeyTheme {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            VaultDatabaseCard(
+                database = com.keepasskey.app.ui.model.VaultDatabaseInfo(
+                    id = "preview-db-local",
+                    name = "预览本地密码库",
+                    path = "/storage/emulated/0/Documents/preview.kdbx",
+                    isRemote = false,
+                    syncType = "本地",
+                    lastOpenedAt = "2026-01-02 12:00",
+                    fileSizeFormatted = "128.0 KB",
+                    isActive = true
+                ),
+                onSelect = {},
+                onDelete = {}
+            )
+            VaultDatabaseCard(
+                database = com.keepasskey.app.ui.model.VaultDatabaseInfo(
+                    id = "preview-db-remote",
+                    name = "预览云端密码库",
+                    path = "https://dav.example.com/preview.kdbx",
+                    isRemote = true,
+                    syncType = "WebDAV",
+                    lastOpenedAt = "2026-01-01 09:00",
+                    fileSizeFormatted = "256.0 KB",
+                    isActive = false
+                ),
+                onSelect = {},
+                onDelete = {}
+            )
         }
     }
 }

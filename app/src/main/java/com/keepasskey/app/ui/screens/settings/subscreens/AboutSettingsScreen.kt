@@ -231,3 +231,20 @@ private fun AboutSpecRow(
         }
     }
 }
+
+// IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
+// 说明：为遵守「不新增 import 语句」约束，@Preview 采用全限定名写法
+@androidx.compose.ui.tooling.preview.Preview(name = "关于页面 - 浅色", showBackground = true)
+@androidx.compose.ui.tooling.preview.Preview(name = "关于页面 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
+@Composable
+private fun AboutSettingsScreenPreview() {
+    com.keepasskey.app.ui.theme.KeePasskeyTheme {
+        AboutSettingsScreen(
+            uiState = com.keepasskey.app.ui.screens.settings.SettingsUiState().copy(
+                appVersion = "预览版本 v0.0.0-Preview",
+                buildNumber = "预览构建 Build 0000.00.00"
+            ),
+            onBackClick = {}
+        )
+    }
+}

@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
@@ -25,14 +26,19 @@ import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.keepasskey.app.R
@@ -295,6 +301,86 @@ internal fun PasskeyCard(entry: UiVaultEntry) {
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+        }
+    }
+}
+
+/**
+ * IDE 预览专用状态装载：仅在组合首帧把示例状态写入 remember 状态，绕开
+ * `remember(…) { mutableStateOf(示例) }` 的「非 Composable 上下文求值」静态检查。
+ */
+@Composable
+private fun <T> previewStateOf(value: T): androidx.compose.runtime.MutableState<T> {
+    val state = remember { mutableStateOf(value) }
+    LaunchedEffect(Unit) { state.value = value }
+    return state
+}
+
+// IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
+@Preview(name = "基础凭据卡片 - 浅色", showBackground = true)
+@Preview(name = "基础凭据卡片 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
+@Composable
+private fun BasicCredentialsCardPreview() {
+    com.keepasskey.app.ui.theme.KeePasskeyTheme {
+        val previewEntry = com.keepasskey.app.ui.preview.PreviewEntryLogin
+        val previewUiState = previewStateOf(
+            com.keepasskey.app.ui.screens.detail.EntryDetailUiState(
+                entry = previewEntry,
+                isPasswordVisible = true,
+                revealedPassword = "预览用假密码",
+                passwordStrengthBits = 72,
+                revealedProtectedFields = mapOf("preview-field-2" to "预览受保护字段值"),
+                protectedFieldsVisibility = mapOf("preview-field-2" to true),
+                totpRemainingSeconds = 18,
+                liveTotpCode = "654321",
+                isFavorite = true
+            )
+        ).value
+        val previewSnackbar = remember { SnackbarHostState() }
+
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            BasicCredentialsCard(
+                uiState = previewUiState,
+                entry = previewEntry,
+                onTogglePasswordVisibility = {},
+                onCopyPassword = { _ -> },
+                onCopyUsername = { _, _ -> }
+            )
+            TotpCard(
+                uiState = previewUiState,
+                entry = previewEntry,
+                onToggleVisibility = {},
+                onAdvanceHotp = {},
+                onShowMessage = { _ -> }
+            )
+            PasskeyCard(entry = com.keepasskey.app.ui.preview.PreviewEntryPasskey)
+            CustomFieldsCard(
+                uiState = previewUiState,
+                entry = previewEntry,
+                onToggleCustomFieldVisibility = { _ -> },
+                onCopyCustomField = { _, _ -> },
+                onShowMessage = { _ -> }
+            )
+            AttachmentsCard(
+                entry = com.keepasskey.app.ui.preview.PreviewEntryLogin.copy(
+                    attachments = com.keepasskey.app.ui.preview.PreviewAttachments
+                ),
+                onPreviewAttachment = { _ -> },
+                onExportAttachment = { _ -> }
+            )
+            RevisionsCard(
+                entry = com.keepasskey.app.ui.preview.PreviewEntryLogin.copy(
+                    revisions = com.keepasskey.app.ui.preview.PreviewRevisions
+                ),
+                onCompareRevision = { _ -> },
+                onRequestRollback = { _ -> }
+            )
+            NotesCard(notesText = "预览用备注文本，仅用于界面排版展示。", updatedAt = "2026-01-02 12:00")
         }
     }
 }

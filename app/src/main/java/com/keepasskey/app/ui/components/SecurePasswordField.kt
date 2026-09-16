@@ -163,3 +163,29 @@ fun SecurePasswordField(
         modifier = modifier.semantics { password() }
     )
 }
+
+// IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
+@androidx.compose.ui.tooling.preview.Preview(name = "安全密码输入框 - 浅色", showBackground = true)
+@androidx.compose.ui.tooling.preview.Preview(name = "安全密码输入框 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
+@Composable
+private fun SecurePasswordFieldPreview() {
+    com.keepasskey.app.ui.theme.KeePasskeyTheme {
+        SecurePasswordField(
+            label = "预览主密码",
+            onPasswordChanged = {},
+            modifier = Modifier,
+            placeholder = "预览输入占位提示",
+            isError = false,
+            supportingText = { androidx.compose.material3.Text(text = "预览辅助说明文案") },
+            isPasswordVisible = false,
+            onToggleVisibility = {},
+            enabled = true,
+            leadingIcon = Icons.Default.Visibility,
+            trailingIcon = null,
+            initialPassword = null,
+            initialKey = null,
+            wipeToken = null,
+            onDone = {}
+        )
+    }
+}

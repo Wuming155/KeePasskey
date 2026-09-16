@@ -431,3 +431,29 @@ fun SecuritySettingsScreen(
         )
     }
 }
+
+// IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
+// 说明：为遵守「不新增 import 语句」约束，@Preview 采用全限定名写法
+@androidx.compose.ui.tooling.preview.Preview(name = "安全策略设置页 - 浅色", showBackground = true)
+@androidx.compose.ui.tooling.preview.Preview(name = "安全策略设置页 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
+@Composable
+private fun SecuritySettingsScreenPreview() {
+    com.keepasskey.app.ui.theme.KeePasskeyTheme {
+        SecuritySettingsScreen(
+            uiState = com.keepasskey.app.ui.screens.settings.SettingsUiState().copy(
+                biometricEnabled = true,
+                autoLockBackground = true,
+                flagSecureEnabled = true,
+                autoClearClipboard = true,
+                unlockThrottleEnabled = true,
+                autoLockTimeoutSeconds = 300,
+                clipboardTimeoutSeconds = 30
+            ),
+            onBackClick = {},
+            onBiometricToggle = {},
+            onAutoLockToggle = {},
+            onFlagSecureToggle = {},
+            onAutoClearClipboardToggle = {}
+        )
+    }
+}

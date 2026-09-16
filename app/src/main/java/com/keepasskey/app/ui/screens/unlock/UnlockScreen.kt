@@ -55,12 +55,11 @@ fun UnlockScreen(
     currentTheme: AppThemeMode,
     onThemeToggle: () -> Unit,
     onUnlockSuccess: () -> Unit,
-    onNavigateToDatabasePicker: () -> Unit = {},
     modifier: Modifier = Modifier,
+    onNavigateToDatabasePicker: () -> Unit = {},
     viewModel: UnlockViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    val onToggleReadOnly = viewModel::onToggleReadOnly
     val context = androidx.compose.ui.platform.LocalContext.current
     val activity = androidx.compose.runtime.remember(context) { context as? androidx.fragment.app.FragmentActivity }
 
@@ -142,6 +141,8 @@ fun UnlockScreen(
 /**
  * 无状态解锁内容渲染组件 (集成 QuickUnlock 状态与感知)
  */
+// imePadding 为 Compose 官方 API 名，拼写检查误报
+@Suppress("SpellCheckingInspection")
 @Composable
 fun UnlockContent(
     uiState: UnlockUiState,
@@ -155,10 +156,10 @@ fun UnlockContent(
     onSwitchMode: (UnlockMode) -> Unit,
     onUnlock: () -> Unit,
     onBiometricUnlock: () -> Unit,
+    modifier: Modifier = Modifier,
     onDowngradeDecision: (Boolean) -> Unit = {},
     onNavigateToDatabasePicker: () -> Unit,
-    onOpenExistingVault: () -> Unit,
-    modifier: Modifier = Modifier
+    onOpenExistingVault: () -> Unit
 ) {
     val scrollState = rememberScrollState()
 
@@ -369,4 +370,36 @@ private fun QuickUnlockDowngradeConsentDialog(
             }
         }
     )
+}
+
+// IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
+@androidx.compose.ui.tooling.preview.Preview(name = "解锁页 - 浅色", showBackground = true)
+@androidx.compose.ui.tooling.preview.Preview(name = "解锁页 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
+@Composable
+private fun UnlockContentPreview() {
+    com.keepasskey.app.ui.theme.KeePasskeyTheme {
+        UnlockContent(
+            uiState = UnlockUiState().copy(
+                hasDatabase = true,
+                databaseName = "预览密码库.kdbx",
+                databaseStatus = "预览状态：已就绪（示例文案）",
+                unlockMode = UnlockMode.STANDARD,
+                isQuickUnlockAvailable = true,
+                accessibilityRiskNotice = true
+            ),
+            currentTheme = AppThemeMode.SYSTEM,
+            onThemeToggle = {},
+            onPasswordChange = {},
+            onTogglePasswordVisibility = {},
+            onSelectKeyFile = {},
+            onClearKeyFile = {},
+            onToggleReadOnly = {},
+            onSwitchMode = {},
+            onUnlock = {},
+            onBiometricUnlock = {},
+            onDowngradeDecision = {},
+            onNavigateToDatabasePicker = {},
+            onOpenExistingVault = {}
+        )
+    }
 }

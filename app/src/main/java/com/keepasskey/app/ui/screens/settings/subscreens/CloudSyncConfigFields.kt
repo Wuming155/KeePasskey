@@ -208,3 +208,29 @@ internal fun S3ConfigFields(
         )
     }
 }
+
+// IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
+// 说明：为遵守「不新增 import 语句」约束，@Preview 采用全限定名写法
+// 说明：本组件直接产出多个并列字段（自身无布局容器），故外包一层 Column，避免预览中字段相互重叠
+@androidx.compose.ui.tooling.preview.Preview(name = "WebDAV 同步配置字段 - 浅色", showBackground = true)
+@androidx.compose.ui.tooling.preview.Preview(name = "WebDAV 同步配置字段 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
+@Composable
+private fun WebDavConfigFieldsPreview() {
+    com.keepasskey.app.ui.theme.KeePasskeyTheme {
+        Column {
+            WebDavConfigFields(
+                url = "https://preview.example.com/remote.php/dav/files/demo/",
+                onUrlChange = {},
+                username = "demo@example.com",
+                onUsernameChange = {},
+                isPasswordVisible = false,
+                onTogglePasswordVisibility = {},
+                // 预览不预填任何密码：预填通道传 null，杜绝示例凭据被当作真实凭据
+                passwordPrefill = null,
+                onPasswordCharsChange = {},
+                remotePath = "/preview/keepasskey.kdbx",
+                onRemotePathChange = {}
+            )
+        }
+    }
+}

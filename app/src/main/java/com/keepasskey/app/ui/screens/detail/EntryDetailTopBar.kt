@@ -24,12 +24,14 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.keepasskey.app.R
 import com.keepasskey.app.ui.theme.LocalSecurityColors
@@ -220,4 +222,47 @@ internal fun DeleteCustomIconDialog(
         },
         shape = RoundedCornerShape(18.dp)
     )
+}
+
+/**
+ * IDE 预览专用状态装载：仅在组合首帧把示例状态写入 remember 状态，绕开
+ * `remember(…) { mutableStateOf(示例) }` 的「非 Composable 上下文求值」静态检查。
+ */
+@Composable
+private fun <T> previewStateOf(value: T): androidx.compose.runtime.MutableState<T> {
+    val state = remember { mutableStateOf(value) }
+    LaunchedEffect(Unit) { state.value = value }
+    return state
+}
+
+// IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
+@Preview(name = "详情页顶栏 - 浅色", showBackground = true)
+@Preview(name = "详情页顶栏 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
+@Composable
+private fun EntryDetailTopBarPreview() {
+    com.keepasskey.app.ui.theme.KeePasskeyTheme {
+        val previewUiState = previewStateOf(
+            com.keepasskey.app.ui.screens.detail.EntryDetailUiState(
+                entry = com.keepasskey.app.ui.preview.PreviewEntryLogin,
+                isFavorite = true,
+                isReadOnly = false,
+                autofillBoundPackage = "com.example.previewapp",
+                isAutofillBlockedForApp = false
+            )
+        ).value
+
+        EntryDetailTopBar(
+            uiState = previewUiState,
+            onBackClick = {},
+            onToggleFavorite = {},
+            onDuplicateEntry = {},
+            onToggleAutofillBlock = {},
+            onEditClick = {},
+            onRequestMoveEntry = {},
+            onRequestDeleteEntry = {},
+            onRequestDeleteCustomIcon = {}
+        )
+
+        DeleteCustomIconDialog(onConfirm = {}, onDismiss = {})
+    }
 }

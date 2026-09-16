@@ -46,3 +46,21 @@ fun BentoCard(
         content = content
     )
 }
+
+// IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
+@androidx.compose.ui.tooling.preview.Preview(name = "Bento 结构卡片 - 浅色", showBackground = true)
+@androidx.compose.ui.tooling.preview.Preview(name = "Bento 结构卡片 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
+@Composable
+private fun BentoCardPreview() {
+    com.keepasskey.app.ui.theme.KeePasskeyTheme {
+        BentoCard(
+            modifier = Modifier,
+            shape = MaterialTheme.shapes.large,
+            backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow,
+            borderColor = MaterialTheme.colorScheme.primary,
+            borderWidth = 1.dp
+        ) {
+            androidx.compose.material3.Text(text = "预览 Bento 卡片内容")
+        }
+    }
+}

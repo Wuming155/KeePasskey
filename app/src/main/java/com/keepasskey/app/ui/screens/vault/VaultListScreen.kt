@@ -358,3 +358,51 @@ fun VaultListContent(
 
 /** ISSUE-P3-30：搜索态子库排除提示行的稳定 key（不同排序 / 筛选下不重建） */
 private const val CHILD_DB_SEARCH_HINT_KEY = "child_db_search_exclusion"
+
+// IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
+@androidx.compose.ui.tooling.preview.Preview(name = "密码库列表 - 浅色", showBackground = true)
+@androidx.compose.ui.tooling.preview.Preview(name = "密码库列表 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
+@Composable
+private fun VaultListContentPreview() {
+    com.keepasskey.app.ui.theme.KeePasskeyTheme {
+        VaultListContent(
+            uiState = VaultListUiState().copy(
+                databaseName = "预览密码库.kdbx",
+                currentGroups = com.keepasskey.app.ui.preview.PreviewGroups,
+                entries = com.keepasskey.app.ui.preview.PreviewEntries,
+                totalEntriesCount = 4,
+                sortOption = VaultSortOption.NAME_ASC,
+                lastSyncTimeText = "预览同步时间 10:25",
+                decorations = com.keepasskey.app.ui.preview.PreviewDecorations
+            ),
+            snackbarHostState = remember { SnackbarHostState() },
+            onSearchQueryChange = {},
+            onSortOptionSelect = {},
+            onGroupClick = {},
+            onNavigateUp = {},
+            onNavigateToBreadcrumb = {},
+            onEntryClick = {},
+            onEntryLongClick = {},
+            onCopyPassword = {},
+            onCopyUsername = {},
+            onAddEntryClick = {},
+            onCreateFromTemplate = {},
+            onCreateGroup = { _, _ -> },
+            onRenameGroup = { _, _ -> },
+            onChangeGroupIcon = { _, _ -> },
+            onDeleteGroup = {},
+            onRestoreEntry = {},
+            onPurgeEntry = {},
+            onEmptyRecycleBin = {},
+            onTriggerSync = {},
+            onNavigateToConflictResolver = {},
+            onLockClick = {},
+            onSelectAllBatch = {},
+            onClearBatch = {},
+            onBatchDelete = {},
+            onBatchMove = {},
+            onKillApp = null,
+            onAutoActivateSearchConsumed = {}
+        )
+    }
+}

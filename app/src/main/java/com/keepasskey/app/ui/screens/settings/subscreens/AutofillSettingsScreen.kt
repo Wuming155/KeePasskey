@@ -24,6 +24,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.keepasskey.app.R
 import com.keepasskey.app.ui.screens.settings.SettingsUiState
@@ -61,6 +62,14 @@ fun AutofillSettingsScreen(
     // ISSUE-P3-43 ②：字段签名级屏蔽（签名不可逆，故仅可回显条数并整体清除）
     blockedFieldCount: Int = 0,
     onClearBlockedFields: () -> Unit = {},
+    /**
+     * 健康自检卡槽位（ISSUE-P3-41）。
+     *
+     * 默认值为生产实现 [AutofillHealthCard]（自持 ViewModel）；预览等无 Hilt 宿主的场景
+     * 可传入无状态实现（见 [AutofillHealthCardContent] 的拆分说明），避免在预览面板中
+     * 触发 `hiltViewModel()` 取用失败。
+     */
+    healthCard: @Composable () -> Unit = { AutofillHealthCard(appEnabled = uiState.autofillServiceEnabled) },
     modifier: Modifier = Modifier
 ) {
     var showBlacklistDialog by remember { mutableStateOf(false) }
@@ -107,7 +116,7 @@ fun AutofillSettingsScreen(
 
             // ISSUE-P3-41：服务健康自检（实时探测系统侧与本应用侧链路状态并给出修复指引）
             item {
-                AutofillHealthCard(appEnabled = uiState.autofillServiceEnabled)
+                healthCard()
             }
 
             item {
@@ -211,6 +220,29 @@ fun AutofillSettingsScreen(
             blockedFieldCount = blockedFieldCount,
             onDismiss = { showFieldBlockDialog = false },
             onConfirmClear = onClearBlockedFields
+        )
+    }
+}
+
+// IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
+@Preview(name = "自动填充设置页 - 浅色", showBackground = true)
+@Preview(name = "自动填充设置页 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AutofillSettingsScreenPreview() {
+    com.keepasskey.app.ui.theme.KeePasskeyTheme {
+        AutofillSettingsScreen(
+            uiState = SettingsUiState(),
+            onBackClick = {},
+            onCredentialProviderToggle = {},
+            onPasskeySupportToggle = {},
+            onAutofillServiceToggle = {},
+            onAutoClearClipboardToggle = {},
+            blockedPackages = listOf("com.example.previewapp"),
+            saveBlockedPackages = listOf("com.example.previewapp2"),
+            blockedFieldCount = 3,
+            // 预览无 Hilt 宿主：健康卡槽位传空实现（卡片本体另有独立预览）
+            healthCard = {}
         )
     }
 }

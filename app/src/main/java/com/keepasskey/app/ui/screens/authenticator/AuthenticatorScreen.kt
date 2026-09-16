@@ -373,3 +373,28 @@ private fun TotpLargeCard(
         }
     }
 }
+
+// IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
+@androidx.compose.ui.tooling.preview.Preview(name = "验证码卡片 - 浅色", showBackground = true)
+@androidx.compose.ui.tooling.preview.Preview(name = "验证码卡片 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
+@Composable
+private fun TotpLargeCardPreview() {
+    com.keepasskey.app.ui.theme.KeePasskeyTheme {
+        TotpLargeCard(
+            item = com.keepasskey.app.ui.screens.authenticator.TotpCardItem(
+                entryId = "preview-totp-1",
+                title = "预览站点",
+                account = "demo@example.com",
+                codeFormatted = "123 456",
+                codeRaw = "123456",
+                remainingSeconds = 18,
+                iconName = "key",
+                url = "https://example.com",
+                isHotp = false
+            ),
+            onClick = {},
+            onCopy = {},
+            onAdvanceHotp = {}
+        )
+    }
+}

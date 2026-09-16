@@ -32,6 +32,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
@@ -39,6 +40,54 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.keepasskey.app.R
 import com.keepasskey.app.ui.model.resolveText
 import com.keepasskey.app.ui.theme.CapsuleShape
+import com.keepasskey.core.security.ProtectedString
+
+/**
+ * 生成器页面的**动作端口**（依赖倒置）：把「界面需要的动作」与「谁来实现」解耦。
+ *
+ * 生产实现是 [GeneratorViewModel]（见 [GeneratorScreen]），预览实现是空实现
+ * （见文件末尾的 `GeneratorContentPreview`）——预览因此不再需要构造持有剪贴板 /
+ * 数据库会话依赖的真实 ViewModel。接口成员与 `GeneratorViewModel` 既有公开动作一一对应，
+ * 不新增、不删减任何业务语义。
+ */
+interface GeneratorActions {
+    fun setMode(mode: GeneratorMode)
+    fun regenerate()
+    fun copyGeneratedPassword(secret: ProtectedString)
+    fun selectHistoryPassword(secret: ProtectedString)
+    fun setRandomLength(length: Int)
+    fun setUseUpper(enabled: Boolean)
+    fun setUseLower(enabled: Boolean)
+    fun setUseDigits(enabled: Boolean)
+    fun setUseSymbols(enabled: Boolean)
+    fun setExcludeAmbiguous(enabled: Boolean)
+    fun setWordCount(count: Int)
+    fun setSeparator(separator: String)
+    fun setCapitalizeWords(enabled: Boolean)
+    fun setIncludeNumberInPassphrase(enabled: Boolean)
+    fun setMaskPattern(pattern: String)
+}
+
+/** 把 [GeneratorViewModel] 适配为 [GeneratorActions]（生产路径唯一实现） */
+private fun GeneratorViewModel.asActions(): GeneratorActions = object : GeneratorActions {
+    override fun setMode(mode: GeneratorMode) = this@asActions.setMode(mode)
+    override fun regenerate() = this@asActions.regenerate()
+    override fun copyGeneratedPassword(secret: ProtectedString) = this@asActions.copyGeneratedPassword(secret)
+    override fun selectHistoryPassword(secret: ProtectedString) = this@asActions.selectHistoryPassword(secret)
+    override fun setRandomLength(length: Int) = this@asActions.setRandomLength(length)
+    override fun setUseUpper(enabled: Boolean) = this@asActions.setUseUpper(enabled)
+    override fun setUseLower(enabled: Boolean) = this@asActions.setUseLower(enabled)
+    override fun setUseDigits(enabled: Boolean) = this@asActions.setUseDigits(enabled)
+    override fun setUseSymbols(enabled: Boolean) = this@asActions.setUseSymbols(enabled)
+    override fun setExcludeAmbiguous(enabled: Boolean) = this@asActions.setExcludeAmbiguous(enabled)
+    override fun setWordCount(count: Int) = this@asActions.setWordCount(count)
+    override fun setSeparator(separator: String) = this@asActions.setSeparator(separator)
+    override fun setCapitalizeWords(enabled: Boolean) = this@asActions.setCapitalizeWords(enabled)
+    override fun setIncludeNumberInPassphrase(enabled: Boolean) =
+        this@asActions.setIncludeNumberInPassphrase(enabled)
+
+    override fun setMaskPattern(pattern: String) = this@asActions.setMaskPattern(pattern)
+}
 
 /**
  * 独立全功能密码生成器页面 (支持随机/Diceware短语/掩码三模式)
@@ -60,9 +109,31 @@ fun GeneratorScreen(
         }
     }
 
-    // P0 整改：不再在 Composable 内直连 ClipboardManager（该路径缺失定时擦除，
-    // 生成的明文密码会永久滞留剪贴板）；统一交给 ViewModel → ClipboardSecurityManager。
-    // ISSUE-P2-12：状态持有 ProtectedString，UI 仅在渲染瞬间 readString() 物化明文
+    GeneratorContent(
+        uiState = uiState,
+        snackbarHostState = snackbarHostState,
+        // 适配器每次重组新建为轻量无状态对象，不持有额外引用，无生命周期负担
+        actions = viewModel.asActions(),
+        modifier = modifier
+    )
+}
+
+/**
+ * 生成器页面**无状态渲染本体**：只依据 [GeneratorUiState] 与 [actions] 绘制。
+ *
+ * 拆分理由（纯结构性，行为逐字等价）：有状态入口 [GeneratorScreen] 依赖 `hiltViewModel()`，
+ * 在 IDE 预览面板中无法独立渲染；抽出本函数后，预览可传入构造好的状态与空实现 [GeneratorActions]
+ * 覆盖随机 / 口令短语 / 掩码三种模式与历史记录的渲染分支。生产路径（含 `userMessage` 的
+ * 一次性 Snackbar 消费）完全不变，仍由 [GeneratorScreen] 承担。
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun GeneratorContent(
+    uiState: GeneratorUiState,
+    snackbarHostState: SnackbarHostState,
+    actions: GeneratorActions,
+    modifier: Modifier = Modifier
+) {
     Scaffold(
         modifier = modifier.fillMaxSize(),
         containerColor = MaterialTheme.colorScheme.background,
@@ -103,7 +174,7 @@ fun GeneratorScreen(
                         val isSelected = uiState.mode == mode
                         Tab(
                             selected = isSelected,
-                            onClick = { viewModel.setMode(mode) },
+                            onClick = { actions.setMode(mode) },
                             text = {
                                 Text(
                                     text = stringResource(mode.labelRes),
@@ -127,17 +198,17 @@ fun GeneratorScreen(
                     password = displayPassword,
                     strengthLabel = uiState.strengthLabel,
                     entropyBits = uiState.entropyBits,
-                    onRegenerate = viewModel::regenerate,
-                    onCopy = { viewModel.copyGeneratedPassword(uiState.currentPassword) }
+                    onRegenerate = actions::regenerate,
+                    onCopy = { actions.copyGeneratedPassword(uiState.currentPassword) }
                 )
             }
 
             // 3. 对应模式的参数配置
             item {
                 when (uiState.mode) {
-                    GeneratorMode.RANDOM -> RandomModeOptions(uiState = uiState, viewModel = viewModel)
-                    GeneratorMode.PASSPHRASE -> PassphraseModeOptions(uiState = uiState, viewModel = viewModel)
-                    GeneratorMode.MASK -> MaskModeOptions(uiState = uiState, viewModel = viewModel)
+                    GeneratorMode.RANDOM -> RandomModeOptions(uiState = uiState, actions = actions)
+                    GeneratorMode.PASSPHRASE -> PassphraseModeOptions(uiState = uiState, actions = actions)
+                    GeneratorMode.MASK -> MaskModeOptions(uiState = uiState, actions = actions)
                 }
             }
 
@@ -168,13 +239,54 @@ fun GeneratorScreen(
                     val displayHistory = remember(historyItem) { historyItem.readString() }
                     HistoryPasswordRow(
                         password = displayHistory,
-                        onSelect = { viewModel.selectHistoryPassword(historyItem) },
-                        onCopy = { viewModel.copyGeneratedPassword(historyItem) }
+                        onSelect = { actions.selectHistoryPassword(historyItem) },
+                        onCopy = { actions.copyGeneratedPassword(historyItem) }
                     )
                 }
             }
 
             item { Spacer(modifier = Modifier.height(24.dp)) }
         }
+    }
+}
+
+// IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
+// 预览用空实现动作端口：不触碰剪贴板 / 数据库会话，只让界面可渲染
+private object NoOpGeneratorActions : GeneratorActions {
+    override fun setMode(mode: GeneratorMode) = Unit
+    override fun regenerate() = Unit
+    override fun copyGeneratedPassword(secret: ProtectedString) = Unit
+    override fun selectHistoryPassword(secret: ProtectedString) = Unit
+    override fun setRandomLength(length: Int) = Unit
+    override fun setUseUpper(enabled: Boolean) = Unit
+    override fun setUseLower(enabled: Boolean) = Unit
+    override fun setUseDigits(enabled: Boolean) = Unit
+    override fun setUseSymbols(enabled: Boolean) = Unit
+    override fun setExcludeAmbiguous(enabled: Boolean) = Unit
+    override fun setWordCount(count: Int) = Unit
+    override fun setSeparator(separator: String) = Unit
+    override fun setCapitalizeWords(enabled: Boolean) = Unit
+    override fun setIncludeNumberInPassphrase(enabled: Boolean) = Unit
+    override fun setMaskPattern(pattern: String) = Unit
+}
+
+@Preview(name = "密码生成器 - 浅色", showBackground = true)
+@Preview(name = "密码生成器 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
+@Composable
+private fun GeneratorContentPreview() {
+    com.keepasskey.app.ui.theme.KeePasskeyTheme {
+        GeneratorContent(
+            uiState = GeneratorUiState(
+                // 预览专用假口令：仅用于界面排版展示，非任何真实生成的密码
+                currentPassword = ProtectedString("预览-示例-口令-A1b2C3d4"),
+                entropyBits = 96,
+                history = listOf(
+                    ProtectedString("预览-历史-口令-1"),
+                    ProtectedString("预览-历史-口令-2")
+                )
+            ),
+            snackbarHostState = remember { SnackbarHostState() },
+            actions = NoOpGeneratorActions
+        )
     }
 }

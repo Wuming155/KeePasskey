@@ -261,3 +261,21 @@ fun IconPickerDialog(
         containerColor = MaterialTheme.colorScheme.surface
     )
 }
+
+// IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
+@androidx.compose.ui.tooling.preview.Preview(name = "图标选择对话框 - 浅色", showBackground = true)
+@androidx.compose.ui.tooling.preview.Preview(name = "图标选择对话框 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
+@Composable
+private fun IconPickerDialogPreview() {
+    com.keepasskey.app.ui.theme.KeePasskeyTheme {
+        IconPickerDialog(
+            selectedIconName = "key",
+            onSelectIcon = {},
+            onDismiss = {},
+            customIcons = emptyList(),
+            selectedCustomIconId = null,
+            onSelectCustomIcon = {},
+            onUploadClick = {}
+        )
+    }
+}

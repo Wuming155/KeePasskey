@@ -146,3 +146,21 @@ fun KeePassGroupRow(
         }
     }
 }
+
+// IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
+@androidx.compose.ui.tooling.preview.Preview(name = "分组行 - 浅色", showBackground = true)
+@androidx.compose.ui.tooling.preview.Preview(name = "分组行 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
+@Composable
+private fun KeePassGroupRowPreview() {
+    com.keepasskey.app.ui.theme.KeePasskeyTheme {
+        KeePassGroupRow(
+            group = com.keepasskey.app.ui.preview.PreviewGroupLogins,
+            onClick = {},
+            onRename = {},
+            onChangeIcon = {},
+            onDelete = {},
+            icon = com.keepasskey.app.ui.preview.PreviewDefaultIcon,
+            densitySpec = ListDensityPresenter.specOf(ListDensity.NORMAL)
+        )
+    }
+}

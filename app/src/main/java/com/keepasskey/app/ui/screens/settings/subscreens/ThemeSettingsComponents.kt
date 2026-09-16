@@ -280,3 +280,18 @@ internal fun ThemeRadioOptionRow(
         }
     }
 }
+
+// IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
+@androidx.compose.ui.tooling.preview.Preview(name = "调色盘条目卡片 - 浅色", showBackground = true)
+@androidx.compose.ui.tooling.preview.Preview(name = "调色盘条目卡片 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
+@Composable
+private fun ThemePaletteItemCardPreview() {
+    com.keepasskey.app.ui.theme.KeePasskeyTheme {
+        ThemePaletteItemCard(
+            palette = com.keepasskey.app.ui.theme.AppThemePalette.SAPPHIRE,
+            isSelected = true,
+            isDarkTheme = false,
+            onClick = {}
+        )
+    }
+}

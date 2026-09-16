@@ -364,3 +364,19 @@ fun CloudSyncScreen(
         )
     }
 }
+
+// IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
+@androidx.compose.ui.tooling.preview.Preview(name = "云端同步设置页 - 浅色", showBackground = true)
+@androidx.compose.ui.tooling.preview.Preview(name = "云端同步设置页 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
+@Composable
+private fun CloudSyncScreenPreview() {
+    com.keepasskey.app.ui.theme.KeePasskeyTheme {
+        CloudSyncScreen(
+            uiState = com.keepasskey.app.ui.screens.settings.SettingsUiState(),
+            onBackClick = {},
+            onAutoSyncToggle = {},
+            onWifiOnlyToggle = {},
+            onTriggerSync = {}
+        )
+    }
+}

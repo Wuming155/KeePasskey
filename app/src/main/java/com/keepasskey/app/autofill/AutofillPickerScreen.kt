@@ -274,3 +274,38 @@ private fun AutofillPickerRequesterBlock(requester: AutofillPickerRequester) {
         }
     }
 }
+
+// IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
+@androidx.compose.ui.tooling.preview.Preview(name = "自动填充手动选择器 - 浅色", showBackground = true)
+@androidx.compose.ui.tooling.preview.Preview(name = "自动填充手动选择器 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
+@Composable
+private fun AutofillPickerScreenPreview() {
+    com.keepasskey.app.ui.theme.KeePasskeyTheme {
+        AutofillPickerScreen(
+            query = "预览",
+            onQueryChange = {},
+            // 预览夹具就地构造：仅标题 / 用户名等非敏感元数据，凭据字段一律不构造
+            results = listOf(
+                com.keepasskey.core.model.KdbxEntry()
+                    .withField(com.keepasskey.core.model.KdbxConstants.Fields.TITLE, "预览登录条目")
+                    .withField(
+                        com.keepasskey.core.model.KdbxConstants.Fields.USER_NAME,
+                        "demo@example.com"
+                    ),
+                com.keepasskey.core.model.KdbxEntry()
+                    .withField(com.keepasskey.core.model.KdbxConstants.Fields.TITLE, "预览便签条目")
+            ),
+            onPick = {},
+            onCancel = {},
+            requester = AutofillPickerRequester(
+                packageName = "com.example.preview",
+                appLabel = "预览请求方应用",
+                certSha256Hex = "预览签名摘要（占位，非真实证书）",
+                reportedDomain = "example.com"
+            ),
+            canBlockUsername = true,
+            canBlockPassword = true,
+            onBlockField = {}
+        )
+    }
+}

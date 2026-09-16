@@ -62,3 +62,20 @@ fun EntryIconContent(
         )
     }
 }
+
+// IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
+@androidx.compose.ui.tooling.preview.Preview(name = "条目图标绘制槽 - 浅色", showBackground = true)
+@androidx.compose.ui.tooling.preview.Preview(name = "条目图标绘制槽 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
+@Composable
+private fun EntryIconContentPreview() {
+    com.keepasskey.app.ui.theme.KeePasskeyTheme {
+        EntryIconContent(
+            icon = com.keepasskey.app.ui.preview.PreviewDefaultIcon,
+            // 预览用中性色：本文件未引入 MaterialTheme，故用 Color.Unspecified（渲染时取 LocalContentColor）
+            tint = Color.Unspecified,
+            placeholderIcon = Icons.Default.BrokenImage,
+            modifier = Modifier,
+            contentSize = 24.dp
+        )
+    }
+}

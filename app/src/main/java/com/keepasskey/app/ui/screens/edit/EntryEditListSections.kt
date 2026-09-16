@@ -33,6 +33,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.keepasskey.app.R
 import com.keepasskey.app.ui.components.BentoCard
@@ -229,6 +230,47 @@ internal fun EntryEditAttachmentsSection(
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(stringResource(R.string.edit_add_attachment))
             }
+        }
+    }
+}
+
+// IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
+@Preview(name = "编辑页字段与附件列表 - 浅色", showBackground = true)
+@Preview(name = "编辑页字段与附件列表 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
+@Composable
+private fun EntryEditCustomFieldsSectionPreview() {
+    com.keepasskey.app.ui.theme.KeePasskeyTheme {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            EntryEditCustomFieldsSection(
+                customFields = listOf(
+                    com.keepasskey.app.ui.model.UiCustomField(
+                        id = "preview-field-1",
+                        key = "预览自定义字段",
+                        value = "预览值"
+                    ),
+                    com.keepasskey.app.ui.model.UiCustomField(
+                        id = "preview-field-2",
+                        key = "预览受保护字段",
+                        value = "",
+                        isProtected = true
+                    )
+                ),
+                loadedProtectedFields = mapOf("preview-field-2" to "预览受保护字段值".toCharArray()),
+                onAddCustomField = {},
+                onUpdateCustomField = { _, _, _, _ -> },
+                onUpdateProtectedFieldValue = { _, _ -> },
+                onRemoveCustomField = { _ -> }
+            )
+            EntryEditAttachmentsSection(
+                attachments = com.keepasskey.app.ui.preview.PreviewAttachments,
+                onPickAttachmentFile = {},
+                onRemoveAttachment = { _ -> }
+            )
         }
     }
 }

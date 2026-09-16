@@ -38,6 +38,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.keepasskey.app.R
@@ -322,4 +323,28 @@ fun SafeAttachmentPreviewDialog(
         },
         shape = RoundedCornerShape(20.dp)
     )
+}
+
+// IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
+@Preview(name = "历史版本差异对比 - 浅色", showBackground = true)
+@Preview(name = "历史版本差异对比 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
+@Composable
+private fun RevisionVisualDiffDialogPreview() {
+    com.keepasskey.app.ui.theme.KeePasskeyTheme {
+        Column(verticalArrangement = Arrangement.spacedBy(24.dp)) {
+            RevisionVisualDiffDialog(
+                currentEntry = com.keepasskey.app.ui.preview.PreviewEntryLogin,
+                revision = com.keepasskey.app.ui.preview.PreviewRevisions.first(),
+                currentPassword = "预览当前假密码",
+                revisionPassword = "预览历史假密码",
+                onDismiss = {},
+                onRollback = {}
+            )
+            SafeAttachmentPreviewDialog(
+                attachment = com.keepasskey.app.ui.preview.PreviewAttachments.first(),
+                onDismiss = {},
+                onExport = {}
+            )
+        }
+    }
 }

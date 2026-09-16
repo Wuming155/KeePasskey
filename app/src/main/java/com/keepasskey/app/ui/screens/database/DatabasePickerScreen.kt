@@ -48,6 +48,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -316,4 +317,59 @@ internal fun queryDocumentDisplayName(context: android.content.Context, uri: Uri
             if (index >= 0 && cursor.moveToFirst()) cursor.getString(index) else null
         }
     }.getOrNull() ?: uri.lastPathSegment.orEmpty()
+}
+
+// IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
+@Preview(name = "密码库选择内容 - 浅色", showBackground = true)
+@Preview(name = "密码库选择内容 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
+@Composable
+private fun DatabasePickerContentPreview() {
+    com.keepasskey.app.ui.theme.KeePasskeyTheme {
+        val previewSnackbar = remember { SnackbarHostState() }
+
+        DatabasePickerContent(
+            uiState = com.keepasskey.app.ui.screens.database.DatabasePickerUiState(
+                databases = listOf(
+                    com.keepasskey.app.ui.model.VaultDatabaseInfo(
+                        id = "preview-db-local",
+                        name = "预览本地密码库",
+                        path = "/storage/emulated/0/Documents/preview.kdbx",
+                        isRemote = false,
+                        syncType = "本地",
+                        lastOpenedAt = "2026-01-02 12:00",
+                        fileSizeFormatted = "128.0 KB",
+                        isActive = true
+                    ),
+                    com.keepasskey.app.ui.model.VaultDatabaseInfo(
+                        id = "preview-db-remote",
+                        name = "预览云端密码库",
+                        path = "https://dav.example.com/preview.kdbx",
+                        isRemote = true,
+                        syncType = "WebDAV",
+                        lastOpenedAt = "2026-01-01 09:00",
+                        fileSizeFormatted = "256.0 KB",
+                        isActive = false
+                    )
+                ),
+                isLoading = false,
+                showCreateDialog = false,
+                showOpenSourceDialog = false
+            ),
+            snackbarHostState = previewSnackbar,
+            onBackClick = {},
+            onSelectDatabase = { _ -> },
+            onOpenCreateDialog = {},
+            onCloseCreateDialog = {},
+            onCreateDatabase = { _, _, _, _, _ -> },
+            onOpenExistingClick = {},
+            onCloseOpenSourceDialog = {},
+            onImportFromSource = { _, _, _ -> },
+            onRemoveDatabase = { _ -> },
+            keyFileDelivery = com.keepasskey.app.ui.screens.database.KeyFileDeliveryState.PendingSave(
+                suggestedFileName = "预览密钥文件.keyx"
+            ),
+            onSaveKeyFile = { _ -> },
+            onKeyFileDeliveryDismissed = {}
+        )
+    }
 }

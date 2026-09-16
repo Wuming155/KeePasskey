@@ -41,6 +41,11 @@ captures/
 # 项目计划与结论一律落 docs/ 下的正式文档）
 .trae/
 .vscode/
+
+# 图形界面（Compose）预览导航索引：根目录 GUI导航.md 属**本地开发期检索工具**，
+# 只服务 Android Studio 预览面板的快速跳转，非项目正式文档（正式文档一律落 docs/ 并登记文档地图），
+# 故不入库；内容可由源码重新生成。
+GUI导航.md
 # Keystore files（ISSUE-P3-09 / ZT-20 AC5 补齐）
 # 已覆盖：*.jks / *.keystore / keystore.properties（keystore.properties.example 为模板，须入库，
 # 故此处只忽略精确文件名而不做 keystore.properties.* 通配）。

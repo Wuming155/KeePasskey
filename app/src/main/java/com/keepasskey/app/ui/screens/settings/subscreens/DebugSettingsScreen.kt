@@ -396,3 +396,27 @@ private fun DebugSwitchRow(
         )
     }
 }
+
+// IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
+// 说明：为遵守「不新增 import 语句」约束，@Preview 采用全限定名写法
+@androidx.compose.ui.tooling.preview.Preview(name = "调试日志设置页 - 浅色", showBackground = true)
+@androidx.compose.ui.tooling.preview.Preview(name = "调试日志设置页 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
+@Composable
+private fun DebugSettingsScreenPreview() {
+    com.keepasskey.app.ui.theme.KeePasskeyTheme {
+        DebugSettingsScreen(
+            uiState = com.keepasskey.app.ui.screens.settings.SettingsUiState().copy(
+                debugLogEnabled = true,
+                verboseSyncLog = true,
+                debugLogLines = listOf(
+                    "[INFO] 预览日志：应用已启动",
+                    "[WARN] 预览日志：示例警告",
+                    "[ERROR] 预览日志：示例错误"
+                )
+            ),
+            onBackClick = {},
+            onDebugLogToggle = {},
+            onVerboseSyncLogToggle = {}
+        )
+    }
+}

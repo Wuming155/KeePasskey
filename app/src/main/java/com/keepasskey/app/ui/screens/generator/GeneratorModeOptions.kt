@@ -30,7 +30,7 @@ import com.keepasskey.app.ui.components.BentoCard
 @Composable
 internal fun RandomModeOptions(
     uiState: GeneratorUiState,
-    viewModel: GeneratorViewModel
+    actions: GeneratorActions
 ) {
     BentoCard(
         modifier = Modifier.fillMaxWidth(),
@@ -45,7 +45,7 @@ internal fun RandomModeOptions(
 
             Slider(
                 value = uiState.randomLength.toFloat(),
-                onValueChange = { viewModel.setRandomLength(it.toInt()) },
+                onValueChange = { actions.setRandomLength(it.toInt()) },
                 valueRange = 6f..64f,
                 steps = 57,
                 colors = SliderDefaults.colors(
@@ -54,15 +54,15 @@ internal fun RandomModeOptions(
                 )
             )
 
-            OptionSwitchRow(title = stringResource(R.string.gen_opt_upper), checked = uiState.useUpper, onCheckedChange = viewModel::setUseUpper)
-            OptionSwitchRow(title = stringResource(R.string.gen_opt_lower), checked = uiState.useLower, onCheckedChange = viewModel::setUseLower)
-            OptionSwitchRow(title = stringResource(R.string.gen_opt_digits), checked = uiState.useDigits, onCheckedChange = viewModel::setUseDigits)
-            OptionSwitchRow(title = stringResource(R.string.gen_opt_symbols), checked = uiState.useSymbols, onCheckedChange = viewModel::setUseSymbols)
+            OptionSwitchRow(title = stringResource(R.string.gen_opt_upper), checked = uiState.useUpper, onCheckedChange = actions::setUseUpper)
+            OptionSwitchRow(title = stringResource(R.string.gen_opt_lower), checked = uiState.useLower, onCheckedChange = actions::setUseLower)
+            OptionSwitchRow(title = stringResource(R.string.gen_opt_digits), checked = uiState.useDigits, onCheckedChange = actions::setUseDigits)
+            OptionSwitchRow(title = stringResource(R.string.gen_opt_symbols), checked = uiState.useSymbols, onCheckedChange = actions::setUseSymbols)
             OptionSwitchRow(
                 title = stringResource(R.string.gen_opt_exclude_ambiguous),
                 subtitle = stringResource(R.string.gen_opt_exclude_ambiguous_sub),
                 checked = uiState.excludeAmbiguous,
-                onCheckedChange = viewModel::setExcludeAmbiguous
+                onCheckedChange = actions::setExcludeAmbiguous
             )
         }
     }
@@ -72,7 +72,7 @@ internal fun RandomModeOptions(
 @Composable
 internal fun PassphraseModeOptions(
     uiState: GeneratorUiState,
-    viewModel: GeneratorViewModel
+    actions: GeneratorActions
 ) {
     val spaceSeparator = stringResource(R.string.gen_separator_space)
     val separators = listOf("-", "_", spaceSeparator, ".", "/")
@@ -90,7 +90,7 @@ internal fun PassphraseModeOptions(
 
             Slider(
                 value = uiState.wordCount.toFloat(),
-                onValueChange = { viewModel.setWordCount(it.toInt()) },
+                onValueChange = { actions.setWordCount(it.toInt()) },
                 valueRange = 3f..8f,
                 steps = 4,
                 colors = SliderDefaults.colors(
@@ -114,7 +114,7 @@ internal fun PassphraseModeOptions(
                     val isSelected = uiState.separator == actualSep
                     FilterChip(
                         selected = isSelected,
-                        onClick = { viewModel.setSeparator(actualSep) },
+                        onClick = { actions.setSeparator(actualSep) },
                         label = { Text(sep) },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
@@ -128,14 +128,14 @@ internal fun PassphraseModeOptions(
                 title = stringResource(R.string.gen_opt_capitalize),
                 subtitle = stringResource(R.string.gen_opt_capitalize_sub),
                 checked = uiState.capitalizeWords,
-                onCheckedChange = viewModel::setCapitalizeWords
+                onCheckedChange = actions::setCapitalizeWords
             )
 
             OptionSwitchRow(
                 title = stringResource(R.string.gen_opt_append_number),
                 subtitle = stringResource(R.string.gen_opt_append_number_sub),
                 checked = uiState.includeNumberInPassphrase,
-                onCheckedChange = viewModel::setIncludeNumberInPassphrase
+                onCheckedChange = actions::setIncludeNumberInPassphrase
             )
         }
     }
@@ -145,7 +145,7 @@ internal fun PassphraseModeOptions(
 @Composable
 internal fun MaskModeOptions(
     uiState: GeneratorUiState,
-    viewModel: GeneratorViewModel
+    actions: GeneratorActions
 ) {
     val presets: List<Pair<Int, String>> = listOf(
         Pair(R.string.gen_mask_preset_pin, "dddddd"),
@@ -167,7 +167,7 @@ internal fun MaskModeOptions(
 
             OutlinedTextField(
                 value = uiState.maskPattern,
-                onValueChange = viewModel::setMaskPattern,
+                onValueChange = actions::setMaskPattern,
                 label = { Text(stringResource(R.string.gen_mask_format)) },
                 singleLine = true,
                 shape = RoundedCornerShape(12.dp),
@@ -188,7 +188,7 @@ internal fun MaskModeOptions(
                     val isSelected = uiState.maskPattern == pattern
                     FilterChip(
                         selected = isSelected,
-                        onClick = { viewModel.setMaskPattern(pattern) },
+                        onClick = { actions.setMaskPattern(pattern) },
                         label = { Text(stringResource(labelRes)) },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
@@ -232,5 +232,23 @@ internal fun OptionSwitchRow(
             }
         }
         Switch(checked = checked, onCheckedChange = onCheckedChange)
+    }
+}
+
+// IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
+// 说明：三个模式参数区块均以 (GeneratorUiState, GeneratorViewModel) 为入参（ViewModel 无法在预览中构造），
+// 故预览本文件中可独立渲染的无状态组件 OptionSwitchRow
+// 为遵守「不新增 import 语句」约束，@Preview 采用全限定名写法
+@androidx.compose.ui.tooling.preview.Preview(name = "密码生成选项开关行 - 浅色", showBackground = true)
+@androidx.compose.ui.tooling.preview.Preview(name = "密码生成选项开关行 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
+@Composable
+private fun GeneratorModeOptionsPreview() {
+    com.keepasskey.app.ui.theme.KeePasskeyTheme {
+        OptionSwitchRow(
+            title = "排除易混淆字符",
+            subtitle = "预览用说明文案：不使用 0/O、1/l 等易混淆字符",
+            checked = true,
+            onCheckedChange = {}
+        )
     }
 }

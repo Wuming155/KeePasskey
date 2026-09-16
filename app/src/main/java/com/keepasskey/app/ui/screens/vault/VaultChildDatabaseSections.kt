@@ -239,3 +239,26 @@ private const val CHILD_SECTION_LOCK_GAP_DP = 6
 
 /** 只读条目行尾随锁形图标边长（dp） */
 private const val CHILD_ENTRY_LOCK_ICON_DP = 16
+
+// IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
+@androidx.compose.ui.tooling.preview.Preview(name = "子库只读条目行 - 浅色", showBackground = true)
+@androidx.compose.ui.tooling.preview.Preview(name = "子库只读条目行 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
+@Composable
+private fun ChildVaultEntryRowViewPreview() {
+    com.keepasskey.app.ui.theme.KeePasskeyTheme {
+        ChildVaultEntryRowView(
+            row = com.keepasskey.app.ui.model.ChildVaultEntryRow(
+                mountId = "preview-mount-1",
+                mountAlias = "预览子库",
+                entryUuid = "preview-entry-uuid-1",
+                title = "预览子库条目",
+                username = "demo@example.com",
+                url = "https://example.com",
+                displayPath = "预览子库 / 网站登录"
+            ),
+            showUsername = true,
+            showUrl = true,
+            densitySpec = ListDensityPresenter.specOf(com.keepasskey.app.ui.screens.settings.ListDensity.NORMAL)
+        )
+    }
+}

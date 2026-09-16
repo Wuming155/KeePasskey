@@ -177,3 +177,21 @@ internal fun ModernSectionHeader(
         modifier = modifier.padding(start = 4.dp, top = 8.dp, bottom = 2.dp)
     )
 }
+
+// IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
+// 说明：为遵守「不新增 import 语句」约束，@Preview 采用全限定名写法
+@androidx.compose.ui.tooling.preview.Preview(name = "现代设置行 - 浅色", showBackground = true)
+@androidx.compose.ui.tooling.preview.Preview(name = "现代设置行 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
+@Composable
+private fun ModernSettingsRowPreview() {
+    com.keepasskey.app.ui.theme.KeePasskeyTheme {
+        ModernSettingsRow(
+            icon = Icons.AutoMirrored.Filled.ArrowForwardIos,
+            iconTint = MaterialTheme.colorScheme.primary,
+            title = "预览设置项标题",
+            subtitle = "预览设置项说明文本",
+            onClick = {},
+            trailingBadge = "预览"
+        )
+    }
+}

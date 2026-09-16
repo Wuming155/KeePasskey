@@ -21,11 +21,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.keepasskey.app.R
 import com.keepasskey.app.autofill.AutofillHealthIssue
+import com.keepasskey.app.autofill.AutofillHealthReport
 import com.keepasskey.app.ui.components.BentoCard
 
 /**
@@ -47,6 +49,22 @@ fun AutofillHealthCard(
         viewModel.refresh(appEnabled)
     }
 
+    AutofillHealthCardContent(report = report, modifier = modifier)
+}
+
+/**
+ * 健康卡片**无状态渲染本体**：只负责把一份报告画出来，不持有 ViewModel、不触发探测。
+ *
+ * 拆分理由（纯结构性，行为逐字等价）：有状态入口 [AutofillHealthCard] 依赖
+ * `hiltViewModel()`，在 IDE 预览面板中无法独立渲染——抽出本函数后，预览可传入构造好的
+ * [AutofillHealthReport] 覆盖「健康 / 有异常」两条渲染分支，而生产路径（含首帧
+ * `report == null` 不渲染任何文案的既有语义）完全不变。
+ */
+@Composable
+private fun AutofillHealthCardContent(
+    report: AutofillHealthReport?,
+    modifier: Modifier = Modifier
+) {
     val current = report ?: return
     val healthy = current.isFullyOperational
 
@@ -96,4 +114,46 @@ private fun AutofillHealthIssue.labelRes(): Int = when (this) {
     // ISSUE-P3-113：字段屏蔽签名密钥不可用（fail-closed 的静默故障出口）
     AutofillHealthIssue.FIELD_BLOCK_SIGNATURE_UNAVAILABLE ->
         R.string.autofill_health_issue_field_signature_unavailable
+}
+
+// IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
+@Preview(name = "自动填充健康卡（全部正常） - 浅色", showBackground = true)
+@Preview(
+    name = "自动填充健康卡（全部正常） - 深色",
+    showBackground = true,
+    uiMode = 0x20 /* UI_MODE_NIGHT_YES */
+)
+@Composable
+private fun AutofillHealthCardPreview() {
+    com.keepasskey.app.ui.theme.KeePasskeyTheme {
+        AutofillHealthCardContent(
+            report = AutofillHealthReport(
+                serviceDeclared = true,
+                appEnabled = true,
+                systemEnabled = true,
+                credentialManagerAvailable = true
+            )
+        )
+    }
+}
+
+// IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
+@Preview(name = "自动填充健康卡（存在异常项） - 浅色", showBackground = true)
+@Preview(
+    name = "自动填充健康卡（存在异常项） - 深色",
+    showBackground = true,
+    uiMode = 0x20 /* UI_MODE_NIGHT_YES */
+)
+@Composable
+private fun AutofillHealthCardIssuesPreview() {
+    com.keepasskey.app.ui.theme.KeePasskeyTheme {
+        AutofillHealthCardContent(
+            report = AutofillHealthReport(
+                serviceDeclared = true,
+                appEnabled = false,
+                systemEnabled = false,
+                credentialManagerAvailable = false
+            )
+        )
+    }
 }

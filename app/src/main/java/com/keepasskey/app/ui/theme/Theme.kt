@@ -2,9 +2,18 @@ package com.keepasskey.app.ui.theme
 
 import android.app.Activity
 import android.os.Build
+import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialExpressiveTheme
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MotionScheme
+import androidx.compose.material3.Text
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.runtime.Composable
@@ -12,9 +21,12 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 
 data class SecurityColors(
@@ -141,5 +153,40 @@ fun KeePasskeyTheme(
             motionScheme = MotionScheme.expressive(),
             content = content
         )
+    }
+}
+
+/**
+ * 主题调色盘总览预览（IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI）。
+ *
+ * 以品牌调色盘 [AppThemePalette.SAPPHIRE] 渲染主角色色块，用于在 Preview 面板中逐目比对
+ * 浅色 / 深色两套语义色的实际观感。
+ */
+@Preview(name = "主题调色盘总览 - 浅色", showBackground = true)
+@Preview(name = "主题调色盘总览 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
+@Composable
+private fun KeePasskeyThemePreview() {
+    KeePasskeyTheme {
+        // 主角色语义色抽样：用于在 Preview 面板中逐目比对浅色 / 深色两套观感
+        val swatches = listOf(
+            "primary" to MaterialTheme.colorScheme.primary,
+            "primaryContainer" to MaterialTheme.colorScheme.primaryContainer,
+            "secondary" to MaterialTheme.colorScheme.secondary,
+            "tertiary" to MaterialTheme.colorScheme.tertiary,
+            "surfaceVariant" to MaterialTheme.colorScheme.surfaceVariant,
+            "error" to MaterialTheme.colorScheme.error
+        )
+        Column(modifier = Modifier.padding(12.dp)) {
+            swatches.forEach { (label, color) ->
+                Text(text = label, modifier = Modifier.padding(bottom = 4.dp))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(28.dp)
+                        .background(color)
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+            }
+        }
     }
 }

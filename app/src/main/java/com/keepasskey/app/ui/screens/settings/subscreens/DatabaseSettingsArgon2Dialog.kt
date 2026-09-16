@@ -198,3 +198,25 @@ internal fun Argon2ParametersDialog(
         }
     )
 }
+
+// IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
+// 说明：为遵守「不新增 import 语句」约束，@Preview 采用全限定名写法
+@androidx.compose.ui.tooling.preview.Preview(name = "Argon2 参数调节对话框 - 浅色", showBackground = true)
+@androidx.compose.ui.tooling.preview.Preview(name = "Argon2 参数调节对话框 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
+@Composable
+private fun Argon2ParametersDialogPreview() {
+    com.keepasskey.app.ui.theme.KeePasskeyTheme {
+        Argon2ParametersDialog(
+            uiState = com.keepasskey.app.ui.screens.settings.SettingsUiState(),
+            // 构造一份「基准已完成」的展示态，覆盖推荐参数结果分支
+            kdfBenchmarkState = com.keepasskey.app.ui.screens.settings.KdfBenchmarkUiState(
+                recommendedIterations = 6L,
+                recommendedMemoryMb = 128L,
+                recommendedParallelism = 4
+            ),
+            onRunKdfBenchmark = {},
+            onApplyParameters = { _, _, _ -> },
+            onDismiss = {}
+        )
+    }
+}

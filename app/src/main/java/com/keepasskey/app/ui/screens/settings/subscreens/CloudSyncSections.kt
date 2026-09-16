@@ -391,3 +391,25 @@ internal fun ConflictResolutionDialog(
         }
     )
 }
+
+// IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
+// 说明：为遵守「不新增 import 语句」约束，@Preview 采用全限定名写法
+@androidx.compose.ui.tooling.preview.Preview(name = "离线缓存与定时同步区块 - 浅色", showBackground = true)
+@androidx.compose.ui.tooling.preview.Preview(name = "离线缓存与定时同步区块 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
+@Composable
+private fun OfflineSyncSectionPreview() {
+    com.keepasskey.app.ui.theme.KeePasskeyTheme {
+        OfflineSyncSection(
+            // 打开周期同步，以覆盖「同步间隔」子行的渲染分支
+            uiState = com.keepasskey.app.ui.screens.settings.SettingsUiState(
+                periodicBackgroundSyncEnabled = true
+            ),
+            onUseOfflineCacheToggle = {},
+            onSyncOnColdStartToggle = {},
+            onAutoSyncToggle = {},
+            onPeriodicBackgroundSyncToggle = {},
+            onShowIntervalDialog = {},
+            onWifiOnlyToggle = {}
+        )
+    }
+}

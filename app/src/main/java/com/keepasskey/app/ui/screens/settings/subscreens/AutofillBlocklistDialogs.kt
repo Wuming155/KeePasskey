@@ -290,3 +290,24 @@ private fun rememberAppLabel(packageName: String): String {
     }
     return label.value
 }
+
+// IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
+// 说明：为遵守「不新增 import 语句」约束，@Preview 采用全限定名写法
+@androidx.compose.ui.tooling.preview.Preview(name = "包名黑名单管理对话框 - 浅色", showBackground = true)
+@androidx.compose.ui.tooling.preview.Preview(name = "包名黑名单管理对话框 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
+@Composable
+private fun PackageBlocklistManageDialogPreview() {
+    com.keepasskey.app.ui.theme.KeePasskeyTheme {
+        PackageBlocklistManageDialog(
+            title = "预览：应用填充黑名单",
+            description = "预览说明：命中名单的应用不会收到填充候选，可随时移除。",
+            emptyText = "预览：名单为空",
+            addHint = "预览：输入应用包名",
+            // 明显虚构的包名占位，不涉及任何真实应用或凭据
+            blockedPackages = listOf("com.example.previewapp", "com.example.previewapp.two"),
+            onDismiss = {},
+            onAdd = { false },
+            onRemove = { true }
+        )
+    }
+}

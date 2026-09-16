@@ -23,6 +23,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -32,6 +33,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.keepasskey.app.R
 import com.keepasskey.app.ui.components.BentoCard
@@ -290,6 +292,72 @@ internal fun PasswordGeneratorWidget(
                 selected = useSymbols,
                 onClick = onToggleSymbols,
                 label = { Text("#$%") }
+            )
+        }
+    }
+}
+
+/**
+ * IDE 预览专用状态装载：仅在组合首帧把示例状态写入 remember 状态，绕开
+ * `remember(…) { mutableStateOf(示例) }` 的「非 Composable 上下文求值」静态检查。
+ */
+@Composable
+private fun <T> previewStateOf(value: T): androidx.compose.runtime.MutableState<T> {
+    val state = remember { mutableStateOf(value) }
+    LaunchedEffect(Unit) { state.value = value }
+    return state
+}
+
+// IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
+@Preview(name = "编辑页配置区块 - 浅色", showBackground = true)
+@Preview(name = "编辑页配置区块 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
+@Composable
+private fun EntryEditTotpSectionPreview() {
+    com.keepasskey.app.ui.theme.KeePasskeyTheme {
+        val previewTags = previewStateOf("预览标签")
+        val previewAutoType = previewStateOf("{USERNAME}{TAB}{PASSWORD}{ENTER}")
+        val previewOverrideUrl = previewStateOf("https://example.com/preview")
+
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            EntryEditTotpSection(
+                entryId = "preview-entry-edit",
+                loadedTotpSecret = "预览假种子".toCharArray(),
+                onTotpSecretChangeSecure = { _ -> },
+                onScanTotpQr = {}
+            )
+            EntryEditPasskeySection(
+                isPasskey = true,
+                onTogglePasskey = {}
+            )
+            EntryEditPasskeySection(
+                isPasskey = false,
+                onTogglePasskey = {}
+            )
+            EntryEditExtraSection(
+                tagsInput = previewTags.value,
+                onTagsInputChange = { previewTags.value = it },
+                autoTypeSequence = previewAutoType.value,
+                onAutoTypeSequenceChange = { previewAutoType.value = it },
+                overrideUrl = previewOverrideUrl.value,
+                onOverrideUrlChange = { previewOverrideUrl.value = it }
+            )
+            PasswordGeneratorWidget(
+                passLength = 20f,
+                useUpper = true,
+                useLower = true,
+                useDigits = true,
+                useSymbols = false,
+                onPassLengthChange = { _ -> },
+                onRegenerate = {},
+                onToggleUpper = {},
+                onToggleLower = {},
+                onToggleDigits = {},
+                onToggleSymbols = {}
             )
         }
     }

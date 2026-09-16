@@ -37,6 +37,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -383,6 +384,90 @@ fun EntryEditContent(
                     Text(stringResource(R.string.btn_continue_edit))
                 }
             }
+        )
+    }
+}
+
+// IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
+@Preview(name = "凭据编辑内容 - 浅色", showBackground = true)
+@Preview(name = "凭据编辑内容 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
+@Composable
+private fun EntryEditContentPreview() {
+    com.keepasskey.app.ui.theme.KeePasskeyTheme {
+        val previewSnackbar = remember { SnackbarHostState() }
+
+        EntryEditContent(
+            uiState = com.keepasskey.app.ui.screens.edit.EntryEditUiState(
+                entryId = "preview-entry-edit",
+                groupId = com.keepasskey.app.ui.preview.PreviewGroupLogins.id,
+                availableGroups = com.keepasskey.app.ui.preview.PreviewGroups,
+                iconName = "key",
+                title = "预览编辑条目",
+                username = "demo@example.com",
+                passwordLength = 16,
+                url = "https://example.com",
+                notes = "预览用备注文本",
+                isPasskey = false,
+                customFields = listOf(
+                    com.keepasskey.app.ui.model.UiCustomField(
+                        id = "preview-field-1",
+                        key = "预览自定义字段",
+                        value = "预览值"
+                    ),
+                    com.keepasskey.app.ui.model.UiCustomField(
+                        id = "preview-field-2",
+                        key = "预览受保护字段",
+                        value = "",
+                        isProtected = true
+                    )
+                ),
+                attachments = com.keepasskey.app.ui.preview.PreviewAttachments,
+                tagsInput = "预览标签",
+                autoTypeSequence = "{USERNAME}{TAB}{PASSWORD}{ENTER}",
+                overrideUrl = "https://example.com/preview",
+                isPasswordVisible = false,
+                showGenerator = true,
+                passLength = 20f,
+                isDirty = true
+            ),
+            loadedPassword = "预览".toCharArray(),
+            loadedTotpSecret = null,
+            loadedProtectedFields = mapOf("preview-field-2" to "预览受保护字段值".toCharArray()),
+            isDirty = true,
+            snackbarHostState = previewSnackbar,
+            onBackClick = {},
+            onSaveClick = {},
+            onGroupChange = { _ -> },
+            onIconChange = { _ -> },
+            customIconOptions = emptyList(),
+            onSelectCustomIcon = { _ -> },
+            onUploadCustomIcon = {},
+            onTitleChange = { _ -> },
+            onUsernameChange = { _ -> },
+            onPasswordChangeSecure = { _ -> },
+            onUrlChange = { _ -> },
+            onNotesChange = { _ -> },
+            onTogglePasskey = {},
+            onTotpSecretChangeSecure = { _ -> },
+            onUpdateProtectedFieldValue = { _, _ -> },
+            onTagsInputChange = { _ -> },
+            onAutoTypeSequenceChange = { _ -> },
+            onOverrideUrlChange = { _ -> },
+            onAddCustomField = {},
+            onUpdateCustomField = { _, _, _, _ -> },
+            onRemoveCustomField = { _ -> },
+            onRemoveAttachment = { _ -> },
+            onTogglePasswordVisibility = {},
+            onToggleGenerator = {},
+            onPassLengthChange = { _ -> },
+            onGeneratePassword = {},
+            onToggleUpper = {},
+            onToggleLower = {},
+            onToggleDigits = {},
+            onToggleSymbols = {},
+            onShowMessage = { _ -> },
+            onPickAttachmentFile = {},
+            onScanTotpQr = {}
         )
     }
 }

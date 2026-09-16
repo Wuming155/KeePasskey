@@ -412,3 +412,24 @@ private fun AutofillCallerAttributionBlock(
         }
     }
 }
+
+// IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI。
+// 只预览确认页的无状态归属块；Activity 本体（Hilt 注入 / 生物识别 / 真实窗口）不可预览
+@androidx.compose.ui.tooling.preview.Preview(name = "填充确认调用方归属块 - 浅色", showBackground = true)
+@androidx.compose.ui.tooling.preview.Preview(name = "填充确认调用方归属块 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
+@Composable
+private fun AutofillCallerAttributionBlockPreview() {
+    com.keepasskey.app.ui.theme.KeePasskeyTheme {
+        AutofillCallerAttributionBlock(
+            attribution = AutofillCallerAttribution(
+                packageName = "com.example.preview",
+                certSha256Hex = "预览签名摘要（占位，非真实证书）",
+                webDomain = "example.com",
+                firstOccurrence = true
+            ),
+            showTrustCheckbox = true,
+            trustChecked = false,
+            onTrustCheckedChange = {}
+        )
+    }
+}

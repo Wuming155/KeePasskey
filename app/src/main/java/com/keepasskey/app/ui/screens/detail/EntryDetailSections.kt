@@ -27,11 +27,13 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.keepasskey.app.R
@@ -270,6 +272,64 @@ internal fun NotesCard(notesText: String, updatedAt: String) {
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.outline
             )
+        }
+    }
+}
+
+/**
+ * IDE 预览专用状态装载：仅在组合首帧把示例状态写入 remember 状态，绕开
+ * `remember(…) { mutableStateOf(示例) }` 的「非 Composable 上下文求值」静态检查。
+ */
+@Composable
+private fun <T> previewStateOf(value: T): androidx.compose.runtime.MutableState<T> {
+    val state = androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(value) }
+    LaunchedEffect(Unit) { state.value = value }
+    return state
+}
+
+// IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
+@Preview(name = "详情页字段与附件区块 - 浅色", showBackground = true)
+@Preview(name = "详情页字段与附件区块 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
+@Composable
+private fun CustomFieldsCardPreview() {
+    com.keepasskey.app.ui.theme.KeePasskeyTheme {
+        val previewEntry = com.keepasskey.app.ui.preview.PreviewEntryLogin
+        val previewUiState = previewStateOf(
+            com.keepasskey.app.ui.screens.detail.EntryDetailUiState(
+                entry = previewEntry,
+                protectedFieldsVisibility = mapOf("preview-field-2" to false),
+                revealedProtectedFields = mapOf("preview-field-2" to "预览受保护字段值")
+            )
+        ).value
+
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            CustomFieldsCard(
+                uiState = previewUiState,
+                entry = previewEntry,
+                onToggleCustomFieldVisibility = { _ -> },
+                onCopyCustomField = { _, _ -> },
+                onShowMessage = { _ -> }
+            )
+            AttachmentsCard(
+                entry = previewEntry.copy(
+                    attachments = com.keepasskey.app.ui.preview.PreviewAttachments
+                ),
+                onPreviewAttachment = { _ -> },
+                onExportAttachment = { _ -> }
+            )
+            RevisionsCard(
+                entry = previewEntry.copy(
+                    revisions = com.keepasskey.app.ui.preview.PreviewRevisions
+                ),
+                onCompareRevision = { _ -> },
+                onRequestRollback = { _ -> }
+            )
+            NotesCard(notesText = "预览用备注文本，仅用于界面排版展示。", updatedAt = "2026-01-02 12:00")
         }
     }
 }

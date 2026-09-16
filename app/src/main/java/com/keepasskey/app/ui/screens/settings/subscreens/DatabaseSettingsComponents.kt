@@ -396,3 +396,21 @@ internal fun DatabaseFeedbackItem(
             )
     )
 }
+
+// IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
+// 说明：为遵守「不新增 import 语句」约束，@Preview 采用全限定名写法
+@androidx.compose.ui.tooling.preview.Preview(name = "密码库基础信息卡片 - 浅色", showBackground = true)
+@androidx.compose.ui.tooling.preview.Preview(name = "密码库基础信息卡片 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
+@Composable
+private fun DatabaseSettingsComponentsPreview() {
+    com.keepasskey.app.ui.theme.KeePasskeyTheme {
+        DatabaseBasicCard(
+            uiState = com.keepasskey.app.ui.screens.settings.SettingsUiState().copy(
+                databaseName = "预览示例密码库",
+                databasePath = "/预览目录/预览示例.kdbx",
+                databaseDefaultUsername = "demo@example.com"
+            ),
+            onRecycleBinToggle = {}
+        )
+    }
+}

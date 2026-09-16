@@ -246,3 +246,30 @@ internal fun StandardEntryLayout(
         }
     }
 }
+
+// IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
+@androidx.compose.ui.tooling.preview.Preview(name = "条目标准行 - 浅色", showBackground = true)
+@androidx.compose.ui.tooling.preview.Preview(name = "条目标准行 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
+@Composable
+private fun StandardEntryLayoutPreview() {
+    com.keepasskey.app.ui.theme.KeePasskeyTheme {
+        StandardEntryLayout(
+            entry = com.keepasskey.app.ui.preview.PreviewEntryLogin,
+            icon = com.keepasskey.app.ui.preview.PreviewDefaultIcon,
+            urlText = "https://example.com",
+            isRecycled = false,
+            isBatchMode = false,
+            isSelected = false,
+            showUsername = true,
+            showOtp = true,
+            showPasskeyBadge = true,
+            showUrl = true,
+            densitySpec = ListDensityPresenter.specOf(com.keepasskey.app.ui.screens.settings.ListDensity.NORMAL),
+            groupPath = null,
+            onCopyPassword = {},
+            onCopyUsername = {},
+            onRestore = {},
+            onPurge = {}
+        )
+    }
+}

@@ -220,3 +220,28 @@ internal fun SecureNoteLayout(
         }
     }
 }
+
+// IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
+@androidx.compose.ui.tooling.preview.Preview(name = "银行卡卡片版式 - 浅色", showBackground = true)
+@androidx.compose.ui.tooling.preview.Preview(name = "银行卡卡片版式 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
+@Composable
+private fun CreditCardLayoutPreview() {
+    com.keepasskey.app.ui.theme.KeePasskeyTheme {
+        CreditCardLayout(
+            entry = com.keepasskey.app.ui.preview.PreviewEntryCard,
+            icon = com.keepasskey.app.ui.preview.PreviewDefaultIcon,
+            isBatchMode = false,
+            isSelected = false,
+            densitySpec = com.keepasskey.app.ui.screens.vault.ListDensitySpec(
+                rowVerticalPaddingDp = 10,
+                rowHorizontalPaddingDp = 12,
+                iconContainerSizeDp = 38,
+                iconContentSizeDp = 20,
+                titleFontSizeSp = 15,
+                secondaryFontSizeSp = 12
+            ),
+            groupPath = "预览分组 / 银行卡",
+            onCopyNumber = {}
+        )
+    }
+}

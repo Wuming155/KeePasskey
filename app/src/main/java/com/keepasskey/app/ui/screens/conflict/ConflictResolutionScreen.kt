@@ -358,3 +358,36 @@ private fun FieldDiffRow(
         }
     }
 }
+
+// IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
+@androidx.compose.ui.tooling.preview.Preview(name = "冲突条目对比卡片 - 浅色", showBackground = true)
+@androidx.compose.ui.tooling.preview.Preview(name = "冲突条目对比卡片 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
+@Composable
+private fun ConflictedEntryCardPreview() {
+    com.keepasskey.app.ui.theme.KeePasskeyTheme {
+        ConflictedEntryCard(
+            entry = com.keepasskey.app.ui.screens.conflict.ConflictedEntryItem(
+                id = "preview-conflict-1",
+                title = "预览冲突条目",
+                groupPath = "预览根目录 / 网站登录",
+                fields = listOf(
+                    com.keepasskey.app.ui.screens.conflict.ConflictedField(
+                        fieldKey = "Title",
+                        fieldName = "标题",
+                        localValue = "预览标题（本地）",
+                        remoteValue = "预览标题（云端）"
+                    ),
+                    com.keepasskey.app.ui.screens.conflict.ConflictedField(
+                        fieldKey = "Password",
+                        fieldName = "密码",
+                        localValue = "预览掩码值（本地）",
+                        remoteValue = "预览掩码值（云端）",
+                        selectedChoice = com.keepasskey.app.ui.screens.conflict.FieldChoice.REMOTE,
+                        isSensitive = true
+                    )
+                )
+            ),
+            onFieldChoiceChange = { _, _ -> }
+        )
+    }
+}

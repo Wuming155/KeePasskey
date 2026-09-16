@@ -33,6 +33,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.keepasskey.app.R
 import com.keepasskey.app.ui.components.BentoCard
@@ -324,3 +325,79 @@ internal fun ColumnScope.EntryEditNotesSection(
  * 故这里不是、也不应是真实熵；详情页的真实熵评估见 `EntryDetailViewModel`。
  */
 private const val PASSWORD_BITS_PER_CHAR = 4.5
+
+// IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
+@Preview(name = "编辑页基础表单分节 - 浅色", showBackground = true)
+@Preview(name = "编辑页基础表单分节 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
+@Composable
+private fun EntryEditBasicInfoSectionPreview() {
+    com.keepasskey.app.ui.theme.KeePasskeyTheme {
+        val previewUiState = com.keepasskey.app.ui.screens.edit.EntryEditUiState(
+            entryId = "preview-entry-edit",
+            groupId = com.keepasskey.app.ui.preview.PreviewGroupLogins.id,
+            availableGroups = com.keepasskey.app.ui.preview.PreviewGroups,
+            iconName = "key",
+            title = "预览编辑条目",
+            username = "demo@example.com",
+            passwordLength = 16,
+            url = "https://example.com",
+            notes = "预览用备注文本",
+            isReadOnly = false,
+            isPasswordVisible = false,
+            showGenerator = false,
+            passLength = 20f
+        )
+
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            EntryEditGroupSection(
+                uiState = previewUiState,
+                onGroupChange = { _ -> }
+            )
+            EntryEditReadOnlyBanner(isReadOnly = true)
+            EntryEditBasicInfoSection(
+                uiState = previewUiState,
+                customIconOptions = emptyList(),
+                onIconClick = {},
+                onTitleChange = { _ -> },
+                onUrlChange = { _ -> }
+            )
+            EntryEditAccountSection(
+                uiState = previewUiState,
+                loadedPassword = null,
+                onUsernameChange = { _ -> },
+                onPasswordChangeSecure = { _ -> },
+                onTogglePasswordVisibility = {},
+                onToggleGenerator = {},
+                onPassLengthChange = { _ -> },
+                onGeneratePassword = {},
+                onToggleUpper = {},
+                onToggleLower = {},
+                onToggleDigits = {},
+                onToggleSymbols = {}
+            )
+            EntryEditAccountSection(
+                uiState = previewUiState.copy(showGenerator = true, isPasswordVisible = true),
+                loadedPassword = "预览".toCharArray(),
+                onUsernameChange = { _ -> },
+                onPasswordChangeSecure = { _ -> },
+                onTogglePasswordVisibility = {},
+                onToggleGenerator = {},
+                onPassLengthChange = { _ -> },
+                onGeneratePassword = {},
+                onToggleUpper = {},
+                onToggleLower = {},
+                onToggleDigits = {},
+                onToggleSymbols = {}
+            )
+            EntryEditNotesSection(
+                notes = "预览用备注文本，仅用于界面排版展示。",
+                onNotesChange = { _ -> }
+            )
+        }
+    }
+}

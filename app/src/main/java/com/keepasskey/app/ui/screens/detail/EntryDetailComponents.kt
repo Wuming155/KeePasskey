@@ -33,6 +33,7 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.keepasskey.app.R
 import com.keepasskey.app.ui.components.EntryIconContent
@@ -218,6 +219,45 @@ internal fun QuickActionTile(
                 style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Medium),
                 color = MaterialTheme.colorScheme.onSurface
             )
+        }
+    }
+}
+
+// IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
+@Preview(name = "详情页头部与快捷操作 - 浅色", showBackground = true)
+@Preview(name = "详情页头部与快捷操作 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
+@Composable
+private fun EntryHeaderSectionPreview() {
+    com.keepasskey.app.ui.theme.KeePasskeyTheme {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            EntryHeaderSection(
+                entry = com.keepasskey.app.ui.preview.PreviewEntryPasskey,
+                icon = com.keepasskey.app.ui.preview.PreviewDefaultIcon,
+                urlText = "https://example.com",
+                groupPath = "网站登录 / 预览分组路径"
+            )
+            EntryHeaderSection(
+                entry = com.keepasskey.app.ui.preview.PreviewEntryLogin,
+                icon = com.keepasskey.app.ui.preview.PreviewMissingIcon,
+                urlText = "https://example.com"
+            )
+            QuickActionRow(
+                entry = com.keepasskey.app.ui.preview.PreviewEntryLogin,
+                onShowMessage = { _ -> },
+                onCopyUsername = { _, _ -> },
+                onCopyPassword = { _ -> }
+            )
+            QuickActionTile(
+                icon = Icons.Default.Key,
+                label = "预览磁贴",
+                onClick = {}
+            )
+            SectionTitle(textRes = com.keepasskey.app.R.string.detail_basic_section)
         }
     }
 }

@@ -1,10 +1,20 @@
 # Gradle 版本目录（TASK-05）：5 模块插件与依赖集中管理，杜绝版本漂移。
 # 版本货币性核对（2026-09-08）：hilt 2.60.1 / credentials 1.6.0 / okhttp 5.5.0 /
 # coroutines 1.11.0 / zxing 4.3.0 均为当前稳定渠道版本。
-# Dependabot PR #1/#2/#3 批量落地：AGP 9.4.0 / navigation 2.10.0 / hilt-ext 1.4.0 /
-# bcprov 1.85.2 / coroutines 1.11.0 / okhttp 5.5.0 / foojay-resolver 1.0.0 / wrapper 9.7.1
+# Dependabot PR #1/#2/#3 批量落地：AGP 9.4.0（**后按 IDE 兼容性降回 9.2.1，见下方 [versions] 说明**）/
+# navigation 2.10.0 / hilt-ext 1.4.0 / bcprov 1.85.2 / coroutines 1.11.0 / okhttp 5.5.0 /
+# foojay-resolver 1.0.0 / wrapper 9.7.1
 [versions]
-agp = "9.4.0"
+# AGP 版本对齐本机 Android Studio（Quail 1 | 2026.1.1 RC 2）支持的**上限 AGP 9.2.1**：
+# 原为 9.4.0（Dependabot 批量落地），但该版本超出 IDE 支持范围，导致 Studio 无法
+# 同步 / 索引本项目——表现为 IDE 报「incompatible version of the Android Gradle plugin…
+# Latest supported version is AGP 9.2.1」，且 Android CLI 的 studio 子命令一律返回
+# "not implemented"（IDE 侧能力整体不可用，含 Compose 预览渲染）。
+# 降级不损失构建能力：AGP 9.2 与 9.4 的最大 API 支持级别同为 **API 37.0**，
+# 故 compileSdk = 37 / targetSdk = 36 / minSdk 36 均无需调整；Gradle 9.7.1 ≥ AGP 9.2
+# 要求的 9.4.1，wrapper 亦无需改动。
+# 依据：https://developer.android.com/build/releases/agp-9-2-0-release-notes（Compatibility 表）
+agp = "9.2.1"
 # Kotlin 版本：经顶层 buildscript classpath 提升内置 Kotlin 的 KGP 至 2.4.20，
 # Compose 编译器插件版本必须与之一致。
 # ISSUE-P3-32：2.4.10 → 2.4.20 系 CVE-2026-53914（Kotlin < 2.4.20 构建缓存元数据

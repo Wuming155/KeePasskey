@@ -143,3 +143,22 @@ internal fun MasterKeyChangeDialog(
         }
     )
 }
+
+// IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
+// 说明：为遵守「不新增 import 语句」约束，@Preview 采用全限定名写法
+@androidx.compose.ui.tooling.preview.Preview(name = "主密钥更改对话框 - 浅色", showBackground = true)
+@androidx.compose.ui.tooling.preview.Preview(name = "主密钥更改对话框 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
+@Composable
+private fun MasterKeyChangeDialogPreview() {
+    com.keepasskey.app.ui.theme.KeePasskeyTheme {
+        MasterKeyChangeDialog(
+            kdfAlgorithm = "Argon2id",
+            coroutineScope = androidx.compose.runtime.rememberCoroutineScope(),
+            snackbarHostState = remember { SnackbarHostState() },
+            masterKeyUpdatedMsg = "预览提示：主密钥已更新",
+            onDismiss = {},
+            // 预览桩：仅返回成功结果占位，不做任何真实密钥派生
+            onChangeMasterPassword = { KdbxResult.Success(Unit) }
+        )
+    }
+}
