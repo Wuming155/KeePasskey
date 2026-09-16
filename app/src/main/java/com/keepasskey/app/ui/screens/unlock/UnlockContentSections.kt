@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -398,7 +399,10 @@ internal fun UnlockStandardUnlockContent(
 
     if (uiState.isQuickUnlockAvailable) {
         Spacer(modifier = Modifier.height(8.dp))
-        TextButton(onClick = { onSwitchMode(UnlockMode.QUICK_UNLOCK) }) {
+        TextButton(
+            onClick = { onSwitchMode(UnlockMode.QUICK_UNLOCK) },
+            modifier = Modifier.heightIn(min = 48.dp)
+        ) {
             Icon(Icons.Default.FlashOn, contentDescription = null, modifier = Modifier.size(16.dp))
             Spacer(modifier = Modifier.width(4.dp))
             Text(stringResource(R.string.unlock_switch_back_quick), style = MaterialTheme.typography.labelSmall)

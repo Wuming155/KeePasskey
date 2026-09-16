@@ -229,13 +229,15 @@ fun TotpSettingsScreen(
                             val stepOptions = listOf(15 to R.string.totp_step_15, 30 to R.string.totp_step_30, 60 to R.string.totp_step_60)
                             SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
                                 stepOptions.forEachIndexed { index, (sec, label) ->
+                                    val selected = stepSeconds == sec
                                     SegmentedButton(
-                                        selected = stepSeconds == sec,
+                                        selected = selected,
                                         onClick = { stepSeconds = sec },
                                         shape = SegmentedButtonDefaults.itemShape(
                                             index = index,
                                             count = stepOptions.size
-                                        )
+                                        ),
+                                        icon = { SegmentedButtonDefaults.Icon(active = selected) }
                                     ) {
                                         Text(stringResource(label))
                                     }
@@ -252,13 +254,15 @@ fun TotpSettingsScreen(
                             val digitOptions = listOf(6 to R.string.totp_digits_6, 8 to R.string.totp_digits_8)
                             SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
                                 digitOptions.forEachIndexed { index, (d, label) ->
+                                    val selected = digits == d
                                     SegmentedButton(
-                                        selected = digits == d,
+                                        selected = selected,
                                         onClick = { digits = d },
                                         shape = SegmentedButtonDefaults.itemShape(
                                             index = index,
                                             count = digitOptions.size
-                                        )
+                                        ),
+                                        icon = { SegmentedButtonDefaults.Icon(active = selected) }
                                     ) {
                                         Text(stringResource(label))
                                     }

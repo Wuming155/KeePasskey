@@ -19,8 +19,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -237,7 +235,7 @@ internal fun PasswordGeneratorWidget(
             .fillMaxWidth()
             .clip(MaterialTheme.shapes.medium)
             .background(MaterialTheme.colorScheme.surfaceContainerLow)
-            .padding(12.dp)
+            .padding(16.dp)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -258,15 +256,10 @@ internal fun PasswordGeneratorWidget(
             }
         }
 
-        Slider(
-            value = passLength,
-            onValueChange = onPassLengthChange,
-            valueRange = 8f..48f,
-            steps = 39,
-            colors = SliderDefaults.colors(
-                thumbColor = MaterialTheme.colorScheme.primary,
-                activeTrackColor = MaterialTheme.colorScheme.primary
-            )
+        com.keepasskey.app.ui.components.ValueSlider(
+            value = passLength.toInt(),
+            onValueChange = { onPassLengthChange(it.toFloat()) },
+            valueRange = 8..48
         )
 
         Row(

@@ -19,6 +19,7 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -208,9 +209,15 @@ fun VaultListContent(
             }
         },
         floatingActionButton = {
+            // M3 Auto-collapsing FAB：滚动中缩回图标态；hideFabOnScroll 开启时整只隐藏
+            val fabExpanded by remember {
+                derivedStateOf { !listState.isScrollInProgress }
+            }
             VaultListFab(
-                visible = !uiState.isBatchMode && !uiState.isInsideRecycleBin && (!uiState.hideFabOnScroll || !listState.isScrollInProgress),
+                visible = !uiState.isBatchMode && !uiState.isInsideRecycleBin &&
+                    (!uiState.hideFabOnScroll || !listState.isScrollInProgress),
                 isReadOnly = uiState.isReadOnly,
+                expanded = fabExpanded,
                 onClick = { dialogs.showCreateTypeDialog = true }
             )
         }

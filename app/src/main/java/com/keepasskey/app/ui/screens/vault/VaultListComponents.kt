@@ -117,12 +117,16 @@ internal fun LastSyncPullIndicator(
 }
 
 /**
- * 新建入口悬浮按钮：滚动时按设置隐藏；只读会话不展示（H4-只读整改）
+ * 新建入口悬浮按钮：滚动时按设置隐藏或缩回为图标态；只读会话不展示（H4-只读整改）。
+ *
+ * [expanded] 控制 Extended FAB 与 56dp Icon FAB 的切换（M3 Auto-collapsing FAB）：
+ * 列表滚动中缩回为方形图标，停稳后展开文案，降低对末条的遮挡。
  */
 @Composable
 internal fun VaultListFab(
     visible: Boolean,
     isReadOnly: Boolean,
+    expanded: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -136,6 +140,7 @@ internal fun VaultListFab(
         if (!isReadOnly) {
             ExtendedFloatingActionButton(
                 onClick = onClick,
+                expanded = expanded,
                 containerColor = MaterialTheme.colorScheme.primary,
                 contentColor = MaterialTheme.colorScheme.onPrimary,
                 // 显式 elevation，保证浅色背景上的阴影层次（M3 默认在部分主题下过弱）

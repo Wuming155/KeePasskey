@@ -13,8 +13,6 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -26,6 +24,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.keepasskey.app.R
 import com.keepasskey.app.ui.components.BentoCard
+import com.keepasskey.app.ui.components.ValueSlider
 
 @Composable
 internal fun RandomModeOptions(
@@ -43,15 +42,10 @@ internal fun RandomModeOptions(
                 color = MaterialTheme.colorScheme.onSurface
             )
 
-            Slider(
-                value = uiState.randomLength.toFloat(),
-                onValueChange = { actions.setRandomLength(it.toInt()) },
-                valueRange = 6f..64f,
-                steps = 57,
-                colors = SliderDefaults.colors(
-                    thumbColor = MaterialTheme.colorScheme.primary,
-                    activeTrackColor = MaterialTheme.colorScheme.primary
-                )
+            ValueSlider(
+                value = uiState.randomLength,
+                onValueChange = actions::setRandomLength,
+                valueRange = 6..64
             )
 
             OptionSwitchRow(title = stringResource(R.string.gen_opt_upper), checked = uiState.useUpper, onCheckedChange = actions::setUseUpper)
@@ -88,15 +82,10 @@ internal fun PassphraseModeOptions(
                 color = MaterialTheme.colorScheme.onSurface
             )
 
-            Slider(
-                value = uiState.wordCount.toFloat(),
-                onValueChange = { actions.setWordCount(it.toInt()) },
-                valueRange = 3f..8f,
-                steps = 4,
-                colors = SliderDefaults.colors(
-                    thumbColor = MaterialTheme.colorScheme.primary,
-                    activeTrackColor = MaterialTheme.colorScheme.primary
-                )
+            ValueSlider(
+                value = uiState.wordCount,
+                onValueChange = actions::setWordCount,
+                valueRange = 3..8
             )
 
             Text(

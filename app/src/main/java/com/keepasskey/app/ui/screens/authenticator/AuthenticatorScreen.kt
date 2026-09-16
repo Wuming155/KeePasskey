@@ -347,11 +347,11 @@ private fun TotpLargeCard(
                     else MaterialTheme.colorScheme.surfaceContainerHighest,
                     shape = CapsuleShape,
                     modifier = Modifier
-                        .defaultMinSize(minWidth = 48.dp, minHeight = 40.dp)
+                        .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
                         .clickable(enabled = actionable) { onAction() }
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(
