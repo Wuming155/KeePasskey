@@ -33,7 +33,7 @@ class CallingOriginResolverAttributionTest {
     }
 
     @Test
-    fun `系统包名被跳过后回退到不可伪造的 extras 记录`() {
+    fun `系统包名被跳过后回退到 extras 中的预期包名（extras 本身不可伪造性不成立）`() {
         assertEquals(
             "com.example.app",
             CallingOriginResolver.clientDataAndroidPackageName("android", "com.example.app")

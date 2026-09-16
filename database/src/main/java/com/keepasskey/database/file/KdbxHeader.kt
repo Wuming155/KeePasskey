@@ -14,6 +14,33 @@ import java.security.SecureRandom
 
 /**
  * KDBX 4 外层 Header 解析与序列化器
+ *
+ * ### ISSUE-P3-143（第四轮复核 NEW-B01-6）：本相等性是**秘密不敏感**语义
+ *
+ * [equals]（[kdfParameters] 一行）**传递**比较 [KdfParameters]，而
+ * `KdfParameters.Argon2.equals` / `hashCode` 刻意忽略 KDBX4 VariantDictionary 的
+ * `K`（`secretKey`，秘密材料）与 `A`（`associatedData`）⇒ **两个 KDF secret 不同、
+ * 其余字段相同的头部会被判为相等**（含 [hashCode] 相同）。
+ *
+ * 该忽略在 `KdfParameters` 侧是有意设计（`secretKey` 是 `var`，
+ * `clearSensitive()` 就地置 null；纳入哈希会破坏清零后的哈希稳定性）。
+ * 缺口在于「秘密不敏感相等性」**经本类对外暴露**——[KdbxDatabase] 是 `data class`
+ * 且持有本类型，而 `core.database` 恰是 `MutableStateFlow`（`SessionCore.kt:21`，
+ * StateFlow 按 `equals` 合并）⇒ 未来若出现「仅 `secretKey` / `associatedData` 变化」
+ * 的赋值或集合去重路径，相应赋值 / 去重会被**静默吞掉**。
+ *
+ * **当前不可达（故本条为 P3/INFO 而非漏洞）**：`secretKey` 仅由反序列化赋值
+ * （`KdbxKdfParameterCodec.deserialize`），且保存会刷新 KDF salt / seed
+ * （`KdbxFile.save`）⇒ 不存在「其余字段全等、仅 secret 不同」的生产赋值路径。
+ *
+ * ⚠ **禁止**把本相等性用于「凭据 / 秘密材料是否变化」一类裁决（如 `old != new`
+ * 决定是否重建会话 / 重新派生 / 失效缓存），也不得据此对含本类型实例的集合去重。
+ * **未来接入约束**：若确有「仅 secret 变化」的路径，须改为**显式变更标记**
+ * （如会话级 `revision`）驱动裁决，**不得**依赖结构相等，也不得为迁就它把
+ * `secretKey` 纳入 `equals` / `hashCode`（那会引入「清零后哈希变化」的新缺陷）。
+ *
+ * 该语义由 `database` 模块回归用例锁定，见
+ * `src/test/java/com/keepasskey/database/file/KdbxHeaderSecretInsensitiveEqualityTest.kt`。
  */
 data class KdbxHeader(
     val signature1: Int = KdbxConstants.Signature.SIGNATURE_1,
@@ -26,6 +53,11 @@ data class KdbxHeader(
     val kdfParameters: KdfParameters,
     val publicCustomData: VariantDictionary? = null
 ) {
+    /**
+     * ISSUE-P3-143：**秘密不敏感**相等性——[kdfParameters] 传递比较时，
+     * `KdfParameters.Argon2` 刻意忽略 `secretKey`（`K`）与 `associatedData`（`A`）。
+     * 理由、禁用场景与未来接入约束见类 KDoc。
+     */
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
         if (other !is KdbxHeader) return false
@@ -40,6 +72,10 @@ data class KdbxHeader(
         return true
     }
 
+    /**
+     * ISSUE-P3-143：与 [equals] 同源的**秘密不敏感**哈希——经 [kdfParameters]
+     * 间接忽略 `secretKey` / `associatedData`，故 KDF secret 清零前后哈希值稳定。
+     */
     override fun hashCode(): Int {
         var result = signature1
         result = 31 * result + signature2

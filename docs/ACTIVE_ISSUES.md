@@ -48,29 +48,10 @@
 - **第四轮定版批注（2026-09-13）**：复核证实 `SyncRollbackGuard.State.sequence` **已持久化但不参与裁决**（写点 `:142`/`:180`；裁决点 `inspect :118-127` 只比对 `current`/`recent`；类 KDoc `:76-80` 自认）——**勿据"sequence 已持久化"推断防回滚强度**（"看似已修"陷阱）。防护现状为"Keystore-HMAC 已见摘要链 + 状态缺失 / MAC 失效 **fail-open**（`:145-158`，已留痕取舍）"。另 **AC① 修正**：不得依赖 "S3 Versioning / ETag 单调性" 作为客户端可信信道（不可实施），须本地单调记录。
 - **2026-09-16 复核批注（§83 批次，实施前必读）**：
   - **AC② 按原文不可实施（代码取证，非推测）**：`KdbxFile.kt:337` 保存时 `p.copy(salt = freshSalt)`、`:342` `masterSeed = freshMasterSeed`——**KDF 盐与主种子每次保存都重新生成**，故任何形式的「库 header 摘要」**每次保存都会变**。照 AC② 原文把封印载荷绑定 header 摘要，结果是**每次保存后快速解锁立即失效**（核心功能回归）。另：封印载荷持有的是**主密码**，「回滚到旧主密码版本」的旧口令本就解不开当前库（原条文亦自认"价值有限"）；而「库与封印被**一致**回滚」属同步防回滚链（AC①）的职责，封印侧无参照可比。⇒ 须改设计（可行方向：封印载荷绑定**库文件内容摘要**并在每次保存后刷新，代价是刷新窗口内需回退主密码）或登记为**已接受边界**——**属架构决策，不得由实施者自行择一**。
-  - **AC① 的实质已具备（复核确认）**：`SyncRollbackGuard` 的「已见内容摘要链」本身就是**本地记录**（不依赖任何服务端版本号）；命中 `recent` 即 `ReplayDetected`，`SyncEngine` 三处裁决点（`:108` / `:173` / `:215`）均**不应用**远端内容，经 `SyncCycleRunner:387` 落为 `SyncOutcome.Error(sync_error_rollback_rejected)`——**不存在静默覆盖**。
+  - **AC① 的实质已具备（复核确认）**：`SyncRollbackGuard` 的「已见内容摘要链」本身就是**本地记录**（不依赖任何服务端版本号）；命中 `recent` 即 `ReplayDetected`，`SyncEngine` 的**全部重放裁决点**（2026-09-16 复核：**`:108` / `:173` / `:215` / `:236` / `:277` 共 5 处**；原文「三处」漏计 `:236`（双方改动分支）与 `:277`（`commitLocal` 分支））均**不应用**远端内容，经 `SyncCycleRunner:387`（另见 `:285` 的 `SyncCommitResult.RollbackRejected`）落为 `SyncOutcome.Error(sync_error_rollback_rejected)`——**不存在静默覆盖**。
   - **`sequence` 处理方式（本批刻意不动格式）**：字段已持久化但不参与裁决，类 KDoc `:76-80` 已明写「启用前不得据此推断防回滚强度」。**不得**为「让它看起来有用」而改其持久化格式——那会变更 MAC 载荷、使**全部存量状态文件 MAC 失效**，按既有的 MAC 失效 fail-open 口径，等于给所有存量用户打开一次重放窗口，代价大于收益。
   - **AC③ 已完成（§90 批次；含一处前提更正）**：`SyncRollbackGuardTest` 已有 8 例（摘要链、曾接受版本判重放、F-23 状态存活、fail-open 口径、状态不被缓存清理删除）。§83 批次的复核批注曾记「**尚缺引擎级『远端回退 → 拒绝且不覆盖本地』用例**」——该前提**已部分不成立**：`SyncEngineTest` 早在 `ISSUE_P2_18` 批次就有 `被入侵端点重放旧库被拒绝应用`（断言 `RollbackRejected`）。**真正缺的是后半句**：该用例只断言裁决与返回字节，**未断言本地缓存 / 基线未被覆盖**——即「拒绝」的全部意义所在。§90 据此补齐两例：`重放被拒后本地缓存与基线不被覆盖`（无守卫时 `openRemote` 会把重放内容写进缓存与基线并**看起来同步成功**，故该断言同时在做负向鉴别）与 `上传路径遇远端重放拒绝合并并保留本地`（覆盖此前**完全无用例**的 `SyncCommitResult.RollbackRejected` 分支，即「冲突下载到的远端内容恰是重放 ⇒ 不得进入三方合并」，否则被命中的旧库会把已删条目复活）。
 - **用户裁决（2026-09-16）**：**AC② 本轮不实施、仅留痕**。该项**仍留在表内**（属「已裁决暂缓」而非已闭环）——重新认领时须先做上述架构取舍裁决。
-
----
-
-### ISSUE-P2-73：自动填充认证流协议漂移（数据集回传 / `PendingIntent` 可变性）
-
-- **优先级**：P2
-- **当前状态**：**未闭环**——崩溃级缺陷已修（§84）；AC② 依第四轮定版批注**不实施**；AC① 的「数据集回传」与 AC② 存在**硬冲突**、已登记为**决策点**并经 2026-09-16 用户裁决**本轮不实施**；**AC③（设备侧实测认证填充链路）是唯一实质待办**。
-- **核实时间点与核实方式**：2026-09-13 对 HEAD `a669a48`（审计 E5 转登项）逐条直读 `AutofillUnlockActivity.kt` / `AutofillConfirmActivity.kt` / `AutofillDatasetBuilders.kt` 复核；2026-09-16 §84 批次按官方文档复核（`FillResponse.Builder#setAuthentication` 注释原文）。
-- **问题描述**：
-  - ① `AutofillUnlockActivity.kt:65` / `AutofillConfirmActivity.kt:160` 用裸 `setResult(RESULT_OK)`，**不带** `AutofillManager.EXTRA_AUTHENTICATION_RESULT`（官方要求经该 extra 回传数据集）；
-  - ② `AutofillDatasetBuilders.kt:69,206` 创建认证 `PendingIntent` 用 `FLAG_IMMUTABLE`，而平台需向其中填认证参数（picker 路径 `:240` 用 `FLAG_MUTABLE` 是对的）。
-- **验收标准**：① 按官方以 `EXTRA_AUTHENTICATION_RESULT` 回传；② 认证 `PendingIntent` 改 `FLAG_MUTABLE`（并保持 base intent 显式 + `Intent.fillIn` 覆盖语义）；③ 设备侧实测认证填充链路。
-- **第四轮定版口径**：**AC② 是负向变更，不可照做**——改 `FLAG_MUTABLE` 是「为对齐文档而降低安全性」（本仓这两条路径**不消费**平台 fillIn extras）；AC① / ③ 仍有效；本项与 `IPC-01`（`ISSUE-P3-122`）**互斥、须同批实测**，`IPC-01` 已于 §84 完成。
-- **进展（§84 批次）**：
-  - **AC① 的崩溃级部分已完成（且原文低估了严重性）**：官方 `FillResponse.Builder#setAuthentication` 明文写着「**IMPORTANT: Extras must be non-null on the intent being set for Android 12 otherwise it will cause a crash. Do not use `Activity.setResult(int)`, instead use `Activity.setResult(int, Intent)` with non-null extras**」。两处裸 `setResult(RESULT_OK)` 因此不只是「协议漂移」，而是 **Android 12+ 上的崩溃级缺陷**（minSdk 36 ⇒ 恒在该区间）。已按官方等价做法改为 `setResult(RESULT_OK, Intent().putExtras(Bundle.EMPTY))`（extras 非空、载荷语义不变）。
-  - **AC① 的「回传数据集」部分与 AC② 存在硬冲突，已登记为决策点（本批不自行择一）**：要让框架真正写入数据集，活动需构造并回传 `Dataset`；而活动拿到字段 `AutofillId` 的正规途径是框架注入的 `EXTRA_ASSIST_STRUCTURE`，**该注入要求 PendingIntent 为 `FLAG_MUTABLE`**——正是第四轮批注明令**不得**改的那一项。另一条路是让服务把已填充的 `Dataset` 经自家 Intent 传给活动，代价是**新增一份明文 Parcel 副本**，与「敏感数据铁律」相抵。两条路各有代价，**须由定版方在「AC② 撤销」与「AC① 数据集回传」之间裁决**。
-  - **AC② 未实施**（遵循第四轮定版批注）；并由接线守卫**反向锁定** FLAG 口径：选择器恒 `FLAG_MUTABLE`（1 处）、解锁与确认恒 `FLAG_IMMUTABLE`（2 处），防止后人「顺手统一」。
-  - **AC③ 未完成**：需要真实 autofill 客户端触发认证流；本机无 ADB 侧入口（与 `P2-83` AC③ 同类边界）。
-- **用户裁决（2026-09-16）**：**AC① 的「数据集回传」本轮不实施**（依据上述硬冲突，AC② 维持不改）；条目**仍留在表内**，重新认领时只剩 AC③ 设备侧实测（如需推进数据集回传，须先撤销 AC② 口径）。
 
 ---
 
@@ -81,44 +62,78 @@
 - **核实时间点与核实方式（2026-09-13，对 HEAD `a669a48`）**：威胁建模 Q-3 / 审计 A-1、A-2 转登项；直读 `KdbxHeader.kt:162-171`、`SettingsKdfBenchmarkController.kt:17-49` 与 `SessionOpener.create` 核实。
 - **问题描述**：**KDF 强度基线未对齐**（唯一纯密码学边界的强度参数）：
   - ① 建库默认 `Argon2id m=64 MiB / t=2 / p=2`（`KdbxHeader.kt:162-171`），而仓库已具备设备自适应推荐 `KdfBenchmark`（`SettingsKdfBenchmarkController.kt:17-49`）——**仅设置页展示，建库路径零消费**（核实：`SessionOpener.create` 直接走 `KdbxHeader.createDefault`）；
-  - ② 读取路径接受极弱参数（`m=1 MiB, t=1, p=1`；AES-KDF `R=1`）并在保存时**原样保留**（仅刷新盐）。
+  - ② 读取路径接受极弱参数并在保存时**原样保留**（仅刷新盐/种子）——**下界为官方 `MinMemory = 8192` 字节（`KdbxKdfParameterCodec.kt:90`），故 `m=1 MiB, t=1, p=1` 只是示例而非下界**；AES-KDF 下界 `R=1`（`:261-265`）。工作因子在保存时逐字保留：`KdbxFile.kt:332`（AES `p.copy(seed = freshSeed)`）、`:337`（Argon2 `p.copy(salt = freshSalt)`）。
 - **验收标准**：① 产品确认目标强度口径（如"设备实测约 1 秒"）；② 建库路径消费 `KdfBenchmark` 建议值（或提供"使用推荐参数"默认）；③ 对过低工作量的导入给出告警或升级选项；④ 参数变更不得破坏既有库可解锁性与官方客户端互操作。
-- **第四轮定版口径**：AC① **仓库已满足**（`KdfBenchmark` 已存在）；**AC② 含削弱陷阱**——直接接入建议值会出现 `8 MiB < 64 MiB` 的**降强**，须取 `max(建议值, 现默认)`。
+- **第四轮定版口径**：AC① **仓库已满足**（`KdfBenchmark` 已存在）；**AC② 含削弱陷阱**——直接接入建议值会出现 `8 MiB < 64 MiB` 的**降强**（`KdfBenchmark.kt:44`），须取 `max(建议值, 现默认)`；**2026-09-16 复核补充**：该 `max` 须**逐参数**施加——建议迭代可低至 `1 < 默认 2`、建议并行度可为 `1/3/4 ≠ 默认 2`（`KdfBenchmark.kt:91,97`），仅对内存取 max 仍会漏掉后两项降强。
 - **用户裁决（2026-09-16）**：**本轮不实施、仅留痕**——建库默认维持 `Argon2id m=64 MiB / t=2 / p=2`，不接入 `KdfBenchmark` 建议值（该 AC 原文即标注「需产品确认」）。条目仍留在表内。
 
 ---
 
-## P3 低危问题、特性接线与体验优化（3 项）
+### ISSUE-P2-86：解锁成功后框架不重发 `onFillRequest`（`onAuthenticationResult(): empty intent`）——`AutofillUnlockActivity` 的 KDoc 前提在真机上不成立
+
+- **优先级**：P2（核心流程体验 + 文档前提失真；**事实基础变化使 `ISSUE-P2-73` AC① 的既有裁决需要重评**）
+- **当前状态**：**开放项**——真机实测发现「解锁后框架自动重发 `onFillRequest`」这一被 KDoc 与既有实现共同依赖的前提**至少是条件性的**；三次运行 1 true / 2 false。
+- **来源**：`ISSUE-P2-73` AC③ 真机实测过程中**顺带撞出**（该 AC 的核心断言正是「框架自行重发」，故本次发现的直接后果就是 AC③ 不能据此判为达成）。
+- **核实时间点与核实方式（2026-09-16，真机 Redmi 4X / LineageOS / Android 17 / API 37）**：读设备侧逐阶段证据文件
+  `/sdcard/Download/autofill-auth-chain-evidence.txt`（各次运行覆盖写，主控已把 23:16 版 pull 留底）。关键原始行：
+  ```
+  09-16 23:14:53.152 20515 20515 I AutofillManager: onAuthenticationResult(): empty intent
+  框架是否自行重发 onFillRequest=false（检测窗口=25000ms，实际耗时=25429ms）；客户端主动请求次数 解锁前=1 解锁后=1
+  框架侧会话事件新增（0 条）
+  框架未自行重发；由客户端「重新请求自动填充」显式触发一次请求继续链路
+  服务侧已解锁分支留痕=true        ← 该留痕出现在显式重请求之后
+  ```
+  > **取证更正（2026-09-16，勿误读上面第一行）**：`onAuthenticationResult(): empty intent` **不是结果载荷的证据**——
+  > 其**时序早于解锁动作**（E3：该行 23:35:37.070，而 `Displayed …AutofillUnlockActivity` 为 23:35:40.522；
+  > run4：该行 23:22:26.608，而解锁按钮点击在 23:22:32.092）⇒ 它属**认证启动**阶段的留痕。
+- **问题描述**：
+  - `AutofillUnlockActivity.kt:20-22` 与 `:70` 的前提原话是：「解锁成功后立即 `setResult(RESULT_OK)` 并 `finish()`——**自动填充框架收到成功结果后会自动重新发起 `onFillRequest`**，此时密码库已解锁，服务端即可输出真实凭据候选」。
+  - 真机实测：框架**读到了**认证结果，但记为 **`onAuthenticationResult(): empty intent`**；随后 **25 秒窗口内框架侧会话事件新增 0 条**，`onFillRequest` **未被重发**。
+  - **归因：既有假设已被本仓真机实验证伪（2026-09-16 记录文档 §7.1.1，勿再据此推断）**：曾假设「我们返回 `Intent().putExtras(Bundle.EMPTY)`（extras 非空但**不含** `EXTRA_AUTHENTICATION_RESULT` 数据集）⇒ 框架判『无认证产物』而不重发」。**该假设被实验证伪**——把解锁页的认证结果载荷临时改为**经 `EXTRA_AUTHENTICATION_RESULT` 回传真实 `Dataset`**（4 次运行；其中 1 次带自检留痕，证明字段 id 确已抵达解锁页 ⇒ 载荷确实被构造），结果是 **`frameworkRedispatch` 恒为 `false`、框架侧会话事件新增恒为 0 条，且该 `Dataset` 也未被写进客户端输入框**。⇒ **「认证结果不带数据集」不是「不重发」的充分原因**；真正判据**尚未定位**。
+  - **仍未测的候选变量（如实声明，勿当结论）**：AC② 所指的认证 `PendingIntent` **可变性**（`FLAG_IMMUTABLE` vs 平台所需 `FLAG_MUTABLE` / `Intent.fillIn` 覆盖语义）——它是「活动能否拿到框架注入的字段 id、后续重发是否被触发」的另一条可能路径；但 AC② 经第四轮定版批注与 2026-09-16 用户裁决**明确维持不改**，混入该变量属越界，故**本轮未做实验**。
+  - **功能后果（与成因无关，独立成立）**：解锁成功后框架不会自动重取候选 ⇒ 用户可能必须**再次点按字段**才能看到凭据候选（本次实测中，链路是靠用例**显式**让客户端重请求才接下去的——该手法恰好**绕过**了本问题，故不得作为 AC③ 达成证据）。
+  - **同源的第二处功能后果（2026-09-16 实测）**：自动匹配候选 → 框架拉起 `AutofillConfirmActivity` → 点选「确认填充」→ 页面正常结束、无崩溃，但**客户端两个输入框始终为空**（`username=[] passwordLength=0`），且**实验态回传真实 `Dataset` 后依然为空**。
+    **对照（须与上面的证伪一起读）**：**选择器路径**（`AutofillPickerActivity` 经 `EXTRA_AUTHENTICATION_RESULT` 回传真实 `Dataset`，该数据集来自**服务端 `FillResponse`**）**实测填充成功**。⇒ 差异不在「有没有数据集」，而在**数据集经哪条通道交付**（服务端 `FillResponse` vs 活动 `setResult`）；该差异的机理**未定位**。
+  - **对 AC① 既有裁决的意义（更正此前表述）**：实验表明「加回数据集」**既不必然恢复重发、也不必然恢复写入** ⇒ **不能**据此断言「重启 AC① 即可修复」；AC① 是否为正确修法**未知**。`ISSUE-P2-73` AC① 的既有裁决（本轮不实施）其事实基础**既未被本实验推翻、也不再被本实验支持**——应在**成因定位之后**再作判断。
+- **与 `ISSUE-P2-73` 的关系（重要）**：`ISSUE-P2-73` 的 2026-09-16 用户裁决为「**AC① 的「数据集回传」本轮不实施**」，其依据是「AC① 与 AC② 硬冲突、且价值有限」。本条的实测证据表明**该依据的事实基础已变化**：不做法集回传会带来可观测的行为差异。⇒ **须由用户重新裁决**（维持在 AC② 口径下不做数据集回传并接受该行为，或撤销 AC② 口径以换取稳定重发）。**实施者不得自行择一。**
+- **验收标准（① ② 已于 2026-09-16 完成，③ ④ 待办；措辞纪律：一律写「现象已确证 / 归因未证实」）**：
+  - **①（已完成）** 逐次真机矩阵：定版用例 **8 次运行 8 次通过**；`frameworkRedispatch` 在**干净归因口径**下可单独取证者 **6/6 = false（0 次 true）**，每次都伴随「框架侧 `AutofillSession`/`RemoteFillService` 会话事件新增 **0 条**」与「客户端 `requestAutofill(` 计数 **1→1**」。历史 8 次失败全部为设备/工具环境或早期断言预期错误，**无一来自产品崩溃**。
+  - **②（已完成，结论为「假设被证伪」）** 归因对照实验：把解锁页结果载荷临时改为经 `EXTRA_AUTHENTICATION_RESULT` 回传**携带值 `Dataset`**（E1–E4；E4 带自检留痕，证明 `usernameId/passwordId` 确已抵达解锁页）⇒ `frameworkRedispatch` **恒为 false**、会话事件恒 0 条、**该 `Dataset` 也未写入**客户端输入框。⇒ **「认证结果不带数据集 ⇒ 不重发」不成立**；实验代码**已完全回退**（`AutofillUnlockActivity.kt` 与 HEAD 一致，`git diff` 为空）。**结论：成因未定位。**
+  - **③（待办）定位真正的约束变量**。候选（**列为待验假设，不得当结论**）：认证 `PendingIntent` 的**可变性**（`FLAG_IMMUTABLE` — 该口径属 AC②，经裁决维持不改，本轮越界未做实验）；以及「数据集经**服务端 `FillResponse`** 交付 vs 经**活动 `setResult`** 交付」这一通道差异的机理（选择器路径走前者且**实测填充成功**，确认路径走后者且**实测未写入**）。实验前须先就 AC② 口径取得裁决。
+  - **④（待办，依 ③ 的定位结果二选一）**：(a) 若定位到可由「按官方回传数据集」闭合，且用户裁决重启 AC①：实施并**同步解除** AC② 口径（含接线守卫更新）；(b) 否则：**更正 `AutofillUnlockActivity` 的 KDoc 前提**（改为「框架**可能不会**自动重发；本路径不产出数据集」，并把认证启动期 `onAuthenticationResult(): empty intent` 与结果载荷的关系写明），并把「解锁后需用户**再次点按字段**」登记为**已知行为边界**（`已知工程限界`）。
+
+---
+
+## P3 低危问题、特性接线与体验优化（2 项）
 
 ### ISSUE-P3-121：自建内网 WebDAV / NAS 在出厂配置下不可用
 
 - **优先级**：P3（**INFO**——作为漏洞不成立，属产品口径 / 文档一致性议题）
-- **当前状态**：**已裁决暂缓（2026-09-16），留表跟踪**——维持默认拒绝，不提供出厂可用口径。
-- **核实时间点与核实方式（2026-09-13，对 HEAD `a669a48`）**：威胁建模 T-17；直读 `SyncNetworkOptions.kt:25`、`SyncProviderResolver.kt:52,77` 与 `SyncEndpointGuard`。
+- **当前状态**：**已裁决暂缓（2026-09-16），留表跟踪**——维持默认拒绝，不提供出厂可用口径；**2026-09-16 复核发现裁决理由前提失真，待用户重新裁决**（见文末「裁决理由前提更正」）。
+- **核实时间点与核实方式（2026-09-13 对 HEAD `a669a48`；2026-09-16 21:37 对 HEAD `2e5ce38` 复核）**：威胁建模 T-17；直读
+  `SyncNetworkOptions.kt:25`、`SyncProviderResolver.kt:52,77` 与 `SyncEndpointGuard`。**复核补充**：全仓 `ssrfAllowedHosts`
+  得 5 处代码命中（定义 `:25`、消费 `SyncHttpClientFactory.kt:35` / `S3SyncProvider.kt:105` / `WebDavSyncProvider.kt:80`、
+  注释 `DalVerifierModule.kt:64`），**无任何生产写入点**；`SyncNetworkOptions(` 构造点仅 `SyncProviderResolver.kt:52,77`
+  （默认）与 `DalVerifierModule.kt:73`（未置该字段）；`SyncCredentialsStore.kt:299-318` 键枚举与 `strings.xml` 均无对应入口。
 - **问题描述**：`SyncNetworkOptions.ssrfAllowedHosts` 默认空集（`SyncNetworkOptions.kt:25`），`SyncProviderResolver` 两处均传默认 `SyncNetworkOptions()`（`:52,77`）→ RFC1918 / `.local` 主机一律被 `SyncEndpointGuard` 拒绝，且**无生产逃生通道**；与 `README` 宣称支持 WebDAV（Nextcloud / ownCloud 等常见家用自建形态）存在张力。
 - **验收标准**：① 明确产品口径（"支持内网自建"或"明确不支持"）；② 若支持，提供**受控**逃生通道（用户显式声明内网主机 + 风险二次确认，默认仍为拒绝）；③ 文档与实现必须一致，不得只改其一。
 - **第四轮定版口径**：原表述「与 `README` 矛盾」**过强**（须先定产品口径再谈文档一致性）。
 - **用户裁决（2026-09-16）**：**不给出厂可用口径**——`ssrfAllowedHosts` **维持默认空集**，自建内网 / `.local` 主机仍一律被 `SyncEndpointGuard` 拒绝。理由：这是 SSRF 纵深防御的**默认收紧**，放开等于给「同步端点被指向内网」留口子；需要内网同步的用户可经既有显式白名单机制自行配置（该项 AC① 的「明确产品口径」即为本裁决）。条目仍留在表内。
+- **裁决理由前提更正（2026-09-16 复核，须用户重新裁决）**：裁决理由所称「需要内网同步的用户可经**既有显式白名单机制
+  自行配置**」**不成立**——`ssrfAllowedHosts` 仅是 `sync` 模块的**库级构造参数**（见上「复核补充」），**无 UI 入口、
+  无持久化键、无 DI 装配点**；唯一非默认赋值在单测 `SyncEndpointGuardTest.kt:179`。归档文档
+  `docs/resolved/batches/86-DAL出口纵深防御批次.md:17` 亦自述该通道为「**预留**」。
+  ⇒ 该裁决的实际语义是「**内网 / 自建同步对终端用户彻底不可用**」，而非「默认收紧但可自配」。**待用户重新裁决**。
+  复核取证见 [`records/存量条目前提复核记录.md`](records/存量条目前提复核记录.md) §①。
 
 ---
 
-### ISSUE-P3-141：第四轮复核分批判定的处置状态不可核对
+### ISSUE-P3-146：`SUPPLY-01` 覆盖条目 `P2-54` 的 AC②「分支保护必需检查」未闭环且无活动跟踪项
 
-- **优先级**：P3
-- **当前状态**：**开放项**——22 个仅存在于复核工作目录的编号尚未逐条给出结论。
-- **来源**：第四轮复核工作目录（`.audit-recheck/`，`.gitignore` 排除）。
-- **核实时间点与核实方式（2026-09-16，对 HEAD `ba11edc`）**：以正则对拍「工作目录 `B01`~`B09` 分批判定文件」与「`SECURITY_RECHECK_2026-09.md` + `ACTIVE_ISSUES.md` + `RESOLVED_LOG.md`/批次正文」的全部编号。
-- **问题描述**：得 **22 个编号仅存在于工作目录**（`ANDROID-01/06/10`、`ISSUE-P1-04/05`、`ISSUE-P2-08`、`ISSUE-P3-25/40`、`NEW-B01-1/5/6`、`NEW-B02-1/5`、`NEW-B04-01/03/04/05/06`、`NEW-B09-01~05`）。**已核实为真实缺口**：`NEW-B02-5`（建库预设算法与 `createDefault` 默认值不一致）与 `NEW-B02-3`（末尾残块明文副本）均属真缺陷，却**从未进入报告或本表**（两条已于 §102 批次以 `ISSUE-P2-85` / `ISSUE-P3-140` 修复）；报告 §6.8 只逐条裁定 `IPC-*`/`SUPPLY-*`，`NEW-B*` 仅少量被 §8 根因矩阵引用。**其余判定的逐条复核未完成**，故登记为开放项（**不伪闭环**）。
-- **验收标准**：① 对上述 22 个编号逐条给出「已由某条目覆盖 / 已在本批修复 / 确属新缺陷 / 前提不成立」四选一结论**并落到文档**（不得只留工作目录）；② 确属新缺陷者登记到本表；③ 结论须与 `SECURITY_RECHECK_2026-09.md` 交叉引用，使「复核未遗留未登记缺陷」从**断言**变成**可核对**；④ 同时评估是否把工作目录的关键分批判定（`.gitignore` 排除、不随仓库分发）按退役纪律分流入库。
-
----
-
-### ISSUE-P3-142：`SyncCacheTest` 清理用例偶发残留大写命名 `.CACHE.tmp`
-
-- **优先级**：P3（偶发；来源疑在本仓之外）
-- **当前状态**：**开放项**——实际写入者未定位，**定位前不得放宽该断言**。
-- **来源**：全量单测偶发（`RESOLVED_LOG.md` §79 残余的**第二次观测**，来源非本仓源码）。
-- **核实时间点与核实方式（2026-09-16）**：见下方「核实」四条。
-- **问题描述**：`SyncCacheTest` 的「clear 与 clearAll 均不删除防回滚状态文件」用例**偶发失败**——清理后目录内残留 `<大写十六进制键>.CACHE.tmp`（该键即 `sha256("remote/vault.kdbx")`，本次实测值 `8215950248E31E…BED990`）。**该命名无法从本仓源码复现**：`SUFFIX_CACHE = ".cache"`（小写）、键由 `SyncCache.sha256Hex`（`digest.toHexString()`）产出（小写）。
-- **核实**：① 全量 `.\gradlew.bat test --rerun-tasks --max-workers=1` 复现一次（**当天同日另两次全量运行均通过**）；② 单独复跑 `:sync:testDebugUnitTest --tests "*SyncCacheTest*"` **连续 3 次全绿**；③ 该症状与 `RESOLVED_LOG.md` §79.5 第 1 条**逐字一致**（§79 已登记「若后续再次观测到大写命名残留，应作为独立线索排查（可能来自本仓之外的写入者）」，本次即第二次观测）；④ §79 的「有界重试」修复（`deleteCacheChild` 3×15 ms）**未能覆盖本形态**。
-- **验收标准**：① 定位该大写命名条目的**实际写入者**（在本仓源码、Gradle/JUnit 临时目录机制、外部进程三者中给出结论，附取证方式）；② 定位后给出处置：属本仓者修根因并补回归，属外部写入者则在 §79 的登记处补「已确认为外部来源」及规避方式；③ **定位前不得放宽该断言**（保持「清理后不得残留」的严格语义）；④ 若长期不可复现，按「已接受残余」登记并写明触发条件与复现尝试次数。
+- **优先级**：P3（可核对性 / 治理面——**不是技术漏洞**）
+- **当前状态**：**开放项**——闸门的**自动触发**已落地，但「闸门是否会**阻断合并**」既未闭环、也**无受跟踪落点**。
+- **来源**：`ISSUE-P3-145` 收口时对 9 项「重合声明」逐条核实发现（见 [`docs/security/待复核区IPC与SUPPLY项重合声明核实.md`](security/待复核区IPC与SUPPLY项重合声明核实.md) §3.2）。
+- **核实时间点与核实方式（2026-09-16，对 HEAD `2e5ce38`）**：直读批次正文 `docs/resolved/batches/49-…md:95-100`（§49.3.6）自述「本环境无权限（`gh` PAT 对 `branches/main/protection` 返回 HTTP 403）」并明写「**该子项不因留痕而视为完成；后续持管理员凭据的环境应补做并把本行闭环**」；`git grep` 确认 `ACTIVE_ISSUES.md`（现 P2×3 / P3×6）与 `docs/architecture/已知工程限界.md` **均无该子项**；`docs/security/退役审计承接-43-…md:137` 的 `C-10` 仍列「无法确认」。
+- **问题描述**：`P2-54` 的 AC①（补自动触发）与 AC③（缺报告 fail-closed）已落地并验证，**AC②「把 `OWASP Dependency-Check` 设为分支保护必需状态检查」未闭环**；该条目随后续批次归档入 `RESOLVED_LOG.md` / `docs/resolved/`，其**未闭环子项随之失去跟踪**（这正是本条要修的东西：恢复跟踪，而非宣称已受保护）。
+- **验收标准**：① 在具备**管理员凭据**的环境中核实 GitHub → Settings → Branches → 保护规则（`main`）是否已把 `OWASP Dependency-Check` 设为必需状态检查；② 已启用 ⇒ 补一行留痕闭环（含核实时间与手段）；未启用 ⇒ 就地登记为待裁决项并给出启用计划；③ **不得**写成「仓库未受保护」——本环境**无法从仓库侧核实**仓库设置，只能写「无法核实且此前无活动跟踪项」。
+- **注意**：本条**不能**通过改代码或跑测试闭环，只能由持有仓库管理员权限者核实环境设置（与 `ISSUE-P3-23` 同属「外部依赖/不排期」类，但**必须留在表内**以免再次失去跟踪）。

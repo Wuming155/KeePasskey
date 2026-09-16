@@ -39,6 +39,28 @@ class SyncCacheEvictorTest {
     private lateinit var evictor: SyncCacheEvictor
     private lateinit var session: DatabaseSession
 
+    /**
+     * 目录内（**含任意层级子目录**）**真实存在**的文件（ISSUE-P3-142）。
+     *
+     * `File.listFiles()` 返回的是**目录索引条目**，与「磁盘上真有一个文件」并不等价：
+     * 在 Windows/NTFS 上实测（见 `docs/records/SyncCache大写CACHE临时文件定位记录.md`）
+     * 偶发返回**磁盘上并不存在**的「鬼影条目」，使「锁定后不得残留密文快照」这类断言偶发假阳性。
+     * 本助手以**实体存在**（`isFile`）为判据，**不放宽**判定：真的没删掉的文件必然仍 `isFile` ⇒ 断言照旧会红。
+     *
+     * **刻意保留递归**（`walkTopDown()`）：本用例原判据即为递归遍历，改为只看直接子项会**收窄覆盖**——
+     * 缓存目录一旦出现嵌套子目录，其中的残留将不再被发现。故此处只把「索引条目」换成「实体存在」这一层，
+     * **不动遍历深度**。口径与 `sync` 模块 `SyncCacheTest` 的实体判据同源（同一记录文档）。
+     *
+     * 残余（与 `SyncCacheTest` 同源）：`isFile` 并非百分百可靠，仍可能有约 3% 的鬼影假阳性
+     * 未消除——详见 `docs/architecture/已知工程限界.md` §7。
+     */
+    private fun realFilesUnder(dir: File): List<File> =
+        dir.walkTopDown().filter { it.isFile }.toList()
+
+    /** 目录索引条目名（含鬼影），仅用于失败信息——便于事后区分「鬼影」与「真残留」。 */
+    private fun listedEntries(dir: File): List<String> =
+        dir.listFiles().orEmpty().map { it.name }
+
     @Before
     fun setUp() {
         appCacheDir = File(tempFolder.root, "cache").apply { mkdirs() }
@@ -86,9 +108,9 @@ class SyncCacheEvictorTest {
         session.lock()
 
         assertEquals(
-            "锁定后不得残留任何密文快照: ${syncDir.listFiles()?.toList()}",
+            "锁定后不得残留任何密文快照（索引条目=${listedEntries(syncDir)}）",
             emptyList<File>(),
-            syncDir.walkTopDown().filter { it.isFile }.toList()
+            realFilesUnder(syncDir)
         )
         assertEquals(DatabaseSession.SessionState.LOCKED, session.state.value)
     }
@@ -139,7 +161,9 @@ class SyncCacheEvictorTest {
         val cleared = evictor.evictAll()
         assertTrue(
             "残留计数必须排除防回滚状态（它不是密文快照）；" +
-                "清理后目录内容=${syncDir.list()?.toList()}；销毁器日志=${debugLog.snapshot()}",
+                "清理后目录索引条目=${listedEntries(syncDir)}；" +
+                "磁盘上真实存在的文件=${realFilesUnder(syncDir).map { it.name }}；" +
+                "销毁器日志=${debugLog.snapshot()}",
             cleared
         )
     }

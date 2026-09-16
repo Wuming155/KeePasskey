@@ -21,6 +21,26 @@ import com.keepasskey.core.model.KdbxUuid
  * - 清零后 [Argon2.secretKey] 为 null：`Argon2KdfEngine` 按「无 secret」跳过、
  *   `KdbxKdfParameterCodec.serialize` 按「缺 K」不写出——两者均为可观测的失效态，
  *   不会以全零数组冒充合法 secret 参与派生（fail-visible 而非静默错密钥）。
+ *
+ * ### ISSUE-P3-143（第四轮复核 NEW-B01-6）：相等性是**秘密不敏感**语义
+ *
+ * [Argon2.equals] / [Argon2.hashCode] **刻意不比较** [Argon2.secretKey]（KDBX4
+ * VariantDictionary `K`，秘密材料）与 [Argon2.associatedData]。[Aes] 同理只比较
+ * `seed` / `rounds`。该忽略是**有意设计**而非缺陷：
+ * [Argon2.secretKey] 为 `var`，[clearSensitive] 会就地置 null，若纳入哈希则
+ * 「清零后哈希变化」会让对象在 `HashSet` / `HashMap` 中失联（见该字段处的就地说明）。
+ *
+ * ⚠ **禁止**把本相等性用于「凭据 / 秘密材料是否变化」一类裁决，例如：
+ * - 以 `old != new` 判定「是否需要重建会话 / 重新派生 / 更新缓存」；
+ * - 把本类型实例放进集合做去重，却期望「仅 secret 不同」的两个实例被区分。
+ *
+ * 上述用法会**静默**把「仅 secret 变化」的更新吞掉。两个仅 `K` / `A` 不同的实例
+ * 被判为**相等**是刻意的、被回归用例锁定的语义
+ * （`database/src/test/java/…/file/KdbxHeaderSecretInsensitiveEqualityTest.kt`）。
+ *
+ * **未来接入约束**：若确实出现「仅 secret 变化」的赋值 / 去重路径，必须改为
+ * **显式变更标记**（如会话级 `revision` 计数器、独立的版本号字段）来驱动裁决，
+ * **不得**依赖本相等性、也不得为迁就该路径而把 `secretKey` 纳入 `equals` / `hashCode`。
  */
 sealed class KdfParameters(val kdfUuid: KdbxUuid) {
 
@@ -84,6 +104,10 @@ sealed class KdfParameters(val kdfUuid: KdbxUuid) {
             secretKey = null
         }
 
+        /**
+         * ISSUE-P3-143：**秘密不敏感**相等性——`secretKey`（`K`）与 `associatedData`（`A`）
+         * 刻意不参与比较，为有意设计（理由与禁用场景见外层类 KDoc「相等性是秘密不敏感语义」一节）。
+         */
         override fun equals(other: Any?): Boolean {
             if (this === other) return true
             if (other !is Argon2) return false
@@ -96,6 +120,10 @@ sealed class KdfParameters(val kdfUuid: KdbxUuid) {
             return true
         }
 
+        /**
+         * ISSUE-P3-143：与 [equals] 同源的**秘密不敏感**哈希——刻意不纳入 `secretKey`，
+         * 以保证 [clearSensitive] 就地清零后哈希值**稳定**（否则集合内对象会失联）。
+         */
         override fun hashCode(): Int {
             var result = type.hashCode()
             result = 31 * result + salt.contentHashCode()

@@ -75,7 +75,9 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
         }
         val attestedPackage = CallingOriginResolver.systemAttestedPackageName(providerReq?.callingAppInfo)
 
-        // 交叉核对：系统认证包名 vs 我们自己在 PendingIntent extras 里记录的预期包名（不可伪造）。
+        // 交叉核对：系统认证包名 vs 本应用在**候选组装阶段**写入 base Intent 的预期包名。
+        // 其完整性由「落地 Activity exported=false」+「PendingIntent 仅由系统发送」共同保证——
+        // PendingIntent 本体不可伪造**不等于**其 extras 不可伪造，不得把 extras 当作可信来源。
         // 两者均可得且不一致 → fail-closed（组装阶段与本窗口看到的调用方不是同一个，拒绝签发）。
         if (attestedPackage != null &&
             expectedPackage.isNotBlank() &&
@@ -140,8 +142,9 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
                     }
                 } else {
                     // F4 整改：非浏览器（apk-key-hash）路径补充二次校验，不再单纯依赖候选组装阶段过滤——
-                    // 调用包名必须与条目绑定的 android://<包名> 精确一致（预期包名由候选组装方
-                    // 经不可伪造的 PendingIntent extras 传入，同 PasswordFillActivity 模式）；
+                    // 调用包名必须与条目绑定的 android://<包名> 精确一致。预期包名由本应用在**候选组装阶段**
+                    // 写入 base Intent；其完整性由「落地 Activity exported=false」+「PendingIntent 仅由系统
+                    // 发送」共同保证，**不得**理解为 extras 本身不可伪造（同 PasswordFillActivity 模式）；
                     // 非应用绑定（https://<rpId>）的条目一律拒绝普通应用签发
                     val boundPackage = DomainMatcher.extractAndroidBoundPackage(entry.url)
                     // ISSUE-P2-83：包名维度还须通过调用方**签名绑定**门控——绑定过的包名若本次
@@ -288,7 +291,8 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
                 put("type", "webauthn.get")
                 put("challenge", challenge)
                 put("origin", origin)
-                // ISSUE-P2-72：只写系统认证（或不可伪造 extras 记录）的调用方包名；
+                // ISSUE-P2-72：只写系统认证的调用方包名（退化时取候选组装阶段写入 base Intent 的
+                // 预期包名——其完整性由 exported=false + PendingIntent 仅由系统发送保证，非 extras 自身）；
                 // 取不到即省略——绝不再回退为本应用包名（原实现 `?: packageName` 属虚假归属）。
                 clientDataPackage?.let { put("androidPackageName", it) }
             }.toString()

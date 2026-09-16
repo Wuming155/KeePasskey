@@ -184,6 +184,10 @@ class KeePasskeyAutofillService : AutofillService() {
 
         // 库已锁定：提供解锁 Action Dataset
         buildLockedUnlockDataset(usernameId, passwordId, inlineRequest)?.let { lockedResponse ->
+            // ISSUE-P2-73 AC③：设备侧核对「库锁定 ⇒ 下发认证引导数据集」的调试留痕。
+            // 用 `AppLog.d`（仅 debug 构建输出，release 静默且被 R8 剥离）——不改变任何语义，
+            // 只为真机链路提供可核对的时序锚点；日志不含包名/条目等敏感标识。
+            AppLog.d(TAG, "onFillRequest 下发解锁引导数据集（密码库锁定，认证由解锁 Activity 承接）")
             callback.onSuccess(lockedResponse)
             return
         }
@@ -214,6 +218,9 @@ class KeePasskeyAutofillService : AutofillService() {
             passwordId = passwordId
         )
 
+        // ISSUE-P2-73 AC③：设备侧核对「认证完成后框架**重发** onFillRequest」的调试留痕
+        // （与库锁定分支的留痕配对即为该结论的直接证据）；仅 debug 构建输出。
+        AppLog.d(TAG, "onFillRequest 下发已解锁数据集（候选/选择器/保存信息）")
         callback.onSuccess(responseBuilder.build())
     }
 

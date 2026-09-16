@@ -191,6 +191,10 @@ internal suspend fun KeePasskeyAutofillService.appendUnlockedDatasets(
         flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
     }
 
+    // ISSUE-P2-73 AC③：设备侧核对「已解锁分支命中了几个自动匹配候选」的调试留痕
+    // （仅 debug 构建输出；只记数量，不含条目名 / 域名 / 包名等标识）
+    AppLog.d(TAG, "已解锁分支候选数据集数量=${rankedEntries.size}")
+
     for ((index, ranked) in rankedEntries.withIndex()) {
         val entry = ranked.entry
         // TASK-17：下发前解析 {REF:...} 字段引用（仅在取值消费点展开，投影层不物化）

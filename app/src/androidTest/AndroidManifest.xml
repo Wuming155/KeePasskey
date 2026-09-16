@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!--
+      ISSUE-P2-73 AC③（设备侧实测自动填充认证链路）。
+
+      本清单只服务于 instrumented 用例：声明一个**独立包名**（测试 APK 包 `com.keepasskey.app.test`）
+      的自动填充客户端 Activity。自动填充框架对「自动填充服务自己所在包名」不生效，
+      故驱动认证链路必须有一个本应用之外的真实客户端——测试 APK 的包名与 uid 均不同于
+      被测应用（`com.keepasskey`），语义上等价于「另一个应用调用了本填充服务」。
+
+      - `exported="true"`：客户端进程与测试进程不同包，需允许外部（测试）显式启动；
+      - `stateAlwaysHidden`：不自动弹输入法，避免键盘遮挡系统填充下拉与后续 a11y 取点；
+      - Activity 自身在 `onPostResume` 内主动调用 `AutofillManager.requestAutofill`，
+        因此无需测试进程持有其 View 引用（跨进程亦可驱动）。
+    -->
+    <application>
+        <activity
+            android:name="com.keepasskey.app.autofill.AutofillClientActivity"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:theme="@android:style/Theme.Material.Light.NoActionBar"
+            android:windowSoftInputMode="stateAlwaysHidden|adjustResize" />
+    </application>
+
+</manifest>

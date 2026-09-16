@@ -88,7 +88,7 @@ class ExportedComponentHygieneTest {
             )
             assertTrue(
                 "${component.name} 必须使用系统签名级 BIND_* 权限",
-                component.permission!!.startsWith("android.permission.BIND_")
+                component.permission.startsWith("android.permission.BIND_")
             )
         }
     }

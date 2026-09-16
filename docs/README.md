@@ -29,6 +29,9 @@
 | [`records/ci-静态校准记录.md`](records/ci-静态校准记录.md) | CI 配置与静态分析的校准留痕 |
 | [`records/退役依据承接-ISSUE-P3-09.md`](records/退役依据承接-ISSUE-P3-09.md) | `ISSUE-P3-09` 依据承接（Action 升级 / ProGuard 收窄 / Compose BOM 回归判据）；原 `.handoff` 依据从未入库 |
 | [`records/运行完整性检测Frida实测基线.md`](records/运行完整性检测Frida实测基线.md) | 真机 Frida 三形态实测矩阵（`ISSUE-P3-120`）：命中率 3/3、两层防线互补关系、**四条未经实测的规避面**、复现步骤与清理留痕 |
+| [`records/存量条目前提复核记录.md`](records/存量条目前提复核记录.md) | `ACTIVE_ISSUES.md` 三条「已裁决暂缓」条目（`P2-47` / `P2-79` / `P3-121`）的前提复核（2026-09-16 对 HEAD `2e5ce38`）：正文前提判定、**失真裁决理由**、可直接粘贴的修正片段 |
+| [`records/SyncCache大写CACHE临时文件定位记录.md`](records/SyncCache大写CACHE临时文件定位记录.md) | `ISSUE-P3-142` 定位记录：残留条目**磁盘上并不存在**（四路交叉取证），判为 **Windows/NTFS 目录枚举鬼影**；非本仓写入者、非外部写入者；含复现率、候选解释逐一裁定、断言口径更正与该形态的残余边界 |
+| [`records/自动填充认证链路真机实测记录.md`](records/自动填充认证链路真机实测记录.md) | `ISSUE-P2-73` AC③ 真机实测记录（Redmi 4X / Android 17 / API 37）：设备侧驱动方式、**定版用例 4/4 通过**与历史失败逐次留痕、关键 logcat 原文与截图；**4 条新发现**——框架解锁后**不自动重发** `onFillRequest`（`ISSUE-P2-86`）、确认路径因认证结果不带数据集而**写不入凭据**（对照：选择器路径回传真实 `Dataset` 即成功）、`UiAutomation` 每用户单槽位、锁屏下 Activity 无法进入前台 |
 
 ## security/ — 安全、威胁建模与合规
 
@@ -39,6 +42,8 @@
 | [`security/退役审计承接-43-安全整改方案与附录.md`](security/退役审计承接-43-安全整改方案与附录.md) | 已退役整改报告的**结论承接处**（附录 A–F、产品决策 A-1 ~ A-4） |
 | [`security/Privacy-Policy.md`](security/Privacy-Policy.md) | 隐私政策（对外交付物） |
 | [`security/SECURITY_RECHECK_2026-09.md`](security/SECURITY_RECHECK_2026-09.md) | **第二轮独立安全复核裁决报告**（89 项开放项逐条复核 + 第一轮「已排除」结论反证）；2026-09-15 由 `523d0fd^` 恢复入库 |
+| [`security/第四轮复核遗留编号处置.md`](security/第四轮复核遗留编号处置.md) | `ISSUE-P3-141` 收口：第四轮复核工作目录「遗留编号」（自称 **22** / 实际枚举 **23** / 两处枚举并集 **25**）**逐条四选一**处置（已由某条目覆盖 / 已在本批修复 / 确属新缺陷 / 前提不成立）+ 可核对证据；三处前提更正；**工作目录（`.audit-recheck/`）结论分流与逐份退役判定** |
+| [`security/待复核区IPC与SUPPLY项重合声明核实.md`](security/待复核区IPC与SUPPLY项重合声明核实.md) | `ISSUE-P3-145` 收口：待复核区全域 **19 项**（`IPC-01…11` / `SUPPLY-01…08`）中「**重合归并**」那 **9 项**的**逐条**核实（7 项成立 / 2 项部分成立）+ 两项独立残余（`IPC-11` 族 CM 通道 `UNBOUND` 口径、`SUPPLY-01` 覆盖条目 `P2-54` AC② 无活动落点） |
 
 ## references/ — 参考项目架构分析（只读借鉴）
 
@@ -52,6 +57,6 @@
 |---|---|
 | [`resolved/README.md`](resolved/README.md) | 分册体系说明与维护规则 |
 | [`resolved/BATCH_01_30.md`](resolved/BATCH_01_30.md) 等 **4 册** | 分册级索引（各 ≤100 行） |
-| `resolved/batches/` | **一批次一文件**的批次正文（当前 98 份；§42 / §43 已归入 `security/`） |
+| `resolved/batches/` | **一批次一文件**的批次正文（当前 **107** 份，§1~§109；§42 / §43 已归入 `security/`） |
 
 > **回溯约定**：归档正文只搬迁、不改写。拆分前的完整版本见 git `a144d21`。

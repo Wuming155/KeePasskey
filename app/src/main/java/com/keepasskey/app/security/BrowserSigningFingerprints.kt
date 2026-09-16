@@ -25,6 +25,14 @@ import java.util.Locale
  * 其 `webDomain` 归属回退到既有 DAL（assetlinks.json）校验路径 fail-closed 处置。
  * 新增浏览器须先取得权威来源证据并在此注明来源与核实方式，禁止臆写。
  *
+ * ## 通道口径差异（第四轮复核 `NEW-B09-02`，2026-09-16）
+ *
+ * 本对象服务**自动填充通道**；`org.mozilla.firefox` 两条指纹是该通道按「来源 2」扩列的。
+ * **CM（Credential Manager）通道的浏览器白名单 `CallingOriginResolver.PRIVILEGED_BROWSER_ALLOWLIST`
+ * 未收录 Firefox（仅 `com.android.chrome`）** ⇒ 同一「受信浏览器」概念在两通道口径不同，较窄的一侧
+ * （CM）方向 fail-closed，不构成攻击面；两侧口径是否对齐未作裁决，且 Firefox 经 CM 通道的
+ * **实际可用性未经设备侧验证**（本注不构成可用性结论）。
+ *
  * 指纹格式：SHA-256 十六进制、**大写、无冒号**（与 `AutofillOriginResolver.callingAppCertSha256Hex`
  * 的输出口径一致）。
  */

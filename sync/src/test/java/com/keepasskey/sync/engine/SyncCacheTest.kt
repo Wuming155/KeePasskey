@@ -28,6 +28,25 @@ class SyncCacheTest {
 
     private fun newCache(): SyncCache = SyncCache(tmpFolder.newFolder("cache"))
 
+    /**
+     * 目录内**真实存在**的直接子项名（ISSUE-P3-142）。
+     *
+     * `File.listFiles()` 返回的是**目录索引条目**，与「磁盘上真有一个文件」并不等价：
+     * 在 Windows/NTFS 上实测（见 `docs/records/SyncCache大写CACHE临时文件定位记录.md`）
+     * 偶发返回**大写拼写、磁盘上并不存在**的**鬼影条目**——此时
+     * `File(dir, name).isFile` 为 `false`，`DirectoryStream` 与 `cmd dir /b` 均看不到它。
+     *
+     * 本过滤器只做这一件事：把「目录索引说有、磁盘上却没有」的鬼影排除，
+     * **不放宽**「清理后不得残留」的判定——凡磁盘上真存在的条目一律保留在返回值中，
+     * 因而「真的没删掉」依然会（而且必须）让断言变红。
+     */
+    private fun realEntriesOf(dir: File): List<String> =
+        dir.listFiles().orEmpty().map { it.name }.filter { File(dir, it).isFile }
+
+    /** 目录索引条目名（含鬼影），仅用于失败信息——便于事后区分「鬼影」与「真残留」。 */
+    private fun listedEntriesOf(dir: File): List<String> =
+        dir.listFiles().orEmpty().map { it.name }
+
     @Test
     fun `缓存写入与读取往返一致`() {
         val cache = newCache()
@@ -145,10 +164,13 @@ class SyncCacheTest {
         assertTrue(cache.clearAll())
 
         assertTrue("SyncCache.clearAll 不得删除防回滚状态: ${stateFile.name}", stateFile.isFile)
+        // ISSUE-P3-142：以「磁盘上真实存在」为准——鬼影条目不计入残留，
+        // 而真的没删掉的文件必然仍 `isFile` ⇒ 断言照旧会红（未放宽判定）。
+        // 被排除的鬼影名通过下方 `索引条目=…` 留在失败信息里，故不再另设恒真断言。
         assertEquals(
-            "除防回滚状态外不得残留其他缓存文件",
+            "除防回滚状态外不得残留其他缓存文件（索引条目=${listedEntriesOf(dir)}）",
             listOf(stateFile.name),
-            dir.listFiles()?.map { it.name }?.sorted().orEmpty()
+            realEntriesOf(dir).sorted()
         )
     }
 
@@ -260,15 +282,16 @@ class SyncCacheTest {
 
         assertTrue(cache.clearAll())
 
-        val remaining = dir.listFiles()?.map { it.name }?.sorted().orEmpty()
+        // ISSUE-P3-142：以「磁盘上真实存在」为准（鬼影条目不计入残留；真残留仍必红）
+        val realRemaining = realEntriesOf(dir).sorted()
         assertTrue(
-            "清理后不得残留任何 .tmp（承载密文快照片段）：$remaining",
-            remaining.none { it.endsWith(".tmp") }
+            "清理后不得残留任何真实存在的 .tmp（承载密文快照片段）：$realRemaining",
+            realRemaining.none { it.endsWith(".tmp") }
         )
         assertEquals(
-            "除防回滚状态外应清空: $remaining",
+            "除防回滚状态外应清空（索引条目=${listedEntriesOf(dir)}）: $realRemaining",
             emptyList<String>(),
-            remaining.filterNot { it.endsWith(".rollback") }
+            realRemaining.filterNot { it.endsWith(".rollback") }
         )
     }
 

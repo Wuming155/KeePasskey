@@ -125,7 +125,9 @@ object InstalledAppsCatalog {
 
     private fun safeLabel(pm: PackageManager, info: ResolveInfo, fallback: String): String =
         try {
-            info.loadLabel(pm)?.toString()?.takeIf { it.isNotBlank() } ?: fallback
+            // PackageManager#loadLabel 在 compileSdk 37 上返回非空 CharSequence ⇒ 无需安全调用
+            // （原 `?.` 是既有基线告警 `Unnecessary safe call on a non-null receiver` 的来源）。
+            info.loadLabel(pm).toString().takeIf { it.isNotBlank() } ?: fallback
         } catch (_: Throwable) {
             fallback
         }
