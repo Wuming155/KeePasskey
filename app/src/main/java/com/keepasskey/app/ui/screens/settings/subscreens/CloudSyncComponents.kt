@@ -313,8 +313,8 @@ internal fun SyncStatusCardPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         SyncStatusCard(
             uiState = com.keepasskey.app.ui.screens.settings.SettingsUiState().copy(
-                syncStatusText = "Connected",
-                syncLastTime = "Last sync 2026-01-02 12:00",
+                syncStatusText = stringResource(R.string.sync_status_synced),
+                syncLastTime = stringResource(R.string.vault_last_sync_time, "2026-01-02 12:00"),
                 isConnectionVerified = true
             ),
             onTriggerSync = {},

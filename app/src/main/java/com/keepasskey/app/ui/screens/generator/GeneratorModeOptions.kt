@@ -234,8 +234,8 @@ internal fun OptionSwitchRow(
 internal fun GeneratorModeOptionsPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         OptionSwitchRow(
-            title = "排除易混淆字符",
-            subtitle = "Skip look-alike characters (0/O, 1/l, …)",
+            title = stringResource(R.string.gen_opt_exclude_ambiguous),
+            subtitle = stringResource(R.string.gen_opt_exclude_ambiguous_sub),
             checked = true,
             onCheckedChange = {}
         )

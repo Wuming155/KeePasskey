@@ -420,7 +420,7 @@ internal fun UnlockQuickUnlockCardPreview() {
             uiState = UnlockUiState().copy(
                 hasDatabase = true,
                 unlockMode = UnlockMode.QUICK_UNLOCK,
-                hardwareBackedSecurity = "Hardware-backed key protection"
+                hardwareBackedSecurity = stringResource(R.string.unlock_hardware_backed_security)
             ),
             onBiometricUnlock = {},
             onSwitchMode = {}

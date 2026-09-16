@@ -193,12 +193,12 @@
     <string name="edit_passkey_create">为此网站创建 Passkey</string>
     <string name="edit_passkey_desc">基于 Android 14+ 凭据管理器，支持端到端公私钥验证</string>
     <string name="edit_custom_fields">自定义字段 (键值对)</string>
-    <string name="edit_add_field">+ 添加自定义字段</string>
+    <string name="edit_add_field">添加自定义字段</string>
     <string name="edit_field_key">字段名称 (如 PIN码、安全问题)</string>
     <string name="edit_field_value">字段内容</string>
     <string name="edit_field_protected">受密码保护 (掩码遮蔽)</string>
     <string name="edit_attachments">附件文件管理</string>
-    <string name="edit_add_attachment">+ 添加附件文件</string>
+    <string name="edit_add_attachment">添加附件文件</string>
     <string name="edit_notes">备注与自定义字段</string>
     <string name="edit_notes_hint">条目备注信息 (可选)</string>
     <string name="edit_save_btn">保 存 凭 据</string>
@@ -304,7 +304,7 @@
     <string name="detail_password_copied_timeout_minutes">密码已复制，%1$d 分钟后自动清空</string>
     <string name="detail_password_copied_no_clear">密码已复制（剪贴板自动清空已关闭）</string>
     <string name="detail_attachment_tap_preview">%1$s • 点击安全预览</string>
-    <string name="detail_revision_meta">时间: %1$s • 历史修订快照</string>
+    <string name="detail_revision_meta">历史修订 · %1$s</string>
     <string name="detail_updated_meta">更新时间: %1$s • 加密存储于 KDBX</string>
     <string name="detail_diff_compare">对比差异</string>
 
@@ -340,6 +340,7 @@
     <string name="sec_biometric_key_invalidated">系统生物特征发生变更，安全密钥已失效，请使用主密码重新登录</string>
     <!-- ISSUE-P1-22：软件级 Keystore 快速解锁降级（显式确认 + 常驻声明） -->
     <string name="quick_unlock_software_key_notice">本机快速解锁降级为软件密钥，不提供硬件级保护</string>
+    <string name="unlock_hardware_backed_security">硬件级密钥保护</string>
     <string name="unlock_downgrade_dialog_title">快速解锁安全降级</string>
     <string name="unlock_downgrade_dialog_body">本机 Keystore 为软件级（无 TEE / StrongBox 硬件隔离），快速解锁封印的主密码与密钥文件将以软件密钥加密，攻击者可离线解出。是否仍要启用？</string>
     <string name="unlock_downgrade_confirm">仍要启用（软件密钥）</string>
@@ -352,7 +353,8 @@
     <string name="readonly_save_rejected">数据库以只读模式打开，无法保存修改</string>
     <string name="readonly_banner">只读模式：数据库以只读方式打开，编辑与保存已禁用</string>
     <string name="edit_tags_hint">标签（多个标签用逗号分隔）</string>
-    <string name="edit_autotype_hint">AutoType 键入序列（如 {USERNAME}{TAB}{PASSWORD}{ENTER}）</string>
+    <string name="edit_autotype_hint">AutoType 键入序列</string>
+    <string name="edit_autotype_placeholder">{USERNAME}{TAB}{PASSWORD}{ENTER}</string>
     <string name="edit_override_url_hint">Override URL（自动填充匹配覆盖）</string>
     <string name="edit_extra_section">高级属性</string>
 
@@ -402,7 +404,7 @@
     <string name="conflict_remote_version">云端版本 (远程副本)</string>
 
     <!-- 版本差异对比 -->
-    <string name="diff_dialog_title">版本差异对比 (Visual Diff)</string>
+    <string name="diff_dialog_title">版本差异对比</string>
     <string name="diff_compare_summary">对比当前状态与 %1$s 历史版本 (%2$s)</string>
     <string name="diff_field_password">密码</string>
     <string name="diff_field_username">用户名</string>
@@ -503,7 +505,7 @@
     <string name="dbset_argon2_threads_chip">%1$d 线程</string>
     <string name="dbset_benchmark_btn">运行性能基准测试</string>
     <string name="dbset_benchmark_running">正在运行 KDF 基准测试（实测设备吞吐，约需数秒）…</string>
-    <string name="dbset_benchmark_result">基准完成：推荐迭代 %1$d 轮、内存 %2$d MiB、并行度 %3$d，已自动填入参数</string>
+    <string name="dbset_benchmark_result">基准完成：推荐迭代 %1$d 轮、内存 %2$d MB、并行度 %3$d，已自动填入参数</string>
     <string name="dbset_benchmark_failed">基准测试失败：%1$s</string>
     <string name="dbset_apply_params">应用参数</string>
     <string name="dbset_btn_done">完成</string>

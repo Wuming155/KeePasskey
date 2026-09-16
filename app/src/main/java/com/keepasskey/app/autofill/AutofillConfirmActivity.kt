@@ -360,7 +360,9 @@ private fun AutofillCallerAttributionBlock(
     onTrustCheckedChange: (Boolean) -> Unit
 ) {
     Column(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
@@ -387,7 +389,8 @@ private fun AutofillCallerAttributionBlock(
             Text(
                 text = stringResource(R.string.autofill_confirm_first_occurrence),
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.error
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.fillMaxWidth()
             )
             Row(
                 modifier = Modifier
@@ -407,7 +410,8 @@ private fun AutofillCallerAttributionBlock(
             Text(
                 text = stringResource(R.string.autofill_confirm_already_trusted),
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.fillMaxWidth()
             )
         }
     }

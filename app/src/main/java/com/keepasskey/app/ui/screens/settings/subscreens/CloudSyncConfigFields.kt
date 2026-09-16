@@ -219,7 +219,7 @@ internal fun WebDavConfigFieldsPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         Column {
             WebDavConfigFields(
-                url = "https://preview.example.com/remote.php/dav/files/demo/",
+                url = "https://preview.example.com/dav/",
                 onUrlChange = {},
                 username = "demo@example.com",
                 onUsernameChange = {},

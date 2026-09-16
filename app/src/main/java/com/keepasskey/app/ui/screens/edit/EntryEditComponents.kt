@@ -199,6 +199,7 @@ internal fun EntryEditExtraSection(
                 value = autoTypeSequence,
                 onValueChange = onAutoTypeSequenceChange,
                 label = { Text(stringResource(R.string.edit_autotype_hint)) },
+                placeholder = { Text(stringResource(R.string.edit_autotype_placeholder)) },
                 singleLine = true,
                 shape = MaterialTheme.shapes.medium,
                 modifier = Modifier.fillMaxWidth()

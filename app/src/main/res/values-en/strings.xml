@@ -188,12 +188,12 @@
     <string name="edit_passkey_create">Create Passkey for this website</string>
     <string name="edit_passkey_desc">Powered by Android 14+ Credential Manager with end-to-end asymmetric keys</string>
     <string name="edit_custom_fields">Custom Fields (Key-Value)</string>
-    <string name="edit_add_field">+ Add Custom Field</string>
+    <string name="edit_add_field">Add Custom Field</string>
     <string name="edit_field_key">Field Name (e.g. PIN, Recovery Code)</string>
     <string name="edit_field_value">Field Value</string>
     <string name="edit_field_protected">Protect as password (Masked)</string>
     <string name="edit_attachments">Attachments Management</string>
-    <string name="edit_add_attachment">+ Add Attachment File</string>
+    <string name="edit_add_attachment">Add Attachment File</string>
     <string name="edit_notes">Notes &amp; Custom Fields</string>
     <string name="edit_notes_hint">Entry notes (Optional)</string>
     <string name="edit_save_btn">S A V E   E N T R Y</string>
@@ -300,7 +300,7 @@
     <string name="detail_password_copied_timeout_minutes">Password copied, clipboard clears in %1$d minutes</string>
     <string name="detail_password_copied_no_clear">Password copied (clipboard auto-clear is disabled)</string>
     <string name="detail_attachment_tap_preview">%1$s • Tap to preview securely</string>
-    <string name="detail_revision_meta">Time: %1$s • Historical revision snapshot</string>
+    <string name="detail_revision_meta">Historical revision · %1$s</string>
     <string name="detail_updated_meta">Updated: %1$s • Encrypted in KDBX</string>
     <string name="detail_diff_compare">Compare changes</string>
 
@@ -334,6 +334,7 @@
     <string name="sec_biometric_key_invalidated">Biometric credentials changed, security key invalidated. Please use master password.</string>
     <!-- ISSUE-P1-22: software-level Keystore quick unlock downgrade (explicit consent + resident notice) -->
     <string name="quick_unlock_software_key_notice">Quick unlock on this device falls back to a software key without hardware-level protection</string>
+    <string name="unlock_hardware_backed_security">Hardware-backed key protection</string>
     <string name="unlock_downgrade_dialog_title">Quick unlock security downgrade</string>
     <string name="unlock_downgrade_dialog_body">This device\'s Keystore is software-level (no TEE / StrongBox hardware isolation). Quick unlock seals your master password and key file with a software key that can be extracted offline. Enable anyway?</string>
     <string name="unlock_downgrade_confirm">Enable anyway (software key)</string>
@@ -346,7 +347,8 @@
     <string name="readonly_save_rejected">Database is open in read-only mode, saving is disabled</string>
     <string name="readonly_banner">Read-only mode: database was opened read-only, editing and saving are disabled</string>
     <string name="edit_tags_hint">Tags (separate multiple tags with commas)</string>
-    <string name="edit_autotype_hint">AutoType sequence (e.g. {USERNAME}{TAB}{PASSWORD}{ENTER})</string>
+    <string name="edit_autotype_hint">AutoType sequence</string>
+    <string name="edit_autotype_placeholder">{USERNAME}{TAB}{PASSWORD}{ENTER}</string>
     <string name="edit_override_url_hint">Override URL (autofill matching override)</string>
     <string name="edit_extra_section">Advanced Properties</string>
 
@@ -396,7 +398,7 @@
     <string name="conflict_remote_version">Remote version (cloud copy)</string>
 
     <!-- Revision diff -->
-    <string name="diff_dialog_title">Revision Diff (Visual Diff)</string>
+    <string name="diff_dialog_title">Revision Diff</string>
     <string name="diff_compare_summary">Comparing current state with the %1$s revision (%2$s)</string>
     <string name="diff_field_password">Password</string>
     <string name="diff_field_username">Username</string>
@@ -496,7 +498,7 @@
     <string name="dbset_argon2_threads_chip">%1$d threads</string>
     <string name="dbset_benchmark_btn">Run benchmark</string>
     <string name="dbset_benchmark_running">Running KDF benchmark (measuring device throughput, may take a few seconds)…</string>
-    <string name="dbset_benchmark_result">Benchmark done: recommended %1$d iterations, %2$d MiB memory, parallelism %3$d — parameters applied</string>
+    <string name="dbset_benchmark_result">Benchmark done: recommended %1$d iterations, %2$d MB memory, parallelism %3$d — parameters applied</string>
     <string name="dbset_benchmark_failed">Benchmark failed: %1$s</string>
     <string name="dbset_apply_params">Apply parameters</string>
     <string name="dbset_btn_done">Done</string>

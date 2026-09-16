@@ -42,16 +42,9 @@ Coroutines + Flow；**文档与代码注释使用简体中文**。
 7. **善用 MCP 知识服务器（强制）**：Android / Jetpack / Kotlin / Gradle / 加密库 / Google 平台 API → `google-developer-knowledge`；
    第三方库与框架（Compose / Hilt / OkHttp 等）→ Context7（`resolve-library-id` + `query-docs`）；**不得凭记忆臆测或盲改**，
    调用前先取该服务器各工具的最新参数 schema。
-8. **每批次收尾必须编译稳定版并回传产物完整路径（强制）**：执行 `.\gradlew.bat assembleRelease`（R8 混淆 + 资源收缩 + release 签名），
-   并在交付说明中**原样给出**：`D:\GithubWorkplace\KeePasskey\app\build\outputs\apk\release\app-release.apk`
-   （未配置 release 签名时为同目录 `app-release-unsigned.apk`，须如实注明）。构建失败必须如实报告并修复；
-   不得以 debug 包冒充稳定版，不得引用旧产物充当本次构建结果。
-   - **签名口令构建期闸门（ISSUE-P2-55，无豁免开关）**：`app/build.gradle.kts` 在配置阶段即 `error(...)` 拒绝已公开示例 / 弱口令
-     （含历史泄露值 `keepasskey123`）、模板占位符与长度 < 16 的口令；口令只来自 `keystore.properties`（gitignore）或 CI Secret（须高熵）。
-     既有弱口令库按 `keystore.properties.example` 只 **re-key、不换密钥**（换密钥会让已安装用户无法覆盖升级）。
-9. **`.kdbx` 互操作证据纪律（§38 立规）**：产物互操作性只认**官方实现端到端对拍**（`OwnProductInteropProbeTest` + `PROBE.md` +
+8. **`.kdbx` 互操作证据纪律（§38 立规）**：产物互操作性只认**官方实现端到端对拍**（`OwnProductInteropProbeTest` + `PROBE.md` +
    `keepassxc-cli` / `pykeepass` 复现）；`tools/kdbx-corpus/generate_corpus.py --verify` 仅证明外层文件头自洽，**不构成**互操作证据。
-10. **本文件始终保持精简（强制）**：只放**长期规则、命令、索引指针**——能落到 `docs/` 的一律落 `docs/`；版本基线、批次细节、
+9. **本文件始终保持精简（强制）**：只放**长期规则、命令、索引指针**——能落到 `docs/` 的一律落 `docs/`；版本基线、批次细节、
     实测数据、历史裁决与已知工程限界一律**不进本文件**。新增内容前先自问「是否已在文档中承载、是否属于长期规则」；每次改动顺手删冗余。
 
 ## 4. 文档索引

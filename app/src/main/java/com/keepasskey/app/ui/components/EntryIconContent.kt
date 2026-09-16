@@ -3,7 +3,7 @@ package com.keepasskey.app.ui.components
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.BrokenImage
+import androidx.compose.material.icons.filled.Key
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -27,7 +27,8 @@ val DefaultEntryIconSize: Dp = 20.dp
  * [com.keepasskey.app.ui.model.EntryIcon]）后传入。
  *
  * - [EntryIcon.Custom] 且有载荷 → 绘制位图；
- * - [EntryIcon.Custom] 无载荷（解码中/解码失败）或 [EntryIcon.Missing] → 缺图占位；
+ * - [EntryIcon.Custom] 无载荷（解码中/解码失败）或 [EntryIcon.Missing] → 回退 [placeholderIcon]，
+ *   避免 Material BrokenImage 碎图在密码条目语境下被误读为「图片加载故障」；
  * - [EntryIcon.Default] → [placeholderIcon]（各版式各自的既有标准图标语义）。
  */
 @Composable
@@ -48,7 +49,7 @@ fun EntryIconContent(
         )
 
         icon is EntryIcon.Custom || icon is EntryIcon.Missing -> Icon(
-            imageVector = Icons.Default.BrokenImage,
+            imageVector = placeholderIcon,
             contentDescription = stringResource(R.string.vault_custom_icon_missing),
             tint = tint,
             modifier = modifier.size(contentSize)
@@ -73,7 +74,7 @@ internal fun EntryIconContentPreview() {
             icon = com.keepasskey.app.ui.preview.PreviewDefaultIcon,
             // 预览用中性色：本文件未引入 MaterialTheme，故用 Color.Unspecified（渲染时取 LocalContentColor）
             tint = Color.Unspecified,
-            placeholderIcon = Icons.Default.BrokenImage,
+            placeholderIcon = Icons.Default.Key,
             modifier = Modifier,
             contentSize = 24.dp
         )
