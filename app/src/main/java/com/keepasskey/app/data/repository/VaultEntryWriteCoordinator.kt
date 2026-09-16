@@ -1,6 +1,7 @@
 package com.keepasskey.app.data.repository
 
 import com.keepasskey.app.R
+import com.keepasskey.app.autofill.AutofillPackageNames
 import com.keepasskey.app.passkey.DomainMatcher
 import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.app.ui.model.UiVaultEntry
@@ -320,9 +321,11 @@ internal class VaultEntryWriteCoordinator(
             val pkg = packageName.trim()
             val raw = webDomain?.trim()?.trimEnd('/')
             return when {
-                raw.isNullOrEmpty() -> CredentialUrlBinding("android://$pkg", pkg, isWebBinding = false)
+                raw.isNullOrEmpty() ->
+                    CredentialUrlBinding(AutofillPackageNames.boundUrl(pkg), pkg, isWebBinding = false)
+
                 raw.startsWith(com.keepasskey.app.passkey.CallingOriginResolver.APK_KEY_HASH_PREFIX) ->
-                    CredentialUrlBinding("android://$pkg", pkg, isWebBinding = false)
+                    CredentialUrlBinding(AutofillPackageNames.boundUrl(pkg), pkg, isWebBinding = false)
                 raw.startsWith("https://", ignoreCase = true) || raw.startsWith("http://", ignoreCase = true) ->
                     CredentialUrlBinding(raw, DomainMatcher.extractDomain(raw), isWebBinding = true)
                 // 自动填充保存路径的既有形态：裸域名

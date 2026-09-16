@@ -850,6 +850,18 @@
     <string name="autofill_blacklist_add_hint">应用包名（如 com.example.bank）</string>
     <string name="autofill_blacklist_add_invalid">包名无效或已在黑名单中</string>
     <string name="autofill_blacklist_delete_cd">从黑名单移除</string>
+    <!-- TASK-139：应用选择器（黑名单 / 条目「关联应用」共用同一对话框） -->
+    <string name="app_picker_title">选择应用</string>
+    <string name="app_picker_search_hint">搜索应用名或包名</string>
+    <string name="app_picker_empty">未读取到可启动的应用</string>
+    <string name="app_picker_no_match">没有匹配的应用</string>
+    <string name="app_picker_load_failed">读取应用列表失败，可改用手工输入包名</string>
+    <string name="app_picker_added_cd">已在名单中</string>
+    <string name="autofill_blacklist_pick_app">从已安装应用中选择</string>
+    <string name="autofill_blacklist_manual_toggle">手动输入包名</string>
+    <string name="edit_app_binding_pick_cd">选择关联的应用</string>
+    <string name="edit_app_binding_bound">已关联应用：%1$s（%2$s）</string>
+    <string name="edit_app_binding_bound_unreadable">已关联应用：%1$s（应用名不可读）</string>
     <string name="cd_autofill_block">为本应用禁用自动填充</string>
     <string name="detail_autofill_blocked">已为 %1$s 禁用自动填充</string>
     <string name="detail_autofill_unblocked">已恢复 %1$s 的自动填充</string>

@@ -17,6 +17,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.ElectricBolt
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Visibility
@@ -28,20 +29,34 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.keepasskey.app.R
+import com.keepasskey.app.apps.InstalledAppOption
+import com.keepasskey.app.apps.InstalledAppsCatalog
+import com.keepasskey.app.autofill.AutofillPackageNames
+import com.keepasskey.app.passkey.DomainMatcher
+import com.keepasskey.app.ui.components.AppIconSlot
+import com.keepasskey.app.ui.components.AppPickerDialog
 import com.keepasskey.app.ui.components.BentoCard
 import com.keepasskey.app.ui.components.CustomIconItem
 import com.keepasskey.app.ui.components.PasswordStrengthBar
 import com.keepasskey.app.ui.components.SecurePasswordField
 import com.keepasskey.app.ui.components.getVaultIcon
 import com.keepasskey.app.ui.theme.CapsuleShape
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * 凭据编辑页的基础表单分节（所属分组 / 只读横幅 / 基本信息 / 账户与密码 / 安全备注）。
@@ -185,16 +200,101 @@ internal fun ColumnScope.EntryEditBasicInfoSection(
                 )
             }
 
-            OutlinedTextField(
-                value = uiState.url,
-                onValueChange = onUrlChange,
-                label = { Text(stringResource(R.string.edit_url_hint)) },
-                singleLine = true,
-                shape = MaterialTheme.shapes.medium,
-                modifier = Modifier.fillMaxWidth()
+            EntryUrlField(
+                url = uiState.url,
+                onUrlChange = onUrlChange
             )
         }
     }
+}
+
+/**
+ * 网址 / 应用绑定字段。
+ *
+ * TASK-139：条目「关联具体应用填充」的绑定形式是 `android://<包名>`（见 `DomainMatcher`
+ * 的严格包名维度判据），此前只能靠用户手打 URL 猜格式。本字段右侧提供**应用选择器**入口：
+ * 按应用名选定后直接写入绑定串，并把该应用图标回显为前置图标、应用名回显为辅助文案——
+ * 用户不必知道、也不必拼写包名。
+ *
+ * 边界（如实声明）：选择器只列**有桌面入口**的应用；字段本身仍可手工编辑，
+ * 因此无桌面入口的包名与 Web URL 的既有写法均不受影响。
+ */
+@Composable
+private fun EntryUrlField(
+    url: String,
+    onUrlChange: (String) -> Unit
+) {
+    var showPicker by remember { mutableStateOf(false) }
+    val boundPackage = remember(url) { DomainMatcher.extractAndroidBoundPackage(url) }
+    val boundApp = rememberBoundAppOption(boundPackage)
+
+    OutlinedTextField(
+        value = url,
+        onValueChange = onUrlChange,
+        label = { Text(stringResource(R.string.edit_url_hint)) },
+        singleLine = true,
+        shape = MaterialTheme.shapes.medium,
+        modifier = Modifier.fillMaxWidth(),
+        leadingIcon = boundApp?.let { app -> { AppIconSlot(app = app, size = 24.dp) } },
+        trailingIcon = {
+            IconButton(onClick = { showPicker = true }) {
+                Icon(
+                    imageVector = Icons.Default.Apps,
+                    contentDescription = stringResource(R.string.edit_app_binding_pick_cd)
+                )
+            }
+        }
+    )
+
+    if (boundApp != null) {
+        // 应用名可读 → 名称 + 包名；不可读（未安装 / 受包可见性限制）→ 只报包名并**如实**
+        // 说明名称不可读，避免退化成「同一串包名显示两遍」的噪声
+        val readable = boundApp.label != boundApp.packageName
+        Text(
+            text = if (readable) {
+                stringResource(R.string.edit_app_binding_bound, boundApp.label, boundApp.packageName)
+            } else {
+                stringResource(R.string.edit_app_binding_bound_unreadable, boundApp.packageName)
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(start = 4.dp, top = 2.dp)
+        )
+    }
+
+    if (showPicker) {
+        AppPickerDialog(
+            onPick = { app ->
+                showPicker = false
+                // 与凭据写入链记录的绑定形式一字不差（同一条判据消费，构造收敛于
+                // AutofillPackageNames.boundUrl）
+                onUrlChange(AutofillPackageNames.boundUrl(app.packageName))
+            },
+            onDismiss = { showPicker = false },
+            alreadySelected = boundPackage?.let { setOf(it) } ?: emptySet()
+        )
+    }
+}
+
+/**
+ * 解析绑定包名的应用信息（应用名 + 图标，IO 线程）。
+ *
+ * 未绑定（[packageName] 为 null）时返回 null，不渲染前置图标与辅助文案；
+ * 绑定但不可解析（未安装 / 受包可见性限制）时回落为「包名即名称 + 通用图标」，
+ * 让用户看到绑定**确实存在但当前不可读**，而不是被静默隐藏。
+ */
+@Composable
+private fun rememberBoundAppOption(packageName: String?): InstalledAppOption? {
+    if (packageName == null) return null
+    val context = LocalContext.current
+    val placeholder = remember(packageName) { InstalledAppOption(packageName, packageName) }
+    val option = produceState(initialValue = placeholder, packageName) {
+        val resolved = withContext(Dispatchers.IO) {
+            InstalledAppsCatalog.lookup(context, packageName)
+        }
+        if (resolved != null) value = resolved
+    }
+    return option.value
 }
 
 /**
@@ -410,6 +510,41 @@ internal fun EntryEditBasicInfoSectionPreview() {
             EntryEditNotesSection(
                 notes = "预览用备注文本，仅用于界面排版展示。",
                 onNotesChange = { _ -> }
+            )
+        }
+    }
+}
+
+/**
+ * TASK-139 预览：URL 字段的「应用绑定」形态（`android://<包名>`）。
+ *
+ * 与上一预览的差异仅在 URL —— 用于目视核对三项新增绘制：前置应用图标、右侧选择器入口、
+ * 以及「已关联应用：<名称>（<包名>）」辅助文案（含全角括号与长包名的换行表现）。
+ * 预览环境下该包名不可解析，故按实现**如实回落**为「包名即名称 + 通用系统图标」。
+ */
+@Preview(name = "编辑页-应用绑定URL - 浅色", showBackground = true)
+@Preview(name = "编辑页-应用绑定URL - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
+@Composable
+internal fun EntryEditBoundAppSectionPreview() {
+    com.keepasskey.app.ui.theme.KeePasskeyTheme {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            EntryEditBasicInfoSection(
+                // 明显虚构的包名占位，不涉及任何真实应用或凭据
+                uiState = com.keepasskey.app.ui.screens.edit.EntryEditUiState(
+                    entryId = "preview-entry-bound",
+                    iconName = "key",
+                    title = "预览编辑条目",
+                    url = "android://com.example.previewapp"
+                ),
+                customIconOptions = emptyList(),
+                onIconClick = {},
+                onTitleChange = { _ -> },
+                onUrlChange = { _ -> }
             )
         }
     }

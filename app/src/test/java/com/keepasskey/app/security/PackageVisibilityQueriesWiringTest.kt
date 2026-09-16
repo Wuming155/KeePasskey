@@ -14,11 +14,15 @@ import java.io.File
  * → `BrowserSigningFingerprints.isTrusted`（要求非空指纹）与 DAL 校验**双双恒 false** → web 域候选
  * 整体失效（fail-closed，无泄露但功能不可用；minSdk 36 ⇒ **全部支持设备**均受影响）。
  *
- * 本用例锁三件事（静态清单断言，对齐既有 `*WiringTest` 先例）：
+ * 本用例锁四件事（静态清单断言，对齐既有 `*WiringTest` 先例）：
  * 1. `<queries>` 存在且含官方推荐的 `https` VIEW intent 声明（使浏览器可见）；
  * 2. 白名单 `BrowserSigningFingerprints.TRUSTED` 的**每个包名**都在清单里显式声明
  *    ——直接以生产常量为准检索，杜绝「白名单加了浏览器、清单忘了同步」的漂移；
- * 3. **不得**声明 `QUERY_ALL_PACKAGES`（最小必要原则；该权限在 Google Play 需审核批准）。
+ * 3. **不得**声明 `QUERY_ALL_PACKAGES`（最小必要原则；该权限在 Google Play 需审核批准）；
+ * 4. TASK-139：含 `MAIN` + `LAUNCHER` 的 intent 签名声明——应用选择器
+ *    （黑名单 / 条目「关联应用」）靠它枚举用户可指认的应用；该声明一旦被删，
+ *    `queryIntentActivities` 会被包可见性过滤成空列表，选择器**静默退化为空列表**，
+ *    这类「清单改动 → 运行期功能整体失效」的缺陷只能由静态接线用例拦下。
  */
 class PackageVisibilityQueriesWiringTest {
 
@@ -75,6 +79,17 @@ class PackageVisibilityQueriesWiringTest {
     }
 
     @Test
+    fun `清单必须声明 MAIN LAUNCHER intent 以枚举可启动应用`() {
+        val body = queriesBlock ?: error("清单缺少 <queries>")
+        assertTrue(
+            "queries 必须含 MAIN + LAUNCHER 的 intent 签名：应用选择器（自动填充 / 保存侧黑名单、" +
+                "条目「关联应用」）依赖它枚举用户可指认的应用。缺失时 queryIntentActivities 被包可见性" +
+                "过滤成空列表（列表恒空），用户只能退回手工键入包名",
+            LAUNCHER_QUERY_REGEX.containsMatchIn(body)
+        )
+    }
+
+    @Test
     fun `不得声明 QUERY_ALL_PACKAGES（最小必要原则）`() {
         assertFalse(
             "禁止以 QUERY_ALL_PACKAGES 替代最小声明：该权限在 Google Play 需审核批准，" +
@@ -87,6 +102,19 @@ class PackageVisibilityQueriesWiringTest {
     private companion object {
         const val MANIFEST_PATH = "app/src/main/AndroidManifest.xml"
         const val ROOT_SEARCH_DEPTH = 6
+
+        /**
+         * `MAIN` + `LAUNCHER` 的 `<intent>` 声明（空白容错）。
+         *
+         * 逐元素校验而非关键字包含：单纯出现 "MAIN" / "LAUNCHER" 字样的注释或其它意图声明
+         * 都会造成假通过（本用例仅在剔除注释后的正文上匹配，注释已是第二道防线）。
+         */
+        val LAUNCHER_QUERY_REGEX = Regex(
+            """<intent>\s*""" +
+                """<action\s+android:name="android\.intent\.action\.MAIN"\s*/>\s*""" +
+                """<category\s+android:name="android\.intent\.category\.LAUNCHER"\s*/>\s*""" +
+                """</intent>"""
+        )
 
         /** 仓库根：同时具备 app 与 core 模块源码目录的最近祖先 */
         val repositoryRoot: File by lazy {

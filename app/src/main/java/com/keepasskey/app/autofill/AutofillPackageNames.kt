@@ -30,4 +30,17 @@ object AutofillPackageNames {
         if (trimmed.length !in MIN_PACKAGE_LENGTH..MAX_PACKAGE_LENGTH) return null
         return if (PACKAGE_PATTERN.matches(trimmed)) trimmed else null
     }
+
+    /**
+     * 条目「关联具体应用」的绑定形式：`android://<包名>`。
+     *
+     * 这是包名维度放行判据（`DomainMatcher.extractAndroidBoundPackage` /
+     * `isAndroidPackageMatch`）唯一认得的形态，**写入侧与判据侧必须逐字一致**——
+     * 因此构造收敛到本处，避免各处各写一遍字面量后漂移成「写进去却匹配不上」。
+     * 传入包名不做校验：调用方（应用选择器 / 凭据写入链）拿到的已是系统给出的包名。
+     */
+    fun boundUrl(packageName: String): String = "$BINDING_SCHEME://$packageName"
+
+    /** `android://` 绑定的 scheme 字面量（见 [boundUrl]） */
+    const val BINDING_SCHEME = "android"
 }

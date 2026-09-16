@@ -50,7 +50,11 @@ internal class PasskeyEntryCoordinator(
     /** 新建 Passkey 条目并立即落盘；写库成功但序列化失败时如实留痕日志 */
     suspend fun saveNewPasskeyEntry(data: PasskeyData, boundPackage: String?): KdbxEntry {
         val title = "${data.userName}@${data.relyingPartyId}"
-        val url = if (boundPackage.isNullOrBlank()) "https://${data.relyingPartyId}" else "android://$boundPackage"
+        val url = if (boundPackage.isNullOrBlank()) {
+            "https://${data.relyingPartyId}"
+        } else {
+            com.keepasskey.app.autofill.AutofillPackageNames.boundUrl(boundPackage)
+        }
         val fields = mapOf(
             KdbxConstants.Fields.TITLE to ProtectedString(title, isProtected = false),
             KdbxConstants.Fields.USER_NAME to ProtectedString(data.userName, isProtected = false),

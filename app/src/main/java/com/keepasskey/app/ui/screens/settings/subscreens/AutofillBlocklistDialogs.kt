@@ -14,8 +14,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
+import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -36,6 +38,10 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.keepasskey.app.R
+import com.keepasskey.app.apps.InstalledAppOption
+import com.keepasskey.app.apps.InstalledAppsCatalog
+import com.keepasskey.app.ui.components.AppIconSlot
+import com.keepasskey.app.ui.components.AppPickerDialog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -94,7 +100,9 @@ internal fun AutofillManageEntryRow(
 }
 
 /**
- * 包名名单管理对话框：条目化展示（应用名 + 包名）与删除，底部按包名新增。
+ * 包名名单管理对话框：条目化展示（图标 + 应用名 + 包名）与删除；新增走 **应用选择器**
+ * （TASK-139：直接选本机应用取包名/图标，替代「自己键入包名」），并保留手工输入兜底
+ * （无桌面入口的组件不进选择器列表，此类包名只能手工录入）。
  * 新增失败（包名非法或已存在）如实上浮错误提示，不谎报成功。
  *
  * TASK-36 整改：此前渲染两条写死的示例条目并挂空 onClick 删除按钮，属假数据回显，已诚实化下架；
@@ -113,6 +121,18 @@ internal fun PackageBlocklistManageDialog(
 ) {
     var pendingPackage by remember { mutableStateOf("") }
     var showAddError by remember { mutableStateOf(false) }
+    var showPicker by remember { mutableStateOf(false) }
+    var manualEntry by remember { mutableStateOf(false) }
+
+    // 选择器与手工输入走同一条写入通道；成败口径一致（false = 非法或已存在）
+    fun submit(packageName: String) {
+        if (onAdd(packageName)) {
+            pendingPackage = ""
+            showAddError = false
+        } else {
+            showAddError = true
+        }
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -142,17 +162,19 @@ internal fun PackageBlocklistManageDialog(
                     }
                 }
 
-                OutlinedTextField(
-                    value = pendingPackage,
-                    onValueChange = {
-                        pendingPackage = it
-                        showAddError = false
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text(addHint) },
-                    singleLine = true,
-                    isError = showAddError
-                )
+                FilledTonalButton(
+                    onClick = { showPicker = true },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Apps,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(stringResource(R.string.autofill_blacklist_pick_app))
+                }
+
                 if (showAddError) {
                     Text(
                         text = stringResource(R.string.autofill_blacklist_add_invalid),
@@ -160,30 +182,63 @@ internal fun PackageBlocklistManageDialog(
                         color = MaterialTheme.colorScheme.error
                     )
                 }
+
+                if (manualEntry) {
+                    OutlinedTextField(
+                        value = pendingPackage,
+                        onValueChange = {
+                            pendingPackage = it
+                            showAddError = false
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text(addHint) },
+                        singleLine = true,
+                        isError = showAddError
+                    )
+                } else {
+                    TextButton(onClick = {
+                        manualEntry = true
+                        showAddError = false
+                    }) {
+                        Text(stringResource(R.string.autofill_blacklist_manual_toggle))
+                    }
+                }
             }
         },
         confirmButton = {
-            TextButton(
-                onClick = {
-                    if (onAdd(pendingPackage)) {
-                        pendingPackage = ""
-                        showAddError = false
-                    } else {
-                        // 真实失败如实反馈（包名非法 / 已存在于名单）
-                        showAddError = true
-                    }
-                },
-                enabled = pendingPackage.isNotBlank()
-            ) {
-                Text(stringResource(R.string.btn_add))
+            if (manualEntry) {
+                TextButton(
+                    onClick = { submit(pendingPackage) },
+                    enabled = pendingPackage.isNotBlank()
+                ) {
+                    Text(stringResource(R.string.btn_add))
+                }
+            } else {
+                TextButton(onClick = onDismiss) {
+                    Text(stringResource(R.string.btn_close))
+                }
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text(stringResource(R.string.btn_close))
+            if (manualEntry) {
+                TextButton(onClick = onDismiss) {
+                    Text(stringResource(R.string.btn_close))
+                }
             }
         }
     )
+
+    if (showPicker) {
+        AppPickerDialog(
+            onPick = { app ->
+                // 选完即关：成败由本对话框的错误提示如实反馈，不让用户面对两层弹窗猜测结果
+                showPicker = false
+                submit(app.packageName)
+            },
+            onDismiss = { showPicker = false },
+            alreadySelected = blockedPackages.toSet()
+        )
+    }
 }
 
 /**
@@ -239,6 +294,7 @@ private fun BlockedPackageRow(
     packageName: String,
     onRemove: () -> Unit
 ) {
+    val app = rememberAppOption(packageName)
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -246,19 +302,24 @@ private fun BlockedPackageRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
+        AppIconSlot(app = app, size = 28.dp)
+        Spacer(modifier = Modifier.width(10.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = rememberAppLabel(packageName),
+                text = app.label,
                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
                 color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1
             )
-            Text(
-                text = packageName,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1
-            )
+            // 应用名不可读时回落为包名：此时不再重复渲染同一串，避免"同一串出现两遍"的噪声
+            if (app.label != packageName) {
+                Text(
+                    text = packageName,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1
+                )
+            }
         }
         IconButton(onClick = onRemove) {
             Icon(
@@ -272,23 +333,22 @@ private fun BlockedPackageRow(
 }
 
 /**
- * 解析已安装应用的可读名称（IO 线程）。包名不可解析（未安装 / 受包可见性限制）时
- * 如实回落为包名本身——不伪造应用名。
+ * 解析包名的显示信息（应用名 + 图标，IO 线程）。
+ *
+ * 包名不可解析（未安装 / 受包可见性限制）时**如实回落为包名本身**并给出系统语义图标——
+ * 不伪造应用名，也不假装该应用存在。
  */
 @Composable
-private fun rememberAppLabel(packageName: String): String {
+private fun rememberAppOption(packageName: String): InstalledAppOption {
     val context = LocalContext.current
-    val label = produceState(initialValue = packageName, packageName) {
-        value = withContext(Dispatchers.IO) {
-            try {
-                val info = context.packageManager.getApplicationInfo(packageName, 0)
-                context.packageManager.getApplicationLabel(info).toString()
-            } catch (_: Exception) {
-                packageName
-            }
+    val placeholder = remember(packageName) { InstalledAppOption(packageName, packageName) }
+    val option = produceState(initialValue = placeholder, packageName) {
+        val resolved = withContext(Dispatchers.IO) {
+            InstalledAppsCatalog.lookup(context, packageName)
         }
+        if (resolved != null) value = resolved
     }
-    return label.value
+    return option.value
 }
 
 // IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI

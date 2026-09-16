@@ -50,6 +50,18 @@
         <package android:name="com.android.chrome" />
         <package android:name="org.mozilla.firefox" />
         <package android:name="org.mozilla.firefox_beta" />
+        <!-- TASK-139：应用选择器（黑名单 / 条目「关联应用」）需让用户按**应用名**指认目标应用，
+             其数据源是 `queryIntentActivities(MAIN + LAUNCHER)`（见 `InstalledAppsCatalog`）。
+             官方口径下查询其它已安装应用须经 `<queries>` 声明，这里用 **MAIN + LAUNCHER 的 intent
+             签名**使「有桌面入口的应用」可见——它是 `QUERY_ALL_PACKAGES` 的**最小替代**：
+             既无须申请该受限权限（Play 需审核）与更窄的可见面（仅用户可见的应用，而非全部进程），
+             也无须维护一份会随时间漂移的 `<package>` 白名单。
+             边界（如实声明）：无桌面入口的组件（系统服务 / 纯 SDK 集成方）**不在**选择器列表内，
+             其包名仍可经选择器内的手工输入兜底添加，功能不因此缺失。 -->
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
     </queries>
 
     <application
