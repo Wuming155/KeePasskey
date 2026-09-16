@@ -18,6 +18,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.NetworkCheck
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -216,8 +217,8 @@ internal fun SyncStatusCard(
             Box(
                 modifier = Modifier
                     .clip(CircleShape)
-                    .background(statusColor.copy(alpha = 0.15f))
-                    .padding(horizontal = 10.dp, vertical = 4.dp)
+                    .background(statusColor.copy(alpha = 0.18f))
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
             ) {
                 Text(
                     text = uiState.syncStatusText.ifEmpty {
@@ -269,6 +270,12 @@ internal fun SyncStatusCard(
                 // 未验证连接时禁用主同步，先走「测试连接」防误触
                 enabled = !uiState.isSyncing && uiState.isConnectionVerified,
                 shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                    disabledContainerColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f),
+                    disabledContentColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                ),
                 modifier = Modifier.weight(1f)
             ) {
                 if (uiState.isSyncing) {

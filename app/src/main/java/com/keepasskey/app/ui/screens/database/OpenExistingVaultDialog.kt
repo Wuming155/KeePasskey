@@ -152,7 +152,7 @@ internal fun OpenExistingVaultDialog(
                                 Text(
                                     text = stringResource(R.string.picker_file_not_selected),
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.outline
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
 

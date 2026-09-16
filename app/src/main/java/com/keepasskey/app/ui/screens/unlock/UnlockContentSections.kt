@@ -374,7 +374,9 @@ internal fun UnlockStandardUnlockContent(
         shape = CapsuleShape,
         colors = ButtonDefaults.buttonColors(
             containerColor = MaterialTheme.colorScheme.primary,
-            contentColor = MaterialTheme.colorScheme.onPrimary
+            contentColor = MaterialTheme.colorScheme.onPrimary,
+            disabledContainerColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f),
+            disabledContentColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
         ),
         modifier = Modifier
             .fillMaxWidth()

@@ -1,13 +1,18 @@
 package com.keepasskey.app.passkey
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -16,6 +21,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 
@@ -42,39 +48,69 @@ fun CredentialFillConfirmScreen(
     confirmEnabled: Boolean = true,
     attributionContent: (@Composable () -> Unit)? = null
 ) {
-    Surface(modifier = Modifier.fillMaxSize()) {
-        Column(
+    // 底部抽屉式确认：压缩空洞留白，主操作贴近拇指热区，同时保留「中断原应用上下文」的清晰确认语义
+    Box(modifier = Modifier.fillMaxSize()) {
+        Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(24.dp),
-            verticalArrangement = Arrangement.Center,
-            horizontalAlignment = Alignment.CenterHorizontally
+                .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.32f))
+        )
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .align(Alignment.BottomCenter),
+            shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            tonalElevation = 3.dp
         ) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.SemiBold),
-                color = MaterialTheme.colorScheme.onSurface
-            )
-            Spacer(modifier = Modifier.height(12.dp))
-            Text(
-                text = hint,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            attributionContent?.let { content ->
-                Spacer(modifier = Modifier.height(20.dp))
-                content()
-            }
-            Spacer(modifier = Modifier.height(28.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally)
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp)
+                    .padding(top = 20.dp, bottom = 16.dp)
+                    .navigationBarsPadding(),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                OutlinedButton(onClick = onCancel) {
-                    Text(cancelText)
+                Box(
+                    modifier = Modifier
+                        .size(width = 36.dp, height = 4.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(MaterialTheme.colorScheme.outlineVariant)
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.SemiBold),
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = hint,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                attributionContent?.let { content ->
+                    Spacer(modifier = Modifier.height(16.dp))
+                    content()
                 }
-                Button(onClick = onConfirm, enabled = confirmEnabled) {
-                    Text(confirmText)
+                Spacer(modifier = Modifier.height(20.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = onCancel,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text(cancelText)
+                    }
+                    Button(
+                        onClick = onConfirm,
+                        enabled = confirmEnabled,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text(confirmText)
+                    }
                 }
             }
         }

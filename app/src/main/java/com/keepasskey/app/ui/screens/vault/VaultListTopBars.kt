@@ -146,7 +146,7 @@ internal fun VaultListSearchTopBar(
                     Icon(
                         imageVector = Icons.Default.Search,
                         contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(20.dp)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
@@ -155,7 +155,7 @@ internal fun VaultListSearchTopBar(
                             Text(
                                 text = stringResource(R.string.vault_search_hint),
                                 style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
@@ -174,12 +174,12 @@ internal fun VaultListSearchTopBar(
                     if (searchQuery.isNotEmpty()) {
                         IconButton(
                             onClick = { onSearchQueryChange("") },
-                            modifier = Modifier.size(24.dp)
+                            modifier = Modifier.size(40.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Clear,
                                 contentDescription = stringResource(R.string.cd_clear_search),
-                                modifier = Modifier.size(16.dp),
+                                modifier = Modifier.size(18.dp),
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }

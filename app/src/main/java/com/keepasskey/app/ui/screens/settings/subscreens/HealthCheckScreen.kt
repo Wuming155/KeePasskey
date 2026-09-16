@@ -153,7 +153,7 @@ fun HealthCheckScreen(
                         Text(
                             text = stringResource(R.string.health_last_scan, uiState.lastHealthScanTime),
                             style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.outline
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
 
                         Spacer(modifier = Modifier.height(16.dp))
@@ -164,7 +164,9 @@ fun HealthCheckScreen(
                             shape = CircleShape,
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = MaterialTheme.colorScheme.primary,
-                                contentColor = MaterialTheme.colorScheme.onPrimary
+                                contentColor = MaterialTheme.colorScheme.onPrimary,
+                                disabledContainerColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f),
+                                disabledContentColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
                             ),
                             modifier = Modifier.fillMaxWidth()
                         ) {
@@ -369,9 +371,9 @@ internal fun HealthCheckScreenPreview() {
         HealthCheckScreen(
             uiState = com.keepasskey.app.ui.screens.settings.SettingsUiState().copy(
                 healthScore = 82,
-                // 预览文案与界面语言一致（默认英文资源路径），避免中英混排
-                healthStatus = "Good",
-                healthMessage = "Sample health summary for layout preview only.",
+                // 预览文案与生产资源同为中文，避免预览面板中英混排
+                healthStatus = "良好",
+                healthMessage = "布局预览专用健康摘要，非真实扫描结果。",
                 weakPasswordCount = 2,
                 reusedPasswordCount = 1,
                 hasHealthScanned = true,

@@ -1,7 +1,6 @@
 package com.keepasskey.app.ui.screens.vault
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -11,7 +10,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Image
@@ -70,11 +68,10 @@ fun KeePassGroupRow(
 
     Card(
         onClick = onClick,
-        modifier = modifier
-            .fillMaxWidth()
-            .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.8f), RoundedCornerShape(12.dp)),
+        // 与条目卡统一为「无描边 + surfaceContainerLow」填充卡，避免文件夹/条目混搭两种卡片语义
+        modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest)
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(
@@ -115,7 +112,12 @@ fun KeePassGroupRow(
             if (!group.isRecycleBin) {
                 Box {
                     IconButton(onClick = { showMenu = true }) {
-                        Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.btn_more), tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
+                        Icon(
+                            imageVector = Icons.Default.MoreVert,
+                            contentDescription = stringResource(R.string.btn_more),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp)
+                        )
                     }
                     DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
                         DropdownMenuItem(
@@ -136,13 +138,6 @@ fun KeePassGroupRow(
                     }
                 }
             }
-
-            Icon(
-                imageVector = Icons.AutoMirrored.Filled.ArrowForwardIos,
-                contentDescription = stringResource(R.string.cd_enter_group),
-                tint = MaterialTheme.colorScheme.outlineVariant,
-                modifier = Modifier.size(14.dp)
-            )
         }
     }
 }

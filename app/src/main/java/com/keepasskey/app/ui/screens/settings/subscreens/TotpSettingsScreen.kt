@@ -27,6 +27,9 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
@@ -128,7 +131,7 @@ fun TotpSettingsScreen(
 
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
                             FilterChip(
                                 selected = seedField == "TOTP Seed" && settingsField == "TOTP Settings",
@@ -222,18 +225,20 @@ fun TotpSettingsScreen(
                                 text = stringResource(R.string.totp_step_label),
                                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
                             )
-                            Spacer(modifier = Modifier.height(6.dp))
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                listOf(15 to R.string.totp_step_15, 30 to R.string.totp_step_30, 60 to R.string.totp_step_60).forEach { (sec, label) ->
-                                    FilterChip(
+                            Spacer(modifier = Modifier.height(8.dp))
+                            val stepOptions = listOf(15 to R.string.totp_step_15, 30 to R.string.totp_step_30, 60 to R.string.totp_step_60)
+                            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                                stepOptions.forEachIndexed { index, (sec, label) ->
+                                    SegmentedButton(
                                         selected = stepSeconds == sec,
                                         onClick = { stepSeconds = sec },
-                                        label = { Text(stringResource(label)) },
-                                        colors = FilterChipDefaults.filterChipColors(
-                                            selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                                            selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
+                                        shape = SegmentedButtonDefaults.itemShape(
+                                            index = index,
+                                            count = stepOptions.size
                                         )
-                                    )
+                                    ) {
+                                        Text(stringResource(label))
+                                    }
                                 }
                             }
                         }
@@ -243,18 +248,20 @@ fun TotpSettingsScreen(
                                 text = stringResource(R.string.totp_digits_label),
                                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
                             )
-                            Spacer(modifier = Modifier.height(6.dp))
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                listOf(6 to R.string.totp_digits_6, 8 to R.string.totp_digits_8).forEach { (d, label) ->
-                                    FilterChip(
+                            Spacer(modifier = Modifier.height(8.dp))
+                            val digitOptions = listOf(6 to R.string.totp_digits_6, 8 to R.string.totp_digits_8)
+                            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                                digitOptions.forEachIndexed { index, (d, label) ->
+                                    SegmentedButton(
                                         selected = digits == d,
                                         onClick = { digits = d },
-                                        label = { Text(stringResource(label)) },
-                                        colors = FilterChipDefaults.filterChipColors(
-                                            selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                                            selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
+                                        shape = SegmentedButtonDefaults.itemShape(
+                                            index = index,
+                                            count = digitOptions.size
                                         )
-                                    )
+                                    ) {
+                                        Text(stringResource(label))
+                                    }
                                 }
                             }
                         }

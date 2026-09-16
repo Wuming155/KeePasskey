@@ -270,7 +270,7 @@ internal fun NotesCard(notesText: String, updatedAt: String) {
             Text(
                 text = stringResource(R.string.detail_updated_meta, updatedAt),
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.outline
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     }

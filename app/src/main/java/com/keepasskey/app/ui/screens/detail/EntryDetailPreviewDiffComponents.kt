@@ -170,7 +170,7 @@ private fun DiffFieldCard(
                     Text(
                         text = stringResource(R.string.diff_unchanged),
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.outline
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }

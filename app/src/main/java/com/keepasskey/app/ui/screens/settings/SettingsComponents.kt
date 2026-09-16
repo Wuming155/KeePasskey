@@ -126,7 +126,7 @@ internal fun ModernSettingsRow(
                     fontSize = 12.5.sp,
                     lineHeight = 16.sp
                 ),
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f)
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
 

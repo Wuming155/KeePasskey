@@ -124,7 +124,7 @@ fun AuthenticatorScreen(
                                     Text(
                                         text = stringResource(R.string.auth_search_hint),
                                         style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
                                 BasicTextField(
@@ -141,12 +141,12 @@ fun AuthenticatorScreen(
                             if (uiState.searchQuery.isNotEmpty()) {
                                 IconButton(
                                     onClick = { viewModel.onSearchQueryChange("") },
-                                    modifier = Modifier.size(24.dp)
+                                    modifier = Modifier.size(40.dp)
                                 ) {
                                     Icon(
                                         imageVector = Icons.Default.Clear,
                                         contentDescription = stringResource(R.string.cd_clear_search),
-                                        modifier = Modifier.size(16.dp),
+                                        modifier = Modifier.size(18.dp),
                                         tint = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }

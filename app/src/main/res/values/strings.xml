@@ -54,7 +54,6 @@
     <string name="cd_sort">排序</string>
     <string name="cd_create">新建</string>
     <string name="cd_navigate_up">返回上一级</string>
-    <string name="cd_enter_group">进入文件夹</string>
     <string name="cd_copy_totp">复制动态验证码</string>
     <string name="cd_passkey">通行密钥</string>
     <string name="cd_password_generator">密码生成器</string>

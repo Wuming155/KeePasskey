@@ -106,8 +106,8 @@ internal fun PassphraseModeOptions(
             )
 
             FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 separators.forEach { sep ->
                     val actualSep = if (sep == spaceSeparator) " " else sep
@@ -181,8 +181,8 @@ internal fun MaskModeOptions(
             )
 
             FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 presets.forEach { (labelRes, pattern) ->
                     val isSelected = uiState.maskPattern == pattern

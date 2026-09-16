@@ -54,7 +54,6 @@
     <string name="cd_sort">Sort</string>
     <string name="cd_create">Create</string>
     <string name="cd_navigate_up">Navigate up</string>
-    <string name="cd_enter_group">Enter folder</string>
     <string name="cd_copy_totp">Copy TOTP token</string>
     <string name="cd_passkey">Passkey</string>
     <string name="cd_password_generator">Password generator</string>
