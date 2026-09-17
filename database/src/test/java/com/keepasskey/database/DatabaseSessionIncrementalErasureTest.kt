@@ -9,6 +9,7 @@ import com.keepasskey.database.session.DatabaseSession
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -136,6 +137,46 @@ class DatabaseSessionIncrementalErasureTest {
         assertEquals("renamed", session.root().findGroup(groupId)!!.name)
         assertEquals("既有子项与其密文必须原样存活", "child-secret", childSecret.readString())
         assertEquals("child-secret", session.findEntry(uuid(1))!!.password!!.readString())
+        session.close()
+    }
+
+    @Test
+    fun `updateEntryById 替换既有条目时旧条目密文被清零且未命中分支按同一实例复用`() = runBlocking {
+        val session = openedSession()
+        val rootId = session.root().id
+        val oldSecret = ProtectedString("old-secret", isProtected = true)
+        val siblingSecret = ProtectedString("sibling-secret", isProtected = true)
+        session.saveEntry(entry(1, rootId, oldSecret))
+        session.saveEntry(entry(2, rootId, siblingSecret))
+        session.saveGroup(KdbxGroup(id = uuid(5), parentGroupId = rootId, name = "sub"))
+        val siblingGroup = session.root().subgroups.single()
+
+        val freshSecret = ProtectedString("fresh-secret", isProtected = true)
+        val patched = session.updateEntryById(uuid(1)) { it.withField(KdbxConstants.Fields.PASSWORD, freshSecret) }
+
+        assertSame("必须回传落树上线的条目实例", freshSecret, patched!!.password)
+        assertEquals("fresh-secret", session.findEntry(uuid(1))!!.password!!.readString())
+        assertNull("被替换旧条目的密文必须清零", readOrNull(oldSecret))
+        assertEquals("未命中条目的密文不得受影响", "sibling-secret", siblingSecret.readString())
+        assertSame("未命中的兄弟分组必须按同一实例复用（路径复制）", siblingGroup, session.root().subgroups.single())
+        session.close()
+    }
+
+    @Test
+    fun `updateEntryById 未命中条目时不写入活动库`() = runBlocking {
+        val session = openedSession()
+        val rootId = session.root().id
+        val secret = ProtectedString("keep-me", isProtected = true)
+        session.saveEntry(entry(1, rootId, secret))
+        val before = session.databaseFlow.value!!
+
+        val result = session.updateEntryById(uuid(9)) {
+            it.withField(KdbxConstants.Fields.PASSWORD, ProtectedString("never", isProtected = true))
+        }
+
+        assertNull("条目不存在 ⇒ 返回 null", result)
+        assertSame("未命中不得替换活动库实例（零写入）", before, session.databaseFlow.value)
+        assertEquals("keep-me", secret.readString())
         session.close()
     }
 

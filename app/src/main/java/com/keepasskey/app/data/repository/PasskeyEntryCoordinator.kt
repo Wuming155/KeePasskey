@@ -5,7 +5,6 @@ import com.keepasskey.app.passkey.DomainMatcher
 import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.core.model.KdbxCustomField
 import com.keepasskey.core.model.KdbxEntry
-import com.keepasskey.core.model.KdbxGroup
 import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.core.model.PasskeyData
 import com.keepasskey.core.result.KdbxResult
@@ -77,10 +76,15 @@ internal class PasskeyEntryCoordinator(
     /**
      * 就地修补签名计数器（CTAP2 signCount 防克隆校验依赖其单调递增）。
      *
-     * ISSUE-P3-10 子项 2（受控事务/原子语义）：读-改-写整体收口到
-     * [DatabaseSession.updateDatabaseMeta]——「读取库内现值 → 计算目标值 → 替换条目」
-     * 发生在会话 Mutex 内的**单次**受控变换中，消除原实现「先取 databaseFlow 快照、
+     * ISSUE-P3-10 子项 2（受控事务/原子语义）：「读取库内现值 → 计算目标值 → 替换条目」
+     * 整体收口到会话 Mutex 内的**单次**受控变换中，消除原实现「先取 databaseFlow 快照、
      * 再 saveEntry（各自独立加锁）」之间被并发断言插入导致的丢失更新。
+     *
+     * ISSUE-P3-157：承载该变换的入口由 [DatabaseSession.updateDatabaseMeta]（任意整库变换，
+     * 擦除退化为整棵新树的 O(全库) 身份集合）改为 [DatabaseSession.updateEntryById]——
+     * 按 id 定位、**路径复制**（只重建从根到命中位置的分组链，未命中分支按引用复用），
+     * 且替换关系回报使定点擦除的候选只含被替换的那一条旧条目。**原子性不变**：
+     * 现值读取、目标值计算与落树同处一个临界区，不得拆到锁外。
      *
      * 取值约束：入参经 [PasskeyData.clampSignCount] 钳制到合法区间，并以
      * `库内现值 + 1`（[PasskeyData.nextSignCount]，饱和不回退）为下界取较大者，
@@ -117,30 +121,24 @@ internal class PasskeyEntryCoordinator(
      * 签名计数器原子读-改-写核心：在会话 Mutex 内的单次受控变换中完成
      * 「读取库内现值 → 计算目标值 → 替换条目」，并回传实际落库值。
      *
+     * 回传值**从已提交条目读回**（而非旁路保存本地算出的值）：两者本就同源，
+     * 读回可确保「返回给调用方的计数器」严格等于库内已提交状态。
+     *
      * @param requested 调用方期望值（已钳制到合法区间）；null 表示「以库内现值为基准纯递增」。
-     * @return 实际落库值；条目不存在时返回 null（本次无任何写入、无落盘调用）。
+     * @return 实际落库值；条目不存在 / UUID 非法时返回 null（本次无任何写入、无落盘调用）。
      */
     private suspend fun applySignCountPatch(entryId: String, requested: Int?): Int? {
         val targetUuid = parseKdbxUuidOrNull(entryId) ?: return null
-        var applied: Int? = null
+        val patched = databaseSession.updateEntryById(targetUuid) { entry ->
+            val monotonicFloor = PasskeyData.nextSignCount(PasskeyData.readSignCount(entry.customFields))
+            val value = if (requested == null) monotonicFloor else maxOf(requested, monotonicFloor)
+            entryWithSignCount(entry, value)
+        } ?: return null
 
-        databaseSession.updateDatabaseMeta { db ->
-            val entry = db.rootGroup.allEntries().firstOrNull { it.id == targetUuid }
-            if (entry == null) {
-                db
-            } else {
-                val monotonicFloor = PasskeyData.nextSignCount(PasskeyData.readSignCount(entry.customFields))
-                val value = if (requested == null) monotonicFloor else maxOf(requested, monotonicFloor)
-                applied = value
-                db.copy(rootGroup = replaceEntry(db.rootGroup, entry.id, entryWithSignCount(entry, value)))
-            }
-        }
-
-        if (applied != null) {
-            val saved = persistSession()
-            if (saved is KdbxResult.Failure) {
-                debugLog.warn(TAG, "签名计数器已更新但落盘失败: ${saved.error.javaClass.simpleName}")
-            }
+        val applied = PasskeyData.readSignCount(patched.customFields)
+        val saved = persistSession()
+        if (saved is KdbxResult.Failure) {
+            debugLog.warn(TAG, "签名计数器已更新但落盘失败: ${saved.error.javaClass.simpleName}")
         }
         return applied
     }
@@ -150,18 +148,6 @@ internal class PasskeyEntryCoordinator(
         customFields = entry.customFields.withSignCount(value),
         times = entry.times.withModified()
     )
-
-    /**
-     * 在分组树中以 [updated] 替换 id 相同的条目（copy-on-write，未命中分支不重建）。
-     *
-     * 其余自定义字段与标准字段按引用复用，使 [DatabaseSession] 的身份擦除
-     * （`clearSupersededSensitiveData`）不会误伤新树仍存活的密文实例。
-     */
-    private fun replaceEntry(group: KdbxGroup, entryId: KdbxUuid, updated: KdbxEntry): KdbxGroup {
-        val newEntries = group.entries.map { if (it.id == entryId) updated else it }
-        val newSubgroups = group.subgroups.map { replaceEntry(it, entryId, updated) }
-        return group.copy(entries = newEntries, subgroups = newSubgroups)
-    }
 
     /** 以受保护字段形态写入计数器：命中则原位替换，缺失则追加 */
     private fun List<KdbxCustomField>.withSignCount(value: Int): List<KdbxCustomField> {

@@ -20,6 +20,8 @@ import kotlinx.coroutines.withContext
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Test
 
 /**
@@ -30,6 +32,11 @@ import org.junit.Test
  * 现实现把「读取库内现值 → 计算目标值 → 替换条目」整体收口到
  * [DatabaseSession.updateDatabaseMeta]（会话 Mutex 内单次受控变换），并以
  * `库内现值 + 1` 为单调下界、以 [PasskeyData.MAX_SIGN_COUNT] 为钳制上界。
+ *
+ * ISSUE-P3-157（§119）：承载该变换的入口改为 [DatabaseSession.updateEntryById]
+ * （按 id 定位的**单条条目原子读-改-写**：路径复制 + 增量定点擦除）；本文件除既有
+ * 计数器语义外，另锁定该路径的擦除与路径复制契约（旧计数器实例必清零、
+ * 同条目存活密文与未命中兄弟分组必留）与 DIRTY / 零写入边界。
  *
  * ISSUE-P3-27 子项 2（并发签名计数器假说）：追加 32 路真实并发用例，收集
  * [PasskeyEntryCoordinator.incrementPasskeySignCount] 的全部返回值断言
@@ -157,6 +164,79 @@ class PasskeyEntryCoordinatorSignCountTest {
 
         assertEquals(3, storedSignCount(session))
         assertFalse(session.databaseFlow.value!!.rootGroup.allEntries().isEmpty())
+    }
+
+    // ===== ISSUE-P3-157：计数器补丁改走单条条目原子变换（路径复制 + 增量定点擦除） =====
+
+    private fun entryIn(session: DatabaseSession): KdbxEntry =
+        session.databaseFlow.value!!.rootGroup.allEntries().first { it.id == entryId }
+
+    private fun customFieldValue(session: DatabaseSession, key: String): ProtectedString =
+        entryIn(session).customFields.first { it.key == key }.value
+
+    /** 已清零的 ProtectedString 读取会抛 IllegalStateException，此处归一为 null 便于断言 */
+    private fun readOrNull(value: ProtectedString): String? =
+        try {
+            value.readString()
+        } catch (_: IllegalStateException) {
+            null
+        }
+
+    @Test
+    fun `计数器补丁后旧计数器实例被清零_而同条目其余密文原样存活`() = runTest {
+        val session = newSession(signCountText = "5")
+        val staleSignCount = customFieldValue(session, PasskeyData.FIELD_SIGN_COUNT)
+        val privateKey = customFieldValue(session, PasskeyData.FIELD_PRIVATE_KEY)
+        val title = entryIn(session).fields.getValue(KdbxConstants.Fields.TITLE)
+
+        coordinatorOf(session).patchPasskeySignCount(entryId.toHexString(), 9)
+
+        assertEquals(9, storedSignCount(session))
+        assertNull("被替换下线的旧计数器实例必须清零", readOrNull(staleSignCount))
+        assertEquals("同一被替换条目内的存活密文不得被误擦", "private-key", privateKey.readString())
+        assertEquals("E", title.readString())
+        assertSame("存活字段实例必须仍是原实例", privateKey, customFieldValue(session, PasskeyData.FIELD_PRIVATE_KEY))
+    }
+
+    @Test
+    fun `计数器补丁只重建命中路径_未命中的兄弟分组按同一实例复用`() = runTest {
+        val session = newSession(signCountText = "1")
+        session.saveGroup(KdbxGroup(id = KdbxUuid.random(), parentGroupId = groupId, name = "sibling"))
+        val siblingBefore = session.databaseFlow.value!!.rootGroup.subgroups.single()
+
+        coordinatorOf(session).patchPasskeySignCount(entryId.toHexString(), 4)
+
+        assertSame(
+            "未命中分支必须按同一实例复用（增量擦除的候选前提）",
+            siblingBefore,
+            session.databaseFlow.value!!.rootGroup.subgroups.single()
+        )
+        assertEquals(4, storedSignCount(session))
+    }
+
+    @Test
+    fun `计数器补丁命中条目后置 DIRTY`() = runTest {
+        val session = newSession(signCountText = "2")
+
+        coordinatorOf(session).patchPasskeySignCount(entryId.toHexString(), 3)
+
+        assertEquals(
+            "命中条目必须置 DIRTY（供后续统一 save 落盘）",
+            DatabaseSession.SessionState.DIRTY,
+            session.state.value
+        )
+    }
+
+    @Test
+    fun `计数器补丁未命中条目时库实例与状态均不变`() = runTest {
+        val session = newSession(signCountText = "2")
+        val before = session.databaseFlow.value!!
+
+        coordinatorOf(session).patchPasskeySignCount(KdbxUuid.random().toHexString(), 9)
+
+        assertSame("未命中不得替换活动库实例（零写入）", before, session.databaseFlow.value)
+        assertEquals("未命中不得置 DIRTY", DatabaseSession.SessionState.OPENED, session.state.value)
+        assertEquals(2, storedSignCount(session))
     }
 
     // ===== ISSUE-P3-27 子项 2：并发递增的返回值唯一性 与 调用方自算的重复面 =====

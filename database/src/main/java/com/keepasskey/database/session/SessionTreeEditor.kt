@@ -64,6 +64,47 @@ internal object SessionTreeEditor {
         return null
     }
 
+    /**
+     * 按 id 定位单条条目并就地变换（ISSUE-P3-157）：只重建「从根到命中位置」的分组链，
+     * 未命中的兄弟子树按**同一实例**复用（路径复制契约，见类 KDoc）。
+     *
+     * [transform] 的产物即落树实例；它与命中的旧实例按 `copy` 语义共享未变更的字段 /
+     * 自定义字段 / 附件 / 历史容器，故调用方据回报的替换关系做增量定点擦除时，
+     * 只会清掉**真正下线**的敏感实例（见 [KdbxGroup.eraseSupersededSensitiveData]）。
+     *
+     * @return 命中时返回编辑结果（[EntryEditResult.replaced] 为命中的旧实例、
+     *   [EntryEditResult.replacement] 为 [transform] 的产物）；[entryId] 不在本树内时返回 null，
+     *   由调用方据此**零写入**（不得再退回整库变换）。
+     */
+    fun updateEntryById(
+        root: KdbxGroup,
+        entryId: KdbxUuid,
+        transform: (KdbxEntry) -> KdbxEntry
+    ): EntryEditResult? = updateEntryByIdIn(root, entryId, transform)
+
+    /** 递归定位：语义同 [updateOrAddEntryIn]，但按**条目 id** 命中（不依赖 `parentGroupId`）。 */
+    private fun updateEntryByIdIn(
+        group: KdbxGroup,
+        entryId: KdbxUuid,
+        transform: (KdbxEntry) -> KdbxEntry
+    ): EntryEditResult? {
+        val index = group.entries.indexOfFirst { it.id == entryId }
+        if (index >= 0) {
+            val replaced = group.entries[index]
+            val replacement = transform(replaced)
+            val newEntries = group.entries.toMutableList()
+            newEntries[index] = replacement
+            return EntryEditResult(group.copy(entries = newEntries), replaced, replacement)
+        }
+        for (index in group.subgroups.indices) {
+            val result = updateEntryByIdIn(group.subgroups[index], entryId, transform) ?: continue
+            val newSubgroups = group.subgroups.toMutableList()
+            newSubgroups[index] = result.root
+            return EntryEditResult(group.copy(subgroups = newSubgroups), result.replaced, result.replacement)
+        }
+        return null
+    }
+
     fun removeEntry(group: KdbxGroup, entryId: KdbxUuid): KdbxGroup {
         var changed = false
         val newEntries = if (group.entries.any { it.id == entryId }) {

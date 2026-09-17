@@ -326,6 +326,20 @@ class DatabaseSession(
     suspend fun saveEntry(entry: KdbxEntry) = mutations.saveEntry(entry)
 
     /**
+     * ISSUE-P3-157：单条条目**原子读-改-写**——在会话 Mutex 内的单次受控变换中完成
+     * 「按 id 定位 → [transform] 变换 → 落树 → 增量定点擦除」。
+     *
+     * 与 [saveEntry] 的分工：`saveEntry` 按 `parentGroupId` 落树（新增 / 替换皆可），
+     * 本入口**只更新已存在的条目**（按 id 定位，绝不新增），供「读库内现值 → 计算 → 写回」
+     * 这类必须原子完成的调用方使用（典型：passkey 签名计数器的并发递增）。
+     * 树变换由 [SessionTreeEditor] 完成，擦除候选只取自被替换的那一条旧条目。
+     *
+     * @return 落树上线的条目实例（条目不存在 / 只读态 / 无活动库时为 null，且不写入、不置 DIRTY）
+     */
+    suspend fun updateEntryById(entryId: KdbxUuid, transform: (KdbxEntry) -> KdbxEntry): KdbxEntry? =
+        mutations.updateEntryById(entryId, transform)
+
+    /**
      * 删除条目
      */
     suspend fun deleteEntry(entryId: KdbxUuid) = mutations.deleteEntry(entryId)

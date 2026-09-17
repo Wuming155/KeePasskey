@@ -14,8 +14,8 @@ import kotlinx.coroutines.sync.withLock
  * 自 [DatabaseSession] 原样抽出条目 / 分组的增删改与批量操作：统一在 [mutex] 临界区内
  * 对 [databaseFlow] 做 copy-on-write 替换、对 [stateFlow] 置 DIRTY，并在替换前定点擦除下线实例。
  *
- * 擦除分两档（ISSUE-P3-156）：
- * - **增量**（[saveEntry] / [saveGroup] / [batchMoveEntries]）：树变换回报被替换节点，
+ * 擦除分两档（ISSUE-P3-156 / ISSUE-P3-157）：
+ * - **增量**（[saveEntry] / [saveGroup] / [batchMoveEntries] / [updateEntryById]）：树变换回报被替换节点，
  *   候选集合规模 = 被替换节点规模，不随全库规模增长；
  * - **通用**（[updateDatabaseMeta]）：任意整库变换无法定位替换位置，退回为整棵新树建身份集合。
  *
@@ -76,12 +76,41 @@ internal class SessionContentMutations(
     }
 
     /**
+     * 单条条目原子读-改-写（ISSUE-P3-157）：在会话 Mutex 内的**单次**受控变换中完成
+     * 「按 id 定位 → [transform] 变换 → 落树 → 增量定点擦除」。
+     *
+     * 与 [updateDatabaseMeta] 的分工：本入口的树变换由 [SessionTreeEditor] 完成并回报替换关系，
+     * 因此擦除候选只取自被替换的那一条旧条目（集合规模 = 单条条目，不随全库规模增长）；
+     * [updateDatabaseMeta] 的变换是**任意整库变换**（同步合并 / 远端库接管会整体替换分组树），
+     * 无法定位替换位置，只能保留通用实现。
+     *
+     * @return 条目存在时返回 [transform] 的产物（**落树上线的实例**，调用方需要回传的值应写入
+     *   该实例后再从它读取，保证与已提交状态同源）；条目不存在（或只读态 / 无活动库）时返回 null，
+     *   且**不写入、不置 DIRTY**——调用方不得据此认为写入已发生。
+     */
+    suspend fun updateEntryById(
+        entryId: KdbxUuid,
+        transform: (KdbxEntry) -> KdbxEntry
+    ): KdbxEntry? = mutex.withLock {
+        if (readOnly()) return@withLock null
+        val currentDb = databaseFlow.value ?: return@withLock null
+        val edit = SessionTreeEditor.updateEntryById(currentDb.rootGroup, entryId, transform)
+            ?: return@withLock null
+        // ISSUE-P2-06 / P3-157：copy-on-write 替换前定点擦除——只以本次被替换下线的旧条目为候选
+        edit.replaced?.let { edit.root.eraseSupersededSensitiveData(it, edit.replacement) }
+        databaseFlow.value = currentDb.copy(rootGroup = edit.root)
+        stateFlow.value = DatabaseSession.SessionState.DIRTY
+        edit.replacement
+    }
+
+    /**
      * 允许受控原子修改数据库顶层元数据与墓碑列表（例如 recycleBinUuid、deletedObjects 追加）。
      * 修改后置为 DIRTY 状态，供后续统一 save() 序列化落盘。
      *
      * ISSUE-P3-156：本入口的变换是**任意整库变换**（同步合并 / 远端库接管会整体替换分组树），
      * 无法定位被替换节点 ⇒ 擦除保留通用实现（为整棵新树建身份集合，O(全库)）；仅改元数据
-     * （根分组同一实例）时零成本返回。需要 O(被替换节点) 的单条写入请走 `saveEntry`。
+     * （根分组同一实例）时零成本返回。需要 O(被替换节点) 的单条写入请走 [saveEntry] 或
+     * [updateEntryById]（后者额外提供会话 Mutex 内的原子读-改-写）。
      */
     suspend fun updateDatabaseMeta(transform: (KdbxDatabase) -> KdbxDatabase) = mutex.withLock {
         if (readOnly()) return@withLock

@@ -172,6 +172,51 @@ class SessionTreeEditorPathCopyTest {
     }
 
     @Test
+    fun `按条目 id 变换只重建从根到命中位置的分组链_未命中分支按同一实例复用`() {
+        val root = KdbxGroup(id = uuid(1), name = "root")
+        val sibling = KdbxGroup(
+            id = uuid(2),
+            parentGroupId = root.id,
+            name = "sibling",
+            entries = listOf(entry(20, uuid(2)))
+        )
+        val deep = KdbxGroup(
+            id = uuid(4),
+            parentGroupId = uuid(3),
+            name = "deep",
+            entries = listOf(entry(30, uuid(4), password = "old"))
+        )
+        val target = KdbxGroup(id = uuid(3), parentGroupId = root.id, name = "target", subgroups = listOf(deep))
+        val rootWithTree = root.copy(subgroups = listOf(sibling, target))
+
+        val edit = SessionTreeEditor.updateEntryById(rootWithTree, uuid(30)) { current ->
+            current.withField(KdbxConstants.Fields.PASSWORD, ProtectedString("new", isProtected = true))
+        }
+
+        assertNotNull("命中条目必须返回编辑结果", edit)
+        assertSame("命中路径之外的兄弟子树必须按同一实例复用", sibling, edit!!.root.subgroups[0])
+        assertSame("未命中分支的条目列表同样必须按同一实例复用", sibling.entries, edit.root.subgroups[0].entries)
+        assertTrue("命中路径上的分组需重建", edit.root.subgroups[1] !== target)
+        assertTrue("命中路径上的分组需重建（深层）", edit.root.subgroups[1].subgroups[0] !== deep)
+        assertSame("必须回报被替换下线的旧条目", deep.entries.single(), edit.replaced)
+        assertSame(
+            "必须回报落树上线的条目（变换产物）",
+            edit.replacement,
+            edit.root.subgroups[1].subgroups[0].entries.single()
+        )
+        assertEquals("new", edit.replacement!!.password!!.readString())
+        assertEquals("原树的目标条目不得被原地改写", "old", deep.entries.single().password!!.readString())
+    }
+
+    @Test
+    fun `按条目 id 变换未命中时返回 null`() {
+        val tree = tree()
+
+        assertNull("条目 id 不在树内", SessionTreeEditor.updateEntryById(tree.root, uuid(99)) { it })
+        assertNull("分组 id 不等于条目 id", SessionTreeEditor.updateEntryById(tree.root, tree.deep.id) { it })
+    }
+
+    @Test
     fun `删除路径未命中时返回同一实例_命中时仅重建路径上的分组`() {
         val tree = tree()
 
