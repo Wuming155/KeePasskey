@@ -51,7 +51,7 @@
 
 ---
 
-## P3 低危问题、特性接线与体验优化（15 项）
+## P3 低危问题、特性接线与体验优化（14 项）
 
 > 本批为 2026-09-17「降低 CPU / 内存占用」排查的**其余开放结论**。
 > 条目 153 为 **Rust 下沉候选的评估结论**（评估项）；条目 155 为同轮后续批次（§115）开工复核转登。
@@ -80,7 +80,11 @@
 > 算 3 遍 SHA-256）——**① 摘要一次化已做**；**② 基线前移的「重复写盘跳过」判定不做**，理由与
 > 解除条件登记 [`architecture/已知工程限界.md`](architecture/已知工程限界.md) **§11**，见
 > [`resolved/batches/125-同步接受路径摘要一次化批次.md`](resolved/batches/125-同步接受路径摘要一次化批次.md)。
-> 其余条目（`P3-163` ~ `P3-165` / `P3-168` / `P3-170` / `P3-171` / `P3-174` ~ `P3-180`）**仍待整改**。
+> **已闭环（§126 第三档：同一份数据重复计算 ‣ 第四条）**：`ISSUE-P3-171`（自动填充评分对全库条目
+> 逐条字符串物化）——**① 形状短路与 ② `url` 单读已做**；**AC ② 的原文路线（为 `KdbxEntry` 加不解密
+> 判定入口）判定不采用**（评分路径必须要 URL 文本，只读一次已吃掉同一条收益且不新增 API 面），见
+> [`resolved/batches/126-自动填充评分逐条目物化收敛批次.md`](resolved/batches/126-自动填充评分逐条目物化收敛批次.md)。
+> 其余条目（`P3-163` ~ `P3-165` / `P3-168` / `P3-170` / `P3-174` ~ `P3-180`）**仍待整改**。
 
 ### ISSUE-P3-153 Rust 下沉候选的评估结论（**评估项，非整改项**）
 
@@ -200,24 +204,6 @@
 - **风险提示**：`UnlockThrottleIntegrity` 的别名派生若改算法会使**存量存在性标记失配**（等于节流复位），
   故只做「去装箱 + 查表 + 复用 digest」三项纯等价替换；Keystore 句柄缓存必须在失效时重取（`§80` 的
   `Mac.getInstance(..., "AndroidKeyStore")` 真机失效教训）。
-
-### ISSUE-P3-171 自动填充评分对全库条目的逐条字符串物化
-
-- **背景**：`app/.../autofill/AutofillCandidateRanker.kt:136-147` 的评分循环对**全库条目**逐条访问
-  `KdbxEntry` 属性 getter（`core/.../model/KdbxEntry.kt:28-41`），而每个 getter 每次都要走
-  `fields[...]?.readString()`——未密封字段至少 `data.clone()` + 一次 `String` 构造，
-  若该字段被写为 `Protected="True"`（KeePassXC 会写）则是**一次完整解密**；
-  并对每条调 `PasskeyData.fromCustomFields`（`core/.../model/PasskeyData.kt:210`，内部 `associateBy` 建 map
-  + 最多 9 次 `readString`），而绝大多数条目根本不是 passkey 条目。
-  N = 5000 时约 5 万次 String 构造 + 5000 个临时 Map，全部落在引擎回调线程。
-- **整改方向**：① `fromCustomFields` 前置廉价短路（先探 `Passkey.` 前缀键，无则直接返回 `null`）；
-  ② 为 `KdbxEntry` 提供**不解密、不物化明文**的判定入口（复用既有 `ProtectedString.length`），
-  把 `url.isNotBlank()` 一类判定改走它；③ 确需字符串投影时在投影层一次算好并随 UI 模型缓存。
-- **验收标准**：非 passkey 条目的评分不产生 Map 与字符串（分配 / 调用计数断言）；
-  候选排序结果与现状逐条一致（既有排序用例全绿）；不得引入新的明文 `String` 长期持有。
-- **核实时间点与方式**：2026-09-17 读 `AutofillCandidateRanker.kt:85-150`、`KdbxEntry.kt:20-60`、
-  `PasskeyData.kt:200-230` 核实。
-- **风险提示**：自动填充候选匹配涉及**调用方归属与签名绑定判定**，只做「先算 / 后算」的等价搬移，不得改变判定顺序与放行面。
 
 ### ISSUE-P3-174 列表页状态投影缺 `flowOn`（全库投影跑在主线程）
 

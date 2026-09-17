@@ -208,6 +208,21 @@ data class PasskeyData(
          * 生成 String（候选匹配等只读消费所需）。
          */
         fun fromCustomFields(fields: List<KdbxCustomField>): PasskeyData? {
+            // ISSUE-P3-171：先做**不解密、不建 Map** 的形状短路——绝大多数条目根本没有 passkey
+            // 字段，而原实现无论有没有都先 `associateBy` 建一次 Map，再逐个 `readString()`
+            // （每次都是一次驻留密文解密 + String 物化）。此处只扫 key 名，三个必需键缺任一即返回。
+            var hasRpId = false
+            var hasCredentialId = false
+            var hasPrivateKey = false
+            for (field in fields) {
+                when (field.key) {
+                    FIELD_RP_ID -> hasRpId = true
+                    FIELD_CREDENTIAL_ID -> hasCredentialId = true
+                    FIELD_PRIVATE_KEY -> hasPrivateKey = true
+                }
+            }
+            if (!hasRpId || !hasCredentialId || !hasPrivateKey) return null
+
             val map = fields.associateBy { it.key }
             val rpId = map[FIELD_RP_ID]?.value?.readString() ?: return null
             val credId = map[FIELD_CREDENTIAL_ID]?.value?.readString() ?: return null

@@ -196,6 +196,33 @@ class AlgoHotPathGuardsTest {
         )
     }
 
+    @Test
+    fun `自动填充评分不得逐条目重复解密与建 Map`() {
+        val ranker = stripped("app/src/main/java/com/keepasskey/app/autofill/AutofillCandidateRanker.kt")
+        assertEquals(
+            "url 属性只允许读一次（每次访问都是一次驻留密文解密 + String 物化）",
+            1,
+            Regex("val entryUrl = entry\\.url").findAll(ranker).count()
+        )
+        assertFalse(
+            "isExactDomain 不得再接收 entry 并自行读一遍 url",
+            ranker.contains("isExactDomain(entry,")
+        )
+
+        val passkey = stripped("core/src/main/java/com/keepasskey/core/model/PasskeyData.kt")
+        assertTrue(
+            "fromCustomFields 必须先做不解密、不建 Map 的形状短路",
+            passkey.contains("if (!hasRpId || !hasCredentialId || !hasPrivateKey) return null")
+        )
+        val preCheck = passkey
+            .substringAfter("fun fromCustomFields")
+            .substringBefore("val map = fields.associateBy")
+        assertFalse(
+            "形状短路本身不得解密（只允许扫 key 名）——否则短路就白做了",
+            preCheck.contains("readString()")
+        )
+    }
+
     private fun stripped(path: String): String = readSource(path)
         .replace(BLOCK_COMMENT, "")
         .lines()

@@ -128,13 +128,17 @@ object AutofillCandidateRanker {
         val reasons = linkedSetOf<MatchReason>()
         var score = 0
 
+        // ISSUE-P3-171：`url` 是属性 getter——每次访问都是一次驻留密文解密 + String 物化；
+        // 本函数与其助手 [isExactDomain] 合计最多访问 4 次 ⇒ 每条目只读一次并下传。
+        val entryUrl = entry.url
+
         // ISSUE-P2-46：包名维度必须同时满足「条目显式 android:// 绑定」与「调用方已按
         // 包名 + 签名摘要完成首次绑定」。仅有前者时，任意以同 applicationId 侧载的应用
         // 都能命中（原缺陷）；仅有后者时，条目并未声明对该包的绑定，同样不得入选。
         val packageMatch = packageDimensionAuthorized &&
             callingPackage.isNotBlank() &&
-            entry.url.isNotBlank() &&
-            DomainMatcher.isAndroidPackageMatch(entry.url, callingPackage)
+            entryUrl.isNotBlank() &&
+            DomainMatcher.isAndroidPackageMatch(entryUrl, callingPackage)
         if (packageMatch) {
             score += SCORE_EXACT_PACKAGE
             reasons += MatchReason.EXACT_PACKAGE
@@ -144,9 +148,9 @@ object AutofillCandidateRanker {
             val passkey = PasskeyData.fromCustomFields(entry.customFields)
             val domainMatched = (passkey != null &&
                     DomainMatcher.isDomainMatch(passkey.relyingPartyId, webDomain)) ||
-                    (entry.url.isNotBlank() && DomainMatcher.isDomainMatch(entry.url, webDomain))
+                    (entryUrl.isNotBlank() && DomainMatcher.isDomainMatch(entryUrl, webDomain))
             if (domainMatched) {
-                if (isExactDomain(entry, passkey, webDomain)) {
+                if (isExactDomain(entryUrl, passkey, webDomain)) {
                     score += SCORE_EXACT_DOMAIN
                     reasons += MatchReason.EXACT_DOMAIN
                 } else {
@@ -175,12 +179,15 @@ object AutofillCandidateRanker {
     /**
      * 判定是否为「精确域名」匹配：取实际命中的域名来源（passkey RP ID 优先）与目标域比较。
      * 注意：本方法仅在 [DomainMatcher.isDomainMatch] 已通过的前提下调用。
+     *
+     * `ISSUE-P3-171`：`entryUrl` 由调用方预先读出并下传（原实现每次内部再访问一次 `entry.url` 属性
+     * getter ⇒ 又一次解密 + String 物化）。
      */
-    private fun isExactDomain(entry: KdbxEntry, passkey: PasskeyData?, webDomain: String): Boolean {
+    private fun isExactDomain(entryUrl: String, passkey: PasskeyData?, webDomain: String): Boolean {
         val source = if (passkey != null && DomainMatcher.isDomainMatch(passkey.relyingPartyId, webDomain)) {
             passkey.relyingPartyId
         } else {
-            entry.url
+            entryUrl
         }
         return DomainMatcher.extractDomain(source) == webDomain
     }
