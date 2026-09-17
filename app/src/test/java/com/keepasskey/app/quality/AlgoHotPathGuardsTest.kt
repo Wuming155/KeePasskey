@@ -435,6 +435,39 @@ class AlgoHotPathGuardsTest {
     }
 
     @Test
+    fun `同步冲突合并的本地侧必须直取内存树`() {
+        val controller = stripped(
+            "app/src/main/java/com/keepasskey/app/sync/SyncConflictController.kt"
+        )
+        assertTrue(
+            "本地侧必须支持由调用方传入内存树（ISSUE-P3-168 ①：省去一次「解析 localBytes 回树」" +
+                "＝一次 KDF + 一次整树构建）",
+            controller.contains("localDbOverride ?: codec.parseKdbxBytes(localBytes)")
+        )
+        assertTrue(
+            "擦除边界（P0）：传入的内存快照不得被 wipeDiscarded 擦除——擦它即静默清空活动库",
+            controller.contains("val localDbOwned = localDbOverride == null") &&
+                controller.contains("if (localDbOwned) wipeDiscarded(localDb)")
+        )
+        assertEquals(
+            "每一处 wipeDiscarded(localDb) 都必须由 localDbOwned 判据把关（裸调用＝P0 隐患）",
+            Regex("wipeDiscarded\\(localDb\\)").findAll(controller).count(),
+            Regex("if \\(localDbOwned\\) wipeDiscarded\\(localDb\\)").findAll(controller).count()
+        )
+
+        val runner = stripped("app/src/main/java/com/keepasskey/app/sync/SyncCycleRunner.kt")
+        assertEquals(
+            "两处冲突合并入口（快速提交 / openRemote）都必须传入内存树快照",
+            2,
+            Regex("localDbOverride = localDbSnapshot").findAll(runner).count()
+        )
+        assertTrue(
+            "快照必须取本周期起点的会话树（currentDb），而不是在合并内重读 flow（UI 写路径不取同步锁）",
+            runner.contains("localDbSnapshot = currentDb,")
+        )
+    }
+
+    @Test
     fun `整库投影流必须共享给多处消费者`() {
         val vm = stripped("app/src/main/java/com/keepasskey/app/ui/screens/vault/VaultListViewModel.kt")
         assertEquals(

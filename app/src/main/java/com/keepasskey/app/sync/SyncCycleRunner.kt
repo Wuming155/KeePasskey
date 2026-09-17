@@ -6,6 +6,7 @@ import com.keepasskey.app.di.RollbackStateDir
 import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.app.ui.screens.settings.ExtendedSettings
 import com.keepasskey.core.result.KdbxResult
+import com.keepasskey.database.file.KdbxDatabase
 import com.keepasskey.database.session.DatabaseSession
 import com.keepasskey.sync.engine.NoopSyncIntegrityMac
 import com.keepasskey.sync.engine.SyncCache
@@ -140,6 +141,14 @@ class SyncCycleRunner @Inject constructor(
 
             val isDirty = databaseSession.state.value == DatabaseSession.SessionState.DIRTY
 
+            // ISSUE-P3-168 ①：下面的三方合并可直接以 `currentDb`（**本周期起点的内存树快照**）
+            // 充当「本地侧」，无需把 localBytes 重新解析回树——两条路径都已证明二者内容等价：
+            // ① `!isCached || hasLocalContentChanged`（:130）：localBytes 刚由 currentDb 序列化而来；
+            // ② 缓存命中且判定本地内容无变化（:138）：currentDb 内容 ≡ 缓存快照字节，而 localBytes 即该快照。
+            // 由此每轮冲突少一次 `parse(localBytes)`（一次 KDF + 一次整树构建）。
+            // 故意**不**在合并内重读 `databaseFlow`：UI 写路径不取本周期持有的 SyncSessionState.mutex，
+            // 重读可能拿到与 localBytes 不对应的树（会与即将上传的字节产生分歧）。
+
             // 2. 首次同步且尚未缓存：若远端尚未创建该文件，直接上传本地库建立基线
             if (!isCached) {
                 establishRemoteBaselineIfMissing(
@@ -157,6 +166,7 @@ class SyncCycleRunner @Inject constructor(
                     syncCache = syncCache,
                     remotePath = remotePath,
                     localBytes = localBytes,
+                    localDbSnapshot = currentDb,
                     baseSnapshotBytes = baseSnapshotBytes,
                     settings = settings,
                     conflictStrategy = conflictStrategy
@@ -169,6 +179,7 @@ class SyncCycleRunner @Inject constructor(
                 syncCache = syncCache,
                 remotePath = remotePath,
                 localBytes = localBytes,
+                localDbSnapshot = currentDb,
                 baseSnapshotBytes = baseSnapshotBytes,
                 isDirty = isDirty,
                 hasLocalContentChanged = hasLocalContentChanged,
@@ -227,12 +238,16 @@ class SyncCycleRunner @Inject constructor(
      *
      * 前置判据 `isDirty && syncCache.isCached(remotePath)` 由调用方判定（与拆分前同一表达式）；
      * 进入本方法后三分支（Uploaded / ConflictNeedsMerge / RemoteUnreachable）恒返回结论。
+     *
+     * @param localDbSnapshot ISSUE-P3-168 ①：与 [localBytes] 内容等价的本地内存树，
+     *   转三方合并时直接充当本地侧（免去一次「解析 localBytes 回树」的整库解密）。
      */
     private suspend fun tryFastCommitPath(
         syncEngine: SyncEngine,
         syncCache: SyncCache,
         remotePath: String,
         localBytes: ByteArray,
+        localDbSnapshot: KdbxDatabase,
         baseSnapshotBytes: ByteArray?,
         settings: ExtendedSettings,
         conflictStrategy: SyncConflictStrategy
@@ -279,7 +294,9 @@ class SyncCycleRunner @Inject constructor(
                     remoteBytes = commitResult.remoteBytes,
                     baseSnapshotBytes = baseSnapshotBytes,
                     remoteEtag = commitResult.remoteEtag,
-                    strategy = conflictStrategy
+                    strategy = conflictStrategy,
+                    // ISSUE-P3-168 ①：本地侧直接取内存树（免去一次解析回树）
+                    localDbOverride = localDbSnapshot
                 )
             }
             is SyncCommitResult.RemoteUnreachable -> SyncOutcome.Offline
@@ -295,12 +312,16 @@ class SyncCycleRunner @Inject constructor(
      *
      * 调用方在 [SyncSessionState.mutex] 内调用；异常归一（NetworkError → Offline、
      * 其他异常 → Error）与拆分前 `try { when (openRemote) {...} } catch {...}` 结构逐一对应。
+     *
+     * @param localDbSnapshot ISSUE-P3-168 ①：与本次冲突涉及的本地字节内容等价的本地内存树，
+     *   转三方合并时直接充当本地侧（免去一次「解析回树」的整库解密）。
      */
     private suspend fun handleOpenRemote(
         syncEngine: SyncEngine,
         syncCache: SyncCache,
         remotePath: String,
         localBytes: ByteArray,
+        localDbSnapshot: KdbxDatabase,
         baseSnapshotBytes: ByteArray?,
         isDirty: Boolean,
         hasLocalContentChanged: Boolean,
@@ -381,7 +402,10 @@ class SyncCycleRunner @Inject constructor(
                         remoteBytes = openResult.remoteBytes,
                         baseSnapshotBytes = baseSnapshotBytes,
                         remoteEtag = openResult.remoteEtag,
-                        strategy = conflictStrategy
+                        strategy = conflictStrategy,
+                        // ISSUE-P3-168 ①：本地侧直接取内存树（localBytes 与本快照内容等价，
+                        // 见 runSyncCycle 内两条来源的证明），免去一次解析回树
+                        localDbOverride = localDbSnapshot
                     )
                 }
                 // ISSUE-P2-18：远端内容为设备侧曾接受过的旧版本（回退/重放）→

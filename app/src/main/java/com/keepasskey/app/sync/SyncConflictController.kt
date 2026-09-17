@@ -224,6 +224,20 @@ class SyncConflictController @Inject constructor(
         pendingRemoteEtag = ""
     }
 
+    /**
+     * 三方合并（`ISSUE-P3-168` ①：本地侧优先取**内存树**，不再把刚序列化出的字节解析回树）。
+     *
+     * @param localDbOverride 本地树的**内存快照**；非 null 表示调用方保证其内容与 [localBytes]
+     *   等价——两种可证情形：① [localBytes] 正是由该树序列化而来；②
+     *   [SyncContentChangeDetector] 刚判定「本地内容无变化」⇒ 该树内容 ≡ 缓存快照字节。
+     *   此时省去一次 `parseKdbxBytes(localBytes)`（一次 KDF + 一次整树构建）。
+     *
+     *   **所有权**：传入的树属于调用方 / 会话，本方法**绝不**擦除它（见 [wipeDiscarded] 前提），
+     *   且合并产物会**别名复用**其节点（`KdbxMerger` 对单侧独有对象按原实例复用）——成功路径下
+     *   由 [DatabaseSession.updateDatabaseMeta] 采用为会话库，与「解析产物被采用」的既有语义一致；
+     *   失败路径只丢弃合并产物（其节点仍由会话树持有）。为 null 时回落「解析 [localBytes]」路径，
+     *   语义与改动前逐字一致。
+     */
     suspend fun handleConflictMerge(
         syncEngine: SyncEngine,
         syncCache: SyncCache,
@@ -232,15 +246,19 @@ class SyncConflictController @Inject constructor(
         remoteBytes: ByteArray,
         baseSnapshotBytes: ByteArray? = null,
         remoteEtag: String = "",
-        strategy: SyncConflictStrategy = SyncConflictStrategy.AUTO_MERGE
+        strategy: SyncConflictStrategy = SyncConflictStrategy.AUTO_MERGE,
+        localDbOverride: KdbxDatabase? = null
     ): SyncOutcome = withContext(Dispatchers.Default) {
-        val localDb = codec.parseKdbxBytes(localBytes)
+        val localDb = localDbOverride ?: codec.parseKdbxBytes(localBytes)
             ?: return@withContext SyncOutcome.Error(strings.get(R.string.sync_error_decrypt_local_conflict_failed))
+        // 该树是否为本方法**自己解析出的独立副本**：只有这种树才允许擦除。传入的内存快照
+        // 属于会话 / 调用方，擦除它等于静默清空活动库（P0 级，见 [wipeDiscarded] 前提）
+        val localDbOwned = localDbOverride == null
         val remoteDb = codec.parseKdbxBytes(remoteBytes)
             ?: run {
                 // ISSUE-P3-119：远端解析失败即整体放弃，localDb 无处可去（未被任何存活对象引用），
-                // 显式擦除而非留给 GC。
-                wipeDiscarded(localDb)
+                // 显式擦除而非留给 GC；ISSUE-P3-168：传入的内存快照不属于本方法，绝不擦除
+                if (localDbOwned) wipeDiscarded(localDb)
                 return@withContext SyncOutcome.Error(strings.get(R.string.sync_error_decrypt_remote_conflict_failed))
             }
 
@@ -299,7 +317,8 @@ class SyncConflictController @Inject constructor(
                 ?: run {
                     // ISSUE-P3-119：序列化失败即整体放弃本次合并（mergedDb / 双方树均不被采用），
                     // 三棵解析产物同批显式擦除（合并产物本身也在此丢弃，不存在共享引用者）。
-                    wipeDiscarded(localDb)
+                    // ISSUE-P3-168：`localDb` 若来自调用方的内存快照则不属于本方法，跳过擦除
+                    if (localDbOwned) wipeDiscarded(localDb)
                     wipeDiscarded(remoteDb)
                     wipeDiscarded(trustedBase)
                     return@withContext SyncOutcome.Error(strings.get(R.string.sync_error_serialize_merged_failed))
@@ -333,7 +352,10 @@ class SyncConflictController @Inject constructor(
      *   「已被 [DatabaseSession.updateDatabaseMeta] 采用为会话库的树」与
      *   「其节点进入待决合并底版 / pending 快照的树」**一律不得擦除**，否则会静默清空活动库内容；
      * - 该树也不会在本次调用返回后被读取（如 `pendingLocalDb` / `pendingRemoteDb` 会在用户决策阶段
-     *   再次被读取，故其释放只能随冲突会话结束由会话生命周期收口）。
+     *   再次被读取，故其释放只能随冲突会话结束由会话生命周期收口）；
+     * - `ISSUE-P3-168` 起 [handleConflictMerge] 的 `localDbOverride` **不是**本类的解析产物——
+     *   它属于调用方 / 会话（内存树快照），一律不得擦除（由 `localDbOwned` 判据把关），
+     *   否则会静默清空活动库。
      */
     private fun wipeDiscarded(db: KdbxDatabase?) {
         db?.clearSensitiveData()
