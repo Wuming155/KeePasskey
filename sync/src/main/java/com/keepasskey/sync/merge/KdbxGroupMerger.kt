@@ -85,40 +85,95 @@ internal object KdbxGroupMerger {
 
     /**
      * 父子关系自愈：父链失链/指向根组/构成环路时统一挂载至根组。
+     *
+     * `ISSUE-P3-165`：判定由「**逐组**上溯整条父链 + 每组一个 `visited` 集」改为
+     * **一次函数图染色**——原实现对每个分组都向上走到根 / 断链，链状退化结构
+     * （**远端可构造**）下为 `O(G × 深度)`、最坏 `O(G²)`，且每组各分配一个 `Set`。
+     *
+     * 判定口径**逐字保持**：`g` 需挂回根组 ⟺ 父链为空 / 指向根 / 指向不存在的分组，
+     * 或从 `g` 沿**原始**父链上溯会重现某个节点（即「在环上」或「其父链进入某个环」）。
+     * 各组的判定均基于**原始**链接、互不影响 ⇒ 结论与逐组上溯**逐项等价**。
+     * 复杂度降为 `O(G)`（每个节点至多被走一次，路径复用同一缓冲）。
      */
     fun sanitizeParentLinks(
         survivingGroups: Map<KdbxUuid, KdbxGroup>,
         rootId: KdbxUuid
     ): Map<KdbxUuid, KdbxGroup> {
+        val cyclic = cyclicGroups(survivingGroups, rootId)
         val sanitizedGroups = mutableMapOf<KdbxUuid, KdbxGroup>()
         for ((gid, g) in survivingGroups) {
             val targetParent = g.parentGroupId
-            if (targetParent == null || targetParent == rootId || !survivingGroups.containsKey(targetParent)) {
+            if (targetParent == null || targetParent == rootId ||
+                !survivingGroups.containsKey(targetParent) || gid in cyclic
+            ) {
                 sanitizedGroups[gid] = g.copy(parentGroupId = rootId)
             } else {
-                // 环路检测
-                var curr = targetParent
-                var hasCycle = false
-                val visited = mutableSetOf(gid)
-                while (curr != null && curr != rootId && survivingGroups.containsKey(curr)) {
-                    if (!visited.add(curr)) {
-                        hasCycle = true
-                        break
-                    }
-                    curr = survivingGroups[curr]?.parentGroupId
-                }
-                if (hasCycle) {
-                    sanitizedGroups[gid] = g.copy(parentGroupId = rootId)
-                } else {
-                    sanitizedGroups[gid] = g
-                }
+                sanitizedGroups[gid] = g
             }
         }
         return sanitizedGroups
     }
 
     /**
+     * 单趟染色求「需挂回根组」的分组集合（`ISSUE-P3-165`）。
+     *
+     * 状态：`ON_PATH` = 在**当前**路径上；`CLEAN` = 已判定为**不**进入环；
+     * `CYCLIC` = 已判定为**进入**环（含在环上）。路径上命中 `CYCLIC` 或 `ON_PATH`
+     * 都意味着该路径**全体**节点均进入某个环 —— 与逐组上溯的「重现即判环」判据一致。
+     */
+    private fun cyclicGroups(
+        survivingGroups: Map<KdbxUuid, KdbxGroup>,
+        rootId: KdbxUuid
+    ): Set<KdbxUuid> {
+        val onPath = 1
+        val clean = 2
+        val cyclicState = 3
+        val state = HashMap<KdbxUuid, Int>(survivingGroups.size)
+        val path = ArrayList<KdbxUuid>()
+        val cyclic = mutableSetOf<KdbxUuid>()
+
+        for (start in survivingGroups.keys) {
+            // 已判定过的节点（clean 或 cyclic）无需再走：其结果已确定
+            if (state.containsKey(start)) continue
+            path.clear()
+            var curr: KdbxUuid? = start
+            var hitsCycle = false
+            while (true) {
+                if (curr == null || curr == rootId || !survivingGroups.containsKey(curr)) break
+                when (state[curr]) {
+                    clean -> break
+                    cyclicState, onPath -> {
+                        hitsCycle = true
+                        break
+                    }
+
+                    else -> {
+                        state[curr] = onPath
+                        path.add(curr)
+                        curr = survivingGroups[curr]?.parentGroupId
+                    }
+                }
+            }
+            val mark = if (hitsCycle) cyclicState else clean
+            for (id in path) {
+                state[id] = mark
+                if (hitsCycle) cyclic.add(id)
+            }
+        }
+        return cyclic
+    }
+
+    /**
      * 递归组装合并后分组树：根组取本地/远端较晚的变更时间戳，其余节点取已净化分组。
+     *
+     * `ISSUE-P3-165`：本递归**未设自有深度上限**，依据是**上游已封顶**——
+     * 两侧树均由 `KdbxXmlParser` 解析而来，其 `MAX_XML_DEPTH = 64` 对嵌套深度 fail-closed 封顶
+     * （分组嵌套是 XML 嵌套的一部分），且 `subgroupsByParent` 由**净化后**的父链构建
+     * （环与失链一律挂回根组，只会缩短链）⇒ 递归深度实际有界、无可达的栈溢出路径。
+     *
+     * **依赖（须随上游同步）**：若日后放宽 / 移除该解析器深度上限，或引入不经该解析器的树来源
+     * （其它格式导入、插件通道等），**必须**在此补自有深度上限或改显式栈，
+     * 超限按既有失败语义处理（fail-closed），**不得**静默截断。
      */
     fun assembleGroupTree(
         rootId: KdbxUuid,
