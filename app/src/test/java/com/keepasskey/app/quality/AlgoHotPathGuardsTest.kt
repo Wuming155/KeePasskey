@@ -223,6 +223,40 @@ class AlgoHotPathGuardsTest {
         )
     }
 
+    @Test
+    fun `自动填充请求内的重复读取必须收敛`() {
+        val builders = stripped("app/src/main/java/com/keepasskey/app/autofill/AutofillDatasetBuilders.kt")
+        assertEquals(
+            "调用方证书摘要只允许读一次（归属解析与包名维度绑定校验共用同一份快照）",
+            1,
+            Regex("autofillOriginResolver\\.callingAppCertDigests\\(").findAll(builders).count()
+        )
+        val resolver = stripped("app/src/main/java/com/keepasskey/app/autofill/AutofillOriginResolver.kt")
+        assertTrue(
+            "归属解析必须接受调用方传入的摘要快照（默认参数保持既有调用点零改动）",
+            resolver.contains("certDigests: CallerCertDigests = callingAppCertDigests(callingPackage)")
+        )
+        assertFalse("不得残留逐字节 format 的 hex 生成", resolver.contains("\"%02X\".format("))
+
+        assertFalse(
+            "字段签名同样不得逐字节 format",
+            stripped("app/src/main/java/com/keepasskey/app/autofill/AutofillFieldSignature.kt")
+                .contains("\"%02x\".format(")
+        )
+
+        val keystore =
+            stripped("app/src/main/java/com/keepasskey/app/autofill/KeystoreHmacFieldSignatureSource.kt")
+        assertTrue(
+            "Keystore 密钥句柄必须缓存（containsAlias + getEntry 都是 IPC 往返）",
+            keystore.contains("private var cachedKeyEntry: KeyStore.SecretKeyEntry? = null")
+        )
+        assertEquals(
+            "containsAlias 只允许出现在加载路径一处",
+            1,
+            Regex("containsAlias\\(KEY_ALIAS\\)").findAll(keystore).count()
+        )
+    }
+
     private fun stripped(path: String): String = readSource(path)
         .replace(BLOCK_COMMENT, "")
         .lines()

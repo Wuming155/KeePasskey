@@ -30,15 +30,26 @@ class AutofillOriginResolver @Inject constructor(
 
     /**
      * 解析可用于凭据匹配的 webDomain。
+     *
+     * `ISSUE-P3-170`：调用方证书摘要可**预先算出并传入**——同一次自动填充请求里，归属解析与
+     * `android://` 维度的首次绑定校验需要**同一份**摘要快照，原实现各读一次
+     * （各含一次 `getPackageInfo` + 逐签名者 SHA-256 + 逐字节 hex 格式化）。
+     * 默认参数保持既有调用点（自动填充确认页等）零改动，且顺带消除「两次读取之间调用方身份变化」
+     * 造成的判定不一致。
+     *
+     * @param certDigests 调用方全部签名摘要；缺省时按 [callingAppCertDigests] 现取
      * @return 通过归属校验的归一化域名；无法验证时返回 null
      */
-    suspend fun resolveUsableWebDomain(callingPackage: String, rawWebDomain: String?): String? {
+    suspend fun resolveUsableWebDomain(
+        callingPackage: String,
+        rawWebDomain: String?,
+        certDigests: CallerCertDigests = callingAppCertDigests(callingPackage)
+    ): String? {
         val domain = AutofillWebDomainPolicy.normalizeDomain(rawWebDomain) ?: return null
 
         // ISSUE-P1-11：证书指纹必须在浏览器判定之前读取，使浏览器分支同样受「包名 + 指纹」约束
         // ISSUE-P3-93：读取**全部**签名摘要（当前 + 历史），任一命中即通过——签名轮换期不得因
         // 只取首个摘要而误判未授权
-        val certDigests = callingAppCertDigests(callingPackage)
         if (AutofillWebDomainPolicy.isTrustedBrowser(callingPackage, certDigests)) return domain
 
         val dalVerified = if (certDigests.isEmpty) {
@@ -90,9 +101,18 @@ class AutofillOriginResolver @Inject constructor(
         val signingInfo = info.signingInfo
         val signers = signingInfo?.apkContentsSigners.orEmpty().toList() +
             signingInfo?.signingCertificateHistory.orEmpty().toList()
+        // ISSUE-P3-170：摘要器复用一次（`digest()` 自带复位）+ 查表生成 hex，
+        // 取代「每个签名者各 getInstance 一次 + 逐字节 `"%02X".format(it)`」
+        val digest = MessageDigest.getInstance("SHA-256")
         CallerCertDigests.of(signers.map { signer ->
-            MessageDigest.getInstance("SHA-256").digest(signer.toByteArray())
-                .joinToString("") { "%02X".format(it) }
+            val bytes = digest.digest(signer.toByteArray())
+            val hex = CharArray(bytes.size * 2)
+            for (i in bytes.indices) {
+                val value = bytes[i].toInt() and 0xFF
+                hex[i * 2] = UPPER_HEX_DIGITS[value ushr 4]
+                hex[i * 2 + 1] = UPPER_HEX_DIGITS[value and 0x0F]
+            }
+            String(hex)
         })
     } catch (t: Throwable) {
         AppLog.w(TAG, "读取调用方签名证书失败，无法完成 webDomain 归属校验", t)
@@ -101,5 +121,8 @@ class AutofillOriginResolver @Inject constructor(
 
     companion object {
         private const val TAG = "AutofillOrigin"
+
+        /** 大写十六进制查表（`ISSUE-P3-170`；签名摘要的既有对外口径为**大写**） */
+        private val UPPER_HEX_DIGITS = "0123456789ABCDEF".toCharArray()
     }
 }

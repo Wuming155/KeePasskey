@@ -149,7 +149,15 @@ internal suspend fun KeePasskeyAutofillService.appendUnlockedDatasets(
     // 库已解锁：查找匹配凭据
     // ISSUE-P2-07：webDomain 参与匹配前必须通过归属校验（受信浏览器白名单或 DAL 归属声明）；
     // 无法验证时按 null 处理（不下发该域候选），绝不静默放行
-    val webDomain = autofillOriginResolver.resolveUsableWebDomain(callingPkg, scanResult.webDomain)
+    // ISSUE-P3-170：调用方证书摘要**只读一次**并由下述两处共用（归属解析 + `android://` 维度
+    // 首次绑定校验）——原实现各读一次，各含一次 `getPackageInfo` + 逐签名者 SHA-256 + 逐字节 hex 格式化；
+    // 顺带消除「两次读取之间调用方身份变化」造成的判定不一致
+    val callerCertDigests = autofillOriginResolver.callingAppCertDigests(callingPkg)
+    val webDomain = autofillOriginResolver.resolveUsableWebDomain(
+        callingPkg,
+        scanResult.webDomain,
+        callerCertDigests
+    )
     if (scanResult.webDomain != null && webDomain == null) {
         AppLog.w(TAG, "webDomain 归属无法验证，已忽略该域候选（fail-closed）")
     }
@@ -157,7 +165,6 @@ internal suspend fun KeePasskeyAutofillService.appendUnlockedDatasets(
     // ISSUE-P2-46：`android://` 包名维度必须先通过「调用方包名 + 签名摘要」首次绑定校验。
     // 未绑定 / 签名不可读时该维度一律不命中（fail-closed），条目仍可经域名维度入选；
     // 未绑定调用方的补救路径是选择器显式指认（该动作即首次绑定写入，见 AutofillPickerActivity）。
-    val callerCertDigests = autofillOriginResolver.callingAppCertDigests(callingPkg)
     val packageDimensionAuthorized = AndroidPackageBindingPolicy.isPackageDimensionAuthorized(
         callingPackage = callingPkg,
         callingCertDigests = callerCertDigests,

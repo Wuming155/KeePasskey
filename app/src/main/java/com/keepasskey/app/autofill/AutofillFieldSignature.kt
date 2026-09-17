@@ -86,6 +86,19 @@ object AutofillFieldSignature {
     private fun normalizeDomain(webDomain: String?): String =
         webDomain?.trim()?.lowercase(Locale.ROOT)?.trimEnd('.').orEmpty()
 
-    private fun ByteArray.toHexString(): String =
-        joinToString("") { byte -> "%02x".format(byte) }
+    /**
+     * `ISSUE-P3-170`：查表替代逐字节 `"%02x".format(byte)`——原实现每字节新建一个 `Formatter`
+     * 并解析格式串（32 字节即 32 次），而签名在每次字段屏蔽检查时都会重算。
+     */
+    private fun ByteArray.toHexString(): String {
+        val hex = CharArray(size * 2)
+        for (i in indices) {
+            val value = this[i].toInt() and 0xFF
+            hex[i * 2] = HEX_DIGITS[value ushr 4]
+            hex[i * 2 + 1] = HEX_DIGITS[value and 0x0F]
+        }
+        return String(hex)
+    }
+
+    private val HEX_DIGITS = "0123456789abcdef".toCharArray()
 }

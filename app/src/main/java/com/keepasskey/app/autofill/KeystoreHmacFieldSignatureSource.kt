@@ -36,6 +36,17 @@ class KeystoreHmacFieldSignatureSource @Inject constructor(
         KeyStore.getInstance(ANDROID_KEY_STORE).apply { load(null) }
     }
 
+    /**
+     * `ISSUE-P3-170`：Keystore 密钥句柄缓存。
+     *
+     * `SecretKeyEntry` 只是 TEE 侧**不可导出**密钥的引用，缓存它不落任何密钥材料；
+     * 该别名全仓**无任何删除点**（2026-09-17 检索全仓 `deleteEntry` 确认：命中的全是库内条目 /
+     * 分组删除，与 Keystore 无关），故不存在「外部删键后仍用旧句柄」的失效面；
+     * `init` 失败时清空缓存并按原路径重建一次，覆盖密钥被系统侧失效的极端情形。
+     */
+    @Volatile
+    private var cachedKeyEntry: KeyStore.SecretKeyEntry? = null
+
     override fun hmacSha256(document: ByteArray): ByteArray? {
         val mac = obtainMac() ?: return null
         return try {
@@ -48,18 +59,38 @@ class KeystoreHmacFieldSignatureSource @Inject constructor(
 
     /**
      * 取得已初始化的 Mac 实例；任何一步失败（含无 context、Keystore 异常）返回 null。
-     * 每次调用新建 Mac 实例，避免跨线程共享（`javax.crypto.Mac` 非线程安全）。
+     *
+     * `ISSUE-P3-170`：**密钥句柄走缓存**（`cachedKeyEntry`），`Mac` 仍每次新建
+     * （`javax.crypto.Mac` 非线程安全，且 `getInstance` 属纯 JVM 侧开销、不走 IPC）。
      */
     @Synchronized
     private fun obtainMac(): Mac? {
         if (context == null) return null
+        val entry = cachedKeyEntry ?: loadOrCreateKeyEntry() ?: return null
         return try {
-            if (!keyStore.containsAlias(KEY_ALIAS)) generateKey()
-            val entry = keyStore.getEntry(KEY_ALIAS, null) as? KeyStore.SecretKeyEntry ?: return null
             Mac.getInstance(MAC_ALGORITHM).apply { init(entry.secretKey) }
         } catch (_: Exception) {
+            // 句柄失效（密钥被系统侧删除 / TEE 拒绝）：清缓存，下次调用按原路径重建一次
+            cachedKeyEntry = null
             null
         }
+    }
+
+    /**
+     * 取密钥句柄：命中缓存即返回；缺失时按原路径（`containsAlias` → 必要时 `generateKey` → `getEntry`）
+     * 加载并回填缓存。
+     *
+     * `ISSUE-P3-170`：`containsAlias` 与 `getEntry` 都是 Keystore daemon / TEE 的 **IPC 往返**
+     * （一次自动填充请求会按字段角色调用 1~2 次），而 `SecretKeyEntry` 只是 TEE 侧**不可导出**密钥的
+     * **引用**——缓存它不落任何密钥材料，也不改变「密钥永不导出」的边界（与 `已知工程限界.md` §2.2 的
+     * `ProtectedString` 驻留加密同属「引用/密文驻留」而非明文驻留）。
+     */
+    @Synchronized
+    private fun loadOrCreateKeyEntry(): KeyStore.SecretKeyEntry? = try {
+        if (!keyStore.containsAlias(KEY_ALIAS)) generateKey()
+        (keyStore.getEntry(KEY_ALIAS, null) as? KeyStore.SecretKeyEntry)?.also { cachedKeyEntry = it }
+    } catch (_: Exception) {
+        null
     }
 
     @Synchronized

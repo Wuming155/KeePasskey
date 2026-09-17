@@ -51,7 +51,7 @@
 
 ---
 
-## P3 低危问题、特性接线与体验优化（14 项）
+## P3 低危问题、特性接线与体验优化（13 项）
 
 > 本批为 2026-09-17「降低 CPU / 内存占用」排查的**其余开放结论**。
 > 条目 153 为 **Rust 下沉候选的评估结论**（评估项）；条目 155 为同轮后续批次（§115）开工复核转登。
@@ -84,7 +84,12 @@
 > 逐条字符串物化）——**① 形状短路与 ② `url` 单读已做**；**AC ② 的原文路线（为 `KdbxEntry` 加不解密
 > 判定入口）判定不采用**（评分路径必须要 URL 文本，只读一次已吃掉同一条收益且不新增 API 面），见
 > [`resolved/batches/126-自动填充评分逐条目物化收敛批次.md`](resolved/batches/126-自动填充评分逐条目物化收敛批次.md)。
-> 其余条目（`P3-163` ~ `P3-165` / `P3-168` / `P3-170` / `P3-174` ~ `P3-180`）**仍待整改**。
+> **已闭环（§127 第三档：同一份数据重复计算 ‣ 收口）**：`ISSUE-P3-170`（自动填充请求内的重复工作：
+> 证书摘要 ×2 / Keystore IPC / hex 格式化）——①②③ 已做；「同请求内 `Mac` 复用」与「按包名跨请求
+> 记忆化」两项**判定不做**并留痕，见
+> [`resolved/batches/127-自动填充请求内重复读取收敛批次.md`](resolved/batches/127-自动填充请求内重复读取收敛批次.md)。
+> **第三档（同一份数据被算两遍以上）已全部闭环**（166 / 167① / 169① / 170 / 171）。
+> 其余条目（`P3-163` ~ `P3-165` / `P3-168` / `P3-174` ~ `P3-180`）**仍待整改**。
 
 ### ISSUE-P3-153 Rust 下沉候选的评估结论（**评估项，非整改项**）
 
@@ -185,25 +190,6 @@
 - **核实时间点与方式**：2026-09-17 读 `SyncCycleRunner.kt:127-139`、`SyncConflictController.kt:220-292` 核实。
 - **风险提示**：树级缓存**扩大解密明文的驻留面**，必须按 `§52`（同步解析落盘与内存池擦除边界）同口径登记
   所有权与擦除责任，否则不得实施；本条属高回归面，排在零风险项之后。
-
-### ISSUE-P3-170 自动填充请求内的重复工作（证书摘要 / Keystore IPC / hex 格式化）
-
-- **背景**：① `app/.../autofill/AutofillOriginResolver.kt:41` 与 `AutofillDatasetBuilders.kt:160`
-  对**同一包名**各算一次调用方证书摘要（每次含 `getPackageInfo` + 逐签名者 `MessageDigest.getInstance` +
-  32~96 次 `"%02X".format`）；② `app/.../autofill/KeystoreHmacFieldSignatureSource.kt:53` 每次字段屏蔽检查
-  走 **3 段 Keystore IPC**（`containsAlias` + `getEntry` + `Mac.init`，均为 TEE/daemon 往返），
-  而一次请求至多 2 个角色 ⇒ 2 次三段式 IPC；③ `AutofillFieldSignature.kt:75` 与 `UnlockThrottleIntegrity.kt:39`
-  以 `"%02x".format` 逐字节生成 hex（后者还经 `ByteArray.take(16)` 产生 **16 个装箱 `Byte`**）。
-  同仓 `PasskeyKeyCodec.scalarToHexChars` 已有查表范式。
-- **整改方向**：① 摘要算一次作参数下传（或按包名做请求级 / 短 TTL 记忆化）；② 缓存 Keystore `SecretKey` 句柄，
-  同请求内 `Mac` 复用（`doFinal` 后自动复位）；③ hex 改查表（预置 `CharArray`），去掉 `take` 装箱。
-- **验收标准**：一次填充请求内证书摘要计算次数为 1、Keystore IPC 段数下降（调用计数断言）；
-  屏蔽判定的**签名原文与结果逐字节不变**；锁定态 fail-safe 语义不变。
-- **核实时间点与方式**：2026-09-17 读 `AutofillOriginResolver.kt:30-105`、`AutofillDatasetBuilders.kt:145-165`、
-  `KeystoreHmacFieldSignatureSource.kt:45-70`、`AutofillFieldSignature.kt:70-95`、`UnlockThrottleIntegrity.kt:35-45` 核实。
-- **风险提示**：`UnlockThrottleIntegrity` 的别名派生若改算法会使**存量存在性标记失配**（等于节流复位），
-  故只做「去装箱 + 查表 + 复用 digest」三项纯等价替换；Keystore 句柄缓存必须在失效时重取（`§80` 的
-  `Mac.getInstance(..., "AndroidKeyStore")` 真机失效教训）。
 
 ### ISSUE-P3-174 列表页状态投影缺 `flowOn`（全库投影跑在主线程）
 
