@@ -57,9 +57,16 @@ class AutofillConfirmDeliveryLockTest {
 
     @Test
     fun `确认页必须提供丢弃未决响应的显式路径`() {
+        // ISSUE-P2-88 起取消回传改为**双参**（extras 非空，官方：Android 12 起 extras 为 null 会崩溃），
+        // 故 marker 取调用形态而非实参，避免守卫随实参变化而静默失效
+        val canceledMarker = Regex("""setResult\(\s*RESULT_CANCELED\b""")
         assertTrue(
             "必须显式以 RESULT_CANCELED 丢弃未决响应（而非仅 finish）",
-            activitySource.contains("setResult(RESULT_CANCELED)")
+            canceledMarker.containsMatchIn(activitySource)
+        )
+        assertTrue(
+            "取消回传必须双参且 extras 非空（不得回落到单参 setResult）",
+            activitySource.contains("setResult(RESULT_CANCELED, authenticationCanceledIntent())")
         )
         assertTrue(
             "必须有集中收口的丢弃入口（discardPendingResult）",

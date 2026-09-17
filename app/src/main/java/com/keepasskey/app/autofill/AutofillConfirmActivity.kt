@@ -3,7 +3,9 @@ package com.keepasskey.app.autofill
 import android.content.Intent
 import android.os.Bundle
 import android.view.WindowManager
+import android.view.autofill.AutofillId
 import androidx.activity.compose.setContent
+import androidx.activity.viewModels
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -68,6 +70,14 @@ import javax.inject.Inject
  * 不进入系统认证弹窗，一律走受保护窗口内的手动确认，并要求显式勾选「记住此应用」授权后
  * 方可确认（[AutofillCallerTrustStore] 以「包名 + 签名摘要」持久化，同包名换签名重新视为首次）；
  * 已授权目标走系统认证弹窗时，把包名并入副标题展示。
+ *
+ * ISSUE-P2-88：确认成功后**必须回传真实 `Dataset`**（官方 `Dataset.Builder#setAuthentication` 契约：
+ * 「If you provide a dataset in the result, it will replace the authenticated dataset and will be
+ * immediately filled in」）。此前本页只回传 `RESULT_OK` + 空 extras，框架无值可写（留痕
+ * `onAuthenticationResult(): empty intent`）⇒ 真机实测「确认后输入框仍为空」。
+ * 现于确认成功后按认证 Intent 下发的目标框 id + `EXTRA_ENTRY_ID` 取回凭据，
+ * 构造 `Dataset` 并经 `AutofillManager.EXTRA_AUTHENTICATION_RESULT` 回传；
+ * 取不回凭据 / 无目标框 / 会话锁定一律如实回传取消，绝不构造空数据集谎报成功。
  */
 @AndroidEntryPoint
 class AutofillConfirmActivity : FragmentActivity() {
@@ -100,6 +110,10 @@ class AutofillConfirmActivity : FragmentActivity() {
     @Inject
     lateinit var autofillLastFilledStore: AutofillLastFilledStore
 
+    // ISSUE-P2-88：确认后取回条目凭据的通道——与选择器复用同一 ViewModel，
+    // 使「按条目取用户名 + 按需解密口令 + 字段引用展开」只有一份实现
+    private val pickerViewModel: AutofillPickerViewModel by viewModels()
+
     private var completed = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -115,7 +129,9 @@ class AutofillConfirmActivity : FragmentActivity() {
 
         val credentialTitle = intent.getStringExtra(EXTRA_CREDENTIAL_TITLE).orEmpty()
         // ISSUE-P1-24 AC①：解析调用方归属——包名取自本服务写入的 extra（源自系统结构树，
-        // 非调用方自报，且确认 PendingIntent 为本应用构建的 FLAG_IMMUTABLE，extra 不可被第三方改写）；
+        // 非调用方自报；该 PendingIntent 由本应用创建且只交给系统框架，第三方拿不到、无从改写。
+        // ISSUE-P2-88 起该 PendingIntent 为 FLAG_MUTABLE——那是官方契约要求平台能注入认证参数的
+        // 唯一原因，不改变「extra 只由本应用写入」这一事实）；
         // 域为本服务已通过归属校验的 webDomain（自报且未通过校验的域不会下发候选）；
         // 签名摘要经 PackageManager 现场读取（包可见性受限时为 null，展示侧如实标注）。
         val callerAttribution = resolveCallerAttribution()
@@ -257,32 +273,92 @@ class AutofillConfirmActivity : FragmentActivity() {
             try {
                 handleTotpAfterConfirm()
             } finally {
-                // ISSUE-P3-95：**回传前再次校验**——TOTP 二次动作（含超时等待）期间会话可能刚被
-                // 自动锁定 / 手动锁定；锁定即丢弃未决响应，否则框架仍会把凭据值写入目标表单
-                if (AutofillAuthenticationPolicy.canDeliverAuthResult(vaultRepository.isLocked())) {
-                    // 官方认证数据集语义：RESULT_OK 后框架才会把该数据集的值写入目标表单。
-                    // ISSUE-P2-73 AC①：**必须**双参 `setResult(int, Intent)` 且 extras 非空——
-                    // 官方 `FillResponse.Builder#setAuthentication` 明文要求 Android 12 起
-                    // extras 为 null 会**崩溃**，并点名不得使用单参 `setResult(int)`。
-                    // 本路径不自行构造 Dataset（框架侧已缓存该数据集），故按官方给的等价做法
-                    // 取 Bundle.EMPTY，保持「回传成功、不改动载荷」的既有语义。
-                    setResult(RESULT_OK, Intent().putExtras(Bundle.EMPTY))
-                } else {
-                    AppLog.w(TAG, "会话在确认过程中被锁定，丢弃未决响应（不回传 RESULT_OK）")
-                    setResult(RESULT_CANCELED)
-                }
-                finish()
+                deliverAuthResult()
             }
         }
     }
 
     /**
-     * ISSUE-P3-95：丢弃未决响应——显式以 `RESULT_CANCELED` 结束，令框架不写入任何凭据值。
+     * ISSUE-P2-88：把**真实数据集**回传给框架。
+     *
+     * 官方契约（`Dataset.Builder#setAuthentication` 原文）：认证流程结束后必须把
+     * 「fully populated dataset」经 `AutofillManager.EXTRA_AUTHENTICATION_RESULT` 回传——
+     * 「If you provide a dataset in the result, it will replace the authenticated dataset and
+     * will be immediately filled in」。此前本页只回传 `RESULT_OK` + 空 extras（框架留痕
+     * `onAuthenticationResult(): empty intent`），框架无值可写 ⇒ 真机实测恒不填充。
+     *
+     * 明文只在**显式确认已经成功**（生物识别绑定通过 / 受保护窗口点选）之后、于本方法内组装；
+     * 取不到凭据 / 两个目标框 id 皆空 / 会话已锁定 ⇒ 如实回传取消，**绝不**构造空数据集谎报成功
+     * （`Dataset.Builder#build()` 在没有任何 `setField` 时会抛异常）。
      */
-    private fun discardPendingResult() {
-        setResult(RESULT_CANCELED)
+    private suspend fun deliverAuthResult() {
+        // ISSUE-P3-95：**回传前再次校验**——TOTP 二次动作（含超时等待）期间会话可能刚被
+        // 自动锁定 / 手动锁定；锁定即丢弃未决响应，否则框架仍会把凭据值写入目标表单
+        if (!AutofillAuthenticationPolicy.canDeliverAuthResult(vaultRepository.isLocked())) {
+            AppLog.w(TAG, "会话在确认过程中被锁定，丢弃未决响应（不回传 RESULT_OK）")
+            discardPendingResult()
+            return
+        }
+        val resultIntent = resolveAuthResultIntent()
+        if (resultIntent == null) {
+            AppLog.w(TAG, "确认后无可交付字段，按取消回传（不构造空数据集）")
+            setResult(RESULT_CANCELED, authenticationCanceledIntent())
+            finish()
+            return
+        }
+        setResult(RESULT_OK, resultIntent)
         finish()
     }
+
+    /**
+     * ISSUE-P2-88：按认证 Intent 下发的目标字段 id 与条目标识取回凭据，构造待回传数据集。
+     *
+     * 复用选择器同一条取数路径（[AutofillPickerViewModel.resolveCredentials]）与同一份载荷构造
+     * （[buildAuthenticationResultDataset]）——这两处都是经真机验证可填充的形态。
+     *
+     * @return 无目标框 / 凭据不可用 / 无可写字段时返回 null（调用方按取消处置）
+     */
+    private suspend fun resolveAuthResultIntent(): Intent? {
+        val entryId = intent.getStringExtra(EXTRA_ENTRY_ID)?.takeIf { it.isNotBlank() } ?: return null
+        val usernameId = readAutofillId(EXTRA_TARGET_USERNAME_ID)
+        val passwordId = readAutofillId(EXTRA_TARGET_PASSWORD_ID)
+        if (usernameId == null && passwordId == null) return null
+
+        val credentials = pickerViewModel.resolveCredentials(entryId) ?: return null
+        val credentialTitle = intent.getStringExtra(EXTRA_CREDENTIAL_TITLE).orEmpty()
+        val dataset = buildAuthenticationResultDataset(
+            packageName = packageName,
+            menuTitle = credentials.username.ifBlank { credentialTitle },
+            menuSubtitle = credentialTitle,
+            username = credentials.username,
+            password = credentials.password,
+            usernameId = usernameId,
+            passwordId = passwordId
+        ) ?: return null
+        // 只记录「哪些字段真的有值」，不含任何凭据内容 / 用户名 / 条目名 / 包名
+        AppLog.d(
+            TAG,
+            "确认后回传数据集：用户名有值=${credentials.username.isNotEmpty()}" +
+                " 口令有值=${credentials.password.isNotEmpty()}" +
+                " 用户名框=${usernameId != null} 密码框=${passwordId != null}"
+        )
+        return authenticationResultIntent(dataset)
+    }
+
+    /**
+     * ISSUE-P3-95：丢弃未决响应——显式以 `RESULT_CANCELED` 结束，令框架不写入任何凭据值。
+     *
+     * ISSUE-P2-88：与成功回传同口径走**双参**重载（extras 非空）——官方明文：Android 12 起
+     * 认证结果 Intent 的 extras 为 null 会崩溃。
+     */
+    private fun discardPendingResult() {
+        setResult(RESULT_CANCELED, authenticationCanceledIntent())
+        finish()
+    }
+
+    /** 从认证 Intent 读取目标输入框 id（服务端下发；缺失表示本次请求未识别到该角色） */
+    private fun readAutofillId(key: String): AutofillId? =
+        intent.getParcelableExtra(key, AutofillId::class.java)
 
     /**
      * 确认后的 TOTP 二次动作：复制到受保护剪贴板 与/或 发送验证码通知。
@@ -338,6 +414,16 @@ class AutofillConfirmActivity : FragmentActivity() {
 
         /** ISSUE-P3-42：会话授权上下文——目标域名（可为空串，表示纯按包名匹配） */
         const val EXTRA_GRANT_DOMAIN = "com.keepasskey.app.autofill.EXTRA_GRANT_DOMAIN"
+
+        /**
+         * ISSUE-P2-88：目标**用户名框** id（可为 null——纯密码表单），
+         * 供确认页在用户确认后构造字段 id 正确的回传数据集。
+         * 只传 `AutofillId`（系统结构树下的字段定位符，非敏感），**不**传任何凭据内容。
+         */
+        const val EXTRA_TARGET_USERNAME_ID = "com.keepasskey.app.autofill.EXTRA_CONFIRM_USERNAME_ID"
+
+        /** ISSUE-P2-88：目标**密码框** id（可为 null——纯用户名表单） */
+        const val EXTRA_TARGET_PASSWORD_ID = "com.keepasskey.app.autofill.EXTRA_CONFIRM_PASSWORD_ID"
 
         /** TOTP 二次动作（复制 / 通知）的硬超时预算：超出即放弃，保证填充回传不被拖慢 */
         private const val TOTP_ACTION_TIMEOUT_MS = 500L

@@ -34,8 +34,10 @@ import java.util.Collections
  *   框架把**真实凭据**写入客户端目标输入框（客户端 logcat 自述 `passwordFilled=true`），
  *   且全程客户端 `requestAutofill(` 计数不变——即不依赖任何「显式重请求」补救手法。
  * - **B（已解锁分支选择器路径）**：客户端重新拉起后请求填充 → 经选择器指认条目 → 再次被真实填充。
- * - **C（第二个认证 Activity）**：已解锁候选数据集点选后由框架拉起 [AutofillConfirmActivity]，
- *   其「确认填充」以双参 `setResult` 结束且不崩溃。
+ * - **C（第二个认证 Activity + 真实写入，ISSUE-P2-88 判据）**：已解锁候选数据集点选后由框架拉起
+ *   [AutofillConfirmActivity]，其「确认填充」经 `AutofillManager.EXTRA_AUTHENTICATION_RESULT`
+ *   回传真实 `Dataset`，框架随即把**真实凭据写入客户端两个输入框**
+ *   （客户端自述 `usernameFilled=true passwordFilled=true`），且全程不崩溃。
  *
  * ## 归因纪律（关键，勿放宽）
  *
@@ -410,10 +412,13 @@ class AutofillAuthChainDeviceTest {
             normalizedText(node).contains(CONFIRM_BUTTON_KEY)
         }
         assertNotNull("确认页未找到「$CONFIRM_BUTTON_KEY」按钮", confirmButton)
+        // ISSUE-P2-88 判据基线：**点击前**先记下「客户端自述已填充」的留痕条数，
+        // 否则确认后产生的行会被当成基线吞掉（假红）
+        val filledLinesBaseline = logcatMatchCount(CLIENT_FILLED_TRACE)
+        val confirmRequestsBefore = clientRequestCount()
         evidence.write("点选确认按钮=${probe.click(confirmButton!!)}")
 
-        // A 的契约面（第二个认证 Activity）：确认页以双参 `setResult(RESULT_OK, Intent+extras)`
-        // 结束，且框架接受该结果、全程无崩溃。
+        // A 的契约面（第二个认证 Activity）：确认页以双参 `setResult` 结束，且框架接受该结果、全程无崩溃。
         val confirmSessionBefore = frameworkSessionEvents()
         val confirmFinished = awaitActivityFinished(CONFIRM_ACTIVITY, ACTIVITY_WAIT_MS)
         val crashedAfterConfirm = hasOwnProcessCrash()
@@ -431,20 +436,29 @@ class AutofillAuthChainDeviceTest {
         assertTrue("$CONFIRM_ACTIVITY 未结束（确认流程卡住）", confirmFinished)
         assertFalse("确认路径出现崩溃（FATAL EXCEPTION / ANR）", crashedAfterConfirm)
 
-        // 如实记录**功能面**：当前实现（AC①「数据集回传」经 2026-09-16 用户裁决本轮不实施）只回传
-        // 「成功」而不回传数据集，框架无值可写 ⇒ 目标输入框保持为空。该缺口是 AC① 未实施的功能后果，
-        // **不是** B 的成功路径；B 的成功路径是选择器路径（阶段 6）。
-        val confirmFilled = probe.awaitText(CLIENT_FILLED_TRACE, CONFIRM_FILL_WAIT_MS) != null
+        // ISSUE-P2-88 **判据**：确认页回传的真实 Dataset 被框架写入客户端目标输入框。
+        // 只认「点击确认之后新增的」客户端自述行——认证页进出会令客户端重新 resume，
+        // 若按 contains 判定，阶段 5 / 阶段 6 的旧留痕会造成假绿。
+        val confirmFilledLines = awaitNewLogcatLines(CLIENT_FILLED_TRACE, filledLinesBaseline, CONFIRM_FILL_WAIT_MS)
         evidence.write(
-            "确认路径是否真的把凭据写入目标输入框=$confirmFilled" +
-                if (confirmFilled) {
-                    "（与 AC① 未实施的前提不符，需复核）"
-                } else {
-                    "（框架留痕 `onAuthenticationResult(): empty intent` ⇒ 认证结果未携带数据集，" +
-                        "框架无值可写；该缺口即 AC①「数据集回传」被裁决本轮不实施的功能后果）"
-                }
+            "确认后新增的客户端自述留痕（logcat 原文，共 ${confirmFilledLines.size} 条）:\n" +
+                confirmFilledLines.joinToString("\n")
+        )
+        evidence.write(
+            "确认窗口内客户端主动请求次数 ${confirmRequestsBefore} → ${clientRequestCount()}" +
+                "（确认路径的写入不得依赖客户端重请求）"
         )
         evidence.write("客户端自述（logcat）:\n" + filteredLogcat(AutofillClientActivity.TAG))
+        assertTrue(
+            "确认页在真机上**未**把凭据写入客户端输入框（确认后未新增「$CLIENT_FILLED_TRACE」留痕）" +
+                "——ISSUE-P2-88 修复未生效",
+            confirmFilledLines.isNotEmpty()
+        )
+        assertTrue(
+            "确认后客户端自述为「已填充」但账号不是播种账号——疑为把别处的旧值误判为本次填充",
+            confirmFilledLines.any { it.contains("username=[${AutofillSeedContract.USERNAME}]") }
+        )
+        screenshot("ac3-08-client-filled-after-confirm")
 
         evidence.section("结论")
         evidence.write(
@@ -461,8 +475,9 @@ class AutofillAuthChainDeviceTest {
                 "$filled"
         )
         evidence.write(
-            "A/第二个认证 Activity：框架拉起 $CONFIRM_ACTIVITY，其确认结果被接受且无崩溃；" +
-                "实际写入未发生（ISSUE-P2-86 阶段二待实施）= 已实测并如实记录"
+            "C（ISSUE-P2-88 判据）：框架拉起 $CONFIRM_ACTIVITY，其确认结果携带实时构造的真实 Dataset，" +
+                "客户端两个输入框被真实凭据写入（客户端自述 usernameFilled=true passwordFilled=true）=" +
+                confirmFilledLines.isNotEmpty()
         )
         evidence.write(
             "归因测量（与既有 KDoc 前提的差异）：框架自行重发 onFillRequest=$frameworkRedispatch" +
@@ -470,8 +485,7 @@ class AutofillAuthChainDeviceTest {
                 "已在 ISSUE-P2-86 中纠正"
         )
         evidence.write(
-            "未覆盖边界：① 确认路径的实际写入（ISSUE-P2-86 阶段二）；" +
-                "② webDomain 归属路径（本用例客户端为原生应用，不产生 webDomain）"
+            "未覆盖边界：webDomain 归属路径（本用例客户端为原生应用，不产生 webDomain）"
         )
     }
 
@@ -548,6 +562,32 @@ class AutofillAuthChainDeviceTest {
             SystemClock.sleep(POLL_MS * 2)
         }
         return false
+    }
+
+    /** 全量 logcat 中包含 [needle] 的行数（用于「点击某动作后是否新增留痕」的基线取值） */
+    private fun logcatMatchCount(needle: String): Int =
+        logcatDump().lines().count { it.contains(needle) }
+
+    /**
+     * 等待「包含 [needle] 的留痕条数比 [baseline] 多」，返回**新增的**那些行。
+     *
+     * 与 [awaitNewLogcatLine] 的区别：按**条数**判定，故不受「新增行与旧行内容逐字相同」
+     * 影响（客户端每次填充的账号/口令值本来就一样，只有 logcat 前缀时间戳不同）。
+     * 基线必须在触发动作**之前**取得——认证 Activity 进出会令客户端重新 resume，
+     * 若在触发之后取基线，本次填充产生的行会被当成基线而漏判（假红）。
+     */
+    private fun awaitNewLogcatLines(needle: String, baseline: Int, timeoutMs: Long): List<String> {
+        val deadline = SystemClock.uptimeMillis() + timeoutMs
+        while (SystemClock.uptimeMillis() < deadline) {
+            if (logcatMatchCount(needle) > baseline) {
+                // 再等一拍，把同一次填充的后续状态行（客户端 ticker 每秒一行）一并收进证据
+                SystemClock.sleep(POLL_MS * 2)
+                val matches = logcatDump().lines().filter { it.contains(needle) }
+                return matches.takeLast(matches.size - baseline)
+            }
+            SystemClock.sleep(POLL_MS)
+        }
+        return emptyList()
     }
 
     /** 客户端主动请求填充的次数（归因用：区分「框架重发」与「客户端又请求」） */
@@ -723,7 +763,7 @@ class AutofillAuthChainDeviceTest {
         /** 归因测量窗口：客户端不请求的前提下，框架自行重发的等待上限 */
         const val REDISPATCH_WAIT_MS = 25_000L
 
-        /** 确认路径的功能面观测窗口（当前实现下预期不填充） */
+        /** 确认路径的写入观测窗口（ISSUE-P2-88 判据；客户端 ticker 每秒一行，8 s 足够） */
         const val CONFIRM_FILL_WAIT_MS = 8_000L
 
         /** 设备侧截图输出目录（shell 身份可写） */

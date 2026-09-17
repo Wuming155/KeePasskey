@@ -203,11 +203,16 @@ internal suspend fun KeePasskeyAutofillService.appendUnlockedDatasets(
         }
     )
 
-    // ISSUE-P2-86 阶段二实测（2026-09-17）：确认路径同样改为「FLAG_MUTABLE + 无基 Intent flags」
-    // 后，真机**仍未写入**目标表单 ⇒「认证 PendingIntent 可变性 / 基 Intent flags」**不是**
-    // 确认路径的决定变量，故此处**保持原构造**（不做未经证实的改动）。
+    // ISSUE-P2-88：官方契约（`Dataset.Builder#setAuthentication` 原文）对认证数据集有**两条**强制要求：
+    // ① 认证 PendingIntent 不得不可变（平台要注入认证参数）⇒ `FLAG_MUTABLE`；
+    // ② 认证结束后必须经 `AutofillManager.EXTRA_AUTHENTICATION_RESULT` 回传「fully populated
+    //    dataset」，框架才会「replace the authenticated dataset and immediately fill in」。
+    // 本路径原先两条都违反（IMMUTABLE + 确认页只回传成功而不回传数据集）⇒ 真机恒不写入。
+    // 现与选择器入口（[buildPickerDataset]，真机实测可用）**同构造**：无 activity flag +
+    // 随认证 Intent 下发目标字段 id，供确认页确认后按条目取回凭据并构造真实 Dataset 回传。
     val confirmIntent = Intent(this, AutofillConfirmActivity::class.java).apply {
-        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        putExtra(AutofillConfirmActivity.EXTRA_TARGET_USERNAME_ID, usernameId)
+        putExtra(AutofillConfirmActivity.EXTRA_TARGET_PASSWORD_ID, passwordId)
     }
 
     // ISSUE-P2-73 AC③：设备侧核对「已解锁分支命中了几个自动匹配候选」的调试留痕
@@ -272,9 +277,10 @@ internal suspend fun KeePasskeyAutofillService.appendUnlockedDatasets(
                 ).putExtra(AutofillConfirmActivity.EXTRA_ENTRY_ID, entryIdHex)
                     .putExtra(AutofillConfirmActivity.EXTRA_GRANT_PACKAGE, callingPkg)
                     .putExtra(AutofillConfirmActivity.EXTRA_GRANT_DOMAIN, webDomain.orEmpty()),
-                // ISSUE-P2-86 阶段二实测：改为 FLAG_MUTABLE 后确认路径**仍未写入** ⇒
-                // 该 flag 不是本路径的决定变量，保持原构造（不扩大攻击面，见接线守卫）
-                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+                // ISSUE-P2-88：官方明文「Do not make the provided pending intent immutable ... as the
+                // platform needs to fill in the authentication arguments」——认证 PendingIntent 必须可变，
+                // 与该契约一致（接线守卫按此强制：本文件不得出现不可变标志）
+                PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
             )
             dsBuilder.setAuthentication(confirmPendingIntent.intentSender)
         }

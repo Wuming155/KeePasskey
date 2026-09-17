@@ -1,13 +1,8 @@
 package com.keepasskey.app.autofill
 
 import android.os.Bundle
-import android.service.autofill.Dataset
-import android.service.autofill.Field
-import android.service.autofill.Presentations
 import android.view.WindowManager
 import android.view.autofill.AutofillId
-import android.view.autofill.AutofillManager
-import android.view.autofill.AutofillValue
 import android.widget.RemoteViews
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
@@ -35,7 +30,8 @@ import javax.inject.Inject
  * 场景下可能零候选，用户此前无任何补救路径。本 Activity 提供全库搜索与手动选择兜底。
  *
  * 回传机制（官方语义）：选择器以认证数据集方式挂入 `FillResponse`；用户选中后本 Activity
- * 构建真实 [Dataset] 并经 `AutofillManager.EXTRA_AUTHENTICATION_RESULT` 回传，
+ * 构建真实 `android.service.autofill.Dataset` 并经
+ * `android.view.autofill.AutofillManager.EXTRA_AUTHENTICATION_RESULT` 回传，
  * 由框架完成填充——**数据集只在用户显式选中并确认后才携带明文**。
  *
  * 安全加固（对齐 AutofillConfirmActivity）：FLAG_SECURE 防截屏录屏 +
@@ -190,44 +186,27 @@ class AutofillPickerActivity : FragmentActivity() {
         // 包名 / 应用名 / 签名摘要，见 ISSUE-P2-70），故此处写入首次绑定——它是 `android://`
         // 维度后续自动命中的唯一前提，也是未绑定调用方唯一的补救路径。
         bindCallerForPackageDimension()
-        val usernameId = readAutofillId(EXTRA_USERNAME_ID)
-        val passwordId = readAutofillId(EXTRA_PASSWORD_ID)
-
-        val views = RemoteViews(packageName, R.layout.autofill_dataset_item).apply {
-            setTextViewText(
-                R.id.tv_username,
-                credentials.username.ifBlank { getString(R.string.autofill_picker_title) }
-            )
-            setTextViewText(R.id.tv_subtitle, getString(R.string.autofill_picker_title))
+        // 载荷构造已收敛到 [buildAuthenticationResultDataset]（与二次确认页共用同一份，
+        // 避免同语义两处实现再次漂移成「只回传成功、不回传数据集」）
+        val dataset = buildAuthenticationResultDataset(
+            packageName = packageName,
+            menuTitle = credentials.username.ifBlank { getString(R.string.autofill_picker_title) },
+            menuSubtitle = getString(R.string.autofill_picker_title),
+            username = credentials.username,
+            password = credentials.password,
+            usernameId = readAutofillId(EXTRA_USERNAME_ID),
+            passwordId = readAutofillId(EXTRA_PASSWORD_ID)
+        )
+        if (dataset == null) {
+            // 无可写字段（无目标框 / 凭据为空）：如实取消，绝不回传空数据集谎报成功
+            AppLog.w(TAG, "选中条目没有任何可交付字段，按取消回传")
+            setResult(RESULT_CANCELED, authenticationCanceledIntent())
+            finish()
+            return
         }
-
-        val dataset = Dataset.Builder(
-            Presentations.Builder()
-                .setMenuPresentation(views)
-                .setDialogPresentation(views)
-                .build()
-        ).apply {
-            if (usernameId != null && credentials.username.isNotEmpty()) {
-                setField(
-                    usernameId,
-                    Field.Builder().setValue(AutofillValue.forText(credentials.username)).build()
-                )
-            }
-            if (passwordId != null && credentials.password.isNotEmpty()) {
-                setField(
-                    passwordId,
-                    Field.Builder().setValue(AutofillValue.forText(credentials.password)).build()
-                )
-            }
-        }.build()
-
-        setResult(RESULT_OK, intentOfResult(dataset))
+        setResult(RESULT_OK, authenticationResultIntent(dataset))
         finish()
     }
-
-    private fun intentOfResult(dataset: Dataset) =
-        android.content.Intent()
-            .putExtra(AutofillManager.EXTRA_AUTHENTICATION_RESULT, dataset)
 
     /**
      * ISSUE-P2-46：写入调用方「首次绑定」（包名 + 主签名摘要），供 `android://` 维度后续放行。

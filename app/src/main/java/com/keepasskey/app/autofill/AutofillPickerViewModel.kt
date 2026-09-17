@@ -81,13 +81,18 @@ class AutofillPickerViewModel @Inject constructor(
      * - 返回值为 String 是 Android 自动填充 API 的硬约束（[android.view.autofill.AutofillValue]
      *   只接受 CharSequence），不可擦除 String 的既有缺口见 ISSUE-P2-15——
      *   其生命周期被压缩到「构建 Dataset → 回传 → 出栈」这一段，不落任何状态流/日志/成员变量。
+     *
+     * ISSUE-P2-88：用户名**不得**只依赖本 VM 的条目缓存——缓存由 `init` 异步填充，而本 VM 是
+     * 按需创建的（二次确认页在用户点「确认填充」时才首次访问它），那一刻缓存尚未就绪，
+     * 会让回传数据集缺用户名（真机实测：口令写入成功、账号框仍为空）。故缓存未命中时
+     * 按需向仓库取一次单条快照；锁定态下仓库同为空读 / 抛错，按空用户名降级（fail-safe 不变）。
      */
     suspend fun resolveCredentials(entryId: String): Credentials? {
         if (entryId.isBlank()) return null
         // ISSUE-P2-52：用户名读取 fail-safe——锁定竞态窗口内条目可能已清零
         // （readString 抛 IllegalStateException），按空用户名降级而非崩溃
         val username = runCatching {
-            _entries.value
+            cachedUsername(entryId) ?: vaultRepository.getKdbxEntries()
                 .firstOrNull { it.id.toHexString() == entryId }
                 ?.userName
                 .orEmpty()
@@ -114,6 +119,13 @@ class AutofillPickerViewModel @Inject constructor(
         }
         return Credentials(username = username, password = password)
     }
+
+    /**
+     * 缓存内查用户名（命中返回该用户名，**未命中返回 null**——注意与「命中但用户名为空」区分，
+     * 后者返回空串，不得触发仓库回查）。
+     */
+    private fun cachedUsername(entryId: String): String? =
+        _entries.value.firstOrNull { it.id.toHexString() == entryId }?.userName
 
     data class Credentials(val username: String, val password: String) {
         /**
