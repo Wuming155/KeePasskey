@@ -26,6 +26,38 @@ private const val DEFAULT_IS_EXPANDED = true
 private const val DEFAULT_QUALITY_CHECK = true
 
 /**
+ * 解析 `<Tags>` 文本为标签列表（Group / Entry 共用，ISSUE-P3-181）：按 `;` 切分、逐段 `trim()`、
+ * 丢弃空段，**单趟扫描**直接产出最终列表。
+ *
+ * 与 `raw?.split(";")?.map { it.trim() }?.filter { it.isNotEmpty() }.orEmpty()` 逐项等价：
+ * - `split(";")` 为**字面量**分隔符、不限段数，恰好给出相邻分隔符之间（以及末尾分隔符之后的**空段**）
+ *   的全部子串——连续分号与尾随分号产生的空段一律被过滤，故不产生任何元素；
+ * - 空串与纯空白段同理被丢弃（`trim()` 后为空）；
+ * - `trim()` 同为 Kotlin 默认的 `Char.isWhitespace()` 语义（不传谓词时二者是同一实现）。
+ *
+ * 原实现对每个 Group / Entry 各产生 3 个中间集合（切分结果、trim 结果、过滤结果），此处仅累积最终列表。
+ *
+ * **可见性**：由 `private` 放宽为 `internal`，供等价性用例（`KdbxTagsParseEquivalenceTest`）
+ * 与旧表达式逐项对拍；语义与调用面不变（本仓同族先例：`KdbxEntryMerger.isModified`）。
+ */
+internal fun parseTagsText(raw: String?): List<String> {
+    if (raw == null) return emptyList()
+    val tags = mutableListOf<String>()
+    var start = 0
+    var index = 0
+    // index == raw.length 时结算最后一段（对应 split 的尾段，可能是空串）
+    while (index <= raw.length) {
+        if (index == raw.length || raw[index] == ';') {
+            val segment = raw.substring(start, index).trim()
+            if (segment.isNotEmpty()) tags.add(segment)
+            start = index + 1
+        }
+        index++
+    }
+    return tags
+}
+
+/**
  * KDBX XML <Group> 节点流式解析节点（递归下降，含 <Entry> / <History> / <Times> / <AutoType> 子树）。
  * 字段缺省语义与原 DOM 解析逐一对齐；官方与主流实现均保证 UUID 先于子节点出现，
  * 因此子元素通过 [LateRef] 在闭合时取父 UUID。
@@ -90,11 +122,8 @@ internal class GroupNode(
     }
 
     override fun end() {
-        // 标签解析语义与条目 <Tags> 一致（分号分隔 + trim + 去空）
-        val tags = tagsStr?.split(";")
-            ?.map { it.trim() }
-            ?.filter { it.isNotEmpty() }
-            .orEmpty()
+        // 标签解析语义与条目 <Tags> 一致（分号分隔 + trim + 去空），共用单趟扫描实现（ISSUE-P3-181）
+        val tags = parseTagsText(tagsStr)
 
         onDone(
             KdbxGroup(
@@ -179,10 +208,8 @@ internal class EntryNode(
     }
 
     override fun end() {
-        val tags = tagsStr?.split(";")
-            ?.map { it.trim() }
-            ?.filter { it.isNotEmpty() }
-            .orEmpty()
+        // 与分组 <Tags> 共用同一单趟扫描实现（ISSUE-P3-181）
+        val tags = parseTagsText(tagsStr)
 
         onDone(
             KdbxEntry(

@@ -39,17 +39,8 @@ internal object WebDavPropfindParser {
         return try {
             // L2 整改：与 KdbxXmlParser 同级的 XXE 纵深防御——禁用 DTD 与外部实体，
             // 防御恶意/被劫持的 WebDAV 服务端返回带 XXE payload 的 PROPFIND 响应
-            val factory = DocumentBuilderFactory.newInstance().apply {
-                isNamespaceAware = true
-                // ISSUE-P3-10 子项 3：逐项设置并留痕——原 runCatching 空吞使「加固特性未生效」
-                // 完全不可观测，且首项失败会连带后续三项根本不被尝试
-                applyXxeGuardFeature(this, "http://apache.org/xml/features/disallow-doctype-decl", true)
-                applyXxeGuardFeature(this, "http://xml.org/sax/features/external-general-entities", false)
-                applyXxeGuardFeature(this, "http://xml.org/sax/features/external-parameter-entities", false)
-                applyXxeGuardFeature(this, "http://apache.org/xml/features/nonvalidating/load-external-dtd", false)
-                isXIncludeAware = false
-                isExpandEntityReferences = false
-            }
+            // ISSUE-P3-172：工厂改为按线程缓存（原实现每次响应都重建并逐项设 6 个特性）
+            val factory = hardenedFactory()
             val builder = factory.newDocumentBuilder()
             val doc = builder.parse(xml.byteInputStream())
             val root = doc.documentElement
@@ -117,6 +108,9 @@ internal object WebDavPropfindParser {
      * 若因此判定 PROPFIND 响应非法，则一个实现差异会让所有 WebDAV 同步直接失败；
      * 且 `isExpandEntityReferences = false` 与「不加载外部 DTD」的默认语义仍在，
      * 解析失败路径另有外层 catch 留痕。故保留「尽力加固 + 可观测告警」语义。
+     *
+     * ISSUE-P3-172：加固结果取决于平台能力（进程级常量），故告警现只在每线程首次
+     * 建工厂时出现一次；原实现每次响应都重新探测一遍。
      */
     private fun applyXxeGuardFeature(factory: DocumentBuilderFactory, feature: String, enabled: Boolean) {
         try {
@@ -126,18 +120,52 @@ internal object WebDavPropfindParser {
         }
     }
 
+    /**
+     * ISSUE-P3-172：加固后的 DOM 工厂**按线程**构建一次。
+     *
+     * `DocumentBuilderFactory` 除 `newDocumentBuilder()` 外的实例状态不可并发共享，
+     * 故用 `ThreadLocal` 而非进程级单例——两种写法都只消除「每次响应重建工厂 + 逐项设 6 个
+     * 特性」的开销，不改变加固语义；每次解析仍取全新的 `DocumentBuilder`。
+     */
+    private val hardenedFactories = ThreadLocal.withInitial {
+        DocumentBuilderFactory.newInstance().apply {
+            isNamespaceAware = true
+            // ISSUE-P3-10 子项 3：逐项设置并留痕——原 runCatching 空吞使「加固特性未生效」
+            // 完全不可观测，且首项失败会连带后续三项根本不被尝试
+            applyXxeGuardFeature(this, "http://apache.org/xml/features/disallow-doctype-decl", true)
+            applyXxeGuardFeature(this, "http://xml.org/sax/features/external-general-entities", false)
+            applyXxeGuardFeature(this, "http://xml.org/sax/features/external-parameter-entities", false)
+            applyXxeGuardFeature(this, "http://apache.org/xml/features/nonvalidating/load-external-dtd", false)
+            isXIncludeAware = false
+            isExpandEntityReferences = false
+        }
+    }
+
+    private fun hardenedFactory(): DocumentBuilderFactory = hardenedFactories.get()
+
+    /** 远端时间戳的三种常见形态（RFC 1123 / ISO-8601 秒 / ISO-8601 毫秒，均为 GMT） */
+    private val HTTP_DATE_PATTERNS = listOf(
+        "EEE, dd MMM yyyy HH:mm:ss zzz",
+        "yyyy-MM-dd'T'HH:mm:ss'Z'",
+        "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"
+    )
+
+    /**
+     * ISSUE-P3-172：日期格式按线程构建一次后复用。
+     *
+     * `SimpleDateFormat` 非线程安全，故按线程持有、在本方法内串行复用（顺序与「首个可解析
+     * 的格式胜出」语义均与原来逐次新建时一致）。
+     */
+    private val httpDateFormats = ThreadLocal.withInitial {
+        HTTP_DATE_PATTERNS.map { pattern ->
+            SimpleDateFormat(pattern, Locale.US).apply { timeZone = TimeZone.getTimeZone("GMT") }
+        }
+    }
+
     fun parseHttpDate(dateStr: String): Long {
         if (dateStr.isBlank()) return 0L
-        val formats = listOf(
-            "EEE, dd MMM yyyy HH:mm:ss zzz",
-            "yyyy-MM-dd'T'HH:mm:ss'Z'",
-            "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"
-        )
-        for (format in formats) {
+        for (sdf in httpDateFormats.get()) {
             try {
-                val sdf = SimpleDateFormat(format, Locale.US).apply {
-                    timeZone = TimeZone.getTimeZone("GMT")
-                }
                 val date = sdf.parse(dateStr)
                 if (date != null) return date.time
             } catch (_: Exception) {}

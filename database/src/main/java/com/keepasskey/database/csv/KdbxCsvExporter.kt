@@ -35,7 +35,7 @@ object KdbxCsvExporter {
         try {
             writeRow(writer, HEADER)
             // 根分组自身的条目落至根（空路径）；子分组条目携带自顶向下（不含根分组名）的路径
-            writeGroup(writer, database.rootGroup, emptyList())
+            writeGroup(writer, database.rootGroup, ArrayDeque())
             writer.flush()
         } finally {
             writer.close()
@@ -43,14 +43,30 @@ object KdbxCsvExporter {
         return buffer.toByteArray()
     }
 
-    private fun writeGroup(writer: Writer, group: KdbxGroup, groupPath: List<String>) {
+    /**
+     * 递归写出分组：当前路径以**栈**维护（进组 `addLast`、出组 `removeLast`），并在**组级**拼一次
+     * 路径字符串供本组全部条目复用（ISSUE-P3-181）。
+     *
+     * 原实现每下钻一层就 `groupPath + child.name` 复制一份父路径，`writeEntry` 又对每条目
+     * `joinToString(SEPARATOR)` 重拼一次 ⇒ O(条目数 × 深度) 次字符复制；改为路径栈后每层只 push/pop
+     * 一个分组名，路径拼装次数与分组数同阶；组内条目的路径字符串按引用共享（[String] 不可变但可复用）。
+     *
+     * 产物逐字节等价：根分组仍以**空栈**进入（空栈 join 得空串，与原 `emptyList()` 一致，根级条目分组列为空），
+     * 子分组路径仍是自顶向下、不含根分组名、以 [GROUP_SEPARATOR] 拼接——分隔符常量与 `joinToString`
+     * 的拼装规则均未改动，仅减少调用次数。
+     */
+    private fun writeGroup(writer: Writer, group: KdbxGroup, path: ArrayDeque<String>) {
+        val groupPath = path.joinToString(GROUP_SEPARATOR.toString())
         group.entries.forEach { writeEntry(writer, it, groupPath) }
         group.subgroups.forEach { child ->
-            writeGroup(writer, child, groupPath + child.name)
+            path.addLast(child.name)
+            writeGroup(writer, child, path)
+            path.removeLast()
         }
     }
 
-    private fun writeEntry(writer: Writer, entry: KdbxEntry, groupPath: List<String>) {
+    /** ISSUE-P3-181：路径字符串由 [writeGroup] 在组级拼好传入，此处不再逐条目重拼。 */
+    private fun writeEntry(writer: Writer, entry: KdbxEntry, groupPath: String) {
         writeRow(
             writer,
             listOf(
@@ -59,7 +75,7 @@ object KdbxCsvExporter {
                 entry.userName,
                 entry.password?.readString().orEmpty(),
                 entry.notes,
-                groupPath.joinToString(GROUP_SEPARATOR.toString())
+                groupPath
             )
         )
     }

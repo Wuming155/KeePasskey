@@ -51,9 +51,12 @@ internal object KdbxKeyFile {
             return extractFromXmlKeyFile(raw)
         }
 
-        val compact = stripWhitespace(raw)
-        if (compact.size == HEX_KEY_TEXT_LENGTH && compact.all { isHexDigit(it) }) {
-            return decodeHex(compact)
+        // ISSUE-P3-181：原实现无条件 stripWhitespace(raw)——对「任意二进制密钥文件」这一常见分支
+        // （每次解锁与每次保存都走）白白复制整份文件后才落入 SHA-256。现改为先单趟探测
+        // 「非空白字节恰 64 且全为 hex」，命中才按需构造 compact 副本；判定优先级与空白字符集合不变。
+        val compactHex = compactHexKeyOrNull(raw)
+        if (compactHex != null) {
+            return decodeHex(compactHex)
         }
         return HashUtil.sha256(raw)
     }
@@ -172,6 +175,34 @@ internal object KdbxKeyFile {
             }
         }
         return if (n == raw.size) out else out.copyOf(n)
+    }
+
+    /**
+     * 「去空白后恰为 64 位十六进制文本」探测（ISSUE-P3-181）：命中返回 compact 副本，否则返回 null。
+     *
+     * 原实现在 [extractKey] 中**无条件**调用 [stripWhitespace]：任意密钥文件（含最常见的
+     * 「任意二进制文件 → 整文件 SHA-256」分支）都要先复制一整份字节数组，之后才判定 hex 形态。
+     * 此处等价改写为「单趟探测 + 命中才构造」：空白判定沿用 [stripWhitespace] 的
+     * `b.toInt().toChar().isWhitespace()`（逐字节同一表达式，故空白字符集合逐字不变），
+     * hex 判定沿用同一 [isHexDigit]，于是
+     * 「非空白字节数恰为 64 且全为 hex」⇔ 旧 `compact.size == 64 && compact.all { isHexDigit(it) }`，
+     * 两分支走向与产物完全一致；探测到第 65 个非空白字节即可提前返回（该情形旧实现必然落入 SHA-256）。
+     */
+    private fun compactHexKeyOrNull(raw: ByteArray): ByteArray? {
+        var count = 0
+        for (b in raw) {
+            if (b.toInt().toChar().isWhitespace()) continue
+            if (count >= HEX_KEY_TEXT_LENGTH || !isHexDigit(b)) return null
+            count++
+        }
+        if (count != HEX_KEY_TEXT_LENGTH) return null
+        // 仅在命中该形态时分配并填充 compact（第二次遍历只为拷贝，不再做判定）
+        val compact = ByteArray(HEX_KEY_TEXT_LENGTH)
+        var n = 0
+        for (b in raw) {
+            if (!b.toInt().toChar().isWhitespace()) compact[n++] = b
+        }
+        return compact
     }
 
     /** 在 [raw] 自 [from] 起查找 ASCII 字节 [b]，找不到返回 -1 */

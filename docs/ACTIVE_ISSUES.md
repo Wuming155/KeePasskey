@@ -63,7 +63,7 @@
 
 ---
 
-## P3 低危问题、特性接线与体验优化（24 项）
+## P3 低危问题、特性接线与体验优化（20 项）
 
 > 本批为 2026-09-17「降低 CPU / 内存占用」排查的**其余开放结论**。
 > 条目 153 为 **Rust 下沉候选的评估结论**（评估项）；条目 155 为同轮后续批次（§115）开工复核转登。
@@ -77,6 +77,11 @@
 > **口径声明（须先读）**：该批全部结论均为**静态代码结构推导**（复杂度与调用频率），**无任何性能实测数据**
 > ⇒ **不得**把下列条目读作「已测得百分比收益」；整改验收标准一律按「不再产生某类工作」的结构性判据给出。
 > 批内按「正确性已单列 `P2-91` → 高杠杆 → 低影响」顺序编号，编号续用不复用。
+> **已闭环（§121 第一档：零风险局部项）**：`ISSUE-P3-162`（分组索引平方级投影）、
+> `ISSUE-P3-172`（①②③ 循环内新建重对象；**④ 已裁决不实施**，理由登记 [`已知工程限界.md`](architecture/已知工程限界.md) §9）、
+> `ISSUE-P3-173`（OTP Base32 装箱与线性查表）、`ISSUE-P3-181`（密钥文件 / CSV / 标签解析常数因子）——见
+> [`resolved/batches/121-零风险局部项与守卫用例批次.md`](resolved/batches/121-零风险局部项与守卫用例批次.md)。
+> 其余条目（`P3-160` / `161` / `163` ~ `171` / `174` ~ `180`）**仍待整改**。
 
 ### ISSUE-P3-153 Rust 下沉候选的评估结论（**评估项，非整改项**）
 
@@ -147,19 +152,6 @@
 - **整改方向**：先按 `parentGroupId` `groupBy` 一次，单趟递归中按当前组 id 取对应条目列表替换，降为 `O(G + k)`。
 - **验收标准**：冲突解决结果与逐条实现等价；新增用例断言「仅目标分组链上的节点被复制」。
 - **核实时间点与方式**：2026-09-17 读 `SyncConflictController.kt:95-124` 与 `:332-349` 实际内容核实。
-
-### ISSUE-P3-162 分组索引缺失导致的平方级投影（面包屑 / 回收站子树 / 路径批量解析）
-
-- **背景**：三处同族问题——① `app/.../ui/screens/vault/VaultListProjection.kt:92` 面包屑
-  `while` 循环内 `allGroups.find { it.id == curId }`（每层一次全表扫描）并用 `breadcrumbs.add(0, grp)` 头插；
-  ② 同文件 `:100` 回收站集合用递归 `allGroups.filter { it.parentId == parentId }`（每个节点重扫全表）；
-  ③ `app/.../ui/screens/vault/GroupPathPresenter.kt:41` 的 `pathsOf` 对每个分组各调一次 `fullPathOf`，
-  而后者首行即 `groups.associateBy { it.id }` ⇒ G 次 Map 构建。三处均在**每次状态投影**执行。
-- **整改方向**：投影入口建一次 `associateBy { it.id }` + `groupBy { it.parentId }` 并下传；
-  面包屑改查表（`ArrayDeque.addFirst` 或尾部追加后 `reversed()`）；回收站改按 `childrenByParent` 一次 BFS。
-- **验收标准**：`pathsOf` 内部不再有循环内 `associateBy`；面包屑不再线性查找；回收站集合构建为单趟；
-  行为等价用例（深层树 + 环状父链 + 回收站多层后代）全绿。
-- **核实时间点与方式**：2026-09-17 读 `VaultListProjection.kt:78-147`、`GroupPathPresenter.kt:20-42` 实际内容核实。
 
 ### ISSUE-P3-163 字段引用引擎按每个引用重建整库扁平列表
 
@@ -293,41 +285,6 @@
   `PasskeyData.kt:200-230` 核实。
 - **风险提示**：自动填充候选匹配涉及**调用方归属与签名绑定判定**，只做「先算 / 后算」的等价搬移，不得改变判定顺序与放行面。
 
-### ISSUE-P3-172 循环内新建重对象（正则 / XML 工厂 / 日期格式 / `Mac`）
-
-- **背景**：四处同族问题——① `app/.../autofill/AutofillFieldScanner.kt:302` 的
-  `value.split(Regex("[^\\p{L}\\p{N}]+"))` 在**函数体内**现编译正则，而 `scan` 对每个节点最多触发 4 次
-  ⇒ 30 节点登录页约 100 次编译/请求，与系统 assist 超时预算直接竞争；
-  ② `sync/.../webdav/WebDavPropfindParser.kt:42` 每次响应新建 `DocumentBuilderFactory`（逐项设 6 个安全特性），
-  `:131` 每次日期解析新建 **3 个 `SimpleDateFormat`**，而该方法按每个远端路径调用一次；
-  ③ `database/.../xml/KdbxXmlParser.kt:166` 每次打开库都重新探测并实例化约 5 个
-  `SAXParserFactory` + `SAXParser`（平台特性支持是**进程级常量**）；
-  ④ `core/.../otp/OtpEngine.kt:75` 每个验证码一次 `Mac.getInstance`（跨周期批量取码时按条目数放大）。
-- **整改方向**：① 提为 object 级 `private val`；② 缓存 `factory`（注意 `DocumentBuilder` 非线程安全，只缓存工厂）
-  与日期格式常量（`DateTimeFormatter` 或 `ThreadLocal<SimpleDateFormat>`）；
-  ③ 加固特性链结果改 `by lazy` 进程级缓存（保留「特性不可用时降级告警」原语义，并顺带消掉每次开库的 WARNING 噪声）；
-  ④ `Mac` 按算法持有并 `reset()` 复用。
-- **验收标准**：四处均以调用计数或结构断言锁定「不再逐次新建」；XML 加固语义、日期解析等价性
-  （含 3 种格式与失败回退）、OTP 码值与 RFC 向量逐项不变。
-- **核实时间点与方式**：2026-09-17 主控直读 `AutofillFieldScanner.kt:290-305` 并读
-  `WebDavPropfindParser.kt:40-145`、`KdbxXmlParser.kt:150-200`、`OtpEngine.kt:60-90` 核实。
-- **风险提示**：`KdbxXmlParser` 的加固特性探测是 `ISSUE-P1-12` / `§83`（DTD 拦截）的证据依据，
-  缓存化**不得**删掉降级告警，也**不得**改变「探测失败即降级」的语义。
-
-### ISSUE-P3-173 OTP 引擎的 Base32 解码装箱与线性查表
-
-- **背景**：`core/.../otp/OtpEngine.kt:123`（`Base32Decoder.decode`）输出缓冲为 `mutableListOf<Byte>()`，
-  每个输出字节**装箱**并在末尾 `toByteArray()` 再复制一次；`:128` 以
-  `ALPHABET.indexOf(upper)` 查表，而 `String.indexOf(Char)` 是**每字符 32 步线性扫描**（`O(32n)`）；
-  `:86` 用 `10.0.pow(digits).toInt()` 取模（浮点路径，`digits=10` 时会饱和到 `Int.MAX_VALUE`）。
-- **整改方向**：字母表改 `IntArray(128/256)` 反查表（非法字符置 -1）；输出改预分配 `ByteArray`
-  （Base32 输出长度 `n*5/8` 可预知）或 `ByteArrayOutputStream`；`10^digits` 改 `POW10` 常量表，
-  把 RFC 4226「模 10^digits」的整数语义显式化。
-- **验收标准**：RFC 4648 向量 + 宽容策略（忽略 `=`、空白、字母表外字符）逐例不变；
-  新增用例断言解码路径不再产生装箱（或直接以 `ByteArray` 长度契约锁定）；
-  护城河式断言：`decode` 仍返回**调用方独占的新数组**（`TASK-46` 借用语义）。
-- **核实时间点与方式**：2026-09-17 主控直读 `OtpEngine.kt:70-139` 核实。
-
 ### ISSUE-P3-174 列表页状态投影缺 `flowOn`（全库投影跑在主线程）
 
 - **背景**：`app/.../ui/screens/vault/VaultListViewModel.kt:248` 的 `uiState` 由
@@ -447,21 +404,3 @@
 - **核实时间点与方式**：2026-09-17 读 `WebDavSyncProvider.kt:215-340` 与 `SyncCycleRunner.kt:195-215` 核实。
 - **风险提示**：条件写是并发正确性的正确性来源（`已知工程限界.md` §1.3），
   减少往返**不得**削弱「用 ETag 预检 + `If-Match` 条件写」的判定，只删重复探测。
-
-### ISSUE-P3-181 若干常数因子清理（密钥文件 / CSV 导出 / 标签解析）
-
-- **背景**：① `database/.../file/KdbxKeyFile.kt:54` 无条件 `stripWhitespace(raw)` 先复制整个 keyfile，
-  再判定是否为 64 位 hex 文本（对「任意二进制作为密钥文件」的常见分支这次拷贝纯属浪费，
-  且每次解锁与每次保存都走一遍）；② `database/.../csv/KdbxCsvExporter.kt:49` 每下钻一层都
-  `groupPath + child.name` 复制父路径，`:62` 又对每条目 `groupPath.joinToString(SEPARATOR)`
-  ⇒ `O(条目数 × 深度)` 次字符复制；③ `database/.../xml/KdbxXmlGroupReader.kt:94` 与 `:182` 的
-  `tagsStr?.split(";")?.map{trim}?.filter{isNotEmpty}` 每个 Group / Entry 各产生 3 个中间列表。
-- **整改方向**：① 先单趟扫描统计非空白字节并同时校验 hex 形状，仅在恰为 64 时构造 compact 数组；
-  ② 路径改「进组 append / 出组回退」的 `ArrayDeque` 或 `StringBuilder`，并在**组级**拼一次路径供组内条目共用；
-  ③ 单趟手写扫描直接产出最终列表（或 `splitToSequence` 惰性链），Entry 与 Group 共用同一私有函数。
-- **验收标准**：三处行为等价（keyfile 三种形态判定、CSV 导出逐字节一致、标签解析结果逐项一致）；
-  新增用例覆盖「含多行 / 空行 / 非 hex 文本的 keyfile」「空标签 / 多余分号 / 前后空白」。
-- **核实时间点与方式**：2026-09-17 读 `KdbxKeyFile.kt:40-80`、`KdbxCsvExporter.kt:40-75`、
-  `KdbxXmlGroupReader.kt:85-195` 核实。
-- **风险提示**：keyfile 解析属**解锁正确性**路径，改动须覆盖官方三种语义
-  （64 位 hex 文本 / XML keyfile / 任意文件 SHA-256），不得改变判定优先级。

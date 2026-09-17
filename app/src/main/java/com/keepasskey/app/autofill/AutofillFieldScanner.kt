@@ -131,6 +131,15 @@ object AutofillFieldScanner {
     )
 
     /**
+     * label 文本的 token 切分正则（ISSUE-P3-172）。
+     *
+     * 原实现把 `Regex(...)` 写在 [tokensOf] 函数体内 ⇒ 每次调用都重新编译 Pattern
+     * （`scan` 对每个节点最多触发 4 次），30 节点登录页约 100 次编译/请求，与系统
+     * assist 超时预算直接竞争。正则本身无状态，提为对象级常量即可。
+     */
+    private val TOKEN_SPLIT_REGEX = Regex("[^\\p{L}\\p{N}]+")
+
+    /**
      * 扫描节点列表并提取用户名框、密码框与来源信息。
      *
      * @param respectImportantForAutofill ISSUE-P3-43：true 时跳过页面显式声明
@@ -300,7 +309,7 @@ object AutofillFieldScanner {
     }
 
     private fun tokensOf(value: String): List<String> =
-        value.split(Regex("[^\\p{L}\\p{N}]+")).filter { it.isNotBlank() }
+        TOKEN_SPLIT_REGEX.split(value).filter { it.isNotBlank() }
 
     private data class Candidate(val id: String, val score: Int)
 }

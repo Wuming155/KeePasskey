@@ -86,27 +86,35 @@ internal fun buildVaultListUiState(
     val activeDb = databases.firstOrNull { it.isActive } ?: databases.firstOrNull()
     val isSearching = session.filterParams.query.isNotBlank()
 
-    // 计算当前面包屑路径
-    val breadcrumbs = mutableListOf<VaultGroup>()
-    var curId = session.currentGroupId
-    while (curId != null) {
-        val grp = allGroups.find { it.id == curId } ?: break
-        breadcrumbs.add(0, grp)
-        curId = grp.parentId
+    // ISSUE-P3-162：分组索引只建一次——面包屑与回收站集合原本各自做全表线性扫描
+    // （面包屑 O(深度 × 分组数)、回收站 O(子树 × 分组数)），而本函数在每次状态投影重跑。
+    val groupsById = allGroups.associateBy { it.id }
+    val childrenByParent = allGroups.groupBy { it.parentId }
+
+    // 计算当前面包屑路径（父链出现环时按已访问集合截断，与 GroupPathPresenter 同口径）
+    val breadcrumbs = ArrayDeque<VaultGroup>()
+    var pendingGroupId = session.currentGroupId
+    val visitedBreadcrumbIds = mutableSetOf<String>()
+    while (true) {
+        val id = pendingGroupId ?: break
+        if (!visitedBreadcrumbIds.add(id)) break
+        val grp = groupsById[id] ?: break
+        breadcrumbs.addFirst(grp)
+        pendingGroupId = grp.parentId
     }
 
     // H5 整改：回收站判定不再依赖 mock 常量字符串——以分组投影的 isRecycleBin 标记
-    // 连同其全部后代分组构建回收站 id 集合
+    // 连同其全部后代分组构建回收站 id 集合（ISSUE-P3-162：按 childrenByParent 单趟 BFS）
     val recycleBinGroupIds = buildSet {
-        fun addDescendants(parentId: String) {
-            allGroups.filter { it.parentId == parentId }.forEach { sub ->
-                add(sub.id)
-                addDescendants(sub.id)
-            }
-        }
+        val pending = ArrayDeque<String>()
         allGroups.filter { it.isRecycleBin }.forEach { bin ->
             add(bin.id)
-            addDescendants(bin.id)
+            pending.addLast(bin.id)
+        }
+        while (pending.isNotEmpty()) {
+            childrenByParent[pending.removeFirst()].orEmpty().forEach { sub ->
+                if (add(sub.id)) pending.addLast(sub.id)
+            }
         }
     }
     val isInsideRecycleBin = breadcrumbs.any { it.isRecycleBin }
@@ -130,8 +138,12 @@ internal fun buildVaultListUiState(
     // 2. 排序条目
     val sortedEntries = when (session.filterParams.sortOption) {
         VaultSortOption.DEFAULT -> filteredEntries.sortedBy { it.orderIndex }
-        VaultSortOption.NAME_ASC -> filteredEntries.sortedBy { it.title.lowercase() }
-        VaultSortOption.NAME_DESC -> filteredEntries.sortedByDescending { it.title.lowercase() }
+        // ISSUE-P3-162：原 `sortedBy { it.title.lowercase() }` 的选择器在**每次比较**中被调用
+        // ⇒ 约 `2·N·log₂N` 次临时小写字符串分配；改按不敏感比较器，零分配且稳定序不变
+        VaultSortOption.NAME_ASC ->
+            filteredEntries.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.title })
+        VaultSortOption.NAME_DESC ->
+            filteredEntries.sortedWith(compareByDescending(String.CASE_INSENSITIVE_ORDER) { it.title })
         VaultSortOption.MODIFIED_DESC -> filteredEntries.sortedByDescending { it.updatedAt }
         VaultSortOption.MODIFIED_ASC -> filteredEntries.sortedBy { it.updatedAt }
         VaultSortOption.CREATED_DESC -> filteredEntries.sortedByDescending { it.createdAt }
@@ -183,7 +195,7 @@ internal fun buildVaultListUiState(
         sortOption = session.filterParams.sortOption,
         currentGroupId = session.currentGroupId,
         isInsideRecycleBin = isInsideRecycleBin,
-        breadcrumbs = breadcrumbs,
+        breadcrumbs = breadcrumbs.toList(),
         currentGroups = targetGroups,
         allGroups = allGroups,
         entries = sortedEntries,

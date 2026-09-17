@@ -145,63 +145,14 @@ class KdbxXmlParser(
     }
 
     /**
-     * 构造启用 XXE 加固的解析器：**逐项探测**平台是否真的接受该特性，不支持的项跳过并留痕告警。
+     * 构造启用 XXE 加固的解析器。
      *
-     * 为什么必须探测（ISSUE-P1-12，设备侧实测缺陷，2026-09-11）：
-     * Android（Harmony）的 `SAXParserFactoryImpl.setFeature` **不校验**特性名，只做记录；
-     * 真正应用发生在 `newSAXParser()`，此时才抛 `SAXNotRecognizedException`。因此仅在
-     * `setFeature` 外面套 try/catch **完全无效**——异常会从 `newSAXParser()` 抛出、被上层包装为
-     * `KdbxCorruptFileException`，导致**每一次** KDBX 解析失败（emulator-5554 / API 36 实测：
-     * `http://xml.org/sax/features/resolve-dtd-uris` 命中该路径，设备端任何库都打不开）。
-     * 本方法对每一项都在「已接受集合 + 该项」上实例化一次解析器作探针，成功才纳入。
-     *
-     * 判定为「不 fail-fast」的理由（沿用 ISSUE-P3-10 子项 3 的既有取舍）：平台对未识别特性抛
-     * `SAXNotRecognizedException`，若因此拒绝打开密码库，则一个实现差异就会让用户完全无法读取
-     * 自己的合法库（可用性代价远高于收益）。
-     *
-     * **安全语义不削弱**：DTD 与外部实体的实际拦截由 handler 侧两道与特性支持无关的
-     * fail-closed 兜底完成（[DefaultHandler2.startDTD] 直接拒绝 DTD 声明、`resolveEntity`
-     * 直接拒绝外部实体，见 [parse] 内 handler 定义）；工厂特性始终只是「尽力加固」层。
+     * ISSUE-P3-172：加固特性探测结论与加固工厂已按「进程 / 线程」缓存（见 companion 的
+     * `probeHardenedFeatures` 与 `hardenedFactory`）——原实现每次解析都要为 4 个候选特性
+     * 各实例化一次「工厂 + 解析器」作探针（共 5 次），即每次打开密码库都重复整组探测、
+     * 重复打印同一批告警。本方法每次仍返回**全新** `SAXParser`（解析器实例不可跨解析复用）。
      */
-    private fun buildHardenedParser(): SAXParser {
-        val accepted = mutableListOf<XxeGuardFeature>()
-        for (feature in XXE_GUARD_FEATURES) {
-            val probe = runCatching { newFactory(accepted + feature).newSAXParser() }
-            if (probe.isSuccess) {
-                accepted += feature
-            } else {
-                logger.log(
-                    Level.WARNING,
-                    "SAX 解析器 XXE 加固特性不受支持，已跳过该项" +
-                            "（DTD/外部实体由 handler 兜底拒绝）: $feature",
-                    probe.exceptionOrNull()
-                )
-            }
-        }
-        return newFactory(accepted).newSAXParser()
-    }
-
-    /**
-     * 新建 SAX 工厂并尽力应用给定加固特性。
-     *
-     * 单项 `setFeature` 失败仅告警：部分实现的失败会在 `newSAXParser()` 才显现，
-     * 该情形由 [buildHardenedParser] 的探针负责剔除。
-     */
-    private fun newFactory(features: List<XxeGuardFeature>): SAXParserFactory {
-        val factory = SAXParserFactory.newInstance()
-        factory.isNamespaceAware = false
-        for (feature in features) {
-            runCatching { factory.setFeature(feature.name, feature.enabled) }
-                .onFailure {
-                    logger.log(
-                        Level.WARNING,
-                        "SAX 解析器 XXE 加固特性设置失败，已跳过该项: $feature",
-                        it
-                    )
-                }
-        }
-        return factory
-    }
+    private fun buildHardenedParser(): SAXParser = hardenedFactory().newSAXParser()
 
     /** 一项 XXE 加固特性：`name` 为 SAX/Apache 特性名，`enabled` 为期望开关。 */
     private data class XxeGuardFeature(val name: String, val enabled: Boolean) {
@@ -243,6 +194,77 @@ class KdbxXmlParser(
             XxeGuardFeature(FEATURE_EXTERNAL_PARAMETER_ENTITIES, false),
             XxeGuardFeature(FEATURE_RESOLVE_DTD_URIS, false)
         )
+
+        /**
+         * ISSUE-P3-172：加固特性链的探测结论，**进程级只探测一次**。
+         *
+         * 探测语义逐字沿用原实现的逐项探针。**为什么必须探测**（ISSUE-P1-12，设备侧实测缺陷，
+         * 2026-09-11）：Android（Harmony）的 `SAXParserFactoryImpl.setFeature` **不校验**特性名，
+         * 只做记录；真正应用发生在 `newSAXParser()`，此时才抛 `SAXNotRecognizedException`。
+         * 因此仅在 `setFeature` 外面套 try/catch **完全无效**——异常会从 `newSAXParser()` 抛出、
+         * 被上层包装为 `KdbxCorruptFileException`，导致**每一次** KDBX 解析失败
+         * （emulator-5554 / API 36 实测：`http://xml.org/sax/features/resolve-dtd-uris` 命中该路径，
+         * 设备端任何库都打不开）。故对每一项都在「已接受集合 + 该项」上实例化一次解析器作探针，
+         * 成功才纳入。
+         *
+         * 缓存带来的唯一行为差异：同一批「特性不受支持」告警由「每次解析各打一遍」变为
+         * 「每进程一遍」。判定为「不 fail-fast」的理由沿用 ISSUE-P3-10 子项 3 的既有取舍：
+         * 平台对未识别特性抛 `SAXNotRecognizedException`，若因此拒绝打开密码库，则一个实现差异
+         * 就会让用户完全无法读取自己的合法库（可用性代价远高于收益）。
+         *
+         * **安全语义不削弱**：DTD 与外部实体的实际拦截由 handler 侧两道与特性支持无关的
+         * fail-closed 兜底完成（[DefaultHandler2.startDTD] 直接拒绝 DTD 声明、`resolveEntity`
+         * 直接拒绝外部实体）；工厂特性始终只是「尽力加固」层。
+         */
+        private val hardenedFeatureList: List<XxeGuardFeature> by lazy { probeHardenedFeatures() }
+
+        /**
+         * ISSUE-P3-172：加固工厂按**线程**缓存（`SAXParserFactory` 非线程安全），
+         * 每次解析从中取全新 `SAXParser`。
+         */
+        private val hardenedFactories = ThreadLocal.withInitial { newFactory(hardenedFeatureList) }
+
+        private fun hardenedFactory(): SAXParserFactory = hardenedFactories.get()
+
+        private fun probeHardenedFeatures(): List<XxeGuardFeature> {
+            val accepted = mutableListOf<XxeGuardFeature>()
+            for (feature in XXE_GUARD_FEATURES) {
+                val probe = runCatching { newFactory(accepted + feature).newSAXParser() }
+                if (probe.isSuccess) {
+                    accepted += feature
+                } else {
+                    logger.log(
+                        Level.WARNING,
+                        "SAX 解析器 XXE 加固特性不受支持，已跳过该项" +
+                                "（DTD/外部实体由 handler 兜底拒绝）: $feature",
+                        probe.exceptionOrNull()
+                    )
+                }
+            }
+            return accepted
+        }
+
+        /**
+         * 新建 SAX 工厂并尽力应用给定加固特性。
+         *
+         * 单项 `setFeature` 失败仅告警：部分实现的失败会在 `newSAXParser()` 才显现，
+         * 该情形由 [probeHardenedFeatures] 的探针负责剔除。
+         */
+        private fun newFactory(features: List<XxeGuardFeature>): SAXParserFactory {
+            val factory = SAXParserFactory.newInstance()
+            factory.isNamespaceAware = false
+            for (feature in features) {
+                runCatching { factory.setFeature(feature.name, feature.enabled) }
+                    .onFailure {
+                        logger.log(
+                            Level.WARNING,
+                            "SAX 解析器 XXE 加固特性设置失败，已跳过该项: $feature",
+                            it
+                        )
+                    }
+            }
+            return factory
+        }
 
         /** LexicalHandler 注册属性名（用于接收 DTD 声明事件） */
         private const val LEXICAL_HANDLER_PROPERTY =
