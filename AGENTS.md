@@ -97,3 +97,9 @@ Coroutines + Flow；**文档与代码注释使用简体中文**。
 > **Rust 单测落位约定（ISSUE-P3-57，须遵守）**：单测放 `crypto/src/main/rust/src/tests/<name>_tests.rs`，源文件中以
 > `#[cfg(test)] #[path = "tests/<name>_tests.rs"] mod tests;` 引用——Code scanning 的 `paths-ignore` 只能做文件级排除，
 > 内联 `mod tests` 里的测试密钥 / 向量会被 `rust/hard-coded-cryptographic-value` 逐条报为 critical 误报。
+
+> **测试资产不删除（§147 立规，强制）**：**测试用例与对拍向量只允许新增或修改，不得因「暂时用不上 / 已被替代 / 实现回退」
+> 而删除**——回退或改道是暂时的，测试是长期资产，代价只是几十行代码，而丢失后**无法经 `git` 取回**（§147 中两个 AES
+> 测试文件在**入库前**被随实现一起删掉，`git log --diff-filter=D` 查无此文件）。确需删除时：① 必须先确认**被删对象已无
+> 生产代码可测**（如生产类同批删除），② 在批次文档或限界表登记理由，③ 与生产代码**同一次提交**入库。
+> 细则见 `.codebuddy/rules/engineering-rules.md` §「测试资产纪律」。
