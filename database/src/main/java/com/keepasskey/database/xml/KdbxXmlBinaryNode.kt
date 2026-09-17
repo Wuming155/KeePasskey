@@ -154,7 +154,7 @@ internal class BinaryNode(
         ).toInt()
         val out = ByteArrayOutputStream(initialCap)
         try {
-            GZIPInputStream(ByteArrayInputStream(compressed)).use { gzip ->
+            GZIPInputStream(ByteArrayInputStream(compressed), GZIP_INFLATER_BUFFER_BYTES).use { gzip ->
                 val buffer = ByteArray(GZIP_COPY_BUFFER_BYTES)
                 while (true) {
                     val read = gzip.read(buffer)
@@ -262,6 +262,14 @@ internal class BinaryNode(
 
         /** 解压拷贝缓冲（8 KiB）。 */
         private const val GZIP_COPY_BUFFER_BYTES = 8 * 1024
+
+        /**
+         * Inflater 内部缓冲尺寸（64 KiB）。
+         *
+         * ISSUE-P3-151：`GZIPInputStream` 单参构造的内部缓冲为 **512 字节**，大附件会以该粒度
+         * 反复进出 inflate；显式传入 64 KiB 后调用次数下降两个数量级（解压输出字节不变）。
+         */
+        private const val GZIP_INFLATER_BUFFER_BYTES = 64 * 1024
     }
 }
 

@@ -392,6 +392,44 @@ class KdbxXmlFullRoundtripTest {
     }
 
     /**
+     * ISSUE-P3-151 回归：**非 BMP 字符**（emoji 等代理对）经 XML 写出后往返无损。
+     *
+     * 缺陷背景：写出器原以 `Writer.write(codePoint)` 逐码点输出，而 `Writer.write(int)`
+     * **只写低 16 位** ⇒ U+1F600 被写成 U+F600（私用区字符），保存即静默损坏。
+     * 本用例同时覆盖「首个字符即非 BMP」「BMP 与代理对混合」「与需转义字符相邻」
+     * 三类边界（后两类用于确认批量写出不会把代理对切成两半）。
+     */
+    @Test
+    fun testNonBmpCharactersPreservedRoundtrip() {
+        val notesText = "\uD83D\uDE00开头表情\n混合😀emoji与<尖括号>&和\"引号\"\r\n尾部🔐\uD83D\uDD10"
+        val groupNotes = "分组😀备注<带转义>"
+
+        val entry = KdbxEntry(
+            fields = mapOf(
+                KdbxConstants.Fields.TITLE to ProtectedString("EmojiEntry \uD83D\uDE00", isProtected = false),
+                KdbxConstants.Fields.NOTES to ProtectedString(notesText, isProtected = false)
+            )
+        )
+        val rootGroup = KdbxGroup(name = "Root", notes = groupNotes, entries = listOf(entry))
+        val db = KdbxDatabase(
+            header = KdbxHeader.createDefault(useArgon2 = false),
+            rootGroup = rootGroup
+        )
+
+        val bos = ByteArrayOutputStream()
+        KdbxFile.save(bos, db, testPassword)
+        val loadedDb = KdbxFile.load(ByteArrayInputStream(bos.toByteArray()), testPassword)
+
+        assertEquals(
+            "非 BMP 字符（代理对）必须原样往返，不得被截断为低 16 位",
+            notesText,
+            loadedDb.rootGroup.entries[0].fields[KdbxConstants.Fields.NOTES]?.readString()
+        )
+        assertEquals("EmojiEntry \uD83D\uDE00", loadedDb.rootGroup.entries[0].title)
+        assertEquals(groupNotes, loadedDb.rootGroup.notes)
+    }
+
+    /**
      * 时间缺省回归：`<Times>` 子元素缺失时取「合理远古时间」
      * [KdbxXmlTimeHelper.ANCIENT_INSTANT]（纪元原点 0001-01-01T00:00:00Z，对应官方未初始化时间
      * 的 .NET `DateTime.MinValue`），绝不再默认 now()——三方合并中缺失时间不得被误判为

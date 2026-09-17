@@ -65,6 +65,10 @@ object KdbxBinaryDeduplicator {
         dedupList: MutableList<InnerHeader.BinaryItem>,
         fingerprintIndex: HashMap<Fingerprint, Int>
     ): KdbxEntry {
+        // ISSUE-P3-150 复核结论：本处「无条件 copy + 附件字节 copy」是**有意的别名隔离契约**
+        // （P1-9 用例 `testAttachmentClearDoesNotZeroBinaryPool` 锁定：外部按 Closeable 契约清零
+        // 附件不得波及池），故**刻意不改**——省下的只是若干对象分配，代价是放宽一条被用例守护的
+        // 所有权保证。本条目的真实成本面在 [candidateItem]（落盘附件每次保存被重新读盘）。
         val updatedAttachments = entry.attachments.map { att ->
             val existingItem = existingPool.getOrNull(att.refIndex)
             val flag: Byte = if (att.isProtected) {
@@ -99,9 +103,12 @@ object KdbxBinaryDeduplicator {
 
     /**
      * 构造候选池条目（不整份物化落盘附件）：
-     * 1. 附件自带落盘来源 → 仅改写 flags（复用 store key，零读取）；
+     * 1. 附件自带落盘来源 → 仅改写 flags（复用 store key，零读取）；**flags 未变则直接复用该实例**
+     *    （ISSUE-P3-150：`BinaryItem.contentHash` 是按实例 `lazy` 缓存的，落盘条目首次计算即需
+     *    流式读回整份附件；若每次保存都新建实例，则「每次保存重新读盘一遍全部落盘附件」；
+     *    复用实例后同一附件的哈希至多计算一次）；
      * 2. 附件自带内存副本 → 克隆入池（入池必须独立副本，避免外部清零旧数组连带清零池）；
-     * 3. 回退旧池条目（其数据本就在池中，直接复用）；
+     * 3. 回退旧池条目（其数据本就在池中，直接复用；**flags 未变同样直接复用实例**）；
      * 4. 兜底空数组。
      */
     private fun candidateItem(
@@ -110,11 +117,15 @@ object KdbxBinaryDeduplicator {
         flag: Byte
     ): InnerHeader.BinaryItem {
         val source = att.binarySource()
-        if (source is InnerHeader.BinaryItem) return source.withFlags(flag)
+        if (source is InnerHeader.BinaryItem) {
+            return if (source.flags == flag) source else source.withFlags(flag)
+        }
         val inline = att.inlineBytes()
         if (inline.isNotEmpty()) return InnerHeader.BinaryItem(flag, inline.clone())
         if (source != null) return InnerHeader.BinaryItem(flag, source.load())
-        if (existingItem != null) return existingItem.withFlags(flag)
+        if (existingItem != null) {
+            return if (existingItem.flags == flag) existingItem else existingItem.withFlags(flag)
+        }
         return InnerHeader.BinaryItem(flag, ByteArray(0))
     }
 

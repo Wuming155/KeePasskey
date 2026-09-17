@@ -50,42 +50,6 @@
 > 条目 154 为 §114 批次的**残留**（`ISSUE-P3-149` ③ 未做部分）。
 > 原 `ISSUE-P3-149`（投影热路径）的 ①②④ 已于 §114 闭环，**③ 转登为 `ISSUE-P3-154`**。
 
-### ISSUE-P3-150 KDBX 保存路径整树重建与附件字节重复拷贝
-
-- **背景**：`save()` 的去重器 `deduplicate` **无条件重建整棵分组树**（逐组 `group.copy` / 逐条 `entry.copy`），
-  且对每个附件引用做 `pooled.data.copyOf()`——即便 `isSpilled` 分支已避开落盘附件的读回，
-  内存附件仍呈「池内一份 + 条目一份」双份驻留。单条条目编辑同样沿 `updateOrAddEntry` **遍历并复制全部分组**（非路径复制），
-  随后 `clearSupersededSensitiveData` 再把全库（含历史）的敏感实例收进一个 `IdentityHashMap` 集合。
-- **量级**：O(条目数 + 分组数 + 内存附件总字节) /每次保存；身份集合 O(元素数 × 字段数) /每次编辑。
-- **核实时间点与方式**：2026-09-17 逐处阅读下列源码核实。
-- **依据**：`database/.../file/KdbxBinaryDeduplicator.kt:47-60,68-88,113-118`、
-  `database/.../session/SessionTreeEditor.kt:34-37`、`database/.../session/SessionContentMutations.kt:30-33`、
-  `core/.../model/KdbxGroup.kt:103-105`。
-- **整改方向**：① 去重器仅在**索引变化**时重建受影响条目；② 池内共享条目的交付改为引用而非 `copyOf()`
-  （别名隔离由 `openStream()` 契约承担，须与 ISSUE-P3-07 借用语义对齐）；③ 编辑器改路径复制；
-  ④ 身份集合同步增量维护或仅在锁定路径做一次。
-- **验收标准**：同一库「保存前后内容一致」的既有回归全绿（含附件去重与别名隔离用例）；
-  保存期附件字节的拷贝次数由 2 降为 ≤1（可断言分配量或引用同一性）；`clearSupersededSensitiveData` 语义不变。
-- **风险提示**：本条触及**写入路径与内存所有权**，是 P2/P3 这批里回归风险最高的一条——须以「附件别名隔离 + 敏感数据清零」两类既有用例作前置护栏。
-
-### ISSUE-P3-151 IO 缓冲与解析常数项（GZip 512 B / XML 逐字符写出 / 时间戳正则）
-
-- **背景**：三处与库规模线性相关的常数项：
-  ① `GZIPInputStream(raw)` / `GZIPOutputStream(cipherOut)` 未传缓冲尺寸，`java.util.zip` 默认内部缓冲为 **512 字节**，
-     多 MB 载荷以极小粒度反复进出 inflate/deflate；同链上的 `CipherInputStream` / `CipherOutputStream`
-     默认缓冲同为 512 字节，AES 硬件加速的收益被每 512 字节一次的 JNI 往返摊薄；
-  ② `KdbxXmlStreamWriter.escape` 对文本逐**字符**调 `writer.write(int)`（保存侧随 XML 字符数线性）；
-  ③ `KdbxXmlTimeHelper.parseDate` 每次先跑一次正则嗅探再 Base64 解码，而每个 `<Times>` 固定调用 **5 次**。
-- **量级**：①O(载荷字节 / 512)；②O(XML 字符数)；③O(条目数 × 5) 次正则 + Base64。
-- **核实时间点与方式**：2026-09-17 逐处阅读下列源码核实（①②为 Kotlin 侧形参缺省，非平台行为推断）。
-- **依据**：`database/.../file/KdbxFile.kt:85,390-394`、`crypto/.../cipher/AesCipherEngine.kt:42-58`、
-  `database/.../xml/KdbxXmlStreamWriter.kt:23,84-102`、`database/.../xml/KdbxXmlTimesNode.kt:53-59`、
-  `database/.../xml/KdbxXmlTimeHelper.kt:143,152`（正则本身已是顶层 `val`，**不是**每条目重建，此处只优化调用次数与前缀判断）。
-- **整改方向**：① 三处流构造传 `64 * 1024` 缓冲（一行改动）；② 转义按「无需转义的连续区间」批量 `write`；
-  ③ 以廉价前缀判断替代正则，或对重复时间戳做小缓存。
-- **验收标准**：解锁与保存的墙钟耗时在**同一真机、同一语料**下可复现下降（须给出前后对比数据，口径见 [`records/原生Argon2真机验证记录.md`](records/原生Argon2真机验证记录.md) §方法学）；
-  `.kdbx` 往返字节级一致（现有互操作与 golden 用例全绿）。
-
 ### ISSUE-P3-152 常驻周期轮询（设置快照每 2 s / 完整性检测每 30 s）
 
 - **背景**：两处与用户操作无关的定时轮询：
@@ -142,4 +106,37 @@
 - **核实时间点与方式**：2026-09-17 由 §114 实施过程中的实测阻塞得出（工作区行尾与全量测试口径均已核实）。
 - **验收标准**：整库投影不再在 Main 上执行（可用测试调度器断言）；`RealVaultRepositoryTest` 全绿且**不引入**
   依赖真实线程池的偶发断言；`getEntries()` 的收集者（列表页 / 自动填充 / 子库）行为零变化。
+
+### ISSUE-P3-155 外层 AES-CBC 流的块粒度受限于 `CipherInputStream` 内部 512 B 缓冲
+
+- **背景**：`ISSUE-P3-151` ① 的前提复核发现：**`CipherInputStream` / `CipherOutputStream`
+  没有缓冲尺寸构造参数**（内部固定 512 B 常量），故 AES-256-CBC 外层流（本仓**默认 cipher**）
+  每次只向平台加密实现投递 512 字节 —— 硬件加速的吞吐被每 512 字节一次的调用开销摊薄，
+  而 `GZIPInputStream` 那侧的同类问题已在 §115 用构造参数解决。同仓已有先例可循：
+  `CbcDecryptingInputStream` / `CbcEncryptingOutputStream` 正是为原生 Twofish 写的**自研分块流**
+  （64 KiB 分块 + 单一 PKCS#7 实现 + 明确的异常语义，由 `CbcStreamFramingTest` 逐例对齐 JCE 基线）。
+- **量级**：O(载荷字节 / 512) 次加密实现调用（10 MB 库约 2 万次）；绝对耗时取决于平台实现，
+  **未实测**（宿主 JVM 的 Conscrypt 行为不代表设备侧）。
+- **核实时间点与方式**：2026-09-17 由 §115 的开工复核发现（`AesCipherEngine.kt:42-58` 无缓冲形参），
+  并以 `CbcStreams.kt` 既有实现作为可行路径的旁证。
+- **整改方向**：为 AES-CBC 复用既有分块流骨架（`transform` 注入 JCE `Cipher.update`），
+  **关键约束**：`Cipher` 自带链值状态，与既有 `transform(key, iv, block)` 的「iv 原地演化」契约不匹配，
+  需先定义新契约（或让 AES 走独立实现），**不得**为复用而扭曲既有 Twofish 路径。
+- **验收标准**：`.kdbx` 往返字节级一致；与官方实现互操作（`OwnProductInteropProbeTest` + `keepassxc-cli`）通过；
+  流式语义（填充非法 / 长度非整数倍 / 提前 close）逐例对齐 JCE 基线；**并给出设备侧前后吞吐对比**再决定是否采纳。
+- **风险提示**：本条触及**主加密数据面**，属高回归面改动，须排在所有零风险项之后。
+
+### ISSUE-P3-156 单条编辑路径的整树遍历与全库敏感身份集合重建
+
+- **背景**：单条条目编辑（含回收站移动、批量操作等写路径）在 `SessionTreeEditor.updateOrAddEntry` 中
+  **遍历并复制全部分组节点**（非路径复制），随后 `SessionContentMutations` 调用
+  `clearSupersededSensitiveData`，由 `KdbxGroup.collectSensitiveIdentities` 把**全库（含历史）**的
+  `ProtectedString` / `KdbxAttachment` 收进一个 `IdentityHashMap` 集合——每次编辑都是 O(元素数 × 字段数)。
+- **量级**：O(分组数) 对象复制 + O(条目数 × 字段数) 集合元素 /每次编辑。
+- **核实时间点与方式**：2026-09-17 由 §115 的开工复核确认（`ISSUE-P3-150` 原正文 ③④ 转登至此）。
+- **整改方向**：编辑器**已持有**「被替换掉的旧节点」信息，据此可做**增量**擦除（只擦本次真正被丢弃的实例），
+  无需每次从新树反推存活集合；路径复制（只重建从根到目标的分组链）可同时消除 O(分组数) 复制。
+- **验收标准**：擦除语义**不得削弱**——既有「被替换节点的敏感数据必被清零」用例全绿，
+  且须补一条**负向对照**（故意漏擦某类节点时用例必红）；编辑路径的集合规模不再随全库规模增长。
+- **风险提示**：擦除保证是安全属性，**宁可保留 O(N) 也不得漏擦**；无增量方案的可核对性证据前不得动手。
 

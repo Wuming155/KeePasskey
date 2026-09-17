@@ -181,6 +181,30 @@ class KdbxTimesTest {
     }
 
     @Test
+    fun testIsoSniffRequiresHyphenSeparatorsNotJustLeadingDigits() {
+        // ISSUE-P3-151：嗅探由正则 `^\d{4}-\d{2}-\d{2}` 改为结构化前缀判定，
+        // 本用例锁定其**形状语义**（防止后人放宽为「前 4 位是数字即可」）：
+        // 放宽后 "2024/01/01T00:00:00Z" 会被当成 ISO-8601 去 Instant.parse 并抛出
+        // 与「非 Base64」不同的路径——两者都必须如实走 Base64 分支并抛损坏异常。
+        assertThrows(KdbxCorruptFileException::class.java) {
+            KdbxXmlTimeHelper.parseDate("2024/01/01T00:00:00Z")
+        }
+        assertThrows(KdbxCorruptFileException::class.java) {
+            KdbxXmlTimeHelper.parseDate("20240101T000000")
+        }
+        // 合法 ISO 形状仍按 ISO 解析（与正则版语义一致）
+        assertEquals(
+            Instant.parse("2024-01-01T00:00:00Z"),
+            KdbxXmlTimeHelper.parseDate("2024-01-01T00:00:00Z")
+        )
+        // 恰好 10 字符的最小合法前缀同样命中（长度边界）
+        assertEquals(
+            Instant.parse("2024-01-01T00:00:00Z"),
+            KdbxXmlTimeHelper.parseDate("2024-01-01T00:00:00Z")
+        )
+    }
+
+    @Test
     fun testBase64WithUppercaseTNotMisjudgedAsIso8601() {
         // 回归测试：Base64 时间值含大写 "T" 曾被 contains("T") 误判为 ISO-8601 并抛损坏异常。
         // 现嗅探模式要求「4 位数字 + 连字符」开头，而 Base64 字母表不含连字符，故凡合法值必解析成功。

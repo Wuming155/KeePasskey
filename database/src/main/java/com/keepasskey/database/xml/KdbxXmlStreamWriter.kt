@@ -79,10 +79,32 @@ class KdbxXmlStreamWriter(
         }
     }
 
+    /**
+     * 按 XML 规则转义后写出（文本与属性共用）。
+     *
+     * ISSUE-P3-151：**按「无需转义的连续区间」批量写出**，不再逐字符调 `write(int)`。
+     * 原实现每个字符一次 `BufferedWriter.write(int)`（每次都要进锁 + 逐字节入缓冲），
+     * 保存大库时随 XML 字符数线性放大。
+     *
+     * 顺带修掉一处**真缺陷**（原实现的结构性后果）：`Writer.write(int)` 只写
+     * **低 16 位**，故非 BMP 字符（如 emoji，U+1F600）会被写成其低位截断值
+     * （`0xF600` 私用区字符）——写出即已损坏。批量路径按 UTF-16 区间原样搬运，
+     * 代理对完整，往返无损。回归锁见 `KdbxXmlFullRoundtripTest` 的「非 BMP 字符往返」用例。
+     */
     private fun escape(value: String, escapeNewLines: Boolean) {
         var index = 0
+        // 当前「无需转义」区间起点；遇到需转义 / 需剔除的码点时先flush本区间
+        var runStart = 0
         while (index < value.length) {
             val codePoint = value.codePointAt(index)
+            val charCount = Character.charCount(codePoint)
+            if (isLegalXmlCodePoint(codePoint) && !needsEscape(codePoint, escapeNewLines)) {
+                index += charCount
+                continue
+            }
+            if (index > runStart) {
+                writer.write(value, runStart, index - runStart)
+            }
             when {
                 codePoint == '&'.code -> writer.write("&amp;")
                 codePoint == '<'.code -> writer.write("&lt;")
@@ -94,12 +116,28 @@ class KdbxXmlStreamWriter(
                 codePoint == '\r'.code -> writer.write("&#xD;")
                 codePoint == '\n'.code && escapeNewLines -> writer.write("&#10;")
                 codePoint == '\t'.code && escapeNewLines -> writer.write("&#9;")
-                isLegalXmlCodePoint(codePoint) -> writer.write(codePoint)
                 // 非法 XML 1.0 控制字符剔除，保证写出文档始终 well-formed
                 else -> {}
             }
-            index += Character.charCount(codePoint)
+            index += charCount
+            runStart = index
         }
+        if (value.length > runStart) {
+            writer.write(value, runStart, value.length - runStart)
+        }
+    }
+
+    /** 该码点是否需要转义（与 [escape] 的分支一一对应；不含「非法码点剔除」）。 */
+    private fun needsEscape(codePoint: Int, escapeNewLines: Boolean): Boolean = when {
+        codePoint == '&'.code -> true
+        codePoint == '<'.code -> true
+        codePoint == '>'.code -> true
+        codePoint == '"'.code -> escapeNewLines
+        // CR 在两条路径上恒转义（见 escape 内的 P3-3 说明）
+        codePoint == '\r'.code -> true
+        codePoint == '\n'.code -> escapeNewLines
+        codePoint == '\t'.code -> escapeNewLines
+        else -> false
     }
 
     private fun isLegalXmlCodePoint(codePoint: Int): Boolean {

@@ -41,6 +41,12 @@ object KdbxXmlTimeHelper {
     /** .NET 1 tick = 100ns，1 秒 = 10^7 ticks；**仅**供历史 Ticks 兼容分支使用。 */
     private const val TICKS_PER_SECOND = 10_000_000L
 
+    /** ISO-8601 日期前缀长度（`yyyy-MM-dd`，ISSUE-P3-151）。 */
+    private const val ISO_DATE_PREFIX_LENGTH = 10
+
+    /** ISO-8601 日期前缀中的分隔符位置字符。 */
+    private const val ISO_DATE_SEPARATOR = '-'
+
     /** 纪元原点在 .NET Ticks 标度下的取值；**仅**供历史 Ticks 兼容分支使用。 */
     private const val EPOCH_OFFSET_TICKS = EPOCH_OFFSET_SECONDS * TICKS_PER_SECOND
 
@@ -116,12 +122,29 @@ object KdbxXmlTimeHelper {
     )
 
     /**
-     * ISO-8601 日历日期嗅探模式（形如 "2024-01-01T..." 或 "2024-01-01..."）。
-     * 必须以「4 位数字 + 连字符」开头——标准 Base64 字母表（A-Za-z0-9+/=）不含连字符，
-     * 因此 Base64 编码的时间值绝不可能命中本模式，杜绝含大写 "T" 的 Base64
-     * 时间值被误判为 ISO-8601 的随机性缺陷。
+     * ISO-8601 日历日期嗅探：形如 "2024-01-01T..." 或 "2024-01-01..."。
+     *
+     * ISSUE-P3-151：由正则 `^\d{4}-\d{2}-\d{2}` 改为**结构化前缀判定**——每个 `<Times>`
+     * 固定调用本嗅探 **5 次**（5 个子字段），正则引擎的每次匹配开销（模式编译后仍有
+     * 引擎进入成本）在万级条目库上被放大成可观常数；结构化判定与之**语义逐一等价**
+     * （`\d` 在未开启 `UNICODE_CHARACTER_CLASS` 时只匹配 ASCII 数字）。
+     *
+     * 判定必须保留「以 4 位数字 + 连字符开头」这一形状：标准 Base64 字母表
+     * （A-Za-z0-9+/=）**不含连字符**，因此 Base64 编码的时间值绝不可能命中本判定，
+     * 杜绝含大写 "T" 的 Base64 时间值被误判为 ISO-8601 的随机性缺陷。
      */
-    private val iso8601Pattern = Regex("^\\d{4}-\\d{2}-\\d{2}")
+    private fun looksLikeIso8601Date(value: String): Boolean {
+        if (value.length < ISO_DATE_PREFIX_LENGTH) return false
+        for (index in 0 until ISO_DATE_PREFIX_LENGTH) {
+            val char = value[index]
+            if (index == 4 || index == 7) {
+                if (char != ISO_DATE_SEPARATOR) return false
+            } else if (char !in '0'..'9') {
+                return false
+            }
+        }
+        return true
+    }
 
     /**
      * 从 XML 字符串解析时间戳。
@@ -139,8 +162,8 @@ object KdbxXmlTimeHelper {
         if (dateStr.isNullOrBlank()) return defaultInstant
         val clean = dateStr.trim()
 
-        // 兼容 KDBX 3 格式的 ISO-8601 字符串（严格模式嗅探，见 iso8601Pattern KDoc）
-        if (iso8601Pattern.containsMatchIn(clean)) {
+        // 兼容 KDBX 3 格式的 ISO-8601 字符串（严格模式嗅探，见 looksLikeIso8601Date KDoc）
+        if (looksLikeIso8601Date(clean)) {
             return try {
                 Instant.parse(clean)
             } catch (e: Exception) {

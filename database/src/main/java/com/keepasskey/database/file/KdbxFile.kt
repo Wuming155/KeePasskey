@@ -50,6 +50,16 @@ object KdbxFile {
     private const val INNER_RANDOM_STREAM_KEY_SIZE = 64
 
     /**
+     * GZip 流内部缓冲尺寸（64 KiB）。
+     *
+     * ISSUE-P3-151：`java.util.zip` 的 `GZIPInputStream` / `GZIPOutputStream` 单参构造
+     * 使用 **512 字节**的内部缓冲，多 MB 载荷会以该粒度反复进出 inflate / deflate
+     * （每次调用都带一层本地方法往返）；显式给出 64 KiB 缓冲后，同一载荷的调用次数下降两个数量级。
+     * 输出字节与压缩级别不变，纯缓冲参数调整。
+     */
+    private const val COMPRESSION_BUFFER_BYTES = 64 * 1024
+
+    /**
      * 载荷解压输出（或未压缩载荷）累计字节数安全上限：128 MiB（Wave 12 解析炸弹防线；
      * ISSUE-P3-10 子项 1 由原 512 MiB 下调）。
      *
@@ -82,7 +92,7 @@ object KdbxFile {
      * 「超限被拒 / 限额内通过」，无需构造超大真实库（见 KdbxParsingResourceLimitsTest）。
      */
     internal fun guardPayloadSize(raw: InputStream, isGzipCompressed: Boolean): InputStream {
-        val decompressed = if (isGzipCompressed) GZIPInputStream(raw) else raw
+        val decompressed = if (isGzipCompressed) GZIPInputStream(raw, COMPRESSION_BUFFER_BYTES) else raw
         return SizeBoundedInputStream(decompressed, MAX_DECOMPRESSED_PAYLOAD_BYTES)
     }
 
@@ -388,7 +398,7 @@ object KdbxFile {
         // 官方载荷顺序（对齐 KeePass 2.x Write.cs / KeePassDX DatabaseOutputKDBX）：
         // 内层头部写在 GZIP 流之内（与 XML 一同被压缩），读取侧先解压再读内层头部
         val gzipOut = if (header.compression == KdbxConstants.Compression.GZIP) {
-            GZIPOutputStream(cipherOut)
+            GZIPOutputStream(cipherOut, COMPRESSION_BUFFER_BYTES)
         } else {
             null
         }
