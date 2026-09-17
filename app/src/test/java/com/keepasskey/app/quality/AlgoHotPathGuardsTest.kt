@@ -166,6 +166,36 @@ class AlgoHotPathGuardsTest {
         )
     }
 
+    @Test
+    fun `健康检查不得对同一份口令重复解密与重复哈希`() {
+        val source = stripped("database/src/main/java/com/keepasskey/database/audit/HealthCheckEngine.kt")
+        assertEquals(
+            "SHA-256 只允许算一次——第二趟必须复用第一趟按条目 id 留档的哈希" +
+                "（原实现对同一条口令解密 3 次、哈希 2 次）",
+            1,
+            Regex("HashUtil\\.sha256\\(passBytes\\)").findAll(source).count()
+        )
+    }
+
+    @Test
+    fun `内存驻留加密的加解密与等值标签原语必须按线程复用`() {
+        val source = stripped("core/src/main/java/com/keepasskey/core/security/InMemoryCipher.kt")
+        assertEquals(
+            "Cipher 只允许在 ThreadLocal 初始化处新建一次（原每次 seal / unseal 各一次 provider 查找）",
+            1,
+            Regex("Cipher\\.getInstance\\(TRANSFORMATION\\)").findAll(source).count()
+        )
+        assertEquals(
+            "等值标签 Mac 只允许在 ThreadLocal 初始化处新建一次",
+            1,
+            Regex("Mac\\.getInstance\\(MAC_ALGORITHM\\)").findAll(source).count()
+        )
+        assertTrue(
+            "两处复用必须真的被取用（初始化了却每次新建等于没改）",
+            source.contains("sealCiphers.get()") && source.contains("eqMacs.get()")
+        )
+    }
+
     private fun stripped(path: String): String = readSource(path)
         .replace(BLOCK_COMMENT, "")
         .lines()

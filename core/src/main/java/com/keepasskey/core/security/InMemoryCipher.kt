@@ -64,6 +64,28 @@ internal object InMemoryCipher {
     /** 等值标签子密钥（HMAC-SHA256） */
     private val eqKey: ByteArray
 
+    /**
+     * `ISSUE-P3-169`：加密与等值标签原语**按线程**复用（`Cipher` 与 `Mac` 均非线程安全，
+     * 故用 `ThreadLocal` 而非共享单例；`init` 仍按 IV / 方向 / 密钥逐次重做，属必要开销）。
+     *
+     * 原实现每次 `seal` / `unseal` 都 `Cipher.getInstance`，每次标签都 `Mac.getInstance`：
+     * 装载一个 1000 条目库即 ≥1000 次两套 provider 查找 + 1000 次 HMAC，而受保护字段的
+     * 等值标签多数从未被比较过。
+     *
+     * **为何不扩大秘密驻留面**：复用实例会持有 `SecretKeySpec`（`encKey` / `eqKey` 的副本），
+     * 而这两把子密钥本就在本对象的字段里随进程存活（类 KDoc 的 `ISSUE-P2-06` 评估结论：
+     * 不轮换、不擦除——否则存活实例的旧密文将永久不可解密）。故本处缓存**不引入新的驻留面**；
+     * 这与 `OtpEngine` 的 `Mac` 复用被判定不实施（`已知工程限界.md` §9）是不同情形——
+     * 那里缓存的密钥是**每个条目的种子**，复用会让调用方 `fill(0)`「自己那份即唯一副本」的前提失效。
+     *
+     * **声明**：`ThreadLocal` 在长生命周期线程池下每线程各持有一份实例（不随线程回收释放），
+     * 属本取舍的代价，非泄漏（两份均为同一进程级密钥的副本）。
+     */
+    private val sealCiphers = ThreadLocal.withInitial { Cipher.getInstance(TRANSFORMATION) }
+
+    /** 等值标签 `Mac` 的按线程复用（同上；`Mac.doFinal` 后自动复位，故每次使用前显式 `init`） */
+    private val eqMacs = ThreadLocal.withInitial { Mac.getInstance(MAC_ALGORITHM) }
+
     init {
         val master = ByteArray(MASTER_KEY_LENGTH_BYTES).also { secureRandom.nextBytes(it) }
         val enc = hmacSha256(master, ENC_DOMAIN)
@@ -75,7 +97,7 @@ internal object InMemoryCipher {
     }
 
     private fun hmacSha256(key: ByteArray, data: ByteArray): ByteArray {
-        val mac = Mac.getInstance(MAC_ALGORITHM)
+        val mac = eqMacs.get()
         mac.init(SecretKeySpec(key, MAC_ALGORITHM))
         return mac.doFinal(data)
     }
@@ -100,7 +122,7 @@ internal object InMemoryCipher {
         val iv = ByteArray(IV_LENGTH_BYTES).also { secureRandom.nextBytes(it) }
         val tag = hmacSha256(eqKey, plain)
         return try {
-            val cipher = Cipher.getInstance(TRANSFORMATION)
+            val cipher = sealCiphers.get()
             cipher.init(Cipher.ENCRYPT_MODE, SecretKeySpec(encKey, "AES"), IvParameterSpec(iv))
             Sealed(iv, tag, cipher.doFinal(plain))
         } catch (e: Exception) {
@@ -116,7 +138,7 @@ internal object InMemoryCipher {
     fun unseal(iv: ByteArray, sealed: ByteArray): ByteArray {
         if (sealed.isEmpty()) return sealed.clone()
         return try {
-            val cipher = Cipher.getInstance(TRANSFORMATION)
+            val cipher = sealCiphers.get()
             cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(encKey, "AES"), IvParameterSpec(iv))
             cipher.doFinal(sealed)
         } catch (e: Exception) {

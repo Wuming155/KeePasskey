@@ -49,6 +49,10 @@ object HealthCheckEngine {
         val passwordHashCountMap = mutableMapOf<String, Int>()
 
         // 统计密码重用频率（基于哈希，用毕显式清零明文字节）
+        // ISSUE-P3-166：同时按条目 id 留档本趟已算出的哈希，供第二趟**复用**——原实现第二趟对
+        // 同一条目重新 `readUtf8()`（一次完整解密）并重算一遍 SHA-256，
+        // 等于「同一条口令在一次扫描里被解密 3 次、哈希 2 次」。
+        val passwordHashByEntryId = mutableMapOf<String, String>()
         for (entry in entries) {
             val passProtected = entry.password
             if (passProtected != null && passProtected.length > 0) {
@@ -57,6 +61,7 @@ object HealthCheckEngine {
                     if (passBytes.isNotEmpty()) {
                         val hashHex = com.keepasskey.crypto.hash.HashUtil.sha256(passBytes).toHexString()
                         passwordHashCountMap[hashHex] = (passwordHashCountMap[hashHex] ?: 0) + 1
+                        passwordHashByEntryId[entry.id.toHexString()] = hashHex
                     }
                 } finally {
                     java.util.Arrays.fill(passBytes, 0.toByte())
@@ -100,14 +105,16 @@ object HealthCheckEngine {
             val passLength = passChars.size
             var isWeak = false
             var strengthScore = 0
-            var hashHex = ""
+            // ISSUE-P3-166：直接复用第一趟已算出的哈希——两趟「取哈希」的前置条件（长度非 0 且
+            // 字节非空）逐字相同，故此处必然命中；原实现对同一份字节重算一遍 SHA-256
+            // （连同第一趟，同一条口令在一次扫描里被解密 3 次、哈希 2 次）。
+            val hashHex = passwordHashByEntryId[id].orEmpty()
             try {
                 // ISSUE-P3-36：弱口令判定下沉至 crypto 强度引擎（原生优先，失败降级为字节级近似）。
                 // 该引擎只读 UTF-8 字节，不构造 String，符合敏感数据铁律。
                 val strength = PasswordStrengthEvaluator.evaluate(passBytes)
                 isWeak = strength.isWeak
                 strengthScore = strength.score
-                hashHex = com.keepasskey.crypto.hash.HashUtil.sha256(passBytes).toHexString()
             } finally {
                 java.util.Arrays.fill(passChars, '0')
                 java.util.Arrays.fill(passBytes, 0.toByte())
