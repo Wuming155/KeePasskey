@@ -3,7 +3,9 @@ package com.keepasskey.crypto.perf
 import com.keepasskey.core.model.PasskeyData
 import com.keepasskey.crypto.cipher.AesCipherEngine
 import com.keepasskey.crypto.cipher.ChaCha20CipherEngine
+import com.keepasskey.crypto.cipher.NativeChaCha20
 import com.keepasskey.crypto.passkey.PasskeyCryptoEngine
+import org.bouncycastle.crypto.digests.SHA256Digest
 import org.bouncycastle.crypto.generators.ECKeyPairGenerator
 import org.bouncycastle.crypto.generators.Ed25519KeyPairGenerator
 import org.bouncycastle.crypto.generators.RSAKeyPairGenerator
@@ -14,6 +16,8 @@ import org.bouncycastle.crypto.params.Ed25519KeyGenerationParameters
 import org.bouncycastle.crypto.params.Ed25519PrivateKeyParameters
 import org.bouncycastle.crypto.params.RSAKeyGenerationParameters
 import org.bouncycastle.crypto.params.RSAPrivateCrtKeyParameters
+import org.bouncycastle.crypto.signers.RSADigestSigner
+import org.bouncycastle.crypto.util.PrivateKeyFactory
 import org.bouncycastle.crypto.util.PrivateKeyInfoFactory
 import org.bouncycastle.asn1.x9.X9ECParameters
 import org.bouncycastle.asn1.sec.SECNamedCurves
@@ -261,6 +265,16 @@ class DeviceThroughputProbeTest {
         val rsaSign = measurePerOp("RS256", "sign(生产signAssertion路径)", 1, SAMPLES, RSA_SIGN_OPS_PER_SAMPLE) {
             PasskeyCryptoEngine.signAssertion(PasskeyData.ALGORITHM_RS256, rsaKeyBytes, dataToSign)
         }
+        // 口径界定（2026-09-17 追问「是否考虑 JNI 开销」）：Rust 侧探针是「解析一次 key、复用它
+        // 反复签名」，而生产 `signRs256` 每次调用都 `PrivateKeyFactory.createKey(der)`。此变体剔除
+        // 解析开销，用于判定「BC 10.9ms 里有多少是解析」以及该不对称的影响方向。
+        val rsaParsedKey = PrivateKeyFactory.createKey(rsaKeyBytes)
+        val rsaSignPreParsed = measurePerOp("RS256", "sign(BC，key解析一次)", 1, SAMPLES, RSA_SIGN_OPS_PER_SAMPLE) {
+            val signer = RSADigestSigner(SHA256Digest())
+            signer.init(true, rsaParsedKey)
+            signer.update(dataToSign, 0, dataToSign.size)
+            signer.generateSignature()
+        }
 
         Arrays.fill(esKeyBytes, 0)
         Arrays.fill(edKeyBytes, 0)
@@ -272,7 +286,45 @@ class DeviceThroughputProbeTest {
         reportPerOp("Ed25519", "keygen", edGen)
         reportPerOp("Ed25519", "sign", edSign)
         reportPerOp("RS256", "keygen", rsaGen)
-        reportPerOp("RS256", "sign", rsaSign)
+        reportPerOp("RS256", "sign(生产路径，含每次解析)", rsaSign)
+        reportPerOp("RS256", "sign(BC，解析一次)", rsaSignPreParsed)
+    }
+
+    /**
+     * JNI 边界单次开销实测（2026-09-17 追问「RS256 结论是否考虑 JNI 开销」的量级证据）。
+     *
+     * 用既有内核测「一次跨边界调用 + 两次数组拷贝」的**固定开销**：
+     * - 16 B 载荷 ≈ 纯边界开销（内核计算量可忽略）；
+     * - 64 KiB 载荷 = 生产分块粒度下的单次调用成本（含真实计算）。
+     *
+     * 有了该数字即可判定：RS256 每次签名只跨边界 1 次、keygen 2 次，
+     * JNI 开销相对 17.8 ms / 2.1 s 的占比是否可能解释 1.6~2.1× 的差距。
+     */
+    @Test
+    fun probeJni边界单次开销() {
+        val key = ByteArray(32) { (it * 7 + 3).toByte() }
+        val nonce = ByteArray(12) { (it * 3 + 1).toByte() }
+        val tiny = ByteArray(16) { (it * 11 + 2).toByte() }
+        val chunk = ByteArray(64 * 1024) { (it * 13 + 5).toByte() }
+
+        fun perCallMicros(label: String, payload: ByteArray) {
+            val ops = 2000
+            repeat(100) { NativeChaCha20.applyKeystreamChecked(key, nonce, 0, payload) }
+            val samples = (0 until SAMPLES).map {
+                val start = System.nanoTime()
+                repeat(ops) { NativeChaCha20.applyKeystreamChecked(key, nonce, 0, payload) }
+                (System.nanoTime() - start) / 1000.0 / ops
+            }
+            val sorted = samples.sorted()
+            println(
+                "$PREFIX JNI边界|$label(${payload.size}B)|n=${sorted.size}轮均摊|" +
+                    "median=${fmt3(sorted[sorted.size / 2])}us|min=${fmt3(sorted.min())}us|max=${fmt3(sorted.max())}us"
+            )
+        }
+
+        perCallMicros("NativeChaCha20.applyKeystream", tiny)
+        perCallMicros("NativeChaCha20.applyKeystream", chunk)
+        Arrays.fill(key, 0); Arrays.fill(nonce, 0); Arrays.fill(tiny, 0); Arrays.fill(chunk, 0)
     }
 
     // ================= 采样与输出基建 =================
