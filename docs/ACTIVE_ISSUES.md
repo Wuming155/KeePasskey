@@ -51,7 +51,7 @@
 
 ---
 
-## P3 低危问题、特性接线与体验优化（7 项）
+## P3 低危问题、特性接线与体验优化（6 项）
 
 > 本批为 2026-09-17「降低 CPU / 内存占用」排查的**其余开放结论**。
 > 条目 153 为 **Rust 下沉候选的评估结论**（评估项）；条目 155 为同轮后续批次（§115）开工复核转登。
@@ -126,7 +126,12 @@
 > ——递归改为**惰性分配**（首次发现变化才复制该层列表）；**AC 第一半的 O(1) 闸门判定不做**（维护点须覆盖
 > 全部整树替换路径，漏一处即让修剪静默失效，风险不对称），见
 > [`resolved/batches/135-保存路径历史修剪惰性分配批次.md`](resolved/batches/135-保存路径历史修剪惰性分配批次.md)。
-> 其余条目（`P3-165` / `P3-168` / `P3-177` / `P3-182` / `P3-183`）**仍待整改**。
+> **已闭环（§136 第四档：Compose 状态宽度 ‣ 第七条＝`ISSUE-P3-176` ② 的转登项）**：`ISSUE-P3-183`
+> （应用根状态过宽导致导航图整图重建）——`keepasskeyNavGraph` 形参由整个 `SettingsUiState` 收窄为
+> `AppThemeMode`（该图实际只用 `themeMode` 两处）；根组合其余字段读取未动。**「不再整图重建」为结构性
+> 推理**（依赖编译器 lambda 记忆化），见
+> [`resolved/batches/136-导航图参数收窄批次.md`](resolved/batches/136-导航图参数收窄批次.md)。
+> 其余条目（`P3-165` / `P3-168` / `P3-177` / `P3-182`）**仍待整改**。
 
 ### ISSUE-P3-153 Rust 下沉候选的评估结论（**评估项，非整改项**）
 
@@ -239,22 +244,3 @@
 - **风险提示**：属**状态形状 + UI 三处联动**的改动，回归面集中在**宿主不可渲染的 UI**
   （须以接线守卫 + 编译期契约承担，并核对预览 / 截图基线）；`§120` 已把「全局 30 秒」这一错误前提
   从分母中移除，**不得**在解耦过程中把它带回来。
-
-### ISSUE-P3-183 应用根状态过宽导致导航图整图重建
-
-- **背景**：`ISSUE-P3-176` ② 的（§134 批次转登）：`app/src/main/java/com/keepasskey/app/ui/KeePasskeyApp.kt:61`
-  的根组合读取**整个** `SettingsUiState`（100+ 字段）并在 `:243` 传给
-  `keepasskeyNavGraph(appSettings = …)`；而 `NavHost` 以
-  `remember(route, startDestination, builder) { navController.createGraph(...) }` 建图 ⇒
-  **builder 是新 lambda 时整张图重建**，而 builder 捕获的 `appSettings` 在任一字段变化
-  （同步状态文案、健康扫描进度、调试开关……）时就是新实例（`SettingsUiState` 含 `List<String>`、
-  未标 `@Immutable`）⇒ 任一**无关**偏好变化都会 `createGraph` + `setGraph`，重建全部 `NavDestination`。
-- **整改方向**（`ISSUE-P3-176` AC ② 原文口径）：根只读**真正需要的窄字段**
-  （`themeMode` / `showKillAppOption` / `appLanguage` 等），`keepasskeyNavGraph` 改接收窄参数，
-  或用 `remember(navController, 窄参数)` 把 builder 包一层。
-- **验收标准**：导航图不因**无关**设置字段变化而重建（结构断言或计数）；既有导航 / 页面用例全绿；
-  预览与截图基线经复核（涉及全仓导航调用点）。
-- **核实时间点与方式**：2026-09-17 读 `KeePasskeyApp.kt:55-70/235-250`、
-  `androidx.navigation:navigation-compose:2.10.0` 的 `NavHost` 建图实现（`remember(route, startDestination, builder)`）核实（§134 开工期一并读得）。
-- **风险提示**：属 **Compose 状态宽度 + 导航建图**面，改动会触及 `keepasskeyNavGraph` 形参与
-  全仓导航调用点；**不得**以「用 `remember` 包一层」掩盖真实依赖（把无关字段也纳入 key 会让问题原样保留）。

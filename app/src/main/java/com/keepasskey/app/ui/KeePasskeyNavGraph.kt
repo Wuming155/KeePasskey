@@ -14,7 +14,7 @@ import com.keepasskey.app.ui.screens.detail.EntryDetailScreen
 import com.keepasskey.app.ui.screens.edit.EntryEditScreen
 import com.keepasskey.app.ui.screens.generator.GeneratorScreen
 import com.keepasskey.app.ui.screens.settings.SettingsScreen
-import com.keepasskey.app.ui.screens.settings.SettingsUiState
+import com.keepasskey.app.ui.theme.AppThemeMode
 import com.keepasskey.app.ui.screens.unlock.UnlockScreen
 import com.keepasskey.app.ui.screens.vault.VaultListScreen
 
@@ -22,13 +22,19 @@ import com.keepasskey.app.ui.screens.vault.VaultListScreen
  * KeePasskey 一级路由图（ISSUE-P3-29：自 `KeePasskeyApp.kt` 拆出，纯结构性拆分）。
  *
  * 逐条路由定义原样迁移；本扩展函数只接收路由构建所需的宿主上下文
- * （[navController] / [appSettings] / [toggleTheme] / [killAppAction] / [autoLockManager]），
+ * （[navController] / [themeMode] / [toggleTheme] / [killAppAction] / [autoLockManager]），
  * 不持有任何状态，故可独立阅读与推理。二级设置页路由见 `keepasskeySettingsNavGraph`。
+ *
+ * `ISSUE-P3-183`：此处原接收**整个** `SettingsUiState`（100+ 字段）——本文件实际只用到其中的
+ * `themeMode` 两处，而 `NavHost` 以 `remember(route, startDestination, builder)` 建图：
+ * builder 捕获的状态若含不稳定字段（`SettingsUiState` 带 `List<String>`、未标 `@Immutable`），
+ * 则任一**无关**偏好变化都会让 builder 成为新实例 ⇒ 整图 `createGraph` + `setGraph`，
+ * 重建全部 `NavDestination`。收窄为 `AppThemeMode`（枚举，稳定）后，仅主题变化才会重建。
  */
 @Suppress("LongParameterList")
 internal fun NavGraphBuilder.keepasskeyNavGraph(
     navController: NavHostController,
-    appSettings: SettingsUiState,
+    themeMode: AppThemeMode,
     toggleTheme: () -> Unit,
     killAppAction: (() -> Unit)?,
     autoLockManager: AutoLockManager?
@@ -36,7 +42,7 @@ internal fun NavGraphBuilder.keepasskeyNavGraph(
     // 1. 登录与解锁页
     composable(Screen.Unlock.route) {
         UnlockScreen(
-            currentTheme = appSettings.themeMode,
+            currentTheme = themeMode,
             onThemeToggle = toggleTheme,
             onUnlockSuccess = {
                 autoLockManager?.onUnlockSuccess()
@@ -63,7 +69,7 @@ internal fun NavGraphBuilder.keepasskeyNavGraph(
     // 3. 主密码库列表页
     composable(Screen.VaultList.route) {
         VaultListScreen(
-            currentTheme = appSettings.themeMode,
+            currentTheme = themeMode,
             onThemeToggle = toggleTheme,
             onEntryClick = { entryId ->
                 navController.navigate(Screen.EntryDetail.createRoute(entryId))

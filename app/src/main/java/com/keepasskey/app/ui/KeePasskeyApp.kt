@@ -240,7 +240,7 @@ fun KeePasskeyApp() {
                         ) {
                             keepasskeyNavGraph(
                                 navController = navController,
-                                appSettings = appSettings,
+                                themeMode = appSettings.themeMode,
                                 toggleTheme = toggleTheme,
                                 killAppAction = killAppAction,
                                 autoLockManager = autoLockManager

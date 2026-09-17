@@ -431,6 +431,25 @@ class AlgoHotPathGuardsTest {
         )
     }
 
+    @Test
+    fun `导航图不得捕获整个设置状态`() {
+        val graph = stripped("app/src/main/java/com/keepasskey/app/ui/KeePasskeyNavGraph.kt")
+        assertFalse(
+            "导航图不得再接收整个 SettingsUiState（NavHost 以 remember(builder) 建图 ⇒ " +
+                "任一无关偏好变化都会整图 createGraph）",
+            graph.contains("appSettings: SettingsUiState")
+        )
+        assertTrue(
+            "应改为收窄的 AppThemeMode（枚举，稳定 ⇒ builder lambda 可被记忆化）",
+            graph.contains("themeMode: AppThemeMode")
+        )
+        assertTrue(
+            "调用点必须只传窄字段",
+            stripped("app/src/main/java/com/keepasskey/app/ui/KeePasskeyApp.kt")
+                .contains("themeMode = appSettings.themeMode,")
+        )
+    }
+
     private fun stripped(path: String): String = readSource(path)
         .replace(BLOCK_COMMENT, "")
         .lines()
