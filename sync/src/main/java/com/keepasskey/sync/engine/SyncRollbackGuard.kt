@@ -116,12 +116,16 @@ class SyncRollbackGuard(
      * （fail-open，取舍与代价见类 KDoc「状态缺失 / 被篡改时的裁决」）。
      */
     fun inspect(remotePath: String, content: ByteArray): RollbackVerdict {
-        val digest = SyncCache.sha256Hex(content)
+        return inspect(remotePath, SyncCache.sha256Hex(content))
+    }
+
+    /** 同上，摘要由调用方提供（`ISSUE-P3-167`；摘要须为内容的 SHA-256 十六进制小写摘要）。 */
+    fun inspect(remotePath: String, contentDigest: String): RollbackVerdict {
         val state = load(remotePath)
         return when {
             state.current == null -> RollbackVerdict.Accept
-            state.current == digest -> RollbackVerdict.Unchanged
-            digest in state.recent -> RollbackVerdict.ReplayDetected
+            state.current == contentDigest -> RollbackVerdict.Unchanged
+            contentDigest in state.recent -> RollbackVerdict.ReplayDetected
             else -> RollbackVerdict.Accept
         }
     }
@@ -132,14 +136,18 @@ class SyncRollbackGuard(
      * [State.sequence] 当前仅被持久化、不参与裁决（见类 KDoc「`sequence` 字段现状」）。
      */
     fun recordAccepted(remotePath: String, content: ByteArray) {
-        val digest = SyncCache.sha256Hex(content)
+        recordAccepted(remotePath, SyncCache.sha256Hex(content))
+    }
+
+    /** 同上，摘要由调用方提供（`ISSUE-P3-167`；摘要须为内容的 SHA-256 十六进制小写摘要）。 */
+    fun recordAccepted(remotePath: String, contentDigest: String) {
         val state = load(remotePath)
-        if (state.current == digest) return
+        if (state.current == contentDigest) return
         val recent = buildList {
             state.current?.let { add(it) }
             addAll(state.recent)
         }.distinct().take(MAX_RECENT_DIGESTS)
-        persist(remotePath, State(state.sequence + 1, digest, recent))
+        persist(remotePath, State(state.sequence + 1, contentDigest, recent))
     }
 
     private fun load(remotePath: String): State {

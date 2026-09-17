@@ -49,6 +49,16 @@ internal class RemoteConsistencyProbe(
  * 「基线前移 + 基准内容落盘」写序（updateBase -> writeBaseContent），保证多处写盘序列一致。
  *
  * @param priorLocalVersion 已计算的本地版本哈希；为 null 时按 [bytes] 现算 SHA-256。
+ *
+ * **`ISSUE-P3-167` 复核结论（为何仍然写两份完整内容）**：本函数与 `writeCache` 各写一份
+ * （缓存快照 + 基准快照），**这是有意的**——基准快照必须与工作副本解耦，否则本地修改会污染 base、
+ * 使三方合并退化为「远端全胜」。原条目另建议「内容一致则跳过第二次写盘」，复核判定**不做**：
+ * ① 逐字节判定（长度 + 摘要）需要在**每一次**调用上先读全量内容并哈希，而本函数总在
+ * 「内容刚变更」之后被调用（上传成功 / 接受远端）⇒ 跳过判定在最常见路径上**净增**工作量；
+ * ② 廉价推断（`basecache` 存在且 `<hash>.baseversion` 已等于该摘要）**不安全**：本函数的写序是
+ * `updateBase` → `writeBaseContent`，两步之间崩溃会留下「baseversion 已前移、basecache 仍旧字节」，
+ * 此时跳过写盘会把**陈旧基准永久固化**——正是基准快照存在的意义所要避免的。
+ * 结论与解除条件登记于 `docs/architecture/已知工程限界.md` §11。
  */
 internal fun advanceBaseAndPersist(
     cache: SyncCache,

@@ -43,6 +43,40 @@ class SyncRollbackGuardTest {
         assertEquals(RollbackVerdict.Unchanged, guard.inspect(remotePath, v1))
     }
 
+    /**
+     * `ISSUE-P3-167`：新增的「摘要由调用方提供」重载必须与字节重载**逐裁决一致**。
+     *
+     * 接受远端内容的路径已改为「一次算出摘要、三处共用」，故两套重载的等价性是这次改动的前提；
+     * 本用例对三种裁决（Accept / Unchanged / ReplayDetected）逐一比对，并顺带锁定
+     * 「摘要重载记录的正是同一份状态」（两次记录 A→B 后重放 A 必判重放）。
+     */
+    @Test
+    fun `摘要重载与字节重载的裁决逐项一致`() {
+        val guard = SyncRollbackGuard(stateDir(), FixedMac("key-A"))
+        val v1 = "content-v1".toByteArray()
+        val v2 = "content-v2".toByteArray()
+        val d1 = SyncCache.sha256Hex(v1)
+        val d2 = SyncCache.sha256Hex(v2)
+
+        assertEquals(RollbackVerdict.Accept, guard.inspect(remotePath, d1))
+        guard.recordAccepted(remotePath, d1)
+        assertEquals(RollbackVerdict.Unchanged, guard.inspect(remotePath, d1))
+        assertEquals(
+            "同一内容下两种重载必须给出同一裁决",
+            guard.inspect(remotePath, v1),
+            guard.inspect(remotePath, d1)
+        )
+
+        guard.recordAccepted(remotePath, v2)
+        assertEquals(
+            "重放旧版本：字节重载与摘要重载必须同为 ReplayDetected",
+            RollbackVerdict.ReplayDetected,
+            guard.inspect(remotePath, d1)
+        )
+        assertEquals(guard.inspect(remotePath, v1), guard.inspect(remotePath, d1))
+        assertEquals(RollbackVerdict.Unchanged, guard.inspect(remotePath, d2))
+    }
+
     @Test
     fun `曾接受过的历史版本被判为重放`() {
         val guard = SyncRollbackGuard(stateDir(), FixedMac("key-A"))

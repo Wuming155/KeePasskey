@@ -26,12 +26,28 @@ class SyncEngine(
     val events = MutableSharedFlow<SyncCacheEvent>(replay = 16, extraBufferCapacity = 64)
 
     /** 远端内容是否为设备侧曾接受过的历史版本（回退 / 重放） */
+    /**
+     * 是否命中「曾接受过的历史版本」（防回滚裁决）。
+     *
+     * `ISSUE-P3-167`：拆成「字节」与「摘要」两个重载——接受远端内容的路径上，同一份字节的
+     * SHA-256 会被回滚裁决、缓存写入与高水位记录共用，由调用方一次算出并贯穿
+     * （原实现三处各算一遍全库 SHA-256）。
+     */
     private fun isReplay(remotePath: String, bytes: ByteArray): Boolean =
-        rollbackGuard?.inspect(remotePath, bytes) == RollbackVerdict.ReplayDetected
+        isReplay(remotePath, SyncCache.sha256Hex(bytes))
+
+    /** 同上，摘要由调用方提供（须为内容的 SHA-256 十六进制小写摘要）。 */
+    private fun isReplay(remotePath: String, contentDigest: String): Boolean =
+        rollbackGuard?.inspect(remotePath, contentDigest) == RollbackVerdict.ReplayDetected
 
     /** 记录一份已被设备接受的内容（前移防回滚高水位） */
     private fun recordAccepted(remotePath: String, bytes: ByteArray) {
-        rollbackGuard?.recordAccepted(remotePath, bytes)
+        recordAccepted(remotePath, SyncCache.sha256Hex(bytes))
+    }
+
+    /** 同上，摘要由调用方提供（须为内容的 SHA-256 十六进制小写摘要）。 */
+    private fun recordAccepted(remotePath: String, contentDigest: String) {
+        rollbackGuard?.recordAccepted(remotePath, contentDigest)
     }
 
     /**
@@ -105,13 +121,16 @@ class SyncEngine(
             }
 
             // ISSUE-P2-18：若远端返回设备侧曾接受过的历史版本（回退/重放），拒绝写入缓存与基线
-            if (isReplay(remotePath, remoteBytes)) {
+            // ISSUE-P3-167：本份远端字节的摘要**只算一次**并全程贯穿——原实现分别在回滚裁决、
+            // 缓存写入与高水位记录三处各算一遍全库 SHA-256（ETag 缺失路径另有探测侧一次）。
+            val remoteDigest = SyncCache.sha256Hex(remoteBytes)
+            if (isReplay(remotePath, remoteDigest)) {
                 return@withContext SyncOpenResult.RollbackRejected(remoteBytes, meta.etag)
             }
 
-            val hash = cache.writeCache(remotePath, remoteBytes)
+            val hash = cache.writeCache(remotePath, remoteBytes, precomputedDigest = remoteDigest)
             advanceBaseAndPersist(cache, remotePath, meta.etag, hash, remoteBytes)
-            recordAccepted(remotePath, remoteBytes)
+            recordAccepted(remotePath, remoteDigest)
             events.tryEmit(SyncCacheEvent.LoadedFromRemoteInSync(remotePath))
             return@withContext SyncOpenResult.RemoteSynced(remoteBytes, meta.etag)
         }

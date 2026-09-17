@@ -100,9 +100,17 @@ open class SyncCache(private val cacheDir: File) {
      * 进而被误判为未缓存而触发全量下载，丢失本地未同步修改。
      *
      * @param updateVersion 是否同步刷新 `<hash>.version`
+     * @param precomputedDigest 调用方已算出的 `data` 摘要（须为 SHA-256 十六进制小写）；
+     *   为空时按 `data` 现算。`ISSUE-P3-167`：接受远端内容时同一份字节的摘要会被多处使用
+     *   （回滚裁决 / 缓存写入 / 高水位记录），由调用方一次算出并贯穿，避免对整库重复计算。
      * @return 写入内容的 SHA-256 十六进制小写摘要
      */
-    fun writeCache(remotePath: String, data: ByteArray, updateVersion: Boolean = true): String {
+    fun writeCache(
+        remotePath: String,
+        data: ByteArray,
+        updateVersion: Boolean = true,
+        precomputedDigest: String? = null
+    ): String {
         val cacheFile = getFile(remotePath, SUFFIX_CACHE)
         val tmpFile = tmpFileFor(cacheFile)
 
@@ -114,7 +122,7 @@ open class SyncCache(private val cacheDir: File) {
 
         moveAtomically(tmpFile, cacheFile)
 
-        val sha256 = sha256Hex(data)
+        val sha256 = precomputedDigest ?: sha256Hex(data)
         if (updateVersion) {
             val versionFile = getFile(remotePath, SUFFIX_VERSION)
             writeStringSafely(versionFile, sha256)
