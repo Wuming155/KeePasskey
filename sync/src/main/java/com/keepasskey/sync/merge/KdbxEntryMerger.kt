@@ -98,6 +98,13 @@ internal object KdbxEntryMerger {
      * 条目相对 base 是否被修改。
      * ISSUE-P3-03 (43a)：由 private 放宽为 internal —— 「每次询问」策略的决策清单扩充
      * （[BothModifiedEntryCollector]）必须复用同一修改判定，避免两处判定口径漂移。
+     *
+     * **口径边界（`ISSUE-P2-91` 复核，勿与另一处混用）**：本判定回答的是
+     * 「条目相对 **base** 是否被修改」（冲突裁决用），故**必须**把 `times.lastModificationTime`
+     * 计入；而「本地是否需要重新序列化上传」的问题由 `app` 模块的 `KdbxContentComparator`
+     * 回答，那一侧**刻意不比 `times`**（`KdbxTimes` 含使用性字段 `lastAccessTime` / `usageCount`，
+     * 纳入会让「触碰但内容等同」被判成变更 ⇒ 无意义重传并前移远端 ETag）。
+     * 两处口径**刻意不同**，理由各自就地声明；边界登记于 `docs/architecture/已知工程限界.md` §10。
      */
     fun isModified(base: KdbxEntry?, current: KdbxEntry): Boolean {
         if (base == null) return true

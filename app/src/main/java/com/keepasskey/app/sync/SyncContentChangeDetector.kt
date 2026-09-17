@@ -1,7 +1,5 @@
 package com.keepasskey.app.sync
 
-import com.keepasskey.core.model.KdbxEntry
-import com.keepasskey.core.model.KdbxGroup
 import com.keepasskey.database.file.KdbxDatabase
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -53,58 +51,14 @@ class SyncContentChangeDetector @Inject constructor(
     }
 
     /**
-     * 全字段递归内容比较（C1 整改）。
-     * 原实现仅比较 title/userName/password/url/notes 五项：仅修改 tags、自定义字段、
-     * 附件、图标、分组结构等内容的编辑会被误判为"无变化"，导致复用过期缓存并把
-     * 旧字节上传到云端（本地编辑与云端静默分叉）。
-     * ProtectedString.equals 为字节数组内容比较，整字段比较不会物化明文密码。
+     * 全字段递归内容比较（C1 整改；`ISSUE-P2-91` 起判定逻辑抽至 [KdbxContentComparator]
+     * 以便脱离 DI 直测——该类此前**零用例覆盖**，而它是「本地编辑被静默丢弃」类缺陷的唯一判据）。
+     *
+     * 判定的 KDoc 与口径（含「刻意不比 `times`」及其理由）随逻辑一并迁移；
+     * 本函数只保留「基线缺失即按有变化保守处理」这一条与比较无关的分支。
      */
     private fun hasDatabaseContentChanged(current: KdbxDatabase, reference: KdbxDatabase?): Boolean {
         if (reference == null) return true
-        if (current.deletedObjects != reference.deletedObjects) return true
-        return isGroupContentChanged(current.rootGroup, reference.rootGroup)
-    }
-
-    private fun isGroupContentChanged(a: KdbxGroup, b: KdbxGroup): Boolean {
-        if (a.id != b.id || a.name != b.name || a.notes != b.notes ||
-            a.iconId != b.iconId || a.customIconId != b.customIconId ||
-            a.parentGroupId != b.parentGroupId ||
-            // P1-8 配套：分组 tags / customData 已为一等持久化字段，纳入变化检测，
-            // 防止仅修改分组标签的编辑被误判为「无变化」而把旧字节上传云端
-            a.tags != b.tags || a.customData != b.customData
-        ) {
-            return true
-        }
-        if (a.entries.size != b.entries.size) return true
-        val bEntries = b.entries.associateBy { it.id }
-        for (entry in a.entries) {
-            val ref = bEntries[entry.id] ?: return true
-            if (isEntryContentChanged(entry, ref)) return true
-        }
-        if (a.subgroups.size != b.subgroups.size) return true
-        val bSubgroups = b.subgroups.associateBy { it.id }
-        for (sub in a.subgroups) {
-            val ref = bSubgroups[sub.id] ?: return true
-            if (isGroupContentChanged(sub, ref)) return true
-        }
-        return false
-    }
-
-    private fun isEntryContentChanged(a: KdbxEntry, b: KdbxEntry): Boolean {
-        return a.fields != b.fields ||
-                a.customFields != b.customFields ||
-                a.tags != b.tags ||
-                a.attachments != b.attachments ||
-                a.iconId != b.iconId ||
-                a.customIconId != b.customIconId ||
-                a.overrideUrl != b.overrideUrl ||
-                a.qualityCheck != b.qualityCheck ||
-                a.parentGroupId != b.parentGroupId ||
-                a.previousParentGroup != b.previousParentGroup ||
-                a.customData != b.customData ||
-                a.autoType != b.autoType ||
-                a.backgroundColor != b.backgroundColor ||
-                a.foregroundColor != b.foregroundColor ||
-                a.history.size != b.history.size
+        return KdbxContentComparator.changed(current, reference)
     }
 }

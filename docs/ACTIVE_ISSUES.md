@@ -34,26 +34,14 @@
 
 ---
 
-## P2 中危缺陷与协议/测试缺口（1 项）
+## P2 中危缺陷与协议/测试缺口（0 项）
 
-### ISSUE-P2-91 同步内容变化检测漏比 `times` 与历史内容（可能静默丢弃本地改动）
-
-- **背景**：`app/src/main/java/com/keepasskey/app/sync/SyncContentChangeDetector.kt:93` 的 `isEntryContentChanged`
-  比较 14 个字段 + `history.size`，**完全不比 `times`**（`expires` / `expiryTime` / `lastModificationTime` 等），
-  历史也**只比条数不比内容**；而合并侧 `sync/.../merge/KdbxEntryMerger.kt:114` 明确把
-  `times.lastModificationTime` 计入「已修改」——两处对同一问题给出不同答案（同文件 `isGroupContentChanged:68`
-  已按 P1-8 把分组 `tags`/`customData` 纳入检测，条目侧未跟上）。
-- **后果（已核实）**：`app/.../sync/SyncCycleRunner.kt:130` 在检测器判「无变化」时，本地字节**直接复用旧缓存快照**、
-  不再序列化当前内存树，而这份旧字节即随后上传远端的内容 ⇒ **只改 `times` 的编辑不会被上传**，
-  远端分支上还有被远端内容覆盖的风险。
-- **整改方向**：补齐 `times` 比较；历史改为内容级比较（逐项字段比较或序列化后摘要比较）；
-  两处判定若需保持不同口径，须在 KDoc 显式声明差异与理由。
-- **验收标准**：新增用例覆盖「仅 `times` 变化」「历史条数相同但内容不同」两种输入，改造前必红；
-  并给出「判定为无变化时不再复用缓存字节」或等价的结构性断言。
-- **核实时间点与方式**：2026-09-17 主控直读 `SyncContentChangeDetector.kt:60-109`、
-  `KdbxEntryMerger.kt:102-116`、`SyncCycleRunner.kt:127-139` 三处源码核实。
-- **未核实（不得当结论）**：**是否存在可达的 UI 编辑面只会改 `times`** 未查；
-  若确认存在，本项严重度应升为 P1。
+> **暂无开放项**。`ISSUE-P2-91`（同步内容变化检测漏比 `times` 与历史内容）已于 §122 批次
+> **经前提复核撤销**——「只改 `times` 的本地编辑被静默丢弃」在本应用可达面上**不成立**
+> （生产代码无 `expires` / `expiryTime` 写入者；`times` 的改写必然伴随 `fields` 或 `customFields` 变化）；
+> 其真实残余（两处判定**口径刻意不同** + 历史只比条数）作为**口径而非缺陷**登记
+> [`architecture/已知工程限界.md`](architecture/已知工程限界.md) **§10**，见
+> [`resolved/batches/122-同步变化判定口径声明与语义锁定批次.md`](resolved/batches/122-同步变化判定口径声明与语义锁定批次.md)。
 
 > **本批历史**：2026-09-17 登记的两条 CPU 占用瓶颈（`ISSUE-P2-89` 列表页秒级整页重建、
 > `ISSUE-P2-90` TOTP 重算 O(T×N)）已于同日在 §114 批次闭环，实现与验证证据见
