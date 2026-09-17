@@ -2,6 +2,7 @@ package com.keepasskey.database.fieldref
 
 import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.model.KdbxGroup
+import java.util.TreeMap
 
 /**
  * KeePass 字段引用（`{REF:...}`）解析引擎（TASK-17）。
@@ -121,13 +122,49 @@ object FieldReferenceEngine {
     ): String =
         if (!containsReference(text)) text
         else resolveInternal(
-            text, root, depth = 0, mode = mode,
+            text, RefIndex(root, ::valueOf), depth = 0, mode = mode,
             protectedPlaceholder = protectedPlaceholder, consumerField = consumerField
         )
 
+    /**
+     * 一次解析内共享的**引用目标索引**（`ISSUE-P3-163`）。
+     *
+     * 原实现把 `root.allEntries()` 写在正则回调体内，而该回调**每个引用出现处执行一次**、
+     * 且解析本身是递归的（每层各展平一次）⇒ 复杂度 `O(引用数 × 深度 × 条目数)` 次整树展平
+     * （每次都是一遍递归遍历 + 一个新 `List` 分配）。本索引在解析入口建一次、沿递归全程共享：
+     *
+     * - 条目树**只展平一次**，且**惰性**——文本不含引用时根本不触发（[resolveWith] 已短路）；
+     * - 按**检索字段**分桶的索引同样惰性构建，故「无人引用口令」时**不会**去解密口令，
+     *   与既有「按需读取受保护字段」的成本面一致（若改为一次性建全部字段的索引，就会把
+     *   全库口令都解密一遍——那是**反向优化**）；
+     * - 查找语义与 `firstOrNull { valueOf(…).equals(searchText, ignoreCase = true) }` **逐字等价**：
+     *   键用 `String.CASE_INSENSITIVE_ORDER`（与 `equalsIgnoreCase` 同一套逐字符折叠，
+     *   故不会像 `lowercase()` 那样在希腊语末位 sigma 等码点上改变等价类），
+     *   同值只保留**文档序首个**条目（`TreeMap` 的 `containsKey` 走同一比较器）。
+     */
+    private class RefIndex(
+        root: KdbxGroup,
+        private val valueOf: (KdbxEntry, RefField) -> String?
+    ) {
+        private val entries: List<KdbxEntry> by lazy { root.allEntries() }
+        private val byField = mutableMapOf<RefField, TreeMap<String, KdbxEntry>>()
+
+        fun find(field: RefField, text: String): KdbxEntry? = indexOf(field)[text]
+
+        private fun indexOf(field: RefField): TreeMap<String, KdbxEntry> =
+            byField.getOrPut(field) {
+                val index = TreeMap<String, KdbxEntry>(String.CASE_INSENSITIVE_ORDER)
+                for (entry in entries) {
+                    val value = valueOf(entry, field) ?: continue
+                    if (!index.containsKey(value)) index[value] = entry
+                }
+                index
+            }
+    }
+
     private fun resolveInternal(
         text: String,
-        root: KdbxGroup,
+        index: RefIndex,
         depth: Int,
         mode: ResolveMode,
         protectedPlaceholder: String,
@@ -148,16 +185,14 @@ object FieldReferenceEngine {
                 return@replace protectedPlaceholder
             }
 
-            val target = root.allEntries().firstOrNull { entry ->
-                valueOf(entry, searchField).equals(searchText, ignoreCase = true)
-            }
+            val target = index.find(searchField, searchText)
             when {
                 // 未命中：保持原文（保守不吞）
                 target == null -> match.value
                 // 命中：取值并递归展开（值本身可能仍是引用链；消费点面白名单随通道全程传递）
                 else -> resolveInternal(
                     valueOf(target, wantField).orEmpty(),
-                    root,
+                    index,
                     depth + 1,
                     mode,
                     protectedPlaceholder,

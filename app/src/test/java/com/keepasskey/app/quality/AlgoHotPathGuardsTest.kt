@@ -257,6 +257,29 @@ class AlgoHotPathGuardsTest {
         )
     }
 
+    @Test
+    fun `字段引用解析不得按每个引用重建整库扁平列表`() {
+        val fieldRef =
+            stripped("database/src/main/java/com/keepasskey/database/fieldref/FieldReferenceEngine.kt")
+        assertEquals(
+            "整树展平只允许出现一次（原实现在正则回调体内逐引用展平，且解析递归 ⇒ 每层各一次）",
+            1,
+            Regex("allEntries\\(\\)").findAll(fieldRef).count()
+        )
+        assertTrue(
+            "该唯一展平点必须在惰性索引内（文本无引用时不得触发）",
+            fieldRef.contains("by lazy { root.allEntries() }")
+        )
+        assertFalse(
+            "正则回调内不得再现场线性扫描整树",
+            fieldRef.contains("firstOrNull { entry ->")
+        )
+        assertTrue(
+            "索引键必须用与 equalsIgnoreCase 同一套折叠的比较器（lowercase 归一化会在部分码点上漂移）",
+            fieldRef.contains("TreeMap<String, KdbxEntry>(String.CASE_INSENSITIVE_ORDER)")
+        )
+    }
+
     private fun stripped(path: String): String = readSource(path)
         .replace(BLOCK_COMMENT, "")
         .lines()

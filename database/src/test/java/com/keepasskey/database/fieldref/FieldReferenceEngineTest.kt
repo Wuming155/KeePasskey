@@ -39,6 +39,59 @@ class FieldReferenceEngineTest {
     private fun rootWith(vararg entries: KdbxEntry): KdbxGroup =
         KdbxGroup(id = KdbxUuid.random(), name = "Root", entries = entries.toList())
 
+    // ── ISSUE-P3-163：一次解析内共享「引用目标索引」，语义须与逐引用现场展平逐字等价 ──
+
+    @Test
+    fun `同一文本中的多个引用与嵌套链共享同一索引且结果不变`() {
+        val a = entry(title = "A", username = "user-a")
+        val b = entry(title = "B", username = "{REF:U@T:A}")
+        val root = rootWith(a, b)
+
+        assertEquals(
+            "三个引用（含经 B 间接指向 A 的嵌套链）必须全部解析出来",
+            "user-a|user-a|user-a",
+            FieldReferenceEngine.resolve(
+                "{REF:U@T:A}|{REF:U@T:B}|{REF:U@T:A}",
+                root,
+                FieldReferenceEngine.RefField.USER_NAME
+            )
+        )
+    }
+
+    @Test
+    fun `同值多条目时取文档序首个`() {
+        val first = entry(title = "Same", username = "first")
+        val second = entry(title = "SAME", username = "second")
+        val root = rootWith(first, second)
+
+        assertEquals(
+            "文档序首个胜出（索引同值只保留首个）",
+            "first",
+            FieldReferenceEngine.resolve("{REF:U@T:Same}", root, FieldReferenceEngine.RefField.USER_NAME)
+        )
+        assertEquals(
+            "检索文本自身的大小写不影响结果",
+            "first",
+            FieldReferenceEngine.resolve("{REF:U@T:sAmE}", root, FieldReferenceEngine.RefField.USER_NAME)
+        )
+    }
+
+    @Test
+    fun `忽略大小写的等价类与逐字符折叠一致`() {
+        // 希腊语：'Σ'（大写）与 'ς'（词尾小写）在 equalsIgnoreCase 下相等，但 `lowercase()` 不相等
+        // （'ς'.lowercase() == 'ς' 而 'Σ'.lowercase() == 'σ'）。
+        // 索引因此必须用 String.CASE_INSENSITIVE_ORDER 而非 lowercase 归一化做键——
+        // 否则该引用会从「命中」退化为「保持原文」，属静默语义漂移。
+        val target = entry(title = "Σ", username = "sigma-user")
+        val root = rootWith(target)
+
+        assertEquals(
+            "非 ASCII 码点上的大小写等价类必须与 equalsIgnoreCase 一致",
+            "sigma-user",
+            FieldReferenceEngine.resolve("{REF:U@T:ς}", root, FieldReferenceEngine.RefField.USER_NAME)
+        )
+    }
+
     @Test
     fun `基本用户名引用按标题检索解析`() {
         val github = entry(title = "GitHub", username = "octocat", password = "gh_secret")
