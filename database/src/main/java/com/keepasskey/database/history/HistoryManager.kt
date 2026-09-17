@@ -134,18 +134,32 @@ object HistoryManager {
     ): KdbxGroup {
         if (maintenanceHistoryDays <= 0) return group
 
-        var changed = false
-        val newEntries = group.entries.map { entry ->
+        // ISSUE-P3-164：列表**惰性分配**——原实现无条件 `entries.map { … }` + `subgroups.map { … }`，
+        // 即使整树无一条超期快照，也会为**每个分组各分配两个新列表**（万级分组库每次保存数万次分配，
+        // 而「确有历史可修剪」只是少数库的少数条目）。仅在同一层首次发现变化时才复制该层列表。
+        var newEntries: MutableList<KdbxEntry>? = null
+        group.entries.forEachIndexed { index, entry ->
             val pruned = pruneHistoryByAge(entry, maintenanceHistoryDays, now)
-            if (pruned !== entry) changed = true
-            pruned
+            if (pruned !== entry) {
+                val list = newEntries ?: group.entries.toMutableList().also { newEntries = it }
+                list[index] = pruned
+            }
         }
-        val newSubgroups = group.subgroups.map { sub ->
+
+        var newSubgroups: MutableList<KdbxGroup>? = null
+        group.subgroups.forEachIndexed { index, sub ->
             val pruned = pruneGroupHistoryByAge(sub, maintenanceHistoryDays, now)
-            if (pruned !== sub) changed = true
-            pruned
+            if (pruned !== sub) {
+                val list = newSubgroups ?: group.subgroups.toMutableList().also { newSubgroups = it }
+                list[index] = pruned
+            }
         }
-        return if (changed) group.copy(entries = newEntries, subgroups = newSubgroups) else group
+
+        if (newEntries == null && newSubgroups == null) return group
+        return group.copy(
+            entries = newEntries ?: group.entries,
+            subgroups = newSubgroups ?: group.subgroups
+        )
     }
 
     /**

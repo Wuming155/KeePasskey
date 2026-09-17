@@ -7,6 +7,7 @@ import com.keepasskey.core.model.KdbxTimes
 import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.core.security.ProtectedString
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -234,6 +235,49 @@ class HistoryManagerTest {
         val prunedDeep = prunedRoot.subgroups.first().entries.first()
         assertEquals(1, prunedDeep.history.size)
         assertEquals("keep", prunedDeep.history.first().title)
+    }
+
+    /**
+     * `ISSUE-P3-164`：惰性分配下的**路径复制契约**——发生修剪时只复制受影响的路径，
+     * 未受影响的兄弟子树与未超期条目按**同一实例**复用。
+     *
+     * 该契约是「只消除分配、不改扫描范围」这一改动正确性的**唯一可观测守护面**：
+     * 原实现虽也复用实例（`changed` 判定避免 `group.copy`），但无条件为沿途每个分组各分配两个新列表；
+     * 若惰性分配的实现里把「未变化」的分支也复制一次，本用例即失败。
+     */
+    @Test
+    fun `修剪只复制受影响路径且未受影响子树按同一实例复用`() {
+        val now = Instant.parse("2026-09-09T00:00:00Z")
+
+        val staleEntry = entryOf("stale").copy(
+            history = listOf(historySnapshot("drop", now.minusSeconds(86_400L * 500)))
+        )
+        val freshEntry = entryOf("fresh").copy(
+            history = listOf(historySnapshot("keep", now.minusSeconds(86_400L)))
+        )
+        val staleSub = KdbxGroup(name = "Stale", entries = listOf(staleEntry))
+        val untouchedSub = KdbxGroup(name = "Untouched", entries = listOf(freshEntry))
+        val root = KdbxGroup(name = "Root", subgroups = listOf(staleSub, untouchedSub))
+
+        val pruned = HistoryManager.pruneGroupHistoryByAge(root, 365, now)
+
+        assertNotSame("根含受影响子树时必须更换实例", root, pruned)
+        assertNotSame("受影响子树必须被复制", staleSub, pruned.subgroups[0])
+        assertSame(
+            "未受影响的兄弟子树必须按同一实例复用（路径复制契约）",
+            untouchedSub,
+            pruned.subgroups[1]
+        )
+        assertSame(
+            "未超期条目必须按同一实例复用",
+            freshEntry,
+            pruned.subgroups[1].entries[0]
+        )
+        assertEquals(
+            "受影响条目的超期快照必须被清除",
+            emptyList<KdbxEntry>(),
+            pruned.subgroups[0].entries[0].history
+        )
     }
 
     private fun historySnapshot(title: String, lastModified: Instant): KdbxEntry {
