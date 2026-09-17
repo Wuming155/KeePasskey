@@ -14,8 +14,9 @@
 //! 秘密擦除：私钥标量 / 种子经 `SigningKey` 构造后，栈上副本即刻由调用方（JNI 层 `Zeroizing`）
 //! 管理；签名输出非秘密（公可验证），但仍以受管缓冲回写。
 
-use ed25519_dalek::Signer;
-use p256::ecdsa::signature::Signer as EcdsaSigner;
+// `signature::Signer` 是对两处签名调用都生效的**同一个 trait**（被 p256 与 ed25519-dalek
+// 双重再导出），故只需引入一次；重复引入会被 rustc 判为 unused import（2026-09-17 实测）。
+use ed25519_dalek::Signer as _;
 use p256::ecdsa::{DerSignature, SigningKey};
 use zeroize::Zeroizing;
 

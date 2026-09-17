@@ -104,6 +104,8 @@ Java_com_keepasskey_crypto_passkey_NativePasskeySign_ed25519Sign   ← §146 新
 | `:app:assembleRelease`（R8 + lintVital） | **绿**（2m 28s / 204 tasks） |
 | APK 四 ABI `.so` 入包 | debug 与 release 包**均为 4 条**；debug 尺寸 arm64-v8a 583,128 B / armeabi-v7a 451,712 B / x86 756,964 B / x86_64 687,136 B（较本批前约 **+105 KB**，来自 3 个新增 Rust 依赖） |
 | **R8 保留面**（`apkanalyzer dex code`，**release 包**） | 三个新 native 方法的**类名与方法名均未被混淆 / 剥离**：`.method public final native applyKeystream([B[BJ[B)[B`、`.method public final native es256Sign([B[B)[B`、`.method public final native ed25519Sign([B[B)[B`（`mapping.txt` 亦为 `NativeChaCha20 -> NativeChaCha20`）⇒ JNI 按名查找在 release 包同样成立 |
+| **完整设备侧套件**（§143~§146 全部改动的最终代码状态） | `:crypto:connectedDebugAndroidTest` + `:database:connectedDebugAndroidTest` 合并 **`tests=33 skipped=0 failures=0 errors=0`**（3m 34s）；含 `ChaCha20NativeDeviceTest` 3、`PasskeyNativeDeviceTest` 2、`BcProviderDeviceTest` 3、`NativeArgon2InstrumentedTest` 7、`RealKdbxCorpusUnlockTest` 2（KeePassXC 官方语料端到端解锁）、`SelfGeneratedRoundTripInstrumentedTest` 1（设备侧 KDBX 往返）等 |
+| Rust 告警洁净度 | `cargo clean -p keepasskey_argon2` 后强制重建：**仅剩 1 条既有告警**（MSVC `linker_messages`：「正在创建库 …dll.lib 和对象 …dll.exp」，Windows cdylib 正常输出，与本批无关）；本批引入的 `unused import` 已消除，`cargo test` 65 例全绿 |
 
 ### 6.5 口径澄清（如实，避免误判）
 
@@ -115,3 +117,11 @@ Java_com_keepasskey_crypto_passkey_NativePasskeySign_ed25519Sign   ← §146 新
 
 > 该口径同时解释了为何本批改动**未**触及 `proguard-rules.pro`：AGP 默认的
 > `-keepclasseswithmembernames class * { native <methods>; }` 已覆盖，实测予以确认。
+
+### 6.6 顺带清理：本批引入的 Rust 告警
+
+`passkey_sign.rs` 初版同时引入 `ed25519_dalek::Signer` 与 `p256::ecdsa::signature::Signer`——
+**二者为同一个 trait**（`signature::Signer<S>` 被两个 crate 双重再导出），rustc 判后者为
+`unused import`（该告警在 `cargoNdkBuild` 的 4 ABI 交叉编译输出中可见）。已合并为单次
+`use ed25519_dalek::Signer as _;` 并加注说明同一 trait 覆盖两处 `sign` 调用；强制重建后
+`cargo test` 仅剩既有的 MSVC linker 提示（与本批无关）。
