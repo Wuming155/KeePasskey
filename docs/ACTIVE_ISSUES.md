@@ -51,7 +51,7 @@
 
 ---
 
-## P3 低危问题、特性接线与体验优化（10 项）
+## P3 低危问题、特性接线与体验优化（9 项）
 
 > 本批为 2026-09-17「降低 CPU / 内存占用」排查的**其余开放结论**。
 > 条目 153 为 **Rust 下沉候选的评估结论**（评估项）；条目 155 为同轮后续批次（§115）开工复核转登。
@@ -101,7 +101,12 @@
 > ——`TracerPid` 改字节级解析 + 缓冲按线程复用；maps 改流式字节匹配 + 块间重叠（并新增 16 MiB
 > 有界上限，封住「hook `read` 喂无限流」的挂死面）；**AC ③（`Debug` 探针去重）判定不做**并留痕，见
 > [`resolved/batches/130-完整性探测字节级化批次.md`](resolved/batches/130-完整性探测字节级化批次.md)。
-> 其余条目（`P3-164` / `P3-165` / `P3-168` / `P3-175` ~ `P3-177` / `P3-179` / `P3-180`）**仍待整改**。
+> **已闭环（§131 第四档：渲染与组合期 ‣ 第三条）**：`ISSUE-P3-179`（非惰性大集合展开与组合期就地派生）
+> ——对话框分组选择改**惰性 + 280 dp 高度上限 + `key`**（原实现超出屏幕的分组**无法触达**，是本批
+> 唯一的可用性缺陷修复）、编辑页组合期过滤下沉 + `key`、面包屑补 `key`、日志等级色改 `remember`
+> 预计算；**AC ① 的日志惰性化刻意不做**（嵌套纵向滚动属 UX 回归；日志有 500 行硬上限），见
+> [`resolved/batches/131-非惰性大集合渲染与组合期就地派生收敛批次.md`](resolved/batches/131-非惰性大集合渲染与组合期就地派生收敛批次.md)。
+> 其余条目（`P3-164` / `P3-165` / `P3-168` / `P3-175` ~ `P3-177` / `P3-180`）**仍待整改**。
 
 ### ISSUE-P3-153 Rust 下沉候选的评估结论（**评估项，非整改项**）
 
@@ -243,24 +248,6 @@
 - **核实时间点与方式**：2026-09-17 读 `CbcStreams.kt:95-300` 核实。
 - **风险提示**：属**主加密数据面**（与 `ISSUE-P3-155` 同族），高回归面，须排在零风险项之后；
   「复用缓冲」**不得**成为「不清零」的借口——清零责任须逐路径重述。
-
-### ISSUE-P3-179 非惰性大集合展开与组合期就地派生
-
-- **背景**：① `app/.../ui/screens/settings/subscreens/DebugSettingsScreen.kt:236` 把上限 500 行的
-  `DebugLogBuffer` 整体塞在**单个 LazyColumn item** 内 `forEach` 组合，且每行做 4 次 `line.contains(…)` 判色；
-  ② `app/.../ui/screens/vault/VaultListDialogs.kt:241` 把全部分组 `filter{}.forEach{}` 铺进 `AlertDialog` 的 `text` 槽
-  （无虚拟化、无高度上限，超出屏幕的分组不可触达）；
-  ③ `app/.../ui/screens/edit/EntryEditFormSections.kt:101` 在组合期执行 `availableGroups.filter { !it.isRecycleBin }`
-  （每次重组重算整库过滤）且 `items` 无 `key`；`VaultListComponents.kt:249` 面包屑 `items` 同样无 `key`。
-- **整改方向**：① 日志改顶层 `items(logLines)` 并按前缀预判等级色；② 分组选择改
-  `LazyColumn(Modifier.heightIn(max = 280.dp))` + `items(…, key = { it.id })`（照抄 `AppPickerDialog.kt:138`）；
-  ③ 过滤下沉到 ViewModel 或 `remember(availableGroups)`，并补 `key`。
-- **验收标准**：三处改为惰性 / 已记忆（结构断言）；对话框内分组可滚动触达（含超长列表）；
-  既有对话框与编辑页用例全绿。
-- **核实时间点与方式**：2026-09-17 读 `DebugSettingsScreen.kt:225-250`、`VaultListDialogs.kt:230-255`、
-  `EntryEditFormSections.kt:90-115` 核实。
-- **风险提示**：`AlertDialog` 的 `text` 槽不滚动，改为 `LazyColumn` 时须一并确认弹窗高度约束，
-  避免「改好了但按钮被挤出屏幕」。
 
 ### ISSUE-P3-180 WebDAV 单次上传最多 4 个往返（重复 PROPFIND）
 

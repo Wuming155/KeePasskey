@@ -74,6 +74,12 @@ internal fun ColumnScope.EntryEditGroupSection(
     uiState: EntryEditUiState,
     onGroupChange: (String?) -> Unit
 ) {
+    // ISSUE-P3-179：回收站过滤下沉到 `LazyRow` **之外**——`LazyRow` 的 content 是 `LazyListScope`
+    // （非 `@Composable`），不能在其中 `remember`；原实现把 `filter` 写在 `items(...)` 实参里，
+    // 编辑表单每敲一个字符都会重组并重跑一次整表过滤。
+    val selectableGroups = remember(uiState.availableGroups) {
+        uiState.availableGroups.filter { !it.isRecycleBin }
+    }
     if (uiState.availableGroups.isEmpty()) return
 
     Text(
@@ -98,7 +104,7 @@ internal fun ColumnScope.EntryEditGroupSection(
                 }
             )
         }
-        items(uiState.availableGroups.filter { !it.isRecycleBin }) { grp ->
+        items(selectableGroups, key = { it.id }) { grp ->
             val selected = uiState.groupId == grp.id
             FilterChip(
                 selected = selected,

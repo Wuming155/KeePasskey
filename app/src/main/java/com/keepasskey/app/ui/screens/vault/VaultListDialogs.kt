@@ -8,9 +8,12 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -238,16 +241,26 @@ internal fun VaultBatchMoveDialog(
                     }
                 }
 
-                allGroups.filter { !it.isRecycleBin }.forEach { grp ->
-                    Surface(
-                        color = MaterialTheme.colorScheme.surfaceContainerLow,
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.fillMaxWidth().clickable { onMove(grp.id) }
-                    ) {
-                        Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Icon(getVaultIcon(grp.iconName), contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Text(grp.name, style = MaterialTheme.typography.bodyMedium)
+                // ISSUE-P3-179：分组列表改**惰性 + 高度上限**——`AlertDialog` 的 `text` 槽**自身不滚动**，
+                // 原实现把全部分组 `forEach` 铺进 `Column` ⇒ 分组多时超出屏幕的部分**无法触达**；
+                // 同时补 `key`，使选择位置在增删分组后可稳定复用（同 `AppPickerDialog` 的写法）。
+                // 过滤在组合之外做一次（原实现写在 `forEach` 实参里，每次重组都重跑一次整表过滤）。
+                val selectableGroups = remember(allGroups) { allGroups.filter { !it.isRecycleBin } }
+                LazyColumn(
+                    modifier = Modifier.heightIn(max = 280.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    items(selectableGroups, key = { it.id }) { grp ->
+                        Surface(
+                            color = MaterialTheme.colorScheme.surfaceContainerLow,
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth().clickable { onMove(grp.id) }
+                        ) {
+                            Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Icon(getVaultIcon(grp.iconName), contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Text(grp.name, style = MaterialTheme.typography.bodyMedium)
+                            }
                         }
                     }
                 }

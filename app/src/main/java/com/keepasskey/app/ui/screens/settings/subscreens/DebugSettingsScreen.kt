@@ -233,7 +233,26 @@ fun DebugSettingsScreen(
                                 color = Color(0xFF94A3B8)
                             )
                         }
-                        logLines.forEach { line ->
+                        // ISSUE-P3-179：等级色按**日志内容**预计算一次——原实现对每行做最多 4 次
+                        // `contains` 判定，而该判定在每次重组（含滚动引起的重组）都会重跑。
+                        //
+                        // 刻意保留（如实声明）：本卡片仍以**单个 `item`** 承载全部日志行。
+                        // 理由是日志缓冲**上限 500 行**（`DebugLogBuffer.MAX_LINES`）且本页是
+                        // **调试专用页**；而改成嵌套 `LazyColumn` 会在外层 `LazyColumn` 内引入
+                        // **嵌套纵向滚动**（触达全量日志需先滚内层再滚外层）——那是 UX 回归，
+                        // 不是优化。若要彻底惰性化，正确形态是先把日志卡片移出外层列表语义。
+                        val coloredLines = remember(logLines) {
+                            logLines.map { line ->
+                                line to when {
+                                    line.contains("[ERROR]") -> Color(0xFFF87171)
+                                    line.contains("[DEBUG]") -> Color(0xFF38BDF8)
+                                    line.contains("[INFO]") -> Color(0xFF4ADE80)
+                                    line.contains("[WARN]") -> Color(0xFFFBBF24)
+                                    else -> Color(0xFFE2E8F0)
+                                }
+                            }
+                        }
+                        coloredLines.forEach { (line, color) ->
                             Text(
                                 text = line,
                                 style = MaterialTheme.typography.labelSmall.copy(
@@ -241,13 +260,7 @@ fun DebugSettingsScreen(
                                     fontSize = 11.sp,
                                     lineHeight = 16.sp
                                 ),
-                                color = when {
-                                    line.contains("[ERROR]") -> Color(0xFFF87171)
-                                    line.contains("[DEBUG]") -> Color(0xFF38BDF8)
-                                    line.contains("[INFO]") -> Color(0xFF4ADE80)
-                                    line.contains("[WARN]") -> Color(0xFFFBBF24)
-                                    else -> Color(0xFFE2E8F0)
-                                }
+                                color = color
                             )
                         }
                     }

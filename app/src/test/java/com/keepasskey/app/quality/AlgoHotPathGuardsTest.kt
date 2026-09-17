@@ -323,6 +323,43 @@ class AlgoHotPathGuardsTest {
         )
     }
 
+    @Test
+    fun `大集合渲染必须惰性且过滤不得留在组合期`() {
+        val dialogs =
+            stripped("app/src/main/java/com/keepasskey/app/ui/screens/vault/VaultListDialogs.kt")
+        assertTrue(
+            "分组选择必须改惰性列表并加高度上限（AlertDialog 的 text 槽自身不滚动，" +
+                "原实现把全部分组铺进 Column ⇒ 超出屏幕的部分无法触达）",
+            dialogs.contains("LazyColumn(") &&
+                dialogs.contains("modifier = Modifier.heightIn(max = 280.dp)")
+        )
+        assertFalse(
+            "不得再用 forEach 把全部分组铺进 Column",
+            dialogs.contains("allGroups.filter { !it.isRecycleBin }.forEach {")
+        )
+
+        val edit =
+            stripped("app/src/main/java/com/keepasskey/app/ui/screens/edit/EntryEditFormSections.kt")
+        assertFalse(
+            "编辑页不得把整表过滤写在 items 实参里（每次重组都会重跑）",
+            edit.contains("items(uiState.availableGroups.filter")
+        )
+        assertTrue("必须补 key 以稳定复用项", edit.contains("items(selectableGroups, key = { it.id })"))
+
+        val components =
+            stripped("app/src/main/java/com/keepasskey/app/ui/screens/vault/VaultListComponents.kt")
+        assertTrue("面包屑必须补 key", components.contains("items(breadcrumbs, key = { it.id })"))
+
+        val debug = stripped(
+            "app/src/main/java/com/keepasskey/app/ui/screens/settings/subscreens/DebugSettingsScreen.kt"
+        )
+        assertTrue(
+            "日志等级色必须按日志内容预计算（原逐行最多 4 次 contains 会在每次重组重跑）",
+            debug.contains("val coloredLines = remember(logLines) {") &&
+                !debug.contains("logLines.forEach { line ->")
+        )
+    }
+
     private fun stripped(path: String): String = readSource(path)
         .replace(BLOCK_COMMENT, "")
         .lines()

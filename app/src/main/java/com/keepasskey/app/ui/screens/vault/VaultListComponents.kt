@@ -246,7 +246,7 @@ internal fun VaultBreadcrumbBar(
                             .padding(horizontal = 8.dp, vertical = 8.dp)
                     )
                 }
-                items(breadcrumbs) { grp ->
+                items(breadcrumbs, key = { it.id }) { grp ->
                     Text(
                         text = "/",
                         style = MaterialTheme.typography.labelMedium,
