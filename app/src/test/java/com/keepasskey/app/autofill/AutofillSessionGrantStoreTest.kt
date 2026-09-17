@@ -173,4 +173,39 @@ class AutofillSessionGrantStoreTest {
             )
         )
     }
+
+    /**
+     * ISSUE-P3-185：手动选择器路径的宽限判定。
+     *
+     * 与数据集路径的差异：选择器每次填充都由用户在受保护窗口内检索并**显式点选**条目
+     * （本身即一次显式指认），不存在「无 UI 自动途径下发口令」的形态，故不设
+     * 「携带口令值」闸门——宽限豁免的仅是重复的生物识别；其余判定与数据集路径一致
+     * （开关开启 + 库已解锁 + 有效授权，三者缺一不可）。
+     */
+    @Test
+    fun `ISSUE-P3-185 选择器路径 开关开启且库已解锁且有授权时跳过生物识别`() {
+        assertTrue(
+            AutofillAuthenticationPolicy.skipPickerRepeatConfirmation(
+                sessionGrantEnabled = true, vaultLocked = false, grantActive = true
+            )
+        )
+        // 开关关闭：不跳过（保持每次生物识别确认）
+        assertFalse(
+            AutofillAuthenticationPolicy.skipPickerRepeatConfirmation(
+                sessionGrantEnabled = false, vaultLocked = false, grantActive = true
+            )
+        )
+        // 库锁定：授权一律不适用（必须先解锁）
+        assertFalse(
+            AutofillAuthenticationPolicy.skipPickerRepeatConfirmation(
+                sessionGrantEnabled = true, vaultLocked = true, grantActive = true
+            )
+        )
+        // 无有效授权：不跳过
+        assertFalse(
+            AutofillAuthenticationPolicy.skipPickerRepeatConfirmation(
+                sessionGrantEnabled = true, vaultLocked = false, grantActive = false
+            )
+        )
+    }
 }

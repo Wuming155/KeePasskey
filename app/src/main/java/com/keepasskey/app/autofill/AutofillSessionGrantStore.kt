@@ -117,6 +117,22 @@ object AutofillAuthenticationPolicy {
     ): Boolean = sessionGrantEnabled && !vaultLocked && grantActive && !datasetCarriesPassword
 
     /**
+     * ISSUE-P3-185：手动选择器路径是否因会话授权宽限**跳过本次生物识别**。
+     *
+     * 与 [skipRepeatConfirmation]（数据集路径）的口径差异：选择器每次填充都要求用户在
+     * 受保护窗口内检索并**显式点选**条目（本身即一次显式指认），不存在「无 UI 自动途径
+     * 下发口令」的形态，故不设「携带口令值」闸门——宽限豁免的仅是重复的生物识别，
+     * 交付仍由用户点选触发，首次绑定写入 / 黑名单复核 / 字段 id 回传语义一律不变。
+     * 其余判定与数据集路径一致：开关开启 + 库已解锁 + 存在匹配的有效授权；
+     * 锁定态一律不适用（须先解锁，与 [skipRepeatConfirmation] 相同守卫）。
+     */
+    fun skipPickerRepeatConfirmation(
+        sessionGrantEnabled: Boolean,
+        vaultLocked: Boolean,
+        grantActive: Boolean
+    ): Boolean = sessionGrantEnabled && !vaultLocked && grantActive
+
+    /**
      * ISSUE-P3-95（审计 F-21）：确认页**是否允许把认证结果回传给框架**。
      *
      * 缺陷形态：`AutofillConfirmActivity` 在生物识别 / 手动确认成功后无条件 `setResult(RESULT_OK)`，

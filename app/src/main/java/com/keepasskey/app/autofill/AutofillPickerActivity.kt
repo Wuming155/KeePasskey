@@ -14,6 +14,8 @@ import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import com.keepasskey.app.R
+import com.keepasskey.app.data.repository.ExtendedSettingsStore
+import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.security.ApplyObscuredTouchFilter
 import com.keepasskey.app.security.AutofillAuthBindingPolicy
 import com.keepasskey.app.security.BiometricAuthManager
@@ -36,6 +38,12 @@ import javax.inject.Inject
  *
  * 安全加固（对齐 AutofillConfirmActivity）：FLAG_SECURE 防截屏录屏 +
  * `setHideOverlayWindows` 反悬浮窗覆盖 + 遮挡触摸过滤（反点击劫持）。
+ *
+ * ISSUE-P3-185：会话授权宽限在本页生效——开关开启 + 库已解锁 + 「包名 + 归属校验后域」
+ * 存在有效授权时跳过本次生物识别；成功交付后按确认页同口径写入授权（30 秒 TTL），
+ * 与数据集路径行为一致。
+ * ISSUE-P3-186：回传前按偏好执行 TOTP 复制 / 验证码通知（[AutofillPostFillTotpActions]
+ * 共用实现，硬超时兜底不阻断回传），兑现设置页承诺。
  */
 @AndroidEntryPoint
 class AutofillPickerActivity : FragmentActivity() {
@@ -57,6 +65,18 @@ class AutofillPickerActivity : FragmentActivity() {
     // 故首次绑定写入落在此处；写入后 `android://` 维度才对同签名调用方参与自动匹配。
     @Inject
     lateinit var callerTrustStore: AutofillCallerTrustStore
+
+    // ISSUE-P3-185：会话授权宽限的偏好读取与库锁定判定通道
+    @Inject
+    lateinit var settingsStore: ExtendedSettingsStore
+
+    // ISSUE-P3-185：库锁定态不走宽限（与 AutofillAuthenticationPolicy 现有守卫一致）
+    @Inject
+    lateinit var vaultRepository: VaultRepository
+
+    // ISSUE-P3-186：填充交付后按偏好执行 TOTP 复制 / 验证码通知（与确认页共用一份实现）
+    @Inject
+    lateinit var totpPostFillActions: AutofillPostFillTotpActions
 
     private val viewModel: AutofillPickerViewModel by viewModels()
 
@@ -144,7 +164,7 @@ class AutofillPickerActivity : FragmentActivity() {
         finish()
     }
 
-    /** 用户选中条目：按需解密 → 二次确认（可用生物识别时）→ 回传数据集 */
+    /** 用户选中条目：按需解密 → 会话授权宽限（命中免生物识别）→ 二次确认（可用认证器时）→ 回传数据集 */
     private fun confirmAndFill(entryId: String) {
         if (completed) return
         lifecycleScope.launch {
@@ -152,6 +172,21 @@ class AutofillPickerActivity : FragmentActivity() {
             if (credentials == null) {
                 AppLog.w(TAG, "选中条目凭据不可用，放弃本次填充")
                 finish()
+                return@launch
+            }
+            // ISSUE-P3-185：会话授权宽限与数据集路径同口径（开关开启 + 库已解锁 + 「包名 +
+            // 归属校验后域」存在有效授权）——命中则跳过本次生物识别直接交付。归属校验仅在
+            // 开关开启时进行（关闭时零额外开销，行为与既有完全一致）；不改变首次绑定写入
+            // （P2-46）、黑名单复核与字段 id 回传语义，宽限豁免的仅是重复的二次确认。
+            val grantContext = resolveGrantContextIfEnabled()
+            val skipBiometric = grantContext != null && AutofillAuthenticationPolicy
+                .skipPickerRepeatConfirmation(
+                    sessionGrantEnabled = true,
+                    vaultLocked = vaultRepository.isLocked(),
+                    grantActive = AutofillSessionGrants.isGranted(grantContext)
+                )
+            if (skipBiometric) {
+                deliver(credentials, entryId, grantContext)
                 return@launch
             }
             // ISSUE-P3-52：可用认证器时以 Keystore 认证绑定密钥的 Cipher 发起（CryptoObject），
@@ -174,42 +209,80 @@ class AutofillPickerActivity : FragmentActivity() {
                     authenticators = BiometricAuthManager.UNLOCK_AUTHENTICATORS,
                     cipher = authCipher
                 ) { result ->
-                    if (AutofillAuthBindingPolicy.isBound(result)) deliver(credentials) else finish()
+                    if (AutofillAuthBindingPolicy.isBound(result)) {
+                        deliver(credentials, entryId, grantContext)
+                    } else {
+                        finish()
+                    }
                 }
             } else {
                 // 无可用认证器 / 认证绑定不可用：用户在受保护窗口内的点选本身即一次显式确认
                 // （与 AutofillConfirmActivity 的退化策略一致）
-                deliver(credentials)
+                deliver(credentials, entryId, grantContext)
             }
         }
     }
 
-    private fun deliver(credentials: AutofillPickerViewModel.Credentials) {
+    /**
+     * ISSUE-P3-185：开关开启时解析会话授权上下文（包名 + 归属校验后域）。
+     *
+     * 与数据集路径同口径：域经 [AutofillOriginResolver.resolveUsableWebDomain] 归属校验
+     * （与确认页写入 `EXTRA_GRANT_DOMAIN`、数据集查询所用域同源），不可归属 → 归一化为
+     * null → 授权存储自身既不写入也不命中（fail-closed，见 [AutofillSessionGrantStore]）。
+     * 开关关闭 / 包名缺失时返回 null（不做归属校验的网络开销，行为与既有一致）。
+     */
+    private suspend fun resolveGrantContextIfEnabled(): AutofillGrantContext? {
+        if (!settingsStore.isAutofillSessionGrantEnabled()) return null
+        val callingPackage = intent.getStringExtra(EXTRA_CALLING_PACKAGE)
+            ?.takeIf { it.isNotBlank() }
+            ?: return null
+        val verifiedDomain = autofillOriginResolver.resolveUsableWebDomain(
+            callingPackage,
+            intent.getStringExtra(EXTRA_WEB_DOMAIN)
+        )
+        return AutofillGrantContext(callingPackage, verifiedDomain)
+    }
+
+    private fun deliver(
+        credentials: AutofillPickerViewModel.Credentials,
+        entryId: String,
+        grantContext: AutofillGrantContext?
+    ) {
         completed = true
         // ISSUE-P2-46：用户已在受保护窗口内**显式指认**「把这条凭据填给该调用方」（该页展示
         // 包名 / 应用名 / 签名摘要，见 ISSUE-P2-70），故此处写入首次绑定——它是 `android://`
         // 维度后续自动命中的唯一前提，也是未绑定调用方唯一的补救路径。
         bindCallerForPackageDimension()
-        // 载荷构造已收敛到 [buildAuthenticationResultDataset]（与二次确认页共用同一份，
-        // 避免同语义两处实现再次漂移成「只回传成功、不回传数据集」）
-        val dataset = buildAuthenticationResultDataset(
-            packageName = packageName,
-            menuTitle = credentials.username.ifBlank { getString(R.string.autofill_picker_title) },
-            menuSubtitle = getString(R.string.autofill_picker_title),
-            username = credentials.username,
-            password = credentials.password,
-            usernameId = readAutofillId(EXTRA_USERNAME_ID),
-            passwordId = readAutofillId(EXTRA_PASSWORD_ID)
-        )
-        if (dataset == null) {
-            // 无可写字段（无目标框 / 凭据为空）：如实取消，绝不回传空数据集谎报成功
-            AppLog.w(TAG, "选中条目没有任何可交付字段，按取消回传")
-            setResult(RESULT_CANCELED, authenticationCanceledIntent())
+        lifecycleScope.launch {
+            // ISSUE-P3-186：回传前按偏好执行 TOTP 二次动作（与确认页共用实现：500ms 硬超时 +
+            // 双开关闸门 + 库锁定不触碰，任何异常 / 超时都不阻断回传——实现内部已兜底）
+            totpPostFillActions.runAfterFill(entryId)
+            // 载荷构造已收敛到 [buildAuthenticationResultDataset]（与二次确认页共用同一份，
+            // 避免同语义两处实现再次漂移成「只回传成功、不回传数据集」）
+            val dataset = buildAuthenticationResultDataset(
+                packageName = packageName,
+                menuTitle = credentials.username.ifBlank { getString(R.string.autofill_picker_title) },
+                menuSubtitle = getString(R.string.autofill_picker_title),
+                username = credentials.username,
+                password = credentials.password,
+                usernameId = readAutofillId(EXTRA_USERNAME_ID),
+                passwordId = readAutofillId(EXTRA_PASSWORD_ID)
+            )
+            if (dataset == null) {
+                // 无可写字段（无目标框 / 凭据为空）：如实取消，绝不回传空数据集谎报成功
+                AppLog.w(TAG, "选中条目没有任何可交付字段，按取消回传")
+                setResult(RESULT_CANCELED, authenticationCanceledIntent())
+                finish()
+                return@launch
+            }
+            // ISSUE-P3-185：成功交付后按确认页同口径写入会话授权（30 秒 TTL），使同
+            // 「包名 + 域」的重复填充免二次确认；不可归属域由存储自身拒绝（fail-closed）
+            if (grantContext != null) {
+                AutofillSessionGrants.grant(grantContext)
+            }
+            setResult(RESULT_OK, authenticationResultIntent(dataset))
             finish()
-            return
         }
-        setResult(RESULT_OK, authenticationResultIntent(dataset))
-        finish()
     }
 
     /**

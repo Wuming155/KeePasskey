@@ -31,19 +31,15 @@ import androidx.lifecycle.lifecycleScope
 import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.ExtendedSettingsStore
 import com.keepasskey.app.data.repository.VaultRepository
-import com.keepasskey.app.notification.TotpNotificationPublisher
 import com.keepasskey.app.passkey.CredentialFillConfirmScreen
 import com.keepasskey.app.security.ApplyObscuredTouchFilter
 import com.keepasskey.app.security.AutofillAuthBindingPolicy
 import com.keepasskey.app.security.BiometricAuthManager
 import com.keepasskey.app.security.BiometricResult
 import com.keepasskey.app.security.BiometricStatus
-import com.keepasskey.app.security.ClipboardSecurityManager
 import com.keepasskey.core.log.AppLog
 import dagger.hilt.android.AndroidEntryPoint
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Inject
 
 /**
@@ -88,8 +84,9 @@ class AutofillConfirmActivity : FragmentActivity() {
     @Inject
     lateinit var vaultRepository: VaultRepository
 
+    // ISSUE-P3-186：验证码通知与 TOTP 复制收敛进共用实现（与选择器路径同源一份）
     @Inject
-    lateinit var clipboardSecurityManager: ClipboardSecurityManager
+    lateinit var totpPostFillActions: AutofillPostFillTotpActions
 
     @Inject
     lateinit var settingsStore: ExtendedSettingsStore
@@ -101,10 +98,6 @@ class AutofillConfirmActivity : FragmentActivity() {
     // ISSUE-P1-24 AC②：调用方「首次绑定」信任存储
     @Inject
     lateinit var callerTrustStore: AutofillCallerTrustStore
-
-    // ISSUE-P3-18：验证码通知发布器（受 autofillShowTotpNotification 偏好与通知权限双闸门约束）
-    @Inject
-    lateinit var totpNotificationPublisher: TotpNotificationPublisher
 
     // ISSUE-P3-39：「上次填充」记忆写入点——用户确认填充即真实填充落点
     @Inject
@@ -243,10 +236,9 @@ class AutofillConfirmActivity : FragmentActivity() {
     /**
      * 完成认证并回传结果。
      *
-     * ISSUE-P3-03 (43b)：先按偏好尝试复制 TOTP 动态码，再回传 RESULT_OK。
-     * ISSUE-P3-18：同一落点按 `autofillShowTotpNotification` 偏好补发验证码通知。
-     * 两个动作均带硬超时兜底（[TOTP_ACTION_TIMEOUT_MS]），任何异常/超时都不阻断填充；
-     * 开关关闭、条目无 TOTP、库已锁定时不触碰剪贴板也不发通知。
+     * ISSUE-P3-03 (43b) / ISSUE-P3-18：回传前按偏好执行 TOTP 复制 / 验证码通知——
+     * ISSUE-P3-186 起该二次动作收敛为共用实现 [AutofillPostFillTotpActions]
+     * （500ms 硬超时 + 双开关闸门 + 库锁定不触碰），与选择器路径同源一份。
      */
     private fun completeAuthResult() {
         if (completed) return
@@ -273,11 +265,10 @@ class AutofillConfirmActivity : FragmentActivity() {
             }
         }
         lifecycleScope.launch {
-            try {
-                handleTotpAfterConfirm()
-            } finally {
-                deliverAuthResult()
-            }
+            // ISSUE-P3-186：TOTP 二次动作收敛为共用实现（与选择器路径同源一份）；
+            // 实现内部自带硬超时与异常兜底，不阻断填充回传
+            totpPostFillActions.runAfterFill(intent.getStringExtra(EXTRA_ENTRY_ID).orEmpty())
+            deliverAuthResult()
         }
     }
 
@@ -363,47 +354,6 @@ class AutofillConfirmActivity : FragmentActivity() {
     private fun readAutofillId(key: String): AutofillId? =
         intent.getParcelableExtra(key, AutofillId::class.java)
 
-    /**
-     * 确认后的 TOTP 二次动作：复制到受保护剪贴板 与/或 发送验证码通知。
-     *
-     * 两个偏好相互独立（`autofillCopyTotp` / `autofillShowTotpNotification`），任一开启都会
-     * 触发一次 TOTP 计算；两者皆关时**不触达仓库**（零开销、零副作用）。
-     * `autofillCopyTotp` 沿用既有单键读取接口；`autofillShowTotpNotification` 暂无单键接口，
-     * 经整体读取取得——本路径每次用户确认仅执行一次，全量读取成本可忽略。
-     */
-    private suspend fun handleTotpAfterConfirm() {
-        val entryId = intent.getStringExtra(EXTRA_ENTRY_ID)?.takeIf { it.isNotBlank() } ?: return
-        val copyEnabled = settingsStore.isAutofillCopyTotpEnabled()
-        val notifyEnabled = settingsStore.load().autofillShowTotpNotification
-        if (!copyEnabled && !notifyEnabled) return
-
-        // 硬超时：TOTP 计算属纯 HMAC 运算（毫秒级），超时即放弃本次二次动作，绝不拖住填充回传；
-        // 取消异常必须继续上抛（不得被结果兜底吞掉，否则协程取消语义被破坏）
-        val snapshot = withTimeoutOrNull(TOTP_ACTION_TIMEOUT_MS) {
-            try {
-                vaultRepository.calculateEntryTotp(entryId)
-            } catch (c: CancellationException) {
-                throw c
-            } catch (t: Throwable) {
-                null
-            }
-        } ?: return
-
-        if (AutofillTotpCopyPolicy.shouldCopy(copyTotpEnabled = copyEnabled, snapshot = snapshot)) {
-            clipboardSecurityManager.copySensitiveText(
-                label = getString(R.string.autofill_totp_clip_label),
-                text = snapshot.code
-            )
-        }
-        if (notifyEnabled) {
-            // 通知只含验证码与剩余秒数，不含任何条目标识（详见 TotpNotificationPublisher 注释）
-            totpNotificationPublisher.publish(
-                code = snapshot.code,
-                periodSeconds = snapshot.periodSeconds
-            )
-        }
-    }
-
     companion object {
         private const val TAG = "AutofillConfirm"
 
@@ -427,9 +377,6 @@ class AutofillConfirmActivity : FragmentActivity() {
 
         /** ISSUE-P2-88：目标**密码框** id（可为 null——纯用户名表单） */
         const val EXTRA_TARGET_PASSWORD_ID = "com.keepasskey.app.autofill.EXTRA_CONFIRM_PASSWORD_ID"
-
-        /** TOTP 二次动作（复制 / 通知）的硬超时预算：超出即放弃，保证填充回传不被拖慢 */
-        private const val TOTP_ACTION_TIMEOUT_MS = 500L
     }
 }
 
