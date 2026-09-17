@@ -70,6 +70,9 @@
     <string name="unlock_keyfile_selected">已加载密钥文件: %1$s</string>
     <string name="unlock_keyfile_none">未关联密钥文件 (可选)</string>
     <string name="unlock_keyfile_read_failed">无法读取所选密钥文件，请重试</string>
+    <!-- ISSUE-P2-87：导入库工作因子非阻断提示（解锁页信息位）。口径只能是
+         「低于本应用建库默认强度」，禁止表述为「不安全 / 已被攻破」；同时声明未自动修改任何参数 -->
+    <string name="unlock_msg_weak_kdf">该库的密钥派生工作因子低于本应用建库默认强度（未自动修改任何参数）</string>
     <string name="keyfile_or_password_mismatch">主密码或密钥文件不正确，请确认密钥文件与创建密码库时使用的一致</string>
     <string name="keyfile_permission_not_persisted">该文件提供方不支持长期授权，密钥文件仅本次可用，无法记住</string>
     <string name="keyfile_restored_from_memory">已自动载入记住的密钥文件: %1$s</string>

@@ -228,6 +228,17 @@ class DatabasePickerViewModel @Inject constructor(
         keyFileDeliveryFlow.value = KeyFileDeliveryState.None
     }
 
+    /**
+     * 导入并登记外部来源的密码库（见 [OpenVaultSourceType]）。
+     *
+     * ISSUE-P2-87 说明：本方法成功后**不再**在本页做工作因子提示。原因（已核实）：
+     * 本页随 [DatabasePickerEvent.DatabaseSelected] 立即被 `popBackStack()` 退栈
+     * （`KeePasskeyNavGraph.kt` 的 `onDatabaseSelected`），Snackbar 往往来不及渲染，
+     * 而承载它的 ViewModel 也会随之清除。因此弱因子提示**统一落在退栈后的落点**
+     * ——解锁页（`UnlockViewModel.importExternalDatabase`），该页在用户导入后确定停留、
+     * 且 `UnlockUiState.infoMessage` 已有渲染点。**不要在**本页另加提示通道：
+     * 那只会产生一条大概率看不见、且与解锁页重复的提示。
+     */
     fun importDatabaseFromSource(source: OpenVaultSourceType, name: String, path: String) {
         viewModelScope.launch {
             val result = vaultRepository.importExternalDatabase(name, path, syncType = source.label)

@@ -8,6 +8,7 @@ import com.keepasskey.app.ui.model.VaultGroup
 import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.model.PasskeyData
 import com.keepasskey.core.result.KdbxResult
+import com.keepasskey.database.file.KdbxKdfStrengthAssessment
 import com.keepasskey.database.session.DatabaseSession
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
@@ -163,6 +164,10 @@ class RealVaultRepository @Inject constructor(
         path = path,
         syncType = syncType
     )
+
+    /** ISSUE-P2-87：工作因子（低于本应用建库默认强度）评估——非阻断提示，失败即「未评估」 */
+    override suspend fun assessKdfStrength(path: String): KdbxKdfStrengthAssessment? =
+        lifecycle.assessKdfStrength(path)
 
     override fun getGroups(): Flow<List<VaultGroup>> = groups.groupsFlow()
 

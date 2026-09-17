@@ -29,19 +29,22 @@ import java.util.Collections
  *
  * - **A（认证链路不崩溃 + 认证结果被接受）**：库锁定时服务下发带 `setAuthentication` 的数据集 →
  *   系统填充 UI 展示 → 点选后由**框架**拉起 [AutofillUnlockActivity] → 在真机上完成解锁 →
- *   该页以 `setResult(RESULT_OK, Intent 携带非空 extras)`（ISSUE-P2-73 §84 修复点）结束，
- *   全程无崩溃；解锁**确实生效**（后续请求进入已解锁分支）。
- * - **A（第二个认证 Activity）**：已解锁候选数据集点选后由框架拉起 [AutofillConfirmActivity]，
- *   其「确认填充」同样以双参 `setResult` 结束且不崩溃。
- * - **B（端到端真实填充）**：真实客户端（测试 APK 包，独立进程/独立 uid，非本应用包名）触发填充 →
- *   经 [AutofillPickerActivity] 显式指认条目 → 框架把**真实凭据**写入目标输入框
- *   （以客户端自身 logcat 自述 `passwordFilled=true` 为证）。
+ *   该页链入 [AutofillPickerActivity] 并把其认证结果原样转发给框架，全程无崩溃。
+ * - **B（解锁后不经人工重请求即可填充，ISSUE-P2-86 判据）**：解锁页链入的选择器中显式指认条目后，
+ *   框架把**真实凭据**写入客户端目标输入框（客户端 logcat 自述 `passwordFilled=true`），
+ *   且全程客户端 `requestAutofill(` 计数不变——即不依赖任何「显式重请求」补救手法。
+ * - **B（已解锁分支选择器路径）**：客户端重新拉起后请求填充 → 经选择器指认条目 → 再次被真实填充。
+ * - **C（第二个认证 Activity）**：已解锁候选数据集点选后由框架拉起 [AutofillConfirmActivity]，
+ *   其「确认填充」以双参 `setResult` 结束且不崩溃。
  *
- * ## 归因纪律（本轮新增）
+ * ## 归因纪律（关键，勿放宽）
  *
  * 客户端 [AutofillClientActivity] **每个实例只主动请求一次**填充。原因：认证 Activity 进出会令客户端
  * 多次 resume，若每次 resume 都请求，就会把「框架在认证结果后自行重发」与「客户端自己又请求了一次」
  * 混为一谈。用例在关键位置同时记录客户端请求次数，保证「框架是否自行重发」的结论可归因。
+ *
+ * ISSUE-P2-86 补充：**不得**再以「客户端显式重请求」作为把链路接下去的手段——该手法恰好绕过
+ * 「解锁后不填充」这一缺陷本身。阶段 5 的写入断言必须在客户端请求计数不变的前提下达成。
  *
  * ## 判定口径（AGENTS.md §5）
  *
@@ -211,10 +214,16 @@ class AutofillAuthChainDeviceTest {
 
         // ---------------------------------------------------------------- 阶段 5：完成解锁 ⇒ 结果被接受
         evidence.section("阶段 5：输入主密码完成解锁，核对 setResult(int, Intent) 契约与后续行为")
+        // 2026-09-17 真机踩坑（本用例侧缺陷，已收敛）：解锁页由框架拉起时**落在客户端任务内**，
+        // 在解锁窗口真正成为活动窗口之前，`rootInActiveWindow` 仍是客户端窗口——此时只按
+        // 「可编辑」匹配会把主密码敲进客户端的用户名框（实测出现 `username=[<主密码>]`，
+        // 随后解锁按钮因密码框为空而失败，链路在 30 s 内不进入选择器）。
+        // 故按**包名**把查找收敛到本应用窗口。
         val passwordField = probe.awaitActiveNode(PASSWORD_FIELD_LABEL, ACTIVITY_WAIT_MS) { node ->
-            node.isEditable || node.isPassword
+            node.packageName?.toString() == targetContext.packageName &&
+                (node.isEditable || node.isPassword)
         }
-        assertNotNull("未在解锁页找到主密码输入框", passwordField)
+        assertNotNull("未在解锁页找到主密码输入框（已按包名收敛到本应用窗口）", passwordField)
         val typed = probe.setText(passwordField!!, AutofillSeedContract.MASTER_PASSWORD_TEXT)
         evidence.write(
             "ACTION_SET_TEXT 写入主密码=$typed（长度 ${AutofillSeedContract.MASTER_PASSWORD_TEXT.length}）"
@@ -235,12 +244,55 @@ class AutofillAuthChainDeviceTest {
         val clientRequestsBeforeUnlock = clientRequestCount()
         evidence.write("解锁按钮点击=${probe.click(unlockButton!!)}（文本「${normalizedText(unlockButton)}」）")
 
-        // (1) 解锁页必须正常结束（finish）——即 RESULT_OK 双参结果已被交付，而非卡死/崩溃
+        // (1) ISSUE-P2-86 的决定性观测：解锁页解锁成功后**链入选择器**，由本次认证结果直接
+        //     交付真实 Dataset。**不**再用「客户端显式重请求」把链路接下去——该手法恰好绕过本缺陷。
+        //     注意：此刻解锁页**尚未**结束——它要等选择器回传结果后才 setResult+finish。
+        val pickerChained = awaitNewTrace("resumed:$PICKER_ACTIVITY", CHAIN_WAIT_MS)
+        evidence.write("生命周期留痕: ${lifecycleTrace.toList()}")
+        assertTrue(
+            "解锁页未链入 $PICKER_ACTIVITY——ISSUE-P2-86 要求解锁成功后直接经选择器交付，" +
+                "而非以空载荷结束并等待（已被证伪的）框架重发",
+            pickerChained
+        )
+        SystemClock.sleep(UI_SETTLE_MS)
+        evidence.write("解锁后链入的选择器窗口快照:\n" + probe.snapshot())
+        screenshot("ac3-04-unlock-chained-picker")
+
+        val chainedEntry = probe.awaitActiveNode(ENTRY_ITEM_LABEL, ACTIVITY_WAIT_MS) { node ->
+            textOf(node).contains(AutofillSeedContract.ENTRY_TITLE)
+        }
+        assertNotNull(
+            "解锁后链入的选择器中未找到播种条目「${AutofillSeedContract.ENTRY_TITLE}」（库未真正解锁？）",
+            chainedEntry
+        )
+        evidence.write("点选播种条目=${probe.click(chainedEntry!!)}")
+
+        // 判据：客户端输入框被真实凭据写入，**且客户端全程未再请求填充**（无补救驱动）
+        val filledAfterUnlock = awaitNewLogcatLine(CLIENT_FILLED_TRACE, FILL_RESULT_WAIT_MS)
+        evidence.write(
+            "解锁后（未经客户端重请求）客户端自述:\n" + filteredLogcat(AutofillClientActivity.TAG).lines()
+                .filter { line -> line.contains(CLIENT_STATUS_TRACE) }
+                .takeLast(3)
+                .joinToString("\n")
+        )
+        assertEquals(
+            "客户端在解锁后又自行请求过填充——归因不干净，无法证明「不靠人工重请求也能填出凭据」",
+            clientRequestsBeforeUnlock,
+            clientRequestCount()
+        )
+        assertTrue(
+            "解锁后未靠人工重请求，客户端输入框未被写入凭据（未捕获到新的「$CLIENT_FILLED_TRACE」）" +
+                "——ISSUE-P2-86 修复未生效",
+            filledAfterUnlock
+        )
+        screenshot("ac3-05-client-filled-after-unlock")
+
+        // (2) 解锁页此时必须正常结束（认证结果已被交付，而非卡死/崩溃）
         val unlockFinished = awaitActivityFinished(UNLOCK_ACTIVITY, ACTIVITY_WAIT_MS)
         evidence.write("生命周期留痕: ${lifecycleTrace.toList()}")
         assertTrue("$UNLOCK_ACTIVITY 未结束（解锁流程卡住或 Activity 未 finish）", unlockFinished)
 
-        // (2) 全程不得出现本应用/本客户端进程的崩溃
+        // (3) 全程不得出现本应用/本客户端进程的崩溃
         val crashed = hasOwnProcessCrash()
         evidence.write("解锁全程崩溃留痕=${crashed}（框架认证结果留痕见下）")
         evidence.write(
@@ -251,11 +303,9 @@ class AutofillAuthChainDeviceTest {
         )
         assertFalse("自动填充链路在真机上出现崩溃（FATAL EXCEPTION / ANR）", crashed)
 
-        // (3) 归因测量：客户端不再主动请求时，框架是否**自行**重发 onFillRequest？
-        //     该行为是 AutofillUnlockActivity KDoc 明文前提（「解锁后框架会自动重新发起 onFillRequest」），
-        //     故此处只做**测量并如实记录**；同时记录两条**独立**证据通道：
-        //     ① 服务侧 debug 留痕（onFillRequest 是否真被调用）；② 框架侧 AutofillSession 会话事件
-        //     （createPendingIntent / onShown 是否出现），避免单一检测手段误判。
+        // (4) 归因测量：客户端不再主动请求时，框架是否**自行**重发 onFillRequest？
+        //     ISSUE-P2-86 已定性为**否**（基线 6/6 false）——此处仍做**测量并如实记录**。
+        //     两条**独立**证据通道：① 服务侧 debug 留痕；② 框架侧 AutofillSession 会话事件。
         val sessionEventsBefore = frameworkSessionEvents()
         val measureStartedAt = SystemClock.uptimeMillis()
         val frameworkRedispatch = awaitNewLogcatLine(UNLOCKED_DISPATCH_TRACE, REDISPATCH_WAIT_MS)
@@ -274,24 +324,20 @@ class AutofillAuthChainDeviceTest {
         // 客户端字段现状（认证结果是否把值写进了目标输入框——A 的功能面直接观测点）
         SystemClock.sleep(UI_SETTLE_MS)
         val clientStateAfterAuth = probe.awaitText(CLIENT_STATUS_TRACE, 6_000)?.let { textOf(it) }
-        evidence.write("解锁结束后客户端状态文本=${clientStateAfterAuth ?: "未读取到"}")
-
-        // (4) 解锁是否**确实生效**：由客户端显式请求一次，服务侧必须进入已解锁分支
-        //     （框架未自行重发时这是必需的补救驱动，不代表产品行为）
-        if (!frameworkRedispatch) {
-            evidence.write("框架未自行重发；由客户端「$REQUEST_BUTTON_LABEL」显式触发一次请求继续链路")
-            probe.awaitText(AutofillClientActivity.REQUEST_BUTTON_TEXT, CLIENT_WAIT_MS)?.let { probe.click(it) }
-        }
-        val unlockedBranchReached = awaitNewLogcatLine(UNLOCKED_DISPATCH_TRACE, FILL_UI_WAIT_MS)
-        evidence.write("服务侧已解锁分支留痕=$unlockedBranchReached")
-        evidence.write("服务端 logcat:\n" + filteredLogcat(SERVICE_TAG))
-        assertTrue(
-            "解锁完成后服务侧始终未进入已解锁分支——即解锁未真正生效或认证结果被框架丢弃",
-            unlockedBranchReached
-        )
+        evidence.write("解锁链路结束后客户端状态文本=${clientStateAfterAuth ?: "未读取到"}")
 
         // ---------------------------------------------------------------- 阶段 6（B）：选择器路径真实填充
         evidence.section("阶段 6：端到端填充——选择器显式指认条目，框架写入目标输入框")
+        // 重新拉起**全新客户端实例**：阶段 5 已把该实例的输入框填满，若不重开，
+        // 本阶段的「新填充留痕」断言会被阶段 5 的旧值顶替（假绿）。
+        probe.shell("input keyevent 4")
+        SystemClock.sleep(UI_SETTLE_MS)
+        targetContext.startActivity(clientIntent())
+        val clientForPicker = probe.awaitText(AutofillClientActivity.TITLE, CLIENT_WAIT_MS) != null
+        evidence.write("客户端重新拉起=$clientForPicker")
+        assertTrue("客户端未能重新拉起，阶段 6 无法取得空表单实例", clientForPicker)
+        SystemClock.sleep(UI_SETTLE_MS)
+
         var pickerItem = probe.awaitText(PICKER_ITEM_TEXT, REQUEST_FILL_WAIT_MS)
         if (pickerItem == null) {
             // 填充 UI 未自动弹出：再显式请求一次（客户端按钮）
@@ -302,7 +348,7 @@ class AutofillAuthChainDeviceTest {
         assertNotNull("系统填充 UI 未出现选择器入口数据集「$PICKER_ITEM_TEXT」", pickerItem)
         screenshot("ac3-03-unlocked-dispatch")
         evidence.write("点选选择器入口=${probe.click(pickerItem!!)}")
-        val pickerLaunched = awaitActivity(PICKER_ACTIVITY, ACTIVITY_WAIT_MS)
+        val pickerLaunched = awaitNewTrace("resumed:$PICKER_ACTIVITY", ACTIVITY_WAIT_MS)
         evidence.write("生命周期留痕: ${lifecycleTrace.toList()}")
         assertTrue("框架未拉起 $PICKER_ACTIVITY", pickerLaunched)
         SystemClock.sleep(UI_SETTLE_MS)
@@ -346,7 +392,7 @@ class AutofillAuthChainDeviceTest {
         )
         screenshot("ac3-06-candidate-dataset")
         evidence.write("点选候选=${probe.click(candidateItem!!)}")
-        val confirmLaunched = awaitActivity(CONFIRM_ACTIVITY, ACTIVITY_WAIT_MS)
+        val confirmLaunched = awaitNewTrace("resumed:$CONFIRM_ACTIVITY", ACTIVITY_WAIT_MS)
         evidence.write("生命周期留痕: ${lifecycleTrace.toList()}")
         assertTrue("框架未拉起 $CONFIRM_ACTIVITY", confirmLaunched)
         SystemClock.sleep(UI_SETTLE_MS)
@@ -402,24 +448,29 @@ class AutofillAuthChainDeviceTest {
 
         evidence.section("结论")
         evidence.write(
-            "A：认证数据集下发并展示 → 框架拉起 $UNLOCK_ACTIVITY → 真机完成解锁 → " +
-                "双参 setResult(RESULT_OK, Intent+extras) 未致崩溃、解锁生效（服务进入已解锁分支）= 已实测"
+            "A：认证数据集下发并展示 → 框架拉起 $UNLOCK_ACTIVITY → 真机完成解锁 → 链入 " +
+                "$PICKER_ACTIVITY 并原样转发其认证结果，解锁页正常结束=已实测（$unlockFinished）"
+        )
+        evidence.write(
+            "B（ISSUE-P2-86 判据）：解锁后**未经客户端重请求**（请求次数 $clientRequestsBeforeUnlock → " +
+                "$clientRequestsAfterUnlock）即由本次认证结果把真实凭据写入客户端输入框=" +
+                "$filledAfterUnlock（客户端自述 $CLIENT_FILLED_TRACE）"
+        )
+        evidence.write(
+            "B（已解锁分支）：真实客户端（$clientPackage，独立进程/uid）经选择器路径被真实凭据填充=" +
+                "$filled"
         )
         evidence.write(
             "A/第二个认证 Activity：框架拉起 $CONFIRM_ACTIVITY，其确认结果被接受且无崩溃；" +
-                "实际写入未发生（依赖 AC①）= 已实测并如实记录"
+                "实际写入未发生（ISSUE-P2-86 阶段二待实施）= 已实测并如实记录"
         )
         evidence.write(
-            "B：真实客户端（$clientPackage，独立进程/uid）经选择器路径被真实凭据填充" +
-                "（客户端自述 passwordFilled=true）= 已实测"
+            "归因测量（与既有 KDoc 前提的差异）：框架自行重发 onFillRequest=$frameworkRedispatch" +
+                "（客户端全程未再主动请求）；$UNLOCK_ACTIVITY 的原 KDoc 前提「解锁后框架会自动重发」" +
+                "已在 ISSUE-P2-86 中纠正"
         )
         evidence.write(
-            "实测与既有 KDoc 前提的差异：`AutofillUnlockActivity` 声明「解锁成功后框架会自动重发 " +
-                "onFillRequest」，本次归因测量结果为 frameworkRedispatch=$frameworkRedispatch" +
-                "（客户端全程未再主动请求）——若为 false 即为新发现，见记录文档"
-        )
-        evidence.write(
-            "未覆盖边界：① 确认路径的实际写入（依赖 AC① 数据集回传，经裁决本轮不实施）；" +
+            "未覆盖边界：① 确认路径的实际写入（ISSUE-P2-86 阶段二）；" +
                 "② webDomain 归属路径（本用例客户端为原生应用，不产生 webDomain）"
         )
     }
@@ -459,6 +510,27 @@ class AutofillAuthChainDeviceTest {
             SystemClock.sleep(POLL_MS)
         }
         return false
+    }
+
+    /**
+     * 等待 trace 中出现一条**新增**的指定留痕。
+     *
+     * 同一 Activity 会在多个阶段被拉起（选择器、确认页均如此），仅判 `contains` 会命中上一阶段的
+     * 旧留痕而**假绿**，故按「出现次数较调用前增加」判定。
+     */
+    private fun awaitNewTrace(needle: String, timeoutMs: Long): Boolean {
+        val before = traceCount(needle)
+        val deadline = SystemClock.uptimeMillis() + timeoutMs
+        while (SystemClock.uptimeMillis() < deadline) {
+            if (traceCount(needle) > before) return true
+            SystemClock.sleep(POLL_MS)
+        }
+        return false
+    }
+
+    /** 计数（对同步列表加锁遍历，避免与生命周期回调并发时迭代器失效） */
+    private fun traceCount(needle: String): Int = synchronized(lifecycleTrace) {
+        lifecycleTrace.count { it == needle }
     }
 
     /**
@@ -632,9 +704,6 @@ class AutofillAuthChainDeviceTest {
         /** 客户端界面状态文本前缀（其内容含 username / passwordFilled 等字段现状） */
         const val CLIENT_STATUS_TRACE = AutofillClientActivity.STATUS_PREFIX
 
-        /** 客户端按钮文案（框架未自动重发时的显式触发入口） */
-        const val REQUEST_BUTTON_LABEL = "重新请求自动填充"
-
         val LEVEL_PATTERN = Regex("运行完整性扫描完成: level=(\\w+)")
 
         const val POLL_MS = 200L
@@ -645,6 +714,9 @@ class AutofillAuthChainDeviceTest {
         const val KEYGUARD_WAIT_MS = 10_000L
         const val REQUEST_FILL_WAIT_MS = 12_000L
         const val ACTIVITY_WAIT_MS = 15_000L
+
+        /** 解锁成功后链入选择器的等待上限（含解锁 KDF 耗时，真机为低端设备故放宽） */
+        const val CHAIN_WAIT_MS = 30_000L
         const val FILL_RESULT_WAIT_MS = 20_000L
         const val CANDIDATE_WAIT_MS = 20_000L
 

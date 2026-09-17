@@ -114,6 +114,23 @@ interface VaultRepository {
     ): com.keepasskey.core.result.KdbxResult<Unit>
 
     /**
+     * 评估某个密码库来源的 KDF 工作因子是否**低于本应用建库默认强度**（ISSUE-P2-87）。
+     *
+     * 语义边界（调用前必读）：
+     * - **只读、非阻断**：只解析外层明文头部（按 KDBX 规范，头部在认证之前即为明文，
+     *   故**不需要任何凭据**，也不解密载荷），既不拒绝打开、也不改写任何 KDF 参数；
+     * - 判据与文案口径见 `KdbxKdfStrengthAssessor`：结论只能表述为「低于本应用建库默认强度」，
+     *   **不得**解读为「不安全 / 已被攻破」；
+     * - **null = 未评估**（来源不可读 / 头部不可解析 / 远端来源不是本地文件）：
+     *   本方法只服务于一条提示，调用时机在导入**已成功之后**，读取失败绝不得反过来
+     *   影响已成功的导入，也不得据此谎报「低于基线」。
+     *
+     * 默认实现恒返回 null（未评估），**仅供不建模文件 IO 的测试替身沿用**——
+     * 生产实现 `RealVaultRepository` 已覆盖。
+     */
+    suspend fun assessKdfStrength(path: String): com.keepasskey.database.file.KdbxKdfStrengthAssessment? = null
+
+    /**
      * 获取全部群组/文件夹的实时响应式流
      */
     fun getGroups(): Flow<List<VaultGroup>>

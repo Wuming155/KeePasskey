@@ -5,7 +5,7 @@
 ## 特性亮点
 
 - **KeePass 兼容**：仅 v4（`v3` 及以下明确拒绝），与 KeePass / KeePassXC / pykeepass 真实互通
-- **多方式同步**：WebDAV（Nextcloud、ownCloud 等）与 S3 兼容协议（AWS S3、MinIO、Cloudflare R2 等）
+- **多方式同步**：WebDAV（Nextcloud、ownCloud 等**公有托管服务**）与 S3 兼容协议（AWS S3、MinIO **公有端点**、Cloudflare R2 等）——**仅限公网端点**，不支持自建内网 / 私网段 / `.local` 端点（见「已知局限」）
 - **通行密钥**：FIDO2 / WebAuthn 凭据的安全存储，并可作为设备绑定解锁方式与系统自动填充凭据
 - **全功能**：分组树 / 条目字段 / 附件 / 历史版本与回滚 / 模板 / 回收站 / 全文搜索
 - **增强**：TOTP·HOTP、密码生成器（含 Diceware）、离线密码健康度审计（可选联网泄露比对，k-匿名、默认关闭）、KeePass 字段引用 `{REF:...}`
@@ -38,7 +38,7 @@ Argon2 原生内核位于 `crypto/src/main/rust/`，由 **Rust + cargo-ndk 从�
 
 1. **创建 / 打开库**：主密码（+ 可选密钥文件）建库，或从外部导入 `.kdbx` v4。
 2. **解锁**：主密码、密钥文件或生物识别；支持设备锁屏绑定的快速解锁。
-3. **同步**：设置页配置 WebDAV / S3 账号，手动或周期性后台同步，冲突时可视化逐字段合并。
+3. **同步**：设置页配置 WebDAV / S3 账号，手动或周期性后台同步，冲突时可视化逐字段合并（**仅限公网端点**，见「已知局限」）。
 4. **自动填充**：系统 Autofill 或 Credential Provider 双通道，含 IME 内联建议；通行密钥由系统 Credential Manager 直接调用。
 
 ## 文档
@@ -59,6 +59,8 @@ Argon2 原生内核位于 `crypto/src/main/rust/`，由 **Rust + cargo-ndk 从�
 > [`docs/ACTIVE_ISSUES.md`](docs/ACTIVE_ISSUES.md)。
 
 自定义键盘（Magikeyboard 式）未实现（已提供 IME 内联建议 + 自动填充替代）；`KDBX v3` 及以下明确拒绝；应用尚未发布至 F-Droid / GitHub Release。
+
+**同步仅限公网端点**：内网 / 私网段（RFC1918、链路本地、ULA、`100.64/10` 等）/ `.local` / `.internal` / `localhost` 端点一律被拒绝，**且不提供终端用户可配置入口**。这是 SSRF 纵深防御的默认收紧（有意偏离主流做法，参考项目普遍不做此限制），口径见 [`docs/architecture/产品裁决登记.md`](docs/architecture/产品裁决登记.md) `PD-02`。公网域名上的 Nextcloud / ownCloud / MinIO 等**正常可用**。
 
 ## 官方签名指纹（ISSUE-P1-23）
 

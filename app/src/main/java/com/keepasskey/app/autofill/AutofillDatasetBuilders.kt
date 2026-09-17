@@ -65,11 +65,20 @@ private const val AUTH_REQUEST_CODE_BASE = 100
 /**
  * 库已锁定时构建解锁引导数据集。
  *
+ * ISSUE-P2-86：认证入口指向 [AutofillUnlockActivity]，该页解锁成功后**链入选择器**
+ * （[AutofillPickerActivity]）并原样转发其认证结果——选择器经
+ * `AutofillManager.EXTRA_AUTHENTICATION_RESULT` 回传真实 [Dataset]，是本应用内
+ * **唯一**经真机验证可用的交付路径。因此基 Intent 必须按选择器所需的上下文补齐 extras。
+ *
+ * @param callingPkg 调用方包名（下发选择器，用于归属展示与首次绑定写入）
+ * @param webDomain 表单**自报**域（下发选择器，用于字段级屏蔽签名；可为 null）
  * @return 库锁定时返回仅含解锁引导数据集的响应；库已解锁时返回 null（由调用方继续走已解锁分支）
  */
 internal fun KeePasskeyAutofillService.buildLockedUnlockDataset(
     usernameId: AutofillId?,
     passwordId: AutofillId?,
+    callingPkg: String,
+    webDomain: String?,
     inlineRequest: InlineSuggestionsRequest?
 ): FillResponse? {
     // 库已锁定：提供解锁 Action Dataset
@@ -79,16 +88,23 @@ internal fun KeePasskeyAutofillService.buildLockedUnlockDataset(
         setTextViewText(R.id.tv_username, getString(R.string.cred_autofill_unlock_prompt))
         setTextViewText(R.id.tv_subtitle, getString(R.string.cred_autofill_locked_subtitle))
     }
-    // 认证入口指向专用 AutofillUnlockActivity：解锁成功即 setResult+finish，
-    // 自动填充框架收到成功结果后自动重发 onFillRequest（此时库已解锁，直接出真实候选）
+    // ISSUE-P2-86：与已验证可用的选择器基 Intent（[buildPickerDataset]）**严格同构**——
+    // 不带任何 activity flag（旧构造的 NEW_TASK|CLEAR_TOP 与之相异），并携带选择器所需的
+    // 全部上下文，使解锁页解锁后能直接链入选择器完成交付。
     val unlockIntent = Intent(this, AutofillUnlockActivity::class.java).apply {
-        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        putExtra(AutofillPickerActivity.EXTRA_USERNAME_ID, usernameId)
+        putExtra(AutofillPickerActivity.EXTRA_PASSWORD_ID, passwordId)
+        putExtra(AutofillPickerActivity.EXTRA_CALLING_PACKAGE, callingPkg)
+        putExtra(AutofillPickerActivity.EXTRA_WEB_DOMAIN, webDomain.orEmpty())
     }
     val pendingIntent = PendingIntent.getActivity(
         this,
         nextAuthRequestCode(),
         unlockIntent,
-        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        // ISSUE-P2-86：框架需向该 PendingIntent 注入 fillIn extras 并消费其回传的认证结果，
+        // 必须 FLAG_MUTABLE——选择器路径（真机实测可填充）即此构造；旧构造的 FLAG_IMMUTABLE
+        // 真机实测恒不填充（对照事实见 docs/records/自动填充认证链路真机实测记录.md）
+        PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
     )
     val dsBuilder = Dataset.Builder(
         Presentations.Builder()
@@ -187,6 +203,9 @@ internal suspend fun KeePasskeyAutofillService.appendUnlockedDatasets(
         }
     )
 
+    // ISSUE-P2-86 阶段二实测（2026-09-17）：确认路径同样改为「FLAG_MUTABLE + 无基 Intent flags」
+    // 后，真机**仍未写入**目标表单 ⇒「认证 PendingIntent 可变性 / 基 Intent flags」**不是**
+    // 确认路径的决定变量，故此处**保持原构造**（不做未经证实的改动）。
     val confirmIntent = Intent(this, AutofillConfirmActivity::class.java).apply {
         flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
     }
@@ -253,6 +272,8 @@ internal suspend fun KeePasskeyAutofillService.appendUnlockedDatasets(
                 ).putExtra(AutofillConfirmActivity.EXTRA_ENTRY_ID, entryIdHex)
                     .putExtra(AutofillConfirmActivity.EXTRA_GRANT_PACKAGE, callingPkg)
                     .putExtra(AutofillConfirmActivity.EXTRA_GRANT_DOMAIN, webDomain.orEmpty()),
+                // ISSUE-P2-86 阶段二实测：改为 FLAG_MUTABLE 后确认路径**仍未写入** ⇒
+                // 该 flag 不是本路径的决定变量，保持原构造（不扩大攻击面，见接线守卫）
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
             )
             dsBuilder.setAuthentication(confirmPendingIntent.intentSender)

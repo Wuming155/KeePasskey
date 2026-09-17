@@ -200,7 +200,21 @@ class UnlockViewModel @Inject constructor(
         biometricUnlock.onBiometricAutoPromptRequested(activity)
 
     /**
-     * 从外部文件导入密码库（在空状态下快速打开已有库）
+     * 从外部文件导入密码库（在空状态下快速打开已有库）。
+     *
+     * ISSUE-P2-87：导入成功后再按**外层明文头部**（按 KDBX 规范位于认证之前，无需凭据、
+     * 不解密载荷）评估 KDF 工作因子，低于本应用建库默认强度时置
+     * [UnlockUiState.infoMessage] —— 这是**非阻断提示**：成功仍是成功
+     * （**不动** [UnlockUiState.errorMessage]），既不阻断后续解锁，也**不改写任何 KDF 参数**。
+     * 判据与文案口径见 `KdbxKdfStrengthAssessor`（只表述「低于本应用建库默认强度」，
+     * 不得解读为「不安全 / 已被攻破」）。
+     *
+     * 达标或**未能评估**（来源不可读 / 头部不可解析）时一并置空：同一槽位若残留上一次导入的
+     * 弱因子提示，会变成对**当前**库的误导性告警，故以「不残留」优先。
+     *
+     * **本页是用户导入后确定停留在的页面**，故弱因子提示落在本页；选择器页的导入路径
+     * （`DatabasePickerViewModel.importDatabaseFromSource`）随导入立即退栈、本页即其落点，
+     * 其提示责任同样由本页承载。
      */
     fun importExternalDatabase(name: String, path: String) {
         viewModelScope.launch {
@@ -208,7 +222,13 @@ class UnlockViewModel @Inject constructor(
             val result = vaultRepository.importExternalDatabase(name, path)
             _uiState.update { it.copy(isLoading = false) }
             if (result is KdbxResult.Failure) {
+                // 失败路径只置 errorMessage：成功/失败是互斥结论，不得同时给出告警
                 _uiState.update { it.copy(errorMessage = UiMessage(R.string.vault_op_failed, listOf(result.message))) }
+            } else {
+                val belowBaseline = vaultRepository.assessKdfStrength(path)?.isBelowBaseline == true
+                _uiState.update {
+                    it.copy(infoMessage = if (belowBaseline) UiMessage(R.string.unlock_msg_weak_kdf) else null)
+                }
             }
         }
     }

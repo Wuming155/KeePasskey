@@ -57,6 +57,7 @@ Coroutines + Flow；**文档与代码注释使用简体中文**。
 
 - [`docs/ACTIVE_ISSUES.md`](docs/ACTIVE_ISSUES.md) — 待办（P0→P3）；[`docs/RESOLVED_LOG.md`](docs/RESOLVED_LOG.md) — 归档总索引
 - [`docs/architecture/已知工程限界.md`](docs/architecture/已知工程限界.md) — **已接受工程限界 / 残余风险登记表**（改这些面之前必读；判「是否为已知限界」只认此表）
+- [`docs/architecture/产品裁决登记.md`](docs/architecture/产品裁决登记.md) — **已裁决的产品口径登记表**（判「这是不是已定的取舍」只认此表；**属取舍而非缺陷的条目一律不进 `ACTIVE_ISSUES.md`**）
 - `.codebuddy/rules/engineering-rules.md` — 工程规则；写代码前
 - [`docs/security/同步层记录级完整性威胁建模.md`](docs/security/同步层记录级完整性威胁建模.md) — 改同步 / 合并 / 防回滚前
 - [`docs/security/SECURITY_RECHECK_2026-09.md`](docs/security/SECURITY_RECHECK_2026-09.md) — 认领安全条目 / 重评 severity / 发布前

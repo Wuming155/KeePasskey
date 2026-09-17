@@ -183,7 +183,15 @@ class KeePasskeyAutofillService : AutofillService() {
         val inlineRequest = request.inlineSuggestionsRequest
 
         // 库已锁定：提供解锁 Action Dataset
-        buildLockedUnlockDataset(usernameId, passwordId, inlineRequest)?.let { lockedResponse ->
+        // ISSUE-P2-86：解锁引导数据集需携带链入选择器所需的上下文（目标框 id + 调用方包名 +
+        // 表单自报域），故按选择器同一口径传入 callingPkg / scanResult.webDomain
+        buildLockedUnlockDataset(
+            usernameId = usernameId,
+            passwordId = passwordId,
+            callingPkg = callingPkg,
+            webDomain = scanResult.webDomain,
+            inlineRequest = inlineRequest
+        )?.let { lockedResponse ->
             // ISSUE-P2-73 AC③：设备侧核对「库锁定 ⇒ 下发认证引导数据集」的调试留痕。
             // 用 `AppLog.d`（仅 debug 构建输出，release 静默且被 R8 剥离）——不改变任何语义，
             // 只为真机链路提供可核对的时序锚点；日志不含包名/条目等敏感标识。

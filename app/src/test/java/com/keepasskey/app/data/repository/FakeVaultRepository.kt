@@ -15,6 +15,7 @@ import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.core.model.PasskeyData
 import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.core.security.ProtectedString
+import com.keepasskey.database.file.KdbxKdfStrengthAssessment
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -133,6 +134,17 @@ class FakeVaultRepository(
         databasesFlow.value = current
         return com.keepasskey.core.result.KdbxResult.Success(Unit)
     }
+
+    /**
+     * ISSUE-P2-87：可注入的工作因子评估结果。
+     *
+     * 默认 null = **未评估**（与生产实现「来源不可读 / 头部不可解析」同一语义），
+     * 故既有用例不受影响；需要驱动「低于本应用建库默认强度」提示的用例显式赋值。
+     */
+    var kdfStrengthAssessment: KdbxKdfStrengthAssessment? = null
+
+    override suspend fun assessKdfStrength(path: String): KdbxKdfStrengthAssessment? =
+        kdfStrengthAssessment
 
     override fun getGroups(): Flow<List<VaultGroup>> = groupsFlow.asStateFlow()
 

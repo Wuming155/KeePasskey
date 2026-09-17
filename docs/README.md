@@ -17,6 +17,7 @@
 |---|---|
 | [`architecture/ARCHITECTURE.md`](architecture/ARCHITECTURE.md) | 模块依赖拓扑与关键架构决策 |
 | [`architecture/已知工程限界.md`](architecture/已知工程限界.md) | **已接受工程限界 / 残余风险的唯一登记表**（原 `AGENTS.md` §6，`215ea82` 删除后由本文件承接）：事实 / 边界 / 依据 / 解除条件 |
+| [`architecture/产品裁决登记.md`](architecture/产品裁决登记.md) | **已裁决的产品口径登记表**（`PD-01`…）：属「产品 / 架构取舍」而非缺陷的条目（2026-09-17 由 `ACTIVE_ISSUES.md` 迁出）；与待办清单、与 `已知工程限界` 的分工见该文件开头 |
 | [`architecture/reference-projects.md`](architecture/reference-projects.md) | 参考项目地图与优先级层级 |
 | [`architecture/扫码方案评估_ZXing与CameraXMLKit.md`](architecture/扫码方案评估_ZXing与CameraXMLKit.md) | 扫码方案选型评估（ZXing vs CameraX/ML Kit） |
 
@@ -31,7 +32,7 @@
 | [`records/运行完整性检测Frida实测基线.md`](records/运行完整性检测Frida实测基线.md) | 真机 Frida 三形态实测矩阵（`ISSUE-P3-120`）：命中率 3/3、两层防线互补关系、**四条未经实测的规避面**、复现步骤与清理留痕 |
 | [`records/存量条目前提复核记录.md`](records/存量条目前提复核记录.md) | `ACTIVE_ISSUES.md` 三条「已裁决暂缓」条目（`P2-47` / `P2-79` / `P3-121`）的前提复核（2026-09-16 对 HEAD `2e5ce38`）：正文前提判定、**失真裁决理由**、可直接粘贴的修正片段 |
 | [`records/SyncCache大写CACHE临时文件定位记录.md`](records/SyncCache大写CACHE临时文件定位记录.md) | `ISSUE-P3-142` 定位记录：残留条目**磁盘上并不存在**（四路交叉取证），判为 **Windows/NTFS 目录枚举鬼影**；非本仓写入者、非外部写入者；含复现率、候选解释逐一裁定、断言口径更正与该形态的残余边界 |
-| [`records/自动填充认证链路真机实测记录.md`](records/自动填充认证链路真机实测记录.md) | `ISSUE-P2-73` AC③ 真机实测记录（Redmi 4X / Android 17 / API 37）：设备侧驱动方式、**定版用例 4/4 通过**与历史失败逐次留痕、关键 logcat 原文与截图；**4 条新发现**——框架解锁后**不自动重发** `onFillRequest`（`ISSUE-P2-86`）、确认路径因认证结果不带数据集而**写不入凭据**（对照：选择器路径回传真实 `Dataset` 即成功）、`UiAutomation` 每用户单槽位、锁屏下 Activity 无法进入前台 |
+| [`records/自动填充认证链路真机实测记录.md`](records/自动填充认证链路真机实测记录.md) | `ISSUE-P2-73` AC③ 真机实测记录（Redmi 4X / Android 17 / API 37）：设备侧驱动方式、**定版用例 4/4 通过**与历史失败逐次留痕、关键 logcat 原文与截图；**4 条新发现**——框架解锁后**不自动重发** `onFillRequest`（`ISSUE-P2-86`）、确认路径因认证结果不带数据集而**写不入凭据**（对照：选择器路径回传真实 `Dataset` 即成功）、`UiAutomation` 每用户单槽位、锁屏下 Activity 无法进入前台。**§11（2026-09-17）** 记录该缺陷的**定位与修复**（根因是**交付路径缺失**，非框架行为）与**真机验证 + 负向对照**，并给出确认路径的**反向结论**（只改 `FLAG_MUTABLE` / 基 Intent flags **无效** ⇒ 不可外推） |
 
 ## security/ — 安全、威胁建模与合规
 
@@ -50,7 +51,7 @@
 | 文档 | 用途 |
 |---|---|
 | [`references/`](references/) | 5 个参考项目深度分析 + 索引；借鉴实现思路前先读 |
-| [`references/存量5项开放问题的参考项目对照.md`](references/存量5项开放问题的参考项目对照.md) | `ACTIVE_ISSUES.md` 当前 **5 项开放条目**（`P2-47` / `P2-79` / `P2-86` / `P3-121` / `P3-146`）逐项「参考项目怎么做」取证对照：**文件级防回滚 5 家全无**、**KDF「只升不降」守卫全无**（且 KeePassDX 基准为降强路径）、**Autofill 两家均不依赖框架重发**（认证 PI 一律 `FLAG_MUTABLE`）、**SSRF 防护全无**（地址口径与本仓相反）、**分支保护即代码全无**；含各项目 `路径:行号` 证据与「未找到证据」逐条区分 |
+| [`references/存量5项开放问题的参考项目对照.md`](references/存量5项开放问题的参考项目对照.md) | `ACTIVE_ISSUES.md` **当时 5 项开放条目**（`P2-47` / `P2-79` / `P2-86` / `P3-121` / `P3-146`）逐项「参考项目怎么做」取证对照：**文件级防回滚 5 家全无**、**KDF「只升不降」守卫全无**（且 KeePassDX 基准为降强路径）、**Autofill 两家均不依赖框架重发**（认证 PI 一律 `FLAG_MUTABLE`）、**SSRF 防护全无**（地址口径与本仓相反）、**分支保护即代码全无**；含各项目 `路径:行号` 证据与「未找到证据」逐条区分。**2026-09-17 起**其中 `P2-47` / `P2-79` / `P3-121` 三条已作为**产品裁决**迁出待办清单（见 [`architecture/产品裁决登记.md`](architecture/产品裁决登记.md) `PD-01`/`PD-02`/`PD-03`）；本文件的取证结论**仍然有效**，是上述三条裁决的依据 |
 
 ## resolved/ — 历史批次归档
 
@@ -58,6 +59,6 @@
 |---|---|
 | [`resolved/README.md`](resolved/README.md) | 分册体系说明与维护规则 |
 | [`resolved/BATCH_01_30.md`](resolved/BATCH_01_30.md) 等 **4 册** | 分册级索引（各 ≤100 行） |
-| `resolved/batches/` | **一批次一文件**的批次正文（当前 **107** 份，§1~§109；§42 / §43 已归入 `security/`） |
+| `resolved/batches/` | **一批次一文件**的批次正文（当前 **108** 份，§1~§110；§42 / §43 已归入 `security/`） |
 
 > **回溯约定**：归档正文只搬迁、不改写。拆分前的完整版本见 git `a144d21`。
