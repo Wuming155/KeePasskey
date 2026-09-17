@@ -11,8 +11,11 @@
 //! - `Java_com_keepasskey_crypto_kdf_NativeAesKdf_deriveKey`
 //! - `Java_com_keepasskey_crypto_cipher_NativeTwofish_cbcEncryptBlocks`
 //! - `Java_com_keepasskey_crypto_cipher_NativeTwofish_cbcDecryptBlocks`
+//! - `Java_com_keepasskey_crypto_cipher_NativeAes_cbcEncryptBlocks`（§147）
+//! - `Java_com_keepasskey_crypto_cipher_NativeAes_cbcDecryptBlocks`（§147）
 //! - `Java_com_keepasskey_crypto_strength_NativePasswordStrength_estimate`
 
+use crate::aes_cbc;
 use crate::aes_kdf::{self, COMPOSITE_KEY_LEN, OUT_LEN};
 use crate::chacha20_stream;
 use crate::passkey_sign;
@@ -86,7 +89,6 @@ pub extern "system" fn Java_com_keepasskey_crypto_kdf_NativeAesKdf_deriveKey<'lo
 // ============================================================================
 // 2) Twofish-CBC（分组变换本体，不含填充）
 // ============================================================================
-
 /// Twofish-CBC 链式加密（**输入长度必须为 16 的整数倍**）。
 ///
 /// `iv` 为**输入输出参数**：调用时给出当前链值，返回时被原地更新为最后一组密文，
@@ -139,6 +141,83 @@ fn twofish_cbc_jni<'local>(
             twofish_cbc::cbc_encrypt(&key_buf, &mut iv_buf, &data_buf)?
         } else {
             twofish_cbc::cbc_decrypt(&key_buf, &mut iv_buf, &data_buf)?
+        };
+
+        // 回写演化后的链值（IV 非秘密，但仍在 Zeroizing 缓冲中处理）
+        let java_iv = iv;
+        // SAFETY：iv_buf 长度已校验为 BLOCK_LEN 且为有效内存
+        env.set_byte_array_region(&java_iv, 0, unsafe { as_jbyte(&iv_buf[..]) })
+            .ok()?;
+
+        let out = Zeroizing::new(out);
+        let java_out = env.new_byte_array(out.len() as jint).ok()?;
+        // SAFETY：out 为有效内存，长度取自 out.len()
+        env.set_byte_array_region(&java_out, 0, unsafe { as_jbyte(&out[..]) })
+            .ok()?;
+        Some(java_out.into_raw())
+    }));
+
+    match outcome {
+        Ok(Some(arr)) => arr,
+        _ => null_mut(),
+    }
+}
+
+// ============================================================================
+// 2b) AES-256-CBC（分组变换本体，不含填充；ISSUE-P3-155 追问 / §147）
+// ============================================================================
+
+/// AES-256-CBC 链式加密（**输入长度必须为 16 的整数倍**；密钥恒 32 字节）。
+///
+/// `iv` 为**输入输出参数**：调用时给出当前链值，返回时被原地更新为最后一组密文。
+#[no_mangle]
+pub extern "system" fn Java_com_keepasskey_crypto_cipher_NativeAes_cbcEncryptBlocks<'local>(
+    env: JNIEnv<'local>,
+    _thiz: JObject<'local>,
+    key: JByteArray<'local>,
+    iv: JByteArray<'local>,
+    data: JByteArray<'local>,
+) -> jbyteArray {
+    aes_cbc_jni(env, key, iv, data, true)
+}
+
+/// AES-256-CBC 链式解密（**不做去填充**；语义与加密侧对称，`iv` 同样原地演化）。
+#[no_mangle]
+pub extern "system" fn Java_com_keepasskey_crypto_cipher_NativeAes_cbcDecryptBlocks<'local>(
+    env: JNIEnv<'local>,
+    _thiz: JObject<'local>,
+    key: JByteArray<'local>,
+    iv: JByteArray<'local>,
+    data: JByteArray<'local>,
+) -> jbyteArray {
+    aes_cbc_jni(env, key, iv, data, false)
+}
+
+/// 加解密共用实现（与 [`twofish_cbc_jni`] 同构，仅内核不同）。
+fn aes_cbc_jni<'local>(
+    env: JNIEnv<'local>,
+    key: JByteArray<'local>,
+    iv: JByteArray<'local>,
+    data: JByteArray<'local>,
+    encrypt: bool,
+) -> jbyteArray {
+    if key.is_null() || iv.is_null() || data.is_null() {
+        return null_mut();
+    }
+
+    let outcome = catch_unwind(AssertUnwindSafe(|| -> Option<jbyteArray> {
+        let key_buf = Zeroizing::new(env.convert_byte_array(&key).ok()?);
+        let mut iv_buf = Zeroizing::new(env.convert_byte_array(&iv).ok()?);
+        let data_buf = Zeroizing::new(env.convert_byte_array(&data).ok()?);
+
+        if iv_buf.len() != aes_cbc::BLOCK_LEN || data_buf.len() % aes_cbc::BLOCK_LEN != 0 {
+            return None;
+        }
+
+        let out = if encrypt {
+            aes_cbc::cbc_encrypt(&key_buf, &mut iv_buf, &data_buf)?
+        } else {
+            aes_cbc::cbc_decrypt(&key_buf, &mut iv_buf, &data_buf)?
         };
 
         // 回写演化后的链值（IV 非秘密，但仍在 Zeroizing 缓冲中处理）
@@ -346,6 +425,20 @@ mod tests {
             jlong,
             JByteArray<'a>,
         ) -> jbyteArray = Java_com_keepasskey_crypto_cipher_NativeChaCha20_applyKeystream;
+        let aes_enc: for<'a> extern "system" fn(
+            JNIEnv<'a>,
+            JObject<'a>,
+            JByteArray<'a>,
+            JByteArray<'a>,
+            JByteArray<'a>,
+        ) -> jbyteArray = Java_com_keepasskey_crypto_cipher_NativeAes_cbcEncryptBlocks;
+        let aes_dec: for<'a> extern "system" fn(
+            JNIEnv<'a>,
+            JObject<'a>,
+            JByteArray<'a>,
+            JByteArray<'a>,
+            JByteArray<'a>,
+        ) -> jbyteArray = Java_com_keepasskey_crypto_cipher_NativeAes_cbcDecryptBlocks;
         let es: for<'a> extern "system" fn(
             JNIEnv<'a>,
             JObject<'a>,
@@ -366,6 +459,8 @@ mod tests {
             dec as usize,
             est as usize,
             chacha as usize,
+            aes_enc as usize,
+            aes_dec as usize,
             es as usize,
             ed as usize,
         );

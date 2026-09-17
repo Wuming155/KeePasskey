@@ -3,6 +3,7 @@ package com.keepasskey.crypto.perf
 import com.keepasskey.core.model.PasskeyData
 import com.keepasskey.crypto.cipher.AesCipherEngine
 import com.keepasskey.crypto.cipher.ChaCha20CipherEngine
+import com.keepasskey.crypto.cipher.NativeAes
 import com.keepasskey.crypto.cipher.NativeChaCha20
 import com.keepasskey.crypto.passkey.PasskeyCryptoEngine
 import org.bouncycastle.crypto.digests.SHA256Digest
@@ -85,25 +86,22 @@ class DeviceThroughputProbeTest {
         assertTrue("候选分块路径解密往返必须逐字节还原明文", Arrays.equals(plainAfter, payload))
         Arrays.fill(plainBefore, 0); Arrays.fill(plainAfter, 0)
 
-        // ---- 加密侧对比 ----
-        val encBefore = measure("AES-CBC加密", "现状-生产流(512B内部缓冲)") { encryptViaProductionStream(engine, payload, key, iv) }
-        val encAfter = measure("AES-CBC加密", "候选-64KiB分块update") { encryptViaChunkedUpdate(payload, key, iv) }
-        val encBulk = measure("AES-CBC加密", "参照-一次性doFinal(10MiB)") {
+        // ---- AES：**生产路径保持平台 JCE**（§147 评估：Rust 下沉因 JNI 边界代价实测倒退，
+        //      已回退，见 `architecture/已知工程限界.md` §17）。此处保留前后对照基线，供重估时复用。
+        measure("AES-CBC加密", "生产-CipherOutputStream") { encryptViaProductionStream(engine, payload, key, iv) }
+        measure("AES-CBC加密", "参照-JCE一次性doFinal") {
             val c = Cipher.getInstance("AES/CBC/PKCS5Padding")
             c.init(Cipher.ENCRYPT_MODE, SecretKeySpec(key, "AES"), IvParameterSpec(iv))
             c.doFinal(payload)
         }
-
-        // ---- 解密侧对比 ----
-        val decBefore = measure("AES-CBC解密", "现状-生产流(512B内部缓冲)") { decryptViaProductionStream(engine, cipherBefore, key, iv) }
-        val decAfter = measure("AES-CBC解密", "候选-64KiB分块update") { decryptViaChunkedUpdate(cipherBefore, key, iv) }
+        measure("AES-CBC加密", "参照-JCE 64KiB分块update") { encryptViaChunkedUpdate(payload, key, iv) }
+        measure("AES-CBC解密", "生产-CbcDecryptingInputStream(64KiB)") { decryptViaProductionStream(engine, cipherBefore, key, iv) }
+        measure("AES-CBC解密", "参照-JCE 64KiB分块update") { decryptViaChunkedUpdate(cipherBefore, key, iv) }
 
         Arrays.fill(cipherBefore, 0); Arrays.fill(cipherAfter, 0)
-        reportComparison("AES-CBC加密", PAYLOAD_BYTES, encBefore, encAfter, encBulk)
-        reportComparison("AES-CBC解密", PAYLOAD_BYTES, decBefore, decAfter, null)
     }
 
-    /** 现状路径：走生产 `AesCipherEngine` 的流包装（内部即 `CipherInputStream/OutputStream`）。 */
+    /** 生产路径的流包装（§147 起：原生可用时为 `CbcEncryptingOutputStream` + 原生变换）。 */
     private fun encryptViaProductionStream(
         engine: AesCipherEngine,
         payload: ByteArray,
@@ -291,6 +289,74 @@ class DeviceThroughputProbeTest {
     }
 
     /**
+     * AES-256-CBC 生产形态对照 · **连续 10 轮**（2026-09-17：单轮/单次不作结论）。
+     *
+     * 每轮对 6 个变体各取 5 次采样中位，按轮打印**一行**（便于外部逐轮汇总与看离散度）：
+     * 生产引擎（整块/流式 × 加/解）× JCE 参照（一次性 doFinal / 64 KiB 分块）。
+     * 结论只允许由 10 轮的**分布**得出，不得由任一轮单独得出。
+     */
+    @Test
+    fun probeAes生产形态对照_连续10轮() {
+        val payload = ByteArray(PAYLOAD_BYTES) { ((it * 31 + 11) and 0xFF).toByte() }
+        val key = ByteArray(32) { ((it * 13 + 3) and 0xFF).toByte() }
+        val iv = ByteArray(16) { ((it * 7 + 1) and 0xFF).toByte() }
+        val engine = AesCipherEngine()
+
+        // 生成一份参考密文（JCE，用于解密侧对照）
+        val referenceCipher = run {
+            val c = Cipher.getInstance("AES/CBC/PKCS5Padding")
+            c.init(Cipher.ENCRYPT_MODE, SecretKeySpec(key, "AES"), IvParameterSpec(iv))
+            c.doFinal(payload)
+        }
+
+        fun medianMs(block: () -> ByteArray): Double {
+            block() // 预热 1 次
+            val samples = (0 until SAMPLES).map {
+                val start = System.nanoTime()
+                val out = block()
+                val ms = (System.nanoTime() - start) / 1_000_000.0
+                Arrays.fill(out, 0)
+                ms
+            }
+            return samples.sorted()[samples.size / 2]
+        }
+
+        fun jceEncryptBulk(): ByteArray {
+            val c = Cipher.getInstance("AES/CBC/PKCS5Padding")
+            c.init(Cipher.ENCRYPT_MODE, SecretKeySpec(key, "AES"), IvParameterSpec(iv))
+            return c.doFinal(payload)
+        }
+
+        repeat(10) { index ->
+            val encBulk = medianMs { engine.encrypt(key, iv, payload) }
+            val encStream = medianMs {
+                val sink = ByteArrayOutputStream(payload.size + 32)
+                engine.createEncryptingStream(sink, key, iv).use { it.write(payload) }
+                sink.toByteArray()
+            }
+            val decBulk = medianMs { engine.decrypt(key, iv, referenceCipher) }
+            val decStream = medianMs {
+                val out = ByteArrayOutputStream(referenceCipher.size)
+                engine.createDecryptingStream(
+                    ByteArrayInputStream(referenceCipher), key, iv
+                ).use { it.copyTo(out) }
+                out.toByteArray()
+            }
+            val jceBulk = medianMs { jceEncryptBulk() }
+            val jceChunk = medianMs { encryptViaChunkedUpdate(payload, key, iv) }
+
+            println(
+                "$PREFIX AES-10轮|round=${index + 1}|" +
+                    "生产整块加密=${fmt(encBulk)}ms|生产流式加密=${fmt(encStream)}ms|" +
+                    "生产整块解密=${fmt(decBulk)}ms|生产流式解密=${fmt(decStream)}ms|" +
+                    "JCE-doFinal=${fmt(jceBulk)}ms|JCE-64KiB=${fmt(jceChunk)}ms"
+            )
+        }
+
+        Arrays.fill(payload, 0); Arrays.fill(key, 0); Arrays.fill(iv, 0); Arrays.fill(referenceCipher, 0)
+    }
+
+    /**
      * JNI 边界单次开销实测（2026-09-17 追问「RS256 结论是否考虑 JNI 开销」的量级证据）。
      *
      * 用既有内核测「一次跨边界调用 + 两次数组拷贝」的**固定开销**：
@@ -325,6 +391,56 @@ class DeviceThroughputProbeTest {
         perCallMicros("NativeChaCha20.applyKeystream", tiny)
         perCallMicros("NativeChaCha20.applyKeystream", chunk)
         Arrays.fill(key, 0); Arrays.fill(nonce, 0); Arrays.fill(tiny, 0); Arrays.fill(chunk, 0)
+    }
+
+    /**
+     * JNI 边界成本分解 · **连续 10 轮**（2026-09-18，回答「AES 是否算法/库的问题」）。
+     *
+     * 用**同一份 10 MiB 载荷**把「算法」与「边界」拆开：
+     * - `Java 数组拷贝`：单遍纯 Java 10 MiB 拷贝（`Arrays.copyOf`，分配 + memcpy）——该机拷贝能力的直接标尺；
+     * - `ChaCha20 单次 10 MiB`：内核无 JNI 实测 ≈85 ms（§2.1，118 MB/s，流密码无串行块依赖）；
+     * - `AES 单次 10 MiB`：内核无 JNI 实测 ≈63 ms（§7.3，158.7 MB/s，CBC 加密串行依赖）；
+     * - `AES 生产形态`：即 [AesCipherEngine.encrypt]（= 上一条 + PKCS#7 垫片 + 明文擦除）。
+     *
+     * 若「ChaCha20/AES 单次 10 MiB」远大于各自内核值，则差额即**边界 + 数组拷贝**成本，
+     * 与所用算法无关——这才是判定下沉是否划算的依据。
+     */
+    @Test
+    fun probeJni边界_10MiB成本分解_连续10轮() {
+        val chachaKey = ByteArray(32) { ((it * 13 + 3) and 0xFF).toByte() }
+        val nonce = ByteArray(12) { ((it * 7 + 1) and 0xFF).toByte() }
+        val aesKey = ByteArray(32) { ((it * 11 + 5) and 0xFF).toByte() }
+        val aesIv = ByteArray(16) { ((it * 3 + 2) and 0xFF).toByte() }
+        // 10 MiB 恰为 16 的整数倍 ⇒ 可直接投原生整块接口（与生产路径的算法段逐字等价）
+        val payload = ByteArray(PAYLOAD_BYTES) { ((it * 31 + 11) and 0xFF).toByte() }
+        val engine = AesCipherEngine()
+
+        fun medianMs(block: () -> ByteArray): Double {
+            block()
+            val samples = (0 until SAMPLES).map {
+                val start = System.nanoTime()
+                val out = block()
+                val ms = (System.nanoTime() - start) / 1_000_000.0
+                Arrays.fill(out, 0)
+                ms
+            }
+            return samples.sorted()[samples.size / 2]
+        }
+
+        repeat(10) { index ->
+            val javaCopy = medianMs { Arrays.copyOf(payload, payload.size) }
+            val chachaJni = medianMs { NativeChaCha20.applyKeystreamChecked(chachaKey, nonce, 0, payload) }
+            val aesJni = medianMs { NativeAes.encryptBlocks(aesKey, aesIv.copyOf(), payload) }
+            val aesProduction = medianMs { engine.encrypt(aesKey, aesIv, payload) }
+            println(
+                "$PREFIX JNI分解-10轮|round=${index + 1}|" +
+                    "Java拷贝10MiB=${fmt(javaCopy)}ms|ChaCha20单次10MiB=${fmt(chachaJni)}ms|" +
+                    "AES单次10MiB=${fmt(aesJni)}ms|AES生产形态=${fmt(aesProduction)}ms"
+            )
+        }
+
+        Arrays.fill(payload, 0); Arrays.fill(chachaKey, 0); Arrays.fill(nonce, 0)
+        Arrays.fill(aesKey, 0); Arrays.fill(aesIv, 0)
     }
 
     // ================= 采样与输出基建 =================

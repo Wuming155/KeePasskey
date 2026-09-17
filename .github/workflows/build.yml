@@ -185,10 +185,11 @@ jobs:
           if skipped != 0:
               print(f"::error::原生用例被跳过 {skipped} 例；本 job 已装 cargo 与 4 ABI 产物，不得跳过"); sys.exit(1)
           PY
-          # 2) 导出符号核对：JNI 定长契约要求每个 ABI 的 .so 导出**恰好 8 个**
+          # 2) 导出符号核对：JNI 定长契约要求每个 ABI 的 .so 导出**恰好 10 个**
           #    Java_com_keepasskey 符号（Argon2 / AES-KDF / Twofish ×2 / 口令强度 5 个，
-          #    加 ISSUE-P3-153 §145/§146 新增的 ChaCha20 / Passkey ES256 / Passkey Ed25519）。
-          #    实测（本机 NDK 28.2.13676358 llvm-nm，**2026-09-17**，arm64-v8a 产物）：恰好 8 个，
+          #    加 ISSUE-P3-153 §145/§146 的 ChaCha20 / Passkey ES256 / Passkey Ed25519，
+          #    加 §147 的 AES-256-CBC ×2）。
+          #    实测（本机 NDK 28.2.13676358 llvm-nm，**2026-09-17**，4 个 ABI 产物）：恰好 10 个，
           #    即下方 expected 清单——按 §73 立规「期望值必须实测而非引用」，该清单为实测输出。
           #    **逐名核对**（而非只比数量）：「数量对而符号错」（如误删一个 `#[no_mangle]` 又
           #    误加另一个）只有逐名核对能拦住。
@@ -209,6 +210,8 @@ jobs:
               "Java_com_keepasskey_crypto_cipher_NativeTwofish_cbcEncryptBlocks",
               "Java_com_keepasskey_crypto_cipher_NativeTwofish_cbcDecryptBlocks",
               "Java_com_keepasskey_crypto_cipher_NativeChaCha20_applyKeystream",
+              "Java_com_keepasskey_crypto_cipher_NativeAes_cbcEncryptBlocks",
+              "Java_com_keepasskey_crypto_cipher_NativeAes_cbcDecryptBlocks",
               "Java_com_keepasskey_crypto_strength_NativePasswordStrength_estimate",
               "Java_com_keepasskey_crypto_passkey_NativePasskeySign_es256Sign",
               "Java_com_keepasskey_crypto_passkey_NativePasskeySign_ed25519Sign",

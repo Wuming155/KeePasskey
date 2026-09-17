@@ -56,9 +56,49 @@
 
 ---
 
-## P3 低危问题、特性接线与体验优化（0 项）
+## P3 低危问题、特性接线与体验优化（1 项）
 
-> **暂无开放项**。`ISSUE-P3-153`（Rust 下沉候选评估 → 立项落地）已于 **§145（ChaCha20 内核）
+### ISSUE-P3-187 JNI 零拷贝评估（原生加密内核的边界拷贝成本）
+
+> **条目性质**：**评估项**（先出结论与量化证据，再决定是否实施），非既定整改。
+
+- **核实时间点与方式**：2026-09-18，双机（Redmi 4X / A53 级 与 M332BF / 现代）**连续 10 轮**
+  instrumented 探针 `DeviceThroughputProbeTest.probeJni边界_10MiB成本分解_连续10轮`
+  （logcat 前缀 `PERF-PROBE|`）＋ 独立 aarch64 二进制内核实测；原始数字见
+  `docs/records/真机吞吐实测记录_2026-09-17.md` §8.2。
+- **背景（实测得出，非推断）**：现有 JNI 桥是**逐字节拷贝**形态——入参 `convert_byte_array`
+  （含一次零化 `Vec` 分配）+ 出参 `SetByteArrayRegion`。同一份 **10 MiB** 载荷的分解：
+  - ChaCha20 单次 JNI **24.7 ms**（现代）/ 151.6 ms（A53），其**内核本体**仅 **16.3 / 85 ms**
+    ⇒ 边界 + 拷贝 ≈ **8.4 / 66.6 ms**；
+  - AES 单次 JNI **34.5 ms**，内核本体 13.3 ms ⇒ 边界 + 拷贝 ≈ **21.2 ms**；
+  - 该成本**与算法无关**（两个内核同形对照），且**随调用粒度线性增长**（AES 生产 48.1 ms 中
+    28% 为 PKCS#7 整缓冲垫片与明文擦除，同属此类）。
+- **影响面**：所有已下沉内核（Twofish / ChaCha20 / AES / Passkey）都交这道税；它同时是
+  `已知工程限界.md` **§15**（ChaCha20 刻意不做零拷贝）与 **§17**（AES 统一后的性能代价）的
+  共同成因。零拷贝若成立，**收益面覆盖全族**，而非单个算法。
+- **评估目标与验收标准**：
+  1. **先定义契约**（评估产出物，须落文档）：临界区形态（`GetPrimitiveArrayCritical` /
+     `ReleasePrimitiveArrayCritical` 的 `mode` 选择，或 `DirectByteBuffer` 形态）下
+     **临界区内禁止分配、禁止 panic**；明确异常 / 早退路径的 release 语义；
+     与现有桥范式（`catch_unwind` + `Zeroizing` 全路径擦除）的取舍须逐条写明。
+  2. **真机前后对比**（同机 / 同语料 / 10 轮中位）：以 §8.2 的四个锚点为基线，
+     目标把「边界 + 拷贝」压到 **≤ 内核本体 + 20%**；达不到即判**收益不足**。
+  3. **语义零漂移**：`AesNativeParityTest` / `ChaCha20NativeEngineTest` / `TwofishNativeParityTest` /
+     `StreamKeyOwnershipContractTest` / `CbcStreamFramingTest` 与三层设备侧套件**保持全绿**；
+     错误语义（失败返回、长度异常、擦除时点）逐例与现状对齐。
+  4. **结论必须入档**：无论可行与否，结论与依据登记到 `已知工程限界.md`（§15 / §17 的解除条件），
+     **不得只留聊天记录**。
+- **失败回退**：
+  1. 临界区方案若与**秘密擦除纪律**冲突且无法自证（`Zeroizing` 全路径归零 / 禁止分配），
+     回退到「`DirectByteBuffer` + 显式清零」形态重评；
+  2. 两者均不可行 ⇒ **维持现状并收口**（当前代价已落在无感区：现代设备 <5 MB 库 +10~20 ms），
+     把「不做」的理由与解除条件登记到限界表。
+- **涉及文件**：`crypto/src/main/rust/src/jni_bridge_ext.rs`、`aes_cbc.rs`、`chacha20_stream.rs`、
+  `twofish_cbc.rs`；`crypto/src/main/java/com/keepasskey/crypto/cipher/NativeAes.kt` /
+  `NativeChaCha20.kt` / `NativeTwofish.kt` / `CbcStreams.kt`。
+- **依据**：实测记录 §8.2 / §8.3；`已知工程限界.md` §15 / §17；批次 `147-AES内核下沉批次.md`。
+
+> **暂无其余开放项**。`ISSUE-P3-153`（Rust 下沉候选评估 → 立项落地）已于 **§145（ChaCha20 内核）
 > + §146（Passkey ES256/Ed25519 签名内核）** 分两批闭环——真机生产路径：ChaCha20 整库流
 > 2.7 → 54~66 MB/s（≈20~24×），ES256 sign 17.7ms → ≈1ms、Ed25519 3.8ms → ≈0.2ms；
 > `cargo deny check` 全绿；RS256 经实测裁定不下沉。见

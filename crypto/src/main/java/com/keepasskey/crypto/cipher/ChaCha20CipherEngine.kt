@@ -81,7 +81,10 @@ class ChaCha20CipherEngine : CipherEngine {
     ): OutputStream {
         validateNonceLength(iv)
         return if (NativeChaCha20.available) {
-            NativeEncryptingOutputStream(outputStream, key, iv)
+            // 流**自持** key/nonce 副本并在 close 时擦除：原生密钥流按偏移惰性施加，
+            // 若直接引用调用方数组，则在「建立流后立即擦除调用方密钥」的调用时序下
+            // 会退化为全零密钥（契约与 §147 整改的 `KeyOwning*` 一致）。
+            NativeEncryptingOutputStream(outputStream, key.copyOf(), iv.copyOf())
         } else {
             CipherOutputStream(outputStream, initCipher(Cipher.ENCRYPT_MODE, key, iv))
         }
@@ -94,7 +97,8 @@ class ChaCha20CipherEngine : CipherEngine {
     ): InputStream {
         validateNonceLength(iv)
         return if (NativeChaCha20.available) {
-            NativeDecryptingInputStream(inputStream, key, iv)
+            // 同上：流自持 key/nonce 副本，close 时擦除
+            NativeDecryptingInputStream(inputStream, key.copyOf(), iv.copyOf())
         } else {
             CipherInputStream(inputStream, initCipher(Cipher.DECRYPT_MODE, key, iv))
         }
@@ -195,7 +199,10 @@ class ChaCha20CipherEngine : CipherEngine {
         override fun close() {
             if (closed) return
             closed = true
-            // key / nonce 属调用方（引擎入参），**不得**在此越权清零（对齐 CbcStreams 先例）
+            // key / nonce 为本流**自持**的副本（由引擎 `copyOf()` 移交所有权），必须擦除；
+            // 调用方原数组不在本流所有权内，故不受影响（契约同 `KeyOwning*`）
+            Arrays.fill(key, 0)
+            Arrays.fill(nonce, 0)
             sink.close()
         }
 
@@ -264,7 +271,9 @@ class ChaCha20CipherEngine : CipherEngine {
             if (closed) return
             closed = true
             Arrays.fill(buffer, 0)
-            // key / nonce 属调用方（引擎入参），**不得**在此越权清零（对齐 CbcStreams 先例）
+            // key / nonce 为本流**自持**的副本（由引擎 `copyOf()` 移交所有权），必须擦除
+            Arrays.fill(key, 0)
+            Arrays.fill(nonce, 0)
             source.close()
         }
 

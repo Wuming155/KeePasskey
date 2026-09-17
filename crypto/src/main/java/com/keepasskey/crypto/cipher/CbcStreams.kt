@@ -31,7 +31,12 @@ internal class CbcEncryptingOutputStream(
     private val key: ByteArray,
     iv: ByteArray,
     private val transform: CbcBlockTransform,
-    bufferSize: Int = CBC_STREAM_BUFFER_SIZE
+    bufferSize: Int = CBC_STREAM_BUFFER_SIZE,
+    /**
+     * 由本流**自持所有权**的秘密缓冲（原生路径传入的 `key.copyOf()`），[close] 时确定性擦除。
+     * 契约与背景见 [CbcDecryptingInputStream.ownedSecrets] 的说明。
+     */
+    private val ownedSecrets: List<ByteArray> = emptyList()
 ) : OutputStream() {
 
     init {
@@ -95,6 +100,8 @@ internal class CbcEncryptingOutputStream(
             Arrays.fill(buffer, 0)
             Arrays.fill(chain, 0)
             filled = 0
+            // 自持密钥副本（原生路径）随之确定性擦除；调用方原数组不在所有权内（不受影响）
+            ownedSecrets.forEach { Arrays.fill(it, 0) }
             sink.close()
         }
     }
@@ -153,7 +160,18 @@ internal class CbcDecryptingInputStream(
     private val key: ByteArray,
     iv: ByteArray,
     private val transform: CbcBlockTransform,
-    private val chunkSize: Int = CBC_STREAM_BUFFER_SIZE
+    private val chunkSize: Int = CBC_STREAM_BUFFER_SIZE,
+    /**
+     * 由本流**自持所有权**的秘密缓冲：原生路径传入的 `key.copyOf()`，[close] 时确定性擦除。
+     *
+     * **契约背景（§147 整改，实测回归）**：`KdbxFile` / `KdbxCipherKeyResolver` 在建立解密流
+     * 之后**立即擦除**调用方持有的旧派生密钥数组（其依据是「`SecretKeySpec` 构造时已克隆密钥」，
+     * 该假设只对 JCE 路径成立）。原生路径的分组变换**惰性**读取密钥（每块一次 JNI 调用），
+     * 沿用同一时序将以全零密钥解密——实测表现为末块 PKCS#7 校验失败 → `IOException`。
+     * 故原生路径必须把 `key.copyOf()` 的**所有权**交给本流，由本流负责擦除；
+     * 调用方原数组不在本流所有权内，**不得**在此擦除。
+     */
+    private val ownedSecrets: List<ByteArray> = emptyList()
 ) : InputStream() {
 
     init {
@@ -225,6 +243,8 @@ internal class CbcDecryptingInputStream(
         Arrays.fill(bodyScratch, 0)
         pendingLength = 0
         Arrays.fill(chain, 0)
+        // 自持密钥副本（原生路径）随之确定性擦除；调用方原数组不在所有权内（不受影响）
+        ownedSecrets.forEach { Arrays.fill(it, 0) }
         source.close()
     }
 

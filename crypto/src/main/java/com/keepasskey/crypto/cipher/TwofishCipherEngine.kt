@@ -55,11 +55,15 @@ class TwofishCipherEngine : CipherEngine {
         if (!NativeTwofish.available) {
             return CipherOutputStream(outputStream, initCipher(Cipher.ENCRYPT_MODE, key, iv))
         }
+        // `ownedSecrets`：原生变换**惰性**读取密钥，故流必须自持副本并负责擦除
+        // （契约背景见 `CbcDecryptingInputStream.ownedSecrets` 的 KDoc，§147 整改）
+        val ownedKey = key.copyOf()
         return CbcEncryptingOutputStream(
             sink = outputStream,
-            key = key,
+            key = ownedKey,
             iv = iv,
-            transform = { k, i, d -> NativeTwofish.encryptBlocks(k, i, d) }
+            transform = { k, i, d -> NativeTwofish.encryptBlocks(k, i, d) },
+            ownedSecrets = listOf(ownedKey)
         )
     }
 
@@ -71,11 +75,15 @@ class TwofishCipherEngine : CipherEngine {
         if (!NativeTwofish.available) {
             return CipherInputStream(inputStream, initCipher(Cipher.DECRYPT_MODE, key, iv))
         }
+        // `ownedSecrets`：原生变换**惰性**读取密钥，故流必须自持副本并负责擦除
+        // （契约背景见 `CbcDecryptingInputStream.ownedSecrets` 的 KDoc，§147 整改）
+        val ownedKey = key.copyOf()
         return CbcDecryptingInputStream(
             source = inputStream,
-            key = key,
+            key = ownedKey,
             iv = iv,
-            transform = { k, i, d -> NativeTwofish.decryptBlocks(k, i, d) }
+            transform = { k, i, d -> NativeTwofish.decryptBlocks(k, i, d) },
+            ownedSecrets = listOf(ownedKey)
         )
     }
 
