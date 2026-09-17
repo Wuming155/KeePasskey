@@ -166,8 +166,27 @@ internal class CbcDecryptingInputStream(
     /** CBC 链值：随每次分组变换原地推进（由变换实现写回）。 */
     private val chain: ByteArray = iv.copyOf()
 
-    /** 尚未交付的最后一个整分组（空数组表示当前无扣留块）。 */
-    private var pending: ByteArray = EMPTY
+    /**
+     * `ISSUE-P3-177`：读取缓冲**实例级复用**。布局：
+     * `[0, pendingLength)` = 上一轮扣留的末分组（密文），紧随其后是本轮读入的载荷。
+     *
+     * 原实现每块都新建 `chunk`（64 KiB）与 `concat` 的合并数组（≈64 KiB+16）——一个 10 MiB 库
+     * 约 160 个块 ⇒ 约 320 次 64 KiB 分配 + 全部整块拷贝。
+     */
+    private val buffer = ByteArray(chunkSize + Pkcs7.BLOCK_SIZE)
+
+    /** 扣留于 [buffer] 头部的末分组长度（0 或一个分组） */
+    private var pendingLength = 0
+
+    /**
+     * `ISSUE-P3-177`：交给变换的**复用**输入缓冲，长度恒为 [chunkSize]（稳态满块载荷等长）。
+     *
+     * 契约说明：变换**必须返回独立结果数组**（不得原地返回入参）——这一点既有实现本已依赖
+     * （[transformBlocks] 的 `finally` 会对入参切片清零；若变换原地返回，明文会被自己抹掉），
+     * 本类据此复用该输入缓冲，并以 [requireDistinctResult] 显式校验，避免未来出现原地实现时
+     * 静默产出零明文。
+     */
+    private val bodyScratch = ByteArray(chunkSize)
 
     /** 待交付明文缓冲。 */
     private var out: ByteArray = EMPTY
@@ -202,8 +221,9 @@ internal class CbcDecryptingInputStream(
         if (closed) return
         closed = true
         wipeBuffers()
-        Arrays.fill(pending, 0)
-        pending = EMPTY
+        Arrays.fill(buffer, 0)
+        Arrays.fill(bodyScratch, 0)
+        pendingLength = 0
         Arrays.fill(chain, 0)
         source.close()
     }
@@ -213,43 +233,49 @@ internal class CbcDecryptingInputStream(
         if (eofDone) return false
         wipeBuffers()
 
-        val chunk = ByteArray(chunkSize)
-        val read = readUpTo(chunk)
-        val atEof = read < chunk.size
+        val read = readUpTo(pendingLength)
+        val filled = pendingLength + read
+        val atEof = read < chunkSize
 
         if (!atEof) {
             // 尾部未到：扣留最后一个整分组，其余立即解密交付
-            val all = concat(pending, chunk, read)
-            val keep = all.size - Pkcs7.BLOCK_SIZE
-            pending = all.copyOfRange(keep, all.size)
-            out = transformBlocks(all, 0, keep)
+            val keep = filled - Pkcs7.BLOCK_SIZE
+            out = if (keep == chunkSize) {
+                // 稳态满块（已扣留一个分组）⇒ 载荷长度恒为 chunkSize：复用输入缓冲，零分配
+                System.arraycopy(buffer, 0, bodyScratch, 0, chunkSize)
+                requireDistinctResult(transform(key, chain, bodyScratch))
+            } else {
+                // 首块（尚未扣留，载荷为 chunkSize - 16）等非等长情形：沿用一次分配路径
+                transformBlocks(buffer, 0, keep)
+            }
             outPos = 0
-            Arrays.fill(all, 0)
+            pendingLength = Pkcs7.BLOCK_SIZE
+            // 原地的末分组前移，并把本块载荷区的密文清零（保留既有清零纪律；不得覆盖前移后的末分组）
+            System.arraycopy(buffer, filled - Pkcs7.BLOCK_SIZE, buffer, 0, Pkcs7.BLOCK_SIZE)
+            Arrays.fill(buffer, Pkcs7.BLOCK_SIZE, filled, 0)
             return true
         }
 
         eofDone = true
-        val tail = concat(pending, chunk, read)
-        Arrays.fill(pending, 0)
-        pending = EMPTY
+        val tailLength = filled
+        pendingLength = 0
 
-        if (tail.isEmpty()) {
+        if (tailLength == 0) {
             // 基线：CipherInputStream 在空输入上由 doFinal 抛 IllegalBlockSizeException → IOException
             throw IOException("CBC 解密流：密文为空，无法校验 PKCS#7 填充")
         }
-        if (tail.size % Pkcs7.BLOCK_SIZE != 0) {
+        if (tailLength % Pkcs7.BLOCK_SIZE != 0) {
             // 基线：长度非分组整数倍 → IllegalBlockSizeException → IOException
-            val actual = tail.size
-            Arrays.fill(tail, 0)
-            throw IOException("CBC 解密流：密文长度 $actual 非 ${Pkcs7.BLOCK_SIZE} 的整数倍")
+            Arrays.fill(buffer, 0, tailLength, 0)
+            throw IOException("CBC 解密流：密文长度 $tailLength 非 ${Pkcs7.BLOCK_SIZE} 的整数倍")
         }
 
-        val keep = tail.size - Pkcs7.BLOCK_SIZE
-        val head = transformBlocks(tail, 0, keep)
-        val lastPlain = transformBlocks(tail, keep, tail.size)
+        val keep = tailLength - Pkcs7.BLOCK_SIZE
+        val head = transformBlocks(buffer, 0, keep)
+        val lastPlain = transformBlocks(buffer, keep, tailLength)
         val stripped = Pkcs7.unpad(lastPlain)
         Arrays.fill(lastPlain, 0)
-        Arrays.fill(tail, 0)
+        Arrays.fill(buffer, 0, tailLength, 0)
 
         if (stripped == null) {
             // 基线：填充非法 → BadPaddingException → IOException
@@ -259,6 +285,14 @@ internal class CbcDecryptingInputStream(
         out = if (head.isEmpty()) stripped else head + stripped
         outPos = 0
         return out.isNotEmpty()
+    }
+
+    /** 变换结果不得与复用输入别名（见 [bodyScratch] 的契约说明）。 */
+    private fun requireDistinctResult(result: ByteArray): ByteArray {
+        check(result !== bodyScratch) {
+            "CBC 变换实现必须返回独立结果数组（不得原地返回入参）：复用输入缓冲会在下一块被覆盖"
+        }
+        return result
     }
 
     /** 变换 `[from, to)` 区间（长度须为分组整数倍），返回新数组；空区间直接返回空。 */
@@ -272,11 +306,14 @@ internal class CbcDecryptingInputStream(
         }
     }
 
-    /** 读取至缓冲填满或流结束；返回实际读取字节数（`< chunk.size` 即已到尾部）。 */
-    private fun readUpTo(buffer: ByteArray): Int {
+    /**
+     * 读取至缓冲填满「载荷区」或流结束；返回实际读取字节数（`< chunkSize` 即已到尾部）。
+     * `start` 为扣留末分组占用的头部长度，载荷最多读 [chunkSize] 字节。
+     */
+    private fun readUpTo(start: Int): Int {
         var total = 0
-        while (total < buffer.size) {
-            val count = source.read(buffer, total, buffer.size - total)
+        while (total < chunkSize) {
+            val count = source.read(buffer, start + total, chunkSize - total)
             if (count <= 0) {
                 // 规范上 len > 0 时不得返回 0；真出现则按结束处理（fail-closed，防自旋）
                 break
@@ -284,14 +321,6 @@ internal class CbcDecryptingInputStream(
             total += count
         }
         return total
-    }
-
-    private fun concat(head: ByteArray, tail: ByteArray, tailLength: Int): ByteArray {
-        if (head.isEmpty() && tailLength == tail.size) return tail
-        val merged = ByteArray(head.size + tailLength)
-        System.arraycopy(head, 0, merged, 0, head.size)
-        System.arraycopy(tail, 0, merged, head.size, tailLength)
-        return merged
     }
 
     private fun wipeBuffers() {

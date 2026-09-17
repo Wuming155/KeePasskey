@@ -3,6 +3,7 @@ package com.keepasskey.crypto.cipher
 import org.bouncycastle.jce.provider.BouncyCastleProvider
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.ByteArrayInputStream
@@ -108,6 +109,32 @@ class CbcStreamFramingTest {
     }
 
     private val lengths = listOf(0, 1, 15, 16, 17, 31, 32, 100, 4095, 4096, 4097, 100_000)
+
+    /**
+     * `ISSUE-P3-177`：原地返回入参的变换实现**必须被显式拒绝**。
+     *
+     * 解密侧现复用「交给变换的输入缓冲」（稳态满块）——若变换原地返回入参，该缓冲会在下一块被
+     * 覆盖（明文在调用方读走之前被改写）。既有实现本已依赖「返回独立数组」这一事实
+     * （[CbcDecryptingInputStream.transformBlocks] 的 `finally` 会对入参切片清零），
+     * 本类据此把它由**隐式前提**升级为**显式校验**；本用例锁定该校验不会被误删。
+     */
+    @Test
+    fun `原地返回入参的变换实现必须被显式拒绝`() {
+        val inPlaceTransform: CbcBlockTransform = { _, _, data -> data }
+        val cipher = nativeEncrypt("x".repeat(CBC_STREAM_BUFFER_SIZE * 2 + 32).toByteArray())
+
+        val stream = CbcDecryptingInputStream(
+            ByteArrayInputStream(cipher), key, iv, inPlaceTransform
+        )
+        val thrown = assertThrows(IllegalStateException::class.java) {
+            // 必须读到「稳态满块」那一轮才会走复用快路径（首块载荷为 chunkSize - 16，走一次分配路径）
+            stream.copyTo(ByteArrayOutputStream())
+        }
+        assertTrue(
+            "必须给出可定位的失败原因（而非静默产出被覆盖的明文）",
+            thrown.message.orEmpty().contains("独立结果数组")
+        )
+    }
 
     // ==================== 加密侧：与 JCE CipherOutputStream 逐字节一致 ====================
 
