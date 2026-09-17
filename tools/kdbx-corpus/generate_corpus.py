@@ -207,12 +207,21 @@ def probe_cli(cli: str) -> dict:
         raise CorpusError(f"{cli} --version 失败（rc={rc}）：{err.strip() or out.strip()}", EXIT_ENV)
     version = (out + err).strip().splitlines()[0] if (out + err).strip() else "(版本输出为空)"
 
-    rc, help_out, help_err = run_cli(cli, ["db-create", "--help"])
-    if rc != 0:
+    # 子命令可用性判据取自**顶层命令清单**（`--help`，rc 恒 0），不取自 `db-create --help` 的退出码：
+    # KeePassXC 2.7.12（Windows / 中文界面）对 `db-create --help` / `-h` / `-?` 一律先打印用法再
+    # 以 rc=1 退出（报文为「缺少位置参数。」，即**位置参数校验早于选项解析**），
+    # 按退出码判定会把装好且可用的 CLI 误判为「不支持 db-create」，使 `--check` 恒失败
+    # （ISSUE-P3-159：2026-09-17 本机实测 `--check` 退出码 3，而 `db-info` / `ls` / `export` 均可用）。
+    rc, root_out, root_err = run_cli(cli, ["--help"])
+    root_help = root_out + root_err
+    if rc != 0 or "db-create" not in root_help:
         raise CorpusError(
-            f"{cli} 不支持 `db-create` 子命令（rc={rc}）：{help_err.strip() or help_out.strip()}",
+            f"{cli} 的顶层命令清单中未见 `db-create`（rc={rc}）：{root_help.strip()[:400]}",
             EXIT_ENV,
         )
+
+    # 开关探测只解析用法文本（退出码同上不可作判据）
+    _, help_out, help_err = run_cli(cli, ["db-create", "--help"])
     help_text = help_out + help_err
     # KeePassXC CLI 历来**不提供** Argon2 变体/版本的直接开关；此处只做事实探测，不假定能力。
     kdf_switches = [

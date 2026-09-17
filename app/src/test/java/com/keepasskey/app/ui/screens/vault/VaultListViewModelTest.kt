@@ -3,6 +3,7 @@ package com.keepasskey.app.ui.screens.vault
 import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.FakeSettingsRepository
 import com.keepasskey.app.data.repository.FakeVaultRepository
+import com.keepasskey.core.otp.OtpEngine
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -70,6 +71,15 @@ class VaultListViewModelTest {
             buildTestCoordinator(),
             displayDispatcher = UnconfinedTestDispatcher(testScheduler)
         ).also { createdViewModels += it }
+
+    /**
+     * 窄通道刻度 → 30 秒周期条目的剩余秒数（ISSUE-P3-158：列表徽标用同一函数按条目自身周期换算）。
+     */
+    private fun VaultListViewModel.remainingSecondsOf30sEntry(): Int =
+        OtpEngine.getRemainingSeconds(
+            timestampMillis = totpNowSeconds.value * 1000L,
+            periodSeconds = 30
+        )
 
     /**
      * 创建被测 ViewModel 并在后台订阅 uiState 以驱动 stateIn 的 WhileSubscribed 上游计算
@@ -285,9 +295,9 @@ class VaultListViewModelTest {
         val state = viewModel.uiState.value
         val totpEntry = state.entries.find { it.id == "2" }!!
         // ISSUE-P2-89：条目上的验证码仍是投影层即时计算值（用于识别「配置了 OTP」与首帧兜底），
-        // 但**剩余秒数不再由整页状态下发**，改由 totpRemainingSeconds 窄通道给列表行徽标
+        // 但**剩余秒数不再由整页状态下发**，改由 totpNowSeconds 窄通道（秒级刻度）给列表行徽标
         assertNotNull(totpEntry.totpCode)
-        assertTrue(viewModel.totpRemainingSeconds.value in 1..30)
+        assertTrue(viewModel.remainingSecondsOf30sEntry() in 1..30)
         // 无 TOTP 的条目不受影响
         assertNull(state.entries.find { it.id == "6" }!!.totpCode)
     }
@@ -300,7 +310,7 @@ class VaultListViewModelTest {
         advanceTimeBy(2500)
         testScheduler.runCurrent()
 
-        val seconds = viewModel.totpRemainingSeconds.value
+        val seconds = viewModel.remainingSecondsOf30sEntry()
         assertTrue(seconds in 1..30)
     }
 
@@ -343,7 +353,7 @@ class VaultListViewModelTest {
             viewModel.uiState.collect { emissions += it }
         }
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
-            viewModel.totpRemainingSeconds.collect {}
+            viewModel.totpNowSeconds.collect {}
         }
         testScheduler.runCurrent()
 
@@ -353,7 +363,7 @@ class VaultListViewModelTest {
 
         assertEquals("秒级 tick 不得再产生新的整页状态", before, emissions.size)
         // 窄通道必须仍然可用（否则上面的断言会以「节拍根本没跑」的方式假绿）
-        assertTrue(viewModel.totpRemainingSeconds.value in 1..30)
+        assertTrue(viewModel.remainingSecondsOf30sEntry() in 1..30)
     }
 
     @Test

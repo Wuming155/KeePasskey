@@ -304,7 +304,8 @@ private fun TotpLargeCard(
                 if (!item.isHotp) {
                     Box(contentAlignment = Alignment.Center) {
                         CircularProgressIndicator(
-                            progress = { item.remainingSeconds / 30f },
+                            // ISSUE-P3-158：分母取条目自身周期（此前写死 30，period != 30 时环比例错误）
+                            progress = { item.remainingSeconds / item.periodSeconds.coerceAtLeast(1).toFloat() },
                             modifier = Modifier.size(28.dp),
                             color = gaugeColor,
                             strokeWidth = 3.dp,

@@ -100,6 +100,7 @@ class AuthenticatorViewModel @Inject constructor(
                 codeFormatted = formatted,
                 codeRaw = raw,
                 remainingSeconds = remaining,
+                periodSeconds = period,
                 iconName = entry.iconName,
                 url = entry.url,
                 isHotp = snapshot?.isHotp == true || entry.isHotp

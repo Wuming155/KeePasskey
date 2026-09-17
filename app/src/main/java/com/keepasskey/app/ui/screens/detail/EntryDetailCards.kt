@@ -233,6 +233,8 @@ internal fun TotpCard(
                 } else {
                     TotpMiniGauge(
                         remainingSeconds = uiState.totpRemainingSeconds ?: entry.totpRemainingSeconds,
+                        // ISSUE-P3-158：环分母取条目自身周期（此前沿用缺省的 30 秒）
+                        totalSeconds = entry.totpPeriod,
                         modifier = Modifier.size(34.dp)
                     )
                     Spacer(modifier = Modifier.width(12.dp))

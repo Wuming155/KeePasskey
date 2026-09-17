@@ -112,7 +112,10 @@ fun PasswordStrengthBar(
 }
 
 /**
- * TOTP 动态倒计时微型进度环
+ * TOTP 动态倒计时微型进度环。
+ *
+ * ISSUE-P3-158：[totalSeconds] 必须传**条目自身周期**（此前调用方一律沿用缺省的 30 秒，
+ * `period != 30` 的条目环比例错误）；非法值（`<= 0`）在此兜底，避免下游各自重复防御。
  */
 @Composable
 fun TotpMiniGauge(
@@ -122,7 +125,7 @@ fun TotpMiniGauge(
 ) {
     val securityColors = LocalSecurityColors.current
     val progress by animateFloatAsState(
-        targetValue = remainingSeconds.toFloat() / totalSeconds.toFloat(),
+        targetValue = remainingSeconds.toFloat() / totalSeconds.coerceAtLeast(1).toFloat(),
         label = "TotpProgress"
     )
     val gaugeColor = if (remainingSeconds <= 5) securityColors.danger else securityColors.success

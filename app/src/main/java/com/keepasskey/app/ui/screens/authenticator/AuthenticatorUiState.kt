@@ -14,6 +14,11 @@ data class TotpCardItem(
     // 此前回退假码 "000000" 会诱导用户复制无效第二因子
     val codeRaw: String?,      // 例如 "582910"
     val remainingSeconds: Int,
+    /**
+     * 条目自身 TOTP 周期（秒）：进度环分母必须取此值（ISSUE-P3-158）。
+     * 缺省 30 仅用于预览 / 测试构造；生产由 ViewModel 按快照或条目填充。
+     */
+    val periodSeconds: Int = 30,
     val iconName: String = "key",
     val url: String = "",
     // ISSUE-P3-49：HOTP 条目——无时间倒计时，取码为「推进计数器」显式动作

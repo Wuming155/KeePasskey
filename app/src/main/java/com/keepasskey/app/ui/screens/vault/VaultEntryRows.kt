@@ -10,7 +10,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
-import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -55,13 +55,14 @@ fun UnifiedVaultEntryRow(
     groupPath: String? = null,
     decorations: EntryDecorations = EntryDecorations.EMPTY,
     /**
-     * ISSUE-P2-89：TOTP **实时剩余秒数**（窄状态）。
+     * ISSUE-P2-89 / ISSUE-P3-158：TOTP **秒级刻度**（窄状态）。
      *
      * 传状态对象而非取值：读取下沉到行内徽标（见 [StandardEntryLayout]），
      * 使每秒 tick 只失效徽标那一个组合作用域，不牵动整行与整表重组。
+     * 下发**刻度**而非剩余秒数——剩余秒数须按条目自身周期现算（`period != 30` 时口径不同）。
      * 缺省值为预览 / 截图测试用（生产由 `VaultListScreen` 传入 ViewModel 的窄通道）。
      */
-    totpRemainingSeconds: State<Int> = remember { mutableIntStateOf(TOTP_PREVIEW_REMAINING_SECONDS) },
+    totpNowSeconds: State<Long> = remember { mutableLongStateOf(TOTP_PREVIEW_NOW_SECONDS) },
     /**
      * ISSUE-P2-89：TOTP **本周期实时验证码**（窄状态，`entryId → 验证码`）。
      * 仅周期翻转时更新；徽标取 `totpLiveCodes[entry.id] ?: entry.totpCode`。
@@ -131,7 +132,7 @@ fun UnifiedVaultEntryRow(
                     onCopyPassword = onCopyPassword,
                     onRestore = onRestore,
                     onPurge = onPurge,
-                    totpRemainingSeconds = totpRemainingSeconds,
+                    totpNowSeconds = totpNowSeconds,
                     totpLiveCodes = totpLiveCodes
                 )
             }
