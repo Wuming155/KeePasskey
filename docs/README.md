@@ -26,6 +26,7 @@
 | 文档 | 用途 |
 |---|---|
 | [`records/原生Argon2真机验证记录.md`](records/原生Argon2真机验证记录.md) | 原生内核真机 / 模拟器实测登记（**禁混表**） |
+| [`records/真机吞吐实测记录_2026-09-17.md`](records/真机吞吐实测记录_2026-09-17.md) | 真机吞吐实测（`ISSUE-P3-153` / `P3-155` / 新发现 `P2-92`）：ChaCha20 BC vs Rust 44×、AES-CBC 解密 7.3×、Passkey 三算法、**仅真机失败的平台 BC 抢占缺陷**；含方法学差异声明与复现命令 |
 | [`records/KDBX4与复合密钥实战互操作排查日志.md`](records/KDBX4与复合密钥实战互操作排查日志.md) | KDBX4 / 复合密钥互操作排障留痕 |
 | [`records/ci-静态校准记录.md`](records/ci-静态校准记录.md) | CI 配置与静态分析的校准留痕 |
 | [`records/退役依据承接-ISSUE-P3-09.md`](records/退役依据承接-ISSUE-P3-09.md) | `ISSUE-P3-09` 依据承接（Action 升级 / ProGuard 收窄 / Compose BOM 回归判据）；原 `.handoff` 依据从未入库 |

@@ -34,9 +34,26 @@
 
 ---
 
-## P2 中危缺陷与协议/测试缺口（0 项）
+## P2 中危缺陷与协议/测试缺口（1 项）
 
-> **暂无开放项**。`ISSUE-P2-91`（同步内容变化检测漏比 `times` 与历史内容）已于 §122 批次
+### ISSUE-P2-92 平台剥离版 BC 抢占 provider 名：真机 ChaCha7539 不可用（宿主单测全绿的仅真机失败）
+
+- **现象（真实失败）**：真机上 `Cipher.getInstance("ChaCha7539", Security.getProvider("BC"))` 抛
+  `NoSuchAlgorithmException: Provider BC does not provide ChaCha7539`——任何经
+  [ChaCha20CipherEngine](../crypto/src/main/java/com/keepasskey/crypto/cipher/ChaCha20CipherEngine.kt)
+  的加解密路径（选 ChaCha20 为外层 cipher 的建库 / 保存 / 读取他人创建的 ChaCha20 KDBX）必然 fail-fast。
+- **根因**：Android 平台自带**剥离版** BC provider（注册名同为 `"BC"`，无 `ChaCha7539`）；
+  `ensureBouncyCastle()` 以 `Security.getProvider("BC") == null` 判定是否注册完整
+  BouncyCastle，真机上恒判「已注册」⇒ 完整版永不注册。宿主 JVM 无平台 `"BC"`，故宿主单测全绿。
+- **整改方向**：引擎内不查注册表、直接传完整 provider 实例
+  （`Cipher.getInstance("ChaCha7539", BouncyCastleProvider())`——2026-09-17 真机已实证该形态可用），
+  或以独立名注册完整版；**严禁** `removeProvider("BC")`（平台组件可能依赖）。
+- **核实时间点与方式**：2026-09-17 Redmi 4X（`santoni` / arm64-v8a / Android 17）真机
+  instrumented 探针首跑的真实异常与复跑通过，数据与证据文件见
+  [`records/真机吞吐实测记录_2026-09-17.md`](records/真机吞吐实测记录_2026-09-17.md) **§0 / §3**；
+  `grep app/src` 确认无任何 `removeProvider` / 完整版注册点。
+
+> **暂无其余开放项**。`ISSUE-P2-91`（同步内容变化检测漏比 `times` 与历史内容）已于 §122 批次
 > **经前提复核撤销**——「只改 `times` 的本地编辑被静默丢弃」在本应用可达面上**不成立**
 > （生产代码无 `expires` / `expiryTime` 写入者；`times` 的改写必然伴随 `fields` 或 `customFields` 变化）；
 > 其真实残余（两处判定**口径刻意不同** + 历史只比条数）作为**口径而非缺陷**登记
@@ -152,7 +169,11 @@
 > 的树外可达性穷举）并登记同文件 **§14**（含解除条件）；见
 > [`resolved/batches/140-冲突合并本地侧直取内存树批次.md`](resolved/batches/140-冲突合并本地侧直取内存树批次.md)。
 > **本清单剩余 2 项**（`P3-153` / `P3-155`）的 AC 均要求**真机吞吐实测**（BC 现行 vs Rust 候选、AES-CBC 块粒度
-> 前后对比），在取得设备侧数据前**不得推进** ⇒ 此后**没有**「无需设备即可闭环」的开放项。
+> 前后对比）——**实测已于 2026-09-17 完成**（真机 Redmi 4X，见
+> [`records/真机吞吐实测记录_2026-09-17.md`](records/真机吞吐实测记录_2026-09-17.md)）：
+> `P3-155` 数据已取得并给出采纳结论（解密侧 7.3×，范围收窄）；`P3-153` 数据已取得（ChaCha20 ≈44×、
+> ES256/Ed25519 17~30×、RS256 否定），**立项决策待用户裁定**。
+> 实测过程另发现并登记 **`ISSUE-P2-92`**（平台 BC 抢占致真机 ChaCha7539 不可用，P2 唯一开放项）。
 > **2026-09-17 增补与同日闭环**：交互成本核查顺带发现 `ISSUE-P3-184`（详情页 TOTP 复制按钮谎报成功），
 > 该条连同 5 项**同源但无编号**的交互整改（甲b 列表行徽标一次点击复制 / 乙 三处单值设置就地化 /
 > 丙 泄露检测开关开启即扫描 / 丁 「保存并同步」合并主按钮 / 戊 系统设置一次点击直达）已于 **§141** 同批闭环，
@@ -192,6 +213,16 @@
   **不得**据此推断「凡 Kotlin 改 Rust 都快」——对已走平台原生（AES/SHA/HMAC/zlib）的路径，重写只会引入 FFI 与供应链成本。
 - **验收标准（评估项）**：若认领本项，须先给出上述两处各一份「BC 现行吞吐 vs Rust 候选吞吐」的真机实测对比（同一语料、同一设备、
   含离散度），再决定是否立项；**未取得实测数据前不得以「Rust 更快」为由发起重写**。
+- **✅ 实测已取得（2026-09-17 真机 Redmi 4X / arm64-v8a / Android 17，数据与命令见
+  [`records/真机吞吐实测记录_2026-09-17.md`](records/真机吞吐实测记录_2026-09-17.md) §2）**：
+  1. **ChaCha20**：BC（完整 provider）2.6~2.7 MB/s vs Rust `chacha20` crate **117.6~118.4 MB/s**，加速比 ≈ **44×**；
+  2. **Passkey**：ES256 keygen 20.4× / sign 16.6×；Ed25519 keygen 30.5× / sign 22.3×——下沉收益明确；
+  3. **RS256 否定**：`rsa` crate keygen 慢 2.1×、sign 慢 1.6×（BC 的 CRT/Montgomery 优化占优），
+     **不得**以「Rust 更快」为由下沉 RSA。
+  **立项决策待裁定**（三处候选均需新增 Rust 依赖，须先过 `crypto/src/main/rust/deny.toml` 与
+  供应链 CVSS ≥ 7.0 闸门；结合用户既有供应链口径，是否立项交由用户裁定——本条保持开放）。
+  另：本条评估过程实测发现 ChaCha20 引擎在真机因平台剥离版 BC 抢占 provider 名而完全不可用，
+  已单列 **`ISSUE-P2-92`**（须先行整改，否则「ChaCha20 下沉与否」在真机无从谈起）。
 - **核实时间点与方式**：2026-09-17 逐处阅读 `crypto/` 全部 cipher / kdf / hash / passkey 实现与其 provider 选择，
   并核对 `crypto/src/main/rust/Cargo.toml` 现有内核边界与 `records/原生Argon2真机验证记录.md` 实测数据。
 - **风险提示**：两处候选均需**新增 Rust 依赖**（如 `chacha20` / `p256` / `ed25519-dalek` / `rsa`），
@@ -214,5 +245,13 @@
   需先定义新契约（或让 AES 走独立实现），**不得**为复用而扭曲既有 Twofish 路径。
 - **验收标准**：`.kdbx` 往返字节级一致；与官方实现互操作（`OwnProductInteropProbeTest` + `keepassxc-cli`）通过；
   流式语义（填充非法 / 长度非整数倍 / 提前 close）逐例对齐 JCE 基线；**并给出设备侧前后吞吐对比**再决定是否采纳。
+- **✅ 设备侧前后吞吐对比已取得（2026-09-17 真机 Redmi 4X / arm64-v8a，数据见
+  [`records/真机吞吐实测记录_2026-09-17.md`](records/真机吞吐实测记录_2026-09-17.md) §1）**：
+  10 MiB 载荷、预热 1 + 5 采样中位——
+  **解密**侧现状（生产流，内部 512 B）15.3 MB/s vs 候选（64 KiB 分块 `update`）111.2 MB/s，**加速比 7.3×**；
+  **加密**侧两者持平（101.4 vs 102.6 MB/s，1.0×，`CipherOutputStream` 对大块写入本已直通）；
+  两条路径密文/解密往返已设备侧断言逐字节一致。
+  **采纳结论**：值得采纳，但**整改范围收窄为解密侧**（`createDecryptingStream`）——加密侧无收益，
+  不必为对称而引入改动；实施时按本条原 AC 走互操作与流语义对拍（触及主数据面，高回归面）。
 - **风险提示**：本条触及**主加密数据面**，属高回归面改动，须排在所有零风险项之后。
 
