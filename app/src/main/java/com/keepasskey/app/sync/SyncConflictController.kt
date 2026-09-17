@@ -6,6 +6,7 @@ import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.core.model.DeletedObject
 import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.model.KdbxGroup
+import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.database.file.KdbxDatabase
 import com.keepasskey.database.session.DatabaseSession
@@ -92,6 +93,11 @@ class SyncConflictController @Inject constructor(
             // 这些合并成果将随冲突决策一并丢失（静默数据丢失）
             var updatedRoot = pendingMergedRoot ?: localDb.rootGroup
 
+            // ISSUE-P3-161：先把全部冲突的裁决结果**收集成表**（按目标父组 id 分组），再**单趟**落树。
+            // 原实现对每条裁决条目各调一次 applyResolvedEntryToGroup，而后者对**每一层**都执行
+            // `subgroups.map { … }` + `copy`（目标不在该子树时也照旧复制）
+            // ⇒ O(裁决条目数 × 分组数) 次分组对象与列表分配，且全程在 Dispatchers.Default + 会话锁内。
+            val resolvedByParent = mutableMapOf<KdbxUuid, MutableList<KdbxEntry>>()
             for (pair in conflicts) {
                 val choice = resolutions[pair.entryId] ?: ConflictResolutionChoice.KEEP_LOCAL
                 val fieldChoice = fieldResolutions[pair.entryId]
@@ -102,10 +108,14 @@ class SyncConflictController @Inject constructor(
                 } else {
                     KdbxMerger.resolveConflict(pair, choice)
                 }
-                // 替换当前分组树中的条目
                 for (resolved in resolvedEntries) {
-                    updatedRoot = applyResolvedEntryToGroup(updatedRoot, resolved)
+                    // 父组缺失时落根组——与逐条实现的 `entry.parentGroupId ?: group.id`（顶层即根组）同语义
+                    val parentId = resolved.parentGroupId ?: updatedRoot.id
+                    resolvedByParent.getOrPut(parentId) { mutableListOf() }.add(resolved)
                 }
+            }
+            if (resolvedByParent.isNotEmpty()) {
+                updatedRoot = applyResolvedEntriesToGroup(updatedRoot, resolvedByParent)
             }
 
             val mergedDb = localDb.copy(
@@ -329,22 +339,47 @@ class SyncConflictController @Inject constructor(
         db?.clearSensitiveData()
     }
 
-    private fun applyResolvedEntryToGroup(
-        group: com.keepasskey.core.model.KdbxGroup,
-        entry: KdbxEntry
-    ): com.keepasskey.core.model.KdbxGroup {
-        val targetParentId = entry.parentGroupId ?: group.id
-        if (group.id == targetParentId) {
-            val idx = group.entries.indexOfFirst { it.id == entry.id }
-            val newEntries = group.entries.toMutableList()
-            if (idx >= 0) {
-                newEntries[idx] = entry
-            } else {
-                newEntries.add(entry)
+    /**
+     * `ISSUE-P3-161`：批量把已裁决条目落回分组树——**单趟**递归。
+     *
+     * 原实现（`applyResolvedEntryToGroup`，逐条版）对**每条**裁决条目复制整棵树：
+     * 对每一层都执行 `subgroups.map { … }` + `copy`，目标不在该子树时也照旧复制
+     * ⇒ O(裁决条目数 × 分组数) 次分组对象与列表分配。本实现按「父组 id → 待落位条目」表
+     * 一次递归到底，且**只复制确实含目标的分组**（未命中子树按同一实例复用，
+     * 与 `SessionTreeEditor` 的路径复制契约同口径）。
+     *
+     * 语义与逐条应用等价：同一父组内的条目按**原冲突顺序**逐个「找到即替换、找不到即追加」；
+     * `parentGroupId` 指向的分组在树中不存在时同样不落位（与逐条实现一致）。
+     */
+    private fun applyResolvedEntriesToGroup(
+        group: KdbxGroup,
+        byParent: Map<KdbxUuid, List<KdbxEntry>>
+    ): KdbxGroup {
+        val own = byParent[group.id]
+        var newEntries: List<KdbxEntry>? = null
+        if (!own.isNullOrEmpty()) {
+            val working = group.entries.toMutableList()
+            own.forEach { entry ->
+                val idx = working.indexOfFirst { it.id == entry.id }
+                if (idx >= 0) {
+                    working[idx] = entry
+                } else {
+                    working.add(entry)
+                }
             }
-            return group.copy(entries = newEntries)
+            newEntries = working
         }
-        val newSubs = group.subgroups.map { applyResolvedEntryToGroup(it, entry) }
-        return group.copy(subgroups = newSubs)
+
+        var referenced: MutableList<KdbxGroup>? = null
+        group.subgroups.forEachIndexed { index, sub ->
+            val updated = applyResolvedEntriesToGroup(sub, byParent)
+            if (updated !== sub) {
+                val list = referenced ?: group.subgroups.toMutableList().also { referenced = it }
+                list[index] = updated
+            }
+        }
+
+        if (newEntries == null && referenced == null) return group
+        return group.copy(entries = newEntries ?: group.entries, subgroups = referenced ?: group.subgroups)
     }
 }

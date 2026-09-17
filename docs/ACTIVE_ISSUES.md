@@ -51,7 +51,7 @@
 
 ---
 
-## P3 低危问题、特性接线与体验优化（20 项）
+## P3 低危问题、特性接线与体验优化（18 项）
 
 > 本批为 2026-09-17「降低 CPU / 内存占用」排查的**其余开放结论**。
 > 条目 153 为 **Rust 下沉候选的评估结论**（评估项）；条目 155 为同轮后续批次（§115）开工复核转登。
@@ -69,7 +69,10 @@
 > `ISSUE-P3-172`（①②③ 循环内新建重对象；**④ 已裁决不实施**，理由登记 [`已知工程限界.md`](architecture/已知工程限界.md) §9）、
 > `ISSUE-P3-173`（OTP Base32 装箱与线性查表）、`ISSUE-P3-181`（密钥文件 / CSV / 标签解析常数因子）——见
 > [`resolved/batches/121-零风险局部项与守卫用例批次.md`](resolved/batches/121-零风险局部项与守卫用例批次.md)。
-> 其余条目（`P3-160` / `161` / `163` ~ `171` / `174` ~ `180`）**仍待整改**。
+> **已闭环（§123 第二档：循环结构改造 ‣ 批量树操作单趟化）**：`ISSUE-P3-160`（批量删除 / 移动按 id
+> 逐次重走整树）、`ISSUE-P3-161`（冲突决策逐条重建整棵树）——见
+> [`resolved/batches/123-批量树操作单趟化批次.md`](resolved/batches/123-批量树操作单趟化批次.md)。
+> 其余条目（`P3-163` ~ `P3-171` / `P3-174` ~ `P3-180`）**仍待整改**。
 
 ### ISSUE-P3-153 Rust 下沉候选的评估结论（**评估项，非整改项**）
 
@@ -116,30 +119,6 @@
   流式语义（填充非法 / 长度非整数倍 / 提前 close）逐例对齐 JCE 基线；**并给出设备侧前后吞吐对比**再决定是否采纳。
 - **风险提示**：本条触及**主加密数据面**，属高回归面改动，须排在所有零风险项之后。
 
-
-### ISSUE-P3-160 批量条目变更按 id 逐次重走整棵树（`O(K × 节点数)`）
-
-- **背景**：`database/.../session/SessionContentMutations.kt:137`（`batchMoveEntries`）与 `:162`（`batchDeleteEntries`）
-  对**每个 id** 调一次 `SessionTreeEditor.removeEntry` / `updateOrAddEntry`，而 `SessionTreeEditor.kt:108` 的
-  `removeEntry` 无条件 `group.subgroups.map { … }` 递归整棵树（命中也不提前退出）并每次新建列表。
-  调用面：`app/.../data/repository/RecycleBinCoordinator.kt:172` 交接回收站全部条目、
-  `VaultListActionController.kt:114/128` 传多选集合 ⇒ 回收站 100 条 + 200 组时约 100 次全树遍历 + 约 2 万次临时 List 分配，
-  且全程持会话 Mutex（锁持有时间被放大 K 倍）。
-- **整改方向**：新增按 id 集合**单趟剪枝**的 `removeEntries(Set<KdbxUuid>)`；`batchMoveEntries` 改为
-  「一次批量移除 → 逐条路径复制插入」。
-- **验收标准**：批量删除 / 移动的树变换结果与逐条实现等价（含未命中分支的实例身份复用）；回收站清空路径回归绿。
-- **核实时间点与方式**：2026-09-17 读 `SessionContentMutations.kt:120-173` 与 `SessionTreeEditor.kt:98-122` 实际内容核实。
-- **风险提示**：须保全 `ISSUE-P2-06` 的「删除路径不擦除」修正与 `ISSUE-P3-118` 的路径复制契约。
-
-### ISSUE-P3-161 冲突决策逐条重建整棵分组树（`O(冲突数 × 分组数)`）
-
-- **背景**：`app/.../sync/SyncConflictController.kt:107` 对每条冲突调 `applyResolvedEntryToGroup`，
-  而 `:332` 的实现对**每一层**都执行 `group.subgroups.map { … }` + `group.copy(subgroups = …)`——
-  目标条目不在该子树时也照旧复制 ⇒ 每条冲突一次全树重建。5000 组 + 100 条冲突约 50 万次 `copy`，
-  在 `Dispatchers.Default` 且持锁执行。
-- **整改方向**：先按 `parentGroupId` `groupBy` 一次，单趟递归中按当前组 id 取对应条目列表替换，降为 `O(G + k)`。
-- **验收标准**：冲突解决结果与逐条实现等价；新增用例断言「仅目标分组链上的节点被复制」。
-- **核实时间点与方式**：2026-09-17 读 `SyncConflictController.kt:95-124` 与 `:332-349` 实际内容核实。
 
 ### ISSUE-P3-163 字段引用引擎按每个引用重建整库扁平列表
 

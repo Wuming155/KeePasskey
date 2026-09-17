@@ -141,6 +141,31 @@ class AlgoHotPathGuardsTest {
         )
     }
 
+    @Test
+    fun `批量树操作必须走单趟剪枝而不得回退为逐条重走整树`() {
+        val mutations =
+            stripped("database/src/main/java/com/keepasskey/database/session/SessionContentMutations.kt")
+        assertFalse(
+            "批量删除 / 批量移动不得再对每个 id 各调一次 removeEntry（O(K × 节点数) 次整树遍历）",
+            mutations.contains("currentRoot = SessionTreeEditor.removeEntry(currentRoot,")
+        )
+        assertTrue(
+            "按 id 集合单趟剪枝的批量入口必须存在",
+            stripped("database/src/main/java/com/keepasskey/database/session/SessionTreeEditor.kt")
+                .contains("fun removeEntries(")
+        )
+
+        val conflict = stripped("app/src/main/java/com/keepasskey/app/sync/SyncConflictController.kt")
+        assertTrue(
+            "冲突决议必须收集后单趟落树",
+            conflict.contains("applyResolvedEntriesToGroup(")
+        )
+        assertFalse(
+            "不得残留「每条裁决各复制整棵树」的逐条实现",
+            conflict.contains("applyResolvedEntryToGroup(")
+        )
+    }
+
     private fun stripped(path: String): String = readSource(path)
         .replace(BLOCK_COMMENT, "")
         .lines()

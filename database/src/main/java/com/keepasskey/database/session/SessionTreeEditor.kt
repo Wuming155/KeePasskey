@@ -113,12 +113,56 @@ internal object SessionTreeEditor {
         } else {
             group.entries
         }
-        val newSubgroups = group.subgroups.map { sub ->
+        // ISSUE-P3-160：仅当子树确实变化时才新建列表——原实现无条件 `group.subgroups.map { … }`，
+        // 即使目标不在本子树内也会为**每个**分组各分配一个新列表（在保存 / 批量路径上放大为
+        // O(分组数) 次分配）。本改动只消除分配，**不**引入「命中即停止下降」的提前退出
+        // （那会是另一处语义变化，UUID 唯一性假设下收益有限）。
+        var referenced: MutableList<KdbxGroup>? = null
+        group.subgroups.forEachIndexed { index, sub ->
             val updated = removeEntry(sub, entryId)
-            if (updated !== sub) changed = true
-            updated
+            if (updated !== sub) {
+                changed = true
+                val list = referenced ?: group.subgroups.toMutableList().also { referenced = it }
+                list[index] = updated
+            }
         }
-        return if (changed) group.copy(entries = newEntries, subgroups = newSubgroups) else group
+        if (!changed) return group
+        return group.copy(entries = newEntries, subgroups = referenced ?: group.subgroups)
+    }
+
+    /**
+     * 批量删除条目（`ISSUE-P3-160`）：按 id 集合**单趟**剪枝整棵树。
+     *
+     * 取代「对每个 id 各调一次 [removeEntry]」——后者每次调用都要遍历整棵树并为沿途分组
+     * 分配列表，K 个 id 即 `O(K × 节点数)` 次遍历与 `K × 分组数` 次列表分配，且调用方
+     * （回收站清空 / 列表多选删除）全程持有会话 Mutex，锁持有时间被放大 K 倍。
+     *
+     * 语义与**逐条调用**逐字等价：未命中任何目标 id 的子树按**同一实例**返回
+     * （`ISSUE-P3-118` 的路径复制契约），列表同样只在确需替换时才分配。
+     * 本函数不做擦除（删除路径的既定口径见 `ISSUE-P2-06`：无替换树、禁止身份擦除）。
+     *
+     * @param entryIds 目标条目 id 集合；**空集直接返回同一实例**（调用方仍按下标置 DIRTY 的语义不变）
+     */
+    fun removeEntries(group: KdbxGroup, entryIds: Set<KdbxUuid>): KdbxGroup {
+        if (entryIds.isEmpty()) return group
+
+        val newEntries = if (group.entries.any { it.id in entryIds }) {
+            group.entries.filterNot { it.id in entryIds }
+        } else {
+            group.entries
+        }
+
+        var referenced: MutableList<KdbxGroup>? = null
+        group.subgroups.forEachIndexed { index, sub ->
+            val updated = removeEntries(sub, entryIds)
+            if (updated !== sub) {
+                val list = referenced ?: group.subgroups.toMutableList().also { referenced = it }
+                list[index] = updated
+            }
+        }
+
+        if (newEntries === group.entries && referenced == null) return group
+        return group.copy(entries = newEntries, subgroups = referenced ?: group.subgroups)
     }
 
     fun updateOrAddGroup(parent: KdbxGroup, groupToSave: KdbxGroup): GroupEditResult {

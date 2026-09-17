@@ -138,10 +138,10 @@ internal class SessionContentMutations(
         if (readOnly()) return@withLock
         val currentDb = databaseFlow.value ?: return@withLock
         val entriesToMove = currentDb.rootGroup.allEntries().filter { it.id in entryIds }
-        var currentRoot = currentDb.rootGroup
-        for (e in entriesToMove) {
-            currentRoot = SessionTreeEditor.removeEntry(currentRoot, e.id)
-        }
+        // ISSUE-P3-160：一次批量移除（单趟按 id 集合剪枝整棵树），取代「对每个条目各调一次
+        // removeEntry」——后者 K 个 id 即 O(K × 节点数) 次整树遍历 + K × 分组数 次列表分配，
+        // 且全程持会话 Mutex。被移除集合与逐条实现相同（entriesToMove 的 id ⊆ entryIds）。
+        var currentRoot = SessionTreeEditor.removeEntries(currentDb.rootGroup, entryIds)
         // ISSUE-P2-06 / P3-156：待擦除对 = 源位置被移除的旧条目 → 其 moved 副本（`copy` 按引用
         // 共享全部敏感实例，故候选集合通常为空）；目标位置若已有同 id 旧节点被替换，一并纳入
         val superseded = mutableListOf<Pair<KdbxEntry, KdbxEntry>>()
@@ -162,12 +162,12 @@ internal class SessionContentMutations(
     suspend fun batchDeleteEntries(entryIds: Set<KdbxUuid>) = mutex.withLock {
         if (readOnly()) return@withLock
         val currentDb = databaseFlow.value ?: return@withLock
-        var currentRoot = currentDb.rootGroup
-        for (id in entryIds) {
-            currentRoot = SessionTreeEditor.removeEntry(currentRoot, id)
-        }
+        // ISSUE-P3-160：单趟按 id 集合剪枝，取代「对每个 id 各调一次 removeEntry」
+        //（原实现 K 个 id ⇒ O(K × 节点数) 次整树遍历 + K × 分组数 次列表分配，全程持会话 Mutex）。
+        // 仍无条件置 DIRTY 并写回新库实例——与逐条实现逐字一致（含「id 不存在」的情形）。
+        val updatedRoot = SessionTreeEditor.removeEntries(currentDb.rootGroup, entryIds)
         // ISSUE-P2-06 修正：批量删除同样无替换树，禁止身份擦除（同 deleteEntry 说明）
-        databaseFlow.value = currentDb.copy(rootGroup = currentRoot)
+        databaseFlow.value = currentDb.copy(rootGroup = updatedRoot)
         stateFlow.value = DatabaseSession.SessionState.DIRTY
     }
 }
