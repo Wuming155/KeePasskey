@@ -34,9 +34,28 @@
 
 ---
 
-## P2 中危缺陷与协议/测试缺口（0 项）
+## P2 中危缺陷与协议/测试缺口（1 项）
 
-> **暂无开放项**。2026-09-17 登记的两条 CPU 占用瓶颈（`ISSUE-P2-89` 列表页秒级整页重建、
+### ISSUE-P2-91 同步内容变化检测漏比 `times` 与历史内容（可能静默丢弃本地改动）
+
+- **背景**：`app/src/main/java/com/keepasskey/app/sync/SyncContentChangeDetector.kt:93` 的 `isEntryContentChanged`
+  比较 14 个字段 + `history.size`，**完全不比 `times`**（`expires` / `expiryTime` / `lastModificationTime` 等），
+  历史也**只比条数不比内容**；而合并侧 `sync/.../merge/KdbxEntryMerger.kt:114` 明确把
+  `times.lastModificationTime` 计入「已修改」——两处对同一问题给出不同答案（同文件 `isGroupContentChanged:68`
+  已按 P1-8 把分组 `tags`/`customData` 纳入检测，条目侧未跟上）。
+- **后果（已核实）**：`app/.../sync/SyncCycleRunner.kt:130` 在检测器判「无变化」时，本地字节**直接复用旧缓存快照**、
+  不再序列化当前内存树，而这份旧字节即随后上传远端的内容 ⇒ **只改 `times` 的编辑不会被上传**，
+  远端分支上还有被远端内容覆盖的风险。
+- **整改方向**：补齐 `times` 比较；历史改为内容级比较（逐项字段比较或序列化后摘要比较）；
+  两处判定若需保持不同口径，须在 KDoc 显式声明差异与理由。
+- **验收标准**：新增用例覆盖「仅 `times` 变化」「历史条数相同但内容不同」两种输入，改造前必红；
+  并给出「判定为无变化时不再复用缓存字节」或等价的结构性断言。
+- **核实时间点与方式**：2026-09-17 主控直读 `SyncContentChangeDetector.kt:60-109`、
+  `KdbxEntryMerger.kt:102-116`、`SyncCycleRunner.kt:127-139` 三处源码核实。
+- **未核实（不得当结论）**：**是否存在可达的 UI 编辑面只会改 `times`** 未查；
+  若确认存在，本项严重度应升为 P1。
+
+> **本批历史**：2026-09-17 登记的两条 CPU 占用瓶颈（`ISSUE-P2-89` 列表页秒级整页重建、
 > `ISSUE-P2-90` TOTP 重算 O(T×N)）已于同日在 §114 批次闭环，实现与验证证据见
 > [`resolved/batches/114-列表页秒级重建与TOTP重算收敛批次.md`](resolved/batches/114-列表页秒级重建与TOTP重算收敛批次.md)。
 > 本批的**残留风险**（整库投影仍在收集上下文执行）已由 §117 闭环（`ISSUE-P3-154`），见
@@ -44,12 +63,20 @@
 
 ---
 
-## P3 低危问题、特性接线与体验优化（2 项）
+## P3 低危问题、特性接线与体验优化（24 项）
 
 > 本批为 2026-09-17「降低 CPU / 内存占用」排查的**其余开放结论**。
 > 条目 153 为 **Rust 下沉候选的评估结论**（评估项）；条目 155 为同轮后续批次（§115）开工复核转登。
 > 同轮排查的其余条目均已闭环：150 / 151 见 §115、152 见 §116、154 见 §117、156 见 §118、157 见 §119，
 > 原 `ISSUE-P3-149`（投影热路径）的 ①②④ 见 §114、**③ 转登的 `ISSUE-P3-154` 见 §117**。
+>
+> **条目 160 ~ 181 的由来**：2026-09-17「算法与数据结构专项」排查（用户提出「看看是不是坏算法、有没有坏数据结构」），
+> 方式为**五路并行静态审计 + 主控逐条复核关键点位**，覆盖 `app` / `core` / `crypto` / `database` / `sync`
+> 五模块全部 `.kt` 源文件；已排除本清单与 `RESOLVED_LOG.md` 中已闭环项、以及
+> [`已知工程限界.md`](architecture/已知工程限界.md) / [`产品裁决登记.md`](architecture/产品裁决登记.md) 中已裁决项。
+> **口径声明（须先读）**：该批全部结论均为**静态代码结构推导**（复杂度与调用频率），**无任何性能实测数据**
+> ⇒ **不得**把下列条目读作「已测得百分比收益」；整改验收标准一律按「不再产生某类工作」的结构性判据给出。
+> 批内按「正确性已单列 `P2-91` → 高杠杆 → 低影响」顺序编号，编号续用不复用。
 
 ### ISSUE-P3-153 Rust 下沉候选的评估结论（**评估项，非整改项**）
 
@@ -96,3 +123,345 @@
   流式语义（填充非法 / 长度非整数倍 / 提前 close）逐例对齐 JCE 基线；**并给出设备侧前后吞吐对比**再决定是否采纳。
 - **风险提示**：本条触及**主加密数据面**，属高回归面改动，须排在所有零风险项之后。
 
+
+### ISSUE-P3-160 批量条目变更按 id 逐次重走整棵树（`O(K × 节点数)`）
+
+- **背景**：`database/.../session/SessionContentMutations.kt:137`（`batchMoveEntries`）与 `:162`（`batchDeleteEntries`）
+  对**每个 id** 调一次 `SessionTreeEditor.removeEntry` / `updateOrAddEntry`，而 `SessionTreeEditor.kt:108` 的
+  `removeEntry` 无条件 `group.subgroups.map { … }` 递归整棵树（命中也不提前退出）并每次新建列表。
+  调用面：`app/.../data/repository/RecycleBinCoordinator.kt:172` 交接回收站全部条目、
+  `VaultListActionController.kt:114/128` 传多选集合 ⇒ 回收站 100 条 + 200 组时约 100 次全树遍历 + 约 2 万次临时 List 分配，
+  且全程持会话 Mutex（锁持有时间被放大 K 倍）。
+- **整改方向**：新增按 id 集合**单趟剪枝**的 `removeEntries(Set<KdbxUuid>)`；`batchMoveEntries` 改为
+  「一次批量移除 → 逐条路径复制插入」。
+- **验收标准**：批量删除 / 移动的树变换结果与逐条实现等价（含未命中分支的实例身份复用）；回收站清空路径回归绿。
+- **核实时间点与方式**：2026-09-17 读 `SessionContentMutations.kt:120-173` 与 `SessionTreeEditor.kt:98-122` 实际内容核实。
+- **风险提示**：须保全 `ISSUE-P2-06` 的「删除路径不擦除」修正与 `ISSUE-P3-118` 的路径复制契约。
+
+### ISSUE-P3-161 冲突决策逐条重建整棵分组树（`O(冲突数 × 分组数)`）
+
+- **背景**：`app/.../sync/SyncConflictController.kt:107` 对每条冲突调 `applyResolvedEntryToGroup`，
+  而 `:332` 的实现对**每一层**都执行 `group.subgroups.map { … }` + `group.copy(subgroups = …)`——
+  目标条目不在该子树时也照旧复制 ⇒ 每条冲突一次全树重建。5000 组 + 100 条冲突约 50 万次 `copy`，
+  在 `Dispatchers.Default` 且持锁执行。
+- **整改方向**：先按 `parentGroupId` `groupBy` 一次，单趟递归中按当前组 id 取对应条目列表替换，降为 `O(G + k)`。
+- **验收标准**：冲突解决结果与逐条实现等价；新增用例断言「仅目标分组链上的节点被复制」。
+- **核实时间点与方式**：2026-09-17 读 `SyncConflictController.kt:95-124` 与 `:332-349` 实际内容核实。
+
+### ISSUE-P3-162 分组索引缺失导致的平方级投影（面包屑 / 回收站子树 / 路径批量解析）
+
+- **背景**：三处同族问题——① `app/.../ui/screens/vault/VaultListProjection.kt:92` 面包屑
+  `while` 循环内 `allGroups.find { it.id == curId }`（每层一次全表扫描）并用 `breadcrumbs.add(0, grp)` 头插；
+  ② 同文件 `:100` 回收站集合用递归 `allGroups.filter { it.parentId == parentId }`（每个节点重扫全表）；
+  ③ `app/.../ui/screens/vault/GroupPathPresenter.kt:41` 的 `pathsOf` 对每个分组各调一次 `fullPathOf`，
+  而后者首行即 `groups.associateBy { it.id }` ⇒ G 次 Map 构建。三处均在**每次状态投影**执行。
+- **整改方向**：投影入口建一次 `associateBy { it.id }` + `groupBy { it.parentId }` 并下传；
+  面包屑改查表（`ArrayDeque.addFirst` 或尾部追加后 `reversed()`）；回收站改按 `childrenByParent` 一次 BFS。
+- **验收标准**：`pathsOf` 内部不再有循环内 `associateBy`；面包屑不再线性查找；回收站集合构建为单趟；
+  行为等价用例（深层树 + 环状父链 + 回收站多层后代）全绿。
+- **核实时间点与方式**：2026-09-17 读 `VaultListProjection.kt:78-147`、`GroupPathPresenter.kt:20-42` 实际内容核实。
+
+### ISSUE-P3-163 字段引用引擎按每个引用重建整库扁平列表
+
+- **背景**：`database/.../fieldref/FieldReferenceEngine.kt:151` 在 `REF_REGEX.replace` 的回调体内执行
+  `root.allEntries().firstOrNull { … }`，而 `allEntries()` 每次现场递归展平整棵树并分配新 List，
+  且该表达式位于**递归展开链**上（每层深度各展平一次）⇒ `O(引用数 × 深度 × 条目数)` 次列表物化。
+  附带成本：检索字段为 `P` 时逐条目 `readString()`（`:186`，每次一次 JCE 解密），为 `UUID` 时逐条目 `toHexString()`。
+- **整改方向**：`resolveWith` 入口按需构建一次索引（`Map<RefField, Map<String, KdbxEntry>>` 或
+  `associateBy { it.id }`）随递归下传，把每次查找降为 O(1)，并让按口令检索不再需要逐条解密。
+- **验收标准**：同一文本的解析结果不变（含未命中保留原文、掩码占位、深度上限、环状引用）；
+  新增用例断言「一次解析内 `allEntries()` 至多调用一次」；按 `P` 检索不再对未命中条目解密。
+- **核实时间点与方式**：2026-09-17 读 `FieldReferenceEngine.kt:125-191` 实际内容核实。
+- **风险提示**：该引擎位于 `P0-08` 消费点白名单语义之上，**不得**在索引化过程中改变「受保护值不物化」的判定路径。
+
+### ISSUE-P3-164 每次保存无条件执行全树历史保留期维护
+
+- **背景**：`database/.../session/DatabaseSession.kt:290` 每次 `save()` 调
+  `HistoryManager.pruneGroupHistoryByAge(rootGroup, maintenanceHistoryDays)`（默认 365 ⇒ 恒执行）；
+  `history/HistoryManager.kt:130` 的实现为 `group.entries.map{…}` + `group.subgroups.map{…}` 递归，
+  即便整库无一条历史快照，也仍为**每个分组各分配两个新 List**（现有 `changed` 判定只避免了 `group.copy`）。
+- **整改方向**：先做 O(1) 的「本库是否存在历史快照」闸门（解析 / 变更时维护计数或惰性标记），无历史直接跳过；
+  递归改为「仅当子树确有变化时才新建列表」。
+- **验收标准**：无历史库的保存路径不再产生分组规模的新列表（结构断言或分配计数）；
+  有历史库的修剪结果与现状等价；保留期边界用例全绿。
+- **核实时间点与方式**：2026-09-17 读 `DatabaseSession.kt` 保存路径与 `HistoryManager.kt:130` 实际内容核实。
+- **风险提示**：历史修剪涉及**用户数据删除**，闸门必须是「保守不修剪」方向（宁可多跑一次）。
+
+### ISSUE-P3-165 分组父链自愈的 `O(G × 深度)` 退化与分组装配无深度上限（安全面）
+
+- **背景**：`sync/.../merge/KdbxGroupMerger.kt:99-115` 对**每个分组**从自身起上溯父链并用 `mutableSetOf(gid)`
+  逐组记录 `visited`，链状退化结构（**远端可构造**）下退化为 `O(G × d)`，最坏 `O(G²)`；
+  同文件 `assembleGroupTree:131-152` 的分组树递归装配**无深度上限**。
+  对照：同仓 `sync/.../webdav/WebDavPropfindParser.kt:94-111` 已用「显式栈 + 深度上限」加固过同一类风险。
+- **整改方向**：以「自底向上一次染色」替代逐组上溯（或缓存每组的「到根可达」判定），复杂度降为 `O(G)`；
+  装配改显式栈并加分组深度上限（上限值须显式声明依据，超限按既有失败语义处理，不得静默截断）。
+- **验收标准**：新增用例覆盖「远端构造的深链 / 环状父链」（现有用例若无此形状须补）；
+  越限库按既定错误语义失败而非栈溢出；正常库合并结果不变。
+- **核实时间点与方式**：2026-09-17 读 `KdbxGroupMerger.kt:95-155` 与 `WebDavPropfindParser.kt:94-111` 对照核实。
+- **风险提示**：属**解析/合并健壮性**（攻击面）而非纯性能项，与 `P3-155` 同属高回归面，须排在零风险项之后。
+
+### ISSUE-P3-166 健康检查对同一条目 3 次解密 + 2 次 SHA-256
+
+- **背景**：`database/.../audit/HealthCheckEngine.kt:52`（第一趟建重用索引）与 `:98`（第二趟判定）——
+  第一趟 `readUtf8()` + `sha256`，第二趟又 `readChars()` + `readUtf8()` + `sha256` 去查第一趟刚建的表。
+  `ProtectedString.readUtf8()/readChars()` 每次都是一次真实 JCE 解密（每次新建 `Cipher`）。
+  ⇒ 每条目 3 次解密 + 2 次哈希，可合并为 1 次解密 + 1 次哈希。
+- **整改方向**：第一趟把 `hashHex` 存入 `Map<entryId, String>` 供第二趟复用（或合并为单趟：先计数再产出 REUSED 条目）；
+  顺带把 `entry.title` / `entry.userName` 在每条目的多个分支里重复读取改为每条目读一次存局部变量。
+- **验收标准**：新增用例断言同一条目在一次扫描内解密次数（读 `readUtf8`/`readChars` 次数）不高于 2；
+  各类风险等级（EXPIRED / WEAK / REUSED 等）判定结果与现状逐项一致。
+- **核实时间点与方式**：2026-09-17 主控直读 `HealthCheckEngine.kt:46-124` 核实。
+- **风险提示**：口令明文中间量必须继续在 `finally` 中清零（`passChars` / `passBytes`），合并趟次不得引入新的长期持有。
+
+### ISSUE-P3-167 同步接受路径对同一份字节重复 SHA-256 与基线前移双写盘
+
+- **背景**：① `sync/.../engine/SyncEngine.kt:108-114` 一次接受流程对**同一份远端字节**算 3~4 遍全库 SHA-256
+  （`SyncRollbackGuard.inspect` 的 `:119`、`SyncCache.writeCache` 的 `:117`、`recordAccepted` 的 `:135`，
+  ETag 缺失路径再加一次）；② `sync/.../engine/SyncEngineSupport.kt:60-61` 的 `advanceBaseAndPersist`
+  恒执行 `writeCache` + `writeBaseContent`，两者各自「写 tmp → flush → `fd.sync()` → rename」
+  ⇒ 每次基线前移 `2×N` 字节顺序写 + 2 次 fsync，且 `cacheDir/sync` 对每个远端路径常驻**两份完整密文**。
+- **整改方向**：① 让摘要只算一次并作参数贯穿（`isReplay(path, bytes, digest)` / `recordAccepted(path, bytes, digest)`），
+  或由 `writeCache` 回传摘要；② `writeBaseContent` 前先比对目标长度 + 摘要，内容一致则整段跳过。
+- **验收标准**：接受流程内 SHA-256 计算次数降为 1（调用计数断言）；基线与缓存内容相同时不再产生第二次写盘与 fsync；
+  防回滚裁决与缓存/基线内容回归全绿（`§90` 的两例不变量不得放宽）。
+- **核实时间点与方式**：2026-09-17 读 `SyncEngine.kt:100-120`、`SyncRollbackGuard.kt:118-143`、`SyncCache.kt:105-123` 核实。
+- **风险提示**：摘要链路与防回滚强耦合，**不得**为省一次哈希而改变 MAC / 摘要载荷格式（见 `已知工程限界.md` §5）。
+
+### ISSUE-P3-168 冲突同步周期最多 6 次全量 KDBX 加解密（每次各跑一遍 KDF）
+
+- **背景**：`app/.../sync/SyncCycleRunner.kt:127` 在内存基线缺失时解析缓存快照，
+  `:131` 序列化本地库，冲突时 `SyncConflictController.kt:227` 又把**刚序列化出的字节解析回树**，
+  再解析远端字节（`:229`）与 base 快照（`:244`），合并后再序列化一次（`:288`）⇒ 常态冲突周期
+  = 4 次全量 load + 2 次全量 save = **6 次 KDF 派生**（KDBX4 默认 Argon2id，单次数百毫秒量级），
+  且全程持 `SyncSessionState.mutex`。其中 `parse(localBytes)` 的产物与内存会话树等价，属可省的一次解密。
+- **整改方向**：① 合并直接用会话内存树构造待合并模型，仅在字节与内存树可能不一致时回落解析；
+  ② 为 `SyncDatabaseCodec` 加会话级「内容摘要 → 已解析树」缓存（锁内使用，锁库 / 超限即 `clearSensitiveData` 淘汰）。
+- **验收标准**：同一冲突周期内 KDF 派生次数下降（调用计数/日志断言）；合并结果与现状逐字段一致；
+  `§90` 的防回滚不变量与 `§114` 的 TOTP 缓存失效点全绿；缓存淘汰路径有显式擦除断言。
+- **核实时间点与方式**：2026-09-17 读 `SyncCycleRunner.kt:127-139`、`SyncConflictController.kt:220-292` 核实。
+- **风险提示**：树级缓存**扩大解密明文的驻留面**，必须按 `§52`（同步解析落盘与内存池擦除边界）同口径登记
+  所有权与擦除责任，否则不得实施；本条属高回归面，排在零风险项之后。
+
+### ISSUE-P3-169 内存驻留加密每次访问新建 `Cipher` / `Mac`
+
+- **背景**：`core/.../security/InMemoryCipher.kt:103`（`seal`）与 `:119`（`unseal`）每次调用都
+  `Cipher.getInstance` + `init`，`hmacSha256` 另各来一次 `Mac.getInstance`；触发面为
+  `ProtectedString.kt:42`（构造即 seal）与 `:177-183`（每次读取即 unseal）。
+  装载 1000 条目库 ⇒ 至少 1000 次两套 provider 查找 + 1000 次 HMAC，其中等值标签多数**从未被比较过**。
+- **整改方向**：① 按线程持有 `Cipher` / `Mac`（`init` 仍按 IV/方向重做），消除每次的 provider 查找；
+  ② `seal` 的等值标签改**惰性计算**（首次 `equals` / `hashCode` 时才算）。
+- **验收标准**：同实例内 `Cipher.getInstance` / `Mac.getInstance` 调用次数与「字段数」解耦（调用计数断言）；
+  等值语义与常时比较（`tagsEqual` 走 `MessageDigest.isEqual`）不变；既有 `ProtectedString` 全集用例绿。
+- **核实时间点与方式**：2026-09-17 主控直读 `InMemoryCipher.kt:86-131` 核实。
+- **风险提示**：`ISSUE-P3-153` 已指出「真正的浪费是每次新建 `Mac`/`MessageDigest`」，本条是其**具体点位与频率**；
+  改动不得把 `Cipher` 跨线程共享（`Cipher` 非线程安全），也不得改变「密钥流绝不复用」的 IV 语义。
+
+### ISSUE-P3-170 自动填充请求内的重复工作（证书摘要 / Keystore IPC / hex 格式化）
+
+- **背景**：① `app/.../autofill/AutofillOriginResolver.kt:41` 与 `AutofillDatasetBuilders.kt:160`
+  对**同一包名**各算一次调用方证书摘要（每次含 `getPackageInfo` + 逐签名者 `MessageDigest.getInstance` +
+  32~96 次 `"%02X".format`）；② `app/.../autofill/KeystoreHmacFieldSignatureSource.kt:53` 每次字段屏蔽检查
+  走 **3 段 Keystore IPC**（`containsAlias` + `getEntry` + `Mac.init`，均为 TEE/daemon 往返），
+  而一次请求至多 2 个角色 ⇒ 2 次三段式 IPC；③ `AutofillFieldSignature.kt:75` 与 `UnlockThrottleIntegrity.kt:39`
+  以 `"%02x".format` 逐字节生成 hex（后者还经 `ByteArray.take(16)` 产生 **16 个装箱 `Byte`**）。
+  同仓 `PasskeyKeyCodec.scalarToHexChars` 已有查表范式。
+- **整改方向**：① 摘要算一次作参数下传（或按包名做请求级 / 短 TTL 记忆化）；② 缓存 Keystore `SecretKey` 句柄，
+  同请求内 `Mac` 复用（`doFinal` 后自动复位）；③ hex 改查表（预置 `CharArray`），去掉 `take` 装箱。
+- **验收标准**：一次填充请求内证书摘要计算次数为 1、Keystore IPC 段数下降（调用计数断言）；
+  屏蔽判定的**签名原文与结果逐字节不变**；锁定态 fail-safe 语义不变。
+- **核实时间点与方式**：2026-09-17 读 `AutofillOriginResolver.kt:30-105`、`AutofillDatasetBuilders.kt:145-165`、
+  `KeystoreHmacFieldSignatureSource.kt:45-70`、`AutofillFieldSignature.kt:70-95`、`UnlockThrottleIntegrity.kt:35-45` 核实。
+- **风险提示**：`UnlockThrottleIntegrity` 的别名派生若改算法会使**存量存在性标记失配**（等于节流复位），
+  故只做「去装箱 + 查表 + 复用 digest」三项纯等价替换；Keystore 句柄缓存必须在失效时重取（`§80` 的
+  `Mac.getInstance(..., "AndroidKeyStore")` 真机失效教训）。
+
+### ISSUE-P3-171 自动填充评分对全库条目的逐条字符串物化
+
+- **背景**：`app/.../autofill/AutofillCandidateRanker.kt:136-147` 的评分循环对**全库条目**逐条访问
+  `KdbxEntry` 属性 getter（`core/.../model/KdbxEntry.kt:28-41`），而每个 getter 每次都要走
+  `fields[...]?.readString()`——未密封字段至少 `data.clone()` + 一次 `String` 构造，
+  若该字段被写为 `Protected="True"`（KeePassXC 会写）则是**一次完整解密**；
+  并对每条调 `PasskeyData.fromCustomFields`（`core/.../model/PasskeyData.kt:210`，内部 `associateBy` 建 map
+  + 最多 9 次 `readString`），而绝大多数条目根本不是 passkey 条目。
+  N = 5000 时约 5 万次 String 构造 + 5000 个临时 Map，全部落在引擎回调线程。
+- **整改方向**：① `fromCustomFields` 前置廉价短路（先探 `Passkey.` 前缀键，无则直接返回 `null`）；
+  ② 为 `KdbxEntry` 提供**不解密、不物化明文**的判定入口（复用既有 `ProtectedString.length`），
+  把 `url.isNotBlank()` 一类判定改走它；③ 确需字符串投影时在投影层一次算好并随 UI 模型缓存。
+- **验收标准**：非 passkey 条目的评分不产生 Map 与字符串（分配 / 调用计数断言）；
+  候选排序结果与现状逐条一致（既有排序用例全绿）；不得引入新的明文 `String` 长期持有。
+- **核实时间点与方式**：2026-09-17 读 `AutofillCandidateRanker.kt:85-150`、`KdbxEntry.kt:20-60`、
+  `PasskeyData.kt:200-230` 核实。
+- **风险提示**：自动填充候选匹配涉及**调用方归属与签名绑定判定**，只做「先算 / 后算」的等价搬移，不得改变判定顺序与放行面。
+
+### ISSUE-P3-172 循环内新建重对象（正则 / XML 工厂 / 日期格式 / `Mac`）
+
+- **背景**：四处同族问题——① `app/.../autofill/AutofillFieldScanner.kt:302` 的
+  `value.split(Regex("[^\\p{L}\\p{N}]+"))` 在**函数体内**现编译正则，而 `scan` 对每个节点最多触发 4 次
+  ⇒ 30 节点登录页约 100 次编译/请求，与系统 assist 超时预算直接竞争；
+  ② `sync/.../webdav/WebDavPropfindParser.kt:42` 每次响应新建 `DocumentBuilderFactory`（逐项设 6 个安全特性），
+  `:131` 每次日期解析新建 **3 个 `SimpleDateFormat`**，而该方法按每个远端路径调用一次；
+  ③ `database/.../xml/KdbxXmlParser.kt:166` 每次打开库都重新探测并实例化约 5 个
+  `SAXParserFactory` + `SAXParser`（平台特性支持是**进程级常量**）；
+  ④ `core/.../otp/OtpEngine.kt:75` 每个验证码一次 `Mac.getInstance`（跨周期批量取码时按条目数放大）。
+- **整改方向**：① 提为 object 级 `private val`；② 缓存 `factory`（注意 `DocumentBuilder` 非线程安全，只缓存工厂）
+  与日期格式常量（`DateTimeFormatter` 或 `ThreadLocal<SimpleDateFormat>`）；
+  ③ 加固特性链结果改 `by lazy` 进程级缓存（保留「特性不可用时降级告警」原语义，并顺带消掉每次开库的 WARNING 噪声）；
+  ④ `Mac` 按算法持有并 `reset()` 复用。
+- **验收标准**：四处均以调用计数或结构断言锁定「不再逐次新建」；XML 加固语义、日期解析等价性
+  （含 3 种格式与失败回退）、OTP 码值与 RFC 向量逐项不变。
+- **核实时间点与方式**：2026-09-17 主控直读 `AutofillFieldScanner.kt:290-305` 并读
+  `WebDavPropfindParser.kt:40-145`、`KdbxXmlParser.kt:150-200`、`OtpEngine.kt:60-90` 核实。
+- **风险提示**：`KdbxXmlParser` 的加固特性探测是 `ISSUE-P1-12` / `§83`（DTD 拦截）的证据依据，
+  缓存化**不得**删掉降级告警，也**不得**改变「探测失败即降级」的语义。
+
+### ISSUE-P3-173 OTP 引擎的 Base32 解码装箱与线性查表
+
+- **背景**：`core/.../otp/OtpEngine.kt:123`（`Base32Decoder.decode`）输出缓冲为 `mutableListOf<Byte>()`，
+  每个输出字节**装箱**并在末尾 `toByteArray()` 再复制一次；`:128` 以
+  `ALPHABET.indexOf(upper)` 查表，而 `String.indexOf(Char)` 是**每字符 32 步线性扫描**（`O(32n)`）；
+  `:86` 用 `10.0.pow(digits).toInt()` 取模（浮点路径，`digits=10` 时会饱和到 `Int.MAX_VALUE`）。
+- **整改方向**：字母表改 `IntArray(128/256)` 反查表（非法字符置 -1）；输出改预分配 `ByteArray`
+  （Base32 输出长度 `n*5/8` 可预知）或 `ByteArrayOutputStream`；`10^digits` 改 `POW10` 常量表，
+  把 RFC 4226「模 10^digits」的整数语义显式化。
+- **验收标准**：RFC 4648 向量 + 宽容策略（忽略 `=`、空白、字母表外字符）逐例不变；
+  新增用例断言解码路径不再产生装箱（或直接以 `ByteArray` 长度契约锁定）；
+  护城河式断言：`decode` 仍返回**调用方独占的新数组**（`TASK-46` 借用语义）。
+- **核实时间点与方式**：2026-09-17 主控直读 `OtpEngine.kt:70-139` 核实。
+
+### ISSUE-P3-174 列表页状态投影缺 `flowOn`（全库投影跑在主线程）
+
+- **背景**：`app/.../ui/screens/vault/VaultListViewModel.kt:248` 的 `uiState` 由
+  `combine(…) { buildVaultListUiState(…) }.stateIn(scope = viewModelScope, …)` 构成——
+  `stateIn` 的收集上下文即 `viewModelScope`（Main），而变换体内是全库过滤 / 排序 / 面包屑上溯 /
+  回收站后代递归 / 分组路径装配。`ISSUE-P3-154` 只给**数据层**两条投影流补了 `flowOn`，
+  **UI 侧这段变换的执行线程未变**；同仓 `AuthenticatorViewModel.kt:118` 已显式 `flowOn(Dispatchers.Default)`，
+  且本 VM 已有可注入的 `displayDispatcher`（现只用于 decorations / TOTP）。
+- **整改方向**：`… }.flowOn(displayDispatcher).stateIn(…)`，与自动填充页 / 验证器页同一写法。
+- **验收标准**：新增用例（记录型调度器或结构断言）锁定「整库投影不在收集上下文执行」；
+  既有列表页状态用例全绿；`ISSUE-P2-89` 的节拍契约（窄通道 / `WhileSubscribed`）不得回退。
+- **核实时间点与方式**：2026-09-17 主控直读 `VaultListViewModel.kt:238-267` 核实。
+- **风险提示**：`§114` / `§117` 的记录显示该 VM 的调度器改动曾两次影响既有用例，
+  实施时须与 `TestScope` 的虚拟时间轴对齐，避免改成偶发红。
+
+### ISSUE-P3-175 秒级节拍常驻与整页重建（详情页 / 验证器页 / 节拍追踪器）
+
+- **背景**：① `app/.../ui/screens/detail/EntryDetailViewModel.kt:167` 的 TOTP ticker 在 `init` **常驻启动**，
+  页面退到后台栈仍每秒唤醒（列表页 `§114` 已改订阅驱动，本页未跟进）；
+  ② `app/.../ui/screens/authenticator/AuthenticatorViewModel.kt:80` 把秒级 tick 并入整页 `combine`
+  ⇒ 每秒重建整表 + **逐条挂起仓库调用**（`§114` 为列表页准备的 `calculateEntryTotps` 批量通道
+  **本页未接入**）；③ `app/.../ui/screens/vault/VaultListTotpTracker.kt:120` 每拍重建
+  `filter` + `map` + `toSet`，而周期集合只在条目集合或其 TOTP 配置变化时才变。
+- **整改方向**：① 改订阅驱动（`WhileSubscribed` 或生命周期可见性）或按 `period` 边界驱动；
+  ② 验证器页接入 `calculateEntryTotps` 批量通道，并把「列表内容」与「剩余秒数」解耦
+  （倒计时下沉到卡片内读共享刻度）；③ `entryPeriods()` 随条目快照缓存。
+- **验收标准**：新增用例断言「1 Hz 刻度不触发整页状态新建」与「同拍内批量取码只调用一次」；
+  `§120` 的 `ISSUE-P3-158` 周期口径用例（任一条目自身周期序号变化才算翻转）必须继续全绿；
+  离屏停止的行为可观测。
+- **核实时间点与方式**：2026-09-17 读 `EntryDetailViewModel.kt:160-175`、`AuthenticatorViewModel.kt:45-120`、
+  `VaultListTotpTracker.kt:85-145` 核实。
+- **风险提示**：TOTP 展示正确性已由 `P3-158` 收紧（周期口径），本条只改**驱动频率与重建面**，
+  不得改变倒计时相位与翻转判据。
+
+### ISSUE-P3-176 冷流重复订阅与应用根状态过宽导致的导航图重建
+
+- **背景**：① `RealVaultRepository.getEntries()` / `getGroups()` 是冷流，而
+  `VaultListViewModel.kt:249` 与 `VaultListDecorationsProvider.kt:38` 各自订阅一次
+  ⇒ 一次数据变更做 2 份整库条目投影 + 2 份分组投影；详情页更密（`EntryDetailStateAssembler.kt` 中
+  `getEntry(id)` 出现于 `:138` / `:104` / `:92` 三处，`getGroups()` 于 `:108` / `:203` 两处）。
+  ② `app/.../ui/KeePasskeyApp.kt:61` 根组合读取**整个** `SettingsUiState`（100+ 字段）
+  并在 `:243` 传给 `keepasskeyNavGraph(appSettings = …)`，而 `NavHost` 以
+  `remember(route, startDestination, builder)` 建图 ⇒ 任一无关偏好变化都会整图 `createGraph`。
+- **整改方向**：① 在 ViewModel / 仓库层对这两条流 `shareIn(scope, WhileSubscribed(5000))` 后复用
+  （详情页把 `entry` 收敛为一条再 `combine` 派生路径与装饰）；② 根只读真正需要的窄字段，
+  `keepasskeyNavGraph` 改接收窄参数或用 `remember` 包一层。
+- **验收标准**：新增用例断言「同一次数据变更内整库投影只执行一次」（投影计数）；
+  导航图不因无关设置字段变化而重建（结构断言或计数）；页面行为用例全绿。
+- **核实时间点与方式**：2026-09-17 读 `VaultListViewModel.kt:248-267`、
+  `VaultListDecorationsProvider.kt:30-50`、`EntryDetailStateAssembler.kt:85-210`、`KeePasskeyApp.kt:55-70/235-250` 核实。
+- **风险提示**：`shareIn` 会改变流的**订阅语义与重放行为**（新收集者不再触发重算），
+  须逐一核对「谁依赖冷流的重算」与 `§117` 的调度器注入口径；导航图改动须复核全仓预览与截图基线。
+
+### ISSUE-P3-177 CBC 流式分块缓冲的反复分配与整块拷贝
+
+- **背景**：`crypto/.../cipher/CbcStreams.kt:216-233` 每读满一个 64 KiB 块产生
+  `ByteArray(chunkSize)` + `concat`（合并 pending 与整块）+ `pending = all.copyOfRange` + `transformBlocks` 的
+  `slice = source.copyOfRange`（又一份整块），随后 `Arrays.fill(all, 0)` 与下轮 `wipeBuffers()` 再清一次
+  ⇒ 约 **4 次 64 KiB 分配 + 3 遍整块内存搬运**；加密侧 `emitAlignedBlocks`（`:103-117`）每块再多一次
+  `buffer.copyOf(aligned)`。该路径服务原生 Twofish（整库数据流）。
+- **整改方向**：`chunk` / `slice` / `out` 改**实例级复用缓冲**（构造时分配一次，`Arrays.fill` 清零语义保留）；
+  `concat` 改「pending 固定 16 B 缓冲 + 双缓冲轮换」；`transformBlocks` 让变换以 `(offset, len)` 工作，
+  去掉 `copyOfRange`；`emitAlignedBlocks` 同理用预分配 scratch。
+- **验收标准**：往返字节级一致；填充非法 / 长度非整数倍 / 提前 `close` 三类流式语义逐例对齐 JCE 基线
+  （既有 `CbcStreamFramingTest` 为基线）；用毕清零语义逐条保留（含抛异常路径）。
+- **核实时间点与方式**：2026-09-17 读 `CbcStreams.kt:95-300` 核实。
+- **风险提示**：属**主加密数据面**（与 `ISSUE-P3-155` 同族），高回归面，须排在零风险项之后；
+  「复用缓冲」**不得**成为「不清零」的借口——清零责任须逐路径重述。
+
+### ISSUE-P3-178 完整性探测未做字节级化（`TracerPid` / `/proc/self/maps`）
+
+- **背景**：① `app/.../security/TracedProcessProbe.kt:88` 每次调用新分配 8 KiB 数组并把整个
+  `/proc/self/status` 物化成 `String`，只为取一个 `TracerPid:` 字段，而它在
+  **每次自动填充 / 凭据提供者请求**上同步执行（`RuntimeIntegrityDetector.kt:155-156`）；
+  ② `app/.../security/RuntimeIntegrityDetector.kt:245` 把 `/proc/self/maps` 逐行解码为 `String`，
+  再对每行做 **6 次大小写不敏感子串扫描**（典型进程数千行）。
+  ⇒ 每次敏感操作 6×数千次 `regionMatches` + 数千个字符串。
+- **整改方向**：① 复用实例级缓冲，改为字节级扫描 `TracerPid:`（保留既有 `parse(String)` 纯函数供单测）；
+  ② maps 改「有界读入 + 特征串字节匹配」单遍扫描；③ 同一次调用内的 `Debug.isDebuggerConnected()`
+  重复探测收敛为一次（`detectSignals` 与 `escalateForLiveSignals`）。
+- **验收标准**：`HOOK_MARKERS` / `HOOK_TRACE_PATHS` 两份清单**逐项不变**（`§92` 的
+  `RuntimeIntegrityDetectionSurfaceTest` 继续全绿）；信号判定结果对同一输入等价（含大小写不敏感语义）；
+  既有判据层用例（含负向对照形状）全绿。
+- **核实时间点与方式**：2026-09-17 读 `TracedProcessProbe.kt:30-100`、
+  `RuntimeIntegrityDetector.kt:130-270` 核实。
+- **风险提示**：**不得**改动 30 s 重扫周期与 120 s 陈旧窗口（`已知工程限界.md` §3.5 已裁决，
+  且 `RuntimeIntegrityRescanContractTest` 把「不得放宽」钉成契约）；本条只换**内部实现**。
+
+### ISSUE-P3-179 非惰性大集合展开与组合期就地派生
+
+- **背景**：① `app/.../ui/screens/settings/subscreens/DebugSettingsScreen.kt:236` 把上限 500 行的
+  `DebugLogBuffer` 整体塞在**单个 LazyColumn item** 内 `forEach` 组合，且每行做 4 次 `line.contains(…)` 判色；
+  ② `app/.../ui/screens/vault/VaultListDialogs.kt:241` 把全部分组 `filter{}.forEach{}` 铺进 `AlertDialog` 的 `text` 槽
+  （无虚拟化、无高度上限，超出屏幕的分组不可触达）；
+  ③ `app/.../ui/screens/edit/EntryEditFormSections.kt:101` 在组合期执行 `availableGroups.filter { !it.isRecycleBin }`
+  （每次重组重算整库过滤）且 `items` 无 `key`；`VaultListComponents.kt:249` 面包屑 `items` 同样无 `key`。
+- **整改方向**：① 日志改顶层 `items(logLines)` 并按前缀预判等级色；② 分组选择改
+  `LazyColumn(Modifier.heightIn(max = 280.dp))` + `items(…, key = { it.id })`（照抄 `AppPickerDialog.kt:138`）；
+  ③ 过滤下沉到 ViewModel 或 `remember(availableGroups)`，并补 `key`。
+- **验收标准**：三处改为惰性 / 已记忆（结构断言）；对话框内分组可滚动触达（含超长列表）；
+  既有对话框与编辑页用例全绿。
+- **核实时间点与方式**：2026-09-17 读 `DebugSettingsScreen.kt:225-250`、`VaultListDialogs.kt:230-255`、
+  `EntryEditFormSections.kt:90-115` 核实。
+- **风险提示**：`AlertDialog` 的 `text` 槽不滚动，改为 `LazyColumn` 时须一并确认弹窗高度约束，
+  避免「改好了但按钮被挤出屏幕」。
+
+### ISSUE-P3-180 WebDAV 单次上传最多 4 个往返（重复 PROPFIND）
+
+- **背景**：`sync/.../webdav/WebDavSyncProvider.kt:272` 在 `expectedEtag == null` 时额外插一次 PROPFIND
+  探测 `Overwrite`，而上游 `app/.../sync/SyncCycleRunner.kt:204` 的 `establishRemoteBaselineIfMissing`
+  已经探过一次；MOVE 成功但响应无 ETag 时再 `getMetadata` 一次（`:333`）；MOVE 失败重试 `for (attempt in 0..1)`
+  （`:296`）又各带一次 412 分支的 `getMetadata`（`:300`）⇒ 首传一次最多 4 个往返，弱网下每往返被 RTT 放大。
+- **整改方向**：把上游已探测到的远端存在性 / ETag 经参数下传（或让 `uploadAtomic` 接受
+  `remoteAbsent: Boolean?`），单次上传内的探测结果在一次调用内复用。
+- **验收标准**：首传路径的 HTTP 往返次数下降（请求计数断言，可用 MockWebServer 计次）；
+  条件写失败 / 412 / 无 ETag 四条分支的既有行为与错误语义回归全绿。
+- **核实时间点与方式**：2026-09-17 读 `WebDavSyncProvider.kt:215-340` 与 `SyncCycleRunner.kt:195-215` 核实。
+- **风险提示**：条件写是并发正确性的正确性来源（`已知工程限界.md` §1.3），
+  减少往返**不得**削弱「用 ETag 预检 + `If-Match` 条件写」的判定，只删重复探测。
+
+### ISSUE-P3-181 若干常数因子清理（密钥文件 / CSV 导出 / 标签解析）
+
+- **背景**：① `database/.../file/KdbxKeyFile.kt:54` 无条件 `stripWhitespace(raw)` 先复制整个 keyfile，
+  再判定是否为 64 位 hex 文本（对「任意二进制作为密钥文件」的常见分支这次拷贝纯属浪费，
+  且每次解锁与每次保存都走一遍）；② `database/.../csv/KdbxCsvExporter.kt:49` 每下钻一层都
+  `groupPath + child.name` 复制父路径，`:62` 又对每条目 `groupPath.joinToString(SEPARATOR)`
+  ⇒ `O(条目数 × 深度)` 次字符复制；③ `database/.../xml/KdbxXmlGroupReader.kt:94` 与 `:182` 的
+  `tagsStr?.split(";")?.map{trim}?.filter{isNotEmpty}` 每个 Group / Entry 各产生 3 个中间列表。
+- **整改方向**：① 先单趟扫描统计非空白字节并同时校验 hex 形状，仅在恰为 64 时构造 compact 数组；
+  ② 路径改「进组 append / 出组回退」的 `ArrayDeque` 或 `StringBuilder`，并在**组级**拼一次路径供组内条目共用；
+  ③ 单趟手写扫描直接产出最终列表（或 `splitToSequence` 惰性链），Entry 与 Group 共用同一私有函数。
+- **验收标准**：三处行为等价（keyfile 三种形态判定、CSV 导出逐字节一致、标签解析结果逐项一致）；
+  新增用例覆盖「含多行 / 空行 / 非 hex 文本的 keyfile」「空标签 / 多余分号 / 前后空白」。
+- **核实时间点与方式**：2026-09-17 读 `KdbxKeyFile.kt:40-80`、`KdbxCsvExporter.kt:40-75`、
+  `KdbxXmlGroupReader.kt:85-195` 核实。
+- **风险提示**：keyfile 解析属**解锁正确性**路径，改动须覆盖官方三种语义
+  （64 位 hex 文本 / XML keyfile / 任意文件 SHA-256），不得改变判定优先级。
