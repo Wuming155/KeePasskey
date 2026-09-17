@@ -5,6 +5,8 @@ import com.keepasskey.app.ui.model.BitmapEntryIcon
 import com.keepasskey.app.ui.model.EntryDecorations
 import com.keepasskey.app.ui.model.EntryIconPresenter
 import com.keepasskey.app.ui.model.EntryReferenceDisplayResolver
+import com.keepasskey.app.ui.model.UiVaultEntry
+import com.keepasskey.app.ui.model.VaultGroup
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOn
@@ -23,7 +25,9 @@ import kotlinx.coroutines.flow.map
  */
 internal class VaultListDecorationsProvider(
     private val vaultRepository: VaultRepository,
-    private val displayDispatcher: CoroutineDispatcher
+    private val displayDispatcher: CoroutineDispatcher,
+    entries: Flow<List<UiVaultEntry>>,
+    groups: Flow<List<VaultGroup>>
 ) {
 
     private val iconPresenter = EntryIconPresenter.production { vaultRepository.getCustomIconBytes() }
@@ -34,8 +38,8 @@ internal class VaultListDecorationsProvider(
         loadEntries = { vaultRepository.getKdbxEntries() }
     )
 
-    /** 条目图标投影 + 引用展开文案 */
-    val entryDecorations: Flow<EntryDecorations> = vaultRepository.getEntries()
+    /** 条目图标投影 + 引用展开文案（`entries` 为共享投影流，见类 KDoc / ISSUE-P3-176） */
+    val entryDecorations: Flow<EntryDecorations> = entries
         .map { entries ->
             EntryDecorations(
                 icons = iconPresenter.present(entries),
@@ -45,7 +49,7 @@ internal class VaultListDecorationsProvider(
         .flowOn(displayDispatcher)
 
     /** ISSUE-P3-22：分组图标投影（同一 presenter → 同一解码缓存，不重复解码） */
-    val groupIcons: Flow<Map<String, BitmapEntryIcon>> = vaultRepository.getGroups()
+    val groupIcons: Flow<Map<String, BitmapEntryIcon>> = groups
         .map { groups -> iconPresenter.presentGroups(groups) }
         .flowOn(displayDispatcher)
 }

@@ -117,7 +117,12 @@
 > 另将宿主侧 Windows 原子 rename 偶发 `AccessDeniedException`（平台现象）登记
 > [`architecture/已知工程限界.md`](architecture/已知工程限界.md) **§12**，见
 > [`resolved/batches/133-WebDAV首传重复探测收敛批次.md`](resolved/batches/133-WebDAV首传重复探测收敛批次.md)。
-> 其余条目（`P3-164` / `P3-165` / `P3-168` / `P3-176` / `P3-177` / `P3-182`）**仍待整改**。
+> **已闭环（§134 第四档：流订阅 ‣ 第六条 ①）**：`ISSUE-P3-176` 的 **① 冷流重复订阅**——列表页
+> 两条整库投影流改 `shareIn` 后共享给 `uiState` 与装饰装配（2 份 → 1 份）；详情页 `getEntry(id)` ×3、
+> `getGroups()` ×2 各收敛为一处（装配器新增 `scope` 形参以承载 `shareIn`）；**② 导航图重建转登
+> `ISSUE-P3-183`**，见
+> [`resolved/batches/134-冷流重复订阅收敛批次.md`](resolved/batches/134-冷流重复订阅收敛批次.md)。
+> 其余条目（`P3-164` / `P3-165` / `P3-168` / `P3-177` / `P3-182` / `P3-183`）**仍待整改**。
 
 ### ISSUE-P3-153 Rust 下沉候选的评估结论（**评估项，非整改项**）
 
@@ -206,25 +211,6 @@
 - **风险提示**：树级缓存**扩大解密明文的驻留面**，必须按 `§52`（同步解析落盘与内存池擦除边界）同口径登记
   所有权与擦除责任，否则不得实施；本条属高回归面，排在零风险项之后。
 
-### ISSUE-P3-176 冷流重复订阅与应用根状态过宽导致的导航图重建
-
-- **背景**：① `RealVaultRepository.getEntries()` / `getGroups()` 是冷流，而
-  `VaultListViewModel.kt:249` 与 `VaultListDecorationsProvider.kt:38` 各自订阅一次
-  ⇒ 一次数据变更做 2 份整库条目投影 + 2 份分组投影；详情页更密（`EntryDetailStateAssembler.kt` 中
-  `getEntry(id)` 出现于 `:138` / `:104` / `:92` 三处，`getGroups()` 于 `:108` / `:203` 两处）。
-  ② `app/.../ui/KeePasskeyApp.kt:61` 根组合读取**整个** `SettingsUiState`（100+ 字段）
-  并在 `:243` 传给 `keepasskeyNavGraph(appSettings = …)`，而 `NavHost` 以
-  `remember(route, startDestination, builder)` 建图 ⇒ 任一无关偏好变化都会整图 `createGraph`。
-- **整改方向**：① 在 ViewModel / 仓库层对这两条流 `shareIn(scope, WhileSubscribed(5000))` 后复用
-  （详情页把 `entry` 收敛为一条再 `combine` 派生路径与装饰）；② 根只读真正需要的窄字段，
-  `keepasskeyNavGraph` 改接收窄参数或用 `remember` 包一层。
-- **验收标准**：新增用例断言「同一次数据变更内整库投影只执行一次」（投影计数）；
-  导航图不因无关设置字段变化而重建（结构断言或计数）；页面行为用例全绿。
-- **核实时间点与方式**：2026-09-17 读 `VaultListViewModel.kt:248-267`、
-  `VaultListDecorationsProvider.kt:30-50`、`EntryDetailStateAssembler.kt:85-210`、`KeePasskeyApp.kt:55-70/235-250` 核实。
-- **风险提示**：`shareIn` 会改变流的**订阅语义与重放行为**（新收集者不再触发重算），
-  须逐一核对「谁依赖冷流的重算」与 `§117` 的调度器注入口径；导航图改动须复核全仓预览与截图基线。
-
 ### ISSUE-P3-177 CBC 流式分块缓冲的反复分配与整块拷贝
 
 - **背景**：`crypto/.../cipher/CbcStreams.kt:216-233` 每读满一个 64 KiB 块产生
@@ -262,3 +248,22 @@
 - **风险提示**：属**状态形状 + UI 三处联动**的改动，回归面集中在**宿主不可渲染的 UI**
   （须以接线守卫 + 编译期契约承担，并核对预览 / 截图基线）；`§120` 已把「全局 30 秒」这一错误前提
   从分母中移除，**不得**在解耦过程中把它带回来。
+
+### ISSUE-P3-183 应用根状态过宽导致导航图整图重建
+
+- **背景**：`ISSUE-P3-176` ② 的（§134 批次转登）：`app/src/main/java/com/keepasskey/app/ui/KeePasskeyApp.kt:61`
+  的根组合读取**整个** `SettingsUiState`（100+ 字段）并在 `:243` 传给
+  `keepasskeyNavGraph(appSettings = …)`；而 `NavHost` 以
+  `remember(route, startDestination, builder) { navController.createGraph(...) }` 建图 ⇒
+  **builder 是新 lambda 时整张图重建**，而 builder 捕获的 `appSettings` 在任一字段变化
+  （同步状态文案、健康扫描进度、调试开关……）时就是新实例（`SettingsUiState` 含 `List<String>`、
+  未标 `@Immutable`）⇒ 任一**无关**偏好变化都会 `createGraph` + `setGraph`，重建全部 `NavDestination`。
+- **整改方向**（`ISSUE-P3-176` AC ② 原文口径）：根只读**真正需要的窄字段**
+  （`themeMode` / `showKillAppOption` / `appLanguage` 等），`keepasskeyNavGraph` 改接收窄参数，
+  或用 `remember(navController, 窄参数)` 把 builder 包一层。
+- **验收标准**：导航图不因**无关**设置字段变化而重建（结构断言或计数）；既有导航 / 页面用例全绿；
+  预览与截图基线经复核（涉及全仓导航调用点）。
+- **核实时间点与方式**：2026-09-17 读 `KeePasskeyApp.kt:55-70/235-250`、
+  `androidx.navigation:navigation-compose:2.10.0` 的 `NavHost` 建图实现（`remember(route, startDestination, builder)`）核实（§134 开工期一并读得）。
+- **风险提示**：属 **Compose 状态宽度 + 导航建图**面，改动会触及 `keepasskeyNavGraph` 形参与
+  全仓导航调用点；**不得**以「用 `remember` 包一层」掩盖真实依赖（把无关字段也纳入 key 会让问题原样保留）。

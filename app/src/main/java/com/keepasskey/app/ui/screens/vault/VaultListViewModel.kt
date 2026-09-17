@@ -27,6 +27,7 @@ import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.shareIn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -140,8 +141,23 @@ class VaultListViewModel @Inject constructor(
         dispatcher = displayDispatcher
     )
 
+    // ISSUE-P3-176：两条**整库投影流**共享给本 VM 的 `uiState` 与展示装饰装配两处消费者——
+    // `RealVaultRepository` 的这两条是**冷流**，原实现各自订阅一次 ⇒ 一次数据变更做
+    // 2 份逐字段解密 + 时间格式化。`replay = 1` 让 `combine` 立即拿到最近值；
+    // `WhileSubscribed(5000)` 与 `uiState` 的启停口径一致（离屏 5 s 后停、重新订阅即恢复）。
+    private val entriesFlow = vaultRepository.getEntries()
+        .shareIn(viewModelScope, SharingStarted.WhileSubscribed(5000), replay = 1)
+    private val groupsFlow = vaultRepository.getGroups()
+        .shareIn(viewModelScope, SharingStarted.WhileSubscribed(5000), replay = 1)
+
     // ISSUE-P3-29：条目 / 分组展示装饰装配（共用同一图标投影缓存）
-    private val decorations = VaultListDecorationsProvider(vaultRepository, displayDispatcher)
+    // ISSUE-P3-176：改为消费上面**已共享**的两条投影流（原实现自行再订阅一次）
+    private val decorations = VaultListDecorationsProvider(
+        vaultRepository = vaultRepository,
+        displayDispatcher = displayDispatcher,
+        entries = entriesFlow,
+        groups = groupsFlow
+    )
 
     init {
         // P1 整改：秒级 tick 改由官方 tickerFlow 冷流驱动，单一 tick 源 + 虚拟时钟可推进。
@@ -247,8 +263,8 @@ class VaultListViewModel @Inject constructor(
     }
 
     val uiState: StateFlow<VaultListUiState> = combine(
-        combine(vaultRepository.getDatabases(), vaultRepository.getGroups()) { dbs, groups -> Pair(dbs, groups) },
-        vaultRepository.getEntries(),
+        combine(vaultRepository.getDatabases(), groupsFlow) { dbs, groups -> Pair(dbs, groups) },
+        entriesFlow,
         settingsRepository.getSettings(),
         sessionStateFlow,
         batchSyncDecorationsFlow

@@ -391,6 +391,46 @@ class AlgoHotPathGuardsTest {
         )
     }
 
+    @Test
+    fun `整库投影流必须共享给多处消费者`() {
+        val vm = stripped("app/src/main/java/com/keepasskey/app/ui/screens/vault/VaultListViewModel.kt")
+        assertEquals(
+            "列表页两条整库投影流必须各 shareIn 一次后共享（原 uiState 与装饰装配各订阅一次，" +
+                "而仓库侧是冷流 ⇒ 每次数据变更做两份整库投影）",
+            2,
+            Regex("shareIn\\(viewModelScope, SharingStarted\\.WhileSubscribed\\(5000\\), replay = 1\\)")
+                .findAll(vm).count()
+        )
+        assertFalse(
+            "combine 内不得再直接订阅冷流",
+            vm.contains("combine(vaultRepository.getDatabases(), vaultRepository.getGroups())") ||
+                vm.contains("\n        vaultRepository.getEntries(),")
+        )
+
+        val provider = stripped(
+            "app/src/main/java/com/keepasskey/app/ui/screens/vault/VaultListDecorationsProvider.kt"
+        )
+        assertFalse(
+            "装饰装配不得自行再订阅条目 / 分组投影（须消费传入的共享流）",
+            provider.contains("vaultRepository.getEntries()") ||
+                provider.contains("vaultRepository.getGroups()")
+        )
+
+        val assembler = stripped(
+            "app/src/main/java/com/keepasskey/app/ui/screens/detail/EntryDetailStateAssembler.kt"
+        )
+        assertEquals(
+            "详情页当前条目投影只允许订阅一次（原 getEntry(id) 有三处消费者）",
+            1,
+            Regex("vaultRepository\\.getEntry\\(id\\)").findAll(assembler).count()
+        )
+        assertEquals(
+            "详情页分组投影只允许订阅一次（原 getGroups() 有两处消费者）",
+            1,
+            Regex("vaultRepository\\.getGroups\\(\\)").findAll(assembler).count()
+        )
+    }
+
     private fun stripped(path: String): String = readSource(path)
         .replace(BLOCK_COMMENT, "")
         .lines()

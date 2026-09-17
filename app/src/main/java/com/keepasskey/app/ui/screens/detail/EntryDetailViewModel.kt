@@ -118,7 +118,9 @@ class EntryDetailViewModel @Inject constructor(
         vaultRepository = vaultRepository,
         settingsRepository = settingsRepository,
         autofillBlocklistStore = autofillBlocklistStore,
-        displayDispatcher = displayDispatcher
+        displayDispatcher = displayDispatcher,
+        // ISSUE-P3-176：共享投影流（shareIn）落在 viewModelScope，启停与 uiState 同生命周期
+        scope = viewModelScope
     )
 
     private val attachmentExporter = EntryDetailAttachmentExporter(

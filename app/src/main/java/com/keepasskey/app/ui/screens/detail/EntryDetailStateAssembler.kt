@@ -9,16 +9,20 @@ import com.keepasskey.app.ui.model.EntryDecorations
 import com.keepasskey.app.ui.model.EntryDisplayPresenter
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.model.UiVaultEntry
+import com.keepasskey.app.ui.model.VaultGroup
 import com.keepasskey.app.ui.screens.settings.ExtendedSettings
 import com.keepasskey.app.ui.screens.vault.GroupPathPresenter
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.shareIn
 
 /**
  * 详情页 UI 状态的装配器。
@@ -31,7 +35,12 @@ internal class EntryDetailStateAssembler(
     private val vaultRepository: VaultRepository,
     private val settingsRepository: SettingsRepository,
     private val autofillBlocklistStore: AutofillBlocklistStore,
-    private val displayDispatcher: CoroutineDispatcher
+    private val displayDispatcher: CoroutineDispatcher,
+    /**
+     * `ISSUE-P3-176`：共享投影流（`shareIn`）所需的作用域。由调用方（ViewModel）传入
+     * `viewModelScope`——共享的启停与 `uiState` 的 `WhileSubscribed(5000)` 同生命周期。
+     */
+    private val scope: CoroutineScope
 ) {
 
     /** 装配所需的上游输入（收敛参数表，避免 8 参裸列）。 */
@@ -83,42 +92,47 @@ internal class EntryDetailStateAssembler(
         loadEntries = { vaultRepository.getKdbxEntries() }
     )
 
-    @OptIn(ExperimentalCoroutinesApi::class)
-    private fun decorationsFlow(entryIdFlow: Flow<String?>): Flow<EntryDecorations> = entryIdFlow
-        .flatMapLatest { id ->
-            if (id == null) {
-                flowOf(EntryDecorations.EMPTY)
-            } else {
-                vaultRepository.getEntry(id).map { entry ->
-                    if (entry == null) EntryDecorations.EMPTY else entryDecorations.decorate(entry)
-                }
-            }
+    /**
+     * `ISSUE-P3-176`：改为接收**已共享**的当前条目投影流——原实现自行 `getEntry(id)` 订阅一次，
+     * 与核心 combine 及 [groupPathFlow] 合计**三处**消费者，而仓库侧是冷流 ⇒ 同一条目的投影
+     * （逐字段解密 + 时间格式化）每次数据变更被做三遍。
+     */
+    private fun decorationsFlow(entryFlow: Flow<UiVaultEntry?>): Flow<EntryDecorations> = entryFlow
+        .map { entry ->
+            if (entry == null) EntryDecorations.EMPTY else entryDecorations.decorate(entry)
         }
         .flowOn(displayDispatcher)
 
     /**
      * ISSUE-P3-17：条目所属分组的完整路径（仅在 `showGroupInEntry` 开启时需要）。
-     * 分组投影与条目各自独立变化，故与 entryIdFlow 组合后按 id 解析，避免依赖发射时序。
+     * 分组投影与条目各自独立变化，故与当前条目流组合后按 id 解析，避免依赖发射时序。
+     *
+     * `ISSUE-P3-176`：`entryFlow` 与 `groupsFlow` 均由调用方传入**已共享**的流
+     * （原实现分别自行订阅 `getEntry(id)` 与 `getGroups()` 各一次）。
      */
-    @OptIn(ExperimentalCoroutinesApi::class)
-    private fun groupPathFlow(entryIdFlow: Flow<String?>): Flow<String?> = combine(
-        entryIdFlow.flatMapLatest { id ->
-            if (id != null) vaultRepository.getEntry(id) else flowOf(null)
-        },
-        vaultRepository.getGroups()
-    ) { entry, groups ->
+    private fun groupPathFlow(
+        entryFlow: Flow<UiVaultEntry?>,
+        groupsFlow: Flow<List<VaultGroup>>
+    ): Flow<String?> = combine(entryFlow, groupsFlow) { entry, groups ->
         GroupPathPresenter.fullPathOf(groups, entry?.groupId)
     }
 
     /**
      * ISSUE-P3-17：显示侧派生量——遮掩初始态决策（[FieldMaskPolicy]）+ 所属分组路径。
      * 偏好快照每次刷新都会重算，但用户显式意图（override 非 null）恒优先。
+     *
+     * `ISSUE-P3-176`：`entryFlow` / `groupsFlow` 为调用方传入的**已共享**流（原实现经
+     * `groupPathFlow(inputs.entryId)` 又各自订阅一次）。
      */
-    private fun displayPrefsFlow(inputs: Inputs): Flow<DetailDisplayPrefs> = combine(
+    private fun displayPrefsFlow(
+        inputs: Inputs,
+        entryFlow: Flow<UiVaultEntry?>,
+        groupsFlow: Flow<List<VaultGroup>>
+    ): Flow<DetailDisplayPrefs> = combine(
         inputs.extendedSettings,
         inputs.secrets.passwordMaskOverride,
         inputs.secrets.totpMaskOverride,
-        groupPathFlow(inputs.entryId)
+        groupPathFlow(entryFlow, groupsFlow)
     ) { settings, passwordOverride, totpOverride, groupPath ->
         DetailDisplayPrefs(
             isPasswordVisible = !FieldMaskPolicy.initialMaskState(
@@ -134,10 +148,17 @@ internal class EntryDetailStateAssembler(
     @OptIn(ExperimentalCoroutinesApi::class)
     fun assemble(inputs: Inputs): Flow<EntryDetailUiState> {
         val secrets = inputs.secrets
+        // ISSUE-P3-176：当前条目投影与分组投影**各共享一份**——原实现里 `getEntry(id)` 有三处
+        // 消费者（核心 combine / decorationsFlow / groupPathFlow）、`getGroups()` 有两处
+        // （groupPathFlow / 下方 allGroups），而仓库侧是**冷流** ⇒ 同一条目与整库分组的投影
+        // 每次数据变更被各做多遍。`replay = 1` 让 combine 立即拿到最近值。
+        val currentEntry = inputs.entryId
+            .flatMapLatest { id -> if (id != null) vaultRepository.getEntry(id) else flowOf(null) }
+            .shareIn(scope, SharingStarted.WhileSubscribed(5000), replay = 1)
+        val allGroups = vaultRepository.getGroups()
+            .shareIn(scope, SharingStarted.WhileSubscribed(5000), replay = 1)
         return combine(
-            inputs.entryId.flatMapLatest { id ->
-                if (id != null) vaultRepository.getEntry(id) else flowOf(null)
-            },
+            currentEntry,
             secrets.passwordMaskOverride,
             secrets.revealedPassword,
             secrets.revealedRevisionPasswords,
@@ -179,7 +200,7 @@ internal class EntryDetailStateAssembler(
                 )
             }
             // ISSUE-P3-17：叠加遮掩初始态决策（偏好的「默认值」语义）与所属分组路径
-            .combine(displayPrefsFlow(inputs)) { state, prefs ->
+            .combine(displayPrefsFlow(inputs, currentEntry, allGroups)) { state, prefs ->
                 state.copy(
                     isPasswordVisible = prefs.isPasswordVisible,
                     isTotpVisible = prefs.isTotpVisible,
@@ -196,11 +217,11 @@ internal class EntryDetailStateAssembler(
                 )
             }
             // ISSUE-P3-02：叠加图标投影与 Notes/URL 引用展开文案（状态层装配，UI 只做纯绘制）
-            .combine(decorationsFlow(inputs.entryId)) { state, decorations ->
+            .combine(decorationsFlow(currentEntry)) { state, decorations ->
                 state.copy(decorations = decorations)
             }
             // ISSUE-P3-51：单条「移动到分组」的目标候选叠加（回收站分组由对话框统一过滤）
-            .combine(vaultRepository.getGroups()) { state, groups ->
+            .combine(allGroups) { state, groups ->
                 state.copy(allGroups = groups)
             }
     }
