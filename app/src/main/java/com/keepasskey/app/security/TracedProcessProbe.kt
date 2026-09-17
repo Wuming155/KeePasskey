@@ -27,6 +27,9 @@ object ProcTracerPid {
     /** `status` 中承载 tracer 进程号的字段名（内核格式为 `TracerPid:\t<N>`） */
     private const val FIELD = "TracerPid:"
 
+    /** 行分隔符（`/proc` 伪文件的既定格式以 `\n` 分行） */
+    private const val LF: Byte = '\n'.code.toByte()
+
     /**
      * 从 `/proc/self/status` 内容解析 `TracerPid`。
      *
@@ -38,7 +41,52 @@ object ProcTracerPid {
         val line = statusContent.lineSequence()
             .firstOrNull { it.startsWith(FIELD) }
             ?: return null
-        return line.substring(FIELD.length).trim().toIntOrNull()
+        return parseValue(line.substring(FIELD.length))
+    }
+
+    /**
+     * `ISSUE-P3-178`：字节级重载——直接在原始字节中定位 `TracerPid:` 行，
+     * **不把整份 `status` 物化成 `String`**（原实现每次调用都构造一份约 1–2 KB 的
+     * `String`，只为取其中一个字段；而本探测在每次生物快速解锁 / 自动填充 / 凭据请求上
+     * 都会**同步**执行一次）。
+     *
+     * 语义与字符串版 [parse] **逐字等价**：按 `\n` 分行、行首逐字节匹配字段名
+     * （大小写敏感，与 `String.startsWith` 同口径），取出的字段值交给**同一个** [parseValue]
+     * （故两种入口不可能漂移）。唯一可分辨的差异是**孤立 `\r` 分行**（`lineSequence` 把 `\r`
+     * 也当行界）：`/proc` 伪文件不产生该形态，且即便出现也只会让一行读得更长、经 `trim()` 后同义。
+     *
+     * @param length 有效字节数（缓冲区可能大于实际读入长度）
+     */
+    fun parse(statusBytes: ByteArray, length: Int): Int? {
+        var lineStart = 0
+        while (lineStart < length) {
+            var lineEnd = lineStart
+            while (lineEnd < length && statusBytes[lineEnd] != LF) lineEnd++
+            if (startsWithAscii(statusBytes, lineStart, lineEnd, FIELD)) {
+                return parseValue(
+                    String(
+                        statusBytes,
+                        lineStart + FIELD.length,
+                        lineEnd - lineStart - FIELD.length,
+                        Charsets.US_ASCII
+                    )
+                )
+            }
+            lineStart = lineEnd + 1
+        }
+        return null
+    }
+
+    /** 字段值语义（两处入口**共用同一实现**） */
+    private fun parseValue(raw: String): Int? = raw.trim().toIntOrNull()
+
+    /** 区间 `[from, to)` 是否以 ASCII 串 [prefix] 开头（大小写敏感） */
+    private fun startsWithAscii(bytes: ByteArray, from: Int, to: Int, prefix: String): Boolean {
+        if (to - from < prefix.length) return false
+        for (i in prefix.indices) {
+            if (bytes[from + i].toInt() != prefix[i].code) return false
+        }
+        return true
     }
 }
 
@@ -74,24 +122,31 @@ interface TracedProcessProbe {
 @Singleton
 class ProcStatusTracedProcessProbe @Inject constructor() : TracedProcessProbe {
 
+    /**
+     * `ISSUE-P3-178`：读取缓冲**按线程复用**——原实现每次调用都新分配一个 8 KiB `ByteArray`
+     * 并构造一份 `String`；而本探测在每次生物快速解锁 / 自动填充 / 凭据请求上都会同步执行一次。
+     * 按线程持有（`ThreadLocal`）而非共享单例，避免任何跨线程共享可变缓冲的可能。
+     */
+    private val statusBuffers = ThreadLocal.withInitial { ByteArray(MAX_STATUS_BYTES) }
+
     override fun tracerPid(): Int? = try {
-        ProcTracerPid.parse(readStatusBounded())
+        val buffer = statusBuffers.get()
+        val read = readStatusInto(buffer)
+        if (read <= 0) null else ProcTracerPid.parse(buffer, read)
     } catch (t: Throwable) {
         AppLog.w(TAG, "读取 /proc/self/status 失败，TracerPid 按无法判定处理", t)
         null
     }
 
     /**
-     * 有界读取：`/proc` 伪文件 `length()` 恒为 0，**不能**据此分配缓冲区，
+     * 有界读取到调用方缓冲：`/proc` 伪文件 `length()` 恒为 0，**不能**据此分配缓冲区，
      * 故固定上限读取（`status` 实际约 1–2 KB，8 KiB 留有充分余量），避免任何无界读风险。
+     *
+     * @return 实际读入字节数；`<= 0` 视为不可判定（与原实现的空串分支同义）
      */
-    private fun readStatusBounded(): String {
+    private fun readStatusInto(buffer: ByteArray): Int {
         val file = File(STATUS_PATH)
-        return file.inputStream().use { input ->
-            val buffer = ByteArray(MAX_STATUS_BYTES)
-            val read = input.read(buffer)
-            if (read <= 0) "" else String(buffer, 0, read, Charsets.UTF_8)
-        }
+        return file.inputStream().use { input -> input.read(buffer) }
     }
 
     private companion object {

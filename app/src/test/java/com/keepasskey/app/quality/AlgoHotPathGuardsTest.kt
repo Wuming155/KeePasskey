@@ -290,6 +290,39 @@ class AlgoHotPathGuardsTest {
         )
     }
 
+    @Test
+    fun `完整性探测必须字节级化且缓冲复用`() {
+        val detector =
+            stripped("app/src/main/java/com/keepasskey/app/security/RuntimeIntegrityDetector.kt")
+        assertFalse(
+            "maps 扫描不得再逐行解码成 String（useLines / 逐行 contains(ignoreCase)）",
+            detector.contains("useLines") || detector.contains("line.contains(")
+        )
+        assertTrue("必须走流式字节匹配", detector.contains("internal fun containsHookMarker("))
+        assertTrue(
+            "块间必须保留重叠窗口（否则跨块特征串会漏报）",
+            detector.contains("arraycopy(chunk, filled - overlap")
+        )
+
+        val probe = stripped("app/src/main/java/com/keepasskey/app/security/TracedProcessProbe.kt")
+        assertTrue(
+            "读取缓冲必须按线程复用（原每次调用新分配 8 KiB 并物化整份 status）",
+            probe.contains(
+                "private val statusBuffers = ThreadLocal.withInitial { ByteArray(MAX_STATUS_BYTES) }"
+            )
+        )
+        assertFalse(
+            "不得再把整份 status 物化成 String",
+            probe.contains("String(buffer, 0, read, Charsets.UTF_8)")
+        )
+        assertTrue("必须走字节级解析重载", probe.contains("ProcTracerPid.parse(buffer, read)"))
+        assertEquals(
+            "字节级与字符串两个入口必须共用同一取值实现（否则两者会漂移）",
+            1,
+            Regex("raw\\.trim\\(\\)\\.toIntOrNull\\(\\)").findAll(probe).count()
+        )
+    }
+
     private fun stripped(path: String): String = readSource(path)
         .replace(BLOCK_COMMENT, "")
         .lines()

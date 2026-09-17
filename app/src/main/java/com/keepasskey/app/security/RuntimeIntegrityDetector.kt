@@ -19,6 +19,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
+import java.io.InputStream
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -245,15 +246,7 @@ class RuntimeIntegrityDetector @Inject constructor(
     private fun detectHookFramework(): Boolean {
         val mapsHit = try {
             val maps = File(PROC_SELF_MAPS)
-            if (!maps.exists()) {
-                false
-            } else {
-                maps.bufferedReader().useLines { lines ->
-                    lines.any { line ->
-                        HOOK_MARKERS.any { marker -> line.contains(marker, ignoreCase = true) }
-                    }
-                }
-            }
+            maps.exists() && scanMapsForMarkers(maps)
         } catch (t: Throwable) {
             // 读取失败不视为攻击特征（部分 ROM 限制 /proc 访问），但必须留痕而非静默
             AppLog.w(TAG, "读取进程内存映射失败，跳过钩子库扫描", t)
@@ -262,6 +255,21 @@ class RuntimeIntegrityDetector @Inject constructor(
         if (mapsHit) return true
         return HOOK_TRACE_PATHS.any { File(it).exists() }
     }
+
+    /**
+     * `ISSUE-P3-178`：maps 扫描改为**流式字节级匹配**。
+     *
+     * 原实现把整份 maps 逐行解码成 `String`，再对每行做 6 次 `contains(ignoreCase = true)`
+     * ——典型进程数千行 ⇒ 每次敏感操作数千个 `String` + 6×数千次逐字符大小写折叠比较。
+     * 现按固定块读取（块间保留 `maxMarkerLen - 1` 字节重叠，保证跨块特征串不漏），
+     * 对每块做「首字节快速筛选 + 不区分大小写字节比对」。特征串清单 [HOOK_MARKERS]
+     * **逐项未改**（该清单是 `ISSUE-P3-120` 真机实测基线的判据）。
+     *
+     * **有界读取**：总量上限 [MAPS_SCAN_MAX_BYTES]，超限即停止并落脱敏告警（fail-open，
+     * 与「读取失败不视为攻击特征」同口径）——该上限同时封住「hook `read` 后喂无限流」的挂死面。
+     */
+    private fun scanMapsForMarkers(maps: File): Boolean =
+        maps.inputStream().use { containsHookMarker(it) }
 
     /**
      * 安装来源判定：仅当能确定 installer 且不在受信任分发方集合中时升级风险；
@@ -313,6 +321,92 @@ class RuntimeIntegrityDetector @Inject constructor(
         internal const val SNAPSHOT_STALE_AFTER_MS = 120_000L
 
         private const val PROC_SELF_MAPS = "/proc/self/maps"
+
+        /**
+         * `ISSUE-P3-178`：maps 扫描的分块大小与总量上限。
+         *
+         * 分块读取避免「整份 maps 物化」（原实现逐行解码成 `String`，更差）；总量上限
+         * [MAPS_SCAN_MAX_BYTES] 同时封住「hook `read` 后喂无限流」的挂死面——超限按未命中处理
+         * 并落脱敏告警（fail-open，与「读取失败不视为攻击特征」同口径）。
+         * 16 MiB 远超真实 maps 规模（典型数 MB 以内），不构成检测面收窄。
+         */
+        private const val MAPS_SCAN_CHUNK_BYTES = 64 * 1024
+        private const val MAPS_SCAN_MAX_BYTES = 16L * 1024 * 1024
+
+        /**
+         * 流式扫描输入流中是否出现任一 [HOOK_MARKERS] 特征串（不区分大小写）。
+         *
+         * `ISSUE-P3-178`：逐块读取 + **块间重叠**（保留 `maxMarkerLen - 1` 字节，保证跨块特征串
+         * 不漏），每块内做「首字节快速筛选 + 不区分大小写字节比对」，全程**零 `String` 分配**
+         * （原实现把整份 maps 逐行解码成 `String` 并对每行做 6 次 `contains(ignoreCase = true)`）。
+         *
+         * **有界**：总量上限 [MAPS_SCAN_MAX_BYTES]，超限即停止并落脱敏告警（fail-open，与
+         * 「读取失败不视为攻击特征」同口径）——该上限同时封住「hook `read` 后喂无限流」的挂死面。
+         *
+         * 放在伴生对象（而非实例成员）是因为它**不依赖任何实例状态**：maps 层检测的判据只由
+         * [HOOK_MARKERS] 与本节常量决定。`internal` + 可选 [chunkSize] 供用例以**小块**
+         * 驱动跨块边界场景（生产调用走默认分块）。
+         */
+        internal fun containsHookMarker(
+            input: InputStream,
+            chunkSize: Int = MAPS_SCAN_CHUNK_BYTES
+        ): Boolean {
+            val overlap = (HOOK_MARKERS.maxOf { it.length } - 1).coerceAtLeast(0)
+            require(chunkSize > overlap) { "分块必须大于特征串最大长度，否则重叠窗口容纳不下跨块匹配" }
+
+            val chunk = ByteArray(chunkSize)
+            var carry = 0
+            var total = 0L
+            while (total < MAPS_SCAN_MAX_BYTES) {
+                val read = input.read(chunk, carry, chunk.size - carry)
+                if (read <= 0) return false
+                val filled = carry + read
+                total += read
+                if (HOOK_MARKERS.any { indexOfIgnoreCaseAscii(chunk, 0, filled, it) >= 0 }) return true
+                carry = if (filled <= overlap) {
+                    filled
+                } else {
+                    System.arraycopy(chunk, filled - overlap, chunk, 0, overlap)
+                    overlap
+                }
+            }
+            AppLog.w(TAG, "内存映射扫描超出上限，按未命中处理（fail-open）")
+            return false
+        }
+
+        /**
+         * 在 `bytes[from, to)` 内查找 ASCII 串 [needle]（**不区分大小写**，按 ASCII 折叠），
+         * 未命中返回 -1。
+         *
+         * 与 `String.contains(ignoreCase = true)` 的语义对齐，但全程在字节上完成（零 `String`
+         * 分配）；先按首字节快速筛选再比对，均摊 `O(n)`。[HOOK_MARKERS] 为纯 ASCII 字符串，
+         * 该前提由 `RuntimeIntegrityMarkerScanTest` 的「特征串清单必须全为 ASCII」一例锁定。
+         */
+        private fun indexOfIgnoreCaseAscii(
+            bytes: ByteArray,
+            from: Int,
+            to: Int,
+            needle: String
+        ): Int {
+            if (needle.isEmpty()) return from
+            val last = to - needle.length
+            val firstLower = lowerAscii(needle[0].code)
+            var i = from
+            while (i <= last) {
+                if (lowerAscii(bytes[i].toInt() and 0xFF) == firstLower) {
+                    var j = 1
+                    while (j < needle.length && equalsIgnoreCaseAscii(bytes[i + j], needle[j].code)) j++
+                    if (j == needle.length) return i
+                }
+                i++
+            }
+            return -1
+        }
+
+        private fun equalsIgnoreCaseAscii(byteValue: Byte, expectedCode: Int): Boolean =
+            lowerAscii(byteValue.toInt() and 0xFF) == lowerAscii(expectedCode)
+
+        private fun lowerAscii(value: Int): Int = if (value in 'A'.code..'Z'.code) value + 32 else value
 
         /** 常见 root 二进制 / Superuser 落点（文件探测，不执行任何外部命令） */
         private val ROOT_ARTIFACT_PATHS = listOf(

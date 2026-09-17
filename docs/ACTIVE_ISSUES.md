@@ -51,7 +51,7 @@
 
 ---
 
-## P3 低危问题、特性接线与体验优化（11 项）
+## P3 低危问题、特性接线与体验优化（10 项）
 
 > 本批为 2026-09-17「降低 CPU / 内存占用」排查的**其余开放结论**。
 > 条目 153 为 **Rust 下沉候选的评估结论**（评估项）；条目 155 为同轮后续批次（§115）开工复核转登。
@@ -97,7 +97,11 @@
 > 在 `stateIn` 前补 `.flowOn(displayDispatcher)`；验收取**结构断言**（AC 允许二选一）并如实声明其
 > 不构成运行期派发证据，见
 > [`resolved/batches/129-列表页整库投影离开收集上下文批次.md`](resolved/batches/129-列表页整库投影离开收集上下文批次.md)。
-> 其余条目（`P3-164` / `P3-165` / `P3-168` / `P3-175` ~ `P3-180`）**仍待整改**。
+> **已闭环（§130 第四档：分配面 / 线程落点 ‣ 第二条）**：`ISSUE-P3-178`（完整性探测未做字节级化）
+> ——`TracerPid` 改字节级解析 + 缓冲按线程复用；maps 改流式字节匹配 + 块间重叠（并新增 16 MiB
+> 有界上限，封住「hook `read` 喂无限流」的挂死面）；**AC ③（`Debug` 探针去重）判定不做**并留痕，见
+> [`resolved/batches/130-完整性探测字节级化批次.md`](resolved/batches/130-完整性探测字节级化批次.md)。
+> 其余条目（`P3-164` / `P3-165` / `P3-168` / `P3-175` ~ `P3-177` / `P3-179` / `P3-180`）**仍待整改**。
 
 ### ISSUE-P3-153 Rust 下沉候选的评估结论（**评估项，非整改项**）
 
@@ -239,25 +243,6 @@
 - **核实时间点与方式**：2026-09-17 读 `CbcStreams.kt:95-300` 核实。
 - **风险提示**：属**主加密数据面**（与 `ISSUE-P3-155` 同族），高回归面，须排在零风险项之后；
   「复用缓冲」**不得**成为「不清零」的借口——清零责任须逐路径重述。
-
-### ISSUE-P3-178 完整性探测未做字节级化（`TracerPid` / `/proc/self/maps`）
-
-- **背景**：① `app/.../security/TracedProcessProbe.kt:88` 每次调用新分配 8 KiB 数组并把整个
-  `/proc/self/status` 物化成 `String`，只为取一个 `TracerPid:` 字段，而它在
-  **每次自动填充 / 凭据提供者请求**上同步执行（`RuntimeIntegrityDetector.kt:155-156`）；
-  ② `app/.../security/RuntimeIntegrityDetector.kt:245` 把 `/proc/self/maps` 逐行解码为 `String`，
-  再对每行做 **6 次大小写不敏感子串扫描**（典型进程数千行）。
-  ⇒ 每次敏感操作 6×数千次 `regionMatches` + 数千个字符串。
-- **整改方向**：① 复用实例级缓冲，改为字节级扫描 `TracerPid:`（保留既有 `parse(String)` 纯函数供单测）；
-  ② maps 改「有界读入 + 特征串字节匹配」单遍扫描；③ 同一次调用内的 `Debug.isDebuggerConnected()`
-  重复探测收敛为一次（`detectSignals` 与 `escalateForLiveSignals`）。
-- **验收标准**：`HOOK_MARKERS` / `HOOK_TRACE_PATHS` 两份清单**逐项不变**（`§92` 的
-  `RuntimeIntegrityDetectionSurfaceTest` 继续全绿）；信号判定结果对同一输入等价（含大小写不敏感语义）；
-  既有判据层用例（含负向对照形状）全绿。
-- **核实时间点与方式**：2026-09-17 读 `TracedProcessProbe.kt:30-100`、
-  `RuntimeIntegrityDetector.kt:130-270` 核实。
-- **风险提示**：**不得**改动 30 s 重扫周期与 120 s 陈旧窗口（`已知工程限界.md` §3.5 已裁决，
-  且 `RuntimeIntegrityRescanContractTest` 把「不得放宽」钉成契约）；本条只换**内部实现**。
 
 ### ISSUE-P3-179 非惰性大集合展开与组合期就地派生
 
