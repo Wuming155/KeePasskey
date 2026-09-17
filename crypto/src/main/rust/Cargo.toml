@@ -46,6 +46,10 @@ jni = { version = "0.21", default-features = false }
 aes = { version = "0.9.3", default-features = false, features = ["zeroize"] }
 sha2 = { version = "0.11.0", default-features = false, features = ["zeroize"] }
 twofish = { version = "0.8.0", default-features = false, features = ["zeroize"] }
+# ISSUE-P3-153（§145）：ChaCha20（RFC 7539 / KDBX 外层 cipher 候选）。RustCrypto 官方 crate，
+# `zeroize` 使密钥调度随对象析构归零（与 aes/twofish 同纪律）；无 std 依赖。
+# seek 位置以 64 字节块计（ChaChaCore 的 u32 块计数器，state[12]）。
+chacha20 = { version = "0.9.1", default-features = false, features = ["zeroize"] }
 
 [dev-dependencies]
 serde_json = "1"

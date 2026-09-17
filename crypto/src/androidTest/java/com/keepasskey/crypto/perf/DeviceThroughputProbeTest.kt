@@ -2,6 +2,7 @@ package com.keepasskey.crypto.perf
 
 import com.keepasskey.core.model.PasskeyData
 import com.keepasskey.crypto.cipher.AesCipherEngine
+import com.keepasskey.crypto.cipher.ChaCha20CipherEngine
 import com.keepasskey.crypto.passkey.PasskeyCryptoEngine
 import org.bouncycastle.crypto.generators.ECKeyPairGenerator
 import org.bouncycastle.crypto.generators.Ed25519KeyPairGenerator
@@ -181,6 +182,15 @@ class DeviceThroughputProbeTest {
         // 正确性前置
         val encrypted = newCipher(Cipher.ENCRYPT_MODE).doFinal(payload)
         assertTrue("ChaCha20 往返必须还原明文", Arrays.equals(newCipher(Cipher.DECRYPT_MODE).doFinal(encrypted), payload))
+
+        // 生产引擎路径（§145 后为原生内核；若原生不可用则与 BC 回退等价）
+        val chachaEngine = ChaCha20CipherEngine()
+        measure("ChaCha20(生产引擎)", "整块encrypt(10MiB)") { chachaEngine.encrypt(key, nonce, payload) }
+        measure("ChaCha20(生产引擎)", "流encrypt(10MiB)") {
+            val sink = ByteArrayOutputStream(payload.size)
+            chachaEngine.createEncryptingStream(sink, key, nonce).use { it.write(payload) }
+            sink.toByteArray()
+        }
 
         val bulk = measure("ChaCha20(BC)加密", "一次性doFinal(10MiB)") { newCipher(Cipher.ENCRYPT_MODE).doFinal(payload) }
         val chunked = measure("ChaCha20(BC)加密", "64KiB分块update") {

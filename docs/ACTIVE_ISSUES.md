@@ -212,6 +212,10 @@
   **立项决策（2026-09-17 用户裁定）**：**ChaCha20 与 ES256/Ed25519 立项下沉**，RS256 否定；
   各候选须先过 `crypto/src/main/rust/deny.toml`（`wildcards = "deny"`、依赖树无重复密码学实现）
   与供应链 CVSS ≥ 7.0 闸门，随后按批次推进 Rust 内核落地（chacha20 整库流 → Passkey 签名）。
+  **✅ ChaCha20 已闭环（§145）**：Rust 内核落地（原生优先 + BC 回退），`cargo deny check` 全绿，
+  真机生产路径 2.7 → 54~66 MB/s（≈20~24×），见
+  [`resolved/batches/145-ChaCha20Rust内核下沉批次.md`](resolved/batches/145-ChaCha20Rust内核下沉批次.md)。
+  **本条剩余**：ES256 / Ed25519 签名内核（同法推进）。
   另：本条评估过程实测发现 ChaCha20 引擎在真机因平台剥离版 BC 抢占 provider 名而完全不可用，
   已单列 `ISSUE-P2-92`（**已于 §143 闭环**——不修复则「ChaCha20 下沉与否」在真机无从谈起）。
 - **核实时间点与方式**：2026-09-17 逐处阅读 `crypto/` 全部 cipher / kdf / hash / passkey 实现与其 provider 选择，

@@ -14,6 +14,7 @@
 //! - `Java_com_keepasskey_crypto_strength_NativePasswordStrength_estimate`
 
 use crate::aes_kdf::{self, COMPOSITE_KEY_LEN, OUT_LEN};
+use crate::chacha20_stream;
 use crate::strength;
 use crate::twofish_cbc::{self, BLOCK_LEN};
 use jni::objects::{JByteArray, JObject};
@@ -194,6 +195,53 @@ pub extern "system" fn Java_com_keepasskey_crypto_strength_NativePasswordStrengt
     }
 }
 
+// ============================================================================
+// 4) ChaCha20 流密码（ISSUE-P3-153 / §145）
+// ============================================================================
+
+/// ChaCha20（RFC 8439）密钥流施加：对 `data` 的副本自 `byte_offset`（字节偏移）起
+/// 原地 XOR 密钥流并返回新数组（加解密同方向）。
+///
+/// 参数：`key`（32 字节）、`nonce`（12 字节）、`byte_offset`（≥ 0）、`data`（任意长度）。
+/// 任何非法参数 / 失败 / panic 返回 `null`（Kotlin 侧归一为 `CryptoException`）。
+#[no_mangle]
+pub extern "system" fn Java_com_keepasskey_crypto_cipher_NativeChaCha20_applyKeystream<'local>(
+    env: JNIEnv<'local>,
+    _thiz: JObject<'local>,
+    key: JByteArray<'local>,
+    nonce: JByteArray<'local>,
+    byte_offset: jlong,
+    data: JByteArray<'local>,
+) -> jbyteArray {
+    if key.is_null() || nonce.is_null() || data.is_null() || byte_offset < 0 {
+        return null_mut();
+    }
+
+    let outcome = catch_unwind(AssertUnwindSafe(|| -> Option<jbyteArray> {
+        let key_buf = Zeroizing::new(env.convert_byte_array(&key).ok()?);
+        let nonce_buf = Zeroizing::new(env.convert_byte_array(&nonce).ok()?);
+        let mut data_buf = Zeroizing::new(env.convert_byte_array(&data).ok()?);
+
+        chacha20_stream::apply_keystream_at(
+            &key_buf,
+            &nonce_buf,
+            byte_offset as u64,
+            &mut data_buf,
+        )?;
+
+        let java_out = env.new_byte_array(data_buf.len() as jint).ok()?;
+        // SAFETY：data_buf 为有效内存，长度取自其 len
+        env.set_byte_array_region(&java_out, 0, unsafe { as_jbyte(&data_buf[..]) })
+            .ok()?;
+        Some(java_out.into_raw())
+    }));
+
+    match outcome {
+        Ok(Some(arr)) => arr,
+        _ => null_mut(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -229,9 +277,17 @@ mod tests {
             JObject<'a>,
             JByteArray<'a>,
         ) -> jintArray = Java_com_keepasskey_crypto_strength_NativePasswordStrength_estimate;
+        let chacha: for<'a> extern "system" fn(
+            JNIEnv<'a>,
+            JObject<'a>,
+            JByteArray<'a>,
+            JByteArray<'a>,
+            jlong,
+            JByteArray<'a>,
+        ) -> jbyteArray = Java_com_keepasskey_crypto_cipher_NativeChaCha20_applyKeystream;
 
         // 取地址即编译期核对签名
-        let _ = (aes as usize, enc as usize, dec as usize, est as usize);
+        let _ = (aes as usize, enc as usize, dec as usize, est as usize, chacha as usize);
     }
 
     /// `null` 入参必须直接返回 `null` 而不是解引用（无法在宿主侧构造真实 JNIEnv，

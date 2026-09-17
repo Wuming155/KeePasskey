@@ -16,6 +16,7 @@
 //!   限制（风险 R2），> 32B 时 [`derive`] 返回 `None`（C/BC 则接受任意长度）。
 
 pub mod aes_kdf;
+pub mod chacha20_stream;
 mod jni_bridge;
 mod jni_bridge_ext;
 pub mod strength;

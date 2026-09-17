@@ -8,6 +8,7 @@ import java.io.InputStream
 import java.io.OutputStream
 import java.security.Provider
 import java.security.Security
+import java.util.Arrays
 import javax.crypto.Cipher
 import javax.crypto.CipherInputStream
 import javax.crypto.CipherOutputStream
@@ -15,7 +16,15 @@ import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
 
 /**
- * ChaCha20 对称加密引擎（RFC 7539 / ChaCha7539）
+ * ChaCha20 对称加密引擎（RFC 7539 / ChaCha7539）。
+ *
+ * **双路径分派**（对齐 [TwofishCipherEngine] 的原生优先范式，ISSUE-P3-153 / §145）：
+ * - **原生路径**：RustCrypto `chacha20` 内核（[NativeChaCha20]）——BC 纯 Java 实现真机吞吐
+ *   仅 2.6~2.7 MB/s，Rust 内核实测 ≈118 MB/s（≈44×，见 `docs/records/真机吞吐实测记录_2026-09-17.md`
+ *   §2.1）；流包装为 ChaCha20 专用的无填充分块流（[NativeEncryptingOutputStream] /
+ *   [NativeDecryptingInputStream]，64 KiB 分块 + 字节偏移推进）；
+ * - **兜底路径**：BC JCE `ChaCha7539`（[bouncyCastleProvider] 持有实例，§143 解耦）——
+ *   原生不可用（个别机型缺 ABI）时回退，语义与接线前逐字节一致。
  */
 class ChaCha20CipherEngine : CipherEngine {
 
@@ -29,21 +38,39 @@ class ChaCha20CipherEngine : CipherEngine {
 
     override fun encrypt(key: ByteArray, iv: ByteArray, data: ByteArray): ByteArray {
         validateNonceLength(iv)
-        return try {
-            val cipher = initCipher(Cipher.ENCRYPT_MODE, key, iv)
-            cipher.doFinal(data)
-        } catch (e: Exception) {
-            throw CryptoException.CipherException("ChaCha20 加密失败", e)
+        return if (NativeChaCha20.available) {
+            try {
+                NativeChaCha20.applyKeystreamChecked(key, iv, 0, data)
+            } catch (e: CryptoException.CipherException) {
+                throw e
+            } catch (e: Exception) {
+                throw CryptoException.CipherException("ChaCha20 加密失败", e)
+            }
+        } else {
+            try {
+                initCipher(Cipher.ENCRYPT_MODE, key, iv).doFinal(data)
+            } catch (e: Exception) {
+                throw CryptoException.CipherException("ChaCha20 加密失败", e)
+            }
         }
     }
 
     override fun decrypt(key: ByteArray, iv: ByteArray, data: ByteArray): ByteArray {
         validateNonceLength(iv)
-        return try {
-            val cipher = initCipher(Cipher.DECRYPT_MODE, key, iv)
-            cipher.doFinal(data)
-        } catch (e: Exception) {
-            throw CryptoException.CipherException("ChaCha20 解密失败", e)
+        return if (NativeChaCha20.available) {
+            try {
+                NativeChaCha20.applyKeystreamChecked(key, iv, 0, data)
+            } catch (e: CryptoException.CipherException) {
+                throw e
+            } catch (e: Exception) {
+                throw CryptoException.CipherException("ChaCha20 解密失败", e)
+            }
+        } else {
+            try {
+                initCipher(Cipher.DECRYPT_MODE, key, iv).doFinal(data)
+            } catch (e: Exception) {
+                throw CryptoException.CipherException("ChaCha20 解密失败", e)
+            }
         }
     }
 
@@ -53,8 +80,11 @@ class ChaCha20CipherEngine : CipherEngine {
         iv: ByteArray
     ): OutputStream {
         validateNonceLength(iv)
-        val cipher = initCipher(Cipher.ENCRYPT_MODE, key, iv)
-        return CipherOutputStream(outputStream, cipher)
+        return if (NativeChaCha20.available) {
+            NativeEncryptingOutputStream(outputStream, key, iv)
+        } else {
+            CipherOutputStream(outputStream, initCipher(Cipher.ENCRYPT_MODE, key, iv))
+        }
     }
 
     override fun createDecryptingStream(
@@ -63,8 +93,11 @@ class ChaCha20CipherEngine : CipherEngine {
         iv: ByteArray
     ): InputStream {
         validateNonceLength(iv)
-        val cipher = initCipher(Cipher.DECRYPT_MODE, key, iv)
-        return CipherInputStream(inputStream, cipher)
+        return if (NativeChaCha20.available) {
+            NativeDecryptingInputStream(inputStream, key, iv)
+        } else {
+            CipherInputStream(inputStream, initCipher(Cipher.DECRYPT_MODE, key, iv))
+        }
     }
 
     /**
@@ -118,5 +151,125 @@ class ChaCha20CipherEngine : CipherEngine {
          *    `Cipher.getInstance` 内部报出难以定位的 `NoSuchProviderException`。
          */
         fun bouncyCastleProvider(): Provider = fullBouncyCastle
+    }
+
+    // ================= 原生路径流包装（ChaCha20 无填充，语义比 CBC 简单） =================
+
+    /**
+     * 原生加密输出流：每次 `write` 调用即按当前字节偏移施加密钥流并写出
+     * （密钥流是偏移的纯函数，调用粒度不影响正确性）；明文中转副本用毕即清零。
+     */
+    private class NativeEncryptingOutputStream(
+        private val sink: OutputStream,
+        private val key: ByteArray,
+        private val nonce: ByteArray
+    ) : OutputStream() {
+
+        private var position = 0L
+        private var closed = false
+
+        override fun write(value: Int) {
+            ensureOpen()
+            val one = byteArrayOf(value.toByte())
+            try {
+                sink.write(NativeChaCha20.applyKeystreamChecked(key, nonce, position, one))
+            } finally {
+                Arrays.fill(one, 0)
+            }
+            position += 1
+        }
+
+        override fun write(data: ByteArray, off: Int, len: Int) {
+            ensureOpen()
+            val chunk = if (off == 0 && len == data.size) data else data.copyOfRange(off, off + len)
+            try {
+                sink.write(NativeChaCha20.applyKeystreamChecked(key, nonce, position, chunk))
+            } finally {
+                if (chunk !== data) Arrays.fill(chunk, 0)
+            }
+            position += len
+        }
+
+        override fun flush() = sink.flush()
+
+        override fun close() {
+            if (closed) return
+            closed = true
+            // key / nonce 属调用方（引擎入参），**不得**在此越权清零（对齐 CbcStreams 先例）
+            sink.close()
+        }
+
+        private fun ensureOpen() {
+            if (closed) throw java.io.IOException("流已关闭")
+        }
+    }
+
+    /**
+     * 原生解密输入流：从底层流读入**实例级复用**的 64 KiB 缓冲，按当前字节偏移施加
+     * 密钥流后交付（ISSUE-P3-177 的缓冲复用纪律；缓冲内为明文，close 时清零）。
+     * ChaCha20 无填充、无分组对齐，无 fail-closed 收尾语义。
+     */
+    private class NativeDecryptingInputStream(
+        private val source: InputStream,
+        private val key: ByteArray,
+        private val nonce: ByteArray
+    ) : InputStream() {
+
+        private val buffer = ByteArray(CHUNK_SIZE)
+        private var position = 0L
+        private var eofDone = false
+        private var closed = false
+
+        override fun read(): Int {
+            val single = ByteArray(1)
+            val count = read(single, 0, 1)
+            if (count <= 0) return -1
+            val value = single[0].toInt() and 0xFF
+            Arrays.fill(single, 0)
+            return value
+        }
+
+        override fun read(data: ByteArray, off: Int, len: Int): Int {
+            if (len == 0) return 0
+            require(off >= 0 && len <= data.size - off) { "非法的读取区间 off=$off len=$len" }
+            if (closed) throw java.io.IOException("流已关闭")
+            if (eofDone) return -1
+
+            // 尽量读满请求量（单次底层读可能短读），读多少解密多少
+            var filled = 0
+            while (filled < len) {
+                val count = source.read(buffer, filled, minOf(len, buffer.size) - filled)
+                if (count <= 0) break
+                filled += count
+            }
+            if (filled == 0) {
+                eofDone = true
+                return -1
+            }
+            try {
+                val out = NativeChaCha20.applyKeystreamChecked(key, nonce, position, buffer.copyOf(filled))
+                try {
+                    System.arraycopy(out, 0, data, off, filled)
+                } finally {
+                    Arrays.fill(out, 0)
+                }
+            } finally {
+                Arrays.fill(buffer, 0, filled, 0)
+            }
+            position += filled
+            return filled
+        }
+
+        override fun close() {
+            if (closed) return
+            closed = true
+            Arrays.fill(buffer, 0)
+            // key / nonce 属调用方（引擎入参），**不得**在此越权清零（对齐 CbcStreams 先例）
+            source.close()
+        }
+
+        private companion object {
+            const val CHUNK_SIZE = 64 * 1024
+        }
     }
 }
