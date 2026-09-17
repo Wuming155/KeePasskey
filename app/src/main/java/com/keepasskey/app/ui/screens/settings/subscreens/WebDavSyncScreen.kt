@@ -18,6 +18,8 @@ fun WebDavSyncScreen(
     onTriggerSync: () -> Unit,
     onTestConnection: () -> Unit = onTriggerSync,
     onProviderChange: (CloudSyncProvider) -> Unit = {},
+    /** 「保存并同步」的后续动作（保存成功后触发；顺序编排在 ViewModel，见 `CloudSyncScreen`） */
+    onSyncAfterSave: () -> Unit = {},
     // Wave 15 整改：密码/SecretKey 以 CharArray 借用语义提交，返回保存结果；
     // ISSUE-P2-01：AccessKey ID 亦改为 CharArray 借用语义提交
     onUpdateWebDav: (url: String, username: String, password: CharArray, remotePath: String) -> Boolean = { _, _, _, _ -> false },
@@ -49,6 +51,7 @@ fun WebDavSyncScreen(
         onTriggerSync = onTriggerSync,
         onTestConnection = onTestConnection,
         onProviderChange = onProviderChange,
+        onSyncAfterSave = onSyncAfterSave,
         onUpdateWebDav = onUpdateWebDav,
         onUpdateS3 = onUpdateS3,
         webdavPasswordPrefill = webdavPasswordPrefill,

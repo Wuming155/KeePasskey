@@ -76,16 +76,10 @@ fun SecuritySettingsScreen(
     integrityReport: RuntimeIntegrityReport? = null,
     modifier: Modifier = Modifier
 ) {
-    var showAutoLockDialog by remember { mutableStateOf(false) }
-    var showClipboardDialog by remember { mutableStateOf(false) }
-    // ISSUE-P3-68：解锁失败重试最长锁定时长选择弹窗
-    var showLockoutMaxDialog by remember { mutableStateOf(false) }
+    // 本批整改：自动锁定超时 / 最长锁定时长 / 剪贴板清空倒计时三处改为**就地** `FilterChip` 选择
+    // （一次点击即生效），原先各自持有的「选择弹窗」显隐状态一并移除。
     // ISSUE-P2-09 验收标准 1：关闭「禁止截屏与录屏」前的风险确认态
     var showFlagSecureRiskDialog by remember { mutableStateOf(false) }
-    val autoLockLabel = stringResource(autoLockTimeoutLabelRes(uiState.autoLockTimeoutSeconds))
-    val clipboardLabel = stringResource(clipboardTimeoutLabelRes(uiState.clipboardTimeoutSeconds))
-    // ISSUE-P3-68：最长锁定时长以「分钟」格式化呈现（任意自定义值无需枚举标签资源）
-    val lockoutMinutes = uiState.unlockLockoutMaxSeconds / 60
     // ISSUE-P2-08：是否提示由策略字段 requireRiskNotice 单一裁决（不再由 UI 自行按等级推断，
     // 使「声明式判定 ⇄ 用户可见提示」真正闭环）；requireRiskNotice 为 true 时等级必为
     // ELEVATED / COMPROMISED，文案仍按等级取字符串资源
@@ -208,11 +202,12 @@ fun SecuritySettingsScreen(
                             onCheckedChange = onLockWhenNavigateBackToggle
                         )
 
-                        SecurityClickableRow(
-                            icon = Icons.Default.LockClock,
+                        SecurityChoiceChips(
                             title = stringResource(R.string.sec_autolock_time_title),
-                            subtitle = stringResource(R.string.sec_autolock_time_current, autoLockLabel),
-                            onClick = { showAutoLockDialog = true }
+                            description = stringResource(R.string.sec_autolock_dialog_desc),
+                            options = AUTO_LOCK_TIMEOUT_CHOICES,
+                            selectedValue = uiState.autoLockTimeoutSeconds,
+                            onSelect = onAutoLockTimeoutChange
                         )
 
                         // ISSUE-P3-68：解锁失败重试节流（总开关 + 自定义最长锁定时长）
@@ -225,14 +220,12 @@ fun SecuritySettingsScreen(
                         )
 
                         if (uiState.unlockThrottleEnabled) {
-                            SecurityClickableRow(
-                                icon = Icons.Default.HourglassBottom,
+                            SecurityChoiceChips(
                                 title = stringResource(R.string.sec_throttle_time_title),
-                                subtitle = stringResource(
-                                    R.string.sec_throttle_time_current,
-                                    lockoutMinutes
-                                ),
-                                onClick = { showLockoutMaxDialog = true }
+                                description = stringResource(R.string.sec_throttle_dialog_desc),
+                                options = LOCKOUT_MAX_DURATION_CHOICES,
+                                selectedValue = uiState.unlockLockoutMaxSeconds,
+                                onSelect = onUnlockLockoutMaxChange
                             )
                         }
 
@@ -294,11 +287,12 @@ fun SecuritySettingsScreen(
                         )
 
                         if (uiState.autoClearClipboard) {
-                            SecurityClickableRow(
-                                icon = Icons.Default.ContentPasteGo,
+                            SecurityChoiceChips(
                                 title = stringResource(R.string.sec_clipboard_countdown_title),
-                                subtitle = stringResource(R.string.sec_clipboard_countdown_current, clipboardLabel),
-                                onClick = { showClipboardDialog = true }
+                                description = stringResource(R.string.sec_clipboard_dialog_desc),
+                                options = CLIPBOARD_TIMEOUT_CHOICES,
+                                selectedValue = uiState.clipboardTimeoutSeconds,
+                                onSelect = onClipboardTimeoutChange
                             )
                         } else {
                             // ISSUE-P3-84 AC①：关闭自动擦除是用户可见的产品选择，但代价必须显式告知
@@ -396,32 +390,8 @@ fun SecuritySettingsScreen(
         }
     }
 
-    // 自动锁定超时选择弹窗
-    if (showAutoLockDialog) {
-        AutoLockTimeoutDialog(
-            selectedSeconds = uiState.autoLockTimeoutSeconds,
-            onSelect = onAutoLockTimeoutChange,
-            onDismiss = { showAutoLockDialog = false }
-        )
-    }
-
-    // 剪贴板清空倒计时弹窗
-    if (showClipboardDialog) {
-        ClipboardTimeoutDialog(
-            selectedSeconds = uiState.clipboardTimeoutSeconds,
-            onSelect = onClipboardTimeoutChange,
-            onDismiss = { showClipboardDialog = false }
-        )
-    }
-
-    // ISSUE-P3-68：解锁失败重试最长锁定时长弹窗（关闭节流时不渲染入口，自然不弹）
-    if (showLockoutMaxDialog) {
-        LockoutMaxDurationDialog(
-            selectedSeconds = uiState.unlockLockoutMaxSeconds,
-            onSelect = onUnlockLockoutMaxChange,
-            onDismiss = { showLockoutMaxDialog = false }
-        )
-    }
+    // 本批整改：原「自动锁定超时 / 剪贴板清空倒计时 / 最长锁定时长」三个选择弹窗已由
+    // 页内就地 `SecurityChoiceChips` 取代（选中即回调），此处只保留仍需二次确认的 FLAG_SECURE 风险弹窗。
 
     // ISSUE-P2-09 验收标准 1：关闭「禁止截屏与录屏」的风险确认（确认后才真正回调关闭）
     if (showFlagSecureRiskDialog) {

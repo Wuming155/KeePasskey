@@ -309,7 +309,15 @@ internal class SettingsSyncController(
         return "$datePrefix ${dateTime.format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"))}"
     }
 
-    fun testSyncConnection() {
+    /**
+     * 测试连接。
+     *
+     * @param onResult 测试完成后的回调（参数为是否通过）。用于把「测试通过才继续下一步」这类
+     *   **顺序动作**的编排收在本层（如「保存并同步」：保存 → 测试 → 通过才同步）。
+     *   回调在**状态写入之后、同一协程内**执行，因此在回调里直接调用 [triggerSync]
+     *   不会撞上其 `isSyncing` 早退守卫（此刻已置回 false）。
+     */
+    fun testSyncConnection(onResult: ((Boolean) -> Unit)? = null) {
         if (syncStateFlow.value.isSyncing) return
         val provider = syncStateFlow.value.provider
         scope.launch {
@@ -336,7 +344,18 @@ internal class SettingsSyncController(
                     isConnectionVerified = verified
                 )
             }
+            onResult?.invoke(verified)
         }
+    }
+
+    /**
+     * 上浮一条同步反馈文案。
+     *
+     * 供编排层在「前置守卫未通过」这类分支给出**明确结论**（如「连接测试未通过，已跳过同步」），
+     * 避免顺序动作在半途静默中止、用户只看到前一步的提示而不知道整体结果。
+     */
+    fun publishFeedback(message: UiMessage) {
+        syncStateFlow.update { it.copy(syncFeedbackMessage = message) }
     }
 
     fun clearSyncFeedbackMessage() {

@@ -240,6 +240,9 @@
     <string name="vault_copy_password_done">已安全复制 %1$s 的密码到剪贴板</string>
     <string name="vault_copy_username_done">已安全复制用户名: %1$s</string>
     <string name="vault_copy_username_missing">该凭据未配置用户名</string>
+    <string name="system_settings_open">打开系统设置</string>
+    <string name="vault_copy_totp_done">已安全复制 %1$s 的动态验证码到剪贴板</string>
+    <string name="vault_copy_totp_missing">该凭据未配置动态验证码</string>
     <string name="vault_batch_moved">已成功批量移动 %1$d 个条目</string>
     <string name="vault_batch_deleted">已将选中的 %1$d 个条目移至回收站</string>
     <string name="vault_recycle_emptied">回收站已清空</string>
@@ -302,6 +305,7 @@
     <string name="detail_username_copied">账号已复制到安全剪贴板</string>
     <string name="detail_username_copied_short">账号已复制</string>
     <string name="detail_totp_copied">动态验证码已复制</string>
+    <string name="detail_totp_copy_failed">验证码复制失败，请稍后重试</string>
     <string name="detail_field_copied">已复制 %1$s</string>
     <string name="detail_password_copied_timeout_seconds">密码已复制，%1$d 秒后自动清空</string>
     <string name="detail_password_copied_timeout_minutes">密码已复制，%1$d 分钟后自动清空</string>
@@ -578,11 +582,9 @@
     <string name="sec_nav_back_title">返回键锁定</string>
     <string name="sec_nav_back_sub">在主页按下返回键时立即锁定</string>
     <string name="sec_autolock_time_title">自动锁定倒计时</string>
-    <string name="sec_autolock_time_current">当前：%1$s</string>
     <string name="sec_throttle_title">解锁失败重试限制</string>
     <string name="sec_throttle_sub">连续多次输错主密码后临时锁定，抵御暴力破解（关闭后可无限次重试）</string>
     <string name="sec_throttle_time_title">最长锁定时长</string>
-    <string name="sec_throttle_time_current">当前：%1$d 分钟</string>
     <string name="sec_throttle_minutes_value">%1$d 分钟</string>
     <string name="sec_throttle_dialog_desc">连续输错次数越多锁定越久，至多不超过此处选择的时长。</string>
     <string name="sec_clear_input_title">离开时清空主密码输入</string>
@@ -609,7 +611,6 @@
     <string name="sec_clipboard_title">剪贴板保护</string>
     <string name="sec_clipboard_sub">复制的敏感内容标记为敏感：系统复制提示不显示明文，并在设定时长后自动擦除</string>
     <string name="sec_clipboard_countdown_title">剪贴板保留时长</string>
-    <string name="sec_clipboard_countdown_current">当前：%1$s</string>
     <string name="sec_clipboard_risk_notice">已关闭自动擦除：复制的口令/验证码将一直留在系统剪贴板中，任何前台应用都能读取，直至被下次复制覆盖或设备重启。建议保持开启，或改用自动填充直接填表。</string>
     <string name="sec_section_memory">内存与密钥保护</string>
     <string name="sec_keyfile_title">密钥文件策略</string>
@@ -640,6 +641,8 @@
     <string name="sync_s3_bucket_label">存储桶 (Bucket)</string>
     <string name="sync_s3_objectkey_label">对象键 (Object Key)</string>
     <string name="sync_save_config_btn">保存配置</string>
+    <string name="sync_save_and_sync_btn">保存并同步</string>
+    <string name="sync_gate_test_failed">连接测试未通过，已跳过同步——请检查服务器地址与凭据</string>
     <string name="sync_webdav_saved">WebDAV 配置已保存</string>
     <string name="sync_s3_saved">S3 配置已保存</string>
     <string name="sync_config_save_failed">保存失败：凭据加密封印未成功（安全密钥可能暂不可用），配置未写入，请重试</string>
@@ -958,11 +961,9 @@
     <string name="sec_5min">5 分钟</string>
     <string name="sec_15min">15 分钟</string>
     <string name="sec_lock_never">从不锁定</string>
-    <string name="sec_never">从不</string>
     <string name="sec_clip_15s">15 秒</string>
     <string name="sec_clip_30s">30 秒</string>
     <string name="sec_clip_no_clear">从不自动清空</string>
-    <string name="sec_clip_never">从不</string>
 
     <!-- ===== 双重认证设置子页 (TotpSettingsScreen) ===== -->
     <string name="totp_section_presets">预设字段名</string>

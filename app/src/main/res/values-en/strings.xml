@@ -236,6 +236,9 @@
     <string name="vault_copy_password_done">Password of %1$s copied securely to clipboard</string>
     <string name="vault_copy_username_done">Username copied securely: %1$s</string>
     <string name="vault_copy_username_missing">This entry has no username</string>
+    <string name="system_settings_open">Open system settings</string>
+    <string name="vault_copy_totp_done">One-time code of %1$s copied securely to clipboard</string>
+    <string name="vault_copy_totp_missing">This entry has no one-time code configured</string>
     <string name="vault_batch_moved">Successfully moved %1$d entries</string>
     <string name="vault_batch_deleted">Moved %1$d selected entries to recycle bin</string>
     <string name="vault_recycle_emptied">Recycle bin emptied</string>
@@ -299,6 +302,7 @@
     <string name="detail_username_copied">Username copied to secure clipboard</string>
     <string name="detail_username_copied_short">Username copied</string>
     <string name="detail_totp_copied">One-time code copied</string>
+    <string name="detail_totp_copy_failed">Couldn\'t copy the code, please try again</string>
     <string name="detail_field_copied">Copied %1$s</string>
     <string name="detail_password_copied_timeout_seconds">Password copied, clipboard clears in %1$d seconds</string>
     <string name="detail_password_copied_timeout_minutes">Password copied, clipboard clears in %1$d minutes</string>
@@ -572,11 +576,9 @@
     <string name="sec_nav_back_title">Lock on back button</string>
     <string name="sec_nav_back_sub">Lock immediately when back is pressed on the home screen</string>
     <string name="sec_autolock_time_title">Auto-lock countdown</string>
-    <string name="sec_autolock_time_current">Current: %1$s</string>
     <string name="sec_throttle_title">Unlock retry throttling</string>
     <string name="sec_throttle_sub">Temporarily lock the vault after repeated wrong master passwords to resist brute force (turn off for unlimited retries)</string>
     <string name="sec_throttle_time_title">Maximum lockout duration</string>
-    <string name="sec_throttle_time_current">Current: %1$d min</string>
     <string name="sec_throttle_minutes_value">%1$d min</string>
     <string name="sec_throttle_dialog_desc">Lockout grows with consecutive failures, capped at the duration chosen here.</string>
     <string name="sec_clear_input_title">Clear master password on leave</string>
@@ -604,7 +606,6 @@
     <string name="sec_clipboard_title">Clipboard protection</string>
     <string name="sec_clipboard_sub">Copied secrets are marked sensitive: the system copy confirmation hides them, and they are auto-cleared after the set duration</string>
     <string name="sec_clipboard_countdown_title">Clipboard retention</string>
-    <string name="sec_clipboard_countdown_current">Current: %1$s</string>
     <string name="sec_clipboard_risk_notice">Auto-clear is off: copied passwords/one-time codes stay in the system clipboard and any foreground app can read them until overwritten or the device reboots. Keep it on, or use autofill to fill forms directly.</string>
     <string name="sec_section_memory">Memory &amp; key protection</string>
     <string name="sec_keyfile_title">Key file policy</string>
@@ -635,6 +636,8 @@
     <string name="sync_s3_bucket_label">Bucket</string>
     <string name="sync_s3_objectkey_label">Object key</string>
     <string name="sync_save_config_btn">Save configuration</string>
+    <string name="sync_save_and_sync_btn">Save and sync</string>
+    <string name="sync_gate_test_failed">Connection test failed, sync skipped — check the server address and credentials</string>
     <string name="sync_webdav_saved">WebDAV configuration saved</string>
     <string name="sync_s3_saved">S3 configuration saved</string>
     <string name="sync_config_save_failed">Save failed: credential encryption sealing did not succeed (security key may be temporarily unavailable). Configuration was not written, please retry</string>
@@ -925,11 +928,9 @@
     <string name="sec_5min">5 minutes</string>
     <string name="sec_15min">15 minutes</string>
     <string name="sec_lock_never">Never lock</string>
-    <string name="sec_never">Never</string>
     <string name="sec_clip_15s">15 seconds</string>
     <string name="sec_clip_30s">30 seconds</string>
     <string name="sec_clip_no_clear">Never auto-clear</string>
-    <string name="sec_clip_never">Never</string>
 
     <!-- ===== TOTP settings subscreen ===== -->
     <string name="totp_section_presets">Preset field names</string>

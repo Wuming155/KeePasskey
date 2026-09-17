@@ -334,7 +334,10 @@ fun HealthCheckScreen(
             item {
                 BreachCheckToggleRow(
                     enabled = uiState.breachCheckEnabled,
-                    onToggle = onBreachCheckToggle
+                    onToggle = onBreachCheckToggle,
+                    // 开启方向会就地触发扫描（见 onBreachCheckToggle 的接线），
+                    // 故本行需要「正在扫描」就地反馈——否则扫到哪儿了只能看页面顶部的按钮
+                    isScanning = uiState.isHealthScanning
                 )
             }
 

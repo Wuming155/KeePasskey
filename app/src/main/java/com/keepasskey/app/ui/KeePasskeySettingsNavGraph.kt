@@ -85,6 +85,9 @@ internal fun NavGraphBuilder.keepasskeySettingsNavGraph(
             onWifiOnlyToggle = settingsViewModel::setWifiOnlySync,
             onTriggerSync = settingsViewModel::triggerSync,
             onTestConnection = settingsViewModel::testSyncConnection,
+            // 本批整改：「保存并同步」——保存成功后由 ViewModel 顺序编排
+            // （未验证连接则先测连接，通过才同步，失败即停并上浮）
+            onSyncAfterSave = settingsViewModel::verifyConnectionThenSync,
             onProviderChange = settingsViewModel::setSyncProvider,
             onUpdateWebDav = settingsViewModel::updateWebDavConfig,
             onUpdateS3 = settingsViewModel::updateS3Config,
@@ -220,7 +223,15 @@ internal fun NavGraphBuilder.keepasskeySettingsNavGraph(
             onBackClick = { navController.popBackStack() },
             onRescanClick = settingsViewModel::rescanHealth,
             // TASK-47：已泄露密码检测开关（默认关闭，开启后才会联网比对）
-            onBreachCheckToggle = settingsViewModel::setBreachCheckEnabled
+            // 本批整改：**仅开启方向**顺带就地扫描一次——开关在页面底部、重扫按钮在顶部，
+            // 否则用户开启后须自行滚回顶部再点一次才能看到结果；关闭方向仍只写偏好（零外联）。
+            onBreachCheckToggle = { enabled ->
+                if (enabled) {
+                    settingsViewModel.enableBreachCheckAndScan()
+                } else {
+                    settingsViewModel.setBreachCheckEnabled(false)
+                }
+            }
         )
     }
 

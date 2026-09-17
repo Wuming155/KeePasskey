@@ -1,9 +1,10 @@
 package com.keepasskey.app.ui.screens.settings.subscreens
 
 import androidx.annotation.StringRes
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -12,8 +13,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
@@ -30,32 +31,6 @@ import androidx.compose.ui.unit.sp
 import com.keepasskey.app.R
 import com.keepasskey.app.security.RuntimeRiskLevel
 import com.keepasskey.app.ui.components.BentoCard
-
-/**
- * 将自动锁定秒数映射为对应的字符串资源 (0 = 立即锁定, -1 = 永不)
- */
-@StringRes
-internal fun autoLockTimeoutLabelRes(seconds: Int): Int = when (seconds) {
-    0 -> R.string.sec_lock_now
-    30 -> R.string.sec_30s
-    60 -> R.string.sec_1min
-    120 -> R.string.sec_2min
-    300 -> R.string.sec_5min
-    900 -> R.string.sec_15min
-    else -> R.string.sec_never
-}
-
-/**
- * 将剪贴板清空秒数映射为对应的字符串资源 (-1 = 不清空)
- */
-@StringRes
-internal fun clipboardTimeoutLabelRes(seconds: Int): Int = when (seconds) {
-    15 -> R.string.sec_clip_15s
-    30 -> R.string.sec_30s
-    60 -> R.string.sec_1min
-    120 -> R.string.sec_2min
-    else -> R.string.sec_clip_never
-}
 
 @Composable
 internal fun SecuritySwitchRow(
@@ -107,52 +82,86 @@ internal fun SecuritySwitchRow(
     }
 }
 
+/** [SecurityChoiceChips] 的单个选项：秒值 + 标签资源（选项表与控件同处一文件，避免调用点各写一份）。 */
+internal data class SecurityChoice(@StringRes val labelRes: Int, val seconds: Int)
+
+/**
+ * 自动锁定超时选项（0 = 立即锁定，-1 = 永不）。
+ * 含 120 秒一档：`autoLockTimeoutLabelRes` 早已支持该值，若选项表不含它，
+ * 旧版本遗留的 120 会在新控件上**无任何选中项**（比原来的弹窗更难理解）。
+ */
+internal val AUTO_LOCK_TIMEOUT_CHOICES = listOf(
+    SecurityChoice(R.string.sec_lock_now, 0),
+    SecurityChoice(R.string.sec_30s, 30),
+    SecurityChoice(R.string.sec_1min, 60),
+    SecurityChoice(R.string.sec_2min, 120),
+    SecurityChoice(R.string.sec_5min, 300),
+    SecurityChoice(R.string.sec_15min, 900),
+    SecurityChoice(R.string.sec_lock_never, -1)
+)
+
+/** 剪贴板清空倒计时选项（-1 = 不清空）。 */
+internal val CLIPBOARD_TIMEOUT_CHOICES = listOf(
+    SecurityChoice(R.string.sec_clip_15s, 15),
+    SecurityChoice(R.string.sec_clip_30s, 30),
+    SecurityChoice(R.string.sec_1min, 60),
+    SecurityChoice(R.string.sec_2min, 120),
+    SecurityChoice(R.string.sec_clip_no_clear, -1)
+)
+
+/**
+ * 解锁失败重试的**最长锁定时长**选项（秒）。语义是指数退避的封顶值，非固定锁定时长；
+ * 域界由 `UnlockThrottleConfigProvider.MIN/MAX_LOCKOUT_SECONDS`（60 ~ 86400）界定，
+ * 本表恰为其内的 7 档枚举值。
+ */
+internal val LOCKOUT_MAX_DURATION_CHOICES = listOf(60, 300, 900, 1800, 3600, 21600, 86400)
+    .map { seconds -> SecurityChoice(R.string.sec_throttle_minutes_value, seconds) }
+
+/**
+ * 单值设置的**就地**选择控件：一组 `FilterChip`，**一次点击即生效**。
+ *
+ * 立规缘由：安全设置页的三处单值设置（自动锁定超时 / 最长锁定时长 / 剪贴板清空倒计时）
+ * 原本是「可点行 → 弹窗 → 选中」＝ 2 次点击外加一次模态打断；而同应用的同类单值设置
+ * （TOTP 刷新周期与位数用 `SingleChoiceSegmentedButtonRow`、外观模式与主题调色盘用卡片直选）
+ * 都是**一次点击**。同一类交互在应用内存在两套成本，本控件把这三处对齐到低成本的那一套。
+ *
+ * 用 `FlowRow` 而非 `SegmentedButtonRow`：三项的选项数分别为 7 / 7 / 5 档，
+ * 分段控件在 360dp 下会溢出，流式换行才能完整承载。
+ *
+ * 选中即回调，**不设确认步骤**——这些偏好均可即时回改，与既有弹窗「选中即 `onSelect` + 关闭」同义。
+ */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-internal fun SecurityClickableRow(
-    icon: ImageVector,
+internal fun SecurityChoiceChips(
     title: String,
-    subtitle: String,
-    onClick: () -> Unit
+    options: List<SecurityChoice>,
+    selectedValue: Int,
+    onSelect: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+    description: String? = null
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-        Row(
-            modifier = Modifier.weight(1f),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(22.dp)
+    Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+            color = MaterialTheme.colorScheme.onSurface
+        )
+        if (description != null) {
+            Text(
+                text = description,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            Spacer(modifier = Modifier.width(12.dp))
-            Column {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                Spacer(modifier = Modifier.height(2.dp))
-                Text(
-                    text = subtitle,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+        }
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            options.forEach { option ->
+                FilterChip(
+                    selected = selectedValue == option.seconds,
+                    onClick = { onSelect(option.seconds) },
+                    label = { Text(text = stringResource(option.labelRes)) }
                 )
             }
         }
-        Icon(
-            imageVector = Icons.AutoMirrored.Filled.ArrowForwardIos,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.outlineVariant,
-            modifier = Modifier.size(14.dp)
-        )
     }
 }
 
@@ -197,7 +206,7 @@ internal fun IntegrityRiskCard(level: RuntimeRiskLevel) {
 }
 
 // IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
-// 说明：SecuritySwitchRow / SecurityClickableRow 需要 ImageVector 入参（图标为扩展属性，
+// 说明：SecuritySwitchRow 需要 ImageVector 入参（图标为扩展属性，
 // 无法以全限定名构造），故预览本文件中仅依赖枚举、可全限定名构造的 IntegrityRiskCard
 // 为遵守「不新增 import 语句」约束，@Preview 采用全限定名写法
 @androidx.compose.ui.tooling.preview.Preview(name = "运行环境完整性风险卡 - 浅色", showBackground = true)

@@ -14,11 +14,14 @@ import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
@@ -29,12 +32,16 @@ import com.keepasskey.app.R
 import com.keepasskey.app.autofill.AutofillHealthIssue
 import com.keepasskey.app.autofill.AutofillHealthReport
 import com.keepasskey.app.ui.components.BentoCard
+import com.keepasskey.app.ui.components.SystemSettingsNavigation
 
 /**
  * 自动填充服务健康状态卡片（ISSUE-P3-41）。
  *
  * 展示 [AutofillHealthProbe] 的实时探测结果与**可操作的修复指引**，
  * 解决「用户遇到不出候选却无从下手」的排障缺口。首帧（报告为 null）不渲染任何状态文案。
+ *
+ * 「可操作」的实际含义（对齐 [HealthIssueRow]）：凡问题有**唯一**的系统设置落点者
+ * （当前为「系统未选中本应用」），直接给出一次点击的跳转入口；无落点者仍为纯说明文字。
  */
 @Composable
 fun AutofillHealthCard(
@@ -95,10 +102,50 @@ private fun AutofillHealthCardContent(
             }
 
             current.issues.forEach { issue ->
+                HealthIssueRow(issue = issue)
+            }
+        }
+    }
+}
+
+/**
+ * 单条健康问题渲染。
+ *
+ * 可修复项附带**一次点击直达**系统设置的入口：此前卡片只把问题写成一行说明文字
+ * （`bodySmall` + 项目符号），而文案却是「请前往系统设置启用」——指了一条用户无法在应用内
+ * 执行的路，须自行走完 4~5 层厂商各异的系统设置。现在该项右侧直接给出入口，
+ * 把「读一句指引 + 自己找路」收敛为「点一下」。
+ *
+ * 降级口径：`resolveActivity` 为空（系统不响应该 action）时不渲染入口，只留原纯文案；
+ * 启动被 ROM 拦截时同样静默降级——**不得**让排障入口成为新的崩溃点。
+ */
+@Composable
+private fun HealthIssueRow(issue: AutofillHealthIssue) {
+    val context = LocalContext.current
+    // 仅「系统未选中本应用」有明确且唯一的系统设置落点；其余问题（Manifest 缺声明、
+    // CM 通道不可用等）没有对应的用户可操作页面，保持纯文案。
+    val systemSettingsIntent = remember(issue, context) {
+        if (issue == AutofillHealthIssue.SYSTEM_NOT_ENABLED) {
+            SystemSettingsNavigation.autofillServiceIntent(context)
+        } else {
+            null
+        }
+    }
+
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            text = "• " + stringResource(issue.labelRes()),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f)
+        )
+        if (systemSettingsIntent != null) {
+            TextButton(
+                onClick = { SystemSettingsNavigation.launchSafely(context, systemSettingsIntent) }
+            ) {
                 Text(
-                    text = "• " + stringResource(issue.labelRes()),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    text = stringResource(R.string.system_settings_open),
+                    style = MaterialTheme.typography.labelLarge
                 )
             }
         }

@@ -180,6 +180,10 @@ internal fun BasicCredentialsCard(
  * ISSUE-P3-17：[EntryDetailUiState.isTotpVisible] 为 false 时验证码以掩码呈现，
  * 用户可经眼睛按钮显式展开——`maskTotpDefault` 只决定**初始**遮掩态，不锁定字段。
  * 遮掩不影响倒计时与换码：验证码始终按周期重算，展开即为当前有效码。
+ *
+ * ISSUE-P3-184：TOTP 分支的复制按钮走 [onCopyTotp] 真实写入剪贴板（此前只弹提示、不复制）。
+ * 遮掩态下复制的是**真实当前码**（遮掩只是显示态，与密码复制语义一致）；
+ * HOTP 分支有意**不提供**复制入口（见下方 `entry.isHotp` 注释）。
  */
 @Composable
 internal fun TotpCard(
@@ -188,7 +192,8 @@ internal fun TotpCard(
     onToggleVisibility: () -> Unit,
     // ISSUE-P3-49：HOTP 取码（推进计数器并复制本次所出之码）
     onAdvanceHotp: () -> Unit = {},
-    onShowMessage: (UiMessage) -> Unit
+    // ISSUE-P3-184：TOTP 取码（复制当前有效码；不推进任何状态，也不经本组件弹提示）
+    onCopyTotp: () -> Unit = {}
 ) {
     BentoCard(
         modifier = Modifier.fillMaxWidth(),
@@ -238,7 +243,9 @@ internal fun TotpCard(
                         modifier = Modifier.size(34.dp)
                     )
                     Spacer(modifier = Modifier.width(12.dp))
-                    IconButton(onClick = { onShowMessage(UiMessage(R.string.detail_totp_copied)) }) {
+                    // ISSUE-P3-184：此前只弹「已复制」提示而不写剪贴板（谎报成功）——
+                    // 现改为调用真实复制通道，成功/失败的文案一律由 ViewModel 经 userMessage 上浮
+                    IconButton(onClick = onCopyTotp) {
                         Icon(
                             imageVector = Icons.Default.ContentCopy,
                             contentDescription = stringResource(R.string.cd_copy_totp),
@@ -359,7 +366,7 @@ internal fun BasicCredentialsCardPreview() {
                 entry = previewEntry,
                 onToggleVisibility = {},
                 onAdvanceHotp = {},
-                onShowMessage = { _ -> }
+                onCopyTotp = {}
             )
             PasskeyCard(entry = com.keepasskey.app.ui.preview.PreviewEntryPasskey)
             CustomFieldsCard(

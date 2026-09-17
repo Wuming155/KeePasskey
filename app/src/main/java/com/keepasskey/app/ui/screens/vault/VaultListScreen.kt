@@ -114,6 +114,8 @@ fun VaultListScreen(
         },
         onCopyPassword = viewModel::copyPassword,
         onCopyUsername = viewModel::copyUsername,
+        // ISSUE-P3-184：行内验证码徽标一次点击复制当前 TOTP 码
+        onCopyTotp = viewModel::copyTotpCode,
         onAddEntryClick = { onAddEntryClick(uiState.currentGroupId) },
         onCreateFromTemplate = { templateId -> onAddFromTemplateClick(uiState.currentGroupId, templateId) },
         onCreateGroup = viewModel::createGroup,
@@ -153,6 +155,8 @@ fun VaultListContent(
     onEntryLongClick: (String) -> Unit,
     onCopyPassword: (UiVaultEntry) -> Unit,
     onCopyUsername: (UiVaultEntry) -> Unit,
+    /** ISSUE-P3-184：行内验证码徽标点击复制（HOTP 条目不渲染该入口） */
+    onCopyTotp: (UiVaultEntry) -> Unit = {},
     onAddEntryClick: () -> Unit,
     // ISSUE-P3-51：从模板新建（入参为选中模板 id）
     onCreateFromTemplate: (String) -> Unit = {},
@@ -333,6 +337,7 @@ fun VaultListContent(
                         onLongClick = { onEntryLongClick(entry.id) },
                         onCopyPassword = { onCopyPassword(entry) },
                         onCopyUsername = { onCopyUsername(entry) },
+                        onCopyTotpCode = { onCopyTotp(entry) },
                         onRestore = { onRestoreEntry(entry.id) },
                         onPurge = { onPurgeEntry(entry.id) },
                         // ISSUE-P3-02：状态层装配的图标投影与引用展开文案（UI 只做纯绘制）
@@ -417,6 +422,7 @@ internal fun VaultListContentPreview() {
             onEntryLongClick = {},
             onCopyPassword = {},
             onCopyUsername = {},
+            onCopyTotp = {},
             onAddEntryClick = {},
             onCreateFromTemplate = {},
             onCreateGroup = { _, _ -> },

@@ -1,239 +1,24 @@
 package com.keepasskey.app.ui.screens.settings.subscreens
 
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
 import com.keepasskey.app.R
 
 /**
- * 自动锁定超时选择弹窗
- */
-@Composable
-internal fun AutoLockTimeoutDialog(
-    selectedSeconds: Int,
-    onSelect: (Int) -> Unit,
-    onDismiss: () -> Unit
-) {
-    val lockOptions = listOf(
-        0 to R.string.sec_lock_now,
-        30 to R.string.sec_30s,
-        60 to R.string.sec_1min,
-        300 to R.string.sec_5min,
-        900 to R.string.sec_15min,
-        -1 to R.string.sec_lock_never
-    )
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Text(
-                text = stringResource(R.string.sec_autolock_time_title),
-                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-            )
-        },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(
-                    text = stringResource(R.string.sec_autolock_dialog_desc),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-                lockOptions.forEach { (seconds, label) ->
-                    val isSelected = selectedSeconds == seconds
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable {
-                                onSelect(seconds)
-                                onDismiss()
-                            }
-                            .padding(vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        RadioButton(
-                            selected = isSelected,
-                            onClick = {
-                                onSelect(seconds)
-                                onDismiss()
-                            }
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = stringResource(label),
-                            style = MaterialTheme.typography.bodyMedium.copy(
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
-                            )
-                        )
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) {
-                Text(stringResource(R.string.btn_cancel))
-            }
-        }
-    )
-}
-
-/**
- * 剪贴板清空倒计时弹窗
- */
-@Composable
-internal fun ClipboardTimeoutDialog(
-    selectedSeconds: Int,
-    onSelect: (Int) -> Unit,
-    onDismiss: () -> Unit
-) {
-    val clipOptions = listOf(
-        15 to R.string.sec_clip_15s,
-        30 to R.string.sec_clip_30s,
-        60 to R.string.sec_1min,
-        120 to R.string.sec_2min,
-        -1 to R.string.sec_clip_no_clear
-    )
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Text(
-                text = stringResource(R.string.sec_clipboard_countdown_title),
-                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-            )
-        },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(
-                    text = stringResource(R.string.sec_clipboard_dialog_desc),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-                clipOptions.forEach { (seconds, label) ->
-                    val isSelected = selectedSeconds == seconds
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable {
-                                onSelect(seconds)
-                                onDismiss()
-                            }
-                            .padding(vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        RadioButton(
-                            selected = isSelected,
-                            onClick = {
-                                onSelect(seconds)
-                                onDismiss()
-                            }
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = stringResource(label),
-                            style = MaterialTheme.typography.bodyMedium.copy(
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
-                            )
-                        )
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) {
-                Text(stringResource(R.string.btn_cancel))
-            }
-        }
-    )
-}
-
-/**
- * ISSUE-P3-68：解锁失败重试的**最长锁定时长**选择弹窗。
+ * 安全设置页剩余的**确认类**弹窗。
  *
- * 语义为指数退避的封顶值（连续失败越多锁得越久，至多此时长），非固定锁定时长。
- * 备选项以分钟格式化（[R.string.sec_throttle_minutes_value]），任意自定义值无需枚举标签资源。
+ * 本文件原有三个「单值选择弹窗」（自动锁定超时 / 剪贴板清空倒计时 / 最长锁定时长），
+ * 已由页内就地 `SecurityChoiceChips` 取代并整体删除——它们把「改一个偏好」变成
+ * 「可点行 → 弹窗 → 选中」两次点击外加一次模态打断，而同类设置在本应用内已有
+ * 一次点击的形态（TOTP 分段控件 / 外观模式卡片直选）。
+ *
+ * 保留的 [FlagSecureRiskDialog] 语义**不同**：它不是在选值，而是对「关闭强制防护」这一
+ * 高风险动作做二次确认（ISSUE-P2-09 AC①），**必须**保留确认步骤，不得一并就地化。
  */
-@Composable
-internal fun LockoutMaxDurationDialog(
-    selectedSeconds: Int,
-    onSelect: (Int) -> Unit,
-    onDismiss: () -> Unit
-) {
-    // (秒值) —— 1 / 5 / 15 / 30 分钟、1 / 6 / 24 小时；域界见 UnlockThrottleConfigProvider
-    val lockoutOptions = listOf(60, 300, 900, 1800, 3600, 21600, 86400)
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Text(
-                text = stringResource(R.string.sec_throttle_time_title),
-                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-            )
-        },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(
-                    text = stringResource(R.string.sec_throttle_dialog_desc),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-                lockoutOptions.forEach { seconds ->
-                    val isSelected = selectedSeconds == seconds
-                    val label = stringResource(R.string.sec_throttle_minutes_value, seconds / 60)
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable {
-                                onSelect(seconds)
-                                onDismiss()
-                            }
-                            .padding(vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        RadioButton(
-                            selected = isSelected,
-                            onClick = {
-                                onSelect(seconds)
-                                onDismiss()
-                            }
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = label,
-                            style = MaterialTheme.typography.bodyMedium.copy(
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
-                            )
-                        )
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) {
-                Text(stringResource(R.string.btn_cancel))
-            }
-        }
-    )
-}
 
 /**
  * ISSUE-P2-09 验收标准 1：关闭「禁止截屏与录屏」的风险确认（确认后才真正回调关闭）
@@ -268,15 +53,11 @@ internal fun FlagSecureRiskDialog(
 
 // IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
 // 说明：为遵守「不新增 import 语句」约束，@Preview 采用全限定名写法
-@androidx.compose.ui.tooling.preview.Preview(name = "自动锁定超时选择对话框 - 浅色", showBackground = true)
-@androidx.compose.ui.tooling.preview.Preview(name = "自动锁定超时选择对话框 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
+@androidx.compose.ui.tooling.preview.Preview(name = "关闭防截屏风险确认 - 浅色", showBackground = true)
+@androidx.compose.ui.tooling.preview.Preview(name = "关闭防截屏风险确认 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
 @Composable
-internal fun SecuritySettingsDialogsPreview() {
+internal fun FlagSecureRiskDialogPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
-        AutoLockTimeoutDialog(
-            selectedSeconds = 300,
-            onSelect = {},
-            onDismiss = {}
-        )
+        FlagSecureRiskDialog(onConfirm = {}, onDismiss = {})
     }
 }

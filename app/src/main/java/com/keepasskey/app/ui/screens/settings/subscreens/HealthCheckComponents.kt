@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
@@ -44,12 +45,20 @@ internal data class LeakRowPresentation(
  *
  * 「默认关闭 + 显式开启」是可审计的隐私边界：关闭时本应用不发起任何泄露查询请求，
  * 开启时以 k-匿名方式比对（仅上送密码 SHA-1 前 5 位），说明文案如实披露数据流向。
+ *
+ * 本批整改：本行位于页面**最底部**（全部审计行之后），而触发扫描的「重新扫描」按钮在页面
+ * **顶部**的评分卡里；开启开关后若不同时就地扫描，用户必须滚回顶部再点一次才能看到任何结果。
+ * 现由 [onToggle] 的调用方在**开启方向**顺带触发一次扫描（见 `SettingsViewModel.enableBreachCheckAndScan`），
+ * 并在此行内给出「正在扫描」反馈——把「滚回顶部才知道有没有在做事」的盲区收掉。
+ *
+ * @param isScanning 扫描进行中（就地反馈；关闭方向与未扫描时为 false）
  */
 @Composable
 internal fun BreachCheckToggleRow(
     enabled: Boolean,
     onToggle: (Boolean) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isScanning: Boolean = false
 ) {
     Box(
         modifier = modifier
@@ -80,6 +89,22 @@ internal fun BreachCheckToggleRow(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     lineHeight = 18.sp
                 )
+                if (isScanning) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(12.dp),
+                            strokeWidth = 1.5.dp,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = stringResource(R.string.health_scanning),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
             }
             Spacer(modifier = Modifier.width(8.dp))
             Switch(checked = enabled, onCheckedChange = onToggle)

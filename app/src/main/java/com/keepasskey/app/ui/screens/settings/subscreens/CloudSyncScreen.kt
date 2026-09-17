@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -17,11 +18,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -66,6 +69,14 @@ fun CloudSyncScreen(
     onTriggerSync: () -> Unit,
     onTestConnection: () -> Unit = onTriggerSync,
     onProviderChange: (CloudSyncProvider) -> Unit = {},
+    /**
+     * 「保存并同步」的后续动作：**仅在保存成功后**触发。
+     *
+     * 顺序编排（未验证连接则先测连接、通过才同步、失败即停并上浮）由 ViewModel 承担，
+     * 本组件只保证「保存成功才调用」这一条 —— 同步因此走的是**已持久化的配置**，
+     * 而非本组件的表单内存态（凭据 `CharArray` 在保存成功时已交出并被清空）。
+     */
+    onSyncAfterSave: () -> Unit = {},
     // Wave 15 整改：密码/SecretKey 以 CharArray 借用语义提交，返回保存结果（false = 保存被拒绝或封印失败）；
     // ISSUE-P2-01：AccessKey ID 亦改为 CharArray 借用语义提交
     onUpdateWebDav: (url: String, username: String, password: CharArray, remotePath: String) -> Boolean = { _, _, _, _ -> false },
@@ -130,6 +141,39 @@ fun CloudSyncScreen(
     var showConflictDialog by remember { mutableStateOf(false) }
     var saveFeedbackMessage by remember { mutableStateOf<UiMessage?>(null) }
     val saveFeedbackText = saveFeedbackMessage?.resolveText()
+
+    /**
+     * 持久化当前表单的同步配置，返回是否保存成功。
+     *
+     * · **借用语义**（Wave 15 / ISSUE-P2-01）：保存成功即把凭据数组交给 ViewModel 消费，
+     *   并**立即清空本地副本**——不在组件内留下第二份明文；
+     * · 保存失败（https 校验拒绝 / 凭据封印失败）由 ViewModel 上浮反馈，本地不谎报「已保存」；
+     * · 抽为局部函数供「保存并同步」与「保存配置」两个入口共用：两条路径若各写一份，
+     *   迟早出现「一个入口清了凭据数组、另一个没清」这类偏差。
+     */
+    val persistConfig: () -> Boolean = {
+        if (uiState.syncProvider == CloudSyncProvider.WEBDAV) {
+            val saved = onUpdateWebDav(webdavUrl, webdavUsername, webdavPasswordChars, webdavRemotePath)
+            if (saved) {
+                saveFeedbackMessage = UiMessage(R.string.sync_webdav_saved)
+                webdavPasswordChars = CharArray(0)
+            }
+            saved
+        } else {
+            val saved = onUpdateS3(
+                s3Endpoint, s3Bucket, s3Region, s3AccessKeyChars,
+                s3SecretKeyChars, s3ObjectKey, s3UsePathStyle
+            )
+            if (saved) {
+                saveFeedbackMessage = UiMessage(R.string.sync_s3_saved)
+                s3AccessKeyChars.fill('0')
+                s3AccessKeyChars = CharArray(0)
+                s3SecretKeyChars.fill('0')
+                s3SecretKeyChars = CharArray(0)
+            }
+            saved
+        }
+    }
 
     LaunchedEffect(saveFeedbackText) {
         if (saveFeedbackText != null) {
@@ -255,35 +299,33 @@ fun CloudSyncScreen(
                             )
                         }
 
-                        Button(
-                            onClick = {
-                                if (uiState.syncProvider == CloudSyncProvider.WEBDAV) {
-                                    // Wave 15 整改：借用语义——调用后密码数组已被 ViewModel 消费擦除；
-                                    // 保存失败（https 拒绝/封印失败）由 ViewModel 上浮反馈，本地不再谎报「已保存」
-                                    val saved = onUpdateWebDav(webdavUrl, webdavUsername, webdavPasswordChars, webdavRemotePath)
-                                    if (saved) {
-                                        saveFeedbackMessage = UiMessage(R.string.sync_webdav_saved)
-                                        webdavPasswordChars = CharArray(0)
-                                    }
-                                } else {
-                                    // ISSUE-P2-01：借用语义——调用后 AccessKey/SecretKey 数组均已被
-                                    // ViewModel 消费擦除；保存失败由 ViewModel 上浮反馈
-                                    val saved = onUpdateS3(s3Endpoint, s3Bucket, s3Region, s3AccessKeyChars, s3SecretKeyChars, s3ObjectKey, s3UsePathStyle)
-                                    if (saved) {
-                                        saveFeedbackMessage = UiMessage(R.string.sync_s3_saved)
-                                        s3AccessKeyChars.fill('0')
-                                        s3AccessKeyChars = CharArray(0)
-                                        s3SecretKeyChars.fill('0')
-                                        s3SecretKeyChars = CharArray(0)
-                                    }
-                                }
-                            },
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.fillMaxWidth()
+                        // 本批整改：主操作由「只保存」上移为「保存并同步」——填完配置后用户的真实意图是
+                        // 「让它生效」，而原流程须「保存配置 → 测试连接 → 立即同步」三次点击（且「立即同步」
+                        // 在未验证连接时禁用）。守卫**不变**，改为**顺序动作的前置步骤**：保存成功 →
+                        // 未验证则先测连接 → 通过才同步；任一环节失败即停并上浮。
+                        // 「保存配置」保留为次级入口：只想改配置、暂不联网的用户仍可单独保存。
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(stringResource(R.string.sync_save_config_btn))
+                            Button(
+                                onClick = { if (persistConfig()) onSyncAfterSave() },
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(Icons.Default.Sync, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(stringResource(R.string.sync_save_and_sync_btn))
+                            }
+                            OutlinedButton(
+                                onClick = { persistConfig() },
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(stringResource(R.string.sync_save_config_btn))
+                            }
                         }
                     }
                 }

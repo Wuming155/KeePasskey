@@ -124,6 +124,8 @@ fun EntryDetailScreen(
         onToggleTotpVisibility = viewModel::toggleTotpVisibility,
         // ISSUE-P3-49：HOTP 取码（推进计数器并复制）
         onAdvanceHotp = viewModel::advanceHotp,
+        // ISSUE-P3-184：TOTP 取码（真实写入受保护剪贴板）
+        onCopyTotp = viewModel::copyTotpCode,
         onToggleCustomFieldVisibility = viewModel::toggleCustomFieldVisibility,
         onCopyCustomField = viewModel::copyCustomField,
         onExportAttachment = { att ->
@@ -211,6 +213,8 @@ fun EntryDetailContent(
     onToggleTotpVisibility: () -> Unit = {},
     // ISSUE-P3-49：HOTP 取码（推进计数器并复制本次所出之码）
     onAdvanceHotp: () -> Unit = {},
+    // ISSUE-P3-184：TOTP 取码（复制当前有效码到受保护剪贴板）
+    onCopyTotp: () -> Unit = {},
     onToggleCustomFieldVisibility: (String) -> Unit,
     onCopyCustomField: (String, String) -> Unit = { _, _ -> },
     onExportAttachment: (UiAttachment) -> Unit,
@@ -304,7 +308,7 @@ fun EntryDetailContent(
                         entry = entry,
                         onToggleVisibility = onToggleTotpVisibility,
                         onAdvanceHotp = onAdvanceHotp,
-                        onShowMessage = onShowMessage
+                        onCopyTotp = onCopyTotp
                     )
                 }
 
@@ -510,6 +514,7 @@ internal fun EntryDetailContentPreview() {
             onTogglePasswordVisibility = {},
             onToggleTotpVisibility = {},
             onAdvanceHotp = {},
+            onCopyTotp = {},
             onToggleCustomFieldVisibility = { _ -> },
             onCopyCustomField = { _, _ -> },
             onExportAttachment = { _ -> },

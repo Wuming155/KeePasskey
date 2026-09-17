@@ -20,7 +20,8 @@ import kotlinx.coroutines.launch
  * 1. **批量选择**：本类持有批量模式与选中集合两个 `StateFlow`（原先在 ViewModel 内），
  *    对外只读暴露供 UI 状态流 combine，写入口收敛为下列方法；
  * 2. **分组 / 条目写操作**：新建 / 重命名 / 改图标 / 删除分组、还原 / 彻底删除条目、清空回收站；
- * 3. **剪贴板复制**：密码走 CharArray 借用通道并用毕清零（ISSUE-P2-15），用户名走明文通道。
+ * 3. **剪贴板复制**：密码走 CharArray 借用通道并用毕清零（ISSUE-P2-15），用户名走明文通道；
+ *    TOTP 走受保护文本通道且**硬拒绝 HOTP**（ISSUE-P3-184，理由见 [copyTotpCode]）。
  *
  * 只读会话（H4）下 2 的写操作一律硬拒绝；`isReadOnly` / `currentGroupId` / `currentGroups` /
  * `currentEntryIds` 均以回调形式从 ViewModel 取当前快照，避免本类反向持有 ViewModel。
@@ -73,6 +74,31 @@ internal class VaultListActionController(
             onMessage(UiMessage(R.string.vault_copy_username_done, listOf(entry.username)))
         } else {
             onMessage(UiMessage(R.string.vault_copy_username_missing))
+        }
+    }
+
+    /**
+     * ISSUE-P3-184：复制条目**当前 TOTP 验证码**——列表行徽标一次点击即可，无需进详情页。
+     *
+     * 三条契约：
+     * 1. **HOTP 硬拒绝**（`entry.isHotp`）：HOTP 之码由持久化计数器决定，「复制而不推进」会让同一
+     *    计数器被重复使用，故只提供详情页的「取下一个码」（`advanceHotp`）而无复制入口；
+     *    调用侧亦按 `isHotp` 不渲染可点徽标，此处是第二道防线。
+     * 2. **取值走仓库按需通道**（ISSUE-P2-90：命中周期缓存时不触碰会话），仅在其不可用时
+     *    回退到列表投影的码，避免复制到过期值。
+     * 3. **失败不谎报**：无 TOTP / 计算失败一律经 [onMessage] 如实提示，不显示「已复制」。
+     */
+    fun copyTotpCode(entry: UiVaultEntry) {
+        if (entry.isHotp) return
+        scope.launch {
+            val code = repository.calculateEntryTotp(entry.id)?.code?.takeIf { it.isNotBlank() }
+                ?: entry.totpCode?.takeIf { it.isNotBlank() }
+            if (code == null) {
+                onMessage(UiMessage(R.string.vault_copy_totp_missing))
+                return@launch
+            }
+            clipboardSecurityManager?.copySensitiveText(entry.title, code)
+            onMessage(UiMessage(R.string.vault_copy_totp_done, listOf(entry.title)))
         }
     }
 

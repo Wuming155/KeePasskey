@@ -527,6 +527,37 @@ class EntryDetailViewModel @Inject constructor(
         }
     }
 
+    /**
+     * ISSUE-P3-184：TOTP 取码——把**当前有效验证码**写入受保护剪贴板。
+     *
+     * 修复前本入口不存在：详情页 TOTP 卡片的复制按钮只弹「已复制」提示而不写剪贴板
+     * （谎报成功，用户粘贴会贴出上一条目的内容）。本方法补齐该写入通道，
+     * 与 [copyPassword] 同口径（受保护剪贴板 + 调度自动擦除）。
+     *
+     * 与 HOTP 的分工（有意差异）：HOTP 之码由**持久化计数器**决定，「复制而不推进」会让同一
+     * 计数器被重复使用，故 HOTP 只有取下一个码（[advanceHotp]）而无复制入口；TOTP 之码由时间
+     * 决定、天然按周期失效，无此约束 ⇒ 只复制、不推进任何状态。
+     *
+     * 取值优先级与卡片显示同源（`liveTotpCode ?: entry.totpCode`），并优先走仓库按需通道
+     * （ISSUE-P2-90：命中周期缓存时不触碰会话）以取到**当拍**之码；全部取不到时**不谎报成功**。
+     *
+     * 只读会话不设门槛：本动作是**纯读**（与 [copyPassword] 一致），`isReadOnly` 约束的是编辑入口。
+     */
+    fun copyTotpCode() {
+        val entryId = entryIdFlow.value ?: return
+        viewModelScope.launch {
+            val code = vaultRepository.calculateEntryTotp(entryId)?.code?.takeIf { it.isNotBlank() }
+                ?: uiState.value.liveTotpCode?.takeIf { it.isNotBlank() }
+                ?: uiState.value.entry?.totpCode?.takeIf { it.isNotBlank() }
+            if (code == null) {
+                userMessageFlow.value = UiMessage(R.string.detail_totp_copy_failed)
+                return@launch
+            }
+            clipboardSecurityManager?.copySensitiveText(uiState.value.entry?.title.orEmpty(), code)
+            userMessageFlow.value = UiMessage(R.string.detail_totp_copied)
+        }
+    }
+
     fun clearUserMessage() {
         userMessageFlow.value = null
     }

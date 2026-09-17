@@ -1,6 +1,7 @@
 package com.keepasskey.app.ui.screens.vault
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -35,6 +36,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -105,6 +107,11 @@ internal fun StandardEntryLayout(
     onCopyPassword: () -> Unit,
     onRestore: () -> Unit,
     onPurge: () -> Unit,
+    /**
+     * ISSUE-P3-184：行内验证码徽标被点击——复制当前 TOTP 码。
+     * HOTP 条目**不**渲染该入口（复制而不推进会复用计数器），见下方徽标调用点的 `isHotp` 过滤。
+     */
+    onCopyTotpCode: () -> Unit = {},
     /**
      * ISSUE-P2-89 / ISSUE-P3-158：TOTP 秒级刻度（窄状态，只在 [EntryTotpBadge] 内读取；缺省值供预览）。
      * 下发刻度而非剩余秒数——剩余秒数由徽标按**条目自身周期**现算。
@@ -216,7 +223,11 @@ internal fun StandardEntryLayout(
                     fallbackCode = entry.totpCode,
                     liveCodes = totpLiveCodes,
                     nowSeconds = totpNowSeconds,
-                    periodSeconds = entry.totpPeriod
+                    periodSeconds = entry.totpPeriod,
+                    // ISSUE-P3-184：TOTP 徽标一次点击即复制（此前必须进详情页才能复制）。
+                    // HOTP 传 null ⇒ 不挂点击（其码由持久化计数器决定，复制而不推进会复用计数器；
+                    // 取码入口只在详情页的「取下一个码」）。
+                    onCopyCode = if (entry.isHotp) null else onCopyTotpCode
                 )
             }
         }
@@ -271,6 +282,12 @@ internal const val TOTP_PREVIEW_NOW_SECONDS = 0L
  *
  * 剩余秒数与进度环分母一律取**条目自身周期**（ISSUE-P3-158）：此前写死 30 秒，
  * `period != 30` 的条目倒计时相位与环比例都是错的。
+ *
+ * ISSUE-P3-184：徽标原本只是纯展示，`onCopyCode` 非空时整块徽标变为**可点**——
+ * 一次点击即复制当前验证码（此前必须点行进详情、再滚到验证码卡片才能复制）。
+ * 点击层加在徽标**内部**，故该小块区域的点击/长按不再冒泡到行（有意：徽标处点击语义是「复制」）。
+ * 不额外增加内边距或背景，保持与既有截图基线逐像素一致；可发现性由 `onClickLabel` 承担
+ * （TalkBack 会播报「复制动态验证码」这一动作名）。
  */
 @Composable
 private fun EntryTotpBadge(
@@ -278,7 +295,9 @@ private fun EntryTotpBadge(
     fallbackCode: String,
     liveCodes: State<Map<String, String>>,
     nowSeconds: State<Long>,
-    periodSeconds: Int
+    periodSeconds: Int,
+    /** 非空则可点复制；传 null 保持纯展示（HOTP 用） */
+    onCopyCode: (() -> Unit)? = null
 ) {
     // 与验证码大卡 / 详情页同一色语义：常规=success，紧迫由 TotpMiniGauge 表达
     val totpCodeColor = LocalSecurityColors.current.success
@@ -287,7 +306,17 @@ private fun EntryTotpBadge(
         timestampMillis = nowSeconds.value * MILLIS_PER_SECOND,
         periodSeconds = period
     )
-    Row(verticalAlignment = Alignment.CenterVertically) {
+    val copyLabel = stringResource(R.string.cd_copy_totp)
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = if (onCopyCode != null) {
+            Modifier
+                .clip(RoundedCornerShape(6.dp))
+                .clickable(onClickLabel = copyLabel, role = Role.Button, onClick = onCopyCode)
+        } else {
+            Modifier
+        }
+    ) {
         Text(
             text = liveCodes.value[entryId] ?: fallbackCode,
             style = MaterialTheme.typography.labelSmall.copy(

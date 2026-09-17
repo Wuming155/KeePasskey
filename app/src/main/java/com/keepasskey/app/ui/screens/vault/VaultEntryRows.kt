@@ -49,6 +49,12 @@ fun UnifiedVaultEntryRow(
     onLongClick: () -> Unit,
     onCopyPassword: () -> Unit,
     onCopyUsername: () -> Unit = {},
+    /**
+     * ISSUE-P3-184：行内验证码徽标被点击——复制当前 TOTP 码。
+     * HOTP 条目**不**渲染该入口（复制而不推进会复用计数器），由 [StandardEntryLayout] 按
+     * `entry.isHotp` 过滤，故生产调用方无需自行判断。
+     */
+    onCopyTotpCode: () -> Unit = {},
     onRestore: () -> Unit,
     onPurge: () -> Unit,
     densitySpec: ListDensitySpec = ListDensityPresenter.specOf(ListDensity.NORMAL),
@@ -128,6 +134,7 @@ fun UnifiedVaultEntryRow(
                     showPasskeyBadge = showPasskeyBadge,
                     showUrl = showUrl,
                     densitySpec = densitySpec,
+                    onCopyTotpCode = onCopyTotpCode,
                     groupPath = groupPath,
                     onCopyPassword = onCopyPassword,
                     onRestore = onRestore,

@@ -362,6 +362,9 @@ class VaultListViewModel @Inject constructor(
 
     fun copyUsername(entry: UiVaultEntry) = actions.copyUsername(entry)
 
+    /** ISSUE-P3-184：列表行徽标一次点击复制当前 TOTP 验证码（HOTP 由 actions 硬拒绝）。 */
+    fun copyTotpCode(entry: UiVaultEntry) = actions.copyTotpCode(entry)
+
     fun clearUserMessage() {
         userMessageFlow.value = null
     }
