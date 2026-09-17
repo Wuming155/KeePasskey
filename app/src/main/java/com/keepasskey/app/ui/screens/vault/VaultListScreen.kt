@@ -19,8 +19,11 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -51,6 +54,10 @@ fun VaultListScreen(
     viewModel: VaultListViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    // ISSUE-P2-89：TOTP 的两条实时通道只在此处**取状态对象本身**（不读 .value），
+    // 读取动作下沉到列表行内的徽标——故本页组合作用域不会因每秒 tick 而失效。
+    val totpRemainingSecondsState = viewModel.totpRemainingSeconds.collectAsStateWithLifecycle()
+    val totpLiveCodesState = viewModel.totpLiveCodes.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
 
     // ISSUE-P3-17：页面每次进入组合时刷新进阶显示偏好快照
@@ -124,6 +131,9 @@ fun VaultListScreen(
         onBatchMove = viewModel::batchMoveSelected,
         onKillApp = onKillApp,
         onAutoActivateSearchConsumed = viewModel::consumeAutoActivateSearch,
+        // ISSUE-P2-89：只传状态对象（此处不读 .value），秒级读取面收敛到列表行徽标
+        totpRemainingSeconds = totpRemainingSecondsState,
+        totpLiveCodes = totpLiveCodesState,
         modifier = modifier
     )
 }
@@ -163,6 +173,15 @@ fun VaultListContent(
     onKillApp: (() -> Unit)? = null,
     // ISSUE-P3-17：自动聚焦搜索栏意图已被消费的回执
     onAutoActivateSearchConsumed: () -> Unit = {},
+    /**
+     * ISSUE-P2-89：TOTP 实时剩余秒数（窄状态）。
+     *
+     * 本页只**持有**该状态对象、不读其值——读取动作下沉到列表行内的徽标，
+     * 故秒级 tick 不会令本页（含整张列表）失效。缺省值供预览 / 截图测试使用。
+     */
+    totpRemainingSeconds: State<Int> = remember { mutableIntStateOf(TOTP_PREVIEW_REMAINING_SECONDS) },
+    /** ISSUE-P2-89：TOTP 本周期实时验证码（窄状态，`entryId → 验证码`） */
+    totpLiveCodes: State<Map<String, String>> = remember { mutableStateOf(emptyMap()) },
     modifier: Modifier = Modifier
 ) {
     // ISSUE-P3-29：8 个对话框的可见性 / 目标对象由独立状态持有者承接（见 VaultListDialogHost.kt）
@@ -316,7 +335,10 @@ fun VaultListContent(
                         onRestore = { onRestoreEntry(entry.id) },
                         onPurge = { onPurgeEntry(entry.id) },
                         // ISSUE-P3-02：状态层装配的图标投影与引用展开文案（UI 只做纯绘制）
-                        decorations = uiState.decorations
+                        decorations = uiState.decorations,
+                        // ISSUE-P2-89：TOTP 实时值经窄状态下发，仅由徽标读取（本页不读其值）
+                        totpRemainingSeconds = totpRemainingSeconds,
+                        totpLiveCodes = totpLiveCodes
                     )
                 }
 

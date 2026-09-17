@@ -770,4 +770,45 @@ class RealVaultRepositoryTest {
             revision.fields[KdbxConstants.Fields.OTP]?.readString()
         )
     }
+
+    /**
+     * ISSUE-P3-149：单条查询**不得**付出「整库投影」的代价。
+     *
+     * 判别手法（毒丸）：把干扰条目的标题字段先 [ProtectedString.clear]——清零后再读会抛
+     * `IllegalStateException`，而投影每个条目都必须读 `entry.title`。于是本用例天然二分：
+     * - 旧实现 `getEntries().map { list.find { … } }` 必然先映射到干扰条目并抛异常 ⇒ 必红；
+     * - 新实现 `KdbxGroup.findEntry` 短路命中后只映射该条 ⇒ 通过。
+     *
+     * 毒丸条目刻意放在**列表首位**，确保「按深度优先顺序只走到目标条目」不会被顺序侥幸掩盖。
+     */
+    @Test
+    fun `单条查询不物化整库投影`() = runTest {
+        val poisonedTitle = ProtectedString("干扰条目", false)
+        val targetEntry = KdbxEntry(
+            fields = mapOf(KdbxConstants.Fields.TITLE to ProtectedString("目标条目", false))
+        )
+        val poisonedEntry = KdbxEntry(
+            fields = mapOf(KdbxConstants.Fields.TITLE to poisonedTitle)
+        )
+        val session = DatabaseSession()
+        session.setDatabaseForTesting(
+            KdbxDatabase(
+                header = KdbxHeader.createDefault(),
+                rootGroup = KdbxGroup(name = "Root", entries = listOf(poisonedEntry, targetEntry))
+            )
+        )
+        val repository = RealVaultRepository(
+            createMockContext(tempFolder.root),
+            session,
+            com.keepasskey.app.data.logger.DebugLogBuffer(),
+            createTestStrings()
+        )
+
+        poisonedTitle.clear()
+
+        val projected = repository.getEntry(targetEntry.id.toHexString()).first()
+        assertEquals(targetEntry.id.toHexString(), projected?.id)
+        assertEquals("目标条目", projected?.title)
+        assertNull(repository.getEntry(KdbxUuid.random().toHexString()).first())
+    }
 }

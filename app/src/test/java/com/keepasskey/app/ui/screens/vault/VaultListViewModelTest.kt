@@ -253,17 +253,18 @@ class VaultListViewModelTest {
     }
 
     @Test
-    fun `带 TOTP 的条目使用全局实时剩余秒数`() = runTest {
+    fun `带 TOTP 的条目在投影层即时算出验证码且倒计时改由窄通道下发`() = runTest {
         val viewModel = createSubscribedViewModel()
 
         viewModel.enterGroup("group_dev")
         testScheduler.runCurrent()
 
         val state = viewModel.uiState.value
-        val expected = (30 - ((System.currentTimeMillis() / 1000) % 30)).toInt()
         val totpEntry = state.entries.find { it.id == "2" }!!
+        // ISSUE-P2-89：条目上的验证码仍是投影层即时计算值（用于识别「配置了 OTP」与首帧兜底），
+        // 但**剩余秒数不再由整页状态下发**，改由 totpRemainingSeconds 窄通道给列表行徽标
         assertNotNull(totpEntry.totpCode)
-        assertEquals(expected, totpEntry.totpRemainingSeconds)
+        assertTrue(viewModel.totpRemainingSeconds.value in 1..30)
         // 无 TOTP 的条目不受影响
         assertNull(state.entries.find { it.id == "6" }!!.totpCode)
     }
@@ -276,8 +277,60 @@ class VaultListViewModelTest {
         advanceTimeBy(2500)
         testScheduler.runCurrent()
 
-        val seconds = viewModel.uiState.value.entries.find { it.id == "2" }!!.totpRemainingSeconds
+        val seconds = viewModel.totpRemainingSeconds.value
         assertTrue(seconds in 1..30)
+    }
+
+    /**
+     * ISSUE-P2-89 回归锁（结构性契约）：整页会话状态**不得**再承载任何 TOTP 实时输入。
+     *
+     * 与本文件运行时的「秒级倒计时不再驱动整页状态重建」互补——那条断言证明「当前不发生」，
+     * 本条证明「结构上不可能发生」：只要有人把秒数 / 验证码重新塞回会话状态，
+     * 秒级 tick 就又能推出新的整页状态；本断言让这种回退在单测期直接变红。
+     */
+    @Test
+    fun `整页会话状态不再承载任何 TOTP 实时输入`() {
+        val fields = VaultListSessionState::class.java.declaredFields.map { it.name.lowercase() }
+        assertTrue("会话状态不得再承载 TOTP 实时输入：$fields", fields.none { it.contains("totp") })
+    }
+
+    /**
+     * ISSUE-P2-89 回归锁：秒级倒计时**不得**再驱动整页状态重建。
+     *
+     * 旧实现把 `totpTracker.remainingSeconds` 并入最外层 `combine`，于是每过 1 秒
+     * `uiState` 都会重新发射一次（每次都要重跑过滤 / 排序 / 全量 copy，且在 Main 线程）。
+     * 现两条 TOTP 实时值都走窄通道，故：跨过多个 tick 之后 `uiState` **一次都不应重发**，
+     * 而倒计时通道仍须照常可用——两侧同时断言，杜绝「干脆不刷新了」的假绿。
+     *
+     * 判别力边界（如实声明）：本用例的倒计时取值来自真实墙钟，故「值确实变了」这一点
+     * 在虚拟时间下无法复现（1 秒内的墙钟余数相同，`distinctUntilChanged` 会吸收重复值）。
+     * 真正锁死「回退即变红」的是同文件的
+     * `整页会话状态不再承载任何 TOTP 实时输入`（结构契约）与本断言
+     * （秒级 tick 后整页状态零重发）。
+     */
+    @Test
+    fun `秒级倒计时不再驱动整页状态重建`() = runTest {
+        val viewModel = createSubscribedViewModel()
+        viewModel.enterGroup("group_dev")
+        testScheduler.runCurrent()
+
+        // 与生产等价：页面同时订阅 uiState 与徽标倒计时窄通道
+        val emissions = mutableListOf<VaultListUiState>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            viewModel.uiState.collect { emissions += it }
+        }
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            viewModel.totpRemainingSeconds.collect {}
+        }
+        testScheduler.runCurrent()
+
+        val before = emissions.size
+        advanceTimeBy(3_100)
+        testScheduler.runCurrent()
+
+        assertEquals("秒级 tick 不得再产生新的整页状态", before, emissions.size)
+        // 窄通道必须仍然可用（否则上面的断言会以「节拍根本没跑」的方式假绿）
+        assertTrue(viewModel.totpRemainingSeconds.value in 1..30)
     }
 
     @Test

@@ -77,6 +77,8 @@ class RealVaultRepository @Inject constructor(
         // 观察会话，当数据库发生变化时同步刷新
         repositoryScope.launch {
             databaseSession.databaseFlow.collect {
+                // ISSUE-P2-90：会话内容变更（含锁库归空、同步合并、外部写入）即作废 TOTP 缓存
+                secretReader.invalidateTotpCache()
                 refreshDatabases()
             }
         }
@@ -187,8 +189,34 @@ class RealVaultRepository @Inject constructor(
         }
     }
 
+    /**
+     * 单条条目投影流。
+     *
+     * ISSUE-P3-149：**不再以「整库投影 + `find`」实现**——原实现为一个条目付出
+     * O(N × 字段数) 的全库映射（详情页一次组合挂了 3 条这样的链），本实现改为
+     * `KdbxGroup.findEntry`（深度优先短路）只映射命中的那一条。
+     *
+     * 语义与旧实现等价（同为深度优先首命中，未命中返回 null）；差异仅在容错面上更宽：
+     * 传入**小写** hex id 时旧实现因与 `toHexString()`（大写）字符串不等而落空，
+     * 本实现按 UUID 字节比较可正常命中（调用方恒传大写，属放宽而非行为变更）。
+     */
+    /**
+     * 单条条目投影流。
+     *
+     * ISSUE-P3-149：**不再以「整库投影 + `find`」实现**——原实现为一个条目付出
+     * O(N × 字段数) 的全库映射（详情页一次组合挂了 3 条这样的链），本实现改为
+     * `KdbxGroup.findEntry`（深度优先短路）只映射命中的那一条。
+     *
+     * 语义与旧实现等价（同为深度优先首命中，未命中返回 null）；差异仅在容错面上更宽：
+     * 传入**小写** hex id 时旧实现因与 `toHexString()`（大写）字符串不等而落空，
+     * 本实现按 UUID 字节比较可正常命中（调用方恒传大写，属放宽而非行为变更）。
+     */
     override fun getEntry(id: String): Flow<UiVaultEntry?> {
-        return getEntries().map { list -> list.find { it.id == id } }
+        val targetUuid = parseKdbxUuidOrNull(id)
+        return databaseSession.databaseFlow.map { db ->
+            val entry = if (targetUuid == null) null else db?.rootGroup?.findEntry(targetUuid)
+            entry?.let { entryMapper.mapKdbxEntryToUi(it) }
+        }
     }
 
     override suspend fun saveEntry(
@@ -307,6 +335,10 @@ class RealVaultRepository @Inject constructor(
     override suspend fun calculateEntryTotp(entryId: String): EntryTotpSnapshot? =
         secretReader.calculateEntryTotp(entryId)
 
+    /** ISSUE-P2-90：批量取码（一次索引覆盖全部条目，列表页每周期重算走此通道）。 */
+    override suspend fun calculateEntryTotps(entryIds: List<String>): Map<String, EntryTotpSnapshot> =
+        secretReader.calculateEntryTotps(entryIds)
+
     /**
      * ISSUE-P3-49：推进 HOTP 计数器并回传本次所出之码。
      *
@@ -402,6 +434,9 @@ class RealVaultRepository @Inject constructor(
      */
     private suspend fun persistSession(): KdbxResult<Unit> {
         val result = databaseSession.save()
+        // ISSUE-P2-90：落库即作废 TOTP 缓存——会话流的失效通知是异步的，
+        // 此处同步作废可消除「刚改完 TOTP 种子 / 周期、同一周期内仍读到旧码」的竞态窗口
+        secretReader.invalidateTotpCache()
         if (result is KdbxResult.Failure) {
             debugLog.error(TAG, "数据库保存失败: ${result.error.javaClass.simpleName}")
         }

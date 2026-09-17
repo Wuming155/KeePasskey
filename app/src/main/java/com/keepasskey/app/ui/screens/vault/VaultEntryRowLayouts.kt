@@ -25,6 +25,10 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.State
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -99,7 +103,11 @@ internal fun StandardEntryLayout(
     groupPath: String?,
     onCopyPassword: () -> Unit,
     onRestore: () -> Unit,
-    onPurge: () -> Unit
+    onPurge: () -> Unit,
+    /** ISSUE-P2-89：TOTP 实时剩余秒数（窄状态，只在 [EntryTotpBadge] 内读取；缺省值供预览） */
+    totpRemainingSeconds: State<Int> = remember { mutableIntStateOf(TOTP_PREVIEW_REMAINING_SECONDS) },
+    /** ISSUE-P2-89：本周期实时验证码（`entryId → 验证码`，窄状态；缺省值供预览） */
+    totpLiveCodes: State<Map<String, String>> = remember { mutableStateOf(emptyMap()) }
 ) {
     val haptic = LocalHapticFeedback.current
     Row(
@@ -197,20 +205,14 @@ internal fun StandardEntryLayout(
 
             if (showOtp && entry.totpCode != null) {
                 Spacer(modifier = Modifier.height(3.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    // 与验证码大卡 / 详情页同一色语义：常规=success，紧迫由 TotpMiniGauge 表达
-                    val totpCodeColor = LocalSecurityColors.current.success
-                    Text(
-                        text = entry.totpCode,
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            fontWeight = FontWeight.Bold,
-                            color = totpCodeColor,
-                            letterSpacing = 1.sp
-                        )
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    TotpMiniGauge(remainingSeconds = entry.totpRemainingSeconds)
-                }
+                // ISSUE-P2-89：徽标自成一格组合作用域——每秒 tick 只失效本组件，
+                // 不牵动整行布局与其余列表行（读取 State 的动作在此发生）
+                EntryTotpBadge(
+                    entryId = entry.id,
+                    fallbackCode = entry.totpCode,
+                    liveCodes = totpLiveCodes,
+                    remainingSeconds = totpRemainingSeconds
+                )
             }
         }
 
@@ -236,6 +238,44 @@ internal fun StandardEntryLayout(
                 }
             }
         }
+    }
+}
+
+/**
+ * ISSUE-P2-89：预览 / 截图测试用的 TOTP 倒计时缺省值（生产恒由窄通道传入真实值）。
+ */
+internal const val TOTP_PREVIEW_REMAINING_SECONDS = 30
+
+/**
+ * ISSUE-P2-89：列表行内 TOTP 徽标（验证码 + 迷你倒计时环）。
+ *
+ * 单独成组件是**性能契约**的一部分：函数体内才读取 [liveCodes] / [remainingSeconds]
+ * 两个状态对象的值，故每秒 tick 只令本组件重组一次，行内其余部分与其余列表行均不受影响
+ * （此前徽标直接内联在 [StandardEntryLayout] 中，秒级状态读取落在整行的作用域上）。
+ *
+ * 验证码取值 `liveCodes[entryId] ?: fallbackCode`：前者是本周期实时之码（窄通道），
+ * 后者是投影层即时计算的兜底值——覆盖「条目刚出现、尚未等到下一拍刷新」的首帧。
+ */
+@Composable
+private fun EntryTotpBadge(
+    entryId: String,
+    fallbackCode: String,
+    liveCodes: State<Map<String, String>>,
+    remainingSeconds: State<Int>
+) {
+    // 与验证码大卡 / 详情页同一色语义：常规=success，紧迫由 TotpMiniGauge 表达
+    val totpCodeColor = LocalSecurityColors.current.success
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            text = liveCodes.value[entryId] ?: fallbackCode,
+            style = MaterialTheme.typography.labelSmall.copy(
+                fontWeight = FontWeight.Bold,
+                color = totpCodeColor,
+                letterSpacing = 1.sp
+            )
+        )
+        Spacer(modifier = Modifier.width(6.dp))
+        TotpMiniGauge(remainingSeconds = remainingSeconds.value)
     }
 }
 

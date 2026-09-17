@@ -173,8 +173,14 @@ internal class VaultEntryMapper(private val strings: StringsProvider) {
         }
     }
 
-    /** 按配置即时计算 TOTP 验证码，配置非法或计算失败返回 null */
-    fun computeTotpCode(config: ParsedTotpConfig): String? {
+    /**
+     * 按配置即时计算 TOTP 验证码，配置非法或计算失败返回 null。
+     *
+     * @param timestampMillis TOTP 取值时刻（HOTP 忽略本参数——其码由持久化计数器决定）。
+     *   默认取当前墙钟；**ISSUE-P2-90 要求调用方与验证码缓存的周期判定共用同一时刻**，
+     *   故缓存路径显式传入，避免「用 A 时刻判定周期、用 B 时刻出码」的错配。
+     */
+    fun computeTotpCode(config: ParsedTotpConfig, timestampMillis: Long = System.currentTimeMillis()): String? {
         // TASK-46：种子经 Base32 解码为 ByteArray 后全程字节态参与计算（绝不还原为 String）；
         // 解码产物归本函数所有，无论成功 / 失败路径均在 finally 中显式擦除（fail-clean），
         // 不因早退残留种子副本（对齐 KdbxKeyFile / SyncCredentialsStore 借用语义）
@@ -201,6 +207,7 @@ internal class VaultEntryMapper(private val strings: StringsProvider) {
             } else {
                 OtpEngine.calculateTotp(
                     secretKey = secretBytes,
+                    timestampMillis = timestampMillis,
                     periodSeconds = config.period,
                     digits = config.digits,
                     algorithm = algo
@@ -354,12 +361,28 @@ internal class VaultEntryMapper(private val strings: StringsProvider) {
         )
     }
 
-    fun formatInstant(instant: Instant): String {
-        val dtf = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm", Locale.getDefault())
-        return dtf.format(instant.atZone(ZoneId.systemDefault()))
-    }
+    /**
+     * 时间戳 → 列表 / 详情页展示文案（`yyyy-MM-dd HH:mm`）。
+     *
+     * ISSUE-P3-149：格式化器**按 Locale 缓存复用**。原实现每次调用都
+     * `DateTimeFormatter.ofPattern(...)` 重新编译模式串，而投影路径上每个条目固定调用 2 次
+     * （更新时间 + 创建时间，历史修订与附件再各叠加），构成 O(N) 次纯浪费的模式编译。
+     * `DateTimeFormatter` 不可变且线程安全，故可安全共享；以 Locale 为键是为了避免
+     * 系统语言变更后仍沿用旧 Locale 的格式化器。
+     */
+    fun formatInstant(instant: Instant): String =
+        formatterFor(Locale.getDefault()).format(instant.atZone(ZoneId.systemDefault()))
+
+    private fun formatterFor(locale: Locale): DateTimeFormatter =
+        INSTANT_FORMATTERS.computeIfAbsent(locale) { DateTimeFormatter.ofPattern(INSTANT_PATTERN, it) }
 
     companion object {
+        /** 展示用时间格式（纯数值模式，跨 Locale 语义一致）。 */
+        private const val INSTANT_PATTERN = "yyyy-MM-dd HH:mm"
+
+        /** `Locale → 已编译格式化器`（进程级复用；键集合随系统语言数量有界） */
+        private val INSTANT_FORMATTERS = java.util.concurrent.ConcurrentHashMap<Locale, DateTimeFormatter>()
+
         /**
          * 银行卡模板自定义字段键（与 [VaultTemplateFactory] 信用卡模板写入的键一致）。
          * 这些键作为 KDBX 条目数据持久化并跨端同步，属格式契约而非 UI 文案，禁止本地化。

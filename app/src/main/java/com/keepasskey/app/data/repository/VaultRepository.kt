@@ -327,8 +327,20 @@ interface VaultRepository {
      * 按需计算单条凭据的当前 TOTP 验证码（F2 整改）。
      * TOTP 种子绝不离开数据层——种子解析与验证码计算均在仓库内部完成并即时丢弃，
      * UI 层仅取得验证码与展示配置；条目未配置 TOTP 时返回 null。
+     *
+     * ISSUE-P2-90：同一周期内的重复调用由数据层缓存吸收（不重复解密 / 不重复计算），
+     * 调用方无需自行节流。
      */
     suspend fun calculateEntryTotp(entryId: String): EntryTotpSnapshot?
+
+    /**
+     * ISSUE-P2-90：批量计算多条凭据的当前验证码——**一次会话读取 + 一次条目索引**，
+     * 适用于「同一时刻要拿一批码」的场景（列表页每周期重算），
+     * 相对逐条调用 [calculateEntryTotp] 可把 O(T×N) 的条目定位收敛为 O(N + T)。
+     *
+     * 条目不存在 / 未配置 TOTP / 计算失败的 id **不出现在返回值中**（与单条通道返回 null 同义）。
+     */
+    suspend fun calculateEntryTotps(entryIds: List<String>): Map<String, EntryTotpSnapshot>
 
     /**
      * ISSUE-P3-49：推进 HOTP（RFC 4226）条目的计数器并返回**本次所出之码**。

@@ -416,6 +416,13 @@ class FakeVaultRepository(
     }
 
     /**
+     * ISSUE-P2-90：批量通道的测试替身实现——语义与逐条调用一致（条目不存在 / 无码即缺席）。
+     * 替身不模拟生产侧的缓存与索引（那是真实实现的内部优化），故此处逐条委托即可。
+     */
+    override suspend fun calculateEntryTotps(entryIds: List<String>): Map<String, EntryTotpSnapshot> =
+        entryIds.mapNotNull { id -> calculateEntryTotp(id)?.let { id to it } }.toMap()
+
+    /**
      * ISSUE-P3-49：测试替身**不支持** HOTP 计数器写回——明确 fail-closed，
      * 绝不谎报「已出码」（与生产实现同一诚实语义）。
      */

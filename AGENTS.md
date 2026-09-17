@@ -42,6 +42,7 @@ Coroutines + Flow；**文档与代码注释使用简体中文**。
    3. **流转归档**：整条**剪切**出 `ACTIVE_ISSUES.md` → `RESOLVED_LOG.md` 加一行 → `docs/resolved/batches/` 新增
       `<NN>-<中文短名>.md`（原样收录，编号续用不复用）。
    4. **提交推送**：文档与代码**同一次 `git commit`** 并**立即 `git push`**；信息以 `TASK-xx` / `ISSUE-xx` 引用并简述主题。
+      **代理直接执行，无须再征询**（2026-09-17 用户明示约定：完成整改+验证即提交推送）。
 7. **善用 MCP 知识服务器（强制）**：Android / Jetpack / Kotlin / Gradle / 加密库 / Google 平台 API → `google-developer-knowledge`；
    第三方库与框架（Compose / Hilt / OkHttp 等）→ Context7（`resolve-library-id` + `query-docs`）；**不得凭记忆臆测或盲改**，
    调用前先取该服务器各工具的最新参数 schema。

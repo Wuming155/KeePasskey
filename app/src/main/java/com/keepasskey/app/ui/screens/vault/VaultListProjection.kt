@@ -50,12 +50,11 @@ internal data class VaultListChildDatabaseSnapshotState(
     val mountedCount: Int = 0
 )
 
-/** 会话态输入快照（导航 / 过滤 / 消息 / TOTP / 进阶偏好 / 子库） */
+/** 会话态输入快照（导航 / 过滤 / 消息 / 进阶偏好 / 子库；ISSUE-P2-89：TOTP 已移出本快照） */
 internal data class VaultListSessionState(
     val currentGroupId: String?,
     val filterParams: VaultListFilterParams,
     val userMessage: UiMessage?,
-    val totpRemainingSeconds: Int,
     // ISSUE-P3-17：进阶显示偏好快照（列表密度 / 搜索结果分组路径）
     val extended: ExtendedSettings = ExtendedSettings(),
     // ISSUE-P3-17：自动聚焦搜索栏的一次性意图（消费后置 false）
@@ -81,8 +80,7 @@ internal fun buildVaultListUiState(
     allEntries: List<UiVaultEntry>,
     settings: UserSettings,
     session: VaultListSessionState,
-    batchSyncDecorations: VaultListBatchSyncDecorations,
-    liveTotpCodes: Map<String, String>
+    batchSyncDecorations: VaultListBatchSyncDecorations
 ): VaultListUiState {
     val batchSync = batchSyncDecorations.batchAndSync
     val activeDb = databases.firstOrNull { it.isActive } ?: databases.firstOrNull()
@@ -140,32 +138,25 @@ internal fun buildVaultListUiState(
         VaultSortOption.CREATED_ASC -> filteredEntries.sortedBy { it.createdAt }
     }
 
-    // 3. 带实时 TOTP 剩余秒数与跨周期实时验证码的条目列表
-    val entriesWithLiveTotp = sortedEntries.map { entry ->
-        val liveCode = liveTotpCodes[entry.id] ?: entry.totpCode
-        if (liveCode != null) {
-            entry.copy(totpCode = liveCode, totpRemainingSeconds = session.totpRemainingSeconds)
-        } else {
-            entry
-        }
-    }
-
-    // 4. 文件夹
+    // 3. 文件夹（条目列表已在第 2 步排序完毕）。
+    // ISSUE-P2-89：TOTP 的「剩余秒数 / 实时验证码」不再经本页状态覆写进条目，
+    // 改由 `VaultListTotpTracker` 的窄通道直接下发列表行徽标——本页状态因此与
+    // 「每秒」「每周期」两个高频节拍彻底解耦，不再被秒级 tick 驱动重算。
     val targetGroups = if (isSearching) {
         allGroups.filter { it.name.contains(session.filterParams.query, ignoreCase = true) }
     } else {
         allGroups.filter { it.parentId == effectiveGroupId }
     }
 
-    // 5. ISSUE-P3-17：搜索结果行的分组路径（仅在「搜索中 + 开关开启」时装配）
+    // 4. ISSUE-P3-17：搜索结果行的分组路径（仅在「搜索中 + 开关开启」时装配）
     val showGroupInSearchResult = session.extended.showGroupInSearchResult
     val entryGroupPaths = if (isSearching && showGroupInSearchResult) {
-        buildEntryGroupPaths(allGroups, entriesWithLiveTotp)
+        buildEntryGroupPaths(allGroups, sortedEntries)
     } else {
         emptyMap()
     }
 
-    // 6. ISSUE-P3-30：已解锁子库的只读分区装配。
+    // 5. ISSUE-P3-30：已解锁子库的只读分区装配。
     // 只做「投影 → 展示结构」的归拢，不参与上面的过滤 / 排序 / 分组树遍历：
     // 子库条目既不进 entries（根库条目流），也不参与搜索与自动填充。
     val childEntryGroups: List<ChildVaultEntryGroup> =
@@ -195,7 +186,7 @@ internal fun buildVaultListUiState(
         breadcrumbs = breadcrumbs,
         currentGroups = targetGroups,
         allGroups = allGroups,
-        entries = entriesWithLiveTotp,
+        entries = sortedEntries,
         totalEntriesCount = allEntries.size,
         databaseName = activeDb?.name.orEmpty(),
         isBatchMode = batchSync.isBatchMode,

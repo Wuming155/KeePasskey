@@ -9,6 +9,10 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.State
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
@@ -50,6 +54,19 @@ fun UnifiedVaultEntryRow(
     densitySpec: ListDensitySpec = ListDensityPresenter.specOf(ListDensity.NORMAL),
     groupPath: String? = null,
     decorations: EntryDecorations = EntryDecorations.EMPTY,
+    /**
+     * ISSUE-P2-89：TOTP **实时剩余秒数**（窄状态）。
+     *
+     * 传状态对象而非取值：读取下沉到行内徽标（见 [StandardEntryLayout]），
+     * 使每秒 tick 只失效徽标那一个组合作用域，不牵动整行与整表重组。
+     * 缺省值为预览 / 截图测试用（生产由 `VaultListScreen` 传入 ViewModel 的窄通道）。
+     */
+    totpRemainingSeconds: State<Int> = remember { mutableIntStateOf(TOTP_PREVIEW_REMAINING_SECONDS) },
+    /**
+     * ISSUE-P2-89：TOTP **本周期实时验证码**（窄状态，`entryId → 验证码`）。
+     * 仅周期翻转时更新；徽标取 `totpLiveCodes[entry.id] ?: entry.totpCode`。
+     */
+    totpLiveCodes: State<Map<String, String>> = remember { mutableStateOf(emptyMap()) },
     modifier: Modifier = Modifier
 ) {
     // M3 色调层级：常态用 surfaceContainerLow 表达容器感，描边仅保留给选中态强强调
@@ -113,12 +130,15 @@ fun UnifiedVaultEntryRow(
                     groupPath = groupPath,
                     onCopyPassword = onCopyPassword,
                     onRestore = onRestore,
-                    onPurge = onPurge
+                    onPurge = onPurge,
+                    totpRemainingSeconds = totpRemainingSeconds,
+                    totpLiveCodes = totpLiveCodes
                 )
             }
         }
     }
 }
+
 
 // IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
 @androidx.compose.ui.tooling.preview.Preview(name = "条目行 - 浅色", showBackground = true)

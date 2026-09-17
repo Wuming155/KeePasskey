@@ -130,10 +130,13 @@ class VaultListViewModel @Inject constructor(
     )
 
     // ISSUE-P3-29：TOTP 实时倒计时（种子只在数据层解析）
+    // ISSUE-P2-89：本协作者的两条输出均**不进整页状态**，经下方窄通道直接给列表行徽标
     private val totpTracker = VaultListTotpTracker(
         vaultRepository = vaultRepository,
         scope = viewModelScope,
-        currentEntries = { uiState.value.entries }
+        currentEntries = { uiState.value.entries },
+        // 生产 Dispatchers.Default；单测注入测试调度器以确定性推进秒级节拍
+        dispatcher = displayDispatcher
     )
 
     // ISSUE-P3-29：条目 / 分组展示装饰装配（共用同一图标投影缓存）
@@ -141,7 +144,8 @@ class VaultListViewModel @Inject constructor(
 
     init {
         // P1 整改：秒级 tick 改由官方 tickerFlow 冷流驱动，单一 tick 源 + 虚拟时钟可推进。
-        totpTracker.start()
+        // ISSUE-P2-89：不再需要显式 start()——节拍随 [totpRemainingSeconds] 的订阅自动起停
+        // （列表页不可见即停表），此前 init 期常驻启动会在离屏后继续每秒烧 CPU。
         // H2 整改：订阅冲突会话流，冲突待解决时点亮列表页冲突入口
         viewModelScope.launch {
             syncCoordinator.conflictFlow.collect { conflicts ->
@@ -210,13 +214,20 @@ class VaultListViewModel @Inject constructor(
             }
         } ?: flowOf(VaultListChildDatabaseSnapshotState())
 
+    /**
+     * ISSUE-P2-89：TOTP 的秒级倒计时与跨周期验证码**不进整页状态**。
+     *
+     * 原实现把 `totpTracker.remainingSeconds`（每秒一个值）并入本 `combine`，于是每秒都会
+     * 重跑一次 [buildVaultListUiState]——全库过滤 / 排序 / 回收站集合与模板扫描，
+     * 且 `stateIn` 的收集上下文是 `viewModelScope`（Main），构成秒级主线程负载与掉帧源。
+     * 现两条值只经 [totpRemainingSeconds] / [totpLiveCodes] 窄通道给列表行徽标按需读取。
+     */
     private val sessionStateFlow = combine(
         currentGroupIdFlow,
         filterParamsFlow,
-        userMessageFlow,
-        totpTracker.remainingSeconds
-    ) { groupId, params, message, totpSeconds ->
-        VaultListSessionState(groupId, params, message, totpSeconds)
+        userMessageFlow
+    ) { groupId, params, message ->
+        VaultListSessionState(groupId, params, message)
     }.combine(extendedSettingsFlow) { state, extended ->
         state.copy(extended = extended)
     }.combine(autoActivateSearchFlow) { state, autoActivate ->
@@ -247,14 +258,30 @@ class VaultListViewModel @Inject constructor(
             allEntries = allEntries,
             settings = settings,
             session = session,
-            batchSyncDecorations = batchSyncDecorations,
-            liveTotpCodes = totpTracker.liveCodes.value
+            batchSyncDecorations = batchSyncDecorations
         )
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5000),
         initialValue = VaultListUiState()
     )
+
+    /**
+     * ISSUE-P2-89：列表行 TOTP 徽标的**实时剩余秒数**（窄通道）。
+     *
+     * 本流即列表页的秒级节拍本体（`WhileSubscribed` 驱动，见 [VaultListTotpTracker]）：
+     * UI 侧只在渲染徽标处用 `collectAsStateWithLifecycle` 读取，**读取作用域只有徽标本身**，
+     * 故每秒的重组面不再扩散到整页状态与全部列表行；页面不可见时无人订阅，节拍自动停止。
+     */
+    val totpRemainingSeconds: StateFlow<Int> get() = totpTracker.remainingSeconds
+
+    /**
+     * ISSUE-P2-89：列表行 TOTP 徽标的**本周期实时验证码**（窄通道，`entryId → 验证码`）。
+     *
+     * 仅在周期翻转时更新（订阅驱动）。徽标取 `totpLiveCodes[entry.id] ?: entry.totpCode`：
+     * 前者是本周期之码，后者是投影层即时计算的兜底值（条目刚出现、尚未等到下一拍刷新时）。
+     */
+    val totpLiveCodes: StateFlow<Map<String, String>> get() = totpTracker.liveCodes
 
     /**
      * ISSUE-P3-17：页面每次进入组合时刷新进阶显示偏好快照。
