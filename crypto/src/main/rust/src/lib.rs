@@ -19,6 +19,7 @@ pub mod aes_kdf;
 pub mod chacha20_stream;
 mod jni_bridge;
 mod jni_bridge_ext;
+pub mod passkey_sign;
 pub mod strength;
 pub mod twofish_cbc;
 

@@ -23,6 +23,18 @@ import java.math.BigInteger
 internal object PasskeyAssertionSigner {
 
     internal fun signEs256(privateKeyBytes: ByteArray, dataToSign: ByteArray): ByteArray {
+        // ISSUE-P3-153 / §146：32 字节原始标量走 Rust 内核（确定性 RFC 6979 与 BC 逐字节一致，
+        // 真机 sign 17.7ms → ~1ms）；其余编码形态（PKCS#8 等）走 BC 兜底（原生内核只吃原始标量）。
+        // 原生返回 null（非法标量：d=0 / d≥n 等）**回落 BC**——由 BC 校验语义抛既有的
+        // `InvalidKeyException`（既有闸门用例锁定该类型），不引入异常类型漂移。
+        if (NativePasskeySign.available && privateKeyBytes.size == NativePasskeySign.ES256_SCALAR_LENGTH) {
+            val native = NativePasskeySign.es256Sign(privateKeyBytes, dataToSign)
+            if (native != null) return native
+        }
+        return bcSignEs256(privateKeyBytes, dataToSign)
+    }
+
+    private fun bcSignEs256(privateKeyBytes: ByteArray, dataToSign: ByteArray): ByteArray {
         val privKeyParams = PasskeyKeyCodec.parseEcPrivateKey(privateKeyBytes)
 
         val digest = SHA256Digest()
@@ -40,6 +52,16 @@ internal object PasskeyAssertionSigner {
     }
 
     internal fun signEd25519(privateKeyBytes: ByteArray, dataToSign: ByteArray): ByteArray {
+        // ISSUE-P3-153 / §146：32 字节原始种子走 Rust 内核（RFC 8032 确定性，真机 3.8ms → ~0.2ms）；
+        // 其余编码形态走 BC 兜底。原生返回 null 时回落 BC（兜底可用性优先）。
+        if (NativePasskeySign.available && privateKeyBytes.size == NativePasskeySign.ED25519_SEED_LENGTH) {
+            val native = NativePasskeySign.ed25519Sign(privateKeyBytes, dataToSign)
+            if (native != null) return native
+        }
+        return bcSignEd25519(privateKeyBytes, dataToSign)
+    }
+
+    private fun bcSignEd25519(privateKeyBytes: ByteArray, dataToSign: ByteArray): ByteArray {
         val privParam = if (privateKeyBytes.size == 32) {
             Ed25519PrivateKeyParameters(privateKeyBytes, 0)
         } else {

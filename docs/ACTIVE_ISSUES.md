@@ -56,7 +56,15 @@
 
 ---
 
-## P3 低危问题、特性接线与体验优化（1 项）
+## P3 低危问题、特性接线与体验优化（0 项）
+
+> **暂无开放项**。`ISSUE-P3-153`（Rust 下沉候选评估 → 立项落地）已于 **§145（ChaCha20 内核）
+> + §146（Passkey ES256/Ed25519 签名内核）** 分两批闭环——真机生产路径：ChaCha20 整库流
+> 2.7 → 54~66 MB/s（≈20~24×），ES256 sign 17.7ms → ≈1ms、Ed25519 3.8ms → ≈0.2ms；
+> `cargo deny check` 全绿；RS256 经实测裁定不下沉。见
+> [`resolved/batches/145-ChaCha20Rust内核下沉批次.md`](resolved/batches/145-ChaCha20Rust内核下沉批次.md) 与
+> [`resolved/batches/146-Passkey签名内核下沉批次.md`](resolved/batches/146-Passkey签名内核下沉批次.md)。
+> 同日连做闭环：`P2-92`（§143）、`P3-155`（§144）、`P3-153`（§145/§146）——**清单归零**。
 
 > 本批为 2026-09-17「降低 CPU / 内存占用」排查的**其余开放结论**。
 > 条目 153 为 **Rust 下沉候选的评估结论**（评估项）；条目 155 为同轮后续批次（§115）开工复核转登。
@@ -159,9 +167,8 @@
 > **本清单剩余 2 项**（`P3-153` / `P3-155`）的 AC 均要求**真机吞吐实测**（BC 现行 vs Rust 候选、AES-CBC 块粒度
 > 前后对比）——**实测已于 2026-09-17 完成**（真机 Redmi 4X，见
 > [`records/真机吞吐实测记录_2026-09-17.md`](records/真机吞吐实测记录_2026-09-17.md)）：
-> `P3-155` 已于 **§144** 闭环（解密侧分块流，真机 15.3 → 55.5 MB/s）；`P3-153` 数据已取得
-> （ChaCha20 ≈44×、ES256/Ed25519 17~30×、RS256 否定），**立项已获用户裁定**（ChaCha20 +
-> ES256/Ed25519 下沉）。
+> `P3-155` 已于 **§144** 闭环（解密侧分块流，真机 15.3 → 55.5 MB/s）；`P3-153` 已于 **§145/§146**
+> 闭环（ChaCha20 内核 + Passkey 签名内核；RS256 否定）。
 > 实测过程另发现并登记 `ISSUE-P2-92`（平台 BC 抢占致真机 ChaCha7539 不可用，**整改中发现 Twofish
 > 路径同样踩中且被静默吞错**）——已于 **§143** 同日闭环。
 > **2026-09-17 增补与同日闭环**：交互成本核查顺带发现 `ISSUE-P3-184`（详情页 TOTP 复制按钮谎报成功），
@@ -182,52 +189,12 @@
 > 「唯一强匹配候选不直达」经判定属**安全取舍而非缺陷**，登记 [`architecture/产品裁决登记.md`](architecture/产品裁决登记.md) **PD-05**。
 > 排查中同时确认既有一次点击整改均已就位（列表行一键复制密码 / TOTP 徽标 / 解锁页 IME Done 接线 / 系统设置直达），无回归。
 
-### ISSUE-P3-153 Rust 下沉候选的评估结论（**评估项，非整改项**）
-
-- **背景**：用户 2026-09-17 提出「是否有些 Kotlin 可以改用 Rust 重写」。经全量排查，**结论是按收益/风险比，绝大多数候选不应下沉**。
-  唯二值得进一步评估的是「**纯 Java BouncyCastle 且作用于数据面 / 用户可见时延**」的两处。
-- **不应下沉（有依据的否定结论）**：
-  1. **AES-256-CBC 外层流**（`crypto/.../cipher/AesCipherEngine.kt`，本仓默认 cipher）：走平台 JCE（Conscrypt 原生 + 硬件加速），Rust 无收益；
-  2. **SHA-256 / HMAC**：`HashUtil` 走 JCE（平台原生），Rust 无收益——真正的浪费是**每次新建 `Mac`/`MessageDigest` 实例**（属 Kotlin 侧整改）；
-  3. **Argon2 / AES-KDF / Twofish / 口令强度**：已是 Rust 内核（`crypto/src/main/rust/`）；
-  4. **GZip/Deflate**：平台 zlib 原生；
-  5. **KDBX 主管线整体下沉（XML 解析 + 模型树）**：读写链已是流式 `HMAC 块流 → AES(平台) → GZip(zlib) → SAX(平台 Expat)`，
-     剩余开销是 **JVM 对象分配与树复制**（ISSUE-P3-150/151）——只有把整个对象模型搬进 Rust 才可能省掉，代价与回归面远超收益，与「保持现有稳定性」的前提冲突；
-     另有 `AGENTS.md` §3.8 互操作证据纪律带来的对拍成本；
-  6. **Compose UI 层**：与语言无关，属 ISSUE-P2-89/90 的结构性整改。
-- **值得进一步评估的两处**（**均为纯 Java BouncyCastle，且不在硬件加速路径上**）：
-  1. `ChaCha20CipherEngine` 以 `Cipher.getInstance("ChaCha7539", BC)` 承载**整库密文流**（选 ChaCha20 作为外层 cipher 的库全程走纯 Java 实现）；
-  2. `PasskeyCryptoEngine`：ES256 / Ed25519 / RS256 的密钥生成与签名全部为 BC 纯 Java（RSA-2048 生成含 `certainty=80` 的素性搜索，属用户可见时延）。
-- **「Rust 更快」的量化前提（不得外推）**：本仓唯一实测锚点是原生 Argon2 对 BouncyCastle 的 **2.2~5.4×（宿主）/ 5~11×（真机）**
-  加速比（见 [`records/原生Argon2真机验证记录.md`](records/原生Argon2真机验证记录.md)）。该数字**只对「纯 Java BC vs Rust」成立**，
-  **不得**据此推断「凡 Kotlin 改 Rust 都快」——对已走平台原生（AES/SHA/HMAC/zlib）的路径，重写只会引入 FFI 与供应链成本。
-- **验收标准（评估项）**：若认领本项，须先给出上述两处各一份「BC 现行吞吐 vs Rust 候选吞吐」的真机实测对比（同一语料、同一设备、
-  含离散度），再决定是否立项；**未取得实测数据前不得以「Rust 更快」为由发起重写**。
-- **✅ 实测已取得（2026-09-17 真机 Redmi 4X / arm64-v8a / Android 17，数据与命令见
-  [`records/真机吞吐实测记录_2026-09-17.md`](records/真机吞吐实测记录_2026-09-17.md) §2）**：
-  1. **ChaCha20**：BC（完整 provider）2.6~2.7 MB/s vs Rust `chacha20` crate **117.6~118.4 MB/s**，加速比 ≈ **44×**；
-  2. **Passkey**：ES256 keygen 20.4× / sign 16.6×；Ed25519 keygen 30.5× / sign 22.3×——下沉收益明确；
-  3. **RS256 否定**：`rsa` crate keygen 慢 2.1×、sign 慢 1.6×（BC 的 CRT/Montgomery 优化占优），
-     **不得**以「Rust 更快」为由下沉 RSA。
-  **立项决策（2026-09-17 用户裁定）**：**ChaCha20 与 ES256/Ed25519 立项下沉**，RS256 否定；
-  各候选须先过 `crypto/src/main/rust/deny.toml`（`wildcards = "deny"`、依赖树无重复密码学实现）
-  与供应链 CVSS ≥ 7.0 闸门，随后按批次推进 Rust 内核落地（chacha20 整库流 → Passkey 签名）。
-  **✅ ChaCha20 已闭环（§145）**：Rust 内核落地（原生优先 + BC 回退），`cargo deny check` 全绿，
-  真机生产路径 2.7 → 54~66 MB/s（≈20~24×），见
-  [`resolved/batches/145-ChaCha20Rust内核下沉批次.md`](resolved/batches/145-ChaCha20Rust内核下沉批次.md)。
-  **本条剩余**：ES256 / Ed25519 签名内核（同法推进）。
-  另：本条评估过程实测发现 ChaCha20 引擎在真机因平台剥离版 BC 抢占 provider 名而完全不可用，
-  已单列 `ISSUE-P2-92`（**已于 §143 闭环**——不修复则「ChaCha20 下沉与否」在真机无从谈起）。
-- **核实时间点与方式**：2026-09-17 逐处阅读 `crypto/` 全部 cipher / kdf / hash / passkey 实现与其 provider 选择，
-  并核对 `crypto/src/main/rust/Cargo.toml` 现有内核边界与 `records/原生Argon2真机验证记录.md` 实测数据。
-- **风险提示**：两处候选均需**新增 Rust 依赖**（如 `chacha20` / `p256` / `ed25519-dalek` / `rsa`），
-  须先过 `crypto/src/main/rust/deny.toml`（`wildcards = "deny"`、依赖树无重复密码学实现）与本仓供应链 CVSS ≥ 7.0 闸门。
-
+> **已闭环（§145/§146）**：原 `ISSUE-P3-153`（Rust 下沉候选评估 → 立项落地）——ChaCha20 内核
+> （§145）与 Passkey ES256/Ed25519 签名内核（§146）分两批落地，RS256 裁定不下沉，见上。
+>
 > **已闭环（§144）**：原 `ISSUE-P3-155`（AES-CBC 解密侧受 `CipherInputStream` 内部 512 B 缓冲限制）——
 > 采纳结论经真机验证后落地：解密侧切换 `CbcDecryptingInputStream` 分块骨架（范围收窄依据：加密侧实测
 > 1.0× 无收益），真机吞吐 15.3 → 55.5 MB/s（3.6×），宿主官方夹具 + 真机 KeePassXC 语料端到端 +
 > pykeepass 外验三重互操作铁证，见
 > [`resolved/batches/144-AES解密侧分块流批次.md`](resolved/batches/144-AES解密侧分块流批次.md)。
-> **本清单剩余 1 项**（`P3-153`）：实测数据已齐，**立项已获用户裁定**（ChaCha20 + ES256/Ed25519 下沉，
-> RS256 否定）⇒ 后续按批次推进 Rust 内核落地。
 

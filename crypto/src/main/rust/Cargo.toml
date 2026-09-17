@@ -50,6 +50,11 @@ twofish = { version = "0.8.0", default-features = false, features = ["zeroize"] 
 # `zeroize` 使密钥调度随对象析构归零（与 aes/twofish 同纪律）；无 std 依赖。
 # seek 位置以 64 字节块计（ChaChaCore 的 u32 块计数器，state[12]）。
 chacha20 = { version = "0.9.1", default-features = false, features = ["zeroize"] }
+# ISSUE-P3-153（§146）：Passkey 签名内核。RustCrypto 官方 p256（ECDSA P-256，确定性 RFC 6979
+# + SHA-256，与 BC 生产路径确定性口径一致）与 ed25519-dalek 2（EdDSA 确定性）。
+# RS256 已裁定**不下沉**（真机实测 rsa crate 慢于 BC 1.6~2.1×）。
+p256 = { version = "0.13", default-features = false, features = ["ecdsa", "alloc"] }
+ed25519-dalek = { version = "2", default-features = false, features = ["alloc"] }
 
 [dev-dependencies]
 serde_json = "1"

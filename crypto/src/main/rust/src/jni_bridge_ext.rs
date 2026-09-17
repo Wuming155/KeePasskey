@@ -15,6 +15,7 @@
 
 use crate::aes_kdf::{self, COMPOSITE_KEY_LEN, OUT_LEN};
 use crate::chacha20_stream;
+use crate::passkey_sign;
 use crate::strength;
 use crate::twofish_cbc::{self, BLOCK_LEN};
 use jni::objects::{JByteArray, JObject};
@@ -242,6 +243,66 @@ pub extern "system" fn Java_com_keepasskey_crypto_cipher_NativeChaCha20_applyKey
     }
 }
 
+// ============================================================================
+// 5) Passkey 签名（ISSUE-P3-153 / §146）
+// ============================================================================
+
+/// ES256 断言签名（P-256 标量 32 字节 + 报文 → ASN.1 DER；确定性 RFC 6979 + SHA-256）。
+#[no_mangle]
+pub extern "system" fn Java_com_keepasskey_crypto_passkey_NativePasskeySign_es256Sign<'local>(
+    env: JNIEnv<'local>,
+    _thiz: JObject<'local>,
+    private_key: JByteArray<'local>,
+    data: JByteArray<'local>,
+) -> jbyteArray {
+    passkey_sign_jni(env, private_key, data, true)
+}
+
+/// Ed25519 断言签名（种子 32 字节 + 报文 → 64 字节 raw；RFC 8032 确定性）。
+#[no_mangle]
+pub extern "system" fn Java_com_keepasskey_crypto_passkey_NativePasskeySign_ed25519Sign<'local>(
+    env: JNIEnv<'local>,
+    _thiz: JObject<'local>,
+    private_key: JByteArray<'local>,
+    data: JByteArray<'local>,
+) -> jbyteArray {
+    passkey_sign_jni(env, private_key, data, false)
+}
+
+/// 共用实现（仅算法不同），确保闸门与擦除语义完全一致。
+fn passkey_sign_jni<'local>(
+    env: JNIEnv<'local>,
+    private_key: JByteArray<'local>,
+    data: JByteArray<'local>,
+    es256: bool,
+) -> jbyteArray {
+    if private_key.is_null() || data.is_null() {
+        return null_mut();
+    }
+
+    let outcome = catch_unwind(AssertUnwindSafe(|| -> Option<jbyteArray> {
+        let key_buf = Zeroizing::new(env.convert_byte_array(&private_key).ok()?);
+        let data_buf = Zeroizing::new(env.convert_byte_array(&data).ok()?);
+
+        let out = if es256 {
+            passkey_sign::es256_sign_der(&key_buf, &data_buf)?
+        } else {
+            passkey_sign::ed25519_sign_raw(&key_buf, &data_buf)?
+        };
+
+        let java_out = env.new_byte_array(out.len() as jint).ok()?;
+        // SAFETY：out 为有效内存，长度取自 out.len()
+        env.set_byte_array_region(&java_out, 0, unsafe { as_jbyte(&out[..]) })
+            .ok()?;
+        Some(java_out.into_raw())
+    }));
+
+    match outcome {
+        Ok(Some(arr)) => arr,
+        _ => null_mut(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -285,9 +346,29 @@ mod tests {
             jlong,
             JByteArray<'a>,
         ) -> jbyteArray = Java_com_keepasskey_crypto_cipher_NativeChaCha20_applyKeystream;
+        let es: for<'a> extern "system" fn(
+            JNIEnv<'a>,
+            JObject<'a>,
+            JByteArray<'a>,
+            JByteArray<'a>,
+        ) -> jbyteArray = Java_com_keepasskey_crypto_passkey_NativePasskeySign_es256Sign;
+        let ed: for<'a> extern "system" fn(
+            JNIEnv<'a>,
+            JObject<'a>,
+            JByteArray<'a>,
+            JByteArray<'a>,
+        ) -> jbyteArray = Java_com_keepasskey_crypto_passkey_NativePasskeySign_ed25519Sign;
 
         // 取地址即编译期核对签名
-        let _ = (aes as usize, enc as usize, dec as usize, est as usize, chacha as usize);
+        let _ = (
+            aes as usize,
+            enc as usize,
+            dec as usize,
+            est as usize,
+            chacha as usize,
+            es as usize,
+            ed as usize,
+        );
     }
 
     /// `null` 入参必须直接返回 `null` 而不是解引用（无法在宿主侧构造真实 JNIEnv，
