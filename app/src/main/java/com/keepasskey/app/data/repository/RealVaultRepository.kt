@@ -11,6 +11,7 @@ import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.database.file.KdbxKdfStrengthAssessment
 import com.keepasskey.database.session.DatabaseSession
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -18,6 +19,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -41,7 +43,10 @@ class RealVaultRepository @Inject constructor(
     private val databaseSession: DatabaseSession,
     private val debugLog: com.keepasskey.app.data.logger.DebugLogBuffer,
     // TASK-21：用户可见消息经 StringsProvider 资源解析（P3-23；单测注入假实现）
-    private val strings: com.keepasskey.app.ui.model.StringsProvider
+    private val strings: com.keepasskey.app.ui.model.StringsProvider,
+    // ISSUE-P3-154：整库投影调度器（生产 Dispatchers.Default；单测注入测试调度器）。
+    // **刻意不给默认值**——默认值会让调用点悄悄退化为「投影落在收集上下文」，正是本条要消除的行为
+    @VaultProjectionDispatcher private val projectionDispatcher: CoroutineDispatcher
 ) : VaultRepository {
 
     private val repositoryScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -171,12 +176,28 @@ class RealVaultRepository @Inject constructor(
     override suspend fun assessKdfStrength(path: String): KdbxKdfStrengthAssessment? =
         lifecycle.assessKdfStrength(path)
 
-    override fun getGroups(): Flow<List<VaultGroup>> = groups.groupsFlow()
+    /**
+     * 分组树的 UI 投影流。
+     *
+     * ISSUE-P3-154：投影（含回收站识别与逐组时间格式化）经 [projectionDispatcher] 执行，
+     * **不落在收集上下文**——列表页的收集上下文是 `viewModelScope`（Main）。
+     */
+    override fun getGroups(): Flow<List<VaultGroup>> =
+        groups.groupsFlow().flowOn(projectionDispatcher)
 
     override suspend fun saveGroup(group: VaultGroup): KdbxResult<Unit> = groups.saveGroup(group)
 
     override suspend fun deleteGroup(id: String): KdbxResult<Unit> = recycleBin.deleteGroup(id)
 
+    /**
+     * 全部条目的 UI 投影流。
+     *
+     * ISSUE-P3-154：投影（`KdbxEntry` → `UiVaultEntry`，逐字段解密 + 时间格式化）经
+     * [projectionDispatcher] 执行，**不落在收集上下文**——列表页 / 自动填充 / 子库各自的
+     * 收集上下文（`viewModelScope`、服务协程）一律不再承担这段 CPU 工作。
+     *
+     * 语义零变更：上游 `databaseFlow` 本就是 `StateFlow`（已合流），`flowOn` 只搬移执行线程。
+     */
     override fun getEntries(): Flow<List<UiVaultEntry>> {
         return databaseSession.databaseFlow.map { db ->
             if (db == null) {
@@ -186,20 +207,9 @@ class RealVaultRepository @Inject constructor(
                     entryMapper.mapKdbxEntryToUi(kdbxEntry)
                 }
             }
-        }
+        }.flowOn(projectionDispatcher)
     }
 
-    /**
-     * 单条条目投影流。
-     *
-     * ISSUE-P3-149：**不再以「整库投影 + `find`」实现**——原实现为一个条目付出
-     * O(N × 字段数) 的全库映射（详情页一次组合挂了 3 条这样的链），本实现改为
-     * `KdbxGroup.findEntry`（深度优先短路）只映射命中的那一条。
-     *
-     * 语义与旧实现等价（同为深度优先首命中，未命中返回 null）；差异仅在容错面上更宽：
-     * 传入**小写** hex id 时旧实现因与 `toHexString()`（大写）字符串不等而落空，
-     * 本实现按 UUID 字节比较可正常命中（调用方恒传大写，属放宽而非行为变更）。
-     */
     /**
      * 单条条目投影流。
      *

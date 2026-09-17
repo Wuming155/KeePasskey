@@ -19,12 +19,17 @@ import com.keepasskey.database.file.InnerHeader
 import com.keepasskey.database.file.KdbxDatabase
 import com.keepasskey.database.file.KdbxHeader
 import com.keepasskey.database.session.DatabaseSession
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -32,6 +37,8 @@ import org.junit.rules.TemporaryFolder
 import java.io.File
 import java.lang.reflect.Proxy
 import java.time.Instant
+import java.util.concurrent.atomic.AtomicInteger
+import kotlin.coroutines.CoroutineContext
 
 /**
  * 针对 RealVaultRepository 的全真单元测试（Wave 3-E P0-6 与 P1-10）：
@@ -89,6 +96,47 @@ class RealVaultRepositoryTest {
     private fun createTestStrings(): com.keepasskey.app.ui.model.StringsProvider =
         com.keepasskey.app.ui.model.StringsProvider { _, _ -> "" }
 
+    /**
+     * ISSUE-P3-154：仓库构造的唯一入口。
+     *
+     * 投影调度器**必须显式注入**（`RealVaultRepository` 刻意不给默认值），且默认值取
+     * `StandardTestDispatcher(testScheduler)`——与 `runTest` 同一虚拟时间轴，
+     * 使投影断言完全确定，**不依赖真实线程池**（真实 `Dispatchers.Default` 会让在途工作
+     * 跨过用例边界，见 §18 记载的跨用例污染类偶发红）。
+     */
+    private fun TestScope.newRepository(
+        session: DatabaseSession,
+        filesDir: File = tempFolder.root,
+        projectionDispatcher: CoroutineDispatcher = StandardTestDispatcher(testScheduler)
+    ): RealVaultRepository = RealVaultRepository(
+        createMockContext(filesDir),
+        session,
+        com.keepasskey.app.data.logger.DebugLogBuffer(),
+        createTestStrings(),
+        projectionDispatcher
+    )
+
+    /**
+     * ISSUE-P3-154：记录型调度器——只统计「被派发次数」，执行委托给测试调度器，
+     * 故断言完全落在虚拟时间轴上（不依赖真实线程池、无跨线程竞态）。
+     *
+     * 用途：证明整库投影**确实被派发到注入的投影调度器**（即离开了收集上下文）；
+     * 若投影仍在收集上下文执行，本调度器一次都不会被派发。
+     */
+    private class DispatchRecordingDispatcher(
+        private val delegate: CoroutineDispatcher
+    ) : CoroutineDispatcher() {
+
+        private val dispatches = AtomicInteger()
+
+        val dispatchCount: Int get() = dispatches.get()
+
+        override fun dispatch(context: CoroutineContext, block: Runnable) {
+            dispatches.incrementAndGet()
+            delegate.dispatch(context, block)
+        }
+    }
+
     private fun createInitialDatabase(): Pair<KdbxDatabase, KdbxEntry> {
         val rootGroupId = KdbxUuid.random()
         val entryId = KdbxUuid.random()
@@ -145,7 +193,7 @@ class RealVaultRepositoryTest {
         val session = DatabaseSession()
         session.setDatabaseForTesting(database)
 
-        val repository = RealVaultRepository(createMockContext(tempFolder.root), session, com.keepasskey.app.data.logger.DebugLogBuffer(), createTestStrings())
+        val repository = newRepository(session)
 
         // UI 触发条目编辑：修改标题、密码，传入新的普通自定义字段，不传 Passkey 字段。
         // H4-断点补齐后，附件/标签/OverrideUrl/图标/AutoType 由 UI 投影全量携带
@@ -212,7 +260,7 @@ class RealVaultRepositoryTest {
         val session = DatabaseSession()
         session.setDatabaseForTesting(database)
 
-        val repository = RealVaultRepository(createMockContext(tempFolder.root), session, com.keepasskey.app.data.logger.DebugLogBuffer(), createTestStrings())
+        val repository = newRepository(session)
 
         val entryIdHex = initialEntry.id.toHexString()
 
@@ -268,7 +316,7 @@ class RealVaultRepositoryTest {
 
         val session = DatabaseSession()
         session.setDatabaseForTesting(dbWithTwo)
-        val repository = RealVaultRepository(createMockContext(tempFolder.root), session, com.keepasskey.app.data.logger.DebugLogBuffer(), createTestStrings())
+        val repository = newRepository(session)
 
         // 将两个条目均移入回收站
         repository.deleteEntry(initialEntry.id.toHexString())
@@ -301,7 +349,7 @@ class RealVaultRepositoryTest {
         )
         assertTrue(createResult is com.keepasskey.core.result.KdbxResult.Success)
 
-        val repository = RealVaultRepository(createMockContext(tempFolder.root), session, com.keepasskey.app.data.logger.DebugLogBuffer(), createTestStrings())
+        val repository = newRepository(session)
 
         // 添加一个测试条目
         val newEntry = UiVaultEntry(
@@ -326,7 +374,7 @@ class RealVaultRepositoryTest {
 
         val reloadedDb = openSession.databaseFlow.first()!!
         assertNotNull("持久化重开后 recycleBinUuid 应完好保留", reloadedDb.recycleBinUuid)
-        val reloadedRepo = RealVaultRepository(createMockContext(tempFolder.root), openSession, com.keepasskey.app.data.logger.DebugLogBuffer(), createTestStrings())
+        val reloadedRepo = newRepository(openSession)
         val reloadedGroups = reloadedRepo.getGroups().first()
         assertTrue("回收站分组应在重开后持久存在", reloadedGroups.any { it.isRecycleBin })
 
@@ -352,7 +400,7 @@ class RealVaultRepositoryTest {
         )
         assertTrue(createResult is com.keepasskey.core.result.KdbxResult.Success)
 
-        val repository = RealVaultRepository(createMockContext(tempFolder.root), session, com.keepasskey.app.data.logger.DebugLogBuffer(), createTestStrings())
+        val repository = newRepository(session)
 
         // 1. 创建分组（模拟 VaultListViewModel.createGroup：非 UUID 临时 id → 仓库生成新 UUID）
         val groupCreateResult = repository.saveGroup(
@@ -450,7 +498,7 @@ class RealVaultRepositoryTest {
         )
         assertTrue(createResult is com.keepasskey.core.result.KdbxResult.Success)
 
-        val repository = RealVaultRepository(createMockContext(tempFolder.root), session, com.keepasskey.app.data.logger.DebugLogBuffer(), createTestStrings())
+        val repository = newRepository(session)
 
         // 1. 创建源条目（含历史修订，验证克隆体不继承 history）
         val srcId = KdbxUuid.random().toHexString()
@@ -512,7 +560,7 @@ class RealVaultRepositoryTest {
     fun `本地尚无 kdbx 文件时 getDatabases 如实返回空列表不伪造默认库`() = runTest {
         val emptyDir = tempFolder.newFolder("empty_vault_dir")
         val session = DatabaseSession()
-        val repository = RealVaultRepository(createMockContext(emptyDir), session, com.keepasskey.app.data.logger.DebugLogBuffer(), createTestStrings())
+        val repository = newRepository(session, emptyDir)
 
         val databases = repository.getDatabases().first()
         assertTrue("无文件时必须返回空列表，绝不能伪造 default_vault", databases.isEmpty())
@@ -526,7 +574,7 @@ class RealVaultRepositoryTest {
         externalFile.writeBytes(byteArrayOf(0x03, 0xD9.toByte(), 0xA2.toByte(), 0x9A.toByte())) // KDBX signature prefix
 
         val session = DatabaseSession()
-        val repository = RealVaultRepository(createMockContext(storageDir), session, com.keepasskey.app.data.logger.DebugLogBuffer(), createTestStrings())
+        val repository = newRepository(session, storageDir)
 
         val importResult = repository.importExternalDatabase("source_vault.kdbx", externalFile.absolutePath)
         assertTrue("导入应成功", importResult is com.keepasskey.core.result.KdbxResult.Success)
@@ -550,7 +598,7 @@ class RealVaultRepositoryTest {
         tempSession.close()
 
         val session = DatabaseSession()
-        val repository = RealVaultRepository(createMockContext(storageDir), session, com.keepasskey.app.data.logger.DebugLogBuffer(), createTestStrings())
+        val repository = newRepository(session, storageDir)
 
         // 登记外部数据库
         repository.importExternalDatabase("my_external.kdbx", externalKdbx.absolutePath)
@@ -611,10 +659,7 @@ class RealVaultRepositoryTest {
 
         val session = DatabaseSession()
         session.setDatabaseForTesting(db)
-        val repository = RealVaultRepository(
-            createMockContext(tempFolder.root), session,
-            com.keepasskey.app.data.logger.DebugLogBuffer(), createTestStrings()
-        )
+        val repository = newRepository(session)
 
         repository.deleteGroup(ancestorId.toHexString())
 
@@ -667,10 +712,7 @@ class RealVaultRepositoryTest {
 
         val session = DatabaseSession()
         session.setDatabaseForTesting(db)
-        val repository = RealVaultRepository(
-            createMockContext(tempFolder.root), session,
-            com.keepasskey.app.data.logger.DebugLogBuffer(), createTestStrings()
-        )
+        val repository = newRepository(session)
 
         repository.deleteEntry(entryId.toHexString())
 
@@ -689,10 +731,7 @@ class RealVaultRepositoryTest {
         val (database, initialEntry) = createInitialDatabase()
         val session = DatabaseSession()
         session.setDatabaseForTesting(database)
-        val repository = RealVaultRepository(
-            createMockContext(tempFolder.root), session,
-            com.keepasskey.app.data.logger.DebugLogBuffer(), createTestStrings()
-        )
+        val repository = newRepository(session)
 
         val chars = repository.getEntryPasswordChars(initialEntry.id.toHexString())
         assertNotNull(chars)
@@ -738,10 +777,7 @@ class RealVaultRepositoryTest {
 
         val session = DatabaseSession()
         session.setDatabaseForTesting(database)
-        val repository = RealVaultRepository(
-            createMockContext(tempFolder.root), session,
-            com.keepasskey.app.data.logger.DebugLogBuffer(), createTestStrings()
-        )
+        val repository = newRepository(session)
 
         val revisionPwdChars = repository.getEntryRevisionPasswordChars(
             entryId.toHexString(), revisionId.toHexString()
@@ -797,12 +833,7 @@ class RealVaultRepositoryTest {
                 rootGroup = KdbxGroup(name = "Root", entries = listOf(poisonedEntry, targetEntry))
             )
         )
-        val repository = RealVaultRepository(
-            createMockContext(tempFolder.root),
-            session,
-            com.keepasskey.app.data.logger.DebugLogBuffer(),
-            createTestStrings()
-        )
+        val repository = newRepository(session)
 
         poisonedTitle.clear()
 
@@ -810,5 +841,44 @@ class RealVaultRepositoryTest {
         assertEquals(targetEntry.id.toHexString(), projected?.id)
         assertEquals("目标条目", projected?.title)
         assertNull(repository.getEntry(KdbxUuid.random().toHexString()).first())
+    }
+
+    /**
+     * ISSUE-P3-154：整库投影（`KdbxEntry` → `UiVaultEntry` / `KdbxGroup` → `VaultGroup`）
+     * **必须离开收集上下文**执行——列表页的收集上下文是 `viewModelScope`（Main）。
+     *
+     * 判别手法：注入记录型调度器（执行委托给测试调度器，断言全在虚拟时间轴上）。
+     * 若投影仍在收集上下文执行，该调度器一次都不会被派发 ⇒ 本用例必红。
+     *
+     * 两条流分开计数（`afterEntries` 差值），使「条目投影接线」与「分组投影接线」
+     * 各自独立可判，不会因其中一条已接线而掩盖另一条漏接线。
+     */
+    @Test
+    fun `整库条目与分组投影在注入的投影调度器上执行`() = runTest {
+        val (database, _) = createInitialDatabase()
+        val session = DatabaseSession()
+        session.setDatabaseForTesting(database)
+
+        val projection = DispatchRecordingDispatcher(StandardTestDispatcher(testScheduler))
+        val repository = newRepository(session, projectionDispatcher = projection)
+
+        assertEquals("未收集时不得产生任何派发", 0, projection.dispatchCount)
+
+        repository.getEntries().first()
+        val afterEntries = projection.dispatchCount
+        assertTrue("整库条目投影必须派发到注入的投影调度器", afterEntries > 0)
+
+        repository.getGroups().first()
+        assertTrue("分组投影必须派发到注入的投影调度器", projection.dispatchCount > afterEntries)
+    }
+
+    /**
+     * ISSUE-P3-154：生产绑定必须落在 [Dispatchers.Default] 上——本条要消除的行为正是
+     * 「投影落在 Main」。用 `assertSame` 锁住绑定值本身：绑定一旦改成 `Dispatchers.Main`
+     * （或任何其它调度器）即红。
+     */
+    @Test
+    fun `生产投影调度器绑定落在 Default 而非 Main`() {
+        assertSame(Dispatchers.Default, VaultProjectionModule.provideVaultProjectionDispatcher())
     }
 }
