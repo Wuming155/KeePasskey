@@ -41,11 +41,19 @@ interface SyncProvider {
      * 事务性原子上传：先写临时对象再原子替换目标，避免进程中断在远端留下半写文件。
      * 默认实现退化为普通 [upload]（协议不支持事务写时语义等价）；
      * 支持的协议（WebDAV PUT+MOVE、S3 条件写）应覆写本方法提供真正的原子保证。
+     *
+     * @param expectedEtag 远端目标的期望 ETag；null 表示不实施乐观锁（首传 / 强制覆盖）
+     * @param remoteExists `ISSUE-P3-180`：调用方**已探明**的「远端目标是否已存在」结论。
+     *   `null` 表示未知——需要该结论的实现（WebDAV 的 `Overwrite` 头）须自行探测；
+     *   非 null 时实现**不得**重复探测：首传路径的调用方
+     *   （`SyncCycleRunner.establishRemoteBaselineIfMissing`）已经用一次 `getMetadata`
+     *   得出「不存在」，原实现会在同一路径上再探一次（整条路径多一个 RTT）。
      */
     suspend fun uploadAtomic(
         remotePath: String,
         data: ByteArray,
-        expectedEtag: String? = null
+        expectedEtag: String? = null,
+        remoteExists: Boolean? = null
     ): Result<String> = upload(remotePath, data, expectedEtag)
 
     /**

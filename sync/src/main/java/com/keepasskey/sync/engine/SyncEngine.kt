@@ -269,7 +269,11 @@ class SyncEngine(
      * 如实返回 [SyncCommitResult.RemoteUnreachable]，待网络恢复后重新同步触发完整冲突流程；
      * 普通网络失败同样保留本地缓存并返回 [SyncCommitResult.RemoteUnreachable]。
      */
-    suspend fun commitLocal(remotePath: String, localBytes: ByteArray): SyncCommitResult = withContext(Dispatchers.IO) {
+    suspend fun commitLocal(
+        remotePath: String,
+        localBytes: ByteArray,
+        remoteExists: Boolean? = null
+    ): SyncCommitResult = withContext(Dispatchers.IO) {
         // 1. 先写缓存
         val localHash = cache.writeCache(remotePath, localBytes)
         val state = cache.getState(remotePath)
@@ -280,7 +284,9 @@ class SyncEngine(
         }
 
         // 2. 尽力上传
-        val uploadResult = provider.uploadAtomic(remotePath, localBytes, expectedEtag)
+        // ISSUE-P3-180：把调用方已探明的远端存在性结论下传（首传路径为 false），
+        // 避免 Provider 侧再探一次（WebDAV 的 Overwrite 判定）
+        val uploadResult = provider.uploadAtomic(remotePath, localBytes, expectedEtag, remoteExists)
         if (uploadResult.isSuccess) {
             val newEtag = uploadResult.getOrThrow()
             advanceBaseAndPersist(cache, remotePath, newEtag, localHash, localBytes)

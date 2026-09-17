@@ -252,7 +252,8 @@ class WebDavSyncProvider(
     override suspend fun uploadAtomic(
         remotePath: String,
         data: ByteArray,
-        expectedEtag: String?
+        expectedEtag: String?,
+        remoteExists: Boolean?
     ): Result<String> = withContext(Dispatchers.IO) {
         runCatching {
             val tmpPath = "$remotePath.${UUID.randomUUID()}$ATOMIC_TMP_SUFFIX"
@@ -268,8 +269,12 @@ class WebDavSyncProvider(
                 // If tagged list 已在服务端原子校验目标 ETag，Overwrite: T 仅表示允许替换
                 "T"
             } else {
-                // 无期望 ETag：探测目标存在性区分真首传与无 ETag 服务器的覆盖上传
-                if (getMetadata(remotePath).isSuccess) "T" else "F"
+                // 无期望 ETag：需要「目标是否已存在」来区分真首传与无 ETag 服务器的覆盖上传。
+                // ISSUE-P3-180：优先采用调用方**已探明**的结论（首传路径上游已用 getMetadata
+                // 得出「不存在」），仅在未知（null）时才现探一次 PROPFIND——原实现恒探一次，
+                // 使首传路径多一个 RTT。
+                val exists = remoteExists ?: getMetadata(remotePath).isSuccess
+                if (exists) "T" else "F"
             }
 
             fun createMoveRequest(): Request {

@@ -205,7 +205,9 @@ class SyncCycleRunner @Inject constructor(
         if (metaResult.isFailure) {
             val ex = metaResult.exceptionOrNull()
             if (ex is com.keepasskey.sync.model.SyncException.FileNotFound) {
-                val uploadResult = syncEngine.commitLocal(remotePath, localBytes)
+                // ISSUE-P3-180：上面的 getMetadata 已给出「远端不存在」的结论，下传给上传路径，
+                // 使首传不必在 Provider 侧再探一次存在性（WebDAV 的 Overwrite 判定）
+                val uploadResult = syncEngine.commitLocal(remotePath, localBytes, remoteExists = false)
                 return when (uploadResult) {
                     is SyncCommitResult.Uploaded -> {
                         session.lastSyncedDb = databaseSession.databaseFlow.value

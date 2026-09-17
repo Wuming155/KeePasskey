@@ -51,7 +51,7 @@
 
 ---
 
-## P3 低危问题、特性接线与体验优化（9 项）
+## P3 低危问题、特性接线与体验优化（8 项）
 
 > 本批为 2026-09-17「降低 CPU / 内存占用」排查的**其余开放结论**。
 > 条目 153 为 **Rust 下沉候选的评估结论**（评估项）；条目 155 为同轮后续批次（§115）开工复核转登。
@@ -111,7 +111,13 @@
 > ② 前半 验证器页接入 `calculateEntryTotps` 批量通道（每拍 T 次挂起调用 → 1 次）、
 > ③ 列表页周期集合按快照实例缓存；**② 后半（验证器页列表与倒计时解耦）转登 `ISSUE-P3-182`**，见
 > [`resolved/batches/132-节拍启停与逐条通道收敛批次.md`](resolved/batches/132-节拍启停与逐条通道收敛批次.md)。
-> 其余条目（`P3-164` / `P3-165` / `P3-168` / `P3-176` / `P3-177` / `P3-180` / `P3-182`）**仍待整改**。
+> **已闭环（§133 第四档：同步往返 ‣ 第五条）**：`ISSUE-P3-180`（WebDAV 首传重复 PROPFIND）——
+> `uploadAtomic` 增可选形参 `remoteExists` 并自首传路径下传，`Overwrite` 判定仅在未知时才现探；
+> **验证为 MockWebServer 的实测请求计数**（`remoteExists=false` ⇒ 2 次；`null` ⇒ 3 次，含负向对照），
+> 另将宿主侧 Windows 原子 rename 偶发 `AccessDeniedException`（平台现象）登记
+> [`architecture/已知工程限界.md`](architecture/已知工程限界.md) **§12**，见
+> [`resolved/batches/133-WebDAV首传重复探测收敛批次.md`](resolved/batches/133-WebDAV首传重复探测收敛批次.md)。
+> 其余条目（`P3-164` / `P3-165` / `P3-168` / `P3-176` / `P3-177` / `P3-182`）**仍待整改**。
 
 ### ISSUE-P3-153 Rust 下沉候选的评估结论（**评估项，非整改项**）
 
@@ -234,20 +240,6 @@
 - **核实时间点与方式**：2026-09-17 读 `CbcStreams.kt:95-300` 核实。
 - **风险提示**：属**主加密数据面**（与 `ISSUE-P3-155` 同族），高回归面，须排在零风险项之后；
   「复用缓冲」**不得**成为「不清零」的借口——清零责任须逐路径重述。
-
-### ISSUE-P3-180 WebDAV 单次上传最多 4 个往返（重复 PROPFIND）
-
-- **背景**：`sync/.../webdav/WebDavSyncProvider.kt:272` 在 `expectedEtag == null` 时额外插一次 PROPFIND
-  探测 `Overwrite`，而上游 `app/.../sync/SyncCycleRunner.kt:204` 的 `establishRemoteBaselineIfMissing`
-  已经探过一次；MOVE 成功但响应无 ETag 时再 `getMetadata` 一次（`:333`）；MOVE 失败重试 `for (attempt in 0..1)`
-  （`:296`）又各带一次 412 分支的 `getMetadata`（`:300`）⇒ 首传一次最多 4 个往返，弱网下每往返被 RTT 放大。
-- **整改方向**：把上游已探测到的远端存在性 / ETag 经参数下传（或让 `uploadAtomic` 接受
-  `remoteAbsent: Boolean?`），单次上传内的探测结果在一次调用内复用。
-- **验收标准**：首传路径的 HTTP 往返次数下降（请求计数断言，可用 MockWebServer 计次）；
-  条件写失败 / 412 / 无 ETag 四条分支的既有行为与错误语义回归全绿。
-- **核实时间点与方式**：2026-09-17 读 `WebDavSyncProvider.kt:215-340` 与 `SyncCycleRunner.kt:195-215` 核实。
-- **风险提示**：条件写是并发正确性的正确性来源（`已知工程限界.md` §1.3），
-  减少往返**不得**削弱「用 ETag 预检 + `If-Match` 条件写」的判定，只删重复探测。
 
 ### ISSUE-P3-182 验证器页倒计时与列表内容未解耦（整页每秒重建）
 

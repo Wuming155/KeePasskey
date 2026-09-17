@@ -79,6 +79,66 @@ class WebDavSyncScenarioTest {
         )
 
     // ------------------------------------------------------------------
+    // 场景 11：首传往返次数（ISSUE-P3-180）
+    // ------------------------------------------------------------------
+
+    @Test
+    fun `场景11 已知远端不存在时首传不得再探 PROPFIND`() = runTest {
+        startStateful()
+        val p = provider()
+
+        val before = server.requestCount
+        val etag = p.uploadAtomic(
+            "fresh.kdbx",
+            "v0".toByteArray(),
+            expectedEtag = null,
+            remoteExists = false
+        ).getOrThrow()
+
+        assertTrue("首传必须拿到 ETag", etag.isNotBlank())
+        assertEquals(
+            "已知远端不存在时首传只应有 PUT + MOVE 两个请求" +
+                "（原实现额外插一次 PROPFIND 存在性探测，首传路径多一个 RTT）",
+            2,
+            server.requestCount - before
+        )
+    }
+
+    @Test
+    fun `场景11 存在性未知时仍按原逻辑探测一次`() = runTest {
+        startStateful()
+        val p = provider()
+
+        val before = server.requestCount
+        p.uploadAtomic("fresh2.kdbx", "v0".toByteArray(), expectedEtag = null, remoteExists = null)
+            .getOrThrow()
+
+        assertEquals(
+            "未提供结论时必须现探一次 PROPFIND（PUT + PROPFIND + MOVE）——对侧保守语义不变",
+            3,
+            server.requestCount - before
+        )
+    }
+
+    @Test
+    fun `场景11 已知远端已存在时覆盖上传同样不探测`() = runTest {
+        val state = startStateful()
+        val p = provider()
+        p.upload("existing.kdbx", "v0".toByteArray()).getOrThrow()
+
+        val before = server.requestCount
+        p.uploadAtomic("existing.kdbx", "v1".toByteArray(), expectedEtag = null, remoteExists = true)
+            .getOrThrow()
+
+        assertEquals("已知存在时同样只需 PUT + MOVE", 2, server.requestCount - before)
+        assertArrayEquals(
+            "覆盖后远端内容必须为新版本（Overwrite: T 语义生效）",
+            "v1".toByteArray(),
+            state.files["/existing.kdbx"]
+        )
+    }
+
+    // ------------------------------------------------------------------
     // 场景 1：多端并发冲突（Provider 协议层）
     // ------------------------------------------------------------------
 

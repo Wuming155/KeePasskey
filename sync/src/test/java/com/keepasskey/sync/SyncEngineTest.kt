@@ -607,12 +607,18 @@ class SyncEngineTest {
         var lastExpectedEtag: String? = null
             private set
 
+        /** `ISSUE-P3-180`：最近一次 uploadAtomic 收到的「远端已存在」结论（同理用于断言参数真实下传） */
+        var lastRemoteExists: Boolean? = null
+            private set
+
         override suspend fun uploadAtomic(
             remotePath: String,
             data: ByteArray,
-            expectedEtag: String?
+            expectedEtag: String?,
+            remoteExists: Boolean?
         ): Result<String> {
             uploadAtomicCalls++
+            lastRemoteExists = remoteExists
             return upload(remotePath, data, expectedEtag)
         }
 
