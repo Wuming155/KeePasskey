@@ -96,19 +96,27 @@ class ChaCha20CipherEngine : CipherEngine {
         }
 
         /**
-         * 取得已注册的 BouncyCastle [Provider] **实例**，供本包引擎以
+         * 完整版 [BouncyCastleProvider] 的**持有实例**（ISSUE-P2-92）。
+         *
+         * **禁止**以 `Security.getProvider("BC")` 取用：Android 平台自带**剥离版** BC provider，
+         * 注册名同为 `"BC"` 但不含 `ChaCha7539` / `Twofish` 等轻量算法——真机上
+         * `ensureBouncyCastle()` 的「无则注册」判定恒为「已注册」，完整版永不生效，
+         * 按注册表取用必然 `NoSuchAlgorithmException`（2026-09-17 Redmi 4X 实测）。
+         * 本持有实例与注册表**完全解耦**，宿主 / 真机行为一致。
+         */
+        private val fullBouncyCastle: Provider by lazy { BouncyCastleProvider() }
+
+        /**
+         * 取得完整版 BouncyCastle [Provider] **实例**，供本包引擎以
          * `Cipher.getInstance(transformation, provider)` 形式取用。
          *
          * 相对按名取用（`Cipher.getInstance(transformation, "BC")`）的两个好处：
          * 1. 避开 Android Lint `DeprecatedProvider`（按名取用在 Android P+ 上会抛
          *    `NoSuchAlgorithmException`，官方建议改用 Provider 实例）；
-         * 2. Provider 缺失时在**这里**就 fail-fast，而不是在 `Cipher.getInstance` 内部
-         *    报出难以定位的 `NoSuchProviderException`。
+         * 2. **与注册表解耦**（ISSUE-P2-92）：无论注册表中的 `"BC"` 是完整版还是平台剥离版，
+         *    本函数恒返回完整版持有实例；BC 类缺失时在**这里**就 fail-fast，而不是在
+         *    `Cipher.getInstance` 内部报出难以定位的 `NoSuchProviderException`。
          */
-        fun bouncyCastleProvider(): Provider {
-            ensureBouncyCastle()
-            return Security.getProvider(BouncyCastleProvider.PROVIDER_NAME)
-                ?: error("BouncyCastle provider 未注册：${BouncyCastleProvider.PROVIDER_NAME}")
-        }
+        fun bouncyCastleProvider(): Provider = fullBouncyCastle
     }
 }

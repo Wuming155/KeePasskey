@@ -171,7 +171,8 @@ class DeviceThroughputProbeTest {
             // 注意：真机上 `Security.getProvider("BC")` 是平台剥离版 BC（无 ChaCha7539），
             // 实测 `Provider BC does not provide ChaCha7539`（2026-09-17，Redmi 4X）。
             // 此处**直接传入完整 BouncyCastleProvider 实例**以测得完整 BC 的真实吞吐；
-            // 生产 `ChaCha20CipherEngine.bouncyCastleProvider()` 的同名抢占缺陷另行登记 ISSUE-P2-92。
+            // 生产 `ChaCha20CipherEngine.bouncyCastleProvider()` 的同名抢占缺陷 ISSUE-P2-92
+            // （已于 §143 闭环：生产侧改为持有完整 BC 实例，与注册表解耦）。
             val c = Cipher.getInstance("ChaCha7539", org.bouncycastle.jce.provider.BouncyCastleProvider())
             c.init(mode, SecretKeySpec(key, "ChaCha7539"), IvParameterSpec(nonce))
             return c

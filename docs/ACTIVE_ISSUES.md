@@ -34,25 +34,13 @@
 
 ---
 
-## P2 中危缺陷与协议/测试缺口（1 项）
+## P2 中危缺陷与协议/测试缺口（0 项）
 
-### ISSUE-P2-92 平台剥离版 BC 抢占 provider 名：真机 ChaCha7539 不可用（宿主单测全绿的仅真机失败）
-
-- **现象（真实失败）**：真机上 `Cipher.getInstance("ChaCha7539", Security.getProvider("BC"))` 抛
-  `NoSuchAlgorithmException: Provider BC does not provide ChaCha7539`——任何经
-  [ChaCha20CipherEngine](../crypto/src/main/java/com/keepasskey/crypto/cipher/ChaCha20CipherEngine.kt)
-  的加解密路径（选 ChaCha20 为外层 cipher 的建库 / 保存 / 读取他人创建的 ChaCha20 KDBX）必然 fail-fast。
-- **根因**：Android 平台自带**剥离版** BC provider（注册名同为 `"BC"`，无 `ChaCha7539`）；
-  `ensureBouncyCastle()` 以 `Security.getProvider("BC") == null` 判定是否注册完整
-  BouncyCastle，真机上恒判「已注册」⇒ 完整版永不注册。宿主 JVM 无平台 `"BC"`，故宿主单测全绿。
-- **整改方向**：引擎内不查注册表、直接传完整 provider 实例
-  （`Cipher.getInstance("ChaCha7539", BouncyCastleProvider())`——2026-09-17 真机已实证该形态可用），
-  或以独立名注册完整版；**严禁** `removeProvider("BC")`（平台组件可能依赖）。
-- **核实时间点与方式**：2026-09-17 Redmi 4X（`santoni` / arm64-v8a / Android 17）真机
-  instrumented 探针首跑的真实异常与复跑通过，数据与证据文件见
-  [`records/真机吞吐实测记录_2026-09-17.md`](records/真机吞吐实测记录_2026-09-17.md) **§0 / §3**；
-  `grep app/src` 确认无任何 `removeProvider` / 完整版注册点。
-
+> **暂无开放项**。`ISSUE-P2-92`（平台剥离版 BC 抢占 `"BC"` 注册名致真机 ChaCha20 / Twofish
+> 全路径不可用）已于 **§143** 闭环——`bouncyCastleProvider()` 改为持有完整 BC 实例与注册表解耦，
+> 宿主回归 1 例 + 真机 3 例全绿，见
+> [`resolved/batches/143-真机BCProvider抢占解耦批次.md`](resolved/batches/143-真机BCProvider抢占解耦批次.md)。
+>
 > **暂无其余开放项**。`ISSUE-P2-91`（同步内容变化检测漏比 `times` 与历史内容）已于 §122 批次
 > **经前提复核撤销**——「只改 `times` 的本地编辑被静默丢弃」在本应用可达面上**不成立**
 > （生产代码无 `expires` / `expiryTime` 写入者；`times` 的改写必然伴随 `fields` 或 `customFields` 变化）；
@@ -173,7 +161,8 @@
 > [`records/真机吞吐实测记录_2026-09-17.md`](records/真机吞吐实测记录_2026-09-17.md)）：
 > `P3-155` 数据已取得并给出采纳结论（解密侧 7.3×，范围收窄）；`P3-153` 数据已取得（ChaCha20 ≈44×、
 > ES256/Ed25519 17~30×、RS256 否定），**立项决策待用户裁定**。
-> 实测过程另发现并登记 **`ISSUE-P2-92`**（平台 BC 抢占致真机 ChaCha7539 不可用，P2 唯一开放项）。
+> 实测过程另发现并登记 `ISSUE-P2-92`（平台 BC 抢占致真机 ChaCha7539 不可用，**整改中发现 Twofish
+> 路径同样踩中且被静默吞错**）——已于 **§143** 同日闭环。
 > **2026-09-17 增补与同日闭环**：交互成本核查顺带发现 `ISSUE-P3-184`（详情页 TOTP 复制按钮谎报成功），
 > 该条连同 5 项**同源但无编号**的交互整改（甲b 列表行徽标一次点击复制 / 乙 三处单值设置就地化 /
 > 丙 泄露检测开关开启即扫描 / 丁 「保存并同步」合并主按钮 / 戊 系统设置一次点击直达）已于 **§141** 同批闭环，
@@ -222,7 +211,7 @@
   **立项决策待裁定**（三处候选均需新增 Rust 依赖，须先过 `crypto/src/main/rust/deny.toml` 与
   供应链 CVSS ≥ 7.0 闸门；结合用户既有供应链口径，是否立项交由用户裁定——本条保持开放）。
   另：本条评估过程实测发现 ChaCha20 引擎在真机因平台剥离版 BC 抢占 provider 名而完全不可用，
-  已单列 **`ISSUE-P2-92`**（须先行整改，否则「ChaCha20 下沉与否」在真机无从谈起）。
+  已单列 `ISSUE-P2-92`（**已于 §143 闭环**——不修复则「ChaCha20 下沉与否」在真机无从谈起）。
 - **核实时间点与方式**：2026-09-17 逐处阅读 `crypto/` 全部 cipher / kdf / hash / passkey 实现与其 provider 选择，
   并核对 `crypto/src/main/rust/Cargo.toml` 现有内核边界与 `records/原生Argon2真机验证记录.md` 实测数据。
 - **风险提示**：两处候选均需**新增 Rust 依赖**（如 `chacha20` / `p256` / `ed25519-dalek` / `rsa`），
