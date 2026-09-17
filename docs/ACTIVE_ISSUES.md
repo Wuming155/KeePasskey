@@ -51,7 +51,7 @@
 
 ---
 
-## P3 低危问题、特性接线与体验优化（2 项）
+## P3 低危问题、特性接线与体验优化（4 项）
 
 > 本批为 2026-09-17「降低 CPU / 内存占用」排查的**其余开放结论**。
 > 条目 153 为 **Rust 下沉候选的评估结论**（评估项）；条目 155 为同轮后续批次（§115）开工复核转登。
@@ -158,6 +158,12 @@
 > 丙 泄露检测开关开启即扫描 / 丁 「保存并同步」合并主按钮 / 戊 系统设置一次点击直达）已于 **§141** 同批闭环，
 > 见 [`resolved/batches/141-一次点击交互整改批次.md`](resolved/batches/141-一次点击交互整改批次.md)。
 > ⇒ 「无需设备即可闭环」的开放项**再次清零**；本清单仍余 `P3-153` / `P3-155` 两项（均需真机吞吐实测）。
+>
+> **2026-09-17 再增补（同日第二排）**：用户命题「查找坏交互——本该一次点击就完成却要点很多次（尤其密码填充）」。
+> 经**填充全链路逐环节通读**（AutofillService → 解锁页 → 选择器 / 确认页 → 回传；CM 通道 PasswordFillActivity），
+> 登记 `ISSUE-P3-185`（选择器路径不复用会话授权宽限）与 `ISSUE-P3-186`（选择器路径不兑现 TOTP 复制/通知偏好）；
+> 「唯一强匹配候选不直达」经判定属**安全取舍而非缺陷**，登记 [`architecture/产品裁决登记.md`](architecture/产品裁决登记.md) **PD-05**。
+> 排查中同时确认既有一次点击整改均已就位（列表行一键复制密码 / TOTP 徽标 / 解锁页 IME Done 接线 / 系统设置直达），无回归。
 
 ### ISSUE-P3-153 Rust 下沉候选的评估结论（**评估项，非整改项**）
 
@@ -203,4 +209,48 @@
 - **验收标准**：`.kdbx` 往返字节级一致；与官方实现互操作（`OwnProductInteropProbeTest` + `keepassxc-cli`）通过；
   流式语义（填充非法 / 长度非整数倍 / 提前 close）逐例对齐 JCE 基线；**并给出设备侧前后吞吐对比**再决定是否采纳。
 - **风险提示**：本条触及**主加密数据面**，属高回归面改动，须排在所有零风险项之后。
+
+### ISSUE-P3-185 手动选择器填充路径不复用会话授权宽限（30 秒内重复填充仍强制二次确认）
+
+- **背景**：`ISSUE-P3-42` 的会话授权宽限（`autofillSessionGrant`，30 秒 TTL，默认关闭）设计意图是「同一站点 / 应用
+  的重复填充免二次确认」，但其消费点**只有数据集路径**一处——`AutofillDatasetBuilders.appendUnlockedDatasets`
+  查询 `AutofillSessionGrants.isGranted`（`AutofillDatasetBuilders.kt:198-211`）决定是否跳过
+  `AutofillConfirmActivity`；写入点在 `AutofillConfirmActivity.completeAuthResult`（`AutofillConfirmActivity.kt:268-274`）。
+  而手动选择器路径 `AutofillPickerActivity.confirmAndFill`（`AutofillPickerActivity.kt:148-185`）**既不查询也不写入**
+  会话授权：从选择器每次填充都无条件走全量生物识别（有认证器时）；且经选择器填充成功也不产生授权记录，
+  30 秒内改走数据集路径同样免不了确认。
+- **影响**：同一「同站 30 秒内重复填充」的用户意图，两条路径行为分叉；选择器本就是更费操作的兜底路径
+  （搜索 + 点选），宽限红利却完全不可得，设置页承诺在选择器路径静默落空。
+- **整改方向**：`confirmAndFill` 在发起生物识别前查询 `AutofillSessionGrants.isGranted`（开关开启 + 库解锁 +
+  授权有效 → 跳过本次生物识别直接 `deliver`）；`deliver` 成功路径同样按确认页同口径写入
+  `AutofillSessionGrants.grant`（`AutofillGrantContext`：包名 + 归属校验后域）。**不得**放宽任何放行判定：
+  宽限豁免的仅是「重复二次确认」，不改变首次绑定写入（P2-46）、黑名单复核与字段 id 回传语义。
+- **验收标准**：① 开关开启时，选择器填充后 30 秒内同「包名 + 域」再次经选择器填充不再弹生物识别，
+  TTL 过期后恢复弹窗（可按 `AutofillSessionGrantStoreTest` 同口径单测）；② 开关关闭时行为与现状完全一致；
+  ③ 库锁定态不走宽限（与 `AutofillAuthenticationPolicy` 现有守卫一致）；④ 既有
+  `AutofillSessionGrantStoreTest` / `AutofillPickerViewModelSessionLockTest` 全绿。
+- **核实时间点与方式**：2026-09-17 全仓 grep `AutofillSessionGrants\.(grant|isGranted)`——仅
+  `AutofillDatasetBuilders.kt:199`（消费）与 `AutofillConfirmActivity.kt:270`（写入）两处命中，
+  `AutofillPickerActivity` 无任何引用。
+- **风险提示**：宽限豁免与 TASK-11（P2-24）的「每数据集二次确认」安全整改存在张力，实现须严格复用
+  既有 `AutofillGrantContext` 判定口径，不得自造更宽的匹配键。
+
+### ISSUE-P3-186 手动选择器填充路径不兑现「填充后自动复制 TOTP / 验证码通知」偏好
+
+- **背景**：设置页承诺「填充后自动将 TOTP 动态码复制到剪贴板 / 发送验证码通知」（`ISSUE-P3-03` 43b /
+  `ISSUE-P3-18`），其唯一落点是 `AutofillConfirmActivity.handleTotpAfterConfirm`
+  （`AutofillConfirmActivity.kt:374-405`，500ms 硬超时 + 双开关闸门 + 库锁定不触碰）。而手动选择器路径
+  `AutofillPickerActivity.deliver`（`AutofillPickerActivity.kt:187-213`）构造数据集回传后直接结束，
+  **无任何 TOTP 处理**——经选择器填充带 TOTP 的条目后，用户仍须回到应用手动复制验证码，偏好被静默打折。
+- **整改方向**：把「填充交付成功 → TOTP 二次动作」收敛为一份共用实现（复用 `AutofillTotpCopyPolicy` +
+  `ClipboardSecurityManager.copySensitiveText` + `TotpNotificationPublisher.publish`），
+  `AutofillPickerActivity.deliver` 在回传前同样调用；沿用 500ms 硬超时与「开关关闭 / 无 TOTP / 库锁定
+  不触碰」守卫，任何异常 / 超时不得阻断填充回传。
+- **验收标准**：① 开关开启时选择器路径填充带 TOTP 条目后剪贴板为该条目当前验证码（受保护剪贴板 +
+  定时擦除）；② 两开关皆关时零额外开销、零副作用；③ 单测覆盖共用实现的策略判定与超时放弃路径；
+  ④ `EntryDetailTotpCopyTest` 等既有 TOTP 用例全绿。
+- **核实时间点与方式**：2026-09-17 通读 `AutofillPickerActivity` 全文（`deliver` 无 TOTP 引用），并 grep
+  `handleTotpAfterConfirm` / `AutofillTotpCopyPolicy` 确认唯一消费点在确认页。
+- **风险提示**：`deliver` 处于回传 `RESULT_OK` 前的临界区，TOTP 动作必须保持硬超时兜底（超时即放弃），
+  不得拖住回传；通知发布须沿用确认页同一双闸门（偏好 + 通知权限）。
 
