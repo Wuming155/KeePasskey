@@ -10,64 +10,122 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * ISSUE-P2-88 回归：条目凭据取值**不得**只依赖本 VM 的缓存。
+ * 自动填充凭据取值通道回归：ISSUE-P2-88（取值不得只依赖 VM 缓存）+ ISSUE-P3-148（确认路径不装载整库）。
  *
- * ## 缺陷形态（真机定位）
+ * ## ISSUE-P2-88 缺陷形态（真机定位）
  *
- * 本 VM 的条目缓存由 `init` **异步**填充，而 VM 是**按需创建**的——二次确认页
- * （[AutofillConfirmActivity]）在用户点「确认填充」时才首次访问它。那一刻缓存尚未就绪，
- * 若用户名只从缓存取，就会拿到空用户名字符串：回传数据集里只剩口令字段。
- * 真机留痕即此形态（口令 12 字符写入成功、账号框始终为空）。
+ * 本 VM 的条目缓存由选择器页异步填充，而确认页（[AutofillConfirmActivity]）在用户点
+ * 「确认填充」时才**首次创建**该 VM——那一刻缓存尚未就绪，若用户名只从缓存取，就会拿到
+ * 空用户名：回传数据集里只剩口令字段。真机留痕即此形态（口令 12 字符写入成功、账号框始终为空）。
  *
- * ## 判据
+ * ## ISSUE-P3-148 判据
  *
- * 首份快照为空（模拟缓存未就绪）时，`resolveCredentials` 必须回退到仓库快照取用户名；
- * 凭据内容仍只经既有通道（口令走 [VaultRepository.getEntryPasswordChars]）。
+ * 确认路径由 `EXTRA_ENTRY_ID` 指向**单条**，故其取数只许走
+ * [VaultRepository.getKdbxEntry]（按 id 单条查询），**不得**触发
+ * [VaultRepository.getKdbxEntries]（整库非敏感投影）——后者是选择器页搜索的固有开销，
+ * 每次「确认填充」付一次即与库规模成正比。
+ *
+ * 口令仍只经既有按需解密通道（[VaultRepository.getEntryPasswordChars]）取得。
  */
 class AutofillPickerViewModelCredentialLookupTest {
 
     @Test
-    fun `缓存未就绪时用户名必须回退到仓库快照`() = runBlocking {
-        val entryId = KdbxUuid.random()
-        val entry = KdbxEntry(
-            id = entryId,
-            fields = mapOf(
-                KdbxConstants.Fields.USER_NAME to ProtectedString(TEST_USERNAME, isProtected = false),
-                KdbxConstants.Fields.PASSWORD to ProtectedString(TEST_PASSWORD, isProtected = true)
-            )
-        )
-        // 首次调用（VM init 拉取缓存）返回空列表，之后返回真实条目——
-        // 复现「VM 按需创建、缓存尚未就绪」这一真机形态
-        var snapshotCalls = 0
+    fun `确认路径不装载整库投影_且仍取到用户名与口令`() = runBlocking {
+        val entryUuid = KdbxUuid.random()
+        var wholeVaultLoads = 0
+        var singleLookups = 0
         val repository = object : VaultRepository by FakeVaultRepository() {
             override suspend fun getKdbxEntries(): List<KdbxEntry> {
-                snapshotCalls++
-                return if (snapshotCalls == 1) emptyList() else listOf(entry)
+                wholeVaultLoads++
+                return listOf(entry(entryUuid))
+            }
+
+            override suspend fun getKdbxEntry(entryId: String): KdbxEntry? {
+                singleLookups++
+                return entry(entryUuid)
             }
 
             override suspend fun getEntryPasswordChars(entryId: String): CharArray? =
                 TEST_PASSWORD.toCharArray()
         }
 
+        // 确认页形态：VM 按需创建，**从不**调用 loadEntries（该页不做整库装载）
         val viewModel = AutofillPickerViewModel(repository)
-        // 等 init 的异步拉取发生一次（缓存被填成「空列表」——即未就绪形态）。
-        // 不等待就调用会在竞态下由 resolveCredentials 消费掉第 1 次快照（假红）。
+        val credentials = viewModel.resolveCredentials(entryUuid.toHexString())
+
+        assertEquals("用户名须经单条查询取回（不得只依赖缓存）", TEST_USERNAME, credentials?.username)
+        assertEquals("口令仍走既有按需解密通道", TEST_PASSWORD, credentials?.password)
+        assertEquals("确认路径不得装载整库非敏感投影", 0, wholeVaultLoads)
+        assertEquals("用户名须经按 id 的单条查询", 1, singleLookups)
+        assertTrue("确认路径不得留下整库缓存", viewModel.entries.value.isEmpty())
+    }
+
+    @Test
+    fun `选择器页缓存命中时不回查仓库单条`() = runBlocking {
+        val entryUuid = KdbxUuid.random()
+        var singleLookups = 0
+        val repository = object : VaultRepository by FakeVaultRepository() {
+            override suspend fun getKdbxEntries(): List<KdbxEntry> = listOf(entry(entryUuid))
+
+            override suspend fun getKdbxEntry(entryId: String): KdbxEntry? {
+                singleLookups++
+                return entry(entryUuid)
+            }
+
+            override suspend fun getEntryPasswordChars(entryId: String): CharArray? =
+                TEST_PASSWORD.toCharArray()
+        }
+
+        // 选择器页形态：显式发起整库装载（搜索用），之后选中条目
+        val viewModel = AutofillPickerViewModel(repository)
+        viewModel.loadEntries()
+        awaitEntries(viewModel)
+
+        val credentials = viewModel.resolveCredentials(entryUuid.toHexString())
+
+        assertEquals(TEST_USERNAME, credentials?.username)
+        assertEquals("缓存命中即免一次仓库单条查询", 0, singleLookups)
+    }
+
+    @Test
+    fun `条目取不回时用户名按空降级而非崩溃`() = runBlocking {
+        // 锁定态 / 条目已不存在：仓库单条查询返回 null（P2-52 fail-safe 语义不回归为抛错或放行）
+        val repository = object : VaultRepository by FakeVaultRepository() {
+            override suspend fun getKdbxEntries(): List<KdbxEntry> =
+                error("确认路径不得装载整库")
+
+            override suspend fun getKdbxEntry(entryId: String): KdbxEntry? = null
+
+            override suspend fun getEntryPasswordChars(entryId: String): CharArray? = null
+        }
+
+        val viewModel = AutofillPickerViewModel(repository)
+        val credentials = viewModel.resolveCredentials(KdbxUuid.random().toHexString())
+
+        assertEquals("条目不可读 ⇒ 空用户名降级", "", credentials?.username)
+        assertEquals("无口令 ⇒ 空口令降级", "", credentials?.password)
+    }
+
+    private fun entry(id: KdbxUuid) = KdbxEntry(
+        id = id,
+        fields = mapOf(
+            KdbxConstants.Fields.USER_NAME to ProtectedString(TEST_USERNAME, isProtected = false),
+            KdbxConstants.Fields.PASSWORD to ProtectedString(TEST_PASSWORD, isProtected = true)
+        )
+    )
+
+    private suspend fun awaitEntries(viewModel: AutofillPickerViewModel) {
         withContext(Dispatchers.IO) {
             var waited = 0L
-            while (snapshotCalls == 0 && waited < 5_000) {
+            while (viewModel.entries.value.isEmpty() && waited < 5_000) {
                 Thread.sleep(10)
                 waited += 10
             }
         }
-        assertEquals("测试前提：缓存首份快照为空（模拟未就绪）", emptyList<KdbxEntry>(), viewModel.entries.value)
-
-        val credentials = viewModel.resolveCredentials(entryId.toHexString())
-
-        assertEquals("缓存未命中时必须回退仓库快照取用户名", TEST_USERNAME, credentials?.username)
-        assertEquals("口令仍走既有按需解密通道", TEST_PASSWORD, credentials?.password)
     }
 
     private companion object {

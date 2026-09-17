@@ -40,25 +40,8 @@
 
 ---
 
-## P3 低危问题、特性接线与体验优化（1 项）
+## P3 低危问题、特性接线与体验优化（0 项）
 
-### ISSUE-P3-148：自动填充确认页每次确认都加载整库条目投影（实际只需一条）
-
-- **优先级**：P3（开销 / 性能——**不是缺陷**，是 `ISSUE-P2-88` 修复**新引入**的调用面）
-- **当前状态**：**开放项**——不因本条而回退 `P2-88` 的修复（那条路径的正确性已验证通过）。
-- **来源**：`ISSUE-P2-88` 修复过程中发现（确认页复用选择器的 ViewModel 以共享取数路径）。
-- **核实时间点与核实方式（2026-09-17 对 HEAD `92cc25f` + §111 工作区）**：直读
-  `app/src/main/java/com/keepasskey/app/autofill/AutofillPickerViewModel.kt`——
-  `:41` / `:44` 的 `_entries` 状态、`:51-56` 的 `init` 装载 `vaultRepository.getKdbxEntries()`（**整库**）、
-  以及 `:95` 的 `cachedUsername(entryId) ?: vaultRepository.getKdbxEntries()`（**回退分支同样装载整库**）；
-  对照 `AutofillConfirmActivity` 中新增的 `AutofillPickerViewModel by viewModels()` 注入点。
-- **问题描述**：选择器页本就装载整库投影（该页要搜索，属其固有开销）；但**确认路径**是本批**新增**的调用方——
-  它每次只处理**一条**条目（`EXTRA_ENTRY_ID` 已给出），却会触发整库投影装载，且在缓存未命中时**再装载一次**
-  （`:95` 的回退）。⇒ 大库上每次「确认填充」多付一到两次与库规模成正比的装载成本。
-- **验收标准**：① 确认路径改走「按 id 取单条」的路径（或给仓库层加「优先单条查询」的接口），
-  不再触发整库装载；② **不改变** `ISSUE-P2-52` 的锁定态 fail-safe 语义（空用户名降级，不得改为抛错/放行）；
-  ③ 回归覆盖两条：确认路径**不再**装载整库、且**仍取得到**凭据（用户名与口令）。
-- **注意**：本条**不影响正确性**，只影响开销；也**不**要求改选择器页（其整库装载是设计使然）。
-- **依据**：`RESOLVED_LOG.md` §111；`app/src/main/java/com/keepasskey/app/autofill/AutofillPickerViewModel.kt`；`AutofillConfirmActivity.kt`。
+> **暂无开放项**（历史 P3 条目见 [RESOLVED_LOG.md](RESOLVED_LOG.md)；本会话最后一条 `ISSUE-P3-148` 于 §113 闭环）。
 
 

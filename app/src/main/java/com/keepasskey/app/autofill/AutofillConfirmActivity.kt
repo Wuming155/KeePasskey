@@ -111,7 +111,10 @@ class AutofillConfirmActivity : FragmentActivity() {
     lateinit var autofillLastFilledStore: AutofillLastFilledStore
 
     // ISSUE-P2-88：确认后取回条目凭据的通道——与选择器复用同一 ViewModel，
-    // 使「按条目取用户名 + 按需解密口令 + 字段引用展开」只有一份实现
+    // 使「按条目取用户名 + 按需解密口令 + 字段引用展开」只有一份实现。
+    // ISSUE-P3-148：本页**不**调用 [AutofillPickerViewModel.loadEntries]——确认路径只处理
+    // EXTRA_ENTRY_ID 指向的单条，取数全走 `VaultRepository.getKdbxEntry` 单条查询，
+    // 不触碰整库非敏感投影（VM 的整库装载已改由选择器页显式发起）。
     private val pickerViewModel: AutofillPickerViewModel by viewModels()
 
     private var completed = false

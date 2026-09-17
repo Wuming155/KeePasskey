@@ -30,6 +30,16 @@ import javax.inject.Inject
  *   绝不让锁定竞态演变为选择器崩溃。
  * - **不削弱** `ProtectedString.clear()`（就地清零是该设计的负载承载点）——本整改只调整
  *   缓存持有与读取侧容错，不触碰清零语义。
+ *
+ * ### ISSUE-P3-148：整库装载改**惰性**，且不再是确认路径的取数通道
+ * 本 VM 有两条**成本面完全不同**的调用路径，此前被同一段 `init` 装载逻辑绑在一起：
+ * - **选择器页**（[AutofillPickerActivity]）：需要全库做搜索，整库非敏感投影是其**固有开销**；
+ * - **确认页**（[AutofillConfirmActivity]）：由 `EXTRA_ENTRY_ID` 指向**单条**，却因复用本 VM
+ *   而被动触发整库装载，缓存未命中时还要再装一次 ⇒ 大库上每次确认多付 1~2 次与规模成正比的开销。
+ *
+ * 故整库装载**不再于 `init` 自动发生**，改由选择器页显式调用 [loadEntries]；确认路径只经
+ * [VaultRepository.getKdbxEntry] 按 id 取单条，**从头到尾不触碰整库投影**。
+ * 缓存命中仍优先（选择器场景免一次仓库查询），未命中才落到单条查询。
  */
 @HiltViewModel
 class AutofillPickerViewModel @Inject constructor(
@@ -48,9 +58,26 @@ class AutofillPickerViewModel @Inject constructor(
         _entries.value = emptyList()
     }
 
+    /** ISSUE-P3-148：整库装载只允许发生一次（幂等），且只由选择器页发起 */
+    private var entriesLoadStarted = false
+
     init {
         // ISSUE-P2-52：注册会话锁定观察者（须在 [sessionLockObserver] 声明之后）
         databaseSession?.addLockObserver(sessionLockObserver)
+        // ISSUE-P3-148：**刻意不在 init 装载整库**——确认页（按需创建本 VM）不需要全库，
+        // 而 init 装载会让每次「确认填充」都付一次与库规模成正比的成本。需要全库的
+        // 选择器页显式调用 [loadEntries]。
+    }
+
+    /**
+     * ISSUE-P3-148：**选择器页专用**——装载整库非敏感投影供搜索。
+     *
+     * 幂等：重复调用不重复装载（与整改前的 `init` 装载同语义——选择器为一次性 Activity，
+     * 锁定清空后重开即新建 VM 并重新拉取）。确认路径**不得**调用本方法。
+     */
+    fun loadEntries() {
+        if (entriesLoadStarted) return
+        entriesLoadStarted = true
         viewModelScope.launch {
             _entries.value = try {
                 vaultRepository.getKdbxEntries()
@@ -82,20 +109,19 @@ class AutofillPickerViewModel @Inject constructor(
      *   只接受 CharSequence），不可擦除 String 的既有缺口见 ISSUE-P2-15——
      *   其生命周期被压缩到「构建 Dataset → 回传 → 出栈」这一段，不落任何状态流/日志/成员变量。
      *
-     * ISSUE-P2-88：用户名**不得**只依赖本 VM 的条目缓存——缓存由 `init` 异步填充，而本 VM 是
-     * 按需创建的（二次确认页在用户点「确认填充」时才首次访问它），那一刻缓存尚未就绪，
-     * 会让回传数据集缺用户名（真机实测：口令写入成功、账号框仍为空）。故缓存未命中时
-     * 按需向仓库取一次单条快照；锁定态下仓库同为空读 / 抛错，按空用户名降级（fail-safe 不变）。
+     * ISSUE-P2-88：用户名**不得**只依赖本 VM 的条目缓存——缓存由选择器页的 [loadEntries] 异步填充，
+     * 而本 VM 在确认页是**按需创建**的（二次确认页在用户点「确认填充」时才首次访问它），且确认路径
+     * **刻意不做整库装载**，那一刻缓存必然为空，若用户名只从缓存取，回传数据集就会缺用户名
+     * （真机实测：口令写入成功、账号框仍为空）。故缓存未命中时按 id 向仓库取**单条**快照
+     * （ISSUE-P3-148：不再是整库装载）；锁定态下仓库同为空读 / 抛错，按空用户名降级（fail-safe 不变）。
      */
     suspend fun resolveCredentials(entryId: String): Credentials? {
         if (entryId.isBlank()) return null
         // ISSUE-P2-52：用户名读取 fail-safe——锁定竞态窗口内条目可能已清零
         // （readString 抛 IllegalStateException），按空用户名降级而非崩溃
         val username = runCatching {
-            cachedUsername(entryId) ?: vaultRepository.getKdbxEntries()
-                .firstOrNull { it.id.toHexString() == entryId }
-                ?.userName
-                .orEmpty()
+            cachedUsername(entryId)
+                ?: vaultRepository.getKdbxEntry(entryId)?.userName.orEmpty()
         }.getOrDefault("")
 
         val chars = try {

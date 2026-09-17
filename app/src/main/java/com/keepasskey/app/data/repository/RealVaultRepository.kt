@@ -262,6 +262,16 @@ class RealVaultRepository @Inject constructor(
         return db.rootGroup.allEntries()
     }
 
+    /**
+     * ISSUE-P3-148：单条查询走 [com.keepasskey.core.model.KdbxGroup.findEntry]（深度优先短路），
+     * **不**物化整份条目列表——自动填充确认路径每次只处理一条，付不起与库规模成正比的装载成本。
+     */
+    override suspend fun getKdbxEntry(entryId: String): KdbxEntry? {
+        val uuid = parseKdbxUuidOrNull(entryId) ?: return null
+        val db = databaseSession.databaseFlow.first() ?: return null
+        return db.rootGroup.findEntry(uuid)
+    }
+
     override suspend fun findEntriesForRpId(rpId: String): List<KdbxEntry> =
         passkeyEntries.findEntriesForRpId(rpId)
 

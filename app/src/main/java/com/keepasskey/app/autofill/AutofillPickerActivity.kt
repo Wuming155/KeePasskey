@@ -73,6 +73,10 @@ class AutofillPickerActivity : FragmentActivity() {
 
         val requester = resolveRequester()
 
+        // ISSUE-P3-148：整库非敏感投影**由本页显式触发**（本页需要全库做搜索，属其固有开销）——
+        // VM 不再于 init 自动装载，否则按需创建的二次确认页会被动付同样的成本。
+        viewModel.loadEntries()
+
         setContent {
             var query by remember { mutableStateOf("") }
             val entries by viewModel.entries.collectAsStateWithLifecycle()

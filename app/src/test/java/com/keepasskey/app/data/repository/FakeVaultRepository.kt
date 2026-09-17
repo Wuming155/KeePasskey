@@ -359,6 +359,10 @@ class FakeVaultRepository(
         return converted + extraKdbxEntries.value
     }
 
+    /** ISSUE-P3-148：单条查询（Fake 无树结构，按同 id 语义在既有快照上取首条） */
+    override suspend fun getKdbxEntry(entryId: String): KdbxEntry? =
+        getKdbxEntries().firstOrNull { it.id.toHexString() == entryId }
+
     override suspend fun findEntriesForRpId(rpId: String): List<KdbxEntry> {
         val cleanTarget = DomainMatcher.extractDomain(rpId)
         return getKdbxEntries().filter { entry ->

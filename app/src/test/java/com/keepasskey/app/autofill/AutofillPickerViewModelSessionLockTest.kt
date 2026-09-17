@@ -29,8 +29,10 @@ class AutofillPickerViewModelSessionLockTest {
     fun `会话锁定后选择器缓存条目被清空`() {
         val session = DatabaseSession()
         val vm = AutofillPickerViewModel(FakeVaultRepository(), session)
+        // ISSUE-P3-148：整库装载不再于 init 自动发生，改由选择器页显式发起（本用例模拟该页）
+        vm.loadEntries()
 
-        // init 异步拉取（Fake 即时返回）→ 先等待列表就绪
+        // 装载为异步（Fake 即时返回）→ 先等待列表就绪
         runBlocking {
             withContext(Dispatchers.IO) {
                 var waited = 0L
@@ -62,8 +64,10 @@ class AutofillPickerViewModelSessionLockTest {
             override suspend fun getKdbxEntries(): List<KdbxEntry> = listOf(clearedEntry)
         }
         val vm = AutofillPickerViewModel(repo, null)
+        // ISSUE-P3-148：显式触发整库装载（选择器页路径）
+        vm.loadEntries()
 
-        // 等待 init 异步拉取完成
+        // 等待异步装载完成
         withContext(Dispatchers.IO) {
             var waited = 0L
             while (vm.entries.value.isEmpty() && waited < 5_000) {

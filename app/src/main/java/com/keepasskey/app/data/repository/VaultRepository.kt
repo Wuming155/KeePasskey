@@ -247,8 +247,24 @@ interface VaultRepository {
 
     /**
      * 一次性快照直出 Core 层 KdbxEntry 列表（供 Credential Provider 与 Autofill 系统服务直接消费，不经 UI 投影）
+     *
+     * **调用面约束（ISSUE-P3-148）**：本方法按库规模物化整份条目列表，只允许**确实需要全库**的
+     * 调用方使用（选择器搜索、系统服务候选装配、健康检查等）。只处理**一条**已知 id 的调用方
+     * 一律改用 [getKdbxEntry]——典型反例是自动填充二次确认页：它由 `EXTRA_ENTRY_ID` 明确指向单条，
+     * 却曾复用选择器的整库装载路径，大库上每次确认多付一次与规模成正比的装载成本。
      */
     suspend fun getKdbxEntries(): List<com.keepasskey.core.model.KdbxEntry>
+
+    /**
+     * 按 id 取**单条**条目快照（ISSUE-P3-148：优先单条查询入口）。
+     *
+     * 与 [getKdbxEntries] 的语义差异在**成本面**而非内容面：实现方必须走「按 id 定位单条」的
+     * 路径（如 `KdbxGroup.findEntry` 的深度优先短路搜索），**不得**物化整份条目列表再过滤。
+     *
+     * 会话锁定 / 库未打开 / id 非法 / 条目不存在一律返回 null——调用方沿用既有 fail-safe
+     * 语义处理（自动填充侧不得因此崩溃或放行）。
+     */
+    suspend fun getKdbxEntry(entryId: String): com.keepasskey.core.model.KdbxEntry?
 
     /**
      * 按需解密单条凭据的密码（M1 整改）。

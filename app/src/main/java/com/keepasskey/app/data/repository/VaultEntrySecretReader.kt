@@ -11,6 +11,11 @@ import kotlinx.coroutines.flow.first
  * 职责单一：条目的密码 / 历史修订密码 / 修订快照 / 受保护自定义字段 / TOTP
  * （计算与配置原文）/ 附件数据的**按需解密读取**。
  *
+ * ISSUE-P3-148：按 id 定位条目一律走 `KdbxGroup.findEntry`（深度优先短路），**不再**
+ * `rootGroup.allEntries().firstOrNull { … }`——后者的语义虽等价（同为深度优先首命中），
+ * 但会先把**整库条目**物化成一份临时列表，在「只需一条」的热路径（自动填充确认页按条目取
+ * 用户名 / 口令 / TOTP）上属于与库规模成正比的纯浪费。
+ *
  * 擦除契约（ISSUE-P2-15）保持不变：
  * - [readErasableString] 中转的 CharArray 副本在用毕立即清零；
  * - 所有 `CharArray` 通道返回**独占副本**，清零责任按借用契约移交调用方；
@@ -43,7 +48,7 @@ internal class VaultEntrySecretReader(
     suspend fun getEntryPassword(entryId: String): String? {
         val targetUuid = parseKdbxUuidOrNull(entryId) ?: return null
         val currentDb = databaseSession.databaseFlow.first() ?: return null
-        val entry = currentDb.rootGroup.allEntries().firstOrNull { it.id == targetUuid }
+        val entry = currentDb.rootGroup.findEntry(targetUuid)
         // ISSUE-P2-15：不再直接 readString()，经 CharArray 独占副本中转并即时清零
         return readErasableString(entry?.password)
     }
@@ -51,7 +56,7 @@ internal class VaultEntrySecretReader(
     suspend fun getEntryPasswordChars(entryId: String): CharArray? {
         val targetUuid = parseKdbxUuidOrNull(entryId) ?: return null
         val currentDb = databaseSession.databaseFlow.first() ?: return null
-        val entry = currentDb.rootGroup.allEntries().firstOrNull { it.id == targetUuid }
+        val entry = currentDb.rootGroup.findEntry(targetUuid)
         // readChars() 返回独占副本（内部中间量已清零），清零责任随契约移交调用方
         return entry?.password?.readChars()
     }
@@ -60,7 +65,7 @@ internal class VaultEntrySecretReader(
         val targetUuid = parseKdbxUuidOrNull(entryId) ?: return null
         val revisionUuid = parseKdbxUuidOrNull(revisionId) ?: return null
         val currentDb = databaseSession.databaseFlow.first() ?: return null
-        val entry = currentDb.rootGroup.allEntries().firstOrNull { it.id == targetUuid }
+        val entry = currentDb.rootGroup.findEntry(targetUuid)
         // ISSUE-P2-15：不再直接 readString()，经 CharArray 独占副本中转并即时清零
         return readErasableString(entry?.history?.firstOrNull { it.id == revisionUuid }?.password)
     }
@@ -69,7 +74,7 @@ internal class VaultEntrySecretReader(
         val targetUuid = parseKdbxUuidOrNull(entryId) ?: return null
         val revisionUuid = parseKdbxUuidOrNull(revisionId) ?: return null
         val currentDb = databaseSession.databaseFlow.first() ?: return null
-        val entry = currentDb.rootGroup.allEntries().firstOrNull { it.id == targetUuid }
+        val entry = currentDb.rootGroup.findEntry(targetUuid)
         // M2 整改：回滚路径全程 CharArray（readChars 返回独占副本，内部中间量已清零）
         return entry?.history?.firstOrNull { it.id == revisionUuid }?.password?.readChars()
     }
@@ -78,7 +83,7 @@ internal class VaultEntrySecretReader(
         val targetUuid = parseKdbxUuidOrNull(entryId) ?: return null
         val revisionUuid = parseKdbxUuidOrNull(revisionId) ?: return null
         val currentDb = databaseSession.databaseFlow.first() ?: return null
-        val entry = currentDb.rootGroup.allEntries().firstOrNull { it.id == targetUuid } ?: return null
+        val entry = currentDb.rootGroup.findEntry(targetUuid) ?: return null
         val revision = entry.history.firstOrNull { it.id == revisionUuid } ?: return null
         // 断点8 整改：整修订快照投影 + 受保护字段解密回填（仅驻留回滚会话），
         // 使回滚保存时 title/url/自定义字段/TOTP/密码全字段真实还原
@@ -114,7 +119,7 @@ internal class VaultEntrySecretReader(
     suspend fun getEntryProtectedFieldChars(entryId: String, fieldKey: String): CharArray? {
         val targetUuid = parseKdbxUuidOrNull(entryId) ?: return null
         val currentDb = databaseSession.databaseFlow.first() ?: return null
-        val entry = currentDb.rootGroup.allEntries().firstOrNull { it.id == targetUuid } ?: return null
+        val entry = currentDb.rootGroup.findEntry(targetUuid) ?: return null
         // TASK-10：编辑态 CharArray 化——readChars 返回独占副本，调用方按借用语义用毕清零
         return entry.customFields.firstOrNull { it.key == fieldKey }?.value?.readChars()
     }
@@ -122,7 +127,7 @@ internal class VaultEntrySecretReader(
     suspend fun calculateEntryTotp(entryId: String): EntryTotpSnapshot? {
         val targetUuid = parseKdbxUuidOrNull(entryId) ?: return null
         val currentDb = databaseSession.databaseFlow.first() ?: return null
-        val entry = currentDb.rootGroup.allEntries().firstOrNull { it.id == targetUuid } ?: return null
+        val entry = currentDb.rootGroup.findEntry(targetUuid) ?: return null
         // 种子仅在数据层内瞬时解析并参与计算，绝不随结果外泄
         val config = entryMapper.parseTotpConfig(entry) ?: return null
         return try {
@@ -144,7 +149,7 @@ internal class VaultEntrySecretReader(
     suspend fun getEntryTotpSecretChars(entryId: String): CharArray? {
         val targetUuid = parseKdbxUuidOrNull(entryId) ?: return null
         val currentDb = databaseSession.databaseFlow.first() ?: return null
-        val entry = currentDb.rootGroup.allEntries().firstOrNull { it.id == targetUuid } ?: return null
+        val entry = currentDb.rootGroup.findEntry(targetUuid) ?: return null
         // 断点4 整改：与 parseTotpConfig 同源读取（otp 字段优先，回退 TOTP 开头的自定义字段）。
         // TASK-10：返回配置原文独占 CharArray 副本（otpauth:// URI 或 Base32 种子）供编辑页回填，
         // 调用方按借用语义用毕清零
@@ -158,7 +163,7 @@ internal class VaultEntrySecretReader(
     suspend fun getAttachmentData(entryId: String, fileName: String): ByteArray? {
         val targetUuid = parseKdbxUuidOrNull(entryId) ?: return null
         val currentDb = databaseSession.databaseFlow.first() ?: return null
-        val entry = currentDb.rootGroup.allEntries().firstOrNull { it.id == targetUuid } ?: return null
+        val entry = currentDb.rootGroup.findEntry(targetUuid) ?: return null
         val attachment = entry.attachments.firstOrNull { it.name == fileName } ?: return null
         // ISSUE-P2-24：按需读取本附件字节（落盘大附件由 source 流式读回），
         // 不再把整个二进制池 map 成字节数组把全库附件拉回内存。
