@@ -97,12 +97,67 @@ data class KdbxGroup(
      * 递归擦除会造成存活数据丢失。
      *
      * 调用约定：在把旧树替换为 [surviving] 之前调用 oldRoot.clearSupersededSensitiveData(newRoot)。
+     * 新旧根为同一实例（无替换）时直接返回。
      */
     fun clearSupersededSensitiveData(surviving: KdbxGroup) {
+        if (this === surviving) return
         // IdentityHashMap 支撑的集合：contains 走引用相等而非 equals/hashCode
-        val live: MutableSet<Any> = java.util.Collections.newSetFromMap(java.util.IdentityHashMap())
+        val live = newSensitiveIdentitySet()
         surviving.collectSensitiveIdentities(live)
         clearSensitiveIdentitiesNotIn(live)
+    }
+
+    /**
+     * ISSUE-P3-156 定点擦除（增量）：**本实例为替换后的新树根**，擦除 [replaced]
+     * （本次被替换下线的旧节点）中在本树不可达的敏感实例；[replacement] 为同位置上线的
+     * 新节点（新增 / 无替换场景为 null）。
+     *
+     * 与 [clearSupersededSensitiveData] 的等价性依据是**路径复制契约**（树变换只重建从根到目标的
+     * 分组链）：新树除 [replaced] 所在位置外与旧树按同一对象引用共享全部子树，故「旧树中下线、
+     * 新树中存活」的敏感实例**只可能来自 [replaced]**。候选集合规模 = [replaced] 规模，
+     * **不随全库规模增长**；[clearSupersededSensitiveData] 需为整棵新树建身份集合（O(全库)），
+     * 只保留给无法定位替换位置的调用方（任意整库变换 / 历史修剪）。
+     *
+     * 判定逐级收窄，任一阶段候选清空即返回：
+     * 1. [replacement] 与 [replaced] 共享全部承载容器（`copy` 仅改元数据）⇒ 旧实例必然存活，零成本返回；
+     * 2. [replaced] 可达实例中被 [replacement] 覆盖者仍在树上 ⇒ 移出候选；
+     * 3. 余下候选在本树任意位置可达者仍在树上 ⇒ 移出候选（**只做引用比较、不插入集合**）；
+     * 4. 仍留存的候选即真正下线的实例，逐个清零。
+     */
+    fun eraseSupersededSensitiveData(replaced: KdbxEntry, replacement: KdbxEntry?) = eraseSuperseded(
+        collect = replaced::collectSensitiveIdentities,
+        coveredByReplacement = replacement != null && replaced.sharesSensitiveContainersWith(replacement),
+        dropFromReplacement = { replacement?.dropSensitiveIdentitiesFrom(it) },
+        clear = replaced::clearSensitiveIdentitiesIn
+    )
+
+    /** 分组版：语义与条目版逐条一致，见 [eraseSupersededSensitiveData] 的条目重载。 */
+    fun eraseSupersededSensitiveData(replaced: KdbxGroup, replacement: KdbxGroup?) = eraseSuperseded(
+        collect = replaced::collectSensitiveIdentities,
+        coveredByReplacement = replacement != null && replaced.sharesSensitiveContainersWith(replacement),
+        dropFromReplacement = { replacement?.dropSensitiveIdentitiesFrom(it) },
+        clear = replaced::clearSensitiveIdentitiesIn
+    )
+
+    /**
+     * 增量擦除的唯一实现（条目 / 分组两个重载共用，避免安全逻辑出现两份漂移实现）。
+     * 候选集合只承载被替换节点可达的实例；存活判定对**本树**（存活树）做引用扫描。
+     */
+    private fun eraseSuperseded(
+        collect: (MutableSet<Any>) -> Unit,
+        coveredByReplacement: Boolean,
+        dropFromReplacement: (MutableSet<Any>) -> Unit,
+        clear: (Set<Any>) -> Unit
+    ) {
+        if (coveredByReplacement) return
+        val pending = newSensitiveIdentitySet()
+        collect(pending)
+        if (pending.isEmpty()) return
+        dropFromReplacement(pending)
+        if (pending.isEmpty()) return
+        dropSensitiveIdentitiesFrom(pending)
+        if (pending.isEmpty()) return
+        clear(pending)
     }
 
     /** 收集本子树（含条目 history）可达的全部敏感实例身份 */
@@ -111,9 +166,38 @@ data class KdbxGroup(
         subgroups.forEach { it.collectSensitiveIdentities(into) }
     }
 
+    /**
+     * 存活判定：把本子树（含条目 history）可达的敏感实例从候选集合 [pending] 中移除。
+     * [pending] 必须是身份集合（如 [newSensitiveIdentitySet]），其 remove 走引用相等。
+     */
+    internal fun dropSensitiveIdentitiesFrom(pending: MutableSet<Any>) {
+        entries.forEach { it.dropSensitiveIdentitiesFrom(pending) }
+        subgroups.forEach { it.dropSensitiveIdentitiesFrom(pending) }
+    }
+
+    /** 擦除本子树中**仍留在候选集合 [pending] 内**（即真正下线）的敏感实例 */
+    internal fun clearSensitiveIdentitiesIn(pending: Set<Any>) {
+        entries.forEach { it.clearSensitiveIdentitiesIn(pending) }
+        subgroups.forEach { it.clearSensitiveIdentitiesIn(pending) }
+    }
+
     /** 擦除本子树中未被身份集合 [live] 引用的敏感实例 */
     internal fun clearSensitiveIdentitiesNotIn(live: Set<Any>) {
         entries.forEach { it.clearSensitiveIdentitiesNotIn(live) }
         subgroups.forEach { it.clearSensitiveIdentitiesNotIn(live) }
     }
+
+    /**
+     * 是否与 [other] 共享全部**承载敏感实例的容器**（子条目列表 / 子分组列表按同一引用）：
+     * 成立即表示本节点可达的敏感实例与 [other] 可达者完全同一批，替换不产生任何下线实例。
+     */
+    private fun sharesSensitiveContainersWith(other: KdbxGroup): Boolean =
+        entries === other.entries && subgroups === other.subgroups
 }
+
+/**
+ * 敏感实例的**身份集合**（引用相等语义）：`ProtectedString` / `KdbxAttachment` 的 `equals`
+ * 是内容等值（HMAC 标签）语义，擦除判定必须按对象身份，故一律经本工厂构造集合。
+ */
+private fun newSensitiveIdentitySet(): MutableSet<Any> =
+    java.util.Collections.newSetFromMap(java.util.IdentityHashMap())

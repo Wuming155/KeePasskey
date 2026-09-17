@@ -20,7 +20,7 @@ class SessionTreeEditorParentNormalizationTest {
         val root = KdbxGroup(name = "Root")
         val entry = KdbxEntry(parentGroupId = null)
 
-        val updated = SessionTreeEditor.updateOrAddEntry(root, entry)
+        val updated = SessionTreeEditor.updateOrAddEntry(root, entry).root
 
         val stored = updated.entries.single()
         assertEquals(root.id, stored.parentGroupId)
@@ -33,7 +33,7 @@ class SessionTreeEditorParentNormalizationTest {
         val rootWithSub = root.copy(subgroups = listOf(sub))
         val entry = KdbxEntry(parentGroupId = sub.id)
 
-        val updated = SessionTreeEditor.updateOrAddEntry(rootWithSub, entry)
+        val updated = SessionTreeEditor.updateOrAddEntry(rootWithSub, entry).root
 
         assertEquals(sub.id, updated.subgroups.single().entries.single().parentGroupId)
     }
@@ -45,7 +45,7 @@ class SessionTreeEditorParentNormalizationTest {
         val rootWithEntry = root.copy(entries = listOf(existing))
         val edited = existing.copy(parentGroupId = null)
 
-        val updated = SessionTreeEditor.updateOrAddEntry(rootWithEntry, edited)
+        val updated = SessionTreeEditor.updateOrAddEntry(rootWithEntry, edited).root
 
         val stored = updated.entries.single()
         assertEquals(root.id, stored.parentGroupId)
@@ -63,7 +63,7 @@ class SessionTreeEditorParentNormalizationTest {
             entries = listOf(templateEntry)
         )
 
-        val updated = SessionTreeEditor.updateOrAddGroup(root, templateGroup)
+        val updated = SessionTreeEditor.updateOrAddGroup(root, templateGroup).root
 
         val storedGroup = updated.subgroups.single()
         assertEquals(root.id, storedGroup.parentGroupId)
@@ -77,7 +77,7 @@ class SessionTreeEditorParentNormalizationTest {
         val rootWithTarget = root.copy(subgroups = listOf(target))
         val renamed = target.copy(name = "Renamed")
 
-        val updated = SessionTreeEditor.updateOrAddGroup(rootWithTarget, renamed)
+        val updated = SessionTreeEditor.updateOrAddGroup(rootWithTarget, renamed).root
 
         val stored = updated.subgroups.single()
         assertEquals("Renamed", stored.name)

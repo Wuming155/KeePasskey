@@ -12,9 +12,14 @@ import kotlinx.coroutines.sync.withLock
  * 会话内容变更（ISSUE-P3-31 批次 D 结构拆分）。
  *
  * 自 [DatabaseSession] 原样抽出条目 / 分组的增删改与批量操作：统一在 [mutex] 临界区内
- * 对 [databaseFlow] 做 copy-on-write 替换、对 [stateFlow] 置 DIRTY，并在替换前经
- * `clearSupersededSensitiveData` 定点擦除下线实例。只读态经 [readOnly] 提供方判定后
- * 直接 no-op。
+ * 对 [databaseFlow] 做 copy-on-write 替换、对 [stateFlow] 置 DIRTY，并在替换前定点擦除下线实例。
+ *
+ * 擦除分两档（ISSUE-P3-156）：
+ * - **增量**（[saveEntry] / [saveGroup] / [batchMoveEntries]）：树变换回报被替换节点，
+ *   候选集合规模 = 被替换节点规模，不随全库规模增长；
+ * - **通用**（[updateDatabaseMeta]）：任意整库变换无法定位替换位置，退回为整棵新树建身份集合。
+ *
+ * 只读态经 [readOnly] 提供方判定后直接 no-op。
  */
 internal class SessionContentMutations(
     private val mutex: Mutex,
@@ -27,10 +32,11 @@ internal class SessionContentMutations(
     suspend fun saveEntry(entry: KdbxEntry) = mutex.withLock {
         if (readOnly()) return@withLock
         val currentDb = databaseFlow.value ?: return@withLock
-        val updatedRoot = SessionTreeEditor.updateOrAddEntry(currentDb.rootGroup, entry)
-        // ISSUE-P2-06：copy-on-write 替换前定点擦除——身份集合保证不误伤新树仍共享的受保护实例
-        currentDb.rootGroup.clearSupersededSensitiveData(updatedRoot)
-        databaseFlow.value = currentDb.copy(rootGroup = updatedRoot)
+        val edit = SessionTreeEditor.updateOrAddEntry(currentDb.rootGroup, entry)
+        // ISSUE-P2-06 / P3-156：copy-on-write 替换前定点擦除——只以本次被替换下线的旧节点为候选，
+        // 集合规模不随全库规模增长（前提是 SessionTreeEditor 的路径复制契约）
+        edit.replaced?.let { edit.root.eraseSupersededSensitiveData(it, edit.replacement) }
+        databaseFlow.value = currentDb.copy(rootGroup = edit.root)
         stateFlow.value = DatabaseSession.SessionState.DIRTY
     }
 
@@ -58,20 +64,24 @@ internal class SessionContentMutations(
     suspend fun saveGroup(group: KdbxGroup) = mutex.withLock {
         if (readOnly()) return@withLock
         val currentDb = databaseFlow.value ?: return@withLock
-        val updatedRoot = if (group.id == currentDb.rootGroup.id) {
-            SessionTreeEditor.preserveChildrenIfMissing(currentDb.rootGroup, group)
+        val edit = if (group.id == currentDb.rootGroup.id) {
+            SessionTreeEditor.replaceRootGroup(currentDb.rootGroup, group)
         } else {
             SessionTreeEditor.updateOrAddGroup(currentDb.rootGroup, group)
         }
-        // ISSUE-P2-06：分组保存可能下线旧条目/旧字段实例，替换前定点擦除
-        currentDb.rootGroup.clearSupersededSensitiveData(updatedRoot)
-        databaseFlow.value = currentDb.copy(rootGroup = updatedRoot)
+        // ISSUE-P2-06 / P3-156：分组保存可能下线旧条目/旧字段实例，替换前对被替换节点定点擦除
+        edit.replaced?.let { edit.root.eraseSupersededSensitiveData(it, edit.replacement) }
+        databaseFlow.value = currentDb.copy(rootGroup = edit.root)
         stateFlow.value = DatabaseSession.SessionState.DIRTY
     }
 
     /**
      * 允许受控原子修改数据库顶层元数据与墓碑列表（例如 recycleBinUuid、deletedObjects 追加）。
      * 修改后置为 DIRTY 状态，供后续统一 save() 序列化落盘。
+     *
+     * ISSUE-P3-156：本入口的变换是**任意整库变换**（同步合并 / 远端库接管会整体替换分组树），
+     * 无法定位被替换节点 ⇒ 擦除保留通用实现（为整棵新树建身份集合，O(全库)）；仅改元数据
+     * （根分组同一实例）时零成本返回。需要 O(被替换节点) 的单条写入请走 `saveEntry`。
      */
     suspend fun updateDatabaseMeta(transform: (KdbxDatabase) -> KdbxDatabase) = mutex.withLock {
         if (readOnly()) return@withLock
@@ -103,12 +113,18 @@ internal class SessionContentMutations(
         for (e in entriesToMove) {
             currentRoot = SessionTreeEditor.removeEntry(currentRoot, e.id)
         }
+        // ISSUE-P2-06 / P3-156：待擦除对 = 源位置被移除的旧条目 → 其 moved 副本（`copy` 按引用
+        // 共享全部敏感实例，故候选集合通常为空）；目标位置若已有同 id 旧节点被替换，一并纳入
+        val superseded = mutableListOf<Pair<KdbxEntry, KdbxEntry>>()
         for (e in entriesToMove) {
             val movedEntry = e.copy(parentGroupId = targetGroupId)
-            currentRoot = SessionTreeEditor.updateOrAddEntry(currentRoot, movedEntry)
+            val edit = SessionTreeEditor.updateOrAddEntry(currentRoot, movedEntry)
+            currentRoot = edit.root
+            superseded += e to movedEntry
+            edit.replaced?.let { superseded += it to movedEntry }
         }
-        // ISSUE-P2-06：批量移动经 remove+update 重建树，替换前定点擦除中间态下线实例
-        currentDb.rootGroup.clearSupersededSensitiveData(currentRoot)
+        // 擦除在**最终树**上执行（存活判定需看到全部移动结果）
+        superseded.forEach { (old, moved) -> currentRoot.eraseSupersededSensitiveData(old, moved) }
         databaseFlow.value = currentDb.copy(rootGroup = currentRoot)
         stateFlow.value = DatabaseSession.SessionState.DIRTY
     }

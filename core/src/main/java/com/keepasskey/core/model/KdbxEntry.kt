@@ -99,6 +99,33 @@ data class KdbxEntry(
         history.forEach { it.clearSensitiveIdentitiesNotIn(live) }
     }
 
+    /**
+     * 存活判定（ISSUE-P3-156）：把本节点（含 history）可达的敏感实例从候选集合 [pending] 中移除。
+     * [pending] 必须是身份集合，其 remove 走引用相等。
+     */
+    internal fun dropSensitiveIdentitiesFrom(pending: MutableSet<Any>) {
+        fields.values.forEach { pending.remove(it) }
+        customFields.forEach { pending.remove(it.value) }
+        attachments.forEach { pending.remove(it) }
+        history.forEach { it.dropSensitiveIdentitiesFrom(pending) }
+    }
+
+    /** 擦除本节点（含 history）中**仍留在候选集合 [pending] 内**（即真正下线）的敏感实例 */
+    internal fun clearSensitiveIdentitiesIn(pending: Set<Any>) {
+        fields.values.forEach { if (it in pending) it.clear() }
+        customFields.forEach { if (it.value in pending) it.value.clear() }
+        attachments.forEach { if (it in pending) it.clear() }
+        history.forEach { it.clearSensitiveIdentitiesIn(pending) }
+    }
+
+    /**
+     * 是否与 [other] 共享全部**承载敏感实例的容器**（字段 / 自定义字段 / 附件 / 历史列表按同一引用）：
+     * 成立即表示本节点可达的敏感实例与 [other] 可达者完全同一批，替换不产生任何下线实例。
+     */
+    internal fun sharesSensitiveContainersWith(other: KdbxEntry): Boolean =
+        fields === other.fields && customFields === other.customFields &&
+            attachments === other.attachments && history === other.history
+
     override fun toString(): String {
         // P2-4 整改：数据类默认 toString 会展开 fields/customFields/history 等集合，
         // 任何隐式字符串化（日志、调试、异常消息）都不该物化字段内容——
