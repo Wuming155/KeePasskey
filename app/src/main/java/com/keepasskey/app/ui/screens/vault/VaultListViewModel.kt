@@ -26,6 +26,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -260,11 +261,17 @@ class VaultListViewModel @Inject constructor(
             session = session,
             batchSyncDecorations = batchSyncDecorations
         )
-    }.stateIn(
-        scope = viewModelScope,
-        started = SharingStarted.WhileSubscribed(5000),
-        initialValue = VaultListUiState()
-    )
+    }
+        // ISSUE-P3-174：整库投影（全库过滤 / 排序 / 面包屑上溯 / 回收站后代递归 / 分组路径装配）
+        // 必须**离开收集上下文**——`stateIn` 的收集上下文是 `viewModelScope`（即 Main），
+        // 故与数据层两条投影流（§117 / ISSUE-P3-154）同口径补 `flowOn`，复用本 VM 已有的
+        // 展示调度器（自动填充页 / 验证器页同一写法）。
+        .flowOn(displayDispatcher)
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = VaultListUiState()
+        )
 
     /**
      * ISSUE-P2-89 / ISSUE-P3-158：列表行 TOTP 徽标的**秒级刻度**（窄通道）。

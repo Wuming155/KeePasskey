@@ -280,6 +280,16 @@ class AlgoHotPathGuardsTest {
         )
     }
 
+    @Test
+    fun `列表页整库投影必须离开收集上下文`() {
+        val vm = stripped("app/src/main/java/com/keepasskey/app/ui/screens/vault/VaultListViewModel.kt")
+        assertTrue(
+            "uiState 的整库投影（全库过滤 / 排序 / 面包屑 / 回收站 / 分组路径）必须补 `flowOn`——" +
+                "`stateIn` 的收集上下文是 `viewModelScope`（Main），与数据层两条投影流（§117）同口径",
+            Regex("\\.flowOn\\(displayDispatcher\\)\\s*\\n\\s*\\.stateIn\\(").containsMatchIn(vm)
+        )
+    }
+
     private fun stripped(path: String): String = readSource(path)
         .replace(BLOCK_COMMENT, "")
         .lines()
