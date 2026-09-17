@@ -360,6 +360,37 @@ class AlgoHotPathGuardsTest {
         )
     }
 
+    @Test
+    fun `秒级节拍不得常驻且不得逐条重建`() {
+        val detail =
+            stripped("app/src/main/java/com/keepasskey/app/ui/screens/detail/EntryDetailViewModel.kt")
+        assertTrue(
+            "详情页节拍必须挂在 uiState 的订阅期上（原在 init 里常驻启动，退到后台栈仍每秒唤醒一次）",
+            detail.contains("private var totpTickJob: Job? = null") &&
+                detail.contains(".onCompletion { totpTickJob?.cancel() }")
+        )
+        assertFalse(
+            "节拍不得再在 init 里常驻启动",
+            detail.substringAfter("init {").substringBefore("\n    }").contains("totpTicker.run")
+        )
+
+        val auth = stripped(
+            "app/src/main/java/com/keepasskey/app/ui/screens/authenticator/AuthenticatorViewModel.kt"
+        )
+        assertFalse(
+            "验证器页不得再逐条挂起调用（每拍 × 每条目一次 calculateEntryTotp）",
+            auth.contains("vaultRepository.calculateEntryTotp(entry.id)")
+        )
+        assertTrue("必须走批量通道", auth.contains("vaultRepository.calculateEntryTotps("))
+
+        val tracker =
+            stripped("app/src/main/java/com/keepasskey/app/ui/screens/vault/VaultListTotpTracker.kt")
+        assertTrue(
+            "周期集合必须随条目快照缓存（原每拍重建 filter + map + Set 三个中间集合）",
+            tracker.contains("if (entries !== periodsSnapshot) {")
+        )
+    }
+
     private fun stripped(path: String): String = readSource(path)
         .replace(BLOCK_COMMENT, "")
         .lines()

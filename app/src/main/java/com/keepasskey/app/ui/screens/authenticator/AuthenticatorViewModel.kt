@@ -76,8 +76,13 @@ class AuthenticatorViewModel @Inject constructor(
             }
         }
 
+        // ISSUE-P3-175：改走**批量通道**——`calculateEntryTotps` 一次会话读取 + 一次条目索引，
+        // 取代原先的逐条挂起调用（每拍 × 每条目一次 `calculateEntryTotp`）。
+        // 快照语义与单条入口一致（同一实现内部共用），故格式化 / `isHotp` / 周期取值逐字不变。
+        val snapshots = vaultRepository.calculateEntryTotps(filtered.map { it.id })
+
         val items = filtered.map { entry ->
-            val snapshot = vaultRepository.calculateEntryTotp(entry.id)
+            val snapshot = snapshots[entry.id]
             val period = snapshot?.periodSeconds ?: entry.totpPeriod
             val remaining = OtpEngine.getRemainingSeconds(periodSeconds = period)
 

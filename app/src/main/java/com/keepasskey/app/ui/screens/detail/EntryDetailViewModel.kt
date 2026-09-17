@@ -24,13 +24,16 @@ import com.keepasskey.app.ui.model.UiMessage
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.onCompletion
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
-import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.launch
+import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 
 /**
@@ -133,6 +136,19 @@ class EntryDetailViewModel @Inject constructor(
         strings = strings
     )
 
+    /**
+     * `ISSUE-P3-175`：节拍收集任务的句柄。
+     *
+     * 启停由 [uiState] 的**订阅期**决定（见其 `onStart` / `onCompletion`）：
+     * `stateIn(WhileSubscribed(5000))` 在最后一个订阅者离开（宽限 5 s）后取消上游收集 ⇒
+     * `onCompletion` 停表；重新订阅时 `onStart` 再启表。原先在 `init` 里常驻启动，
+     * 页面退到后台栈（Activity stopped、ViewModel 未销毁）时仍每秒唤醒并做一次仓库调用。
+     */
+    private var totpTickJob: Job? = null
+
+    /** 当前条目快照（供节拍读取；读 `uiState.value` 不会额外启动其上游）。 */
+    private fun currentEntryOrNull() = uiState.value.entry
+
     val uiState: StateFlow<EntryDetailUiState> = stateAssembler
         .assemble(
             EntryDetailStateAssembler.Inputs(
@@ -146,6 +162,19 @@ class EntryDetailViewModel @Inject constructor(
                 extendedSettings = extendedSettingsFlow
             )
         )
+        // 断点6 整改：每秒驱动 TOTP 倒计时；周期翻转（剩余秒数不降反升）时重算实时验证码。
+        // ISSUE-P3-175：改为随本链的订阅期启停（原为 `init` 常驻）。
+        .onStart {
+            totpTickJob?.cancel()
+            totpTickJob = viewModelScope.launch(Dispatchers.Default) {
+                totpTicker.run(
+                    currentEntry = { currentEntryOrNull() },
+                    onRemaining = { totpRemainingSecondsFlow.value = it },
+                    onLiveCode = { liveTotpCodeFlow.value = it }
+                )
+            }
+        }
+        .onCompletion { totpTickJob?.cancel() }
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),
@@ -163,16 +192,9 @@ class EntryDetailViewModel @Inject constructor(
     }
 
     init {
-        // 断点6 整改：每秒驱动 TOTP 倒计时；周期翻转（剩余秒数不降反升）时重算实时验证码
-        viewModelScope.launch(Dispatchers.Default) {
-            totpTicker.run(
-                currentEntry = { uiState.value.entry },
-                onRemaining = { totpRemainingSecondsFlow.value = it },
-                onLiveCode = { liveTotpCodeFlow.value = it }
-            )
-        }
         // ISSUE-P2-65：注册会话锁定观察者——锁库 / 关库（含切库、后台超时、熄屏熔断）时
         // 立即擦除按需解密明文与实时 TOTP 码，不依赖导航离开时机。
+        // （节拍启停已移交 `uiState` 的 onStart / onCompletion，见该属性 KDoc——ISSUE-P3-175）
         databaseSession?.addLockObserver(sessionLockObserver)
     }
 

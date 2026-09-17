@@ -123,12 +123,24 @@ internal class VaultListTotpTracker(
         return entryPeriods().any { period -> previous / period != second / period }
     }
 
+    // ISSUE-P3-175：周期集合按**条目快照实例**缓存——原实现每拍（1 Hz）都重建
+    // `filter` + `map` + `Set` 三个中间集合，而周期只在「条目集合或其 TOTP 配置变化」时才变。
+    // 仅在节拍链（`flowOn(dispatcher)` 上的 `onEach`）内访问，故无需额外同步。
+    private var periodsSnapshot: List<UiVaultEntry>? = null
+    private var periodsCache: Set<Int> = emptySet()
+
     /** 当前列表带 TOTP 条目的**去重周期**（`<= 0` 的异常值按缺省周期兜底，避免除零） */
-    private fun entryPeriods(): Set<Int> =
-        currentEntries()
-            .filter { it.totpCode != null }
-            .map { if (it.totpPeriod > 0) it.totpPeriod else TOTP_PERIOD_SECONDS }
-            .toSet()
+    private fun entryPeriods(): Set<Int> {
+        val entries = currentEntries()
+        if (entries !== periodsSnapshot) {
+            periodsSnapshot = entries
+            periodsCache = entries
+                .filter { it.totpCode != null }
+                .map { if (it.totpPeriod > 0) it.totpPeriod else TOTP_PERIOD_SECONDS }
+                .toSet()
+        }
+        return periodsCache
+    }
 
     /** 对当前列表中带 TOTP 的条目批量重算实时验证码（种子在数据层内解析，绝不外泄） */
     private suspend fun refreshLiveCodes() {

@@ -106,7 +106,12 @@
 > 唯一的可用性缺陷修复）、编辑页组合期过滤下沉 + `key`、面包屑补 `key`、日志等级色改 `remember`
 > 预计算；**AC ① 的日志惰性化刻意不做**（嵌套纵向滚动属 UX 回归；日志有 500 行硬上限），见
 > [`resolved/batches/131-非惰性大集合渲染与组合期就地派生收敛批次.md`](resolved/batches/131-非惰性大集合渲染与组合期就地派生收敛批次.md)。
-> 其余条目（`P3-164` / `P3-165` / `P3-168` / `P3-175` ~ `P3-177` / `P3-180`）**仍待整改**。
+> **已闭环（§132 第四档：节拍与线程落点 ‣ 第四条）**：`ISSUE-P3-175`（秒级节拍常驻与整页重建）
+> ——① 详情页节拍改挂 `uiState` 的订阅期（`onStart`/`onCompletion`，`run` 循环体逐字未改）、
+> ② 前半 验证器页接入 `calculateEntryTotps` 批量通道（每拍 T 次挂起调用 → 1 次）、
+> ③ 列表页周期集合按快照实例缓存；**② 后半（验证器页列表与倒计时解耦）转登 `ISSUE-P3-182`**，见
+> [`resolved/batches/132-节拍启停与逐条通道收敛批次.md`](resolved/batches/132-节拍启停与逐条通道收敛批次.md)。
+> 其余条目（`P3-164` / `P3-165` / `P3-168` / `P3-176` / `P3-177` / `P3-180` / `P3-182`）**仍待整改**。
 
 ### ISSUE-P3-153 Rust 下沉候选的评估结论（**评估项，非整改项**）
 
@@ -195,25 +200,6 @@
 - **风险提示**：树级缓存**扩大解密明文的驻留面**，必须按 `§52`（同步解析落盘与内存池擦除边界）同口径登记
   所有权与擦除责任，否则不得实施；本条属高回归面，排在零风险项之后。
 
-### ISSUE-P3-175 秒级节拍常驻与整页重建（详情页 / 验证器页 / 节拍追踪器）
-
-- **背景**：① `app/.../ui/screens/detail/EntryDetailViewModel.kt:167` 的 TOTP ticker 在 `init` **常驻启动**，
-  页面退到后台栈仍每秒唤醒（列表页 `§114` 已改订阅驱动，本页未跟进）；
-  ② `app/.../ui/screens/authenticator/AuthenticatorViewModel.kt:80` 把秒级 tick 并入整页 `combine`
-  ⇒ 每秒重建整表 + **逐条挂起仓库调用**（`§114` 为列表页准备的 `calculateEntryTotps` 批量通道
-  **本页未接入**）；③ `app/.../ui/screens/vault/VaultListTotpTracker.kt:120` 每拍重建
-  `filter` + `map` + `toSet`，而周期集合只在条目集合或其 TOTP 配置变化时才变。
-- **整改方向**：① 改订阅驱动（`WhileSubscribed` 或生命周期可见性）或按 `period` 边界驱动；
-  ② 验证器页接入 `calculateEntryTotps` 批量通道，并把「列表内容」与「剩余秒数」解耦
-  （倒计时下沉到卡片内读共享刻度）；③ `entryPeriods()` 随条目快照缓存。
-- **验收标准**：新增用例断言「1 Hz 刻度不触发整页状态新建」与「同拍内批量取码只调用一次」；
-  `§120` 的 `ISSUE-P3-158` 周期口径用例（任一条目自身周期序号变化才算翻转）必须继续全绿；
-  离屏停止的行为可观测。
-- **核实时间点与方式**：2026-09-17 读 `EntryDetailViewModel.kt:160-175`、`AuthenticatorViewModel.kt:45-120`、
-  `VaultListTotpTracker.kt:85-145` 核实。
-- **风险提示**：TOTP 展示正确性已由 `P3-158` 收紧（周期口径），本条只改**驱动频率与重建面**，
-  不得改变倒计时相位与翻转判据。
-
 ### ISSUE-P3-176 冷流重复订阅与应用根状态过宽导致的导航图重建
 
 - **背景**：① `RealVaultRepository.getEntries()` / `getGroups()` 是冷流，而
@@ -262,3 +248,25 @@
 - **核实时间点与方式**：2026-09-17 读 `WebDavSyncProvider.kt:215-340` 与 `SyncCycleRunner.kt:195-215` 核实。
 - **风险提示**：条件写是并发正确性的正确性来源（`已知工程限界.md` §1.3），
   减少往返**不得**削弱「用 ETag 预检 + `If-Match` 条件写」的判定，只删重复探测。
+
+### ISSUE-P3-182 验证器页倒计时与列表内容未解耦（整页每秒重建）
+
+- **背景**：`ISSUE-P3-175` ② 的**后半**（§132 批次转登）：该页把秒级 tick 并入整页 `combine`
+  （`app/src/main/java/com/keepasskey/app/ui/screens/authenticator/AuthenticatorViewModel.kt:58-115`），
+  tick 的**唯一作用是触发重算**（变换体内该参数被丢弃为 `_`，剩余秒数由 `OtpEngine.getRemainingSeconds(period)`
+  现算）⇒ 每拍都会新建整份 `items`（`List<TotpCardItem>`）并带动全部卡片重组。
+  `§132` 已把该页的**逐条挂起调用**换成批量通道（每拍 T 次 → 1 次），但**整页每秒重建未消除**。
+- **整改方向**（`ISSUE-P3-175` AC ② 原文口径）：列表内容只在**周期边界**重建；倒计时由卡片内读
+  共享刻度现算（照抄列表页 `EntryTotpBadge` 的窄通道模式）。具体需要：
+  ① `TotpCardItem` 去掉 `remainingSeconds`；
+  ② `AuthenticatorScreen` 三处（`isUrgent` 判据 `/ 进度环分母 / 倒计时文本`）改为按卡片收到的刻度 +
+  `item.periodSeconds` 经 `OtpEngine.getRemainingSeconds` 现算；
+  ③ 验证码刷新走与列表**同构**的「周期序号变化才重算」通道（`§114` / `§120` 已确立该口径）。
+- **验收标准**：`ISSUE-P3-175` 的两条运行期判据在此条落地——「1 Hz 刻度不触发整页状态新建」
+  与「同拍内批量取码只调用一次」；`§120` 的周期口径用例（任一条目自身周期序号变化才算翻转）全绿；
+  倒计时相位与进度环分母逐项不变（含 `period != 30` 的条目）。
+- **核实时间点与方式**：2026-09-17 读 `AuthenticatorViewModel.kt:58-115`、
+  `AuthenticatorUiState.kt:8-22`、`AuthenticatorScreen.kt:231/308/315` 核实（§132 开工期一并读得）。
+- **风险提示**：属**状态形状 + UI 三处联动**的改动，回归面集中在**宿主不可渲染的 UI**
+  （须以接线守卫 + 编译期契约承担，并核对预览 / 截图基线）；`§120` 已把「全局 30 秒」这一错误前提
+  从分母中移除，**不得**在解耦过程中把它带回来。
