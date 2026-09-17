@@ -294,14 +294,23 @@ class RuntimeIntegrityDetector @Inject constructor(
         /**
          * ISSUE-P2-63：后台周期重扫间隔。注入框架落点 / 内存映射变化在此间隔内进入快照，
          * 使非 suspend 门控（生物识别快速解锁）不再依赖启动态判定。
+         *
+         * ISSUE-P3-152 复核（2026-09-17）：本值**是安全参数，不得为省电放宽**——
+         * 它同时是「附加注入框架后多久被抓到」的上界，[SNAPSHOT_STALE_AFTER_MS] 则保证
+         * 连丢 4 次重扫即转 fail-closed。省下的只是每 30 s 一次的文件探测（IO 线程），
+         * 与「高价值通道的判定新鲜度」不成比例，故**刻意不动**；该窗口作为**已接受残余风险**
+         * 登记于 `docs/architecture/已知工程限界.md` §3.5。
+         * `internal`（原 `private`）仅供 [`RuntimeIntegrityRescanContractTest`] 断言「不得放宽」。
          */
-        private const val LIVE_RESCAN_INTERVAL_MS = 30_000L
+        internal const val LIVE_RESCAN_INTERVAL_MS = 30_000L
 
         /**
          * ISSUE-P2-63：快照新鲜度窗口。超过该时长未完成任何重扫（如进程挂起、IO 受限）
          * 即视为陈旧 → 非 suspend 门控转保守（fail-closed），容忍 4 次周期重扫缺失。
+         *
+         * 与 [LIVE_RESCAN_INTERVAL_MS] 同为安全参数，**不得放宽**（同见 §3.5 登记）。
          */
-        private const val SNAPSHOT_STALE_AFTER_MS = 120_000L
+        internal const val SNAPSHOT_STALE_AFTER_MS = 120_000L
 
         private const val PROC_SELF_MAPS = "/proc/self/maps"
 

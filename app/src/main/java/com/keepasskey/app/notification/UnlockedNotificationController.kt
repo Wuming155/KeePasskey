@@ -11,9 +11,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.launch
@@ -64,27 +62,28 @@ class UnlockedNotificationController @Inject constructor(
         cancel()
         scope.launch {
             // merge 的下游收集是单协程串行语义：refresh() 不会被并发调用，posted 无需额外同步
-            merge(databaseSession.state.map { }, preferenceRefreshTicks())
+            merge(databaseSession.state.map { }, preferenceChanges())
                 .collect { refresh() }
         }
     }
 
     /**
-     * 低频轮询触发源。
+     * 偏好变更触发源（ISSUE-P3-152：**由 2 秒轮询改为进程级快照订阅**）。
      *
-     * `ExtendedSettingsStore` 是同步 SharedPreferences API（无 Flow 通道），追加本触发源后
-     * 「库已解锁期间在设置页切换开关」也能即时生效；否则开关只在下一次解锁/锁定时才被重新读取，
-     * 观感上接近「假开关」。每周期的实际成本仅一次内存态偏好读取。
+     * 原实现每 2 秒调一次 `settingsStore.load()`——即逐 key 读取约 50 项 `SharedPreferences`
+     * 并构造整个 `ExtendedSettings` 对象，仅用于刷新本通知的目标态；
+     * 解锁期间长期驻留，属「用户看不见也在耗电」的常态成本。
+     *
+     * 收敛手段：`ExtendedSettingsStore` 自 ISSUE-P2-21 起已持有**进程级唯一内存权威快照**
+     * `settings: StateFlow<ExtendedSettings>`，且设置页的每个写入点都走
+     * `publish(...) + save(...)`（[com.keepasskey.app.ui.screens.settings.SettingsExtendedPreferencesController]）⇒
+     * 订阅该快照既**零 IO**（不再触碰 SharedPreferences）又**比轮询更快**（变更即达，不必等下一个周期）。
+     * 原先「同步 API 无 Flow 通道，故须轮询」的理由**已不成立**（该快照早于本条存在）。
      */
-    private fun preferenceRefreshTicks(): Flow<Unit> = flow {
-        while (true) {
-            delay(PREFERENCE_REFRESH_INTERVAL_MS)
-            emit(Unit)
-        }
-    }
+    private fun preferenceChanges(): Flow<Unit> = settingsStore.settings.map { }
 
     private fun refresh() {
-        val prefEnabled = settingsStore.load().showUnlockedNotification
+        val prefEnabled = settingsStore.settings.value.showUnlockedNotification
         val permissionGranted = permissionPrompter.isGranted()
         val desired = NotificationGate.shouldPostUnlockedNotification(
             prefEnabled = prefEnabled,
@@ -92,7 +91,7 @@ class UnlockedNotificationController @Inject constructor(
             sessionState = databaseSession.state.value
         )
         if (lastDesired != desired) {
-            // 目标状态变化才记录（解锁/锁定/开关切换/权限变更），轮询周期本身不产生日志；
+            // 目标状态变化才记录（解锁/锁定/开关切换/权限变更），同态重入不产生日志；
             // 内容仅含布尔量，绝不含库文件名、条目等任何用户数据
             AppLog.i(
                 TAG,
@@ -146,8 +145,5 @@ class UnlockedNotificationController @Inject constructor(
 
     private companion object {
         const val TAG = "UnlockedNotification"
-
-        /** 偏好轮询间隔：一次内存态偏好读取，成本可忽略却能即时反映开关变化 */
-        const val PREFERENCE_REFRESH_INTERVAL_MS = 2_000L
     }
 }

@@ -43,28 +43,12 @@
 
 ---
 
-## P3 低危问题、特性接线与体验优化（5 项）
+## P3 低危问题、特性接线与体验优化（4 项）
 
 > 本批为 2026-09-17「降低 CPU / 内存占用」排查的其余结论。
 > 条目 150 / 151 为**纯 Kotlin 层**整改，条目 152 为常驻轮询收敛，条目 153 为 **Rust 下沉候选的评估结论**，
 > 条目 154 为 §114 批次的**残留**（`ISSUE-P3-149` ③ 未做部分）。
 > 原 `ISSUE-P3-149`（投影热路径）的 ①②④ 已于 §114 闭环，**③ 转登为 `ISSUE-P3-154`**。
-
-### ISSUE-P3-152 常驻周期轮询（设置快照每 2 s / 完整性检测每 30 s）
-
-- **背景**：两处与用户操作无关的定时轮询：
-  ① `UnlockedNotificationController` 以 **2 s** 周期 `settingsStore.load()`——逐 key 读取约 50 项偏好并构造整个 `ExtendedSettings`
-     对象，仅用于刷新「已解锁通知」目标态，且不比较新旧值即整体替换；
-  ② `RuntimeIntegrityDetector` 每 **30 s** 重扫一次（含 `/proc/self/maps`、无障碍服务列表等 IO）。
-- **量级**：O(1) 但**持续**发生（仅解锁期间 / 常驻），属「用户看不见也在耗电」类成本。
-- **核实时间点与方式**：2026-09-17 逐处阅读下列源码核实。
-- **依据**：`app/.../notification/UnlockedNotificationController.kt:79-84,151`、
-  `app/.../data/repository/ExtendedSettingsStore.kt:60+`（`load()` 逐 key 读取）、
-  `app/.../security/RuntimeIntegrityDetector.kt:74-81`。
-- **整改方向**：① 偏好改 `OnSharedPreferenceChangeListener` 事件驱动，或退一步：`load()` 结果做相等性早退（当前不做比较）；
-  ② 完整性检测的周期与触发条件按实际威胁模型复核（**不得**为省电削弱既有检测面——若判定不可动，应登记到
-  [`已知工程限界.md`](architecture/已知工程限界.md)）。
-- **验收标准**：解锁态静置 5 分钟，偏好读取次数由 O(150) 降为「仅变更时」；完整性检测语义与覆盖面不变（现有用例全绿），或在限界表登记为不整改并给出理由。
 
 ### ISSUE-P3-153 Rust 下沉候选的评估结论（**评估项，非整改项**）
 
