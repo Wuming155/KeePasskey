@@ -8,6 +8,7 @@ import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.security.ClipboardSecurityManager
 import com.keepasskey.app.ui.model.EntryDisplayDispatcher
 import com.keepasskey.app.ui.model.StringsProvider
+import com.keepasskey.app.ui.model.TotpCountdownTracker
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.model.UiVaultEntry
 import com.keepasskey.app.ui.model.VaultGroup
@@ -60,7 +61,7 @@ import javax.inject.Inject
  * 原 803 行巨型类已按职责拆为四个协作者，本类只保留「输入流编排 + 状态投影 + 对外 API 门面」：
  * - 纯投影：[buildVaultListUiState]（`VaultListProjection.kt`）
  * - 同步指示：[VaultListSyncController]
- * - TOTP 倒计时：[VaultListTotpTracker]
+ * - TOTP 倒计时：[TotpCountdownTracker]
  * - 写操作与剪贴板：[VaultListActionController]
  * - 展示装饰：[VaultListDecorationsProvider]
  * 拆分为**纯结构性**：公开 API 与状态输出零变化。
@@ -133,7 +134,7 @@ class VaultListViewModel @Inject constructor(
 
     // ISSUE-P3-29：TOTP 实时倒计时（种子只在数据层解析）
     // ISSUE-P2-89：本协作者的两条输出均**不进整页状态**，经下方窄通道直接给列表行徽标
-    private val totpTracker = VaultListTotpTracker(
+    private val totpTracker = TotpCountdownTracker(
         vaultRepository = vaultRepository,
         scope = viewModelScope,
         currentEntries = { uiState.value.entries },
@@ -292,7 +293,7 @@ class VaultListViewModel @Inject constructor(
     /**
      * ISSUE-P2-89 / ISSUE-P3-158：列表行 TOTP 徽标的**秒级刻度**（窄通道）。
      *
-     * 本流即列表页的秒级节拍本体（`WhileSubscribed` 驱动，见 [VaultListTotpTracker]）：
+     * 本流即列表页的秒级节拍本体（`WhileSubscribed` 驱动，见 [TotpCountdownTracker]）：
      * UI 侧只在渲染徽标处用 `collectAsStateWithLifecycle` 读取，**读取作用域只有徽标本身**，
      * 故每秒的重组面不再扩散到整页状态与全部列表行；页面不可见时无人订阅，节拍自动停止。
      *

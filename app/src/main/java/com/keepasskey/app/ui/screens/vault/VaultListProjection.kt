@@ -152,7 +152,7 @@ internal fun buildVaultListUiState(
 
     // 3. 文件夹（条目列表已在第 2 步排序完毕）。
     // ISSUE-P2-89：TOTP 的「剩余秒数 / 实时验证码」不再经本页状态覆写进条目，
-    // 改由 `VaultListTotpTracker` 的窄通道直接下发列表行徽标——本页状态因此与
+    // 改由 `TotpCountdownTracker` 的窄通道直接下发列表行徽标——本页状态因此与
     // 「每秒」「每周期」两个高频节拍彻底解耦，不再被秒级 tick 驱动重算。
     val targetGroups = if (isSearching) {
         allGroups.filter { it.name.contains(session.filterParams.query, ignoreCase = true) }

@@ -18,7 +18,7 @@ import java.io.File
  * （「此前写死 30」），若不剥离会误判为残留。
  *
  * 行为面（何时重算、周期内零重算、`period != 30` 不漏拍）由
- * `VaultListTotpTrackerTest` 以虚拟时钟锁定；本文件只锁「UI 接线是否取到条目自身周期」。
+ * `TotpCountdownTrackerTest` 以虚拟时钟锁定；本文件只锁「UI 接线是否取到条目自身周期」。
  */
 class TotpPeriodWiringGuardTest {
 
@@ -67,7 +67,7 @@ class TotpPeriodWiringGuardTest {
 
     @Test
     fun `列表节拍不得再以全局 30 秒网格计算倒计时`() {
-        val source = stripped(readSource(VAULT_LIST_TOTP_TRACKER))
+        val source = stripped(readSource(TOTP_COUNTDOWN_TRACKER))
         assertFalse(
             "不得再出现「按全局 30 秒取余」的倒计时计算（缺陷形态）",
             source.contains("% TOTP_PERIOD_SECONDS")
@@ -93,8 +93,8 @@ class TotpPeriodWiringGuardTest {
     private companion object {
         const val VAULT_ROW_LAYOUTS =
             "app/src/main/java/com/keepasskey/app/ui/screens/vault/VaultEntryRowLayouts.kt"
-        const val VAULT_LIST_TOTP_TRACKER =
-            "app/src/main/java/com/keepasskey/app/ui/screens/vault/VaultListTotpTracker.kt"
+        const val TOTP_COUNTDOWN_TRACKER =
+            "app/src/main/java/com/keepasskey/app/ui/model/TotpCountdownTracker.kt"
         const val AUTHENTICATOR_SCREEN =
             "app/src/main/java/com/keepasskey/app/ui/screens/authenticator/AuthenticatorScreen.kt"
         const val ENTRY_DETAIL_CARDS =

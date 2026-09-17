@@ -1,9 +1,8 @@
-package com.keepasskey.app.ui.screens.vault
+package com.keepasskey.app.ui.model
 
 import com.keepasskey.app.data.repository.EntryTotpSnapshot
 import com.keepasskey.app.data.repository.FakeVaultRepository
 import com.keepasskey.app.data.repository.VaultRepository
-import com.keepasskey.app.ui.model.UiVaultEntry
 import com.keepasskey.core.otp.OtpEngine
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
@@ -16,7 +15,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 /**
- * [VaultListTotpTracker] 的节拍与重算纪律（ISSUE-P2-89 / ISSUE-P2-90 / ISSUE-P3-158）。
+ * [TotpCountdownTracker] 的节拍与重算纪律（ISSUE-P2-89 / ISSUE-P2-90 / ISSUE-P3-158）。
  *
  * 本用例覆盖五条**可判别的**契约（每条都能被对应的回退改动弄红）：
  * 1. **订阅驱动**：无人订阅时既不 tick 也不请求验证码——回退到「init 期常驻 start()」
@@ -32,7 +31,7 @@ import org.junit.Test
  * 后者使秒级节拍落在虚拟时间上（不 sleep、不依赖真实线程）。
  */
 @OptIn(ExperimentalCoroutinesApi::class)
-class VaultListTotpTrackerTest {
+class TotpCountdownTrackerTest {
 
     /** 计数型仓库：只关心「批量取码被调用了几次、请求了哪些 id」 */
     private class CountingRepository : VaultRepository by FakeVaultRepository() {
@@ -65,8 +64,8 @@ class VaultListTotpTrackerTest {
         totpPeriod = periodSeconds
     )
 
-    /** 窄通道刻度 → 指定周期下的剩余秒数（生产侧列表徽标用同一函数换算） */
-    private fun VaultListTotpTracker.remainingSeconds(periodSeconds: Int = 30): Int =
+    /** 窄通道刻度 → 指定周期下的剩余秒数（生产侧 UI 用同一函数换算） */
+    private fun TotpCountdownTracker.remainingSeconds(periodSeconds: Int = 30): Int =
         OtpEngine.getRemainingSeconds(
             timestampMillis = nowSeconds.value * 1000L,
             periodSeconds = periodSeconds
@@ -85,7 +84,7 @@ class VaultListTotpTrackerTest {
         repository: VaultRepository,
         entries: () -> List<UiVaultEntry>,
         clock: () -> Long
-    ) = VaultListTotpTracker(
+    ) = TotpCountdownTracker(
         vaultRepository = repository,
         // 用 backgroundScope：其生命周期由用例框架在收尾时取消，
         // 否则 WhileSubscribed 的 stateIn 常驻协程会让 runTest 报「未完成的协程」

@@ -381,14 +381,57 @@ class AlgoHotPathGuardsTest {
             "验证器页不得再逐条挂起调用（每拍 × 每条目一次 calculateEntryTotp）",
             auth.contains("vaultRepository.calculateEntryTotp(entry.id)")
         )
-        assertTrue("必须走批量通道", auth.contains("vaultRepository.calculateEntryTotps("))
+        assertFalse(
+            "验证器页不得再把秒级 tick 并入整页 combine（ISSUE-P3-182：每拍重建整份 items）",
+            auth.contains("timerSecondsFlow")
+        )
+        assertTrue(
+            "验证码刷新必须交给共享的周期边界通道（ISSUE-P3-175 ② / ISSUE-P3-182）",
+            auth.contains("TotpCountdownTracker(")
+        )
+        assertTrue(
+            "倒计时与实时码必须走窄通道，不得留在整页状态里",
+            auth.contains("totpTracker.nowSeconds") && auth.contains("totpTracker.liveCodes")
+        )
 
         val tracker =
-            stripped("app/src/main/java/com/keepasskey/app/ui/screens/vault/VaultListTotpTracker.kt")
+            stripped("app/src/main/java/com/keepasskey/app/ui/model/TotpCountdownTracker.kt")
+        assertTrue(
+            "批量通道必须仍在该通道内（一次会话读取 + 一次条目索引）",
+            tracker.contains("vaultRepository.calculateEntryTotps(")
+        )
         assertTrue(
             "周期集合必须随条目快照缓存（原每拍重建 filter + map + Set 三个中间集合）",
             tracker.contains("if (entries !== periodsSnapshot) {")
         )
+    }
+
+    @Test
+    fun `验证器页卡片状态不得随秒级节拍重建`() {
+        val state = stripped(
+            "app/src/main/java/com/keepasskey/app/ui/screens/authenticator/AuthenticatorUiState.kt"
+        )
+        assertFalse(
+            "卡片状态不得再携带 remainingSeconds（每秒都变 ⇒ 整页 combine 每拍重建）",
+            state.contains("remainingSeconds")
+        )
+        assertTrue(
+            "验证码格式化必须只有一份实现（ViewModel 与卡片共用）",
+            state.contains("internal fun formatTotpCode(")
+        )
+
+        val screen = stripped(
+            "app/src/main/java/com/keepasskey/app/ui/screens/authenticator/AuthenticatorScreen.kt"
+        )
+        assertTrue(
+            "卡片必须按窄通道刻度 + 条目自身周期现算剩余秒数",
+            screen.contains("OtpEngine.getRemainingSeconds(") && screen.contains("nowSeconds.value")
+        )
+        assertTrue(
+            "验证码必须优先取窄通道的实时码，缺失时回落投影码",
+            screen.contains("liveCodes.value[item.entryId] ?: item.codeRaw")
+        )
+        assertTrue("显示文本必须经共用格式化函数", screen.contains("formatTotpCode("))
     }
 
     @Test

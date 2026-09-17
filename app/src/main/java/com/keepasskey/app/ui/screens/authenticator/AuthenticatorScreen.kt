@@ -63,6 +63,7 @@ import com.keepasskey.app.ui.model.resolveText
 import com.keepasskey.app.ui.components.getVaultIcon
 import com.keepasskey.app.ui.theme.CapsuleShape
 import com.keepasskey.app.ui.theme.MonospaceTotpStyle
+import com.keepasskey.core.otp.OtpEngine
 
 /**
  * 独立双重认证验证码 (TOTP) 集中管理页面
@@ -77,6 +78,10 @@ fun AuthenticatorScreen(
     // 遮挡触摸过滤（ISSUE-P2-09 / P3-12）
     ApplyObscuredTouchFilter()
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    // ISSUE-P3-182：两条窄通道**有意不 collect 成值**——保留 State 对象，令读取动作落在
+    // 卡片自身的组合作用域内（见下方 items 内注释），秒级 tick 只失效可见卡片。
+    val nowSeconds = viewModel.nowSeconds.collectAsStateWithLifecycle()
+    val liveCodes = viewModel.liveCodes.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
 
     uiState.userMessage?.let { message ->
@@ -167,10 +172,25 @@ fun AuthenticatorScreen(
         ) {
             // TOTP 账号卡片列表
             items(uiState.items, key = { it.entryId }) { item ->
+                // 本行内才读取两条窄通道（State 读取注册在**卡片**的组合作用域上）：
+                // 每秒 tick 只令可见卡片重组，`uiState` 与其 items 在周期内零重建。
+                val code = if (item.isHotp) {
+                    // HOTP 之码由用户显式推进计数器决定（推进后重新投影即得新码），
+                    // 不在时间通道内——通道里的值恒为推进前的旧码（ISSUE-P3-182）
+                    item.codeRaw
+                } else {
+                    liveCodes.value[item.entryId] ?: item.codeRaw
+                }
                 TotpLargeCard(
                     item = item,
+                    remainingSeconds = OtpEngine.getRemainingSeconds(
+                        timestampMillis = nowSeconds.value * MILLIS_PER_SECOND,
+                        periodSeconds = item.periodSeconds
+                    ),
+                    code = code,
                     onClick = { onEntryClick(item.entryId) },
-                    onCopy = { item.codeRaw?.let(copyCode) },
+                    // 复制「当前所见之码」：窄通道已出新周期之码时，必须复制新码而非投影兜底码
+                    onCopy = { code?.let(copyCode) },
                     // ISSUE-P3-49：HOTP 取码需推进计数器（复制当前码会重复使用同一计数器）
                     onAdvanceHotp = { viewModel.advanceHotpAndCopy(item.entryId) }
                 )
@@ -218,9 +238,22 @@ fun AuthenticatorScreen(
     }
 }
 
+/** 毫秒 / 秒换算：窄通道下发的是**秒级刻度**，[OtpEngine] 取值按毫秒时间戳 */
+private const val MILLIS_PER_SECOND = 1000L
+
 @Composable
 private fun TotpLargeCard(
     item: TotpCardItem,
+    /**
+     * 剩余秒数（ISSUE-P3-182）：由调用方按窄通道刻度 + 条目自身周期现算后传入——
+     * 本组件不再从整页状态里读它，故整页 `items` 不随秒级节拍重建。
+     */
+    remainingSeconds: Int,
+    /**
+     * 当前应展示 / 复制的码（可空：种子缺失 / 解析失败时不可复制）：
+     * TOTP 取窄通道实时码、缺失时回落投影之码；HOTP 恒取投影之码（见调用方注释）。
+     */
+    code: String?,
     onClick: () -> Unit,
     onCopy: () -> Unit,
     // ISSUE-P3-49：HOTP 取码（推进计数器并复制）
@@ -228,7 +261,7 @@ private fun TotpLargeCard(
 ) {
     // HOTP 无时间步长：不作紧迫着色、不显示倒计时环
     // 与 TotpMiniGauge 同一色语义：常规=success，紧迫（≤5s）=danger，避免跨页蓝/绿混用
-    val isUrgent = !item.isHotp && item.remainingSeconds <= 5
+    val isUrgent = !item.isHotp && remainingSeconds <= 5
     val securityColors = com.keepasskey.app.ui.theme.LocalSecurityColors.current
     val gaugeColor by animateColorAsState(
         targetValue = if (isUrgent) securityColors.danger else securityColors.success,
@@ -305,14 +338,14 @@ private fun TotpLargeCard(
                     Box(contentAlignment = Alignment.Center) {
                         CircularProgressIndicator(
                             // ISSUE-P3-158：分母取条目自身周期（此前写死 30，period != 30 时环比例错误）
-                            progress = { item.remainingSeconds / item.periodSeconds.coerceAtLeast(1).toFloat() },
+                            progress = { remainingSeconds / item.periodSeconds.coerceAtLeast(1).toFloat() },
                             modifier = Modifier.size(28.dp),
                             color = gaugeColor,
                             strokeWidth = 3.dp,
                             trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
                         )
                         Text(
-                            text = "${item.remainingSeconds}",
+                            text = "$remainingSeconds",
                             style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
                             color = gaugeColor,
                             fontSize = 10.sp
@@ -324,7 +357,7 @@ private fun TotpLargeCard(
             // 中部：大号分段动态码 + 独立复制按钮
             // ISSUE-P3-49：HOTP 的动作是「取下一个码」（推进计数器并复制），TOTP 为「复制当前码」
             // 防误触：整行不再作为点击热区，仅右侧复制胶囊按钮可点（48dp 触控）
-            val actionable = item.isHotp || item.codeRaw != null
+            val actionable = item.isHotp || code != null
             val onAction: () -> Unit = { if (item.isHotp) onAdvanceHotp() else onCopy() }
             Row(
                 modifier = Modifier
@@ -336,7 +369,7 @@ private fun TotpLargeCard(
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Text(
-                    text = item.codeFormatted,
+                    text = formatTotpCode(code),
                     style = MonospaceTotpStyle.copy(
                         fontSize = 28.sp,
                         fontWeight = FontWeight.Bold,
@@ -391,13 +424,14 @@ internal fun TotpLargeCardPreview() {
                 entryId = "preview-totp-1",
                 title = "预览站点",
                 account = "demo@example.com",
-                codeFormatted = "123 456",
                 codeRaw = "123456",
-                remainingSeconds = 18,
                 iconName = "key",
                 url = "https://example.com",
                 isHotp = false
             ),
+            // 预览固定取「剩余 18 秒」：与改动前的预览 / 截图基线同值（生产由窄通道刻度现算）
+            remainingSeconds = 18,
+            code = "123456",
             onClick = {},
             onCopy = {},
             onAdvanceHotp = {}

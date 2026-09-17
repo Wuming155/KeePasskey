@@ -1,7 +1,6 @@
-package com.keepasskey.app.ui.screens.vault
+package com.keepasskey.app.ui.model
 
 import com.keepasskey.app.data.repository.VaultRepository
-import com.keepasskey.app.ui.model.UiVaultEntry
 import com.keepasskey.app.util.tickerFlow
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -17,11 +16,21 @@ import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 
 /**
- * 密码库列表页的 **TOTP 实时倒计时与跨周期验证码重算**（ISSUE-P3-29：自 `VaultListViewModel.kt` 拆出）。
+ * 展示层共享的 **TOTP 实时倒计时与跨周期验证码重算**（ISSUE-P3-29：自 `VaultListViewModel.kt` 拆出；
+ * ISSUE-P3-182：提升为**列表页与验证器页共用**，故自 `ui/screens/vault/` 移至 `ui/model/` 并更名）。
  *
- * 原实现逐字迁移：秒级 tick 由官方 [tickerFlow] 冷流驱动（P1 整改，与详情页 / 验证器页共用单一
- * tick 源），剩余秒数回跳判定新周期并触发带 TOTP 条目重算。种子解析与验证码计算全在数据层完成，
+ * 原实现逐字迁移：秒级 tick 由官方 [tickerFlow] 冷流驱动（P1 整改，与详情页同为单一 tick 源），
+ * 剩余秒数回跳判定新周期并触发带 TOTP 条目重算。种子解析与验证码计算全在数据层完成，
  * 本类只持有验证码结果，**绝不接触种子**。
+ *
+ * ## ISSUE-P3-182：两个订阅方的口径差异
+ *
+ * [liveCodes] 是**时间驱动**之码——只在（任一条目自身）周期边界重算，其余时刻取值不变。
+ * - **列表页徽标**：对全部带 TOTP 条目原样取用（`liveCodes[id] ?: 投影之码`）；
+ * - **验证器页**：仅对 **TOTP** 条目取用本通道；**HOTP 条目走投影值**——HOTP 之码由用户
+ *   显式推进计数器决定（推进后重新投影即得新码），而本通道里的值恒为**推进前**的旧码，
+ *   沿用会把「刚被消费掉的那个码」显示回卡片（与详情页 `EntryDetailTotpTicker`
+ *   只跟 TOTP 的口径一致）。
  *
  * ## ISSUE-P2-89：两条通道均改为**订阅驱动**，且不再并入整页状态
  *
@@ -54,10 +63,10 @@ import kotlinx.coroutines.flow.stateIn
  * 经 `OtpEngine.getRemainingSeconds` 换算；重算触发改为「**任一条目自身周期的序号变化**」。
  * 全 30 秒的库与本改动之前逐拍等价（周期内零重算、跨周期必重算）。
  */
-internal class VaultListTotpTracker(
+internal class TotpCountdownTracker(
     private val vaultRepository: VaultRepository,
     private val scope: CoroutineScope,
-    /** 当前列表的根库条目（用于跨周期重算；由 ViewModel 提供其 uiState 快照） */
+    /** 待跟踪的条目快照（用于跨周期重算；由各页 ViewModel 提供其状态中的条目列表） */
     private val currentEntries: () -> List<UiVaultEntry>,
     /**
      * 节拍上游（含验证码重算）的调度器——生产为 [Dispatchers.Default]，
@@ -80,7 +89,7 @@ internal class VaultListTotpTracker(
      * 当前时刻的**秒级刻度**（自 1970 起的整秒，取自注入的 [nowMillis]）。
      *
      * **本 StateFlow 即节拍本体**：其上游（`tickerFlow`）由 `WhileSubscribed` 控制——
-     * 有人订阅才计时（列表页可见时由行内徽标订阅），无人订阅即停，故不需要显式启动/停止 API。
+     * 有人订阅才计时（页面可见时由 UI 订阅），无人订阅即停，故不需要显式启动/停止 API。
      *
      * 为什么下发**刻度**而不是「剩余秒数」：倒计时必须按**各条目自身周期**换算
      * （`period != 30` 的条目在 30 秒网格下会显示错误值），换算只需刻度与周期两个输入，

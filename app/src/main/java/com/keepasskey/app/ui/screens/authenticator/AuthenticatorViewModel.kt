@@ -5,18 +5,18 @@ import androidx.lifecycle.viewModelScope
 import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.security.ClipboardSecurityManager
+import com.keepasskey.app.ui.model.EntryDisplayDispatcher
+import com.keepasskey.app.ui.model.TotpCountdownTracker
 import com.keepasskey.app.ui.model.UiMessage
-import com.keepasskey.app.util.tickerFlow
-import com.keepasskey.core.otp.OtpEngine
+import com.keepasskey.app.ui.model.UiVaultEntry
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOn
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -25,7 +25,9 @@ import javax.inject.Inject
 class AuthenticatorViewModel @Inject constructor(
     private val vaultRepository: VaultRepository,
     // 允许为 null 仅用于 JVM 单测注入（测试环境无法提供系统剪贴板服务）；生产 DI 恒定注入真实实现
-    private val clipboardSecurityManager: ClipboardSecurityManager? = null
+    private val clipboardSecurityManager: ClipboardSecurityManager? = null,
+    // ISSUE-P3-182：展示装配调度器（生产 Dispatchers.Default；单测注入测试调度器保证断言确定性）
+    @EntryDisplayDispatcher private val displayDispatcher: CoroutineDispatcher = Dispatchers.Default
 ) : ViewModel() {
 
     companion object {
@@ -37,78 +39,78 @@ class AuthenticatorViewModel @Inject constructor(
     private val userMessageFlow = MutableStateFlow<UiMessage?>(null)
 
     /**
-     * 秒级 TOTP 倒计时触发器：在下方 uiState 的 combine 中并不消费其值（占位参数），
-     * 唯一职责是每秒推动各卡片按自身 period 重算剩余秒数与动态码。
+     * ISSUE-P3-175 ② / ISSUE-P3-182：**本页内容流**——带 TOTP 的条目（已按搜索词过滤）。
      *
-     * P1 整改：原实现为手写 `while (isActive) { delay(1000); ... }` 常驻循环，
-     * 与 VaultList / EntryDetail 三份逐字重复且各自的 delay 起点互不对齐；
-     * 现改由官方 tickerFlow 冷流 + stateIn 驱动——随 UI 订阅自动启停（WhileSubscribed），
-     * 取消即终止，且可被 kotlinx-coroutines-test 虚拟时钟（advanceTimeBy）精确推进。
+     * 独立成流的唯一目的是把「内容」与「秒级节拍」拆成两条通道：原实现把秒级 tick 作为
+     * combine 的占位参数（变换体内以 `_` 丢弃），其唯一作用是**触发整页重建**——
+     * 每拍都新建整份 `items` 且 `remainingSeconds` 每拍都变，全部卡片因此每秒重组；
+     * 现节拍与实时码只经 [nowSeconds] / [liveCodes] 两条窄通道下发，本流仅在
+     * 「条目或搜索词变化」时发射 ⇒ **周期内零重建**。
+     *
+     * 取码（种子解析 + HMAC）不在本流内：交给 [TotpCountdownTracker] 的周期边界通道，
+     * 本流只做过滤与映射（无解密、无计算）。
      */
-    private val timerSecondsFlow: StateFlow<Int> = tickerFlow()
-        .map { OtpEngine.getRemainingSeconds() }
-        .distinctUntilChanged()
-        .flowOn(Dispatchers.Default)
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
-            initialValue = OtpEngine.getRemainingSeconds()
-        )
-
-    val uiState: StateFlow<AuthenticatorUiState> = combine(
-        vaultRepository.getEntries(),
-        searchQueryFlow,
-        timerSecondsFlow,
-        userMessageFlow
-    ) { entries, query, _, message ->
-        // F2 整改：TOTP 种子不再随条目投影下发（UiVaultEntry 已移除 totpSecret）。
-        // 依据投影层即时计算出的 totpCode 识别 TOTP 条目，验证码经仓库 calculateEntryTotp
-        // 按需单条重算——种子解析与计算均在数据层内完成，绝不外泄到 UI 层。
-        val totpEntries = entries.filter { it.totpCode != null }
-
-        val filtered = if (query.isBlank()) {
-            totpEntries
-        } else {
-            totpEntries.filter {
-                it.title.contains(query, ignoreCase = true) ||
-                        it.username.contains(query, ignoreCase = true) ||
-                        it.url.contains(query, ignoreCase = true)
+    private val totpEntriesFlow: StateFlow<List<UiVaultEntry>> =
+        combine(vaultRepository.getEntries(), searchQueryFlow) { entries, query ->
+            val totpEntries = entries.filter { it.totpCode != null }
+            if (query.isBlank()) {
+                totpEntries
+            } else {
+                totpEntries.filter {
+                    it.title.contains(query, ignoreCase = true) ||
+                            it.username.contains(query, ignoreCase = true) ||
+                            it.url.contains(query, ignoreCase = true)
+                }
             }
         }
+            .flowOn(displayDispatcher)
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5000),
+                initialValue = emptyList()
+            )
 
-        // ISSUE-P3-175：改走**批量通道**——`calculateEntryTotps` 一次会话读取 + 一次条目索引，
-        // 取代原先的逐条挂起调用（每拍 × 每条目一次 `calculateEntryTotp`）。
-        // 快照语义与单条入口一致（同一实现内部共用），故格式化 / `isHotp` / 周期取值逐字不变。
-        val snapshots = vaultRepository.calculateEntryTotps(filtered.map { it.id })
+    /**
+     * ISSUE-P3-182：与列表页**同一实现**的周期边界通道（`ISSUE-P3-29` 拆出的共享协作者）。
+     * 复用而非再写一份的理由：仓内既有 P1 整改已把「三份逐字重复的秒级节拍」收敛为一，
+     * 再复制一份即为回归。种子解析与验证码计算全在数据层完成，本类只持有结果。
+     */
+    private val totpTracker = TotpCountdownTracker(
+        vaultRepository = vaultRepository,
+        scope = viewModelScope,
+        currentEntries = { totpEntriesFlow.value },
+        dispatcher = displayDispatcher
+    )
 
-        val items = filtered.map { entry ->
-            val snapshot = snapshots[entry.id]
-            val period = snapshot?.periodSeconds ?: entry.totpPeriod
-            val remaining = OtpEngine.getRemainingSeconds(periodSeconds = period)
+    /** 窄通道：秒级**刻度**（倒计时由卡片按条目自身周期现算，ISSUE-P3-158） */
+    val nowSeconds: StateFlow<Long> get() = totpTracker.nowSeconds
 
-            // TASK-33 整改：快照缺失（种子缺失/解析失败/计算异常）时不再回退假码 "000000"，
-            // 改为下发 null + 占位符 "------"，UI 端禁用复制——假码会诱导用户复制无效第二因子
-            val raw = snapshot?.code
+    /** 窄通道：`entryId → 本周期实时验证码`（仅在周期边界重算） */
+    val liveCodes: StateFlow<Map<String, String>> get() = totpTracker.liveCodes
 
-            val formatted = raw?.let {
-                when (it.length) {
-                    6 -> "${it.substring(0, 3)} ${it.substring(3)}"
-                    8 -> "${it.substring(0, 4)} ${it.substring(4)}"
-                    else -> it
-                }
-            } ?: "------"
-
+    val uiState: StateFlow<AuthenticatorUiState> = combine(
+        totpEntriesFlow,
+        searchQueryFlow,
+        userMessageFlow
+    ) { entries, query, message ->
+        // ISSUE-P3-182：本变换**不再含任何解密 / HMAC / 逐条挂起调用**——内容来自
+        // totpEntriesFlow（条目或搜索词变化才发射），秒级与周期性的动态只走窄通道。
+        // 搜索框回显仍直接取 searchQueryFlow（键入即时回显，不等过滤流水完成）。
+        val items = entries.map { entry ->
             TotpCardItem(
                 entryId = entry.id,
                 title = entry.title,
                 account = entry.username,
-                codeFormatted = formatted,
-                codeRaw = raw,
-                remainingSeconds = remaining,
-                periodSeconds = period,
+                // F2 整改：TOTP 种子不随条目投影下发（UiVaultEntry 已移除 totpSecret）。
+                // 此处只取投影层**即时计算**的兜底之码（归一到纯数字，与窄通道之码同形态）；
+                // 本周期实时之码由 totpTracker 下发，卡片取 `liveCodes[entryId] ?: codeRaw`。
+                codeRaw = entry.totpCode?.replace(" ", ""),
+                periodSeconds = entry.totpPeriod,
                 iconName = entry.iconName,
                 url = entry.url,
-                isHotp = snapshot?.isHotp == true || entry.isHotp
+                // ISSUE-P3-182：HOTP 之码由用户显式推进计数器决定（推进后重新投影即得新码），
+                // 不在时间通道内——与详情页 `EntryDetailTotpTicker` 只跟 TOTP 的口径一致。
+                isHotp = entry.isHotp
             )
         }
 
@@ -118,9 +120,10 @@ class AuthenticatorViewModel @Inject constructor(
             userMessage = message
         )
     }
-        // TASK-42 整改（P2-30）：combine 变换内含 calculateEntryTotp（种子解析+HMAC 计算），
-        // 显式 flowOn(Default) 使全部上游变换脱离主线程——不依赖上游实现的调度选择，兜底防 ANR
-        .flowOn(Dispatchers.Default)
+        // TASK-42 整改（P2-30）：显式 flowOn 使全部上游变换脱离 Main——不依赖上游实现的
+        // 调度选择，兜底防 ANR。ISSUE-P3-182 后本变换已无种子解析与 HMAC，但条目映射与
+        // 状态构造仍不落在主线程（与列表页 §174 同一调度器口径）
+        .flowOn(displayDispatcher)
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),

@@ -85,9 +85,10 @@ class AuthenticatorViewModelTest {
         val codeRaw = githubItem!!.codeRaw ?: error("种子完好条目的验证码不得为 null")
         assertEquals(6, codeRaw.length)
         assertTrue("TOTP 代码必须全为数字", codeRaw.all { it.isDigit() })
-        // 格式化应为 "xxx xxx"
-        assertEquals(7, githubItem.codeFormatted.length)
-        assertTrue(githubItem.codeFormatted.contains(' '))
+        // 显示文本由卡片经**共用**格式化函数现算（ISSUE-P3-182：状态里不再携带格式化结果）
+        val display = formatTotpCode(codeRaw)
+        assertEquals(7, display.length)
+        assertTrue(display.contains(' '))
 
         // 验证不再包含无 TOTP 密钥的普通条目（如条目 1, 3, 5）
         val nonTotpItem = state.items.firstOrNull { it.entryId == "1" || it.entryId == "3" || it.entryId == "5" }
