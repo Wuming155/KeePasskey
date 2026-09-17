@@ -185,21 +185,45 @@ jobs:
           if skipped != 0:
               print(f"::error::原生用例被跳过 {skipped} 例；本 job 已装 cargo 与 4 ABI 产物，不得跳过"); sys.exit(1)
           PY
-          # 2) 导出符号核对：JNI 定长契约要求每个 ABI 的 .so 恰好导出 5 个 Java_com_keepasskey 符号
-          #    （Twofish ×2 / AES-KDF / Argon2 / 口令强度）。
-          #    实测（本机 NDK 28.2.13676358 llvm-nm，2026-09-15，arm64-v8a 产物）：恰好 5 个。
+          # 2) 导出符号核对：JNI 定长契约要求每个 ABI 的 .so 导出**恰好 8 个**
+          #    Java_com_keepasskey 符号（Argon2 / AES-KDF / Twofish ×2 / 口令强度 5 个，
+          #    加 ISSUE-P3-153 §145/§146 新增的 ChaCha20 / Passkey ES256 / Passkey Ed25519）。
+          #    实测（本机 NDK 28.2.13676358 llvm-nm，**2026-09-17**，arm64-v8a 产物）：恰好 8 个，
+          #    即下方 expected 清单——按 §73 立规「期望值必须实测而非引用」，该清单为实测输出。
+          #    **逐名核对**（而非只比数量）：「数量对而符号错」（如误删一个 `#[no_mangle]` 又
+          #    误加另一个）只有逐名核对能拦住。
           nm="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm"
           test -x "$nm"
           for abi in arm64-v8a armeabi-v7a x86_64 x86; do
             so="crypto/build/rust/jniLibs/${abi}/libkeepasskey_argon2.so"
             test -f "$so"
-            count=$("$nm" --dynamic --defined-only "$so" | grep -c 'Java_com_keepasskey' || true)
-            echo "${abi}: Java_com_keepasskey 导出数 = ${count}"
-            if [ "$count" -ne 5 ]; then
-              echo "::error::${abi} 的 JNI 导出符号数异常（期望 5，实际 ${count}）——契约变更或符号被剥离"
-              exit 1
-            fi
+            "$nm" --dynamic --defined-only "$so" \
+              | grep -o 'Java_com_keepasskey[A-Za-z0-9_]*' | sort -u > "/tmp/${abi}.symbols"
+            echo "${abi}: Java_com_keepasskey 导出数 = $(wc -l < "/tmp/${abi}.symbols")"
           done
+          python3 - <<'PY'
+          import sys
+          expected = {
+              "Java_com_keepasskey_crypto_kdf_NativeArgon2_deriveKey",
+              "Java_com_keepasskey_crypto_kdf_NativeAesKdf_deriveKey",
+              "Java_com_keepasskey_crypto_cipher_NativeTwofish_cbcEncryptBlocks",
+              "Java_com_keepasskey_crypto_cipher_NativeTwofish_cbcDecryptBlocks",
+              "Java_com_keepasskey_crypto_cipher_NativeChaCha20_applyKeystream",
+              "Java_com_keepasskey_crypto_strength_NativePasswordStrength_estimate",
+              "Java_com_keepasskey_crypto_passkey_NativePasskeySign_es256Sign",
+              "Java_com_keepasskey_crypto_passkey_NativePasskeySign_ed25519Sign",
+          }
+          failed = False
+          for abi in ("arm64-v8a", "armeabi-v7a", "x86_64", "x86"):
+              actual = set(open(f"/tmp/{abi}.symbols").read().split())
+              if actual != expected:
+                  print(f"::error::{abi} 的 JNI 导出符号与定长契约不一致；"
+                        f"缺失={sorted(expected - actual)} 多余={sorted(actual - expected)}")
+                  failed = True
+          if failed:
+              sys.exit(1)
+          print(f"4 ABI 导出符号逐名核对通过（各 {len(expected)} 个）")
+          PY
 
       - name: Assemble Debug（真实触发原生构建与 APK 打包）
         run: ./gradlew :app:assembleDebug --console=plain

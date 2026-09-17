@@ -59,3 +59,59 @@
 - 未跑 `lint` / `assembleRelease`；签名吞吐的本批前后对比为「评估探针数据 + 生产对拍」，
   未重跑真机签名计时探针（signAssertion 计时探针属评估期一次性数据，§146 后生产路径
   即评估中的 Rust 内核，耗时 ≈1 ms 量级）。
+
+---
+
+## 6. 批后补正：CI 原生门禁的 JNI 符号契约同步（2026-09-17）
+
+### 6.1 必红的门禁（本批提交后才会暴露）
+
+§145 / §146 各新增 JNI 导出（ChaCha20 ×1、Passkey ES256 / Ed25519 ×2）⇒ `.so` 的
+`Java_com_keepasskey` 导出数由 **5 → 8**；而 CI `native-gate` 的
+「断言原生用例零跳过 + 4 ABI 导出符号核对（ISSUE-P3-97）」步骤**硬断言恰好 5 个**。
+**本地 `test` / `assembleDebug` / `connectedDebugAndroidTest` 均不会暴露该问题**——
+唯有跑 CI 才会红（本批在补做构建面验证时发现）。
+
+### 6.2 实测期望值（§73 立规：期望值必须实测而非引用）
+
+本机 NDK 28.2.13676358 `llvm-nm --dynamic --defined-only`：**4 个 ABI 产物均为 8 个**，
+且符号名跨 ABI **完全一致**（已逐名核对 arm64-v8a 与 x86）：
+
+```text
+Java_com_keepasskey_crypto_kdf_NativeArgon2_deriveKey
+Java_com_keepasskey_crypto_kdf_NativeAesKdf_deriveKey
+Java_com_keepasskey_crypto_cipher_NativeTwofish_cbcEncryptBlocks
+Java_com_keepasskey_crypto_cipher_NativeTwofish_cbcDecryptBlocks
+Java_com_keepasskey_crypto_cipher_NativeChaCha20_applyKeystream    ← §145 新增
+Java_com_keepasskey_crypto_strength_NativePasswordStrength_estimate
+Java_com_keepasskey_crypto_passkey_NativePasskeySign_es256Sign     ← §146 新增
+Java_com_keepasskey_crypto_passkey_NativePasskeySign_ed25519Sign   ← §146 新增
+```
+
+### 6.3 处置：数量断言升级为逐名集合核对
+
+`grep -o` 提取符号名 → python 集合比对（缺失 / 多余分别打印）。修期望值的同时**收严口径**：
+堵住「数量对而符号错」这一数量断言拦不住的形态（如误删一个 `#[no_mangle]` 又误加另一个）。
+`set -euo pipefail` 下 `grep` 无命中即失败（fail-closed，符号被整体剥离不会静默通过）。
+
+### 6.4 验证与实测（含此前标注「未跑」的构建面）
+
+| 项 | 结果 |
+|---|---|
+| CI 文件语法 | `yaml.safe_load` 解析通过（jobs：`fast-gate` / `native-gate` / `rust-supply-chain`） |
+| 断言逻辑本机模拟 | 4 ABI 全部通过 |
+| `assembleDebug` + `lint` | **绿**（3m 19s / 227 tasks） |
+| `:app:assembleRelease`（R8 + lintVital） | **绿**（2m 28s / 204 tasks） |
+| APK 四 ABI `.so` 入包 | debug 与 release 包**均为 4 条**；debug 尺寸 arm64-v8a 583,128 B / armeabi-v7a 451,712 B / x86 756,964 B / x86_64 687,136 B（较本批前约 **+105 KB**，来自 3 个新增 Rust 依赖） |
+| **R8 保留面**（`apkanalyzer dex code`，**release 包**） | 三个新 native 方法的**类名与方法名均未被混淆 / 剥离**：`.method public final native applyKeystream([B[BJ[B)[B`、`.method public final native es256Sign([B[B)[B`、`.method public final native ed25519Sign([B[B)[B`（`mapping.txt` 亦为 `NativeChaCha20 -> NativeChaCha20`）⇒ JNI 按名查找在 release 包同样成立 |
+
+### 6.5 口径澄清（如实，避免误判）
+
+`app/build/outputs/mapping/release/usage.txt` 会列出 `getAvailable()`、
+`NativeTwofish.decryptBlocks()` / `encryptBlocks()` 一类成员「已移除」——那是 R8 的
+**访问器内联 / 死代码消除**（死代码含本批改造后不再被调用的 `es256SignChecked` /
+`ed25519SignChecked` 包装）结果，**不是** native 方法被剥离。native 方法存活以 **dex 实测**
+为准（见上表最后一行），故**未**据此新增任何 `-keep` 规则。
+
+> 该口径同时解释了为何本批改动**未**触及 `proguard-rules.pro`：AGP 默认的
+> `-keepclasseswithmembernames class * { native <methods>; }` 已覆盖，实测予以确认。
