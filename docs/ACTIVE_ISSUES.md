@@ -186,9 +186,13 @@
      门面回到 **430 行**；五成员放宽为 `internal`；`AlgoHotPathGuardsTest` 改按「门面 + 分支文件」并集扫描，
      计数判据仍为 2。见 [`resolved/batches/155-同步周期远端分支下沉批次.md`](resolved/batches/155-同步周期远端分支下沉批次.md)）；
   3. **其余 400~500 行文件**（**§161 重测口径**：五模块 `src/main` 全部 `.kt` 逐文件 `wc -l`，
-     **§163 后为 38 个**；原记「约 36 个」系 §188 首次清点时刻之数）——头部：
+     **§164 后为 37 个**（§161 40 → §162 39 → §163 38 → §164 37）；原记「约 36 个」系 §188 首次清点时刻之数）——头部：
      `RealVaultRepository` 489、`VaultRepository` 478、`AutofillConfirmActivity` 475、`EntryEditScreen` 472、
      `RuntimeIntegrityDetector` 470、`SyncConflictController` 461、`KdbxHeader` 461、`KdbxXmlParser` 454；第一档余量 `EntryDetailViewModel` 435 / `EntryDetailScreen` 426 亦含在内。
+     > **§164 再消化一个**：`AutofillConfirmActivity` 476 → **367**（无状态的「调用方归属块」+ 其预览夹具
+     > 移入 `AutofillCallerAttributionBlock.kt` 127 行，`private` → `internal`；三处源码接线守卫的判据
+     > 都锚在 Activity 本体的认证结果与交付锁路径上，**其行为用户刻意排除**——该段的行为级证据只有
+     > 设备侧 `AutofillAuthChainDeviceTest`，本机无设备时不搬，以免进入「只有静态判据、无法真机复跑」的区域）。
      > **§163 再消化一个**：`VaultEntryMapper` 490 → **385**（条目 TOTP 面「来源定位 → 配置解析 → 按时刻取码」
      > 三者是无状态纯函数，整族移入 `VaultEntryTotpMapping.kt` 128 行；TASK-46 的字节态与 `finally` 擦除
      > 语义随代码同迁未放宽；对外 `parseTotpConfig` / `computeTotpCode` 由母文件留一行委托，调用点零改动）。
