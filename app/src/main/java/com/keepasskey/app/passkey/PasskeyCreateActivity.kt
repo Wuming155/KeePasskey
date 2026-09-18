@@ -125,101 +125,119 @@ class PasskeyCreateActivity : BaseCredentialActivity() {
     private fun startCreation() {
         lifecycleScope.launch {
             try {
-                if (vaultRepository.isLocked()) {
-                    AppLog.w(TAG, "密码库仍未解锁，无法注册新 Passkey")
-                    failAndFinish()
-                    return@launch
-                }
-
-                // 普通应用（apk-key-hash origin）创建的凭据额外记录调用包绑定（android://<包名>）。
-                // ISSUE-P2-72：仅接受**系统背书**的 CallingAppInfo 包名，取不到即返回 null。
-                val callerPackage = CallingOriginResolver.systemAttestedPackageName(providerReq?.callingAppInfo)
-
-                // ISSUE-P2-02：普通应用注册的 DAL 远程资产声明强绑定校验。
-                // 浏览器委派调用豁免（rp.id ↔ web origin 归属已由 DomainMatcher 严格点号边界强制）。
-                if (!CallingOriginResolver.isBrowserOrigin(origin)) {
-                    val pkg = callerPackage ?: run {
-                        AppLog.e(TAG, "无法确定调用应用包名，拒绝创建应用内 Passkey")
-                        failAndFinish()
-                        return@launch
-                    }
-                    val skipDal = extendedSettingsStore.load().skipDalVerification
-                    if (skipDal) {
-                        AppLog.w(TAG, "用户已显式开启「跳过 DAL 校验」，本次注册不执行远程声明验证")
-                    } else {
-                        val callingAppInfo = providerReq?.callingAppInfo
-                        // ISSUE-P3-93：以调用方**全部**签名摘要参与 DAL 校验（签名轮换期任一命中即通过）
-                        val certDigests = callingAppInfo?.let { CallingOriginResolver.certDigests(it) }
-                            ?: CallerCertDigests.EMPTY
-                        if (callingAppInfo == null || certDigests.isEmpty) {
-                            AppLog.e(TAG, "无法获取调用方签名证书，DAL 校验 fail-closed，拒绝创建")
-                            failAndFinish()
-                            return@launch
-                        }
-                        when (dalVerifier.verify(rpId, pkg, certDigests)) {
-                            DigitalAssetLinksVerifier.DalResult.VERIFIED -> Unit
-                            DigitalAssetLinksVerifier.DalResult.NOT_VERIFIED -> {
-                                AppLog.w(TAG, "DAL 声明校验未通过（无匹配授权声明或格式错误），拒绝创建")
-                                failAndFinish()
-                                return@launch
-                            }
-                            DigitalAssetLinksVerifier.DalResult.NETWORK_UNAVAILABLE -> {
-                                AppLog.w(TAG, "DAL 校验网络不可用，fail-closed 拒绝创建")
-                                failAndFinish()
-                                return@launch
-                            }
-                        }
-                    }
-                }
-
-                // ISSUE：`excludeCredentials` 查重（WebAuthn 规范要求认证器拒绝创建已排除的凭据）
-                if (!ensureNotExcluded()) {
-                    failAndFinish()
-                    return@launch
-                }
-
-                // RP 要求 `userVerification: "required"` 时强制系统级强验证（不得降级为手动确认）
-                val requireBiometric = request?.authenticatorSelectionUserVerification ==
-                    WebAuthnRequest.UserVerification.REQUIRED
-
-                val rpLabel = rpId.ifBlank { userName }
-                requestCredentialUserVerification(
-                    biometricAuthManager = biometricAuthManager,
-                    fillVerifier = fillVerifier,
-                    title = getString(R.string.cred_passkey_create_title),
-                    biometricSubtitle = getString(R.string.passkey_create_biometric_subtitle, rpLabel),
-                    manualHint = getString(R.string.passkey_create_manual_hint, rpLabel),
-                    confirmText = getString(R.string.passkey_confirm_ok),
-                    cancelText = getString(R.string.passkey_confirm_cancel),
-                    requireBiometric = requireBiometric,
-                    onVerified = { verification ->
-                        if (settled) return@requestCredentialUserVerification
-                        settled = true
-                        // ISSUE-P2-83：注册流程是「用户在受保护窗口内把凭据显式交给该调用方」的
-                        // 两个入口之一（另一个是保存），故在验证通过后、落库前写入 CM 通道绑定。
-                        // fail-closed：包名不可得或摘要不可读一律**不写入**（保持未绑定）。
-                        val attestedPkg = callerPackage
-                        val callerDigests = providerReq?.callingAppInfo
-                            ?.let { CallingOriginResolver.certDigests(it) }
-                            ?: CallerCertDigests.EMPTY
-                        if (attestedPkg.isNullOrBlank() || callerDigests.isEmpty) {
-                            AppLog.w(TAG, "调用方包名或签名摘要不可读，CM 通道保持未绑定（fail-closed）")
-                        } else {
-                            callerTrustStore.trust(attestedPkg, callerDigests.primary)
-                        }
-                        createAndReturn(callerPackage = callerPackage, verification = verification)
-                    },
-                    onRejected = {
-                        if (settled) return@requestCredentialUserVerification
-                        settled = true
-                        AppLog.w(TAG, "用户验证未通过，拒绝创建 Passkey")
-                        failAndFinish()
-                    }
-                )
+                awaitRegistration()
             } catch (t: Throwable) {
                 AppLog.e(TAG, "Passkey 注册异常", t)
                 failAndFinish()
             }
+        }
+    }
+
+    /**
+     * 注册门禁链（ISSUE-P3-188 拆分）：锁定态复核 → DAL / 归属校验 → `excludeCredentials`
+     * 查重 → 用户验证门控；判定顺序与 fail-closed 口径逐字不变。
+     */
+    private suspend fun awaitRegistration() {
+        if (vaultRepository.isLocked()) {
+            AppLog.w(TAG, "密码库仍未解锁，无法注册新 Passkey")
+            failAndFinish()
+            return
+        }
+
+        // 普通应用（apk-key-hash origin）创建的凭据额外记录调用包绑定（android://<包名>）。
+        // ISSUE-P2-72：仅接受**系统背书**的 CallingAppInfo 包名，取不到即返回 null。
+        val callerPackage = CallingOriginResolver.systemAttestedPackageName(providerReq?.callingAppInfo)
+        if (!passesRegistrationGates(callerPackage)) {
+            failAndFinish()
+            return
+        }
+
+        // ISSUE：`excludeCredentials` 查重（WebAuthn 规范要求认证器拒绝创建已排除的凭据）
+        if (!ensureNotExcluded()) {
+            failAndFinish()
+            return
+        }
+        requestCreationUserVerification(callerPackage)
+    }
+
+    /**
+     * ISSUE-P2-02：普通应用注册的 DAL 远程资产声明强绑定校验。
+     * 浏览器委派调用豁免（rp.id ↔ web origin 归属已由 DomainMatcher 严格点号边界强制）。
+     */
+    private suspend fun passesRegistrationGates(callerPackage: String?): Boolean {
+        if (CallingOriginResolver.isBrowserOrigin(origin)) return true
+        val pkg = callerPackage ?: run {
+            AppLog.e(TAG, "无法确定调用应用包名，拒绝创建应用内 Passkey")
+            return false
+        }
+        if (extendedSettingsStore.load().skipDalVerification) {
+            AppLog.w(TAG, "用户已显式开启「跳过 DAL 校验」，本次注册不执行远程声明验证")
+            return true
+        }
+        val callingAppInfo = providerReq?.callingAppInfo
+        // ISSUE-P3-93：以调用方**全部**签名摘要参与 DAL 校验（签名轮换期任一命中即通过）
+        val certDigests = callingAppInfo?.let { CallingOriginResolver.certDigests(it) }
+            ?: CallerCertDigests.EMPTY
+        if (callingAppInfo == null || certDigests.isEmpty) {
+            AppLog.e(TAG, "无法获取调用方签名证书，DAL 校验 fail-closed，拒绝创建")
+            return false
+        }
+        return when (dalVerifier.verify(rpId, pkg, certDigests)) {
+            DigitalAssetLinksVerifier.DalResult.VERIFIED -> true
+            DigitalAssetLinksVerifier.DalResult.NOT_VERIFIED -> {
+                AppLog.w(TAG, "DAL 声明校验未通过（无匹配授权声明或格式错误），拒绝创建")
+                false
+            }
+
+            DigitalAssetLinksVerifier.DalResult.NETWORK_UNAVAILABLE -> {
+                AppLog.w(TAG, "DAL 校验网络不可用，fail-closed 拒绝创建")
+                false
+            }
+        }
+    }
+
+    /** RP 要求 `userVerification: "required"` 时强制系统级强验证（不得降级为手动确认） */
+    private fun requestCreationUserVerification(callerPackage: String?) {
+        val requireBiometric = request?.authenticatorSelectionUserVerification ==
+            WebAuthnRequest.UserVerification.REQUIRED
+        val rpLabel = rpId.ifBlank { userName }
+        requestCredentialUserVerification(
+            biometricAuthManager = biometricAuthManager,
+            fillVerifier = fillVerifier,
+            title = getString(R.string.cred_passkey_create_title),
+            biometricSubtitle = getString(R.string.passkey_create_biometric_subtitle, rpLabel),
+            manualHint = getString(R.string.passkey_create_manual_hint, rpLabel),
+            confirmText = getString(R.string.passkey_confirm_ok),
+            cancelText = getString(R.string.passkey_confirm_cancel),
+            requireBiometric = requireBiometric,
+            onVerified = { verification ->
+                if (settled) return@requestCredentialUserVerification
+                settled = true
+                bindCallerForRegistration(callerPackage)
+                createAndReturn(callerPackage = callerPackage, verification = verification)
+            },
+            onRejected = {
+                if (settled) return@requestCredentialUserVerification
+                settled = true
+                AppLog.w(TAG, "用户验证未通过，拒绝创建 Passkey")
+                failAndFinish()
+            }
+        )
+    }
+
+    /**
+     * ISSUE-P2-83：注册流程是「用户在受保护窗口内把凭据显式交给该调用方」的两个入口之一
+     * （另一个是保存），故在验证通过后、落库前写入 CM 通道绑定。
+     * fail-closed：包名不可得或摘要不可读一律**不写入**（保持未绑定）。
+     */
+    private fun bindCallerForRegistration(callerPackage: String?) {
+        val callerDigests = providerReq?.callingAppInfo
+            ?.let { CallingOriginResolver.certDigests(it) }
+            ?: CallerCertDigests.EMPTY
+        if (callerPackage.isNullOrBlank() || callerDigests.isEmpty) {
+            AppLog.w(TAG, "调用方包名或签名摘要不可读，CM 通道保持未绑定（fail-closed）")
+        } else {
+            callerTrustStore.trust(callerPackage, callerDigests.primary)
         }
     }
 
@@ -351,20 +369,20 @@ class PasskeyCreateActivity : BaseCredentialActivity() {
             )
 
             val attestationMap = linkedMapOf<String, Any>(
-                "fmt" to "none",
-                "attStmt" to emptyMap<String, Any>(),
-                "authData" to authData
+                WebAuthnJson.FORMAT to WebAuthnJson.FORMAT_NONE,
+                WebAuthnJson.ATTESTATION_STATEMENT to emptyMap<String, Any>(),
+                WebAuthnJson.AUTHENTICATOR_DATA to authData
             )
             attestationObjectBytes = CborEncoder.encodeMap(attestationMap)
 
             val clientDataJson = JSONObject().apply {
-                put("type", "webauthn.create")
-                put("challenge", challenge)
-                put("origin", origin.ifBlank { "https://$rpId" })
+                put(WebAuthnJson.TYPE, WebAuthnJson.CLIENT_DATA_TYPE_CREATE)
+                put(WebAuthnJson.CHALLENGE, challenge)
+                put(WebAuthnJson.ORIGIN, origin.ifBlank { "https://$rpId" })
                 // ISSUE-P2-72：归属字段只写**系统背书**的调用方包名；取不到即省略该字段——
                 // 绝不回退为本应用包名（那会把 RP 收到的归属伪造成我们）。
                 CallingOriginResolver.clientDataAndroidPackageName(callerPackage)?.let {
-                    put("androidPackageName", it)
+                    put(WebAuthnJson.ANDROID_PACKAGE_NAME, it)
                 }
             }.toString()
 
@@ -373,18 +391,18 @@ class PasskeyCreateActivity : BaseCredentialActivity() {
             val attestationBase64 = b64Url.encodeToString(attestationObjectBytes)
 
             return JSONObject().apply {
-                put("id", passkeyData.credentialId)
-                put("rawId", passkeyData.credentialId)
-                put("type", "public-key")
-                put("authenticatorAttachment", "platform")
+                put(WebAuthnJson.ID, passkeyData.credentialId)
+                put(WebAuthnJson.RAW_ID, passkeyData.credentialId)
+                put(WebAuthnJson.TYPE, WebAuthnJson.CREDENTIAL_TYPE_PUBLIC_KEY)
+                put(WebAuthnJson.AUTHENTICATOR_ATTACHMENT, WebAuthnJson.ATTACHMENT_PLATFORM)
                 put(
-                    "clientExtensionResults",
+                    WebAuthnJson.CLIENT_EXTENSION_RESULTS,
                     buildPrfClientExtensionResults(prfEval, passkeyData.prfSecret, isRegistration = true)
                 )
-                put("response", JSONObject().apply {
-                    put("clientDataJSON", clientDataBase64)
-                    put("attestationObject", attestationBase64)
-                    put("transports", JSONArray().put("internal"))
+                put(WebAuthnJson.RESPONSE, JSONObject().apply {
+                    put(WebAuthnJson.CLIENT_DATA_JSON, clientDataBase64)
+                    put(WebAuthnJson.ATTESTATION_OBJECT, attestationBase64)
+                    put(WebAuthnJson.TRANSPORTS, JSONArray().put(WebAuthnJson.TRANSPORT_INTERNAL))
                 })
             }.toString()
         } finally {
@@ -408,27 +426,27 @@ class PasskeyCreateActivity : BaseCredentialActivity() {
         val prf = JSONObject()
         if (prfSecret == null) {
             if (!isRegistration) return JSONObject()
-            prf.put("enabled", true)
-            return JSONObject().put("prf", prf)
+            prf.put(WebAuthnJson.ENABLED, true)
+            return JSONObject().put(WebAuthnJson.PRF, prf)
         }
-        prf.put("enabled", true)
+        prf.put(WebAuthnJson.ENABLED, true)
         val first = PasskeyPrf.computeValue(prfSecret, prfEval.first)
         try {
-            val results = JSONObject().put("first", b64Url.encodeToString(first))
+            val results = JSONObject().put(WebAuthnJson.FIRST, b64Url.encodeToString(first))
             val secondInput = prfEval.second
             if (secondInput != null) {
                 val second = PasskeyPrf.computeValue(prfSecret, secondInput)
                 try {
-                    results.put("second", b64Url.encodeToString(second))
+                    results.put(WebAuthnJson.SECOND, b64Url.encodeToString(second))
                 } finally {
                     second.fill(0)
                 }
             }
-            prf.put("results", results)
+            prf.put(WebAuthnJson.RESULTS, results)
         } finally {
             first.fill(0)
         }
-        return JSONObject().put("prf", prf)
+        return JSONObject().put(WebAuthnJson.PRF, prf)
     }
 
     companion object {

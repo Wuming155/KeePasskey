@@ -180,6 +180,15 @@ class UnlockPasskeyManager @Inject constructor(
         /** AuthenticatorData 固定头长：rpIdHash(32) + flags(1) + signCount(4) */
         const val AUTHENTICATOR_DATA_LENGTH = 37
 
+        /** rpIdHash 长度（SHA-256 摘要），即 flags 之前的字节数 */
+        private const val RP_ID_HASH_LENGTH = 32
+
+        /** flags 字节在 AuthenticatorData 中的偏移 */
+        private const val FLAGS_OFFSET = RP_ID_HASH_LENGTH
+
+        /** signCount（大端 4 字节）在 AuthenticatorData 中的起始偏移 */
+        private const val SIGN_COUNT_OFFSET = 33
+
         /** UP（User Present）标志位 */
         private const val FLAG_UP: Byte = 0x01
 
@@ -191,11 +200,11 @@ class UnlockPasskeyManager @Inject constructor(
         fun buildAuthenticatorData(rpId: String, signCount: Int): ByteArray {
             val out = ByteArray(AUTHENTICATOR_DATA_LENGTH)
             rpIdHash(rpId).copyInto(out)
-            out[32] = FLAG_UP
-            out[33] = ((signCount ushr 24) and 0xFF).toByte()
-            out[34] = ((signCount ushr 16) and 0xFF).toByte()
-            out[35] = ((signCount ushr 8) and 0xFF).toByte()
-            out[36] = (signCount and 0xFF).toByte()
+            out[FLAGS_OFFSET] = FLAG_UP
+            out[SIGN_COUNT_OFFSET] = ((signCount ushr 24) and 0xFF).toByte()
+            out[SIGN_COUNT_OFFSET + 1] = ((signCount ushr 16) and 0xFF).toByte()
+            out[SIGN_COUNT_OFFSET + 2] = ((signCount ushr 8) and 0xFF).toByte()
+            out[SIGN_COUNT_OFFSET + 3] = (signCount and 0xFF).toByte()
             return out
         }
 
@@ -230,11 +239,11 @@ class UnlockPasskeyManager @Inject constructor(
             // clientDataJSON 规范性：与按预期 challenge 重建的本地序列化逐字节一致
             if (!clientDataJSON.contentEquals(buildClientDataJson(expectedChallenge))) return false
             if (authenticatorData.size < AUTHENTICATOR_DATA_LENGTH) return false
-            if (!authenticatorData.copyOfRange(0, 32).contentEquals(expectedRpIdHash)) return false
-            val newCount = ((authenticatorData[33].toInt() and 0xFF) shl 24) or
-                    ((authenticatorData[34].toInt() and 0xFF) shl 16) or
-                    ((authenticatorData[35].toInt() and 0xFF) shl 8) or
-                    (authenticatorData[36].toInt() and 0xFF)
+            if (!authenticatorData.copyOfRange(0, RP_ID_HASH_LENGTH).contentEquals(expectedRpIdHash)) return false
+            val newCount = ((authenticatorData[SIGN_COUNT_OFFSET].toInt() and 0xFF) shl 24) or
+                    ((authenticatorData[SIGN_COUNT_OFFSET + 1].toInt() and 0xFF) shl 16) or
+                    ((authenticatorData[SIGN_COUNT_OFFSET + 2].toInt() and 0xFF) shl 8) or
+                    (authenticatorData[SIGN_COUNT_OFFSET + 3].toInt() and 0xFF)
             if (newCount <= lastSignCount) return false
             return try {
                 val publicKey = KeyFactory.getInstance("EC")

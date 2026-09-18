@@ -83,122 +83,18 @@ internal fun buildVaultListUiState(
     batchSyncDecorations: VaultListBatchSyncDecorations
 ): VaultListUiState {
     val batchSync = batchSyncDecorations.batchAndSync
+    val content = projectVaultListContent(allGroups, allEntries, session)
     val activeDb = databases.firstOrNull { it.isActive } ?: databases.firstOrNull()
-    val isSearching = session.filterParams.query.isNotBlank()
-
-    // ISSUE-P3-162：分组索引只建一次——面包屑与回收站集合原本各自做全表线性扫描
-    // （面包屑 O(深度 × 分组数)、回收站 O(子树 × 分组数)），而本函数在每次状态投影重跑。
-    val groupsById = allGroups.associateBy { it.id }
-    val childrenByParent = allGroups.groupBy { it.parentId }
-
-    // 计算当前面包屑路径（父链出现环时按已访问集合截断，与 GroupPathPresenter 同口径）
-    val breadcrumbs = ArrayDeque<VaultGroup>()
-    var pendingGroupId = session.currentGroupId
-    val visitedBreadcrumbIds = mutableSetOf<String>()
-    while (true) {
-        val id = pendingGroupId ?: break
-        if (!visitedBreadcrumbIds.add(id)) break
-        val grp = groupsById[id] ?: break
-        breadcrumbs.addFirst(grp)
-        pendingGroupId = grp.parentId
-    }
-
-    // H5 整改：回收站判定不再依赖 mock 常量字符串——以分组投影的 isRecycleBin 标记
-    // 连同其全部后代分组构建回收站 id 集合（ISSUE-P3-162：按 childrenByParent 单趟 BFS）
-    val recycleBinGroupIds = buildSet {
-        val pending = ArrayDeque<String>()
-        allGroups.filter { it.isRecycleBin }.forEach { bin ->
-            add(bin.id)
-            pending.addLast(bin.id)
-        }
-        while (pending.isNotEmpty()) {
-            childrenByParent[pending.removeFirst()].orEmpty().forEach { sub ->
-                if (add(sub.id)) pending.addLast(sub.id)
-            }
-        }
-    }
-    val isInsideRecycleBin = breadcrumbs.any { it.isRecycleBin }
-
-    // 根目录内容直显：currentGroupId == null 表示密码库顶层，
-    // 应展示根分组内部内容（子分组 + 根级条目），而非把根分组自身渲染成一个节点
-    val effectiveGroupId = session.currentGroupId
-        ?: allGroups.firstOrNull { it.parentId == null }?.id
-
-    // 1. 过滤条目：搜索时全局匹配（排除回收站内容），正常时只展示当前文件夹下的条目
-    val targetEntries = if (isSearching) {
-        allEntries.filter { if (!isInsideRecycleBin) it.groupId !in recycleBinGroupIds else true }
-    } else {
-        allEntries.filter { it.groupId == effectiveGroupId }
-    }
-
-    val filteredEntries = targetEntries.filter { entry ->
-        matchesSearchQuery(entry, session.filterParams.query)
-    }
-
-    // 2. 排序条目
-    val sortedEntries = when (session.filterParams.sortOption) {
-        VaultSortOption.DEFAULT -> filteredEntries.sortedBy { it.orderIndex }
-        // ISSUE-P3-162：原 `sortedBy { it.title.lowercase() }` 的选择器在**每次比较**中被调用
-        // ⇒ 约 `2·N·log₂N` 次临时小写字符串分配；改按不敏感比较器，零分配且稳定序不变
-        VaultSortOption.NAME_ASC ->
-            filteredEntries.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.title })
-        VaultSortOption.NAME_DESC ->
-            filteredEntries.sortedWith(compareByDescending(String.CASE_INSENSITIVE_ORDER) { it.title })
-        VaultSortOption.MODIFIED_DESC -> filteredEntries.sortedByDescending { it.updatedAt }
-        VaultSortOption.MODIFIED_ASC -> filteredEntries.sortedBy { it.updatedAt }
-        VaultSortOption.CREATED_DESC -> filteredEntries.sortedByDescending { it.createdAt }
-        VaultSortOption.CREATED_ASC -> filteredEntries.sortedBy { it.createdAt }
-    }
-
-    // 3. 文件夹（条目列表已在第 2 步排序完毕）。
-    // ISSUE-P2-89：TOTP 的「剩余秒数 / 实时验证码」不再经本页状态覆写进条目，
-    // 改由 `TotpCountdownTracker` 的窄通道直接下发列表行徽标——本页状态因此与
-    // 「每秒」「每周期」两个高频节拍彻底解耦，不再被秒级 tick 驱动重算。
-    val targetGroups = if (isSearching) {
-        allGroups.filter { it.name.contains(session.filterParams.query, ignoreCase = true) }
-    } else {
-        allGroups.filter { it.parentId == effectiveGroupId }
-    }
-
-    // 4. ISSUE-P3-17：搜索结果行的分组路径（仅在「搜索中 + 开关开启」时装配）
-    val showGroupInSearchResult = session.extended.showGroupInSearchResult
-    val entryGroupPaths = if (isSearching && showGroupInSearchResult) {
-        buildEntryGroupPaths(allGroups, sortedEntries)
-    } else {
-        emptyMap()
-    }
-
-    // 5. ISSUE-P3-30：已解锁子库的只读分区装配。
-    // 只做「投影 → 展示结构」的归拢，不参与上面的过滤 / 排序 / 分组树遍历：
-    // 子库条目既不进 entries（根库条目流），也不参与搜索与自动填充。
-    val childEntryGroups: List<ChildVaultEntryGroup> =
-        ChildVaultEntryPresenter.groupsOf(session.childDatabase.projections)
-    // 可见性判定与列表数据同处状态层：搜索态 / 根库子分组态一律不展示（理由见 UiState KDoc）
-    val childEntrySectionVisible = !isSearching &&
-        session.currentGroupId == null &&
-        childEntryGroups.isNotEmpty()
-
-    // 7. ISSUE-P3-51：库内「模板」分组内的条目（供「从模板新建」选择器）。
-    // 未安装模板库（无同名分组）时为空表，创建对话框据此隐藏该入口。
-    val templateGroupIds = allGroups
-        .filter { it.name == VaultTemplateFactory.TEMPLATE_GROUP_NAME }
-        .mapTo(mutableSetOf()) { it.id }
-    val templateEntries = if (templateGroupIds.isEmpty()) {
-        emptyList()
-    } else {
-        allEntries.filter { it.groupId in templateGroupIds }.sortedBy { it.orderIndex }
-    }
-
     return VaultListUiState(
         searchQuery = session.filterParams.query,
         isSearchActive = session.filterParams.isSearchActive,
         sortOption = session.filterParams.sortOption,
         currentGroupId = session.currentGroupId,
-        isInsideRecycleBin = isInsideRecycleBin,
-        breadcrumbs = breadcrumbs.toList(),
-        currentGroups = targetGroups,
+        isInsideRecycleBin = content.isInsideRecycleBin,
+        breadcrumbs = content.breadcrumbs,
+        currentGroups = content.currentGroups,
         allGroups = allGroups,
-        entries = sortedEntries,
+        entries = content.sortedEntries,
         totalEntriesCount = allEntries.size,
         databaseName = activeDb?.name.orEmpty(),
         isBatchMode = batchSync.isBatchMode,
@@ -215,16 +111,201 @@ internal fun buildVaultListUiState(
         showUrlInList = settings.showUrlInList,
         hideFabOnScroll = settings.hideFabOnScroll,
         listDensity = session.extended.listDensity,
-        showGroupInSearchResult = showGroupInSearchResult,
-        entryGroupPaths = entryGroupPaths,
+        showGroupInSearchResult = session.extended.showGroupInSearchResult,
+        entryGroupPaths = content.entryGroupPaths,
         autoActivateSearch = session.autoActivateSearch,
         groupIcons = batchSyncDecorations.groupIcons,
         decorations = batchSyncDecorations.decorations,
-        childEntryGroups = childEntryGroups,
+        childEntryGroups = content.childEntryGroups,
         mountedChildDatabaseCount = session.childDatabase.mountedCount,
-        childEntrySectionVisible = childEntrySectionVisible,
-        templateEntries = templateEntries
+        childEntrySectionVisible = content.childEntrySectionVisible,
+        templateEntries = content.templateEntries
     )
+}
+
+/** 列表内容投影结果（面包屑 / 条目 / 分组 / 搜索路径 / 子库分区 / 模板条目） */
+private data class VaultListContent(
+    val isInsideRecycleBin: Boolean,
+    val breadcrumbs: List<VaultGroup>,
+    val currentGroups: List<VaultGroup>,
+    val sortedEntries: List<UiVaultEntry>,
+    val entryGroupPaths: Map<String, String>,
+    val childEntryGroups: List<ChildVaultEntryGroup>,
+    val childEntrySectionVisible: Boolean,
+    val templateEntries: List<UiVaultEntry>
+)
+
+private fun projectVaultListContent(
+    allGroups: List<VaultGroup>,
+    allEntries: List<UiVaultEntry>,
+    session: VaultListSessionState
+): VaultListContent {
+    val query = session.filterParams.query
+    val isSearching = query.isNotBlank()
+    // ISSUE-P3-162：分组索引只建一次——面包屑与回收站集合原本各自做全表线性扫描
+    // （面包屑 O(深度 × 分组数)、回收站 O(子树 × 分组数)），而本函数在每次状态投影重跑。
+    val groupsById = allGroups.associateBy { it.id }
+    val childrenByParent = allGroups.groupBy { it.parentId }
+    val breadcrumbs = buildBreadcrumbs(groupsById, session.currentGroupId)
+    val isInsideRecycleBin = breadcrumbs.any { it.isRecycleBin }
+    val recycleBinGroupIds = buildRecycleBinGroupIds(allGroups, childrenByParent)
+    // 根目录内容直显：currentGroupId == null 表示密码库顶层，
+    // 应展示根分组内部内容（子分组 + 根级条目），而非把根分组自身渲染成一个节点
+    val effectiveGroupId = session.currentGroupId ?: allGroups.firstOrNull { it.parentId == null }?.id
+
+    val sortedEntries = selectSortedEntries(
+        allEntries = allEntries,
+        query = query,
+        isSearching = isSearching,
+        isInsideRecycleBin = isInsideRecycleBin,
+        recycleBinGroupIds = recycleBinGroupIds,
+        effectiveGroupId = effectiveGroupId,
+        sortOption = session.filterParams.sortOption
+    )
+    // 4. ISSUE-P3-17：搜索结果行的分组路径（仅在「搜索中 + 开关开启」时装配）
+    val entryGroupPaths = searchEntryGroupPaths(allGroups, sortedEntries, session, isSearching)
+
+    // 5. ISSUE-P3-30：已解锁子库的只读分区装配。
+    // 只做「投影 → 展示结构」的归拢，不参与上面的过滤 / 排序 / 分组树遍历：
+    // 子库条目既不进 entries（根库条目流），也不参与搜索与自动填充。
+    val childEntryGroups = ChildVaultEntryPresenter.groupsOf(session.childDatabase.projections)
+    // 可见性判定与列表数据同处状态层：搜索态 / 根库子分组态一律不展示（理由见 UiState KDoc）
+    val childEntrySectionVisible = !isSearching &&
+        session.currentGroupId == null &&
+        childEntryGroups.isNotEmpty()
+
+    return VaultListContent(
+        isInsideRecycleBin = isInsideRecycleBin,
+        breadcrumbs = breadcrumbs,
+        currentGroups = selectGroups(allGroups, isSearching, query, effectiveGroupId),
+        sortedEntries = sortedEntries,
+        entryGroupPaths = entryGroupPaths,
+        childEntryGroups = childEntryGroups,
+        childEntrySectionVisible = childEntrySectionVisible,
+        templateEntries = buildTemplateEntries(allGroups, allEntries)
+    )
+}
+
+/**
+ * ISSUE-P3-17：搜索结果行的分组路径——仅在「搜索中 + 开关开启」时装配，否则空表。
+ */
+private fun searchEntryGroupPaths(
+    allGroups: List<VaultGroup>,
+    sortedEntries: List<UiVaultEntry>,
+    session: VaultListSessionState,
+    isSearching: Boolean
+): Map<String, String> =
+    if (isSearching && session.extended.showGroupInSearchResult) {
+        buildEntryGroupPaths(allGroups, sortedEntries)
+    } else {
+        emptyMap()
+    }
+
+/** 当前分组的面包屑父链（父链出现环时按已访问集合截断，与 GroupPathPresenter 同口径） */
+private fun buildBreadcrumbs(
+    groupsById: Map<String, VaultGroup>,
+    currentGroupId: String?
+): List<VaultGroup> {
+    val breadcrumbs = ArrayDeque<VaultGroup>()
+    var pendingGroupId = currentGroupId
+    val visitedBreadcrumbIds = mutableSetOf<String>()
+    while (true) {
+        val id = pendingGroupId ?: break
+        if (!visitedBreadcrumbIds.add(id)) break
+        val grp = groupsById[id] ?: break
+        breadcrumbs.addFirst(grp)
+        pendingGroupId = grp.parentId
+    }
+    return breadcrumbs.toList()
+}
+
+/**
+ * H5 整改：回收站判定不再依赖 mock 常量字符串——以分组投影的 isRecycleBin 标记
+ * 连同其全部后代分组构建回收站 id 集合（ISSUE-P3-162：按 childrenByParent 单趟 BFS）
+ */
+private fun buildRecycleBinGroupIds(
+    allGroups: List<VaultGroup>,
+    childrenByParent: Map<String?, List<VaultGroup>>
+): Set<String> = buildSet {
+    val pending = ArrayDeque<String>()
+    allGroups.filter { it.isRecycleBin }.forEach { bin ->
+        add(bin.id)
+        pending.addLast(bin.id)
+    }
+    while (pending.isNotEmpty()) {
+        childrenByParent[pending.removeFirst()].orEmpty().forEach { sub ->
+            if (add(sub.id)) pending.addLast(sub.id)
+        }
+    }
+}
+
+/** 1. 过滤条目：搜索时全局匹配（排除回收站内容），正常时只展示当前文件夹下的条目 */
+private fun selectSortedEntries(
+    allEntries: List<UiVaultEntry>,
+    query: String,
+    isSearching: Boolean,
+    isInsideRecycleBin: Boolean,
+    recycleBinGroupIds: Set<String>,
+    effectiveGroupId: String?,
+    sortOption: VaultSortOption
+): List<UiVaultEntry> {
+    val targetEntries = if (isSearching) {
+        allEntries.filter { if (!isInsideRecycleBin) it.groupId !in recycleBinGroupIds else true }
+    } else {
+        allEntries.filter { it.groupId == effectiveGroupId }
+    }
+    return sortEntries(targetEntries.filter { matchesSearchQuery(it, query) }, sortOption)
+}
+
+/** 2. 排序条目 */
+private fun sortEntries(
+    entries: List<UiVaultEntry>,
+    sortOption: VaultSortOption
+): List<UiVaultEntry> = when (sortOption) {
+    VaultSortOption.DEFAULT -> entries.sortedBy { it.orderIndex }
+    // ISSUE-P3-162：原 `sortedBy { it.title.lowercase() }` 的选择器在**每次比较**中被调用
+    // ⇒ 约 `2·N·log₂N` 次临时小写字符串分配；改按不敏感比较器，零分配且稳定序不变
+    VaultSortOption.NAME_ASC -> entries.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.title })
+    VaultSortOption.NAME_DESC -> entries.sortedWith(compareByDescending(String.CASE_INSENSITIVE_ORDER) { it.title })
+    VaultSortOption.MODIFIED_DESC -> entries.sortedByDescending { it.updatedAt }
+    VaultSortOption.MODIFIED_ASC -> entries.sortedBy { it.updatedAt }
+    VaultSortOption.CREATED_DESC -> entries.sortedByDescending { it.createdAt }
+    VaultSortOption.CREATED_ASC -> entries.sortedBy { it.createdAt }
+}
+
+/**
+ * 3. 文件夹（条目列表已在第 2 步排序完毕）。
+ * ISSUE-P2-89：TOTP 的「剩余秒数 / 实时验证码」不再经本页状态覆写进条目，
+ * 改由 `TotpCountdownTracker` 的窄通道直接下发列表行徽标——本页状态因此与
+ * 「每秒」「每周期」两个高频节拍彻底解耦，不再被秒级 tick 驱动重算。
+ */
+private fun selectGroups(
+    allGroups: List<VaultGroup>,
+    isSearching: Boolean,
+    query: String,
+    effectiveGroupId: String?
+): List<VaultGroup> = if (isSearching) {
+    allGroups.filter { it.name.contains(query, ignoreCase = true) }
+} else {
+    allGroups.filter { it.parentId == effectiveGroupId }
+}
+
+/**
+ * 7. ISSUE-P3-51：库内「模板」分组内的条目（供「从模板新建」选择器）。
+ * 未安装模板库（无同名分组）时为空表，创建对话框据此隐藏该入口。
+ */
+private fun buildTemplateEntries(
+    allGroups: List<VaultGroup>,
+    allEntries: List<UiVaultEntry>
+): List<UiVaultEntry> {
+    val templateGroupIds = allGroups
+        .filter { it.name == VaultTemplateFactory.TEMPLATE_GROUP_NAME }
+        .mapTo(mutableSetOf()) { it.id }
+    return if (templateGroupIds.isEmpty()) {
+        emptyList()
+    } else {
+        allEntries.filter { it.groupId in templateGroupIds }.sortedBy { it.orderIndex }
+    }
 }
 
 /**

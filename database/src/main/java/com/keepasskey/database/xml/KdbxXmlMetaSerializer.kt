@@ -20,7 +20,21 @@ object KdbxXmlMetaSerializer {
         meta: KdbxMetaData
     ) {
         writer.startElement(KdbxConstants.Xml.META)
+        serializeIdentityFields(writer, meta)
+        serializeMaintenanceFields(writer, meta)
+        serializeMemoryProtection(writer)
+        serializeCustomIcons(writer, meta)
+        serializeBinAndTemplateSettings(writer, meta)
+        serializeCustomData(writer, meta)
+        // KDBX 4.1 官方追加字段：位于 Meta 文档末位
+        if (meta.settingsChanged != null) {
+            KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.SETTINGS_CHANGED, KdbxXmlTimeHelper.formatDate(meta.settingsChanged))
+        }
+        writer.endElement()
+    }
 
+    /** 库标识（Generator / Name / Description 及其变更时间），顺序对齐官方 WriteMeta */
+    private fun serializeIdentityFields(writer: KdbxXmlStreamWriter, meta: KdbxMetaData) {
         KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.GENERATOR, meta.generator)
         KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.DATABASE_NAME, meta.databaseName)
         if (meta.databaseNameChanged != null) {
@@ -30,8 +44,10 @@ object KdbxXmlMetaSerializer {
         if (meta.databaseDescriptionChanged != null) {
             KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.DATABASE_DESCRIPTION_CHANGED, KdbxXmlTimeHelper.formatDate(meta.databaseDescriptionChanged))
         }
+    }
 
-        // 官方 Meta 字段（P1-8 补齐：写出侧全量保留，读写往返零丢失）
+    /** 官方 Meta 字段（P1-8 补齐：写出侧全量保留，读写往返零丢失） */
+    private fun serializeMaintenanceFields(writer: KdbxXmlStreamWriter, meta: KdbxMetaData) {
         KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.DEFAULT_USER_NAME, meta.defaultUserName)
         if (meta.defaultUserNameChanged != null) {
             KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.DEFAULT_USER_NAME_CHANGED, KdbxXmlTimeHelper.formatDate(meta.defaultUserNameChanged))
@@ -45,82 +61,76 @@ object KdbxXmlMetaSerializer {
         KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.MASTER_KEY_CHANGE_FORCE, meta.masterKeyChangeForce.toString())
         // 官方仅在为 true 时写出（Write.cs:461-462）
         if (meta.masterKeyChangeForceOnce) {
-            KdbxXmlWriteUtil.textElement(writer, XML_MASTER_KEY_CHANGE_FORCE_ONCE, "True")
+            KdbxXmlWriteUtil.textElement(writer, XML_MASTER_KEY_CHANGE_FORCE_ONCE, KdbxXmlWriteUtil.XML_TRUE)
         }
+    }
 
-        serializeMemoryProtection(writer)
-
-        if (meta.customIcons.isNotEmpty()) {
-            writer.startElement(KdbxConstants.Xml.CUSTOM_ICONS)
-            for (icon in meta.customIcons) {
-                writer.startElement(KdbxConstants.Xml.ICON)
-                KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.UUID, KdbxXmlValueUtil.encodeUuid(icon.uuid))
-                KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.DATA, Base64.getEncoder().encodeToString(icon.data))
-                // KDBX 4.1 追加字段（官方 WriteCustomIconList，Write.cs:697-703）：空名/无时间不写出
-                if (icon.name.isNotEmpty()) {
-                    KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.NAME, icon.name)
-                }
-                // 跨模块 public 属性不可 smart cast（Kotlin 契约：其它模块的属性可能被覆写），
-                // 故先取局部不可变副本再判空
-                val iconLastModificationTime = icon.lastModificationTime
-                if (iconLastModificationTime != null) {
-                    KdbxXmlWriteUtil.textElement(
-                        writer,
-                        KdbxConstants.Xml.LAST_MODIFICATION_TIME,
-                        KdbxXmlTimeHelper.formatDate(iconLastModificationTime)
-                    )
-                }
-                writer.endElement()
+    /** 自定义图标列表：空列表不写出；4.1 追加的 Name / LastModificationTime 空值不写出 */
+    private fun serializeCustomIcons(writer: KdbxXmlStreamWriter, meta: KdbxMetaData) {
+        if (meta.customIcons.isEmpty()) return
+        writer.startElement(KdbxConstants.Xml.CUSTOM_ICONS)
+        for (icon in meta.customIcons) {
+            writer.startElement(KdbxConstants.Xml.ICON)
+            KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.UUID, KdbxXmlValueUtil.encodeUuid(icon.uuid))
+            KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.DATA, Base64.getEncoder().encodeToString(icon.data))
+            // KDBX 4.1 追加字段（官方 WriteCustomIconList，Write.cs:697-703）：空名/无时间不写出
+            if (icon.name.isNotEmpty()) {
+                KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.NAME, icon.name)
+            }
+            // 跨模块 public 属性不可 smart cast（Kotlin 契约：其它模块的属性可能被覆写），
+            // 故先取局部不可变副本再判空
+            val iconLastModificationTime = icon.lastModificationTime
+            if (iconLastModificationTime != null) {
+                KdbxXmlWriteUtil.textElement(
+                    writer,
+                    KdbxConstants.Xml.LAST_MODIFICATION_TIME,
+                    KdbxXmlTimeHelper.formatDate(iconLastModificationTime)
+                )
             }
             writer.endElement()
         }
+        writer.endElement()
+    }
 
-        KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.RECYCLE_BIN_ENABLED, if (meta.recycleBinEnabled) "True" else "False")
+    /** 回收站 / 模板组 / 历史上限 / 上次选中组：全部为「有则写、无则略」的可选项 */
+    private fun serializeBinAndTemplateSettings(writer: KdbxXmlStreamWriter, meta: KdbxMetaData) {
+        KdbxXmlWriteUtil.boolElement(writer, KdbxConstants.Xml.RECYCLE_BIN_ENABLED, meta.recycleBinEnabled)
         if (meta.recycleBinUuid != null) {
             KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.RECYCLE_BIN_UUID, KdbxXmlValueUtil.encodeUuid(meta.recycleBinUuid))
         }
         if (meta.recycleBinChanged != null) {
             KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.RECYCLE_BIN_CHANGED, KdbxXmlTimeHelper.formatDate(meta.recycleBinChanged))
         }
-
         if (meta.entryTemplatesGroup != null) {
             KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.ENTRY_TEMPLATES_GROUP, KdbxXmlValueUtil.encodeUuid(meta.entryTemplatesGroup))
         }
         if (meta.entryTemplatesGroupChanged != null) {
             KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.ENTRY_TEMPLATES_GROUP_CHANGED, KdbxXmlTimeHelper.formatDate(meta.entryTemplatesGroupChanged))
         }
-
         KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.HISTORY_MAX_ITEMS, meta.historyMaxItems.toString())
         KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.HISTORY_MAX_SIZE, meta.historyMaxSize.toString())
-
         if (meta.lastSelectedGroup != null) {
             KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.LAST_SELECTED_GROUP, KdbxXmlValueUtil.encodeUuid(meta.lastSelectedGroup))
         }
         if (meta.lastTopVisibleGroup != null) {
             KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.LAST_TOP_VISIBLE_GROUP, KdbxXmlValueUtil.encodeUuid(meta.lastTopVisibleGroup))
         }
+    }
 
-        if (meta.customData.isNotEmpty()) {
-            writer.startElement(KdbxConstants.Xml.CUSTOM_DATA)
-            for ((key, value) in meta.customData) {
-                writer.startElement(KdbxConstants.Xml.ITEM)
-                KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.KEY, key)
-                KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.VALUE, value)
-                // 官方元素顺序：Key → Value → LastModificationTime（Write.cs:808-825）
-                val lastModificationTime = meta.customDataTimes[key]
-                if (lastModificationTime != null) {
-                    KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.LAST_MODIFICATION_TIME, KdbxXmlTimeHelper.formatDate(lastModificationTime))
-                }
-                writer.endElement()
+    /** 公有自定义数据：官方元素顺序 Key → Value → LastModificationTime（Write.cs:808-825） */
+    private fun serializeCustomData(writer: KdbxXmlStreamWriter, meta: KdbxMetaData) {
+        if (meta.customData.isEmpty()) return
+        writer.startElement(KdbxConstants.Xml.CUSTOM_DATA)
+        for ((key, value) in meta.customData) {
+            writer.startElement(KdbxConstants.Xml.ITEM)
+            KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.KEY, key)
+            KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.VALUE, value)
+            val lastModificationTime = meta.customDataTimes[key]
+            if (lastModificationTime != null) {
+                KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.LAST_MODIFICATION_TIME, KdbxXmlTimeHelper.formatDate(lastModificationTime))
             }
             writer.endElement()
         }
-
-        // KDBX 4.1 官方追加字段：位于 Meta 文档末位
-        if (meta.settingsChanged != null) {
-            KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.SETTINGS_CHANGED, KdbxXmlTimeHelper.formatDate(meta.settingsChanged))
-        }
-
         writer.endElement()
     }
 
@@ -160,11 +170,11 @@ object KdbxXmlMetaSerializer {
     private fun serializeMemoryProtection(writer: KdbxXmlStreamWriter) {
         val memoryProtection = MemoryProtectionConfig()
         writer.startElement(KdbxConstants.Xml.MEMORY_PROTECTION)
-        KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.PROTECT_TITLE, if (memoryProtection.protectTitle) "True" else "False")
-        KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.PROTECT_USER_NAME, if (memoryProtection.protectUserName) "True" else "False")
-        KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.PROTECT_PASSWORD, if (memoryProtection.protectPassword) "True" else "False")
-        KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.PROTECT_URL, if (memoryProtection.protectUrl) "True" else "False")
-        KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.PROTECT_NOTES, if (memoryProtection.protectNotes) "True" else "False")
+        KdbxXmlWriteUtil.boolElement(writer, KdbxConstants.Xml.PROTECT_TITLE, memoryProtection.protectTitle)
+        KdbxXmlWriteUtil.boolElement(writer, KdbxConstants.Xml.PROTECT_USER_NAME, memoryProtection.protectUserName)
+        KdbxXmlWriteUtil.boolElement(writer, KdbxConstants.Xml.PROTECT_PASSWORD, memoryProtection.protectPassword)
+        KdbxXmlWriteUtil.boolElement(writer, KdbxConstants.Xml.PROTECT_URL, memoryProtection.protectUrl)
+        KdbxXmlWriteUtil.boolElement(writer, KdbxConstants.Xml.PROTECT_NOTES, memoryProtection.protectNotes)
         writer.endElement()
     }
 }

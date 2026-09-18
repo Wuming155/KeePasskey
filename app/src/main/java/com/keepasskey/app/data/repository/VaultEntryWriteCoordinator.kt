@@ -4,6 +4,7 @@ import com.keepasskey.app.R
 import com.keepasskey.app.autofill.AutofillPackageNames
 import com.keepasskey.app.passkey.DomainMatcher
 import com.keepasskey.app.ui.model.StringsProvider
+import com.keepasskey.app.ui.model.UiCustomField
 import com.keepasskey.app.ui.model.UiVaultEntry
 import com.keepasskey.core.model.KdbxAttachment
 import com.keepasskey.core.model.KdbxConstants
@@ -12,6 +13,7 @@ import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.core.security.ProtectedString
+import com.keepasskey.database.file.KdbxDatabase
 import com.keepasskey.database.history.HistoryManager
 import com.keepasskey.database.session.DatabaseSession
 import kotlinx.coroutines.flow.first
@@ -49,107 +51,7 @@ internal class VaultEntryWriteCoordinator(
         } else null
 
         if (existing != null) {
-            // 既有条目做合并更新：保留既有元数据与属性，更新提交字段，接入 HistoryManager
-            // M1 整改：密码仅在显式提交（passwordChars 非空）时更新，否则保留既有密码
-            val mergedFields = existing.fields.toMutableMap().apply {
-                put(KdbxConstants.Fields.TITLE, ProtectedString(entry.title, isProtected = false))
-                put(KdbxConstants.Fields.USER_NAME, ProtectedString(entry.username, isProtected = false))
-                passwordChars?.let {
-                    put(KdbxConstants.Fields.PASSWORD, ProtectedString(it, isProtected = true))
-                }
-                put(KdbxConstants.Fields.URL, ProtectedString(entry.url, isProtected = false))
-                put(KdbxConstants.Fields.NOTES, ProtectedString(entry.notes, isProtected = false))
-                // 断点4 整改：TOTP 种子显式提交（null=未修改；空串=清除；非空=写标准 otp 字段）
-                // TASK-10：TOTP 配置以 CharArray 显式提交（null=未修改保留既有；空数组=清除），
-                // 明文仅在 ProtectedString 密封瞬间物化，中间副本即时擦除
-                if (totpSecretChars != null) {
-                    val trimmedTotp = totpSecretChars.trimmedCopy()
-                    if (trimmedTotp.isEmpty()) {
-                        remove(KdbxConstants.Fields.OTP)
-                    } else {
-                        put(KdbxConstants.Fields.OTP, ProtectedString(trimmedTotp, isProtected = true))
-                    }
-                    trimmedTotp.fill('0')
-                }
-            }
-
-            val uiCustomList = entry.customFields.map { cf ->
-                // TASK-10：受保护自定义字段编辑态明文以 CharArray 显式提交（键为字段编辑 id），
-                // 仅用户显式编辑过的字段出现在 protectedFieldChars 中。
-                // 擦除语义：submittedChars 归 saveEntry 的 finally 契约擦除；回填路径的
-                // readChars 独占副本在密封后立即擦除
-                val submittedChars = if (cf.isProtected) protectedFieldChars[cf.id] else null
-                // F2 整改：UI 投影中受保护字段的明文恒为空（按需解密），未编辑的受保护字段
-                // 回写时「空值」视为未修改，回填既有条目的真实值——防止详情页回滚等携带掩码
-                // 投影的保存路径清空受保护字段
-                val existingField = existing.customFields.firstOrNull { it.key == cf.key }
-                when {
-                    submittedChars != null ->
-                        KdbxCustomField(cf.key, ProtectedString(submittedChars, isProtected = true))
-                    cf.isProtected && cf.value.isEmpty() -> {
-                        val backfillChars = existingField?.value?.readChars()
-                        try {
-                            KdbxCustomField(cf.key, ProtectedString(backfillChars ?: CharArray(0), isProtected = true))
-                        } finally {
-                            backfillChars?.fill('0')
-                        }
-                    }
-                    else ->
-                        KdbxCustomField(cf.key, ProtectedString(cf.value, isProtected = cf.isProtected))
-                }
-            }
-            val uiKeys = uiCustomList.map { it.key }.toSet()
-            // 保留既有条目中未在 UI 覆盖的系统字段（例如 Passkey 属性等）
-            val preservedCustom = existing.customFields.filter { ef -> ef.key !in uiKeys }
-            val mergedCustomFields = uiCustomList + preservedCustom
-
-            val targetParentId = entry.groupId?.let { parseKdbxUuidOrNull(it) } ?: existing.parentGroupId
-            val isParentChanged = targetParentId != existing.parentGroupId
-
-            // 断点1-2 整改：附件全链路——UI 侧新附件（data 非空）直接随条目提交，
-            // 已落库附件（data 为空）按名称匹配既有引用保留 refIndex；
-            // UI 中被移除的附件不再出现在列表里，即自然从条目上删除（二进制池在保存时去重重建）
-            val mergedAttachments = entry.attachments.map { ui ->
-                if (ui.data != null) {
-                    KdbxAttachment(name = ui.fileName, data = ui.data, isProtected = false)
-                } else {
-                    existing.attachments.firstOrNull { it.name == ui.fileName }
-                        ?: KdbxAttachment(name = ui.fileName, data = byteArrayOf())
-                }
-            }
-
-            // 断点7 整改：图标落盘——把 UI 图标名映射回 KDBX 标准 iconId
-            val newIconId = entryMapper.mapIconNameToId(entry.iconName, fallbackId = existing.iconId)
-
-            // KP2A 能力补齐：tags / overrideUrl / AutoType 序列
-            val mergedAutoType = entryMapper.mergeAutoType(existing.autoType, entry.autoTypeSequence)
-
-            val pendingNewEntry = existing.copy(
-                parentGroupId = targetParentId,
-                fields = mergedFields,
-                customFields = mergedCustomFields,
-                attachments = mergedAttachments,
-                iconId = newIconId,
-                // TASK-15：自定义图标引用以 UI 选择为准（null=清除引用，回退标准图标）
-                customIconId = entry.customIconId?.let { parseKdbxUuidOrNull(it) },
-                tags = entry.tags,
-                overrideUrl = entry.overrideUrl?.takeIf { it.isNotBlank() },
-                autoType = mergedAutoType
-            )
-
-            // P3-4 整改：历史修剪遵从库级 Meta 配置（historyMaxItems / historyMaxSize），
-            // 缺失时回退官方默认值，不再写死 10 条上限
-            val finalEntry = HistoryManager.recordHistorySnapshot(
-                currentEntry = existing,
-                newEntry = pendingNewEntry,
-                maxHistoryItems = db?.historyMaxItems ?: HistoryManager.DEFAULT_MAX_HISTORY_ITEMS,
-                maxHistorySize = db?.historyMaxSize ?: HistoryManager.DEFAULT_MAX_HISTORY_SIZE
-            )
-
-            if (isParentChanged) {
-                databaseSession.deleteEntry(existing.id)
-            }
-            databaseSession.saveEntry(finalEntry)
+            saveMergedEntry(entry, existing, db, passwordChars, totpSecretChars, protectedFieldChars)
         } else {
             // 新建条目
             val kdbxEntry = entryMapper.mapUiEntryToKdbx(entry, passwordChars, totpSecretChars, protectedFieldChars)
@@ -157,6 +59,133 @@ internal class VaultEntryWriteCoordinator(
         }
         return persistSession()
     }
+
+    /** 既有条目：五段字段各自合并后走 HistoryManager 记录修订，父组变更时换址重挂 */
+    private suspend fun saveMergedEntry(
+        entry: UiVaultEntry,
+        existing: KdbxEntry,
+        db: KdbxDatabase?,
+        passwordChars: CharArray?,
+        totpSecretChars: CharArray?,
+        protectedFieldChars: Map<String, CharArray>
+    ) {
+        val targetParentId = entry.groupId?.let { parseKdbxUuidOrNull(it) } ?: existing.parentGroupId
+        val pendingNewEntry = existing.copy(
+            parentGroupId = targetParentId,
+            fields = mergeStandardFields(existing, entry, passwordChars, totpSecretChars),
+            customFields = mergeCustomFields(existing, entry, protectedFieldChars),
+            attachments = mergeAttachments(existing, entry),
+            // 断点7 整改：图标落盘——把 UI 图标名映射回 KDBX 标准 iconId
+            iconId = entryMapper.mapIconNameToId(entry.iconName, fallbackId = existing.iconId),
+            // TASK-15：自定义图标引用以 UI 选择为准（null=清除引用，回退标准图标）
+            customIconId = entry.customIconId?.let { parseKdbxUuidOrNull(it) },
+            tags = entry.tags,
+            overrideUrl = entry.overrideUrl?.takeIf { it.isNotBlank() },
+            // KP2A 能力补齐：tags / overrideUrl / AutoType 序列
+            autoType = entryMapper.mergeAutoType(existing.autoType, entry.autoTypeSequence)
+        )
+
+        // P3-4 整改：历史修剪遵从库级 Meta 配置（historyMaxItems / historyMaxSize），
+        // 缺失时回退官方默认值，不再写死 10 条上限
+        val finalEntry = HistoryManager.recordHistorySnapshot(
+            currentEntry = existing,
+            newEntry = pendingNewEntry,
+            maxHistoryItems = db?.historyMaxItems ?: HistoryManager.DEFAULT_MAX_HISTORY_ITEMS,
+            maxHistorySize = db?.historyMaxSize ?: HistoryManager.DEFAULT_MAX_HISTORY_SIZE
+        )
+
+        if (targetParentId != existing.parentGroupId) {
+            databaseSession.deleteEntry(existing.id)
+        }
+        databaseSession.saveEntry(finalEntry)
+    }
+
+    /** 标准字段：保留既有映射，仅覆盖提交字段（M1：密码仅在显式提交时更新） */
+    private fun mergeStandardFields(
+        existing: KdbxEntry,
+        entry: UiVaultEntry,
+        passwordChars: CharArray?,
+        totpSecretChars: CharArray?
+    ): MutableMap<String, ProtectedString> = existing.fields.toMutableMap().apply {
+        put(KdbxConstants.Fields.TITLE, ProtectedString(entry.title, isProtected = false))
+        put(KdbxConstants.Fields.USER_NAME, ProtectedString(entry.username, isProtected = false))
+        passwordChars?.let {
+            put(KdbxConstants.Fields.PASSWORD, ProtectedString(it, isProtected = true))
+        }
+        put(KdbxConstants.Fields.URL, ProtectedString(entry.url, isProtected = false))
+        put(KdbxConstants.Fields.NOTES, ProtectedString(entry.notes, isProtected = false))
+        // 断点4 整改：TOTP 种子显式提交（null=未修改；空串=清除；非空=写标准 otp 字段）
+        // TASK-10：TOTP 配置以 CharArray 显式提交（null=未修改保留既有；空数组=清除），
+        // 明文仅在 ProtectedString 密封瞬间物化，中间副本即时擦除
+        if (totpSecretChars != null) {
+            val trimmedTotp = totpSecretChars.trimmedCopy()
+            if (trimmedTotp.isEmpty()) {
+                remove(KdbxConstants.Fields.OTP)
+            } else {
+                put(KdbxConstants.Fields.OTP, ProtectedString(trimmedTotp, isProtected = true))
+            }
+            trimmedTotp.fill('0')
+        }
+    }
+
+    /** 自定义字段：UI 覆盖者按原序落地，未在 UI 出现的既有字段（如 Passkey 属性）原样保留 */
+    private fun mergeCustomFields(
+        existing: KdbxEntry,
+        entry: UiVaultEntry,
+        protectedFieldChars: Map<String, CharArray>
+    ): List<KdbxCustomField> {
+        val uiCustomList = entry.customFields.map { cf ->
+            mergeCustomField(existing, cf, protectedFieldChars)
+        }
+        val uiKeys = uiCustomList.map { it.key }.toSet()
+        val preservedCustom = existing.customFields.filter { ef -> ef.key !in uiKeys }
+        return uiCustomList + preservedCustom
+    }
+
+    private fun mergeCustomField(
+        existing: KdbxEntry,
+        cf: UiCustomField,
+        protectedFieldChars: Map<String, CharArray>
+    ): KdbxCustomField {
+        // TASK-10：受保护自定义字段编辑态明文以 CharArray 显式提交（键为字段编辑 id），
+        // 仅用户显式编辑过的字段出现在 protectedFieldChars 中。
+        // 擦除语义：submittedChars 归 saveEntry 的 finally 契约擦除；回填路径的
+        // readChars 独占副本在密封后立即擦除
+        val submittedChars = if (cf.isProtected) protectedFieldChars[cf.id] else null
+        // F2 整改：UI 投影中受保护字段的明文恒为空（按需解密），未编辑的受保护字段
+        // 回写时「空值」视为未修改，回填既有条目的真实值——防止详情页回滚等携带掩码
+        // 投影的保存路径清空受保护字段
+        val existingField = existing.customFields.firstOrNull { it.key == cf.key }
+        return when {
+            submittedChars != null ->
+                KdbxCustomField(cf.key, ProtectedString(submittedChars, isProtected = true))
+            cf.isProtected && cf.value.isEmpty() -> {
+                val backfillChars = existingField?.value?.readChars()
+                try {
+                    KdbxCustomField(cf.key, ProtectedString(backfillChars ?: CharArray(0), isProtected = true))
+                } finally {
+                    backfillChars?.fill('0')
+                }
+            }
+            else ->
+                KdbxCustomField(cf.key, ProtectedString(cf.value, isProtected = cf.isProtected))
+        }
+    }
+
+    /**
+     * 断点1-2 整改：附件全链路——UI 侧新附件（data 非空）直接随条目提交，
+     * 已落库附件（data 为空）按名称匹配既有引用保留 refIndex；
+     * UI 中被移除的附件不再出现在列表里，即自然从条目上删除（二进制池在保存时去重重建）
+     */
+    private fun mergeAttachments(existing: KdbxEntry, entry: UiVaultEntry): List<KdbxAttachment> =
+        entry.attachments.map { ui ->
+            if (ui.data != null) {
+                KdbxAttachment(name = ui.fileName, data = ui.data, isProtected = false)
+            } else {
+                existing.attachments.firstOrNull { it.name == ui.fileName }
+                    ?: KdbxAttachment(name = ui.fileName, data = byteArrayOf())
+            }
+        }
 
     /**
      * 收藏状态写入：持久化至 KDBX 条目 customData（随库文件同步），

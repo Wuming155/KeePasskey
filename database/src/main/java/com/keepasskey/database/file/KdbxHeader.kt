@@ -122,7 +122,7 @@ data class KdbxHeader(
         writeField(
             headerBytesStream,
             KdbxConstants.HeaderFieldId.END_OF_HEADER,
-            byteArrayOf(0x0D, 0x0A, 0x0D, 0x0A)
+            END_OF_HEADER_MARKER
         )
 
         val headerBytes = headerBytesStream.toByteArray()
@@ -178,6 +178,9 @@ data class KdbxHeader(
         /** CompressionFlags 字段合法长度（小端 Int32） */
         private const val COMPRESSION_FIELD_SIZE = 4
 
+        /** EndOfHeader 字段的固定数据（官方规范 `\r\n\r\n`，对齐 KeePass 2.x WriteHeaderField） */
+        private val END_OF_HEADER_MARKER = byteArrayOf(0x0D, 0x0A, 0x0D, 0x0A)
+
         fun createDefault(
             cipherUuid: KdbxUuid = KdbxConstants.Cipher.AES_256_CBC,
             useArgon2: Boolean = true
@@ -223,12 +226,73 @@ data class KdbxHeader(
         }
 
         fun deserialize(inputStream: InputStream): Pair<KdbxHeader, ByteArray> {
-            val recordingStream = ByteArrayOutputStream()
+            val recorder = HeaderRecorder(inputStream)
 
-            /**
-             * F-11：记录流写入的唯一闸门——先按「写入后」的总量裁决，通过才写入。
-             * 严禁先写后判：那是先分配再拒绝，闸门本身就成了 OOM 通道。
-             */
+            val sig1 = recorder.readAndRecordInt()
+            val sig2 = recorder.readAndRecordInt()
+            if (sig1 != KdbxConstants.Signature.SIGNATURE_1 ||
+                (sig2 != KdbxConstants.Signature.SIGNATURE_2_KDBX &&
+                        sig2 != KdbxConstants.Signature.SIGNATURE_2_KDBX_OLD &&
+                        sig2 != KdbxConstants.Signature.SIGNATURE_2_KDBX_PRE)
+            ) {
+                throw KdbxCorruptFileException("非法的 KDBX 文件魔数签名: 0x${Integer.toHexString(sig1)}, 0x${Integer.toHexString(sig2)}")
+            }
+
+            val version = recorder.readAndRecordInt()
+            validateVersion(version)
+
+            val fields = OuterHeaderFields()
+            // F-11：字段数闸门同样位于认证之前——5 字节字段头即可占一个字段位，
+            // 若不设限，攻击者可零成本构造海量空字段驱动解析循环与记录流无界增长
+            var fieldCount = 0
+            while (true) {
+                if (fieldCount + 1 > MAX_HEADER_FIELD_COUNT) {
+                    throw KdbxCorruptFileException(
+                        "外层 Header 字段数超过安全上限: ${fieldCount + 1}（上限 $MAX_HEADER_FIELD_COUNT）" +
+                                "——认证前 fail-closed 加固判定为损坏文件"
+                    )
+                }
+                fieldCount++
+
+                val (fieldId, fieldData) = recorder.readField()
+                if (fieldId == KdbxConstants.HeaderFieldId.END_OF_HEADER) break
+                fields.accept(fieldId, fieldData)
+            }
+
+            val header = fields.toHeader(sig1, sig2, version)
+            // P2-8：EncryptionIV 合法长度依赖 CipherID 字段，且字段出现顺序不作保证，
+            // 必须在全部字段解析完成后统一裁决
+            validateEncryptionIvSize(header.cipherUuid, header.encryptionIv)
+
+            return Pair(header, recorder.bytes())
+        }
+
+        /**
+         * ISSUE-P3-126③：**版本策略显式声明为「仅校验 major」**。
+         * 4.x 的 minor 递增只引入本仓不依赖的可选特性（本仓读取路径对 4.0 / 4.1 完全一致），
+         * 故 minor 原样接受、**不**据此拒绝文件——拒之反而会打不开官方新写的库。
+         * 该声明用于消除「看起来校验了版本」的误读：`KdbxConstants.Version` 亦不保留
+         * 未被引用的 `VERSION_4_1` 死常量（详见该处 KDoc）。
+         */
+        private fun validateVersion(version: Int) {
+            val major = version and KdbxConstants.Version.VERSION_MAJOR_MASK
+            if (major != KdbxConstants.Version.VERSION_4_0) {
+                throw KdbxUnsupportedVersionException("不支持 KDBX v4 之前的版本")
+            }
+        }
+
+        /**
+         * F-11：外层 Header 的记录流与认证前预算闸门。
+         *
+         * [record] 是记录流写入的唯一闸门——先按「写入后」的总量裁决，通过才写入；
+         * 严禁先写后判：那是先分配再拒绝，闸门本身就成了 OOM 通道。
+         */
+        private class HeaderRecorder(private val inputStream: InputStream) {
+            private val recordingStream = ByteArrayOutputStream()
+
+            /** 已记录的原始头部字节（参与后续 SHA-256 / HMAC 校验，故须逐字保真） */
+            fun bytes(): ByteArray = recordingStream.toByteArray()
+
             fun record(bytes: ByteArray) {
                 if (recordingStream.size() + bytes.size > MAX_HEADER_TOTAL_BYTES) {
                     throw KdbxCorruptFileException(
@@ -255,47 +319,15 @@ data class KdbxHeader(
                 return LittleEndianUtil.bytesToInt(b)
             }
 
-            val sig1 = readAndRecordInt()
-            val sig2 = readAndRecordInt()
-            if (sig1 != KdbxConstants.Signature.SIGNATURE_1 ||
-                (sig2 != KdbxConstants.Signature.SIGNATURE_2_KDBX &&
-                        sig2 != KdbxConstants.Signature.SIGNATURE_2_KDBX_OLD &&
-                        sig2 != KdbxConstants.Signature.SIGNATURE_2_KDBX_PRE)
-            ) {
-                throw KdbxCorruptFileException("非法的 KDBX 文件魔数签名: 0x${Integer.toHexString(sig1)}, 0x${Integer.toHexString(sig2)}")
-            }
-
-            val version = readAndRecordInt()
-            val major = version and KdbxConstants.Version.VERSION_MAJOR_MASK
-            // ISSUE-P3-126③：**版本策略在此显式声明为「仅校验 major」**。
-            // 4.x 的 minor 递增只引入本仓不依赖的可选特性（本仓读取路径对 4.0 / 4.1 完全一致），
-            // 故 minor 原样接受、**不**据此拒绝文件——拒之反而会打不开官方新写的库。
-            // 该声明用于消除「看起来校验了版本」的误读：`KdbxConstants.Version` 亦不保留
-            // 未被引用的 `VERSION_4_1` 死常量（详见该处 KDoc）。
-            if (major != KdbxConstants.Version.VERSION_4_0) {
-                throw KdbxUnsupportedVersionException("不支持 KDBX v4 之前的版本")
-            }
-
-            var cipherUuid: KdbxUuid = KdbxConstants.Cipher.AES_256_CBC
-            var compression: Int = KdbxConstants.Compression.GZIP
-            var masterSeed: ByteArray? = null
-            var encryptionIv: ByteArray? = null
-            var kdfParams: KdfParameters? = null
-            var publicCustomData: VariantDictionary? = null
-
-            /** F-11：已消费的字段数（含 EndOfHeader 字段），受 [MAX_HEADER_FIELD_COUNT] 约束 */
-            var fieldCount = 0
-            while (true) {
-                // F-11：字段数闸门同样位于认证之前——5 字节字段头即可占一个字段位，
-                // 若不设限，攻击者可零成本构造海量空字段驱动解析循环与记录流无界增长
-                if (fieldCount + 1 > MAX_HEADER_FIELD_COUNT) {
-                    throw KdbxCorruptFileException(
-                        "外层 Header 字段数超过安全上限: ${fieldCount + 1}（上限 $MAX_HEADER_FIELD_COUNT）" +
-                                "——认证前 fail-closed 加固判定为损坏文件"
-                    )
-                }
-                fieldCount++
-
+            /**
+             * 读取一个头字段，返回 `(fieldId, fieldData)`。
+             *
+             * P0-5：`fieldLen` 来自未认证输入，必须在 `ByteArray` 分配前通过边界裁决，
+             * 否则恶意长度（0xFFFFFFFF 负数 / 0x7FFFFFFF 超大值）直接造成崩溃或 OOM。
+             * F-11：累计预算必须在**读取字段数据之前**裁决——`fieldLen` 是未认证声明值，
+             * 先按声明长度分配读取再判断预算，预算便失去约束分配的意义。
+             */
+            fun readField(): Pair<Byte, ByteArray> {
                 val fieldIdByte = inputStream.read()
                 if (fieldIdByte < 0) throw KdbxCorruptFileException("意外到达头部流末尾")
                 record(fieldIdByte)
@@ -303,17 +335,11 @@ data class KdbxHeader(
                 val fieldLenBytes = LittleEndianUtil.readBytes(inputStream, 4)
                 record(fieldLenBytes)
                 val fieldLen = LittleEndianUtil.bytesToInt(fieldLenBytes)
-
-                // P0-5：fieldLen 来自未认证输入，必须在 ByteArray 分配前通过边界裁决，
-                // 否则恶意长度（0xFFFFFFFF 负数 / 0x7FFFFFFF 超大值）直接造成崩溃或 OOM
                 if (fieldLen < 0 || fieldLen > MAX_HEADER_FIELD_BYTES) {
                     throw KdbxCorruptFileException(
                         "头部字段长度非法或超过安全上限: fieldId=$fieldIdByte, length=$fieldLen（允许 0 ~ $MAX_HEADER_FIELD_BYTES）"
                     )
                 }
-
-                // F-11：累计预算必须在**读取字段数据之前**裁决——fieldLen 是未认证声明值，
-                // 先按声明长度分配读取再判断预算，预算便失去约束分配的意义
                 if (recordingStream.size() + fieldLen > MAX_HEADER_TOTAL_BYTES) {
                     throw KdbxCorruptFileException(
                         "外层 Header 累计字节数超过安全上限: 字段数据前已达 ${recordingStream.size()} 字节，" +
@@ -323,12 +349,21 @@ data class KdbxHeader(
 
                 val fieldData = LittleEndianUtil.readBytes(inputStream, fieldLen, MAX_HEADER_FIELD_BYTES)
                 record(fieldData)
+                return fieldIdByte.toByte() to fieldData
+            }
+        }
 
-                val fieldId = fieldIdByte.toByte()
-                if (fieldId == KdbxConstants.HeaderFieldId.END_OF_HEADER) {
-                    break
-                }
+        /** 外层 Header 各字段的累积容器（字段出现顺序不作保证，跨字段校验在装配后统一执行） */
+        private class OuterHeaderFields {
+            var cipherUuid: KdbxUuid = KdbxConstants.Cipher.AES_256_CBC
+            var compression: Int = KdbxConstants.Compression.GZIP
+            var masterSeed: ByteArray? = null
+            var encryptionIv: ByteArray? = null
+            var kdfParams: KdfParameters? = null
+            var publicCustomData: VariantDictionary? = null
 
+            /** 单个字段的长度裁决与落地；未知字段原样忽略（前向兼容） */
+            fun accept(fieldId: Byte, fieldData: ByteArray) {
                 when (fieldId) {
                     KdbxConstants.HeaderFieldId.CIPHER_ID -> {
                         if (fieldData.size != KdbxUuid.UUID_SIZE) {
@@ -371,7 +406,7 @@ data class KdbxHeader(
                 }
             }
 
-            val header = KdbxHeader(
+            fun toHeader(sig1: Int, sig2: Int, version: Int): KdbxHeader = KdbxHeader(
                 signature1 = sig1,
                 signature2 = sig2,
                 version = version,
@@ -382,12 +417,6 @@ data class KdbxHeader(
                 kdfParameters = kdfParams ?: throw KdbxCorruptFileException("缺少 KdfParameters 头字段"),
                 publicCustomData = publicCustomData
             )
-
-            // P2-8：EncryptionIV 合法长度依赖 CipherID 字段，且字段出现顺序不作保证，
-            // 必须在全部字段解析完成后统一裁决
-            validateEncryptionIvSize(header.cipherUuid, header.encryptionIv)
-
-            return Pair(header, recordingStream.toByteArray())
         }
 
         /**

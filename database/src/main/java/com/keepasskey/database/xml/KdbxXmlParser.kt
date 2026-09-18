@@ -54,63 +54,96 @@ class KdbxXmlParser(
         var metaData = KdbxMetaData()
         var rootGroup: KdbxGroup? = null
         val nodeStack = ArrayDeque<SaxNode>()
+
+        parseDocument(
+            parser = parser,
+            inputStream = inputStream,
+            handler = createSaxHandler(nodeStack, binaries, referenceBudget) { meta, group ->
+                metaData = meta
+                rootGroup = group
+            }
+        )
+
+        return ParseResult(
+            meta = metaData,
+            // 官方语义（KeePass 2.61.1 KdbxFile.Read.Streamed.cs:651,682）：
+            // Group/Entry 的 UUID 缺失或全零时替换为随机新 UUID（`if(Uuid.IsZero) new PwUuid(true)`）。
+            // 零 UUID 会让多个对象互相「撞名」，父引用与墓碑（DeletedObjects）随之失配，
+            // 删除条目在跨客户端合并时可能复活。
+            rootGroup = normalizeZeroUuids(rootGroup ?: KdbxGroup(name = "Root"), null)
+        )
+    }
+
+    /**
+     * 构建 SAX 事件处理器：维护节点栈与两道解析炸弹封顶（元素总数 / 嵌套深度）。
+     *
+     * @param onFileEnd 文档收尾回调（`</KeePassFile>`），交付 `<Meta>` 与根 `<Group>`
+     */
+    private fun createSaxHandler(
+        nodeStack: ArrayDeque<SaxNode>,
+        binaries: List<InnerHeader.BinaryItem>,
+        referenceBudget: BinaryReferenceBudget,
+        onFileEnd: (KdbxMetaData, KdbxGroup?) -> Unit
+    ): DefaultHandler2 = object : DefaultHandler2() {
         // Wave 12 / D23 解析炸弹防线：XML 元素**总数**封顶（此前仅约束深度与单节点文本长度，
         // 海量小元素可绕过两者放大内存与 SAX 事件开销）
-        var elementCount = 0
+        private var elementCount = 0
 
-        val handler = object : DefaultHandler2() {
-            override fun resolveEntity(publicId: String?, systemId: String?): InputSource {
-                // 拒绝一切外部实体解析（防御纵深）
-                throw KdbxCorruptFileException("KDBX XML 不允许包含外部实体引用: $systemId")
+        override fun resolveEntity(publicId: String?, systemId: String?): InputSource {
+            // 拒绝一切外部实体解析（防御纵深）
+            throw KdbxCorruptFileException("KDBX XML 不允许包含外部实体引用: $systemId")
+        }
+
+        /**
+         * DTD 出现即拒绝（fail-closed 纵深防御）。
+         *
+         * KDBX XML 规范不含 DOCTYPE，官方 KeePass / KeePassXC / KeePassDX 产物亦无。
+         * 本回调不依赖平台解析器是否支持 [FEATURE_DISALLOW_DOCTYPE_DECL]——在该特性
+         * 不受支持的实现（如 Android Expat 后端）上，内部实体展开炸弹（billion laughs）
+         * 可在字符读取上限生效前先撑爆内存，故在 DTD 声明处直接中止解析（合法库零影响）。
+         */
+        override fun startDTD(name: String?, publicId: String?, systemId: String?) {
+            throw KdbxCorruptFileException("KDBX XML 不允许包含 DTD 声明（DOCTYPE）")
+        }
+
+        override fun startElement(uri: String?, localName: String?, qName: String, attributes: Attributes) {
+            elementCount++
+            if (elementCount > MAX_XML_ELEMENTS) {
+                throw KdbxCorruptFileException(
+                    "KDBX XML 元素总数超出上限（$MAX_XML_ELEMENTS），疑似解析炸弹"
+                )
             }
-
-            /**
-             * DTD 出现即拒绝（fail-closed 纵深防御）。
-             *
-             * KDBX XML 规范不含 DOCTYPE，官方 KeePass / KeePassXC / KeePassDX 产物亦无。
-             * 本回调不依赖平台解析器是否支持 [FEATURE_DISALLOW_DOCTYPE_DECL]——在该特性
-             * 不受支持的实现（如 Android Expat 后端）上，内部实体展开炸弹（billion laughs）
-             * 可在字符读取上限生效前先撑爆内存，故在 DTD 声明处直接中止解析（合法库零影响）。
-             */
-            override fun startDTD(name: String?, publicId: String?, systemId: String?) {
-                throw KdbxCorruptFileException("KDBX XML 不允许包含 DTD 声明（DOCTYPE）")
+            // Wave 12 解析炸弹防线：XML 嵌套深度封顶（合法库远低于该界；深度受限同时
+            // 约束分组树嵌套与 IgnoredNode 未知子树的栈消耗）
+            if (nodeStack.size >= MAX_XML_DEPTH) {
+                throw KdbxCorruptFileException("KDBX XML 嵌套深度超出上限（$MAX_XML_DEPTH），疑似解析炸弹")
             }
-
-            override fun startElement(uri: String?, localName: String?, qName: String, attributes: Attributes) {
-                // Wave 12 / D23 解析炸弹防线：XML 元素总数封顶（海量小元素放大）
-                elementCount++
-                if (elementCount > MAX_XML_ELEMENTS) {
-                    throw KdbxCorruptFileException(
-                        "KDBX XML 元素总数超出上限（$MAX_XML_ELEMENTS），疑似解析炸弹"
-                    )
+            if (nodeStack.isEmpty()) {
+                if (qName != KdbxConstants.Xml.ROOT) {
+                    throw KdbxCorruptFileException("KDBX XML 根节点必须是 <${KdbxConstants.Xml.ROOT}>，实际为 <$qName>")
                 }
-                // Wave 12 解析炸弹防线：XML 嵌套深度封顶（合法库远低于该界；深度受限同时
-                // 约束分组树嵌套与 IgnoredNode 未知子树的栈消耗）
-                if (nodeStack.size >= MAX_XML_DEPTH) {
-                    throw KdbxCorruptFileException("KDBX XML 嵌套深度超出上限（$MAX_XML_DEPTH），疑似解析炸弹")
-                }
-                if (nodeStack.isEmpty()) {
-                    if (qName != KdbxConstants.Xml.ROOT) {
-                        throw KdbxCorruptFileException("KDBX XML 根节点必须是 <${KdbxConstants.Xml.ROOT}>，实际为 <$qName>")
-                    }
-                    nodeStack.addLast(FileNode(innerStreamCipher, binaries, referenceBudget) {
-                        metaData = it.first
-                        rootGroup = it.second
-                    })
-                } else {
-                    nodeStack.addLast(nodeStack.last().startChild(qName, attributes))
-                }
-            }
-
-            override fun characters(ch: CharArray, start: Int, length: Int) {
-                nodeStack.lastOrNull()?.text(ch, start, length)
-            }
-
-            override fun endElement(uri: String?, localName: String?, qName: String?) {
-                nodeStack.removeLast().end()
+                nodeStack.addLast(FileNode(innerStreamCipher, binaries, referenceBudget) {
+                    onFileEnd(it.first, it.second)
+                })
+            } else {
+                nodeStack.addLast(nodeStack.last().startChild(qName, attributes))
             }
         }
 
+        override fun characters(ch: CharArray, start: Int, length: Int) {
+            nodeStack.lastOrNull()?.text(ch, start, length)
+        }
+
+        override fun endElement(uri: String?, localName: String?, qName: String?) {
+            nodeStack.removeLast().end()
+        }
+    }
+
+    /**
+     * 执行一次 SAX 解析：lexical-handler 注册属「尽力加固」（不受支持仅告警），
+     * 语义化异常原样放行，其余文档级异常统一包装为损坏文件。
+     */
+    private fun parseDocument(parser: SAXParser, inputStream: InputStream, handler: DefaultHandler2) {
         try {
             // 注册 LexicalHandler：DTD 声明（startDTD）由 handler 直接 fail-closed 拒绝。
             // 属性不受支持时仅告警——加固层级降级但绝不阻断合法库解析。
@@ -133,15 +166,6 @@ class KdbxXmlParser(
         } catch (e: Exception) {
             throw KdbxCorruptFileException("KDBX XML 解析失败：文档结构非法或已损坏", e)
         }
-
-        return ParseResult(
-            meta = metaData,
-            // 官方语义（KeePass 2.61.1 KdbxFile.Read.Streamed.cs:651,682）：
-            // Group/Entry 的 UUID 缺失或全零时替换为随机新 UUID（`if(Uuid.IsZero) new PwUuid(true)`）。
-            // 零 UUID 会让多个对象互相「撞名」，父引用与墓碑（DeletedObjects）随之失配，
-            // 删除条目在跨客户端合并时可能复活。
-            rootGroup = normalizeZeroUuids(rootGroup ?: KdbxGroup(name = "Root"), null)
-        )
     }
 
     /**

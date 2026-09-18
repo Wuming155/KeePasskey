@@ -3,10 +3,8 @@ package com.keepasskey.app.passkey
 import android.content.Intent
 import android.os.Bundle
 import androidx.credentials.GetCredentialResponse
-import androidx.credentials.GetPublicKeyCredentialOption
 import androidx.credentials.PublicKeyCredential
 import androidx.credentials.provider.PendingIntentHandler
-import androidx.credentials.provider.ProviderGetCredentialRequest
 import androidx.lifecycle.lifecycleScope
 import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.VaultRepository
@@ -61,155 +59,141 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        val entryId = intent.getStringExtra(EXTRA_ENTRY_ID).orEmpty()
-        val challenge = intent.getStringExtra(EXTRA_CHALLENGE).orEmpty()
-        val origin = intent.getStringExtra(EXTRA_ORIGIN).orEmpty()
-        val expectedPackage = intent.getStringExtra(EXTRA_EXPECTED_PACKAGE).orEmpty()
-
-        // ISSUE-P2-72：归属字段取**系统认证**的 CallingAppInfo 包名——系统把原始
-        // BeginGetCredentialRequest 注入本窗口的 PendingIntent，其中 `callingAppInfo.packageName`
-        // 由平台背书（凭据组装阶段亦用它做严格匹配）。原实现用 `Activity.getCallingPackage()`，
-        // 在 PendingIntent 拉起场景为 `"android"`/null，随后 `?: packageName` 又回退成
-        // **本应用包名**——等于向 RP 谎报调用方。
-        val providerReq: ProviderGetCredentialRequest? = try {
-            PendingIntentHandler.retrieveProviderGetCredentialRequest(intent)
-        } catch (_: Exception) {
-            null
-        }
-        val attestedPackage = CallingOriginResolver.systemAttestedPackageName(providerReq?.callingAppInfo)
-
-        // 交叉核对：系统认证包名 vs 本应用在**候选组装阶段**写入 base Intent 的预期包名。
-        // 两者均可得且不一致 → fail-closed（组装阶段与本窗口看到的调用方不是同一个，拒绝签发）。
-        if (attestedPackage != null &&
-            expectedPackage.isNotBlank() &&
-            attestedPackage != expectedPackage.trim()
-        ) {
-            AppLog.e(TAG, "系统认证调用方与预期包名不一致，拒绝签发断言")
+        // ISSUE-P3-188：`onCreate` 收敛为「解析调用方 → 解析请求 → 派发」三段编排，
+        // 请求面解析下沉同包协作对象；判定顺序与 fail-closed 口径**逐字不变**
+        val caller = PasskeyAssertionRequestParser.resolveAttestedCaller(intent, TAG)
+        if (caller.rejected) {
             failAndFinish()
             return
         }
-        val clientDataPackage = CallingOriginResolver.clientDataAndroidPackageName(
-            attestedPackage,
-            expectedPackage
-        )
-
-        if (entryId.isBlank()) {
-            AppLog.e(TAG, "缺少通行密钥 entryId")
+        val context = PasskeyAssertionRequestParser.buildAssertionContext(intent, TAG, caller)
+        if (context == null) {
             failAndFinish()
             return
         }
-
-        // 系统下发的断言请求（权威来源）：请求 JSON 与**特权调用方自带的 clientDataJSON 摘要**
-        val option = providerReq?.credentialOptions
-            ?.firstOrNull { it is GetPublicKeyCredentialOption } as? GetPublicKeyCredentialOption
-        val requestJson = option?.requestJson
-            ?: intent.getStringExtra(EXTRA_REQUEST_JSON).orEmpty()
-        // 特权调用方（自带 clientDataJSON 的浏览器）下发摘要时必须直接对其签名——自建 JSON
-        // 的哈希与其预期不一致会让 RP 侧验签失败（KeePassDX 同口径）
-        val providedClientDataHash = option?.clientDataHash?.takeIf { it.isNotEmpty() }
-        val request = WebAuthnRequest.parse(requestJson)
-        val prfEval = request?.prfEval
-        val requireBiometric = request?.userVerification == WebAuthnRequest.UserVerification.REQUIRED
-
         lifecycleScope.launch {
             try {
-                if (vaultRepository.isLocked()) {
-                    AppLog.w(TAG, "密码库处于锁定状态，无法执行 Passkey 认证")
-                    failAndFinish()
-                    return@launch
-                }
-
-                val allEntries = vaultRepository.getKdbxEntries()
-                val entry = allEntries.firstOrNull { it.id.toHexString() == entryId }
-                if (entry == null) {
-                    // ISSUE-P1-10：日志不得携带 entryId 等敏感标识
-                    AppLog.e(TAG, "未找到目标条目")
-                    failAndFinish()
-                    return@launch
-                }
-
-                val passkeyData = PasskeyData.fromCustomFields(entry.customFields)
-                if (passkeyData == null) {
-                    AppLog.e(TAG, "条目不含有效的 Passkey 自定义字段")
-                    failAndFinish()
-                    return@launch
-                }
-
-                // F4 整改：origin 缺失一律拒绝签发（fail-closed），不得以 RP ID 冒充 web origin
-                if (origin.isBlank()) {
-                    AppLog.e(TAG, "缺少调用来源 origin，拒绝签发断言")
-                    failAndFinish()
-                    return@launch
-                }
-
-                // H1 整改：签名前二次校验 origin 与凭据 RP-ID 的绑定关系。
-                if (CallingOriginResolver.isBrowserOrigin(origin)) {
-                    val originHost = DomainMatcher.extractDomain(origin)
-                    if (originHost.isEmpty() ||
-                        !DomainMatcher.isDomainMatch(passkeyData.relyingPartyId, originHost)
-                    ) {
-                        AppLog.e(TAG, "origin 与凭据 RP-ID 不匹配，拒绝签发断言")
-                        failAndFinish()
-                        return@launch
-                    }
-                } else {
-                    val boundPackage = DomainMatcher.extractAndroidBoundPackage(entry.url)
-                    // ISSUE-P2-83：包名维度还须通过调用方**签名绑定**门控
-                    val packageDimensionAllowed = CredentialManagerPackageBindingGate.allowsPackageDimension(
-                        callingPackage = expectedPackage,
-                        certDigests = providerReq?.callingAppInfo
-                            ?.let { CallingOriginResolver.certDigests(it) }
-                            ?: CallerCertDigests.EMPTY,
-                        isTrusted = callerTrustStore::isTrusted,
-                        hasAnyBinding = callerTrustStore::hasAnyBindingFor
-                    )
-                    if (expectedPackage.isBlank() || !packageDimensionAllowed ||
-                        boundPackage != expectedPackage.trim().lowercase()
-                    ) {
-                        AppLog.e(TAG, "调用包名与凭据绑定包名不一致或签名未绑定，拒绝签发断言")
-                        failAndFinish()
-                        return@launch
-                    }
-                }
-
-                // ISSUE-P0-03 (ZT-03) + 本次整改：进入签名前执行「本次实际发生」的用户验证门控。
-                // RP 要求 `userVerification: required` 时强制强验证（不降级为手动确认）。
-                val rpLabel = passkeyData.relyingPartyId
-                requestCredentialUserVerification(
-                    biometricAuthManager = biometricAuthManager,
-                    fillVerifier = fillVerifier,
-                    title = getString(R.string.cred_passkey_assert_title),
-                    biometricSubtitle = getString(R.string.passkey_assert_biometric_subtitle, rpLabel),
-                    manualHint = getString(R.string.passkey_assert_manual_hint, rpLabel),
-                    confirmText = getString(R.string.passkey_confirm_ok),
-                    cancelText = getString(R.string.passkey_confirm_cancel),
-                    requireBiometric = requireBiometric,
-                    onVerified = { verification ->
-                        if (settled) return@requestCredentialUserVerification
-                        settled = true
-                        signAndReturn(
-                            entryId = entryId,
-                            passkeyData = passkeyData,
-                            origin = origin,
-                            challenge = challenge,
-                            clientDataPackage = clientDataPackage,
-                            verification = verification,
-                            providedClientDataHash = providedClientDataHash,
-                            prfEval = prfEval
-                        )
-                    },
-                    onRejected = {
-                        if (settled) return@requestCredentialUserVerification
-                        settled = true
-                        AppLog.w(TAG, "用户验证未通过，拒绝签发 Passkey 断言")
-                        failAndFinish()
-                    }
-                )
+                performAssertion(context)
             } catch (t: Throwable) {
                 AppLog.e(TAG, "Passkey 认证执行失败", t)
                 failAndFinish()
             }
         }
+    }
+
+    /** 库状态 / 条目 / Passkey 字段核对，通过后进入 origin 绑定门控与用户验证 */
+    private suspend fun performAssertion(context: PasskeyAssertionContext) {
+        if (vaultRepository.isLocked()) {
+            AppLog.w(TAG, "密码库处于锁定状态，无法执行 Passkey 认证")
+            failAndFinish()
+            return
+        }
+
+        val allEntries = vaultRepository.getKdbxEntries()
+        val entry = allEntries.firstOrNull { it.id.toHexString() == context.entryId }
+        if (entry == null) {
+            // ISSUE-P1-10：日志不得携带 entryId 等敏感标识
+            AppLog.e(TAG, "未找到目标条目")
+            failAndFinish()
+            return
+        }
+
+        val passkeyData = PasskeyData.fromCustomFields(entry.customFields)
+        if (passkeyData == null) {
+            AppLog.e(TAG, "条目不含有效的 Passkey 自定义字段")
+            failAndFinish()
+            return
+        }
+
+        // F4 整改：origin 缺失一律拒绝签发（fail-closed），不得以 RP ID 冒充 web origin
+        if (context.origin.isBlank()) {
+            AppLog.e(TAG, "缺少调用来源 origin，拒绝签发断言")
+            failAndFinish()
+            return
+        }
+        if (!passesOriginBinding(context, passkeyData, entry.url)) {
+            failAndFinish()
+            return
+        }
+        requestAssertionUserVerification(context, passkeyData)
+    }
+
+    /**
+     * H1 整改：签名前二次校验 origin 与凭据 RP-ID / 绑定包名的关系。
+     * 包名维度还须通过调用方**签名绑定**门控（ISSUE-P2-83）。
+     */
+    private fun passesOriginBinding(
+        context: PasskeyAssertionContext,
+        passkeyData: PasskeyData,
+        entryUrl: String
+    ): Boolean {
+        if (CallingOriginResolver.isBrowserOrigin(context.origin)) {
+            val originHost = DomainMatcher.extractDomain(context.origin)
+            if (originHost.isEmpty() ||
+                !DomainMatcher.isDomainMatch(passkeyData.relyingPartyId, originHost)
+            ) {
+                AppLog.e(TAG, "origin 与凭据 RP-ID 不匹配，拒绝签发断言")
+                return false
+            }
+            return true
+        }
+        val boundPackage = DomainMatcher.extractAndroidBoundPackage(entryUrl)
+        val packageDimensionAllowed = CredentialManagerPackageBindingGate.allowsPackageDimension(
+            callingPackage = context.expectedPackage,
+            certDigests = context.providerReq?.callingAppInfo
+                ?.let { CallingOriginResolver.certDigests(it) }
+                ?: CallerCertDigests.EMPTY,
+            isTrusted = callerTrustStore::isTrusted,
+            hasAnyBinding = callerTrustStore::hasAnyBindingFor
+        )
+        if (context.expectedPackage.isBlank() || !packageDimensionAllowed ||
+            boundPackage != context.expectedPackage.trim().lowercase()
+        ) {
+            AppLog.e(TAG, "调用包名与凭据绑定包名不一致或签名未绑定，拒绝签发断言")
+            return false
+        }
+        return true
+    }
+
+    /**
+     * ISSUE-P0-03 (ZT-03) + 本次整改：进入签名前执行「本次实际发生」的用户验证门控。
+     * RP 要求 `userVerification: required` 时强制强验证（不降级为手动确认）。
+     */
+    private fun requestAssertionUserVerification(
+        context: PasskeyAssertionContext,
+        passkeyData: PasskeyData
+    ) {
+        val rpLabel = passkeyData.relyingPartyId
+        requestCredentialUserVerification(
+            biometricAuthManager = biometricAuthManager,
+            fillVerifier = fillVerifier,
+            title = getString(R.string.cred_passkey_assert_title),
+            biometricSubtitle = getString(R.string.passkey_assert_biometric_subtitle, rpLabel),
+            manualHint = getString(R.string.passkey_assert_manual_hint, rpLabel),
+            confirmText = getString(R.string.passkey_confirm_ok),
+            cancelText = getString(R.string.passkey_confirm_cancel),
+            requireBiometric = context.requireBiometric,
+            onVerified = { verification ->
+                if (settled) return@requestCredentialUserVerification
+                settled = true
+                signAndReturn(
+                    entryId = context.entryId,
+                    passkeyData = passkeyData,
+                    origin = context.origin,
+                    challenge = context.challenge,
+                    clientDataPackage = context.clientDataPackage,
+                    verification = verification,
+                    providedClientDataHash = context.providedClientDataHash,
+                    prfEval = context.prfEval
+                )
+            },
+            onRejected = {
+                if (settled) return@requestCredentialUserVerification
+                settled = true
+                AppLog.w(TAG, "用户验证未通过，拒绝签发 Passkey 断言")
+                failAndFinish()
+            }
+        )
     }
 
     /**
@@ -308,11 +292,11 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
 
             // 2. 构造 ClientDataJSON（响应体回传内容）与签名用摘要
             val clientDataJson = JSONObject().apply {
-                put("type", "webauthn.get")
-                put("challenge", challenge)
-                put("origin", origin)
+                put(WebAuthnJson.TYPE, WebAuthnJson.CLIENT_DATA_TYPE_GET)
+                put(WebAuthnJson.CHALLENGE, challenge)
+                put(WebAuthnJson.ORIGIN, origin)
                 // ISSUE-P2-72：只写系统认证的调用方包名；取不到即省略——绝不再回退为本应用包名
-                clientDataPackage?.let { put("androidPackageName", it) }
+                clientDataPackage?.let { put(WebAuthnJson.ANDROID_PACKAGE_NAME, it) }
             }.toString()
             val clientDataBytesLocal = clientDataJson.toByteArray(Charsets.UTF_8)
             clientDataBytes = clientDataBytesLocal
@@ -340,16 +324,16 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
             // 5. 构造最终 WebAuthn 断言响应 JSON
             val b64Url = Base64.getUrlEncoder().withoutPadding()
             val assertionJson = JSONObject().apply {
-                put("id", passkeyData.credentialId)
-                put("rawId", passkeyData.credentialId)
-                put("type", "public-key")
-                put("authenticatorAttachment", "platform")
-                put("clientExtensionResults", buildPrfClientExtensionResults(prfEval, passkeyData.prfSecret))
-                put("response", JSONObject().apply {
-                    put("clientDataJSON", b64Url.encodeToString(clientDataBytesLocal))
-                    put("authenticatorData", b64Url.encodeToString(authDataLocal))
-                    put("signature", b64Url.encodeToString(signature))
-                    put("userHandle", passkeyData.userHandle)
+                put(WebAuthnJson.ID, passkeyData.credentialId)
+                put(WebAuthnJson.RAW_ID, passkeyData.credentialId)
+                put(WebAuthnJson.TYPE, WebAuthnJson.CREDENTIAL_TYPE_PUBLIC_KEY)
+                put(WebAuthnJson.AUTHENTICATOR_ATTACHMENT, WebAuthnJson.ATTACHMENT_PLATFORM)
+                put(WebAuthnJson.CLIENT_EXTENSION_RESULTS, buildPrfClientExtensionResults(prfEval, passkeyData.prfSecret))
+                put(WebAuthnJson.RESPONSE, JSONObject().apply {
+                    put(WebAuthnJson.CLIENT_DATA_JSON, b64Url.encodeToString(clientDataBytesLocal))
+                    put(WebAuthnJson.AUTHENTICATOR_DATA, b64Url.encodeToString(authDataLocal))
+                    put(WebAuthnJson.SIGNATURE, b64Url.encodeToString(signature))
+                    put(WebAuthnJson.USER_HANDLE, passkeyData.userHandle)
                 })
             }
             return assertionJson.toString()
@@ -379,16 +363,16 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
         return try {
             val first = PasskeyPrf.computeValue(prfSecret, prfEval.first)
             try {
-                val results = JSONObject().put("first", b64Url.encodeToString(first))
+                val results = JSONObject().put(WebAuthnJson.FIRST, b64Url.encodeToString(first))
                 prfEval.second?.let { secondInput ->
                     val second = PasskeyPrf.computeValue(prfSecret, secondInput)
                     try {
-                        results.put("second", b64Url.encodeToString(second))
+                        results.put(WebAuthnJson.SECOND, b64Url.encodeToString(second))
                     } finally {
                         second.fill(0)
                     }
                 }
-                JSONObject().put("prf", JSONObject().put("results", results))
+                JSONObject().put(WebAuthnJson.PRF, JSONObject().put(WebAuthnJson.RESULTS, results))
             } finally {
                 first.fill(0)
             }

@@ -61,42 +61,103 @@ internal class VaultEntryMapper(private val strings: StringsProvider) {
         // ISSUE-P2-24：投影只需字节数，直接取 attachment.size——
         // 不再把整个二进制池 map 成字节数组（那会令落盘大附件被整批读回内存）。
         val uiAttachments = entry.attachments.map { att ->
-            val byteCount = att.size
-            val sizeKb = (byteCount / 1024).coerceAtLeast(if (byteCount > 0) 1L else 0L)
-            val sizeFormatted = if (byteCount < 1024) "$byteCount B" else "$sizeKb KB"
             UiAttachment(
                 id = "${entry.id.toHexString()}_${att.name}",
                 fileName = att.name,
-                fileSizeFormatted = sizeFormatted,
+                fileSizeFormatted = formatAttachmentSize(att.size),
                 mimeType = determineMimeType(att.name),
                 addedAt = formatInstant(entry.times.creationTime)
             )
         }
 
-        // 解析标准 OTP 或自定义字段中的 TOTP 配置
-        val parsedTotp = parseTotpConfig(entry)
-
-        val totpPeriod = parsedTotp?.period ?: 30
-        val totpDigits = parsedTotp?.digits ?: 6
-        val totpAlgorithm = parsedTotp?.algorithm ?: "SHA1"
-
-        val currentRemaining = OtpEngine.getRemainingSeconds(periodSeconds = totpPeriod)
-        // F2 整改：TOTP 种子不进 UiVaultEntry，列表展示用验证码在此即时计算；
-        // 验证器页经 [RealVaultRepository.calculateEntryTotp] 按需重算。
-        // ISSUE-P2-12：配置内的 Base32 种子字节用毕即擦（不再以 String 形态驻留）
-        val liveTotpCode = try {
-            parsedTotp?.let { computeTotpCode(it) }
-        } finally {
-            parsedTotp?.secret?.fill(0)
-        }
+        val totp = projectTotpFields(entry)
 
         val passkeyData = PasskeyData.fromCustomFields(entry.customFields)
         val icon = mapIconIdToName(entry.iconId)
 
-        // TASK-35 整改：识别银行卡条目并映射卡面字段——模板「信用卡」以自定义字段
-        // 存放卡信息（卡号/持卡人/有效期/CVV），此前一律按普通登录展示。
-        // 仅读取未加保护字段进投影（受保护字段不物化明文，F2 语义不变）；
-        // 受保护的卡号/CVV 保持 null，由 UI 渲染整卡掩码兜底。
+        val card = projectCardFields(entry)
+
+        return UiVaultEntry(
+            id = entry.id.toHexString(),
+            title = entry.title,
+            username = entry.userName,
+            passwordMasked = if (entry.password == null) "" else PASSWORD_MASK,
+            url = entry.url,
+            isPasskey = passkeyData != null,
+            passkeyRpId = passkeyData?.relyingPartyId,
+            totpCode = totp.code,
+            totpRemainingSeconds = totp.remainingSeconds,
+            totpPeriod = totp.period,
+            totpDigits = totp.digits,
+            totpAlgorithm = totp.algorithm,
+            isHotp = totp.isHotp,
+            category = if (card.isCardEntry) EntryCategory.CARD else EntryCategory.LOGIN,
+            isFavorite = entry.customData[RealVaultRepository.FAVORITE_CUSTOM_DATA_KEY] == "true",
+            notes = entry.notes,
+            groupId = entry.parentGroupId?.toHexString(),
+            iconName = icon,
+            customIconId = entry.customIconId?.toHexString(),
+            updatedAt = formatInstant(entry.times.lastModificationTime),
+            createdAt = formatInstant(entry.times.creationTime),
+            cardNumberMasked = card.cardNumberMasked,
+            cardHolder = card.cardHolder,
+            cardExpiry = card.cardExpiry,
+            customFields = uiCustomFields,
+            attachments = uiAttachments,
+            revisions = uiRevisions,
+            tags = entry.tags,
+            autoTypeSequence = entry.autoType?.defaultSequence.orEmpty(),
+            overrideUrl = entry.overrideUrl
+        )
+    }
+
+    /**
+     * 解析标准 OTP 或自定义字段中的 TOTP 配置并出码（列表投影用）。
+     *
+     * F2 整改：TOTP 种子不进 UiVaultEntry，列表展示用验证码在此即时计算；
+     * 验证器页经 [RealVaultRepository.calculateEntryTotp] 按需重算。
+     * ISSUE-P2-12：配置内的 Base32 种子字节用毕即擦（不再以 String 形态驻留）。
+     */
+    private fun projectTotpFields(entry: KdbxEntry): TotpProjection {
+        val parsedTotp = parseTotpConfig(entry)
+        val period = parsedTotp?.period ?: DEFAULT_TOTP_PERIOD_SECONDS
+        val code = try {
+            parsedTotp?.let { computeTotpCode(it) }
+        } finally {
+            parsedTotp?.secret?.fill(0)
+        }
+        return TotpProjection(
+            period = period,
+            digits = parsedTotp?.digits ?: DEFAULT_TOTP_DIGITS,
+            algorithm = parsedTotp?.algorithm ?: DEFAULT_TOTP_ALGORITHM,
+            isHotp = parsedTotp?.isHotp == true,
+            code = code,
+            remainingSeconds = OtpEngine.getRemainingSeconds(periodSeconds = period)
+        )
+    }
+
+    /** TOTP 条目投影（参数 + 实时码 + 周期剩余秒数） */
+    private data class TotpProjection(
+        val period: Int,
+        val digits: Int,
+        val algorithm: String,
+        val isHotp: Boolean,
+        val code: String?,
+        val remainingSeconds: Int
+    )
+
+    /** 附件大小展示：不足 1 KiB 以字节计，否则折算 KiB（向上至少 1）。 */
+    private fun formatAttachmentSize(byteCount: Long): String =
+        if (byteCount < BYTES_PER_KIB) "$byteCount B"
+        else "${(byteCount / BYTES_PER_KIB).coerceAtLeast(1L)} KB"
+
+    /**
+     * TASK-35 整改：识别银行卡条目并映射卡面字段——模板「信用卡」以自定义字段
+     * 存放卡信息（卡号/持卡人/有效期/CVV），此前一律按普通登录展示。
+     * 仅读取未加保护字段进投影（受保护字段不物化明文，F2 语义不变）；
+     * 受保护的卡号/CVV 保持 null，由 UI 渲染整卡掩码兜底。
+     */
+    private fun projectCardFields(entry: KdbxEntry): CardProjection {
         val cfByKey = entry.customFields.associateBy { it.key }
         fun unprotectedValue(vararg keys: String): String? {
             for (key in keys) {
@@ -109,47 +170,28 @@ internal class VaultEntryMapper(private val strings: StringsProvider) {
             return null
         }
         val cardNumber = unprotectedValue(CARD_FIELD_NUMBER_ZH, CARD_FIELD_NUMBER_EN)
-        val cardHolderValue = unprotectedValue(CARD_FIELD_HOLDER_ZH, CARD_FIELD_HOLDER_EN)
-        val cardExpiryValue = unprotectedValue(CARD_FIELD_EXPIRY_ZH, CARD_FIELD_EXPIRY_EN, CARD_FIELD_EXPIRY_EN_ALT)
-        val isCardEntry = cardNumber != null || cardHolderValue != null ||
-                cardExpiryValue != null || entry.iconId == 27
+        val cardHolder = unprotectedValue(CARD_FIELD_HOLDER_ZH, CARD_FIELD_HOLDER_EN)
+        val cardExpiry =
+            unprotectedValue(CARD_FIELD_EXPIRY_ZH, CARD_FIELD_EXPIRY_EN, CARD_FIELD_EXPIRY_EN_ALT)
+        val isCardEntry = cardNumber != null || cardHolder != null ||
+            cardExpiry != null || entry.iconId == CARD_ICON_ID
         val cardNumberMasked = cardNumber?.let { raw ->
-            if (raw.length >= 4) "•••• •••• •••• ${raw.takeLast(4)}" else "••••"
+            if (raw.length >= CARD_LAST_VISIBLE_DIGITS) {
+                "$CARD_SHORT_MASK ${raw.takeLast(CARD_LAST_VISIBLE_DIGITS)}"
+            } else {
+                CARD_FULL_MASK
+            }
         }
-
-        return UiVaultEntry(
-            id = entry.id.toHexString(),
-            title = entry.title,
-            username = entry.userName,
-            passwordMasked = if (entry.password == null) "" else "••••••••••••••••",
-            url = entry.url,
-            isPasskey = passkeyData != null,
-            passkeyRpId = passkeyData?.relyingPartyId,
-            totpCode = liveTotpCode,
-            totpRemainingSeconds = currentRemaining,
-            totpPeriod = totpPeriod,
-            totpDigits = totpDigits,
-            totpAlgorithm = totpAlgorithm,
-            isHotp = parsedTotp?.isHotp == true,
-            category = if (isCardEntry) EntryCategory.CARD else EntryCategory.LOGIN,
-            isFavorite = entry.customData[RealVaultRepository.FAVORITE_CUSTOM_DATA_KEY] == "true",
-            notes = entry.notes,
-            groupId = entry.parentGroupId?.toHexString(),
-            iconName = icon,
-            customIconId = entry.customIconId?.toHexString(),
-            updatedAt = formatInstant(entry.times.lastModificationTime),
-            createdAt = formatInstant(entry.times.creationTime),
-            cardNumberMasked = cardNumberMasked,
-            cardHolder = cardHolderValue,
-            cardExpiry = cardExpiryValue,
-            customFields = uiCustomFields,
-            attachments = uiAttachments,
-            revisions = uiRevisions,
-            tags = entry.tags,
-            autoTypeSequence = entry.autoType?.defaultSequence.orEmpty(),
-            overrideUrl = entry.overrideUrl
-        )
+        return CardProjection(isCardEntry, cardNumberMasked, cardHolder, cardExpiry)
     }
+
+    /** 银行卡条目投影（分类判定 + 三个展示字段） */
+    private data class CardProjection(
+        val isCardEntry: Boolean,
+        val cardNumberMasked: String?,
+        val cardHolder: String?,
+        val cardExpiry: String?
+    )
 
     /**
      * 解析条目中的 TOTP 配置（标准 otp 字段优先，回退 TOTP 开头的自定义字段）。
@@ -397,6 +439,27 @@ internal class VaultEntryMapper(private val strings: StringsProvider) {
 
         /** 回退读取的 TOTP 自定义字段前缀（KDBX 自定义字段键，属格式契约不可本地化） */
         const val TOTP_CUSTOM_FIELD_PREFIX = "TOTP"
+
+        /** 模板「信用卡」条目的 KDBX 标准图标 id（无卡面字段时按图标识别） */
+        private const val CARD_ICON_ID = 27
+
+        /** 卡号展示保留的末位位数 */
+        private const val CARD_LAST_VISIBLE_DIGITS = 4
+
+        /** 卡号掩码前缀（末四位可见形态）与整卡掩码兜底 */
+        private const val CARD_SHORT_MASK = "•••• •••• ••••"
+        private const val CARD_FULL_MASK = "••••"
+
+        /** 密码遮罩（长度即占位宽度，不反映真实长度） */
+        private const val PASSWORD_MASK = "••••••••••••••••"
+
+        /** 附件大小折算基数（1 KiB） */
+        private const val BYTES_PER_KIB = 1024L
+
+        /** TOTP 配置缺省参数（RFC 6238 默认值） */
+        private const val DEFAULT_TOTP_PERIOD_SECONDS = 30
+        private const val DEFAULT_TOTP_DIGITS = 6
+        private const val DEFAULT_TOTP_ALGORITHM = "SHA1"
     }
 }
 

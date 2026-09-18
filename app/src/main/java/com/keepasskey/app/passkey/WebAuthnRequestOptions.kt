@@ -33,8 +33,8 @@ internal class WebAuthnRequest private constructor(private val root: Map<String,
 
         companion object {
             fun from(raw: String?): UserVerification = when (raw?.trim()?.lowercase()) {
-                "required" -> REQUIRED
-                "discouraged" -> DISCOURAGED
+                WebAuthnJson.VERIFICATION_REQUIRED -> REQUIRED
+                WebAuthnJson.VERIFICATION_DISCOURAGED -> DISCOURAGED
                 else -> PREFERRED
             }
         }
@@ -56,51 +56,51 @@ internal class WebAuthnRequest private constructor(private val root: Map<String,
 
     /** 依赖方标识（创建请求在 `rp.id`，断言请求在顶层 `rpId`） */
     val rpId: String
-        get() = SimpleJson.string(SimpleJson.objectAt(root, "rp"), "id")
-            ?: SimpleJson.string(root, "rpId")
+        get() = SimpleJson.string(SimpleJson.objectAt(root, WebAuthnJson.RP), WebAuthnJson.ID)
+            ?: SimpleJson.string(root, WebAuthnJson.RP_ID)
             ?: ""
 
-    val challenge: String get() = SimpleJson.string(root, "challenge") ?: ""
+    val challenge: String get() = SimpleJson.string(root, WebAuthnJson.CHALLENGE) ?: ""
 
     /** 注册请求 `user.id`（WebAuthn 要求认证器原样保存并回传） */
-    val userId: String get() = SimpleJson.string(userEntity, "id") ?: ""
+    val userId: String get() = SimpleJson.string(userEntity, WebAuthnJson.ID) ?: ""
 
-    val userName: String get() = SimpleJson.string(userEntity, "name") ?: ""
+    val userName: String get() = SimpleJson.string(userEntity, WebAuthnJson.NAME) ?: ""
 
-    val userDisplayName: String get() = SimpleJson.string(userEntity, "displayName") ?: ""
+    val userDisplayName: String get() = SimpleJson.string(userEntity, WebAuthnJson.DISPLAY_NAME) ?: ""
 
-    private val userEntity: Map<String, Any?>? get() = SimpleJson.objectAt(root, "user")
+    private val userEntity: Map<String, Any?>? get() = SimpleJson.objectAt(root, WebAuthnJson.USER)
 
     /** 注册请求 `pubKeyCredParams[].alg`（按请求顺序） */
     val pubKeyCredParams: List<Int>
-        get() = SimpleJson.arrayAt(root, "pubKeyCredParams")
+        get() = SimpleJson.arrayAt(root, WebAuthnJson.PUB_KEY_CRED_PARAMS)
             .orEmpty()
-            .mapNotNull { SimpleJson.int(SimpleJson.asObject(it), "alg") }
+            .mapNotNull { SimpleJson.int(SimpleJson.asObject(it), WebAuthnJson.ALG) }
 
     /** 断言请求 `allowCredentials[].id`（空集表示「无用户名」流程，不做收敛） */
-    val allowCredentialIds: Set<String> get() = descriptorIds("allowCredentials")
+    val allowCredentialIds: Set<String> get() = descriptorIds(WebAuthnJson.ALLOW_CREDENTIALS)
 
     /** 注册请求 `excludeCredentials[].id` */
-    val excludeCredentialIds: Set<String> get() = descriptorIds("excludeCredentials")
+    val excludeCredentialIds: Set<String> get() = descriptorIds(WebAuthnJson.EXCLUDE_CREDENTIALS)
 
     /** 断言请求 `userVerification`（缺省 `preferred`） */
     val userVerification: UserVerification
-        get() = UserVerification.from(SimpleJson.string(root, "userVerification"))
+        get() = UserVerification.from(SimpleJson.string(root, WebAuthnJson.USER_VERIFICATION))
 
     /** 注册请求 `authenticatorSelection.userVerification`（缺省 `preferred`） */
     val authenticatorSelectionUserVerification: UserVerification
         get() = UserVerification.from(
-            SimpleJson.string(SimpleJson.objectAt(root, "authenticatorSelection"), "userVerification")
+            SimpleJson.string(SimpleJson.objectAt(root, WebAuthnJson.AUTHENTICATOR_SELECTION), WebAuthnJson.USER_VERIFICATION)
         )
 
     /** PRF 请求输入；未请求 PRF 或形态非法（缺 `eval.first`）时返回 null */
     val prfEval: PrfEval?
         get() {
-            val prf = SimpleJson.objectAt(SimpleJson.objectAt(root, "extensions"), "prf") ?: return null
-            val evalByCredentialPresent = prf.containsKey("evalByCredential")
-            val eval = SimpleJson.objectAt(prf, "eval")
-            val firstBytes = base64UrlDecode(SimpleJson.string(eval, "first").orEmpty()) ?: return null
-            val secondBytes = SimpleJson.string(eval, "second")
+            val prf = SimpleJson.objectAt(SimpleJson.objectAt(root, WebAuthnJson.EXTENSIONS), WebAuthnJson.PRF) ?: return null
+            val evalByCredentialPresent = prf.containsKey(WebAuthnJson.EVAL_BY_CREDENTIAL)
+            val eval = SimpleJson.objectAt(prf, WebAuthnJson.EVAL)
+            val firstBytes = base64UrlDecode(SimpleJson.string(eval, WebAuthnJson.FIRST).orEmpty()) ?: return null
+            val secondBytes = SimpleJson.string(eval, WebAuthnJson.SECOND)
                 ?.takeIf { it.isNotBlank() }
                 ?.let { base64UrlDecode(it) }
             return PrfEval(firstBytes, secondBytes, evalByCredentialPresent)
@@ -110,7 +110,7 @@ internal class WebAuthnRequest private constructor(private val root: Map<String,
         val array = SimpleJson.arrayAt(root, key) ?: return emptySet()
         val ids = LinkedHashSet<String>(array.size)
         for (item in array) {
-            val id = SimpleJson.string(SimpleJson.asObject(item), "id")
+            val id = SimpleJson.string(SimpleJson.asObject(item), WebAuthnJson.ID)
             if (!id.isNullOrBlank()) ids += id
         }
         return ids

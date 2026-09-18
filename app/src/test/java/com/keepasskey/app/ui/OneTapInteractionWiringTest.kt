@@ -29,6 +29,8 @@ class OneTapInteractionWiringTest {
     fun `详情页 TOTP 复制必须走真实复制通道而非只弹提示`() {
         val cards = stripComments(readSource(DETAIL_CARDS))
         val viewModel = stripComments(readSource(DETAIL_VIEW_MODEL))
+        val copyCoordinator = stripComments(readSource(DETAIL_COPY_COORDINATOR))
+        val coordinatorBody = functionBody(copyCoordinator, "fun copyTotpCode()")
 
         assertTrue(
             "TOTP 复制按钮必须直接调用复制回调（onClick = onCopyTotp），实际未接线",
@@ -39,13 +41,16 @@ class OneTapInteractionWiringTest {
             cards.contains("onShowMessage(UiMessage(R.string.detail_totp_copied))")
         )
         assertTrue(
+            "ViewModel 门面必须委托复制协作者（不得在门面上退回只弹提示）",
+            functionBody(viewModel, "fun copyTotpCode()").contains("copyCoordinator.copyTotpCode()")
+        )
+        assertTrue(
             "copyTotpCode 必须经受保护剪贴板写入（copySensitiveText）",
-            viewModel.contains("copySensitiveText") &&
-                functionBody(viewModel, "fun copyTotpCode()").contains("copySensitiveText")
+            copyCoordinator.contains("copySensitiveText") && coordinatorBody.contains("copySensitiveText")
         )
         assertTrue(
             "取不到码时必须发失败文案而非成功文案（不谎报成功）",
-            functionBody(viewModel, "fun copyTotpCode()").contains("R.string.detail_totp_copy_failed")
+            coordinatorBody.contains("R.string.detail_totp_copy_failed")
         )
     }
 
@@ -209,7 +214,7 @@ class OneTapInteractionWiringTest {
     @Test
     fun `本批整改的扫描目标文件全部存在（防空扫）`() {
         val targets = listOf(
-            DETAIL_CARDS, DETAIL_VIEW_MODEL, VAULT_ROW_LAYOUTS, VAULT_ACTION_CONTROLLER,
+            DETAIL_CARDS, DETAIL_VIEW_MODEL, DETAIL_COPY_COORDINATOR, VAULT_ROW_LAYOUTS, VAULT_ACTION_CONTROLLER,
             VAULT_LIST_SCREEN, SECURITY_SCREEN, SECURITY_DIALOGS, SECURITY_COMPONENTS,
             SETTINGS_NAV_GRAPH, SETTINGS_VIEW_MODEL, HEALTH_CONTROLLER,
             CLOUD_SYNC_SCREEN, SYNC_CONTROLLER, SYSTEM_SETTINGS_NAV,
@@ -218,7 +223,7 @@ class OneTapInteractionWiringTest {
         targets.forEach { path ->
             assertTrue("扫描目标不存在（路径已漂移）：$path", File(repositoryRoot, path).isFile)
         }
-        assertEquals("扫描目标清单不得被悄悄删项", 16, targets.size)
+        assertEquals("扫描目标清单不得被悄悄删项（ISSUE-P3-188 增列复制协作者，16 → 17）", 17, targets.size)
     }
 
     // ---------------------------------------------------------------- helpers
@@ -263,6 +268,8 @@ class OneTapInteractionWiringTest {
         const val DETAIL_CARDS = "app/src/main/java/com/keepasskey/app/ui/screens/detail/EntryDetailCards.kt"
         const val DETAIL_VIEW_MODEL =
             "app/src/main/java/com/keepasskey/app/ui/screens/detail/EntryDetailViewModel.kt"
+        const val DETAIL_COPY_COORDINATOR =
+            "app/src/main/java/com/keepasskey/app/ui/screens/detail/EntryDetailCopyCoordinator.kt"
         const val VAULT_ROW_LAYOUTS =
             "app/src/main/java/com/keepasskey/app/ui/screens/vault/VaultEntryRowLayouts.kt"
         const val VAULT_ACTION_CONTROLLER =

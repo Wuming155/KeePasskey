@@ -155,6 +155,58 @@ internal object KdbxEntryMerger {
         val diffFields = mutableListOf<String>()
 
         // 字段级三方合并
+        val mergedFields = mergeStandardFields(base, local, remote, diffFields)
+        val mergedCustomFields = mergeCustomFields(base, local, remote, diffFields)
+
+        // 标签合并 (Union)
+        val mergedTags = (local.tags + remote.tags).distinct()
+
+        val mergedAttachments = mergeAttachments(base, local, remote)
+
+        // 历史版本合并（对齐官方 MergeIn：三方历史并集，按最后修改时间去重后升序排列；
+        // 时间戳碰撞时优先保留本地侧快照）
+        val mergedHistory = (local.history + remote.history + base?.history.orEmpty())
+            .distinctBy { it.times.lastModificationTime }
+            .sortedBy { it.times.lastModificationTime }
+
+        // 时间戳取最新
+        val maxMod = if (remote.times.lastModificationTime.isAfter(local.times.lastModificationTime)) {
+            remote.times.lastModificationTime
+        } else {
+            local.times.lastModificationTime
+        }
+
+        val mergedEntry = local.copy(
+            fields = mergedFields,
+            customFields = mergedCustomFields,
+            tags = mergedTags,
+            attachments = mergedAttachments,
+            history = mergedHistory,
+            times = local.times.copy(lastModificationTime = maxMod),
+            parentGroupId = resolveMergedParentGroup(base, local, remote)
+        )
+
+        val conflictPair = if (diffFields.isNotEmpty()) {
+            ConflictedEntryPair(
+                entryId = local.id.toHexString(),
+                localEntry = local,
+                remoteEntry = remote,
+                modifiedFields = diffFields
+            )
+        } else {
+            null
+        }
+
+        return Pair(mergedEntry, conflictPair)
+    }
+
+    /** 标准字段三方合并：单侧变更取该侧，双侧同值取本地，双侧异值按最后修改时间取胜方并记入 [diffFields]。 */
+    private fun mergeStandardFields(
+        base: KdbxEntry?,
+        local: KdbxEntry,
+        remote: KdbxEntry,
+        diffFields: MutableList<String>
+    ): Map<String, ProtectedString> {
         val allFieldKeys = (local.fields.keys + remote.fields.keys + (base?.fields?.keys ?: emptySet())).toSet()
         val mergedFields = mutableMapOf<String, ProtectedString>()
 
@@ -183,8 +235,16 @@ internal object KdbxEntryMerger {
                 }
             }
         }
+        return mergedFields
+    }
 
-        // 自定义字段合并
+    /** 自定义字段三方合并：判定口径同标准字段，冲突记入 [diffFields]。 */
+    private fun mergeCustomFields(
+        base: KdbxEntry?,
+        local: KdbxEntry,
+        remote: KdbxEntry,
+        diffFields: MutableList<String>
+    ): List<KdbxCustomField> {
         val baseCustomMap = base?.customFields?.associateBy { it.key } ?: emptyMap()
         val localCustomMap = local.customFields.associateBy { it.key }
         val remoteCustomMap = remote.customFields.associateBy { it.key }
@@ -216,13 +276,17 @@ internal object KdbxEntryMerger {
                 }
             }
         }
+        return mergedCustomFields
+    }
 
-        // 标签合并 (Union)
-        val mergedTags = (local.tags + remote.tags).distinct()
-
-        // 附件合并
+    /** 附件合并：单侧变更取该侧；双侧变更按名称并集（远端先入、本地覆盖同名项）。 */
+    private fun mergeAttachments(
+        base: KdbxEntry?,
+        local: KdbxEntry,
+        remote: KdbxEntry
+    ): List<KdbxAttachment> {
         val bAttachments: List<KdbxAttachment> = base?.attachments ?: emptyList()
-        val mergedAttachments = when {
+        return when {
             local.attachments != bAttachments && remote.attachments == bAttachments -> local.attachments
             local.attachments == bAttachments && remote.attachments != bAttachments -> remote.attachments
             else -> {
@@ -233,48 +297,17 @@ internal object KdbxEntryMerger {
                 attMap.values.toList()
             }
         }
+    }
 
-        // 历史版本合并（对齐官方 MergeIn：三方历史并集，按最后修改时间去重后升序排列；
-        // 时间戳碰撞时优先保留本地侧快照）
-        val mergedHistory = (local.history + remote.history + base?.history.orEmpty())
-            .distinctBy { it.times.lastModificationTime }
-            .sortedBy { it.times.lastModificationTime }
-
-        // 时间戳取最新
-        val maxMod = if (remote.times.lastModificationTime.isAfter(local.times.lastModificationTime)) {
-            remote.times.lastModificationTime
-        } else {
-            local.times.lastModificationTime
-        }
-
-        val parentGroupId = when {
-            local.parentGroupId != base?.parentGroupId && remote.parentGroupId == base?.parentGroupId -> local.parentGroupId
-            local.parentGroupId == base?.parentGroupId && remote.parentGroupId != base?.parentGroupId -> remote.parentGroupId
-            else -> if (remote.times.lastModificationTime.isAfter(local.times.lastModificationTime)) remote.parentGroupId else local.parentGroupId
-        }
-
-        val mergedEntry = local.copy(
-            fields = mergedFields,
-            customFields = mergedCustomFields,
-            tags = mergedTags,
-            attachments = mergedAttachments,
-            history = mergedHistory,
-            times = local.times.copy(lastModificationTime = maxMod),
-            parentGroupId = parentGroupId
-        )
-
-        val conflictPair = if (diffFields.isNotEmpty()) {
-            ConflictedEntryPair(
-                entryId = local.id.toHexString(),
-                localEntry = local,
-                remoteEntry = remote,
-                modifiedFields = diffFields
-            )
-        } else {
-            null
-        }
-
-        return Pair(mergedEntry, conflictPair)
+    /** 父分组归属：单侧移动取该侧；双侧异动按最后修改时间取胜方。 */
+    private fun resolveMergedParentGroup(
+        base: KdbxEntry?,
+        local: KdbxEntry,
+        remote: KdbxEntry
+    ): KdbxUuid? = when {
+        local.parentGroupId != base?.parentGroupId && remote.parentGroupId == base?.parentGroupId -> local.parentGroupId
+        local.parentGroupId == base?.parentGroupId && remote.parentGroupId != base?.parentGroupId -> remote.parentGroupId
+        else -> if (remote.times.lastModificationTime.isAfter(local.times.lastModificationTime)) remote.parentGroupId else local.parentGroupId
     }
 
     private fun isFieldDifferent(a: ProtectedString?, b: ProtectedString?): Boolean {

@@ -180,6 +180,12 @@ object PasskeyKeyText {
         return -1
     }
 
+    /** 需剔除的空白码位（LF / CR / 空格 / TAB，语义对齐 RFC 7468 §3 的 PEM 空白字符集） */
+    private const val CHAR_LF = 0x0A
+    private const val CHAR_CR = 0x0D
+    private const val CHAR_SPACE = 0x20
+    private const val CHAR_TAB = 0x09
+
     /** 剔除 `[from, to)` 区间内的全部空白字节（换行 / 回车 / 空格 / TAB） */
     private fun stripWhitespace(bytes: ByteArray, from: Int, to: Int): ByteArray {
         val start = from.coerceAtLeast(0)
@@ -189,7 +195,7 @@ object PasskeyKeyText {
         var n = 0
         for (i in start until end) {
             val b = bytes[i].toInt() and 0xFF
-            if (b == 0x0A || b == 0x0D || b == 0x20 || b == 0x09) continue
+            if (b == CHAR_LF || b == CHAR_CR || b == CHAR_SPACE || b == CHAR_TAB) continue
             out[n++] = bytes[i]
         }
         return if (n == out.size) out else out.copyOf(n)

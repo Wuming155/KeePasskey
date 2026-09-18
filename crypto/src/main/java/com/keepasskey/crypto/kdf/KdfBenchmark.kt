@@ -51,6 +51,18 @@ object KdfBenchmark {
     const val MIN_ARGON2_PARALLELISM: Int = 1
     const val MAX_ARGON2_PARALLELISM: Int = 4
 
+    /** 测速哑元密钥 / 盐长度（与实际凭据分量同长即可） */
+    private const val DUMMY_CREDENTIAL_BYTES = 32
+
+    /** 测速哑元填充字节：任意非零固定值，避免以全零输入测量 KDF（值不承载语义） */
+    private const val AES_DUMMY_KEY_FILL = 0x42
+    private const val AES_DUMMY_SEED_FILL = 0x24
+    private const val ARGON2_DUMMY_KEY_FILL = 0x55
+    private const val ARGON2_DUMMY_SALT_FILL = 0xAA
+
+    /** 纳秒 → 毫秒换算因子 */
+    private const val NANOS_PER_MILLI = 1_000_000L
+
     /**
      * 对 AES-KDF 执行基准测试并外推轮数
      *
@@ -120,8 +132,8 @@ object KdfBenchmark {
 
     private fun measureRealAesKdfMillis(rounds: Long): Long {
         val engine = AesKdfEngine()
-        val dummyKey = ByteArray(32) { 0x42.toByte() }
-        val dummySeed = ByteArray(32) { 0x24.toByte() }
+        val dummyKey = ByteArray(DUMMY_CREDENTIAL_BYTES) { AES_DUMMY_KEY_FILL.toByte() }
+        val dummySeed = ByteArray(DUMMY_CREDENTIAL_BYTES) { AES_DUMMY_SEED_FILL.toByte() }
         val params = KdfParameters.Aes(seed = dummySeed, rounds = rounds)
 
         val start = System.nanoTime()
@@ -133,13 +145,13 @@ object KdfBenchmark {
             Arrays.fill(dummySeed, 0.toByte())
         }
         val end = System.nanoTime()
-        return (end - start) / 1_000_000L
+        return (end - start) / NANOS_PER_MILLI
     }
 
     private fun measureRealArgon2Millis(memoryBytes: Long, parallelism: Int): Long {
         val engine = Argon2KdfEngine(KdfParameters.Argon2.Argon2Type.ARGON2ID)
-        val dummyKey = ByteArray(32) { 0x55.toByte() }
-        val dummySalt = ByteArray(32) { 0xAA.toByte() }
+        val dummyKey = ByteArray(DUMMY_CREDENTIAL_BYTES) { ARGON2_DUMMY_KEY_FILL.toByte() }
+        val dummySalt = ByteArray(DUMMY_CREDENTIAL_BYTES) { ARGON2_DUMMY_SALT_FILL.toByte() }
         // 采样 1 轮以推导单轮耗时
         val sampleParams = KdfParameters.Argon2(
             type = KdfParameters.Argon2.Argon2Type.ARGON2ID,
@@ -158,6 +170,6 @@ object KdfBenchmark {
             Arrays.fill(dummySalt, 0.toByte())
         }
         val end = System.nanoTime()
-        return (end - start) / 1_000_000L
+        return (end - start) / NANOS_PER_MILLI
     }
 }

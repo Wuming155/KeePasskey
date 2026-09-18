@@ -94,45 +94,8 @@ class SyncEngine(
             return@withContext SyncOpenResult.CacheHitOffline(cached)
         }
 
-        val isCached = cache.isCached(remotePath)
-
-        if (!isCached) {
-            // 未缓存：从远端下载
-            val metaResult = provider.getMetadata(remotePath)
-            if (metaResult.isFailure) {
-                val ex = metaResult.exceptionOrNull()
-                if (ex is SyncException.FileNotFound) {
-                    throw ex
-                }
-                events.tryEmit(SyncCacheEvent.CouldntOpenFromRemote(remotePath, ex))
-                throw ex ?: SyncException.NetworkError("无法连接远端服务器")
-            }
-
-            val meta = metaResult.getOrThrow()
-            if (meta.isDirectory) {
-                // 路径误指远端目录（如 PROPFIND 命中 collection）时 GET 将返回 HTML 目录列表，
-                // 直接落库会产生脏缓存并污染三哈希基线，fail-fast 终止
-                throw SyncException.ProtocolError(400, "远程路径指向目录而非数据库文件: $remotePath")
-            }
-            val downloadResult = provider.download(remotePath)
-            val remoteBytes = downloadResult.getOrElse { ex ->
-                events.tryEmit(SyncCacheEvent.CouldntOpenFromRemote(remotePath, ex))
-                throw ex
-            }
-
-            // ISSUE-P2-18：若远端返回设备侧曾接受过的历史版本（回退/重放），拒绝写入缓存与基线
-            // ISSUE-P3-167：本份远端字节的摘要**只算一次**并全程贯穿——原实现分别在回滚裁决、
-            // 缓存写入与高水位记录三处各算一遍全库 SHA-256（ETag 缺失路径另有探测侧一次）。
-            val remoteDigest = SyncCache.sha256Hex(remoteBytes)
-            if (isReplay(remotePath, remoteDigest)) {
-                return@withContext SyncOpenResult.RollbackRejected(remoteBytes, meta.etag)
-            }
-
-            val hash = cache.writeCache(remotePath, remoteBytes, precomputedDigest = remoteDigest)
-            advanceBaseAndPersist(cache, remotePath, meta.etag, hash, remoteBytes)
-            recordAccepted(remotePath, remoteDigest)
-            events.tryEmit(SyncCacheEvent.LoadedFromRemoteInSync(remotePath))
-            return@withContext SyncOpenResult.RemoteSynced(remoteBytes, meta.etag)
+        if (!cache.isCached(remotePath)) {
+            return@withContext openUncached(remotePath)
         }
 
         // 已缓存。读取失败绝不以空字节数组继续——空数组一旦命中「本地赢自动上传」
@@ -145,29 +108,14 @@ class SyncEngine(
 
         val metaResult = provider.getMetadata(remotePath)
         if (metaResult.isFailure) {
-            val ex = metaResult.exceptionOrNull()
-            when (ex) {
-                is SyncException.FileNotFound -> {
-                    // 远端 404 且有缓存 -> 上传恢复远端
-                    val uploadResult = provider.uploadAtomic(remotePath, cachedBytes, expectedEtag = null)
-                    val newEtag = uploadResult.getOrThrow()
-                    advanceBaseAndPersist(cache, remotePath, newEtag, state?.localVersion, cachedBytes)
-                    recordAccepted(remotePath, cachedBytes)
-                    events.tryEmit(SyncCacheEvent.UpdatedRemoteFileOnLoad(remotePath))
-                    return@withContext SyncOpenResult.RemoteLostRestored(newEtag)
-                }
-                else -> {
-                    // 网络不可达或服务器错误，降级读取缓存
-                    events.tryEmit(SyncCacheEvent.CouldntOpenFromRemote(remotePath, ex))
-                    return@withContext SyncOpenResult.RemoteUnreachableUsingCache(cachedBytes)
-                }
-            }
+            return@withContext recoverFromMetaFailure(
+                remotePath, cachedBytes, state?.localVersion,
+                metaResult.exceptionOrNull()
+            )
         }
 
         val remoteMeta = metaResult.getOrThrow()
         val remoteEtag = cleanEtag(remoteMeta.etag)
-        val localHasChanges = cache.hasLocalChanges(remotePath)
-
         val remoteProbe = RemoteConsistencyProbe(
             provider = provider,
             remotePath = remotePath,
@@ -176,89 +124,176 @@ class SyncEngine(
             baseVersionHash = baseVersionHash
         )
 
-        if (!localHasChanges) {
-            // 本地无修改
-            if (remoteProbe.isRemoteUnchanged()) {
-                if (remoteProbe.downloaded != null) {
-                    // 内容哈希裁决命中：内容一致，仅刷新元数据，无需重复写缓存
-                    cache.updateBase(remotePath, baseVersionHash, remoteEtag.ifEmpty { baseEtag })
-                }
-                events.tryEmit(SyncCacheEvent.LoadedFromRemoteInSync(remotePath))
-                SyncOpenResult.RemoteSynced(cachedBytes, remoteEtag.ifEmpty { baseEtag })
-            } else {
-                // 远端有更新，拉取刷新
-                val remoteBytes = remoteProbe.remoteBytes()
-                // ISSUE-P2-18：重放的历史版本拒绝落地
-                if (isReplay(remotePath, remoteBytes)) {
-                    return@withContext SyncOpenResult.RollbackRejected(remoteBytes, remoteEtag)
-                }
-                val newHash = cache.writeCache(remotePath, remoteBytes)
-                cache.updateBase(remotePath, newHash, remoteEtag)
-                cache.writeBaseContent(remotePath, remoteBytes)
-                recordAccepted(remotePath, remoteBytes)
-                events.tryEmit(SyncCacheEvent.UpdatedCachedFileOnLoad(remotePath))
-                SyncOpenResult.RemoteSynced(remoteBytes, remoteEtag)
-            }
+        if (!cache.hasLocalChanges(remotePath)) {
+            openCachedWithoutLocalChanges(remotePath, cachedBytes, baseEtag, baseVersionHash, remoteProbe, remoteEtag)
         } else {
-            // 本地有修改
-            if (overwriteRemoteWithoutPrecondition) {
-                // ISSUE-P3-03 43a：用户关闭「上传前比对云端版本」→ 不做远端一致性裁决、
-                // 不带 ETag 预条件，本地内容直接覆盖远端（最后写入者胜）。
-                // 缓存已保存本地内容，上传失败时本地修改仍安全保留在缓存中。
-                val forcedUpload = provider.uploadAtomic(remotePath, cachedBytes, expectedEtag = null)
-                if (forcedUpload.isSuccess) {
-                    val newEtag = forcedUpload.getOrThrow()
-                    advanceBaseAndPersist(cache, remotePath, newEtag, state?.localVersion, cachedBytes)
-                    recordAccepted(remotePath, cachedBytes)
-                    events.tryEmit(SyncCacheEvent.UpdatedRemoteFileOnLoad(remotePath))
-                    return@withContext SyncOpenResult.LocalWinAutoUploaded(newEtag)
-                }
-                val forcedEx = forcedUpload.exceptionOrNull()
-                events.tryEmit(SyncCacheEvent.CouldntSaveToRemote(remotePath, forcedEx))
-                return@withContext SyncOpenResult.RemoteUnreachableUsingCache(cachedBytes)
-            }
-            if (remoteProbe.isRemoteUnchanged()) {
-                // 本地有修改且远端未变 -> 本地赢，自动上传并基线前移
-                val uploadResult = provider.uploadAtomic(remotePath, cachedBytes, expectedEtag = baseEtag.ifEmpty { null })
-                if (uploadResult.isSuccess) {
-                    val newEtag = uploadResult.getOrThrow()
-                    advanceBaseAndPersist(cache, remotePath, newEtag, state?.localVersion, cachedBytes)
-                    recordAccepted(remotePath, cachedBytes)
-                    events.tryEmit(SyncCacheEvent.UpdatedRemoteFileOnLoad(remotePath))
-                    SyncOpenResult.LocalWinAutoUploaded(newEtag)
-                } else {
-                    val uploadEx = uploadResult.exceptionOrNull()
-                    if (uploadEx is SyncException.ConflictError) {
-                        val remoteBytes = remoteProbe.remoteBytes()
-                        // ISSUE-P2-18：重放的历史版本不参与三方合并
-                        if (isReplay(remotePath, remoteBytes)) {
-                            return@withContext SyncOpenResult.RollbackRejected(
-                                remoteBytes,
-                                uploadEx.remoteEtag.ifEmpty { remoteEtag }
-                            )
-                        }
-                        events.tryEmit(SyncCacheEvent.OpenedFromLocalDueToConflict(remotePath))
-                        SyncOpenResult.ConflictDetected(
-                            cachedBytes,
-                            remoteBytes,
-                            uploadEx.remoteEtag.ifEmpty { remoteEtag }
-                        )
-                    } else {
-                        events.tryEmit(SyncCacheEvent.CouldntSaveToRemote(remotePath, uploadEx))
-                        SyncOpenResult.RemoteUnreachableUsingCache(cachedBytes)
-                    }
-                }
-            } else {
-                // 本地有修改且远端也有修改 -> 双方冲突
-                val remoteBytes = remoteProbe.remoteBytes()
-                // ISSUE-P2-18：重放的历史版本不参与三方合并
-                if (isReplay(remotePath, remoteBytes)) {
-                    return@withContext SyncOpenResult.RollbackRejected(remoteBytes, remoteEtag)
-                }
-                events.tryEmit(SyncCacheEvent.OpenedFromLocalDueToConflict(remotePath))
-                SyncOpenResult.ConflictDetected(cachedBytes, remoteBytes, remoteEtag)
-            }
+            openCachedWithLocalChanges(remotePath, cachedBytes, state?.localVersion, baseEtag, remoteProbe, remoteEtag)
         }
+    }
+
+    /** [openRemote] 分支 1：未缓存 -> 下载 + 写缓存 + 基线设为远端 ETag。 */
+    private suspend fun openUncached(remotePath: String): SyncOpenResult {
+        // 未缓存：从远端下载
+        val metaResult = provider.getMetadata(remotePath)
+        if (metaResult.isFailure) {
+            val ex = metaResult.exceptionOrNull()
+            if (ex is SyncException.FileNotFound) {
+                throw ex
+            }
+            events.tryEmit(SyncCacheEvent.CouldntOpenFromRemote(remotePath, ex))
+            throw ex ?: SyncException.NetworkError("无法连接远端服务器")
+        }
+
+        val meta = metaResult.getOrThrow()
+        if (meta.isDirectory) {
+            // 路径误指远端目录（如 PROPFIND 命中 collection）时 GET 将返回 HTML 目录列表，
+            // 直接落库会产生脏缓存并污染三哈希基线，fail-fast 终止
+            throw SyncException.ProtocolError(400, "远程路径指向目录而非数据库文件: $remotePath")
+        }
+        val downloadResult = provider.download(remotePath)
+        val remoteBytes = downloadResult.getOrElse { ex ->
+            events.tryEmit(SyncCacheEvent.CouldntOpenFromRemote(remotePath, ex))
+            throw ex
+        }
+
+        // ISSUE-P2-18：若远端返回设备侧曾接受过的历史版本（回退/重放），拒绝写入缓存与基线
+        // ISSUE-P3-167：本份远端字节的摘要**只算一次**并全程贯穿——原实现分别在回滚裁决、
+        // 缓存写入与高水位记录三处各算一遍全库 SHA-256（ETag 缺失路径另有探测侧一次）。
+        val remoteDigest = SyncCache.sha256Hex(remoteBytes)
+        if (isReplay(remotePath, remoteDigest)) {
+            return SyncOpenResult.RollbackRejected(remoteBytes, meta.etag)
+        }
+
+        val hash = cache.writeCache(remotePath, remoteBytes, precomputedDigest = remoteDigest)
+        advanceBaseAndPersist(cache, remotePath, meta.etag, hash, remoteBytes)
+        recordAccepted(remotePath, remoteDigest)
+        events.tryEmit(SyncCacheEvent.LoadedFromRemoteInSync(remotePath))
+        return SyncOpenResult.RemoteSynced(remoteBytes, meta.etag)
+    }
+
+    /**
+     * [openRemote] 元数据获取失败分支：远端 404 且有缓存 -> 上传恢复；
+     * 其余（网络不可达 / 服务器错误）-> 降级读取缓存。
+     */
+    private suspend fun recoverFromMetaFailure(
+        remotePath: String,
+        cachedBytes: ByteArray,
+        localVersion: String?,
+        ex: Throwable?
+    ): SyncOpenResult = when (ex) {
+        is SyncException.FileNotFound -> {
+            // 远端 404 且有缓存 -> 上传恢复远端
+            val uploadResult = provider.uploadAtomic(remotePath, cachedBytes, expectedEtag = null)
+            val newEtag = uploadResult.getOrThrow()
+            advanceBaseAndPersist(cache, remotePath, newEtag, localVersion, cachedBytes)
+            recordAccepted(remotePath, cachedBytes)
+            events.tryEmit(SyncCacheEvent.UpdatedRemoteFileOnLoad(remotePath))
+            SyncOpenResult.RemoteLostRestored(newEtag)
+        }
+        else -> {
+            // 网络不可达或服务器错误，降级读取缓存
+            events.tryEmit(SyncCacheEvent.CouldntOpenFromRemote(remotePath, ex))
+            SyncOpenResult.RemoteUnreachableUsingCache(cachedBytes)
+        }
+    }
+
+    /** [openRemote] 分支 2：已缓存且本地无修改 -> 远端无变直接返回 / 远端修改则下载刷新。 */
+    private suspend fun openCachedWithoutLocalChanges(
+        remotePath: String,
+        cachedBytes: ByteArray,
+        baseEtag: String,
+        baseVersionHash: String,
+        remoteProbe: RemoteConsistencyProbe,
+        remoteEtag: String
+    ): SyncOpenResult {
+        if (remoteProbe.isRemoteUnchanged()) {
+            if (remoteProbe.downloaded != null) {
+                // 内容哈希裁决命中：内容一致，仅刷新元数据，无需重复写缓存
+                cache.updateBase(remotePath, baseVersionHash, remoteEtag.ifEmpty { baseEtag })
+            }
+            events.tryEmit(SyncCacheEvent.LoadedFromRemoteInSync(remotePath))
+            return SyncOpenResult.RemoteSynced(cachedBytes, remoteEtag.ifEmpty { baseEtag })
+        }
+        // 远端有更新，拉取刷新
+        val remoteBytes = remoteProbe.remoteBytes()
+        // ISSUE-P2-18：重放的历史版本拒绝落地
+        if (isReplay(remotePath, remoteBytes)) {
+            return SyncOpenResult.RollbackRejected(remoteBytes, remoteEtag)
+        }
+        val newHash = cache.writeCache(remotePath, remoteBytes)
+        cache.updateBase(remotePath, newHash, remoteEtag)
+        cache.writeBaseContent(remotePath, remoteBytes)
+        recordAccepted(remotePath, remoteBytes)
+        events.tryEmit(SyncCacheEvent.UpdatedCachedFileOnLoad(remotePath))
+        return SyncOpenResult.RemoteSynced(remoteBytes, remoteEtag)
+    }
+
+    /**
+     * [openRemote] 分支 3/4/5：已缓存且本地有修改 -> 远端未变则本地赢自动上传；
+     * 远端已变（或强覆盖开关开启、412 预条件失败）则按冲突/降级路径处置。
+     */
+    private suspend fun openCachedWithLocalChanges(
+        remotePath: String,
+        cachedBytes: ByteArray,
+        localVersion: String?,
+        baseEtag: String,
+        remoteProbe: RemoteConsistencyProbe,
+        remoteEtag: String
+    ): SyncOpenResult {
+        if (overwriteRemoteWithoutPrecondition) {
+            // ISSUE-P3-03 43a：用户关闭「上传前比对云端版本」→ 不做远端一致性裁决、
+            // 不带 ETag 预条件，本地内容直接覆盖远端（最后写入者胜）。
+            // 缓存已保存本地内容，上传失败时本地修改仍安全保留在缓存中。
+            val forcedUpload = provider.uploadAtomic(remotePath, cachedBytes, expectedEtag = null)
+            if (forcedUpload.isSuccess) {
+                val newEtag = forcedUpload.getOrThrow()
+                advanceBaseAndPersist(cache, remotePath, newEtag, localVersion, cachedBytes)
+                recordAccepted(remotePath, cachedBytes)
+                events.tryEmit(SyncCacheEvent.UpdatedRemoteFileOnLoad(remotePath))
+                return SyncOpenResult.LocalWinAutoUploaded(newEtag)
+            }
+            val forcedEx = forcedUpload.exceptionOrNull()
+            events.tryEmit(SyncCacheEvent.CouldntSaveToRemote(remotePath, forcedEx))
+            return SyncOpenResult.RemoteUnreachableUsingCache(cachedBytes)
+        }
+        if (!remoteProbe.isRemoteUnchanged()) {
+            // 本地有修改且远端也有修改 -> 双方冲突
+            val remoteBytes = remoteProbe.remoteBytes()
+            // ISSUE-P2-18：重放的历史版本不参与三方合并
+            if (isReplay(remotePath, remoteBytes)) {
+                return SyncOpenResult.RollbackRejected(remoteBytes, remoteEtag)
+            }
+            events.tryEmit(SyncCacheEvent.OpenedFromLocalDueToConflict(remotePath))
+            return SyncOpenResult.ConflictDetected(cachedBytes, remoteBytes, remoteEtag)
+        }
+        // 本地有修改且远端未变 -> 本地赢，自动上传并基线前移
+        val uploadResult = provider.uploadAtomic(remotePath, cachedBytes, expectedEtag = baseEtag.ifEmpty { null })
+        if (uploadResult.isSuccess) {
+            val newEtag = uploadResult.getOrThrow()
+            advanceBaseAndPersist(cache, remotePath, newEtag, localVersion, cachedBytes)
+            recordAccepted(remotePath, cachedBytes)
+            events.tryEmit(SyncCacheEvent.UpdatedRemoteFileOnLoad(remotePath))
+            return SyncOpenResult.LocalWinAutoUploaded(newEtag)
+        }
+        val uploadEx = uploadResult.exceptionOrNull()
+        if (uploadEx is SyncException.ConflictError) {
+            val remoteBytes = remoteProbe.remoteBytes()
+            // ISSUE-P2-18：重放的历史版本不参与三方合并
+            if (isReplay(remotePath, remoteBytes)) {
+                return SyncOpenResult.RollbackRejected(
+                    remoteBytes,
+                    uploadEx.remoteEtag.ifEmpty { remoteEtag }
+                )
+            }
+            events.tryEmit(SyncCacheEvent.OpenedFromLocalDueToConflict(remotePath))
+            return SyncOpenResult.ConflictDetected(
+                cachedBytes,
+                remoteBytes,
+                uploadEx.remoteEtag.ifEmpty { remoteEtag }
+            )
+        }
+        events.tryEmit(SyncCacheEvent.CouldntSaveToRemote(remotePath, uploadEx))
+        return SyncOpenResult.RemoteUnreachableUsingCache(cachedBytes)
     }
 
     /**

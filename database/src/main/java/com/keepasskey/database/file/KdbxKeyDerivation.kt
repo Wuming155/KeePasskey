@@ -16,6 +16,15 @@ internal object KdbxKeyDerivation {
     /** 主密钥派生时的种子缓冲长度（SHA-512 摘要长度） */
     private const val SEED_HASH_BUFFER_SIZE = 64
 
+    /** KDBX4 复合种子长度：MasterSeed (32B) ‖ TransformedKey (32B) ‖ 尾部选择子 (1B) */
+    private const val COMPOSITE_SEED_BYTES = 65
+
+    /** 复合种子内的定长分量长度：MasterSeed 与 TransformedKey 均为 SHA-256 摘要（32 字节） */
+    private const val KEY_COMPONENT_BYTES = 32
+
+    /** 官方 KDBX4 中把复合种子区分为 hmacKey 派生输入的尾部选择子（0x01） */
+    private const val HMAC_KEY_SELECTOR: Byte = 1
+
     /**
      * 派生用于数据加密的 cipherKey (32B) 与用于认证的 hmacKey (64B)。
      *
@@ -41,85 +50,107 @@ internal object KdbxKeyDerivation {
         keyFileData: ByteArray?,
         isLegacy: Boolean = false
     ): Pair<ByteArray, ByteArray> {
-        val hasPassword = passwordChars != null && passwordChars.isNotEmpty()
-        val hasKeyFile = keyFileData != null && keyFileData.isNotEmpty()
-
-        val compositeKey = when {
-            hasPassword && hasKeyFile -> {
-                // 密码 + 密钥文件：SHA-256(SHA-256(password) ‖ keyFileKey)
-                // ISSUE-P3-55：显式捕获 charsToUtf8 产出的中间字节副本并在用毕清零，
-                // 对齐同文件「仅密码」分支的既有写法（原实现未捕获 → 明文口令字节随 GC 驻留）
-                val passwordBytes = charsToUtf8(passwordChars)
-                val passwordHash = try {
-                    HashUtil.sha256(passwordBytes)
-                } finally {
-                    Arrays.fill(passwordBytes, 0.toByte())
-                }
-                try {
-                    // 按官方语义解析密钥文件（XML .keyx 取 <Data> / 裸 32 字节 /
-                    // 64 位 hex 文本 / 任意二进制整文件 SHA-256），
-                    // 原实现对 XML 密钥文件整文件哈希导致复合密钥错误（虚假开关整改）
-                    val keyFileKey = KdbxKeyFile.extractKey(keyFileData)
-                    try {
-                        HashUtil.sha256(passwordHash, keyFileKey)
-                    } finally {
-                        Arrays.fill(keyFileKey, 0.toByte())
-                    }
-                } finally {
-                    Arrays.fill(passwordHash, 0.toByte())
-                }
-            }
-            hasKeyFile -> {
-                // P1-10：仅密钥文件 —— 直接 SHA-256(keyFileKey)，不拼入空密码分量 SHA-256("")。
-                // 原实现恒拼入 SHA-256("")，官方仅密钥文件库 100% 派生错误密钥、报「主密码错误」
-                val keyFileKey = KdbxKeyFile.extractKey(keyFileData)
-                try {
-                    HashUtil.sha256(keyFileKey)
-                } finally {
-                    Arrays.fill(keyFileKey, 0.toByte())
-                }
-            }
-            else -> {
-                // 仅密码：SHA-256(SHA-256(password))。
-                // 密码与密钥文件均缺失时退化为 SHA-256(SHA-256(""))——本应用历史「空密码库」
-                // 语义（官方客户端无法创建此类库），保持既有空密码库读写兼容，
-                // 凭据校验由头部 HMAC 给出明确失败。
-                val passwordBytes = if (hasPassword) charsToUtf8(passwordChars) else ByteArray(0)
-                val passwordHash = HashUtil.sha256(passwordBytes)
-                Arrays.fill(passwordBytes, 0.toByte())
-                try {
-                    HashUtil.sha256(passwordHash)
-                } finally {
-                    Arrays.fill(passwordHash, 0.toByte())
-                }
-            }
-        }
+        val compositeKey = deriveCompositeKey(passwordChars, keyFileData)
 
         val kdfEngine = KdfFactory.getEngine(header.kdfParameters.kdfUuid)
         val transformedKey = kdfEngine.transform(compositeKey, header.kdfParameters)
         Arrays.fill(compositeKey, 0.toByte())
 
+        return deriveCipherAndHmacKeys(header, transformedKey, isLegacy)
+    }
+
+    /** 按**实际存在**的凭据分量分派复合密钥装配（P1-10 口径见 [deriveKeys] KDoc） */
+    private fun deriveCompositeKey(passwordChars: CharArray?, keyFileData: ByteArray?): ByteArray {
+        val hasPassword = passwordChars != null && passwordChars.isNotEmpty()
+        val hasKeyFile = keyFileData != null && keyFileData.isNotEmpty()
+        return when {
+            hasPassword && hasKeyFile -> compositeFromPasswordAndKeyFile(passwordChars, keyFileData)
+            hasKeyFile -> compositeFromKeyFile(keyFileData)
+            else -> compositeFromPassword(passwordChars)
+        }
+    }
+
+    /** 密码 + 密钥文件：SHA-256(SHA-256(password) ‖ keyFileKey) */
+    private fun compositeFromPasswordAndKeyFile(passwordChars: CharArray, keyFileData: ByteArray): ByteArray {
+        // ISSUE-P3-55：显式捕获 charsToUtf8 产出的中间字节副本并在用毕清零，
+        // 对齐同文件「仅密码」分支的既有写法（原实现未捕获 → 明文口令字节随 GC 驻留）
+        val passwordBytes = charsToUtf8(passwordChars)
+        val passwordHash = try {
+            HashUtil.sha256(passwordBytes)
+        } finally {
+            Arrays.fill(passwordBytes, 0.toByte())
+        }
+        return try {
+            // 按官方语义解析密钥文件（XML .keyx 取 <Data> / 裸 32 字节 /
+            // 64 位 hex 文本 / 任意二进制整文件 SHA-256），
+            // 原实现对 XML 密钥文件整文件哈希导致复合密钥错误（虚假开关整改）
+            val keyFileKey = KdbxKeyFile.extractKey(keyFileData)
+            try {
+                HashUtil.sha256(passwordHash, keyFileKey)
+            } finally {
+                Arrays.fill(keyFileKey, 0.toByte())
+            }
+        } finally {
+            Arrays.fill(passwordHash, 0.toByte())
+        }
+    }
+
+    /** 仅密钥文件：直接 SHA-256(keyFileKey)，不拼入空密码分量 SHA-256("") */
+    private fun compositeFromKeyFile(keyFileData: ByteArray): ByteArray {
+        // P1-10：原实现恒拼入 SHA-256("")，官方仅密钥文件库 100% 派生错误密钥、报「主密码错误」
+        val keyFileKey = KdbxKeyFile.extractKey(keyFileData)
+        try {
+            return HashUtil.sha256(keyFileKey)
+        } finally {
+            Arrays.fill(keyFileKey, 0.toByte())
+        }
+    }
+
+    /**
+     * 仅密码：SHA-256(SHA-256(password))。
+     * 密码与密钥文件均缺失时退化为 SHA-256(SHA-256(""))——本应用历史「空密码库」
+     * 语义（官方客户端无法创建此类库），保持既有空密码库读写兼容，
+     * 凭据校验由头部 HMAC 给出明确失败。
+     */
+    private fun compositeFromPassword(passwordChars: CharArray?): ByteArray {
+        val hasPassword = passwordChars != null && passwordChars.isNotEmpty()
+        val passwordBytes = if (hasPassword) charsToUtf8(passwordChars) else ByteArray(0)
+        val passwordHash = HashUtil.sha256(passwordBytes)
+        Arrays.fill(passwordBytes, 0.toByte())
+        try {
+            return HashUtil.sha256(passwordHash)
+        } finally {
+            Arrays.fill(passwordHash, 0.toByte())
+        }
+    }
+
+    /**
+     * 由 `masterSeed ‖ transformedKey` 组装两把密钥（官方公式与 isLegacy 历史兼容口径见
+     * [deriveKeys] KDoc）；[transformedKey] 用毕即清零。
+     */
+    private fun deriveCipherAndHmacKeys(
+        header: KdbxHeader,
+        transformedKey: ByteArray,
+        isLegacy: Boolean
+    ): Pair<ByteArray, ByteArray> {
         // 组装 65 字节复合种子：MasterSeed (32B) + TransformedKey (32B) + 1 (1B)
-        val cmpKey = ByteArray(65)
-        System.arraycopy(header.masterSeed, 0, cmpKey, 0, 32)
-        System.arraycopy(transformedKey, 0, cmpKey, 32, 32)
+        val cmpKey = ByteArray(COMPOSITE_SEED_BYTES)
+        System.arraycopy(header.masterSeed, 0, cmpKey, 0, KEY_COMPONENT_BYTES)
+        System.arraycopy(transformedKey, 0, cmpKey, KEY_COMPONENT_BYTES, KEY_COMPONENT_BYTES)
         Arrays.fill(transformedKey, 0.toByte())
 
-        // 官方 KDBX4 派生（对齐 KeePass 2.x / pykeepass / KeePassXC）：
-        // cipherKey  = SHA-256(masterSeed ‖ transformedKey)
-        // hmacKey64  = SHA-512(masterSeed ‖ transformedKey ‖ 0x01)
         // 历史 bug 回放：本应用曾把 cipherKey 误实现为 SHA-512(seed‖tk)[0..32)（无尾部常量），
         // 该错误公式保留为旧文件探针回退路径（isLegacy = true）
         val cipherKeyBytes = ByteArray(SEED_HASH_BUFFER_SIZE)
-        System.arraycopy(cmpKey, 0, cipherKeyBytes, 0, 64)
+        System.arraycopy(cmpKey, 0, cipherKeyBytes, 0, SEED_HASH_BUFFER_SIZE)
         val cipherKey = if (isLegacy) {
-            HashUtil.sha512(cipherKeyBytes).copyOfRange(0, 32)
+            HashUtil.sha512(cipherKeyBytes).copyOfRange(0, KEY_COMPONENT_BYTES)
         } else {
             HashUtil.sha256(cipherKeyBytes)
         }
         Arrays.fill(cipherKeyBytes, 0.toByte())
 
-        cmpKey[64] = 1.toByte()
+        cmpKey[SEED_HASH_BUFFER_SIZE] = HMAC_KEY_SELECTOR
         val hmacKey64 = HashUtil.sha512(cmpKey)
         Arrays.fill(cmpKey, 0.toByte())
 

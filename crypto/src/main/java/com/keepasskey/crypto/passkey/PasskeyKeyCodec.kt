@@ -144,22 +144,25 @@ internal object PasskeyKeyCodec {
 
     internal fun extractEcPoint(bytes: ByteArray): Pair<ByteArray, ByteArray> {
         return when {
-            bytes.size == 65 && bytes[0] == 0x04.toByte() -> {
-                val x = bytes.copyOfRange(1, 33)
-                val y = bytes.copyOfRange(33, 65)
+            bytes.size == UNCOMPRESSED_POINT_LENGTH && bytes[0] == UNCOMPRESSED_POINT_TAG -> {
+                val x = bytes.copyOfRange(COORDINATE_TAG_LENGTH, COORDINATE_TAG_LENGTH + COORDINATE_LENGTH)
+                val y = bytes.copyOfRange(COORDINATE_TAG_LENGTH + COORDINATE_LENGTH, UNCOMPRESSED_POINT_LENGTH)
                 Pair(x, y)
             }
-            bytes.size == 64 -> {
-                val x = bytes.copyOfRange(0, 32)
-                val y = bytes.copyOfRange(32, 64)
+            bytes.size == RAW_POINT_LENGTH -> {
+                val x = bytes.copyOfRange(0, COORDINATE_LENGTH)
+                val y = bytes.copyOfRange(COORDINATE_LENGTH, RAW_POINT_LENGTH)
                 Pair(x, y)
             }
             else -> {
                 // 尝试解析 X.509 SubjectPublicKeyInfo DER
                 val spki = SubjectPublicKeyInfo.getInstance(bytes)
                 val pointBytes = spki.publicKeyData.bytes
-                if (pointBytes.size == 65 && pointBytes[0] == 0x04.toByte()) {
-                    Pair(pointBytes.copyOfRange(1, 33), pointBytes.copyOfRange(33, 65))
+                if (pointBytes.size == UNCOMPRESSED_POINT_LENGTH && pointBytes[0] == UNCOMPRESSED_POINT_TAG) {
+                    Pair(
+                        pointBytes.copyOfRange(COORDINATE_TAG_LENGTH, COORDINATE_TAG_LENGTH + COORDINATE_LENGTH),
+                        pointBytes.copyOfRange(COORDINATE_TAG_LENGTH + COORDINATE_LENGTH, UNCOMPRESSED_POINT_LENGTH)
+                    )
                 } else {
                     throw CryptoException.InvalidKeyException("无法从公钥数据解析 EC 坐标点: 大小=${bytes.size}")
                 }
@@ -190,4 +193,19 @@ internal object PasskeyKeyCodec {
         }
         return Pair(rsaPub.modulus.toByteArray(), rsaPub.publicExponent.toByteArray())
     }
+
+/** 坐标分量长度（P-256 每分量 32 字节） */
+private const val COORDINATE_LENGTH = 32
+
+/** 未压缩点前缀标记字节长度（即 0x04 占 1 字节） */
+private const val COORDINATE_TAG_LENGTH = 1
+
+/** 未压缩 EC 点总长：tag(1) + X(32) + Y(32) */
+private const val UNCOMPRESSED_POINT_LENGTH = COORDINATE_TAG_LENGTH + COORDINATE_LENGTH * 2
+
+/** 裸 EC 点总长（无 tag）：X(32) + Y(32) */
+private const val RAW_POINT_LENGTH = COORDINATE_LENGTH * 2
+
+/** SEC 1 未压缩点的前缀标记 */
+private val UNCOMPRESSED_POINT_TAG: Byte = 0x04
 }

@@ -20,6 +20,7 @@ import com.keepasskey.sync.merge.ConflictStrategyPolicy
 import com.keepasskey.sync.merge.ConflictedEntryPair
 import com.keepasskey.sync.merge.KdbxDatabaseLite
 import com.keepasskey.sync.merge.KdbxMerger
+import com.keepasskey.sync.merge.MergeResult
 import com.keepasskey.sync.merge.SyncConflictStrategy
 import com.keepasskey.sync.model.cleanEtag
 import kotlinx.coroutines.Dispatchers
@@ -262,84 +263,137 @@ class SyncConflictController @Inject constructor(
                 return@withContext SyncOutcome.Error(strings.get(R.string.sync_error_decrypt_remote_conflict_failed))
             }
 
-        // F2 修复：base 快照必须通过三重可信检验——存在、可解析、且内容与本地字节不同
-        // （本地工作副本污染判定：KDBX4 随机 IV 使同一内容的两次序列化字节必然不同，
-        // 字节级 contentEquals 命中相同即证明 base 已被本地内容顶替）。
-        // 不可信时严禁以本地充当 base——那会把「本地新建」误判为「远端已删除且本地未修改」
-        // 而确认删除且不留墓碑，同时远端修改全胜；改为以空库充当 base，
-        // 三方合并退化为双方并集语义：单侧新建保留、同 UUID 条目字段级合并、
-        // 同字段分叉进入冲突清单交用户决策（宁多冲突不静默丢数据）。
+        val base = resolveTrustedBase(baseSnapshotBytes, localBytes)
+        val localLite = KdbxDatabaseLite(localDb.rootGroup, localDb.deletedObjects)
+        val remoteLite = KdbxDatabaseLite(remoteDb.rootGroup, remoteDb.deletedObjects)
+        val mergeResult = KdbxMerger.mergeDatabases(base.trustedLite, localLite, remoteLite)
+        val decisionConflicts = decisionConflictsOf(
+            strategy = strategy,
+            base = base,
+            local = localLite,
+            remote = remoteLite,
+            mergeResult = mergeResult
+        )
+
+        if (decisionConflicts.isNotEmpty()) {
+            beginPendingConflict(
+                syncEngine, remotePath, localDb, remoteDb, mergeResult, decisionConflicts, remoteEtag
+            )
+        } else {
+            autoMergeAndUpload(
+                syncEngine, remotePath, localDb, localDbOwned, remoteDb, base.trusted, mergeResult
+            )
+        }
+    }
+
+    /**
+     * F2 修复：base 快照的**三重可信检验**——存在、可解析、且内容与本地字节不同
+     * （本地工作副本污染判定：KDBX4 随机 IV 使同一内容的两次序列化字节必然不同，
+     * 字节级 contentEquals 命中相同即证明 base 已被本地内容顶替）。
+     *
+     * 不可信时严禁以本地充当 base——那会把「本地新建」误判为「远端已删除且本地未修改」
+     * 而确认删除且不留墓碑，同时远端修改全胜；改为以空库充当 base，
+     * 三方合并退化为双方并集语义：单侧新建保留、同 UUID 条目字段级合并、
+     * 同字段分叉进入冲突清单交用户决策（宁多冲突不静默丢数据）。
+     */
+    private suspend fun resolveTrustedBase(baseSnapshotBytes: ByteArray?, localBytes: ByteArray): BaseSnapshot {
         val parsedBase = baseSnapshotBytes?.let { codec.parseKdbxBytes(it) }
         val trustedBase = parsedBase?.takeIf { !baseSnapshotBytes.contentEquals(localBytes) }
         // ISSUE-P3-119：被判为「不可信 base」的解析产物随即被丢弃（baseSnapshotBytes 已被本地
         // 内容顶替），不再被任何存活对象引用 → 显式擦除。
         if (parsedBase != null && trustedBase == null) wipeDiscarded(parsedBase)
+        return BaseSnapshot(
+            trusted = trustedBase,
+            trustedLite = trustedBase?.let { KdbxDatabaseLite(it.rootGroup, it.deletedObjects) }
+                ?: KdbxDatabaseLite(KdbxGroup(name = ""), emptyList())
+        )
+    }
 
-        val trustedBaseLite = trustedBase?.let { KdbxDatabaseLite(it.rootGroup, it.deletedObjects) }
-        val baseLite = trustedBaseLite ?: KdbxDatabaseLite(KdbxGroup(name = ""), emptyList())
-        val localLite = KdbxDatabaseLite(localDb.rootGroup, localDb.deletedObjects)
-        val remoteLite = KdbxDatabaseLite(remoteDb.rootGroup, remoteDb.deletedObjects)
+    /** base 裁决结果：[trusted] 供失败路径的擦除判定，[trustedLite] 为合并底版（不可信时为空库） */
+    private data class BaseSnapshot(val trusted: KdbxDatabase?, val trustedLite: KdbxDatabaseLite)
 
-        val mergeResult = KdbxMerger.mergeDatabases(baseLite, localLite, remoteLite)
-
-        // ISSUE-P3-03 (43a)：PROMPT_USER（每次询问）把「双方各自修改过的条目」一并纳入决策清单，
-        // 而不是只问同字段分歧的条目；其余策略沿用合并引擎给出的冲突清单
-        val decisionConflicts = if (ConflictStrategyPolicy.dispositionOf(strategy) ==
-            ConflictDisposition.PromptUser
-        ) {
+    /**
+     * ISSUE-P3-03 (43a)：PROMPT_USER（每次询问）把「双方各自修改过的条目」一并纳入决策清单，
+     * 而不是只问同字段分歧的条目；其余策略沿用合并引擎给出的冲突清单。
+     */
+    private fun decisionConflictsOf(
+        strategy: SyncConflictStrategy,
+        base: BaseSnapshot,
+        local: KdbxDatabaseLite,
+        remote: KdbxDatabaseLite,
+        mergeResult: MergeResult
+    ): List<ConflictedEntryPair> =
+        if (ConflictStrategyPolicy.dispositionOf(strategy) == ConflictDisposition.PromptUser) {
             BothModifiedEntryCollector.collect(
-                trustedBase = trustedBaseLite,
-                local = localLite,
-                remote = remoteLite,
+                trustedBase = base.trustedLite.takeIf { base.trusted != null },
+                local = local,
+                remote = remote,
                 alreadyConflicted = mergeResult.conflicts
             )
         } else {
             mergeResult.conflicts
         }
 
-        if (decisionConflicts.isNotEmpty()) {
-            _conflictFlow.value = decisionConflicts
-            pendingRemoteEngine = syncEngine
-            pendingRemotePath = remotePath
-            pendingLocalDb = localDb
-            pendingRemoteDb = remoteDb
-            pendingMergedRoot = mergeResult.mergedRoot
-            pendingMergedTombstones = mergeResult.mergedDeletedObjects
-            pendingRemoteEtag = cleanEtag(remoteEtag)
-            SyncOutcome.ConflictNeedsUser(decisionConflicts)
-        } else {
-            // 无条目级冲突，自动合并
-            val mergedDb = localDb.copy(
-                rootGroup = mergeResult.mergedRoot,
-                deletedObjects = mergeResult.mergedDeletedObjects
-            )
-            val mergedBytes = codec.serializeLocalDatabase(mergedDb)
-                ?: run {
-                    // ISSUE-P3-119：序列化失败即整体放弃本次合并（mergedDb / 双方树均不被采用），
-                    // 三棵解析产物同批显式擦除（合并产物本身也在此丢弃，不存在共享引用者）。
-                    // ISSUE-P3-168：`localDb` 若来自调用方的内存快照则不属于本方法，跳过擦除
-                    if (localDbOwned) wipeDiscarded(localDb)
-                    wipeDiscarded(remoteDb)
-                    wipeDiscarded(trustedBase)
-                    return@withContext SyncOutcome.Error(strings.get(R.string.sync_error_serialize_merged_failed))
-                }
+    /** 有条目级分叉：留存本次合并底版与双方树，交用户决策（决策阶段由 pending 通道复用） */
+    private fun beginPendingConflict(
+        syncEngine: SyncEngine,
+        remotePath: String,
+        localDb: KdbxDatabase,
+        remoteDb: KdbxDatabase,
+        mergeResult: MergeResult,
+        decisionConflicts: List<ConflictedEntryPair>,
+        remoteEtag: String
+    ): SyncOutcome {
+        _conflictFlow.value = decisionConflicts
+        pendingRemoteEngine = syncEngine
+        pendingRemotePath = remotePath
+        pendingLocalDb = localDb
+        pendingRemoteDb = remoteDb
+        pendingMergedRoot = mergeResult.mergedRoot
+        pendingMergedTombstones = mergeResult.mergedDeletedObjects
+        pendingRemoteEtag = cleanEtag(remoteEtag)
+        return SyncOutcome.ConflictNeedsUser(decisionConflicts)
+    }
 
-            val uploadResult = syncEngine.markResolvedAndUpload(remotePath, mergedBytes)
-            if (uploadResult.isSuccess) {
-                databaseSession.updateDatabaseMeta { mergedDb }
-                val saveResult = databaseSession.save()
-                if (saveResult is KdbxResult.Failure) {
-                    SyncOutcome.Error(
-                        strings.get(R.string.sync_error_merged_upload_local_save_failed, saveResult.message)
-                    )
-                } else {
-                    SyncOutcome.MergedAndUploaded
-                }
-            } else {
-                SyncOutcome.Error(
-                    strings.get(R.string.sync_error_upload_merged_failed, uploadResult.exceptionOrNull()?.message)
-                )
-            }
+    /** 无条目级冲突：合并产物落库并上传远端 */
+    private suspend fun autoMergeAndUpload(
+        syncEngine: SyncEngine,
+        remotePath: String,
+        localDb: KdbxDatabase,
+        localDbOwned: Boolean,
+        remoteDb: KdbxDatabase,
+        trustedBase: KdbxDatabase?,
+        mergeResult: MergeResult
+    ): SyncOutcome {
+        val mergedDb = localDb.copy(
+            rootGroup = mergeResult.mergedRoot,
+            deletedObjects = mergeResult.mergedDeletedObjects
+        )
+        val mergedBytes = codec.serializeLocalDatabase(mergedDb)
+        if (mergedBytes == null) {
+            // ISSUE-P3-119：序列化失败即整体放弃本次合并（mergedDb / 双方树均不被采用），
+            // 三棵解析产物同批显式擦除（合并产物本身也在此丢弃，不存在共享引用者）。
+            // ISSUE-P3-168：`localDb` 若来自调用方的内存快照则不属于本方法，跳过擦除
+            if (localDbOwned) wipeDiscarded(localDb)
+            wipeDiscarded(remoteDb)
+            wipeDiscarded(trustedBase)
+            return SyncOutcome.Error(strings.get(R.string.sync_error_serialize_merged_failed))
+        }
+
+        val uploadResult = syncEngine.markResolvedAndUpload(remotePath, mergedBytes)
+        if (!uploadResult.isSuccess) {
+            return SyncOutcome.Error(
+                strings.get(R.string.sync_error_upload_merged_failed, uploadResult.exceptionOrNull()?.message)
+            )
+        }
+        databaseSession.updateDatabaseMeta { mergedDb }
+        val saveResult = databaseSession.save()
+        return if (saveResult is KdbxResult.Failure) {
+            SyncOutcome.Error(
+                strings.get(R.string.sync_error_merged_upload_local_save_failed, saveResult.message)
+            )
+        } else {
+            SyncOutcome.MergedAndUploaded
         }
     }
 

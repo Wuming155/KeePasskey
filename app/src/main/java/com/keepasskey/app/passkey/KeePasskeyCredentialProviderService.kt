@@ -2,7 +2,6 @@ package com.keepasskey.app.passkey
 
 import android.app.PendingIntent
 import android.content.Intent
-import android.graphics.drawable.Icon
 import android.os.Bundle
 import android.os.CancellationSignal
 import android.os.OutcomeReceiver
@@ -22,7 +21,6 @@ import androidx.credentials.provider.BeginGetCredentialResponse
 import androidx.credentials.provider.BeginGetPasswordOption
 import androidx.credentials.provider.BeginGetPublicKeyCredentialOption
 import androidx.credentials.provider.CallingAppInfo
-import androidx.credentials.provider.CreateEntry
 import androidx.credentials.provider.CredentialProviderService
 import androidx.credentials.provider.PasswordCredentialEntry
 import androidx.credentials.provider.ProviderClearCredentialStateRequest
@@ -40,7 +38,6 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
-import org.json.JSONObject
 import javax.inject.Inject
 
 /**
@@ -220,92 +217,21 @@ class KeePasskeyCredentialProviderService : CredentialProviderService() {
             return responseBuilder.build()
         }
 
-        val callingAppInfo = request.callingAppInfo
-        val callingPackage = callingAppInfo?.packageName.orEmpty()
-        val callingOrigin = extractOrigin(callingAppInfo)
         // ISSUE-P1-10：不记录调用包名 / origin（会暴露用户安装应用清单与注册站点）
+        val callingAppInfo = request.callingAppInfo
+        val callingOrigin = extractOrigin(callingAppInfo)
+        // ISSUE-P3-188：入口装配下沉同包协作对象，本函数只保留「门控 → 分派 → 收口」编排；
+        // 分派不命中任何已知请求类型时不追加条目（与拆分前的空 `when` 完全一致）
+        val createEntry = when (request) {
+            is BeginCreatePublicKeyCredentialRequest ->
+                CredentialCreateEntries.passkeyEntry(this, request, callingOrigin)
 
-        when (request) {
-            is BeginCreatePublicKeyCredentialRequest -> {
-                var rpId = ""
-                var userName = ""
-                var userDisplayName = ""
-                var challenge = ""
+            is BeginCreatePasswordCredentialRequest ->
+                CredentialCreateEntries.passwordEntry(this, callingAppInfo?.packageName.orEmpty(), callingOrigin)
 
-                try {
-                    val json = JSONObject(request.requestJson)
-                    val rpObj = json.optJSONObject("rp")
-                    rpId = rpObj?.optString("id").orEmpty()
-                    val userObj = json.optJSONObject("user")
-                    userName = userObj?.optString("name").orEmpty()
-                    userDisplayName = userObj?.optString("displayName").orEmpty()
-                    challenge = json.optString("challenge")
-                } catch (e: Exception) {
-                    AppLog.w(TAG, "解析 BeginCreatePublicKeyCredentialRequest JSON 失败", e)
-                }
-
-                if (rpId.isBlank()) {
-                    rpId = DomainMatcher.extractDomain(callingOrigin)
-                }
-
-                // Wave 12 授权收紧（对齐官方「rp.id 须为 origin 可注册后缀」）：
-                // 创建分支与断言分支同等 fail-closed——rp.id 不可信时拒绝呈现创建入口
-                if (!DomainMatcher.isRpIdTrustedForCreation(rpId, callingOrigin)) {
-                    // ISSUE-P1-10：日志不得携带 rpId 等敏感标识（会暴露用户注册的站点域）
-                    AppLog.w(TAG, "拒绝创建请求：rp.id 不可信（非调用方可注册后缀或为公共后缀）")
-                    return responseBuilder.build()
-                }
-
-                val intent = Intent(this, PasskeyCreateActivity::class.java).apply {
-                    putExtra(PasskeyCreateActivity.EXTRA_RP_ID, rpId)
-                    putExtra(PasskeyCreateActivity.EXTRA_USER_NAME, userName)
-                    putExtra(PasskeyCreateActivity.EXTRA_USER_DISPLAY_NAME, userDisplayName)
-                    putExtra(PasskeyCreateActivity.EXTRA_CHALLENGE, challenge)
-                    putExtra(PasskeyCreateActivity.EXTRA_ORIGIN, callingOrigin)
-                }
-
-                val pendingIntent = PendingIntent.getActivity(
-                    this,
-                    REQUEST_CODE_CREATE_PASSKEY,
-                    intent,
-                    // ISSUE-P1-01：必须 FLAG_MUTABLE，系统需注入 ProviderCreateCredentialRequest
-                    CredentialPendingIntents.ENTRY_FLAGS
-                )
-
-                val accountLabel = userName.ifBlank { getString(R.string.cred_create_entry_title) }
-                val createEntry = CreateEntry.Builder(accountLabel, pendingIntent)
-                    .setDescription(getString(R.string.cred_create_entry_subtitle))
-                    .setIcon(Icon.createWithResource(this, R.drawable.ic_launcher))
-                    .build()
-
-                responseBuilder.addCreateEntry(createEntry)
-                // ISSUE-P1-10：不记录 rpId / 账号标签（会暴露用户注册的站点域）
-                AppLog.i(TAG, "已向系统返回 Passkey CreateEntry")
-            }
-
-            is BeginCreatePasswordCredentialRequest -> {
-                val intent = Intent(this, PasswordSaveActivity::class.java).apply {
-                    putExtra(PasswordSaveActivity.EXTRA_PACKAGE_NAME, callingPackage)
-                    putExtra(PasswordSaveActivity.EXTRA_WEB_DOMAIN, callingOrigin)
-                }
-
-                val pendingIntent = PendingIntent.getActivity(
-                    this,
-                    REQUEST_CODE_CREATE_PASSWORD,
-                    intent,
-                    // ISSUE-P1-01：必须 FLAG_MUTABLE，系统需注入 ProviderCreateCredentialRequest
-                    CredentialPendingIntents.ENTRY_FLAGS
-                )
-
-                val createEntry = CreateEntry.Builder(getString(R.string.cred_create_entry_title), pendingIntent)
-                    .setDescription(getString(R.string.cred_create_entry_subtitle))
-                    .setIcon(Icon.createWithResource(this, R.drawable.ic_launcher))
-                    .build()
-
-                responseBuilder.addCreateEntry(createEntry)
-            }
+            else -> null
         }
-
+        createEntry?.let { responseBuilder.addCreateEntry(it) }
         return responseBuilder.build()
     }
 
@@ -375,7 +301,5 @@ class KeePasskeyCredentialProviderService : CredentialProviderService() {
         private const val REQUEST_CODE_UNLOCK = 100
         private const val REQUEST_CODE_ASSERT = 101
         private const val REQUEST_CODE_FILL = 102
-        private const val REQUEST_CODE_CREATE_PASSKEY = 103
-        private const val REQUEST_CODE_CREATE_PASSWORD = 104
     }
 }

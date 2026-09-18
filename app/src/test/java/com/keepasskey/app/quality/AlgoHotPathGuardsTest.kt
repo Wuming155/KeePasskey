@@ -458,13 +458,14 @@ class AlgoHotPathGuardsTest {
 
         val runner = stripped("app/src/main/java/com/keepasskey/app/sync/SyncCycleRunner.kt")
         assertEquals(
-            "两处冲突合并入口（快速提交 / openRemote）都必须传入内存树快照",
+            "两处冲突合并入口（快速提交 / openRemote）都必须传入内存树快照" +
+                "（ISSUE-P3-188：合并段下沉后经 RemoteSyncContext 取值，故允许 `ctx.` 前缀）",
             2,
-            Regex("localDbOverride = localDbSnapshot").findAll(runner).count()
+            Regex("localDbOverride = (ctx\\.)?localDbSnapshot").findAll(runner).count()
         )
         assertTrue(
             "快照必须取本周期起点的会话树（currentDb），而不是在合并内重读 flow（UI 写路径不取同步锁）",
-            runner.contains("localDbSnapshot = currentDb,")
+            Regex("localDbSnapshot = (ctx\\.)?currentDb,").containsMatchIn(runner)
         )
     }
 

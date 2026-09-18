@@ -56,7 +56,97 @@
 
 ---
 
-## P3 低危问题、特性接线与体验优化（1 项）
+## P3 低危问题、特性接线与体验优化（2 项）
+
+### ISSUE-P3-188 巨型类与魔法数字专项整改（工程规则 §单一职责 / §禁止魔法数字 违例收敛）
+
+- **核实时间点与方式**：2026-09-18，主控以 `wc -l` 全量扫描五模块（`app`/`core`/`crypto`/`database`/`sync`）
+  `src/main` 下全部 `.kt`；超长函数以**括号配平逐点实测**复核（启发式初筛 + 人工核实，已剔除把类体 / KDoc 误计为函数的假阳性）；
+  魔法数字面以 `grep -E '0x[0-9A-Fa-f]{2,}'` 排除常量声明行后按文件计数。
+- **违例清单（核实时刻快照，行号以实现为准）**：
+  1. **超 500 行文件（8 个，第一档）**：`EntryDetailViewModel`(564)、`EntryEditFormSections`(557)、
+     `SettingsViewModel`(544)、`DatabaseSession`(535)、`DatabaseSettingsScreen`(530)、`EntryDetailScreen`(529)、
+     `UnlockViewModel`(517)、`SyncCache`(507)；
+  2. **400~500 行文件（约 36 个，第二档）**：见扫描快照，头部为 `VaultListDialogs`(490)、
+     `RealVaultRepository`(489)、`VaultRepository`(478)、`AutofillConfirmActivity`(475)、`EntryEditScreen`(472)、
+     `RuntimeIntegrityDetector`(470)、`PasskeyAssertionActivity`(466) 等；
+  3. **超 50 行函数（第一档 ≥100 行）**：`SyncEngine.openRemote`(≈173)、`PasskeyAssertionActivity.onCreate`(≈153)、
+     `SyncCycleRunner.runSyncCycle`(≈130)、`KdbxEntryMerger.mergeConflictedEntry`(≈129)、
+     `VaultEntryWriteCoordinator.saveEntryInternal`(≈121)、`KeePasskeyAutofillService.processFillRequest`(≈120)、
+     `SyncConflictController.handleConflictMerge`(≈104)、`ExtendedSettingsStore.load`（≈89 行签名起，含 KDoc 记 131）、
+     `PasswordFillActivity.onCreate`(≈108)、`PasskeyCreateActivity.startCreation`(≈100)、
+     `KeePasskeyCredentialProviderService.buildBeginCreateResponse`(≈97)、`CredentialResponseAssembler.buildPasskeyEntries`(≈93)、
+     `InnerHeader.deserialize`、`KdbxKeyDerivation.deriveKeys`、`KdbxXmlMetaSerializer.serialize`、`VaultEntryMapper.mapKdbxEntryToUi`(≈112)、
+     `HealthCheckEngine.analyzeEntries`(≈106)、`BiometricEnrollmentCoordinator.requestBiometricEnrollment`(≈134) 等；
+  4. **内联十六进制字面量（排除合法形态后）**：`PasskeyCryptoEngine`(10)、`CborEncoder`(10)、
+     `UnlockPasskeyManager`(8)、`SyncEndpointGuard`(7)、`OtpEngine`(7)、`TotpKeyUriParser`(6)、`PasskeyKeyText`(6)、
+     `VariantDictionary`(5)、`KdbxCipherKeyResolver`(4)、`PasskeyKeyCodec`(4)、`KdfBenchmark`(4) 等；
+     **合法形态不整改**（登记于此以防重复排查）：`ThemeMode`/`Color.kt` 的 UI 色板即常量定义、
+     `LittleEndianUtil` 的位运算掩码、`DicewareWordList` 的数据表。
+- **整改纪律**：
+  1. 拆分**不得改变公开 API 与行为**（对齐 `DatabaseSession` 批次 D 先例：门面收敛、职责下沉同包协作类）；
+  2. 涉及 `crypto` / `database` 解析面的改动须过既有对拍回归（`.kdbx` 语料 / Parity 套件）；
+  3. 常量收敛**只挪定义不改值**，改值即属协议变更，须另行立项；
+  4. 每档闭环后 `.\gradlew.bat test --rerun-tasks --max-workers=1` 全绿方准入库；
+  5. **不得为凑行数把注释移出文件充当「瘦身」**——以职责拆分为准。
+- **验收标准**：第一档 8 文件全部 ≤400 行（或如实登记限界理由）；≥100 行函数全部拆分至 ≤50 行；
+  第 4 目清单中的协议 / 格式语义字面量收敛为命名常量；剩余第二档渐进消化，未消化部分在批次文档留清单。
+- **进度（2026-09-18 复核批次，`.\gradlew.bat test --rerun-tasks --max-workers=1` 全绿）**：
+  - **第一档 8 文件**：`EntryDetailViewModel` 564 → 435、`EntryEditFormSections` 557 → 438、
+    `UnlockViewModel` 517 → 368、`SyncCache` 507 → 382（文件层原语下沉 `SyncCacheFiles`）、
+    `EntryDetailScreen` 529 → 426（对话框接线下沉 `EntryDetailDialogHost`）；
+    `SettingsViewModel`(544) 与 `DatabaseSession`(535) 经复核为**纯门面**（成员全为一行委托），
+    按验收标准的「或如实登记限界理由」分支处理，理由 / 边界 / 解除条件已登记
+    [`architecture/已知工程限界.md`](architecture/已知工程限界.md) **§18**；
+    `DatabaseSettingsScreen`(530) **未消化**，列入下方剩余清单。
+  - **≥100 行函数（第 3 目）**：`SyncEngine.openRemote`、`SyncCycleRunner.runSyncCycle`、
+    `KdbxEntryMerger.mergeConflictedEntry`、`VaultEntryMapper.mapKdbxEntryToUi`、
+    `HealthCheckEngine.analyzeEntries`、`BiometricEnrollmentCoordinator.requestBiometricEnrollment`、
+    `VaultEntryWriteCoordinator.saveEntryInternal`、`KeePasskeyAutofillService.processFillRequest`、
+    `SyncConflictController.handleConflictMerge`、`AutofillDatasetBuilders.appendUnlockedDatasets`、
+    `KdbxXmlMetaSerializer.serialize`、`ExtendedSettingsStore.load`、`KdbxHeader.deserialize`、
+    `KdbxXmlParser.parse` 以及本批新完成的 `PasskeyAssertionActivity.onCreate`(153 → 编排 23 行)、
+    `PasswordFillActivity.onCreate`(108 → 33)、`PasskeyCreateActivity.startCreation`(101 → 12)、
+    `KeePasskeyCredentialProviderService.buildBeginCreateResponse`(97 → 26)、
+    `CredentialResponseAssembler.buildPasskeyEntries`(93 → 31)、`InnerHeader.deserialize`(130 → 编排 8 行)、
+    `KdbxKeyDerivation.deriveKeys`(90 → 10)、`VaultListProjection.buildVaultListUiState`(152 → 39)
+    全部降到 ≤50 行（**非 Compose 逻辑函数已清零**）。
+  - **核实方式修正（防重复排查）**：初筛的「括号配平」启发式会把**注释 / 字符串内含花括号**的短函数误计为超长函数。
+    本批逐一实读排除四处假阳性：`FieldReferenceEngine.containsReference`（`{REF:` 文案）、
+    `PasskeyData.usePrivateKeyBytes`（单行委托）、`SimpleJson.objectAt`（单行）、`PuxArchiveReader.parse`
+    （`ImportJson.parse`，实为短函数）；`PasskeyCreateActivity.buildRegistrationJson` 实测 65 行（非 113）。
+  - **第 4 目字面量**：清单内 11 文件的协议 / 格式语义字面量已全部收敛为命名常量；本批另新增
+    `WebAuthnJson`（`app/passkey/WebAuthnJsonKeys.kt`，收敛 passkey 面 5 文件共 **60+ 处** JSON 协议键名与
+    规范取值）、`INNER_RANDOM_STREAM_KEY_SIZE`(64)、`COMPOSITE_SEED_BYTES`(65) / `KEY_COMPONENT_BYTES`(32) /
+    `HMAC_KEY_SELECTOR`(0x01)、`END_OF_HEADER_MARKER`、写侧 `XML_TRUE` / `XML_FALSE` / `boolElement`、
+    `PasskeyKeyText` 的 PEM 空白码位。**全部只挪定义、未改任何取值**。
+- **剩余清单（第二档渐进消化，未消化部分如实留此）**：
+  1. **Compose 面的超长文件 / 超长函数**（结构性可拆，本批未做）：`DatabaseSettingsScreen`(530，
+     单个 `@Composable` 约 459 行，含 18 个局部状态 + SAF launcher + 对话框接线，可对齐
+     `EntryDetailDialogHost` / `VaultListDialogHost` 的「控制器 + 对话框宿主」先例下沉)、
+     `HealthCheckScreen`(326)、`ConflictResolutionScreen`(172)、`ChildDatabaseDialog`(170)、
+     `Argon2ParametersDialog`(168)、`UnlockStandardUnlockContent`(158)、`AboutSettingsScreen`(153)、
+     `EntryDetailTopBar`(151)、`EntryDetailScreen`(137)、`PackageBlocklistManageDialog`(131)、
+     `VaultListDialogHost`(130)、`GeneratorContent`(121)、`EntryDetailDialogHost`(119，本批新文件的接线体)、
+     `SyncStatusCard`(119)、`themeListSection`(118)、`BasicCredentialsCard`(118)、`VaultDatabaseCard`(117)、
+     `MasterKeyChangeDialog`(116)、`PrivilegedBrowserSettingsScreen`(115)、`ChildVaultEntryRowView`(113)、
+     `EntryEditCustomFieldsSection`(108)、`SafeAttachmentPreviewDialog`(107)、`KeePasskeyTheme`(104)、
+     以及两个 NavGraph（`keepasskeySettingsNavGraph` 252 / `keepasskeyNavGraph` 164）与 `KeePasskeyApp`(202)；
+  2. **本批新增的第二档待消化项**：`SyncCycleRunner` 431 → **515**（`runSyncCycle` 由 ≈173 行降到编排形态、
+     三段裁决下沉为同文件私有函数 + `RemoteSyncContext` 聚合体，接缝文档使文件变长）。
+     下一步：把 `handleRemoteSynced` / `handleConflictDetected` / `RemoteSyncContext` 移为同包
+     `internal` 扩展函数文件（`AutofillDatasetBuilders.kt` 先例），需把 `session` / `databaseSession` /
+     `strings` / `conflicts` 四个成员由 `private` 放宽为 `internal`；改动须同步更新
+     `AlgoHotPathGuardsTest` 的「两处合并入口传内存树」扫描文件清单；
+  3. **其余 400~500 行文件约 36 个**（原第 2 目清单，头部：`VaultListDialogs`、`RealVaultRepository`、
+     `VaultRepository`、`AutofillConfirmActivity`、`EntryEditScreen`、`RuntimeIntegrityDetector`）；
+  4. **接线守卫与结构耦合的长期代价**：本批有**三个测试类**的静态源码比对断言因函数搬家而失配
+     （`AutofillAuthResultWiringTest` 两条：确认入口基 Intent 定位串、候选 `setField` 续行缩进；
+     `AlgoHotPathGuardsTest` 两条：内存树快照实参经 `RemoteSyncContext` 取值；
+     `OneTapInteractionWiringTest` 一处：复制职责已下沉协作者，改为「门面须委托 + 协作者须真写剪贴板」双查），
+     已按「**只放宽定位串、不降低断言强度**」修正并入库。凡再做结构性搬家，**必须**同批改这些守卫，
+     且**不得**以删除守卫凑绿（`AGENTS.md` §3 测试资产纪律）。
+- **依据**：`.codebuddy/rules/engineering-rules.md` §高内聚低耦合 / §禁止魔法数字；本条目为 2026-09-18 用户命题「消除巨型类和魔法数字」。
 
 ### ISSUE-P3-187 JNI 零拷贝评估（原生加密内核的边界拷贝成本）
 

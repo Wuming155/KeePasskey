@@ -159,8 +159,10 @@ class AutofillAuthResultWiringTest {
             unlockEntry.contains("FLAG_ACTIVITY")
         )
         val confirmEntry = source
-            .substringAfter("val confirmIntent = Intent(this, AutofillConfirmActivity::class.java)")
-            .substringBefore("\n\n")
+            // ISSUE-P3-188：基 Intent 现作为 UnlockedDatasetContext 的具名实参构造，
+            // 故定位串不再要求 `val confirmIntent =` 前缀（与选择器 / 解锁两条入口同法收口）
+            .substringAfter("Intent(this, AutofillConfirmActivity::class.java)")
+            .substringBefore("PendingIntent.getActivity(")
         assertFalse(
             "确认入口基 Intent 不得携带任何 activity flag（ISSUE-P2-88：三条认证入口同一构造口径）",
             confirmEntry.contains("FLAG_ACTIVITY")
@@ -197,8 +199,10 @@ class AutofillAuthResultWiringTest {
             "候选数据集必须仍以 setField 写入真实用户名 / 口令——ISSUE-P3-42 的会话授权宽限分支" +
                 "（skipRepeatConfirmation）**不挂**认证 PendingIntent，其填充完全依赖数据集自带的值；" +
                 "摘掉会让「30 秒内免二次确认」直接填不出值",
-            source.contains("dsBuilder.setField(\n                usernameId,") &&
-                source.contains("dsBuilder.setField(\n                passwordId,")
+            // ISSUE-P3-188：数据集构造下沉 `buildCandidateDataset`，字段 id 经上下文对象传入，
+            // 故此处按「不依赖换行与缩进」的正则定位（断言强度不变：两条通道都须 setField 真实值）
+            Regex("""dsBuilder\.setField\(\s*(ctx\.)?usernameId""").containsMatchIn(source) &&
+                Regex("""dsBuilder\.setField\(\s*(ctx\.)?passwordId""").containsMatchIn(source)
         )
         assertTrue(
             "候选数据集必须仍以 Field.Builder().setValue 承载真实值（而非 null 占位）",

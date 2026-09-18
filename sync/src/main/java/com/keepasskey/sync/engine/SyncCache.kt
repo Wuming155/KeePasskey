@@ -6,12 +6,7 @@ import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.InputStream
-import java.nio.file.AtomicMoveNotSupportedException
-import java.nio.file.Files
-import java.nio.file.StandardCopyOption
-import java.nio.file.attribute.PosixFilePermission
 import java.security.MessageDigest
-import java.util.UUID
 
 /**
  * 缓存快照元数据状态。
@@ -46,11 +41,14 @@ data class SyncCacheState(
  */
 open class SyncCache(private val cacheDir: File) {
 
+    /** 文件层原语（唯一临时名 / fsync / 原子替换 / 权限收敛 / 有界重试删除） */
+    private val files = SyncCacheFiles(cacheDir)
+
     init {
         if (!cacheDir.exists()) {
             cacheDir.mkdirs()
         }
-        restrictToOwnerOnly(cacheDir, isDirectory = true)
+        files.restrictToOwnerOnly(cacheDir, isDirectory = true)
     }
 
     /**
@@ -112,7 +110,7 @@ open class SyncCache(private val cacheDir: File) {
         precomputedDigest: String? = null
     ): String {
         val cacheFile = getFile(remotePath, SUFFIX_CACHE)
-        val tmpFile = tmpFileFor(cacheFile)
+        val tmpFile = files.tmpFileFor(cacheFile)
 
         FileOutputStream(tmpFile).use { fos ->
             fos.write(data)
@@ -120,12 +118,12 @@ open class SyncCache(private val cacheDir: File) {
             fos.fd.sync()
         }
 
-        moveAtomically(tmpFile, cacheFile)
+        files.moveAtomically(tmpFile, cacheFile)
 
         val sha256 = precomputedDigest ?: sha256Hex(data)
         if (updateVersion) {
             val versionFile = getFile(remotePath, SUFFIX_VERSION)
-            writeStringSafely(versionFile, sha256)
+            files.writeStringSafely(versionFile, sha256)
         }
         return sha256
     }
@@ -141,7 +139,7 @@ open class SyncCache(private val cacheDir: File) {
      */
     open fun writeCacheStreaming(remotePath: String, input: InputStream, size: Long): String {
         val cacheFile = getFile(remotePath, SUFFIX_CACHE)
-        val tmpFile = tmpFileFor(cacheFile)
+        val tmpFile = files.tmpFileFor(cacheFile)
         val digest = MessageDigest.getInstance("SHA-256")
         FileOutputStream(tmpFile).use { fos ->
             val buffer = ByteArray(STREAM_BUFFER_BYTES)
@@ -157,11 +155,11 @@ open class SyncCache(private val cacheDir: File) {
             fos.flush()
             fos.fd.sync()
         }
-        restrictToOwnerOnly(tmpFile, isDirectory = false)
-        moveAtomically(tmpFile, cacheFile)
+        files.restrictToOwnerOnly(tmpFile, isDirectory = false)
+        files.moveAtomically(tmpFile, cacheFile)
 
         val sha256 = digest.digest().toHexString()
-        writeStringSafely(getFile(remotePath, SUFFIX_VERSION), sha256)
+        files.writeStringSafely(getFile(remotePath, SUFFIX_VERSION), sha256)
         return sha256
     }
 
@@ -197,13 +195,13 @@ open class SyncCache(private val cacheDir: File) {
      */
     fun writeBaseContent(remotePath: String, data: ByteArray) {
         val baseFile = getFile(remotePath, SUFFIX_BASE_CACHE)
-        val tmpFile = tmpFileFor(baseFile)
+        val tmpFile = files.tmpFileFor(baseFile)
         FileOutputStream(tmpFile).use { fos ->
             fos.write(data)
             fos.flush()
             fos.fd.sync()
         }
-        moveAtomically(tmpFile, baseFile)
+        files.moveAtomically(tmpFile, baseFile)
     }
 
     /**
@@ -228,13 +226,13 @@ open class SyncCache(private val cacheDir: File) {
             append(KEY_LAST_SYNC_MILLIS).append('=').append(System.currentTimeMillis()).append('\n')
         }
 
-        val baseTmp = tmpFileFor(baseFile)
-        val metaTmp = tmpFileFor(metaFile)
+        val baseTmp = files.tmpFileFor(baseFile)
+        val metaTmp = files.tmpFileFor(metaFile)
         try {
-            writeTmpSynced(baseTmp, baseVersion.trim().toByteArray(Charsets.UTF_8))
-            writeTmpSynced(metaTmp, metaContent.toByteArray(Charsets.UTF_8))
-            moveAtomically(baseTmp, baseFile)
-            moveAtomically(metaTmp, metaFile)
+            files.writeTmpSynced(baseTmp, baseVersion.trim().toByteArray(Charsets.UTF_8))
+            files.writeTmpSynced(metaTmp, metaContent.toByteArray(Charsets.UTF_8))
+            files.moveAtomically(baseTmp, baseFile)
+            files.moveAtomically(metaTmp, metaFile)
         } finally {
             // 任一步失败时清理未交付的 tmp（rename 成功后对应 tmp 已不存在，delete 幂等）
             baseTmp.delete()
@@ -302,7 +300,7 @@ open class SyncCache(private val cacheDir: File) {
             SUFFIX_BASE_VERSION,
             SUFFIX_BASE_CACHE,
             SUFFIX_META,
-            "$SUFFIX_CACHE$SUFFIX_TMP"
+            "$SUFFIX_CACHE${SyncCacheFiles.SUFFIX_TMP}"
         ).forEach { suffix ->
             val file = getFile(remotePath, suffix)
             if (file.exists()) {
@@ -311,7 +309,7 @@ open class SyncCache(private val cacheDir: File) {
                 deleteCacheChild(file)
             }
         }
-        deleteOrphanTmpFiles(remotePath)
+        files.deleteOrphanTmpFiles(remotePath)
     }
 
     /**
@@ -338,126 +336,15 @@ open class SyncCache(private val cacheDir: File) {
     }
 
     /**
-     * 删除单个缓存子项（ISSUE-P2-82）。
+     * 删除单个缓存子项（ISSUE-P2-82）：委托文件层原语 [SyncCacheFiles.deleteChild]。
      *
-     * **幂等契约**：`File.delete()` 对**已不存在**的目标返回 `false`，故「先列目录、再逐个删除」
-     * 的清理在**并发或连续两次**执行时会误判失败——后一次 `delete()` 因目标已被先者删除而返回
-     * `false`，调用方 [`com.keepasskey.app.sync.SyncCacheEvictor`] 据此记录
-     * **「残留 0 项，锁定后密文可能仍可恢复」这一自相矛盾的 WARN**，并把 `false` 一路传回
-     * `MainApplication.purgeVolatileCachesBeforeExit()`（该入口的返回值被当作「两个清理面是否都成功」）。
-     * 故此处以「删除动作结束后目标是否仍存在」为准：**已不存在即视为成功**。
-     *
-     * 实测形态（2026-09-15）：`SyncCacheEvictorTest` 的 F-23 用例在 `session.lock()` 的观察者回调与
-     * 用例内显式 `evictAll()` 竞态时偶发红，失败信息同时出现 `INFO 已随会话终止销毁` 与
-     * `WARN 残留 0 项` 两条互相矛盾的日志——即本缺陷的可观测形态。
+     * 幂等契约与瞬时删除失败的有界重试（ISSUE-P3-108）见被委托函数 KDoc；
+     * 此处保留 internal 入口，供回归用例直接驱动「目录清单 + 逐个删除」的清理面。
      */
-    internal fun deleteCacheChild(child: File): Boolean {
-        if (!child.exists()) return true
-        var removed = deleteOnce(child)
-        // ISSUE-P3-108：平台层「句柄尚未释放」会**瞬时**让 delete() 返回 false
-        // （Windows 桌面调试环境与写入方刚结束时的固有延迟；Android 上同理但概率更低）。
-        // 有界重试把「稍后即可删除」的瞬时失败与「真的删不掉」区分开：
-        // 前者不再被当作清理失败上报（也不必因此放宽任何断言），后者仍如实返回 false。
-        var attempt = 0
-        while (!removed && child.exists() && attempt < DELETE_RETRIES) {
-            attempt++
-            Thread.sleep(DELETE_RETRY_GAP_MS)
-            removed = deleteOnce(child)
-        }
-        return removed || !child.exists()
-    }
+    internal fun deleteCacheChild(child: File): Boolean = files.deleteChild(child)
 
-    private fun deleteOnce(child: File): Boolean =
-        if (child.isDirectory) child.deleteRecursively() else child.delete()
-
-    /**
-     * 生成唯一临时文件路径。
-     * 固定名 tmp 在并发写同一 remotePath 时会互相覆盖，造成 A 的 rename 交付 B 的
-     * 内容（交叉污染）；对齐 Wave 9 WebDAV uploadAtomic 临时名唯一化的同类整改语义。
-     * 当前 SyncCoordinator 以 mutex 串行化同步周期，唯一名作为并发防御纵深兜底。
-     */
-    private fun tmpFileFor(targetFile: File): File =
-        File(cacheDir, "${targetFile.name}.${UUID.randomUUID()}$SUFFIX_TMP")
-
-    /**
-     * 通配清理本 remotePath 的全部残留 tmp 文件。
-     * tmp 名含随机成分后，固定名清单不再完备；以「缓存键前缀 + tmp 后缀」通配兜底，
-     * 防止进程崩溃残留的 tmp 文件累积泄漏磁盘。
-     */
-    private fun deleteOrphanTmpFiles(remotePath: String) {
-        val key = sha256Hex(remotePath.toByteArray(Charsets.UTF_8))
-        cacheDir.listFiles { file -> file.name.startsWith(key) && file.name.endsWith(SUFFIX_TMP) }
-            ?.forEach { it.delete() }
-    }
-
-    /**
-     * 原子替换移动：POSIX rename 对已存在目标执行原子替换（无窗口、无半写状态）；
-     * renameTo 失败的平台（如桌面 Windows 调试环境）回退 Files.move，
-     * 优先 ATOMIC_MOVE，不支持时降级 REPLACE_EXISTING，绝不做非原子 copyTo。
-     */
-    private fun moveAtomically(tmpFile: File, targetFile: File) {
-        if (tmpFile.renameTo(targetFile)) {
-            restrictToOwnerOnly(targetFile, isDirectory = false)
-            return
-        }
-        try {
-            Files.move(
-                tmpFile.toPath(), targetFile.toPath(),
-                StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING
-            )
-        } catch (_: AtomicMoveNotSupportedException) {
-            Files.move(tmpFile.toPath(), targetFile.toPath(), StandardCopyOption.REPLACE_EXISTING)
-        }
-        restrictToOwnerOnly(targetFile, isDirectory = false)
-    }
-
-    /**
-     * 收敛文件权限为「仅属主可访问」（ISSUE-P1-07 验收标准 2）。
-     *
-     * 缓存文件承载完整 KDBX 密文快照，即便位于应用私有目录也必须显式降权：
-     * 默认 umask 通常给出 0644，同 UID（`sharedUserId`、调试备份、root 场景）之外
-     * 的读取面应被彻底关闭。优先走 POSIX 精确置位（0600 / 0700）；
-     * 非 POSIX 文件系统（如 Windows 开发机 / FAT 分区）降级为 `java.io` 语义尽力而为。
-     */
-    private fun restrictToOwnerOnly(file: File, isDirectory: Boolean) {
-        runCatching {
-            Files.setPosixFilePermissions(
-                file.toPath(),
-                if (isDirectory) DIRECTORY_OWNER_ONLY else FILE_OWNER_ONLY
-            )
-        }.onFailure {
-            // 降级路径：仅属主可读可写；目录额外需要属主可执行（进入权限）
-            file.setReadable(true, true)
-            file.setWritable(true, true)
-            if (isDirectory) file.setExecutable(true, true) else file.setExecutable(false, false)
-        }
-    }
-
-    private fun getFile(remotePath: String, suffix: String): File {
-        val key = sha256Hex(remotePath.toByteArray(Charsets.UTF_8))
-        return File(cacheDir, "$key$suffix")
-    }
-
-    private fun writeStringSafely(targetFile: File, content: String) {
-        val tmpFile = tmpFileFor(targetFile)
-        try {
-            writeTmpSynced(tmpFile, content.toByteArray(Charsets.UTF_8))
-            moveAtomically(tmpFile, targetFile)
-        } finally {
-            tmpFile.delete()
-        }
-    }
-
-    /** 写入 tmp 文件并 fsync 落盘（不含 rename 交付步骤，供多文件合并原子写复用） */
-    private fun writeTmpSynced(tmpFile: File, bytes: ByteArray) {
-        FileOutputStream(tmpFile).use { fos ->
-            fos.write(bytes)
-            fos.flush()
-            fos.fd.sync()
-        }
-        // 密文自落盘第一刻起即为仅属主可见，绝不在窗口期内以默认 umask 权限暴露
-        restrictToOwnerOnly(tmpFile, isDirectory = false)
-    }
+    /** 定位缓存目录内的规范键文件（键名与后缀拼接口径见 [SyncCacheFiles.fileFor]） */
+    private fun getFile(remotePath: String, suffix: String): File = files.fileFor(remotePath, suffix)
 
     companion object {
         private const val SUFFIX_CACHE = ".cache"
@@ -465,11 +352,6 @@ open class SyncCache(private val cacheDir: File) {
         private const val SUFFIX_BASE_VERSION = ".baseversion"
         private const val SUFFIX_BASE_CACHE = ".basecache"
         private const val SUFFIX_META = ".meta"
-        private const val SUFFIX_TMP = ".tmp"
-
-        /** ISSUE-P3-108：瞬时删除失败的有界重试次数与间隔（见 [deleteCacheChild]） */
-        private const val DELETE_RETRIES = 3
-        private const val DELETE_RETRY_GAP_MS = 15L
 
         /** 流式搬运缓冲（64 KiB，兼顾吞吐与内存占用）。 */
         private const val STREAM_BUFFER_BYTES = 64 * 1024
@@ -483,13 +365,6 @@ open class SyncCache(private val cacheDir: File) {
          * 由 app 侧 [SyncCache] 使用方与缓存清理器共用，避免两处各写字面量而漂移。
          */
         const val CACHE_DIR_NAME = "sync"
-
-        private val FILE_OWNER_ONLY = setOf(
-            PosixFilePermission.OWNER_READ,
-            PosixFilePermission.OWNER_WRITE
-        )
-
-        private val DIRECTORY_OWNER_ONLY = FILE_OWNER_ONLY + PosixFilePermission.OWNER_EXECUTE
 
         /**
          * 判断文件名是否属**跨会话防回滚安全状态**（[SyncRollbackGuard.SUFFIX_STATE]）。

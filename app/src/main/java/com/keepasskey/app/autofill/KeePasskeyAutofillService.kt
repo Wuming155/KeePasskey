@@ -9,6 +9,7 @@ import android.service.autofill.FillResponse
 import android.service.autofill.SaveCallback
 import android.service.autofill.SaveRequest
 import android.view.autofill.AutofillId
+import android.view.inputmethod.InlineSuggestionsRequest
 import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.security.RuntimeIntegrityGate
@@ -119,63 +120,19 @@ class KeePasskeyAutofillService : AutofillService() {
             callback.onSuccess(null)
             return
         }
-
         val callingPkg = structure.activityComponent.packageName
-
-        // ISSUE-P2-08：完整性风险态禁用自动填充；TASK-44：黑名单命中 fail-closed——
-        // 两者均不下发数据集（含解锁引导与 SaveInfo），等价于「该应用从未注册过本填充服务」，
-        // 不降级已有填充语义也不返回错误。
-        val enforcement = runtimeIntegrityGate.awaitEnforcement()
-        when (AutofillAccessPolicy.rejectReason(enforcement, callingPkg, autofillBlocklistStore::isBlocked)) {
-            AutofillRejection.INTEGRITY_RISK -> {
-                // ISSUE-P1-10：日志不得携带调用包名等敏感标识
-                AppLog.i(TAG, "设备完整性风险，拒绝下发自动填充数据集")
-                callback.onSuccess(null)
-                return
-            }
-            AutofillRejection.BLOCKLISTED -> {
-                AppLog.i(TAG, "调用应用已列入自动填充黑名单，拒绝下发数据集")
-                callback.onSuccess(null)
-                return
-            }
-            null -> Unit
-        }
-
-        val scanned = AutofillStructureScanner.scan(structure, callingPkg)
-        val parsedNodes = scanned.viewNodes
-
-        val scanResult = AutofillFieldScanner.scan(
-            scanned.scanNodes,
-            respectImportantForAutofill = !settingsStore.isOverrideNoAutofillEnabled()
-        )
-        val usernameParsed = scanResult.usernameId?.toIntOrNull()?.let { parsedNodes.getOrNull(it) }
-        val passwordParsed = scanResult.passwordId?.toIntOrNull()?.let { parsedNodes.getOrNull(it) }
-
-        val scannedUsernameId: AutofillId? = usernameParsed?.autofillId
-        val scannedPasswordId: AutofillId? = passwordParsed?.autofillId
-
-        if (scannedUsernameId == null && scannedPasswordId == null) {
+        if (rejectsDatasetDelivery(callingPkg)) {
             callback.onSuccess(null)
             return
         }
 
-        // ISSUE-P3-43 ②：字段签名级屏蔽——判定先于「库锁定引导」与任何数据集构建，
-        // 因此被屏蔽的框连解锁引导都不会收到（更保守）。签名的域取表单**自报**的
-        // scanResult.webDomain（用户屏蔽的是他当时看到的那个表单），
-        // 与后续用于凭据匹配的「归属校验后 webDomain」是两个独立用途，不可互替。
-        val fieldDecision = AutofillFieldBlockPolicy.decide(
-            hasUsernameField = scannedUsernameId != null,
-            hasPasswordField = scannedPasswordId != null
-        ) { role ->
-            autofillFieldBlocklistStore.isBlocked(callingPkg, scanResult.webDomain, role)
-        }
-        if (fieldDecision.blocksEntireForm) {
-            AppLog.i(TAG, "本表单字段已被用户逐字段屏蔽，拒绝下发数据集")
+        val targets = resolveTargetFields(structure, callingPkg) ?: run {
             callback.onSuccess(null)
             return
         }
-        val usernameId: AutofillId? = scannedUsernameId.takeIf { fieldDecision.allowUsername }
-        val passwordId: AutofillId? = scannedPasswordId.takeIf { fieldDecision.allowPassword }
+        val usernameId = targets.usernameId
+        val passwordId = targets.passwordId
+        val scanResult = targets.scanResult
 
         val responseBuilder = FillResponse.Builder()
         // 内联建议通道（IME）：请求侧携带 InlineSuggestionsRequest 且声明 supportsInlineSuggestions
@@ -200,7 +157,97 @@ class KeePasskeyAutofillService : AutofillService() {
             return
         }
 
-        // 库已解锁：查找匹配凭据并追加候选数据集
+        deliverUnlockedResponse(
+            responseBuilder = responseBuilder,
+            callback = callback,
+            callingPkg = callingPkg,
+            scanResult = scanResult,
+            usernameId = usernameId,
+            passwordId = passwordId,
+            inlineRequest = inlineRequest
+        )
+    }
+
+    /**
+     * ISSUE-P2-08：完整性风险态禁用自动填充；TASK-44：黑名单命中 fail-closed——
+     * 两者均不下发数据集（含解锁引导与 SaveInfo），等价于「该应用从未注册过本填充服务」，
+     * 不降级已有填充语义也不返回错误。
+     *
+     * @return true = 本次请求不予下发（调用方据此 `onSuccess(null)`）
+     */
+    private suspend fun rejectsDatasetDelivery(callingPkg: String): Boolean =
+        when (
+            AutofillAccessPolicy.rejectReason(
+                runtimeIntegrityGate.awaitEnforcement(),
+                callingPkg,
+                autofillBlocklistStore::isBlocked
+            )
+        ) {
+            AutofillRejection.INTEGRITY_RISK -> {
+                // ISSUE-P1-10：日志不得携带调用包名等敏感标识
+                AppLog.i(TAG, "设备完整性风险，拒绝下发自动填充数据集")
+                true
+            }
+            AutofillRejection.BLOCKLISTED -> {
+                AppLog.i(TAG, "调用应用已列入自动填充黑名单，拒绝下发数据集")
+                true
+            }
+            null -> false
+        }
+
+    /** 表单目标框 + 字段级屏蔽后的可用 id；无可填充目标（或未通过屏蔽判定）时为 null */
+    private data class TargetFields(
+        val usernameId: AutofillId?,
+        val passwordId: AutofillId?,
+        val scanResult: ScanResult
+    )
+
+    private fun resolveTargetFields(structure: AssistStructure, callingPkg: String): TargetFields? {
+        val scanned = AutofillStructureScanner.scan(structure, callingPkg)
+        val parsedNodes = scanned.viewNodes
+
+        val scanResult = AutofillFieldScanner.scan(
+            scanned.scanNodes,
+            respectImportantForAutofill = !settingsStore.isOverrideNoAutofillEnabled()
+        )
+        val usernameParsed = scanResult.usernameId?.toIntOrNull()?.let { parsedNodes.getOrNull(it) }
+        val passwordParsed = scanResult.passwordId?.toIntOrNull()?.let { parsedNodes.getOrNull(it) }
+
+        val scannedUsernameId: AutofillId? = usernameParsed?.autofillId
+        val scannedPasswordId: AutofillId? = passwordParsed?.autofillId
+        if (scannedUsernameId == null && scannedPasswordId == null) return null
+
+        // ISSUE-P3-43 ②：字段签名级屏蔽——判定先于「库锁定引导」与任何数据集构建，
+        // 因此被屏蔽的框连解锁引导都不会收到（更保守）。签名的域取表单**自报**的
+        // scanResult.webDomain（用户屏蔽的是他当时看到的那个表单），
+        // 与后续用于凭据匹配的「归属校验后 webDomain」是两个独立用途，不可互替。
+        val fieldDecision = AutofillFieldBlockPolicy.decide(
+            hasUsernameField = scannedUsernameId != null,
+            hasPasswordField = scannedPasswordId != null
+        ) { role ->
+            autofillFieldBlocklistStore.isBlocked(callingPkg, scanResult.webDomain, role)
+        }
+        if (fieldDecision.blocksEntireForm) {
+            AppLog.i(TAG, "本表单字段已被用户逐字段屏蔽，拒绝下发数据集")
+            return null
+        }
+        return TargetFields(
+            usernameId = scannedUsernameId.takeIf { fieldDecision.allowUsername },
+            passwordId = scannedPasswordId.takeIf { fieldDecision.allowPassword },
+            scanResult = scanResult
+        )
+    }
+
+    /** 库已解锁：候选数据集 + 手动搜索兜底入口 + SaveInfo，一次装配合并后回给框架 */
+    private suspend fun deliverUnlockedResponse(
+        responseBuilder: FillResponse.Builder,
+        callback: FillCallback,
+        callingPkg: String,
+        scanResult: ScanResult,
+        usernameId: AutofillId?,
+        passwordId: AutofillId?,
+        inlineRequest: InlineSuggestionsRequest?
+    ) {
         appendUnlockedDatasets(
             responseBuilder = responseBuilder,
             callingPkg = callingPkg,
@@ -209,7 +256,6 @@ class KeePasskeyAutofillService : AutofillService() {
             passwordId = passwordId,
             inlineRequest = inlineRequest
         )
-
         // ISSUE-P3-40：手动搜索兜底入口
         buildPickerDataset(
             responseBuilder = responseBuilder,
@@ -218,14 +264,12 @@ class KeePasskeyAutofillService : AutofillService() {
             usernameId = usernameId,
             passwordId = passwordId
         )
-
         // 注册 SaveInfo 以便在用户提交时捕获新账密
         applySaveInfoIfNeeded(
             responseBuilder = responseBuilder,
             usernameId = usernameId,
             passwordId = passwordId
         )
-
         // ISSUE-P2-73 AC③：设备侧核对「认证完成后框架**重发** onFillRequest」的调试留痕
         // （与库锁定分支的留痕配对即为该结论的直接证据）；仅 debug 构建输出。
         AppLog.d(TAG, "onFillRequest 下发已解锁数据集（候选/选择器/保存信息）")

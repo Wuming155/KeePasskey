@@ -31,16 +31,16 @@ object KdbxXmlGroupSerializer {
         }
 
         KdbxXmlWriteUtil.serializeTimes(writer, group.times)
-        KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.IS_EXPANDED, if (group.isExpanded) "True" else "False")
+        KdbxXmlWriteUtil.boolElement(writer, KdbxConstants.Xml.IS_EXPANDED, group.isExpanded)
 
         if (group.defaultAutoTypeSequence.isNotEmpty()) {
             KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.DEFAULT_AUTO_TYPE_SEQUENCE, group.defaultAutoTypeSequence)
         }
         group.enableAutoType?.let {
-            KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.ENABLE_AUTO_TYPE, if (it) "True" else "False")
+            KdbxXmlWriteUtil.boolElement(writer, KdbxConstants.Xml.ENABLE_AUTO_TYPE, it)
         }
         group.enableSearching?.let {
-            KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.ENABLE_SEARCHING, if (it) "True" else "False")
+            KdbxXmlWriteUtil.boolElement(writer, KdbxConstants.Xml.ENABLE_SEARCHING, it)
         }
         group.lastTopVisibleEntry?.let {
             KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.LAST_TOP_VISIBLE_ENTRY, KdbxXmlValueUtil.encodeUuid(it))

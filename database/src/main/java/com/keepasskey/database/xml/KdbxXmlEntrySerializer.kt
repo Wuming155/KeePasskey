@@ -44,7 +44,7 @@ object KdbxXmlEntrySerializer {
         KdbxXmlWriteUtil.optionalTextElement(writer, KdbxConstants.Xml.BACKGROUND_COLOR, entry.backgroundColor)
         KdbxXmlWriteUtil.optionalTextElement(writer, KdbxConstants.Xml.OVERRIDE_URL, entry.overrideUrl)
         if (!entry.qualityCheck) {
-            KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.QUALITY_CHECK, "False")
+            KdbxXmlWriteUtil.boolElement(writer, KdbxConstants.Xml.QUALITY_CHECK, false)
         }
         entry.previousParentGroup?.let {
             KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.PREVIOUS_PARENT_GROUP, KdbxXmlValueUtil.encodeUuid(it))
@@ -244,7 +244,7 @@ object KdbxXmlEntrySerializer {
 
     private fun serializeAutoType(writer: KdbxXmlStreamWriter, autoType: KdbxAutoType) {
         writer.startElement(KdbxConstants.Xml.AUTO_TYPE)
-        KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.ENABLED, if (autoType.enabled) "True" else "False")
+        KdbxXmlWriteUtil.boolElement(writer, KdbxConstants.Xml.ENABLED, autoType.enabled)
         KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.DATA_TRANSFER_OBFUSCATION, autoType.dataTransferObfuscation.toString())
         if (autoType.defaultSequence.isNotEmpty()) {
             KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.DEFAULT_SEQUENCE, autoType.defaultSequence)

@@ -12,11 +12,18 @@ import java.io.OutputStream
 import java.security.SecureRandom
 
 /**
+ * 内层随机流密钥定长（KDBX 4 固定 64 字节；ChaCha20 语义下为 32 字节 key + 32 字节 nonce 占位）。
+ *
+ * ISSUE-P3-188：原三处 `ByteArray(64)` 内联字面量收敛至此，值与既有格式实现逐字一致。
+ */
+private const val INNER_RANDOM_STREAM_KEY_SIZE = 64
+
+/**
  * KDBX 4 内层 Header（解密后、GZip 解压前）
  */
 data class InnerHeader(
     val innerRandomStreamId: Int = KdbxConstants.InnerRandomStream.CHACHA20,
-    val innerRandomStreamKey: ByteArray = ByteArray(64),
+    val innerRandomStreamKey: ByteArray = ByteArray(INNER_RANDOM_STREAM_KEY_SIZE),
     val binaries: List<BinaryItem> = emptyList()
 ) {
     /**
@@ -249,7 +256,7 @@ data class InnerHeader(
         }
 
         fun createDefault(): InnerHeader {
-            val key = ByteArray(64)
+            val key = ByteArray(INNER_RANDOM_STREAM_KEY_SIZE)
             secureRandom.nextBytes(key)
             return InnerHeader(
                 innerRandomStreamId = KdbxConstants.InnerRandomStream.CHACHA20,
@@ -269,90 +276,124 @@ data class InnerHeader(
             binaryStore: BinaryStore? = null,
             spillThresholdBytes: Long = BinaryStorePolicy.DEFAULT_THRESHOLD_BYTES
         ): InnerHeader {
+            val reader = InnerHeaderReader(inputStream, binaryStore, spillThresholdBytes)
+            reader.readFields()
+            return reader.toHeader()
+        }
+
+        /**
+         * 内层 Header 的逐字段读取器（ISSUE-P3-188 自 [deserialize] 下沉）。
+         *
+         * 把原函数内的四个可变量（流算法 id / 流密钥 / 二进制池 / 池累计字节）收拢为实例状态，
+         * 使每类字段的守卫（长度上限、条目数与累计字节封顶、落盘分流）各自成函数；
+         * 判定口径、异常文案与读取时序与拆分前**逐字一致**。
+         */
+        private class InnerHeaderReader(
+            private val inputStream: InputStream,
+            private val binaryStore: BinaryStore?,
+            private val spillThresholdBytes: Long
+        ) {
             var streamId = KdbxConstants.InnerRandomStream.CHACHA20
-            var streamKey = ByteArray(64)
+                private set
+            var streamKey = ByteArray(INNER_RANDOM_STREAM_KEY_SIZE)
+                private set
             val binaries = mutableListOf<BinaryItem>()
-            // Wave 12 解析炸弹防线：二进制池条目数与累计字节数双封顶
-            var binaryPoolTotalBytes = 0L
 
-            while (true) {
-                val fieldIdByte = inputStream.read()
-                if (fieldIdByte < 0) throw KdbxCorruptFileException("意外到达内层 Header 末尾")
-                val fieldId = fieldIdByte.toByte()
+            /** Wave 12 解析炸弹防线：二进制池累计字节数封顶（条目数封顶见 [enforceBinaryPoolEntryLimit]） */
+            private var binaryPoolTotalBytes = 0L
 
-                val fieldLen = LittleEndianUtil.readInt(inputStream)
-                // P0-5：长度字段不直接驱动分配，负数（0xFFFFFFFF）或超限值按损坏文件拒绝
-                if (fieldLen < 0 || fieldLen > MAX_INNER_FIELD_BYTES) {
-                    throw KdbxCorruptFileException(
-                        "内层 Header 字段长度非法或超过安全上限: fieldId=$fieldIdByte, " +
-                                "length=$fieldLen（允许 0 ~ $MAX_INNER_FIELD_BYTES）"
-                    )
-                }
-
-                if (fieldId == KdbxConstants.InnerHeaderFieldId.END) {
-                    break
-                }
-
-                // 大附件字段：长度已知，直接流式落盘，不整份物化（ISSUE-P2-24）
-                if (fieldId == KdbxConstants.InnerHeaderFieldId.BINARY &&
-                    fieldLen > FLAGS_FIELD_BYTES.toInt()
-                ) {
-                    enforceBinaryPoolEntryLimit(binaries.size)
-                    val flag = readFlagByte(inputStream)
-                    val payloadLen = fieldLen - FLAGS_FIELD_BYTES.toInt()
-                    binaryPoolTotalBytes += payloadLen
-                    enforceBinaryPoolTotalLimit(binaryPoolTotalBytes)
-                    if (binaryStore != null &&
-                        BinaryStorePolicy.shouldSpill(payloadLen.toLong(), spillThresholdBytes)
-                    ) {
-                        val key = binaryStore.storeFromStream(inputStream, payloadLen.toLong())
-                        binaries.add(BinaryItem(flag, binaryStore, key, payloadLen.toLong()))
-                    } else {
-                        val data = LittleEndianUtil.readBytes(inputStream, payloadLen, MAX_INNER_FIELD_BYTES)
-                        binaries.add(BinaryItem(flag, data))
-                    }
-                    continue
-                }
-
-                val fieldData = LittleEndianUtil.readBytes(inputStream, fieldLen, MAX_INNER_FIELD_BYTES)
-
-                when (fieldId) {
-                    KdbxConstants.InnerHeaderFieldId.INNER_RANDOM_STREAM_ID -> {
-                        if (fieldData.size != INNER_RANDOM_STREAM_ID_FIELD_SIZE) {
-                            throw KdbxCorruptFileException(
-                                "InnerRandomStreamID 字段长度非法: ${fieldData.size}" +
-                                        "（期望 $INNER_RANDOM_STREAM_ID_FIELD_SIZE）"
-                            )
-                        }
-                        streamId = LittleEndianUtil.bytesToInt(fieldData)
-                    }
-                    KdbxConstants.InnerHeaderFieldId.INNER_RANDOM_STREAM_KEY -> {
-                        if (fieldData.size > MAX_INNER_RANDOM_STREAM_KEY_BYTES) {
-                            throw KdbxCorruptFileException(
-                                "InnerRandomStreamKey 字段长度非法或超过安全上限: ${fieldData.size}" +
-                                        "（允许 0 ~ $MAX_INNER_RANDOM_STREAM_KEY_BYTES）"
-                            )
-                        }
-                        streamKey = fieldData
-                    }
-                    KdbxConstants.InnerHeaderFieldId.BINARY -> {
-                        if (fieldData.isNotEmpty()) {
-                            enforceBinaryPoolEntryLimit(binaries.size)
-                            val flag = fieldData[0]
-                            val data = fieldData.copyOfRange(1, fieldData.size)
-                            binaryPoolTotalBytes += data.size
-                            enforceBinaryPoolTotalLimit(binaryPoolTotalBytes)
-                            binaries.add(BinaryItem(flag, data))
-                        }
-                    }
-                }
-            }
-
-            return InnerHeader(
+            fun toHeader(): InnerHeader = InnerHeader(
                 innerRandomStreamId = streamId,
                 innerRandomStreamKey = streamKey,
                 binaries = binaries
             )
+
+            fun readFields() {
+                while (true) {
+                    val fieldIdByte = inputStream.read()
+                    if (fieldIdByte < 0) throw KdbxCorruptFileException("意外到达内层 Header 末尾")
+                    val fieldId = fieldIdByte.toByte()
+
+                    val fieldLen = LittleEndianUtil.readInt(inputStream)
+                    // P0-5：长度字段不直接驱动分配，负数（0xFFFFFFFF）或超限值按损坏文件拒绝
+                    if (fieldLen < 0 || fieldLen > MAX_INNER_FIELD_BYTES) {
+                        throw KdbxCorruptFileException(
+                            "内层 Header 字段长度非法或超过安全上限: fieldId=$fieldIdByte, " +
+                                    "length=$fieldLen（允许 0 ~ $MAX_INNER_FIELD_BYTES）"
+                        )
+                    }
+
+                    if (fieldId == KdbxConstants.InnerHeaderFieldId.END) {
+                        break
+                    }
+
+                    // 大附件字段：长度已知，直接流式落盘，不整份物化（ISSUE-P2-24）
+                    if (!readBinaryFieldAsStream(fieldId, fieldLen)) {
+                        acceptField(fieldId, LittleEndianUtil.readBytes(inputStream, fieldLen, MAX_INNER_FIELD_BYTES))
+                    }
+                }
+            }
+
+            /** 命中「BINARY 且长度大于标志位」时流式消费该字段并返回 true，否则原样交回调用方 */
+            private fun readBinaryFieldAsStream(fieldId: Byte, fieldLen: Int): Boolean {
+                if (fieldId != KdbxConstants.InnerHeaderFieldId.BINARY ||
+                    fieldLen <= FLAGS_FIELD_BYTES.toInt()
+                ) return false
+
+                enforceBinaryPoolEntryLimit(binaries.size)
+                val flag = readFlagByte(inputStream)
+                val payloadLen = fieldLen - FLAGS_FIELD_BYTES.toInt()
+                binaryPoolTotalBytes += payloadLen
+                enforceBinaryPoolTotalLimit(binaryPoolTotalBytes)
+                val store = binaryStore
+                if (store != null &&
+                    BinaryStorePolicy.shouldSpill(payloadLen.toLong(), spillThresholdBytes)
+                ) {
+                    val key = store.storeFromStream(inputStream, payloadLen.toLong())
+                    binaries.add(BinaryItem(flag, store, key, payloadLen.toLong()))
+                } else {
+                    val data = LittleEndianUtil.readBytes(inputStream, payloadLen, MAX_INNER_FIELD_BYTES)
+                    binaries.add(BinaryItem(flag, data))
+                }
+                return true
+            }
+
+            private fun acceptField(fieldId: Byte, fieldData: ByteArray) {
+                when (fieldId) {
+                    KdbxConstants.InnerHeaderFieldId.INNER_RANDOM_STREAM_ID -> acceptStreamId(fieldData)
+                    KdbxConstants.InnerHeaderFieldId.INNER_RANDOM_STREAM_KEY -> acceptStreamKey(fieldData)
+                    KdbxConstants.InnerHeaderFieldId.BINARY -> if (fieldData.isNotEmpty()) acceptInlineBinary(fieldData)
+                }
+            }
+
+            private fun acceptStreamId(fieldData: ByteArray) {
+                if (fieldData.size != INNER_RANDOM_STREAM_ID_FIELD_SIZE) {
+                    throw KdbxCorruptFileException(
+                        "InnerRandomStreamID 字段长度非法: ${fieldData.size}" +
+                                "（期望 $INNER_RANDOM_STREAM_ID_FIELD_SIZE）"
+                    )
+                }
+                streamId = LittleEndianUtil.bytesToInt(fieldData)
+            }
+
+            private fun acceptStreamKey(fieldData: ByteArray) {
+                if (fieldData.size > MAX_INNER_RANDOM_STREAM_KEY_BYTES) {
+                    throw KdbxCorruptFileException(
+                        "InnerRandomStreamKey 字段长度非法或超过安全上限: ${fieldData.size}" +
+                                "（允许 0 ~ $MAX_INNER_RANDOM_STREAM_KEY_BYTES）"
+                    )
+                }
+                streamKey = fieldData
+            }
+
+            private fun acceptInlineBinary(fieldData: ByteArray) {
+                enforceBinaryPoolEntryLimit(binaries.size)
+                val flag = fieldData[0]
+                val data = fieldData.copyOfRange(1, fieldData.size)
+                binaryPoolTotalBytes += data.size
+                enforceBinaryPoolTotalLimit(binaryPoolTotalBytes)
+                binaries.add(BinaryItem(flag, data))
+            }
         }
 
         private fun enforceBinaryPoolEntryLimit(currentCount: Int) {

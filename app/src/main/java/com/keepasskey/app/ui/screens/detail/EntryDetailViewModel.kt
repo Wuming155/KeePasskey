@@ -7,7 +7,6 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.keepasskey.app.R
 import com.keepasskey.app.data.logger.DebugLogBuffer
-import com.keepasskey.app.data.repository.AutofillBlockState
 import com.keepasskey.app.data.repository.CustomIconAdmin
 import com.keepasskey.app.data.repository.SettingsRepository
 import com.keepasskey.app.data.repository.VaultRepository
@@ -131,6 +130,35 @@ class EntryDetailViewModel @Inject constructor(
     )
 
     private val totpTicker = EntryDetailTotpTicker(vaultRepository)
+
+    /** ISSUE-P3-188：复制 / 取码动作簇下沉至协作者，本类保留事件入口与状态持有。 */
+    private val copyCoordinator = EntryDetailCopyCoordinator(
+        vaultRepository = vaultRepository,
+        clipboardSecurityManager = clipboardSecurityManager,
+        scope = viewModelScope,
+        currentEntryId = { entryIdFlow.value },
+        isReadOnly = { uiState.value.isReadOnly },
+        entryTitle = { uiState.value.entry?.title.orEmpty() },
+        passwordCopyMessage = { uiState.value.passwordCopyMessage },
+        liveTotpCode = { uiState.value.liveTotpCode },
+        projectedTotpCode = { uiState.value.entry?.totpCode },
+        showMessage = { userMessageFlow.value = it }
+    )
+
+    /** ISSUE-P3-188：条目动作簇（克隆 / 删除 / 移动 / 图标 / 自动填充屏蔽）下沉至协作者。 */
+    private val entryActions = EntryDetailEntryActions(
+        vaultRepository = vaultRepository,
+        autofillBlocklistStore = autofillBlocklistStore,
+        customIconAdmin = customIconAdmin,
+        scope = viewModelScope,
+        currentEntryId = { entryIdFlow.value },
+        isReadOnly = { uiState.value.isReadOnly },
+        boundPackage = { uiState.value.autofillBoundPackage },
+        boundCustomIconId = { uiState.value.entry?.customIconId },
+        onEntrySwitched = { setEntryId(it) },
+        onEntryDeleted = { entryDeletedFlow.value = true },
+        showMessage = { userMessageFlow.value = it }
+    )
 
     private val revisionController = EntryDetailRevisionController(
         vaultRepository = vaultRepository,
@@ -274,102 +302,35 @@ class EntryDetailViewModel @Inject constructor(
     }
 
     /**
-     * 克隆当前条目（TASK-16）：全字段保真复制 + 新 UUID + 清历史，落库后
-     * 详情页就地切换至克隆体。失败如实上浮（H3 语义）。
+     * 克隆当前条目（TASK-16，委托 [EntryDetailEntryActions]）：全字段保真复制 + 新 UUID + 清历史，
+     * 落库后详情页就地切换至克隆体。
      */
     fun duplicateEntry() {
-        val entryId = entryIdFlow.value ?: return
-        viewModelScope.launch {
-            when (val result = vaultRepository.duplicateEntry(entryId)) {
-                is com.keepasskey.core.result.KdbxResult.Success -> {
-                    userMessageFlow.value = UiMessage(R.string.detail_duplicate_success)
-                    setEntryId(result.data)
-                }
-                is com.keepasskey.core.result.KdbxResult.Failure ->
-                    userMessageFlow.value = UiMessage(R.string.edit_save_failed, listOf(result.message))
-            }
-        }
+        entryActions.duplicateEntry()
     }
 
     /**
-     * TASK-44：切换「为本应用禁用自动填充」——写入/移出自动填充黑名单。
-     *
-     * 仅当条目 URL 携带 `android://<包名>` 绑定（即凭据确有明确归属应用）时可用；
-     * 未绑定应用的条目（如纯 Web 凭据）本入口不呈现。
-     * 结果经 [userMessageFlow] 如实告知用户（屏蔽 / 恢复），不做乐观谎报。
-     *
-     * ISSUE-P3-15：判定改用三态 [AutofillBlockState]。绑定包名缺失或非法（不可识别）时，
-     * **不执行任何写操作**（不调 add / remove），亦不产出「已屏蔽 / 已恢复」语义，
-     * 只如实提示「无法识别应用标识」——填充侧 fail-closed 判定不受本改动影响。
+     * TASK-44：切换「为本应用禁用自动填充」（委托 [EntryDetailEntryActions]）——
+     * 写入/移出自动填充黑名单；包名不可识别时不执行任何写操作并如实提示（ISSUE-P3-15）。
      */
     fun toggleAutofillBlockForApp() {
-        val packageName = uiState.value.autofillBoundPackage
-        if (packageName == null) {
-            showUnidentifiablePackageMessage()
-            return
-        }
-        when (autofillBlocklistStore.resolveBlockState(packageName)) {
-            AutofillBlockState.UnidentifiablePackage -> showUnidentifiablePackageMessage()
-            AutofillBlockState.Blocked -> {
-                autofillBlocklistStore.remove(packageName)
-                userMessageFlow.value = UiMessage(R.string.detail_autofill_unblocked, listOf(packageName))
-            }
-            AutofillBlockState.NotBlocked -> {
-                autofillBlocklistStore.add(packageName)
-                userMessageFlow.value = UiMessage(R.string.detail_autofill_blocked, listOf(packageName))
-            }
-        }
-    }
-
-    /** ISSUE-P3-15：不可识别包名的如实提示（不含任何「已屏蔽 / 已恢复」语义） */
-    private fun showUnidentifiablePackageMessage() {
-        userMessageFlow.value = UiMessage(R.string.autofill_block_unidentifiable_package)
+        entryActions.toggleAutofillBlockForApp()
     }
 
     /**
-     * ISSUE-P3-02（TASK-49）：删除当前条目绑定的库级自定义图标。
-     *
-     * 自定义图标是**库级共享资源**：删除会移除 KDBX Meta 图标池条目，并把全部引用该图标的
-     * 条目回退为默认图标，故 Screen 侧必须先经确认弹窗（[EntryDetailScreen] 的删除确认）；
-     * 只读会话、无绑定图标或缺少注入通道时为 no-op / 如实失败，绝不谎报成功。
+     * ISSUE-P3-02（TASK-49，委托 [EntryDetailEntryActions]）：删除当前条目绑定的库级自定义图标；
+     * 只读会话 / 无绑定图标 / 缺少注入通道时为 no-op 或如实失败。
      */
     fun deleteCustomIcon() {
-        val iconId = uiState.value.entry?.customIconId ?: return
-        if (uiState.value.isReadOnly) return
-        val admin = customIconAdmin
-        if (admin == null) {
-            userMessageFlow.value = UiMessage(R.string.vault_icon_delete_failed)
-            return
-        }
-        viewModelScope.launch {
-            when (val result = admin.deleteCustomIcon(iconId)) {
-                is com.keepasskey.core.result.KdbxResult.Success ->
-                    userMessageFlow.value = UiMessage(R.string.vault_icon_delete_done)
-                is com.keepasskey.core.result.KdbxResult.Failure ->
-                    userMessageFlow.value = UiMessage(R.string.vault_op_failed, listOf(result.message))
-            }
-        }
+        entryActions.deleteCustomIcon()
     }
 
     /**
-     * 复制受保护自定义字段（F2 整改）：按需解密后写入受保护剪贴板，
-     * 不再依赖条目投影中的明文（投影层受保护字段恒为空）。
+     * 复制受保护自定义字段（F2 整改，委托 [EntryDetailCopyCoordinator]）：
+     * 按需解密后写入受保护剪贴板，不再依赖条目投影中的明文（投影层受保护字段恒为空）。
      */
     fun copyCustomField(fieldId: String, fieldKey: String) {
-        val entryId = entryIdFlow.value ?: return
-        viewModelScope.launch {
-            // TASK-10 + ISSUE-P2-15：仓库读取走 CharArray 独占副本，并直通受保护剪贴板的
-            // CharArray 通道（不经中间 String），副本用毕清零
-            val chars = vaultRepository.getEntryProtectedFieldChars(entryId, fieldKey)
-            if (chars != null) {
-                try {
-                    clipboardSecurityManager?.copySensitiveChars(fieldKey, chars)
-                } finally {
-                    chars.fill('0')
-                }
-                userMessageFlow.value = UiMessage(R.string.detail_field_copied, listOf(fieldKey))
-            }
-        }
+        copyCoordinator.copyCustomField(fieldId, fieldKey)
     }
 
     /**
@@ -421,63 +382,26 @@ class EntryDetailViewModel @Inject constructor(
     }
 
     /**
-     * ISSUE-P3-48：删除当前条目（单条入口）。
-     *
-     * 语义由仓库回收站分流决定：条目不在回收站内 → 软删移入回收站（可还原）；
-     * 条目已在回收站内或回收站被禁用 → 物理删除并记录墓碑。
-     * 只读会话 / 缺少条目 id 时为 no-op；成功置一次性 [entryDeleted] 供 Screen 回退导航，
-     * 失败经仓库 [KdbxResult.Failure] 如实上浮（不谎报成功）。
+     * ISSUE-P3-48：删除当前条目（单条入口，委托 [EntryDetailEntryActions]）。
+     * 成功置一次性 [entryDeleted] 供 Screen 回退导航，失败如实上浮。
      */
     fun deleteEntry() {
-        val entryId = entryIdFlow.value ?: return
-        if (uiState.value.isReadOnly) return
-        viewModelScope.launch {
-            when (val result = vaultRepository.deleteEntry(entryId)) {
-                is com.keepasskey.core.result.KdbxResult.Success -> entryDeletedFlow.value = true
-                is com.keepasskey.core.result.KdbxResult.Failure ->
-                    userMessageFlow.value = UiMessage(R.string.vault_op_failed, listOf(result.message))
-            }
-        }
+        entryActions.deleteEntry()
     }
 
     /**
-     * ISSUE-P3-51：把当前条目移动到目标分组（null = 根目录）。
-     * 复用仓库批量移动通道（单元素集合）；只读会话 / 缺条目 id 为 no-op；
-     * 成功 / 失败经 [userMessageFlow] 如实告知。
+     * ISSUE-P3-51：把当前条目移动到目标分组（null = 根目录，委托 [EntryDetailEntryActions]）。
      */
     fun moveEntryToGroup(targetGroupId: String?) {
-        val entryId = entryIdFlow.value ?: return
-        if (uiState.value.isReadOnly) return
-        viewModelScope.launch {
-            when (val result = vaultRepository.batchMoveEntries(setOf(entryId), targetGroupId)) {
-                is com.keepasskey.core.result.KdbxResult.Success ->
-                    userMessageFlow.value = UiMessage(R.string.detail_move_success)
-                is com.keepasskey.core.result.KdbxResult.Failure ->
-                    userMessageFlow.value = UiMessage(R.string.vault_op_failed, listOf(result.message))
-            }
-        }
+        entryActions.moveEntryToGroup(targetGroupId)
     }
 
     /**
-     * ISSUE-P3-49：HOTP 取码——推进计数器（**先落库成功**）并把本次所出之码写入受保护剪贴板。
-     *
-     * 语义对齐 KeePassXC：只有计数器成功推进后才交付验证码；失败经 [userMessageFlow] 如实上浮，
-     * **绝不**产出「未推进」的码（否则同一计数器会被重复使用）。只读会话 / 缺条目 id 为 no-op。
+     * ISSUE-P3-49：HOTP 取码（委托 [EntryDetailCopyCoordinator]）——推进计数器（**先落库成功**）
+     * 并把本次所出之码写入受保护剪贴板；失败如实上浮，绝不产出「未推进」的码。
      */
     fun advanceHotp() {
-        val entryId = entryIdFlow.value ?: return
-        if (uiState.value.isReadOnly) return
-        viewModelScope.launch {
-            when (val result = vaultRepository.advanceEntryHotpCounter(entryId)) {
-                is com.keepasskey.core.result.KdbxResult.Success -> {
-                    val code = result.data.code
-                    clipboardSecurityManager?.copySensitiveText(uiState.value.entry?.title.orEmpty(), code)
-                    userMessageFlow.value = UiMessage(R.string.detail_hotp_copied, listOf(code))
-                }
-                is com.keepasskey.core.result.KdbxResult.Failure ->
-                    userMessageFlow.value = UiMessage(R.string.vault_op_failed, listOf(result.message))
-            }
-        }
+        copyCoordinator.advanceHotp()
     }
 
     fun showMessage(message: UiMessage) {
@@ -485,77 +409,23 @@ class EntryDetailViewModel @Inject constructor(
     }
 
     /**
-     * 复制密码：按需解密后写入受保护剪贴板（M1 整改：不再从条目投影取明文）。
+     * 复制密码（委托 [EntryDetailCopyCoordinator]）：按需解密后写入受保护剪贴板
+     * （M1 整改：不再从条目投影取明文）。
      */
     fun copyPassword(title: String) {
-        val entryId = entryIdFlow.value ?: return
-        viewModelScope.launch {
-            // TASK-17：复制前解析 {REF:...} 引用（密码可能指向其他条目的字段）。
-            // ISSUE-P2-15：先经 CharArray 借用通道读取；{REF:...} 引擎为 String 文本语义，
-            // 此处的 String 物化属引用解析边界，副本已即时清零
-            // ISSUE-P0-08：口令消费点声明 P 面（白名单放行受保护引用展开）
-            val raw = vaultRepository.getEntryPasswordChars(entryId).toDisplayString().orEmpty()
-            val password = vaultRepository.resolveFieldReferences(
-                entryId, raw,
-                com.keepasskey.database.fieldref.FieldReferenceEngine.RefField.PASSWORD
-            ) ?: raw
-            clipboardSecurityManager?.copySensitiveText(title, password)
-            userMessageFlow.value = uiState.value.passwordCopyMessage
-        }
+        copyCoordinator.copyPassword(title)
     }
 
     fun copyUsername(title: String, username: String) {
-        val entryId = entryIdFlow.value ?: return
-        viewModelScope.launch {
-            // TASK-17：用户名可能为 {REF:U@...} 引用，复制前解析
-            // ISSUE-P0-08：非口令消费点声明 U 面——UserName 中的 {REF:P@…} 掩码输出，
-            // 被引用条目的口令明文绝不写入剪贴板
-            val resolved = vaultRepository.resolveFieldReferences(
-                entryId, username,
-                com.keepasskey.database.fieldref.FieldReferenceEngine.RefField.USER_NAME
-            ) ?: username
-            // ISSUE-P1-25 AC①：UserName 含口令面引用（{REF:P@…} 或检索面为 P）时，
-            // 即便引擎已掩码输出，复制通道仍按敏感数据处理（EXTRA_IS_SENSITIVE + 调度自动擦除）
-            if (com.keepasskey.database.fieldref.FieldReferenceEngine
-                    .containsPasswordFaceReference(username)
-            ) {
-                clipboardSecurityManager?.copySensitiveText(title, resolved)
-            } else {
-                clipboardSecurityManager?.copyPlainText(title, resolved)
-            }
-            userMessageFlow.value = UiMessage(R.string.detail_username_copied_short)
-        }
+        copyCoordinator.copyUsername(title, username)
     }
 
     /**
-     * ISSUE-P3-184：TOTP 取码——把**当前有效验证码**写入受保护剪贴板。
-     *
-     * 修复前本入口不存在：详情页 TOTP 卡片的复制按钮只弹「已复制」提示而不写剪贴板
-     * （谎报成功，用户粘贴会贴出上一条目的内容）。本方法补齐该写入通道，
-     * 与 [copyPassword] 同口径（受保护剪贴板 + 调度自动擦除）。
-     *
-     * 与 HOTP 的分工（有意差异）：HOTP 之码由**持久化计数器**决定，「复制而不推进」会让同一
-     * 计数器被重复使用，故 HOTP 只有取下一个码（[advanceHotp]）而无复制入口；TOTP 之码由时间
-     * 决定、天然按周期失效，无此约束 ⇒ 只复制、不推进任何状态。
-     *
-     * 取值优先级与卡片显示同源（`liveTotpCode ?: entry.totpCode`），并优先走仓库按需通道
-     * （ISSUE-P2-90：命中周期缓存时不触碰会话）以取到**当拍**之码；全部取不到时**不谎报成功**。
-     *
-     * 只读会话不设门槛：本动作是**纯读**（与 [copyPassword] 一致），`isReadOnly` 约束的是编辑入口。
+     * ISSUE-P3-184：TOTP 取码（委托 [EntryDetailCopyCoordinator]）——把**当前有效验证码**
+     * 写入受保护剪贴板；全部取不到时不谎报成功。只读会话不设门槛（纯读）。
      */
     fun copyTotpCode() {
-        val entryId = entryIdFlow.value ?: return
-        viewModelScope.launch {
-            val code = vaultRepository.calculateEntryTotp(entryId)?.code?.takeIf { it.isNotBlank() }
-                ?: uiState.value.liveTotpCode?.takeIf { it.isNotBlank() }
-                ?: uiState.value.entry?.totpCode?.takeIf { it.isNotBlank() }
-            if (code == null) {
-                userMessageFlow.value = UiMessage(R.string.detail_totp_copy_failed)
-                return@launch
-            }
-            clipboardSecurityManager?.copySensitiveText(uiState.value.entry?.title.orEmpty(), code)
-            userMessageFlow.value = UiMessage(R.string.detail_totp_copied)
-        }
+        copyCoordinator.copyTotpCode()
     }
 
     fun clearUserMessage() {

@@ -40,19 +40,39 @@ data class EntryHealthIssue(
  */
 object HealthCheckEngine {
 
+    /** 强度评分满分（`crypto` 强度引擎的 0..4 分档上界） */
+    private const val MAX_STRENGTH_SCORE = 4
+
+    /**
+     * 密码重用索引（ISSUE-P3-166：哈希一次算成、两趟共用）。
+     *
+     * P1-1 整改：以 SHA-256 哈希值而非明文密码建立索引，绝不构建全库明文密码表。
+     */
+    private data class ReuseIndex(
+        /** SHA-256(密码) 十六进制 → 出现次数 */
+        val countByHash: Map<String, Int>,
+        /**
+         * 条目 id → 本趟已算出的哈希，供第二趟**复用**——原实现第二趟对同一条目重新
+         * `readUtf8()`（一次完整解密）并重算一遍 SHA-256，等于「同一条口令在一次扫描里
+         * 被解密 3 次、哈希 2 次」。
+         */
+        val hashByEntryId: Map<String, String>
+    )
+
     /**
      * 对数据库全部条目执行健康安全扫描
      */
     fun analyzeEntries(entries: List<KdbxEntry>): List<EntryHealthIssue> {
+        val index = buildReuseIndex(entries)
         val issues = mutableListOf<EntryHealthIssue>()
-        // P1-1 整改：使用 SHA-256 哈希值而非明文密码建立重用索引，绝不构建全库明文密码表
-        val passwordHashCountMap = mutableMapOf<String, Int>()
+        for (entry in entries) analyzeEntry(entry, index, issues)
+        return issues
+    }
 
-        // 统计密码重用频率（基于哈希，用毕显式清零明文字节）
-        // ISSUE-P3-166：同时按条目 id 留档本趟已算出的哈希，供第二趟**复用**——原实现第二趟对
-        // 同一条目重新 `readUtf8()`（一次完整解密）并重算一遍 SHA-256，
-        // 等于「同一条口令在一次扫描里被解密 3 次、哈希 2 次」。
-        val passwordHashByEntryId = mutableMapOf<String, String>()
+    /** 第一趟：统计密码重用频率（明文字节用毕显式清零） */
+    private fun buildReuseIndex(entries: List<KdbxEntry>): ReuseIndex {
+        val countByHash = mutableMapOf<String, Int>()
+        val hashByEntryId = mutableMapOf<String, String>()
         for (entry in entries) {
             val passProtected = entry.password
             if (passProtected != null && passProtected.length > 0) {
@@ -60,93 +80,94 @@ object HealthCheckEngine {
                 try {
                     if (passBytes.isNotEmpty()) {
                         val hashHex = com.keepasskey.crypto.hash.HashUtil.sha256(passBytes).toHexString()
-                        passwordHashCountMap[hashHex] = (passwordHashCountMap[hashHex] ?: 0) + 1
-                        passwordHashByEntryId[entry.id.toHexString()] = hashHex
+                        countByHash[hashHex] = (countByHash[hashHex] ?: 0) + 1
+                        hashByEntryId[entry.id.toHexString()] = hashHex
                     }
                 } finally {
                     java.util.Arrays.fill(passBytes, 0.toByte())
                 }
             }
         }
+        return ReuseIndex(countByHash, hashByEntryId)
+    }
 
-        for (entry in entries) {
-            val id = entry.id.toHexString()
-
-            // 密码时效性：条目声明了过期时间且已过期（文档承诺的 EXPIRED 风险等级真实落地）
-            if (entry.times.expires && entry.times.expiryTime.isBefore(Instant.now())) {
-                issues.add(
-                    EntryHealthIssue(
-                        entryId = id,
-                        title = entry.title,
-                        username = entry.userName,
-                        riskLevel = PasswordRiskLevel.EXPIRED,
-                        description = "该条目凭据已过期（${entry.times.expiryTime}），请更新密码或清除过期标记"
-                    )
+    /** 第二趟：逐条目产出「时效 / 空密码 / 弱口令 / 重用」四类问题 */
+    private fun analyzeEntry(
+        entry: KdbxEntry,
+        index: ReuseIndex,
+        issues: MutableList<EntryHealthIssue>
+    ) {
+        // 密码时效性：条目声明了过期时间且已过期（文档承诺的 EXPIRED 风险等级真实落地）
+        if (entry.times.expires && entry.times.expiryTime.isBefore(Instant.now())) {
+            issues.add(
+                issueOf(
+                    entry,
+                    PasswordRiskLevel.EXPIRED,
+                    "该条目凭据已过期（${entry.times.expiryTime}），请更新密码或清除过期标记"
                 )
-            }
-
-            val passProtected = entry.password
-            if (passProtected == null || passProtected.length == 0) {
-                issues.add(
-                    EntryHealthIssue(
-                        entryId = id,
-                        title = entry.title,
-                        username = entry.userName,
-                        riskLevel = PasswordRiskLevel.WEAK,
-                        description = "该条目未设置密码或密码为空"
-                    )
-                )
-                continue
-            }
-
-            // 检查弱口令与长度（单条临时读取并在 finally 中擦除）
-            val passChars = passProtected.readChars()
-            val passBytes = passProtected.readUtf8()
-            val passLength = passChars.size
-            var isWeak = false
-            var strengthScore = 0
-            // ISSUE-P3-166：直接复用第一趟已算出的哈希——两趟「取哈希」的前置条件（长度非 0 且
-            // 字节非空）逐字相同，故此处必然命中；原实现对同一份字节重算一遍 SHA-256
-            // （连同第一趟，同一条口令在一次扫描里被解密 3 次、哈希 2 次）。
-            val hashHex = passwordHashByEntryId[id].orEmpty()
-            try {
-                // ISSUE-P3-36：弱口令判定下沉至 crypto 强度引擎（原生优先，失败降级为字节级近似）。
-                // 该引擎只读 UTF-8 字节，不构造 String，符合敏感数据铁律。
-                val strength = PasswordStrengthEvaluator.evaluate(passBytes)
-                isWeak = strength.isWeak
-                strengthScore = strength.score
-            } finally {
-                java.util.Arrays.fill(passChars, '0')
-                java.util.Arrays.fill(passBytes, 0.toByte())
-            }
-
-            if (isWeak) {
-                issues.add(
-                    EntryHealthIssue(
-                        entryId = id,
-                        title = entry.title,
-                        username = entry.userName,
-                        riskLevel = PasswordRiskLevel.WEAK,
-                        description = "密码过弱（长度: ${passLength}，强度评分 ${strengthScore}/4，建议 ≥ 12 位且避免常见词与规律结构）"
-                    )
-                )
-            }
-
-            // 检查多处复用（按哈希查重）
-            val reuseCount = passwordHashCountMap[hashHex] ?: 0
-            if (reuseCount > 1) {
-                issues.add(
-                    EntryHealthIssue(
-                        entryId = id,
-                        title = entry.title,
-                        username = entry.userName,
-                        riskLevel = PasswordRiskLevel.REUSED,
-                        description = "密码在 $reuseCount 个不同条目中被重复使用"
-                    )
-                )
-            }
+            )
         }
 
-        return issues
+        val passProtected = entry.password
+        if (passProtected == null || passProtected.length == 0) {
+            issues.add(issueOf(entry, PasswordRiskLevel.WEAK, "该条目未设置密码或密码为空"))
+            return
+        }
+
+        // 检查弱口令与长度（单条临时读取并在 finally 中擦除）
+        val passChars = passProtected.readChars()
+        val passBytes = passProtected.readUtf8()
+        val passLength = passChars.size
+        var isWeak = false
+        var strengthScore = 0
+        try {
+            // ISSUE-P3-36：弱口令判定下沉至 crypto 强度引擎（原生优先，失败降级为字节级近似）。
+            // 该引擎只读 UTF-8 字节，不构造 String，符合敏感数据铁律。
+            val strength = PasswordStrengthEvaluator.evaluate(passBytes)
+            isWeak = strength.isWeak
+            strengthScore = strength.score
+        } finally {
+            java.util.Arrays.fill(passChars, '0')
+            java.util.Arrays.fill(passBytes, 0.toByte())
+        }
+
+        if (isWeak) {
+            issues.add(
+                issueOf(
+                    entry,
+                    PasswordRiskLevel.WEAK,
+                    "密码过弱（长度: $passLength，强度评分 $strengthScore/$MAX_STRENGTH_SCORE，" +
+                        "建议 ≥ 12 位且避免常见词与规律结构）"
+                )
+            )
+        }
+
+        // 检查多处复用（按哈希查重）。
+        // ISSUE-P3-166：直接复用第一趟已算出的哈希——两趟「取哈希」的前置条件（长度非 0 且
+        // 字节非空）逐字相同，故此处必然命中；原实现对同一份字节重算一遍 SHA-256。
+        val hashHex = index.hashByEntryId[entry.id.toHexString()].orEmpty()
+        val reuseCount = index.countByHash[hashHex] ?: 0
+        if (reuseCount > 1) {
+            issues.add(
+                issueOf(
+                    entry,
+                    PasswordRiskLevel.REUSED,
+                    "密码在 $reuseCount 个不同条目中被重复使用"
+                )
+            )
+        }
     }
+
+    /** 以条目自身标识 + 风险等级 + 描述装配问题项（四路共用，消除重复构造） */
+    private fun issueOf(
+        entry: KdbxEntry,
+        riskLevel: PasswordRiskLevel,
+        description: String
+    ): EntryHealthIssue = EntryHealthIssue(
+        entryId = entry.id.toHexString(),
+        title = entry.title,
+        username = entry.userName,
+        riskLevel = riskLevel,
+        description = description
+    )
 }

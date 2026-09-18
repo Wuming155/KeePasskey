@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -43,8 +42,6 @@ import com.keepasskey.app.ui.model.UiAttachment
 import com.keepasskey.app.ui.model.UiEntryRevision
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.model.resolveText
-import com.keepasskey.app.ui.screens.vault.VaultBatchMoveDialog
-import com.keepasskey.app.ui.theme.CapsuleShape
 
 /**
  * 有状态凭据详情页面（Route）
@@ -227,15 +224,9 @@ fun EntryDetailContent(
     modifier: Modifier = Modifier
 ) {
     val entry = uiState.entry
-    var revisionToRollback by remember { mutableStateOf<UiEntryRevision?>(null) }
-    var revisionToDiff by remember { mutableStateOf<UiEntryRevision?>(null) }
-    var attachmentToPreview by remember { mutableStateOf<UiAttachment?>(null) }
-    // ISSUE-P3-02：自定义图标删除二次确认（库级共享资源，防误删）
-    var showDeleteIconConfirm by remember { mutableStateOf(false) }
-    // ISSUE-P3-48：单条删除二次确认（移入回收站，防误删）
-    var showDeleteEntryConfirm by remember { mutableStateOf(false) }
-    // ISSUE-P3-51：单条移动到分组的分组选择器
-    var showMoveDialog by remember { mutableStateOf(false) }
+    // ISSUE-P3-188：六个二次确认 / 预览对话框的可见性与目标对象收敛到控制器，
+    // 由同包 [EntryDetailDialogHost] 统一渲染（对齐 VaultListDialogHost 先例）
+    val dialogController = rememberEntryDetailDialogController()
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -249,9 +240,9 @@ fun EntryDetailContent(
                 onDuplicateEntry = onDuplicateEntry,
                 onToggleAutofillBlock = onToggleAutofillBlock,
                 onEditClick = onEditClick,
-                onRequestMoveEntry = { showMoveDialog = true },
-                onRequestDeleteEntry = { showDeleteEntryConfirm = true },
-                onRequestDeleteCustomIcon = { showDeleteIconConfirm = true }
+                onRequestMoveEntry = { dialogController.showMoveDialog = true },
+                onRequestDeleteEntry = { dialogController.showDeleteEntryConfirm = true },
+                onRequestDeleteCustomIcon = { dialogController.showDeleteIconConfirm = true }
             )
         }
     ) { innerPadding ->
@@ -335,7 +326,7 @@ fun EntryDetailContent(
                     SectionTitle(textRes = R.string.detail_attachments_section)
                     AttachmentsCard(
                         entry = entry,
-                        onPreviewAttachment = { attachmentToPreview = it },
+                        onPreviewAttachment = { dialogController.attachmentToPreview = it },
                         onExportAttachment = onExportAttachment
                     )
                 }
@@ -345,8 +336,8 @@ fun EntryDetailContent(
                     SectionTitle(textRes = R.string.detail_history_section)
                     RevisionsCard(
                         entry = entry,
-                        onCompareRevision = { revisionToDiff = it },
-                        onRequestRollback = { revisionToRollback = it }
+                        onCompareRevision = { dialogController.revisionToDiff = it },
+                        onRequestRollback = { dialogController.revisionToRollback = it }
                     )
                 }
 
@@ -362,112 +353,18 @@ fun EntryDetailContent(
         }
     }
 
-    // ISSUE-P3-02：自定义图标删除确认（库级共享资源，确认后才上行删除）
-    if (showDeleteIconConfirm) {
-        DeleteCustomIconDialog(
-            onConfirm = {
-                showDeleteIconConfirm = false
-                onDeleteCustomIcon()
-            },
-            onDismiss = { showDeleteIconConfirm = false }
-        )
-    }
-
-    // ISSUE-P3-48：单条删除确认（确认后才上行；语义为移入回收站 / 站内彻底删除）
-    if (showDeleteEntryConfirm) {
-        AlertDialog(
-            onDismissRequest = { showDeleteEntryConfirm = false },
-            title = { Text(stringResource(R.string.detail_delete_entry_title)) },
-            text = { Text(stringResource(R.string.detail_delete_entry_message)) },
-            confirmButton = {
-                TextButton(onClick = {
-                    showDeleteEntryConfirm = false
-                    onDeleteEntry()
-                }) {
-                    Text(
-                        text = stringResource(R.string.btn_delete),
-                        color = MaterialTheme.colorScheme.error
-                    )
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDeleteEntryConfirm = false }) {
-                    Text(stringResource(R.string.btn_cancel))
-                }
-            }
-        )
-    }
-
-    // ISSUE-P3-51：单条移动到分组选择器（回收站分组由对话框统一过滤）
-    if (showMoveDialog) {
-        VaultBatchMoveDialog(
-            allGroups = uiState.allGroups,
-            onDismiss = { showMoveDialog = false },
-            onMove = { targetGroupId ->
-                showMoveDialog = false
-                onMoveEntry(targetGroupId)
-            },
-            titleRes = R.string.detail_move_dialog_title
-        )
-    }
-
-    // 版本回滚确认对话框
-    revisionToRollback?.let { rev ->
-        AlertDialog(
-            onDismissRequest = { revisionToRollback = null },
-            title = { Text(stringResource(R.string.detail_history_rollback)) },
-            text = { Text(stringResource(R.string.detail_history_rollback_confirm)) },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        onRollbackRevision(rev)
-                        revisionToRollback = null
-                    },
-                    shape = CapsuleShape
-                ) {
-                    Text(stringResource(R.string.btn_restore))
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { revisionToRollback = null }) {
-                    Text(stringResource(R.string.btn_cancel))
-                }
-            }
-        )
-    }
-
-    // 版本历史差异对比对话框 (Visual Diff)
-    revisionToDiff?.let { rev ->
-        LaunchedEffect(rev.id) { onPrepareRevisionDiff(rev.id) }
-        entry?.let { current ->
-            RevisionVisualDiffDialog(
-                currentEntry = current,
-                revision = rev,
-                currentPassword = uiState.revealedPassword.orEmpty(),
-                revisionPassword = uiState.revealedRevisionPasswords[rev.id].orEmpty(),
-                onDismiss = {
-                    onClearRevisionDiff()
-                    revisionToDiff = null
-                },
-                onRollback = {
-                    onRollbackRevision(rev)
-                    revisionToDiff = null
-                }
-            )
-        }
-    }
-
-    // 安全附件预览对话框 (Safe Attachment Previewer)
-    attachmentToPreview?.let { att ->
-        SafeAttachmentPreviewDialog(
-            attachment = att,
-            onDismiss = { attachmentToPreview = null },
-            onExport = {
-                onExportAttachment(att)
-                attachmentToPreview = null
-            }
-        )
-    }
+    EntryDetailDialogHost(
+        controller = dialogController,
+        uiState = uiState,
+        entry = entry,
+        onDeleteCustomIcon = onDeleteCustomIcon,
+        onDeleteEntry = onDeleteEntry,
+        onMoveEntry = onMoveEntry,
+        onRollbackRevision = onRollbackRevision,
+        onPrepareRevisionDiff = onPrepareRevisionDiff,
+        onClearRevisionDiff = onClearRevisionDiff,
+        onExportAttachment = onExportAttachment
+    )
 }
 
 /**

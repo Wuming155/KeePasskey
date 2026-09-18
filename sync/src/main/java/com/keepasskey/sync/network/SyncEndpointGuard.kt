@@ -199,17 +199,35 @@ object SyncEndpointGuard {
     private fun isBlockedIpv6(b: ByteArray): Boolean {
         val b0 = b[0].toInt() and 0xFF
         // fc00::/7 唯一本地地址（ULA，IPv6 版 RFC1918）
-        if (b0 == 0xFC || b0 == 0xFD) return true
+        if (b0 == ULA_PREFIX_LOWER || b0 == ULA_PREFIX_UPPER) return true
         // ::ffff:0:0/96 IPv4-mapped：抽取内嵌 IPv4 递归判定，杜绝以映射地址绕过 IPv4 网段检查
-        val isMapped = (0..9).all { b[it].toInt() == 0 } &&
-            (b[10].toInt() and 0xFF) == 0xFF &&
-            (b[11].toInt() and 0xFF) == 0xFF
+        val isMapped = (0 until IPV4_MAPPED_MARKER_OFFSET).all { b[it].toInt() == 0 } &&
+            (b[IPV4_MAPPED_MARKER_OFFSET].toInt() and 0xFF) == IPV4_MAPPED_MARKER_OCTET &&
+            (b[IPV4_MAPPED_MARKER_OFFSET + 1].toInt() and 0xFF) == IPV4_MAPPED_MARKER_OCTET
         if (isMapped) {
-            val v4 = byteArrayOf(b[12], b[13], b[14], b[15])
+            val v4 = b.copyOfRange(IPV4_MAPPED_EMBEDDED_OFFSET, IPV6_ADDRESS_BYTES)
             return runCatching { isBlockedAddress(InetAddress.getByAddress(v4)) }.getOrDefault(true)
         }
         return false
     }
+
+    /** fc00::/7 唯一本地地址首字节下界 */
+    private const val ULA_PREFIX_LOWER = 0xFC
+
+    /** fc00::/7 唯一本地地址首字节上界 */
+    private const val ULA_PREFIX_UPPER = 0xFD
+
+    /** ::ffff:0:0/96 IPv4-mapped 的标记字节偏移（前 10 字节须全零） */
+    private const val IPV4_MAPPED_MARKER_OFFSET = 10
+
+    /** IPv4-mapped 标记字节的取值 */
+    private const val IPV4_MAPPED_MARKER_OCTET = 0xFF
+
+    /** 内嵌 IPv4 地址在 IPv6 字串中的起始偏移 */
+    private const val IPV4_MAPPED_EMBEDDED_OFFSET = 12
+
+    /** IPv6 地址字节数（亦作内嵌 IPv4 的截取上界） */
+    private const val IPV6_ADDRESS_BYTES = 16
 }
 
 /**

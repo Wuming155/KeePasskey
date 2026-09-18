@@ -110,98 +110,102 @@ internal class BiometricEnrollmentCoordinator(
             if (storage.hasEncryptedCredential(dbId)) return
         }
 
-        // ISSUE-P1-22：封印密钥供给 + 实际落位探测（先建钥后探测，见类 KDoc 次序约束）。
-        // 软件级 / 未知落位 → 显式降级确认闸门：未经确认不封印（fail-closed）。
+        // ISSUE-P1-22：封印密钥供给 + 实际落位探测（先建钥后探测，见类 KDoc 次序约束）
         val provision = (sealKeyProvisionOverride ?: defaultSealKeyProvision)(dbId)
         if (provision == null) {
             debugLog.warn(TAG, "生物识别凭据未登记：封印密钥不可用，跳过封印（fail-closed）")
             return
         }
-        var downgradedSeal = false
-        if (UnlockAuthPolicy.requiresDowngradeConsent(provision.securityLevel)) {
-            if (!settings.quickUnlockDowngradeAcknowledged) {
-                debugLog.warn(
-                    TAG,
-                    "封印密钥落位 ${provision.securityLevel}：请求用户显式降级确认（未确认不封印）"
-                )
-                when (awaitDowngradeConsent()) {
-                    null -> {
-                        debugLog.info(TAG, "降级确认超时未决，本次跳过封印（fail-closed）")
-                        return
-                    }
-                    false -> {
-                        // 用户拒绝软件级降级路径：关闭生物识别开关（用户唯一可用路径已拒绝，
-                        // 关闭可避免后续每次解锁重复弹窗），不封印、不留确认记录
-                        debugLog.info(TAG, "用户拒绝软件级快速解锁，关闭生物识别并不封印")
-                        settingsRepository.setBiometricEnabled(false)
-                        uiState.update { it.copy(isBiometricEnabled = false) }
-                        return
-                    }
-                    true -> {
-                        // 显式记录用户确认（AC②：建立封印前提示并留痕），后续解锁不再重复询问
-                        settingsRepository.setQuickUnlockDowngradeAcknowledged(true)
-                    }
-                }
-            }
-            downgradedSeal = true
-        }
+        // ISSUE-P1-22 降级确认闸门：未放行即中止，绝不静默封印
+        if (!acquireDowngradeConsent(provision, settings.quickUnlockDowngradeAcknowledged)) return
+        val downgradedSeal = UnlockAuthPolicy.requiresDowngradeConsent(provision.securityLevel)
 
         val storage = biometricCredentialStorage ?: return
         val authManager = biometricAuthManager ?: return
-
-        if (activity == null) {
+        // 缺少宿主 Activity 亦 fail-closed（仅留痕，不影响本次解锁）
+        val hostActivity = activity ?: run {
             debugLog.warn(TAG, "生物识别凭据未登记：缺少宿主 Activity，本次跳过（fail-closed，不影响解锁）")
             return
         }
+        if (!hasStrongBiometric(authManager, hostActivity)) return
 
-        // ISSUE-P1-08：封印闸门——设备须具备「硬件存在且已录入」的 Class 3 强生物识别，
-        // 无强生物（含未录入）时禁用封印（fail-closed），不降级到弱锁屏凭据路径
+        val encrypted = sealCompositePayload(authManager, hostActivity, provision, passwordChars) ?: return
+        persistSealedCredential(storage, dbId, encrypted, downgradedSeal)
+    }
+
+    /**
+     * ISSUE-P1-22：软件级降级确认闸门的裁决。
+     *
+     * @return true = 放行封印（硬件落位，或软件级降级已获用户确认并已留痕）；
+     *   false = 中止本次封印（超时未决 / 用户拒绝，均 fail-closed）
+     */
+    private suspend fun acquireDowngradeConsent(
+        provision: SealedKeyProvision,
+        acknowledged: Boolean
+    ): Boolean {
+        if (!UnlockAuthPolicy.requiresDowngradeConsent(provision.securityLevel)) return true
+        if (acknowledged) return true
+        debugLog.warn(
+            TAG,
+            "封印密钥落位 ${provision.securityLevel}：请求用户显式降级确认（未确认不封印）"
+        )
+        return when (awaitDowngradeConsent()) {
+            null -> {
+                debugLog.info(TAG, "降级确认超时未决，本次跳过封印（fail-closed）")
+                false
+            }
+            false -> {
+                // 用户拒绝软件级降级路径：关闭生物识别开关（用户唯一可用路径已拒绝，
+                // 关闭可避免后续每次解锁重复弹窗），不封印、不留确认记录
+                debugLog.info(TAG, "用户拒绝软件级快速解锁，关闭生物识别并不封印")
+                settingsRepository.setBiometricEnabled(false)
+                uiState.update { it.copy(isBiometricEnabled = false) }
+                false
+            }
+            true -> {
+                // 显式记录用户确认（AC②：建立封印前提示并留痕），后续解锁不再重复询问
+                settingsRepository.setQuickUnlockDowngradeAcknowledged(true)
+                true
+            }
+        }
+    }
+
+    /**
+     * ISSUE-P1-08：封印闸门——设备须具备「硬件存在且已录入」的 Class 3 强生物识别，
+     * 无强生物（含未录入）时禁用封印（fail-closed），不降级到弱锁屏凭据路径。
+     */
+    private fun hasStrongBiometric(authManager: BiometricAuthManager, activity: FragmentActivity): Boolean {
         val biometricStatus = authManager.canAuthenticate(
             activity,
             BiometricManager.Authenticators.BIOMETRIC_STRONG
         )
         if (!UnlockAuthPolicy.canSeal(biometricStatus)) {
             debugLog.warn(TAG, "生物识别凭据未登记：设备无可用强生物识别（$biometricStatus），禁用封印（fail-closed）")
-            return
+            return false
         }
+        return true
+    }
 
-        val encrypted = try {
-            val cipher = provision.cipher
-            // ISSUE-P2-23：封印复合载荷（主密码 + 可选密钥文件因子）。
-            // 密钥文件先快照克隆（登记跨 BiometricPrompt 挂起，原字节归会话所有），
+    /**
+     * 封印复合载荷（主密码 + 可选密钥文件因子），敏感字节全程 `finally` 显式清零。
+     *
+     * @return `iv to 密文`；取消 / 未取得授权 Cipher / 异常时为 null（各分支均已留痕）
+     */
+    private suspend fun sealCompositePayload(
+        authManager: BiometricAuthManager,
+        activity: FragmentActivity,
+        provision: SealedKeyProvision,
+        passwordChars: CharArray
+    ): Pair<ByteArray, ByteArray>? {
+        val cipher = provision.cipher
+        return try {
+            // ISSUE-P2-23：密钥文件先快照克隆（登记跨 BiometricPrompt 挂起，原字节归会话所有），
             // 快照在载荷编码完成后立即清零；载荷明文在其自身 finally 中清零。
             val keyFileSnapshot = keyFileBytes()?.copyOf()
             val bytes = BiometricSealedPayloadCodec.encode(passwordChars, keyFileSnapshot)
             keyFileSnapshot?.fill(0)
             try {
-                val authResult = awaitBiometricAuth(
-                    authManager = authManager,
-                    activity = activity,
-                    cipher = cipher
-                )
-                when (authResult) {
-                    is BiometricResult.Success -> {
-                        val authedCipher = authResult.cipher
-                        if (authedCipher == null) {
-                            debugLog.warn(TAG, "生物识别登记未取得授权 Cipher，跳过封印")
-                            null
-                        } else {
-                            authedCipher.doFinal(bytes)
-                        }
-                    }
-                    is BiometricResult.Cancelled -> {
-                        debugLog.info(TAG, "用户取消生物识别登记")
-                        null
-                    }
-                    is BiometricResult.Error -> {
-                        debugLog.warn(TAG, "生物识别登记失败: ${authResult.errString}")
-                        null
-                    }
-                    is BiometricResult.Failed -> {
-                        debugLog.warn(TAG, "生物识别登记未通过")
-                        null
-                    }
-                }?.let { cipher.iv to it }
+                authorizeAndSeal(authManager, activity, cipher, bytes)
             } finally {
                 bytes.fill(0)
             }
@@ -210,22 +214,61 @@ internal class BiometricEnrollmentCoordinator(
             debugLog.warn(TAG, "生物识别凭据登记异常: ${e.javaClass.simpleName}")
             null
         }
+    }
 
-        if (encrypted != null) {
-            storage.saveEncryptedCredential(dbId, encrypted.first, encrypted.second)
-            // TASK-18：随快速解锁凭据登记设备绑定解锁通行密钥（best-effort，失败不影响本次解锁）
-            if (unlockPasskeyManager?.enroll(dbId) == false) {
-                debugLog.warn(TAG, "解锁通行密钥登记未成功，本次快速解锁回退为纯封印语义")
+    /** 取得一次 Class 3 授权后以授权 Cipher 密封 [payload]；四条结果路径均如实留痕。 */
+    private suspend fun authorizeAndSeal(
+        authManager: BiometricAuthManager,
+        activity: FragmentActivity,
+        cipher: Cipher,
+        payload: ByteArray
+    ): Pair<ByteArray, ByteArray>? {
+        val sealed = when (val authResult = awaitBiometricAuth(authManager, activity, cipher)) {
+            is BiometricResult.Success -> {
+                val authedCipher = authResult.cipher
+                if (authedCipher == null) {
+                    debugLog.warn(TAG, "生物识别登记未取得授权 Cipher，跳过封印")
+                    null
+                } else {
+                    authedCipher.doFinal(payload)
+                }
             }
-            uiState.update {
-                it.copy(
-                    isQuickUnlockAvailable = true,
-                    // ISSUE-P1-22：软件密钥封印 → 常驻声明随本次登记即刻生效（冷启动由确认记录推导）
-                    quickUnlockDowngraded = downgradedSeal
-                )
+            is BiometricResult.Cancelled -> {
+                debugLog.info(TAG, "用户取消生物识别登记")
+                null
             }
-            debugLog.info(TAG, "生物识别凭据登记成功")
+            is BiometricResult.Error -> {
+                debugLog.warn(TAG, "生物识别登记失败: ${authResult.errString}")
+                null
+            }
+            is BiometricResult.Failed -> {
+                debugLog.warn(TAG, "生物识别登记未通过")
+                null
+            }
         }
+        return sealed?.let { cipher.iv to it }
+    }
+
+    /** 封印成功落库 + best-effort 登记解锁通行密钥（TASK-18）+ 置位快速解锁可用性。 */
+    private fun persistSealedCredential(
+        storage: BiometricCredentialStorage,
+        dbId: String,
+        encrypted: Pair<ByteArray, ByteArray>,
+        downgradedSeal: Boolean
+    ) {
+        storage.saveEncryptedCredential(dbId, encrypted.first, encrypted.second)
+        // TASK-18：随快速解锁凭据登记设备绑定解锁通行密钥（best-effort，失败不影响本次解锁）
+        if (unlockPasskeyManager?.enroll(dbId) == false) {
+            debugLog.warn(TAG, "解锁通行密钥登记未成功，本次快速解锁回退为纯封印语义")
+        }
+        uiState.update {
+            it.copy(
+                isQuickUnlockAvailable = true,
+                // ISSUE-P1-22：软件密钥封印 → 常驻声明随本次登记即刻生效（冷启动由确认记录推导）
+                quickUnlockDowngraded = downgradedSeal
+            )
+        }
+        debugLog.info(TAG, "生物识别凭据登记成功")
     }
 
     /**

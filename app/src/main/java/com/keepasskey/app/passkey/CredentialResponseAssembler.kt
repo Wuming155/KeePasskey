@@ -128,32 +128,74 @@ class CredentialResponseAssembler @Inject constructor(
         requestCodes: RequestCodeAllocator,
         responseBuilder: BeginGetCredentialResponse.Builder
     ) {
+        val browserFlow = CallingOriginResolver.isBrowserOrigin(callingOrigin)
+        // ISSUE-P3-188：本函数收敛为「RP-ID 归属判定 → 候选收敛 → 逐条呈现」编排，
+        // 判定口径与 fail-closed 收口点（null / 空集）与拆分前逐字一致
+        val targetRpId = resolvePasskeyTargetRpId(option, callingOrigin, browserFlow) ?: return
+
+        for (entry in passkeyCandidates(
+            option = option,
+            allEntries = allEntries,
+            browserFlow = browserFlow,
+            targetRpId = targetRpId,
+            callingPackage = callingPackage,
+            packageDimensionAllowed = packageDimensionAllowed
+        )) {
+            val passkey = PasskeyData.fromCustomFields(entry.customFields) ?: continue
+            appendPasskeyEntry(
+                responseBuilder = responseBuilder,
+                option = option,
+                entry = entry,
+                passkey = passkey,
+                browserFlow = browserFlow,
+                callingOrigin = callingOrigin,
+                callingPackage = callingPackage,
+                requestCodes = requestCodes
+            )
+        }
+    }
+
+    /**
+     * H1 整改：origin 与 RP-ID 强绑定。
+     * - 浏览器委派（可信 web origin）：requestJson 的 rp.id 必须等于浏览器 origin 域
+     *   或为其可注册后缀（WebAuthn 规范），杜绝伪造 rp.id 骗取任意站点凭据；
+     * - 普通应用（apk-key-hash origin）：不信任 requestJson 中的 web rp.id，仅返回调用包名
+     *   已绑定的凭据（P2-40：条目 url 必须是 `android://<包名>`，严格精确，无启发式），
+     *   故此处以空串占位并由 [passkeyCandidates] 的包名维度把关。
+     *
+     * 返回 null 表示按规范拒绝本次候选呈现（等价于拆分前的提前 `return`）。
+     */
+    private fun resolvePasskeyTargetRpId(
+        option: BeginGetPublicKeyCredentialOption,
+        callingOrigin: String,
+        browserFlow: Boolean
+    ): String? {
+        if (!browserFlow) return ""
         val rpIdFromOption = try {
-            JSONObject(option.requestJson).optJSONObject("rp")?.optString("id").orEmpty()
+            JSONObject(option.requestJson).optJSONObject(WebAuthnJson.RP)?.optString(WebAuthnJson.ID).orEmpty()
         } catch (_: Exception) {
             ""
         }
+        val targetRpId = rpIdFromOption.ifBlank { DomainMatcher.extractDomain(callingOrigin) }
+        if (targetRpId.isBlank()) return null
+        if (!DomainMatcher.isDomainMatch(targetRpId, DomainMatcher.extractDomain(callingOrigin))) return null
+        return targetRpId
+    }
 
-        // H1 整改：origin 与 RP-ID 强绑定
-        // - 浏览器委派（可信 web origin）：requestJson 的 rp.id 必须等于浏览器 origin 域
-        //   或为其可注册后缀（WebAuthn 规范），杜绝伪造 rp.id 骗取任意站点凭据；
-        // - 普通应用（apk-key-hash origin）：不信任 requestJson 中的 web rp.id，
-        //   仅返回调用包名已绑定的凭据（P2-40：条目 url 必须是 android://<包名>，严格精确，无启发式）。
-        val browserFlow = CallingOriginResolver.isBrowserOrigin(callingOrigin)
-        val targetRpId: String
-        if (browserFlow) {
-            targetRpId = rpIdFromOption.ifBlank { DomainMatcher.extractDomain(callingOrigin) }
-            if (targetRpId.isBlank()) return
-            if (!DomainMatcher.isDomainMatch(targetRpId, DomainMatcher.extractDomain(callingOrigin))) return
-        } else {
-            targetRpId = ""
-        }
-
-        // 整改：按请求的 `allowCredentials` 收敛候选（空集＝无用户名/discoverable 流程，不收敛）。
-        // 此前对白名单外的凭据同样下发候选，用户选中后 RP 必然拒绝，表现为「点了没反应/登录失败」。
+    /**
+     * 按请求的 `allowCredentials` 收敛候选（空集＝无用户名 / discoverable 流程，不收敛）。
+     * 此前对白名单外的凭据同样下发候选，用户选中后 RP 必然拒绝，表现为「点了没反应 / 登录失败」。
+     */
+    private fun passkeyCandidates(
+        option: BeginGetPublicKeyCredentialOption,
+        allEntries: List<KdbxEntry>,
+        browserFlow: Boolean,
+        targetRpId: String,
+        callingPackage: String,
+        packageDimensionAllowed: Boolean
+    ): List<KdbxEntry> {
         val allowedCredentialIds = WebAuthnRequest.parse(option.requestJson)?.allowCredentialIds.orEmpty()
-
-        val matchedPasskeys = allEntries.filter { entry ->
+        return allEntries.filter { entry ->
             CredentialCandidateMatcher.matchesPasskey(
                 entry = entry,
                 browserFlow = browserFlow,
@@ -163,53 +205,75 @@ class CredentialResponseAssembler @Inject constructor(
                 allowedCredentialIds = allowedCredentialIds
             )
         }
+    }
 
-        for (entry in matchedPasskeys) {
-            val passkey = PasskeyData.fromCustomFields(entry.customFields) ?: continue
-            val challenge = try {
-                JSONObject(option.requestJson).optString("challenge")
-            } catch (_: Exception) {
-                ""
-            }
+    /** 追加单条 Passkey 候选条目（点选后由断言 Activity 在受保护窗口内闭环验证并签发） */
+    private fun appendPasskeyEntry(
+        responseBuilder: BeginGetCredentialResponse.Builder,
+        option: BeginGetPublicKeyCredentialOption,
+        entry: KdbxEntry,
+        passkey: PasskeyData,
+        browserFlow: Boolean,
+        callingOrigin: String,
+        callingPackage: String,
+        requestCodes: RequestCodeAllocator
+    ) {
+        val intent = passkeyAssertionIntent(option, entry, browserFlow, callingOrigin, callingPackage)
+        val pendingIntent = PendingIntent.getActivity(
+            context,
+            requestCodes.next(),
+            intent,
+            // ISSUE-P1-01：必须 FLAG_MUTABLE，系统需注入 ProviderGetCredentialRequest
+            CredentialPendingIntents.ENTRY_FLAGS
+        )
 
-            val intent = Intent(context, PasskeyAssertionActivity::class.java).apply {
-                putExtra(PasskeyAssertionActivity.EXTRA_ENTRY_ID, entry.id.toHexString())
-                putExtra(PasskeyAssertionActivity.EXTRA_REQUEST_JSON, option.requestJson)
-                putExtra(PasskeyAssertionActivity.EXTRA_CHALLENGE, challenge)
-                    putExtra(
-                        PasskeyAssertionActivity.EXTRA_ORIGIN,
-                        when {
-                            browserFlow -> callingOrigin
-                            else -> callingOrigin.ifBlank { "android:apk-key-hash:unknown" }
-                        }
-                    )
-                    // F4 整改：传入预期调用包名，供断言 Activity 签发前二次校验（与密码填充同模式）
-                    putExtra(PasskeyAssertionActivity.EXTRA_EXPECTED_PACKAGE, callingPackage)
-            }
-            val pendingIntent = PendingIntent.getActivity(
-                context,
-                requestCodes.next(),
-                intent,
-                // ISSUE-P1-01：必须 FLAG_MUTABLE，系统需注入 ProviderGetCredentialRequest
-                CredentialPendingIntents.ENTRY_FLAGS
+        val entryBuilder = PublicKeyCredentialEntry.Builder(
+            context,
+            passkey.userName.ifBlank { entry.title },
+            pendingIntent,
+            option
+        ).setIcon(Icon.createWithResource(context, R.drawable.ic_launcher))
+
+        if (passkey.userDisplayName.isNotBlank()) {
+            entryBuilder.setDisplayName(passkey.userDisplayName)
+        }
+
+        // ISSUE-P0-03 (ZT-03)：不再在候选条目上挂 BiometricPromptData——它只是「看起来已验证」
+        // 的假门控，无法判定系统门控是否真的通过，且会与 PasskeyAssertionActivity 窗口内验证
+        // 重复弹窗。真实验证门控在受保护窗口内闭环执行：用户点选候选拉起断言 Activity 后，
+        // 由其在签名前强制执行生物识别 / 锁屏凭据验证（无可用认证器则手动确认并如实 UV=0）。
+        responseBuilder.addCredentialEntry(entryBuilder.build())
+    }
+
+    /**
+     * 断言落地页的基 Intent：下传条目标识、原始请求 JSON 与**预期归属**
+     * （F4 整改：签发前由断言 Activity 二次校验 origin / 包名绑定）。
+     */
+    private fun passkeyAssertionIntent(
+        option: BeginGetPublicKeyCredentialOption,
+        entry: KdbxEntry,
+        browserFlow: Boolean,
+        callingOrigin: String,
+        callingPackage: String
+    ): Intent {
+        val challenge = try {
+            JSONObject(option.requestJson).optString(WebAuthnJson.CHALLENGE)
+        } catch (_: Exception) {
+            ""
+        }
+        return Intent(context, PasskeyAssertionActivity::class.java).apply {
+            putExtra(PasskeyAssertionActivity.EXTRA_ENTRY_ID, entry.id.toHexString())
+            putExtra(PasskeyAssertionActivity.EXTRA_REQUEST_JSON, option.requestJson)
+            putExtra(PasskeyAssertionActivity.EXTRA_CHALLENGE, challenge)
+            putExtra(
+                PasskeyAssertionActivity.EXTRA_ORIGIN,
+                when {
+                    browserFlow -> callingOrigin
+                    else -> callingOrigin.ifBlank { "android:apk-key-hash:unknown" }
+                }
             )
-
-            val entryBuilder = PublicKeyCredentialEntry.Builder(
-                context,
-                passkey.userName.ifBlank { entry.title },
-                pendingIntent,
-                option
-            ).setIcon(Icon.createWithResource(context, R.drawable.ic_launcher))
-
-            if (passkey.userDisplayName.isNotBlank()) {
-                entryBuilder.setDisplayName(passkey.userDisplayName)
-            }
-
-            // ISSUE-P0-03 (ZT-03)：不再在候选条目上挂 BiometricPromptData——它只是「看起来已验证」
-            // 的假门控，无法判定系统门控是否真的通过，且会与 PasskeyAssertionActivity 窗口内验证
-            // 重复弹窗。真实验证门控在受保护窗口内闭环执行：用户点选候选拉起断言 Activity 后，
-            // 由其在签名前强制执行生物识别 / 锁屏凭据验证（无可用认证器则手动确认并如实 UV=0）。
-            responseBuilder.addCredentialEntry(entryBuilder.build())
+            // F4 整改：传入预期调用包名，供断言 Activity 签发前二次校验（与密码填充同模式）
+            putExtra(PasskeyAssertionActivity.EXTRA_EXPECTED_PACKAGE, callingPackage)
         }
     }
 

@@ -132,10 +132,8 @@ internal object KdbxCipherKeyResolver {
             return false
         }
         return if (isGzipCompressed) {
-            prefix.size >= 3 &&
-                    prefix[0] == 0x1F.toByte() &&
-                    prefix[1] == 0x8B.toByte() &&
-                    prefix[2] == 0x08.toByte()
+            prefix.size >= GZIP_MAGIC.size &&
+                    prefix.copyOfRange(0, GZIP_MAGIC.size).contentEquals(GZIP_MAGIC)
         } else {
             isPlausibleFieldSequence(prefix)
         }
@@ -161,4 +159,7 @@ internal object KdbxCipherKeyResolver {
         }
         return offset <= prefix.size
     }
+
+/** RFC 1952 gzip 外层魔数（明文流头 3 字节，用于校验「声称压缩即须以 gzip 头起始」） */
+private val GZIP_MAGIC = byteArrayOf(0x1F.toByte(), 0x8B.toByte(), 0x08.toByte())
 }
