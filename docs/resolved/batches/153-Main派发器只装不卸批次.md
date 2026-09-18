@@ -44,7 +44,7 @@
    `StandardTestDispatcher` 会一并改掉 `Dispatchers.Main.immediate` 的**就地执行**语义（属行为改动），
    故本批**不**强制「凡构造 ViewModel 者必须装 Main」。忘装时迟到回跳会落进**上一个**用例的调度器且无人推进，
    该用例多半因「工作没跑」而自身变红——仍会暴露，只是不再是干净的报错。已登记
-   [`../architecture/已知工程限界.md`](../architecture/已知工程限界.md) **§19**。
+   [`../architecture/已知工程限界.md`](../../architecture/已知工程限界.md) **§19**。
 2. **根因未被本批消除，只是不再触发**：取消 `viewModelScope` 后仍会有一次「回跳访问 Main」发生，
    这是 `withContext` 的实现事实；本批把它从「抛给下一个用例」变成「落进各自 inert 的调度器」。
    若日后 `kotlinx-coroutines-test` 改了 absent 判定或调度器终止语义，本口径需重评（§19 含解除条件）。

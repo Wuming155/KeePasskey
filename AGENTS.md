@@ -65,7 +65,8 @@ Coroutines + Flow；**文档与代码注释使用简体中文**。
 - [`docs/records/原生Argon2真机验证记录.md`](docs/records/原生Argon2真机验证记录.md) — 声称性能或真机验证前
 - `tools/audit/check_recheck_consistency.sh` — 修改任何审计 / 复核报告后必跑
 
-> **索引纪律（ISSUE-P3-81 立规）**：凡记录**已确认缺陷 / 残余风险 / 验证结论**的文档必须登记到文档地图。
+> **索引纪律（ISSUE-P3-81 立规）**：凡记录**已确认缺陷 / 残余风险 / 验证结论**的文档必须登记到文档地图，
+> 且登记的链接**必须可跳转**（相对路径以本文件所在目录为基准，`python tools/doc/check_md_links.py` 自检，§180）。
 > **退役纪律**：文档退役前其结论必须完成分流并同步文档地图（**不得脱离索引与工作流入口**）；审计报告须**开始阅读时即纳入
 > git 跟踪**（未跟踪文档退役后无法经 `git show` 取回）；同批退役的多份审计文档须**逐份处置**。
 
@@ -85,6 +86,8 @@ Coroutines + Flow；**文档与代码注释使用简体中文**。
 - `python .github/check_dependency_cvss.py build/reports/dependency-check/dependency-check-report.json` — 供应链 CVSS ≥ 7.0 硬断言（fail-closed）
 - `cd crypto/src/main/rust && cargo test` — 原生内核单测
 - `python tools/kdbx-corpus/generate_corpus.py --check` — `.kdbx` 语料校验
+- `python tools/doc/count_line_tiers.py` / `python tools/doc/check_md_links.py` — 五模块行数分档复核
+  （`ISSUE-P3-188` 唯一口径）/ `docs/` 相对链接自检（**改任何文档后跑**，断链即退出码 1）
 - `bash tools/audit/check_recheck_consistency.sh` — 复核报告一致性扫描（**改审计 / 复核报告后必跑**）
 - `"$env:USERPROFILE\.android\bin\android-cli.exe" studio <子命令>` — IDE / 设备侧调试首选入口（Android CLI，见下条约定；
   **PowerShell 写法**；Git Bash / MSYS 下同义写法为 `"$USERPROFILE/.android/bin/android-cli.exe"`）

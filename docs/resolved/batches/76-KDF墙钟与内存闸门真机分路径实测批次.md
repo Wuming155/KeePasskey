@@ -10,7 +10,7 @@
 | 子项 | 内容 |
 |---|---|
 | 设备侧用例 | 新增 `database/src/androidTest/java/com/keepasskey/database/kdf/KdfWallClockDeviceTest.kt`（**2 例**）：M-2 分路径接受性 + M-1 墙钟；日志前缀 `KDF-MEASURE\|` 便于从 logcat 与测试 XML 提取 |
-| 设备基线登记 | 实测值写入 [`docs/records/原生Argon2真机验证记录.md`](../records/原生Argon2真机验证记录.md) **§9**（与原 x86_64 表**禁混**） |
+| 设备基线登记 | 实测值写入 [`docs/records/原生Argon2真机验证记录.md`](../../records/原生Argon2真机验证记录.md) **§9**（与原 x86_64 表**禁混**） |
 | 口径回填 | `ACTIVE_ISSUES.md` 的 `ISSUE-P2-49` 行补记实测值 + `AC②` 的**已定处置路径** |
 | 题面更正 | 条目原文要求实测「合法 Header（`I = 2²⁴`、`M = 堆/2`）」——该组合自 `P2-49` AC①（§48）起**已不合法**，已作为**断言**记录 |
 

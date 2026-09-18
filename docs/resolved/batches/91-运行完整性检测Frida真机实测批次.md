@@ -50,7 +50,7 @@ AC 原文为「按结果决定加强检测 **或** 在 `RuntimeIntegrityPolicy` 
 故改采纳「如实声明」分支，落点两处：
 
 1. **`detectHookFramework()` 的 KDoc**：写明实测矩阵、两层互补关系，并列出**四条未经实测的规避面**；
-2. **新建 [`records/运行完整性检测Frida实测基线.md`](records/运行完整性检测Frida实测基线.md)**（已登记进
+2. **新建 [`records/运行完整性检测Frida实测基线.md`](../../records/运行完整性检测Frida实测基线.md)**（已登记进
    `docs/README.md` 的 records 分区）：完整矩阵 + 原始证据 + 复现命令 + 清理留痕。
 
 ### 91.5 未经实测的规避面（**如实声明，不得读作已覆盖**）

@@ -218,6 +218,7 @@
 | §177 | 待办条目口径复核批次（`ISSUE-P3-188` 文档面：第一档数法三处并一处、`DatabaseSettingsScreen` 369→370 修正、已消化 11→13、新增两档复核脚本；剩余清单补登第 6 项分流欠账） | `ISSUE-P3-188`（文档口径收敛，零生产代码改动） | [`177-待办条目口径复核批次.md`](resolved/batches/177-待办条目口径复核批次.md) |
 | §178 | 打开已有密码库对话框段落拆分批次（`ISSUE-P3-188` 第 3 目：`OpenExistingVaultDialog` 226 → 96 行，同包新建 8 个窄参数段落组件；≥100 行 Compose 函数 28 → 27；反向逐字核对与三个搬家坑留痕） | `ISSUE-P3-188`（第 3 目再消化一个） | [`178-打开已有密码库对话框段落拆分批次.md`](resolved/batches/178-打开已有密码库对话框段落拆分批次.md) |
 | §179 | 新建库向导段落拆分批次（`ISSUE-P3-188` 第 3 目：`CreateVaultWizardDialog` 234 → 158 行，新建同包 4 个段落组件；`CreateVaultPresetTest` 向导判据改「本体 + 段落文件」并集扩扫；逐字核对工具化 `tools/doc/check_verbatim_move.py`） | `ISSUE-P3-188`（第 3 目再削一个最长非装配表函数） | [`179-新建库向导段落拆分与守卫并集批次.md`](resolved/batches/179-新建库向导段落拆分与守卫并集批次.md) |
+| §180 | 文档相对链接断链收口批次（`docs/resolved/batches/` 19 份文件 26 处链接按「相对本文件」口径修正；新增 `tools/doc/check_md_links.py` 自检并登记进 `AGENTS.md` §4 索引纪律 / §5 命令表；围栏代码块内的粘贴正文判为假阳性、不改） | 文档面自发现（用户命题「精简文档」，无既有 ISSUE 条目） | [`180-文档相对链接断链收口批次.md`](resolved/batches/180-文档相对链接断链收口批次.md) |
 
 ## 分册导航
 
