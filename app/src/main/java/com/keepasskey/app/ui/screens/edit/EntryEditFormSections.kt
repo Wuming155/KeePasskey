@@ -13,16 +13,12 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.ElectricBolt
-import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -31,19 +27,15 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.keepasskey.app.R
-import com.keepasskey.app.apps.InstalledAppOption
-import com.keepasskey.app.apps.InstalledAppsCatalog
 import com.keepasskey.app.autofill.AutofillPackageNames
 import com.keepasskey.app.passkey.DomainMatcher
 import com.keepasskey.app.ui.components.AppIconSlot
@@ -53,9 +45,6 @@ import com.keepasskey.app.ui.components.CustomIconItem
 import com.keepasskey.app.ui.components.PasswordStrengthBar
 import com.keepasskey.app.ui.components.SecurePasswordField
 import com.keepasskey.app.ui.components.getVaultIcon
-import com.keepasskey.app.ui.theme.CapsuleShape
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 
 /**
  * 凭据编辑页的基础表单分节（所属分组 / 只读横幅 / 基本信息 / 账户与密码 / 安全备注）。
@@ -66,61 +55,6 @@ import kotlinx.coroutines.withContext
  * 密码生成器所在的 `AnimatedVisibility` 亦保留在原 `BentoCard { Column { … } }` 内，
  * `ColumnScope` 重载解析（expandVertically/shrinkVertically 默认动画）不变。
  */
-
-/** 所属群组 / 文件夹选择（回收站分组不作为可选目标）。 */
-@Composable
-internal fun ColumnScope.EntryEditGroupSection(
-    uiState: EntryEditUiState,
-    onGroupChange: (String?) -> Unit
-) {
-    // ISSUE-P3-179：回收站过滤下沉到 `LazyRow` **之外**——`LazyRow` 的 content 是 `LazyListScope`
-    // （非 `@Composable`），不能在其中 `remember`；原实现把 `filter` 写在 `items(...)` 实参里，
-    // 编辑表单每敲一个字符都会重组并重跑一次整表过滤。
-    val selectableGroups = remember(uiState.availableGroups) {
-        uiState.availableGroups.filter { !it.isRecycleBin }
-    }
-    if (uiState.availableGroups.isEmpty()) return
-
-    Text(
-        text = stringResource(R.string.edit_group_label),
-        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-        color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(start = 4.dp)
-    )
-    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        item {
-            FilterChip(
-                selected = uiState.groupId == null,
-                onClick = { onGroupChange(null) },
-                label = { Text(stringResource(R.string.edit_group_root)) },
-                shape = CapsuleShape,
-                leadingIcon = {
-                    Icon(
-                        imageVector = Icons.Default.FolderOpen,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp)
-                    )
-                }
-            )
-        }
-        items(selectableGroups, key = { it.id }) { grp ->
-            val selected = uiState.groupId == grp.id
-            FilterChip(
-                selected = selected,
-                onClick = { onGroupChange(grp.id) },
-                label = { Text(grp.name) },
-                shape = CapsuleShape,
-                leadingIcon = {
-                    Icon(
-                        imageVector = getVaultIcon(grp.iconName),
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp)
-                    )
-                }
-            )
-        }
-    }
-}
 
 /** H4-只读整改：只读会话提示横幅。 */
 @Composable
@@ -279,27 +213,6 @@ private fun EntryUrlField(
             alreadySelected = boundPackage?.let { setOf(it) } ?: emptySet()
         )
     }
-}
-
-/**
- * 解析绑定包名的应用信息（应用名 + 图标，IO 线程）。
- *
- * 未绑定（[packageName] 为 null）时返回 null，不渲染前置图标与辅助文案；
- * 绑定但不可解析（未安装 / 受包可见性限制）时回落为「包名即名称 + 通用图标」，
- * 让用户看到绑定**确实存在但当前不可读**，而不是被静默隐藏。
- */
-@Composable
-private fun rememberBoundAppOption(packageName: String?): InstalledAppOption? {
-    if (packageName == null) return null
-    val context = LocalContext.current
-    val placeholder = remember(packageName) { InstalledAppOption(packageName, packageName) }
-    val option = produceState(initialValue = placeholder, packageName) {
-        val resolved = withContext(Dispatchers.IO) {
-            InstalledAppsCatalog.lookup(context, packageName)
-        }
-        if (resolved != null) value = resolved
-    }
-    return option.value
 }
 
 /**

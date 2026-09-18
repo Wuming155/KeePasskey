@@ -123,10 +123,13 @@
   4. 每档闭环后 `.\gradlew.bat test --rerun-tasks --max-workers=1` 全绿方准入库；
   5. **不得为凑行数把注释移出文件充当「瘦身」**——以职责拆分为准。
 - **验收标准**：第一档 8 文件全部 ≤400 行（或如实登记限界理由）；
-  > **§159 实测口径（`wc -l`）**：达标 5（`SyncCache` 382 / `DatabaseSettingsScreen` 369 /
-  > `UnlockViewModel` 368 + 本批）、按理由登记 2（`SettingsViewModel` 544 / `DatabaseSession` 535，限界 §18）、
-  > **仍超 3**（`EntryEditFormSections` 438 / `EntryDetailViewModel` 434 / `EntryDetailScreen` 426）
-  > ⇒ 本条**不得**被读作「第一档已闭环」。≥100 行函数全部拆分至 ≤50 行；
+  > **§160 实测口径（`wc -l`）**：达标 6（`SyncCache` 382 / `DatabaseSettingsScreen` 369 /
+  > `UnlockViewModel` 368 / **`EntryEditFormSections` 351**（§160）… ）、按理由登记 2
+  > （`SettingsViewModel` 544 / `DatabaseSession` 535，限界 **§18**）、
+  > **仍超 2**（`EntryDetailViewModel` 435 / `EntryDetailScreen` 426）
+  > ⇒ 本条**不得**被读作「第一档已闭环」。`EntryDetailViewModel` 虽有 44 / 58 个成员是一行委托，
+  > 但仍有 5 个含实现体的成员（`uiState` 装配 29 行、`exportAttachment` 14 行、协作者构造等），
+  > **不满足**限界 §18 的成立前提（「成员全部为一行委托」）⇒ 不得登记为门面理由，只能继续拆。≥100 行函数全部拆分至 ≤50 行；
   第 4 目清单中的协议 / 格式语义字面量收敛为命名常量；剩余第二档渐进消化，未消化部分在批次文档留清单。
 - **进度（2026-09-18 复核批次，`.\gradlew.bat test --rerun-tasks --max-workers=1` 全绿）**：
   - **第一档 8 文件**：`EntryDetailViewModel` 564 → 435、`EntryEditFormSections` 557 → 438、
@@ -184,6 +187,9 @@
      计数判据仍为 2。见 [`resolved/batches/155-同步周期远端分支下沉批次.md`](resolved/batches/155-同步周期远端分支下沉批次.md)）；
   3. **其余 400~500 行文件约 36 个**（原第 2 目清单，头部：`VaultListDialogs`、`RealVaultRepository`、
      `VaultRepository`、`AutofillConfirmActivity`、`EntryEditScreen`、`RuntimeIntegrityDetector`）；
+     > `EntryEditFormSections`（原 438）已由 §160 降到 **351**（分组选择分节 + 绑定应用解析下沉为同包
+     > `EntryEditGroupAndAppSections.kt`）⇒ 该文件退出本档；其下沉块含 §131 的 `items(…, key = …)` 修复，
+     > `AlgoHotPathGuardsTest` 的扫描目标已按**两文件并集**同步（判据强度不变）。
   4. **接线守卫与结构耦合的长期代价**：本批有**三个测试类**的静态源码比对断言因函数搬家而失配
      （`AutofillAuthResultWiringTest` 两条：确认入口基 Intent 定位串、候选 `setField` 续行缩进；
      `AlgoHotPathGuardsTest` 两条：内存树快照实参经 `RemoteSyncContext` 取值；

@@ -340,8 +340,12 @@ class AlgoHotPathGuardsTest {
             dialogs.contains("allGroups.filter { !it.isRecycleBin }.forEach {")
         )
 
-        val edit =
-            stripped("app/src/main/java/com/keepasskey/app/ui/screens/edit/EntryEditFormSections.kt")
+        // §160：分组选择分节（连同 ISSUE-P3-179 的 items(…, key = …) 修复）已下沉到同包新文件，
+        // 故按**两文件并集**扫描——负向与正向两条判据强度均不变，且负向多覆盖一份文件。
+        val edit = listOf(
+            "app/src/main/java/com/keepasskey/app/ui/screens/edit/EntryEditFormSections.kt",
+            "app/src/main/java/com/keepasskey/app/ui/screens/edit/EntryEditGroupAndAppSections.kt"
+        ).joinToString(separator = " ") { stripped(it) }
         assertFalse(
             "编辑页不得把整表过滤写在 items 实参里（每次重组都会重跑）",
             edit.contains("items(uiState.availableGroups.filter")
