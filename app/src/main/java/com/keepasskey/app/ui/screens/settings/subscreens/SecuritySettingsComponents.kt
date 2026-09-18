@@ -1,5 +1,6 @@
 package com.keepasskey.app.ui.screens.settings.subscreens
 
+import android.content.res.Configuration
 import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -210,7 +211,7 @@ internal fun IntegrityRiskCard(level: RuntimeRiskLevel) {
 // 无法以全限定名构造），故预览本文件中仅依赖枚举、可全限定名构造的 IntegrityRiskCard
 // 为遵守「不新增 import 语句」约束，@Preview 采用全限定名写法
 @androidx.compose.ui.tooling.preview.Preview(name = "运行环境完整性风险卡 - 浅色", showBackground = true)
-@androidx.compose.ui.tooling.preview.Preview(name = "运行环境完整性风险卡 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
+@androidx.compose.ui.tooling.preview.Preview(name = "运行环境完整性风险卡 - 深色", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
 @Composable
 internal fun SecuritySettingsComponentsPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {

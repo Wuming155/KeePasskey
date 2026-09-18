@@ -1,5 +1,6 @@
 package com.keepasskey.app.ui.screens.settings.subscreens
 
+import android.content.res.Configuration
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -354,7 +355,7 @@ private fun rememberAppOption(packageName: String): InstalledAppOption {
 // IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
 // 说明：为遵守「不新增 import 语句」约束，@Preview 采用全限定名写法
 @androidx.compose.ui.tooling.preview.Preview(name = "包名黑名单管理对话框 - 浅色", showBackground = true)
-@androidx.compose.ui.tooling.preview.Preview(name = "包名黑名单管理对话框 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
+@androidx.compose.ui.tooling.preview.Preview(name = "包名黑名单管理对话框 - 深色", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
 @Composable
 internal fun PackageBlocklistManageDialogPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {

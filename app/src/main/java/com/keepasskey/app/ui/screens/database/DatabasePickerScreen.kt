@@ -1,5 +1,6 @@
 package com.keepasskey.app.ui.screens.database
 
+import android.content.res.Configuration
 import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -320,7 +321,7 @@ internal fun queryDocumentDisplayName(context: android.content.Context, uri: Uri
 
 // IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
 @Preview(name = "密码库选择内容 - 浅色", showBackground = true)
-@Preview(name = "密码库选择内容 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
+@Preview(name = "密码库选择内容 - 深色", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
 @Composable
 internal fun DatabasePickerContentPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {

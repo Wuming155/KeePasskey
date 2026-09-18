@@ -1,5 +1,6 @@
 package com.keepasskey.app.ui.screens.settings.subscreens
 
+import android.content.res.Configuration
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -54,7 +55,7 @@ internal fun FlagSecureRiskDialog(
 // IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
 // 说明：为遵守「不新增 import 语句」约束，@Preview 采用全限定名写法
 @androidx.compose.ui.tooling.preview.Preview(name = "关闭防截屏风险确认 - 浅色", showBackground = true)
-@androidx.compose.ui.tooling.preview.Preview(name = "关闭防截屏风险确认 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
+@androidx.compose.ui.tooling.preview.Preview(name = "关闭防截屏风险确认 - 深色", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
 @Composable
 internal fun FlagSecureRiskDialogPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {

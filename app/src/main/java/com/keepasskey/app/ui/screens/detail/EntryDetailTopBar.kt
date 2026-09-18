@@ -1,5 +1,6 @@
 package com.keepasskey.app.ui.screens.detail
 
+import android.content.res.Configuration
 import androidx.compose.foundation.layout.Box
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -235,7 +236,7 @@ private fun <T> previewStateOf(value: T): androidx.compose.runtime.MutableState<
 
 // IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
 @Preview(name = "详情页顶栏 - 浅色", showBackground = true)
-@Preview(name = "详情页顶栏 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
+@Preview(name = "详情页顶栏 - 深色", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
 @Composable
 internal fun EntryDetailTopBarPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {

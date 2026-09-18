@@ -1,5 +1,6 @@
 package com.keepasskey.app.ui.screens.edit
 
+import android.content.res.Configuration
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
@@ -329,7 +330,7 @@ private fun <T> previewStateOf(value: T): androidx.compose.runtime.MutableState<
 
 // IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
 @Preview(name = "编辑页配置区块 - 浅色", showBackground = true)
-@Preview(name = "编辑页配置区块 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
+@Preview(name = "编辑页配置区块 - 深色", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
 @Composable
 internal fun EntryEditTotpSectionPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {

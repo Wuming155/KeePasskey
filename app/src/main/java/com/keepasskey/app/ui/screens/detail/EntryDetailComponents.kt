@@ -1,5 +1,6 @@
 package com.keepasskey.app.ui.screens.detail
 
+import android.content.res.Configuration
 import androidx.annotation.StringRes
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
@@ -208,7 +209,7 @@ private val QUICK_ACTION_ICON_SIZE = 18.dp
 
 // IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
 @Preview(name = "详情页头部与快捷操作 - 浅色", showBackground = true)
-@Preview(name = "详情页头部与快捷操作 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
+@Preview(name = "详情页头部与快捷操作 - 深色", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
 @Composable
 internal fun EntryHeaderSectionPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {

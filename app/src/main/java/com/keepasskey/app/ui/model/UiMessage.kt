@@ -1,5 +1,6 @@
 package com.keepasskey.app.ui.model
 
+import android.content.res.Configuration
 import androidx.annotation.StringRes
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.res.stringResource
@@ -23,7 +24,7 @@ fun UiMessage.resolveText(): String = stringResource(resId, *args.toTypedArray()
 // 本文件唯一的 Composable 是「资源 ID → 当前语言文案」的解析函数（返回 String，无自绘 UI），
 // 故预览用最小 Text 承载其解析结果，验证多语言文案解析链路
 @androidx.compose.ui.tooling.preview.Preview(name = "界面消息文案解析 - 浅色", showBackground = true)
-@androidx.compose.ui.tooling.preview.Preview(name = "界面消息文案解析 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
+@androidx.compose.ui.tooling.preview.Preview(name = "界面消息文案解析 - 深色", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
 @Composable
 internal fun UiMessagePreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {

@@ -1,5 +1,6 @@
 package com.keepasskey.app.ui.screens.edit
 
+import android.content.res.Configuration
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -20,7 +21,7 @@ import com.keepasskey.app.ui.theme.KeePasskeyTheme
  */
 
 @Preview(name = "编辑页基础表单分节 - 浅色", showBackground = true)
-@Preview(name = "编辑页基础表单分节 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
+@Preview(name = "编辑页基础表单分节 - 深色", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
 @Composable
 internal fun EntryEditBasicInfoSectionPreview() {
     KeePasskeyTheme {
@@ -109,7 +110,7 @@ internal fun EntryEditBasicInfoSectionPreview() {
  * 预览环境下该包名不可解析，故按实现**如实回落**为「包名即名称 + 通用系统图标」。
  */
 @Preview(name = "编辑页-应用绑定URL - 浅色", showBackground = true)
-@Preview(name = "编辑页-应用绑定URL - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
+@Preview(name = "编辑页-应用绑定URL - 深色", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
 @Composable
 internal fun EntryEditBoundAppSectionPreview() {
     KeePasskeyTheme {
@@ -138,7 +139,7 @@ internal fun EntryEditBoundAppSectionPreview() {
 
 // IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
 @Preview(name = "凭据编辑内容 - 浅色", showBackground = true)
-@Preview(name = "凭据编辑内容 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
+@Preview(name = "凭据编辑内容 - 深色", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
 @Composable
 internal fun EntryEditContentPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {

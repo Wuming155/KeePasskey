@@ -1,5 +1,6 @@
 package com.keepasskey.app.ui.screens.edit
 
+import android.content.res.Configuration
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -238,7 +239,7 @@ internal fun EntryEditAttachmentsSection(
 
 // IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
 @Preview(name = "编辑页字段与附件列表 - 浅色", showBackground = true)
-@Preview(name = "编辑页字段与附件列表 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
+@Preview(name = "编辑页字段与附件列表 - 深色", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
 @Composable
 internal fun EntryEditCustomFieldsSectionPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {

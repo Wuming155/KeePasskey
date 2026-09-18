@@ -1,5 +1,6 @@
 package com.keepasskey.app.ui.screens.unlock
 
+import android.content.res.Configuration
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -412,7 +413,7 @@ internal fun UnlockStandardUnlockContent(
 
 // IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
 @androidx.compose.ui.tooling.preview.Preview(name = "快速解锁卡片 - 浅色", showBackground = true)
-@androidx.compose.ui.tooling.preview.Preview(name = "快速解锁卡片 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
+@androidx.compose.ui.tooling.preview.Preview(name = "快速解锁卡片 - 深色", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
 @Composable
 internal fun UnlockQuickUnlockCardPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {

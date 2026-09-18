@@ -1,5 +1,6 @@
 package com.keepasskey.app.ui.screens.settings.subscreens
 
+import android.content.res.Configuration
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -213,7 +214,7 @@ internal fun S3ConfigFields(
 // 说明：为遵守「不新增 import 语句」约束，@Preview 采用全限定名写法
 // 说明：本组件直接产出多个并列字段（自身无布局容器），故外包一层 Column，避免预览中字段相互重叠
 @androidx.compose.ui.tooling.preview.Preview(name = "WebDAV 同步配置字段 - 浅色", showBackground = true)
-@androidx.compose.ui.tooling.preview.Preview(name = "WebDAV 同步配置字段 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
+@androidx.compose.ui.tooling.preview.Preview(name = "WebDAV 同步配置字段 - 深色", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
 @Composable
 internal fun WebDavConfigFieldsPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {

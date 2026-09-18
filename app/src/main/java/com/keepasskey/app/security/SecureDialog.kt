@@ -1,5 +1,6 @@
 package com.keepasskey.app.security
 
+import android.content.res.Configuration
 import android.view.View
 import android.view.ViewParent
 import android.view.Window
@@ -169,7 +170,7 @@ internal object SecureDialogFlagPolicy {
 // IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI。
 // 预览环境的 LocalView 父链不含 DialogWindowProvider，包装按 fail-safe 静默不动作（不崩溃、不改窗口）
 @androidx.compose.ui.tooling.preview.Preview(name = "受保护对话框内容 - 浅色", showBackground = true)
-@androidx.compose.ui.tooling.preview.Preview(name = "受保护对话框内容 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
+@androidx.compose.ui.tooling.preview.Preview(name = "受保护对话框内容 - 深色", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
 @Composable
 internal fun SecureDialogPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {

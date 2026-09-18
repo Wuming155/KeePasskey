@@ -65,7 +65,9 @@ def inject_locale(ann_text: str, locale: str) -> str:
         joined = joined.replace(
             "@androidx.compose.ui.tooling.preview.Preview", "@Preview"
         )
-        joined = joined.replace("Configuration.UI_MODE_NIGHT_YES", "0x20")
+        # `ISSUE-P3-188` §167：源面已改用平台命名常量 `Configuration.UI_MODE_NIGHT_YES`，
+        # 派生面**照原样搬运**并补 import（原实现在此处把它改写回裸 `0x20`，是为省一行 import
+        # 而把魔法数字重新引回——现由下方 `needs_configuration_import` 统一处理）。
         # 去掉已有 locale
         joined = re.sub(r"\s*locale\s*=\s*\"[^\"]*\"\s*,?", "", joined)
         # 在 @Preview( 后插入 locale
@@ -122,7 +124,13 @@ def main() -> int:
 
         new_text, n = PREVIEW_BLOCK.subn(repl, text)
         if n:
-            kt.write_text(new_text, encoding="utf-8")
+            # `ISSUE-P3-188` §167 附带修复：原写法 `kt.write_text(...)` 在 Windows 上按
+            # `os.linesep` 落盘，会把 LF 文件**整文件改写成 CRLF**——正是 `.gitattributes`
+            # （`* text=auto eol=lf`）里登记过的历史事故形态（git 层会在 add 时归一，故不污染
+            # 提交，但工作区整文件行尾被翻，`git status` 与后续工具全部吃噪声）。
+            # 读写统一显式 `newline=""`：读到什么行尾就写回什么行尾。
+            with open(kt, "w", encoding="utf-8", newline="") as fh:
+                fh.write(new_text)
 
     # 清掉旧生成物
     if OUT_ROOT.exists():
@@ -134,16 +142,25 @@ def main() -> int:
         rel = Path(*pkg.split(".")) / "GeneratedPreviewWrappers.kt"
         out = OUT_ROOT / rel
         out.parent.mkdir(parents=True, exist_ok=True)
+        # 源面用了平台命名常量时，派生面必须带上其 import（否则 unresolved reference）
+        cfg_import = (
+            "import android.content.res.Configuration\n"
+            if any("Configuration." in c for c in chunks)
+            else ""
+        )
         body = (
             "// 自动生成：勿手改。tools/export_previews/generate_screenshot_test_wrappers.py\n"
             f"// preview-screenshot-test-engine 用；locale={locale}\n\n"
             f"package {pkg}\n\n"
-            "import androidx.compose.runtime.Composable\n"
+            + cfg_import
+            + "import androidx.compose.runtime.Composable\n"
             "import androidx.compose.ui.tooling.preview.Preview\n"
             "import com.android.tools.screenshot.PreviewTest\n\n"
             + "\n".join(chunks)
         )
-        out.write_text(body, encoding="utf-8")
+        # 与上面同源：显式 `newline=""` + 内存中的 `\n` ⇒ 生成物一律 LF（对齐 `* text=auto eol=lf`）
+        with open(out, "w", encoding="utf-8", newline="") as fh:
+            fh.write(body)
         count += len(chunks)
 
     print(f"locale={locale} promoted={promoted} wrappers={count} packages={len(by_pkg)}")

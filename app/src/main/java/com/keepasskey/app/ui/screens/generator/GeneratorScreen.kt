@@ -1,5 +1,6 @@
 package com.keepasskey.app.ui.screens.generator
 
+import android.content.res.Configuration
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -272,7 +273,7 @@ private object NoOpGeneratorActions : GeneratorActions {
 }
 
 @Preview(name = "密码生成器 - 浅色", showBackground = true)
-@Preview(name = "密码生成器 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
+@Preview(name = "密码生成器 - 深色", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
 @Composable
 internal fun GeneratorContentPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {

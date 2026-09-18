@@ -1,5 +1,6 @@
 package com.keepasskey.app.ui.screens.settings.subscreens
 
+import android.content.res.Configuration
 import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -168,7 +169,7 @@ private fun AutofillHealthIssue.labelRes(): Int = when (this) {
 @Preview(
     name = "自动填充健康卡（全部正常） - 深色",
     showBackground = true,
-    uiMode = 0x20 /* UI_MODE_NIGHT_YES */
+    uiMode = Configuration.UI_MODE_NIGHT_YES
 )
 @Composable
 internal fun AutofillHealthCardPreview() {
@@ -189,7 +190,7 @@ internal fun AutofillHealthCardPreview() {
 @Preview(
     name = "自动填充健康卡（存在异常项） - 深色",
     showBackground = true,
-    uiMode = 0x20 /* UI_MODE_NIGHT_YES */
+    uiMode = Configuration.UI_MODE_NIGHT_YES
 )
 @Composable
 internal fun AutofillHealthCardIssuesPreview() {

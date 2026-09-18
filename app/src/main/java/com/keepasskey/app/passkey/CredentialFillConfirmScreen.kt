@@ -1,5 +1,6 @@
 package com.keepasskey.app.passkey
 
+import android.content.res.Configuration
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -133,7 +134,7 @@ fun CredentialFillConfirmScreen(
 
 // IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
 @androidx.compose.ui.tooling.preview.Preview(name = "凭据填充确认页 - 浅色", showBackground = true)
-@androidx.compose.ui.tooling.preview.Preview(name = "凭据填充确认页 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
+@androidx.compose.ui.tooling.preview.Preview(name = "凭据填充确认页 - 深色", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
 @Composable
 internal fun CredentialFillConfirmScreenPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {

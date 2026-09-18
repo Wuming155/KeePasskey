@@ -1,5 +1,6 @@
 package com.keepasskey.app.ui.screens.vault
 
+import android.content.res.Configuration
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
@@ -398,7 +399,7 @@ private const val CHILD_DB_SEARCH_HINT_KEY = "child_db_search_exclusion"
 
 // IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
 @androidx.compose.ui.tooling.preview.Preview(name = "密码库列表 - 浅色", showBackground = true)
-@androidx.compose.ui.tooling.preview.Preview(name = "密码库列表 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
+@androidx.compose.ui.tooling.preview.Preview(name = "密码库列表 - 深色", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
 @Composable
 internal fun VaultListContentPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {

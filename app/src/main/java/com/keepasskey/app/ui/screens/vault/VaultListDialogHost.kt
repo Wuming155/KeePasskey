@@ -1,5 +1,6 @@
 package com.keepasskey.app.ui.screens.vault
 
+import android.content.res.Configuration
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
@@ -171,7 +172,7 @@ internal fun VaultListDialogHost(
 // IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @androidx.compose.ui.tooling.preview.Preview(name = "新建分类对话框宿主 - 浅色", showBackground = true)
-@androidx.compose.ui.tooling.preview.Preview(name = "新建分类对话框宿主 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
+@androidx.compose.ui.tooling.preview.Preview(name = "新建分类对话框宿主 - 深色", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
 @Composable
 internal fun VaultListDialogHostPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {

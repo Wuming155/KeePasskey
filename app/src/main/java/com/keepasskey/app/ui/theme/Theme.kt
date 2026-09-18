@@ -1,5 +1,6 @@
 package com.keepasskey.app.ui.theme
 
+import android.content.res.Configuration
 import android.app.Activity
 import android.os.Build
 import androidx.compose.foundation.background
@@ -163,7 +164,7 @@ fun KeePasskeyTheme(
  * 浅色 / 深色两套语义色的实际观感。
  */
 @Preview(name = "主题调色盘总览 - 浅色", showBackground = true)
-@Preview(name = "主题调色盘总览 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
+@Preview(name = "主题调色盘总览 - 深色", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
 @Composable
 internal fun KeePasskeyThemePreview() {
     KeePasskeyTheme {

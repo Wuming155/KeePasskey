@@ -1,5 +1,6 @@
 package com.keepasskey.app.ui.screens.settings.subscreens
 
+import android.content.res.Configuration
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
@@ -197,7 +198,7 @@ internal fun HealthAuditRowItem(
 // 故预览本文件中同样可独立渲染且无需额外依赖的 BreachCheckToggleRow
 // 为遵守「不新增 import 语句」约束，@Preview 采用全限定名写法
 @androidx.compose.ui.tooling.preview.Preview(name = "泄露密码检测开关行 - 浅色", showBackground = true)
-@androidx.compose.ui.tooling.preview.Preview(name = "泄露密码检测开关行 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
+@androidx.compose.ui.tooling.preview.Preview(name = "泄露密码检测开关行 - 深色", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
 @Composable
 internal fun HealthCheckComponentsPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {

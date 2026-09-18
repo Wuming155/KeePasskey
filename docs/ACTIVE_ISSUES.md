@@ -95,14 +95,16 @@
 
 - **核实时间点与方式**：2026-09-18，主控以 `wc -l` 全量扫描五模块（`app`/`core`/`crypto`/`database`/`sync`）
   `src/main` 下全部 `.kt`；超长函数以**括号配平逐点实测**复核（启发式初筛 + 人工核实，已剔除把类体 / KDoc 误计为函数的假阳性）；
-  魔法数字面以 `grep -E '0x[0-9A-Fa-f]{2,}'` 排除常量声明行后按文件计数。
+  魔法数字面以 `grep -E '0x[0-9A-Fa-f]{2,}'` 排除常量声明行后按文件计数（**§167 复核：该初筛法假阳性偏多，
+  只可用于圈定候选，裁定须逐条看上下文**——见下方第 4 目）。
 - **违例清单（核实时刻快照，行号以实现为准）**：
-  1. **超 500 行文件（8 个，第一档）**：`EntryDetailViewModel`(564)、`EntryEditFormSections`(557)、
-     `SettingsViewModel`(544)、`DatabaseSession`(535)、`DatabaseSettingsScreen`(530)、`EntryDetailScreen`(529)、
-     `UnlockViewModel`(517)、`SyncCache`(507)；
-  2. **400~500 行文件（约 36 个，第二档）**：见扫描快照，头部为 `VaultListDialogs`(490)、
-     `RealVaultRepository`(489)、`VaultRepository`(478)、`AutofillConfirmActivity`(475)、`EntryEditScreen`(472)、
-     `RuntimeIntegrityDetector`(470)、`PasskeyAssertionActivity`(466) 等；
+  1. **超 500 行文件（核实时刻 8 个，第一档）** —— **§167 重测**：全仓 `src/main` 超 500 行**仅余 2 个**
+     （`SettingsViewModel` 544 / `DatabaseSession` 535，均已按限界 **§18** 登记为门面理由）；
+     其余 6 个已降到 500 以下，但**验收线是 ≤400**：`EntryEditFormSections` 351（§160）、
+     `DatabaseSettingsScreen` 369（§159）、`UnlockViewModel` 368、`SyncCache` 382 **达标**，
+     `EntryDetailViewModel` 434 / `EntryDetailScreen` 426 **仍超**（见下方验收说明）；
+  2. **400~500 行文件（第二档）**：清单、当前计数与逐批消减**只在下方「剩余清单第 3 项」维护一份**
+     （此处不再重复快照数字，避免两处数法各自漂移）；
   3. **超 50 行函数（第一档 ≥100 行）**：`SyncEngine.openRemote`(≈173)、`PasskeyAssertionActivity.onCreate`(≈153)、
      `SyncCycleRunner.runSyncCycle`(≈130)、`KdbxEntryMerger.mergeConflictedEntry`(≈129)、
      `VaultEntryWriteCoordinator.saveEntryInternal`(≈121)、`KeePasskeyAutofillService.processFillRequest`(≈120)、
@@ -111,11 +113,27 @@
      `KeePasskeyCredentialProviderService.buildBeginCreateResponse`(≈97)、`CredentialResponseAssembler.buildPasskeyEntries`(≈93)、
      `InnerHeader.deserialize`、`KdbxKeyDerivation.deriveKeys`、`KdbxXmlMetaSerializer.serialize`、`VaultEntryMapper.mapKdbxEntryToUi`(≈112)、
      `HealthCheckEngine.analyzeEntries`(≈106)、`BiometricEnrollmentCoordinator.requestBiometricEnrollment`(≈134) 等；
-  4. **内联十六进制字面量（排除合法形态后）**：`PasskeyCryptoEngine`(10)、`CborEncoder`(10)、
-     `UnlockPasskeyManager`(8)、`SyncEndpointGuard`(7)、`OtpEngine`(7)、`TotpKeyUriParser`(6)、`PasskeyKeyText`(6)、
-     `VariantDictionary`(5)、`KdbxCipherKeyResolver`(4)、`PasskeyKeyCodec`(4)、`KdfBenchmark`(4) 等；
-     **合法形态不整改**（登记于此以防重复排查）：`ThemeMode`/`Color.kt` 的 UI 色板即常量定义、
-     `LittleEndianUtil` 的位运算掩码、`DicewareWordList` 的数据表。
+  4. **内联十六进制字面量**（**§167 复核后重写本目**：原清单以 `grep '0x[0-9A-Fa-f]{2,}'` 计数，
+     **假阳性占多数**——同一行里的 `const val` / `val NAME = byteArrayOf(...)` 常量与数据表定义也被算进去。
+     复核口径：排除**位掩码**（`and 0xFF` / `and 0x0F`）、**常量与数据表定义**、UI 色板，再逐条人工裁定）：
+     - **真实违例只有一族**：`@Preview(uiMode = 0x20)`——**151 处 / 88 份文件**（`src/main` 75 处 / 71 份，
+       其余 76 处在 `app/src/screenshotTest/` 的**生成物**内，该目录由 `.gitignore` 排除）。
+       **§167 已全部改用平台命名常量** `android.content.res.Configuration.UI_MODE_NIGHT_YES`
+       （注解参数须编译期常量，该 Java 字段正是；全仓 `grep 'uiMode = 0x20'` 归零）；
+     - **原判为违例、经复核属合法**：`CborEncoder` 的 10 处全是 `and 0xFF` 字节截断掩码（与已登记的
+       `LittleEndianUtil` 同族）、`TotpKeyUriParser` 的 16 处全是 `val` 常量定义、
+       `PasskeyKeyText` 的 31 处全是 OID/DER 字节串与 ASCII 常量定义、
+       `UnlockPasskeyManager` / `SyncEndpointGuard` / `OtpEngine` 各仅余 1~2 处掩码；
+     - **仍待裁定（低价值，留此备查，勿再全仓重扫）**：① `PasskeyKeyText` 同文件内
+       `ASCII_NEWLINE`(0x0A) 与 `CHAR_LF`(0x0A)、`ASCII_SPACE`(0x20) 与 `CHAR_SPACE`(0x20)
+       是**重复命名的同一值**，应合并为一处定义；② `PasskeyAssertionActivity` / `SimpleJson` /
+       `CallingOriginResolver` 的 `<= 0x20` 控制字符阈值可命名为「ASCII 控制字符上界」；
+       ③ `PasskeyCryptoEngine` 的 6 处 `0x40` / `0x04` / `0x80` / `0x10` / `0x08` / `0xFFFF`
+       需逐处判定是位掩码（合法）还是编码语义值（应收敛）；
+     - **合法形态登记（不整改）**：UI 色板（`ThemeMode` / `Color.kt`）、位运算掩码
+       （`LittleEndianUtil` / `CborEncoder` / 各处 `and 0x0F` 十六进制编码）、数据表
+       （`DicewareWordList` / OID-DER 字节串 / `CborConstants`）、BOM 探测字节
+       （`ImportTextDecoder` / `BitwardenJsonImporter`）。
 - **整改纪律**：
   1. 拆分**不得改变公开 API 与行为**（对齐 `DatabaseSession` 批次 D 先例：门面收敛、职责下沉同包协作类）；
   2. 涉及 `crypto` / `database` 解析面的改动须过既有对拍回归（`.kdbx` 语料 / Parity 套件）；
@@ -130,36 +148,24 @@
   > ⇒ 本条**不得**被读作「第一档已闭环」。`EntryDetailViewModel` 虽有 44 / 58 个成员是一行委托，
   > 但仍有 5 个含实现体的成员（`uiState` 装配 29 行、`exportAttachment` 14 行、协作者构造等），
   > **不满足**限界 §18 的成立前提（「成员全部为一行委托」）⇒ 不得登记为门面理由，只能继续拆。≥100 行函数全部拆分至 ≤50 行；
-  第 4 目清单中的协议 / 格式语义字面量收敛为命名常量；剩余第二档渐进消化，未消化部分在批次文档留清单。
-- **进度（2026-09-18 复核批次，`.\gradlew.bat test --rerun-tasks --max-workers=1` 全绿）**：
-  - **第一档 8 文件**：`EntryDetailViewModel` 564 → 435、`EntryEditFormSections` 557 → 438、
-    `UnlockViewModel` 517 → 368、`SyncCache` 507 → 382（文件层原语下沉 `SyncCacheFiles`）、
-    `EntryDetailScreen` 529 → 426（对话框接线下沉 `EntryDetailDialogHost`）；
-    `SettingsViewModel`(544) 与 `DatabaseSession`(535) 经复核为**纯门面**（成员全为一行委托），
-    按验收标准的「或如实登记限界理由」分支处理，理由 / 边界 / 解除条件已登记
-    [`architecture/已知工程限界.md`](architecture/已知工程限界.md) **§18**；
-    `DatabaseSettingsScreen`(530) **未消化**，列入下方剩余清单。
-  - **≥100 行函数（第 3 目）**：`SyncEngine.openRemote`、`SyncCycleRunner.runSyncCycle`、
-    `KdbxEntryMerger.mergeConflictedEntry`、`VaultEntryMapper.mapKdbxEntryToUi`、
-    `HealthCheckEngine.analyzeEntries`、`BiometricEnrollmentCoordinator.requestBiometricEnrollment`、
-    `VaultEntryWriteCoordinator.saveEntryInternal`、`KeePasskeyAutofillService.processFillRequest`、
-    `SyncConflictController.handleConflictMerge`、`AutofillDatasetBuilders.appendUnlockedDatasets`、
-    `KdbxXmlMetaSerializer.serialize`、`ExtendedSettingsStore.load`、`KdbxHeader.deserialize`、
-    `KdbxXmlParser.parse` 以及本批新完成的 `PasskeyAssertionActivity.onCreate`(153 → 编排 23 行)、
-    `PasswordFillActivity.onCreate`(108 → 33)、`PasskeyCreateActivity.startCreation`(101 → 12)、
-    `KeePasskeyCredentialProviderService.buildBeginCreateResponse`(97 → 26)、
-    `CredentialResponseAssembler.buildPasskeyEntries`(93 → 31)、`InnerHeader.deserialize`(130 → 编排 8 行)、
-    `KdbxKeyDerivation.deriveKeys`(90 → 10)、`VaultListProjection.buildVaultListUiState`(152 → 39)
-    全部降到 ≤50 行（**非 Compose 逻辑函数已清零**）。
-  - **核实方式修正（防重复排查）**：初筛的「括号配平」启发式会把**注释 / 字符串内含花括号**的短函数误计为超长函数。
-    本批逐一实读排除四处假阳性：`FieldReferenceEngine.containsReference`（`{REF:` 文案）、
-    `PasskeyData.usePrivateKeyBytes`（单行委托）、`SimpleJson.objectAt`（单行）、`PuxArchiveReader.parse`
-    （`ImportJson.parse`，实为短函数）；`PasskeyCreateActivity.buildRegistrationJson` 实测 65 行（非 113）。
-  - **第 4 目字面量**：清单内 11 文件的协议 / 格式语义字面量已全部收敛为命名常量；本批另新增
-    `WebAuthnJson`（`app/passkey/WebAuthnJsonKeys.kt`，收敛 passkey 面 5 文件共 **60+ 处** JSON 协议键名与
-    规范取值）、`INNER_RANDOM_STREAM_KEY_SIZE`(64)、`COMPOSITE_SEED_BYTES`(65) / `KEY_COMPONENT_BYTES`(32) /
-    `HMAC_KEY_SELECTOR`(0x01)、`END_OF_HEADER_MARKER`、写侧 `XML_TRUE` / `XML_FALSE` / `boolElement`、
-    `PasskeyKeyText` 的 PEM 空白码位。**全部只挪定义、未改任何取值**。
+  第 4 目清单中的协议 / 格式语义字面量收敛为命名常量（**§167 部分达标**：复核后唯一成片的真实违例
+  `@Preview(uiMode = 0x20)` 已全量归零；余下三小项——同文件重复命名常量、`<= 0x20` 控制字符阈值、
+  `PasskeyCryptoEngine` 位值定性——登记在第 4 目「仍待裁定」段，属低价值小项，**不得**据此把本条读作已闭环）；
+  剩余第二档渐进消化，未消化部分在批次文档留清单。
+- **当前进度（只留结论；逐批改动与验证见 `docs/resolved/batches/155`~`167`）**：
+  - **第一档 8 文件**：达标 4（`UnlockViewModel` 368、`SyncCache` 382、`DatabaseSettingsScreen` 369（§159）、
+    `EntryEditFormSections` 351（§160））；按理由登记 2（`SettingsViewModel` 544 / `DatabaseSession` 535，
+    经复核为**纯门面**，理由 / 边界 / 解除条件见限界 **§18**）；**仍超 2**（`EntryDetailViewModel` 434 /
+    `EntryDetailScreen` 426 ⇒ 见上方验收说明，本条不得读作已闭环）；
+  - **第 3 目（≥100 行函数）**：**非 Compose 逻辑函数已清零**（清单内 20 处全部降到 ≤50 行）；
+    余下为 Compose 侧长函数。度量口径提醒：初筛的括号配平会把「注释 / 字符串内含花括号」的短函数误计
+    为超长（`FieldReferenceEngine.containsReference`、`PasskeyData.usePrivateKeyBytes`、`SimpleJson.objectAt`、
+    `PuxArchiveReader.parse` 四处已实读排除），复核须**实读**；
+  - **第 4 目（字面量）**：协议 / 格式语义字面量的收敛**已完成**（`WebAuthnJson` 键名面、
+    `INNER_RANDOM_STREAM_KEY_SIZE`、`COMPOSITE_SEED_BYTES` / `KEY_COMPONENT_BYTES`、`HMAC_KEY_SELECTOR`、
+    `END_OF_HEADER_MARKER`、写侧 `XML_TRUE` / `XML_FALSE`、`PasskeyKeyText` 的 PEM 空白码位——
+    **全部只挪定义、未改任何取值**）；§167 复核出「唯一成片真实违例」= `@Preview(uiMode = 0x20)` 并已归零，
+    三小项待裁定（见违例清单第 4 目）。
 - **剩余清单（第二档渐进消化，未消化部分如实留此）**：
   1. **Compose 面的超长文件 / 超长函数**（结构性可拆）：`DatabaseSettingsScreen` ——
      **§156 已消化第一段**（三处同形「明文导出二次确认」弹窗收敛为共享组件
