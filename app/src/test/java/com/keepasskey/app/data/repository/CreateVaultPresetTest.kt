@@ -136,7 +136,10 @@ class CreateVaultPresetTest {
 
     @Test
     fun `向导以枚举为单一真相源而非裸字符串`() {
-        val dialog = readSource(WIZARD)
+        // ISSUE-P3-188 §179：向导的密钥文件区 / 预设芯片 / 确认按钮已下沉到同包段落文件，
+        // 故按「门面 + 分支文件」**并集**扫描——**只放宽定位，不降低强度**：
+        // 四条判据原文逐字保留，负向「不得出现裸预设字符串」同样扩扫两处（覆盖面变严而非变宽）。
+        val dialog = readSource(WIZARD) + readSource(WIZARD_SECTIONS)
         assertTrue(
             "向导默认值必须取自枚举",
             dialog.contains("mutableStateOf(CreateVaultPreset.DEFAULT)")
@@ -162,6 +165,10 @@ class CreateVaultPresetTest {
         const val OPENER = "database/src/main/java/com/keepasskey/database/session/SessionOpener.kt"
         const val WIZARD =
             "app/src/main/java/com/keepasskey/app/ui/screens/database/CreateVaultWizardDialog.kt"
+
+        /** §179 段落文件（与 [WIZARD] 并集扫描，缺一即由 `readSource` 的存在性断言报错） */
+        const val WIZARD_SECTIONS =
+            "app/src/main/java/com/keepasskey/app/ui/screens/database/CreateVaultWizardDialogSections.kt"
 
         /** 仓库根：同时具备 app 与 core 模块源码目录的最近祖先 */
         val repositoryRoot: File by lazy {

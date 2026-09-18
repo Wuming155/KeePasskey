@@ -147,7 +147,7 @@
   `@Preview(uiMode = 0x20)` 归零、三小项全部落地，**全部只命名未改值**；余下只有 `crypto` / `database`
   格式面的 7 份「待逐处判定」文件，须与 `.kdbx` 对拍同批做，属独立一段 ⇒ 本条**不得**据此读作已闭环）；
   剩余第二档渐进消化，未消化部分在批次文档留清单。
-- **当前进度（只留结论；逐批改动与验证见 `docs/resolved/batches/155`~`178`）**：
+- **当前进度（只留结论；逐批改动与验证见 `docs/resolved/batches/155`~`179`）**：
   - **第一档 8 文件**（`wc -l` 实测）：**达标 6**（`SyncCache` 382、`UnlockViewModel` 368、
     `DatabaseSettingsScreen` 370（§159 降到 369，后续批次回填至 370）、`EntryEditFormSections` 351（§160）、
     `EntryDetailScreen` 349（§169）、`EntryDetailViewModel` 397（§170））；按理由登记 2（`SettingsViewModel` 543 / `DatabaseSession` 535，
@@ -169,13 +169,16 @@
   > 编号映射（§172 压缩流水后本清单为 1~6 项，第 5 项由 §173、第 6 项由 §176 追加）：早期批次正文里提到的
   > 「剩余清单第 3 项」= 此处第 2 项（第二档渐进消化），「第 5 项」= 此处第 4 项（会话锁定直调用例）。
   1. **Compose 面的长函数**（第 3 目的剩余部分）：**§175 重测 = 28 个 ≥100 行函数，全部为 Compose 面**
-     （§178 消化 `OpenExistingVaultDialog` 一个 ⇒ **现为 27 个**；非 Compose 逻辑函数确认清零）。
+     （§178 消化 `OpenExistingVaultDialog` 一个 ⇒ **现为 27 个**；§179 把 `CreateVaultWizardDialog`
+     234 → 158 但**仍在表内**，其下限由主密码 `CharArray` 擦除链的「单一现场」决定，见 §179 §3；
+     非 Compose 逻辑函数确认清零）。
      重测口径三条：括号配平 + 去注释与字符串 + **跳过单表达式函数**
      ——只上前两条会把 `PasskeyData.usePrivateKeyBytes`（单行委托）、`SimpleJson.isNull`、
      `PuxArchiveReader.asLong` 误计成 154~285 行（单表达式函数没有自己的左花括号，配平会吞掉后面的声明）。
      清单与逐批消减见 [`resolved/batches/175-健康度页仪表段下沉批次.md`](resolved/batches/175-健康度页仪表段下沉批次.md) §2
-     （Top：`keepasskeySettingsNavGraph` 252、`CreateVaultWizardDialog` 234、`HealthCheckScreen` 326→227（§175）、
-     `KeePasskeyApp` 202、`ConflictResolutionScreen` 172 …；`OpenExistingVaultDialog` 226→**96（§178，已出本目）**）。
+     （Top：`keepasskeySettingsNavGraph` 252、`CreateVaultWizardDialog` 234→158（§179，仍在表内）、
+     `HealthCheckScreen` 326→227（§175）、`KeePasskeyApp` 202、`ConflictResolutionScreen` 172 …；
+     `OpenExistingVaultDialog` 226→**96（§178，已出本目）**）。
      **待裁的口径问题**：两个 NavGraph 与 `KeePasskeyApp` 属**声明式装配表**，按分支拆反而损害可读性——
      是否计入本目尚未裁决，裁前不得直接开拆。
      拆法与 §156 / §159 / §175 同：同包段落组件（窄参数、不读 `UiState`、不自持状态）。
@@ -202,7 +205,8 @@
      拆散反害查表语义。
   3. **接线守卫与结构耦合的长期代价（搬家必读）**：结构性搬家会改写静态源码比对断言的**定位范围**——
      首例为三测试类同时失配（`AutofillAuthResultWiringTest` / `AlgoHotPathGuardsTest` /
-     `OneTapInteractionWiringTest`，见 §160 留痕），§166 再把 `AlgoHotPathGuardsTest` 的两条判据改为并集。
+     `OneTapInteractionWiringTest`，见 §160 留痕），§166 再把 `AlgoHotPathGuardsTest` 的两条判据改为并集，
+     §179 把 `CreateVaultPresetTest` 的向导判据扩为「向导本体 + 段落文件」并集（**负向那条一并扩扫**）。
      规则：凡搬家**必须**同批把守卫扫描改为「门面 + 分支文件」**并集**，做到「**只放宽定位串、不降低断言
      强度**」（计数类判据两侧计数保持不变）；**不得**以删除或放宽守卫凑绿（`AGENTS.md` §3 测试资产纪律）。
      并集里少一份文件不会静默通过——`readSource` 对不存在的路径先断言失败。

@@ -5,26 +5,15 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -34,31 +23,16 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.CreateVaultPreset
 import com.keepasskey.app.ui.components.SecurePasswordField
-import com.keepasskey.app.ui.components.disabledPrimaryButtonBorder
-import com.keepasskey.app.ui.components.disabledPrimaryButtonColors
 import com.keepasskey.app.ui.theme.CapsuleShape
-
-/**
- * 新建库向导中密钥文件来源的选择态（ISSUE-P3-21：替换原裸字符串 `"GENERATE"` / `"SELECT_EXISTING"`）。
- */
-private enum class KeyFileSourceChoice {
-    /** 生成全新密钥文件（由 database 模块唯一生成器产出 KeePass 2.x XML v2.0） */
-    GENERATE,
-
-    /** 使用用户从设备选取的既有密钥文件 */
-    SELECT_EXISTING
-}
 
 /**
  * 生成型密钥文件的一次性保存提示（ISSUE-P3-21 验收 2）。
@@ -119,6 +93,9 @@ internal fun KeyFileOneTimeSaveDialog(
 /**
  * 新建密码库向导（ISSUE-P3-31 批次 B 自 `DatabasePickerScreen.kt` 拆出，纯结构性改动）。
  *
+ * ISSUE-P3-188 §179：密钥文件区、预设芯片与确认按钮下沉至同包 `CreateVaultWizardDialogSections.kt`；
+ * **主密码 / 确认密码的 `CharArray` 管线与离场擦除的 `DisposableEffect` 刻意留在本体**（见该文件 KDoc）。
+ *
  * 主密码全程以 [CharArray] 承载（[SecurePasswordField] 桥接），不进入 String / UiState / StateFlow；
  * 弹窗离场（确认 / 取消 / 进程回收）经 [DisposableEffect] 擦除组件内持有的全部密码副本。
  */
@@ -147,7 +124,6 @@ internal fun CreateVaultWizardDialog(
     // ISSUE-P2-85：预设改为类型化枚举——芯片与落盘共用 `CreateVaultPreset` 单一真相源，
     // 消除「裸字符串标签 + 落盘侧只按 contains("AES-KDF") 反推」导致的算法静默丢失。
     var selectedPreset by remember { mutableStateOf(CreateVaultPreset.DEFAULT) }
-    val presets = CreateVaultPreset.entries
 
     val keyPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
@@ -230,82 +206,20 @@ internal fun CreateVaultWizardDialog(
                         .padding(10.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth().clickable { useKeyFile = !useKeyFile }
-                    ) {
-                        Checkbox(checked = useKeyFile, onCheckedChange = { useKeyFile = it })
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Column {
-                            Text(
-                                text = stringResource(R.string.picker_keyfile_toggle),
-                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold)
-                            )
-                            Text(
-                                text = stringResource(R.string.picker_keyfile_toggle_desc),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
+                    KeyFileToggleRow(
+                        useKeyFile = useKeyFile,
+                        onUseKeyFileChange = { useKeyFile = it }
+                    )
 
                     if (useKeyFile) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            FilterChip(
-                                selected = keyFileChoice == KeyFileSourceChoice.GENERATE,
-                                onClick = { keyFileChoice = KeyFileSourceChoice.GENERATE },
-                                label = { Text(stringResource(R.string.picker_keyfile_generate), fontSize = 11.sp) },
-                                shape = CapsuleShape
-                            )
-                            FilterChip(
-                                selected = keyFileChoice == KeyFileSourceChoice.SELECT_EXISTING,
-                                onClick = { keyFileChoice = KeyFileSourceChoice.SELECT_EXISTING },
-                                label = { Text(stringResource(R.string.picker_keyfile_select_existing), fontSize = 11.sp) },
-                                shape = CapsuleShape
-                            )
-                        }
-
-                        if (keyFileChoice == KeyFileSourceChoice.GENERATE) {
-                            // ISSUE-P3-21：原文案声称「自动保存至安全存储」，实际并无自动保存——
-                            // 现改为如实描述「生成后强制一次性交付」
-                            Text(
-                                text = stringResource(R.string.db_picker_keyfile_generate_desc),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                        } else {
-                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                OutlinedButton(
-                                    onClick = { keyPickerLauncher.launch(arrayOf("*/*")) },
-                                    shape = CapsuleShape,
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(16.dp))
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(stringResource(R.string.picker_keyfile_pick), fontSize = 12.sp)
-                                }
-
-                                if (selectedKeyFileName.isNotBlank()) {
-                                    Text(
-                                        text = stringResource(R.string.picker_file_selected, selectedKeyFileName),
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.primary
-                                    )
-                                }
-
-                                OutlinedTextField(
-                                    value = selectedKeyFilePath,
-                                    onValueChange = { selectedKeyFilePath = it },
-                                    label = { Text(stringResource(R.string.picker_keyfile_path_label)) },
-                                    placeholder = { Text("content://... 或 /path/to/keyfile.key") },
-                                    singleLine = true,
-                                    modifier = Modifier.fillMaxWidth()
-                                )
-                            }
-                        }
+                        KeyFileSourceSection(
+                            keyFileChoice = keyFileChoice,
+                            onKeyFileChoiceChange = { keyFileChoice = it },
+                            selectedKeyFileName = selectedKeyFileName,
+                            selectedKeyFilePath = selectedKeyFilePath,
+                            onSelectedKeyFilePathChange = { selectedKeyFilePath = it },
+                            onBrowse = { keyPickerLauncher.launch(arrayOf("*/*")) }
+                        )
                     }
                 }
 
@@ -315,23 +229,18 @@ internal fun CreateVaultWizardDialog(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
 
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    presets.forEach { preset ->
-                        FilterChip(
-                            selected = selectedPreset == preset,
-                            onClick = { selectedPreset = preset },
-                            label = { Text(preset.chipLabel, fontSize = 11.sp) },
-                            shape = CapsuleShape
-                        )
-                    }
-                }
+                CreateVaultPresetChips(
+                    selected = selectedPreset,
+                    onSelect = { selectedPreset = it }
+                )
             }
         },
         confirmButton = {
-            Button(
-                // H2 整改：直接移交组件持有的 CharArray（ViewModel 复制私有副本并自行擦除）
-                // ISSUE-P3-21：SELECT_EXISTING 时上行选中的密钥文件 Uri，其字节真实参与复合密钥
-                onClick = {
+            CreateVaultConfirmButton(
+                enabled = isFormValid,
+                onCreate = {
+                    // H2 整改：直接移交组件持有的 CharArray（ViewModel 复制私有副本并自行擦除）
+                    // ISSUE-P3-21：SELECT_EXISTING 时上行选中的密钥文件 Uri，其字节真实参与复合密钥
                     onConfirm(
                         vaultName,
                         passwordChars,
@@ -339,16 +248,8 @@ internal fun CreateVaultWizardDialog(
                         selectedPreset,
                         if (keyFileChoice == KeyFileSourceChoice.SELECT_EXISTING) selectedKeyFilePath else null
                     )
-                },
-                enabled = isFormValid,
-                shape = CapsuleShape,
-                // ISSUE-P3-134：接入禁用态共用配色——MD3 默认 onSurface @12% 在 background
-                // 画布上仅 1.29:1（见 ButtonStyles.kt），未填完表单时「创建」形同消失
-                colors = disabledPrimaryButtonColors(),
-                border = disabledPrimaryButtonBorder()
-            ) {
-                Text(stringResource(R.string.btn_create))
-            }
+                }
+            )
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
