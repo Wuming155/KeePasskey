@@ -146,7 +146,7 @@
   `@Preview(uiMode = 0x20)` 归零、三小项全部落地，**全部只命名未改值**；余下只有 `crypto` / `database`
   格式面的 7 份「待逐处判定」文件，须与 `.kdbx` 对拍同批做，属独立一段 ⇒ 本条**不得**据此读作已闭环）；
   剩余第二档渐进消化，未消化部分在批次文档留清单。
-- **当前进度（只留结论；逐批改动与验证见 `docs/resolved/batches/155`~`185`（§180 为文档面批次，不属本条））**：
+- **当前进度（只留结论；逐批改动与验证见 `docs/resolved/batches/155`~`186`（§180 为文档面批次，不属本条））**：
   - **第一档 8 文件**（`wc -l` 实测）：**达标 6**（`SyncCache` 382、`UnlockViewModel` 368、
     `DatabaseSettingsScreen` 370（§159 降到 369，后续批次回填至 370）、`EntryEditFormSections` 351（§160）、
     `EntryDetailScreen` 349（§169）、`EntryDetailViewModel` 397（§170））；按理由登记 2（`SettingsViewModel` 543 / `DatabaseSession` 535，
@@ -171,15 +171,15 @@
   > 编号映射（§172 压缩流水后本清单为 1~5 项；第 6 项由 §176 追加、§181 就地改写、**§182 结案移出**，
 > 处置结论见限界 **§20** 与 [`resolved/batches/182-合并层冲突对下沉与早退守卫限界批次.md`](resolved/batches/182-合并层冲突对下沉与早退守卫限界批次.md)）：早期批次正文里提到的
   > 「剩余清单第 3 项」= 此处第 2 项（第二档渐进消化），「第 5 项」= 此处第 4 项（会话锁定直调用例）。
-  1. **Compose 面的长函数**（第 3 目的剩余部分）：**§185 复跑 = 26 个 ≥100 行函数，全部为 Compose 面**（§181 首测 28 → §183 削 `Argon2ParametersDialog` → §185 削 `KeePasskeyApp`）；
+  1. **Compose 面的长函数**（第 3 目的剩余部分）：**§186 复跑 = 25 个 ≥100 行函数，全部为 Compose 面**（§181 首测 28 → §183 削 `Argon2ParametersDialog` → §185 削 `KeePasskeyApp` → §186 削 `UnlockStandardUnlockContent`）；
      逐个名单见 [`resolved/batches/181-长函数度量工具化与快照分流批次.md`](resolved/batches/181-长函数度量工具化与快照分流批次.md) §3。
      **计数今后一律现跑 `python tools/doc/long_functions.py`**（三条判据与其踩坑史写在工具文档串里，
      条目内不再抄录，以免重演 §175 一次性脚本漏报 10 条的失真）。
      已消减：§178 `OpenExistingVaultDialog` 226→96、§183 `Argon2ParametersDialog` 168→80、
-     §185 `KeePasskeyApp` 202→86（三者均**出表**，§185 另补 5 例宿主单测）；
+     §185 `KeePasskeyApp` 202→86、§186 `UnlockStandardUnlockContent` 158→71（均**出表**，§185 另补 5 例宿主单测）；
      §179 `CreateVaultWizardDialog` 234→158（**仍在表内**，下限由主密码 `CharArray` 擦除链的「单一现场」决定，见 §179 §3）。
      **口径问题已裁决（§184，PD-11）**：两个纯接线装配表 `keepasskeySettingsNavGraph`（252，逻辑行 1）与
-     `keepasskeyNavGraph`（164，逻辑行 0）**豁免本目 ⇒ 26 项中扣除二者，待拆实为 24 个**；
+     `keepasskeyNavGraph`（164，逻辑行 0）**豁免本目 ⇒ 25 项中扣除二者，待拆实为 23 个**；
      **`KeePasskeyApp` 不豁免**，已按该裁决于 §185 下沉（逻辑行 10 → 0）。裁决全文、分类计数依据与
      「逻辑行 ≥5 即重新计入」的重开条件见 [`architecture/产品裁决登记.md`](architecture/产品裁决登记.md) PD-11。
      拆法与 §156 / §159 / §175 / §178 / §179 同：同包段落组件（窄参数、不读 `UiState`、不自持状态），
@@ -191,17 +191,18 @@
      「弹了确认框却导出别的对象」失去可断言落点；② `AutofillConfirmActivity.completeAuthResult`——
      唯一行为级证据是设备侧 `AutofillAuthChainDeviceTest`；③ `SyncConflictController.autoMergeAndUpload`——
      承载 `localDbOwned` 擦除判据的一处调用点（§166 §2）。
-  2. **第二档（400~500 行文件）渐进消化**：**§176 后为 29 个**（口径：五模块 `src/main` 全部 `.kt`
+  2. **第二档（400~500 行文件）渐进消化**：**§186 后为 28 个**（口径：五模块 `src/main` 全部 `.kt`
      逐文件计数、**400 与 500 两端皆含**，脚本 `python tools/doc/count_line_tiers.py` 一次给出两档；
      取数须在**最终写盘后**——§165 §7 校正过一批「测量点早于写盘」造成的 `+1` 漂移）。
      当前头部：`RealVaultRepository` 489、`VaultRepository` 478、`RuntimeIntegrityDetector` 470、
      `KdbxHeader` 461、`KdbxXmlParser` 454、`VaultListScreen` 447、`UnlockScreen` 446。
-     **已消化 13 个**（一律「只搬不改逻辑」，逐批留痕 `resolved/batches/159`~`176`）：
+     **已消化 14 个**（一律「只搬不改逻辑」，逐批留痕 `resolved/batches/159`~`186`）：
      `DatabaseSettingsScreen` 530→369、`VaultListDialogs` 490→280、`PasskeyCreateActivity` 460→359、
      `VaultEntryMapper` 490→384、`AutofillConfirmActivity` 475→366、`EntryEditScreen` 472→319、
      `SyncConflictController` 461→355、`EntryDetailScreen` 427→349、`EntryDetailViewModel` 434→397、
      `PasskeyAssertionActivity` 450→267（§173，与 §162 的注册侧对称）、`PasskeyCryptoEngine` 453→269（§174）、
-     `HealthCheckScreen` 406→299（§175）、`SettingsPreferencesController` 446→379（§176）。
+     `HealthCheckScreen` 406→299（§175）、`SettingsPreferencesController` 446→379（§176）、
+     `UnlockContentSections` 430→336（§186，与第 3 目一批双降）。
      **刻意排后（是取舍不是遗漏）**：① `RealVaultRepository` / `VaultRepository`——整树读写与擦除边界，
      牵动限界 §1.6 的可达性穷举；② `KdbxHeader` / `KdbxXmlParser`——`.kdbx` 格式面，须过官方实现
      端到端对拍（§38 证据纪律），属独立一段；③ `DicewareWordList` 408——词表数据文件，

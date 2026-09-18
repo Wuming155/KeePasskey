@@ -51,9 +51,12 @@ def classify(rel: str, fn: str) -> None:
             "空行": sum(1 for l in body if not l.strip()),
             "逻辑行": len(logic),
         }
-        verdict = "计入本目" if len(logic) >= 5 or any(l.startswith(("when ", "for ", "while ")) for l in logic) else "装配表（PD-11 豁免）"
+        # 只报「是否触发 PD-11 重开条件」——**是否属装配表由人判定**（PD-11 边界①：豁免只覆盖
+        # NavGraphBuilder 扩展函数，屏幕内容函数即使逻辑行为 0 也不因此豁免）。
+        reopened = len(logic) >= 5 or any(l.startswith(("when ", "for ", "while ")) for l in logic)
         print(f"{fn} (L{i + 1}-{end + 1}): " + "  ".join(f"{k}={v}" for k, v in counts.items()))
-        print(f"    → PD-11 判定：{verdict}")
+        print(f"    → PD-11 重开条件：{'**已触发**（逻辑行 ≥5 或含 when/循环）' if reopened else '未触发'}"
+              "；是否属豁免范围须按 PD-11 边界①自行判定")
         for l in logic[:10]:
             print(f"      逻辑行: {l[:100]}")
 

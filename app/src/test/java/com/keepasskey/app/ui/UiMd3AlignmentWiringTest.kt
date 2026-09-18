@@ -91,7 +91,12 @@ class UiMd3AlignmentWiringTest {
         // `HealthCheckScreenSections.kt`，故该处改按「页面 + 段落组件」**并集**扫描——
         // 两条断言逐字保留，不做放宽（只放宽定位串，见 AGENTS.md §3 测试资产纪律）。
         listOf(
-            listOf("app/src/main/java/com/keepasskey/app/ui/screens/unlock/UnlockContentSections.kt"),
+            // §186：解锁主按钮（该文件内 disabledPrimaryButton* 的唯一使用点）已拆到同包
+            // `UnlockStandardUnlockSections.kt` ⇒ 此条并按「原文件 + 段落文件」，两条断言逐字不动。
+            listOf(
+                "app/src/main/java/com/keepasskey/app/ui/screens/unlock/UnlockContentSections.kt",
+                "app/src/main/java/com/keepasskey/app/ui/screens/unlock/UnlockStandardUnlockSections.kt"
+            ),
             listOf(
                 "app/src/main/java/com/keepasskey/app/ui/screens/settings/subscreens/HealthCheckScreen.kt",
                 "app/src/main/java/com/keepasskey/app/ui/screens/settings/subscreens/HealthCheckScreenSections.kt"
