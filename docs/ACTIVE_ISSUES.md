@@ -155,7 +155,7 @@
   `@Preview(uiMode = 0x20)` 归零、三小项全部落地，**全部只命名未改值**；余下只有 `crypto` / `database`
   格式面的 7 份「待逐处判定」文件，须与 `.kdbx` 对拍同批做，属独立一段 ⇒ 本条**不得**据此读作已闭环）；
   剩余第二档渐进消化，未消化部分在批次文档留清单。
-- **当前进度（只留结论；逐批改动与验证见 `docs/resolved/batches/155`~`170`）**：
+- **当前进度（只留结论；逐批改动与验证见 `docs/resolved/batches/155`~`171`）**：
   - **第一档 8 文件**：达标 5（`UnlockViewModel` 368、`SyncCache` 382、`DatabaseSettingsScreen` 369（§159）、
     `EntryEditFormSections` 351（§160）、`EntryDetailScreen` 349（§169）、`EntryDetailViewModel` 397（§170））；按理由登记 2（`SettingsViewModel` 543 / `DatabaseSession` 535，
     经复核为**纯门面**，理由 / 边界 / 解除条件见限界 **§18**）；**仍超 0** ⇒ 第一档维度闭环（详见上方验收标准与 §170 批次正文）；
@@ -222,6 +222,10 @@
      **核实方式**：2026-09-18，`grep -rln "lockSession|SessionLock" app/src/test/.../{detail,edit,settings}` 无命中。
      **整改**：为三者各补一例「注册观测器 → 触发 lock → 断言明文通道已清空」的宿主用例
      （属宿主可测面，不需要设备），并保持 `SessionLockGuardTest` 只测样板、两者不互相顶替。
+     **进度**：§171 已补 `EntryDetailViewModel` 一例（先验证「明文与强度读数确已驻留」再断言锁定后归零，
+     余 `EntryEditViewModel`（应断言 `clearAllSecrets()`）与 `SettingsViewModel`（应断言 WebDAV 口令与
+     S3 两个密钥的预填清空）两例，各自所需夹具与应断言通道见
+     [`resolved/batches/171-详情页锁定即擦除直调用例批次.md`](resolved/batches/171-详情页锁定即擦除直调用例批次.md) §2~§3。
 - **依据**：`.codebuddy/rules/engineering-rules.md` §高内聚低耦合 / §禁止魔法数字；本条目为 2026-09-18 用户命题「消除巨型类和魔法数字」。
 
 ### ISSUE-P3-187 JNI 零拷贝评估（原生加密内核的边界拷贝成本）

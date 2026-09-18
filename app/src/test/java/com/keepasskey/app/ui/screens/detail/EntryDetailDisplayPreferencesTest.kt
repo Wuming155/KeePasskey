@@ -21,6 +21,7 @@ import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -50,7 +51,9 @@ class EntryDetailDisplayPreferencesTest {
     private fun TestScope.createViewModel(
         entryId: String = ENTRY_IN_DEV_GROUP,
         repository: FakeVaultRepository = FakeVaultRepository(),
-        settingsSource: ExtendedSettingsSource = { ExtendedSettings() }
+        settingsSource: ExtendedSettingsSource = { ExtendedSettings() },
+        // §171：会话锁定擦除用例需要真实会话（lock() 在未开库的实例上即会通知观测器）
+        databaseSession: com.keepasskey.database.session.DatabaseSession? = null
     ): EntryDetailViewModel {
         val viewModel = EntryDetailViewModel(
             appContext = null,
@@ -63,7 +66,8 @@ class EntryDetailDisplayPreferencesTest {
             debugLog = null,
             customIconAdmin = null,
             displayDispatcher = UnconfinedTestDispatcher(testScheduler),
-            extendedSettingsSource = settingsSource
+            extendedSettingsSource = settingsSource,
+            databaseSession = databaseSession
         )
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
             viewModel.uiState.collect {}
@@ -304,5 +308,52 @@ class EntryDetailDisplayPreferencesTest {
 
         /** 虚构假密码（非真实凭据，符合测试数据规约） */
         const val FAKE_PASSWORD = "Fake-Pwd-1"
+    }
+    /**
+     * `ISSUE-P3-188` 剩余清单第 5 项（§171 补）：详情页 VM 的「锁定即擦除」回调路径此前**无宿主直调用例**
+     * （五个 VM 里只有 `GeneratorViewModel` 与 `AutofillPickerViewModel` 有）。§170 把注册/注销三件套
+     * 收敛成 `SessionLockGuard` 之后，成对性由 `SessionLockGuardTest` 把守，而**本 VM 传入的擦除动作**
+     * 需要自己的用例：默认明文偏好下先按需解密，再触发 `lock()`，断言明文与强度读数一并撤回。
+     *
+     * 不在此断言 `isPasswordVisible`：`clearAll()` 会连 `passwordMaskOverride` 一起复位，
+     * 而 `maskPasswordsDefault = false` 时按 [FieldMaskPolicy] 推导「仍应可见」——
+     * 锁定后会话本身已无条目投影可解密，故这里只把「明文不得驻留」这一条钉住。
+     */
+    @Test
+    fun `会话锁定后已按需解密出的密码明文与强度读数一并撤回`() = runTest {
+        val repository = FakeVaultRepository()
+        repository.saveEntry(
+            UiVaultEntry(
+                id = PASSWORD_ENTRY_ID,
+                title = "锁定擦除用例条目",
+                username = "user",
+                url = "https://example.com"
+            ),
+            FAKE_PASSWORD.toCharArray(),
+            null,
+            emptyMap()
+        )
+        val session = com.keepasskey.database.session.DatabaseSession()
+        val viewModel = createViewModel(
+            entryId = PASSWORD_ENTRY_ID,
+            repository = repository,
+            settingsSource = { ExtendedSettings(maskPasswordsDefault = false) },
+            databaseSession = session
+        )
+
+        viewModel.onScreenEntered()
+        testScheduler.runCurrent()
+        testScheduler.awaitOffMainComputation {
+            viewModel.uiState.value.revealedPassword == FAKE_PASSWORD
+        }
+        assertEquals("前提：默认不遮掩偏好应已按需解密出明文", FAKE_PASSWORD, viewModel.uiState.value.revealedPassword)
+        assertNotNull("前提：按需解密应同时给出真实熵读数", viewModel.uiState.value.passwordStrengthBits)
+
+        session.lock()
+        testScheduler.runCurrent()
+        testScheduler.advanceUntilIdle()
+
+        assertNull("锁定后必须撤回已揭示的密码明文（ISSUE-P2-65）", viewModel.uiState.value.revealedPassword)
+        assertNull("锁定后必须一并撤回口令强度读数", viewModel.uiState.value.passwordStrengthBits)
     }
 }
