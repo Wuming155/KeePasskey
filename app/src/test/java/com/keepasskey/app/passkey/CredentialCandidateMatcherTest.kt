@@ -159,6 +159,35 @@ class CredentialCandidateMatcherTest {
         )
     }
 
+    // ── allowCredentials 收敛（本次整改：请求列出的凭据之外一律不得下发候选） ──
+
+    @Test
+    fun `allowCredentials 非空时白名单外的凭据不得入选`() {
+        val entry = passkeyEntry("https://$domain", rpId = domain)
+
+        assertFalse(
+            "请求明确列出 allowCredentials 而本凭据不在其中时，不得作为候选下发",
+            CredentialCandidateMatcher.matchesPasskey(
+                entry, browserFlow = true, targetRpId = domain, callingPackage = "com.android.chrome",
+                packageDimensionAllowed = false, allowedCredentialIds = setOf("other-cred")
+            )
+        )
+        assertTrue(
+            "凭据 id 在白名单内时必须入选",
+            CredentialCandidateMatcher.matchesPasskey(
+                entry, browserFlow = true, targetRpId = domain, callingPackage = "com.android.chrome",
+                packageDimensionAllowed = false, allowedCredentialIds = setOf("cred")
+            )
+        )
+        assertTrue(
+            "空集表示请求未限定（无用户名 / discoverable 流程），不得收敛",
+            CredentialCandidateMatcher.matchesPasskey(
+                entry, browserFlow = true, targetRpId = domain, callingPackage = "com.android.chrome",
+                packageDimensionAllowed = false, allowedCredentialIds = emptySet()
+            )
+        )
+    }
+
     @Test
     fun `非 passkey 条目不得进入通行密钥候选`() {
         assertFalse(

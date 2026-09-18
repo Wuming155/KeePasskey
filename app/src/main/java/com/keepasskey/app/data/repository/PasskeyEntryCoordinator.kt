@@ -28,6 +28,65 @@ internal class PasskeyEntryCoordinator(
         return db.rootGroup.allEntries()
     }
 
+    /**
+     * 新建或在**既有条目**上原地替换 Passkey 数据（整改：同站点重复注册曾产生重复条目）。
+     *
+     * 复用条件：**同 rpId（域匹配）+ 同用户名**的既有 Passkey 条目。命中时保留该条目的其它
+     * 内容（标题 / 备注 / 密码 / 标签 / 历史 / 附件等），仅整体换新 Passkey schema 字段；
+     * 未命中则按原口径新建条目。
+     */
+    suspend fun saveOrReplacePasskeyEntry(data: PasskeyData, boundPackage: String?): KdbxEntry {
+        val existing = findReusablePasskeyEntry(data) ?: return saveNewPasskeyEntry(data, boundPackage)
+
+        val preserved = existing.customFields.filterNot { PasskeyData.isPasskeyFieldKey(it.key) }
+        var updated = existing.copy(
+            customFields = preserved + data.toCustomFields(),
+            times = existing.times.withModified()
+        )
+        if (existing.userName.isBlank()) {
+            updated = updated.withField(KdbxConstants.Fields.USER_NAME, data.userName)
+        }
+        if (existing.title.isBlank()) {
+            updated = updated.withField(KdbxConstants.Fields.TITLE, passkeyTitle(data))
+        }
+        if (existing.url.isBlank()) {
+            updated = updated.withField(KdbxConstants.Fields.URL, passkeyUrl(data, boundPackage))
+        }
+
+        databaseSession.saveEntry(updated)
+        val saved = persistSession()
+        if (saved is KdbxResult.Failure) {
+            debugLog.warn(TAG, "Passkey 条目替换成功但落盘失败: ${saved.error.javaClass.simpleName}")
+        }
+        return updated
+    }
+
+    /**
+     * `excludeCredentials` 查重（单趟扫描）：返回 [candidates] 中**已存在于库内**的 credentialId 集合。
+     *
+     * WebAuthn 规范要求认证器拒绝创建排除列表内的凭据；命中即由调用方 fail-closed 拒绝注册，
+     * 避免同一凭据被重复登记。
+     */
+    suspend fun findExistingCredentialIds(candidates: Set<String>): Set<String> {
+        if (candidates.isEmpty()) return emptySet()
+        val found = LinkedHashSet<String>()
+        for (entry in allEntries()) {
+            val passkey = PasskeyData.fromCustomFields(entry.customFields) ?: continue
+            if (passkey.credentialId in candidates) found += passkey.credentialId
+        }
+        return found
+    }
+
+    /** 可复用的既有 Passkey 条目（同 rpId + 同用户名） */
+    private suspend fun findReusablePasskeyEntry(data: PasskeyData): KdbxEntry? {
+        val cleanTarget = DomainMatcher.extractDomain(data.relyingPartyId)
+        return allEntries().firstOrNull { entry ->
+            val passkey = PasskeyData.fromCustomFields(entry.customFields) ?: return@firstOrNull false
+            passkey.userName == data.userName &&
+                DomainMatcher.isDomainMatch(passkey.relyingPartyId, cleanTarget)
+        }
+    }
+
     /** 按 RP-ID 匹配候选条目：Passkey rpId 域匹配优先，条目 URL 域匹配兜底 */
     suspend fun findEntriesForRpId(rpId: String): List<KdbxEntry> {
         val cleanTarget = DomainMatcher.extractDomain(rpId)
@@ -48,12 +107,8 @@ internal class PasskeyEntryCoordinator(
 
     /** 新建 Passkey 条目并立即落盘；写库成功但序列化失败时如实留痕日志 */
     suspend fun saveNewPasskeyEntry(data: PasskeyData, boundPackage: String?): KdbxEntry {
-        val title = "${data.userName}@${data.relyingPartyId}"
-        val url = if (boundPackage.isNullOrBlank()) {
-            "https://${data.relyingPartyId}"
-        } else {
-            com.keepasskey.app.autofill.AutofillPackageNames.boundUrl(boundPackage)
-        }
+        val title = passkeyTitle(data)
+        val url = passkeyUrl(data, boundPackage)
         val fields = mapOf(
             KdbxConstants.Fields.TITLE to ProtectedString(title, isProtected = false),
             KdbxConstants.Fields.USER_NAME to ProtectedString(data.userName, isProtected = false),
@@ -148,6 +203,17 @@ internal class PasskeyEntryCoordinator(
         customFields = entry.customFields.withSignCount(value),
         times = entry.times.withModified()
     )
+
+    /** 新条目标题（`用户名@rpId`） */
+    private fun passkeyTitle(data: PasskeyData): String = "${data.userName}@${data.relyingPartyId}"
+
+    /** 条目 URL：普通应用注册记 `android://<包名>`（严格包名边界匹配），浏览器注册记 `https://<rpId>` */
+    private fun passkeyUrl(data: PasskeyData, boundPackage: String?): String =
+        if (boundPackage.isNullOrBlank()) {
+            "https://${data.relyingPartyId}"
+        } else {
+            com.keepasskey.app.autofill.AutofillPackageNames.boundUrl(boundPackage)
+        }
 
     /** 以受保护字段形态写入计数器：命中则原位替换，缺失则追加 */
     private fun List<KdbxCustomField>.withSignCount(value: Int): List<KdbxCustomField> {

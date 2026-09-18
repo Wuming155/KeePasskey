@@ -793,6 +793,11 @@
     <string name="autofill_cm_sub">System-level credential management on Android 16+, unified passkey and password filling</string>
     <string name="autofill_passkey_title">Passkey support</string>
     <string name="autofill_passkey_sub">Sign in with device-generated passkeys in supporting apps and sites</string>
+    <!-- Privileged browser allowlist (passkey availability in the Credential Manager channel) -->
+    <string name="settings_passkey_privileged_browsers">Privileged browser allowlist</string>
+    <string name="settings_passkey_privileged_sub">Let browsers other than Chrome / Firefox use passkeys</string>
+    <string name="settings_passkey_privileged_warning">Enabling an app lets it request passkeys for any site identity — that is how browser delegation works. Only enable browsers you trust: the fingerprint is read from the app\'s own signing certificate, so a changed signature or a same-name sideloaded app stops matching immediately.</string>
+    <string name="settings_passkey_privileged_empty">No browser apps detected.</string>
     <string name="autofill_legacy_title">Legacy autofill service</string>
     <string name="autofill_legacy_sub">Accessibility-based filling compatible with older Android versions</string>
     <string name="autofill_section_ux">Filling experience</string>

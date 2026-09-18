@@ -403,6 +403,12 @@ class RealVaultRepository @Inject constructor(
     override suspend fun saveNewPasskeyEntry(data: PasskeyData, boundPackage: String?): KdbxEntry =
         passkeyEntries.saveNewPasskeyEntry(data, boundPackage)
 
+    override suspend fun saveOrReplacePasskeyEntry(data: PasskeyData, boundPackage: String?): KdbxEntry =
+        passkeyEntries.saveOrReplacePasskeyEntry(data, boundPackage)
+
+    override suspend fun findExistingPasskeyCredentialIds(credentialIds: Set<String>): Set<String> =
+        passkeyEntries.findExistingCredentialIds(credentialIds)
+
     override suspend fun patchPasskeySignCount(entryId: String, newCount: Int) =
         passkeyEntries.patchPasskeySignCount(entryId, newCount)
 

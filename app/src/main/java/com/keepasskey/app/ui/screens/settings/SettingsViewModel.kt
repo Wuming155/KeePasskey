@@ -87,7 +87,10 @@ class SettingsViewModel @Inject constructor(
     private val childDatabaseSessionManager: ChildDatabaseSessionManager? = null,
     // ISSUE-P3-20：SAF 持久化读授权 + 密钥文件字节读取通道（复用解锁特性既有契约，
     // 生产 DI 经 KeyFileAccessModule 注入 SafKeyFileAccess）。允许为 null 仅用于既有单测注入。
-    private val keyFileAccess: KeyFileAccess? = null
+    private val keyFileAccess: KeyFileAccess? = null,
+    // CM 通道特权浏览器白名单（内置已取证条目 + 用户显式启用的浏览器）。允许为 null 仅用于
+    // 既有单测注入；缺失时列表恒为空（如实「未检测到」，不谎报）。
+    private val passkeyPrivilegedBrowserStore: com.keepasskey.app.data.repository.PasskeyPrivilegedBrowserStore? = null
 ) : ViewModel() {
 
     companion object {
@@ -372,6 +375,34 @@ class SettingsViewModel @Inject constructor(
 
     /** 移出黑名单。@return true=移除成功；false=包名非法或本就不在黑名单中 */
     fun unblockAutofillPackage(packageName: String): Boolean = preferences.unblockAutofillPackage(packageName)
+
+    // ===== CM 通道：特权浏览器白名单（让 Chrome / Firefox 之外的浏览器也能用通行密钥） =====
+
+    private val privilegedBrowsersState = MutableStateFlow(
+        emptyList<com.keepasskey.app.data.repository.PasskeyPrivilegedBrowserStore.BrowserApp>()
+    )
+
+    /** 已安装浏览器候选 + 启用状态；独立于 [uiState] 下发（避免 combine 元组膨胀）。 */
+    val privilegedBrowsers:
+        StateFlow<List<com.keepasskey.app.data.repository.PasskeyPrivilegedBrowserStore.BrowserApp>> =
+        privilegedBrowsersState
+
+    /** 重新扫描已安装浏览器（进入设置页时调用；读取失败的应用不会被虚构出来） */
+    fun refreshPrivilegedBrowsers() {
+        val store = passkeyPrivilegedBrowserStore ?: return
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            privilegedBrowsersState.value = store.installedBrowsers()
+        }
+    }
+
+    /** 启用 / 停用某个浏览器的特权资格（启用时指纹取自该应用自身签名，读取失败则不启用） */
+    fun setPrivilegedBrowserEnabled(packageName: String, enabled: Boolean) {
+        val store = passkeyPrivilegedBrowserStore ?: return
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            store.setEnabled(packageName, enabled)
+            privilegedBrowsersState.value = store.installedBrowsers()
+        }
+    }
 
     // ===== ISSUE-P3-43：保存侧独立黑名单 + 字段签名级屏蔽 =====
     /** 「不再提示保存」名单快照（按包名升序）。 */

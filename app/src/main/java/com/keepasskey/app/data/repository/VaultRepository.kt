@@ -377,6 +377,24 @@ interface VaultRepository {
     ): com.keepasskey.core.model.KdbxEntry
 
     /**
+     * 新建或**原地替换** Passkey 凭据条目。
+     *
+     * 复用条件：同 rpId（域匹配）+ 同用户名的既有 Passkey 条目 —— 命中时保留条目其它内容
+     * （标题 / 备注 / 密码 / 标签 / 历史 / 附件），仅整体换新 Passkey schema 字段；
+     * 未命中则等价于 [saveNewPasskeyEntry]。整改动机：同站点重复注册曾产生多条重复条目。
+     */
+    suspend fun saveOrReplacePasskeyEntry(
+        data: com.keepasskey.core.model.PasskeyData,
+        boundPackage: String? = null
+    ): com.keepasskey.core.model.KdbxEntry
+
+    /**
+     * `excludeCredentials` 查重（WebAuthn 规范）：返回 [credentialIds] 中**已存在于库内**的
+     * credentialId 子集（空集表示全部未被占用）。命中即由调用方 fail-closed 拒绝注册。
+     */
+    suspend fun findExistingPasskeyCredentialIds(credentialIds: Set<String>): Set<String>
+
+    /**
      * 递增并写回 Passkey 条目的签名计数器 (SignCount)。
      *
      * ISSUE-P3-27 子项 2：本入口不向调用方回传落库值，**断言路径不得使用它**——

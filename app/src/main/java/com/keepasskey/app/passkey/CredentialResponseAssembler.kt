@@ -45,7 +45,9 @@ class CredentialResponseAssembler @Inject constructor(
     private val vaultRepository: VaultRepository,
     private val autofillBlocklistStore: AutofillBlocklistStore,
     /** ISSUE-P2-83：CM 通道 `android://` 包名维度的调用方「包名 + 签名摘要」绑定存储 */
-    private val callerTrustStore: CredentialManagerCallerTrustStore
+    private val callerTrustStore: CredentialManagerCallerTrustStore,
+    /** 特权浏览器白名单（内置已取证 + 用户显式启用的浏览器） */
+    private val privilegedBrowserStore: com.keepasskey.app.data.repository.PasskeyPrivilegedBrowserStore
 ) {
 
     /**
@@ -147,13 +149,18 @@ class CredentialResponseAssembler @Inject constructor(
             targetRpId = ""
         }
 
+        // 整改：按请求的 `allowCredentials` 收敛候选（空集＝无用户名/discoverable 流程，不收敛）。
+        // 此前对白名单外的凭据同样下发候选，用户选中后 RP 必然拒绝，表现为「点了没反应/登录失败」。
+        val allowedCredentialIds = WebAuthnRequest.parse(option.requestJson)?.allowCredentialIds.orEmpty()
+
         val matchedPasskeys = allEntries.filter { entry ->
             CredentialCandidateMatcher.matchesPasskey(
                 entry = entry,
                 browserFlow = browserFlow,
                 targetRpId = targetRpId,
                 callingPackage = callingPackage,
-                packageDimensionAllowed = packageDimensionAllowed
+                packageDimensionAllowed = packageDimensionAllowed,
+                allowedCredentialIds = allowedCredentialIds
             )
         }
 
@@ -260,7 +267,10 @@ class CredentialResponseAssembler @Inject constructor(
         if (callingAppInfo == null) return ""
         // H1 整改：浏览器走官方 getOrigin + 特权白名单，普通应用固定 apk-key-hash origin，
         // 绝不反射私有字段或信任调用方可控字符串
-        return CallingOriginResolver.resolveTrustedOrigin(callingAppInfo)
+        return CallingOriginResolver.resolveTrustedOrigin(
+            callingAppInfo,
+            privilegedBrowserStore.allowlistJson()
+        )
     }
 
     companion object {

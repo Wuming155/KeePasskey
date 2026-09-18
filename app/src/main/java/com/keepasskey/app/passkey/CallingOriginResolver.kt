@@ -27,47 +27,98 @@ object CallingOriginResolver {
     private val Base64UrlNoPadding = Base64.UrlSafe.withPadding(Base64.PaddingOption.ABSENT_OPTIONAL)
 
     /**
-     * 浏览器特权白名单（官方 getOrigin 格式）。
-     * 指纹为浏览器签名证书 SHA-256 十六进制摘要（同时收录带冒号/不带冒号两种写法以兼容解析差异）。
-     * 浏览器签名证书轮换或新增受信浏览器时更新此处即可。
+     * 内置浏览器特权白名单（官方 `getOrigin` 要求的 JSON 形态）。
      *
-     * ISSUE-P3-88：无冒号副本原多出一个 hex 字符（65 位，SHA-256 恒 64 位）⇒ 该条永不匹配；
-     * 现已与同组冒号分隔副本逐字节对齐（两副本必须**同批**修改，否则又是一次「自证笔误」）。
+     * **单一真相源**：不再手抄字面量，而是由 [com.keepasskey.app.security.BrowserSigningFingerprints.TRUSTED]
+     * （已取证指纹表：每条均注明来源与核实方式，改写须先取证据）派生，指纹统一为
+     * 大写冒号分隔形式。
+     *
+     * 这样同时解决两个历史问题：
+     * 1. ISSUE-P3-88 的「同一指纹两种写法互相打架」——派生后不存在第二份副本；
+     * 2. 通道口径不一致（自动填充通道已收录 Firefox，而 CM 通道仅 Chrome）——
+     *    两通道自此共用同一张已取证指纹表。
+     *
+     * 用户显式启用的其它浏览器（安装包现场读取签名）由
+     * [com.keepasskey.app.data.repository.PasskeyPrivilegedBrowserStore] 追加合并。
      */
-    private val PRIVILEGED_BROWSER_ALLOWLIST = """
-        {
-          "apps": [
-            {
-              "type": "android",
-              "info": {
-                "package_name": "com.android.chrome",
-                "signatures": [
-                  {"build": "default", "userdebug": false, "cert_fingerprint_sha256": "32:a2:fc:74:d7:31:10:58:59:e5:a8:5d:f1:6d:95:f1:02:d8:5b:22:09:9b:80:64:c6:d6:ba:bb:66:52:84:9f"},
-                  {"build": "default", "userdebug": false, "cert_fingerprint_sha256": "32a2fc74d731105859e5a85df16d95f102d85b22099b8064c6d6babb6652849f"},
-                  {"build": "default", "userdebug": false, "cert_fingerprint_sha256": "f0:fd:6c:5b:41:0f:25:cb:25:c3:b5:33:46:c8:97:2f:ae:30:f8:ee:74:11:df:91:04:80:ad:6b:2d:60:db:83"},
-                  {"build": "default", "userdebug": false, "cert_fingerprint_sha256": "f0fd6c5b410f25cb25c3b53346c8972fae30f8ee7411df910480ad6b2d60db83"}
-                ]
-              }
-            }
-          ]
-        }
-    """.trimIndent()
+    val builtInAllowlistJson: String by lazy { buildAllowlistJson(builtInAllowlistEntries()) }
 
     /**
-     * 解析调用方可信 origin。
+     * 内置白名单的**结构化形态**（包名 → 大写冒号分隔指纹），供用户白名单与之合并后
+     * 一次性构造 JSON（避免「解析 JSON 再合并」的额外依赖与失败面）。
+     */
+    internal fun builtInAllowlistEntries(): Map<String, List<String>> =
+        com.keepasskey.app.security.BrowserSigningFingerprints.TRUSTED
+            .mapValues { (_, fingerprints) -> fingerprints.map { toColonSeparatedUpper(it) } }
+
+    /** 解析调用方可信 origin。
      * 返回值仅可能为：浏览器特权白名单校验通过的 web origin（https://…），
      * 或普通应用的 android:apk-key-hash: origin；无法确定签名时返回空串。
+     *
+     * @param allowlistJson 传入的白名单（内置已取证条目 + 用户显式启用的浏览器）；
+     *   缺省为 [builtInAllowlistJson]，便于无 Context 的调用点与单测直接使用。
      */
-    fun resolveTrustedOrigin(callingAppInfo: CallingAppInfo): String {
+    fun resolveTrustedOrigin(
+        callingAppInfo: CallingAppInfo,
+        allowlistJson: String = builtInAllowlistJson
+    ): String {
         if (callingAppInfo.isOriginPopulated()) {
             return try {
-                callingAppInfo.getOrigin(PRIVILEGED_BROWSER_ALLOWLIST).orEmpty()
+                callingAppInfo.getOrigin(allowlistJson).orEmpty()
             } catch (_: Throwable) {
                 // 不在白名单 / 白名单格式漂移 / origin 缺失：fail-closed，按普通应用处理
                 apkKeyHashOrigin(callingAppInfo)
             }
         }
         return apkKeyHashOrigin(callingAppInfo)
+    }
+
+    /** 无冒号 hex → 大写冒号分隔（`getOrigin` 白名单的规范写法） */
+    internal fun toColonSeparatedUpper(fingerprint: String): String {
+        val hex = fingerprint.replace(":", "").uppercase()
+        return hex.chunked(2).joinToString(":")
+    }
+
+    /**
+     * 由「包名 → 指纹集合」构造 `getOrigin` 白名单 JSON（确定性输出，便于断言）。
+     *
+     * **手写拼接而非 JSON 库**：① 该串是安全关键面，形状固定且字段极少，手写可读可测；
+     * ② 避免依赖 `org.json`——它在宿主单测里是未实现的桩，用库会让本函数无法被 JVM 用例覆盖。
+     * 包名与指纹由系统/取证表提供，字符集受限（`[A-Za-z0-9._:-]`），仍统一做最小转义兜底。
+     */
+    internal fun buildAllowlistJson(entries: Map<String, List<String>>): String {
+        val sb = StringBuilder(256)
+        sb.append("{\"apps\":[")
+        var firstApp = true
+        for ((packageName, fingerprints) in entries) {
+            if (!firstApp) sb.append(',')
+            firstApp = false
+            sb.append("{\"type\":\"android\",\"info\":{\"package_name\":\"")
+                .append(escapeJson(packageName))
+                .append("\",\"signatures\":[")
+            fingerprints.forEachIndexed { index, fingerprint ->
+                if (index > 0) sb.append(',')
+                sb.append("{\"build\":\"default\",\"userdebug\":false,\"cert_fingerprint_sha256\":\"")
+                    .append(escapeJson(fingerprint))
+                    .append("\"}")
+            }
+            sb.append("]}}")
+        }
+        sb.append("]}")
+        return sb.toString()
+    }
+
+    private fun escapeJson(value: String): String {
+        val sb = StringBuilder(value.length + 8)
+        value.forEach { c ->
+            when {
+                c == '"' -> sb.append("\\\"")
+                c == '\\' -> sb.append("\\\\")
+                c.code < 0x20 -> sb.append("\\u%04x".format(c.code))
+                else -> sb.append(c)
+            }
+        }
+        return sb.toString()
     }
 
     /** 是否为浏览器委派的 web origin（非 android:apk-key-hash 且为 https） */

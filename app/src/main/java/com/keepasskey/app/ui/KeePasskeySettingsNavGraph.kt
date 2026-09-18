@@ -13,6 +13,7 @@ import com.keepasskey.app.ui.screens.settings.subscreens.AutofillSettingsScreen
 import com.keepasskey.app.ui.screens.settings.subscreens.DatabaseSettingsScreen
 import com.keepasskey.app.ui.screens.settings.subscreens.DebugSettingsScreen
 import com.keepasskey.app.ui.screens.settings.subscreens.HealthCheckScreen
+import com.keepasskey.app.ui.screens.settings.subscreens.PrivilegedBrowserSettingsScreen
 import com.keepasskey.app.ui.screens.settings.subscreens.SecuritySettingsScreen
 import com.keepasskey.app.ui.screens.settings.subscreens.ThemeSettingsScreen
 import com.keepasskey.app.ui.screens.settings.subscreens.TotpSettingsScreen
@@ -135,6 +136,7 @@ internal fun NavGraphBuilder.keepasskeySettingsNavGraph(
             onSkipDalVerificationToggle = settingsViewModel::setSkipDalVerification,
             onOverrideNoAutofillToggle = settingsViewModel::setOverrideNoAutofill,
             onAutofillSessionGrantToggle = settingsViewModel::setAutofillSessionGrantEnabled,
+            onOpenPrivilegedBrowsers = { navController.navigate(Screen.SettingsPrivilegedBrowsers.route) },
             blockedPackages = blockedPackages,
             onBlockAutofillPackage = settingsViewModel::blockAutofillPackage,
             onUnblockAutofillPackage = settingsViewModel::unblockAutofillPackage,
@@ -143,6 +145,18 @@ internal fun NavGraphBuilder.keepasskeySettingsNavGraph(
             onUnblockSavePackage = settingsViewModel::unblockSavePackage,
             blockedFieldCount = blockedFieldCount,
             onClearBlockedFields = settingsViewModel::clearBlockedFields
+        )
+    }
+
+    // 9b. 三级设置页面：特权浏览器白名单（CM 通道通行密钥在非 Chrome 浏览器上的可用性）
+    composable(Screen.SettingsPrivilegedBrowsers.route) {
+        val settingsViewModel: SettingsViewModel = hiltViewModel()
+        val browsers by settingsViewModel.privilegedBrowsers.collectAsStateWithLifecycle()
+        PrivilegedBrowserSettingsScreen(
+            browsers = browsers,
+            onBackClick = { navController.popBackStack() },
+            onToggle = settingsViewModel::setPrivilegedBrowserEnabled,
+            onRefresh = settingsViewModel::refreshPrivilegedBrowsers
         )
     }
 

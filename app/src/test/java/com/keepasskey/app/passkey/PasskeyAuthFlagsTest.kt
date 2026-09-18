@@ -96,6 +96,28 @@ class PasskeyAuthFlagsTest {
     }
 
     @Test
+    fun `BE 与 BS 位由凭据持久化值驱动而非无条件置位`() {
+        val flags = PasskeyAuthFlags.forAssertion(
+            CredentialUserVerification.BiometricSucceeded,
+            backupEligible = false,
+            backupState = false
+        )
+        assertNotNull(flags)
+        assertEquals("BE=0 必须如实回传", 0, flags!!.toInt() and PasskeyCryptoEngine.FLAG_BE.toInt())
+        assertEquals("BS=0 必须如实回传", 0, flags.toInt() and PasskeyCryptoEngine.FLAG_BS.toInt())
+        assertTrue("UP 位不受 BE/BS 影响", hasBit(flags, PasskeyCryptoEngine.FLAG_UP))
+
+        val registration = PasskeyAuthFlags.forRegistration(
+            CredentialUserVerification.BiometricSucceeded,
+            backupEligible = true,
+            backupState = false
+        )
+        assertNotNull(registration)
+        assertTrue("BE=1 时置位", hasBit(registration!!, PasskeyCryptoEngine.FLAG_BE))
+        assertEquals("BS=0 时不置位", 0, registration.toInt() and PasskeyCryptoEngine.FLAG_BS.toInt())
+    }
+
+    @Test
     fun `注册路径手动确认通过时携带 AT 位但 UV 位为 0`() {
         val flags = PasskeyAuthFlags.forRegistration(CredentialUserVerification.ManualConfirmed)
         assertNotNull(flags)

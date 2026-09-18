@@ -48,6 +48,15 @@ import java.util.Base64
  */
 object PasskeyCryptoEngine {
 
+    /**
+     * 签名侧私钥材料：[algorithmId] 为 COSE 算法标识，[keyBytes] 为该算法的签名入参
+     * （ES256 = 32 字节标量、Ed25519 = 32 字节种子、RS256 = PKCS#8 DER）。
+     */
+    class PasskeySigningKey(
+        val algorithmId: Int,
+        val keyBytes: ByteArray
+    )
+
     // AuthenticatorData Flags 标志位常量 (W3C WebAuthn Section 6.1)
     const val FLAG_UP: Byte = 0x01             // 用户在场 (User Present)
     const val FLAG_UV: Byte = 0x04             // 用户已验证 (User Verified)
@@ -86,11 +95,10 @@ object PasskeyCryptoEngine {
         val pubEncoded = pub.q.getEncoded(false)
         val pubBase64 = Base64.getEncoder().encodeToString(pubEncoded)
 
-        // ISSUE-P1-02（生成侧脱敏）：私钥标量不落 String——直接从 BigInteger 二进制形态编码为
-        // 定长 64 字符小写 hex CharArray（标量二进制副本与字符副本用毕即清零），再封装进
-        // ProtectedString 密文驻留层供 KDBX 受保护字段存储。
-        val privHexChars = PasskeyKeyCodec.scalarToHexChars(priv.d, PasskeyKeyCodec.EC_SCALAR_HEX_CHARS)
-        val privateKeyProtected = sealedFromPrivateChars(privHexChars)
+        // ISSUE-P1-02（生成侧脱敏）+ KeePassXC / KeePassDX 互操作：私钥驻留文本为 **PKCS#8 PEM**
+        // （`KPEX_PASSKEY_PRIVATE_KEY_PEM` 口径），编码全程在 CharArray 通道上完成、中间 DER 用毕
+        // 即清零，再封装进 ProtectedString 密文驻留层供 KDBX 受保护字段存储。
+        val privateKeyProtected = sealedFromPrivateChars(PasskeyPkcs8Codec.encodeEcToPem(priv.d))
 
         val handle = resolveUserHandle(userHandle)
 
@@ -131,11 +139,13 @@ object PasskeyCryptoEngine {
         val pubEncoded = pub.encoded
         val pubBase64 = Base64.getEncoder().encodeToString(pubEncoded)
 
-        // ISSUE-P1-02（生成侧脱敏）：Base64 编码结果不落 String，经 CharArray 通道封装进
-        // ProtectedString，字符副本与原始种子字节副本用毕即清零。
-        val privChars = PasskeyKeyCodec.base64ToChars(privEncoded)
-        Arrays.fill(privEncoded, 0.toByte())
-        val privateKey = sealedFromPrivateChars(privChars)
+        // ISSUE-P1-02（生成侧脱敏）+ 互操作：驻留文本为 PKCS#8 PEM（RFC 8410 编码），
+        // PEM 字符副本与原始种子字节副本用毕即清零。
+        val privateKey = try {
+            sealedFromPrivateChars(PasskeyPkcs8Codec.encodeEd25519ToPem(privEncoded))
+        } finally {
+            Arrays.fill(privEncoded, 0.toByte())
+        }
 
         val credIdBase64Url = generateRandomCredentialId()
         val handle = resolveUserHandle(userHandle)
@@ -191,11 +201,13 @@ object PasskeyCryptoEngine {
 
         val pubBase64 = Base64.getEncoder().encodeToString(pubEncoded)
 
-        // ISSUE-P1-02（生成侧脱敏）：PKCS#8 DER 的 Base64 编码不落 String，经 CharArray 通道
-        // 封装进 ProtectedString，字符副本与 DER 中间副本用毕即清零。
-        val privChars = PasskeyKeyCodec.base64ToChars(privEncoded)
-        Arrays.fill(privEncoded, 0.toByte())
-        val privateKey = sealedFromPrivateChars(privChars)
+        // ISSUE-P1-02（生成侧脱敏）+ 互操作：驻留文本为 PKCS#8 DER 的 PEM 包裹，
+        // PEM 字符副本与 DER 中间副本用毕即清零。
+        val privateKey = try {
+            sealedFromPrivateChars(PasskeyPkcs8Codec.encodeToPem(priv))
+        } finally {
+            Arrays.fill(privEncoded, 0.toByte())
+        }
 
         val credIdBase64Url = generateRandomCredentialId()
         val handle = resolveUserHandle(userHandle)
@@ -213,6 +225,78 @@ object PasskeyCryptoEngine {
             backupEligible = true,
             backupState = true
         )
+    }
+
+    // ================= 注册算法协商（WebAuthn `pubKeyCredParams`） =================
+
+    /**
+     * 本认证器支持的 COSE 算法，按**协商偏好顺序**排列（ES256 → Ed25519 → RS256）。
+     *
+     * 与 W3C WebAuthn 的通行做法一致：P-256 兼容面最广故列首位；Ed25519 次之；
+     * RS256 签名体最大、性能最差列为末位（但仍须支持——部分企业 RP 只接受 RS256）。
+     */
+    val SUPPORTED_ALGORITHMS: List<Int> = listOf(
+        PasskeyData.ALGORITHM_ES256,
+        PasskeyData.ALGORITHM_ED25519,
+        PasskeyData.ALGORITHM_RS256
+    )
+
+    /** [algorithmId] 是否为本认证器可生成的算法 */
+    fun isAlgorithmSupported(algorithmId: Int): Boolean = algorithmId in SUPPORTED_ALGORITHMS
+
+    /**
+     * 依 RP 的 `pubKeyCredParams` 协商出注册所用算法。
+     *
+     * 语义（对齐 KeePassDX `Signature.generateKeyPair(pubKeyCredParams.map { it.alg })`）：
+     * - 取 [SUPPORTED_ALGORITHMS] 中**首个出现在请求列表里**的算法（即本认证器的偏好顺序）；
+     * - 请求列表为空（非规范输入）→ 回落 ES256（兼容面最广，且不因此拒绝注册）；
+     * - 请求的算法**全部不受支持** → 抛 [CryptoException.InvalidKeyException]，
+     *   调用方 fail-closed 拒绝注册（绝不降级为 RP 未请求的算法后返回给 RP）。
+     */
+    fun selectAlgorithmForRegistration(requestedAlgorithms: List<Int>): Int {
+        if (requestedAlgorithms.isEmpty()) return PasskeyData.ALGORITHM_ES256
+        return SUPPORTED_ALGORITHMS.firstOrNull { it in requestedAlgorithms }
+            ?: throw CryptoException.InvalidKeyException(
+                "RP 请求的公钥算法均不受支持（请求数 ${requestedAlgorithms.size}），拒绝注册"
+            )
+    }
+
+    /**
+     * 按 RP 的 `pubKeyCredParams` 协商算法并生成对应密钥对（注册路径的**唯一**入口）。
+     *
+     * @throws CryptoException.InvalidKeyException 请求算法全部不受支持
+     */
+    fun generateKeyPairForAlgorithms(
+        requestedAlgorithms: List<Int>,
+        relyingPartyId: String,
+        userName: String,
+        userHandle: String = "",
+        userDisplayName: String = ""
+    ): PasskeyData = when (val algorithmId = selectAlgorithmForRegistration(requestedAlgorithms)) {
+        PasskeyData.ALGORITHM_ES256 -> generateEs256KeyPair(relyingPartyId, userName, userHandle, userDisplayName)
+        PasskeyData.ALGORITHM_ED25519 -> generateEd25519KeyPair(relyingPartyId, userName, userHandle, userDisplayName)
+        PasskeyData.ALGORITHM_RS256 -> generateRs256KeyPair(relyingPartyId, userName, userHandle, userDisplayName)
+        else -> throw CryptoException.InvalidKeyException("协商得到的算法无法生成密钥对: $algorithmId")
+    }
+
+    /**
+     * PEM 私钥文本（字节流）→ 算法标识 + 签名侧材料（32 字节标量 / 32 字节种子 / 整段 PKCS#8 DER）。
+     *
+     * 供 app 层的断言路径消费 KeePassXC / KeePassDX 口径（`KPEX_PASSKEY_PRIVATE_KEY_PEM`）的
+     * 私钥文本；**非 PEM 或结构非法返回 null**，由调用方回退到历史 v1 形态的解析。
+     * 全程走字节通道（ISSUE-P1-02：私钥不物化为不可擦除的 String）。
+     */
+    fun decodePemPrivateKeyText(keyTextBytes: ByteArray): PasskeySigningKey? {
+        if (!com.keepasskey.core.model.PasskeyKeyText.isPem(keyTextBytes)) return null
+        val chars = CharArray(keyTextBytes.size) { keyTextBytes[it].toInt().toChar() }
+        try {
+            val signingKey = PasskeyPkcs8Codec.pemCharsToSigningKey(chars)
+            return PasskeySigningKey(signingKey.algorithmId, signingKey.keyBytes)
+        } catch (_: IllegalArgumentException) {
+            return null
+        } finally {
+            chars.fill('0')
+        }
     }
 
     /**

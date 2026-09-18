@@ -26,6 +26,9 @@ sealed class Screen(val route: String) {
     data object SettingsDatabase : Screen("settings/database")
     data object SettingsSync : Screen("settings/sync")
     data object SettingsAutofill : Screen("settings/autofill")
+
+    /** 特权浏览器白名单（CM 通道通行密钥可用性；自自动填充页进入） */
+    data object SettingsPrivilegedBrowsers : Screen("settings/privileged_browsers")
     data object SettingsSecurity : Screen("settings/security")
     data object SettingsTheme : Screen("settings/theme")
     data object SettingsHealth : Screen("settings/health")

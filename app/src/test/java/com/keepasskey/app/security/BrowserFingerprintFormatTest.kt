@@ -1,9 +1,9 @@
 package com.keepasskey.app.security
 
+import com.keepasskey.app.passkey.CallingOriginResolver
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.io.File
 
 /**
  * 浏览器签名证书指纹的**格式与双副本一致性**守卫（ISSUE-P3-88）。
@@ -45,58 +45,58 @@ class BrowserFingerprintFormatTest {
     }
 
     @Test
-    fun `passkey 白名单的带冒号与不带冒号副本必须规范化一致`() {
-        val source = readSource(CALLING_ORIGIN_RESOLVER_SOURCE)
-        val raw = FINGERPRINT_ENTRY.findAll(source).map { it.groupValues[1] }.toList()
+    fun `passkey 白名单必须由已取证指纹表派生且指纹规范化为大写冒号分隔`() {
+        val allowlist = CallingOriginResolver.builtInAllowlistJson
+        // 用零依赖解析器（org.json 在宿主单测里是未实现的桩）
+        val root = com.keepasskey.app.passkey.SimpleJson.asObject(
+            com.keepasskey.app.passkey.SimpleJson.parse(allowlist)
+        )!!
+        val apps = com.keepasskey.app.passkey.SimpleJson.arrayAt(root, "apps")!!
 
-        assertTrue("未从 $CALLING_ORIGIN_RESOLVER_SOURCE 提取到指纹（解析正则已失效）", raw.size >= 2)
+        val parsed = LinkedHashMap<String, MutableList<String>>()
+        for (app in apps) {
+            val appObject = com.keepasskey.app.passkey.SimpleJson.asObject(app)!!
+            val info = com.keepasskey.app.passkey.SimpleJson.objectAt(appObject, "info")!!
+            val packageName = com.keepasskey.app.passkey.SimpleJson.string(info, "package_name")!!
+            val signatures = com.keepasskey.app.passkey.SimpleJson.arrayAt(info, "signatures").orEmpty()
+            val fingerprints = parsed.getOrPut(packageName) { mutableListOf() }
+            for (signature in signatures) {
+                val signatureObject = com.keepasskey.app.passkey.SimpleJson.asObject(signature)!!
+                fingerprints += com.keepasskey.app.passkey.SimpleJson
+                    .string(signatureObject, "cert_fingerprint_sha256")!!
+            }
+        }
 
-        val normalized = raw.map { it.replace(":", "").uppercase() }
-        val formatOffenders = normalized.filterNot { SHA256_HEX_UPPER.matches(it) }
-        assertTrue("白名单存在非 64 位 hex 指纹：$formatOffenders", formatOffenders.isEmpty())
+        // 1. 包名与指纹数量必须与已取证表逐一对应（派生而非手抄）
+        assertEquals(BrowserSigningFingerprints.TRUSTED.keys, parsed.keys)
+        BrowserSigningFingerprints.TRUSTED.forEach { (pkg, fingerprints) ->
+            assertEquals(
+                "包 $pkg 的指纹条数必须与已取证表一致",
+                fingerprints.size,
+                parsed[pkg]?.size
+            )
+        }
 
-        val colonForm = raw.filter { it.contains(":") }.map { it.replace(":", "").uppercase() }.toSet()
-        val plainForm = raw.filterNot { it.contains(":") }.map { it.uppercase() }.toSet()
+        // 2. 全部指纹必须是「大写、冒号分隔」的 64 位 hex（getOrigin 白名单的规范写法）
+        val offenders = parsed.flatMap { (pkg, fingerprints) -> fingerprints.map { pkg to it } }
+            .filter { (_, value) ->
+                value.split(":").size != COLON_HEX_SEGMENTS ||
+                    value.replace(":", "").let { !SHA256_HEX_UPPER.matches(it) }
+            }
+        assertTrue("以下指纹不是规范的大写冒号分隔形态：$offenders", offenders.isEmpty())
 
-        assertEquals(
-            "同一指纹的两种写法必须指向同一值（否则其中一份是笔误，且永不匹配）",
-            colonForm,
-            plainForm
-        )
-    }
-
-    /** 源码全文；路径相对仓库根（app 模块测试工作目录为 app/，向上回溯定位仓库根） */
-    private fun readSource(path: String): String {
-        val file = File(repositoryRoot, path)
-        assertTrue("源码文件不存在（是否被重命名/移动）：$path", file.isFile)
-        return file.readText()
+        // 3. 规范化后必须与已取证表逐字相等（任何抄写偏差都会在此失败）
+        BrowserSigningFingerprints.TRUSTED.forEach { (pkg, fingerprints) ->
+            val expected = fingerprints.map { it.replace(":", "").uppercase() }.toSet()
+            val actual = parsed[pkg].orEmpty().map { it.replace(":", "").uppercase() }.toSet()
+            assertEquals("包 $pkg 的指纹集合必须与已取证表一致", expected, actual)
+        }
     }
 
     private companion object {
-        const val CALLING_ORIGIN_RESOLVER_SOURCE =
-            "app/src/main/java/com/keepasskey/app/passkey/CallingOriginResolver.kt"
-
         val SHA256_HEX_UPPER = Regex("[0-9A-F]{64}")
 
-        /** 白名单 JSON 内的指纹条目（`"cert_fingerprint_sha256": "<value>"`） */
-        val FINGERPRINT_ENTRY =
-            Regex(""""cert_fingerprint_sha256"\s*:\s*"([0-9a-fA-F:]+)"""")
-
-        /** 仓库根：同时具备 app 与 core 模块源码目录的最近祖先 */
-        val repositoryRoot: File by lazy {
-            var dir: File? = File(System.getProperty("user.dir").orEmpty()).absoluteFile
-            repeat(ROOT_SEARCH_DEPTH) {
-                val candidate = dir ?: return@repeat
-                if (File(candidate, "app/src/main/java").isDirectory &&
-                    File(candidate, "core/src/main/java").isDirectory
-                ) {
-                    return@lazy candidate
-                }
-                dir = candidate.parentFile
-            }
-            error("无法定位仓库根目录（起始：${System.getProperty("user.dir")}）")
-        }
-
-        const val ROOT_SEARCH_DEPTH = 4
+        /** 冒号分隔指纹的分段数（SHA-256 = 32 字节 = 32 段两字符） */
+        const val COLON_HEX_SEGMENTS = 32
     }
 }

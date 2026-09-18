@@ -24,14 +24,25 @@ import com.keepasskey.crypto.passkey.PasskeyCryptoEngine
 internal object PasskeyAuthFlags {
 
     /** 构造断言（Get）路径的 flags；验证结果不可签发时返回 null */
-    fun forAssertion(verification: CredentialUserVerification): Byte? =
-        compose(verification, attested = false)
+    fun forAssertion(
+        verification: CredentialUserVerification,
+        backupEligible: Boolean = true,
+        backupState: Boolean = true
+    ): Byte? = compose(verification, attested = false, backupEligible = backupEligible, backupState = backupState)
 
     /** 构造注册（Create）路径的 flags；验证结果不可签发时返回 null */
-    fun forRegistration(verification: CredentialUserVerification): Byte? =
-        compose(verification, attested = true)
+    fun forRegistration(
+        verification: CredentialUserVerification,
+        backupEligible: Boolean = true,
+        backupState: Boolean = true
+    ): Byte? = compose(verification, attested = true, backupEligible = backupEligible, backupState = backupState)
 
-    private fun compose(verification: CredentialUserVerification, attested: Boolean): Byte? {
+    private fun compose(
+        verification: CredentialUserVerification,
+        attested: Boolean,
+        backupEligible: Boolean,
+        backupState: Boolean
+    ): Byte? {
         val userVerified = when (verification) {
             CredentialUserVerification.BiometricSucceeded -> true
             CredentialUserVerification.ManualConfirmed -> false
@@ -39,9 +50,12 @@ internal object PasskeyAuthFlags {
             else -> return null
         }
 
-        var flags = PasskeyCryptoEngine.FLAG_UP.toInt() or
-            PasskeyCryptoEngine.FLAG_BE.toInt() or
-            PasskeyCryptoEngine.FLAG_BS.toInt()
+        var flags = PasskeyCryptoEngine.FLAG_UP.toInt()
+        // ISSUE（本次整改）：BE / BS 由**该凭据的持久化值**驱动，不再无条件置位——
+        // 库中显式声明「不可备份 / 未备份」的凭据（外部管理器写入 0）必须如实回传，
+        // 否则向 RP 谎报备份状态会让其按「可同步凭据」放宽风控。
+        if (backupEligible) flags = flags or PasskeyCryptoEngine.FLAG_BE.toInt()
+        if (backupState) flags = flags or PasskeyCryptoEngine.FLAG_BS.toInt()
         if (userVerified) {
             flags = flags or PasskeyCryptoEngine.FLAG_UV.toInt()
         }

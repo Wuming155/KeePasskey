@@ -3,8 +3,10 @@ package com.keepasskey.app.passkey
 import android.content.Intent
 import android.os.Bundle
 import androidx.credentials.GetCredentialResponse
+import androidx.credentials.GetPublicKeyCredentialOption
 import androidx.credentials.PublicKeyCredential
 import androidx.credentials.provider.PendingIntentHandler
+import androidx.credentials.provider.ProviderGetCredentialRequest
 import androidx.lifecycle.lifecycleScope
 import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.VaultRepository
@@ -12,7 +14,9 @@ import com.keepasskey.app.security.BiometricAuthManager
 import com.keepasskey.app.security.CallerCertDigests
 import com.keepasskey.core.log.AppLog
 import com.keepasskey.core.model.PasskeyData
+import com.keepasskey.core.security.ProtectedString
 import com.keepasskey.crypto.passkey.PasskeyCryptoEngine
+import com.keepasskey.crypto.passkey.PasskeyPrf
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -28,13 +32,12 @@ import javax.inject.Inject
  * 在独立受保护窗口中：
  * 1. 从密码库检索目标 Passkey 条目并二次校验「调用方 ⇄ 凭据」绑定；
  * 2. **ISSUE-P0-03 (ZT-03)**：签名前先执行「本次实际发生」的用户验证门控
- *    （系统级生物识别 / 锁屏凭据，或设备无可用认证器时的受保护窗口手动确认），
- *    结果交由 [PasskeyAuthFlags] 决定 AuthenticatorData 的 UV 位——强验证通过 → `UV=1`，
- *    手动确认仅证实在场 → 如实 `UV=0`，未验证 / 失败 / 取消一律拒绝签发；
- * 3. 组装 AuthenticatorData 二进制块；
- * 4. 构造 ClientDataJSON 并哈希；
+ *    （RP 声明 `userVerification: "required"` 时强制系统级强验证，绝不降级为手动确认）；
+ * 3. 组装 AuthenticatorData 二进制块（BE / BS 取**该凭据的持久化值**）；
+ * 4. 构造 ClientDataJSON 并哈希（特权调用方下发 `clientDataHash` 时**直接对其签名**）；
  * 5. 调用 PasskeyCryptoEngine 签名 (私钥敏感内存即用即清)；
- * 6. 组装并返回 PublicKeyCredential 响应，原子递增签名计数器防重放。
+ * 6. 请求携带 `extensions.prf` 时按该凭据的 PRF 秘密回传 `clientExtensionResults.prf`；
+ * 7. 组装并返回 PublicKeyCredential 响应，原子递增签名计数器防重放。
  */
 @AndroidEntryPoint
 class PasskeyAssertionActivity : BaseCredentialActivity() {
@@ -68,7 +71,7 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
         // 由平台背书（凭据组装阶段亦用它做严格匹配）。原实现用 `Activity.getCallingPackage()`，
         // 在 PendingIntent 拉起场景为 `"android"`/null，随后 `?: packageName` 又回退成
         // **本应用包名**——等于向 RP 谎报调用方。
-        val providerReq = try {
+        val providerReq: ProviderGetCredentialRequest? = try {
             PendingIntentHandler.retrieveProviderGetCredentialRequest(intent)
         } catch (_: Exception) {
             null
@@ -76,8 +79,6 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
         val attestedPackage = CallingOriginResolver.systemAttestedPackageName(providerReq?.callingAppInfo)
 
         // 交叉核对：系统认证包名 vs 本应用在**候选组装阶段**写入 base Intent 的预期包名。
-        // 其完整性由「落地 Activity exported=false」+「PendingIntent 仅由系统发送」共同保证——
-        // PendingIntent 本体不可伪造**不等于**其 extras 不可伪造，不得把 extras 当作可信来源。
         // 两者均可得且不一致 → fail-closed（组装阶段与本窗口看到的调用方不是同一个，拒绝签发）。
         if (attestedPackage != null &&
             expectedPackage.isNotBlank() &&
@@ -97,6 +98,18 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
             failAndFinish()
             return
         }
+
+        // 系统下发的断言请求（权威来源）：请求 JSON 与**特权调用方自带的 clientDataJSON 摘要**
+        val option = providerReq?.credentialOptions
+            ?.firstOrNull { it is GetPublicKeyCredentialOption } as? GetPublicKeyCredentialOption
+        val requestJson = option?.requestJson
+            ?: intent.getStringExtra(EXTRA_REQUEST_JSON).orEmpty()
+        // 特权调用方（自带 clientDataJSON 的浏览器）下发摘要时必须直接对其签名——自建 JSON
+        // 的哈希与其预期不一致会让 RP 侧验签失败（KeePassDX 同口径）
+        val providedClientDataHash = option?.clientDataHash?.takeIf { it.isNotEmpty() }
+        val request = WebAuthnRequest.parse(requestJson)
+        val prfEval = request?.prfEval
+        val requireBiometric = request?.userVerification == WebAuthnRequest.UserVerification.REQUIRED
 
         lifecycleScope.launch {
             try {
@@ -130,7 +143,6 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
                 }
 
                 // H1 整改：签名前二次校验 origin 与凭据 RP-ID 的绑定关系。
-                // 浏览器委派的 web origin 必须与 RP ID 同域（或为其子域）。
                 if (CallingOriginResolver.isBrowserOrigin(origin)) {
                     val originHost = DomainMatcher.extractDomain(origin)
                     if (originHost.isEmpty() ||
@@ -141,14 +153,8 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
                         return@launch
                     }
                 } else {
-                    // F4 整改：非浏览器（apk-key-hash）路径补充二次校验，不再单纯依赖候选组装阶段过滤——
-                    // 调用包名必须与条目绑定的 android://<包名> 精确一致。预期包名由本应用在**候选组装阶段**
-                    // 写入 base Intent；其完整性由「落地 Activity exported=false」+「PendingIntent 仅由系统
-                    // 发送」共同保证，**不得**理解为 extras 本身不可伪造（同 PasswordFillActivity 模式）；
-                    // 非应用绑定（https://<rpId>）的条目一律拒绝普通应用签发
                     val boundPackage = DomainMatcher.extractAndroidBoundPackage(entry.url)
-                    // ISSUE-P2-83：包名维度还须通过调用方**签名绑定**门控——绑定过的包名若本次
-                    // 调用方签名不匹配（换签名 / 同 applicationId 侧载顶替），一律拒绝签发。
+                    // ISSUE-P2-83：包名维度还须通过调用方**签名绑定**门控
                     val packageDimensionAllowed = CredentialManagerPackageBindingGate.allowsPackageDimension(
                         callingPackage = expectedPackage,
                         certDigests = providerReq?.callingAppInfo
@@ -166,10 +172,8 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
                     }
                 }
 
-                // ISSUE-P0-03 (ZT-03)：进入签名前先执行「本次实际发生」的用户验证门控。
-                // 修复前此处无条件 UP|UV|BE|BS 全置位，与实际验证解耦——无强认证器设备上仍向
-                // RP 谎报 UV=1。现改由门控结果决定 UV 位（强验证 → UV=1；手动确认 → UV=0 且 UI
-                // 已明示降级；未验证 / 失败 / 取消一律拒绝签发），杜绝跨系统信任伪造。
+                // ISSUE-P0-03 (ZT-03) + 本次整改：进入签名前执行「本次实际发生」的用户验证门控。
+                // RP 要求 `userVerification: required` 时强制强验证（不降级为手动确认）。
                 val rpLabel = passkeyData.relyingPartyId
                 requestCredentialUserVerification(
                     biometricAuthManager = biometricAuthManager,
@@ -179,10 +183,20 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
                     manualHint = getString(R.string.passkey_assert_manual_hint, rpLabel),
                     confirmText = getString(R.string.passkey_confirm_ok),
                     cancelText = getString(R.string.passkey_confirm_cancel),
+                    requireBiometric = requireBiometric,
                     onVerified = { verification ->
                         if (settled) return@requestCredentialUserVerification
                         settled = true
-                        signAndReturn(entryId, passkeyData, origin, challenge, clientDataPackage, verification)
+                        signAndReturn(
+                            entryId = entryId,
+                            passkeyData = passkeyData,
+                            origin = origin,
+                            challenge = challenge,
+                            clientDataPackage = clientDataPackage,
+                            verification = verification,
+                            providedClientDataHash = providedClientDataHash,
+                            prfEval = prfEval
+                        )
                     },
                     onRejected = {
                         if (settled) return@requestCredentialUserVerification
@@ -210,12 +224,18 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
         origin: String,
         challenge: String,
         clientDataPackage: String?,
-        verification: CredentialUserVerification
+        verification: CredentialUserVerification,
+        providedClientDataHash: ByteArray?,
+        prfEval: WebAuthnRequest.PrfEval?
     ) {
         lifecycleScope.launch {
             try {
                 // fail-closed 兜底：凡不可签发的验证结果（理论不可达）一律拒绝产出断言
-                val flags = PasskeyAuthFlags.forAssertion(verification)
+                val flags = PasskeyAuthFlags.forAssertion(
+                    verification = verification,
+                    backupEligible = passkeyData.backupEligible,
+                    backupState = passkeyData.backupState
+                )
                 if (flags == null) {
                     AppLog.e(TAG, "用户验证结果不可签发断言: verification=$verification")
                     failAndFinish()
@@ -223,13 +243,8 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
                 }
 
                 // ISSUE-P3-27 子项 2：先把签名计数器**原子递增并落库**，再据其返回值签名。
-                // 返回值是本次唯一「已提交」的计数器（递增与落库同处会话 Mutex 内的单次受控
-                // 变换），并发断言因此拿到互不相同的值；且返回值写入响应时库内必然已推进。
-                // 条目缺失 / entryId 非法返回 null → fail-closed 拒绝签发，**绝不**回退为
-                // 「进入断言时的锁外快照 + 1」（那正是计数器重复缺陷本身）。
                 val signCount = vaultRepository.incrementPasskeySignCount(entryId)
                 if (signCount == null) {
-                    // ISSUE-P1-10：日志不得携带 entryId 等敏感标识
                     AppLog.e(TAG, "签名计数器未能原子递增并落库，拒绝签发断言")
                     failAndFinish()
                     return@launch
@@ -237,11 +252,19 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
 
                 // 密码学运算调度至 Default，杜绝在系统回调线程上执行 CPU 密集签名
                 val assertionJson = withContext(Dispatchers.Default) {
-                    buildAssertionJson(passkeyData, origin, challenge, clientDataPackage, flags, signCount)
+                    buildAssertionJson(
+                        passkeyData = passkeyData,
+                        origin = origin,
+                        challenge = challenge,
+                        clientDataPackage = clientDataPackage,
+                        flags = flags,
+                        signCount = signCount,
+                        providedClientDataHash = providedClientDataHash,
+                        prfEval = prfEval
+                    )
                 }
 
-                // ISSUE-P3-27 子项 2：计数器已落库后才回传 RP——原实现先 setResult 再落盘，
-                // 进程若在两者之间中断，RP 已收到 N+1 而库内仍是 N，下次断言会再交一次 N+1。
+                // ISSUE-P3-27 子项 2：计数器已落库后才回传 RP
                 val resultIntent = Intent()
                 val response = GetCredentialResponse(PublicKeyCredential(assertionJson))
                 PendingIntentHandler.setGetCredentialResponse(resultIntent, response)
@@ -258,11 +281,6 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
     /**
      * 在 [Dispatchers.Default] 上构造完整断言响应 JSON（authData || clientDataHash 签名）。
      * 私钥仅经字节流解码、签名后立即清零，全程不产生不可变私钥 String。
-     *
-     * ISSUE-P3-27 子项 2：[signCount] 必须是调用方从
-     * [VaultRepository.incrementPasskeySignCount] 取得的**实际落库值**，本方法不再自行计算——
-     * 签名写入 AuthenticatorData 的计数器与库内计数器必须逐字节一致，否则 RP 侧防克隆校验
-     * 会与真实状态错位（并发断言或中断重试时表现为重复计数器）。
      */
     private fun buildAssertionJson(
         passkeyData: PasskeyData,
@@ -270,15 +288,17 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
         challenge: String,
         clientDataPackage: String?,
         flags: Byte,
-        signCount: Int
+        signCount: Int,
+        providedClientDataHash: ByteArray?,
+        prfEval: WebAuthnRequest.PrfEval?
     ): String {
         // 派生中间量统一在 finally 中擦除（ISSUE-P1-02：签名会话材料用毕即清零）
         var authData: ByteArray? = null
         var clientDataBytes: ByteArray? = null
         var dataToSign: ByteArray? = null
+        var signingKeyBytes: ByteArray? = null
         try {
-            // 1. 构造 AuthenticatorData (flags 由本次实际用户验证结果驱动，无 AT)
-            // ISSUE-P3-27 子项 2：计数器取「本次已落库值」，不再由锁外快照递增推导
+            // 1. 构造 AuthenticatorData (flags 由本次用户验证结果与凭据 BE/BS 驱动，无 AT)
             val authDataLocal = PasskeyCryptoEngine.buildAuthenticatorData(
                 rpId = passkeyData.relyingPartyId,
                 flags = flags,
@@ -286,20 +306,19 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
             )
             authData = authDataLocal
 
-            // 2. 构造 ClientDataJSON 与 SHA-256 哈希
+            // 2. 构造 ClientDataJSON（响应体回传内容）与签名用摘要
             val clientDataJson = JSONObject().apply {
                 put("type", "webauthn.get")
                 put("challenge", challenge)
                 put("origin", origin)
-                // ISSUE-P2-72：只写系统认证的调用方包名（退化时取候选组装阶段写入 base Intent 的
-                // 预期包名——其完整性由 exported=false + PendingIntent 仅由系统发送保证，非 extras 自身）；
-                // 取不到即省略——绝不再回退为本应用包名（原实现 `?: packageName` 属虚假归属）。
+                // ISSUE-P2-72：只写系统认证的调用方包名；取不到即省略——绝不再回退为本应用包名
                 clientDataPackage?.let { put("androidPackageName", it) }
             }.toString()
             val clientDataBytesLocal = clientDataJson.toByteArray(Charsets.UTF_8)
             clientDataBytes = clientDataBytesLocal
-            val sha256 = MessageDigest.getInstance("SHA-256")
-            val clientDataHash = sha256.digest(clientDataBytesLocal)
+            // 特权调用方自带 clientDataJSON：直接对其摘要签名；否则自建 JSON 取 SHA-256
+            val clientDataHash = providedClientDataHash
+                ?: MessageDigest.getInstance("SHA-256").digest(clientDataBytesLocal)
 
             // 3. 构造待签名数据包 (authData || clientDataHash)
             val dataToSignLocal = ByteArray(authDataLocal.size + clientDataHash.size)
@@ -307,17 +326,16 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
             System.arraycopy(clientDataHash, 0, dataToSignLocal, authDataLocal.size, clientDataHash.size)
             dataToSign = dataToSignLocal
 
-            // 4. 读取私钥并执行签名，全流程保护敏感内存
-            // P0-7 整改：直接从 ProtectedString 取字节数组并解码，严禁生成不可变私钥 String
-            // ISSUE-P1-02 整改：解码改走纯字节通道（usePrivateKeyBytes 自动清零 + 手工 hex 解析），
-            // 修复原实现 `String(rawBytes).trim()` 与 `BigInteger(String,16)` 两处不可变私钥 String 残留
-            val privBytes = passkeyData.usePrivateKeyBytes { raw -> decodePrivateKeyBytes(raw) }
-
-            val signature = try {
-                PasskeyCryptoEngine.signAssertion(passkeyData.algorithmId, privBytes, dataToSignLocal)
-            } finally {
-                Arrays.fill(privBytes, 0.toByte())
+            // 4. 读取私钥并执行签名，全流程保护敏感内存（PEM 优先，历史 v1 形态回退）
+            val material = passkeyData.usePrivateKeyBytes { raw -> decodePrivateKeyMaterial(passkeyData, raw) }
+            signingKeyBytes = material.keyBytes
+            if (material.algorithmId != passkeyData.algorithmId) {
+                // 私钥形态（PKCS#8 OID）是算法的权威来源；仓库字段仅是缓存，不一致时如实留痕
+                AppLog.w(TAG, "凭据算法字段与私钥形态不一致，以私钥解析结果为准签发")
             }
+            val signature = PasskeyCryptoEngine.signAssertion(
+                material.algorithmId, material.keyBytes, dataToSignLocal
+            )
 
             // 5. 构造最终 WebAuthn 断言响应 JSON
             val b64Url = Base64.getUrlEncoder().withoutPadding()
@@ -326,7 +344,7 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
                 put("rawId", passkeyData.credentialId)
                 put("type", "public-key")
                 put("authenticatorAttachment", "platform")
-                put("clientExtensionResults", JSONObject())
+                put("clientExtensionResults", buildPrfClientExtensionResults(prfEval, passkeyData.prfSecret))
                 put("response", JSONObject().apply {
                     put("clientDataJSON", b64Url.encodeToString(clientDataBytesLocal))
                     put("authenticatorData", b64Url.encodeToString(authDataLocal))
@@ -339,17 +357,67 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
             authData?.fill(0)
             clientDataBytes?.fill(0)
             dataToSign?.fill(0)
+            signingKeyBytes?.fill(0)
         }
     }
 
     /**
+     * 组装断言响应的 `clientExtensionResults.prf`（WebAuthn Level 3 §10.1）：
+     * 请求携带 `eval` 且凭据持有 PRF 秘密时回传 `results.first` / `results.second`；
+     * 否则返回空对象（绝不伪造输出，由 RP 自行判定）。
+     */
+    private fun buildPrfClientExtensionResults(
+        prfEval: WebAuthnRequest.PrfEval?,
+        prfSecret: ProtectedString?
+    ): JSONObject {
+        if (prfEval == null) return JSONObject()
+        if (prfSecret == null) {
+            AppLog.w(TAG, "请求要求 PRF，但该凭据未持有 PRF 秘密，不返回 prf 结果")
+            return JSONObject()
+        }
+        val b64Url = Base64.getUrlEncoder().withoutPadding()
+        return try {
+            val first = PasskeyPrf.computeValue(prfSecret, prfEval.first)
+            try {
+                val results = JSONObject().put("first", b64Url.encodeToString(first))
+                prfEval.second?.let { secondInput ->
+                    val second = PasskeyPrf.computeValue(prfSecret, secondInput)
+                    try {
+                        results.put("second", b64Url.encodeToString(second))
+                    } finally {
+                        second.fill(0)
+                    }
+                }
+                JSONObject().put("prf", JSONObject().put("results", results))
+            } finally {
+                first.fill(0)
+            }
+        } catch (t: Throwable) {
+            AppLog.e(TAG, "PRF 输出计算失败，不返回 prf 结果", t)
+            JSONObject()
+        }
+    }
+
+    /** 签名侧私钥材料（算法标识 + 该算法的签名入参字节） */
+    private class PrivateKeyMaterial(val algorithmId: Int, val keyBytes: ByteArray)
+
+    /**
      * 从私钥受控字节流解码为签名引擎可用的原始私钥字节（ISSUE-P1-02 纯字节通道）。
-     * 兼容两种驻留形态：
-     * - 定长（≤64 字符）hex 文本字节流（ES256 生成侧格式）：手工半字节解析，零 String 中间量；
-     * - Base64（Ed25519 原始种子 / RS256 PKCS#8 DER）：直接字节流解码。
+     * 兼容驻留形态：
+     * - **PKCS#8 PEM**（新写入口径，与 KeePassXC `KPEX_PASSKEY_PRIVATE_KEY_PEM` 一致）：由
+     *   [PasskeyCryptoEngine.decodePemPrivateKeyText] 权威解析出算法与签名材料；
+     * - 历史 v1：定长（≤64 字符）hex 文本（ES256）、Base64（Ed25519 种子 / RS256 PKCS#8 DER）。
      * 输出为独立副本，调用方负责用毕清零。
      */
-    private fun decodePrivateKeyBytes(raw: ByteArray): ByteArray {
+    private fun decodePrivateKeyMaterial(passkeyData: PasskeyData, raw: ByteArray): PrivateKeyMaterial {
+        PasskeyCryptoEngine.decodePemPrivateKeyText(raw)?.let {
+            return PrivateKeyMaterial(it.algorithmId, it.keyBytes)
+        }
+        return PrivateKeyMaterial(passkeyData.algorithmId, decodeLegacyPrivateKeyBytes(raw))
+    }
+
+    /** 历史 v1 私钥文本（hex 标量 / Base64 种子 / Base64 PKCS#8 DER）→ 原始字节 */
+    private fun decodeLegacyPrivateKeyBytes(raw: ByteArray): ByteArray {
         val isHex = raw.size in 2..64 && raw.all { b ->
             b.toInt() in '0'.code..'9'.code ||
                     b.toInt() in 'a'.code..'f'.code ||

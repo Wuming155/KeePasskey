@@ -2,16 +2,21 @@ package com.keepasskey.app.passkey
 
 import android.content.Intent
 import android.os.Bundle
+import androidx.credentials.CreatePublicKeyCredentialRequest
 import androidx.credentials.CreatePublicKeyCredentialResponse
 import androidx.credentials.provider.PendingIntentHandler
+import androidx.credentials.provider.ProviderCreateCredentialRequest
 import androidx.lifecycle.lifecycleScope
 import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.security.BiometricAuthManager
 import com.keepasskey.app.security.CallerCertDigests
 import com.keepasskey.core.log.AppLog
+import com.keepasskey.core.model.PasskeyData
+import com.keepasskey.core.security.ProtectedString
 import com.keepasskey.crypto.cbor.CborEncoder
 import com.keepasskey.crypto.passkey.PasskeyCryptoEngine
+import com.keepasskey.crypto.passkey.PasskeyPrf
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -25,14 +30,17 @@ import javax.inject.Inject
  * 通行密钥创建与注册落地 Activity (对齐 P0-3 要求)。
  * 在受保护的独立生命周期中完成：
  * 1. 确定调用方来源并校验（H1 / L1）；
- * 2. **ISSUE-P0-03 (ZT-03)**：生成密钥并落库前，先执行「本次实际发生」的用户验证门控
- *    （系统级生物识别 / 锁屏凭据，或设备无可用认证器时的受保护窗口手动确认），
- *    结果交由 [PasskeyAuthFlags] 决定 AuthenticatorData 的 UV 位——强验证通过 → `UV=1`，
- *    手动确认仅证实在场 → 如实 `UV=0`；未验证 / 失败 / 取消一律拒绝创建；
- * 3. 硬件级/密码学 ES256 密钥对生成；
- * 4. 写入 KDBX 密码库并原子落盘；
- * 5. 构造标准 WebAuthn W3C 证明对象 (AttestationObject) 与确定性 CBOR 编码；
- * 6. 通过 PendingIntentHandler 回传 CreatePublicKeyCredentialResponse。
+ * 2. 库锁定时在**同一受保护窗口内**呈现解锁页（[CredentialUnlockPresenter]）——
+ *    整改前此处直接 `failAndFinish()`，用户点选系统「创建通行密钥」后静默失败；
+ * 3. **ISSUE-P0-03 (ZT-03)**：生成密钥并落库前，先执行「本次实际发生」的用户验证门控
+ *    （RP 声明 `userVerification: required` 时强制系统级强验证，绝不降级为手动确认）；
+ * 4. **按 RP 的 `pubKeyCredParams` 协商算法**生成密钥对（此前写死 ES256）；
+ * 5. **原样采用 RP 下发的 `user.id` 作为 userHandle**（此前自造随机值，破坏无用户名登录）；
+ * 6. `excludeCredentials` 命中库内既有凭据即 fail-closed 拒绝（防重复注册）；
+ * 7. 请求携带 `extensions.prf` 时生成并持久化 PRF 秘密，并在响应中回传 `prf` 结果；
+ * 8. 写入 KDBX 密码库并原子落盘（同 rpId + 用户名已有条目则**原地替换**，不产生重复条目）；
+ * 9. 构造标准 WebAuthn W3C 证明对象 (AttestationObject) 与确定性 CBOR 编码；
+ * 10. 通过 PendingIntentHandler 回传 CreatePublicKeyCredentialResponse。
  */
 @AndroidEntryPoint
 class PasskeyCreateActivity : BaseCredentialActivity() {
@@ -46,6 +54,9 @@ class PasskeyCreateActivity : BaseCredentialActivity() {
     @Inject
     lateinit var fillVerifier: CredentialFillVerifier
 
+    @Inject
+    lateinit var unlockPresenter: CredentialUnlockPresenter
+
     /** ISSUE-P2-02：DAL 远程资产声明校验器（普通应用注册的 RP ID 强绑定门控） */
     @Inject
     lateinit var dalVerifier: DigitalAssetLinksVerifier
@@ -54,44 +65,50 @@ class PasskeyCreateActivity : BaseCredentialActivity() {
     @Inject
     lateinit var extendedSettingsStore: com.keepasskey.app.data.repository.ExtendedSettingsStore
 
-    /** 防止验证回调 / 取消回调 / 重复 finish 交错产生重复创建或重复收尾 */
-    private var settled = false
-
     /** ISSUE-P2-83：CM 通道调用方「包名 + 主签名摘要」首次绑定存储（`android://` 维度放行依据） */
     @Inject
     lateinit var callerTrustStore: CredentialManagerCallerTrustStore
 
+    /** 防止验证回调 / 取消回调 / 重复 finish 交错产生重复创建或重复收尾 */
+    private var settled = false
+
+    /** 系统注入的创建请求（解锁后仍需使用其中经平台背书的调用方信息与请求 JSON） */
+    private var providerReq: ProviderCreateCredentialRequest? = null
+
+    /** **平台下发**的创建请求选项（`pubKeyCredParams` / `user.id` / `excludeCredentials` / `prf`） */
+    private var request: WebAuthnRequest? = null
+
+    private var rpId = ""
+    private var userName = ""
+    private var userDisplayName = ""
+    private var challenge = ""
+    private var origin = ""
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        var rpId = intent.getStringExtra(EXTRA_RP_ID).orEmpty()
-        var userName = intent.getStringExtra(EXTRA_USER_NAME).orEmpty()
-        var userDisplayName = intent.getStringExtra(EXTRA_USER_DISPLAY_NAME).orEmpty()
-        var challenge = intent.getStringExtra(EXTRA_CHALLENGE).orEmpty()
-        var origin = intent.getStringExtra(EXTRA_ORIGIN).orEmpty()
+        rpId = intent.getStringExtra(EXTRA_RP_ID).orEmpty()
+        userName = intent.getStringExtra(EXTRA_USER_NAME).orEmpty()
+        userDisplayName = intent.getStringExtra(EXTRA_USER_DISPLAY_NAME).orEmpty()
+        challenge = intent.getStringExtra(EXTRA_CHALLENGE).orEmpty()
+        origin = intent.getStringExtra(EXTRA_ORIGIN).orEmpty()
 
-        val providerReq = try {
+        providerReq = try {
             PendingIntentHandler.retrieveProviderCreateCredentialRequest(intent)
         } catch (_: Exception) {
             null
         }
+        // 系统请求 JSON 是**平台下发**的权威来源，优先于本应用写入 base Intent 的副本
         val callingReq = providerReq?.callingRequest
-        if (callingReq is androidx.credentials.CreatePublicKeyCredentialRequest) {
-            try {
-                val json = JSONObject(callingReq.requestJson)
-                val rpObj = json.optJSONObject("rp")
-                if (rpId.isBlank()) rpId = rpObj?.optString("id").orEmpty()
-                val userObj = json.optJSONObject("user")
-                if (userName.isBlank()) userName = userObj?.optString("name").orEmpty()
-                if (userDisplayName.isBlank()) userDisplayName = userObj?.optString("displayName").orEmpty()
-                if (challenge.isBlank()) challenge = json.optString("challenge")
-            } catch (e: Exception) {
-                AppLog.w(TAG, "解析 callingRequest.requestJson 失败", e)
-            }
+        if (callingReq is CreatePublicKeyCredentialRequest) {
+            request = WebAuthnRequest.parse(callingReq.requestJson)
+            if (rpId.isBlank()) rpId = request?.rpId.orEmpty()
+            if (userName.isBlank()) userName = request?.userName.orEmpty()
+            if (userDisplayName.isBlank()) userDisplayName = request?.userDisplayName.orEmpty()
+            if (challenge.isBlank()) challenge = request?.challenge.orEmpty()
         }
         // H1 整改：不再从 candidateQueryData 读取调用方可控 origin（不可信）。
         // origin 缺省留空，clientDataJSON 回退为 https://<rpId> 标准值。
-        // （P3-28 整改：移除仅含注释的空 if 块）
 
         if (rpId.isBlank() || userName.isBlank()) {
             // ISSUE-P1-10：日志不得携带 rpId / userName 等敏感标识
@@ -100,28 +117,26 @@ class PasskeyCreateActivity : BaseCredentialActivity() {
             return
         }
 
+        // 锁库时在受保护窗口内先解锁，解锁成功后从同一入口继续注册流程
+        unlockPresenter.requireUnlocked(this) { startCreation() }
+    }
+
+    /** 解锁后（或库本就解锁）的注册主流程 */
+    private fun startCreation() {
         lifecycleScope.launch {
             try {
                 if (vaultRepository.isLocked()) {
-                    AppLog.w(TAG, "密码库处于锁定状态，无法注册新 Passkey")
+                    AppLog.w(TAG, "密码库仍未解锁，无法注册新 Passkey")
                     failAndFinish()
                     return@launch
                 }
 
-                // 普通应用（apk-key-hash origin）创建的凭据额外记录调用包绑定（android://<包名>），
-                // 供后续 GET 流程按严格包名边界匹配（H1/L1/P1-4 整改）
-                //
-                // ISSUE-P2-72：仅接受**系统背书**的 CallingAppInfo 包名。原实现回退
-                // `callingPackage`（Activity.getCallingPackage）在系统经 PendingIntent 拉起时为
-                // `"android"`/null → 会落出 `android://android` 绑定（可被同包名侧载应用命中）；
-                // 取不到即返回 null，由下方 DAL 门控 fail-closed 拒绝。
+                // 普通应用（apk-key-hash origin）创建的凭据额外记录调用包绑定（android://<包名>）。
+                // ISSUE-P2-72：仅接受**系统背书**的 CallingAppInfo 包名，取不到即返回 null。
                 val callerPackage = CallingOriginResolver.systemAttestedPackageName(providerReq?.callingAppInfo)
 
                 // ISSUE-P2-02：普通应用注册的 DAL 远程资产声明强绑定校验。
-                // 浏览器委派调用豁免（rp.id ↔ web origin 归属已由 DomainMatcher 严格点号边界强制）；
-                // 普通应用必须通过 https://<rpId>/.well-known/assetlinks.json 的
-                // `delegate_permission/common.get_login_creds` 授权声明（包名 + 证书指纹双向绑定），
-                // 网络 / 声明 / 格式任一不满足一律 fail-closed 拒绝；用户可在设置中显式开启跳过。
+                // 浏览器委派调用豁免（rp.id ↔ web origin 归属已由 DomainMatcher 严格点号边界强制）。
                 if (!CallingOriginResolver.isBrowserOrigin(origin)) {
                     val pkg = callerPackage ?: run {
                         AppLog.e(TAG, "无法确定调用应用包名，拒绝创建应用内 Passkey")
@@ -157,10 +172,16 @@ class PasskeyCreateActivity : BaseCredentialActivity() {
                     }
                 }
 
-                // ISSUE-P0-03 (ZT-03)：生成并保存凭据前先执行「本次实际发生」的用户验证门控。
-                // 修复前注册路径无条件 UP|UV|BE|BS|AT 全置位——即使设备无强认证器、用户未被
-                // 验证也会向 RP 谎报 UV=1。现改由门控结果决定 UV 位（强验证 → UV=1；手动确认
-                // → UV=0 且 UI 已明示降级；未验证 / 失败 / 取消一律拒绝创建）。
+                // ISSUE：`excludeCredentials` 查重（WebAuthn 规范要求认证器拒绝创建已排除的凭据）
+                if (!ensureNotExcluded()) {
+                    failAndFinish()
+                    return@launch
+                }
+
+                // RP 要求 `userVerification: "required"` 时强制系统级强验证（不得降级为手动确认）
+                val requireBiometric = request?.authenticatorSelectionUserVerification ==
+                    WebAuthnRequest.UserVerification.REQUIRED
+
                 val rpLabel = rpId.ifBlank { userName }
                 requestCredentialUserVerification(
                     biometricAuthManager = biometricAuthManager,
@@ -170,13 +191,13 @@ class PasskeyCreateActivity : BaseCredentialActivity() {
                     manualHint = getString(R.string.passkey_create_manual_hint, rpLabel),
                     confirmText = getString(R.string.passkey_confirm_ok),
                     cancelText = getString(R.string.passkey_confirm_cancel),
+                    requireBiometric = requireBiometric,
                     onVerified = { verification ->
                         if (settled) return@requestCredentialUserVerification
                         settled = true
                         // ISSUE-P2-83：注册流程是「用户在受保护窗口内把凭据显式交给该调用方」的
                         // 两个入口之一（另一个是保存），故在验证通过后、落库前写入 CM 通道绑定。
-                        // 仅在确有**系统背书**包名（普通应用路径）时写入；fail-closed：包名不可得或
-                        // 摘要不可读一律**不写入**（保持未绑定），不落「仅包名」降级键。
+                        // fail-closed：包名不可得或摘要不可读一律**不写入**（保持未绑定）。
                         val attestedPkg = callerPackage
                         val callerDigests = providerReq?.callingAppInfo
                             ?.let { CallingOriginResolver.certDigests(it) }
@@ -186,15 +207,7 @@ class PasskeyCreateActivity : BaseCredentialActivity() {
                         } else {
                             callerTrustStore.trust(attestedPkg, callerDigests.primary)
                         }
-                        createAndReturn(
-                            rpId = rpId,
-                            userName = userName,
-                            userDisplayName = userDisplayName,
-                            challenge = challenge,
-                            origin = origin,
-                            callerPackage = callerPackage,
-                            verification = verification
-                        )
+                        createAndReturn(callerPackage = callerPackage, verification = verification)
                     },
                     onRejected = {
                         if (settled) return@requestCredentialUserVerification
@@ -211,17 +224,28 @@ class PasskeyCreateActivity : BaseCredentialActivity() {
     }
 
     /**
+     * `excludeCredentials` 查重：请求排除的凭据 id 若已存在于库中，说明该 RP + 该凭据已注册过，
+     * 按 WebAuthn 规范 fail-closed 拒绝创建（避免同一凭据被重复登记为多条条目）。
+     */
+    private suspend fun ensureNotExcluded(): Boolean {
+        val excludedIds = request?.excludeCredentialIds ?: return true
+        if (excludedIds.isEmpty()) return true
+        val existing = vaultRepository.findExistingPasskeyCredentialIds(excludedIds)
+        if (existing.isNotEmpty()) {
+            // ISSUE-P1-10：日志不得携带 credentialId 等敏感标识
+            AppLog.w(TAG, "命中 excludeCredentials：库中已存在该凭据，拒绝重复创建")
+            return false
+        }
+        return true
+    }
+
+    /**
      * 用户验证通过后执行密钥生成、落库与响应回传（唯一允许 `RESULT_OK` 的路径）。
      *
      * [verification] 已被门控裁决为满足要求，此处将其实话实说地投影为 flags：
      * 强验证 → [PasskeyAuthFlags] 置 `UV=1`；仅手动确认 → 如实 `UV=0`。
      */
     private fun createAndReturn(
-        rpId: String,
-        userName: String,
-        userDisplayName: String,
-        challenge: String,
-        origin: String,
         callerPackage: String?,
         verification: CredentialUserVerification
     ) {
@@ -235,26 +259,46 @@ class PasskeyCreateActivity : BaseCredentialActivity() {
                     return@launch
                 }
 
-                // 1. 生成 ES256 密钥对（CPU 密集调度至 Default）
-                val passkeyData = withContext(Dispatchers.Default) {
-                    PasskeyCryptoEngine.generateEs256KeyPair(
+                val requestedAlgorithms = request?.pubKeyCredParams ?: emptyList()
+                // 原样采用 RP 下发的 user.id（Base64URL 文本）；缺失时才由引擎生成随机句柄
+                val rpUserId = request?.userId.orEmpty()
+
+                // PRF 扩展：注册请求携带 `extensions.prf` 时生成每凭据秘密；规范禁止注册携带
+                // `evalByCredential`（出现即 fail-closed，KeePassDX 同口径）
+                val prfEval = request?.prfEval
+                if (prfEval?.evalByCredentialPresent == true) {
+                    AppLog.w(TAG, "注册请求携带 evalByCredential（规范禁止），拒绝创建")
+                    failAndFinish()
+                    return@launch
+                }
+                val prfSecret: ProtectedString? = if (prfEval != null) PasskeyPrf.newSecretProtected() else null
+
+                // 1. 按 pubKeyCredParams 协商算法并生成密钥对（CPU 密集调度至 Default）
+                val generated = withContext(Dispatchers.Default) {
+                    PasskeyCryptoEngine.generateKeyPairForAlgorithms(
+                        requestedAlgorithms = requestedAlgorithms,
                         relyingPartyId = rpId,
                         userName = userName,
-                        userHandle = "",
+                        userHandle = rpUserId,
                         userDisplayName = userDisplayName
                     )
-                }
+                }.let { if (prfSecret == null) it else it.copy(prfSecret = prfSecret) }
 
-                // 2. 存储至 KDBX 密码库（原子落盘）
-                vaultRepository.saveNewPasskeyEntry(
-                    data = passkeyData,
-                    boundPackage = if (CallingOriginResolver.isBrowserOrigin(origin)) null
-                    else callerPackage
+                // 2. 存储至 KDBX 密码库（原子落盘）；同 rpId + 用户名已有条目则原地替换
+                vaultRepository.saveOrReplacePasskeyEntry(
+                    data = generated,
+                    boundPackage = if (CallingOriginResolver.isBrowserOrigin(origin)) null else callerPackage
                 )
 
                 // 3. 构建证明数据 (Attestation) 并回传（确定性 CBOR 编码在 Default 执行）
                 val regResponseJson = withContext(Dispatchers.Default) {
-                    buildRegistrationJson(passkeyData, rpId, challenge, origin, callerPackage, flags)
+                    buildRegistrationJson(
+                        passkeyData = generated,
+                        challenge = challenge,
+                        callerPackage = callerPackage,
+                        flags = flags,
+                        prfEval = prfEval
+                    )
                 }
 
                 val resultIntent = Intent()
@@ -274,9 +318,9 @@ class PasskeyCreateActivity : BaseCredentialActivity() {
      * 无证明声明采用 `fmt="none"`；私钥不参与该路径，仅使用公钥构建 COSE 键。
      *
      * ISSUE-P1-02 内存脱敏边界声明：
-     * - 私钥全程不进入本路径——生成侧（[PasskeyCryptoEngine]）已保证零 String 中间量，
-     *   私钥唯一长期持有者是落库条目内的 [com.keepasskey.core.security.ProtectedString]
-     *   （密文驻留，且经 [PasskeyData.toCustomFields] 零拷贝别名共享，**不可 clear**）；
+     * - 私钥全程不进入本路径——生成侧已保证零 String 中间量，私钥唯一长期持有者是落库条目内
+     *   的 [com.keepasskey.core.security.ProtectedString]（密文驻留，且经
+     *   [PasskeyData.toCustomFields] 零拷贝别名共享，**不可 clear**）；
      * - credentialId / 公钥 / authData / attestationObject 均为 WebAuthn 规范定义的公开材料，
      *   派生字节数组仍统一 try/finally 擦除，保持防御一致性；
      * - 不可消解的 String 边界：系统 Credential Manager 契约要求响应为 JSON 字符串
@@ -284,17 +328,17 @@ class PasskeyCreateActivity : BaseCredentialActivity() {
      *   公开注册材料（不含私钥），属受控且可接受的驻留。
      */
     private fun buildRegistrationJson(
-        passkeyData: com.keepasskey.core.model.PasskeyData,
-        rpId: String,
+        passkeyData: PasskeyData,
         challenge: String,
-        origin: String,
         callerPackage: String?,
-        flags: Byte
+        flags: Byte,
+        prfEval: WebAuthnRequest.PrfEval?
     ): String {
         var authData: ByteArray? = null
         var attestationObjectBytes: ByteArray? = null
         try {
-            val credIdBytes = Base64.getUrlDecoder().decode(passkeyData.credentialId)
+            val credIdBytes = WebAuthnRequest.base64UrlDecode(passkeyData.credentialId)
+                ?: Base64.getUrlDecoder().decode(passkeyData.credentialId)
             val pubBytes = Base64.getDecoder().decode(passkeyData.publicKeyBase64)
             val coseKeyBytes = PasskeyCryptoEngine.coseKeyFor(passkeyData.algorithmId, pubBytes)
 
@@ -324,17 +368,19 @@ class PasskeyCreateActivity : BaseCredentialActivity() {
                 }
             }.toString()
 
-            val clientDataBase64 = Base64.getUrlEncoder().withoutPadding()
-                .encodeToString(clientDataJson.toByteArray(Charsets.UTF_8))
-            val attestationBase64 = Base64.getUrlEncoder().withoutPadding()
-                .encodeToString(attestationObjectBytes)
+            val b64Url = Base64.getUrlEncoder().withoutPadding()
+            val clientDataBase64 = b64Url.encodeToString(clientDataJson.toByteArray(Charsets.UTF_8))
+            val attestationBase64 = b64Url.encodeToString(attestationObjectBytes)
 
             return JSONObject().apply {
                 put("id", passkeyData.credentialId)
                 put("rawId", passkeyData.credentialId)
                 put("type", "public-key")
                 put("authenticatorAttachment", "platform")
-                put("clientExtensionResults", JSONObject())
+                put(
+                    "clientExtensionResults",
+                    buildPrfClientExtensionResults(prfEval, passkeyData.prfSecret, isRegistration = true)
+                )
                 put("response", JSONObject().apply {
                     put("clientDataJSON", clientDataBase64)
                     put("attestationObject", attestationBase64)
@@ -345,6 +391,44 @@ class PasskeyCreateActivity : BaseCredentialActivity() {
             authData?.fill(0)
             attestationObjectBytes?.fill(0)
         }
+    }
+
+    /**
+     * 组装 `clientExtensionResults.prf`（WebAuthn Level 3 §10.1）：
+     * - 注册：`enabled = true`；请求带 `eval` 时同时回传 `results`；
+     * - 断言：仅当确能计算出结果时回传 `results`（否则空对象，绝不谎报）。
+     */
+    private fun buildPrfClientExtensionResults(
+        prfEval: WebAuthnRequest.PrfEval?,
+        prfSecret: ProtectedString?,
+        isRegistration: Boolean
+    ): JSONObject {
+        if (prfEval == null) return JSONObject()
+        val b64Url = Base64.getUrlEncoder().withoutPadding()
+        val prf = JSONObject()
+        if (prfSecret == null) {
+            if (!isRegistration) return JSONObject()
+            prf.put("enabled", true)
+            return JSONObject().put("prf", prf)
+        }
+        prf.put("enabled", true)
+        val first = PasskeyPrf.computeValue(prfSecret, prfEval.first)
+        try {
+            val results = JSONObject().put("first", b64Url.encodeToString(first))
+            val secondInput = prfEval.second
+            if (secondInput != null) {
+                val second = PasskeyPrf.computeValue(prfSecret, secondInput)
+                try {
+                    results.put("second", b64Url.encodeToString(second))
+                } finally {
+                    second.fill(0)
+                }
+            }
+            prf.put("results", results)
+        } finally {
+            first.fill(0)
+        }
+        return JSONObject().put("prf", prf)
     }
 
     companion object {

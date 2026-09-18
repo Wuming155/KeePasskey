@@ -86,6 +86,14 @@ class KeePasskeyCredentialProviderService : CredentialProviderService() {
     @Inject
     lateinit var runtimeIntegrityGate: com.keepasskey.app.security.RuntimeIntegrityGate
 
+    /**
+     * 特权浏览器白名单（内置已取证指纹 + 用户显式启用的浏览器）。
+     * 缺省白名单只有 Chrome，会让 Firefox / Brave / Edge 等浏览器上**通行密钥完全不可用**
+     * （origin 退化为 `apk-key-hash`，与 `https://<rpId>` 绑定条目不匹配）。
+     */
+    @Inject
+    lateinit var privilegedBrowserStore: com.keepasskey.app.data.repository.PasskeyPrivilegedBrowserStore
+
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     override fun onBeginGetCredentialRequest(
@@ -172,6 +180,8 @@ class KeePasskeyCredentialProviderService : CredentialProviderService() {
         cancellationSignal: CancellationSignal,
         callback: OutcomeReceiver<BeginCreateCredentialResponse, CreateCredentialException>
     ) {
+        // ISSUE-P1-10：只记录请求类别（类型名），不记录调用包名 / rpId 等敏感标识
+        AppLog.i(TAG, "onBeginCreateCredentialRequest 收到系统创建请求: ${request.javaClass.simpleName}")
         if (cancellationSignal.isCanceled) return
 
         val job = serviceScope.launch {
@@ -213,6 +223,7 @@ class KeePasskeyCredentialProviderService : CredentialProviderService() {
         val callingAppInfo = request.callingAppInfo
         val callingPackage = callingAppInfo?.packageName.orEmpty()
         val callingOrigin = extractOrigin(callingAppInfo)
+        // ISSUE-P1-10：不记录调用包名 / origin（会暴露用户安装应用清单与注册站点）
 
         when (request) {
             is BeginCreatePublicKeyCredentialRequest -> {
@@ -268,6 +279,8 @@ class KeePasskeyCredentialProviderService : CredentialProviderService() {
                     .build()
 
                 responseBuilder.addCreateEntry(createEntry)
+                // ISSUE-P1-10：不记录 rpId / 账号标签（会暴露用户注册的站点域）
+                AppLog.i(TAG, "已向系统返回 Passkey CreateEntry")
             }
 
             is BeginCreatePasswordCredentialRequest -> {
@@ -317,7 +330,10 @@ class KeePasskeyCredentialProviderService : CredentialProviderService() {
      */
     private fun extractOrigin(callingAppInfo: CallingAppInfo?): String {
         if (callingAppInfo == null) return ""
-        return CallingOriginResolver.resolveTrustedOrigin(callingAppInfo)
+        return CallingOriginResolver.resolveTrustedOrigin(
+            callingAppInfo,
+            privilegedBrowserStore.allowlistJson()
+        )
     }
 
     /**

@@ -41,19 +41,35 @@ internal fun FragmentActivity.requestCredentialUserVerification(
     confirmText: String,
     cancelText: String,
     onVerified: (CredentialUserVerification) -> Unit,
-    onRejected: () -> Unit
+    onRejected: () -> Unit,
+    /**
+     * RP 要求 `userVerification: "required"`（或注册侧 `authenticatorSelection.userVerification
+     * = "required"`）时置 true：**强制**走系统级强验证，绝不退化为「手动点选确认」
+     * （后者只能证明用户在场，投影为 `UV=0`，对 required 的 RP 毫无意义）。设备无可用认证器
+     * 或无法建立密码学绑定时一律 [onRejected]（fail-closed），由调用方如实失败。
+     */
+    requireBiometric: Boolean = false
 ) {
     val status = biometricAuthManager.canAuthenticate(
         this,
         BiometricAuthManager.UNLOCK_AUTHENTICATORS
     )
-    val requirement = fillVerifier.requirementFor(status)
+    val requirement = if (requireBiometric) {
+        CredentialFillRequirement.BIOMETRIC
+    } else {
+        fillVerifier.requirementFor(status)
+    }
 
     when (requirement) {
         CredentialFillRequirement.BIOMETRIC -> {
-            // ISSUE-P2-76：先准备密码学绑定 Cipher；取不到即按既有退化策略走手动确认
+            // ISSUE-P2-76：先准备密码学绑定 Cipher；取不到即按既有退化策略走手动确认。
+            // RP 显式要求强验证时不得降级 → 直接拒绝。
             val authCipher = biometricAuthManager.prepareAutofillAuthCipher()
             if (authCipher == null) {
+                if (requireBiometric) {
+                    onRejected()
+                    return
+                }
                 showManualConfirmation(title, manualHint, confirmText, cancelText, onVerified, onRejected)
                 return
             }

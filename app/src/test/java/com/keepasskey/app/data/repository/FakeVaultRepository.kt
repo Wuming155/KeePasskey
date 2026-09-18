@@ -448,6 +448,34 @@ class FakeVaultRepository(
     }
 
     /**
+     * 测试替身：同 rpId + 用户名命中既有条目时**原地替换**其 Passkey schema 字段，
+     * 否则与 [saveNewPasskeyEntry] 同语义新建（与生产 [RealVaultRepository] 契约一致）。
+     */
+    override suspend fun saveOrReplacePasskeyEntry(data: PasskeyData, boundPackage: String?): KdbxEntry {
+        val cleanTarget = DomainMatcher.extractDomain(data.relyingPartyId)
+        val current = extraKdbxEntries.value
+        val index = current.indexOfFirst { entry ->
+            val passkey = PasskeyData.fromCustomFields(entry.customFields) ?: return@indexOfFirst false
+            passkey.userName == data.userName && DomainMatcher.isDomainMatch(passkey.relyingPartyId, cleanTarget)
+        }
+        if (index < 0) return saveNewPasskeyEntry(data, boundPackage)
+
+        val preserved = current[index].customFields.filterNot { PasskeyData.isPasskeyFieldKey(it.key) }
+        val updated = current[index].copy(customFields = preserved + data.toCustomFields())
+        extraKdbxEntries.value = current.toMutableList().also { it[index] = updated }
+        return updated
+    }
+
+    /** 测试替身：`excludeCredentials` 查重的单趟扫描语义（与生产实现一致） */
+    override suspend fun findExistingPasskeyCredentialIds(credentialIds: Set<String>): Set<String> {
+        if (credentialIds.isEmpty()) return emptySet()
+        return getKdbxEntries()
+            .mapNotNull { PasskeyData.fromCustomFields(it.customFields)?.credentialId }
+            .filter { it in credentialIds }
+            .toSet()
+    }
+
+    /**
      * ISSUE-P3-27：原子递增并回传**实际落库值**。
      *
      * 替身刻意**不写死返回值**：按 [PasskeyData.readSignCount] + [PasskeyData.nextSignCount]

@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.ContentPasteGo
@@ -209,7 +210,8 @@ internal fun AutofillCaptureCard(
     blockedFieldCount: Int,
     onOpenBlacklist: () -> Unit,
     onOpenSaveBlacklist: () -> Unit,
-    onOpenFieldBlock: () -> Unit
+    onOpenFieldBlock: () -> Unit,
+    onOpenPrivilegedBrowsers: () -> Unit
 ) {
     BentoCard(
         modifier = Modifier.fillMaxWidth(),
@@ -238,6 +240,15 @@ internal fun AutofillCaptureCard(
                 subtitle = stringResource(R.string.autofill_skip_dal_sub),
                 checked = uiState.skipDalVerification,
                 onCheckedChange = onSkipDalVerificationToggle
+            )
+
+            // CM 通道特权浏览器白名单：内置仅收录已取证浏览器（Chrome / Firefox），
+            // 其余浏览器须在此显式启用，否则其上的通行密钥不会出现在候选里
+            AutofillManageEntryRow(
+                icon = Icons.Default.Public,
+                title = stringResource(R.string.settings_passkey_privileged_browsers),
+                subtitle = stringResource(R.string.settings_passkey_privileged_sub),
+                onClick = onOpenPrivilegedBrowsers
             )
 
             // 一级：按应用屏蔽填充（TASK-44）

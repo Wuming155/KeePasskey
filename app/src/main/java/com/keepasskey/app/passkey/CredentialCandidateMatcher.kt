@@ -17,19 +17,28 @@ import com.keepasskey.core.model.PasskeyData
  *
  * - 通行密钥候选：浏览器委派走 RP-ID 域匹配；普通应用走 `android://` 硬约束 **且** 包名维度
  *   已通过签名绑定门控（[CredentialManagerPackageBindingGate]）；
+ *   **且**（请求给出 `allowCredentials` 时）凭据 id 必须在白名单内 —— WebAuthn 规范要求
+ *   认证器只呈现请求列出的凭据，否则用户可能选中 RP 明确不接受的凭据导致登录失败；
  * - 密码候选：域匹配 **或** `android://` 包名匹配，后者同样受门控约束；条目必须**确有密码**。
  */
 internal object CredentialCandidateMatcher {
 
-    /** 通行密钥候选入选判定 */
+    /**
+     * 通行密钥候选入选判定。
+     *
+     * @param allowedCredentialIds 请求 `allowCredentials[].id` 的 Base64URL 文本集合；
+     *   **空集表示请求未限定**（无用户名 / discoverable 流程），此时不做 id 收敛。
+     */
     fun matchesPasskey(
         entry: KdbxEntry,
         browserFlow: Boolean,
         targetRpId: String,
         callingPackage: String,
-        packageDimensionAllowed: Boolean
+        packageDimensionAllowed: Boolean,
+        allowedCredentialIds: Set<String> = emptySet()
     ): Boolean {
         val passkey = PasskeyData.fromCustomFields(entry.customFields) ?: return false
+        if (allowedCredentialIds.isNotEmpty() && passkey.credentialId !in allowedCredentialIds) return false
         return if (browserFlow) {
             DomainMatcher.isDomainMatch(passkey.relyingPartyId, targetRpId)
         } else {

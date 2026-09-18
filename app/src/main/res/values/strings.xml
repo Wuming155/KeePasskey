@@ -799,6 +799,11 @@
     <string name="autofill_cm_sub">Android 16+ 系统级凭据管理，密码与通行密钥统一填充</string>
     <string name="autofill_passkey_title">通行密钥 (Passkey) 支持</string>
     <string name="autofill_passkey_sub">在支持的应用与网站中使用本机生成的通行密钥登录</string>
+    <!-- 特权浏览器白名单（CM 通道通行密钥可用性）：内置仅收录已取证浏览器，其余由用户逐项启用 -->
+    <string name="settings_passkey_privileged_browsers">特权浏览器白名单</string>
+    <string name="settings_passkey_privileged_sub">让 Chrome / Firefox 之外的浏览器也能使用通行密钥</string>
+    <string name="settings_passkey_privileged_warning">启用某个应用等于允许它以任意网站身份发起通行密钥请求（浏览器委派的固有语义）。请仅启用你信任的浏览器：指纹取自该应用自身的签名证书，换签名或同包名顶替会立即失效。</string>
+    <string name="settings_passkey_privileged_empty">未检测到可用的浏览器应用。</string>
     <string name="autofill_legacy_title">旧版自动填充服务</string>
     <string name="autofill_legacy_sub">兼容低版本 Android 的无障碍填充方式</string>
     <string name="autofill_section_ux">填充体验</string>

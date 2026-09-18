@@ -211,8 +211,9 @@ class AlgoHotPathGuardsTest {
 
         val passkey = stripped("core/src/main/java/com/keepasskey/core/model/PasskeyData.kt")
         assertTrue(
-            "fromCustomFields 必须先做不解密、不建 Map 的形状短路",
-            passkey.contains("if (!hasRpId || !hasCredentialId || !hasPrivateKey) return null")
+            "fromCustomFields 必须先做不解密、不建 Map 的形状短路（KPEX 与 v1 两套 schema 各三个必需键，" +
+                "任一一套齐备即可解析）",
+            passkey.contains("if (!kpexComplete && !legacyComplete) return null")
         )
         val preCheck = passkey
             .substringAfter("fun fromCustomFields")
