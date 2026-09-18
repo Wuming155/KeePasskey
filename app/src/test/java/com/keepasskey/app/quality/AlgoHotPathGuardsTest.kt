@@ -456,10 +456,13 @@ class AlgoHotPathGuardsTest {
             Regex("if \\(localDbOwned\\) wipeDiscarded\\(localDb\\)").findAll(controller).count()
         )
 
-        val runner = stripped("app/src/main/java/com/keepasskey/app/sync/SyncCycleRunner.kt")
+        // §155：两条合并入口的其中一处（handleConflictDetected）已下沉到同包分支文件，
+        // 故按**两文件并集**扫描——计数判据仍为 2，不放宽强度（AGENTS.md §3 测试资产纪律）。
+        val runner = listOf(stripped(RUNNER), stripped(RUNNER_REMOTE_OUTCOMES)).joinToString(separator = " ")
         assertEquals(
             "两处冲突合并入口（快速提交 / openRemote）都必须传入内存树快照" +
-                "（ISSUE-P3-188：合并段下沉后经 RemoteSyncContext 取值，故允许 `ctx.` 前缀）",
+                "（ISSUE-P3-188：合并段下沉后经 RemoteSyncContext 取值，故允许 `ctx.` 前缀；" +
+                "§155 分支文件下沉后改按门面 + 分支文件并集计数）",
             2,
             Regex("localDbOverride = (ctx\\.)?localDbSnapshot").findAll(runner).count()
         )
@@ -551,6 +554,9 @@ class AlgoHotPathGuardsTest {
         const val XML_PARSER =
             "database/src/main/java/com/keepasskey/database/xml/KdbxXmlParser.kt"
         const val OTP_ENGINE = "core/src/main/java/com/keepasskey/core/otp/OtpEngine.kt"
+        const val RUNNER = "app/src/main/java/com/keepasskey/app/sync/SyncCycleRunner.kt"
+        const val RUNNER_REMOTE_OUTCOMES =
+            "app/src/main/java/com/keepasskey/app/sync/SyncCycleRemoteOutcomes.kt"
 
         val BLOCK_COMMENT = Regex("""/\*[\s\S]*?\*/""", RegexOption.MULTILINE)
 

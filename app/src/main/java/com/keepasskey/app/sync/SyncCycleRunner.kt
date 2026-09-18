@@ -34,20 +34,22 @@ import javax.inject.Singleton
  * 加密与合并在 `Dispatchers.Default`（`SyncConflictController` / [SyncDatabaseCodec] 内），
  * 网络与文件写盘在 `Dispatchers.IO`（`sync` 模块内），本类不额外切线程。
  *
+ * 接缝（§155）：`openRemote` 的两条远端裁决分支（`handleRemoteSynced` / `handleConflictDetected`）
+ * 与其共享上下文 [RemoteSyncContext] 已下沉到同包文件 `SyncCycleRemoteOutcomes.kt`（ISSUE-P3-188 第二档）。
  * 互斥语义：本类在 [SyncSessionState.mutex] 内执行整个周期（与拆分前 `mutex.withLock` 覆盖范围一致），
  * 周期内触达 [SyncConflictController] 的各方法不得二次取锁。
  */
 @Singleton
 class SyncCycleRunner @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val databaseSession: DatabaseSession,
-    private val session: SyncSessionState,
+    internal val databaseSession: DatabaseSession,
+    internal val session: SyncSessionState,
     private val providerResolver: SyncProviderResolver,
-    private val codec: SyncDatabaseCodec,
-    private val conflicts: SyncConflictController,
+    internal val codec: SyncDatabaseCodec,
+    internal val conflicts: SyncConflictController,
     private val changes: SyncContentChangeDetector,
     private val preferences: SyncPreferences,
-    private val strings: StringsProvider,
+    internal val strings: StringsProvider,
     /**
      * F-23 整改：防回滚状态目录，生产由 DI 注入 `filesDir/<SyncRollbackGuard.STATE_DIR_NAME>`
      * （**跨会话锁定保留**，与可丢弃的 `cacheDir/sync` 语义彻底分离）。
@@ -424,92 +426,5 @@ class SyncCycleRunner @Inject constructor(
             // 遏制为「本次同步失败」，不允许绕过应用自身的错误遏制框架。
             SyncOutcome.Error(e.message ?: strings.get(R.string.sync_error_unknown))
         }
-    }
-
-    /** `openRemote` 决策分支共享的上下文（9 项入参在分支间原样流转，聚合以免逐支透传） */
-    private data class RemoteSyncContext(
-        val syncEngine: SyncEngine,
-        val syncCache: SyncCache,
-        val remotePath: String,
-        val localBytes: ByteArray,
-        val localDbSnapshot: KdbxDatabase,
-        val baseSnapshotBytes: ByteArray?,
-        val isDirty: Boolean,
-        val hasLocalContentChanged: Boolean,
-        val conflictStrategy: SyncConflictStrategy
-    )
-
-    /** 远端与本地 ETag 一致：按「是否 identical / 本地是否有未同步修改」三分支裁决 */
-    private suspend fun handleRemoteSynced(
-        ctx: RemoteSyncContext,
-        openResult: SyncOpenResult.RemoteSynced
-    ): SyncOutcome {
-        if (openResult.remoteBytes.contentEquals(ctx.localBytes)) {
-            session.lastSyncedDb = databaseSession.databaseFlow.value
-            return SyncOutcome.UpToDate
-        }
-        if (ctx.isDirty || ctx.hasLocalContentChanged) {
-            // F1 修复：本地存在未同步修改（缓存被回收导致步骤 3 快速提交被跳过时
-            // 尤其危险——Android 官方文档明确 cacheDir 会在存储不足时被系统自动
-            // 回收，读取前必须检查存在性）。判据用 isDirty || hasLocalContentChanged：
-            // 前者覆盖「内存修改未落盘」，后者覆盖「已落盘但尚未同步」（更常见，
-            // isDirty 在 save() 后即复位，绝不能只看它）。严禁以远端整体覆盖会话，
-            // 否则本地未上传修改将不可恢复地丢失：先按 R3 落盘本地会话，
-            // 再转三方合并（base 缺失时按 F2 修复退化为双方并集合并）
-            val preSave = databaseSession.save()
-            if (preSave is KdbxResult.Failure) {
-                return SyncOutcome.Error(
-                    strings.get(R.string.sync_error_conflict_presave_failed, preSave.message)
-                )
-            }
-            return conflicts.handleConflictMerge(
-                syncEngine = ctx.syncEngine,
-                syncCache = ctx.syncCache,
-                remotePath = ctx.remotePath,
-                localBytes = ctx.localBytes,
-                remoteBytes = openResult.remoteBytes,
-                baseSnapshotBytes = ctx.baseSnapshotBytes,
-                remoteEtag = openResult.etag,
-                strategy = ctx.conflictStrategy
-            )
-        }
-        val applied = codec.loadAndApplyRemoteBytes(openResult.remoteBytes)
-        if (!applied) return SyncOutcome.Error(strings.get(R.string.sync_error_load_remote_failed))
-        session.lastSyncedDb = databaseSession.databaseFlow.value
-        return SyncOutcome.UpToDate
-    }
-
-    /** 引擎判定为冲突：先按 R3 落盘本地会话，再按强制策略 / 三方合并裁决 */
-    private suspend fun handleConflictDetected(
-        ctx: RemoteSyncContext,
-        openResult: SyncOpenResult.ConflictDetected
-    ): SyncOutcome {
-        // R3 整改：同 commitLocal 冲突路径，先落盘本地会话再进入合并
-        val preSave = databaseSession.save()
-        if (preSave is KdbxResult.Failure) {
-            return SyncOutcome.Error(
-                strings.get(R.string.sync_error_conflict_presave_failed, preSave.message)
-            )
-        }
-        // ISSUE-P3-03 (43a)：强制策略优先；null 表示继续三方合并
-        return conflicts.applyForcedConflictStrategy(
-            strategy = ctx.conflictStrategy,
-            syncEngine = ctx.syncEngine,
-            remotePath = ctx.remotePath,
-            localBytes = openResult.localBytes,
-            remoteBytes = openResult.remoteBytes
-        ) ?: conflicts.handleConflictMerge(
-            syncEngine = ctx.syncEngine,
-            syncCache = ctx.syncCache,
-            remotePath = ctx.remotePath,
-            localBytes = openResult.localBytes,
-            remoteBytes = openResult.remoteBytes,
-            baseSnapshotBytes = ctx.baseSnapshotBytes,
-            remoteEtag = openResult.remoteEtag,
-            strategy = ctx.conflictStrategy,
-            // ISSUE-P3-168 ①：本地侧直接取内存树（localBytes 与本快照内容等价，
-            // 见 runSyncCycle 内两条来源的证明），免去一次解析回树
-            localDbOverride = ctx.localDbSnapshot
-        )
     }
 }

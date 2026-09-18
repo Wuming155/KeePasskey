@@ -165,12 +165,10 @@
      `MasterKeyChangeDialog`(116)、`PrivilegedBrowserSettingsScreen`(115)、`ChildVaultEntryRowView`(113)、
      `EntryEditCustomFieldsSection`(108)、`SafeAttachmentPreviewDialog`(107)、`KeePasskeyTheme`(104)、
      以及两个 NavGraph（`keepasskeySettingsNavGraph` 252 / `keepasskeyNavGraph` 164）与 `KeePasskeyApp`(202)；
-  2. **本批新增的第二档待消化项**：`SyncCycleRunner` 431 → **515**（`runSyncCycle` 由 ≈173 行降到编排形态、
-     三段裁决下沉为同文件私有函数 + `RemoteSyncContext` 聚合体，接缝文档使文件变长）。
-     下一步：把 `handleRemoteSynced` / `handleConflictDetected` / `RemoteSyncContext` 移为同包
-     `internal` 扩展函数文件（`AutofillDatasetBuilders.kt` 先例），需把 `session` / `databaseSession` /
-     `strings` / `conflicts` 四个成员由 `private` 放宽为 `internal`；改动须同步更新
-     `AlgoHotPathGuardsTest` 的「两处合并入口传内存树」扫描文件清单；
+  2. ~~**§151 新增的第二档待消化项**：`SyncCycleRunner` 431 → 515~~ —— **§155 已闭环**
+     （三段裁决与 `RemoteSyncContext` 移为同包 `internal` 扩展函数文件 `SyncCycleRemoteOutcomes.kt`，
+     门面回到 **430 行**；五成员放宽为 `internal`；`AlgoHotPathGuardsTest` 改按「门面 + 分支文件」并集扫描，
+     计数判据仍为 2。见 [`resolved/batches/155-同步周期远端分支下沉批次.md`](resolved/batches/155-同步周期远端分支下沉批次.md)）；
   3. **其余 400~500 行文件约 36 个**（原第 2 目清单，头部：`VaultListDialogs`、`RealVaultRepository`、
      `VaultRepository`、`AutofillConfirmActivity`、`EntryEditScreen`、`RuntimeIntegrityDetector`）；
   4. **接线守卫与结构耦合的长期代价**：本批有**三个测试类**的静态源码比对断言因函数搬家而失配
