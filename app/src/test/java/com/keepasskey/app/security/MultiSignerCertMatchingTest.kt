@@ -5,6 +5,7 @@ import com.keepasskey.app.autofill.AutofillWebDomainPolicy
 import com.keepasskey.app.autofill.WebDomainAttribution
 import com.keepasskey.app.passkey.DalStatementMatcher
 import com.keepasskey.app.passkey.DigitalAssetLinksVerifier
+import com.keepasskey.app.testutil.stripCommentsOnly
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -187,10 +188,7 @@ class MultiSignerCertMatchingTest {
     }
 
     /** 剔除块注释与行注释（静态断言须只看真实声明，不看整改说明） */
-    private fun stripComments(source: String): String =
-        source.replace(Regex("""/\*.*?\*/""", RegexOption.DOT_MATCHES_ALL), "")
-            .replace(Regex("""//[^\n]*"""), "")
-
+    private fun stripComments(source: String): String = stripCommentsOnly(source)
     // ---------------- 辅助 ----------------
 
     private fun dalJson(pkg: String, fingerprints: List<String>): String =

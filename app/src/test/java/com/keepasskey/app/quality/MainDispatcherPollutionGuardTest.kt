@@ -1,5 +1,6 @@
 package com.keepasskey.app.quality
 
+import com.keepasskey.app.testutil.stripCommentsOnly
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
@@ -100,12 +101,7 @@ class MainDispatcherPollutionGuardTest {
     }
 
     /** 剥离 `/* … */` 块注释与整行 `//` 注释（§116 的教训：KDoc 里引用旧写法不得被判成违例） */
-    private fun stripped(file: File): String = readSource(file)
-        .replace(BLOCK_COMMENT, "")
-        .lines()
-        .filterNot { it.trimStart().startsWith("//") }
-        .joinToString("\n")
-
+    private fun stripped(file: File): String = stripCommentsOnly(readSource(file))
     private fun testSources(): List<File> {
         val root = File(repositoryRoot, TEST_SOURCE_ROOT)
         assertTrue("测试源集目录不存在：$TEST_SOURCE_ROOT", root.isDirectory)
@@ -136,7 +132,6 @@ class MainDispatcherPollutionGuardTest {
         /** 形如 `val viewModel = EntryDetailViewModel(` 的直接构造点 */
         val VIEWMODEL_CONSTRUCTION = Regex("=\\s*[A-Z]\\w*ViewModel\\(")
 
-        val BLOCK_COMMENT = Regex("""/\*[\s\S]*?\*/""", RegexOption.MULTILINE)
 
         val repositoryRoot: File by lazy {
             var dir: File? = File(System.getProperty("user.dir").orEmpty()).absoluteFile

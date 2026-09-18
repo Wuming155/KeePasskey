@@ -1,5 +1,6 @@
 package com.keepasskey.app.sync
 
+import com.keepasskey.app.testutil.stripCommentsOnly
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -100,10 +101,7 @@ class CredentialIntermediateWipeTest {
         error("函数体括号未闭合：$signature")
     }
 
-    private fun stripComments(source: String): String =
-        source.replace(Regex("""/\*.*?\*/""", RegexOption.DOT_MATCHES_ALL), "")
-            .replace(Regex("""//[^\n]*"""), "")
-
+    private fun stripComments(source: String): String = stripCommentsOnly(source)
     private fun readSource(path: String): String {
         val file = File(repositoryRoot, path)
         assertTrue("源码文件不存在（是否被重命名或移动）：$path", file.isFile)

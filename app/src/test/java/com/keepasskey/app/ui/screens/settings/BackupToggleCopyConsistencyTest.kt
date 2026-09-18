@@ -1,5 +1,6 @@
 package com.keepasskey.app.ui.screens.settings
 
+import com.keepasskey.app.testutil.stripCommentsOnly
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -119,17 +120,13 @@ class BackupToggleCopyConsistencyTest {
     }
 
     /** 剔除块注释与行注释——整改说明本身会写出被断言的字面量 */
-    private fun stripComments(source: String): String =
-        source.replace(BLOCK_COMMENT, "").replace(LINE_COMMENT, "")
-
+    private fun stripComments(source: String): String = stripCommentsOnly(source)
     private companion object {
         const val CONTROLLER_SOURCE =
             "app/src/main/java/com/keepasskey/app/ui/screens/settings/SettingsExtendedPreferencesController.kt"
         const val ZH_STRINGS = "app/src/main/res/values/strings.xml"
         const val EN_STRINGS = "app/src/main/res/values-en/strings.xml"
 
-        val BLOCK_COMMENT = Regex("""/\*[\s\S]*?\*/""")
-        val LINE_COMMENT = Regex("""//[^\n]*""")
 
         /** 仓库根：同时具备 app 与 core 模块源码目录的最近祖先 */
         val repositoryRoot: File by lazy {

@@ -89,44 +89,7 @@
 
 ---
 
-## P3 低危问题、特性接线与体验优化（3 项）
-
-### ISSUE-P3-194 静态源码守卫的「剥注释」不认识字符串字面量（一处安全守卫已证实假阴性，余 11 份待收口）
-
-- **核实时间点与方式**：2026-09-18，脚本对比两种视图——naive（直接去块注释 + 行注释）与
-  strict（先剥三引号 / 双引号字面量，再去注释），遍历 `app/src/main` 全部 `.kt`；再以
-  `grep -l 'stripComments\|BLOCK_COMMENT\|stripped('` 清点 `app/src/test` 的静态守卫。
-- **事实（快照，收口后须重算）**：`app/src/main` 下 **97 份**文件的「块注释剥离视图」在两种口径下不同，
-  naive 口径**多删 100 ~ 10,963 字符**的真实代码。起因是 Kotlin 字符串里出现的「斜杠星 / 星斜杠」子串
-  （本仓 SAF 通配过滤器字面量最常见，正则字面量亦含之）——一旦某处开注释符落在字符串内，
-  配对会一路错到文件末尾。`app/src/test` 侧 **12 份**静态守卫使用同类剥离，其中 **4 份**做
-  **全目录扫描**（`UiMd3AlignmentWiringTest` / `DatabaseConfigHeaderMappingTest` /
-  `ExportTicketSinkGuardTest` / `MainDispatcherPollutionGuardTest`），受影响面最大。
-- **已证实的后果（§156）**：`ExportTicketSinkGuardTest` 扫 `DatabaseSettingsScreen.kt` 时**三处调用点被看成一处**；
-  更要紧的是该守卫第一条判据「全仓 `app/src/main` 有无第二处 `ExportTicket` 实现」正走这套剥离
-  ⇒ 落在被吞区间内的**伪造令牌实现不会被发现**（安全守卫**假阴性**）。§156 已把**该一份**改为委托新工具
-  `app/src/test/java/com/keepasskey/app/testutil/SourceTextSanitizer.kt`（口径：字符串 → 块注释 → 行注释）。
-- **§157 进展（第一段：3 / 12 份收口）**：工具改为提供**两种口径**并按判据性质分工——
-  `stripCommentsOnly`（tokenizer 逐字符扫描，**保留字符串内容**，适用「以字面量本身为判据」的守卫）与
-  `stripStringsAndComments`（抹字面量 + 去注释，适用「只看代码形状」的守卫）。已收口：
-  `ExportTicketSinkGuardTest`（§156）、`UiMd3AlignmentWiringTest` 与 `DatabaseConfigHeaderMappingTest`
-  （两份**全目录扫描**守卫）；另新增 `SourceTextSanitizerTest`（3 例自检，含「串内注释符不得吞掉后续代码」）。
-  **余 9 份待逐份收口**。
-- **裁定先例（这就是「必须逐份」的理由）**：§157 首版把 `stripStringsAndComments` 直接套到
-  `DatabaseConfigHeaderMappingTest` 上**当场变红**——该守卫要比对的正是标签字面量本身，抹掉字面量
-  等于删掉被查找之物。结论是**给工具补一种口径**，而不是放宽那条断言。
-- **反模式（§157 实测后回退，勿重复）**：一次性批量改写 18 份守卫的 stripper **不可行**——
-  语句边界形态各异（`= source` 后接换行续体、参数名不同），脚本首版造成 6 处编译错，已逐文件回退未入库。
-- **整改纪律**：① 各守卫的 `stripComments` / `stripped` 一律改为委托上述两者**之一**
-  （判据涉及字面量本身者用 `stripCommentsOnly`），不再自带注释正则；② **逐份**改、**单跑**该守卫，
-  任何新暴露的失败必须**就地裁定并留痕**（两类结论分开写），**不得**为凑绿放宽断言
-  （`AGENTS.md` §3 测试资产纪律）；③ 守卫与自检样例源**不得**直接写出那两个注释符序列
-  （用常量拼接），否则样例自身会误导其它仍在用 naive 剥离的守卫。
-- **验收标准**：`grep -rn "val BLOCK_COMMENT" app/src/test` **归零**；上述 12 份守卫全部改委托且各自单跑绿；
-  `ExportTicketSinkGuardTest` 一类「全域扫描」守卫在两种口径下**结论一致**。
-- **边界**：纯**测试基础设施**缺陷，不涉及产品行为；本条不影响运行时安全机制本身（令牌机制仍由控制器与
-  用例双重把守），受影响的是「守卫能否看见问题」。
-
+## P3 低危问题、特性接线与体验优化（2 项）
 
 ### ISSUE-P3-188 巨型类与魔法数字专项整改（工程规则 §单一职责 / §禁止魔法数字 违例收敛）
 

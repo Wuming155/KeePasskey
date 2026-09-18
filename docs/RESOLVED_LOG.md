@@ -4,11 +4,11 @@
 > **维护规则**：`ACTIVE_ISSUES.md` 中的条目整改并测试通过后，整条移入本归档——**新批次追加一行索引 + 新增一个批次文件**，编号续 §68 起。
 > **如实留痕**：整改中真实发生的生产 / 测试 / 编排缺陷不美化、不隐去（各批次文件的「过程缺陷」小节）。
 > **引用约定**：仓内其它文档写「`RESOLVED_LOG.md` §NN」时，按本表「正文」列跳转到该批次的独立文件。
-> **分册体系**：见 [`resolved/README.md`](resolved/README.md)；分册级索引 4 份（各 ≤100 行）：[`01`](resolved/BATCH_01_30.md) · [`02`](resolved/BATCH_31_45.md) · [`03`](resolved/BATCH_46_57.md) · [`04`](resolved/BATCH_58_PLUS.md)（§58 起，滚动）。
+> **分册体系**：见 [`resolved/README.md`](resolved/README.md)；分册级索引 5 份（各 ≤100 行）：[`01`](resolved/BATCH_01_30.md) · [`02`](resolved/BATCH_31_45.md) · [`03`](resolved/BATCH_46_57.md) · [`04`](resolved/BATCH_58_PLUS.md)（§58 起，滚动）。
 
 ---
 
-## 全量批次索引（§1 ~ §157）
+## 全量批次索引（§1 ~ §158）
 
 | § | 批次主题 | 条目范围 | 正文 |
 |:--:|---|---|---|
@@ -196,6 +196,7 @@
 | §155 | 同步周期远端分支下沉批次（`ISSUE-P3-188` 剩余清单第 2 项：`SyncCycleRunner` 515 → 430 行，分支移同包 internal 扩展函数；函数体逐字未改） | `ISSUE-P3-188`（剩余清单第 2 项闭环） | [`155-同步周期远端分支下沉批次.md`](resolved/batches/155-同步周期远端分支下沉批次.md) |
 | §156 | 明文导出二次确认弹窗收敛批次（`ISSUE-P3-188` 第 1 项第一段：`DatabaseSettingsScreen` 530 → 432 行；附带修掉一处安全守卫假阴性，余 11 份登记 `ISSUE-P3-194`） | `ISSUE-P3-188`（第 1 项第一段闭环）/ 新登记 `ISSUE-P3-194` | [`156-明文导出二次确认收敛批次.md`](resolved/batches/156-明文导出二次确认收敛批次.md) |
 | §157 | 源码文本清洗口径统一批次（`ISSUE-P3-194` 第一段：双口径工具 + 自检 3 例 + 3 份守卫收口，余 9 份逐份待办） | `ISSUE-P3-194`（第一段收口） | [`157-源码文本清洗口径统一批次.md`](resolved/batches/157-源码文本清洗口径统一批次.md) |
+| §158 | 静态守卫清洗口径收口批次（`ISSUE-P3-194` 闭环：19 份守卫全部委托双口径工具，余 16 份收口且 84 例原样通过；另立分册 05） | `ISSUE-P3-194`（闭环） | [`158-静态守卫清洗口径收口批次.md`](resolved/batches/158-静态守卫清洗口径收口批次.md) |
 
 ## 分册导航
 
@@ -204,5 +205,6 @@
 | 01 | §1 ~ §30 | 2026-09-07 ~ 2026-09-12 | [`resolved/BATCH_01_30.md`](resolved/BATCH_01_30.md) |
 | 02 | §31 ~ §45 | 2026-09-12 ~ 2026-09-13 | [`resolved/BATCH_31_45.md`](resolved/BATCH_31_45.md) |
 | 03 | §46 ~ §57 | 2026-09-13 ~ 2026-09-15 | [`resolved/BATCH_46_57.md`](resolved/BATCH_46_57.md) |
-| 04 | §58 起（滚动） | 2026-09-15 | [`resolved/BATCH_58_PLUS.md`](resolved/BATCH_58_PLUS.md) |
+| 04 | §58 ~ §157（**已封卷**） | 2026-09-15 ~ 2026-09-18 | [`resolved/BATCH_58_PLUS.md`](resolved/BATCH_58_PLUS.md) |
+| 05 | §158 起（**滚动分册**） | 2026-09-18 | [`resolved/BATCH_158_PLUS.md`](resolved/BATCH_158_PLUS.md) |
 

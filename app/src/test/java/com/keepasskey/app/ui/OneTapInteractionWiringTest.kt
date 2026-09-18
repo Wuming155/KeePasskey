@@ -1,5 +1,6 @@
 package com.keepasskey.app.ui
 
+import com.keepasskey.app.testutil.stripCommentsOnly
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -259,11 +260,8 @@ class OneTapInteractionWiringTest {
     }
 
     /** 去块注释与整行行注释：避免 KDoc 里举例写的代码把扫描带偏。 */
-    private fun stripComments(source: String): String =
-        source.replace(BLOCK_COMMENT, "").lines().filterNot { it.trim().startsWith("//") }.joinToString("\n")
-
+    private fun stripComments(source: String): String = stripCommentsOnly(source)
     private companion object {
-        val BLOCK_COMMENT = Regex("""/\*.*?\*/""", RegexOption.DOT_MATCHES_ALL)
 
         const val DETAIL_CARDS = "app/src/main/java/com/keepasskey/app/ui/screens/detail/EntryDetailCards.kt"
         const val DETAIL_VIEW_MODEL =

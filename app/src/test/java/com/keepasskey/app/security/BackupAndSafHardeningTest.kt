@@ -1,5 +1,6 @@
 package com.keepasskey.app.security
 
+import com.keepasskey.app.testutil.stripCommentsOnly
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
@@ -79,9 +80,7 @@ class BackupAndSafHardeningTest {
     }
 
     /** 剔除块注释与行注释——整改说明本身会写出被断言的字面量 */
-    private fun stripComments(source: String): String =
-        source.replace(BLOCK_COMMENT, "").replace(LINE_COMMENT, "")
-
+    private fun stripComments(source: String): String = stripCommentsOnly(source)
     private fun String.windowedCountOf(needle: String): Int {
         var count = 0
         var index = indexOf(needle)
@@ -115,8 +114,6 @@ class BackupAndSafHardeningTest {
         )
 
         val XML_COMMENT = Regex("""<!--[\s\S]*?-->""")
-        val BLOCK_COMMENT = Regex("""/\*[\s\S]*?\*/""")
-        val LINE_COMMENT = Regex("""//[^\n]*""")
         val GUARD_EARLY_RETURN =
             Regex("""if\s*\(!DocumentsContract\.isDocumentUri\(context, targetUri\)\)\s*return""")
 

@@ -1,5 +1,6 @@
 package com.keepasskey.app.ui
 
+import com.keepasskey.app.testutil.stripCommentsOnly
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -79,11 +80,7 @@ class TotpPeriodWiringGuardTest {
     }
 
     /** 剥离块注释与行注释：本仓注释会为解释动机而引用旧写法，直接断言全文会误判 */
-    private fun stripped(source: String): String =
-        source
-            .replace(Regex("""/\*[\s\S]*?\*/"""), "")
-            .replace(Regex("""//[^\n]*"""), "")
-
+    private fun stripped(source: String): String = stripCommentsOnly(source)
     private fun readSource(path: String): String {
         val file = File(repositoryRoot, path)
         assertTrue("源文件不存在（是否被重命名/移动）：$path", file.isFile)

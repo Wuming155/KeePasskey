@@ -1,5 +1,6 @@
 package com.keepasskey.app.quality
 
+import com.keepasskey.app.testutil.stripCommentsOnly
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -531,12 +532,7 @@ class AlgoHotPathGuardsTest {
         )
     }
 
-    private fun stripped(path: String): String = readSource(path)
-        .replace(BLOCK_COMMENT, "")
-        .lines()
-        .filterNot { it.trimStart().startsWith("//") }
-        .joinToString("\n")
-
+    private fun stripped(path: String): String = stripCommentsOnly(readSource(path))
     private fun readSource(path: String): String {
         val file = File(repositoryRoot, path)
         assertTrue("源文件不存在（是否被重命名/移动）：$path", file.isFile)
@@ -558,7 +554,6 @@ class AlgoHotPathGuardsTest {
         const val RUNNER_REMOTE_OUTCOMES =
             "app/src/main/java/com/keepasskey/app/sync/SyncCycleRemoteOutcomes.kt"
 
-        val BLOCK_COMMENT = Regex("""/\*[\s\S]*?\*/""", RegexOption.MULTILINE)
 
         val repositoryRoot: File by lazy {
             var dir: File? = File(System.getProperty("user.dir").orEmpty()).absoluteFile

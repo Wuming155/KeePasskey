@@ -1,5 +1,6 @@
 package com.keepasskey.app.log
 
+import com.keepasskey.app.testutil.stripCommentsOnly
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -62,10 +63,7 @@ class AppLogProguardRuleTest {
         ).find(rules)?.value
 
     /** 剔除块注释与行注释（规则文件里的大段说明含关键字，直接匹配会造成假通过） */
-    private fun stripComments(source: String): String =
-        source.replace(Regex("""/\*.*?\*/""", RegexOption.DOT_MATCHES_ALL), "")
-            .replace(Regex("""//[^\n]*"""), "")
-
+    private fun stripComments(source: String): String = stripCommentsOnly(source)
     private fun readSource(path: String): String {
         val file = File(repositoryRoot, path)
         assertTrue("文件不存在（是否被重命名或移动）：$path", file.isFile)

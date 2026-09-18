@@ -8,6 +8,7 @@ import com.keepasskey.core.security.BinarySource
 import com.keepasskey.database.file.KdbxDatabase
 import com.keepasskey.database.file.KdbxHeader
 import com.keepasskey.database.session.DatabaseSession
+import com.keepasskey.app.testutil.stripCommentsOnly
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
@@ -160,15 +161,11 @@ class AttachmentDataOwnershipTest {
     }
 
     /** 剔除块注释与行注释——整改说明本身会写出关键字，不剔除即会「注释里的假接线」也通过 */
-    private fun stripComments(source: String): String =
-        source.replace(BLOCK_COMMENT, "").replace(LINE_COMMENT, "")
-
+    private fun stripComments(source: String): String = stripCommentsOnly(source)
     private companion object {
         const val EXPORTER_SOURCE =
             "app/src/main/java/com/keepasskey/app/ui/screens/detail/EntryDetailAttachmentExporter.kt"
 
-        val BLOCK_COMMENT = Regex("""/\*[\s\S]*?\*/""")
-        val LINE_COMMENT = Regex("""//[^\n]*""")
 
         /** 写出口的 finally 清零形态（`} finally { bytes.fill(0) }`） */
         val FINALLY_WIPE = Regex("""finally\s*\{\s*bytes\.fill\(0\)\s*\}""")

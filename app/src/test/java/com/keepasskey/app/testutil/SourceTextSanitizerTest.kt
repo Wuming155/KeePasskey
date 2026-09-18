@@ -74,6 +74,26 @@ class SourceTextSanitizerTest {
         assertTrue(stripCommentsOnly(source).contains("AFTER_UNCLOSED"))
     }
 
+    /**
+     * **正向对照**（证明本工具不是无谓改动）：同一份样例源下，旧口径（直接拿块注释正则去replace）
+     * 会把串内的闭注释符当配对点，从而**丢掉其后真实代码**；[stripCommentsOnly] 不丢。
+     * 没有这条对照，「修好假阴性」只是口头主张——旧口径下守卫不会变红，只会**看不见**。
+     */
+    @Test
+    fun `对照旧口径确实会丢代码`() {
+        // 配对方向：先出现「开注释符」的串，再出现「闭注释符」的串，中间夹一行必须留存的代码
+        val source = lines(
+            "private val openish = \"$OPEN\"",
+            "private val sentinel = \"SENTINEL_AFTER\"",
+            "private val closeish = \"$CLOSE\""
+        )
+        val naive = NAIVE_BLOCK.replace(source, "")
+        assertFalse("对照前提：旧口径会把 sentinel 一并吞掉（这正是假阴性的成因）",
+            naive.contains("SENTINEL_AFTER"))
+        assertTrue("新口径必须保留其后真实代码",
+            stripCommentsOnly(source).contains("SENTINEL_AFTER"))
+    }
+
     private fun lines(vararg items: String): String = items.joinToString("\n")
 
     private companion object {
@@ -87,5 +107,8 @@ class SourceTextSanitizerTest {
         val LINE_COMMENT_MARK = "/" + "/"
         val DOC_MARK = OPEN + "*"
         val TRIPLE = "\"\"\""
+
+        /** 旧守卫口径（拼接而成：本文件仍不得出现该序列本身）——仅供上面的正向对照使用 */
+        val NAIVE_BLOCK = Regex("/" + "\\*" + "[\\s\\S]*?" + "\\*" + "/")
     }
 }
