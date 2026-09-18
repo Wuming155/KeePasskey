@@ -56,7 +56,50 @@
 
 ---
 
-## P3 低危问题、特性接线与体验优化（2 项）
+## P3 低危问题、特性接线与体验优化（3 项）
+
+### ISSUE-P3-189 测试调度器跨用例污染防护未全覆盖（§18 归档批次口径的余量，本地偶发红已复现）
+
+- **核实时间点与方式**：2026-09-18 14:05，本地 `.\gradlew.bat test --rerun-tasks --max-workers=1` 连跑两轮——
+  第 1 轮 `:app:testDebugUnitTest` **1 红**（`BreachCheckHealthTest > 查询失败时状态为 FAILED 且原因如实上浮，绝不回落为未泄露 FAILED`，
+  `IllegalStateException → MainDispatchers.kt:111 → Looper.java`）；第 2 轮同命令 **114 task 全绿**；单独
+  `--tests` 重跑该类亦绿 ⇒ 判定为**套件内时序 / 顺序相关偶发**。抛点经
+  `kotlinx-coroutines-test-jvm-1.11.0-sources.jar` 定位为 `TestMainDispatcherJvm.kt:45`
+  `reportMissingMainCoroutineDispatcher`，原文即「`Dispatchers.Main` 在平台调度器缺失且测试调度器已 unset
+  （含 `resetMain()` 之后）时被访问」。
+- **归类**：属归档批次 **§18**（[`resolved/batches/18-偶发红根因修复-测试调度器跨用例污染.md`](resolved/batches/18-偶发红根因修复-测试调度器跨用例污染.md)）
+  已记载的**同一类根因**，非 §188 的结构性拆分引入；§115 曾把本用例的同一条报错如实判为「§18 类偶发红、与本批无因果」。
+  机理：`runTest` 结束**不取消** `viewModelScope`，ViewModel 内在真实线程（`Dispatchers.Default` / `IO`）上执行的
+  在途工作于 `@After` 的 `resetMain()` **之后**回跳 Main，异常被协程测试记到「用例开始前已有未捕获异常」，
+  **污染同一 JVM 中后续用例**（表现位置随执行顺序漂移）。
+- **本批已修（§150）**：`ui/screens/settings` 下直接构造 `SettingsViewModel` 的三个用例
+  （`BreachCheckHealthTest` / `HealthCheckViewModelTest` / `ChildDatabaseSettingsWiringTest`）补齐
+  「先 `viewModelScope.cancel()`、再 `resetMain()`」口径——`SettingsViewModel` **无调度器注入点**，
+  故采用 §18 对 `AuthenticatorViewModelTest` 的那一种修法。
+  修复后 `test --rerun-tasks --max-workers=1 --continue` **连续三轮全绿**（`tests=2182 skipped=13`）；
+  因修复前命中率仅 1/2，该三轮属**弱证据**，本条**不因三轮绿而闭环**。
+- **剩余清单（18 个类仍无该防护；核实方式：脚本扫描 `app/src/test` 中同时含 `Dispatchers.setMain` +
+  `resetMain` + `*ViewModel(` 构造、且不含 `viewModelScope.cancel` 的文件，2026-09-18）**：
+  1. **风险最高**（生产侧用真实调度器且**无**注入点）：`DatabasePickerViewModelTest`、
+     `DatabasePickerKeyFileCreateTest`（`DatabasePickerViewModel` 内 `withContext(Dispatchers.IO)`）；
+  2. **风险较低**（已按 §18 注入 `displayDispatcher`，真实 Default 线程面已收敛，但生产侧另有 `Dispatchers.IO`）：
+     `CustomIconDeleteTest`、`EntryDetailDisplayPreferencesTest`、`EntryDetailTotpCopyTest`、
+     `EntryDetailViewModelTest`、`VaultDisplayPreferencesTest`、`VaultListChildDatabaseTest`、
+     `VaultListDecorationsTest`；
+  3. **待判定**（所构造 ViewModel 本体未见真实调度器，是否可泄漏取决于依赖链）：
+     `ConflictResolutionViewModelTest`、`EntryEditViewModelTest`，以及 `unlock` 目录 7 个
+     （`QuickUnlockSealDowngradeTest`、`UnlockFailureLogSanitizationTest`、`UnlockImportKdfStrengthNoticeTest`、
+     `UnlockKeyFileFlowTest`、`UnlockViewModelBiometricAutoPromptTest`、`UnlockViewModelClearOnLeaveTest`、
+     `UnlockViewModelTest`）。
+- **整改纪律**：按 §18 两种修法择一——有调度器注入点的**注入测试调度器**（首选，从源头消除真实线程竞速），
+  无注入点的在 `@After` **先 cancel 各 ViewModel 作用域、再 `resetMain()`**。
+  **不得**以「给 `resetMain()` 包 try/catch 吞异常」或「调大 `awaitOffMainComputation` 超时」处置——
+  那是掩盖污染而非修复。
+- **验收标准**：上述 18 类全部具备防护，或逐条如实登记「该 ViewModel 无可在真实线程上回跳 Main 的在途工作」并给出依据；
+  `.\gradlew.bat test --rerun-tasks --max-workers=1` **连续三轮**全绿；CI Fast gate 同期不再出现
+  `UncaughtExceptionsBeforeTest`。
+- **边界**：本条是**测试基础设施**缺陷，不涉及生产行为；复现窗口与时序 / 核数相关（§18 为 CI-only，
+  本条本地 1/2 命中），故**不得**以「跑一次绿了」判定已修复。
 
 ### ISSUE-P3-188 巨型类与魔法数字专项整改（工程规则 §单一职责 / §禁止魔法数字 违例收敛）
 

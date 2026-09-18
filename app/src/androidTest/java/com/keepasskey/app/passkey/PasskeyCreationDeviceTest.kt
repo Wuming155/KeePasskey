@@ -29,8 +29,9 @@ import java.io.File
  * 2. 验证在真实 Android 运行时下解析标准 WebAuthn `BeginCreatePublicKeyCredentialRequest`，
  *    确保不会在 domain 校验、PSL 判定或序列化处异常；
  * 3. 验证通过真实的 [PasskeyCryptoEngine] 在真机上生成 ES256 密钥对并由
- *    [PasskeyEntryCoordinator] 持久化至测试数据库，再由断言引擎 [PasskeyCryptoEngine.signAssertion]
- *    验证新创建的私钥具备真实合法的签名能力。
+ *    [PasskeyEntryCoordinator] 持久化至测试数据库，再由**生产断言路径同一 PEM 通道**
+ *    （[PasskeyCryptoEngine.decodePemPrivateKeyText] 还原签名材料）交断言引擎
+ *    [PasskeyCryptoEngine.signAssertion] 验证新创建的私钥具备真实合法的签名能力。
  */
 @RunWith(AndroidJUnit4::class)
 class PasskeyCreationDeviceTest {
@@ -122,17 +123,43 @@ class PasskeyCreationDeviceTest {
         assertEquals(passkeyData.credentialId, loadedPasskey!!.credentialId)
 
         // 4. 关键：验证刚创建的 Passkey 私钥经受控字节流可以在真机上完成有效断言签名
+        //    私钥在库内以 **PKCS#8 PEM 文本**驻留（KeePassXC / KeePassDX 口径），而
+        //    `signAssertion` 的入参契约是**签名材料**（ES256 = 32 字节标量）——故须先走
+        //    生产断言路径同一 PEM 通道（`PasskeyAssertionActivity.decodePrivateKeyMaterial`）
+        //    还原，再送签；直接把 PEM 文本字节流喂给 `signAssertion` 属契约误用。
         val clientDataHash = ByteArray(32) { 0x01 }
         val authData = PasskeyCryptoEngine.buildAuthenticatorData("passkeys.io", 0x01.toByte(), 1)
         val dataToSign = authData + clientDataHash
 
-        val signature = loadedPasskey.usePrivateKeyBytes { rawKey ->
-            PasskeyCryptoEngine.signAssertion(
+        val signingKey = loadedPasskey.usePrivateKeyBytes { rawKey ->
+            checkNotNull(PasskeyCryptoEngine.decodePemPrivateKeyText(rawKey)) {
+                "真机上驻留的 PKCS#8 PEM 私钥必须能经生产 PEM 通道还原签名材料"
+            }
+        }
+        try {
+            assertEquals(
+                "私钥形态（PKCS#8 OID）还原出的算法必须与条目字段一致",
                 loadedPasskey.algorithmId,
-                rawKey,
+                signingKey.algorithmId
+            )
+            assertEquals(
+                "ES256 的 PEM 通道还原结果必须是定长原始标量",
+                ES256_SCALAR_BYTES,
+                signingKey.keyBytes.size
+            )
+            val signature = PasskeyCryptoEngine.signAssertion(
+                signingKey.algorithmId,
+                signingKey.keyBytes,
                 dataToSign
             )
+            assertTrue("断言签名输出必须非空且符合 ASN.1 DER 结构 (0x30 开头)", signature.isNotEmpty() && signature[0] == 0x30.toByte())
+        } finally {
+            java.util.Arrays.fill(signingKey.keyBytes, 0.toByte())
         }
-        assertTrue("断言签名输出必须非空且符合 ASN.1 DER 结构 (0x30 开头)", signature.isNotEmpty() && signature[0] == 0x30.toByte())
+    }
+
+    private companion object {
+        /** ES256 签名侧材料长度：P-256 私钥标量 32 字节（与 `PasskeySigningKey` 文档口径一致） */
+        const val ES256_SCALAR_BYTES = 32
     }
 }

@@ -76,7 +76,7 @@ Coroutines + Flow；**文档与代码注释使用简体中文**。
 - `.\gradlew.bat assembleDebug` / `lint` — 编译全部模块 / Android Lint（warning 不阻断）
 - `.\gradlew.bat test --rerun-tasks --max-workers=1` — 单元测试（强制真实执行，单会话勿并发）
 - `.\gradlew.bat test -DliveSyncTest` — 追加真实联调（需先起 `tools/local-sync`）
-- `.\gradlew.bat :crypto:connectedDebugAndroidTest` / `:database:connectedDebugAndroidTest` / `:app:connectedDebugAndroidTest` — instrumented 测试（需设备）
+- `.\gradlew.bat :crypto:connectedDebugAndroidTest` / `:database:connectedDebugAndroidTest` / `:sync:connectedDebugAndroidTest` / `:app:connectedDebugAndroidTest` — instrumented 测试（需设备；**`:sync:` 那层含 `SyncCacheAndroidRuntimeTest`，即 0600 / 0700 仅属主权限不变量——宿主 JVM 恒走降级分支，只有真机可证**）
 - `.\gradlew.bat assembleRelease` — R8 混淆 + 资源收缩发布包
 - `python .github/check_dependency_cvss.py build/reports/dependency-check/dependency-check-report.json` — 供应链 CVSS ≥ 7.0 硬断言（fail-closed）
 - `cd crypto/src/main/rust && cargo test` — 原生内核单测
@@ -109,3 +109,6 @@ Coroutines + Flow；**文档与代码注释使用简体中文**。
 > `connectedDebugAndroidTest` 后方准入库——宿主单测**看不见** Android 运行时差异：§147 的「全零密钥解密」是
 > **宿主 100% 绿、仅真机失败**，§143 的「平台剥离版 BC 抢占 `"BC"`」同样如此。
 > 兜底分支（JCE / BC）的等价性由宿主 `CipherFallbackParityTest` 常态锁定，**不得**以「反正有兜底」为由跳过设备侧。
+> **设备侧用例本身同样必须实跑（§150 立规）**：`*/src/androidTest/**` 新增或修改的用例，须在设备上实际执行该用例后方准入库；
+> `compileDebugAndroidTestKotlin` 通过**不构成**验证证据（编译只保证类型自洽，不保证契约用对）。细则见
+> `.codebuddy/rules/engineering-rules.md` §「测试资产纪律」。
