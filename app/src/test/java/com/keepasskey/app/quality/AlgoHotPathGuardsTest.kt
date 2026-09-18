@@ -370,16 +370,24 @@ class AlgoHotPathGuardsTest {
 
     @Test
     fun `秒级节拍不得常驻且不得逐条重建`() {
-        val detail =
-            stripped("app/src/main/java/com/keepasskey/app/ui/screens/detail/EntryDetailViewModel.kt")
+        // §170：uiState 的装配链（含节拍订阅期启停）下沉到 EntryDetailStateAssembler，
+        // 故两条**正向**判据改按「ViewModel + 装配器」并集扫描（判据逐字保留）。
+        val detail = listOf(
+            stripped("app/src/main/java/com/keepasskey/app/ui/screens/detail/EntryDetailViewModel.kt"),
+            stripped(DETAIL_ASSEMBLER)
+        ).joinToString(separator = " ")
         assertTrue(
             "详情页节拍必须挂在 uiState 的订阅期上（原在 init 里常驻启动，退到后台栈仍每秒唤醒一次）",
             detail.contains("private var totpTickJob: Job? = null") &&
                 detail.contains(".onCompletion { totpTickJob?.cancel() }")
         )
+        // **反向**判据刻意仍只扫 ViewModel 本体：它约束的是「ViewModel 的 init 不得常驻启表」。
+        // 并集里装配器 legitimately 含 `totpTicker` 启动代码，扩扫会把合法实现读成违规。
+        val viewModel =
+            stripped("app/src/main/java/com/keepasskey/app/ui/screens/detail/EntryDetailViewModel.kt")
         assertFalse(
             "节拍不得再在 init 里常驻启动",
-            detail.substringAfter("init {").substringBefore("\n    }").contains("totpTicker.run")
+            viewModel.substringAfter("init {").substringBefore("\n    }").contains("totpTicker")
         )
 
         val auth = stripped(
@@ -561,6 +569,8 @@ class AlgoHotPathGuardsTest {
         const val RUNNER_REMOTE_OUTCOMES =
             "app/src/main/java/com/keepasskey/app/sync/SyncCycleRemoteOutcomes.kt"
         const val CONFLICT = "app/src/main/java/com/keepasskey/app/sync/SyncConflictController.kt"
+        const val DETAIL_ASSEMBLER =
+            "app/src/main/java/com/keepasskey/app/ui/screens/detail/EntryDetailStateAssembler.kt"
         const val CONFLICT_ADJUDICATION =
             "app/src/main/java/com/keepasskey/app/sync/SyncConflictMergeAdjudication.kt"
 

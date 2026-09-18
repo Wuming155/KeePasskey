@@ -18,18 +18,14 @@ import com.keepasskey.app.ui.model.EntryDisplayDispatcher
 import com.keepasskey.app.ui.screens.vault.ExtendedSettingsSource
 import com.keepasskey.app.ui.model.UiAttachment
 import com.keepasskey.app.ui.model.UiEntryRevision
+import com.keepasskey.app.ui.model.orFallback
 import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.app.ui.model.UiMessage
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.onCompletion
-import kotlinx.coroutines.flow.onStart
-import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -73,9 +69,7 @@ class EntryDetailViewModel @Inject constructor(
 ) : ViewModel() {
 
     // P3-23：文案解析通道（优先 stringsProvider，其次经 appContext 转发，均缺省时回退空串实现）
-    private val strings: StringsProvider = stringsProvider
-        ?: appContext?.let { ctx -> StringsProvider { id, args -> ctx.getString(id, *args) } }
-        ?: StringsProvider { _, _ -> "" }
+    private val strings: StringsProvider = stringsProvider.orFallback(appContext)
 
     // ISSUE-P2-10 (ZT-15)：明文附件导出审计（复用进程内日志缓冲，仅记类型与脱敏目标标识）
     private val exportAuditRecorder: ExportAuditRecorder? = debugLog?.let { ExportAuditRecorder(it) }
@@ -163,73 +157,58 @@ class EntryDetailViewModel @Inject constructor(
     private val revisionController = EntryDetailRevisionController(
         vaultRepository = vaultRepository,
         secrets = secrets,
-        strings = strings
+        strings = strings,
+        // §170：派发与 UI 回灌由协作者完成，与同包 CopyCoordinator / EntryActions 同形态
+        scope = viewModelScope,
+        currentEntry = { uiState.value.entry },
+        currentEntryId = { entryIdFlow.value },
+        showMessage = { userMessageFlow.value = it }
     )
-
-    /**
-     * `ISSUE-P3-175`：节拍收集任务的句柄。
-     *
-     * 启停由 [uiState] 的**订阅期**决定（见其 `onStart` / `onCompletion`）：
-     * `stateIn(WhileSubscribed(5000))` 在最后一个订阅者离开（宽限 5 s）后取消上游收集 ⇒
-     * `onCompletion` 停表；重新订阅时 `onStart` 再启表。原先在 `init` 里常驻启动，
-     * 页面退到后台栈（Activity stopped、ViewModel 未销毁）时仍每秒唤醒并做一次仓库调用。
-     */
-    private var totpTickJob: Job? = null
 
     /** 当前条目快照（供节拍读取；读 `uiState.value` 不会额外启动其上游）。 */
     private fun currentEntryOrNull() = uiState.value.entry
 
-    val uiState: StateFlow<EntryDetailUiState> = stateAssembler
-        .assemble(
-            EntryDetailStateAssembler.Inputs(
-                entryId = entryIdFlow,
-                secrets = secrets,
-                isFavorite = isFavoriteFlow,
-                userMessage = userMessageFlow,
-                totpRemainingSeconds = totpRemainingSecondsFlow,
-                liveTotpCode = liveTotpCodeFlow,
-                passwordStrengthBits = revealController.passwordStrengthBits,
-                extendedSettings = extendedSettingsFlow
-            )
-        )
-        // 断点6 整改：每秒驱动 TOTP 倒计时；周期翻转（剩余秒数不降反升）时重算实时验证码。
-        // ISSUE-P3-175：改为随本链的订阅期启停（原为 `init` 常驻）。
-        .onStart {
-            totpTickJob?.cancel()
-            totpTickJob = viewModelScope.launch(Dispatchers.Default) {
-                totpTicker.run(
-                    currentEntry = { currentEntryOrNull() },
-                    onRemaining = { totpRemainingSecondsFlow.value = it },
-                    onLiveCode = { liveTotpCodeFlow.value = it }
-                )
-            }
-        }
-        .onCompletion { totpTickJob?.cancel() }
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
-            initialValue = EntryDetailUiState(isLoading = true)
-        )
+    /**
+     * 详情页 UI 状态流。`ISSUE-P3-188` §170：装配链（含节拍的订阅期启停与 `stateIn` 宽限）
+     * 下沉到 [EntryDetailStateAssembler.assembleState]——本属性只传输入与本类的状态通道，
+     * 启停时机与 `viewModelScope` 归属逐字不变（装配器构造期拿到的就是 `viewModelScope`）。
+     */
+    val uiState: StateFlow<EntryDetailUiState> = stateAssembler.assembleState(
+        inputs = EntryDetailStateAssembler.Inputs(
+            entryId = entryIdFlow,
+            secrets = secrets,
+            isFavorite = isFavoriteFlow,
+            userMessage = userMessageFlow,
+            totpRemainingSeconds = totpRemainingSecondsFlow,
+            liveTotpCode = liveTotpCodeFlow,
+            passwordStrengthBits = revealController.passwordStrengthBits,
+            extendedSettings = extendedSettingsFlow
+        ),
+        ticker = totpTicker,
+        currentEntry = ::currentEntryOrNull,
+        onRemaining = { totpRemainingSecondsFlow.value = it },
+        onLiveCode = { liveTotpCodeFlow.value = it }
+    )
 
     /**
      * ISSUE-P2-65：会话锁定 / 关闭回调——擦除全部明文驻留点
      * （[SessionLockObserver] 契约：非阻塞、幂等、自容错）。
      * 声明必须在 [init] 之前：Kotlin 按类体顺序执行初始化器。
      */
-    private val sessionLockObserver = com.keepasskey.core.session.SessionLockObserver {
+    private val sessionLockGuard = com.keepasskey.database.session.SessionLockGuard(databaseSession) {
         liveTotpCodeFlow.value = null
-        clearAllRevealedSecrets()
+        revealController.clearAll()
     }
 
     init {
         // ISSUE-P2-65：注册会话锁定观察者——锁库 / 关库（含切库、后台超时、熄屏熔断）时
         // 立即擦除按需解密明文与实时 TOTP 码，不依赖导航离开时机。
         // （节拍启停已移交 `uiState` 的 onStart / onCompletion，见该属性 KDoc——ISSUE-P3-175）
-        databaseSession?.addLockObserver(sessionLockObserver)
+        sessionLockGuard.register()
     }
 
     override fun onCleared() {
-        databaseSession?.removeLockObserver(sessionLockObserver)
+        sessionLockGuard.unregister()
         super.onCleared()
     }
 
@@ -242,9 +221,9 @@ class EntryDetailViewModel @Inject constructor(
         // ISSUE-P3-49：切换条目即清空上一 TOTP 条目的实时码，避免 HOTP 条目（不由节拍驱动）
         // 误显上一条目的验证码
         liveTotpCodeFlow.value = null
-        clearAllRevealedSecrets()
+        revealController.clearAll()
         // ISSUE-P3-17：偏好声明「默认不遮掩」时，新条目同样按默认态补齐明文
-        revealPasswordIfVisibleByDefault()
+        revealController.revealPasswordIfVisibleByDefault()
     }
 
     /**
@@ -252,10 +231,6 @@ class EntryDetailViewModel @Inject constructor(
      * 对比 KeePassDX「解密即用即弃」语义——明文仅允许在显式查看期间驻留。
      */
     fun onScreenDisposed() {
-        clearAllRevealedSecrets()
-    }
-
-    private fun clearAllRevealedSecrets() {
         revealController.clearAll()
     }
 
@@ -269,10 +244,6 @@ class EntryDetailViewModel @Inject constructor(
     fun onScreenEntered() {
         extendedSettingsSource?.let { source -> extendedSettingsFlow.value = source.load() }
         // 覆盖「离开详情页已清零明文 → 再次进入」的路径（此时条目 id 未变化，setEntryId 提前返回）
-        revealPasswordIfVisibleByDefault()
-    }
-
-    private fun revealPasswordIfVisibleByDefault() {
         revealController.revealPasswordIfVisibleByDefault()
     }
 
@@ -338,20 +309,12 @@ class EntryDetailViewModel @Inject constructor(
      * 取整修订快照（含解密后的受保护字段与 TOTP 配置）全字段回滚；
      * 快照缺失时如实暴露失败，绝不谎报「已回滚」（TASK-31）。
      */
-    fun rollbackToRevision(revision: UiEntryRevision) {
-        val current = uiState.value.entry ?: return
-        viewModelScope.launch {
-            userMessageFlow.value = revisionController.rollback(current, revision)
-        }
-    }
+    fun rollbackToRevision(revision: UiEntryRevision) =
+        revisionController.rollbackToCurrentEntry(revision)
 
     /** 打开历史修订对比弹窗前按需解密：当前密码 + 目标修订密码。 */
-    fun prepareRevisionDiff(revisionId: String) {
-        val entryId = entryIdFlow.value ?: return
-        viewModelScope.launch {
-            revisionController.prepareDiff(entryId, revisionId)
-        }
-    }
+    fun prepareRevisionDiff(revisionId: String) =
+        revisionController.prepareDiffForCurrentEntry(revisionId)
 
     fun clearRevisionDiff() {
         revisionController.clearDiff()

@@ -15,14 +15,19 @@ import com.keepasskey.app.ui.screens.vault.GroupPathPresenter
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onCompletion
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.shareIn
+import kotlinx.coroutines.flow.stateIn
 
 /**
  * 详情页 UI 状态的装配器。
@@ -237,6 +242,37 @@ internal class EntryDetailStateAssembler(
         else ->
             UiMessage(R.string.detail_password_copied_no_clear)
     }
+
+    /**
+     * `ISSUE-P3-188` §170：把「订阅期节拍启停 + `stateIn`」整条链自 `EntryDetailViewModel` 搬来。
+     *
+     * [assemble] 的 combine 嵌套与叠加顺序**逐字不变**，变的只是归属：句柄原先由 ViewModel 持有，
+     * 在其 `uiState` 的 `onStart` / `onCompletion` 上启停（ISSUE-P3-175 的整改点，原为 `init` 常驻）。
+     * 本装配器与 `uiState` **同生命周期、同 scope**（构造期由 ViewModel 传入 `viewModelScope`），
+     * 故移动句柄不改变启停时机；`AlgoHotPathGuardsTest` 的两条定位判据随之改按
+     * 「ViewModel + 装配器」**并集**扫描（判据逐字保留，反向判据仍只扫 ViewModel 的 `init`）。
+     */
+    fun assembleState(
+        inputs: Inputs,
+        ticker: EntryDetailTotpTicker,
+        currentEntry: () -> UiVaultEntry?,
+        onRemaining: (Int) -> Unit,
+        onLiveCode: (String?) -> Unit
+    ): StateFlow<EntryDetailUiState> = assemble(inputs)
+        // 断点6 整改：每秒驱动 TOTP 倒计时；周期翻转（剩余秒数不降反升）时重算实时验证码。
+        .onStart {
+            totpTickJob?.cancel()
+            totpTickJob = ticker.start(scope, currentEntry, onRemaining, onLiveCode)
+        }
+        .onCompletion { totpTickJob?.cancel() }
+        .stateIn(
+            scope = scope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = EntryDetailUiState(isLoading = true)
+        )
+
+    /** 节拍任务句柄（随 `uiState` 的订阅期启停，ISSUE-P3-175） */
+    private var totpTickJob: Job? = null
 
     private companion object {
         private const val SECONDS_PER_MINUTE = 60

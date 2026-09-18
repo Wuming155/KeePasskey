@@ -54,7 +54,7 @@ class AutofillPickerViewModel @Inject constructor(
     val entries: StateFlow<List<KdbxEntry>> = _entries.asStateFlow()
 
     /** ISSUE-P2-52：锁定即清空缓存活树（清零后的条目任何字段读取都会抛异常） */
-    private val sessionLockObserver = com.keepasskey.core.session.SessionLockObserver {
+    private val sessionLockGuard = com.keepasskey.database.session.SessionLockGuard(databaseSession) {
         _entries.value = emptyList()
     }
 
@@ -62,8 +62,8 @@ class AutofillPickerViewModel @Inject constructor(
     private var entriesLoadStarted = false
 
     init {
-        // ISSUE-P2-52：注册会话锁定观察者（须在 [sessionLockObserver] 声明之后）
-        databaseSession?.addLockObserver(sessionLockObserver)
+        // ISSUE-P2-52：注册会话锁定观察者（须在 [sessionLockGuard] 声明之后）
+        sessionLockGuard.register()
         // ISSUE-P3-148：**刻意不在 init 装载整库**——确认页（按需创建本 VM）不需要全库，
         // 而 init 装载会让每次「确认填充」都付一次与库规模成正比的成本。需要全库的
         // 选择器页显式调用 [loadEntries]。
@@ -89,7 +89,7 @@ class AutofillPickerViewModel @Inject constructor(
     }
 
     override fun onCleared() {
-        databaseSession?.removeLockObserver(sessionLockObserver)
+        sessionLockGuard.unregister()
         super.onCleared()
     }
 

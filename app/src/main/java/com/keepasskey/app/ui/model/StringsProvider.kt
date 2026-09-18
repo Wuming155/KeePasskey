@@ -11,3 +11,14 @@ import androidx.annotation.StringRes
 fun interface StringsProvider {
     fun get(@StringRes id: Int, vararg args: Any?): String
 }
+
+/**
+ * 文案通道的**三级回退链**（`ISSUE-P3-188` §170 收敛）：已注入的通道优先 → 经 [context] 转发
+ * `Context.getString` → 两者皆缺（纯 JVM 单测）时回退「恒返回空串」的静默实现。
+ *
+ * 收敛前 `EntryDetailViewModel` 与 `SettingsViewModel` 各写一份同样的三级回退；
+ * 「静默空串」是**只在测试里成立**的行为，集中一处便于审计（生产 DI 恒注入真实现）。
+ */
+fun StringsProvider?.orFallback(context: android.content.Context?): StringsProvider = this
+    ?: context?.let { ctx -> StringsProvider { id, args -> ctx.getString(id, *args) } }
+    ?: StringsProvider { _, _ -> "" }

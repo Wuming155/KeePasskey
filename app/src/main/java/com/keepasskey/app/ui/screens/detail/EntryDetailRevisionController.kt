@@ -7,7 +7,9 @@ import com.keepasskey.app.ui.model.UiEntryRevision
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.model.UiVaultEntry
 import com.keepasskey.core.result.KdbxResult
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 
 /**
  * 历史修订的回滚与对比预解密（断点8 / TASK-31 / M2 / ISSUE-P2-15）。
@@ -22,8 +24,26 @@ import kotlinx.coroutines.flow.update
 internal class EntryDetailRevisionController(
     private val vaultRepository: VaultRepository,
     private val secrets: EntryDetailSecrets,
-    private val strings: StringsProvider
+    private val strings: StringsProvider,
+    // `ISSUE-P3-188` §170：与同包的 EntryDetailCopyCoordinator / EntryDetailEntryActions 同形态，
+    // 由协作者自行派发到 scope 并把结果消息回灌 UI —— ViewModel 侧只留事件入口的一行委托。
+    private val scope: CoroutineScope,
+    private val currentEntry: () -> UiVaultEntry?,
+    private val currentEntryId: () -> String?,
+    private val showMessage: (UiMessage) -> Unit
 ) {
+
+    /** 事件入口：回滚**当前条目**到 [revision]（原为 ViewModel 内的 `launch` 包装，§170 归位至此）。 */
+    fun rollbackToCurrentEntry(revision: UiEntryRevision) {
+        val current = currentEntry() ?: return
+        scope.launch { showMessage(rollback(current, revision)) }
+    }
+
+    /** 事件入口：为对比弹窗预解密**当前条目**的密码与目标修订密码。 */
+    fun prepareDiffForCurrentEntry(revisionId: String) {
+        val entryId = currentEntryId() ?: return
+        scope.launch { prepareDiff(entryId, revisionId) }
+    }
 
     /**
      * 回滚 [current] 到 [revision]：取整修订快照（含解密后的受保护字段与 TOTP 配置）全字段回滚，

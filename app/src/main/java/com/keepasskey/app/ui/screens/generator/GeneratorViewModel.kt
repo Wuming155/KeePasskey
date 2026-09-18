@@ -197,18 +197,18 @@ class GeneratorViewModel @Inject constructor(
     override fun onCleared() {
         // ISSUE-P2-12：ViewModel 销毁时显式擦除受控容器内的全部生成结果
         clearGeneratedSecrets()
-        databaseSession?.removeLockObserver(sessionLockObserver)
+        sessionLockGuard.unregister()
         super.onCleared()
     }
 
     /** ISSUE-P2-65：会话锁定 / 关闭时擦除全部生成结果（当前 + 历史）。 */
-    private val sessionLockObserver = com.keepasskey.core.session.SessionLockObserver {
+    private val sessionLockGuard = com.keepasskey.database.session.SessionLockGuard(databaseSession) {
         clearGeneratedSecrets()
     }
 
     init {
-        // ISSUE-P2-65：注册会话锁定观察者（须在 [sessionLockObserver] 声明之后）
-        databaseSession?.addLockObserver(sessionLockObserver)
+        // ISSUE-P2-65：注册会话锁定观察者（须在 [sessionLockGuard] 声明之后）
+        sessionLockGuard.register()
     }
 
     private fun clearGeneratedSecrets() {

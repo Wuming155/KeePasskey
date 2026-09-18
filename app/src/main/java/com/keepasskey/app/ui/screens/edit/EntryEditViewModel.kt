@@ -400,7 +400,7 @@ class EntryEditViewModel @Inject constructor(
     override fun onCleared() {
         // M1 整改：ViewModel 销毁时彻底擦除密码驻留（预填通道与编辑副本）
         clearAllSecrets()
-        databaseSession?.removeLockObserver(sessionLockObserver)
+        sessionLockGuard.unregister()
         super.onCleared()
     }
 
@@ -408,12 +408,12 @@ class EntryEditViewModel @Inject constructor(
      * ISSUE-P2-65：会话锁定 / 关闭时擦除全部编辑态明文（口令 / TOTP 种子 / 受保护字段），
      * 不得仅依赖 ViewModel 销毁（`onCleared`）——锁定后 ViewModel 可能仍被导航栈持有。
      */
-    private val sessionLockObserver = com.keepasskey.core.session.SessionLockObserver {
+    private val sessionLockGuard = com.keepasskey.database.session.SessionLockGuard(databaseSession) {
         clearAllSecrets()
     }
 
     init {
-        databaseSession?.addLockObserver(sessionLockObserver)
+        sessionLockGuard.register()
     }
 
     private fun clearAllSecrets() {

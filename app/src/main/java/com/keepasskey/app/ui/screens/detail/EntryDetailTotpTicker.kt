@@ -3,6 +3,10 @@ package com.keepasskey.app.ui.screens.detail
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.ui.model.UiVaultEntry
 import com.keepasskey.app.util.tickerFlow
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 
 /**
  * 详情页 TOTP 每秒倒计时驱动（断点6 整改）。
@@ -50,6 +54,19 @@ internal class EntryDetailTotpTicker(
             }
             previous = remaining
         }
+    }
+
+    /**
+     * 在指定作用域内启动节拍循环并**返回任务句柄**（`ISSUE-P3-188` §170：供装配器随 `uiState`
+     * 的订阅期持有与取消；语义与原先在 ViewModel 里裸 `launch(Dispatchers.Default)` 逐字一致）。
+     */
+    fun start(
+        scope: CoroutineScope,
+        currentEntry: () -> UiVaultEntry?,
+        onRemaining: (Int) -> Unit,
+        onLiveCode: (String?) -> Unit
+    ): Job = scope.launch(Dispatchers.Default) {
+        run(currentEntry = currentEntry, onRemaining = onRemaining, onLiveCode = onLiveCode)
     }
 
     private companion object {

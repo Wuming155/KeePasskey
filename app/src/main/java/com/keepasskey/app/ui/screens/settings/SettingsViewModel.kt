@@ -15,6 +15,7 @@ import com.keepasskey.app.security.RuntimeIntegrityDetector
 import com.keepasskey.app.security.RuntimeIntegrityReport
 import com.keepasskey.app.sync.SyncCoordinator
 import com.keepasskey.app.sync.SyncCredentialsStore
+import com.keepasskey.app.ui.model.orFallback
 import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.screens.importer.ImportUiState
@@ -99,9 +100,7 @@ class SettingsViewModel @Inject constructor(
     }
 
     // TASK-21 拆分：文案解析通道与领域控制器（同步/健康/导出），ViewModel 保留状态编排
-    private val strings: StringsProvider = stringsProvider
-        ?: appContext?.let { ctx -> StringsProvider { id, args -> ctx.getString(id, *args) } }
-        ?: StringsProvider { _, _ -> "" }
+    private val strings: StringsProvider = stringsProvider.orFallback(appContext)
 
     // ===== ISSUE-P3-19：明文导入（委托 [SettingsImportPresenter]，缺失控制器时恒 Idle） =====
     private val importPresenter = SettingsImportPresenter(vaultImportController)
@@ -143,7 +142,7 @@ class SettingsViewModel @Inject constructor(
      * ISSUE-P2-65：会话锁定 / 关闭时擦除同步凭据的明文预填通道
      * （WebDAV 口令 / S3 SecretKey / AccessKey 均为 CharArray 借用副本，锁定后不得继续驻留）。
      */
-    private val sessionLockObserver = com.keepasskey.core.session.SessionLockObserver {
+    private val sessionLockGuard = com.keepasskey.database.session.SessionLockGuard(databaseSession) {
         syncController.clearWebDavPasswordPrefill()
         syncController.clearS3SecretKeyPrefill()
         syncController.clearS3AccessKeyPrefill()
@@ -236,8 +235,8 @@ class SettingsViewModel @Inject constructor(
         // TASK-12 整改：wifiOnlySync 持久化恢复（周期同步网络约束的消费方）
         syncController.updateWifiOnlySync(extendedSettingsStore.loadWifiOnlySync())
         syncController.restoreSyncCredentials()
-        // ISSUE-P2-65：注册会话锁定观察者（须在 [sessionLockObserver] 声明之后）
-        databaseSession?.addLockObserver(sessionLockObserver)
+        // ISSUE-P2-65：注册会话锁定观察者（须在 [sessionLockGuard] 声明之后）
+        sessionLockGuard.register()
         // 离线开关联动：冷启动时把默认/持久化的离线偏好传导至同步协调器
         syncCoordinator.setOfflineMode(extendedPreferences.settings.value.useOfflineCache)
         coldStartSyncGate.checkAndTrigger()
@@ -538,7 +537,7 @@ class SettingsViewModel @Inject constructor(
         syncController.clearS3SecretKeyPrefill()
         // ISSUE-P2-01：AccessKey ID 预填通道随销毁一并擦除
         syncController.clearS3AccessKeyPrefill()
-        databaseSession?.removeLockObserver(sessionLockObserver)
+        sessionLockGuard.unregister()
         super.onCleared()
     }
 }
