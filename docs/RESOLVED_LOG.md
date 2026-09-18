@@ -223,6 +223,7 @@
 | §182 | 合并层冲突对下沉与早退守卫限界批次（第 3 目「≤50 行」验收线逐条结案：`mergeConflictedEntry` 52→41 已下沉；`processFillRequest` 55 登记为**限界 §20**；修 `check_verbatim_move.py` 参数校验 off-by-one；更正 lint 计数口径 216 → **215**（`grep "<issue"` 误含根元素）） | `ISSUE-P3-188`（第 3 目验收线结案 + 度量口径更正） | [`182-合并层冲突对下沉与早退守卫限界批次.md`](resolved/batches/182-合并层冲突对下沉与早退守卫限界批次.md) |
 | §183 | Argon2 参数对话框段落拆分批次（`ISSUE-P3-188` 第 3 目：`Argon2ParametersDialog` 168 → **80 行出表**，≥100 行 Compose 函数 **28 → 27**；两处内联档位表常量化；`LaunchedEffect` 回填逐项核对；登记一次「切片顺序错置 ⇒ 删除静默落空」的脚本坑） | `ISSUE-P3-188`（第 3 目再消化一个） | [`183-Argon2参数对话框段落拆分批次.md`](resolved/batches/183-Argon2参数对话框段落拆分批次.md) |
 | §184 | 装配表口径裁决批次（`ISSUE-P3-188` 第 3 目：登记 **PD-11**——两个纯接线 NavGraph（252 逻辑行 1 / 164 逻辑行 0）豁免、`KeePasskeyApp`（202 逻辑行 10）**不豁免**，待拆数 27 → 25；新增 `tools/doc/logic_lines.py` 把 PD-11 重开条件做成可执行判据） | `ISSUE-P3-188`（范围口径，用户裁决后登记 PD-11） | [`184-装配表口径裁决批次.md`](resolved/batches/184-装配表口径裁决批次.md) |
+| §185 | 应用外壳逻辑下沉批次（`ISSUE-P3-188` 第 3 目：按 PD-11 对**不豁免**的 `KeePasskeyApp` 动手，202 → **86 行出表**、逻辑行 10 → 0；≥100 项 27 → 26（扣除 PD-11 豁免后待拆 24）；新增 `KeePasskeyAppLogicTest` 5 例——该文件首份行为用例，总用例 2198 → **2203**） | `ISSUE-P3-188`（第 3 目再消化一个 + 补验证面） | [`185-应用外壳逻辑下沉批次.md`](resolved/batches/185-应用外壳逻辑下沉批次.md) |
 
 ## 分册导航
 

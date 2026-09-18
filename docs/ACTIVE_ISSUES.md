@@ -146,7 +146,7 @@
   `@Preview(uiMode = 0x20)` 归零、三小项全部落地，**全部只命名未改值**；余下只有 `crypto` / `database`
   格式面的 7 份「待逐处判定」文件，须与 `.kdbx` 对拍同批做，属独立一段 ⇒ 本条**不得**据此读作已闭环）；
   剩余第二档渐进消化，未消化部分在批次文档留清单。
-- **当前进度（只留结论；逐批改动与验证见 `docs/resolved/batches/155`~`184`（§180 为文档面批次，不属本条））**：
+- **当前进度（只留结论；逐批改动与验证见 `docs/resolved/batches/155`~`185`（§180 为文档面批次，不属本条））**：
   - **第一档 8 文件**（`wc -l` 实测）：**达标 6**（`SyncCache` 382、`UnlockViewModel` 368、
     `DatabaseSettingsScreen` 370（§159 降到 369，后续批次回填至 370）、`EntryEditFormSections` 351（§160）、
     `EntryDetailScreen` 349（§169）、`EntryDetailViewModel` 397（§170））；按理由登记 2（`SettingsViewModel` 543 / `DatabaseSession` 535，
@@ -171,18 +171,20 @@
   > 编号映射（§172 压缩流水后本清单为 1~5 项；第 6 项由 §176 追加、§181 就地改写、**§182 结案移出**，
 > 处置结论见限界 **§20** 与 [`resolved/batches/182-合并层冲突对下沉与早退守卫限界批次.md`](resolved/batches/182-合并层冲突对下沉与早退守卫限界批次.md)）：早期批次正文里提到的
   > 「剩余清单第 3 项」= 此处第 2 项（第二档渐进消化），「第 5 项」= 此处第 4 项（会话锁定直调用例）。
-  1. **Compose 面的长函数**（第 3 目的剩余部分）：**§183 复跑 = 27 个 ≥100 行函数，全部为 Compose 面**（§181 首测 28，§183 削去 `Argon2ParametersDialog`）；
+  1. **Compose 面的长函数**（第 3 目的剩余部分）：**§185 复跑 = 26 个 ≥100 行函数，全部为 Compose 面**（§181 首测 28 → §183 削 `Argon2ParametersDialog` → §185 削 `KeePasskeyApp`）；
      逐个名单见 [`resolved/batches/181-长函数度量工具化与快照分流批次.md`](resolved/batches/181-长函数度量工具化与快照分流批次.md) §3。
      **计数今后一律现跑 `python tools/doc/long_functions.py`**（三条判据与其踩坑史写在工具文档串里，
      条目内不再抄录，以免重演 §175 一次性脚本漏报 10 条的失真）。
-     已消减：§178 `OpenExistingVaultDialog` 226→96、§183 `Argon2ParametersDialog` 168→80（均**出表**）；
+     已消减：§178 `OpenExistingVaultDialog` 226→96、§183 `Argon2ParametersDialog` 168→80、
+     §185 `KeePasskeyApp` 202→86（三者均**出表**，§185 另补 5 例宿主单测）；
      §179 `CreateVaultWizardDialog` 234→158（**仍在表内**，下限由主密码 `CharArray` 擦除链的「单一现场」决定，见 §179 §3）。
      **口径问题已裁决（§184，PD-11）**：两个纯接线装配表 `keepasskeySettingsNavGraph`（252，逻辑行 1）与
-     `keepasskeyNavGraph`（164，逻辑行 0）**豁免本目 ⇒ 待拆实为 25 个**；
-     **`KeePasskeyApp`（202，逻辑行 10）不豁免**，仍在表内。裁决全文、分类计数依据与
+     `keepasskeyNavGraph`（164，逻辑行 0）**豁免本目 ⇒ 26 项中扣除二者，待拆实为 24 个**；
+     **`KeePasskeyApp` 不豁免**，已按该裁决于 §185 下沉（逻辑行 10 → 0）。裁决全文、分类计数依据与
      「逻辑行 ≥5 即重新计入」的重开条件见 [`architecture/产品裁决登记.md`](architecture/产品裁决登记.md) PD-11。
      拆法与 §156 / §159 / §175 / §178 / §179 同：同包段落组件（窄参数、不读 `UiState`、不自持状态），
-     逐字性以 `python tools/doc/check_verbatim_move.py <原文件> <本体> <段落文件>` 复核。
+     逐字性以 `python tools/doc/check_verbatim_move.py <原文件> <本体> <段落文件>` 复核；
+     逻辑段（语言映射 / 主题循环 / 回落判定）优先下沉为**可 JVM 单测的纯函数**并补用例（§185 先例）。
      **刻意不搬的三处**（各有锚在现场的守卫或边界，勿重复尝试）：
      ① `DatabaseSettingsScreen` 导出侧四个 `CreateDocument` launcher 与三处 `pending…Uri`——
      `ExportTicketSinkGuardTest` 的定位串锚在「SAF 回调把目标落到待确认态」这一现场，再搬走会让
