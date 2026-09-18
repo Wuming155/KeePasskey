@@ -17,7 +17,7 @@
 |---|---|
 | [`architecture/ARCHITECTURE.md`](architecture/ARCHITECTURE.md) | 模块依赖拓扑与关键架构决策 |
 | [`architecture/已知工程限界.md`](architecture/已知工程限界.md) | **已接受工程限界 / 残余风险的唯一登记表**（原 `AGENTS.md` §6，`215ea82` 删除后由本文件承接）：事实 / 边界 / 依据 / 解除条件 |
-| [`architecture/产品裁决登记.md`](architecture/产品裁决登记.md) | **已裁决的产品口径登记表**（`PD-01`…）：属「产品 / 架构取舍」而非缺陷的条目；与待办清单、`已知工程限界` 的分工见该文件开头 |
+| [`architecture/产品裁决登记.md`](architecture/产品裁决登记.md) | **已裁决的产品口径登记表**（`PD-01`~`PD-11`）：属「产品 / 架构取舍」而非缺陷的条目；与待办清单、`已知工程限界` 的分工见该文件开头 |
 | [`architecture/reference-projects.md`](architecture/reference-projects.md) | 参考项目地图与优先级层级 |
 | [`architecture/扫码方案评估_ZXing与CameraXMLKit.md`](architecture/扫码方案评估_ZXing与CameraXMLKit.md) | 扫码方案选型评估（ZXing vs CameraX/ML Kit） |
 
@@ -60,6 +60,6 @@
 |---|---|
 | [`resolved/README.md`](resolved/README.md) | 分册体系说明与维护规则 |
 | [`resolved/BATCH_01_30.md`](resolved/BATCH_01_30.md) 等 **5 册** | 分册级索引（各 ≤100 数据行；分册 04 已封卷、05 自 §158 滚动） |
-| `resolved/batches/` | **一批次一文件**的批次正文（当前 **181** 份，§1~§183；§42 / §43 已归入 `security/`） |
+| `resolved/batches/` | **一批次一文件**的批次正文（当前 **182** 份，§1~§184；§42 / §43 已归入 `security/`） |
 
 > **回溯约定**：归档正文只搬迁、不改写。拆分前的完整版本见 git `a144d21`。

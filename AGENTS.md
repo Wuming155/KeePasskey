@@ -87,8 +87,11 @@ Coroutines + Flow；**文档与代码注释使用简体中文**。
 - `cd crypto/src/main/rust && cargo test` — 原生内核单测
 - `python tools/kdbx-corpus/generate_corpus.py --check` — `.kdbx` 语料校验
 - `python tools/doc/count_line_tiers.py` / `python tools/doc/long_functions.py` / `python tools/doc/check_md_links.py`
-  — 五模块行数分档复核 / 超长函数复核（`ISSUE-P3-188` 唯一口径，度量须用已知值反校，判据见脚本文档串）
-  / `docs/` 相对链接自检（**改任何文档后跑**，断链即退出码 1）
+  / `python tools/doc/logic_lines.py <文件> <函数名>`
+  — 五模块行数分档复核 / 超长函数复核 / `docs/` 相对链接自检（**改任何文档后跑**，断链即退出码 1）
+  / 装配表「逻辑行」分类计数（`PD-11` 重开条件的可执行判据）。前三者是 `ISSUE-P3-188` 唯一口径，
+  **度量工具一律用已知值反校**（判据与踩坑史写在各脚本文档串里）；逐字搬移复核用
+  `python tools/doc/check_verbatim_move.py <原文件> <本体> [段落文件…]`
 - `bash tools/audit/check_recheck_consistency.sh` — 复核报告一致性扫描（**改审计 / 复核报告后必跑**）
 - `"$env:USERPROFILE\.android\bin\android-cli.exe" studio <子命令>` — IDE / 设备侧调试首选入口（Android CLI，见下条约定；
   **PowerShell 写法**；Git Bash / MSYS 下同义写法为 `"$USERPROFILE/.android/bin/android-cli.exe"`）

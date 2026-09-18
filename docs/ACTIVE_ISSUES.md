@@ -146,7 +146,7 @@
   `@Preview(uiMode = 0x20)` 归零、三小项全部落地，**全部只命名未改值**；余下只有 `crypto` / `database`
   格式面的 7 份「待逐处判定」文件，须与 `.kdbx` 对拍同批做，属独立一段 ⇒ 本条**不得**据此读作已闭环）；
   剩余第二档渐进消化，未消化部分在批次文档留清单。
-- **当前进度（只留结论；逐批改动与验证见 `docs/resolved/batches/155`~`183`（§180 为文档面批次，不属本条））**：
+- **当前进度（只留结论；逐批改动与验证见 `docs/resolved/batches/155`~`184`（§180 为文档面批次，不属本条））**：
   - **第一档 8 文件**（`wc -l` 实测）：**达标 6**（`SyncCache` 382、`UnlockViewModel` 368、
     `DatabaseSettingsScreen` 370（§159 降到 369，后续批次回填至 370）、`EntryEditFormSections` 351（§160）、
     `EntryDetailScreen` 349（§169）、`EntryDetailViewModel` 397（§170））；按理由登记 2（`SettingsViewModel` 543 / `DatabaseSession` 535，
@@ -177,8 +177,10 @@
      条目内不再抄录，以免重演 §175 一次性脚本漏报 10 条的失真）。
      已消减：§178 `OpenExistingVaultDialog` 226→96、§183 `Argon2ParametersDialog` 168→80（均**出表**）；
      §179 `CreateVaultWizardDialog` 234→158（**仍在表内**，下限由主密码 `CharArray` 擦除链的「单一现场」决定，见 §179 §3）。
-     **待裁的口径问题**：两个 NavGraph（252 / 164）与 `KeePasskeyApp`（202）属**声明式装配表**，
-     按分支拆反而损害可读性——是否计入本目尚未裁决，裁前不得直接开拆。
+     **口径问题已裁决（§184，PD-11）**：两个纯接线装配表 `keepasskeySettingsNavGraph`（252，逻辑行 1）与
+     `keepasskeyNavGraph`（164，逻辑行 0）**豁免本目 ⇒ 待拆实为 25 个**；
+     **`KeePasskeyApp`（202，逻辑行 10）不豁免**，仍在表内。裁决全文、分类计数依据与
+     「逻辑行 ≥5 即重新计入」的重开条件见 [`architecture/产品裁决登记.md`](architecture/产品裁决登记.md) PD-11。
      拆法与 §156 / §159 / §175 / §178 / §179 同：同包段落组件（窄参数、不读 `UiState`、不自持状态），
      逐字性以 `python tools/doc/check_verbatim_move.py <原文件> <本体> <段落文件>` 复核。
      **刻意不搬的三处**（各有锚在现场的守卫或边界，勿重复尝试）：
