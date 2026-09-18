@@ -3,7 +3,6 @@ package com.keepasskey.app.ui.screens.settings.subscreens
 import android.content.res.Configuration
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -15,15 +14,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.WarningAmber
-import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -35,7 +30,6 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -43,8 +37,6 @@ import androidx.compose.ui.unit.sp
 import com.keepasskey.app.R
 import com.keepasskey.app.data.breach.BreachCheckStatus
 import com.keepasskey.app.ui.components.BentoCard
-import com.keepasskey.app.ui.components.disabledPrimaryButtonBorder
-import com.keepasskey.app.ui.components.disabledPrimaryButtonColors
 import com.keepasskey.app.ui.screens.settings.SettingsUiState
 import com.keepasskey.app.ui.theme.LocalSecurityColors
 
@@ -99,113 +91,14 @@ fun HealthCheckScreen(
         ) {
             // 总体健康分仪表卡片
             item {
-                BentoCard(
-                    modifier = Modifier.fillMaxWidth(),
-                    backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow
-                ) {
-                    Column(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        // 仪表盘内只放分数：英文 “Overall health score” 放不进 96dp 圆，
-                        // 强行内嵌会导致换行/重叠（用户反馈 score 错位为 ‘ore）
-                        Box(
-                            modifier = Modifier.size(96.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            // M3 环形进度：分数映射 0–100，紧迫/良好经色阶表达
-                            CircularProgressIndicator(
-                                progress = { (uiState.healthScore.coerceIn(0, 100)) / 100f },
-                                modifier = Modifier.size(96.dp),
-                                color = when {
-                                    uiState.healthScore >= 80 -> MaterialTheme.colorScheme.primary
-                                    uiState.healthScore >= 50 -> MaterialTheme.colorScheme.tertiary
-                                    else -> MaterialTheme.colorScheme.error
-                                },
-                                strokeWidth = 6.dp,
-                                trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
-                            )
-                            Box(
-                                modifier = Modifier
-                                    .size(78.dp)
-                                    .clip(CircleShape)
-                                    .background(MaterialTheme.colorScheme.primaryContainer),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = "${uiState.healthScore}",
-                                    style = MaterialTheme.typography.headlineLarge.copy(
-                                        fontWeight = FontWeight.Black,
-                                        fontSize = 36.sp
-                                    ),
-                                    color = MaterialTheme.colorScheme.onPrimaryContainer
-                                )
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(10.dp))
-
-                        Text(
-                            text = stringResource(R.string.health_total_score),
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-
-                        Spacer(modifier = Modifier.height(6.dp))
-
-                        Text(
-                            text = stringResource(R.string.health_rating, uiState.healthStatus),
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-
-                        Spacer(modifier = Modifier.height(4.dp))
-
-                        Text(
-                            text = uiState.healthMessage,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        Text(
-                            text = stringResource(R.string.health_last_scan, uiState.lastHealthScanTime),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-
-                        Spacer(modifier = Modifier.height(16.dp))
-
-                        Button(
-                            onClick = onRescanClick,
-                            enabled = !uiState.isHealthScanning,
-                            shape = CircleShape,
-                            // ISSUE-P3-132 ③：禁用态补可见边界（共用组件，理由见 ButtonStyles.kt）
-                            colors = disabledPrimaryButtonColors(),
-                            border = disabledPrimaryButtonBorder(),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            if (uiState.isHealthScanning) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(18.dp),
-                                    strokeWidth = 2.dp,
-                                    color = MaterialTheme.colorScheme.onPrimary
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(stringResource(R.string.health_scanning))
-                            } else {
-                                Icon(
-                                    imageVector = Icons.Default.Refresh,
-                                    contentDescription = stringResource(R.string.health_cd_rescan),
-                                    modifier = Modifier.size(18.dp)
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(stringResource(R.string.health_rescan_btn))
-                            }
-                        }
-                    }
-                }
+                HealthCheckScoreCard(
+                    healthScore = uiState.healthScore,
+                    healthStatus = uiState.healthStatus,
+                    healthMessage = uiState.healthMessage,
+                    lastScanTime = uiState.lastHealthScanTime,
+                    isScanning = uiState.isHealthScanning,
+                    onRescanClick = onRescanClick
+                )
             }
 
             // 检查项目明细

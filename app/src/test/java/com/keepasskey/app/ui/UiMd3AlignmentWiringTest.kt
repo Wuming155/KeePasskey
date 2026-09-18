@@ -87,12 +87,19 @@ class UiMd3AlignmentWiringTest {
             offenders.isEmpty()
         )
 
+        // §175：健康度页的仪表卡片（禁用态共用配色 / 描边的唯一使用点）已下沉到同包段落组件
+        // `HealthCheckScreenSections.kt`，故该处改按「页面 + 段落组件」**并集**扫描——
+        // 两条断言逐字保留，不做放宽（只放宽定位串，见 AGENTS.md §3 测试资产纪律）。
         listOf(
-            "app/src/main/java/com/keepasskey/app/ui/screens/unlock/UnlockContentSections.kt",
-            "app/src/main/java/com/keepasskey/app/ui/screens/settings/subscreens/HealthCheckScreen.kt",
-            "app/src/main/java/com/keepasskey/app/ui/screens/settings/subscreens/CloudSyncComponents.kt"
-        ).forEach { path ->
-            val source = readSource(path)
+            listOf("app/src/main/java/com/keepasskey/app/ui/screens/unlock/UnlockContentSections.kt"),
+            listOf(
+                "app/src/main/java/com/keepasskey/app/ui/screens/settings/subscreens/HealthCheckScreen.kt",
+                "app/src/main/java/com/keepasskey/app/ui/screens/settings/subscreens/HealthCheckScreenSections.kt"
+            ),
+            listOf("app/src/main/java/com/keepasskey/app/ui/screens/settings/subscreens/CloudSyncComponents.kt")
+        ).forEach { paths ->
+            val path = paths.joinToString(separator = " + ")
+            val source = paths.joinToString(separator = "\n") { readSource(it) }
             assertTrue("$path 必须接入禁用态共用配色", source.contains("disabledPrimaryButtonColors()"))
             assertTrue("$path 必须接入禁用态共用描边", source.contains("disabledPrimaryButtonBorder()"))
         }

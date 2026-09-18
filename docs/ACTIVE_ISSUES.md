@@ -155,7 +155,7 @@
   `@Preview(uiMode = 0x20)` 归零、三小项全部落地，**全部只命名未改值**；余下只有 `crypto` / `database`
   格式面的 7 份「待逐处判定」文件，须与 `.kdbx` 对拍同批做，属独立一段 ⇒ 本条**不得**据此读作已闭环）；
   剩余第二档渐进消化，未消化部分在批次文档留清单。
-- **当前进度（只留结论；逐批改动与验证见 `docs/resolved/batches/155`~`174`）**：
+- **当前进度（只留结论；逐批改动与验证见 `docs/resolved/batches/155`~`175`）**：
   - **第一档 8 文件**：达标 5（`UnlockViewModel` 368、`SyncCache` 382、`DatabaseSettingsScreen` 369（§159）、
     `EntryEditFormSections` 351（§160）、`EntryDetailScreen` 349（§169）、`EntryDetailViewModel` 397（§170））；按理由登记 2（`SettingsViewModel` 543 / `DatabaseSession` 535，
     经复核为**纯门面**，理由 / 边界 / 解除条件见限界 **§18**）；**仍超 0** ⇒ 第一档维度闭环（详见上方验收标准与 §170 批次正文）；
@@ -171,18 +171,23 @@
 - **剩余清单（本条尚未闭环的部分，逐条自包含）**：
   > 编号映射（§172 压缩流水后本清单为 1~4 项）：早期批次正文里提到的「剩余清单第 3 项」
   > = 此处第 2 项（第二档渐进消化），「第 5 项」= 此处第 4 项（会话锁定直调用例）。
-  1. **Compose 面的长函数与可继续拆的组件**：第 3 目「非 Compose 逻辑函数已清零」之外的余量，
-     即各页面组件里仍存的 >50 行 `@Composable`（`HealthCheckScreen` 326、`ConflictResolutionScreen` 172、
-     `ChildDatabaseDialog` 170、`Argon2ParametersDialog` 168、`UnlockStandardUnlockContent` 158、
-     `AboutSettingsScreen` 153、`EntryDetailTopBar` 151、`VaultListDialogHost` 130、`KeePasskeyApp` 202、
-     两个 NavGraph 252 / 164 等）。拆法与 §156 / §159 同：同包段落组件 + 为该搬家新增的段落接线守卫。
+  1. **Compose 面的长函数**（第 3 目的剩余部分）：**§175 重测 = 28 个 ≥100 行函数，全部为 Compose 面**
+     （非 Compose 逻辑函数确认清零）。重测口径三条：括号配平 + 去注释与字符串 + **跳过单表达式函数**
+     ——只上前两条会把 `PasskeyData.usePrivateKeyBytes`（单行委托）、`SimpleJson.isNull`、
+     `PuxArchiveReader.asLong` 误计成 154~285 行（单表达式函数没有自己的左花括号，配平会吞掉后面的声明）。
+     清单与逐批消减见 [`resolved/batches/175-健康度页仪表段下沉批次.md`](resolved/batches/175-健康度页仪表段下沉批次.md) §2
+     （Top：`keepasskeySettingsNavGraph` 252、`CreateVaultWizardDialog` 234、`OpenExistingVaultDialog` 226、
+     `HealthCheckScreen` 326→227（§175）、`KeePasskeyApp` 202、`ConflictResolutionScreen` 172 …）。
+     **待裁的口径问题**：两个 NavGraph 与 `KeePasskeyApp` 属**声明式装配表**，按分支拆反而损害可读性——
+     是否计入本目尚未裁决，裁前不得直接开拆。
+     拆法与 §156 / §159 / §175 同：同包段落组件（窄参数、不读 `UiState`、不自持状态）。
      **刻意不搬的三处**（各有锚在现场的守卫或边界，勿重复尝试）：
      ① `DatabaseSettingsScreen` 导出侧四个 `CreateDocument` launcher 与三处 `pending…Uri`——
      `ExportTicketSinkGuardTest` 的定位串锚在「SAF 回调把目标落到待确认态」这一现场，再搬走会让
      「弹了确认框却导出别的对象」失去可断言落点；② `AutofillConfirmActivity.completeAuthResult`——
      唯一行为级证据是设备侧 `AutofillAuthChainDeviceTest`；③ `SyncConflictController.autoMergeAndUpload`——
      承载 `localDbOwned` 擦除判据的一处调用点（§166 §2）。
-  2. **第二档（400~500 行文件）渐进消化**：**§174 后为 31 个**（口径：五模块 `src/main` 全部 `.kt`
+  2. **第二档（400~500 行文件）渐进消化**：**§175 后为 30 个**（口径：五模块 `src/main` 全部 `.kt`
      逐文件 `wc -l`，且在**最终写盘后**取数——§165 §7 校正过一批「测量点早于写盘」造成的 `+1` 漂移）。
      当前头部：`RealVaultRepository` 489、`VaultRepository` 478、`RuntimeIntegrityDetector` 470、
      `KdbxHeader` 461、`KdbxXmlParser` 454、`VaultListScreen` 447、`UnlockScreen` 446。
