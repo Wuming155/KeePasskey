@@ -122,7 +122,11 @@
   3. 常量收敛**只挪定义不改值**，改值即属协议变更，须另行立项；
   4. 每档闭环后 `.\gradlew.bat test --rerun-tasks --max-workers=1` 全绿方准入库；
   5. **不得为凑行数把注释移出文件充当「瘦身」**——以职责拆分为准。
-- **验收标准**：第一档 8 文件全部 ≤400 行（或如实登记限界理由）；≥100 行函数全部拆分至 ≤50 行；
+- **验收标准**：第一档 8 文件全部 ≤400 行（或如实登记限界理由）；
+  > **§159 实测口径（`wc -l`）**：达标 5（`SyncCache` 382 / `DatabaseSettingsScreen` 369 /
+  > `UnlockViewModel` 368 + 本批）、按理由登记 2（`SettingsViewModel` 544 / `DatabaseSession` 535，限界 §18）、
+  > **仍超 3**（`EntryEditFormSections` 438 / `EntryDetailViewModel` 434 / `EntryDetailScreen` 426）
+  > ⇒ 本条**不得**被读作「第一档已闭环」。≥100 行函数全部拆分至 ≤50 行；
   第 4 目清单中的协议 / 格式语义字面量收敛为命名常量；剩余第二档渐进消化，未消化部分在批次文档留清单。
 - **进度（2026-09-18 复核批次，`.\gradlew.bat test --rerun-tasks --max-workers=1` 全绿）**：
   - **第一档 8 文件**：`EntryDetailViewModel` 564 → 435、`EntryEditFormSections` 557 → 438、
@@ -159,8 +163,13 @@
      `DatabaseSettingsExportConfirmDialog.kt`，530 → **432 行**；配套把 `ExportTicketSinkGuardTest`
      的接线判据由 3 条扩到 8 条并做变异验证，见
      [`resolved/batches/156-明文导出二次确认收敛批次.md`](resolved/batches/156-明文导出二次确认收敛批次.md)）；
-     **仍开放**：7 个 SAF launcher 群与子库对话框群（对话框 5 / 5b）未下沉，需按
-     `EntryDetailDialogHost` / `VaultListDialogHost` 的「控制器 + 对话框宿主」先例整体上抬状态（>400 阈值仍未达）；
+     **§159 消化第二段**（子库段 + 导入段下沉为 `DatabaseSettingsSections.kt` 的两个同包段落组件，
+     整页 **432 → 369 行，本文件降到 400 阈值以下**；并为搬家新增 `DatabaseSettingsSectionWiringTest` 4 例，
+     钉住「选择器先于门控块 / 段落必须无条件组合 / 子库关闭三口径齐备 / 导入两步式顺序」）。
+     **仍开放**：导出侧四个 `CreateDocument` launcher 与三处 `pending…Uri` 状态刻意留在整页
+     （`ExportTicketSinkGuardTest` 的定位串锚在「SAF 回调把目标落到待确认态」这一现场，再搬走会让
+     「弹了确认框却导出别的对象」失去可断言落点）；清单内其余 Compose 文件（`HealthCheckScreen`(326)、
+     `ConflictResolutionScreen`(172) 等）仍按同一路径逐档消化。
      `HealthCheckScreen`(326)、`ConflictResolutionScreen`(172)、`ChildDatabaseDialog`(170)、
      `Argon2ParametersDialog`(168)、`UnlockStandardUnlockContent`(158)、`AboutSettingsScreen`(153)、
      `EntryDetailTopBar`(151)、`EntryDetailScreen`(137)、`PackageBlocklistManageDialog`(131)、

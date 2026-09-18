@@ -32,7 +32,6 @@ import com.keepasskey.app.R
 import com.keepasskey.app.data.importer.ImportSource
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.model.resolveText
-import com.keepasskey.app.ui.screens.importer.ImportReportDialog
 import com.keepasskey.app.ui.screens.importer.ImportUiState
 import com.keepasskey.app.ui.screens.settings.ChildDatabaseUiState
 import com.keepasskey.app.ui.screens.settings.ExportArtifactKind
@@ -105,11 +104,6 @@ fun DatabaseSettingsScreen(
     // ISSUE-P3-128：密钥文件导出的待确认目标（同属明文风险等级）
     var pendingKeyFileUri by remember { mutableStateOf<Uri?>(null) }
     var showKeyFileExportConfirm by remember { mutableStateOf(false) }
-    // ISSUE-P3-20：子库 SAF 选择结果（非敏感元数据）+ 待解锁的挂载身份
-    var childDbSourceUri by remember { mutableStateOf<String?>(null) }
-    var childDbMountKeyFileUri by remember { mutableStateOf<String?>(null) }
-    var childDbUnlockKeyFileUri by remember { mutableStateOf<String?>(null) }
-    var childDbUnlockTargetId by remember { mutableStateOf<String?>(null) }
 
     // TASK-13 整改：SAF CreateDocument 真实另存为（此前导出/密钥文件仅弹假成功提示）
     val exportKdbxLauncher = rememberLauncherForActivityResult(
@@ -144,17 +138,6 @@ fun DatabaseSettingsScreen(
         }
     }
 
-    // ISSUE-P3-20：子库来源与（可选）密钥文件的 SAF 选择器。
-    // 选择器置于本屏而非对话框内：对话框在 SAF 交互期间保持组合，表单输入（别名/主密码）因此不丢失。
-    val childDbSourceLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocument()
-    ) { uri -> uri?.let { childDbSourceUri = it.toString() } }
-    val childDbMountKeyFileLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocument()
-    ) { uri -> uri?.let { childDbMountKeyFileUri = it.toString() } }
-    val childDbUnlockKeyFileLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocument()
-    ) { uri -> uri?.let { childDbUnlockKeyFileUri = it.toString() } }
 
     // 对话框 6d：密钥文件导出二次确认（ISSUE-P3-128，同属 PLAINTEXT 风险等级；实现见 ExportConfirmationDialog）
     if (showKeyFileExportConfirm) {
@@ -306,49 +289,18 @@ fun DatabaseSettingsScreen(
         )
     }
 
-    // 对话框 5：子数据库挂载（ISSUE-P3-20：真实挂载/解锁/卸载；原「尚未实现」假提示已移除）
-    if (showChildDbDialog) {
-        ChildDatabaseDialog(
-            state = childDatabaseState,
-            selectedSourceUri = childDbSourceUri,
-            selectedKeyFileUri = childDbMountKeyFileUri,
-            onPickSource = { childDbSourceLauncher.launch(arrayOf("*/*")) },
-            onPickKeyFile = { childDbMountKeyFileLauncher.launch(arrayOf("*/*")) },
-            onMount = onMountChildDatabase,
-            onUnlockRequest = { mountId -> childDbUnlockTargetId = mountId },
-            onUnmount = onUnmountChildDatabase,
-            onDismiss = {
-                showChildDbDialog = false
-                childDbSourceUri = null
-                childDbMountKeyFileUri = null
-                onChildDatabaseFeedbackDismiss()
-            }
-        )
-    }
+    // 对话框 5 / 5b：子库挂载与凭据补录（§159 下沉至 ChildDatabaseSection，四项状态由该段自持）
+    ChildDatabaseSection(
+        state = childDatabaseState,
+        showDialog = showChildDbDialog,
+        onDialogDismiss = { showChildDbDialog = false },
+        onMount = onMountChildDatabase,
+        onUnlock = onUnlockChildDatabase,
+        onUnmount = onUnmountChildDatabase,
+        onFeedbackDismiss = onChildDatabaseFeedbackDismiss
+    )
 
-    // 对话框 5b：子库凭据补录（凭据被清零后重新解锁；不卸载即重开）
-    val unlockTargetId = childDbUnlockTargetId
-    if (unlockTargetId != null) {
-        ChildDatabaseCredentialDialog(
-            alias = childDatabaseState.mounts
-                .firstOrNull { it.mountId == unlockTargetId }
-                ?.alias
-                .orEmpty(),
-            selectedKeyFileUri = childDbUnlockKeyFileUri,
-            onPickKeyFile = { childDbUnlockKeyFileLauncher.launch(arrayOf("*/*")) },
-            onConfirm = { passwordChars, keyFileUri ->
-                onUnlockChildDatabase(unlockTargetId, passwordChars, keyFileUri)
-                childDbUnlockTargetId = null
-                childDbUnlockKeyFileUri = null
-            },
-            onDismiss = {
-                childDbUnlockTargetId = null
-                childDbUnlockKeyFileUri = null
-            }
-        )
-    }
 
-    // 对话框 6：导出密码库
     if (showExportDialog) {
         ExportDatabaseDialog(
             databaseName = uiState.databaseName,
@@ -387,28 +339,14 @@ fun DatabaseSettingsScreen(
     }
 
 
-    // 对话框 7：导入数据源 → SAF 打开文件 → 交控制器（解析 / 落库 / 出报告）
-    var pendingImportSource by remember { mutableStateOf<ImportSource?>(null) }
-    val importFileLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocument()
-    ) { uri ->
-        // 选源与选文件是两步：Uri 回调时把二者一并交给控制器（URI 过滤交给解析器的扩展名闸门）
-        val source = pendingImportSource
-        pendingImportSource = null
-        if (uri != null && source != null) onImportFileSelected(source, uri)
-    }
-    if (showImportDialog) {
-        ImportSourceDialog(
-            onSourceSelected = { source ->
-                pendingImportSource = source
-                importFileLauncher.launch(arrayOf("*/*"))
-            },
-            onDismiss = { showImportDialog = false }
-        )
-    }
-
-    // 导入报告对话框：状态全来自控制器 StateFlow（Idle 时不渲染）
-    ImportReportDialog(state = importState, onDismiss = onImportReportDismiss)
+    // 对话框 7 + 导入报告（§159 下沉至 VaultImportSection；两步式选源-选文件的中间态由该段自持）
+    VaultImportSection(
+        state = importState,
+        showDialog = showImportDialog,
+        onDialogDismiss = { showImportDialog = false },
+        onFileSelected = onImportFileSelected,
+        onReportDismiss = onImportReportDismiss
+    )
 }
 
 // IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
