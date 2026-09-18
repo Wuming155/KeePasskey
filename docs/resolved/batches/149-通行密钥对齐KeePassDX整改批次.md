@@ -138,3 +138,15 @@
   `data/repository/{PasskeyEntryCoordinator,PasskeyPrivilegedBrowserStore(新增),VaultRepository,RealVaultRepository}.kt`、
   `ui/.../subscreens/PrivilegedBrowserSettingsScreen.kt`(新增) 与设置页 / 导航接线、`res/values/strings.xml`。
 - 测试：见 §3 清单（含 `app/src/test/.../FakeVaultRepository.kt` 的契约同步）。
+
+---
+
+## 归档索引行原文（无损迁移承接）
+
+> 迁移前本批次的正文同时存在于三处：总索引行、分册级索引行、本文件。以下按「只搬迁、不改写」
+> 原文照录两处索引行正文（更正须另加小节，不得就地改），自此两处索引只留一行指针。
+> 承接批次：§154。
+
+### 总索引行原文（§149）
+
+通行密钥对齐 KeePassDX 整改批次（用户命题「和 KeepassDX 比较，本项目在通行密钥功能上有什么问题」；**无待办条目可剪切**，系评审发现后即时补登并同日闭环）：按 `docs/references/KeePassDX-架构分析.md` 给出的路径对 `PasskeyHelper.kt` / `PasskeyEntryFields.kt` / `Passkey.kt` / `PasskeyProviderService.kt` **定向只读**逐行核对，核实出 **13 项缺口**并全部整改：① 创建链路（通行密钥 / 密码）锁库时**直接失败**且无解锁入口 ⇒ 新增 `CredentialUnlockPresenter` 在同一受保护窗口内先解锁再继续（**不做**链式解锁：`androidx.credentials:1.6.0` 的 `PendingIntentHandler` **无** `setBeginCreateCredentialResponse`，已核对 AAR 公开方法表）；② 注册写死 ES256 ⇒ 按 `pubKeyCredParams` 协商（ES256→Ed25519→RS256，全不支持即 fail-closed）；③ 自造随机 `userHandle` ⇒ 原样采用 RP `user.id`；④ 候选不按 `allowCredentials` 收敛 ⇒ 收敛（空集＝无用户名流程）；⑤ 不读 `clientDataHash` ⇒ 特权调用方摘要直接签名；⑥ **未实现 `prf`** ⇒ 新增 `PasskeyPrf`（域分隔盐 + hmac-secret，与 KeePassDX 逐字节同口径）并在注册 / 断言回传 `clientExtensionResults.prf`；⑦ 特权浏览器白名单**硬编码仅 Chrome** ⇒ 改为派生自已取证表 `BrowserSigningFingerprints.TRUSTED`（顺带消除 ISSUE-P3-88 类「同值两写法」与通道口径不一致）+ 新增用户逐项启用的 `PasskeyPrivilegedBrowserStore`（指纹取该包自身签名，`queryIntentActivities` 无需 `QUERY_ALL_PACKAGES`）+ 设置页；⑧ 落库 schema 自造 `Passkey.*`/hex ⇒ 改为 **`KPEX_PASSKEY_*` + PKCS#8 PEM**（EC 走**命名曲线**，避免显式曲线参数被 KeePassXC 拒收），读侧三形态兼容（KPEX / v1 旧键 / 外部条目按 OID 字节嗅探），Rust 内核快路径不受影响；⑨ `BE`/`BS` 存而不用 ⇒ 由凭据持久化值驱动；⑩ `userVerification: required` 被降级 ⇒ 强制强验证且不降级为手动确认；⑪ `excludeCredentials` 不查 ⇒ 单趟扫描查重后拒绝；⑫ 重复注册产生重复条目 ⇒ 同 rpId + 用户名**原地替换**；⑬ `credentialId`/`userHandle` 非保护 ⇒ 改受保护（KeePassXC / KeePassDX 口径）。另回退工作区把 `callingPackage`/`rpId` 写进日志的改动（`ISSUE-P1-10`）。新增零依赖 `SimpleJson`（`org.json` 在宿主单测是不可用桩，安全关键面必须有可执行单测）。**验证**：全量 `test --rerun-tasks --max-workers=1` **绿**，聚合 **`tests=2184 skipped=13 failures=0 errors=0`**（§148 基准 2144；本批新增 29 例，**差额未逐例溯源**）；三模块 `compileDebugAndroidTestKotlin` 通过。**如实声明**：**未跑设备侧 / `assembleRelease`**（`lint` 三模块 debug 已跑通，首轮 4 条 `MissingTranslation` 已补英文并复跑通过）；KPEX 互操作**仅格式面证据**（未用 `keepassxc-cli` / `pykeepass` / 真实 KeePassDX 端到端对拍 ⇒ 不得宣称「互操作已验证」）；PRF 未与真实 RP 对拍；v1 旧条目不自动迁移；条目复用为行为变更

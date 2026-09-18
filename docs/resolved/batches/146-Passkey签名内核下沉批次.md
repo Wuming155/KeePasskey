@@ -125,3 +125,15 @@ Java_com_keepasskey_crypto_passkey_NativePasskeySign_ed25519Sign   ← §146 新
 `unused import`（该告警在 `cargoNdkBuild` 的 4 ABI 交叉编译输出中可见）。已合并为单次
 `use ed25519_dalek::Signer as _;` 并加注说明同一 trait 覆盖两处 `sign` 调用；强制重建后
 `cargo test` 仅剩既有的 MSVC linker 提示（与本批无关）。
+
+---
+
+## 归档索引行原文（无损迁移承接）
+
+> 迁移前本批次的正文同时存在于三处：总索引行、分册级索引行、本文件。以下按「只搬迁、不改写」
+> 原文照录两处索引行正文（更正须另加小节，不得就地改），自此两处索引只留一行指针。
+> 承接批次：§154。
+
+### 总索引行原文（§146）
+
+Passkey 签名内核下沉批次（`ISSUE-P3-153` 第二阶段 · **条目闭环**）：新增 RustCrypto `p256 0.13`（ecdsa/alloc）+ `ed25519-dalek 2`（alloc）；`passkey_sign.rs` 纯函数内核（`es256_sign_der` 确定性 RFC 6979+SHA-256→规范 DER、非法标量 d=0/d≥n fail-closed；`ed25519_sign_raw` RFC 8032→64B raw）；JNI `NativePasskeySign`（探活 = RFC 6979 A.2.5 + RFC 8032 §7.1 TEST 1 双官方向量自测）；`PasskeyAssertionSigner` 路由：`available && size==32` 走原生、**原生 null 回落 BC**（保住既有 `InvalidKeyException` 校验语义，不引入异常类型漂移）、PKCS#8 形态与 RS256 恒走 BC。**供应链闸门**：`cargo deny check` 4 项全 ok。**对拍根据**：两侧签名均确定性（RFC 6979 / RFC 8032）⇒ 40 轮随机 (key,msg) 逐字节一致 + 互验签。**验证**：Rust 4 例（双官方向量/确定性/闸门）；宿主 `PasskeyNativeSignTest` 3 例；真机 `PasskeyNativeDeviceTest` 2/2 绿 skipped=0（Redmi 4X）；全量 `test --rerun-tasks` 绿聚合 **`tests=2125 skipped=13 failures=0 errors=0`**（§145 基准 2122 + 3 吻合）。**收益**：ES256 sign 17.7→~1ms（16.6×）、Ed25519 sign 3.8→~0.2ms（22.3×），每次 WebAuthn getAssertion 均受益；RS256 裁定不下沉（Rust 慢 1.6~2.1×）。**过程留痕**：① RFC 6979 私钥误记（CFCF…CF ≠ A.2.5 的 C9AFA9D8…）→ 下载 RFC 原文核对修正——**向量必须对官方原文核对**；② DER 规范编码认知修正（r 高位置位须 `02 21 00` 前导零——BC `BigInteger.toByteArray()` 同样补零，对拍口径不受影响）；③ 异常类型漂移一次（原生 null 直转 `CipherException` 使既有闸门 3 例红 → 改回落 BC）。**批后补正（批次文档 §6）**：本批新增 3 个 JNI 导出使 `.so` 符号数 **5 → 8**，而 CI `native-gate` **硬断言恰好 5 个** ⇒ **唯有跑 CI 才会红**（本地 `test`/`assembleDebug`/设备用例均不暴露）；已按 §73「期望值必须实测而非引用」实测 4 个 ABI（**均为 8 个、符号名跨 ABI 完全一致**），并将断言由「只比数量」**升级为逐名集合核对**（缺失/多余分别打印，`set -euo pipefail` 下无命中即失败 = fail-closed）；同批补跑此前标注「未跑」的构建面：`assembleDebug`+`lint` **绿**（3m19s/227 tasks）、`:app:assembleRelease`（R8 + lintVital）**绿**（2m28s/204 tasks），APK 四 ABI `.so` 入包核对通过（debug 尺寸 arm64-v8a 583,128 B / armeabi-v7a 451,712 B / x86 756,964 B / x86_64 687,136 B，较本批前约 +105 KB，来自 3 个新增 Rust 依赖），并以 `apkanalyzer dex code` 在 **release 包**实测三个新 native 方法**类名与方法名均未被混淆/剥离**（`.method public final native applyKeystream([B[BJ[B)[B` 等，JNI 按名查找成立）；`usage.txt` 中的 `getAvailable()` 一类「已移除」条目经核实为 R8 **访问器内联/死代码消除**（非 native 剥离），故**未**据此新增任何 `-keep`；并补跑**完整设备侧套件**（crypto 18 + database 15 + **app 41**，§143~§146 最终代码状态）合并 **`tests=74 skipped=0 failures=0 errors=0`**（含 `RealKdbxCorpusUnlockTest` 2 = KeePassXC 官方语料端到端解锁、`SelfGeneratedRoundTripInstrumentedTest` 1 = 设备侧 KDBX 往返、`ChaCha20NativeDeviceTest` 3、`PasskeyNativeDeviceTest` 2、**`passkey.CredentialManagerBindingDeviceTest` 7 = 通行密钥 CM 通道**等）；顺带清理本批引入的 Rust 告警（`ed25519_dalek::Signer` 与 `p256::ecdsa::signature::Signer` **为同一 trait**，重复引入被判 `unused import` ⇒ 合并为单次 `as _` 引入并加注；`cargo clean -p` 强制重建后仅剩既有 MSVC `linker_messages` 提示，与本批无关）

@@ -75,3 +75,15 @@ JNI 边界的两次数组拷贝（`convert_byte_array` 入参拷贝 + `SetByteAr
 - Kotlin 侧两次字符串拼接 + `hexToByteArray()` 优先级错误（编译期抓获，未入库）。
 - ES256 / Ed25519 签名内核（`ISSUE-P3-153` 第二阶段）**未在本批**；RS256 已被裁定否定下沉。
 - 未跑 `lint` / `assembleRelease`；ChaCha20 为可选 cipher，默认 AES 路径零改动。
+
+---
+
+## 归档索引行原文（无损迁移承接）
+
+> 迁移前本批次的正文同时存在于三处：总索引行、分册级索引行、本文件。以下按「只搬迁、不改写」
+> 原文照录两处索引行正文（更正须另加小节，不得就地改），自此两处索引只留一行指针。
+> 承接批次：§154。
+
+### 总索引行原文（§145）
+
+ChaCha20 Rust 内核下沉批次（`ISSUE-P3-153` 第一阶段，用户 2026-09-17 立项）：新增 RustCrypto `chacha20 0.9.1`（default-features=false + zeroize，与 aes/twofish 同纪律）；**纯函数无状态内核** `chacha20_stream::apply_keystream_at`（密钥流按字节偏移定位——实证 `StreamCipherSeek` 契约即「position in bytes」，无需跨 JNI 持有流对象；闸门含 RFC 8439 u32 块计数器上界 2^32×64 字节 fail-closed）；JNI 导出 `NativeChaCha20.applyKeystream`（范式对齐既有桥）；`ChaCha20CipherEngine` 改**原生优先 + BC 回退**双路径（对齐 TwofishCipherEngine 先例；新增 ChaCha20 专用无填充分块流，64KiB 复用缓冲 + 明文清零，不自作主张清零调用方 key/nonce）。**供应链闸门**：`cargo deny check` 4 项全 ok（wildcards=deny 零违例 / 无重复密码学实现 / RUSTSEC 无命中）。**真机吞吐（同机同探针）**：生产路径整块 66.4 MB/s / 流 54.1 MB/s（BC 2.7 MB/s ⇒ **≈20~24×**）；低于评估裸二进制 118 MB/s 的差距 = JNI 两次数组拷贝（安全范式固有代价）+ Kotlin 流中转，JNI 零拷贝优化**不在本批**。**验证**：Rust 4 例（RFC 8439 §2.4.2 官方向量 / 任意字节粒度=整段 / 非零偏移链式 / 闸门负例）；宿主 `ChaCha20NativeEngineTest` 3 例（对 BC 逐字节对拍 + 官方向量）；真机 `ChaCha20NativeDeviceTest` 3/3 绿 skipped=0；全量 `test --rerun-tasks` 绿聚合 **`tests=2122 skipped=13 failures=0 errors=0`**（§144 基准 2119 + 3 吻合）。**过程留痕**：① seek 粒度误判一次（块 vs 字节——用例先行抓住，实证 cipher 0.5.2 契约后修正）；② 官方向量凭记忆拼接截断一次（130B≠114B）→ 改以 crate 内嵌 RFC 8439 向量逐字对照——**密码学向量不得手打**；③ Kotlin 字符串拼接+`hexToByteArray()` 优先级错误两次（编译期抓获）。ES256/Ed25519 签名内核为后续批次，RS256 裁定否定下沉

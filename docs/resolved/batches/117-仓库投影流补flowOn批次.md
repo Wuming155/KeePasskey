@@ -140,3 +140,19 @@ Hilt 生成代码 `DaggerMainApplication_HiltComponents_SingletonC` 已将
 - **核实时间点与方式**：2026-09-17 由 §114 实施过程中的实测阻塞得出（工作区行尾与全量测试口径均已核实）。
 - **验收标准**：整库投影不再在 Main 上执行（可用测试调度器断言）；`RealVaultRepositoryTest` 全绿且**不引入**
   依赖真实线程池的偶发断言；`getEntries()` 的收集者（列表页 / 自动填充 / 子库）行为零变化。
+
+---
+
+## 归档索引行原文（无损迁移承接）
+
+> 迁移前本批次的正文同时存在于三处：总索引行、分册级索引行、本文件。以下按「只搬迁、不改写」
+> 原文照录两处索引行正文（更正须另加小节，不得就地改），自此两处索引只留一行指针。
+> 承接批次：§154。
+
+### 总索引行原文（§117）
+
+仓库投影流补 `flowOn` 批次（`ISSUE-P3-154`，§114 的**残留**收口——`ISSUE-P3-149` ③）：`getEntries()` / `getGroups()` 的整库投影（逐字段解密 + 时间格式化）此前在**收集上下文**执行（列表页为 `viewModelScope` = Main）；§114 只把**频率**由每秒降为每次变更，**执行线程未变**。修法按条目原文：**先在数据层引入可注入的限定符** `@VaultProjectionDispatcher` + Hilt 模块（生产 `Dispatchers.Default`，做法对齐展示层 `@EntryDisplayDispatcher`），**再补 `flowOn`**，构造参数**刻意不给默认值**（默认值等于留一条悄悄退回收集上下文的路）；15 处测试构造点收敛为单一入口 `TestScope.newRepository(...)`（默认 `StandardTestDispatcher(testScheduler)`，与 `runTest` 同一虚拟时间轴）。**验证**：新增 2 例——①**记录型调度器**（只计数派发、执行委托测试调度器）断言「未收集时 0 / `getEntries()` 后 >0 / `getGroups()` 后继续增长」（两条流**分开计数**，防一条接线掩盖另一条）；②`assertSame(Dispatchers.Default, …)` 锁生产绑定。**负向对照**：去掉两处 `flowOn` ⇒ 必红（`AssertionError: 整库条目投影必须派发到注入的投影调度器`）✔，随后逐字节还原。全量 `--rerun-tasks` **1m 55s 绿**，聚合 **`tests=1995 skipped=13 failures=0 errors=0`**（§116 为 1993，+2）；Hilt 生成代码核实绑定已注入（缺失即编译期失败）。**边界如实声明**：**无性能实测**（判据是派发事实与绑定值，**不得**宣称百分比收益）；只覆盖两条**整库**投影流，`getEntry(id)` 单条投影**未**补（条目原文范围亦只点名这两条）⇒ **不得**读作「仓库层投影已全部离开收集上下文」；两条流各自独立派发后 `combine` 的**中间态对齐不再严格同步**（终态一致，既有收集者用例全绿）；`repositoryScope` 仍硬编码 `Dispatchers.Default`（**刻意不合并**——常驻作用域落在测试调度器上会以 `UncompletedCoroutinesError` 收场）；`FakeVaultRepository` 未补且 `VaultRepository` 接口**未**声明该契约 ⇒ 属实现属性而非接口保证；未跑 `assembleRelease` 与设备侧用例。**过程留痕**：条目前提**偏差更正**——原文「40+ 处直接构造」实测为 **15 处**（全在 `RealVaultRepositoryTest`，全为 `runTest` + `first()`、无虚拟时间推进）；用例名含点号触发 Kotlin `Name contains illegal characters` 而改名；**统计口径陷阱**——首次聚合得 `tests=1997`，多出的 2 例定位为 `updateDebugScreenshotTest/` 的**陈旧**结果目录（非 `test` 产出），剔除后方与基线严格对齐；顺带删除 `getEntry` 上 §114 遗留的**重复 KDoc 块**
+
+### 分册 04行原文（§117）
+
+仓库投影流补 `flowOn` 批次（`ISSUE-P3-154`，§114 的**残留**收口——`ISSUE-P3-149` ③）：`getEntries()` / `getGroups()` 的整库投影（逐字段解密 + 时间格式化）此前在**收集上下文**执行（列表页为 `viewModelScope` = Main）；§114 只把**频率**降为「每次数据变更」，**执行线程未变**。按条目原文修法：数据层新增可注入限定符 `@VaultProjectionDispatcher` + Hilt 模块（生产 `Dispatchers.Default`，对齐展示层 `@EntryDisplayDispatcher`），再补 `flowOn`；构造参数**刻意不给默认值**（默认值等于留一条悄悄退回收集上下文的路）；15 处测试构造点收敛为单一入口 `TestScope.newRepository(...)`（默认 `StandardTestDispatcher(testScheduler)`，与 `runTest` 同虚拟时间轴）。**验证**：新增 2 例——①**记录型调度器**（只计数派发、执行委托测试调度器）断言「未收集 0 / `getEntries()` 后 >0 / `getGroups()` 后继续增长」（两条流**分开计数**）；②`assertSame(Dispatchers.Default, …)` 锁生产绑定。**负向对照**：去掉两处 `flowOn` ⇒ 必红（`整库条目投影必须派发到注入的投影调度器`）✔ 后逐字节还原。全量 `--rerun-tasks` **1m 55s 绿**，`tests=1995 skipped=13 failures=0 errors=0`（§116 为 1993，+2）；Hilt 生成代码核实绑定已注入（缺失即编译期失败）。**边界**：无性能实测（不得宣称百分比收益）；只覆盖两条**整库**流，`getEntry(id)` **未**补（不得读作「仓库层投影已全部离开收集上下文」）；两条流独立派发后 `combine` 中间态对齐不再严格同步（终态一致）；`repositoryScope` 仍硬编码 `Dispatchers.Default`（**刻意不合并**，否则常驻作用域落在测试调度器上会 `UncompletedCoroutinesError`）；`FakeVaultRepository` 未补、接口**未**声明该契约 ⇒ 属实现属性非接口保证。**过程留痕**：条目前提更正（「40+ 处直接构造」实测 **15 处**）；用例名含点号触发 Kotlin `Name contains illegal characters` 而改名；**统计口径陷阱**（首次聚合得 1997，多出的 2 例来自 `updateDebugScreenshotTest/` 陈旧结果目录，剔除后与基线对齐）；顺带删 `getEntry` 上 §114 遗留的重复 KDoc 块

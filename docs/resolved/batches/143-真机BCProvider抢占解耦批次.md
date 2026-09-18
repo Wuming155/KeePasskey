@@ -79,3 +79,15 @@
 
 - 无生产代码返工；`fullBouncyCastle` 用 `by lazy` 保证多测试并发下的单次构造与线程安全；
 - 本批先于 `ISSUE-P3-153` 立项与 `ISSUE-P3-155` 整改执行（用户裁定顺序：P2-92 → P3-155 → P3-153 立项）。
+
+---
+
+## 归档索引行原文（无损迁移承接）
+
+> 迁移前本批次的正文同时存在于三处：总索引行、分册级索引行、本文件。以下按「只搬迁、不改写」
+> 原文照录两处索引行正文（更正须另加小节，不得就地改），自此两处索引只留一行指针。
+> 承接批次：§154。
+
+### 总索引行原文（§143）
+
+真机 BC Provider 抢占解耦批次（`ISSUE-P2-92`，2026-09-17 真机实测发现）：Android 平台剥离版 BC 抢占 `"BC"` 注册名（无 `ChaCha7539` / `Twofish`）⇒ 真机上 **ChaCha20 fail-fast、Twofish 更隐蔽**（`NativeTwofish.available` 探活 BC 对照抛异常被 `catch(Throwable){false}` 吞掉 ⇒ 恒 `false` 静默弃用原生内核，JCE 兜底再挂）⇒ **真机仅默认 AES 可用**，宿主单测全绿（宿主无平台 `"BC"`）。修复：`ChaCha20CipherEngine.bouncyCastleProvider()` 改为返回**持有的完整 `BouncyCastleProvider` 实例**（`by lazy`，与注册表完全解耦），签名不变 ⇒ 三个生产调用点（ChaCha20 引擎 / Twofish 兜底 / NativeTwofish 探活对照）自动修复；`ensureBouncyCastle()` 原样保留仅供宿主测试按名查找并标注禁令；**刻意不做** `removeProvider("BC")` 与异名注册。**验证**：宿主 `BcProviderCollisionTest`（注入同名空服务假 BC 模拟真机：负向对照 + 解耦断言 + 引擎往返 + Twofish 解析）1 例绿；真机 `BcProviderDeviceTest`（Redmi 4X / arm64-v8a / Android 17）3 例全绿（生产引擎往返 / `NativeTwofish.available==true` 钉死 / Twofish 单分组变换）；全量 `test --rerun-tasks --max-workers=1` 绿。**发现过程与红证**：[`records/真机吞吐实测记录_2026-09-17.md`](records/真机吞吐实测记录_2026-09-17.md) §3（P3-153/P3-155 真机吞吐探针首跑的真实失败）
