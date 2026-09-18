@@ -1,5 +1,6 @@
 package com.keepasskey.app.ui.screens.settings
 
+import com.keepasskey.app.testutil.MainDispatcherGuard
 import androidx.lifecycle.viewModelScope
 import com.keepasskey.app.autofill.testHmacFieldSignatureSource
 import com.keepasskey.app.data.repository.FakeSettingsRepository
@@ -12,7 +13,6 @@ import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.core.security.ProtectedString
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -43,7 +43,6 @@ class HealthCheckViewModelTest {
     }
 
     /** 各用例创建的 ViewModel；teardown 时统一取消其作用域（见 [tearDown] 说明）。 */
-    private val createdViewModels = mutableListOf<SettingsViewModel>()
 
     @After
     fun tearDown() {
@@ -52,9 +51,7 @@ class HealthCheckViewModelTest {
         // `resetMain()` 之后才落地，就会打到 android.jar 的 `Looper` 桩并抛
         // IllegalStateException（Main 在 resetMain 之后被访问），污染同 JVM 后续用例。
         // 故先取消作用域、再恢复 Main。
-        createdViewModels.forEach { it.viewModelScope.cancel() }
-        createdViewModels.clear()
-        Dispatchers.resetMain()
+        MainDispatcherGuard.tearDown()
     }
 
     private class TestAuditVaultRepository(
@@ -131,7 +128,7 @@ class HealthCheckViewModelTest {
                 com.keepasskey.app.ui.screens.settings.NoOpBreachRangeClient
             ),
             stringsProvider = fakeStrings
-        ).also { createdViewModels += it }
+        ).also { MainDispatcherGuard.track(it) }
         val job = backgroundScope.launch(kotlinx.coroutines.test.UnconfinedTestDispatcher(testScheduler)) {
             viewModel.uiState.collect {}
         }

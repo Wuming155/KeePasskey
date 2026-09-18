@@ -8,6 +8,7 @@ import com.keepasskey.app.security.BiometricAuthManager
 import com.keepasskey.app.security.FakeRuntimeIntegrityGate
 import com.keepasskey.app.security.KeystoreManager
 import com.keepasskey.app.security.UnlockAuthPolicy
+import com.keepasskey.app.testutil.MainDispatcherGuard
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
@@ -16,7 +17,6 @@ import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
-import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
@@ -55,7 +55,8 @@ class QuickUnlockSealDowngradeTest {
 
     @After
     fun tearDown() {
-        Dispatchers.resetMain()
+        // 先取消本用例登记的 ViewModel 作用域、再恢复 Main（ISSUE-P3-189，见 MainDispatcherGuard）。
+        MainDispatcherGuard.tearDown()
     }
 
     // ── 策略纯函数：落位降级判定（唯一语义声明点） ─────────────────────────
@@ -93,7 +94,7 @@ class QuickUnlockSealDowngradeTest {
             viewModel.uiState.collect {}
         }
         testScheduler.runCurrent()
-        return viewModel to settings
+        return MainDispatcherGuard.track(viewModel) to settings
     }
 
     /** 注册解锁成功事件采集器（跨确认弹窗挂起持续存活），返回时刻快照读取器 */

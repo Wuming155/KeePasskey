@@ -1,5 +1,6 @@
 package com.keepasskey.app.ui.screens.detail
 
+import com.keepasskey.app.testutil.MainDispatcherGuard
 import androidx.lifecycle.SavedStateHandle
 import com.keepasskey.app.data.repository.AutofillBlocklistStore
 import com.keepasskey.app.data.repository.FakeSettingsRepository
@@ -42,7 +43,8 @@ class EntryDetailViewModelTest {
 
     @After
     fun tearDown() {
-        Dispatchers.resetMain()
+        // 先取消本用例登记的 ViewModel 作用域、再恢复 Main（ISSUE-P3-189，见 MainDispatcherGuard）。
+        MainDispatcherGuard.tearDown()
     }
 
     private fun TestScope.createViewModel(
@@ -67,7 +69,7 @@ class EntryDetailViewModelTest {
             viewModel.uiState.collect {}
         }
         testScheduler.runCurrent()
-        return viewModel
+        return MainDispatcherGuard.track(viewModel)
     }
 
     @Test
@@ -111,6 +113,7 @@ class EntryDetailViewModelTest {
         val viewModel = EntryDetailViewModel(
             null, handle, FakeVaultRepository(), settings, null, AutofillBlocklistStore(null)
         )
+        MainDispatcherGuard.track(viewModel)
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
             viewModel.uiState.collect {}
         }

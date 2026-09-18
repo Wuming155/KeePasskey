@@ -5,12 +5,12 @@ import com.keepasskey.app.data.repository.FakeVaultRepository
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.core.model.KdbxEntry
+import com.keepasskey.app.testutil.MainDispatcherGuard
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.StandardTestDispatcher
-import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertNotNull
@@ -41,7 +41,8 @@ class HealthScanOffMainThreadTest {
 
     @After
     fun tearDown() {
-        Dispatchers.resetMain()
+        // 先取消本用例登记的作用域、再恢复 Main（ISSUE-P3-189，见 MainDispatcherGuard）。
+        MainDispatcherGuard.tearDown()
     }
 
     @Test
@@ -61,7 +62,7 @@ class HealthScanOffMainThreadTest {
             breachCheckCoordinator = BreachCheckCoordinator(NoOpBreachRangeClient),
             strings = StringsProvider { _, _ -> "" },
             breachCheckEnabled = { false }, // 关闭态：零外联，聚焦 CPU 归属断言
-            scope = CoroutineScope(Dispatchers.Main)
+            scope = MainDispatcherGuard.trackScope(CoroutineScope(Dispatchers.Main))
         )
 
         controller.rescanHealth()

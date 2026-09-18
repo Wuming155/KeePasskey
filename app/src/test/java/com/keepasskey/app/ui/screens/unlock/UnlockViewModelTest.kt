@@ -6,6 +6,7 @@ import com.keepasskey.app.security.FakeUnlockThrottleStore
 import com.keepasskey.app.security.UnlockThrottleManager
 import com.keepasskey.app.security.UnlockThrottlePolicy
 import com.keepasskey.app.security.UnlockThrottleRecord
+import com.keepasskey.app.testutil.MainDispatcherGuard
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
@@ -13,7 +14,6 @@ import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
-import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
@@ -41,7 +41,8 @@ class UnlockViewModelTest {
 
     @After
     fun tearDown() {
-        Dispatchers.resetMain()
+        // 先取消本用例登记的 ViewModel 作用域、再恢复 Main（ISSUE-P3-189，见 MainDispatcherGuard）。
+        MainDispatcherGuard.tearDown()
     }
 
     private fun TestScope.createViewModel(): UnlockViewModel {
@@ -50,7 +51,7 @@ class UnlockViewModelTest {
             viewModel.uiState.collect {}
         }
         testScheduler.runCurrent()
-        return viewModel
+        return MainDispatcherGuard.track(viewModel)
     }
 
     @Test
@@ -154,6 +155,7 @@ class UnlockViewModelTest {
     fun `无活动数据库时hasDatabase为false`() = runTest {
         val emptyRepo = FakeVaultRepository(initialDatabases = emptyList())
         val viewModel = UnlockViewModel(emptyRepo, FakeSettingsRepository(), null, null, com.keepasskey.app.data.logger.DebugLogBuffer())
+        MainDispatcherGuard.track(viewModel)
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
             viewModel.uiState.collect {}
         }
@@ -182,7 +184,7 @@ class UnlockViewModelTest {
             viewModel.uiState.collect {}
         }
         testScheduler.runCurrent()
-        return viewModel
+        return MainDispatcherGuard.track(viewModel)
     }
 
     @Test

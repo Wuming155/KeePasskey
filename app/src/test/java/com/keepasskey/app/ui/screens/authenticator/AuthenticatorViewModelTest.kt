@@ -1,7 +1,7 @@
 package com.keepasskey.app.ui.screens.authenticator
 
+import com.keepasskey.app.testutil.MainDispatcherGuard
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
 import com.keepasskey.app.data.repository.FakeVaultRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -37,7 +37,6 @@ class AuthenticatorViewModelTest {
     }
 
     /** 各用例创建的 ViewModel；teardown 时统一取消其作用域（见 [tearDown] 说明）。 */
-    private val createdViewModels = mutableListOf<AuthenticatorViewModel>()
 
     @After
     fun tearDown() {
@@ -45,9 +44,7 @@ class AuthenticatorViewModelTest {
         // resetMain() 之后才回跳已缺失的 Main，会抛 IllegalStateException 并被协程测试记为
         // 「用例开始前已有未捕获异常」（UncaughtExceptionsBeforeTest），污染后续用例。
         // 故在恢复 Main 之前先取消各 ViewModel 作用域，终止其真实线程上的在途工作。
-        createdViewModels.forEach { it.viewModelScope.cancel() }
-        createdViewModels.clear()
-        Dispatchers.resetMain()
+        MainDispatcherGuard.tearDown()
     }
 
     /** 真实时间轮询等待 uiState 满足条件（上游 flowOn(Default) 与虚拟调度器异步） */
@@ -70,7 +67,7 @@ class AuthenticatorViewModelTest {
     @Test
     fun `仅展示包含真实 TOTP 密钥的条目并计算真实动态码`() = runTest(testDispatcher) {
         val fakeRepo = FakeVaultRepository()
-        val viewModel = AuthenticatorViewModel(fakeRepo).also { createdViewModels += it }
+        val viewModel = AuthenticatorViewModel(fakeRepo).also { MainDispatcherGuard.track(it) }
         val job = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
             viewModel.uiState.collect {}
         }
@@ -100,7 +97,7 @@ class AuthenticatorViewModelTest {
     @Test
     fun `搜索过滤正确联动`() = runTest(testDispatcher) {
         val fakeRepo = FakeVaultRepository()
-        val viewModel = AuthenticatorViewModel(fakeRepo).also { createdViewModels += it }
+        val viewModel = AuthenticatorViewModel(fakeRepo).also { MainDispatcherGuard.track(it) }
         val job = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
             viewModel.uiState.collect {}
         }

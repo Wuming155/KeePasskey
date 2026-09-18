@@ -87,70 +87,65 @@
 - **边界**：本条是**测试基础设施**清单，不指认任何生产缺陷；§151 的结论仅代表
   Redmi 4X（API 37 / A53）一台，不得外推为「其余机型亦成立或不成立」。
 
-> **历史开放项**：`ISSUE-P2-92`（平台剥离版 BC 抢占 `"BC"` 注册名致真机 ChaCha20 / Twofish
-> 全路径不可用）已于 **§143** 闭环——`bouncyCastleProvider()` 改为持有完整 BC 实例与注册表解耦，
-> 宿主回归 1 例 + 真机 3 例全绿，见
-> [`resolved/batches/143-真机BCProvider抢占解耦批次.md`](resolved/batches/143-真机BCProvider抢占解耦批次.md)。
->
-> **暂无其余开放项**。`ISSUE-P2-91`（同步内容变化检测漏比 `times` 与历史内容）已于 §122 批次
-> **经前提复核撤销**——「只改 `times` 的本地编辑被静默丢弃」在本应用可达面上**不成立**
-> （生产代码无 `expires` / `expiryTime` 写入者；`times` 的改写必然伴随 `fields` 或 `customFields` 变化）；
-> 其真实残余（两处判定**口径刻意不同** + 历史只比条数）作为**口径而非缺陷**登记
-> [`architecture/已知工程限界.md`](architecture/已知工程限界.md) **§10**，见
-> [`resolved/batches/122-同步变化判定口径声明与语义锁定批次.md`](resolved/batches/122-同步变化判定口径声明与语义锁定批次.md)。
-
-> **本批历史**：2026-09-17 登记的两条 CPU 占用瓶颈（`ISSUE-P2-89` 列表页秒级整页重建、
-> `ISSUE-P2-90` TOTP 重算 O(T×N)）已于同日在 §114 批次闭环，实现与验证证据见
-> [`resolved/batches/114-列表页秒级重建与TOTP重算收敛批次.md`](resolved/batches/114-列表页秒级重建与TOTP重算收敛批次.md)。
-> 本批的**残留风险**（整库投影仍在收集上下文执行）已由 §117 闭环（`ISSUE-P3-154`），见
-> [`resolved/batches/117-仓库投影流补flowOn批次.md`](resolved/batches/117-仓库投影流补flowOn批次.md)。
-
 ---
 
-## P3 低危问题、特性接线与体验优化（3 项）
+## P3 低危问题、特性接线与体验优化（4 项）
 
-### ISSUE-P3-189 测试调度器跨用例污染防护未全覆盖（§18 归档批次口径的余量，本地偶发红已复现）
+### ISSUE-P3-193 归档索引表混入批次正文（同一结论最多存三处，`RESOLVED_LOG.md` 256 KB）
 
-- **核实时间点与方式**：2026-09-18 14:05，本地 `.\gradlew.bat test --rerun-tasks --max-workers=1` 连跑两轮——
-  第 1 轮 `:app:testDebugUnitTest` **1 红**（`BreachCheckHealthTest > 查询失败时状态为 FAILED 且原因如实上浮，绝不回落为未泄露 FAILED`，
-  `IllegalStateException → MainDispatchers.kt:111 → Looper.java`）；第 2 轮同命令 **114 task 全绿**；单独
-  `--tests` 重跑该类亦绿 ⇒ 判定为**套件内时序 / 顺序相关偶发**。抛点经
-  `kotlinx-coroutines-test-jvm-1.11.0-sources.jar` 定位为 `TestMainDispatcherJvm.kt:45`
-  `reportMissingMainCoroutineDispatcher`，原文即「`Dispatchers.Main` 在平台调度器缺失且测试调度器已 unset
-  （含 `resetMain()` 之后）时被访问」。
-- **归类**：属归档批次 **§18**（[`resolved/batches/18-偶发红根因修复-测试调度器跨用例污染.md`](resolved/batches/18-偶发红根因修复-测试调度器跨用例污染.md)）
-  已记载的**同一类根因**，非 §188 的结构性拆分引入；§115 曾把本用例的同一条报错如实判为「§18 类偶发红、与本批无因果」。
-  机理：`runTest` 结束**不取消** `viewModelScope`，ViewModel 内在真实线程（`Dispatchers.Default` / `IO`）上执行的
-  在途工作于 `@After` 的 `resetMain()` **之后**回跳 Main，异常被协程测试记到「用例开始前已有未捕获异常」，
-  **污染同一 JVM 中后续用例**（表现位置随执行顺序漂移）。
-- **本批已修（§150）**：`ui/screens/settings` 下直接构造 `SettingsViewModel` 的三个用例
-  （`BreachCheckHealthTest` / `HealthCheckViewModelTest` / `ChildDatabaseSettingsWiringTest`）补齐
-  「先 `viewModelScope.cancel()`、再 `resetMain()`」口径——`SettingsViewModel` **无调度器注入点**，
-  故采用 §18 对 `AuthenticatorViewModelTest` 的那一种修法。
-  修复后 `test --rerun-tasks --max-workers=1 --continue` **连续三轮全绿**（`tests=2182 skipped=13`）；
-  因修复前命中率仅 1/2，该三轮属**弱证据**，本条**不因三轮绿而闭环**。
-- **剩余清单（18 个类仍无该防护；核实方式：脚本扫描 `app/src/test` 中同时含 `Dispatchers.setMain` +
-  `resetMain` + `*ViewModel(` 构造、且不含 `viewModelScope.cancel` 的文件，2026-09-18）**：
-  1. **风险最高**（生产侧用真实调度器且**无**注入点）：`DatabasePickerViewModelTest`、
-     `DatabasePickerKeyFileCreateTest`（`DatabasePickerViewModel` 内 `withContext(Dispatchers.IO)`）；
-  2. **风险较低**（已按 §18 注入 `displayDispatcher`，真实 Default 线程面已收敛，但生产侧另有 `Dispatchers.IO`）：
-     `CustomIconDeleteTest`、`EntryDetailDisplayPreferencesTest`、`EntryDetailTotpCopyTest`、
-     `EntryDetailViewModelTest`、`VaultDisplayPreferencesTest`、`VaultListChildDatabaseTest`、
-     `VaultListDecorationsTest`；
-  3. **待判定**（所构造 ViewModel 本体未见真实调度器，是否可泄漏取决于依赖链）：
-     `ConflictResolutionViewModelTest`、`EntryEditViewModelTest`，以及 `unlock` 目录 7 个
-     （`QuickUnlockSealDowngradeTest`、`UnlockFailureLogSanitizationTest`、`UnlockImportKdfStrengthNoticeTest`、
-     `UnlockKeyFileFlowTest`、`UnlockViewModelBiometricAutoPromptTest`、`UnlockViewModelClearOnLeaveTest`、
-     `UnlockViewModelTest`）。
-- **整改纪律**：按 §18 两种修法择一——有调度器注入点的**注入测试调度器**（首选，从源头消除真实线程竞速），
-  无注入点的在 `@After` **先 cancel 各 ViewModel 作用域、再 `resetMain()`**。
-  **不得**以「给 `resetMain()` 包 try/catch 吞异常」或「调大 `awaitOffMainComputation` 超时」处置——
-  那是掩盖污染而非修复。
-- **验收标准**：上述 18 类全部具备防护，或逐条如实登记「该 ViewModel 无可在真实线程上回跳 Main 的在途工作」并给出依据；
-  `.\gradlew.bat test --rerun-tasks --max-workers=1` **连续三轮**全绿；CI Fast gate 同期不再出现
-  `UncaughtExceptionsBeforeTest`。
-- **边界**：本条是**测试基础设施**缺陷，不涉及生产行为；复现窗口与时序 / 核数相关（§18 为 CI-only，
-  本条本地 1/2 命中），故**不得**以「跑一次绿了」判定已修复。
+- **核实时间点与方式**：2026-09-18，逐行覆盖度核验脚本（把 `RESOLVED_LOG.md` 每行「批次主题」列按标点切成
+  ≥20 字符片段，再到该行「正文」列指向的 `docs/resolved/batches/NN-*.md` 内做子串匹配）。结论：
+  `RESOLVED_LOG.md` **256,687 字节 / 152 行**，其中 **67 行**主题列长 200 ~ 4,341 字符，片段覆盖率普遍
+  **0 ~ 18%** ⇒ 行内正文是**另一套措辞的二次叙述**，不是批次文件的节选；分册 04 `resolved/BATCH_58_PLUS.md`
+  （98 行）复制同族叙述且**停在 §142**（§143 ~ §151 从未追加）。
+- **背景（为何是缺陷而非风格问题）**：`RESOLVED_LOG.md` 自述定位是「归档**总索引**（一页纸，直达每个批次文件）」，
+  `resolved/README.md` 立则「**索引只做引用、不复制正文**，避免同一结论在两处漂移」。当前形态与该定位相反：
+  同一批次结论最多同时存在于**三处**（总索引行 + 分册行 + 批次文件），其中两处已实际漂移。风险是
+  **更正只落到一处**（历史上 §68 曾出现「索引有行、正文未落盘」的同族缺口），且 256 KB 的文件无法作为
+  入口被通读或全文检索。
+- **整改纪律**：① **不得直接删行**——§152 的核验已证明行内正文不是节选，删即丢证据
+  （违反 `AGENTS.md` §3 与 `resolved/README.md` 的「归档正文只搬迁、不改写」）；② 正确路径是**逐批无损迁移**：
+  先把该行原文追加到其批次文件的新小节（如「## 归档行原文（§NN 迁移承接）」），确认落盘后索引行才改为一行索引；
+  ③ 每 ~10 批为一段推进，段末复跑覆盖度脚本，确保无未承接片段；④ 分册 04 自 §143 起停止同族复制
+  （其定位改为「分册级一行索引」，与 `resolved/README.md` 一致）。
+- **验收标准**：`RESOLVED_LOG.md` 全部 152 行的主题列 ≤200 字符，且迁移前后**片段总数守恒**
+  （脚本对全部行片段在 `resolved/batches/` 全域匹配，缺失数 = 0）；`docs/README.md` 与 `resolved/README.md`
+  的「一页纸 / 只引用不复制」定位与实际一致；分册 04 与总索引不再同时承载同族叙述。
+- **边界**：本条是**文档结构**缺陷，不涉及任何产品行为；范围只含归档层（`RESOLVED_LOG.md` + `resolved/`），
+  `ACTIVE_ISSUES.md` 与 `AGENTS.md` 的同类精简已由 §152 闭环。
+
+
+### ISSUE-P3-189 测试调度器跨用例污染：防护覆盖面已由 §152 闭合，**症状仍在**（根因比「漏 cancel」更深一层）
+
+- **核实时间点与方式**：2026-09-18 17:15，§152 改造完成后 `.\gradlew.bat test --rerun-tasks --max-workers=1 --continue`
+  **连跑四轮**：第 1 / 2 轮全绿（`tests=2185 failures=0 errors=0 skipped=13`）；第 3 轮 `SyncCacheEvictorTest > 同步凭据清空时
+  连带销毁同步缓存` 红——断言值为**大写键名** `490A…77A1.META.tmp` 残留，系限界表 **§7** 家族的 Windows 目录枚举鬼影
+  （见 [`records/SyncCache大写CACHE临时文件定位记录.md`](records/SyncCache大写CACHE临时文件定位记录.md)），隔离复跑 **3/3 绿**，
+  与本条无因果；**第 4 轮 `BreachCheckHealthTest > 查询失败时状态为 FAILED 且原因如实上浮` 再现 §150 登记的同一条
+  `IllegalStateException`**（`TestMainDispatcherJvm.kt:45`）。
+- **§152 已闭合的部分（原 AC 的「18 类全覆盖」分支）**：18 类「`setMain` + 构造 ViewModel 但无防护」全部登记到共享守卫
+  `app/src/test/java/com/keepasskey/app/testutil/MainDispatcherGuard.kt`；§150 的 5 类 per-file 清单口径统一进同一守卫
+  （同义机制在一处）；`HealthScanOffMainThreadTest` 的自持 `CoroutineScope(Dispatchers.Main)` 改走 `trackScope`；
+  两个「被测面无自持作用域」的 `sync` 用例就地豁免并写明取证方式；新增静态门禁
+  `app/src/test/java/com/keepasskey/app/quality/MainDispatcherPollutionGuardTest.kt`（3 例：必须经守卫收尾 / 构造 ViewModel
+  必须登记 / 守卫内 `cancel` 早于 `resetMain` 且不得吞异常）。
+- **仍未闭合的根因（不得再按「补齐 cancel」推进）**：第 4 轮的栈顶为
+  `TestMainDispatcher.isDispatchNeeded ← safeIsDispatchNeeded(DispatchedContinuation.kt:262) ← DispatchedCoroutine.afterResume(Builders.common.kt:588)`
+  ⇒ **`withContext(Dispatchers.Default)` 的块正常跑完后，把结果回送给已取消的父协程时仍要对父作用域的 `Dispatchers.Main`
+  问一次 `isDispatchNeeded`**。即「先 cancel 再 `resetMain()`」**只保证续体不被执行，不保证不再访问 Main**——取消本身就会
+  **制造**一次回跳访问。这与 §18 / §150 的「漏 cancel 即污染」模型不兼容；§150 修复后「连续三轮绿」与本条不矛盾
+  （命中率与时序 / 核数相关，§152 实测 1/4）。
+- **候选路线（先出结论再动手）**：① **JVM 级只装不卸**——守卫不再调 `resetMain()`，改由各用例 `@Before` 的
+  `setMain(新实例)` 覆盖：Main 永处「已装」态 ⇒ 无「absent」异常面，回跳落入的调度器随用例更换、对已取消作用域惰性无害；
+  **代价**是失去「测试忘装 Main」这类真实缺陷的检测 ⇒ 须同时补「用到 Main 的用例必须自行 `setMain`」的门禁；
+  ② **收尾前静默**——`cancel` 后轮询 Default 线程静默再 `resetMain()`；**代价**：等待真实线程即 §150 明令禁止的「调大超时」
+  变体，仅在静默判据不依赖超时时成立；③ **生产侧改造**——把 `viewModelScope` 上的 CPU 段改为显式持有可 await 的 `Job`
+  句柄，测试精确等待而非取消；**代价**：触及多个 ViewModel 的公开面，属结构改动。
+- **验收标准**：任选一条路线落地后 `.\gradlew.bat test --rerun-tasks --max-workers=1 --continue` **连续 8 轮**全绿
+  （§152 命中率 1/4，8 轮方有把握），且 CI Fast gate 不再出现 `UncaughtExceptionsBeforeTest`；选定路线的理由与
+  被否路线登记 `docs/architecture/已知工程限界.md` 或本条批次文档。
+- **边界**：本条是**测试基础设施**缺陷，不涉及生产行为；§152 的门禁只保证「防护不回退」，**不构成**症状消失的证据。
+
 
 ### ISSUE-P3-188 巨型类与魔法数字专项整改（工程规则 §单一职责 / §禁止魔法数字 违例收敛）
 
@@ -307,144 +302,3 @@
   `twofish_cbc.rs`；`crypto/src/main/java/com/keepasskey/crypto/cipher/NativeAes.kt` /
   `NativeChaCha20.kt` / `NativeTwofish.kt` / `CbcStreams.kt`。
 - **依据**：实测记录 §8.2 / §8.3；`已知工程限界.md` §15 / §17；批次 `147-AES内核下沉批次.md`。
-
-> **暂无其余开放项**。`ISSUE-P3-153`（Rust 下沉候选评估 → 立项落地）已于 **§145（ChaCha20 内核）
-> + §146（Passkey ES256/Ed25519 签名内核）** 分两批闭环——真机生产路径：ChaCha20 整库流
-> 2.7 → 54~66 MB/s（≈20~24×），ES256 sign 17.7ms → ≈1ms、Ed25519 3.8ms → ≈0.2ms；
-> `cargo deny check` 全绿；RS256 经实测裁定不下沉。见
-> [`resolved/batches/145-ChaCha20Rust内核下沉批次.md`](resolved/batches/145-ChaCha20Rust内核下沉批次.md) 与
-> [`resolved/batches/146-Passkey签名内核下沉批次.md`](resolved/batches/146-Passkey签名内核下沉批次.md)。
-> 同日连做闭环：`P2-92`（§143）、`P3-155`（§144）、`P3-153`（§145/§146）——**清单归零**。
-
-> 本批为 2026-09-17「降低 CPU / 内存占用」排查的**其余开放结论**。
-> 条目 153 为 **Rust 下沉候选的评估结论**（评估项）；条目 155 为同轮后续批次（§115）开工复核转登。
-> 同轮排查的其余条目均已闭环：150 / 151 见 §115、152 见 §116、154 见 §117、156 见 §118、157 见 §119，
-> 原 `ISSUE-P3-149`（投影热路径）的 ①②④ 见 §114、**③ 转登的 `ISSUE-P3-154` 见 §117**。
->
-> **条目 160 ~ 181 的由来**：2026-09-17「算法与数据结构专项」排查（用户提出「看看是不是坏算法、有没有坏数据结构」），
-> 方式为**五路并行静态审计 + 主控逐条复核关键点位**，覆盖 `app` / `core` / `crypto` / `database` / `sync`
-> 五模块全部 `.kt` 源文件；已排除本清单与 `RESOLVED_LOG.md` 中已闭环项、以及
-> [`已知工程限界.md`](architecture/已知工程限界.md) / [`产品裁决登记.md`](architecture/产品裁决登记.md) 中已裁决项。
-> **口径声明（须先读）**：该批全部结论均为**静态代码结构推导**（复杂度与调用频率），**无任何性能实测数据**
-> ⇒ **不得**把下列条目读作「已测得百分比收益」；整改验收标准一律按「不再产生某类工作」的结构性判据给出。
-> 批内按「正确性已单列 `P2-91` → 高杠杆 → 低影响」顺序编号，编号续用不复用。
-> **已闭环（§121 第一档：零风险局部项）**：`ISSUE-P3-162`（分组索引平方级投影）、
-> `ISSUE-P3-172`（①②③ 循环内新建重对象；**④ 已裁决不实施**，理由登记 [`已知工程限界.md`](architecture/已知工程限界.md) §9）、
-> `ISSUE-P3-173`（OTP Base32 装箱与线性查表）、`ISSUE-P3-181`（密钥文件 / CSV / 标签解析常数因子）——见
-> [`resolved/batches/121-零风险局部项与守卫用例批次.md`](resolved/batches/121-零风险局部项与守卫用例批次.md)。
-> **已闭环（§123 第二档：循环结构改造 ‣ 批量树操作单趟化）**：`ISSUE-P3-160`（批量删除 / 移动按 id
-> 逐次重走整树）、`ISSUE-P3-161`（冲突决策逐条重建整棵树）——见
-> [`resolved/batches/123-批量树操作单趟化批次.md`](resolved/batches/123-批量树操作单趟化批次.md)。
-> **已闭环（§124 第三档：同一份数据重复计算 ‣ 前两条）**：`ISSUE-P3-166`（健康检查同一条口令
-> 解密 3 次、哈希 2 次）、`ISSUE-P3-169`（内存驻留加密每次访问新建 `Cipher` / `Mac`；
-> **其 AC ② 经复核判定原理不可实施**，依据见批次文档 §1.2）——见
-> [`resolved/batches/124-同一份数据重复计算收敛批次.md`](resolved/batches/124-同一份数据重复计算收敛批次.md)。
-> **已闭环（§125 第三档：同一份数据重复计算 ‣ 第三条）**：`ISSUE-P3-167`（同步接受路径对同一份字节
-> 算 3 遍 SHA-256）——**① 摘要一次化已做**；**② 基线前移的「重复写盘跳过」判定不做**，理由与
-> 解除条件登记 [`architecture/已知工程限界.md`](architecture/已知工程限界.md) **§11**，见
-> [`resolved/batches/125-同步接受路径摘要一次化批次.md`](resolved/batches/125-同步接受路径摘要一次化批次.md)。
-> **已闭环（§126 第三档：同一份数据重复计算 ‣ 第四条）**：`ISSUE-P3-171`（自动填充评分对全库条目
-> 逐条字符串物化）——**① 形状短路与 ② `url` 单读已做**；**AC ② 的原文路线（为 `KdbxEntry` 加不解密
-> 判定入口）判定不采用**（评分路径必须要 URL 文本，只读一次已吃掉同一条收益且不新增 API 面），见
-> [`resolved/batches/126-自动填充评分逐条目物化收敛批次.md`](resolved/batches/126-自动填充评分逐条目物化收敛批次.md)。
-> **已闭环（§127 第三档：同一份数据重复计算 ‣ 收口）**：`ISSUE-P3-170`（自动填充请求内的重复工作：
-> 证书摘要 ×2 / Keystore IPC / hex 格式化）——①②③ 已做；「同请求内 `Mac` 复用」与「按包名跨请求
-> 记忆化」两项**判定不做**并留痕，见
-> [`resolved/batches/127-自动填充请求内重复读取收敛批次.md`](resolved/batches/127-自动填充请求内重复读取收敛批次.md)。
-> **第三档（同一份数据被算两遍以上）已全部闭环**（166 / 167① / 169① / 170 / 171）。
-> **已闭环（§128 第二档剩余项之一：循环结构改造）**：`ISSUE-P3-163`（字段引用引擎按每个引用重建整库
-> 扁平列表）——改为入口建一次**按字段惰性**的引用目标索引并沿递归共享；AC 建议的「一次性建全部字段
-> 索引」经复核**刻意收窄**（那会把全库口令解密一遍，属反向优化），见
-> [`resolved/batches/128-字段引用解析索引一次化批次.md`](resolved/batches/128-字段引用解析索引一次化批次.md)。
-> **已闭环（§129 第四档：线程落点 ‣ 首条）**：`ISSUE-P3-174`（列表页整库投影缺 `flowOn`）——`uiState`
-> 在 `stateIn` 前补 `.flowOn(displayDispatcher)`；验收取**结构断言**（AC 允许二选一）并如实声明其
-> 不构成运行期派发证据，见
-> [`resolved/batches/129-列表页整库投影离开收集上下文批次.md`](resolved/batches/129-列表页整库投影离开收集上下文批次.md)。
-> **已闭环（§130 第四档：分配面 / 线程落点 ‣ 第二条）**：`ISSUE-P3-178`（完整性探测未做字节级化）
-> ——`TracerPid` 改字节级解析 + 缓冲按线程复用；maps 改流式字节匹配 + 块间重叠（并新增 16 MiB
-> 有界上限，封住「hook `read` 喂无限流」的挂死面）；**AC ③（`Debug` 探针去重）判定不做**并留痕，见
-> [`resolved/batches/130-完整性探测字节级化批次.md`](resolved/batches/130-完整性探测字节级化批次.md)。
-> **已闭环（§131 第四档：渲染与组合期 ‣ 第三条）**：`ISSUE-P3-179`（非惰性大集合展开与组合期就地派生）
-> ——对话框分组选择改**惰性 + 280 dp 高度上限 + `key`**（原实现超出屏幕的分组**无法触达**，是本批
-> 唯一的可用性缺陷修复）、编辑页组合期过滤下沉 + `key`、面包屑补 `key`、日志等级色改 `remember`
-> 预计算；**AC ① 的日志惰性化刻意不做**（嵌套纵向滚动属 UX 回归；日志有 500 行硬上限），见
-> [`resolved/batches/131-非惰性大集合渲染与组合期就地派生收敛批次.md`](resolved/batches/131-非惰性大集合渲染与组合期就地派生收敛批次.md)。
-> **已闭环（§132 第四档：节拍与线程落点 ‣ 第四条）**：`ISSUE-P3-175`（秒级节拍常驻与整页重建）
-> ——① 详情页节拍改挂 `uiState` 的订阅期（`onStart`/`onCompletion`，`run` 循环体逐字未改）、
-> ② 前半 验证器页接入 `calculateEntryTotps` 批量通道（每拍 T 次挂起调用 → 1 次）、
-> ③ 列表页周期集合按快照实例缓存；**② 后半（验证器页列表与倒计时解耦）转登 `ISSUE-P3-182`**，见
-> [`resolved/batches/132-节拍启停与逐条通道收敛批次.md`](resolved/batches/132-节拍启停与逐条通道收敛批次.md)。
-> **已闭环（§133 第四档：同步往返 ‣ 第五条）**：`ISSUE-P3-180`（WebDAV 首传重复 PROPFIND）——
-> `uploadAtomic` 增可选形参 `remoteExists` 并自首传路径下传，`Overwrite` 判定仅在未知时才现探；
-> **验证为 MockWebServer 的实测请求计数**（`remoteExists=false` ⇒ 2 次；`null` ⇒ 3 次，含负向对照），
-> 另将宿主侧 Windows 原子 rename 偶发 `AccessDeniedException`（平台现象）登记
-> [`architecture/已知工程限界.md`](architecture/已知工程限界.md) **§12**，见
-> [`resolved/batches/133-WebDAV首传重复探测收敛批次.md`](resolved/batches/133-WebDAV首传重复探测收敛批次.md)。
-> **已闭环（§134 第四档：流订阅 ‣ 第六条 ①）**：`ISSUE-P3-176` 的 **① 冷流重复订阅**——列表页
-> 两条整库投影流改 `shareIn` 后共享给 `uiState` 与装饰装配（2 份 → 1 份）；详情页 `getEntry(id)` ×3、
-> `getGroups()` ×2 各收敛为一处（装配器新增 `scope` 形参以承载 `shareIn`）；**② 导航图重建转登
-> `ISSUE-P3-183`**，见
-> [`resolved/batches/134-冷流重复订阅收敛批次.md`](resolved/batches/134-冷流重复订阅收敛批次.md)。
-> **已闭环（§135 第二档剩余项：保存路径分配面）**：`ISSUE-P3-164`（每次保存无条件全树历史保留期维护）
-> ——递归改为**惰性分配**（首次发现变化才复制该层列表）；**AC 第一半的 O(1) 闸门判定不做**（维护点须覆盖
-> 全部整树替换路径，漏一处即让修剪静默失效，风险不对称），见
-> [`resolved/batches/135-保存路径历史修剪惰性分配批次.md`](resolved/batches/135-保存路径历史修剪惰性分配批次.md)。
-> **已闭环（§136 第四档：Compose 状态宽度 ‣ 第七条＝`ISSUE-P3-176` ② 的转登项）**：`ISSUE-P3-183`
-> （应用根状态过宽导致导航图整图重建）——`keepasskeyNavGraph` 形参由整个 `SettingsUiState` 收窄为
-> `AppThemeMode`（该图实际只用 `themeMode` 两处）；根组合其余字段读取未动。**「不再整图重建」为结构性
-> 推理**（依赖编译器 lambda 记忆化），见
-> [`resolved/batches/136-导航图参数收窄批次.md`](resolved/batches/136-导航图参数收窄批次.md)。
-> **已闭环（§137 第二档剩余项：合并健壮性）**：`ISSUE-P3-165`（分组父链自愈 `O(G × 深度)` 退化）
-> ——改为**一次函数图染色**（`O(G)`，判定与逐组上溯逐项等价，已由随机图对拍锁定）；**装配递归深度
-> 上限经复核判定不可达**（上游 `KdbxXmlParser.MAX_XML_DEPTH = 64` 已封顶输入深度），故**不加**并登记
-> 依赖，见 [`resolved/batches/137-分组父链自愈单趟染色批次.md`](resolved/batches/137-分组父链自愈单趟染色批次.md)。
-> **已闭环（§138 第四档：数据面分配 ‣ 第八条）**：`ISSUE-P3-177`（CBC 流式分块缓冲反复分配）——
-> 解密侧稳态 **3 处 64 KiB 分配 → 0**（实例级 `buffer` + `bodyScratch`、`pending` 改「偏移 + 长度」），
-> 并把「变换必须返回独立数组」由隐式前提升级为**显式校验**；**AC 的 `(offset, len)` 契约部分判定不做**
-> （会触及 `NativeTwofish` 的 JNI 定长布局契约、收益为每块 1 次分配），见
-> [`resolved/batches/138-CBC解密流缓冲复用批次.md`](resolved/batches/138-CBC解密流缓冲复用批次.md)。
-> **已闭环（§139 第四档：节拍与整页状态宽度 ‣ 验证器页）**：`ISSUE-P3-182`（验证器页倒计时与列表内容未解耦）
-> ——删除占位 tick 流、内容独立成流、复用并**迁移更名**列表页通道为 `ui/model/TotpCountdownTracker`、两条窄通道
-> （刻度 + 实时码）只由卡片读取；`TotpCardItem` 去掉 `remainingSeconds` 与 `codeFormatted`（格式化提为单一实现），
-> **HOTP 卡片按 `isHotp` 分流取投影之码**（AC 未写、照抄列表页写法会显示刚被消费掉的码）；见
-> [`resolved/batches/139-验证器页倒计时解耦批次.md`](resolved/batches/139-验证器页倒计时解耦批次.md)。
-> **已闭环（§140 第四档：同步冲突周期解密面）**：`ISSUE-P3-168`（冲突周期实际为 4 load + 4 save = **8 次 KDF**，
-> 条目原记 6 次且行号已漂移 +10）——三方合并的本地侧改**直取会话内存树快照**（`handleConflictMerge` 的
-> `localDbOverride` + `localDbOwned` 擦除守卫），省去一次「把刚序列化出的字节解析回树」；
-> **AC ②（会话级「摘要 → 已解析树」缓存）判定不实施**（须跨会话持有整棵解密树，破坏 `已知工程限界.md` §1.6
-> 的树外可达性穷举）并登记同文件 **§14**（含解除条件）；见
-> [`resolved/batches/140-冲突合并本地侧直取内存树批次.md`](resolved/batches/140-冲突合并本地侧直取内存树批次.md)。
-> **本清单剩余 2 项**（`P3-153` / `P3-155`）的 AC 均要求**真机吞吐实测**（BC 现行 vs Rust 候选、AES-CBC 块粒度
-> 前后对比）——**实测已于 2026-09-17 完成**（真机 Redmi 4X，见
-> [`records/真机吞吐实测记录_2026-09-17.md`](records/真机吞吐实测记录_2026-09-17.md)）：
-> `P3-155` 已于 **§144** 闭环（解密侧分块流，真机 15.3 → 55.5 MB/s）；`P3-153` 已于 **§145/§146**
-> 闭环（ChaCha20 内核 + Passkey 签名内核；RS256 否定）。
-> 实测过程另发现并登记 `ISSUE-P2-92`（平台 BC 抢占致真机 ChaCha7539 不可用，**整改中发现 Twofish
-> 路径同样踩中且被静默吞错**）——已于 **§143** 同日闭环。
-> **2026-09-17 增补与同日闭环**：交互成本核查顺带发现 `ISSUE-P3-184`（详情页 TOTP 复制按钮谎报成功），
-> 该条连同 5 项**同源但无编号**的交互整改（甲b 列表行徽标一次点击复制 / 乙 三处单值设置就地化 /
-> 丙 泄露检测开关开启即扫描 / 丁 「保存并同步」合并主按钮 / 戊 系统设置一次点击直达）已于 **§141** 同批闭环，
-> 见 [`resolved/batches/141-一次点击交互整改批次.md`](resolved/batches/141-一次点击交互整改批次.md)。
-> **已闭环（§142 增补条目同日闭环）**：`ISSUE-P3-185`（选择器路径不复用会话授权宽限）、
-> `ISSUE-P3-186`（选择器路径不兑现 TOTP 复制/通知偏好）——选择器 `confirmAndFill` 接入
-> `AutofillAuthenticationPolicy.skipPickerRepeatConfirmation` 查询与 `deliver` 成功路径同口径写入授权
-> （域口径与数据集路径同源，均走 `resolveUsableWebDomain`）；TOTP 二次动作收敛为共用实现
-> `AutofillPostFillTotpActions`（确认页同批改委托），见
-> [`resolved/batches/142-选择器路径宽限与TOTP偏好兑现批次.md`](resolved/batches/142-选择器路径宽限与TOTP偏好兑现批次.md)。
-> ⇒ 「无需设备即可闭环」的开放项**再次清零**；本清单仍余 `P3-153` / `P3-155` 两项（均需真机吞吐实测）。
->
-> **2026-09-17 再增补（同日第二排）**：用户命题「查找坏交互——本该一次点击就完成却要点很多次（尤其密码填充）」。
-> 经**填充全链路逐环节通读**（AutofillService → 解锁页 → 选择器 / 确认页 → 回传；CM 通道 PasswordFillActivity），
-> 登记 `ISSUE-P3-185`（选择器路径不复用会话授权宽限）与 `ISSUE-P3-186`（选择器路径不兑现 TOTP 复制/通知偏好）；
-> 「唯一强匹配候选不直达」经判定属**安全取舍而非缺陷**，登记 [`architecture/产品裁决登记.md`](architecture/产品裁决登记.md) **PD-05**。
-> 排查中同时确认既有一次点击整改均已就位（列表行一键复制密码 / TOTP 徽标 / 解锁页 IME Done 接线 / 系统设置直达），无回归。
-
-> **已闭环（§145/§146）**：原 `ISSUE-P3-153`（Rust 下沉候选评估 → 立项落地）——ChaCha20 内核
-> （§145）与 Passkey ES256/Ed25519 签名内核（§146）分两批落地，RS256 裁定不下沉，见上。
->
-> **已闭环（§144）**：原 `ISSUE-P3-155`（AES-CBC 解密侧受 `CipherInputStream` 内部 512 B 缓冲限制）——
-> 采纳结论经真机验证后落地：解密侧切换 `CbcDecryptingInputStream` 分块骨架（范围收窄依据：加密侧实测
-> 1.0× 无收益），真机吞吐 15.3 → 55.5 MB/s（3.6×），宿主官方夹具 + 真机 KeePassXC 语料端到端 +
-> pykeepass 外验三重互操作铁证，见
-> [`resolved/batches/144-AES解密侧分块流批次.md`](resolved/batches/144-AES解密侧分块流批次.md)。
-

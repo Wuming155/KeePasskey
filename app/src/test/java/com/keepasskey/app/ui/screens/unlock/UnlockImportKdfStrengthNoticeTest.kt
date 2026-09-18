@@ -9,13 +9,13 @@ import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.database.file.KdbxKdfStrengthAssessment
 import com.keepasskey.database.file.KdbxKdfStrengthDimension
 import com.keepasskey.database.file.KdbxKdfWeakness
+import com.keepasskey.app.testutil.MainDispatcherGuard
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
-import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
@@ -49,7 +49,8 @@ class UnlockImportKdfStrengthNoticeTest {
 
     @After
     fun tearDown() {
-        Dispatchers.resetMain()
+        // 先取消本用例登记的 ViewModel 作用域、再恢复 Main（ISSUE-P3-189，见 MainDispatcherGuard）。
+        MainDispatcherGuard.tearDown()
     }
 
     /** 低于基线的结论样本（内存维度不足），用于驱动告警分支 */
@@ -84,7 +85,7 @@ class UnlockImportKdfStrengthNoticeTest {
             viewModel.uiState.collect {}
         }
         testScheduler.runCurrent()
-        return viewModel
+        return MainDispatcherGuard.track(viewModel)
     }
 
     @Test

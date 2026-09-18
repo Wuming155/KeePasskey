@@ -92,6 +92,8 @@ class SyncConflictMergeLocalTreeEquivalenceTest {
     @After
     fun tearDown() {
         masterPassword.fill('0')
+        // 污染防护豁免（ISSUE-P3-189 验收第二分支）：本用例直接驱动 SyncConflictController.handleConflictMerge（纯挂起函数，无自持 CoroutineScope、
+        // 不引用 Dispatchers.Main），在途工作随 runTest 结束收束 ⇒ 无跨用例回跳 Main 的泄漏面。
         Dispatchers.resetMain()
     }
 

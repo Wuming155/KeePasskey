@@ -6,13 +6,13 @@ import com.keepasskey.app.data.repository.ExtendedSettingsStore
 import com.keepasskey.app.data.repository.FakeSettingsRepository
 import com.keepasskey.app.data.repository.FakeVaultRepository
 import com.keepasskey.app.ui.screens.settings.ExtendedSettings
+import com.keepasskey.app.testutil.MainDispatcherGuard
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
-import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
@@ -42,7 +42,8 @@ class UnlockViewModelClearOnLeaveTest {
 
     @After
     fun tearDown() {
-        Dispatchers.resetMain()
+        // 先取消本用例登记的 ViewModel 作用域、再恢复 Main（ISSUE-P3-189，见 MainDispatcherGuard）。
+        MainDispatcherGuard.tearDown()
     }
 
     private fun TestScope.createViewModel(clearOnLeave: Boolean): UnlockViewModel {
@@ -61,7 +62,7 @@ class UnlockViewModelClearOnLeaveTest {
             viewModel.uiState.collect {}
         }
         testScheduler.runCurrent()
-        return viewModel
+        return MainDispatcherGuard.track(viewModel)
     }
 
     @Test

@@ -9,13 +9,13 @@ import com.keepasskey.app.ui.screens.unlock.KeyFileAccess
 import com.keepasskey.app.ui.screens.unlock.KeyFileReadResult
 import com.keepasskey.app.ui.screens.unlock.RememberedKeyFile
 import com.keepasskey.core.result.KdbxResult
+import com.keepasskey.app.testutil.MainDispatcherGuard
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
-import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
@@ -50,7 +50,8 @@ class DatabasePickerKeyFileCreateTest {
 
     @After
     fun tearDown() {
-        Dispatchers.resetMain()
+        // 先取消本用例登记的 ViewModel 作用域、再恢复 Main（ISSUE-P3-189，见 MainDispatcherGuard）。
+        MainDispatcherGuard.tearDown()
     }
 
     /** 记录型仓库：只关心「建库时下传的密钥文件因子」，其余方法委托给内存 Fake */
@@ -109,7 +110,7 @@ class DatabasePickerKeyFileCreateTest {
             viewModel.uiState.collect {}
         }
         testScheduler.runCurrent()
-        return viewModel
+        return MainDispatcherGuard.track(viewModel)
     }
 
     @Test

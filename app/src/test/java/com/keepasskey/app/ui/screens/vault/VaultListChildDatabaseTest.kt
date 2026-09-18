@@ -14,6 +14,7 @@ import com.keepasskey.app.data.repository.FakeVaultRepository
 import com.keepasskey.app.security.FakeUnlockThrottleStore
 import com.keepasskey.app.security.UnlockThrottleManager
 import com.keepasskey.database.session.DatabaseSession
+import com.keepasskey.app.testutil.MainDispatcherGuard
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
@@ -22,7 +23,6 @@ import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
-import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
@@ -71,7 +71,8 @@ class VaultListChildDatabaseTest {
 
     @After
     fun tearDown() {
-        Dispatchers.resetMain()
+        // 先取消本用例登记的 ViewModel 作用域、再恢复 Main（ISSUE-P3-189，见 MainDispatcherGuard）。
+        MainDispatcherGuard.tearDown()
     }
 
     private fun newChildManager(): ChildDatabaseSessionManager = ChildDatabaseSessionManager(
@@ -116,7 +117,7 @@ class VaultListChildDatabaseTest {
             viewModel.uiState.collect {}
         }
         testScheduler.advanceUntilIdle()
-        return viewModel
+        return MainDispatcherGuard.track(viewModel)
     }
 
     /** 以真实密文作来源完成一次子库挂载（真实解密 + 真实投影） */

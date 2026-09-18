@@ -1,5 +1,6 @@
 package com.keepasskey.app.ui.screens.settings
 
+import com.keepasskey.app.testutil.MainDispatcherGuard
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.SharedPreferences
@@ -30,7 +31,6 @@ import com.keepasskey.app.ui.screens.unlock.KeyFileAccess
 import com.keepasskey.database.session.DatabaseSession
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
@@ -81,16 +81,13 @@ class ChildDatabaseSettingsWiringTest {
     }
 
     /** 各用例创建的 ViewModel；teardown 时统一取消其作用域（见 [tearDown] 说明）。 */
-    private val createdViewModels = mutableListOf<SettingsViewModel>()
 
     @After
     fun tearDown() {
         // SettingsViewModel 构造函数即在 viewModelScope 上挂载偏好/凭据观察，`runTest` 结束不会
         // 自动取消；若其续体在 resetMain() 之后回跳 Main 会打到 android.jar 的 Looper 桩并抛
         // IllegalStateException，污染同 JVM 后续用例。故先取消作用域、再恢复 Main。
-        createdViewModels.forEach { it.viewModelScope.cancel() }
-        createdViewModels.clear()
-        Dispatchers.resetMain()
+        MainDispatcherGuard.tearDown()
     }
 
     /** 挂载注册表使用内存偏好替身（与生产同一存储形态，且断言「不触碰其他偏好文件」） */
@@ -454,6 +451,6 @@ class ChildDatabaseSettingsWiringTest {
             stringsProvider = TEST_STRINGS,
             childDatabaseSessionManager = manager,
             keyFileAccess = keyFileAccess
-        ).also { createdViewModels += it }
+        ).also { MainDispatcherGuard.track(it) }
     }
 }

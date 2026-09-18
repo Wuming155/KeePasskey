@@ -1,5 +1,6 @@
 package com.keepasskey.app.ui.screens.detail
 
+import com.keepasskey.app.testutil.MainDispatcherGuard
 import androidx.lifecycle.SavedStateHandle
 import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.AutofillBlocklistStore
@@ -29,7 +30,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
-import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
@@ -65,7 +65,8 @@ class CustomIconDeleteTest {
 
     @After
     fun tearDown() {
-        Dispatchers.resetMain()
+        // 先取消本用例登记的 ViewModel 作用域、再恢复 Main（ISSUE-P3-189，见 MainDispatcherGuard）。
+        MainDispatcherGuard.tearDown()
     }
 
     private fun kdbxEntry(customIconId: KdbxUuid? = null, title: String = "entry") = KdbxEntry(
@@ -264,7 +265,7 @@ class CustomIconDeleteTest {
             viewModel.uiState.collect {}
         }
         testScheduler.runCurrent()
-        return viewModel
+        return MainDispatcherGuard.track(viewModel)
     }
 
     private suspend fun FakeVaultRepository.addEntryWithIcon(

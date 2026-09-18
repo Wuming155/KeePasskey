@@ -1,5 +1,6 @@
 package com.keepasskey.app.ui.screens.settings
 
+import com.keepasskey.app.testutil.MainDispatcherGuard
 import androidx.lifecycle.viewModelScope
 import com.keepasskey.app.autofill.testHmacFieldSignatureSource
 import com.keepasskey.app.data.breach.BreachCheckCoordinator
@@ -74,7 +75,6 @@ class BreachCheckHealthTest {
     }
 
     /** 各用例创建的 ViewModel；teardown 时统一取消其作用域（见 [tearDown] 说明）。 */
-    private val createdViewModels = mutableListOf<SettingsViewModel>()
 
     @After
     fun tearDown() {
@@ -82,9 +82,7 @@ class BreachCheckHealthTest {
         // 不随 `runTest` 结束而取消：若其续体在 `resetMain()` 之后才回跳 Main，会打到
         // android.jar 的 `Looper` 桩并抛 IllegalStateException，污染同 JVM 后续用例。
         // 故先取消各 ViewModel 作用域、再恢复 Main（对齐 AuthenticatorViewModelTest 口径）。
-        createdViewModels.forEach { it.viewModelScope.cancel() }
-        createdViewModels.clear()
-        Dispatchers.resetMain()
+        MainDispatcherGuard.tearDown()
     }
 
     private fun breachedEntry(): KdbxEntry = KdbxEntry(
@@ -130,7 +128,7 @@ class BreachCheckHealthTest {
             com.keepasskey.app.autofill.AutofillFieldBlocklistStore(null, testHmacFieldSignatureSource()),
             BreachCheckCoordinator(rangeClient),
             stringsProvider = TEST_STRINGS
-        ).also { createdViewModels += it }
+        ).also { MainDispatcherGuard.track(it) }
     }
 
     @Test

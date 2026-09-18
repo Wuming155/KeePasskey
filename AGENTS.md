@@ -89,26 +89,20 @@ Coroutines + Flow；**文档与代码注释使用简体中文**。
 > `android studio` 之下（sync / build / Compose 预览 / PSI 代码分析 / IDE Lint），设备操作由该 CLI 内部调用 ADB，无对应能力时**如实说明并给出退路**。
 > 本机 `android` **未加入 `PATH`**（数据在 `%USERPROFILE%\.android\cli\`），故按上表用启动器全路径调用。
 
-> **原生内核与设备侧用例**：`cargo` **缺失**（离线 / 无工具链）时原生内核任务经 `onlyIf` **跳过**、JNI 用例经 `Assume` 跳过（有意降级），
-> **构建失败则 fail-closed 直接失败**——严禁再引入吞退出码的开关；设备侧用例需先起 AVD 或接真机，真实语料缺失时 `RealKdbxCorpusUnlockTest`
-> 抛 `AssumptionViolatedException`（task 仍 `BUILD SUCCESSFUL`，但 AGP 的 `TEST-*.xml` 记为 `<failure>`、`skipped=0`）——**判定以 task 结果为准**；
-> 该类用例是**唯一**能覆盖 Android 运行时差异的层，涉及正则 / XML / 平台 API 的逻辑不可只靠宿主单测。
+> **设备侧是独立一层，判定以 task 结果为准**：`cargo` 缺失（离线 / 无工具链）时原生内核任务经 `onlyIf` **跳过**、JNI 用例经 `Assume` 跳过
+> （有意降级），**构建失败则 fail-closed 直接失败**——严禁再引入吞退出码的开关；真实语料缺失时 `RealKdbxCorpusUnlockTest` 抛
+> `AssumptionViolatedException`（task 仍 `BUILD SUCCESSFUL`，但 `TEST-*.xml` 记为 `<failure>`、`skipped=0`）。
+> 涉及正则 / XML / 平台 API 的逻辑不可只靠宿主单测。
 
 > **Rust 单测落位约定（ISSUE-P3-57，须遵守）**：单测放 `crypto/src/main/rust/src/tests/<name>_tests.rs`，源文件中以
 > `#[cfg(test)] #[path = "tests/<name>_tests.rs"] mod tests;` 引用——Code scanning 的 `paths-ignore` 只能做文件级排除，
 > 内联 `mod tests` 里的测试密钥 / 向量会被 `rust/hard-coded-cryptographic-value` 逐条报为 critical 误报。
 
-> **测试资产不删除（§147 立规，强制）**：**测试用例与对拍向量只允许新增或修改，不得因「暂时用不上 / 已被替代 / 实现回退」
-> 而删除**——回退或改道是暂时的，测试是长期资产，代价只是几十行代码，而丢失后**无法经 `git` 取回**（§147 中两个 AES
-> 测试文件在**入库前**被随实现一起删掉，`git log --diff-filter=D` 查无此文件）。确需删除时：① 必须先确认**被删对象已无
-> 生产代码可测**（如生产类同批删除），② 在批次文档或限界表登记理由，③ 与生产代码**同一次提交**入库。
-> 细则见 `.codebuddy/rules/engineering-rules.md` §「测试资产纪律」。
-
-> **原生面改动的验证义务（§147 立规，强制）**：凡改动 `crypto/src/main/rust/**`、`jni_bridge_ext.rs`，或任一
-> `Native*` 绑定 / 引擎的原生分派与**探活**，**必须**在设备上跑完 `:crypto:` / `:database:` / `:app:` 三个
-> `connectedDebugAndroidTest` 后方准入库——宿主单测**看不见** Android 运行时差异：§147 的「全零密钥解密」是
-> **宿主 100% 绿、仅真机失败**，§143 的「平台剥离版 BC 抢占 `"BC"`」同样如此。
+> **测试资产纪律与原生面验证义务（细则见 `.codebuddy/rules/engineering-rules.md` §「测试资产纪律」，强制）**：
+> ① **用例与对拍向量只允许新增或修改**，不得因「暂时用不上 / 已被替代 / 实现回退」删除（丢失后无法经 `git` 取回）；
+> 确需删除时须先确认被删对象已无生产代码可测、在批次文档或限界表登记理由、与生产代码同一次提交入库。
+> ② 凡改动 `crypto/src/main/rust/**`、`jni_bridge_ext.rs` 或任一 `Native*` 绑定 / 引擎的原生分派与**探活**，**必须**在设备上跑完
+> `:crypto:` / `:database:` / `:sync:` / `:app:` 四层 `connectedDebugAndroidTest` 方准入库；`*/src/androidTest/**` 新增或修改的用例
+> 同样必须真机实跑——`compileDebugAndroidTestKotlin` 通过**不构成**验证证据。
+> ③ 宿主全绿不代表设备可用（§143 平台剥离版 BC 抢占、§147 全零密钥解密均系「宿主 100% 绿、仅真机失败」）；
 > 兜底分支（JCE / BC）的等价性由宿主 `CipherFallbackParityTest` 常态锁定，**不得**以「反正有兜底」为由跳过设备侧。
-> **设备侧用例本身同样必须实跑（§150 立规）**：`*/src/androidTest/**` 新增或修改的用例，须在设备上实际执行该用例后方准入库；
-> `compileDebugAndroidTestKotlin` 通过**不构成**验证证据（编译只保证类型自洽，不保证契约用对）。细则见
-> `.codebuddy/rules/engineering-rules.md` §「测试资产纪律」。

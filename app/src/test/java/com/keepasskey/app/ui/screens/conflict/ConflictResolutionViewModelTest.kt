@@ -8,6 +8,7 @@ import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.core.security.ProtectedString
 import com.keepasskey.sync.merge.ConflictResolutionChoice
 import com.keepasskey.sync.merge.ConflictedEntryPair
+import com.keepasskey.app.testutil.MainDispatcherGuard
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -16,7 +17,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
-import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
@@ -43,7 +43,8 @@ class ConflictResolutionViewModelTest {
 
     @After
     fun tearDown() {
-        Dispatchers.resetMain()
+        // 先取消本用例登记的 ViewModel 作用域、再恢复 Main（ISSUE-P3-189，见 MainDispatcherGuard）。
+        MainDispatcherGuard.tearDown()
     }
 
     @Test
@@ -116,6 +117,7 @@ class ConflictResolutionViewModelTest {
             }
         }
         val viewModel = ConflictResolutionViewModel(mockCoordinator, stringsProvider = fakeStrings)
+        MainDispatcherGuard.track(viewModel)
         val job = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
             viewModel.uiState.collect {}
         }

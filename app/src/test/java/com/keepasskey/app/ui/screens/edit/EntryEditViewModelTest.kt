@@ -1,5 +1,6 @@
 package com.keepasskey.app.ui.screens.edit
 
+import com.keepasskey.app.testutil.MainDispatcherGuard
 import androidx.lifecycle.SavedStateHandle
 import com.keepasskey.app.data.repository.FakeVaultRepository
 import kotlinx.coroutines.Dispatchers
@@ -8,7 +9,6 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
-import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
@@ -36,7 +36,8 @@ class EntryEditViewModelTest {
 
     @After
     fun tearDown() {
-        Dispatchers.resetMain()
+        // 先取消本用例登记的 ViewModel 作用域、再恢复 Main（ISSUE-P3-189，见 MainDispatcherGuard）。
+        MainDispatcherGuard.tearDown()
     }
 
     @Test
@@ -46,6 +47,7 @@ class EntryEditViewModelTest {
             SavedStateHandle(mapOf("groupId" to "group_work")),
             repository
         )
+        MainDispatcherGuard.track(viewModel)
         val events = mutableListOf<EntryEditEvent>()
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
             viewModel.events.collect { events.add(it) }
@@ -70,6 +72,7 @@ class EntryEditViewModelTest {
             SavedStateHandle(mapOf("entryId" to "1")),
             repository
         )
+        MainDispatcherGuard.track(viewModel)
         testScheduler.runCurrent()
         assertEquals("Google Workspace", viewModel.uiState.value.title)
 

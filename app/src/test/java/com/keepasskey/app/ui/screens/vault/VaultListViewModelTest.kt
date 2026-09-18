@@ -4,10 +4,10 @@ import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.FakeSettingsRepository
 import com.keepasskey.app.data.repository.FakeVaultRepository
 import com.keepasskey.core.otp.OtpEngine
+import com.keepasskey.app.testutil.MainDispatcherGuard
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -47,7 +47,6 @@ class VaultListViewModelTest {
     }
 
     /** 各用例创建的 ViewModel；teardown 时统一取消其作用域（见 [tearDown] 说明）。 */
-    private val createdViewModels = mutableListOf<VaultListViewModel>()
 
     @After
     fun tearDown() {
@@ -55,13 +54,11 @@ class VaultListViewModelTest {
         // 本期的 TOTP 节拍由 `stateIn(viewModelScope, WhileSubscribed(5s))` 持有，
         // 用例结束后若任由其存活，后续用例重置 Main 时可能在途协程回跳到已缺失的 Main
         // （「测试调度器跨用例污染」这一类偶发红），故在恢复 Main 之前先终止本用例的作用域。
-        createdViewModels.forEach { it.viewModelScope.cancel() }
-        createdViewModels.clear()
-        Dispatchers.resetMain()
+        MainDispatcherGuard.tearDown()
     }
 
     /**
-     * 构造被测 ViewModel 并登记到 [createdViewModels]（teardown 统一取消其作用域，见 [tearDown]）。
+     * 构造被测 ViewModel 并登记到 `MainDispatcherGuard`（teardown 统一取消其作用域，见 [tearDown]）。
      */
     private fun TestScope.newViewModel(repository: FakeVaultRepository): VaultListViewModel =
         VaultListViewModel(
@@ -70,7 +67,7 @@ class VaultListViewModelTest {
             null,
             buildTestCoordinator(),
             displayDispatcher = UnconfinedTestDispatcher(testScheduler)
-        ).also { createdViewModels += it }
+        ).also { MainDispatcherGuard.track(it) }
 
     /**
      * 窄通道刻度 → 30 秒周期条目的剩余秒数（ISSUE-P3-158：列表徽标用同一函数按条目自身周期换算）。

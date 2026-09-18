@@ -146,6 +146,9 @@ class SyncCoordinatorTest {
     @After
     fun tearDown() {
         masterPassword.fill('0')
+        // 污染防护豁免（ISSUE-P3-189 验收第二分支）：本用例的被测面（SyncCoordinator / SyncEngine）不持有 CoroutineScope，也不引用 Dispatchers.Main：
+        // 全部工作由测试侧挂起调用驱动、随 runTest 结束收束，故无「在途工作回跳到已缺失 Main」
+        // 的泄漏面（核实：grep -rn 'CoroutineScope(|Dispatchers.Main' app|sync/src/main/**/sync/*.kt 无命中）。
         Dispatchers.resetMain()
     }
 
