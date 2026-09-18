@@ -4,6 +4,9 @@ import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.UserSettings
 import com.keepasskey.app.security.RuntimeIntegrityReport
 import com.keepasskey.app.ui.model.StringsProvider
+import com.keepasskey.core.model.KdbxConstants
+import com.keepasskey.crypto.kdf.KdfParameters
+import com.keepasskey.database.file.KdbxDatabase
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
@@ -217,4 +220,70 @@ internal fun buildSettingsUiState(
 
     // 9. 运行环境完整性（ISSUE-P2-08 风险提示数据源）
     integrityReport = integrityReport
+)
+
+/**
+ * 活动库文件头 → 设置页显示值的映射（ISSUE-P2-19 / P3-59）。
+ *
+ * 此前「密码库与加密」页的算法/KDF/参数全部来自 [DatabaseConfigUiState] 的硬编码占位默认值，
+ * 与真实文件头不符（ ChaCha20 显示 vs AES 实际 / Argon2d·8轮 vs Argon2id·2轮 等）。
+ * 本映射以活动库 [KdbxDatabase.header] 为单一真相源；未挂接会话时返回 null（UI 保持空态占位）。
+ */
+internal fun databaseConfigFromHeader(db: KdbxDatabase): DatabaseConfigUiState {
+    val header = db.header
+    val cipherLabel = when (header.cipherUuid) {
+        KdbxConstants.Cipher.AES_256_CBC -> CipherLabels.AES_256_CBC
+        // ISSUE-P3-92：ChaCha20 无 Poly1305 AEAD 标签（词汇表见 CipherLabels）
+        KdbxConstants.Cipher.CHACHA20 -> CipherLabels.CHACHA20
+        KdbxConstants.Cipher.TWOFISH -> CipherLabels.TWOFISH_CBC
+        else -> ""
+    }
+    val kdf = header.kdfParameters
+    val kdfLabel = when (kdf) {
+        is KdfParameters.Aes -> "AES-KDF"
+        is KdfParameters.Argon2 -> if (kdf.type == KdfParameters.Argon2.Argon2Type.ARGON2D) "Argon2d" else "Argon2id"
+    }
+    val compressionLabel = when (header.compression) {
+        KdbxConstants.Compression.GZIP -> "GZip 压缩"
+        else -> "无压缩"
+    }
+    return DatabaseConfigUiState(
+        databaseName = db.databaseName,
+        defaultUsername = db.defaultUserName,
+        encryptionAlgorithm = cipherLabel,
+        kdfAlgorithm = kdfLabel,
+        argon2Iterations = if (kdf is KdfParameters.Argon2) kdf.iterations else 0L,
+        argon2MemoryMb = if (kdf is KdfParameters.Argon2) kdf.memoryInBytes / (1024L * 1024L) else 0L,
+        argon2Parallelism = if (kdf is KdfParameters.Argon2) kdf.parallelism else 0,
+        compressionAlgorithm = compressionLabel,
+        recycleBinEnabled = db.recycleBinEnabled
+    )
+}
+
+/** 自动填充启用开关的局部投影（原 `SettingsViewModel` 私有嵌套类型，ISSUE-P3-29 上移为同包 internal） */
+internal data class AutofillUiState(
+    val credentialProviderEnabled: Boolean,
+    val passkeySupportEnabled: Boolean,
+    val autofillServiceEnabled: Boolean
+)
+
+/** 密码库配置的局部投影（原 `SettingsViewModel` 私有嵌套类型，ISSUE-P3-29 上移为同包 internal） */
+internal data class DatabaseConfigUiState(
+    val databaseName: String,
+    val defaultUsername: String,
+    /** 文件路径（ISSUE-P3-59：取自活动库记录；无活动库时为空，UI 显示「未设置」占位） */
+    val databasePath: String = "",
+    val encryptionAlgorithm: String,
+    val kdfAlgorithm: String,
+    val argon2Iterations: Long,
+    val argon2MemoryMb: Long,
+    val argon2Parallelism: Int,
+    /** 压缩算法显示值（ISSUE-P2-19：真实值来自文件头 compressionFlags） */
+    val compressionAlgorithm: String = "",
+    val recycleBinEnabled: Boolean
+)
+
+/** 安全超时配置的局部投影（原 `SettingsViewModel` 私有嵌套类型，ISSUE-P3-29 上移为同包 internal） */
+internal data class SecurityTimeoutUiState(
+    val autoLockTimeoutSeconds: Int
 )

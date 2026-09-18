@@ -142,23 +142,21 @@
   3. 常量收敛**只挪定义不改值**，改值即属协议变更，须另行立项；
   4. 每档闭环后 `.\gradlew.bat test --rerun-tasks --max-workers=1` 全绿方准入库；
   5. **不得为凑行数把注释移出文件充当「瘦身」**——以职责拆分为准。
-- **验收标准**：第一档 8 文件全部 ≤400 行（或如实登记限界理由）；
-  > **§170 达标（`wc -l`）**：达标 6（`SyncCache` 382 / `DatabaseSettingsScreen` 369 / `UnlockViewModel` 368 /
-  > `EntryEditFormSections` 351（§160）/ `EntryDetailScreen` 349（§169）/ `EntryDetailViewModel` 397（§170））、
-  > 按理由登记 2（`SettingsViewModel` 543 / `DatabaseSession` 535，限界 **§18**）⇒ **第一档维度闭环**。
-  > 两点留痕：① `EntryDetailViewModel` **不满足**限界 §18 的成立前提（「成员全部为一行委托」），
-  > 它是真降到 400 以下而非登记为门面；② 其剩下 6 个含实现体成员（跨条目明文处置顺序、偏好快照刷新、
-  > fail-closed 导出判定、会话登记与 `init` / `onCleared`）属页面状态层应持有者，**不得**再为「门面感」外搬
-  > （§170 §3 记了两处刻意不做的移动及各自的已记录边界）。
+- **验收标准**：第一档 8 文件全部 ≤400 行（或如实登记限界理由，实测口径见下方进度）；
   ≥100 行函数全部拆分至 ≤50 行（**非 Compose 逻辑函数已清零**，见下方进度）；
   第 4 目清单中的协议 / 格式语义字面量收敛为命名常量（**§167~§168 已裁定完毕**：成片真实违例
   `@Preview(uiMode = 0x20)` 归零、三小项全部落地，**全部只命名未改值**；余下只有 `crypto` / `database`
   格式面的 7 份「待逐处判定」文件，须与 `.kdbx` 对拍同批做，属独立一段 ⇒ 本条**不得**据此读作已闭环）；
   剩余第二档渐进消化，未消化部分在批次文档留清单。
-- **当前进度（只留结论；逐批改动与验证见 `docs/resolved/batches/155`~`175`）**：
-  - **第一档 8 文件**：达标 5（`UnlockViewModel` 368、`SyncCache` 382、`DatabaseSettingsScreen` 369（§159）、
-    `EntryEditFormSections` 351（§160）、`EntryDetailScreen` 349（§169）、`EntryDetailViewModel` 397（§170））；按理由登记 2（`SettingsViewModel` 543 / `DatabaseSession` 535，
-    经复核为**纯门面**，理由 / 边界 / 解除条件见限界 **§18**）；**仍超 0** ⇒ 第一档维度闭环（详见上方验收标准与 §170 批次正文）；
+- **当前进度（只留结论；逐批改动与验证见 `docs/resolved/batches/155`~`176`）**：
+  - **第一档 8 文件**（`wc -l` 实测）：**达标 6**（`SyncCache` 382、`UnlockViewModel` 368、
+    `DatabaseSettingsScreen` 369（§159）、`EntryEditFormSections` 351（§160）、`EntryDetailScreen` 349（§169）、
+    `EntryDetailViewModel` 397（§170））；按理由登记 2（`SettingsViewModel` 543 / `DatabaseSession` 535，
+    经复核为**纯门面**，理由 / 边界 / 解除条件见限界 **§18**）；**仍超 0** ⇒ **第一档维度闭环**。
+    两点留痕：① `EntryDetailViewModel` **不满足**限界 §18 的成立前提（「成员全部为一行委托」），
+    它是真降到 400 以下而非登记为门面；② 其剩下 6 个含实现体成员（跨条目明文处置顺序、偏好快照刷新、
+    fail-closed 导出判定、会话登记与 `init` / `onCleared`）属页面状态层应持有者，**不得**再为「门面感」外搬
+    （§170 §3 记了两处刻意不做的移动及各自的已记录边界）；
   - **第 3 目（≥100 行函数）**：**非 Compose 逻辑函数已清零**（清单内 20 处全部降到 ≤50 行）；
     余下为 Compose 侧长函数。度量口径提醒：初筛的括号配平会把「注释 / 字符串内含花括号」的短函数误计
     为超长（`FieldReferenceEngine.containsReference`、`PasskeyData.usePrivateKeyBytes`、`SimpleJson.objectAt`、
@@ -167,10 +165,10 @@
     `INNER_RANDOM_STREAM_KEY_SIZE`、`COMPOSITE_SEED_BYTES` / `KEY_COMPONENT_BYTES`、`HMAC_KEY_SELECTOR`、
     `END_OF_HEADER_MARKER`、写侧 `XML_TRUE` / `XML_FALSE`、`PasskeyKeyText` 的 PEM 空白码位——
     **全部只挪定义、未改任何取值**）；§167 复核出「唯一成片真实违例」= `@Preview(uiMode = 0x20)` 并已归零，
-    三小项待裁定（见违例清单第 4 目）。
+    当时的三个「待裁定」小项已由 §168 逐条落地（见违例清单第 4 目）。
 - **剩余清单（本条尚未闭环的部分，逐条自包含）**：
-  > 编号映射（§172 压缩流水后本清单为 1~4 项）：早期批次正文里提到的「剩余清单第 3 项」
-  > = 此处第 2 项（第二档渐进消化），「第 5 项」= 此处第 4 项（会话锁定直调用例）。
+  > 编号映射（§172 压缩流水后本清单为 1~5 项，第 5 项由 §173 追加）：早期批次正文里提到的
+  > 「剩余清单第 3 项」= 此处第 2 项（第二档渐进消化），「第 5 项」= 此处第 4 项（会话锁定直调用例）。
   1. **Compose 面的长函数**（第 3 目的剩余部分）：**§175 重测 = 28 个 ≥100 行函数，全部为 Compose 面**
      （非 Compose 逻辑函数确认清零）。重测口径三条：括号配平 + 去注释与字符串 + **跳过单表达式函数**
      ——只上前两条会把 `PasskeyData.usePrivateKeyBytes`（单行委托）、`SimpleJson.isNull`、
@@ -187,7 +185,7 @@
      「弹了确认框却导出别的对象」失去可断言落点；② `AutofillConfirmActivity.completeAuthResult`——
      唯一行为级证据是设备侧 `AutofillAuthChainDeviceTest`；③ `SyncConflictController.autoMergeAndUpload`——
      承载 `localDbOwned` 擦除判据的一处调用点（§166 §2）。
-  2. **第二档（400~500 行文件）渐进消化**：**§175 后为 30 个**（口径：五模块 `src/main` 全部 `.kt`
+  2. **第二档（400~500 行文件）渐进消化**：**§176 后为 29 个**（口径：五模块 `src/main` 全部 `.kt`
      逐文件 `wc -l`，且在**最终写盘后**取数——§165 §7 校正过一批「测量点早于写盘」造成的 `+1` 漂移）。
      当前头部：`RealVaultRepository` 489、`VaultRepository` 478、`RuntimeIntegrityDetector` 470、
      `KdbxHeader` 461、`KdbxXmlParser` 454、`VaultListScreen` 447、`UnlockScreen` 446。
