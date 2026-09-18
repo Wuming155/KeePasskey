@@ -185,8 +185,14 @@
      （三段裁决与 `RemoteSyncContext` 移为同包 `internal` 扩展函数文件 `SyncCycleRemoteOutcomes.kt`，
      门面回到 **430 行**；五成员放宽为 `internal`；`AlgoHotPathGuardsTest` 改按「门面 + 分支文件」并集扫描，
      计数判据仍为 2。见 [`resolved/batches/155-同步周期远端分支下沉批次.md`](resolved/batches/155-同步周期远端分支下沉批次.md)）；
-  3. **其余 400~500 行文件约 36 个**（原第 2 目清单，头部：`VaultListDialogs`、`RealVaultRepository`、
-     `VaultRepository`、`AutofillConfirmActivity`、`EntryEditScreen`、`RuntimeIntegrityDetector`）；
+  3. **其余 400~500 行文件**（**§161 重测口径**：五模块 `src/main` 全部 `.kt` 逐文件 `wc -l`，
+     **当前 40 个**；原记「约 36 个」系 §188 首次清点时刻之数）——头部：`VaultEntryMapper` 490、
+     `RealVaultRepository` 489、`VaultRepository` 478、`AutofillConfirmActivity` 475、`EntryEditScreen` 472、
+     `RuntimeIntegrityDetector` 470、`SyncConflictController` 461、`KdbxHeader` 461、`PasskeyCreateActivity` 460、
+     `KdbxXmlParser` 454；第一档余量 `EntryDetailViewModel` 435 / `EntryDetailScreen` 426 亦含在内。
+     > **§161 已消化头部之一**：`VaultListDialogs` 491 → **281**（五个群组生命周期对话框移入
+     > `VaultListGroupDialogs.kt` 243 行，组件体逐字未改、无可见性放宽）；
+     > `.kdbx` 格式面（`KdbxHeader` / `KdbxXmlParser`）**刻意排在最后**——拆它们必须过对拍回归，属独立一段。
      > `EntryEditFormSections`（原 438）已由 §160 降到 **351**（分组选择分节 + 绑定应用解析下沉为同包
      > `EntryEditGroupAndAppSections.kt`）⇒ 该文件退出本档；其下沉块含 §131 的 `items(…, key = …)` 修复，
      > `AlgoHotPathGuardsTest` 的扫描目标已按**两文件并集**同步（判据强度不变）。
