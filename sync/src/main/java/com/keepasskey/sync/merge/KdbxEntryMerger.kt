@@ -186,18 +186,27 @@ internal object KdbxEntryMerger {
             parentGroupId = resolveMergedParentGroup(base, local, remote)
         )
 
-        val conflictPair = if (diffFields.isNotEmpty()) {
-            ConflictedEntryPair(
-                entryId = local.id.toHexString(),
-                localEntry = local,
-                remoteEntry = remote,
-                modifiedFields = diffFields
-            )
-        } else {
-            null
-        }
+        return Pair(mergedEntry, conflictPairOf(local, remote, diffFields))
+    }
 
-        return Pair(mergedEntry, conflictPair)
+    /**
+     * 字段级差异非空时构成「冲突对」，交由上层冲突解决页展示；为空则静默合并、不上报冲突。
+     *
+     * §182 自 [mergeConflictedEntry] 原样搬出（只搬不改逻辑），使该函数只剩「按字段装配合并结果」一件事。
+     */
+    private fun conflictPairOf(
+        local: KdbxEntry,
+        remote: KdbxEntry,
+        diffFields: List<String>
+    ): ConflictedEntryPair? = if (diffFields.isNotEmpty()) {
+        ConflictedEntryPair(
+            entryId = local.id.toHexString(),
+            localEntry = local,
+            remoteEntry = remote,
+            modifiedFields = diffFields
+        )
+    } else {
+        null
     }
 
     /** 标准字段三方合并：单侧变更取该侧，双侧同值取本地，双侧异值按最后修改时间取胜方并记入 [diffFields]。 */

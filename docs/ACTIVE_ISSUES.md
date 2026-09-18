@@ -139,12 +139,14 @@
   4. 每档闭环后 `.\gradlew.bat test --rerun-tasks --max-workers=1` 全绿方准入库；
   5. **不得为凑行数把注释移出文件充当「瘦身」**——以职责拆分为准。
 - **验收标准**：第一档 8 文件全部 ≤400 行（或如实登记限界理由，实测口径见下方进度）；
-  ≥100 行函数全部拆分至 ≤50 行（达标情况一律以 `tools/doc/long_functions.py` 实测，见下方进度）；
+  ≥100 行函数全部拆分至 ≤50 行（达标情况一律以 `tools/doc/long_functions.py` 实测，见下方进度；
+  非 Compose 面**已逐条处置完毕**：一处削到 41、一处经**限界 §20** 裁定接受 ⇒ 本目**不以「全表 ≤50」达标**，
+  以「无未登记的超限项」达标）；
   第 4 目清单中的协议 / 格式语义字面量收敛为命名常量（**§167~§168 已裁定完毕**：成片真实违例
   `@Preview(uiMode = 0x20)` 归零、三小项全部落地，**全部只命名未改值**；余下只有 `crypto` / `database`
   格式面的 7 份「待逐处判定」文件，须与 `.kdbx` 对拍同批做，属独立一段 ⇒ 本条**不得**据此读作已闭环）；
   剩余第二档渐进消化，未消化部分在批次文档留清单。
-- **当前进度（只留结论；逐批改动与验证见 `docs/resolved/batches/155`~`181`（§180 为文档面批次，不属本条））**：
+- **当前进度（只留结论；逐批改动与验证见 `docs/resolved/batches/155`~`182`（§180 为文档面批次，不属本条））**：
   - **第一档 8 文件**（`wc -l` 实测）：**达标 6**（`SyncCache` 382、`UnlockViewModel` 368、
     `DatabaseSettingsScreen` 370（§159 降到 369，后续批次回填至 370）、`EntryEditFormSections` 351（§160）、
     `EntryDetailScreen` 349（§169）、`EntryDetailViewModel` 397（§170））；按理由登记 2（`SettingsViewModel` 543 / `DatabaseSession` 535，
@@ -155,9 +157,10 @@
     （§170 §3 记了两处刻意不做的移动及各自的已记录边界）；
   - **第 3 目（≥100 行函数）**：**≥100 行的非 Compose 函数已全部消除**，余下 28 个 ≥100 行函数**全部为
     Compose 面**（清单见 [`resolved/batches/181-长函数度量工具化与快照分流批次.md`](resolved/batches/181-长函数度量工具化与快照分流批次.md) §3）。
-    但「清单内 20 处**全部降到 ≤50**」这句原结论**经 §181 实测为不实**：`processFillRequest` 55 /
-    `mergeConflictedEntry` 52 仍超验收线 ⇒ 已登为剩余清单第 6 项。度量口径与三类假阳性成因（含 §175
-    实读排除过的 `FieldReferenceEngine.containsReference` 等四例）已固化进
+    但「清单内 20 处**全部降到 ≤50**」这句原结论**经 §181 实测为不实**，两处余量已于 **§182 逐条处置**：
+    `mergeConflictedEntry` 52 → **41**（冲突对构造原样下沉为 `conflictPairOf`），
+    `processFillRequest` **55** 经**限界 §20** 裁定接受（早退守卫 + 强制注释，再拆即违反纪律 ⑤ 或改写 fail-closed 路径）。
+    度量口径与三类假阳性成因（含 §175 实读排除过的 `FieldReferenceEngine.containsReference` 等四例）已固化进
     `tools/doc/long_functions.py` 文档串，**不再靠一次性脚本**；
   - **第 4 目（字面量）**：协议 / 格式语义字面量的收敛**已完成**（`WebAuthnJson` 键名面、
     `INNER_RANDOM_STREAM_KEY_SIZE`、`COMPOSITE_SEED_BYTES` / `KEY_COMPONENT_BYTES`、`HMAC_KEY_SELECTOR`、
@@ -165,7 +168,8 @@
     **全部只挪定义、未改任何取值**）；§167 复核出「唯一成片真实违例」= `@Preview(uiMode = 0x20)` 并已归零，
     当时的三个「待裁定」小项已由 §168 逐条落地（见违例清单第 4 目）。
 - **剩余清单（本条尚未闭环的部分，逐条自包含）**：
-  > 编号映射（§172 压缩流水后本清单为 1~6 项，第 5 项由 §173、第 6 项由 §176 追加并于 §181 就地改写）：早期批次正文里提到的
+  > 编号映射（§172 压缩流水后本清单为 1~5 项；第 6 项由 §176 追加、§181 就地改写、**§182 结案移出**，
+> 处置结论见限界 **§20** 与 [`resolved/batches/182-合并层冲突对下沉与早退守卫限界批次.md`](resolved/batches/182-合并层冲突对下沉与早退守卫限界批次.md)）：早期批次正文里提到的
   > 「剩余清单第 3 项」= 此处第 2 项（第二档渐进消化），「第 5 项」= 此处第 4 项（会话锁定直调用例）。
   1. **Compose 面的长函数**（第 3 目的剩余部分）：**§181 工具复核 = 28 个 ≥100 行函数，全部为 Compose 面**；
      逐个名单见 [`resolved/batches/181-长函数度量工具化与快照分流批次.md`](resolved/batches/181-长函数度量工具化与快照分流批次.md) §3。
@@ -231,16 +235,6 @@
      > 可行的两条路：**① 设备侧 instrumentation 用例**（需硬件，当前阻塞）；
      > **② 先引入宿主可用的 JSON 写入口径**（新增小写入器，把注册 / 断言两处 payload 改走它，
      > 再补上述四条宿主断言）。选 ② 时须与两处 payload 的既有静态守卫同批核对，勿只改一半。
-  6. **两处非 Compose 函数仍超「≤50 行」验收线（§181 工具复核暴露）**：
-     `app/src/main/java/com/keepasskey/app/autofill/KeePasskeyAutofillService.kt::processFillRequest`
-     **55 行**、`sync/src/main/java/com/keepasskey/sync/merge/KdbxEntryMerger.kt::mergeConflictedEntry`
-     **52 行**（`python tools/doc/long_functions.py 40` 实测）⇒ 此前「20 处全部降到 ≤50」的结论不实，
-     已按实测更正（见上方进度 · 第 3 目）。
-     **整改**：各削一处子步骤为同包私有辅助（**不改行为**），削完复跑 `long_functions.py 50` 确认归零；
-     `mergeConflictedEntry` 属同步合并面，动手前先读
-     [`docs/security/同步层记录级完整性威胁建模.md`](security/同步层记录级完整性威胁建模.md)。
-     > 编号说明：本项**原为**「第 3 目历史快照分流」（§176 追加），§181 已完成该分流
-     > （快照原样收录于 `resolved/batches/181-*.md` §4，条目侧压缩为指针），故**就地改写**为新登的两处未达标函数。
 - **依据**：`.codebuddy/rules/engineering-rules.md` §高内聚低耦合 / §禁止魔法数字；本条目为 2026-09-18 用户命题「消除巨型类和魔法数字」。
 
 ### ISSUE-P3-187 JNI 零拷贝评估（原生加密内核的边界拷贝成本）

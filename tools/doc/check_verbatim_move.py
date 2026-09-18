@@ -20,7 +20,8 @@ def counts(path: Path) -> Counter:
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) < 3:
+    if len(argv) < 2:  # 最少两个：原文件 + 搬入后的本体（§182 修正此前的 off-by-one：写成 <3 会让
+        # 最常见的「一个原文件 + 一个本体」用法直接打印 usage 而什么都不核对）
         print(__doc__)
         return 2
     orig = counts(Path(argv[0]))
