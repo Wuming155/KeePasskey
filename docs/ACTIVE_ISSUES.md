@@ -126,7 +126,7 @@
   > **§160 实测口径（`wc -l`）**：达标 6（`SyncCache` 382 / `DatabaseSettingsScreen` 369 /
   > `UnlockViewModel` 368 / **`EntryEditFormSections` 351**（§160）… ）、按理由登记 2
   > （`SettingsViewModel` 544 / `DatabaseSession` 535，限界 **§18**）、
-  > **仍超 2**（`EntryDetailViewModel` 435 / `EntryDetailScreen` 426）
+  > **仍超 2**（`EntryDetailViewModel` 434 / `EntryDetailScreen` 426）
   > ⇒ 本条**不得**被读作「第一档已闭环」。`EntryDetailViewModel` 虽有 44 / 58 个成员是一行委托，
   > 但仍有 5 个含实现体的成员（`uiState` 装配 29 行、`exportAttachment` 14 行、协作者构造等），
   > **不满足**限界 §18 的成立前提（「成员全部为一行委托」）⇒ 不得登记为门面理由，只能继续拆。≥100 行函数全部拆分至 ≤50 行；
@@ -163,11 +163,11 @@
 - **剩余清单（第二档渐进消化，未消化部分如实留此）**：
   1. **Compose 面的超长文件 / 超长函数**（结构性可拆）：`DatabaseSettingsScreen` ——
      **§156 已消化第一段**（三处同形「明文导出二次确认」弹窗收敛为共享组件
-     `DatabaseSettingsExportConfirmDialog.kt`，530 → **432 行**；配套把 `ExportTicketSinkGuardTest`
+     `DatabaseSettingsExportConfirmDialog.kt`，530 → **431 行**；配套把 `ExportTicketSinkGuardTest`
      的接线判据由 3 条扩到 8 条并做变异验证，见
      [`resolved/batches/156-明文导出二次确认收敛批次.md`](resolved/batches/156-明文导出二次确认收敛批次.md)）；
      **§159 消化第二段**（子库段 + 导入段下沉为 `DatabaseSettingsSections.kt` 的两个同包段落组件，
-     整页 **432 → 369 行，本文件降到 400 阈值以下**；并为搬家新增 `DatabaseSettingsSectionWiringTest` 4 例，
+     整页 **431 → 369 行，本文件降到 400 阈值以下**；并为搬家新增 `DatabaseSettingsSectionWiringTest` 4 例，
      钉住「选择器先于门控块 / 段落必须无条件组合 / 子库关闭三口径齐备 / 导入两步式顺序」）。
      **仍开放**：导出侧四个 `CreateDocument` launcher 与三处 `pending…Uri` 状态刻意留在整页
      （`ExportTicketSinkGuardTest` 的定位串锚在「SAF 回调把目标落到待确认态」这一现场，再搬走会让
@@ -183,24 +183,27 @@
      以及两个 NavGraph（`keepasskeySettingsNavGraph` 252 / `keepasskeyNavGraph` 164）与 `KeePasskeyApp`(202)；
   2. ~~**§151 新增的第二档待消化项**：`SyncCycleRunner` 431 → 515~~ —— **§155 已闭环**
      （三段裁决与 `RemoteSyncContext` 移为同包 `internal` 扩展函数文件 `SyncCycleRemoteOutcomes.kt`，
-     门面回到 **430 行**；五成员放宽为 `internal`；`AlgoHotPathGuardsTest` 改按「门面 + 分支文件」并集扫描，
+     门面回到 **429 行**；五成员放宽为 `internal`；`AlgoHotPathGuardsTest` 改按「门面 + 分支文件」并集扫描，
      计数判据仍为 2。见 [`resolved/batches/155-同步周期远端分支下沉批次.md`](resolved/batches/155-同步周期远端分支下沉批次.md)）；
   3. **其余 400~500 行文件**（**§161 重测口径**：五模块 `src/main` 全部 `.kt` 逐文件 `wc -l`，
-     **§164 后为 37 个**（§161 40 → §162 39 → §163 38 → §164 37）；原记「约 36 个」系 §188 首次清点时刻之数）——头部：
+     **§165 后为 36 个**（§161 40 → §162 39 → §163 38 → §164 37 → §165 36）；原记「约 36 个」系 §188 首次清点时刻之数）——头部：
      `RealVaultRepository` 489、`VaultRepository` 478、`AutofillConfirmActivity` 475、`EntryEditScreen` 472、
-     `RuntimeIntegrityDetector` 470、`SyncConflictController` 461、`KdbxHeader` 461、`KdbxXmlParser` 454；第一档余量 `EntryDetailViewModel` 435 / `EntryDetailScreen` 426 亦含在内。
-     > **§164 再消化一个**：`AutofillConfirmActivity` 476 → **367**（无状态的「调用方归属块」+ 其预览夹具
-     > 移入 `AutofillCallerAttributionBlock.kt` 127 行，`private` → `internal`；三处源码接线守卫的判据
+     `RuntimeIntegrityDetector` 470、`SyncConflictController` 461、`KdbxHeader` 461、`KdbxXmlParser` 454；第一档余量 `EntryDetailViewModel` 434 / `EntryDetailScreen` 426 亦含在内。
+     > **§165 再消化一个**：`EntryEditScreen` 472 → **319**（四件窄参数无状态展示件抽为
+     > `EntryEditChrome.kt` 135 行 + 预览夹具归位到本包既有预览夹；`showIconPicker` /
+     > `showDiscardDialog` 刻意留在母文件，避免「关对话框」出现两处真相）。
+     > **§164 再消化一个**：`AutofillConfirmActivity` 475 → **366**（无状态的「调用方归属块」+ 其预览夹具
+     > 移入 `AutofillCallerAttributionBlock.kt` 126 行，`private` → `internal`；三处源码接线守卫的判据
      > 都锚在 Activity 本体的认证结果与交付锁路径上，**其行为用户刻意排除**——该段的行为级证据只有
      > 设备侧 `AutofillAuthChainDeviceTest`，本机无设备时不搬，以免进入「只有静态判据、无法真机复跑」的区域）。
-     > **§163 再消化一个**：`VaultEntryMapper` 490 → **385**（条目 TOTP 面「来源定位 → 配置解析 → 按时刻取码」
-     > 三者是无状态纯函数，整族移入 `VaultEntryTotpMapping.kt` 128 行；TASK-46 的字节态与 `finally` 擦除
+     > **§163 再消化一个**：`VaultEntryMapper` 490 → **384**（条目 TOTP 面「来源定位 → 配置解析 → 按时刻取码」
+     > 三者是无状态纯函数，整族移入 `VaultEntryTotpMapping.kt` 127 行；TASK-46 的字节态与 `finally` 擦除
      > 语义随代码同迁未放宽；对外 `parseTotpConfig` / `computeTotpCode` 由母文件留一行委托，调用点零改动）。
-     > **§162 再消化一个头部文件**：`PasskeyCreateActivity` 460 → **360**（注册响应材料是纯函数产物，
-     > 整族移入 `PasskeyRegistrationPayload.kt` 134 行；`rpId` / `origin` 由实例字段改为显式入参，
+     > **§162 再消化一个头部文件**：`PasskeyCreateActivity` 460 → **359**（注册响应材料是纯函数产物，
+     > 整族移入 `PasskeyRegistrationPayload.kt` 133 行；`rpId` / `origin` 由实例字段改为显式入参，
      > 三处安全语义随代码同迁未放宽），该档实测降至 **39 个**。
-     > **§161 已消化头部之一**：`VaultListDialogs` 491 → **281**（五个群组生命周期对话框移入
-     > `VaultListGroupDialogs.kt` 243 行，组件体逐字未改、无可见性放宽）；
+     > **§161 已消化头部之一**：`VaultListDialogs` 490 → **280**（五个群组生命周期对话框移入
+     > `VaultListGroupDialogs.kt` 242 行，组件体逐字未改、无可见性放宽）；
      > `.kdbx` 格式面（`KdbxHeader` / `KdbxXmlParser`）**刻意排在最后**——拆它们必须过对拍回归，属独立一段。
      > `EntryEditFormSections`（原 438）已由 §160 降到 **351**（分组选择分节 + 绑定应用解析下沉为同包
      > `EntryEditGroupAndAppSections.kt`）⇒ 该文件退出本档；其下沉块含 §131 的 `items(…, key = …)` 修复，

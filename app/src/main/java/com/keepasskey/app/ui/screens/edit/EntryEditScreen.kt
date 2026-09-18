@@ -5,27 +5,16 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -34,19 +23,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.keepasskey.app.R
 import com.keepasskey.app.security.ApplyObscuredTouchFilter
 import com.keepasskey.app.ui.components.CustomIconItem
-import com.keepasskey.app.ui.components.IconPickerDialog
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.model.resolveText
-import com.keepasskey.app.ui.theme.CapsuleShape
 
 /**
  * 有状态凭据编辑/添加页面（Route）
@@ -206,33 +190,11 @@ fun EntryEditContent(
         containerColor = MaterialTheme.colorScheme.background,
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         topBar = {
-            TopAppBar(
-                title = {
-                    Text(
-                        text = if (uiState.entryId != null) stringResource(R.string.edit_title_edit) else stringResource(R.string.edit_title_new),
-                        style = MaterialTheme.typography.titleLarge
-                    )
-                },
-                navigationIcon = {
-                    IconButton(onClick = requestBack) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = stringResource(R.string.cd_back)
-                        )
-                    }
-                },
-                actions = {
-                    TextButton(onClick = onSaveClick, enabled = !uiState.isReadOnly) {
-                        Text(
-                            text = stringResource(R.string.cd_save),
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold)
-                        )
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    titleContentColor = MaterialTheme.colorScheme.onSurface
-                )
+            EntryEditTopBar(
+                entryId = uiState.entryId,
+                isReadOnly = uiState.isReadOnly,
+                requestBack = requestBack,
+                onSaveClick = onSaveClick
             )
         }
     ) { innerPadding ->
@@ -328,145 +290,30 @@ fun EntryEditContent(
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            // 底部保存大按钮（H4-只读整改：只读会话禁用保存）
-            Button(
-                onClick = onSaveClick,
-                enabled = !uiState.isReadOnly,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(50.dp),
-                shape = CapsuleShape
-            ) {
-                Text(
-                    text = stringResource(R.string.edit_save_btn),
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold)
-                )
-            }
+            // 底部保存大按钮（§165 抽为 EntryEditSaveButton）
+            EntryEditSaveButton(isReadOnly = uiState.isReadOnly, onSaveClick = onSaveClick)
 
             Spacer(modifier = Modifier.height(30.dp))
         }
     }
 
     if (showIconPicker) {
-        IconPickerDialog(
-            selectedIconName = uiState.iconName,
-            onSelectIcon = {
-                onIconChange(it)
-                showIconPicker = false
-            },
-            onDismiss = { showIconPicker = false },
-            // TASK-15：自定义图标扩展段
+        EntryEditIconPickerDialog(
+            iconName = uiState.iconName,
+            customIconId = uiState.customIconId,
             customIcons = customIconOptions,
-            selectedCustomIconId = uiState.customIconId,
-            onSelectCustomIcon = {
-                onSelectCustomIcon(it)
-                showIconPicker = false
-            },
-            onUploadClick = onUploadCustomIcon
+            onSelectIcon = { onIconChange(it); showIconPicker = false },
+            onSelectCustomIcon = { onSelectCustomIcon(it); showIconPicker = false },
+            onUploadClick = onUploadCustomIcon,
+            onDismiss = { showIconPicker = false }
         )
     }
 
-    // 丢弃未保存更改确认弹窗
+    // 丢弃未保存更改确认弹窗（§165 抽为 EntryEditDiscardDialog）
     if (showDiscardDialog) {
-        AlertDialog(
-            onDismissRequest = { showDiscardDialog = false },
-            title = { Text(stringResource(R.string.edit_discard_title)) },
-            text = { Text(stringResource(R.string.edit_discard_desc)) },
-            confirmButton = {
-                TextButton(onClick = onBackClick) {
-                    Text(stringResource(R.string.btn_discard))
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDiscardDialog = false }) {
-                    Text(stringResource(R.string.btn_continue_edit))
-                }
-            }
-        )
-    }
-}
-
-// IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
-@Preview(name = "凭据编辑内容 - 浅色", showBackground = true)
-@Preview(name = "凭据编辑内容 - 深色", showBackground = true, uiMode = 0x20 /* UI_MODE_NIGHT_YES */)
-@Composable
-internal fun EntryEditContentPreview() {
-    com.keepasskey.app.ui.theme.KeePasskeyTheme {
-        val previewSnackbar = remember { SnackbarHostState() }
-
-        EntryEditContent(
-            uiState = com.keepasskey.app.ui.screens.edit.EntryEditUiState(
-                entryId = "preview-entry-edit",
-                groupId = com.keepasskey.app.ui.preview.PreviewGroupLogins.id,
-                availableGroups = com.keepasskey.app.ui.preview.PreviewGroups,
-                iconName = "key",
-                title = "预览编辑条目",
-                username = "demo@example.com",
-                // 与 loadedPassword 长度一致，避免「空密码框 + 强度条」并存的假状态
-                passwordLength = 8,
-                url = "https://example.com",
-                notes = "预览用备注文本",
-                isPasskey = false,
-                customFields = listOf(
-                    com.keepasskey.app.ui.model.UiCustomField(
-                        id = "preview-field-1",
-                        key = "预览自定义字段",
-                        value = "预览值"
-                    ),
-                    com.keepasskey.app.ui.model.UiCustomField(
-                        id = "preview-field-2",
-                        key = "预览受保护字段",
-                        value = "",
-                        isProtected = true
-                    )
-                ),
-                attachments = com.keepasskey.app.ui.preview.PreviewAttachments,
-                tagsInput = "预览标签",
-                autoTypeSequence = "{USERNAME}{TAB}{PASSWORD}{ENTER}",
-                overrideUrl = "https://example.com/preview",
-                isPasswordVisible = false,
-                showGenerator = true,
-                passLength = 20f,
-                isDirty = true
-            ),
-            loadedPassword = "Passw0rd".toCharArray(),
-            loadedTotpSecret = null,
-            loadedProtectedFields = mapOf("preview-field-2" to "预览受保护字段值".toCharArray()),
-            isDirty = true,
-            snackbarHostState = previewSnackbar,
-            onBackClick = {},
-            onSaveClick = {},
-            onGroupChange = { _ -> },
-            onIconChange = { _ -> },
-            customIconOptions = emptyList(),
-            onSelectCustomIcon = { _ -> },
-            onUploadCustomIcon = {},
-            onTitleChange = { _ -> },
-            onUsernameChange = { _ -> },
-            onPasswordChangeSecure = { _ -> },
-            onUrlChange = { _ -> },
-            onNotesChange = { _ -> },
-            onTogglePasskey = {},
-            onTotpSecretChangeSecure = { _ -> },
-            onUpdateProtectedFieldValue = { _, _ -> },
-            onTagsInputChange = { _ -> },
-            onAutoTypeSequenceChange = { _ -> },
-            onOverrideUrlChange = { _ -> },
-            onAddCustomField = {},
-            onUpdateCustomField = { _, _, _, _ -> },
-            onRemoveCustomField = { _ -> },
-            onRemoveAttachment = { _ -> },
-            onTogglePasswordVisibility = {},
-            onToggleGenerator = {},
-            onPassLengthChange = { _ -> },
-            onGeneratePassword = {},
-            onToggleUpper = {},
-            onToggleLower = {},
-            onToggleDigits = {},
-            onToggleSymbols = {},
-            onShowMessage = { _ -> },
-            onPickAttachmentFile = {},
-            onScanTotpQr = {}
+        EntryEditDiscardDialog(
+            onDiscard = onBackClick,
+            onKeepEditing = { showDiscardDialog = false }
         )
     }
 }

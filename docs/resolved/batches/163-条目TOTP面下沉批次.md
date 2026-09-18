@@ -1,4 +1,4 @@
-# §163 条目 TOTP 面下沉批次（`ISSUE-P3-188` 第二档：`VaultEntryMapper` 490 → 385 行）
+# §163 条目 TOTP 面下沉批次（`ISSUE-P3-188` 第二档：`VaultEntryMapper` 490 → 384 行）
 
 > **起因**：`ISSUE-P3-188` 剩余清单第 3 项头部文件之一 `data/repository/VaultEntryMapper.kt`（490 行）。
 > **本批未改任何生产逻辑**：TOTP 三者是**无状态纯函数**，整族搬出后母文件只留三行委托。
@@ -13,8 +13,8 @@
 | `computeTotpCode`（按时刻取码） | `Base32Decoder` / `OtpEngine`，取码时刻由入参给出（ISSUE-P2-90） | 同上（含默认参数） |
 | `projectTotpFields` + 其投影类型 | 上面两者 + `OtpEngine.getRemainingSeconds` | 移入新对象；`private data class TotpProjection` → `VaultEntryTotpMapping.Projection`（同模块 `internal` 可见） |
 
-新增 `data/repository/VaultEntryTotpMapping.kt`（128 行，`internal object`）；
-母文件 **490 → 385 行**，两文件均低于 400 阈值；三个 `DEFAULT_TOTP_*` 常量随被搬代码同迁
+新增 `data/repository/VaultEntryTotpMapping.kt`（127 行，`internal object`）；
+母文件 **490 → 384 行**，两文件均低于 400 阈值；三个 `DEFAULT_TOTP_*` 常量随被搬代码同迁
 （它们在母文件内**仅**被这一段使用，已核对）。
 
 ## 2. 安全语义随代码同迁、未放宽
