@@ -155,7 +155,7 @@
   `@Preview(uiMode = 0x20)` 归零、三小项全部落地，**全部只命名未改值**；余下只有 `crypto` / `database`
   格式面的 7 份「待逐处判定」文件，须与 `.kdbx` 对拍同批做，属独立一段 ⇒ 本条**不得**据此读作已闭环）；
   剩余第二档渐进消化，未消化部分在批次文档留清单。
-- **当前进度（只留结论；逐批改动与验证见 `docs/resolved/batches/155`~`173`）**：
+- **当前进度（只留结论；逐批改动与验证见 `docs/resolved/batches/155`~`174`）**：
   - **第一档 8 文件**：达标 5（`UnlockViewModel` 368、`SyncCache` 382、`DatabaseSettingsScreen` 369（§159）、
     `EntryEditFormSections` 351（§160）、`EntryDetailScreen` 349（§169）、`EntryDetailViewModel` 397（§170））；按理由登记 2（`SettingsViewModel` 543 / `DatabaseSession` 535，
     经复核为**纯门面**，理由 / 边界 / 解除条件见限界 **§18**）；**仍超 0** ⇒ 第一档维度闭环（详见上方验收标准与 §170 批次正文）；
@@ -182,15 +182,15 @@
      「弹了确认框却导出别的对象」失去可断言落点；② `AutofillConfirmActivity.completeAuthResult`——
      唯一行为级证据是设备侧 `AutofillAuthChainDeviceTest`；③ `SyncConflictController.autoMergeAndUpload`——
      承载 `localDbOwned` 擦除判据的一处调用点（§166 §2）。
-  2. **第二档（400~500 行文件）渐进消化**：**§173 后为 32 个**（口径：五模块 `src/main` 全部 `.kt`
+  2. **第二档（400~500 行文件）渐进消化**：**§174 后为 31 个**（口径：五模块 `src/main` 全部 `.kt`
      逐文件 `wc -l`，且在**最终写盘后**取数——§165 §7 校正过一批「测量点早于写盘」造成的 `+1` 漂移）。
      当前头部：`RealVaultRepository` 489、`VaultRepository` 478、`RuntimeIntegrityDetector` 470、
-     `KdbxHeader` 461、`KdbxXmlParser` 454、`PasskeyCryptoEngine` 453、`VaultListScreen` 447。
-     **已消化 10 个**（一律「只搬不改逻辑」，逐批留痕 `resolved/batches/159`~`173`）：
+     `KdbxHeader` 461、`KdbxXmlParser` 454、`VaultListScreen` 447、`UnlockScreen` 446。
+     **已消化 11 个**（一律「只搬不改逻辑」，逐批留痕 `resolved/batches/159`~`174`）：
      `DatabaseSettingsScreen` 530→369、`VaultListDialogs` 490→280、`PasskeyCreateActivity` 460→359、
      `VaultEntryMapper` 490→384、`AutofillConfirmActivity` 475→366、`EntryEditScreen` 472→319、
      `SyncConflictController` 461→355、`EntryDetailScreen` 427→349、`EntryDetailViewModel` 434→397、
-     `PasskeyAssertionActivity` 450→267（§173，与 §162 的注册侧对称）。
+     `PasskeyAssertionActivity` 450→267（§173，与 §162 的注册侧对称）、`PasskeyCryptoEngine` 453→269（§174）。
      **刻意排后（是取舍不是遗漏）**：① `RealVaultRepository` / `VaultRepository`——整树读写与擦除边界，
      牵动限界 §1.6 的可达性穷举；② `KdbxHeader` / `KdbxXmlParser`——`.kdbx` 格式面，须过官方实现
      端到端对拍（§38 证据纪律），属独立一段；③ `DicewareWordList` 408——词表数据文件，
@@ -220,6 +220,13 @@
      必须是空对象；③ `authenticatorData` 为 37 字节、前 16 字节等于 `SHA-256(rpId)`、第 5~8 字节
      等于传入的 `signCount`；④ 签名可用该凭据公钥对 `authData || SHA-256(clientDataJSON)` 验过。
      **不做**：不指望覆盖 Credential Manager 交互（那部分证据仍在设备侧）。
+     > **§174 核实：本项在 JVM 单测里做不到**。`PasskeyAssertionPayload` 用 `org.json.JSONObject`
+     > 组装响应，而 `org.json` 在宿主单测中是 Android 桩（调用即抛 `Method put not mocked`）——
+     > 本仓 `SimpleJson` 的立项理由即是此点，且全仓无任何测试文件引用 `JSONObject`、
+     > `app/build.gradle.kts` 未开 `testOptions.unitTests.returnDefaultValues`（均实测）。
+     > 可行的两条路：**① 设备侧 instrumentation 用例**（需硬件，当前阻塞）；
+     > **② 先引入宿主可用的 JSON 写入口径**（新增小写入器，把注册 / 断言两处 payload 改走它，
+     > 再补上述四条宿主断言）。选 ② 时须与两处 payload 的既有静态守卫同批核对，勿只改一半。
 - **依据**：`.codebuddy/rules/engineering-rules.md` §高内聚低耦合 / §禁止魔法数字；本条目为 2026-09-18 用户命题「消除巨型类和魔法数字」。
 
 ### ISSUE-P3-187 JNI 零拷贝评估（原生加密内核的边界拷贝成本）
