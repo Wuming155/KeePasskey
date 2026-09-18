@@ -1,6 +1,5 @@
 package com.keepasskey.app.ui.screens.detail
 
-import android.content.res.Configuration
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -13,14 +12,12 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -34,7 +31,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -141,45 +137,29 @@ fun EntryDetailScreen(
     )
 
     // ISSUE-P2-10 (ZT-15)：明文附件导出二次确认——取消分支不写盘（fail-closed），
-    // 仅确认后才以 confirmed = true 委托 ViewModel 落盘并写审计
+    // 仅确认后才以 confirmed = true 委托 ViewModel 落盘并写审计。
+    // ISSUE-P3-188 §169：对话框 UI 归位到 EntryDetailDialogHost.kt；三态与 SAF 空文档清理
+    // 仍留在本处（同一状态不得有两处真相），出口顺序逐字保持。
     if (showPlaintextExportConfirm) {
         val attachment = pendingExportAttachment
         val targetUri = pendingPlaintextExportUri
-        // ISSUE-P2-20：取消分支必须清理 SAF 已创建的空目标文档，不留 0 字节残留
         val localContext = LocalContext.current
-        fun cleanupCancelledTarget() {
-            if (targetUri != null) {
-                SafDocumentCleanup.deleteCreatedDocument(localContext, targetUri)
-            }
-            showPlaintextExportConfirm = false
-            pendingPlaintextExportUri = null
-            pendingExportAttachment = null
-        }
-        AlertDialog(
-            onDismissRequest = { cleanupCancelledTarget() },
-            title = { Text(stringResource(R.string.detail_attachment_export_warn_title)) },
-            text = {
-                Text(
-                    text = stringResource(R.string.detail_attachment_export_warn_message),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.error
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    showPlaintextExportConfirm = false
-                    pendingPlaintextExportUri = null
-                    pendingExportAttachment = null
-                    if (attachment != null && targetUri != null) {
-                        viewModel.exportAttachment(attachment, targetUri, confirmed = true)
-                    }
-                }) {
-                    Text(stringResource(R.string.detail_attachment_export_warn_confirm))
+        EntryDetailPlaintextExportConfirmDialog(
+            onCancel = {
+                // ISSUE-P2-20：取消分支必须清理 SAF 已创建的空目标文档，不留 0 字节残留
+                if (targetUri != null) {
+                    SafDocumentCleanup.deleteCreatedDocument(localContext, targetUri)
                 }
+                showPlaintextExportConfirm = false
+                pendingPlaintextExportUri = null
+                pendingExportAttachment = null
             },
-            dismissButton = {
-                TextButton(onClick = { cleanupCancelledTarget() }) {
-                    Text(stringResource(R.string.btn_cancel))
+            onConfirm = {
+                showPlaintextExportConfirm = false
+                pendingPlaintextExportUri = null
+                pendingExportAttachment = null
+                if (attachment != null && targetUri != null) {
+                    viewModel.exportAttachment(attachment, targetUri, confirmed = true)
                 }
             }
         )
@@ -366,62 +346,4 @@ fun EntryDetailContent(
         onClearRevisionDiff = onClearRevisionDiff,
         onExportAttachment = onExportAttachment
     )
-}
-
-/**
- * IDE 预览专用状态装载：仅在组合首帧把示例状态写入 remember 状态，绕开
- * `remember(…) { mutableStateOf(示例) }` 的「非 Composable 上下文求值」静态检查。
- */
-@Composable
-private fun <T> previewStateOf(value: T): androidx.compose.runtime.MutableState<T> {
-    val state = remember { mutableStateOf(value) }
-    LaunchedEffect(Unit) { state.value = value }
-    return state
-}
-
-// IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
-@Preview(name = "凭据详情内容 - 浅色", showBackground = true)
-@Preview(name = "凭据详情内容 - 深色", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
-@Composable
-internal fun EntryDetailContentPreview() {
-    com.keepasskey.app.ui.theme.KeePasskeyTheme {
-        val previewUiState = previewStateOf(
-            com.keepasskey.app.ui.screens.detail.EntryDetailUiState(
-                entry = com.keepasskey.app.ui.preview.PreviewEntryLogin,
-                isFavorite = true,
-                groupPath = "网站登录 / 预览分组路径",
-                totpRemainingSeconds = 18,
-                passwordStrengthBits = 72,
-                isTotpVisible = true,
-                allGroups = com.keepasskey.app.ui.preview.PreviewGroups
-            )
-        ).value
-        val previewSnackbar = remember { SnackbarHostState() }
-
-        EntryDetailContent(
-            uiState = previewUiState,
-            snackbarHostState = previewSnackbar,
-            onBackClick = {},
-            onEditClick = {},
-            onToggleFavorite = {},
-            onDuplicateEntry = {},
-            onToggleAutofillBlock = {},
-            onDeleteCustomIcon = {},
-            onDeleteEntry = {},
-            onMoveEntry = { _ -> },
-            onTogglePasswordVisibility = {},
-            onToggleTotpVisibility = {},
-            onAdvanceHotp = {},
-            onCopyTotp = {},
-            onToggleCustomFieldVisibility = { _ -> },
-            onCopyCustomField = { _, _ -> },
-            onExportAttachment = { _ -> },
-            onRollbackRevision = { _ -> },
-            onPrepareRevisionDiff = { _ -> },
-            onClearRevisionDiff = {},
-            onShowMessage = { _ -> },
-            onCopyPassword = { _ -> },
-            onCopyUsername = { _, _ -> }
-        )
-    }
 }

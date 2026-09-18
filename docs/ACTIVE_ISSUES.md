@@ -102,7 +102,7 @@
      （`SettingsViewModel` 544 / `DatabaseSession` 535，均已按限界 **§18** 登记为门面理由）；
      其余 6 个已降到 500 以下，但**验收线是 ≤400**：`EntryEditFormSections` 351（§160）、
      `DatabaseSettingsScreen` 369（§159）、`UnlockViewModel` 368、`SyncCache` 382 **达标**，
-     `EntryDetailViewModel` 434 / `EntryDetailScreen` 426 **仍超**（见下方验收说明）；
+     `EntryDetailViewModel` 434 **仍超**（`EntryDetailScreen` 已由 §169 降到 349）；
   2. **400~500 行文件（第二档）**：清单、当前计数与逐批消减**只在下方「剩余清单第 3 项」维护一份**
      （此处不再重复快照数字，避免两处数法各自漂移）；
   3. **超 50 行函数（第一档 ≥100 行）**：`SyncEngine.openRemote`(≈173)、`PasskeyAssertionActivity.onCreate`(≈153)、
@@ -146,7 +146,7 @@
   > **§160 实测口径（`wc -l`）**：达标 6（`SyncCache` 382 / `DatabaseSettingsScreen` 369 /
   > `UnlockViewModel` 368 / **`EntryEditFormSections` 351**（§160）… ）、按理由登记 2
   > （`SettingsViewModel` 544 / `DatabaseSession` 535，限界 **§18**）、
-  > **仍超 2**（`EntryDetailViewModel` 434 / `EntryDetailScreen` 426）
+  > **仍超 1**（`EntryDetailViewModel` 434；`EntryDetailScreen` 427 → 349 由 §169 达标）
   > ⇒ 本条**不得**被读作「第一档已闭环」。`EntryDetailViewModel` 虽有 44 / 58 个成员是一行委托，
   > 但仍有 5 个含实现体的成员（`uiState` 装配 29 行、`exportAttachment` 14 行、协作者构造等），
   > **不满足**限界 §18 的成立前提（「成员全部为一行委托」）⇒ 不得登记为门面理由，只能继续拆。≥100 行函数全部拆分至 ≤50 行；
@@ -154,11 +154,10 @@
   `@Preview(uiMode = 0x20)` 归零、三小项全部落地，**全部只命名未改值**；余下只有 `crypto` / `database`
   格式面的 7 份「待逐处判定」文件，须与 `.kdbx` 对拍同批做，属独立一段 ⇒ 本条**不得**据此读作已闭环）；
   剩余第二档渐进消化，未消化部分在批次文档留清单。
-- **当前进度（只留结论；逐批改动与验证见 `docs/resolved/batches/155`~`168`）**：
-  - **第一档 8 文件**：达标 4（`UnlockViewModel` 368、`SyncCache` 382、`DatabaseSettingsScreen` 369（§159）、
-    `EntryEditFormSections` 351（§160））；按理由登记 2（`SettingsViewModel` 544 / `DatabaseSession` 535，
-    经复核为**纯门面**，理由 / 边界 / 解除条件见限界 **§18**）；**仍超 2**（`EntryDetailViewModel` 434 /
-    `EntryDetailScreen` 426 ⇒ 见上方验收说明，本条不得读作已闭环）；
+- **当前进度（只留结论；逐批改动与验证见 `docs/resolved/batches/155`~`169`）**：
+  - **第一档 8 文件**：达标 5（`UnlockViewModel` 368、`SyncCache` 382、`DatabaseSettingsScreen` 369（§159）、
+    `EntryEditFormSections` 351（§160）、`EntryDetailScreen` 349（§169））；按理由登记 2（`SettingsViewModel` 544 / `DatabaseSession` 535，
+    经复核为**纯门面**，理由 / 边界 / 解除条件见限界 **§18**）；**仍超 1**（`EntryDetailViewModel` 434 ⇒ 见上方验收说明，本条不得读作已闭环）；
   - **第 3 目（≥100 行函数）**：**非 Compose 逻辑函数已清零**（清单内 20 处全部降到 ≤50 行）；
     余下为 Compose 侧长函数。度量口径提醒：初筛的括号配平会把「注释 / 字符串内含花括号」的短函数误计
     为超长（`FieldReferenceEngine.containsReference`、`PasskeyData.usePrivateKeyBytes`、`SimpleJson.objectAt`、
@@ -194,10 +193,11 @@
      门面回到 **429 行**；五成员放宽为 `internal`；`AlgoHotPathGuardsTest` 改按「门面 + 分支文件」并集扫描，
      计数判据仍为 2。见 [`resolved/batches/155-同步周期远端分支下沉批次.md`](resolved/batches/155-同步周期远端分支下沉批次.md)）；
   3. **其余 400~500 行文件**（**口径**：五模块 `src/main` 全部 `.kt` 逐文件 `wc -l`，且在**最终写盘后**取数
-     ——§165 §7 校正过一批「测量点早于写盘」造成的 `+1` 漂移）：**§166 后为 35 个**（§161 重测 40 →
-     §162 ~ §166 逐批各消化 1 个）。当前头部：`RealVaultRepository` 489、`VaultRepository` 478、
+     ——§165 §7 校正过一批「测量点早于写盘」造成的 `+1` 漂移）：**§169 后为 34 个**（§161 重测 40 →
+     §162 ~ §166 逐批各消化 1 个至 35，§169 再使 `EntryDetailScreen` 退出本档 ⇒ 34；
+     §167 ~ §168 为字面量收敛，不动档位）。当前头部：`RealVaultRepository` 489、`VaultRepository` 478、
      `RuntimeIntegrityDetector` 470、`KdbxHeader` 461、`KdbxXmlParser` 454、`PasskeyAssertionActivity` 450；
-     第一档余量 `EntryDetailViewModel` 434 / `EntryDetailScreen` 426 亦含在内。
+     第一档余量 `EntryDetailViewModel` 434 / `EntryDetailScreen` 426 亦含在内（§169 已降到 349 ⇒ 退出本档）。
      > **已消化的头部文件**（逐批留痕于 `docs/resolved/batches/160`~`166`，一律「只搬不改逻辑」）：
      > `VaultListDialogs` 490→280、`PasskeyCreateActivity` 460→359、`VaultEntryMapper` 490→384、
      > `AutofillConfirmActivity` 475→366、`EntryEditScreen` 472→319、`SyncConflictController` 461→355；

@@ -173,3 +173,39 @@ internal fun EntryDetailDialogHost(
         )
     }
 }
+
+/**
+ * 明文附件导出的二次确认对话框（`ISSUE-P3-188` §169 自 [EntryDetailScreen] **归位**到本文件，
+ * 与其余详情页对话框同处一份；UI 树、文案与 error 色正文逐字未改）。
+ *
+ * **状态所有权仍在外层**：`showPlaintextExportConfirm` 与两个 pending 态由页面持有，
+ * 「取消 → 清理 SAF 已建空文档 → 复位三态」与「确认 → 复位三态 → 放行导出」的**顺序**逐字保持
+ * （本组件只呈现两条出口，避免同一状态出现两处真相）。
+ */
+@Composable
+internal fun EntryDetailPlaintextExportConfirmDialog(
+    onCancel: () -> Unit,
+    onConfirm: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onCancel,
+        title = { Text(stringResource(R.string.detail_attachment_export_warn_title)) },
+        text = {
+            Text(
+                text = stringResource(R.string.detail_attachment_export_warn_message),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.error
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onConfirm) {
+                Text(stringResource(R.string.detail_attachment_export_warn_confirm))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onCancel) {
+                Text(stringResource(R.string.btn_cancel))
+            }
+        }
+    )
+}
