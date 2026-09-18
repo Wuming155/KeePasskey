@@ -225,6 +225,7 @@
 | §184 | 装配表口径裁决批次（`ISSUE-P3-188` 第 3 目：登记 **PD-11**——两个纯接线 NavGraph（252 逻辑行 1 / 164 逻辑行 0）豁免、`KeePasskeyApp`（202 逻辑行 10）**不豁免**，待拆数 27 → 25；新增 `tools/doc/logic_lines.py` 把 PD-11 重开条件做成可执行判据） | `ISSUE-P3-188`（范围口径，用户裁决后登记 PD-11） | [`184-装配表口径裁决批次.md`](resolved/batches/184-装配表口径裁决批次.md) |
 | §185 | 应用外壳逻辑下沉批次（`ISSUE-P3-188` 第 3 目：按 PD-11 对**不豁免**的 `KeePasskeyApp` 动手，202 → **86 行出表**、逻辑行 10 → 0；≥100 项 27 → 26（扣除 PD-11 豁免后待拆 24）；新增 `KeePasskeyAppLogicTest` 5 例——该文件首份行为用例，总用例 2198 → **2203**） | `ISSUE-P3-188`（第 3 目再消化一个 + 补验证面） | [`185-应用外壳逻辑下沉批次.md`](resolved/batches/185-应用外壳逻辑下沉批次.md) |
 | §186 | 解锁区段落拆分批次（`ISSUE-P3-188` **一批双降**：第二档 **29 → 28**（`UnlockContentSections` 430→336）、≥100 行 **26 → 25**（`UnlockStandardUnlockContent` 158→71）；新建 `UnlockStandardUnlockSections.kt` 四段，主密码 `SecurePasswordField` 链路刻意留本体；`UiMd3AlignmentWiringTest` 判据按内层列表并集扩扫；顺带收紧 `logic_lines.py` 一处会误导的豁免判定语） | `ISSUE-P3-188`（第 3 目 + 第二档双降） | [`186-解锁区段落拆分批次.md`](resolved/batches/186-解锁区段落拆分批次.md) |
+| §187 | 关于页段落拆分批次（`ISSUE-P3-188` 第 3 目：`AboutSettingsScreen` 153 → **75 行出表**，≥100 项 25 → 24、待拆 22；新建 `AboutSettingsScreenSections.kt` 三段 + 一个 private 助手；逐字核对仅 3 处形参改名；**实测并登记剩余清单第 6 项**——11 处 / 241 行重复 `TopAppBar` 骨架） | `ISSUE-P3-188`（第 3 目再消化一个 + 新登结构性重复） | [`187-关于页段落拆分与重复骨架登记批次.md`](resolved/batches/187-关于页段落拆分与重复骨架登记批次.md) |
 
 ## 分册导航
 
