@@ -11,14 +11,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -27,7 +25,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -39,10 +36,8 @@ import com.keepasskey.app.ui.screens.importer.ImportReportDialog
 import com.keepasskey.app.ui.screens.importer.ImportUiState
 import com.keepasskey.app.ui.screens.settings.ChildDatabaseUiState
 import com.keepasskey.app.ui.screens.settings.ExportArtifactKind
-import com.keepasskey.app.ui.screens.settings.ExportConfirmationPolicy
 import com.keepasskey.app.ui.screens.settings.ExportTicket
 import com.keepasskey.app.ui.screens.settings.KdfBenchmarkUiState
-import com.keepasskey.app.ui.screens.settings.SafDocumentCleanup
 import com.keepasskey.app.ui.screens.settings.SettingsUiState
 
 /**
@@ -161,49 +156,19 @@ fun DatabaseSettingsScreen(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri -> uri?.let { childDbUnlockKeyFileUri = it.toString() } }
 
-    // 对话框 6d：密钥文件导出二次确认（ISSUE-P3-128，语义同明文 XML：同属 PLAINTEXT 风险等级）
+    // 对话框 6d：密钥文件导出二次确认（ISSUE-P3-128，同属 PLAINTEXT 风险等级；实现见 ExportConfirmationDialog）
     if (showKeyFileExportConfirm) {
-        // ISSUE-P2-20：取消分支清理 SAF 已创建的空目标文档，不留 0 字节残留
-        val localContext = LocalContext.current
-        fun cleanupCancelledKeyFileTarget() {
-            pendingKeyFileUri?.let {
-                SafDocumentCleanup.deleteCreatedDocument(localContext, it)
-            }
-            showKeyFileExportConfirm = false
-            pendingKeyFileUri = null
-        }
-        AlertDialog(
-            onDismissRequest = { cleanupCancelledKeyFileTarget() },
-            title = { Text(stringResource(R.string.dbset_keyfile_export_warn_title)) },
-            text = {
-                Text(
-                    text = stringResource(R.string.dbset_keyfile_export_warn_message),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.error
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    val target = pendingKeyFileUri
-                    showKeyFileExportConfirm = false
-                    pendingKeyFileUri = null
-                    // 确认后签发令牌再放行：令牌是控制器入口的必填参数，UI 无法绕过确认直接调用
-                    val ticket = ExportConfirmationPolicy.confirm(
-                        kind = ExportArtifactKind.KEY_FILE,
-                        userConfirmed = true
-                    )
-                    if (target != null && ticket != null) onExportKeyFile(target, ticket)
-                }) {
-                    Text(stringResource(R.string.dbset_export_plain_warn_confirm))
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { cleanupCancelledKeyFileTarget() }) {
-                    Text(stringResource(R.string.btn_cancel))
-                }
-            }
+        ExportConfirmationDialog(
+            titleResId = R.string.dbset_keyfile_export_warn_title,
+            messageResId = R.string.dbset_keyfile_export_warn_message,
+            artifactKind = ExportArtifactKind.KEY_FILE,
+            targetUri = pendingKeyFileUri,
+            onCancel = { showKeyFileExportConfirm = false },
+            onTargetConsumed = { pendingKeyFileUri = null },
+            onConfirmed = onExportKeyFile
         )
     }
+
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -394,97 +359,33 @@ fun DatabaseSettingsScreen(
         )
     }
 
-    // 对话框 6b：明文 XML 导出二次确认（ISSUE-P2-10 / ZT-15）
+    // 对话框 6b：明文 XML 导出二次确认（ISSUE-P2-10 / ZT-15；实现见 ExportConfirmationDialog）
     if (showPlaintextXmlConfirm) {
-        // ISSUE-P2-20：取消分支清理 SAF 已创建的空目标文档，不留 0 字节残留
-        val localContext = LocalContext.current
-        fun cleanupCancelledXmlTarget() {
-            pendingPlaintextXmlUri?.let {
-                SafDocumentCleanup.deleteCreatedDocument(localContext, it)
-            }
-            showPlaintextXmlConfirm = false
-            pendingPlaintextXmlUri = null
-        }
-        AlertDialog(
-            onDismissRequest = { cleanupCancelledXmlTarget() },
-            title = { Text(stringResource(R.string.dbset_export_plain_warn_title)) },
-            text = {
-                Text(
-                    text = stringResource(R.string.dbset_export_plain_warn_message),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.error
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    val target = pendingPlaintextXmlUri
-                    showPlaintextXmlConfirm = false
-                    pendingPlaintextXmlUri = null
-                    // 决策走可单测的 ExportConfirmationPolicy：确认后**签发令牌**再放行
-                    // （ISSUE-P3-110：令牌是导出控制器层的必填参数，UI 无法绕过确认直接调用）
-                    // 取消/未确认分支不调用 onExportXml（fail-closed）
-                    val ticket = ExportConfirmationPolicy.confirm(
-                        kind = ExportArtifactKind.PLAINTEXT_XML,
-                        userConfirmed = true
-                    )
-                    if (target != null && ticket != null) onExportXml(target, ticket)
-                }) {
-                    Text(stringResource(R.string.dbset_export_plain_warn_confirm))
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { cleanupCancelledXmlTarget() }) {
-                    Text(stringResource(R.string.btn_cancel))
-                }
-            }
+        ExportConfirmationDialog(
+            titleResId = R.string.dbset_export_plain_warn_title,
+            messageResId = R.string.dbset_export_plain_warn_message,
+            artifactKind = ExportArtifactKind.PLAINTEXT_XML,
+            targetUri = pendingPlaintextXmlUri,
+            onCancel = { showPlaintextXmlConfirm = false },
+            onTargetConsumed = { pendingPlaintextXmlUri = null },
+            onConfirmed = onExportXml
         )
     }
 
-    // 对话框 6c：明文 CSV 导出二次确认（ISSUE-P3-73，语义同明文 XML）
+
+    // 对话框 6c：明文 CSV 导出二次确认（ISSUE-P3-73，语义同明文 XML；实现见 ExportConfirmationDialog）
     if (showPlaintextCsvConfirm) {
-        // ISSUE-P2-20：取消分支清理 SAF 已创建的空目标文档，不留 0 字节残留
-        val localContext = LocalContext.current
-        fun cleanupCancelledCsvTarget() {
-            pendingPlaintextCsvUri?.let {
-                SafDocumentCleanup.deleteCreatedDocument(localContext, it)
-            }
-            showPlaintextCsvConfirm = false
-            pendingPlaintextCsvUri = null
-        }
-        AlertDialog(
-            onDismissRequest = { cleanupCancelledCsvTarget() },
-            title = { Text(stringResource(R.string.dbset_export_csv_plain_warn_title)) },
-            text = {
-                Text(
-                    text = stringResource(R.string.dbset_export_csv_plain_warn_message),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.error
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    val target = pendingPlaintextCsvUri
-                    showPlaintextCsvConfirm = false
-                    pendingPlaintextCsvUri = null
-                    // 决策走可单测的 ExportConfirmationPolicy：确认后**签发令牌**再放行
-                    // （ISSUE-P3-110：令牌是导出控制器层的必填参数，UI 无法绕过确认直接调用）
-                    // 取消/未确认分支不调用 onExportCsv（fail-closed）
-                    val ticket = ExportConfirmationPolicy.confirm(
-                        kind = ExportArtifactKind.PLAINTEXT_CSV,
-                        userConfirmed = true
-                    )
-                    if (target != null && ticket != null) onExportCsv(target, ticket)
-                }) {
-                    Text(stringResource(R.string.dbset_export_plain_warn_confirm))
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { cleanupCancelledCsvTarget() }) {
-                    Text(stringResource(R.string.btn_cancel))
-                }
-            }
+        ExportConfirmationDialog(
+            titleResId = R.string.dbset_export_csv_plain_warn_title,
+            messageResId = R.string.dbset_export_csv_plain_warn_message,
+            artifactKind = ExportArtifactKind.PLAINTEXT_CSV,
+            targetUri = pendingPlaintextCsvUri,
+            onCancel = { showPlaintextCsvConfirm = false },
+            onTargetConsumed = { pendingPlaintextCsvUri = null },
+            onConfirmed = onExportCsv
         )
     }
+
 
     // 对话框 7：导入数据源 → SAF 打开文件 → 交控制器（解析 / 落库 / 出报告）
     var pendingImportSource by remember { mutableStateOf<ImportSource?>(null) }

@@ -89,7 +89,33 @@
 
 ---
 
-## P3 低危问题、特性接线与体验优化（2 项）
+## P3 低危问题、特性接线与体验优化（3 项）
+
+### ISSUE-P3-194 静态源码守卫的「剥注释」不认识字符串字面量（一处安全守卫已证实假阴性，余 11 份待收口）
+
+- **核实时间点与方式**：2026-09-18，脚本对比两种视图——naive（直接去块注释 + 行注释）与
+  strict（先剥三引号 / 双引号字面量，再去注释），遍历 `app/src/main` 全部 `.kt`；再以
+  `grep -l 'stripComments\|BLOCK_COMMENT\|stripped('` 清点 `app/src/test` 的静态守卫。
+- **事实（快照，收口后须重算）**：`app/src/main` 下 **97 份**文件的「块注释剥离视图」在两种口径下不同，
+  naive 口径**多删 100 ~ 10,963 字符**的真实代码。起因是 Kotlin 字符串里出现的「斜杠星 / 星斜杠」子串
+  （本仓 SAF 通配过滤器字面量最常见，正则字面量亦含之）——一旦某处开注释符落在字符串内，
+  配对会一路错到文件末尾。`app/src/test` 侧 **12 份**静态守卫使用同类剥离，其中 **4 份**做
+  **全目录扫描**（`UiMd3AlignmentWiringTest` / `DatabaseConfigHeaderMappingTest` /
+  `ExportTicketSinkGuardTest` / `MainDispatcherPollutionGuardTest`），受影响面最大。
+- **已证实的后果（§156）**：`ExportTicketSinkGuardTest` 扫 `DatabaseSettingsScreen.kt` 时**三处调用点被看成一处**；
+  更要紧的是该守卫第一条判据「全仓 `app/src/main` 有无第二处 `ExportTicket` 实现」正走这套剥离
+  ⇒ 落在被吞区间内的**伪造令牌实现不会被发现**（安全守卫**假阴性**）。§156 已把**该一份**改为委托新工具
+  `app/src/test/java/com/keepasskey/app/testutil/SourceTextSanitizer.kt`（口径：字符串 → 块注释 → 行注释）。
+- **为何本批不一次改完其余 11 份**：视图变严后，各守卫的既有断言可能从「靠盲区通过」变成真实判据下失败——
+  每条都需**逐条裁定**（断言写错 还是 代码确有旁路），**不得**为凑绿放宽断言（`AGENTS.md` §3 测试资产纪律）。
+- **整改纪律**：① 各守卫的 `stripComments` / `stripped` 一律改为委托 `stripStringsAndComments`，
+  不再自带注释正则；② 每改一份即单跑该守卫，任何新暴露的失败必须**就地裁定并留痕**（两类结论分开写）；
+  ③ 全部收口后给该工具补一条自检用例（对含通配字面量的样例源断言「调用点计数 = 实际处数」形态），防再退化。
+- **验收标准**：`grep -rn "val BLOCK_COMMENT" app/src/test` **归零**；上述 12 份守卫全部改委托且各自单跑绿；
+  `ExportTicketSinkGuardTest` 一类「全域扫描」守卫在两种口径下**结论一致**。
+- **边界**：纯**测试基础设施**缺陷，不涉及产品行为；本条不影响运行时安全机制本身（令牌机制仍由控制器与
+  用例双重把守），受影响的是「守卫能否看见问题」。
+
 
 ### ISSUE-P3-188 巨型类与魔法数字专项整改（工程规则 §单一职责 / §禁止魔法数字 违例收敛）
 
@@ -154,9 +180,13 @@
     `HMAC_KEY_SELECTOR`(0x01)、`END_OF_HEADER_MARKER`、写侧 `XML_TRUE` / `XML_FALSE` / `boolElement`、
     `PasskeyKeyText` 的 PEM 空白码位。**全部只挪定义、未改任何取值**。
 - **剩余清单（第二档渐进消化，未消化部分如实留此）**：
-  1. **Compose 面的超长文件 / 超长函数**（结构性可拆，本批未做）：`DatabaseSettingsScreen`(530，
-     单个 `@Composable` 约 459 行，含 18 个局部状态 + SAF launcher + 对话框接线，可对齐
-     `EntryDetailDialogHost` / `VaultListDialogHost` 的「控制器 + 对话框宿主」先例下沉)、
+  1. **Compose 面的超长文件 / 超长函数**（结构性可拆）：`DatabaseSettingsScreen` ——
+     **§156 已消化第一段**（三处同形「明文导出二次确认」弹窗收敛为共享组件
+     `DatabaseSettingsExportConfirmDialog.kt`，530 → **432 行**；配套把 `ExportTicketSinkGuardTest`
+     的接线判据由 3 条扩到 8 条并做变异验证，见
+     [`resolved/batches/156-明文导出二次确认收敛批次.md`](resolved/batches/156-明文导出二次确认收敛批次.md)）；
+     **仍开放**：7 个 SAF launcher 群与子库对话框群（对话框 5 / 5b）未下沉，需按
+     `EntryDetailDialogHost` / `VaultListDialogHost` 的「控制器 + 对话框宿主」先例整体上抬状态（>400 阈值仍未达）；
      `HealthCheckScreen`(326)、`ConflictResolutionScreen`(172)、`ChildDatabaseDialog`(170)、
      `Argon2ParametersDialog`(168)、`UnlockStandardUnlockContent`(158)、`AboutSettingsScreen`(153)、
      `EntryDetailTopBar`(151)、`EntryDetailScreen`(137)、`PackageBlocklistManageDialog`(131)、

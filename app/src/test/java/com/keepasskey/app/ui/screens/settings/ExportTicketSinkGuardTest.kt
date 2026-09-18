@@ -1,5 +1,6 @@
 package com.keepasskey.app.ui.screens.settings
 
+import com.keepasskey.app.testutil.stripStringsAndComments
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -97,10 +98,19 @@ class ExportTicketSinkGuardTest {
     /**
      * ISSUE-P3-128：密钥文件导出在 **UI 侧**也必须先经二次确认——
      * 否则控制器虽要求令牌，UI 仍可在 SAF 回调里凭空签发一个（等于没确认）。
+     *
+     * **§156 搬家后的等价改写**：三处同形确认弹窗（明文 XML / 明文 CSV / 密钥文件）已收敛为
+     * 同包共享组件 `ExportConfirmationDialog`，故「签发点」与「取消清理点」移到该文件、
+     * `kind` 改由调用方传入。**定位串随搬家更新，断言强度只增不减**：除原有三条外，另钉
+     * ① 密钥文件调用点必须把 `artifactKind` 钉为 `KEY_FILE` 且 `targetUri` / `onConfirmed`
+     * 分别是 `pendingKeyFileUri` / `onExportKeyFile`（防「弹了确认框却导出别的对象」），
+     * ② 三类明文导出各一处调用点（多一处即存在旁路），③ UI 侧签发点在整个 `subscreens` 目录**唯一**，
+     * ④ 目标或令牌缺失一律不放行（fail-closed），⑤ 取消分支必清理 SAF 空文档（ISSUE-P2-20）。
      */
     @Test
     fun `密钥文件导出必须先经二次确认弹窗签发令牌`() {
         val code = stripComments(readSource(SCREEN_SOURCE))
+        val dialog = stripComments(readSource(CONFIRM_DIALOG_SOURCE))
 
         assertTrue(
             "[$SCREEN_SOURCE] SAF 回调须把目标落到「待确认」状态并弹出确认框",
@@ -111,10 +121,39 @@ class ExportTicketSinkGuardTest {
             DIRECT_KEYFILE_EXPORT.containsMatchIn(code)
         )
         assertTrue(
-            "[$SCREEN_SOURCE] 确认分支必须经 ExportConfirmationPolicy 签发 KEY_FILE 令牌",
-            KEY_FILE_TICKET.containsMatchIn(code)
+            "[$SCREEN_SOURCE] 密钥文件的确认调用点必须钉住「种类 = KEY_FILE、目标 = pendingKeyFileUri、" +
+                "放行 = onExportKeyFile」三者的绑定",
+            KEY_FILE_CALL_SITE.containsMatchIn(code)
+        )
+        assertEquals(
+            "[$SCREEN_SOURCE] 三类明文导出（XML / CSV / 密钥文件）各一处确认调用点，多一处即存在旁路",
+            3,
+            Regex("ExportConfirmationDialog\\(").findAll(code).count()
+        )
+
+        assertTrue(
+            "[$CONFIRM_DIALOG_SOURCE] 令牌必须由策略签发（UI 侧不得自行构造 ExportTicket）",
+            ISSUANCE.containsMatchIn(dialog)
+        )
+        assertEquals(
+            "整个 subscreens 目录只允许一处 UI 侧签发点（共享确认框内），多出处即存在未确认的放行路径",
+            1,
+            subscreenSources()
+                .sumOf { Regex("""ExportConfirmationPolicy\.confirm\(""").findAll(stripComments(it.readText())).count() }
+        )
+        assertTrue(
+            "[$CONFIRM_DIALOG_SOURCE] 目标或令牌缺失时不得放行导出（fail-closed）",
+            FAIL_CLOSED.containsMatchIn(dialog)
+        )
+        assertTrue(
+            "[$CONFIRM_DIALOG_SOURCE] 取消分支必须清理 SAF 已创建的空目标文档（ISSUE-P2-20）",
+            dialog.contains("SafDocumentCleanup.deleteCreatedDocument(localContext, it)")
         )
     }
+
+    /** `subscreens` 目录（三类调用点与共享确认框所在处）的全部 Kotlin 源文件 */
+    private fun subscreenSources(): List<File> =
+        File(repositoryRoot, SUBSCREENS_DIR).walkTopDown().filter { it.isFile && it.extension == "kt" }.toList()
 
     /** 控制器/策略所在源文件的全部 `main` 源码文件 */
     private fun mainSourceFiles(): List<File> =
@@ -153,15 +192,38 @@ class ExportTicketSinkGuardTest {
         error("函数体未闭合：$signature")
     }
 
-    /** 剔除块注释与行注释——整改说明本身会写出被断言的字面量 */
-    private fun stripComments(source: String): String =
-        source.replace(BLOCK_COMMENT, "").replace(LINE_COMMENT, "")
+    /**
+     * 剔除注释（先剥字符串字面量）——整改说明本身会写出被断言的字面量。
+     * §156：原实现只剥注释，于是 SAF 通配过滤器字面量里的「斜杠星」会被当成块注释起点，
+     * 一路吞到下一个闭注释符，使本守卫在被吞区间上**假阴性**（含「全仓无第二实现」那条扫描）。
+     * 口径统一到 [com.keepasskey.app.testutil.stripStringsAndComments]。
+     */
+    private fun stripComments(source: String): String = stripStringsAndComments(source)
 
     private companion object {
         const val CONTROLLER_SOURCE =
             "app/src/main/java/com/keepasskey/app/ui/screens/settings/SettingsExportController.kt"
         const val SCREEN_SOURCE =
             "app/src/main/java/com/keepasskey/app/ui/screens/settings/subscreens/DatabaseSettingsScreen.kt"
+        const val CONFIRM_DIALOG_SOURCE =
+            "app/src/main/java/com/keepasskey/app/ui/screens/settings/subscreens/DatabaseSettingsExportConfirmDialog.kt"
+        const val SUBSCREENS_DIR =
+            "app/src/main/java/com/keepasskey/app/ui/screens/settings/subscreens"
+
+        /** 密钥文件确认调用点的三项绑定：种类、待确认目标、放行回调 */
+        val KEY_FILE_CALL_SITE = Regex(
+            """ExportConfirmationDialog\(\s*titleResId = R\.string\.dbset_keyfile_export_warn_title,""" +
+                """[\s\S]*?artifactKind = ExportArtifactKind\.KEY_FILE,[\s\S]*?targetUri = pendingKeyFileUri,""" +
+                """[\s\S]*?onConfirmed = onExportKeyFile"""
+        )
+
+        /** 共享确认框内的唯一签发点（`kind` 由调用方传入） */
+        val ISSUANCE = Regex(
+            """ExportConfirmationPolicy\.confirm\(\s*kind\s*=\s*artifactKind,\s*userConfirmed\s*=\s*true\s*\)"""
+        )
+
+        /** 未确认 / 无目标一律不放行 */
+        val FAIL_CLOSED = Regex("""if \(target != null && ticket != null\) onConfirmed\(target, ticket\)""")
 
         /** 令牌唯一实现必须是 private class（防止文件外构造） */
         val PRIVATE_IMPL = Regex("""private\s+class\s+IssuedExportTicket\s*\(""")
@@ -178,13 +240,6 @@ class ExportTicketSinkGuardTest {
         /** 非法形态：SAF 结果直接触发密钥文件导出（跳过二次确认） */
         val DIRECT_KEYFILE_EXPORT = Regex("""uri\?\.let\(onExportKeyFile\)""")
 
-        /** 密钥文件确认分支的令牌签发形态 */
-        val KEY_FILE_TICKET = Regex(
-            """ExportConfirmationPolicy\.confirm\(\s*kind\s*=\s*ExportArtifactKind\.KEY_FILE\s*,"""
-        )
-
-        val BLOCK_COMMENT = Regex("""/\*[\s\S]*?\*/""")
-        val LINE_COMMENT = Regex("""//[^\n]*""")
 
         /** 仓库根：同时具备 app 与 core 模块源码目录的最近祖先 */
         val repositoryRoot: File by lazy {
