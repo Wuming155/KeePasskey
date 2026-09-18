@@ -1,5 +1,6 @@
 package com.keepasskey.app.ui
 
+import com.keepasskey.app.testutil.stripCommentsOnly
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -199,12 +200,14 @@ class UiMd3AlignmentWiringTest {
         return segments
     }
 
-    /** 去掉块注释与行注释（本用例只做模式匹配，字符串里的 `//` 被截断无害） */
-    private fun stripComments(source: String): String =
-        source
-            .replace(Regex("/\\*.*?\\*/", RegexOption.DOT_MATCHES_ALL), "")
-            .lines()
-            .joinToString("\n") { it.substringBefore("//") }
+    /**
+     * 去掉字符串字面量与注释（口径统一见 [com.keepasskey.app.testutil.stripCommentsOnly]）。
+     *
+     * `ISSUE-P3-194`：原实现只剥注释，而本用例**全目录扫描** `app/src/main`——源文件里 SAF 通配
+     * 过滤器字面量含「斜杠星」子串时，会被当成块注释起点一路吞到下一个闭注释符，
+     * 使被吞区间内的真实代码对本守卫不可见（假阴性）。
+     */
+    private fun stripComments(source: String): String = stripCommentsOnly(source)
 
     private fun readSource(path: String): String {
         val file = File(repositoryRoot, path)

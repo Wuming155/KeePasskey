@@ -6,6 +6,7 @@ import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.crypto.kdf.KdfParameters
 import com.keepasskey.database.file.KdbxDatabase
 import com.keepasskey.database.file.KdbxHeader
+import com.keepasskey.app.testutil.stripCommentsOnly
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -159,15 +160,11 @@ class DatabaseConfigHeaderMappingTest {
             .toList()
 
     /** 剔除块注释与行注释——整改说明本身会写出被断言的字面量 */
-    private fun stripComments(source: String): String =
-        source.replace(BLOCK_COMMENT, "").replace(LINE_COMMENT, "")
+    private fun stripComments(source: String): String = stripCommentsOnly(source)
 
     private companion object {
         const val POLY1305 = "Poly1305"
         const val LABELS_SOURCE_NAME = "CipherLabels.kt"
-
-        val BLOCK_COMMENT = Regex("""/\*[\s\S]*?\*/""")
-        val LINE_COMMENT = Regex("""//[^\n]*""")
 
         /** 仓库根：同时具备 app 与 core 模块源码目录的最近祖先 */
         val repositoryRoot: File by lazy {
