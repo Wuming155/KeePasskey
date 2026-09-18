@@ -68,6 +68,13 @@ object PasskeyCryptoEngine {
     // 默认自托管 / 虚拟 Authenticator AAGUID (16 字节全零)
     val DEFAULT_AAGUID: ByteArray = ByteArray(16) { 0 }
 
+    /**
+     * 凭据 ID 的字节上限：`Attested Credential Data` 里的 `credentialIdLength` 是
+     * **2 字节大端整数**（W3C WebAuthn §6.1），故上限即 uint16 最大值
+     * （`ISSUE-P3-188` 第 4 目 §168 收敛：原为 `require` 里内联的字面量）。
+     */
+    const val CREDENTIAL_ID_MAX_BYTES: Int = 0xFFFF
+
     private val ecParams: X9ECParameters = SECNamedCurves.getByName("secp256r1")
     private val domainParams = ECDomainParameters(ecParams.curve, ecParams.g, ecParams.n, ecParams.h)
     private val secureRandom = SecureRandom()
@@ -368,7 +375,7 @@ object PasskeyCryptoEngine {
         if (hasAttestedData) {
             requireNotNull(credentialId) { "flags 声明 AT (0x40) 时 credentialId 不能为空" }
             requireNotNull(cosePublicKey) { "flags 声明 AT (0x40) 时 cosePublicKey 不能为空" }
-            require(credentialId.size <= 0xFFFF) { "credentialId 长度超出 16 位整数上限: ${credentialId.size}" }
+            require(credentialId.size <= CREDENTIAL_ID_MAX_BYTES) { "credentialId 长度超出 16 位整数上限: ${credentialId.size}" }
 
             // 4.1 aaguid (16 字节)
             val finalAaguid = if (aaguid.size == 16) aaguid else DEFAULT_AAGUID

@@ -1,6 +1,16 @@
 package com.keepasskey.app.passkey
 
 /**
+ * ASCII 空格码位（`ISSUE-P3-188` 第 4 目 §168 收敛：原先三处各写一份裸 `0x20`）。
+ * 本包内两种用法共用同一个值，语义由比较符决定，不再各自造名：
+ * - `< ASCII_SPACE`：**控制字符**（JSON 字符串内必须转义，见 [SimpleJson] 与
+ *   [CallingOriginResolver] 的转义面）；
+ * - `<= ASCII_SPACE`：**可剔除的 ASCII 空白**（Base64 解码前的两侧修剪，见
+ *   [PasskeyAssertionActivity]）。
+ */
+internal const val ASCII_SPACE = 0x20
+
+/**
  * 极简 JSON 解析器（**零依赖**，可 JVM 单测）。
  *
  * ## 为什么不用 `org.json.JSONObject`
@@ -154,7 +164,7 @@ internal object SimpleJson {
                         }
                     }
                     else -> {
-                        if (c.code < 0x20) throw IllegalArgumentException("字符串包含未转义控制字符")
+                        if (c.code < ASCII_SPACE) throw IllegalArgumentException("字符串包含未转义控制字符")
                         sb.append(c)
                     }
                 }

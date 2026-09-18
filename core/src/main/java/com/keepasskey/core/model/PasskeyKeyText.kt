@@ -39,8 +39,15 @@ object PasskeyKeyText {
         0x06, 0x09, 0x2A, 0x86.toByte(), 0x48, 0x86.toByte(), 0xF7.toByte(), 0x0D, 0x01, 0x01, 0x01
     )
 
-    private const val ASCII_NEWLINE = 0x0A
+    /**
+     * PEM 文本里的空白与换行码位（**唯一一组定义**，语义对齐 RFC 7468 §3 的 PEM 空白字符集）。
+     * §168 前本对象内另有 `CHAR_LF` / `CHAR_CR` / `CHAR_SPACE` / `CHAR_TAB` 一组同值异名常量，
+     * 已并入此处——收敛只挪定义，未改任何取值。
+     */
+    private const val ASCII_LF = 0x0A
+    private const val ASCII_CR = 0x0D
     private const val ASCII_SPACE = 0x20
+    private const val ASCII_TAB = 0x09
 
     /** PEM 标准折行宽度（RFC 7468 建议 64 字符） */
     private const val PEM_LINE_CHARS = 64
@@ -163,7 +170,7 @@ object PasskeyKeyText {
     private fun indexOfLineBreak(bytes: ByteArray, from: Int): Int {
         var i = from
         while (i < bytes.size) {
-            if ((bytes[i].toInt() and 0xFF) == ASCII_NEWLINE) return i
+            if ((bytes[i].toInt() and 0xFF) == ASCII_LF) return i
             i++
         }
         return -1
@@ -180,12 +187,6 @@ object PasskeyKeyText {
         return -1
     }
 
-    /** 需剔除的空白码位（LF / CR / 空格 / TAB，语义对齐 RFC 7468 §3 的 PEM 空白字符集） */
-    private const val CHAR_LF = 0x0A
-    private const val CHAR_CR = 0x0D
-    private const val CHAR_SPACE = 0x20
-    private const val CHAR_TAB = 0x09
-
     /** 剔除 `[from, to)` 区间内的全部空白字节（换行 / 回车 / 空格 / TAB） */
     private fun stripWhitespace(bytes: ByteArray, from: Int, to: Int): ByteArray {
         val start = from.coerceAtLeast(0)
@@ -195,7 +196,7 @@ object PasskeyKeyText {
         var n = 0
         for (i in start until end) {
             val b = bytes[i].toInt() and 0xFF
-            if (b == CHAR_LF || b == CHAR_CR || b == CHAR_SPACE || b == CHAR_TAB) continue
+            if (b == ASCII_LF || b == ASCII_CR || b == ASCII_SPACE || b == ASCII_TAB) continue
             out[n++] = bytes[i]
         }
         return if (n == out.size) out else out.copyOf(n)

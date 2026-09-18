@@ -421,8 +421,8 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
         // 先剔除两侧 ASCII 空白再 Base64 解码（与历史 trim() 语义一致，但不物化 String）
         var start = 0
         var end = raw.size
-        while (start < end && raw[start].toInt() <= 0x20) start++
-        while (end > start && raw[end - 1].toInt() <= 0x20) end--
+        while (start < end && raw[start].toInt() <= ASCII_SPACE) start++
+        while (end > start && raw[end - 1].toInt() <= ASCII_SPACE) end--
         val slice = raw.copyOfRange(start, end)
         try {
             return Base64.getDecoder().decode(slice)

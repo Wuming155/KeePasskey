@@ -114,7 +114,7 @@ object CallingOriginResolver {
             when {
                 c == '"' -> sb.append("\\\"")
                 c == '\\' -> sb.append("\\\\")
-                c.code < 0x20 -> sb.append("\\u%04x".format(c.code))
+                c.code < ASCII_SPACE -> sb.append("\\u%04x".format(c.code))
                 else -> sb.append(c)
             }
         }

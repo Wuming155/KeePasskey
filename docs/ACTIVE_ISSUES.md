@@ -124,12 +124,14 @@
        `LittleEndianUtil` 同族）、`TotpKeyUriParser` 的 16 处全是 `val` 常量定义、
        `PasskeyKeyText` 的 31 处全是 OID/DER 字节串与 ASCII 常量定义、
        `UnlockPasskeyManager` / `SyncEndpointGuard` / `OtpEngine` 各仅余 1~2 处掩码；
-     - **仍待裁定（低价值，留此备查，勿再全仓重扫）**：① `PasskeyKeyText` 同文件内
-       `ASCII_NEWLINE`(0x0A) 与 `CHAR_LF`(0x0A)、`ASCII_SPACE`(0x20) 与 `CHAR_SPACE`(0x20)
-       是**重复命名的同一值**，应合并为一处定义；② `PasskeyAssertionActivity` / `SimpleJson` /
-       `CallingOriginResolver` 的 `<= 0x20` 控制字符阈值可命名为「ASCII 控制字符上界」；
-       ③ `PasskeyCryptoEngine` 的 6 处 `0x40` / `0x04` / `0x80` / `0x10` / `0x08` / `0xFFFF`
-       需逐处判定是位掩码（合法）还是编码语义值（应收敛）；
+     - **§168 已把「仍待裁定」三小项全部裁定完毕**：① `PasskeyKeyText` 的同值异名常量并为一组
+       `ASCII_LF` / `ASCII_CR` / `ASCII_SPACE` / `ASCII_TAB`；② 三处 `0x20` 阈值改为包内
+       `internal const val ASCII_SPACE`（`<` 表控制字符、`<=` 表可修剪空白，分工写进常量 KDoc）；
+       ③ `PasskeyCryptoEngine` 的 6 处十六进制经逐处判定**全为 `FLAG_UP`~`FLAG_ED` 定义本身**（合法），
+       其真正的内联 uint16 上限改为 `CREDENTIAL_ID_MAX_BYTES`。**全部只命名、未改任何取值**。
+       剩余 169 处内联十六进制的三类定性（UI 色板 / 格式签名字节 / **待逐处判定的 7 份文件**）
+       与扫描判据见 [`resolved/batches/168-魔法数字第4目三小项裁定批次.md`](resolved/batches/168-魔法数字第4目三小项裁定批次.md) §2~§3；
+       第 3 类集中在 `crypto` / `database` 的格式编解码面，须与 `.kdbx` 对拍同批做，**属独立一段**（§38 证据纪律）。
      - **合法形态登记（不整改）**：UI 色板（`ThemeMode` / `Color.kt`）、位运算掩码
        （`LittleEndianUtil` / `CborEncoder` / 各处 `and 0x0F` 十六进制编码）、数据表
        （`DicewareWordList` / OID-DER 字节串 / `CborConstants`）、BOM 探测字节
@@ -148,11 +150,11 @@
   > ⇒ 本条**不得**被读作「第一档已闭环」。`EntryDetailViewModel` 虽有 44 / 58 个成员是一行委托，
   > 但仍有 5 个含实现体的成员（`uiState` 装配 29 行、`exportAttachment` 14 行、协作者构造等），
   > **不满足**限界 §18 的成立前提（「成员全部为一行委托」）⇒ 不得登记为门面理由，只能继续拆。≥100 行函数全部拆分至 ≤50 行；
-  第 4 目清单中的协议 / 格式语义字面量收敛为命名常量（**§167 部分达标**：复核后唯一成片的真实违例
-  `@Preview(uiMode = 0x20)` 已全量归零；余下三小项——同文件重复命名常量、`<= 0x20` 控制字符阈值、
-  `PasskeyCryptoEngine` 位值定性——登记在第 4 目「仍待裁定」段，属低价值小项，**不得**据此把本条读作已闭环）；
+  第 4 目清单中的协议 / 格式语义字面量收敛为命名常量（**§167~§168 已裁定完毕**：成片真实违例
+  `@Preview(uiMode = 0x20)` 归零、三小项全部落地，**全部只命名未改值**；余下只有 `crypto` / `database`
+  格式面的 7 份「待逐处判定」文件，须与 `.kdbx` 对拍同批做，属独立一段 ⇒ 本条**不得**据此读作已闭环）；
   剩余第二档渐进消化，未消化部分在批次文档留清单。
-- **当前进度（只留结论；逐批改动与验证见 `docs/resolved/batches/155`~`167`）**：
+- **当前进度（只留结论；逐批改动与验证见 `docs/resolved/batches/155`~`168`）**：
   - **第一档 8 文件**：达标 4（`UnlockViewModel` 368、`SyncCache` 382、`DatabaseSettingsScreen` 369（§159）、
     `EntryEditFormSections` 351（§160））；按理由登记 2（`SettingsViewModel` 544 / `DatabaseSession` 535，
     经复核为**纯门面**，理由 / 边界 / 解除条件见限界 **§18**）；**仍超 2**（`EntryDetailViewModel` 434 /
