@@ -86,8 +86,9 @@ Coroutines + Flow；**文档与代码注释使用简体中文**。
 - `python .github/check_dependency_cvss.py build/reports/dependency-check/dependency-check-report.json` — 供应链 CVSS ≥ 7.0 硬断言（fail-closed）
 - `cd crypto/src/main/rust && cargo test` — 原生内核单测
 - `python tools/kdbx-corpus/generate_corpus.py --check` — `.kdbx` 语料校验
-- `python tools/doc/count_line_tiers.py` / `python tools/doc/check_md_links.py` — 五模块行数分档复核
-  （`ISSUE-P3-188` 唯一口径）/ `docs/` 相对链接自检（**改任何文档后跑**，断链即退出码 1）
+- `python tools/doc/count_line_tiers.py` / `python tools/doc/long_functions.py` / `python tools/doc/check_md_links.py`
+  — 五模块行数分档复核 / 超长函数复核（`ISSUE-P3-188` 唯一口径，度量须用已知值反校，判据见脚本文档串）
+  / `docs/` 相对链接自检（**改任何文档后跑**，断链即退出码 1）
 - `bash tools/audit/check_recheck_consistency.sh` — 复核报告一致性扫描（**改审计 / 复核报告后必跑**）
 - `"$env:USERPROFILE\.android\bin\android-cli.exe" studio <子命令>` — IDE / 设备侧调试首选入口（Android CLI，见下条约定；
   **PowerShell 写法**；Git Bash / MSYS 下同义写法为 `"$USERPROFILE/.android/bin/android-cli.exe"`）
