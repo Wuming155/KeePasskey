@@ -89,7 +89,32 @@
 
 ---
 
-## P3 低危问题、特性接线与体验优化（2 项）
+## P3 低危问题、特性接线与体验优化（3 项）
+
+### ISSUE-P3-195 `PrivilegedBrowserSettingsScreen` 顶栏配色被 §188 顺手改掉（重复骨架收敛的一处真实回归）
+
+- **症状**：该页顶栏 `containerColor` 由 `MaterialTheme.colorScheme.background` 变为共用骨架写死的
+  `surface`，并新增了原块没有的 `titleContentColor = onSurface`。浅色主题下两色近乎不可辨、
+  **深色主题下可辨** ⇒ 属真实的呈现变更，不是「只搬不改」。
+- **核实时间点与方式**：2026-09-18，`python tools/doc/scaffold_block_fingerprint.py 5690ecf^
+  app/src/main/java/com/keepasskey/app/ui/screens/settings/subscreens <十页>`——十页的 `Scaffold(...)`
+  块按括号配平取出、只归一化「标题资源 / `snackbarHost` 行 / 尾随 lambda 形参名」三项后取哈希分组，
+  结果为 **6 页同桶 + 3 页同桶（差一行 `snackbarHost`，已归一化）+ 1 页独桶**，独桶即本页
+  （差异行：`containerColor` 取值不同、缺 `titleContentColor`）；逐行差异见
+  [`resolved/batches/189-守卫点名五页接入共用骨架批次.md`](resolved/batches/189-守卫点名五页接入共用骨架批次.md) §2~§3。
+  成因是 §188 §2 的「实测五页这两项逐字相同」靠**目测**登记，未做上述指纹比对。
+- **涉及文件**：`app/src/main/java/com/keepasskey/app/ui/screens/settings/subscreens/SettingsSubscreenScaffold.kt`
+  （70 行，`internal`）与同目录 `PrivilegedBrowserSettingsScreen.kt`（145 行）。
+- **两条修法（取舍口径不同，须用户择一；代理侧两条均已被拦，不得擅自动手）**：
+  ① **参数化骨架**：加 `topBarContainerColor: Color = MaterialTheme.colorScheme.surface` 与
+  `topBarTitleContentColor: Color? = MaterialTheme.colorScheme.onSurface`（可空即「不传该参数」），
+  该页传 `background` / `null` ⇒ 十页仍共用一份骨架，代价是骨架多两个参数；
+  ② **撤销该页替换**：`PrivilegedBrowserSettingsScreen` 退回自写 `Scaffold + TopAppBar`（纯反向补丁）
+  ⇒ 骨架保持最小，代价是留一处例外，且该页函数由 95 行回到 **115 行 ⇒ 重新入第 3 目待拆表**。
+- **验收标准**：修法落地后该页顶栏的**有效配色参数**与 §188 之前一致（以
+  `git diff 5690ecf^ -- <该页>` 加骨架定义逐行核读为证，不靠「看起来一样」）；
+  `test --rerun-tasks --max-workers=1` 全绿；`:app:lintDebug` 的 `issue` 计数保持 **215**；
+  **不得**为凑「十页同桶」而把该页配色改成与其它九页相同（那是把回归固化成口径）。
 
 ### ISSUE-P3-188 巨型类与魔法数字专项整改（工程规则 §单一职责 / §禁止魔法数字 违例收敛）
 
@@ -146,17 +171,18 @@
   `@Preview(uiMode = 0x20)` 归零、三小项全部落地，**全部只命名未改值**；余下只有 `crypto` / `database`
   格式面的 7 份「待逐处判定」文件，须与 `.kdbx` 对拍同批做，属独立一段 ⇒ 本条**不得**据此读作已闭环）；
   剩余第二档渐进消化，未消化部分在批次文档留清单。
-- **当前进度（只留结论；逐批改动与验证见 `docs/resolved/batches/155`~`188`（§180 为文档面批次，不属本条））**：
+- **当前进度（只留结论；逐批改动与验证见 `docs/resolved/batches/155`~`189`（§180 为文档面批次，不属本条））**：
   - **第一档 8 文件**（`wc -l` 实测）：**达标 6**（`SyncCache` 382、`UnlockViewModel` 368、
-    `DatabaseSettingsScreen` 370（§159 降到 369，后续批次回填至 370）、`EntryEditFormSections` 351（§160）、
+    `DatabaseSettingsScreen` 339（§159 降到 369，后续批次回填至 370，§189 再降到 339）、`EntryEditFormSections` 351（§160）、
     `EntryDetailScreen` 349（§169）、`EntryDetailViewModel` 397（§170））；按理由登记 2（`SettingsViewModel` 543 / `DatabaseSession` 535，
     经复核为**纯门面**，理由 / 边界 / 解除条件见限界 **§18**）；**仍超 0** ⇒ **第一档维度闭环**。
     两点留痕：① `EntryDetailViewModel` **不满足**限界 §18 的成立前提（「成员全部为一行委托」），
     它是真降到 400 以下而非登记为门面；② 其剩下 6 个含实现体成员（跨条目明文处置顺序、偏好快照刷新、
     fail-closed 导出判定、会话登记与 `init` / `onCleared`）属页面状态层应持有者，**不得**再为「门面感」外搬
     （§170 §3 记了两处刻意不做的移动及各自的已记录边界）；
-  - **第 3 目（≥100 行函数）**：**≥100 行的非 Compose 函数已全部消除**，余下 28 个 ≥100 行函数**全部为
-    Compose 面**（清单见 [`resolved/batches/181-长函数度量工具化与快照分流批次.md`](resolved/batches/181-长函数度量工具化与快照分流批次.md) §3）。
+  - **第 3 目（≥100 行函数）**：**≥100 行的非 Compose 函数已全部消除**，表内余项**全部为 Compose 面**
+    （§181 首测 28；**当前计数一律现跑 `tools/doc/long_functions.py`，本文件只在剩余清单第 1 项维护一份**），
+    逐个名单见 [`resolved/batches/181-长函数度量工具化与快照分流批次.md`](resolved/batches/181-长函数度量工具化与快照分流批次.md) §3。
     但「清单内 20 处**全部降到 ≤50**」这句原结论**经 §181 实测为不实**，两处余量已于 **§182 逐条处置**：
     `mergeConflictedEntry` 52 → **41**（冲突对构造原样下沉为 `conflictPairOf`），
     `processFillRequest` **55** 经**限界 §20** 裁定接受（早退守卫 + 强制注释，再拆即违反纪律 ⑤ 或改写 fail-closed 路径）。
@@ -168,20 +194,26 @@
     **全部只挪定义、未改任何取值**）；§167 复核出「唯一成片真实违例」= `@Preview(uiMode = 0x20)` 并已归零，
     当时的三个「待裁定」小项已由 §168 逐条落地（见违例清单第 4 目）。
 - **剩余清单（本条尚未闭环的部分，逐条自包含）**：
-  > 编号映射（§172 压缩流水后本清单为 1~6 项）：早期批次正文里提到的「剩余清单第 3 项」= 此处第 2 项
-  > （第二档渐进消化），「第 5 项」= 此处第 4 项（会话锁定直调用例）。第 5 项由 §173 追加；
-  > **第 6 项已两度易主**——原登「第 3 目历史快照分流」（§176 追加、§181 就地改写、§182 结案移出，
+  > **现为 1~5 项**（§172 压缩流水时为 1~6 项；第 6 项已由 §189 结案移出）。
+  > 编号映射：早期批次正文里提到的「剩余清单第 3 项」= 此处第 2 项（第二档渐进消化），
+  > 「第 5 项」= 此处第 4 项（会话锁定直调用例）。第 5 项由 §173 追加；
+  > **第 6 项已三度易主后结案**——原登「第 3 目历史快照分流」（§176 追加、§181 就地改写、§182 结案移出，
   > 处置结论见限界 **§20** 与
   > [`resolved/batches/182-合并层冲突对下沉与早退守卫限界批次.md`](resolved/batches/182-合并层冲突对下沉与早退守卫限界批次.md)），
-  > 现登「二级设置页重复 `TopAppBar` 骨架」（§187 实测新登）。
-  1. **Compose 面的长函数**（第 3 目的剩余部分）：**§188 复跑 = 23 个 ≥100 行函数，全部为 Compose 面**（§181 首测 28 → §183 削 `Argon2ParametersDialog` → §185 削 `KeePasskeyApp` → §186 削 `UnlockStandardUnlockContent` → §187 削 `AboutSettingsScreen` → §188 顺带削 `PrivilegedBrowserSettingsScreen`）；
+  > 后登「二级设置页重复 `TopAppBar` 骨架」（§187 实测新登、§188 首段五页、**§189 十页全部收敛后结案**，
+  > 见 [`resolved/batches/189-守卫点名五页接入共用骨架批次.md`](resolved/batches/189-守卫点名五页接入共用骨架批次.md)）；
+  > **该批遗留的一处真实回归已独立成条 ⇒ 由 `ISSUE-P3-195` 承接**（本清单不再复述其内容）。
+  1. **Compose 面的长函数**（第 3 目的剩余部分）：**§189 复跑 = 23 个 ≥100 行函数，全部为 Compose 面**（§181 首测 28 → §183 削 `Argon2ParametersDialog` → §185 削 `KeePasskeyApp` → §186 削 `UnlockStandardUnlockContent` → §187 削 `AboutSettingsScreen` → §188 顺带削 `PrivilegedBrowserSettingsScreen`）；
      逐个名单见 [`resolved/batches/181-长函数度量工具化与快照分流批次.md`](resolved/batches/181-长函数度量工具化与快照分流批次.md) §3。
      **计数今后一律现跑 `python tools/doc/long_functions.py`**（三条判据与其踩坑史写在工具文档串里，
      条目内不再抄录，以免重演 §175 一次性脚本漏报 10 条的失真）。
      已消减：§178 `OpenExistingVaultDialog` 226→96、§183 `Argon2ParametersDialog` 168→80、
      §185 `KeePasskeyApp` 202→86、§186 `UnlockStandardUnlockContent` 158→71、
      §187 `AboutSettingsScreen` 153→75（均**出表**，§185 另补 5 例宿主单测）；
-     §179 `CreateVaultWizardDialog` 234→158（**仍在表内**，下限由主密码 `CharArray` 擦除链的「单一现场」决定，见 §179 §3）。
+     §179 `CreateVaultWizardDialog` 234→158（**仍在表内**，下限由主密码 `CharArray` 擦除链的「单一现场」决定，见 §179 §3）；
+     §189 `HealthCheckScreen` 227→**206**（骨架块在函数体内、**未出表**，计数仍 23）。
+     **当前表内头部**（现跑读数）：`HealthCheckScreen` 206、`ConflictResolutionScreen` 172、
+     `ChildDatabaseDialog` 170、`CreateVaultWizardDialog` 158、`EntryDetailTopBar` 151。
      **口径问题已裁决（§184，PD-11）**：两个纯接线装配表 `keepasskeySettingsNavGraph`（252，逻辑行 1）与
      `keepasskeyNavGraph`（164，逻辑行 0）**豁免本目 ⇒ 23 项中扣除二者，待拆实为 21 个**；
      **`KeePasskeyApp` 不豁免**，已按该裁决于 §185 下沉（逻辑行 10 → 0）。裁决全文、分类计数依据与
@@ -195,18 +227,20 @@
      「弹了确认框却导出别的对象」失去可断言落点；② `AutofillConfirmActivity.completeAuthResult`——
      唯一行为级证据是设备侧 `AutofillAuthChainDeviceTest`；③ `SyncConflictController.autoMergeAndUpload`——
      承载 `localDbOwned` 擦除判据的一处调用点（§166 §2）。
-  2. **第二档（400~500 行文件）渐进消化**：**§186 后为 28 个**（口径：五模块 `src/main` 全部 `.kt`
+  2. **第二档（400~500 行文件）渐进消化**：**§189 复跑仍为 28 个**（口径：五模块 `src/main` 全部 `.kt`
      逐文件计数、**400 与 500 两端皆含**，脚本 `python tools/doc/count_line_tiers.py` 一次给出两档；
      取数须在**最终写盘后**——§165 §7 校正过一批「测量点早于写盘」造成的 `+1` 漂移）。
      当前头部：`RealVaultRepository` 489、`VaultRepository` 478、`RuntimeIntegrityDetector` 470、
      `KdbxHeader` 461、`KdbxXmlParser` 454、`VaultListScreen` 447、`UnlockScreen` 446。
-     **已消化 14 个**（一律「只搬不改逻辑」，逐批留痕 `resolved/batches/159`~`186`）：
-     `DatabaseSettingsScreen` 530→369、`VaultListDialogs` 490→280、`PasskeyCreateActivity` 460→359、
+     **已消化 14 个**（一律「只搬不改逻辑」，逐批留痕 `resolved/batches/159`~`189`）：
+     `DatabaseSettingsScreen` 530→339（§159 起，§189 再降）、`VaultListDialogs` 490→280、`PasskeyCreateActivity` 460→359、
      `VaultEntryMapper` 490→384、`AutofillConfirmActivity` 475→366、`EntryEditScreen` 472→319、
      `SyncConflictController` 461→355、`EntryDetailScreen` 427→349、`EntryDetailViewModel` 434→397、
      `PasskeyAssertionActivity` 450→267（§173，与 §162 的注册侧对称）、`PasskeyCryptoEngine` 453→269（§174）、
-     `HealthCheckScreen` 406→299（§175）、`SettingsPreferencesController` 446→379（§176）、
+     `HealthCheckScreen` 406→272（§175→§189）、`SettingsPreferencesController` 446→379（§176）、
      `UnlockContentSections` 430→336（§186，与第 3 目一批双降）。
+     **减而未出档（勿误记为消减）**：§189 让 `DebugSettingsScreen` 443→418、`SecuritySettingsScreen` 433→407、
+     `CloudSyncScreen` 427→401 各再省 25~26 行，**三页仍全部留在第二档** ⇒ 28 不变；`CloudSyncScreen` 距出表 1 行。
      **刻意排后（是取舍不是遗漏）**：① `RealVaultRepository` / `VaultRepository`——整树读写与擦除边界，
      牵动限界 §1.6 的可达性穷举；② `KdbxHeader` / `KdbxXmlParser`——`.kdbx` 格式面，须过官方实现
      端到端对拍（§38 证据纪律），属独立一段；③ `DicewareWordList` 408——词表数据文件，
@@ -218,6 +252,9 @@
      规则：凡搬家**必须**同批把守卫扫描改为「门面 + 分支文件」**并集**，做到「**只放宽定位串、不降低断言
      强度**」（计数类判据两侧计数保持不变）；**不得**以删除或放宽守卫凑绿（`AGENTS.md` §3 测试资产纪律）。
      并集里少一份文件不会静默通过——`readSource` 对不存在的路径先断言失败。
+     **同类代价的第二形态（§189 实测）**：「多处重复、可收敛为一份」也是一个**前提**，目测登记同样会错
+     （§188 即因此改掉过一页顶栏配色 ⇒ `ISSUE-P3-195`）；收敛前须跑
+     `python tools/doc/scaffold_block_fingerprint.py <rev> <目录> <页名>…` 让差异**自己分桶**。
   4. **会话锁定「擦除动作」仍有两个 ViewModel 无宿主直调用例（§170 暴露，§171 已补详情页）**：
      `SessionLockGuard` 样板化之后，五个 VM 中只有 `AutofillPickerViewModel`（2 例）与
      `GeneratorViewModel`（1 例）带锁定行为用例；`EntryDetailViewModel` / `EntryEditViewModel` /
@@ -244,28 +281,6 @@
      > 可行的两条路：**① 设备侧 instrumentation 用例**（需硬件，当前阻塞）；
      > **② 先引入宿主可用的 JSON 写入口径**（新增小写入器，把注册 / 断言两处 payload 改走它，
      > 再补上述四条宿主断言）。选 ② 时须与两处 payload 的既有静态守卫同批核对，勿只改一半。
-  6. **二级设置页各写一份 `TopAppBar` 骨架（§187 实测新登，属重复而非缺陷）**：
-     `app/src/main/java/com/keepasskey/app/ui/screens/settings/` 下 **10 个二级设置页**
-     （`AboutSettingsScreen` / `AutofillSettingsScreen` / `CloudSyncScreen` / `DatabaseSettingsScreen` /
-     `DebugSettingsScreen` / `HealthCheckScreen` / `PrivilegedBrowserSettingsScreen` /
-     `SecuritySettingsScreen` / `ThemeSettingsScreen` / `TotpSettingsScreen`）各写一份
-     **19~20 行**的 `TopAppBar(标题 + ArrowBack + topAppBarColors(surface/onSurface))` 块，
-     加主页 `SettingsScreen` 的 42 行，合计 **11 处 / 241 行**（§187 括号配平实测）。
-     **核实方式**：2026-09-18，脚本按 `^\s+TopAppBar\($` 定位并配平到闭合括号统计（同 §175「复核须实读」纪律，
-     初筛结果已逐处确认标题/返回键/配色三要素一致）。
-     **进度（§188）**：共用骨架 `subscreens/SettingsSubscreenScaffold.kt` 已建，**零守卫引用的五页已替换**
-     （`About` / `Theme` / `Autofill` / `PrivilegedBrowser` / `Totp` 各 −21 行，附带
-     `PrivilegedBrowserSettingsScreen` 115→95 出本目表）；**余六页**（`CloudSyncScreen` 427、
-     `DebugSettingsScreen` 443、`SecuritySettingsScreen` 433、`HealthCheckScreen`、
-     `DatabaseSettingsScreen`、主页 `SettingsScreen`）均被接线守卫点名，其中
-     **`DebugSettingsScreen` 的锚点已核实位于 topBar 块之外**（`coloredLines = remember(logLines)`）。
-     替换时逐页替换；**每替换一页须核该页是否另有
-     `containerColor` / `contentWindowInsets` 差异**（`AboutSettingsScreen` 用
-     `containerColor = background`，与部分页不同 ⇒ 骨架需以参数暴露，不得强行统一）。
-     **注意**：上述六页各被 `UiMd3AlignmentWiringTest` / `OneTapInteractionWiringTest` /
-     `AlgoHotPathGuardsTest` / `DatabaseSettingsSectionWiringTest` / `ExportTicketSinkGuardTest` 之一点名，
-     替换前须逐页核锚点位置（在 topBar 块外则可径直替换；块内须做剩余清单第 3 项的并集扩扫）。
-     `SettingsScreen` 的 42 行块另含 actions，**不属本骨架范围**。
 - **依据**：`.codebuddy/rules/engineering-rules.md` §高内聚低耦合 / §禁止魔法数字；本条目为 2026-09-18 用户命题「消除巨型类和魔法数字」。
 
 ### ISSUE-P3-187 JNI 零拷贝评估（原生加密内核的边界拷贝成本）

@@ -75,7 +75,8 @@ Coroutines + Flow；**文档与代码注释使用简体中文**。
 统一用 Gradle Wrapper（版本与 SHA-256 见 `gradle/wrapper/gradle-wrapper.properties`）。Windows 下执行 `.\gradlew.bat <task>`：
 
 - `.\gradlew.bat assembleDebug` / `lint` / `:app:compileDebugScreenshotTestKotlin --rerun` — 编译全部模块 / Android Lint
-  （warning 不阻断）/ **截图测试包装编译门禁**（`app/src/screenshotTest/` 是 gitignore 的生成物目录，改过 `@Preview`
+  （warning 不阻断；`lint` 报告计数**只认** `grep -cE "^ *<issue$" app/build/reports/lint-results-debug.xml`——
+  用 `<issue` 会把根元素 `<issues>` 也算进去，恒多 1）/ **截图测试包装编译门禁**（`app/src/screenshotTest/` 是 gitignore 的生成物目录，改过 `@Preview`
   或 `tools/export_previews/` 生成器后跑；无需设备，`test` 不覆盖它。**用真编译任务 `...Kotlin`**：
   聚合任务 `:app:compileDebugScreenshotTestSources` 只做依赖编排，见到它报 UP-TO-DATE 并不能证明编译发生过；
   需要确凿证据时加 `--rerun`（实测该 Kotlin 任务强制执行约 3s））
@@ -91,7 +92,9 @@ Coroutines + Flow；**文档与代码注释使用简体中文**。
   — 五模块行数分档复核 / 超长函数复核 / `docs/` 相对链接自检（**改任何文档后跑**，断链即退出码 1）
   / 装配表「逻辑行」分类计数（`PD-11` 重开条件的可执行判据）。前三者是 `ISSUE-P3-188` 唯一口径，
   **度量工具一律用已知值反校**（判据与踩坑史写在各脚本文档串里）；逐字搬移复核用
-  `python tools/doc/check_verbatim_move.py <原文件> <本体> [段落文件…]`
+  `python tools/doc/check_verbatim_move.py <原文件> <本体> [段落文件…]`；「多处重复代码是否真逐字相同」
+  的前提成立性用 `python tools/doc/scaffold_block_fingerprint.py <git rev> <目录> <页名>…`
+  （**目测登记前提曾造成一次真实回归**，见 `ISSUE-P3-195`）
 - `bash tools/audit/check_recheck_consistency.sh` — 复核报告一致性扫描（**改审计 / 复核报告后必跑**）
 - `"$env:USERPROFILE\.android\bin\android-cli.exe" studio <子命令>` — IDE / 设备侧调试首选入口（Android CLI，见下条约定；
   **PowerShell 写法**；Git Bash / MSYS 下同义写法为 `"$USERPROFILE/.android/bin/android-cli.exe"`）

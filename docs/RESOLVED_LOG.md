@@ -1,14 +1,14 @@
 # KeePasskey 已整改问题与历史任务归档（Resolved Log）
 
 > **文档定位**：已整改缺陷 / 已落地特性 / 已闭环技术债的**归档总索引**（一页纸入口）。正文按**一批次一文件**拆分，见下表「正文」列。
-> **维护规则**：`ACTIVE_ISSUES.md` 中的条目整改并测试通过后，整条移入本归档——**新批次追加一行索引 + 新增一个批次文件**，编号续 §68 起。
+> **维护规则**：`ACTIVE_ISSUES.md` 中的条目整改并测试通过后，整条移入本归档——**新批次追加一行索引 + 新增一个批次文件**，编号全局递增、不复用。
 > **如实留痕**：整改中真实发生的生产 / 测试 / 编排缺陷不美化、不隐去（各批次文件的「过程缺陷」小节）。
 > **引用约定**：仓内其它文档写「`RESOLVED_LOG.md` §NN」时，按本表「正文」列跳转到该批次的独立文件。
-> **分册体系**：见 [`resolved/README.md`](resolved/README.md)；分册级索引 5 份（各 ≤100 行）：[`01`](resolved/BATCH_01_30.md) · [`02`](resolved/BATCH_31_45.md) · [`03`](resolved/BATCH_46_57.md) · [`04`](resolved/BATCH_58_PLUS.md)（§58 起，滚动）。
+> **分册体系**：见 [`resolved/README.md`](resolved/README.md)；分册级索引 5 份：[`01`](resolved/BATCH_01_30.md) · [`02`](resolved/BATCH_31_45.md) · [`03`](resolved/BATCH_46_57.md) · [`04`](resolved/BATCH_58_PLUS.md)（§58 起，滚动）· [`05`](resolved/BATCH_158_PLUS.md)（§158 起，滚动）。
 
 ---
 
-## 全量批次索引（§1 ~ §165）
+## 全量批次索引（§1 起，逐批在表末追加；「当前最大编号」只在 [`resolved/README.md`](resolved/README.md) 维护一份）
 
 | § | 批次主题 | 条目范围 | 正文 |
 |:--:|---|---|---|
@@ -227,6 +227,7 @@
 | §186 | 解锁区段落拆分批次（`ISSUE-P3-188` **一批双降**：第二档 **29 → 28**（`UnlockContentSections` 430→336）、≥100 行 **26 → 25**（`UnlockStandardUnlockContent` 158→71）；新建 `UnlockStandardUnlockSections.kt` 四段，主密码 `SecurePasswordField` 链路刻意留本体；`UiMd3AlignmentWiringTest` 判据按内层列表并集扩扫；顺带收紧 `logic_lines.py` 一处会误导的豁免判定语） | `ISSUE-P3-188`（第 3 目 + 第二档双降） | [`186-解锁区段落拆分批次.md`](resolved/batches/186-解锁区段落拆分批次.md) |
 | §187 | 关于页段落拆分批次（`ISSUE-P3-188` 第 3 目：`AboutSettingsScreen` 153 → **75 行出表**，≥100 项 25 → 24、待拆 22；新建 `AboutSettingsScreenSections.kt` 三段 + 一个 private 助手；逐字核对仅 3 处形参改名；**实测并登记剩余清单第 6 项**——11 处 / 241 行重复 `TopAppBar` 骨架） | `ISSUE-P3-188`（第 3 目再消化一个 + 新登结构性重复） | [`187-关于页段落拆分与重复骨架登记批次.md`](resolved/batches/187-关于页段落拆分与重复骨架登记批次.md) |
 | §188 | 二级设置页共用骨架批次（第 6 项首段：新建 `SettingsSubscreenScaffold.kt`，零守卫引用的五页各 −21 行（About/Theme/Autofill/PrivilegedBrowser/Totp），重复 5 份收敛为 1 份；附带 `PrivilegedBrowserSettingsScreen` 115→95 **出第 3 目表** ⇒ ≥100 项 24 → 23、待拆 21） | `ISSUE-P3-188`（第 6 项推进 + 第 3 目再消化一个） | [`188-二级设置页共用骨架批次.md`](resolved/batches/188-二级设置页共用骨架批次.md) |
+| §189 | 守卫点名五页接入共用骨架批次（`ISSUE-P3-188` **第 6 项结案**：`Debug` 443→418、`CloudSync` 427→401、`Security` 433→407、`HealthCheck` 299→272、`DatabaseSettings` 370→339 五页接入 `SettingsSubscreenScaffold`，**净 −135 行、十页重复收敛为一份**；`HealthCheckScreen` 函数 227→**206**（未出表 ⇒ ≥100 仍 23、第二档仍 28）；新增 `tools/doc/scaffold_block_fingerprint.py` 把「多处重复是否真逐字相同」做成可复跑判据，**并据此查出 §188 曾顺手改掉一页顶栏配色 ⇒ 新登 `ISSUE-P3-195`**（两条修法均待用户择一，本批未改生产代码）） | `ISSUE-P3-188`（第 6 项闭环）/ 新登记 `ISSUE-P3-195` | [`189-守卫点名五页接入共用骨架批次.md`](resolved/batches/189-守卫点名五页接入共用骨架批次.md) |
 
 ## 分册导航
 
