@@ -156,7 +156,9 @@ class AlgoHotPathGuardsTest {
                 .contains("fun removeEntries(")
         )
 
-        val conflict = stripped("app/src/main/java/com/keepasskey/app/sync/SyncConflictController.kt")
+        // §166：四类无状态合并辅助（含 applyResolvedEntriesToGroup 的**定义**）已下沉到同包分支文件，
+        // 故按「门面 + 分支文件」并集扫描——两条判据（必须有单趟入口 / 不得残留逐条实现）逐字保留。
+        val conflict = listOf(stripped(CONFLICT), stripped(CONFLICT_ADJUDICATION)).joinToString(separator = " ")
         assertTrue(
             "冲突决议必须收集后单趟落树",
             conflict.contains("applyResolvedEntriesToGroup(")
@@ -442,9 +444,7 @@ class AlgoHotPathGuardsTest {
 
     @Test
     fun `同步冲突合并的本地侧必须直取内存树`() {
-        val controller = stripped(
-            "app/src/main/java/com/keepasskey/app/sync/SyncConflictController.kt"
-        )
+        val controller = stripped(CONFLICT)
         assertTrue(
             "本地侧必须支持由调用方传入内存树（ISSUE-P3-168 ①：省去一次「解析 localBytes 回树」" +
                 "＝一次 KDF + 一次整树构建）",
@@ -455,10 +455,13 @@ class AlgoHotPathGuardsTest {
             controller.contains("val localDbOwned = localDbOverride == null") &&
                 controller.contains("if (localDbOwned) wipeDiscarded(localDb)")
         )
+        // §166：`wipeDiscarded` 的**定义**已随四类合并辅助下沉到同包分支文件；对裸调用的计数必须
+        // 覆盖「门面 + 分支文件」并集，否则把调用点搬出门面即可绕过本判据（两侧计数判据不变，不放宽）。
+        val wipeScope = listOf(controller, stripped(CONFLICT_ADJUDICATION)).joinToString(separator = " ")
         assertEquals(
             "每一处 wipeDiscarded(localDb) 都必须由 localDbOwned 判据把关（裸调用＝P0 隐患）",
-            Regex("wipeDiscarded\\(localDb\\)").findAll(controller).count(),
-            Regex("if \\(localDbOwned\\) wipeDiscarded\\(localDb\\)").findAll(controller).count()
+            Regex("wipeDiscarded\\(localDb\\)").findAll(wipeScope).count(),
+            Regex("if \\(localDbOwned\\) wipeDiscarded\\(localDb\\)").findAll(wipeScope).count()
         )
 
         // §155：两条合并入口的其中一处（handleConflictDetected）已下沉到同包分支文件，
@@ -557,6 +560,9 @@ class AlgoHotPathGuardsTest {
         const val RUNNER = "app/src/main/java/com/keepasskey/app/sync/SyncCycleRunner.kt"
         const val RUNNER_REMOTE_OUTCOMES =
             "app/src/main/java/com/keepasskey/app/sync/SyncCycleRemoteOutcomes.kt"
+        const val CONFLICT = "app/src/main/java/com/keepasskey/app/sync/SyncConflictController.kt"
+        const val CONFLICT_ADJUDICATION =
+            "app/src/main/java/com/keepasskey/app/sync/SyncConflictMergeAdjudication.kt"
 
 
         val repositoryRoot: File by lazy {

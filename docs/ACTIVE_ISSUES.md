@@ -185,35 +185,27 @@
      （三段裁决与 `RemoteSyncContext` 移为同包 `internal` 扩展函数文件 `SyncCycleRemoteOutcomes.kt`，
      门面回到 **429 行**；五成员放宽为 `internal`；`AlgoHotPathGuardsTest` 改按「门面 + 分支文件」并集扫描，
      计数判据仍为 2。见 [`resolved/batches/155-同步周期远端分支下沉批次.md`](resolved/batches/155-同步周期远端分支下沉批次.md)）；
-  3. **其余 400~500 行文件**（**§161 重测口径**：五模块 `src/main` 全部 `.kt` 逐文件 `wc -l`，
-     **§165 后为 36 个**（§161 40 → §162 39 → §163 38 → §164 37 → §165 36）；原记「约 36 个」系 §188 首次清点时刻之数）——头部：
-     `RealVaultRepository` 489、`VaultRepository` 478、`AutofillConfirmActivity` 475、`EntryEditScreen` 472、
-     `RuntimeIntegrityDetector` 470、`SyncConflictController` 461、`KdbxHeader` 461、`KdbxXmlParser` 454；第一档余量 `EntryDetailViewModel` 434 / `EntryDetailScreen` 426 亦含在内。
-     > **§165 再消化一个**：`EntryEditScreen` 472 → **319**（四件窄参数无状态展示件抽为
-     > `EntryEditChrome.kt` 135 行 + 预览夹具归位到本包既有预览夹；`showIconPicker` /
-     > `showDiscardDialog` 刻意留在母文件，避免「关对话框」出现两处真相）。
-     > **§164 再消化一个**：`AutofillConfirmActivity` 475 → **366**（无状态的「调用方归属块」+ 其预览夹具
-     > 移入 `AutofillCallerAttributionBlock.kt` 126 行，`private` → `internal`；三处源码接线守卫的判据
-     > 都锚在 Activity 本体的认证结果与交付锁路径上，**其行为用户刻意排除**——该段的行为级证据只有
-     > 设备侧 `AutofillAuthChainDeviceTest`，本机无设备时不搬，以免进入「只有静态判据、无法真机复跑」的区域）。
-     > **§163 再消化一个**：`VaultEntryMapper` 490 → **384**（条目 TOTP 面「来源定位 → 配置解析 → 按时刻取码」
-     > 三者是无状态纯函数，整族移入 `VaultEntryTotpMapping.kt` 127 行；TASK-46 的字节态与 `finally` 擦除
-     > 语义随代码同迁未放宽；对外 `parseTotpConfig` / `computeTotpCode` 由母文件留一行委托，调用点零改动）。
-     > **§162 再消化一个头部文件**：`PasskeyCreateActivity` 460 → **359**（注册响应材料是纯函数产物，
-     > 整族移入 `PasskeyRegistrationPayload.kt` 133 行；`rpId` / `origin` 由实例字段改为显式入参，
-     > 三处安全语义随代码同迁未放宽），该档实测降至 **39 个**。
-     > **§161 已消化头部之一**：`VaultListDialogs` 490 → **280**（五个群组生命周期对话框移入
-     > `VaultListGroupDialogs.kt` 242 行，组件体逐字未改、无可见性放宽）；
-     > `.kdbx` 格式面（`KdbxHeader` / `KdbxXmlParser`）**刻意排在最后**——拆它们必须过对拍回归，属独立一段。
-     > `EntryEditFormSections`（原 438）已由 §160 降到 **351**（分组选择分节 + 绑定应用解析下沉为同包
-     > `EntryEditGroupAndAppSections.kt`）⇒ 该文件退出本档；其下沉块含 §131 的 `items(…, key = …)` 修复，
-     > `AlgoHotPathGuardsTest` 的扫描目标已按**两文件并集**同步（判据强度不变）。
-  4. **接线守卫与结构耦合的长期代价**：本批有**三个测试类**的静态源码比对断言因函数搬家而失配
-     （`AutofillAuthResultWiringTest` 两条：确认入口基 Intent 定位串、候选 `setField` 续行缩进；
-     `AlgoHotPathGuardsTest` 两条：内存树快照实参经 `RemoteSyncContext` 取值；
-     `OneTapInteractionWiringTest` 一处：复制职责已下沉协作者，改为「门面须委托 + 协作者须真写剪贴板」双查），
-     已按「**只放宽定位串、不降低断言强度**」修正并入库。凡再做结构性搬家，**必须**同批改这些守卫，
-     且**不得**以删除守卫凑绿（`AGENTS.md` §3 测试资产纪律）。
+  3. **其余 400~500 行文件**（**口径**：五模块 `src/main` 全部 `.kt` 逐文件 `wc -l`，且在**最终写盘后**取数
+     ——§165 §7 校正过一批「测量点早于写盘」造成的 `+1` 漂移）：**§166 后为 35 个**（§161 重测 40 →
+     §162 ~ §166 逐批各消化 1 个）。当前头部：`RealVaultRepository` 489、`VaultRepository` 478、
+     `RuntimeIntegrityDetector` 470、`KdbxHeader` 461、`KdbxXmlParser` 454、`PasskeyAssertionActivity` 450；
+     第一档余量 `EntryDetailViewModel` 434 / `EntryDetailScreen` 426 亦含在内。
+     > **已消化的头部文件**（逐批留痕于 `docs/resolved/batches/160`~`166`，一律「只搬不改逻辑」）：
+     > `VaultListDialogs` 490→280、`PasskeyCreateActivity` 460→359、`VaultEntryMapper` 490→384、
+     > `AutofillConfirmActivity` 475→366、`EntryEditScreen` 472→319、`SyncConflictController` 461→355；
+     > 另 `EntryEditFormSections` 438→351、`DatabaseSettingsScreen` 530→369 已退出本档。
+     > **刻意排后的三类（是取舍不是遗漏）**：① `RealVaultRepository` / `VaultRepository`——整树读写与
+     > 擦除边界，牵动限界 §1.6 的可达性穷举；② `KdbxHeader` / `KdbxXmlParser`——`.kdbx` 格式面，拆它们
+     > 必须过官方实现端到端对拍（§38 证据纪律），属独立一段；③ `DicewareWordList` 408——词表数据文件，
+     > 拆散反害查表语义。同类局部保留：`AutofillConfirmActivity` 的 `completeAuthResult`（其唯一行为级
+     > 证据是设备侧 `AutofillAuthChainDeviceTest`，无设备时不搬）、`SyncConflictController` 的
+     > `autoMergeAndUpload`（承载 `localDbOwned` 擦除判据的一处调用点，搬走需再扩守卫定位串）。
+  4. **接线守卫与结构耦合的长期代价（搬家必读）**：结构性搬家会改写静态源码比对断言的**定位范围**——
+     首例为三测试类同时失配（`AutofillAuthResultWiringTest` / `AlgoHotPathGuardsTest` /
+     `OneTapInteractionWiringTest`，见 §160 留痕），§166 再把 `AlgoHotPathGuardsTest` 的两条判据改为并集。
+     规则：凡搬家**必须**同批把守卫扫描改为「门面 + 分支文件」**并集**，做到「**只放宽定位串、不降低断言
+     强度**」（计数类判据两侧计数保持不变）；**不得**以删除或放宽守卫凑绿（`AGENTS.md` §3 测试资产纪律）。
+     并集里少一份文件不会静默通过——`readSource` 对不存在的路径先断言失败。
 - **依据**：`.codebuddy/rules/engineering-rules.md` §高内聚低耦合 / §禁止魔法数字；本条目为 2026-09-18 用户命题「消除巨型类和魔法数字」。
 
 ### ISSUE-P3-187 JNI 零拷贝评估（原生加密内核的边界拷贝成本）
