@@ -146,7 +146,7 @@
   `@Preview(uiMode = 0x20)` 归零、三小项全部落地，**全部只命名未改值**；余下只有 `crypto` / `database`
   格式面的 7 份「待逐处判定」文件，须与 `.kdbx` 对拍同批做，属独立一段 ⇒ 本条**不得**据此读作已闭环）；
   剩余第二档渐进消化，未消化部分在批次文档留清单。
-- **当前进度（只留结论；逐批改动与验证见 `docs/resolved/batches/155`~`187`（§180 为文档面批次，不属本条））**：
+- **当前进度（只留结论；逐批改动与验证见 `docs/resolved/batches/155`~`188`（§180 为文档面批次，不属本条））**：
   - **第一档 8 文件**（`wc -l` 实测）：**达标 6**（`SyncCache` 382、`UnlockViewModel` 368、
     `DatabaseSettingsScreen` 370（§159 降到 369，后续批次回填至 370）、`EntryEditFormSections` 351（§160）、
     `EntryDetailScreen` 349（§169）、`EntryDetailViewModel` 397（§170））；按理由登记 2（`SettingsViewModel` 543 / `DatabaseSession` 535，
@@ -174,7 +174,7 @@
   > 处置结论见限界 **§20** 与
   > [`resolved/batches/182-合并层冲突对下沉与早退守卫限界批次.md`](resolved/batches/182-合并层冲突对下沉与早退守卫限界批次.md)），
   > 现登「二级设置页重复 `TopAppBar` 骨架」（§187 实测新登）。
-  1. **Compose 面的长函数**（第 3 目的剩余部分）：**§187 复跑 = 24 个 ≥100 行函数，全部为 Compose 面**（§181 首测 28 → §183 削 `Argon2ParametersDialog` → §185 削 `KeePasskeyApp` → §186 削 `UnlockStandardUnlockContent` → §187 削 `AboutSettingsScreen`）；
+  1. **Compose 面的长函数**（第 3 目的剩余部分）：**§188 复跑 = 23 个 ≥100 行函数，全部为 Compose 面**（§181 首测 28 → §183 削 `Argon2ParametersDialog` → §185 削 `KeePasskeyApp` → §186 削 `UnlockStandardUnlockContent` → §187 削 `AboutSettingsScreen` → §188 顺带削 `PrivilegedBrowserSettingsScreen`）；
      逐个名单见 [`resolved/batches/181-长函数度量工具化与快照分流批次.md`](resolved/batches/181-长函数度量工具化与快照分流批次.md) §3。
      **计数今后一律现跑 `python tools/doc/long_functions.py`**（三条判据与其踩坑史写在工具文档串里，
      条目内不再抄录，以免重演 §175 一次性脚本漏报 10 条的失真）。
@@ -183,7 +183,7 @@
      §187 `AboutSettingsScreen` 153→75（均**出表**，§185 另补 5 例宿主单测）；
      §179 `CreateVaultWizardDialog` 234→158（**仍在表内**，下限由主密码 `CharArray` 擦除链的「单一现场」决定，见 §179 §3）。
      **口径问题已裁决（§184，PD-11）**：两个纯接线装配表 `keepasskeySettingsNavGraph`（252，逻辑行 1）与
-     `keepasskeyNavGraph`（164，逻辑行 0）**豁免本目 ⇒ 24 项中扣除二者，待拆实为 22 个**；
+     `keepasskeyNavGraph`（164，逻辑行 0）**豁免本目 ⇒ 23 项中扣除二者，待拆实为 21 个**；
      **`KeePasskeyApp` 不豁免**，已按该裁决于 §185 下沉（逻辑行 10 → 0）。裁决全文、分类计数依据与
      「逻辑行 ≥5 即重新计入」的重开条件见 [`architecture/产品裁决登记.md`](architecture/产品裁决登记.md) PD-11。
      拆法与 §156 / §159 / §175 / §178 / §179 同：同包段落组件（窄参数、不读 `UiState`、不自持状态），
@@ -253,12 +253,19 @@
      加主页 `SettingsScreen` 的 42 行，合计 **11 处 / 241 行**（§187 括号配平实测）。
      **核实方式**：2026-09-18，脚本按 `^\s+TopAppBar\($` 定位并配平到闭合括号统计（同 §175「复核须实读」纪律，
      初筛结果已逐处确认标题/返回键/配色三要素一致）。
-     **整改**：抽一个共用骨架（如 `SettingsSubscreenScaffold(title, onBackClick) { … }`，
-     内部 `Scaffold + TopAppBar + 内容 padding`），逐页替换；**每替换一页须核该页是否另有
+     **进度（§188）**：共用骨架 `subscreens/SettingsSubscreenScaffold.kt` 已建，**零守卫引用的五页已替换**
+     （`About` / `Theme` / `Autofill` / `PrivilegedBrowser` / `Totp` 各 −21 行，附带
+     `PrivilegedBrowserSettingsScreen` 115→95 出本目表）；**余六页**（`CloudSyncScreen` 427、
+     `DebugSettingsScreen` 443、`SecuritySettingsScreen` 433、`HealthCheckScreen`、
+     `DatabaseSettingsScreen`、主页 `SettingsScreen`）均被接线守卫点名，其中
+     **`DebugSettingsScreen` 的锚点已核实位于 topBar 块之外**（`coloredLines = remember(logLines)`）。
+     替换时逐页替换；**每替换一页须核该页是否另有
      `containerColor` / `contentWindowInsets` 差异**（`AboutSettingsScreen` 用
      `containerColor = background`，与部分页不同 ⇒ 骨架需以参数暴露，不得强行统一）。
-     **注意**：`UiMd3AlignmentWiringTest` / `PopupSecureFlagInventoryTest` / `SecureDialogFlagPolicyTest`
-     按文件路径点名读文本，替换哪些页就要按剩余清单第 3 项对这些守卫做**并集扩扫**。
+     **注意**：上述六页各被 `UiMd3AlignmentWiringTest` / `OneTapInteractionWiringTest` /
+     `AlgoHotPathGuardsTest` / `DatabaseSettingsSectionWiringTest` / `ExportTicketSinkGuardTest` 之一点名，
+     替换前须逐页核锚点位置（在 topBar 块外则可径直替换；块内须做剩余清单第 3 项的并集扩扫）。
+     `SettingsScreen` 的 42 行块另含 actions，**不属本骨架范围**。
 - **依据**：`.codebuddy/rules/engineering-rules.md` §高内聚低耦合 / §禁止魔法数字；本条目为 2026-09-18 用户命题「消除巨型类和魔法数字」。
 
 ### ISSUE-P3-187 JNI 零拷贝评估（原生加密内核的边界拷贝成本）

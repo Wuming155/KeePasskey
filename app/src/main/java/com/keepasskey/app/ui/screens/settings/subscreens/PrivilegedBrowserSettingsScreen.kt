@@ -58,30 +58,10 @@ fun PrivilegedBrowserSettingsScreen(
     // 进入即刷新一次已安装浏览器列表（安装/卸载后回到本页能立即反映）
     LaunchedEffect(Unit) { onRefresh() }
 
-    Scaffold(
-        modifier = modifier.fillMaxSize(),
-        containerColor = MaterialTheme.colorScheme.background,
-        topBar = {
-            TopAppBar(
-                title = {
-                    Text(
-                        text = stringResource(R.string.settings_passkey_privileged_browsers),
-                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
-                    )
-                },
-                navigationIcon = {
-                    IconButton(onClick = onBackClick) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = stringResource(R.string.cd_back)
-                        )
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background
-                )
-            )
-        }
+    SettingsSubscreenScaffold(
+        titleRes = R.string.settings_passkey_privileged_browsers,
+        onBackClick = onBackClick,
+        modifier = modifier,
     ) { padding ->
         LazyColumn(
             modifier = Modifier

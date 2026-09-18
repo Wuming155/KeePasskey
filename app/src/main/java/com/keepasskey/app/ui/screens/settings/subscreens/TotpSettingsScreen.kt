@@ -74,32 +74,11 @@ fun TotpSettingsScreen(
     var stepSeconds by remember(uiState.defaultTotpStepSeconds) { mutableIntStateOf(uiState.defaultTotpStepSeconds) }
     var digits by remember(uiState.defaultTotpDigits) { mutableIntStateOf(uiState.defaultTotpDigits) }
 
-    Scaffold(
-        modifier = modifier.fillMaxSize(),
-        containerColor = MaterialTheme.colorScheme.background,
+    SettingsSubscreenScaffold(
+        titleRes = R.string.set_totp_entry_title,
+        onBackClick = onBackClick,
+        modifier = modifier,
         snackbarHost = { SnackbarHost(snackbarHostState) },
-        topBar = {
-            TopAppBar(
-                title = {
-                    Text(
-                        text = stringResource(R.string.set_totp_entry_title),
-                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
-                    )
-                },
-                navigationIcon = {
-                    IconButton(onClick = onBackClick) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = stringResource(R.string.cd_back)
-                        )
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    titleContentColor = MaterialTheme.colorScheme.onSurface
-                )
-            )
-        }
     ) { innerPadding ->
         LazyColumn(
             modifier = Modifier
