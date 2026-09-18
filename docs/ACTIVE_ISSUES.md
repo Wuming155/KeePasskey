@@ -98,11 +98,10 @@
   魔法数字面以 `grep -E '0x[0-9A-Fa-f]{2,}'` 排除常量声明行后按文件计数（**§167 复核：该初筛法假阳性偏多，
   只可用于圈定候选，裁定须逐条看上下文**——见下方第 4 目）。
 - **违例清单（核实时刻快照，行号以实现为准）**：
-  1. **超 500 行文件（核实时刻 8 个，第一档）** —— **§167 重测**：全仓 `src/main` 超 500 行**仅余 2 个**
-     （`SettingsViewModel` 543 / `DatabaseSession` 535，均已按限界 **§18** 登记为门面理由）；
-     其余 6 个已降到 500 以下，但**验收线是 ≤400**：`EntryEditFormSections` 351（§160）、
-     `DatabaseSettingsScreen` 369（§159）、`UnlockViewModel` 368、`SyncCache` 382 **达标**，
-     `EntryDetailViewModel` 397（§170）与 `EntryDetailScreen` 349（§169）**均已降到 400 以下**；
+  1. **超 500 行文件（核实时刻 8 个，第一档）** —— **§176 重测**（`python tools/doc/count_line_tiers.py`）：
+     全仓 `src/main` 超 500 行**仅余 2 个**（`SettingsViewModel` 543 / `DatabaseSession` 535，均已按限界
+     **§18** 登记为门面理由）；其余 6 个已降到 500 以下，其**逐文件 `wc -l` 只在下方「当前进度 · 第一档」
+     维护一份**（验收线 ≤400），此处不再重复快照数字；
   2. **400~500 行文件（第二档）**：清单、当前计数与逐批消减**只在下方「剩余清单第 2 项」维护一份**
      （此处不再重复快照数字，避免两处数法各自漂移）；
   3. **超 50 行函数（第一档 ≥100 行）**：`SyncEngine.openRemote`(≈173)、`PasskeyAssertionActivity.onCreate`(≈153)、
@@ -148,10 +147,10 @@
   `@Preview(uiMode = 0x20)` 归零、三小项全部落地，**全部只命名未改值**；余下只有 `crypto` / `database`
   格式面的 7 份「待逐处判定」文件，须与 `.kdbx` 对拍同批做，属独立一段 ⇒ 本条**不得**据此读作已闭环）；
   剩余第二档渐进消化，未消化部分在批次文档留清单。
-- **当前进度（只留结论；逐批改动与验证见 `docs/resolved/batches/155`~`176`）**：
+- **当前进度（只留结论；逐批改动与验证见 `docs/resolved/batches/155`~`177`）**：
   - **第一档 8 文件**（`wc -l` 实测）：**达标 6**（`SyncCache` 382、`UnlockViewModel` 368、
-    `DatabaseSettingsScreen` 369（§159）、`EntryEditFormSections` 351（§160）、`EntryDetailScreen` 349（§169）、
-    `EntryDetailViewModel` 397（§170））；按理由登记 2（`SettingsViewModel` 543 / `DatabaseSession` 535，
+    `DatabaseSettingsScreen` 370（§159 降到 369，后续批次回填至 370）、`EntryEditFormSections` 351（§160）、
+    `EntryDetailScreen` 349（§169）、`EntryDetailViewModel` 397（§170））；按理由登记 2（`SettingsViewModel` 543 / `DatabaseSession` 535，
     经复核为**纯门面**，理由 / 边界 / 解除条件见限界 **§18**）；**仍超 0** ⇒ **第一档维度闭环**。
     两点留痕：① `EntryDetailViewModel` **不满足**限界 §18 的成立前提（「成员全部为一行委托」），
     它是真降到 400 以下而非登记为门面；② 其剩下 6 个含实现体成员（跨条目明文处置顺序、偏好快照刷新、
@@ -167,7 +166,7 @@
     **全部只挪定义、未改任何取值**）；§167 复核出「唯一成片真实违例」= `@Preview(uiMode = 0x20)` 并已归零，
     当时的三个「待裁定」小项已由 §168 逐条落地（见违例清单第 4 目）。
 - **剩余清单（本条尚未闭环的部分，逐条自包含）**：
-  > 编号映射（§172 压缩流水后本清单为 1~5 项，第 5 项由 §173 追加）：早期批次正文里提到的
+  > 编号映射（§172 压缩流水后本清单为 1~6 项，第 5 项由 §173、第 6 项由 §176 追加）：早期批次正文里提到的
   > 「剩余清单第 3 项」= 此处第 2 项（第二档渐进消化），「第 5 项」= 此处第 4 项（会话锁定直调用例）。
   1. **Compose 面的长函数**（第 3 目的剩余部分）：**§175 重测 = 28 个 ≥100 行函数，全部为 Compose 面**
      （非 Compose 逻辑函数确认清零）。重测口径三条：括号配平 + 去注释与字符串 + **跳过单表达式函数**
@@ -186,14 +185,16 @@
      唯一行为级证据是设备侧 `AutofillAuthChainDeviceTest`；③ `SyncConflictController.autoMergeAndUpload`——
      承载 `localDbOwned` 擦除判据的一处调用点（§166 §2）。
   2. **第二档（400~500 行文件）渐进消化**：**§176 后为 29 个**（口径：五模块 `src/main` 全部 `.kt`
-     逐文件 `wc -l`，且在**最终写盘后**取数——§165 §7 校正过一批「测量点早于写盘」造成的 `+1` 漂移）。
+     逐文件计数、**400 与 500 两端皆含**，脚本 `python tools/doc/count_line_tiers.py` 一次给出两档；
+     取数须在**最终写盘后**——§165 §7 校正过一批「测量点早于写盘」造成的 `+1` 漂移）。
      当前头部：`RealVaultRepository` 489、`VaultRepository` 478、`RuntimeIntegrityDetector` 470、
      `KdbxHeader` 461、`KdbxXmlParser` 454、`VaultListScreen` 447、`UnlockScreen` 446。
-     **已消化 11 个**（一律「只搬不改逻辑」，逐批留痕 `resolved/batches/159`~`174`）：
+     **已消化 13 个**（一律「只搬不改逻辑」，逐批留痕 `resolved/batches/159`~`176`）：
      `DatabaseSettingsScreen` 530→369、`VaultListDialogs` 490→280、`PasskeyCreateActivity` 460→359、
      `VaultEntryMapper` 490→384、`AutofillConfirmActivity` 475→366、`EntryEditScreen` 472→319、
      `SyncConflictController` 461→355、`EntryDetailScreen` 427→349、`EntryDetailViewModel` 434→397、
-     `PasskeyAssertionActivity` 450→267（§173，与 §162 的注册侧对称）、`PasskeyCryptoEngine` 453→269（§174）。
+     `PasskeyAssertionActivity` 450→267（§173，与 §162 的注册侧对称）、`PasskeyCryptoEngine` 453→269（§174）、
+     `HealthCheckScreen` 406→299（§175）、`SettingsPreferencesController` 446→379（§176）。
      **刻意排后（是取舍不是遗漏）**：① `RealVaultRepository` / `VaultRepository`——整树读写与擦除边界，
      牵动限界 §1.6 的可达性穷举；② `KdbxHeader` / `KdbxXmlParser`——`.kdbx` 格式面，须过官方实现
      端到端对拍（§38 证据纪律），属独立一段；③ `DicewareWordList` 408——词表数据文件，
@@ -230,6 +231,14 @@
      > 可行的两条路：**① 设备侧 instrumentation 用例**（需硬件，当前阻塞）；
      > **② 先引入宿主可用的 JSON 写入口径**（新增小写入器，把注册 / 断言两处 payload 改走它，
      > 再补上述四条宿主断言）。选 ② 时须与两处 payload 的既有静态守卫同批核对，勿只改一半。
+  6. **违例清单第 3 目的函数名快照待分流（§176 登记，纯文档项）**：该目仍是「核实时刻 20 处 ≥100 行函数」
+     的原文清单，而其结论已是「非 Compose 逻辑函数清零」⇒ 按 `AGENTS.md` §4 索引纪律，历史快照应
+     **先迁入批次正文（或限界表）留痕，再压缩本目**。
+     **不得直接删**：`KdbxEntryMerger.mergeConflictedEntry` / `VaultEntryWriteCoordinator.saveEntryInternal` /
+     `KeePasskeyAutofillService.processFillRequest` / `PasskeyCreateActivity.startCreation` /
+     `CredentialResponseAssembler.buildPasskeyEntries` / `HealthCheckEngine.analyzeEntries` 六处在
+     `docs/resolved/` 内**零命中**（§176 实测 `grep -rl`），删掉即失去「已审范围」的唯一文字记录。
+     **整改**：为六处各补一行「降到 ≤50 的批次的 §号 + 拆法」留痕后，把本目压成一句指针。
 - **依据**：`.codebuddy/rules/engineering-rules.md` §高内聚低耦合 / §禁止魔法数字；本条目为 2026-09-18 用户命题「消除巨型类和魔法数字」。
 
 ### ISSUE-P3-187 JNI 零拷贝评估（原生加密内核的边界拷贝成本）
