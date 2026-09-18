@@ -73,9 +73,11 @@ Coroutines + Flow；**文档与代码注释使用简体中文**。
 
 统一用 Gradle Wrapper（版本与 SHA-256 见 `gradle/wrapper/gradle-wrapper.properties`）。Windows 下执行 `.\gradlew.bat <task>`：
 
-- `.\gradlew.bat assembleDebug` / `lint` / `:app:compileDebugScreenshotTestSources` — 编译全部模块 / Android Lint
+- `.\gradlew.bat assembleDebug` / `lint` / `:app:compileDebugScreenshotTestKotlin --rerun` — 编译全部模块 / Android Lint
   （warning 不阻断）/ **截图测试包装编译门禁**（`app/src/screenshotTest/` 是 gitignore 的生成物目录，改过 `@Preview`
-  或 `tools/export_previews/` 生成器后跑；无需设备，`test` 不覆盖它）
+  或 `tools/export_previews/` 生成器后跑；无需设备，`test` 不覆盖它。**用真编译任务 `...Kotlin`**：
+  聚合任务 `:app:compileDebugScreenshotTestSources` 只做依赖编排，见到它报 UP-TO-DATE 并不能证明编译发生过；
+  需要确凿证据时加 `--rerun`（实测该 Kotlin 任务强制执行约 3s））
 - `.\gradlew.bat test --rerun-tasks --max-workers=1` — 单元测试（强制真实执行，单会话勿并发）
 - `.\gradlew.bat test -DliveSyncTest` — 追加真实联调（需先起 `tools/local-sync`）
 - `.\gradlew.bat :crypto:connectedDebugAndroidTest` / `:database:connectedDebugAndroidTest` / `:sync:connectedDebugAndroidTest` / `:app:connectedDebugAndroidTest` — instrumented 测试（需设备；**`:sync:` 那层含 `SyncCacheAndroidRuntimeTest`，即 0600 / 0700 仅属主权限不变量——宿主 JVM 恒走降级分支，只有真机可证**）
