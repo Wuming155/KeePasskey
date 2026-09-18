@@ -186,10 +186,12 @@
      门面回到 **430 行**；五成员放宽为 `internal`；`AlgoHotPathGuardsTest` 改按「门面 + 分支文件」并集扫描，
      计数判据仍为 2。见 [`resolved/batches/155-同步周期远端分支下沉批次.md`](resolved/batches/155-同步周期远端分支下沉批次.md)）；
   3. **其余 400~500 行文件**（**§161 重测口径**：五模块 `src/main` 全部 `.kt` 逐文件 `wc -l`，
-     **§162 后为 39 个**；原记「约 36 个」系 §188 首次清点时刻之数）——头部：`VaultEntryMapper` 490、
+     **§163 后为 38 个**；原记「约 36 个」系 §188 首次清点时刻之数）——头部：
      `RealVaultRepository` 489、`VaultRepository` 478、`AutofillConfirmActivity` 475、`EntryEditScreen` 472、
-     `RuntimeIntegrityDetector` 470、`SyncConflictController` 461、`KdbxHeader` 461、`PasskeyCreateActivity` 460、
-     `KdbxXmlParser` 454；第一档余量 `EntryDetailViewModel` 435 / `EntryDetailScreen` 426 亦含在内。
+     `RuntimeIntegrityDetector` 470、`SyncConflictController` 461、`KdbxHeader` 461、`KdbxXmlParser` 454；第一档余量 `EntryDetailViewModel` 435 / `EntryDetailScreen` 426 亦含在内。
+     > **§163 再消化一个**：`VaultEntryMapper` 490 → **385**（条目 TOTP 面「来源定位 → 配置解析 → 按时刻取码」
+     > 三者是无状态纯函数，整族移入 `VaultEntryTotpMapping.kt` 128 行；TASK-46 的字节态与 `finally` 擦除
+     > 语义随代码同迁未放宽；对外 `parseTotpConfig` / `computeTotpCode` 由母文件留一行委托，调用点零改动）。
      > **§162 再消化一个头部文件**：`PasskeyCreateActivity` 460 → **360**（注册响应材料是纯函数产物，
      > 整族移入 `PasskeyRegistrationPayload.kt` 134 行；`rpId` / `origin` 由实例字段改为显式入参，
      > 三处安全语义随代码同迁未放宽），该档实测降至 **39 个**。
