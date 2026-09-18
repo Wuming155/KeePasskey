@@ -1,5 +1,6 @@
 package com.keepasskey.app.sync
 
+import com.keepasskey.app.testutil.MainDispatcherGuard
 import android.content.Context
 import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.core.model.KdbxEntry
@@ -17,7 +18,6 @@ import com.keepasskey.sync.provider.SyncProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
-import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
@@ -146,10 +146,9 @@ class SyncCoordinatorTest {
     @After
     fun tearDown() {
         masterPassword.fill('0')
-        // 污染防护豁免（ISSUE-P3-189 验收第二分支）：本用例的被测面（SyncCoordinator / SyncEngine）不持有 CoroutineScope，也不引用 Dispatchers.Main：
-        // 全部工作由测试侧挂起调用驱动、随 runTest 结束收束，故无「在途工作回跳到已缺失 Main」
-        // 的泄漏面（核实：grep -rn 'CoroutineScope(|Dispatchers.Main' app|sync/src/main/**/sync/*.kt 无命中）。
-        Dispatchers.resetMain()
+        // Main 采用「只装不卸」口径（ISSUE-P3-189 路线①）：此处不 resetMain()，
+        // 收尾统一走 MainDispatcherGuard（见其类 KDoc 的实测反证）。
+        MainDispatcherGuard.tearDown()
     }
 
     @Test

@@ -6,19 +6,32 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.TestDispatcher
+import kotlinx.coroutines.test.setMain
 
 /**
- * 测试调度器跨用例污染防护（`ISSUE-P3-189`；根因同归档批次 §18 / §150）。
+ * 测试调度器跨用例污染防护（`ISSUE-P3-189`，根因与三条候选路线见批次 §152 / §153）。
  *
- * 机理：`runTest` 结束**不**取消 `viewModelScope`。ViewModel 内在真实线程
- * （`Dispatchers.Default` / `Dispatchers.IO`）上执行的在途工作，若在 `resetMain()` **之后**
- * 才回跳 Main，会打到 `android.jar` 的 `Looper` 桩并抛 `IllegalStateException`，被协程测试
- * 记为「用例开始前已有未捕获异常」⇒ 污染同一 JVM 内的后续用例（表现位置随执行顺序漂移）。
+ * **两件事，缺一不可**：
+ * 1. **取消**（[track] / [trackScope] + [tearDown]）：`runTest` 结束**不**取消 `viewModelScope`，
+ *    其真实线程（`Dispatchers.Default` / `IO`）上的在途工作必须显式终止，否则会在**别的用例**里回写状态；
+ * 2. **不卸载 Main**（路线①）：本守卫**刻意不**调用 `Dispatchers.resetMain()`。
  *
- * 用法：用例创建 ViewModel 处调用 [track]（在构造表达式上直接包裹，不改变语义），
- * `@After` 调用 [tearDown]。**顺序不可颠倒**，且**不得**以「给 `resetMain()` 包 try/catch 吞异常」
- * 或「调大 `awaitOffMainComputation` 超时」处置——那是掩盖污染而非修复。
+ * 为什么不 reset（§152 第 4 轮实测反证）：`withContext(Dispatchers.Default)` 的块**正常跑完**后，
+ * 回送结果给父协程时要对父作用域的 `Dispatchers.Main` 问一次 `isDispatchNeeded`
+ * （栈：`DispatchedCoroutine.afterResume` → `safeIsDispatchNeeded` → `TestMainDispatcher.isDispatchNeeded`）。
+ * 即「先 cancel 再 resetMain」**只保证续体不被执行，不保证不再访问 Main**——取消本身反而制造一次回跳访问，
+ * 而 `resetMain()` 之后的 Main 处于「absent」态，任何访问即抛
+ * （`IllegalStateException: Dispatchers.Main was accessed when the platform dispatcher was absent`），
+ * 该异常落在真实线程上 ⇒ 被协程测试记给**下一个**用例（表现为无关用例偶发红）。
+ *
+ * 改为「只装不卸」后：Main 永不进入 absent 态，故回跳访问不再抛错；每个用例的 `@Before` 仍各自
+ * `setMain(新实例)`，迟到的回跳落入**当时那个**用例自己的调度器，其父作用域已取消 ⇒ 续体被丢弃、不执行。
+ *
+ * **代价与补偿**（须知，不得当作免费午餐）：一旦某个用例**忘装** Main，将静默继承上一个用例的派发器
+ * 而不再立刻抛错。故 `MainDispatcherPollutionGuardTest` 同批钉死：
+ * ① 守卫之外不得出现 `Dispatchers.resetMain()`；② 凡构造 ViewModel 的用例必须自行 `Dispatchers.setMain(`；
+ * ③ [tearDown] 内「取消」必须发生在任何 Main 生命周期操作之前。
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 object MainDispatcherGuard {
@@ -32,14 +45,19 @@ object MainDispatcherGuard {
     /** 登记本用例为被测对象自持的作用域（非 ViewModel 的同类泄漏面），并原样返回。 */
     fun trackScope(scope: CoroutineScope): CoroutineScope = scope.also { trackedScopes += it }
 
-    /** 先取消各 ViewModel / 作用域、再恢复 `Dispatchers.Main`。 */
-    fun tearDown() {
+    /**
+     * 用例收尾：取消全部已登记作用域。**不调用** `Dispatchers.resetMain()`（见类 KDoc 路线①）。
+     *
+     * [nextDispatcher] 非空时顺带为**下一个**用例装好派发器——本仓各用例的 `@Before` 已各自 `setMain`，
+     * 形参保留是为无需 `@Before` 的用例提供同一条路径。
+     */
+    fun tearDown(nextDispatcher: TestDispatcher? = null) {
         val pending = tracked.toList()
         val pendingScopes = trackedScopes.toList()
         tracked.clear()
         trackedScopes.clear()
         pending.forEach { it.viewModelScope.cancel() }
         pendingScopes.forEach { it.cancel() }
-        Dispatchers.resetMain()
+        nextDispatcher?.let { Dispatchers.setMain(it) }
     }
 }

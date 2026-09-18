@@ -89,7 +89,7 @@
 
 ---
 
-## P3 低危问题、特性接线与体验优化（4 项）
+## P3 低危问题、特性接线与体验优化（3 项）
 
 ### ISSUE-P3-193 归档索引表混入批次正文（同一结论最多存三处，`RESOLVED_LOG.md` 256 KB）
 
@@ -97,7 +97,12 @@
   ≥20 字符片段，再到该行「正文」列指向的 `docs/resolved/batches/NN-*.md` 内做子串匹配）。结论：
   `RESOLVED_LOG.md` **256,687 字节 / 152 行**，其中 **67 行**主题列长 200 ~ 4,341 字符，片段覆盖率普遍
   **0 ~ 18%** ⇒ 行内正文是**另一套措辞的二次叙述**，不是批次文件的节选；分册 04 `resolved/BATCH_58_PLUS.md`
-  （98 行）复制同族叙述且**停在 §142**（§143 ~ §151 从未追加）。
+  分册 04 `resolved/BATCH_58_PLUS.md`（98 行 / 85 行数据行 / **70,183 字符**）**停在 §142**
+  （§143 ~ §152 从未追加），且其形态**前后不一致**：§58 ~ §110 共 53 行是短索引（每行数十字到百来字，
+  即「只引用不复制」的正确形态），§111 ~ §142 共 32 行是长复制（单行 372 ~ 4,013 字符）。
+  **逐片段对齐结论**：这 32 行中只有 **3 行**（§136 / §141 / §142）可判为总索引同批行的子集，
+  其余 **29 行**与总索引行**近似但漂移**（长度差 5% ~ 30%，每行有 3 ~ 19 个 ≥20 字片段互不覆盖）
+  ⇒ 三处副本已各走各路，**任何一处单独删改都会丢内容**。
 - **背景（为何是缺陷而非风格问题）**：`RESOLVED_LOG.md` 自述定位是「归档**总索引**（一页纸，直达每个批次文件）」，
   `resolved/README.md` 立则「**索引只做引用、不复制正文**，避免同一结论在两处漂移」。当前形态与该定位相反：
   同一批次结论最多同时存在于**三处**（总索引行 + 分册行 + 批次文件），其中两处已实际漂移。风险是
@@ -107,44 +112,14 @@
   （违反 `AGENTS.md` §3 与 `resolved/README.md` 的「归档正文只搬迁、不改写」）；② 正确路径是**逐批无损迁移**：
   先把该行原文追加到其批次文件的新小节（如「## 归档行原文（§NN 迁移承接）」），确认落盘后索引行才改为一行索引；
   ③ 每 ~10 批为一段推进，段末复跑覆盖度脚本，确保无未承接片段；④ 分册 04 自 §143 起停止同族复制
-  （其定位改为「分册级一行索引」，与 `resolved/README.md` 一致）。
+  （其定位改为「分册级一行索引」，与 `resolved/README.md` 一致；§58 ~ §110 段已是该形态，
+  照该形态改写即可）；⑤ 分册 04 的 §111 ~ §142 与总索引的**互不覆盖片段**（29 行 / 每行 3 ~ 19 段）
+  必须先并入对应批次文件，才能删任一侧——并入顺序：分册独有段 → 总索引独有段 → 两侧改短索引。
 - **验收标准**：`RESOLVED_LOG.md` 全部 152 行的主题列 ≤200 字符，且迁移前后**片段总数守恒**
   （脚本对全部行片段在 `resolved/batches/` 全域匹配，缺失数 = 0）；`docs/README.md` 与 `resolved/README.md`
   的「一页纸 / 只引用不复制」定位与实际一致；分册 04 与总索引不再同时承载同族叙述。
 - **边界**：本条是**文档结构**缺陷，不涉及任何产品行为；范围只含归档层（`RESOLVED_LOG.md` + `resolved/`），
   `ACTIVE_ISSUES.md` 与 `AGENTS.md` 的同类精简已由 §152 闭环。
-
-
-### ISSUE-P3-189 测试调度器跨用例污染：防护覆盖面已由 §152 闭合，**症状仍在**（根因比「漏 cancel」更深一层）
-
-- **核实时间点与方式**：2026-09-18 17:15，§152 改造完成后 `.\gradlew.bat test --rerun-tasks --max-workers=1 --continue`
-  **连跑四轮**：第 1 / 2 轮全绿（`tests=2185 failures=0 errors=0 skipped=13`）；第 3 轮 `SyncCacheEvictorTest > 同步凭据清空时
-  连带销毁同步缓存` 红——断言值为**大写键名** `490A…77A1.META.tmp` 残留，系限界表 **§7** 家族的 Windows 目录枚举鬼影
-  （见 [`records/SyncCache大写CACHE临时文件定位记录.md`](records/SyncCache大写CACHE临时文件定位记录.md)），隔离复跑 **3/3 绿**，
-  与本条无因果；**第 4 轮 `BreachCheckHealthTest > 查询失败时状态为 FAILED 且原因如实上浮` 再现 §150 登记的同一条
-  `IllegalStateException`**（`TestMainDispatcherJvm.kt:45`）。
-- **§152 已闭合的部分（原 AC 的「18 类全覆盖」分支）**：18 类「`setMain` + 构造 ViewModel 但无防护」全部登记到共享守卫
-  `app/src/test/java/com/keepasskey/app/testutil/MainDispatcherGuard.kt`；§150 的 5 类 per-file 清单口径统一进同一守卫
-  （同义机制在一处）；`HealthScanOffMainThreadTest` 的自持 `CoroutineScope(Dispatchers.Main)` 改走 `trackScope`；
-  两个「被测面无自持作用域」的 `sync` 用例就地豁免并写明取证方式；新增静态门禁
-  `app/src/test/java/com/keepasskey/app/quality/MainDispatcherPollutionGuardTest.kt`（3 例：必须经守卫收尾 / 构造 ViewModel
-  必须登记 / 守卫内 `cancel` 早于 `resetMain` 且不得吞异常）。
-- **仍未闭合的根因（不得再按「补齐 cancel」推进）**：第 4 轮的栈顶为
-  `TestMainDispatcher.isDispatchNeeded ← safeIsDispatchNeeded(DispatchedContinuation.kt:262) ← DispatchedCoroutine.afterResume(Builders.common.kt:588)`
-  ⇒ **`withContext(Dispatchers.Default)` 的块正常跑完后，把结果回送给已取消的父协程时仍要对父作用域的 `Dispatchers.Main`
-  问一次 `isDispatchNeeded`**。即「先 cancel 再 `resetMain()`」**只保证续体不被执行，不保证不再访问 Main**——取消本身就会
-  **制造**一次回跳访问。这与 §18 / §150 的「漏 cancel 即污染」模型不兼容；§150 修复后「连续三轮绿」与本条不矛盾
-  （命中率与时序 / 核数相关，§152 实测 1/4）。
-- **候选路线（先出结论再动手）**：① **JVM 级只装不卸**——守卫不再调 `resetMain()`，改由各用例 `@Before` 的
-  `setMain(新实例)` 覆盖：Main 永处「已装」态 ⇒ 无「absent」异常面，回跳落入的调度器随用例更换、对已取消作用域惰性无害；
-  **代价**是失去「测试忘装 Main」这类真实缺陷的检测 ⇒ 须同时补「用到 Main 的用例必须自行 `setMain`」的门禁；
-  ② **收尾前静默**——`cancel` 后轮询 Default 线程静默再 `resetMain()`；**代价**：等待真实线程即 §150 明令禁止的「调大超时」
-  变体，仅在静默判据不依赖超时时成立；③ **生产侧改造**——把 `viewModelScope` 上的 CPU 段改为显式持有可 await 的 `Job`
-  句柄，测试精确等待而非取消；**代价**：触及多个 ViewModel 的公开面，属结构改动。
-- **验收标准**：任选一条路线落地后 `.\gradlew.bat test --rerun-tasks --max-workers=1 --continue` **连续 8 轮**全绿
-  （§152 命中率 1/4，8 轮方有把握），且 CI Fast gate 不再出现 `UncaughtExceptionsBeforeTest`；选定路线的理由与
-  被否路线登记 `docs/architecture/已知工程限界.md` 或本条批次文档。
-- **边界**：本条是**测试基础设施**缺陷，不涉及生产行为；§152 的门禁只保证「防护不回退」，**不构成**症状消失的证据。
 
 
 ### ISSUE-P3-188 巨型类与魔法数字专项整改（工程规则 §单一职责 / §禁止魔法数字 违例收敛）

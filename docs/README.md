@@ -60,6 +60,6 @@
 |---|---|
 | [`resolved/README.md`](resolved/README.md) | 分册体系说明与维护规则 |
 | [`resolved/BATCH_01_30.md`](resolved/BATCH_01_30.md) 等 **4 册** | 分册级索引（各 ≤100 行） |
-| `resolved/batches/` | **一批次一文件**的批次正文（当前 **150** 份，§1~§152；§42 / §43 已归入 `security/`） |
+| `resolved/batches/` | **一批次一文件**的批次正文（当前 **151** 份，§1~§153；§42 / §43 已归入 `security/`） |
 
 > **回溯约定**：归档正文只搬迁、不改写。拆分前的完整版本见 git `a144d21`。
