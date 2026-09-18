@@ -103,7 +103,7 @@
      其余 6 个已降到 500 以下，但**验收线是 ≤400**：`EntryEditFormSections` 351（§160）、
      `DatabaseSettingsScreen` 369（§159）、`UnlockViewModel` 368、`SyncCache` 382 **达标**，
      `EntryDetailViewModel` 397（§170）与 `EntryDetailScreen` 349（§169）**均已降到 400 以下**；
-  2. **400~500 行文件（第二档）**：清单、当前计数与逐批消减**只在下方「剩余清单第 3 项」维护一份**
+  2. **400~500 行文件（第二档）**：清单、当前计数与逐批消减**只在下方「剩余清单第 2 项」维护一份**
      （此处不再重复快照数字，避免两处数法各自漂移）；
   3. **超 50 行函数（第一档 ≥100 行）**：`SyncEngine.openRemote`(≈173)、`PasskeyAssertionActivity.onCreate`(≈153)、
      `SyncCycleRunner.runSyncCycle`(≈130)、`KdbxEntryMerger.mergeConflictedEntry`(≈129)、
@@ -168,54 +168,39 @@
     `END_OF_HEADER_MARKER`、写侧 `XML_TRUE` / `XML_FALSE`、`PasskeyKeyText` 的 PEM 空白码位——
     **全部只挪定义、未改任何取值**）；§167 复核出「唯一成片真实违例」= `@Preview(uiMode = 0x20)` 并已归零，
     三小项待裁定（见违例清单第 4 目）。
-- **剩余清单（第二档渐进消化，未消化部分如实留此）**：
-  1. **Compose 面的超长文件 / 超长函数**（结构性可拆）：`DatabaseSettingsScreen` ——
-     **§156 已消化第一段**（三处同形「明文导出二次确认」弹窗收敛为共享组件
-     `DatabaseSettingsExportConfirmDialog.kt`，530 → **431 行**；配套把 `ExportTicketSinkGuardTest`
-     的接线判据由 3 条扩到 8 条并做变异验证，见
-     [`resolved/batches/156-明文导出二次确认收敛批次.md`](resolved/batches/156-明文导出二次确认收敛批次.md)）；
-     **§159 消化第二段**（子库段 + 导入段下沉为 `DatabaseSettingsSections.kt` 的两个同包段落组件，
-     整页 **431 → 369 行，本文件降到 400 阈值以下**；并为搬家新增 `DatabaseSettingsSectionWiringTest` 4 例，
-     钉住「选择器先于门控块 / 段落必须无条件组合 / 子库关闭三口径齐备 / 导入两步式顺序」）。
-     **仍开放**：导出侧四个 `CreateDocument` launcher 与三处 `pending…Uri` 状态刻意留在整页
-     （`ExportTicketSinkGuardTest` 的定位串锚在「SAF 回调把目标落到待确认态」这一现场，再搬走会让
-     「弹了确认框却导出别的对象」失去可断言落点）；清单内其余 Compose 文件（`HealthCheckScreen`(326)、
-     `ConflictResolutionScreen`(172) 等）仍按同一路径逐档消化。
-     `HealthCheckScreen`(326)、`ConflictResolutionScreen`(172)、`ChildDatabaseDialog`(170)、
-     `Argon2ParametersDialog`(168)、`UnlockStandardUnlockContent`(158)、`AboutSettingsScreen`(153)、
-     `EntryDetailTopBar`(151)、`EntryDetailScreen`(137)、`PackageBlocklistManageDialog`(131)、
-     `VaultListDialogHost`(130)、`GeneratorContent`(121)、`EntryDetailDialogHost`(119，本批新文件的接线体)、
-     `SyncStatusCard`(119)、`themeListSection`(118)、`BasicCredentialsCard`(118)、`VaultDatabaseCard`(117)、
-     `MasterKeyChangeDialog`(116)、`PrivilegedBrowserSettingsScreen`(115)、`ChildVaultEntryRowView`(113)、
-     `EntryEditCustomFieldsSection`(108)、`SafeAttachmentPreviewDialog`(107)、`KeePasskeyTheme`(104)、
-     以及两个 NavGraph（`keepasskeySettingsNavGraph` 252 / `keepasskeyNavGraph` 164）与 `KeePasskeyApp`(202)；
-  2. ~~**§151 新增的第二档待消化项**：`SyncCycleRunner` 431 → 515~~ —— **§155 已闭环**
-     （三段裁决与 `RemoteSyncContext` 移为同包 `internal` 扩展函数文件 `SyncCycleRemoteOutcomes.kt`，
-     门面回到 **429 行**；五成员放宽为 `internal`；`AlgoHotPathGuardsTest` 改按「门面 + 分支文件」并集扫描，
-     计数判据仍为 2。见 [`resolved/batches/155-同步周期远端分支下沉批次.md`](resolved/batches/155-同步周期远端分支下沉批次.md)）；
-  3. **其余 400~500 行文件**（**口径**：五模块 `src/main` 全部 `.kt` 逐文件 `wc -l`，且在**最终写盘后**取数
-     ——§165 §7 校正过一批「测量点早于写盘」造成的 `+1` 漂移）：**§170 后为 33 个**（§161 重测 40 →
-     §162 ~ §166 逐批各消化 1 个至 35，§169 使 `EntryDetailScreen`、§170 使 `EntryDetailViewModel` 先后退出本档 ⇒ 33；
-     §167 ~ §168 为字面量收敛，不动档位）。当前头部：`RealVaultRepository` 489、`VaultRepository` 478、
-     `RuntimeIntegrityDetector` 470、`KdbxHeader` 461、`KdbxXmlParser` 454、`PasskeyCryptoEngine` 453、`PasskeyAssertionActivity` 450；
-     原「第一档余量」两文件（`EntryDetailViewModel` / `EntryDetailScreen`）已由 §169、§170 先后降到 400 以下 ⇒ 均已退出本档。
-     > **已消化的头部文件**（逐批留痕于 `docs/resolved/batches/160`~`166`，一律「只搬不改逻辑」）：
-     > `VaultListDialogs` 490→280、`PasskeyCreateActivity` 460→359、`VaultEntryMapper` 490→384、
-     > `AutofillConfirmActivity` 475→366、`EntryEditScreen` 472→319、`SyncConflictController` 461→355；
-     > 另 `EntryEditFormSections` 438→351、`DatabaseSettingsScreen` 530→369 已退出本档。
-     > **刻意排后的三类（是取舍不是遗漏）**：① `RealVaultRepository` / `VaultRepository`——整树读写与
-     > 擦除边界，牵动限界 §1.6 的可达性穷举；② `KdbxHeader` / `KdbxXmlParser`——`.kdbx` 格式面，拆它们
-     > 必须过官方实现端到端对拍（§38 证据纪律），属独立一段；③ `DicewareWordList` 408——词表数据文件，
-     > 拆散反害查表语义。同类局部保留：`AutofillConfirmActivity` 的 `completeAuthResult`（其唯一行为级
-     > 证据是设备侧 `AutofillAuthChainDeviceTest`，无设备时不搬）、`SyncConflictController` 的
-     > `autoMergeAndUpload`（承载 `localDbOwned` 擦除判据的一处调用点，搬走需再扩守卫定位串）。
-  4. **接线守卫与结构耦合的长期代价（搬家必读）**：结构性搬家会改写静态源码比对断言的**定位范围**——
+- **剩余清单（本条尚未闭环的部分，逐条自包含）**：
+  > 编号映射（§172 压缩流水后本清单为 1~4 项）：早期批次正文里提到的「剩余清单第 3 项」
+  > = 此处第 2 项（第二档渐进消化），「第 5 项」= 此处第 4 项（会话锁定直调用例）。
+  1. **Compose 面的长函数与可继续拆的组件**：第 3 目「非 Compose 逻辑函数已清零」之外的余量，
+     即各页面组件里仍存的 >50 行 `@Composable`（`HealthCheckScreen` 326、`ConflictResolutionScreen` 172、
+     `ChildDatabaseDialog` 170、`Argon2ParametersDialog` 168、`UnlockStandardUnlockContent` 158、
+     `AboutSettingsScreen` 153、`EntryDetailTopBar` 151、`VaultListDialogHost` 130、`KeePasskeyApp` 202、
+     两个 NavGraph 252 / 164 等）。拆法与 §156 / §159 同：同包段落组件 + 为该搬家新增的段落接线守卫。
+     **刻意不搬的三处**（各有锚在现场的守卫或边界，勿重复尝试）：
+     ① `DatabaseSettingsScreen` 导出侧四个 `CreateDocument` launcher 与三处 `pending…Uri`——
+     `ExportTicketSinkGuardTest` 的定位串锚在「SAF 回调把目标落到待确认态」这一现场，再搬走会让
+     「弹了确认框却导出别的对象」失去可断言落点；② `AutofillConfirmActivity.completeAuthResult`——
+     唯一行为级证据是设备侧 `AutofillAuthChainDeviceTest`；③ `SyncConflictController.autoMergeAndUpload`——
+     承载 `localDbOwned` 擦除判据的一处调用点（§166 §2）。
+  2. **第二档（400~500 行文件）渐进消化**：**§170 后为 33 个**（口径：五模块 `src/main` 全部 `.kt`
+     逐文件 `wc -l`，且在**最终写盘后**取数——§165 §7 校正过一批「测量点早于写盘」造成的 `+1` 漂移）。
+     当前头部：`RealVaultRepository` 489、`VaultRepository` 478、`RuntimeIntegrityDetector` 470、
+     `KdbxHeader` 461、`KdbxXmlParser` 454、`PasskeyCryptoEngine` 453、`PasskeyAssertionActivity` 450。
+     **已消化 9 个**（一律「只搬不改逻辑」，逐批留痕 `resolved/batches/159`~`170`）：
+     `DatabaseSettingsScreen` 530→369、`VaultListDialogs` 490→280、`PasskeyCreateActivity` 460→359、
+     `VaultEntryMapper` 490→384、`AutofillConfirmActivity` 475→366、`EntryEditScreen` 472→319、
+     `SyncConflictController` 461→355、`EntryDetailScreen` 427→349、`EntryDetailViewModel` 434→397。
+     **刻意排后（是取舍不是遗漏）**：① `RealVaultRepository` / `VaultRepository`——整树读写与擦除边界，
+     牵动限界 §1.6 的可达性穷举；② `KdbxHeader` / `KdbxXmlParser`——`.kdbx` 格式面，须过官方实现
+     端到端对拍（§38 证据纪律），属独立一段；③ `DicewareWordList` 408——词表数据文件，
+     拆散反害查表语义。
+  3. **接线守卫与结构耦合的长期代价（搬家必读）**：结构性搬家会改写静态源码比对断言的**定位范围**——
      首例为三测试类同时失配（`AutofillAuthResultWiringTest` / `AlgoHotPathGuardsTest` /
      `OneTapInteractionWiringTest`，见 §160 留痕），§166 再把 `AlgoHotPathGuardsTest` 的两条判据改为并集。
      规则：凡搬家**必须**同批把守卫扫描改为「门面 + 分支文件」**并集**，做到「**只放宽定位串、不降低断言
      强度**」（计数类判据两侧计数保持不变）；**不得**以删除或放宽守卫凑绿（`AGENTS.md` §3 测试资产纪律）。
      并集里少一份文件不会静默通过——`readSource` 对不存在的路径先断言失败。
-  5. **会话锁定「擦除动作」在三个 ViewModel 里无宿主直调用例（§170 暴露）**：
+  4. **会话锁定「擦除动作」仍有两个 ViewModel 无宿主直调用例（§170 暴露，§171 已补详情页）**：
      `SessionLockGuard` 样板化之后，五个 VM 中只有 `AutofillPickerViewModel`（2 例）与
      `GeneratorViewModel`（1 例）带锁定行为用例；`EntryDetailViewModel` / `EntryEditViewModel` /
      `SettingsViewModel` 的「锁定 → 擦除明文 / 实时 TOTP」回调路径无人直调。
