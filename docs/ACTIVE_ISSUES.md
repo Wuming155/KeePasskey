@@ -76,22 +76,48 @@
 - **影响面**：所有已下沉内核（Twofish / ChaCha20 / AES / Passkey）都交这道税；它同时是
   `已知工程限界.md` **§15**（ChaCha20 刻意不做零拷贝）与 **§17**（AES 统一后的性能代价）的
   共同成因。零拷贝若成立，**收益面覆盖全族**，而非单个算法。
+- **JNI 面的现状覆盖清单（本条的"未闭合项"定义；2026-09-18 核实）**：
+
+  | 面 | 状态 |
+  |---|---|
+  | 符号与定长契约 | ✅ CI `native-gate` 逐名集合核对（4 ABI） |
+  | 密钥所有权 | ✅ `ownedSecrets` 契约 + `StreamKeyOwnershipContractTest` |
+  | 错误语义 | ✅ 与 JCE / BC 逐例对拍（`AesNativeParityTest` 等） |
+  | 兜底分支等价 | ✅ `CipherFallbackParityTest`（强制兜底 ↔ 原生逐字节一致，含流式） |
+  | 探活（库能否正确工作） | ✅ 官方向量 KAT 自测；AES 已由 1 分组扩至 **NIST 4 分组 + `iv` 出口契约** |
+  | 边界代价 | ✅ 已量化并登记（限界 §15 / §17） |
+  | **零拷贝（效率）** | ❌ **未做——本条要回答的问题** |
+  | **有状态形态（结构性消除密钥所有权风险）** | ❌ **未评估——并入本条 AC ⑤** |
+
+  ⇒ 也就是说：**本条目是 JNI 面上唯一未闭合的一项，且它只影响效率，不影响正确性**。
 - **评估目标与验收标准**：
-  1. **先定义契约**（评估产出物，须落文档）：临界区形态（`GetPrimitiveArrayCritical` /
-     `ReleasePrimitiveArrayCritical` 的 `mode` 选择，或 `DirectByteBuffer` 形态）下
-     **临界区内禁止分配、禁止 panic**；明确异常 / 早退路径的 release 语义；
+  1. **先定义契约**（评估产出物，须落文档）：**三条候选路线**各自的契约——
+     ① `GetPrimitiveArrayCritical` / `ReleasePrimitiveArrayCritical`（`mode` 选择）；
+     ② `DirectByteBuffer`；
+     ③ **`CipherSpi`（有状态 Provider 形态，参考 KeePassDX 的 `NativeAESCipherSpi`）**。
+     三者的**临界区内禁止分配、禁止 panic**、异常 / 早退路径的 release 语义、
      与现有桥范式（`catch_unwind` + `Zeroizing` 全路径擦除）的取舍须逐条写明。
+     > 路线 ③ 的特别之处（2026-09-18 补充）：JCA 的
+     > `update(byte[] in, int inOff, int inLen, byte[] out, int outOff)` **由调用方提供输出缓冲**，
+     > 结构上允许零拷贝；且 `CipherSpi` 天然**有状态**（`engineInit` 时把密钥交给原生自持），
+     > 顺带消除「Java 侧提前擦除密钥 ⇒ 全零密钥」这一类风险（§147 实测踩过）。
   2. **真机前后对比**（同机 / 同语料 / 10 轮中位）：以 §8.2 的四个锚点为基线，
      目标把「边界 + 拷贝」压到 **≤ 内核本体 + 20%**；达不到即判**收益不足**。
   3. **语义零漂移**：`AesNativeParityTest` / `ChaCha20NativeEngineTest` / `TwofishNativeParityTest` /
-     `StreamKeyOwnershipContractTest` / `CbcStreamFramingTest` 与三层设备侧套件**保持全绿**；
-     错误语义（失败返回、长度异常、擦除时点）逐例与现状对齐。
+     `StreamKeyOwnershipContractTest` / `CbcStreamFramingTest` / `CipherFallbackParityTest` 与三层
+     设备侧套件**保持全绿**；错误语义（失败返回、长度异常、擦除时点）逐例与现状对齐。
   4. **结论必须入档**：无论可行与否，结论与依据登记到 `已知工程限界.md`（§15 / §17 的解除条件），
      **不得只留聊天记录**。
+  5. **有状态 vs 无状态对比（AC ⑤，2026-09-18 追加）**：必须给出两种形态在
+     **密钥所有权 / 擦除时点 / 生命周期泄漏防护 / 可测试性** 四个维度上的对照结论；
+     若采用有状态形态，须证明它**不削弱**现有秘密治理纪律（`Zeroizing` 全路径擦除 / 显式清零），
+     并说明 `ownedSecrets` 契约在有状态形态下的等价物（应为「原生侧自持 + `close()` 时由原生擦除」）。
 - **失败回退**：
   1. 临界区方案若与**秘密擦除纪律**冲突且无法自证（`Zeroizing` 全路径归零 / 禁止分配），
      回退到「`DirectByteBuffer` + 显式清零」形态重评；
-  2. 两者均不可行 ⇒ **维持现状并收口**（当前代价已落在无感区：现代设备 <5 MB 库 +10~20 ms），
+  2. 上述两者均不可行时，回退到 **`CipherSpi`（有状态 Provider）路线**——它把密钥自持与输出缓冲
+     一并解决，但引入跨 JNI 的对象生命周期管理，须按 AC ⑤ 逐维对照后再定；
+  3. 三条路线均不可行 ⇒ **维持现状并收口**（当前代价已落在无感区：现代设备 <5 MB 库 +10~20 ms），
      把「不做」的理由与解除条件登记到限界表。
 - **涉及文件**：`crypto/src/main/rust/src/jni_bridge_ext.rs`、`aes_cbc.rs`、`chacha20_stream.rs`、
   `twofish_cbc.rs`；`crypto/src/main/java/com/keepasskey/crypto/cipher/NativeAes.kt` /

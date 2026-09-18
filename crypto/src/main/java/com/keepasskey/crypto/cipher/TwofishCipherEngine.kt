@@ -28,8 +28,21 @@ import javax.crypto.spec.SecretKeySpec
  *   [CbcEncryptingOutputStream] / [CbcDecryptingInputStream] 承担（单一实现，整型与流式共用）；
  * - **兜底路径**：仍由 JCE 的 `CipherInputStream` / `CipherOutputStream` 承担。
  *   两路径的可观测行为差异由差分类单测锁定（见 `TwofishNativeParityTest`）。
+ *
+ * **兜底分支的常态回归**（§147 追问的后续整改）：兜底路径原只在「原生库不可用」时才执行，
+ * 即最需要它正确的时刻最缺回归；现经 `internal constructor(forceBcFallback = true)` 由
+ * `CipherFallbackParityTest` 在常态构建中强制走通（生产恒用公开无参构造，行为不变）。
  */
-class TwofishCipherEngine : CipherEngine {
+class TwofishCipherEngine internal constructor(
+    /** **仅供测试**：强制走 BouncyCastle 兜底分支（生产恒为 `false`）。 */
+    private val forceBcFallback: Boolean
+) : CipherEngine {
+
+    /** 公开无参构造：生产路径（[CipherFactory]）与设备侧用例一律使用本构造。 */
+    constructor() : this(forceBcFallback = false)
+
+    /** 本次调用是否走原生：生产由 [NativeTwofish.available] 决定，测试可经 [forceBcFallback] 强制兜底。 */
+    private val useNative: Boolean get() = !forceBcFallback && NativeTwofish.available
 
     init {
         ChaCha20CipherEngine.ensureBouncyCastle()
@@ -40,11 +53,11 @@ class TwofishCipherEngine : CipherEngine {
     override val ivLength: Int = KdbxConstants.Cipher.BLOCK_CIPHER_IV_LENGTH
 
     override fun encrypt(key: ByteArray, iv: ByteArray, data: ByteArray): ByteArray {
-        return if (NativeTwofish.available) encryptNative(key, iv, data) else encryptJce(key, iv, data)
+        return if (useNative) encryptNative(key, iv, data) else encryptJce(key, iv, data)
     }
 
     override fun decrypt(key: ByteArray, iv: ByteArray, data: ByteArray): ByteArray {
-        return if (NativeTwofish.available) decryptNative(key, iv, data) else decryptJce(key, iv, data)
+        return if (useNative) decryptNative(key, iv, data) else decryptJce(key, iv, data)
     }
 
     override fun createEncryptingStream(
@@ -52,7 +65,7 @@ class TwofishCipherEngine : CipherEngine {
         key: ByteArray,
         iv: ByteArray
     ): OutputStream {
-        if (!NativeTwofish.available) {
+        if (!useNative) {
             return CipherOutputStream(outputStream, initCipher(Cipher.ENCRYPT_MODE, key, iv))
         }
         // `ownedSecrets`：原生变换**惰性**读取密钥，故流必须自持副本并负责擦除
@@ -72,7 +85,7 @@ class TwofishCipherEngine : CipherEngine {
         key: ByteArray,
         iv: ByteArray
     ): InputStream {
-        if (!NativeTwofish.available) {
+        if (!useNative) {
             return CipherInputStream(inputStream, initCipher(Cipher.DECRYPT_MODE, key, iv))
         }
         // `ownedSecrets`：原生变换**惰性**读取密钥，故流必须自持副本并负责擦除

@@ -25,8 +25,21 @@ import javax.crypto.spec.SecretKeySpec
  *   [NativeDecryptingInputStream]，64 KiB 分块 + 字节偏移推进）；
  * - **兜底路径**：BC JCE `ChaCha7539`（[bouncyCastleProvider] 持有实例，§143 解耦）——
  *   原生不可用（个别机型缺 ABI）时回退，语义与接线前逐字节一致。
+ *
+ * **兜底分支的常态回归**（§147 追问的后续整改）：兜底路径原只在「原生库不可用」时才执行，
+ * 即最需要它正确的时刻最缺回归；现经 `internal constructor(forceBcFallback = true)` 由
+ * `CipherFallbackParityTest` 在常态构建中强制走通（生产恒用公开无参构造，行为不变）。
  */
-class ChaCha20CipherEngine : CipherEngine {
+class ChaCha20CipherEngine internal constructor(
+    /** **仅供测试**：强制走 BC 兜底分支（生产恒为 `false`）。 */
+    private val forceBcFallback: Boolean
+) : CipherEngine {
+
+    /** 公开无参构造：生产路径（[CipherFactory]）与设备侧用例一律使用本构造。 */
+    constructor() : this(forceBcFallback = false)
+
+    /** 本次调用是否走原生：生产由 [NativeChaCha20.available] 决定，测试可经 [forceBcFallback] 强制兜底。 */
+    private val useNative: Boolean get() = !forceBcFallback && NativeChaCha20.available
 
     init {
         ensureBouncyCastle()
@@ -38,7 +51,7 @@ class ChaCha20CipherEngine : CipherEngine {
 
     override fun encrypt(key: ByteArray, iv: ByteArray, data: ByteArray): ByteArray {
         validateNonceLength(iv)
-        return if (NativeChaCha20.available) {
+        return if (useNative) {
             try {
                 NativeChaCha20.applyKeystreamChecked(key, iv, 0, data)
             } catch (e: CryptoException.CipherException) {
@@ -57,7 +70,7 @@ class ChaCha20CipherEngine : CipherEngine {
 
     override fun decrypt(key: ByteArray, iv: ByteArray, data: ByteArray): ByteArray {
         validateNonceLength(iv)
-        return if (NativeChaCha20.available) {
+        return if (useNative) {
             try {
                 NativeChaCha20.applyKeystreamChecked(key, iv, 0, data)
             } catch (e: CryptoException.CipherException) {
@@ -80,7 +93,7 @@ class ChaCha20CipherEngine : CipherEngine {
         iv: ByteArray
     ): OutputStream {
         validateNonceLength(iv)
-        return if (NativeChaCha20.available) {
+        return if (useNative) {
             // 流**自持** key/nonce 副本并在 close 时擦除：原生密钥流按偏移惰性施加，
             // 若直接引用调用方数组，则在「建立流后立即擦除调用方密钥」的调用时序下
             // 会退化为全零密钥（契约与 §147 整改的 `KeyOwning*` 一致）。
@@ -96,7 +109,7 @@ class ChaCha20CipherEngine : CipherEngine {
         iv: ByteArray
     ): InputStream {
         validateNonceLength(iv)
-        return if (NativeChaCha20.available) {
+        return if (useNative) {
             // 同上：流自持 key/nonce 副本，close 时擦除
             NativeDecryptingInputStream(inputStream, key.copyOf(), iv.copyOf())
         } else {

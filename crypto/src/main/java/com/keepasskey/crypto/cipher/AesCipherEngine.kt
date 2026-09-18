@@ -20,18 +20,55 @@ import javax.crypto.spec.SecretKeySpec
  * - **兜底路径**：平台 JCE——原生不可用（个别机型缺 ABI / 宿主未注入）时回退，
  *   语义与接线前逐字节一致（差分用例锁定）。
  *
- * **性能状态**：内核级吞吐显著领先（真机 158.7 / 249.2 MB/s），但端到端生产形态是否净收益
- * 取决于跨 JNI 边界代价（详见 `docs/records/真机吞吐实测记录_2026-09-17.md` §7 与
- * `docs/architecture/已知工程限界.md` §17）——该对照须以**连续多轮**实测为准，单轮不作结论。
+ * **性能状态（已定论，2026-09-18）**：本项**不以性能为由**下沉。现代机上 Rust **内核本体**
+ * （10 MiB 加密 13.3 ms）加密侧已慢于平台 JCE 全程（`doFinal` 9.2 ms），且 CBC 加密为串行依赖、
+ * 逐块调用吃不到 ILP ⇒ **优化实现无法翻盘**；取向是**跨平台统一与审计一致性**
+ * （与 KeePassXC 统一到 Botan 同构）。生产形态代价（现代机 +20~39 ms / A53 级 +166~222 ms
+ * 每 10 MiB，落在无感区）与四条「不得据此断言」见
+ * [`已知工程限界.md`](../../../../../../../docs/architecture/已知工程限界.md) §17；
+ * 双机 10 轮实测见 `docs/records/真机吞吐实测记录_2026-09-17.md` §8。
  */
-class AesCipherEngine : CipherEngine {
+class AesCipherEngine internal constructor(
+    /**
+     * **仅供测试**：强制走平台 JCE 兜底分支（生产恒为 `false`）。
+     *
+     * 存在理由（§147 追问的后续整改）：兜底分支原本只在「原生库不可用」时才执行，即
+     * **最需要它正确的时刻，恰是它最缺回归的时刻**。该形参让兜底路径进入**常态回归**
+     * （见 `CipherFallbackParityTest`：强制兜底 ↔ 参照实现逐字节一致）。
+     */
+    private val forceJceFallback: Boolean
+) : CipherEngine {
+
+    /** 公开无参构造：生产路径（[CipherFactory]）与设备侧用例一律使用本构造。 */
+    constructor() : this(forceJceFallback = false)
 
     override val cipherUuid: KdbxUuid = KdbxConstants.Cipher.AES_256_CBC
     override val name: String = "AES-256 (CBC)"
     override val ivLength: Int = KdbxConstants.Cipher.BLOCK_CIPHER_IV_LENGTH
 
+    /** 本次调用是否走原生：生产由 [NativeAes.available] 决定，测试可经 [forceJceFallback] 强制兜底。 */
+    private val useNative: Boolean get() = !forceJceFallback && NativeAes.available
+
+    /**
+     * 密钥长度闸门（**四条入口、两条路径同口径**）：只接受 AES-256 的 [NativeAes.KEY_LENGTH]。
+     *
+     * 存在理由（本轮整改）：原生内核 fail-closed 拒绝非 32 字节密钥，而 **JCE 会接受 16 / 24 字节**
+     * （静默按 AES-128 / AES-192 加密）⇒ 同一输入在两条路径下**行为不同**。KDBX 的
+     * `cipherKey = resize(masterSeed‖transformed, cipherKeyLen)` 对 AES 恒为 32 字节，故本闸门
+     * 对合法输入**零影响**（回归由全量 `test` 与设备侧套件覆盖），用途是消除双路径的**可观测分歧**。
+     * （Twofish 无此分歧：其内核与 BC **都**接受 16 / 24 / 32，见 `TwofishNativeParityTest`。）
+     */
+    private fun requireAes256Key(key: ByteArray) {
+        if (key.size != NativeAes.KEY_LENGTH) {
+            throw CryptoException.CipherException(
+                "AES-256 密钥长度必须为 ${NativeAes.KEY_LENGTH} 字节，实际 ${key.size}"
+            )
+        }
+    }
+
     override fun encrypt(key: ByteArray, iv: ByteArray, data: ByteArray): ByteArray {
-        if (NativeAes.available) {
+        requireAes256Key(key)
+        if (useNative) {
             return encryptNative(key, iv, data)
         }
         return try {
@@ -43,7 +80,8 @@ class AesCipherEngine : CipherEngine {
     }
 
     override fun decrypt(key: ByteArray, iv: ByteArray, data: ByteArray): ByteArray {
-        if (NativeAes.available) {
+        requireAes256Key(key)
+        if (useNative) {
             return decryptNative(key, iv, data)
         }
         return try {
@@ -59,7 +97,8 @@ class AesCipherEngine : CipherEngine {
         key: ByteArray,
         iv: ByteArray
     ): OutputStream {
-        if (NativeAes.available) {
+        requireAes256Key(key)
+        if (useNative) {
             // 原生侧走与解密侧对称的分块骨架（每 64 KiB 一段，链值随段推进）。
             // `ownedSecrets`：原生变换**惰性**读取密钥，故流必须自持副本并负责擦除
             // （契约背景见 `CbcDecryptingInputStream.ownedSecrets` 的 KDoc，§147 整改）
@@ -82,7 +121,8 @@ class AesCipherEngine : CipherEngine {
         key: ByteArray,
         iv: ByteArray
     ): InputStream {
-        if (NativeAes.available) {
+        requireAes256Key(key)
+        if (useNative) {
             // `ownedSecrets`：原生变换**惰性**读取密钥，故流必须自持副本并负责擦除
             // （契约背景见本类 `ownedSecrets` 的 KDoc，§147 整改）
             val ownedKey = key.copyOf()

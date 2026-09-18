@@ -103,3 +103,9 @@ Coroutines + Flow；**文档与代码注释使用简体中文**。
 > 测试文件在**入库前**被随实现一起删掉，`git log --diff-filter=D` 查无此文件）。确需删除时：① 必须先确认**被删对象已无
 > 生产代码可测**（如生产类同批删除），② 在批次文档或限界表登记理由，③ 与生产代码**同一次提交**入库。
 > 细则见 `.codebuddy/rules/engineering-rules.md` §「测试资产纪律」。
+
+> **原生面改动的验证义务（§147 立规，强制）**：凡改动 `crypto/src/main/rust/**`、`jni_bridge_ext.rs`，或任一
+> `Native*` 绑定 / 引擎的原生分派与**探活**，**必须**在设备上跑完 `:crypto:` / `:database:` / `:app:` 三个
+> `connectedDebugAndroidTest` 后方准入库——宿主单测**看不见** Android 运行时差异：§147 的「全零密钥解密」是
+> **宿主 100% 绿、仅真机失败**，§143 的「平台剥离版 BC 抢占 `"BC"`」同样如此。
+> 兜底分支（JCE / BC）的等价性由宿主 `CipherFallbackParityTest` 常态锁定，**不得**以「反正有兜底」为由跳过设备侧。
