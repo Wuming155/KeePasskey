@@ -171,7 +171,7 @@
   `@Preview(uiMode = 0x20)` 归零、三小项全部落地，**全部只命名未改值**；余下只有 `crypto` / `database`
   格式面的 7 份「待逐处判定」文件，须与 `.kdbx` 对拍同批做，属独立一段 ⇒ 本条**不得**据此读作已闭环）；
   剩余第二档渐进消化，未消化部分在批次文档留清单。
-- **当前进度（只留结论；逐批改动与验证见 `docs/resolved/batches/155`~`195`（§180 为文档面批次，不属本条））**：
+- **当前进度（只留结论；逐批改动与验证见 `docs/resolved/batches/155`~`196`（§180 为文档面批次，不属本条））**：
   - **第一档 8 文件**（`wc -l` 实测）：**达标 6**（`SyncCache` 382、`UnlockViewModel` 368、
     `DatabaseSettingsScreen` 339（§159 降到 369，后续批次回填至 370，§189 再降到 339）、`EntryEditFormSections` 351（§160）、
     `EntryDetailScreen` 349（§169）、`EntryDetailViewModel` 397（§170））；按理由登记 2（`SettingsViewModel` 543 / `DatabaseSession` 535，
@@ -205,7 +205,7 @@
   > 「第 5 项 = 会话锁定直调用例」这类早期提法对应**§190 之前**的编号，现已不成立。
   > 处置结论另见限界 **§20** 与
   > [`resolved/batches/182-合并层冲突对下沉与早退守卫限界批次.md`](resolved/batches/182-合并层冲突对下沉与早退守卫限界批次.md)。
-  1. **Compose 面的长函数**（第 3 目的剩余部分）：**§194 复跑 = 19 个 ≥100 行函数，全部为 Compose 面**（§181 首测 28 → §183 削 `Argon2ParametersDialog` → §185 削 `KeePasskeyApp` → §186 削 `UnlockStandardUnlockContent` → §187 削 `AboutSettingsScreen` → §188 顺带削 `PrivilegedBrowserSettingsScreen`）；
+  1. **Compose 面的长函数**（第 3 目的剩余部分）：**§196 复跑 = 18 个 ≥100 行函数，全部为 Compose 面**（§181 首测 28 → §183 削 `Argon2ParametersDialog` → §185 削 `KeePasskeyApp` → §186 削 `UnlockStandardUnlockContent` → §187 削 `AboutSettingsScreen` → §188 顺带削 `PrivilegedBrowserSettingsScreen`）；
      逐个名单见 [`resolved/batches/181-长函数度量工具化与快照分流批次.md`](resolved/batches/181-长函数度量工具化与快照分流批次.md) §3。
      **计数今后一律现跑 `python tools/doc/long_functions.py`**（三条判据与其踩坑史写在工具文档串里，
      条目内不再抄录，以免重演 §175 一次性脚本漏报 10 条的失真）。
@@ -222,13 +222,16 @@
      §193 `ChildDatabaseDialog` 170→**97 出表**（敏感对话框：`SecureDialogWindowEffect()` 两处
      **必须留在被 `SecureDialogFlagPolicyTest` 点名的文件里**、子库主密码链路留本体，只搬非保密段落）；
      §194 `EntryDetailTopBar` 151→**84 出表**（溢出菜单原样下沉；这是**首个跨 `PopupSecureFlagInventoryTest` 清单锁的搬移**，
-     见下方第 3 项的清单锁口径）。
+     见下方第 3 项的清单锁口径）；§196 `VaultListDialogHost` 130→**68 出表**（纯派发表按特性切两段，
+     `check_verbatim_move` 报 **`MISSING_KINDS=0`** 的纯逐字搬；段组件**追加进原文件**而非另起——
+     198 行 + 75 仍距 400 很远，判据是「离 400 还有多少」而不是「段落一律另起文件」）。
      **当前表内头部**（现跑读数）：`CreateVaultWizardDialog` 158（受限界 §179 下限）、
-     `PackageBlocklistManageDialog` 131、`VaultListDialogHost` 130、`GeneratorContent` 121、`EntryDetailScreen` 121。
+     `PackageBlocklistManageDialog` 131、`GeneratorContent` 121、`EntryDetailScreen` 121、
+     `SyncStatusCard` 119、`EntryDetailDialogHost` 119。
      §192 另把 `FieldDiffRow` 的两份同形选项行并为一份 `ConflictFieldChoiceRow`（83 → 41 行，
      不在表内但属同一「重复呈现并一」主题）。
      **口径问题已裁决（§184，PD-11）**：两个纯接线装配表 `keepasskeySettingsNavGraph`（252，逻辑行 1）与
-     `keepasskeyNavGraph`（164，逻辑行 0）**豁免本目 ⇒ 19 项中扣除二者，待拆实为 17 个**；
+     `keepasskeyNavGraph`（164，逻辑行 0）**豁免本目 ⇒ 18 项中扣除二者，待拆实为 16 个**；
      **`KeePasskeyApp` 不豁免**，已按该裁决于 §185 下沉（逻辑行 10 → 0）。裁决全文、分类计数依据与
      「逻辑行 ≥5 即重新计入」的重开条件见 [`architecture/产品裁决登记.md`](architecture/产品裁决登记.md) PD-11。
      > 注：§188 出表的 `PrivilegedBrowserSettingsScreen`（115→95）**若按 `ISSUE-P3-195` 修法②撤销该页替换，
