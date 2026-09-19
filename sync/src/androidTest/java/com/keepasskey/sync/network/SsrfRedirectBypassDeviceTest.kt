@@ -21,7 +21,8 @@ import java.util.Collections
 import javax.net.ssl.SSLException
 
 /**
- * **ISSUE-P2-208 设备侧取证**：OkHttp 路由层对「IP 字面量」短路，不经自定义 `[Dns]`。
+ * **ISSUE-P2-208 设备侧取证**：OkHttp 路由层对「IP 字面量」短路，不经自定义 `[Dns]`；
+ * 以及连接期复核（[SsrfGuardSocketFactory]）落地后的现状。
  *
  * ## 为什么必须设备侧
  *
@@ -34,18 +35,20 @@ import javax.net.ssl.SSLException
  * 2. 「302 重定向到 IPv4 字面量」是否真的绕过 `[SsrfGuardDns]`，以及**控制组**
  *    （重定向到主机名）是否确实被拦——只有同时观察两侧，「旁路」才不是自说自话。
  *
- * ## 判别方式：异常类型 + Dns 调用记录（双证据）
+ * ## 整改前后的判别面（ISSUE-P2-208 修复取证，2026-09-19 第三轮起）
  *
- * - 主机名目标：`SsrfGuardDns.lookup` 被调用 ⇒ 环回被拒 ⇒ `UnknownHostException`；
- * - IP 字面量目标：`lookup` **零调用** ⇒ 请求抵达连接期 ⇒ 自签证书 `TLS` 失败（`SSLException`）。
+ * | 目标 | Dns 层（含自定义 Dns 的客户端） | 生产工厂客户端（TLS-only + 连接期复核） |
+ * |---|---|---|
+ * | 主机名（`localhost`） | `UnknownHostException`（Dns 拦） | 同左（Dns 拦得更早） |
+ * | IPv4 字面量 | **旁路** ⇒ 抵达 TCP ⇒ `SSLException` | `IOException("SSRF 防护…")`，**SYN 之前**拒绝 |
  *
- * 二者在异常类型上互斥，故断言具备**判别力**（而非仅"请求失败了"）。
+ * 故第 3 个用例（复刻 **Dns-only** 接线的明文客户端）依旧成立并作为「为何需要连接期层」的
+ * 设备侧证据；第 2 个用例断言的是**生产工厂客户端对字面量的现状**（整改后已为连接期拒绝）。
  *
  * ## 边界（如实声明）
  *
- * 明文对照用例使用**复刻工厂 `Dns` 接线**的测试客户端——`Dns` 参与的是 OkHttp 的
- * 路由选择，与传输层（`ConnectionSpec`）无关，故复刻客户端对本案结论等价；
- * 真实工厂客户端（TLS-only）对「字面量旁路」的判别见本类第 2 个用例的异常类型对照。
+ * 明文对照用例使用复刻 `Dns` 接线的测试客户端——`Dns` 参与的是 OkHttp 路由选择，
+ * 与传输层（`ConnectionSpec`）无关，故复刻客户端对「Dns-only 旁路」的结论等价。
  */
 @RunWith(AndroidJUnit4::class)
 class SsrfRedirectBypassDeviceTest {
@@ -69,13 +72,17 @@ class SsrfRedirectBypassDeviceTest {
     }
 
     @Test
-    fun `真实工厂客户端对主机名走 SsrfGuardDns、对 IPv4 字面量旁路`() {
+    fun `真实工厂客户端对主机名走 SsrfGuardDns、对 IPv4 字面量在连接期即拒`() {
         val server = newTlsServer()
         try {
             val client = SyncHttpClientFactory.createSyncClient(SyncNetworkOptions())
             assertTrue(
-                "工厂客户端必须装配 SsrfGuardDns（第二层防线接线断言）",
+                "工厂客户端必须装配 SsrfGuardDns（Dns 层防线接线断言）",
                 client.dns is SsrfGuardDns
+            )
+            assertTrue(
+                "工厂客户端必须装配 SsrfGuardSocketFactory（ISSUE-P2-208 的连接期层接线断言）",
+                client.socketFactory is SsrfGuardSocketFactory
             )
 
             val hostnameFailure = execute(client, "https://localhost:${server.port}/")
@@ -86,12 +93,19 @@ class SsrfRedirectBypassDeviceTest {
                 causes(hostnameFailure).any { it is UnknownHostException }
             )
             assertFalse(
-                "IPv4 字面量不得经 SsrfGuardDns（若经必抛 UnknownHostException，则 ISSUE-P2-208 的旁路不成立）；" +
+                "IPv4 字面量不得经 SsrfGuardDns（若经必抛 UnknownHostException——它确实不走 Dns）；" +
                     "实际=$literalFailure",
                 causes(literalFailure).any { it is UnknownHostException }
             )
             assertTrue(
-                "IPv4 字面量应已建立 TCP 并在自签 TLS 阶段失败——这正是「旁路 Dns、抵达连接期」的设备侧证据；" +
+                "IPv4 字面量必须在**建立 TCP 之前**被连接期复核拒掉（ISSUE-P2-208 整改后的现状）：" +
+                    "异常须带守卫标识；实际=$literalFailure",
+                causes(literalFailure).any {
+                    it is IOException && it.message.orEmpty().contains("SSRF 防护")
+                }
+            )
+            assertFalse(
+                "整改后字面量不再抵达自签 TLS 阶段（若仍抛 SSLException 说明连接期层未生效）；" +
                     "实际=$literalFailure",
                 causes(literalFailure).any { it is SSLException }
             )
@@ -109,6 +123,7 @@ class SsrfRedirectBypassDeviceTest {
         val entry = MockWebServer().apply { start(LOOPBACK, 0) }
         try {
             // ① 初跳与重定向目标皆为 IPv4 字面量：若 OkHttp 对字面量短路，则 Dns 零调用且请求抵达 target
+            // （本客户端**不含**连接期层——那正是要证明「仅靠 Dns 够不着」这一半的隔离面）
             entry.enqueue(
                 MockResponse().setResponseCode(302)
                     .setHeader("Location", "http://127.0.0.1:${target.port}/")
@@ -164,7 +179,13 @@ class SsrfRedirectBypassDeviceTest {
         }
     }
 
-    /** 复刻工厂的 `Dns` 接线（明文放行以便重定向链路可端到端跑通；`Dns` 与传输层无关） */
+    /**
+     * **刻意只复刻工厂的 `Dns` 一层**（明文放行以便重定向链路可端到端跑通；`Dns` 与传输层无关）。
+     *
+     * 这样做的目的正是「隔离 Dns 层的可达面」：客户端的字面量旁路必须原样复现，
+     * 才能证明 ISSUE-P2-208 的结论（Dns 层对 IP 字面量无能为力）与连接期层的**必要性**。
+     * 生产工厂客户端的现状由本类第 2 个用例断言。
+     */
     private fun plainClient(dns: Dns): OkHttpClient =
         OkHttpClient.Builder()
             .connectionSpecs(listOf(ConnectionSpec.CLEARTEXT))

@@ -65,6 +65,13 @@ class PasskeyCreateActivity : BaseCredentialActivity() {
     @Inject
     lateinit var callerTrustStore: CredentialManagerCallerTrustStore
 
+    /**
+     * ISSUE-P2-199：特权浏览器白名单——用于按**本次**系统背书的 [androidx.credentials.provider.CallingAppInfo]
+     * 重新派生 origin，取代对组装期写入 base Intent 的 origin 副本的信任。
+     */
+    @Inject
+    lateinit var privilegedBrowserStore: com.keepasskey.app.data.repository.PasskeyPrivilegedBrowserStore
+
     /** 防止验证回调 / 取消回调 / 重复 finish 交错产生重复创建或重复收尾 */
     private var settled = false
 
@@ -83,28 +90,46 @@ class PasskeyCreateActivity : BaseCredentialActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        rpId = intent.getStringExtra(EXTRA_RP_ID).orEmpty()
-        userName = intent.getStringExtra(EXTRA_USER_NAME).orEmpty()
-        userDisplayName = intent.getStringExtra(EXTRA_USER_DISPLAY_NAME).orEmpty()
-        challenge = intent.getStringExtra(EXTRA_CHALLENGE).orEmpty()
-        origin = intent.getStringExtra(EXTRA_ORIGIN).orEmpty()
+        // ISSUE-P2-199：base Intent 上的 extras 只是**组装期的展示缓存**（含设备侧可读的
+        // 条目文案与请求摘要），不再参与任何安全判定——判定一律依据系统经 fillIn Intent
+        // 注入的「本次」请求（`providerReq` / `callingRequest` / `callingAppInfo`）。
+        val cachedRpId = intent.getStringExtra(EXTRA_RP_ID).orEmpty()
+        val cachedUserName = intent.getStringExtra(EXTRA_USER_NAME).orEmpty()
+        val cachedUserDisplayName = intent.getStringExtra(EXTRA_USER_DISPLAY_NAME).orEmpty()
+        val cachedChallenge = intent.getStringExtra(EXTRA_CHALLENGE).orEmpty()
 
         providerReq = try {
             PendingIntentHandler.retrieveProviderCreateCredentialRequest(intent)
         } catch (_: Exception) {
             null
         }
-        // 系统请求 JSON 是**平台下发**的权威来源，优先于本应用写入 base Intent 的副本
-        val callingReq = providerReq?.callingRequest
-        if (callingReq is CreatePublicKeyCredentialRequest) {
-            request = WebAuthnRequest.parse(callingReq.requestJson)
-            if (rpId.isBlank()) rpId = request?.rpId.orEmpty()
-            if (userName.isBlank()) userName = request?.userName.orEmpty()
-            if (userDisplayName.isBlank()) userDisplayName = request?.userDisplayName.orEmpty()
-            if (challenge.isBlank()) challenge = request?.challenge.orEmpty()
+        val injected = providerReq
+        if (injected == null) {
+            // 系统未注入创建请求（理论上仅当条目 PendingIntent 非 FLAG_MUTABLE 时发生）：
+            // 没有系统背书的调用方与请求，一切字段都不可信 ⇒ fail-closed，绝不按缓存副本注册。
+            AppLog.e(TAG, "缺少系统注入的创建请求（条目 PendingIntent 需 FLAG_MUTABLE），拒绝创建")
+            failAndFinish()
+            return
         }
-        // H1 整改：不再从 candidateQueryData 读取调用方可控 origin（不可信）。
-        // origin 缺省留空，clientDataJSON 回退为 https://<rpId> 标准值。
+
+        // 系统请求 JSON 是**平台下发**的权威来源，整体覆盖组装期缓存副本
+        // （缓存仅在系统侧字段缺失 / 解析失败时兜底，见各行的 takeIf 判定）
+        val callingReq = injected.callingRequest
+        request = (callingReq as? CreatePublicKeyCredentialRequest)
+            ?.let { WebAuthnRequest.parse(it.requestJson) }
+        rpId = request?.rpId?.takeIf { it.isNotBlank() } ?: cachedRpId
+        userName = request?.userName?.takeIf { it.isNotBlank() } ?: cachedUserName
+        userDisplayName = request?.userDisplayName?.takeIf { it.isNotBlank() } ?: cachedUserDisplayName
+        challenge = request?.challenge?.takeIf { it.isNotBlank() } ?: cachedChallenge
+
+        // H1 整改：origin 只认系统背书——由**本次** CallingAppInfo 重新派生（特权浏览器走
+        // 官方 getOrigin + 白名单，普通应用固定 apk-key-hash），派生不出即 fail-closed。
+        // ISSUE-P2-199：组装期写入的 origin 副本曾是判定来源，被跨请求覆写后会让
+        // `passesRegistrationGates` 整段跳过 DAL 校验，故该副本自此不再具备任何判定效力。
+        origin = CallingOriginResolver.resolveTrustedOrigin(
+            injected.callingAppInfo,
+            privilegedBrowserStore.allowlistJson()
+        )
 
         if (rpId.isBlank() || userName.isBlank()) {
             // ISSUE-P1-10：日志不得携带 rpId / userName 等敏感标识
@@ -350,10 +375,25 @@ class PasskeyCreateActivity : BaseCredentialActivity() {
 
     companion object {
         private const val TAG = "PasskeyCreateActivity"
+
+        /**
+         * 组装期请求摘要的**展示缓存**（ISSUE-P2-199）。
+         *
+         * 这些 extras 由 [CredentialCreateEntries] 在**组装期**写入 base Intent；自
+         * ISSUE-P2-199 起，它们**不再作为任何安全判定的来源**（origin 已彻底不再读取，
+         * 其余字段仅在系统注入的 `callingRequest` 缺失该字段时兜底）。保留写入是为了
+         * 抓包 / 日志中辨认「系统实际拉起了哪一路创建入口」，以及为系统侧字段缺失兜底。
+         */
         const val EXTRA_RP_ID = "com.keepasskey.extra.RP_ID"
         const val EXTRA_USER_NAME = "com.keepasskey.extra.USER_NAME"
         const val EXTRA_USER_DISPLAY_NAME = "com.keepasskey.extra.USER_DISPLAY_NAME"
         const val EXTRA_CHALLENGE = "com.keepasskey.extra.CHALLENGE"
+
+        /**
+         * 组装期 origin 副本。**已无任何读取点**（ISSUE-P2-199 起 origin 一律由本次
+         * 系统背书的 CallingAppInfo 重新派生）；保留常量仅为兼容既有设备侧匹配键用例
+         * （`PendingIntentMatchKeyDeviceTest`）与将来可能的展示需求。
+         */
         const val EXTRA_ORIGIN = "com.keepasskey.extra.ORIGIN"
     }
 }

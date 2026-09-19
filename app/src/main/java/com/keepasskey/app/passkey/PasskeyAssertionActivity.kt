@@ -46,6 +46,13 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
     @Inject
     lateinit var callerTrustStore: CredentialManagerCallerTrustStore
 
+    /**
+     * ISSUE-P2-199：特权浏览器白名单——供请求面解析器按**本次**系统背书的 CallingAppInfo
+     * 重新派生 origin，并与组装期副本交叉核对（覆盖判定即 fail-closed）。
+     */
+    @Inject
+    lateinit var privilegedBrowserStore: com.keepasskey.app.data.repository.PasskeyPrivilegedBrowserStore
+
     /** 防止验证回调 / 取消回调 / 重复 finish 交错产生多重签发或重复收尾 */
     private var settled = false
 
@@ -54,7 +61,11 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
 
         // ISSUE-P3-188：`onCreate` 收敛为「解析调用方 → 解析请求 → 派发」三段编排，
         // 请求面解析下沉同包协作对象；判定顺序与 fail-closed 口径**逐字不变**
-        val caller = PasskeyAssertionRequestParser.resolveAttestedCaller(intent, TAG)
+        val caller = PasskeyAssertionRequestParser.resolveAttestedCaller(
+            intent,
+            TAG,
+            privilegedBrowserStore.allowlistJson()
+        )
         if (caller.rejected) {
             failAndFinish()
             return

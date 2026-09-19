@@ -68,6 +68,21 @@ class CredentialProviderRequestContractDeviceTest {
     private fun callingAppInfo(origin: String? = null): CallingAppInfo =
         CallingAppInfo(callingPackage, realSigningInfo, origin)
 
+    /**
+     * ISSUE-P2-199：把**本测试包**（真实包名 + 真实指纹）列入特权白名单，
+     * 使平台侧 `CallingAppInfo` 自带的 web origin 能被 `getOrigin` 采信——
+     * 这样「origin 以系统背书派生值为权威」这条断言才具备判别力
+     * （否则派生值恒为 apk-key-hash，与任何 web origin 都「不一致」，测不出权威来源是谁）。
+     */
+    private val platformAllowlist: String by lazy {
+        CallingOriginResolver.buildAllowlistJson(
+            mapOf(
+                callingPackage to CallingOriginResolver.certDigests(callingAppInfo()).values
+                    .map { CallingOriginResolver.toColonSeparatedUpper(it) }
+            )
+        )
+    }
+
     @Test
     fun 真机签名信息下apk密钥哈希与证书摘要等于独立复算值() {
         val info = callingAppInfo()
@@ -164,7 +179,7 @@ class CredentialProviderRequestContractDeviceTest {
             PendingIntentHandler.retrieveProviderGetCredentialRequest(intent)
         )
 
-        val caller = PasskeyAssertionRequestParser.resolveAttestedCaller(intent, TAG)
+        val caller = PasskeyAssertionRequestParser.resolveAttestedCaller(intent, TAG, platformAllowlist)
         assertFalse("未写入预期包名时不得判为不一致", caller.rejected)
         assertEquals("未写入预期包名时期望值应为空串（不得伪造）", "", caller.expectedPackage)
         assertEquals(
@@ -177,19 +192,34 @@ class CredentialProviderRequestContractDeviceTest {
         }
         assertTrue(
             "ISSUE-P2-72：组装阶段与断言窗口看到的调用方不一致必须 fail-closed",
-            PasskeyAssertionRequestParser.resolveAttestedCaller(mismatched, TAG).rejected
+            PasskeyAssertionRequestParser.resolveAttestedCaller(mismatched, TAG, platformAllowlist).rejected
         )
 
-        val withEntry = platformGetCredentialIntent(ASSERTION_REQUEST_JSON, clientDataHash).apply {
+        // ISSUE-P2-199：平台侧 CallingAppInfo 自带（且命中白名单的）origin 才是权威来源，
+        // 组装期写入 base Intent 的 EXTRA_ORIGIN 与之一致时正常放行；
+        // 同时把 EXTRA_CHALLENGE 刻意写成另一个值，验证 challenge 亦以系统请求 JSON 为准。
+        val withEntry = platformGetCredentialIntent(ASSERTION_REQUEST_JSON, clientDataHash, WEB_ORIGIN).apply {
             putExtra(PasskeyAssertionActivity.EXTRA_EXPECTED_PACKAGE, callingPackage)
             putExtra(PasskeyAssertionActivity.EXTRA_ENTRY_ID, ENTRY_ID)
             putExtra(PasskeyAssertionActivity.EXTRA_ORIGIN, WEB_ORIGIN)
+            putExtra(PasskeyAssertionActivity.EXTRA_CHALLENGE, STALE_CHALLENGE)
         }
-        val parsedCaller = PasskeyAssertionRequestParser.resolveAttestedCaller(withEntry, TAG)
+        val parsedCaller = PasskeyAssertionRequestParser.resolveAttestedCaller(withEntry, TAG, platformAllowlist)
+        assertFalse("系统背书 origin 与组装期副本一致时不得拒签", parsedCaller.rejected)
+        assertEquals(
+            "origin 必须取**本次**系统背书派生值（ISSUE-P2-199），而非组装期副本",
+            WEB_ORIGIN,
+            parsedCaller.origin
+        )
         val assembled = PasskeyAssertionRequestParser.buildAssertionContext(withEntry, TAG, parsedCaller)
         assertNotNull("带 entryId 的断言请求必须可装配", assembled)
         requireNotNull(assembled)
         assertEquals(ENTRY_ID, assembled.entryId)
+        assertEquals(
+            "challenge 必须取系统请求 JSON（ISSUE-P2-199：extras 仅作展示缓存），实际=${assembled.challenge}",
+            SYSTEM_CHALLENGE,
+            assembled.challenge
+        )
         assertArrayEquals(
             "特权调用方自带的 clientDataJSON 摘要必须原样透传（自建哈希会让 RP 验签失败）",
             clientDataHash, assembled.providedClientDataHash
@@ -213,6 +243,40 @@ class CredentialProviderRequestContractDeviceTest {
         assertNull(
             "缺少 entryId 必须返回 null 由调用方收尾，绝不以空 id 继续签发",
             PasskeyAssertionRequestParser.buildAssertionContext(missingEntry, TAG, parsedCaller)
+        )
+    }
+
+    /**
+     * ISSUE-P2-199 的**能红判据**：组装期 origin 副本与系统背书派生值不一致时（即该
+     * `PendingIntent` 记录被另一路请求就地覆写的形态）必须 fail-closed，绝不按副本签发。
+     *
+     * 覆盖判定是本条的核心防线——只做「一致才放行」，不改动任何既有放行口径。
+     */
+    @Test
+    fun 组装期origin副本与系统背书不一致时必须拒绝签发() {
+        val clientDataHash = ByteArray(32) { (it + 1).toByte() }
+        // 本次系统背书 origin 为 apk-key-hash（平台侧未带 web origin），
+        // 而组装期副本却是另一路请求留下的 web origin ⇒ 覆盖证据成立
+        val contaminated = platformGetCredentialIntent(ASSERTION_REQUEST_JSON, clientDataHash).apply {
+            putExtra(PasskeyAssertionActivity.EXTRA_EXPECTED_PACKAGE, callingPackage)
+            putExtra(PasskeyAssertionActivity.EXTRA_ENTRY_ID, ENTRY_ID)
+            putExtra(PasskeyAssertionActivity.EXTRA_ORIGIN, WEB_ORIGIN)
+        }
+
+        assertTrue(
+            "组装期 origin 副本与系统背书派生值不一致必须 fail-closed（ISSUE-P2-199）",
+            PasskeyAssertionRequestParser.resolveAttestedCaller(contaminated, TAG, platformAllowlist).rejected
+        )
+
+        // 对照组：本次系统背书 origin 命中白名单并等于副本 ⇒ 不得误拒
+        val consistent = platformGetCredentialIntent(ASSERTION_REQUEST_JSON, clientDataHash, WEB_ORIGIN).apply {
+            putExtra(PasskeyAssertionActivity.EXTRA_EXPECTED_PACKAGE, callingPackage)
+            putExtra(PasskeyAssertionActivity.EXTRA_ENTRY_ID, ENTRY_ID)
+            putExtra(PasskeyAssertionActivity.EXTRA_ORIGIN, WEB_ORIGIN)
+        }
+        assertFalse(
+            "一致时不得误拒（否则整条防线退化为「一律拒绝」）",
+            PasskeyAssertionRequestParser.resolveAttestedCaller(consistent, TAG, platformAllowlist).rejected
         )
     }
 
@@ -269,7 +333,11 @@ class CredentialProviderRequestContractDeviceTest {
      * 刻意走平台对象而非直接 new androidx 对象：让「系统背书」这一环真实经过一次
      * parcel 往返与 `CredentialOption` 换型——这正是宿主单测无法覆盖的部分。
      */
-    private fun platformGetCredentialIntent(requestJson: String, clientDataHash: ByteArray): Intent {
+    private fun platformGetCredentialIntent(
+        requestJson: String,
+        clientDataHash: ByteArray,
+        origin: String? = null
+    ): Intent {
         // 由 androidx 的公开构造器产出「规范形态」的请求数据 Bundle（含 subtype 与两个字段），
         // 再原样交给平台 Builder —— 全程不复制库内 private 常量，形态与线上一致。
         val androidxOption = GetPublicKeyCredentialOption(requestJson, clientDataHash)
@@ -287,7 +355,7 @@ class CredentialProviderRequestContractDeviceTest {
             )
         }
         val frameworkRequest = android.service.credentials.GetCredentialRequest(
-            android.service.credentials.CallingAppInfo(callingPackage, realSigningInfo, null),
+            android.service.credentials.CallingAppInfo(callingPackage, realSigningInfo, origin),
             listOf(platformOption)
         )
         return Intent().putExtra(
@@ -306,6 +374,12 @@ class CredentialProviderRequestContractDeviceTest {
         const val LOOKALIKE_PACKAGE = "com.evil.lookalike"
         const val ENTRY_ID = "entry-42"
         const val TAG = "device-cm-contract"
+
+        /** [ASSERTION_REQUEST_JSON] 内嵌的 challenge（系统请求 JSON 的权威值） */
+        const val SYSTEM_CHALLENGE = "q0k7Tew"
+
+        /** 组装期副本里的陈旧 challenge（ISSUE-P2-199：不得覆盖系统请求 JSON 的值） */
+        const val STALE_CHALLENGE = "stale-challenge-from-earlier-request"
 
         /** 一定不属于本机的指纹（前 16 字节零，形态与平台要求一致）。 */
         const val ZERO_FINGERPRINT =

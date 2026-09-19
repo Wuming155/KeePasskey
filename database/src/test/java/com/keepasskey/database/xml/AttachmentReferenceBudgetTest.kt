@@ -14,7 +14,7 @@ import java.util.Base64
  *
  * 逐引用 `item.load().copyOf()` 是 ISSUE-P3-07 的别名隔离契约防线，不得取消；
  * 但同一池条目被引用 N 次即 N 份副本，元素数与整包上限都只间接约束该乘积，
- * 故须以 [BinaryReferenceBudget] 按累计字节 fail-closed。
+ * 故须以 [AttachmentBudget] 按累计字节 fail-closed。
  */
 class AttachmentReferenceBudgetTest {
 

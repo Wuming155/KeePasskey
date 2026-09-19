@@ -17,6 +17,11 @@ import java.util.TreeMap
  * （深度上限 [MAX_DEPTH] 防循环引用无限递归，超限后原样返回不再展开）。
  * 未命中的引用保持原文（保守策略：宁缺毋错，不静默吞掉用户数据）。
  *
+ * ISSUE-P2-200：仅封深度**不足以**约束产物——分支因子（目标字段内引用个数）会让
+ * `k^depth` 相乘放大（自引用 `{REF:N@T:<自身标题>}` 即可构造）。故每次解析另设
+ * [MAX_EXPANSIONS]（展开次数）与 [MAX_PRODUCED_CHARS]（产出字符数）双闸门，
+ * 二者超限**一律逐段保留引用原文**：不抛错、不吞数据，与未命中 / 超深的既有语义一致。
+ *
  * 两条解析通道（ISSUE-P3-02 / TASK-49）：
  * - [resolve]：**取值消费点**（自动填充下发、详情页复制）——**必须显式声明消费点面**
  *   （[consumerField]）：口令消费点（`P`）可按 KDBX 语义展开受保护字段；**非口令消费点
@@ -45,6 +50,38 @@ object FieldReferenceEngine {
      * 公开为常量，便于调用方与单测按同一上限断言超深引用行为。
      */
     const val MAX_DEPTH: Int = 10
+
+    /**
+     * ISSUE-P2-200 落点②：单次解析的**展开次数**上限（分支计数闸门）。
+     *
+     * ## 为什么深度上限不够
+     * [MAX_DEPTH] 只封递归层数，**不封每层的展开个数**：`{REF:W@S:text}` 的替换结果会作为
+     * 下一层的输入继续展开，分支因子等于「目标字段内引用个数」。于是一个自引用
+     * `{REF:N@T:<自身标题>}`（目标是本条目，检索键恰为自身标题）即可让每层引用数相乘——
+     * 字段内放 k 个引用、深度 11（d=0..10 均执行替换）即产生 `k^11` 个叶展开：
+     * `k=4`、输入不足 1 KB 即 ~4×10⁶ 次展开，而**输出长度无上界**。
+     *
+     * ## 取值依据
+     * 合法场景（展示 Notes/URL、填充账密）中引用链是**线性**的：一次解析的展开次数与
+     * 「文本内引用数 × 链长」同阶，实际为个位数到几十。4000 足足高出两个数量级；
+     * 而放大构造需要 10⁵ 次以上展开才会体现「爆炸」，故该闸门必然先于内存耗尽触发。
+     */
+    const val MAX_EXPANSIONS: Int = 4_000
+
+    /**
+     * ISSUE-P2-200 落点②：单次解析的**产出字符数**上限（输出预算闸门，UTF-16 字符计）。
+     *
+     * 与 [MAX_EXPANSIONS] 构成双闸门：次数闸门封「相乘的分支数」，本闸门封「每次展开的产出
+     * 体积」。二者缺一都会被绕过——只有次数闸门时，k 很小但单个目标的字段极大仍可产出巨串；
+     * 只有体积闸门时，海量小展开的 CPU / 分配开销不受约束。
+     *
+     * 超限的引用**原样保留未展开段**（`{REF:...}` 原文），既不抛错也不吞掉用户数据——
+     * 与 [MAX_DEPTH] 超限、未命中引用的既有保守语义完全一致。
+     *
+     * 1 MiB 的选取：合法展开产物与字段本身同阶（正常为几 KB），高出三个数量级仍不误伤；
+     * 而在真机上该量级的内存峰值（数十 MiB 的瞬时串）远低于任何设备的堆界。
+     */
+    const val MAX_PRODUCED_CHARS: Int = 1 shl 20
 
     /**
      * `{REF:W@S:text}` 匹配：字段代码单字符、SearchText 不允许出现花括号
@@ -123,8 +160,38 @@ object FieldReferenceEngine {
         if (!containsReference(text)) text
         else resolveInternal(
             text, RefIndex(root, ::valueOf), depth = 0, mode = mode,
-            protectedPlaceholder = protectedPlaceholder, consumerField = consumerField
+            protectedPlaceholder = protectedPlaceholder, consumerField = consumerField,
+            // ISSUE-P2-200：双闸门**每次解析独享**（不作为跨调用状态），超限即逐段保留原文
+            budget = ExpansionBudget()
         )
+
+    /**
+     * ISSUE-P2-200 落点②：一次解析内的展开预算（次数 + 产出字符数双闸门）。
+     *
+     * 计数器**每层递归共享**，故「指数展开」在总次数上受限而非逐层各自计数——
+     * 逐层计数会被「每层都在额度内」的形式绕过（这正是 `k^depth` 放大的成因）。
+     *
+     * 超限**不抛异常**：调用方返回该引用的原文（`match.value`），与未命中 / 超深引用的
+     * 既有保守语义一致（宁缺毋错，绝不吞掉用户数据）。
+     */
+    private class ExpansionBudget {
+        private var expansions = 0
+        private var producedChars = 0L
+
+        /** 认领一次展开；额度耗尽返回 false（调用方保留原文） */
+        fun tryClaimExpansion(): Boolean {
+            if (expansions >= MAX_EXPANSIONS) return false
+            expansions++
+            return true
+        }
+
+        /** 认领一段产出字符；额度耗尽返回 false（调用方保留原文） */
+        fun tryClaimChars(count: Int): Boolean {
+            if (producedChars + count > MAX_PRODUCED_CHARS) return false
+            producedChars += count
+            return true
+        }
+    }
 
     /**
      * 一次解析内共享的**引用目标索引**（`ISSUE-P3-163`）。
@@ -168,7 +235,8 @@ object FieldReferenceEngine {
         depth: Int,
         mode: ResolveMode,
         protectedPlaceholder: String,
-        consumerField: RefField?
+        consumerField: RefField?,
+        budget: ExpansionBudget
     ): String {
         if (depth > MAX_DEPTH) return text
         return REF_REGEX.replace(text) { match ->
@@ -185,19 +253,28 @@ object FieldReferenceEngine {
                 return@replace protectedPlaceholder
             }
 
+            // ISSUE-P2-200：展开次数闸门——超限即保留该引用原文（不再递归，也不吞原文）
+            if (!budget.tryClaimExpansion()) return@replace match.value
+
             val target = index.find(searchField, searchText)
             when {
                 // 未命中：保持原文（保守不吞）
                 target == null -> match.value
                 // 命中：取值并递归展开（值本身可能仍是引用链；消费点面白名单随通道全程传递）
-                else -> resolveInternal(
-                    valueOf(target, wantField).orEmpty(),
-                    index,
-                    depth + 1,
-                    mode,
-                    protectedPlaceholder,
-                    consumerField
-                )
+                else -> {
+                    val expanded = resolveInternal(
+                        valueOf(target, wantField).orEmpty(),
+                        index,
+                        depth + 1,
+                        mode,
+                        protectedPlaceholder,
+                        consumerField,
+                        budget
+                    )
+                    // ISSUE-P2-200：产出体积闸门——超限即保留该引用原文（原文长度已计入输入侧，
+                    // 不额外占用预算），使最终产物上界 ≈ 输入长度 + MAX_PRODUCED_CHARS
+                    if (!budget.tryClaimChars(expanded.length)) match.value else expanded
+                }
             }
         }
     }

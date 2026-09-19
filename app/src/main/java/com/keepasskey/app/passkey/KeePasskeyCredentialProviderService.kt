@@ -154,7 +154,8 @@ class KeePasskeyCredentialProviderService : CredentialProviderService() {
             val unlockIntent = Intent(this, CredentialUnlockActivity::class.java)
             val pendingIntent = PendingIntent.getActivity(
                 this,
-                REQUEST_CODE_UNLOCK,
+                // ISSUE-P2-199：requestCode 进程级单调（原为常量 100，会与后续响应的候选条目记录互相覆写）
+                CredentialPendingIntents.nextRequestCode(),
                 unlockIntent,
                 // ISSUE-P1-01：必须 FLAG_MUTABLE，系统需注入原始 BeginGetCredentialRequest
                 CredentialPendingIntents.ENTRY_FLAGS
@@ -298,8 +299,5 @@ class KeePasskeyCredentialProviderService : CredentialProviderService() {
     companion object {
         private const val TAG = "KeePasskeyCredProvider"
         private const val TIMEOUT_MS = 5_000L
-        private const val REQUEST_CODE_UNLOCK = 100
-        private const val REQUEST_CODE_ASSERT = 101
-        private const val REQUEST_CODE_FILL = 102
     }
 }

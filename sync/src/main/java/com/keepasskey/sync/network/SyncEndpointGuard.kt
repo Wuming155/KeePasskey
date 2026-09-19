@@ -20,14 +20,19 @@ import java.util.Locale
  *    （`scheme://bucket.host/key`），注入 `x@evil.com/`、`x#`、`x?` 即可改写真实目标主机，
  *    且 SigV4 canonicalHeaders 取自被注入后的 host → 签名自洽 → 向攻击者主机投递对其有效的签名。
  *
- * 防线分两层，均 fail-closed：
+ * 防线分三层，均 fail-closed：
  * - **构造期（纯字符串/字面 IP 校验，零网络）**：桶名严格按 S3 命名正则校验杜绝 authority 注入；
  *   端点主机拒绝 userinfo 注入、本地/内网保留名与**字面 IP** 的内网/保留网段；
  * - **连接期（DNS 解析后校验）**：经 [SsrfGuardDns] 拦截主机名解析结果，任一解析地址落入
- *   内网/保留网段即整体拒绝——同时抵御 DNS 重绑定（校验用的解析结果即喂给实际连接）。
+ *   内网/保留网段即整体拒绝——同时抵御 DNS 重绑定（校验用的解析结果即喂给实际连接）；
+ * - **连接期（目标地址复核）**：经 [SsrfGuardSocketFactory] 在建立 TCP 之前复核**实际目标地址**，
+ *   覆盖 Dns 层天然够不着的两条路径——**IP 字面量**（OkHttp 路由层对其短路，不经自定义 Dns）
+ *   与**重定向跳转**（ISSUE-P2-208：`302 → https://<内网 IP>/` 曾只剩 TLS 证书链一道约束）。
  *
- * 显式白名单豁免：[allowedHosts] 提供可审计的例外通道（默认空）；测试/本地联调另经
- * Provider 注入自定义 OkHttpClient 的生产旁路豁免（与既有强制 HTTPS 校验的 `client == null` 门控一致）。
+ * 显式白名单豁免：[allowedHosts] 提供可审计的例外通道（默认空），其解析结果经
+ * [SsrfAddressApprovals] 登记后在连接期一并放行（否则纵深防御会退化为内网自建的可用性回归）；
+ * 测试/本地联调另经 Provider 注入自定义 OkHttpClient 的生产旁路豁免
+ * （与既有强制 HTTPS 校验的 `client == null` 门控一致）。
  */
 object SyncEndpointGuard {
 
@@ -237,17 +242,28 @@ object SyncEndpointGuard {
  *
  * 校验用的解析结果即喂给实际连接，故对 DNS 重绑定同样有效。仅装配于生产客户端
  * （[SyncHttpClientFactory]）；测试/本地联调经注入自定义客户端旁路。
+ *
+ * **本层管不到 IP 字面量与重定向跳转**——那两条由 [SsrfGuardSocketFactory] 在连接期兜底
+ * （ISSUE-P2-208），本类只负责「主机名 ⇒ 解析结果」这一面。
  */
 class SsrfGuardDns(
     private val delegate: Dns = Dns.SYSTEM,
-    private val allowedHosts: Set<String> = emptySet()
+    private val allowedHosts: Set<String> = emptySet(),
+    /**
+     * ISSUE-P2-208：白名单豁免地址登记表——豁免主机解析出的内网地址在此登记后，
+     * 由 [SsrfGuardSocketFactory] 的连接期复核放行（保障内网自建场景不被纵深防御误伤）。
+     */
+    private val approvals: SsrfAddressApprovals = SsrfAddressApprovals()
 ) : Dns {
 
     override fun lookup(hostname: String): List<InetAddress> {
         val addresses = delegate.lookup(hostname)
         val lower = hostname.lowercase(Locale.US).removeSuffix(".")
         val exempt = allowedHosts.any { it.lowercase(Locale.US) == lower }
-        if (exempt) return addresses
+        if (exempt) {
+            approvals.approveAll(addresses)
+            return addresses
+        }
 
         val blocked = addresses.firstOrNull { SyncEndpointGuard.isBlockedAddress(it) }
         if (blocked != null) {

@@ -40,7 +40,7 @@ internal fun KeePasskeyAutofillService.buildInlinePresentation(
 ): InlinePresentation? = inlinePresentationFactory.build(inlineRequest, title, subtitle)
 
 /**
- * ISSUE-P3-122（IPC-01）：认证 `PendingIntent` 的 requestCode **进程级单调分配器**。
+ * ISSUE-P3-122（IPC-01）：认证 `PendingIntent` 的 requestCode **进程级单调分配器**（自动填充通道）。
  *
  * ## 缺陷形态
  *
@@ -51,9 +51,17 @@ internal fun KeePasskeyAutofillService.buildInlinePresentation(
  *
  * ## 修复口径
  *
- * 与 CM 通道的 `CredentialResponseAssembler.RequestCodeAllocator` **同构**：每次分配取新值，
- * 从根上消除「不同响应共用 requestCode」这一前提；`FLAG_UPDATE_CURRENT` 随之不再有覆盖对象。
- * 计数器为进程级单调，无需随响应重置（重置反而会重新引入复用）。
+ * 每次分配取新值，从根上消除「不同响应共用 requestCode」这一前提；
+ * `FLAG_UPDATE_CURRENT` 随之不再有覆盖对象。计数器为进程级单调，无需随响应重置
+ * （重置反而会重新引入复用）。
+ *
+ * ## 与 CM 通道的关系（ISSUE-P2-199 更正）
+ *
+ * 本注释原称「与 CM 通道的 `CredentialResponseAssembler.RequestCodeAllocator` 同构」，
+ * 而当时 CM 侧是**每响应复位**的局部计数器——该自称**失实**。ISSUE-P2-199 已把 CM 通道
+ * 同形缺陷一并整改：[CredentialPendingIntents.nextRequestCode] 亦为进程级 `AtomicInteger`
+ * 单调分配（唯一差异是分配基线，用于日志辨认）。两通道自此**真正同构**，
+ * 该对应关系由 `CredentialRequestCodeWiringTest` 的源码断言常态锁定（防再次漂移）。
  */
 private val authRequestCodeAllocator = AtomicInteger(AUTH_REQUEST_CODE_BASE)
 

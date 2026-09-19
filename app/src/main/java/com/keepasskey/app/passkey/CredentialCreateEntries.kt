@@ -18,15 +18,15 @@ import org.json.JSONObject
  * 运行环境完整性门控与响应对象组装仍留在服务内（`return responseBuilder.build()` 的
  * 收口点不迁移，避免拆分改变下发时序）。返回 `null` 表示该请求被 fail-closed 拒绝，
  * 调用方据此不追加任何条目。
+ *
+ * PendingIntent requestCode：**不再使用本文件原有常量**（原为 103 / 104，ISSUE-P2-199）——
+ * 创建入口原先恒用固定 requestCode，而落地 Intent 只带 extras（无 action / data ⇒ 同组件的
+ * `Intent.filterEquals` 恒为真），叠加 `FLAG_UPDATE_CURRENT` 后第二次创建请求会**就地覆写**
+ * 第一次的 PendingIntent 记录，后者携带的陈旧 `origin` / `rpId` 会让 `PasskeyCreateActivity`
+ * 的 DAL 门控整段被跳过。现统一取自 [CredentialPendingIntents.nextRequestCode]（进程级单调），
+ * 从根上消除覆写对象。
  */
 internal object CredentialCreateEntries {
-
-    /**
-     * PendingIntent requestCode：与拆分前的服务常量**同值**（103 / 104），
-     * 仅因唯一使用点在本文件而随职责一并迁入。
-     */
-    private const val REQUEST_CODE_CREATE_PASSKEY = 103
-    private const val REQUEST_CODE_CREATE_PASSWORD = 104
 
     /** 沿用服务 TAG，使入口装配与门控留痕可在同一标签下串读 */
     private const val TAG = "KeePasskeyCredentialProviderService"
@@ -62,7 +62,7 @@ internal object CredentialCreateEntries {
         AppLog.i(TAG, "已向系统返回 Passkey CreateEntry")
         return CreateEntry.Builder(
             fields.userName.ifBlank { context.getString(R.string.cred_create_entry_title) },
-            entryPendingIntent(context, REQUEST_CODE_CREATE_PASSKEY, intent)
+            entryPendingIntent(context, intent)
         )
             .setDescription(context.getString(R.string.cred_create_entry_subtitle))
             .setIcon(Icon.createWithResource(context, R.drawable.ic_launcher))
@@ -77,7 +77,7 @@ internal object CredentialCreateEntries {
         }
         return CreateEntry.Builder(
             context.getString(R.string.cred_create_entry_title),
-            entryPendingIntent(context, REQUEST_CODE_CREATE_PASSWORD, intent)
+            entryPendingIntent(context, intent)
         )
             .setDescription(context.getString(R.string.cred_create_entry_subtitle))
             .setIcon(Icon.createWithResource(context, R.drawable.ic_launcher))
@@ -114,7 +114,15 @@ internal object CredentialCreateEntries {
     /**
      * ISSUE-P1-01：必须 FLAG_MUTABLE，系统需注入 ProviderCreateCredentialRequest
      * （标志位口径集中在 [CredentialPendingIntents.ENTRY_FLAGS]）。
+     *
+     * ISSUE-P2-199：requestCode 由 [CredentialPendingIntents.nextRequestCode] 进程级单调发放
+     * （标志位与 requestCode 两类契约现同处一个对象，避免再次漂移）。
      */
-    private fun entryPendingIntent(context: Context, requestCode: Int, intent: Intent): PendingIntent =
-        PendingIntent.getActivity(context, requestCode, intent, CredentialPendingIntents.ENTRY_FLAGS)
+    private fun entryPendingIntent(context: Context, intent: Intent): PendingIntent =
+        PendingIntent.getActivity(
+            context,
+            CredentialPendingIntents.nextRequestCode(),
+            intent,
+            CredentialPendingIntents.ENTRY_FLAGS
+        )
 }

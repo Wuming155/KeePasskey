@@ -47,9 +47,10 @@ class KdbxXmlParser(
         // `newSAXParser()` 才抛，仅在 `setFeature` 外套 try/catch 无法阻止设备端解析全量失败。
         val parser = buildHardenedParser()
 
-        // ISSUE-P2-48（审计 F-10）：本次解析共享的「池引用累计物化字节」预算——
-        // 逐引用 copyOf() 是别名隔离契约防线（不得取消），须以累计预算封住副本乘法。
-        val referenceBudget = BinaryReferenceBudget.forPool(binaries)
+        // ISSUE-P2-48（审计 F-10）+ ISSUE-P2-200 落点①：本次解析共享的「附件物化预算」——
+        // 池引用副本乘法（逐引用 copyOf 不得取消）与内联压缩附件解压放大两条通道合一封顶，
+        // 且**按累计**而非按单次调用（后者是 ISSUE-P2-200 的原始缺陷形态）。
+        val attachmentBudget = AttachmentBudget.forParse(binaries)
 
         var metaData = KdbxMetaData()
         var rootGroup: KdbxGroup? = null
@@ -58,7 +59,7 @@ class KdbxXmlParser(
         parseDocument(
             parser = parser,
             inputStream = inputStream,
-            handler = createSaxHandler(nodeStack, binaries, referenceBudget) { meta, group ->
+            handler = createSaxHandler(nodeStack, binaries, attachmentBudget) { meta, group ->
                 metaData = meta
                 rootGroup = group
             }
@@ -82,7 +83,7 @@ class KdbxXmlParser(
     private fun createSaxHandler(
         nodeStack: ArrayDeque<SaxNode>,
         binaries: List<InnerHeader.BinaryItem>,
-        referenceBudget: BinaryReferenceBudget,
+        attachmentBudget: AttachmentBudget,
         onFileEnd: (KdbxMetaData, KdbxGroup?) -> Unit
     ): DefaultHandler2 = object : DefaultHandler2() {
         // Wave 12 / D23 解析炸弹防线：XML 元素**总数**封顶（此前仅约束深度与单节点文本长度，
@@ -122,7 +123,7 @@ class KdbxXmlParser(
                 if (qName != KdbxConstants.Xml.ROOT) {
                     throw KdbxCorruptFileException("KDBX XML 根节点必须是 <${KdbxConstants.Xml.ROOT}>，实际为 <$qName>")
                 }
-                nodeStack.addLast(FileNode(innerStreamCipher, binaries, referenceBudget) {
+                nodeStack.addLast(FileNode(innerStreamCipher, binaries, attachmentBudget) {
                     onFileEnd(it.first, it.second)
                 })
             } else {
@@ -330,7 +331,7 @@ class KdbxXmlParser(
 private class FileNode(
     private val innerStreamCipher: InnerRandomStreamCipher?,
     private val binaries: List<InnerHeader.BinaryItem>,
-    private val referenceBudget: BinaryReferenceBudget,
+    private val attachmentBudget: AttachmentBudget,
     private val onDone: (Pair<KdbxMetaData, KdbxGroup?>) -> Unit
 ) : SaxNode() {
 
@@ -340,7 +341,7 @@ private class FileNode(
     override fun startChild(name: String, attrs: Attributes): SaxNode {
         return when (name) {
             KdbxConstants.Xml.META -> MetaNode { meta = it }
-            KdbxConstants.Xml.ROOT_GROUP -> RootNode(innerStreamCipher, binaries, referenceBudget) { group, rootDeletedObjects ->
+            KdbxConstants.Xml.ROOT_GROUP -> RootNode(innerStreamCipher, binaries, attachmentBudget) { group, rootDeletedObjects ->
                 rootGroup = group
                 if (rootDeletedObjects.isNotEmpty()) {
                     meta = meta.copy(
@@ -368,7 +369,7 @@ private class FileNode(
 private class RootNode(
     private val innerStreamCipher: InnerRandomStreamCipher?,
     private val binaries: List<InnerHeader.BinaryItem>,
-    private val referenceBudget: BinaryReferenceBudget,
+    private val attachmentBudget: AttachmentBudget,
     private val onDone: (KdbxGroup?, List<DeletedObject>) -> Unit
 ) : SaxNode() {
 
@@ -377,7 +378,7 @@ private class RootNode(
 
     override fun startChild(name: String, attrs: Attributes): SaxNode {
         return when (name) {
-            KdbxConstants.Xml.GROUP -> GroupNode(null, innerStreamCipher, binaries, referenceBudget) { rootGroup = it }
+            KdbxConstants.Xml.GROUP -> GroupNode(null, innerStreamCipher, binaries, attachmentBudget) { rootGroup = it }
             KdbxConstants.Xml.DELETED_OBJECTS -> DeletedObjectsNode { deletedObjects = it }
             else -> IgnoredNode()
         }

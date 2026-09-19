@@ -5,7 +5,6 @@ import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.crypto.stream.InnerRandomStreamCipher
 import com.keepasskey.database.exception.KdbxCorruptFileException
 import com.keepasskey.database.file.InnerHeader
-import com.keepasskey.database.file.KdbxFile
 import org.xml.sax.Attributes
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
@@ -51,13 +50,12 @@ internal class BinaryNode(
      */
     private val innerStreamCipher: InnerRandomStreamCipher? = null,
     /**
-     * ISSUE-P2-48（审计 F-10）：本次解析共享的「池引用物化累计字节」预算。
+     * 本次解析共享的**附件物化预算**——两条放大通道合一（ISSUE-P2-48 池引用副本乘法 /
+     * ISSUE-P2-200 内联解压放大），见 [AttachmentBudget] 的类 KDoc。
      *
-     * 逐引用 `item.load().copyOf()` 是 ISSUE-P3-07 的别名隔离契约防线（**不得取消**），
-     * 但同一池条目被引用 N 次即产生 N 份副本——元素数与整包上限都只**间接**约束它。
-     * 故此处按累计物化字节 fail-closed。默认不限（仅供不经 `KdbxXmlParser` 的直接构造）。
+     * 默认不限（仅供不经 `KdbxXmlParser` 的直接构造，如设备侧单节点内存行为实测）。
      */
-    private val referenceBudget: BinaryReferenceBudget = BinaryReferenceBudget.unlimited(),
+    private val attachmentBudget: AttachmentBudget = AttachmentBudget.unlimited(),
     private val onDone: (KdbxAttachment) -> Unit
 ) : SaxNode() {
 
@@ -118,6 +116,9 @@ internal class BinaryNode(
      *
      * `isProtected` 仅在 [innerStreamCipher] 可用时才走解密分支——与 [StringNode] 同一
      * 降级判定（无内层流密码意味着调用方使用明文 XML 通道，此时 `Protected` 无密钥流可解）。
+     *
+     * ISSUE-P2-200：三条分支物化出的字节**一律计入本次解析的累计预算**（[AttachmentBudget]）。
+     * 内联压缩分支额外在解压**之前**认领节点额度（超限即不再付出解压成本）。
      */
     private fun decodeInlineValue(text: String): ByteArray {
         if (isProtected && innerStreamCipher != null) {
@@ -128,7 +129,9 @@ internal class BinaryNode(
             }
             // 官方 ProcessNode：受保护内联值与数据库级压缩互斥（Write.cs:947-963 二选一分支），
             // 故此处不叠加 Compressed 解压。空载荷不消耗密钥流（Write.cs:951-953 仅长度 > 0 才写出）。
-            return if (decoded.isEmpty()) ByteArray(0) else innerStreamCipher.processBytes(decoded)
+            val materialized = if (decoded.isEmpty()) ByteArray(0) else innerStreamCipher.processBytes(decoded)
+            attachmentBudget.accountInlineMaterialized(materialized.size)
+            return materialized
         }
 
         val decoded = try {
@@ -136,21 +139,35 @@ internal class BinaryNode(
         } catch (e: IllegalArgumentException) {
             throw KdbxCorruptFileException("无法解码内联附件 Base64 数据: key=$key", e)
         }
-        return if (isCompressed) gunzip(decoded) else decoded
+        if (!isCompressed) {
+            attachmentBudget.accountInlineMaterialized(decoded.size)
+            return decoded
+        }
+        // 先认领节点额度：超限在解压**之前**拒绝（不付出解压成本，也不再申请输出缓冲）
+        attachmentBudget.claimInlineCompressedNode()
+        // 本节点可用字节 = 累计预算的剩余量（单节点因此同样受累计上界约束）
+        val materialized = gunzip(decoded, attachmentBudget.remainingInlineBytes())
+        attachmentBudget.accountInlineMaterialized(materialized.size)
+        return materialized
     }
 
     /**
      * GZip 解压内联附件字节（官方 `MemUtil.Decompress`，GZip 容器）。
      *
-     * 解压是**不可信输入**触发的内存放大器，故以
-     * [KdbxFile.MAX_DECOMPRESSED_PAYLOAD_BYTES]（整包上限）封顶，
-     * 与 [KdbxFile.guardPayloadSize] 对压缩载荷的同级防线一致。
+     * 解压是**不可信输入**触发的内存放大器：官方写侧产出该形态时压缩比可达千倍量级
+     * （实测 gzip(128 MiB 全零) ≈ 130 KB），故输出严格以调用方给出的
+     * [maxOutputBytes]（= 本次解析累计预算的剩余量）封顶。
+     *
+     * ISSUE-P2-200：整改前此处是「**每次 gunzip 调用**独立以整包上限 128 MiB 封顶」——
+     * 单节点即可产出 128 MiB 驻留（低端机 192 MiB 堆实测 OOM），且多节点互不累计。
+     * 现封顶值由累计预算动态给出，单节点与整库两个维度同时受约束。
      */
-    private fun gunzip(compressed: ByteArray): ByteArray {
+    private fun gunzip(compressed: ByteArray, maxOutputBytes: Long): ByteArray {
         // 初始容量按 4 倍压缩比预估，并以 4 MiB 封顶，避免小压缩体直接预留过大缓冲
         val initialCap = minOf(
             compressed.size.toLong() * GZIP_SIZE_GROWTH_HINT,
-            GZIP_INITIAL_CAP_BYTES
+            GZIP_INITIAL_CAP_BYTES,
+            maxOutputBytes
         ).toInt()
         val out = ByteArrayOutputStream(initialCap)
         try {
@@ -159,9 +176,9 @@ internal class BinaryNode(
                 while (true) {
                     val read = gzip.read(buffer)
                     if (read < 0) break
-                    if (out.size().toLong() + read > MAX_INFLATED_ATTACHMENT_BYTES) {
+                    if (out.size().toLong() + read > maxOutputBytes) {
                         throw KdbxCorruptFileException(
-                            "内联附件解压后字节数超出安全上限（允许 ≤ $MAX_INFLATED_ATTACHMENT_BYTES），疑似解压炸弹"
+                            "内联附件解压后字节数超出本次解析的累计安全预算（本节点可用 ≤ $maxOutputBytes），疑似解压炸弹"
                         )
                     }
                     out.write(buffer, 0, read)
@@ -201,7 +218,7 @@ internal class BinaryNode(
         } else if (item != null) {
             // ISSUE-P2-48：先计入累计预算再物化——同一池条目被 N 次引用即 N 份副本，
             // 超出预算即 fail-closed，避免以「单条目 + 海量引用」放大内存（拒绝服务）。
-            referenceBudget.account(item.size)
+            attachmentBudget.accountPoolReference(item.size)
             onDone(
                 KdbxAttachment(
                     name = key,
@@ -251,9 +268,6 @@ internal class BinaryNode(
          */
         const val INLINE_REF_INDEX = -1
 
-        /** 解压输出上限：与整包上限同级（内联附件必然整体位于整包之内）。 */
-        private val MAX_INFLATED_ATTACHMENT_BYTES: Long = KdbxFile.MAX_DECOMPRESSED_PAYLOAD_BYTES
-
         /** GZip 输出缓冲初值上限（4 MiB）：避免小压缩体直接预留过大缓冲。 */
         private const val GZIP_INITIAL_CAP_BYTES = 4L * 1024 * 1024
 
@@ -274,33 +288,78 @@ internal class BinaryNode(
 }
 
 /**
- * 附件池引用「累计物化字节」预算（ISSUE-P2-48 / 审计 F-10）。
+ * 附件物化预算：**一次解析内**对两条内存放大通道的累计封顶。
  *
- * ## 为什么需要专用预算
- * 逐引用 `item.load().copyOf()`（[BinaryNode.emit]）是 ISSUE-P3-07 的别名隔离契约防线，
- * **不得取消**——但它意味着同一池条目被引用 N 次即产生 N 份独立副本。既有的
- * `KdbxXmlParser.MAX_XML_ELEMENTS`（元素数）与 `KdbxFile.MAX_DECOMPRESSED_PAYLOAD_BYTES`
- * （整包字节）都只**间接**约束该乘积，缺的是按累计被引用字节的专用闸门。
+ * 两条通道同根（都由不可信 `.kdbx` 载荷的单节点/单次调用放大而来）：
  *
- * ## 上界取值（诚实文件不受影响）
- * `2 × 池内条目字节总和 + 1 MiB 余量`：
- * - 池总字节由 `InnerHeader.MAX_BINARY_POOL_TOTAL_BYTES`（≤128 MiB）封顶；
- * - 诚实文件中每条池条目通常被引用 1 次（去重后共享时可达 2 次，如
- *   `KdbxAttachmentAliasIsolationTest` 的「两条目引用同一池条目」）→ 累计 ≈ 池总字节；
- * - 1 MiB 余量覆盖极小池（如总字节仅数字节）与边界用例，避免误拒。
+ * 1. **池引用副本乘法**（ISSUE-P2-48 / 审计 F-10）：逐引用 `item.load().copyOf()`
+ *    （[BinaryNode.emit]）是 ISSUE-P3-07 的别名隔离契约防线，**不得取消**——但它意味着
+ *    同一池条目被引用 N 次即产生 N 份独立副本。`KdbxXmlParser.MAX_XML_ELEMENTS`（元素数）
+ *    与 `KdbxFile.MAX_DECOMPRESSED_PAYLOAD_BYTES`（整包字节）都只**间接**约束该乘积。
+ *    上界取 `2 × 池内条目字节总和 + 1 MiB 余量`：诚实文件中每条池条目通常被引用 1 次
+ *    （去重共享时可达 2 次，见 `KdbxAttachmentAliasIsolationTest`）⇒ 累计 ≈ 池总字节；
+ *    余量覆盖极小池与边界用例。
  *
- * 超限抛 [KdbxCorruptFileException]（fail-closed），视同文件损坏 / 疑似放大攻击。
+ * 2. **内联压缩附件解压放大**（ISSUE-P2-200 落点①）：`Compressed="True"` 的内联
+ *    `<Value>` 一节点即可用 ~170 KiB 文本换出巨量字节。整改前判据是**每次 gunzip 调用**
+ *    以整包上限 128 MiB 封顶，且多节点互不累计（名义最坏累计可达 GiB 量级）；
+ *    真机取证（Redmi 4X / 192 MiB 堆）实测**单节点即 OOM**。现改为本对象持有的
+ *    **全会话累计字节**预算 + **内联压缩附件节点数**上限，两者都在解压之前/之中生效。
+ *
+ * ## 内联累计上界取值（[MAX_INLINE_MATERIALIZED_BYTES] = 64 MiB）
+ * - 远低于低端机堆界（实测 192 MiB），使单节点峰值（输出缓冲 + `toByteArray()` 副本）
+ *   回落至堆界之内，而整改前的 128 MiB 单节点上限必然越界；
+ * - 作为**累计**上界，多节点不再叠加（这是「每调用独立封顶」与「累计封顶」的本质差别）；
+ * - 单节点输入本身另受 `KdbxXmlParser` 的 `MAX_TEXT_CHARS`（8 MiB 字符 ≈ 6 MiB Base64）
+ *   约束，故正常压缩比（数倍）下的合法内联附件远达不到 64 MiB，不会误拒。
+ *
+ * 超限一律抛 [KdbxCorruptFileException]（fail-closed），视同文件损坏 / 疑似放大攻击。
  */
-internal class BinaryReferenceBudget(private val maxTotalBytes: Long) {
+internal class AttachmentBudget(
+    private val maxPoolReferenceBytes: Long,
+    private val maxInlineMaterializedBytes: Long = MAX_INLINE_MATERIALIZED_BYTES,
+    private val maxInlineCompressedNodes: Int = MAX_INLINE_COMPRESSED_NODES
+) {
 
-    private var accountedBytes = 0L
+    private var accountedPoolReferenceBytes = 0L
+    private var accountedInlineBytes = 0L
+    private var inlineCompressedNodes = 0
 
     /** 计入本次池引用将物化的字节数；超预算即 fail-closed。 */
-    fun account(bytes: Long) {
-        accountedBytes += bytes
-        if (accountedBytes > maxTotalBytes) {
+    fun accountPoolReference(bytes: Long) {
+        accountedPoolReferenceBytes += bytes
+        if (accountedPoolReferenceBytes > maxPoolReferenceBytes) {
             throw KdbxCorruptFileException(
-                "附件池引用累计物化字节超出预算（$accountedBytes > $maxTotalBytes），疑似引用放大攻击"
+                "附件池引用累计物化字节超出预算（$accountedPoolReferenceBytes > $maxPoolReferenceBytes），疑似引用放大攻击"
+            )
+        }
+    }
+
+    /**
+     * 认领一个内联压缩附件节点额度（**在解压之前**调用）。
+     *
+     * 与字节预算互补：字节预算封「单个节点解出多少」，节点数上限封「多少节点各自付出
+     * 解压固定开销」，杜绝以海量小压缩节点耗用 CPU 与缓冲。
+     */
+    fun claimInlineCompressedNode() {
+        inlineCompressedNodes++
+        if (inlineCompressedNodes > maxInlineCompressedNodes) {
+            throw KdbxCorruptFileException(
+                "内联压缩附件节点数超出安全上限（$inlineCompressedNodes > $maxInlineCompressedNodes），疑似解压炸弹"
+            )
+        }
+    }
+
+    /** 本节点解压可用的字节上限 = 累计预算剩余量（单节点与整库同时受约束）。 */
+    fun remainingInlineBytes(): Long =
+        (maxInlineMaterializedBytes - accountedInlineBytes).coerceAtLeast(0L)
+
+    /** 计入本次内联附件物化出的字节数；超累计预算即 fail-closed。 */
+    fun accountInlineMaterialized(bytes: Int) {
+        accountedInlineBytes += bytes
+        if (accountedInlineBytes > maxInlineMaterializedBytes) {
+            throw KdbxCorruptFileException(
+                "内联附件累计物化字节超出预算（$accountedInlineBytes > $maxInlineMaterializedBytes），疑似解压炸弹"
             )
         }
     }
@@ -310,13 +369,23 @@ internal class BinaryReferenceBudget(private val maxTotalBytes: Long) {
         /** 池引用余量：覆盖极小池与边界用例，避免误拒合法文件。 */
         const val BUDGET_SLACK_BYTES: Long = 1L * 1024 * 1024
 
-        /** 依池内容构造预算：`2 × 池总字节 + 余量`（见类 KDoc）。 */
-        fun forPool(pool: List<InnerHeader.BinaryItem>): BinaryReferenceBudget {
+        /**
+         * 内联附件（含解压产物）的**本次解析累计**字节上限：64 MiB。
+         * 取值依据与堆界关系见类 KDoc。
+         */
+        const val MAX_INLINE_MATERIALIZED_BYTES: Long = 64L * 1024 * 1024
+
+        /** 内联压缩附件节点数上限：与二进制池条目上限同量级，远高于合法库的附件总量。 */
+        const val MAX_INLINE_COMPRESSED_NODES: Int = 1024
+
+        /** 依池内容构造预算：`2 × 池总字节 + 余量`（见类 KDoc），内联通道取生产常量。 */
+        fun forParse(pool: List<InnerHeader.BinaryItem>): AttachmentBudget {
             val poolTotal = pool.sumOf { it.size }
-            return BinaryReferenceBudget(2 * poolTotal + BUDGET_SLACK_BYTES)
+            return AttachmentBudget(2 * poolTotal + BUDGET_SLACK_BYTES)
         }
 
         /** 不设上限（仅供不经 [KdbxXmlParser] 的直接构造 / 单测）。 */
-        fun unlimited(): BinaryReferenceBudget = BinaryReferenceBudget(Long.MAX_VALUE / 2)
+        fun unlimited(): AttachmentBudget =
+            AttachmentBudget(Long.MAX_VALUE / 2, Long.MAX_VALUE / 2, Int.MAX_VALUE)
     }
 }

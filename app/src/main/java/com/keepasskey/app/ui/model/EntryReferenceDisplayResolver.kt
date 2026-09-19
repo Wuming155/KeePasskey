@@ -1,8 +1,10 @@
 package com.keepasskey.app.ui.model
 
+import com.keepasskey.core.log.AppLog
 import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.model.KdbxGroup
 import com.keepasskey.database.fieldref.FieldReferenceEngine
+import kotlin.coroutines.cancellation.CancellationException
 
 /**
  * 条目 Notes / URL 的展示文案投影（ISSUE-P3-02 / TASK-49，承接 TASK-17 残余）。
@@ -39,7 +41,7 @@ class EntryReferenceDisplayResolver(
         if (!FieldReferenceEngine.containsReference(rawText)) return rawText
         val entries = loadEntries()
         if (entries.isEmpty()) return rawText
-        return FieldReferenceEngine.resolveForDisplay(rawText, rootOf(entries), protectedPlaceholder)
+        return displaySafely(rawText, rootOf(entries))
     }
 
     /**
@@ -53,12 +55,17 @@ class EntryReferenceDisplayResolver(
         val snapshot = loadEntries()
         if (snapshot.isEmpty()) return EntryTextDisplay(notes = notes, url = url)
         val root = rootOf(snapshot)
-        return EntryTextDisplay(notes = displayWith(notes, root), url = displayWith(url, root))
+        return EntryTextDisplay(notes = displaySafely(notes, root), url = displaySafely(url, root))
     }
 
     /**
      * 批量解析（列表页）：仅对确实含引用的条目解析，且整批共用一次条目快照；
      * 返回值只包含需要替换展示文案的条目 id，调用方按缺失回退条目原文。
+     *
+     * ISSUE-P2-200 AC③：逐条目、逐字段的失败**归一为该字段回退原文**（见 [displaySafely]），
+     * 单条坏数据不会拖垮整批渲染——列表页是「每次 emission 全库展开」的热路径，
+     * 任一未捕获的 `Throwable` 都会经 `SupervisorJob` 落到主线程 uncaughtExceptionHandler
+     * 变成进程崩溃（且每次开库复现）。
      */
     suspend fun present(entries: List<UiVaultEntry>): Map<String, EntryTextDisplay> {
         val referencing = entries.filter { entry ->
@@ -71,21 +78,37 @@ class EntryReferenceDisplayResolver(
         val root = rootOf(snapshot)
         return referencing.associate { entry ->
             entry.id to EntryTextDisplay(
-                notes = displayWith(entry.notes, root),
-                url = displayWith(entry.url, root)
+                notes = displaySafely(entry.notes, root),
+                url = displaySafely(entry.url, root)
             )
         }
     }
 
-    private fun displayWith(rawText: String, root: KdbxGroup): String {
+    /**
+     * 展示解析 + **Throwable 兜底归一**（ISSUE-P2-200 AC③）。
+     *
+     * 解析失败（含 [Error] 级：递归过深、内存压力等）一律回退该字段原文——原文本身就是
+     * 引用占位符文本，既不泄露额外信息也不丢用户数据，同时阻断「列表渲染即崩」的准持久 DoS。
+     * 协程取消信号必须原样上抛，否则会吞掉结构化并发的取消（`runCatching` 的经典陷阱）。
+     */
+    private fun displaySafely(rawText: String, root: KdbxGroup): String {
         if (!FieldReferenceEngine.containsReference(rawText)) return rawText
-        return FieldReferenceEngine.resolveForDisplay(rawText, root, protectedPlaceholder)
+        return try {
+            FieldReferenceEngine.resolveForDisplay(rawText, root, protectedPlaceholder)
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (t: Throwable) {
+            AppLog.w(TAG, "字段引用展示解析失败，该字段回退原文", t)
+            rawText
+        }
     }
 
     private fun rootOf(entries: List<KdbxEntry>): KdbxGroup =
         KdbxGroup(name = REFERENCE_ROOT_NAME, entries = entries)
 
     private companion object {
+        const val TAG = "EntryRefDisplayResolver"
+
         /** 合成检索根的名称（引擎不读取分组名，仅为可读性） */
         const val REFERENCE_ROOT_NAME = "reference-search-root"
     }

@@ -85,9 +85,8 @@ class CredentialResponseAssembler @Inject constructor(
 
         val allEntries = vaultRepository.getKdbxEntries()
 
-        // P1 整改：整份响应的 requestCode 由单一分配器供给，跨 Passkey/密码两类候选两两互异
-        val requestCodes = RequestCodeAllocator()
-
+        // ISSUE-P2-199：requestCode 一律取自 [CredentialPendingIntents.nextRequestCode]（进程级单调），
+        // 不再在本响应内新建分配器——「每响应复位」会与后续响应碰撞同一 PendingIntent 记录。
         for (option in request.beginGetCredentialOptions) {
             when (option) {
                 is BeginGetPublicKeyCredentialOption -> {
@@ -97,7 +96,6 @@ class CredentialResponseAssembler @Inject constructor(
                         callingPackage,
                         packageDimensionAllowed,
                         allEntries,
-                        requestCodes,
                         responseBuilder
                     )
                 }
@@ -109,7 +107,6 @@ class CredentialResponseAssembler @Inject constructor(
                         callingOrigin,
                         packageDimensionAllowed,
                         allEntries,
-                        requestCodes,
                         responseBuilder
                     )
                 }
@@ -125,7 +122,6 @@ class CredentialResponseAssembler @Inject constructor(
         callingPackage: String,
         packageDimensionAllowed: Boolean,
         allEntries: List<KdbxEntry>,
-        requestCodes: RequestCodeAllocator,
         responseBuilder: BeginGetCredentialResponse.Builder
     ) {
         val browserFlow = CallingOriginResolver.isBrowserOrigin(callingOrigin)
@@ -149,8 +145,7 @@ class CredentialResponseAssembler @Inject constructor(
                 passkey = passkey,
                 browserFlow = browserFlow,
                 callingOrigin = callingOrigin,
-                callingPackage = callingPackage,
-                requestCodes = requestCodes
+                callingPackage = callingPackage
             )
         }
     }
@@ -215,13 +210,12 @@ class CredentialResponseAssembler @Inject constructor(
         passkey: PasskeyData,
         browserFlow: Boolean,
         callingOrigin: String,
-        callingPackage: String,
-        requestCodes: RequestCodeAllocator
+        callingPackage: String
     ) {
         val intent = passkeyAssertionIntent(option, entry, browserFlow, callingOrigin, callingPackage)
         val pendingIntent = PendingIntent.getActivity(
             context,
-            requestCodes.next(),
+            CredentialPendingIntents.nextRequestCode(),
             intent,
             // ISSUE-P1-01：必须 FLAG_MUTABLE，系统需注入 ProviderGetCredentialRequest
             CredentialPendingIntents.ENTRY_FLAGS
@@ -283,7 +277,6 @@ class CredentialResponseAssembler @Inject constructor(
         callingOrigin: String,
         packageDimensionAllowed: Boolean,
         allEntries: List<KdbxEntry>,
-        requestCodes: RequestCodeAllocator,
         responseBuilder: BeginGetCredentialResponse.Builder
     ) {
         // H1/L1 整改：仅浏览器委派信任 web origin 域匹配；普通应用仅按严格包名边界匹配，
@@ -309,7 +302,7 @@ class CredentialResponseAssembler @Inject constructor(
             }
             val pendingIntent = PendingIntent.getActivity(
                 context,
-                requestCodes.next(),
+                CredentialPendingIntents.nextRequestCode(),
                 intent,
                 // ISSUE-P1-01：必须 FLAG_MUTABLE，系统需注入 ProviderGetCredentialRequest
                 CredentialPendingIntents.ENTRY_FLAGS
@@ -339,23 +332,5 @@ class CredentialResponseAssembler @Inject constructor(
 
     companion object {
         private const val TAG = "CredResponseAssembler"
-
-        /**
-         * PendingIntent requestCode 分配器：一次候选组装内全域单调递增，保证同一批候选两两互异。
-         *
-         * P1 整改：原实现使用 `REQUEST_CODE_ASSERT + entry.id.hashCode()`，存在两重缺陷——
-         * 1. 同一批候选内不同条目哈希可能碰撞，叠加 FLAG_UPDATE_CURRENT 后写条目会覆盖先写条目，
-         *    表现为「用户点中第 1 条候选，实际拉起第 3 条」；
-         * 2. 两个 base 仅相差 1（101/102），跨类型（Passkey 断言 / 密码填充）条目同样会撞同一 requestCode
-         *    （如 101 + h(A) == 102 + h(B)）。
-         * 现改为单次响应内统一基数分配，彻底消除碰撞面。
-         */
-        private class RequestCodeAllocator {
-            private var next = REQUEST_CODE_BASE
-            fun next(): Int = next++
-        }
-
-        /** PendingIntent requestCode 分配基线 */
-        private const val REQUEST_CODE_BASE = 1000
     }
 }
