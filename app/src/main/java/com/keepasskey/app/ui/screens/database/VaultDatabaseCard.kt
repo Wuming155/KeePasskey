@@ -75,67 +75,7 @@ internal fun VaultDatabaseCard(
                 .fillMaxWidth()
                 .padding(14.dp)
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        modifier = Modifier
-                            .size(36.dp)
-                            .clip(CircleShape)
-                            .background(if (database.isRemote) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.secondaryContainer),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = if (database.isRemote) Icons.Default.CloudDone else Icons.Default.Storage,
-                            contentDescription = null,
-                            tint = if (database.isRemote) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.secondary,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Column {
-                        Text(
-                            text = database.name,
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Text(
-                            text = "${database.syncType} • ${database.fileSizeFormatted}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (database.isActive) {
-                        Box(
-                            modifier = Modifier
-                                .clip(CapsuleShape)
-                                .background(securityColors.success.copy(alpha = 0.15f))
-                                .padding(horizontal = 8.dp, vertical = 4.dp)
-                        ) {
-                            Text(
-                                text = stringResource(R.string.db_picker_current_active),
-                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                color = securityColors.success
-                            )
-                        }
-                    } else {
-                        IconButton(onClick = onDelete) {
-                            Icon(
-                                imageVector = Icons.Default.DeleteOutline,
-                                contentDescription = stringResource(R.string.btn_delete),
-                                tint = MaterialTheme.colorScheme.outline,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-                    }
-                }
-            }
+            VaultDatabaseCardHeader(database = database, onDelete = onDelete)
 
             Spacer(modifier = Modifier.height(10.dp))
 
@@ -161,6 +101,83 @@ internal fun VaultDatabaseCard(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
+            }
+        }
+    }
+}
+
+/**
+ * 卡片头部行：库类型图标（远程云 = CloudDone / 本地 = Storage）+ 名称与元数据 +
+ * 激活徽章 / 删除按钮（互斥：激活态只显示徽章，不提供删除入口）。
+ * §207 自 [VaultDatabaseCard] 下沉（逐字搬动、零行为变更）。
+ *
+ * 路径行**未随迁**：`UiMd3AlignmentWiringTest` 的中段省略守卫锚定 `middleEllipsize(...)`
+ * 在宿主文件的现场，路径行留在 [VaultDatabaseCard]。
+ */
+@Composable
+private fun VaultDatabaseCardHeader(
+    database: com.keepasskey.app.ui.model.VaultDatabaseInfo,
+    onDelete: () -> Unit
+) {
+    val securityColors = LocalSecurityColors.current
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(CircleShape)
+                    .background(if (database.isRemote) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.secondaryContainer),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = if (database.isRemote) Icons.Default.CloudDone else Icons.Default.Storage,
+                    contentDescription = null,
+                    tint = if (database.isRemote) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.secondary,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+            Spacer(modifier = Modifier.width(10.dp))
+            Column {
+                Text(
+                    text = database.name,
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = "${database.syncType} • ${database.fileSizeFormatted}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (database.isActive) {
+                Box(
+                    modifier = Modifier
+                        .clip(CapsuleShape)
+                        .background(securityColors.success.copy(alpha = 0.15f))
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                ) {
+                    Text(
+                        text = stringResource(R.string.db_picker_current_active),
+                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                        color = securityColors.success
+                    )
+                }
+            } else {
+                IconButton(onClick = onDelete) {
+                    Icon(
+                        imageVector = Icons.Default.DeleteOutline,
+                        contentDescription = stringResource(R.string.btn_delete),
+                        tint = MaterialTheme.colorScheme.outline,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
             }
         }
     }

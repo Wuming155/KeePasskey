@@ -250,6 +250,8 @@
 
 | §206 | Compose 长函数拆分两处批次（`ISSUE-P3-188` 第 1 项渐进：待拆 **14 → 12**——`BasicCredentialsCard` 118 出表（`EntryDetailCards.kt` 397 行距 400 仅 3 行 ⇒ 段落另起新文件 `EntryDetailCardSections.kt`：用户名行 + 密码区，haptic 同源不自持）+ `SyncStatusCard` 119 出表（`CloudSyncComponents.kt` 追加将贴 400 档沿 ⇒ 新文件 `CloudSyncStatusSections.kt`：状态头行 / 反馈条（null 早退等价）/ 按钮行）；**守卫并集活例**：`UiMd3AlignmentWiringTest` 禁用态配色判据锚门面文件首跑即红（守卫有效证据）⇒ 同批改「门面+分支文件」并集、断言零变化；tier2=28 维持；test 2233 同值全绿、lint 214 持平） | `ISSUE-P3-188`（第 1 项渐进） | [`206-Compose长函数拆分两处批次.md`](resolved/batches/206-Compose长函数拆分两处批次.md) |
 
+| §207 | Compose 长函数拆分两处批次（`ISSUE-P3-188` 第 1 项渐进：待拆 **12 → 10**——`themeListSection` 118 出表（密度选择器下沉 `ThemeDensitySelector` 追加原文件，7 个 DisplayPrefRow 声明式序列是最小单元不再动）+ `VaultDatabaseCard` 117 出表（头部行下沉 `VaultDatabaseCardHeader`；**路径行不随迁**——MD3 中段省略守卫锚定 `middleEllipsize` 在宿主现场，免并集化）；tier2 不变；test 2233 同值全绿、lint 214 持平） | `ISSUE-P3-188`（第 1 项渐进） | [`207-Compose长函数拆分两处批次.md`](resolved/batches/207-Compose长函数拆分两处批次.md) |
+
 ## 分册导航
 
 | 分册 | 覆盖批次 | 时间 | 索引 |

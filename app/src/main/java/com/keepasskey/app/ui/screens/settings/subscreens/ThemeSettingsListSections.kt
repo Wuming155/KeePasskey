@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.runtime.Composable
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -57,33 +58,10 @@ internal fun LazyListScope.themeListSection(
             backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                Column {
-                    Text(
-                        text = stringResource(R.string.theme_density_title),
-                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = stringResource(R.string.theme_density_desc),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        ListDensity.entries.forEach { density ->
-                            FilterChip(
-                                selected = uiState.listDensity == density,
-                                onClick = { onListDensitySelected(density) },
-                                label = { Text(stringResource(density.labelRes)) },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                                    selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
-                                )
-                            )
-                        }
-                    }
-                }
+                ThemeDensitySelector(
+                    selected = uiState.listDensity,
+                    onSelected = onListDensitySelected
+                )
 
                 DisplayPrefRow(
                     title = stringResource(R.string.theme_show_username_title),
@@ -150,6 +128,44 @@ internal fun LazyListScope.themeListSection(
                     subtitle = stringResource(R.string.theme_show_gen_tab_sub),
                     checked = uiState.showGeneratorTab,
                     onCheckedChange = onShowGeneratorTabToggle
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 列表密度选择器（标题 + 说明 + 三态 FilterChip 行）。
+ * §207 自 [themeListSection] 下沉（逐字搬动、零行为变更）。
+ */
+@Composable
+private fun ThemeDensitySelector(
+    selected: ListDensity,
+    onSelected: (ListDensity) -> Unit
+) {
+    Column {
+        Text(
+            text = stringResource(R.string.theme_density_title),
+            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+            color = MaterialTheme.colorScheme.onSurface
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = stringResource(R.string.theme_density_desc),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            ListDensity.entries.forEach { density ->
+                FilterChip(
+                    selected = selected == density,
+                    onClick = { onSelected(density) },
+                    label = { Text(stringResource(density.labelRes)) },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                        selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
                 )
             }
         }
