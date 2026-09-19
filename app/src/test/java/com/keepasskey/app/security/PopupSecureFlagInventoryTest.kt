@@ -145,7 +145,11 @@ class PopupSecureFlagInventoryTest {
         val VERIFIED_POPUP_CALL_SITES = setOf(
             "app/src/main/java/com/keepasskey/app/ui/screens/vault/VaultListTopBars.kt",
             "app/src/main/java/com/keepasskey/app/ui/screens/vault/VaultGroupRow.kt",
-            "app/src/main/java/com/keepasskey/app/ui/screens/detail/EntryDetailTopBar.kt",
+            // §194：详情页顶栏的溢出菜单**原样**下沉到同包段落组件，调用点随之迁到新文件。
+            // 重新盘点结论不变：3 个菜单项全是静态动作文案（移动到分组 / 删除条目 / 删除共享图标），
+            // 无口令 / TOTP / 密钥 / 用户数据插值 ⇒ 仍无需接线；菜单项总数 8 未变，
+            // 由本测试的「菜单块敏感记号扫描」与「计数判据」当场复验（只换定位，不放宽强度）。
+            "app/src/main/java/com/keepasskey/app/ui/screens/detail/EntryDetailTopBarSections.kt",
             "app/src/main/java/com/keepasskey/app/ui/screens/settings/subscreens/CloudSyncComponents.kt"
         )
 

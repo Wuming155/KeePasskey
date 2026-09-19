@@ -58,7 +58,7 @@ import androidx.compose.ui.window.DialogWindowProvider
  *
  * **ISSUE-P3-79 盘点结论（2026-09-15 逐点直读源码核实，**无需接线**）**：
  * 全仓 Popup 调用点**恰好 4 处**——`VaultListTopBars`（顶栏溢出，1 项）、`VaultGroupRow`（分组操作，3 项）、
- * `EntryDetailTopBar`（条目操作，3 项）、`CloudSyncComponents`（`ExposedDropdownMenuBox` + `DropdownMenu`，
+ * `EntryDetailTopBarSections`（条目操作，3 项；§194 前该菜单在 `EntryDetailTopBar` 内）、`CloudSyncComponents`（`ExposedDropdownMenuBox` + `DropdownMenu`，
  * 1 项 × provider 数）。上述 **8 个 `DropdownMenuItem` 全部为静态动作文案 / provider 名称**
  * （彻底退出应用 / 重命名 / 更改图标 / 删除分组 / 移动到分组 / 删除条目 / 删除共享图标 /
  * WebDAV·S3 provider 名与描述），**无任何口令、TOTP、密钥或用户数据插值**；

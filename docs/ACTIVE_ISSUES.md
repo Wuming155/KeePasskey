@@ -171,7 +171,7 @@
   `@Preview(uiMode = 0x20)` 归零、三小项全部落地，**全部只命名未改值**；余下只有 `crypto` / `database`
   格式面的 7 份「待逐处判定」文件，须与 `.kdbx` 对拍同批做，属独立一段 ⇒ 本条**不得**据此读作已闭环）；
   剩余第二档渐进消化，未消化部分在批次文档留清单。
-- **当前进度（只留结论；逐批改动与验证见 `docs/resolved/batches/155`~`193`（§180 为文档面批次，不属本条））**：
+- **当前进度（只留结论；逐批改动与验证见 `docs/resolved/batches/155`~`194`（§180 为文档面批次，不属本条））**：
   - **第一档 8 文件**（`wc -l` 实测）：**达标 6**（`SyncCache` 382、`UnlockViewModel` 368、
     `DatabaseSettingsScreen` 339（§159 降到 369，后续批次回填至 370，§189 再降到 339）、`EntryEditFormSections` 351（§160）、
     `EntryDetailScreen` 349（§169）、`EntryDetailViewModel` 397（§170））；按理由登记 2（`SettingsViewModel` 543 / `DatabaseSession` 535，
@@ -203,7 +203,7 @@
   > 「第 5 项 = 会话锁定直调用例」这类早期提法对应**§190 之前**的编号，现已不成立。
   > 处置结论另见限界 **§20** 与
   > [`resolved/batches/182-合并层冲突对下沉与早退守卫限界批次.md`](resolved/batches/182-合并层冲突对下沉与早退守卫限界批次.md)。
-  1. **Compose 面的长函数**（第 3 目的剩余部分）：**§193 复跑 = 20 个 ≥100 行函数，全部为 Compose 面**（§181 首测 28 → §183 削 `Argon2ParametersDialog` → §185 削 `KeePasskeyApp` → §186 削 `UnlockStandardUnlockContent` → §187 削 `AboutSettingsScreen` → §188 顺带削 `PrivilegedBrowserSettingsScreen`）；
+  1. **Compose 面的长函数**（第 3 目的剩余部分）：**§194 复跑 = 19 个 ≥100 行函数，全部为 Compose 面**（§181 首测 28 → §183 削 `Argon2ParametersDialog` → §185 削 `KeePasskeyApp` → §186 削 `UnlockStandardUnlockContent` → §187 削 `AboutSettingsScreen` → §188 顺带削 `PrivilegedBrowserSettingsScreen`）；
      逐个名单见 [`resolved/batches/181-长函数度量工具化与快照分流批次.md`](resolved/batches/181-长函数度量工具化与快照分流批次.md) §3。
      **计数今后一律现跑 `python tools/doc/long_functions.py`**（三条判据与其踩坑史写在工具文档串里，
      条目内不再抄录，以免重演 §175 一次性脚本漏报 10 条的失真）。
@@ -218,13 +218,15 @@
      段落组件**必须另起新文件**——原文件 394 行，就地追加 wrapper 会越过 400，
      等于把「长函数」换成「第二档」新问题）；
      §193 `ChildDatabaseDialog` 170→**97 出表**（敏感对话框：`SecureDialogWindowEffect()` 两处
-     **必须留在被 `SecureDialogFlagPolicyTest` 点名的文件里**、子库主密码链路留本体，只搬非保密段落）。
-     **当前表内头部**（现跑读数）：`CreateVaultWizardDialog` 158、`EntryDetailTopBar` 151、
+     **必须留在被 `SecureDialogFlagPolicyTest` 点名的文件里**、子库主密码链路留本体，只搬非保密段落）；
+     §194 `EntryDetailTopBar` 151→**84 出表**（溢出菜单原样下沉；这是**首个跨 `PopupSecureFlagInventoryTest` 清单锁的搬移**，
+     见下方第 3 项的清单锁口径）。
+     **当前表内头部**（现跑读数）：`CreateVaultWizardDialog` 158（受限界 §179 下限）、
      `PackageBlocklistManageDialog` 131、`VaultListDialogHost` 130、`GeneratorContent` 121、`EntryDetailScreen` 121。
      §192 另把 `FieldDiffRow` 的两份同形选项行并为一份 `ConflictFieldChoiceRow`（83 → 41 行，
      不在表内但属同一「重复呈现并一」主题）。
      **口径问题已裁决（§184，PD-11）**：两个纯接线装配表 `keepasskeySettingsNavGraph`（252，逻辑行 1）与
-     `keepasskeyNavGraph`（164，逻辑行 0）**豁免本目 ⇒ 20 项中扣除二者，待拆实为 18 个**；
+     `keepasskeyNavGraph`（164，逻辑行 0）**豁免本目 ⇒ 19 项中扣除二者，待拆实为 17 个**；
      **`KeePasskeyApp` 不豁免**，已按该裁决于 §185 下沉（逻辑行 10 → 0）。裁决全文、分类计数依据与
      「逻辑行 ≥5 即重新计入」的重开条件见 [`architecture/产品裁决登记.md`](architecture/产品裁决登记.md) PD-11。
      > 注：§188 出表的 `PrivilegedBrowserSettingsScreen`（115→95）**若按 `ISSUE-P3-195` 修法②撤销该页替换，
@@ -266,6 +268,12 @@
      **同类代价的第二形态（§189 实测）**：「多处重复、可收敛为一份」也是一个**前提**，目测登记同样会错
      （§188 即因此改掉过一页顶栏配色 ⇒ `ISSUE-P3-195`）；收敛前须跑
      `python tools/doc/scaffold_block_fingerprint.py <rev> <目录> <页名>…` 让差异**自己分桶**。
+     **第三形态：安全「清单锁」型守卫（§194 首例）**。`PopupSecureFlagInventoryTest` 断言
+     「含 Popup 调用点的**文件集合** == 已核实清单」（`assertEquals`）+「菜单项总数 == 8」。
+     把 `DropdownMenu` **原样**搬到段落文件即令集合报红——这是它应有的反应，也是该守卫非摆设的证据。
+     处置**只能重新盘点**：核内容仍无凭据类插值 ⇒ 换清单里的**路径**并同步 `SecureDialog` KDoc 的
+     「未能覆盖」一节；**不得**删清单条目、不得改记号表、不得放宽 `8` / `≥4` 计数。
+     旁证判据：以同样记号自扫一遍 `app/src/main/java`，确认「实际集合 == 清单集合」。
   4. **断言响应材料的宿主直调用例（§173 打开的新验证面）**：§173 把断言侧响应组装下沉为
      `PasskeyAssertionPayload.build(...)`（同包 `internal object` 纯函数）之后，下列判据第一次变成
      **可离线断言**（此前只能靠静态接线守卫 + 设备侧用例）：

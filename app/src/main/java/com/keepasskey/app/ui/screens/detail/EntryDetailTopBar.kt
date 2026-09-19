@@ -1,20 +1,14 @@
 package com.keepasskey.app.ui.screens.detail
 
 import android.content.res.Configuration
-import androidx.compose.foundation.layout.Box
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.DriveFileMove
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -25,14 +19,11 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
-import androidx.compose.ui.unit.dp
 import com.keepasskey.app.R
 import com.keepasskey.app.ui.theme.LocalSecurityColors
 
@@ -55,7 +46,6 @@ internal fun EntryDetailTopBar(
     modifier: Modifier = Modifier
 ) {
     val securityColors = LocalSecurityColors.current
-    var showOverflowMenu by remember { mutableStateOf(false) }
 
     TopAppBar(
         modifier = modifier,
@@ -101,80 +91,14 @@ internal fun EntryDetailTopBar(
                     )
                 }
             }
-            // ISSUE-P3-48：溢出菜单——非只读会话恒呈现（单条「移入回收站」入口）；
-            // 条目绑定了库级自定义图标时追加「删除自定义图标」项。
+            // ISSUE-P3-48：溢出菜单（段组件见 `EntryDetailOverflowMenu`）
             if (!uiState.isReadOnly) {
-                Box {
-                    IconButton(onClick = { showOverflowMenu = true }) {
-                        Icon(
-                            imageVector = Icons.Default.MoreVert,
-                            contentDescription = stringResource(R.string.cd_more_actions),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    DropdownMenu(
-                        expanded = showOverflowMenu,
-                        onDismissRequest = { showOverflowMenu = false }
-                    ) {
-                        // ISSUE-P3-51：单条移动到分组（对话框内过滤回收站）
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.detail_move_to_group)) },
-                            leadingIcon = {
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Filled.DriveFileMove,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            },
-                            onClick = {
-                                showOverflowMenu = false
-                                onRequestMoveEntry()
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = {
-                                Text(
-                                    text = stringResource(R.string.detail_delete_entry),
-                                    color = MaterialTheme.colorScheme.error
-                                )
-                            },
-                            leadingIcon = {
-                                Icon(
-                                    imageVector = Icons.Default.Delete,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.error
-                                )
-                            },
-                            onClick = {
-                                showOverflowMenu = false
-                                onRequestDeleteEntry()
-                            }
-                        )
-                        // ISSUE-P3-02：自定义图标删除入口——仅「条目确实绑定了自定义图标」时呈现；
-                        // 图标是库级共享资源，删除会连带回退全部引用条目，故点击后仍须经确认弹窗
-                        if (uiState.entry?.customIconId != null) {
-                            DropdownMenuItem(
-                                text = {
-                                    Text(
-                                        text = stringResource(R.string.vault_icon_delete_action),
-                                        color = MaterialTheme.colorScheme.error
-                                    )
-                                },
-                                leadingIcon = {
-                                    Icon(
-                                        imageVector = Icons.Default.Delete,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.error
-                                    )
-                                },
-                                onClick = {
-                                    showOverflowMenu = false
-                                    onRequestDeleteCustomIcon()
-                                }
-                            )
-                        }
-                    }
-                }
+                EntryDetailOverflowMenu(
+                    showsCustomIconDelete = uiState.entry?.customIconId != null,
+                    onRequestMoveEntry = onRequestMoveEntry,
+                    onRequestDeleteEntry = onRequestDeleteEntry,
+                    onRequestDeleteCustomIcon = onRequestDeleteCustomIcon
+                )
             }
             // H4-只读整改：只读会话隐藏编辑入口
             if (!uiState.isReadOnly) {
