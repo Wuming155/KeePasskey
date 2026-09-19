@@ -1,7 +1,7 @@
 package com.keepasskey.app.sync
 
 import android.content.Context
-import android.content.SharedPreferences
+import com.keepasskey.app.testutil.InMemorySharedPreferences
 import com.keepasskey.app.ui.screens.settings.CloudSyncProvider
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
@@ -11,7 +11,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
-import java.lang.reflect.Proxy
 
 /**
  * SyncCredentialsStore 凭据持久化与加解密往返单元测试 (Wave 3-E P2-19)
@@ -21,71 +20,13 @@ import java.lang.reflect.Proxy
  */
 class SyncCredentialsStoreTest {
 
-    private val memoryStorage = mutableMapOf<String, Any?>()
+    /** 共享内存替身（§195：本类原有一份同形态的私有 `Proxy` 实现，两份已并为共享件） */
+    private val prefsFake = InMemorySharedPreferences()
 
-    private val fakePrefs = Proxy.newProxyInstance(
-        SharedPreferences::class.java.classLoader,
-        arrayOf(SharedPreferences::class.java)
-    ) { _, method, args ->
-        when (method.name) {
-            "getString" -> {
-                val key = args[0] as String
-                val def = args[1] as? String
-                (memoryStorage[key] as? String) ?: def
-            }
-            "getBoolean" -> {
-                val key = args[0] as String
-                val def = args[1] as? Boolean ?: false
-                (memoryStorage[key] as? Boolean) ?: def
-            }
-            "getLong" -> {
-                val key = args[0] as String
-                val def = args[1] as Long
-                (memoryStorage[key] as? Long) ?: def
-            }
-            "contains" -> {
-                memoryStorage.containsKey(args[0] as String)
-            }
-            "edit" -> fakeEditor
-            else -> null
-        }
-    } as SharedPreferences
+    /** 断言用别名：本类要直接检视「落盘了什么」（读密文键 20 处、预置脏键 4 处） */
+    private val memoryStorage: MutableMap<String, Any?> get() = prefsFake.storage
 
-    private val fakeEditor: SharedPreferences.Editor = Proxy.newProxyInstance(
-        SharedPreferences.Editor::class.java.classLoader,
-        arrayOf(SharedPreferences.Editor::class.java)
-    ) { proxy, method, args ->
-        when (method.name) {
-            "putString" -> {
-                memoryStorage[args[0] as String] = args[1]
-                proxy
-            }
-            "putBoolean" -> {
-                memoryStorage[args[0] as String] = args[1]
-                proxy
-            }
-            "putLong" -> {
-                memoryStorage[args[0] as String] = args[1]
-                proxy
-            }
-            "remove" -> {
-                memoryStorage.remove(args[0] as String)
-                proxy
-            }
-            "clear" -> {
-                memoryStorage.clear()
-                proxy
-            }
-            "apply", "commit" -> {
-                null
-            }
-            else -> proxy
-        }
-    } as SharedPreferences.Editor
-
-    private val fakeContext: Context = object : android.content.ContextWrapper(null) {
-        override fun getSharedPreferences(name: String?, mode: Int): SharedPreferences = fakePrefs
-    }
+    private val fakeContext: Context = prefsFake.context()
 
     private lateinit var store: SyncCredentialsStore
 

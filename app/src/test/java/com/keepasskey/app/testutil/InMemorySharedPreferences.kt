@@ -21,7 +21,9 @@ import java.nio.file.Files
  */
 class InMemorySharedPreferences {
 
-    private val storage = mutableMapOf<String, Any?>()
+    /** 底层键值面**故意公开**：既让被测代码走正常读写，也让用例直接检视「到底落盘了什么」
+     * （`SyncCredentialsStoreTest` 有 20 处断言要读密文键、4 处要预置脏键）。 */
+    val storage = mutableMapOf<String, Any?>()
 
     val prefs: SharedPreferences by lazy { newPrefsProxy() }
 
