@@ -3,18 +3,23 @@ package com.keepasskey.app.ui.screens.edit
 import com.keepasskey.app.testutil.MainDispatcherGuard
 import androidx.lifecycle.SavedStateHandle
 import com.keepasskey.app.data.repository.FakeVaultRepository
+import com.keepasskey.app.ui.model.UiVaultEntry
+import com.keepasskey.database.session.DatabaseSession
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
@@ -89,5 +94,86 @@ class EntryEditViewModelTest {
         // 仓库契约：更新保存自动归档修订，修订快照保留旧凭据字段
         assertEquals(originalRevisionCount + 1, updated.revisions.size)
         assertEquals(originalUsername, updated.revisions.first().username)
+    }
+
+    /**
+     * `ISSUE-P3-188` 剩余清单第 4 项第二段（§190）：`EntryEditViewModel` 的「锁定即擦除」回调
+     * （`SessionLockGuard(databaseSession) { clearAllSecrets() }`）此前无宿主直调用例。
+     *
+     * 三层证据，逐层加强：
+     * 1. **预填通道置空**——`loadedPassword` 由 `clearAllSecrets()` 显式置 `null`；
+     * 2. **数组本体填零**——只丢引用而不 `fill('0')`，明文仍会随数组副本留在堆上（本用例握着锁定前的
+     *    引用，能区分这两种做法；`clearAllSecrets` 用的是字符 `'0'` 而非 `\u0000`）；
+     * 3. **私有副本确实擦除**——编辑态口令只存在于私有 `passwordChars`，不进 UiState（只有
+     *    `passwordLength` 进），故唯一可断言的观测点是**保存落库的内容**：若锁定只清了通道而没清私有
+     *    副本，锁定后那次 `saveEntry()` 就会把明文再写回去。
+     *
+     * 不在此断言 `isDirty` / `passwordLength`：`clearAllSecrets()` 只擦明文副本、不回写 UiState，
+     * 长度读数残留属既有呈现口径（长度非机密），钉在这里等于替该口径背书。
+     */
+    @Test
+    fun `会话锁定后编辑态口令明文与预填通道一并擦除`() = runTest {
+        val repository = FakeVaultRepository()
+        repository.saveEntry(
+            UiVaultEntry(
+                id = LOCK_ENTRY_ID,
+                title = "锁定擦除用例条目",
+                username = "user",
+                url = "https://example.com"
+            ),
+            LOADED_FAKE_PASSWORD.toCharArray(),
+            null,
+            emptyMap()
+        )
+        val session = DatabaseSession()
+        val viewModel = EntryEditViewModel(
+            SavedStateHandle(mapOf("entryId" to LOCK_ENTRY_ID)),
+            repository,
+            databaseSession = session
+        )
+        MainDispatcherGuard.track(viewModel)
+        testScheduler.runCurrent()
+
+        val prefillBeforeLock = viewModel.loadedPassword.value
+        assertNotNull("前提：既有条目口令应经一次性预填通道下发", prefillBeforeLock)
+        assertEquals(
+            "前提：私有副本长度应等于按需解密出的口令长度",
+            LOADED_FAKE_PASSWORD.length,
+            viewModel.uiState.value.passwordLength
+        )
+        assertEquals(
+            "前提：预填通道里就是那段明文",
+            LOADED_FAKE_PASSWORD,
+            String(prefillBeforeLock!!)
+        )
+
+        session.lock()
+        testScheduler.runCurrent()
+        testScheduler.advanceUntilIdle()
+
+        assertNull("锁定后预填通道必须置空", viewModel.loadedPassword.value)
+        assertTrue(
+            "锁定必须把预填数组本体填零，不得只丢引用",
+            prefillBeforeLock.all { it == ERASED_CHAR }
+        )
+
+        viewModel.saveEntry()
+        testScheduler.runCurrent()
+        val storedAfterLock = repository.getEntryPasswordChars(LOCK_ENTRY_ID)
+        assertTrue(
+            "锁定后保存不得再带口令明文（证私有副本已擦除，而非仅清了预填通道）",
+            storedAfterLock == null || storedAfterLock.isEmpty()
+        )
+    }
+
+    private companion object {
+        /** 用例自建的条目 id，不与假数据里的条目 1 冲突 */
+        const val LOCK_ENTRY_ID = "pwd_entry_for_session_lock"
+
+        /** 虚构假密码（非真实凭据，符合测试数据规约） */
+        const val LOADED_FAKE_PASSWORD = "Loaded-Fake-Pw-1"
+
+        /** `clearAllSecrets()` / `fill('0')` 的擦除字符——是字符 `'0'`，不是空字符 */
+        const val ERASED_CHAR = '0'
     }
 }

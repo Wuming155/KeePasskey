@@ -171,7 +171,7 @@
   `@Preview(uiMode = 0x20)` 归零、三小项全部落地，**全部只命名未改值**；余下只有 `crypto` / `database`
   格式面的 7 份「待逐处判定」文件，须与 `.kdbx` 对拍同批做，属独立一段 ⇒ 本条**不得**据此读作已闭环）；
   剩余第二档渐进消化，未消化部分在批次文档留清单。
-- **当前进度（只留结论；逐批改动与验证见 `docs/resolved/batches/155`~`189`（§180 为文档面批次，不属本条））**：
+- **当前进度（只留结论；逐批改动与验证见 `docs/resolved/batches/155`~`190`（§180 为文档面批次，不属本条））**：
   - **第一档 8 文件**（`wc -l` 实测）：**达标 6**（`SyncCache` 382、`UnlockViewModel` 368、
     `DatabaseSettingsScreen` 339（§159 降到 369，后续批次回填至 370，§189 再降到 339）、`EntryEditFormSections` 351（§160）、
     `EntryDetailScreen` 349（§169）、`EntryDetailViewModel` 397（§170））；按理由登记 2（`SettingsViewModel` 543 / `DatabaseSession` 535，
@@ -194,15 +194,15 @@
     **全部只挪定义、未改任何取值**）；§167 复核出「唯一成片真实违例」= `@Preview(uiMode = 0x20)` 并已归零，
     当时的三个「待裁定」小项已由 §168 逐条落地（见违例清单第 4 目）。
 - **剩余清单（本条尚未闭环的部分，逐条自包含）**：
-  > **现为 1~5 项**（§172 压缩流水时为 1~6 项；第 6 项已由 §189 结案移出）。
-  > 编号映射：早期批次正文里提到的「剩余清单第 3 项」= 此处第 2 项（第二档渐进消化），
-  > 「第 5 项」= 此处第 4 项（会话锁定直调用例）。第 5 项由 §173 追加；
-  > **第 6 项已三度易主后结案**——原登「第 3 目历史快照分流」（§176 追加、§181 就地改写、§182 结案移出，
-  > 处置结论见限界 **§20** 与
-  > [`resolved/batches/182-合并层冲突对下沉与早退守卫限界批次.md`](resolved/batches/182-合并层冲突对下沉与早退守卫限界批次.md)），
-  > 后登「二级设置页重复 `TopAppBar` 骨架」（§187 实测新登、§188 首段五页、**§189 十页全部收敛后结案**，
-  > 见 [`resolved/batches/189-守卫点名五页接入共用骨架批次.md`](resolved/batches/189-守卫点名五页接入共用骨架批次.md)）；
-  > **该批遗留的一处真实回归已独立成条 ⇒ 由 `ISSUE-P3-195` 承接**（本清单不再复述其内容）。
+  > **现为 1~5 项**。编号映射：早期批次正文里提到的「剩余清单第 3 项」= 此处第 2 项（第二档渐进消化）。
+  > **§190 起**：原第 4 项（三 VM 的会话锁定擦除直调用例）**已结案移出**（§171 详情页 / §190 编辑页 +
+  > 设置页），原第 5 项（断言响应材料）上移为此处**第 4 项**，新的**第 5 项**由 §190 登记（测试替身重复）。
+  > 更早的第 6 项（二级设置页重复 `TopAppBar` 骨架，§187 新登、§188 首段、§189 结案）见
+  > [`resolved/batches/189-守卫点名五页接入共用骨架批次.md`](resolved/batches/189-守卫点名五页接入共用骨架批次.md)；
+  > 它遗留的一处真实回归由 `ISSUE-P3-195` 独立承接。
+  > 「第 5 项 = 会话锁定直调用例」这类早期提法对应**§190 之前**的编号，现已不成立。
+  > 处置结论另见限界 **§20** 与
+  > [`resolved/batches/182-合并层冲突对下沉与早退守卫限界批次.md`](resolved/batches/182-合并层冲突对下沉与早退守卫限界批次.md)。
   1. **Compose 面的长函数**（第 3 目的剩余部分）：**§189 复跑 = 23 个 ≥100 行函数，全部为 Compose 面**（§181 首测 28 → §183 削 `Argon2ParametersDialog` → §185 削 `KeePasskeyApp` → §186 削 `UnlockStandardUnlockContent` → §187 削 `AboutSettingsScreen` → §188 顺带削 `PrivilegedBrowserSettingsScreen`）；
      逐个名单见 [`resolved/batches/181-长函数度量工具化与快照分流批次.md`](resolved/batches/181-长函数度量工具化与快照分流批次.md) §3。
      **计数今后一律现跑 `python tools/doc/long_functions.py`**（三条判据与其踩坑史写在工具文档串里，
@@ -255,18 +255,7 @@
      **同类代价的第二形态（§189 实测）**：「多处重复、可收敛为一份」也是一个**前提**，目测登记同样会错
      （§188 即因此改掉过一页顶栏配色 ⇒ `ISSUE-P3-195`）；收敛前须跑
      `python tools/doc/scaffold_block_fingerprint.py <rev> <目录> <页名>…` 让差异**自己分桶**。
-  4. **会话锁定「擦除动作」仍有两个 ViewModel 无宿主直调用例（§170 暴露，§171 已补详情页）**：
-     `SessionLockGuard` 样板化之后，五个 VM 中只有 `AutofillPickerViewModel`（2 例）与
-     `GeneratorViewModel`（1 例）带锁定行为用例；`EntryDetailViewModel` / `EntryEditViewModel` /
-     `SettingsViewModel` 的「锁定 → 擦除明文 / 实时 TOTP」回调路径无人直调。
-     **核实方式**：2026-09-18，`grep -rln "lockSession|SessionLock" app/src/test/.../{detail,edit,settings}` 无命中。
-     **整改**：为三者各补一例「注册观测器 → 触发 lock → 断言明文通道已清空」的宿主用例
-     （属宿主可测面，不需要设备），并保持 `SessionLockGuardTest` 只测样板、两者不互相顶替。
-     **进度**：§171 已补 `EntryDetailViewModel` 一例（先验证「明文与强度读数确已驻留」再断言锁定后归零，
-     余 `EntryEditViewModel`（应断言 `clearAllSecrets()`）与 `SettingsViewModel`（应断言 WebDAV 口令与
-     S3 两个密钥的预填清空）两例，各自所需夹具与应断言通道见
-     [`resolved/batches/171-详情页锁定即擦除直调用例批次.md`](resolved/batches/171-详情页锁定即擦除直调用例批次.md) §2~§3。
-  5. **断言响应材料的宿主直调用例（§173 打开的新验证面）**：§173 把断言侧响应组装下沉为
+  4. **断言响应材料的宿主直调用例（§173 打开的新验证面）**：§173 把断言侧响应组装下沉为
      `PasskeyAssertionPayload.build(...)`（同包 `internal object` 纯函数）之后，下列判据第一次变成
      **可离线断言**（此前只能靠静态接线守卫 + 设备侧用例）：
      ① `clientDataPackage` 为 null 时 `clientDataJSON` **不得出现** `androidPackageName` 字段，
@@ -281,6 +270,15 @@
      > 可行的两条路：**① 设备侧 instrumentation 用例**（需硬件，当前阻塞）；
      > **② 先引入宿主可用的 JSON 写入口径**（新增小写入器，把注册 / 断言两处 payload 改走它，
      > 再补上述四条宿主断言）。选 ② 时须与两处 payload 的既有静态守卫同批核对，勿只改一半。
+  5. **`SharedPreferences` 内存替身现存两份（§190 新登，属重复不属缺陷）**：
+     `app/src/test/.../sync/SyncCredentialsStoreTest.kt` 内的私有 `fakePrefs` / `fakeEditor` 代理，
+     与 §190 为「预置已封印凭据」而新建的共享件 `app/src/test/.../testutil/InMemorySharedPreferences.kt`
+     是同一形态的两份实现（前者只覆盖 `getString/getBoolean/getLong/contains/edit`，后者另含
+     `getInt/getStringSet/getAll` 与一个 `context()`）。
+     **核实方式**：2026-09-18，逐文件读取两处源码比对（`wc -l` 亦实测：共享件 79 行）。
+     **整改**：让 `SyncCredentialsStoreTest` 改用共享件并**逐条核对其 10 例（`@Test` 实测）断言不受影响**
+     （只改夹具定位、不改断言强度）；属小整理，不单独占批次，可搭任何 `app` 测试面批次顺带做。
+     **不得**反向做（把共享件删掉回退到私有实现）——`SettingsSessionLockEraseTest` 依赖它。
 - **依据**：`.codebuddy/rules/engineering-rules.md` §高内聚低耦合 / §禁止魔法数字；本条目为 2026-09-18 用户命题「消除巨型类和魔法数字」。
 
 ### ISSUE-P3-187 JNI 零拷贝评估（原生加密内核的边界拷贝成本）
