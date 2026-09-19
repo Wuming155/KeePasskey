@@ -51,26 +51,13 @@ fun EntryDetailScreen(
     modifier: Modifier = Modifier,
     viewModel: EntryDetailViewModel = hiltViewModel()
 ) {
-    LaunchedEffect(entryId) {
-        viewModel.setEntryId(entryId)
-    }
-
-    // M1 整改：离开详情页（返回导航 / 目的地销毁）时擦除 ViewModel 内按需解密的全部明文
-    DisposableEffect(entryId) {
-        onDispose { viewModel.onScreenDisposed() }
-    }
+    EntryDetailLifecycleEffects(
+        entryId = entryId,
+        viewModel = viewModel,
+        onEntryDeleted = onBackClick
+    )
 
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-
-    // ISSUE-P3-48：删除成功后返回列表——条目已移入回收站（或已在站内被彻底删除），
-    // 详情页不再有对应实体，停留会呈现「条目不存在」，故一次性回退导航。
-    val entryDeleted by viewModel.entryDeleted.collectAsStateWithLifecycle()
-    LaunchedEffect(entryDeleted) {
-        if (entryDeleted) onBackClick()
-    }
-
-    // ISSUE-P3-17：进入详情页时刷新进阶显示偏好快照（遮掩默认值 / 所属分组开关）
-    LaunchedEffect(Unit) { viewModel.onScreenEntered() }
 
     // 断点3 整改：SAF 导出挂起中的附件，选择目标后交给 ViewModel 真实写盘
     var pendingExportAttachment by remember { mutableStateOf<UiAttachment?>(null) }
@@ -91,48 +78,23 @@ fun EntryDetailScreen(
     }
     val snackbarHostState = remember { SnackbarHostState() }
 
-    uiState.userMessage?.let { message ->
-        val text = message.resolveText()
-        LaunchedEffect(message, text) {
-            snackbarHostState.showSnackbar(text)
-            viewModel.clearUserMessage()
-        }
-    }
-
-    EntryDetailContent(
-        uiState = uiState,
+    EntryDetailSnackbarEffect(
+        message = uiState.userMessage,
         snackbarHostState = snackbarHostState,
+        onMessageShown = viewModel::clearUserMessage
+    )
+
+    EntryDetailContentHost(
+        viewModel = viewModel,
+        uiState = uiState,
         onBackClick = onBackClick,
-        onEditClick = { uiState.entry?.let { onEditClick(it.id) } },
-        onToggleFavorite = viewModel::toggleFavorite,
-        onDuplicateEntry = viewModel::duplicateEntry,
-        onToggleAutofillBlock = viewModel::toggleAutofillBlockForApp,
-        // ISSUE-P3-02：自定义图标删除（经确认弹窗后调用，状态层负责清理 Meta 与回退引用）
-        onDeleteCustomIcon = viewModel::deleteCustomIcon,
-        // ISSUE-P3-48：单条删除（经确认弹窗后调用，语义为移入回收站 / 站内彻底删除）
-        onDeleteEntry = viewModel::deleteEntry,
-        // ISSUE-P3-51：单条移动到分组（null = 根目录）
-        onMoveEntry = viewModel::moveEntryToGroup,
-        onTogglePasswordVisibility = viewModel::togglePasswordVisibility,
-        // ISSUE-P3-17：TOTP 验证码显式展开/收起（默认态来自 maskTotpDefault）
-        onToggleTotpVisibility = viewModel::toggleTotpVisibility,
-        // ISSUE-P3-49：HOTP 取码（推进计数器并复制）
-        onAdvanceHotp = viewModel::advanceHotp,
-        // ISSUE-P3-184：TOTP 取码（真实写入受保护剪贴板）
-        onCopyTotp = viewModel::copyTotpCode,
-        onToggleCustomFieldVisibility = viewModel::toggleCustomFieldVisibility,
-        onCopyCustomField = viewModel::copyCustomField,
+        onEditClick = onEditClick,
+        // SAF 三态的写路径仍由 Route 持有（§169）：呼起另存为并落挂起附件在本处完成
         onExportAttachment = { att ->
-            // 断点3 整改：呼起真实 SAF 另存为，导出经仓库解析的真实附件字节
             pendingExportAttachment = att
             exportLauncher.launch(att.fileName)
         },
-        onRollbackRevision = viewModel::rollbackToRevision,
-        onPrepareRevisionDiff = viewModel::prepareRevisionDiff,
-        onClearRevisionDiff = viewModel::clearRevisionDiff,
-        onShowMessage = viewModel::showMessage,
-        onCopyPassword = viewModel::copyPassword,
-        onCopyUsername = viewModel::copyUsername,
+        snackbarHostState = snackbarHostState,
         modifier = modifier
     )
 
@@ -346,4 +308,102 @@ fun EntryDetailContent(
         onClearRevisionDiff = onClearRevisionDiff,
         onExportAttachment = onExportAttachment
     )
+}
+
+/**
+ * [EntryDetailContent] 的纯装配段（§211 自 [EntryDetailScreen] 下沉，逐字搬动、零行为变更）：
+ * 把 ViewModel 动作端口逐一接到内容层；SAF 三态（pendingExportAttachment / exportLauncher）
+ * 仍由 Route 层持有，经参数只读借用（§169「同一状态不得有两处真相」）。
+ */
+@Composable
+private fun EntryDetailContentHost(
+    viewModel: EntryDetailViewModel,
+    uiState: EntryDetailUiState,
+    onBackClick: () -> Unit,
+    onEditClick: (String) -> Unit,
+    onExportAttachment: (UiAttachment) -> Unit,
+    snackbarHostState: SnackbarHostState,
+    modifier: Modifier = Modifier
+) {
+    EntryDetailContent(
+        uiState = uiState,
+        snackbarHostState = snackbarHostState,
+        onBackClick = onBackClick,
+        onEditClick = { uiState.entry?.let { onEditClick(it.id) } },
+        onToggleFavorite = viewModel::toggleFavorite,
+        onDuplicateEntry = viewModel::duplicateEntry,
+        onToggleAutofillBlock = viewModel::toggleAutofillBlockForApp,
+        // ISSUE-P3-02：自定义图标删除（经确认弹窗后调用，状态层负责清理 Meta 与回退引用）
+        onDeleteCustomIcon = viewModel::deleteCustomIcon,
+        // ISSUE-P3-48：单条删除（经确认弹窗后调用，语义为移入回收站 / 站内彻底删除）
+        onDeleteEntry = viewModel::deleteEntry,
+        // ISSUE-P3-51：单条移动到分组（null = 根目录）
+        onMoveEntry = viewModel::moveEntryToGroup,
+        onTogglePasswordVisibility = viewModel::togglePasswordVisibility,
+        // ISSUE-P3-17：TOTP 验证码显式展开/收起（默认态来自 maskTotpDefault）
+        onToggleTotpVisibility = viewModel::toggleTotpVisibility,
+        // ISSUE-P3-49：HOTP 取码（推进计数器并复制）
+        onAdvanceHotp = viewModel::advanceHotp,
+        // ISSUE-P3-184：TOTP 取码（真实写入受保护剪贴板）
+        onCopyTotp = viewModel::copyTotpCode,
+        onToggleCustomFieldVisibility = viewModel::toggleCustomFieldVisibility,
+        onCopyCustomField = viewModel::copyCustomField,
+        onExportAttachment = onExportAttachment,
+        onRollbackRevision = viewModel::rollbackToRevision,
+        onPrepareRevisionDiff = viewModel::prepareRevisionDiff,
+        onClearRevisionDiff = viewModel::clearRevisionDiff,
+        onShowMessage = viewModel::showMessage,
+        onCopyPassword = viewModel::copyPassword,
+        onCopyUsername = viewModel::copyUsername,
+        modifier = modifier
+    )
+}
+
+/**
+ * 详情页生命周期副作用编排（§211 自 [EntryDetailScreen] 下沉，逐字搬动、零行为变更）：
+ * 进入即绑定 entryId、销毁即擦除 ViewModel 明文（M1）、删除成功一次性回退导航（ISSUE-P3-48）、
+ * 进入时刷新进阶显示偏好快照（ISSUE-P3-17）。状态所有权仍在 [EntryDetailScreen]（三态 SAF 不迁）。
+ */
+@Composable
+private fun EntryDetailLifecycleEffects(
+    entryId: String?,
+    viewModel: EntryDetailViewModel,
+    onEntryDeleted: () -> Unit
+) {
+    LaunchedEffect(entryId) {
+        viewModel.setEntryId(entryId)
+    }
+
+    // M1 整改：离开详情页（返回导航 / 目的地销毁）时擦除 ViewModel 内按需解密的全部明文
+    DisposableEffect(entryId) {
+        onDispose { viewModel.onScreenDisposed() }
+    }
+
+    // ISSUE-P3-48：删除成功后返回列表——条目已移入回收站（或已在站内被彻底删除），
+    // 详情页不再有对应实体，停留会呈现「条目不存在」，故一次性回退导航。
+    val entryDeleted by viewModel.entryDeleted.collectAsStateWithLifecycle()
+    LaunchedEffect(entryDeleted) {
+        if (entryDeleted) onEntryDeleted()
+    }
+
+    // ISSUE-P3-17：进入详情页时刷新进阶显示偏好快照（遮掩默认值 / 所属分组开关）
+    LaunchedEffect(Unit) { viewModel.onScreenEntered() }
+}
+
+/**
+ * 一次性用户消息 → Snackbar 的消费编排（§211 自 [EntryDetailScreen] 下沉，逐字搬动、零行为变更）。
+ */
+@Composable
+private fun EntryDetailSnackbarEffect(
+    message: UiMessage?,
+    snackbarHostState: SnackbarHostState,
+    onMessageShown: () -> Unit
+) {
+    message?.let {
+        val text = it.resolveText()
+        LaunchedEffect(it, text) {
+            snackbarHostState.showSnackbar(text)
+            onMessageShown()
+        }
+    }
 }

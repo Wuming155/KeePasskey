@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -75,76 +76,95 @@ fun PrivilegedBrowserSettingsScreen(
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            item {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.35f)
-                    )
-                ) {
-                    Row(
-                        modifier = Modifier.padding(12.dp),
-                        verticalAlignment = Alignment.Top
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.WarningAmber,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.error
-                        )
-                        Spacer(modifier = Modifier.padding(horizontal = 4.dp))
-                        Text(
-                            text = stringResource(R.string.settings_passkey_privileged_warning),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-                }
-            }
+            item { PrivilegedBrowserWarningCard() }
 
-            if (browsers.isEmpty()) {
-                item {
-                    Text(
-                        text = stringResource(R.string.settings_passkey_privileged_empty),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(vertical = 16.dp)
-                    )
-                }
-            } else {
-                items(browsers, key = { it.packageName }) { browser ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Public,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                        Spacer(modifier = Modifier.padding(horizontal = 6.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = browser.label,
-                                style = MaterialTheme.typography.titleSmall,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Text(
-                                text = browser.packageName,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        Switch(
-                            checked = browser.enabled,
-                            onCheckedChange = { enabled -> onToggle(browser.packageName, enabled) }
-                        )
-                    }
-                }
-            }
+            privilegedBrowserListItems(browsers = browsers, onToggle = onToggle)
 
             item { Spacer(modifier = Modifier.height(24.dp)) }
+        }
+    }
+}
+
+/**
+ * 特权浏览器页顶部的风险提示卡（errorContainer 底 + WarningAmber 图标 + 说明文案）。
+ * §211 自 [PrivilegedBrowserSettingsScreen] 下沉（逐字搬动、零行为变更）；
+ * 该页的 Scaffold 装配（含 §199 守卫锚定的顶栏参数与注释）留在宿主文件。
+ */
+@Composable
+private fun PrivilegedBrowserWarningCard() {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.35f)
+        )
+    ) {
+        Row(
+            modifier = Modifier.padding(12.dp),
+            verticalAlignment = Alignment.Top
+        ) {
+            Icon(
+                imageVector = Icons.Default.WarningAmber,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.error
+            )
+            Spacer(modifier = Modifier.padding(horizontal = 4.dp))
+            Text(
+                text = stringResource(R.string.settings_passkey_privileged_warning),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+        }
+    }
+}
+
+/**
+ * 特权浏览器列表内容（空态文案 / 逐浏览器行：图标 + 名称 + 包名 + 启用开关）。
+ * §211 自 [PrivilegedBrowserSettingsScreen] 下沉（逐字搬动、零行为变更）。
+ */
+private fun LazyListScope.privilegedBrowserListItems(
+    browsers: List<PasskeyPrivilegedBrowserStore.BrowserApp>,
+    onToggle: (packageName: String, enabled: Boolean) -> Unit
+) {
+    if (browsers.isEmpty()) {
+        item {
+            Text(
+                text = stringResource(R.string.settings_passkey_privileged_empty),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(vertical = 16.dp)
+            )
+        }
+    } else {
+        items(browsers, key = { it.packageName }) { browser ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Public,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary
+                )
+                Spacer(modifier = Modifier.padding(horizontal = 6.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = browser.label,
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = browser.packageName,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(
+                    checked = browser.enabled,
+                    onCheckedChange = { enabled -> onToggle(browser.packageName, enabled) }
+                )
+            }
         }
     }
 }

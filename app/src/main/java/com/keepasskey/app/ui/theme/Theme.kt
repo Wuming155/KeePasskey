@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialExpressiveTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MotionScheme
@@ -74,36 +75,12 @@ fun KeePasskeyTheme(
     // Material You 动态取色（Android 12+）：开启后以系统壁纸取色为基准，品牌调色盘让位；
     // 语义安全色 (LocalSecurityColors) 保持固定，不随壁纸漂移
     val useDynamicColor = dynamicColorEnabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
-    val colorScheme = when {
-        useDynamicColor -> {
-            val context = LocalContext.current
-            if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-        }
-        darkTheme -> baseColorScheme.copy(
-            primary = themePalette.primaryColorDark,
-            onPrimary = themePalette.onPrimaryDark,
-            primaryContainer = themePalette.containerColorDark,
-            onPrimaryContainer = themePalette.onContainerColorDark,
-            secondary = themePalette.secondaryColorDark,
-            onSecondary = themePalette.onSecondaryDark,
-            secondaryContainer = themePalette.secondaryContainerDark,
-            onSecondaryContainer = themePalette.onSecondaryContainerDark,
-            tertiary = themePalette.tertiaryColorDark,
-            tertiaryContainer = themePalette.tertiaryContainerDark
-        )
-        else -> baseColorScheme.copy(
-            primary = themePalette.primaryColorLight,
-            onPrimary = themePalette.onPrimaryLight,
-            primaryContainer = themePalette.containerColorLight,
-            onPrimaryContainer = themePalette.onContainerColorLight,
-            secondary = themePalette.secondaryColorLight,
-            onSecondary = themePalette.onSecondaryLight,
-            secondaryContainer = themePalette.secondaryContainerLight,
-            onSecondaryContainer = themePalette.onSecondaryContainerLight,
-            tertiary = themePalette.tertiaryColorLight,
-            tertiaryContainer = themePalette.tertiaryContainerLight
-        )
-    }
+    val colorScheme = resolveAppColorScheme(
+        useDynamicColor = useDynamicColor,
+        darkTheme = darkTheme,
+        baseColorScheme = baseColorScheme,
+        themePalette = themePalette
+    )
 
     // 动态取色路径下 OLED 纯黑需手动接管（品牌暗色板已内置纯黑方案）
     val finalColorScheme = if (useDynamicColor && darkTheme && oledBlack) {
@@ -112,23 +89,7 @@ fun KeePasskeyTheme(
         colorScheme
     }
 
-    val securityColors = if (darkTheme) {
-        SecurityColors(
-            passkey = PasskeyPurpleDark,
-            passkeyContainer = PasskeyContainerDark,
-            success = SecuritySuccessDark,
-            warning = SecurityWarningDark,
-            danger = SecurityDangerDark
-        )
-    } else {
-        SecurityColors(
-            passkey = PasskeyPurpleLight,
-            passkeyContainer = PasskeyContainerLight,
-            success = SecuritySuccessLight,
-            warning = SecurityWarningLight,
-            danger = SecurityDangerLight
-        )
-    }
+    val securityColors = resolveSecurityColors(darkTheme)
 
     val view = LocalView.current
     if (!view.isInEditMode) {
@@ -155,6 +116,70 @@ fun KeePasskeyTheme(
             content = content
         )
     }
+}
+
+/**
+ * 解析生效的 [ColorScheme]：动态取色命中时以系统壁纸取色为基准；
+ * 否则以品牌调色盘覆写 primary / secondary / tertiary 三族语义色（dark / light 两分支）。
+ * §211 自 [KeePasskeyTheme] 下沉（纯函数，逐字搬动、零行为变更）。
+ */
+@Composable
+private fun resolveAppColorScheme(
+    useDynamicColor: Boolean,
+    darkTheme: Boolean,
+    baseColorScheme: ColorScheme,
+    themePalette: AppThemePalette
+): ColorScheme = when {
+    useDynamicColor -> {
+        val context = LocalContext.current
+        if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+    }
+    darkTheme -> baseColorScheme.copy(
+        primary = themePalette.primaryColorDark,
+        onPrimary = themePalette.onPrimaryDark,
+        primaryContainer = themePalette.containerColorDark,
+        onPrimaryContainer = themePalette.onContainerColorDark,
+        secondary = themePalette.secondaryColorDark,
+        onSecondary = themePalette.onSecondaryDark,
+        secondaryContainer = themePalette.secondaryContainerDark,
+        onSecondaryContainer = themePalette.onSecondaryContainerDark,
+        tertiary = themePalette.tertiaryColorDark,
+        tertiaryContainer = themePalette.tertiaryColorDark
+    )
+    else -> baseColorScheme.copy(
+        primary = themePalette.primaryColorLight,
+        onPrimary = themePalette.onPrimaryLight,
+        primaryContainer = themePalette.containerColorLight,
+        onPrimaryContainer = themePalette.onContainerColorLight,
+        secondary = themePalette.secondaryColorLight,
+        onSecondary = themePalette.onSecondaryLight,
+        secondaryContainer = themePalette.secondaryContainerLight,
+        onSecondaryContainer = themePalette.onSecondaryContainerLight,
+        tertiary = themePalette.tertiaryColorLight,
+        tertiaryContainer = themePalette.tertiaryColorLight
+    )
+}
+
+/**
+ * 解析语义安全色（passkey / success / warning / danger）的明暗两套取值。
+ * §211 自 [KeePasskeyTheme] 下沉（纯函数，逐字搬动、零行为变更）。
+ */
+private fun resolveSecurityColors(darkTheme: Boolean): SecurityColors = if (darkTheme) {
+    SecurityColors(
+        passkey = PasskeyPurpleDark,
+        passkeyContainer = PasskeyContainerDark,
+        success = SecuritySuccessDark,
+        warning = SecurityWarningDark,
+        danger = SecurityDangerDark
+    )
+} else {
+    SecurityColors(
+        passkey = PasskeyPurpleLight,
+        passkeyContainer = PasskeyContainerLight,
+        success = SecuritySuccessLight,
+        warning = SecurityWarningLight,
+        danger = SecurityDangerLight
+    )
 }
 
 /**

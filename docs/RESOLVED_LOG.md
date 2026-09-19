@@ -258,6 +258,8 @@
 
 | §210 | Compose 长函数拆分两处批次（`ISSUE-P3-188` 第 1 项渐进：待拆 **6 → 3**——`EntryEditCustomFieldsSection` 108 出表（单字段编辑卡片下沉追加原文件，TASK-10 擦除通道注释随迁）+ `SafeAttachmentPreviewDialog` 107 出表（隔离提示横幅 + 预览画布下沉；**清单锁零风险设计**：只搬 `SecureDialog {` 包裹内部渲染段，调用点计数不变、守卫零改动；过程缺陷脚本重复执行致函数重复当场修复）；test 2233 同值全绿、lint 214 持平） | `ISSUE-P3-188`（第 1 项渐进） | [`210-Compose长函数拆分两处批次.md`](resolved/batches/210-Compose长函数拆分两处批次.md) |
 
+| §211 | Compose 长函数收官批次（`ISSUE-P3-188` 第 1 项**闭环**：待拆 **3 → 0**——`KeePasskeyTheme` 104 出表（resolveAppColorScheme 须 @Composable 因内部读 LocalContext，过程缺陷当场修）+ `PrivilegedBrowserSettingsScreen` 100 出表（**§199 守卫锚零触碰**：顶栏参数与注释留宿主，只下沉内容段）+ `EntryDetailScreen` 121 出表（**§169 全文遵守**：SAF 三态/exportLauncher/确认对话框留 Route 现场，只下沉生命周期编排/Snackbar 消费/Content 纯装配段；**过程纠偏真险情**：onExportAttachment 写路径误搬 Host 不会回写 Route 状态 ⇒ 改 Route 传导出回调）；现跑表内余项全为已登记豁免，「无未登记的超限项」达标；test 2233 同值全绿、真机 connected 64 例全绿、lint 214 持平） | `ISSUE-P3-188`（第 1 项闭环） | [`211-Compose长函数收官批次.md`](resolved/batches/211-Compose长函数收官批次.md) |
+
 ## 分册导航
 
 | 分册 | 覆盖批次 | 时间 | 索引 |
