@@ -254,6 +254,8 @@
 
 | §208 | Compose 长函数拆分两处批次（`ISSUE-P3-188` 第 1 项渐进：待拆 **10 → 8**——`HealthCheckScoreCard` 116 出表（仪表盘 + 文本序列下沉追加原文件）+ `MasterKeyChangeDialog` 116 出表（**§193 清单锁生效**：`SecureDialog {` 与 AlertDialog 本体留宿主文件，只搬字段渲染面（onPasswordChanged 擦除链回样上行）与按钮渲染面（onClick 提交与 pwdChars finally 擦除链全留现场，类比 §179 单一现场），`SecureDialogFlagPolicyTest` 随套件通过）；test 2233 同值全绿、lint 214 持平） | `ISSUE-P3-188`（第 1 项渐进） | [`208-Compose长函数拆分两处批次.md`](resolved/batches/208-Compose长函数拆分两处批次.md) |
 
+| §209 | Compose 长函数拆分两处批次（`ISSUE-P3-188` 第 1 项渐进：待拆 **8 → 6**——`S3ConfigFields` 113 出表（凭据双字段段 + path-style 开关行下沉追加原文件，SecurePasswordField 的 CharArray 通道注释随迁）+ `ChildVaultEntryRowView` 113 出表（次级信息行下沉，hasSecondaryLine 判定仍留调用方先行、本段不渲染空行）；tier2 不变；test 2233 同值全绿、lint 214 持平） | `ISSUE-P3-188`（第 1 项渐进） | [`209-Compose长函数拆分两处批次.md`](resolved/batches/209-Compose长函数拆分两处批次.md) |
+
 ## 分册导航
 
 | 分册 | 覆盖批次 | 时间 | 索引 |

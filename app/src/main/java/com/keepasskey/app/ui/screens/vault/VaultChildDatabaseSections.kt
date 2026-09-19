@@ -154,42 +154,12 @@ internal fun ChildVaultEntryRowView(
 
                 if (hasSecondaryLine(row, showUsername, showUrl)) {
                     Spacer(modifier = Modifier.height(2.dp))
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        if (showUsername && row.username.isNotBlank()) {
-                            Text(
-                                text = row.username,
-                                style = MaterialTheme.typography.bodySmall.copy(
-                                    fontSize = densitySpec.secondaryFontSizeSp.sp
-                                ),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f, fill = false)
-                            )
-                        }
-                        if (showUsername && row.username.isNotBlank() && showUrl && row.url.isNotBlank()) {
-                            Text(
-                                text = "•",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.outline
-                            )
-                        }
-                        if (showUrl && row.url.isNotBlank()) {
-                            Text(
-                                text = row.url.removePrefix("https://").removePrefix("http://").trimEnd('/'),
-                                style = MaterialTheme.typography.labelSmall.copy(
-                                    fontSize = densitySpec.secondaryFontSizeSp.sp
-                                ),
-                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.85f),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f, fill = false)
-                            )
-                        }
-                    }
+                    ChildVaultSecondaryLine(
+                        row = row,
+                        showUsername = showUsername,
+                        showUrl = showUrl,
+                        densitySpec = densitySpec
+                    )
                 }
             }
 
@@ -201,6 +171,56 @@ internal fun ChildVaultEntryRowView(
                 contentDescription = stringResource(R.string.cd_child_db_entry_read_only),
                 tint = MaterialTheme.colorScheme.outline,
                 modifier = Modifier.size(CHILD_ENTRY_LOCK_ICON_DP.dp)
+            )
+        }
+    }
+}
+
+/**
+ * 条目行的次级信息行（用户名 / 分隔点 / URL 的条件渲染）。
+ * §209 自 [ChildVaultEntryRowView] 下沉（逐字搬动、零行为变更）；
+ * 「是否存在可展示次级行」的判定仍由 [hasSecondaryLine] 承担（调用方先行判空，本段不渲染空行）。
+ */
+@Composable
+private fun ChildVaultSecondaryLine(
+    row: ChildVaultEntryRow,
+    showUsername: Boolean,
+    showUrl: Boolean,
+    densitySpec: ListDensitySpec
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        if (showUsername && row.username.isNotBlank()) {
+            Text(
+                text = row.username,
+                style = MaterialTheme.typography.bodySmall.copy(
+                    fontSize = densitySpec.secondaryFontSizeSp.sp
+                ),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false)
+            )
+        }
+        if (showUsername && row.username.isNotBlank() && showUrl && row.url.isNotBlank()) {
+            Text(
+                text = "•",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.outline
+            )
+        }
+        if (showUrl && row.url.isNotBlank()) {
+            Text(
+                text = row.url.removePrefix("https://").removePrefix("http://").trimEnd('/'),
+                style = MaterialTheme.typography.labelSmall.copy(
+                    fontSize = densitySpec.secondaryFontSizeSp.sp
+                ),
+                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.85f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false)
             )
         }
     }

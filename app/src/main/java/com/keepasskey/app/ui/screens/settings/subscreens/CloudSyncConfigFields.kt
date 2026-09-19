@@ -152,6 +152,50 @@ internal fun S3ConfigFields(
         )
     }
 
+    S3CredentialFields(
+        isAccessKeyVisible = isAccessKeyVisible,
+        onToggleAccessKeyVisibility = onToggleAccessKeyVisibility,
+        accessKeyPrefill = accessKeyPrefill,
+        onAccessKeyCharsChange = onAccessKeyCharsChange,
+        isSecretKeyVisible = isSecretKeyVisible,
+        onToggleSecretKeyVisibility = onToggleSecretKeyVisibility,
+        secretKeyPrefill = secretKeyPrefill,
+        onSecretKeyCharsChange = onSecretKeyCharsChange
+    )
+
+    OutlinedTextField(
+        value = objectKey,
+        onValueChange = onObjectKeyChange,
+        label = { Text(stringResource(R.string.sync_s3_objectkey_label)) },
+        placeholder = { Text("passwords/master_vault.kdbx") },
+        leadingIcon = { Icon(Icons.AutoMirrored.Filled.InsertDriveFile, contentDescription = null, modifier = Modifier.size(20.dp)) },
+        singleLine = true,
+        shape = RoundedCornerShape(12.dp),
+        modifier = Modifier.fillMaxWidth()
+    )
+
+    S3PathStyleSwitch(
+        usePathStyle = usePathStyle,
+        onUsePathStyleChange = onUsePathStyleChange
+    )
+}
+
+/**
+ * S3 凭据双字段（Access Key ID + Secret Access Key，均走 `SecurePasswordField`）。
+ * §209 自 [S3ConfigFields] 下沉（逐字搬动、零行为变更）：
+ * 显示用 String 仅存活于组件内部，CharArray 直达本地状态（ISSUE-P2-01 / Wave 15 注释随迁）。
+ */
+@Composable
+private fun S3CredentialFields(
+    isAccessKeyVisible: Boolean,
+    onToggleAccessKeyVisibility: () -> Unit,
+    accessKeyPrefill: CharArray?,
+    onAccessKeyCharsChange: (CharArray) -> Unit,
+    isSecretKeyVisible: Boolean,
+    onToggleSecretKeyVisibility: () -> Unit,
+    secretKeyPrefill: CharArray?,
+    onSecretKeyCharsChange: (CharArray) -> Unit
+) {
     // ISSUE-P2-01：AccessKey ID 输入走 SecurePasswordField（语义同 SecretKey）
     SecurePasswordField(
         label = "Access Key ID",
@@ -175,19 +219,17 @@ internal fun S3ConfigFields(
         leadingIcon = Icons.Default.Lock,
         modifier = Modifier.fillMaxWidth()
     )
+}
 
-    OutlinedTextField(
-        value = objectKey,
-        onValueChange = onObjectKeyChange,
-        label = { Text(stringResource(R.string.sync_s3_objectkey_label)) },
-        placeholder = { Text("passwords/master_vault.kdbx") },
-        leadingIcon = { Icon(Icons.AutoMirrored.Filled.InsertDriveFile, contentDescription = null, modifier = Modifier.size(20.dp)) },
-        singleLine = true,
-        shape = RoundedCornerShape(12.dp),
-        modifier = Modifier.fillMaxWidth()
-    )
-
-    // path-style 寻址开关：自建 MinIO / 反向代理 / IP 直连等场景必须开启
+/**
+ * path-style 寻址开关行（自建 MinIO / 反向代理 / IP 直连等场景必须开启）。
+ * §209 自 [S3ConfigFields] 下沉（逐字搬动、零行为变更）。
+ */
+@Composable
+private fun S3PathStyleSwitch(
+    usePathStyle: Boolean,
+    onUsePathStyleChange: (Boolean) -> Unit
+) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically
