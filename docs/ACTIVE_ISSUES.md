@@ -280,17 +280,18 @@
      「弹了确认框却导出别的对象」失去可断言落点；② `AutofillConfirmActivity.completeAuthResult`——
      唯一行为级证据是设备侧 `AutofillAuthChainDeviceTest`；③ `SyncConflictController.autoMergeAndUpload`——
      承载 `localDbOwned` 擦除判据的一处调用点（§166 §2）。
-  2. **第二档（400~500 行文件）渐进消化**：**§189 复跑仍为 28 个**（口径：五模块 `src/main` 全部 `.kt`
+  2. **第二档（400~500 行文件）渐进消化**：**§196 复跑仍为 28 个**（§189 起连续七批未变；口径：五模块 `src/main` 全部 `.kt`
      逐文件计数、**400 与 500 两端皆含**，脚本 `python tools/doc/count_line_tiers.py` 一次给出两档；
      取数须在**最终写盘后**——§165 §7 校正过一批「测量点早于写盘」造成的 `+1` 漂移）。
      当前头部：`RealVaultRepository` 489、`VaultRepository` 478、`RuntimeIntegrityDetector` 470、
      `KdbxHeader` 461、`KdbxXmlParser` 454、`VaultListScreen` 447、`UnlockScreen` 446。
-     **已消化 14 个**（一律「只搬不改逻辑」，逐批留痕 `resolved/batches/159`~`189`）：
-     `DatabaseSettingsScreen` 530→339（§159 起，§189 再降）、`VaultListDialogs` 490→280、`PasskeyCreateActivity` 460→359、
+     **已消化 14 个**（一律「只搬不改逻辑」，逐批留痕 `resolved/batches/159`~`186`；
+     **§187 起七批再无出档项**——§189 与 §191~§197 都只是「减而未出档」，见下方同注）：
+     `DatabaseSettingsScreen` 530→339（§159 起，§189 再降）、`VaultListDialogs` 490→281、`PasskeyCreateActivity` 460→359、
      `VaultEntryMapper` 490→384、`AutofillConfirmActivity` 475→366、`EntryEditScreen` 472→319、
      `SyncConflictController` 461→355、`EntryDetailScreen` 427→349、`EntryDetailViewModel` 434→397、
      `PasskeyAssertionActivity` 450→267（§173，与 §162 的注册侧对称）、`PasskeyCryptoEngine` 453→269（§174）、
-     `HealthCheckScreen` 406→272（§175→§189）、`SettingsPreferencesController` 446→379（§176）、
+     `HealthCheckScreen` 406→146（§175→§189→§191）、`SettingsPreferencesController` 446→379（§176）、
      `UnlockContentSections` 430→336（§186，与第 3 目一批双降）。
      **减而未出档（勿误记为消减）**：§189 让 `DebugSettingsScreen` 443→418、`SecuritySettingsScreen` 433→407、
      `CloudSyncScreen` 427→401 各再省 25~26 行，**三页仍全部留在第二档** ⇒ 28 不变；`CloudSyncScreen` 距出表 1 行。
