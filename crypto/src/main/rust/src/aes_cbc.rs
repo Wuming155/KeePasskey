@@ -119,6 +119,63 @@ pub fn cbc_decrypt(key: &[u8], iv: &mut [u8], data: &[u8]) -> Option<Vec<u8>> {
     Some(out)
 }
 
+/// CBC 链式加密（**原地形态**，供 direct `ByteBuffer` 零拷贝路径使用，`ISSUE-P3-198`）。
+///
+/// 与 [`cbc_encrypt`] 语义逐字节一致（含 `iv` 出口契约），区别仅在输出**覆写输入缓冲**：
+/// 加密侧 `dst = E(src ⊕ chain)` 天然可原地——明文块先就地异或链值、再就地加密，
+/// 明文在被密文覆写前已完整消费。参数闸门同 [`cbc_encrypt`]（含「非整数倍分组返回 `None`」）；
+/// 闸门通过后循环内**无失败路径**，不存在「部分变换」的中间态（JNI 层据此保证失败时不留半截密文）。
+pub fn cbc_encrypt_in_place(key: &[u8], iv: &mut [u8], data: &mut [u8]) -> Option<()> {
+    if key.len() != KEY_LEN || iv.len() != BLOCK_LEN || data.len() % BLOCK_LEN != 0 {
+        return None;
+    }
+    let cipher = Aes256::new_from_slice(key).ok()?;
+
+    // 链值单缓冲（全路径 Zeroizing）；**逐块零分配**：直接在输入缓冲上原地推进
+    let mut chain = Zeroizing::new([0u8; BLOCK_LEN]);
+    chain.copy_from_slice(iv);
+
+    for block in data.chunks_exact_mut(BLOCK_LEN) {
+        // dst = E(src ⊕ chain)：先就地异或链值，再就地加密；密文本身即下一链值（CBC 定义）
+        for i in 0..BLOCK_LEN {
+            block[i] ^= chain[i];
+        }
+        cipher.encrypt_block(as_block_mut(block));
+        chain.copy_from_slice(block);
+    }
+
+    iv.copy_from_slice(&chain[..]);
+    Some(())
+}
+
+/// CBC 链式解密（**不做去填充**；原地形态，语义与 [`cbc_decrypt`] 逐字节一致，`ISSUE-P3-198`）。
+///
+/// 解密侧原地覆写需要**先暂存本组密文**——它是下一轮的链值，覆写后即丢失
+/// （与 [`cbc_encrypt_in_place`] 的无暂存形态不同，暂存缓冲同样全路径 [`Zeroizing`]）。
+pub fn cbc_decrypt_in_place(key: &[u8], iv: &mut [u8], data: &mut [u8]) -> Option<()> {
+    if key.len() != KEY_LEN || iv.len() != BLOCK_LEN || data.len() % BLOCK_LEN != 0 {
+        return None;
+    }
+    let cipher = Aes256::new_from_slice(key).ok()?;
+
+    let mut chain = Zeroizing::new([0u8; BLOCK_LEN]);
+    chain.copy_from_slice(iv);
+    let mut next_chain = Zeroizing::new([0u8; BLOCK_LEN]);
+
+    for block in data.chunks_exact_mut(BLOCK_LEN) {
+        // dst = D(src) ⊕ chain；解密侧链值取**密文**（本组输入），原地覆写前必须暂存
+        next_chain.copy_from_slice(block);
+        cipher.decrypt_block(as_block_mut(block));
+        for i in 0..BLOCK_LEN {
+            block[i] ^= chain[i];
+        }
+        chain.copy_from_slice(&next_chain[..]);
+    }
+
+    iv.copy_from_slice(&chain[..]);
+    Some(())
+}
+
 #[cfg(test)]
 #[path = "tests/aes_cbc_tests.rs"]
 mod tests;

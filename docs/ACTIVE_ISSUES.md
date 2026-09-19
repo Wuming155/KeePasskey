@@ -40,27 +40,8 @@
 
 ---
 
-## P3 低危问题、特性接线与体验优化（1 项）
+## P3 低危问题、特性接线与体验优化（0 项）
 
-### ISSUE-P3-198 ChaCha20 / AES 直扣（DirectByteBuffer）生产化承接（`ISSUE-P3-187` 评估的定案实施）
-
-- **核实时间点与方式**：2026-09-19，`ISSUE-P3-187` 评估定案（见
-  [`records/JNI零拷贝评估_2026-09-19.md`](records/JNI零拷贝评估_2026-09-19.md)）——
-  探针 `probeJni零拷贝DirectByteBuffer_对比_连续10轮` 在 Pixel_10 上实测
-  **现状 24.05 ms（中位 10 轮，与 2026-09-17 基线 24.7 ms 复现一致）vs 直扣 3.7 ms（≈6.5×）**，
-  拷贝 + 分配开销（占单次 JNI 44%）被消除，AC② 达标；正确性前置为两条路径输出逐字节一致。
-  原生侧新增导出 `NativeChaCha20.applyKeystreamDirect`（direct `ByteBuffer` 就地变换，
-  **非生产路径**探针），4 ABI 已构建、`cargo test` 73 例全绿、符号契约 CI 清单已更新（10→11）。
-- **本条承接内容（生产化）**：
-  1. `ChaCha20CipherEngine` 与 `CbcStreams` 的调用方 `ByteBuffer` 化（或桥内双形态），
-     生产路径切换到直扣；**擦除责任上移**——direct 缓冲的会话级复用与用毕就地归零
-     由调用方承担（评估文档 §3 契约）；
-  2. AES 族同构探针与生产化（`NativeAes` 直扣，方法学同 ChaCha20）；
-  3. Redmi 4X 真机 10 轮对比补测（评估期间真机 USB 断连缺测，探针已入库随批可跑），
-     以真机数据复核 AC② 达标结论；
-  4. 既有语义回归全绿：`AesNativeParityTest` / `ChaCha20NativeEngineTest` /
-     `StreamKeyOwnershipContractTest` / `CipherFallbackParityTest` 等 + 四层设备侧套件。
-- **边界**：`CipherSpi` 有状态 Provider 路线**不在本条**（评估定案为长线演进方向，
-  与直扣正交；如未来立项须按评估文档 §6 四维对照先行）。
-- **依据**：`records/JNI零拷贝评估_2026-09-19.md`；`已知工程限界.md` §15 / §17（已按结论更新）。
+> **暂无开放项**（历史 P3 条目的实现与验收证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md)；
+> 最近结案：`ISSUE-P3-198` 直扣生产化（§215）。）
 

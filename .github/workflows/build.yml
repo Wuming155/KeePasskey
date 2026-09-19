@@ -215,8 +215,11 @@ jobs:
               "Java_com_keepasskey_crypto_strength_NativePasswordStrength_estimate",
               "Java_com_keepasskey_crypto_passkey_NativePasskeySign_es256Sign",
               "Java_com_keepasskey_crypto_passkey_NativePasskeySign_ed25519Sign",
-              # ISSUE-P3-187 AC②：ChaCha20 DirectByteBuffer 零拷贝探针（评估用，非生产路径）
+              # ISSUE-P3-187 AC②：ChaCha20 DirectByteBuffer 零拷贝（§187 探针，§198 起生产化）
               "Java_com_keepasskey_crypto_cipher_NativeChaCha20_applyKeystreamDirect",
+              # ISSUE-P3-198：AES 直扣生产化（原地内核 + direct ByteBuffer）
+              "Java_com_keepasskey_crypto_cipher_NativeAes_cbcEncryptBlocksDirect",
+              "Java_com_keepasskey_crypto_cipher_NativeAes_cbcDecryptBlocksDirect",
           }
           failed = False
           for abi in ("arm64-v8a", "armeabi-v7a", "x86_64", "x86"):

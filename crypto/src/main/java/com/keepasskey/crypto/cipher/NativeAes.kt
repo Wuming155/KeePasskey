@@ -2,6 +2,7 @@ package com.keepasskey.crypto.cipher
 
 import com.keepasskey.crypto.NativeCryptoLibrary
 import com.keepasskey.crypto.exception.CryptoException
+import java.nio.ByteBuffer
 
 /**
  * AES-256-CBC 原生 JNI 绑定（ISSUE-P3-155 追问 / §147）。
@@ -15,6 +16,10 @@ import com.keepasskey.crypto.exception.CryptoException
  *
  * [cbcEncryptBlocks] / [cbcDecryptBlocks] 的 `iv` 为**输入输出参数**：返回时被原地更新为
  * 最后一组密文（下一段的起始链值），这是流式路径能把长数据切成任意多段连续变换的前提。
+ *
+ * **direct 形态（`ISSUE-P3-198`）**：[cbcEncryptBlocksDirect] / [cbcDecryptBlocksDirect]
+ * 对 **direct** `ByteBuffer` 就地变换（无入参拷贝、无输出新数组），供 `CbcStreams` 的
+ * direct 分支（生产原生流路径）使用；擦除责任上移调用方（见各函数 KDoc）。
  */
 object NativeAes {
 
@@ -100,7 +105,26 @@ object NativeAes {
      */
     external fun cbcDecryptBlocks(key: ByteArray, iv: ByteArray, data: ByteArray): ByteArray?
 
-    /** 原生加密统一入口：失败归一为 [CryptoException.CipherException]。 */
+    /**
+     * CBC 链式加密（**direct 形态**，`ISSUE-P3-198`）：对 **direct** [data] 就地变换。
+     *
+     * 契约差异（相对 [cbcEncryptBlocks]）：**擦除责任上移调用方**——缓冲为调用方拥有的
+     * 堆外内存，原生侧不做 `Zeroizing`（`key` / `iv` 仍受管，16/32 字节不构成吞吐面）；
+     * 就地写不移动 Java 侧 `position`，调用方按 `flip()` 后的 `[position, limit)` 读取。
+     * `iv` 出口契约不变（原地更新为最后一组密文）。
+     *
+     * @return 处理字节数；失败（非 direct 缓冲 / 参数不合法 / 内核异常）返回 `-1`
+     */
+    external fun cbcEncryptBlocksDirect(key: ByteArray, iv: ByteArray, data: ByteBuffer): Int
+
+    /**
+     * CBC 链式解密（**direct 形态**，不做去填充；语义与加密侧对称，`iv` 同样原地演化）。
+     *
+     * @return 处理字节数；失败（非 direct 缓冲 / 参数不合法 / 内核异常）返回 `-1`
+     */
+    external fun cbcDecryptBlocksDirect(key: ByteArray, iv: ByteArray, data: ByteBuffer): Int
+
+    /** 原生调用统一入口：失败归一为 [CryptoException.CipherException]。 */
     fun encryptBlocks(key: ByteArray, iv: ByteArray, data: ByteArray): ByteArray {
         val out = try {
             cbcEncryptBlocks(key, iv, data)
@@ -118,5 +142,34 @@ object NativeAes {
             throw CryptoException.CipherException("AES 原生库不可用", e)
         }
         return out ?: throw CryptoException.CipherException("AES 原生解密失败（参数不合法或内核异常）")
+    }
+
+    /**
+     * direct 加密统一入口（`ISSUE-P3-198`）：失败归一为 [CryptoException.CipherException]
+     * （fail-closed），成功返回处理字节数。
+     */
+    fun encryptBlocksDirect(key: ByteArray, iv: ByteArray, data: ByteBuffer): Int {
+        val n = try {
+            cbcEncryptBlocksDirect(key, iv, data)
+        } catch (e: UnsatisfiedLinkError) {
+            throw CryptoException.CipherException("AES 原生库不可用", e)
+        }
+        if (n < 0) {
+            throw CryptoException.CipherException("AES 原生 direct 加密失败（非 direct 缓冲 / 参数不合法 / 内核异常）")
+        }
+        return n
+    }
+
+    /** direct 解密统一入口：失败归一为 [CryptoException.CipherException]，成功返回处理字节数。 */
+    fun decryptBlocksDirect(key: ByteArray, iv: ByteArray, data: ByteBuffer): Int {
+        val n = try {
+            cbcDecryptBlocksDirect(key, iv, data)
+        } catch (e: UnsatisfiedLinkError) {
+            throw CryptoException.CipherException("AES 原生库不可用", e)
+        }
+        if (n < 0) {
+            throw CryptoException.CipherException("AES 原生 direct 解密失败（非 direct 缓冲 / 参数不合法 / 内核异常）")
+        }
+        return n
     }
 }

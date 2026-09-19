@@ -515,6 +515,92 @@ class DeviceThroughputProbeTest {
         Arrays.fill(nonce, 0)
     }
 
+    /**
+     * AES 直扣零拷贝探针对比（`ISSUE-P3-198` 条目②，评估测量、非回归闸门）：
+     * 方法学与 ChaCha20 探针（上例）完全同构——现状路线（[NativeAes.encryptBlocks]，
+     * `byte[]` 进 / 新数组出 = 双拷贝 + 入参零化）vs 直扣路线（[NativeAes.cbcEncryptBlocksDirect]，
+     * direct `ByteBuffer` 就地原地变换 = 零拷贝、零分配、擦除责任上移调用方）。
+     * 正确性前置含 **`iv` 出口契约**（两条路径的链值演化必须一致 = 末组密文）与
+     * direct 往返；随后 10 轮同载荷对比，输出 `PERF-PROBE| AES直扣对比-10轮|`。
+     */
+    @Test
+    fun probeAes直扣DirectByteBuffer_对比_连续10轮() {
+        val key = ByteArray(32) { ((it * 11 + 5) and 0xFF).toByte() }
+        val iv = ByteArray(16) { ((it * 3 + 2) and 0xFF).toByte() }
+
+        // ---- 正确性前置①：加密输出与 iv 出口逐字节一致（64 KiB 样本 = 4096 分组）----
+        val sample = ByteArray(CHUNK_64K) { ((it * 17 + 5) and 0xFF).toByte() }
+        val byteIv = iv.copyOf()
+        val expected = NativeAes.encryptBlocks(key, byteIv, sample)
+        val directSample = ByteBuffer.allocateDirect(sample.size).apply {
+            put(sample)
+            flip()
+        }
+        val directIv = iv.copyOf()
+        val processed = NativeAes.cbcEncryptBlocksDirect(key, directIv, directSample)
+        assertTrue(
+            "直扣探针必须返回处理字节数（返回 $processed，期望 ${sample.size}）",
+            processed == sample.size
+        )
+        assertTrue(
+            "iv 出口契约：直扣与 byte[] 路径的链值演化必须一致（= 末组密文）",
+            directIv.contentEquals(byteIv) && directIv.contentEquals(expected.copyOfRange(expected.size - 16, expected.size))
+        )
+        for (i in sample.indices) {
+            if (directSample.get(i) != expected[i]) {
+                fail("直扣路径与现状路径密文不一致（offset=$i）")
+                return
+            }
+        }
+
+        // ---- 正确性前置②：direct 解密往返（就地解密须还原明文；链值必须回到**原始 IV**——
+        //      directIv 已被加密前置演化为末组密文，误用即首块解错）----
+        NativeAes.cbcDecryptBlocksDirect(key, iv.copyOf(), directSample)
+        for (i in sample.indices) {
+            if (directSample.get(i) != sample[i]) {
+                fail("直扣解密往返不一致（offset=$i）")
+                return
+            }
+        }
+
+        // ---- 10 轮对比：同 10 MiB 载荷（现状 = byte[] 进新数组出；直扣 = direct 就地）----
+        val payload = ByteArray(PAYLOAD_BYTES) { ((it * 31 + 11) and 0xFF).toByte() }
+        val direct = ByteBuffer.allocateDirect(PAYLOAD_BYTES).apply {
+            put(payload)
+            flip()
+        }
+
+        fun medianMs(block: () -> Unit): Double {
+            block()
+            val samples = (0 until SAMPLES).map {
+                val start = System.nanoTime()
+                block()
+                (System.nanoTime() - start) / 1_000_000.0
+            }
+            return samples.sorted()[samples.size / 2]
+        }
+
+        repeat(10) { index ->
+            val legacy = medianMs { NativeAes.encryptBlocks(key, iv.copyOf(), payload) }
+            val directMs = medianMs { NativeAes.cbcEncryptBlocksDirect(key, iv.copyOf(), direct) }
+            println(
+                "$PREFIX AES直扣对比-10轮|round=${index + 1}|" +
+                    "现状byte数组=${fmt(legacy)}ms|DirectByteBuffer=${fmt(directMs)}ms"
+            )
+        }
+
+        // 擦除收尾（零拷贝契约：direct 堆外段就地归零）
+        direct.rewind()
+        while (direct.hasRemaining()) direct.put(0)
+        Arrays.fill(payload, 0)
+        Arrays.fill(sample, 0)
+        Arrays.fill(expected, 0)
+        Arrays.fill(key, 0)
+        Arrays.fill(iv, 0)
+        Arrays.fill(byteIv, 0)
+        Arrays.fill(directIv, 0)
+    }
+
     // ================= 采样与输出基建 =================
 
     /** 吞吐测量：预热 [WARMUP] 次后采样 [SAMPLES] 次，返回毫秒列表。 */

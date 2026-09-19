@@ -6,6 +6,7 @@ import com.keepasskey.crypto.exception.CryptoException
 import org.bouncycastle.jce.provider.BouncyCastleProvider
 import java.io.InputStream
 import java.io.OutputStream
+import java.nio.ByteBuffer
 import java.security.Provider
 import java.security.Security
 import java.util.Arrays
@@ -22,7 +23,9 @@ import javax.crypto.spec.SecretKeySpec
  * - **原生路径**：RustCrypto `chacha20` 内核（[NativeChaCha20]）——BC 纯 Java 实现真机吞吐
  *   仅 2.6~2.7 MB/s，Rust 内核实测 ≈118 MB/s（≈44×，见 `docs/records/真机吞吐实测记录_2026-09-17.md`
  *   §2.1）；流包装为 ChaCha20 专用的无填充分块流（[NativeEncryptingOutputStream] /
- *   [NativeDecryptingInputStream]，64 KiB 分块 + 字节偏移推进）；
+ *   [NativeDecryptingInputStream]，64 KiB 分块 + 字节偏移推进）。**解密流自 `ISSUE-P3-198`
+ *   起走 direct `ByteBuffer` 直扣**（评估定案见 `records/JNI零拷贝评估_2026-09-19.md`）；
+ *   加密流与整块 `byte[]` 路径维持拷贝桥（边界理由见各处 KDoc，§198 批次文档）；
  * - **兜底路径**：BC JCE `ChaCha7539`（[bouncyCastleProvider] 持有实例，§143 解耦）——
  *   原生不可用（个别机型缺 ABI）时回退，语义与接线前逐字节一致。
  *
@@ -175,6 +178,13 @@ class ChaCha20CipherEngine internal constructor(
     /**
      * 原生加密输出流：每次 `write` 调用即按当前字节偏移施加密钥流并写出
      * （密钥流是偏移的纯函数，调用粒度不影响正确性）；明文中转副本用毕即清零。
+     *
+     * **刻意不切 direct（`ISSUE-P3-198` 边界登记）**：本流的写粒度由调用方决定且可任意大
+     * （旧形态把任意尺寸数组**单次**交给 JNI，边界拷贝总量与粒度无关）；若改用固定 direct
+     * 缓冲，大写入必须分段循环，反而引入「每 64 KiB 一次 JNI 固定开销 + 堆外归零」的额外
+     * 成本——拷贝次数不变（`OutputStream` 字节 API 两侧各留一次），仅省每次 write 的输出
+     * 数组分配，收益不入。解密侧（[NativeDecryptingInputStream]）读粒度受本流 64 KiB 缓冲
+     * 封顶，直扣才有净收益。
      */
     private class NativeEncryptingOutputStream(
         private val sink: OutputStream,
@@ -225,9 +235,15 @@ class ChaCha20CipherEngine internal constructor(
     }
 
     /**
-     * 原生解密输入流：从底层流读入**实例级复用**的 64 KiB 缓冲，按当前字节偏移施加
-     * 密钥流后交付（ISSUE-P3-177 的缓冲复用纪律；缓冲内为明文，close 时清零）。
-     * ChaCha20 无填充、无分组对齐，无 fail-closed 收尾语义。
+     * 原生解密输入流（`ISSUE-P3-198` 直扣形态）：从底层流读入堆内中转缓冲（`InputStream`
+     * API 只收 `byte[]`，该次拷贝不可消），经**流实例自持的 direct 缓冲**就地施加密钥流后
+     * 交付——每块仅「堆→堆外 put」与「堆外→调用方 get」两次拷贝、零分配（旧形态为
+     * `copyOf` + JNI 入/出拷贝 + 交付 `arraycopy` 共 4 次拷贝，且每块分配 2 个 64 KiB 数组）。
+     *
+     * 敏感数据处理：明文区间**交付即归零**（堆外内存不受 GC 管辖，归零必须显式且确定性），
+     * close 时整段兜底归零；`key` / `nonce` 为本流自持副本，close 时擦除。`ISSUE-P3-177`
+     * 的缓冲复用纪律由「单 direct 缓冲整流复用」承接。ChaCha20 无填充、无分组对齐，
+     * 无 fail-closed 收尾语义。
      */
     private class NativeDecryptingInputStream(
         private val source: InputStream,
@@ -235,7 +251,15 @@ class ChaCha20CipherEngine internal constructor(
         private val nonce: ByteArray
     ) : InputStream() {
 
+        /** 密文中转缓冲（堆内）：`InputStream.read` 只收 `byte[]`，此一次拷贝受 API 限制。 */
         private val buffer = ByteArray(CHUNK_SIZE)
+
+        /** 明文就地区（堆外，direct）：单次分配、整流复用、用毕就地归零（擦除责任在本流）。 */
+        private val plain = ByteBuffer.allocateDirect(CHUNK_SIZE)
+
+        /** `[0, plainLength)` 为待交付明文区间，`plainPos` 为已交付前缀（交付即归零）。 */
+        private var plainLength = 0
+        private var plainPos = 0
         private var position = 0L
         private var eofDone = false
         private var closed = false
@@ -253,41 +277,75 @@ class ChaCha20CipherEngine internal constructor(
             if (len == 0) return 0
             require(off >= 0 && len <= data.size - off) { "非法的读取区间 off=$off len=$len" }
             if (closed) throw java.io.IOException("流已关闭")
-            if (eofDone) return -1
-
-            // 尽量读满请求量（单次底层读可能短读），读多少解密多少
-            var filled = 0
-            while (filled < len) {
-                val count = source.read(buffer, filled, minOf(len, buffer.size) - filled)
-                if (count <= 0) break
-                filled += count
-            }
-            if (filled == 0) {
-                eofDone = true
-                return -1
-            }
-            try {
-                val out = NativeChaCha20.applyKeystreamChecked(key, nonce, position, buffer.copyOf(filled))
-                try {
-                    System.arraycopy(out, 0, data, off, filled)
-                } finally {
-                    Arrays.fill(out, 0)
+            while (true) {
+                if (plainPos < plainLength) {
+                    val count = minOf(len, plainLength - plainPos)
+                    plain.position(plainPos)
+                    plain.get(data, off, count)
+                    // 交付即归零：明文区间用毕确定性擦除
+                    plain.wipeRange(plainPos, plainPos + count)
+                    plainPos += count
+                    return count
                 }
-            } finally {
-                Arrays.fill(buffer, 0, filled, 0)
+                if (eofDone || !refill(len)) return -1
             }
-            position += filled
-            return filled
         }
 
         override fun close() {
             if (closed) return
             closed = true
+            wipePlain()
             Arrays.fill(buffer, 0)
+            // 堆外明文区整段兜底归零（可能残留未交付明文）
+            plain.wipeRange(0, plain.capacity())
             // key / nonce 为本流**自持**的副本（由引擎 `copyOf()` 移交所有权），必须擦除
             Arrays.fill(key, 0)
             Arrays.fill(nonce, 0)
             source.close()
+        }
+
+        /**
+         * 读入一段密文并对 `[0, filled)` 的等容量视图就地变换；返回 `false` 表示流结束。
+         * [target] 为本次调用方请求的上限（与旧形态一致：读满请求量即交付，不做过量预读）。
+         */
+        private fun refill(target: Int): Boolean {
+            if (eofDone) return false
+            wipePlain()
+
+            // 尽量读满请求量（单次底层读可能短读），读多少解密多少——与旧形态读满语义一致
+            val cap = minOf(target, CHUNK_SIZE)
+            var filled = 0
+            while (filled < cap) {
+                val count = source.read(buffer, filled, cap - filled)
+                if (count <= 0) break
+                filled += count
+            }
+            if (filled == 0) {
+                eofDone = true
+                return false
+            }
+
+            // 堆→堆外一次拷贝后按 [0, filled) 视图就地变换（JNI 契约按 capacity 处理整区间）
+            plain.clear()
+            plain.put(buffer, 0, filled)
+            plain.flip()
+            NativeChaCha20.applyKeystreamDirectChecked(key, nonce, position, plain.slice())
+            plainLength = filled
+            plainPos = 0
+
+            // 密文中转卫生清零（维持既有清零纪律；变换已发生在堆外，此处残留为密文）
+            Arrays.fill(buffer, 0, filled, 0)
+            position += filled
+            return true
+        }
+
+        /** 归零未交付的明文残留并复位交付游标（refill 前置与 close 共用）。 */
+        private fun wipePlain() {
+            if (plainPos < plainLength) {
+                plain.wipeRange(plainPos, plainLength)
+            }
+            plainLength = 0
+            plainPos = 0
         }
 
         private companion object {

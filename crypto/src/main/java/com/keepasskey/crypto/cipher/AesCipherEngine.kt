@@ -100,6 +100,8 @@ class AesCipherEngine internal constructor(
         requireAes256Key(key)
         if (useNative) {
             // 原生侧走与解密侧对称的分块骨架（每 64 KiB 一段，链值随段推进）。
+            // `ISSUE-P3-198`：原生分支走 **direct 直扣形态**（累积区在堆外、原地变换，
+            // 擦除责任上移调用方契约由流承担），byte[] 形态保留给 JCE 兜底与宿主注入。
             // `ownedSecrets`：原生变换**惰性**读取密钥，故流必须自持副本并负责擦除
             // （契约背景见 `CbcDecryptingInputStream.ownedSecrets` 的 KDoc，§147 整改）
             val ownedKey = key.copyOf()
@@ -107,8 +109,9 @@ class AesCipherEngine internal constructor(
                 sink = outputStream,
                 key = ownedKey,
                 iv = iv,
-                transform = { k, i, d -> NativeAes.encryptBlocks(k, i, d) },
-                ownedSecrets = listOf(ownedKey)
+                transform = null,
+                ownedSecrets = listOf(ownedKey),
+                directTransform = { k, i, v -> NativeAes.encryptBlocksDirect(k, i, v) }
             )
         }
         val cipher = initCipher(Cipher.ENCRYPT_MODE, key, iv)
@@ -123,6 +126,8 @@ class AesCipherEngine internal constructor(
     ): InputStream {
         requireAes256Key(key)
         if (useNative) {
+            // `ISSUE-P3-198`：原生分支走 **direct 直扣形态**（载荷在堆外就地区原地变换、
+            // 交付即归零），byte[] 形态保留给 JCE 兜底与宿主注入。
             // `ownedSecrets`：原生变换**惰性**读取密钥，故流必须自持副本并负责擦除
             // （契约背景见本类 `ownedSecrets` 的 KDoc，§147 整改）
             val ownedKey = key.copyOf()
@@ -130,8 +135,9 @@ class AesCipherEngine internal constructor(
                 source = inputStream,
                 key = ownedKey,
                 iv = iv,
-                transform = { k, i, d -> NativeAes.decryptBlocks(k, i, d) },
-                ownedSecrets = listOf(ownedKey)
+                transform = null,
+                ownedSecrets = listOf(ownedKey),
+                directTransform = { k, i, v -> NativeAes.decryptBlocksDirect(k, i, v) }
             )
         }
         val cipher = Cipher.getInstance(TRANSFORMATION_NO_PADDING)

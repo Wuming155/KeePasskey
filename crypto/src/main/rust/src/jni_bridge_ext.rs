@@ -13,6 +13,10 @@
 //! - `Java_com_keepasskey_crypto_cipher_NativeTwofish_cbcDecryptBlocks`
 //! - `Java_com_keepasskey_crypto_cipher_NativeAes_cbcEncryptBlocks`（§147）
 //! - `Java_com_keepasskey_crypto_cipher_NativeAes_cbcDecryptBlocks`（§147）
+//! - `Java_com_keepasskey_crypto_cipher_NativeChaCha20_applyKeystream`（§145）
+//! - `Java_com_keepasskey_crypto_cipher_NativeChaCha20_applyKeystreamDirect`（§187 探针 / §198 生产化）
+//! - `Java_com_keepasskey_crypto_cipher_NativeAes_cbcEncryptBlocksDirect`（`ISSUE-P3-198`）
+//! - `Java_com_keepasskey_crypto_cipher_NativeAes_cbcDecryptBlocksDirect`（`ISSUE-P3-198`）
 //! - `Java_com_keepasskey_crypto_strength_NativePasswordStrength_estimate`
 
 use crate::aes_cbc;
@@ -237,6 +241,86 @@ fn aes_cbc_jni<'local>(
     match outcome {
         Ok(Some(arr)) => arr,
         _ => null_mut(),
+    }
+}
+
+// ============================================================================
+// 2c) AES-256-CBC 直扣（direct ByteBuffer 零拷贝，`ISSUE-P3-198` 生产化承接）
+// ============================================================================
+
+/// AES-256-CBC 链式加密（**direct 形态**，`ISSUE-P3-198`）：入参 `data` 为 **direct**
+/// `java.nio.ByteBuffer`，经 `GetDirectBufferAddress` 就地变换——无 `convert_byte_array`
+/// 拷贝、无输出 `new_byte_array`、无入参零化副本。
+///
+/// 契约与 ChaCha20 的 `applyKeystreamDirect` 同构（评估文档 §3）：
+/// 1. **擦除责任上移**：数据缓冲是调用方拥有的堆外内存，变换后由调用方归零；
+///    `key` / `iv` 仍走 [`Zeroizing`] 副本（32/16 字节，不构成吞吐面）；
+/// 2. **`iv` 出口契约保留**：返回时被原地更新为最后一组密文（回写 Java 数组）——
+///    这是流式分段能把长数据切成任意多段连续变换的前提；
+/// 3. 返回处理字节数（`jint`）；失败（非 direct 缓冲 / null / 空缓冲 / 参数非法 / panic）
+///    返回 `-1`。参数闸门先于任何写入（内核闸门不过即 `None`），通过后变换完整执行，
+///    **失败路径不留半截变换中间态**。
+#[no_mangle]
+pub extern "system" fn Java_com_keepasskey_crypto_cipher_NativeAes_cbcEncryptBlocksDirect<'local>(
+    env: JNIEnv<'local>,
+    _thiz: JObject<'local>,
+    key: JByteArray<'local>,
+    iv: JByteArray<'local>,
+    data: JByteBuffer<'local>,
+) -> jint {
+    aes_cbc_direct_jni(env, key, iv, data, true)
+}
+
+/// AES-256-CBC 链式解密（**direct 形态**，不做去填充；语义与加密侧对称，`iv` 同样原地演化）。
+#[no_mangle]
+pub extern "system" fn Java_com_keepasskey_crypto_cipher_NativeAes_cbcDecryptBlocksDirect<'local>(
+    env: JNIEnv<'local>,
+    _thiz: JObject<'local>,
+    key: JByteArray<'local>,
+    iv: JByteArray<'local>,
+    data: JByteBuffer<'local>,
+) -> jint {
+    aes_cbc_direct_jni(env, key, iv, data, false)
+}
+
+/// AES direct 加解密共用实现（与 [`aes_cbc_jni`] / ChaCha20 直扣同构，仅内核不同）。
+fn aes_cbc_direct_jni<'local>(
+    env: JNIEnv<'local>,
+    key: JByteArray<'local>,
+    iv: JByteArray<'local>,
+    data: JByteBuffer<'local>,
+    encrypt: bool,
+) -> jint {
+    if key.is_null() || iv.is_null() {
+        return -1;
+    }
+
+    let outcome = catch_unwind(AssertUnwindSafe(|| -> Option<jint> {
+        let key_buf = Zeroizing::new(env.convert_byte_array(&key).ok()?);
+        let mut iv_buf = Zeroizing::new(env.convert_byte_array(&iv).ok()?);
+        // 堆外地址直取：无拷贝、无分配（非 direct 缓冲 / null 此处返回 Err → -1）。
+        // SAFETY：ptr 在 buffer 存活期内有效；len 取自 GetDirectBufferCapacity，
+        // from_raw_parts_mut 的安全前提由 JNI 引用界定（本函数内不逃逸）。
+        let ptr = env.get_direct_buffer_address(&data).ok()?;
+        let len = env.get_direct_buffer_capacity(&data).ok()?;
+        if ptr.is_null() || len == 0 {
+            return None;
+        }
+        let slice = unsafe { std::slice::from_raw_parts_mut(ptr, len) };
+        if encrypt {
+            aes_cbc::cbc_encrypt_in_place(&key_buf, &mut iv_buf, slice)?;
+        } else {
+            aes_cbc::cbc_decrypt_in_place(&key_buf, &mut iv_buf, slice)?;
+        }
+        // 回写演化后的链值（iv 出口契约；IV 非秘密，但仍在 Zeroizing 缓冲中处理）
+        env.set_byte_array_region(&iv, 0, unsafe { as_jbyte(&iv_buf[..]) })
+            .ok()?;
+        Some(len as jint)
+    }));
+
+    match outcome {
+        Ok(Some(n)) => n,
+        _ => -1,
     }
 }
 

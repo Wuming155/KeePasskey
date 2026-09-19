@@ -7,7 +7,10 @@
 //!    （每 64 KiB 一段、`iv` 原地演化）正确性的直接依据；
 //! 3. 参数闸门负例与往返。
 
-use super::{cbc_decrypt, cbc_encrypt, ecb_encrypt_block, BLOCK_LEN, KEY_LEN};
+use super::{
+    cbc_decrypt, cbc_decrypt_in_place, cbc_encrypt, cbc_encrypt_in_place, ecb_encrypt_block,
+    BLOCK_LEN, KEY_LEN,
+};
 
 fn hex(s: &str) -> Vec<u8> {
     hex::decode(s.trim()).expect("非法 hex")
@@ -183,5 +186,108 @@ fn gate_rejects_invalid_params() {
         Vec::<u8>::new(),
         cbc_encrypt(&key, &mut empty_iv, &[]).expect("空数据应成功")
     );
+    assert_eq!(iv, empty_iv, "空数据不得改动 iv");
+}
+
+// ============ 4) 原地形态（direct ByteBuffer 零拷贝路径，ISSUE-P3-198）============
+
+/// 原地与分配形态必须逐字节一致（含 `iv` 出口契约）——direct 路径正确性的直接依据。
+#[test]
+fn in_place_matches_allocating_variant() {
+    let key = hex(NIST_KEY);
+
+    // NIST 官方向量（加密侧）
+    let mut ip_iv = hex(NIST_IV);
+    let mut ip_data = hex(NIST_PLAINTEXT);
+    cbc_encrypt_in_place(&key, &mut ip_iv, &mut ip_data).expect("原地加密应成功");
+    let mut alloc_iv = hex(NIST_IV);
+    let alloc_ct = cbc_encrypt(&key, &mut alloc_iv, &hex(NIST_PLAINTEXT)).expect("分配形态应成功");
+    assert_eq!(alloc_ct, ip_data, "原地密文必须与分配形态逐字节一致");
+    assert_eq!(alloc_iv, ip_iv, "原地 iv 出口必须与分配形态一致");
+
+    // NIST 官方向量（解密侧）
+    let mut ip_iv = hex(NIST_IV);
+    let mut ip_data = hex(NIST_CIPHERTEXT);
+    cbc_decrypt_in_place(&key, &mut ip_iv, &mut ip_data).expect("原地解密应成功");
+    let mut alloc_iv = hex(NIST_IV);
+    let alloc_pt = cbc_decrypt(&key, &mut alloc_iv, &hex(NIST_CIPHERTEXT)).expect("分配形态应成功");
+    assert_eq!(alloc_pt, ip_data, "原地明文必须与分配形态逐字节一致");
+    assert_eq!(alloc_iv, ip_iv, "原地 iv 出口必须与分配形态一致");
+}
+
+/// 原地形态的往返与分段等价性（随机长度 × 任意段长，覆盖覆写次序的正确性）。
+#[test]
+fn in_place_round_trip_and_segmentation() {
+    let key = [0x7au8; KEY_LEN];
+    let iv0 = [0xc3u8; BLOCK_LEN];
+    for blocks in [1usize, 2, 15, 64, 257] {
+        let plain: Vec<u8> = (0..blocks * BLOCK_LEN).map(|i| (i * 41 + 17) as u8).collect();
+        let mut iv = iv0;
+        let mut ct = plain.clone();
+        cbc_encrypt_in_place(&key, &mut iv, &mut ct).expect("原地加密应成功");
+
+        let mut whole_iv = iv0;
+        let whole = cbc_encrypt(&key, &mut whole_iv, &plain).expect("分配形态应成功");
+        assert_eq!(whole, ct, "{blocks} 分组：原地密文必须与分配形态一致");
+
+        let mut back_iv = iv0;
+        let mut back = ct.clone();
+        cbc_decrypt_in_place(&key, &mut back_iv, &mut back).expect("原地解密应成功");
+        assert_eq!(plain, back, "{blocks} 分组：原地往返必须还原");
+        assert_eq!(iv, back_iv, "两侧 iv 出口必须一致");
+    }
+
+    // 分段等价：整段一次 vs 任意段长连续推进 iv（原地形态）
+    let total = 16 * 100;
+    let plain: Vec<u8> = (0..total).map(|i| (i * 29 + 5) as u8).collect();
+    let mut whole_iv = iv0;
+    let mut whole = plain.clone();
+    cbc_encrypt_in_place(&key, &mut whole_iv, &mut whole).expect("整段应成功");
+    for seg_blocks in [1usize, 3, 7, 64] {
+        let mut iv = iv0;
+        let mut out = Vec::with_capacity(total);
+        let mut seg = Vec::new();
+        for chunk in plain.chunks(seg_blocks * BLOCK_LEN) {
+            seg.clear();
+            seg.extend_from_slice(chunk);
+            cbc_encrypt_in_place(&key, &mut iv, &mut seg).expect("分段应成功");
+            out.extend_from_slice(&seg);
+        }
+        assert_eq!(whole, out, "段长 {seg_blocks} 分组的原地密文必须与整段一致");
+    }
+}
+
+/// 原地形态参数闸门：与分配形态同口径（fail-closed，不做静默截断）。
+#[test]
+fn in_place_gate_rejects_invalid_params() {
+    let key = [0x11u8; KEY_LEN];
+    let iv = [0x22u8; BLOCK_LEN];
+    let mut data = [0x33u8; BLOCK_LEN * 2];
+
+    // 密钥长度：仅 32 字节合法（AES-256）
+    let mut iv_mut = iv;
+    let short_key = [0x11u8; 31];
+    assert!(cbc_encrypt_in_place(&short_key, &mut iv_mut, &mut data).is_none());
+    let mut iv_mut = iv;
+    assert!(cbc_encrypt_in_place(&[], &mut iv_mut, &mut data).is_none());
+
+    // IV 长度
+    let mut short_iv = [0u8; 15];
+    let mut data2 = [0x33u8; BLOCK_LEN * 2];
+    assert!(cbc_encrypt_in_place(&key, &mut short_iv, &mut data2).is_none());
+    let mut short_iv = [0u8; 15];
+    assert!(cbc_decrypt_in_place(&key, &mut short_iv, &mut data2).is_none());
+
+    // 数据非分组整数倍（不做静默截断）
+    let mut iv_mut = iv;
+    let mut odd = [0x33u8; BLOCK_LEN + 1];
+    assert!(cbc_encrypt_in_place(&key, &mut iv_mut, &mut odd).is_none());
+    let mut iv_mut = iv;
+    assert!(cbc_decrypt_in_place(&key, &mut iv_mut, &mut odd).is_none());
+
+    // 空数据是合法输入（原地空转，iv 不变）
+    let mut empty_iv = iv;
+    let mut empty = Vec::<u8>::new();
+    assert!(cbc_encrypt_in_place(&key, &mut empty_iv, &mut empty).is_some());
     assert_eq!(iv, empty_iv, "空数据不得改动 iv");
 }

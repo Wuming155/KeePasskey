@@ -82,12 +82,16 @@ object NativeChaCha20 {
     ): ByteArray?
 
     /**
-     * **零拷贝探针**（`ISSUE-P3-187` AC②，非生产路径）：对 **direct** [data] 就地施加密钥流——
+     * 密钥流施加（**direct 形态**）：对 **direct** [data] 就地施加密钥流——
      * 无 `convert_byte_array` 拷贝、无输出新数组、无入参零化副本。
      *
      * 契约差异（相对 [applyKeystream]）：**擦除责任上移调用方**（缓冲为调用方拥有的堆外内存，
      * 原生侧不做 `Zeroizing`）；返回处理字节数，失败（非 direct / 参数非法 / panic）返回 `-1`。
-     * 仅供真机对比探针调用，`ChaCha20CipherEngine` 生产路径不经此函数。
+     * 由 §187 AC② 探针实测证成（≈6.5×，见 `records/JNI零拷贝评估_2026-09-19.md`），
+     * `ISSUE-P3-198` 起为**生产路径**（[ChaCha20CipherEngine.NativeDecryptingInputStream]）。
+     *
+     * 区间语义：处理范围为 **`[0, capacity)` 全区间**——调用方对不满一段的载荷先用
+     * `limit(...)` + `slice()` 收窄出等容量视图再传入（流包装内已有先例）。
      */
     external fun applyKeystreamDirect(
         key: ByteArray,
@@ -95,6 +99,38 @@ object NativeChaCha20 {
         byteOffset: Long,
         data: ByteBuffer
     ): Int
+
+    /**
+     * direct 原生调用统一入口（`ISSUE-P3-198`）：失败归一为 [CryptoException.CipherException]
+     * （fail-closed），成功返回处理字节数。
+     */
+    fun applyKeystreamDirectChecked(
+        key: ByteArray,
+        nonce: ByteArray,
+        byteOffset: Long,
+        data: ByteBuffer
+    ): Int {
+        if (key.size != KEY_LENGTH) {
+            throw CryptoException.CipherException("ChaCha20 原生密钥长度必须为 $KEY_LENGTH 字节，实际 ${key.size}")
+        }
+        if (nonce.size != NONCE_LENGTH) {
+            throw CryptoException.CipherException("ChaCha20 原生 nonce 长度必须为 $NONCE_LENGTH 字节，实际 ${nonce.size}")
+        }
+        if (byteOffset < 0) {
+            throw CryptoException.CipherException("ChaCha20 原生偏移不得为负：$byteOffset")
+        }
+        val n = try {
+            applyKeystreamDirect(key, nonce, byteOffset, data)
+        } catch (e: UnsatisfiedLinkError) {
+            throw CryptoException.CipherException("ChaCha20 原生库不可用", e)
+        }
+        if (n < 0) {
+            throw CryptoException.CipherException(
+                "ChaCha20 原生 direct 密钥流施加失败（非 direct 缓冲或参数不合法，offset=$byteOffset）"
+            )
+        }
+        return n
+    }
 
     /** 原生调用统一入口：失败归一为 [CryptoException.CipherException]（fail-closed）。 */
     fun applyKeystreamChecked(
