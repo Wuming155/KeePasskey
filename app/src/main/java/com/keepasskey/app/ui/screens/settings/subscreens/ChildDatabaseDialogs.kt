@@ -3,7 +3,6 @@ package com.keepasskey.app.ui.screens.settings.subscreens
 import android.content.res.Configuration
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.size
@@ -11,12 +10,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -29,7 +25,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -37,7 +32,6 @@ import androidx.compose.ui.unit.dp
 import com.keepasskey.app.R
 import com.keepasskey.app.security.SecureDialogWindowEffect
 import com.keepasskey.app.ui.components.SecurePasswordField
-import com.keepasskey.app.ui.model.resolveText
 import com.keepasskey.app.ui.screens.settings.ChildDatabaseMountUiState
 import com.keepasskey.app.ui.screens.settings.ChildDatabaseStatus
 import com.keepasskey.app.ui.screens.settings.ChildDatabaseUiState
@@ -93,18 +87,7 @@ internal fun ChildDatabaseDialog(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Text(
-                    text = stringResource(R.string.dbset_child_db_dialog_desc),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Text(
-                    text = stringResource(R.string.dbset_child_db_credential_dialog_desc),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                ChildDatabaseDialogIntro()
 
                 OutlinedTextField(
                     value = alias,
@@ -126,44 +109,13 @@ internal fun ChildDatabaseDialog(
                     modifier = Modifier.fillMaxWidth()
                 )
 
-                OutlinedButton(
-                    onClick = onPickSource,
+                ChildDatabaseSourcePickers(
                     enabled = state.available,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Icon(
-                        Icons.AutoMirrored.Filled.InsertDriveFile,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(stringResource(R.string.dbset_child_db_select_file))
-                }
-                // 已选来源回显：仅文件名（非敏感元数据），避免用户对「选了哪个文件」无据可依
-                selectedSourceUri?.let { source ->
-                    Text(
-                        text = childDatabaseSourceDisplayName(source),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-
-                OutlinedButton(
-                    onClick = onPickKeyFile,
-                    enabled = state.available,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Icon(Icons.Default.Lock, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = selectedKeyFileUri?.let {
-                            stringResource(
-                                R.string.unlock_keyfile_selected,
-                                childDatabaseSourceDisplayName(it)
-                            )
-                        } ?: stringResource(R.string.unlock_keyfile_none)
-                    )
-                }
+                    selectedSourceUri = selectedSourceUri,
+                    selectedKeyFileUri = selectedKeyFileUri,
+                    onPickSource = onPickSource,
+                    onPickKeyFile = onPickKeyFile
+                )
 
                 Button(
                     onClick = {
@@ -180,44 +132,13 @@ internal fun ChildDatabaseDialog(
                     Text(stringResource(R.string.dbset_child_db_btn_mount))
                 }
 
-                // 控制器缺失（仅单测/异常装配）时上方全部控件已被禁用，即事实本身；
-                // 此处不再补文案（无对应资源），生产装配下 available 恒为 true。
-                if (state.available) {
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-
-                    if (state.mounts.isEmpty()) {
-                        Text(
-                            text = stringResource(R.string.dbset_child_db_none),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    } else {
-                        state.mounts.forEach { mount ->
-                            ChildDatabaseMountRow(
-                                mount = mount,
-                                onUnlock = { onUnlockRequest(mount.mountId) },
-                                onUnmount = { onUnmount(mount.mountId) }
-                            )
-                        }
-                        Text(
-                            text = stringResource(R.string.dbset_child_db_unmount_hint),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-
-                    state.feedback?.let { feedback ->
-                        Text(
-                            text = feedback.message.resolveText(),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = if (feedback.isError) {
-                                MaterialTheme.colorScheme.error
-                            } else {
-                                MaterialTheme.colorScheme.primary
-                            }
-                        )
-                    }
-                }
+                ChildDatabaseMountListSection(
+                    available = state.available,
+                    mounts = state.mounts,
+                    feedback = state.feedback,
+                    onUnlockRequest = onUnlockRequest,
+                    onUnmount = onUnmount
+                )
             }
         },
         confirmButton = {
@@ -226,48 +147,6 @@ internal fun ChildDatabaseDialog(
             }
         }
     )
-}
-
-/** 单条已挂载子库：别名 + 真实状态（或「正在打开」进度）+ 解锁/卸载入口 */
-@Composable
-private fun ChildDatabaseMountRow(
-    mount: ChildDatabaseMountUiState,
-    onUnlock: () -> Unit,
-    onUnmount: () -> Unit
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = mount.alias,
-                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-                color = MaterialTheme.colorScheme.onSurface
-            )
-            when (val status = mount.status) {
-                is ChildDatabaseStatus.Text -> Text(
-                    text = status.message.resolveText(),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-
-                ChildDatabaseStatus.Opening -> CircularProgressIndicator(
-                    modifier = Modifier.size(14.dp),
-                    strokeWidth = 2.dp
-                )
-            }
-        }
-        // 「已挂载」不等于「已解锁」：未解锁状态下必须给出真实的重试入口
-        if (mount.canRetryWithCredentials) {
-            TextButton(onClick = onUnlock) {
-                Text(stringResource(R.string.dbset_child_db_btn_unlock))
-            }
-        }
-        TextButton(onClick = onUnmount) {
-            Text(stringResource(R.string.dbset_child_db_btn_unmount))
-        }
-    }
 }
 
 // 对话框 5b：子库凭据补录（重新解锁已挂载子库）
