@@ -62,6 +62,9 @@ internal object PasskeyPkcs8Codec {
     /** Ed25519 种子长度 */
     private const val ED25519_SEED_BYTES = 32
 
+    /** PEM 严格 ASCII 上界（RFC 7468：PEM 的文本为 7-bit ASCII；越界即 fail-closed 拒绝，ISSUE-P3-196 命名） */
+    private const val ASCII_7BIT_MAX = 0x7F
+
     /** PKCS#8 PrivateKeyInfo 合法版本号：v0（PrivateKeyInfo）/ v1（oneAsymmetricKey，RFC 5958，Ed25519 编码即 v1） */
     private val PKCS8_VERSIONS = setOf(0, 1)
 
@@ -274,7 +277,7 @@ internal object PasskeyPkcs8Codec {
         val out = ByteArray(chars.size)
         for (i in chars.indices) {
             val c = chars[i]
-            require(c.code <= 0x7F) { "PEM 文本必须为 ASCII" }
+            require(c.code <= ASCII_7BIT_MAX) { "PEM 文本必须为 ASCII" }
             out[i] = c.code.toByte()
         }
         return out

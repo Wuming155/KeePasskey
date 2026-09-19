@@ -36,6 +36,17 @@ object PasskeyPrf {
     /** PRF 凭据秘密长度（字节） */
     const val SECRET_BYTES: Int = 32
 
+    /**
+     * Base64 秘密文本中可剔除的 ASCII 空白码位（[stripWhitespace] 用，**等值比较**——
+     * 与 `app/passkey` 的 `ASCII_SPACE` 不同：那里 `<` 表控制字符、`<=` 表两侧可修剪空白，
+     * 三种语义分工不可互相「统一」。与 core `PasskeyKeyText` 的同组常量同值，但该组为
+     * private、跨模块不可见，故按 §168 口径在本模块就地命名（ISSUE-P3-196）。
+     */
+    private const val ASCII_LF = 0x0A
+    private const val ASCII_CR = 0x0D
+    private const val ASCII_SPACE = 0x20
+    private const val ASCII_TAB = 0x09
+
     /** 域分隔前缀（WebAuthn Level 3 §10.1 规定的客户端侧处理） */
     private val DOMAIN_SEPARATION_PREFIX = "WebAuthn PRF".toByteArray(Charsets.UTF_8)
 
@@ -121,7 +132,7 @@ object PasskeyPrf {
         var n = 0
         for (b in bytes) {
             val v = b.toInt() and 0xFF
-            if (v == 0x0A || v == 0x0D || v == 0x20 || v == 0x09) continue
+            if (v == ASCII_LF || v == ASCII_CR || v == ASCII_SPACE || v == ASCII_TAB) continue
             out[n++] = b
         }
         return if (n == out.size) out else out.copyOf(n)

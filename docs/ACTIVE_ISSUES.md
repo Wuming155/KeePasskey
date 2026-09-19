@@ -89,41 +89,7 @@
 
 ---
 
-## P3 低危问题、特性接线与体验优化（3 项）
-
-### ISSUE-P3-196 格式面 26 处字面量的逐处判定与 `.kdbx` / passkey 对拍回归（`ISSUE-P3-188` 第 4 目的最后一段，**无需设备**）
-
-- **性质**：§168 把「第 3 类待逐处判定」显式推给「独立一段」（理由：与纯命名收敛混做会稀释证据）。
-  本条把它独立登记，并**核实该段的前置工具链早已就位**——此前多处读起来像在「等环境」，实际不等。
-- **核实时间点与方式**：2026-09-19 本机实测——
-  `command -v keepassxc-cli` ⇒ `C:\Program Files\KeePassXC\keepassxc-cli`，`--version` ⇒ **2.7.12**；
-  `python -c "import pykeepass"` ⇒ **4.2.0**（Python 3.12.10）；
-  `command -v cargo` ⇒ `C:\Users\baiyun\.cargo\bin\cargo`（**工具链存在**，但代理侧执行 `cargo test`
-  被本机权限层拦下 ⇒ 该步须由用户自行跑或显式授权，**不得**以「宿主用例绿」代替）；
-  既有对拍产物在位：`database/build/interop-probe/keepasskey-probe.kdbx` 与同目录 `PROBE.md`
-  （由 `OwnProductInteropProbeTest` 生成，其 KDoc 已写好两条外用验证命令与期望值）。
-- **待判定清单（26 处 / 7 份，逐字转录 §168 §2 第 3 类）**：`PasskeyPrf` 5、`InnerRandomStreamCipher` 5、
-  `KdbxXmlStreamWriter` 4、`CoseKey` 3、`PasskeyAssertionSigner` 3、`PasskeyPkcs8Codec` 3、`KdbxFile` 3。
-  判据沿用 §167 / §168：排除 `//` 行注释、`val` 定义行、`and/or 0x..` 掩码、`@Preview` 行后**逐处看上下文**，
-  区分「内联魔法数字」与「格式固定字节」——后者**只登记、不整改**（CBOR / COSE / PKCS#8 /
-  Salsa20 sigma / `.kdbx` XML 常量皆属此类）。
-- **验收标准**：
-  1. 每处给出**规范出处**（WebAuthn / COSE / PKCS#8 / KDBX 4）或改为命名常量；**只挪定义、禁改取值**；
-  2. `.kdbx` 侧凡触动 `KdbxFile` / `KdbxXmlStreamWriter`：重跑 `OwnProductInteropProbeTest` 产出新产物，
-     并以 `echo -n '<口令>' | keepassxc-cli db-info -q <产物>` 与 `pykeepass` 两条外用命令实测复现，
-     结论 + SHA-256 写进 `PROBE.md` 与批次文档——**`generate_corpus.py --verify` 只证外层文件头自洽，
-     不构成互操作证据**（`AGENTS.md` §3 规则 8）；
-  3. passkey 侧：`CoseKey` / `PasskeyPkcs8Codec` / `PasskeyPrf` / `PasskeyAssertionSigner` 的改动须跑
-     既有 CBOR / 签名一致性套件并全绿；
-  4. `test --rerun-tasks --max-workers=1` 全绿；`:app:lintDebug` 的 `issue` 计数不得上升（现 **215**，
-     口径 `grep -cE "^ *<issue$"`）。
-- **设备义务边界（开工前先认清）**：本段只动 `crypto` / `database` / `sync` 的 **Kotlin** 面，
-  **不触发** `AGENTS.md` §5「原生面改动须真机跑四层 `connectedDebugAndroidTest`」的前置条件
-  （触发对象是 `crypto/src/main/rust/**`、`jni_bridge_ext.rs`、`Native*` 分派与探活）
-  ⇒ **可在无设备机上完成并入库**；一旦顺手触碰上述文件，本条立刻升级为硬件阻塞项并须改挂到设备窗口。
-- **连带解锁**：`ISSUE-P3-188` 第 4 目只有这 26 处判定完毕才可读作闭环（现仍写着「余 7 份」）；
-  同属 `.kdbx` 格式面的第二档项 `KdbxHeader` 461 / `KdbxXmlParser` 454 的搬运受同一 §38 证据纪律约束，
-  宜与本条**同段推进以免两次对拍**。
+## P3 低危问题、特性接线与体验优化（2 项）
 
 ### ISSUE-P3-188 巨型类与魔法数字专项整改（工程规则 §单一职责 / §禁止魔法数字 违例收敛）
 
@@ -161,7 +127,7 @@
        其真正的内联 uint16 上限改为 `CREDENTIAL_ID_MAX_BYTES`。**全部只命名、未改任何取值**。
        剩余 169 处内联十六进制的三类定性（UI 色板 / 格式签名字节 / **待逐处判定的 7 份文件**）
        与扫描判据见 [`resolved/batches/168-魔法数字第4目三小项裁定批次.md`](resolved/batches/168-魔法数字第4目三小项裁定批次.md) §2~§3；
-       第 3 类集中在 `crypto` / `database` 的格式编解码面，须与 `.kdbx` 对拍同批做，**属独立一段**（§38 证据纪律）。
+       第 3 类集中在 `crypto` / `database` 的格式编解码面，须与 `.kdbx` 对拍同批做，**属独立一段**（§38 证据纪律）——该段已立为 `ISSUE-P3-196` 并**由 §201 结案**。
      - **合法形态登记（不整改）**：UI 色板（`ThemeMode` / `Color.kt`）、位运算掩码
        （`LittleEndianUtil` / `CborEncoder` / 各处 `and 0x0F` 十六进制编码）、数据表
        （`DicewareWordList` / OID-DER 字节串 / `CborConstants`）、BOM 探测字节
@@ -177,9 +143,9 @@
   非 Compose 面**已逐条处置完毕**：一处削到 41、一处经**限界 §20** 裁定接受 ⇒ 本目**不以「全表 ≤50」达标**，
   以「无未登记的超限项」达标）；
   第 4 目清单中的协议 / 格式语义字面量收敛为命名常量（**§167~§168 已裁定完毕**：成片真实违例
-  `@Preview(uiMode = 0x20)` 归零、三小项全部落地，**全部只命名未改值**；余下只有 `crypto` / `database`
-  格式面的 7 份「待逐处判定」文件，须与 `.kdbx` 对拍同批做，属独立一段 ⇒ 本条**不得**据此读作已闭环，
-  该独立一段已登记为 `ISSUE-P3-196`（本机工具链经实测**已就位**，非阻塞项））；
+  `@Preview(uiMode = 0x20)` 归零、三小项全部落地，**全部只命名未改值**；余下的 `crypto` / `database`
+  格式面 7 份 26 处**已由 §201 逐处判定完毕**（登记 21 / 命名 5 值，只挪定义未改值）⇒ **本目闭环**，
+  见 [`resolved/batches/201-格式面26处字面量逐处判定批次.md`](resolved/batches/201-格式面26处字面量逐处判定批次.md)）；
   剩余第二档渐进消化，未消化部分在批次文档留清单。
 - **当前进度（只留结论；逐批改动与验证见 `docs/resolved/batches/155`~`199`（§180 / §197 为文档面批次，不属本条的整改量））**：
   - **第一档 8 文件**（`wc -l` 实测）：**达标 6**（`SyncCache` 382、`UnlockViewModel` 368、
@@ -202,7 +168,7 @@
     `INNER_RANDOM_STREAM_KEY_SIZE`、`COMPOSITE_SEED_BYTES` / `KEY_COMPONENT_BYTES`、`HMAC_KEY_SELECTOR`、
     `END_OF_HEADER_MARKER`、写侧 `XML_TRUE` / `XML_FALSE`、`PasskeyKeyText` 的 PEM 空白码位——
     **全部只挪定义、未改任何取值**）；§167 复核出「唯一成片真实违例」= `@Preview(uiMode = 0x20)` 并已归零，
-    当时的三个「待裁定」小项已由 §168 逐条落地（见违例清单第 4 目）。
+    当时的三个「待裁定」小项已由 §168 逐条落地（见违例清单第 4 目）；格式面余量 26 处已由 §201 逐处判定完毕 ⇒ **第 4 目闭环**。
 - **剩余清单（本条尚未闭环的部分，逐条自包含）**：
   > **现为 1~4 项**（§200 起：原第 5 项——§198 下沉时发现的详情页两个破坏性确认出口零断言——
   > **已结案移出**，出口决策纯函数化 + 4 例纯函数断言 + 4 例静态接线守卫，回滚确认的历史顺序孤例并入口径；
