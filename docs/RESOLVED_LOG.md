@@ -252,6 +252,8 @@
 
 | §207 | Compose 长函数拆分两处批次（`ISSUE-P3-188` 第 1 项渐进：待拆 **12 → 10**——`themeListSection` 118 出表（密度选择器下沉 `ThemeDensitySelector` 追加原文件，7 个 DisplayPrefRow 声明式序列是最小单元不再动）+ `VaultDatabaseCard` 117 出表（头部行下沉 `VaultDatabaseCardHeader`；**路径行不随迁**——MD3 中段省略守卫锚定 `middleEllipsize` 在宿主现场，免并集化）；tier2 不变；test 2233 同值全绿、lint 214 持平） | `ISSUE-P3-188`（第 1 项渐进） | [`207-Compose长函数拆分两处批次.md`](resolved/batches/207-Compose长函数拆分两处批次.md) |
 
+| §208 | Compose 长函数拆分两处批次（`ISSUE-P3-188` 第 1 项渐进：待拆 **10 → 8**——`HealthCheckScoreCard` 116 出表（仪表盘 + 文本序列下沉追加原文件）+ `MasterKeyChangeDialog` 116 出表（**§193 清单锁生效**：`SecureDialog {` 与 AlertDialog 本体留宿主文件，只搬字段渲染面（onPasswordChanged 擦除链回样上行）与按钮渲染面（onClick 提交与 pwdChars finally 擦除链全留现场，类比 §179 单一现场），`SecureDialogFlagPolicyTest` 随套件通过）；test 2233 同值全绿、lint 214 持平） | `ISSUE-P3-188`（第 1 项渐进） | [`208-Compose长函数拆分两处批次.md`](resolved/batches/208-Compose长函数拆分两处批次.md) |
+
 ## 分册导航
 
 | 分册 | 覆盖批次 | 时间 | 索引 |

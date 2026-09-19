@@ -57,72 +57,14 @@ internal fun HealthCheckScoreCard(
             modifier = Modifier.fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // 仪表盘内只放分数：英文 “Overall health score” 放不进 96dp 圆，
-            // 强行内嵌会导致换行/重叠（用户反馈 score 错位为 ‘ore）
-            Box(
-                modifier = Modifier.size(96.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                // M3 环形进度：分数映射 0–100，紧迫/良好经色阶表达
-                CircularProgressIndicator(
-                    progress = { (healthScore.coerceIn(0, 100)) / 100f },
-                    modifier = Modifier.size(96.dp),
-                    color = when {
-                        healthScore >= 80 -> MaterialTheme.colorScheme.primary
-                        healthScore >= 50 -> MaterialTheme.colorScheme.tertiary
-                        else -> MaterialTheme.colorScheme.error
-                    },
-                    strokeWidth = 6.dp,
-                    trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
-                )
-                Box(
-                    modifier = Modifier
-                        .size(78.dp)
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.primaryContainer),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "${healthScore}",
-                        style = MaterialTheme.typography.headlineLarge.copy(
-                            fontWeight = FontWeight.Black,
-                            fontSize = 36.sp
-                        ),
-                        color = MaterialTheme.colorScheme.onPrimaryContainer
-                    )
-                }
-            }
+            HealthCheckScoreGauge(healthScore = healthScore)
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            Text(
-                text = stringResource(R.string.health_total_score),
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-
-            Spacer(modifier = Modifier.height(6.dp))
-
-            Text(
-                text = stringResource(R.string.health_rating, healthStatus),
-                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                color = MaterialTheme.colorScheme.onSurface
-            )
-
-            Spacer(modifier = Modifier.height(4.dp))
-
-            Text(
-                text = healthMessage,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Text(
-                text = stringResource(R.string.health_last_scan, lastScanTime),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+            HealthCheckScoreTexts(
+                healthStatus = healthStatus,
+                healthMessage = healthMessage,
+                lastScanTime = lastScanTime
             )
 
             Spacer(modifier = Modifier.height(16.dp))
@@ -156,4 +98,88 @@ internal fun HealthCheckScoreCard(
             }
         }
     }
+}
+
+/**
+ * 健康分数仪表盘（96dp 环形进度 + 分数圆）。
+ *
+ * 仪表盘内只放分数：英文 “Overall health score” 放不进 96dp 圆，强行内嵌会导致换行/重叠
+ * （用户反馈 score 错位为 ‘ore）。M3 环形进度：分数映射 0–100，紧迫/良好经色阶表达。
+ * §208 自 [HealthCheckScoreCard] 下沉（逐字搬动、零行为变更）。
+ */
+@Composable
+private fun HealthCheckScoreGauge(healthScore: Int) {
+    Box(
+        modifier = Modifier.size(96.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        CircularProgressIndicator(
+            progress = { (healthScore.coerceIn(0, 100)) / 100f },
+            modifier = Modifier.size(96.dp),
+            color = when {
+                healthScore >= 80 -> MaterialTheme.colorScheme.primary
+                healthScore >= 50 -> MaterialTheme.colorScheme.tertiary
+                else -> MaterialTheme.colorScheme.error
+            },
+            strokeWidth = 6.dp,
+            trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
+        )
+        Box(
+            modifier = Modifier
+                .size(78.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.primaryContainer),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = "${healthScore}",
+                style = MaterialTheme.typography.headlineLarge.copy(
+                    fontWeight = FontWeight.Black,
+                    fontSize = 36.sp
+                ),
+                color = MaterialTheme.colorScheme.onPrimaryContainer
+            )
+        }
+    }
+}
+
+/**
+ * 分数卡文本序列（总分数 / 评级 / 消息 / 上次扫描）。
+ * §208 自 [HealthCheckScoreCard] 下沉（逐字搬动、零行为变更）。
+ */
+@Composable
+private fun HealthCheckScoreTexts(
+    healthStatus: String,
+    healthMessage: String,
+    lastScanTime: String
+) {
+    Text(
+        text = stringResource(R.string.health_total_score),
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+
+    Spacer(modifier = Modifier.height(6.dp))
+
+    Text(
+        text = stringResource(R.string.health_rating, healthStatus),
+        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+        color = MaterialTheme.colorScheme.onSurface
+    )
+
+    Spacer(modifier = Modifier.height(4.dp))
+
+    Text(
+        text = healthMessage,
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+
+    Spacer(modifier = Modifier.height(8.dp))
+
+    Text(
+        text = stringResource(R.string.health_last_scan, lastScanTime),
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
 }

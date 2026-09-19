@@ -74,36 +74,25 @@ internal fun MasterKeyChangeDialog(
             // Recents 预览，见 SecureDialog KDoc 与官方 "Excluding views from assistants"）
             SecureDialog {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text(
-                        text = stringResource(R.string.set_master_key_dialog_desc, kdfAlgorithm),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-
-                    SecurePasswordField(
-                        label = stringResource(R.string.set_new_master_password),
-                        onPasswordChanged = { chars ->
+                    MasterKeyChangePasswordFields(
+                        kdfAlgorithm = kdfAlgorithm,
+                        passwordVisible = passwordVisible,
+                        onNewPassword = { chars ->
                             newPasswordChars.fill('0')
                             newPasswordChars = chars.copyOf()
                         },
-                        isPasswordVisible = passwordVisible,
-                        onToggleVisibility = { passwordVisible = !passwordVisible }
-                    )
-
-                    SecurePasswordField(
-                        label = stringResource(R.string.set_confirm_master_password),
-                        onPasswordChanged = { chars ->
+                        onConfirmPassword = { chars ->
                             confirmPasswordChars.fill('0')
                             confirmPasswordChars = chars.copyOf()
                         },
-                        isPasswordVisible = passwordVisible,
                         onToggleVisibility = { passwordVisible = !passwordVisible }
                     )
                 }
             }
         },
         confirmButton = {
-            Button(
+            MasterKeyChangeConfirmButton(
+                enabled = passwordsMatch,
                 onClick = {
                     if (passwordsMatch) {
                         val pwdChars = newPasswordChars.copyOf()
@@ -126,16 +115,8 @@ internal fun MasterKeyChangeDialog(
                             }
                         }
                     }
-                },
-                enabled = passwordsMatch,
-                shape = CapsuleShape,
-                // ISSUE-P3-134：两次输入未一致时「保存更改」须仍可辨识——接入禁用态共用
-                // 配色 / 描边，而非 MD3 默认的 onSurface @12%（同 ButtonStyles.kt 的口径）
-                colors = disabledPrimaryButtonColors(),
-                border = disabledPrimaryButtonBorder()
-            ) {
-                Text(stringResource(R.string.set_save_changes))
-            }
+                }
+            )
         },
         dismissButton = {
             TextButton(onClick = {
@@ -146,6 +127,68 @@ internal fun MasterKeyChangeDialog(
             }
         }
     )
+}
+
+/**
+ * 新 / 确认两行主密码输入字段（§208 自 [MasterKeyChangeDialog] 下沉）。
+ *
+ * **只搬渲染面**：`onPasswordChanged` 回调原样上行（含调用方的 fill(0) + copyOf 擦除链），
+ * 密码字节不经过本段落驻留；提交链路（copyOf → wipe → 协程 → finally 擦除）仍留在
+ * 对话框现场（擦除链「单一现场」口径，勿为行数外搬）。
+ * `SecureDialog {` 包裹与 `AlertDialog` 本体留在宿主文件——`SecureDialogFlagPolicyTest`
+ * 以 `SecureDialog {` 调用点计数锚定该文件（§193 清单锁）。
+ */
+@Composable
+private fun MasterKeyChangePasswordFields(
+    kdfAlgorithm: String,
+    passwordVisible: Boolean,
+    onNewPassword: (CharArray) -> Unit,
+    onConfirmPassword: (CharArray) -> Unit,
+    onToggleVisibility: () -> Unit
+) {
+    Text(
+        text = stringResource(R.string.set_master_key_dialog_desc, kdfAlgorithm),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+
+    SecurePasswordField(
+        label = stringResource(R.string.set_new_master_password),
+        onPasswordChanged = onNewPassword,
+        isPasswordVisible = passwordVisible,
+        onToggleVisibility = onToggleVisibility
+    )
+
+    SecurePasswordField(
+        label = stringResource(R.string.set_confirm_master_password),
+        onPasswordChanged = onConfirmPassword,
+        isPasswordVisible = passwordVisible,
+        onToggleVisibility = onToggleVisibility
+    )
+}
+
+/**
+ * 「保存更改」按钮渲染面（§208 自 [MasterKeyChangeDialog] 下沉）。
+ *
+ * **只搬渲染**：enabled 判定与 onClick 提交逻辑（含 `pwdChars` 的 copyOf → wipe → 协程 →
+ * finally 擦除链）全部留在对话框现场；ISSUE-P3-134 禁用态共用配色 / 描边随渲染面同迁（逐字）。
+ */
+@Composable
+private fun MasterKeyChangeConfirmButton(
+    enabled: Boolean,
+    onClick: () -> Unit
+) {
+    Button(
+        onClick = onClick,
+        enabled = enabled,
+        shape = CapsuleShape,
+        // ISSUE-P3-134：两次输入未一致时「保存更改」须仍可辨识——接入禁用态共用
+        // 配色 / 描边，而非 MD3 默认的 onSurface @12%（同 ButtonStyles.kt 的口径）
+        colors = disabledPrimaryButtonColors(),
+        border = disabledPrimaryButtonBorder()
+    ) {
+        Text(stringResource(R.string.set_save_changes))
+    }
 }
 
 // IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
