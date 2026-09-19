@@ -77,79 +77,13 @@ internal fun EntryEditCustomFieldsSection(
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             customFields.forEach { field ->
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(MaterialTheme.colorScheme.surfaceContainerLow)
-                        .padding(10.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        OutlinedTextField(
-                            value = field.key,
-                            onValueChange = { onUpdateCustomField(field.id, it, field.value, field.isProtected) },
-                            label = { Text(stringResource(R.string.edit_field_key)) },
-                            singleLine = true,
-                            modifier = Modifier.weight(1f)
-                        )
-                        IconButton(onClick = { onRemoveCustomField(field.id) }) {
-                            Icon(
-                                imageVector = Icons.Default.Delete,
-                                contentDescription = stringResource(R.string.btn_delete),
-                                tint = MaterialTheme.colorScheme.error,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                    }
-
-                    if (field.isProtected) {
-                        // TASK-10 整改（加解密审查 B9）：受保护字段明文输入走
-                        // SecurePasswordField——显示用 String 仅存活于组件内部，
-                        // CharArray 直达 ViewModel 私有链路；既有值经预填通道一次性注入
-                        var protectedVisible by remember(field.id) { mutableStateOf(false) }
-                        SecurePasswordField(
-                            label = stringResource(R.string.edit_field_value),
-                            onPasswordChanged = { chars ->
-                                onUpdateProtectedFieldValue(field.id, chars)
-                            },
-                            isPasswordVisible = protectedVisible,
-                            onToggleVisibility = { protectedVisible = !protectedVisible },
-                            initialPassword = loadedProtectedFields[field.id],
-                            initialKey = field.id,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    } else {
-                        OutlinedTextField(
-                            value = field.value,
-                            onValueChange = { onUpdateCustomField(field.id, field.key, it, field.isProtected) },
-                            label = { Text(stringResource(R.string.edit_field_value)) },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    }
-
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.clickable {
-                            onUpdateCustomField(field.id, field.key, field.value, !field.isProtected)
-                        }
-                    ) {
-                        Checkbox(
-                            checked = field.isProtected,
-                            onCheckedChange = { onUpdateCustomField(field.id, field.key, field.value, it) }
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = stringResource(R.string.edit_field_protected),
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    }
-                }
+                CustomFieldEditCard(
+                    field = field,
+                    loadedProtectedFields = loadedProtectedFields,
+                    onUpdateCustomField = onUpdateCustomField,
+                    onUpdateProtectedFieldValue = onUpdateProtectedFieldValue,
+                    onRemoveCustomField = onRemoveCustomField
+                )
             }
 
             OutlinedButton(
@@ -161,6 +95,96 @@ internal fun EntryEditCustomFieldsSection(
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(stringResource(R.string.edit_add_field))
             }
+        }
+    }
+}
+
+/**
+ * 单条自定义字段的编辑卡片（key 行 + 删除按钮 / 值输入（受保护走 SecurePasswordField）/
+ * 「受保护」开关行）。
+ * §210 自 [EntryEditCustomFieldsSection] 下沉（逐字搬动、零行为变更）。
+ * TASK-10 擦除通道注释随迁：受保护字段明文输入的 CharArray 直达 ViewModel 私有链路，
+ * 显示用 String 仅存活于组件内部（`protectedVisible` 状态仍按 field.id 记忆在本卡片）。
+ */
+@Composable
+private fun CustomFieldEditCard(
+    field: UiCustomField,
+    loadedProtectedFields: Map<String, CharArray>,
+    onUpdateCustomField: (String, String, String, Boolean) -> Unit,
+    onUpdateProtectedFieldValue: (String, CharArray) -> Unit,
+    onRemoveCustomField: (String) -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainerLow)
+            .padding(10.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            OutlinedTextField(
+                value = field.key,
+                onValueChange = { onUpdateCustomField(field.id, it, field.value, field.isProtected) },
+                label = { Text(stringResource(R.string.edit_field_key)) },
+                singleLine = true,
+                modifier = Modifier.weight(1f)
+            )
+            IconButton(onClick = { onRemoveCustomField(field.id) }) {
+                Icon(
+                    imageVector = Icons.Default.Delete,
+                    contentDescription = stringResource(R.string.btn_delete),
+                    tint = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+        }
+
+        if (field.isProtected) {
+            // TASK-10 整改（加解密审查 B9）：受保护字段明文输入走
+            // SecurePasswordField——显示用 String 仅存活于组件内部，
+            // CharArray 直达 ViewModel 私有链路；既有值经预填通道一次性注入
+            var protectedVisible by remember(field.id) { mutableStateOf(false) }
+            SecurePasswordField(
+                label = stringResource(R.string.edit_field_value),
+                onPasswordChanged = { chars ->
+                    onUpdateProtectedFieldValue(field.id, chars)
+                },
+                isPasswordVisible = protectedVisible,
+                onToggleVisibility = { protectedVisible = !protectedVisible },
+                initialPassword = loadedProtectedFields[field.id],
+                initialKey = field.id,
+                modifier = Modifier.fillMaxWidth()
+            )
+        } else {
+            OutlinedTextField(
+                value = field.value,
+                onValueChange = { onUpdateCustomField(field.id, field.key, it, field.isProtected) },
+                label = { Text(stringResource(R.string.edit_field_value)) },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.clickable {
+                onUpdateCustomField(field.id, field.key, field.value, !field.isProtected)
+            }
+        ) {
+            Checkbox(
+                checked = field.isProtected,
+                onCheckedChange = { onUpdateCustomField(field.id, field.key, field.value, it) }
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+            Text(
+                text = stringResource(R.string.edit_field_protected),
+                style = MaterialTheme.typography.bodySmall
+            )
         }
     }
 }

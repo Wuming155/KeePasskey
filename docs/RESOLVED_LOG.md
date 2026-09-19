@@ -256,6 +256,8 @@
 
 | §209 | Compose 长函数拆分两处批次（`ISSUE-P3-188` 第 1 项渐进：待拆 **8 → 6**——`S3ConfigFields` 113 出表（凭据双字段段 + path-style 开关行下沉追加原文件，SecurePasswordField 的 CharArray 通道注释随迁）+ `ChildVaultEntryRowView` 113 出表（次级信息行下沉，hasSecondaryLine 判定仍留调用方先行、本段不渲染空行）；tier2 不变；test 2233 同值全绿、lint 214 持平） | `ISSUE-P3-188`（第 1 项渐进） | [`209-Compose长函数拆分两处批次.md`](resolved/batches/209-Compose长函数拆分两处批次.md) |
 
+| §210 | Compose 长函数拆分两处批次（`ISSUE-P3-188` 第 1 项渐进：待拆 **6 → 3**——`EntryEditCustomFieldsSection` 108 出表（单字段编辑卡片下沉追加原文件，TASK-10 擦除通道注释随迁）+ `SafeAttachmentPreviewDialog` 107 出表（隔离提示横幅 + 预览画布下沉；**清单锁零风险设计**：只搬 `SecureDialog {` 包裹内部渲染段，调用点计数不变、守卫零改动；过程缺陷脚本重复执行致函数重复当场修复）；test 2233 同值全绿、lint 214 持平） | `ISSUE-P3-188`（第 1 项渐进） | [`210-Compose长函数拆分两处批次.md`](resolved/batches/210-Compose长函数拆分两处批次.md) |
+
 ## 分册导航
 
 | 分册 | 覆盖批次 | 时间 | 索引 |

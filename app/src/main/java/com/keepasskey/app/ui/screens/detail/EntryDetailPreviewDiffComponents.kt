@@ -256,53 +256,9 @@ fun SafeAttachmentPreviewDialog(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
-                    // 安全隔离提示
-                    Surface(
-                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Row(modifier = Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Shield, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = stringResource(R.string.diff_attachment_isolated),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                    }
+                    SafeAttachmentIsolationNotice()
 
-                    // 预览区模拟
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(180.dp)
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-                            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(14.dp)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Icon(
-                                imageVector = Icons.Default.Lock,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(40.dp)
-                            )
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                text = attachment.mimeType,
-                                style = MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Text(
-                                text = stringResource(R.string.diff_attachment_size, attachment.fileSizeFormatted),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
+                    SafeAttachmentPreviewCanvas(attachment = attachment)
                 }
             }
         },
@@ -322,6 +278,66 @@ fun SafeAttachmentPreviewDialog(
             }
         }
     )
+}
+
+/**
+ * 「安全隔离提示」横幅（§210 自 [SafeAttachmentPreviewDialog] 下沉，逐字搬动、零行为变更）。
+ */
+@Composable
+private fun SafeAttachmentIsolationNotice() {
+    Surface(
+        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
+        shape = RoundedCornerShape(10.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(modifier = Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Default.Shield, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = stringResource(R.string.diff_attachment_isolated),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary
+            )
+        }
+    }
+}
+
+/**
+ * 预览区画布（锁形图标 + MIME 类型 + 大小；真实内容不落预览——只渲染元信息）。
+ * §210 自 [SafeAttachmentPreviewDialog] 下沉（逐字搬动、零行为变更）；
+ * `SecureDialog {` 包裹留在宿主——本文件在该守卫的调用点计数清单内（expectedCalls=2），不得迁出。
+ */
+@Composable
+private fun SafeAttachmentPreviewCanvas(attachment: UiAttachment) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(180.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(14.dp)),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Icon(
+                imageVector = Icons.Default.Lock,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(40.dp)
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = attachment.mimeType,
+                style = MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace),
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = stringResource(R.string.diff_attachment_size, attachment.fileSizeFormatted),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
 }
 
 // IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
