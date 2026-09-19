@@ -89,7 +89,41 @@
 
 ---
 
-## P3 低危问题、特性接线与体验优化（3 项）
+## P3 低危问题、特性接线与体验优化（4 项）
+
+### ISSUE-P3-196 格式面 26 处字面量的逐处判定与 `.kdbx` / passkey 对拍回归（`ISSUE-P3-188` 第 4 目的最后一段，**无需设备**）
+
+- **性质**：§168 把「第 3 类待逐处判定」显式推给「独立一段」（理由：与纯命名收敛混做会稀释证据）。
+  本条把它独立登记，并**核实该段的前置工具链早已就位**——此前多处读起来像在「等环境」，实际不等。
+- **核实时间点与方式**：2026-09-19 本机实测——
+  `command -v keepassxc-cli` ⇒ `C:\Program Files\KeePassXC\keepassxc-cli`，`--version` ⇒ **2.7.12**；
+  `python -c "import pykeepass"` ⇒ **4.2.0**（Python 3.12.10）；
+  `command -v cargo` ⇒ `C:\Users\baiyun\.cargo\bin\cargo`（**工具链存在**，但代理侧执行 `cargo test`
+  被本机权限层拦下 ⇒ 该步须由用户自行跑或显式授权，**不得**以「宿主用例绿」代替）；
+  既有对拍产物在位：`database/build/interop-probe/keepasskey-probe.kdbx` 与同目录 `PROBE.md`
+  （由 `OwnProductInteropProbeTest` 生成，其 KDoc 已写好两条外用验证命令与期望值）。
+- **待判定清单（26 处 / 7 份，逐字转录 §168 §2 第 3 类）**：`PasskeyPrf` 5、`InnerRandomStreamCipher` 5、
+  `KdbxXmlStreamWriter` 4、`CoseKey` 3、`PasskeyAssertionSigner` 3、`PasskeyPkcs8Codec` 3、`KdbxFile` 3。
+  判据沿用 §167 / §168：排除 `//` 行注释、`val` 定义行、`and/or 0x..` 掩码、`@Preview` 行后**逐处看上下文**，
+  区分「内联魔法数字」与「格式固定字节」——后者**只登记、不整改**（CBOR / COSE / PKCS#8 /
+  Salsa20 sigma / `.kdbx` XML 常量皆属此类）。
+- **验收标准**：
+  1. 每处给出**规范出处**（WebAuthn / COSE / PKCS#8 / KDBX 4）或改为命名常量；**只挪定义、禁改取值**；
+  2. `.kdbx` 侧凡触动 `KdbxFile` / `KdbxXmlStreamWriter`：重跑 `OwnProductInteropProbeTest` 产出新产物，
+     并以 `echo -n '<口令>' | keepassxc-cli db-info -q <产物>` 与 `pykeepass` 两条外用命令实测复现，
+     结论 + SHA-256 写进 `PROBE.md` 与批次文档——**`generate_corpus.py --verify` 只证外层文件头自洽，
+     不构成互操作证据**（`AGENTS.md` §3 规则 8）；
+  3. passkey 侧：`CoseKey` / `PasskeyPkcs8Codec` / `PasskeyPrf` / `PasskeyAssertionSigner` 的改动须跑
+     既有 CBOR / 签名一致性套件并全绿；
+  4. `test --rerun-tasks --max-workers=1` 全绿；`:app:lintDebug` 的 `issue` 计数不得上升（现 **215**，
+     口径 `grep -cE "^ *<issue$"`）。
+- **设备义务边界（开工前先认清）**：本段只动 `crypto` / `database` / `sync` 的 **Kotlin** 面，
+  **不触发** `AGENTS.md` §5「原生面改动须真机跑四层 `connectedDebugAndroidTest`」的前置条件
+  （触发对象是 `crypto/src/main/rust/**`、`jni_bridge_ext.rs`、`Native*` 分派与探活）
+  ⇒ **可在无设备机上完成并入库**；一旦顺手触碰上述文件，本条立刻升级为硬件阻塞项并须改挂到设备窗口。
+- **连带解锁**：`ISSUE-P3-188` 第 4 目只有这 26 处判定完毕才可读作闭环（现仍写着「余 7 份」）；
+  同属 `.kdbx` 格式面的第二档项 `KdbxHeader` 461 / `KdbxXmlParser` 454 的搬运受同一 §38 证据纪律约束，
+  宜与本条**同段推进以免两次对拍**。
 
 ### ISSUE-P3-195 `PrivilegedBrowserSettingsScreen` 顶栏配色被 §188 顺手改掉（重复骨架收敛的一处真实回归）
 
@@ -169,9 +203,10 @@
   以「无未登记的超限项」达标）；
   第 4 目清单中的协议 / 格式语义字面量收敛为命名常量（**§167~§168 已裁定完毕**：成片真实违例
   `@Preview(uiMode = 0x20)` 归零、三小项全部落地，**全部只命名未改值**；余下只有 `crypto` / `database`
-  格式面的 7 份「待逐处判定」文件，须与 `.kdbx` 对拍同批做，属独立一段 ⇒ 本条**不得**据此读作已闭环）；
+  格式面的 7 份「待逐处判定」文件，须与 `.kdbx` 对拍同批做，属独立一段 ⇒ 本条**不得**据此读作已闭环，
+  该独立一段已登记为 `ISSUE-P3-196`（本机工具链经实测**已就位**，非阻塞项））；
   剩余第二档渐进消化，未消化部分在批次文档留清单。
-- **当前进度（只留结论；逐批改动与验证见 `docs/resolved/batches/155`~`196`（§180 为文档面批次，不属本条））**：
+- **当前进度（只留结论；逐批改动与验证见 `docs/resolved/batches/155`~`197`（§180 / §197 为文档面批次，不属本条的整改量））**：
   - **第一档 8 文件**（`wc -l` 实测）：**达标 6**（`SyncCache` 382、`UnlockViewModel` 368、
     `DatabaseSettingsScreen` 339（§159 降到 369，后续批次回填至 370，§189 再降到 339）、`EntryEditFormSections` 351（§160）、
     `EntryDetailScreen` 349（§169）、`EntryDetailViewModel` 397（§170））；按理由登记 2（`SettingsViewModel` 543 / `DatabaseSession` 535，
