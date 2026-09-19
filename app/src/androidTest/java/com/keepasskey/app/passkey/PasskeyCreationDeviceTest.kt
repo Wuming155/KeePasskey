@@ -10,6 +10,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.app.data.repository.PasskeyEntryCoordinator
 import com.keepasskey.core.model.PasskeyData
+import com.keepasskey.core.model.PasskeyKeyText
 import com.keepasskey.crypto.passkey.PasskeyCryptoEngine
 import com.keepasskey.database.session.DatabaseSession
 import kotlinx.coroutines.flow.first
@@ -32,7 +33,9 @@ import java.io.File
  * 3. 验证通过真实的 [PasskeyCryptoEngine] 在真机上生成 ES256 密钥对并由
  *    [PasskeyEntryCoordinator] 持久化至测试数据库，再由**生产断言路径同一 PEM 通道**
  *    （[PasskeyCryptoEngine.decodePemPrivateKeyText] 还原签名材料）交断言引擎
- *    [PasskeyCryptoEngine.signAssertion] 验证新创建的私钥具备真实合法的签名能力。
+ *    [PasskeyCryptoEngine.signAssertion] 验证新创建的私钥具备真实合法的签名能力；
+ * 4. （`ISSUE-P2-211`）覆盖 **Ed25519 / RS256** 两条生成路径的 PEM 形态与签名能力——
+ *    含「Ed25519 必须是 RFC 8410 `version = 0` 最小形态」这一设备侧回归判据。
  */
 @RunWith(AndroidJUnit4::class)
 class PasskeyCreationDeviceTest {
@@ -164,8 +167,100 @@ class PasskeyCreationDeviceTest {
         }
     }
 
+    /**
+     * `ISSUE-P2-211` 真机回归：**Ed25519 / RS256** 两条生成路径在设备运行时产出的
+     * `KPEX_PASSKEY_PRIVATE_KEY_PEM` 必须
+     * ① 是合法 PKCS#8 PEM、
+     * ② 能经生产 PEM 通道还原签名材料、
+     * ③ 能完成真实断言签名；
+     * 且 Ed25519 必须是 **RFC 8410 的 `version = 0` 最小形态**——`version = 1` 的
+     * `OneAsymmetricKey` 会被 KeePassXC 等 OpenSSL 系实现拒收（该缺陷正是被
+     * `tools/passkey-interop/verify_interop.py` 的外部对拍首次发现的）。
+     *
+     * 为何必须在真机而非宿主：同一份 Kotlin 代码在 Android 运行时可能落到不同的
+     * BC / 原生实现分派（§143 / §147 的教训），宿主全绿不构成设备可用的证据。
+     */
+    @Test
+    fun `真机生成Ed25519与RS256通行密钥并校验PEM形态与签名能力`() = runBlocking {
+        assertGeneratedKeyUsable(
+            passkeyData = PasskeyCryptoEngine.generateEd25519KeyPair(
+                relyingPartyId = "passkeys.io",
+                userName = "ed25519@example.com",
+                userHandle = "ed25519-handle",
+                userDisplayName = "Ed25519 User"
+            ),
+            expectRfc8410V0Pem = true
+        )
+        assertGeneratedKeyUsable(
+            passkeyData = PasskeyCryptoEngine.generateRs256KeyPair(
+                relyingPartyId = "passkeys.io",
+                userName = "rs256@example.com",
+                userHandle = "rs256-handle",
+                userDisplayName = "RSA User"
+            ),
+            expectRfc8410V0Pem = false
+        )
+    }
+
+    private fun assertGeneratedKeyUsable(passkeyData: PasskeyData, expectRfc8410V0Pem: Boolean) {
+        assertTrue("公钥必须生成且非空", passkeyData.publicKeyBase64.isNotBlank())
+
+        passkeyData.usePrivateKeyBytes { pemBytes ->
+            val der = requireNotNull(PasskeyKeyText.pemToDer(pemBytes)) {
+                "设备运行时的私钥必须是合法 PKCS#8 PEM（算法 ${passkeyData.algorithmId}）"
+            }
+            try {
+                if (expectRfc8410V0Pem) {
+                    assertTrue(
+                        "Ed25519 私钥必须为 RFC 8410 version=0 最小形态（version=1 的 " +
+                            "OneAsymmetricKey 会被 OpenSSL 系实现拒收，见 ISSUE-P2-211）",
+                        der.size > ED25519_RFC8410_V0_PREFIX.size &&
+                            ED25519_RFC8410_V0_PREFIX.indices.all { der[it] == ED25519_RFC8410_V0_PREFIX[it] }
+                    )
+                }
+            } finally {
+                java.util.Arrays.fill(der, 0.toByte())
+            }
+        }
+
+        val signingKey = passkeyData.usePrivateKeyBytes { rawKey ->
+            requireNotNull(PasskeyCryptoEngine.decodePemPrivateKeyText(rawKey)) {
+                "设备运行时的 PKCS#8 PEM 必须能经生产 PEM 通道还原签名材料"
+            }
+        }
+        try {
+            assertEquals(
+                "PEM 通道还原出的算法必须与条目算法一致",
+                passkeyData.algorithmId,
+                signingKey.algorithmId
+            )
+            val dataToSign = PasskeyCryptoEngine.buildAuthenticatorData(
+                passkeyData.relyingPartyId,
+                PasskeyCryptoEngine.FLAG_UP,
+                1
+            ) + ByteArray(32) { 0x07 }
+            val signature = PasskeyCryptoEngine.signAssertion(
+                signingKey.algorithmId,
+                signingKey.keyBytes,
+                dataToSign
+            )
+            assertTrue("断言签名输出必须非空", signature.isNotEmpty())
+        } finally {
+            java.util.Arrays.fill(signingKey.keyBytes, 0.toByte())
+        }
+        passkeyData.privateKey.clear()
+    }
+
     private companion object {
         /** ES256 签名侧材料长度：P-256 私钥标量 32 字节（与 `PasskeySigningKey` 文档口径一致） */
         const val ES256_SCALAR_BYTES = 32
+
+        /**
+         * RFC 8410 `version = 0` Ed25519 `PrivateKeyInfo` 的固定 DER 前缀：
+         * `SEQUENCE(0x2e) { INTEGER 0, SEQUENCE { OID 1.3.101.112 }, OCTET STRING(0x22) { OCTET STRING(0x20) … } }`
+         */
+        val ED25519_RFC8410_V0_PREFIX = byteArrayOf(
+            0x30, 0x2E, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2B, 0x65, 0x70, 0x04, 0x22, 0x04, 0x20
+        )
     }
 }

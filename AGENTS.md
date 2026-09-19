@@ -87,6 +87,10 @@ Coroutines + Flow；**文档与代码注释使用简体中文**。
 - `python .github/check_dependency_cvss.py build/reports/dependency-check/dependency-check-report.json` — 供应链 CVSS ≥ 7.0 硬断言（fail-closed）
 - `cd crypto/src/main/rust && cargo test` — 原生内核单测
 - `python tools/kdbx-corpus/generate_corpus.py --check` — `.kdbx` 语料校验
+- `python tools/passkey-interop/verify_interop.py` — **通行密钥 KPEX 互操作对拍**（规则 8 在 passkey 面的机检出口；
+  先跑 `:database:` 的 `PasskeyInteropProbeTest` 产出产物；判据含 `keepassxc-cli` / `pykeepass` 双实现读数与
+  `cryptography` 独立解析 PEM 并重导出公钥，退出码 1 即失败。**改 `PasskeyData` schema / `PasskeyPkcs8Codec` /
+  KPEX 字段后必跑**——`ISSUE-P2-211` 正是被它揭出的）
 - `python tools/doc/count_line_tiers.py` / `python tools/doc/long_functions.py` / `python tools/doc/check_md_links.py`
   / `python tools/doc/logic_lines.py <文件> <函数名>` / `python tools/doc/count_test_results.py`
   / `python tools/doc/check_resolved_index_sync.py`

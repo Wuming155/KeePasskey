@@ -2,7 +2,13 @@ package com.keepasskey.crypto.passkey
 
 import com.keepasskey.core.model.PasskeyData
 import com.keepasskey.core.model.PasskeyKeyText
+import org.bouncycastle.asn1.ASN1Integer
+import org.bouncycastle.asn1.ASN1ObjectIdentifier
+import org.bouncycastle.asn1.ASN1OctetString
+import org.bouncycastle.asn1.ASN1Primitive
+import org.bouncycastle.asn1.ASN1Sequence
 import org.bouncycastle.crypto.util.PrivateKeyFactory
+import org.bouncycastle.crypto.util.PrivateKeyInfoFactory
 import org.bouncycastle.jce.provider.BouncyCastleProvider
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
@@ -108,6 +114,83 @@ class PasskeyPkcs8CodecTest {
         }
     }
 
+    /**
+     * `ISSUE-P2-211` 形状守卫：生成侧 Ed25519 必须是 **RFC 8410 的 `version = 0`
+     * `PrivateKeyInfo`**（恰 3 个成员、无 `publicKey` / `attributes`）。
+     *
+     * 为什么必须钉死到字节级：BC 的 `PrivateKeyInfoFactory` 会产出 RFC 5958
+     * `OneAsymmetricKey`（`version = 1` + `publicKey [1]`），而 **OpenSSL 系实现
+     * （含 KeePassXC）拒收该形态**——实测 `cryptography` 抛 `ASN.1 parsing error`，
+     * 隔离实验证明「只要 version=1 即被拒」。该缺陷此前靠「自家 writer → 自家 reader」
+     * 长期不可见，故这里以结构断言把它钉成可执行契约（回退即红）。
+     */
+    @Test
+    fun `Ed25519 生成侧必须是 RFC 8410 的 version 0 三成员 PrivateKeyInfo`() {
+        val seed = ByteArray(32) { it.toByte() }
+        val pemChars = PasskeyPkcs8Codec.encodeEd25519ToPem(seed)
+        val der = PasskeyKeyText.pemToDer(charsToAscii(pemChars))
+        try {
+            val top = ASN1Sequence.getInstance(ASN1Primitive.fromByteArray(der))
+            assertEquals(
+                "RFC 8410：Ed25519 PrivateKeyInfo 恰含 version / AlgorithmIdentifier / privateKey 三个成员",
+                3,
+                top.size()
+            )
+            assertEquals(
+                "Ed25519 私钥必须写 version=0（version=1 的 OneAsymmetricKey 会被 OpenSSL 系实现拒收）",
+                0,
+                ASN1Integer.getInstance(top.getObjectAt(0)).value.intValueExact()
+            )
+
+            val algId = ASN1Sequence.getInstance(top.getObjectAt(1))
+            assertEquals("AlgorithmIdentifier 的 parameters 必须缺省（RFC 8410 §3）", 1, algId.size())
+            assertEquals(
+                "AlgorithmIdentifier 必须是 id-Ed25519",
+                ED25519_OID,
+                ASN1ObjectIdentifier.getInstance(algId.getObjectAt(0)).id
+            )
+
+            // privateKey 为 OCTET STRING，其内容又是 CurvePrivateKey（OCTET STRING），内层即 32 字节种子
+            val curvePrivateKey = ASN1OctetString.getInstance(top.getObjectAt(2)).octets
+            val inner = ASN1OctetString.getInstance(ASN1Primitive.fromByteArray(curvePrivateKey)).octets
+            assertArrayEquals("内层 CurvePrivateKey 必须就是原种子", seed, inner)
+
+            assertEquals("version=0 的最小形态 DER 总长恒为 48 字节", DER_TOTAL_BYTES, der!!.size)
+        } finally {
+            der?.fill(0)
+            pemChars.fill('0')
+            seed.fill(0)
+        }
+    }
+
+    /**
+     * 存量兼容（`ISSUE-P2-211` 验收标准 ②）：旧版本写出的 **v1 `OneAsymmetricKey`**
+     * 形态必须继续被解码接受——否则既有库中的 Ed25519 条目会**无法断言**。
+     * 这里直接以 BC 工厂方法现造该形态（即修复前的生产输出）作为回归输入。
+     */
+    @Test
+    fun `旧版 v1 OneAsymmetricKey 形态的 Ed25519 私钥必须继续可解码`() {
+        val seed = ByteArray(32) { (0xF0 - it).toByte() }
+        val legacyDer = PrivateKeyInfoFactory.createPrivateKeyInfo(
+            org.bouncycastle.crypto.params.Ed25519PrivateKeyParameters(seed, 0)
+        ).encoded
+        try {
+            assertEquals(
+                "回归输入必须是 v1 形态（否则本用例测不到存量兼容路径）",
+                1,
+                ASN1Integer.getInstance(
+                    ASN1Sequence.getInstance(ASN1Primitive.fromByteArray(legacyDer)).getObjectAt(0)
+                ).value.intValueExact()
+            )
+            val decoded = PasskeyPkcs8Codec.derToSigningKey(legacyDer)
+            assertEquals(PasskeyData.ALGORITHM_ED25519, decoded.algorithmId)
+            assertArrayEquals(seed, decoded.keyBytes)
+        } finally {
+            legacyDer.fill(0)
+            seed.fill(0)
+        }
+    }
+
     // ── RS256 ──
 
     @Test
@@ -192,6 +275,19 @@ class PasskeyPkcs8CodecTest {
     }
 
     // ── 测试辅助 ──
+
+    private companion object {
+        /** id-Ed25519（RFC 8410 §3） */
+        const val ED25519_OID = "1.3.101.112"
+
+        /**
+         * RFC 8410 `version = 0` 最小形态的 DER 总长：
+         * 外层 `30 2e`（2）+ version `02 01 00`（3）+ AlgorithmIdentifier（7）
+         * + privateKey `04 22`（2）+ CurvePrivateKey `04 20`（2）+ 种子（32）= **48**
+         * ⇒ 外层内容长度 46（`0x2e`，即 OpenSSL 产出的 `302e020100300506032b6570…` 同形）。
+         */
+        const val DER_TOTAL_BYTES = 48
+    }
 
     private fun PrivateKey.pkcs8Der(): ByteArray = encoded.copyOf()
 

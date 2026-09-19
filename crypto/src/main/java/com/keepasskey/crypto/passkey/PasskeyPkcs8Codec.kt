@@ -2,18 +2,20 @@ package com.keepasskey.crypto.passkey
 
 import com.keepasskey.core.model.PasskeyData
 import com.keepasskey.core.model.PasskeyKeyText
+import org.bouncycastle.asn1.ASN1Encodable
 import org.bouncycastle.asn1.ASN1Integer
 import org.bouncycastle.asn1.ASN1ObjectIdentifier
 import org.bouncycastle.asn1.ASN1OctetString
 import org.bouncycastle.asn1.ASN1Primitive
 import org.bouncycastle.asn1.ASN1Sequence
+import org.bouncycastle.asn1.DEROctetString
+import org.bouncycastle.asn1.DERSequence
 import org.bouncycastle.asn1.sec.SECObjectIdentifiers
 import org.bouncycastle.asn1.x9.X9ObjectIdentifiers
 import org.bouncycastle.crypto.params.AsymmetricKeyParameter
 import org.bouncycastle.crypto.params.ECDomainParameters
 import org.bouncycastle.crypto.params.ECNamedDomainParameters
 import org.bouncycastle.crypto.params.ECPrivateKeyParameters
-import org.bouncycastle.crypto.params.Ed25519PrivateKeyParameters
 import org.bouncycastle.crypto.util.PrivateKeyInfoFactory
 import org.bouncycastle.asn1.sec.SECNamedCurves
 import org.bouncycastle.asn1.x9.X9ECParameters
@@ -65,7 +67,12 @@ internal object PasskeyPkcs8Codec {
     /** PEM 严格 ASCII 上界（RFC 7468：PEM 的文本为 7-bit ASCII；越界即 fail-closed 拒绝，ISSUE-P3-196 命名） */
     private const val ASCII_7BIT_MAX = 0x7F
 
-    /** PKCS#8 PrivateKeyInfo 合法版本号：v0（PrivateKeyInfo）/ v1（oneAsymmetricKey，RFC 5958，Ed25519 编码即 v1） */
+    /**
+     * PKCS#8 合法版本号：v0（`PrivateKeyInfo`）与 v1（`OneAsymmetricKey`，RFC 5958）。
+     *
+     * 编码侧自 `ISSUE-P2-211` 起对所有算法**只写 v0**；解码侧继续接受 v1，
+     * 因为存量库中由旧版本写出的 Ed25519 私钥（BC 工厂产出的 v1 形态）必须仍可断言。
+     */
     private val PKCS8_VERSIONS = setOf(0, 1)
 
     /** SEC1 ECPrivateKey 结构版本号（v1） */
@@ -111,14 +118,53 @@ internal object PasskeyPkcs8Codec {
     /** Ed25519：32 字节种子 → PKCS#8（RFC 8410）→ PEM 文本 */
     fun encodeEd25519ToPem(seed: ByteArray): CharArray {
         require(seed.size == ED25519_SEED_BYTES) { "Ed25519 种子必须为 32 字节，实际 ${seed.size}" }
-        val privateKeyInfo = PrivateKeyInfoFactory.createPrivateKeyInfo(
-            Ed25519PrivateKeyParameters(seed, 0)
-        )
-        val der = privateKeyInfo.encoded
+        val der = ed25519PrivateKeyInfoDer(seed)
         try {
             return PasskeyKeyText.derToPemChars(der)
         } finally {
             Arrays.fill(der, 0.toByte())
+        }
+    }
+
+    /**
+     * 构造 RFC 8410 §7 口径的 Ed25519 `PrivateKeyInfo` DER：**`version = 0`**，
+     * 且**不含** `publicKey [1]` / `attributes [0]` 可选字段。
+     *
+     * ## 为什么不直接用 BC 的 `PrivateKeyInfoFactory`（`ISSUE-P2-211`）
+     *
+     * BC 的工厂方法产出的是 RFC 5958 `OneAsymmetricKey`——`version = 1` **并附带**
+     * `publicKey [1] IMPLICIT BIT STRING`。该形态合法，但 **OpenSSL 系导入实现会拒收**：
+     * 实测 `cryptography`（OpenSSL 后端）对含 `publicKey` / `version = 1` 的结构抛
+     * `ASN.1 parsing error`；RFC 8410 §10.3 亦明写「部分私钥导入函数尚不支持 RFC 5958 的
+     * `OneAsymmetricKey` 结构，会拒绝含 `publicKey` 的私钥结构」，并给出 `version = 0`
+     * 的编码示例。`KPEX_PASSKEY_PRIVATE_KEY_PEM` 的消费方正是 KeePassXC 这类 OpenSSL 系实现，
+     * **可导入性优先于携带公钥**（公钥可由私钥推导），故此处手工构造最小形态：
+     *
+     * ```
+     * SEQUENCE {
+     *   INTEGER 0                                  -- version（RFC 8410：无 publicKey ⇒ 0）
+     *   SEQUENCE { OID 1.3.101.112 }               -- AlgorithmIdentifier，parameters 必须缺省
+     *   OCTET STRING {                             -- privateKey
+     *     OCTET STRING (32) seed                   -- CurvePrivateKey（RFC 8410 §7 的双包要求）
+     *   }
+     * }
+     * ```
+     *
+     * 内层双包是规范要求（`privateKey` 的 OCTET STRING 内承载的是 `CurvePrivateKey`
+     * ——它本身又是一个 OCTET STRING），实测 OpenSSL 对「单包 32 字节」同样拒收。
+     */
+    private fun ed25519PrivateKeyInfoDer(seed: ByteArray): ByteArray {
+        val curvePrivateKeyDer = DEROctetString(seed).encoded
+        try {
+            return DERSequence(
+                arrayOf<ASN1Encodable>(
+                    ASN1Integer(0L),
+                    DERSequence(arrayOf<ASN1Encodable>(OID_ED25519)),
+                    DEROctetString(curvePrivateKeyDer)
+                )
+            ).encoded
+        } finally {
+            Arrays.fill(curvePrivateKeyDer, 0.toByte())
         }
     }
 
