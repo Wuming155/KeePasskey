@@ -238,6 +238,11 @@ dependencies {
     androidTestImplementation(libs.androidx.test.ext.junit)
     androidTestImplementation(libs.androidx.test.runner)
     androidTestImplementation(libs.coroutines.test)
+    // ISSUE-P2-192 余量第 2 项：平台网络策略设备侧证明（明文拦截 + 自签证书信任锚拒绝）
+    androidTestImplementation(libs.mockwebserver)
+    androidTestImplementation(libs.okhttp.tls)
+    // ISSUE-P2-192 余量第 4 项：WorkManager 周期同步设备侧调度/执行用例
+    androidTestImplementation(libs.work.testing)
     // TASK-47：已泄露密码检测（HIBP k-匿名范围查询）——范围查询客户端与 MockWebServer 回归
     implementation(libs.okhttp)
     testImplementation(libs.mockwebserver)

@@ -38,6 +38,8 @@ dependencies {
     // ISSUE-P2-27：androidTest（instrumented）源集依赖（与 crypto / database / app 同源版本）
     androidTestImplementation(libs.androidx.test.ext.junit)
     androidTestImplementation(libs.androidx.test.runner)
+    // ISSUE-P2-192 余量第 1 项：传输层设备侧请求-响应用例（WebDav / S3 Provider 真实 socket 链路）
+    androidTestImplementation(libs.mockwebserver)
 }
 
 /**

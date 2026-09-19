@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  ISSUE-P2-192 余量第 1 项：sync 传输层设备侧（instrumented）请求-响应用例的运行前提。
+
+  传输层用例在测试 APK 进程内起本地回环 MockWebServer（真实 socket），并经被测
+  Provider 发起真实 HTTP 请求——测试 APK 自身必须持有 INTERNET 权限，否则
+  SocketConnect 在权限层即被拒绝，用例红在「无权限」而非传输逻辑。
+  被测 library 的主清单未声明权限（库不自带权限是正确形态），故只在此声明。
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!--
+      MockWebServer 回环为明文 HTTP：targetSdk 37 的测试 APK 进程平台默认禁明文
+      （这正是 ISSUE-P2-192 余量第 2 项平台策略生效的直接证据，失败日志实拍
+      「CLEARTEXT communication to 127.0.0.1 not permitted by network security policy」）。
+      本声明只放开**测试 APK 进程**的回环明文；生产 APK 的全站禁明文
+      （app/src/main/res/xml/network_security_config.xml）不受影响，
+      且 app 层策略证明用例（CleartextPolicyDeviceTest）依赖该禁令保持生效。
+    -->
+    <application android:usesCleartextTraffic="true" />
+
+</manifest>

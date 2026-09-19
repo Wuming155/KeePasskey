@@ -34,62 +34,35 @@
 
 ---
 
-## P2 中危缺陷与协议/测试缺口（1 项）
+## P2 中危缺陷与协议/测试缺口（0 项）
 
-### ISSUE-P2-192 设备侧测试层覆盖面余量清单（§151 扩容后仍未被真机证明的面）
-
-- **核实时间点与方式**：2026-09-18，全量清点 `*/src/androidTest/**`（逐文件读取并核对其实际调用的
-  平台 API，非按文件名推定）；宿主 / 设备比例经 `find <模块>/src/{test,androidTest} -name '*.kt' | wc -l`
-  计数——扩容前为**宿主 307 : 设备 26**；§151 新增 5 个设备类后为 **307 : 31**。
-  下列每条的「零覆盖」结论均以 `grep -rl <类名> */src/androidTest` 核实（命中 0）。
-- **归类**：属优先级定义中的「**测试有效性缺口**」。§151 已补齐 5 处（原生 AES-KDF / 口令强度、
-  平台 DOM 的 PROPFIND、AndroidKeyStore 三类消费方、Credential Manager provider 请求契约），
-  并当场撞出并修复两项真机缺陷（`ISSUE-P1-190` / `ISSUE-P1-191`）——**这正说明下列余量的性价比**。
-- **余量清单（按性价比排序；均为「真机才可证」）**：
-  1. **`sync` 传输层在设备侧仍零覆盖**，且是**结构性不可达**：`liveSyncTest` 联调凭据只经
-     `systemProperty` 下发到宿主测试 JVM（`sync/build.gradle.kts` 的 `tasks.withType<Test>`），
-     而全仓**无任何** `instrumentationRunnerArguments` ⇒ 设备侧永远读不到该参数，
-     真实 HTTPS 联调从未在真机跑过。修法：加 `testInstrumentationRunnerArgument`，
-     或在设备侧起 `MockWebServer`（`okhttp3.mockwebserver` 目前仅 `testImplementation`，需补
-     `androidTestImplementation`）覆盖 `WebDavSyncProvider` / `S3SyncProvider` / `S3RequestSigner`
-     在平台 HTTP 栈（Conscrypt + 真实 socket）上的请求-响应链路。
-  2. **平台网络策略从未被证明生效**：`app/src/main/res/xml/network_security_config.xml` 的
-     「全局禁明文 + 信任锚仅系统 CA」是 **Android-only** 的 NetworkSecurityConfig，
-     宿主 JVM 根本不解析它；`SyncHttpClientFactory` 的 TLS-only `ConnectionSpec` 与它是双层防御的
-     **上层**，而该上层目前只有代码注释作证据。
-  3. **Hilt 图在真机上从未实例化**：无 `hilt-android-testing`、无 `@HiltAndroidTest`
-     ⇒「DI 图能否构建」这一类启动崩溃只靠手工冒烟（改依赖后尤其危险）。
-  4. **`WorkManager` 周期同步零设备用例**（`PeriodicSyncScheduler` / `PeriodicSyncWorker`，
-     含 `Constraints`/`NetworkType` 与锁屏态执行），`androidx.work:work-testing` 未引入。
-  5. **系统 UI / 权限依赖面**：`BiometricPrompt` 实际弹窗与 `CryptoObject` 绑定、通知渠道渲染、
-     剪贴板（Android 10+ 后台读取限制、`EXTRA_IS_SENSITIVE`）、`FLAG_SECURE` 与截屏检测、
-     SAF / `ContentResolver` / `FileProvider` 的附件与库导出、扫码相机流。
-  6. **`core` 无 `androidTest` 源集**（连 `testInstrumentationRunner` 都未配置），
-     而 `AppLog` 等平台侧行为只有在此源集才能证。
-  7. **CI 从不跑 connected 层**：`.github/workflows/build.yml` 无 `connectedAndroidTest`
-     ⇒ 本节这类缺陷（含 §151 撞出的两项）**只在本地真机可复现**，CI 上永久绿灯。
-  8. **设备用例把环境前提写成硬断言**且无 orchestrator / `clearPackageData`：
-     `QuickUnlockSealDowngradeDeviceTest`（要求**未**录入生物识别）、`TracedProcessProbeDeviceTest`
-     （要求 `TracerPid=0`，挂调试器即红）、`PasskeyCreationDeviceTest`（`SDK_INT>=34` 硬断言）、
-     `AutofillAuthChainDeviceTest`（要求解锁屏 + 独占 `UiAutomation`，且**自行改写全局
-     `secure autofill_service`** 并依赖自身 `@After` 还原）⇒ 换机 / 换环境即红，
-     红了又易被读作「生产有 bug」。应改为「前提不满足即 `Assume` 跳过 + 如实登记跳过数」，
-     或引入 orchestrator 与 `clearPackageData`。
-- **整改纪律**：① 逐项要么补用例、要么显式登记到
-  [`architecture/已知工程限界.md`](architecture/已知工程限界.md) §4.1，**不得**留成无人认领的空白；
-  ② 新增/修改的设备用例**必须在真机实跑**（`AGENTS.md` §5，§150 立规）——
-  `compileDebugAndroidTestKotlin` 通过不构成任何验证证据；
-  ③ **不得**以「宿主单测已覆盖同一逻辑」推定设备可用（§147 全零密钥解密、§143 平台剥离版 BC、
-  §151 的两项均系「宿主全绿、仅真机失败」）。
-- **验收标准**：1 / 2 / 7 三项必须闭环（传输层设备侧有真实请求-响应用例、网络策略被证明、CI 有
-  connected 门禁或明确登记为不做）；3 ~ 6 逐条给出「补用例」或「入限界表」的处置；
-  8 的全局副作用项须做到**可重复执行**（同一台设备连跑两轮无相互污染）。
-- **边界**：本条是**测试基础设施**清单，不指认任何生产缺陷；§151 的结论仅代表
-  Redmi 4X（API 37 / A53）一台，不得外推为「其余机型亦成立或不成立」。
+> **暂无开放项**（历史 P2 条目的实现与验收证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md)）。
 
 ---
 
-## P3 低危问题、特性接线与体验优化（2 项）
+## P3 低危问题、特性接线与体验优化（3 项）
+
+### ISSUE-P3-197 完整性扫描留痕在模拟器上缺失（真机正常，成因未定位）
+
+- **核实时间点与方式**：2026-09-19，`ISSUE-P2-192` 结案批次双设备实跑发现——
+  `AutofillAuthChainDeviceTest` 阶段 0 自检在 **Pixel_10（API 36.1 x86_64 模拟器）上两轮稳定失败**
+  （断言「本进程未打出完整性扫描留痕」，15 秒轮询未捕获 `RuntimeIntegrityDetector` 的
+  `运行完整性扫描完成` 留痕行），**Redmi 4X 真机同轮两轮全绿**；模拟器 logcat 文件内无
+  FATAL / AndroidRuntime 记录（grep 证据见
+  [`resolved/batches/203-设备侧覆盖余量清单闭环批次.md`](resolved/batches/203-设备侧覆盖余量清单闭环批次.md) §4）。
+- **背景**：`RuntimeIntegrityDetector.start()` 在 `MainApplication.onCreate` 无条件调用（幂等），
+  扫描协程 `scanScope.launch { … refresh() … }` 末尾以 `AppLog.i` 打留痕；`refresh()` 自身无 try 包裹。
+  模拟器上留痕缺失说明协程未走到该行，**候选成因（未定位，不猜结论）**：
+  ① `detectSignals()` 在模拟器上某信号读取抛异常 → launch 协程静默终止（无 FATAL 日志的静默死）；
+  ② 模拟器 logcat dump 形态差异（`UiAutomation.executeShellCommand("logcat -d -v threadtime")` 返回不全）。
+- **影响**：模拟器 / 某些特殊环境下完整性门恒为 UNDETERMINED——方向是 fail-closed（敏感通道拒绝），**不构成安全放行**；
+  但「探测静默失效不可观测」违背该组件的可审计意图，且阻塞模拟器上依赖完整性留痕的设备用例
+  （`AutofillAuthChainDeviceTest` 因此无法在模拟器驱动，CI device-gate 上该例会红）。
+- **验收标准**：① 定位成因（先在模拟器上捕获 `detectSignals()` 的异常路径，可在协程体加
+  fail-safe 捕获 + 降级留痕，或逐信号实测）；② 若为 ①，修法不得放宽信号判定（补 catch 只为
+  **可观测**，判定仍 fail-closed）；③ 修后模拟器上 `AutofillAuthChainDeviceTest` 可驱动（或证明
+  该用例失败与完整性无关的另一半候选）；④ 真机全量 connected 复跑保持全绿。
+- **边界**：本条不涉及 Redmi 4X 真机的任何行为差异；真机结论仍以 §202 前各批次为准。
 
 ### ISSUE-P3-188 巨型类与魔法数字专项整改（工程规则 §单一职责 / §禁止魔法数字 违例收敛）
 

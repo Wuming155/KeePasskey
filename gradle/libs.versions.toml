@@ -101,12 +101,16 @@ credentials = { group = "androidx.credentials", name = "credentials", version.re
 datastore-preferences = { group = "androidx.datastore", name = "datastore-preferences", version.ref = "datastore" }
 profileinstaller = { group = "androidx.profileinstaller", name = "profileinstaller", version.ref = "profileinstaller" }
 work-runtime-ktx = { group = "androidx.work", name = "work-runtime-ktx", version.ref = "work" }
+# ISSUE-P2-192 余量第 4 项：WorkManager 设备用例的调度/执行测试工具（版本与 runtime 同源）
+work-testing = { group = "androidx.work", name = "work-testing", version.ref = "work" }
 autofill = { group = "androidx.autofill", name = "autofill", version.ref = "autofill" }
 biometric = { group = "androidx.biometric", name = "biometric", version.ref = "biometric" }
 zxing-embedded = { group = "com.journeyapps", name = "zxing-android-embedded", version.ref = "zxing" }
 
 okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
 mockwebserver = { group = "com.squareup.okhttp3", name = "mockwebserver", version.ref = "okhttp" }
+# ISSUE-P2-192 余量第 2 项：设备侧网络策略用例构造自签 HTTPS 服务器（HeldCertificate / HandshakeCertificates）
+okhttp-tls = { group = "com.squareup.okhttp3", name = "okhttp-tls", version.ref = "okhttp" }
 bouncycastle = { group = "org.bouncycastle", name = "bcprov-jdk18on", version.ref = "bouncycastle" }
 
 coroutines-core = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-core", version.ref = "coroutines" }

@@ -133,12 +133,14 @@ class QuickUnlockSealDowngradeDeviceTest {
         settings.setBiometricEnabled(true)
         settings.setQuickUnlockDowngradeAcknowledged(false)
 
-        // 设备条件实测：模拟器无已录入 Class 3 强生物识别
+        // 设备条件实测：模拟器无已录入 Class 3 强生物识别。
+        // ISSUE-P2-192 余量第 8 项：环境前提从 assertNotEquals 硬断言改为 Assume——
+        // 已录入强生物识别的设备上本用例（fail-closed 分支）前提不成立，跳过并记入 skipped 数，
+        // 完整确认链路在真机（已录入）上由确认闸门用例覆盖，不再被误读为「生产有 bug」。
         val status = authManager.canAuthenticate(context, BiometricManager.Authenticators.BIOMETRIC_STRONG)
-        assertNotEquals(
-            "本用例前提：环境未录入强生物识别（若已录入请改跑完整确认链路用例）",
-            BiometricStatus.AVAILABLE,
-            status
+        org.junit.Assume.assumeTrue(
+            "本用例前提：环境未录入强生物识别（实际 $status；已录入请改跑完整确认链路用例）",
+            status != BiometricStatus.AVAILABLE
         )
         assertFalse(
             "canSeal 闸门必须拒绝（ISSUE-P1-08 既有语义的设备侧复核）",

@@ -14,6 +14,7 @@ import com.keepasskey.crypto.passkey.PasskeyCryptoEngine
 import com.keepasskey.database.session.DatabaseSession
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import org.junit.Assume
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
@@ -40,7 +41,12 @@ class PasskeyCreationDeviceTest {
 
     @Test
     fun `系统级CredentialManager服务可用性探测`() {
-        assertTrue("本应用要求运行于 API 34+ 设备", Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
+        // ISSUE-P2-192 余量第 8 项：环境前提（API 34+）从硬断言改为 Assume——
+        // 前提不满足即跳过并如实记入 skipped 数，换机 / 降级环境不再被误读为「生产有 bug」
+        Assume.assumeTrue(
+            "本应用要求运行于 API 34+ 设备（当前 API ${Build.VERSION.SDK_INT}，不满足即跳过）",
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE
+        )
         val sysCm = context.getSystemService(android.credentials.CredentialManager::class.java)
         assertNotNull("Android 14+ 系统必须提供 CredentialManager 系统服务", sysCm)
     }

@@ -57,9 +57,14 @@ class TracedProcessProbeDeviceTest {
     fun `未附加 tracer 的测试进程报告 0 且不误判为被 trace`() {
         val pid = probe.tracerPid()
 
-        // adb shell am instrument 起的测试进程默认无 tracer；若开发者从 IDE 附加调试器，
-        // 本断言会如实失败——那正是探测应当报告的信号。
-        assertEquals("测试进程不应被 trace（若从 IDE 附加调试请以 am instrument 复跑）", 0, pid)
+        // ISSUE-P2-192 余量第 8 项：环境前提（测试进程未被真实 trace）从硬断言改为 Assume——
+        // adb shell am instrument 起的测试进程默认无 tracer；开发者从 IDE 附加调试器时
+        // 前提不成立即跳过并记入 skipped 数，不再被误读为「生产有 bug」（探测对非零
+        // TracerPid 的正确判定由宿主合成内容用例覆盖）。
+        org.junit.Assume.assumeTrue(
+            "测试进程不应被 trace（TracerPid=$pid；若从 IDE 附加调试请以 am instrument 复跑）",
+            pid == 0
+        )
         assertTrue("TracerPid=0 不得被判为被 trace", !RuntimeIntegrityPolicy.isTraced(pid))
     }
 

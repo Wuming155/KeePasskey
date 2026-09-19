@@ -383,3 +383,103 @@ jobs:
       # 本步骤需联网克隆 https://github.com/rustsec/advisory-db（GitHub 网络可达即可）。
       - name: cargo deny check（advisories + bans + licenses + sources）
         run: cargo deny check
+
+  # ---------------------------------------------------------------------------
+  # 门禁 4：设备层门禁（ISSUE-P2-192 余量第 7 项：connected 层在 CI 真实执行）。
+  #
+  # 动因与边界（2026-09-19）：
+  # 1. 此前 CI 永不跑 connected ⇒ 设备侧缺陷（§151 撞出的两项等）只在本地真机可复现，
+  #    CI 上永久绿灯。本 job 以 x86_64 模拟器补上这道门禁。
+  # 2. 模拟器镜像**实测核实**为 `system-images;android-36.1;google_apis;x86_64`——
+  #    system-images 目录在 API 36 起同样带 minor 版本（写 android-36 会报包不存在，
+  #    与 platforms;android-37.0 的坑同源）；开发机 Pixel_10 AVD 用的正是该镜像。
+  # 3. 环境前提类设备用例已在本批 ISSUE-P2-192 第 8 项 Assume 化（API 前提 / TracerPid /
+  #    生物识别录入态），前提不满足即跳过并计入 skipped，不再把「环境不满足」误读为
+  #    「生产缺陷」；autofill 链路用例依赖已录入生物识别的真机环境，在模拟器上跳过属预期。
+  # 4. app 的 debug APK 含 4 ABI 原生库 ⇒ assembleDebug 需要真实 NDK + Rust 工具链
+  #    （与 native-gate 同源版本），故本 job 必须先完成原生构建。
+  # ---------------------------------------------------------------------------
+  device-gate:
+    name: Device gate (emulator connected tests, all modules)
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Gradle (含依赖与构建缓存)
+        uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
+
+      - name: 安装 NDK / 编译平台 / build-tools / 模拟器镜像（版本与本仓库固定值一致）
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager --install \
+            "ndk;${ANDROID_NDK_VERSION}" \
+            "platforms;${ANDROID_PLATFORM}" \
+            "build-tools;${ANDROID_BUILD_TOOLS}" \
+            "emulator" \
+            "platform-tools" \
+            "system-images;android-36.1;google_apis;x86_64"
+          {
+            echo "ANDROID_NDK_HOME=${ANDROID_SDK_ROOT}/ndk/${ANDROID_NDK_VERSION}"
+            echo "ANDROID_NDK_ROOT=${ANDROID_SDK_ROOT}/ndk/${ANDROID_NDK_VERSION}"
+          } >> "$GITHUB_ENV"
+          test -d "${ANDROID_SDK_ROOT}/ndk/${ANDROID_NDK_VERSION}"
+
+      - name: Set up Rust（固定版本 + 4 个 Android target）
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          toolchain: "1.97.1"
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android,i686-linux-android
+
+      - name: 安装 cargo-ndk（固定版本）
+        run: cargo install cargo-ndk --version "${CARGO_NDK_VERSION}" --locked
+
+      - name: 4 ABI Rust 内核交叉编译（app debug APK 依赖 libkeepasskey_argon2.so）
+        run: ./gradlew :crypto:cargoNdkBuild --console=plain
+
+      - name: 启动 Android 模拟器（API 36.1 x86_64，headless + KVM）并等待启动完成
+        run: |
+          set -euo pipefail
+          echo "no" | avdmanager create avd \
+            --name ci-device \
+            --package "system-images;android-36.1;google_apis;x86_64" \
+            --device pixel
+          adb start-server
+          emulator -avd ci-device \
+            -no-window -no-audio -no-boot-anim -no-snapshot \
+            -gpu swiftshader_indirect -accel on -port 5554 &
+          adb wait-for-device
+          for i in $(seq 1 120); do
+            boot="$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')"
+            [ "$boot" = "1" ] && break
+            sleep 10
+          done
+          boot="$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')"
+          if [ "$boot" != "1" ]; then
+            echo "::error::模拟器 20 分钟内未完成启动"
+            exit 1
+          fi
+          adb devices
+
+      - name: 全模块 connected 测试（device 层门禁真实执行）
+        run: ./gradlew connectedDebugAndroidTest --console=plain
+
+      - name: 归档 connected 测试报告
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: device-gate-reports
+          path: |
+            **/build/outputs/androidTest-results/connected/**
+          if-no-files-found: warn
