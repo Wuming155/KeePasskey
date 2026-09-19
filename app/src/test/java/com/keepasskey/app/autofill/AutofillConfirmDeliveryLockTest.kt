@@ -17,10 +17,17 @@ import java.io.File
  * 1. **门控策略**（纯函数）——锁定即不允许回传；
  * 2. **接线守卫**（静态源码断言）——每一处 `setResult(RESULT_OK)` 之前**必须**出现门控判定，
  *    且存在显式的「丢弃未决响应」路径（`setResult(RESULT_CANCELED)`）。
+ *
+ * ISSUE-P3-201：接线守卫扩至**选择器页**——`AutofillPickerActivity` 的
+ * `confirmAndFill → deliver → setResult(RESULT_OK)` 全链路与确认页同形（且凭据在生物识别
+ * **之前**已解密、`deliver` 内含 TOTP 500ms 窗口、锁定后仍会写会话授权与首次绑定），
+ * 原 `AutofillConfirmDeliveryLockTest.kt:100-101` 只扫确认页源码，picker 漏网。
  */
 class AutofillConfirmDeliveryLockTest {
 
     private val activitySource: String by lazy { readSource(CONFIRM_ACTIVITY_PATH) }
+
+    private val pickerSource: String by lazy { readSource(PICKER_ACTIVITY_PATH) }
 
     // ---------------- ① 门控策略 ----------------
 
@@ -90,6 +97,90 @@ class AutofillConfirmDeliveryLockTest {
         )
     }
 
+    // ---------------- ③ 选择器页接线守卫（ISSUE-P3-201，与确认页同形） ----------------
+
+    @Test
+    fun `选择器页每一处回传 RESULT_OK 之前必须经过锁定门控`() {
+        val marker = Regex("""setResult\(\s*RESULT_OK\b""")
+        val indices = marker.findAll(pickerSource).map { it.range.first }.toList()
+
+        assertTrue("选择器页必须存在回传路径（未找到 ${marker.pattern}）", indices.isNotEmpty())
+        for (index in indices) {
+            val gateIndex = pickerSource.lastIndexOf("canDeliverAuthResult(", index)
+            val functionStart = pickerSource.lastIndexOf("private fun ", index)
+            assertTrue(
+                "选择器页回传 RESULT_OK 之前必须调用 AutofillAuthenticationPolicy.canDeliverAuthResult 门控" +
+                    "（否则锁定后框架仍会把凭据值写入目标表单——ISSUE-P3-201）",
+                gateIndex > functionStart
+            )
+        }
+    }
+
+    @Test
+    fun `选择器页门控必须覆盖凭据解密前与 TOTP 窗口后两个时点`() {
+        val gateMarker = "AutofillAuthenticationPolicy.canDeliverAuthResult("
+        val gateUsages = Regex("AutofillAuthenticationPolicy\\.canDeliverAuthResult\\(")
+            .findAll(pickerSource).count()
+        assertTrue(
+            "选择器页门控必须覆盖「进入交付链路（凭据解密之前）」与「回传前」至少两个时点" +
+                "（实际 $gateUsages 处，ISSUE-P3-201）",
+            gateUsages >= 2
+        )
+        // 时点 1：先于凭据解密——锁定后不得继续解密与交付
+        assertTrue(
+            "选择器页必须在解密凭据（resolveCredentials）之前做锁定复核",
+            pickerSource.indexOf(gateMarker) in 0 until pickerSource.indexOf("viewModel.resolveCredentials(")
+        )
+        // 时点 2：TOTP 二次动作（500ms 窗口，锁定可在窗口内点火）之后、回传 RESULT_OK 之前
+        val totpIndex = pickerSource.indexOf("totpPostFillActions.runAfterFill(entryId)")
+        val okIndex = pickerSource.indexOf("setResult(RESULT_OK")
+        val gateAfterTotp = if (totpIndex >= 0) pickerSource.indexOf("canDeliverAuthResult(", totpIndex) else -1
+        assertTrue(
+            "选择器页必须在 TOTP 二次动作之后、回传 RESULT_OK 之前再次复核锁定（窗口期锁定漏判）",
+            totpIndex >= 0 && gateAfterTotp > totpIndex && okIndex > gateAfterTotp
+        )
+    }
+
+    @Test
+    fun `选择器页锁定时不得发生首次绑定与会话授权副作用`() {
+        // 交付入口门控必须先于「首次绑定写入」（bindCallerForPackageDimension 的调用点，
+        // 而非其函数定义）与「会话授权写入」——ISSUE-P3-201：锁定后这两项副作用均不应发生
+        val deliverStart = pickerSource.indexOf("private fun deliver(")
+        val gateInDeliver = pickerSource.indexOf("canDeliverAuthResult(", deliverStart)
+        val bindCall = Regex("""(?m)^\s+bindCallerForPackageDimension\(\)""")
+            .find(pickerSource, deliverStart)?.range?.first ?: -1
+        val grantCall = pickerSource.indexOf("AutofillSessionGrants.grant(grantContext)", deliverStart)
+        assertTrue(
+            "deliver 交付入口必须先做锁定复核（ISSUE-P3-201）",
+            deliverStart >= 0 && gateInDeliver > deliverStart
+        )
+        assertTrue(
+            "首次绑定写入必须晚于交付入口锁定门控（锁定态不得写绑定）",
+            bindCall > gateInDeliver
+        )
+        assertTrue(
+            "会话授权写入必须晚于交付入口锁定门控（锁定态不得写授权）",
+            grantCall > gateInDeliver
+        )
+    }
+
+    @Test
+    fun `选择器页必须提供丢弃未决响应的显式路径`() {
+        val canceledMarker = Regex("""setResult\(\s*RESULT_CANCELED\b""")
+        assertTrue(
+            "选择器页必须显式以 RESULT_CANCELED 丢弃未决响应（而非仅 finish）",
+            canceledMarker.containsMatchIn(pickerSource)
+        )
+        assertTrue(
+            "取消回传必须双参且 extras 非空（不得回落到单参 setResult）",
+            pickerSource.contains("setResult(RESULT_CANCELED, authenticationCanceledIntent())")
+        )
+        assertTrue(
+            "必须有集中收口的丢弃入口（discardPendingResult）",
+            pickerSource.contains("fun discardPendingResult()")
+        )
+    }
+
     private fun readSource(path: String): String {
         val file = File(repositoryRoot, path)
         assertTrue("源码文件不存在（是否被重命名或移动）：$path", file.isFile)
@@ -99,6 +190,11 @@ class AutofillConfirmDeliveryLockTest {
     private companion object {
         const val CONFIRM_ACTIVITY_PATH =
             "app/src/main/java/com/keepasskey/app/autofill/AutofillConfirmActivity.kt"
+
+        /** ISSUE-P3-201：选择器页同纳入守卫面 */
+        const val PICKER_ACTIVITY_PATH =
+            "app/src/main/java/com/keepasskey/app/autofill/AutofillPickerActivity.kt"
+
         const val ROOT_SEARCH_DEPTH = 6
 
         /** 仓库根：同时具备 app 与 core 模块源码目录的最近祖先 */

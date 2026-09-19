@@ -71,7 +71,9 @@ val cargoNdkBuild = tasks.register<Exec>("cargoNdkBuild") {
         "-t", "x86_64",
         "-t", "x86",
         "-o", rustJniLibsDir.get().asFile.absolutePath,
-        "build", "--release",
+        // ISSUE-P3-203：`--locked` 把出厂 .so 绑定到受审 Cargo.lock——lock 与 manifest 不一致
+        // 时构建直接失败（fail-closed），杜绝「产物依赖树 ≠ 受审依赖树」的静默漂移
+        "build", "--release", "--locked",
     )
 }
 
@@ -108,7 +110,8 @@ val cargoHostBuild = tasks.register<Exec>("cargoHostBuild") {
     workingDir = rustProjectDir
     // 产物落 build/ 下，避免污染源码树（Cargo.toml/Cargo.lock 仍入库）
     environment("CARGO_TARGET_DIR", rustHostTargetDir.get().asFile.absolutePath)
-    commandLine("cargo", "build", "--release")
+    // ISSUE-P3-203：同 cargoNdkBuild——宿主 cdylib 同样只准按受审 Cargo.lock 构建
+    commandLine("cargo", "build", "--release", "--locked")
     // ISSUE-P3-125③：**不再** `isIgnoreExitValue = true`。
     // 「cargo 缺失」与「cargo 构建失败」必须区分对待：
     //   · 缺失（离线 / 无工具链）→ `onlyIf` 跳过任务 ⇒ 宿主库不产出 ⇒ JNI 用例经 `Assume` 跳过

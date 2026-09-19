@@ -168,6 +168,13 @@ class AutofillPickerActivity : FragmentActivity() {
     private fun confirmAndFill(entryId: String) {
         if (completed) return
         lifecycleScope.launch {
+            // ISSUE-P3-201：进入交付链路前锁定复核（凭据解密之前）——与确认页 ISSUE-P3-95 同口径：
+            // 锁定即终止本次填充，绝不在此之后继续解密与交付
+            if (!AutofillAuthenticationPolicy.canDeliverAuthResult(vaultRepository.isLocked())) {
+                AppLog.w(TAG, "会话已锁定，放弃本次选择器填充")
+                finish()
+                return@launch
+            }
             val credentials = viewModel.resolveCredentials(entryId)
             if (credentials == null) {
                 AppLog.w(TAG, "选中条目凭据不可用，放弃本次填充")
@@ -249,6 +256,13 @@ class AutofillPickerActivity : FragmentActivity() {
         grantContext: AutofillGrantContext?
     ) {
         completed = true
+        // ISSUE-P3-201：交付入口锁定复核（同确认页 ISSUE-P3-95 口径）——锁定即丢弃未决响应，
+        // 且**不**发生任何副作用（首次绑定写入、TOTP 动作、会话授权写入均不得在锁定态进行）
+        if (!AutofillAuthenticationPolicy.canDeliverAuthResult(vaultRepository.isLocked())) {
+            AppLog.w(TAG, "会话已锁定，丢弃本次未决响应")
+            discardPendingResult()
+            return
+        }
         // ISSUE-P2-46：用户已在受保护窗口内**显式指认**「把这条凭据填给该调用方」（该页展示
         // 包名 / 应用名 / 签名摘要，见 ISSUE-P2-70），故此处写入首次绑定——它是 `android://`
         // 维度后续自动命中的唯一前提，也是未绑定调用方唯一的补救路径。
@@ -257,6 +271,14 @@ class AutofillPickerActivity : FragmentActivity() {
             // ISSUE-P3-186：回传前按偏好执行 TOTP 二次动作（与确认页共用实现：500ms 硬超时 +
             // 双开关闸门 + 库锁定不触碰，任何异常 / 超时都不阻断回传——实现内部已兜底）
             totpPostFillActions.runAfterFill(entryId)
+            // ISSUE-P3-201：**回传前再次校验**——TOTP 二次动作（含超时等待）期间会话可能刚被
+            // 自动锁定（AutoLockManager 延迟锁 / 熄屏即时锁均可在页面存活期点火）；锁定即丢弃
+            // 未决响应，否则框架仍会把凭据值写入目标表单（与确认页 deliverAuthResult 同口径）
+            if (!AutofillAuthenticationPolicy.canDeliverAuthResult(vaultRepository.isLocked())) {
+                AppLog.w(TAG, "会话在交付过程中被锁定，丢弃未决响应（不回传 RESULT_OK）")
+                discardPendingResult()
+                return@launch
+            }
             // 载荷构造已收敛到 [buildAuthenticationResultDataset]（与二次确认页共用同一份，
             // 避免同语义两处实现再次漂移成「只回传成功、不回传数据集」）
             val dataset = buildAuthenticationResultDataset(
@@ -283,6 +305,16 @@ class AutofillPickerActivity : FragmentActivity() {
             setResult(RESULT_OK, authenticationResultIntent(dataset))
             finish()
         }
+    }
+
+    /**
+     * ISSUE-P3-201：丢弃未决响应——显式以 `RESULT_CANCELED` 结束，令框架不写入任何凭据值。
+     * 与确认页 [AutofillConfirmActivity.discardPendingResult] 同口径：双参重载（extras 非空，
+     * 官方契约：Android 12 起认证结果 Intent 的 extras 为 null 会崩溃）。
+     */
+    private fun discardPendingResult() {
+        setResult(RESULT_CANCELED, authenticationCanceledIntent())
+        finish()
     }
 
     /**

@@ -302,7 +302,7 @@ class WebDavSyncProviderTest {
             client = plainLoopbackClient
         )
 
-        val downloadResult = provider.download("我的 密码库/工作 vault.kdbx")
+        val downloadResult = provider.downloadBytes("我的 密码库/工作 vault.kdbx")
         assertTrue(downloadResult.isSuccess)
 
         val req = server.takeRequest()

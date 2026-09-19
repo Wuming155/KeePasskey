@@ -1,12 +1,7 @@
 package com.keepasskey.sync.engine
 
 import java.io.File
-import java.io.FileOutputStream
-import java.nio.file.AtomicMoveNotSupportedException
-import java.nio.file.Files
-import java.nio.file.StandardCopyOption
 import java.util.Base64
-import java.util.UUID
 
 /**
  * 防回滚裁决（ISSUE-P2-18）。
@@ -103,10 +98,20 @@ class SyncRollbackGuard(
         val recent: List<String> = emptyList()
     )
 
+    /**
+     * 文件层原语（ISSUE-P3-202）：复用 [SyncCacheFiles] 的唯一临时名 / fsync / 原子替换 /
+     * 仅属主权限收敛，与本仓其余同步落盘面同一口径。原实现裸 `FileOutputStream` +
+     * 私有 `moveAtomically` 全程不收敛权限，仅依赖进程 umask（真机恰好 0600/0700，
+     * 但与「自声明口径」漂移——消口径而非堵可利用暴露，见 ISSUE-P3-202 第三轮真机取证）。
+     */
+    private val files = SyncCacheFiles(stateDir)
+
     init {
         if (!stateDir.exists()) {
             stateDir.mkdirs()
         }
+        // ISSUE-P3-202：状态目录同样显式收敛为仅属主（0700），不依赖 umask
+        files.restrictToOwnerOnly(stateDir, isDirectory = true)
     }
 
     /**
@@ -195,29 +200,15 @@ class SyncRollbackGuard(
         val content = (payloadLines.joinToString("\n") + "\n$PREFIX_MAC$encodedMac\n")
             .toByteArray(Charsets.UTF_8)
 
+        // ISSUE-P3-202：tmp 写入经 [SyncCacheFiles.writeTmpSynced]（落盘第一字节起即仅属主），
+        // 交付经 [SyncCacheFiles.moveAtomically]（rename 后目标同样收敛）
         val target = stateFile(remotePath)
-        val tmp = File(stateDir, "${target.name}.${UUID.randomUUID()}$SUFFIX_TMP")
+        val tmp = files.tmpFileFor(target)
         try {
-            FileOutputStream(tmp).use { fos ->
-                fos.write(content)
-                fos.flush()
-                fos.fd.sync()
-            }
-            moveAtomically(tmp, target)
+            files.writeTmpSynced(tmp, content)
+            files.moveAtomically(tmp, target)
         } finally {
             tmp.delete()
-        }
-    }
-
-    private fun moveAtomically(tmpFile: File, targetFile: File) {
-        if (tmpFile.renameTo(targetFile)) return
-        try {
-            Files.move(
-                tmpFile.toPath(), targetFile.toPath(),
-                StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING
-            )
-        } catch (_: AtomicMoveNotSupportedException) {
-            Files.move(tmpFile.toPath(), targetFile.toPath(), StandardCopyOption.REPLACE_EXISTING)
         }
     }
 
@@ -229,7 +220,6 @@ class SyncRollbackGuard(
         private const val KEY_CURRENT = "current"
         private const val KEY_RECENT = "recent"
         private const val PREFIX_MAC = "mac="
-        private const val SUFFIX_TMP = ".tmp"
 
         /**
          * 状态文件后缀（`<SHA-256(remotePath)>.rollback`）。

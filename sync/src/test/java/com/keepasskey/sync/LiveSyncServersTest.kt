@@ -129,7 +129,7 @@ class LiveSyncServersTest {
         val etag = provider.upload("vault.kdbx", payload).getOrThrow()
         assertNotNull("PUT 返回 ETag", etag)
 
-        val downloaded = provider.download("vault.kdbx").getOrThrow()
+        val downloaded = provider.downloadBytes("vault.kdbx").getOrThrow()
         assertArrayEquals("GET 下载字节精确", payload, downloaded)
 
         val meta = provider.getMetadata("vault.kdbx").getOrThrow()
@@ -163,7 +163,7 @@ class LiveSyncServersTest {
         val etag1 = provider.upload("vault.kdbx", payload).getOrThrow()
         assertNotNull("首传 PUT 返回 ETag", etag1)
 
-        val downloaded = provider.download("vault.kdbx").getOrThrow()
+        val downloaded = provider.downloadBytes("vault.kdbx").getOrThrow()
         assertArrayEquals("GET 下载字节精确", payload, downloaded)
 
         // 覆盖上传（If-Match 乐观锁，服务端原子校验）
@@ -203,9 +203,9 @@ class LiveSyncServersTest {
         provider.upload("merge_remote.bin", dbToBytes(remote)).getOrThrow()
 
         // 真实下载（字节精确）
-        val dBase = provider.download("merge_base.bin").getOrThrow()
-        val dLocal = provider.download("merge_local.bin").getOrThrow()
-        val dRemote = provider.download("merge_remote.bin").getOrThrow()
+        val dBase = provider.downloadBytes("merge_base.bin").getOrThrow()
+        val dLocal = provider.downloadBytes("merge_local.bin").getOrThrow()
+        val dRemote = provider.downloadBytes("merge_remote.bin").getOrThrow()
         assertArrayEquals("base 下载字节精确", dbToBytes(base), dBase)
 
         // 重建模型并运行真实三方合并
@@ -244,9 +244,9 @@ class LiveSyncServersTest {
         provider.upload("conf_remote.bin", dbToBytes(remote)).getOrThrow()
 
         val merged = KdbxMerger.mergeDatabases(
-            bytesToDb(provider.download("conf_base.bin").getOrThrow()),
-            bytesToDb(provider.download("conf_local.bin").getOrThrow()),
-            bytesToDb(provider.download("conf_remote.bin").getOrThrow())
+            bytesToDb(provider.downloadBytes("conf_base.bin").getOrThrow()),
+            bytesToDb(provider.downloadBytes("conf_local.bin").getOrThrow()),
+            bytesToDb(provider.downloadBytes("conf_remote.bin").getOrThrow())
         )
         assertTrue("应检测到冲突", merged.conflicts.isNotEmpty())
         assertTrue(
@@ -279,7 +279,7 @@ class LiveSyncServersTest {
         val meta = provider.getMetadata(name).getOrThrow()
         assertEquals("中文文件名元数据大小一致", payload.size.toLong(), meta.contentLength)
 
-        assertArrayEquals("中文名下载字节精确", payload, provider.download(name).getOrThrow())
+        assertArrayEquals("中文名下载字节精确", payload, provider.downloadBytes(name).getOrThrow())
         assertTrue(provider.delete(name).isSuccess)
     }
 
@@ -303,7 +303,7 @@ class LiveSyncServersTest {
         val meta = provider.getMetadata(key).getOrThrow()
         assertEquals("嵌套中文键元数据大小一致", payload.size.toLong(), meta.contentLength)
 
-        assertArrayEquals("嵌套中文键下载字节精确", payload, provider.download(key).getOrThrow())
+        assertArrayEquals("嵌套中文键下载字节精确", payload, provider.downloadBytes(key).getOrThrow())
         assertTrue(provider.delete(key).isSuccess)
     }
 
@@ -315,7 +315,7 @@ class LiveSyncServersTest {
         val etag = provider.upload("live-empty.kdbx", ByteArray(0)).getOrThrow()
         assertTrue(etag.isNotBlank())
 
-        val downloaded = provider.download("live-empty.kdbx").getOrThrow()
+        val downloaded = provider.downloadBytes("live-empty.kdbx").getOrThrow()
         assertEquals("真机零字节下载必须为空数组而非失败", 0, downloaded.size)
         assertEquals(0L, provider.getMetadata("live-empty.kdbx").getOrThrow().contentLength)
         assertTrue(provider.delete("live-empty.kdbx").isSuccess)
@@ -331,7 +331,7 @@ class LiveSyncServersTest {
         )
 
         provider.upload("live-empty.kdbx", ByteArray(0)).getOrThrow()
-        val downloaded = provider.download("live-empty.kdbx").getOrThrow()
+        val downloaded = provider.downloadBytes("live-empty.kdbx").getOrThrow()
         assertEquals(0, downloaded.size)
         assertEquals(0L, provider.getMetadata("live-empty.kdbx").getOrThrow().contentLength)
         assertTrue(provider.delete("live-empty.kdbx").isSuccess)
@@ -344,7 +344,7 @@ class LiveSyncServersTest {
 
         val payload = Random(42).nextBytes(1024 * 1024)
         provider.upload("live-big.kdbx", payload).getOrThrow()
-        assertArrayEquals("真机 1MiB 往返字节精确", payload, provider.download("live-big.kdbx").getOrThrow())
+        assertArrayEquals("真机 1MiB 往返字节精确", payload, provider.downloadBytes("live-big.kdbx").getOrThrow())
         assertEquals(payload.size.toLong(), provider.getMetadata("live-big.kdbx").getOrThrow().contentLength)
         assertTrue(provider.delete("live-big.kdbx").isSuccess)
     }
@@ -360,7 +360,7 @@ class LiveSyncServersTest {
 
         val payload = Random(43).nextBytes(1024 * 1024)
         provider.upload("live-big.kdbx", payload).getOrThrow()
-        assertArrayEquals("真机 1MiB 往返字节精确", payload, provider.download("live-big.kdbx").getOrThrow())
+        assertArrayEquals("真机 1MiB 往返字节精确", payload, provider.downloadBytes("live-big.kdbx").getOrThrow())
         assertEquals(payload.size.toLong(), provider.getMetadata("live-big.kdbx").getOrThrow().contentLength)
         assertTrue(provider.delete("live-big.kdbx").isSuccess)
     }
@@ -394,7 +394,7 @@ class LiveSyncServersTest {
             assertTrue(resultA.exceptionOrNull() is SyncException.ConflictError)
             winnerBytes = bytesB
         }
-        assertArrayEquals("远端最终内容必须是胜者载荷", winnerBytes, provider.download("race.kdbx").getOrThrow())
+        assertArrayEquals("远端最终内容必须是胜者载荷", winnerBytes, provider.downloadBytes("race.kdbx").getOrThrow())
         assertTrue(provider.delete("race.kdbx").isSuccess)
     }
 

@@ -1,5 +1,6 @@
 package com.keepasskey.app.sync
 
+import java.io.OutputStream
 import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.core.model.KdbxEntry
@@ -116,9 +117,12 @@ class SyncConflictMergeLocalTreeEquivalenceTest {
             )
         }
 
-        override suspend fun download(remotePath: String): Result<ByteArray> =
-            remoteStorage[remotePath]?.let { Result.success(it.first) }
-                ?: Result.failure(SyncException.FileNotFound("File not found: $remotePath"))
+        // ISSUE-P3-206 流式契约：内容边读边写进 sink
+        override suspend fun download(remotePath: String, sink: OutputStream): Result<Unit> =
+            remoteStorage[remotePath]?.let {
+                sink.write(it.first)
+                Result.success(Unit)
+            } ?: Result.failure(SyncException.FileNotFound("File not found: $remotePath"))
 
         override suspend fun upload(
             remotePath: String,

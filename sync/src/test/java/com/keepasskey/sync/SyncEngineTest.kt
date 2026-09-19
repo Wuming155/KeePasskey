@@ -23,6 +23,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
+import java.io.OutputStream
 import java.security.MessageDigest
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
@@ -638,12 +639,14 @@ class SyncEngineTest {
             )
         }
 
-        override suspend fun download(remotePath: String): Result<ByteArray> {
+        // ISSUE-P3-206 流式契约：内容边读边写进 sink（测试内存 fake 同样不整份物化）
+        override suspend fun download(remotePath: String, sink: OutputStream): Result<Unit> {
             if (downloadError) return Result.failure(SyncException.NetworkError("Download failed after conflict"))
             if (networkError) return Result.failure(SyncException.NetworkError("Network down"))
             val file = remoteFiles[remotePath]
                 ?: return Result.failure(SyncException.FileNotFound("Not found"))
-            return Result.success(file.data)
+            sink.write(file.data)
+            return Result.success(Unit)
         }
 
         override suspend fun upload(

@@ -1,6 +1,7 @@
 package com.keepasskey.sync.provider
 
 import com.keepasskey.sync.model.RemoteFileMetadata
+import java.io.OutputStream
 
 /**
  * 通用云存储协议提供者契约接口。
@@ -20,9 +21,20 @@ interface SyncProvider {
     suspend fun getMetadata(remotePath: String): Result<RemoteFileMetadata>
 
     /**
-     * 下载远程文件流
+     * 下载远程文件流（ISSUE-P3-206 **流式契约**）。
+     *
+     * 内容**边读边写**进 [sink]（网络流 → 固定缓冲 → [sink]），下载期不在堆上整份物化
+     * （原 `Result<ByteArray>` 契约使接受路径以 `ByteArrayOutputStream` 累积 + `toByteArray()`
+     * 复制，下载期峰值 ~2×S、chunked 声明缺失可达 ~3×S）。
+     * 实现内部经 `SyncDownloadLimits.copyBounded` 强制「声明尺寸预检 + 累计封顶」双重守卫
+     * （ISSUE-P0-09 语义不变），超限即抛 [com.keepasskey.sync.model.SyncException.ProtocolError]
+     * 并中止写入。
+     *
+     * 生命周期归调用方：实现只写不关 [sink]；sink 的载体（如缓存 tmp 文件）由调用方在
+     * 失败 / 重放拒绝时负责清除——**不遗留半成品文件**是调用方的义务，本契约只保证
+     * 失败时不再继续写入。
      */
-    suspend fun download(remotePath: String): Result<ByteArray>
+    suspend fun download(remotePath: String, sink: OutputStream): Result<Unit>
 
     /**
      * 上传本地数据库文件至远程。

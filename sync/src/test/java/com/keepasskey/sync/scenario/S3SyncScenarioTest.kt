@@ -1,5 +1,6 @@
 package com.keepasskey.sync.scenario
 
+import com.keepasskey.sync.downloadBytes
 import com.keepasskey.sync.model.SyncException
 import com.keepasskey.sync.s3.S3SyncProvider
 import kotlinx.coroutines.Dispatchers
@@ -193,7 +194,7 @@ class S3SyncScenarioTest {
 
         val payload = Random(20260907).nextBytes(2 * 1024 * 1024)
         p.upload("big-vault.kdbx", payload).getOrThrow()
-        val downloaded = p.download("big-vault.kdbx").getOrThrow()
+        val downloaded = p.downloadBytes("big-vault.kdbx").getOrThrow()
         assertArrayEquals("2MiB 载荷必须逐字节一致", payload, downloaded)
 
         val meta = p.getMetadata("big-vault.kdbx").getOrThrow()
@@ -216,7 +217,7 @@ class S3SyncScenarioTest {
             usePathStyle = true, client = shortTimeoutClient
         )
         val start = System.nanoTime()
-        val result = p.download("vault.kdbx")
+        val result = p.downloadBytes("vault.kdbx")
         val elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start)
 
         assertTrue("无响应必须在读取超时后如实失败", result.isFailure)
@@ -228,14 +229,14 @@ class S3SyncScenarioTest {
         // GET 500 -> ProtocolError
         startQueued()
         server.enqueue(MockResponse().setResponseCode(500).setBody("boom"))
-        val r500 = provider().download("vault.kdbx")
+        val r500 = provider().downloadBytes("vault.kdbx")
         assertTrue(r500.exceptionOrNull() is SyncException.ProtocolError)
         server.shutdown()
 
         // GET 401 -> AuthenticationError
         server = MockWebServer(); startQueued()
         server.enqueue(MockResponse().setResponseCode(401))
-        val r401 = provider().download("vault.kdbx")
+        val r401 = provider().downloadBytes("vault.kdbx")
         assertTrue(r401.exceptionOrNull() is SyncException.AuthenticationError)
         server.shutdown()
 
@@ -340,7 +341,7 @@ class S3SyncScenarioTest {
         )
         assertEquals(0L, putReq.bodySize)
 
-        val downloaded = p.download("empty.kdbx").getOrThrow()
+        val downloaded = p.downloadBytes("empty.kdbx").getOrThrow()
         assertEquals("零字节对象必须下载为空数组而非失败", 0, downloaded.size)
     }
 
@@ -371,7 +372,7 @@ class S3SyncScenarioTest {
         startQueued()
         val url = server.url("/").toString()
         server.shutdown()
-        val result = provider().download("vault.kdbx")
+        val result = provider().downloadBytes("vault.kdbx")
         assertTrue("连接被拒必须如实失败: ${result.getOrNull()}", result.isFailure)
         assertTrue(url.isNotBlank())
     }
@@ -384,6 +385,6 @@ class S3SyncScenarioTest {
             accessKeyId = "tester".toCharArray(), secretAccessKey = "pw".toCharArray(),
             usePathStyle = true, client = shortConnect
         )
-        assertTrue("连接超时必须如实失败", p.download("vault.kdbx").isFailure)
+        assertTrue("连接超时必须如实失败", p.downloadBytes("vault.kdbx").isFailure)
     }
 }

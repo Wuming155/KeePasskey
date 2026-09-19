@@ -9,20 +9,24 @@ import com.keepasskey.sync.provider.SyncProvider
  * 回退内容哈希裁决——下载一次与 baseversion 记录的 SHA-256 比对，避免 etag 缺失导致
  * "每次同步都误判远端更新/冲突"的退化循环。
  *
- * 内部记忆已下载的远端字节，供后续按需复用，避免同一决策树内重复下载。
+ * ISSUE-P3-206 流式化：内部改经 [SyncCache.receiveRemote] 把远端内容**边读边写**进缓存
+ * tmp（下载期不在堆上整份物化），摘要接收期同步累计；同一份接收在决策树内复用
+ * （原「记忆已下载字节」语义由 [received] 回执承载）。回执的交付 / 弃置由调用方裁决：
+ * 内容与 base 一致 → abort（tmp 用后即弃）；有更新 → commit 或读出字节后按路径处置。
  */
 internal class RemoteConsistencyProbe(
     private val provider: SyncProvider,
+    private val cache: SyncCache,
     private val remotePath: String,
     private val baseEtag: String,
     private val remoteEtag: String,
     private val baseVersionHash: String
 ) {
-    private var downloadedBytes: ByteArray? = null
+    private var receivedReceipt: SyncCache.ReceivedRemote? = null
 
-    /** 已下载并缓存的远端字节；未触发下载时为 null。 */
-    val downloaded: ByteArray?
-        get() = downloadedBytes
+    /** 是否已真实触发过远端下载（内容哈希裁决路径命中时的元数据刷新判据） */
+    val hasDownloaded: Boolean
+        get() = receivedReceipt != null
 
     /** 远端相对基准版本是否未变（ETag 双端可用时优先乐观锁，缺失时回退内容哈希）。 */
     suspend fun isRemoteUnchanged(): Boolean {
@@ -31,15 +35,23 @@ internal class RemoteConsistencyProbe(
         }
         // ETag 双端任一缺失：回退内容哈希裁决
         if (baseVersionHash.isEmpty()) return false
-        val bytes = downloadedBytes
-            ?: provider.download(remotePath).getOrNull()?.also { downloadedBytes = it }
-            ?: return false
-        return SyncCache.sha256Hex(bytes) == baseVersionHash
+        return ensureReceived().digest == baseVersionHash
     }
 
-    /** 复用已下载内容；未下载时拉取远端，失败则抛出。 */
-    suspend fun remoteBytes(): ByteArray =
-        downloadedBytes ?: provider.download(remotePath).getOrThrow()
+    /**
+     * 取回已接收的远端回执（未下载时流式拉取一次并在决策树内复用）。
+     * **回执生命周期归调用方**：裁决通过须 commit / 弃置须 abort，不得搁置。
+     */
+    suspend fun received(): SyncCache.ReceivedRemote = ensureReceived()
+
+    private suspend fun ensureReceived(): SyncCache.ReceivedRemote {
+        receivedReceipt?.let { return it }
+        val receipt = cache.receiveRemote(remotePath) { sink ->
+            provider.download(remotePath, sink).getOrThrow()
+        }
+        receivedReceipt = receipt
+        return receipt
+    }
 }
 
 /**

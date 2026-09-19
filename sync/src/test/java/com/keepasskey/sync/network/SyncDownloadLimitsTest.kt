@@ -6,6 +6,7 @@ import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
 
 /**
  * 下载体入口封顶单测（ISSUE-P0-09 / ISSUE-P2-75）。
@@ -62,5 +63,58 @@ class SyncDownloadLimitsTest {
     fun `生产上限常量符合设计量级`() {
         assertEquals(128L * 1024 * 1024, SyncDownloadLimits.MAX_DOWNLOAD_BYTES)
         assertEquals(16L * 1024 * 1024, SyncDownloadLimits.MAX_PROPFIND_BYTES)
+    }
+
+    // ---------------- ISSUE-P3-206：copyBounded 流式封顶判据 ----------------
+
+    @Test
+    fun `copyBounded 声明超限时未写 sink 任何字节即拒绝`() {
+        val input = ByteArrayInputStream(ByteArray(1024))
+        val sink = ByteArrayOutputStream()
+        val ex = assertThrows(SyncException.ProtocolError::class.java) {
+            SyncDownloadLimits.copyBounded(input, declaredLength = 1024L, maxBytes = 512L, label = "测试", sink = sink)
+        }
+        assertEquals(413, ex.statusCode)
+        assertEquals(1024, input.available())
+        assertEquals("声明预检拒绝时 sink 不得收到任何字节", 0, sink.size())
+    }
+
+    @Test
+    fun `copyBounded 声明缺失时累计封顶中途拒绝`() {
+        val payload = ByteArray(1024) { it.toByte() }
+        val input = ByteArrayInputStream(payload)
+        val sink = ByteArrayOutputStream()
+        val ex = assertThrows(SyncException.ProtocolError::class.java) {
+            SyncDownloadLimits.copyBounded(input, declaredLength = -1L, maxBytes = 512L, label = "测试", sink = sink)
+        }
+        assertEquals(413, ex.statusCode)
+        assertTrue("中途拒绝时 sink 已写字节必须不超过上限", sink.size() <= 512L)
+    }
+
+    @Test
+    fun `copyBounded 正常搬运逐字节一致且返回字节数`() {
+        val payload = "streamed-kdbx-download-bytes".toByteArray(Charsets.UTF_8)
+        val sink = ByteArrayOutputStream()
+        val total = SyncDownloadLimits.copyBounded(
+            ByteArrayInputStream(payload),
+            declaredLength = payload.size.toLong(),
+            maxBytes = 1024L,
+            label = "测试",
+            sink = sink
+        )
+        assertEquals(payload.size.toLong(), total)
+        assertTrue("流式搬运必须逐字节一致", payload.contentEquals(sink.toByteArray()))
+    }
+
+    @Test
+    fun `readBounded 经 copyBounded 委托后语义不变`() {
+        val payload = ByteArray(700) { (it % 251).toByte() }
+        val read = SyncDownloadLimits.readBounded(
+            ByteArrayInputStream(payload),
+            declaredLength = payload.size.toLong(),
+            maxBytes = 1024L,
+            label = "测试"
+        )
+        assertTrue(payload.contentEquals(read))
     }
 }

@@ -1,6 +1,7 @@
 package com.keepasskey.sync.webdav
 
 import com.keepasskey.sync.model.SyncException
+import java.io.ByteArrayOutputStream
 import kotlinx.coroutines.runBlocking
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
@@ -124,10 +125,12 @@ class WebDavTransferDeviceTest {
                 .setBody(okio.Buffer().write(payload))
         )
 
-        val downloaded = newProvider().download("vault.kdbx")
+        // ISSUE-P3-206 流式契约：内容边读边写进内存 sink 后断言（下载期不整份物化）
+        val sink = ByteArrayOutputStream()
+        val downloaded = newProvider().download("vault.kdbx", sink)
 
         assertTrue("GET 下载应在设备上成功：${downloaded.exceptionOrNull()}", downloaded.isSuccess)
-        assertEquals("下载体必须与 mock 远端逐字节一致", payload.toList(), downloaded.getOrThrow().toList())
+        assertEquals("下载体必须与 mock 远端逐字节一致", payload.toList(), sink.toByteArray().toList())
 
         val sent = server.takeRequest()
         assertEquals("GET 请求方法必须真实发出", "GET", sent.method)

@@ -1,7 +1,5 @@
 package com.keepasskey.app.sync
 
-import com.keepasskey.sync.network.SyncHttpClientFactory
-import com.keepasskey.sync.network.SyncNetworkOptions
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.tls.HandshakeCertificates
@@ -42,8 +40,10 @@ import javax.net.ssl.SSLHandshakeException
  *    内置豁免**（2026-09-19 Redmi 4X 实测 `loopback=true localhost=true` 而 default=false，
  *    与模拟器行为相反）——断言改为「请求结果必须与策略读数一致」，两代平台均稳定且
  *    证明 OkHttp 尊重平台策略（策略差异本身作为平台事实登记批次文档）；
- * 4. **信任锚仅系统 CA**：自签证书 HTTPS 握手被拒（自签 / 用户注入证书链不被信任）；
- *    顺带证明工厂客户端的 SSRF 回环防线（ISSUE-P1-05 连接期防线）在设备上生效。
+ * 4. **信任锚仅系统 CA**：自签证书 HTTPS 握手被拒（自签 / 用户注入证书链不被信任）。
+ *    工厂客户端的 SSRF 回环防线**不在本类证明**——原第 5 例断言只判 `error != null`、
+ *    不区分异常类型而恒绿（零判别力，ISSUE-P3-209），判别面已并入
+ *    `SsrfRedirectBypassDeviceTest`（能红判据 + 接线静态断言）。
  *
  * ## 边界（如实声明）
  *
@@ -187,24 +187,11 @@ class CleartextPolicyDeviceTest {
         )
     }
 
-    @Test
-    fun `工厂客户端的 SSRF 防线在设备上拒绝回环解析`() {
-        val factoryClient = SyncHttpClientFactory.createSyncClient(SyncNetworkOptions())
-        val heldCertificate = HeldCertificate.Builder()
-            .commonName("loopback.keepasskey.test")
-            .addSubjectAlternativeName("127.0.0.1")
-            .build()
-        val certificates = HandshakeCertificates.Builder()
-            .heldCertificate(heldCertificate)
-            .build()
-        server.useHttps(certificates.sslSocketFactory(), false)
-
-        val error = execute(factoryClient, server.url("/").toString())
-
-        assertTrue(
-            "工厂客户端对回环端点必须失败（SsrfGuardDns 环回网段拦截），" +
-                "实际: ${error?.javaClass?.simpleName}: ${error?.message}",
-            error != null
-        )
-    }
+    // ISSUE-P3-209：原「工厂客户端的 SSRF 防线在设备上拒绝回环解析」用例**已移除**——
+    // 其断言只判 `error != null`、不区分异常类型，而自签证书使请求无论 SsrfGuardDns 是否
+    // 接线都会失败（守卫在位 → UnknownHostException；守卫被删 → SSLHandshakeException，
+    // 同为非空）⇒ 该用例恒绿、对守卫是否生效零判别力。判别面（`causes.any { UnknownHostException }`
+    // + `factoryClient.dns is SsrfGuardDns` 接线断言 + IPv4 字面量连接期对照）由
+    // `sync/src/androidTest/.../SsrfRedirectBypassDeviceTest` 承载（ISSUE-P3-209 AC②去重合并，
+    // 删除理由与证据链更正登记于归档批次）。
 }

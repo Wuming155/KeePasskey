@@ -1,5 +1,6 @@
 package com.keepasskey.sync
 
+import java.io.OutputStream
 import com.keepasskey.sync.engine.SyncCache
 import com.keepasskey.sync.engine.SyncCommitResult
 import com.keepasskey.sync.engine.SyncEngine
@@ -133,10 +134,12 @@ class SyncEnginePreferenceBranchTest {
             )
         }
 
-        override suspend fun download(remotePath: String): Result<ByteArray> {
+        // ISSUE-P3-206 流式契约：内容边读边写进 sink
+        override suspend fun download(remotePath: String, sink: OutputStream): Result<Unit> {
             val file = remoteFiles[remotePath]
                 ?: return Result.failure(SyncException.FileNotFound("Not found"))
-            return Result.success(file.data)
+            sink.write(file.data)
+            return Result.success(Unit)
         }
 
         override suspend fun upload(

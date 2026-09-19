@@ -40,9 +40,32 @@ class NativeBuildFailClosedTest {
     fun `宿主 cargo 构建任务仍真实执行 cargo build`() {
         val script = stripComments(readBuildScript())
 
+        // ISSUE-P3-203：断言取调用形态前缀而非完整实参——`--locked` 加入后原字面量断言会误红；
+        // 结构化判定「仍为真实 cargo build」不受旗标增减影响
         assertTrue(
             "构建命令必须仍为真实 cargo build（不得被替换为 no-op / echo 占位）",
-            script.contains("""commandLine("cargo", "build", "--release")""")
+            script.contains("""commandLine("cargo", "build", "--release"""")
+        )
+    }
+
+    @Test
+    fun `两条 cargo 构建任务必须绑定受审 Cargo`() {
+        // ISSUE-P3-203：出厂 .so / 宿主 cdylib 只准按受审 Cargo.lock 构建——
+        // lock 与 manifest 不一致时构建直接失败（fail-closed），杜绝产物依赖树静默漂移。
+        // 判据：两条构建调用（cargoNdkBuild / cargoHostBuild）的 release build 末位都必须带 "--locked"；
+        // 刻意不解析 commandLine 括号块（嵌套调用会截断 regex，曾致误红）
+        val script = stripComments(readBuildScript())
+        val releaseBuilds = Regex(""""build",\s*"--release""").findAll(script).count()
+        val lockedBuilds = Regex(""""build",\s*"--release",\s*"--locked"""").findAll(script).count()
+
+        assertTrue(
+            "必须存在两条 release cargo 构建调用（cargoNdkBuild / cargoHostBuild），实际 $releaseBuilds 条",
+            releaseBuilds >= 2
+        )
+        assertTrue(
+            "release cargo 构建必须全部携带 --locked（$lockedBuilds / $releaseBuilds 条）——" +
+                "出厂 .so 必须与受审 Cargo.lock 绑定（ISSUE-P3-203）",
+            lockedBuilds == releaseBuilds
         )
     }
 

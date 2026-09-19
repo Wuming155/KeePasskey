@@ -17,6 +17,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
+import java.io.OutputStream
 import java.util.UUID
 
 /**
@@ -162,33 +163,37 @@ class WebDavSyncProvider(
         }
     }
 
-    override suspend fun download(remotePath: String): Result<ByteArray> = withContext(Dispatchers.IO) {
-        runCatching {
-            val fullUrl = WebDavUrlCodec.buildUrl(serverUrl, remotePath)
-            val request = Request.Builder()
-                .url(fullUrl)
-                .get()
-                .header("Authorization", authHeader)
-                .build()
+    override suspend fun download(remotePath: String, sink: OutputStream): Result<Unit> =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val fullUrl = WebDavUrlCodec.buildUrl(serverUrl, remotePath)
+                val request = Request.Builder()
+                    .url(fullUrl)
+                    .get()
+                    .header("Authorization", authHeader)
+                    .build()
 
-            httpClient.newCall(request).execute().use { response ->
-                when {
-                    response.code == 404 -> throw SyncException.FileNotFound("远程文件不存在: $remotePath")
-                    response.code == 401 || response.code == 403 ->
-                        throw SyncException.AuthenticationError("WebDAV 鉴权失败 (${response.code})")
-                    !response.isSuccessful -> throw SyncException.ProtocolError(response.code, response.message)
+                httpClient.newCall(request).execute().use { response ->
+                    when {
+                        response.code == 404 -> throw SyncException.FileNotFound("远程文件不存在: $remotePath")
+                        response.code == 401 || response.code == 403 ->
+                            throw SyncException.AuthenticationError("WebDAV 鉴权失败 (${response.code})")
+                        !response.isSuccessful -> throw SyncException.ProtocolError(response.code, response.message)
+                    }
+
+                    // ISSUE-P0-09 / ISSUE-P3-206：下载体「流式 + 声明尺寸」双重封顶——超大响应被拒绝
+                    // 而非整体物化致 OOM（远端或系统 CA 级 MITM 是唯一可单方面触发的一方）；
+                    // 内容边读边写进调用方 sink，下载期堆占用为常量缓冲（不再 ~2×S 整份物化）
+                    SyncDownloadLimits.copyBounded(
+                        input = response.body.byteStream(),
+                        declaredLength = response.body.contentLength(),
+                        label = "WebDAV",
+                        sink = sink
+                    )
+                    Unit
                 }
-
-                // ISSUE-P0-09：下载体「流式 + 声明尺寸」双重封顶——超大响应被拒绝而非
-                // `bytes()` 整体物化致 OOM（远端或系统 CA 级 MITM 是唯一可单方面触发的一方）
-                SyncDownloadLimits.readBounded(
-                    input = response.body.byteStream(),
-                    declaredLength = response.body.contentLength(),
-                    label = "WebDAV"
-                )
             }
         }
-    }
 
     override suspend fun upload(
         remotePath: String,

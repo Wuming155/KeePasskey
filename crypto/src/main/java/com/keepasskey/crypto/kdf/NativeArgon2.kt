@@ -19,17 +19,37 @@ object NativeArgon2 {
     /** argon2_type：Argon2id */
     const val TYPE_ARGON2ID = 2
 
+    /** 探活 KAT 的固定输入长度（password 32B / salt 16B，KDBX 规约口径） */
+    private const val PROBE_PASSWORD_LEN = 32
+    private const val PROBE_SALT_LEN = 16
+
+    /**
+     * 探活 KAT（ISSUE-P3-204）：固定输入 + 冻结期望摘要，与同批其余内核口径对齐。
+     *
+     * 输入：Argon2id v0x13，t=1 / m=8 KiB / p=1，password = 32×0x00，salt = 16×0x00，
+     * 无 secret / associatedData，输出 32 字节。
+     * 期望值由独立参考实现（phc-winner-argon2 系 `argon2-cffi`）计算并冻结，
+     * 使探活不仅能发现「库没加载 / 符号缺失 / 返回 null」，还能发现「内核返回同长度
+     * 垃圾值」这类静默错误——后者若漏过，会以「派生密钥错误 → HMAC 校验失败 →
+     * 用户无法解锁」的形式在真机上暴露（可用性窗口，无机密性后果，见 ISSUE-P3-204）。
+     * 回归对拍：`Argon2ProbeKatTest` 在宿主 JVM 以同输入断言原生输出逐字节等于本值。
+     */
+    private val PROBE_KAT_HEX: String =
+        "c9cc39f9d3cc47bb2db7c1be933c763de2724869bf55c412382afbc904cb3407"
+
     /**
      * 可用性探活（懒加载一次）：加载 .so 并以极小参数（t=1, m=8 KiB, p=1）真实试算，
-     * 确保功能可用而非仅加载成功；桌面 JVM / 个别机型失败时返回 false。
+     * 且与 [PROBE_KAT_HEX] 冻结摘要逐字节比对（ISSUE-P3-204 起，原「非空即通过」升级为
+     * KAT 对照，与 `NativeAesKdf` / `NativeTwofish` 等同批内核口径一致）；
+     * 桌面 JVM / 个别机型失败时返回 false。
      */
     val available: Boolean by lazy {
         try {
             System.loadLibrary("keepasskey_argon2")
-            // 探活试算：随机占位输入，结果仅用于验证调用通路，即刻丢弃
+            // 探活试算：固定输入，结果仅用于 KAT 对照，对照后即刻清零
             val probe = deriveKey(
-                password = ByteArray(32),
-                salt = ByteArray(16),
+                password = ByteArray(PROBE_PASSWORD_LEN),
+                salt = ByteArray(PROBE_SALT_LEN),
                 secret = null,
                 associatedData = null,
                 iterations = 1,
@@ -38,8 +58,14 @@ object NativeArgon2 {
                 version = 0x13,
                 type = TYPE_ARGON2ID
             )
-            probe?.fill(0)
-            probe != null
+            val kat = hexToBytes(PROBE_KAT_HEX)
+            val matches = probe != null && probe.size == kat.size && probe.contentEquals(kat)
+            try {
+                probe?.fill(0)
+            } finally {
+                kat.fill(0)
+            }
+            matches
         } catch (t: Throwable) {
             false
         }
@@ -101,4 +127,7 @@ object NativeArgon2 {
         }
         return out
     }
+
+    private fun hexToBytes(hex: String): ByteArray =
+        ByteArray(hex.length / 2) { i -> hex.substring(i * 2, i * 2 + 2).toInt(16).toByte() }
 }

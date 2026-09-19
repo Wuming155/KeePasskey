@@ -118,6 +118,7 @@ class SyncEngine(
         val remoteEtag = cleanEtag(remoteMeta.etag)
         val remoteProbe = RemoteConsistencyProbe(
             provider = provider,
+            cache = cache,
             remotePath = remotePath,
             baseEtag = baseEtag,
             remoteEtag = remoteEtag,
@@ -150,23 +151,28 @@ class SyncEngine(
             // 直接落库会产生脏缓存并污染三哈希基线，fail-fast 终止
             throw SyncException.ProtocolError(400, "远程路径指向目录而非数据库文件: $remotePath")
         }
-        val downloadResult = provider.download(remotePath)
-        val remoteBytes = downloadResult.getOrElse { ex ->
+        // ISSUE-P3-206：下载体流式接收进缓存 tmp（下载期不在堆上整份物化），摘要接收期同步累计
+        val receipt = try {
+            cache.receiveRemote(remotePath) { sink ->
+                provider.download(remotePath, sink).getOrThrow()
+            }
+        } catch (ex: Throwable) {
             events.tryEmit(SyncCacheEvent.CouldntOpenFromRemote(remotePath, ex))
             throw ex
         }
 
         // ISSUE-P2-18：若远端返回设备侧曾接受过的历史版本（回退/重放），拒绝写入缓存与基线
-        // ISSUE-P3-167：本份远端字节的摘要**只算一次**并全程贯穿——原实现分别在回滚裁决、
-        // 缓存写入与高水位记录三处各算一遍全库 SHA-256（ETag 缺失路径另有探测侧一次）。
-        val remoteDigest = SyncCache.sha256Hex(remoteBytes)
-        if (isReplay(remotePath, remoteDigest)) {
+        // ISSUE-P3-167：摘要由接收期一次算出并全程贯穿，不再对整库重算
+        if (isReplay(remotePath, receipt.digest)) {
+            val remoteBytes = receipt.readBytes()
+            receipt.abort()
             return SyncOpenResult.RollbackRejected(remoteBytes, meta.etag)
         }
 
-        val hash = cache.writeCache(remotePath, remoteBytes, precomputedDigest = remoteDigest)
-        advanceBaseAndPersist(cache, remotePath, meta.etag, hash, remoteBytes)
-        recordAccepted(remotePath, remoteDigest)
+        val remoteBytes = receipt.readBytes()
+        receipt.commit()
+        advanceBaseAndPersist(cache, remotePath, meta.etag, receipt.digest, remoteBytes)
+        recordAccepted(remotePath, receipt.digest)
         events.tryEmit(SyncCacheEvent.LoadedFromRemoteInSync(remotePath))
         return SyncOpenResult.RemoteSynced(remoteBytes, meta.etag)
     }
@@ -207,23 +213,29 @@ class SyncEngine(
         remoteEtag: String
     ): SyncOpenResult {
         if (remoteProbe.isRemoteUnchanged()) {
-            if (remoteProbe.downloaded != null) {
-                // 内容哈希裁决命中：内容一致，仅刷新元数据，无需重复写缓存
+            if (remoteProbe.hasDownloaded) {
+                // 内容哈希裁决命中：内容一致，仅刷新元数据，无需重复写缓存；
+                // 探测用的接收回执与 base 内容一致，tmp 用后即弃（ISSUE-P3-206）
+                remoteProbe.received().abort()
                 cache.updateBase(remotePath, baseVersionHash, remoteEtag.ifEmpty { baseEtag })
             }
             events.tryEmit(SyncCacheEvent.LoadedFromRemoteInSync(remotePath))
             return SyncOpenResult.RemoteSynced(cachedBytes, remoteEtag.ifEmpty { baseEtag })
         }
-        // 远端有更新，拉取刷新
-        val remoteBytes = remoteProbe.remoteBytes()
+        // 远端有更新，拉取刷新（回执已在探测期接收，决策树内复用不重复下载）
+        val receipt = remoteProbe.received()
         // ISSUE-P2-18：重放的历史版本拒绝落地
-        if (isReplay(remotePath, remoteBytes)) {
+        if (isReplay(remotePath, receipt.digest)) {
+            val remoteBytes = receipt.readBytes()
+            receipt.abort()
             return SyncOpenResult.RollbackRejected(remoteBytes, remoteEtag)
         }
-        val newHash = cache.writeCache(remotePath, remoteBytes)
+        val remoteBytes = receipt.readBytes()
+        receipt.commit()
+        val newHash = receipt.digest
         cache.updateBase(remotePath, newHash, remoteEtag)
         cache.writeBaseContent(remotePath, remoteBytes)
-        recordAccepted(remotePath, remoteBytes)
+        recordAccepted(remotePath, newHash)
         events.tryEmit(SyncCacheEvent.UpdatedCachedFileOnLoad(remotePath))
         return SyncOpenResult.RemoteSynced(remoteBytes, remoteEtag)
     }
@@ -257,12 +269,17 @@ class SyncEngine(
             return SyncOpenResult.RemoteUnreachableUsingCache(cachedBytes)
         }
         if (!remoteProbe.isRemoteUnchanged()) {
-            // 本地有修改且远端也有修改 -> 双方冲突
-            val remoteBytes = remoteProbe.remoteBytes()
+            // 本地有修改且远端也有修改 -> 双方冲突（远端内容仅供三方合并，缓存保留本地工作副本）
+            val receipt = remoteProbe.received()
             // ISSUE-P2-18：重放的历史版本不参与三方合并
-            if (isReplay(remotePath, remoteBytes)) {
+            if (isReplay(remotePath, receipt.digest)) {
+                val remoteBytes = receipt.readBytes()
+                receipt.abort()
                 return SyncOpenResult.RollbackRejected(remoteBytes, remoteEtag)
             }
+            val remoteBytes = receipt.readBytes()
+            // 冲突路径不落地：远端内容不写缓存（保留本地），接收 tmp 用后即弃（ISSUE-P3-206）
+            receipt.abort()
             events.tryEmit(SyncCacheEvent.OpenedFromLocalDueToConflict(remotePath))
             return SyncOpenResult.ConflictDetected(cachedBytes, remoteBytes, remoteEtag)
         }
@@ -277,14 +294,20 @@ class SyncEngine(
         }
         val uploadEx = uploadResult.exceptionOrNull()
         if (uploadEx is SyncException.ConflictError) {
-            val remoteBytes = remoteProbe.remoteBytes()
+            // 412 预条件失败：远端冲突内容已在探测期流式接收，读出后按冲突处置（不落地缓存）
+            val receipt = remoteProbe.received()
             // ISSUE-P2-18：重放的历史版本不参与三方合并
-            if (isReplay(remotePath, remoteBytes)) {
+            if (isReplay(remotePath, receipt.digest)) {
+                val remoteBytes = receipt.readBytes()
+                receipt.abort()
                 return SyncOpenResult.RollbackRejected(
                     remoteBytes,
                     uploadEx.remoteEtag.ifEmpty { remoteEtag }
                 )
             }
+            val remoteBytes = receipt.readBytes()
+            // 冲突路径不落地：远端内容不写缓存（保留本地），接收 tmp 用后即弃（ISSUE-P3-206）
+            receipt.abort()
             events.tryEmit(SyncCacheEvent.OpenedFromLocalDueToConflict(remotePath))
             return SyncOpenResult.ConflictDetected(
                 cachedBytes,
@@ -330,22 +353,32 @@ class SyncEngine(
         } else {
             val ex = uploadResult.exceptionOrNull()
             if (ex is SyncException.ConflictError) {
-                val downloadResult = provider.download(remotePath)
-                val remoteBytes = downloadResult.getOrNull()
-                if (remoteBytes != null) {
+                // ISSUE-P3-206：远端冲突内容流式接收（仅供合并，不落地缓存），失败归一为远端不可达
+                var downloadFailure: Throwable? = null
+                val receipt = try {
+                    cache.receiveRemote(remotePath) { sink ->
+                        provider.download(remotePath, sink).getOrThrow()
+                    }
+                } catch (t: Throwable) {
+                    downloadFailure = t
+                    null
+                }
+                if (receipt != null) {
                     // ISSUE-P2-18：远端冲突内容若为设备侧曾接受过的历史版本（回退/重放），拒绝合并
-                    if (isReplay(remotePath, remoteBytes)) {
+                    if (isReplay(remotePath, receipt.digest)) {
+                        receipt.abort()
                         SyncCommitResult.RollbackRejected(keptLocal = true)
                     } else {
+                        val remoteBytes = receipt.readBytes()
+                        receipt.abort()
                         SyncCommitResult.ConflictNeedsMerge(remoteBytes, ex.remoteEtag)
                     }
                 } else {
-                    // 远端已确认冲突但拉取远端内容失败：严禁以 ByteArray(0) 伪造空冲突远端
+                    // 远端已确认冲突但拉取远端内容失败：严禁以空字节伪造冲突远端
                     // ——空字节会被当作合法远端版本参与三方合并，导致远端全部内容被静默丢弃。
                     // 本地缓存已在步骤 1 安全保留，如实返回远端不可达，
                     // 待网络恢复后重新同步走完整的冲突检测与合并流程。
-                    val downloadEx = downloadResult.exceptionOrNull()
-                    events.tryEmit(SyncCacheEvent.CouldntSaveToRemote(remotePath, downloadEx ?: ex))
+                    events.tryEmit(SyncCacheEvent.CouldntSaveToRemote(remotePath, downloadFailure ?: ex))
                     SyncCommitResult.RemoteUnreachable(keptLocal = true)
                 }
             } else {

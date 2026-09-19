@@ -32,6 +32,7 @@ import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.IOException
+import java.io.OutputStream
 
 /** TASK-21：用户可见消息已资源化；单测无资源环境，注入返回占位文本的假 StringsProvider */
 private val TEST_STRINGS = com.keepasskey.app.ui.model.StringsProvider { _, _ -> "" }
@@ -84,13 +85,15 @@ class SyncCoordinatorTest {
             )
         }
 
-        override suspend fun download(remotePath: String): Result<ByteArray> {
+        // ISSUE-P3-206 流式契约：内容边读边写进 sink
+        override suspend fun download(remotePath: String, sink: OutputStream): Result<Unit> {
             downloadFailure?.let { return Result.failure(it) }
             if (!isReachable) return Result.failure(SyncException.NetworkError("Network error"))
             val item = remoteStorage[remotePath] ?: return Result.failure(
                 SyncException.FileNotFound("File not found")
             )
-            return Result.success(item.first)
+            sink.write(item.first)
+            return Result.success(Unit)
         }
 
         override suspend fun upload(remotePath: String, data: ByteArray, expectedEtag: String?): Result<String> {

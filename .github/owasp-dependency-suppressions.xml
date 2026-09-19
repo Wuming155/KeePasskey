@@ -164,8 +164,17 @@
             范围与护栏：本豁免**只绑定 `CVE-2026-53914` 这一个 CVE**；Kotlin 出现任何**其它** CVE 时闸门照常失败。
             **若将来 `:app:releaseRuntimeClasspath` 上出现低于 2.4.20 的 Kotlin 构件，本豁免即不应再适用，
             必须重新评估**（该情形在本次升级后已不成立）。
+
+            ISSUE-P3-205 版本界护栏（机检于 `SupplyChainSuppressionPolicyTest`）：
+            1. regex 由无界 `^pkg:maven/org\.jetbrains\.kotlin/.*$` 收窄为**显式版本族枚举**
+               （1.6.10 / 1.8.x / 2.2.x / 2.3.x / 2.4.x——即本仓依赖图中实际出现过的 Kotlin 构件版本面，
+               含构建工具链 shade 的旧版），杜绝「任意新构件 × 任意新版本」进仓即被豁免的旁路；
+               工具链升级引入新版本族时本条**失效并令闸门红灯**，强制重新评估（fail-closed，期望行为）；
+            2. 运行时 stdlib 的「≥ 2.4.20」下界不靠 regex 表达，而由守卫测试直接解析
+               `gradle/libs.versions.toml` 的 `kotlin` 版本并断言 ≥ 2.4.20（notes 声明的修复版）——
+               降级 PR 会先被该断言拦下，而非静默享受豁免。
         ]]></notes>
-        <packageUrl regex="true">^pkg:maven/org\.jetbrains\.kotlin/.*$</packageUrl>
+        <packageUrl regex="true">^pkg:maven/org\.jetbrains\.kotlin/.*@(1\.6\.10|1\.8\.\d+|2\.2\.\d+|2\.3\.\d+|2\.4\.\d+)$</packageUrl>
         <cve>CVE-2026-53914</cve>
     </suppress>
 </suppressions>

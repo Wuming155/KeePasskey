@@ -1,5 +1,6 @@
 package com.keepasskey.sync.scenario
 
+import com.keepasskey.sync.downloadBytes
 import com.keepasskey.sync.model.SyncException
 import com.keepasskey.sync.webdav.WebDavSyncProvider
 import kotlinx.coroutines.Dispatchers
@@ -247,7 +248,7 @@ class WebDavSyncScenarioTest {
         val etag = p.upload("big-vault.kdbx", payload).getOrThrow()
         assertTrue(etag.isNotBlank())
 
-        val downloaded = p.download("big-vault.kdbx").getOrThrow()
+        val downloaded = p.downloadBytes("big-vault.kdbx").getOrThrow()
         assertArrayEquals("2MiB 载荷必须逐字节一致", payload, downloaded)
 
         val meta = p.getMetadata("big-vault.kdbx").getOrThrow()
@@ -315,7 +316,7 @@ class WebDavSyncScenarioTest {
             .build()
 
         val start = System.nanoTime()
-        val result = provider(shortTimeoutClient).download("vault.kdbx")
+        val result = provider(shortTimeoutClient).downloadBytes("vault.kdbx")
         val elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start)
 
         assertTrue("无响应必须在读取超时后如实失败", result.isFailure)
@@ -333,7 +334,7 @@ class WebDavSyncScenarioTest {
                 .setSocketPolicy(SocketPolicy.DISCONNECT_DURING_RESPONSE_BODY)
         )
 
-        val result = provider().download("vault.kdbx")
+        val result = provider().downloadBytes("vault.kdbx")
         // 核心不变量：要么如实失败，要么拿到完整字节——绝不静默返回半截数据
         if (result.isSuccess) {
             assertArrayEquals("若返回成功则必须字节完整", full, result.getOrThrow())
@@ -347,14 +348,14 @@ class WebDavSyncScenarioTest {
         // GET 500 -> ProtocolError
         startQueued()
         server.enqueue(MockResponse().setResponseCode(500).setBody("boom"))
-        val r500 = provider().download("vault.kdbx")
+        val r500 = provider().downloadBytes("vault.kdbx")
         assertTrue(r500.exceptionOrNull() is SyncException.ProtocolError)
         server.shutdown()
 
         // GET 401 -> AuthenticationError
         server = MockWebServer(); startQueued()
         server.enqueue(MockResponse().setResponseCode(401))
-        val r401 = provider().download("vault.kdbx")
+        val r401 = provider().downloadBytes("vault.kdbx")
         assertTrue(r401.exceptionOrNull() is SyncException.AuthenticationError)
         server.shutdown()
 
@@ -479,7 +480,7 @@ class WebDavSyncScenarioTest {
 
         val p = provider()
         p.upload(name, "payload".toByteArray()).getOrThrow()
-        p.download(name).getOrThrow()
+        p.downloadBytes(name).getOrThrow()
 
         val putPath = server.takeRequest().path.orEmpty()
         val getPath = server.takeRequest().path.orEmpty()
@@ -526,7 +527,7 @@ class WebDavSyncScenarioTest {
         val etag = p.upload("empty.kdbx", ByteArray(0)).getOrThrow()
         assertTrue(etag.isNotBlank())
 
-        val downloaded = p.download("empty.kdbx").getOrThrow()
+        val downloaded = p.downloadBytes("empty.kdbx").getOrThrow()
         assertEquals("零字节文件必须下载为空数组而非失败", 0, downloaded.size)
 
         val meta = p.getMetadata("empty.kdbx").getOrThrow()
@@ -589,7 +590,7 @@ class WebDavSyncScenarioTest {
         startQueued()
         val url = server.url("/").toString()
         server.shutdown()
-        val result = provider().download("vault.kdbx")
+        val result = provider().downloadBytes("vault.kdbx")
         assertTrue("连接被拒必须如实失败: ${result.getOrNull()}", result.isFailure)
         assertTrue(url.isNotBlank())
     }
@@ -601,7 +602,7 @@ class WebDavSyncScenarioTest {
             .connectTimeout(300, TimeUnit.MILLISECONDS)
             .build()
         val p = WebDavSyncProvider("http://10.255.255.1:9", "tester", "pw".toCharArray(), client = shortConnect)
-        val result = p.download("vault.kdbx")
+        val result = p.downloadBytes("vault.kdbx")
         assertTrue("连接超时必须如实失败", result.isFailure)
     }
 
@@ -609,7 +610,7 @@ class WebDavSyncScenarioTest {
     fun `场景9 https端点指向明文服务器 TLS握手失败如实失败`() = runTest {
         startQueued() // 明文 HTTP 服务器
         val p = WebDavSyncProvider("https://localhost:${server.port}", "tester", "pw".toCharArray(), client = plainClient)
-        val result = p.download("vault.kdbx")
+        val result = p.downloadBytes("vault.kdbx")
         assertTrue("TLS 握手失败必须如实失败", result.isFailure)
     }
 }
