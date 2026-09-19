@@ -183,6 +183,9 @@ internal fun ProviderSelectionSection(
 
 /**
  * 区块 3：同步状态卡片与手动测试（自 CloudSyncScreen 整体抽出）
+ *
+ * §206：状态头行 / 反馈消息条 / 操作按钮行下沉至 [SyncStatusHeaderRow] / [SyncFeedbackMessage] /
+ * [SyncActionButtonsRow]（CloudSyncStatusSections.kt，逐字搬动、零行为变更），本文件保留卡片编排。
  */
 @Composable
 internal fun SyncStatusCard(
@@ -190,8 +193,6 @@ internal fun SyncStatusCard(
     onTriggerSync: () -> Unit,
     onTestConnection: () -> Unit
 ) {
-    val securityColors = LocalSecurityColors.current
-
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -201,36 +202,7 @@ internal fun SyncStatusCard(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = stringResource(R.string.sync_connection_status),
-                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
-            )
-            val statusVerified = uiState.isConnectionVerified
-            val statusColor = when {
-                uiState.isSyncing -> MaterialTheme.colorScheme.primary
-                statusVerified -> securityColors.success
-                else -> securityColors.warning
-            }
-            Box(
-                modifier = Modifier
-                    .clip(CircleShape)
-                    .background(statusColor.copy(alpha = 0.18f))
-                    .padding(horizontal = 12.dp, vertical = 6.dp)
-            ) {
-                Text(
-                    text = uiState.syncStatusText.ifEmpty {
-                        stringResource(R.string.sync_status_unverified)
-                    },
-                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                    color = statusColor
-                )
-            }
-        }
+        SyncStatusHeaderRow(uiState = uiState)
 
         Text(
             text = uiState.syncLastTime,
@@ -238,70 +210,14 @@ internal fun SyncStatusCard(
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
 
-        if (uiState.syncFeedbackMessage != null) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f))
-                    .padding(horizontal = 12.dp, vertical = 8.dp)
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Default.CheckCircle,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = uiState.syncFeedbackMessage.resolveText(),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                }
-            }
-        }
+        SyncFeedbackMessage(message = uiState.syncFeedbackMessage)
 
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Button(
-                onClick = onTriggerSync,
-                // 未验证连接时禁用主同步，先走「测试连接」防误触
-                enabled = !uiState.isSyncing && uiState.isConnectionVerified,
-                shape = RoundedCornerShape(12.dp),
-                // ISSUE-P3-132 ③：禁用态补可见边界（共用组件，理由见 ButtonStyles.kt）
-                colors = disabledPrimaryButtonColors(),
-                border = disabledPrimaryButtonBorder(),
-                modifier = Modifier.weight(1f)
-            ) {
-                if (uiState.isSyncing) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(16.dp),
-                        strokeWidth = 2.dp,
-                        color = MaterialTheme.colorScheme.onPrimary
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(stringResource(R.string.sync_btn_syncing))
-                } else {
-                    Icon(Icons.Default.Sync, contentDescription = stringResource(R.string.sync_cd_sync_now), modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(stringResource(R.string.sync_sync_now_btn))
-                }
-            }
-
-            OutlinedButton(
-                onClick = { onTestConnection() },
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier.weight(1f)
-            ) {
-                Icon(Icons.Default.NetworkCheck, contentDescription = stringResource(R.string.sync_cd_test_connection), modifier = Modifier.size(18.dp))
-                Spacer(modifier = Modifier.width(6.dp))
-                Text(stringResource(R.string.sync_test_connection_btn))
-            }
-        }
+        SyncActionButtonsRow(
+            isSyncing = uiState.isSyncing,
+            isConnectionVerified = uiState.isConnectionVerified,
+            onTriggerSync = onTriggerSync,
+            onTestConnection = onTestConnection
+        )
     }
 }
 

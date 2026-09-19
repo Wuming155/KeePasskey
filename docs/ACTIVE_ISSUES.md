@@ -139,18 +139,20 @@
   > 更早的第 4~6 项也已分别结案（§171/§190、§195、§189/§199）——历史编号映射与逐批去向见各批次文档，不再在此复述。
   > 处置结论另见限界 **§20** 与
   > [`resolved/batches/182-合并层冲突对下沉与早退守卫限界批次.md`](resolved/batches/182-合并层冲突对下沉与早退守卫限界批次.md)。
-  1. **Compose 面的长函数**（第 3 目的剩余部分）：**§205 现跑 = 16 个 ≥100 行函数**（§200 现跑 18；
-     §205 拆出 `PackageBlocklistManageDialog` 131 与 `GeneratorContent` 121 两处，
-     逐批留痕见 [`resolved/batches/205-Compose长函数拆分两处批次.md`](resolved/batches/205-Compose长函数拆分两处批次.md)），
-     扣除 2 个 PD-11 豁免 NavGraph ⇒ **待拆 14**。
+  1. **Compose 面的长函数**（第 3 目的剩余部分）：**§206 现跑 = 14 个 ≥100 行函数**（§200 现跑 18；
+     §205 拆出 `PackageBlocklistManageDialog` 131 与 `GeneratorContent` 121、§206 拆出
+     `BasicCredentialsCard` 118 与 `SyncStatusCard` 119，逐批留痕见
+     [`resolved/batches/205-Compose长函数拆分两处批次.md`](resolved/batches/205-Compose长函数拆分两处批次.md)
+     与 [`resolved/batches/206-Compose长函数拆分两处批次.md`](resolved/batches/206-Compose长函数拆分两处批次.md)），
+     扣除 2 个 PD-11 豁免 NavGraph ⇒ **待拆 12**。
      逐个名单与已出表 9 个的逐批留痕见
      [`resolved/batches/181-长函数度量工具化与快照分流批次.md`](resolved/batches/181-长函数度量工具化与快照分流批次.md) §3
      及各批次文档（§178~§198），此处不再复述；
      **计数今后一律现跑 `python tools/doc/long_functions.py`**（三条判据与其踩坑史写在工具文档串里，
      条目内不再抄录，以免重演 §175 一次性脚本漏报 10 条的失真）。
      **当前表内头部**（现跑读数）：`CreateVaultWizardDialog` 158（**受限界 §179 下限**——主密码
-     `CharArray` 擦除链的「单一现场」决定，勿再拆）、`EntryDetailScreen` 121、`SyncStatusCard` 119、
-     `themeListSection` 118、`BasicCredentialsCard` 118。
+     `CharArray` 擦除链的「单一现场」决定，勿再拆）、`EntryDetailScreen` 121、`themeListSection` 118、
+     `VaultDatabaseCard` 117、`HealthCheckScoreCard` 116。
      **口径问题已裁决（§184，PD-11）**：两个纯接线装配表 `keepasskeySettingsNavGraph` / `keepasskeyNavGraph`
      （逻辑行 <5）**豁免本目**；裁决全文、分类计数依据与「逻辑行 ≥5 即重新计入」的重开条件见
      [`architecture/产品裁决登记.md`](architecture/产品裁决登记.md) PD-11。

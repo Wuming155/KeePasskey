@@ -101,7 +101,12 @@ class UiMd3AlignmentWiringTest {
                 "app/src/main/java/com/keepasskey/app/ui/screens/settings/subscreens/HealthCheckScreen.kt",
                 "app/src/main/java/com/keepasskey/app/ui/screens/settings/subscreens/HealthCheckScreenSections.kt"
             ),
-            listOf("app/src/main/java/com/keepasskey/app/ui/screens/settings/subscreens/CloudSyncComponents.kt")
+            // §206：SyncStatusCard 的按钮行下沉至 CloudSyncStatusSections.kt（逐字搬动），
+            // 守卫按「门面 + 分支文件」并集扫描（只放宽定位范围、不降低断言强度）
+            listOf(
+                "app/src/main/java/com/keepasskey/app/ui/screens/settings/subscreens/CloudSyncComponents.kt",
+                "app/src/main/java/com/keepasskey/app/ui/screens/settings/subscreens/CloudSyncStatusSections.kt"
+            )
         ).forEach { paths ->
             val path = paths.joinToString(separator = " + ")
             val source = paths.joinToString(separator = "\n") { readSource(it) }

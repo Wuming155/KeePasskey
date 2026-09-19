@@ -248,6 +248,8 @@
 
 | §205 | Compose 长函数拆分两处批次（`ISSUE-P3-188` 第 1 项渐进：待拆 **16 → 14**——`PackageBlocklistManageDialog` 131 出表（段落**另起新文件** `PackageBlocklistDialogSections.kt`：原文件距 400 余量仅 25 行，按 §192/§196「余量逐案判」口径；Body / Confirm / Dismiss 槽位 / 名单行 + rememberAppOption 同迁 private→internal，状态仍由对话框持有经参数回传不自持；**回调语义保真**：名单模式 confirm 槽=关闭，拆分时曾误写无条件 submit 已即时纠偏）+ `GeneratorContent` 121 出表（`GeneratorScreen.kt` 295 行余量充足、段落**追加原文件**：TopBar / LazyListScope 模式 Tab / 历史区 isEmpty 早退保序）；逐字核对 MISSING 全为回调参数化 / 可见性 / 注释、绘制代码逐字未动；tier2=28 维持不变名单零变动；test 2233 同值全绿、lint 214 持平） | `ISSUE-P3-188`（第 1 项渐进） | [`205-Compose长函数拆分两处批次.md`](resolved/batches/205-Compose长函数拆分两处批次.md) |
 
+| §206 | Compose 长函数拆分两处批次（`ISSUE-P3-188` 第 1 项渐进：待拆 **14 → 12**——`BasicCredentialsCard` 118 出表（`EntryDetailCards.kt` 397 行距 400 仅 3 行 ⇒ 段落另起新文件 `EntryDetailCardSections.kt`：用户名行 + 密码区，haptic 同源不自持）+ `SyncStatusCard` 119 出表（`CloudSyncComponents.kt` 追加将贴 400 档沿 ⇒ 新文件 `CloudSyncStatusSections.kt`：状态头行 / 反馈条（null 早退等价）/ 按钮行）；**守卫并集活例**：`UiMd3AlignmentWiringTest` 禁用态配色判据锚门面文件首跑即红（守卫有效证据）⇒ 同批改「门面+分支文件」并集、断言零变化；tier2=28 维持；test 2233 同值全绿、lint 214 持平） | `ISSUE-P3-188`（第 1 项渐进） | [`206-Compose长函数拆分两处批次.md`](resolved/batches/206-Compose长函数拆分两处批次.md) |
+
 ## 分册导航
 
 | 分册 | 覆盖批次 | 时间 | 索引 |

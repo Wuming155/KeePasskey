@@ -54,6 +54,9 @@ import com.keepasskey.app.ui.theme.MonospaceTotpStyle
 
 /**
  * 基础凭据卡片（用户名 / 密码行与强度条）
+ *
+ * §206：用户名行与密码区下沉至 [BasicCredentialsUsernameRow] / [BasicCredentialsPasswordArea]
+ * （EntryDetailCardSections.kt，逐字搬动、零行为变更），本文件保留卡片编排。
  */
 @Composable
 internal fun BasicCredentialsCard(
@@ -63,39 +66,15 @@ internal fun BasicCredentialsCard(
     onCopyPassword: (String) -> Unit,
     onCopyUsername: (String, String) -> Unit
 ) {
-    val haptic = LocalHapticFeedback.current
     BentoCard(
         modifier = Modifier.fillMaxWidth(),
         backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = stringResource(R.string.detail_username_label),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = entry.username,
-                        style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                }
-                IconButton(onClick = { onCopyUsername(entry.title, entry.username) }) {
-                    Icon(
-                        imageVector = Icons.Default.ContentCopy,
-                        contentDescription = stringResource(R.string.cd_copy_username),
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-            }
+            BasicCredentialsUsernameRow(
+                entry = entry,
+                onCopyUsername = onCopyUsername
+            )
 
             Box(
                 modifier = Modifier
@@ -104,73 +83,12 @@ internal fun BasicCredentialsCard(
                     .background(MaterialTheme.colorScheme.outlineVariant)
             )
 
-            Column {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = stringResource(R.string.detail_password_label),
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        // 明文/掩码切换：交叉淡入 + 容器尺寸平滑过渡（消除突兀跳变）
-                        AnimatedContent(
-                            targetState = uiState.isPasswordVisible,
-                            transitionSpec = {
-                                (fadeIn(tween(150)) togetherWith fadeOut(tween(90)))
-                                    .using(SizeTransform(clip = false))
-                            },
-                            label = "passwordReveal"
-                        ) { isVisible ->
-                            Text(
-                                text = if (isVisible) uiState.revealedPassword.orEmpty() else entry.passwordMasked,
-                                style = MonospacePasswordStyle.copy(
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                    fontSize = 17.sp
-                                ),
-                                maxLines = 1
-                            )
-                        }
-                    }
-                    Row {
-                        IconButton(onClick = {
-                            // 揭示明文用轻触感（Tick）：克制、不与复制成功反馈混淆
-                            haptic.performHapticFeedback(HapticFeedbackType.SegmentTick)
-                            onTogglePasswordVisibility()
-                        }) {
-                            Icon(
-                                imageVector = if (uiState.isPasswordVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                                contentDescription = stringResource(R.string.cd_toggle_password_visibility),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                        IconButton(onClick = {
-                            haptic.performHapticFeedback(HapticFeedbackType.Confirm)
-                            onCopyPassword(entry.title)
-                        }) {
-                            Icon(
-                                imageVector = Icons.Default.ContentCopy,
-                                contentDescription = stringResource(R.string.cd_copy_password),
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(8.dp))
-                // TASK-32 整改：投影层恒不解密密码（entry.strengthBits 恒 null），
-                // 真实熵由 ViewModel 在用户显式查看密码时估算后经 uiState 下发
-                PasswordStrengthBar(
-                    entropyBits = uiState.passwordStrengthBits,
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
+            BasicCredentialsPasswordArea(
+                uiState = uiState,
+                entry = entry,
+                onTogglePasswordVisibility = onTogglePasswordVisibility,
+                onCopyPassword = onCopyPassword
+            )
         }
     }
 }
