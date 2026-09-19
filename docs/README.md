@@ -27,6 +27,7 @@
 |---|---|
 | [`records/原生Argon2真机验证记录.md`](records/原生Argon2真机验证记录.md) | 原生内核真机 / 模拟器实测登记（**禁混表**） |
 | [`records/真机吞吐实测记录_2026-09-17.md`](records/真机吞吐实测记录_2026-09-17.md) | 真机吞吐实测（`ISSUE-P3-153` / `P3-155` / 新发现 `P2-92`）：ChaCha20 / AES-CBC / Passkey 三算法前后对比，含方法学差异声明与复现命令 |
+| [`records/JNI零拷贝评估_2026-09-19.md`](records/JNI零拷贝评估_2026-09-19.md) | JNI 零拷贝评估（`ISSUE-P3-187`）：三条候选路线契约、有状态 vs 无状态四维对照（AC⑤）、DirectByteBuffer 探针真机对比与结论（AC②④） |
 | [`records/KDBX4与复合密钥实战互操作排查日志.md`](records/KDBX4与复合密钥实战互操作排查日志.md) | KDBX4 / 复合密钥互操作排障留痕 |
 | [`records/ci-静态校准记录.md`](records/ci-静态校准记录.md) | CI 配置与静态分析的校准留痕 |
 | [`records/退役依据承接-ISSUE-P3-09.md`](records/退役依据承接-ISSUE-P3-09.md) | `ISSUE-P3-09` 依据承接（Action 升级 / ProGuard 收窄 / Compose BOM 回归判据）；原 `.handoff` 依据从未入库 |

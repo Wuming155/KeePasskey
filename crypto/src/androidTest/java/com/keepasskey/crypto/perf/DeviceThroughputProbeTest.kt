@@ -23,8 +23,10 @@ import org.bouncycastle.crypto.util.PrivateKeyInfoFactory
 import org.bouncycastle.asn1.x9.X9ECParameters
 import org.bouncycastle.asn1.sec.SECNamedCurves
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Test
 import java.io.ByteArrayInputStream
+import java.nio.ByteBuffer
 import java.io.ByteArrayOutputStream
 import java.math.BigInteger
 import java.security.SecureRandom
@@ -441,6 +443,76 @@ class DeviceThroughputProbeTest {
 
         Arrays.fill(payload, 0); Arrays.fill(chachaKey, 0); Arrays.fill(nonce, 0)
         Arrays.fill(aesKey, 0); Arrays.fill(aesIv, 0)
+    }
+
+    // ================= ISSUE-P3-187 AC②：DirectByteBuffer 零拷贝对比 =================
+
+    /**
+     * 零拷贝探针对比（`ISSUE-P3-187` AC②，评估测量、非回归闸门）：
+     * 现状路线（`byte[]` 进 / 新数组出 = 一次入参拷贝 + 一次出参拷贝 + 入参零化）vs
+     * 原型路线（[NativeChaCha20.applyKeystreamDirect]，direct `ByteBuffer` 就地变换 =
+     * 零拷贝、零分配、零化责任上移调用方）。同 10 MiB 载荷、同轮次、逐轮输出
+     * `PERF-PROBE| 零拷贝对比-10轮|`，评估裁定由记录文档承担。
+     */
+    @Test
+    fun probeJni零拷贝DirectByteBuffer_对比_连续10轮() {
+        val key = ByteArray(32) { ((it * 13 + 3) and 0xFF).toByte() }
+        val nonce = ByteArray(12) { ((it * 7 + 1) and 0xFF).toByte() }
+
+        // ---- 正确性前置：两条路径输出必须逐字节一致（64 KiB 样本，KAT 之外的路径一致性证）----
+        val sample = ByteArray(CHUNK_64K) { ((it * 17 + 5) and 0xFF).toByte() }
+        val expected = NativeChaCha20.applyKeystreamChecked(key, nonce, 0, sample)
+        val directSample = ByteBuffer.allocateDirect(sample.size).apply {
+            put(sample)
+            flip()
+        }
+        val processed = NativeChaCha20.applyKeystreamDirect(key, nonce, 0, directSample)
+        assertTrue(
+            "零拷贝探针必须返回处理字节数（返回 $processed，期望 ${sample.size}）",
+            processed == sample.size
+        )
+        // JNI 就地写不移动 Java 侧 position——首次 flip 后（position=0, limit=size）即可读取
+        for (i in sample.indices) {
+            if (directSample.get(i) != expected[i]) {
+                fail("零拷贝路径与现状路径输出不一致（offset=$i）")
+                return
+            }
+        }
+
+        // ---- 10 轮对比：同 10 MiB 载荷（现状 = byte[] 进新数组出；原型 = direct 就地）----
+        val payload = ByteArray(PAYLOAD_BYTES) { ((it * 31 + 11) and 0xFF).toByte() }
+        val direct = ByteBuffer.allocateDirect(PAYLOAD_BYTES).apply {
+            put(payload)
+            flip()
+        }
+
+        fun medianMs(block: () -> Unit): Double {
+            block()
+            val samples = (0 until SAMPLES).map {
+                val start = System.nanoTime()
+                block()
+                (System.nanoTime() - start) / 1_000_000.0
+            }
+            return samples.sorted()[samples.size / 2]
+        }
+
+        repeat(10) { index ->
+            val legacy = medianMs { NativeChaCha20.applyKeystreamChecked(key, nonce, 0, payload) }
+            val directMs = medianMs { NativeChaCha20.applyKeystreamDirect(key, nonce, 0, direct) }
+            println(
+                "$PREFIX 零拷贝对比-10轮|round=${index + 1}|" +
+                    "现状byte数组=${fmt(legacy)}ms|DirectByteBuffer=${fmt(directMs)}ms"
+            )
+        }
+
+        // 擦除收尾（零拷贝契约：擦除责任上移调用方——direct 堆外段就地归零）
+        direct.rewind()
+        while (direct.hasRemaining()) direct.put(0)
+        Arrays.fill(payload, 0)
+        Arrays.fill(sample, 0)
+        Arrays.fill(expected, 0)
+        Arrays.fill(key, 0)
+        Arrays.fill(nonce, 0)
     }
 
     // ================= 采样与输出基建 =================

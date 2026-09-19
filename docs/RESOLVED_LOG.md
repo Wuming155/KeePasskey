@@ -260,6 +260,8 @@
 
 | §211 | Compose 长函数收官批次（`ISSUE-P3-188` 第 1 项**闭环**：待拆 **3 → 0**——`KeePasskeyTheme` 104 出表（resolveAppColorScheme 须 @Composable 因内部读 LocalContext，过程缺陷当场修）+ `PrivilegedBrowserSettingsScreen` 100 出表（**§199 守卫锚零触碰**：顶栏参数与注释留宿主，只下沉内容段）+ `EntryDetailScreen` 121 出表（**§169 全文遵守**：SAF 三态/exportLauncher/确认对话框留 Route 现场，只下沉生命周期编排/Snackbar 消费/Content 纯装配段；**过程纠偏真险情**：onExportAttachment 写路径误搬 Host 不会回写 Route 状态 ⇒ 改 Route 传导出回调）；现跑表内余项全为已登记豁免，「无未登记的超限项」达标；test 2233 同值全绿、真机 connected 64 例全绿、lint 214 持平） | `ISSUE-P3-188`（第 1 项闭环） | [`211-Compose长函数收官批次.md`](resolved/batches/211-Compose长函数收官批次.md) |
 
+| §212 | JNI 零拷贝评估批次（`ISSUE-P3-187` **评估项结案**：AC① 三路线契约（Critical=GC 钉住窗口劣于②不采纳 / DirectByteBuffer=唯一零拷贝+无窗口+纪律自洽 / CipherSpi=长线演进与②正交）+ AC⑤ 四维对照 + AC② 探针原型实测——Rust `applyKeystreamDirect`（DirectBuffer 直取就地变换无拷贝无分配）+ Kotlin 绑定 + 探针用例，**现状 24.05ms（基线 24.7 复现一致）vs 直扣 3.7ms ≈6.5×，拷贝+分配 44% 份额消除，AC② 达标**；正确性前置两路径逐字节一致；Redmi 4X 真机缺测如实登记（USB 断连，探针已入库随批补跑）；`cargo test` 73 全绿、crypto connected 36 全绿、四层设备义务模拟器轮完成、符号契约 CI 10→11；**实施另立 `ISSUE-P3-198`**；限界 §15/§17 解除条件已更新；顺带登记 P3-188 第 2 项用户容差裁定（±15%）） | `ISSUE-P3-187`（结案）/ `ISSUE-P3-198`（新立）/ `ISSUE-P3-188`（容差裁定登记） | [`212-JNI零拷贝评估批次.md`](resolved/batches/212-JNI零拷贝评估批次.md) |
+
 ## 分册导航
 
 | 分册 | 覆盖批次 | 时间 | 索引 |

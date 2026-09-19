@@ -21,7 +21,7 @@ use crate::chacha20_stream;
 use crate::passkey_sign;
 use crate::strength;
 use crate::twofish_cbc::{self, BLOCK_LEN};
-use jni::objects::{JByteArray, JObject};
+use jni::objects::{JByteArray, JByteBuffer, JObject};
 use jni::sys::{jbyteArray, jint, jintArray, jlong};
 use jni::JNIEnv;
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -323,6 +323,64 @@ pub extern "system" fn Java_com_keepasskey_crypto_cipher_NativeChaCha20_applyKey
 }
 
 // ============================================================================
+// 4b) ChaCha20 直扣（DirectByteBuffer 零拷贝探针，ISSUE-P3-187 AC②）
+// ============================================================================
+
+/// ChaCha20 直扣（零拷贝**探针**，`ISSUE-P3-187` AC②）：入参 `data` 为 **direct**
+/// `java.nio.ByteBuffer`，经 `GetDirectBufferAddress` 就地变换——无 `convert_byte_array`
+/// 拷贝、无输出 `new_byte_array`、无入参零化副本。
+///
+/// 返回处理字节数（`jint`）；失败（非 direct 缓冲 / 参数非法 / panic）返回 `-1`。
+///
+/// 与既有 `applyKeystream` 的契约差异（评估结论逐条写明，见评估文档）：
+/// 1. **擦除责任上移**：本函数不做 `Zeroizing`——缓冲是调用方拥有的堆外内存，
+///    变换后是否归零由调用方裁定（探针在断言与现状路径一致后随堆外段一并释放）；
+/// 2. **无返回副本**：结果就地写在 direct buffer 内（调用方按 `capacity`/`position` 读取）；
+/// 3. **临界区纪律**：不走 `GetPrimitiveArrayCritical`（无 GC 钉住窗口）——
+///    direct buffer 地址稳定，裸指针生命周期由 JNI 引用与本次调用界定；
+/// 4. **非生产路径**：仅供 AC② 的真机对比探针调用；生产 `ChaCha20CipherEngine` 不经此函数。
+#[no_mangle]
+pub extern "system" fn Java_com_keepasskey_crypto_cipher_NativeChaCha20_applyKeystreamDirect<'local>(
+    env: JNIEnv<'local>,
+    _thiz: JObject<'local>,
+    key: JByteArray<'local>,
+    nonce: JByteArray<'local>,
+    byte_offset: jlong,
+    data: JByteBuffer<'local>,
+) -> jint {
+    if key.is_null() || nonce.is_null() || byte_offset < 0 {
+        return -1;
+    }
+
+    let outcome = catch_unwind(AssertUnwindSafe(|| -> Option<jint> {
+        let key_buf = Zeroizing::new(env.convert_byte_array(&key).ok()?);
+        let nonce_buf = Zeroizing::new(env.convert_byte_array(&nonce).ok()?);
+        // 堆外地址直取：无拷贝、无分配（非 direct 缓冲 / null 此处返回 Err → -1）。
+        // SAFETY：ptr 在 buffer 存活期内有效；len 取自 GetDirectBufferCapacity，
+        // from_raw_parts_mut 的安全前提由 JNI 引用界定（本函数内不逃逸）。
+        let ptr = env.get_direct_buffer_address(&data).ok()?;
+        let len = env.get_direct_buffer_capacity(&data).ok()?;
+        if ptr.is_null() || len == 0 {
+            return None;
+        }
+        let slice = unsafe { std::slice::from_raw_parts_mut(ptr, len) };
+        let processed = len as jint;
+        chacha20_stream::apply_keystream_at(
+            &key_buf,
+            &nonce_buf,
+            byte_offset as u64,
+            slice,
+        )?;
+        Some(processed)
+    }));
+
+    match outcome {
+        Ok(Some(n)) => n,
+        _ => -1,
+    }
+}
+
+// ============================================================================
 // 5) Passkey 签名（ISSUE-P3-153 / §146）
 // ============================================================================
 
@@ -425,6 +483,15 @@ mod tests {
             jlong,
             JByteArray<'a>,
         ) -> jbyteArray = Java_com_keepasskey_crypto_cipher_NativeChaCha20_applyKeystream;
+        // ISSUE-P3-187 AC② 探针：DirectByteBuffer 零拷贝直扣（返回 jint，非 jbyteArray）
+        let chacha_direct: for<'a> extern "system" fn(
+            JNIEnv<'a>,
+            JObject<'a>,
+            JByteArray<'a>,
+            JByteArray<'a>,
+            jlong,
+            JByteBuffer<'a>,
+        ) -> jint = Java_com_keepasskey_crypto_cipher_NativeChaCha20_applyKeystreamDirect;
         let aes_enc: for<'a> extern "system" fn(
             JNIEnv<'a>,
             JObject<'a>,

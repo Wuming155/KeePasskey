@@ -172,6 +172,10 @@
   2. **第二档（400~500 行文件）渐进消化**：**§196 复跑仍为 28 个**（§189 起连续七批未变；口径：五模块 `src/main` 全部 `.kt`
      逐文件计数、**400 与 500 两端皆含**，脚本 `python tools/doc/count_line_tiers.py` 一次给出两档；
      取数须在**最终写盘后**——§165 §7 校正过一批「测量点早于写盘」造成的 `+1` 漂移）。
+     > **2026-09-19 用户裁定（容差口径）**：行数「超过一行两行就不用管了，加减 15% 以内都不用管」——
+     > 即 ≤460 行（400+15%）的文件**不**为出表而拆；现档内仅 `RealVaultRepository` 489 /
+     > `VaultRepository` 478 超容差，且两者本属「刻意排后」（限界 §1.6 可达性穷举牵动）。
+     > 后续批次对第二档的任何拆分以**职责下沉**为准，**不得**为凑行数删注释 / 空行。
      当前头部：`RealVaultRepository` 489、`VaultRepository` 478、`RuntimeIntegrityDetector` 470、
      `KdbxHeader` 461、`KdbxXmlParser` 454、`VaultListScreen` 447、`UnlockScreen` 446。
      **已消化 14 个**（一律「只搬不改逻辑」；逐文件明细与逐批留痕见 `resolved/batches/159`~`186`，
@@ -204,68 +208,25 @@
      守卫的区分力可用 `git show <回归态提交>:<文件>` 代入其谓词复核，**不必**注入临时坏码。
 - **依据**：`.codebuddy/rules/engineering-rules.md` §高内聚低耦合 / §禁止魔法数字；本条目为 2026-09-18 用户命题「消除巨型类和魔法数字」。
 
-### ISSUE-P3-187 JNI 零拷贝评估（原生加密内核的边界拷贝成本）
+### ISSUE-P3-198 ChaCha20 / AES 直扣（DirectByteBuffer）生产化承接（`ISSUE-P3-187` 评估的定案实施）
 
-> **条目性质**：**评估项**（先出结论与量化证据，再决定是否实施），非既定整改。
+- **核实时间点与方式**：2026-09-19，`ISSUE-P3-187` 评估定案（见
+  [`records/JNI零拷贝评估_2026-09-19.md`](records/JNI零拷贝评估_2026-09-19.md)）——
+  探针 `probeJni零拷贝DirectByteBuffer_对比_连续10轮` 在 Pixel_10 上实测
+  **现状 24.05 ms（中位 10 轮，与 2026-09-17 基线 24.7 ms 复现一致）vs 直扣 3.7 ms（≈6.5×）**，
+  拷贝 + 分配开销（占单次 JNI 44%）被消除，AC② 达标；正确性前置为两条路径输出逐字节一致。
+  原生侧新增导出 `NativeChaCha20.applyKeystreamDirect`（direct `ByteBuffer` 就地变换，
+  **非生产路径**探针），4 ABI 已构建、`cargo test` 73 例全绿、符号契约 CI 清单已更新（10→11）。
+- **本条承接内容（生产化）**：
+  1. `ChaCha20CipherEngine` 与 `CbcStreams` 的调用方 `ByteBuffer` 化（或桥内双形态），
+     生产路径切换到直扣；**擦除责任上移**——direct 缓冲的会话级复用与用毕就地归零
+     由调用方承担（评估文档 §3 契约）；
+  2. AES 族同构探针与生产化（`NativeAes` 直扣，方法学同 ChaCha20）；
+  3. Redmi 4X 真机 10 轮对比补测（评估期间真机 USB 断连缺测，探针已入库随批可跑），
+     以真机数据复核 AC② 达标结论；
+  4. 既有语义回归全绿：`AesNativeParityTest` / `ChaCha20NativeEngineTest` /
+     `StreamKeyOwnershipContractTest` / `CipherFallbackParityTest` 等 + 四层设备侧套件。
+- **边界**：`CipherSpi` 有状态 Provider 路线**不在本条**（评估定案为长线演进方向，
+  与直扣正交；如未来立项须按评估文档 §6 四维对照先行）。
+- **依据**：`records/JNI零拷贝评估_2026-09-19.md`；`已知工程限界.md` §15 / §17（已按结论更新）。
 
-- **核实时间点与方式**：2026-09-18，双机（Redmi 4X / A53 级 与 M332BF / 现代）**连续 10 轮**
-  instrumented 探针 `DeviceThroughputProbeTest.probeJni边界_10MiB成本分解_连续10轮`
-  （logcat 前缀 `PERF-PROBE|`）＋ 独立 aarch64 二进制内核实测；原始数字见
-  `docs/records/真机吞吐实测记录_2026-09-17.md` §8.2。
-- **背景（实测得出，非推断）**：现有 JNI 桥是**逐字节拷贝**形态——入参 `convert_byte_array`
-  （含一次零化 `Vec` 分配）+ 出参 `SetByteArrayRegion`。同一份 **10 MiB** 载荷的分解：
-  - ChaCha20 单次 JNI **24.7 ms**（现代）/ 151.6 ms（A53），其**内核本体**仅 **16.3 / 85 ms**
-    ⇒ 边界 + 拷贝 ≈ **8.4 / 66.6 ms**；
-  - AES 单次 JNI **34.5 ms**，内核本体 13.3 ms ⇒ 边界 + 拷贝 ≈ **21.2 ms**；
-  - 该成本**与算法无关**（两个内核同形对照），且**随调用粒度线性增长**（AES 生产 48.1 ms 中
-    28% 为 PKCS#7 整缓冲垫片与明文擦除，同属此类）。
-- **影响面**：所有已下沉内核（Twofish / ChaCha20 / AES / Passkey）都交这道税；它同时是
-  `已知工程限界.md` **§15**（ChaCha20 刻意不做零拷贝）与 **§17**（AES 统一后的性能代价）的
-  共同成因。零拷贝若成立，**收益面覆盖全族**，而非单个算法。
-- **JNI 面的现状覆盖清单（本条的"未闭合项"定义；2026-09-18 核实）**：
-
-  | 面 | 状态 |
-  |---|---|
-  | 符号与定长契约 | ✅ CI `native-gate` 逐名集合核对（4 ABI） |
-  | 密钥所有权 | ✅ `ownedSecrets` 契约 + `StreamKeyOwnershipContractTest` |
-  | 错误语义 | ✅ 与 JCE / BC 逐例对拍（`AesNativeParityTest` 等） |
-  | 兜底分支等价 | ✅ `CipherFallbackParityTest`（强制兜底 ↔ 原生逐字节一致，含流式） |
-  | 探活（库能否正确工作） | ✅ 官方向量 KAT 自测；AES 已由 1 分组扩至 **NIST 4 分组 + `iv` 出口契约** |
-  | 边界代价 | ✅ 已量化并登记（限界 §15 / §17） |
-  | **零拷贝（效率）** | ❌ **未做——本条要回答的问题** |
-  | **有状态形态（结构性消除密钥所有权风险）** | ❌ **未评估——并入本条 AC ⑤** |
-
-  ⇒ 也就是说：**本条目是 JNI 面上唯一未闭合的一项，且它只影响效率，不影响正确性**。
-- **评估目标与验收标准**：
-  1. **先定义契约**（评估产出物，须落文档）：**三条候选路线**各自的契约——
-     ① `GetPrimitiveArrayCritical` / `ReleasePrimitiveArrayCritical`（`mode` 选择）；
-     ② `DirectByteBuffer`；
-     ③ **`CipherSpi`（有状态 Provider 形态，参考 KeePassDX 的 `NativeAESCipherSpi`）**。
-     三者的**临界区内禁止分配、禁止 panic**、异常 / 早退路径的 release 语义、
-     与现有桥范式（`catch_unwind` + `Zeroizing` 全路径擦除）的取舍须逐条写明。
-     > 路线 ③ 的特别之处（2026-09-18 补充）：JCA 的
-     > `update(byte[] in, int inOff, int inLen, byte[] out, int outOff)` **由调用方提供输出缓冲**，
-     > 结构上允许零拷贝；且 `CipherSpi` 天然**有状态**（`engineInit` 时把密钥交给原生自持），
-     > 顺带消除「Java 侧提前擦除密钥 ⇒ 全零密钥」这一类风险（§147 实测踩过）。
-  2. **真机前后对比**（同机 / 同语料 / 10 轮中位）：以 §8.2 的四个锚点为基线，
-     目标把「边界 + 拷贝」压到 **≤ 内核本体 + 20%**；达不到即判**收益不足**。
-  3. **语义零漂移**：`AesNativeParityTest` / `ChaCha20NativeEngineTest` / `TwofishNativeParityTest` /
-     `StreamKeyOwnershipContractTest` / `CbcStreamFramingTest` / `CipherFallbackParityTest` 与三层
-     设备侧套件**保持全绿**；错误语义（失败返回、长度异常、擦除时点）逐例与现状对齐。
-  4. **结论必须入档**：无论可行与否，结论与依据登记到 `已知工程限界.md`（§15 / §17 的解除条件），
-     **不得只留聊天记录**。
-  5. **有状态 vs 无状态对比（AC ⑤，2026-09-18 追加）**：必须给出两种形态在
-     **密钥所有权 / 擦除时点 / 生命周期泄漏防护 / 可测试性** 四个维度上的对照结论；
-     若采用有状态形态，须证明它**不削弱**现有秘密治理纪律（`Zeroizing` 全路径擦除 / 显式清零），
-     并说明 `ownedSecrets` 契约在有状态形态下的等价物（应为「原生侧自持 + `close()` 时由原生擦除」）。
-- **失败回退**：
-  1. 临界区方案若与**秘密擦除纪律**冲突且无法自证（`Zeroizing` 全路径归零 / 禁止分配），
-     回退到「`DirectByteBuffer` + 显式清零」形态重评；
-  2. 上述两者均不可行时，回退到 **`CipherSpi`（有状态 Provider）路线**——它把密钥自持与输出缓冲
-     一并解决，但引入跨 JNI 的对象生命周期管理，须按 AC ⑤ 逐维对照后再定；
-  3. 三条路线均不可行 ⇒ **维持现状并收口**（当前代价已落在无感区：现代设备 <5 MB 库 +10~20 ms），
-     把「不做」的理由与解除条件登记到限界表。
-- **涉及文件**：`crypto/src/main/rust/src/jni_bridge_ext.rs`、`aes_cbc.rs`、`chacha20_stream.rs`、
-  `twofish_cbc.rs`；`crypto/src/main/java/com/keepasskey/crypto/cipher/NativeAes.kt` /
-  `NativeChaCha20.kt` / `NativeTwofish.kt` / `CbcStreams.kt`。
-- **依据**：实测记录 §8.2 / §8.3；`已知工程限界.md` §15 / §17；批次 `147-AES内核下沉批次.md`。

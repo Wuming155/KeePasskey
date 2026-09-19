@@ -2,6 +2,7 @@ package com.keepasskey.crypto.cipher
 
 import com.keepasskey.crypto.NativeCryptoLibrary
 import com.keepasskey.crypto.exception.CryptoException
+import java.nio.ByteBuffer
 
 /**
  * ChaCha20（RFC 8439）原生 JNI 绑定（ISSUE-P3-153 / §145）。
@@ -79,6 +80,21 @@ object NativeChaCha20 {
         byteOffset: Long,
         data: ByteArray
     ): ByteArray?
+
+    /**
+     * **零拷贝探针**（`ISSUE-P3-187` AC②，非生产路径）：对 **direct** [data] 就地施加密钥流——
+     * 无 `convert_byte_array` 拷贝、无输出新数组、无入参零化副本。
+     *
+     * 契约差异（相对 [applyKeystream]）：**擦除责任上移调用方**（缓冲为调用方拥有的堆外内存，
+     * 原生侧不做 `Zeroizing`）；返回处理字节数，失败（非 direct / 参数非法 / panic）返回 `-1`。
+     * 仅供真机对比探针调用，`ChaCha20CipherEngine` 生产路径不经此函数。
+     */
+    external fun applyKeystreamDirect(
+        key: ByteArray,
+        nonce: ByteArray,
+        byteOffset: Long,
+        data: ByteBuffer
+    ): Int
 
     /** 原生调用统一入口：失败归一为 [CryptoException.CipherException]（fail-closed）。 */
     fun applyKeystreamChecked(
