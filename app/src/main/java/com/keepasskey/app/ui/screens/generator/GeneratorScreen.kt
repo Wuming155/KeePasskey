@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.History
@@ -140,17 +141,7 @@ private fun GeneratorContent(
         modifier = modifier.fillMaxSize(),
         containerColor = MaterialTheme.colorScheme.background,
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
-        topBar = {
-            TopAppBar(
-                title = {
-                    Text(
-                        text = stringResource(R.string.nav_generator),
-                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
-                    )
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
-            )
-        }
+        topBar = { GeneratorTopBar() }
     ) { innerPadding ->
         LazyColumn(
             modifier = Modifier
@@ -163,32 +154,7 @@ private fun GeneratorContent(
             item { Spacer(modifier = Modifier.height(4.dp)) }
 
             // 1. 模式切换 Tab
-            item {
-                // Material3 已将 TabRow 弃用（官方替代 PrimaryTabRow / SecondaryTabRow）。
-                // 容器色 / 内容色沿用原显式指定；唯一外观差异是选中指示器由下划线变为
-                // 药丸式高亮——该视觉效果**未经真机/模拟器验证**（本仓当前无渲染侧证据）。
-                PrimaryTabRow(
-                    selectedTabIndex = uiState.mode.ordinal,
-                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                    contentColor = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.clip(CapsuleShape)
-                ) {
-                    GeneratorMode.entries.forEach { mode ->
-                        val isSelected = uiState.mode == mode
-                        Tab(
-                            selected = isSelected,
-                            onClick = { actions.setMode(mode) },
-                            text = {
-                                Text(
-                                    text = stringResource(mode.labelRes),
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                    fontSize = 13.sp
-                                )
-                            }
-                        )
-                    }
-                }
-            }
+            generatorModeTabsItem(mode = uiState.mode, onSetMode = actions::setMode)
 
             // 2. 主展示卡片：生成的密码与快捷操作
             item {
@@ -215,40 +181,106 @@ private fun GeneratorContent(
             }
 
             // 4. 历史记录 (Recent Generations)
-            if (uiState.history.isNotEmpty()) {
-                item {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.History,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = stringResource(R.string.gen_history_title, uiState.history.size),
-                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                    }
-                }
-
-                items(uiState.history) { historyItem ->
-                    // ISSUE-P2-16：同上，历史行渲染边界的 String 物化按条目实例 remember，避免重复物化
-                    val displayHistory = remember(historyItem) { historyItem.readString() }
-                    HistoryPasswordRow(
-                        password = displayHistory,
-                        onSelect = { actions.selectHistoryPassword(historyItem) },
-                        onCopy = { actions.copyGeneratedPassword(historyItem) }
-                    )
-                }
-            }
+            generatorHistoryItems(
+                history = uiState.history,
+                onSelect = actions::selectHistoryPassword,
+                onCopy = actions::copyGeneratedPassword
+            )
 
             item { Spacer(modifier = Modifier.height(24.dp)) }
         }
+    }
+}
+
+/** 顶栏：标题固定为「生成器」，容器色显式沿用 surface（§205 段落下沉，逐字等价）。 */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun GeneratorTopBar() {
+    TopAppBar(
+        title = {
+            Text(
+                text = stringResource(R.string.nav_generator),
+                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
+            )
+        },
+        colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
+    )
+}
+
+/**
+ * 模式切换 Tab（LazyListScope 段落，§205 下沉、逐字等价）。
+ *
+ * Material3 已将 TabRow 弃用（官方替代 PrimaryTabRow / SecondaryTabRow）。
+ * 容器色 / 内容色沿用原显式指定；唯一外观差异是选中指示器由下划线变为
+ * 药丸式高亮——该视觉效果**未经真机/模拟器验证**（本仓当前无渲染侧证据）。
+ */
+private fun LazyListScope.generatorModeTabsItem(
+    mode: GeneratorMode,
+    onSetMode: (GeneratorMode) -> Unit
+) {
+    item {
+        PrimaryTabRow(
+            selectedTabIndex = mode.ordinal,
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+            contentColor = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.clip(CapsuleShape)
+        ) {
+            GeneratorMode.entries.forEach { candidate ->
+                val isSelected = mode == candidate
+                Tab(
+                    selected = isSelected,
+                    onClick = { onSetMode(candidate) },
+                    text = {
+                        Text(
+                            text = stringResource(candidate.labelRes),
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                            fontSize = 13.sp
+                        )
+                    }
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 历史记录（Recent Generations）区（LazyListScope 段落，§205 下沉、逐字等价）：
+ * 标题行 + 逐条历史行；历史为空时整段不渲染。
+ */
+private fun LazyListScope.generatorHistoryItems(
+    history: List<ProtectedString>,
+    onSelect: (ProtectedString) -> Unit,
+    onCopy: (ProtectedString) -> Unit
+) {
+    if (history.isEmpty()) return
+    item {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Default.History,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(18.dp)
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(
+                text = stringResource(R.string.gen_history_title, history.size),
+                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                color = MaterialTheme.colorScheme.primary
+            )
+        }
+    }
+
+    items(history) { historyItem ->
+        // ISSUE-P2-16：同上，历史行渲染边界的 String 物化按条目实例 remember，避免重复物化
+        val displayHistory = remember(historyItem) { historyItem.readString() }
+        HistoryPasswordRow(
+            password = displayHistory,
+            onSelect = { onSelect(historyItem) },
+            onCopy = { onCopy(historyItem) }
+        )
     }
 }
 

@@ -7,44 +7,29 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
-import androidx.compose.material.icons.filled.Apps
-import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.keepasskey.app.R
-import com.keepasskey.app.apps.InstalledAppOption
-import com.keepasskey.app.apps.InstalledAppsCatalog
-import com.keepasskey.app.ui.components.AppIconSlot
 import com.keepasskey.app.ui.components.AppPickerDialog
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 
 /**
  * 自动填充三级屏蔽的管理组件（包级 / 保存侧 / 字段签名级）。
@@ -52,6 +37,9 @@ import kotlinx.coroutines.withContext
  * ISSUE-P3-43：由 `AutofillSettingsScreen.kt` 搬出并扩展。
  * 包名列表型管理对话框（包级填充黑名单、保存侧黑名单）**共用**同一实现并参数化文案，
  * 避免两份几乎相同的对话框各自演化；字段签名级因签名不可逆，只能提供「计数 + 全部清除」。
+ *
+ * §205：`text` 主体 / confirm / dismiss 槽位与名单行渲染下沉至同包
+ * [PackageBlocklistDialogSections]（逐字搬动、零行为变更），本文件保留接口实现与状态编排。
  */
 
 /** 可点击的「进入管理」列表行（右侧箭头样式与设置页其它二级入口一致）。 */
@@ -139,93 +127,36 @@ internal fun PackageBlocklistManageDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(
-                    text = description,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-
-                if (blockedPackages.isEmpty()) {
-                    Text(
-                        text = emptyText,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                } else {
-                    LazyColumn(modifier = Modifier.heightIn(max = 220.dp)) {
-                        items(blockedPackages, key = { it }) { packageName ->
-                            BlockedPackageRow(
-                                packageName = packageName,
-                                onRemove = { onRemove(packageName) }
-                            )
-                        }
-                    }
-                }
-
-                FilledTonalButton(
-                    onClick = { showPicker = true },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Apps,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(stringResource(R.string.autofill_blacklist_pick_app))
-                }
-
-                if (showAddError) {
-                    Text(
-                        text = stringResource(R.string.autofill_blacklist_add_invalid),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error
-                    )
-                }
-
-                if (manualEntry) {
-                    OutlinedTextField(
-                        value = pendingPackage,
-                        onValueChange = {
-                            pendingPackage = it
-                            showAddError = false
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text(addHint) },
-                        singleLine = true,
-                        isError = showAddError
-                    )
-                } else {
-                    TextButton(onClick = {
-                        manualEntry = true
-                        showAddError = false
-                    }) {
-                        Text(stringResource(R.string.autofill_blacklist_manual_toggle))
-                    }
-                }
-            }
+            PackageBlocklistBody(
+                description = description,
+                emptyText = emptyText,
+                addHint = addHint,
+                blockedPackages = blockedPackages,
+                showAddError = showAddError,
+                manualEntry = manualEntry,
+                pendingPackage = pendingPackage,
+                onPickApp = { showPicker = true },
+                onPendingPackageChange = {
+                    pendingPackage = it
+                    showAddError = false
+                },
+                onToggleManual = {
+                    manualEntry = true
+                    showAddError = false
+                },
+                onRemove = onRemove
+            )
         },
         confirmButton = {
-            if (manualEntry) {
-                TextButton(
-                    onClick = { submit(pendingPackage) },
-                    enabled = pendingPackage.isNotBlank()
-                ) {
-                    Text(stringResource(R.string.btn_add))
-                }
-            } else {
-                TextButton(onClick = onDismiss) {
-                    Text(stringResource(R.string.btn_close))
-                }
-            }
+            PackageBlocklistConfirmButton(
+                manualEntry = manualEntry,
+                pendingPackage = pendingPackage,
+                // 手工输入模式 = 新增（成败由错误提示反馈）；名单模式 = 关闭（既有语义）
+                onConfirm = { if (manualEntry) submit(pendingPackage) else onDismiss }
+            )
         },
         dismissButton = {
-            if (manualEntry) {
-                TextButton(onClick = onDismiss) {
-                    Text(stringResource(R.string.btn_close))
-                }
-            }
+            PackageBlocklistDismissButton(manualEntry = manualEntry, onDismiss = onDismiss)
         }
     )
 
@@ -288,68 +219,6 @@ internal fun FieldBlocklistClearDialog(
             }
         }
     )
-}
-
-@Composable
-private fun BlockedPackageRow(
-    packageName: String,
-    onRemove: () -> Unit
-) {
-    val app = rememberAppOption(packageName)
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-        AppIconSlot(app = app, size = 28.dp)
-        Spacer(modifier = Modifier.width(10.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = app.label,
-                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1
-            )
-            // 应用名不可读时回落为包名：此时不再重复渲染同一串，避免"同一串出现两遍"的噪声
-            if (app.label != packageName) {
-                Text(
-                    text = packageName,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1
-                )
-            }
-        }
-        IconButton(onClick = onRemove) {
-            Icon(
-                imageVector = Icons.Default.Delete,
-                contentDescription = stringResource(R.string.autofill_blacklist_delete_cd),
-                tint = MaterialTheme.colorScheme.error,
-                modifier = Modifier.size(20.dp)
-            )
-        }
-    }
-}
-
-/**
- * 解析包名的显示信息（应用名 + 图标，IO 线程）。
- *
- * 包名不可解析（未安装 / 受包可见性限制）时**如实回落为包名本身**并给出系统语义图标——
- * 不伪造应用名，也不假装该应用存在。
- */
-@Composable
-private fun rememberAppOption(packageName: String): InstalledAppOption {
-    val context = LocalContext.current
-    val placeholder = remember(packageName) { InstalledAppOption(packageName, packageName) }
-    val option = produceState(initialValue = placeholder, packageName) {
-        val resolved = withContext(Dispatchers.IO) {
-            InstalledAppsCatalog.lookup(context, packageName)
-        }
-        if (resolved != null) value = resolved
-    }
-    return option.value
 }
 
 // IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI

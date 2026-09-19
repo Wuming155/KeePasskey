@@ -246,6 +246,8 @@
 
 | §204 | 断言响应材料宿主写入口径批次（`ISSUE-P3-188` 剩余清单第 4 项**结案** ⇒ 回到 1~3 项：§174 路线②落地——新增宿主可用的极简写入器 `WebAuthnJsonWriter`（键序=插入序 / 紧凑 / AOSP 转义语义含 `\/`、不实现数字与 null），**注册 / 断言两处 payload 全部改走它**（`org.json` import 双双移除，`buildPrfClientExtensionResults` 收敛 private）；**四条宿主离线断言** `PasskeyAssertionPayloadBuildTest`（归属省略与不回退本应用包名含正对照 / prfEval=null 空对象 / authData 37 字节标准布局——条目「前 16 字节」系笔误按标准口径 / JCE 公钥验签 `authData‖SHA-256(clientDataJSON)`，解析走 SimpleJson、签名走生产 PEM 链路）+ 转义回归 8 例 + **设备侧 `org.json` 逐字节对拍 3 例双设备全绿**（该契约只能设备侧锁定）；守卫核对：`CredentialManagerCallerBindingWiringTest` 判据锚门控调用点与组装无交集、零改动；**过程发现并同批修复 `AutofillAuthChainDeviceTest` 两处缺陷**（`linePid()` split 双空格解析对 4 位 pid 恒假——真机此前两轮绿系 pid 恰好 5 位巧合、`INTEGRITY_WAIT_MS` 15s<30s 重扫周期采窗缺陷），修复后真机恢复全绿 64 例，模拟器残余「系统填充 UI 呈现」环境面 CI device-gate 以 notClass 排除、真机承担 ⇒ `ISSUE-P3-197` 更新收窄；宿主 **2221 → 2233**（+12）、lint 214 持平） | `ISSUE-P3-188`（第 4 项闭环）/ `ISSUE-P3-197`（根因定位并修复） | [`204-断言响应材料宿主写入口径批次.md`](resolved/batches/204-断言响应材料宿主写入口径批次.md) |
 
+| §205 | Compose 长函数拆分两处批次（`ISSUE-P3-188` 第 1 项渐进：待拆 **16 → 14**——`PackageBlocklistManageDialog` 131 出表（段落**另起新文件** `PackageBlocklistDialogSections.kt`：原文件距 400 余量仅 25 行，按 §192/§196「余量逐案判」口径；Body / Confirm / Dismiss 槽位 / 名单行 + rememberAppOption 同迁 private→internal，状态仍由对话框持有经参数回传不自持；**回调语义保真**：名单模式 confirm 槽=关闭，拆分时曾误写无条件 submit 已即时纠偏）+ `GeneratorContent` 121 出表（`GeneratorScreen.kt` 295 行余量充足、段落**追加原文件**：TopBar / LazyListScope 模式 Tab / 历史区 isEmpty 早退保序）；逐字核对 MISSING 全为回调参数化 / 可见性 / 注释、绘制代码逐字未动；tier2=28 维持不变名单零变动；test 2233 同值全绿、lint 214 持平） | `ISSUE-P3-188`（第 1 项渐进） | [`205-Compose长函数拆分两处批次.md`](resolved/batches/205-Compose长函数拆分两处批次.md) |
+
 ## 分册导航
 
 | 分册 | 覆盖批次 | 时间 | 索引 |
