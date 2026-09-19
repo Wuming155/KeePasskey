@@ -48,10 +48,47 @@ internal class EntryDetailDialogController {
 internal fun rememberEntryDetailDialogController(): EntryDetailDialogController =
     remember { EntryDetailDialogController() }
 
+/** 破坏性确认对话框上报的用户意图（ISSUE-P3-188 剩余清单第 5 项：把出口决策变成可 JVM 断言的纯函数）。 */
+internal enum class EntryDetailConfirmIntent { CONFIRM, DISMISS }
+
+/**
+ * 破坏性确认的出口决策：是否上行不可逆动作、是否复位触发态。
+ * 唯一裁定入口是 [entryDetailConfirmExit]——「取消 → 只复位、绝不上行」与
+ * 「确认 → 复位并上行」不得在调用点各自手写，否则「确认后才上行」的闸门语义无从断言。
+ */
+internal data class EntryDetailConfirmExit(
+    val propagateAction: Boolean,
+    val resetTriggerState: Boolean
+)
+
+internal fun entryDetailConfirmExit(intent: EntryDetailConfirmIntent): EntryDetailConfirmExit =
+    when (intent) {
+        EntryDetailConfirmIntent.CONFIRM ->
+            EntryDetailConfirmExit(propagateAction = true, resetTriggerState = true)
+        EntryDetailConfirmIntent.DISMISS ->
+            EntryDetailConfirmExit(propagateAction = false, resetTriggerState = true)
+    }
+
+/**
+ * 出口执行器：意图 → [entryDetailConfirmExit] → 按仓库口径「**先复位、再上行**」执行
+ * （§169 导出确认与 §198 删除确认同款顺序）。回滚确认历史上是「先上行、再复位」的孤例，
+ * §200 并入口径——唯一行为差异是 [propagate] 同步抛错时对话框先关闭，批次文档已留痕。
+ */
+internal fun entryDetailConfirmExitHandler(
+    reset: () -> Unit,
+    propagate: () -> Unit
+): (EntryDetailConfirmIntent) -> Unit = { intent ->
+    val exit = entryDetailConfirmExit(intent)
+    if (exit.resetTriggerState) reset()
+    if (exit.propagateAction) propagate()
+}
+
 /**
  * 渲染 [EntryDetailContent] 的全部对话框；每个对话框在关闭 / 确认后自行复位控制器状态。
  *
- * 接线与拆分前逐字一致（含 `LaunchedEffect(rev.id)` 的差异预备与 `onClearRevisionDiff` 收口）。
+ * §198 下沉时与拆分前逐字一致；§200 起两份破坏性确认（单条删除 / 版本回滚）的出口
+ * 改经 [entryDetailConfirmExitHandler] 统一裁定（顺序：先复位、再上行），其余接线
+ * （含 `LaunchedEffect(rev.id)` 的差异预备与 `onClearRevisionDiff` 收口）保持原样。
  */
 @Composable
 internal fun EntryDetailDialogHost(
@@ -80,11 +117,10 @@ internal fun EntryDetailDialogHost(
     // ISSUE-P3-48：单条删除确认（确认后才上行；语义为移入回收站 / 站内彻底删除）
     if (controller.showDeleteEntryConfirm) {
         EntryDetailDeleteEntryConfirm(
-            onDismissRequest = { controller.showDeleteEntryConfirm = false },
-            onConfirm = {
-                controller.showDeleteEntryConfirm = false
-                onDeleteEntry()
-            }
+            onExit = entryDetailConfirmExitHandler(
+                reset = { controller.showDeleteEntryConfirm = false },
+                propagate = onDeleteEntry
+            )
         )
     }
 
@@ -104,11 +140,10 @@ internal fun EntryDetailDialogHost(
     // 版本回滚确认对话框
     controller.revisionToRollback?.let { rev ->
         EntryDetailRollbackConfirm(
-            onDismissRequest = { controller.revisionToRollback = null },
-            onConfirm = {
-                onRollbackRevision(rev)
-                controller.revisionToRollback = null
-            }
+            onExit = entryDetailConfirmExitHandler(
+                reset = { controller.revisionToRollback = null },
+                propagate = { onRollbackRevision(rev) }
+            )
         )
     }
 
@@ -149,20 +184,20 @@ internal fun EntryDetailDialogHost(
 /**
  * 单条删除确认对话框（§198 自 [EntryDetailDialogHost] **原样下沉**，文案 / error 色 / 出口结构未改）。
  *
- * 「先复位、再上行」的组合**留在调用点**（本组件只接两个出口闭包）——与 §169 对导出确认的同一口径：
- * 状态所有权只有一处，段组件不持复位职责。
+ * §200 起只上报 [EntryDetailConfirmIntent]、自己不复位也不上行——「先复位、再上行」的组合
+ * 统一由调用点经 [entryDetailConfirmExitHandler] 执行（与 §169 对导出确认的同一口径：
+ * 状态所有权只有一处，段组件不持复位职责）。
  */
 @Composable
 private fun EntryDetailDeleteEntryConfirm(
-    onDismissRequest: () -> Unit,
-    onConfirm: () -> Unit
+    onExit: (EntryDetailConfirmIntent) -> Unit
 ) {
     AlertDialog(
-        onDismissRequest = onDismissRequest,
+        onDismissRequest = { onExit(EntryDetailConfirmIntent.DISMISS) },
         title = { Text(stringResource(R.string.detail_delete_entry_title)) },
         text = { Text(stringResource(R.string.detail_delete_entry_message)) },
         confirmButton = {
-            TextButton(onClick = onConfirm) {
+            TextButton(onClick = { onExit(EntryDetailConfirmIntent.CONFIRM) }) {
                 Text(
                     text = stringResource(R.string.btn_delete),
                     color = MaterialTheme.colorScheme.error
@@ -170,7 +205,7 @@ private fun EntryDetailDeleteEntryConfirm(
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismissRequest) {
+            TextButton(onClick = { onExit(EntryDetailConfirmIntent.DISMISS) }) {
                 Text(stringResource(R.string.btn_cancel))
             }
         }
@@ -180,26 +215,28 @@ private fun EntryDetailDeleteEntryConfirm(
 /**
  * 版本回滚确认对话框（§198 原样下沉；`Button` + `CapsuleShape` 的出口样式刻意**不与上面的
  * TextButton 版合并**——两者视觉语义不同，为省 20 行而统一它们属于为指标改动）。
+ *
+ * §200 起出口与删除确认同构：只上报 [EntryDetailConfirmIntent]，复位与上行由调用点的
+ * [entryDetailConfirmExitHandler] 执行；其「先上行、再复位」的历史顺序已并入口径（见该函数 KDoc）。
  */
 @Composable
 private fun EntryDetailRollbackConfirm(
-    onDismissRequest: () -> Unit,
-    onConfirm: () -> Unit
+    onExit: (EntryDetailConfirmIntent) -> Unit
 ) {
     AlertDialog(
-        onDismissRequest = onDismissRequest,
+        onDismissRequest = { onExit(EntryDetailConfirmIntent.DISMISS) },
         title = { Text(stringResource(R.string.detail_history_rollback)) },
         text = { Text(stringResource(R.string.detail_history_rollback_confirm)) },
         confirmButton = {
             Button(
-                onClick = onConfirm,
+                onClick = { onExit(EntryDetailConfirmIntent.CONFIRM) },
                 shape = CapsuleShape
             ) {
                 Text(stringResource(R.string.btn_restore))
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismissRequest) {
+            TextButton(onClick = { onExit(EntryDetailConfirmIntent.DISMISS) }) {
                 Text(stringResource(R.string.btn_cancel))
             }
         }
