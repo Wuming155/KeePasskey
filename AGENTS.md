@@ -89,10 +89,13 @@ Coroutines + Flow；**文档与代码注释使用简体中文**。
 - `python tools/kdbx-corpus/generate_corpus.py --check` — `.kdbx` 语料校验
 - `python tools/doc/count_line_tiers.py` / `python tools/doc/long_functions.py` / `python tools/doc/check_md_links.py`
   / `python tools/doc/logic_lines.py <文件> <函数名>` / `python tools/doc/count_test_results.py`
+  / `python tools/doc/check_resolved_index_sync.py`
   — 五模块行数分档复核 / 超长函数复核 / `docs/` 相对链接自检（**改任何文档后跑**，断链即退出码 1）
   / 装配表「逻辑行」分类计数（`PD-11` 重开条件的可执行判据）
   / **JVM 单测聚合计数的唯一尺子**（`test` 后跑它，**不要**自己 `glob` `test-results/**/*.xml`——
   那会把截图与真机 `connected` 的旧 XML 算进来，§190 现形过一次）。
+  / **`resolved/` 分册索引与批次正文双向一致性**自检（`BATCH_*.md` 登记集 ↔ `batches/*.md` 文件集
+  ↔ `resolved/README.md` 最大编号口径；**改任一批次 / 分册 / `resolved/README.md` 后跑**，漏登或陈旧行即退出码 1）
   这些计数**一律现跑、不得凭记忆或抄上一批文档**，且**度量工具一律用已知值反校**
   （判据与踩坑史写在各脚本文档串里）；逐字搬移复核用
   `python tools/doc/check_verbatim_move.py <原文件> <本体> [段落文件…]`；「多处重复代码是否真逐字相同」
