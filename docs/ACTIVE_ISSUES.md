@@ -206,7 +206,7 @@
   格式面的 7 份「待逐处判定」文件，须与 `.kdbx` 对拍同批做，属独立一段 ⇒ 本条**不得**据此读作已闭环，
   该独立一段已登记为 `ISSUE-P3-196`（本机工具链经实测**已就位**，非阻塞项））；
   剩余第二档渐进消化，未消化部分在批次文档留清单。
-- **当前进度（只留结论；逐批改动与验证见 `docs/resolved/batches/155`~`197`（§180 / §197 为文档面批次，不属本条的整改量））**：
+- **当前进度（只留结论；逐批改动与验证见 `docs/resolved/batches/155`~`198`（§180 / §197 为文档面批次，不属本条的整改量））**：
   - **第一档 8 文件**（`wc -l` 实测）：**达标 6**（`SyncCache` 382、`UnlockViewModel` 368、
     `DatabaseSettingsScreen` 339（§159 降到 369，后续批次回填至 370，§189 再降到 339）、`EntryEditFormSections` 351（§160）、
     `EntryDetailScreen` 349（§169）、`EntryDetailViewModel` 397（§170））；按理由登记 2（`SettingsViewModel` 543 / `DatabaseSession` 535，
@@ -229,7 +229,7 @@
     **全部只挪定义、未改任何取值**）；§167 复核出「唯一成片真实违例」= `@Preview(uiMode = 0x20)` 并已归零，
     当时的三个「待裁定」小项已由 §168 逐条落地（见违例清单第 4 目）。
 - **剩余清单（本条尚未闭环的部分，逐条自包含）**：
-  > **现为 1~4 项**。编号映射：早期批次正文里提到的「剩余清单第 3 项」= 此处第 2 项（第二档渐进消化）。
+  > **现为 1~5 项**（第 5 项由 §198 下沉时发现并新登）。编号映射：早期批次正文里提到的「剩余清单第 3 项」= 此处第 2 项（第二档渐进消化）。
   > **§190 起**：原第 4 项（三 VM 的会话锁定擦除直调用例）**已结案移出**（§171 详情页 / §190 编辑页 +
   > 设置页），原第 5 项（断言响应材料）上移为此处**第 4 项**。
   > **§195 起**：§190 登记的第 5 项（`SharedPreferences` 内存替身两份）**已结案移出**（§195 并为一份，
@@ -240,7 +240,7 @@
   > 「第 5 项 = 会话锁定直调用例」这类早期提法对应**§190 之前**的编号，现已不成立。
   > 处置结论另见限界 **§20** 与
   > [`resolved/batches/182-合并层冲突对下沉与早退守卫限界批次.md`](resolved/batches/182-合并层冲突对下沉与早退守卫限界批次.md)。
-  1. **Compose 面的长函数**（第 3 目的剩余部分）：**§196 复跑 = 18 个 ≥100 行函数，全部为 Compose 面**（§181 首测 28 → §183 削 `Argon2ParametersDialog` → §185 削 `KeePasskeyApp` → §186 削 `UnlockStandardUnlockContent` → §187 削 `AboutSettingsScreen` → §188 顺带削 `PrivilegedBrowserSettingsScreen`）；
+  1. **Compose 面的长函数**（第 3 目的剩余部分）：**§198 复跑 = 17 个 ≥100 行函数，全部为 Compose 面**（§181 首测 28 → §183 削 `Argon2ParametersDialog` → §185 削 `KeePasskeyApp` → §186 削 `UnlockStandardUnlockContent` → §187 削 `AboutSettingsScreen` → §188 顺带削 `PrivilegedBrowserSettingsScreen`）；
      逐个名单见 [`resolved/batches/181-长函数度量工具化与快照分流批次.md`](resolved/batches/181-长函数度量工具化与快照分流批次.md) §3。
      **计数今后一律现跑 `python tools/doc/long_functions.py`**（三条判据与其踩坑史写在工具文档串里，
      条目内不再抄录，以免重演 §175 一次性脚本漏报 10 条的失真）。
@@ -259,14 +259,16 @@
      §194 `EntryDetailTopBar` 151→**84 出表**（溢出菜单原样下沉；这是**首个跨 `PopupSecureFlagInventoryTest` 清单锁的搬移**，
      见下方第 3 项的清单锁口径）；§196 `VaultListDialogHost` 130→**68 出表**（纯派发表按特性切两段，
      `check_verbatim_move` 报 **`MISSING_KINDS=0`** 的纯逐字搬；段组件**追加进原文件**而非另起——
-     198 行 + 75 仍距 400 很远，判据是「离 400 还有多少」而不是「段落一律另起文件」）。
+     198 行 + 75 仍距 400 很远，判据是「离 400 还有多少」而不是「段落一律另起文件」）；
+     §198 `EntryDetailDialogHost` 119→**91 出表**（两个内联 `AlertDialog` 确认框原样下沉；两份确认
+     **刻意不合并**——删除走 `TextButton` + error 色、回滚走 `Button` + `CapsuleShape`，视觉语义不同，
+     为省 22 行拉平它们正是 `ISSUE-P3-195` 那类失效）。
      **当前表内头部**（现跑读数）：`CreateVaultWizardDialog` 158（受限界 §179 下限）、
-     `PackageBlocklistManageDialog` 131、`GeneratorContent` 121、`EntryDetailScreen` 121、
-     `SyncStatusCard` 119、`EntryDetailDialogHost` 119。
+     `PackageBlocklistManageDialog` 131、`GeneratorContent` 121、`EntryDetailScreen` 121、`SyncStatusCard` 119。
      §192 另把 `FieldDiffRow` 的两份同形选项行并为一份 `ConflictFieldChoiceRow`（83 → 41 行，
      不在表内但属同一「重复呈现并一」主题）。
      **口径问题已裁决（§184，PD-11）**：两个纯接线装配表 `keepasskeySettingsNavGraph`（252，逻辑行 1）与
-     `keepasskeyNavGraph`（164，逻辑行 0）**豁免本目 ⇒ 18 项中扣除二者，待拆实为 16 个**；
+     `keepasskeyNavGraph`（164，逻辑行 0）**豁免本目 ⇒ 17 项中扣除二者，待拆实为 15 个**；
      **`KeePasskeyApp` 不豁免**，已按该裁决于 §185 下沉（逻辑行 10 → 0）。裁决全文、分类计数依据与
      「逻辑行 ≥5 即重新计入」的重开条件见 [`architecture/产品裁决登记.md`](architecture/产品裁决登记.md) PD-11。
      > 注：§188 出表的 `PrivilegedBrowserSettingsScreen`（115→95）**若按 `ISSUE-P3-195` 修法②撤销该页替换，
@@ -330,6 +332,16 @@
      > 可行的两条路：**① 设备侧 instrumentation 用例**（需硬件，当前阻塞）；
      > **② 先引入宿主可用的 JSON 写入口径**（新增小写入器，把注册 / 断言两处 payload 改走它，
      > 再补上述四条宿主断言）。选 ② 时须与两处 payload 的既有静态守卫同批核对，勿只改一半。
+  5. **详情页两个破坏性确认出口无任何断言（§198 下沉时发现，属验证缺口而非长度问题）**：
+     `EntryDetailDialogHost` 里「单条删除条目」与「版本回滚」各有一份 `AlertDialog` 确认框，
+     它们是**不可逆动作前的唯一闸门**（确认后即移入回收站 / 覆盖当前版本）。
+     **核实方式**：2026-09-19，`grep -rln "EntryDetailDialogHost" app/src/test --include=*.kt` 命中 **0**；
+     `VaultListDialogHost` / `PackageBlocklistManageDialog` 同为零引用（一并核实）。
+     ⇒ 若「确认后才上行」的先后顺序被改坏（例如先上行再复位），**现有测试面不会报红**。
+     **整改**：把两份确认的出口决策抽成纯函数（入参 `DialogIntent` 类枚举，出参「是否上行 + 复位哪几个态」）
+     并补宿主用例——**勿**为了可测而把 `Controller` 的 `mutableStateOf` 抬进段组件（状态两处真相）；
+     `SessionLockGuardTest` 那类样板不互相顶替的规矩同样适用。
+     **优先级**：本项应排在继续削第 1 目长度**之前**（§198 §4 已注明证据边界）。
 - **依据**：`.codebuddy/rules/engineering-rules.md` §高内聚低耦合 / §禁止魔法数字；本条目为 2026-09-18 用户命题「消除巨型类和魔法数字」。
 
 ### ISSUE-P3-187 JNI 零拷贝评估（原生加密内核的边界拷贝成本）

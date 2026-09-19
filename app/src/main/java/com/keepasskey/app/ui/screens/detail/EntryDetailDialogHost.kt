@@ -79,25 +79,11 @@ internal fun EntryDetailDialogHost(
 
     // ISSUE-P3-48：单条删除确认（确认后才上行；语义为移入回收站 / 站内彻底删除）
     if (controller.showDeleteEntryConfirm) {
-        AlertDialog(
+        EntryDetailDeleteEntryConfirm(
             onDismissRequest = { controller.showDeleteEntryConfirm = false },
-            title = { Text(stringResource(R.string.detail_delete_entry_title)) },
-            text = { Text(stringResource(R.string.detail_delete_entry_message)) },
-            confirmButton = {
-                TextButton(onClick = {
-                    controller.showDeleteEntryConfirm = false
-                    onDeleteEntry()
-                }) {
-                    Text(
-                        text = stringResource(R.string.btn_delete),
-                        color = MaterialTheme.colorScheme.error
-                    )
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { controller.showDeleteEntryConfirm = false }) {
-                    Text(stringResource(R.string.btn_cancel))
-                }
+            onConfirm = {
+                controller.showDeleteEntryConfirm = false
+                onDeleteEntry()
             }
         )
     }
@@ -117,25 +103,11 @@ internal fun EntryDetailDialogHost(
 
     // 版本回滚确认对话框
     controller.revisionToRollback?.let { rev ->
-        AlertDialog(
+        EntryDetailRollbackConfirm(
             onDismissRequest = { controller.revisionToRollback = null },
-            title = { Text(stringResource(R.string.detail_history_rollback)) },
-            text = { Text(stringResource(R.string.detail_history_rollback_confirm)) },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        onRollbackRevision(rev)
-                        controller.revisionToRollback = null
-                    },
-                    shape = CapsuleShape
-                ) {
-                    Text(stringResource(R.string.btn_restore))
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { controller.revisionToRollback = null }) {
-                    Text(stringResource(R.string.btn_cancel))
-                }
+            onConfirm = {
+                onRollbackRevision(rev)
+                controller.revisionToRollback = null
             }
         )
     }
@@ -172,6 +144,66 @@ internal fun EntryDetailDialogHost(
             }
         )
     }
+}
+
+/**
+ * 单条删除确认对话框（§198 自 [EntryDetailDialogHost] **原样下沉**，文案 / error 色 / 出口结构未改）。
+ *
+ * 「先复位、再上行」的组合**留在调用点**（本组件只接两个出口闭包）——与 §169 对导出确认的同一口径：
+ * 状态所有权只有一处，段组件不持复位职责。
+ */
+@Composable
+private fun EntryDetailDeleteEntryConfirm(
+    onDismissRequest: () -> Unit,
+    onConfirm: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismissRequest,
+        title = { Text(stringResource(R.string.detail_delete_entry_title)) },
+        text = { Text(stringResource(R.string.detail_delete_entry_message)) },
+        confirmButton = {
+            TextButton(onClick = onConfirm) {
+                Text(
+                    text = stringResource(R.string.btn_delete),
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismissRequest) {
+                Text(stringResource(R.string.btn_cancel))
+            }
+        }
+    )
+}
+
+/**
+ * 版本回滚确认对话框（§198 原样下沉；`Button` + `CapsuleShape` 的出口样式刻意**不与上面的
+ * TextButton 版合并**——两者视觉语义不同，为省 20 行而统一它们属于为指标改动）。
+ */
+@Composable
+private fun EntryDetailRollbackConfirm(
+    onDismissRequest: () -> Unit,
+    onConfirm: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismissRequest,
+        title = { Text(stringResource(R.string.detail_history_rollback)) },
+        text = { Text(stringResource(R.string.detail_history_rollback_confirm)) },
+        confirmButton = {
+            Button(
+                onClick = onConfirm,
+                shape = CapsuleShape
+            ) {
+                Text(stringResource(R.string.btn_restore))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismissRequest) {
+                Text(stringResource(R.string.btn_cancel))
+            }
+        }
+    )
 }
 
 /**
