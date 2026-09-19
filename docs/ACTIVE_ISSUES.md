@@ -164,7 +164,7 @@
 - **涉及文件**：`SupplyChainSuppressionPolicyTest`、suppressions.xml。
 - **验收标准**：① 守卫测试增断言：豁免 regex 必须含版本界（或白名单化 artifactId），并核对其绑定版本 ≥ notes 声明的修复版；② test 全绿。
 
-### ISSUE-P3-206：`SyncEngine` 下载→缓存未接已存在的 `writeCacheStreaming`——整份 128 MiB `ByteArray` 在缓存路径驻留
+### ISSUE-P3-206：同步下载体在 Provider 内整份物化——`SyncProvider.download` 的 `ByteArray` 契约使下载期峰值达 ~2×S（**第三轮重写**：原「未接 `writeCacheStreaming`／缓存路径多驻留一份」两条立论已被逐行证伪）
 
 - **背景与证据**（2026-09-19 提出，**第三轮重写**——原表述「`SyncEngine` 未接已存在的 `writeCacheStreaming`／该 API 全仓零调用方／交付副本之外再驻留一份 128 MiB」经四轮对抗审计**逐行证伪**，已全部删除）：
   - 物化点在 `SyncDownloadLimits.readBounded`（`SyncDownloadLimits.kt:55-76`）：**接受路径**以 `ByteArrayOutputStream` 累积后 `toByteArray()` 返回 ⇒ **持久 1×S，复制期瞬态再 +1×S**；声明长度缺失（chunked）时该缓冲倍增，峰值可达 **~3×S**。`SyncProvider.download` 契约即 `Result<ByteArray>`（`SyncProvider.kt:25`），WebDAV / S3 均经此物化。
