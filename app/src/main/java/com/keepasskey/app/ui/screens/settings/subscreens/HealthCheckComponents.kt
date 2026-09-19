@@ -3,6 +3,7 @@ package com.keepasskey.app.ui.screens.settings.subscreens
 import android.content.res.Configuration
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -13,6 +14,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.WarningAmber
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -29,6 +34,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.keepasskey.app.R
+import com.keepasskey.app.data.breach.BreachCheckStatus
+import com.keepasskey.app.ui.components.BentoCard
+import com.keepasskey.app.ui.theme.LocalSecurityColors
 
 /**
  * TASK-47：泄露密码审计行的展示模型（按检测状态派生，状态与文案一一对应）
@@ -206,5 +214,158 @@ internal fun HealthCheckComponentsPreview() {
             enabled = true,
             onToggle = {}
         )
+    }
+}
+
+/**
+ * ISSUE-P3-61 的三态口径：计数类审计项**未扫描时一律中性**——「安全 / 需注意」这类结论
+ * 只有真实扫描结果才能支撑。§191 把这条判定从页面里两处内联 `Triple` 链收敛为纯函数
+ * （宿主可单测，见 `HealthCheckAuditToneTest`），图标 / 配色 / 文案的展示映射留在
+ * [HealthCountAuditRow] 里。
+ */
+internal enum class HealthAuditTone { NOT_SCANNED, WARNING, PASS }
+
+/**
+ * 计数类审计项的状态判定：未扫描 ⇒ 中性；已扫描且违规数 > 0 ⇒ 需注意；已扫描且为 0 ⇒ 通过。
+ *
+ * 「未扫描」优先于计数是刻意的：扫描前的计数是 0，若先判计数就会在未扫描时亮出「安全」徽标
+ * （ISSUE-P3-61 要消除的正是这种「以 0 冒充安全」）。
+ */
+internal fun healthAuditTone(hasScanned: Boolean, violationCount: Int): HealthAuditTone = when {
+    !hasScanned -> HealthAuditTone.NOT_SCANNED
+    violationCount > 0 -> HealthAuditTone.WARNING
+    else -> HealthAuditTone.PASS
+}
+
+/**
+ * 弱口令 / 重复口令两条审计行的共用形态（§191 自 `HealthCheckScreen` 原样下沉，逻辑零变更）。
+ *
+ * 刻意**不读** `SettingsUiState`：入参为已取出的标量，展示决策由 [healthAuditTone] 给出。
+ */
+@Composable
+internal fun HealthCountAuditRow(
+    title: String,
+    subtitle: String,
+    hasScanned: Boolean,
+    violationCount: Int
+) {
+    val securityColors = LocalSecurityColors.current
+    val tone = healthAuditTone(hasScanned, violationCount)
+    HealthAuditRowItem(
+        icon = when (tone) {
+            HealthAuditTone.NOT_SCANNED -> Icons.Default.Security
+            HealthAuditTone.WARNING -> Icons.Default.WarningAmber
+            HealthAuditTone.PASS -> Icons.Default.CheckCircle
+        },
+        iconTint = when (tone) {
+            HealthAuditTone.NOT_SCANNED -> MaterialTheme.colorScheme.outline
+            HealthAuditTone.WARNING -> securityColors.warning
+            HealthAuditTone.PASS -> securityColors.success
+        },
+        title = title,
+        subtitle = subtitle,
+        statusText = stringResource(
+            when (tone) {
+                HealthAuditTone.NOT_SCANNED -> R.string.health_status_not_scanned
+                HealthAuditTone.WARNING -> R.string.health_status_warn
+                HealthAuditTone.PASS -> R.string.health_status_pass
+            }
+        ),
+        isWarning = tone == HealthAuditTone.WARNING
+    )
+}
+
+/**
+ * 泄露密码审计行（TASK-47）：按真实检测状态呈现，**绝不以「已防护」掩盖未检测 / 失败**。
+ * §191 自 `HealthCheckScreen` 原样下沉，五个分支的图标 / 配色 / 文案与 `isWarning` 逐字未改。
+ */
+@Composable
+internal fun HealthBreachAuditRow(
+    status: BreachCheckStatus,
+    compromisedCount: Int,
+    breachMessage: String,
+    title: String
+) {
+    val securityColors = LocalSecurityColors.current
+    val leak = when (status) {
+        BreachCheckStatus.DISABLED -> LeakRowPresentation(
+            icon = Icons.Default.Security,
+            iconTint = MaterialTheme.colorScheme.outline,
+            subtitle = stringResource(R.string.health_leak_sub_disabled),
+            statusText = stringResource(R.string.health_leak_status_disabled),
+            isWarning = false
+        )
+        BreachCheckStatus.CHECKING -> LeakRowPresentation(
+            icon = Icons.Default.Security,
+            iconTint = MaterialTheme.colorScheme.primary,
+            subtitle = stringResource(R.string.health_leak_sub_checking),
+            statusText = stringResource(R.string.health_leak_status_checking),
+            isWarning = false
+        )
+        BreachCheckStatus.CLEAN -> LeakRowPresentation(
+            icon = Icons.Default.CheckCircle,
+            iconTint = securityColors.success,
+            subtitle = stringResource(R.string.health_leak_sub_clean),
+            statusText = stringResource(R.string.health_status_safe),
+            isWarning = false
+        )
+        BreachCheckStatus.BREACHED -> LeakRowPresentation(
+            icon = Icons.Default.WarningAmber,
+            iconTint = securityColors.warning,
+            subtitle = stringResource(
+                R.string.health_leak_sub_breached, compromisedCount
+            ),
+            statusText = stringResource(R.string.health_leak_status_breached),
+            isWarning = true
+        )
+        BreachCheckStatus.FAILED -> LeakRowPresentation(
+            icon = Icons.Default.WarningAmber,
+            iconTint = MaterialTheme.colorScheme.error,
+            subtitle = stringResource(R.string.health_leak_sub_failed, breachMessage),
+            statusText = stringResource(R.string.health_leak_status_failed),
+            isWarning = true
+        )
+    }
+    HealthAuditRowItem(
+        icon = leak.icon,
+        iconTint = leak.iconTint,
+        title = title,
+        subtitle = leak.subtitle,
+        statusText = leak.statusText,
+        isWarning = leak.isWarning
+    )
+}
+
+/**
+ * 安全建议卡片（§191 自 `HealthCheckScreen` 原样下沉，正文与文案逐字未改）。
+ */
+@Composable
+internal fun HealthTipsCard() {
+    BentoCard(
+        modifier = Modifier.fillMaxWidth(),
+        backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Default.Security,
+                    contentDescription = "Security tips",
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = stringResource(R.string.health_tips_title),
+                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            }
+            Text(
+                text = stringResource(R.string.health_tips_desc),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                lineHeight = 20.sp
+            )
+        }
     }
 }

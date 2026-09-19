@@ -2,37 +2,22 @@ package com.keepasskey.app.ui.screens.settings.subscreens
 
 import android.content.res.Configuration
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Security
-import androidx.compose.material.icons.filled.WarningAmber
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.keepasskey.app.R
-import com.keepasskey.app.data.breach.BreachCheckStatus
-import com.keepasskey.app.ui.components.BentoCard
 import com.keepasskey.app.ui.screens.settings.SettingsUiState
-import com.keepasskey.app.ui.theme.LocalSecurityColors
 
 /**
  * 密码库健康度检查二级详情页
@@ -47,8 +32,6 @@ fun HealthCheckScreen(
     onBreachCheckToggle: (Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val securityColors = LocalSecurityColors.current
-
     SettingsSubscreenScaffold(
         titleRes = R.string.health_screen_title,
         onBackClick = onBackClick,
@@ -86,114 +69,31 @@ fun HealthCheckScreen(
 
             item {
                 // ISSUE-P3-61：未扫描时徽标保持中性「未扫描」——「安全 / 需注意」这类结论
-                // 只有真实扫描结果才能支撑；扫描后按实际计数给出对应徽标
-                val weakStatus = if (!uiState.hasHealthScanned) {
-                    Triple(
-                        Icons.Default.Security,
-                        MaterialTheme.colorScheme.outline,
-                        stringResource(R.string.health_status_not_scanned)
-                    )
-                } else if (uiState.weakPasswordCount > 0) {
-                    Triple(
-                        Icons.Default.WarningAmber,
-                        securityColors.warning,
-                        stringResource(R.string.health_status_warn)
-                    )
-                } else {
-                    Triple(
-                        Icons.Default.CheckCircle,
-                        securityColors.success,
-                        stringResource(R.string.health_status_pass)
-                    )
-                }
-                HealthAuditRowItem(
-                    icon = weakStatus.first,
-                    iconTint = weakStatus.second,
+                // 只有真实扫描结果才能支撑；扫描后按实际计数给出对应徽标（判定见 healthAuditTone）
+                HealthCountAuditRow(
                     title = stringResource(R.string.health_weak_title),
                     subtitle = stringResource(R.string.health_weak_sub),
-                    statusText = weakStatus.third,
-                    isWarning = uiState.hasHealthScanned && uiState.weakPasswordCount > 0
+                    hasScanned = uiState.hasHealthScanned,
+                    violationCount = uiState.weakPasswordCount
                 )
             }
 
             item {
-                val reuseStatus = if (!uiState.hasHealthScanned) {
-                    Triple(
-                        Icons.Default.Security,
-                        MaterialTheme.colorScheme.outline,
-                        stringResource(R.string.health_status_not_scanned)
-                    )
-                } else if (uiState.reusedPasswordCount > 0) {
-                    Triple(
-                        Icons.Default.WarningAmber,
-                        securityColors.warning,
-                        stringResource(R.string.health_status_warn)
-                    )
-                } else {
-                    Triple(
-                        Icons.Default.CheckCircle,
-                        securityColors.success,
-                        stringResource(R.string.health_status_pass)
-                    )
-                }
-                HealthAuditRowItem(
-                    icon = reuseStatus.first,
-                    iconTint = reuseStatus.second,
+                HealthCountAuditRow(
                     title = stringResource(R.string.health_reuse_title),
                     subtitle = stringResource(R.string.health_reuse_sub, uiState.reusedPasswordCount),
-                    statusText = reuseStatus.third,
-                    isWarning = uiState.hasHealthScanned && uiState.reusedPasswordCount > 0
+                    hasScanned = uiState.hasHealthScanned,
+                    violationCount = uiState.reusedPasswordCount
                 )
             }
 
             // TASK-47：泄露密码审计项——按真实检测状态呈现，绝不以「已防护」掩盖未检测 / 失败
             item {
-                val leak = when (uiState.breachCheckStatus) {
-                    BreachCheckStatus.DISABLED -> LeakRowPresentation(
-                        icon = Icons.Default.Security,
-                        iconTint = MaterialTheme.colorScheme.outline,
-                        subtitle = stringResource(R.string.health_leak_sub_disabled),
-                        statusText = stringResource(R.string.health_leak_status_disabled),
-                        isWarning = false
-                    )
-                    BreachCheckStatus.CHECKING -> LeakRowPresentation(
-                        icon = Icons.Default.Security,
-                        iconTint = MaterialTheme.colorScheme.primary,
-                        subtitle = stringResource(R.string.health_leak_sub_checking),
-                        statusText = stringResource(R.string.health_leak_status_checking),
-                        isWarning = false
-                    )
-                    BreachCheckStatus.CLEAN -> LeakRowPresentation(
-                        icon = Icons.Default.CheckCircle,
-                        iconTint = securityColors.success,
-                        subtitle = stringResource(R.string.health_leak_sub_clean),
-                        statusText = stringResource(R.string.health_status_safe),
-                        isWarning = false
-                    )
-                    BreachCheckStatus.BREACHED -> LeakRowPresentation(
-                        icon = Icons.Default.WarningAmber,
-                        iconTint = securityColors.warning,
-                        subtitle = stringResource(
-                            R.string.health_leak_sub_breached, uiState.compromisedPasswordCount ?: 0
-                        ),
-                        statusText = stringResource(R.string.health_leak_status_breached),
-                        isWarning = true
-                    )
-                    BreachCheckStatus.FAILED -> LeakRowPresentation(
-                        icon = Icons.Default.WarningAmber,
-                        iconTint = MaterialTheme.colorScheme.error,
-                        subtitle = stringResource(R.string.health_leak_sub_failed, uiState.breachCheckMessage),
-                        statusText = stringResource(R.string.health_leak_status_failed),
-                        isWarning = true
-                    )
-                }
-                HealthAuditRowItem(
-                    icon = leak.icon,
-                    iconTint = leak.iconTint,
-                    title = stringResource(R.string.health_leak_title),
-                    subtitle = leak.subtitle,
-                    statusText = leak.statusText,
-                    isWarning = leak.isWarning
+                HealthBreachAuditRow(
+                    status = uiState.breachCheckStatus,
+                    compromisedCount = uiState.compromisedPasswordCount ?: 0,
+                    breachMessage = uiState.breachCheckMessage,
+                    title = stringResource(R.string.health_leak_title)
                 )
             }
 
@@ -210,33 +110,7 @@ fun HealthCheckScreen(
 
             // 安全建议卡片
             item {
-                BentoCard(
-                    modifier = Modifier.fillMaxWidth(),
-                    backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow
-                ) {
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Default.Security,
-                                contentDescription = "Security tips",
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = stringResource(R.string.health_tips_title),
-                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                        }
-                        Text(
-                            text = stringResource(R.string.health_tips_desc),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            lineHeight = 20.sp
-                        )
-                    }
-                }
+                HealthTipsCard()
             }
 
             item {
