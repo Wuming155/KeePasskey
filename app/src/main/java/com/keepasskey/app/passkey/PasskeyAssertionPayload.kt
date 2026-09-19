@@ -8,7 +8,6 @@ import com.keepasskey.crypto.passkey.PasskeyPrf
 import java.security.MessageDigest
 import java.util.Arrays
 import java.util.Base64
-import org.json.JSONObject
 
 /**
  * 通行密钥**断言（Get）响应材料**的组装与私钥解码（`ISSUE-P3-188` §173 自
@@ -21,6 +20,10 @@ import org.json.JSONObject
  * 2. 派生中间量（authData / clientDataBytes / dataToSign / signingKey）统一在 `finally` 擦除（ISSUE-P1-02）；
  * 3. `clientDataJSON` 的归属字段只写**系统背书**的调用方包名，取不到即省略（ISSUE-P2-72）；
  * 4. PRF 输出算不出时返回空对象，**绝不伪造**（WebAuthn Level 3 §10.1）。
+ *
+ * 组装口径（`ISSUE-P3-188` 第 4 项 §174 路线②）：JSON 组装走 [WebAuthnJsonWriter]
+ * （宿主可用、序列化语义与平台 `org.json` 一致且由设备侧对拍锁定），使本文件的四条安全判据
+ * 可被宿主单测离线断言（`PasskeyAssertionPayloadBuildTest`）。
  *
  * 日志 tag 沿用 `"PasskeyAssertionActivity"`，使迁移前后的 logcat 归因保持不变。
  */
@@ -54,14 +57,16 @@ internal object PasskeyAssertionPayload {
             )
             authData = authDataLocal
 
-            // 2. 构造 ClientDataJSON（响应体回传内容）与签名用摘要
-            val clientDataJson = JSONObject().apply {
-                put(WebAuthnJson.TYPE, WebAuthnJson.CLIENT_DATA_TYPE_GET)
-                put(WebAuthnJson.CHALLENGE, challenge)
-                put(WebAuthnJson.ORIGIN, origin)
+            // 2. 构造 ClientDataJSON（响应体回传内容）与签名用摘要。
+            //    ISSUE-P3-188 第 4 项 §174 路线②：组装走宿主可用的 [WebAuthnJsonWriter]
+            //    （序列化语义与平台 org.json 一致，设备侧对拍用例锁定），使本函数可被宿主单测离线断言。
+            val clientDataJson = WebAuthnJsonWriter.obj {
+                str(WebAuthnJson.TYPE, WebAuthnJson.CLIENT_DATA_TYPE_GET)
+                str(WebAuthnJson.CHALLENGE, challenge)
+                str(WebAuthnJson.ORIGIN, origin)
                 // ISSUE-P2-72：只写系统认证的调用方包名；取不到即省略——绝不再回退为本应用包名
-                clientDataPackage?.let { put(WebAuthnJson.ANDROID_PACKAGE_NAME, it) }
-            }.toString()
+                clientDataPackage?.let { str(WebAuthnJson.ANDROID_PACKAGE_NAME, it) }
+            }
             val clientDataBytesLocal = clientDataJson.toByteArray(Charsets.UTF_8)
             clientDataBytes = clientDataBytesLocal
             // 特权调用方自带 clientDataJSON：直接对其摘要签名；否则自建 JSON 取 SHA-256
@@ -85,22 +90,25 @@ internal object PasskeyAssertionPayload {
                 material.algorithmId, material.keyBytes, dataToSignLocal
             )
 
-            // 5. 构造最终 WebAuthn 断言响应 JSON
+            // 5. 构造最终 WebAuthn 断言响应 JSON（组装口径同上：WebAuthnJsonWriter）
             val b64Url = Base64.getUrlEncoder().withoutPadding()
-            val assertionJson = JSONObject().apply {
-                put(WebAuthnJson.ID, passkeyData.credentialId)
-                put(WebAuthnJson.RAW_ID, passkeyData.credentialId)
-                put(WebAuthnJson.TYPE, WebAuthnJson.CREDENTIAL_TYPE_PUBLIC_KEY)
-                put(WebAuthnJson.AUTHENTICATOR_ATTACHMENT, WebAuthnJson.ATTACHMENT_PLATFORM)
-                put(WebAuthnJson.CLIENT_EXTENSION_RESULTS, buildPrfClientExtensionResults(prfEval, passkeyData.prfSecret))
-                put(WebAuthnJson.RESPONSE, JSONObject().apply {
-                    put(WebAuthnJson.CLIENT_DATA_JSON, b64Url.encodeToString(clientDataBytesLocal))
-                    put(WebAuthnJson.AUTHENTICATOR_DATA, b64Url.encodeToString(authDataLocal))
-                    put(WebAuthnJson.SIGNATURE, b64Url.encodeToString(signature))
-                    put(WebAuthnJson.USER_HANDLE, passkeyData.userHandle)
+            val assertionJson = WebAuthnJsonWriter.obj {
+                str(WebAuthnJson.ID, passkeyData.credentialId)
+                str(WebAuthnJson.RAW_ID, passkeyData.credentialId)
+                str(WebAuthnJson.TYPE, WebAuthnJson.CREDENTIAL_TYPE_PUBLIC_KEY)
+                str(WebAuthnJson.AUTHENTICATOR_ATTACHMENT, WebAuthnJson.ATTACHMENT_PLATFORM)
+                obj(
+                    WebAuthnJson.CLIENT_EXTENSION_RESULTS,
+                    buildPrfClientExtensionResultsObj(prfEval, passkeyData.prfSecret)
+                )
+                obj(WebAuthnJson.RESPONSE, WebAuthnJsonWriter.Obj().apply {
+                    str(WebAuthnJson.CLIENT_DATA_JSON, b64Url.encodeToString(clientDataBytesLocal))
+                    str(WebAuthnJson.AUTHENTICATOR_DATA, b64Url.encodeToString(authDataLocal))
+                    str(WebAuthnJson.SIGNATURE, b64Url.encodeToString(signature))
+                    str(WebAuthnJson.USER_HANDLE, passkeyData.userHandle)
                 })
             }
-            return assertionJson.toString()
+            return assertionJson
         } finally {
             authData?.fill(0)
             clientDataBytes?.fill(0)
@@ -112,37 +120,43 @@ internal object PasskeyAssertionPayload {
     /**
      * 组装断言响应的 `clientExtensionResults.prf`（WebAuthn Level 3 §10.1）：
      * 请求携带 `eval` 且凭据持有 PRF 秘密时回传 `results.first` / `results.second`；
-     * 否则返回空对象（绝不伪造输出，由 RP 自行判定）。
+     * 否则返回**空对象**（绝不伪造输出，由 RP 自行判定）。
      */
-    private fun buildPrfClientExtensionResults(
+    private fun buildPrfClientExtensionResultsObj(
         prfEval: WebAuthnRequest.PrfEval?,
         prfSecret: ProtectedString?
-    ): JSONObject {
-        if (prfEval == null) return JSONObject()
+    ): WebAuthnJsonWriter.Obj {
+        if (prfEval == null) return WebAuthnJsonWriter.Obj()
         if (prfSecret == null) {
             AppLog.w(TAG, "请求要求 PRF，但该凭据未持有 PRF 秘密，不返回 prf 结果")
-            return JSONObject()
+            return WebAuthnJsonWriter.Obj()
         }
         val b64Url = Base64.getUrlEncoder().withoutPadding()
         return try {
             val first = PasskeyPrf.computeValue(prfSecret, prfEval.first)
             try {
-                val results = JSONObject().put(WebAuthnJson.FIRST, b64Url.encodeToString(first))
+                val results = WebAuthnJsonWriter.Obj().apply {
+                    str(WebAuthnJson.FIRST, b64Url.encodeToString(first))
+                }
                 prfEval.second?.let { secondInput ->
                     val second = PasskeyPrf.computeValue(prfSecret, secondInput)
                     try {
-                        results.put(WebAuthnJson.SECOND, b64Url.encodeToString(second))
+                        results.str(WebAuthnJson.SECOND, b64Url.encodeToString(second))
                     } finally {
                         second.fill(0)
                     }
                 }
-                JSONObject().put(WebAuthnJson.PRF, JSONObject().put(WebAuthnJson.RESULTS, results))
+                WebAuthnJsonWriter.Obj().apply {
+                    obj(WebAuthnJson.PRF, WebAuthnJsonWriter.Obj().apply {
+                        obj(WebAuthnJson.RESULTS, results)
+                    })
+                }
             } finally {
                 first.fill(0)
             }
         } catch (t: Throwable) {
             AppLog.e(TAG, "PRF 输出计算失败，不返回 prf 结果", t)
-            JSONObject()
+            WebAuthnJsonWriter.Obj()
         }
     }
 

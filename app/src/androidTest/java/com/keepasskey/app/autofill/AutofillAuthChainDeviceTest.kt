@@ -628,8 +628,16 @@ class AutofillAuthChainDeviceTest {
         return null
     }
 
-    /** threadtime 格式第 3 列是 pid；解析失败返回 null（该行即被丢弃） */
-    private fun linePid(line: String): String? = line.trim().split(" ").getOrNull(2)
+    /**
+     * threadtime 格式第 3 列是 pid；解析失败返回 null（该行即被丢弃）。
+     *
+     * §204 纠偏：threadtime 的 pid/tid **右对齐 5 位宽**——4 位 pid 前有 2 个空格，
+     * `split(" ")` 会把连续空格解析成空元素（getOrNull(2) = ""），只有 5 位 pid 才凑巧
+     * 拿到正确列（2026-09-19 实测：真机 pid 5 位时两轮绿、pid 回落 4 位后恒败，
+     * 模拟器 pid 恒 4 位故从未绿过）。改为按连续空白切分，两种位宽均正确。
+     */
+    private fun linePid(line: String): String? =
+        line.trim().split(Regex(" +")).getOrNull(2)
 
     /**
      * 轮询直至锁屏窗口消失。
@@ -750,7 +758,11 @@ class AutofillAuthChainDeviceTest {
         const val UI_SETTLE_MS = 1_200L
         const val CLIENT_WAIT_MS = 15_000L
         const val FILL_UI_WAIT_MS = 25_000L
-        const val INTEGRITY_WAIT_MS = 15_000L
+        // §204 纠偏：原 15s 窗口 < 完整性周期重扫间隔（LIVE_RESCAN_INTERVAL_MS = 30s，安全参数不得
+        // 放宽）——阶段 0 的 logcat -c 已把进程启动时那拍留痕清掉，等待只能依赖**下一拍周期重扫**；
+        // 窗口 < 周期时相位错过即恒等不到（2026-09-19 真机/模拟器同时现形，此前真机两轮绿系相位命中）。
+        // 改为 > 一个完整周期（35s），保证窗口内必有一拍；断言强度不变（仍要求 level 非空且非 COMPROMISED）。
+        const val INTEGRITY_WAIT_MS = 35_000L
         const val KEYGUARD_WAIT_MS = 10_000L
         const val REQUEST_FILL_WAIT_MS = 12_000L
         const val ACTIVITY_WAIT_MS = 15_000L

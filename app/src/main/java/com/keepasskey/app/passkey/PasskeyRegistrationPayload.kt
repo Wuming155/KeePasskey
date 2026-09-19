@@ -6,8 +6,6 @@ import com.keepasskey.crypto.cbor.CborEncoder
 import com.keepasskey.crypto.passkey.PasskeyCryptoEngine
 import com.keepasskey.crypto.passkey.PasskeyPrf
 import java.util.Base64
-import org.json.JSONArray
-import org.json.JSONObject
 
 internal object PasskeyRegistrationPayload {
 
@@ -57,36 +55,38 @@ internal object PasskeyRegistrationPayload {
             )
             attestationObjectBytes = CborEncoder.encodeMap(attestationMap)
 
-            val clientDataJson = JSONObject().apply {
-                put(WebAuthnJson.TYPE, WebAuthnJson.CLIENT_DATA_TYPE_CREATE)
-                put(WebAuthnJson.CHALLENGE, challenge)
-                put(WebAuthnJson.ORIGIN, origin.ifBlank { "https://$rpId" })
+            // ISSUE-P3-188 第 4 项 §174 路线②：组装走宿主可用的 [WebAuthnJsonWriter]
+            // （序列化语义与平台 org.json 一致，设备侧对拍用例锁定）
+            val clientDataJson = WebAuthnJsonWriter.obj {
+                str(WebAuthnJson.TYPE, WebAuthnJson.CLIENT_DATA_TYPE_CREATE)
+                str(WebAuthnJson.CHALLENGE, challenge)
+                str(WebAuthnJson.ORIGIN, origin.ifBlank { "https://$rpId" })
                 // ISSUE-P2-72：归属字段只写**系统背书**的调用方包名；取不到即省略该字段——
                 // 绝不回退为本应用包名（那会把 RP 收到的归属伪造成我们）。
                 CallingOriginResolver.clientDataAndroidPackageName(callerPackage)?.let {
-                    put(WebAuthnJson.ANDROID_PACKAGE_NAME, it)
+                    str(WebAuthnJson.ANDROID_PACKAGE_NAME, it)
                 }
-            }.toString()
+            }
 
             val b64Url = Base64.getUrlEncoder().withoutPadding()
             val clientDataBase64 = b64Url.encodeToString(clientDataJson.toByteArray(Charsets.UTF_8))
             val attestationBase64 = b64Url.encodeToString(attestationObjectBytes)
 
-            return JSONObject().apply {
-                put(WebAuthnJson.ID, passkeyData.credentialId)
-                put(WebAuthnJson.RAW_ID, passkeyData.credentialId)
-                put(WebAuthnJson.TYPE, WebAuthnJson.CREDENTIAL_TYPE_PUBLIC_KEY)
-                put(WebAuthnJson.AUTHENTICATOR_ATTACHMENT, WebAuthnJson.ATTACHMENT_PLATFORM)
-                put(
+            return WebAuthnJsonWriter.obj {
+                str(WebAuthnJson.ID, passkeyData.credentialId)
+                str(WebAuthnJson.RAW_ID, passkeyData.credentialId)
+                str(WebAuthnJson.TYPE, WebAuthnJson.CREDENTIAL_TYPE_PUBLIC_KEY)
+                str(WebAuthnJson.AUTHENTICATOR_ATTACHMENT, WebAuthnJson.ATTACHMENT_PLATFORM)
+                obj(
                     WebAuthnJson.CLIENT_EXTENSION_RESULTS,
-                    buildPrfClientExtensionResults(prfEval, passkeyData.prfSecret, isRegistration = true)
+                    buildPrfClientExtensionResultsObj(prfEval, passkeyData.prfSecret, isRegistration = true)
                 )
-                put(WebAuthnJson.RESPONSE, JSONObject().apply {
-                    put(WebAuthnJson.CLIENT_DATA_JSON, clientDataBase64)
-                    put(WebAuthnJson.ATTESTATION_OBJECT, attestationBase64)
-                    put(WebAuthnJson.TRANSPORTS, JSONArray().put(WebAuthnJson.TRANSPORT_INTERNAL))
+                obj(WebAuthnJson.RESPONSE, WebAuthnJsonWriter.Obj().apply {
+                    str(WebAuthnJson.CLIENT_DATA_JSON, clientDataBase64)
+                    str(WebAuthnJson.ATTESTATION_OBJECT, attestationBase64)
+                    strArray(WebAuthnJson.TRANSPORTS, listOf(WebAuthnJson.TRANSPORT_INTERNAL))
                 })
-            }.toString()
+            }
         } finally {
             authData?.fill(0)
             attestationObjectBytes?.fill(0)
@@ -98,36 +98,38 @@ internal object PasskeyRegistrationPayload {
      * - 注册：`enabled = true`；请求带 `eval` 时同时回传 `results`；
      * - 断言：仅当确能计算出结果时回传 `results`（否则空对象，绝不谎报）。
      */
-    fun buildPrfClientExtensionResults(
+    private fun buildPrfClientExtensionResultsObj(
         prfEval: WebAuthnRequest.PrfEval?,
         prfSecret: ProtectedString?,
         isRegistration: Boolean
-    ): JSONObject {
-        if (prfEval == null) return JSONObject()
+    ): WebAuthnJsonWriter.Obj {
+        if (prfEval == null) return WebAuthnJsonWriter.Obj()
         val b64Url = Base64.getUrlEncoder().withoutPadding()
-        val prf = JSONObject()
+        val prf = WebAuthnJsonWriter.Obj()
         if (prfSecret == null) {
-            if (!isRegistration) return JSONObject()
-            prf.put(WebAuthnJson.ENABLED, true)
-            return JSONObject().put(WebAuthnJson.PRF, prf)
+            if (!isRegistration) return WebAuthnJsonWriter.Obj()
+            prf.bool(WebAuthnJson.ENABLED, true)
+            return WebAuthnJsonWriter.Obj().apply { obj(WebAuthnJson.PRF, prf) }
         }
-        prf.put(WebAuthnJson.ENABLED, true)
+        prf.bool(WebAuthnJson.ENABLED, true)
         val first = PasskeyPrf.computeValue(prfSecret, prfEval.first)
         try {
-            val results = JSONObject().put(WebAuthnJson.FIRST, b64Url.encodeToString(first))
+            val results = WebAuthnJsonWriter.Obj().apply {
+                str(WebAuthnJson.FIRST, b64Url.encodeToString(first))
+            }
             val secondInput = prfEval.second
             if (secondInput != null) {
                 val second = PasskeyPrf.computeValue(prfSecret, secondInput)
                 try {
-                    results.put(WebAuthnJson.SECOND, b64Url.encodeToString(second))
+                    results.str(WebAuthnJson.SECOND, b64Url.encodeToString(second))
                 } finally {
                     second.fill(0)
                 }
             }
-            prf.put(WebAuthnJson.RESULTS, results)
+            prf.obj(WebAuthnJson.RESULTS, results)
         } finally {
             first.fill(0)
         }
-        return JSONObject().put(WebAuthnJson.PRF, prf)
+        return WebAuthnJsonWriter.Obj().apply { obj(WebAuthnJson.PRF, prf) }
     }
 }

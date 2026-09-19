@@ -396,6 +396,9 @@ jobs:
   # 3. 环境前提类设备用例已在本批 ISSUE-P2-192 第 8 项 Assume 化（API 前提 / TracerPid /
   #    生物识别录入态），前提不满足即跳过并计入 skipped，不再把「环境不满足」误读为
   #    「生产缺陷」；autofill 链路用例依赖已录入生物识别的真机环境，在模拟器上跳过属预期。
+  #    AutofillAuthChainDeviceTest **显式排除**（notClass）：其设计验证环境为真机（真实系统
+  #    填充 UI + 解锁屏 + 全局 autofill 服务改写与还原），模拟器上「系统填充 UI 呈现」一步
+  #    属环境敏感面（2026-09-19 实测；另其 linePid 解析缺陷已同批修复），由本地真机承担。
   # 4. app 的 debug APK 含 4 ABI 原生库 ⇒ assembleDebug 需要真实 NDK + Rust 工具链
   #    （与 native-gate 同源版本），故本 job 必须先完成原生构建。
   # ---------------------------------------------------------------------------
@@ -473,7 +476,8 @@ jobs:
           adb devices
 
       - name: 全模块 connected 测试（device 层门禁真实执行）
-        run: ./gradlew connectedDebugAndroidTest --console=plain
+        run: ./gradlew connectedDebugAndroidTest --console=plain \
+          -Pandroid.testInstrumentationRunnerArguments.notClass=com.keepasskey.app.autofill.AutofillAuthChainDeviceTest
 
       - name: 归档 connected 测试报告
         if: always()

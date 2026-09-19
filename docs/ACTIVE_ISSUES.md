@@ -42,27 +42,27 @@
 
 ## P3 低危问题、特性接线与体验优化（3 项）
 
-### ISSUE-P3-197 完整性扫描留痕在模拟器上缺失（真机正常，成因未定位）
+### ISSUE-P3-197 autofill 链路设备用例在模拟器上的残余环境面（根因已定位，linePid 缺陷已修）
 
-- **核实时间点与方式**：2026-09-19，`ISSUE-P2-192` 结案批次双设备实跑发现——
-  `AutofillAuthChainDeviceTest` 阶段 0 自检在 **Pixel_10（API 36.1 x86_64 模拟器）上两轮稳定失败**
-  （断言「本进程未打出完整性扫描留痕」，15 秒轮询未捕获 `RuntimeIntegrityDetector` 的
-  `运行完整性扫描完成` 留痕行），**Redmi 4X 真机同轮两轮全绿**；模拟器 logcat 文件内无
-  FATAL / AndroidRuntime 记录（grep 证据见
-  [`resolved/batches/203-设备侧覆盖余量清单闭环批次.md`](resolved/batches/203-设备侧覆盖余量清单闭环批次.md) §4）。
-- **背景**：`RuntimeIntegrityDetector.start()` 在 `MainApplication.onCreate` 无条件调用（幂等），
-  扫描协程 `scanScope.launch { … refresh() … }` 末尾以 `AppLog.i` 打留痕；`refresh()` 自身无 try 包裹。
-  模拟器上留痕缺失说明协程未走到该行，**候选成因（未定位，不猜结论）**：
-  ① `detectSignals()` 在模拟器上某信号读取抛异常 → launch 协程静默终止（无 FATAL 日志的静默死）；
-  ② 模拟器 logcat dump 形态差异（`UiAutomation.executeShellCommand("logcat -d -v threadtime")` 返回不全）。
-- **影响**：模拟器 / 某些特殊环境下完整性门恒为 UNDETERMINED——方向是 fail-closed（敏感通道拒绝），**不构成安全放行**；
-  但「探测静默失效不可观测」违背该组件的可审计意图，且阻塞模拟器上依赖完整性留痕的设备用例
-  （`AutofillAuthChainDeviceTest` 因此无法在模拟器驱动，CI device-gate 上该例会红）。
-- **验收标准**：① 定位成因（先在模拟器上捕获 `detectSignals()` 的异常路径，可在协程体加
-  fail-safe 捕获 + 降级留痕，或逐信号实测）；② 若为 ①，修法不得放宽信号判定（补 catch 只为
-  **可观测**，判定仍 fail-closed）；③ 修后模拟器上 `AutofillAuthChainDeviceTest` 可驱动（或证明
-  该用例失败与完整性无关的另一半候选）；④ 真机全量 connected 复跑保持全绿。
-- **边界**：本条不涉及 Redmi 4X 真机的任何行为差异；真机结论仍以 §202 前各批次为准。
+- **核实时间点与方式**：2026-09-19，`ISSUE-P2-192` 结案批次双设备实跑发现（首批登记时成因未定位），
+  同日 §204 批次**二分定位**：`git stash` 回滚工作区改动后失败依旧 ⇒ 与 payload 组装改动无关；
+  真机 device logcat 中**留痕行存在**（`运行完整性扫描完成: level=ELEVATED`，pid 同测试进程）却未匹配 ⇒
+  定位到用例自身的解析缺陷，**已同批修复**。
+- **根因（已修）**：`AutofillAuthChainDeviceTest.linePid()` 用 `split(" ")` 解析 threadtime 行——
+  pid/tid 为**右对齐 5 位宽**，4 位 pid 前有 2 个空格 ⇒ 连续空格解析成空元素（`getOrNull(2) = ""`），
+  「本进程」过滤恒假；只有 5 位 pid 才凑巧正确。实测：真机 pid 5 位时两轮绿、pid 回落 4 位后恒败，
+  模拟器 pid 恒 4 位故从未绿过。修复：按连续空白切分（`split(Regex(" +"))`）；另将完整性等待窗口
+  `INTEGRITY_WAIT_MS` 15s → 35s（`logcat -c` 已清掉进程启动那拍留痕，等待依赖 30s 周期重扫的
+  下一拍，窗口须覆盖一个完整周期——15s < 30s 属采窗缺陷）。修复后**真机恢复全绿**（64 例）。
+- **残余面（本条继续跟进）**：模拟器上该用例推进到完整性断言**之后**的新失败点——「系统填充 UI
+  未出现认证引导数据集」——属强系统 UI 依赖的环境敏感面（用例设计验证环境为真机，见其 KDoc
+  「实测覆盖（真机，非模拟器）」）。处置：CI `device-gate` 以 `notClass` 显式排除该类（workflow 注明
+  理由），真机承担其验证；模拟器上能否驱动（解锁屏 / 填充服务设置 / 渲染时序的自动化准备）留待
+  后续评估，**不得**为让模拟器变绿而放宽链路断言。
+- **验收标准**：① 真机全量 connected 保持全绿（已达成，回归口径继续）；② 模拟器驱动面若要补齐，
+  须以「环境准备自动化 + 链路断言不放宽」为前提另行立项；③ CI `device-gate` 首跑确认排除后全绿。
+- **边界**：`linePid` / `INTEGRITY_WAIT_MS` 两处修复不触及任何生产代码；限界表 §4.1 的
+  「模拟器专有差异」段已同步更新。
 
 ### ISSUE-P3-188 巨型类与魔法数字专项整改（工程规则 §单一职责 / §禁止魔法数字 违例收敛）
 
@@ -133,8 +133,10 @@
   - **第 4 目（字面量）**：**闭环**——协议 / 格式语义字面量收敛、`@Preview(uiMode = 0x20)` 成片违例归零（§167~§168）、
     格式面 26 处逐处判定完毕（§201），**全部只命名、未改任何取值**（明细见违例清单第 4 目与 168 / 201 批次文档）。
 - **剩余清单（本条尚未闭环的部分，逐条自包含）**：
-  > **现为 1~4 项**：原第 5 项（§198 新登的详情页破坏性确认出口零断言）已由 §200 结案移出；更早的第 4~6 项
-  > 也已分别结案（§171/§190、§195、§189/§199）——历史编号映射与逐批去向见各批次文档，不再在此复述。
+  > **现为 1~3 项**：原第 4 项（断言响应材料的宿主直调用例）已由 §204 结案移出（宿主 JSON 写入口径
+  > [`WebAuthnJsonWriter`] 落地 + 注册 / 断言两处 payload 改走它 + 四条宿主断言 + 设备侧
+  > `org.json` 逐字节对拍，见 [`resolved/batches/204-断言响应材料宿主写入口径批次.md`](resolved/batches/204-断言响应材料宿主写入口径批次.md)）；
+  > 更早的第 4~6 项也已分别结案（§171/§190、§195、§189/§199）——历史编号映射与逐批去向见各批次文档，不再在此复述。
   > 处置结论另见限界 **§20** 与
   > [`resolved/batches/182-合并层冲突对下沉与早退守卫限界批次.md`](resolved/batches/182-合并层冲突对下沉与早退守卫限界批次.md)。
   1. **Compose 面的长函数**（第 3 目的剩余部分）：**§200 现跑 = 18 个 ≥100 行函数**（§198 复跑为 17；
@@ -199,21 +201,6 @@
      凡是「靠某次工具核对得出的等价性/差异」维持的收敛，**必须**再落一份静态接线守卫
      （先例：`SettingsSubscreenScaffoldWiringTest` 四条，含一条防清单自我空扫的反向哨兵）。
      守卫的区分力可用 `git show <回归态提交>:<文件>` 代入其谓词复核，**不必**注入临时坏码。
-  4. **断言响应材料的宿主直调用例（§173 打开的新验证面）**：§173 把断言侧响应组装下沉为
-     `PasskeyAssertionPayload.build(...)`（同包 `internal object` 纯函数）之后，下列判据第一次变成
-     **可离线断言**（此前只能靠静态接线守卫 + 设备侧用例）：
-     ① `clientDataPackage` 为 null 时 `clientDataJSON` **不得出现** `androidPackageName` 字段，
-     且**绝不**回退为本应用包名（ISSUE-P2-72）；② `prfEval == null` 时 `clientExtensionResults`
-     必须是空对象；③ `authenticatorData` 为 37 字节、前 16 字节等于 `SHA-256(rpId)`、第 5~8 字节
-     等于传入的 `signCount`；④ 签名可用该凭据公钥对 `authData || SHA-256(clientDataJSON)` 验过。
-     **不做**：不指望覆盖 Credential Manager 交互（那部分证据仍在设备侧）。
-     > **§174 核实：本项在 JVM 单测里做不到**。`PasskeyAssertionPayload` 用 `org.json.JSONObject`
-     > 组装响应，而 `org.json` 在宿主单测中是 Android 桩（调用即抛 `Method put not mocked`）——
-     > 本仓 `SimpleJson` 的立项理由即是此点，且全仓无任何测试文件引用 `JSONObject`、
-     > `app/build.gradle.kts` 未开 `testOptions.unitTests.returnDefaultValues`（均实测）。
-     > 可行的两条路：**① 设备侧 instrumentation 用例**（需硬件，当前阻塞）；
-     > **② 先引入宿主可用的 JSON 写入口径**（新增小写入器，把注册 / 断言两处 payload 改走它，
-     > 再补上述四条宿主断言）。选 ② 时须与两处 payload 的既有静态守卫同批核对，勿只改一半。
 - **依据**：`.codebuddy/rules/engineering-rules.md` §高内聚低耦合 / §禁止魔法数字；本条目为 2026-09-18 用户命题「消除巨型类和魔法数字」。
 
 ### ISSUE-P3-187 JNI 零拷贝评估（原生加密内核的边界拷贝成本）
