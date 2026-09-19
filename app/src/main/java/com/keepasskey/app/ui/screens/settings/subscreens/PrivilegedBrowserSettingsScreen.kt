@@ -62,6 +62,11 @@ fun PrivilegedBrowserSettingsScreen(
         titleRes = R.string.settings_passkey_privileged_browsers,
         onBackClick = onBackClick,
         modifier = modifier,
+        // ISSUE-P3-195：本页顶栏自始与其余九页不同——containerColor 用 background、
+        // 且**不传** titleContentColor（标题色由 TopAppBar 自行推导）。§188 收敛时把它拉平
+        // 成 surface/onSurface 是一处真实回归，此处按原值复原；传 null 即「不传该参数」。
+        topBarContainerColor = MaterialTheme.colorScheme.background,
+        topBarTitleContentColor = null,
     ) { padding ->
         LazyColumn(
             modifier = Modifier

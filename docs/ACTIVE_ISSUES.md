@@ -89,7 +89,7 @@
 
 ---
 
-## P3 低危问题、特性接线与体验优化（4 项）
+## P3 低危问题、特性接线与体验优化（3 项）
 
 ### ISSUE-P3-196 格式面 26 处字面量的逐处判定与 `.kdbx` / passkey 对拍回归（`ISSUE-P3-188` 第 4 目的最后一段，**无需设备**）
 
@@ -124,31 +124,6 @@
 - **连带解锁**：`ISSUE-P3-188` 第 4 目只有这 26 处判定完毕才可读作闭环（现仍写着「余 7 份」）；
   同属 `.kdbx` 格式面的第二档项 `KdbxHeader` 461 / `KdbxXmlParser` 454 的搬运受同一 §38 证据纪律约束，
   宜与本条**同段推进以免两次对拍**。
-
-### ISSUE-P3-195 `PrivilegedBrowserSettingsScreen` 顶栏配色被 §188 顺手改掉（重复骨架收敛的一处真实回归）
-
-- **症状**：该页顶栏 `containerColor` 由 `MaterialTheme.colorScheme.background` 变为共用骨架写死的
-  `surface`，并新增了原块没有的 `titleContentColor = onSurface`。浅色主题下两色近乎不可辨、
-  **深色主题下可辨** ⇒ 属真实的呈现变更，不是「只搬不改」。
-- **核实时间点与方式**：2026-09-18，`python tools/doc/scaffold_block_fingerprint.py 5690ecf^
-  app/src/main/java/com/keepasskey/app/ui/screens/settings/subscreens <十页>`——十页的 `Scaffold(...)`
-  块按括号配平取出、只归一化「标题资源 / `snackbarHost` 行 / 尾随 lambda 形参名」三项后取哈希分组，
-  结果为 **6 页同桶 + 3 页同桶（差一行 `snackbarHost`，已归一化）+ 1 页独桶**，独桶即本页
-  （差异行：`containerColor` 取值不同、缺 `titleContentColor`）；逐行差异见
-  [`resolved/batches/189-守卫点名五页接入共用骨架批次.md`](resolved/batches/189-守卫点名五页接入共用骨架批次.md) §2~§3。
-  成因是 §188 §2 的「实测五页这两项逐字相同」靠**目测**登记，未做上述指纹比对。
-- **涉及文件**：`app/src/main/java/com/keepasskey/app/ui/screens/settings/subscreens/SettingsSubscreenScaffold.kt`
-  （70 行，`internal`）与同目录 `PrivilegedBrowserSettingsScreen.kt`（145 行）。
-- **两条修法（取舍口径不同，须用户择一；代理侧两条均已被拦，不得擅自动手）**：
-  ① **参数化骨架**：加 `topBarContainerColor: Color = MaterialTheme.colorScheme.surface` 与
-  `topBarTitleContentColor: Color? = MaterialTheme.colorScheme.onSurface`（可空即「不传该参数」），
-  该页传 `background` / `null` ⇒ 十页仍共用一份骨架，代价是骨架多两个参数；
-  ② **撤销该页替换**：`PrivilegedBrowserSettingsScreen` 退回自写 `Scaffold + TopAppBar`（纯反向补丁）
-  ⇒ 骨架保持最小，代价是留一处例外，且该页函数由 95 行回到 **115 行 ⇒ 重新入第 3 目待拆表**。
-- **验收标准**：修法落地后该页顶栏的**有效配色参数**与 §188 之前一致（以
-  `git diff 5690ecf^ -- <该页>` 加骨架定义逐行核读为证，不靠「看起来一样」）；
-  `test --rerun-tasks --max-workers=1` 全绿；`:app:lintDebug` 的 `issue` 计数保持 **215**；
-  **不得**为凑「十页同桶」而把该页配色改成与其它九页相同（那是把回归固化成口径）。
 
 ### ISSUE-P3-188 巨型类与魔法数字专项整改（工程规则 §单一职责 / §禁止魔法数字 违例收敛）
 
@@ -206,7 +181,7 @@
   格式面的 7 份「待逐处判定」文件，须与 `.kdbx` 对拍同批做，属独立一段 ⇒ 本条**不得**据此读作已闭环，
   该独立一段已登记为 `ISSUE-P3-196`（本机工具链经实测**已就位**，非阻塞项））；
   剩余第二档渐进消化，未消化部分在批次文档留清单。
-- **当前进度（只留结论；逐批改动与验证见 `docs/resolved/batches/155`~`198`（§180 / §197 为文档面批次，不属本条的整改量））**：
+- **当前进度（只留结论；逐批改动与验证见 `docs/resolved/batches/155`~`199`（§180 / §197 为文档面批次，不属本条的整改量））**：
   - **第一档 8 文件**（`wc -l` 实测）：**达标 6**（`SyncCache` 382、`UnlockViewModel` 368、
     `DatabaseSettingsScreen` 339（§159 降到 369，后续批次回填至 370，§189 再降到 339）、`EntryEditFormSections` 351（§160）、
     `EntryDetailScreen` 349（§169）、`EntryDetailViewModel` 397（§170））；按理由登记 2（`SettingsViewModel` 543 / `DatabaseSession` 535，
@@ -236,7 +211,7 @@
   > 24 处断言字面未动）⇒ 清单回到 1~4 项。
   > 更早的第 6 项（二级设置页重复 `TopAppBar` 骨架，§187 新登、§188 首段、§189 结案）见
   > [`resolved/batches/189-守卫点名五页接入共用骨架批次.md`](resolved/batches/189-守卫点名五页接入共用骨架批次.md)；
-  > 它遗留的一处真实回归由 `ISSUE-P3-195` 独立承接。
+  > 它遗留的一处真实回归由 `ISSUE-P3-195` 独立承接，该条**已由 §199 结案**（参数化骨架 + 静态接线守卫）。
   > 「第 5 项 = 会话锁定直调用例」这类早期提法对应**§190 之前**的编号，现已不成立。
   > 处置结论另见限界 **§20** 与
   > [`resolved/batches/182-合并层冲突对下沉与早退守卫限界批次.md`](resolved/batches/182-合并层冲突对下沉与早退守卫限界批次.md)。
@@ -271,8 +246,8 @@
      `keepasskeyNavGraph`（164，逻辑行 0）**豁免本目 ⇒ 17 项中扣除二者，待拆实为 15 个**；
      **`KeePasskeyApp` 不豁免**，已按该裁决于 §185 下沉（逻辑行 10 → 0）。裁决全文、分类计数依据与
      「逻辑行 ≥5 即重新计入」的重开条件见 [`architecture/产品裁决登记.md`](architecture/产品裁决登记.md) PD-11。
-     > 注：§188 出表的 `PrivilegedBrowserSettingsScreen`（115→95）**若按 `ISSUE-P3-195` 修法②撤销该页替换，
-     > 会回到 115 行 ⇒ **重新入表（待拆数 +1）**。这是该条取舍的代价之一，不是新缺陷。
+     > 注：§188 出表的 `PrivilegedBrowserSettingsScreen` 曾因其修法取舍而可能重新入表——
+     > **该条已由 §199 结案**（取「参数化骨架」一路：复原配色且保住出表），此风险不再存在。
      拆法与 §156 / §159 / §175 / §178 / §179 同：同包段落组件（窄参数、不读 `UiState`、不自持状态），
      逐字性以 `python tools/doc/check_verbatim_move.py <原文件> <本体> <段落文件>` 复核；
      逻辑段（语言映射 / 主题循环 / 回落判定）优先下沉为**可 JVM 单测的纯函数**并补用例（§185 先例）。
@@ -317,6 +292,11 @@
      处置**只能重新盘点**：核内容仍无凭据类插值 ⇒ 换清单里的**路径**并同步 `SecureDialog` KDoc 的
      「未能覆盖」一节；**不得**删清单条目、不得改记号表、不得放宽 `8` / `≥4` 计数。
      旁证判据：以同样记号自扫一遍 `app/src/main/java`，确认「实际集合 == 清单集合」。
+     **第四形态（§199）：一次性核对 ≠ 防护**。`scaffold_block_fingerprint.py` 查出了 §188 的差异，
+     但它是**跑一次就完**的核对，挡不住日后参数默认值被改、或例外页的具名实参被当冗余删掉——
+     凡是「靠某次工具核对得出的等价性/差异」维持的收敛，**必须**再落一份静态接线守卫
+     （先例：`SettingsSubscreenScaffoldWiringTest` 四条，含一条防清单自我空扫的反向哨兵）。
+     守卫的区分力可用 `git show <回归态提交>:<文件>` 代入其谓词复核，**不必**注入临时坏码。
   4. **断言响应材料的宿主直调用例（§173 打开的新验证面）**：§173 把断言侧响应组装下沉为
      `PasskeyAssertionPayload.build(...)`（同包 `internal object` 纯函数）之后，下列判据第一次变成
      **可离线断言**（此前只能靠静态接线守卫 + 设备侧用例）：
