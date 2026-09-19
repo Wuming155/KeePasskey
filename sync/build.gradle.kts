@@ -40,6 +40,9 @@ dependencies {
     androidTestImplementation(libs.androidx.test.runner)
     // ISSUE-P2-192 余量第 1 项：传输层设备侧请求-响应用例（WebDav / S3 Provider 真实 socket 链路）
     androidTestImplementation(libs.mockwebserver)
+    // ISSUE-P2-208 设备侧取证：自签 HTTPS 服务（HeldCertificate / HandshakeCertificates）
+    // 用于「真实工厂客户端」对 IP 字面量 vs 主机名的异常类型判别（Dns 旁路证据）
+    androidTestImplementation(libs.okhttp.tls)
 }
 
 /**
