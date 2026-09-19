@@ -147,84 +147,46 @@
   格式面 7 份 26 处**已由 §201 逐处判定完毕**（登记 21 / 命名 5 值，只挪定义未改值）⇒ **本目闭环**，
   见 [`resolved/batches/201-格式面26处字面量逐处判定批次.md`](resolved/batches/201-格式面26处字面量逐处判定批次.md)）；
   剩余第二档渐进消化，未消化部分在批次文档留清单。
-- **当前进度（只留结论；逐批改动与验证见 `docs/resolved/batches/155`~`199`（§180 / §197 为文档面批次，不属本条的整改量））**：
-  - **第一档 8 文件**（`wc -l` 实测）：**达标 6**（`SyncCache` 382、`UnlockViewModel` 368、
-    `DatabaseSettingsScreen` 339（§159 降到 369，后续批次回填至 370，§189 再降到 339）、`EntryEditFormSections` 351（§160）、
-    `EntryDetailScreen` 349（§169）、`EntryDetailViewModel` 397（§170））；按理由登记 2（`SettingsViewModel` 543 / `DatabaseSession` 535，
-    经复核为**纯门面**，理由 / 边界 / 解除条件见限界 **§18**）；**仍超 0** ⇒ **第一档维度闭环**。
-    两点留痕：① `EntryDetailViewModel` **不满足**限界 §18 的成立前提（「成员全部为一行委托」），
-    它是真降到 400 以下而非登记为门面；② 其剩下 6 个含实现体成员（跨条目明文处置顺序、偏好快照刷新、
-    fail-closed 导出判定、会话登记与 `init` / `onCleared`）属页面状态层应持有者，**不得**再为「门面感」外搬
-    （§170 §3 记了两处刻意不做的移动及各自的已记录边界）；
-  - **第 3 目（≥100 行函数）**：**≥100 行的非 Compose 函数已全部消除**，表内余项**全部为 Compose 面**
-    （§181 首测 28；**当前计数一律现跑 `tools/doc/long_functions.py`，本文件只在剩余清单第 1 项维护一份**），
-    逐个名单见 [`resolved/batches/181-长函数度量工具化与快照分流批次.md`](resolved/batches/181-长函数度量工具化与快照分流批次.md) §3。
-    但「清单内 20 处**全部降到 ≤50**」这句原结论**经 §181 实测为不实**，两处余量已于 **§182 逐条处置**：
-    `mergeConflictedEntry` 52 → **41**（冲突对构造原样下沉为 `conflictPairOf`），
-    `processFillRequest` **55** 经**限界 §20** 裁定接受（早退守卫 + 强制注释，再拆即违反纪律 ⑤ 或改写 fail-closed 路径）。
-    度量口径与三类假阳性成因（含 §175 实读排除过的 `FieldReferenceEngine.containsReference` 等四例）已固化进
-    `tools/doc/long_functions.py` 文档串，**不再靠一次性脚本**；
-  - **第 4 目（字面量）**：协议 / 格式语义字面量的收敛**已完成**（`WebAuthnJson` 键名面、
-    `INNER_RANDOM_STREAM_KEY_SIZE`、`COMPOSITE_SEED_BYTES` / `KEY_COMPONENT_BYTES`、`HMAC_KEY_SELECTOR`、
-    `END_OF_HEADER_MARKER`、写侧 `XML_TRUE` / `XML_FALSE`、`PasskeyKeyText` 的 PEM 空白码位——
-    **全部只挪定义、未改任何取值**）；§167 复核出「唯一成片真实违例」= `@Preview(uiMode = 0x20)` 并已归零，
-    当时的三个「待裁定」小项已由 §168 逐条落地（见违例清单第 4 目）；格式面余量 26 处已由 §201 逐处判定完毕 ⇒ **第 4 目闭环**。
+- **当前进度（只留结论；逐批改动与验证见 `docs/resolved/batches/155`~`201`，批次细节以彼处为单一真相源，不再在本文件复述）**：
+  - **第一档 8 文件**（`wc -l` 实测）：**达标 6**（`SyncCache` 382、`UnlockViewModel` 368、`DatabaseSettingsScreen` 339、
+    `EntryEditFormSections` 351、`EntryDetailScreen` 349、`EntryDetailViewModel` 397）；按理由登记 2
+    （`SettingsViewModel` 543 / `DatabaseSession` 535，经复核为**纯门面**，理由 / 边界 / 解除条件见限界 **§18**）；
+    **仍超 0** ⇒ **第一档维度闭环**。留痕：`EntryDetailViewModel` 是真降到 400 以下（**不满足**限界 §18
+    「成员全部为一行委托」的成立前提）；其剩下 6 个含实现体成员（跨条目明文处置顺序、偏好快照刷新、
+    fail-closed 导出判定、会话登记与 `init` / `onCleared`）属页面状态层应持有者，**不得**再为「门面感」外搬（§170 §3）。
+  - **第 3 目（≥100 行函数）**：**非 Compose 面已全部消除**（`mergeConflictedEntry` 削至 **41**；
+    `processFillRequest` 55 经**限界 §20** 裁定接受），表内余项**全部为 Compose 面** ⇒ 见剩余清单第 1 项
+    （度量口径与假阳性成因已固化进 `tools/doc/long_functions.py` 文档串，**不再靠一次性脚本**）。
+  - **第 4 目（字面量）**：**闭环**——协议 / 格式语义字面量收敛、`@Preview(uiMode = 0x20)` 成片违例归零（§167~§168）、
+    格式面 26 处逐处判定完毕（§201），**全部只命名、未改任何取值**（明细见违例清单第 4 目与 168 / 201 批次文档）。
 - **剩余清单（本条尚未闭环的部分，逐条自包含）**：
-  > **现为 1~4 项**（§200 起：原第 5 项——§198 下沉时发现的详情页两个破坏性确认出口零断言——
-  > **已结案移出**，出口决策纯函数化 + 4 例纯函数断言 + 4 例静态接线守卫，回滚确认的历史顺序孤例并入口径；
-  > 见 [`resolved/batches/200-破坏性确认出口决策纯函数化批次.md`](resolved/batches/200-破坏性确认出口决策纯函数化批次.md)）。
-  > 编号映射：早期批次正文里提到的「剩余清单第 3 项」= 此处第 2 项（第二档渐进消化）。
-  > **§190 起**：原第 4 项（三 VM 的会话锁定擦除直调用例）**已结案移出**（§171 详情页 / §190 编辑页 +
-  > 设置页），原第 5 项（断言响应材料）上移为此处**第 4 项**。
-  > **§195 起**：§190 登记的第 5 项（`SharedPreferences` 内存替身两份）**已结案移出**（§195 并为一份，
-  > 24 处断言字面未动）。更早的第 6 项（二级设置页重复 `TopAppBar` 骨架，§187 新登、§188 首段、§189 结案）见
-  > [`resolved/batches/189-守卫点名五页接入共用骨架批次.md`](resolved/batches/189-守卫点名五页接入共用骨架批次.md)；
-  > 它遗留的一处真实回归由 `ISSUE-P3-195` 独立承接，该条**已由 §199 结案**（参数化骨架 + 静态接线守卫）。
-  > 「第 5 项 = 会话锁定直调用例」这类早期提法对应**§190 之前**的编号，现已不成立。
+  > **现为 1~4 项**：原第 5 项（§198 新登的详情页破坏性确认出口零断言）已由 §200 结案移出；更早的第 4~6 项
+  > 也已分别结案（§171/§190、§195、§189/§199）——历史编号映射与逐批去向见各批次文档，不再在此复述。
   > 处置结论另见限界 **§20** 与
   > [`resolved/batches/182-合并层冲突对下沉与早退守卫限界批次.md`](resolved/batches/182-合并层冲突对下沉与早退守卫限界批次.md)。
   1. **Compose 面的长函数**（第 3 目的剩余部分）：**§200 现跑 = 18 个 ≥100 行函数**（§198 复跑为 17；
      **§200 复跑纠偏**：§199 复原 `PrivilegedBrowserSettingsScreen` 配色时在函数体内 +5 行，
      把该函数从 95 推到恰好 100 重新入表，而 §199 的验证表漏跑了本尺子 ⇒ 失真至 §200 现跑才现形；
-     该页 5 行复原是 `SettingsSubscreenScaffoldWiringTest` 的守卫锚点不得删减，再出表归后续批次。
-     §181 首测 28 → §183 削 `Argon2ParametersDialog` → §185 削 `KeePasskeyApp` → §186 削
-     `UnlockStandardUnlockContent` → §187 削 `AboutSettingsScreen` → §188 顺带削 `PrivilegedBrowserSettingsScreen`）；
-     逐个名单见 [`resolved/batches/181-长函数度量工具化与快照分流批次.md`](resolved/batches/181-长函数度量工具化与快照分流批次.md) §3。
+     该页 5 行复原是 `SettingsSubscreenScaffoldWiringTest` 的守卫锚点不得删减，再出表归后续批次），
+     扣除 2 个 PD-11 豁免 NavGraph ⇒ **待拆 16**。
+     逐个名单与已出表 9 个的逐批留痕见
+     [`resolved/batches/181-长函数度量工具化与快照分流批次.md`](resolved/batches/181-长函数度量工具化与快照分流批次.md) §3
+     及各批次文档（§178~§198），此处不再复述；
      **计数今后一律现跑 `python tools/doc/long_functions.py`**（三条判据与其踩坑史写在工具文档串里，
      条目内不再抄录，以免重演 §175 一次性脚本漏报 10 条的失真）。
-     已消减：§178 `OpenExistingVaultDialog` 226→96、§183 `Argon2ParametersDialog` 168→80、
-     §185 `KeePasskeyApp` 202→86、§186 `UnlockStandardUnlockContent` 158→71、
-     §187 `AboutSettingsScreen` 153→75（均**出表**，§185 另补 5 例宿主单测）；
-     §179 `CreateVaultWizardDialog` 234→158（**仍在表内**，下限由主密码 `CharArray` 擦除链的「单一现场」决定，见 §179 §3）；
-     §189 `HealthCheckScreen` 227→206（骨架块在函数体内、**未出表**）、§191 同一函数 206→**95 出表**
-     （两条同形判定并为 `HealthCountAuditRow` + 纯函数 `healthAuditTone`，**并附 4 例宿主单测**；
-     代价是本批**不是逐字搬**，缺失行逐条归类见 §191 §2）；
-     §192 `ConflictResolutionScreen` 172→**91 出表**（三段整块内联呈现下沉为同包段落组件；
-     段落组件**必须另起新文件**——原文件 394 行，就地追加 wrapper 会越过 400，
-     等于把「长函数」换成「第二档」新问题）；
-     §193 `ChildDatabaseDialog` 170→**97 出表**（敏感对话框：`SecureDialogWindowEffect()` 两处
-     **必须留在被 `SecureDialogFlagPolicyTest` 点名的文件里**、子库主密码链路留本体，只搬非保密段落）；
-     §194 `EntryDetailTopBar` 151→**84 出表**（溢出菜单原样下沉；这是**首个跨 `PopupSecureFlagInventoryTest` 清单锁的搬移**，
-     见下方第 3 项的清单锁口径）；§196 `VaultListDialogHost` 130→**68 出表**（纯派发表按特性切两段，
-     `check_verbatim_move` 报 **`MISSING_KINDS=0`** 的纯逐字搬；段组件**追加进原文件**而非另起——
-     198 行 + 75 仍距 400 很远，判据是「离 400 还有多少」而不是「段落一律另起文件」）；
-     §198 `EntryDetailDialogHost` 119→**91 出表**（两个内联 `AlertDialog` 确认框原样下沉；两份确认
-     **刻意不合并**——删除走 `TextButton` + error 色、回滚走 `Button` + `CapsuleShape`，视觉语义不同，
-     为省 22 行拉平它们正是 `ISSUE-P3-195` 那类失效）。
-     **当前表内头部**（现跑读数）：`CreateVaultWizardDialog` 158（受限界 §179 下限）、
-     `PackageBlocklistManageDialog` 131、`GeneratorContent` 121、`EntryDetailScreen` 121、`SyncStatusCard` 119。
-     §192 另把 `FieldDiffRow` 的两份同形选项行并为一份 `ConflictFieldChoiceRow`（83 → 41 行，
-     不在表内但属同一「重复呈现并一」主题）。
-     **口径问题已裁决（§184，PD-11）**：两个纯接线装配表 `keepasskeySettingsNavGraph`（252，逻辑行 1）与
-     `keepasskeyNavGraph`（164，逻辑行 0）**豁免本目**（§184 裁决时 17 项中扣除二者，待拆 15；
-     §200 起表内 18、**待拆 16**）；
-     **`KeePasskeyApp` 不豁免**，已按该裁决于 §185 下沉（逻辑行 10 → 0）。裁决全文、分类计数依据与
-     「逻辑行 ≥5 即重新计入」的重开条件见 [`architecture/产品裁决登记.md`](architecture/产品裁决登记.md) PD-11。
-     > 注：§188 出表的 `PrivilegedBrowserSettingsScreen` 曾因其修法取舍而可能重新入表——
-     > **该条已由 §199 结案**（取「参数化骨架」一路：复原配色且保住出表），此风险不再存在。
-     拆法与 §156 / §159 / §175 / §178 / §179 同：同包段落组件（窄参数、不读 `UiState`、不自持状态），
-     逐字性以 `python tools/doc/check_verbatim_move.py <原文件> <本体> <段落文件>` 复核；
-     逻辑段（语言映射 / 主题循环 / 回落判定）优先下沉为**可 JVM 单测的纯函数**并补用例（§185 先例）。
+     **当前表内头部**（现跑读数）：`CreateVaultWizardDialog` 158（**受限界 §179 下限**——主密码
+     `CharArray` 擦除链的「单一现场」决定，勿再拆）、`PackageBlocklistManageDialog` 131、
+     `GeneratorContent` 121、`EntryDetailScreen` 121、`SyncStatusCard` 119。
+     **口径问题已裁决（§184，PD-11）**：两个纯接线装配表 `keepasskeySettingsNavGraph` / `keepasskeyNavGraph`
+     （逻辑行 <5）**豁免本目**；裁决全文、分类计数依据与「逻辑行 ≥5 即重新计入」的重开条件见
+     [`architecture/产品裁决登记.md`](architecture/产品裁决登记.md) PD-11。
+     **搬移约束（历史批次实证，勿重蹈）**：① 同包段落组件窄参数、不读 `UiState`、不自持状态
+     （§156 / §159 先例）；② 敏感对话框的 `SecureDialogWindowEffect()` 两处**必须留在被
+     `SecureDialogFlagPolicyTest` 点名的文件里**、只搬非保密段落（§193）；③ 段落组件「另起新文件 vs
+     追加进原文件」按原文件距 400 的余量**逐案判**（§192 与 §196 两案结论相反正是此理）；
+     ④ 逻辑段优先下沉为**可 JVM 单测的纯函数**并补用例（§185 先例）；逐字性以
+     `python tools/doc/check_verbatim_move.py <原文件> <本体> <段落文件>` 复核；
+     安全「清单锁」型守卫与「一次性核对 ≠ 防护」的纪律见下方第 3 项。
      **刻意不搬的三处**（各有锚在现场的守卫或边界，勿重复尝试）：
      ① `DatabaseSettingsScreen` 导出侧四个 `CreateDocument` launcher 与三处 `pending…Uri`——
      `ExportTicketSinkGuardTest` 的定位串锚在「SAF 回调把目标落到待确认态」这一现场，再搬走会让
@@ -236,16 +198,9 @@
      取数须在**最终写盘后**——§165 §7 校正过一批「测量点早于写盘」造成的 `+1` 漂移）。
      当前头部：`RealVaultRepository` 489、`VaultRepository` 478、`RuntimeIntegrityDetector` 470、
      `KdbxHeader` 461、`KdbxXmlParser` 454、`VaultListScreen` 447、`UnlockScreen` 446。
-     **已消化 14 个**（一律「只搬不改逻辑」，逐批留痕 `resolved/batches/159`~`186`；
-     **§187 起七批再无出档项**——§189 与 §191~§197 都只是「减而未出档」，见下方同注）：
-     `DatabaseSettingsScreen` 530→339（§159 起，§189 再降）、`VaultListDialogs` 490→281、`PasskeyCreateActivity` 460→359、
-     `VaultEntryMapper` 490→384、`AutofillConfirmActivity` 475→366、`EntryEditScreen` 472→319、
-     `SyncConflictController` 461→355、`EntryDetailScreen` 427→349、`EntryDetailViewModel` 434→397、
-     `PasskeyAssertionActivity` 450→267（§173，与 §162 的注册侧对称）、`PasskeyCryptoEngine` 453→269（§174）、
-     `HealthCheckScreen` 406→146（§175→§189→§191）、`SettingsPreferencesController` 446→379（§176）、
-     `UnlockContentSections` 430→336（§186，与第 3 目一批双降）。
-     **减而未出档（勿误记为消减）**：§189 让 `DebugSettingsScreen` 443→418、`SecuritySettingsScreen` 433→407、
-     `CloudSyncScreen` 427→401 各再省 25~26 行，**三页仍全部留在第二档** ⇒ 28 不变；`CloudSyncScreen` 距出表 1 行。
+     **已消化 14 个**（一律「只搬不改逻辑」；逐文件明细与逐批留痕见 `resolved/batches/159`~`186`，
+     此处不再复述）。**减而未出档（勿误记为消减）**：§189 让 `DebugSettingsScreen` / `SecuritySettingsScreen` /
+     `CloudSyncScreen` 各再省 25~26 行，**三页仍全部留在第二档** ⇒ 28 不变；`CloudSyncScreen` 距出表 1 行。
      **刻意排后（是取舍不是遗漏）**：① `RealVaultRepository` / `VaultRepository`——整树读写与擦除边界，
      牵动限界 §1.6 的可达性穷举；② `KdbxHeader` / `KdbxXmlParser`——`.kdbx` 格式面，须过官方实现
      端到端对拍（§38 证据纪律），属独立一段；③ `DicewareWordList` 408——词表数据文件，
