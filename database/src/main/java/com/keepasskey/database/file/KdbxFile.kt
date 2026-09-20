@@ -218,31 +218,53 @@ object KdbxFile {
         // ISSUE-P2-24：大附件在解析期即流式落盘（binaryStore 为 null 时行为与既往逐字一致）
         val innerHeader = InnerHeader.deserialize(xmlInputStream, binaryStore)
 
-        // D7 协调项：内层随机流算法由文件自述（属未认证字段），不支持时 crypto 侧抛
-        // CryptoException.CipherException；在本跨模块边界统一包装为类型化
-        // [KdbxCorruptFileException]，使上层得到「不支持的内层随机流算法」这一可行动语义，
-        // 而非泛化失败（crypto 侧行为不改动，由其归属代理负责）。
-        // 注：执行到此处时头部 SHA-256 / 头部 HMAC / 首个数据块 HMAC 均已校验通过，
-        // 故该算法标识只可能来自「格式不受支持的合法库」或「已通过认证后被篡改的库」。
-        val innerCipher = try {
-            InnerRandomStreamCipher(
-                innerHeader.innerRandomStreamId,
-                innerHeader.innerRandomStreamKey
-            )
-        } catch (e: CryptoException) {
-            // 跨模块异常包装：crypto 侧的泛化失败在此收敛为类型化「文件损坏/格式不受支持」
-            throw KdbxCorruptFileException(
-                "不支持的内层随机流算法: id=${innerHeader.innerRandomStreamId}（文件损坏或格式不受支持）",
-                e
-            )
-        }
-
-        val parseResult = KdbxXmlParser(innerCipher).parse(xmlInputStream, innerHeader.binaries)
-
-        // XML 解析可能在 GZip 尾部即停止拉取，显式确认 HMAC 终止块已被消费校验
-        hmacBlockIn.verifyEndOfStream()
+        val parseResult = decodeInnerPayload(xmlInputStream, hmacBlockIn, innerHeader)
 
         return buildDatabase(header, innerHeader, parseResult)
+    }
+
+    /**
+     * 内层阶段：构造内层流密码 → 流式解析 XML → 校验 HMAC 终止块；并在**任何路径**上
+     * 确定性擦除内层随机流密钥（`ISSUE-P3-235` / `RC-02` 收口；秘密的所有权与契约见
+     * [InnerHeader.clearSensitive] 与 `docs/architecture/敏感缓冲所有权契约.md` §3 R3）。
+     *
+     * 擦除**必须**落在本方法的 `finally`（而非调用方）：密钥的用途到解析结束为止，此后仅
+     * [buildDatabase] 消费 `binaries`；这样「解析失败 / HMAC 终止块校验失败 / 内层算法不受支持」
+     * 三条异常出口同样不留残留。
+     */
+    private fun decodeInnerPayload(
+        xmlInputStream: InputStream,
+        hmacBlockIn: HmacBlockInputStream,
+        innerHeader: InnerHeader
+    ): KdbxXmlParser.ParseResult {
+        try {
+            // D7 协调项：内层随机流算法由文件自述（属未认证字段），不支持时 crypto 侧抛
+            // CryptoException.CipherException；在本跨模块边界统一包装为类型化
+            // [KdbxCorruptFileException]，使上层得到「不支持的内层随机流算法」这一可行动语义，
+            // 而非泛化失败（crypto 侧行为不改动，由其归属代理负责）。
+            // 注：执行到此处时头部 SHA-256 / 头部 HMAC / 首个数据块 HMAC 均已校验通过，
+            // 故该算法标识只可能来自「格式不受支持的合法库」或「已通过认证后被篡改的库」。
+            val innerCipher = try {
+                InnerRandomStreamCipher(
+                    innerHeader.innerRandomStreamId,
+                    innerHeader.innerRandomStreamKey
+                )
+            } catch (e: CryptoException) {
+                // 跨模块异常包装：crypto 侧的泛化失败在此收敛为类型化「文件损坏/格式不受支持」
+                throw KdbxCorruptFileException(
+                    "不支持的内层随机流算法: id=${innerHeader.innerRandomStreamId}（文件损坏或格式不受支持）",
+                    e
+                )
+            }
+
+            val parseResult = KdbxXmlParser(innerCipher).parse(xmlInputStream, innerHeader.binaries)
+
+            // XML 解析可能在 GZip 尾部即停止拉取，显式确认 HMAC 终止块已被消费校验
+            hmacBlockIn.verifyEndOfStream()
+            return parseResult
+        } finally {
+            innerHeader.clearSensitive()
+        }
     }
 
     private fun buildDatabase(
@@ -407,8 +429,16 @@ object KdbxFile {
             innerHeader.serialize(bodyOut)
             KdbxXmlSerializer(innerCipher).serialize(bodyOut, database)
         } finally {
-            // 级联收尾：GZip finish → 加密流 doFinal → HMAC 块流写入终止块
-            gzipOut?.close() ?: cipherOut.close()
+            try {
+                // 级联收尾：GZip finish → 加密流 doFinal → HMAC 块流写入终止块
+                gzipOut?.close() ?: cipherOut.close()
+            } finally {
+                // ISSUE-P3-235（RC-02 收口）：内层随机流密钥（秘密）的用途到序列化结束为止，
+                // 无论收尾是否抛异常都在此擦除；所有权与契约见 InnerHeader.clearSensitive。
+                // 本方法是「该密钥实际保护过载荷」的唯一路径——若更早的步骤（KDF 派生 /
+                // 外层头部写出）失败，密钥尚未加密任何载荷，其残留不构成新的秘密暴露。
+                innerHeader.clearSensitive()
+            }
         }
     }
 

@@ -185,13 +185,31 @@
   - AC③ 迁移过程不得触碰 §9.6 的 7 条写坏库红线（`P3-105` 的 `copyOf`、`P2-48` 的逐引用物化、
     `P2-60` 的清理时机等）——红线与规则的对应关系**已在设计 §7.1 逐条列明**；
   - AC④ `.\gradlew.bat test` 全绿；涉及原生 / 会话路径的改动按测试资产纪律跑相应设备侧层。
-- **迁移起点（2026-09-20 走查所得，登记为设计附 A）**：`G1` 内层随机流密钥（64 B，读 / 写两条
-  路径）无清零点；`G2` `SyncSessionState.lastSyncedDb` 与 `SyncConflictController.clearPendingConflictSession()`
-  **只置 null 不擦树**；`G4` 清零点无统一符号（散落 100+ 处 `fill`）；`G5` 部分收口点缺擦除契约用例
-  （设计 §4 中守卫用例标 `—` 者）；`G3` 池内内联附件明文不随会话终止擦除属**已登记限界**（限界 §1.6）。
-  ——另如实声明：本轮**未**逐条复核 `RC-02` 症状项（`P2-56/57/60`、`P3-86/96/99/100/101/105/118/119`）
-  的闭环状态，其中多数在 HEAD 上已由 §52 / §54 / §57 / §58 / §59 等批次**逐处**闭环；本条**不重开**
-  这些已闭环条目，只收口其**结构性缺口**。
+- **迁移进度（逐处、每步独立成批）**：
+  - ✅ **`G1`（§235 批次）**：内层随机流密钥（64 B，读 / 写两条路径）原本**无清零点**——
+    已改为 `InnerHeader.clearSensitive()`（O 类，所有权归 `InnerHeader`），由读路径
+    `KdbxFile.decodeInnerPayload` 的 `finally`（解析 + HMAC 终止块校验之后）与写路径
+    `KdbxFile.savePayload` 的 `finally`（序列化之后）两处调用；契约用例
+    `InnerStreamKeyWipeTest` 8 例（行为级 4 + 静态接线 4，含**顺序**断言），并用已知坏样本反校过守卫。
+  - ⏳ **待办 `G2`（原前提经实施前复核两处不成立，已就地更正）**：原登记「`lastSyncedDb` 与
+    `clearPendingConflictSession()` 只置 null、不擦树」**不成立**——`lastSyncedDb` 全仓 5 处赋值
+    全部是 `databaseSession.databaseFlow.value`（**会话活动树本身**），而 `pendingLocalDb` 的生产两处调用
+    （`SyncCycleRunner.kt:354`、`SyncCycleRemoteOutcomes.kt:103`）都传 `localDbOverride = localDbSnapshot`
+    （同属会话树引用）⇒ 二者是 **S/B 类引用**，「只置 null」是**正确形态**，擦除由 `DatabaseSession.lock()`
+    承担。**真实残余收窄为**：`pendingRemoteDb`（恒为 `codec.parseKdbxBytes(remoteBytes)` 的独立解析树）
+    与 `pendingMergedRoot` 的**合并器新建节点**。**且 `clearPendingConflictSession()` 结构上不是合法擦除点**
+    ——它同时服务「会话锁定」（`SyncCoordinator.onSessionLocked`）与「合并树已采用为会话库并落盘成功」
+    （`SyncConflictController.kt:141-144`，此前 `updateDatabaseMeta { mergedDb }`）两条路径，在后一条上
+    擦 `pendingRemoteDb` 会**连带擦掉刚被采用的活动库中共享的节点**（**P0 级数据损坏**）。
+    ⇒ 准入：擦除只能挂**会话终止**路径 + **身份集合判定**（对齐 `KdbxGroup.clearSupersededSensitiveData`）
+    并先确定 `KdbxMerger` 的实例复用边界；该链路须真机跑设备侧层（本环境无设备 ⇒ **未实施**）。
+  - ⏳ **待办 `G4` / `G5`**：`G4` 清零点无统一符号（散落 100+ 处 `fill`，纯机械替换、按模块分批）；
+    `G5` 部分收口点缺擦除契约用例（设计 §4 中守卫用例标 `—` 者）。
+  - **`G3`** 池内内联附件明文不随会话终止擦除属**已登记限界**（限界 §1.6）；其实施准入条件
+    见设计 §6.2（须先满足 `G2` 与身份集合判定）。
+  - 如实声明：本轮**未**逐条复核 `RC-02` 症状项（`P2-56/57/60`、`P3-86/96/99/100/101/105/118/119`）
+    的闭环状态，其中多数在 HEAD 上已由 §52 / §54 / §57 / §58 / §59 等批次**逐处**闭环；本条**不重开**
+    这些已闭环条目，只收口其**结构性缺口**。
 - **依据**：`SECURITY_RECHECK_2026-09.md` §8 `RC-02` / `R-CLEAR-2` / §9.6；
   [`docs/architecture/敏感缓冲所有权契约.md`](architecture/敏感缓冲所有权契约.md)；
   [`docs/architecture/已知工程限界.md`](architecture/已知工程限界.md) §1.6 / §1.7。

@@ -165,6 +165,27 @@ data class InnerHeader(
         writeField(outputStream, KdbxConstants.InnerHeaderFieldId.END, ByteArray(0))
     }
 
+    /**
+     * ISSUE-P3-235（`RC-02` 收口）：擦除本实例持有的**秘密**材料——内层随机流密钥
+     * （解密全部 `Protected="True"` 字段的密钥，64 字节）。
+     *
+     * **所有权（契约见 `docs/architecture/敏感缓冲所有权契约.md` §2 / §3 R3）**：本类是
+     * [innerRandomStreamKey] 的**独占所有者（O 类）**，擦除责任在本类；调用时机为本实例的
+     * 生命周期终点——读路径在负载解析完成后、写路径在负载序列化完成后，两处均由
+     * `KdbxFile` 在其 `finally` 中调用（就地注释见该文件 `decodeInnerPayload` /
+     * `savePayload`）。
+     *
+     * **不得**把本方法与 [innerRandomStreamId] / [binaries] 同等看待：前者是算法标识、
+     * 后者属二进制池（其擦除边界见 `docs/architecture/已知工程限界.md` §1.6），二者均非秘密，
+     * 本方法不触碰。派生自本密钥的引擎内部态（BC `StreamCipher` 的密钥调度）**无法**经公开
+     * API 擦除，属本项已声明的残余面。
+     *
+     * 幂等：重复调用无害。
+     */
+    fun clearSensitive() {
+        innerRandomStreamKey.fill(0)
+    }
+
     companion object {
         private val secureRandom = SecureRandom()
 
