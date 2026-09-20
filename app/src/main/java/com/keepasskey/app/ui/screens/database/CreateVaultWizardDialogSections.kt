@@ -192,3 +192,82 @@ internal fun CreateVaultConfirmButton(
         Text(stringResource(R.string.btn_create))
     }
 }
+
+/**
+ * 新建库的存储位置选择（**ISSUE-P2-229**）。
+ *
+ * 两行单选：内部存储为默认；选「自选位置」即当场拉起系统文件选择器，挑定的文件名回显在下方。
+ * 外部位置的两条降级（写回非原子、不参与 WebDAV / S3 同步）**必须**同屏如实告知——
+ * 不得让用户在不知情下拿到一个「看起来一样但更容易损坏、也同步不走」的库。
+ */
+@Composable
+internal fun VaultStorageLocationSection(
+    location: VaultStorageLocation,
+    pickedFileName: String,
+    onSelectInternal: () -> Unit,
+    onSelectExternal: () -> Unit
+) {
+    Column(
+        modifier = androidx.compose.ui.Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Text(
+            text = stringResource(R.string.db_create_location_title),
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.Bold
+        )
+        StorageLocationOption(
+            title = stringResource(R.string.db_create_location_internal),
+            subtitle = stringResource(R.string.db_create_location_internal_sub),
+            selected = location == VaultStorageLocation.INTERNAL,
+            onClick = onSelectInternal
+        )
+        StorageLocationOption(
+            title = stringResource(R.string.db_create_location_external),
+            subtitle = stringResource(R.string.db_create_location_external_sub),
+            selected = location == VaultStorageLocation.EXTERNAL,
+            onClick = onSelectExternal
+        )
+        if (location == VaultStorageLocation.EXTERNAL) {
+            Text(
+                text = if (pickedFileName.isBlank()) {
+                    stringResource(R.string.db_create_location_external_hint)
+                } else {
+                    stringResource(R.string.db_create_location_picked, pickedFileName)
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = stringResource(R.string.db_create_location_external_warning),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error
+            )
+        }
+    }
+}
+
+/** 单个位置选项（单选钮 + 标题 + 说明），整行可点。 */
+@Composable
+private fun StorageLocationOption(
+    title: String,
+    subtitle: String,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = androidx.compose.ui.Modifier.fillMaxWidth().clickable(onClick = onClick),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        androidx.compose.material3.RadioButton(selected = selected, onClick = onClick)
+        Spacer(modifier = androidx.compose.ui.Modifier.width(6.dp))
+        Column {
+            Text(text = title, style = MaterialTheme.typography.bodyMedium)
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}

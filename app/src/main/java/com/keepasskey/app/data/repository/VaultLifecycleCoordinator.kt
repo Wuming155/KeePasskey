@@ -60,14 +60,7 @@ internal class VaultLifecycleCoordinator(
                     context.contentResolver.openInputStream(uri)
                         ?: throw IOException("无法打开数据库文件流: ${activeDb.name}")
                 },
-                saveWriter = { bytes ->
-                    withContext(Dispatchers.IO) {
-                        context.contentResolver.openOutputStream(uri, "rwt")?.use { os ->
-                            os.write(bytes)
-                            os.flush()
-                        } ?: throw IOException("无法写入目标数据库文件: ${activeDb.name}")
-                    }
-                },
+                saveWriter = SafVaultCreation.saveWriter(context, uri, activeDb.name),
                 passwordChars = passwordChars,
                 keyFileData = keyFileData,
                 readOnly = readOnly
@@ -115,20 +108,17 @@ internal class VaultLifecycleCoordinator(
      *
      * ISSUE-P2-85：[preset] 为**类型化的整组选择**（外层算法 + KDF），两者都真实落到文件头。
      * 此前它只是字符串且仅用 `contains("AES-KDF")` 反推 KDF，外层算法被整段丢弃。
+     *
+     * ISSUE-P2-229：[targetUri] 非空即「经系统文件选择器自选位置」建库（此前新建一律静默落在
+     * 应用私有目录，用户既看不到也无法选）；为 null 时维持既有的 `filesDir` 路径与全部行为。
      */
     suspend fun createDatabaseWithKeyFile(
         name: String,
         masterPassword: CharArray,
         keyFileFactor: CreateKeyFileFactor,
-        preset: CreateVaultPreset
+        preset: CreateVaultPreset,
+        targetUri: String? = null
     ): KdbxResult<Unit> {
-        val filesDir = context.filesDir ?: return KdbxResult.Failure(
-            IllegalStateException("No filesDir"),
-            strings.get(R.string.repo_files_dir_unavailable)
-        )
-        val fileName = if (name.endsWith(".kdbx", ignoreCase = true)) name else "$name.kdbx"
-        val targetFile = File(filesDir, fileName)
-
         val generatedKeyFile = if (keyFileFactor is CreateKeyFileFactor.Generate) {
             try {
                 KdbxKeyFileGenerator.generate()
@@ -146,25 +136,55 @@ internal class VaultLifecycleCoordinator(
         }
 
         return try {
-            val result = databaseSession.create(
-                file = targetFile,
-                name = name.removeSuffix(".kdbx"),
-                passwordChars = masterPassword,
-                useArgon2 = preset.useArgon2,
-                keyFileData = keyFileData,
-                cipherUuid = preset.cipherUuid
-            )
-            if (result is KdbxResult.Success) {
-                selectDatabase(fileName)
+            val uri = targetUri?.let { Uri.parse(it) }
+            if (uri == null) {
+                createInFilesDir(name, masterPassword, keyFileData, preset)
+            } else {
+                SafVaultCreation.create(
+                    context = context,
+                    strings = strings,
+                    databaseSession = databaseSession,
+                    name = name,
+                    masterPassword = masterPassword,
+                    keyFileData = keyFileData,
+                    preset = preset,
+                    targetUri = uri
+                ) { dbName, path -> importExternalDatabase(dbName, path, SYNC_TYPE_FILE_PICKER) }
             }
-            refresh()
-            result
         } finally {
             // 生成副本用毕即擦：会话已克隆自己的副本供保存与导出复用
             // （Existing 分支的字节归调用方所有，本层不得擦除）
             generatedKeyFile?.fill(0)
         }
     }
+
+    /** 既有内部存储建库通道（ISSUE-P2-229 起为 `targetUri == null` 分支，行为逐字未改） */
+    private suspend fun createInFilesDir(
+        name: String,
+        masterPassword: CharArray,
+        keyFileData: ByteArray?,
+        preset: CreateVaultPreset
+    ): KdbxResult<Unit> {
+        val filesDir = context.filesDir ?: return KdbxResult.Failure(
+            IllegalStateException("No filesDir"),
+            strings.get(R.string.repo_files_dir_unavailable)
+        )
+        val fileName = if (name.endsWith(".kdbx", ignoreCase = true)) name else "$name.kdbx"
+        val result = databaseSession.create(
+            file = File(filesDir, fileName),
+            name = name.removeSuffix(".kdbx"),
+            passwordChars = masterPassword,
+            useArgon2 = preset.useArgon2,
+            keyFileData = keyFileData,
+            cipherUuid = preset.cipherUuid
+        )
+        if (result is KdbxResult.Success) {
+            selectDatabase(fileName)
+        }
+        refresh()
+        return result
+    }
+
 
     /** 移除已知库：摘除注册表条目、删除沙盒内文件、必要时关闭会话并清空活动库 ID */
     suspend fun removeDatabase(id: String): KdbxResult<Unit> {
@@ -219,7 +239,7 @@ internal class VaultLifecycleCoordinator(
                 id = path,
                 name = sanitizedName,
                 path = path,
-                isRemote = syncType != "本地设备存储" && syncType != "系统文件选择器",
+                isRemote = syncType != SYNC_TYPE_LOCAL_DEVICE && syncType != SYNC_TYPE_FILE_PICKER,
                 syncType = syncType,
                 lastOpenedAt = ""
             )
@@ -268,4 +288,14 @@ internal class VaultLifecycleCoordinator(
         } else {
             File(path).takeIf { it.isFile }?.inputStream()
         }
+
+    companion object {
+        /**
+         * `syncType` 的两个「本机」取值（ISSUE-P2-229 收敛为常量：此前它们是散落在
+         * `isRemote` 判定里的裸字面量，新增分支时极易写成第三个变体而被判成远端库）。
+         * 值与设置页 / 打开对话框的既有字符串保持一致，**不得**改动字面量本身。
+         */
+        const val SYNC_TYPE_LOCAL_DEVICE = "本地设备存储"
+        const val SYNC_TYPE_FILE_PICKER = "系统文件选择器"
+    }
 }

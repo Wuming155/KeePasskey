@@ -36,25 +36,32 @@
 
 ---
 
-## P2 中危缺陷与协议/测试缺口（1 项）
+## P2 中危缺陷与协议/测试缺口（0 项）
 
-### ISSUE-P2-229：新建密码库强制落应用私有目录，未给位置选择（SAF 缺失）
-
-- **核实时间点**：2026-09-20 经新建链路走查核实。
-- **核实方式**：`DatabasePickerScreen.kt:197`「新建」→ `CreateVaultWizardDialog`（`:263`）→ `DatabasePickerViewModel.kt:131` → `RealVaultRepository.kt:151` → **`VaultLifecycleCoordinator.kt:125/130` `File(context.filesDir, "$name.kdbx")`** ⇒ 实际路径 `/data/user/0/com.keepasskey/files/x.kdbx`；对照「打开已有库」已走 SAF：`OpenExistingVaultDialog.kt:43` `OpenDocument` + `VaultLifecycleCoordinator.kt:209` `takePersistableUriPermission(READ|WRITE)`。`产品裁决登记.md` PD-01~PD-12 **无**存储位置裁决；`Privacy-Policy.md:82` 反而承诺「或用户自行选择的存储位置」。
-- **背景与根因**：新建即静默落在私有目录，用户既看不到也无法选位置；而 `docs/ACTIVE_ISSUES` 之外的既有能力（SAF 读写通道）已具备，属**遗漏**而非取舍。**改造风险面（须如实处理，不得静默降级）**：① `AtomicFileWriter.kt:12-30` 的 `.tmp` + `renameTo`/`ATOMIC_MOVE` + `.bak` + 目录 fsync 在 SAF 文档上**不可用**（现存 SAF 通道已用 `openOutputStream(uri,"rwt")` 截断式非原子写，本身违反规则 4）；② `SessionOpener.create` 只收 `File`（`:55`）；③ `SyncCycleRunner.kt:180-181` 硬依赖 `currentFile`、`:102` 以 `activeFile.name` 推 remotePath ⇒ SAF 库失去同步能力；④ `takePersistableUriPermission` 现为静默 `catch`（`:213`），provider 不支持时重启后库不可开且无告警；⑤ `VaultDatabaseCatalog.kt:107-112/162/172` 以文件名作 id，内外同名可碰撞。
-- **裁决范围（用户 2026-09-20 明示）**：新建向导提供**二选一**——①应用私有目录（默认，原子写 + 同步全功能）②自选位置（`ACTION_CREATE_DOCUMENT`）；选②时**如实提示**该库不支持 WebDAV/S3 同步、写盘为非原子降级方案，并登记进限界表。
-- **验收标准**：AC① 新建向导落地位置二选一，默认内部存储；AC② SAF 分支持久化 `content://` 位置且授权失败**显式告警**（不再静默 catch）；AC③ 非原子写降级面在限界表登记，不得声称已满足规则 4；AC④ 现有内部存储路径行为与既有测试语义零回归。
-
-> **历史 P2 条目**（§219 闭环的 `ISSUE-P2-199` / `ISSUE-P2-200` / `ISSUE-P2-208`，§220 闭环的
-> `ISSUE-P2-210` / `ISSUE-P2-211`，§223 闭环的 `ISSUE-P2-212`）的实现与验收证据见
-> [RESOLVED_LOG.md](RESOLVED_LOG.md) 与 [`docs/resolved/batches/`](resolved/batches/)。
+> **暂无开放项**（本区最近一次归零：§230 ~ §233 四批闭环 `ISSUE-P2-226` / `P2-227` / `P2-228` / `P2-229`
+> ——即用户 2026-09-20 真机报告的四项问题（自身界面仍出现填充建议 / 生物识别被禁用时归因笼统 /
+> 自动填充卡三个假开关且文案谎称需要无障碍 / 新建库无位置选择入口）；实现与验收证据见
+> [RESOLVED_LOG.md](RESOLVED_LOG.md) 与 [`docs/resolved/batches/`](resolved/batches/) 的 230 ~ 233 号批次）。
 
 ---
 
-## P3 低危问题、特性接线与体验优化（0 项）
+## P3 低危问题、特性接线与体验优化（1 项）
 
-> **暂无开放项**（本区最近一次归零：§229 闭环的 `ISSUE-P3-225`——已解锁常驻通知未联动呈现自动锁定倒计时）。
+### ISSUE-P3-230：打开已有 SAF 库时持久化授权失败被静默吞掉（重启后库打不开且无告警）
+
+- **核实时间点**：2026-09-20 随 `ISSUE-P2-229` 整改过程中同处代码走查发现。
+- **核实方式**：`VaultLifecycleCoordinator.importExternalDatabase`（现 `:213` 附近）对
+  `takePersistableUriPermission(uri, READ or WRITE)` 包 `try { } catch (_: Throwable) { }`，
+  注释理由为「部分外部 Provider 不支持持久化授权，容错继续」；调用链
+  `OpenExistingVaultDialog.kt:43`（`OpenDocument`）→ 本方法 → 解锁走 `openStream`。
+- **背景与影响**：临时授权在**本次会话内**有效，故打开与保存都能成功；一旦进程重启，
+  未拿到持久化授权的 uri 会失去读权限 ⇒ 该库**从列表里可见却永远打不开**，
+  且应用不给任何归因提示（用户只会看到「解锁失败」）。新建路径已在 §233 改为
+  「授权失败即在建库前显式失败」，本条是同一缺陷在**已有库**侧的残留面。
+- **验收标准**：AC① 授权失败不得静默：至少落 `AppLog.w` 并在打开成功后给出一次性可见提示
+  （文案含「重启后可能需要重新选择该文件」）；AC② 列表项对「无持久化授权」的库给出可辨识状态，
+  点击可直接重新拉起 `OpenDocument` 重授；AC③ 不改变既有「provider 不支持持久化仍允许本次打开」
+  的容错取向（不得改为硬失败，否则云盘类 provider 会整体不可用）。
 
 > **历史 P3 条目**（含 §221 闭环的 `ISSUE-P3-201` / `202` / `203` / `204` / `205` / `206` /
 > `209`，§222 闭环的 `ISSUE-P3-212` / `213` / `214`，§224 闭环的 `ISSUE-P3-215`）的实现与验收证据见

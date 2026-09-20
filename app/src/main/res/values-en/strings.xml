@@ -1173,6 +1173,17 @@
     <string name="autofill_fill_failed">Failed to handle the autofill request. Please try again</string>
     <string name="autofill_save_failed">Failed to save the credential. Please try again</string>
     <string name="repo_files_dir_unavailable">Internal storage directory unavailable</string>
+    <!-- ISSUE-P2-229: where a new vault lands - two choices (previously no entry at all; always silently written into the app-private dir) -->
+    <string name="db_create_location_title">Storage location</string>
+    <string name="db_create_location_internal">App private folder (recommended)</string>
+    <string name="db_create_location_internal_sub">Readable only by this app; supports atomic saves and WebDAV / S3 sync; deleted when the app is uninstalled</string>
+    <string name="db_create_location_external">Custom location (system file picker)</string>
+    <string name="db_create_location_external_sub">Choose the folder and file name yourself, for manual backup and moving between devices</string>
+    <string name="db_create_location_external_hint">No location chosen yet - tap this row to pick one in the system file picker</string>
+    <string name="db_create_location_picked">Selected: %1$s</string>
+    <string name="db_create_location_external_warning">Saves here are not atomic (a crash or power loss mid-save can corrupt the vault, so export backups regularly), and WebDAV / S3 sync does not apply</string>
+    <string name="repo_saf_persist_consent_failed">The chosen location does not support persistent access, so creation was cancelled. Use the app private folder or pick another location</string>
+    <string name="repo_saf_write_failed">Writing to the chosen location failed, so creation was cancelled</string>
     <string name="repo_no_active_database">Select or create a vault first</string>
     <string name="repo_file_missing_with_keyfile">Database file not found; cannot open with a composite key</string>
     <string name="repo_db_locked">Database is locked</string>

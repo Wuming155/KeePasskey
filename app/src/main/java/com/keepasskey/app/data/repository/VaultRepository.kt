@@ -85,15 +85,25 @@ interface VaultRepository {
         name: String,
         masterPassword: CharArray,
         keyFileFactor: CreateKeyFileFactor,
-        preset: CreateVaultPreset
-    ): com.keepasskey.core.result.KdbxResult<Unit> = when (keyFileFactor) {
-        CreateKeyFileFactor.None -> createDatabase(name, masterPassword, keyFile = false, preset)
-        else -> com.keepasskey.core.result.KdbxResult.Failure(
-            UnsupportedOperationException("实现方未支持携带密钥文件的建库通道"),
-            // 兜底文案留空：本分支在生产 DI 下不可达（RealVaultRepository 已覆盖），
-            // Failure.message 会回退为 KdbxResult 的固定通用文案，绝不谎报「创建成功」
+        preset: CreateVaultPreset,
+        /** ISSUE-P2-229：非空即「经系统文件选择器自选位置」建库（`content://` uri 字符串） */
+        targetUri: String? = null
+    ): com.keepasskey.core.result.KdbxResult<Unit> = when {
+        targetUri != null -> com.keepasskey.core.result.KdbxResult.Failure(
+            UnsupportedOperationException("实现方未支持在自选位置建库"),
+            // 兜底文案留空：本分支在生产 DI 下不可达（RealVaultRepository 已覆盖）
             userMessage = null
         )
+
+        else -> when (keyFileFactor) {
+            CreateKeyFileFactor.None -> createDatabase(name, masterPassword, keyFile = false, preset)
+            else -> com.keepasskey.core.result.KdbxResult.Failure(
+                UnsupportedOperationException("实现方未支持携带密钥文件的建库通道"),
+                // 兜底文案留空：本分支在生产 DI 下不可达（RealVaultRepository 已覆盖），
+                // Failure.message 会回退为 KdbxResult 的固定通用文案，绝不谎报「创建成功」
+                userMessage = null
+            )
+        }
     }
 
     /**

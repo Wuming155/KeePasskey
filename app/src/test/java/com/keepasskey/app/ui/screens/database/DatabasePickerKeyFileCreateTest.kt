@@ -63,14 +63,19 @@ class DatabasePickerKeyFileCreateTest {
         /** 调用瞬间的密钥文件字节快照（VM 会在调用返回后清零原数组，故必须当场拷贝） */
         var lastExistingKeyFileBytes: ByteArray? = null
 
+        /** ISSUE-P2-229：建库落地位置（null = 应用私有目录；非空 = `content://` 自选文档） */
+        var lastTargetUri: String? = null
+
         override suspend fun createDatabaseWithKeyFile(
             name: String,
             masterPassword: CharArray,
             keyFileFactor: CreateKeyFileFactor,
-            preset: CreateVaultPreset
+            preset: CreateVaultPreset,
+            targetUri: String?
         ): KdbxResult<Unit> {
             lastCreatedName = name
             lastFactor = keyFileFactor
+            lastTargetUri = targetUri
             if (keyFileFactor is CreateKeyFileFactor.Existing) {
                 lastExistingKeyFileBytes = keyFileFactor.bytes.copyOf()
             }
@@ -126,6 +131,37 @@ class DatabasePickerKeyFileCreateTest {
 
         assertEquals(CreateKeyFileFactor.None, repository.lastFactor)
         assertEquals(KeyFileDeliveryState.None, viewModel.keyFileDelivery.value)
+    }
+
+    /** ISSUE-P2-229：未显式选位置即维持既有行为——建到应用私有目录（targetUri 必须为 null） */
+    @Test
+    fun `默认建库不下发自选位置`() = runTest {
+        val repository = RecordingVaultRepository()
+        val viewModel = createViewModel(repository)
+
+        viewModel.createDatabase(
+            "internal.kdbx", "Fake#Internal".toCharArray(),
+            keyFile = false, preset = PRESET
+        )
+        testScheduler.runCurrent()
+
+        assertNull("内部存储分支必须传 null，否则会被误判为 SAF 库", repository.lastTargetUri)
+    }
+
+    /** ISSUE-P2-229：向导经 `ACTION_CREATE_DOCUMENT` 挑定文档后，uri 必须原样下行到数据层 */
+    @Test
+    fun `自选位置时把 SAF 文档 uri 下行到数据层`() = runTest {
+        val repository = RecordingVaultRepository()
+        val viewModel = createViewModel(repository)
+        val picked = "content://com.android.externalstorage.documents/document/primary%3Abackup.kdbx"
+
+        viewModel.createDatabase(
+            "backup.kdbx", "Fake#Saf".toCharArray(),
+            keyFile = false, preset = PRESET, targetUri = picked
+        )
+        testScheduler.runCurrent()
+
+        assertEquals(picked, repository.lastTargetUri)
     }
 
     @Test

@@ -133,7 +133,9 @@ class DatabasePickerViewModel @Inject constructor(
         masterPassword: CharArray,
         keyFile: Boolean,
         preset: CreateVaultPreset,
-        keyFileSourceUri: String? = null
+        keyFileSourceUri: String? = null,
+        /** ISSUE-P2-229：非空即建到用户经系统文件选择器自选的位置（`content://` uri 字符串） */
+        targetUri: String? = null
     ) {
         viewModelScope.launch {
             // H2 整改：主密码全程 CharArray——复制私有副本并在 finally 擦除；
@@ -148,7 +150,7 @@ class DatabasePickerViewModel @Inject constructor(
                 val resolved = resolution as KeyFileFactorResolution.Resolved
                 // H3 整改：创建失败（写盘失败等）不再谎报创建成功
                 val result = try {
-                    vaultRepository.createDatabaseWithKeyFile(name, pwd, resolved.factor, preset)
+                    vaultRepository.createDatabaseWithKeyFile(name, pwd, resolved.factor, preset, targetUri)
                 } finally {
                     // 借用语义的调用方责任：数据层已克隆持有自己的副本，此处副本用毕即擦
                     resolved.borrowedKeyFileBytes?.fill(0)
@@ -163,7 +165,9 @@ class DatabasePickerViewModel @Inject constructor(
                             suggestedFileName = suggestedKeyFileName(name)
                         )
                     }
-                    _events.emit(DatabasePickerEvent.DatabaseSelected(fileName))
+                    // ISSUE-P2-229：自选位置库在目录中的标识就是 uri 字符串（`importExternalDatabase` 同口径），
+                    // 以文件名下行的选中事件对这类库无效
+                    _events.emit(DatabasePickerEvent.DatabaseSelected(targetUri ?: fileName))
                 } else {
                     userMessageFlow.value = UiMessage(R.string.vault_op_failed, listOf((result as KdbxResult.Failure).message))
                 }

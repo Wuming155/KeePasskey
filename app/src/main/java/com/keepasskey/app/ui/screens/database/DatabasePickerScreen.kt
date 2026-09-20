@@ -128,7 +128,8 @@ fun DatabasePickerContent(
         pwd: CharArray,
         keyFile: Boolean,
         preset: CreateVaultPreset,
-        keyFileSourceUri: String?
+        keyFileSourceUri: String?,
+        targetUri: String?
     ) -> Unit,
     onOpenExistingClick: () -> Unit,
     onCloseOpenSourceDialog: () -> Unit,
@@ -360,7 +361,7 @@ internal fun DatabasePickerContentPreview() {
             onSelectDatabase = { _ -> },
             onOpenCreateDialog = {},
             onCloseCreateDialog = {},
-            onCreateDatabase = { _, _, _, _, _ -> },
+            onCreateDatabase = { _, _, _, _, _, _ -> },
             onOpenExistingClick = {},
             onCloseOpenSourceDialog = {},
             onImportFromSource = { _, _, _ -> },

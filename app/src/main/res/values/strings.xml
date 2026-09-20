@@ -1052,6 +1052,17 @@
 
     <!-- TASK-21：数据仓库层用户可见消息（repo_*） -->
     <string name="repo_files_dir_unavailable">内部存储目录不可用</string>
+    <!-- ISSUE-P2-229：新建库的落地位置二选一（此前无任何入口，一律静默写入应用私有目录） -->
+    <string name="db_create_location_title">存储位置</string>
+    <string name="db_create_location_internal">应用私有目录（推荐）</string>
+    <string name="db_create_location_internal_sub">仅本应用可读写；支持原子写盘与 WebDAV / S3 同步；卸载应用即随之删除</string>
+    <string name="db_create_location_external">自选位置（系统文件选择器）</string>
+    <string name="db_create_location_external_sub">自行挑选位置并命名，便于手动备份与迁移</string>
+    <string name="db_create_location_external_hint">尚未选择位置，点此行可在系统文件选择器中指定</string>
+    <string name="db_create_location_picked">已选择：%1$s</string>
+    <string name="db_create_location_external_warning">该位置写盘非原子（保存途中断电或闪退存在损坏风险，建议定期导出备份），且不参与 WebDAV / S3 同步</string>
+    <string name="repo_saf_persist_consent_failed">所选位置不支持持久访问授权，已取消创建。请改用应用私有目录，或换一个存储位置</string>
+    <string name="repo_saf_write_failed">写入所选位置失败，已取消创建</string>
     <string name="repo_no_active_database">请先选择或创建密码库</string>
     <string name="repo_file_missing_with_keyfile">数据库文件不存在，无法以复合密钥打开</string>
     <string name="repo_db_locked">数据库未解锁</string>

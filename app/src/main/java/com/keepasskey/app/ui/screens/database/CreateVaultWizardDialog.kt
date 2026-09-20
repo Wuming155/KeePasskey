@@ -108,7 +108,8 @@ internal fun CreateVaultWizardDialog(
         pwd: CharArray,
         keyFile: Boolean,
         preset: CreateVaultPreset,
-        keyFileSourceUri: String?
+        keyFileSourceUri: String?,
+        targetUri: String?
     ) -> Unit
 ) {
     val context = LocalContext.current
@@ -124,6 +125,12 @@ internal fun CreateVaultWizardDialog(
     // ISSUE-P2-85：预设改为类型化枚举——芯片与落盘共用 `CreateVaultPreset` 单一真相源，
     // 消除「裸字符串标签 + 落盘侧只按 contains("AES-KDF") 反推」导致的算法静默丢失。
     var selectedPreset by remember { mutableStateOf(CreateVaultPreset.DEFAULT) }
+    // ISSUE-P2-229：新建库的落地位置此前**无任何入口**——一律静默写入应用私有目录。
+    // 现由用户二选一；选「自选位置」时必须已在系统面板挑定文档，否则确认按钮保持禁用
+    // （绝不静默回退到内部存储，那会让用户以为库在自己选的位置）。
+    var storageLocation by remember { mutableStateOf(VaultStorageLocation.INTERNAL) }
+    var selectedVaultUri by remember { mutableStateOf("") }
+    var selectedVaultFileName by remember { mutableStateOf("") }
 
     val keyPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
@@ -135,9 +142,24 @@ internal fun CreateVaultWizardDialog(
         }
     }
 
+    // ISSUE-P2-229：ACTION_CREATE_DOCUMENT 通道（与密钥文件另存为同一 contract 口径）；
+    // 用户在系统面板取消即回落到「应用私有目录」并**即时反映在单选项上**（不留隐式选择）
+    val vaultCreateLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/octet-stream")
+    ) { uri: Uri? ->
+        if (uri != null) {
+            selectedVaultFileName = queryDocumentDisplayName(context, uri)
+            selectedVaultUri = uri.toString()
+        } else {
+            storageLocation = VaultStorageLocation.INTERNAL
+        }
+    }
+
+    val isLocationValid = storageLocation == VaultStorageLocation.INTERNAL || selectedVaultUri.isNotBlank()
     val isKeyFileValid = !useKeyFile || keyFileChoice == KeyFileSourceChoice.GENERATE ||
         selectedKeyFilePath.isNotBlank()
-    val isFormValid = vaultName.isNotBlank() && passwordChars.isNotEmpty() && passwordChars.contentEquals(confirmChars) && isKeyFileValid
+    val isFormValid = vaultName.isNotBlank() && passwordChars.isNotEmpty() &&
+        passwordChars.contentEquals(confirmChars) && isKeyFileValid && isLocationValid
 
     // 弹窗离场（确认 / 取消 / 进程回收）时擦除组件内持有的全部密码副本
     DisposableEffect(Unit) {
@@ -167,6 +189,23 @@ internal fun CreateVaultWizardDialog(
                     placeholder = { Text(stringResource(R.string.db_picker_vault_name_hint)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
+                )
+
+                // ISSUE-P2-229：存储位置二选一（内部存储 / 经系统文件选择器自选）
+                VaultStorageLocationSection(
+                    location = storageLocation,
+                    pickedFileName = selectedVaultFileName,
+                    onSelectInternal = {
+                        storageLocation = VaultStorageLocation.INTERNAL
+                        selectedVaultUri = ""
+                        selectedVaultFileName = ""
+                    },
+                    onSelectExternal = {
+                        storageLocation = VaultStorageLocation.EXTERNAL
+                        vaultCreateLauncher.launch(
+                            if (vaultName.endsWith(".kdbx", ignoreCase = true)) vaultName else "$vaultName.kdbx"
+                        )
+                    }
                 )
 
                 SecurePasswordField(
@@ -246,7 +285,9 @@ internal fun CreateVaultWizardDialog(
                         passwordChars,
                         useKeyFile,
                         selectedPreset,
-                        if (keyFileChoice == KeyFileSourceChoice.SELECT_EXISTING) selectedKeyFilePath else null
+                        if (keyFileChoice == KeyFileSourceChoice.SELECT_EXISTING) selectedKeyFilePath else null,
+                        // ISSUE-P2-229：仅「自选位置」时上行已挑定的文档 uri；内部存储传 null
+                        selectedVaultUri.ifBlank { null }
                     )
                 }
             )
@@ -268,7 +309,21 @@ internal fun CreateVaultWizardDialogPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         CreateVaultWizardDialog(
             onDismiss = {},
-            onConfirm = { _, _, _, _, _ -> }
+            onConfirm = { _, _, _, _, _, _ -> }
         )
     }
+}
+
+/**
+ * 新建密码库的落地位置（ISSUE-P2-229）。
+ *
+ * - [INTERNAL]：应用私有目录（`filesDir`）——具备原子写盘（`.tmp` + rename + `.bak`）
+ *   与 WebDAV / S3 同步能力，为默认项；
+ * - [EXTERNAL]：经系统文件选择器（`ACTION_CREATE_DOCUMENT`）由用户自选位置——
+ *   便于自行备份与跨应用查看，但写回为非原子的 `"rwt"` 截断式写、且不参与同步
+ *   （两条降级在向导内如实告知，并登记于 `docs/architecture/已知工程限界.md`）。
+ */
+internal enum class VaultStorageLocation {
+    INTERNAL,
+    EXTERNAL
 }

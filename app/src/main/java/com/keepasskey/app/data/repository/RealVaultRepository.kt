@@ -152,12 +152,14 @@ class RealVaultRepository @Inject constructor(
         name: String,
         masterPassword: CharArray,
         keyFileFactor: CreateKeyFileFactor,
-        preset: CreateVaultPreset
+        preset: CreateVaultPreset,
+        targetUri: String?
     ): KdbxResult<Unit> = lifecycle.createDatabaseWithKeyFile(
         name = name,
         masterPassword = masterPassword,
         keyFileFactor = keyFileFactor,
-        preset = preset
+        preset = preset,
+        targetUri = targetUri
     )
 
     override suspend fun removeDatabase(id: String): KdbxResult<Unit> = lifecycle.removeDatabase(id)
