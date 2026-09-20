@@ -4,8 +4,7 @@ import android.content.res.Configuration
 import android.content.Context
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
+import com.keepasskey.app.ui.navigation.AppNavigationMotion
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
@@ -349,8 +348,10 @@ private fun AppShellScaffold(
                     navController = navController,
                     startDestination = Screen.Unlock.route,
                     modifier = Modifier.fillMaxSize(),
-                    enterTransition = { fadeIn() },
-                    exitTransition = { fadeOut() }
+                    enterTransition = AppNavigationMotion.defaultEnterTransition,
+                    exitTransition = AppNavigationMotion.defaultExitTransition,
+                    popEnterTransition = AppNavigationMotion.defaultPopEnterTransition,
+                    popExitTransition = AppNavigationMotion.defaultPopExitTransition
                 ) {
                     keepasskeyNavGraph(
                         navController = navController,

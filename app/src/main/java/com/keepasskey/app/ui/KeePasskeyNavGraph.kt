@@ -6,6 +6,7 @@ import androidx.navigation.NavType
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
 import com.keepasskey.app.security.AutoLockManager
+import com.keepasskey.app.ui.navigation.AppNavigationMotion
 import com.keepasskey.app.ui.navigation.Screen
 import com.keepasskey.app.ui.screens.authenticator.AuthenticatorScreen
 import com.keepasskey.app.ui.screens.conflict.ConflictResolutionScreen
@@ -40,7 +41,13 @@ internal fun NavGraphBuilder.keepasskeyNavGraph(
     autoLockManager: AutoLockManager?
 ) {
     // 1. 登录与解锁页
-    composable(Screen.Unlock.route) {
+    composable(
+        route = Screen.Unlock.route,
+        enterTransition = AppNavigationMotion.topLevelEnterTransition,
+        exitTransition = AppNavigationMotion.topLevelExitTransition,
+        popEnterTransition = AppNavigationMotion.topLevelEnterTransition,
+        popExitTransition = AppNavigationMotion.topLevelExitTransition
+    ) {
         UnlockScreen(
             currentTheme = themeMode,
             onThemeToggle = toggleTheme,
@@ -67,7 +74,13 @@ internal fun NavGraphBuilder.keepasskeyNavGraph(
     }
 
     // 3. 主密码库列表页
-    composable(Screen.VaultList.route) {
+    composable(
+        route = Screen.VaultList.route,
+        enterTransition = AppNavigationMotion.topLevelEnterTransition,
+        exitTransition = AppNavigationMotion.topLevelExitTransition,
+        popEnterTransition = AppNavigationMotion.defaultPopEnterTransition,
+        popExitTransition = AppNavigationMotion.topLevelExitTransition
+    ) {
         VaultListScreen(
             currentTheme = themeMode,
             onThemeToggle = toggleTheme,
@@ -98,7 +111,13 @@ internal fun NavGraphBuilder.keepasskeyNavGraph(
     }
 
     // 3.1 独立双重认证验证码 (TOTP) 管理页
-    composable(Screen.Authenticator.route) {
+    composable(
+        route = Screen.Authenticator.route,
+        enterTransition = AppNavigationMotion.topLevelEnterTransition,
+        exitTransition = AppNavigationMotion.topLevelExitTransition,
+        popEnterTransition = AppNavigationMotion.defaultPopEnterTransition,
+        popExitTransition = AppNavigationMotion.topLevelExitTransition
+    ) {
         AuthenticatorScreen(
             onEntryClick = { entryId ->
                 navController.navigate(Screen.EntryDetail.createRoute(entryId))
@@ -107,7 +126,13 @@ internal fun NavGraphBuilder.keepasskeyNavGraph(
     }
 
     // 3.2 独立全功能密码生成器页
-    composable(Screen.Generator.route) {
+    composable(
+        route = Screen.Generator.route,
+        enterTransition = AppNavigationMotion.topLevelEnterTransition,
+        exitTransition = AppNavigationMotion.topLevelExitTransition,
+        popEnterTransition = AppNavigationMotion.defaultPopEnterTransition,
+        popExitTransition = AppNavigationMotion.topLevelExitTransition
+    ) {
         GeneratorScreen()
     }
 
