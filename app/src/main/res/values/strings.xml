@@ -854,8 +854,13 @@
     <string name="autofill_override_title">覆盖应用填充</string>
     <string name="autofill_override_sub">优先使用本应用替代系统默认填充服务</string>
     <string name="settings_action_failed">操作失败：%1$s</string>
-    <string name="autofill_skip_dal_title">跳过浏览器兼容层</string>
-    <string name="autofill_skip_dal_sub">不通过浏览器兼容适配直接填充原生表单</string>
+    <!-- ISSUE-P2-240：原文案「跳过浏览器兼容层 / 不通过浏览器兼容适配直接填充原生表单」描述的是
+         **另一件事**——本开关的真实消费方是 PasskeyCreateActivity 的 PasskeyRegistrationGate，
+         决定是否对调用方执行 DigitalAssetLinksVerifier 远程归属声明校验（「浏览器兼容层」既无实现
+         也无对应偏好项，属措辞漂移）。现如实表述其控制对象、作用范围与降级后果，措辞与
+         DigitalAssetLinksVerifier 的 KDoc 互相锚定（由 DalSkipSwitchCopyWiringTest 锁定不漂移）。 -->
+    <string name="autofill_skip_dal_title">跳过通行密钥站点归属校验</string>
+    <string name="autofill_skip_dal_sub">注册通行密钥前默认向站点拉取授权声明，核对调用应用对本站点的归属；开启后不再校验该归属，任何应用都能以任意域名注册通行密钥（默认关闭）</string>
     <!-- ISSUE-P0-02：设置页明示「下发前二次确认」为默认强制策略；
          ISSUE-P3-42：另提供默认关闭的「短时免重复确认」开关（不影响「库锁定必须先解锁」语义） -->
     <string name="autofill_fill_confirm_title">下发前二次确认</string>

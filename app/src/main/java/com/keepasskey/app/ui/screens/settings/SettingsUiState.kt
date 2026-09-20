@@ -137,7 +137,7 @@ data class SettingsUiState(
     // ISSUE-P2-43：默认关闭——开启后 TOTP 动态码会被写入剪贴板（见 ExtendedSettings 同名字段）
     val autofillCopyTotp: Boolean = false, // KP2A: 填充后自动将 TOTP 动态码复制到剪贴板
     val autofillShowTotpNotification: Boolean = false, // KP2A: 填充后在通知栏显示 TOTP 验证码
-    val skipDalVerification: Boolean = false, // KP2A: 跳过数字资产链接 (DAL) 校验（ISSUE-P2-02 已接线：Passkey 注册门控）
+    val skipDalVerification: Boolean = false, // 设置页「跳过通行密钥站点归属校验」：KP2A 跳过 DAL 校验（ISSUE-P2-02 接线注册门控；ISSUE-P2-240 更正原「浏览器兼容层」文案）
     val overrideNoAutofill: Boolean = false, // KP2A: 强制忽略应用的禁止自动填充标记
     val autofillSessionGrantEnabled: Boolean = false, // ISSUE-P3-42: 会话授权宽限（短时免重复二次确认，默认关闭）
     // 自动填充黑名单（TASK-44）：改为真实包名条目，由 AutofillBlocklistStore 经独立

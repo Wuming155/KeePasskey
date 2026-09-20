@@ -69,7 +69,7 @@
 
 ---
 
-## P2 中危缺陷与协议/测试缺口（2 项）
+## P2 中危缺陷与协议/测试缺口（1 项）
 
 ### ISSUE-P2-239：凭据提供者通道「系统未登记本应用」的失效完全静默且用户无法自救
 
@@ -92,33 +92,14 @@
 - **涉及文件**：`app/src/main/java/com/keepasskey/app/passkey/**`、设置页安全分区；
   先例 `AutofillHealthProbe`。已执行的处置与真机验证见 §240 批次正文。
 
-### ISSUE-P2-240：设置页「跳过浏览器兼容层」开关的文案与其真实语义无关（用户看不到 DAL 降级入口）
-
-- **核实时间点**：2026-09-21 于真机 Redmi 4X（Android 17 / API 37）实测（§242 收口轮）。
-- **核实方式**：`uiautomator dump` 读出该行文案为 `autofill_skip_dal_title/sub`
-  （`app/src/main/res/values/strings.xml:857-858` = 「跳过浏览器兼容层」/「不通过浏览器兼容适配直接填充原生表单」）；
-  沿 `AutofillSettingsComponents.kt:238-244` 追到 `onSkipDalVerificationToggle` →
-  `setSkipDalVerification` → `ExtendedSettings.skipDalVerification`；**真机点击后**
-  `keepasskey_extended_settings.xml` 写入 `<boolean name="skip_dal_verification" value="true" />`，
-  且随后的通行密钥注册日志出现 `用户已显式开启「跳过 DAL 校验」，本次注册不执行远程声明验证`。
-- **背景与根因**：该开关**有**真实消费方（`PasskeyCreateActivity` 的 `PasskeyRegistrationGate`，
-  决定是否对调用方执行 `DigitalAssetLinksVerifier` 远程声明校验），但界面文案描述的是
-  **另一件事**（浏览器兼容层 / 原生表单填充），与「通行密钥注册的站点归属声明校验」无关。
-  后果：`DigitalAssetLinksVerifier` 的 KDoc 称「用户如确有离线注册需求，可经设置中
-  『跳过 DAL 校验』**显式授权降级**」——用户**根本看不到这个入口的名字**；
-  而 DAL 是通行密钥注册的**安全防线**，用户既无法知情也无法自主选择。
-  这与 §232 已闭环的 `ISSUE-P2-228`（通道假开关 + 文案谎称需要无障碍）属**同类缺陷**。
-- **验收标准**：AC① 该开关的标题/副标题改述为真实语义（Passkey 注册的站点归属声明校验降级），
-  并与 `DigitalAssetLinksVerifier` KDoc 的措辞**互相对齐**（两处不得再各说一套）；
-  AC② 若产品确实需要独立的「跳过浏览器兼容层」开关，须作为**独立偏好项**另行接线，
-  **不得**与 `skipDalVerification` 共用同一字段；AC③ 文案不得暗示「不影响安全性」，
-  须写明降级后果（调用方归属不再被校验）；AC④ 中英文同步；
-  AC⑤ 新增守护用例锁定「文案资源 ↔ 偏好字段 ↔ 消费方」三者对应关系，防再次漂移。
-- **涉及文件**：`app/src/main/res/values/strings.xml`、`values-en/strings.xml`、
-  `ui/screens/settings/subscreens/AutofillSettingsComponents.kt`、
-  `passkey/DigitalAssetLinksVerifier.kt`（KDoc）。真机证据见 §242 批次正文 §4。
-
 ---
+
+> **本区近期变动**：§243 闭环 `ISSUE-P2-240`（设置页「跳过 DAL 校验」开关的文案按其**真实语义**更正为
+> 「跳过通行密钥站点归属校验」，并与 `DigitalAssetLinksVerifier` KDoc / 字段注释 / 告警日志逐字同锚；
+> AC② 裁决「**不新增**独立的『跳过浏览器兼容层』偏好项」落
+> [`architecture/产品裁决登记.md`](architecture/产品裁决登记.md) `PD-16`）——证据见
+> [RESOLVED_LOG.md](RESOLVED_LOG.md) 与
+> [`resolved/batches/243-设置页DAL降级开关文案更正批次.md`](resolved/batches/243-设置页DAL降级开关文案更正批次.md)。
 
 > **本区历史上一次归零**：§236 闭环 `ISSUE-P2-231`（Java 依赖面完整性锁定缺失）/
 > `ISSUE-P2-232`（完整性风险升级无主动熔断接线）——前者落**重开决策**判「仍不引入」并交付

@@ -235,6 +235,11 @@ internal fun AutofillCaptureCard(
                 onCheckedChange = onOverrideNoAutofillToggle
             )
 
+            // ISSUE-P2-240：本行的真实语义是**通行密钥注册的站点归属声明校验降级**——
+            // 消费方是 `PasskeyCreateActivity` 的 `PasskeyRegistrationGate`，决定是否对调用方执行
+            // `DigitalAssetLinksVerifier` 远程声明校验。原文案（「跳过浏览器兼容层 / 不通过浏览器
+            // 兼容适配直接填充原生表单」）描述的是另一件事，且不存在任何实现或偏好项，属措辞漂移，
+            // 已更正；文案与 KDoc 的锚定关系由 `DalSkipSwitchCopyWiringTest` 锁定。
             AutofillSwitchRow(
                 icon = Icons.Default.Block,
                 title = stringResource(R.string.autofill_skip_dal_title),

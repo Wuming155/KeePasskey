@@ -60,7 +60,7 @@ class PasskeyCreateActivity : BaseCredentialActivity() {
     @Inject
     lateinit var dalVerifier: DigitalAssetLinksVerifier
 
-    /** ISSUE-P2-02：读取「跳过 DAL 校验」显式用户授权开关 */
+    /** ISSUE-P2-02：读取设置页「跳过通行密钥站点归属校验」显式用户授权开关（ISSUE-P2-240 前文案漂移） */
     @Inject
     lateinit var extendedSettingsStore: com.keepasskey.app.data.repository.ExtendedSettingsStore
 
@@ -179,7 +179,7 @@ class PasskeyCreateActivity : BaseCredentialActivity() {
             ?: CallerCertDigests.EMPTY
         val skipDalVerification = extendedSettingsStore.load().skipDalVerification
         if (skipDalVerification) {
-            AppLog.w(TAG, "用户已显式开启「跳过 DAL 校验」，本次注册不执行远程声明验证")
+            AppLog.w(TAG, "用户已显式开启「跳过通行密钥站点归属校验」，本次注册不执行远程声明验证")
         }
         val gateRejection = PasskeyRegistrationGate.evaluate(
             origin = origin,

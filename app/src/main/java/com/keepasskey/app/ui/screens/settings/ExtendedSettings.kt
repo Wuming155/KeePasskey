@@ -46,6 +46,13 @@ data class ExtendedSettings(
     // 与口令泄露组合即可在有效期内完成第二因素绕过。故改为用户显式开启。
     val autofillCopyTotp: Boolean = false,
     val autofillShowTotpNotification: Boolean = false,
+    /**
+     * 设置页「跳过通行密钥站点归属校验」开关（`ISSUE-P2-240` 前的界面文案误写为
+     * 「跳过浏览器兼容层」，与真实语义无关，已更正）。
+     *
+     * 唯一生产消费方是 `PasskeyCreateActivity` 的 `PasskeyRegistrationGate`——开启即跳过
+     * `DigitalAssetLinksVerifier` 的远程归属声明校验，默认关闭且只作用于通行密钥注册侧。
+     */
     val skipDalVerification: Boolean = false,
     val overrideNoAutofill: Boolean = false,
     // ISSUE-P3-42：会话授权宽限（默认关闭）——开启后在库已解锁且短时间内已确认过的

@@ -847,8 +847,11 @@
     <string name="autofill_override_title">Override app filling</string>
     <string name="autofill_override_sub">Prefer this app over the system default fill service</string>
     <string name="settings_action_failed">Action failed: %1$s</string>
-    <string name="autofill_skip_dal_title">Skip browser compatibility layer</string>
-    <string name="autofill_skip_dal_sub">Fill native forms directly without browser adapters</string>
+    <!-- ISSUE-P2-240: the old copy ("skip browser compatibility layer") described something else
+         entirely — no such layer exists in this app. This switch actually gates the passkey
+         registration gate (DigitalAssetLinksVerifier ownership check) in PasskeyCreateActivity. -->
+    <string name="autofill_skip_dal_title">Skip passkey site ownership check</string>
+    <string name="autofill_skip_dal_sub">Passkey registration normally fetches the authorization statement published by the site to verify that the calling app belongs to it; when enabled, this check is skipped, so any app can register a passkey for any domain (off by default)</string>
     <string name="autofill_blacklist_row_title">Autofill blacklist</string>
     <string name="autofill_blacklist_count">%1$d apps blocked</string>
     <string name="autofill_blacklist_empty">No apps blocked</string>

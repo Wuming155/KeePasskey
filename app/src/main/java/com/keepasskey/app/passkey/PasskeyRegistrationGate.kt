@@ -10,7 +10,7 @@ import com.keepasskey.app.security.CallerCertDigests
  * 1. 浏览器委派调用（origin 为网页来源）→ **放行**：`rp.id ↔ web origin` 的归属已由
  *    [DomainMatcher] 按点号边界强校验，无需 DAL 二次声明；
  * 2. 取不到系统背书的调用包名 → [CredentialRejectionReason.CALLER_UNKNOWN]；
- * 3. 用户显式开启「跳过 DAL 校验」→ **放行**（削弱防线的显式取舍，风险由用户自担）；
+ * 3. 用户显式开启设置页「跳过通行密钥站点归属校验」→ **放行**（削弱防线的显式取舍，风险由用户自担）；
  * 4. 取不到 `CallingAppInfo` 或签名摘要为空 → [CredentialRejectionReason.CALLER_CERT_UNREADABLE]
  *    （DAL 无从执行 ⇒ fail-closed）；
  * 5. 其余情形执行 DAL，并按其结论投影（[CredentialRejectionReason.fromDalResult]）。
@@ -26,7 +26,7 @@ object PasskeyRegistrationGate {
     /**
      * @param origin 本次由系统背书重新派生出的 origin
      * @param callerPackage 系统背书的调用方包名（取不到为 `null`）
-     * @param skipDalVerification 用户是否已显式开启「跳过 DAL 校验」
+     * @param skipDalVerification 用户是否已显式开启设置页「跳过通行密钥站点归属校验」
      * @param callingAppInfoPresent 是否取到系统背书的 `CallingAppInfo`
      * @param certDigests 调用方签名摘要集合（不可读时为 [CallerCertDigests.EMPTY]）
      * @param verifyDal DAL 远程资产声明校验；仅在前置条件齐备时被调用，且**只会**收到非空包名
