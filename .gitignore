@@ -121,3 +121,7 @@ venv/
 
 # 第二轮安全复核证据暂存（不随仓库分发）
 .audit-recheck/
+
+# 真机调试临时转储（uiautomator dump / 截图，严禁入库；b4670f2 曾误提交）
+/current_dump.xml
+/current_screen.png
