@@ -352,8 +352,6 @@
     <string name="unlock_downgrade_dialog_body">本机 Keystore 为软件级（无 TEE / StrongBox 硬件隔离），快速解锁封印的主密码与密钥文件将以软件密钥加密，攻击者可离线解出。是否仍要启用？</string>
     <string name="unlock_downgrade_confirm">仍要启用（软件密钥）</string>
     <string name="unlock_downgrade_decline">不启用</string>
-    <string name="unlock_accessibility_notice_title">已启用无障碍服务</string>
-    <string name="unlock_accessibility_notice_body">本机已启用无障碍服务（非本应用）。该类服务可读取你在屏幕上输入的内容，包括主密码。若非你本人因可及性需要而开启，建议先在系统设置中关闭再输入。</string>
 <string name="edit_scan_totp_qr">呼起相机扫描 TOTP 二维码</string>
     <string name="edit_attachment_empty">附件内容为空，未添加</string>
     <string name="edit_save_failed">保存失败：%1$s</string>
@@ -610,6 +608,9 @@
     <string name="sec_integrity_risk_title">运行环境风险提示</string>
     <string name="sec_integrity_risk_elevated">检测到可疑运行环境（可调试构建或非受信任安装来源）。出于安全考虑，已禁用生物识别快速解锁，请谨慎处理敏感凭据。</string>
     <string name="sec_integrity_risk_compromised">检测到明确的动态攻击特征（调试器附加、Root/Magisk 或注入框架）。已禁用生物识别快速解锁与自动填充，请立即停止在本设备处理敏感凭据。</string>
+    <!-- ISSUE-P3-215：无障碍服务状态（自解锁页迁入安全分区；信息性告知，不降级任何通道） -->
+    <string name="sec_accessibility_notice_title">已启用无障碍服务</string>
+    <string name="sec_accessibility_notice_body">本机已启用无障碍服务（非本应用）。该类服务可读取你在屏幕上输入的内容，包括主密码。若你并非因可及性需要而开启，建议前往系统设置关闭。本提示仅作告知，不影响本应用的解锁与自动填充。</string>
     <!-- ISSUE-P2-08 (ZT-13)：风险态降级路径对系统的非敏感回调文案 -->
     <string name="sec_biometric_integrity_blocked">设备存在安全风险，已禁用生物识别快速解锁，请改用主密码解锁</string>
     <string name="autofill_save_integrity_blocked">设备存在安全风险，已禁用凭据保存</string>

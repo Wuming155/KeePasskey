@@ -81,7 +81,8 @@ data class IntegrityEnforcement(
     val disableAutofill: Boolean,
     val requireRiskNotice: Boolean,
     /**
-     * 是否需在主密码输入页提示「已启用无障碍服务」（ISSUE-P2-44）。
+     * 是否需在设置页安全分区展示「已启用无障碍服务」状态
+     * （ISSUE-P2-44；ISSUE-P3-215 自解锁页迁入——该信号与主密码输入无交互关系，常驻首页属冗余）。
      *
      * 与 [requireRiskNotice] **分离**：后者由完整性等级（ELEVATED / COMPROMISED）驱动并伴随通道降级；
      * 本项由**合法可及性配置**驱动，**只提示、不降级**——判据见
@@ -160,7 +161,8 @@ object RuntimeIntegrityPolicy {
         report?.enforcement?.requireRiskNotice == true
 
     /**
-     * 是否必须在**主密码输入页**提示「已启用无障碍服务」（ISSUE-P2-44 的唯一消费点）。
+     * 是否必须在**设置页安全分区**展示「已启用无障碍服务」状态
+     * （ISSUE-P2-44 的唯一消费点；ISSUE-P3-215 自解锁页迁入，判定与「只提示、不降级」语义不变）。
      *
      * 与 [requiresRiskNotice] 正交：本项**不**随等级变化，故 `TRUSTED` 等级下也可能为 true；
      * 未注入快照（null，仅单测 / 异常装配）恒为 false，绝不回填「有风险」假值。
@@ -175,7 +177,7 @@ object RuntimeIntegrityPolicy {
             signals.magiskDetected ||
             signals.hookFrameworkDetected
         val elevated = signals.appDebuggable || signals.untrustedInstallSource
-        // ISSUE-P2-44：无障碍信号只影响「是否提示」，不影响等级与通道降级
+        // ISSUE-P2-44：无障碍信号只影响「是否提示」（设置页安全分区展示），不影响等级与通道降级
         val accessibilityNotice = signals.thirdPartyAccessibilityEnabled
 
         return when {

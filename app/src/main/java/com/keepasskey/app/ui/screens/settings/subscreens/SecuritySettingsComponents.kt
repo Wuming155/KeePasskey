@@ -2,6 +2,7 @@ package com.keepasskey.app.ui.screens.settings.subscreens
 
 import android.content.res.Configuration
 import androidx.annotation.StringRes
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -14,6 +15,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Accessibility
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -22,16 +25,20 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.keepasskey.app.R
 import com.keepasskey.app.security.RuntimeRiskLevel
 import com.keepasskey.app.ui.components.BentoCard
+import com.keepasskey.app.ui.components.SystemSettingsNavigation
 
 @Composable
 internal fun SecuritySwitchRow(
@@ -165,6 +172,71 @@ internal fun SecurityChoiceChips(
                     label = { Text(text = stringResource(option.labelRes)) }
                 )
             }
+        }
+    }
+}
+
+/**
+ * ISSUE-P3-215：无障碍服务状态卡（自解锁页「主密码输入页提示」迁入安全分区）。
+ *
+ * **为何迁移**：该信号与主密码输入本身无交互关系，常驻首页属纯冗余（ISSUE-P3-215 用户反馈）；
+ * 作为「本机环境状态」在设置页安全分区展示更贴合其性质。
+ *
+ * **语义边界（不得扩写）**：本卡**只做告知**，不降级任何通道——启用无障碍是合法且必要的
+ * 可及性配置（视障用户依赖），故不因该信号禁用生物快速解锁 / 自动填充；
+ * 判定口径（含系统预装服务的如实披露）见 `RuntimeIntegrityPolicy.requiresAccessibilityNotice`。
+ *
+ * 卡内整块可点直达系统「无障碍」设置页（尾部以 `Settings` 图标示意可操作）；
+ * 系统不响应 action 时不渲染图标、也不挂点击，保留纯文案（绝不出现死链）。
+ */
+@Composable
+internal fun AccessibilityStatusCard(modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    val settingsIntent = remember(context) { SystemSettingsNavigation.accessibilityIntent(context) }
+    val openLabel = stringResource(R.string.system_settings_open)
+    val cardModifier = if (settingsIntent != null) {
+        modifier
+            .fillMaxWidth()
+            .clickable(onClickLabel = openLabel, role = Role.Button) {
+                SystemSettingsNavigation.launchSafely(context, settingsIntent)
+            }
+    } else {
+        modifier.fillMaxWidth()
+    }
+    BentoCard(
+        modifier = cardModifier,
+        backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Default.Accessibility,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = stringResource(R.string.sec_accessibility_notice_title),
+                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.weight(1f)
+                )
+                if (settingsIntent != null) {
+                    Icon(
+                        imageVector = Icons.Default.Settings,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
+            Text(
+                text = stringResource(R.string.sec_accessibility_notice_body),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                lineHeight = 18.sp
+            )
         }
     }
 }

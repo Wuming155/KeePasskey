@@ -20,38 +20,29 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Accessibility
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.keepasskey.app.R
 import com.keepasskey.app.ui.components.BentoCard
-import com.keepasskey.app.ui.components.SystemSettingsNavigation
 import com.keepasskey.app.ui.components.ThemeToggleCapsule
 import com.keepasskey.app.ui.theme.AppThemeMode
 import com.keepasskey.app.ui.theme.HeroTitleStyle
@@ -288,12 +279,9 @@ fun UnlockContent(
                         onSwitchMode = onSwitchMode
                     )
                 } else {
-                    // ISSUE-P2-44：已启用本应用以外的无障碍服务 → 主密码输入页常驻提示。
-                    // **只提示、不降级**（不得因此禁用生物解锁 / 自动填充，见该信号 KDoc）。
-                    if (uiState.accessibilityRiskNotice) {
-                        AccessibilityInputNotice()
-                        Spacer(modifier = Modifier.height(12.dp))
-                    }
+                    // ISSUE-P3-215：无障碍服务状态提示已迁至设置页安全分区——解锁页（首页）不再
+                    // 承载该信息（与主密码输入无直接交互关系，属纯冗余）；判定与「只提示、不降级」
+                    // 语义不变，见 RuntimeIntegrityPolicy.requiresAccessibilityNotice。
                     UnlockStandardUnlockContent(
                         uiState = uiState,
                         onPasswordChange = onPasswordChange,
@@ -315,75 +303,6 @@ fun UnlockContent(
             onConfirm = { onDowngradeDecision(true) },
             onDecline = { onDowngradeDecision(false) }
         )
-    }
-}
-
-/**
- * ISSUE-P2-44：已启用本应用以外无障碍服务时，主密码输入页的常驻提示。
- *
- * **语义边界（不得扩写）**：本提示**只做告知**，不降级任何通道——启用无障碍是合法且必要的
- * 可及性配置（视障用户依赖），故不因该信号禁用生物快速解锁 / 自动填充，也不阻止输入。
- *
- * UI 降权：改为轻量 Banner（surfaceContainer 底 + 两行文案），不再用高饱和大卡片抢夺主密码输入焦点。
- *
- * 本批整改：整条 Banner 可点直达系统「无障碍」设置页（尾部以 `Settings` 图标示意可操作），
- * 把「读一句『建议先在系统设置中关闭』+ 自己找路」收敛为一次点击；降权语义不变
- * （仍无按钮、无高饱和底色）。系统不响应 action 时退回纯文案。
- */
-@Composable
-private fun AccessibilityInputNotice() {
-    val context = LocalContext.current
-    // 本批整改：文案原本只说「建议先在系统设置中关闭」，用户得自己找路
-    // （设置 → 系统 → 无障碍 → 找到该服务）。现整条 Banner 可点直达无障碍设置页；
-    // 系统不响应该 action 时不渲染尾部图标、也不挂点击，保留原纯文案（不死链）。
-    val settingsIntent = remember(context) { SystemSettingsNavigation.accessibilityIntent(context) }
-    val openLabel = stringResource(R.string.system_settings_open)
-    val noticeModifier = if (settingsIntent != null) {
-        Modifier.clickable(onClickLabel = openLabel, role = Role.Button) {
-            SystemSettingsNavigation.launchSafely(context, settingsIntent)
-        }
-    } else {
-        Modifier
-    }
-    Surface(
-        modifier = Modifier.fillMaxWidth().then(noticeModifier),
-        color = MaterialTheme.colorScheme.surfaceContainer,
-        shape = RoundedCornerShape(12.dp)
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                imageVector = Icons.Default.Accessibility,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(16.dp)
-            )
-            Spacer(modifier = Modifier.width(10.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = stringResource(R.string.unlock_accessibility_notice_title),
-                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(modifier = Modifier.height(2.dp))
-                Text(
-                    text = stringResource(R.string.unlock_accessibility_notice_body),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            if (settingsIntent != null) {
-                Spacer(modifier = Modifier.width(6.dp))
-                Icon(
-                    imageVector = Icons.Default.Settings,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(16.dp)
-                )
-            }
-        }
     }
 }
 
@@ -425,8 +344,7 @@ internal fun UnlockContentPreview() {
                 databaseName = "Preview Vault.kdbx",
                 databaseStatus = "Ready",
                 unlockMode = UnlockMode.STANDARD,
-                isQuickUnlockAvailable = true,
-                accessibilityRiskNotice = true
+                isQuickUnlockAvailable = true
             ),
             currentTheme = AppThemeMode.SYSTEM,
             onThemeToggle = {},

@@ -347,8 +347,6 @@
     <string name="unlock_downgrade_dialog_body">This device\'s Keystore is software-level (no TEE / StrongBox hardware isolation). Quick unlock seals your master password and key file with a software key that can be extracted offline. Enable anyway?</string>
     <string name="unlock_downgrade_confirm">Enable anyway (software key)</string>
     <string name="unlock_downgrade_decline">Don\'t enable</string>
-    <string name="unlock_accessibility_notice_title">Accessibility service enabled</string>
-    <string name="unlock_accessibility_notice_body">An accessibility service (not from this app) is enabled on this device. Such services can read what you type on screen, including your master password. If you did not enable it for accessibility reasons, turn it off in system settings before typing.</string>
 <string name="edit_scan_totp_qr">Open camera to scan TOTP QR code</string>
     <string name="edit_attachment_empty">Attachment is empty, not added</string>
     <string name="edit_save_failed">Save failed: %1$s</string>
@@ -604,6 +602,9 @@
     <string name="sec_integrity_risk_title">Runtime environment risk</string>
     <string name="sec_integrity_risk_elevated">A suspicious runtime environment was detected (debuggable build or untrusted install source). Biometric quick unlock has been disabled; handle sensitive credentials with care.</string>
     <string name="sec_integrity_risk_compromised">Clear signs of dynamic attack were detected (debugger attached, root/Magisk or an injection framework). Biometric quick unlock and autofill have been disabled; stop handling sensitive credentials on this device.</string>
+    <!-- ISSUE-P3-215: accessibility service status (moved from unlock screen to the security section; informational only, no channel downgrade) -->
+    <string name="sec_accessibility_notice_title">Accessibility service enabled</string>
+    <string name="sec_accessibility_notice_body">An accessibility service (not from this app) is enabled on this device. Such services can read what you type on screen, including your master password. If you did not enable it for accessibility reasons, turn it off in system settings. This notice is informational only and does not affect unlocking or autofill.</string>
     <!-- ISSUE-P2-08 (ZT-13): non-sensitive system callback text for the degraded path -->
     <string name="sec_biometric_integrity_blocked">This device is at risk, so biometric quick unlock is disabled. Use your master password instead.</string>
     <string name="autofill_save_integrity_blocked">This device is at risk, so saving credentials is disabled.</string>

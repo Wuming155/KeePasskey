@@ -93,6 +93,9 @@ fun SecuritySettingsScreen(
     } else {
         null
     }
+    // ISSUE-P3-215：无障碍服务状态是「本机可及性配置」的**信息性**展示，与风险等级正交
+    // （TRUSTED 下也可能为真）；只告知、不降级任何通道——见该卡 KDoc
+    val accessibilityNotice = RuntimeIntegrityPolicy.requiresAccessibilityNotice(integrityReport)
 
     SettingsSubscreenScaffold(
         titleRes = R.string.sec_screen_title,
@@ -261,6 +264,13 @@ fun SecuritySettingsScreen(
             integrityLevel?.let { level ->
                 item {
                     IntegrityRiskCard(level = level)
+                }
+            }
+
+            // ISSUE-P3-215：无障碍服务状态提示（自解锁页迁入；仅信号为真时渲染，只告知不降级）
+            if (accessibilityNotice) {
+                item {
+                    AccessibilityStatusCard()
                 }
             }
 

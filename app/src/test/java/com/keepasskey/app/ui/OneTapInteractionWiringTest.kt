@@ -181,7 +181,8 @@ class OneTapInteractionWiringTest {
     fun `系统设置排障入口必须一次点击直达且可降级`() {
         val nav = stripComments(readSource(SYSTEM_SETTINGS_NAV))
         val healthCard = stripComments(readSource(AUTOFILL_HEALTH_CARD))
-        val unlock = stripComments(readSource(UNLOCK_SCREEN))
+        // ISSUE-P3-215：无障碍提示自解锁页迁至设置页安全分区，判据随之改指该承载文件
+        val accessibilityCard = stripComments(readSource(SECURITY_COMPONENTS))
 
         assertTrue(
             "自动填充服务页必须用官方 action（不得臆测未公开 extra）",
@@ -205,8 +206,8 @@ class OneTapInteractionWiringTest {
                 healthCard.contains("autofillServiceIntent")
         )
         assertTrue(
-            "解锁页无障碍提示必须接线直达入口",
-            unlock.contains("accessibilityIntent") && unlock.contains("launchSafely")
+            "无障碍状态卡必须接线直达入口（ISSUE-P3-215：承载位置改为设置页安全分区）",
+            accessibilityCard.contains("accessibilityIntent") && accessibilityCard.contains("launchSafely")
         )
     }
 

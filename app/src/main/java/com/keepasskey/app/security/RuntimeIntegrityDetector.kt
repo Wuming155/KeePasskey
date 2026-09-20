@@ -186,7 +186,7 @@ class RuntimeIntegrityDetector @Inject constructor(
      * 其包名 ≠ 本应用包名即为真（**含系统预装的 TalkBack**）——无障碍服务同等具备读取任意
      * 输入内容的能力，系统签名不改变该能力。只用官方 API，**无需任何权限**。
      *
-     * **不参与等级判定**：仅驱动主密码输入页的提示（见 [IntegritySignals] 该字段 KDoc）。
+     * **不参与等级判定**：仅驱动设置页安全分区的状态展示（见 [IntegritySignals] 该字段 KDoc）。
      *
      * 失败（服务不可用 / ROM 限制）一律按「未检测到」处理并落脱敏日志——
      * 该信号只影响提示，不构成 fail-closed 门控，故不上行异常。

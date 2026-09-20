@@ -1,20 +1,24 @@
 package com.keepasskey.app.security
 
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 
 /**
- * ISSUE-P2-44 接线守卫（静态源码比对，体例沿用
+ * ISSUE-P2-44 / ISSUE-P3-215 接线守卫（静态源码比对，体例沿用
  * [com.keepasskey.app.ColdStartAttachmentPurgeWiringTest]）。
  *
- * 本项的三个失效形态都不是「判定算错」，而是**接线被静默移除**或**隐式耦合**：
+ * 本项的失效形态都不是「判定算错」，而是**接线被静默移除**、**隐式耦合**或**承载位置回潮**：
  *
  * 1. 无障碍信号**采集**：`RuntimeIntegrityDetector` 必须真的枚举已启用的无障碍服务，
  *    而不是把 `thirdPartyAccessibilityEnabled` 恒留默认 false（「加了字段没人填」）；
- * 2. 提示**消费点**：主密码输入页必须真的按 `uiState.accessibilityRiskNotice` 渲染提示
+ * 2. 提示**消费点**：设置页安全分区必须真的按
+ *    `RuntimeIntegrityPolicy.requiresAccessibilityNotice` 渲染状态卡
  *    （「加了判定没人消费」——本仓 ISSUE-P2-41 的原形态）；
- * 3. 口令语义**显式声明**：`SecurePasswordField` 必须显式 `semantics { password() }`，
+ * 3. 承载位置**不得回潮**：ISSUE-P3-215 起该提示只在设置页展示，解锁页（首页）不得再渲染
+ *    ——该信号与主密码输入无交互关系，常驻首页属纯冗余；
+ * 4. 口令语义**显式声明**：`SecurePasswordField` 必须显式 `semantics { password() }`，
  *    不得只依赖框架从 `PasswordVisualTransformation` 隐式推导（ISSUE-P2-44 AC②）。
  *
  * 说明：本项**不**断言「无障碍信号导致通道降级」——恰恰相反，它只提示、不降级，
@@ -27,6 +31,19 @@ class AccessibilityNoticeWiringTest {
 
     private val unlockScreenSource: String
         get() = readSource("app/src/main/java/com/keepasskey/app/ui/screens/unlock/UnlockScreen.kt")
+
+    private val unlockUiStateSource: String
+        get() = readSource("app/src/main/java/com/keepasskey/app/ui/screens/unlock/UnlockUiState.kt")
+
+    private val securityScreenSource: String
+        get() = readSource(
+            "app/src/main/java/com/keepasskey/app/ui/screens/settings/subscreens/SecuritySettingsScreen.kt"
+        )
+
+    private val securityComponentsSource: String
+        get() = readSource(
+            "app/src/main/java/com/keepasskey/app/ui/screens/settings/subscreens/SecuritySettingsComponents.kt"
+        )
 
     private val secureFieldSource: String
         get() = readSource("app/src/main/java/com/keepasskey/app/ui/components/SecurePasswordField.kt")
@@ -50,17 +67,34 @@ class AccessibilityNoticeWiringTest {
     }
 
     @Test
-    fun `主密码输入页消费提示位并渲染无障碍提示`() {
-        val source = unlockScreenSource
-
+    fun `设置页安全分区消费提示位并渲染无障碍状态卡`() {
         assertTrue(
-            "解锁页必须按 uiState.accessibilityRiskNotice 渲染提示",
-            source.contains("uiState.accessibilityRiskNotice")
+            "设置页必须按 RuntimeIntegrityPolicy.requiresAccessibilityNotice(integrityReport) 决定是否渲染",
+            securityScreenSource.contains(
+                "RuntimeIntegrityPolicy.requiresAccessibilityNotice(integrityReport)"
+            )
         )
         assertTrue(
-            "提示文案须取专用字符串资源（不得硬编码）",
-            source.contains("R.string.unlock_accessibility_notice_title") &&
-                source.contains("R.string.unlock_accessibility_notice_body")
+            "必须真的渲染状态卡（判定不得无人消费）",
+            securityScreenSource.contains("AccessibilityStatusCard()")
+        )
+        assertTrue(
+            "状态卡文案须取专用字符串资源（不得硬编码）",
+            securityComponentsSource.contains("R.string.sec_accessibility_notice_title") &&
+                securityComponentsSource.contains("R.string.sec_accessibility_notice_body")
+        )
+    }
+
+    @Test
+    fun `解锁页不再承载无障碍提示`() {
+        assertFalse(
+            "ISSUE-P3-215：解锁页（首页）不得回潮渲染无障碍提示——该信号只在设置页安全分区展示",
+            unlockScreenSource.contains("accessibilityRiskNotice") ||
+                unlockScreenSource.contains("unlock_accessibility_notice")
+        )
+        assertFalse(
+            "ISSUE-P3-215：解锁页状态不得再保留该提示位（避免无用数据源回潮）",
+            unlockUiStateSource.contains("accessibilityRiskNotice")
         )
     }
 

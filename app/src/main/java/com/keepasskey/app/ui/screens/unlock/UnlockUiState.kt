@@ -61,10 +61,5 @@ data class UnlockUiState(
     val quickUnlockDowngradeConsentPending: Boolean = false,
     // ISSUE-P1-22：本机快速解锁封印为软件密钥（无硬件隔离）——
     // 解锁页常驻声明「不提供硬件级保护」的渲染依据
-    val quickUnlockDowngraded: Boolean = false,
-
-    // ISSUE-P2-44：已启用本应用以外的无障碍服务时，主密码输入页常驻提示
-    // （无障碍服务具备读取输入内容的能力；本项**只提示、不降级**通道，
-    //  判定见 RuntimeIntegrityPolicy.requiresAccessibilityNotice）
-    val accessibilityRiskNotice: Boolean = false
+    val quickUnlockDowngraded: Boolean = false
 )
