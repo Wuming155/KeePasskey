@@ -143,6 +143,20 @@ fun DatabasePickerContent(
 ) {
     var dbToRemove by remember { mutableStateOf<VaultDatabaseInfo?>(null) }
 
+    // ISSUE-P3-230 AC②：缺持久化授权的库「重新授权」——由用户重选**同一个**文件以重新取得
+    // 长期授权（SAF 无「原地续期」原语，必须经用户操作）。授权后复用既有导入路径登记
+    // （同一 path 幂等覆盖条目），不新开写盘或登记分支。
+    var pendingRestore by remember { mutableStateOf<VaultDatabaseInfo?>(null) }
+    val restorePermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        val target = pendingRestore
+        pendingRestore = null
+        if (uri != null && target != null) {
+            onImportFromSource(OpenVaultSourceType.LOCAL, target.name, uri.toString())
+        }
+    }
+
     // ISSUE-P3-21：SAF 另存为生成型密钥文件（仅传 Uri 上行，写盘由 ViewModel 复用既有导出通道完成）
     val keyFileSaveLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("application/octet-stream")
@@ -251,7 +265,11 @@ fun DatabasePickerContent(
                         VaultDatabaseCard(
                             database = db,
                             onSelect = { onSelectDatabase(db.id) },
-                            onDelete = { dbToRemove = db }
+                            onDelete = { dbToRemove = db },
+                            onRestoreAccess = {
+                                pendingRestore = db
+                                restorePermissionLauncher.launch(arrayOf("*/*"))
+                            }
                         )
                     }
                 }

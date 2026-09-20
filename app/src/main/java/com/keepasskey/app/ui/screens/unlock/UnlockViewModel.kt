@@ -1,5 +1,6 @@
 package com.keepasskey.app.ui.screens.unlock
 
+import android.content.Context
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -7,6 +8,8 @@ import com.keepasskey.app.R
 import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.app.data.repository.SettingsRepository
 import com.keepasskey.app.data.repository.VaultRepository
+import com.keepasskey.app.data.repository.lacksPersistedReadPermission
+import com.keepasskey.app.data.repository.persistedReadUriStrings
 import com.keepasskey.app.security.BiometricAuthManager
 import com.keepasskey.app.security.BiometricCredentialStorage
 import com.keepasskey.app.security.BiometricResult
@@ -17,6 +20,7 @@ import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.core.result.KdbxResult
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -64,7 +68,10 @@ class UnlockViewModel @Inject constructor(
     private val keyFileAccess: KeyFileAccess? = null,
     // ISSUE-P3-117：进阶偏好通道（`clearPasswordOnLeave` 的行为消费方）。
     // nullable 仅用于纯 JVM 单测；生产 DI 经 ExtendedSettingsSourceModule 恒注入
-    private val extendedSettingsStore: com.keepasskey.app.data.repository.ExtendedSettingsStore? = null
+    private val extendedSettingsStore: com.keepasskey.app.data.repository.ExtendedSettingsStore? = null,
+    // ISSUE-P3-230 AC①：`content://` 库持久化读授权的查询通道。nullable 仅用于纯 JVM 单测；
+    // 生产 DI 注入 @ApplicationContext（与 DatabasePickerViewModel / SettingsViewModel 同一既有范式）
+    @ApplicationContext private val appContext: Context? = null
 ) : ViewModel() {
 
     // P3-23：null 时回退空串实现（生产 Hilt 恒注入 StringsProviderModule 真实现）
@@ -217,10 +224,32 @@ class UnlockViewModel @Inject constructor(
             } else {
                 val belowBaseline = vaultRepository.assessKdfStrength(path)?.isBelowBaseline == true
                 _uiState.update {
-                    it.copy(infoMessage = if (belowBaseline) UiMessage(R.string.unlock_msg_weak_kdf) else null)
+                    it.copy(
+                        infoMessage = when {
+                            // ISSUE-P3-230 AC①：`content://` 库未拿到持久化授权时给出**一次性可见提示**
+                            // （重启后可能打不开）——优先级高于弱因子提示，因为它直接决定「下次能否打开」
+                            lacksPersistedPermission(path) ->
+                                UiMessage(R.string.unlock_msg_no_persisted_permission)
+                            belowBaseline -> UiMessage(R.string.unlock_msg_weak_kdf)
+                            else -> null
+                        }
+                    )
                 }
             }
         }
+    }
+
+    /**
+     * `ISSUE-P3-230 AC①`：该库路径是否**缺少**持久化读授权。
+     *
+     * 判定与列表投影同源（`VaultUriPermission` 的纯函数 + 唯一平台查询），避免两处口径漂移。
+     * `appContext == null`（纯 JVM 单测）或查询失败一律返回 false——**绝不误报**：
+     * 把「查不到」说成「没授权」会凭空制造一条对用户的虚假告警。
+     */
+    private fun lacksPersistedPermission(path: String): Boolean {
+        val context = appContext ?: return false
+        val granted = persistedReadUriStrings(context) ?: return false
+        return lacksPersistedReadPermission(path, granted)
     }
 
     /**

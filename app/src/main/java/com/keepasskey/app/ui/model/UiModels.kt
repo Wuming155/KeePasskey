@@ -87,7 +87,15 @@ data class VaultDatabaseInfo(
     val lastOpenedAt: String = "",
     val fileSizeFormatted: String = "",
     val isActive: Boolean = false,
-    val encryptionPreset: String = "ChaCha20 + Argon2id"
+    val encryptionPreset: String = "ChaCha20 + Argon2id",
+    /**
+     * `ISSUE-P3-230`：该库（`content://`）**未获得持久化读授权**——本次会话可用，
+     * 但进程重启后可能失去读权限而**打不开**。列表据此给出可辨识状态与重新授权入口。
+     *
+     * 判定见 `VaultUriPermission.lacksPersistedReadPermission`；非 `content://` 路径恒 false。
+     * **只驱动提示与状态，不参与放行决策**（AC③：不得改为硬失败）。
+     */
+    val lacksPersistedPermission: Boolean = false
 )
 
 /**

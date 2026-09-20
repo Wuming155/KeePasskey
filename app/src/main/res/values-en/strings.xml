@@ -74,6 +74,11 @@
          default creation strength" only; never phrase it as "unsafe / compromised", and state
          that no parameter was modified automatically -->
     <string name="unlock_msg_weak_kdf">This vault\'s key derivation work factor is below this app\'s default creation strength (no parameter was changed automatically)</string>
+    <!-- ISSUE-P3-230: no persisted permission for this SAF location. NOT an error — the current
+         session still opens and saves normally; only the ability to re-open after a restart is affected -->
+    <string name="unlock_msg_no_persisted_permission">Long-term access to this location was not granted: it works for now, but you may need to re-select this file after restarting</string>
+    <string name="vault_permission_not_persisted">No long-term access granted — you may need to re-select this file after restarting</string>
+    <string name="vault_permission_restore_action">Re-authorize</string>
     <string name="keyfile_or_password_mismatch">Incorrect master password or key file — make sure the key file is the one used to create this vault</string>
     <string name="keyfile_permission_not_persisted">This file provider does not support persistent access, so the key file works for this session only and cannot be remembered</string>
     <string name="keyfile_restored_from_memory">Remembered key file loaded: %1$s</string>

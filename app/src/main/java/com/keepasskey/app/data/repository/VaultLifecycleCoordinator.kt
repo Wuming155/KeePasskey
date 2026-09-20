@@ -6,6 +6,7 @@ import android.net.Uri
 import com.keepasskey.app.R
 import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.app.ui.model.VaultDatabaseInfo
+import com.keepasskey.core.log.AppLog
 import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.database.file.KdbxHeader
@@ -230,8 +231,11 @@ internal class VaultLifecycleCoordinator(
                         uri,
                         Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
                     )
-                } catch (_: Throwable) {
-                    // 部分外部 Provider 不支持持久化授权，容错继续
+                } catch (t: Throwable) {
+                    // 部分外部 Provider 不支持持久化授权，容错继续（不得改为硬失败，见 ISSUE-P3-230 AC③）；
+                    // 但**不得静默**：本次会话结束后该 uri 将失去读权限（重启后库打不开），
+                    // 故落脱敏告警留痕，并由列表状态 / 解锁页一次性提示向用户归因（AC①）
+                    AppLog.w(TAG, "持久化 URI 授权失败，重启后该库可能需要重新选择文件", t)
                 }
             }
             val sanitizedName = if (name.endsWith(".kdbx", ignoreCase = true)) name else "$name.kdbx"
@@ -290,6 +294,8 @@ internal class VaultLifecycleCoordinator(
         }
 
     companion object {
+        private const val TAG = "VaultLifecycle"
+
         /**
          * `syncType` 的两个「本机」取值（ISSUE-P2-229 收敛为常量：此前它们是散落在
          * `isRemote` 判定里的裸字面量，新增分支时极易写成第三个变体而被判成远端库）。

@@ -99,6 +99,18 @@ internal class VaultDatabaseCatalog(
     }
 
     /**
+     * `ISSUE-P3-230`：该库路径是否**缺少**持久化读授权（非 `content://` 恒 false）。
+     *
+     * 查询失败（`ContentResolver` 异常）按「未知」处理 ⇒ false（不误报）——
+     * 与 [persistedReadUriStrings] 的 `null` 语义一致，绝不把查询失败谎报成「缺授权」。
+     */
+    private fun lacksPersistedPermission(path: String): Boolean {
+        if (!path.startsWith("content://")) return false
+        val granted = persistedReadUriStrings(context) ?: return false
+        return lacksPersistedReadPermission(path, granted)
+    }
+
+    /**
      * 构建「已知外部库 + 沙盒内部 `*.kdbx`」的合并列表并标定活动态。
      *
      * 副作用（与拆分前一致）：当已有条目均未被标为活动时，把首条写回为活动库 ID。
@@ -154,7 +166,10 @@ internal class VaultDatabaseCatalog(
                 lastOpenedAt = strings.get(R.string.repo_last_opened_ready),
                 fileSizeFormatted = "$sizeKb KB",
                 isActive = false,
-                encryptionPreset = "AES-256 + Argon2id"
+                encryptionPreset = "AES-256 + Argon2id",
+                // ISSUE-P3-230：`content://` 库缺持久化读授权时，重启后打不开——列表给出
+                // 可辨识状态与重授入口（查询失败按「未知」处理，不误报）
+                lacksPersistedPermission = lacksPersistedPermission(ext.path)
             )
         }
 

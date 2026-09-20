@@ -20,6 +20,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Storage
+import androidx.compose.material.icons.filled.WarningAmber
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -51,7 +52,9 @@ import com.keepasskey.app.ui.theme.LocalSecurityColors
 internal fun VaultDatabaseCard(
     database: VaultDatabaseInfo,
     onSelect: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    // ISSUE-P3-230 AC②：缺持久化授权时的重新授权入口（重选同一个文件以重新取得长期授权）
+    onRestoreAccess: () -> Unit = {}
 ) {
     val securityColors = LocalSecurityColors.current
     Card(
@@ -102,7 +105,55 @@ internal fun VaultDatabaseCard(
                     overflow = TextOverflow.Ellipsis
                 )
             }
+
+            // ISSUE-P3-230 AC②：缺持久化授权（重启后打不开）时给出可辨识状态 + 重授入口
+            if (database.lacksPersistedPermission) {
+                Spacer(modifier = Modifier.height(10.dp))
+                VaultDatabasePermissionNotice(onRestoreAccess = onRestoreAccess)
+            }
         }
+    }
+}
+
+/**
+ * `ISSUE-P3-230 AC②`：库卡片上的「未获长期授权」状态行。
+ *
+ * 本行**不是**错误提示（AC③：provider 不支持持久化授权时，本次会话的打开与保存依然正常），
+ * 故以「注意」级的 `tertiaryContainer` 呈现，而非 error 色：警示图标 + 说明 + 「重新授权」动作，
+ * **整行可点**（比小按钮更易命中，符合本仓 48dp 热区口径）。
+ */
+@Composable
+private fun VaultDatabasePermissionNotice(onRestoreAccess: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.5f))
+            .clickable { onRestoreAccess() }
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            imageVector = Icons.Filled.WarningAmber,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onTertiaryContainer,
+            modifier = Modifier.size(16.dp)
+        )
+        Spacer(modifier = Modifier.width(6.dp))
+        Text(
+            text = stringResource(R.string.vault_permission_not_persisted),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onTertiaryContainer,
+            modifier = Modifier.weight(1f)
+        )
+        Spacer(modifier = Modifier.width(6.dp))
+        Text(
+            text = stringResource(R.string.vault_permission_restore_action),
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.primary,
+            maxLines = 1
+        )
     }
 }
 
