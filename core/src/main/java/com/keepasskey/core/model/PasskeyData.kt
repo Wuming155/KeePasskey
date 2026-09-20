@@ -28,7 +28,9 @@ import com.keepasskey.core.security.ProtectedString
  *
  * **历史 schema（v1，`Passkey.RelyingParty` / `Passkey.CredentialId` / `Passkey.PrivateKey` /
  * `Passkey.UserHandle` / `Passkey.UserName` / `Passkey.BackupEligible` / `Passkey.BackupState`）
- * 保留只读兼容**：既有库中的条目无需迁移即可继续断言；新写入一律采用 KPEX。
+ * 保留只读兼容**：既有库中的条目无需迁移即可继续断言；新写入一律采用 KPEX，且**写路径会
+ * 就地自动迁移**——条目因断言而被修补（签名计数器）时整条换新为 KPEX（`ISSUE-P3-213`，
+ * 判据见 [needsKpexMigration]）。
  *
  * ## ISSUE-P1-02 私钥受控生命周期与不可变边界声明
  * - KDBX 4 自定义字段值在格式层为 XML 文本（`<Value Protected="True">`），**必须以文本形态
@@ -75,8 +77,9 @@ data class PasskeyData(
      * 算法标识 (COSE 算法标识，ES256 = -7, Ed25519 = -8, RS256 = -257)。
      *
      * KPEX schema 不含算法字段：本仓以扩展键 `Passkey.Algorithm` 承载，缺失时（外部管理器
-     * 创建的条目）由 [PasskeyKeyText.sniffAlgorithmId] 依 PKCS#8 `AlgorithmIdentifier`
-     * 内的 OID **纯字节嗅探**得出；两者皆不可得时回落 [ALGORITHM_ES256]，签名时由
+     * 创建的条目）由 [PasskeyKeyText.sniffAlgorithmId] **纯字节嗅探**得出（先按 PKCS#8
+     * `AlgorithmIdentifier` 内的 OID，再按 v1 文本形态：64 字符 hex → ES256、32 字节种子
+     * → Ed25519，`ISSUE-P3-214`）；两者皆不可得时回落 [ALGORITHM_ES256]，签名时由
      * crypto 侧的权威解析 fail-closed 兜底。
      */
     val algorithmId: Int = ALGORITHM_ES256,
@@ -268,6 +271,45 @@ data class PasskeyData(
         /** [key] 是否属本模型的 schema 键（原地替换时须整体换新，不得残留旧值） */
         fun isPasskeyFieldKey(key: String): Boolean = key in SCHEMA_FIELD_KEYS
 
+        /** v1 旧 schema 的键集合（[needsKpexMigration] 的判据来源） */
+        private val LEGACY_FIELD_KEYS: Set<String> = setOf(
+            LEGACY_FIELD_RP_ID,
+            LEGACY_FIELD_CREDENTIAL_ID,
+            LEGACY_FIELD_PRIVATE_KEY,
+            LEGACY_FIELD_USER_HANDLE,
+            LEGACY_FIELD_USER_NAME,
+            LEGACY_FIELD_BACKUP_ELIGIBLE,
+            LEGACY_FIELD_BACKUP_STATE
+        )
+
+        /** KPEX 核心三键（RP ID / Credential ID / 私钥）：齐备才认为条目已是 KPEX 形态 */
+        private val KPEX_CORE_FIELD_KEYS: Set<String> = setOf(
+            KPEX_FIELD_RELYING_PARTY,
+            KPEX_FIELD_CREDENTIAL_ID,
+            KPEX_FIELD_PRIVATE_KEY
+        )
+
+        /**
+         * 条目是否**仍需由 v1 旧 schema 迁移到 KPEX**（`ISSUE-P3-213`）：持有任一 v1 旧键
+         * 且 KPEX 核心三键（RP ID / Credential ID / 私钥）不齐备。
+         *
+         * 与 [fromCustomFields] 一致，本判定**只扫键名**：不解密、不建 Map、不物化明文，
+         * 故可安全地在写入路径（每次签名计数器修补）上先判后迁。
+         */
+        fun needsKpexMigration(fields: List<KdbxCustomField>): Boolean {
+            var hasLegacy = false
+            var coreKeyCount = 0
+            for (field in fields) {
+                val key = field.key
+                if (key in LEGACY_FIELD_KEYS) {
+                    hasLegacy = true
+                } else if (key in KPEX_CORE_FIELD_KEYS) {
+                    coreKeyCount++
+                }
+            }
+            return hasLegacy && coreKeyCount < KPEX_CORE_FIELD_KEYS.size
+        }
+
         /**
          * 签名计数器「未知 / 认证器不支持计数器」哨兵值。
          *
@@ -405,8 +447,9 @@ data class PasskeyData(
             val userName = (map[KPEX_FIELD_USERNAME] ?: map[LEGACY_FIELD_USER_NAME])
                 ?.value?.readString().orEmpty()
             val userDisplayName = map[FIELD_USER_DISPLAY_NAME]?.value?.readString().orEmpty()
-            // 扩展键优先（写入口径）；缺失（外部管理器创建的条目）则按 PKCS#8 OID 字节嗅探，
-            // 仍不可得时回落 ES256 —— 签名侧由 crypto 的权威解析 fail-closed 兜底。
+            // 扩展键优先（写入口径）；缺失（外部管理器条目 / v1 历史条目）则字节嗅探
+            // （PKCS#8 OID → v1 hex 标量 / 32 字节种子），仍不可得时回落 ES256
+            // —— 签名侧由 crypto 的权威解析 fail-closed 兜底。
             val algorithmId = map[FIELD_ALGORITHM]?.value?.readString()?.toIntOrNull()
                 ?: privateKeyVal.useUtf8 { PasskeyKeyText.sniffAlgorithmId(it) }
                 ?: ALGORITHM_ES256

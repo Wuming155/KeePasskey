@@ -10,7 +10,9 @@ import java.util.Base64
  * 本仓通行密钥的落库 schema 已对齐 KeePassXC / KeePassDX（`KPEX_PASSKEY_PRIVATE_KEY_PEM`），
  * 私钥文本形态为 **PKCS#8 ASN.1 DER 的 PEM 包裹**；而 `PasskeyData` 属 `core` 模块，
  * **不得**依赖 `crypto`（模块依赖单向：`crypto → core`）。因此「这段私钥文本是什么算法」
- * 只能在此以**纯字节嗅探**回答——按 PKCS#8 `AlgorithmIdentifier` 内 OID 的 DER 编码原样匹配。
+ * 只能在此以**纯字节嗅探**回答——按 PKCS#8 `AlgorithmIdentifier` 内 OID 的 DER 编码原样匹配；
+ * v1 历史驻留形态（hex 标量 / Base64 种子）无 ASN.1 可依，按**文本形态与长度**判定
+ * （见 [sniffAlgorithmId]，`ISSUE-P3-214`）。
  *
  * 嗅探结果仅用于填充 [PasskeyData.algorithmId]（展示与分派）；**权威判定**仍由
  * `crypto` 侧的 PKCS#8 解析器在签名时给出（结构非法 / 算法不受支持一律 fail-closed）。
@@ -51,6 +53,16 @@ object PasskeyKeyText {
 
     /** PEM 标准折行宽度（RFC 7468 建议 64 字符） */
     private const val PEM_LINE_CHARS = 64
+
+    /**
+     * v1 ES256 私钥文本的定长 hex 字符数（256 位标量 → 64 hex 字符，
+     * 与 `PasskeyKeyCodec.EC_SCALAR_HEX_CHARS` 同一事实的 core 侧声明——
+     * `core` 不得依赖 `crypto`，故不能直接引用后者）。
+     */
+    private const val HEX_SCALAR_CHARS = 64
+
+    /** v1 Ed25519 私钥文本的定长字节数（32 字节原始种子，RFC 8032） */
+    private const val ED25519_SEED_BYTES = 32
 
     /** 文本是否为 PEM 包裹形态（**唯一**判定入口，避免各处各写一份 trim/startsWith） */
     fun isPem(keyTextBytes: ByteArray): Boolean {
@@ -118,35 +130,66 @@ object PasskeyKeyText {
     }
 
     /**
-     * 从私钥文本字节流嗅探 COSE 算法标识；无法判定（非 PEM、非 DER、无已知 OID）返回 null。
+     * 从私钥文本字节流嗅探 COSE 算法标识；无法判定返回 null（**绝不抛出**，由调用方按各自口径回退）。
      *
-     * 也接受**裸 Base64 的 PKCS#8 DER**（v1 schema 的 RS256 驻留形态）与**裸 DER**，
-     * 使历史条目同样能被识别。
+     * 判定顺序（`ISSUE-P3-214`：把 v1 历史驻留形态与外部条目形态一并覆盖）：
+     * 1. **PEM** → 解包为 PKCS#8 DER，按 `AlgorithmIdentifier` 内的 OID 判定；
+     * 2. **恰 [HEX_SCALAR_CHARS] 个 hex 字符**（v1 ES256 的定长标量文本）→ [PasskeyData.ALGORITHM_ES256]；
+     * 3. **Base64**（v1 Ed25519 种子 / RS256 的 PKCS#8 DER）或**裸 DER** → 先按 OID 判定；
+     * 4. 仍无 OID 但候选字节恰为 [ED25519_SEED_BYTES] 字节 → [PasskeyData.ALGORITHM_ED25519]
+     *    （v1 Ed25519 的 32 字节种子，Base64 文本或裸字节两种承载）。
+     *
+     * 第 2 步**必须先于** Base64 解码：hex 字母表是 Base64 字母表的真子集，64 字符 hex 文本会被
+     * Base64 解码器「成功」解出 48 字节无 OID 的垃圾，进而白白丢掉 v1 ES256 的唯一判据。
      */
     fun sniffAlgorithmId(keyTextBytes: ByteArray): Int? {
-        var der: ByteArray? = null
-        try {
-            der = when {
-                isPem(keyTextBytes) -> pemToDer(keyTextBytes)
-                else -> {
-                    val body = stripWhitespace(keyTextBytes, 0, keyTextBytes.size)
-                    try {
-                        Base64.getDecoder().decode(body)
-                    } catch (_: IllegalArgumentException) {
-                        // 非 Base64 文本：按裸 DER 处理
-                        body
-                    }
-                }
-            } ?: return null
-            return when {
-                der.containsSequence(OID_DER_EC_PUBLIC_KEY) -> PasskeyData.ALGORITHM_ES256
-                der.containsSequence(OID_DER_ED25519) -> PasskeyData.ALGORITHM_ED25519
-                der.containsSequence(OID_DER_RSA_ENCRYPTION) -> PasskeyData.ALGORITHM_RS256
-                else -> null
+        if (isPem(keyTextBytes)) {
+            val der = pemToDer(keyTextBytes) ?: return null
+            try {
+                return sniffDer(der)
+            } finally {
+                der.fill(0)
             }
-        } finally {
-            der?.fill(0)
         }
+        val body = stripWhitespace(keyTextBytes, 0, keyTextBytes.size)
+        var decoded: ByteArray? = null
+        try {
+            if (isHexScalarText(body)) return PasskeyData.ALGORITHM_ES256
+            decoded = try {
+                Base64.getDecoder().decode(body)
+            } catch (_: IllegalArgumentException) {
+                // 非 Base64 文本：按裸 DER 处理（候选即 body 自身）
+                null
+            }
+            val candidate = decoded ?: body
+            sniffDer(candidate)?.let { return it }
+            return if (candidate.size == ED25519_SEED_BYTES) PasskeyData.ALGORITHM_ED25519 else null
+        } finally {
+            decoded?.fill(0)
+            body.fill(0)
+        }
+    }
+
+    /** PKCS#8 DER 内的 `AlgorithmIdentifier` OID → COSE 算法标识；无已知 OID 返回 null */
+    private fun sniffDer(der: ByteArray): Int? = when {
+        der.containsSequence(OID_DER_EC_PUBLIC_KEY) -> PasskeyData.ALGORITHM_ES256
+        der.containsSequence(OID_DER_ED25519) -> PasskeyData.ALGORITHM_ED25519
+        der.containsSequence(OID_DER_RSA_ENCRYPTION) -> PasskeyData.ALGORITHM_RS256
+        else -> null
+    }
+
+    /** v1 ES256 私钥文本形态判据：**恰**为 [HEX_SCALAR_CHARS] 个 hex 字符（定长标量的 ASCII 承载） */
+    private fun isHexScalarText(bytes: ByteArray): Boolean {
+        if (bytes.size != HEX_SCALAR_CHARS) return false
+        for (b in bytes) {
+            if (!isHexDigit(b)) return false
+        }
+        return true
+    }
+
+    private fun isHexDigit(b: Byte): Boolean {
+        val v = b.toInt()
+        return v in '0'.code..'9'.code || v in 'a'.code..'f'.code || v in 'A'.code..'F'.code
     }
 
     /** 朴素子序列匹配（DER 长度普遍 < 1 KiB，无需 KMP；仅匹配固定 OID 常量） */

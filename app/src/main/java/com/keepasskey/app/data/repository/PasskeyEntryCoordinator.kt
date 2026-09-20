@@ -9,13 +9,15 @@ import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.core.model.PasskeyData
 import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.core.security.ProtectedString
+import com.keepasskey.crypto.passkey.PasskeyCryptoEngine
 import com.keepasskey.database.session.DatabaseSession
 import kotlinx.coroutines.flow.first
 
 /**
  * Passkey 条目协调器（TASK-21 拆分自 RealVaultRepository）。
  * 职责单一：按 RP-ID/凭据 ID 检索 Passkey 条目、新建 Passkey 条目落库、
- * 签名计数器（signCount）就地修补。落盘统一经 [persistSession] 回传仓库出口。
+ * 签名计数器（signCount）就地修补（并顺带把 v1 旧 schema 条目就地迁移到 KPEX，ISSUE-P3-213）。
+ * 落盘统一经 [persistSession] 回传仓库出口。
  */
 internal class PasskeyEntryCoordinator(
     private val databaseSession: DatabaseSession,
@@ -174,7 +176,8 @@ internal class PasskeyEntryCoordinator(
 
     /**
      * 签名计数器原子读-改-写核心：在会话 Mutex 内的单次受控变换中完成
-     * 「读取库内现值 → 计算目标值 → 替换条目」，并回传实际落库值。
+     * 「读取库内现值 → 计算目标值 → 替换条目」（并顺带完成 v1 → KPEX 就地迁移），
+     * 并回传实际落库值。
      *
      * 回传值**从已提交条目读回**（而非旁路保存本地算出的值）：两者本就同源，
      * 读回可确保「返回给调用方的计数器」严格等于库内已提交状态。
@@ -198,11 +201,54 @@ internal class PasskeyEntryCoordinator(
         return applied
     }
 
-    /** 就地写回计数器与修改时间（copy-on-write；其余字段与既有实例按引用复用，避免误伤擦除逻辑）。 */
-    private fun entryWithSignCount(entry: KdbxEntry, value: Int): KdbxEntry = entry.copy(
-        customFields = entry.customFields.withSignCount(value),
-        times = entry.times.withModified()
-    )
+    /**
+     * 就地写回计数器与修改时间（copy-on-write；其余字段与既有实例按引用复用，避免误伤擦除逻辑）。
+     *
+     * ISSUE-P3-213：命中「仍是 v1 旧 schema」的条目时，**在同一受控变换内**先整条迁移到 KPEX
+     * （见 [migrateLegacySchemaIfNeeded]），再写入计数器——两次改动同属一次原子替换，
+     * 不存在「迁移成功但计数器没写」或反之的中间态。
+     */
+    private fun entryWithSignCount(entry: KdbxEntry, value: Int): KdbxEntry {
+        val migrated = migrateLegacySchemaIfNeeded(entry)
+        return migrated.copy(
+            customFields = migrated.customFields.withSignCount(value),
+            times = migrated.times.withModified()
+        )
+    }
+
+    /**
+     * v1 旧 schema → KPEX 的**写路径就地迁移**（ISSUE-P3-213）。
+     *
+     * 为何要做：v1 条目（`Passkey.*` 旧键 + hex/Base64 私钥）对 KeePassXC / KeePassDX 不可读，
+     * 此前只有「用户重新注册该站点（原地替换）」或重新导入才会换新 schema——常态使用该凭据的用户
+     * 永远等不到那次换新。此处借「断言必然修补计数器」这一既有写路径，让老库随使用自然收敛。
+     *
+     * 迁移内容：保留全部非 passkey 字段（标题 / 备注 / 标签 / 附件等，按引用复用），
+     * 丢弃全部 v1 旧键与旧扩展键，写入 [PasskeyData.toCustomFields] 的 KPEX 规范字段；
+     * 私钥经 [PasskeyCryptoEngine.legacyPrivateKeyTextToPemChars] 重包为 **PKCS#8 PEM**
+     * （受保护属性写入 `KPEX_PASSKEY_PRIVATE_KEY_PEM`）。
+     *
+     * **失败即放弃**：私钥重包失败（形态非法 / 算法不匹配 / 标量越界）时原样返回条目，
+     * 只留痕不迁移——迁移是收敛动作，绝不允许它把一条仍可断言的历史凭据改成不可用。
+     */
+    private fun migrateLegacySchemaIfNeeded(entry: KdbxEntry): KdbxEntry {
+        if (!PasskeyData.needsKpexMigration(entry.customFields)) return entry
+        val data = PasskeyData.fromCustomFields(entry.customFields) ?: return entry
+        val pemChars = data.usePrivateKeyBytes { raw ->
+            PasskeyCryptoEngine.legacyPrivateKeyTextToPemChars(raw, data.algorithmId)
+        }
+        if (pemChars == null) {
+            debugLog.warn(TAG, "v1 旧条目私钥无法重包为 PKCS#8 PEM，保持旧 schema 不迁移")
+            return entry
+        }
+        val pemKey = try {
+            ProtectedString(pemChars, isProtected = true)
+        } finally {
+            pemChars.fill('0')
+        }
+        val preserved = entry.customFields.filterNot { PasskeyData.isPasskeyFieldKey(it.key) }
+        return entry.copy(customFields = preserved + data.copy(privateKey = pemKey).toCustomFields())
+    }
 
     /** 新条目标题（`用户名@rpId`） */
     private fun passkeyTitle(data: PasskeyData): String = "${data.userName}@${data.relyingPartyId}"

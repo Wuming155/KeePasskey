@@ -7,8 +7,10 @@ import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.model.KdbxGroup
 import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.core.model.PasskeyData
+import com.keepasskey.core.model.PasskeyKeyText
 import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.core.security.ProtectedString
+import com.keepasskey.crypto.passkey.PasskeyCryptoEngine
 import com.keepasskey.database.file.KdbxDatabase
 import com.keepasskey.database.file.KdbxHeader
 import com.keepasskey.database.session.DatabaseSession
@@ -17,12 +19,15 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
+import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.util.Base64
 
 /**
  * ISSUE-P3-10 子项 2（ZT-21）签名计数器受控事务回归测试。
@@ -42,6 +47,10 @@ import org.junit.Test
  * [PasskeyEntryCoordinator.incrementPasskeySignCount] 的全部返回值断言
  * **互不相同且恰为 1..N**（证伪「协调器内部并发递增会得到同一值」），
  * 并用例锁死唯一被证实的重复来源——调用方以锁外快照自行计算（见对应用例 KDoc）。
+ *
+ * ISSUE-P3-213：另锁定「v1 旧 schema 条目在计数器修补的同一受控变换内就地迁移为 KPEX」——
+ * 旧键清除、KPEX 字段完整建立、私钥重包为 PKCS#8 PEM 且仍是同一把可签名密钥，
+ * 以及迁移失败（私钥无法重包）时**不阻断计数器写入**的 fail-safe 边界。
  */
 class PasskeyEntryCoordinatorSignCountTest {
 
@@ -62,6 +71,11 @@ class PasskeyEntryCoordinatorSignCountTest {
                 )
             )
         }
+        return newSessionWith(customFields)
+    }
+
+    /** 与 [newSession] 同一装配，但自定义字段完全由调用方给定（v1 旧 schema 场景用） */
+    private fun newSessionWith(customFields: List<KdbxCustomField>): DatabaseSession {
         val entry = KdbxEntry(
             id = entryId,
             parentGroupId = groupId,
@@ -322,5 +336,135 @@ class PasskeyEntryCoordinatorSignCountTest {
         assertEquals("饱和后不得回绕为负", PasskeyData.MAX_SIGN_COUNT, first)
         assertEquals("上界处的重复是饱和语义的必然结果（非并发缺陷）", first, second)
         assertEquals(PasskeyData.MAX_SIGN_COUNT, storedSignCount(session))
+    }
+
+    // ===== ISSUE-P3-213：v1 旧 schema 在写路径上就地迁移为 KPEX =====
+
+    /** v1 旧 schema 条目字段（旧键齐备、无任何 KPEX 核心键），私钥文本由调用方给定 */
+    private fun legacyFields(privateKeyText: String): List<KdbxCustomField> = listOf(
+        KdbxCustomField(PasskeyData.LEGACY_FIELD_RP_ID, ProtectedString("legacy.example", isProtected = false)),
+        KdbxCustomField(PasskeyData.LEGACY_FIELD_CREDENTIAL_ID, ProtectedString("old-cred", isProtected = true)),
+        KdbxCustomField(PasskeyData.LEGACY_FIELD_PRIVATE_KEY, ProtectedString(privateKeyText, isProtected = true)),
+        KdbxCustomField(PasskeyData.LEGACY_FIELD_USER_NAME, ProtectedString("bob", isProtected = false)),
+        KdbxCustomField(PasskeyData.LEGACY_FIELD_USER_HANDLE, ProtectedString("old-handle", isProtected = false)),
+        KdbxCustomField(PasskeyData.LEGACY_FIELD_BACKUP_ELIGIBLE, ProtectedString("false", isProtected = false)),
+        KdbxCustomField(PasskeyData.LEGACY_FIELD_BACKUP_STATE, ProtectedString("true", isProtected = false))
+    )
+
+    private fun fieldsOf(session: DatabaseSession): Map<String, KdbxCustomField> =
+        entryIn(session).customFields.associateBy { it.key }
+
+    /** 条目当前私钥字段的 UTF-8 字节副本（调用方负责清零） */
+    private fun privateKeyBytesOf(session: DatabaseSession, key: String): ByteArray =
+        fieldsOf(session).getValue(key).value.useUtf8 { it.copyOf() }
+
+    @Test
+    fun `v1 旧 schema 条目在计数器修补时被就地迁移为 KPEX`() = runTest {
+        val session = newSessionWith(legacyFields(HEX_SCALAR_64))
+        val staleLegacyPrivateKey = customFieldValue(session, PasskeyData.LEGACY_FIELD_PRIVATE_KEY)
+
+        val applied = coordinatorOf(session).incrementPasskeySignCount(entryId.toHexString())
+
+        assertEquals("迁移不得影响计数器语义", 1, applied)
+        val fields = fieldsOf(session)
+        // 1. 全部 v1 旧键被清除（否则同一库出现两套不自洽的字段）
+        assertNull("Passkey.RelyingParty 必须被移除", fields[PasskeyData.LEGACY_FIELD_RP_ID])
+        assertNull(fields[PasskeyData.LEGACY_FIELD_CREDENTIAL_ID])
+        assertNull(fields[PasskeyData.LEGACY_FIELD_PRIVATE_KEY])
+        assertNull(fields[PasskeyData.LEGACY_FIELD_USER_NAME])
+        assertNull(fields[PasskeyData.LEGACY_FIELD_USER_HANDLE])
+        assertNull(fields[PasskeyData.LEGACY_FIELD_BACKUP_ELIGIBLE])
+        assertNull(fields[PasskeyData.LEGACY_FIELD_BACKUP_STATE])
+        // 2. KPEX 规范字段完整建立（键名 / 保护位 / 值均按 KeePassXC 口径）
+        assertEquals("legacy.example", fields.getValue(PasskeyData.KPEX_FIELD_RELYING_PARTY).value.readString())
+        assertEquals("bob", fields.getValue(PasskeyData.KPEX_FIELD_USERNAME).value.readString())
+        assertEquals("old-handle", fields.getValue(PasskeyData.KPEX_FIELD_USER_HANDLE).value.readString())
+        assertEquals("0", fields.getValue(PasskeyData.KPEX_FIELD_FLAG_BE).value.readString())
+        assertEquals("1", fields.getValue(PasskeyData.KPEX_FIELD_FLAG_BS).value.readString())
+        assertTrue(
+            "Credential ID 迁移后必须按 KeePassXC 口径受保护",
+            fields.getValue(PasskeyData.KPEX_FIELD_CREDENTIAL_ID).value.isProtected
+        )
+        assertTrue(
+            "私钥必须以受保护属性写入 KPEX_PASSKEY_PRIVATE_KEY_PEM",
+            fields.getValue(PasskeyData.KPEX_FIELD_PRIVATE_KEY).value.isProtected
+        )
+        assertEquals("old-cred", fields.getValue(PasskeyData.KPEX_FIELD_CREDENTIAL_ID).value.readString())
+        // 3. 私钥重包为 PKCS#8 PEM，且经生产解析链路仍是同一把可签名的密钥
+        val pemBytes = privateKeyBytesOf(session, PasskeyData.KPEX_FIELD_PRIVATE_KEY)
+        try {
+            assertTrue("迁移后的私钥文本必须是 PKCS#8 PEM", PasskeyKeyText.isPem(pemBytes))
+            val signingKey = PasskeyCryptoEngine.decodePemPrivateKeyText(pemBytes)
+            assertNotNull("迁移后的 PEM 必须能被生产解析链路还原", signingKey)
+            assertEquals(PasskeyData.ALGORITHM_ES256, signingKey!!.algorithmId)
+            assertArrayEquals(
+                "hex 标量迁移到 PEM 必须逐字节保留原标量",
+                ByteArray(32) { 0x11.toByte() },
+                signingKey.keyBytes
+            )
+            assertTrue(
+                "迁移后必须仍能真实签发断言",
+                PasskeyCryptoEngine.signAssertionConsumingKey(
+                    signingKey.algorithmId, signingKey.keyBytes, "migration challenge".toByteArray()
+                ).isNotEmpty()
+            )
+        } finally {
+            pemBytes.fill(0)
+        }
+        // 4. 被替换下线的旧私钥实例随定点擦除清零（迁移不给旧密文留驻留机会）
+        assertNull("下线的 v1 私钥实例必须清零", readOrNull(staleLegacyPrivateKey))
+        // 5. 计数器写入与非 passkey 字段保留
+        assertEquals(1, storedSignCount(session))
+        assertEquals("E", entryIn(session).fields.getValue(KdbxConstants.Fields.TITLE).readString())
+    }
+
+    @Test
+    fun `v1 Ed25519 种子条目迁移后算法保持 Ed25519 且种子不变`() = runTest {
+        val seed = ByteArray(32) { (it + 1).toByte() }
+        val session = newSessionWith(legacyFields(Base64.getEncoder().encodeToString(seed)))
+
+        coordinatorOf(session).incrementPasskeySignCount(entryId.toHexString())
+
+        val fields = fieldsOf(session)
+        assertNull(fields[PasskeyData.LEGACY_FIELD_PRIVATE_KEY])
+        val pemBytes = privateKeyBytesOf(session, PasskeyData.KPEX_FIELD_PRIVATE_KEY)
+        try {
+            val signingKey = PasskeyCryptoEngine.decodePemPrivateKeyText(pemBytes)
+            assertNotNull(signingKey)
+            assertEquals(
+                "v1 Ed25519 条目（无 Passkey.Algorithm 扩展键）迁移后仍须按 Ed25519 解析",
+                PasskeyData.ALGORITHM_ED25519,
+                signingKey!!.algorithmId
+            )
+            assertArrayEquals("种子必须逐字节保留", seed, signingKey.keyBytes)
+        } finally {
+            pemBytes.fill(0)
+        }
+    }
+
+    @Test
+    fun `私钥无法重包时保持旧 schema 不迁移_但计数器照常写入`() = runTest {
+        val session = newSessionWith(legacyFields("!!not-a-private-key!!"))
+
+        val applied = coordinatorOf(session).incrementPasskeySignCount(entryId.toHexString())
+
+        assertEquals("迁移失败不得阻断计数器写入（fail-safe 而非 fail-closed）", 1, applied)
+        val fields = fieldsOf(session)
+        assertEquals("legacy.example", fields.getValue(PasskeyData.LEGACY_FIELD_RP_ID).value.readString())
+        assertEquals(
+            "迁移失败时私钥必须保持原文（绝不写入一份解析不了的 PEM）",
+            "!!not-a-private-key!!",
+            fields.getValue(PasskeyData.LEGACY_FIELD_PRIVATE_KEY).value.readString()
+        )
+        assertNull(
+            "迁移失败时不得留下半套 KPEX 字段",
+            fields[PasskeyData.KPEX_FIELD_RELYING_PARTY]
+        )
+        assertEquals(1, storedSignCount(session))
+    }
+
+    private companion object {
+        /** 合法 secp256r1 标量（< n，故可真实签名）的 64 字符 hex 文本：32 个 0x11 */
+        val HEX_SCALAR_64 = "1".repeat(64)
     }
 }

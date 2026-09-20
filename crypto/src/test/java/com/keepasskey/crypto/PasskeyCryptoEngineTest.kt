@@ -432,4 +432,53 @@ class PasskeyCryptoEngineTest {
             )
         }
     }
+
+    // ============ ISSUE-P3-212：消费式签名入口的私钥缓冲单点清零契约 ============
+
+    @Test
+    fun `消费式签名入口在签名成功后清零调用方私钥缓冲`() {
+        val scalar = toScalar32(BigInteger("1234567890abcdef1234567890abcdef", 16))
+        val expected = scalar.copyOf()
+
+        val signature = PasskeyCryptoEngine.signAssertionConsumingKey(
+            PasskeyData.ALGORITHM_ES256, scalar, sampleDataToSign
+        )
+
+        assertEquals(0x30.toByte(), signature[0]) // ASN.1 SEQUENCE
+        assertArrayEquals("签名成功后调用方私钥缓冲必须已被引擎清零", ByteArray(expected.size), scalar)
+        // 对照：非消费式入口不得改动调用方缓冲
+        val kept = expected.copyOf()
+        PasskeyCryptoEngine.signAssertion(PasskeyData.ALGORITHM_ES256, kept, sampleDataToSign)
+        assertArrayEquals("signAssertion 必须保持「不改动调用方缓冲」的既有契约", expected, kept)
+    }
+
+    @Test
+    fun `消费式签名入口在签名异常时同样清零调用方私钥缓冲`() {
+        val zeroScalar = ByteArray(32)
+
+        assertThrows(CryptoException.InvalidKeyException::class.java) {
+            PasskeyCryptoEngine.signAssertionConsumingKey(
+                PasskeyData.ALGORITHM_ES256, zeroScalar, sampleDataToSign
+            )
+        }
+
+        assertArrayEquals("签名异常路径（finally）同样必须清零调用方私钥缓冲", ByteArray(32), zeroScalar)
+    }
+
+    @Test
+    fun `消费式签名入口对 Ed25519 与 RS256 同样清零调用方私钥缓冲`() {
+        val edSeed = ByteArray(32) { (it + 1).toByte() }
+        PasskeyCryptoEngine.signAssertionConsumingKey(
+            PasskeyData.ALGORITHM_ED25519, edSeed, sampleDataToSign
+        )
+        assertArrayEquals("Ed25519 种子缓冲必须被清零", ByteArray(32), edSeed)
+
+        val rsaDer = PasskeyCryptoEngine.generateRs256KeyPair("consume.rs.example", "consume-rs")
+            .usePrivateKeyBytes { raw -> PasskeyCryptoEngine.decodePemPrivateKeyText(raw)!!.keyBytes }
+        val rsaSignature = PasskeyCryptoEngine.signAssertionConsumingKey(
+            PasskeyData.ALGORITHM_RS256, rsaDer, sampleDataToSign
+        )
+        assertEquals("RS256 交付 256 字节 PKCS#1 v1.5 签名", 256, rsaSignature.size)
+        assertArrayEquals("RS256 私钥 DER 缓冲必须被清零", ByteArray(rsaDer.size), rsaDer)
+    }
 }

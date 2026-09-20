@@ -226,6 +226,66 @@ class PasskeyDataSchemaInteropTest {
         assertFalse(PasskeyData.parseFlag(null, default = false))
     }
 
+    // ── ISSUE-P3-213：v1 → KPEX 就地迁移的判据 ──
+
+    @Test
+    fun `持有 v1 旧键且 KPEX 核心不齐备才判定为待迁移`() {
+        fun legacy(vararg extra: KdbxCustomField) = listOf(
+            KdbxCustomField(PasskeyData.LEGACY_FIELD_RP_ID, ProtectedString("legacy.example", isProtected = false)),
+            KdbxCustomField(PasskeyData.LEGACY_FIELD_CREDENTIAL_ID, ProtectedString("old-cred", isProtected = true)),
+            KdbxCustomField(PasskeyData.LEGACY_FIELD_PRIVATE_KEY, ProtectedString("deadbeef", isProtected = true))
+        ) + extra
+
+        assertTrue("纯 v1 旧条目必须待迁移", PasskeyData.needsKpexMigration(legacy()))
+        assertTrue(
+            "只有扩展键（计数器 / 展示名等）而不含 KPEX 核心三键时仍待迁移",
+            PasskeyData.needsKpexMigration(
+                legacy(
+                    KdbxCustomField(PasskeyData.FIELD_SIGN_COUNT, ProtectedString("3", isProtected = false)),
+                    KdbxCustomField(PasskeyData.FIELD_ALGORITHM, ProtectedString("-7", isProtected = false))
+                )
+            )
+        )
+        assertFalse(
+            "KPEX 核心三键齐备即不再是待迁移对象（哪怕残留 v1 旧键）",
+            PasskeyData.needsKpexMigration(
+                legacy(
+                    KdbxCustomField(PasskeyData.KPEX_FIELD_RELYING_PARTY, ProtectedString("new.example", isProtected = false)),
+                    KdbxCustomField(PasskeyData.KPEX_FIELD_CREDENTIAL_ID, ProtectedString("new-cred", isProtected = true)),
+                    KdbxCustomField(PasskeyData.KPEX_FIELD_PRIVATE_KEY, ProtectedString("pem", isProtected = true))
+                )
+            )
+        )
+        assertFalse(
+            "本就无 v1 旧键的 KPEX 条目不得被判为待迁移（避免每次断言都走一遍迁移分支）",
+            PasskeyData.needsKpexMigration(
+                listOf(
+                    KdbxCustomField(PasskeyData.KPEX_FIELD_RELYING_PARTY, ProtectedString("new.example", isProtected = false)),
+                    KdbxCustomField(PasskeyData.KPEX_FIELD_CREDENTIAL_ID, ProtectedString("new-cred", isProtected = true)),
+                    KdbxCustomField(PasskeyData.KPEX_FIELD_PRIVATE_KEY, ProtectedString("pem", isProtected = true))
+                )
+            )
+        )
+        assertFalse("非 passkey 条目（含完全无自定义字段）不得被判为待迁移", PasskeyData.needsKpexMigration(emptyList()))
+        assertFalse(
+            "普通条目的无关自定义字段不得被判为待迁移",
+            PasskeyData.needsKpexMigration(listOf(unprotected("JBSWY3DPEHPK3PXP")))
+        )
+    }
+
+    @Test
+    fun `迁移判据不物化任何明文（受保护值在被判据扫描后仍可正常读取）`() {
+        val secret = ProtectedString("c2VjcmV0", isProtected = true)
+        val fields = listOf(
+            KdbxCustomField(PasskeyData.LEGACY_FIELD_RP_ID, ProtectedString("legacy.example", isProtected = false)),
+            KdbxCustomField(PasskeyData.LEGACY_FIELD_CREDENTIAL_ID, ProtectedString("old-cred", isProtected = true)),
+            KdbxCustomField(PasskeyData.LEGACY_FIELD_PRIVATE_KEY, secret)
+        )
+
+        assertTrue(PasskeyData.needsKpexMigration(fields))
+        assertEquals("判据只扫键名，不得读取（并因此改写 / 清零）任何字段值", "c2VjcmV0", secret.readString())
+    }
+
     @Test
     fun `未知字段不影响解析且必需键仍强制`() {
         val required = listOf(

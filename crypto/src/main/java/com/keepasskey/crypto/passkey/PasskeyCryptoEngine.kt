@@ -24,8 +24,12 @@ import java.util.Arrays
  *
  * 纯结构性下沉：[PasskeyKeyCodec] 承载编解码/解析，[PasskeyAssertionSigner] 承载三类签名实现，
  * [PasskeyKeyGeneration] 承载三类密钥对生成（`ISSUE-P3-188` §174，生成侧的零 String 中间量与
- * 逐副本清零纪律随代码同迁未放宽）；本对象保留**同名公开入口的一行委托**、装配与统一签名入口，
+ * 逐副本清零纪律随代码同迁未放宽），[PasskeyLegacyKeyText] 承载历史 v1 私钥文本形态
+ * （`ISSUE-P3-213`）；本对象保留**同名公开入口的一行委托**、装配与统一签名入口，
  * 公开 API 与敏感清零点不变。
+ *
+ * 签名入口分两档（`ISSUE-P3-212`）：[signAssertion] 不改动调用方缓冲；
+ * [signAssertionConsumingKey] 在 `finally` 中单点擦除调用方缓冲，生产断言路径走后者。
  */
 object PasskeyCryptoEngine {
 
@@ -154,7 +158,10 @@ object PasskeyCryptoEngine {
 
     /**
      * 统一 Passkey 认证断言签名 API。
-     * 支持 ES256 (-7)、Ed25519 (-8) 与 RS256 (-257)；执行完毕后自动清零临时敏感密钥缓冲。
+     * 支持 ES256 (-7)、Ed25519 (-8) 与 RS256 (-257)；执行完毕后自动清零**内部克隆**的密钥缓冲。
+     *
+     * 注意：[privateKeyBytes] 归**调用方**所有，本入口不改动它；需要引擎代为擦除调用方缓冲时
+     * 必须改用 [signAssertionConsumingKey]（`ISSUE-P3-212` 的单点清零契约）。
      *
      * @param algorithmId COSE 算法标识
      * @param privateKeyBytes 承载私钥材料的字节流（原始私钥标量、种子或 PKCS#8 DER 编码）
@@ -174,6 +181,52 @@ object PasskeyCryptoEngine {
             Arrays.fill(workingKey, 0.toByte())
         }
     }
+
+    /**
+     * **消费式**统一签名入口（`ISSUE-P3-212`）：签名语义与 [signAssertion] 逐字相同，
+     * 差别只在私钥缓冲的**所有权**——本入口在 `finally` 中无条件擦除调用方传入的
+     * [privateKeyBytes]（无论签名成功还是抛出），使「签名后清零调用方私钥缓冲」成为
+     * **引擎的单点契约**（对齐 KeePassDX `Signature.sign`），调用方不再需要各自记忆
+     * `finally { fill(0) }`，也就不会再因遗漏 `finally` 而留下敏感私钥残留。
+     *
+     * **传参即转移所有权**：调用方在本调用返回后**不得**再读取该数组（恒为全零）。
+     *
+     * @return 同 [signAssertion]
+     */
+    fun signAssertionConsumingKey(
+        algorithmId: Int,
+        privateKeyBytes: ByteArray,
+        dataToSign: ByteArray
+    ): ByteArray {
+        try {
+            return signAssertion(algorithmId, privateKeyBytes, dataToSign)
+        } finally {
+            Arrays.fill(privateKeyBytes, 0.toByte())
+        }
+    }
+
+    /**
+     * 历史 v1 私钥文本字节流 → 原始签名材料（ES256 = 标量 / Ed25519 = 种子 / RS256 = PKCS#8 DER）。
+     *
+     * 供断言回退路径消费既有库中的 v1 条目（`ISSUE-P3-213` 起该解码口径收敛到本入口与
+     * `PasskeyLegacyKeyText` 单点，app 层不再各留一份）。
+     *
+     * @throws IllegalArgumentException 文本既非 hex 也非合法 Base64（fail-closed）
+     */
+    fun decodeLegacyPrivateKeyBytes(keyTextBytes: ByteArray): ByteArray =
+        PasskeyLegacyKeyText.legacyTextToKeyBytes(keyTextBytes)
+
+    /**
+     * 历史 v1 私钥文本 → PKCS#8 PEM 文本（`ISSUE-P3-213` 写路径就地迁移的公开入口）。
+     *
+     * 无法转换（形态非法 / 与 [algorithmId] 不匹配 / 标量越界）时返回 null，由调用方
+     * 放弃迁移并保持原文——fail-safe 而非 fail-closed：迁移是可选的收敛动作，绝不因它
+     * 失败的而阻断计数器写入或让条目变成不可用。
+     *
+     * @return PEM 文本（CharArray，调用方用毕清零）；不可迁移时为 null
+     */
+    fun legacyPrivateKeyTextToPemChars(keyTextBytes: ByteArray, algorithmId: Int): CharArray? =
+        PasskeyLegacyKeyText.legacyTextToPemChars(keyTextBytes, algorithmId)
 
     /**
      * 构建标准 AuthenticatorData 二进制块（无证明凭据数据）

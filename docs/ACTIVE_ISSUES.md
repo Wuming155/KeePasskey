@@ -44,6 +44,6 @@
 
 ## P3 低危问题、特性接线与体验优化（0 项）
 
-> **暂无开放项**（历史 P3 条目——含 §221 闭环的 `ISSUE-P3-201` / `202` / `203` / `204` /
-> `205` / `206` / `209`——的实现与验收证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md) 与
-> [`docs/resolved/batches/`](resolved/batches/)）。
+> **暂无开放项**（历史 P3 条目——含 §221 闭环的 `ISSUE-P3-201` / `202` / `203` / `204` / `205` / `206` /
+> `209`，以及 §222 闭环的 `ISSUE-P3-212` / `213` / `214`——的实现与验收证据见
+> [RESOLVED_LOG.md](RESOLVED_LOG.md) 与 [`docs/resolved/batches/`](resolved/batches/)）。
