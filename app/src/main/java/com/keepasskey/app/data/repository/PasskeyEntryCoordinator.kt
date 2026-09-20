@@ -179,21 +179,37 @@ internal class PasskeyEntryCoordinator(
      * 「读取库内现值 → 计算目标值 → 替换条目」（并顺带完成 v1 → KPEX 就地迁移），
      * 并回传实际落库值。
      *
-     * 回传值**从已提交条目读回**（而非旁路保存本地算出的值）：两者本就同源，
+     * 回传值**从本次上线的条目实例读回**（而非旁路保存本地算出的值）：两者本就同源，
      * 读回可确保「返回给调用方的计数器」严格等于库内已提交状态。
+     *
+     * **读回必须在临界区内完成（ISSUE-P1-216 机制性根因，不得挪出）**：
+     * 计数器补丁走「增量定点擦除」——每次替换会把**被替下线**的旧条目的敏感实例清零
+     * （见 `SessionContentMutations.updateEntryById` → `KdbxGroup.eraseSupersededSensitiveData`）。
+     * 而 `withSignCount` 每次落树都新建一个计数器 [ProtectedString]，因此第 N 次提交上线的
+     * 落树实例**恰好是第 N+1 次提交的擦除候选**。若像整改前那样在 `updateEntryById` 返回后
+     * （即已释放会话 Mutex）再从该实例 `readSignCount`，并发后继提交可在这条语句之前把它的
+     * 计数器实例清零 ⇒ `ProtectedString.checkNotCleared()` 抛
+     * `IllegalStateException("ProtectedString 已经清零，禁止继续访问")`。
+     * 该竞态只在真并发下出现（本机单类实跑不复现、CI 上 32 路并发用例偶发红），
+     * 且与「宿主机调度/负载」相关——CI artifact 里的 `ProtectedString.kt:173` 即此处。
+     * 故读回点必须与落树同处一个临界区：临界区内没有任何并发擦除者，
+     * 「读回值严格等于已提交状态」的语义**不因此损失**（读的正是本次落树的同一实例）。
      *
      * @param requested 调用方期望值（已钳制到合法区间）；null 表示「以库内现值为基准纯递增」。
      * @return 实际落库值；条目不存在 / UUID 非法时返回 null（本次无任何写入、无落盘调用）。
      */
     private suspend fun applySignCountPatch(entryId: String, requested: Int?): Int? {
         val targetUuid = parseKdbxUuidOrNull(entryId) ?: return null
-        val patched = databaseSession.updateEntryById(targetUuid) { entry ->
+        // 回传值在临界区内确定并落到局部量：临界区外只搬运该 Int，不再触碰任何落树实例
+        var applied: Int? = null
+        databaseSession.updateEntryById(targetUuid) { entry ->
             val monotonicFloor = PasskeyData.nextSignCount(PasskeyData.readSignCount(entry.customFields))
             val value = if (requested == null) monotonicFloor else maxOf(requested, monotonicFloor)
-            entryWithSignCount(entry, value)
+            val replacement = entryWithSignCount(entry, value)
+            applied = PasskeyData.readSignCount(replacement.customFields)
+            replacement
         } ?: return null
 
-        val applied = PasskeyData.readSignCount(patched.customFields)
         val saved = persistSession()
         if (saved is KdbxResult.Failure) {
             debugLog.warn(TAG, "签名计数器已更新但落盘失败: ${saved.error.javaClass.simpleName}")

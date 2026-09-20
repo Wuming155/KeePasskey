@@ -29,13 +29,19 @@
 将返回的 `object.sha` 与 workflow 中钉死的 SHA 逐字比对；注释型 tag 再经 `…/git/tags/<sha>` 解引用到 commit。
 **未遇到 403 / 限流**（全部 HTTP 200，共 11 次请求）。
 
+> **⚠️ 基线已过期（2026-09-20，ISSUE-P2-218）**：下表 `android-actions/setup-android` 一行的
+> **v3（`9fc6c4e9…`）基线已随 PR #5 的整体升级作废**——仓库在用的已是 **v4.0.1**（`40fd30fb…`）。
+> 两版默认 `packages` **同为 `tools platform-tools`**，但裸 `tools` 包在远端 SDK 仓库已不存在，
+> 故该默认值在 v4.0.1 下**必然失败**。实体更正见 [§12](#12-实测校正set-up-android-的-tools-包缺失issue-p2-218)
+> （含 2026-09-20 远端仓库实测依据与修法）。**不要据本行的 v3 默认值判断当前行为。**
+
 | owner/repo@SHA | 声明版本 | API 结果 | 判定 |
 |---|---|---|---|
 | `actions/checkout@11d5960a…677262` | `# v4` | `refs/tags/v4` → `11d5960a…677262`（commit） | ✅ 一致 |
 | `actions/setup-java@cf277c60…f6c3` | `# v4` | `refs/tags/v4` → `cf277c60…f6c3`（commit） | ✅ 一致 |
 | `gradle/actions/setup-gradle@ed408507…7933a` | `# v4.4.3` | `refs/tags/v4.4.3` 为**注释型 tag** `48b5f213…2947` → 解引用 commit = `ed408507…7933a` | ✅ 一致 |
 | `actions/upload-artifact@ea165f8d…7fa02` | `# v4` | `refs/tags/v4` → `ea165f8d…7fa02`；且 `refs/tags/v4.6.2` → 同一 SHA | ✅ 一致（v4 线最新补丁） |
-| `android-actions/setup-android@9fc6c4e9…65407` | `# v3` | `refs/tags/v3` → `9fc6c4e9…65407`（commit） | ✅ 一致 |
+| ~~`android-actions/setup-android@9fc6c4e9…65407`~~ | ~~`# v3`~~ | ~~`refs/tags/v3` → `9fc6c4e9…65407`（commit）~~ | ⚠️ **已过期**：仓库现用 v4.0.1（`40fd30fb…`）——见上方提示与 §12 |
 | `github/codeql-action/upload-sarif@faaca9a8…a2eca` | `# v3` | `refs/tags/v3` 为注释型 tag（2026-09-09 更新，**未签名**）→ 解引用 commit = `faaca9a8…a2eca` | ✅ 一致（tag 为移动标签，故 SHA 钉死是必要的） |
 | `dtolnay/rust-toolchain@6bed0761…5ba87` | `# stable` | `refs/tags/stable` → **404（不存在该 tag）**；`refs/heads/stable` → `6bed0761…5ba87` | ✅ 一致——该 action 的 `stable` 是**分支**而非 tag，注释 `# stable` 描述正确 |
 
@@ -289,3 +295,87 @@ val expectedOutcome = if (hostSupportsDirectoryChannel) DirectorySyncOutcome.SYN
 2. `github/codeql-action/upload-sarif` **v4** 的真实执行——该 Action 仅出现在手动触发的
    `dependency-scan`，PR #5 的 CI 未覆盖；
 3. §9-6（Gradle 对 daemon JVM criteria 不满足时的失败/自动供给行为）与 §9-7 的逐条 POSIX 断言结论。
+
+---
+
+## 12. 实测校正：`setup-android` 的 `tools` 包缺失（ISSUE-P2-218）
+
+> **性质**：本节是**对 §2 既有基线的实体更正**，不是新的静态推演。
+> **核实时间点**：2026-09-20（UTC+8）。
+> **核实方式**：GitHub REST 拉取 job 日志 + 直取 `dl.google.com` 远端 SDK 仓库索引逐字计数
+> + 直取 Action 钉死 SHA 的 `action.yml`。**本环境无法运行 CI**，故本节不含「CI 已跑通」的结论。
+
+### 12.1 已过期的基线（§2 那一行的原判）
+
+§2 曾以 **v3**（`android-actions/setup-android@9fc6c4e9…65407`）核实「默认 `packages: 'tools platform-tools'`」
+并判为「用法与官方 README 一致」。该判定的**前提已在两处失效**：
+
+1. 仓库在用的 `setup-android` 自 PR #5（合并提交 `a9b838f`）起已是 **v4.0.1**（`40fd30fb…`），
+   §2 核实的 v3 SHA 已不在 workflow 中；
+2. 裸 `tools` 包在**远端 SDK 仓库**中已不存在（见 §12.2）——默认值里的它**必然安装失败**。
+
+⇒ **凡以「v3 默认值」为前提的结论一律作废**；§2 该行已就地加注「基线已过期」指向本节。
+
+### 12.2 `tools` 包不存在：远端仓库实测
+
+核实方式：`Invoke-WebRequest https://dl.google.com/android/repository/{repository2-1.xml,repository2-3.xml}`
+（2026-09-20，本地实跑），对返回 XML 逐字计数 `path="tools"`：
+
+| 仓库索引 | 文件大小 | 裸 `path="tools"` 出现次数 | `path="platform-tools"` | `cmdline-tools;16.0` |
+|---|---|---|---|---|
+| `repository2-1.xml` | 373,254 B | **0** | ✅ 存在 | ✅ 存在 |
+| `repository2-3.xml` | 415,919 B | **0** | ✅ 存在 | ✅ 存在 |
+
+- 两个索引里 `path` 含 `tools` 子串的条目**全部**是 `build-tools;<ver>` / `cmdline-tools;<ver>` /
+  `platform-tools`，**没有**裸 `tools`；
+- `cmdline-tools` 可用版本覆盖 `1.0` … `23.0` 与 `latest`（即 Action 供应 cmdline-tools 的能力不受影响）。
+
+### 12.3 Action 侧契约（钉死 SHA 的 `action.yml` 原文）
+
+核实方式：`https://raw.githubusercontent.com/android-actions/setup-android/40fd30fb8d7440372e1316f5d1809ec01dcd3699/action.yml`
+
+```yaml
+inputs:
+  cmdline-tools-version:
+    default: '14742923'
+  accept-android-sdk-licenses:
+    default: 'true'
+  packages:
+    description: 'Additional packages to install'
+    default: 'tools platform-tools'      # ← 问题所在：默认值含裸 tools
+runs:
+  using: node24
+```
+
+即：**默认值 = 必装 `tools`**，与 §12.2 的远端事实直接冲突 ⇒ 该步骤在 runner 上**恒失败**
+（job 日志形态：`Warning: Failed to find package 'tools'` →
+`Error: The process '…/sdkmanager' failed with exit code 1`），
+`native-gate` / `device-gate` 因此整体不可达。
+
+### 12.4 本次更正（就地实施，三选一取 ②）
+
+| 选项 | 取舍 | 判定 |
+|---|---|---|
+| ① 钉回 v3 的已核实 SHA | v3 的默认 `packages` **同样含 `tools`**（§2 补充栏原文），钉回去等于保留同一缺陷；且会回退 PR #5 的整体升级 | ❌ 不成立 |
+| **② 显式传 `packages:`（不含 `tools`）** | 一行改动，**精确移除唯一失效项**；Action 仍负责供应 cmdline-tools（裸 `sdkmanager` 在 `PATH` 上的前提）与许可证接受；NDK / 编译平台 / build-tools 仍由下一步 `sdkmanager --install` 按仓库固定版本安装 | ✅ **采用** |
+| ③ 去掉该 Action，改手工安装并钉死 cmdline-tools / platform 版本 | 需自己实现 cmdline-tools 的下载与解包（Action 内部即按 `cmdline-tools-version` 取 `commandlinetools-*-<ver>_latest.zip`），增面且无额外收益 | ❌ 不采用 |
+
+落地形态：`build.yml` 的 `native-gate:123` 与 `device-gate:<setup-android 处>` 两处均改为
+
+```yaml
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
+        with:
+          packages: "platform-tools"
+```
+
+**未做的事（如实声明）**：未钉 `cmdline-tools-version`——该值的可用性本次**只核实到 Action 的默认字面量**
+（§12.3），未核实 `14742923` 对应产物在 `dl.google.com` 上仍可取；在无法验证的情形下**显式钉一个未验证的值
+反而更差**，故沿用 Action 自身的默认。若日后需要完全消除该漂移，正确做法是先核实
+`commandlinetools-<os>-14742923_latest.zip` 可达，再显式钉入。
+
+### 12.5 本节仍未验证（不得据此认为两 job 已恢复）
+
+1. 两 job 在 runner 上的**真实结果**——本环境无 runner，本节只给出「失效项已移除」的证据；
+2. 后续步骤（NDK 安装、4 ABI 交叉编译、模拟器启动、connected 测试）是否还有其它阻塞点——
+   需 CI 实跑一次方可判定（这也是 `ISSUE-P2-218` AC② 的留痕要求）。

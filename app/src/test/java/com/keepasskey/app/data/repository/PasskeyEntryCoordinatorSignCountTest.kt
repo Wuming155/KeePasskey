@@ -17,17 +17,22 @@ import com.keepasskey.database.session.DatabaseSession
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.Base64
+import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 /**
  * ISSUE-P3-10 子项 2（ZT-21）签名计数器受控事务回归测试。
@@ -336,6 +341,134 @@ class PasskeyEntryCoordinatorSignCountTest {
         assertEquals("饱和后不得回绕为负", PasskeyData.MAX_SIGN_COUNT, first)
         assertEquals("上界处的重复是饱和语义的必然结果（非并发缺陷）", first, second)
         assertEquals(PasskeyData.MAX_SIGN_COUNT, storedSignCount(session))
+    }
+
+    // ===== ISSUE-P1-216：回传值必须在临界区内确定（并发提交会定点擦除先前落树实例） =====
+
+    @Test
+    fun `后继提交会定点擦除先前落树实例的计数器_故临界区外读回必失效`() = runTest {
+        // 机制面（确定性复现，非依赖调度运气）：
+        //   `withSignCount` 每次落树都**新建**一个计数器 ProtectedString，因此第 N 次提交上线的
+        //   落树实例恰好是第 N+1 次提交的「增量定点擦除」候选。整改前的生产实现正是在
+        //   `updateEntryById` 返回（会话 Mutex 已释放）之后才从该实例读回计数器——
+        //   并发后继提交若抢在这条读回之前完成提交，读回处即命中
+        //   `ProtectedString.checkNotCleared()` 抛 IllegalStateException（CI artifact 的
+        //   `ProtectedString.kt:173`）。本用例把「擦除确实会发生」变成确定性断言，
+        //   并按整改前的读回写法复演出与 CI **逐字同形**的异常。
+        val session = newSession(signCountText = "0")
+        val coordinator = coordinatorOf(session)
+
+        // 第 1 次提交：握住所上线的落树实例（= 整改前临界区外读回的那个实例）
+        coordinator.incrementPasskeySignCount(entryId.toHexString())
+        val firstPlacedEntry = entryIn(session)
+        val firstSignCount = customFieldValue(session, PasskeyData.FIELD_SIGN_COUNT)
+        assertEquals("第 1 次提交落库值为 1", 1, readOrNull(firstSignCount)?.toInt())
+
+        // 第 2 次提交：只重建命中路径，并对第 1 次的落树实例做定点擦除
+        coordinator.incrementPasskeySignCount(entryId.toHexString())
+
+        assertNotSame("落树实例已被后继提交替换", firstPlacedEntry, entryIn(session))
+        assertNull(
+            "先前落树实例的计数器必被后继提交定点擦除——擦除本身是既定安全语义，" +
+                "缺陷只在于整改前于临界区外读回该实例（ISSUE-P1-216）",
+            readOrNull(firstSignCount)
+        )
+        // 复演整改前的读回写法：与 CI 日志逐字同形的异常
+        val replayed = runCatching { PasskeyData.readSignCount(firstPlacedEntry.customFields) }.exceptionOrNull()
+        assertTrue(
+            "临界区外读回落树实例必须复现 CI 的 IllegalStateException（实际：$replayed）",
+            replayed is IllegalStateException && replayed.message.orEmpty().contains("已经清零")
+        )
+        assertEquals("后继提交自身不受影响", 2, storedSignCount(session))
+        assertEquals(
+            "同一被替换条目内的存活密文（私钥）仍可读，擦除面未外溢",
+            "private-key",
+            customFieldValue(session, PasskeyData.FIELD_PRIVATE_KEY).readString()
+        )
+    }
+
+    @Test
+    fun `并发递增在真实线程屏障同步下仍取回各自唯一计数器`() {
+        // ISSUE-P1-216 AC③：宿主侧**稳定复现**该竞态。
+        //
+        // 为何必须用真实线程 + 屏障（而非 `Dispatchers.Default` 上的协程）：
+        // 竞态窗口 = 「会话 Mutex 释放后 → 读回落树实例前」，宽度仅百纳秒级；而
+        // `runTest` + `Dispatchers.Default` 下未获锁的调用方处于**挂起**态、不占 CPU，
+        // 解锁方几乎总能先跑完那条读回（实测 1200 轮 × 32 路：0 次命中，与「本机绿」
+        // 一致）。CI runner 上并发调用方是真线程争抢 CPU，解锁方极易在该窗口被抢占——
+        // 这才是「本地绿 / CI 红」的成因。
+        // 本用例以**真实线程 + CyclicBarrier 同时起跑**复刻该条件：
+        // 整改前实测命中率约 1/8 ~ 4/轮（32 路 × 800 轮实测命中 3402 次，
+        // 异常消息与 CI 逐字同形；12 轮即已在第 11 轮命中）；整改后读回在临界区内完成，
+        // 任何交错都不再可能读到已擦除实例。取 150 轮以保证「整改前必红」的判定力。
+        val concurrency = 32
+        val rounds = 150
+        repeat(rounds) { round ->
+            val session = newSession(signCountText = "0")
+            val coordinator = coordinatorOf(session)
+            val startBarrier = CountDownLatch(1)
+            val finished = CountDownLatch(concurrency)
+            val failures = ConcurrentLinkedQueue<Throwable>()
+            val applied = ConcurrentLinkedQueue<Int>()
+
+            repeat(concurrency) {
+                Thread {
+                    try {
+                        startBarrier.await()
+                        runBlocking { coordinator.incrementPasskeySignCount(entryId.toHexString()) }
+                            ?.let(applied::add)
+                    } catch (t: Throwable) {
+                        failures += t
+                    } finally {
+                        finished.countDown()
+                    }
+                }.apply { isDaemon = true }.start()
+            }
+            startBarrier.countDown()
+            assertTrue(
+                "第 $round 轮：并发调用必须在 30s 内全部退出（有无死锁？）",
+                finished.await(30, TimeUnit.SECONDS)
+            )
+
+            assertTrue(
+                "第 $round 轮：并发递增不得抛异常（整改前此处即 ProtectedString 已清零断言）——" +
+                    "实际失败 ${failures.size} 次，首个：${failures.firstOrNull()}",
+                failures.isEmpty()
+            )
+            assertEquals("第 $round 轮：每次并发递增都必须落账并回传", concurrency, applied.size)
+            assertEquals(
+                "第 $round 轮：回传值必须恰为 1..N（无重复、无丢失更新、无回退）",
+                (1..concurrency).toList(),
+                applied.sorted()
+            )
+            assertEquals("第 $round 轮：库内终态必须等于最大回传值", concurrency, storedSignCount(session))
+        }
+    }
+
+    @Test
+    fun `多轮并发递增不丢失更新`() = runTest {
+        // ISSUE-P3-27 子项 2 的廉价伴随守卫：在 Default 线程池上反复跑 32 路并发，
+        // 覆盖「受控变换的单调下界」在多次交错下是否仍然逐次落账。
+        // （擦除面竞态由上面的真实线程用例承担——它才是能命中该窗口的形态。）
+        val concurrency = 32
+        val rounds = 60
+        repeat(rounds) { round ->
+            val session = newSession(signCountText = "0")
+            val coordinator = coordinatorOf(session)
+
+            val values = withContext(Dispatchers.Default) {
+                List(concurrency) { async { coordinator.incrementPasskeySignCount(entryId.toHexString()) } }
+                    .awaitAll()
+            }.filterNotNull()
+
+            assertEquals("第 $round 轮：并发递增必须全部落账", concurrency, values.size)
+            assertEquals(
+                "第 $round 轮：回传的计数器必须恰为 1..N",
+                (1..concurrency).toList(),
+                values.sorted()
+            )
+            assertEquals("第 $round 轮：库内终态等于最大回传值", concurrency, storedSignCount(session))
+        }
     }
 
     // ===== ISSUE-P3-213：v1 旧 schema 在写路径上就地迁移为 KPEX =====

@@ -2,9 +2,11 @@
 #
 # 设计要点：
 # 1. **两个构建门禁并行存在**，各自真实可跑：
-#    - fast-gate：单元测试 + Android Lint，**不安装 NDK/Rust**（依据 AGENTS.md §5：
-#      纯 `test` 不触发 `:crypto:cargoNdkBuild`；原生内核仅由 `assemble*` 触发），
-#      目的是在 3~5 分钟内给出快速反馈；
+#    - fast-gate：单元测试 + Android Lint，**不安装 NDK/Rust**。依据是「纯 `test` 不触发
+#      `:crypto:cargoNdkBuild`；原生内核仅由 `assemble*` 触发」，目的是在 3~5 分钟内给出快速反馈。
+#      **注意（ISSUE-P2-217 更正）**：`lint` **会**经 AGP 的 lint 模型链
+#      （`bundleDebugLocalLintAar` → `mergeDebugNativeLibs`）触达 `:crypto:cargoNdkBuild`，
+#      故该步骤显式 `-x :crypto:cargoNdkBuild`；详见该步骤内的完整依据。
 #    - native-gate：安装固定版本 NDK + Rust 工具链 + cargo-ndk 后执行 4 ABI 原生交叉编译
 #      与 `assembleDebug` / `assembleRelease`（后者让 R8 真实执行，是 ProGuard 收窄的硬校验）。
 # 2. **三方供应链闸门** rust-supply-chain：Rust 侧 `cargo test` + `cargo deny check`
@@ -86,8 +88,22 @@ jobs:
       - name: 单元测试（全模块）
         run: ./gradlew test --console=plain
 
-      - name: Android Lint
-        run: ./gradlew lint --console=plain
+      # ISSUE-P2-217：`lint` 会经 AGP 的 lint 模型链触达原生构建——
+      #   `:crypto:lint` → `:crypto:lintAnalyzeDebug` → `:crypto:generateDebugLintModel`
+      #   → `:crypto:writeDebugLintModelMetadata` → `:crypto:bundleDebugLocalLintAar`
+      #   → `:crypto:mergeDebugNativeLibs` → `:crypto:cargoNdkBuild`
+      # （2026-09-20 在本机以 `./gradlew lint --dry-run` 实测：任务清单含 `:crypto:cargoNdkBuild`；
+      #  同一 dry-run 下 `./gradlew test --dry-run` 不含它，故污染源是 Lint 而非单测）。
+      # 本 job 按设计**不装** NDK / Rust / cargo-ndk，该步骤此前遂恒在「工具缺失」处失败
+      # （`error: no such command: ndk`），从未产出真实 Lint 判定。
+      # 修法：**显式排除** `:crypto:cargoNdkBuild` 这一项。被排除的只有「为打包而做的原生
+      # 交叉编译」——原生产物不参与任何静态分析，排除它不改变任何 lint 结论；
+      # 此处**没有** `|| true` / `continue-on-error` 之类吞掉失败的写法：lint 任务自身的
+      # 成功/失败判定完整保留（真实 Lint 失败仍使本步骤红）。
+      # 若将来任务名漂移导致排除失效，本步骤会以「cargo-ndk 缺失」**响亮报红**
+      # （fail-closed：绝不静默转绿）。
+      - name: Android Lint（显式排除与静态分析无关的原生构建）
+        run: ./gradlew lint -x :crypto:cargoNdkBuild --console=plain
 
       - name: 归档测试与 Lint 报告
         if: always()
@@ -122,6 +138,18 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
+        with:
+          # ISSUE-P2-218：**必须显式传 packages**。v4.0.1 的默认值是 `tools platform-tools`，
+          # 而裸 `tools` 包在远端 SDK 仓库中**已不存在**——2026-09-20 以
+          # `https://dl.google.com/android/repository/repository2-1.xml` 与 `repository2-3.xml`
+          # 实测：`path="tools"` 出现次数均为 0（只有 `build-tools;*` / `cmdline-tools;*` /
+          # `platform-tools` 含 "tools" 子串）。默认值因此必然触发
+          # `Warning: Failed to find package 'tools'` → `sdkmanager` 退出码 1 → 本步骤恒红，
+          # 使 native-gate / device-gate 整体不可达。
+          # 此处收窄为只需 platform-tools；NDK / 编译平台 / build-tools 由下一步
+          # `sdkmanager --install` 按仓库固定版本安装，本 action 只负责供应
+          # cmdline-tools（裸 `sdkmanager` 在 PATH 上的前提）与许可证接受。
+          packages: "platform-tools"
 
       - name: 安装 NDK / 编译平台 / build-tools（版本与本仓库固定值一致）
         run: |
@@ -426,6 +454,10 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
+        with:
+          # ISSUE-P2-218：同 native-gate——显式传 packages 以避开 v4.0.1 默认值里的裸 `tools`
+          # （该包在远端 SDK 仓库已不存在，实测依据见 native-gate 处）。
+          packages: "platform-tools"
 
       - name: 安装 NDK / 编译平台 / build-tools / 模拟器镜像（版本与本仓库固定值一致）
         run: |

@@ -73,14 +73,50 @@ allprojects {
             rootProject.file(".github/owasp-dependency-suppressions.xml").absolutePath
         )
 
-        // 跳过 AGP instrumentation / lint 类派生配置：非生产运行面，压缩扫描面与耗时。
-        // （配置名不存在时插件自动忽略，向后兼容不同 AGP 变体配置命名）
+        // 扫描面 = **生产可运行面**（含 androidTest 编译/运行面）。
+        // 为什么必须显式列出：插件对**全部可解析配置**做扫描，而 AGP 会为自带的
+        // 测试 / lint / 截图校验工具链创建一批配置——其产物只在构建机 JVM 上运行，
+        // 永不进入 APK，其构件（UTP / lint 工具自身）也**不是本仓声明的依赖**。
+        //
+        // ISSUE-P2-219 实测（2026-09-20，本地同参数 `dependencyCheckAggregate` +
+        // `python .github/check_dependency_cvss.py`，得出与 CI 完全一致的
+        // 「漏洞实例 1316 条 / 达阈（CVE × 构件）948 条」）：948 条**全部**落在下表新增的
+        // AGP 工具链配置族上（35 个构件：netty 4.1.93 / 4.1.110、grpc 1.57.2、
+        // kotlin-stdlib 1.9.0、protos 32.2.1、protobuf-java-util 3.22.3、jsoup 1.6.3），
+        // 生产 runtime / compile 面为 **0 条**（逐构件的承载配置与引入者见批次证据表）。
+        // 故此处按「扫描面收口」处置（而非为 AGP 内部件逐条维护 CVE 白名单），
+        // 口径已登记于 docs/architecture/已知工程限界.md；机检由
+        // SupplyChainScanSurfaceTest 守卫（工具链族必须在 skip 内、生产配置族不得混入）。
+        //
+        // 配置族名由 AGP 生成、随 AGP 版本稳定（本仓 AGP 版本钉死）；若将来 AGP 升级
+        // 引入**新**的工具链配置名，闸门会以「新增达阈条目」**响亮报红**（fail-closed），
+        // 届时按同一原则补入本表并复核——绝不静默放宽。
         skipConfigurations = mutableListOf(
             "androidTestDebugCompileClasspath",
             "androidTestDebugRuntimeClasspath",
             "androidTestCompileClasspath",
             "lintClassPath",
-            "lintChecks"
+            "lintChecks",
+            // === AGP 测试工具链：Unified Test Platform（UTP）各构件解析面 ===
+            "unified-test-platform-core",
+            "unified-test-platform-launcher",
+            "unified-test-platform-gradle-work-action",
+            "unified-test-platform-android-test-plugin",
+            "unified-test-platform-android-device-provider-ddmlib",
+            "unified-test-platform-android-driver-instrumentation",
+            "unified-test-platform-android-test-plugin-host-additional-test-output",
+            "unified-test-platform-android-test-plugin-host-apk-installer",
+            "unified-test-platform-android-test-plugin-host-coverage",
+            "unified-test-platform-android-test-plugin-host-device-info",
+            "unified-test-platform-android-test-plugin-host-emulator-control",
+            "unified-test-platform-android-test-plugin-host-logcat",
+            "unified-test-platform-android-test-plugin-result-listener-gradle",
+            // === Android Lint 工具自身（`lint-gradle` 及其传递面）===
+            "androidLintTool",
+            // === AGP 截图测试（screenshotTest）内部工具面 ===
+            "_internal-screenshot-test-task-layoutlib",
+            "_internal-screenshot-test-task-layoutlib-res",
+            "_internal-screenshot-validation-junit-engine"
         )
     }
 }
