@@ -41,6 +41,8 @@ class ObscuredTouchWiringTest {
         "app/src/main/java/com/keepasskey/app/passkey/CredentialVerificationLauncher.kt",
         // Credential Manager 链式解锁窗口
         "app/src/main/java/com/keepasskey/app/passkey/CredentialUnlockActivity.kt",
+        // ISSUE-P2-220：创建链路 fail-closed 拒绝原因页（渲染在基类自己的受保护窗口内）
+        "app/src/main/java/com/keepasskey/app/passkey/BaseCredentialActivity.kt",
         // 自动填充两窗口（ISSUE-P2-09 既有接线，纳入清单防止回归移除）
         "app/src/main/java/com/keepasskey/app/autofill/AutofillUnlockActivity.kt",
         "app/src/main/java/com/keepasskey/app/autofill/AutofillConfirmActivity.kt"

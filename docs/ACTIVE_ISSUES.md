@@ -36,31 +36,11 @@
 
 ---
 
-## P2 中危缺陷与协议/测试缺口（1 项）
+## P2 中危缺陷与协议/测试缺口（0 项）
 
-### ISSUE-P2-220：Passkey 创建链路 fail-closed 拒绝时零用户反馈（用户视角为「点了继续就断」）
-
-- **核实时间点与方式**：2026-09-20，用户真机（小米，Release 构建）复现报告 + 全链路代码走查
-  （`KeePasskeyCredentialProviderService` → `CredentialCreateEntries` → `PasskeyCreateActivity`）；
-  无真机日志，根因由代码路径与用户问答（Via 浏览器 / 密码库已解锁 / KeePasskey 无任何界面露面）唯一收敛。
-- **现象**：Via 浏览器打开 passkeys.io 创建通行密钥，系统确认弹窗（「创建通行密钥…将存储在 KeePasskey 中」）
-  正常出现；点「继续」后 KeePasskey 无任何界面，浏览器侧流程直接中断。
-- **根因**：Via 不在特权浏览器白名单 → `CallingOriginResolver.resolveTrustedOrigin` 降级为
-  `android:apk-key-hash:` origin → `PasskeyCreateActivity.passesRegistrationGates` 走普通应用路径执行
-  DAL 远程校验 → passkeys.io 无对 Via 包名的 assetlinks 声明 → `NOT_VERIFIED` → fail-closed
-  `failAndFinish()`（RESULT_CANCELED）。该拒绝发生在**任何 UI 呈现之前**，用户无法区分
-  「功能坏了」与「被安全门控拒绝」。用户侧临时解法（均不改代码）：① 设置 → 自动填充 →
-  「特权浏览器白名单」启用 Via（若 Via 请求确实填充 origin 则走浏览器路径豁免 DAL）；
-  ② 开启「跳过 DAL 校验」开关（削弱防线，仅限个人设备自担风险）。
-- **涉及文件**：`app/src/main/java/com/keepasskey/app/passkey/PasskeyCreateActivity.kt`
-  （`passesRegistrationGates` 各拒绝分支 / `failAndFinish`）、`app/src/main/java/com/keepasskey/app/passkey/BaseCredentialActivity.kt`
-  （统一收尾）。
-- **AC**：
-  1. 创建链路任一 fail-closed 拒绝分支（缺系统注入请求 / 缺注册参数 / DAL 未通过 / `excludeCredentials`
-     命中 / 锁定态复核失败）在受保护窗口内**呈现明确拒绝原因**、由用户确认后关闭，不再静默 `finish`；
-  2. 拒绝文案沿用预定义字符串资源（ISSUE-P1-10 口径），不得携带 rpId / 包名等敏感标识；
-  3. 对系统的回传契约不变（仍 `RESULT_CANCELED`，浏览器侧仍收到创建失败）；
-  4. 单测覆盖各拒绝分支的文案选择与结果回传；`.\gradlew.bat test` 全绿。
+> **暂无开放项**（本区最近一次归零：§226 闭环的 `ISSUE-P2-220`——Passkey 创建链路 fail-closed 拒绝时
+> 零用户反馈；实现与验收证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md) 与
+> [`docs/resolved/batches/226-Passkey创建链路拒绝原因呈现批次.md`](resolved/batches/226-Passkey创建链路拒绝原因呈现批次.md)）。
 
 > **历史 P2 条目**（§219 闭环的 `ISSUE-P2-199` / `ISSUE-P2-200` / `ISSUE-P2-208`，§220 闭环的
 > `ISSUE-P2-210` / `ISSUE-P2-211`，§223 闭环的 `ISSUE-P2-212`）的实现与验收证据见

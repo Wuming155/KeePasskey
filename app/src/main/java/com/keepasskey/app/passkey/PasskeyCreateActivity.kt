@@ -28,15 +28,18 @@ import javax.inject.Inject
  * 1. 确定调用方来源并校验（H1 / L1）；
  * 2. 库锁定时在**同一受保护窗口内**呈现解锁页（[CredentialUnlockPresenter]）——
  *    整改前此处直接 `failAndFinish()`，用户点选系统「创建通行密钥」后静默失败；
- * 3. **ISSUE-P0-03 (ZT-03)**：生成密钥并落库前，先执行「本次实际发生」的用户验证门控
+ * 3. **ISSUE-P2-220**：任一 fail-closed 拒绝分支都在受保护窗口内呈现**明确原因**
+ *    （[rejectAndFinish] + [CredentialRejectionReason]），由用户确认后才收尾——
+ *    整改前各分支静默 `finish()`，用户视角是「点了继续就断」；回传契约不变（仍取消）；
+ * 4. **ISSUE-P0-03 (ZT-03)**：生成密钥并落库前，先执行「本次实际发生」的用户验证门控
  *    （RP 声明 `userVerification: required` 时强制系统级强验证，绝不降级为手动确认）；
- * 4. **按 RP 的 `pubKeyCredParams` 协商算法**生成密钥对（此前写死 ES256）；
- * 5. **原样采用 RP 下发的 `user.id` 作为 userHandle**（此前自造随机值，破坏无用户名登录）；
- * 6. `excludeCredentials` 命中库内既有凭据即 fail-closed 拒绝（防重复注册）；
- * 7. 请求携带 `extensions.prf` 时生成并持久化 PRF 秘密，并在响应中回传 `prf` 结果；
- * 8. 写入 KDBX 密码库并原子落盘（同 rpId + 用户名已有条目则**原地替换**，不产生重复条目）；
- * 9. 构造标准 WebAuthn W3C 证明对象 (AttestationObject) 与确定性 CBOR 编码；
- * 10. 通过 PendingIntentHandler 回传 CreatePublicKeyCredentialResponse。
+ * 5. **按 RP 的 `pubKeyCredParams` 协商算法**生成密钥对（此前写死 ES256）；
+ * 6. **原样采用 RP 下发的 `user.id` 作为 userHandle**（此前自造随机值，破坏无用户名登录）；
+ * 7. `excludeCredentials` 命中库内既有凭据即 fail-closed 拒绝（防重复注册）；
+ * 8. 请求携带 `extensions.prf` 时生成并持久化 PRF 秘密，并在响应中回传 `prf` 结果；
+ * 9. 写入 KDBX 密码库并原子落盘（同 rpId + 用户名已有条目则**原地替换**，不产生重复条目）；
+ * 10. 构造标准 WebAuthn W3C 证明对象 (AttestationObject) 与确定性 CBOR 编码；
+ * 11. 通过 PendingIntentHandler 回传 CreatePublicKeyCredentialResponse。
  */
 @AndroidEntryPoint
 class PasskeyCreateActivity : BaseCredentialActivity() {
@@ -108,7 +111,7 @@ class PasskeyCreateActivity : BaseCredentialActivity() {
             // 系统未注入创建请求（理论上仅当条目 PendingIntent 非 FLAG_MUTABLE 时发生）：
             // 没有系统背书的调用方与请求，一切字段都不可信 ⇒ fail-closed，绝不按缓存副本注册。
             AppLog.e(TAG, "缺少系统注入的创建请求（条目 PendingIntent 需 FLAG_MUTABLE），拒绝创建")
-            failAndFinish()
+            rejectAndFinish(CredentialRejectionReason.MISSING_REQUEST)
             return
         }
 
@@ -134,7 +137,7 @@ class PasskeyCreateActivity : BaseCredentialActivity() {
         if (rpId.isBlank() || userName.isBlank()) {
             // ISSUE-P1-10：日志不得携带 rpId / userName 等敏感标识
             AppLog.e(TAG, "缺少必要注册参数（rpId 或 userName 为空）")
-            failAndFinish()
+            rejectAndFinish(CredentialRejectionReason.MISSING_PARAMETERS)
             return
         }
 
@@ -149,72 +152,58 @@ class PasskeyCreateActivity : BaseCredentialActivity() {
                 awaitRegistration()
             } catch (t: Throwable) {
                 AppLog.e(TAG, "Passkey 注册异常", t)
-                failAndFinish()
+                rejectAndFinish(CredentialRejectionReason.INTERNAL_ERROR)
             }
         }
     }
 
     /**
-     * 注册门禁链（ISSUE-P3-188 拆分）：锁定态复核 → DAL / 归属校验 → `excludeCredentials`
-     * 查重 → 用户验证门控；判定顺序与 fail-closed 口径逐字不变。
+     * 注册门禁链（ISSUE-P3-188 拆分）：锁定态复核 → 注册门禁（DAL / 归属校验）→
+     * `excludeCredentials` 查重 → 用户验证门控；判定顺序与 fail-closed 口径逐字不变。
+     *
+     * ISSUE-P2-220：每一处拒绝都携带**用户可见的原因**（[rejectAndFinish]）——整改前此处
+     * 一律静默 `failAndFinish()`，被安全门控拒绝的用户只看到「点了继续就断」。
      */
     private suspend fun awaitRegistration() {
         if (vaultRepository.isLocked()) {
             AppLog.w(TAG, "密码库仍未解锁，无法注册新 Passkey")
-            failAndFinish()
+            rejectAndFinish(CredentialRejectionReason.VAULT_LOCKED)
             return
         }
 
         // 普通应用（apk-key-hash origin）创建的凭据额外记录调用包绑定（android://<包名>）。
         // ISSUE-P2-72：仅接受**系统背书**的 CallingAppInfo 包名，取不到即返回 null。
-        val callerPackage = CallingOriginResolver.systemAttestedPackageName(providerReq?.callingAppInfo)
-        if (!passesRegistrationGates(callerPackage)) {
-            failAndFinish()
+        val callingAppInfo = providerReq?.callingAppInfo
+        val callerPackage = CallingOriginResolver.systemAttestedPackageName(callingAppInfo)
+        val certDigests = callingAppInfo?.let { CallingOriginResolver.certDigests(it) }
+            ?: CallerCertDigests.EMPTY
+        val skipDalVerification = extendedSettingsStore.load().skipDalVerification
+        if (skipDalVerification) {
+            AppLog.w(TAG, "用户已显式开启「跳过 DAL 校验」，本次注册不执行远程声明验证")
+        }
+        val gateRejection = PasskeyRegistrationGate.evaluate(
+            origin = origin,
+            callerPackage = callerPackage,
+            skipDalVerification = skipDalVerification,
+            callingAppInfoPresent = callingAppInfo != null,
+            certDigests = certDigests
+        ) { verifiedPackage ->
+            // ISSUE-P3-93：以调用方**全部**签名摘要参与 DAL 校验（签名轮换期任一命中即通过）
+            dalVerifier.verify(rpId, verifiedPackage, certDigests)
+        }
+        if (gateRejection != null) {
+            // ISSUE-P1-10：日志只记拒绝类别，不得携带 rpId / 调用包名等敏感标识
+            AppLog.w(TAG, "注册门禁拒绝（${gateRejection.name}），fail-closed 不创建 Passkey")
+            rejectAndFinish(gateRejection)
             return
         }
 
         // ISSUE：`excludeCredentials` 查重（WebAuthn 规范要求认证器拒绝创建已排除的凭据）
         if (!ensureNotExcluded()) {
-            failAndFinish()
+            rejectAndFinish(CredentialRejectionReason.CREDENTIAL_ALREADY_EXISTS)
             return
         }
         requestCreationUserVerification(callerPackage)
-    }
-
-    /**
-     * ISSUE-P2-02：普通应用注册的 DAL 远程资产声明强绑定校验。
-     * 浏览器委派调用豁免（rp.id ↔ web origin 归属已由 DomainMatcher 严格点号边界强制）。
-     */
-    private suspend fun passesRegistrationGates(callerPackage: String?): Boolean {
-        if (CallingOriginResolver.isBrowserOrigin(origin)) return true
-        val pkg = callerPackage ?: run {
-            AppLog.e(TAG, "无法确定调用应用包名，拒绝创建应用内 Passkey")
-            return false
-        }
-        if (extendedSettingsStore.load().skipDalVerification) {
-            AppLog.w(TAG, "用户已显式开启「跳过 DAL 校验」，本次注册不执行远程声明验证")
-            return true
-        }
-        val callingAppInfo = providerReq?.callingAppInfo
-        // ISSUE-P3-93：以调用方**全部**签名摘要参与 DAL 校验（签名轮换期任一命中即通过）
-        val certDigests = callingAppInfo?.let { CallingOriginResolver.certDigests(it) }
-            ?: CallerCertDigests.EMPTY
-        if (callingAppInfo == null || certDigests.isEmpty) {
-            AppLog.e(TAG, "无法获取调用方签名证书，DAL 校验 fail-closed，拒绝创建")
-            return false
-        }
-        return when (dalVerifier.verify(rpId, pkg, certDigests)) {
-            DigitalAssetLinksVerifier.DalResult.VERIFIED -> true
-            DigitalAssetLinksVerifier.DalResult.NOT_VERIFIED -> {
-                AppLog.w(TAG, "DAL 声明校验未通过（无匹配授权声明或格式错误），拒绝创建")
-                false
-            }
-
-            DigitalAssetLinksVerifier.DalResult.NETWORK_UNAVAILABLE -> {
-                AppLog.w(TAG, "DAL 校验网络不可用，fail-closed 拒绝创建")
-                false
-            }
-        }
     }
 
     /** RP 要求 `userVerification: "required"` 时强制系统级强验证（不得降级为手动确认） */
@@ -294,7 +283,7 @@ class PasskeyCreateActivity : BaseCredentialActivity() {
                 val flags = PasskeyAuthFlags.forRegistration(verification)
                 if (flags == null) {
                     AppLog.e(TAG, "用户验证结果不可用于注册: verification=$verification")
-                    failAndFinish()
+                    rejectAndFinish(CredentialRejectionReason.INTERNAL_ERROR)
                     return@launch
                 }
 
@@ -307,7 +296,7 @@ class PasskeyCreateActivity : BaseCredentialActivity() {
                 val prfEval = request?.prfEval
                 if (prfEval?.evalByCredentialPresent == true) {
                     AppLog.w(TAG, "注册请求携带 evalByCredential（规范禁止），拒绝创建")
-                    failAndFinish()
+                    rejectAndFinish(CredentialRejectionReason.REQUEST_INVALID)
                     return@launch
                 }
                 val prfSecret: ProtectedString? = if (prfEval != null) PasskeyPrf.newSecretProtected() else null
@@ -347,7 +336,7 @@ class PasskeyCreateActivity : BaseCredentialActivity() {
                 finish()
             } catch (t: Throwable) {
                 AppLog.e(TAG, "Passkey 注册异常", t)
-                failAndFinish()
+                rejectAndFinish(CredentialRejectionReason.INTERNAL_ERROR)
             }
         }
     }

@@ -50,4 +50,16 @@
     <string name="passkey_create_biometric_subtitle">验证身份后为「%1$s」创建通行密钥</string>
     <string name="passkey_create_manual_hint">即将为「%1$s」创建通行密钥。\n\n本设备无可用生物识别或锁屏凭据，新凭据将如实标记为「创建时未执行用户验证」(UV=0)，后续部分网站可能拒绝其登录。\n\n仅在可信设备上继续。</string>
 
+    <!-- ===== ISSUE-P2-220：创建链路 fail-closed 拒绝的用户可见原因 =====
+         一律为**无插值**固定文本（ISSUE-P1-10）：拒绝原因不得携带 rpId / 调用包名 / 域名 /
+         凭据 id 等敏感标识，故此处**不存在** %1$s 一类占位符（由 `CredentialRejectionFeedbackTest` 守护）。 -->
+    <string name="cred_reject_title">无法创建通行密钥</string>
+    <string name="cred_reject_confirm">知道了</string>
+    <string name="passkey_reject_missing_request">系统未提供完整的创建请求，已拒绝创建。</string>
+    <string name="passkey_reject_caller_cert_unreadable">无法读取调用方应用的签名信息，已拒绝创建。</string>
+    <string name="passkey_reject_dal_unverified">无法确认调用应用对本站点的归属声明，已拒绝创建通行密钥。</string>
+    <string name="passkey_reject_dal_network_unavailable">无法联网校验调用应用对本站点的归属声明，已拒绝创建通行密钥。</string>
+    <string name="passkey_reject_request_invalid">创建请求不符合通行密钥规范，已拒绝创建。</string>
+    <string name="passkey_reject_credential_exists">该站点在此密码库中已存在通行密钥，无需重复创建。</string>
+
 </resources>

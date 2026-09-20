@@ -1261,6 +1261,15 @@
     <string name="passkey_create_biometric_subtitle">Verify your identity to create a passkey for %1$s</string>
     <!-- %1$s = 依赖方标识 -->
     <string name="passkey_create_manual_hint">About to create a passkey for %1$s.\n\nThis device has no usable biometric or lock-screen credential, so the new credential will be honestly marked as not user-verified at creation (UV=0). Some websites may later refuse sign-in with it.\n\nContinue only on a trusted device.</string>
+    <!-- ISSUE-P2-220：创建链路 fail-closed 拒绝原因（无插值，不含 rpId / 包名等标识） -->
+    <string name="cred_reject_title">Cannot create passkey</string>
+    <string name="cred_reject_confirm">Got it</string>
+    <string name="passkey_reject_missing_request">The system did not provide a complete create request; creation was refused.</string>
+    <string name="passkey_reject_caller_cert_unreadable">The calling app\'s signature could not be read; creation was refused.</string>
+    <string name="passkey_reject_dal_unverified">The calling app\'s ownership claim for this site could not be confirmed; passkey creation was refused.</string>
+    <string name="passkey_reject_dal_network_unavailable">The calling app\'s ownership claim for this site could not be verified online; passkey creation was refused.</string>
+    <string name="passkey_reject_request_invalid">The create request does not conform to the passkey specification; creation was refused.</string>
+    <string name="passkey_reject_credential_exists">A passkey for this site already exists in this vault; no need to create another.</string>
 
     <!-- 来源：values/strings_ui_messages.xml（53 条） -->
     <string name="picker_open_vault_title">Open an existing KDBX vault</string>

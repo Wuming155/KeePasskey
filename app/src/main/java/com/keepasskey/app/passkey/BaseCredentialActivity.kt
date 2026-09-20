@@ -2,7 +2,10 @@ package com.keepasskey.app.passkey
 
 import android.os.Bundle
 import android.view.WindowManager
+import androidx.activity.compose.setContent
 import androidx.fragment.app.FragmentActivity
+import com.keepasskey.app.R
+import com.keepasskey.app.security.ApplyObscuredTouchFilter
 
 /**
  * 凭据交互 Activity 公共抽象基类。
@@ -33,5 +36,27 @@ abstract class BaseCredentialActivity : FragmentActivity() {
     protected fun failAndFinish() {
         setResult(RESULT_CANCELED)
         finish()
+    }
+
+    /**
+     * fail-closed 拒绝收尾（ISSUE-P2-220）：回传契约与 [failAndFinish] 完全一致
+     * （仍是 `RESULT_CANCELED`，绝不谎报成功），但**先在受保护窗口内呈现拒绝原因**，
+     * 用户确认后才收尾——整改前各拒绝分支直接静默 `finish()`，用户视角是「点了继续就断」，
+     * 无法区分「功能坏了」与「被安全门控拒绝」。
+     *
+     * 文案一律取 [reason] 携带的预定义字符串资源（ISSUE-P1-10），不得插入 rpId / 包名等。
+     * 必须在主线程调用（内部 [setContent]）。
+     */
+    protected fun rejectAndFinish(reason: CredentialRejectionReason) {
+        setContent {
+            // 遮挡触摸过滤（ISSUE-P2-09 / P3-12）
+            ApplyObscuredTouchFilter()
+            CredentialRejectionScreen(
+                title = getString(R.string.cred_reject_title),
+                message = getString(reason.messageRes),
+                confirmText = getString(R.string.cred_reject_confirm),
+                onConfirm = { failAndFinish() }
+            )
+        }
     }
 }
