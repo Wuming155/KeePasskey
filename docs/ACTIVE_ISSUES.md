@@ -48,8 +48,43 @@
 
 ---
 
-## P3 低危问题、特性接线与体验优化（0 项）
+## P3 低危问题、特性接线与体验优化（1 项）
 
-> **暂无开放项**（历史 P3 条目——含 §221 闭环的 `ISSUE-P3-201` / `202` / `203` / `204` / `205` / `206` /
-> `209`，§222 闭环的 `ISSUE-P3-212` / `213` / `214`，以及 §224 闭环的 `ISSUE-P3-215`——的实现与验收证据见
+### ISSUE-P3-221：拒绝原因页只说「为什么被拒」，不说「那怎么办」
+
+- **核实时间点与方式**：2026-09-20，用户真机复现报告（Via 浏览器 + passkeys.io）后对 §226 交付物的
+  **当场反馈**（原文：「用户知道问题之后，也应该知道怎么解决问题，比如说添加白名单什么的。
+  最好能够通过按钮一键跳转到对应位置」）+ 全链路代码走查（`BaseCredentialActivity` /
+  `CredentialRejectionScreen` / `KeePasskeyApp` / `MainActivity` / `ExportedComponentHygieneTest`）。
+- **现状（§226 的已知边界）**：`ISSUE-P2-220` 让拒绝原因**可见**了，但页面只呈现「为什么被拒」，
+  未给出「怎么解决」。用户读到「无法确认调用应用对本站点的归属声明」后仍不知道下一步做什么，
+  只能反复重试。**这是 §226 刻意留白的结果**（当时口径为「不存在第二条出路」），非实现缺陷。
+- **根因**：`CredentialRejectionReason` 只承载文案资源，没有「用户可执行动作」这一维度；
+  且拒绝页渲染在系统经 PendingIntent 拉起的 `PasskeyCreateActivity` 窗口内，跨 Activity 进入
+  设置页缺通道。
+- **硬约束（已核实）**：
+  1. `MainActivity` 是唯一无权限保护的导出组件，`ExportedComponentHygieneTest` 明令其
+     **不得消费任何外部 intent 数据**（禁 `getStringExtra` / `onNewIntent` / `intent.action` 等），
+     manifest 注释亦写死「本组件不得新增任何 intent 数据消费」⇒ 不能靠 intent extra / deep link 传路由。
+  2. 凭据 Activity「跳出去却不结束」会让框架收不到认证完成事件（`AutofillUnlockActivity` 有实测教训）
+     ⇒ 必须**先收尾再跳转**。
+  3. 文案纪律（ISSUE-P1-10）：一律无 `%` 插值、不得携带调用包名 / rpId / 域名 ⇒ 指引不得点名浏览器。
+  4. 既有取向「凭据窗口不提供本应用内导航」（`CredentialUnlockPresenter` 等三处 no-op）⇒ 需论证
+     「收尾之后的跳转」属独立动作而非「流程中途外跳」。
+- **AC**：
+  1. 仅当拒绝原因**确有用户可执行的解法**时，页面才额外呈现一段指引与一个直达动作；
+     无从下手的原因（含 `CREDENTIAL_ALREADY_EXISTS` 这类正常结果）维持原布局，不得硬凑入口；
+  2. 唯一受支持的补救路径是**特权浏览器白名单**；**不得**提供「跳过 DAL 校验」一类使本次请求通过
+     或削弱核心防线的直达路径；
+  3. 动作发生在**收尾之后**（`RESULT_CANCELED` + `finish()` 先行），对系统的回传契约与 §226 完全一致；
+  4. 跨 Activity 路由传递不得违反 `ExportedComponentHygieneTest`；未解锁时不得绕过解锁门；
+  5. 单测覆盖「原因 → 动作」穷举映射、指引文案（中英齐备且无插值）、「先收尾再跳转」顺序与信箱幂等；
+     `.\gradlew.bat test` 全绿。
+- **涉及文件**：`app/.../passkey/CredentialRejectionAction.kt`（新）、
+  `app/.../ui/navigation/RemediationNavigationEffect.kt`（新）、
+  `app/.../passkey/BaseCredentialActivity.kt`、`app/.../passkey/CredentialRejectionScreen.kt`、
+  `app/.../ui/KeePasskeyApp.kt`。
+
+> **历史 P3 条目**（含 §221 闭环的 `ISSUE-P3-201` / `202` / `203` / `204` / `205` / `206` /
+> `209`，§222 闭环的 `ISSUE-P3-212` / `213` / `214`，以及 §224 闭环的 `ISSUE-P3-215`）的实现与验收证据见
 > [RESOLVED_LOG.md](RESOLVED_LOG.md) 与 [`docs/resolved/batches/`](resolved/batches/)）。
