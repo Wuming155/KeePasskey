@@ -86,8 +86,7 @@ class BiometricFailureMessagePolicyTest {
                 errString = BiometricAuthManager.INTEGRITY_BLOCKED_DIAGNOSTIC,
                 blockReasons = listOf(
                     IntegrityBlockReason.HOOK_FRAMEWORK,
-                    IntegrityBlockReason.DEBUGGABLE_BUILD,
-                    IntegrityBlockReason.UNTRUSTED_INSTALLER
+                    IntegrityBlockReason.DEBUGGABLE_BUILD
                 )
             )
         )

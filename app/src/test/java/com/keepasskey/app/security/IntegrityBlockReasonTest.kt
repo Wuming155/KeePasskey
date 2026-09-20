@@ -38,8 +38,7 @@ class IntegrityBlockReasonTest {
             IntegritySignals(hookFrameworkDetected = true) to IntegrityBlockReason.HOOK_FRAMEWORK,
             IntegritySignals(rootArtifactsDetected = true) to IntegrityBlockReason.ROOT_ARTIFACTS,
             IntegritySignals(magiskDetected = true) to IntegrityBlockReason.MAGISK,
-            IntegritySignals(appDebuggable = true) to IntegrityBlockReason.DEBUGGABLE_BUILD,
-            IntegritySignals(untrustedInstallSource = true) to IntegrityBlockReason.UNTRUSTED_INSTALLER
+            IntegritySignals(appDebuggable = true) to IntegrityBlockReason.DEBUGGABLE_BUILD
         )
         cases.forEach { (signals, expected) ->
             assertEquals(
@@ -64,7 +63,6 @@ class IntegrityBlockReasonTest {
     fun `清单顺序即危害度降序且解锁提示取到攻击特征`() {
         val allHits = IntegritySignals(
             appDebuggable = true,
-            untrustedInstallSource = true,
             magiskDetected = true,
             debuggerAttached = true
         )
@@ -74,8 +72,7 @@ class IntegrityBlockReasonTest {
             listOf(
                 IntegrityBlockReason.DEBUGGER_ATTACHED,
                 IntegrityBlockReason.MAGISK,
-                IntegrityBlockReason.DEBUGGABLE_BUILD,
-                IntegrityBlockReason.UNTRUSTED_INSTALLER
+                IntegrityBlockReason.DEBUGGABLE_BUILD
             ),
             reasons
         )
@@ -86,7 +83,6 @@ class IntegrityBlockReasonTest {
         // 本缺陷的原始形态：禁了却给不出原因。新增降级路径时若忘了登记原因，此例即红
         val signalSets = listOf(
             IntegritySignals(appDebuggable = true),
-            IntegritySignals(untrustedInstallSource = true),
             IntegritySignals(rootArtifactsDetected = true),
             IntegritySignals(debuggerAttached = true),
             IntegritySignals(beingTraced = true),

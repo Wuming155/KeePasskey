@@ -23,8 +23,9 @@ enum class RuntimeRiskLevel {
 /**
  * 完整性探测原始信号集合（纯数据，无 Android 依赖，便于 JVM 单测构造）。
  *
- * 说明：安装来源与调试签名同属「可选」信号——仅安装来源无法判定（installer 为 null，
- * 如 adb 直装）时不升级风险，避免误报；调试签名已由 [appDebuggable]（FLAG_DEBUGGABLE）覆盖。
+ * 说明：安装来源信号（[untrustedInstallSource]）已于 ISSUE-P3-231 移除——`installingPackageName`
+ * 可被任意应用伪造、无法防伪，且误伤正常侧载 / 第三方商店用户，故不再参与等级判定；篡改防护交给
+ * 签名指纹核对与未接入的 Play Integrity。现存静态可疑特征仅余 [appDebuggable]（FLAG_DEBUGGABLE）。
  */
 data class IntegritySignals(
     val debuggerAttached: Boolean = false,
@@ -32,7 +33,6 @@ data class IntegritySignals(
     val rootArtifactsDetected: Boolean = false,
     val magiskDetected: Boolean = false,
     val hookFrameworkDetected: Boolean = false,
-    val untrustedInstallSource: Boolean = false,
     /**
      * 已启用**本应用以外**的无障碍服务（ISSUE-P2-44）。
      *
@@ -184,7 +184,8 @@ object RuntimeIntegrityPolicy {
             signals.rootArtifactsDetected ||
             signals.magiskDetected ||
             signals.hookFrameworkDetected
-        val elevated = signals.appDebuggable || signals.untrustedInstallSource
+        // ISSUE-P3-231：安装来源信号已移除（可被伪造、误伤正常侧载），仅 debug 构建属静态可疑特征
+        val elevated = signals.appDebuggable
         // ISSUE-P2-44：无障碍信号只影响「是否提示」（设置页安全分区展示），不影响等级与通道降级
         val accessibilityNotice = signals.thirdPartyAccessibilityEnabled
         // ISSUE-P2-227：命中信号清单与等级同源产出（声明顺序即危害度降序），供 UI 点名归因

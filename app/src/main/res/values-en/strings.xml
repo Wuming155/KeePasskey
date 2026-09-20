@@ -614,7 +614,6 @@
     <string name="sec_biometric_block_root">Root artifacts (su binaries) were detected, so biometric quick unlock is disabled. Use your master password instead.</string>
     <string name="sec_biometric_block_magisk">Magisk artifacts were detected, so biometric quick unlock is disabled. Use your master password instead.</string>
     <string name="sec_biometric_block_debuggable">You installed a debuggable (debug) build, so biometric quick unlock is disabled by our zero-trust policy. Use your master password, or install a release build for daily use.</string>
-    <string name="sec_biometric_block_installer">The install channel is not on the trusted list (for example adb or a third-party store), so biometric quick unlock is disabled. Use your master password instead.</string>
     <string name="sec_biometric_block_undetermined">The security environment scan has not finished yet, so biometric quick unlock is temporarily disabled. Try again shortly or use your master password.</string>
     <!-- ISSUE-P2-227: settings security section lists every currently matched reason -->
     <string name="sec_integrity_risk_reasons_prefix">Matched now:</string>

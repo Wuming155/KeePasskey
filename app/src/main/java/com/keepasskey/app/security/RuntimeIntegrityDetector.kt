@@ -174,7 +174,6 @@ class RuntimeIntegrityDetector @Inject constructor(
             rootArtifactsDetected = ROOT_ARTIFACT_PATHS.any { File(it).exists() },
             magiskDetected = MAGISK_TRACE_PATHS.any { File(it).exists() },
             hookFrameworkDetected = detectHookFramework(),
-            untrustedInstallSource = detectUntrustedInstallSource(ctx),
             thirdPartyAccessibilityEnabled = detectThirdPartyAccessibility(ctx)
         )
     }
@@ -272,34 +271,11 @@ class RuntimeIntegrityDetector @Inject constructor(
         maps.inputStream().use { containsHookMarker(it) }
 
     /**
-     * 安装来源判定：仅当能确定 installer 且不在受信任分发方集合中时升级风险；
-     * installer 为 `null`（部分 ROM / 无法查询）一律不升级，避免误报。
-     *
-     * **前提更正（ISSUE-P2-227，2026-09-20）**：原注释把「adb 直装」列为 `installer == null` 的例子，
-     * 该前提是**错的**——`adb install` / `pm install` 走 shell 身份，`installingPackageName` 为
-     * **`com.android.shell`（非 null）**，不在 [TRUSTED_INSTALLERS] 内，故 adb 安装的包
-     * （含 release 包）**会被判为 ELEVATED 并禁用生物快速解锁**。判据本身不改（用户 2026-09-20 明示
-     * 「不放宽」），但这一后果自此对用户**点名可见**：命中时提示为
-     * `R.string.sec_biometric_block_installer`（见 [IntegrityBlockReason.UNTRUSTED_INSTALLER]）。
-     *
-     * **ISSUE-P1-23 显式决策留痕（2026-09-13）**：`installer == null` → 不升级风险，系**显式产品决策**，非遗漏——
-     * 1. 该信号只能证明「非商店渠道安装」，**无法证明「APK 未被篡改」**：自签重打包版的 installer
-     *    同样为 null，且应用内任何自校验逻辑都可被重打包者一并 patch 掉——应用内无法建立该信任根；
-     * 2. 对该威胁的有效缓解在应用外：README「官方签名指纹」公布 release 证书 SHA-256 供安装前核对；
-     *    上架商店后接入平台完整性证明（Play Integrity 或同等服务，尚未上架，暂不适用）；
-     * 3. 故本信号维持「仅可判定来源时才参与升级」语义：null 不当可疑（避免 adb / 企业分发误报），
-     *    也不当安全（篡改防护交由签名指纹核对，不引入无效的「应用内签名自校验」）。
+     * ISSUE-P3-231：安装来源信号（[untrustedInstallSource]）已整体移除。
+     * `installingPackageName` 可被任意应用伪造，无法防伪；且误伤正常侧载 / 第三方商店用户，
+     * 却未挡住重打包威胁。篡改防护改由签名指纹核对（README 公布 release 证书 SHA-256）与
+     * 未接入的 Play Integrity 承担，故不再采集该信号，[TRUSTED_INSTALLERS] 一并删除。
      */
-    private fun detectUntrustedInstallSource(ctx: Context): Boolean {
-        val installer = try {
-            ctx.packageManager.getInstallSourceInfo(ctx.packageName).installingPackageName
-        } catch (t: Throwable) {
-            AppLog.w(TAG, "查询安装来源失败，按来源不可判定处理", t)
-            null
-        } ?: return false
-        return installer !in TRUSTED_INSTALLERS
-    }
-
     companion object {
         private const val TAG = "RuntimeIntegrity"
 
@@ -465,13 +441,5 @@ class RuntimeIntegrityDetector @Inject constructor(
          */
         internal val HOOK_MARKERS =
             listOf("frida", "xposed", "substrate", "edxposed", "lsposed", "libhook")
-
-        /** 受信任安装来源（官方商店与主流开源分发渠道） */
-        private val TRUSTED_INSTALLERS = setOf(
-            "com.android.vending",
-            "com.google.android.packageinstaller",
-            "com.android.packageinstaller",
-            "org.fdroid.fdroid"
-        )
     }
 }

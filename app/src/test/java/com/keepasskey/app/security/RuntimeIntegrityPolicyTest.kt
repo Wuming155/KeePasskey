@@ -70,21 +70,11 @@ class RuntimeIntegrityPolicyTest {
     }
 
     @Test
-    fun `非受信任安装来源仅升级为可疑`() {
-        val report = RuntimeIntegrityPolicy.evaluate(IntegritySignals(untrustedInstallSource = true))
-
-        assertEquals(RuntimeRiskLevel.ELEVATED, report.level)
-        assertTrue(report.enforcement.disableBiometricQuickUnlock)
-        assertFalse(report.enforcement.disableAutofill)
-    }
-
-    @Test
     fun `动态特征优先于静态可疑特征`() {
         val report = RuntimeIntegrityPolicy.evaluate(
             IntegritySignals(
                 debuggerAttached = true,
-                appDebuggable = true,
-                untrustedInstallSource = true
+                appDebuggable = true
             )
         )
 
@@ -243,12 +233,11 @@ class RuntimeIntegrityPolicyTest {
         val signalMatrix = listOf(
             IntegritySignals.NONE,
             IntegritySignals(appDebuggable = true),
-            IntegritySignals(untrustedInstallSource = true),
             IntegritySignals(debuggerAttached = true),
             IntegritySignals(rootArtifactsDetected = true),
             IntegritySignals(magiskDetected = true),
             IntegritySignals(hookFrameworkDetected = true),
-            IntegritySignals(debuggerAttached = true, appDebuggable = true, untrustedInstallSource = true),
+            IntegritySignals(debuggerAttached = true, appDebuggable = true),
             // ISSUE-P2-44：无障碍信号置位时等级仍为 TRUSTED，且**不**要求风险卡
             IntegritySignals(thirdPartyAccessibilityEnabled = true)
         )

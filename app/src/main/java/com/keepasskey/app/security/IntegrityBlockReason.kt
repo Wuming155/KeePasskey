@@ -44,9 +44,6 @@ enum class IntegrityBlockReason(@StringRes val messageRes: Int) {
     /** 安装包带 `FLAG_DEBUGGABLE`（debug 构建） */
     DEBUGGABLE_BUILD(R.string.sec_biometric_block_debuggable),
 
-    /** 安装来源可判定且不在受信任清单内 */
-    UNTRUSTED_INSTALLER(R.string.sec_biometric_block_installer),
-
     /** 首次扫描未完成或快照已陈旧：按保守策略禁用，但**并未**判定出任何风险 */
     SCAN_UNDETERMINED(R.string.sec_biometric_block_undetermined);
 
@@ -73,7 +70,6 @@ enum class IntegrityBlockReason(@StringRes val messageRes: Int) {
             ROOT_ARTIFACTS -> s.rootArtifactsDetected
             MAGISK -> s.magiskDetected
             DEBUGGABLE_BUILD -> s.appDebuggable
-            UNTRUSTED_INSTALLER -> s.untrustedInstallSource
             SCAN_UNDETERMINED -> false
         }
     }
