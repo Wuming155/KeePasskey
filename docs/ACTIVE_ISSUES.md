@@ -28,17 +28,66 @@
 
 ---
 
-## P1 高危与核心功能问题（0 项）
+## P1 高危与核心功能问题（1 项）
 
-> **暂无开放项**（本区最近一次归零：§229 闭环的 `ISSUE-P1-223`（设置页生物识别开关闪退）/
-> `ISSUE-P1-224`（外部输入账号密码点击保存未落盘）；实现与验收证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md) 与
-> [`docs/resolved/batches/229-生物识别闪退与自动填充保存及解锁通知倒计时批次.md`](resolved/batches/229-生物识别闪退与自动填充保存及解锁通知倒计时批次.md)）。
+### ISSUE-P1-238：冷启动关键路径仍逼近系统凭据创建应答预算（点保存间歇性无反应）
+
+- **核实时间点**：2026-09-21 于真机 Redmi 4X（santoni，`lineage_Mi8937_4_19`，Android 17 / API 37）实测。
+- **核实方式**：以测试 APK 内**独立包名**的真实客户端（`CredentialSaveClientActivity`，语义等价第三方应用）
+  调用 `CredentialManager.createCredential`，经 `adb logcat` 逐轮比对
+  `ActivityManager: Start proc …KeePasskeyCredentialProviderService` 与
+  `KeePasskeyCredProvider: onBeginCreateCredentialRequest` 两条时间戳。
+- **背景与根因**：系统给 provider 的创建应答预算约 **3.0 s**（`Provider session created` →
+  `Remote provider response timed out` 两轮实测 2.97 ~ 3.02 s）。本应用进程自 `Start proc`
+  到进入 `onBeginCreateCredentialRequest` 实测 **3.05 / 2.49 / 2.38 s**（三轮），其中 3.05 s
+  那轮被系统丢弃（`Remote provider response timed out` ⇒ `TYPE_NO_CREATE_OPTIONS`）——
+  用户视角即「点了保存没反应」，且呈**间歇性**。§240 已把最重的
+  `periodicSyncScheduler.applySavedSchedule()`（会拉起 WorkManager）移出冷启动关键路径，
+  但 `MainApplication.onCreate` 其余同步工作（易失缓存清理、剪贴板对账、自动锁定注册、
+  完整性探测、通知通道建立）与 Hilt 图初始化仍在关键路径上。
+- **验收标准**：AC① 真机 `force-stop` 后连续 ≥ 10 轮冷启动触发保存请求，
+  `Start proc` → `onBeginCreateCredentialRequest` **全部** ≤ 1.5 s（留 2× 余量）；
+  AC② 同轮次内 `logcat` **零** `Remote provider response timed out`；
+  AC③ 改善手段**不得**削减任何冷启动安全对账语义（`fileBinaryStore.clear()` 与
+  `clipboardSecurityManager.reconcileOnColdStart()` 必须仍在 `onCreate` 中同步执行，
+  由 `ColdStartAttachmentPurgeWiringTest` 锁定）。
+- **涉及文件**：`app/src/main/java/com/keepasskey/app/MainApplication.kt`；
+  定位与已完成的整改见 §240 批次正文。
 
 ---
 
-## P2 中危缺陷与协议/测试缺口（0 项）
+> **本区历史上一次归零**：§229 闭环的 `ISSUE-P1-223`（设置页生物识别开关闪退）/
+> `ISSUE-P1-224`（外部输入账号密码点击保存未落盘）；实现与验收证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md) 与
+> [`resolved/batches/229-生物识别闪退与自动填充保存及解锁通知倒计时批次.md`](resolved/batches/229-生物识别闪退与自动填充保存及解锁通知倒计时批次.md)。
 
-> **暂无开放项**（本区最近一次归零：§236 闭环 `ISSUE-P2-231`（Java 依赖面完整性锁定缺失）/
+---
+
+## P2 中危缺陷与协议/测试缺口（1 项）
+
+### ISSUE-P2-239：凭据提供者通道「系统未登记本应用」的失效完全静默且用户无法自救
+
+- **核实时间点**：2026-09-21 于真机 Redmi 4X（Android 17 / API 37）实测（与 `ISSUE-P1-238` 同一次排查）。
+- **核实方式**：`adb shell settings get secure credential_service`（实测为**空**）、
+  `credential_service_primary`（实测指向**不存在的包** `com.keepasskey.app`，而实际包名是 `com.keepasskey`）；
+  并以四条归因实验（仅改 `credential_service` / 仅改 `primary` / 全新安装仅写 `primary` / `force-stop` 后冷启动）
+  分别观察系统侧 `CredentialManager: starting executeCreateCredential` 与 provider 侧回调是否出现。
+- **背景与根因**：`credential_service` 为空时，系统**不会**向本应用发起创建请求（框架层直接
+  `CreateCredentialException.TYPE_NO_CREATE_OPTIONS`）。而 ① **全新安装后系统不自动登记**本应用；
+  ② 本机 ROM 的「首选服务」选择器只写 `credential_service_primary`（且写入命名空间前缀包名，
+  为**悬空组件**），**不写** `credential_service`。结果是保存能力对用户**完全不可见地失效**：
+  无报错、无提示，只有「点保存没反应」。自动填充通道早有 `AutofillHealthProbe` 与设置页健康卡片，
+  CM 通道**既无自检也无引导**。
+- **验收标准**：AC① 新增凭据提供者通道健康检查，在「系统未登记本应用」时给出用户可见状态与
+  修复指引（跳转系统设置；`android.settings.CREDENTIAL_PROVIDER` 在本机不可解析时**如实降级说明**，
+  不得伪造「已开启」）；AC② 检查结果只反映真实系统状态，**读取失败一律呈现「未知」而非「正常」**
+  （沿用本项目既有口径）；AC③ 判定落在纯函数上并被 JVM 单测穷举，平台查询单点化便于注入；
+  AC④ 设置页文案不得声称「已从系统移除」（组件注册由 Manifest 决定，应用内无法动态摘除）。
+- **涉及文件**：`app/src/main/java/com/keepasskey/app/passkey/**`、设置页安全分区；
+  先例 `AutofillHealthProbe`。已执行的处置与真机验证见 §240 批次正文。
+
+---
+
+> **本区历史上一次归零**：§236 闭环 `ISSUE-P2-231`（Java 依赖面完整性锁定缺失）/
 > `ISSUE-P2-232`（完整性风险升级无主动熔断接线）——前者落**重开决策**判「仍不引入」并交付
 > 可机检的替代缓解口径（`PD-14`），后者经前置裁决 `PD-13` 判「维持现状」、残余风险登记限界 §26；
 > 证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md) 与 [`docs/resolved/batches/`](resolved/batches/) 的 §236 批次）。

@@ -22,6 +22,19 @@
             android:launchMode="singleTop"
             android:theme="@android:style/Theme.Material.Light.NoActionBar"
             android:windowSoftInputMode="stateAlwaysHidden|adjustResize" />
+
+        <!--
+          Credential Manager「保存」链路的真实客户端（同上：测试 APK 自己的包名与 uid，
+          语义等价于第三方应用调用 CredentialManager.createCredential 触发系统保存提示）。
+          `exported="true"` 使真机复现时可由 adb 直接拉起，无需先跑 gradle 用例。
+        -->
+        <activity
+            android:name="com.keepasskey.app.passkey.CredentialSaveClientActivity"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:theme="@android:style/Theme.Material.Light.NoActionBar"
+            android:windowSoftInputMode="stateAlwaysHidden|adjustResize" />
     </application>
 
 </manifest>

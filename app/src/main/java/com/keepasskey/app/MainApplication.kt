@@ -11,6 +11,10 @@ import com.keepasskey.app.sync.PeriodicSyncScheduler
 import com.keepasskey.app.sync.SyncCacheEvictor
 import com.keepasskey.core.log.AppLog
 import dagger.hilt.android.HiltAndroidApp
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 @HiltAndroidApp
@@ -105,7 +109,17 @@ class MainApplication : Application() {
         runtimeIntegrityDetector.start()
         // TASK-08 整改：冷启动按持久化偏好恢复周期后台同步调度
         // （默认关闭，未开启时行为与既往完全一致）
-        periodicSyncScheduler.applySavedSchedule()
+        //
+        // ISSUE-P1-237（2026-09-21 真机定位）：**不得同步执行**——本调用会拉起 WorkManager
+        // （其自身需要打开自己的数据库与 executor），是 `Application.onCreate` 主线程上最重的
+        // 一段；而「按偏好恢复周期调度」**没有任何冷启动时序依赖**（不解锁、不下发数据、
+        // 不参与任何门控判定）。
+        //
+        // 实测代价（同机多次）：原同步调用下，系统绑定凭据提供者时进程从 `Start proc` 到
+        // `onBeginCreateCredentialRequest` 首行耗时 2.49 ~ 3.05 s，而系统给 provider 的应答
+        // 预算约 3.0 s —— 已实测出现 `Remote provider response timed out`，请求被直接丢弃，
+        // 用户视角即「点了保存/继续没反应」。移至后台线程后该段不再占用冷启动关键路径。
+        coldStartBackgroundScope.launch { periodicSyncScheduler.applySavedSchedule() }
         // ISSUE-P3-18：通知通道必须在任何 notify 之前建立（Android 8+ 向不存在的通道发送通知
         // 会被系统静默丢弃）；进程唯一冷启动点幂等建立，覆盖全部冷启动入口。
         NotificationChannels.ensureCreated(this)
@@ -113,6 +127,18 @@ class MainApplication : Application() {
         // 解锁（OPENED/DIRTY）即发、锁定/关闭即撤，受 showUnlockedNotification 偏好与通知权限双闸门约束。
         unlockedNotificationController.start()
     }
+
+    /**
+     * 冷启动**非关键路径**工作作用域（ISSUE-P1-237）。
+     *
+     * 只承载「没有冷启动时序依赖、但对时延敏感」的收尾工作：这些工作若留在
+     * [onCreate] 主线程上，会把本进程的所有系统回调（凭据提供者 / 自动填充）推迟到
+     * 系统应答预算之外。**不得**把任何参与门控判定或清理对账的工作放进本作用域
+     * ——那类工作必须在冷启动点同步完成（见 [ColdStartAttachmentPurgeWiringTest]）。
+     *
+     * 作用域与进程同生命周期，无需取消：进程终止即随之回收。
+     */
+    private val coldStartBackgroundScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private companion object {
         const val TAG = "MainApplication"

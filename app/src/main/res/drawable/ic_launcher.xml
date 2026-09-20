@@ -1,3 +1,30 @@
 <?xml version="1.0" encoding="utf-8"?>
-<bitmap xmlns:android="http://schemas.android.com/apk/res/android"
-    android:src="@mipmap/ic_launcher" />
+<!--
+    「应用图标」的**可加载别名**（供系统 UI 侧以 `Icon.createWithResource` 消费）。
+
+    ## 为什么需要这个别名而不是直接用 `@mipmap/ic_launcher`
+    `mipmap-anydpi-v26/ic_launcher.xml` 是 **adaptive-icon**，它只是启动器图标的**自适应层叠定义**：
+    API 26+ 由 Launcher 按厂商蒙版自行裁切。而凭据面板 / 自动填充内联建议等系统 UI 需要的是
+    一个**可直接绘制的完整图标**，故此处以本别名把「背景层 + 前景层」合成成普通 drawable。
+
+    ## 历史缺陷（ISSUE-P1-237，2026-09-21 真机定位）
+    本文件曾是 `<bitmap android:src="@mipmap/ic_launcher" />`。**`<bitmap>` 的 `src` 必须是位图**，
+    而 `@mipmap/ic_launcher` 在 API 26+ 解析到上面的 adaptive-icon XML ⇒ 该 drawable **在任何
+    消费方都无法加载**：
+
+    ```
+    org.xmlpull.v1.XmlPullParserException: Binary XML file line #3: <bitmap> requires a valid 'src' attribute
+    ```
+
+    后果（真机日志实证）：系统凭据管理器在构建「保存」面板的创建项列表时
+    （`CreateFlowUtils.toSortedCreationOptionInfoList`）每次都要加载本图标并抛错；自动填充内联
+    建议的 `setStartIcon` 同理。
+
+    ## 约束
+    两个 `item` 必须指向**位图资源**（`mipmap-*dpi` 下的 PNG）：若改指 `@mipmap/ic_launcher`
+    或任何 `anydpi-v26` 下的 adaptive-icon，会立刻退回到上面那种「层叠定义当位图用」的非法形态。
+-->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@mipmap/ic_launcher_background" />
+    <item android:drawable="@mipmap/ic_launcher_foreground" />
+</layer-list>
