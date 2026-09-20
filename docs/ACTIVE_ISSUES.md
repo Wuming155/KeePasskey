@@ -40,6 +40,10 @@
   **通行密钥方向同口径复测（§241）**：冷启动轮 `Provider session created 06:51:35.407` →
   回调 `06:51:37.864`（2.46 s）→ `CANCELED 06:51:38.409`（2.99 s = 系统预算）→
   `TYPE_NO_CREATE_OPTIONS`，与密码方向**同源**。
+  **10 轮冷启动统计（§242）**：时延 2.351 / 2.354 / 2.354 / 2.357 / 2.361 / 2.366 / 2.371 /
+  2.393 / 2.568 s（最小 2.351、最大 2.568、中位 **2.359**、均值 2.383），**超时 0/10**、
+  10/10 均 `SAVE_ENTRIES_RECEIVED`。⇒ §240 的改动使分布稳定落在约 3.0 s 预算内
+  （余量 0.4 ~ 0.65 s），但**仍未达到本条目 AC① 的 ≤ 1.5 s**，故保持开放。
 - **背景与根因**：系统给 provider 的创建应答预算约 **3.0 s**（`Provider session created` →
   `Remote provider response timed out` 两轮实测 2.97 ~ 3.02 s）。本应用进程自 `Start proc`
   到进入 `onBeginCreateCredentialRequest` 实测 **3.05 / 2.49 / 2.38 s**（三轮），其中 3.05 s
@@ -65,7 +69,7 @@
 
 ---
 
-## P2 中危缺陷与协议/测试缺口（1 项）
+## P2 中危缺陷与协议/测试缺口（2 项）
 
 ### ISSUE-P2-239：凭据提供者通道「系统未登记本应用」的失效完全静默且用户无法自救
 
@@ -87,6 +91,32 @@
   AC④ 设置页文案不得声称「已从系统移除」（组件注册由 Manifest 决定，应用内无法动态摘除）。
 - **涉及文件**：`app/src/main/java/com/keepasskey/app/passkey/**`、设置页安全分区；
   先例 `AutofillHealthProbe`。已执行的处置与真机验证见 §240 批次正文。
+
+### ISSUE-P2-240：设置页「跳过浏览器兼容层」开关的文案与其真实语义无关（用户看不到 DAL 降级入口）
+
+- **核实时间点**：2026-09-21 于真机 Redmi 4X（Android 17 / API 37）实测（§242 收口轮）。
+- **核实方式**：`uiautomator dump` 读出该行文案为 `autofill_skip_dal_title/sub`
+  （`app/src/main/res/values/strings.xml:857-858` = 「跳过浏览器兼容层」/「不通过浏览器兼容适配直接填充原生表单」）；
+  沿 `AutofillSettingsComponents.kt:238-244` 追到 `onSkipDalVerificationToggle` →
+  `setSkipDalVerification` → `ExtendedSettings.skipDalVerification`；**真机点击后**
+  `keepasskey_extended_settings.xml` 写入 `<boolean name="skip_dal_verification" value="true" />`，
+  且随后的通行密钥注册日志出现 `用户已显式开启「跳过 DAL 校验」，本次注册不执行远程声明验证`。
+- **背景与根因**：该开关**有**真实消费方（`PasskeyCreateActivity` 的 `PasskeyRegistrationGate`，
+  决定是否对调用方执行 `DigitalAssetLinksVerifier` 远程声明校验），但界面文案描述的是
+  **另一件事**（浏览器兼容层 / 原生表单填充），与「通行密钥注册的站点归属声明校验」无关。
+  后果：`DigitalAssetLinksVerifier` 的 KDoc 称「用户如确有离线注册需求，可经设置中
+  『跳过 DAL 校验』**显式授权降级**」——用户**根本看不到这个入口的名字**；
+  而 DAL 是通行密钥注册的**安全防线**，用户既无法知情也无法自主选择。
+  这与 §232 已闭环的 `ISSUE-P2-228`（通道假开关 + 文案谎称需要无障碍）属**同类缺陷**。
+- **验收标准**：AC① 该开关的标题/副标题改述为真实语义（Passkey 注册的站点归属声明校验降级），
+  并与 `DigitalAssetLinksVerifier` KDoc 的措辞**互相对齐**（两处不得再各说一套）；
+  AC② 若产品确实需要独立的「跳过浏览器兼容层」开关，须作为**独立偏好项**另行接线，
+  **不得**与 `skipDalVerification` 共用同一字段；AC③ 文案不得暗示「不影响安全性」，
+  须写明降级后果（调用方归属不再被校验）；AC④ 中英文同步；
+  AC⑤ 新增守护用例锁定「文案资源 ↔ 偏好字段 ↔ 消费方」三者对应关系，防再次漂移。
+- **涉及文件**：`app/src/main/res/values/strings.xml`、`values-en/strings.xml`、
+  `ui/screens/settings/subscreens/AutofillSettingsComponents.kt`、
+  `passkey/DigitalAssetLinksVerifier.kt`（KDoc）。真机证据见 §242 批次正文 §4。
 
 ---
 

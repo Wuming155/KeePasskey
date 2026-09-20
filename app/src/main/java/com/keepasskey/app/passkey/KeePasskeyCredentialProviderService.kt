@@ -259,7 +259,7 @@ class KeePasskeyCredentialProviderService : CredentialProviderService() {
             is BeginCreatePasswordCredentialRequest ->
                 CredentialCreateEntries.passwordEntry(this, callingAppInfo?.packageName.orEmpty(), callingOrigin)
 
-            // ISSUE-P1-240：未识别的创建请求**必须留痕**——`androidx.credentials.provider`
+            // §241：未识别的创建请求**必须留痕**——`androidx.credentials.provider`
             // 对「类型是公钥凭据、但载荷缺 `BUNDLE_KEY_REQUEST_JSON`」的请求会以
             // `FrameworkClassParsingException` 兜底成 `BeginCreateCustomCredentialRequest`
             // （**类型字符串仍是 `androidx.credentials.TYPE_PUBLIC_KEY_CREDENTIAL`**），
