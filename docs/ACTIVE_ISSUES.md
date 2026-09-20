@@ -37,6 +37,9 @@
   调用 `CredentialManager.createCredential`，经 `adb logcat` 逐轮比对
   `ActivityManager: Start proc …KeePasskeyCredentialProviderService` 与
   `KeePasskeyCredProvider: onBeginCreateCredentialRequest` 两条时间戳。
+  **通行密钥方向同口径复测（§241）**：冷启动轮 `Provider session created 06:51:35.407` →
+  回调 `06:51:37.864`（2.46 s）→ `CANCELED 06:51:38.409`（2.99 s = 系统预算）→
+  `TYPE_NO_CREATE_OPTIONS`，与密码方向**同源**。
 - **背景与根因**：系统给 provider 的创建应答预算约 **3.0 s**（`Provider session created` →
   `Remote provider response timed out` 两轮实测 2.97 ~ 3.02 s）。本应用进程自 `Start proc`
   到进入 `onBeginCreateCredentialRequest` 实测 **3.05 / 2.49 / 2.38 s**（三轮），其中 3.05 s

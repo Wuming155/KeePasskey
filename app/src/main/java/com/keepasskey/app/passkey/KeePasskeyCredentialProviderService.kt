@@ -259,7 +259,19 @@ class KeePasskeyCredentialProviderService : CredentialProviderService() {
             is BeginCreatePasswordCredentialRequest ->
                 CredentialCreateEntries.passwordEntry(this, callingAppInfo?.packageName.orEmpty(), callingOrigin)
 
-            else -> null
+            // ISSUE-P1-240：未识别的创建请求**必须留痕**——`androidx.credentials.provider`
+            // 对「类型是公钥凭据、但载荷缺 `BUNDLE_KEY_REQUEST_JSON`」的请求会以
+            // `FrameworkClassParsingException` 兜底成 `BeginCreateCustomCredentialRequest`
+            // （**类型字符串仍是 `androidx.credentials.TYPE_PUBLIC_KEY_CREDENTIAL`**），
+            // 于是静默落进本分支 ⇒ 空响应 ⇒ 用户视角「点了通行密钥保存没反应」。
+            // 2026-09-21 真机排查时，正因为此处**零日志**而一度误判为「应用不支持该请求」。
+            //
+            // 只记录**请求类名**（androidx 的三种固定类型之一，非调用方可控内容）；
+            // 类型字符串本身不落日志——它由调用方提供，可携带任意内容（ISSUE-P1-10 口径）。
+            else -> {
+                AppLog.i(TAG, "未识别的创建请求类型，不产出创建入口: ${request.javaClass.simpleName}")
+                null
+            }
         }
         createEntry?.let { responseBuilder.addCreateEntry(it) }
         return responseBuilder.build()
