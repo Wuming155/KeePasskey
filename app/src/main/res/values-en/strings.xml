@@ -568,6 +568,11 @@
     <string name="sec_section_biometric">Biometrics &amp; quick unlock</string>
     <string name="sec_biometric_title">Biometric unlock</string>
     <string name="sec_biometric_sub">Unlock with fingerprint or face, key protected by secure hardware</string>
+    <!-- ISSUE-P2-212: the switch is off by default; enabling verifies biometrics on the spot -->
+    <string name="sec_biometric_verify_title">Enable biometric unlock</string>
+    <string name="sec_biometric_verify_subtitle">Verify your fingerprint or face to confirm you are enabling this</string>
+    <string name="sec_biometric_enable_unavailable">No fingerprint or face is enrolled on this device, so biometric unlock cannot be enabled</string>
+    <string name="sec_biometric_enable_pending_seal">Enabled. Unlock once with your master password to complete credential enrollment; after that you can unlock with fingerprint or face</string>
     <string name="sec_section_autolock">Auto-lock</string>
     <string name="sec_bg_lock_title">Lock on background</string>
     <string name="sec_bg_lock_sub">Lock the vault as soon as the app goes to background</string>

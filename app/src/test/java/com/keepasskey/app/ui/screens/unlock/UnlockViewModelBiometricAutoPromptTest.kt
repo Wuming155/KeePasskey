@@ -180,7 +180,7 @@ class UnlockViewModelBiometricAutoPromptTest {
     private suspend fun enabledSettings(): FakeSettingsRepository =
         FakeSettingsRepository().also { it.setBiometricEnabled(true) }
 
-    /** 显式关闭生物识别开关（[com.keepasskey.app.data.repository.UserSettings] 出厂默认 biometricEnabled = true） */
+    /** 显式关闭生物识别开关（ISSUE-P2-212 起 [com.keepasskey.app.data.repository.UserSettings] 出厂默认已为 false） */
     private suspend fun disabledSettings(): FakeSettingsRepository =
         FakeSettingsRepository().also { it.setBiometricEnabled(false) }
 
@@ -224,7 +224,7 @@ class UnlockViewModelBiometricAutoPromptTest {
     @Test
     fun `生物识别开关关闭时即便有封印凭据也不自动唤起`() = runTest {
         val storage = InMemorySealedCredentialStore().also { it.sealPlaceholderCredential() }
-        // 用户显式关闭开关（UserSettings 出厂默认 biometricEnabled = true，必须显式置 false）
+        // 用户显式关闭开关（ISSUE-P2-212 起出厂默认已为 false；本用例锁死「显式关闭 ⇒ 不唤起」语义）
         val viewModel = createViewModel(disabledSettings(), storage.storage)
 
         assertFalse("开关应处于关闭态", viewModel.uiState.value.isBiometricEnabled)

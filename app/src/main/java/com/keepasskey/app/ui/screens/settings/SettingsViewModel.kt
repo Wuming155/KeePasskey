@@ -2,6 +2,7 @@ package com.keepasskey.app.ui.screens.settings
 
 import android.content.Context
 import android.net.Uri
+import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.keepasskey.app.R
@@ -11,6 +12,8 @@ import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.app.data.repository.AppLanguage
 import com.keepasskey.app.data.repository.SettingsRepository
 import com.keepasskey.app.data.repository.VaultRepository
+import com.keepasskey.app.security.BiometricAuthManager
+import com.keepasskey.app.security.BiometricCredentialStorage
 import com.keepasskey.app.security.RuntimeIntegrityDetector
 import com.keepasskey.app.security.RuntimeIntegrityReport
 import com.keepasskey.app.sync.SyncCoordinator
@@ -91,7 +94,12 @@ class SettingsViewModel @Inject constructor(
     private val keyFileAccess: KeyFileAccess? = null,
     // CM 通道特权浏览器白名单（内置已取证条目 + 用户显式启用的浏览器）。允许为 null 仅用于
     // 既有单测注入；缺失时列表恒为空（如实「未检测到」，不谎报）。
-    private val passkeyPrivilegedBrowserStore: com.keepasskey.app.data.repository.PasskeyPrivilegedBrowserStore? = null
+    private val passkeyPrivilegedBrowserStore: com.keepasskey.app.data.repository.PasskeyPrivilegedBrowserStore? = null,
+    // ISSUE-P2-212：设置页「开启生物识别开关」的当场验证通道。允许为 null 仅用于既有单测注入；
+    // 缺失时开启动作 fail-closed（不写偏好并如实提示），绝不因缺失而静默直开
+    private val biometricAuthManager: BiometricAuthManager? = null,
+    // ISSUE-P2-212：封印凭据存在性判定（决定「立即可用」还是「下次主密码解锁后完成登记」）
+    private val biometricCredentialStorage: BiometricCredentialStorage? = null
 ) : ViewModel() {
 
     companion object {
@@ -188,6 +196,25 @@ class SettingsViewModel @Inject constructor(
         appContext = appContext, strings = strings, scope = viewModelScope
     )
 
+    // ===== ISSUE-P2-212：生物识别开关「开启前当场验证」 =====
+
+    /** 活动库 id（封印凭据就绪判定的数据源）；随仓库库列表流更新 */
+    private var activeDatabaseId: String? = null
+
+    /** 开关开启动作的即时状态（验证中 / 一次性反馈），经投影层并入 [uiState] */
+    private val biometricToggleState = MutableStateFlow(BiometricToggleUiState())
+
+    private val biometricEnableCoordinator = BiometricEnableCoordinator(
+        scope = viewModelScope,
+        settingsRepository = settingsRepository,
+        activeDbId = { activeDatabaseId },
+        biometricAuthManager = biometricAuthManager,
+        biometricCredentialStorage = biometricCredentialStorage,
+        strings = strings,
+        debugLog = debugLogBuffer,
+        state = biometricToggleState
+    )
+
     // TASK-21 拆分：同步状态流与凭据明文预填通道由 [SettingsSyncController] 承载
     val webdavPasswordPrefill: StateFlow<CharArray?> get() = syncController.webdavPasswordPrefill
     val s3SecretKeyPrefill: StateFlow<CharArray?> get() = syncController.s3SecretKeyPrefill
@@ -216,6 +243,8 @@ class SettingsViewModel @Inject constructor(
         healthState = healthController.state,
         autofillState = preferences.autofillState,
         databaseConfigState = preferences.databaseConfigState,
+        // ISSUE-P2-212：生物识别开关的验证中/一次性反馈状态
+        biometricToggleState = biometricToggleState,
         securityTimeoutState = preferences.securityTimeoutState,
         extendedSettings = extendedPreferences.settings,
         debugLogLines = preferences.debugLogLines,
@@ -240,6 +269,12 @@ class SettingsViewModel @Inject constructor(
         // 离线开关联动：冷启动时把默认/持久化的离线偏好传导至同步协调器
         syncCoordinator.setOfflineMode(extendedPreferences.settings.value.useOfflineCache)
         coldStartSyncGate.checkAndTrigger()
+        // ISSUE-P2-212：跟踪活动库（开启生物识别开关时据此判定封印凭据是否就绪）
+        viewModelScope.launch {
+            vaultRepository.getDatabases().collect { databases ->
+                activeDatabaseId = (databases.firstOrNull { it.isActive } ?: databases.firstOrNull())?.id
+            }
+        }
     }
 
     // ===== 外观与语言（仓库直写） =====
@@ -248,7 +283,19 @@ class SettingsViewModel @Inject constructor(
     fun setThemePalette(themePalette: AppThemePalette) = preferences.setThemePalette(themePalette)
     fun setOledBlackOptimization(enabled: Boolean) = preferences.setOledBlackOptimization(enabled)
     fun setDynamicColorEnabled(enabled: Boolean) = preferences.setDynamicColorEnabled(enabled)
-    fun setBiometricEnabled(enabled: Boolean) = preferences.setBiometricEnabled(enabled)
+    /**
+     * ISSUE-P2-212：生物识别开关切换。
+     *
+     * **开启必须当场验证**：委托 [BiometricEnableCoordinator] 发起一次强生物识别验证，
+     * 通过后才写入偏好；取消 / 失败 / 设备无可用强生物识别一律不写入（开关受控回到关闭态）
+     * 并经 [SettingsUiState.biometricToggleNotice] 如实提示。
+     * 关闭无需验证（即时落偏好）。
+     *
+     * @param activity 宿主 Activity（发起 `BiometricPrompt` 必需）；由设置页自
+     *   `LocalActivity` 解析后透传，缺失时开启动作 fail-closed。
+     */
+    fun setBiometricEnabled(enabled: Boolean, activity: FragmentActivity? = null) =
+        biometricEnableCoordinator.setEnabled(enabled, activity)
     fun setAutoLockBackground(enabled: Boolean) = preferences.setAutoLockBackground(enabled)
     fun setFlagSecureEnabled(enabled: Boolean) = preferences.setFlagSecureEnabled(enabled)
     fun setAutoClearClipboard(enabled: Boolean) = preferences.setAutoClearClipboard(enabled)

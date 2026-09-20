@@ -39,6 +39,8 @@ internal fun SecuritySwitchRow(
     title: String,
     subtitle: String,
     checked: Boolean,
+    // ISSUE-P2-212：等待生物识别验证期间禁用（默认可用，既有调用点行为不变）
+    enabled: Boolean = true,
     onCheckedChange: (Boolean) -> Unit
 ) {
     Row(
@@ -75,6 +77,7 @@ internal fun SecuritySwitchRow(
         Switch(
             checked = checked,
             onCheckedChange = onCheckedChange,
+            enabled = enabled,
             colors = SwitchDefaults.colors(
                 checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
                 checkedTrackColor = MaterialTheme.colorScheme.primary

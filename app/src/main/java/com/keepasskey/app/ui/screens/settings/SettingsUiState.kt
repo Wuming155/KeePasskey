@@ -145,7 +145,16 @@ data class SettingsUiState(
     // disabledAutofillQueriesCount 计数已下架
 
     // 4. 设备解锁与安全策略 (Device Unlock & Security) - 生物识别与锁定策略
-    val biometricEnabled: Boolean = true, // 生物识别 / 指纹验证
+    // ISSUE-P2-212：默认关闭（与 UserSettings 出厂默认一致）——生物识别解锁须用户手动开启
+    val biometricEnabled: Boolean = false, // 生物识别 / 指纹验证
+    /** ISSUE-P2-212：开关开启动作正在等待生物识别验证（期间开关禁用，防重复触发） */
+    val biometricVerifying: Boolean = false,
+    /**
+     * ISSUE-P2-212：上一次生物识别开关操作的即时反馈。
+     * 覆盖「验证取消/失败」「设备无可用强生物识别」「已验证但凭据待登记」三类结果；
+     * null = 无待呈现提示（成功且立即生效 / 用户关闭开关）。
+     */
+    val biometricToggleNotice: UiMessage? = null,
     val autoLockBackground: Boolean = true,
     val flagSecureEnabled: Boolean = true,
     val autoClearClipboard: Boolean = true,

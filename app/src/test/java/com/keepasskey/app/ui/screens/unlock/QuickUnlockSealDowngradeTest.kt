@@ -81,6 +81,11 @@ class QuickUnlockSealDowngradeTest {
         provision: (String) -> SealedKeyProvision?,
         settings: FakeSettingsRepository = FakeSettingsRepository()
     ): Pair<UnlockViewModel, FakeSettingsRepository> {
+        // ISSUE-P2-212：封印登记的**前置条件**是「生物识别开关已开启」——出厂默认已改为关闭，
+        // 本类聚焦封印流程中的降级闸门，故在此显式开启以保留各用例原有语义。
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            settings.setBiometricEnabled(true)
+        }
         val viewModel = UnlockViewModel(
             FakeVaultRepository(),
             settings,

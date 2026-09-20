@@ -24,7 +24,7 @@ import kotlinx.coroutines.flow.stateIn
 /**
  * 组装设置页 [SettingsUiState] 状态流（原 `SettingsViewModel.uiState` 的 combine 编排逐字迁移）。
  *
- * 五路输入流 → `Map`/`Triple` 元组嵌套，避开 combine 的重载上限。
+ * 六路输入流 → `Map`/`Triple` 元组嵌套，避开 combine 的重载上限。
  */
 @Suppress("LongParameterList")
 internal fun settingsUiStateFlow(
@@ -35,6 +35,8 @@ internal fun settingsUiStateFlow(
     healthState: Flow<SettingsHealthController.HealthCheckUiState>,
     autofillState: Flow<AutofillUiState>,
     databaseConfigState: Flow<DatabaseConfigUiState>,
+    // ISSUE-P2-212：生物识别开关的「验证中 / 一次性反馈」局部状态（与持久化偏好正交）
+    biometricToggleState: Flow<BiometricToggleUiState>,
     securityTimeoutState: Flow<SecurityTimeoutUiState>,
     extendedSettings: Flow<ExtendedSettings>,
     debugLogLines: Flow<List<String>>,
@@ -45,7 +47,9 @@ internal fun settingsUiStateFlow(
     userSettings,
     syncState,
     healthState,
-    combine(autofillState, databaseConfigState) { af, db -> Pair(af, db) },
+    combine(autofillState, databaseConfigState, biometricToggleState) { af, db, toggle ->
+        Triple(af, db, toggle)
+    },
     combine(
         combine(securityTimeoutState, extendedSettings, debugLogLines) { sec, ext, logs ->
             Triple(sec, ext, logs)
@@ -55,7 +59,7 @@ internal fun settingsUiStateFlow(
     ) { securityState, report, mountedChildDatabases ->
         Triple(securityState, report, mountedChildDatabases)
     }
-) { settings, sync, health, (autofill, db), (securityState, report, mounted) ->
+) { settings, sync, health, (autofill, db, biometricToggle), (securityState, report, mounted) ->
     val (secState, extState, logs) = securityState
     buildSettingsUiState(
         userSettings = settings,
@@ -63,6 +67,7 @@ internal fun settingsUiStateFlow(
         healthState = health,
         autofillState = autofill,
         dbState = db,
+        biometricToggle = biometricToggle,
         secState = secState,
         extState = extState,
         debugLogLines = logs,
@@ -82,6 +87,8 @@ internal fun buildSettingsUiState(
     healthState: SettingsHealthController.HealthCheckUiState,
     autofillState: AutofillUiState,
     dbState: DatabaseConfigUiState,
+    // ISSUE-P2-212：生物识别开关的验证中/一次性反馈（默认值便于既有调用点不受影响）
+    biometricToggle: BiometricToggleUiState = BiometricToggleUiState(),
     secState: SecurityTimeoutUiState,
     extState: ExtendedSettings,
     debugLogLines: List<String>,
@@ -153,6 +160,9 @@ internal fun buildSettingsUiState(
 
     // 4. 设备解锁与安全 (指纹识别与锁定规则)
     biometricEnabled = userSettings.biometricEnabled,
+    // ISSUE-P2-212：开关开启动作的即时状态（持久化值是开关选中态的唯一真相源）
+    biometricVerifying = biometricToggle.verifying,
+    biometricToggleNotice = biometricToggle.notice,
     autoLockBackground = userSettings.autoLockBackground,
     flagSecureEnabled = userSettings.flagSecureEnabled,
     autoClearClipboard = userSettings.autoClearClipboard,

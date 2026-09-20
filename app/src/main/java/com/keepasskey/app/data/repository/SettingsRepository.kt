@@ -22,7 +22,10 @@ data class UserSettings(
     // Material You 动态取色（Android 12+ 生效，开启后覆盖品牌调色盘）
     val dynamicColorEnabled: Boolean = false,
     val appLanguage: AppLanguage = AppLanguage.SYSTEM,
-    val biometricEnabled: Boolean = true,
+    // ISSUE-P2-212：默认**关闭**——生物识别解锁必须由用户在设置页手动开启，
+    // 且开启动作本身要当场通过一次强生物识别验证（此前默认 true 却因无封印凭据
+    // 而完全不生效，形成「开关显示已开、实际无任何生物入口」的静默失效）
+    val biometricEnabled: Boolean = false,
     val autoLockBackground: Boolean = true,
     val autoLockTimeoutSeconds: Int = 60,
     val lockWhenScreenOff: Boolean = true,

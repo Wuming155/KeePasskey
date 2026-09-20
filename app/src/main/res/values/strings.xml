@@ -574,6 +574,11 @@
     <string name="sec_section_biometric">生物识别与快速解锁</string>
     <string name="sec_biometric_title">生物识别解锁</string>
     <string name="sec_biometric_sub">使用指纹或面容快速解锁，密钥由硬件安全模块保护</string>
+    <!-- ISSUE-P2-212：开关默认关闭，开启时当场验证生物识别；以下为验证弹窗与结果反馈文案 -->
+    <string name="sec_biometric_verify_title">启用生物识别解锁</string>
+    <string name="sec_biometric_verify_subtitle">请验证指纹或面容，以确认由本人启用</string>
+    <string name="sec_biometric_enable_unavailable">本机没有可用的指纹或面容（未录入），无法启用生物识别解锁</string>
+    <string name="sec_biometric_enable_pending_seal">已启用；请先用主密码解锁一次以完成凭据登记，此后即可用指纹或面容解锁</string>
     <string name="sec_section_autolock">自动锁定</string>
     <string name="sec_bg_lock_title">后台自动锁定</string>
     <string name="sec_bg_lock_sub">应用切换至后台后立即锁定密码库</string>

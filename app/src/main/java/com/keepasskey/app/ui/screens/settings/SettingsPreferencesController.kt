@@ -289,11 +289,8 @@ internal class SettingsPreferencesController(
         }
     }
 
-    fun setBiometricEnabled(enabled: Boolean) {
-        scope.launch {
-            settingsRepository.setBiometricEnabled(enabled)
-        }
-    }
+    // ISSUE-P2-212：生物识别开关已移出本控制器——「开启」须先经 BiometricPrompt 当场验证
+    // （见 BiometricEnableCoordinator），直写偏好会让开关在未验证的情况下被打开
 
     fun setAutoLockBackground(enabled: Boolean) {
         scope.launch {

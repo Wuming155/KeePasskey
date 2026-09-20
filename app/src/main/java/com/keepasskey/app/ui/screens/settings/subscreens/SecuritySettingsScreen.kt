@@ -25,6 +25,7 @@ import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.ScreenLockPortrait
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -34,16 +35,19 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.activity.compose.LocalActivity
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.fragment.app.FragmentActivity
 import com.keepasskey.app.R
 import com.keepasskey.app.security.RuntimeIntegrityPolicy
 import com.keepasskey.app.security.RuntimeIntegrityReport
 import com.keepasskey.app.ui.components.BentoCard
+import com.keepasskey.app.ui.model.resolveText
 import com.keepasskey.app.ui.screens.settings.SettingsUiState
 
 /**
@@ -54,7 +58,8 @@ import com.keepasskey.app.ui.screens.settings.SettingsUiState
 fun SecuritySettingsScreen(
     uiState: SettingsUiState,
     onBackClick: () -> Unit,
-    onBiometricToggle: (Boolean) -> Unit,
+    // ISSUE-P2-212：第二参数为宿主 Activity——「开启」须当场发起 BiometricPrompt 验证，缺失时 fail-closed
+    onBiometricToggle: (Boolean, FragmentActivity?) -> Unit,
     onAutoLockToggle: (Boolean) -> Unit,
     onFlagSecureToggle: (Boolean) -> Unit,
     onAutoClearClipboardToggle: (Boolean) -> Unit,
@@ -76,6 +81,10 @@ fun SecuritySettingsScreen(
     // （一次点击即生效），原先各自持有的「选择弹窗」显隐状态一并移除。
     // ISSUE-P2-09 验收标准 1：关闭「禁止截屏与录屏」前的风险确认态
     var showFlagSecureRiskDialog by remember { mutableStateOf(false) }
+    // ISSUE-P2-212：宿主 Activity（发起 BiometricPrompt 必需）；解析失败时由 ViewModel 侧 fail-closed
+    // 经 `LocalActivity` 直取（而非 `LocalContext.current as? Activity`）——后者触发
+    // AndroidLint `ContextCastToActivity`，且 LocalActivity 已由宿主 Activity 精确提供
+    val hostActivity = LocalActivity.current as? FragmentActivity
     // ISSUE-P2-08：是否提示由策略字段 requireRiskNotice 单一裁决（不再由 UI 自行按等级推断，
     // 使「声明式判定 ⇄ 用户可见提示」真正闭环）；requireRiskNotice 为 true 时等级必为
     // ELEVATED / COMPROMISED，文案仍按等级取字符串资源
@@ -119,8 +128,31 @@ fun SecuritySettingsScreen(
                             title = stringResource(R.string.sec_biometric_title),
                             subtitle = stringResource(R.string.sec_biometric_sub),
                             checked = uiState.biometricEnabled,
-                            onCheckedChange = onBiometricToggle
+                            // ISSUE-P2-212：验证进行中禁用开关，防止并发发起多个 BiometricPrompt
+                            enabled = !uiState.biometricVerifying,
+                            onCheckedChange = { onBiometricToggle(it, hostActivity) }
                         )
+
+                        // ISSUE-P2-212：开启动作正在等待生物识别验证
+                        if (uiState.biometricVerifying) {
+                            CircularProgressIndicator(
+                                modifier = Modifier
+                                    .padding(start = 4.dp)
+                                    .size(16.dp),
+                                strokeWidth = 2.dp
+                            )
+                        }
+
+                        // ISSUE-P2-212：开启动作的结果反馈（验证取消/失败、设备无可用强生物识别、
+                        // 已验证但凭据待下次主密码解锁后登记）——不写偏好时如实说明原因
+                        uiState.biometricToggleNotice?.let { notice ->
+                            Text(
+                                text = notice.resolveText(),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(start = 4.dp)
+                            )
+                        }
 
                         // ISSUE-P1-22：软件级快速解锁降级的常驻声明（AC②：
                         // 用户确认降级后，设置页持续声明「不提供硬件级保护」）
@@ -398,7 +430,7 @@ internal fun SecuritySettingsScreenPreview() {
                 clipboardTimeoutSeconds = 30
             ),
             onBackClick = {},
-            onBiometricToggle = {},
+            onBiometricToggle = { _, _ -> },
             onAutoLockToggle = {},
             onFlagSecureToggle = {},
             onAutoClearClipboardToggle = {}

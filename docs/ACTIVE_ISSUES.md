@@ -37,8 +37,8 @@
 ## P2 中危缺陷与协议/测试缺口（0 项）
 
 > **暂无开放项**（历史 P2 条目——含 [RESOLVED_LOG.md](RESOLVED_LOG.md) §219 闭环的 `ISSUE-P2-199` /
-> `ISSUE-P2-200` / `ISSUE-P2-208`，以及 §220 闭环的 `ISSUE-P2-210` / `ISSUE-P2-211`——的实现与验收证据见
-> 该归档及 [`docs/resolved/batches/`](resolved/batches/)）。
+> `ISSUE-P2-200` / `ISSUE-P2-208`，§220 闭环的 `ISSUE-P2-210` / `ISSUE-P2-211`，以及 §223 闭环的
+> `ISSUE-P2-212`——的实现与验收证据见该归档及 [`docs/resolved/batches/`](resolved/batches/)）。
 
 ---
 

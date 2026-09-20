@@ -232,6 +232,14 @@ class BiometricAuthManager @Inject constructor(
         const val ERROR_AUTH_TIMEOUT = -3
 
         /**
+         * ISSUE-P2-212：缺少宿主 Activity（无法发起 `BiometricPrompt`）的结果码。
+         *
+         * 设置页「开启生物识别开关」的当场验证路径在宿主缺失时以此显式失败回落
+         * （fail-closed，不写偏好），绝不静默悬挂等待系统回调。
+         */
+        const val ERROR_NO_HOST_ACTIVITY = -4
+
+        /**
          * ISSUE-P3-14：完整性风险禁用生物快速解锁的**内部诊断标识**（稳定英文码，非用户可见文案）。
          *
          * 用户可见文案统一经消费侧按 [ERROR_INTEGRITY_BLOCKED] 映射到
@@ -242,6 +250,9 @@ class BiometricAuthManager @Inject constructor(
 
         /** ISSUE-P3-14：认证超时熔断的内部诊断标识（同 [INTEGRITY_BLOCKED_DIAGNOSTIC]，仅日志留痕，不对外展示） */
         const val AUTH_TIMEOUT_DIAGNOSTIC = "AUTH_TIMEOUT"
+
+        /** ISSUE-P2-212：缺少宿主 Activity 的内部诊断标识（语义同 [INTEGRITY_BLOCKED_DIAGNOSTIC]，仅日志留痕） */
+        const val NO_HOST_ACTIVITY_DIAGNOSTIC = "NO_HOST_ACTIVITY"
 
         /**
          * 快速解锁统一认证器集合：仅 Class 3 强生物识别。

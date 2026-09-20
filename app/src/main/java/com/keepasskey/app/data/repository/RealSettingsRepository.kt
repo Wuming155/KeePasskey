@@ -90,7 +90,8 @@ class RealSettingsRepository @Inject constructor(
         oledBlackOptimization = prefs[KEY_OLED_BLACK] ?: false,
         dynamicColorEnabled = prefs[KEY_DYNAMIC_COLOR] ?: false,
         appLanguage = enumValueOrDefault(prefs[KEY_APP_LANGUAGE], AppLanguage.SYSTEM),
-        biometricEnabled = prefs[KEY_BIOMETRIC_ENABLED] ?: true,
+        // ISSUE-P2-212：与 UserSettings 出厂默认一致——未持久化过即视为关闭
+        biometricEnabled = prefs[KEY_BIOMETRIC_ENABLED] ?: false,
         autoLockBackground = prefs[KEY_AUTO_LOCK_BACKGROUND] ?: true,
         autoLockTimeoutSeconds = prefs[KEY_AUTO_LOCK_TIMEOUT] ?: 60,
         lockWhenScreenOff = prefs[KEY_LOCK_WHEN_SCREEN_OFF] ?: true,
