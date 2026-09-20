@@ -28,7 +28,7 @@
 
 ---
 
-## P1 高危与核心功能问题（1 项）
+## P1 高危与核心功能问题（2 项）
 
 ### ISSUE-P1-238：冷启动关键路径仍逼近系统凭据创建应答预算（点保存间歇性无反应）
 
@@ -60,6 +60,40 @@
   由 `ColdStartAttachmentPurgeWiringTest` 锁定）。
 - **涉及文件**：`app/src/main/java/com/keepasskey/app/MainApplication.kt`；
   定位与已完成的整改见 §240 批次正文。
+
+### ISSUE-P1-241：「移除密码库关联」的确认文案承诺「不会删除物理文件」，但应用私有库的文件**会被真的删除**
+
+- **核实时间点**：2026-09-21 于真机 Redmi 4X（santoni，Android 17 / API 37）实测
+  （§243 真机验证收尾、清理该批新建的测试库时触发）。
+- **核实方式**：
+  ① 界面路径：解锁页「切换密码库」→ 密码库管理 → 对 `e2e-issue240.kdbx` 卡片点删除图标
+  （`contentDescription = @string/btn_delete`）；
+  ② 弹窗文案经 Android CLI `android layout` 读出：`db_picker_delete_confirm_title`
+  「移除密码库关联？」+ `db_picker_delete_confirm_desc`
+  「这只会从本机的密码库切换列表中移除该条目，**不会删除物理文件**。」
+  （`values-en` 同义："The original physical file will not be deleted."）；
+  ③ 点「删除」确认后 `adb shell run-as com.keepasskey ls -la files/` 实测：
+  **该库文件已不存在**（目录内仅余 `passwords.kdbx` / `passwords.kdbx.bak` / `profileInstalled`），
+  而删除前同一命令可清晰看到 `-rw------- 1017 … e2e-issue240.kdbx`；
+  ④ 代码核对：`VaultLifecycleCoordinator.removeDatabase` 的 KDoc 即「摘除注册表条目、**删除沙盒内文件**、
+  必要时关闭会话并清空活动库 ID」，实现为 `File(context.filesDir, id).delete()`（无条件尝试，存在即删）。
+- **背景与根因**：该文案描述的是**外部库**（`content://` / 绝对路径登记）的真实行为——其物理文件在应用外，
+  `File(filesDir, id)` 不存在故不会删除；而**应用私有目录**（建库向导的默认且推荐项）下的库，
+  其 `id` 恰是 `filesDir` 内的文件名 ⇒ **真的被删除且不可恢复**（无回收站、无二次确认差异、
+  连同 `.bak` 也不在保护之列）。用户按文案理解为「只是从列表移除」，实际把密码库永久删掉。
+  这与 §243 刚闭环的 `ISSUE-P2-240`（文案与真实语义无关）同源，但**危害面更大**（不可逆数据丢失），
+  故按 P1 登记。
+- **验收标准**：AC① 确认弹窗文案必须与真实行为一致，并**按存储类型区分**：应用私有库须明示
+  「将**永久删除**应用私有目录中的该文件，**无法恢复**」；外部库方可保留现「仅移除关联」表述；
+  AC② 删除私有库须是**明确的破坏性动作**（红色危险按钮 + 指明被删文件名），不得与「仅移除关联」
+  共用同一套确认措辞；AC③ 若产品选择「只移除关联、不删文件」，则必须**另行**提供显式的「删除文件」
+  入口，且默认动作不得删文件（二选一由产品裁决并登记 `产品裁决登记.md`）；
+  AC④ 「存储类型 → 文案/动作」映射落纯函数并由 JVM 单测按类型穷举锁定，中英文同步；
+  AC⑤ 真机回归：对应用私有库执行删除后，**界面声明与文件系统结果一致**（`run-as` 观测取证）。
+- **涉及文件**：`app/src/main/java/com/keepasskey/app/ui/screens/database/DatabasePickerScreen.kt`（确认弹窗）、
+  `app/src/main/res/values/strings.xml` / `values-en/strings.xml`（`db_picker_delete_confirm_title/_desc`）、
+  `app/src/main/java/com/keepasskey/app/data/repository/VaultLifecycleCoordinator.kt`（`removeDatabase`）；
+  触发经过与现场证据见 §243 批次正文 §7。
 
 ---
 
