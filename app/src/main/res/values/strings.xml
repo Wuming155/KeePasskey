@@ -1112,7 +1112,8 @@
     <string name="notification_channel_unlocked_name">已解锁状态</string>
     <string name="notification_channel_unlocked_desc">密码库处于解锁状态时的常驻提醒，点击可返回应用</string>
     <string name="notification_unlocked_title">KeePasskey 密码库已解锁</string>
-    <string name="notification_unlocked_text">自动锁定计时进行中，点击返回应用</string>
+    <string name="notification_unlocked_text">自动锁定倒计时进行中，点击返回应用</string>
+    <string name="notification_unlocked_text_idle">密码库已解锁，点击返回应用</string>
     <string name="notification_channel_totp_name">动态验证码</string>
     <string name="notification_channel_totp_desc">自动填充后显示该条目的动态验证码，随有效期自动消失</string>
     <string name="notification_totp_title">动态验证码</string>

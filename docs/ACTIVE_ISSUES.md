@@ -28,11 +28,43 @@
 
 ---
 
-## P1 高危与核心功能问题（0 项）
+## P1 高危与核心功能问题（2 项）
 
-> **暂无开放项**（本区最近一次归零：§225 闭环的 `ISSUE-P1-216`——云端 CI 并发签名计数器用例触达
-> 已清零 `ProtectedString`；实现与验收证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md) 与
-> [`docs/resolved/batches/225-CI门禁四项缺陷整改批次.md`](resolved/batches/225-CI门禁四项缺陷整改批次.md)）。
+### ISSUE-P1-223：设置页开启生物识别开关点击后闪退（BiometricAuthManager 缺 negativeButtonText 引发致命崩溃）
+
+- **核实时间点**：2026-09-20 经代码走查与 AndroidX 官方契约对拍核实。
+- **核实方式**：查阅 `BiometricAuthManager.kt:130` 与 `BiometricEnableCoordinator.kt:225`，在未设置 `DEVICE_CREDENTIAL` 时，`negativeButtonText` 为 `null` 未调用 `setNegativeButtonText()`，直接调用 `build()` 引发 `IllegalArgumentException: Negative text must be set and then should be non-empty.`。
+- **背景与根因**：
+  1. `BiometricAuthManager.authenticate` 内部构建 `BiometricPrompt.PromptInfo.Builder` 时，条件 `if (!usesDeviceCredential && negativeButtonText != null)` 导致在 `negativeButtonText == null` 且 `usesDeviceCredential == false` 时未设置负向按钮文本；
+  2. AndroidX 规范硬性要求：若 authenticator 不含 `DEVICE_CREDENTIAL`，`PromptInfo.Builder.setNegativeButtonText` 为必选项，缺失直接导致 `build()` 抛出未捕获的 `IllegalArgumentException`，主线程立即崩溃闪退；
+  3. `BiometricEnableCoordinator.kt`、`BiometricEnrollmentCoordinator.kt`、`BiometricUnlockCoordinator.kt` 均未传 `negativeButtonText`，直接暴露在崩溃路径上。
+- **涉及文件**：
+  - `app/src/main/java/com/keepasskey/app/security/BiometricAuthManager.kt`
+  - `app/src/main/java/com/keepasskey/app/ui/screens/settings/BiometricEnableCoordinator.kt`
+- **整改依据与验收标准**：
+  1. **AC① 防御性兜底**：在 `BiometricAuthManager.authenticate` 中，当 `!usesDeviceCredential` 时，若 `negativeButtonText` 为 null 或空白，自动回退采用 `activity.getString(R.string.btn_cancel)`，绝不允许抛出 `IllegalArgumentException`；
+  2. **AC② 调用方显式传参**：`BiometricEnableCoordinator` 等发起生物验证处显式传入取消文本；
+  3. **AC③ 单测全覆盖**：编写或更新针对 `BiometricAuthManager` 负向按钮兜底逻辑的断言测试，保证 JVM / 平台下不再发生闪退。
+
+---
+
+### ISSUE-P1-224：外部输入账号密码后点击保存未落盘写入文件
+
+- **核实时间点**：2026-09-20 经 `KeePasskeyAutofillService.kt`、`AutofillDatasetBuilders.kt` 与 `VaultEntryWriteCoordinator.kt` 代码审查核实。
+- **核实方式**：
+  1. `applySaveInfoIfNeeded` 中未设置 `SaveInfo.FLAG_SAVE_ON_ALL_VIEWS_INVISIBLE`，且将用户名与密码一同作为必填项 `requiredIds`，导致输入框未变更或视图隐藏时无法稳定触发表单捕获；
+  2. `handleSaveRequest` 仅取 `request.fillContexts.lastOrNull()`，在表单提交触发界面跳转或原输入框清空时，最后一个 context 往往丢失密码数据；提取出的 `password.isBlank()` 时直接调用 `callback.onSuccess()` 静默结束，完全不落库；
+  3. 库处于锁定时，`onSaveRequest` 直接调 `saveAutofillCredential` 导致 `persistSession()` 报 `当前无活动数据库` 并向系统报失败，未提供解锁引导或安全保存通道。
+- **背景与根因**：
+  用户在第三方应用或浏览器输入新凭据，提交时系统弹出保存提示，用户点击保存后，由于上下文提取失真或密码库在后台已自动锁定，保存操作未真正完成，文件内没有任何新记录。
+- **涉及文件**：
+  - `app/src/main/java/com/keepasskey/app/autofill/KeePasskeyAutofillService.kt`
+  - `app/src/main/java/com/keepasskey/app/autofill/AutofillDatasetBuilders.kt`
+  - `app/src/main/java/com/keepasskey/app/data/repository/VaultEntryWriteCoordinator.kt`
+- **整改依据与验收标准**：
+  1. **AC① 多 Context 鲁棒回溯**：`handleSaveRequest` 倒序遍历 `request.fillContexts`，优先选取包含非空密码与有效账号的上下文，并在单个 context 中优先匹配含有效文本的密码节点，杜绝因 `lastOrNull()` 取到空跳转页而静默丢弃；
+  2. **AC② 规范 SaveInfo 契约**：`applySaveInfoIfNeeded` 引入 `FLAG_SAVE_ON_ALL_VIEWS_INVISIBLE`；将密码设为 `requiredIds`，用户名设为 `optionalIds`，提升系统保存提示触发率；
+  3. **AC③ 库锁定状态友好处理**：当保存触发时若库处于锁定状态，若系统支持通过 `IntentSender` 交互，安全唤起解锁与保存承接；在已解锁态下保证 `vaultRepository.saveAutofillCredential` 真正写盘成功后回调 `onSuccess()`，失败时明确留痕。
 
 ---
 
@@ -48,10 +80,25 @@
 
 ---
 
-## P3 低危问题、特性接线与体验优化（0 项）
+## P3 低危问题、特性接线与体验优化（1 项）
 
-> **暂无开放项**（本区最近一次归零：§228 闭环的 `ISSUE-P3-222`——全局导航与退出动效优化（Material 3 共享轴转场 + 预测性返回支持）；实现与验收证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md) 与
-> [`docs/resolved/batches/228-全局导航与退出动效优化批次.md`](resolved/batches/228-全局导航与退出动效优化批次.md)）。
+### ISSUE-P3-225：已解锁常驻通知未联动呈现自动锁定倒计时
+
+- **核实时间点**：2026-09-20 经 `UnlockedNotificationController.kt` 与 `AutoLockManager.kt` 代码审查核实。
+- **核实方式**：
+  查阅 `UnlockedNotificationController.kt:124`，通知构建显式 `.setShowWhen(false)`，正文写死固定文案 `R.string.notification_unlocked_text`（“自动锁定计时进行中，点击返回应用”），未设置 `setUsesChronometer(true)` 与截止时间戳，亦未监听 `AutoLockManager` 的后台锁定倒计时。
+- **背景与根因**：
+  应用已具备常驻已解锁通知，文案声称“计时进行中”，但用户在系统通知栏上看不到任何实时的倒计时数字（分:秒），导致通知未能发挥提示超时锁定的实际功效。
+- **涉及文件**：
+  - `app/src/main/java/com/keepasskey/app/security/AutoLockManager.kt`
+  - `app/src/main/java/com/keepasskey/app/notification/UnlockedNotificationController.kt`
+  - `app/src/main/res/values/strings.xml`
+  - `app/src/main/res/values-en/strings.xml`
+- **整改依据与验收标准**：
+  1. **AC① 状态流透传倒计时截止点**：`AutoLockManager` 暴露 `lockDeadline: StateFlow<Long?>`，在进入后台且配置了超时自动锁定时输出 `backgroundTimestamp + timeoutMillis`，回前台或从不锁定时回落 `null`；
+  2. **AC② 接入系统 Chronometer 倒计时**：`UnlockedNotificationController` 订阅该状态流；当存在有效截止时刻时，配置 `setWhen(deadline)`、`setShowWhen(true)`、`setUsesChronometer(true)` 与 `setChronometerCountDown(true)`，由 Android SystemUI 原生渲染秒级递减，零轮询零额外耗电；
+  3. **AC③ 空闲态自然回退**：无倒计时时（前台或永不锁定），通知展示默认已解锁状态文案，关闭 Chronometer；
+  4. **AC④ 守护单测全覆盖**：编写单元测试验证倒计时时间戳计算与通知目标态的联动。
 
 > **历史 P3 条目**（含 §221 闭环的 `ISSUE-P3-201` / `202` / `203` / `204` / `205` / `206` /
 > `209`，§222 闭环的 `ISSUE-P3-212` / `213` / `214`，以及 §224 闭环的 `ISSUE-P3-215`）的实现与验收证据见

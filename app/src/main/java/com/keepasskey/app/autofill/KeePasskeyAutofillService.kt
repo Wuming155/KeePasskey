@@ -1,6 +1,8 @@
 package com.keepasskey.app.autofill
 
+import android.app.PendingIntent
 import android.app.assist.AssistStructure
+import android.content.Intent
 import android.os.CancellationSignal
 import android.service.autofill.AutofillService
 import android.service.autofill.FillCallback
@@ -12,6 +14,7 @@ import android.view.autofill.AutofillId
 import android.view.inputmethod.InlineSuggestionsRequest
 import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.VaultRepository
+import com.keepasskey.app.passkey.PasswordSaveActivity
 import com.keepasskey.app.security.RuntimeIntegrityGate
 import com.keepasskey.core.log.AppLog
 import dagger.hilt.android.AndroidEntryPoint
@@ -280,7 +283,8 @@ class KeePasskeyAutofillService : AutofillService() {
         request: SaveRequest,
         callback: SaveCallback
     ) {
-        val structure: AssistStructure = request.fillContexts.lastOrNull()?.structure ?: run {
+        val contexts = request.fillContexts
+        if (contexts.isEmpty()) {
             callback.onSuccess()
             return
         }
@@ -294,7 +298,7 @@ class KeePasskeyAutofillService : AutofillService() {
             // 注：处理体抽为 [handleSaveRequest] 而非就地包一层——`withTimeoutOrNull` **不是** inline，
             // 内部不允许 `return@launch`（非局部返回），就地包裹无法编译。
             val handled = withTimeoutOrNull(SAVE_REQUEST_TIMEOUT_MS) {
-                handleSaveRequest(structure, callback)
+                handleSaveRequest(contexts, callback)
             }
             if (handled == null) {
                 AppLog.w(TAG, "保存请求超出 ${SAVE_REQUEST_TIMEOUT_MS}ms 预算，按『本次无需保存』收尾")
@@ -308,12 +312,21 @@ class KeePasskeyAutofillService : AutofillService() {
      *
      * 抽取的唯一动因是让调用方能在其外层施加超时预算：`withTimeoutOrNull` 不是 inline 函数，
      * 处理体若留在 lambda 内，其中的 `return@launch` 属非局部返回、**无法编译**。
-     * 抽取后语义逐字不变：各早退分支仍各自回调，`CancellationException` 仍原样重抛
-     * （服务解绑时不得回调；超时则由外层 `withTimeoutOrNull` 收敛为 `onSuccess`）。
+     *
+     * ISSUE-P1-224：支持倒序多 Context 回溯，防止跳转新界面导致密码丢失；
+     * 库锁定时以 IntentSender 唤起保存解锁界面，库解锁时后台直接写盘。
      */
-    private suspend fun handleSaveRequest(structure: AssistStructure, callback: SaveCallback) {
+    private suspend fun handleSaveRequest(
+        contexts: List<android.service.autofill.FillContext>,
+        callback: SaveCallback
+    ) {
         try {
-            val callingPkg = structure.activityComponent.packageName
+            val latestStructure = contexts.lastOrNull()?.structure
+            val callingPkg = latestStructure?.activityComponent?.packageName.orEmpty()
+            if (callingPkg.isBlank()) {
+                callback.onSuccess()
+                return
+            }
 
             // ISSUE-P2-08 / TASK-44：保存侧同样前置于完整性闸门与黑名单检查——
             // 命中即拒绝落库并向系统回调非敏感提示，绝不让被屏蔽/风险环境写入任何凭据
@@ -349,46 +362,45 @@ class KeePasskeyAutofillService : AutofillService() {
                 return
             }
 
-            val scanned = AutofillStructureScanner.scan(structure, callingPkg)
-            val parsedNodes = scanned.viewNodes
-
-            val scanResult = AutofillFieldScanner.scan(
-                scanned.scanNodes,
-                respectImportantForAutofill = !settingsStore.isOverrideNoAutofillEnabled()
+            val extracted = AutofillSaveExtractor.extract(
+                contexts = contexts,
+                callingPkg = callingPkg,
+                isOverrideNoAutofillEnabled = settingsStore.isOverrideNoAutofillEnabled(),
+                originResolver = autofillOriginResolver
             )
-            val username = scanResult.usernameId?.toIntOrNull()?.let { parsedNodes.getOrNull(it)?.text }.orEmpty()
-            val password = scanResult.passwordId?.toIntOrNull()?.let { parsedNodes.getOrNull(it)?.text }.orEmpty()
-            // ISSUE-P2-07：保存前同样做 webDomain 归属校验，避免把不可归属的域写进条目
-            val usableWebDomain =
-                autofillOriginResolver.resolveUsableWebDomain(callingPkg, scanResult.webDomain)
-
-            if (password.isNotBlank()) {
-                // Wave 12 敏感数据卫生：调用方持有的密码 CharArray 在任何结果路径下用毕立即清零
-                // （注：来源 node.text 的 String 由系统 AssistStructure 提供，应用侧无法擦除，
-                //  已尽量缩短其存活期——本回调结束即失去引用，绝不进入日志/StateFlow/成员变量）
-                val passwordChars = password.toCharArray()
-                try {
-                    val result = vaultRepository.saveAutofillCredential(
-                        packageName = callingPkg,
-                        webDomain = usableWebDomain,
-                        username = username,
-                        passwordChars = passwordChars
-                    )
-                    when (result) {
-                        is com.keepasskey.core.result.KdbxResult.Success -> {
-                            callback.onSuccess()
-                        }
-                        is com.keepasskey.core.result.KdbxResult.Failure -> {
-                            // ISSUE-P1-10：对外回调一律使用预定义用户文案，禁止透传异常 message
-                            AppLog.e(TAG, "onSaveRequest 保存凭据失败", result.error)
-                            callback.onFailure(getString(R.string.autofill_save_failed))
-                        }
-                    }
-                } finally {
-                    passwordChars.fill('0')
-                }
-            } else {
+            if (extracted == null || extracted.password.isBlank()) {
+                AppLog.i(TAG, "未在表单上下文中提取到有效密码，本次无需保存")
                 callback.onSuccess()
+                return
+            }
+
+            // ISSUE-P1-224：若密码库当前处于锁定状态，无法在后台直接加密落盘；
+            // 回传 IntentSender 唤起 PasswordSaveActivity 在受保护窗口中解锁并承接保存
+            if (vaultRepository.isLocked()) {
+                dispatchLockedSave(callingPkg, extracted, callback)
+                return
+            }
+
+            val passwordChars = extracted.password.toCharArray()
+            try {
+                val result = vaultRepository.saveAutofillCredential(
+                    packageName = callingPkg,
+                    webDomain = extracted.webDomain,
+                    username = extracted.username,
+                    passwordChars = passwordChars
+                )
+                when (result) {
+                    is com.keepasskey.core.result.KdbxResult.Success -> {
+                        callback.onSuccess()
+                    }
+                    is com.keepasskey.core.result.KdbxResult.Failure -> {
+                        // ISSUE-P1-10：对外回调一律使用预定义用户文案，禁止透传异常 message
+                        AppLog.e(TAG, "onSaveRequest 保存凭据失败", result.error)
+                        callback.onFailure(getString(R.string.autofill_save_failed))
+                    }
+                }
+            } finally {
+                passwordChars.fill('0')
             }
         } catch (c: CancellationException) {
             // 服务解绑/协程取消：静默退出，不再回调
@@ -398,6 +410,30 @@ class KeePasskeyAutofillService : AutofillService() {
             // ISSUE-P1-10：对外回调一律使用预定义用户文案，禁止透传 t.message
             callback.onFailure(getString(R.string.autofill_save_failed))
         }
+    }
+
+    /**
+     * 库锁定时唤起 PasswordSaveActivity 解锁并承接保存（ISSUE-P1-224）。
+     */
+    private fun dispatchLockedSave(
+        callingPkg: String,
+        extracted: ExtractedSaveCredentials,
+        callback: SaveCallback
+    ) {
+        AppLog.i(TAG, "密码库当前处于锁定状态，向系统返回解锁保存 IntentSender")
+        val saveIntent = Intent(this, PasswordSaveActivity::class.java).apply {
+            putExtra(PasswordSaveActivity.EXTRA_PACKAGE_NAME, callingPkg)
+            putExtra(PasswordSaveActivity.EXTRA_WEB_DOMAIN, extracted.webDomain)
+            putExtra(PasswordSaveActivity.EXTRA_USERNAME, extracted.username)
+            putExtra(PasswordSaveActivity.EXTRA_PASSWORD, extracted.password)
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            this,
+            REQUEST_CODE_SAVE,
+            saveIntent,
+            PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        callback.onSuccess(pendingIntent.intentSender)
     }
 
     override fun onDestroy() {
@@ -425,6 +461,9 @@ class KeePasskeyAutofillService : AutofillService() {
 
         /** ISSUE-P3-40：手动选择器入口数据集的 requestCode（与确认基址段无重叠） */
         internal const val REQUEST_CODE_PICKER = 2200
+
+        /** ISSUE-P1-224：密码库锁定时保存凭据拉起解锁保存 Activity 的 requestCode */
+        internal const val REQUEST_CODE_SAVE = 2300
 
         // ISSUE-P2-07/08：保存被拒的提示文案已迁入 strings.xml
         // （autofill_save_blocked / autofill_save_integrity_blocked），与填充侧同源资源化。

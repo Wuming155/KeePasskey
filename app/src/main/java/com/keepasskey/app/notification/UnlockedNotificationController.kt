@@ -39,7 +39,8 @@ class UnlockedNotificationController @Inject constructor(
     @ApplicationContext private val context: Context,
     private val databaseSession: DatabaseSession,
     private val settingsStore: ExtendedSettingsStore,
-    private val permissionPrompter: NotificationPermissionPrompter
+    private val permissionPrompter: NotificationPermissionPrompter,
+    private val autoLockManager: com.keepasskey.app.security.AutoLockManager
 ) {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -48,6 +49,9 @@ class UnlockedNotificationController @Inject constructor(
 
     /** 当前是否已发出常驻通知：避免每个轮询周期重复 notify / 撤销 */
     private var posted = false
+
+    /** 上一次已发布通知关联的倒计时截止点 */
+    private var lastDeadline: Long? = null
 
     /** 上一次求得的「目标状态」，仅在变化时记录诊断日志（避免轮询刷屏） */
     private var lastDesired: Boolean? = null
@@ -62,8 +66,11 @@ class UnlockedNotificationController @Inject constructor(
         cancel()
         scope.launch {
             // merge 的下游收集是单协程串行语义：refresh() 不会被并发调用，posted 无需额外同步
-            merge(databaseSession.state.map { }, preferenceChanges())
-                .collect { refresh() }
+            merge(
+                databaseSession.state.map { },
+                preferenceChanges(),
+                autoLockManager.lockDeadline.map { }
+            ).collect { refresh() }
         }
     }
 
@@ -99,21 +106,25 @@ class UnlockedNotificationController @Inject constructor(
             )
             lastDesired = desired
         }
+        val currentDeadline = autoLockManager.lockDeadline.value
+        val deadlineChanged = posted && lastDeadline != currentDeadline
         when {
-            desired && !posted -> post()
+            desired && (!posted || deadlineChanged) -> {
+                lastDeadline = currentDeadline
+                post(currentDeadline)
+            }
             !desired && posted -> cancel()
             else -> Unit
         }
     }
 
-    private fun post() {
-        val notification = NotificationCompat.Builder(
+    private fun post(deadline: Long?) {
+        val builder = NotificationCompat.Builder(
             context,
             NotificationChannelSpec.UNLOCKED_STATUS.channelId
         )
             .setSmallIcon(NotificationChannels.SMALL_ICON_RES)
             .setContentTitle(context.getString(R.string.notification_unlocked_title))
-            .setContentText(context.getString(R.string.notification_unlocked_text))
             .setContentIntent(NotificationIntents.openAppForUnlockedStatus(context))
             .setCategory(NotificationCompat.CATEGORY_STATUS)
             // 锁屏仅显示「内容已隐藏」：库处于解锁态本身即敏感状态，不应在锁屏暴露
@@ -121,8 +132,21 @@ class UnlockedNotificationController @Inject constructor(
             .setOngoing(true)
             .setSilent(true)
             .setOnlyAlertOnce(true)
-            .setShowWhen(false)
-            .build()
+
+        val now = System.currentTimeMillis()
+        if (deadline != null && deadline > now) {
+            builder.setContentText(context.getString(R.string.notification_unlocked_text))
+                .setWhen(deadline)
+                .setShowWhen(true)
+                .setUsesChronometer(true)
+                .setChronometerCountDown(true)
+        } else {
+            builder.setContentText(context.getString(R.string.notification_unlocked_text_idle))
+                .setShowWhen(false)
+                .setUsesChronometer(false)
+        }
+
+        val notification = builder.build()
         try {
             NotificationManagerCompat.from(context)
                 .notify(NotificationChannels.ID_UNLOCKED_STATUS, notification)
@@ -136,6 +160,7 @@ class UnlockedNotificationController @Inject constructor(
 
     private fun cancel() {
         posted = false
+        lastDeadline = null
         try {
             NotificationManagerCompat.from(context).cancel(NotificationChannels.ID_UNLOCKED_STATUS)
         } catch (t: SecurityException) {

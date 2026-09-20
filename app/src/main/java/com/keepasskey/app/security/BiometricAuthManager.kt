@@ -5,6 +5,7 @@ import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
+import com.keepasskey.app.R
 import javax.crypto.Cipher
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -127,9 +128,12 @@ class BiometricAuthManager @Inject constructor(
                 if (subtitle.isNotBlank()) {
                     setSubtitle(subtitle)
                 }
-                // 官方互斥约束：允许设备凭据时禁止再设置负向按钮
-                if (!usesDeviceCredential && negativeButtonText != null) {
-                    setNegativeButtonText(negativeButtonText)
+                // 官方互斥约束：允许设备凭据时禁止再设置负向按钮；
+                // 纯生物识别（不含设备凭据）时，AndroidX 要求必须设置非空负向按钮，否则 build() 会抛 IllegalArgumentException 崩溃
+                if (!usesDeviceCredential) {
+                    val resolvedNegative = negativeButtonText?.takeIf { it.isNotBlank() }
+                        ?: activity.getString(R.string.btn_cancel)
+                    setNegativeButtonText(resolvedNegative)
                 }
                 setAllowedAuthenticators(authenticators)
                 setConfirmationRequired(confirmationRequired)

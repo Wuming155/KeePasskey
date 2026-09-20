@@ -69,6 +69,18 @@ class UnlockedNotificationWiringTest {
         )
     }
 
+    @Test
+    fun `接入自动锁定倒计时并由系统Chronometer原生渲染`() {
+        assertTrue(
+            "必须订阅 AutoLockManager 的 lockDeadline 倒计时状态流",
+            code.contains("autoLockManager.lockDeadline.map")
+        )
+        assertTrue(
+            "必须使用系统 Chronometer 渲染倒计时，零轮询零额外耗电",
+            code.contains("setUsesChronometer(true)") && code.contains("setChronometerCountDown(true)")
+        )
+    }
+
     /** 源码全文；路径相对仓库根（app 模块测试工作目录为 app/，向上回溯定位仓库根） */
     private fun readSource(path: String): String {
         val file = File(repositoryRoot, path)

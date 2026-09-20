@@ -46,11 +46,11 @@ class PasswordSaveActivity : BaseCredentialActivity() {
             callingReq is CreatePasswordRequest -> callingReq.id
             else -> intent.getStringExtra(EXTRA_USERNAME).orEmpty()
         }
-        // M4 整改（加解密审查 2026-09）：密码唯一来源为系统 Credential Manager 的
-        // CreatePasswordRequest（平台 API 边界，String 不可避免，OS Parcel 副本不受本应用控制）。
+        // M4 整改（加解密审查 2026-09）：密码来源为系统 Credential Manager 的
+        // CreatePasswordRequest，或传统自动填充保存唤起时的 EXTRA_PASSWORD
         val password: String? = when (callingReq) {
             is CreatePasswordRequest -> callingReq.password
-            else -> null
+            else -> intent.getStringExtra(EXTRA_PASSWORD)
         }
         val targetPackage = providerReq?.callingAppInfo?.packageName
             ?: intent.getStringExtra(EXTRA_PACKAGE_NAME).orEmpty()
@@ -122,10 +122,14 @@ class PasswordSaveActivity : BaseCredentialActivity() {
                     callerTrustStore.trust(boundPackage, callerDigests.primary)
                 }
 
-                val response = CreatePasswordResponse()
-                val resultIntent = Intent()
-                PendingIntentHandler.setCreateCredentialResponse(resultIntent, response)
-                setResult(RESULT_OK, resultIntent)
+                if (providerReq != null) {
+                    val response = CreatePasswordResponse()
+                    val resultIntent = Intent()
+                    PendingIntentHandler.setCreateCredentialResponse(resultIntent, response)
+                    setResult(RESULT_OK, resultIntent)
+                } else {
+                    setResult(RESULT_OK)
+                }
                 finish()
             } catch (t: Throwable) {
                 AppLog.e(TAG, "保存密码凭据失败", t)
@@ -141,5 +145,6 @@ class PasswordSaveActivity : BaseCredentialActivity() {
         const val EXTRA_PACKAGE_NAME = "com.keepasskey.extra.PACKAGE_NAME"
         const val EXTRA_WEB_DOMAIN = "com.keepasskey.extra.WEB_DOMAIN"
         const val EXTRA_USERNAME = "com.keepasskey.extra.USERNAME"
+        const val EXTRA_PASSWORD = "com.keepasskey.extra.PASSWORD"
     }
 }

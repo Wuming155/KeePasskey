@@ -228,6 +228,7 @@ internal class BiometricEnableCoordinator(
             subtitle = strings.get(R.string.sec_biometric_verify_subtitle),
             authenticators = BiometricAuthManager.UNLOCK_AUTHENTICATORS,
             cipher = cipher,
+            negativeButtonText = strings.get(R.string.btn_cancel),
             onResult = onResult
         )
     }

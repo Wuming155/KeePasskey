@@ -410,12 +410,28 @@ internal fun KeePasskeyAutofillService.applySaveInfoIfNeeded(
     passwordId: AutofillId?
 ) {
     // 注册 SaveInfo 以便在用户提交时捕获新账密
-    // ISSUE-P3-44：仅在用户开启「新密码保存提示」时注册——否则框架会提示保存、
-    // 保存侧却又按开关跳过落库，形成「提示了但没保存」的矛盾语义。
-    val requiredIds = listOfNotNull(usernameId, passwordId).toTypedArray()
-    if (requiredIds.isNotEmpty() && settingsStore.isOfferSaveCredentialsEnabled()) {
-        val saveFlags = SaveInfo.SAVE_DATA_TYPE_PASSWORD or SaveInfo.SAVE_DATA_TYPE_USERNAME
-        val saveInfo = SaveInfo.Builder(saveFlags, requiredIds).build()
+    // ISSUE-P3-44：仅在用户开启「新密码保存提示」时注册
+    if (!settingsStore.isOfferSaveCredentialsEnabled()) return
+    val saveFlags = SaveInfo.SAVE_DATA_TYPE_PASSWORD or SaveInfo.SAVE_DATA_TYPE_USERNAME
+
+    val saveInfo = when {
+        passwordId != null -> {
+            val builder = SaveInfo.Builder(saveFlags, arrayOf(passwordId))
+                .setFlags(SaveInfo.FLAG_SAVE_ON_ALL_VIEWS_INVISIBLE)
+            if (usernameId != null) {
+                builder.setOptionalIds(arrayOf(usernameId))
+            }
+            builder.build()
+        }
+        usernameId != null -> {
+            SaveInfo.Builder(saveFlags, arrayOf(usernameId))
+                .setFlags(SaveInfo.FLAG_SAVE_ON_ALL_VIEWS_INVISIBLE)
+                .build()
+        }
+        else -> null
+    }
+
+    if (saveInfo != null) {
         responseBuilder.setSaveInfo(saveInfo)
     }
 }

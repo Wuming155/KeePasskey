@@ -1020,7 +1020,8 @@
     <string name="notification_channel_unlocked_name">Unlocked status</string>
     <string name="notification_channel_unlocked_desc">Persistent reminder while the vault is unlocked; tap to return to the app</string>
     <string name="notification_unlocked_title">KeePasskey vault is unlocked</string>
-    <string name="notification_unlocked_text">Auto-lock timer is running; tap to return to the app</string>
+    <string name="notification_unlocked_text">Auto-lock countdown in progress; tap to return to the app</string>
+    <string name="notification_unlocked_text_idle">KeePasskey vault is unlocked; tap to return to the app</string>
     <string name="notification_channel_totp_name">Dynamic codes</string>
     <string name="notification_channel_totp_desc">Shows the dynamic code of the autofilled entry; it disappears once the code expires</string>
     <string name="notification_totp_title">Dynamic code</string>

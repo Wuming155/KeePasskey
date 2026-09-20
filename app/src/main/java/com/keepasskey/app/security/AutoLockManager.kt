@@ -15,6 +15,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -51,6 +52,10 @@ class AutoLockManager @Inject constructor(
     val isLocked: StateFlow<Boolean> get() = sessionGuard.isLocked
 
     val lockEvents: SharedFlow<Unit> get() = sessionGuard.lockEvents
+
+    private val _lockDeadline = MutableStateFlow<Long?>(null)
+    /** 当前自动锁定的目标截止时间戳（毫秒）；null 表示当前未处于自动锁定倒计时（如在前台或从不锁定） */
+    val lockDeadline: StateFlow<Long?> get() = _lockDeadline
 
     private var backgroundTimestamp: Long = 0L
     private var isInBackground: Boolean = false
@@ -133,17 +138,31 @@ class AutoLockManager @Inject constructor(
         cancelBackgroundLock()
         backgroundLockJob = scope.launch {
             val settings = settingsRepository.getSettings().first()
-            if (!settings.autoLockBackground) return@launch
+            if (!settings.autoLockBackground) {
+                _lockDeadline.value = null
+                return@launch
+            }
             val delayMillis = AutoLockTimeoutPolicy.delayMillis(settings.autoLockTimeoutSeconds)
-                ?: return@launch // 「永不」档：禁止启动定时器
+            if (delayMillis == null || delayMillis <= 0L) {
+                _lockDeadline.value = null
+                if (delayMillis == 0L) {
+                    backgroundTimestamp = 0L
+                    sessionGuard.triggerLock("后台立即自动锁定")
+                }
+                return@launch
+            }
+            val targetDeadline = backgroundTimestamp + delayMillis
+            _lockDeadline.value = targetDeadline
             delay(delayMillis)
             // 到点即锁：无需等待用户切回前台
             backgroundTimestamp = 0L
+            _lockDeadline.value = null
             sessionGuard.triggerLock("后台超时自动锁定 (${settings.autoLockTimeoutSeconds} 秒)")
         }
     }
 
     private fun cancelBackgroundLock() {
+        _lockDeadline.value = null
         backgroundLockJob?.cancel()
         backgroundLockJob = null
     }
