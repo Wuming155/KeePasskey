@@ -40,7 +40,9 @@ import javax.inject.Inject
  * 6. 生命周期契约（官方：调用无状态、服务仅请求期间绑定）：cancellationSignal 取消即级联
  *    取消协程，onDestroy 取消全部在途任务，杜绝解绑后空转与迟到回调；
  * 7. TASK-44 黑名单：命中黑名单的调用包名在填充前即 fail-closed 返回空响应，
- *    不产出于解锁引导、数据集与 SaveInfo（语义上等价于未注册本填充服务）。
+ *    不产出于解锁引导、数据集与 SaveInfo（语义上等价于未注册本填充服务）；
+ * 8. ISSUE-P2-226 自我排除：调用包名即本应用包名时同样不下发任何数据集，框架保存通道静默跳过
+ *    （本应用内凭据写入走自有写盘链路，不经自动填充）。
  */
 @AndroidEntryPoint
 class KeePasskeyAutofillService : AutofillService() {
@@ -124,6 +126,13 @@ class KeePasskeyAutofillService : AutofillService() {
             return
         }
         val callingPkg = structure.activityComponent.packageName
+        // ISSUE-P2-226：调用方即本应用自身时在完整性闸门**之前**短路——该请求无论风险态如何都不下发，
+        // 短路同时免去自家口令框每次聚焦都触发一轮 `awaitEnforcement()` 重扫（maps / 路径扫描）。
+        if (AutofillAccessPolicy.isSelfApp(callingPkg, packageName)) {
+            AppLog.d(TAG, "onFillRequest 调用方即本应用，跳过下发")
+            callback.onSuccess(null)
+            return
+        }
         if (rejectsDatasetDelivery(callingPkg)) {
             callback.onSuccess(null)
             return
@@ -172,9 +181,9 @@ class KeePasskeyAutofillService : AutofillService() {
     }
 
     /**
-     * ISSUE-P2-08：完整性风险态禁用自动填充；TASK-44：黑名单命中 fail-closed——
-     * 两者均不下发数据集（含解锁引导与 SaveInfo），等价于「该应用从未注册过本填充服务」，
-     * 不降级已有填充语义也不返回错误。
+     * ISSUE-P2-08：完整性风险态禁用自动填充；ISSUE-P2-226：调用方即本应用自身；
+     * TASK-44：黑名单命中 fail-closed——三者均不下发数据集（含解锁引导与 SaveInfo），
+     * 等价于「该应用从未注册过本填充服务」，不降级已有填充语义也不返回错误。
      *
      * @return true = 本次请求不予下发（调用方据此 `onSuccess(null)`）
      */
@@ -183,12 +192,17 @@ class KeePasskeyAutofillService : AutofillService() {
             AutofillAccessPolicy.rejectReason(
                 runtimeIntegrityGate.awaitEnforcement(),
                 callingPkg,
+                packageName,
                 autofillBlocklistStore::isBlocked
             )
         ) {
             AutofillRejection.INTEGRITY_RISK -> {
                 // ISSUE-P1-10：日志不得携带调用包名等敏感标识
                 AppLog.i(TAG, "设备完整性风险，拒绝下发自动填充数据集")
+                true
+            }
+            AutofillRejection.SELF_APP -> {
+                AppLog.i(TAG, "调用方即本应用，拒绝下发自动填充数据集")
                 true
             }
             AutofillRejection.BLOCKLISTED -> {
@@ -321,9 +335,8 @@ class KeePasskeyAutofillService : AutofillService() {
         callback: SaveCallback
     ) {
         try {
-            val latestStructure = contexts.lastOrNull()?.structure
-            val callingPkg = latestStructure?.activityComponent?.packageName.orEmpty()
-            if (callingPkg.isBlank()) {
+            val callingPkg = contexts.lastOrNull()?.structure?.activityComponent?.packageName.orEmpty()
+            if (callingPkg.isBlank() || AutofillAccessPolicy.isSelfApp(callingPkg, packageName)) {
                 callback.onSuccess()
                 return
             }
@@ -331,10 +344,15 @@ class KeePasskeyAutofillService : AutofillService() {
             // ISSUE-P2-08 / TASK-44：保存侧同样前置于完整性闸门与黑名单检查——
             // 命中即拒绝落库并向系统回调非敏感提示，绝不让被屏蔽/风险环境写入任何凭据
             val enforcement = runtimeIntegrityGate.awaitEnforcement()
-            when (AutofillAccessPolicy.rejectReason(enforcement, callingPkg, autofillBlocklistStore::isBlocked)) {
+            when (AutofillAccessPolicy.rejectReason(enforcement, callingPkg, packageName, autofillBlocklistStore::isBlocked)) {
                 AutofillRejection.INTEGRITY_RISK -> {
                     AppLog.i(TAG, "设备完整性风险，拒绝保存自动填充凭据")
                     callback.onFailure(getString(R.string.autofill_save_integrity_blocked))
+                    return
+                }
+                AutofillRejection.SELF_APP -> {
+                    AppLog.i(TAG, "调用方即本应用，跳过框架保存通道")
+                    callback.onSuccess()
                     return
                 }
                 AutofillRejection.BLOCKLISTED -> {
