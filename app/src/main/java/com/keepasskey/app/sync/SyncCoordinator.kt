@@ -139,8 +139,17 @@ open class SyncCoordinator @Inject constructor(
         }
 
     /**
-     * ISSUE-P1-07：会话终止（锁定/关闭）时释放本协调器持有的全部数据库树副本。
-     * 回调在会话锁内同步触发，此处仅置空引用，不做任何阻塞操作。
+     * ISSUE-P1-07：会话终止（锁定/关闭/换库前置释放）时释放本协调器持有的全部数据库树副本。
+     * 回调在会话锁内同步触发，此处不做任何阻塞操作。
+     *
+     * 两个持有者的收口方式不同（`ISSUE-P3-235` G2 起明确）：
+     * - [SyncSessionState.clear]：`lastSyncedDb` 恒为**会话活动树的引用**（全仓赋值点右侧均为
+     *   `databaseSession.databaseFlow.value`），其擦除由 `DatabaseSession.lock()/close()` 对活动树
+     *   的 `clearSensitiveData()` 承担，故此处**只丢引用**即为正确形态；
+     * - [SyncConflictController.clearPendingConflictSession]：冲突待决期的 `pendingRemoteDb`
+     *   （独立解析树）与 `pendingMergedRoot` 的合并器新建节点**不属于**活动树 ——
+     *   此时活动树已被 [DatabaseSession] 先行擦除并置空（存活侧为空）⇒ 在该方法内**全量擦除**，
+     *   不留给 GC（契约 `docs/architecture/敏感缓冲所有权契约.md` §3 R3 / R5）。
      */
     override fun onSessionLocked() {
         session.clear()

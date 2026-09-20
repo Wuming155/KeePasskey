@@ -42,7 +42,8 @@ import javax.inject.Singleton
  * `ISSUE-P3-188` §166：四类**无实例状态**的合并判据（base 三重可信检验 [resolveTrustedBase]、
  * PROMPT_USER 的决策清单归集 [decisionConflictsOf]、丢弃树显式擦除 [wipeDiscarded]、已裁决条目
  * 单趟落树 [applyResolvedEntriesToGroup]）下沉到同包 `SyncConflictMergeAdjudication.kt`；
- * 本类只保留**待决冲突会话上下文**与上传 / 落库编排。
+ * `ISSUE-P3-235` G2 的**身份集合判定擦除原语**（[eraseDiscardedDatabase] / [eraseDiscardedGroup] /
+ * [eraseDiscardedParseResults]）同置该文件，本类只保留**待决冲突会话上下文**与上传 / 落库编排。
  */
 @Singleton
 class SyncConflictController @Inject constructor(
@@ -218,7 +219,28 @@ class SyncConflictController @Inject constructor(
         ConflictDisposition.AutoMerge, ConflictDisposition.PromptUser -> null
     }
 
+    /**
+     * 丢弃待决冲突会话（`ISSUE-P3-235` G2 / `RC-02` 收口）。
+     *
+     * 本类是 `pendingLocalDb` / `pendingRemoteDb` / `pendingMergedRoot` 的**唯一持有者**：
+     * 丢弃引用之前必须**先按身份集合判定擦除**（[eraseDiscardedDatabase] / [eraseDiscardedGroup]，
+     * 存活侧 = `databaseSession.databaseFlow.value` 即当前活动会话树），
+     * 不得留给 GC（契约见 `docs/architecture/敏感缓冲所有权契约.md` §3 R1 ~ R5、§4）：
+     * - **决策路径**（[resolveConflicts]）：活动树即刚被 `updateDatabaseMeta` 采用（或未被改写的）
+     *   会话库；`KdbxMerger` 复用进合并树的实例按身份判定为存活 ⇒ 不会误擦刚上线的活动库
+     *   （无判定的裸 `clearSensitiveData()` 即 §9.6 #3 同型的 P0 级数据损坏，
+     *   这正是 §52 此前对 `pending*` 只丢引用的原因）；
+     * - **会话终止路径**（`SyncCoordinator.onSessionLocked`）：`DatabaseSession.lock()` 已先行擦除
+     *   并置空活动树 ⇒ 存活侧为空 ⇒ 全量擦除，冲突待决期解析出的远端整树不再滞留至 GC。
+     *
+     * 与池内二进制（`InnerHeader.binaries`）无关：该面属 `已知工程限界.md` §1.6 的既定边界
+     * （准入条件见契约 §6.2），本方法不改动池。
+     */
     fun clearPendingConflictSession() {
+        val live = databaseSession.databaseFlow.value
+        pendingLocalDb?.let { eraseDiscardedDatabase(it, live) }
+        pendingRemoteDb?.let { eraseDiscardedDatabase(it, live) }
+        pendingMergedRoot?.let { eraseDiscardedGroup(it, live?.rootGroup) }
         _conflictFlow.value = emptyList()
         pendingRemoteEngine = null
         pendingRemotePath = null
@@ -338,12 +360,25 @@ class SyncConflictController @Inject constructor(
 
         val uploadResult = syncEngine.markResolvedAndUpload(remotePath, mergedBytes)
         if (!uploadResult.isSuccess) {
+            // ISSUE-P3-235 G2：上传失败 ⇒ 合并产物与本次判定用的三棵解析树**全部**失去持有者，
+            // 按身份集合判定擦除未被活动会话树引用的实例（合并树按原实例复用来源树节点，裸擦会清空活动库）
+            eraseDiscardedParseResults(
+                localDb, localDbOwned, remoteDb, trustedBase, mergedDb,
+                databaseSession.databaseFlow.value
+            )
             return SyncOutcome.Error(
                 strings.get(R.string.sync_error_upload_merged_failed, uploadResult.exceptionOrNull()?.message)
             )
         }
         databaseSession.updateDatabaseMeta { mergedDb }
         val saveResult = databaseSession.save()
+        // ISSUE-P3-235 G2：合并树已被采用为会话库（即存活侧本身，故传 null 不列入擦除面），
+        // 三棵来源树中未被复用的实例按身份判定定点擦除、不留给 GC——`wipeDiscarded` 的
+        // 「无存活别名」前提在此**不成立**（`KdbxMerger` 对单侧独有对象复用原实例）
+        eraseDiscardedParseResults(
+            localDb, localDbOwned, remoteDb, trustedBase, mergedDb = null,
+            live = databaseSession.databaseFlow.value
+        )
         return if (saveResult is KdbxResult.Failure) {
             SyncOutcome.Error(
                 strings.get(R.string.sync_error_merged_upload_local_save_failed, saveResult.message)

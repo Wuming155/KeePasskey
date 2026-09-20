@@ -21,9 +21,13 @@ import com.keepasskey.sync.merge.SyncConflictStrategy
  * `strings` / `debugLog`——即「冲突决策的**裁决规则**」与「待决会话的**上下文持有**」是两件事，
  * 前者是无副作用（或仅依赖入参）的纯判定，留在门面里只会把后者撑大。
  *
+ * `ISSUE-P3-235` G2（`RC-02` 收口）起，**丢弃解析树的擦除原语**（[wipeDiscarded] 的无别名形态、
+ * [eraseDiscardedDatabase] / [eraseDiscardedGroup] / [eraseDiscardedParseResults] 的身份集合判定形态）
+ * 同置本文件：擦除**判定**无实例状态，门面只负责在各自钩子上调用它。
+ *
  * 仍在 [SyncConflictController] 内的部分：`pending*` 通道、`resolveConflicts` 的上传与落库、
  * `handleConflictMerge` 的树获取与 `localDbOwned` 判据、`autoMergeAndUpload` /
- * `beginPendingConflict` —— 它们要么持有会话态，要么承载擦除边界与 `If-Match` 语义。
+ * `beginPendingConflict` —— 它们要么持有会话态，要么承载擦除**时机**与 `If-Match` 语义。
  */
 
 /** base 裁决结果：[trusted] 供失败路径的擦除判定，[trustedLite] 为合并底版（不可信时为空库） */
@@ -97,6 +101,68 @@ internal fun decisionConflictsOf(
  */
 internal fun wipeDiscarded(db: KdbxDatabase?) {
     db?.clearSensitiveData()
+}
+
+/**
+ * `ISSUE-P3-235` G2（`RC-02` 收口）：丢弃整棵解析树前的**身份集合判定**擦除。
+ *
+ * 与 [wipeDiscarded] 的分工（**选错即 P0 级数据损坏**）：
+ * - [wipeDiscarded] 只适用于「本次判定内自解析、且确定不存在任何存活别名」的树；
+ * - 本函数适用于「**可能**被存活别名引用」的树：[KdbxDatabase] 是 data class，
+ *   `localDb.copy(rootGroup = mergedRoot, …)` 与 [KdbxMerger] 对「单侧独有对象」的**原实例复用**
+ *   会使同一 `ProtectedString` / `KdbxAttachment` 实例被「待丢弃树」与「活动会话树」同时可达
+ *   （`SECURITY_RECHECK_2026-09.md` §9.6 #19 同型）。此时裸调 `clearSensitiveData()` 会
+ *   **静默清空活动库内容**——这正是 `ISSUE-P3-119` / §52 在原「所有权语义未定义」前提下
+ *   对 `pending*` 树**只丢引用不擦除**的原因。
+ *
+ * 判据（对齐 `KdbxGroup.clearSupersededSensitiveData` 的身份集合口径）：
+ * 以 [live]（当前活动会话树）为存活侧收集敏感实例身份，**只擦除 [db] 中不被存活树以同一对象
+ * 引用到的实例**。头部 KDF secret `K` 另有一道独立护栏：`localDb.copy(...)` 产出的合并树与来源树
+ * **共享同一 `header` 实例**（`KdbxHeader` 为 data class 浅拷贝），故仅在 `db.header !== live?.header`
+ * 时才擦——误擦会让活动库以「无 `K`」的头部重新派生（fail-visible，但属静默写坏库的同型风险）。
+ *
+ * [live] 为 null 表示**确无存活别名**（会话终止路径：活动树已被 `DatabaseSession` 先行擦除并置空）
+ * ⇒ 全量擦除；[db] 与 [live] 为同一实例时不做任何动作。
+ */
+internal fun eraseDiscardedDatabase(db: KdbxDatabase, live: KdbxDatabase?) {
+    if (db === live) return
+    eraseDiscardedGroup(db.rootGroup, live?.rootGroup)
+    if (db.header !== live?.header) db.header.kdfParameters.clearSensitive()
+}
+
+/**
+ * [eraseDiscardedDatabase] 的分组版：擦除 [discarded] 子树中**未被 [liveRoot] 以同一实例引用**
+ * 的敏感实例（`ProtectedString` / `KdbxAttachment`，含 history）；[liveRoot] 为 null 时全量擦除
+ * （含未被任何存活树引用的下线实例），[discarded] 与 [liveRoot] 为同一实例时不动作。
+ */
+internal fun eraseDiscardedGroup(discarded: KdbxGroup, liveRoot: KdbxGroup?) {
+    if (liveRoot == null) {
+        discarded.clearSensitiveData()
+    } else {
+        discarded.clearSupersededSensitiveData(liveRoot)
+    }
+}
+
+/**
+ * `ISSUE-P3-235` G2：一次三方合并判定的解析产物**全部失去持有者**时，逐棵按身份集合判定擦除
+ * （存活侧 = [live]，即当前活动会话树；判据与红线见 [eraseDiscardedDatabase]）。
+ *
+ * @param mergedDb 本次合并产物；**已被采用为会话库时必须传 `null`**（它即存活侧自身）
+ * @param localDbOwned [localDb] 是否为调用方自己解析出的独立副本；false 表示它属调用方 / 会话
+ *   （`ISSUE-P3-168` 的 `localDbOverride` 入参），与 [wipeDiscarded] 同口径**一律不擦**
+ */
+internal fun eraseDiscardedParseResults(
+    localDb: KdbxDatabase,
+    localDbOwned: Boolean,
+    remoteDb: KdbxDatabase,
+    trustedBase: KdbxDatabase?,
+    mergedDb: KdbxDatabase?,
+    live: KdbxDatabase?
+) {
+    mergedDb?.let { eraseDiscardedDatabase(it, live) }
+    if (localDbOwned) eraseDiscardedDatabase(localDb, live)
+    eraseDiscardedDatabase(remoteDb, live)
+    trustedBase?.let { eraseDiscardedDatabase(it, live) }
 }
 
 /**
