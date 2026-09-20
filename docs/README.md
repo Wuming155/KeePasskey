@@ -18,6 +18,7 @@
 | [`architecture/ARCHITECTURE.md`](architecture/ARCHITECTURE.md) | 模块依赖拓扑与关键架构决策 |
 | [`architecture/已知工程限界.md`](architecture/已知工程限界.md) | **已接受工程限界 / 残余风险的唯一登记表**（原 `AGENTS.md` §6，`215ea82` 删除后由本文件承接）：事实 / 边界 / 依据 / 解除条件 |
 | [`architecture/产品裁决登记.md`](architecture/产品裁决登记.md) | **已裁决的产品口径登记表**（`PD-01`~`PD-11`）：属「产品 / 架构取舍」而非缺陷的条目；与待办清单、`已知工程限界` 的分工见该文件开头 |
+| [`architecture/敏感缓冲所有权契约.md`](architecture/敏感缓冲所有权契约.md) | **敏感缓冲所有权与擦除责任的唯一规范**（`ISSUE-P3-235` / `RC-02` AC① 交付物）：四类所有权（O/B/S/P）与判定树、规则 R1~R6、收口点登记表、非秘密豁免下界清单、`已知工程限界` §1.6 池内擦除解除条件评估、逐处迁移路线图；**改任何清零 / 所有权语义前必读** |
 | [`architecture/reference-projects.md`](architecture/reference-projects.md) | 参考项目地图与优先级层级 |
 | [`architecture/扫码方案评估_ZXing与CameraXMLKit.md`](architecture/扫码方案评估_ZXing与CameraXMLKit.md) | 扫码方案选型评估（ZXing vs CameraX/ML Kit） |
 
