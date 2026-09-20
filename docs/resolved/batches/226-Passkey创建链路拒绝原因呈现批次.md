@@ -197,3 +197,32 @@
 | `docs/RESOLVED_LOG.md` / `docs/resolved/BATCH_158_PLUS.md` | 本批次整行索引登记 |
 | `docs/resolved/README.md` | 「当前最大编号」§225 → **§226** |
 | `docs/resolved/batches/226-Passkey创建链路拒绝原因呈现批次.md` | 本文件 |
+
+---
+
+## 6. 更正节（§227 新增，**原文一字未改**）
+
+> 按归档纪律「只搬迁、不改写；确需更正时**新增更正节**并保留原文」，本批正文（尤其 §2.4、§4 的
+> 「**不存在第二条出路**」表述）**保持原样**，更正统一记于本节。
+
+**更正事由**：本批交付后用户当场反馈「用户知道问题之后，也应该知道怎么解决问题，比如说添加白名单
+什么的。最好能够通过按钮一键跳转到对应位置」，遂立 `ISSUE-P3-221` 并由 §227 批次实施。
+
+**口径收窄（不是推翻）**：原文「不存在第二条出路」的**主体语义仍然成立**，但需按
+[`产品裁决登记.md` PD-12](../../architecture/产品裁决登记.md) 精确化为两层含义：
+
+| 维度 | 本批（§226）原状 | §227 起 |
+|---|---|---|
+| **本次**请求能否被用户点通 | 不能 | **仍然不能**（不变） |
+| 页面是否有第二个按钮 | 没有，只有「知道了」 | 仅当原因确有用户可解法时，多一个**收尾之后**的补救动作 |
+| 动作发生的时机 | — | `RESULT_CANCELED` + `finish()` **之后**（窗口已闭环） |
+| 对系统回传契约 | `RESULT_CANCELED` | **完全一致**（不变） |
+
+即：被否定的「第二条出路」指**让本次被拒请求通过**的路径——这一层**未变**；
+§227 新增的是**下一次**发起前的用户引导，它是窗口闭环后的**独立动作**，两者不矛盾。
+
+**落地改动**：`CredentialRejectionScreen` 增加可选 `guidance` 形参（`null` 时布局与本批**逐字一致**）；
+`BaseCredentialActivity` 的 `onConfirm` 由 `failAndFinish()` 改为 `settleRejection()`
+（幂等收尾原语，行为等价）——故
+[`CredentialRejectionFeedbackTest.kt`](../../../app/src/test/java/com/keepasskey/app/passkey/CredentialRejectionFeedbackTest.kt)
+中断言 `onConfirm = { failAndFinish() }` 的那一处**已随之更新**为 `onConfirm = { settleRejection() }`。

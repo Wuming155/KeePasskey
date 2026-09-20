@@ -194,7 +194,16 @@ class PasskeyCreateActivity : BaseCredentialActivity() {
         if (gateRejection != null) {
             // ISSUE-P1-10：日志只记拒绝类别，不得携带 rpId / 调用包名等敏感标识
             AppLog.w(TAG, "注册门禁拒绝（${gateRejection.name}），fail-closed 不创建 Passkey")
-            rejectAndFinish(gateRejection)
+            // ISSUE-P3-221：调用方确为浏览器时给就地授权（窗口内闭环、无跳转）；
+            // 资格不成立（原生 App / 包名不可得 / 已启用）时 builder 返回 null
+            val remedy = BrowserRemedyBuilder.build(
+                context = this@PasskeyCreateActivity,
+                store = privilegedBrowserStore,
+                reason = gateRejection,
+                callerPackage = callerPackage,
+                scope = lifecycleScope
+            )
+            rejectAndFinish(gateRejection, remedy)
             return
         }
 

@@ -1270,6 +1270,12 @@
     <string name="passkey_reject_dal_network_unavailable">The calling app\'s ownership claim for this site could not be verified online; passkey creation was refused.</string>
     <string name="passkey_reject_request_invalid">The create request does not conform to the passkey specification; creation was refused.</string>
     <string name="passkey_reject_credential_exists">A passkey for this site already exists in this vault; no need to create another.</string>
+    <!-- ISSUE-P3-221：拒绝原因页的就地补救（窗口内授权、无跳转）；%1$s = 系统背书包的应用展示名 -->
+    <string name="cred_reject_exit">Exit</string>
+    <string name="cred_reject_action_add_browser">Add to allowlist</string>
+    <string name="cred_reject_browser_not_allowed">%1$s is not on the privileged browser allowlist. Add it, then start the request again from the browser.</string>
+    <string name="cred_reject_browser_added">%1$s was added. Start the request again from the browser.</string>
+    <string name="cred_reject_browser_add_failed">Could not add it: the app\'s signature could not be read. Try again later under Settings → Autofill.</string>
 
     <!-- 来源：values/strings_ui_messages.xml（53 条） -->
     <string name="picker_open_vault_title">Open an existing KDBX vault</string>

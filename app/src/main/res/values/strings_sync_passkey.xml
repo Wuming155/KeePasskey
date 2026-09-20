@@ -62,4 +62,14 @@
     <string name="passkey_reject_request_invalid">创建请求不符合通行密钥规范，已拒绝创建。</string>
     <string name="passkey_reject_credential_exists">该站点在此密码库中已存在通行密钥，无需重复创建。</string>
 
+    <!-- ===== ISSUE-P3-221：拒绝原因页的**就地补救**（窗口内授权、无跳转） =====
+         - 「退出 / 动作按钮」文案无插值；
+         - %1$s 仅承载系统背书包的**应用展示名**（不写包名 / rpId / 域名）。
+         由 `CredentialRejectionFeedbackTest` 守护。 -->
+    <string name="cred_reject_exit">退出</string>
+    <string name="cred_reject_action_add_browser">添加到特权名单</string>
+    <string name="cred_reject_browser_not_allowed">「%1$s」尚未加入特权浏览器白名单。将其加入后，回到浏览器重新发起创建即可。</string>
+    <string name="cred_reject_browser_added">已添加「%1$s」。请回到浏览器重新发起创建。</string>
+    <string name="cred_reject_browser_add_failed">添加失败：无法读取该应用的签名信息，请稍后在「设置 → 自动填充」中重试。</string>
+
 </resources>

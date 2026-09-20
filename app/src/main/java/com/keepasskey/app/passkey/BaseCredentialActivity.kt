@@ -18,6 +18,12 @@ import com.keepasskey.app.security.ApplyObscuredTouchFilter
  */
 abstract class BaseCredentialActivity : FragmentActivity() {
 
+    /** 拒绝页是否**已呈现**：防重复渲染致后一次覆盖前一次的原因（ISSUE-P3-221） */
+    private var rejectionPresented = false
+
+    /** 是否**已收尾**：防重复 `finish()`（ISSUE-P3-221） */
+    private var rejectionSettled = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.setFlags(
@@ -39,6 +45,17 @@ abstract class BaseCredentialActivity : FragmentActivity() {
     }
 
     /**
+     * 幂等收尾（ISSUE-P3-221）：首次调用执行 [failAndFinish] 并返回 `true`，
+     * 之后一律返回 `false`，避免重复收尾。
+     */
+    private fun settleRejection(): Boolean {
+        if (rejectionSettled) return false
+        rejectionSettled = true
+        failAndFinish()
+        return true
+    }
+
+    /**
      * fail-closed 拒绝收尾（ISSUE-P2-220）：回传契约与 [failAndFinish] 完全一致
      * （仍是 `RESULT_CANCELED`，绝不谎报成功），但**先在受保护窗口内呈现拒绝原因**，
      * 用户确认后才收尾——整改前各拒绝分支直接静默 `finish()`，用户视角是「点了继续就断」，
@@ -46,16 +63,30 @@ abstract class BaseCredentialActivity : FragmentActivity() {
      *
      * 文案一律取 [reason] 携带的预定义字符串资源（ISSUE-P1-10），不得插入 rpId / 包名等。
      * 必须在主线程调用（内部 [setContent]）。
+     *
+     * **ISSUE-P3-221**：调用方可在确认 [reason] 确有用户可执行的解法（
+     * [CredentialRejectionAction.forReason] 非空）且调用方资格成立后，随 [remedy] 提供
+     * **就地补救**（当前窗口内完成授权，不跳转任何界面）。**本次**被拒请求仍以 `RESULT_CANCELED`
+     * 结束：授权只影响**下一次**发起（产品裁决 PD-12）。[remedy] 为 `null` 时布局与
+     * ISSUE-P2-220 原状逐字一致。
      */
-    protected fun rejectAndFinish(reason: CredentialRejectionReason) {
+    internal fun rejectAndFinish(
+        reason: CredentialRejectionReason,
+        remedy: CredentialRejectionRemedy? = null
+    ) {
+        if (rejectionPresented) return
+        rejectionPresented = true
         setContent {
             // 遮挡触摸过滤（ISSUE-P2-09 / P3-12）
             ApplyObscuredTouchFilter()
             CredentialRejectionScreen(
                 title = getString(R.string.cred_reject_title),
                 message = getString(reason.messageRes),
-                confirmText = getString(R.string.cred_reject_confirm),
-                onConfirm = { failAndFinish() }
+                confirmText = getString(
+                    if (remedy != null) R.string.cred_reject_exit else R.string.cred_reject_confirm
+                ),
+                onConfirm = { settleRejection() },
+                remedy = remedy
             )
         }
     }

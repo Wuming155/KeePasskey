@@ -162,7 +162,7 @@ class CredentialRejectionFeedbackTest {
         }
         assertTrue(
             "门禁（DAL / 归属 / 调用方）结论必须原样作为原因呈现",
-            source.contains("rejectAndFinish(gateRejection)")
+            source.contains("rejectAndFinish(gateRejection, remedy)")
         )
         assertFalse(
             "旧的布尔门禁（无原因）必须已被 PasskeyRegistrationGate 取代",
@@ -196,7 +196,7 @@ class CredentialRejectionFeedbackTest {
 
         assertTrue(
             "基类必须提供带原因的拒绝收尾入口",
-            base.contains("protected fun rejectAndFinish(reason: CredentialRejectionReason)")
+            base.contains("fun rejectAndFinish(") && base.contains("reason: CredentialRejectionReason")
         )
         assertTrue(
             "拒绝页必须由预定义资源取文案（不得拼接 rpId / 包名）",
@@ -204,13 +204,134 @@ class CredentialRejectionFeedbackTest {
         )
         assertTrue(
             "用户确认与页面销毁走同一收尾（仍 RESULT_CANCELED）",
-            base.contains("onConfirm = { failAndFinish() }")
+            base.contains("onConfirm = { settleRejection() }")
         )
         val failAndFinishBody = base.substringAfter("protected fun failAndFinish()").substringBefore("}")
         assertTrue(
             "失败收尾必须回传 RESULT_CANCELED（呈现原因不得改变对系统的契约）",
             failAndFinishBody.contains("setResult(RESULT_CANCELED)")
         )
+    }
+
+    // ── ④ ISSUE-P3-221：就地补救（窗口内授权、无跳转） ─────────────
+
+    @Test
+    fun `仅确有用户可执行解法的原因才给出补救动作`() {
+        for (reason in CredentialRejectionReason.entries) {
+            val expected = reason == CredentialRejectionReason.DAL_UNVERIFIED ||
+                reason == CredentialRejectionReason.DAL_NETWORK_UNAVAILABLE
+            assertEquals(
+                "「$reason」的补救动作判定与预期不符——不得为无从下手的原因硬凑一个动作",
+                expected,
+                CredentialRejectionAction.forReason(reason) != null
+            )
+        }
+        assertEquals(
+            "网络不可用与声明未通过同源（非白名单浏览器走普通应用 DAL 分支），授权对两者都是正解",
+            CredentialRejectionAction.ADD_PRIVILEGED_BROWSER,
+            CredentialRejectionAction.forReason(CredentialRejectionReason.DAL_NETWORK_UNAVAILABLE)
+        )
+    }
+
+    @Test
+    fun `补救动作唯一且不提供削弱防线的入口`() {
+        assertEquals(
+            "动作枚举应恰好只有「加入特权名单」一项",
+            listOf(CredentialRejectionAction.ADD_PRIVILEGED_BROWSER),
+            CredentialRejectionAction.entries
+        )
+        assertEquals(
+            "动作按钮应恰好引用一条资源",
+            1,
+            actionResourceNames().distinct().size
+        )
+        assertTrue(
+            "动作资源不得出现「跳过」类条目——把关闭 DAL 校验做成一步直达就是给削弱核心防线的捷径",
+            actionResourceNames().none { it.contains("skip") }
+        )
+    }
+
+    @Test
+    fun `就地授权必须接上浏览器资格判定与 fail-closed 写入`() {
+        val activity = readCode(CREATE_ACTIVITY_PATH)
+        val builder = readCode(BROWSER_BUILDER_PATH)
+
+        assertTrue(
+            "门禁拒绝后必须经 BrowserRemedyBuilder 判定补救资格",
+            activity.contains("BrowserRemedyBuilder.build(")
+        )
+        assertTrue(
+            "授权必须写特权浏览器白名单",
+            builder.contains("store.setEnabled(")
+        )
+        assertTrue(
+            "写入属于包管理/偏好面，须下沉 Default（不得在主线程裸跑）",
+            builder.contains("Dispatchers.Default")
+        )
+        assertTrue(
+            "Builder 必须枚举浏览器候选作资格判定（排除原生 App 这一假入口）",
+            builder.contains("store.installedBrowsers()")
+        )
+        assertTrue(
+            "Builder 必须排除已启用项（已启用再给「添加」无意义）",
+            builder.contains("if (browser.enabled) return null")
+        )
+    }
+
+    @Test
+    fun `补救资源中英齐备且插值只承载应用名`() {
+        val zh = readSource(ZH_PASSKEY_STRINGS) + readSource(ZH_STRINGS)
+        val en = readSource(EN_STRINGS)
+
+        // 无插值资源：退出 / 动作按钮 / 失败反馈——按钮不得点名任何调用方
+        for (resName in FIXED_REMEDY_RESOURCES) {
+            val zhBody = stringBody(zh, resName)
+                ?: error("中文资源缺失：$resName")
+            assertFalse("$resName 不得含格式占位符", zhBody.contains("%"))
+            val enBody = stringBody(en, resName)
+                ?: error("英文资源缺失：$resName")
+            assertFalse("英文 $resName 不得含格式占位符", enBody.contains("%"))
+        }
+        // 说明句允许且必须含 %1$s（应用展示名）；不得出现第二个占位符
+        val placeholderRegex = Regex("%[0-9]+\\\$s|%s")
+        for (resName in NAMED_REMEDY_RESOURCES) {
+            val zhBody = stringBody(zh, resName)
+                ?: error("中文资源缺失：$resName")
+            assertEquals("$resName 应恰好含一个 %1\$s（应用展示名）", 1,
+                placeholderRegex.findAll(zhBody).count())
+            val enBody = stringBody(en, resName)
+                ?: error("英文资源缺失：$resName")
+            assertEquals("英文 $resName 应恰好含一个 %1\$s", 1,
+                placeholderRegex.findAll(enBody).count())
+        }
+    }
+
+    @Test
+    fun `补救全程窗口内闭环不跳转且收尾仍回传取消`() {
+        val base = readCode(BASE_ACTIVITY_PATH)
+
+        assertFalse(
+            "就地补救不得拉起其它界面（无跳转是该方案的核心）",
+            base.contains("startActivity(")
+        )
+        assertTrue(
+            "用户确认与退出必须走幂等收尾",
+            base.contains("onConfirm = { settleRejection() }")
+        )
+        val failAndFinishBody = base.substringAfter("protected fun failAndFinish()").substringBefore("}")
+        assertTrue(
+            "收尾必须仍是 RESULT_CANCELED（就地授权不得改变对系统契约）",
+            failAndFinishBody.contains("setResult(RESULT_CANCELED)")
+        )
+    }
+
+    @Test
+    fun `拒绝页仅在补救存在时渲染两选择并覆盖成功失败态`() {
+        val screen = readCode(REJECTION_SCREEN_PATH)
+
+        assertTrue("必须存在授权成功态分支", screen.contains("status == STATUS_ADDED"))
+        assertTrue("必须存在授权失败反馈分支", screen.contains("status == STATUS_FAILED"))
+        assertTrue("无补救时不得渲染按钮或多余留白", screen.contains("remedy != null"))
     }
 
     // ── 辅助 ──────────────────────────────────────────────────────
@@ -249,6 +370,13 @@ class CredentialRejectionFeedbackTest {
             .associate { it.groupValues[1] to it.groupValues[2] }
     }
 
+    /** 自**动作**枚举源解析其引用的字符串资源（自动覆盖后续新增的动作，无需手抄） */
+    private fun actionResourceNames(): List<String> =
+        Regex("""R\.string\.([a-z0-9_]+)""")
+            .findAll(readCode(ACTION_ENUM_PATH))
+            .map { it.groupValues[1] }
+            .toList()
+
     private fun stringBody(xml: String, name: String): String? =
         Regex("""<string name="$name">(.*?)</string>""", RegexOption.DOT_MATCHES_ALL)
             .find(xml)?.groupValues?.get(1)
@@ -271,6 +399,25 @@ class CredentialRejectionFeedbackTest {
 
         const val REASON_ENUM_PATH =
             "app/src/main/java/com/keepasskey/app/passkey/CredentialRejectionReason.kt"
+        const val ACTION_ENUM_PATH =
+            "app/src/main/java/com/keepasskey/app/passkey/CredentialRejectionAction.kt"
+        const val REJECTION_SCREEN_PATH =
+            "app/src/main/java/com/keepasskey/app/passkey/CredentialRejectionScreen.kt"
+        const val BROWSER_BUILDER_PATH =
+            "app/src/main/java/com/keepasskey/app/passkey/BrowserRemedyBuilder.kt"
+
+        /** 无插值补救资源：退出 / 动作按钮 / 失败反馈 */
+        val FIXED_REMEDY_RESOURCES = listOf(
+            "cred_reject_exit",
+            "cred_reject_action_add_browser",
+            "cred_reject_browser_add_failed"
+        )
+
+        /** 含 %1$s（应用展示名）的说明句资源 */
+        val NAMED_REMEDY_RESOURCES = listOf(
+            "cred_reject_browser_not_allowed",
+            "cred_reject_browser_added"
+        )
         const val CREATE_ACTIVITY_PATH =
             "app/src/main/java/com/keepasskey/app/passkey/PasskeyCreateActivity.kt"
         const val BASE_ACTIVITY_PATH =
