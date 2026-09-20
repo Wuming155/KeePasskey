@@ -45,7 +45,17 @@ sealed interface BiometricResult {
      * - `passkey/CredentialVerificationLauncher`、`autofill/AutofillConfirmActivity`：丢弃该字段，
      *   仅按失败/取消分型改变控制流。
      */
-    data class Error(val errorCode: Int, val errString: String) : BiometricResult
+    data class Error(
+        val errorCode: Int,
+        val errString: String,
+        /**
+         * 完整性闸门拦下时的**具体命中信号**（按危害度降序，ISSUE-P2-227），其余失败为空清单。
+         *
+         * 与 [errString] 的区别即本字段的存在理由：它是工程自己产出的**枚举**，
+         * 由消费侧映射到已资源化文案（可安全展示）；[errString] 是系统透传的诊断串，禁止外显。
+         */
+        val blockReasons: List<IntegrityBlockReason> = emptyList()
+    ) : BiometricResult
 
     data object Failed : BiometricResult
     data object Cancelled : BiometricResult
@@ -112,9 +122,17 @@ class BiometricAuthManager @Inject constructor(
         onResult: (BiometricResult) -> Unit
     ) {
         // ISSUE-P2-08：完整性风险态（含扫描未完成的未判定态）禁用生物快速解锁，
-        // 以显式失败结果回落主密码路径，绝不静默放行
-        if (runtimeIntegrityGate.currentEnforcement().disableBiometricQuickUnlock) {
-            onResult(BiometricResult.Error(ERROR_INTEGRITY_BLOCKED, INTEGRITY_BLOCKED_DIAGNOSTIC))
+        // 以显式失败结果回落主密码路径，绝不静默放行；
+        // ISSUE-P2-227：同时把**具体命中信号**随结果下行，供消费侧点名归因而非笼统报「设备有风险」
+        val enforcement = runtimeIntegrityGate.currentEnforcement()
+        if (enforcement.disableBiometricQuickUnlock) {
+            onResult(
+                BiometricResult.Error(
+                    errorCode = ERROR_INTEGRITY_BLOCKED,
+                    errString = INTEGRITY_BLOCKED_DIAGNOSTIC,
+                    blockReasons = enforcement.biometricBlockReasons
+                )
+            )
             return
         }
 

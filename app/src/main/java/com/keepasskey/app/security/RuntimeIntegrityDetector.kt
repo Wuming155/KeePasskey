@@ -273,7 +273,14 @@ class RuntimeIntegrityDetector @Inject constructor(
 
     /**
      * 安装来源判定：仅当能确定 installer 且不在受信任分发方集合中时升级风险；
-     * 无法确定（installer 为 null，如 adb 直装 / 部分 ROM）一律不升级，避免误报。
+     * installer 为 `null`（部分 ROM / 无法查询）一律不升级，避免误报。
+     *
+     * **前提更正（ISSUE-P2-227，2026-09-20）**：原注释把「adb 直装」列为 `installer == null` 的例子，
+     * 该前提是**错的**——`adb install` / `pm install` 走 shell 身份，`installingPackageName` 为
+     * **`com.android.shell`（非 null）**，不在 [TRUSTED_INSTALLERS] 内，故 adb 安装的包
+     * （含 release 包）**会被判为 ELEVATED 并禁用生物快速解锁**。判据本身不改（用户 2026-09-20 明示
+     * 「不放宽」），但这一后果自此对用户**点名可见**：命中时提示为
+     * `R.string.sec_biometric_block_installer`（见 [IntegrityBlockReason.UNTRUSTED_INSTALLER]）。
      *
      * **ISSUE-P1-23 显式决策留痕（2026-09-13）**：`installer == null` → 不升级风险，系**显式产品决策**，非遗漏——
      * 1. 该信号只能证明「非商店渠道安装」，**无法证明「APK 未被篡改」**：自签重打包版的 installer

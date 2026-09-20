@@ -36,15 +36,7 @@
 
 ---
 
-## P2 中危缺陷与协议/测试缺口（3 项）
-
-### ISSUE-P2-227：生物识别被完整性闸门禁用时提示未点名命中信号（归因笼统）
-
-- **核实时间点**：2026-09-20 经用户真机反馈 + 代码走查核实。
-- **核实方式**：文案 `sec_biometric_integrity_blocked`（`strings.xml:615`「设备存在安全风险，已禁用生物识别快速解锁，请改用主密码解锁」）**由本应用产生**，非 `BiometricPrompt` / Keystore 返回；触发点 `BiometricAuthManager.kt:116` 读 `currentEnforcement().disableBiometricQuickUnlock`，`RuntimeIntegrityPolicy.kt:183-216` 中 ELEVATED / COMPROMISED / UNDETERMINED 三档皆置 true。
-- **背景与根因**：用户看到「设备存在安全风险」无法分辨究竟是「**本机跑的是可调试构建**」（`appDebuggable`，`RuntimeIntegrityDetector.kt:173` 读 `FLAG_DEBUGGABLE`）、「**安装来源不在受信任清单**」（`:286-293`）、还是「**真被 root / 注入框架攻破**」（`:174-176`）「**快照陈旧/扫描未完成**」（`RuntimeIntegrityPolicy.kt:270-274`）。**开发者自测环境（debug 包）必然命中 ELEVATED**，故该提示在正常开发路径上恒定出现，用户据此怀疑整机安全。**另有一处注释前提为假**：`RuntimeIntegrityDetector.kt:276` 称「adb 直装 installer 为 `null` 故不升级」，实测 adb / `pm install` 记录的 `installingPackageName` 为 **`com.android.shell`（非 null）**，不在 `TRUSTED_INSTALLERS`（`:463-468`）⇒ 侧载的 release 包同样被判 ELEVATED。
-- **裁决范围（用户 2026-09-20 明示）**：**仅整改归因呈现 + 更正错误注释**；`com.android.shell` **不**加入受信任清单、debug 构建**不**放宽降级——判据与 fail-closed 分级保持不动（避免降低安全性）。
-- **验收标准**：AC① 生物识别被拦时的文案点名**具体命中信号**（可调试构建 / 安装来源包名 / root 痕迹 / Magisk 痕迹 / 注入框架 / 调试器附加 / 正被 trace / 尚未完成扫描），多信号并中时按危害度排序呈现，全部资源化中英双语；AC② 设置页风险卡同源（不得第二数据源）；AC③ 错误注释就地更正；AC④ 新增纯函数级用例穷举「信号集合 → 文案资源 id」映射。
+## P2 中危缺陷与协议/测试缺口（2 项）
 
 ### ISSUE-P2-228：自动填充卡三开关为无持久化无消费方的假开关，且「无障碍」措辞与事实不符
 

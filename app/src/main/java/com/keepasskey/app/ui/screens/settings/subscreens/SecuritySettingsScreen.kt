@@ -261,9 +261,13 @@ fun SecuritySettingsScreen(
             }
 
             // ISSUE-P2-08 (ZT-13)：运行环境完整性风险提示（不静默放行；仅风险档渲染）
+            // ISSUE-P2-227：命中清单与等级同源自同一份快照，逐条点名而非只给档级
             integrityLevel?.let { level ->
                 item {
-                    IntegrityRiskCard(level = level)
+                    IntegrityRiskCard(
+                        level = level,
+                        reasons = integrityReport?.enforcement?.biometricBlockReasons.orEmpty()
+                    )
                 }
             }
 

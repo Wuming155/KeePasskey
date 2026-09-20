@@ -613,6 +613,17 @@
     <string name="sec_accessibility_notice_body">本机已启用无障碍服务（非本应用）。该类服务可读取你在屏幕上输入的内容，包括主密码。若你并非因可及性需要而开启，建议前往系统设置关闭。本提示仅作告知，不影响本应用的解锁与自动填充。</string>
     <!-- ISSUE-P2-08 (ZT-13)：风险态降级路径对系统的非敏感回调文案 -->
     <string name="sec_biometric_integrity_blocked">设备存在安全风险，已禁用生物识别快速解锁，请改用主密码解锁</string>
+    <!-- ISSUE-P2-227：生物识别被完整性闸门拦下时点名**具体命中信号**（每句自带处置指引，无插值） -->
+    <string name="sec_biometric_block_debugger">检测到调试器正附加在本应用上，已禁用生物识别快速解锁，请改用主密码解锁</string>
+    <string name="sec_biometric_block_traced">检测到本应用正被其他进程跟踪，已禁用生物识别快速解锁，请改用主密码解锁</string>
+    <string name="sec_biometric_block_hook">检测到注入框架（Frida / Xposed 类）痕迹，已禁用生物识别快速解锁，请改用主密码解锁</string>
+    <string name="sec_biometric_block_root">检测到 Root 痕迹（su 可执行文件），已禁用生物识别快速解锁，请改用主密码解锁</string>
+    <string name="sec_biometric_block_magisk">检测到 Magisk 痕迹，已禁用生物识别快速解锁，请改用主密码解锁</string>
+    <string name="sec_biometric_block_debuggable">当前安装的是可调试构建（debug 版），按零信任策略禁用生物识别快速解锁，请改用主密码解锁；正式使用请安装 release 版</string>
+    <string name="sec_biometric_block_installer">安装渠道不在受信任清单内（如 adb 或第三方渠道安装），已禁用生物识别快速解锁，请改用主密码解锁</string>
+    <string name="sec_biometric_block_undetermined">安全环境扫描尚未完成，暂时禁用生物识别快速解锁，请稍后重试或改用主密码解锁</string>
+    <!-- ISSUE-P2-227：设置页安全分区逐条列出当前命中的降级原因 -->
+    <string name="sec_integrity_risk_reasons_prefix">当前命中项：</string>
     <string name="autofill_save_integrity_blocked">设备存在安全风险，已禁用凭据保存</string>
     <string name="sec_clipboard_title">剪贴板保护</string>
     <string name="sec_clipboard_sub">复制的敏感内容标记为敏感：系统复制提示不显示明文，并在设定时长后自动擦除</string>

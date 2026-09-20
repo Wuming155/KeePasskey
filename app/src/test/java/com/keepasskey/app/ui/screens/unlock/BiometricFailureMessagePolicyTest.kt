@@ -3,6 +3,7 @@ package com.keepasskey.app.ui.screens.unlock
 import com.keepasskey.app.R
 import com.keepasskey.app.security.BiometricAuthManager
 import com.keepasskey.app.security.BiometricResult
+import com.keepasskey.app.security.IntegrityBlockReason
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -60,5 +61,66 @@ class BiometricFailureMessagePolicyTest {
                 BiometricResult.Error(BiometricAuthManager.ERROR_INTEGRITY_BLOCKED, "")
             ).args
         )
+    }
+
+    // ========== ISSUE-P2-227：点名具体命中信号（归因不再笼统） ==========
+
+    @Test
+    fun `携带可调试构建信号时点名该信号专属文案`() {
+        val message = BiometricFailureMessagePolicy.of(
+            BiometricResult.Error(
+                errorCode = BiometricAuthManager.ERROR_INTEGRITY_BLOCKED,
+                errString = BiometricAuthManager.INTEGRITY_BLOCKED_DIAGNOSTIC,
+                blockReasons = listOf(IntegrityBlockReason.DEBUGGABLE_BUILD)
+            )
+        )
+        assertEquals(R.string.sec_biometric_block_debuggable, message.resId)
+    }
+
+    @Test
+    fun `多信号并存时点名危害度最高的一项`() {
+        // 清单由闸门按危害度降序产出（动态攻击特征在前），UI 取首项
+        val message = BiometricFailureMessagePolicy.of(
+            BiometricResult.Error(
+                errorCode = BiometricAuthManager.ERROR_INTEGRITY_BLOCKED,
+                errString = BiometricAuthManager.INTEGRITY_BLOCKED_DIAGNOSTIC,
+                blockReasons = listOf(
+                    IntegrityBlockReason.HOOK_FRAMEWORK,
+                    IntegrityBlockReason.DEBUGGABLE_BUILD,
+                    IntegrityBlockReason.UNTRUSTED_INSTALLER
+                )
+            )
+        )
+        assertEquals(R.string.sec_biometric_block_hook, message.resId)
+    }
+
+    @Test
+    fun `扫描未判定态用未判定专属文案而非风险指控`() {
+        val message = BiometricFailureMessagePolicy.of(
+            BiometricResult.Error(
+                errorCode = BiometricAuthManager.ERROR_INTEGRITY_BLOCKED,
+                errString = BiometricAuthManager.INTEGRITY_BLOCKED_DIAGNOSTIC,
+                blockReasons = listOf(IntegrityBlockReason.SCAN_UNDETERMINED)
+            )
+        )
+        assertEquals(R.string.sec_biometric_block_undetermined, message.resId)
+    }
+
+    /** 契约锁（ISSUE-P1-10 沿用）：每条专属文案都不得带格式化参数，避免把标识类数据插值进 UI */
+    @Test
+    fun `点名信号后仍不携带任何格式化参数`() {
+        IntegrityBlockReason.values().forEach { reason ->
+            assertEquals(
+                "原因 $reason 的专属文案不得声明占位符",
+                emptyList<Any>(),
+                BiometricFailureMessagePolicy.of(
+                    BiometricResult.Error(
+                        errorCode = BiometricAuthManager.ERROR_INTEGRITY_BLOCKED,
+                        errString = "",
+                        blockReasons = listOf(reason)
+                    )
+                ).args
+            )
+        }
     }
 }

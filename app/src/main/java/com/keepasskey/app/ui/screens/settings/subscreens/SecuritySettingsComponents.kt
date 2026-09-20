@@ -244,9 +244,16 @@ internal fun AccessibilityStatusCard(modifier: Modifier = Modifier) {
 /**
  * ISSUE-P2-08 (ZT-13)：运行环境完整性风险提示卡。
  * 命中可疑 / 攻击特征时明确告知用户当前生效的降级策略，杜绝静默放行。
+ *
+ * ISSUE-P2-227：[reasons] 非空时改为**逐条点名当前命中项**（由 `RuntimeIntegrityPolicy` 与等级同源产出，
+ * 无第二数据源），取代整改前那句「可调试构建**或**非受信任安装来源」的笼统枚举；
+ * 清单为空（异常装配）时回落原等级文案，绝不凭空造原因。
  */
 @Composable
-internal fun IntegrityRiskCard(level: RuntimeRiskLevel) {
+internal fun IntegrityRiskCard(
+    level: RuntimeRiskLevel,
+    reasons: List<com.keepasskey.app.security.IntegrityBlockReason> = emptyList()
+) {
     val messageRes = if (level == RuntimeRiskLevel.COMPROMISED) {
         R.string.sec_integrity_risk_compromised
     } else {
@@ -271,12 +278,29 @@ internal fun IntegrityRiskCard(level: RuntimeRiskLevel) {
                     color = MaterialTheme.colorScheme.onErrorContainer
                 )
             }
-            Text(
-                text = stringResource(messageRes),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onErrorContainer,
-                lineHeight = 18.sp
-            )
+            if (reasons.isEmpty()) {
+                Text(
+                    text = stringResource(messageRes),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                    lineHeight = 18.sp
+                )
+            } else {
+                Text(
+                    text = stringResource(R.string.sec_integrity_risk_reasons_prefix),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                    lineHeight = 18.sp
+                )
+                reasons.forEach { reason ->
+                    Text(
+                        text = "· " + stringResource(reason.messageRes),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        lineHeight = 18.sp
+                    )
+                }
+            }
         }
     }
 }

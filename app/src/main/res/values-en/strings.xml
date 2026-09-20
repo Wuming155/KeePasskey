@@ -607,6 +607,17 @@
     <string name="sec_accessibility_notice_body">An accessibility service (not from this app) is enabled on this device. Such services can read what you type on screen, including your master password. If you did not enable it for accessibility reasons, turn it off in system settings. This notice is informational only and does not affect unlocking or autofill.</string>
     <!-- ISSUE-P2-08 (ZT-13): non-sensitive system callback text for the degraded path -->
     <string name="sec_biometric_integrity_blocked">This device is at risk, so biometric quick unlock is disabled. Use your master password instead.</string>
+    <!-- ISSUE-P2-227: name the exact signal that blocked biometrics (self-contained, no interpolation) -->
+    <string name="sec_biometric_block_debugger">A debugger is attached to this app, so biometric quick unlock is disabled. Use your master password instead.</string>
+    <string name="sec_biometric_block_traced">This app is being traced by another process, so biometric quick unlock is disabled. Use your master password instead.</string>
+    <string name="sec_biometric_block_hook">An injection framework (Frida / Xposed class) was detected, so biometric quick unlock is disabled. Use your master password instead.</string>
+    <string name="sec_biometric_block_root">Root artifacts (su binaries) were detected, so biometric quick unlock is disabled. Use your master password instead.</string>
+    <string name="sec_biometric_block_magisk">Magisk artifacts were detected, so biometric quick unlock is disabled. Use your master password instead.</string>
+    <string name="sec_biometric_block_debuggable">You installed a debuggable (debug) build, so biometric quick unlock is disabled by our zero-trust policy. Use your master password, or install a release build for daily use.</string>
+    <string name="sec_biometric_block_installer">The install channel is not on the trusted list (for example adb or a third-party store), so biometric quick unlock is disabled. Use your master password instead.</string>
+    <string name="sec_biometric_block_undetermined">The security environment scan has not finished yet, so biometric quick unlock is temporarily disabled. Try again shortly or use your master password.</string>
+    <!-- ISSUE-P2-227: settings security section lists every currently matched reason -->
+    <string name="sec_integrity_risk_reasons_prefix">Matched now:</string>
     <string name="autofill_save_integrity_blocked">This device is at risk, so saving credentials is disabled.</string>
     <string name="autofill_save_blocked">This app is on the autofill blocklist, so saving credentials was rejected.</string>
     <string name="sec_clipboard_title">Clipboard protection</string>

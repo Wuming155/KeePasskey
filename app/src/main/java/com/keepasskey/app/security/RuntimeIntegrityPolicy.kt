@@ -88,7 +88,14 @@ data class IntegrityEnforcement(
      * 本项由**合法可及性配置**驱动，**只提示、不降级**——判据见
      * [IntegritySignals.thirdPartyAccessibilityEnabled] 的 KDoc。
      */
-    val requireAccessibilityNotice: Boolean = false
+    val requireAccessibilityNotice: Boolean = false,
+    /**
+     * 生物识别快速解锁被禁用时的**具体命中信号**，按危害度降序（ISSUE-P2-227）。
+     *
+     * 与 [disableBiometricQuickUnlock] 同源产出，消费侧据此把「为什么被禁」如实告知用户，
+     * 不再只给一句笼统的「设备存在安全风险」。放行态恒为空清单。
+     */
+    val biometricBlockReasons: List<IntegrityBlockReason> = emptyList()
 ) {
     companion object {
         /** 无风险：全部通道放行 */
@@ -106,7 +113,8 @@ data class IntegrityEnforcement(
         val UNDETERMINED = IntegrityEnforcement(
             disableBiometricQuickUnlock = true,
             disableAutofill = true,
-            requireRiskNotice = false
+            requireRiskNotice = false,
+            biometricBlockReasons = listOf(IntegrityBlockReason.SCAN_UNDETERMINED)
         )
     }
 }
@@ -179,6 +187,8 @@ object RuntimeIntegrityPolicy {
         val elevated = signals.appDebuggable || signals.untrustedInstallSource
         // ISSUE-P2-44：无障碍信号只影响「是否提示」（设置页安全分区展示），不影响等级与通道降级
         val accessibilityNotice = signals.thirdPartyAccessibilityEnabled
+        // ISSUE-P2-227：命中信号清单与等级同源产出（声明顺序即危害度降序），供 UI 点名归因
+        val blockReasons = IntegrityBlockReason.from(signals, undetermined = false)
 
         return when {
             compromised -> RuntimeIntegrityReport(
@@ -188,7 +198,8 @@ object RuntimeIntegrityPolicy {
                     disableBiometricQuickUnlock = true,
                     disableAutofill = true,
                     requireRiskNotice = true,
-                    requireAccessibilityNotice = accessibilityNotice
+                    requireAccessibilityNotice = accessibilityNotice,
+                    biometricBlockReasons = blockReasons
                 )
             )
 
@@ -199,7 +210,8 @@ object RuntimeIntegrityPolicy {
                     disableBiometricQuickUnlock = true,
                     disableAutofill = false,
                     requireRiskNotice = true,
-                    requireAccessibilityNotice = accessibilityNotice
+                    requireAccessibilityNotice = accessibilityNotice,
+                    biometricBlockReasons = blockReasons
                 )
             )
 
