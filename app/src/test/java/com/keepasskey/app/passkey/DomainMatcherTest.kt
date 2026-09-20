@@ -142,6 +142,48 @@ class DomainMatcherTest {
         assertFalse(PublicSuffixList.isRegistrableDomain("a..com"))
     }
 
+    // ===== IP 字面量面（ISSUE-P3-234：DAL 出口 SSRF 覆盖层的可达性判据） =====
+
+    /**
+     * `ISSUE-P3-234`：`extractDomain` **不做 IP 字面量识别**，而 PSL 下限对 IPv4 / IPv6 的裁决不同。
+     *
+     * - IPv4 是「四段点分」⇒ 在默认规则 `*` 下被判为**可注册域**（三个标签位于公共后缀之上）；
+     * - IPv6 去方括号 / 端口后是**单标签**（或空串）⇒ 被 PSL 下限拒绝。
+     *
+     * 该差异是「`Dns` 层守卫（`SsrfGuardDns`）不构成 IP 字面量面完整覆盖」的**判据本身**：
+     * OkHttp 对 IP 字面量主机名不经 `Dns` 接口，故仅连接期层（`SsrfGuardSocketFactory`）可达。
+     */
+    @Test
+    fun `IP 字面量_IPv4 通过可注册域下限而 IPv6 被拒`() {
+        // 归一化不做 IP 识别（方括号 IPv6 与端口剥离后原样返回）
+        assertEquals("127.0.0.1", DomainMatcher.extractDomain("https://127.0.0.1/path?q=1"))
+        assertEquals("169.254.169.254", DomainMatcher.extractDomain("169.254.169.254"))
+        assertEquals("::1", DomainMatcher.extractDomain("https://[::1]/x"))
+
+        assertTrue(PublicSuffixList.isRegistrableDomain("127.0.0.1"))
+        assertTrue(PublicSuffixList.isRegistrableDomain("169.254.169.254"))
+        assertFalse(PublicSuffixList.isRegistrableDomain("::1"))
+    }
+
+    /**
+     * `ISSUE-P3-234`：IPv4 字面量**可作为 `rp.id` 通过创建校验** ⇒ DAL 随后会请求
+     * `https://<ip>/.well-known/assetlinks.json`。这是「SSRF 连接期层必须保留」的可执行依据
+     * ——不得据「`rp.id` 大概不会是 IP」推断该面不可达而拆除 `SsrfGuardSocketFactory`。
+     */
+    @Test
+    fun `IP 字面量_IPv4 可作 rp_id 通过创建校验而 IPv6 不可`() {
+        val appOrigin = "android:apk-key-hash:AbCdEf123456"
+        // 普通应用来源：仅要求「可注册域」⇒ IPv4 字面量放行
+        assertTrue(DomainMatcher.isRpIdTrustedForCreation("127.0.0.1", appOrigin))
+        assertTrue(DomainMatcher.isRpIdTrustedForCreation("169.254.169.254", appOrigin))
+        // 浏览器来源：与 origin 主机名相等亦放行（域名匹配分支同样只受 PSL 下限约束）
+        assertTrue(DomainMatcher.isRpIdTrustedForCreation("127.0.0.1", "https://127.0.0.1"))
+        // 对照：IPv6 字面量为单标签 ⇒ 两条分支一律拒绝
+        assertFalse(DomainMatcher.isRpIdTrustedForCreation("::1", appOrigin))
+        assertFalse(DomainMatcher.isRpIdTrustedForCreation("[::1]", appOrigin))
+        assertFalse(DomainMatcher.isRpIdTrustedForCreation("::1", "https://[::1]"))
+    }
+
     // ===== isPackageMatch（F1 回归锁，宽松变体：仅供保存侧去重） =====
 
     @Test

@@ -59,7 +59,10 @@ object DalVerifierModule {
      *   兜底（单层防御）；现由 `RESTRICTED_TLS` + `MODERN_TLS` **显式排除 `CLEARTEXT`**；
      * - **SSRF / DNS 重绑定守卫**：不校验解析结果，`https://<域名>` 可解析到环回 / 链路本地
      *   （含 `169.254.169.254` 云元数据）/ RFC1918 / ULA 等内网地址；现由 `SsrfGuardDns` 在
-     *   **连接期**拦截，并抵御「先公网、后内网」的重绑定。
+     *   **解析期**拦截「主机名 → 内网地址」并抵御「先公网、后内网」的重绑定，再由
+     *   `SsrfGuardSocketFactory` 在**建连前**复核实际目标地址——后者是 **IP 字面量**与
+     *   **302 跳转目标**的唯一覆盖层（`ISSUE-P2-208` / `ISSUE-P3-234`；
+     *   边界与解除条件见 `docs/architecture/已知工程限界.md` §25）。
      *
      * **`ssrfAllowedHosts` 保持默认空集**（刻意为之）：`ISSUE-P3-121` 的自建内网 WebDAV 逃生通道
      * **不适用**于 DAL——RP 的 `assetlinks.json` 只可能来自公网站点，放行内网目标纯属扩大攻击面。

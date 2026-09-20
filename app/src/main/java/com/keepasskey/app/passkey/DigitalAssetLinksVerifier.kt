@@ -61,6 +61,13 @@ class DigitalAssetLinksVerifier @Inject constructor(
      * 而加固客户端**必然**拒绝明文与回环目标，两者不可共存。
      * 该拆分使「生产出口是否加固」由 `DalVerifierModule` 的提供方法**单独断言**，
      * 而不是被逻辑用例的测试替身悄悄替代掉。
+     *
+     * **已知边界（`ISSUE-P3-234`）**：两层守卫中 `SsrfGuardDns` **覆盖不到 IP 字面量主机名**
+     * ——OkHttp 对字面量直接建连、不经 `Dns` 接口，而 **IPv4 字面量可通过 `rp.id` 校验**
+     * （`DomainMatcher.isRpIdTrustedForCreation("127.0.0.1", …) == true`，由 `DomainMatcherTest`
+     * 实跑锁定；IPv6 字面量因单标签被 PSL 下限拒绝）。故该面仅由 `SsrfGuardSocketFactory`
+     * 的连接期复核承担，**不得**据「`rp.id` 不会是 IP」推断其冗余。完整口径与解除条件见
+     * `docs/architecture/已知工程限界.md` §25。
      */
     @DalHttpClient
     private val http: OkHttpClient
