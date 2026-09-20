@@ -170,6 +170,8 @@ internal fun NavGraphBuilder.keepasskeySettingsNavGraph(
             integrityReport = settingsState.integrityReport,
             onBackClick = { navController.popBackStack() },
             onBiometricToggle = settingsViewModel::setBiometricEnabled,
+            // ISSUE-P3-236 / PD-15：运行环境完整性检测总开关（默认关闭，关闭时不阻断指纹）
+            onIntegrityCheckToggle = settingsViewModel::setIntegrityCheckEnabled,
             onAutoLockToggle = settingsViewModel::setAutoLockBackground,
             onFlagSecureToggle = settingsViewModel::setFlagSecureEnabled,
             onAutoClearClipboardToggle = settingsViewModel::setAutoClearClipboard,

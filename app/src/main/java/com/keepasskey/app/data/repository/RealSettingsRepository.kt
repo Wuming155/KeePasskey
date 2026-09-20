@@ -115,7 +115,9 @@ class RealSettingsRepository @Inject constructor(
         unlockLockoutMaxSeconds = prefs[KEY_UNLOCK_LOCKOUT_MAX] ?: 1800,
         // ISSUE-P1-22：软件级快速解锁降级的用户显式确认（默认未确认 → 未确认不封印）
         quickUnlockDowngradeAcknowledged =
-            prefs[KEY_QUICK_UNLOCK_DOWNGRADE_ACKNOWLEDGED] ?: false
+            prefs[KEY_QUICK_UNLOCK_DOWNGRADE_ACKNOWLEDGED] ?: false,
+        // ISSUE-P3-236 / PD-15：运行环境完整性检测总开关（与 UserSettings 出厂默认一致——未持久化过即关闭）
+        integrityCheckEnabled = prefs[KEY_INTEGRITY_CHECK_ENABLED] ?: false
     )
 
     private suspend fun edit(block: (MutablePreferences) -> Unit) {
@@ -217,6 +219,11 @@ class RealSettingsRepository @Inject constructor(
         it[KEY_QUICK_UNLOCK_DOWNGRADE_ACKNOWLEDGED] = acknowledged
     }
 
+    /** ISSUE-P3-236 / PD-15：运行环境完整性检测总开关（默认关闭，用户显式开启才恢复拦截） */
+    override suspend fun setIntegrityCheckEnabled(enabled: Boolean) = edit {
+        it[KEY_INTEGRITY_CHECK_ENABLED] = enabled
+    }
+
     private companion object {
         private const val LEGACY_PREFS_NAME = "keepasskey_settings"
 
@@ -250,5 +257,7 @@ class RealSettingsRepository @Inject constructor(
         // ISSUE-P1-22：软件级快速解锁降级的用户显式确认
         private val KEY_QUICK_UNLOCK_DOWNGRADE_ACKNOWLEDGED =
             booleanPreferencesKey("quick_unlock_downgrade_acknowledged")
+        // ISSUE-P3-236 / PD-15：运行环境完整性检测总开关
+        private val KEY_INTEGRITY_CHECK_ENABLED = booleanPreferencesKey("integrity_check_enabled")
     }
 }

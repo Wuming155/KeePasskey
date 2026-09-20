@@ -243,6 +243,19 @@ internal class SettingsPreferencesController(
         }
     }
 
+    /**
+     * ISSUE-P3-236 / PD-15：运行环境完整性检测总开关（仓库直写项，UI 回显经设置流投影）。
+     *
+     * 无需当场验证——该开关**不涉及身份确认**（不同于 ISSUE-P2-212 的生物识别开关），
+     * 且两个方向都是即时可回改的：关闭立即放行，开启后由 `RuntimeIntegrityDetector`
+     * 订阅设置流并立刻重扫，下一轮门控即恢复拦截，不存在「开关已开但判定仍是旧的」窗口。
+     */
+    fun setIntegrityCheckEnabled(enabled: Boolean) {
+        scope.launch {
+            settingsRepository.setIntegrityCheckEnabled(enabled)
+        }
+    }
+
     // ========== 仓库直写偏好 ==========
     fun setAppLanguage(language: AppLanguage) {
         scope.launch {

@@ -178,55 +178,93 @@ object RuntimeIntegrityPolicy {
     fun requiresAccessibilityNotice(report: RuntimeIntegrityReport?): Boolean =
         report?.enforcement?.requireAccessibilityNotice == true
 
-    fun evaluate(signals: IntegritySignals): RuntimeIntegrityReport {
-        val compromised = signals.debuggerAttached ||
-            signals.beingTraced ||
-            signals.rootArtifactsDetected ||
-            signals.magiskDetected ||
-            signals.hookFrameworkDetected
-        // ISSUE-P3-231：安装来源信号已移除（可被伪造、误伤正常侧载），仅 debug 构建属静态可疑特征
-        val elevated = signals.appDebuggable
+    fun evaluate(
+        signals: IntegritySignals,
+        /**
+         * 用户是否启用了运行环境完整性检测（ISSUE-P3-236 / PD-15，出厂默认**关闭**）。
+         *
+         * `false` 时**只解除通道降级**（生物快速解锁 / 自动填充照常放行、不再要求风险提示），
+         * 风险等级与命中清单仍如实产出——`report` 不得因用户关掉阻断而谎报「未发现风险」。
+         * 默认 `true` 供纯信号单测与既有调用点沿用原 fail-closed 语义。
+         */
+        enforcementEnabled: Boolean = true
+    ): RuntimeIntegrityReport {
         // ISSUE-P2-44：无障碍信号只影响「是否提示」（设置页安全分区展示），不影响等级与通道降级
         val accessibilityNotice = signals.thirdPartyAccessibilityEnabled
         // ISSUE-P2-227：命中信号清单与等级同源产出（声明顺序即危害度降序），供 UI 点名归因
         val blockReasons = IntegrityBlockReason.from(signals, undetermined = false)
+        val level = riskLevelOf(signals)
 
-        return when {
-            compromised -> RuntimeIntegrityReport(
-                level = RuntimeRiskLevel.COMPROMISED,
-                signals = signals,
-                enforcement = IntegrityEnforcement(
-                    disableBiometricQuickUnlock = true,
-                    disableAutofill = true,
-                    requireRiskNotice = true,
-                    requireAccessibilityNotice = accessibilityNotice,
-                    biometricBlockReasons = blockReasons
-                )
-            )
-
-            elevated -> RuntimeIntegrityReport(
-                level = RuntimeRiskLevel.ELEVATED,
-                signals = signals,
-                enforcement = IntegrityEnforcement(
-                    disableBiometricQuickUnlock = true,
-                    disableAutofill = false,
-                    requireRiskNotice = true,
-                    requireAccessibilityNotice = accessibilityNotice,
-                    biometricBlockReasons = blockReasons
-                )
-            )
-
-            else -> RuntimeIntegrityReport(
-                level = RuntimeRiskLevel.TRUSTED,
-                signals = signals,
-                enforcement = IntegrityEnforcement(
+        return RuntimeIntegrityReport(
+            level = level,
+            signals = signals,
+            enforcement = if (enforcementEnabled) {
+                enforcingEnforcement(level, accessibilityNotice, blockReasons)
+            } else {
+                // ISSUE-P3-236 / PD-15：用户已显式关闭检测 ⇒ 不降级任何通道。
+                // `biometricBlockReasons` 按既有约定在放行态恒为空清单——即使信号命中，
+                // 也不得向「为什么被禁」的消费侧提供本就未生效的归因。
+                IntegrityEnforcement(
                     disableBiometricQuickUnlock = false,
                     disableAutofill = false,
                     requireRiskNotice = false,
                     requireAccessibilityNotice = accessibilityNotice
                 )
-            )
+            }
+        )
+    }
+
+    /**
+     * 信号 → 风险等级（ISSUE-P3-236：自 [evaluate] 提为独立纯函数，判定口径**逐字未改**）。
+     *
+     * ISSUE-P3-231：安装来源信号已移除（可被伪造、误伤正常侧载），仅 debug 构建属静态可疑特征。
+     */
+    private fun riskLevelOf(signals: IntegritySignals): RuntimeRiskLevel {
+        val compromised = signals.debuggerAttached ||
+            signals.beingTraced ||
+            signals.rootArtifactsDetected ||
+            signals.magiskDetected ||
+            signals.hookFrameworkDetected
+        return when {
+            compromised -> RuntimeRiskLevel.COMPROMISED
+            signals.appDebuggable -> RuntimeRiskLevel.ELEVATED
+            else -> RuntimeRiskLevel.TRUSTED
         }
+    }
+
+    /**
+     * 等级 → 阻断策略（ISSUE-P3-236：自 [evaluate] 提为独立纯函数，映射**逐字未改**）。
+     *
+     * 仅检测启用时使用；[RuntimeRiskLevel.UNDETERMINED] 由 [RuntimeIntegrityReport.UNDETERMINED]
+     * 与 [RuntimeIntegrityDetector] 的保守分支单独产出，本函数入参恒为三档真实等级。
+     */
+    private fun enforcingEnforcement(
+        level: RuntimeRiskLevel,
+        accessibilityNotice: Boolean,
+        blockReasons: List<IntegrityBlockReason>
+    ): IntegrityEnforcement = when (level) {
+        RuntimeRiskLevel.COMPROMISED -> IntegrityEnforcement(
+            disableBiometricQuickUnlock = true,
+            disableAutofill = true,
+            requireRiskNotice = true,
+            requireAccessibilityNotice = accessibilityNotice,
+            biometricBlockReasons = blockReasons
+        )
+
+        RuntimeRiskLevel.ELEVATED -> IntegrityEnforcement(
+            disableBiometricQuickUnlock = true,
+            disableAutofill = false,
+            requireRiskNotice = true,
+            requireAccessibilityNotice = accessibilityNotice,
+            biometricBlockReasons = blockReasons
+        )
+
+        else -> IntegrityEnforcement(
+            disableBiometricQuickUnlock = false,
+            disableAutofill = false,
+            requireRiskNotice = false,
+            requireAccessibilityNotice = accessibilityNotice
+        )
     }
 
     /**
@@ -242,12 +280,15 @@ object RuntimeIntegrityPolicy {
      * @param hookFrameworkDetected 实时钩子框架信号（磁盘扫描结果；非 suspend 路径可不提供）
      * @param beingTraced 实时 ptrace 信号（ISSUE-P3-83；`TracerPid > 0`）。
      *   **刻意无默认值**：安全信号不允许「忘记传参即放行」。
+     * @param enforcementEnabled 用户是否启用了完整性检测（ISSUE-P3-236 / PD-15）。
+     *   默认 `true`（既有 fail-closed 语义）；关闭时仅重算等级与命中项，不降级任何通道。
      */
     fun escalateForLiveSignals(
         base: RuntimeIntegrityReport,
         debuggerAttached: Boolean,
         hookFrameworkDetected: Boolean,
-        beingTraced: Boolean
+        beingTraced: Boolean,
+        enforcementEnabled: Boolean = true
     ): RuntimeIntegrityReport {
         if (!debuggerAttached && !hookFrameworkDetected && !beingTraced) return base
         return evaluate(
@@ -255,7 +296,8 @@ object RuntimeIntegrityPolicy {
                 debuggerAttached = base.signals.debuggerAttached || debuggerAttached,
                 hookFrameworkDetected = base.signals.hookFrameworkDetected || hookFrameworkDetected,
                 beingTraced = base.signals.beingTraced || beingTraced
-            )
+            ),
+            enforcementEnabled = enforcementEnabled
         )
     }
 

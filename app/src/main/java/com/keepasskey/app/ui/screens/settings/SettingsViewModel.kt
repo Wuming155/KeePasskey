@@ -299,6 +299,14 @@ class SettingsViewModel @Inject constructor(
     fun setFlagSecureEnabled(enabled: Boolean) = preferences.setFlagSecureEnabled(enabled)
     fun setAutoClearClipboard(enabled: Boolean) = preferences.setAutoClearClipboard(enabled)
 
+    /**
+     * ISSUE-P3-236 / PD-15：运行环境完整性检测总开关（出厂默认关闭）。
+     *
+     * 关闭即解除 Root / 调试 / 注入环境对指纹快速解锁与自动填充的阻断；
+     * 探测本身仍在后台运行，设置页据同一份快照呈现环境状态。
+     */
+    fun setIntegrityCheckEnabled(enabled: Boolean) = preferences.setIntegrityCheckEnabled(enabled)
+
     // ===== 同步配置 / 动作（委托 [SettingsSyncController]） =====
     fun setSyncProvider(provider: CloudSyncProvider) = syncController.setSyncProvider(provider)
     /**

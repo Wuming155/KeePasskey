@@ -5,6 +5,7 @@ import android.content.pm.ApplicationInfo
 import android.os.Debug
 import android.view.accessibility.AccessibilityManager
 import android.accessibilityservice.AccessibilityServiceInfo
+import com.keepasskey.app.data.repository.SettingsRepository
 import com.keepasskey.core.log.AppLog
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
@@ -14,7 +15,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -35,21 +38,33 @@ import javax.inject.Singleton
  * - **判定与探测分离**：风险裁决由纯函数 [RuntimeIntegrityPolicy] 承担（JVM 可测），
  *   本类只负责采集信号并持有可观察快照；
  * - **fail-closed**：首次扫描完成前暴露 [IntegrityEnforcement.UNDETERMINED] 保守策略，
- *   敏感通道等待结果而非放行。
+ *   敏感通道等待结果而非放行；
+ * - **用户可关闭**（`PD-15`）：总开关出厂默认**关闭**，关闭时不降级任何通道（见 [enforcementEnabled]）。
  *
  * @param context 允许为 null 仅用于纯 JVM 单元测试（此时探测退化为干净信号）；
  *   生产 DI 注入 @ApplicationContext。
+ * @param settingsRepository 总开关数据源；允许为 null 仅用于纯 JVM 单测（此时按出厂默认「关闭」处理）。
  */
 @Singleton
 class RuntimeIntegrityDetector @Inject constructor(
     @ApplicationContext private val context: Context?,
     /** ISSUE-P3-83：实时 ptrace 探测（`/proc/self/status` 的 `TracerPid`） */
-    private val tracedProcessProbe: TracedProcessProbe
+    private val tracedProcessProbe: TracedProcessProbe,
+    /** ISSUE-P3-236 / PD-15：运行环境完整性检测总开关（默认关闭）的数据源 */
+    private val settingsRepository: SettingsRepository? = null
 ) : RuntimeIntegrityGate {
 
     private val scanScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val started = AtomicBoolean(false)
     private val rescanInFlight = AtomicBoolean(false)
+
+    /**
+     * ISSUE-P3-236 / PD-15：检测总开关的内存镜像。初值 `false` = 出厂默认——偏好未读到时
+     * **不阻断**，避免冷启动瞬间反转口径；由 [observeEnforcementPreference] 订阅设置流维持一致。
+     * **关闭只解除阻断、不停探测**：周期重扫照常运行，重新开启时 [report] 已是真值。
+     */
+    @Volatile
+    private var enforcementEnabled: Boolean = false
 
     /** ISSUE-P2-63：上次扫描完成时刻（毫秒）；0 = 尚未扫描。由后台周期重扫与显式 refresh 推进。 */
     @Volatile
@@ -74,11 +89,32 @@ class RuntimeIntegrityDetector @Inject constructor(
      */
     fun start() {
         if (!started.compareAndSet(false, true)) return
+        observeEnforcementPreference()
         scanScope.launch {
             while (true) {
                 runCatching { refresh() }
                 delay(LIVE_RESCAN_INTERVAL_MS)
             }
+        }
+    }
+
+    /**
+     * ISSUE-P3-236 / PD-15：订阅用户总开关，维持 [enforcementEnabled] 与持久化值一致；
+     * 未注入仓库（纯 JVM 单测）时保持出厂默认「关闭」——**不得**因依赖缺失回落到「开启并阻断」。
+     * 变更后立即重扫一次，杜绝「用关闭态算出的策略代表开启态判定」。
+     */
+    private fun observeEnforcementPreference() {
+        val repository = settingsRepository ?: return
+        scanScope.launch {
+            repository.getSettings()
+                .map { it.integrityCheckEnabled }
+                .distinctUntilChanged()
+                .collect { enabled ->
+                    if (enforcementEnabled == enabled) return@collect
+                    enforcementEnabled = enabled
+                    AppLog.i(TAG, "运行完整性检测总开关已${if (enabled) "开启" else "关闭"}")
+                    runCatching { refresh() }
+                }
         }
     }
 
@@ -93,6 +129,9 @@ class RuntimeIntegrityDetector @Inject constructor(
      *    绝不用陈旧快照为高价值通道（解封主密码）放行。
      */
     override fun currentEnforcement(): IntegrityEnforcement {
+        // ISSUE-P3-236 / PD-15：关闭 ⇒ 直接放行，**刻意连「未判定 / 陈旧」的保守分支一并绕过**
+        // ——那条 fail-closed 同属「检测」语义，用户既已显式关闭，就不该以「扫描没跑完」为由挡住指纹。
+        if (!enforcementEnabled) return IntegrityEnforcement.ALLOWED
         val snapshot = _report.value
         val stale = RuntimeIntegrityPolicy.isSnapshotStale(
             snapshotAtMillis = lastScanAtMillis,
@@ -110,7 +149,8 @@ class RuntimeIntegrityDetector @Inject constructor(
             // ISSUE-P3-83：TracerPid 是**瞬时**信号，周期重扫会漏掉「附加→读取→脱离」窗口，
             // 故在此（非 suspend 门控的唯一入口）同步求值——生物快速解锁与 CM/自动填充
             // 两条通道因此同时获得 ptrace 信号。
-            beingTraced = liveBeingTraced()
+            beingTraced = liveBeingTraced(),
+            enforcementEnabled = true
         ).enforcement
     }
 
@@ -127,6 +167,8 @@ class RuntimeIntegrityDetector @Inject constructor(
     }
 
     override suspend fun awaitEnforcement(): IntegrityEnforcement {
+        // ISSUE-P3-236 / PD-15：关闭 ⇒ 放行（口径同 [currentEnforcement]，保守分支同样不适用）
+        if (!enforcementEnabled) return IntegrityEnforcement.ALLOWED
         // ISSUE-P3-53：敏感操作（自动填充下发）前**重扫**，捕获冷启动后才出现的时变信号
         // （调试器附加 / 钩子框架落点等）；重扫失败时回退为等待首次扫描完成，
         // 超时同样返回 UNDETERMINED（fail-closed，绝不返回「默认放行」）。
@@ -138,7 +180,8 @@ class RuntimeIntegrityDetector @Inject constructor(
             base = base,
             debuggerAttached = liveDebuggerAttached(),
             hookFrameworkDetected = false,
-            beingTraced = liveBeingTraced()
+            beingTraced = liveBeingTraced(),
+            enforcementEnabled = true
         ).enforcement
     }
 
@@ -158,7 +201,9 @@ class RuntimeIntegrityDetector @Inject constructor(
 
     /** 重新采集信号并刷新快照（供显式复检；由 [start] 的周期重扫与敏感通道 await 触发） */
     suspend fun refresh(): RuntimeIntegrityReport {
-        val report = RuntimeIntegrityPolicy.evaluate(detectSignals())
+        // ISSUE-P3-236 / PD-15：按当前总开关裁决——关闭时仍产出**真实等级与命中项**，
+        // 只是不降级通道（快照不得因用户关掉阻断就谎报 TRUSTED）。
+        val report = RuntimeIntegrityPolicy.evaluate(detectSignals(), enforcementEnabled)
         _report.value = report
         // ISSUE-P2-63：记录扫描时刻，供非 suspend 门控判定快照新鲜度
         lastScanAtMillis = System.currentTimeMillis()

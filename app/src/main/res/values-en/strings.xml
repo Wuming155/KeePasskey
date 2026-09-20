@@ -622,6 +622,10 @@
     <string name="sec_biometric_block_undetermined">The security environment scan has not finished yet, so biometric quick unlock is temporarily disabled. Try again shortly or use your master password.</string>
     <!-- ISSUE-P2-227: settings security section lists every currently matched reason -->
     <string name="sec_integrity_risk_reasons_prefix">Matched now:</string>
+    <!-- ISSUE-P3-236 / PD-15: master switch for runtime integrity checks (off by default; turning it off only lifts blocking, detection still runs) -->
+    <string name="sec_integrity_check_title">Runtime integrity checks</string>
+    <string name="sec_integrity_check_sub">When on, blocks fingerprint quick unlock and autofill on rooted / Magisk, debugger-attached or hooked environments; when off (default) fingerprint still works there</string>
+    <string name="sec_integrity_check_off_notice">Checks are off (default): on a rooted device (incl. Magisk), with a debugger attached or with an injection framework, fingerprint quick unlock and autofill are no longer blocked, and detected risks no longer downgrade anything. Keeping it off suits a device you fully control; turn it on for devices you do not.</string>
     <string name="autofill_save_integrity_blocked">This device is at risk, so saving credentials is disabled.</string>
     <string name="autofill_save_blocked">This app is on the autofill blocklist, so saving credentials was rejected.</string>
     <string name="sec_clipboard_title">Clipboard protection</string>

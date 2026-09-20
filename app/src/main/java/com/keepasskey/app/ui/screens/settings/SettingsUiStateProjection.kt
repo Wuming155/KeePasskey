@@ -227,7 +227,10 @@ internal fun buildSettingsUiState(
     debugLogLines = debugLogLines,
 
     // 9. 运行环境完整性（ISSUE-P2-08 风险提示数据源）
-    integrityReport = integrityReport
+    integrityReport = integrityReport,
+
+    // 10. 运行环境完整性检测总开关（ISSUE-P3-236 / PD-15；仓库直写项，userSettings 为单一真相源）
+    integrityCheckEnabled = userSettings.integrityCheckEnabled
 )
 
 /**

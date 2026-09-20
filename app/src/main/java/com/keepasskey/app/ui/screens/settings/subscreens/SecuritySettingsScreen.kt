@@ -60,6 +60,8 @@ fun SecuritySettingsScreen(
     onBackClick: () -> Unit,
     // ISSUE-P2-212：第二参数为宿主 Activity——「开启」须当场发起 BiometricPrompt 验证，缺失时 fail-closed
     onBiometricToggle: (Boolean, FragmentActivity?) -> Unit,
+    // ISSUE-P3-236 / PD-15：运行环境完整性检测总开关（默认关闭）
+    onIntegrityCheckToggle: (Boolean) -> Unit = {},
     onAutoLockToggle: (Boolean) -> Unit,
     onFlagSecureToggle: (Boolean) -> Unit,
     onAutoClearClipboardToggle: (Boolean) -> Unit,
@@ -165,6 +167,29 @@ fun SecuritySettingsScreen(
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.error,
                                 modifier = Modifier.padding(start = 4.dp)
+                            )
+                        }
+
+                        // ISSUE-P3-236 / PD-15：运行环境完整性检测总开关（出厂默认关闭）。
+                        // 归入本卡片而非「系统环境防泄露保护」分区，是因为它存在的唯一目的
+                        // 就是决定「指纹在 Root / 调试 / 注入环境下是否还能用」——放在生物识别
+                        // 名称旁边，用户在看到指纹被拦的提示后能就地找到它。
+                        SecuritySwitchRow(
+                            icon = Icons.Default.GppBad,
+                            title = stringResource(R.string.sec_integrity_check_title),
+                            subtitle = stringResource(R.string.sec_integrity_check_sub),
+                            checked = uiState.integrityCheckEnabled,
+                            onCheckedChange = onIntegrityCheckToggle
+                        )
+
+                        // AC③：关闭（出厂默认）即为「放弃拦截」，代价必须显式告知而非留给用户推断
+                        // （语义与「关闭自动擦除剪贴板」的常驻提示一致）。
+                        if (!uiState.integrityCheckEnabled) {
+                            Text(
+                                text = stringResource(R.string.sec_integrity_check_off_notice),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.padding(start = 16.dp, end = 16.dp)
                             )
                         }
                     }
