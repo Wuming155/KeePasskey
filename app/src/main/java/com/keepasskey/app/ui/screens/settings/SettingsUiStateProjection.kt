@@ -33,7 +33,6 @@ internal fun settingsUiStateFlow(
     userSettings: Flow<UserSettings>,
     syncState: Flow<SettingsSyncController.SyncUiState>,
     healthState: Flow<SettingsHealthController.HealthCheckUiState>,
-    autofillState: Flow<AutofillUiState>,
     databaseConfigState: Flow<DatabaseConfigUiState>,
     // ISSUE-P2-212：生物识别开关的「验证中 / 一次性反馈」局部状态（与持久化偏好正交）
     biometricToggleState: Flow<BiometricToggleUiState>,
@@ -47,8 +46,8 @@ internal fun settingsUiStateFlow(
     userSettings,
     syncState,
     healthState,
-    combine(autofillState, databaseConfigState, biometricToggleState) { af, db, toggle ->
-        Triple(af, db, toggle)
+    combine(databaseConfigState, biometricToggleState) { db, toggle ->
+        Pair(db, toggle)
     },
     combine(
         combine(securityTimeoutState, extendedSettings, debugLogLines) { sec, ext, logs ->
@@ -59,13 +58,12 @@ internal fun settingsUiStateFlow(
     ) { securityState, report, mountedChildDatabases ->
         Triple(securityState, report, mountedChildDatabases)
     }
-) { settings, sync, health, (autofill, db, biometricToggle), (securityState, report, mounted) ->
+) { settings, sync, health, (db, biometricToggle), (securityState, report, mounted) ->
     val (secState, extState, logs) = securityState
     buildSettingsUiState(
         userSettings = settings,
         syncState = sync,
         healthState = health,
-        autofillState = autofill,
         dbState = db,
         biometricToggle = biometricToggle,
         secState = secState,
@@ -85,7 +83,6 @@ internal fun buildSettingsUiState(
     userSettings: UserSettings,
     syncState: SettingsSyncController.SyncUiState,
     healthState: SettingsHealthController.HealthCheckUiState,
-    autofillState: AutofillUiState,
     dbState: DatabaseConfigUiState,
     // ISSUE-P2-212：生物识别开关的验证中/一次性反馈（默认值便于既有调用点不受影响）
     biometricToggle: BiometricToggleUiState = BiometricToggleUiState(),
@@ -146,9 +143,10 @@ internal fun buildSettingsUiState(
     preloadDatabaseEnabled = extState.preloadDatabaseEnabled,
 
     // 3. 表单自动填充与 Passkey
-    credentialProviderEnabled = autofillState.credentialProviderEnabled,
-    passkeySupportEnabled = autofillState.passkeySupportEnabled,
-    autofillServiceEnabled = autofillState.autofillServiceEnabled,
+    // ISSUE-P2-228：三条通道开关取自持久化的 extState（迁移前来自内存态 AutofillUiState，重启即回弹）
+    credentialProviderEnabled = extState.credentialProviderEnabled,
+    passkeySupportEnabled = extState.passkeySupportEnabled,
+    autofillServiceEnabled = extState.autofillServiceEnabled,
     offerSaveCredentials = extState.offerSaveCredentials,
     inlineSuggestionsEnabled = extState.inlineSuggestionsEnabled,
     autoReturnFromQuery = extState.autoReturnFromQuery,
@@ -269,13 +267,6 @@ internal fun databaseConfigFromHeader(db: KdbxDatabase): DatabaseConfigUiState {
         recycleBinEnabled = db.recycleBinEnabled
     )
 }
-
-/** 自动填充启用开关的局部投影（原 `SettingsViewModel` 私有嵌套类型，ISSUE-P3-29 上移为同包 internal） */
-internal data class AutofillUiState(
-    val credentialProviderEnabled: Boolean,
-    val passkeySupportEnabled: Boolean,
-    val autofillServiceEnabled: Boolean
-)
 
 /** 密码库配置的局部投影（原 `SettingsViewModel` 私有嵌套类型，ISSUE-P3-29 上移为同包 internal） */
 internal data class DatabaseConfigUiState(

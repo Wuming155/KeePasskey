@@ -807,16 +807,18 @@
     <!-- ===== Autofill settings subscreen ===== -->
     <string name="autofill_section_provider">Fill services</string>
     <string name="autofill_cm_title">Credential Manager</string>
-    <string name="autofill_cm_sub">System-level credential management on Android 16+, unified passkey and password filling</string>
+    <string name="autofill_cm_sub">System-level credential management on Android 16+, unified passkey and password filling. When off, this app returns no credential candidates or save prompts at all (it still appears in the system list of providers)</string>
     <string name="autofill_passkey_title">Passkey support</string>
-    <string name="autofill_passkey_sub">Sign in with device-generated passkeys in supporting apps and sites</string>
+    <string name="autofill_passkey_sub">Sign in with device-generated passkeys in supporting apps and sites; when off, passkey registration and sign-in are both unavailable, while password autofill keeps working</string>
     <!-- Privileged browser allowlist (passkey availability in the Credential Manager channel) -->
     <string name="settings_passkey_privileged_browsers">Privileged browser allowlist</string>
     <string name="settings_passkey_privileged_sub">Let browsers other than Chrome / Firefox use passkeys</string>
     <string name="settings_passkey_privileged_warning">Enabling an app lets it request passkeys for any site identity — that is how browser delegation works. Only enable browsers you trust: the fingerprint is read from the app\'s own signing certificate, so a changed signature or a same-name sideloaded app stops matching immediately.</string>
     <string name="settings_passkey_privileged_empty">No browser apps detected.</string>
-    <string name="autofill_legacy_title">Legacy autofill service</string>
-    <string name="autofill_legacy_sub">Accessibility-based filling compatible with older Android versions</string>
+    <string name="autofill_service_title">System autofill service</string>
+    <!-- ISSUE-P2-228: the old copy claimed an accessibility-based legacy channel; this app registers
+         no AccessibilityService (minSdk 36), and the switch had neither persistence nor a consumer. -->
+    <string name="autofill_service_sub">Credential filling for browser and app forms. When off, this app offers no fill suggestions and accepts no saves anywhere (it is still listed by the system; pick another service in system settings)</string>
     <string name="autofill_section_ux">Filling experience</string>
     <string name="autofill_inline_title">Inline keyboard suggestions</string>
     <string name="autofill_inline_sub">Show account suggestions right in the input method bar; this passes the candidate username and entry title to the input method (which may be a third-party keyboard). Off by default</string>
@@ -1148,7 +1150,7 @@
     <string name="autofill_health_ok">Autofill service is working</string>
     <string name="autofill_health_attention">Autofill service needs attention</string>
     <string name="autofill_health_issue_service_missing">Autofill service is not declared correctly; reinstall the app</string>
-    <string name="autofill_health_issue_app_disabled">Legacy autofill service is turned off in the app</string>
+    <string name="autofill_health_issue_app_disabled">The in-app "System autofill service" switch is turned off</string>
     <string name="autofill_health_issue_system_disabled">This app is not selected as the autofill service; enable it in system settings</string>
     <string name="autofill_health_issue_cm_unavailable">Credential Manager is unavailable</string>
     <string name="autofill_health_issue_field_signature_unavailable">Field-block verification is temporarily unavailable (system keystore unavailable), so autofill is conservatively not filling; retry after rebooting, and check your system security settings if it persists</string>

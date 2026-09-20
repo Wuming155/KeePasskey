@@ -44,14 +44,6 @@ internal class SettingsPreferencesController(
     private val scope: CoroutineScope
 ) {
 
-    private val autofillStateFlow = MutableStateFlow(
-        AutofillUiState(
-            credentialProviderEnabled = true,
-            passkeySupportEnabled = true,
-            autofillServiceEnabled = true
-        )
-    )
-
     private val databaseConfigStateFlow = MutableStateFlow(
         DatabaseConfigUiState(
             databaseName = "",
@@ -80,7 +72,8 @@ internal class SettingsPreferencesController(
     /** 调试日志真实缓冲快照（随刷新/清除动作更新） */
     private val debugLogLinesFlow = MutableStateFlow(debugLogBuffer.snapshot())
 
-    val autofillState: StateFlow<AutofillUiState> = autofillStateFlow
+    // ISSUE-P2-228：原 `autofillState`（三条通道开关的纯内存回显）已删除——
+    // 那三个开关改由 ExtendedSettingsStore 持久化，UI 状态在 SettingsUiStateProjection 直接取自 extState。
     val databaseConfigState: StateFlow<DatabaseConfigUiState> = databaseConfigStateFlow
     val securityTimeoutState: StateFlow<SecurityTimeoutUiState> = securityTimeoutStateFlow
     val debugLogLines: StateFlow<List<String>> = debugLogLinesFlow
@@ -215,18 +208,10 @@ internal class SettingsPreferencesController(
     // ISSUE-P3-65：setTanExpiresOnUse / setCheckForDuplicateUuids 已移除——
     // 两者仅回写内存回显且无任何行为消费方（假开关），UI 入口已如实禁用。
 
-    // ========== 自动填充启用开关 ==========
-    fun setCredentialProviderEnabled(enabled: Boolean) {
-        autofillStateFlow.update { it.copy(credentialProviderEnabled = enabled) }
-    }
-
-    fun setPasskeySupportEnabled(enabled: Boolean) {
-        autofillStateFlow.update { it.copy(passkeySupportEnabled = enabled) }
-    }
-
-    fun setAutofillServiceEnabled(enabled: Boolean) {
-        autofillStateFlow.update { it.copy(autofillServiceEnabled = enabled) }
-    }
+    // ISSUE-P2-228：原「自动填充启用开关」三个方法（setCredentialProviderEnabled /
+    // setPasskeySupportEnabled / setAutofillServiceEnabled）已移除——它们只回写内存 StateFlow、
+    // 既无持久化键也无生产消费方（假开关，同 ISSUE-P3-65 的处置口径）。
+    // 三个开关现由 SettingsExtendedPreferencesController 持久化，并由两条凭据通道服务真实消费。
 
     // ========== 设备解锁与安全 ==========
     fun setAutoLockTimeout(seconds: Int) {

@@ -51,6 +51,14 @@ data class ExtendedSettings(
     // ISSUE-P3-42：会话授权宽限（默认关闭）——开启后在库已解锁且短时间内已确认过的
     // 同一「包名 + 域」上跳过重复二次确认；关闭时保持「每次下发前强制二次确认」不变。
     val autofillSessionGrantEnabled: Boolean = false,
+    // ISSUE-P2-228：三条**通道总开关**自 `SettingsPreferencesController` 的纯内存态迁入持久化。
+    // 迁移前它们是「无写入方持久化、无生产消费方」的假开关（关掉不影响任何行为、重启即回 true），
+    // 且其中「旧版自动填充服务」的副标题声称走无障碍通道——本应用**没有任何 AccessibilityService**。
+    // 现由 `KeePasskeyAutofillService` / `KeePasskeyCredentialProviderService` 在每次请求时求值：
+    // 关闭即该通道不下发任何凭据、不接受保存（默认 true = 与迁移前的实际可观察行为一致）。
+    val credentialProviderEnabled: Boolean = true,
+    val passkeySupportEnabled: Boolean = true,
+    val autofillServiceEnabled: Boolean = true,
     // 自动填充黑名单已由 AutofillBlocklistStore 承载（TASK-44）：
     // 原 disabledAutofillQueriesCount 计数无任何写入方，随本次整改一并下架
 

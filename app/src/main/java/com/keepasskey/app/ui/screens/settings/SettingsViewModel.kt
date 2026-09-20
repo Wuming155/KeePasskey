@@ -241,7 +241,6 @@ class SettingsViewModel @Inject constructor(
         userSettings = settingsRepository.getSettings(),
         syncState = syncController.state,
         healthState = healthController.state,
-        autofillState = preferences.autofillState,
         databaseConfigState = preferences.databaseConfigState,
         // ISSUE-P2-212：生物识别开关的验证中/一次性反馈状态
         biometricToggleState = biometricToggleState,
@@ -372,9 +371,12 @@ class SettingsViewModel @Inject constructor(
     // ISSUE-P3-68：解锁失败重试节流开关与最长锁定时长
     fun setUnlockThrottleEnabled(enabled: Boolean) = preferences.setUnlockThrottleEnabled(enabled)
     fun setUnlockLockoutMaxSeconds(seconds: Int) = preferences.setUnlockLockoutMaxSeconds(seconds)
-    fun setCredentialProviderEnabled(enabled: Boolean) = preferences.setCredentialProviderEnabled(enabled)
-    fun setPasskeySupportEnabled(enabled: Boolean) = preferences.setPasskeySupportEnabled(enabled)
-    fun setAutofillServiceEnabled(enabled: Boolean) = preferences.setAutofillServiceEnabled(enabled)
+    // ISSUE-P2-228：三条通道开关改由扩展偏好承载（持久化 + 真实消费方），门面方法名不变
+    fun setCredentialProviderEnabled(enabled: Boolean) =
+        extendedPreferences.setCredentialProviderEnabled(enabled)
+
+    fun setPasskeySupportEnabled(enabled: Boolean) = extendedPreferences.setPasskeySupportEnabled(enabled)
+    fun setAutofillServiceEnabled(enabled: Boolean) = extendedPreferences.setAutofillServiceEnabled(enabled)
     fun setRecycleBinEnabled(enabled: Boolean) = preferences.setRecycleBinEnabled(enabled)
     // ISSUE-P3-65：TAN 序列号 / 数据库 UUID 两开关的假 setter 已移除——UI 入口如实禁用，
     // 待真实语义（TAN 用后标记 / 重复 UUID 扫描）落地后再以可持久化+可消费的形态恢复

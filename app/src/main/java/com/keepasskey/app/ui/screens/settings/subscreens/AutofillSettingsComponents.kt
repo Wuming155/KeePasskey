@@ -92,8 +92,8 @@ internal fun AutofillProviderCard(
 
             AutofillSwitchRow(
                 icon = Icons.Default.Password,
-                title = stringResource(R.string.autofill_legacy_title),
-                subtitle = stringResource(R.string.autofill_legacy_sub),
+                title = stringResource(R.string.autofill_service_title),
+                subtitle = stringResource(R.string.autofill_service_sub),
                 checked = uiState.autofillServiceEnabled,
                 onCheckedChange = onAutofillServiceToggle
             )

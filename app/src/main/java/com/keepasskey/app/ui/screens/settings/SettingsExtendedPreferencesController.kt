@@ -89,6 +89,23 @@ internal class SettingsExtendedPreferencesController(
     fun setAutofillSessionGrantEnabled(enabled: Boolean) =
         updateExtended { it.copy(autofillSessionGrantEnabled = enabled) }
 
+    /**
+     * ISSUE-P2-228：三条凭据通道总开关（默认开启）。
+     *
+     * 迁移前它们落在 `SettingsPreferencesController` 的纯内存 `StateFlow` 上——既不落盘也无生产
+     * 消费方；现统一走 [updateExtended]（内存 Flow 与持久化原子完成），消费方见
+     * `ExtendedSettingsStore.isCredentialProviderEnabled` / `isPasskeySupportEnabled` /
+     * `isAutofillServiceEnabled` 的 KDoc。
+     */
+    fun setCredentialProviderEnabled(enabled: Boolean) =
+        updateExtended { it.copy(credentialProviderEnabled = enabled) }
+
+    fun setPasskeySupportEnabled(enabled: Boolean) =
+        updateExtended { it.copy(passkeySupportEnabled = enabled) }
+
+    fun setAutofillServiceEnabled(enabled: Boolean) =
+        updateExtended { it.copy(autofillServiceEnabled = enabled) }
+
     // ========== KP2A 扩展：显示与外观交互 ==========
     fun setMaskPasswordsDefault(enabled: Boolean) = updateExtended { it.copy(maskPasswordsDefault = enabled) }
 

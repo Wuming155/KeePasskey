@@ -813,16 +813,19 @@
     <!-- ===== 自动填充设置子页 (AutofillSettingsScreen) ===== -->
     <string name="autofill_section_provider">填充服务</string>
     <string name="autofill_cm_title">凭据管理器 (Credential Manager)</string>
-    <string name="autofill_cm_sub">Android 16+ 系统级凭据管理，密码与通行密钥统一填充</string>
+    <string name="autofill_cm_sub">Android 16+ 系统级凭据管理，密码与通行密钥统一填充。关闭后本应用不再返回任何凭据候选或保存入口（系统列表中仍会显示本应用）</string>
     <string name="autofill_passkey_title">通行密钥 (Passkey) 支持</string>
-    <string name="autofill_passkey_sub">在支持的应用与网站中使用本机生成的通行密钥登录</string>
+    <string name="autofill_passkey_sub">在支持的应用与网站中使用本机生成的通行密钥登录；关闭后通行密钥的注册与登录均不可用，账号密码填充不受影响</string>
     <!-- 特权浏览器白名单（CM 通道通行密钥可用性）：内置仅收录已取证浏览器，其余由用户逐项启用 -->
     <string name="settings_passkey_privileged_browsers">特权浏览器白名单</string>
     <string name="settings_passkey_privileged_sub">让 Chrome / Firefox 之外的浏览器也能使用通行密钥</string>
     <string name="settings_passkey_privileged_warning">启用某个应用等于允许它以任意网站身份发起通行密钥请求（浏览器委派的固有语义）。请仅启用你信任的浏览器：指纹取自该应用自身的签名证书，换签名或同包名顶替会立即失效。</string>
     <string name="settings_passkey_privileged_empty">未检测到可用的浏览器应用。</string>
-    <string name="autofill_legacy_title">旧版自动填充服务</string>
-    <string name="autofill_legacy_sub">兼容低版本 Android 的无障碍填充方式</string>
+    <string name="autofill_service_title">系统自动填充服务</string>
+    <!-- ISSUE-P2-228：原「旧版自动填充服务 / 兼容低版本 Android 的无障碍填充方式」为虚假描述——
+         本应用没有注册任何 AccessibilityService（minSdk 36，AutofillService 自 API 26 起即为唯一
+         官方填充通道），且该开关当时既不持久化也无消费方。现如实表述其控制对象与边界。 -->
+    <string name="autofill_service_sub">浏览器与应用表单的账号密码填充通道。关闭后本应用不再向任何界面提供填充与保存（系统设置仍会列出本应用，可在其中改选其它服务）</string>
     <string name="autofill_section_ux">填充体验</string>
     <string name="autofill_inline_title">键盘内联建议</string>
     <string name="autofill_inline_sub">在输入法候选栏直接展示账号建议；该通道会把候选的用户名与条目标题交给输入法（可能为第三方键盘），默认关闭</string>
@@ -856,7 +859,7 @@
     <string name="autofill_health_ok">自动填充服务运行正常</string>
     <string name="autofill_health_attention">自动填充服务需要处理</string>
     <string name="autofill_health_issue_service_missing">自动填充服务未正确声明，请重新安装应用</string>
-    <string name="autofill_health_issue_app_disabled">应用内「旧版自动填充服务」已关闭</string>
+    <string name="autofill_health_issue_app_disabled">应用内「系统自动填充服务」开关已关闭</string>
     <string name="autofill_health_issue_system_disabled">系统未选择本应用为自动填充服务，请前往系统设置启用</string>
     <string name="autofill_health_issue_cm_unavailable">凭据管理器 (Credential Manager) 不可用</string>
     <string name="autofill_health_issue_field_signature_unavailable">字段屏蔽校验暂不可用（系统密钥库不可用），自动填充已按「保守不填充」处理；重启设备后重试，若持续存在请检查系统安全设置</string>

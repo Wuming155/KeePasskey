@@ -47,7 +47,9 @@ class CredentialResponseAssembler @Inject constructor(
     /** ISSUE-P2-83：CM 通道 `android://` 包名维度的调用方「包名 + 签名摘要」绑定存储 */
     private val callerTrustStore: CredentialManagerCallerTrustStore,
     /** 特权浏览器白名单（内置已取证 + 用户显式启用的浏览器） */
-    private val privilegedBrowserStore: com.keepasskey.app.data.repository.PasskeyPrivilegedBrowserStore
+    private val privilegedBrowserStore: com.keepasskey.app.data.repository.PasskeyPrivilegedBrowserStore,
+    /** ISSUE-P2-228：「通行密钥支持」开关的持久化来源（关闭后本类不产出任何公钥候选） */
+    private val settingsStore: com.keepasskey.app.data.repository.ExtendedSettingsStore
 ) {
 
     /**
@@ -124,6 +126,9 @@ class CredentialResponseAssembler @Inject constructor(
         allEntries: List<KdbxEntry>,
         responseBuilder: BeginGetCredentialResponse.Builder
     ) {
+        // ISSUE-P2-228：设置中关闭「通行密钥 (Passkey) 支持」⇒ 本函数不产出任何公钥候选。
+        // 密码候选（`buildPasswordEntries`）**不受该开关影响**——两条通道在设置页各自独立成行。
+        if (!settingsStore.isPasskeySupportEnabled()) return
         val browserFlow = CallingOriginResolver.isBrowserOrigin(callingOrigin)
         // ISSUE-P3-188：本函数收敛为「RP-ID 归属判定 → 候选收敛 → 逐条呈现」编排，
         // 判定口径与 fail-closed 收口点（null / 空集）与拆分前逐字一致

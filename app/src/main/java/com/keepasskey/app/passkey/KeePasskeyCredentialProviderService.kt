@@ -91,6 +91,16 @@ class KeePasskeyCredentialProviderService : CredentialProviderService() {
     @Inject
     lateinit var privilegedBrowserStore: com.keepasskey.app.data.repository.PasskeyPrivilegedBrowserStore
 
+    /**
+     * ISSUE-P2-228：设置页三条通道开关的持久化来源。
+     *
+     * 关闭 `credentialProviderEnabled` 后本服务对 `get` / `create` 两条入口一律返回**空响应**。
+     * 边界须如实认知：本应用**仍会被系统列出**为凭据提供方（组件注册由 Manifest 决定，
+     * 应用内无法动态摘除），只是不再交付任何凭据——设置页文案据此表述，不得写「已从系统移除」。
+     */
+    @Inject
+    lateinit var settingsStore: com.keepasskey.app.data.repository.ExtendedSettingsStore
+
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     override fun onBeginGetCredentialRequest(
@@ -130,7 +140,14 @@ class KeePasskeyCredentialProviderService : CredentialProviderService() {
     private suspend fun buildBeginGetResponse(request: BeginGetCredentialRequest): BeginGetCredentialResponse {
         val responseBuilder = BeginGetCredentialResponse.Builder()
 
-        // ISSUE-P2-53：完整性门控收口（最先裁决）——风险态一律不下发任何数据集 / 解锁引导。
+        // ISSUE-P2-228：凭据管理器通道总开关（最先裁决，代价最低）——关闭即空响应，
+        // 不产出候选、解锁引导或保存入口。
+        if (!settingsStore.isCredentialProviderEnabled()) {
+            AppLog.i(TAG, "凭据管理器通道已在设置中关闭，返回空响应")
+            return responseBuilder.build()
+        }
+
+        // ISSUE-P2-53：完整性门控收口——风险态一律不下发任何数据集 / 解锁引导。
         // 与自动填充通道（KeePasskeyAutofillService.awaitEnforcement）同一判据，消除通道不对称。
         if (runtimeIntegrityGate.awaitEnforcement().disableAutofill) {
             AppLog.i(TAG, "运行环境完整性风险态，拒绝返回凭据候选")
@@ -212,6 +229,12 @@ class KeePasskeyCredentialProviderService : CredentialProviderService() {
     private suspend fun buildBeginCreateResponse(request: BeginCreateCredentialRequest): BeginCreateCredentialResponse {
         val responseBuilder = BeginCreateCredentialResponse.Builder()
 
+        // ISSUE-P2-228：通道总开关关闭 ⇒ 不产出任何保存入口（与 get 通道同口径）
+        if (!settingsStore.isCredentialProviderEnabled()) {
+            AppLog.i(TAG, "凭据管理器通道已在设置中关闭，不产出保存入口")
+            return responseBuilder.build()
+        }
+
         // ISSUE-P2-53：完整性门控收口——风险态不下发保存入口（与 get 通道同判据）。
         if (runtimeIntegrityGate.awaitEnforcement().disableAutofill) {
             AppLog.i(TAG, "运行环境完整性风险态，拒绝返回凭据保存入口")
@@ -224,8 +247,14 @@ class KeePasskeyCredentialProviderService : CredentialProviderService() {
         // ISSUE-P3-188：入口装配下沉同包协作对象，本函数只保留「门控 → 分派 → 收口」编排；
         // 分派不命中任何已知请求类型时不追加条目（与拆分前的空 `when` 完全一致）
         val createEntry = when (request) {
+            // ISSUE-P2-228：「通行密钥支持」关闭时公钥类创建请求不产出条目（与 `else -> null`
+            // 同一收敛语义：系统侧等价于「本提供方不处理该请求」）；密码类创建不受影响。
             is BeginCreatePublicKeyCredentialRequest ->
-                CredentialCreateEntries.passkeyEntry(this, request, callingOrigin)
+                if (settingsStore.isPasskeySupportEnabled()) {
+                    CredentialCreateEntries.passkeyEntry(this, request, callingOrigin)
+                } else {
+                    null
+                }
 
             is BeginCreatePasswordCredentialRequest ->
                 CredentialCreateEntries.passwordEntry(this, callingAppInfo?.packageName.orEmpty(), callingOrigin)

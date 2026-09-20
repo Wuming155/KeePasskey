@@ -126,10 +126,13 @@ class KeePasskeyAutofillService : AutofillService() {
             return
         }
         val callingPkg = structure.activityComponent.packageName
-        // ISSUE-P2-226：调用方即本应用自身时在完整性闸门**之前**短路——该请求无论风险态如何都不下发，
-        // 短路同时免去自家口令框每次聚焦都触发一轮 `awaitEnforcement()` 重扫（maps / 路径扫描）。
-        if (AutofillAccessPolicy.isSelfApp(callingPkg, packageName)) {
-            AppLog.d(TAG, "onFillRequest 调用方即本应用，跳过下发")
+        // ISSUE-P2-226 / ISSUE-P2-228：调用方即本应用、或用户已关闭本通道 ⇒ 一律不下发。
+        // 置于完整性闸门**之前**短路：这两种情形无论风险态如何都拒绝，免去自家口令框每次聚焦
+        // 都触发一轮 `awaitEnforcement()` 重扫（maps / 路径扫描）。
+        if (!settingsStore.isAutofillServiceEnabled() ||
+            AutofillAccessPolicy.isSelfApp(callingPkg, packageName)
+        ) {
+            AppLog.d(TAG, "自动填充通道已关闭或调用方即本应用，跳过下发")
             callback.onSuccess(null)
             return
         }
@@ -299,6 +302,12 @@ class KeePasskeyAutofillService : AutofillService() {
     ) {
         val contexts = request.fillContexts
         if (contexts.isEmpty()) {
+            callback.onSuccess()
+            return
+        }
+        // ISSUE-P2-228：用户关闭「系统自动填充服务」通道 ⇒ 一律不接收保存
+        // （onSuccess 表示「本次无需保存」，与「用户关闭保存提示」同一收敛语义；不报错）
+        if (!settingsStore.isAutofillServiceEnabled()) {
             callback.onSuccess()
             return
         }

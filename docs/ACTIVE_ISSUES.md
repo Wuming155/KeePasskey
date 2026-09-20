@@ -36,14 +36,7 @@
 
 ---
 
-## P2 中危缺陷与协议/测试缺口（2 项）
-
-### ISSUE-P2-228：自动填充卡三开关为无持久化无消费方的假开关，且「无障碍」措辞与事实不符
-
-- **核实时间点**：2026-09-20 经全仓 grep + Manifest 核对核实。
-- **核实方式**：① `AndroidManifest.xml` 仅注册 `CredentialProviderService`（`:137`）与 `AutofillService`（`:157`），全仓 `AccessibilityService` 子类**只出现在 `RuntimeIntegrityDetector` 的第三方服务枚举里**（`:194-211`），本应用**没有**任何无障碍服务；② 字符串 `autofill_legacy_title`「旧版自动填充服务」/ `autofill_legacy_sub`「兼容低版本 Android 的无障碍填充方式」（`strings.xml:813-814`，EN `values-en/strings.xml:807-808`「Accessibility-based filling compatible with older Android versions」）；③ 该开关绑定 `uiState.autofillServiceEnabled`（`AutofillSettingsComponents.kt:97`），默认 `true`（`SettingsUiState.kt:132`、`SettingsPreferencesController.kt:51`），`setAutofillServiceEnabled`（`:228`）只更新内存 `StateFlow`——`ExtendedSettingsStore` **无对应持久化 key**、`KeePasskeyAutofillService` **零消费**，唯一去处是健康卡入参（`AutofillSettingsScreen.kt:75`）；④ 同卡 `credentialProviderEnabled` / `passkeySupportEnabled` 全仓 grep **唯一消费点即 UI 自身**（`:81` / `:89`）。
-- **背景与根因**：用户按文案理解「这是需要无障碍权限的旧版通道」，与「安全防护」页「已启用无障碍服务」（`strings.xml:612`，判据为**非本应用**的第三方无障碍服务）撞成语义冲突；实际是**关掉不影响任何行为、重启即回 true 的假开关**，且「旧版」在 minSdk 36（`AutofillService` 自 API 26 起）下无对应实体。项目已有先例反对假开关：`AutofillSettingsComponents.kt:101-108`（ISSUE-P0-02「避免设置页出现『看似可关』的假开关」）、ISSUE-P3-44 把假保存开关接线为真实消费方。
-- **验收标准**：AC① 中英文案去除「无障碍」「旧版」虚假描述，如实表述其控制对象；AC② 三开关持久化到 `ExtendedSettingsStore`（重启不回弹）；AC③ 开关有**真实生产消费方**（关闭即对应通道不下发/不注册/不响应），消费点 fail-closed 默认值明确；AC④ 与系统真实状态（`AutofillHealthProbe` 的 `systemEnabled` / CM 可用性）联动呈现，并提供既有 `SystemSettingsNavigation` 跳转入口；AC⑤ 新增接线守卫用例，禁「UI 有开关、生产无消费方」复现。
+## P2 中危缺陷与协议/测试缺口（1 项）
 
 ### ISSUE-P2-229：新建密码库强制落应用私有目录，未给位置选择（SAF 缺失）
 
