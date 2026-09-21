@@ -37,7 +37,6 @@
 | [`records/SyncCache大写CACHE临时文件定位记录.md`](records/SyncCache大写CACHE临时文件定位记录.md) | `ISSUE-P3-142` 定位记录：残留条目**磁盘上并不存在**（四路交叉取证），判为 Windows/NTFS 目录枚举鬼影；含复现率、候选解释裁定与断言口径更正 |
 | [`records/自动填充认证链路真机实测记录.md`](records/自动填充认证链路真机实测记录.md) | `ISSUE-P2-73` AC③ 真机实测记录（Redmi 4X / Android 17 / API 37）：设备侧驱动方式、定版用例与历史失败逐次留痕、logcat 原文与截图；四条新发现与该缺陷的定位 / 修复（§11） |
 | [`records/通行密钥互操作对拍记录_2026-09-19.md`](records/通行密钥互操作对拍记录_2026-09-19.md) | `ISSUE-P2-210` / `ISSUE-P2-211` 的证据留痕（`AGENTS.md` 规则 8）：`keepassxc-cli` + `pykeepass` + `cryptography` 双向对拍的命令与原文输出、114 条判据构成、Ed25519 PKCS#8 形态缺陷的隔离实验与修复复跑、**github.com 端到端手工冒烟清单（本批未执行）** |
-| [`records/passkeys.io保存通行密钥失败排查与整改交接.md`](records/passkeys.io保存通行密钥失败排查与整改交接.md) | `ISSUE-P1-238` 排障与交接（2026-09-21，Redmi 4X / Android 17）：passkeys.io 实测超时定位、PSL 按 TLD 懒加载 / WorkManager 移出启动期 / 资源不压缩三项整改前后对比、Firefox 140 无 GMS 下 makeCredential 回退 FIDO2 私有 API 的现场证据与后续建议 |
 
 ## security/ — 安全、威胁建模与合规
 
