@@ -1,6 +1,7 @@
 package com.keepasskey.app
 
 import android.app.Application
+import androidx.work.Configuration
 import com.keepasskey.app.data.binary.FileBinaryStore
 import com.keepasskey.app.notification.NotificationChannels
 import com.keepasskey.app.notification.UnlockedNotificationController
@@ -18,7 +19,29 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 @HiltAndroidApp
-class MainApplication : Application() {
+class MainApplication : Application(), Configuration.Provider {
+
+    /**
+     * WorkManager **按需初始化**配置（ISSUE-P1-238，2026-09-21 真机实测后整改）。
+     *
+     * 本应用此前的 `AndroidManifest` 未干预 `androidx.startup` 的
+     * `androidx.work.WorkManagerInitializer`，于是每次冷启动都会在
+     * **ContentProvider 阶段（早于 [onCreate]）**构造 `WorkManagerImpl`：打开
+     * WorkManager 自己的 Room 数据库、建立 `SystemJobScheduler` 并执行
+     * `ForceStopRunnable` 对账。真机实测该段占 **0.41 s**（同轮 `Start proc` →
+     * 凭据提供者应答预算仅约 3.0 s，见 `ISSUE-P1-238` 的实测表）。
+     *
+     * 而 WorkManager 在冷启动路径上**没有任何时序依赖**——唯一的冷启动调用方
+     * [PeriodicSyncScheduler.applySavedSchedule] 早已被移入后台作用域（`ISSUE-P1-237`）。
+     * 故改为：清单里摘除该 initializer，本类实现 [Configuration.Provider] 提供与
+     * 「默认配置」等价的配置，`WorkManager.getInstance()` 首次被真正调用时才初始化
+     * （即那条后台协程），冷启动主线程不再为它付费。
+     *
+     * **不得**改为直接 `WorkManager.initialize()`：`getInstance()` 在未初始化且应用
+     * 未实现本接口时会抛 `IllegalStateException`，按需初始化必须由本接口承担。
+     */
+    override val workManagerConfiguration: Configuration
+        get() = Configuration.Builder().build()
 
     @Inject
     lateinit var periodicSyncScheduler: PeriodicSyncScheduler

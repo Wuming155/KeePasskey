@@ -40,26 +40,53 @@
   **通行密钥方向同口径复测（§241）**：冷启动轮 `Provider session created 06:51:35.407` →
   回调 `06:51:37.864`（2.46 s）→ `CANCELED 06:51:38.409`（2.99 s = 系统预算）→
   `TYPE_NO_CREATE_OPTIONS`，与密码方向**同源**。
-  **10 轮冷启动统计（§242）**：时延 2.351 / 2.354 / 2.354 / 2.357 / 2.361 / 2.366 / 2.371 /
-  2.393 / 2.568 s（最小 2.351、最大 2.568、中位 **2.359**、均值 2.383），**超时 0/10**、
-  10/10 均 `SAVE_ENTRIES_RECEIVED`。⇒ §240 的改动使分布稳定落在约 3.0 s 预算内
-  （余量 0.4 ~ 0.65 s），但**仍未达到本条目 AC① 的 ≤ 1.5 s**，故保持开放。
-- **背景与根因**：系统给 provider 的创建应答预算约 **3.0 s**（`Provider session created` →
-  `Remote provider response timed out` 两轮实测 2.97 ~ 3.02 s）。本应用进程自 `Start proc`
-  到进入 `onBeginCreateCredentialRequest` 实测 **3.05 / 2.49 / 2.38 s**（三轮），其中 3.05 s
-  那轮被系统丢弃（`Remote provider response timed out` ⇒ `TYPE_NO_CREATE_OPTIONS`）——
-  用户视角即「点了保存没反应」，且呈**间歇性**。§240 已把最重的
-  `periodicSyncScheduler.applySavedSchedule()`（会拉起 WorkManager）移出冷启动关键路径，
-  但 `MainApplication.onCreate` 其余同步工作（易失缓存清理、剪贴板对账、自动锁定注册、
-  完整性探测、通知通道建立）与 Hilt 图初始化仍在关键路径上。
+  **10 轮冷启动统计（§242）**：中位 **2.359 s**，超时 0/10。
+  **2026-09-21 追加实测（真机浏览器复现 passkeys.io 失败后）**：系统预算复测为
+  `Provider session created` → `Remote provider response timed out` = **3.001 ~ 3.002 s**（6 轮全同）；
+  整改前 8 轮冷启动 **全部** `Remote provider response timed out`（回调 2.43 ~ 3.40 s）。
+  应用侧应答路径经分段计时定位（见「背景与根因」）并整改后复测：应用侧
+  （`onBeginCreateCredentialRequest` 进入 → `已向系统返回 Passkey CreateEntry`）
+  由 **1.15 s 降至 0.25 ~ 0.32 s**。
+- **背景与根因**（2026-09-21 重新归因，三分量）：
+  1. **应用侧应答路径（已整改，本批）**：`PublicSuffixList` 首次装载要全量解析 PSL
+     （16,475 行 / 1.0 万条规则），实测 **1.00 s**，且它是 `rp.id` 归属校验的**同步依赖**。
+     分段计时显示瓶颈是自写的逐字符/逐字节 Kotlin 循环（**解释执行**），
+     而 `String` / `HashSet` 等框架方法运行于 boot image 的已编译代码。已改为
+     **按末标签懒加载**（查询只命中目标 TLD 的规则桶，`indexOf` 单趟文本定位），
+     并把 IDN 规则的 punycode 归一移出热路径、WorkManager 改为
+     `Configuration.Provider` 按需初始化（原 androidx.startup initializer 在
+     ContentProvider 阶段实测占 0.41 s）、PSL 资源改为不压缩存放（读取 0.13 s → 0.03 s）。
+     等价性由 `PublicSuffixListTest`（对 PSL 全量规则与独立引用实现穷举比对）与
+     `PublicSuffixListResourceTest`（源文件三条前提机检）锁定。
+  2. **平台侧进程启动（未整改，非应用代码所能及）**：`Start proc` → 首条应用侧日志
+     实测 **2.35 ~ 2.79 s**，主体是 ART 打开并**运行期校验** debug 构建的
+     `classes.dex`（39.77 MB，debug 构建不混淆 ⇒ 无 AOT，`dumpsys package dexopt`
+     显示 `status=run-from-apk`）。对照实验：对该包执行
+     `adb shell cmd package compile -m verify -f com.keepasskey`（预校验出 odex）后，
+     6 轮冷启动整链路 `Provider session created` → `SAVE_ENTRIES_RECEIVED` 全部
+     **1.32 ~ 1.58 s、零超时** ⇒ 剩余差距属 **debug 构建类型 × 低端机**的平台属性。
+     **本机排障手段**：重装 APK 后执行上述 `cmd package compile`；或以 release 构建实测
+     （R8 + baseline profile，冷启动应显著更低）。
+  3. `MainApplication.onCreate` 其余同步工作与 Hilt 图初始化仍在关键路径上
+     （§240 结论不变）。
 - **验收标准**：AC① 真机 `force-stop` 后连续 ≥ 10 轮冷启动触发保存请求，
   `Start proc` → `onBeginCreateCredentialRequest` **全部** ≤ 1.5 s（留 2× 余量）；
   AC② 同轮次内 `logcat` **零** `Remote provider response timed out`；
   AC③ 改善手段**不得**削减任何冷启动安全对账语义（`fileBinaryStore.clear()` 与
   `clipboardSecurityManager.reconcileOnColdStart()` 必须仍在 `onCreate` 中同步执行，
-  由 `ColdStartAttachmentPurgeWiringTest` 锁定）。
-- **涉及文件**：`app/src/main/java/com/keepasskey/app/MainApplication.kt`；
-  定位与已完成的整改见 §240 批次正文。
+  由 `ColdStartAttachmentPurgeWiringTest` 锁定）；
+  AC④ PSL 装载策略改动必须与全量引用实现**逐规则等价**（`PublicSuffixListTest`），
+  且 PSL 资源的三条前提（纯 LF / 已小写 / 无首尾空白）由 `PublicSuffixListResourceTest` 机检锁定；
+  AC⑤ 若在**无 odex** 的 debug 构建上仍无法稳定满足 AC①②，须在本条目如实登记
+  「平台侧占比 + 本机排障手段」，**不得**以放宽系统预算或削弱门控为手段强行达标。
+- **当前状态**：应用侧应答路径已整改（AC④ 落地）；在预校验 odex 存在时 AC①② 达标
+  （6/6，1.32 ~ 1.58 s）；无 odex 的 debug 构建上仍会间歇性超时（8 轮 3 次超时），
+  根因见「背景与根因」第 2 条 ⇒ **保持开放**。
+- **涉及文件**：`app/src/main/java/com/keepasskey/app/MainApplication.kt`、
+  `app/src/main/java/com/keepasskey/app/passkey/PublicSuffixList.kt`、
+  `app/src/main/java/com/keepasskey/app/passkey/CredentialCreateEntries.kt`、
+  `app/src/main/AndroidManifest.xml`、`app/build.gradle.kts`；
+  §240 批次正文（首轮定位）、§241（通行密钥方向复测）、§242（10 轮统计）。
 
 ### ISSUE-P1-241：「移除密码库关联」的确认文案承诺「不会删除物理文件」，但应用私有库的文件**会被真的删除**
 

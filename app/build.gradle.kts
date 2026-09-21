@@ -130,6 +130,15 @@ android {
         }
     }
 
+    androidResources {
+        // ISSUE-P1-238（2026-09-21 真机实测）：PSL 数据文件（`src/main/resources/publicsuffix/`）
+        // 此前在 APK 内以 DEFLATE 存放（334 KB → 90 KB），读取需解压 + 流式搬运，实测
+        // **约 0.13 s**；而该文件正处在凭据提供者约 3.0 s 的应答预算内被同步读取。
+        // 改为**不压缩**存放后读取退化为直接搬运（实测约 0.03 s）。代价是 APK 增大约 0.25 MB
+        // （本包原本即 95 MB 级）。该开关只影响打包方式，不改变资源内容与访问路径。
+        noCompress += "dat"
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true

@@ -74,6 +74,23 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:label="@string/app_name"
         android:theme="@style/Theme.KeePasskey">
+        <!-- ISSUE-P1-238（2026-09-21 真机实测）：摘除 WorkManager 的 androidx.startup
+             initializer——它会在 ContentProvider 阶段（**早于 Application.onCreate**）
+             构造 WorkManagerImpl（打开 Room 数据库 + 建立系统任务调度器 + ForceStopRunnable
+             对账），真机实测占冷启动 **0.41 s**，而凭据提供者只有约 3.0 s 应答预算。
+             摘除后 WorkManager 改由 `MainApplication.workManagerConfiguration` 按需初始化
+             （首个真实调用方是已下沉到后台作用域的 `PeriodicSyncScheduler.applySavedSchedule`）。
+             保留同一 InitializationProvider 中的其它 initializer（如 ProfileInstaller）。 -->
+        <provider
+            android:name="androidx.startup.InitializationProvider"
+            android:authorities="${applicationId}.androidx-startup"
+            android:exported="false"
+            tools:node="merge">
+            <meta-data
+                android:name="androidx.work.WorkManagerInitializer"
+                android:value="androidx.startup"
+                tools:node="remove" />
+        </provider>
         <!-- ISSUE-P3-85 ①：唯一**无权限保护**的 exported 组件（启动器入口）。
              launchMode=singleTask + taskAffinity="" 用于消除「任意应用反复拉起 / 清任务栈」的
              DoS 与 UI 干扰面；配套回归约束（不得消费外部 extra）由
