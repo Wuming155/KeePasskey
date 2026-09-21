@@ -54,7 +54,9 @@ fun PasskeyBadge(
         Text(
             text = "Passkey",
             style = MaterialTheme.typography.labelMedium,
-            color = securityColors.passkey
+            color = securityColors.passkey,
+            maxLines = 1,
+            softWrap = false
         )
     }
 }

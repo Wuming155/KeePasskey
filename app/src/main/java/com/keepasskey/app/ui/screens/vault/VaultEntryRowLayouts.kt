@@ -172,7 +172,8 @@ internal fun StandardEntryLayout(
                     ),
                     color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false)
                 )
                 if (entry.isPasskey && showPasskeyBadge) {
                     Spacer(modifier = Modifier.width(6.dp))

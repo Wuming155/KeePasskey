@@ -103,7 +103,7 @@
 
 ---
 
-> **本区近期变动**：§243 闭环 `ISSUE-P2-240`（设置页「跳过 DAL 校验」开关的文案按其**真实语义**更正为
+> **本区近期变动**：§245 闭环 `ISSUE-P2-242`（条目列表与详情页标题过长时 Passkey 徽标被挤压变形或消失缺陷：`PasskeyBadge` 锁定单行不软折行、列表与详情页标题 Text 增加 `Modifier.weight(1f, fill = false)` 自适应让位约束，真机实测 46 字符超长标题项与中长项均完整水平横向呈现 `[Passkey]`；新增 `PasskeyBadgeLayoutWiringTest` 锁定布局契约）——证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md) 与 [`resolved/batches/245-条目行Passkey徽标防折行与标题自适应让位批次.md`](resolved/batches/245-条目行Passkey徽标防折行与标题自适应让位批次.md)；§243 闭环 `ISSUE-P2-240`（设置页「跳过 DAL 校验」开关的文案按其**真实语义**更正为
 > 「跳过通行密钥站点归属校验」，并与 `DigitalAssetLinksVerifier` KDoc / 字段注释 / 告警日志逐字同锚；
 > AC② 裁决「**不新增**独立的『跳过浏览器兼容层』偏好项」落
 > [`architecture/产品裁决登记.md`](architecture/产品裁决登记.md) `PD-16`）——证据见
