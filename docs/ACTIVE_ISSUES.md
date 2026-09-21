@@ -49,7 +49,7 @@
 
 ## P2 中危缺陷与协议/测试缺口（3 项）
 
-> **本区上一次归零**（本区归零：§247 闭环 `ISSUE-P2-239`（凭据提供者通道「系统未登记本应用」的失效完全静默且用户无法自救）——整改＝新增该通道健康检查：三态判定落纯函数（`REGISTERED` / `NOT_REGISTERED` / `UNKNOWN`，**「读不到」不得呈现为「正常」**）、平台查询经**公开 API** `CredentialManager.isEnabledCredentialProviderService` 单点化、设置页健康卡给出用户可见状态与系统设置指引（action 不可解析时如实降级为纯文案）；真机两态实证「未登记」与系统 `TYPE_NO_CREATE_OPTIONS` 同态、已登记则请求被正常路由。新增限界 §27（本机 ROM 缺该设置页 activity ⇒ 一键入口如实降级）。证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md) 与
+> **本区上一次归零**：§247 闭环 `ISSUE-P2-239`（凭据提供者通道「系统未登记本应用」的失效完全静默且用户无法自救）——整改＝新增该通道健康检查：三态判定落纯函数（`REGISTERED` / `NOT_REGISTERED` / `UNKNOWN`，**「读不到」不得呈现为「正常」**）、平台查询经**公开 API** `CredentialManager.isEnabledCredentialProviderService` 单点化、设置页健康卡给出用户可见状态与系统设置指引（action 不可解析时如实降级为纯文案）；真机两态实证「未登记」与系统 `TYPE_NO_CREATE_OPTIONS` 同态、已登记则请求被正常路由。新增限界 §27（本机 ROM 缺该设置页 activity ⇒ 一键入口如实降级）。证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md) 与
 > [`resolved/batches/247-凭据提供者通道健康检查批次.md`](resolved/batches/247-凭据提供者通道健康检查批次.md)。）（本区随后补登 §248 复核发现的 3 项，见下）
 
 ### `ISSUE-P2-243`：子库只读会话未传 `BinaryStore` ⇒ 子库附件全量内联驻留
@@ -136,7 +136,7 @@
 
 ## P3 低危问题、特性接线与体验优化（5 项）
 
-> **本区上一次归零**（本区归零：§238 闭环 `ISSUE-P3-235`（`RC-02` 敏感缓冲所有权收口）——
+> **本区上一次归零**：§238 闭环 `ISSUE-P3-235`（`RC-02` 敏感缓冲所有权收口）——
 > AC① 设计交付 [`architecture/敏感缓冲所有权契约.md`](architecture/敏感缓冲所有权契约.md)；
 > AC② 逐处迁移：`G1`（§235）/ `G2`（§238）闭环、`G3`（池内擦除）维持已登记限界 §1.6、
 > `G4`（命名统一）降为「按需」、`G5` / Step 1 已核实；`test` 343 类 / 2402 例全绿。
