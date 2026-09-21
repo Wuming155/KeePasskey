@@ -4,6 +4,7 @@ import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.model.KdbxGroup
 import com.keepasskey.core.result.KdbxResult
+import com.keepasskey.core.security.BinaryStore
 import com.keepasskey.database.exception.KdbxCorruptFileException
 import com.keepasskey.database.exception.KdbxInvalidCredentialsException
 import com.keepasskey.database.exception.KdbxUnsupportedVersionException
@@ -40,6 +41,12 @@ import java.io.IOException
  *
  * - 凭据只经 [ChildDatabaseCredentialStore]（独立通道）取用，副本由该通道自动清零；
  * - 解密树**不做常驻**：投影（非敏感展示字段）生成后立即 `clearSensitiveData()` 定点擦除；
+ * - **超过 1 MiB 的附件沿用应用级 `FileBinaryStore` 落盘**（与根库会话同一实例，见
+ *   `docs/architecture/已知工程限界.md` §1.1）：池中只留 store key，不再整份明文内联驻留堆。
+ *   其清理由**会话锁定 / 关闭**与**冷启动**统一收口（同限界 §1.1 / §1.2 口径），
+ *   本类**不新增**任何独立清理路径——子库与根库同属应用私有缓存、共享同一清理面；
+ *   而**投影仍不携带附件字段**（[ChildDatabaseEntryProjection] 只有展示字段与 `hasPassword`），
+ *   落盘只影响对象树在内存中的形态，不扩大对外暴露面；
  * - 投影刻意不携带密码字段（只有 `hasPassword` 布尔事实），不提供任何读取子库密码的 API
  *   ——首版无需该能力，少一条明文通道即少一份暴露面；
  * - [terminate] 是**同步**终止路径（供根库锁定的 `SessionLockObserver` 回调直接调用）：
@@ -54,7 +61,13 @@ import java.io.IOException
 internal class ChildReadOnlySession(
     private val mount: ChildDatabaseMount,
     private val streamSource: ChildDatabaseStreamSource,
-    private val credentials: ChildDatabaseCredentialStore
+    private val credentials: ChildDatabaseCredentialStore,
+    /**
+     * ISSUE-P2-67 不变量的子库侧闭环（`ISSUE-P2-243`，2026-09-21）：
+     * 「新增装载调用方不得忘记传 [BinaryStore]」——此前的唯一残余反例即本类。
+     * 传入应用级 `FileBinaryStore`（不新建实例、不新增清理路径）。
+     */
+    private val binaryStore: BinaryStore
 ) {
 
     private val stateLock = Any()
@@ -131,7 +144,7 @@ internal class ChildReadOnlySession(
     private suspend fun loadProjection(password: CharArray?, keyFile: ByteArray?): Attempt = try {
         val projected = withContext(Dispatchers.Default) {
             streamSource.open(mount).use { input ->
-                KdbxFile.load(input, password, keyFile)
+                KdbxFile.load(input, password, keyFile, binaryStore)
             }.let { database ->
                 try {
                     project(database)

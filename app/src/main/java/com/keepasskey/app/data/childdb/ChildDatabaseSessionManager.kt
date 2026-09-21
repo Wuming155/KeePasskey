@@ -4,6 +4,7 @@ import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.app.security.ThrottleGate
 import com.keepasskey.app.security.UnlockThrottleManager
 import com.keepasskey.core.result.KdbxResult
+import com.keepasskey.core.security.BinaryStore
 import com.keepasskey.core.session.SessionLockObserver
 import com.keepasskey.database.session.DatabaseSession
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -90,7 +91,12 @@ class ChildDatabaseSessionManager @Inject constructor(
     private val databaseSession: DatabaseSession,
     private val debugLog: DebugLogBuffer,
     // ISSUE-P2-17：子库解锁失败节流（与主库共用同一状态机，按 mountId 计次）
-    private val unlockThrottleManager: UnlockThrottleManager
+    private val unlockThrottleManager: UnlockThrottleManager,
+    // ISSUE-P2-243（2026-09-21）：子库装载同样传入应用级 FileBinaryStore（与根库 DatabaseSession
+    // 共享同一单例实例），使超过阈值的子库附件落盘而非整树明文内联驻留；不新建实例、不新增清理路径。
+    // 依赖取抽象 [BinaryStore]（生产实现即该单例，见 ChildDatabaseModule 的 @Binds 别名绑定），
+    // 便于宿主单测注入内存替身
+    private val binaryStore: BinaryStore
 ) : SessionLockObserver {
 
     /** 序列化全部挂起型变更（挂载 / 打开 / 卸载 / 刷新），避免并发挂载竞态 */
@@ -180,7 +186,7 @@ class ChildDatabaseSessionManager @Inject constructor(
             mountedAtEpochMillis = System.currentTimeMillis()
         )
         // 先入会话表：使并发锁定能命中该会话并立即清零其凭据
-        val session = putSession(ChildReadOnlySession(mount, streamSource, credentials))
+        val session = putSession(ChildReadOnlySession(mount, streamSource, credentials, binaryStore))
         val opened = session.open(passwordChars, keyFileData)
         if (opened is KdbxResult.Failure) {
             dropSession(session.mountId)
@@ -324,7 +330,7 @@ class ChildDatabaseSessionManager @Inject constructor(
     private fun sessionFor(mount: ChildDatabaseMount): ChildReadOnlySession {
         val existing = synchronized(stateLock) { sessions[mount.id] }
         if (existing != null) return existing
-        return putSession(ChildReadOnlySession(mount, streamSource, credentials))
+        return putSession(ChildReadOnlySession(mount, streamSource, credentials, binaryStore))
     }
 
     private fun putSession(session: ChildReadOnlySession): ChildReadOnlySession {

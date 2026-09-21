@@ -1,7 +1,9 @@
 package com.keepasskey.app.di
 
+import com.keepasskey.app.data.binary.FileBinaryStore
 import com.keepasskey.app.data.childdb.ChildDatabaseStreamSource
 import com.keepasskey.app.data.childdb.LocalChildDatabaseStreamSource
+import com.keepasskey.core.security.BinaryStore
 import dagger.Binds
 import dagger.Module
 import dagger.hilt.InstallIn
@@ -31,4 +33,17 @@ abstract class ChildDatabaseModule {
     abstract fun bindChildDatabaseStreamSource(
         localChildDatabaseStreamSource: LocalChildDatabaseStreamSource
     ): ChildDatabaseStreamSource
+
+    /**
+     * ISSUE-P2-243（2026-09-21）：子库装载链路要的落盘存储即**应用级** [FileBinaryStore] 单例。
+     *
+     * 该单例原仅以具体类被注入（`DatabaseModule.provideDatabaseSession`），DI 图中**并不存在**
+     * `BinaryStore` 接口绑定；本别名绑定把同一 `@Singleton` 实例暴露在抽象类型下，
+     * 使 `ChildDatabaseSessionManager` 依赖倒置到接口、宿主单测可注入内存替身。
+     * **不产生第二个实例**（同 key 的 `@Singleton` 实例复用），也**不新增任何清理路径**：
+     * 该单例早已自行注册为会话锁定观察者，并在 `MainApplication` 冷启动时清理。
+     */
+    @Binds
+    @Singleton
+    abstract fun bindBinaryStore(fileBinaryStore: FileBinaryStore): BinaryStore
 }

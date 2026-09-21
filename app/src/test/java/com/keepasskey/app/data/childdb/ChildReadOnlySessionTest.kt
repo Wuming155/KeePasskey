@@ -1,6 +1,7 @@
 package com.keepasskey.app.data.childdb
 
 import com.keepasskey.core.result.KdbxResult
+import com.keepasskey.core.security.BinaryStore
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -29,8 +30,9 @@ class ChildReadOnlySessionTest {
 
     private fun session(
         source: ChildDatabaseStreamSource,
-        mount: ChildDatabaseMount = testMount()
-    ): ChildReadOnlySession = ChildReadOnlySession(mount, source, credentials)
+        mount: ChildDatabaseMount = testMount(),
+        binaryStore: BinaryStore = RecordingBinaryStore()
+    ): ChildReadOnlySession = ChildReadOnlySession(mount, source, credentials, binaryStore)
 
     private fun reasonOf(result: KdbxResult<*>): ChildDatabaseFailureReason =
         ChildDatabaseFailureReason.of((result as KdbxResult.Failure).error)
@@ -180,6 +182,33 @@ class ChildReadOnlySessionTest {
         assertEquals(2, source.openCount)
         val snapshot = requireNotNull(session.currentSnapshot()) { "重复打开后仍应有投影" }
         assertEquals(ChildDatabaseFixtures.ENTRY_COUNT, snapshot.entries.size)
+    }
+
+    @Test
+    fun `含大附件的子库装载时附件经 BinaryStore 真实落盘`() = runTest {
+        // ISSUE-P2-243：子库装载必须把 BinaryStore 传进 `KdbxFile.load`，否则 >1 MiB 的附件
+        // 会整份内联驻留 GC 堆（子库是 ISSUE-P2-67 不变量的唯一残余反例）。
+        // 判别力：本语料含严格超过落盘阈值的附件——漏传 store 时 store 一次都不会被写入。
+        val store = RecordingBinaryStore()
+        val source = FakeChildDatabaseStreamSource(
+            payload = ChildDatabaseFixtures.kdbxBytesWithLargeAttachment(password)
+        )
+        val session = session(source, binaryStore = store)
+
+        val result = session.open(password, null)
+
+        assertTrue("含大附件的子库仍须真实解密成功", result.isSuccess)
+        assertTrue(
+            "超过阈值的附件必须经 BinaryStore 真实落盘" +
+                "（装载未携带 binaryStore 时 count=0；子库与根库共用应用级 FileBinaryStore）",
+            store.spillCalls > 0
+        )
+        assertTrue("落盘内容不得为空", store.entries.values.all { it.isNotEmpty() })
+        assertEquals(
+            "落盘字节数必须与附件声明尺寸一致",
+            ChildDatabaseFixtures.BIG_ATTACHMENT_BYTES.toLong(),
+            store.entries.values.first().size.toLong()
+        )
     }
 
     /** 投影必须只有非敏感展示字段：任何一条目的任何文本字段都不得出现密码明文 */

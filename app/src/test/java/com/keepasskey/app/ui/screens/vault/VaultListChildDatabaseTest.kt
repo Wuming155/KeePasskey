@@ -7,6 +7,7 @@ import com.keepasskey.app.data.childdb.ChildDatabaseMountStore
 import com.keepasskey.app.data.childdb.ChildDatabaseSessionManager
 import com.keepasskey.app.data.childdb.FakeChildDatabaseStreamSource
 import com.keepasskey.app.data.childdb.RecordingContextFactory
+import com.keepasskey.app.data.childdb.RecordingBinaryStore
 import com.keepasskey.app.data.childdb.validLocalSource
 import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.app.data.repository.FakeSettingsRepository
@@ -81,7 +82,8 @@ class VaultListChildDatabaseTest {
         streamSource = childSource,
         databaseSession = rootSession,
         debugLog = DebugLogBuffer(),
-        unlockThrottleManager = UnlockThrottleManager(FakeUnlockThrottleStore())
+        unlockThrottleManager = UnlockThrottleManager(FakeUnlockThrottleStore()),
+        binaryStore = RecordingBinaryStore()
     )
 
     /** 构造最小可用的 SyncCoordinator（假 Context + 空会话）；本测试不触发真实同步 */

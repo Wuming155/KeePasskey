@@ -236,13 +236,22 @@ class DatabasePickerViewModel @Inject constructor(
     /**
      * 导入并登记外部来源的密码库（见 [OpenVaultSourceType]）。
      *
-     * ISSUE-P2-87 说明：本方法成功后**不再**在本页做工作因子提示。原因（已核实）：
-     * 本页随 [DatabasePickerEvent.DatabaseSelected] 立即被 `popBackStack()` 退栈
-     * （`KeePasskeyNavGraph.kt` 的 `onDatabaseSelected`），Snackbar 往往来不及渲染，
-     * 而承载它的 ViewModel 也会随之清除。因此弱因子提示**统一落在退栈后的落点**
-     * ——解锁页（`UnlockViewModel.importExternalDatabase`），该页在用户导入后确定停留、
-     * 且 `UnlockUiState.infoMessage` 已有渲染点。**不要在**本页另加提示通道：
-     * 那只会产生一条大概率看不见、且与解锁页重复的提示。
+     * ISSUE-P2-87 / ISSUE-P3-248 说明：本方法成功后**不在本页**做工作因子提示，且**当前也没有
+     * 任何别的地方替它提示**——这是如实口径，不是设计选择：
+     *
+     * 1. 本页会随 [DatabasePickerEvent.DatabaseSelected] 立即被 `popBackStack()` 退栈
+     *    （`KeePasskeyNavGraph.kt` 的 `onDatabaseSelected`）：Snackbar 往往来不及渲染，
+     *    而承载它的 ViewModel 也会随之清除。故本页确实不适合承载该提示。
+     * 2. **但「交给退栈落点代为提示」这条路并不成立**（2026-09-21 复核更正）：
+     *    `UnlockViewModel.importExternalDatabase` 的**唯一调用点是解锁页自身的导入按钮**
+     *    （`UnlockScreen.kt:119`），选择器这条路径只调 `vaultRepository.importExternalDatabase`
+     *    （本文件 [importDatabaseFromSource]），**从不写** `UnlockUiState.infoMessage`，
+     *    也就不会在解锁页产生任何提示。
+     * 3. 结论：**「从来源打开（本地文件）」路径当前没有任何弱因子提示**。该残余已登记
+     *    `docs/architecture/已知工程限界.md` §8（不是修复，是留痕）。
+     *
+     * `ASSESS` 阶段的既有取舍（弱因子提示置于导入落点、不阻断导入）与**「不要在本页另加提示通道」
+     * 依然有效**，但真实原因是第 1 条「本页会立即退栈」，而非「落点会代为提示」。
      */
     fun importDatabaseFromSource(source: OpenVaultSourceType, name: String, path: String) {
         viewModelScope.launch {

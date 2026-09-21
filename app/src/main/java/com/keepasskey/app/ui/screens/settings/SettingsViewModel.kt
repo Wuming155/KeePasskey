@@ -473,10 +473,8 @@ class SettingsViewModel @Inject constructor(
     /** 已屏蔽字段签名的条数（签名不可逆，故只下发计数，不下发签名本身）。 */
     val autofillBlockedFieldCount: StateFlow<Int> = preferences.autofillBlockedFieldCount
 
-    /** 清除全部字段级屏蔽。 */
-    fun clearBlockedFields() {
-        preferences.clearBlockedFields()
-    }
+    /** 清除全部字段级屏蔽（单语句委托，控制器返回的条数有意丢弃；`ISSUE-P3-250` 待消化清单第一项）。 */
+    fun clearBlockedFields() { preferences.clearBlockedFields() }
 
     // ===== KP2A 扩展：显示与外观交互 =====
     fun setMaskPasswordsDefault(enabled: Boolean) = extendedPreferences.setMaskPasswordsDefault(enabled)

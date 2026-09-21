@@ -47,50 +47,10 @@
 
 ---
 
-## P2 中危缺陷与协议/测试缺口（3 项）
+## P2 中危缺陷与协议/测试缺口（1 项）
 
 > **本区上一次归零**：§247 闭环 `ISSUE-P2-239`（凭据提供者通道「系统未登记本应用」的失效完全静默且用户无法自救）——整改＝新增该通道健康检查：三态判定落纯函数（`REGISTERED` / `NOT_REGISTERED` / `UNKNOWN`，**「读不到」不得呈现为「正常」**）、平台查询经**公开 API** `CredentialManager.isEnabledCredentialProviderService` 单点化、设置页健康卡给出用户可见状态与系统设置指引（action 不可解析时如实降级为纯文案）；真机两态实证「未登记」与系统 `TYPE_NO_CREATE_OPTIONS` 同态、已登记则请求被正常路由。新增限界 §27（本机 ROM 缺该设置页 activity ⇒ 一键入口如实降级）。证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md) 与
-> [`resolved/batches/247-凭据提供者通道健康检查批次.md`](resolved/batches/247-凭据提供者通道健康检查批次.md)。）（本区随后补登 §248 复核发现的 3 项，见下）
-
-### `ISSUE-P2-243`：子库只读会话未传 `BinaryStore` ⇒ 子库附件全量内联驻留
-
-- **核实时间点**：2026-09-21（对 `已知工程限界.md` 全文独立复核时发现）。
-- **核实方式**：直读 `app/src/main/java/com/keepasskey/app/data/childdb/ChildReadOnlySession.kt:131-143`
-  （`KdbxFile.load(input, password, keyFile)` 三参调用）与
-  `database/src/main/java/com/keepasskey/database/file/KdbxFile.kt:118-123`（`binaryStore: BinaryStore? = null`）；
-  对照 `database/src/main/java/com/keepasskey/database/model/InnerHeader.kt:369-378`
-  （仅当 store 非空且长度 > `BinaryStorePolicy.DEFAULT_THRESHOLD_BYTES`（1 MiB）才落盘）。
-- **背景与影响**：限界 §1.1 声明「附件字节**除外**——超阈值经 `BinaryStore` 落盘、池中只留引用」，
-  读者据此认为大附件库的内存峰值已消除。子库路径下该结论**不成立**：子库内任何大小的附件都内联进
-  `InnerHeader.binaries`（单字段上限 64 MiB、池累计 ≤128 MiB 仍可容纳），解析期为**全量明文峰值**
-  （投影完成后 `clearSensitiveData()` 只擦条目树）。§52 曾以「新增调用方无法再忘记传参」立
-  `ISSUE-P2-67`，本路径（2026-09-10 引入）即反例，且此前未在任何限界条目登记。
-- **验收标准**：
-  - AC① 子库装载传入 `BinaryStore`；或明确论证「子库不落盘」属有意取舍，并作为**边界**登记限界 §1.1。
-  - AC② 两者取一均需宿主用例锁定（落盘：断言超阈值附件不进池；取舍：断言现行为并注明理由）。
-  - AC③ 不得改动主库（`DatabaseSession` / `SyncDatabaseCodec`）既有装配。
-- **依据**：`ChildReadOnlySession.kt` / `KdbxFile.kt` / `InnerHeader.kt` 直读；
-  `docs/architecture/已知工程限界.md` §1.1；
-  `docs/resolved/batches/52-同步解析落盘与内存池擦除边界批次.md`。
-
-### `ISSUE-P2-244`：S3 覆盖路径在远端无 ETag 时**一个条件头都不发**（退化为无条件 PUT）
-
-- **核实时间点**：2026-09-21（同上轮复核）。
-- **核实方式**：直读 `sync/src/main/java/com/keepasskey/sync/s3/S3SyncProvider.kt:240-300`：
-  `expectedEtag` 为空且 HEAD 成功时 `precheckEtag = metaResult.getOrThrow().etag`；随后
-  `precheckEtag?.takeIf { it.isNotBlank() }?.let { … header("If-Match", …) }` ⇒ ETag 为空/空白时
-  **既不 `If-Match` 也不 `If-None-Match`**（该分支 `isFirstUpload = false`，故也走不到原子创建），
-  实为**无条件 PUT**。
-- **背景与影响**：限界 §1.3 的边界只声明「少数未实现条件写的兼容存储会忽略 `If-Match`」——那是
-  「服务端不校验」；此处是**客户端根本没发条件头**，预检保护与服务端校验**同时缺失**，
-  远端被他人更新时会被静默覆盖（数据丢失面）。触发前提：HEAD 探测成功但未返回 ETag（合理存在于部分兼容存储）。
-- **验收标准**：
-  - AC① 该分支改为 fail-closed：HEAD 成功但 ETag 缺失/空白 ⇒ 与「HEAD 非 404 失败」同口径上抛；
-    或给出显式取舍（接受「所见即所覆」）并登记限界 §1.3 边界。
-  - AC② 宿主用例锁定「无 ETag 时不得发出无条件的覆盖 PUT」（可用 mock provider 注入）。
-  - AC③ 不得放宽既有 412 / 401 语义与 SigV4 头构造。
-- **依据**：`S3SyncProvider.kt:240-300` 直读；`docs/architecture/已知工程限界.md` §1.3；
-  `sync/src/androidTest/.../S3TransferDeviceTest.kt`（既有传输层证据）。
+> [`resolved/batches/247-凭据提供者通道健康检查批次.md`](resolved/batches/247-凭据提供者通道健康检查批次.md)。）（本区随后补登 §248 复核发现的 3 项；**§249 已闭环其中 2 项**——`ISSUE-P2-243`（子库只读会话装载传入**应用级 `FileBinaryStore`**，超阈值附件真实落盘、投影仍不带附件字段）与 `ISSUE-P2-244`（S3 覆盖前 HEAD 未返回 ETag 时 **fail-closed 上抛**，绝不发无条件 PUT），余 1 项见下）
 
 ### `ISSUE-P2-245`：Compose 对话框窗口未接遮挡触摸过滤（限界 §3.3「无盲区」不成立，含主密码输入面）
 
@@ -134,14 +94,14 @@
 
 ---
 
-## P3 低危问题、特性接线与体验优化（5 项）
+## P3 低危问题、特性接线与体验优化（3 项）
 
 > **本区上一次归零**：§238 闭环 `ISSUE-P3-235`（`RC-02` 敏感缓冲所有权收口）——
 > AC① 设计交付 [`architecture/敏感缓冲所有权契约.md`](architecture/敏感缓冲所有权契约.md)；
 > AC② 逐处迁移：`G1`（§235）/ `G2`（§238）闭环、`G3`（池内擦除）维持已登记限界 §1.6、
 > `G4`（命名统一）降为「按需」、`G5` / Step 1 已核实；`test` 343 类 / 2402 例全绿。
 > 证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md) 与
-> [`docs/resolved/batches/238-待决冲突解析树身份判定擦除批次.md`](resolved/batches/238-待决冲突解析树身份判定擦除批次.md)）。（本区随后补登 §248 复核发现的 5 项，见下）
+> [`docs/resolved/batches/238-待决冲突解析树身份判定擦除批次.md`](resolved/batches/238-待决冲突解析树身份判定擦除批次.md)）。（本区随后补登 §248 复核发现的 5 项；**§249 已闭环其中 2 项**——`ISSUE-P3-248`（`DatabasePickerViewModel` 的弱因子提示 KDoc 更正为**如实表述**，由 `WeakKdfNoticeHonestyGuardTest` 钉死口径）与 `ISSUE-P3-250`（限界 §18 **收窄授权**为「不得新增含实现体成员」+ 5 处薄编排待消化清单、§20 按 65 行现值**重新裁定**为接受为限界），余 3 项见下）
 
 ### `ISSUE-P3-246`：`SyncCacheAndroidRuntimeTest` 的「目录已清空」判据未按限界 §7 的实体口径
 
@@ -179,26 +139,6 @@
 - **依据**：`sync/src/androidTest/AndroidManifest.xml`；`app/src/main/res/xml/network_security_config.xml`；
   `docs/architecture/已知工程限界.md` §4.1。
 
-### `ISSUE-P3-248`：`DatabasePickerViewModel` KDoc 与限界 §8 结论相反（该路径的提示**永不出现**）
-
-- **核实时间点**：2026-09-21（同上轮复核）。
-- **核实方式**：`app/src/main/java/com/keepasskey/app/ui/screens/database/DatabasePickerViewModel.kt:236-259`
-  （导入方法旁 KDoc 声称弱因子提示「统一落在退栈后的落点——解锁页 `UnlockViewModel.importExternalDatabase`」，
-  实现只调仓库、不写 `infoMessage`）；`UnlockViewModel.importExternalDatabase` 的**唯一**调用点是
-  `app/.../ui/screens/unlock/UnlockScreen.kt:114-120`（解锁页自身按钮）；`assessKdfStrength` 的唯一消费点
-  亦在 `UnlockViewModel.kt:216-237`；进入选择器的路径唯一（`app/.../ui/KeePasskeyNavGraph.kt:60-62`），
-  其 `onDatabaseSelected` 恒为 `popBackStack()`（`:70-72`，落点固定为解锁页）。
-- **背景与影响**：限界 §8 已把「选择器『从来源打开』路径不给提示」登记为已接受残余；但代码 KDoc
-  **反向**声称该路径由落点承接提示，两处结论相反。限界 §8 的**理由②**（「退栈落点不固定，无法交给落点显示」）
-  亦与代码不符（落点唯一）。
-- **验收标准**：
-  - AC① 二者取一后一致：或接线（把弱因子评估接到选择器导入路径，并按限界 §8 解除条件①/② 选定呈现面），
-    或改 KDoc 如实说明「本路径不给提示」。
-  - AC② 若改 KDoc，须同步更正限界 §8 的理由②与「依据」。
-  - AC③ 出口：接线则补断言；仅改文案则补静态守卫或人工复核留痕。
-- **依据**：`DatabasePickerViewModel.kt` / `UnlockViewModel.kt` / `KeePasskeyNavGraph.kt` 直读；
-  `docs/architecture/已知工程限界.md` §8。
-
 ### `ISSUE-P3-249`：复核报告四行与代码现况不一致（需同步或标注取代）
 
 - **核实时间点**：2026-09-21（同上轮复核）。
@@ -218,33 +158,7 @@
 - **依据**：`SECURITY_RECHECK_2026-09.md` 上述四行；`docs/architecture/已知工程限界.md` §6 / §25；
   `docs/resolved/batches/82-…`、`110-…`、`111-…`、`236-…`。
 
-### `ISSUE-P3-250`：限界 §18 / §20 两条「行数下限」的成立前提已变，需重新裁定
 
-- **核实时间点**：2026-09-21（同上轮复核，逐值现跑）。
-- **核实方式**：
-  ① `wc -l app/src/main/java/com/keepasskey/app/ui/screens/settings/SettingsViewModel.kt` = **600**（限界 §18 记 543），
-  `grep -cE "^ +(fun|val|var) "` = **118**（限界 §18 记「约 90」），且**并非全部为一行委托**——
-  `verifyConnectionThenSync`（`:346`）、`refreshPrivilegedBrowsers`（`:447`）、`setPrivilegedBrowserEnabled`（`:455`）、
-  `clearBlockedFields`（`:477`）、`enableBreachCheckAndScan`（`:537`）各含实现体，另有 `init{}`（`:258-276`）编排；
-  而 §18 **自身**的边界① 写「任何仍含实现体的超长文件**一律不适用**」；
-  ② `python tools/doc/long_functions.py 40` 显示 `app/.../autofill/KeePasskeyAutofillService.kt::processFillRequest`
-  = **65** 行（限界 §20 记 55），**已越过 §20 自己写的解除条件①（`>60 行` 须在同一次改动里顺带达标）**；
-  其内部结构亦已变（现 4 处早退，其中黑名单命中改走命名谓词 `rejectsDatasetDelivery`，非原记的「三段 `?: run`」）。
-- **背景与影响**：两条限界都被引用为「不必再拆」的授权，但**前提值均已失效**：§18 的保护对象已含实现体
-  （按本条自订边界即应移出本条），§20 的对象已触发自己的解除条件却仍挂「接受为限界」。
-  继续按原文引用会得到**与实际相反的授权**。
-- **验收标准**：
-  - AC① SettingsViewModel：或在**同一次改动**内把 5 个薄编排成员下沉到控制器（回到纯门面形态），
-    或把该文件移出 §18 并按「巨型类专项」第二档重新裁定（限界 §18 与批次正文同步更正）。
-  - AC② `processFillRequest`：在同一次改动内降到 ≤50 行（含把早退改写为可观测的拒绝计数等达标手段，
-    需设备侧 `AutofillAuthChainDeviceTest` 证伪风险），或**重新裁定**并改写 §20 的判据与解除条件。
-  - AC③ 涉及应用内行为改动时，按「测试资产纪律」②真机跑 `:app:connectedDebugAndroidTest`；
-    纯结构下沉（行为不变）则以宿主全量 + 既有守卫用例为准，并在批次正文写明证据。
-  - AC④ **不得**以本条为由放宽 `.codebuddy/rules/engineering-rules.md` 的巨型类 / 长函数阈值。
-- **依据**：`wc -l` / `grep -cE` / `python tools/doc/long_functions.py 40` 现跑读数；
-  `docs/architecture/已知工程限界.md` §18 / §20；
-  `docs/resolved/batches/182-合并层冲突对下沉与早退守卫限界批次.md`。
->
 > **本区近期变动**：§236 闭环 `ISSUE-P3-233`（复核报告 `P3-120` 状态陈旧——更正报告
 > §10.1 / §3.3.2 / §2.3 / §2.4 / §6.7 / §9.2 并增补 §15.3 方法学第 12 条）与 `ISSUE-P3-234`
 > （DAL 出口 IP 字面量面定案，登记 [`已知工程限界.md`](architecture/已知工程限界.md) §25）；

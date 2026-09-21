@@ -49,7 +49,8 @@ class ChildDatabaseSessionManagerTest {
         streamSource = source,
         databaseSession = databaseSession,
         debugLog = DebugLogBuffer(),
-        unlockThrottleManager = UnlockThrottleManager(throttleStore)
+        unlockThrottleManager = UnlockThrottleManager(throttleStore),
+        binaryStore = RecordingBinaryStore()
     )
 
     private fun reasonOf(result: KdbxResult<*>): ChildDatabaseFailureReason =
@@ -228,7 +229,8 @@ class ChildDatabaseSessionManagerTest {
             streamSource = source,
             databaseSession = databaseSession,
             debugLog = DebugLogBuffer(),
-            unlockThrottleManager = UnlockThrottleManager(throttleStore)
+            unlockThrottleManager = UnlockThrottleManager(throttleStore),
+            binaryStore = RecordingBinaryStore()
         )
 
         assertEquals(1, restarted.mountedCount.value)

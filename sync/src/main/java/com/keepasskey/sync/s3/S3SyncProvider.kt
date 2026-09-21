@@ -230,9 +230,13 @@ class S3SyncProvider(
      *    PUT 附带 `If-Match: "<expectedEtag>"` 条件头（AWS S3 及支持条件写的兼容存储
      *    在服务端原子校验），远端 ETag 与期望不符（含 HEAD 探测后被并发修改）时
      *    S3 返回 HTTP 412，映射为 [SyncException.ConflictError]。
-     *    HEAD 预检仅作快速失败优化，正确性完全由 PUT 的 If-Match 服务端校验保证。
+     *    HEAD 预检作快速失败优化，正确性另由 PUT 的 If-Match 服务端校验保证。
+     *    **HEAD 成功但未返回 ETag 时不再退化为无条件 PUT**：条件写无从构造（无任何可锁定的版本），
+     *    此处 fail-closed 上抛 [SyncException.ProtocolError]（选型：网络通、服务端也返回了 200，
+     *    坏的是「响应不含条件写所需的版本信息」这一协议层可用性，故非 `NetworkError`；`ISSUE-P2-244`）。
      * 3. 兼容性降级说明：少数未支持条件覆写的 S3 兼容存储可能忽略 If-Match 头，
-     *    此时语义退化为「HEAD 预检 + 无条件 PUT」，行为与旧版一致，不会更差。
+     *    此时语义退化为「HEAD 预检 + 无条件 PUT」，行为与旧版一致，不会更差
+     *    （该降级仍成立；它与「本地根本构不出条件」的 fail-closed 是两回事，不可混同）。
      */
     override suspend fun upload(
         remotePath: String,
@@ -252,7 +256,14 @@ class S3SyncProvider(
                     // 远端已存在却未声明期望 ETag：锁定 HEAD 所见版本，保证「覆盖的即所见」
                     metaResult.isSuccess -> {
                         isFirstUpload = false
-                        precheckEtag = metaResult.getOrThrow().etag
+                        val probedEtag = metaResult.getOrThrow().etag
+                        // ISSUE-P2-244：ETag 空白 ⇒ 条件写无从构造，放行即退化为无条件 PUT（选型见方法 KDoc）
+                        if (probedEtag.isBlank()) {
+                            throw SyncException.ProtocolError(
+                                200, "S3 覆盖前 HEAD 未返回 ETag，无法构造条件写，已拒绝无条件 PUT"
+                            )
+                        }
+                        precheckEtag = probedEtag
                     }
                     // HEAD 探测遭遇网络错误 / 5xx 等非 404 失败时严禁无条件 PUT——
                     // 此时不带任何条件头的 PUT 若成功将静默覆盖远端（可能含他人更新）。
@@ -288,9 +299,8 @@ class S3SyncProvider(
                     if (isFirstUpload) {
                         requestBuilder.header("If-None-Match", "*")
                     } else {
-                        precheckEtag?.takeIf { it.isNotBlank() }?.let { conditionEtag ->
-                            requestBuilder.header("If-Match", "\"${cleanEtag(conditionEtag)}\"")
-                        }
+                        // ISSUE-P2-244：非首传必有非空条件值（上方已 fail-closed）；不用 takeIf 放行（那是后门）
+                        requestBuilder.header("If-Match", "\"${cleanEtag(precheckEtag.orEmpty())}\"")
                     }
                     httpClient.newCall(requestBuilder.build()).execute()
                 },

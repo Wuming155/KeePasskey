@@ -3,10 +3,12 @@ package com.keepasskey.app.data.childdb
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.SharedPreferences
+import com.keepasskey.core.model.KdbxAttachment
 import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.model.KdbxGroup
 import com.keepasskey.core.model.KdbxUuid
+import com.keepasskey.core.security.BinaryStore
 import com.keepasskey.core.security.ProtectedString
 import com.keepasskey.crypto.kdf.KdfParameters
 import com.keepasskey.database.file.KdbxDatabase
@@ -14,6 +16,7 @@ import com.keepasskey.database.file.KdbxFile
 import com.keepasskey.database.file.KdbxHeader
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
+import java.io.DataInputStream
 import java.io.File
 import java.io.FileNotFoundException
 import java.io.InputStream
@@ -174,6 +177,59 @@ internal class FakeChildDatabaseStreamSource(
 }
 
 /**
+ * 记录落盘调用的内存 [BinaryStore] 替身（ISSUE-P2-243 判别力来源）。
+ *
+ * 只关心一件事：**装载子库时附件是否真的被写进 store**。不触碰文件系统，
+ * 且 [storeFromStream] / [store] 的记录数即「落盘被真实触发」的证据。
+ */
+internal class RecordingBinaryStore : BinaryStore {
+
+    val entries = LinkedHashMap<String, ByteArray>()
+
+    /** [storeFromStream] 调用次数（大附件流式落盘走这条路径） */
+    var storeFromStreamCalls: Int = 0
+        private set
+
+    /** [store] 调用次数（小批量字节落盘路径） */
+    var storeCalls: Int = 0
+        private set
+
+    /** 落盘总次数（两条路径之和） */
+    val spillCalls: Int
+        get() = storeFromStreamCalls + storeCalls
+
+    private var counter = 0
+
+    override fun store(bytes: ByteArray): String {
+        storeCalls++
+        val key = "rec-${counter++}"
+        entries[key] = bytes.copyOf()
+        return key
+    }
+
+    override fun storeFromStream(input: InputStream, size: Long): String {
+        storeFromStreamCalls++
+        val bytes = ByteArray(size.toInt())
+        DataInputStream(input).readFully(bytes)
+        val key = "rec-${counter++}"
+        entries[key] = bytes
+        return key
+    }
+
+    override fun load(key: String): ByteArray =
+        entries[key]?.copyOf() ?: ByteArray(0)
+
+    override fun openStream(key: String): InputStream = ByteArrayInputStream(load(key))
+
+    override fun sizeOf(key: String): Long = (entries[key]?.size ?: 0).toLong()
+
+    override fun clear() {
+        entries.values.forEach { it.fill(0) }
+        entries.clear()
+    }
+}
+
+/**
  * 真实 KDBX 语料工厂：以生产写入管线产出可被 [KdbxFile.load] 解密的密文字节。
  *
  * 刻意使用**小轮数 AES-KDF**：单测只关心「真实解密 + 真实投影」，
@@ -242,6 +298,46 @@ internal object ChildDatabaseFixtures {
         ByteArrayOutputStream().also { buffer ->
             KdbxFile.save(buffer, database(), password)
         }.toByteArray()
+
+    /** 判别力语料：附件字节数严格大于 [BinaryStorePolicy.DEFAULT_THRESHOLD_BYTES]（1 MiB） */
+    const val BIG_ATTACHMENT_BYTES = 1_200_000
+
+    const val BIG_ATTACHMENT_ENTRY_TITLE = "大附件条目"
+    const val BIG_ATTACHMENT_NAME = "big.bin"
+
+    /**
+     * 用给定主密码加密出**含 >1 MiB 附件**的真实 KDBX 字节（ISSUE-P2-243 判别力语料）。
+     *
+     * 只有超过落盘阈值的附件才会经 [BinaryStore] 落盘，故此语料是「装载方是否真把
+     * store 传下去」的唯一可判据来源（小附件语料无论传不传 store 都不会触发落盘）。
+     */
+    fun kdbxBytesWithLargeAttachment(
+        password: CharArray,
+        attachmentBytes: Int = BIG_ATTACHMENT_BYTES
+    ): ByteArray {
+        val root = KdbxGroup(name = ROOT_GROUP_NAME)
+        val entry = KdbxEntry(
+            id = KdbxUuid.random(),
+            parentGroupId = root.id,
+            fields = mapOf(
+                KdbxConstants.Fields.TITLE to ProtectedString(BIG_ATTACHMENT_ENTRY_TITLE, false)
+            ),
+            attachments = listOf(
+                KdbxAttachment(
+                    name = BIG_ATTACHMENT_NAME,
+                    data = ByteArray(attachmentBytes) { (it % 251).toByte() }
+                )
+            )
+        )
+        val database = KdbxDatabase(
+            header = header(),
+            databaseName = DATABASE_NAME,
+            rootGroup = root.copy(entries = listOf(entry))
+        )
+        return ByteArrayOutputStream().also { buffer ->
+            KdbxFile.save(buffer, database, password)
+        }.toByteArray()
+    }
 
     private fun entry(parentGroupId: KdbxUuid, title: String, password: String?): KdbxEntry {
         val fields = mutableMapOf(

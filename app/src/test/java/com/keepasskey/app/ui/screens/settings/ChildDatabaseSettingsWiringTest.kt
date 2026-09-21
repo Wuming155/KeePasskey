@@ -14,6 +14,7 @@ import com.keepasskey.app.data.childdb.ChildDatabaseMountStore
 import com.keepasskey.app.data.childdb.ChildDatabaseSessionManager
 import com.keepasskey.app.data.childdb.FakeChildDatabaseStreamSource
 import com.keepasskey.app.data.childdb.RecordingContextFactory
+import com.keepasskey.app.data.childdb.RecordingBinaryStore
 import com.keepasskey.app.data.childdb.validLocalSource
 import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.app.data.repository.AutofillBlocklistStore
@@ -106,7 +107,8 @@ class ChildDatabaseSettingsWiringTest {
         streamSource = streamSource,
         databaseSession = databaseSession,
         debugLog = DebugLogBuffer(),
-        unlockThrottleManager = UnlockThrottleManager(FakeUnlockThrottleStore())
+        unlockThrottleManager = UnlockThrottleManager(FakeUnlockThrottleStore()),
+        binaryStore = RecordingBinaryStore()
     )
 
     private val password = "child-master-pw".toCharArray()

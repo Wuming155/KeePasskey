@@ -258,6 +258,31 @@ class S3SyncProviderTest {
     }
 
     @Test
+    fun `测试覆盖前 HEAD 未返回 ETag 时快速失败不发无条件 PUT`() = runTest {
+        // ISSUE-P2-244：expectedEtag 为空且 HEAD 返回 200 却**不带 ETag 头**时，
+        // 条件写无从构造（无任何可锁定的远端版本）。若在此放行，就会落到
+        // 「条件值为空 ⇒ 不发 If-Match」的路径，即静默退化为无条件 PUT——
+        // 远端存在他人更新时将被覆盖。故必须 fail-closed。
+        server.enqueue(MockResponse().setResponseCode(200))
+
+        val provider = S3SyncProvider(
+            endpoint = "http://127.0.0.1:${server.port}",
+            bucketName = "test-bucket",
+            region = "us-east-1",
+            accessKeyId = "TESTKEY".toCharArray(),
+            secretAccessKey = "TESTSECRET".toCharArray(),
+            client = createLoopbackClient()
+        )
+
+        val result = provider.upload("vault.kdbx", "data".toByteArray(), expectedEtag = null)
+        assertTrue("HEAD 无 ETag 时必须 fail-fast: ${result.exceptionOrNull()}", result.isFailure)
+        assertTrue(result.exceptionOrNull() is SyncException.ProtocolError)
+        // 仅 HEAD 探测，绝无 PUT 发出
+        assertEquals("HEAD", server.takeRequest().method)
+        assertEquals(1, server.requestCount)
+    }
+
+    @Test
     fun `测试编码对象键与 SigV4 规范 URI 一致性`() {
         val provider = S3SyncProvider(
             endpoint = "https://s3.amazonaws.com",
