@@ -6,6 +6,10 @@ import android.credentials.CreateCredentialException;
 import android.credentials.CreateCredentialRequest;
 import android.credentials.CreateCredentialResponse;
 import android.credentials.CredentialManager;
+import android.credentials.CredentialOption;
+import android.credentials.GetCredentialException;
+import android.credentials.GetCredentialRequest;
+import android.credentials.GetCredentialResponse;
 import android.os.Bundle;
 import android.os.CancellationSignal;
 import android.os.OutcomeReceiver;
@@ -84,6 +88,9 @@ public class CredentialSaveClientActivity extends Activity {
     /** 通行密钥注册模式取值 */
     public static final String MODE_PASSKEY = "passkey";
 
+    /** 通行密钥断言获取/登录模式取值 */
+    public static final String MODE_GET_PASSKEY = "get-passkey";
+
     /**
      * 「载荷残缺的公钥创建请求」模式。
      *
@@ -103,6 +110,8 @@ public class CredentialSaveClientActivity extends Activity {
     private static final String KEY_SUBTYPE = "androidx.credentials.BUNDLE_KEY_SUBTYPE";
     private static final String SUBTYPE_CREATE_PUBLIC_KEY =
             "androidx.credentials.BUNDLE_VALUE_SUBTYPE_CREATE_PUBLIC_KEY_CREDENTIAL_REQUEST";
+    private static final String SUBTYPE_GET_PUBLIC_KEY =
+            "androidx.credentials.BUNDLE_VALUE_SUBTYPE_GET_PUBLIC_KEY_CREDENTIAL_OPTION";
 
     /** androidx {@code BUNDLE_KEY_REQUEST_JSON} */
     private static final String KEY_REQUEST_JSON = "androidx.credentials.BUNDLE_KEY_REQUEST_JSON";
@@ -128,6 +137,14 @@ public class CredentialSaveClientActivity extends Activity {
             + "\"pubKeyCredParams\":[{\"type\":\"public-key\",\"alg\":-7}],"
             + "\"timeout\":60000,"
             + "\"attestation\":\"none\""
+            + "}";
+
+    /** WebAuthn 断言/登录选项 JSON（虚构测试值，用于测试离线通行密钥登录） */
+    private static final String PASSKEY_GET_REQUEST_JSON = "{"
+            + "\"challenge\":\"cm-probe-get-challenge\","
+            + "\"rpId\":\"example.com\","
+            + "\"timeout\":60000,"
+            + "\"userVerification\":\"preferred\""
             + "}";
 
     private static final long REQUEST_DELAY_MS = 1200L;
@@ -192,6 +209,11 @@ public class CredentialSaveClientActivity extends Activity {
                 status("providerEnabled=" + enabled);
             } catch (Throwable t) {
                 status("enabledProbeThrew=" + t.getClass().getSimpleName());
+            }
+
+            if (MODE_GET_PASSKEY.equals(mode)) {
+                requestGetPasskey(credentialManager);
+                return;
             }
 
             CreateCredentialRequest request;
@@ -275,6 +297,41 @@ public class CredentialSaveClientActivity extends Activity {
         payload.putByteArray(KEY_CLIENT_DATA_HASH, new byte[CLIENT_DATA_HASH_BYTES]);
         return new CreateCredentialRequest.Builder(
                 TYPE_PUBLIC_KEY_CREDENTIAL, payload, new Bundle(payload)).build();
+    }
+
+    /** 发起一次与真实客户端登录等价的「通行密钥断言获取」请求（完全离线） */
+    private void requestGetPasskey(CredentialManager credentialManager) {
+        Bundle payload = new Bundle();
+        payload.putString(KEY_SUBTYPE, SUBTYPE_GET_PUBLIC_KEY);
+        payload.putString(KEY_REQUEST_JSON, PASSKEY_GET_REQUEST_JSON);
+        payload.putByteArray(KEY_CLIENT_DATA_HASH, new byte[CLIENT_DATA_HASH_BYTES]);
+
+        CredentialOption option = new CredentialOption.Builder(
+                TYPE_PUBLIC_KEY_CREDENTIAL, payload, new Bundle(payload)).build();
+
+        GetCredentialRequest request = new GetCredentialRequest.Builder(new Bundle())
+                .addCredentialOption(option)
+                .build();
+
+        status("requesting:get-passkey");
+        credentialManager.getCredential(
+                this,
+                request,
+                new CancellationSignal(),
+                getMainExecutor(),
+                new OutcomeReceiver<GetCredentialResponse, GetCredentialException>() {
+                    @Override
+                    public void onResult(GetCredentialResponse response) {
+                        status("get:onResult");
+                        Log.i(TAG, STATUS_PREFIX + ":get:onResult type=" + response.getCredential().getType());
+                    }
+
+                    @Override
+                    public void onError(GetCredentialException error) {
+                        status("get:onError:" + error.getType());
+                        Log.w(TAG, STATUS_PREFIX + ":get:onError type=" + error.getType());
+                    }
+                });
     }
 
     private void status(String value) {
