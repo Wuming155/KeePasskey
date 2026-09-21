@@ -41,6 +41,34 @@ import androidx.compose.ui.window.DialogWindowProvider
  * 放在 `AlertDialog(...)` 之外包裹整个调用是**无效**的：那时 [LocalView] 属于 Activity 窗口，
  * 取不到对话框 provider，本包装会按 fail-safe 静默不动作（不崩溃、不误改 Activity 窗口）。
  *
+ * ## 遮挡触摸过滤（`ISSUE-P2-245`，2026-09-21 补接线）
+ *
+ * `FLAG_SECURE` 只防**截屏 / 录屏 / Recents 预览**，不防**点击劫持（tapjacking）**——后者需要
+ * `View.setFilterTouchesWhenObscured`，而它与 `FLAG_SECURE` 是**同形的窗口级缺口**：过滤同样是
+ * **视图 / 窗口级**属性，不会从 Activity 窗口传播到对话框窗口。故本包装在**同一个** [DisposableEffect]
+ * 内对同一落点叠加两者（两者正交：一个挡截屏、一个丢遮挡态触摸）。
+ *
+ * - **目标取对话框窗口的 `decorView`**：与 [FlagSecureGuard.applyObscuredTouchFilter] 对 Activity 窗口的
+ *   既有口径一致（同一威胁面用同一施加点，便于审计与复查）；`decorView` 即窗口根视图
+ *   （`DecorView`，`ViewGroup` 子类）。
+ * - **过滤覆盖整棵子树**：javadoc 表述为「the framework will discard touches …… whenever the view's
+ *   window is obscured by another visible window at the touched location」（本地 SDK 源 `android-36.1` 的
+ *   `View.java` 类级 Security 段与 `getFilterTouchesWhenObscured()` 逐字直读）。
+ *   「连同后代一并丢弃」的**实现**依据（非 javadoc 措辞）：`View.onFilterTouchEventForSecurity`
+ *   在视图自身带 `FILTER_TOUCHES_WHEN_OBSCURED` 且事件带 `MotionEvent.FLAG_WINDOW_IS_OBSCURED` 时返回
+ *   false（`View.java:16854-16860`），而 `ViewGroup.dispatchTouchEvent` 以该返回值**包住**整段子视图派发
+ *   （`ViewGroup.java:2658`）⇒ 在 `decorView` 这类 `ViewGroup` 根上开启即等于丢弃整窗的遮挡态触摸。
+ *   **不**声称「部分遮挡也计入」——遮挡粒度由平台判定，本包装只保证接线已施加。
+ * - **无权限、无 API 版本门槛**：`FILTER_TOUCHES_WHEN_OBSCURED` 自 API 1 即有；本地 SDK 源的
+ *   `setFilterTouchesWhenObscured` / `getFilterTouchesWhenObscured` **无** `@RequiresApi` /
+ *   `@RequiresPermission` 标注（直读核实）。
+ * - **为何不用 `Window.setHideOverlayWindows(true)`**：① 该 API 的语义是「阻止非系统悬浮窗**绘制**在本窗口
+ *   之上」（javadoc 原文 "Prevent non-system overlay windows from being drawn on top of this window"，
+ *   `Window.java:1151-1153`；须持 `HIDE_OVERLAY_WINDOWS` 权限，本仓已在 Manifest 声明）——它抑制的是
+ *   **绘制 / 可见性**，**不**等价于「触摸一定被丢弃」；② 依 `docs/architecture/已知工程限界.md` §3.3 的既有
+ *   结论，它只阻断**新**覆盖、**不**解除**已存在**的遮挡窗口。故沿用 `BaseCredentialActivity` 体系的同口径：
+ *   触摸过滤为**独立施加**，不与 `setHideOverlayWindows` 互相替代。
+ *
  * ## 与 `flagSecureEnabled` 开关的关系（有意的 fail-closed 偏离，勿误当缺陷）
  *
  * 本包装**无条件**施加 dialog 窗口的 `FLAG_SECURE`，不读取 `SettingsRepository` 的用户开关
@@ -79,7 +107,12 @@ import androidx.compose.ui.window.DialogWindowProvider
  * ## 可测性
  *
  * flag 施加/撤销的裁决抽为纯逻辑 [SecureDialogFlagPolicy]（JVM 单测全覆盖）；
- * 真正的 `addFlags` 需要真实窗口（window token / WindowManager 服务），**留待设备侧验证**。
+ * 真正的 `addFlags` 需要真实窗口（window token / WindowManager 服务），已由设备侧用例
+ * `app/src/androidTest/java/com/keepasskey/app/security/DialogWindowHardeningDeviceTest.kt` 在真机上实证
+ * （三条断言：`decorView.filterTouchesWhenObscured == true`、窗口 `FLAG_SECURE` 位已置、
+ * 关闭对话框后 `FLAG_SECURE` 已清）。
+ * **该用例证明的是「遮罩与过滤已真实施加到对话框窗口」，不是「遮挡窗口的触摸确实被丢弃」**——
+ * 后者需要真机上有真实的遮挡窗口配合，仍为手工冒烟项（`ISSUE-P2-245` AC③ 的如实边界）。
  */
 @Composable
 internal fun SecureDialog(content: @Composable () -> Unit) {
@@ -105,7 +138,19 @@ internal fun SecureDialogWindowEffect() {
         if (addedByThisWrapper) {
             dialogWindow?.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         }
+        // 遮挡触摸过滤（ISSUE-P2-245）：与 FLAG_SECURE 同形的窗口级缺口，故在同一落点施加；
+        // save/restore 语义同 ApplyObscuredTouchFilter。原值读得到即等价于「窗口已解析」
+        //（decorView 一经 window.decorView 取用即存在，getFilterTouchesWhenObscured() 返回非空 Boolean），
+        // 故该非空守卫同时也是 fail-safe：取不到窗口时不写入、也不回写任何视图。
+        val dialogDecorView = dialogWindow?.decorView
+        val previousFilterTouchesWhenObscured = dialogDecorView?.filterTouchesWhenObscured
+        if (previousFilterTouchesWhenObscured != null) {
+            dialogDecorView?.filterTouchesWhenObscured = true
+        }
         onDispose {
+            if (previousFilterTouchesWhenObscured != null) {
+                dialogDecorView?.filterTouchesWhenObscured = previousFilterTouchesWhenObscured
+            }
             // 仅撤销本包装自己施加的 flag；取不到 provider（fail-safe 空操作）时不触碰任何窗口
             if (SecureDialogFlagPolicy.onDispose(addedByThisWrapper) ==
                 SecureDialogFlagAction.CLEAR_SECURE
@@ -125,8 +170,12 @@ internal fun SecureDialogWindowEffect() {
  *
  * 非 Dialog 的独立窗口（Popup / `DropdownMenu` 的 `PopupLayout`）**不存在** provider，
  * 返回 null 由调用方 fail-safe 处理：宁可少设一个 flag，也不得崩溃或误改 Activity 窗口。
+ *
+ * 可见性为 `internal`（`ISSUE-P2-245`，2026-09-21）：设备侧用例
+ * `DialogWindowHardeningDeviceTest` 需以**同一解析口径**取到对话框窗口（否则用例断言的是
+ * 「另一种取窗口方式的结果」，无法证成生产路径的接线），故不再收为 `private`。
  */
-private fun View.dialogWindowOrNull(): Window? {
+internal fun View.dialogWindowOrNull(): Window? {
     var parent: ViewParent? = this.parent
     while (parent != null) {
         if (parent is DialogWindowProvider) return parent.window

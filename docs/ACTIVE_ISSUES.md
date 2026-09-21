@@ -49,40 +49,82 @@
 
 ## P2 中危缺陷与协议/测试缺口（1 项）
 
-> **本区上一次归零**：§247 闭环 `ISSUE-P2-239`（凭据提供者通道「系统未登记本应用」的失效完全静默且用户无法自救）——整改＝新增该通道健康检查：三态判定落纯函数（`REGISTERED` / `NOT_REGISTERED` / `UNKNOWN`，**「读不到」不得呈现为「正常」**）、平台查询经**公开 API** `CredentialManager.isEnabledCredentialProviderService` 单点化、设置页健康卡给出用户可见状态与系统设置指引（action 不可解析时如实降级为纯文案）；真机两态实证「未登记」与系统 `TYPE_NO_CREATE_OPTIONS` 同态、已登记则请求被正常路由。新增限界 §27（本机 ROM 缺该设置页 activity ⇒ 一键入口如实降级）。证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md) 与
-> [`resolved/batches/247-凭据提供者通道健康检查批次.md`](resolved/batches/247-凭据提供者通道健康检查批次.md)。）（本区随后补登 §248 复核发现的 3 项；**§249 已闭环其中 2 项**——`ISSUE-P2-243`（子库只读会话装载传入**应用级 `FileBinaryStore`**，超阈值附件真实落盘、投影仍不带附件字段）与 `ISSUE-P2-244`（S3 覆盖前 HEAD 未返回 ETag 时 **fail-closed 上抛**，绝不发无条件 PUT），余 1 项见下）
+### `ISSUE-P2-246`：对话框窗口的 `FLAG_SECURE` 会被 Compose 的 `SecureFlagPolicy.Inherit` 清除（`SecureDialog.kt` 的 fail-closed 自陈不成立）
 
-### `ISSUE-P2-245`：Compose 对话框窗口未接遮挡触摸过滤（限界 §3.3「无盲区」不成立，含主密码输入面）
-
-- **核实时间点**：2026-09-21（同上轮复核）。
-- **核实方式**：全仓 `grep -rn "ApplyObscuredTouchFilter"` 调用点清单 ∩ `setFilterTouchesWhenObscured` 接线面，
-  与对话框文件比对：`app/src/main/java/com/keepasskey/app/ui/screens/database/CreateVaultWizardDialog.kt:184`
-  （新建库向导，**含主密码字段**）、`.../settings/MasterKeyChangeDialog.kt:75`、
-  `.../settings/subscreens/ChildDatabaseDialogs.kt:85/176`、`.../detail/EntryDetailPreviewDiffComponents.kt:81/253`
-  只经 `SecureDialogWindowEffect` 施 `FLAG_SECURE`（`app/.../security/SecureDialog.kt:98-118`），
-  **无**遮挡触摸过滤接线；Compose `Dialog` 是独立窗口，不继承 Activity `decorView` 的过滤。
-- **背景与影响**：限界 §3.3 标题为「接线面（**无盲区**）」。上述窗口承载主密码 / 密钥文件等高价值输入，
-  若上层存在遮挡窗口（tapjacking）而无过滤，属既有加固面上的空档。**可利用性未在真机验证**，本条先以
-  「如实登记 + 补接线或改判标题」处置。
+- **核实时间点**：2026-09-21（§252 设备侧实测揭出）。
+- **核实方式**：真机用例 `app/src/androidTest/java/com/keepasskey/app/security/DialogWindowHardeningDeviceTest.kt`
+  的第二个用例（宿主窗口**未**携带 `FLAG_SECURE`）实测 `dialogFlags=0x1800002`（**无** `FLAG_SECURE=0x2000`）
+  而同一 `decorView` 的 `filterTouchesWhenObscured=true`；对照用例（宿主窗口携带该 flag）实测
+  `dialogFlags=0x1802002`（**含**）⇒ 差异**只**来自宿主窗口状态。
+  机制**直读 Compose 1.12.0 源**核实（`~/.gradle` 缓存的 `ui-android-1.12.0-sources.jar`）：
+  `AndroidDialog.android.kt:251/263` 把**调用方** composition 的 `LocalView` 作为 `composeView`
+  交给 `DialogWrapper`；`:675` 用 `composeView.isFlagSecureEnabled()`（实现见
+  `AndroidPopup.android.kt:1110-1116`，读**宿主窗口**的 `FLAG_SECURE` 位）求值
+  `SecureFlagPolicy.Inherit`（默认值，`:134`）；`:676-683` 以
+  `setFlags(FLAG_SECURE.inv(), FLAG_SECURE)` **清除**对话框窗口的该 flag。
+- **背景与影响**：`SecureDialog.kt` KDoc 自陈本包装「**无条件**施加 dialog 窗口的 `FLAG_SECURE`，
+  不读取用户开关（**有意的 fail-closed 偏离**）」——**实测不成立**：宿主 `MainActivity` 窗口不带该 flag 时
+  （即**会话已解锁 + 用户在设置页关闭「防截屏」开关**），对话框窗口最终**不带** `FLAG_SECURE`。
+  受影响面 = 三条解锁态对话框（主密钥修改 / 子库凭据 / 修订差异与附件预览）在该状态下可被截屏录屏。
+  **根因不在本仓代码**（本包装的 `addFlags` 确实执行——由 `filterTouchesWhenObscured=true` 反证同一
+  `DisposableEffect` 已作用于同一窗口），而在 Compose 的默认 `Inherit` 策略**覆盖**了它。
 - **验收标准**：
-  - AC① 直读当前 Compose 版本（BOM 钉 `ui 1.12.0`）的 `Dialog` 窗口 API，判定能否对 dialog window
-    施加 `setFilterTouchesWhenObscured`（或等价加固），**结论就地落 KDoc**。
-  - AC② 按结论接线；或改判限界 §3.3 标题与「无盲区」结论（二者取一，不得两处并存）。
-  - AC③ 宿主用例锁定接线存在性（对齐 `ObscuredTouchWiringTest` 的静态守卫口径）；涉及窗口行为的改动
-    需真机冒烟 tapjacking 场景。
-  - AC④ 不得移除既有任何一处的过滤接线。
-- **依据**：`SecureDialog.kt` / `security/SecureTouchCompose.kt` 与四个对话框文件直读；
-  `app/src/test/java/com/keepasskey/app/security/ObscuredTouchWiringTest.kt`；
-  `docs/architecture/已知工程限界.md` §3.3。
+  - AC① **二选一（不得两处并存）**：①在四个对话框文件的调用点传
+    `DialogProperties(securePolicy = SecureFlagPolicy.SecureOn)`（Compose 官方等价 API，
+    见 `SecureFlagPolicy.android.kt:22-45`），让 Compose 自身强制并保持该 flag；
+    或 ②改判 `SecureDialog.kt` KDoc 的 fail-closed 自陈，如实写明「本包装的施加会被 Compose 的
+    `Inherit` 策略按**宿主窗口**状态覆盖」。
+  - AC② 选定方案后同步两处自陈：`SecureDialogFlagPolicyTest` 的 KDoc（其「真实 `addFlags` 未覆盖」
+    一句在设备侧已部分收口）与 `DialogWindowHardeningDeviceTest` 的第二个用例
+    （该用例**当前按「缺口存在」锁定**：修掉后其断言必红，须同批更新并引用本条目）。
+  - AC③ 不得为此放宽既有的 `FLAG_SECURE` 施加/撤销语义（`SecureDialogFlagPolicy` 两条不变式维持）。
+- **依据**：`app/src/main/java/com/keepasskey/app/security/SecureDialog.kt`；
+  `app/src/androidTest/java/com/keepasskey/app/security/DialogWindowHardeningDeviceTest.kt`（第二个用例）；
+  Compose 1.12.0 源（上列行号）；`docs/architecture/已知工程限界.md` §3.3。
 
 ---
 
-> **本区近期变动**：§245 闭环 `ISSUE-P2-242`（条目列表与详情页标题过长时 Passkey 徽标被挤压变形或消失缺陷：`PasskeyBadge` 锁定单行不软折行、列表与详情页标题 Text 增加 `Modifier.weight(1f, fill = false)` 自适应让位约束，真机实测 46 字符超长标题项与中长项均完整水平横向呈现 `[Passkey]`；新增 `PasskeyBadgeLayoutWiringTest` 锁定布局契约）——证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md) 与 [`resolved/batches/245-条目行Passkey徽标防折行与标题自适应让位批次.md`](resolved/batches/245-条目行Passkey徽标防折行与标题自适应让位批次.md)；§243 闭环 `ISSUE-P2-240`（设置页「跳过 DAL 校验」开关的文案按其**真实语义**更正为
+> **本区历史上一次归零（§247）**：§247 闭环 `ISSUE-P2-239`（凭据提供者通道「系统未登记本应用」的失效完全静默且用户无法自救）——整改＝新增该通道健康检查：三态判定落纯函数（`REGISTERED` / `NOT_REGISTERED` / `UNKNOWN`，**「读不到」不得呈现为「正常」**）、平台查询经**公开 API** `CredentialManager.isEnabledCredentialProviderService` 单点化、设置页健康卡给出用户可见状态与系统设置指引（action 不可解析时如实降级为纯文案）；真机两态实证「未登记」与系统 `TYPE_NO_CREATE_OPTIONS` 同态、已登记则请求被正常路由。新增限界 §27（本机 ROM 缺该设置页 activity ⇒ 一键入口如实降级）。证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md) 与
+> [`resolved/batches/247-凭据提供者通道健康检查批次.md`](resolved/batches/247-凭据提供者通道健康检查批次.md)。）（本区随后补登 §248 复核发现的 3 项；**§249 已闭环其中 2 项**——`ISSUE-P2-243`（子库只读会话装载传入**应用级 `FileBinaryStore`**，超阈值附件真实落盘、投影仍不带附件字段）与 `ISSUE-P2-244`（S3 覆盖前 HEAD 未返回 ETag 时 **fail-closed 上抛**，绝不发无条件 PUT），**§252 闭环余下的 `ISSUE-P2-245`**（本区因此一度归零），**§252 同轮新登记 `ISSUE-P2-246`**（见上）——逐条摘要见下方「本区近期变动」引用块。）
+
+---
+
+> **本区近期变动**：§252 闭环 `ISSUE-P2-245`——`app/.../security/SecureDialog.kt`
+> 的 `SecureDialogWindowEffect()` 原只给**对话框窗口**施 `FLAG_SECURE`（防截屏），**无**遮挡触摸过滤；
+> 而 `filterTouchesWhenObscured` 与 `FLAG_SECURE` 是**同形的窗口级缺口**（都不从 Activity 窗口传播到
+> 对话框窗口）。整改＝在同一 `DisposableEffect` 内对**对话框窗口的 `decorView`** 叠加
+> `filterTouchesWhenObscured`（save/restore 语义，取不到窗口时不动任何窗口 = fail-safe 不变；
+> 既有的 `FLAG_SECURE` 施加/撤销语义与 `SecureDialogFlagPolicy` 的「只撤销自己施加的」不变式**一行未改**），
+> 并因 4 类敏感对话框（含主密码字段的 `CreateVaultWizardDialog`）共 6 处调用点全部经该单一入口，
+> 一次接线即全覆盖；KDoc 就地落「为何用 `decorView`」「过滤覆盖整棵子树的**实现**依据
+> （`ViewGroup.dispatchTouchEvent` 以 `onFilterTouchEventForSecurity` 包住子视图派发）」
+> 「为何**不**用 `Window.setHideOverlayWindows`（只抑制**绘制**且不解除**已存在**遮挡）」三项结论，
+> `dialogWindowOrNull()` 由 `private` 改 `internal` 供设备侧用例复用同一解析口径。
+> 宿主守卫：`ObscuredTouchWiringTest` 新增一条不变式（`SecureDialog.kt` 必须**同时**具备
+> `FLAG_SECURE` 的施加+撤销、遮挡触摸过滤的**施加**（仅剩读/还原不算）、与对话框窗口解析；
+> 既有两条清单与判据未动）。**真机实证**（Redmi 4X / Android 17 · API 37）：
+> `DialogWindowHardeningDeviceTest` 3 条断言全部通过（`skipped=0`）——① 对话框
+> `decorView.filterTouchesWhenObscured == true`；② 该窗口 `FLAG_SECURE` 位已置（同时补上
+> `SecureDialogFlagPolicyTest` 自陈的「真实 `addFlags` 未覆盖」缺口）；③ 关闭对话框后 `FLAG_SECURE` 已清。
+> **如实边界**：该用例证明的是「遮罩与过滤已真实施加到对话框窗口」，**不是**「遮挡窗口的触摸确实被丢弃」
+> （后者需真实遮挡窗口，仍为手工冒烟项）。限界 §3.3 的「无遮挡触摸过滤接线」边界已更新为**已接线**
+> （原句保留作留痕）。证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md) 与
+> [`resolved/batches/252-对话框窗口遮挡触摸过滤接线批次.md`](resolved/batches/252-对话框窗口遮挡触摸过滤接线批次.md)；
+> §245 闭环 `ISSUE-P2-242`（条目列表与详情页标题过长时 Passkey 徽标被挤压变形或消失缺陷：`PasskeyBadge` 锁定单行不软折行、列表与详情页标题 Text 增加 `Modifier.weight(1f, fill = false)` 自适应让位约束，真机实测 46 字符超长标题项与中长项均完整水平横向呈现 `[Passkey]`；新增 `PasskeyBadgeLayoutWiringTest` 锁定布局契约）——证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md) 与 [`resolved/batches/245-条目行Passkey徽标防折行与标题自适应让位批次.md`](resolved/batches/245-条目行Passkey徽标防折行与标题自适应让位批次.md)；§243 闭环 `ISSUE-P2-240`（设置页「跳过 DAL 校验」开关的文案按其**真实语义**更正为
 > 「跳过通行密钥站点归属校验」，并与 `DigitalAssetLinksVerifier` KDoc / 字段注释 / 告警日志逐字同锚；
 > AC② 裁决「**不新增**独立的『跳过浏览器兼容层』偏好项」落
 > [`architecture/产品裁决登记.md`](architecture/产品裁决登记.md) `PD-16`）——证据见
 > [RESOLVED_LOG.md](RESOLVED_LOG.md) 与
 > [`resolved/batches/243-设置页DAL降级开关文案更正批次.md`](resolved/batches/243-设置页DAL降级开关文案更正批次.md)。
+
+> **§252 同轮新登记 `ISSUE-P2-246`（设备侧实测揭出，见上）**：`SecureDialog.kt` KDoc 自陈本包装
+> 「无条件施加 `FLAG_SECURE`（对用户开关的有意 fail-closed 偏离）」**实测不成立**——Compose `Dialog`
+> 默认 `SecureFlagPolicy.Inherit`，以**宿主窗口**的该 flag 位为准，宿主窗口不带时会把本包装刚施加的
+> `FLAG_SECURE` **清除**（真机对照读数：宿主带 ⇒ `dialogFlags=0x1802002`；宿主不带 ⇒ `0x1800002`，
+> 两者 `filterTouchesWhenObscured` 均为 `true`）。影响面＝会话已解锁且用户关闭「防截屏」开关时，
+> 三条解锁态对话框不再被遮罩。`ISSUE-P2-245` 的整改面（遮挡触摸过滤）**不受影响、已实证**；
+> 缺口与其两选一整改方向（调用点传 `SecureFlagPolicy.SecureOn` **或** 改判 KDoc 自陈）登记为
+> `ISSUE-P2-246`，**本批不改** `FLAG_SECURE` 语义。
 
 > **本区历史上一次归零**：§236 闭环 `ISSUE-P2-231`（Java 依赖面完整性锁定缺失）/
 > `ISSUE-P2-232`（完整性风险升级无主动熔断接线）——前者落**重开决策**判「仍不引入」并交付

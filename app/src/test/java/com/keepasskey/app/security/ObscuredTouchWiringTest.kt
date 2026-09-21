@@ -72,6 +72,63 @@ class ObscuredTouchWiringTest {
         )
     }
 
+    /**
+     * `ISSUE-P2-245`（2026-09-21 接线）：**对话框窗口**的加固接线必须是**成对**的——
+     * `FLAG_SECURE`（防截屏）与遮挡触摸过滤（防点击劫持）属**同形的窗口级缺口**
+     * （两者都是「不跨窗口传播」的属性），只接其一即留下盲区。
+     *
+     * 失效形态与本类既有两条一致：判定不会算错，错的是**接线被静默删掉**（Compose 对话框窗口
+     * 无法在宿主 JVM 上构造，故仍以源码文本比对守护）。判据四项：
+     * 1. `FLAG_SECURE` 的**施加**（`addFlags(… FLAG_SECURE)`）；
+     * 2. `FLAG_SECURE` 的**撤销**（`clearFlags(… FLAG_SECURE)`）；
+     * 3. 遮挡触摸过滤的**施加**（必须有 `filterTouchesWhenObscured = true` 这一行；仅剩「读原值 / 还原」
+     *    两处出现**不算**通过——那正是「把施加那行删掉」的故障形态）；
+     * 4. **对话框窗口解析**（`dialogWindowOrNull()` 或 `DialogWindowProvider`）——没有第 4 项则
+     *    前三条可能作用在 Activity 窗口上（`FLAG_SECURE` 会破坏用户开关语义，过滤则不覆盖对话框）。
+     * 不变量之外的内容（策略函数、KDoc）不在此断言范围内。
+     */
+    @Test
+    fun `对话框窗口加固同时施加防截屏与遮挡触摸过滤`() {
+        val source = readSource(SECURE_DIALOG_WINDOW)
+        val violations = mutableListOf<String>()
+
+        if (!source.contains("addFlags(WindowManager.LayoutParams.FLAG_SECURE)")) {
+            violations += "缺少 FLAG_SECURE 施加（addFlags）"
+        }
+        if (!source.contains("clearFlags(WindowManager.LayoutParams.FLAG_SECURE)")) {
+            violations += "缺少 FLAG_SECURE 撤销（clearFlags）"
+        }
+        if (!source.contains("filterTouchesWhenObscured = true")) {
+            violations += "缺少遮挡触摸过滤的施加（须有 `filterTouchesWhenObscured = true` 一行）"
+        }
+        if (source.windowedCountOf("filterTouchesWhenObscured") < 2) {
+            violations += "遮挡触摸过滤未成对（施加 + 还原原值，`filterTouchesWhenObscured` 应至少出现 2 次）"
+        }
+        if (!source.contains("dialogWindowOrNull()") && !source.contains("DialogWindowProvider")) {
+            violations += "缺少对话框窗口解析（既无 dialogWindowOrNull() 也无 DialogWindowProvider）"
+        }
+
+        assertTrue(
+            "对话框窗口加固接线不完整（$SECURE_DIALOG_WINDOW）：$violations" +
+                "——FLAG_SECURE 与遮挡触摸过滤必须成对施加于**对话框窗口**（见 ISSUE-P2-245）",
+            violations.isEmpty()
+        )
+    }
+
+    /** 子串出现次数（源码文本比对用；不引入正则以免转义歧义） */
+    private fun String.occurrencesOf(needle: String): Int {
+        var count = 0
+        var index = indexOf(needle)
+        while (index >= 0) {
+            count++
+            index = indexOf(needle, index + needle.length)
+        }
+        return count
+    }
+
+    /** [occurrencesOf] 的可读别名（与 `SecureDialogFlagPolicyTest` 同名的本类局部实现） */
+    private fun String.windowedCountOf(needle: String): Int = occurrencesOf(needle)
+
     /** 具名根 Composable 的函数体首条语句（自 `fun <name>(` 找到 `) {` 起算） */
     private fun headStatementOfRootFunction(path: String, functionName: String): String {
         val lines = readSource(path).lines()
@@ -109,6 +166,9 @@ class ObscuredTouchWiringTest {
 
     private companion object {
         const val OBSCURED_FILTER_CALL = "ApplyObscuredTouchFilter()"
+
+        /** `ISSUE-P2-245` 的对话框窗口加固入口（app 模块相对路径） */
+        const val SECURE_DIALOG_WINDOW = "app/src/main/java/com/keepasskey/app/security/SecureDialog.kt"
 
         /** 函数体起始行（Kotlin 约定的 `) {`） */
         val BODY_OPEN = Regex("""^\s*\)\s*\{\s*$""")

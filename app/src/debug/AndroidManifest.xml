@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  debug 变体专属清单（ISSUE-P2-245）：只声明设备侧用例
+  `DialogWindowHardeningDeviceTest` 的宿主 Activity。
+
+  为什么必须落在**被测应用**的清单里（而非 app/src/androidTest/AndroidManifest.xml）：
+  `Instrumentation.startActivitySync` 拒绝启动另一包/进程的组件——宿主若属测试 APK 包
+  （com.keepasskey.app.test），真机上 `ActivityScenario.launch` 会抛
+  `Intent in process com.keepasskey resolved to different process com.keepasskey.test`，
+  且用例在另一进程里组合出的对话框窗口测试进程读不到（2026-09-21 真机实测，如实留痕）。
+
+  release 变体不含本文件 ⇒ 生产包（含其清单）一行未改。
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application>
+        <activity
+            android:name="com.keepasskey.app.security.DialogWindowHardeningHostActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:theme="@style/Theme.KeePasskey" />
+    </application>
+
+</manifest>
