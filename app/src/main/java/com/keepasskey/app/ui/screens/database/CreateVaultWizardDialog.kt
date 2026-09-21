@@ -29,6 +29,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.SecureFlagPolicy
 import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.CreateVaultPreset
 import com.keepasskey.app.ui.components.SecurePasswordField
@@ -53,6 +55,9 @@ internal fun KeyFileOneTimeSaveDialog(
         onDismissRequest = {
             // 必须显式选择：误触外部若静默关闭，用户将永久失去该密码库的第二因子
         },
+        // 对话框窗口的 FLAG_SECURE 由 Compose 的 SecureFlagPolicy 决定（默认 Inherit ← **宿主窗口**），
+        // 宿主不带该 flag 时 Inherit 会清掉本窗的 flag（ISSUE-P2-246 真机实测）；故显式要求 SecureOn
+        properties = DialogProperties(securePolicy = SecureFlagPolicy.SecureOn),
         title = {
             Text(
                 text = stringResource(R.string.db_picker_keyfile_backup_title),
@@ -171,6 +176,8 @@ internal fun CreateVaultWizardDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
+        // 同 KeyFileOneTimeSaveDialog：本窗含主密码与确认主密码，须显式要求对话框窗口遮罩
+        properties = DialogProperties(securePolicy = SecureFlagPolicy.SecureOn),
         title = {
             Text(
                 text = stringResource(R.string.db_picker_create_title),

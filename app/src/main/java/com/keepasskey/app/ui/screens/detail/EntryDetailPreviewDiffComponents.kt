@@ -42,6 +42,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.SecureFlagPolicy
 import com.keepasskey.app.R
 import com.keepasskey.app.security.SecureDialog
 import com.keepasskey.app.ui.model.UiAttachment
@@ -65,6 +67,9 @@ fun RevisionVisualDiffDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
+        // 见 CreateVaultWizardDialog 同款说明：SecureFlagPolicy 默认 Inherit 会按**宿主窗口**清掉本窗
+        // 的 FLAG_SECURE（ISSUE-P2-246 真机实测），本窗含条目字段明文差异，须显式 SecureOn
+        properties = DialogProperties(securePolicy = SecureFlagPolicy.SecureOn),
         title = {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Default.Difference, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp))
@@ -223,6 +228,8 @@ fun SafeAttachmentPreviewDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
+        // 见 RevisionVisualDiffDialog 同款说明：本窗预览附件明文，须显式 SecureOn
+        properties = DialogProperties(securePolicy = SecureFlagPolicy.SecureOn),
         title = {
             Row(
                 modifier = Modifier.fillMaxWidth(),

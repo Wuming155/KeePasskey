@@ -17,6 +17,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.SecureFlagPolicy
 import com.keepasskey.app.R
 import com.keepasskey.app.security.SecureDialog
 import com.keepasskey.app.ui.components.SecurePasswordField
@@ -62,6 +64,8 @@ internal fun MasterKeyChangeDialog(
             wipeDialogPasswords()
             onDismiss()
         },
+        // SecureFlagPolicy 默认 Inherit 会按宿主窗口清掉本窗 FLAG_SECURE（ISSUE-P2-246），故须 SecureOn
+        properties = DialogProperties(securePolicy = SecureFlagPolicy.SecureOn),
         title = {
             Text(
                 text = stringResource(R.string.settings_change_master_key),

@@ -13,6 +13,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.SecureFlagPolicy
 import kotlinx.coroutines.CompletableDeferred
 
 /**
@@ -51,7 +53,18 @@ class DialogWindowHardeningHostActivity : ComponentActivity() {
         }
         setContent {
             if (DialogWindowProbe.visible) {
-                Dialog(onDismissRequest = {}) {
+                Dialog(
+                    onDismissRequest = {},
+                    // 与生产调用点同参数（§254 起生产 7 处调用点全部传 SecureOn）：
+                    // 本探针由测试切换策略，用于证明「SecureOn 强制并保持该 flag」这一机制本身。
+                    properties = DialogProperties(
+                        securePolicy = if (DialogWindowProbe.secureOn) {
+                            SecureFlagPolicy.SecureOn
+                        } else {
+                            SecureFlagPolicy.Inherit
+                        }
+                    )
+                ) {
                     DialogWindowProbe.Content()
                 }
             }
@@ -86,6 +99,16 @@ internal object DialogWindowProbe {
      */
     var hostWindowSecureOnCreate = false
 
+    /**
+     * 探针 `Dialog` 的策略是否为 `SecureFlagPolicy.SecureOn`——**必须在 `ActivityScenario.launch`
+     * 之前设定**。
+     *
+     * 生产侧 7 处调用点自 §254 起全部传 `SecureOn`（由 `SecureDialogFlagPolicyTest` 静态守卫），
+     * 本开关让设备用例既能验证 `SecureOn` 的**保持**效果，也能在同一宿主机上复现
+     * `Inherit`（＝调用点漏传）时的缺口，从而证明该策略参数是**承重**的。
+     */
+    var secureOn = true
+
     lateinit var window: CompletableDeferred<Window>
         private set
 
@@ -93,9 +116,10 @@ internal object DialogWindowProbe {
         private set
 
     /** 每个用例开始前复位（instrumentation 的静态状态跨用例存活） */
-    fun reset(hostWindowSecure: Boolean) {
+    fun reset(hostWindowSecure: Boolean, secure: Boolean = true) {
         visible = true
         hostWindowSecureOnCreate = hostWindowSecure
+        secureOn = secure
         window = CompletableDeferred()
         decorView = CompletableDeferred()
     }

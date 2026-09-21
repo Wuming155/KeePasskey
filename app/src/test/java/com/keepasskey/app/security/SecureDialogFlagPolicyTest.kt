@@ -96,6 +96,38 @@ class SecureDialogFlagPolicyTest {
         )
     }
 
+    /**
+     * `ISSUE-P2-246`（2026-09-21 §254 修复）的静态守卫：**每个**敏感对话框调用点都必须显式要求
+     * `securePolicy = SecureFlagPolicy.SecureOn`。
+     *
+     * 为什么非有这条不可：对话框窗口的 `FLAG_SECURE` 实际由 Compose 的 `SecureFlagPolicy` 决定，
+     * 其默认 `Inherit` 以**宿主窗口**的该 flag 位为准（`AndroidDialog.android.kt` 取调用方
+     * `LocalView` 作 `composeView` 求值），宿主窗口不带时 Compose 会**清除**本窗的 flag
+     * ⇒ 本包装的 `addFlags` 单独不足以保住遮罩（真机实测：宿主不带时对话框窗口
+     * `flags=0x1800002` 缺 `0x2000`；宿主带时含）。**删掉任一调用点的 `SecureOn` 即留下该缺口**，
+     * 而这一删除在运行时**完全静默**（无异常、无日志），故只能以静态比对守护。
+     *
+     * 与上一条按「文件计数」同体例，但**独立成清单**：上一条锁的是「本包装接线存在」，
+     * 本条锁的是「Compose 策略被判为 SecureOn」，两者失效方式不同，合并会互相掩盖。
+     */
+    @Test
+    fun `敏感对话框调用点全部显式要求 SecureOn`() {
+        val violations = SECURE_POLICY_CALL_SITES.mapNotNull { site ->
+            val actual = readSource(site.path).windowedCountOf(SECURE_POLICY_REQUIREMENT)
+            if (actual >= site.expectedCalls) {
+                null
+            } else {
+                "${site.path}：期望 ≥${site.expectedCalls} 处 `$SECURE_POLICY_REQUIREMENT`，实际 $actual 处"
+            }
+        }
+
+        assertTrue(
+            "以下敏感对话框调用点未显式要求 SecureOn（宿主窗口不带 FLAG_SECURE 时其对话框窗口将不被遮罩，" +
+                "见 ISSUE-P2-246）：$violations",
+            violations.isEmpty()
+        )
+    }
+
     /** 源码全文；路径相对仓库根（app 模块测试工作目录为 app/，向上回溯定位仓库根） */
     private fun readSource(path: String): String {
         val file = File(repositoryRoot, path)
@@ -139,6 +171,41 @@ class SecureDialogFlagPolicyTest {
                 expectedCalls = 2
             )
         )
+
+        /**
+         * `ISSUE-P2-246`：调用点必须显式要求 `SecureOn`（与上一条**独立**，失效方式不同）——
+         * 含 `securePolicy = SecureFlagPolicy.SecureOn` 的最少处数，按文件计。
+         *
+         * 计数依据（2026-09-21 现查 `grep -rn "    AlertDialog(" app/src/main/java`）：
+         * 四个文件共 **7 个** `AlertDialog` 调用（`CreateVaultWizardDialog.kt` 2 =
+         * 密钥文件备份提示 + 含主密码的建库向导；`ChildDatabaseDialogs.kt` 2 = 子库挂载 + 子库凭据补录；
+         * `EntryDetailPreviewDiffComponents.kt` 2 = 修订差异 + 附件预览；`MasterKeyChangeDialog.kt` 1）。
+         */
+        val SECURE_POLICY_CALL_SITES = listOf(
+            SecureDialogCallSite(
+                path = "app/src/main/java/com/keepasskey/app/ui/screens/database/CreateVaultWizardDialog.kt",
+                invocation = SECURE_POLICY_REQUIREMENT,
+                expectedCalls = 2
+            ),
+            SecureDialogCallSite(
+                path = "app/src/main/java/com/keepasskey/app/ui/screens/settings/MasterKeyChangeDialog.kt",
+                invocation = SECURE_POLICY_REQUIREMENT,
+                expectedCalls = 1
+            ),
+            SecureDialogCallSite(
+                path = "app/src/main/java/com/keepasskey/app/ui/screens/settings/subscreens/ChildDatabaseDialogs.kt",
+                invocation = SECURE_POLICY_REQUIREMENT,
+                expectedCalls = 2
+            ),
+            SecureDialogCallSite(
+                path = "app/src/main/java/com/keepasskey/app/ui/screens/detail/EntryDetailPreviewDiffComponents.kt",
+                invocation = SECURE_POLICY_REQUIREMENT,
+                expectedCalls = 2
+            )
+        )
+
+        /** 调用点必须出现的显式策略要求（Compose `DialogProperties.securePolicy`） */
+        const val SECURE_POLICY_REQUIREMENT = "securePolicy = SecureFlagPolicy.SecureOn"
 
         /** 仓库根：同时具备 app 与 core 模块源码目录的最近祖先 */
         val repositoryRoot: File by lazy {

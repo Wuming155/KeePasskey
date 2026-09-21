@@ -47,45 +47,15 @@
 
 ---
 
-## P2 中危缺陷与协议/测试缺口（1 项）
+## P2 中危缺陷与协议/测试缺口（0 项）
 
-### `ISSUE-P2-246`：对话框窗口的 `FLAG_SECURE` 会被 Compose 的 `SecureFlagPolicy.Inherit` 清除（`SecureDialog.kt` 的 fail-closed 自陈不成立）
-
-- **核实时间点**：2026-09-21（§252 设备侧实测揭出）。
-- **核实方式**：真机用例 `app/src/androidTest/java/com/keepasskey/app/security/DialogWindowHardeningDeviceTest.kt`
-  的第二个用例（宿主窗口**未**携带 `FLAG_SECURE`）实测 `dialogFlags=0x1800002`（**无** `FLAG_SECURE=0x2000`）
-  而同一 `decorView` 的 `filterTouchesWhenObscured=true`；对照用例（宿主窗口携带该 flag）实测
-  `dialogFlags=0x1802002`（**含**）⇒ 差异**只**来自宿主窗口状态。
-  机制**直读 Compose 1.12.0 源**核实（`~/.gradle` 缓存的 `ui-android-1.12.0-sources.jar`）：
-  `AndroidDialog.android.kt:251/263` 把**调用方** composition 的 `LocalView` 作为 `composeView`
-  交给 `DialogWrapper`；`:675` 用 `composeView.isFlagSecureEnabled()`（实现见
-  `AndroidPopup.android.kt:1110-1116`，读**宿主窗口**的 `FLAG_SECURE` 位）求值
-  `SecureFlagPolicy.Inherit`（默认值，`:134`）；`:676-683` 以
-  `setFlags(FLAG_SECURE.inv(), FLAG_SECURE)` **清除**对话框窗口的该 flag。
-- **背景与影响**：`SecureDialog.kt` KDoc 自陈本包装「**无条件**施加 dialog 窗口的 `FLAG_SECURE`，
-  不读取用户开关（**有意的 fail-closed 偏离**）」——**实测不成立**：宿主 `MainActivity` 窗口不带该 flag 时
-  （即**会话已解锁 + 用户在设置页关闭「防截屏」开关**），对话框窗口最终**不带** `FLAG_SECURE`。
-  受影响面 = 三条解锁态对话框（主密钥修改 / 子库凭据 / 修订差异与附件预览）在该状态下可被截屏录屏。
-  **根因不在本仓代码**（本包装的 `addFlags` 确实执行——由 `filterTouchesWhenObscured=true` 反证同一
-  `DisposableEffect` 已作用于同一窗口），而在 Compose 的默认 `Inherit` 策略**覆盖**了它。
-- **验收标准**：
-  - AC① **二选一（不得两处并存）**：①在四个对话框文件的调用点传
-    `DialogProperties(securePolicy = SecureFlagPolicy.SecureOn)`（Compose 官方等价 API，
-    见 `SecureFlagPolicy.android.kt:22-45`），让 Compose 自身强制并保持该 flag；
-    或 ②改判 `SecureDialog.kt` KDoc 的 fail-closed 自陈，如实写明「本包装的施加会被 Compose 的
-    `Inherit` 策略按**宿主窗口**状态覆盖」。
-  - AC② 选定方案后同步两处自陈：`SecureDialogFlagPolicyTest` 的 KDoc（其「真实 `addFlags` 未覆盖」
-    一句在设备侧已部分收口）与 `DialogWindowHardeningDeviceTest` 的第二个用例
-    （该用例**当前按「缺口存在」锁定**：修掉后其断言必红，须同批更新并引用本条目）。
-  - AC③ 不得为此放宽既有的 `FLAG_SECURE` 施加/撤销语义（`SecureDialogFlagPolicy` 两条不变式维持）。
-- **依据**：`app/src/main/java/com/keepasskey/app/security/SecureDialog.kt`；
-  `app/src/androidTest/java/com/keepasskey/app/security/DialogWindowHardeningDeviceTest.kt`（第二个用例）；
-  Compose 1.12.0 源（上列行号）；`docs/architecture/已知工程限界.md` §3.3。
+> **暂无开放项**（本区归零：§254 闭环 `ISSUE-P2-246`——敏感对话框遮罩改由调用点
+> `SecureFlagPolicy.SecureOn` 强制（7 处调用点），真机对照实证；详见下方「本区近期变动」引用块）。
 
 ---
 
 > **本区历史上一次归零（§247）**：§247 闭环 `ISSUE-P2-239`（凭据提供者通道「系统未登记本应用」的失效完全静默且用户无法自救）——整改＝新增该通道健康检查：三态判定落纯函数（`REGISTERED` / `NOT_REGISTERED` / `UNKNOWN`，**「读不到」不得呈现为「正常」**）、平台查询经**公开 API** `CredentialManager.isEnabledCredentialProviderService` 单点化、设置页健康卡给出用户可见状态与系统设置指引（action 不可解析时如实降级为纯文案）；真机两态实证「未登记」与系统 `TYPE_NO_CREATE_OPTIONS` 同态、已登记则请求被正常路由。新增限界 §27（本机 ROM 缺该设置页 activity ⇒ 一键入口如实降级）。证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md) 与
-> [`resolved/batches/247-凭据提供者通道健康检查批次.md`](resolved/batches/247-凭据提供者通道健康检查批次.md)。）（本区随后补登 §248 复核发现的 3 项；**§249 已闭环其中 2 项**——`ISSUE-P2-243`（子库只读会话装载传入**应用级 `FileBinaryStore`**，超阈值附件真实落盘、投影仍不带附件字段）与 `ISSUE-P2-244`（S3 覆盖前 HEAD 未返回 ETag 时 **fail-closed 上抛**，绝不发无条件 PUT），**§252 闭环余下的 `ISSUE-P2-245`**（本区因此一度归零），**§252 同轮新登记 `ISSUE-P2-246`**（见上）——逐条摘要见下方「本区近期变动」引用块。）
+> [`resolved/batches/247-凭据提供者通道健康检查批次.md`](resolved/batches/247-凭据提供者通道健康检查批次.md)。）（本区随后补登 §248 复核发现的 3 项；**§249 已闭环其中 2 项**——`ISSUE-P2-243`（子库只读会话装载传入**应用级 `FileBinaryStore`**，超阈值附件真实落盘、投影仍不带附件字段）与 `ISSUE-P2-244`（S3 覆盖前 HEAD 未返回 ETag 时 **fail-closed 上抛**，绝不发无条件 PUT），**§252 闭环余下的 `ISSUE-P2-245`**（本区因此一度归零）、**§252 同轮新登记 `ISSUE-P2-246`**（**§254 已闭环**，见下）——逐条摘要见下方「本区近期变动」引用块。）
 
 ---
 
@@ -117,14 +87,24 @@
 > [RESOLVED_LOG.md](RESOLVED_LOG.md) 与
 > [`resolved/batches/243-设置页DAL降级开关文案更正批次.md`](resolved/batches/243-设置页DAL降级开关文案更正批次.md)。
 
-> **§252 同轮新登记 `ISSUE-P2-246`（设备侧实测揭出，见上）**：`SecureDialog.kt` KDoc 自陈本包装
-> 「无条件施加 `FLAG_SECURE`（对用户开关的有意 fail-closed 偏离）」**实测不成立**——Compose `Dialog`
-> 默认 `SecureFlagPolicy.Inherit`，以**宿主窗口**的该 flag 位为准，宿主窗口不带时会把本包装刚施加的
-> `FLAG_SECURE` **清除**（真机对照读数：宿主带 ⇒ `dialogFlags=0x1802002`；宿主不带 ⇒ `0x1800002`，
-> 两者 `filterTouchesWhenObscured` 均为 `true`）。影响面＝会话已解锁且用户关闭「防截屏」开关时，
-> 三条解锁态对话框不再被遮罩。`ISSUE-P2-245` 的整改面（遮挡触摸过滤）**不受影响、已实证**；
-> 缺口与其两选一整改方向（调用点传 `SecureFlagPolicy.SecureOn` **或** 改判 KDoc 自陈）登记为
-> `ISSUE-P2-246`，**本批不改** `FLAG_SECURE` 语义。
+> **§254 闭环 `ISSUE-P2-246`（**本区由此归零**）**：§252 设备侧实测揭出——`SecureDialog.kt` KDoc 自陈的
+> 「无条件施加 `FLAG_SECURE`（对用户开关的有意 fail-closed 偏离）」**不成立**：对话框窗口的该 flag 实际由
+> Compose 的 `DialogProperties.securePolicy` 决定，默认 `Inherit` 以**宿主窗口**的 flag 位为准，宿主不带时
+> 会 `setFlags(FLAG_SECURE.inv(), FLAG_SECURE)` **清除**本包装刚施加的那一次（真机对照：宿主带 ⇒
+> `dialogFlags=0x1802002`；宿主不带 ⇒ `0x1800002`）。**定案＝让实现追上它自己写明的意图**：4 个文件的
+> **7 处**调用点全部加 `properties = DialogProperties(securePolicy = SecureFlagPolicy.SecureOn)`
+> （Compose 官方 API，强制并**保持**该 flag；`SecureFlagPolicy` 为公开枚举、`DialogProperties.securePolicy`
+> 为公开参数，**无需**任何 `@OptIn`）；`SecureDialog.kt` KDoc 的旧自陈改写为如实表述并保留「与用户开关无关」
+> 的意图陈述及其现有实现方式；`SecureDialogFlagPolicy` 两条不变式与遮挡触摸过滤逻辑**一行未改**。
+> **产品可见语义变化**：这三个对话框此后**无视用户「防截屏」开关而始终遮罩**（依据＝该包装自陈意图），
+> 若日后要恢复「尊重开关」须改判并同步 KDoc / 调用点。**守卫**：`SecureDialogFlagPolicyTest` 新增
+> 「调用点全部显式要求 SecureOn」静态不变式（按文件计数，独立于既有清单）；**设备侧**把原「锁定缺口」的
+> 第 2 例翻转为**锁定修复**（宿主不带 flag 时对话框**仍必须**带该 flag），并新增第 3 例作**同宿主仅改策略
+> 参数**的对照（`Inherit` ⇒ 不带，证明该参数承重）。**反向反校三条全中**：①任一调用点去掉 `SecureOn` ⇒
+> 守卫红；②设备第 2 例断言改回旧口径 ⇒ 红（实测 `dialogFlags=0x1802002` 含该位）；③设备第 2 例策略改回
+> `Inherit` ⇒ 红。真机全量 `:app:connectedDebugAndroidTest` **74 例 / 0 失败 / 0 error / 1 skipped**
+> （§252 基线 73 ⇒ +1，即新增的对照例）。证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md) 与
+> [`resolved/batches/254-对话框遮罩改由SecureFlagPolicy强制批次.md`](resolved/batches/254-对话框遮罩改由SecureFlagPolicy强制批次.md)。
 
 > **本区历史上一次归零**：§236 闭环 `ISSUE-P2-231`（Java 依赖面完整性锁定缺失）/
 > `ISSUE-P2-232`（完整性风险升级无主动熔断接线）——前者落**重开决策**判「仍不引入」并交付

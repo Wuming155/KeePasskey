@@ -28,21 +28,26 @@ import org.junit.runner.RunWith
  * ## 本用例证明什么 / 不证明什么（如实边界，勿外推）
  *
  * - **证明**：① 遮挡触摸过滤**真的施加到了对话框窗口的 `decorView`**（这是 `ISSUE-P2-245` 的接线结果）；
- *   ② 该对话框窗口在宿主窗口携带 `FLAG_SECURE` 时**确实带该 flag**、关闭后**确实被清除**。
+ *   ② 对话框窗口**在宿主窗口带与不带 `FLAG_SECURE` 的两种态下都携带该 flag**（后者是 `ISSUE-P2-246`
+ *   的修复面，由调用点 `SecureFlagPolicy.SecureOn` 强制并保持）；③ 关闭对话框后该 flag **确实被清除**。
+ * - **不证明**：「截屏确实被拦截」——需在真机上实际截图比对（本仓无该自动化基建），属手工冒烟项。
  * - **不证明**：「遮挡窗口的触摸确实被丢弃」——需要真机上存在真实遮挡窗口以产生带
  *   `MotionEvent.FLAG_WINDOW_IS_OBSCURED` 的事件，属手工冒烟项，本仓无该场景自动化基建。
  * - **不证明**：「对话框窗口的 `FLAG_SECURE` 由 `SecureDialogWindowEffect` 的 `addFlags` 保证」——
- *   下一条用例（`宿主窗口未携带FLAG_SECURE时对话框遮罩被Compose清除`）实测表明**不成立**：
- *   Compose 的 `Dialog` 默认 `SecureFlagPolicy.Inherit`，以**宿主窗口**的 flag 位为准，
- *   在宿主窗口无该 flag 时会 `clearFlags` 掉本包装刚施加的那一次。该缺口归 `ISSUE-P2-246`
- *   （2026-09-21 §252 设备侧揭出），**本批不改** FLAG_SECURE 语义。
+ *   §252 实测已证成**不成立**（Compose 的 `SecureFlagPolicy.Inherit` 会按宿主窗口状态清除它）；
+ *   §254 的修复是**让调用点显式要求 `SecureOn`**，而不是加强本包装的 `addFlags`。
+ * - **不覆盖**：**生产 7 处调用点本身**。本用例的组合里，承载对话框的 `Dialog` 由测试宿主提供
+ *   （只有测试自己的 composition 能插入探针去解析对话框窗口），故它验证的是
+ *   「本包装 + `DialogProperties(securePolicy = …)` 在**真实对话框窗口**上的行为」，
+ *   调用点的接线由宿主静态守卫 `SecureDialogFlagPolicyTest` 覆盖（两条互为补充）。
  */
 @RunWith(AndroidJUnit4::class)
 class DialogWindowHardeningDeviceTest {
 
     /**
      * 宿主窗口（等价生产 `MainActivity` 在「会话锁定」或「防截屏开关开启」态）= `FLAG_SECURE`
-     * 存在 ⇒ 对话框窗口也应带该 flag（由 Compose 的 `Inherit` 保持），关闭后由本包装清除。
+     * 存在 ⇒ 对话框窗口也应带该 flag（本态下调用点的 `SecureOn` 与 Compose 的 `Inherit` 都会保持它），
+     * 关闭后由本包装的 `clearFlags` 清除。
      */
     @Test
     fun `对话框窗口获得遮挡触摸过滤并携带遮罩且关闭后撤销遮罩`() {
@@ -95,24 +100,25 @@ class DialogWindowHardeningDeviceTest {
     }
 
     /**
-     * **`ISSUE-P2-246`（2026-09-21 §252 设备侧揭出）的锁定与证据**：宿主窗口**未**携带
-     * `FLAG_SECURE`（等价生产「会话已解锁 + 用户在设置页关闭防截屏开关」态）时，
-     * `SecureDialogWindowEffect` 的 `addFlags(FLAG_SECURE)` **会被 Compose 清除**——
-     * Compose `Dialog` 默认 `SecureFlagPolicy.Inherit`，以宿主窗口的 flag 位为准
-     * （`AndroidDialog.android.kt` :675 `composeView.isFlagSecureEnabled()`，`composeView` 取的是
-     * **调用方** composition 的 `LocalView`，见 `:251/263`），宿主窗口无该 flag 时执行
-     * `window.setFlags(FLAG_SECURE.inv(), FLAG_SECURE)` 即**清除**。
+     * **`ISSUE-P2-246` 修复的锁定（2026-09-21 §254）**：宿主窗口**未**携带 `FLAG_SECURE`
+     * （等价生产「会话已解锁 + 用户在设置页关闭『防截屏』开关」态）时，本类对话框窗口**仍必须**带
+     * `FLAG_SECURE`——即**宿主的开关状态不影响本类对话框**（该包装自陈意图的实现：
+     * 这四类对话框含主密钥 / 子密钥 / 条目明文差异，一律强制遮罩）。
      *
-     * ⇒ `SecureDialog.kt` KDoc 自陈的「无条件施加（对 `flagSecureEnabled` 开关的**有意 fail-closed 偏离**）」
-     * **在宿主窗口无该 flag 时不成立**，须改判 KDoc 或改在各对话框调用点传
-     * `DialogProperties(securePolicy = SecureFlagPolicy.SecureOn)`。**本批不改** FLAG_SECURE 语义
-     * （上级约束「既有施加/撤销语义一行不得改」），缺口如实登记为 `ISSUE-P2-246`。
+     * 判据为什么是这一条：Compose `Dialog` 默认 `SecureFlagPolicy.Inherit`，其继承源是**宿主窗口**
+     * 的该 flag 位（`AndroidDialog.android.kt` 取调用方 `LocalView` 作 `composeView`，
+     * 以 `composeView.isFlagSecureEnabled()` 求值，实现见 `AndroidPopup.android.kt`），
+     * 宿主不带时会执行 `setFlags(FLAG_SECURE.inv(), FLAG_SECURE)` **清除**本窗的 flag——
+     * 这正是 §252 实测到的缺口（当时读数 `hostFlags=0x81810100, dialogFlags=0x1800002`）。
+     * §254 的修复＝各调用点传 `DialogProperties(securePolicy = SecureFlagPolicy.SecureOn)`
+     * （Compose 官方 API，强制并**保持**该 flag），故本用例在本态下反而**必须**读到该 flag
+     * ——**它判的是「修复」，不是「缺口」**。
      *
-     * 本用例同时**正面锁定** `ISSUE-P2-245` 的成果：**过滤**与该 COMPOSE 策略无关，
+     * 本用例同时**正面锁定** `ISSUE-P2-245` 的成果：**过滤**与该 Compose 策略无关，
      * 在宿主窗口无 flag 时**仍然被施加**（同一个 `DisposableEffect` 内、同一 `decorView`）。
      */
     @Test
-    fun `宿主窗口未携带FLAG_SECURE时对话框遮罩被Compose清除`() {
+    fun `宿主窗口未携带FLAG_SECURE时对话框仍强制遮罩`() {
         DialogWindowProbe.reset(hostWindowSecure = false)
 
         ActivityScenario.launch(DialogWindowHardeningHostActivity::class.java).use { scenario ->
@@ -121,7 +127,7 @@ class DialogWindowHardeningDeviceTest {
                 DialogWindowProbe.decorView
             }
 
-            // 正面锁定本批成果：遮挡触摸过滤不依赖宿主窗口状态，照样已施加
+            // 正面锁定 ISSUE-P2-245 成果：遮挡触摸过滤不依赖宿主窗口状态，照样已施加
             assertTrue(
                 "遮挡触摸过滤与宿主窗口的 FLAG_SECURE 无关，必须照样施加到对话框 decorView 上" +
                     "（本次读到 ${decorView.filterTouchesWhenObscured}，ISSUE-P2-245）",
@@ -136,11 +142,63 @@ class DialogWindowHardeningDeviceTest {
                     "dialogFlags=0x${Integer.toHexString(flags)}, " +
                     "filterTouchesWhenObscured=true"
             )
+            assertTrue(
+                "宿主窗口未带 FLAG_SECURE 时，本类对话框窗口**仍必须**携带该 flag（ISSUE-P2-246，" +
+                    "2026-09-21 §254 修复）：三个含主密钥 / 子密钥 / 条目明文差异的对话框不随用户的" +
+                    "「防截屏」开关解除遮罩，故调用点已传 " +
+                    "DialogProperties(securePolicy = SecureFlagPolicy.SecureOn)；" +
+                    "本次读到 hostFlags=0x${Integer.toHexString(hostFlags)}、" +
+                    "dialogFlags=0x${Integer.toHexString(flags)}" +
+                    "（FLAG_SECURE=0x${Integer.toHexString(FLAG_SECURE)}）" +
+                    "——若此处又读不到该位，说明某调用点的 SecureOn 被移除（宿主侧守卫 " +
+                    "`SecureDialogFlagPolicyTest` 应同时报红），不得放宽本断言",
+                flags and FLAG_SECURE == FLAG_SECURE
+            )
+        }
+    }
+
+    /**
+     * **机制留证（Compose 行为，非本仓缺陷）**：同一宿主（窗口**不带** `FLAG_SECURE`）下，
+     * 若探针 `Dialog` 的策略保持默认 `Inherit`（＝等价于「某调用点漏传 `SecureOn`」），
+     * 对话框窗口**读不到** `FLAG_SECURE`——这正是 §252 实测到的缺口形态（`ISSUE-P2-246`）。
+     *
+     * 为什么要有这一条：上一条用例断言「`SecureOn` 下必须带 flag」，若该断言因某种原因恒真
+     * （例如平台/版本变化后 `Inherit` 也会保留 flag），它就失去了判别力。本条以**同一宿主、
+     * 仅改策略参数**作对照，证明上一条**真的在判策略**（两组读数只差 `securePolicy`），
+     * 也即证明生产 7 处调用点的 `SecureOn` 是**承重**的。
+     */
+    @Test
+    fun `宿主窗口未携带FLAG_SECURE且策略为Inherit时对话框不遮罩`() {
+        DialogWindowProbe.reset(hostWindowSecure = false, secure = false)
+
+        ActivityScenario.launch(DialogWindowHardeningHostActivity::class.java).use { scenario ->
+            val dialogWindow = awaitProbe("对话框窗口未在超时内解析到") { DialogWindowProbe.window }
+            val decorView = awaitProbe("对话框 decorView 未在超时内解析到") {
+                DialogWindowProbe.decorView
+            }
+
+            // 过滤与本策略无关：即便 Inherit 清掉了 flag，遮挡触摸过滤照样已施加（ISSUE-P2-245）
+            assertTrue(
+                "遮挡触摸过滤由本包装独立施加、与 SecureFlagPolicy 无关，必须照样成立" +
+                    "（本次读到 ${decorView.filterTouchesWhenObscured}，ISSUE-P2-245）",
+                decorView.filterTouchesWhenObscured
+            )
+
+            val flags = dialogWindow.attributes.flags
+            val hostFlags = hostWindowFlags(scenario)
+            println(
+                "[对话框窗口加固设备侧实测·宿主无 FLAG_SECURE + 策略 Inherit] " +
+                    "hostFlags=0x${Integer.toHexString(hostFlags)}, " +
+                    "dialogFlags=0x${Integer.toHexString(flags)}, " +
+                    "filterTouchesWhenObscured=true"
+            )
             assertEquals(
-                "既有缺口锁定（ISSUE-P2-246，2026-09-21 §252 设备侧实测）：宿主窗口未带 FLAG_SECURE 时，" +
-                    "Compose 的 SecureFlagPolicy.Inherit 会清除 SecureDialogWindowEffect 刚施加的 " +
-                    "FLAG_SECURE ⇒ 对话框窗口实测**不带**该 flag。修掉该缺口（如在调用点传 " +
-                    "SecurePolicy.SecureOn）后本断言即红，届时须同步更新 ISSUE-P2-246 与本断言。”",
+                "对照留证：宿主窗口未带 FLAG_SECURE 且 DialogProperties 策略为默认 Inherit 时，" +
+                    "Compose 会清除对话框窗口的 FLAG_SECURE（ISSUE-P2-246 的缺口形态，2026-09-21 §252 实测）；" +
+                    "本条锁定的是**框架行为**（本仓未改），用于证明上一条用例真的在判 securePolicy 参数" +
+                    "——即生产调用点的 SecureOn 是承重的。本次读到 " +
+                    "hostFlags=0x${Integer.toHexString(hostFlags)}、" +
+                    "dialogFlags=0x${Integer.toHexString(flags)}",
                 0,
                 flags and FLAG_SECURE
             )

@@ -29,6 +29,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.SecureFlagPolicy
 import com.keepasskey.app.R
 import com.keepasskey.app.security.SecureDialogWindowEffect
 import com.keepasskey.app.ui.components.SecurePasswordField
@@ -77,6 +79,8 @@ internal fun ChildDatabaseDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
+        // SecureFlagPolicy 默认 Inherit 会按宿主窗口清掉本窗 FLAG_SECURE（ISSUE-P2-246），故须 SecureOn
+        properties = DialogProperties(securePolicy = SecureFlagPolicy.SecureOn),
         title = { Text(stringResource(R.string.dbset_child_db_title)) },
         text = {
             // FLAG_SECURE 是窗口级属性：AlertDialog 由 Compose 创建独立窗口，Activity 窗口的
@@ -170,6 +174,8 @@ internal fun ChildDatabaseCredentialDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
+        // 见 ChildDatabaseDialog 同款说明：本窗含子库凭据输入，须显式 SecureOn
+        properties = DialogProperties(securePolicy = SecureFlagPolicy.SecureOn),
         title = { Text(stringResource(R.string.dbset_child_db_btn_unlock)) },
         text = {
             // 同上：子库重新解锁对话框同样是独立窗口，必须自带 FLAG_SECURE
