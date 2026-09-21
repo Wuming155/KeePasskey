@@ -19,6 +19,7 @@
 | [`architecture/已知工程限界.md`](architecture/已知工程限界.md) | **已接受工程限界 / 残余风险的唯一登记表**（原 `AGENTS.md` §6，`215ea82` 删除后由本文件承接）：事实 / 边界 / 依据 / 解除条件 |
 | [`architecture/产品裁决登记.md`](architecture/产品裁决登记.md) | **已裁决的产品口径登记表**（`PD-01`~`PD-14`）：属「产品 / 架构取舍」而非缺陷的条目；与待办清单、`已知工程限界` 的分工见该文件开头 |
 | [`architecture/敏感缓冲所有权契约.md`](architecture/敏感缓冲所有权契约.md) | **敏感缓冲所有权与擦除责任的唯一规范**（`ISSUE-P3-235` / `RC-02` AC① 交付物）：四类所有权（O/B/S/P）与判定树、规则 R1~R6、收口点登记表、非秘密豁免下界清单、`已知工程限界` §1.6 池内擦除解除条件评估、逐处迁移路线图；**改任何清零 / 所有权语义前必读** |
+| [`architecture/实现约定与验证现状.md`](architecture/实现约定与验证现状.md) | **实现约定与验证现状**（§255 从 `已知工程限界.md` 迁出、**逐字原样**）：§1.2 彻底退出的清理面 / §2.3 Rust 内核与互操作**已达成** / §3.1 原生库懒加载顺序 / §3.2 `CipherInputStream` 异常语义 / §3.3 遮挡触摸过滤接线清单 / §3.5 完整性重扫参数与契约不变量 / §4.1 设备侧覆盖现状 / §4.2 视觉与系统 UI 未核对项 / §4.3 KPEX 互操作证据现状；**非残余风险**，限界表对应编号处留存根（节标题 + 规范句 + 指针） |
 | [`architecture/reference-projects.md`](architecture/reference-projects.md) | 参考项目地图与优先级层级 |
 | [`architecture/扫码方案评估_ZXing与CameraXMLKit.md`](architecture/扫码方案评估_ZXing与CameraXMLKit.md) | 扫码方案选型评估（ZXing vs CameraX/ML Kit） |
 
@@ -38,6 +39,7 @@
 | [`records/自动填充认证链路真机实测记录.md`](records/自动填充认证链路真机实测记录.md) | `ISSUE-P2-73` AC③ 真机实测记录（Redmi 4X / Android 17 / API 37）：设备侧驱动方式、定版用例与历史失败逐次留痕、logcat 原文与截图；四条新发现与该缺陷的定位 / 修复（§11） |
 | [`records/通行密钥互操作对拍记录_2026-09-19.md`](records/通行密钥互操作对拍记录_2026-09-19.md) | `ISSUE-P2-210` / `ISSUE-P2-211` 的证据留痕（`AGENTS.md` 规则 8）：`keepassxc-cli` + `pykeepass` + `cryptography` 双向对拍的命令与原文输出、114 条判据构成、Ed25519 PKCS#8 形态缺陷的隔离实验与修复复跑、**github.com 端到端手工冒烟清单（本批未执行）** |
 | [`records/限界表证据与实测数据汇录.md`](records/限界表证据与实测数据汇录.md) | [`architecture/已知工程限界.md`](architecture/已知工程限界.md) 的**证据 / 实测 / 沿革附卷**（§253 批次外迁，§253 补正扩充）：按 `§x.y` 分节收录从限界表移出的实测表、多轮叙事、根因推导与观测点记录（**整句 / 整段逐字搬移、不改写**），另含原表文末「附」表 40 行逐字归档与**附录 A**（§253 补正时由正文移出的全部说明性句子，按原节标题分组）；限界表内相应位置留一行指针 |
+| [`records/宿主开发环境现象.md`](records/宿主开发环境现象.md) | **宿主开发环境现象**（§255 从 `已知工程限界.md` 迁出、**逐字原样**）：§7 Windows/NTFS 目录枚举鬼影及其派生残余、§12 宿主侧 Windows 原子 rename 偶发 `AccessDeniedException`——两节原文均自陈「**非产品缺陷**」、Android 生产环境未观测到；限界表对应编号处留存根（节标题 + 规范句 + 指针） |
 
 ## security/ — 安全、威胁建模与合规
 
