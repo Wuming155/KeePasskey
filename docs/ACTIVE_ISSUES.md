@@ -94,7 +94,7 @@
 
 ---
 
-## P3 低危问题、特性接线与体验优化（3 项）
+## P3 低危问题、特性接线与体验优化（2 项）
 
 > **本区上一次归零**：§238 闭环 `ISSUE-P3-235`（`RC-02` 敏感缓冲所有权收口）——
 > AC① 设计交付 [`architecture/敏感缓冲所有权契约.md`](architecture/敏感缓冲所有权契约.md)；
@@ -139,27 +139,9 @@
 - **依据**：`sync/src/androidTest/AndroidManifest.xml`；`app/src/main/res/xml/network_security_config.xml`；
   `docs/architecture/已知工程限界.md` §4.1。
 
-### `ISSUE-P3-249`：复核报告四行与代码现况不一致（需同步或标注取代）
-
-- **核实时间点**：2026-09-21（同上轮复核）。
-- **核实方式**：逐行对拍 `docs/security/SECURITY_RECHECK_2026-09.md` 与 HEAD 现状：
-  ① `:232` 以「**全仓无锁态驱动的 UI 导航**」作为 `P2-65` 的判定依据，而
-  `app/src/main/java/com/keepasskey/app/ui/KeePasskeyApp.kt:287-295`（`lockEvents` → Unlock + `popUpTo(0)`）
-  正是锁态驱动导航；
-  ② `:799` 表项 10 仍写 `P2-73` AC② 改 `FLAG_MUTABLE`「**不可照做**（本仓这两条路径不消费 fillIn extras）」，
-  该前提已随 §110 / §111 修复失效（现行代码即 `FLAG_MUTABLE` + 经 `EXTRA_AUTHENTICATION_RESULT`
-  回传完整数据集，真机验证通过）；
-  ③ `:609-610` 仍把「CM 通道 `UNBOUND` 越权面**未进**限界登记表」列为残余，而限界 §6 已于 §82 批次补登；
-  ④ `:850` 仍记 `SUPPLY-06`「本轮未直读」，而 §236 已直读定案并把结论落限界 §25。
-- **验收标准**：
-  - AC① 四行按现状更正；或加「已由 §NNN 取代」标注并**保留原文**（本项目留痕口径）。
-  - AC② 改后必跑 `bash tools/audit/check_recheck_consistency.sh` 与 `python tools/doc/check_md_links.py`。
-  - AC③ 改写时**不得**在正文复述脚本的禁用短语（§15.2(p) 的既有教训）。
-- **依据**：`SECURITY_RECHECK_2026-09.md` 上述四行；`docs/architecture/已知工程限界.md` §6 / §25；
-  `docs/resolved/batches/82-…`、`110-…`、`111-…`、`236-…`。
-
-
-> **本区近期变动**：§236 闭环 `ISSUE-P3-233`（复核报告 `P3-120` 状态陈旧——更正报告
+> **本区近期变动**：§250 闭环 `ISSUE-P3-249`（复核报告四行与代码现况不一致——`P2-65` 判定依据「全仓无锁态驱动的 UI 导航」更正为「锁态驱动导航**确实存在**」（`KeePasskeyApp.kt:287-295`），`P2-73` AC② 改 `FLAG_MUTABLE` 的「不可照做」前提已随 §110 / §111 失效、CM 通道 `UNBOUND` 越权面**已登记**限界 §6、`SUPPLY-06` 的 IP 字面量面**已由 §236 直读定案**（限界 §25）；四处一律**保留原文 + 就地加更正注**）——证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md) 与
+> [`resolved/batches/250-复核报告四行与代码现况对齐批次.md`](resolved/batches/250-复核报告四行与代码现况对齐批次.md)；
+> §236 闭环 `ISSUE-P3-233`（复核报告 `P3-120` 状态陈旧——更正报告
 > §10.1 / §3.3.2 / §2.3 / §2.4 / §6.7 / §9.2 并增补 §15.3 方法学第 12 条）与 `ISSUE-P3-234`
 > （DAL 出口 IP 字面量面定案，登记 [`已知工程限界.md`](architecture/已知工程限界.md) §25）；
 > §237 闭环 `ISSUE-P3-230`（已有 SAF 库授权失败不再静默——提示 + 列表状态 + 重授入口，

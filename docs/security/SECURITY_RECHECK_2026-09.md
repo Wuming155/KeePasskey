@@ -229,7 +229,7 @@ Phase 5  Final Board → 最终裁决 + Finding Matrix + 修复优先级 + 验�
 | `P2-62` | P2 | INFO | HARDENING | 否 | P3 | `[V]` |
 | `P2-63` | P2 | LOW | DESIGN WEAKNESS | 受限 | **P1（与 `P2-53` 同批）** | `[V]` |
 | `P2-64` | P2 | INFO | DESIGN WEAKNESS | 否 | P3 | `[V]` |
-| `P2-65` | P2 | LOW | CONFIRMED VULNERABILITY | 受限 | P1 | `[V]` **关键前提被静态否定**：全仓无锁态驱动的 UI 导航 |
+| `P2-65` | P2 | LOW | CONFIRMED VULNERABILITY | 受限 | P1 | `[V]` **关键前提被静态否定**：全仓无锁态驱动的 UI 导航。**（2026-09-21 更正，`ISSUE-P3-249`）该依据与 HEAD 现况不符**：`app/src/main/java/com/keepasskey/app/ui/KeePasskeyApp.kt:287-295` 的 `lockEvents` → `Unlock` + `popUpTo(0)` **正是**锁态驱动的 UI 导航（限界 §13 的「锁库后该页已移出返回栈」亦以此为据）⇒ 依据更正为「**锁态驱动的 UI 导航确实存在**」；本条**终评 LOW / 终态 CONFIRMED VULNERABILITY / 可利受限 / 修 P1 均不变**。 |
 | `P2-66` | P2 | **LOW–INFO** | **FALSE POSITIVE**（+残余边界） | 否 | P3 | `[V]` 子断言**误报**（`clearAll()` 已覆盖 `.tmp`）；余下 unlink-only 为已接受边界 |
 | `P2-67` | P2 | LOW | DESIGN WEAKNESS | 受限 | P2 | `[V]` |
 | `P2-68` | P2 | INFO | POTENTIAL SECURITY ISSUE | 否 | P3 | `[V]` **风险面被高估**：JVM 数组 `toString()` 只打印 `[B@hash`，**只泄露 `String` 字段** |
@@ -611,6 +611,15 @@ scheme **硬编码 `https://`**（不可能是明文）、路径固定、结果*
 > 判定、`文件:行号` 与 commit 证据见
 > [`待复核区IPC与SUPPLY项重合声明核实.md`](待复核区IPC与SUPPLY项重合声明核实.md)。
 >
+> **（2026-09-21 更正，`ISSUE-P3-249`）**上条第 1 处独立残余「CM 通道 `UNBOUND` 越权面**未进**登记表」**状态已更新**：
+> 该取舍已在同一次 `ISSUE-P3-145` 收口工作中（§106 批次，2026-09-16，commit `1d4f251`）补登为
+> [`已知工程限界.md`](../architecture/已知工程限界.md) **§6**（「CM（通行密钥）通道『未绑定包名』的退回放行口径」，
+> `IPC-11` 族 / `P2-83` 同族；来源见
+> [`docs/resolved/batches/106-报告口径更正与重合声明核实批次.md`](../resolved/batches/106-报告口径更正与重合声明核实批次.md)，
+> 该节由 §82 批次确立的 `UNBOUND` 边界口径而来）⇒ 该残余**不再是未登记项**；
+> `UNBOUND` 仍为**明示边界**（其越权面由该节正文与 `CredentialManagerPackageBindingGateTest` 锁定，
+> 不得读作「已加固」）。第 2 处残余（`P2-54` 的 AC② 分支保护必需检查无活动落点）**不受本条更正影响**。
+>
 > 此外，**第四轮复核工作目录（`.audit-recheck/`，`.gitignore` 排除）另有编号从未进入本报告**：
 > 对这批编号的逐条四选一结论（已由某条目覆盖 / 已在本批修复 / 确属新缺陷 / 前提不成立）、可核对证据、
 > 以及「工作目录结论分流与退役判定」，同见上述文件（第 3、6 节）。
@@ -796,7 +805,7 @@ RC-09  ★★ 字段引用的解析面未按消费点收敛
 | 7 | `P2-58` | AC① 只按长度 → 长数字串**误判极强** | 补**线性惩罚** |
 | 8 | `P1-22` | 无条件禁用封印 → 打断模拟器 / CI 生物识别路径 | 显式确认 + 常驻声明 |
 | 9 | `P2-43` | "强制不可关闭短擦除" → `armScheduledClear` 分支顺序（`:85` 先于 `:87`）会产出**假加固** | 调整分支顺序 |
-| 10 | `P2-73` AC② | 改 `FLAG_MUTABLE` → **为对齐文档而降低安全性** | **不可照做**（本仓这两条路径不消费 fillIn extras） |
+| 10 | `P2-73` AC② | 改 `FLAG_MUTABLE` → **为对齐文档而降低安全性** | **不可照做**（本仓这两条路径不消费 fillIn extras）。**（2026-09-21 更正，`ISSUE-P3-249`）**上述前提已随 §110 / §111 修复失效：现行实现即 `FLAG_MUTABLE` + 经 `EXTRA_AUTHENTICATION_RESULT` 回传**完整**已填充 `Dataset`（`app/src/main/java/com/keepasskey/app/autofill/AutofillDatasetBuilders.kt:113/165/348/379`、`KeePasskeyAutofillService.kt:461`、`AutofillAuthResultDelivery.kt:89`），**真机已验证通过** ⇒ 本条陷阱对现行代码不再适用（指针：限界 §4.1；[`docs/resolved/batches/110-产品裁决分流与自动填充解锁链路修复批次.md`](../resolved/batches/110-产品裁决分流与自动填充解锁链路修复批次.md) / [`111-自动填充确认路径凭据交付修复批次.md`](../resolved/batches/111-自动填充确认路径凭据交付修复批次.md)） |
 | 11 | `P2-73` | 与 `IPC-01` **互斥**（一方成立则另一方无影响） | 须**同批实测** |
 | 12 | `P2-74` AC② | "改用 `CallingAppInfo`" → 传统 autofill 通道**没有**该字段 | 需另寻方案 |
 | 13 | `IPC-02` / `P3-111` | 顺序颠倒 → 交叉核对**恒失败**，把"能填充"变"不能填充" | 先保证 `retrieve*` 非 null |
@@ -847,7 +856,7 @@ RC-09  ★★ 字段引用的解析面未按消费点收敛
 | `IPC-10` | AOSP `AutofillManagerService.java` 保存回调是否有兜底超时 |
 | `AP-43` | `adb shell bmgr backupnow com.keepasskey.app` + `dumpsys backup` |
 | `P3-88` | `apksigner verify --print-certs` 取 Chrome 真实 64-hex 指纹比对 |
-| `SUPPLY-06` | `DomainMatcher.extractDomain` 是否允许 IP 字面量（本轮未直读） |
+| `SUPPLY-06` | `DomainMatcher.extractDomain` 是否允许 IP 字面量（原写「本轮未直读」）——**（2026-09-21 更正，`ISSUE-P3-249`）已由 §236 批次直读定案**：IPv4 字面量**可过** PSL 下限、IPv6 **被拒**；SSRF 仅由连接期层 `SsrfGuardSocketFactory` 覆盖 ⇒ 结论落 [`已知工程限界.md`](../architecture/已知工程限界.md) **§25**（`ISSUE-P3-234`，来源 [`docs/resolved/batches/236-存量裁决与P3两项收敛批次.md`](../resolved/batches/236-存量裁决与P3两项收敛批次.md)）；**该项不再是待验项** |
 | `P2-54` AC② | `gh api repos/{owner}/{repo}/branches/main/protection` |
 | `P3-123④` | `gh api repos/:owner/:repo --jq .visibility`（决定 `mapping.txt` 的 LOW / INFO） |
 | **`M-1`（新增）** | **`P2-49` 的墙钟量级实测**：构造合法 Header（`I = 2²⁴`、`M` 取「堆/2」）在设备上实测一次 KDF 耗时，用实测值替换 §4.2 的推算，避免第三次修正。**判据**：记录 API / ABI / 机型 / 实测秒数 |
