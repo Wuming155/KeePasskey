@@ -94,52 +94,41 @@
 
 ---
 
-## P3 低危问题、特性接线与体验优化（2 项）
+## P3 低危问题、特性接线与体验优化（0 项）
 
-> **本区上一次归零**：§238 闭环 `ISSUE-P3-235`（`RC-02` 敏感缓冲所有权收口）——
+> **暂无开放项**（本区归零：§251 闭环 `ISSUE-P3-246` / `ISSUE-P3-247`——
+> sync 测试侧两处口径收窄（限界 §7 实体口径判据 + 明文豁免由整进程收窄到两域），
+> 真机 `:sync:` 24 例 / `:app:` 71 例全绿；另 §250 闭环 `ISSUE-P3-249`。
+> 逐条摘要见下方「本区近期变动」引用块）。
+
+---
+
+> **本区历史上一次归零（§238）**：§238 闭环 `ISSUE-P3-235`（`RC-02` 敏感缓冲所有权收口）——
 > AC① 设计交付 [`architecture/敏感缓冲所有权契约.md`](architecture/敏感缓冲所有权契约.md)；
 > AC② 逐处迁移：`G1`（§235）/ `G2`（§238）闭环、`G3`（池内擦除）维持已登记限界 §1.6、
 > `G4`（命名统一）降为「按需」、`G5` / Step 1 已核实；`test` 343 类 / 2402 例全绿。
 > 证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md) 与
-> [`docs/resolved/batches/238-待决冲突解析树身份判定擦除批次.md`](resolved/batches/238-待决冲突解析树身份判定擦除批次.md)）。（本区随后补登 §248 复核发现的 5 项；**§249 已闭环其中 2 项**——`ISSUE-P3-248`（`DatabasePickerViewModel` 的弱因子提示 KDoc 更正为**如实表述**，由 `WeakKdfNoticeHonestyGuardTest` 钉死口径）与 `ISSUE-P3-250`（限界 §18 **收窄授权**为「不得新增含实现体成员」+ 5 处薄编排待消化清单、§20 按 65 行现值**重新裁定**为接受为限界），余 3 项见下）
+> [`docs/resolved/batches/238-待决冲突解析树身份判定擦除批次.md`](resolved/batches/238-待决冲突解析树身份判定擦除批次.md)）。（本区随后补登 §248 复核发现的 5 项；**§249 已闭环其中 2 项**——`ISSUE-P3-248`（`DatabasePickerViewModel` 的弱因子提示 KDoc 更正为**如实表述**，由 `WeakKdfNoticeHonestyGuardTest` 钉死口径）与 `ISSUE-P3-250`（限界 §18 **收窄授权**为「不得新增含实现体成员」+ 5 处薄编排待消化清单、§20 按 65 行现值**重新裁定**为接受为限界）；**§250 随之闭环 `ISSUE-P3-249`**、**§251 闭环余下 2 项（`ISSUE-P3-246` / `ISSUE-P3-247`）**——逐条摘要见下方「本区近期变动」引用块。）
 
-### `ISSUE-P3-246`：`SyncCacheAndroidRuntimeTest` 的「目录已清空」判据未按限界 §7 的实体口径
-
-- **核实时间点**：2026-09-21（同上轮复核）。
-- **核实方式**：`sync/src/androidTest/java/com/keepasskey/sync/engine/SyncCacheAndroidRuntimeTest.kt:76`
-  仍写 `assertTrue("清理后不得残留任何文件", (dir.listFiles() ?: emptyArray()).isEmpty())`
-  ——用**原始目录枚举返回值**判定「目录已清空」；限界 §7 边界 1 明令不得如此（须以 `isFile` / NIO 实体复核），
-  并声明 `SyncCacheTest` / `SyncCacheEvictorTest` 已按该口径更正；限界 §7 未说明该处为何豁免
-  （`docs/records/SyncCache大写CACHE临时文件定位记录.md` §6.3 自陈扫描范围只含 `*/src/test`）。
-- **背景与影响**：该判据在宿主产物上与 §7 口径不一致；用例只在真机跑，日后复现同形红会被读作新缺陷。
-- **验收标准**：
-  - AC① 该断言改为实体口径（`walkTopDown().filter { it.isFile }` 或 `File(dir, name).isFile`），
-    与 `SyncCacheEvictorTest` 的写法一致。
-  - AC② 改后按「测试资产纪律」②真机跑 `:sync:connectedDebugAndroidTest`。
-  - AC③ **不得**放宽「真残留必红」的判别力。
-- **依据**：`SyncCacheAndroidRuntimeTest.kt:76`；`docs/architecture/已知工程限界.md` §7 边界 1；
-  `docs/records/SyncCache大写CACHE临时文件定位记录.md` §6.3。
-
-### `ISSUE-P3-247`：sync 测试 APK 的明文放行未收窄到回环（与限界 §4.1 表述不一致）
-
-- **核实时间点**：2026-09-21（同上轮复核）。
-- **核实方式**：直读 `sync/src/androidTest/AndroidManifest.xml`，其中为
-  `<application android:usesCleartextTraffic="true" />`——**整个测试 APK 进程**放行明文（非仅回环），
-  与同文件注释自述的「只放开测试 APK 进程的回环明文」不一致；限界 §4.1 亦写作
-  「sync 测试 APK 经 `androidTest/AndroidManifest.xml` 声明 INTERNET 权限与回环明文豁免」。
-- **背景与影响**：**生产侧不受影响**（`app/src/main/res/xml/network_security_config.xml`：
-  `base-config cleartextTrafficPermitted="false"` + 信任锚仅系统 CA；OkHttp 层
-  `SyncHttpClientFactory` 另有 TLS-only `ConnectionSpec`）。但测试侧口径宽于文档声明：
-  该进程内任何主机（含非回环 LAN 地址）都允许明文。属**测试资产**口径债，不是产品缺陷。
-- **验收标准**：
-  - AC① 测试 APK 改用 network security config，**只对** `127.0.0.1` / `localhost` 放行明文，其余域仍禁。
-  - AC② 改后按「测试资产纪律」②真机跑 `:sync:connectedDebugAndroidTest` 与 `:app:connectedDebugAndroidTest`
-    （`CleartextPolicyDeviceTest` 依赖生产禁令保持生效）。
-  - AC③ 生产 `network_security_config.xml` **一行不得放宽**；`CleartextPolicyDeviceTest` 必须仍绿。
-- **依据**：`sync/src/androidTest/AndroidManifest.xml`；`app/src/main/res/xml/network_security_config.xml`；
-  `docs/architecture/已知工程限界.md` §4.1。
-
-> **本区近期变动**：§250 闭环 `ISSUE-P3-249`（复核报告四行与代码现况不一致——`P2-65` 判定依据「全仓无锁态驱动的 UI 导航」更正为「锁态驱动导航**确实存在**」（`KeePasskeyApp.kt:287-295`），`P2-73` AC② 改 `FLAG_MUTABLE` 的「不可照做」前提已随 §110 / §111 失效、CM 通道 `UNBOUND` 越权面**已登记**限界 §6、`SUPPLY-06` 的 IP 字面量面**已由 §236 直读定案**（限界 §25）；四处一律**保留原文 + 就地加更正注**）——证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md) 与
+> **本区近期变动**：§251 闭环 `ISSUE-P3-246` / `ISSUE-P3-247`（**本区由此归零**）——
+> `ISSUE-P3-246`：`SyncCacheAndroidRuntimeTest` 的「目录已清空」断言由**原始目录枚举返回值**（`dir.listFiles()`）
+> 改为限界 §7 的**实体口径**（`walkTopDown().filter { it.isFile }` 对 `emptyList<File>()`，与 `SyncCacheTest` /
+> `app` 侧 `SyncCacheEvictorTest` 同款写法），「真残留必红」的判别力未放宽，并把依据与 §7 边界 3 自陈的
+> 约 3% 假阳性残余写进用例 KDoc；
+> `ISSUE-P3-247`：sync 测试 APK 的明文放行由**整进程** `android:usesCleartextTraffic="true"` 收窄为该测试 APK
+> **专用**的 network security config（`base-config` 显式禁明文 + 仅系统 CA 信任锚），唯一的 `domain-config`
+> **只放行设备侧用例实际使用的两个主机名** `localhost` 与 `127.0.0.1`（逐份勘察该源集 6 个用例，
+> 未出现「假主机名 + 回环 `Dns`」形态 ⇒ 两域**恰好完备**）；生产全站禁令
+> （`app/src/main/res/xml/network_security_config.xml`）**一行未放宽**。
+> **真机实证**（Redmi 4X / Android 17 · API 37，2026-09-21）：`:sync:connectedDebugAndroidTest`
+> **24 例 / 0 失败 / 0 error / 0 skipped**、`:app:connectedDebugAndroidTest`
+> **71 例 / 0 失败 / 0 error / 1 skipped**（该 skipped 为 `CredentialSaveChainDeviceTest` 的环境前提 `Assume`，
+> 非本批所致）；`CleartextPolicyDeviceTest`（4 例）全绿 ⇒ 生产明文禁令未被测试侧改动影响。三处工程留痕
+> （安装器会话残留 `INSTALL_FAILED_UPDATE_INCOMPATIBLE` / UiAutomation 槽位被占按限界 §4.1 约束 1 既有口径
+> `am force-stop` 规避 / `:core:` 一度卡 Windows 文件锁与限界 §12 同类）均系**已登记约束的现场复现或宿主现象**，
+> 不是新缺陷。证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md) 与
+> [`resolved/batches/251-设备侧两处测试口径收窄批次.md`](resolved/batches/251-设备侧两处测试口径收窄批次.md)；
+> §250 闭环 `ISSUE-P3-249`（复核报告四行与代码现况不一致——`P2-65` 判定依据「全仓无锁态驱动的 UI 导航」更正为「锁态驱动导航**确实存在**」（`KeePasskeyApp.kt:287-295`），`P2-73` AC② 改 `FLAG_MUTABLE` 的「不可照做」前提已随 §110 / §111 失效、CM 通道 `UNBOUND` 越权面**已登记**限界 §6、`SUPPLY-06` 的 IP 字面量面**已由 §236 直读定案**（限界 §25）；四处一律**保留原文 + 就地加更正注**）——证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md) 与
 > [`resolved/batches/250-复核报告四行与代码现况对齐批次.md`](resolved/batches/250-复核报告四行与代码现况对齐批次.md)；
 > §236 闭环 `ISSUE-P3-233`（复核报告 `P3-120` 状态陈旧——更正报告
 > §10.1 / §3.3.2 / §2.3 / §2.4 / §6.7 / §9.2 并增补 §15.3 方法学第 12 条）与 `ISSUE-P3-234`

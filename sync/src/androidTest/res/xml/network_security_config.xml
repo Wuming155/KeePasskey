@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  sync 测试 APK 专用的网络安全配置（ISSUE-P3-247）。
+
+  背景：本测试 APK 此前以 `<application android:usesCleartextTraffic="true" />` **整进程**放行明文，
+  比同文件注释与 `docs/architecture/已知工程限界.md` §4.1 自述的「回环明文豁免」**宽**——
+  该进程内任何主机（含非回环 LAN 地址）都允许明文。本配置把豁免收窄为**测试实际使用的主机名**。
+
+  - base-config 与生产策略同形（`cleartextTrafficPermitted="false"` + 信任锚仅系统 CA）：
+    默认禁明文，其余任何主机仍受平台禁令约束（这正是 ISSUE-P2-192 余量第 2 项的判别面）；
+  - 下列 domain-config 只放行**设备侧用例真实请求的主机名**（逐条依据见各 <domain> 上方注释）；
+  - 生产 APK 的全站禁明文（`app/src/main/res/xml/network_security_config.xml`）不受本文件影响，
+    且 `CleartextPolicyDeviceTest` 依赖该生产禁令保持生效。
+
+  平台校验的是 **URL 里的主机名**（非解析后的 IP），故此处逐名列举，
+  不能以「最终都解析到 127.0.0.1」为由只写 IP 字面量。
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+
+    <domain-config cleartextTrafficPermitted="true">
+        <!--
+          `localhost`：WebDavTransferDeviceTest 经 `MockWebServer.url("/")` 取 provider 的 serverUrl，
+          其 host 即 `localhost`（SsrfRedirectBypassDeviceTest 第 1 例把该事实钉为断言）；
+          SsrfRedirectBypassDeviceTest 第 3 例的控制组重定向目标亦为 `http://localhost:<port>/`。
+        -->
+        <domain includeSubdomains="false">localhost</domain>
+        <!--
+          `127.0.0.1`：S3TransferDeviceTest 以 `http://127.0.0.1:${server.port}` 构造 endpoint；
+          SsrfRedirectBypassDeviceTest 第 3 例的初跳与重定向目标均为 IPv4 字面量。
+        -->
+        <domain includeSubdomains="false">127.0.0.1</domain>
+    </domain-config>
+</network-security-config>

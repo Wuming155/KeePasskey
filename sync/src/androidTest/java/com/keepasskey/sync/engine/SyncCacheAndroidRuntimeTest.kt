@@ -63,6 +63,19 @@ class SyncCacheAndroidRuntimeTest {
         assertArrayEquals(data, cache.openCacheStream("attachments/k1")!!.readBytes())
     }
 
+    /**
+     * `clearAll` 清空全部落盘内容——**判据必须是「磁盘上真实存在的文件」**（ISSUE-P3-246）。
+     *
+     * 为什么不用 `File.listFiles()` 的**原始返回值**判「目录已清空」：限界
+     * [`docs/architecture/已知工程限界.md`](../../../../../../../../docs/architecture/已知工程限界.md) **§7 边界 1**
+     * 明令不得如此——本机（Windows/NTFS）实测偶发返回**大写拼写、磁盘上并不存在**的**鬼影条目**
+     * （宿主侧 `SyncCacheTest` / `SyncCacheEvictorTest` 已因同形偶发红按实体口径更正，
+     * 依据与踩坑史见 `docs/records/SyncCache大写CACHE临时文件定位记录.md` 与 §107 / `ISSUE-P2-192` 的既有口径）。
+     *
+     * **判别力未放宽**：`isFile == true` 的真残留（真的没删掉）依旧留在返回值里 ⇒ 断言照旧变红；
+     * 被排除的只是「目录索引说有、磁盘上没有」的条目。残余：`isFile` 并非百分百可靠
+     * （§7 边界 3 自陈约 3% 假阳性未消除）。
+     */
     @Test
     fun `clearAll 清空全部落盘内容`() {
         val dir = newCacheDir()
@@ -73,6 +86,13 @@ class SyncCacheAndroidRuntimeTest {
 
         assertTrue(cache.clearAll())
 
-        assertTrue("清理后不得残留任何文件", (dir.listFiles() ?: emptyArray()).isEmpty())
+        val leftovers = dir.walkTopDown().filter { it.isFile }.toList()
+        val listed = (dir.listFiles() ?: emptyArray()).map { it.name }
+        assertEquals(
+            "清理后不得残留任何**实体**文件（判据为 isFile，见限界 §7 边界 1；" +
+                "磁盘上没有的目录索引条目不计入）。索引条目（含鬼影）=$listed；实体残留=${leftovers.map { it.name }}",
+            emptyList<File>(),
+            leftovers
+        )
     }
 }
