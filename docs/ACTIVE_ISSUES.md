@@ -28,41 +28,10 @@
 
 ---
 
-## P1 高危与核心功能问题（1 项）
+## P1 高危与核心功能问题（0 项）
 
-### ISSUE-P1-241：「移除密码库关联」的确认文案承诺「不会删除物理文件」，但应用私有库的文件**会被真的删除**
-
-- **核实时间点**：2026-09-21 于真机 Redmi 4X（santoni，Android 17 / API 37）实测
-  （§243 真机验证收尾、清理该批新建的测试库时触发）。
-- **核实方式**：
-  ① 界面路径：解锁页「切换密码库」→ 密码库管理 → 对 `e2e-issue240.kdbx` 卡片点删除图标
-  （`contentDescription = @string/btn_delete`）；
-  ② 弹窗文案经 Android CLI `android layout` 读出：`db_picker_delete_confirm_title`
-  「移除密码库关联？」+ `db_picker_delete_confirm_desc`
-  「这只会从本机的密码库切换列表中移除该条目，**不会删除物理文件**。」
-  （`values-en` 同义："The original physical file will not be deleted."）；
-  ③ 点「删除」确认后 `adb shell run-as com.keepasskey ls -la files/` 实测：
-  **该库文件已不存在**（目录内仅余 `passwords.kdbx` / `passwords.kdbx.bak` / `profileInstalled`），
-  而删除前同一命令可清晰看到 `-rw------- 1017 … e2e-issue240.kdbx`；
-  ④ 代码核对：`VaultLifecycleCoordinator.removeDatabase` 的 KDoc 即「摘除注册表条目、**删除沙盒内文件**、
-  必要时关闭会话并清空活动库 ID」，实现为 `File(context.filesDir, id).delete()`（无条件尝试，存在即删）。
-- **背景与根因**：该文案描述的是**外部库**（`content://` / 绝对路径登记）的真实行为——其物理文件在应用外，
-  `File(filesDir, id)` 不存在故不会删除；而**应用私有目录**（建库向导的默认且推荐项）下的库，
-  其 `id` 恰是 `filesDir` 内的文件名 ⇒ **真的被删除且不可恢复**（无回收站、无二次确认差异、
-  连同 `.bak` 也不在保护之列）。用户按文案理解为「只是从列表移除」，实际把密码库永久删掉。
-  这与 §243 刚闭环的 `ISSUE-P2-240`（文案与真实语义无关）同源，但**危害面更大**（不可逆数据丢失），
-  故按 P1 登记。
-- **验收标准**：AC① 确认弹窗文案必须与真实行为一致，并**按存储类型区分**：应用私有库须明示
-  「将**永久删除**应用私有目录中的该文件，**无法恢复**」；外部库方可保留现「仅移除关联」表述；
-  AC② 删除私有库须是**明确的破坏性动作**（红色危险按钮 + 指明被删文件名），不得与「仅移除关联」
-  共用同一套确认措辞；AC③ 若产品选择「只移除关联、不删文件」，则必须**另行**提供显式的「删除文件」
-  入口，且默认动作不得删文件（二选一由产品裁决并登记 `产品裁决登记.md`）；
-  AC④ 「存储类型 → 文案/动作」映射落纯函数并由 JVM 单测按类型穷举锁定，中英文同步；
-  AC⑤ 真机回归：对应用私有库执行删除后，**界面声明与文件系统结果一致**（`run-as` 观测取证）。
-- **涉及文件**：`app/src/main/java/com/keepasskey/app/ui/screens/database/DatabasePickerScreen.kt`（确认弹窗）、
-  `app/src/main/res/values/strings.xml` / `values-en/strings.xml`（`db_picker_delete_confirm_title/_desc`）、
-  `app/src/main/java/com/keepasskey/app/data/repository/VaultLifecycleCoordinator.kt`（`removeDatabase`）；
-  触发经过与现场证据见 §243 批次正文 §7。
+> **暂无开放项**（本区归零：§246 闭环 `ISSUE-P1-241`（「移除密码库关联」的确认文案承诺「不会删除物理文件」，而应用私有库的文件**会被真的删除**）——整改＝确认弹窗文案与动作按**存储类型**分列两套、判据落纯函数并单点化、数据层只在「应用私有库」分支删物理文件（产品口径落 `PD-17`）；真机逐字实证「界面声明与文件系统结果一致」（私有库删除后文件确已消失，外部库确认后文件原样在）。证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md) 与
+> [`resolved/batches/246-移除密码库确认文案与真实行为一致批次.md`](resolved/batches/246-移除密码库确认文案与真实行为一致批次.md)。）
 
 ---
 
@@ -78,28 +47,10 @@
 
 ---
 
-## P2 中危缺陷与协议/测试缺口（1 项）
+## P2 中危缺陷与协议/测试缺口（0 项）
 
-### ISSUE-P2-239：凭据提供者通道「系统未登记本应用」的失效完全静默且用户无法自救
-
-- **核实时间点**：2026-09-21 于真机 Redmi 4X（Android 17 / API 37）实测（与 `ISSUE-P1-238` 同一次排查）。
-- **核实方式**：`adb shell settings get secure credential_service`（实测为**空**）、
-  `credential_service_primary`（实测指向**不存在的包** `com.keepasskey.app`，而实际包名是 `com.keepasskey`）；
-  并以四条归因实验（仅改 `credential_service` / 仅改 `primary` / 全新安装仅写 `primary` / `force-stop` 后冷启动）
-  分别观察系统侧 `CredentialManager: starting executeCreateCredential` 与 provider 侧回调是否出现。
-- **背景与根因**：`credential_service` 为空时，系统**不会**向本应用发起创建请求（框架层直接
-  `CreateCredentialException.TYPE_NO_CREATE_OPTIONS`）。而 ① **全新安装后系统不自动登记**本应用；
-  ② 本机 ROM 的「首选服务」选择器只写 `credential_service_primary`（且写入命名空间前缀包名，
-  为**悬空组件**），**不写** `credential_service`。结果是保存能力对用户**完全不可见地失效**：
-  无报错、无提示，只有「点保存没反应」。自动填充通道早有 `AutofillHealthProbe` 与设置页健康卡片，
-  CM 通道**既无自检也无引导**。
-- **验收标准**：AC① 新增凭据提供者通道健康检查，在「系统未登记本应用」时给出用户可见状态与
-  修复指引（跳转系统设置；`android.settings.CREDENTIAL_PROVIDER` 在本机不可解析时**如实降级说明**，
-  不得伪造「已开启」）；AC② 检查结果只反映真实系统状态，**读取失败一律呈现「未知」而非「正常」**
-  （沿用本项目既有口径）；AC③ 判定落在纯函数上并被 JVM 单测穷举，平台查询单点化便于注入；
-  AC④ 设置页文案不得声称「已从系统移除」（组件注册由 Manifest 决定，应用内无法动态摘除）。
-- **涉及文件**：`app/src/main/java/com/keepasskey/app/passkey/**`、设置页安全分区；
-  先例 `AutofillHealthProbe`。已执行的处置与真机验证见 §240 批次正文。
+> **暂无开放项**（本区归零：§247 闭环 `ISSUE-P2-239`（凭据提供者通道「系统未登记本应用」的失效完全静默且用户无法自救）——整改＝新增该通道健康检查：三态判定落纯函数（`REGISTERED` / `NOT_REGISTERED` / `UNKNOWN`，**「读不到」不得呈现为「正常」**）、平台查询经**公开 API**`CredentialManager.isEnabledCredentialProviderService` 单点化、设置页健康卡给出用户可见状态与系统设置指引（action 不可解析时如实降级为纯文案）；真机两态实证「未登记」与系统 `TYPE_NO_CREATE_OPTIONS`同态、已登记则请求被正常路由。新增限界 §27（本机 ROM 缺该设置页 activity ⇒ 一键入口如实降级）。证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md) 与
+> [`resolved/batches/247-凭据提供者通道健康检查批次.md`](resolved/batches/247-凭据提供者通道健康检查批次.md)。）
 
 ---
 

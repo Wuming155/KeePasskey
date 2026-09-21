@@ -23,9 +23,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.FileOpen
 import androidx.compose.material.icons.filled.Storage
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -35,7 +33,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -46,6 +43,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
@@ -56,6 +54,7 @@ import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.CreateVaultPreset
 import com.keepasskey.app.security.ApplyObscuredTouchFilter
 import com.keepasskey.app.ui.model.VaultDatabaseInfo
+import com.keepasskey.app.ui.model.VaultRemovalKind
 import com.keepasskey.app.ui.model.resolveText
 import com.keepasskey.app.ui.theme.CapsuleShape
 
@@ -134,7 +133,9 @@ fun DatabasePickerContent(
     onOpenExistingClick: () -> Unit,
     onCloseOpenSourceDialog: () -> Unit,
     onImportFromSource: (source: OpenVaultSourceType, name: String, path: String) -> Unit,
-    onRemoveDatabase: (String) -> Unit,
+    // ISSUE-P1-241：第二个参数即该动作的**真实对象**（应用私有库 = 真删文件 / 外部库 = 只摘登记），
+    // 与确认弹窗所用文案同一枚判据，数据层据此决定是否删除物理文件
+    onRemoveDatabase: (String, VaultRemovalKind) -> Unit,
     // ISSUE-P3-21：生成型密钥文件的一次性交付（默认值便于预览与既有调用点复用）
     keyFileDelivery: KeyFileDeliveryState = KeyFileDeliveryState.None,
     onSaveKeyFile: (Uri) -> Unit = {},
@@ -142,6 +143,11 @@ fun DatabasePickerContent(
     modifier: Modifier = Modifier
 ) {
     var dbToRemove by remember { mutableStateOf<VaultDatabaseInfo?>(null) }
+
+    // ISSUE-P1-241：判定「应用私有库 / 外部库」所需的应用私有目录（`filesDir` 取值不做 I/O）。
+    // 该枚判据同时驱动两件事——确认弹窗的措辞与下行给数据层的删除开关——故在此取一次共用。
+    val context = LocalContext.current
+    val filesDirPath = remember(context) { context.filesDir?.absolutePath }
 
     // ISSUE-P3-230 AC②：缺持久化授权的库「重新授权」——由用户重选**同一个**文件以重新取得
     // 长期授权（SAF 无「原地续期」原语，必须经用户操作）。授权后复用既有导入路径登记
@@ -302,28 +308,18 @@ fun DatabasePickerContent(
         )
     }
 
-    // 移除密码库确认对话框
+    // 移除密码库确认对话框（ISSUE-P1-241）：文案与动作按**存储类型**分列两套。
+    // 判据与投影见 VaultRemovalPresentation.kt、渲染见 VaultRemovalConfirmDialog.kt；
+    // 下行给数据层的删除开关必须取同一枚判据（confirmation.kind）。
     dbToRemove?.let { db ->
-        AlertDialog(
-            onDismissRequest = { dbToRemove = null },
-            title = { Text(stringResource(R.string.db_picker_delete_confirm_title)) },
-            text = { Text(stringResource(R.string.db_picker_delete_confirm_desc)) },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        onRemoveDatabase(db.id)
-                        dbToRemove = null
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
-                ) {
-                    Text(stringResource(R.string.btn_delete))
-                }
+        val confirmation = VaultRemovalConfirmation.of(database = db, filesDirPath = filesDirPath)
+        VaultRemovalConfirmDialog(
+            confirmation = confirmation,
+            onConfirm = {
+                onRemoveDatabase(db.id, confirmation.kind)
+                dbToRemove = null
             },
-            dismissButton = {
-                TextButton(onClick = { dbToRemove = null }) {
-                    Text(stringResource(R.string.btn_cancel))
-                }
-            }
+            onDismiss = { dbToRemove = null }
         )
     }
 }
@@ -383,7 +379,7 @@ internal fun DatabasePickerContentPreview() {
             onOpenExistingClick = {},
             onCloseOpenSourceDialog = {},
             onImportFromSource = { _, _, _ -> },
-            onRemoveDatabase = { _ -> },
+            onRemoveDatabase = { _, _ -> },
             keyFileDelivery = com.keepasskey.app.ui.screens.database.KeyFileDeliveryState.PendingSave(
                 suggestedFileName = "预览密钥文件.keyx"
             ),

@@ -9,6 +9,7 @@ import com.keepasskey.app.data.repository.CreateKeyFileFactor
 import com.keepasskey.app.data.repository.CreateVaultPreset
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.ui.model.UiMessage
+import com.keepasskey.app.ui.model.VaultRemovalKind
 import com.keepasskey.app.ui.screens.unlock.KeyFileAccess
 import com.keepasskey.app.ui.screens.unlock.KeyFileReadResult
 import com.keepasskey.core.result.KdbxResult
@@ -257,9 +258,18 @@ class DatabasePickerViewModel @Inject constructor(
         }
     }
 
-    fun removeDatabase(id: String) {
+    /**
+     * 移除密码库。
+     *
+     * `ISSUE-P1-241`：[kind] 是该动作的**真实对象**（由界面按 `VaultRemovalKind.of(条目 path,
+     * filesDir)` 判定，与确认弹窗所用文案同一枚判据）——应用私有库移除即**删除其物理文件**，
+     * 外部库只摘除本机登记。此前该参数不存在，数据层只能按 `id` 形状反推，而「外部登记的 id
+     * 恰是裸文件名」时会误删应用私有库的同名文件（文案却承诺不删）。
+     * **不得**在调用侧以外的地方另行判定，也不得把该参数默认成「会删」。
+     */
+    fun removeDatabase(id: String, kind: VaultRemovalKind) {
         viewModelScope.launch {
-            val result = vaultRepository.removeDatabase(id)
+            val result = vaultRepository.removeDatabase(id, kind)
             if (result is KdbxResult.Success) {
                 userMessageFlow.value = UiMessage(R.string.db_picker_msg_removed)
             } else {

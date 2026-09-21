@@ -8,7 +8,8 @@ import android.provider.Settings
  * 系统设置快捷入口（本批立规）。
  *
  * 背景：应用内有若干「待用户去**系统设置**里改一项」的排障提示——系统未把本应用选为自动填充服务、
- * 存在第三方无障碍服务。此前这些提示**只有文字指引**（「请前往系统设置启用」），用户须自行走完
+ * 存在第三方无障碍服务、**系统未把本应用登记为凭据提供者**（`ISSUE-P2-239`）。此前这些提示**只有文字指引**
+ * （「请前往系统设置启用」），用户须自行走完
  * 「设置 → 系统 → 语言和输入法 → 自动填充服务 → 选择 KeePasskey」（厂商 ROM 路径各异，通常 4~5 层），
  * 属「本可一次点击、却要用户自己找路」的典型。本对象把这段路收敛为**一次点击**。
  *
@@ -34,6 +35,20 @@ internal object SystemSettingsNavigation {
     /** 无障碍服务设置页。 */
     fun accessibilityIntent(context: Context): Intent? =
         Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+            .takeIf { it.resolveActivity(context.packageManager) != null }
+
+    /**
+     * 凭据提供程序设置页（`ISSUE-P2-239`）。
+     *
+     * `Settings.ACTION_CREDENTIAL_PROVIDER`（`android.settings.CREDENTIAL_PROVIDER`）是 API 34+
+     * 的**公开** SDK 常量（本仓 compileSdk 37 实测存在），用于承载「系统未登记本应用」的修复路径，
+     * 与凭据提供者声明的 `settingsActivity` 落点不同（后者是 provider 自己的设置页）。
+     *
+     * 降级口径同上方三条：本机 ROM 不响应该 action 时 `resolveActivity` 为空 ⇒ 返回 `null`，
+     * 调用方**只**保留纯文案指引并如实说明需自行前往系统设置，**不得**伪造「已开启」。
+     */
+    fun credentialProviderIntent(context: Context): Intent? =
+        Intent(Settings.ACTION_CREDENTIAL_PROVIDER)
             .takeIf { it.resolveActivity(context.packageManager) != null }
 
     /** 启动系统设置页；无 Activity 处理 / 被 ROM 拦截一律返回 false（调用方据此降级为纯文案）。 */

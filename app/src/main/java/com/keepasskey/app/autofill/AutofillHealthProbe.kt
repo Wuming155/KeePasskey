@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.view.autofill.AutofillManager
 import androidx.credentials.CredentialManager
+import com.keepasskey.app.passkey.CredentialProviderHealthProbe
 import com.keepasskey.core.log.AppLog
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
@@ -26,7 +27,9 @@ import javax.inject.Singleton
 class AutofillHealthProbe @Inject constructor(
     @ApplicationContext private val context: Context,
     // ISSUE-P3-113：字段屏蔽签名密钥的可用性（用户可感知的静默故障来源之一）
-    private val fieldBlocklistStore: AutofillFieldBlocklistStore
+    private val fieldBlocklistStore: AutofillFieldBlocklistStore,
+    // ISSUE-P2-239：凭据提供者通道（CM）的系统登记状态——平台查询单点在该探针内部
+    private val credentialProviderProbe: CredentialProviderHealthProbe
 ) {
 
     /** 采集一次健康报告；[appEnabled] 由调用方从偏好状态传入 */
@@ -35,7 +38,8 @@ class AutofillHealthProbe @Inject constructor(
         appEnabled = appEnabled,
         systemEnabled = isSystemAutofillServiceEnabled(),
         credentialManagerAvailable = isCredentialManagerAvailable(),
-        fieldBlockSignatureUnavailable = fieldBlocklistStore.signatureUnavailable.value
+        fieldBlockSignatureUnavailable = fieldBlocklistStore.signatureUnavailable.value,
+        credentialProviderRegistration = credentialProviderProbe.probe()
     )
 
     /** 服务是否在 Manifest 声明且带 `BIND_AUTOFILL_SERVICE` 权限 */

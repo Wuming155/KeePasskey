@@ -3,6 +3,7 @@ package com.keepasskey.app.data.repository
 import com.keepasskey.app.ui.model.UiVaultEntry
 import com.keepasskey.app.ui.model.VaultDatabaseInfo
 import com.keepasskey.app.ui.model.VaultGroup
+import com.keepasskey.app.ui.model.VaultRemovalKind
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -107,9 +108,17 @@ interface VaultRepository {
     }
 
     /**
-     * 移除密码库关联
+     * 移除密码库。
+     *
+     * `ISSUE-P1-241`：[kind] 即该动作的真实对象——[com.keepasskey.app.ui.model.VaultRemovalKind.PRIVATE_FILE]
+     * 表示这是应用私有目录内的库文件，移除**会删除该物理文件**（不可恢复）；
+     * [com.keepasskey.app.ui.model.VaultRemovalKind.EXTERNAL_LINK] 表示物理文件在应用之外，
+     * 只摘除本机登记。实现**必须**据此决定是否删除文件，不得由 `id` 形状反推。
      */
-    suspend fun removeDatabase(id: String): com.keepasskey.core.result.KdbxResult<Unit>
+    suspend fun removeDatabase(
+        id: String,
+        kind: VaultRemovalKind
+    ): com.keepasskey.core.result.KdbxResult<Unit>
 
     /**
      * 导入并打开已有 KDBX 数据库 (支持本地、WebDAV、S3 来源)

@@ -8,6 +8,7 @@ import com.keepasskey.app.ui.model.UiEntryRevision
 import com.keepasskey.app.ui.model.UiVaultEntry
 import com.keepasskey.app.ui.model.VaultDatabaseInfo
 import com.keepasskey.app.ui.model.VaultGroup
+import com.keepasskey.app.ui.model.VaultRemovalKind
 import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.core.model.KdbxCustomField
 import com.keepasskey.core.model.KdbxEntry
@@ -112,7 +113,17 @@ class FakeVaultRepository(
         return com.keepasskey.core.result.KdbxResult.Success(Unit)
     }
 
-    override suspend fun removeDatabase(id: String): com.keepasskey.core.result.KdbxResult<Unit> {
+    /**
+     * `ISSUE-P1-241`：最近一次移除动作的**真实对象**。
+     *
+     * 仅作用例观测点，不参与任何行为——用于锁定「界面文案所用判据 == 下行给数据层的删除开关」
+     * 这一条不变式（两者若各判一次就正是本项要根治的形态）。
+     */
+    var lastRemovalKind: VaultRemovalKind? = null
+        private set
+
+    override suspend fun removeDatabase(id: String, kind: VaultRemovalKind): com.keepasskey.core.result.KdbxResult<Unit> {
+        lastRemovalKind = kind
         databasesFlow.value = databasesFlow.value.filter { it.id != id }
         return com.keepasskey.core.result.KdbxResult.Success(Unit)
     }

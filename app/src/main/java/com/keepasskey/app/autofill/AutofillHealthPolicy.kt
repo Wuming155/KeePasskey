@@ -1,5 +1,7 @@
 package com.keepasskey.app.autofill
 
+import com.keepasskey.app.passkey.CredentialProviderRegistration
+
 /**
  * 自动填充链路健康检查项（ISSUE-P3-41）。
  *
@@ -25,7 +27,24 @@ enum class AutofillHealthIssue {
      * 结果是**整条字段级屏蔽判定恒为真** ⇒ 填充侧静态放弃下发候选；用户只看到「不出候选」，
      * 无从归因。此项即为该静默故障的显式化出口。
      */
-    FIELD_BLOCK_SIGNATURE_UNAVAILABLE
+    FIELD_BLOCK_SIGNATURE_UNAVAILABLE,
+
+    /**
+     * 系统未把本应用登记为凭据提供者（`ISSUE-P2-239`）。
+     *
+     * 该状态下系统的创建请求在框架层即被丢弃（`TYPE_NO_CREATE_OPTIONS`），
+     * **根本不会发到本应用** —— 用户只会看到「点保存没反应」。此前 CM 通道既无自检也无引导，
+     * 此项即该静默失效的显式化出口（判定见 [com.keepasskey.app.passkey.CredentialProviderRegistration]）。
+     */
+    CREDENTIAL_PROVIDER_NOT_REGISTERED,
+
+    /**
+     * 系统凭据提供者登记状态**未知**（`ISSUE-P2-239` AC②）。
+     *
+     * 读取系统登记失败时**不得**当作「正常」渲染：那会让用户继续面对「点保存没反应」
+     * 却看到一张全绿的卡 ⇒ 本项按异常项如实列出，并同样给出系统设置入口供用户自行核对。
+     */
+    CREDENTIAL_PROVIDER_STATE_UNKNOWN
 }
 
 /**
@@ -39,7 +58,15 @@ data class AutofillHealthReport(
     val systemEnabled: Boolean,
     val credentialManagerAvailable: Boolean,
     /** 字段屏蔽签名密钥是否不可用（ISSUE-P3-113）；默认 false 以兼容既有调用与用例 */
-    val fieldBlockSignatureUnavailable: Boolean = false
+    val fieldBlockSignatureUnavailable: Boolean = false,
+    /**
+     * 系统侧凭据提供者登记状态（`ISSUE-P2-239`）。
+     *
+     * **无默认值**（有意）：AC② 明令「读取失败一律呈现『未知』而非『正常』」，
+     * 若给出 `= REGISTERED` 之类的缺省，任何漏传该参数的接线点都会静默渲染成「一切正常」——
+     * 那正是本项要根治的失效形态。调用方必须显式交出探针读数。
+     */
+    val credentialProviderRegistration: CredentialProviderRegistration
 ) {
 
     /** 全部检查项逐条列出（顺序即建议修复优先级） */
@@ -52,6 +79,15 @@ data class AutofillHealthReport(
             if (fieldBlockSignatureUnavailable) {
                 add(AutofillHealthIssue.FIELD_BLOCK_SIGNATURE_UNAVAILABLE)
             }
+            // ISSUE-P2-239：凭据提供者通道的两态各自成项——「未登记」给出修复指引、
+            // 「未知」如实声明读不到（**不得**并入正常）
+            when (credentialProviderRegistration) {
+                CredentialProviderRegistration.REGISTERED -> Unit
+                CredentialProviderRegistration.NOT_REGISTERED ->
+                    add(AutofillHealthIssue.CREDENTIAL_PROVIDER_NOT_REGISTERED)
+                CredentialProviderRegistration.UNKNOWN ->
+                    add(AutofillHealthIssue.CREDENTIAL_PROVIDER_STATE_UNKNOWN)
+            }
         }
 
     /**
@@ -59,6 +95,9 @@ data class AutofillHealthReport(
      *
      * 注意：Credential Manager 不可用**不**使传统自动填充失效（两条通道独立），
      * 故这里要求「传统链路三要素」齐备即视为传统填充可用；[issues] 仍如实列出全部异常。
+     *
+     * `ISSUE-P2-239` 同口径：系统未登记本应用只影响 **CM（保存 / 通行密钥）** 通道，
+     * 传统 `AutofillService` 通道照常工作 ⇒ **不得**计入本判据（否则界面会给出错误的修复指引）。
      */
     val isLegacyAutofillOperational: Boolean
         get() = serviceDeclared && appEnabled && systemEnabled
@@ -77,12 +116,15 @@ object AutofillHealthPolicy {
         appEnabled: Boolean,
         systemEnabled: Boolean,
         credentialManagerAvailable: Boolean,
-        fieldBlockSignatureUnavailable: Boolean = false
+        fieldBlockSignatureUnavailable: Boolean = false,
+        /** `ISSUE-P2-239`：由 [com.keepasskey.app.passkey.CredentialProviderHealthProbe] 采集 */
+        credentialProviderRegistration: CredentialProviderRegistration
     ): AutofillHealthReport = AutofillHealthReport(
         serviceDeclared = serviceDeclared,
         appEnabled = appEnabled,
         systemEnabled = systemEnabled,
         credentialManagerAvailable = credentialManagerAvailable,
-        fieldBlockSignatureUnavailable = fieldBlockSignatureUnavailable
+        fieldBlockSignatureUnavailable = fieldBlockSignatureUnavailable,
+        credentialProviderRegistration = credentialProviderRegistration
     )
 }

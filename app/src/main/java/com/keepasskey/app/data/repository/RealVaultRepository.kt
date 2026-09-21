@@ -5,6 +5,7 @@ import com.keepasskey.app.R
 import com.keepasskey.app.ui.model.UiVaultEntry
 import com.keepasskey.app.ui.model.VaultDatabaseInfo
 import com.keepasskey.app.ui.model.VaultGroup
+import com.keepasskey.app.ui.model.VaultRemovalKind
 import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.model.PasskeyData
 import com.keepasskey.core.result.KdbxResult
@@ -162,7 +163,10 @@ class RealVaultRepository @Inject constructor(
         targetUri = targetUri
     )
 
-    override suspend fun removeDatabase(id: String): KdbxResult<Unit> = lifecycle.removeDatabase(id)
+    override suspend fun removeDatabase(
+        id: String,
+        kind: VaultRemovalKind
+    ): KdbxResult<Unit> = lifecycle.removeDatabase(id, kind)
 
     override suspend fun importExternalDatabase(
         name: String,

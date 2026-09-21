@@ -32,6 +32,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.keepasskey.app.R
 import com.keepasskey.app.autofill.AutofillHealthIssue
 import com.keepasskey.app.autofill.AutofillHealthReport
+import com.keepasskey.app.passkey.CredentialProviderRegistration
 import com.keepasskey.app.ui.components.BentoCard
 import com.keepasskey.app.ui.components.SystemSettingsNavigation
 
@@ -123,13 +124,18 @@ private fun AutofillHealthCardContent(
 @Composable
 private fun HealthIssueRow(issue: AutofillHealthIssue) {
     val context = LocalContext.current
-    // 仅「系统未选中本应用」有明确且唯一的系统设置落点；其余问题（Manifest 缺声明、
-    // CM 通道不可用等）没有对应的用户可操作页面，保持纯文案。
+    // 有明确且唯一的系统设置落点者给出入口：自动填充服务选择页 / 凭据提供程序页；
+    // 其余问题（Manifest 缺声明、开关关闭、字段屏蔽密钥不可用等）没有对应的用户可操作页面，
+    // 保持纯文案。
+    // ISSUE-P2-239：「系统未登记本应用」与「登记状态未知」两态都指向同一系统页——
+    // 前者是修复路径，后者是让用户自行核对（读不到就如实说读不到，不谎报「正常」）。
     val systemSettingsIntent = remember(issue, context) {
-        if (issue == AutofillHealthIssue.SYSTEM_NOT_ENABLED) {
-            SystemSettingsNavigation.autofillServiceIntent(context)
-        } else {
-            null
+        when (issue) {
+            AutofillHealthIssue.SYSTEM_NOT_ENABLED -> SystemSettingsNavigation.autofillServiceIntent(context)
+            AutofillHealthIssue.CREDENTIAL_PROVIDER_NOT_REGISTERED,
+            AutofillHealthIssue.CREDENTIAL_PROVIDER_STATE_UNKNOWN ->
+                SystemSettingsNavigation.credentialProviderIntent(context)
+            else -> null
         }
     }
 
@@ -162,6 +168,11 @@ private fun AutofillHealthIssue.labelRes(): Int = when (this) {
     // ISSUE-P3-113：字段屏蔽签名密钥不可用（fail-closed 的静默故障出口）
     AutofillHealthIssue.FIELD_BLOCK_SIGNATURE_UNAVAILABLE ->
         R.string.autofill_health_issue_field_signature_unavailable
+    // ISSUE-P2-239：CM 通道系统登记的「未登记 / 未知」两态（后者不得并入「正常」）
+    AutofillHealthIssue.CREDENTIAL_PROVIDER_NOT_REGISTERED ->
+        R.string.autofill_health_issue_cp_not_registered
+    AutofillHealthIssue.CREDENTIAL_PROVIDER_STATE_UNKNOWN ->
+        R.string.autofill_health_issue_cp_state_unknown
 }
 
 // IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
@@ -179,7 +190,8 @@ internal fun AutofillHealthCardPreview() {
                 serviceDeclared = true,
                 appEnabled = true,
                 systemEnabled = true,
-                credentialManagerAvailable = true
+                credentialManagerAvailable = true,
+                credentialProviderRegistration = CredentialProviderRegistration.REGISTERED
             )
         )
     }
@@ -200,7 +212,9 @@ internal fun AutofillHealthCardIssuesPreview() {
                 serviceDeclared = true,
                 appEnabled = false,
                 systemEnabled = false,
-                credentialManagerAvailable = false
+                credentialManagerAvailable = false,
+                // ISSUE-P2-239：异常预览覆盖 CM 通道「未登记」这一新增异常项
+                credentialProviderRegistration = CredentialProviderRegistration.NOT_REGISTERED
             )
         )
     }

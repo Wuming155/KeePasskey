@@ -102,8 +102,14 @@
     <string name="db_picker_pwd_mismatch">Passwords do not match</string>
     <string name="db_picker_use_keyfile">Generate auxiliary key file (.key)</string>
     <string name="db_picker_encryption_preset">Encryption &amp; KDF</string>
-    <string name="db_picker_delete_confirm_title">Remove vault connection?</string>
-    <string name="db_picker_delete_confirm_desc">This will only remove the vault from the quick switch list. The original physical file will not be deleted.</string>
+    <!-- ISSUE-P1-241：见 values/strings.xml 同名键上方注释（应用私有库 = 真删文件且不可恢复；
+         外部库 = 只摘登记，不动物理文件）。两套三处措辞均不同，不得合并。 -->
+    <string name="db_picker_remove_private_title">Permanently delete this vault file from app-private storage?</string>
+    <string name="db_picker_remove_private_desc">This permanently deletes the file "%1$s" in app-private storage. It cannot be recovered: there is no recycle bin, and the file is not covered by any backup.</string>
+    <string name="db_picker_remove_private_confirm">Delete permanently</string>
+    <string name="db_picker_remove_external_title">Remove vault connection?</string>
+    <string name="db_picker_remove_external_desc">The physical file of this vault lives outside the app, so this only removes the entry from the quick switch list. The original physical file will not be deleted.</string>
+    <string name="db_picker_remove_external_confirm">Remove link only</string>
     <string name="db_picker_opened_external_toast">External database imported successfully</string>
     <string name="db_picker_created_toast">New vault created and activated successfully</string>
 
@@ -1165,6 +1171,10 @@
     <string name="autofill_health_issue_system_disabled">This app is not selected as the autofill service; enable it in system settings</string>
     <string name="autofill_health_issue_cm_unavailable">Credential Manager is unavailable</string>
     <string name="autofill_health_issue_field_signature_unavailable">Field-block verification is temporarily unavailable (system keystore unavailable), so autofill is conservatively not filling; retry after rebooting, and check your system security settings if it persists</string>
+    <!-- ISSUE-P2-239: see the same keys in values/strings.xml (CM channel registration: not
+         registered = repair path; unknown = honestly unreadable, never rendered as "normal"). -->
+    <string name="autofill_health_issue_cp_not_registered">The system has not registered this app as a credential provider, so password / passkey save requests are never routed here (tapping "Save" does nothing); open system settings, go to credential providers and select KeePasskey as the current service</string>
+    <string name="autofill_health_issue_cp_state_unknown">The system credential provider registration could not be read, so the current state is unknown; if saving a password / passkey does nothing, open system settings, go to credential providers and make sure KeePasskey is selected</string>
     <string name="autofill_picker_title">Choose a credential to fill</string>
     <!-- ISSUE-P2-70: the picker must always show who is requesting the fill -->
     <string name="autofill_picker_requester_title">Requesting app for this fill</string>

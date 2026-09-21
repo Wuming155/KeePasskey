@@ -6,6 +6,7 @@ import android.net.Uri
 import com.keepasskey.app.R
 import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.app.ui.model.VaultDatabaseInfo
+import com.keepasskey.app.ui.model.VaultRemovalKind
 import com.keepasskey.core.log.AppLog
 import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.core.result.KdbxResult
@@ -187,20 +188,35 @@ internal class VaultLifecycleCoordinator(
     }
 
 
-    /** 移除已知库：摘除注册表条目、删除沙盒内文件、必要时关闭会话并清空活动库 ID */
-    suspend fun removeDatabase(id: String): KdbxResult<Unit> {
+    /**
+     * 移除已知库：摘除注册表条目、**仅当条目确为应用私有库时**删除沙盒内文件、
+     * 必要时关闭会话并清空活动库 ID。
+     *
+     * `ISSUE-P1-241`：[kind] 是界面按 `VaultRemovalKind.of(条目 path, filesDir)` 判定出的
+     * **真实对象**，与确认弹窗所用文案同一枚判据。此前本方法按 `id` 形状反推——
+     * `File(filesDir, id)` 存在即删，于是「外部登记的 id 恰是裸文件名」（用户在「打开已有」里
+     * 把本地路径填成相对文件名）会**误删应用私有库里的同名库文件**，而弹窗文案承诺的是
+     * 「不会删除物理文件」。现改为由调用方显式声明；`kind` 与 `id` 不一致时最坏结果是
+     * 「该删的没删」（卡片仍在列表里），**绝不会**反向变成「不该删的删了」。
+     *
+     * 另：注册表条目的匹配收紧为 `id` / `path`（去掉按 `name` 匹配）——外部登记的
+     * `name` 只是展示名，与其它库的文件名撞车时会摘掉**另一个库**的登记。
+     */
+    suspend fun removeDatabase(id: String, kind: VaultRemovalKind): KdbxResult<Unit> {
         return try {
             val known = catalog.loadKnownDatabases()
-            val matchExternal = known.find { it.id == id || it.path == id || it.name == id }
+            val matchExternal = known.find { it.id == id || it.path == id }
             if (matchExternal != null) {
                 catalog.saveKnownDatabases(known.filter { it.id != matchExternal.id && it.path != matchExternal.path })
             }
 
-            val filesDir = context.filesDir
-            if (filesDir != null) {
-                val targetFile = File(filesDir, id)
-                if (targetFile.exists()) {
-                    targetFile.delete()
+            if (kind == VaultRemovalKind.PRIVATE_FILE) {
+                val filesDir = context.filesDir
+                if (filesDir != null) {
+                    val targetFile = File(filesDir, id)
+                    if (targetFile.exists()) {
+                        targetFile.delete()
+                    }
                 }
             }
 

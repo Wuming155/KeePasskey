@@ -106,8 +106,17 @@
     <string name="db_picker_pwd_mismatch">两次输入的密码不一致</string>
     <string name="db_picker_use_keyfile">同时生成附属密钥文件 (.key)</string>
     <string name="db_picker_encryption_preset">加密算法与 KDF</string>
-    <string name="db_picker_delete_confirm_title">移除密码库关联？</string>
-    <string name="db_picker_delete_confirm_desc">这只会从本机的密码库切换列表中移除该条目，不会删除物理文件。</string>
+    <!-- ISSUE-P1-241：移除动作的确认文案按**存储类型**分列两套——应用私有库（filesDir 内的文件）
+         移除即**真删文件、不可恢复**，外部库（content:// 等沙盒外来源）只摘登记、不动物理文件。
+         两套的标题 / 正文 / 确认按钮措辞均不同，**不得**再合并回一套：
+         整改前私有库共用外部库那套「不会删除物理文件」，与真实行为相反（真机取证见 §243 §7）。
+         映射与判据见 VaultRemovalPresentation.kt / ui/model/VaultRemovalKind.kt。 -->
+    <string name="db_picker_remove_private_title">永久删除应用私有目录中的此文件？</string>
+    <string name="db_picker_remove_private_desc">将永久删除应用私有目录中的文件「%1$s」，删除后无法恢复（本应用没有回收站，该文件不在任何备份之内）。</string>
+    <string name="db_picker_remove_private_confirm">永久删除</string>
+    <string name="db_picker_remove_external_title">移除密码库关联？</string>
+    <string name="db_picker_remove_external_desc">该库的物理文件在本应用之外，这只会从本机的密码库切换列表中移除该条目，不会删除物理文件。</string>
+    <string name="db_picker_remove_external_confirm">仅移除关联</string>
     <string name="db_picker_opened_external_toast">已成功导入并载入外部数据库</string>
     <string name="db_picker_created_toast">新密码库已成功创建并设为当前活动库</string>
 
@@ -876,6 +885,13 @@
     <string name="autofill_health_issue_system_disabled">系统未选择本应用为自动填充服务，请前往系统设置启用</string>
     <string name="autofill_health_issue_cm_unavailable">凭据管理器 (Credential Manager) 不可用</string>
     <string name="autofill_health_issue_field_signature_unavailable">字段屏蔽校验暂不可用（系统密钥库不可用），自动填充已按「保守不填充」处理；重启设备后重试，若持续存在请检查系统安全设置</string>
+    <!-- ISSUE-P2-239：凭据提供者通道（CM）的系统登记状态两态——「未登记」给出修复路径（§240 E1/E3
+         实测：系统未登记本应用时框架层直接丢弃创建请求，且 credential_service_primary 单独写入不放行）；
+         「未知」如实声明读不到，**不得**渲染成「正常」。文案不得声称「已从系统移除」——
+         组件注册由 Manifest 决定，应用内无法动态摘除（见 KeePasskeyCredentialProviderService 的
+         settingsStore KDoc）。 -->
+    <string name="autofill_health_issue_cp_not_registered">系统未把本应用登记为凭据提供者，保存密码 / 通行密钥的请求不会被发到本应用（点「保存」会没有反应）；请在系统设置的「凭据提供程序」中把 KeePasskey 设为当前服务</string>
+    <string name="autofill_health_issue_cp_state_unknown">无法读取系统的凭据提供者登记状态，当前状态未知；若保存密码 / 通行密钥时没有反应，请在系统设置的「凭据提供程序」中确认 KeePasskey 已被选中</string>
     <!-- ISSUE-P3-40：自动填充手动选择器（全库搜索兜底） -->
     <string name="autofill_picker_title">选择要填充的凭据</string>
     <!-- ISSUE-P2-70：选择器页强制展示请求方身份（此前手动兜底路径可把任意条目凭据交给请求方而无任何提示） -->

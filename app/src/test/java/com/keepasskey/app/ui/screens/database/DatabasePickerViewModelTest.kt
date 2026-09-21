@@ -3,6 +3,7 @@ package com.keepasskey.app.ui.screens.database
 import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.CreateVaultPreset
 import com.keepasskey.app.data.repository.FakeVaultRepository
+import com.keepasskey.app.ui.model.VaultRemovalKind
 import com.keepasskey.app.testutil.MainDispatcherGuard
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -116,13 +117,16 @@ class DatabasePickerViewModelTest {
 
     @Test
     fun `移除数据库成功后弹出提示`() = runTest {
-        val (viewModel, _) = createViewModel()
+        val (viewModel, repo) = createViewModel()
 
-        viewModel.removeDatabase("db_work")
+        viewModel.removeDatabase("db_work", VaultRemovalKind.PRIVATE_FILE)
         testScheduler.runCurrent()
 
         assertNotNull(viewModel.uiState.value.userMessage)
         assertEquals(R.string.db_picker_msg_removed, viewModel.uiState.value.userMessage?.resId)
         assertNull(viewModel.uiState.value.databases.find { it.id == "db_work" })
+        // ISSUE-P1-241：下行给数据层的必须是调用侧同一枚判据（数据层据此决定是否删文件），
+        // 不得被 ViewModel 二次判定或吞掉
+        assertEquals(VaultRemovalKind.PRIVATE_FILE, repo.lastRemovalKind)
     }
 }
