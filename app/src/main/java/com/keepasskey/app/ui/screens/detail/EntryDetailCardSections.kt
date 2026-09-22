@@ -2,7 +2,6 @@ package com.keepasskey.app.ui.screens.detail
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.SizeTransform
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
@@ -88,6 +87,8 @@ internal fun BasicCredentialsPasswordArea(
     onCopyPassword: (String) -> Unit
 ) {
     val haptic = LocalHapticFeedback.current
+    // ISSUE-P3-261 AC⑤：密码明文/掩码交叉淡化取主题 MotionScheme 的 fast 效果 spec
+    val passwordRevealFade = MaterialTheme.motionScheme.fastEffectsSpec<Float>()
     Column {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -101,11 +102,13 @@ internal fun BasicCredentialsPasswordArea(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(modifier = Modifier.height(4.dp))
-                // 明文/掩码切换：交叉淡入 + 容器尺寸平滑过渡（消除突兀跳变）
+                // 明文/掩码切换：交叉淡入 + 容器尺寸平滑过渡（消除突兀跳变）。
+                // ISSUE-P3-261 AC⑤：原自定 150 / 90 系 Compose 默认 tween 的自造第二套语言，
+                // 现取主题 MotionScheme 的 fast 效果 spec，与页面转场 / 底栏指示器同族。
                 AnimatedContent(
                     targetState = uiState.isPasswordVisible,
                     transitionSpec = {
-                        (fadeIn(tween(150)) togetherWith fadeOut(tween(90)))
+                        (fadeIn(passwordRevealFade) togetherWith fadeOut(passwordRevealFade))
                             .using(SizeTransform(clip = false))
                     },
                     label = "passwordReveal"

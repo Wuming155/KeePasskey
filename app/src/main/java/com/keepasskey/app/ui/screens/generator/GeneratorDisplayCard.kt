@@ -2,7 +2,6 @@ package com.keepasskey.app.ui.screens.generator
 
 import android.content.res.Configuration
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -52,9 +51,11 @@ internal fun GeneratorDisplayCard(
     onCopy: () -> Unit
 ) {
     var rotationAngle by remember { mutableFloatStateOf(0f) }
+    // ISSUE-P3-261 AC⑤：重掷按钮的旋转角动画改取主题 MotionScheme 的空间 spec
+    // （原 `tween(350)` 属自造第二套语言；旋转是位移类动效，故用 spatial 而非 effects）。
     val animatedRotation by animateFloatAsState(
         targetValue = rotationAngle,
-        animationSpec = tween(durationMillis = 350),
+        animationSpec = MaterialTheme.motionScheme.defaultSpatialSpec<Float>(),
         label = "rotate"
     )
     val haptic = LocalHapticFeedback.current

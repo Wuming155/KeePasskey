@@ -28,6 +28,7 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -204,6 +205,12 @@ fun VaultListContent(
     // 子库分区本身的可见性判定在状态层完成，见 VaultListUiState.childEntrySectionVisible）
     val isSearching = uiState.searchQuery.isNotBlank()
 
+    // ISSUE-P3-261 AC⑧：列表内容层动效与主题 MotionScheme 同族——条目增删 / 重排不再瞬移。
+    // 在**本层**取值后传入 `animateItem`（`items` 的 content lambda 是 `@Composable`，
+    // 但把 `MaterialTheme` 读取下沉到每个条目会让 N 个 item 各注册一次组合局部读取）。
+    val itemFadeSpec = MaterialTheme.motionScheme.fastEffectsSpec<Float>()
+    val itemPlacementSpec = MaterialTheme.motionScheme.fastSpatialSpec<IntOffset>()
+
     Scaffold(
         modifier = modifier.fillMaxSize(),
         containerColor = MaterialTheme.colorScheme.background,
@@ -315,7 +322,13 @@ fun VaultListContent(
                         onClick = { onGroupClick(group.id) },
                         onRename = { dialogs.groupToRename = group },
                         onChangeIcon = { dialogs.groupToChangeIcon = group },
-                        onDelete = { dialogs.groupToDelete = group }
+                        onDelete = { dialogs.groupToDelete = group },
+                        // ISSUE-P3-261 AC⑧：增删 / 重排不再瞬移
+                        modifier = Modifier.animateItem(
+                            fadeInSpec = itemFadeSpec,
+                            placementSpec = itemPlacementSpec,
+                            fadeOutSpec = itemFadeSpec
+                        )
                     )
                 }
 
@@ -345,7 +358,13 @@ fun VaultListContent(
                         decorations = uiState.decorations,
                         // ISSUE-P2-89：TOTP 实时值经窄状态下发，仅由徽标读取（本页不读其值）
                         totpNowSeconds = totpNowSeconds,
-                        totpLiveCodes = totpLiveCodes
+                        totpLiveCodes = totpLiveCodes,
+                        // ISSUE-P3-261 AC⑧：搜索 / 过滤 / 删除后的条目增删与重排走同族动效
+                        modifier = Modifier.animateItem(
+                            fadeInSpec = itemFadeSpec,
+                            placementSpec = itemPlacementSpec,
+                            fadeOutSpec = itemFadeSpec
+                        )
                     )
                 }
 
@@ -362,7 +381,12 @@ fun VaultListContent(
                                 row = childEntry,
                                 showUsername = uiState.showUsernameInList,
                                 showUrl = uiState.showUrlInList,
-                                densitySpec = densitySpec
+                                densitySpec = densitySpec,
+                                modifier = Modifier.animateItem(
+                                    fadeInSpec = itemFadeSpec,
+                                    placementSpec = itemPlacementSpec,
+                                    fadeOutSpec = itemFadeSpec
+                                )
                             )
                         }
                     }

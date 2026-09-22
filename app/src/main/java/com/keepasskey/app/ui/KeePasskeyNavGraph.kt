@@ -35,6 +35,7 @@ import com.keepasskey.app.ui.screens.vault.VaultListScreen
 @Suppress("LongParameterList")
 internal fun NavGraphBuilder.keepasskeyNavGraph(
     navController: NavHostController,
+    motion: AppNavigationMotion,
     themeMode: AppThemeMode,
     toggleTheme: () -> Unit,
     killAppAction: (() -> Unit)?,
@@ -43,10 +44,10 @@ internal fun NavGraphBuilder.keepasskeyNavGraph(
     // 1. 登录与解锁页
     composable(
         route = Screen.Unlock.route,
-        enterTransition = AppNavigationMotion.topLevelEnterTransition,
-        exitTransition = AppNavigationMotion.topLevelExitTransition,
-        popEnterTransition = AppNavigationMotion.topLevelEnterTransition,
-        popExitTransition = AppNavigationMotion.topLevelExitTransition
+        enterTransition = motion.topLevelEnterTransition,
+        exitTransition = motion.topLevelExitTransition,
+        popEnterTransition = motion.topLevelEnterTransition,
+        popExitTransition = motion.topLevelExitTransition
     ) {
         UnlockScreen(
             currentTheme = themeMode,
@@ -74,12 +75,18 @@ internal fun NavGraphBuilder.keepasskeyNavGraph(
     }
 
     // 3. 主密码库列表页
+    // ISSUE-P2-260 AC④ / ISSUE-P3-261 偏差表第 6 项：顶层 Tab 路由的 `popEnterTransition` 例外
+    // 配置**保留**——`navigateToTopLevel` 修复后同级切换不再走 pop 语义，该 slot 的唯一命中路径
+    // 是「下钻页（详情 / 编辑）返回本页」，此时共享轴的视差还原才是正确语义（而非同级淡入）。
+    // 原 `popExitTransition = topLevelExitTransition` 则是不可达的例外：顶层路由的退出只发生在
+    // `navigateToTopLevel` 内部的 pop（同一次 `navigate` 内完成，`isPop` 收尾为 false，走
+    // `enterTransition` / `exitTransition`），若它在未来被命中，用「同级淡出」渲染一次层级弹出
+    // 反而是错的 ⇒ 删除，继承 `NavHost` 层的层级默认值。
     composable(
         route = Screen.VaultList.route,
-        enterTransition = AppNavigationMotion.topLevelEnterTransition,
-        exitTransition = AppNavigationMotion.topLevelExitTransition,
-        popEnterTransition = AppNavigationMotion.defaultPopEnterTransition,
-        popExitTransition = AppNavigationMotion.topLevelExitTransition
+        enterTransition = motion.topLevelEnterTransition,
+        exitTransition = motion.topLevelExitTransition,
+        popEnterTransition = motion.defaultPopEnterTransition
     ) {
         VaultListScreen(
             currentTheme = themeMode,
@@ -113,10 +120,9 @@ internal fun NavGraphBuilder.keepasskeyNavGraph(
     // 3.1 独立双重认证验证码 (TOTP) 管理页
     composable(
         route = Screen.Authenticator.route,
-        enterTransition = AppNavigationMotion.topLevelEnterTransition,
-        exitTransition = AppNavigationMotion.topLevelExitTransition,
-        popEnterTransition = AppNavigationMotion.defaultPopEnterTransition,
-        popExitTransition = AppNavigationMotion.topLevelExitTransition
+        enterTransition = motion.topLevelEnterTransition,
+        exitTransition = motion.topLevelExitTransition,
+        popEnterTransition = motion.defaultPopEnterTransition
     ) {
         AuthenticatorScreen(
             onEntryClick = { entryId ->
@@ -128,10 +134,9 @@ internal fun NavGraphBuilder.keepasskeyNavGraph(
     // 3.2 独立全功能密码生成器页
     composable(
         route = Screen.Generator.route,
-        enterTransition = AppNavigationMotion.topLevelEnterTransition,
-        exitTransition = AppNavigationMotion.topLevelExitTransition,
-        popEnterTransition = AppNavigationMotion.defaultPopEnterTransition,
-        popExitTransition = AppNavigationMotion.topLevelExitTransition
+        enterTransition = motion.topLevelEnterTransition,
+        exitTransition = motion.topLevelExitTransition,
+        popEnterTransition = motion.defaultPopEnterTransition
     ) {
         GeneratorScreen()
     }
@@ -196,7 +201,16 @@ internal fun NavGraphBuilder.keepasskeyNavGraph(
     }
 
     // 6. 设置主页（作为一级标签页展示）
-    composable(Screen.Settings.route) {
+    // ISSUE-P3-261 AC② / 偏差表第 8 项：`Screen.Settings` 同为底栏顶层 Tab
+    // （`AppBottomBar` / `BottomNavItem.SETTINGS`）却缺席 `topLevel*` 覆盖，切换时走的是
+    // 「旧页 150ms 淡出 + 新页 300ms 滑入」，与其余三个 Tab 不同族。现补齐为同族的 fade through；
+    // 其 `popEnterTransition` 同样保留为共享轴还原（自二级设置页返回）。
+    composable(
+        route = Screen.Settings.route,
+        enterTransition = motion.topLevelEnterTransition,
+        exitTransition = motion.topLevelExitTransition,
+        popEnterTransition = motion.defaultPopEnterTransition
+    ) {
         SettingsScreen(
             onNavigateToDatabase = { navController.navigate(Screen.SettingsDatabase.route) },
             onNavigateToSync = { navController.navigate(Screen.SettingsSync.route) },

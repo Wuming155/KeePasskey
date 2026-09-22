@@ -131,10 +131,15 @@ internal fun VaultListFab(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val motionScheme = MaterialTheme.motionScheme
+    // ISSUE-P3-261 AC⑤：显式给出 enter / exit —— 原实现虽给了 `fadeIn() + scaleIn()`，
+    // 但走的是 Compose 的默认 spring（自造第二套），现分别取主题的效果 / 空间 spec。
+    val fabFade = motionScheme.fastEffectsSpec<Float>()
+    val fabScale = motionScheme.fastSpatialSpec<Float>()
     AnimatedVisibility(
         visible = visible,
-        enter = fadeIn() + scaleIn(),
-        exit = fadeOut() + scaleOut(),
+        enter = fadeIn(fabFade) + scaleIn(fabScale),
+        exit = fadeOut(fabFade) + scaleOut(fabScale),
         modifier = modifier
     ) {
         // H4-只读整改：只读会话隐藏新建入口

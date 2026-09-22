@@ -1,6 +1,10 @@
 package com.keepasskey.app.ui.screens.edit
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -34,6 +38,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.keepasskey.app.R
 import com.keepasskey.app.autofill.AutofillPackageNames
@@ -236,6 +241,9 @@ internal fun ColumnScope.EntryEditAccountSection(
     onToggleDigits: () -> Unit,
     onToggleSymbols: () -> Unit
 ) {
+    // ISSUE-P3-261 AC⑤：内容层动效参数取自主题 MotionScheme（见下方 AnimatedVisibility 注释）
+    val generatorFade = MaterialTheme.motionScheme.defaultEffectsSpec<Float>()
+    val generatorSize = MaterialTheme.motionScheme.defaultSpatialSpec<IntSize>()
     Text(
         text = stringResource(R.string.edit_account_pwd),
         style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
@@ -293,7 +301,13 @@ internal fun ColumnScope.EntryEditAccountSection(
             }
 
             // 密码生成器模块
-            AnimatedVisibility(visible = uiState.showGenerator) {
+            // ISSUE-P3-261 AC⑤：原为无 enter / exit 的默认 `expandIn` + `fadeIn`，现显式取主题
+            // MotionScheme 的空间（展开/收起）与效果（淡化）spec。
+            AnimatedVisibility(
+                visible = uiState.showGenerator,
+                enter = fadeIn(generatorFade) + expandVertically(generatorSize),
+                exit = fadeOut(generatorFade) + shrinkVertically(generatorSize)
+            ) {
                 PasswordGeneratorWidget(
                     passLength = uiState.passLength,
                     useUpper = uiState.useUpper,

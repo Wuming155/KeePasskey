@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -223,18 +224,35 @@ private fun localizedContextOf(
  * 顶层 Tab 切换（§185 下沉为 `NavHostController` 扩展）：仅在目标与当前不同时导航，
  * 并保存 / 恢复各 Tab 的后栈状态。
  *
+ * **`popUpTo` 目标必须取自返回栈本身（`ISSUE-P2-260`）**：`NavController` 对不在当前返回栈上的
+ * `popUpTo` 目标**静默忽略**（`NavControllerImpl.popBackStackInternal` 命中
+ * `Ignoring popBackStack to destination …` 即 `return false`，不执行任何 pop）。原实现取
+ * `graph.findStartDestination().id`（＝ `startDestination` `Unlock`），而解锁成功与手动锁库都把它
+ * `inclusive` 弹出栈外 ⇒ 该 `popUpTo` 恒被忽略，每次点底栏都是纯 `navigate` 压栈（`saveState` /
+ * `restoreState` 成对失效、返回栈无界增长）。底栏 / 侧栏只在顶层路由呈现，故当前路由必为**栈上**的
+ * 顶层 entry：以它为 `popUpTo` 目标并按 `inclusive = true` 弹出后，其状态以**自身 destination id**
+ * 为键入 `backStackMap`（`executePopOperations` 的 inclusive 分支），切回时 `restoreState` 恰好命中；
+ * 弹出后 `destinationCountOnBackStack == 1` ⇒ 返回键在顶层被熔断（交由系统 Back-to-home / 外壳层
+ * 锁库 BackHandler），不再回退 Tab 历史。完整成因、三处收口语义与真机读数见批次
+ * `docs/resolved/batches/262-导航转场定标与顶层Tab返回栈整改批次.md` §2.1 / §3.1。
+ *
+ * **`currentRoute` 为空时不做任何 pop**（fail-safe）；**可见性为 `internal`** 是为了让设备侧用例
+ * `TopLevelTabBackStackDeviceTest` 直接复用本函数（体例同 §252），而非复制一份实现。
+ *
  * **与 Tab 被隐藏时的回落导航不同**：那条用 `popUpTo(start) { inclusive = false }` 且不保存状态，
  * 保持原样，见 [KeePasskeyApp] 内的 `hiddenTabRedirectRoute` 调用点。
  */
-private fun NavHostController.navigateToTopLevel(targetRoute: String, currentRoute: String?) {
-    if (targetRoute != currentRoute) {
-        navigate(targetRoute) {
-            popUpTo(graph.findStartDestination().id) {
+internal fun NavHostController.navigateToTopLevel(targetRoute: String, currentRoute: String?) {
+    if (targetRoute == currentRoute) return
+    navigate(targetRoute) {
+        currentRoute?.let { stackRoute ->
+            popUpTo(stackRoute) {
+                inclusive = true
                 saveState = true
             }
-            launchSingleTop = true
-            restoreState = true
         }
+        launchSingleTop = true
+        restoreState = true
     }
 }
 
@@ -314,6 +332,13 @@ private fun AppShellScaffold(
     autoLockManager: AutoLockManager?
 ) {
     val isWideScreen = LocalConfiguration.current.screenWidthDp >= 600
+    // ISSUE-P3-261 AC⑤：转场空间参数取自主题声明的 MotionScheme（`expressive()`），
+    // 使页面滑动与底栏指示器同族。必须在可组合上下文取值后下传——`NavHost` 的转场参数与
+    // `NavGraphBuilder` 内的逐路由转场都是普通函数类型，其 lambda 内读不到 `MaterialTheme`。
+    // `remember(motionScheme)` 保证实例身份稳定，`NavHost` 的
+    // `remember(route, startDestination, builder)` 才不会因每次重组都拿到新实例而整图重建（§183）。
+    val motionScheme = MaterialTheme.motionScheme
+    val motion = remember(motionScheme) { AppNavigationMotion.from(motionScheme) }
     Scaffold(
         modifier = Modifier.imePadding(),
         bottomBar = {
@@ -348,13 +373,17 @@ private fun AppShellScaffold(
                     navController = navController,
                     startDestination = Screen.Unlock.route,
                     modifier = Modifier.fillMaxSize(),
-                    enterTransition = AppNavigationMotion.defaultEnterTransition,
-                    exitTransition = AppNavigationMotion.defaultExitTransition,
-                    popEnterTransition = AppNavigationMotion.defaultPopEnterTransition,
-                    popExitTransition = AppNavigationMotion.defaultPopExitTransition
+                    enterTransition = motion.defaultEnterTransition,
+                    exitTransition = motion.defaultExitTransition,
+                    popEnterTransition = motion.defaultPopEnterTransition,
+                    popExitTransition = motion.defaultPopExitTransition,
+                    // ISSUE-P3-261 AC④：手势驱动的预测性返回曾是空槽位，只能复用 pop 四向参数。
+                    predictivePopEnterTransition = motion.predictivePopEnterTransition,
+                    predictivePopExitTransition = motion.predictivePopExitTransition
                 ) {
                     keepasskeyNavGraph(
                         navController = navController,
+                        motion = motion,
                         themeMode = themeMode,
                         toggleTheme = toggleTheme,
                         killAppAction = killAppAction,

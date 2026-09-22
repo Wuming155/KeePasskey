@@ -53,9 +53,12 @@ fun ThemeToggleCapsule(
             .padding(horizontal = 10.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        // ISSUE-P3-261 AC⑤：图标交叉淡化改读主题 MotionScheme 的效果 spec，
+        // 与页面转场 / 底栏指示器共用同一套弹性语言（原为 Compose 默认 spring，属自造第二套）。
+        val iconFade = MaterialTheme.motionScheme.fastEffectsSpec<Float>()
         AnimatedContent(
             targetState = currentTheme,
-            transitionSpec = { fadeIn() togetherWith fadeOut() },
+            transitionSpec = { fadeIn(iconFade) togetherWith fadeOut(iconFade) },
             label = "ThemeIconAnimation"
         ) { theme ->
             // 主题名称按当前语言动态解析，替代枚举内置的硬编码文案

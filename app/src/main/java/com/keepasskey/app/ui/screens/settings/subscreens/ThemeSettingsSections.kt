@@ -2,6 +2,10 @@ package com.keepasskey.app.ui.screens.settings.subscreens
 
 import android.os.Build
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -16,10 +20,12 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.keepasskey.app.R
 import com.keepasskey.app.ui.components.BentoCard
@@ -92,32 +98,12 @@ internal fun LazyListScope.themeModeSection(
                     )
                 }
 
-                AnimatedVisibility(visible = uiState.themeMode == AppThemeMode.DARK) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = stringResource(R.string.theme_oled_title),
-                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Text(
-                                text = stringResource(R.string.theme_oled_sub),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        Switch(
-                            checked = uiState.oledBlackOptimization,
-                            onCheckedChange = onOledOptimizationToggle
-                        )
-                    }
-                }
+                // ISSUE-P3-261 AC⑤：显隐动效参数下沉到 OledBlackToggleRow（读主题 MotionScheme）
+                OledBlackToggleRow(
+                    visible = uiState.themeMode == AppThemeMode.DARK,
+                    checked = uiState.oledBlackOptimization,
+                    onCheckedChange = onOledOptimizationToggle
+                )
 
                 // Material You 动态取色（Android 12+）：跟随壁纸取色，覆盖品牌调色盘
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -132,6 +118,50 @@ internal fun LazyListScope.themeModeSection(
                     )
                 }
             }
+        }
+    }
+}
+
+/**
+ * OLED 纯黑开关行（§262 自 [themeModeSection] 下沉）：显隐动效参数取自主题 `MotionScheme`
+ * （`ISSUE-P3-261` AC⑤——原实现走 `AnimatedVisibility` 默认 spec，属同屏第二套动效语言）。
+ */
+@Composable
+private fun OledBlackToggleRow(
+    visible: Boolean,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    val fade = MaterialTheme.motionScheme.defaultEffectsSpec<Float>()
+    val size = MaterialTheme.motionScheme.defaultSpatialSpec<IntSize>()
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn(fade) + expandVertically(size),
+        exit = fadeOut(fade) + shrinkVertically(size)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = stringResource(R.string.theme_oled_title),
+                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = stringResource(R.string.theme_oled_sub),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Switch(
+                checked = checked,
+                onCheckedChange = onCheckedChange
+            )
         }
     }
 }

@@ -52,6 +52,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -164,6 +165,9 @@ fun AuthenticatorScreen(
             )
         }
     ) { innerPadding ->
+        // ISSUE-P3-261 AC⑧：列表内容层动效与主题 MotionScheme 同族（见 `items` 内 `animateItem`）
+        val itemFadeSpec = MaterialTheme.motionScheme.fastEffectsSpec<Float>()
+        val itemPlacementSpec = MaterialTheme.motionScheme.fastSpatialSpec<IntOffset>()
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
@@ -193,7 +197,13 @@ fun AuthenticatorScreen(
                     // 复制「当前所见之码」：窄通道已出新周期之码时，必须复制新码而非投影兜底码
                     onCopy = { code?.let(copyCode) },
                     // ISSUE-P3-49：HOTP 取码需推进计数器（复制当前码会重复使用同一计数器）
-                    onAdvanceHotp = { viewModel.advanceHotpAndCopy(item.entryId) }
+                    onAdvanceHotp = { viewModel.advanceHotpAndCopy(item.entryId) },
+                    // ISSUE-P3-261 AC⑧：TOTP 卡片的增删 / 筛选后重排走同族动效
+                    modifier = Modifier.animateItem(
+                        fadeInSpec = itemFadeSpec,
+                        placementSpec = itemPlacementSpec,
+                        fadeOutSpec = itemFadeSpec
+                    )
                 )
             }
 
@@ -257,6 +267,8 @@ private fun TotpLargeCard(
     code: String?,
     onClick: () -> Unit,
     onCopy: () -> Unit,
+    // ISSUE-P3-261 AC⑧：`modifier` 必须排在**第一个可选参数**位（lint `ModifierParameter`）
+    modifier: Modifier = Modifier,
     // ISSUE-P3-49：HOTP 取码（推进计数器并复制）
     onAdvanceHotp: () -> Unit = {}
 ) {
@@ -271,7 +283,7 @@ private fun TotpLargeCard(
 
     Card(
         onClick = onClick,
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .border(
                 width = 1.dp,
