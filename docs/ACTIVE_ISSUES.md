@@ -65,7 +65,7 @@
 
 ---
 
-## P3 低危问题、特性接线与体验优化（1 项）
+## P3 低危问题、特性接线与体验优化（2 项）
 
 ### `ISSUE-P3-263`：动态取色开启后「主题调色盘」5 项仍可点选、仍显示选中态，但全局配色零变化
 
@@ -92,9 +92,33 @@
   - AC⑥ 任一项若裁决「不做」，须经 `产品裁决登记.md` 或 `architecture/已知工程限界.md` 承接并写明重开条件，**不得静默留白**。
 - **依据**：`app/src/main/java/com/keepasskey/app/ui/theme/Theme.kt:75-77, 104-108, 126-161`；`app/src/main/java/com/keepasskey/app/ui/theme/ThemeMode.kt:20-164`；`app/src/main/java/com/keepasskey/app/ui/screens/settings/subscreens/ThemeSettingsSections.kt:108-119, 170-200`；`app/src/main/java/com/keepasskey/app/ui/screens/settings/subscreens/ThemeSettingsComponents.kt:178-251`；`app/src/main/java/com/keepasskey/app/data/repository/RealSettingsRepository.kt:130-140, 230-233`；`app/src/main/res/values/strings.xml:757-760`。同类「界面声明与真实行为一致」先例：[`resolved/batches/246-移除密码库确认文案与真实行为一致批次.md`](resolved/batches/246-移除密码库确认文案与真实行为一致批次.md)。
 
+### `ISSUE-P3-264`：「不再提示保存的应用」弹窗的「关闭」被焊进**状态相关**的 confirm 槽（手工输入模式下右下角变为可禁用的「新增」、真正的关闭被挤到左侧），且该弹窗零接线守卫
+
+- **核实时间点**：2026-09-22（用户报告「设置 → 自动填充 → 不再提示保存的应用：点开后右下角『关闭』点击无响应/关不掉」后的静态走查）。**用户所报「接线缺失」未获证实**——实证到的是下述结构缺陷与两态观感；若真机在**非手工模式**复现「点了不关」，按 AC⑤ 升 P2 处理。
+- **核实方式**：直读 HEAD 六处并逐跳跟线——① `app/src/main/java/com/keepasskey/app/ui/screens/settings/subscreens/AutofillSettingsComponents.kt:272-282`（该行接线 `onClick = onOpenSaveBlacklist`）；② `.../AutofillSettingsScreen.kt:79`（`showSaveBlacklistDialog` 本屏自持）与 `:186-198`（`onDismiss = { showSaveBlacklistDialog = false }`；与填充黑名单各占一个 `if` 组，`remember` 槽位互不共用）；③ `.../AutofillBlocklistDialogs.kt:126-161`（`onDismissRequest = onDismiss`；confirm 槽给 `PackageBlocklistConfirmButton`、dismiss 槽给 `PackageBlocklistDismissButton`；`:155` 即 `onConfirm = { if (manualEntry) submit(pendingPackage) else onDismiss }`）；④ `.../PackageBlocklistDialogSections.kt:128-146`（非手工分支渲染「关闭」并**绑 `onConfirm`**；手工分支渲染「新增」且 `enabled = pendingPackage.isNotBlank()`）与 `:148-158`（`PackageBlocklistDismissButton` **仅**手工分支才渲染「关闭」，否则整段不产子项）。⇒ **非手工模式下全弹窗只有一颗按钮**（「关闭」，落在 confirm 槽），且逐跳接线完整：**未发现**监听缺失、空 lambda、`onDismiss` 错挂、`enabled` 误用（该参数不作用于非手工分支）或状态错挂。
+  布局面以项目实际所用 M3 版本源码核实：`~/.gradle/caches/modules-2/files-2.1/androidx.compose.material3/material3-android/1.5.0-alpha27/…-sources.jar!commonMain/androidx/compose/material3/AlertDialog.kt` 的 `:259-273`（槽位调用序 `confirmButton()` → `dismissButton?.invoke()`）、`:382-406`（`AlertDialogFlowRow` 以 `LayoutDirection.flip()` 承载 FlowRow ⇒ confirm 落在最右）、`:293-375`（`text` 槽为 `Modifier.weight(1f, fill = false)`，按钮属非 weight 子项**先测量**）⇒ 正文再长也不会把按钮顶出可视区、亦不被文本覆盖——**排除布局遮挡**。
+  接线形态清点：`grep -rn "R\.string\.btn_close" app/src/main --include=*.kt` 共 15 处，14 处为真实「关闭」按钮（另 1 处在 `ui/model/UiMessage.kt:33` 的预览里，非按钮）；14 处中 **13 处直接绑 `onDismiss`**（12 处同形 `TextButton(onClick = onDismiss)` ＋ `EntryDetailPreviewDiffComponents` 的 `IconButton(onClick = onDismiss)` 图标关闭），**唯一例外**即本弹窗 confirm 槽经 `onConfirm` 间接转发 ⇒ **非通用组件问题**。
+  测试守卫：`grep -rln "PackageBlocklistManageDialog\|autofill_save_blacklist" app/src/test app/src/androidTest` **零命中**（唯一命中落在 `app/src/screenshotTest/kotlin/…/GeneratedPreviewWrappers.kt:23`，而该目录由 `.gitignore:53` 排除、未入 git，属**生成物**且只调用预览函数、不构成行为断言）⇒ **零接线守卫**，与 §196 / §198 两次记下的 `VaultListDialogHost` / `PackageBlocklistManageDialog`「零测试引用」同源。
+  历史同形故障：`git --no-pager show 52bf966` 复核并见 [`resolved/batches/205-Compose长函数拆分两处批次.md`](resolved/batches/205-Compose长函数拆分两处批次.md) §1.1——该 confirm 槽在 §205 拆分时**曾误写为无条件 `submit(pendingPackage)`** ⇒ 点「关闭」走 `onAdd("")` 返 `false` ⇒ `showAddError = true` ⇒ **弹窗不关、还多一条「包名无效」**，正是「右下角关闭点了没反应」的完整原型；同提交内已纠偏为现形态。
+- **背景与影响**：本条的确认缺陷不是「接线断了」，而是**「关闭语义与一个单向状态耦合」＋「零守卫」**，落到用户侧有两种可复现观感：
+  1. **非手工模式（默认态）**：全弹窗只有一颗「关闭」且接线正确 ⇒ 在此态若真机复现「点了不关」，只可能是构建落在 §205 纠偏之前，或存在本条目范围外的干扰项（须真机取证，见 AC⑤）。
+  2. **手工输入模式**：`manualEntry` 是**单向闩锁**（`AutofillBlocklistDialogs.kt:143-146` 的 `onToggleManual` 只置 `true`，无回退到名单模式的路径），一旦点过「手工输入」，右下角即由「关闭」**变为**「新增」；空输入时 `enabled = pendingPackage.isNotBlank()` 为假 ⇒ **灰掉且点之不动**，真正的「关闭」被挤到其左侧。用户按「右下角那颗按钮」的既有印象点击，观感即「右下角按钮无响应 / 关不掉」（`submit` 成功还会清空 `pendingPackage` ⇒「新增」随即再次变灰，极易踩中）。
+  影响面：设置页 → 自动填充 →「智能识别、凭证保存与兼容策略」→「不再提示保存的应用」（`ISSUE-P3-43 ③` 的保存侧黑名单）。**不阻断使用**（返回键 / 点弹窗外部 / 左侧「关闭」三条路仍可关），无数据风险 ⇒ **定级 P3**；**升档条件**：若在**非手工模式**下真机复现「点关闭不关」，即为功能性阻断，须升 **P2** 并先定位真因。
+- **正确的方式（整改方向）**：
+  1. **关闭语义去状态化**：把「关闭」**无条件**放回 `dismissButton` 槽（与全仓 13 处同形，`PackageBlocklistDismissButton` 删掉 `manualEntry` 分支），confirm 槽只在 `manualEntry == true` 时承载「新增」（`enabled = pendingPackage.isNotBlank()` 保持不变）⇒ 顺带消灭 `onConfirm` 里 `if (manualEntry) … else …` 这一**全仓唯一**的状态相关关闭语义。
+  2. **补回退路径**：手工输入模式提供回到名单模式的方式（或新增成功后自动回落），使界面不存在「右下角长期停在禁用按钮上」的态。
+  3. **补接线守卫**：比照 `SettingsSubscreenScaffoldWiringTest` / `OneTapInteractionWiringTest` 的静态源码比对形态新增用例——断言该弹窗 `dismissButton` 槽存在 `TextButton(onClick = onDismiss)`，且 confirm 槽**不得再出现** `btn_close`；须含**防空扫**断言（§77 口径：扫不到目标即失败）。
+- **验收标准**：
+  - AC① 非手工模式下「关闭」由 `dismissButton` 槽承载，且其**存在与可点性不依赖任何状态**（`manualEntry` 取何值都不影响）；
+  - AC② 手工输入模式补回退路径，界面**不存在**「右下角恒为禁用按钮」的态；切换/回落后按钮文案与动作一致（界面声明 == 实际行为）；
+  - AC③ 新增接线守卫用例（含防空扫），并以下述方式**证明其区分力**：把 §205 的历史坏形态（confirm 槽无条件 `submit`）代入谓词须报红（`git show <回归态>` 代入法，§199 先例），不得只以「现态通过」自证；
+  - AC④ 若裁决「保留现形态」（不重构），须在 [`architecture/产品裁决登记.md`](architecture/产品裁决登记.md) 登记取舍与重开条件，**不得静默留白**；
+  - AC⑤ 若真机在**非手工模式**下复现「点关闭不关」，本条目升 P2，并先取真机留痕（设备 / 构建号 / 复现步骤 / 录屏或日志）再定因。
+- **依据**：`app/src/main/java/com/keepasskey/app/ui/screens/settings/subscreens/AutofillSettingsComponents.kt:272-282`；`.../AutofillSettingsScreen.kt:79, 186-198`；`.../AutofillBlocklistDialogs.kt:143-146, 150-161`；`.../PackageBlocklistDialogSections.kt:128-158`；`app/src/main/res/values/strings.xml:947-952`（`autofill_save_blacklist_*` 文案与 `ISSUE-P3-43 ③` 出处）；[`resolved/batches/205-Compose长函数拆分两处批次.md`](resolved/batches/205-Compose长函数拆分两处批次.md) §1.1（同形故障与纠偏留痕）；同族「零测试引用」先例 [`resolved/batches/196-库列表对话框宿主分段批次.md`](resolved/batches/196-库列表对话框宿主分段批次.md)、[`resolved/batches/198-详情页确认对话框下沉批次.md`](resolved/batches/198-详情页确认对话框下沉批次.md)。
+
 ---
 
-> **本区最近一次归零记录**（2026-09-22 §263 补登 `ISSUE-P3-263` 前）：§262 闭环 `ISSUE-P3-261`，条目正文原样收录批次 §1——全局转场动效
+> **本区最近一次归零记录**（2026-09-22 §263 补登 `ISSUE-P3-263`、其后补登 `ISSUE-P3-264` 前）：§262 闭环 `ISSUE-P3-261`，条目正文原样收录批次 §1——全局转场动效
 > 由「自研 tween 一套 + 主题 Expressive 一套」收敛为**双栏定标**——空间段（位移 / 缩放）走
 > `MaterialTheme.motionScheme` 的 spring（与底栏指示器同族）、效果段（透明度）走官方 shared axis 的
 > **顺序淡化时间轴**（出向 90ms / 入向 210ms 延迟 90ms，35% 阈值以两条不变式锁定）；
