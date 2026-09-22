@@ -65,7 +65,7 @@
 
 ---
 
-## P3 低危问题、特性接线与体验优化（2 项）
+## P3 低危问题、特性接线与体验优化（3 项）
 
 ### `ISSUE-P3-263`：动态取色开启后「主题调色盘」5 项仍可点选、仍显示选中态，但全局配色零变化
 
@@ -115,6 +115,19 @@
   - AC④ 若裁决「保留现形态」（不重构），须在 [`architecture/产品裁决登记.md`](architecture/产品裁决登记.md) 登记取舍与重开条件，**不得静默留白**；
   - AC⑤ 若真机在**非手工模式**下复现「点关闭不关」，本条目升 P2，并先取真机留痕（设备 / 构建号 / 复现步骤 / 录屏或日志）再定因。
 - **依据**：`app/src/main/java/com/keepasskey/app/ui/screens/settings/subscreens/AutofillSettingsComponents.kt:272-282`；`.../AutofillSettingsScreen.kt:79, 186-198`；`.../AutofillBlocklistDialogs.kt:143-146, 150-161`；`.../PackageBlocklistDialogSections.kt:128-158`；`app/src/main/res/values/strings.xml:947-952`（`autofill_save_blacklist_*` 文案与 `ISSUE-P3-43 ③` 出处）；[`resolved/batches/205-Compose长函数拆分两处批次.md`](resolved/batches/205-Compose长函数拆分两处批次.md) §1.1（同形故障与纠偏留痕）；同族「零测试引用」先例 [`resolved/batches/196-库列表对话框宿主分段批次.md`](resolved/batches/196-库列表对话框宿主分段批次.md)、[`resolved/batches/198-详情页确认对话框下沉批次.md`](resolved/batches/198-详情页确认对话框下沉批次.md)。
+
+### `ISSUE-P3-265`：CI 工作流硬编码固定临时签名口令 `keepasskey-ci-ephemeral`
+
+- **核实时间点**：2026-09-22（Git 跟踪内容与历史敏感信息审计）。
+- **核实方式**：① 全树检索 `keepasskey-ci-ephemeral` / `CI_KEYSTORE_PASSWORD` 命中**仅** `.github/workflows/build.yml`（约 `:60` 及同 job 的 `keytool` / `GITHUB_ENV` 导出段）；② 直读 `build.yml` 该段——`env.CI_KEYSTORE_PASSWORD: "keepasskey-ci-ephemeral"` 为 workflow 级固定字符串，同 job 内 `keytool -genkeypair … -storepass "${CI_KEYSTORE_PASSWORD}" -keypass "${CI_KEYSTORE_PASSWORD}"` 生成 `${RUNNER_TEMP}/ci-release.jks`，再写入 `KEYSTORE_FILE` / `KEYSTORE_PASSWORD` / `KEY_ALIAS` / `KEY_PASSWORD` 供 `assembleRelease` 读取；③ 直读 `app/build.gradle.kts` 签名口令闸门——启用签名时校验长度 ≥ 16、不命中 `FORBIDDEN_RELEASE_PASSWORDS`（含 `keepasskey123`）、不包含 `__REPLACE_WITH` 占位符标记；④ `git log -S 'keepasskey-ci-ephemeral'` 与产品/测试源码交叉检索：无其他消费方、无测试断言依赖该字面量。
+- **背景与影响**：该口令仅用于 **CI runner 临时生成的一次性签名密钥**（工作流注释已写明「非机密、不可用于发布」），不保护发布身份，**不构成生产凭据泄露**。但值被写死在公开仓库的 workflow 中，任何克隆者皆可读；一旦有人误将同口令用于真实密钥库，或后续把该 job 改成消费真实 secret 却沿用固定值，会静默放大风险。属**供应链 / 密钥卫生**缺口，非功能缺陷。定级 **P3**。
+- **正确的方式（整改方向）**：将口令改为 **job 运行时随机生成**（如 `openssl rand -base64 24`，约 32 字符，可过构建闸门长度 ≥ 16），在 `keytool` 之前生成**一次**并同时用于 `storepass`/`keypass` 与 `GITHUB_ENV` 导出——**不得**分两次 `openssl rand`（否则 keystore 口令与 Gradle 读到的口令不一致，签名失败）。固定字面量与 `CI_KEYSTORE_PASSWORD` 顶层 env 一并移除或改为占位说明。随机值须避开 `FORBIDDEN_RELEASE_PASSWORDS` 与 `__REPLACE_WITH`（`openssl rand -base64` 实际不会命中，但闸门本身会兜底）。
+- **验收标准**：
+  - AC① `build.yml` 中**不再出现**任何固定口令字面量；`keytool` 与 `KEYSTORE_PASSWORD`/`KEY_PASSWORD` 使用**同一次**运行时随机值；
+  - AC② 随机口令长度 ≥ 16 且能通过 `app/build.gradle.kts` 发布签名口令闸门（以真实 `assembleRelease` 配置阶段不 `error` 为证）；
+  - AC③ 全仓检索 `keepasskey-ci-ephemeral` 零命中（历史提交除外）；工作流注释同步改为「口令运行时生成、非机密、不可用于发布」口径；
+  - AC④ 若裁决「保留固定值」（例如为可复现构建），须在 [`architecture/产品裁决登记.md`](architecture/产品裁决登记.md) 或 [`architecture/已知工程限界.md`](architecture/已知工程限界.md) 登记取舍与重开条件，**不得静默留白**。
+- **依据**：`.github/workflows/build.yml`（`CI_KEYSTORE_PASSWORD` env 与同 job `keytool` / `GITHUB_ENV` 段）；`app/build.gradle.kts`（`minReleasePasswordLength = 16` / `forbiddenReleasePasswords` / `releasePasswordPlaceholderMarker` 闸门）；`keystore.properties.example`（口令卫生与 re-key 说明）。相关历史：`ISSUE-P2-55`（发布签名弱口令 `keepasskey123`，已 re-key 闭环，见 [`resolved/batches/49-存量安全整改批次-密钥文件纯字节解析.md`](resolved/batches/49-存量安全整改批次-密钥文件纯字节解析.md)）。
 
 ---
 
