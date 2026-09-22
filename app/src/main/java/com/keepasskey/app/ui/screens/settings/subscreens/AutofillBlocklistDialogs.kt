@@ -93,6 +93,8 @@ internal fun AutofillManageEntryRow(
  * （TASK-139：直接选本机应用取包名/图标，替代「自己键入包名」），并保留手工输入兜底
  * （无桌面入口的组件不进选择器列表，此类包名只能手工录入）。
  * 新增失败（包名非法或已存在）如实上浮错误提示，不谎报成功。
+ * `ISSUE-P3-264`：「关闭」无条件落在 `dismissButton` 槽（存在与可点性不依赖任何状态），
+ * 手工输入为真双态切换、可退回名单模式。
  *
  * TASK-36 整改：此前渲染两条写死的示例条目并挂空 onClick 删除按钮，属假数据回显，已诚实化下架；
  * TASK-44 补齐真实生命周期；ISSUE-P3-43 参数化文案后由「填充黑名单」与「保存黑名单」共用。
@@ -141,22 +143,28 @@ internal fun PackageBlocklistManageDialog(
                     showAddError = false
                 },
                 onToggleManual = {
-                    manualEntry = true
+                    // ISSUE-P3-264：真双态切换（原为单向闩锁，进入手工输入后无回退路径）
+                    manualEntry = !manualEntry
                     showAddError = false
                 },
                 onRemove = onRemove
             )
         },
         confirmButton = {
-            PackageBlocklistConfirmButton(
-                manualEntry = manualEntry,
-                pendingPackage = pendingPackage,
-                // 手工输入模式 = 新增（成败由错误提示反馈）；名单模式 = 关闭（既有语义）
-                onConfirm = { if (manualEntry) submit(pendingPackage) else onDismiss }
-            )
+            // ISSUE-P3-264：confirm 槽只在手工输入态承载「新增」；名单模式下整槽不产子项，
+            // 「关闭」一律由 dismissButton 槽承载（与全仓其余 13 处同形，关闭语义不随状态漂移）。
+            // 历史教训：本槽曾把「关闭」焊进 confirm 槽且按 manualEntry 分流转发，else 分支
+            // 只引用了 onDismiss 而未调用（Kotlin 对 Unit 期望静默丢弃函数值）⇒ 默认态「关闭」
+            // 是死按钮，正是用户所报「点了不关」的根因。
+            if (manualEntry) {
+                PackageBlocklistConfirmButton(
+                    pendingPackage = pendingPackage,
+                    onConfirm = { submit(pendingPackage) }
+                )
+            }
         },
         dismissButton = {
-            PackageBlocklistDismissButton(manualEntry = manualEntry, onDismiss = onDismiss)
+            PackageBlocklistDismissButton(onDismiss = onDismiss)
         }
     )
 

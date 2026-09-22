@@ -924,6 +924,7 @@
     <string name="app_picker_added_cd">已在名单中</string>
     <string name="autofill_blacklist_pick_app">从已安装应用中选择</string>
     <string name="autofill_blacklist_manual_toggle">手动输入包名</string>
+    <string name="autofill_blacklist_manual_back">返回名单模式</string>
     <string name="edit_app_binding_pick_cd">选择关联的应用</string>
     <string name="edit_app_binding_bound">已关联应用：%1$s（%2$s）</string>
     <string name="edit_app_binding_bound_unreadable">已关联应用：%1$s（应用名不可读）</string>

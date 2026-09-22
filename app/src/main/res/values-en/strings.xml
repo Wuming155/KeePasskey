@@ -875,6 +875,7 @@
     <string name="app_picker_added_cd">Already on the list</string>
     <string name="autofill_blacklist_pick_app">Choose from installed apps</string>
     <string name="autofill_blacklist_manual_toggle">Enter package name manually</string>
+    <string name="autofill_blacklist_manual_back">Back to list mode</string>
     <string name="edit_app_binding_pick_cd">Choose a bound app</string>
     <string name="edit_app_binding_bound">Bound app: %1$s (%2$s)</string>
     <string name="edit_app_binding_bound_unreadable">Bound app: %1$s (app name unreadable)</string>

@@ -44,7 +44,8 @@ import kotlinx.coroutines.withContext
  * - [PackageBlocklistBody]：对话框 `text` 主体（说明 / 空态或名单 / 应用选择器入口 /
  *   新增错误提示 / 手工输入切换）——**不自持状态**，输入值与开关全部由对话框持有、经参数回传；
  * - [PackageBlocklistConfirmButton] / [PackageBlocklistDismissButton]：confirm / dismiss 槽位
- *   （手工输入模式下 confirm=新增、dismiss=关闭；名单模式下 confirm 槽让位给关闭）；
+ *   （`ISSUE-P3-264`：「关闭」**无条件**由 dismiss 槽承载、不随 `manualEntry` 状态漂移；
+ *   confirm 槽仅在手工输入态承载「新增」，名单模式下整槽不产子项）；
  * - [BlockedPackageRow] / [rememberAppOption]：名单行的图标 + 应用名 + 包名渲染
  *   （随 text 主体同迁，仍只服务于本对话框）。
  */
@@ -117,6 +118,10 @@ internal fun PackageBlocklistBody(
                 singleLine = true,
                 isError = showAddError
             )
+            // ISSUE-P3-264：手工输入必须可退回名单模式（单向闩锁会让右下角恒停在可禁用的「新增」上）
+            TextButton(onClick = onToggleManual) {
+                Text(stringResource(R.string.autofill_blacklist_manual_back))
+            }
         } else {
             TextButton(onClick = onToggleManual) {
                 Text(stringResource(R.string.autofill_blacklist_manual_toggle))
@@ -127,33 +132,23 @@ internal fun PackageBlocklistBody(
 
 @Composable
 internal fun PackageBlocklistConfirmButton(
-    manualEntry: Boolean,
     pendingPackage: String,
     onConfirm: () -> Unit
 ) {
-    if (manualEntry) {
-        TextButton(
-            onClick = onConfirm,
-            enabled = pendingPackage.isNotBlank()
-        ) {
-            Text(stringResource(R.string.btn_add))
-        }
-    } else {
-        TextButton(onClick = onConfirm) {
-            Text(stringResource(R.string.btn_close))
-        }
+    TextButton(
+        onClick = onConfirm,
+        enabled = pendingPackage.isNotBlank()
+    ) {
+        Text(stringResource(R.string.btn_add))
     }
 }
 
 @Composable
 internal fun PackageBlocklistDismissButton(
-    manualEntry: Boolean,
     onDismiss: () -> Unit
 ) {
-    if (manualEntry) {
-        TextButton(onClick = onDismiss) {
-            Text(stringResource(R.string.btn_close))
-        }
+    TextButton(onClick = onDismiss) {
+        Text(stringResource(R.string.btn_close))
     }
 }
 
