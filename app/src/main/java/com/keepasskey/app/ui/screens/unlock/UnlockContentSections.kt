@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.FlashOn
 import androidx.compose.material.icons.filled.Lock
@@ -37,10 +36,10 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.keepasskey.app.R
+import com.keepasskey.app.ui.components.SecurePasswordField
 import com.keepasskey.app.ui.model.resolveText
 import com.keepasskey.app.ui.theme.CapsuleShape
 import com.keepasskey.app.ui.theme.HeroTitleStyle
-import com.keepasskey.app.ui.components.SecurePasswordField
 
 /**
  * 密码库锁 Logo 与呼吸光晕底座
@@ -76,74 +75,6 @@ internal fun UnlockVaultLogo(uiState: UnlockUiState) {
                 modifier = Modifier.size(32.dp)
             )
         }
-    }
-}
-
-/**
- * 空状态：当前未配置或选择任何密码库
- */
-@Composable
-internal fun UnlockEmptyVaultContent(
-    uiState: UnlockUiState,
-    onNavigateToDatabasePicker: () -> Unit,
-    onOpenExistingVault: () -> Unit
-) {
-    Text(
-        text = stringResource(R.string.unlock_empty_vault_title),
-        style = HeroTitleStyle,
-        color = MaterialTheme.colorScheme.onBackground
-    )
-
-    Spacer(modifier = Modifier.height(6.dp))
-
-    Text(
-        text = stringResource(R.string.unlock_empty_vault_subtitle),
-        style = MaterialTheme.typography.bodyMedium,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        textAlign = androidx.compose.ui.text.style.TextAlign.Center
-    )
-
-    Spacer(modifier = Modifier.height(24.dp))
-
-    uiState.errorMessage?.let { message ->
-        Text(
-            text = message.resolveText(),
-            color = MaterialTheme.colorScheme.error,
-            style = MaterialTheme.typography.bodySmall,
-            modifier = Modifier.padding(bottom = 12.dp)
-        )
-    }
-
-    Button(
-        onClick = onNavigateToDatabasePicker,
-        shape = CapsuleShape,
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(50.dp)
-    ) {
-        Icon(Icons.Default.Lock, contentDescription = null, modifier = Modifier.size(18.dp))
-        Spacer(modifier = Modifier.width(8.dp))
-        Text(
-            text = stringResource(R.string.unlock_empty_create_btn),
-            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-        )
-    }
-
-    Spacer(modifier = Modifier.height(12.dp))
-
-    androidx.compose.material3.OutlinedButton(
-        onClick = onOpenExistingVault,
-        shape = CapsuleShape,
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(50.dp)
-    ) {
-        Icon(Icons.Default.AttachFile, contentDescription = null, modifier = Modifier.size(18.dp))
-        Spacer(modifier = Modifier.width(8.dp))
-        Text(
-            text = stringResource(R.string.unlock_empty_open_btn),
-            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-        )
     }
 }
 
