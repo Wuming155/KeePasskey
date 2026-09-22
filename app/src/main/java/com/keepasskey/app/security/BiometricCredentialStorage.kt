@@ -123,6 +123,40 @@ class BiometricCredentialStorage @Inject constructor(
         prefs.edit().clear().apply()
     }
 
+    /**
+     * 撤销全部生物识别数据（ISSUE-P2-253：**关闭开关 = 删除**）。
+     *
+     * ① 从 prefs 键集合按已知后缀解析出全部已登记库 ID，逐库删除其**封印密钥**与
+     *   **解锁通行密钥对**的 Keystore 别名（单点构造见 [KeystoreManager.sealAliasFor] /
+     *   [KeystoreManager.unlockPasskeyAliasFor]）——逐项 `runCatching`，单个别名删除失败
+     *   不阻断其余撤销（Keystore 不可达时跳过密钥删除，**prefs 清空仍必须执行**）；
+     * ② 清空全部 prefs（各库封印 `iv`/`cipher` + 解锁通行密钥登记记录及其 MAC）。
+     *
+     * **刻意不删**：[KeystoreManager.AUTOFILL_AUTH_KEY_ALIAS]（自动填充放行绑定与本开关无关）、
+     * [KeystoreManager.UNLOCK_PASSKEY_INTEGRITY_KEY_ALIAS]（登记记录防篡改 HMAC 密钥，
+     * 无认证门控、不承载秘密，供重新登记复用）。
+     */
+    fun revokeAllBiometricData() {
+        val dbIds = mutableSetOf<String>()
+        for (key in prefs.all.keys) {
+            for (suffix in DB_KEY_SUFFIXES) {
+                if (key.endsWith(suffix)) {
+                    val dbId = key.dropLast(suffix.length)
+                    if (dbId.isNotEmpty()) dbIds.add(dbId)
+                    break
+                }
+            }
+        }
+        keystoreManager?.let { km ->
+            for (dbId in dbIds) {
+                // 单个别名删除失败不阻断其余撤销（残留别名不含明文，且下次撤销重试）
+                runCatching { km.deleteKey(KeystoreManager.sealAliasFor(dbId)) }
+                runCatching { km.deleteKey(KeystoreManager.unlockPasskeyAliasFor(dbId)) }
+            }
+        }
+        clearAll()
+    }
+
     // ── 解锁通行密钥记录（TASK-18 / ISSUE-P1-09 防篡改化）──────────────────
     //
     // 登记记录（公钥/credentialId/signCount）经硬件 HMAC 封存：任何仅具备文件级
@@ -194,5 +228,18 @@ class BiometricCredentialStorage @Inject constructor(
 
         /** Wave 12 前遗留 QuickUnlock PIN 体系 prefs 文件名（仅供启动期清理引用） */
         private const val LEGACY_QUICK_UNLOCK_PREFS = "com.keepasskey.quick_unlock_pin"
+
+        /**
+         * prefs 中以库 ID 为前缀的键后缀全集（ISSUE-P2-253）：
+         * [revokeAllBiometricData] 据此枚举全部已登记库；新增键后缀须同步登记于此。
+         */
+        private val DB_KEY_SUFFIXES = listOf(
+            "_iv",
+            "_cipher",
+            "_passkey_pub",
+            "_passkey_cred",
+            "_passkey_count",
+            "_passkey_mac"
+        )
     }
 }

@@ -162,7 +162,7 @@ class UnlockPasskeyManager @Inject constructor(
         }
     }
 
-    private fun aliasFor(databaseId: String): String = "${KeystoreManager.BIOMETRIC_KEY_ALIAS}_passkey_$databaseId"
+    private fun aliasFor(databaseId: String): String = KeystoreManager.unlockPasskeyAliasFor(databaseId)
 
     companion object {
         private const val TAG = "UnlockPasskey"

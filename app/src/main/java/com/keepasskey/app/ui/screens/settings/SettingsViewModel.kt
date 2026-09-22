@@ -288,7 +288,8 @@ class SettingsViewModel @Inject constructor(
      * **开启必须当场验证**：委托 [BiometricEnableCoordinator] 发起一次强生物识别验证，
      * 通过后才写入偏好；取消 / 失败 / 设备无可用强生物识别一律不写入（开关受控回到关闭态）
      * 并经 [SettingsUiState.biometricToggleNotice] 如实提示。
-     * 关闭无需验证（即时落偏好）。
+     * 关闭无需验证：落偏好并**撤销全部生物识别数据**（封印凭据 + 断言登记记录 + 对应 Keystore 密钥，
+     * ISSUE-P2-253「关闭开关 = 删除」）。
      *
      * @param activity 宿主 Activity（发起 `BiometricPrompt` 必需）；由设置页自
      *   `LocalActivity` 解析后透传，缺失时开启动作 fail-closed。

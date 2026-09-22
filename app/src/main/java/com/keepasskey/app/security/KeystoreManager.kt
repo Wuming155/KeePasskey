@@ -237,6 +237,20 @@ class KeystoreManager @Inject constructor(
         const val UNLOCK_PASSKEY_INTEGRITY_KEY_ALIAS = "com.keepasskey.unlock_passkey_integrity"
 
         /**
+         * 各数据库封印密钥别名（per-database，ISSUE-P2-253 收敛为单点构造）：
+         * `BIOMETRIC_KEY_ALIAS_<dbId>`。[BiometricAuthManager.getAliasForDatabase] 与
+         * [BiometricCredentialStorage.revokeAllBiometricData] 均经本函数取值，杜绝两侧漂移。
+         */
+        fun sealAliasFor(databaseId: String): String = "${BIOMETRIC_KEY_ALIAS}_$databaseId"
+
+        /**
+         * 各数据库解锁通行密钥（断言 ES256）别名（per-database，ISSUE-P2-253 收敛为单点构造）：
+         * `BIOMETRIC_KEY_ALIAS_passkey_<dbId>`。[UnlockPasskeyManager] 与
+         * [BiometricCredentialStorage.revokeAllBiometricData] 均经本函数取值。
+         */
+        fun unlockPasskeyAliasFor(databaseId: String): String = "${BIOMETRIC_KEY_ALIAS}_passkey_$databaseId"
+
+        /**
          * 快速解锁密钥的授权集合：仅 Class 3 强生物识别（per-operation）。
          * ISSUE-P1-08：设备锁屏凭据（PIN/图案/密码）不再可解封（弱凭据降级 + 生物录入失效标志被忽略）。
          *

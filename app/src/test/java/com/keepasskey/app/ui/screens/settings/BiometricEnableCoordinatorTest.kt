@@ -34,10 +34,11 @@ import javax.crypto.Cipher
  * 覆盖验收标准：
  * 1. 打开开关 → 发起一次强生物识别验证，**通过后才写入偏好**；
  * 2. 用户取消 / 系统错误 / 设备无可用强生物识别 → **不写偏好**（开关保持关闭）并给出提示；
- * 3. 关闭开关无需验证，即时落偏好；
+ * 3. 关闭开关无需验证，即时落偏好，**并撤销全部生物识别数据**（ISSUE-P2-253「关闭 = 删除」）；
  * 4. 验证进行中的重复点击不并发发起第二次验证（防抖）；
  * 5. 单次比对未通过（`Failed`）不是终态——系统弹窗驻留重试，最终成功仍须启用；
- * 6. 封印凭据的解密 Cipher 准备失败（密钥被吊销）→ 清除陈旧凭据并退化为纯身份验证。
+ * 6. 封印凭据的解密 Cipher 准备失败（密钥被吊销）→ 清除陈旧凭据并退化为纯身份验证；
+ * 7. 源码守卫：登记协调器的「拒绝降级关闭」路径须撤销全部封印数据，且封印落库前须复核开关。
  *
  * 测试边界如实说明：Android `BiometricPrompt` 与 `FragmentActivity` 无法在 JVM 中构造，
  * 故两处 Android 触点经 `*Override` 替身注入；`setEnabled` 的 activity 参数传 null，
@@ -140,7 +141,7 @@ class BiometricEnableCoordinatorTest {
         assertEquals(UiMessage(R.string.sec_biometric_enable_unavailable), f.state.value.notice)
     }
 
-    // ── 3. 关闭：无需验证 ────────────────────────────────────────────────
+    // ── 3. 关闭：无需验证 + 撤销全部数据（ISSUE-P2-253）─────────────────
 
     @Test
     fun `关闭开关无需验证即时落偏好并清除提示`() = runTest {
@@ -153,6 +154,54 @@ class BiometricEnableCoordinatorTest {
         assertFalse(f.settings.current().biometricEnabled)
         assertNull("关闭动作不应残留任何提示", f.state.value.notice)
         assertFalse(f.state.value.verifying)
+    }
+
+    @Test
+    fun `关闭开关撤销全部封印凭据与断言登记记录`() = runTest {
+        val storage = inMemoryCredentialStorage()
+        storage.saveEncryptedCredential("db_a", IV, CIPHERTEXT)
+        storage.saveEncryptedCredential("db_b", IV, CIPHERTEXT)
+        storage.saveUnlockPasskey("db_a", "PUB_A", "CRED_A", 1)
+        storage.saveUnlockPasskey("db_b", "PUB_B", "CRED_B", 2)
+        val f = createFixture(storage = storage)
+        f.settings.setBiometricEnabled(true)
+
+        f.coordinator.setEnabled(false, null)
+        advanceUntilIdle()
+
+        assertFalse(f.settings.current().biometricEnabled)
+        assertFalse("关闭必须删除库 A 封印凭据（关闭 = 删除）", storage.hasEncryptedCredential("db_a"))
+        assertFalse("关闭必须删除库 B 封印凭据（关闭 = 删除）", storage.hasEncryptedCredential("db_b"))
+        assertNull("关闭必须删除断言登记记录", storage.getUnlockPasskey("db_a"))
+        assertNull(storage.getUnlockPasskey("db_b"))
+    }
+
+    // ── 3b. 登记协调器的关闭撤销接线（源码守卫）─────────────────────────
+
+    @Test
+    fun `登记协调器拒绝降级关闭路径必须撤销全部封印数据`() {
+        val source = readSource(ENROLLMENT_COORDINATOR_PATH)
+        val refusal = source
+            .substringAfter("用户拒绝软件级快速解锁")
+            .substringBefore("true ->")
+        assertTrue("拒绝关闭路径必须落偏好关闸", refusal.contains("setBiometricEnabled(false)"))
+        assertTrue(
+            "拒绝关闭路径必须撤销全部封印数据（关闭 = 删除，ISSUE-P2-253）",
+            refusal.contains("revokeAllBiometricData()")
+        )
+        val prefIndex = refusal.indexOf("setBiometricEnabled(false)")
+        val revokeIndex = refusal.indexOf("revokeAllBiometricData()")
+        assertTrue("必须先落偏好关闸、再删数据（防并发登记写回）", prefIndex in 0 until revokeIndex)
+    }
+
+    @Test
+    fun `封印落库前必须复核开关未在弹窗挂起期间被关闭`() {
+        val source = readSource(ENROLLMENT_COORDINATOR_PATH)
+        val afterSeal = source.substringAfter("sealCompositePayload(authManager")
+        assertTrue(
+            "封印弹窗返回后、落库前必须复核 biometricEnabled（防撤销后陈旧封印写回）",
+            afterSeal.substringBefore("persistSealedCredential").contains("biometricEnabled")
+        )
     }
 
     // ── 4. 防抖 ─────────────────────────────────────────────────────────
@@ -269,6 +318,7 @@ class BiometricEnableCoordinatorTest {
         ) { _, method, args ->
             when (method.name) {
                 "getString" -> (entries[args[0] as String] as? String) ?: args[1] as? String
+                "getAll" -> HashMap(entries)
                 "contains" -> entries.containsKey(args[0] as String)
                 "edit" -> editor
                 else -> null
@@ -282,9 +332,31 @@ class BiometricEnableCoordinatorTest {
         )
     }
 
+    private fun readSource(path: String): String {
+        val file = java.io.File(repositoryRoot, path)
+        assertTrue("源文件不存在: $path", file.isFile)
+        return file.readText()
+    }
+
     private companion object {
         const val ACTIVE_DB_ID = "db_personal"
         val IV = ByteArray(12) { (it + 1).toByte() }
         val CIPHERTEXT = ByteArray(16) { (it + 1).toByte() }
+        const val ENROLLMENT_COORDINATOR_PATH =
+            "app/src/main/java/com/keepasskey/app/ui/screens/unlock/BiometricEnrollmentCoordinator.kt"
+
+        val repositoryRoot: java.io.File by lazy {
+            var dir: java.io.File? = java.io.File(System.getProperty("user.dir").orEmpty()).absoluteFile
+            repeat(4) {
+                val candidate = dir ?: return@repeat
+                if (java.io.File(candidate, "app/src/main/java").isDirectory &&
+                    java.io.File(candidate, "core/src/main/java").isDirectory
+                ) {
+                    return@lazy candidate
+                }
+                dir = candidate.parentFile
+            }
+            error("未能定位仓库根目录")
+        }
     }
 }

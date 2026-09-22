@@ -31,6 +31,7 @@ class BiometricCredentialStorageTest {
                 val def = args[1] as? String
                 (memoryStorage[key] as? String) ?: def
             }
+            "getAll" -> HashMap(memoryStorage)
             "contains" -> memoryStorage.containsKey(args[0] as String)
             "edit" -> fakeEditor
             else -> null
@@ -122,6 +123,35 @@ class BiometricCredentialStorageTest {
 
         assertNull(storage.getEncryptedCredential("vault_a"))
         assertNull(storage.getEncryptedCredential("vault_b"))
+    }
+
+    @Test
+    fun `revokeAllBiometricData 撤销全部库的封印凭据与断言登记记录`() {
+        val iv = ByteArray(12) { 5 }
+        val ciphertext = ByteArray(16) { 6 }
+        storage.saveEncryptedCredential("vault_a", iv, ciphertext)
+        storage.saveEncryptedCredential("vault_b", iv, ciphertext)
+        storage.saveUnlockPasskey("vault_a", "PUB_A", "CRED_A", 3)
+        storage.saveUnlockPasskey("vault_b", "PUB_B", "CRED_B", 7)
+        assertTrue(storage.hasEncryptedCredential("vault_a"))
+        assertTrue(memoryStorage.containsKey("vault_b_passkey_pub"))
+
+        // ISSUE-P2-253：关闭开关 = 删除——全部库的封印凭据与断言登记记录一并撤销
+        storage.revokeAllBiometricData()
+
+        assertFalse(storage.hasEncryptedCredential("vault_a"))
+        assertFalse(storage.hasEncryptedCredential("vault_b"))
+        assertNull(storage.getEncryptedCredential("vault_a"))
+        assertNull("断言登记记录必须随撤销一并清除", storage.getUnlockPasskey("vault_a"))
+        assertNull(storage.getUnlockPasskey("vault_b"))
+        assertTrue("prefs 必须整体清空", memoryStorage.isEmpty())
+    }
+
+    @Test
+    fun `revokeAllBiometricData 在无任何登记数据时安全执行`() {
+        // Keystore 删除路径（keystoreManager = null）与空 prefs 均不得抛异常
+        storage.revokeAllBiometricData()
+        assertTrue(memoryStorage.isEmpty())
     }
 
     @Test

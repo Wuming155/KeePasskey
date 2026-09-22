@@ -43,7 +43,9 @@ internal data class BiometricToggleUiState(
  * **开关默认关闭，由用户手动打开；打开的那一刻当场验证生物识别，验证通过才真正启用。**
  *
  * ## 本协调器的职责边界
- * - 关闭开关：直接落偏好（无需验证），并清除残留提示；
+ * - 关闭开关：落偏好（无需验证）并**撤销全部生物识别数据**——各库封印凭据、解锁通行密钥
+ *   登记记录及其 Keystore 密钥一并删除（ISSUE-P2-253「关闭开关 = 删除」），同时清除残留提示；
+ *   次序固定为**先落偏好关闸、再删数据**（偏好先为 false 则并发登记路径被入口拦截）；
  * - 打开开关：先校验设备具备可用的 Class 3 强生物识别（fail-closed），再发起一次
  *   BiometricPrompt 验证，**验证通过后才写入偏好**；取消 / 失败 / 系统错误一律不写入
  *   （开关受控，视觉自动回到关闭态），并给出对应提示。
@@ -85,13 +87,17 @@ internal class BiometricEnableCoordinator(
     /**
      * 开关切换入口。
      *
-     * @param enabled 目标态；false 直接落偏好，true 须先通过一次强生物识别验证
+     * @param enabled 目标态；false 落偏好并撤销全部生物识别数据（无需验证），true 须先通过一次强生物识别验证
      * @param activity 宿主 Activity（发起 BiometricPrompt 必需；生产由设置页透传）
      */
     fun setEnabled(enabled: Boolean, activity: FragmentActivity?) {
         if (!enabled) {
             state.update { it.copy(verifying = false, notice = null) }
-            scope.launch { settingsRepository.setBiometricEnabled(false) }
+            scope.launch {
+                // ISSUE-P2-253：先落偏好关闸（阻断并发登记），再撤销全部封印数据（关闭 = 删除）
+                settingsRepository.setBiometricEnabled(false)
+                biometricCredentialStorage?.revokeAllBiometricData()
+            }
             return
         }
         // 验证进行中的重复点击为幂等空操作（避免并发发起多个 BiometricPrompt）

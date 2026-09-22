@@ -38,7 +38,10 @@
 ## P2 中危缺陷与协议/测试缺口（0 项）
 
 > **暂无开放项**（本区归零：§254 闭环 `ISSUE-P2-246`——敏感对话框遮罩改由调用点
-> `SecureFlagPolicy.SecureOn` 强制（7 处调用点），真机对照实证；详见下方「本区近期变动」引用块）。
+> `SecureFlagPolicy.SecureOn` 强制（7 处调用点），真机对照实证；§259 闭环 `ISSUE-P2-253`——
+> 关闭生物识别开关只落偏好、不删封印凭据与断言登记，现关闭即撤销全部生物识别数据（关闭 = 删除）。
+> 证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md) 与
+> [`resolved/batches/259-关闭生物识别开关撤销封印数据批次.md`](resolved/batches/259-关闭生物识别开关撤销封印数据批次.md)。）
 
 ---
 

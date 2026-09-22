@@ -130,6 +130,12 @@ internal class BiometricEnrollmentCoordinator(
         if (!hasStrongBiometric(authManager, hostActivity)) return
 
         val encrypted = sealCompositePayload(authManager, hostActivity, provision, passwordChars) ?: return
+        // ISSUE-P2-253：封印弹窗挂起期间开关可能已被关闭（关闭 = 删除），落库前复核偏好，
+        // 杜绝「撤销刚执行、陈旧封印又写回」的竞态（acquireDowngradeConsent 拒绝路径亦同批关闸）
+        if (!settingsRepository.getSettings().first().biometricEnabled) {
+            debugLog.info(TAG, "封印挂起期间生物识别开关已关闭，放弃落库")
+            return
+        }
         persistSealedCredential(storage, dbId, encrypted, downgradedSeal)
     }
 
@@ -160,6 +166,8 @@ internal class BiometricEnrollmentCoordinator(
                 debugLog.info(TAG, "用户拒绝软件级快速解锁，关闭生物识别并不封印")
                 settingsRepository.setBiometricEnabled(false)
                 uiState.update { it.copy(isBiometricEnabled = false) }
+                // ISSUE-P2-253：关闭 = 删除——先落偏好关闸，再撤销各库既有封印数据
+                biometricCredentialStorage?.revokeAllBiometricData()
                 false
             }
             true -> {

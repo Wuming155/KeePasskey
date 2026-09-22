@@ -221,10 +221,10 @@ class BiometricAuthManager @Inject constructor(
     }
 
     /**
-     * 生成各数据库独立的硬件密钥别名
+     * 生成各数据库独立的硬件密钥别名（单点构造见 [KeystoreManager.sealAliasFor]）
      */
     fun getAliasForDatabase(databaseId: String): String {
-        return "${KeystoreManager.BIOMETRIC_KEY_ALIAS}_$databaseId"
+        return KeystoreManager.sealAliasFor(databaseId)
     }
 
     /**
