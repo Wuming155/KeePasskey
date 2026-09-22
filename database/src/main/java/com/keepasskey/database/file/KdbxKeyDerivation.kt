@@ -111,6 +111,7 @@ internal object KdbxKeyDerivation {
      * 密码与密钥文件均缺失时退化为 SHA-256(SHA-256(""))——本应用历史「空密码库」
      * 语义（官方客户端无法创建此类库），保持既有空密码库读写兼容，
      * 凭据校验由头部 HMAC 给出明确失败。
+     * 该退化语义已登记 [`docs/architecture/已知工程限界.md`] §2.5（2026-09-22 KDBX 格式核对补登）。
      */
     private fun compositeFromPassword(passwordChars: CharArray?): ByteArray {
         val hasPassword = passwordChars != null && passwordChars.isNotEmpty()
