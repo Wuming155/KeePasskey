@@ -78,7 +78,7 @@
 
 ---
 
-## P3 低危问题、特性接线与体验优化（6 项）
+## P3 低危问题、特性接线与体验优化（3 项）
 
 ### `ISSUE-P3-263`：动态取色开启后「主题调色盘」5 项仍可点选、仍显示选中态，但全局配色零变化
 
@@ -129,31 +129,6 @@
   - AC⑤ 若真机在**非手工模式**下复现「点关闭不关」，本条目升 P2，并先取真机留痕（设备 / 构建号 / 复现步骤 / 录屏或日志）再定因。
 - **依据**：`app/src/main/java/com/keepasskey/app/ui/screens/settings/subscreens/AutofillSettingsComponents.kt:272-282`；`.../AutofillSettingsScreen.kt:79, 186-198`；`.../AutofillBlocklistDialogs.kt:143-146, 150-161`；`.../PackageBlocklistDialogSections.kt:128-158`；`app/src/main/res/values/strings.xml:947-952`（`autofill_save_blacklist_*` 文案与 `ISSUE-P3-43 ③` 出处）；[`resolved/batches/205-Compose长函数拆分两处批次.md`](resolved/batches/205-Compose长函数拆分两处批次.md) §1.1（同形故障与纠偏留痕）；同族「零测试引用」先例 [`resolved/batches/196-库列表对话框宿主分段批次.md`](resolved/batches/196-库列表对话框宿主分段批次.md)、[`resolved/batches/198-详情页确认对话框下沉批次.md`](resolved/batches/198-详情页确认对话框下沉批次.md)。
 
-### `ISSUE-P3-265`：CI 工作流硬编码固定临时签名口令 `keepasskey-ci-ephemeral`
-
-- **核实时间点**：2026-09-22（Git 跟踪内容与历史敏感信息审计）。
-- **核实方式**：① 全树检索 `keepasskey-ci-ephemeral` / `CI_KEYSTORE_PASSWORD` 命中**仅** `.github/workflows/build.yml`（约 `:60` 及同 job 的 `keytool` / `GITHUB_ENV` 导出段）；② 直读 `build.yml` 该段——`env.CI_KEYSTORE_PASSWORD: "keepasskey-ci-ephemeral"` 为 workflow 级固定字符串，同 job 内 `keytool -genkeypair … -storepass "${CI_KEYSTORE_PASSWORD}" -keypass "${CI_KEYSTORE_PASSWORD}"` 生成 `${RUNNER_TEMP}/ci-release.jks`，再写入 `KEYSTORE_FILE` / `KEYSTORE_PASSWORD` / `KEY_ALIAS` / `KEY_PASSWORD` 供 `assembleRelease` 读取；③ 直读 `app/build.gradle.kts` 签名口令闸门——启用签名时校验长度 ≥ 16、不命中 `FORBIDDEN_RELEASE_PASSWORDS`（含 `keepasskey123`）、不包含 `__REPLACE_WITH` 占位符标记；④ `git log -S 'keepasskey-ci-ephemeral'` 与产品/测试源码交叉检索：无其他消费方、无测试断言依赖该字面量。
-- **背景与影响**：该口令仅用于 **CI runner 临时生成的一次性签名密钥**（工作流注释已写明「非机密、不可用于发布」），不保护发布身份，**不构成生产凭据泄露**。但值被写死在公开仓库的 workflow 中，任何克隆者皆可读；一旦有人误将同口令用于真实密钥库，或后续把该 job 改成消费真实 secret 却沿用固定值，会静默放大风险。属**供应链 / 密钥卫生**缺口，非功能缺陷。定级 **P3**。
-- **正确的方式（整改方向）**：将口令改为 **job 运行时随机生成**（如 `openssl rand -base64 24`，约 32 字符，可过构建闸门长度 ≥ 16），在 `keytool` 之前生成**一次**并同时用于 `storepass`/`keypass` 与 `GITHUB_ENV` 导出——**不得**分两次 `openssl rand`（否则 keystore 口令与 Gradle 读到的口令不一致，签名失败）。固定字面量与 `CI_KEYSTORE_PASSWORD` 顶层 env 一并移除或改为占位说明。随机值须避开 `FORBIDDEN_RELEASE_PASSWORDS` 与 `__REPLACE_WITH`（`openssl rand -base64` 实际不会命中，但闸门本身会兜底）。
-- **验收标准**：
-  - AC① `build.yml` 中**不再出现**任何固定口令字面量；`keytool` 与 `KEYSTORE_PASSWORD`/`KEY_PASSWORD` 使用**同一次**运行时随机值；
-  - AC② 随机口令长度 ≥ 16 且能通过 `app/build.gradle.kts` 发布签名口令闸门（以真实 `assembleRelease` 配置阶段不 `error` 为证）；
-  - AC③ 全仓检索 `keepasskey-ci-ephemeral` 零命中（历史提交除外）；工作流注释同步改为「口令运行时生成、非机密、不可用于发布」口径；
-  - AC④ 若裁决「保留固定值」（例如为可复现构建），须在 [`architecture/产品裁决登记.md`](architecture/产品裁决登记.md) 或 [`architecture/已知工程限界.md`](architecture/已知工程限界.md) 登记取舍与重开条件，**不得静默留白**。
-- **依据**：`.github/workflows/build.yml`（`CI_KEYSTORE_PASSWORD` env 与同 job `keytool` / `GITHUB_ENV` 段）；`app/build.gradle.kts`（`minReleasePasswordLength = 16` / `forbiddenReleasePasswords` / `releasePasswordPlaceholderMarker` 闸门）；`keystore.properties.example`（口令卫生与 re-key 说明）。相关历史：`ISSUE-P2-55`（发布签名弱口令 `keepasskey123`，已 re-key 闭环，见 [`resolved/batches/49-存量安全整改批次-密钥文件纯字节解析.md`](resolved/batches/49-存量安全整改批次-密钥文件纯字节解析.md)）。
-
-### `ISSUE-P3-267`：AES-KDF 的 `S` 未按规格校验 32 字节（恰 16 字节静默按 AES-128 派生，其它非法长度在解锁期抛非类型化异常）
-
-- **核实时间点**：2026-09-22（同 `ISSUE-P2-266` 的格式层核对走查）。
-- **核实方式**：直读 HEAD——① `database/src/main/java/com/keepasskey/database/file/KdbxKdfParameterCodec.kt:158-162`：AES-KDF 分支对 `S` 仅做非空检查（`getByteArray("S") ?: throw`）+ `validateAesKdfBounds(rounds)`（`:261-264`，只查轮数），**长度零校验**；同文件 Argon2 分支 `:170` 有 `validateArgon2SaltBounds`（`ISSUE-P3-78`）⇒ 两侧不对称；② 派生侧 `crypto/src/main/java/com/keepasskey/crypto/kdf/AesKdfJce.kt:33`：`SecretKeySpec(seed)` + `"AES/ECB/NoPadding"`——恰 16 字节 seed 静默实例化为 AES-128，非 16/24/32 字节在解锁期抛 JCE 异常而非 `KdbxCorruptFileException`；③ 外层 Header 的 MasterSeed 有对称先例（`KdbxHeader.kt` `MASTER_SEED_SIZE` 长度 != 32 即拒）。
-- **背景与影响**：规格定 AES-KDF 的 `S` 为 **Byte[32]**。恰 16 字节时按 AES-128 派生——官方客户端不会产出该文件，派生结果必错、表现为「主密码错误」且难排查；其它非法长度的报错不类型化（不走「文件损坏」通道）。属解析期输入校验缺口，非可利用漏洞。
-- **正确的方式（整改方向）**：与 Argon2 盐对称，解析期 `require(seed.size == 32)`，非 32 字节抛 `KdbxCorruptFileException`（消息风格对齐 `validateArgon2SaltBounds`）。
-- **验收标准**：
-  - AC① `KdbxKdfParameterCodec.deserialize` AES-KDF 分支对 `S` 增加 32 字节定长校验，越界即 `KdbxCorruptFileException`；
-  - AC② 新增用例锁定 0 / 16 / 31 / 33 字节均被拒、32 字节通过，**必含**恰 16 字节「静默 AES-128」回归项；
-  - AC③ `.\gradlew.bat test` 全绿。
-- **依据**：`keepass.info/help/kb/kdbx.html`（AES-KDF `S` 为 Byte[32]）；`database/src/main/java/com/keepasskey/database/file/KdbxKdfParameterCodec.kt:158-162, 245-257, 261-264`；`crypto/src/main/java/com/keepasskey/crypto/kdf/AesKdfJce.kt:25-40`。同族先例：Argon2 盐边界校验（`ISSUE-P3-78`）、MasterSeed 定长校验（`KdbxHeader.kt`）。
-
 ### `ISSUE-P3-268`：HMAC 块流读取上限 1 MiB 会拒收「块长 > 1 MiB」的合法 KDBX 文件（规格对块长仅定 Int32）——裁决项
 
 - **核实时间点**：2026-09-22（同 `ISSUE-P2-266` 的格式层核对走查）。
@@ -165,19 +140,17 @@
   - AC② 若后续实测发现确有客户端写出 > 1 MiB 块，本条自动升 P2 重开。
 - **依据**：`keepass.info/help/kb/kdbx.html`（块格式与 1 MiB 惯例表述）；`database/src/main/java/com/keepasskey/database/file/HmacBlockStream.kt:32-39, 110-120, 252-262`。
 
-### `ISSUE-P3-269`：`InnerHeader.kt` 类 KDoc「解密后、GZip 解压前」笔误（真实位置为 GZip 解压**后**）
-
-- **核实时间点**：2026-09-22（同 `ISSUE-P2-266` 的格式层核对走查）。
-- **核实方式**：直读 `database/src/main/java/com/keepasskey/database/file/InnerHeader.kt:22`——KDoc 写「KDBX 4 内层 Header（解密后、GZip 解压前）」；真实载荷顺序为 `decrypt → gunzip → inner header → XML`：读侧 `KdbxFile.loadPayload` 注释与实现一致、写侧 `KdbxFile.kt:429` `innerHeader.serialize(bodyOut)` 中 `bodyOut` 即 gzipOut（内层头写在压缩流之内）——代码正确，KDoc 方向写反。
-- **背景与影响**：纯文档缺陷，不影响行为；但该类是内层头语义的锚点文档，方向写反易误导后续改动（规格明文内层头位于压缩流内）。
-- **验收标准**：
-  - AC① KDoc 改为「解密后、GZip 解压后（位于压缩流之内、XML 之前）」；
-  - AC② 全仓检索「解压前」等反序表述，确认无其它同形笔误；纯文档改动，随批提交。
-- **依据**：`database/src/main/java/com/keepasskey/database/file/InnerHeader.kt:21-23`；`database/src/main/java/com/keepasskey/database/file/KdbxFile.kt:418-430`（`savePayload` 载荷顺序）。
-
 ---
 
-> **本区最近一次归零记录**（2026-09-22 §263 补登 `ISSUE-P3-263`、其后补登 `ISSUE-P3-264` 前）：§262 闭环 `ISSUE-P3-261`，条目正文原样收录批次 §1——全局转场动效
+> **本区最近一次归零记录**（2026-09-22 §264 同批闭环三条，P3 6 → **3 项**）：`ISSUE-P3-267`——AES-KDF 的 `S`
+> 解析期 32 字节定长校验（恰 16 字节曾静默按 AES-128 派生；新增 `AesKdfSeedBoundsTest` 5 例边界用例，走真实字节流）；
+> `ISSUE-P3-265`——CI 签名口令改 job 运行时随机生成（固定字面量 `keepasskey-ci-ephemeral` 移除，
+> `openssl rand -base64 24` 一次生成同供 keytool 与 Gradle）；`ISSUE-P3-269`——`InnerHeader` KDoc
+> 「GZip 解压前」笔误更正（连同 references 架构分析载荷层次图的同形错误一并收口）。
+> 证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md) 与
+> [`resolved/batches/264-AES-KDF种子定长与CI口令卫生及KDoc笔误批次.md`](resolved/batches/264-AES-KDF种子定长与CI口令卫生及KDoc笔误批次.md)。
+>
+> **前次归零记录**（2026-09-22 §263 补登 `ISSUE-P3-263`、其后补登 `ISSUE-P3-264` 前）：§262 闭环 `ISSUE-P3-261`，条目正文原样收录批次 §1——全局转场动效
 > 由「自研 tween 一套 + 主题 Expressive 一套」收敛为**双栏定标**——空间段（位移 / 缩放）走
 > `MaterialTheme.motionScheme` 的 spring（与底栏指示器同族）、效果段（透明度）走官方 shared axis 的
 > **顺序淡化时间轴**（出向 90ms / 入向 210ms 延迟 90ms，35% 阈值以两条不变式锁定）；

@@ -56,8 +56,6 @@ env:
   RUST_TOOLCHAIN: "1.97.1"
   CARGO_NDK_VERSION: "4.1.2"
   CARGO_DENY_VERSION: "0.20.2"
-  # 一次性 CI 签名口令：仅用于 runner 临时生成的测试密钥，非机密、不可用于发布
-  CI_KEYSTORE_PASSWORD: "keepasskey-ci-ephemeral"
 
 jobs:
   # ---------------------------------------------------------------------------
@@ -267,6 +265,13 @@ jobs:
       - name: 生成一次性 CI 测试密钥（**非发布签名**，仅用于校验签名方案）
         run: |
           set -euo pipefail
+          # ISSUE-P3-265：签名口令改为 job 运行时随机生成（openssl rand -base64 24 → 32 字符），
+          # 仓库内不再出现任何固定口令字面量。必须**只生成一次**并同时用于 keytool 的
+          # storepass/keypass 与下方 GITHUB_ENV 导出——分两次随机会使 keystore 口令与
+          # Gradle 读到的口令不一致，签名直接失败。随机值不会命中 app/build.gradle.kts
+          # 口令闸门的黑名单与 __REPLACE_WITH 占位符（长度 32 ≥ 16 亦满足）。
+          # 该口令仅保护 runner 临时目录里的一次性测试密钥：非机密、不可用于发布。
+          CI_KEYSTORE_PASSWORD="$(openssl rand -base64 24)"
           keytool -genkeypair -v \
             -keystore "${RUNNER_TEMP}/ci-release.jks" \
             -storetype PKCS12 -keyalg RSA -keysize 2048 -validity 3650 \

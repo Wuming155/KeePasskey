@@ -41,6 +41,7 @@ import com.keepasskey.database.exception.KdbxCorruptFileException
  * | Argon2 `V` 取值集 | `{0x10, 0x13}`（`MinVersion` / `MaxVersion`） | **{0x10, 0x13}** | 与官方一致 |
  * | AES-KDF `R` 下界 | 1 | **1** | 与官方一致 |
  * | AES-KDF `R` 上界 | 无（规范未封顶） | **2^28** | 本仓封顶（合法偏执配置通常 ≤ 1 亿轮） |
+ * | AES-KDF `S` 长度 | 固定 32 字节（规范 Byte[32]） | **32** | 与规范一致（ISSUE-P3-267；恰 16 字节曾静默按 AES-128 派生） |
  * | Argon2 `I×M` 联合预算 | 无（官方仅逐项校验，见 `AreParametersWeak`） | **2^33 字节·轮** | 本仓封顶（ISSUE-P2-49，**测量锚定**，见下） |
  *
  * **凡标注「本仓更严」的封顶均属 fail-closed 加固**：取值宽于一切合法用户配置
@@ -114,6 +115,15 @@ internal object KdbxKdfParameterCodec {
     private const val AES_KDF_MAX_ROUNDS = 1L shl 28
 
     /**
+     * AES-KDF 种子 `S` 定长：规范定 Byte[32]（ISSUE-P3-267）。
+     *
+     * 恰 16 字节时 `SecretKeySpec(seed)` 会静默按 AES-128 派生——官方客户端不会产出该文件，
+     * 派生结果必错、表现为「主密码错误」且难排查；其余非法长度在派生期才抛非类型化 JCE 异常。
+     * 故解析期即按损坏文件拒绝，与 Argon2 盐边界（[validateArgon2SaltBounds]）对称。
+     */
+    private const val AES_KDF_SEED_BYTES = 32
+
+    /**
      * Argon2 工作量联合预算（`I × M` 上界，单位「字节·轮」）：ISSUE-P2-49 / 审计 F-12。
      *
      * `2^33` 由**真机实测速率锚定**（详见本对象类 KDoc 的「Argon2 `I×M` 联合预算」一节）：
@@ -159,6 +169,7 @@ internal object KdbxKdfParameterCodec {
                 val seed = vd.getByteArray("S") ?: throw KdbxCorruptFileException("AES-KDF 缺少 S 参数")
                 val rounds = vd.getUInt64("R") ?: throw KdbxCorruptFileException("AES-KDF 缺少 R 参数")
                 validateAesKdfBounds(rounds)
+                validateAesKdfSeedBounds(seed.size)
                 KdfParameters.Aes(seed = seed, rounds = rounds)
             }
             KdbxConstants.Kdf.ARGON2D, KdbxConstants.Kdf.ARGON2ID -> {
@@ -261,6 +272,21 @@ internal object KdbxKdfParameterCodec {
     fun validateAesKdfBounds(rounds: Long) {
         if (rounds < 1 || rounds > AES_KDF_MAX_ROUNDS) {
             throw KdbxCorruptFileException("AES-KDF 轮数越界: $rounds（允许 1 ~ $AES_KDF_MAX_ROUNDS）")
+        }
+    }
+
+    /**
+     * AES-KDF 种子 `S` 定长校验（ISSUE-P3-267）：规范定 Byte[32]，非 32 字节即损坏文件。
+     *
+     * 恰 16 字节的文件此前会静默按 AES-128 派生（`SecretKeySpec(seed)`），派生结果必错；
+     * 其余非法长度此前要到派生期才抛非类型化 JCE 异常。二者均应在解析期走
+     * [KdbxCorruptFileException] 的「文件损坏」通道，与 Argon2 盐边界（[validateArgon2SaltBounds]）对称。
+     */
+    fun validateAesKdfSeedBounds(seedLength: Int) {
+        if (seedLength != AES_KDF_SEED_BYTES) {
+            throw KdbxCorruptFileException(
+                "AES-KDF 种子长度非法: $seedLength 字节（规范固定 $AES_KDF_SEED_BYTES 字节）"
+            )
         }
     }
 }

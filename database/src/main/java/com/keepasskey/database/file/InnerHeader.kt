@@ -19,7 +19,7 @@ import java.security.SecureRandom
 private const val INNER_RANDOM_STREAM_KEY_SIZE = 64
 
 /**
- * KDBX 4 内层 Header（解密后、GZip 解压前）
+ * KDBX 4 内层 Header（解密后、GZip 解压后——位于压缩流之内、XML 之前）
  */
 data class InnerHeader(
     val innerRandomStreamId: Int = KdbxConstants.InnerRandomStream.CHACHA20,

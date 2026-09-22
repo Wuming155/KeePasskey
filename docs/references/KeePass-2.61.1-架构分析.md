@@ -286,13 +286,13 @@ KdfEngine (abstract)
 +---------------------------------------------+
 | 数据加密流 (AES-256-CBC / ChaCha20)          |  <- CipherID 决定
 +---------------------------------------------+
-| 内层头（解密后、GZip 解压前）                 |
+| GZip 压缩流（内层头与 XML 都位于压缩流之内）  |
++---------------------------------------------+
+| 内层头（解密后、GZip 解压后，XML 之前）       |
 |  1 InnerRandomStreamID(=ChaCha20)            |
 |  2 InnerRandomStreamKey(64B)                 |
 |  3 Binary*(附件按引用去重, KdbxBinaryFlags)   |
 |  0 EndOfHeader                               |
-+---------------------------------------------+
-| GZip 压缩流                                  |
 +---------------------------------------------+
 | XML 文档 (KeePassFile/Meta/Root/...)         |
 |   受保护值: <Value Protected="True">base64   |
