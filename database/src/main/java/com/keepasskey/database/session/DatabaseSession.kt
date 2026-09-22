@@ -136,7 +136,7 @@ class DatabaseSession(
 
     /**
      * ISSUE-P2-77：换库前置释放——语义与 [lock] 的清理部分**对齐**
-     * （擦除旧库明文树、清空凭据缓存、置 `LOCKED`、通知锁观察者驱逐派生数据），
+     * （擦除旧库明文树与二进制池、清空凭据缓存、置 `LOCKED`、通知锁观察者驱逐派生数据），
      * 但不取互斥锁（由 [SessionOpener] 在其临界区内调用，避免重入死锁）。
      *
      * 触发点：`SessionOpener.create` / `openStream` 在装载新库**之前**调用，
@@ -178,7 +178,8 @@ class DatabaseSession(
      *    不改动任何会话状态（不替换当前库、不写凭据缓存、不改 [state]）；
      * 2. 凭据克隆在 `finally` 中显式清零，与 [useCredentials] 的契约一致；
      * 3. **返回值所有权归调用方**：除「采用为会话库」的情形外，调用方在丢弃返回的
-     *    [KdbxDatabase] 之前**必须**调用 `clearSensitiveData()`（≤ 落盘阈值的附件仍为内联明文）。
+     *    [KdbxDatabase] 之前**必须**调用 `clearSensitiveData()`（≤ 落盘阈值的附件仍为内联明文——
+     *    自 `ISSUE-P3-258` 起该调用一并清零其二进制池）。
      */
     suspend fun parseExternalDatabase(bytes: ByteArray): KdbxResult<KdbxDatabase> =
         withContext(Dispatchers.Default) {
@@ -425,7 +426,7 @@ class DatabaseSession(
     fun exportKeyFileBytes(): ByteArray? = credentials.exportKeyFileBytes()
 
     /**
-     * 锁定当前数据库：保留文件路径引用，但物理销毁内存中的敏感主密码与数据库明文树
+     * 锁定当前数据库：保留文件路径引用，但物理销毁内存中的敏感主密码、数据库明文树与二进制池
      */
     suspend fun lock() = mutex.withLock {
         core.readOnlyMode = false

@@ -233,8 +233,9 @@ class SyncConflictController @Inject constructor(
      * - **会话终止路径**（`SyncCoordinator.onSessionLocked`）：`DatabaseSession.lock()` 已先行擦除
      *   并置空活动树 ⇒ 存活侧为空 ⇒ 全量擦除，冲突待决期解析出的远端整树不再滞留至 GC。
      *
-     * 与池内二进制（`InnerHeader.binaries`）无关：该面属 `已知工程限界.md` §1.6 的既定边界
-     * （准入条件见契约 §6.2），本方法不改动池。
+     * **池内二进制**（`ISSUE-P3-258` / 契约 Step 4 起）：[eraseDiscardedDatabase] 对丢弃库的
+     * `binaries` 同步做**身份集合判定**擦除（存活侧共享的池条目跳过、独立解析池全量清零）——
+     * 本方法由此同时收口 pending 树与 pending 池，不再把 ≤ 落盘阈值的附件明文留给 GC。
      */
     fun clearPendingConflictSession() {
         val live = databaseSession.databaseFlow.value
@@ -322,6 +323,12 @@ class SyncConflictController @Inject constructor(
         decisionConflicts: List<ConflictedEntryPair>,
         remoteEtag: String
     ): SyncOutcome {
+        // ISSUE-P3-258：新一轮待决**覆盖**旧 pending 字段前先按身份集合判定擦除旧会话
+        // （对齐下方 conflictFlow 的覆盖语义）。否则被覆盖的 `pendingRemoteDb` 独立解析树
+        // 与旧 `pendingMergedRoot` 的远端独有节点会在**任何会话终止事件之前**失去唯一持有者，
+        // 树密文与池内附件明文只能等 GC——三事件永远追不上已不可达的对象。
+        // live = 当前活动会话树：旧 `pendingLocalDb` 恒为其实例（或 copy 共享）⇒ 判定护栏不误擦。
+        clearPendingConflictSession()
         _conflictFlow.value = decisionConflicts
         pendingRemoteEngine = syncEngine
         pendingRemotePath = remotePath

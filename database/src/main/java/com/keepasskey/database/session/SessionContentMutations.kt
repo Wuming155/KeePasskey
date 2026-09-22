@@ -118,6 +118,11 @@ internal class SessionContentMutations(
         val updated = transform(currentDb)
         // ISSUE-P2-06：元数据变换同样可能下线旧条目实例，替换前定点擦除
         currentDb.rootGroup.clearSupersededSensitiveData(updated.rootGroup)
+        // ISSUE-P3-258（契约 Step 4）：与树擦除同点收口——换下库的二进制池中，不被新库以同一
+        // `BinaryItem` 实例引用的条目就地清零（copy 形态共享同一池列表 ⇒ 全部跳过；
+        // 远端库整体接管的形态池不相交 ⇒ 旧池全量擦除，不再滞留 GC）。身份集合判定，
+        // 与上方树擦除的存活口径一致，禁止退化为裸 forEach 清池。
+        currentDb.clearBinaryPool(updated.binaries)
         databaseFlow.value = updated
         stateFlow.value = DatabaseSession.SessionState.DIRTY
     }

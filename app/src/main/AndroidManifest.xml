@@ -135,9 +135,10 @@
             android:exported="false"
             android:theme="@style/Theme.KeePasskey" />
 
-        <!-- 传统自动填充链式解锁落地 Activity（认证数据集点选后由系统拉起；解锁成功后链入
-             AutofillPickerActivity 并原样转发其认证结果——框架不会在解锁后自动重发填充请求，
-             故必须由本次认证结果携带真实 Dataset，见 ISSUE-P2-86） -->
+        <!-- 传统自动填充链式解锁落地 Activity（认证数据集点选后由系统拉起；解锁成功后经 PD-05
+             路由链入 AutofillPickerActivity 或 AutofillConfirmActivity 并原样转发其认证结果
+             ——框架不会在解锁后自动重发填充请求，故必须由本次认证结果携带真实 Dataset，
+             见 ISSUE-P2-86 / PD-05 候选 C） -->
         <activity
             android:name=".autofill.AutofillUnlockActivity"
             android:exported="false"

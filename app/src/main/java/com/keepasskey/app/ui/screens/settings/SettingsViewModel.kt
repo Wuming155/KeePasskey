@@ -5,7 +5,6 @@ import android.net.Uri
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.keepasskey.app.R
 import com.keepasskey.app.data.childdb.ChildDatabaseSessionManager
 import com.keepasskey.app.data.importer.ImportSource
 import com.keepasskey.app.data.logger.DebugLogBuffer
@@ -173,7 +172,9 @@ class SettingsViewModel @Inject constructor(
         breachCheckCoordinator = breachCheckCoordinator,
         strings = strings,
         breachCheckEnabled = { extendedPreferences.settings.value.breachCheckEnabled },
-        scope = viewModelScope
+        scope = viewModelScope,
+        // ISSUE-P3-257：开启泄露检测并就地扫描的偏好持久化回调（形态同 extendedPreferences 的 lambda 注入）
+        setBreachCheckEnabled = { extendedPreferences.setBreachCheckEnabled(it) }
     )
 
     private val exportController = SettingsExportController(
@@ -330,35 +331,11 @@ class SettingsViewModel @Inject constructor(
     fun testSyncConnection() = syncController.testSyncConnection()
 
     /**
-     * 「保存并同步」的**顺序编排**：保存已成功 →（未验证时先）测试连接 → 通过则同步。
-     *
-     * 立规缘由：WebDAV / S3 配置页把「保存配置」「测试连接」「立即同步」做成三个独立入口，
-     * 而「立即同步」在未验证连接时禁用（`enabled = !isSyncing && isConnectionVerified`，
-     * 见 `CloudSyncComponents.kt` 的就地注释）⇒ 填完配置想让它生效，最少是
-     * 「保存(1) → 测试连接(2) → 立即同步(3)」三次点击。
-     *
-     * 该守卫**不变**，但由「解锁同步按钮的条件」改为**顺序动作的前置步骤**：
-     * 1. **同步走已保存的配置**——本方法**只**在前一步保存成功后才被调用，且自身不接收任何
-     *    表单实参（凭据 `CharArray` 已在保存时被消费擦除），故不存在「拿表单内存态去同步」的路径；
-     * 2. **已验证则跳过重复测试**，直接同步；
-     * 3. **任一环节失败即停并上浮**：测试未通过时明确提示「已跳过同步」，绝不静默中止；
-     * 4. 忙态（`isSyncing`）由控制器既有守卫拦截，不新增并发面。
+     * 「保存并同步」的**顺序编排**入口：保存已成功 →（未验证时先）测试连接 → 通过则同步。
+     * 实现与「立规缘由」四点守卫随实现体迁于 [SettingsSyncController.verifyConnectionThenSync]
+     * （ISSUE-P3-257 下沉，本侧仅单语句委托，公开 API 形状不变）。
      */
-    fun verifyConnectionThenSync() {
-        val state = syncController.state.value
-        if (state.isSyncing) return
-        if (state.isConnectionVerified) {
-            syncController.triggerSync()
-            return
-        }
-        syncController.testSyncConnection { verified ->
-            if (verified) {
-                syncController.triggerSync()
-            } else {
-                syncController.publishFeedback(UiMessage(R.string.sync_gate_test_failed))
-            }
-        }
-    }
+    fun verifyConnectionThenSync() = syncController.verifyConnectionThenSync()
     fun clearSyncFeedbackMessage() = syncController.clearSyncFeedbackMessage()
 
     // ===== 密码库与加密配置 =====
@@ -435,31 +412,21 @@ class SettingsViewModel @Inject constructor(
 
     // ===== CM 通道：特权浏览器白名单（让 Chrome / Firefox 之外的浏览器也能用通行密钥） =====
 
-    private val privilegedBrowsersState = MutableStateFlow(
-        emptyList<com.keepasskey.app.data.repository.PasskeyPrivilegedBrowserStore.BrowserApp>()
+    /** ISSUE-P3-257：安装扫描 / 启停编排已下沉 [SettingsPrivilegedBrowserController]（store 缺失时恒空，不谎报）。 */
+    private val privilegedBrowserController = SettingsPrivilegedBrowserController(
+        store = passkeyPrivilegedBrowserStore,
+        scope = viewModelScope
     )
 
     /** 已安装浏览器候选 + 启用状态；独立于 [uiState] 下发（避免 combine 元组膨胀）。 */
     val privilegedBrowsers:
-        StateFlow<List<com.keepasskey.app.data.repository.PasskeyPrivilegedBrowserStore.BrowserApp>> =
-        privilegedBrowsersState
+        StateFlow<List<com.keepasskey.app.data.repository.PasskeyPrivilegedBrowserStore.BrowserApp>>
+        get() = privilegedBrowserController.privilegedBrowsers
 
-    /** 重新扫描已安装浏览器（进入设置页时调用；读取失败的应用不会被虚构出来） */
-    fun refreshPrivilegedBrowsers() {
-        val store = passkeyPrivilegedBrowserStore ?: return
-        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            privilegedBrowsersState.value = store.installedBrowsers()
-        }
-    }
+    fun refreshPrivilegedBrowsers() = privilegedBrowserController.refresh()
 
-    /** 启用 / 停用某个浏览器的特权资格（启用时指纹取自该应用自身签名，读取失败则不启用） */
-    fun setPrivilegedBrowserEnabled(packageName: String, enabled: Boolean) {
-        val store = passkeyPrivilegedBrowserStore ?: return
-        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            store.setEnabled(packageName, enabled)
-            privilegedBrowsersState.value = store.installedBrowsers()
-        }
-    }
+    fun setPrivilegedBrowserEnabled(packageName: String, enabled: Boolean) =
+        privilegedBrowserController.setEnabled(packageName, enabled)
 
     // ===== ISSUE-P3-43：保存侧独立黑名单 + 字段签名级屏蔽 =====
     /** 「不再提示保存」名单快照（按包名升序）。 */
@@ -516,27 +483,11 @@ class SettingsViewModel @Inject constructor(
     fun setBreachCheckEnabled(enabled: Boolean) = extendedPreferences.setBreachCheckEnabled(enabled)
 
     /**
-     * 开启泄露检测并**就地扫描一次**。
-     *
-     * 立规缘由：该开关位于健康检查页**最底部**（全部审计行之后），而触发它的「重新扫描」按钮在
-     * 页面**顶部**的评分卡里；而 [setBreachCheckEnabled] 只写偏好、不触发扫描 ⇒ 用户开启后
-     * 开关看着「已开」却什么都没发生，必须自己滚回顶部再点一次才知道结果。
-     *
-     * 安全边界（TASK-47「联网特性显式开关 + 默认关闭」的裁决**不变**）：
-     * 1. **仅开启方向触发**——关闭一律走 [setBreachCheckEnabled]，`breachCheckEnabled()` 为 false 时
-     *    `runBreachCheck` 直接返回 `DISABLED`，**零外联**；
-     * 2. **并发互斥**：`SettingsHealthController.rescanHealth` 首行即以 `isHealthScanning` 早退，
-     *    重复触发不会并发扫描（本方法不另设门控，避免两套状态互不同步）；
-     * 3. **无竞态**：偏好写入经 `ExtendedSettingsStore.publish` **同步发布**到内存设置流，
-     *    紧随其后的扫描读到的一定是新值（不会退化成「开关开了却没联网」）；
-     * 4. **失败如实上浮**：查询失败由控制器转 `BreachCheckStatus.FAILED` 并经 `breachCheckMessage`
-     *    透出，绝不以「已防护」掩盖；
-     * 5. 仍走既有 k-匿名范围查询路径，**不新增**任何明文 / 完整哈希外发面。
+     * 开启泄露检测并**就地扫描一次**入口。
+     * 实现与安全边界五点随实现体迁于 [SettingsHealthController.enableBreachCheckAndScan]
+     * （ISSUE-P3-257 下沉，本侧仅单语句委托，公开 API 形状不变）。
      */
-    fun enableBreachCheckAndScan() {
-        setBreachCheckEnabled(true)
-        healthController.rescanHealth()
-    }
+    fun enableBreachCheckAndScan() = healthController.enableBreachCheckAndScan()
 
     // ===== KP2A 扩展：调试日志 =====
     fun setDebugLogEnabled(enabled: Boolean) = extendedPreferences.setDebugLogEnabled(enabled)

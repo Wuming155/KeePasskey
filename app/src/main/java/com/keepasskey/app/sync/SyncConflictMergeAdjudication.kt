@@ -86,7 +86,8 @@ internal fun decisionConflictsOf(
     }
 
 /**
- * ISSUE-P3-119：丢弃「仅服务本次判定 / 合并、且不被任何存活对象引用」的解析产物前**显式擦除**。
+ * ISSUE-P3-119：丢弃「仅服务本次判定 / 合并、且不被任何存活对象引用」的解析产物前**显式擦除**
+ * （`clearSensitiveData()` 自 `ISSUE-P3-258` 起一并清零该库的二进制池）。
  *
  * 使用前提（**逐点确认，不可套用**）：
  * - 该树的节点**没有**被 [KdbxMerger] 产物或会话库继续引用——合并器对「远端独有 / 本地独有」
@@ -123,11 +124,18 @@ internal fun wipeDiscarded(db: KdbxDatabase?) {
  *
  * [live] 为 null 表示**确无存活别名**（会话终止路径：活动树已被 `DatabaseSession` 先行擦除并置空）
  * ⇒ 全量擦除；[db] 与 [live] 为同一实例时不做任何动作。
+ *
+ * **池内二进制同口径**（`ISSUE-P3-258` 准入② / 契约 Step 4）：除树与头部外，本函数同时对
+ * [db] 的二进制池按**实例身份**判定擦除——跳过被 [live] 以同一 `BinaryItem` 实例引用的条目
+ * （`localDb.copy(...)` 共享同一池列表的形态即由此护栏保住），[live] 为 null 时全量擦池。
+ * 裸 `binaries.forEach { it.clear() }` 会使共享池的存活库拿到全零附件，由
+ * `SyncPendingTreeErasureTest` 的共享池护栏机检。
  */
 internal fun eraseDiscardedDatabase(db: KdbxDatabase, live: KdbxDatabase?) {
     if (db === live) return
     eraseDiscardedGroup(db.rootGroup, live?.rootGroup)
     if (db.header !== live?.header) db.header.kdfParameters.clearSensitive()
+    db.clearBinaryPool(live?.binaries ?: emptyList())
 }
 
 /**

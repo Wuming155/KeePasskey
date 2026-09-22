@@ -40,7 +40,8 @@ import java.io.IOException
  * ## 敏感数据边界
  *
  * - 凭据只经 [ChildDatabaseCredentialStore]（独立通道）取用，副本由该通道自动清零；
- * - 解密树**不做常驻**：投影（非敏感展示字段）生成后立即 `clearSensitiveData()` 定点擦除；
+ * - 解密树**不做常驻**：投影（非敏感展示字段）生成后立即 `clearSensitiveData()` 定点擦除
+ *   （含其二进制池，`ISSUE-P3-258` 起）；
  * - **超过 1 MiB 的附件沿用应用级 `FileBinaryStore` 落盘**（与根库会话同一实例，见
  *   `docs/architecture/已知工程限界.md` §1.1）：池中只留 store key，不再整份明文内联驻留堆。
  *   其清理由**会话锁定 / 关闭**与**冷启动**统一收口（同限界 §1.1 / §1.2 口径），

@@ -99,6 +99,22 @@ data class InnerHeader(
             if (spillKey != null) BinaryItem(newFlags, store!!, spillKey, spilledSize)
             else BinaryItem(newFlags, inlineData)
 
+        /**
+         * 池内擦除（`ISSUE-P3-258` / 契约 Step 4）：就地清零**本实例独占（O 类）**的
+         * 内联字节 [inlineData]（≤ 落盘阈值的附件明文）。
+         *
+         * 落盘条目（[spillKey] 非空）的 [inlineData] 恒为空数组，本方法为安全 no-op——
+         * 其字节归 `BinaryStore` 所有，由会话终止观察者（`FileBinaryStore.onSessionLocked`）统一收口。
+         *
+         * **调用纪律**：本实例可能经 `KdbxDatabase.copy()` 被多个库实例共享（契约 §6.1 判 **S 类**），
+         * 就地清零前必须经身份集合判定确认其不被存活侧引用——唯一合法入口是
+         * `KdbxDatabase.clearBinaryPool`，**禁止**在其它路径直接对池条目调用本方法。
+         * 幂等：重复清零无害。
+         */
+        internal fun clear() {
+            inlineData.fill(0)
+        }
+
         /** 序列化时直接写出（落盘条目流式拷贝，不整份物化）。 */
         internal fun writeTo(outputStream: OutputStream) {
             if (spillKey == null) {
@@ -176,8 +192,9 @@ data class InnerHeader(
      * `savePayload`）。
      *
      * **不得**把本方法与 [innerRandomStreamId] / [binaries] 同等看待：前者是算法标识、
-     * 后者属二进制池（其擦除边界见 `docs/architecture/已知工程限界.md` §1.6），二者均非秘密，
-     * 本方法不触碰。派生自本密钥的引擎内部态（BC `StreamCipher` 的密钥调度）**无法**经公开
+     * 后者的擦除自 `ISSUE-P3-258`（契约 Step 4）起由 `KdbxDatabase.clearSensitiveData` /
+     * `clearBinaryPool` 按身份集合判定收口（评估与边界仍见 `docs/architecture/已知工程限界.md` §1.6），
+     * 本方法只负责内层流密钥、均不在其列。派生自本密钥的引擎内部态（BC `StreamCipher` 的密钥调度）**无法**经公开
      * API 擦除，属本项已声明的残余面。
      *
      * 幂等：重复调用无害。

@@ -12,6 +12,7 @@ import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.core.security.ProtectedString
 import com.keepasskey.crypto.kdf.KdfParameters
+import com.keepasskey.database.file.InnerHeader
 import com.keepasskey.database.file.KdbxDatabase
 import com.keepasskey.database.file.KdbxFile
 import com.keepasskey.database.file.KdbxHeader
@@ -376,6 +377,123 @@ class SyncPendingTreeErasureTest {
             "本地独有条目口令不得被误擦",
             "LocalOnly#pwd",
             adopted.rootGroup.findEntry(UUID_LOCAL_ONLY)!!.fields.getValue(PWD).readString()
+        )
+    }
+
+    // ------------------------------------------------------------------ 池内擦除（ISSUE-P3-258 / 契约 Step 4）
+
+    @Test
+    fun `丢弃库的二进制池按身份集合判定擦除：共享池条目存活、独立池条目清零`() {
+        // P0 护栏：`localDb.copy(...)` 形态下待丢弃库与存活库共享同一 BinaryItem 实例。
+        // 把 eraseDiscardedDatabase 的池擦除退化为裸 `binaries.forEach { it.clear() }` 时，
+        // 下方「共享池条目不得被擦」断言必红（反向反校 #2 的锚点）。
+        val sharedItem = InnerHeader.BinaryItem(0, ByteArray(4) { 0x11 })
+        val live = KdbxDatabase(
+            header = headerWithSecret(),
+            rootGroup = KdbxGroup(name = "Root"),
+            binaries = listOf(sharedItem)
+        )
+        val ownItem = InnerHeader.BinaryItem(0, ByteArray(4) { 0x22 })
+        val discarded = live.copy(
+            rootGroup = KdbxGroup(name = "Root"),
+            binaries = listOf(sharedItem, ownItem)
+        )
+
+        eraseDiscardedDatabase(discarded, live)
+
+        assertArrayEquals(
+            "P0 护栏：被存活侧以同一实例引用的池条目绝不可被清零（裸擦实现即红）",
+            ByteArray(4) { 0x11 },
+            sharedItem.data
+        )
+        assertTrue(
+            "待丢弃库独有的池条目必须清零（否则池明文滞留 GC，改动退化为空）",
+            ownItem.data.all { it == 0.toByte() }
+        )
+        assertArrayEquals("存活侧的池不受影响", ByteArray(4) { 0x11 }, live.binaries.single().data)
+    }
+
+    @Test
+    fun `存活侧为空时丢弃库的二进制池全量擦除（会话终止路径）`() {
+        val item = InnerHeader.BinaryItem(0, ByteArray(4) { 0x33 })
+        val discarded = KdbxDatabase(
+            header = headerWithSecret(),
+            rootGroup = KdbxGroup(name = "Root"),
+            binaries = listOf(item)
+        )
+
+        eraseDiscardedDatabase(discarded, null)
+
+        assertTrue("无存活别名 ⇒ 池内附件明文全量清零", item.data.all { it == 0.toByte() })
+    }
+
+    @Test
+    fun `丢弃库与存活库为同一实例时池不做任何动作`() {
+        val item = InnerHeader.BinaryItem(0, ByteArray(4) { 0x44 })
+        val db = KdbxDatabase(
+            header = headerWithSecret(),
+            rootGroup = KdbxGroup(name = "Root"),
+            binaries = listOf(item)
+        )
+
+        eraseDiscardedDatabase(db, db)
+
+        assertArrayEquals("同一实例绝不可被擦", ByteArray(4) { 0x44 }, item.data)
+    }
+
+    @Test
+    fun `新一轮待决覆盖旧 pending：旧远端树随覆盖被擦除而不是滞留等 GC`() = runTest(testDispatcher) {
+        // 覆盖形态：冲突待决期内再次进入 beginPendingConflict（周期重入 / 策略变化后的再检测）。
+        // 整改前旧 pending 字段被直接覆盖——旧远端解析树在**任何会话终止事件之前**即失去
+        // 唯一持有者，树密文与池明文只能等 GC（三事件追不上已不可达的对象）。
+        // 树侧可由 conflictFlow 外泄的 remoteEntry 观测；池侧与树同点收口
+        // （clearPendingConflictSession → eraseDiscardedDatabase），由上方池原语用例锁定。
+        val workDir = File(tempFolder.root, "overwrite-pending").apply { mkdirs() }
+        val (session, fixture) = buildFixture(workDir, conflicting = true)
+        val controller = controllerFor(session)
+        val engine = engineFor(workDir, fixture.remoteBytes)
+
+        val firstOutcome = controller.handleConflictMerge(
+            syncEngine = engine,
+            syncCache = SyncCache(File(workDir, "cache").apply { mkdirs() }),
+            remotePath = "/remote/overwrite.kdbx",
+            localBytes = fixture.localBytes,
+            remoteBytes = fixture.remoteBytes,
+            baseSnapshotBytes = fixture.baseBytes,
+            remoteEtag = "etag-1",
+            strategy = SyncConflictStrategy.AUTO_MERGE,
+            localDbOverride = session.databaseFlow.value
+        )
+        assertTrue("前提：第一次必须进入待决: $firstOutcome", firstOutcome is SyncOutcome.ConflictNeedsUser)
+        val firstRemotePassword = controller.conflictFlow.value.single().remoteEntry.fields.getValue(PWD)
+        assertEquals("前提：第一次待决远端树字段可读", "Remote#3", firstRemotePassword.readString())
+
+        val secondOutcome = controller.handleConflictMerge(
+            syncEngine = engine,
+            syncCache = SyncCache(File(workDir, "cache").apply { mkdirs() }),
+            remotePath = "/remote/overwrite.kdbx",
+            localBytes = fixture.localBytes,
+            remoteBytes = fixture.remoteBytes,
+            baseSnapshotBytes = fixture.baseBytes,
+            remoteEtag = "etag-2",
+            strategy = SyncConflictStrategy.AUTO_MERGE,
+            localDbOverride = session.databaseFlow.value
+        )
+        assertTrue("前提：第二次也必须进入待决（覆盖旧字段）: $secondOutcome", secondOutcome is SyncOutcome.ConflictNeedsUser)
+
+        assertTrue(
+            "覆盖旧 pending 前必须先按身份集合判定擦除旧远端树（只覆盖不擦即红）",
+            firstRemotePassword.isCleared()
+        )
+        val secondRemotePassword = controller.conflictFlow.value.single().remoteEntry.fields.getValue(PWD)
+        assertEquals(
+            "新一轮待决自身的远端树不得被误擦",
+            "Remote#3",
+            secondRemotePassword.readString()
+        )
+        assertTrue(
+            "活动库不得被覆盖清理波及",
+            session.databaseFlow.value!!.snapshotTree().contains("Local#2")
         )
     }
 

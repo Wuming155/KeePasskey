@@ -17,7 +17,8 @@ import kotlinx.coroutines.launch
 /**
  * TASK-21 拆分：设置页「云端多协议同步」状态控制器。
  * 持有同步状态流与凭据明文一次性预填通道，承接凭据恢复、配置保存（Wave 14/15 语义）、
- * 手动同步 / 连接测试与反馈文案生成；ViewModel 仅做委托转发。
+ * 手动同步 / 连接测试、「保存并同步」顺序编排与反馈文案生成；ViewModel 仅做委托转发
+ * （顺序编排随 ISSUE-P3-257 自 ViewModel 下沉，KDoc 立规缘由随函数整体迁入本类）。
  */
 internal class SettingsSyncController(
     private val syncCredentialsStore: SyncCredentialsStore,
@@ -356,6 +357,39 @@ internal class SettingsSyncController(
      */
     fun publishFeedback(message: UiMessage) {
         syncStateFlow.update { it.copy(syncFeedbackMessage = message) }
+    }
+
+    /**
+     * 「保存并同步」的**顺序编排**：保存已成功 →（未验证时先）测试连接 → 通过则同步。
+     *
+     * 立规缘由：WebDAV / S3 配置页把「保存配置」「测试连接」「立即同步」做成三个独立入口，
+     * 而「立即同步」在未验证连接时禁用（`enabled = !isSyncing && isConnectionVerified`，
+     * 见 `CloudSyncComponents.kt` 的就地注释）⇒ 填完配置想让它生效，最少是
+     * 「保存(1) → 测试连接(2) → 立即同步(3)」三次点击。
+     *
+     * 该守卫**不变**，但由「解锁同步按钮的条件」改为**顺序动作的前置步骤**：
+     * 1. **同步走已保存的配置**——本方法**只**在前一步保存成功后才被调用，且自身不接收任何
+     *    表单实参（凭据 `CharArray` 已在保存时被消费擦除），故不存在「拿表单内存态去同步」的路径；
+     * 2. **已验证则跳过重复测试**，直接同步；
+     * 3. **任一环节失败即停并上浮**：测试未通过时明确提示「已跳过同步」，绝不静默中止；
+     * 4. 忙态（`isSyncing`）由控制器既有守卫拦截，不新增并发面。
+     *
+     * ISSUE-P3-257：实现体随 KDoc 自 `SettingsViewModel` 整体下沉，公开 API 形状不变。
+     */
+    fun verifyConnectionThenSync() {
+        val state = syncStateFlow.value
+        if (state.isSyncing) return
+        if (state.isConnectionVerified) {
+            triggerSync()
+            return
+        }
+        testSyncConnection { verified ->
+            if (verified) {
+                triggerSync()
+            } else {
+                publishFeedback(UiMessage(R.string.sync_gate_test_failed))
+            }
+        }
     }
 
     fun clearSyncFeedbackMessage() {

@@ -129,8 +129,18 @@ class OneTapInteractionWiringTest {
             "导航层必须在开启分支调用「开启并扫描」而非只写偏好",
             navGraph.contains("enableBreachCheckAndScan")
         )
-        val body = functionBody(viewModel, "fun enableBreachCheckAndScan()")
-        assertTrue("必须先写偏好再扫描（顺序不可倒置）", body.contains("setBreachCheckEnabled(true)"))
+        // ISSUE-P3-257：实现体已下沉至健康控制器，ViewModel 侧只准保留单语句委托
+        assertTrue(
+            "ViewModel 必须收为单语句委托（ISSUE-P3-257 不得新增含实现体的成员）",
+            viewModel.contains("fun enableBreachCheckAndScan() = healthController.enableBreachCheckAndScan()")
+        )
+        val body = functionBody(healthController, "fun enableBreachCheckAndScan()")
+        val persistAt = body.indexOf("setBreachCheckEnabled(true)")
+        assertTrue("必须先写偏好（持久化回调缺失即红）", persistAt >= 0)
+        assertTrue(
+            "必须先写偏好再扫描（顺序不可倒置）",
+            persistAt < body.indexOf("rescanHealth()")
+        )
         assertTrue("必须触发扫描", body.contains("rescanHealth()"))
         assertTrue(
             "扫描互斥守卫（isHealthScanning 早退）不得移除——自动触发路径依赖它防并发",
@@ -169,9 +179,14 @@ class OneTapInteractionWiringTest {
             "编排入口不得接收表单实参（凭据 CharArray 已在保存时消费擦除）",
             viewModel.contains("fun verifyConnectionThenSync()")
         )
+        // ISSUE-P3-257：实现体已下沉至同步控制器，ViewModel 侧只准保留单语句委托
         assertTrue(
-            "守卫语义必须保留：未验证连接时不得直接同步",
-            functionBody(viewModel, "fun verifyConnectionThenSync()").contains("isConnectionVerified")
+            "ViewModel 必须收为单语句委托（ISSUE-P3-257 不得新增含实现体的成员）",
+            viewModel.contains("fun verifyConnectionThenSync() = syncController.verifyConnectionThenSync()")
+        )
+        assertTrue(
+            "守卫语义必须保留：未验证连接时不得直接同步（实现体在 [SettingsSyncController]）",
+            functionBody(controller, "fun verifyConnectionThenSync()").contains("isConnectionVerified")
         )
     }
 

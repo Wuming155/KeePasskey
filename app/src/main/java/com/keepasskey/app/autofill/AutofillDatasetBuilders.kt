@@ -73,13 +73,15 @@ private const val AUTH_REQUEST_CODE_BASE = 100
 /**
  * 库已锁定时构建解锁引导数据集。
  *
- * ISSUE-P2-86：认证入口指向 [AutofillUnlockActivity]，该页解锁成功后**链入选择器**
- * （[AutofillPickerActivity]）并原样转发其认证结果——选择器经
- * `AutofillManager.EXTRA_AUTHENTICATION_RESULT` 回传真实 [Dataset]，是本应用内
- * **唯一**经真机验证可用的交付路径。因此基 Intent 必须按选择器所需的上下文补齐 extras。
+ * ISSUE-P2-86：认证入口指向 [AutofillUnlockActivity]，该页解锁成功后经 **PD-05 路由**
+ * （[AutofillUnlockRouter]，候选 C：唯一强匹配且调用方已绑定 ⇒ 链 [AutofillConfirmActivity]，
+ * 否则维持链 [AutofillPickerActivity]）完成交付，并原样转发落地页的认证结果——两条链路都经
+ * `AutofillManager.EXTRA_AUTHENTICATION_RESULT` 回传真实 [Dataset]，均为本应用内
+ * 经真机验证可用的交付路径。因此基 Intent 必须按选择器所需的上下文补齐 extras
+ * （路由判据的输入亦取自同一批 extras）。
  *
- * @param callingPkg 调用方包名（下发选择器，用于归属展示与首次绑定写入）
- * @param webDomain 表单**自报**域（下发选择器，用于字段级屏蔽签名；可为 null）
+ * @param callingPkg 调用方包名（下发解锁页，用于路由归属展示与绑定状态判定）
+ * @param webDomain 表单**自报**域（下发解锁页，解锁后经归属校验再参与匹配；可为 null）
  * @return 库锁定时返回仅含解锁引导数据集的响应；库已解锁时返回 null（由调用方继续走已解锁分支）
  */
 internal fun KeePasskeyAutofillService.buildLockedUnlockDataset(

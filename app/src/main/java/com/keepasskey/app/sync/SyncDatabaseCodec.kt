@@ -67,7 +67,9 @@ class SyncDatabaseCodec @Inject constructor(
     suspend fun loadAndApplyRemoteBytes(remoteBytes: ByteArray): Boolean {
         val remoteDb = parseKdbxBytes(remoteBytes) ?: return false
         // 注意：解析产物在此**采用为会话库**，其所有权随之下移给会话的生命周期管理，
-        // 故此处**不得**调用 clearSensitiveData()（会连带擦掉活动库的内容）。
+        // 故此处**不得**调用 clearSensitiveData()（会连带擦掉活动库的内容——含二进制池）。
+        // 被替换下线的旧库由 updateDatabaseMeta 在同一收口点按身份集合判定擦除树与池
+        // （`ISSUE-P3-258`）。
         databaseSession.updateDatabaseMeta { remoteDb }
         return databaseSession.save() is KdbxResult.Success
     }

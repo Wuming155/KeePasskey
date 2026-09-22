@@ -32,7 +32,14 @@ internal class SettingsHealthController(
     private val breachCheckCoordinator: BreachCheckCoordinator,
     private val strings: StringsProvider,
     private val breachCheckEnabled: () -> Boolean,
-    private val scope: CoroutineScope
+    private val scope: CoroutineScope,
+    /**
+     * 「开启泄露检测并就地扫描」的偏好持久化通道（由 ViewModel 注入
+     * `extendedPreferences.setBreachCheckEnabled`，形态同其 `persistLockWhenScreenOff` 的
+     * lambda 注入；ISSUE-P3-257 下沉时新增）。默认空实现仅为既有单测构造点兼容，
+     * 生产接线由 `SettingsThinOrchestrationTest` / `OneTapInteractionWiringTest` 锁定。
+     */
+    private val setBreachCheckEnabled: (Boolean) -> Unit = {}
 ) {
 
     internal data class HealthCheckUiState(
@@ -155,6 +162,32 @@ internal class SettingsHealthController(
                 }
             }
         }
+    }
+
+    /**
+     * 开启泄露检测并**就地扫描一次**。
+     *
+     * 立规缘由：该开关位于健康检查页**最底部**（全部审计行之后），而触发它的「重新扫描」按钮在
+     * 页面**顶部**的评分卡里；而 [setBreachCheckEnabled] 只写偏好、不触发扫描 ⇒ 用户开启后
+     * 开关看着「已开」却什么都没发生，必须自己滚回顶部再点一次才知道结果。
+     *
+     * 安全边界（TASK-47「联网特性显式开关 + 默认关闭」的裁决**不变**）：
+     * 1. **仅开启方向触发**——关闭一律走 [setBreachCheckEnabled]，`breachCheckEnabled()` 为 false 时
+     *    `runBreachCheck` 直接返回 `DISABLED`，**零外联**；
+     * 2. **并发互斥**：`SettingsHealthController.rescanHealth` 首行即以 `isHealthScanning` 早退，
+     *    重复触发不会并发扫描（本方法不另设门控，避免两套状态互不同步）；
+     * 3. **无竞态**：偏好写入经 `ExtendedSettingsStore.publish` **同步发布**到内存设置流，
+     *    紧随其后的扫描读到的一定是新值（不会退化成「开关开了却没联网」）；
+     * 4. **失败如实上浮**：查询失败由控制器转 `BreachCheckStatus.FAILED` 并经 `breachCheckMessage`
+     *    透出，绝不以「已防护」掩盖；
+     * 5. 仍走既有 k-匿名范围查询路径，**不新增**任何明文 / 完整哈希外发面。
+     *
+     * ISSUE-P3-257：实现体随 KDoc 自 `SettingsViewModel` 整体下沉，公开 API 形状不变；
+     * [setBreachCheckEnabled] 即原 ViewModel 侧同一偏好 setter 的持久化回调。
+     */
+    fun enableBreachCheckAndScan() {
+        setBreachCheckEnabled(true)
+        rescanHealth()
     }
 
     /**
