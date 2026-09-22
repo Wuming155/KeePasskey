@@ -65,11 +65,11 @@
    - 交叉验证：[`KeePassXC-架构分析.md`](../references/KeePassXC-架构分析.md) 的 **第 4 节「format 模块：KDBX 序列化管线」** 与 **第 10.2 节「原子保存」**。
 
 ### 阶段 3：生物识别与防御性安全加固
-- 阅读：[`KeePassDX-架构分析.md`](../references/KeePassDX-架构分析.md) 的 **第 6.4 节「生物识别解锁流程」** 与 **第 8 节「安全防护策略」**；
-- 阅读：[`Monica-架构分析.md`](../references/Monica-架构分析.md) 的 **第 6 节「安全与凭据保护」**。
+- 阅读：[`KeePassDX-架构分析.md`](../references/KeePassDX-架构分析.md) 的 **第 6.5 节「生物识别 / 设备凭据封装（直接对标 KeePasskey 需求）」** 与 **第 8.2 节「值得移植的模式（按优先级）」**；
+- 阅读：[`Monica-架构分析.md`](../references/Monica-架构分析.md) 的 **第 2.5 节「加密与密钥管理（SecurityManager & KeyStore）」**。
 
 ### 阶段 4：通行密钥（Passkey）与 Credential Manager 自动填充
-- 重点阅读：[`KeePassDX-架构分析.md`](../references/KeePassDX-架构分析.md) 的 **第 6.5 节「凭据提供服务（CredentialProviderService 与 WebAuthn/Passkey）」**；
+- 重点阅读：[`KeePassDX-架构分析.md`](../references/KeePassDX-架构分析.md) 的 **第 6.6 节「Autofill、Magikeyboard、Credential Provider（通行密钥）」**；
 - 重点阅读：[`keepass2android-架构分析.md`](../references/keepass2android-架构分析.md) 的 **第 7 节「Autofill 框架与输入法填充」**；
 - 数据模型对照：[`KeePassXC-架构分析.md`](../references/KeePassXC-架构分析.md) 的 **第 8 节「browser 与 proxy 模块」**（`KPEX_PASSKEY_*` 属性 schema、CBOR attestation/assertion 构造）。
 

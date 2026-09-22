@@ -403,6 +403,11 @@ Phase 5  Final Board → 最终裁决 + Finding Matrix + 修复优先级 + 验�
 - `[V]` `app/src/main/java/com/keepasskey/app/passkey/` 下 `RuntimeIntegrityGate` **零命中**；
   全仓门控消费点仅 `MainApplication` / `KeePasskeyAutofillService` / `BiometricAuthManager`。
 - `[V]` CM / Passkey 通道 `BiometricPrompt` **未绑 `CryptoObject`**（自动填充通道**已绑**且可行）。
+  **更正注（2026-09-22 / §259）**：该句为本轮复核时点的快照，**现已不成立**——`ISSUE-P2-76` 已随 §48 闭环，
+  `app/src/main/java/com/keepasskey/app/passkey/CredentialVerificationLauncher.kt` 现以
+  `prepareAutofillAuthCipher()` + `BiometricPrompt.CryptoObject` 发起，且须
+  `AutofillAuthBindingPolicy.isBound`（Success 且携带绑定 Cipher）双条件方予放行；
+  下方 §10 Fix 项与 §12 断言表中的 `P2-76` 相应按已闭环读。本节其余口径未逐条复核。
 - **⚠️ 排期硬约束（本轮最重要结论之一）**：`P2-53` 与 `P2-63` **互为前提**——
   若 `P2-53` 的收口点取 `currentEnforcement()`（**非 suspend，最省事的接法**），
   修复会被 `P2-63`（非 suspend 路径不感知启动后注入）**完全抵消**。**必须同批修。**
