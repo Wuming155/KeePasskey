@@ -35,6 +35,13 @@
 
 ---
 
+> **本区近期变动**：§257 闭环 `ISSUE-P1-242`（生物识别快速解锁恒被断言门控拒绝——断言私钥**读路径**每次删钥重建 ⇒
+> 新公钥与已登记记录脱钩 ⇒ 每一次快速解锁都 fail-closed；与 `ISSUE-P1-09` 的「`setUserAuthenticationParameters`
+> 单独调用不生效」API 陷阱同源，双设备实测判红 / 判绿对照见批次正文）——证据见
+> [RESOLVED_LOG.md](RESOLVED_LOG.md) 与
+> [`resolved/batches/257-生物识别断言密钥形态修复批次.md`](resolved/batches/257-生物识别断言密钥形态修复批次.md)。
+> （本条为本次诊断中当场发现、当场闭环，**未在待办区驻留**，故本区计数不变，仍为 0 项。）
+
 > **本区近期变动**：§244 闭环 `ISSUE-P1-238`（release 生产包真机 10 轮冷启动应答实测：
 > `Start proc` → `onBeginCreateCredentialRequest` 最小 185 / 最大 247 / 中位 213 ms，
 > 10/10 零超时，AC①~⑤ 全部满足；debug 无 odex 的平台属性按 AC⑤ 口径保持登记）——证据见

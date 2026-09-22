@@ -186,17 +186,16 @@ class KeystoreManager @Inject constructor(
     /**
      * 获取或生成设备绑定「解锁通行密钥」ES256（P-256 ECDSA）密钥对（TASK-18）。
      *
-     * 私钥生成于 Keystore 硬件内（StrongBox 优先，回退 TEE），**不可导出**；
-     * ISSUE-P1-09：私钥**绑定强生物识别用户认证**（认证时间窗
-     * [UNLOCK_PASSKEY_AUTH_VALIDITY_SECONDS] 内方可签名）——快速解锁流程中
-     * BiometricPrompt（Class 3 强生物识别）授权解封后，同一认证事件的时间窗内
-     * 即可完成断言签名；窗口外签名抛 UserNotAuthenticatedException，由调用方
-     * fail-closed 拒绝（认证门控由封印密钥承担，断言承担凭据持有性证明与
-     * signCount 防克隆，且不再存在「无认证即签名」的密钥形态）。
+     * 私钥生成于 Keystore 硬件内（StrongBox 优先，回退 TEE），**不可导出**；规格（含
+     * 「**不**要求用户认证」）由 [UnlockPasskeyKeyPolicy] 单点声明。快速解锁的认证闸门是
+     * **封印密钥**（per-operation 强生物识别 + `BiometricPrompt.CryptoObject` 密码学绑定），
+     * 断言私钥只承担凭据持有性证明、signCount 反克隆与登记记录防篡改。
      *
-     * 兼容轮换：旧规范（未绑定用户认证）的存量私钥一经发现立即删除重建——
-     * 新私钥公钥与已登记记录不再匹配，断言验证 fail-closed，用户以主密码完整
-     * 解锁后自动重新登记，杜绝旧密钥永久游离于认证门控之外。
+     * 读路径**不做规格探测、不轮换**：命中既有别名即原样返回（公钥 + 私钥）；轮换只在
+     * [UnlockPasskeyManager.enroll] 的「删别名 → 重建 → 重写登记记录」序列内。
+     * `ISSUE-P1-242` 的故障恰是读路径轮换：其探测前提（私钥已绑定用户认证）在本仓的密钥形态下
+     * 恒不成立 ⇒ 每次断言都删钥重建 ⇒ 新公钥与既有登记记录脱钩 ⇒ 每一次快速解锁都被断言门控
+     * fail-closed 拒绝（用户可见「快速解锁凭据校验未通过」）。
      */
     @Synchronized
     fun getOrCreateUnlockPasskeyPair(alias: String): KeyPair? {
@@ -233,13 +232,6 @@ class KeystoreManager @Inject constructor(
          * 现由设备凭据绑定密钥取代；常量仅供 BiometricCredentialStorage 启动期清理旧别名，不再生成新密钥。
          */
         const val LEGACY_QUICK_UNLOCK_KEY_ALIAS = "com.keepasskey.quick_unlock_key"
-
-        /**
-         * 解锁通行密钥断言签名的强生物识别认证时间窗（秒，ISSUE-P1-09）。
-         * 快速解锁流程内 BiometricPrompt 授权解封后立即执行断言签名，30s 窗口
-         * 覆盖正常流程；窗口外签名抛 UserNotAuthenticatedException，fail-closed。
-         */
-        const val UNLOCK_PASSKEY_AUTH_VALIDITY_SECONDS = 30
 
         /** 解锁通行密钥登记记录防篡改 HMAC 密钥别名（ISSUE-P1-09） */
         const val UNLOCK_PASSKEY_INTEGRITY_KEY_ALIAS = "com.keepasskey.unlock_passkey_integrity"

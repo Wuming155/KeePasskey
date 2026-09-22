@@ -40,11 +40,11 @@ sealed interface UnlockPasskeyGate {
 /**
  * 设备绑定「解锁通行密钥」管理器（TASK-18 / ISSUE-P1-09 fail-closed 化）。
  *
- * 快速解锁语义：主密码封印（AES-256-GCM，生物识别/锁屏凭据门控）之外，
- * 叠加一层 WebAuthn 形态的本地通行密钥断言——
+ * 快速解锁语义：主密码封印（AES-256-GCM，强生物识别 per-operation 门控 + `CryptoObject`
+ * 密码学绑定）之外，叠加一层 WebAuthn 形态的本地通行密钥断言——
  * - 登记：成功主密码解锁后，生成硬件内不可导出的 ES256（P-256 ECDSA）密钥对
- *   （StrongBox 优先），私钥**绑定强生物识别用户认证**（认证时间窗内方可签名，
- *   见 [KeystoreManager.getOrCreateUnlockPasskeyPair]）；公钥与随机 credentialId
+ *   （StrongBox 优先），**不绑定用户认证**（认证闸门由封印密钥承担；该形态与理由见
+ *   [UnlockPasskeyKeyPolicy] KDoc）；公钥与随机 credentialId
  *   经防篡改 HMAC 封存于应用私有存储；
  * - 解锁：生物识别授权解封成功后，验证方生成一次性随机 challenge，硬件私钥对
  *   AuthenticatorData（rpIdHash + UP 标志 + signCount）|| SHA-256(clientDataJSON)
@@ -57,7 +57,8 @@ sealed interface UnlockPasskeyGate {
  *
  * 诚实边界：验证方与证明方同进程同存储，本断言不构成第二因素；其价值在于
  * 持有性证明 + signCount 反克隆 + 记录防篡改抬高攻击门槛（文件级写入 / ADB
- * 备份恢复无法重算 HMAC），并使记录被删路径显式可见。
+ * 备份恢复无法重算 HMAC），并使记录被删路径显式可见。断言私钥不绑定用户认证的
+ * 后果边界见 [UnlockPasskeyKeyPolicy]。
  */
 @Singleton
 class UnlockPasskeyManager @Inject constructor(

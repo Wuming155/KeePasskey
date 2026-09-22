@@ -118,10 +118,11 @@ internal class BiometricUnlockCoordinator(
     /**
      * 解锁通行密钥断言验证（TASK-18 / ISSUE-P1-09 fail-closed 化）。
      *
-     * 每次快速解锁生成一次性随机 challenge，要求硬件私钥（已绑定强生物识别认证
-     * 时间窗）对 AuthenticatorData || SHA-256(clientDataJSON) 签名，并本地复核
+     * 每次快速解锁生成一次性随机 challenge，要求硬件私钥对
+     * AuthenticatorData || SHA-256(clientDataJSON) 签名，并本地复核
      * clientDataJSON 规范性（type/challenge/origin）、rpIdHash 归属与 signCount
-     * 严格单调。
+     * 严格单调。私钥不绑定用户认证——认证闸门是封印密钥（per-operation +
+     * `CryptoObject` 密码学绑定），理由见 [UnlockPasskeyKeyPolicy]。
      *
      * 未登记（记录被删/被篡改/未登记，[UnlockPasskeyGate.NotEnrolled]）与硬件
      * 签名失败一律 fail-closed——清除封印凭据与通行密钥登记（视为凭据被克隆/
