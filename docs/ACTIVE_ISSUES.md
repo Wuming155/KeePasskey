@@ -41,7 +41,7 @@
 
 ---
 
-## P2 中危缺陷与协议/测试缺口（1 项）
+## P2 中危缺陷与协议/测试缺口（2 项）
 
 ### `ISSUE-P2-254`：通行密钥交互链路三项端到端验证缺口（github.com 手工冒烟未执行 / PRF 未对真实 RP 对拍 / CM 选择器 UI 未覆盖）
 
@@ -55,6 +55,19 @@
   - AC④ 三项完成后同步收口 `architecture/实现约定与验证现状.md` §4.3 与限界 §4.3 存根的对应边界句（原句保留作留痕）并归档本条。任一项若裁决「不做」，必须以限界 / 产品裁决登记承接。
 - **依据**：`docs/records/通行密钥互操作对拍记录_2026-09-19.md` §6；`docs/architecture/实现约定与验证现状.md` §4.3；`docs/resolved/batches/220-通行密钥互操作对拍与Ed25519-PKCS8形态整改批次.md`（结案如实声明）；同类「逐条收口」先例 `docs/resolved/batches/242-凭据链路未验证项逐条收口批次.md`。
 
+### `ISSUE-P2-266`：新建库写侧声明 KDBX 4.0（`0x00040000`）却写出 6 项 4.1 专有 XML 字段（SettingsChanged / MasterKeyChangeForceOnce / CustomData Item LastModificationTime / CustomIcon Name·LastModificationTime / Entry QualityCheck）
+
+- **核实时间点**：2026-09-22（对照 `keepass.info/help/kb/kdbx.html` 的格式层核对走查）。
+- **核实方式**：直读 HEAD——① `core/src/main/java/com/keepasskey/core/model/KdbxConstants.kt:32` 仅 `VERSION_4_0 = 0x00040000`，全仓无 `0x00040001` 版本常量（`ISSUE-P3-126③` 曾显式删除死常量 `VERSION_4_1`）；② 新建库路径 `database/src/main/java/com/keepasskey/database/session/SessionOpener.kt:69` → `KdbxHeader.createDefault()`，而 `KdbxHeader.kt:48` 默认 `version = VERSION_4_0`；③ 写出侧 6 处 4.1 字段逐一确认：`KdbxXmlMetaSerializer.kt:30-32`（`SettingsChanged`）、`:63-65`（`MasterKeyChangeForceOnce`）、`:77-89`（CustomIcon `Name` / `LastModificationTime`）、`:128-131`（CustomData Item `LastModificationTime`）、`KdbxXmlEntrySerializer.kt:46-47`（Entry `QualityCheck`），且各处 KDoc 均自陈「KDBX 4.1 追加字段」；④ 边界澄清：已存在的 4.1 库往返**保留**原版本——`KdbxHeader.deserialize` 经 `toHeader(sig1, sig2, version)`（`KdbxHeader.kt:409-412`）原样传入读到的 version，`KdbxFile.save` 的 `database.header.copy(...)`（`KdbxFile.kt:373`）不重置 version ⇒ 缺陷面仅限**新建库**；⑤ `SettingsUiState.kt:237` 注释「写侧恒为 4.0」表述不精确（只对新建场景成立），随本条一并修正。
+- **背景与影响**：规格明文「For KDBX 4.1, the format version value is `0x00040001`」。新建库声明 4.0 却夹带 4.1 元素：严格客户端可能丢弃未知元素或告警（规格仅对 minor **更大**的文件建议「可忽略未知项」，对本仓这种「声明小、夹带大」无宽容承诺）；经 4.0 严格客户端往返时，4.1 元数据可能被静默丢掉。读取侧「仅校验 major」策略（`KdbxHeader.validateVersion`）不受影响、不动。
+- **正确的方式（整改方向）**：凡写出任一 4.1 XML 字段，format version 写 `0x00040001`——推荐**新建库直接恒写 4.1**（官方 KeePass 2.53+ / KeePassXC 新写文件即 4.1，既有读取路径对 4.0 / 4.1 完全一致，见 `ISSUE-P3-126③` 声明）；或条件化「写了 4.1 字段才升版本」。读取侧继续只校验 major。
+- **验收标准**：
+  - AC① 写出侧不再存在「声明 4.0 且含 4.1 字段」的文件：新建库保存后外层 header version 字段为 `0x00040001`（或写出内容不含任何 4.1 专属元素——二选一，须留证）；
+  - AC② 官方语料与互操作对拍回归全绿：`OwnProductInteropProbeTest` + `python tools/kdbx-corpus/generate_corpus.py --check`；
+  - AC③ `SettingsUiState.kt` 相关注释口径随裁决同步修正；
+  - AC④ 若裁决「维持 4.0 版本号不动」，须在 [`architecture/产品裁决登记.md`](architecture/产品裁决登记.md) 或 [`architecture/已知工程限界.md`](architecture/已知工程限界.md) 登记取舍与重开条件，**不得静默留白**。
+- **依据**：`keepass.info/help/kb/kdbx.html`（KDBX 4.1 版本值与追加元素清单）；`core/src/main/java/com/keepasskey/core/model/KdbxConstants.kt:32`；`database/src/main/java/com/keepasskey/database/file/KdbxHeader.kt:48, 277-282, 409-412`；`database/src/main/java/com/keepasskey/database/file/KdbxFile.kt:373`；`database/src/main/java/com/keepasskey/database/xml/KdbxXmlMetaSerializer.kt:29-32, 62-65, 76-89, 128-131`；`database/src/main/java/com/keepasskey/database/xml/KdbxXmlEntrySerializer.kt:46-47`；`app/src/main/java/com/keepasskey/app/ui/screens/settings/SettingsUiState.kt:235-240`。
+
 ---
 
 > **本区最近一次归零记录**（2026-09-22 §260 补登 `ISSUE-P2-254` 前）：§254 闭环 `ISSUE-P2-246`——敏感对话框遮罩改由调用点
@@ -65,7 +78,7 @@
 
 ---
 
-## P3 低危问题、特性接线与体验优化（3 项）
+## P3 低危问题、特性接线与体验优化（6 项）
 
 ### `ISSUE-P3-263`：动态取色开启后「主题调色盘」5 项仍可点选、仍显示选中态，但全局配色零变化
 
@@ -128,6 +141,39 @@
   - AC③ 全仓检索 `keepasskey-ci-ephemeral` 零命中（历史提交除外）；工作流注释同步改为「口令运行时生成、非机密、不可用于发布」口径；
   - AC④ 若裁决「保留固定值」（例如为可复现构建），须在 [`architecture/产品裁决登记.md`](architecture/产品裁决登记.md) 或 [`architecture/已知工程限界.md`](architecture/已知工程限界.md) 登记取舍与重开条件，**不得静默留白**。
 - **依据**：`.github/workflows/build.yml`（`CI_KEYSTORE_PASSWORD` env 与同 job `keytool` / `GITHUB_ENV` 段）；`app/build.gradle.kts`（`minReleasePasswordLength = 16` / `forbiddenReleasePasswords` / `releasePasswordPlaceholderMarker` 闸门）；`keystore.properties.example`（口令卫生与 re-key 说明）。相关历史：`ISSUE-P2-55`（发布签名弱口令 `keepasskey123`，已 re-key 闭环，见 [`resolved/batches/49-存量安全整改批次-密钥文件纯字节解析.md`](resolved/batches/49-存量安全整改批次-密钥文件纯字节解析.md)）。
+
+### `ISSUE-P3-267`：AES-KDF 的 `S` 未按规格校验 32 字节（恰 16 字节静默按 AES-128 派生，其它非法长度在解锁期抛非类型化异常）
+
+- **核实时间点**：2026-09-22（同 `ISSUE-P2-266` 的格式层核对走查）。
+- **核实方式**：直读 HEAD——① `database/src/main/java/com/keepasskey/database/file/KdbxKdfParameterCodec.kt:158-162`：AES-KDF 分支对 `S` 仅做非空检查（`getByteArray("S") ?: throw`）+ `validateAesKdfBounds(rounds)`（`:261-264`，只查轮数），**长度零校验**；同文件 Argon2 分支 `:170` 有 `validateArgon2SaltBounds`（`ISSUE-P3-78`）⇒ 两侧不对称；② 派生侧 `crypto/src/main/java/com/keepasskey/crypto/kdf/AesKdfJce.kt:33`：`SecretKeySpec(seed)` + `"AES/ECB/NoPadding"`——恰 16 字节 seed 静默实例化为 AES-128，非 16/24/32 字节在解锁期抛 JCE 异常而非 `KdbxCorruptFileException`；③ 外层 Header 的 MasterSeed 有对称先例（`KdbxHeader.kt` `MASTER_SEED_SIZE` 长度 != 32 即拒）。
+- **背景与影响**：规格定 AES-KDF 的 `S` 为 **Byte[32]**。恰 16 字节时按 AES-128 派生——官方客户端不会产出该文件，派生结果必错、表现为「主密码错误」且难排查；其它非法长度的报错不类型化（不走「文件损坏」通道）。属解析期输入校验缺口，非可利用漏洞。
+- **正确的方式（整改方向）**：与 Argon2 盐对称，解析期 `require(seed.size == 32)`，非 32 字节抛 `KdbxCorruptFileException`（消息风格对齐 `validateArgon2SaltBounds`）。
+- **验收标准**：
+  - AC① `KdbxKdfParameterCodec.deserialize` AES-KDF 分支对 `S` 增加 32 字节定长校验，越界即 `KdbxCorruptFileException`；
+  - AC② 新增用例锁定 0 / 16 / 31 / 33 字节均被拒、32 字节通过，**必含**恰 16 字节「静默 AES-128」回归项；
+  - AC③ `.\gradlew.bat test` 全绿。
+- **依据**：`keepass.info/help/kb/kdbx.html`（AES-KDF `S` 为 Byte[32]）；`database/src/main/java/com/keepasskey/database/file/KdbxKdfParameterCodec.kt:158-162, 245-257, 261-264`；`crypto/src/main/java/com/keepasskey/crypto/kdf/AesKdfJce.kt:25-40`。同族先例：Argon2 盐边界校验（`ISSUE-P3-78`）、MasterSeed 定长校验（`KdbxHeader.kt`）。
+
+### `ISSUE-P3-268`：HMAC 块流读取上限 1 MiB 会拒收「块长 > 1 MiB」的合法 KDBX 文件（规格对块长仅定 Int32）——裁决项
+
+- **核实时间点**：2026-09-22（同 `ISSUE-P2-266` 的格式层核对走查）。
+- **核实方式**：直读 HEAD——`database/src/main/java/com/keepasskey/database/file/HmacBlockStream.kt:32`（`DEFAULT_BLOCK_SIZE = 1024 * 1024`）、`:39`（`MAX_READ_BLOCK_SIZE = DEFAULT_BLOCK_SIZE`），读侧两处（`:116-117`、`:258-259`）块长超限即抛 `KdbxCorruptFileException`；规格对块长 `s` 只定 Int32 并注明「KeePass 当前用 1 MiB」——即 1 MiB 是官方写侧惯例而非格式上限。
+- **背景与影响**：格式本身允许更大块。官方 KeePass 写侧恒 1 MiB、日常互操作无碍；若第三方实现写出 2 MiB 块，本仓会误判为损坏文件。现状是 fail-closed 防 DoS 取向，与仓内加固纪律一致——**本条属裁决项而非明确缺陷**（报告中「KeePassXC 也恒 1 MiB」系第三方行为论断，未实证）。
+- **验收标准**：
+  - AC⓪ **先决**：由用户裁决二选一——(a) 放宽读上限至数 MiB（仍保留上限防 DoS），并补边界值单测与互操作说明；或 (b) 维持 1 MiB，在 [`architecture/已知工程限界.md`](architecture/已知工程限界.md) 登记边界、依据与重开条件。**未裁决不得动代码**；
+  - AC① 按裁决落地；选 (a) 时须证放宽后超上限路径仍 fail-closed 且有单测覆盖边界值（上限、上限+1）；
+  - AC② 若后续实测发现确有客户端写出 > 1 MiB 块，本条自动升 P2 重开。
+- **依据**：`keepass.info/help/kb/kdbx.html`（块格式与 1 MiB 惯例表述）；`database/src/main/java/com/keepasskey/database/file/HmacBlockStream.kt:32-39, 110-120, 252-262`。
+
+### `ISSUE-P3-269`：`InnerHeader.kt` 类 KDoc「解密后、GZip 解压前」笔误（真实位置为 GZip 解压**后**）
+
+- **核实时间点**：2026-09-22（同 `ISSUE-P2-266` 的格式层核对走查）。
+- **核实方式**：直读 `database/src/main/java/com/keepasskey/database/file/InnerHeader.kt:22`——KDoc 写「KDBX 4 内层 Header（解密后、GZip 解压前）」；真实载荷顺序为 `decrypt → gunzip → inner header → XML`：读侧 `KdbxFile.loadPayload` 注释与实现一致、写侧 `KdbxFile.kt:429` `innerHeader.serialize(bodyOut)` 中 `bodyOut` 即 gzipOut（内层头写在压缩流之内）——代码正确，KDoc 方向写反。
+- **背景与影响**：纯文档缺陷，不影响行为；但该类是内层头语义的锚点文档，方向写反易误导后续改动（规格明文内层头位于压缩流内）。
+- **验收标准**：
+  - AC① KDoc 改为「解密后、GZip 解压后（位于压缩流之内、XML 之前）」；
+  - AC② 全仓检索「解压前」等反序表述，确认无其它同形笔误；纯文档改动，随批提交。
+- **依据**：`database/src/main/java/com/keepasskey/database/file/InnerHeader.kt:21-23`；`database/src/main/java/com/keepasskey/database/file/KdbxFile.kt:418-430`（`savePayload` 载荷顺序）。
 
 ---
 
