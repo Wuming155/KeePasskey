@@ -2,6 +2,7 @@ package com.keepasskey.app.passkey
 
 import androidx.credentials.provider.CallingAppInfo
 import com.keepasskey.app.security.CallerCertDigests
+import com.keepasskey.core.log.AppLog
 import java.security.MessageDigest
 import kotlin.io.encoding.Base64
 
@@ -14,11 +15,32 @@ import kotlin.io.encoding.Base64
  *    才返回 origin，白名单缺失、格式漂移或校验失败一律 fail-closed 降级为普通应用处理；
  * 2. 普通应用调用：绝不信任调用方可控的 origin 字符串（bundle/requestJson 均为攻击面），
  *    固定颁发 `android:apk-key-hash:<base64url(sha256(签名证书))>` origin；
- * 3. 白名单外浏览器（或指纹轮换）降级为普通应用路径，安全边界不放松。
+ * 3. 白名单外浏览器（或指纹轮换）降级为普通应用路径，安全边界不放松——降级**一律**颁发
+ *    `android:apk-key-hash:`，**绝不**改写为 `https://{rpId}`（理由见下方「降级口径」说明）。
+ *
+ * ## 降级口径：为什么不做 `https://{rpId}` 兜底
+ *
+ * 曾短暂加过一条「rpId 兜底」（仅在用户开启「跳过通行密钥站点归属校验」时，把非特权调用的
+ * origin 改写为 `https://{rpId}`），其立论是「原生应用注册时依赖方收到非 https origin 即判
+ * 验证未通过」。**该立论已被设备侧对照实测证伪**：同一站点、同一账号下，飞书等原生应用在
+ * `android:apk-key-hash:` 归属下注册**成功**；同期「注册一律失败」的真因是
+ * `attestationObject` 的 CBOR 键被写成 `authenticatorData` 而非 `authData`
+ * （见 [com.keepasskey.app.passkey.WebAuthnJson.AUTH_DATA]），与 origin 归属无关。
+ *
+ * 两个可工作的参考实现（KeePassDX `PassHelper.getOrigin`、Monica `PasskeyOriginResolver`）在
+ * 「调用方未携带 origin」时同样一律颁发 `android:apk-key-hash:`。故本仓保持与之逐字一致，
+ * 不引入「把任意非特权调用方抬升为某站点 web 归属」的通道——那会推翻设备侧已固化的断言
+ * 「白名单未命中的委派调用方不得产出 web origin」。
  */
 object CallingOriginResolver {
 
     const val APK_KEY_HASH_PREFIX = "android:apk-key-hash:"
+
+    /**
+     * 日志标签。ISSUE-P1-10 口径：本对象只记**类别与布尔**——绝不记包名 / 指纹 / origin 明文
+     * （origin 明文含站点域，属敏感标识），故只投影 scheme 类别。
+     */
+    private const val TAG = "CallingOriginResolver"
 
     /**
      * URL-Safe 无 Padding Base64（WebAuthn apk-key-hash 语义，对齐 android.util.Base64
@@ -62,16 +84,45 @@ object CallingOriginResolver {
         callingAppInfo: CallingAppInfo,
         allowlistJson: String = builtInAllowlistJson
     ): String {
-        if (callingAppInfo.isOriginPopulated()) {
-            return try {
-                callingAppInfo.getOrigin(allowlistJson).orEmpty()
-            } catch (_: Throwable) {
-                // 不在白名单 / 白名单格式漂移 / origin 缺失：fail-closed，按普通应用处理
-                apkKeyHashOrigin(callingAppInfo)
-            }
+        if (!callingAppInfo.isOriginPopulated()) {
+            // ISSUE-P1-10：只记事实（调用方未携带 origin），不记包名 / 指纹 / 站点域。
+            // 「非特权调用」有两种来源：普通 App，或**未携带 origin 的浏览器**——后者会让
+            // 面向网页的注册材料带上 apk-key-hash 归属，故必须可诊断。
+            AppLog.i(TAG, "调用方未携带 origin（非特权调用），归属按 apk-key-hash 处理")
+            return apkKeyHashOrigin(callingAppInfo)
         }
-        return apkKeyHashOrigin(callingAppInfo)
+        return try {
+            val origin = callingAppInfo.getOrigin(allowlistJson).orEmpty()
+            if (origin.isBlank()) {
+                AppLog.w(TAG, "系统未返回 origin（白名单未命中或 origin 缺失），归属降级为 apk-key-hash")
+                apkKeyHashOrigin(callingAppInfo)
+            } else {
+                AppLog.i(TAG, "已取得系统背书 origin，无需降级")
+                normalizeOrigin(origin)
+            }
+        } catch (t: Throwable) {
+            // 不在白名单 / 白名单格式漂移 / origin 缺失：fail-closed，按普通应用处理。
+            // 留痕只记异常类型名（非敏感）；此前该降级完全静默，是「本地成功、RP 拒绝」无法归因的根因之一。
+            AppLog.w(TAG, "getOrigin 未通过特权白名单校验（${t.javaClass.simpleName}），归属降级为 apk-key-hash")
+            apkKeyHashOrigin(callingAppInfo)
+        }
     }
+
+    /**
+     * 把系统返回的 origin 规范化为 WebAuthn 语义形态。
+     *
+     * **这是一个实际致败点**：WebAuthn 规范把 origin 定义为 `scheme://host[:port]`，
+     * **不含路径、不含末尾斜杠**；而系统 [CallingAppInfo.getOrigin] 的返回值**可能带末尾斜杠**
+     * （Android 16 实测返回 `https://www.passkeys.io/`）。依赖方按字符串严格比对 origin，
+     * 带斜杠会被判为「origin 不匹配」而拒绝整个注册响应——表现为「系统侧返回成功、
+     * 网页/服务端判定未通过」。
+     *
+     * 参考实现 KeePassDX 在 `PrivilegedAllowLists.getOriginFromPrivilegedAllowListStream`
+     * 中同样以 `removeSuffix("/")` 处理，本函数与之对齐。
+     *
+     * 对 `android:apk-key-hash:…`（本仓自算、本就不带斜杠）为恒等变换。
+     */
+    fun normalizeOrigin(raw: String): String = raw.removeSuffix("/")
 
     /** 无冒号 hex → 大写冒号分隔（`getOrigin` 白名单的规范写法） */
     internal fun toColonSeparatedUpper(fingerprint: String): String {

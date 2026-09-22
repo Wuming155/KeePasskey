@@ -17,6 +17,7 @@ import com.keepasskey.core.security.ProtectedString
 import com.keepasskey.crypto.passkey.PasskeyCryptoEngine
 import com.keepasskey.crypto.passkey.PasskeyPrf
 import dagger.hilt.android.AndroidEntryPoint
+import org.json.JSONObject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -129,9 +130,25 @@ class PasskeyCreateActivity : BaseCredentialActivity() {
         // 官方 getOrigin + 白名单，普通应用固定 apk-key-hash），派生不出即 fail-closed。
         // ISSUE-P2-199：组装期写入的 origin 副本曾是判定来源，被跨请求覆写后会让
         // `passesRegistrationGates` 整段跳过 DAL 校验，故该副本自此不再具备任何判定效力。
+        //
+        // 归属降级**一律** `android:apk-key-hash:`（与 KeePassDX / Monica 逐字一致），
+        // 不做 `https://{rpId}` 兜底——该兜底曾被实测证伪，理由见 [CallingOriginResolver]。
         origin = CallingOriginResolver.resolveTrustedOrigin(
             injected.callingAppInfo,
             privilegedBrowserStore.allowlistJson()
+        )
+
+        // 归属诊断留痕（ISSUE-P1-10：只记布尔与类别，不记 rpId / 包名 / 指纹 / 站点域明文）。
+        // 目的：区分三种归属来源——「非特权调用（未携带 origin）」「特权白名单未命中被降级」
+        // 「已取得系统背书 origin」。三者在注册材料上表现为不同的 clientDataJSON.origin，
+        // RP 侧据此判通过或拒绝；此前该决策链**全程静默**，是「本地成功、RP 报验证失败」无法归因的根因。
+        val createPublicKeyRequest = callingReq as? CreatePublicKeyCredentialRequest
+        AppLog.i(
+            TAG,
+            "注册归属诊断: originPopulated=${injected.callingAppInfo?.isOriginPopulated()}" +
+                ", clientDataHashPresent=${createPublicKeyRequest?.clientDataHash != null}" +
+                ", requestJsonHasOrigin=${hasOriginKey(createPublicKeyRequest?.requestJson)}" +
+                ", originKind=${originKindOf(origin)}"
         )
 
         if (rpId.isBlank() || userName.isBlank()) {
@@ -334,7 +351,8 @@ class PasskeyCreateActivity : BaseCredentialActivity() {
                         challenge = challenge,
                         callerPackage = callerPackage,
                         flags = flags,
-                        prfEval = prfEval
+                        prfEval = prfEval,
+                        credPropsRequested = request?.credPropsRequested == true
                     )
                 }
 
@@ -360,7 +378,8 @@ class PasskeyCreateActivity : BaseCredentialActivity() {
         challenge: String,
         callerPackage: String?,
         flags: Byte,
-        prfEval: WebAuthnRequest.PrfEval?
+        prfEval: WebAuthnRequest.PrfEval?,
+        credPropsRequested: Boolean
     ): String = PasskeyRegistrationPayload.build(
         passkeyData = passkeyData,
         challenge = challenge,
@@ -368,8 +387,32 @@ class PasskeyCreateActivity : BaseCredentialActivity() {
         flags = flags,
         prfEval = prfEval,
         rpId = rpId,
-        origin = origin
+        origin = origin,
+        credPropsRequested = credPropsRequested
     )
+
+    /**
+     * `requestJson` 是否自带 `origin` 键（**只判存在性、不读值**，避免把站点域写进日志）。
+     *
+     * 用途：非特权调用方的网页 origin 只可能来自请求本身；本仓当前忽略该键，
+     * 若调用方（浏览器）实际提供了它，则该事实是恢复正确归属的直接依据。
+     */
+    private fun hasOriginKey(requestJson: String?): Boolean {
+        if (requestJson.isNullOrBlank()) return false
+        return try {
+            JSONObject(requestJson).has(WebAuthnJson.ORIGIN)
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    /** origin 的归属类别（**只记类别、不记明文**，`origin` 含站点域属敏感标识） */
+    private fun originKindOf(origin: String): String = when {
+        origin.startsWith("https://") -> "web"
+        origin.startsWith(CallingOriginResolver.APK_KEY_HASH_PREFIX) -> "apk-key-hash"
+        origin.isBlank() -> "blank"
+        else -> "other"
+    }
 
     companion object {
         private const val TAG = "PasskeyCreateActivity"

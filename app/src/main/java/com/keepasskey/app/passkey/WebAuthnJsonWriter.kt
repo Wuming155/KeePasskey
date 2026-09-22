@@ -17,9 +17,11 @@ package com.keepasskey.app.passkey
  * - **字符串转义**（对齐 AOSP `JSONStringer.string`）：`"` `\` `/` 以 `\\` 短转义（AOSP 版**转义
  *   `/`**——`https://` 会写作 `https:\/\/`，WebAuthn RP 侧 JSON 解析后语义等价）；`\t` `\b` `\n`
  *   `\r` `\f` 用短转义；其余 `≤ 0x1F` 写 `\u00xx`（小写四位十六进制）；`≥ 0x20` 一律原样（UTF-8）；
- * - **不实现数字与 null**：WebAuthn 响应材料无数字 / null 值（标识均为 base64url String、
- *   `enabled` 为 Boolean）；可缺席的键由调用方显式省略（ISSUE-P2-72 的「取不到即省略」语义，
- *   同时避免「null 值被序列化」的形态漂移）。
+ * - **只实现字符串 / 布尔 / 整数 / 嵌套对象 / 字符串数组，不实现 null**：可缺席的键由调用方
+ *   显式省略（ISSUE-P2-72 的「取不到即省略」语义，同时避免「null 值被序列化」的形态漂移）。
+ *   > `ISSUE-P2-265` 起补上整数：注册响应的 `response.publicKeyAlgorithm` 是 **COSE 算法号**
+ *   > （ES256 = `-7`），KeePassDX 与 Monica 两个参考实现都按**数字**下发该字段，故原先
+ *   > 「WebAuthn 响应材料无数字」的前提不再成立。
  *
  * ## 与既有静态守卫的关系
  *
@@ -41,6 +43,14 @@ internal object WebAuthnJsonWriter {
 
         /** 写入布尔值 */
         fun bool(key: String, value: Boolean) {
+            pairs[key] = value.toString()
+        }
+
+        /**
+         * 写入整数（**当前唯一消费方**：注册响应的 `response.publicKeyAlgorithm`，值为 COSE
+         * 算法号，可负如 `-7`）。输出形态与平台 `JSONObject.put(String, int)` 一致（十进制、无引号）。
+         */
+        fun int(key: String, value: Int) {
             pairs[key] = value.toString()
         }
 

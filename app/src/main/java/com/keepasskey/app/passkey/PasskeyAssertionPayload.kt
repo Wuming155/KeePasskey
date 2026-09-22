@@ -67,6 +67,10 @@ internal object PasskeyAssertionPayload {
                 str(WebAuthnJson.ORIGIN, origin)
                 // ISSUE-P2-72：只写系统认证的调用方包名；取不到即省略——绝不再回退为本应用包名
                 clientDataPackage?.let { str(WebAuthnJson.ANDROID_PACKAGE_NAME, it) }
+                // ISSUE-P2-265：显式声明非跨源上下文（与注册侧、与 Monica 写法一致）。
+                // 注意：本字段参与 clientDataJSON 的字节，签名与哈希由本函数**同时**产出，
+                // 二者恒自洽；不影响既有凭据（每次断言都重新构造并重新签名）。
+                bool(WebAuthnJson.CROSS_ORIGIN, false)
             }
             val clientDataBytesLocal = clientDataJson.toByteArray(Charsets.UTF_8)
             clientDataBytes = clientDataBytesLocal

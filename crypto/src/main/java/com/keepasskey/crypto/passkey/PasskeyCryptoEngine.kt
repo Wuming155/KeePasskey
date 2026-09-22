@@ -50,8 +50,33 @@ object PasskeyCryptoEngine {
     const val FLAG_AT: Byte = 0x40             // 包含证明凭据数据 (Attested Credential Data Present)
     const val FLAG_ED: Byte = 0x80.toByte()    // 包含扩展数据 (Extension Data Present)
 
-    // 默认自托管 / 虚拟 Authenticator AAGUID (16 字节全零)
-    val DEFAULT_AAGUID: ByteArray = ByteArray(16) { 0 }
+    /**
+     * 本认证器（KeePasskey 自建 Authenticator）的 AAGUID。
+     * (`ISSUE-P2-265`：与参考实现对齐，登记真实身份而非全零)
+     *
+     * **必须长期稳定**：RP 会把 AAGUID 作为认证器身份留存，并据此在凭据管理页展示提供方
+     * 名称（Google RP 指引：「When you save the passkey on the app server, make sure that
+     * you save the Authenticator Attestation Globally Unique Identifier (AAGUID) from the
+     * client data.」）。变更只影响**新注册**，既有凭据保持有效。
+     *
+     * 取值来源（可离线复算，非随手常量）：
+     * `UUIDv5(DNS, "keepasskey.app/webauthn/authenticator")` = `d8a7de40-8975-5786-bd94-605287e4357f`
+     * （版本位 `5`、变体位 `10x` 均符合 RFC 4122）。
+     *
+     * 为什么不再用 16 字节全零：全零在规范里的语义是「该认证器**没有** AAGUID」，
+     * 等于主动放弃提供方身份。对照两个可工作的参考实现——`参考项目/KeePassDX-master` 的
+     * `credentialprovider/passkey/data/AuthenticatorAttestationResponse.kt:95` 使用固定
+     * `eaecdef2-1c31-5634-8639-f1cbd9c00a08`；`参考项目/Monica-main` 的
+     * `passkey/PasskeyCreateActivity.kt:99-108` 使用固定 `6d6f6e69-6361-4d33-a001-706173736b79`
+     * 并明确注释「Relying parties may display authenticator brand from AAGUID」——
+     * 两者都登记了真实 AAGUID，本仓是唯一使用全零的实现。
+     */
+    val DEFAULT_AAGUID: ByteArray = byteArrayOf(
+        0xd8.toByte(), 0xa7.toByte(), 0xde.toByte(), 0x40.toByte(),
+        0x89.toByte(), 0x75.toByte(), 0x57.toByte(), 0x86.toByte(),
+        0xbd.toByte(), 0x94.toByte(), 0x60.toByte(), 0x52.toByte(),
+        0x87.toByte(), 0xe4.toByte(), 0x35.toByte(), 0x7f.toByte()
+    )
 
     /**
      * 凭据 ID 的字节上限：`Attested Credential Data` 里的 `credentialIdLength` 是
@@ -318,5 +343,21 @@ object PasskeyCryptoEngine {
             else -> throw CryptoException.InvalidKeyException("不支持的 COSE Key 算法标识: $algorithmId")
         }
     }
+
+    /**
+     * 库内公钥字节流 → **DER 编码的 X.509 `SubjectPublicKeyInfo`（SPKI）**。
+     *
+     * 供注册响应的 `response.publicKey` 使用：W3C WebAuthn 规范把
+     * `AuthenticatorAttestationResponse.getPublicKey()` 定义为「DER-encoded
+     * SubjectPublicKeyInfo」，与 [coseKeyFor] 产出（COSE_Key CBOR，只用于
+     * `authData.credentialPublicKey`）是**同一公钥在不同字段上的不同编码**，
+     * 不可互换、也不得互相替代。
+     *
+     * 本仓此前该字段误用 COSE_Key CBOR；两个参考实现中 Monica 用 SPKI
+     * （`keyPair.public.encoded`）并在「同设备 / 同浏览器 / 同站点」对照下 100% 成功，
+     * 故本入口用于对齐规范与参考实现。
+     */
+    fun publicKeySubjectInfoFor(algorithmId: Int, publicKeyBytes: ByteArray): ByteArray =
+        PasskeyKeyCodec.toSubjectPublicKeyInfo(algorithmId, publicKeyBytes)
 
 }

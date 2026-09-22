@@ -125,3 +125,4 @@ venv/
 # 真机调试临时转储（uiautomator dump / 截图，严禁入库；b4670f2 曾误提交）
 /current_dump.xml
 /current_screen.png
+.ci-artifacts/devtest/

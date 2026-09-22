@@ -34,7 +34,13 @@ internal object WebAuthnJson {
     const val AUTHENTICATOR_SELECTION = "authenticatorSelection"
     const val USER_VERIFICATION = "userVerification"
 
-    /** `userVerification` 的规范取值（缺省按 `preferred` 处理） */
+    /**
+     * `authenticatorSelection.userVerification` 的规范取值（缺省按 `preferred` 处理）。
+     *
+     * 注：**不**登记 `authenticatorSelection.residentKey` / `requireResidentKey` 两个常量——
+     * `clientExtensionResults.credProps.rk` 如实报 `true`（本仓凭据断言时按 rpId 全库匹配即可取出，
+     * **确实可发现**，与 KeePassDX 恒报 `true` 一致），无需读取这两个请求字段。
+     */
     const val VERIFICATION_REQUIRED = "required"
 
     const val VERIFICATION_DISCOURAGED = "discouraged"
@@ -43,6 +49,12 @@ internal object WebAuthnJson {
 
     const val EXTENSIONS = "extensions"
     const val PRF = "prf"
+
+    /** Credential Properties 扩展（WebAuthn L3 §10.2）；请求侧取值恒为布尔 `true` */
+    const val CRED_PROPS = "credProps"
+
+    /** `credProps` 输出：该凭据是否可被发现（discoverable / resident key） */
+    const val RK = "rk"
     const val EVAL = "eval"
     const val EVAL_BY_CREDENTIAL = "evalByCredential"
     const val FIRST = "first"
@@ -72,8 +84,26 @@ internal object WebAuthnJson {
     const val ATTESTATION_OBJECT = "attestationObject"
     const val TRANSPORTS = "transports"
 
+    /**
+     * `response.publicKey`：凭据公钥的 base64url 编码。
+     *
+     * **编码口径已修正为 DER `SubjectPublicKeyInfo`（SPKI）**：W3C WebAuthn 把
+     * `AuthenticatorAttestationResponse.getPublicKey()` 定义为「DER-encoded
+     * SubjectPublicKeyInfo」，Monica 用 `keyPair.public.encoded`（SPKI）即遵循此口径。
+     * 本仓此前误用 **COSE_Key CBOR**（那是 `attestationObject.authData.credentialPublicKey`
+     * 的编码，两者不可互换），已由 [com.keepasskey.crypto.passkey.PasskeyCryptoEngine.publicKeySubjectInfoFor]
+     * 单独产出 SPKI。
+     */
+    const val PUBLIC_KEY = "publicKey"
+
+    /** `response.publicKeyAlgorithm`：COSE 算法号（**数字**，如 ES256 = `-7`） */
+    const val PUBLIC_KEY_ALGORITHM = "publicKeyAlgorithm"
+
     /** `transports[]` 取值：仅本设备内部凭据 */
     const val TRANSPORT_INTERNAL = "internal"
+
+    /** `transports[]` 取值：混合传输（本机 + 其它设备），参考实现同样声明 */
+    const val TRANSPORT_HYBRID = "hybrid"
 
     // ---------------- clientDataJSON（§5.4.1 / §6.4.1） ----------------
 
@@ -85,10 +115,23 @@ internal object WebAuthnJson {
 
     const val ORIGIN = "origin"
 
+    /**
+     * `clientDataJSON.crossOrigin`：本次请求是否发生在跨源（iframe）上下文。
+     *
+     * `ISSUE-P2-265`：本仓此前省略该字段（规范允许省略、默认 `false`），
+     * 而 Monica 显式写 `false`。显式下发可让 RP 无需依赖缺省语义，对齐参考实现。
+     */
+    const val CROSS_ORIGIN = "crossOrigin"
+
     /** DAL 扩展：系统背书的调用方包名（仅在有背书时写入，绝不回退为本应用包名） */
     const val ANDROID_PACKAGE_NAME = "androidPackageName"
 
     // ---------------- `none` 格式 attestationObject（CBOR map 键） ----------------
+    //
+    // ⚠️ 这一节是 **CBOR map 的键名**，与响应 JSON 的字段名只是形近、语义与位置完全不同。
+    // 尤其 `authData`（本节的 CBOR 键，8 字符）与 [AUTHENTICATOR_DATA]（响应 JSON 字段，
+    // `authenticatorData`，17 字符）**不可互相替换**——本仓曾因此产出一份浏览器无法解析的
+    // 证明对象（详见 [AUTH_DATA]）。
 
     const val FORMAT = "fmt"
 
@@ -96,4 +139,28 @@ internal object WebAuthnJson {
     const val FORMAT_NONE = "none"
 
     const val ATTESTATION_STATEMENT = "attStmt"
+
+    /**
+     * `attestationObject` CBOR map 内承载认证器数据的字节串键 —— **`authData`**（CTAP2 §6.5.4）。
+     *
+     * ⚠️ **与 [AUTHENTICATOR_DATA] 是两个东西**：后者是响应 JSON 里 `response.authenticatorData`
+     * 的**字段名**（17 字符），前者是 CBOR map 的**键名**（8 字符）。二者仅形近。
+     *
+     * 本仓曾在此误用 [AUTHENTICATOR_DATA] 作 CBOR 键，产出的证明对象里只有 `authenticatorData`
+     * 键、没有规范要求的 `authData` 键。后果具有极强的误导性：
+     *
+     * 1. **系统侧一切正常** —— CredMan 只校验注册响应 JSON 的合法性（`isValidJSON`），
+     *    不解析 CBOR，于是 `Final credential received`、`resultCode=-1` 一路绿灯；
+     * 2. **浏览器侧直接失败** —— Chromium 把响应转成 WebAuthn 对象时按规范查找 `authData`：
+     *    ```
+     *    E chromium: [ERROR:components/webauthn/android/fido2credentialrequest_native_android.cc:59]
+     *      MojoClassFromJSON failed to convert JSON: field missing or invalid: attestationObject
+     *    ```
+     *    网页因此收到 `UnknownError`（"unknown error occurred while talking to the credential
+     *    manager"），**依赖方从未收到任何凭据**，自然「未成功验证」。
+     *
+     * 这正是「本地显示添加成功、网站一律判未通过」且「浏览器与原生 App 表现一致、换站点也一样」
+     * 的**单一根因**，也与两个参考实现（KeePassDX `ao["authData"]`、Monica 同）的行为差异所在。
+     */
+    const val AUTH_DATA = "authData"
 }

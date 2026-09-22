@@ -112,6 +112,14 @@ Coroutines + Flow；**文档与代码注释使用简体中文**。
 > **Android CLI 调试约定（2026-09-15 立规，强制）**：IDE 侧与设备侧调试**统一走 Android CLI，不得直接使用 `adb`**；IDE 能力一律在
 > `android studio` 之下（sync / build / Compose 预览 / PSI 代码分析 / IDE Lint），设备操作由该 CLI 内部调用 ADB，无对应能力时**如实说明并给出退路**。
 > 本机 `android` **未加入 `PATH`**（数据在 `%USERPROFILE%\.android\cli\`），故按上表用启动器全路径调用。
+> Android CLI不可用的情况下，可以使用ADB。
+
+> **设备侧测试前置检查（2026-09-22 §263 立规，强制）**：对**装有需要保留的数据／应用**的设备，**禁止**直接运行
+> `connectedDebugAndroidTest`——若设备上已装应用的签名与测试包不一致（如设备上装的是 `assembleRelease` 包、测试装的是
+> debug 包），UTP 会在 `INSTALL_FAILED_UPDATE_INCOMPATIBLE` 之后**卸载该应用**，其内部数据**随之永久丢失**
+> （应用声明 `android:allowBackup="false"` 时**无任何**备份可恢复）。应改用 AVD（本机 `Pixel_10`），或先与用户确认
+> 该应用的本地数据无需保留。**立规缘由（实测事故）**：§263 开发中即为跑一条设备用例导致 `com.keepasskey`
+> 被卸载、用户密码库丢失。
 
 > **设备侧是独立一层，判定以 task 结果为准**：`cargo` 缺失（离线 / 无工具链）时原生内核任务经 `onlyIf` **跳过**、JNI 用例经 `Assume` 跳过
 > （有意降级），**构建失败则 fail-closed 直接失败**——严禁再引入吞退出码的开关；真实语料缺失时 `RealKdbxCorpusUnlockTest` 抛

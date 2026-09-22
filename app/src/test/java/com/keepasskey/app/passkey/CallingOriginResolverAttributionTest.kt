@@ -55,6 +55,33 @@ class CallingOriginResolverAttributionTest {
         assertEquals("android", CallingOriginResolver.SYSTEM_PACKAGE_ANDROID)
     }
 
+    /**
+     * 系统返回的 origin 可能带末尾斜杠（Android 16 实测 `https://www.passkeys.io/`），
+     * 而依赖方按 WebAuthn 语义（`scheme://host[:port]`）严格比对，带斜杠即判 origin 不匹配。
+     */
+    @Test
+    fun `系统返回 origin 的末尾斜杠必须被剥离`() {
+        assertEquals(
+            "https://www.passkeys.io",
+            CallingOriginResolver.normalizeOrigin("https://www.passkeys.io/")
+        )
+        assertEquals(
+            "带端口的 origin 同样剥离",
+            "https://example.com:8443",
+            CallingOriginResolver.normalizeOrigin("https://example.com:8443/")
+        )
+        assertEquals(
+            "已规范化的 origin 为恒等变换",
+            "https://example.com",
+            CallingOriginResolver.normalizeOrigin("https://example.com")
+        )
+        assertEquals(
+            "非 web 归属不受影响",
+            "android:apk-key-hash:abc",
+            CallingOriginResolver.normalizeOrigin("android:apk-key-hash:abc")
+        )
+    }
+
     @Test
     fun `无系统背书时包名解析返回 null`() {
         assertNull(CallingOriginResolver.systemAttestedPackageName(null))

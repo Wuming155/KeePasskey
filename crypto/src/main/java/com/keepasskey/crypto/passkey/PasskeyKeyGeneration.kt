@@ -212,8 +212,21 @@ internal object PasskeyKeyGeneration {
         }
     }
 
+    /**
+     * 生成凭据 ID（16 字节随机 ⇒ Base64URL 无填充）。
+     *
+     * **长度口径**：WebAuthn 规范（`§5.4.1`）只要求 credentialId 为 1..1023 字节，
+     * 本身不限定长度；但两个成熟的参考实现**都取 16 字节**——
+     * KeePassDX `HashManager.generateRandom(16)`（其代码显式引用规范该节），
+     * Monica `generateCredentialId()` 亦为 `ByteArray(16)`。
+     *
+     * 本仓此前用 **32 字节**。在「同设备 / 同站点，KeePassDX 与 Monica 都能通过、
+     * 仅本仓失败」的对照中，这是两个成功实现唯一的**共同取值**，
+     * 故收敛为 16 字节以对齐互操作口径（部分依赖方按 UUID 语义解析该字段，
+     * 非 16 字节会被判为无效凭据）。
+     */
     private fun generateRandomCredentialId(): String {
-        val credIdBytes = ByteArray(32)
+        val credIdBytes = ByteArray(16)
         secureRandom.nextBytes(credIdBytes)
         return Base64.getUrlEncoder().withoutPadding().encodeToString(credIdBytes)
     }

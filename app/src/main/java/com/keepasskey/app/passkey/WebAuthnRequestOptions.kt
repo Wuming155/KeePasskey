@@ -93,6 +93,17 @@ internal class WebAuthnRequest private constructor(private val root: Map<String,
             SimpleJson.string(SimpleJson.objectAt(root, WebAuthnJson.AUTHENTICATOR_SELECTION), WebAuthnJson.USER_VERIFICATION)
         )
 
+    /**
+     * 请求是否携带 `extensions.credProps`（WebAuthn L3 §10.2 Credential Properties）。
+     *
+     * 判定依据是**键存在**而非「值是对象」：规范规定请求侧取值恒为布尔 `true`
+     * （`"credProps": true`）。`ISSUE-P2-265` 起据此在注册响应的 `clientExtensionResults`
+     * 中回 `credProps.rk`（参考实现 KeePassDX/Monica 均回传该扩展）。
+     */
+    val credPropsRequested: Boolean
+        get() = SimpleJson.objectAt(root, WebAuthnJson.EXTENSIONS)
+            ?.containsKey(WebAuthnJson.CRED_PROPS) == true
+
     /** PRF 请求输入；未请求 PRF 或形态非法（缺 `eval.first`）时返回 null */
     val prfEval: PrfEval?
         get() {

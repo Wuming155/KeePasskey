@@ -40,6 +40,7 @@
 | [`records/通行密钥互操作对拍记录_2026-09-19.md`](records/通行密钥互操作对拍记录_2026-09-19.md) | `ISSUE-P2-210` / `ISSUE-P2-211` 的证据留痕（`AGENTS.md` 规则 8）：`keepassxc-cli` + `pykeepass` + `cryptography` 双向对拍的命令与原文输出、114 条判据构成、Ed25519 PKCS#8 形态缺陷的隔离实验与修复复跑、**github.com 端到端手工冒烟清单（本批未执行）** |
 | [`records/限界表证据与实测数据汇录.md`](records/限界表证据与实测数据汇录.md) | [`architecture/已知工程限界.md`](architecture/已知工程限界.md) 的**证据 / 实测 / 沿革附卷**（§253 批次外迁，§253 补正扩充）：按 `§x.y` 分节收录从限界表移出的实测表、多轮叙事、根因推导与观测点记录（**整句 / 整段逐字搬移、不改写**），另含原表文末「附」表 40 行逐字归档与**附录 A**（§253 补正时由正文移出的全部说明性句子，按原节标题分组）；限界表内相应位置留一行指针 |
 | [`records/宿主开发环境现象.md`](records/宿主开发环境现象.md) | **宿主开发环境现象**（§255 从 `已知工程限界.md` 迁出、**逐字原样**）：§7 Windows/NTFS 目录枚举鬼影及其派生残余、§12 宿主侧 Windows 原子 rename 偶发 `AccessDeniedException`——两节原文均自陈「**非产品缺陷**」、Android 生产环境未观测到；限界表对应编号处留存根（节标题 + 规范句 + 指针） |
+| [`records/注册响应CBOR键误用定位记录.md`](records/注册响应CBOR键误用定位记录.md) | `ISSUE-P2-265` 定位记录（§263 批次）：`attestationObject` 的 CBOR 键误用 `authenticatorData`（应为 `authData`）的**字节级证据**、Chromium 侧报错出处链路、**五条走偏路径留痕**（每条都曾「自洽解释症状」）、**镜像测试盲区**（断言与被测代码共用常量导致实现与测试一起错）、以及 `connectedDebugAndroidTest` **卸载应用致数据丢失**的操作事故与立规；含复现取数的命令骨架 |
 
 ## security/ — 安全、威胁建模与合规
 

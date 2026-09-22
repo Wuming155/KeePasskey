@@ -229,9 +229,16 @@ class PasskeyCryptoEngineTest {
         // 2. signCount = 100 (大端 4 字节，索引 33..36)
         assertEquals(100.toByte(), authData[36])
 
-        // 3. aaguid 16 字节全零 (索引 37..52)
+        // 3. aaguid 16 字节（索引 37..52），必须等于引擎登记值
+        //    ISSUE-P2-265：取值由「16 字节全零」改为登记的真实 AAGUID——全零在规范里的语义是
+        //    「该认证器**没有** AAGUID」，RP 无法据此识别提供方；KeePassDX / Monica 两个参考
+        //    实现都登记了真实值（含可离线复算的来源注释）。
         val aaguidPart = authData.copyOfRange(37, 53)
         assertArrayEquals(PasskeyCryptoEngine.DEFAULT_AAGUID, aaguidPart)
+        assertTrue(
+            "AAGUID 不得回退为全零（规范语义为「无 AAGUID」，会丢失提供方身份）",
+            PasskeyCryptoEngine.DEFAULT_AAGUID.any { it != 0.toByte() }
+        )
 
         // 4. credIdLength 2 字节大端 (索引 53..54) -> 16 字节
         assertEquals(0.toByte(), authData[53])

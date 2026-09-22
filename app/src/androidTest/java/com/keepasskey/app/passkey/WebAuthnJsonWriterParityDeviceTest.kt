@@ -63,6 +63,26 @@ class WebAuthnJsonWriterParityDeviceTest {
     }
 
     @Test
+    fun `整数字段与平台一致`() {
+        // ISSUE-P2-265：写入器新增 `int`——`response.publicKeyAlgorithm` 是 COSE 算法号（可负），
+        // 必须与平台 `JSONObject.put(String, int)` 的输出（十进制、无引号）逐字节一致，
+        // 否则「写入器输出 == 平台输出」这条契约就破了。
+        val platform = JSONObject()
+            .put("publicKeyAlgorithm", -7)
+            .put("zero", 0)
+            .put("max", 2147483647)
+            .put("min", -2147483648)
+            .toString()
+        val writer = WebAuthnJsonWriter.obj {
+            int("publicKeyAlgorithm", -7)
+            int("zero", 0)
+            int("max", 2147483647)
+            int("min", -2147483648)
+        }
+        assertEquals("整数字段与平台 org.json 输出不一致", platform, writer)
+    }
+
+    @Test
     fun `布尔与嵌套对象与数组形态一致`() {
         val platform = JSONObject()
             .put("enabled", true)

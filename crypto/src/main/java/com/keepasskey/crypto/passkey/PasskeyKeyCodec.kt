@@ -1,14 +1,20 @@
 package com.keepasskey.crypto.passkey
 
+import com.keepasskey.core.model.PasskeyData
 import com.keepasskey.crypto.exception.CryptoException
 import org.bouncycastle.asn1.ASN1InputStream
 import org.bouncycastle.asn1.pkcs.RSAPublicKey
 import org.bouncycastle.asn1.sec.SECNamedCurves
 import org.bouncycastle.asn1.x509.SubjectPublicKeyInfo
 import org.bouncycastle.asn1.x9.X9ECParameters
+import org.bouncycastle.asn1.x9.X9ObjectIdentifiers
 import org.bouncycastle.crypto.params.ECDomainParameters
+import org.bouncycastle.crypto.params.ECNamedDomainParameters
 import org.bouncycastle.crypto.params.ECPrivateKeyParameters
+import org.bouncycastle.crypto.params.ECPublicKeyParameters
+import org.bouncycastle.crypto.params.Ed25519PublicKeyParameters
 import org.bouncycastle.crypto.util.PrivateKeyFactory
+import org.bouncycastle.crypto.util.SubjectPublicKeyInfoFactory
 import java.math.BigInteger
 import java.util.Arrays
 import java.util.Base64
@@ -192,6 +198,53 @@ internal object PasskeyKeyCodec {
             }
         }
         return Pair(rsaPub.modulus.toByteArray(), rsaPub.publicExponent.toByteArray())
+    }
+
+    /**
+     * 库内公钥字节流 → **DER 编码的 X.509 `SubjectPublicKeyInfo`（SPKI）**。
+     *
+     * 用途：注册响应的 `response.publicKey` 按 W3C WebAuthn 规范必须是 SPKI DER——
+     * `AuthenticatorAttestationResponse.getPublicKey()` 明确定义为「DER-encoded
+     * SubjectPublicKeyInfo」。本仓此前该字段直接下发 **COSE_Key CBOR**（与
+     * `attestationObject` 内的公钥同一份），与参考实现 Monica
+     * （`keyPair.public.encoded`，即 Java `PublicKey.getEncoded()` 的 SPKI）不一致：
+     * 在「同设备 / 同浏览器 / 同站点，Monica 成功而本仓失败」的对照中，这是唯一
+     * 已知的响应材料实质分歧点。
+     *
+     * 输入形态与 [extractEcPoint] / [extractEd25519PublicKey] 一致（即库内既有存储形态）：
+     * - ES256：未压缩点 `0x04 || X || Y`（65 字节）→ 包成 SPKI；
+     * - Ed25519：32 字节 raw 公钥 → 包成 SPKI；
+     * - RS256：库内**已存 SPKI**（`SubjectPublicKeyInfoFactory` 生成）→ 原样返回。
+     *
+     * 注意：`attestationObject` 内的 `credentialPublicKey` **仍必须是 COSE_Key**（见
+     * [PasskeyCryptoEngine.coseKeyFor]），两者是**不同字段的不同编码**，不可互换。
+     */
+    internal fun toSubjectPublicKeyInfo(algorithmId: Int, publicKeyBytes: ByteArray): ByteArray {
+        return when (algorithmId) {
+            PasskeyData.ALGORITHM_ES256 -> {
+                val point = ecParams.curve.decodePoint(publicKeyBytes)
+                // **必须**用带 OID 的命名域参数：普通 [domainParams]（`ECDomainParameters(curve,G,n,h)`）
+                // 不携带曲线 OID，`SubjectPublicKeyInfoFactory` 只能编出「显式曲线参数」形式的 SPKI，
+                // 而 JDK / OpenSSL 等实现**只接受命名曲线** —— 实测该产物会导致
+                // `KeyFactory.generatePublic(X509EncodedKeySpec)` 抛
+                // `InvalidKeySpecException: Unable to decode key`。
+                val namedDomain = ECNamedDomainParameters(X9ObjectIdentifiers.prime256v1, domainParams)
+                SubjectPublicKeyInfoFactory.createSubjectPublicKeyInfo(
+                    ECPublicKeyParameters(point, namedDomain)
+                ).encoded
+            }
+            PasskeyData.ALGORITHM_ED25519 -> {
+                // 库内为 32 字节 raw；若已是 SPKI 则先解出 raw 再重新包（幂等）
+                val raw = extractEd25519PublicKey(publicKeyBytes)
+                SubjectPublicKeyInfoFactory.createSubjectPublicKeyInfo(
+                    Ed25519PublicKeyParameters(raw, 0)
+                ).encoded
+            }
+            PasskeyData.ALGORITHM_RS256 -> publicKeyBytes
+            else -> throw CryptoException.InvalidKeyException(
+                "无法导出 SPKI 公钥：不支持的算法标识 $algorithmId"
+            )
+        }
     }
 
 /** 坐标分量长度（P-256 每分量 32 字节） */
