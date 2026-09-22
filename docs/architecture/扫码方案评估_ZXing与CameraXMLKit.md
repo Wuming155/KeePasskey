@@ -1,6 +1,7 @@
 # TOTP 扫码方案评估：ZXing-Android-Embedded 与 CameraX + ML Kit
 
-> - **对应条目**：`docs/ACTIVE_ISSUES.md` → ISSUE-P3-05 (TASK-19)「zxing → CameraX + ML Kit 扫码迁移评估」
+> - **对应条目**：`ISSUE-P3-05` (TASK-19)「zxing → CameraX + ML Kit 扫码迁移评估」——**已闭环**（结论：纯评估、维持 zxing、条件触发迁移；
+>   归档见 [`../resolved/batches/03-批次整改归档.md`](../resolved/batches/03-批次整改归档.md)；2026-09-22 §260 更正原「`docs/ACTIVE_ISSUES.md` →」悬空指针）
 > - **评估性质**：**纯评估，零代码改动**。本文件为评估产出，未修改任何 `.kt` / `.gradle.kts` / `.toml` / `.xml` 文件。
 > - **代码基线**：Git `HEAD = 7307f5f`（工作树干净）
 > - **评估日期**：2026-09（体积类数字实测于本机当前构建产物与 Google Maven 当日元数据）
@@ -303,7 +304,7 @@ Google 扫码器的官方描述（[Google 扫码器（仅限 Android）](https:/
 | **T1** | **真机可复现的扫码缺陷**：某些机型黑屏/对焦失败/旋转错误/低光照识别率显著低/相机启动缓慢卡顿 | 需以 issue 形式登记**具体机型 + 系统版本 + 复现步骤**；禁止以「感觉不流畅」触发 |
 | **T2** | **平台侧收紧 Camera1**：targetSdk 提升后 `android.hardware.Camera` 出现行为回归，或官方 release notes 宣布移除/限制 | Android Developers 官方 release notes / behavior changes 文档 |
 | **T3** | **产品需要 in-app 取景器**：要求扫码与解锁/自动填充/详情页复用同一 Compose 取景 UI，或要求扫码期间保持应用内上下文（当前「跳 Activity」不再满足需求） | 产品需求文档 / UI 评审结论 |
-| **T4** | **依赖治理硬化**：ISSUE-P3-09 供应链批次将「上游 N 个月无发布」定为阻断门禁，或 Dependabot/SBOM 策略要求替换无维护依赖 | `docs/ACTIVE_ISSUES.md` ISSUE-P3-09 的最终验收标准 |
+| **T4** | **依赖治理硬化**：ISSUE-P3-09 供应链批次将「上游 N 个月无发布」定为阻断门禁，或 Dependabot/SBOM 策略要求替换无维护依赖 | `ISSUE-P3-09` 的最终验收标准——**已闭环**（批次 [`03-批次整改归档.md`](../resolved/batches/03-批次整改归档.md)，「五达成一部分」；依据承接见 [`../records/退役依据承接-ISSUE-P3-09.md`](../records/退役依据承接-ISSUE-P3-09.md)；2026-09-22 §260 更正原 `ACTIVE_ISSUES` 悬空指针） |
 | **T5** | **分发形态改为 AAB**：届时 bundled ML Kit 的单设备边际成本降至官方口径 ≈2.4 MB，收益/成本比发生实质变化 | `app/build.gradle.kts` 出现 `bundle{}` / Play 上架形态变更 |
 | **T6** | **上游复活**：`zxing-android-embedded` 发布基于 CameraX 或至少 camera2 的新版本 | Maven Central metadata `lastUpdated` 变化 + CHANGES.md |
 
@@ -355,7 +356,7 @@ Google 扫码器的官方描述（[Google 扫码器（仅限 Android）](https:/
 ## 八、残余与风险（如实登记）
 
 1. **Camera1 的长期风险未量化**：`android.hardware.Camera` 自 API 21 起 deprecated，但官方**未给出移除时间表**；本评估未检索到任何「将在某个 API 级别移除」的官方声明。该风险以 T2 作为监视线。
-2. **未做漏洞数据源专门核查**：本次未核查 zxing / zxing-core 的 CVE 与 GitHub Security Advisory，也未运行 `dependency-check`。传递版本 `com.google.zxing:core:3.4.1` 明显偏旧（上游已 3.5.4），且**仓库内无版本约束**，存在静默漂移空间。→ 建议并入 ISSUE-P3-09（供应链批次）统一核查，勿在本条目内闭环。
+2. **未做漏洞数据源专门核查**：本次未核查 zxing / zxing-core 的 CVE 与 GitHub Security Advisory，也未运行 `dependency-check`。传递版本 `com.google.zxing:core:3.4.1` 明显偏旧（上游已 3.5.4），且**仓库内无版本约束**，存在静默漂移空间。→ 当时建议并入 ISSUE-P3-09（供应链批次）统一核查，勿在本条目内闭环。（**2026-09-22 注，§260**：`ISSUE-P3-09` **已闭环**于批次 03「五达成一部分」；CVE 面现由生产面 `dependency-check` + CVSS ≥ 7.0 硬断言闸门常态覆盖（`AGENTS.md` §5），版本面由精确版本纪律与 `DependencyResolutionDeterminismTest` 承担——本行「未运行 dependency-check」的前提已失效，「传递版本无直接约束」仍属实。）
 3. **「对焦更流畅」未被量化**：本工作区无真机、无性能采集，该主张在决策中记「未证实」而非「不成立」；若未来真机验证证伪现状稳定性，应立即转为 T1 触发。
 4. **体积数字的时效性**：§2.6 基于 2026-09-10 的 release APK；§三 的版本号基于当日 Google Maven / Maven Central 元数据快照。上游发新版（CameraX 1.6.x/1.7、ML Kit 17.4+）后需刷新。
 5. **分发形态未确认**：本仓库**无** `bundle{}` / `splits{}` / `abiFilters`（app 模块）配置，评估按「通用 APK」给出主口径并同时列出 AAB 口径；若实际以 AAB 上架，则成本项 #1（体积）的结论强度会显著减弱，但**不改变决策**（决定性项为 #6 数据安全申报与 #4 无缺陷驱动）。
@@ -417,6 +418,7 @@ Google 扫码器的官方描述（[Google 扫码器（仅限 Android）](https:/
 2. **收敛扫码调用点**：在调用点与 zxing 之间加一层薄接口（当前仅 1 处调用，成本≈0），使未来触发式迁移只影响 1 个文件。
 3. **标注冻结状态**：在 `gradle/libs.versions.toml` 顶部「版本货币性核对」注释中把 zxing 标注为「上游冻结（4.3.0 / 2021-10-25），已评估维持（本文件）」，防止后续重复评估。
 4. **传递版本可见化**：`com.google.zxing:core` 目前为无约束的传递依赖（3.4.1），建议纳入 ISSUE-P3-09 的依赖核查范围。
+   （**2026-09-22 注，§260**：`ISSUE-P3-09` 已闭环于批次 03；传递依赖的 CVE 面现由生产面 `dependency-check` 闸门覆盖，「无直接版本约束」仍属实。）
 
 ---
 
