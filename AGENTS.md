@@ -106,6 +106,10 @@ Coroutines + Flow；**文档与代码注释使用简体中文**。
   的前提成立性用 `python tools/doc/scaffold_block_fingerprint.py <git rev> <目录> <页名>…`
   （**目测登记前提曾造成一次真实回归**，见 `ISSUE-P3-195`）
 - `bash tools/audit/check_recheck_consistency.sh` — 复核报告一致性扫描（**改审计 / 复核报告后必跑**）
+- `python tools/audit/check_tautological_assertions.py` — **「永远为真的断言」机检**（§275 立规；**改 `*/src/test/**`
+  的任何断言后必跑**）：判据＝断言实参能否在 `@Test` 函数体内按「纯局部 `val`」口径全部求值，命中即退出码 1；
+  `--selftest` 为口径反校；**`var` 观测通道一律豁免**（由生产代码经回调写入者恰为最有鉴别力的形态）。
+  口径与边界（静态启发式：容器取值类断言会漏报）见脚本文档串，**不得**据其绿推定「仓内已无重言断言」
 - `"$env:USERPROFILE\.android\bin\android-cli.exe" studio <子命令>` — IDE / 设备侧调试首选入口（Android CLI，见下条约定；
   **PowerShell 写法**；Git Bash / MSYS 下同义写法为 `"$USERPROFILE/.android/bin/android-cli.exe"`）
 

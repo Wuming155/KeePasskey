@@ -156,21 +156,34 @@ class SecurityTest {
         assertEquals(null, session.databaseFlow.value)
     }
 
+    /**
+     * 后台停留超时判定（ISSUE-P3-299 修正 ⇒ §275）。
+     *
+     * 原实现的两个断言把 `elapsedMillis` 与 `timeoutMillis` **都在测试体内本地算出**
+     * （`assertTrue(elapsedMillis >= timeoutMillis)`），不触任何生产代码 ⇒ **恒为真**、
+     * 对被测行为零鉴别力（属冗余弱测：真行为由 [AutoLockTimeoutPolicy] /
+     * [AutoLockSessionGuard] 承担，其正确覆盖见 `AutoLockTimeoutPolicyTest` 与
+     * `AutoLockSessionGuardTest`，后者以注入 `now` / `backgroundTimestamp` 驱动真实守护入口）。
+     *
+     * 按 AC① 改为**走生产判据** [AutoLockTimeoutPolicy.isExpired]：判定式与阈值换算全部交生产代码，
+     * 测试体只提供注入的时钟样本（`now` / `backgroundTimestamp`）与原「已离开 70 秒 / 15 秒」两档场景
+     * （原注释把第二档写作「20 秒」，与 `now − recentBackground = 15 000 ms` 不符，本批一并订正）。
+     * AC② 未删除用例，只把弱断言修正为真断言（测试资产纪律 ①）。
+     * 机检口径见 `tools/audit/check_tautological_assertions.py`（改本文件后必跑）。
+     */
     @Test
     fun `测试后台停留超时判定逻辑`() {
         val now = 100_000L
         val backgroundTimestamp = 30_000L
         val timeoutSeconds = 60 // 60秒
 
+        // 离开 70 秒，超时 60 秒 -> 生产判据必须判为已超时
         val elapsedMillis = now - backgroundTimestamp
-        val timeoutMillis = timeoutSeconds * 1000L
+        assertTrue(AutoLockTimeoutPolicy.isExpired(timeoutSeconds, elapsedMillis))
 
-        // 离开 70 秒，超时 60 秒 -> 应触发熔断
-        assertTrue(elapsedMillis >= timeoutMillis)
-
-        // 离开 20 秒，未超时 -> 不触发熔断
+        // 离开 15 秒，未达 60 秒 -> 生产判据必须判为未超时
         val recentBackground = 85_000L
         val elapsedShort = now - recentBackground
-        assertFalse(elapsedShort >= timeoutMillis)
+        assertFalse(AutoLockTimeoutPolicy.isExpired(timeoutSeconds, elapsedShort))
     }
 }
