@@ -41,6 +41,7 @@ captures/
 # 项目计划与结论一律落 docs/ 下的正式文档）
 .trae/
 .vscode/
+.workbuddy/
 
 # 图形界面（Compose）预览导航索引：根目录 GUI导航.md 属**本地开发期检索工具**，
 # 只服务 Android Studio 预览面板的快速跳转，非项目正式文档（正式文档一律落 docs/ 并登记文档地图），
@@ -51,6 +52,13 @@ preview-exports/
 # Compose Screenshot Testing 的 reference 金样（本地导出用；若将来做视觉回归再决定是否入库）
 app/src/screenshotTestDebug/
 app/src/screenshotTest/
+# 密码库文件（*.kdbx）：开发 / 真机调试期的用户库与备份严禁入库；互操作对拍与
+# 回归用的**官方实现产出夹具**（规则 8 / 测试资产纪律的长期资产）显式保留可入库能力。
+*.kdbx
+!crypto/src/test/resources/**
+!database/src/test/resources/**
+!database/src/androidTest/assets/**
+
 # Keystore files（ISSUE-P3-09 / ZT-20 AC5 补齐）
 # 已覆盖：*.jks / *.keystore / keystore.properties（keystore.properties.example 为模板，须入库，
 # 故此处只忽略精确文件名而不做 keystore.properties.* 通配）。
@@ -112,6 +120,9 @@ fabric.properties
 KeePasskey测试/
 KeePasskey测试_backup/
 *_backup/
+# 真机调试期临时备份目录（如 .device_vault_backup_YYYY-MM-DD/）：`*_backup/` 只匹配
+# 以 _backup 结尾的目录名，盖不住带日期后缀的变体；整类目录一律不得入库。
+.device_vault_backup_*/
 
 # Python 工具链产物（tools/local-sync 等本地联调脚本）
 __pycache__/
@@ -125,4 +136,6 @@ venv/
 # 真机调试临时转储（uiautomator dump / 截图，严禁入库；b4670f2 曾误提交）
 /current_dump.xml
 /current_screen.png
-.ci-artifacts/devtest/
+# CI / 本地调试产物整树（APK/dex 转储、backup_passwords.kdbx 等）；原先只忽略
+# devtest/ 子路径，非 build 子路径的新文件会变成未跟踪垃圾，故收口为整目录。
+.ci-artifacts/
