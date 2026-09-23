@@ -428,10 +428,13 @@ class SyncEngine(
     /**
      * 在冲突合并解决完成后提交最终数据，并将基准版本前移。
      *
-     * @param expectedEtag 冲突发生时刻记录的远端 ETag。必须使用该值做 If-Match 乐观锁，
+     * @param expectedEtag 冲突发生时刻记录的远端 ETag。必须使用该值做 If 预条件乐观锁，
      *   而非重新探测的当前 ETag——用户决策期间远端可能再次被修改，
      *   用当前值会通过校验并静默覆盖他端的更新；用冲突时刻值则 412 暴露新冲突。
-     *   传空（如无 ETag 服务器）时回退为探测当前远端元数据。
+     *   传 null / 空白是**唯一**显式回退情形：调用方已判定「无基线可校验」（无 ETag 服务器，
+     *   冲突时刻本就拿不到 ETag）⇒ 无预条件上传（与 [commitLocalForce] 同语义）。
+     *   **禁止**在本方法内回退重探当前值充当预条件（ISSUE-P1-275 AC①：那会撤除合并窗口
+     *   ——一次 KDF 级全库序列化 + 一次分钟级网络往返——最后一步的乐观锁）。
      *
      * 写序约定（先上传后落缓存）：上传失败时缓存与基线保持原状
      * （本地未同步修改仍在，下次同步自动重试），避免"缓存已含合并结果但
@@ -440,12 +443,10 @@ class SyncEngine(
     suspend fun markResolvedAndUpload(
         remotePath: String,
         mergedBytes: ByteArray,
-        expectedEtag: String? = null
+        expectedEtag: String?
     ): Result<String> = withContext(Dispatchers.IO) {
         runCatching {
-            val finalExpected = expectedEtag?.takeIf { it.isNotBlank() }
-                ?: cleanEtag(provider.getMetadata(remotePath).getOrNull()?.etag)
-            val newEtag = provider.uploadAtomic(remotePath, mergedBytes, expectedEtag = finalExpected)
+            val newEtag = provider.uploadAtomic(remotePath, mergedBytes, expectedEtag?.takeIf { it.isNotBlank() })
                 .getOrThrow()
             val localHash = cache.writeCache(remotePath, mergedBytes)
             advanceBaseAndPersist(cache, remotePath, newEtag, localHash, mergedBytes)

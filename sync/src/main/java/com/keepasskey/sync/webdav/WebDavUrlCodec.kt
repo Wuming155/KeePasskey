@@ -24,9 +24,18 @@ internal object WebDavUrlCodec {
         return "$base/$encodedPath"
     }
 
-    /** 把裸 ETag 收敛为 HTTP 头形态（去引号后重新加引号）。 */
+    /**
+     * 把规范化 ETag 收敛为 HTTP 头形态（ISSUE-P1-275 AC②）。
+     * 弱校验 ETag 保留 `W/` 标记（`W/"abc"`），强 ETag 补引号（`"abc"`）——禁止剥掉弱标记后
+     * 以强形态发送：RFC 7232 §2.3 的强比较要求两侧均非弱，剥标记发出的强形态在弱存储标签的
+     * 服务器上永不匹配（恒 412）。RFC 4918 §10.4.9 的 `If` 头示例明示 `[W/"..."]` 为合法形态。
+     */
     fun formatHeaderEtag(etag: String): String {
-        val trimmed = cleanEtag(etag)
-        return "\"$trimmed\""
+        val canonical = cleanEtag(etag)
+        return if (canonical.startsWith("W/")) {
+            "W/\"${canonical.substring(2)}\""
+        } else {
+            "\"$canonical\""
+        }
     }
 }

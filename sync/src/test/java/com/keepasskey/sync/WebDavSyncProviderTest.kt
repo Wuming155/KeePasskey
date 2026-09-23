@@ -109,7 +109,8 @@ class WebDavSyncProviderTest {
         val metaResult = provider.getMetadata("vault_dir")
         assertTrue(metaResult.isSuccess)
         val meta = metaResult.getOrThrow()
-        assertEquals("weak-etag-999", meta.etag)
+        // ISSUE-P1-275 AC②：弱标记保留（旧断言预期剥掉 W/，与读写一致化口径相悖）
+        assertEquals("W/weak-etag-999", meta.etag)
         assertTrue(meta.isDirectory)
     }
 

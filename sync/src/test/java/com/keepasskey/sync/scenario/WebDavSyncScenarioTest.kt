@@ -378,7 +378,7 @@ class WebDavSyncScenarioTest {
     // ------------------------------------------------------------------
 
     @Test
-    fun `场景4 元数据ETag经IfMatch头规范化传输 弱校验清洗加引号`() = runTest {
+    fun `场景4 元数据ETag弱校验标记保留 弱期望不进IfMatch`() = runTest {
         startQueued()
         server.enqueue(
             MockResponse().setResponseCode(207).setBody(
@@ -389,17 +389,56 @@ class WebDavSyncScenarioTest {
             )
         )
         server.enqueue(MockResponse().setResponseCode(201).setHeader("ETag", "\"e2\""))
+        server.enqueue(MockResponse().setResponseCode(207).setBody(
+            """<?xml version="1.0" encoding="utf-8"?><D:multistatus xmlns:D="DAV:">
+               <D:response><D:propstat><D:prop><D:getetag>"strong-456"</D:getetag>
+               <D:getcontentlength>10</D:getcontentlength></D:prop></D:propstat></D:response>
+               </D:multistatus>"""
+        ))
+        server.enqueue(MockResponse().setResponseCode(201).setHeader("ETag", "\"e3\""))
 
         val p = provider()
+        // ISSUE-P1-275 AC②：弱标记必须保留——规范化形态 = W/ 前缀 + 不带引号不透明值
         val meta = p.getMetadata("vault.kdbx").getOrThrow()
-        assertEquals("弱校验前缀必须清洗", "weak-123", meta.etag)
+        assertEquals("弱校验标记必须保留", "W/weak-123", meta.etag)
 
+        // 弱期望 ETag 不得进 If-Match（RFC 7232 §3.1 强比较下永不匹配 → 恒 412 死锁）：
+        // 不发送 If-Match，上传照常成功
         val newEtag = p.upload("vault.kdbx", "0123456789".toByteArray(), expectedEtag = meta.etag).getOrThrow()
         assertEquals("e2", newEtag)
-
         server.takeRequest() // 第 1 个请求：PROPFIND（getMetadata）
         val putReq = server.takeRequest() // 第 2 个请求：PUT
-        assertEquals("If-Match 必须以带引号形态传输清洗后的 ETag", "\"weak-123\"", putReq.getHeader("If-Match"))
+        assertEquals("弱期望 ETag 不得产生 If-Match 头", null, putReq.getHeader("If-Match"))
+
+        // 强期望 ETag 仍以带引号形态传输 If-Match（既有行为锁定）
+        val strongMeta = p.getMetadata("vault.kdbx").getOrThrow()
+        assertEquals("strong-456", strongMeta.etag)
+        p.upload("vault.kdbx", "0123456789".toByteArray(), expectedEtag = strongMeta.etag).getOrThrow()
+        server.takeRequest() // 第 3 个请求：PROPFIND
+        val strongPut = server.takeRequest() // 第 4 个请求：PUT
+        assertEquals("\"strong-456\"", strongPut.getHeader("If-Match"))
+    }
+
+    @Test
+    fun `场景4 弱校验ETag服务器全链路上传不产生恒412`() = runTest {
+        // ISSUE-P1-275 AC④：弱 ETag 服务器（如部分 Apache/mod_dav 配置）上，乐观锁必须照常工作：
+        // MOVE 的 If 头以弱形态回传（RFC 4918 §10.4.4 允许弱比较），不得因剥标记的强形态恒 412
+        val state = startStateful()
+        state.weakEtagPaths.add("/vault.kdbx")
+        val p = provider()
+
+        val etag0 = p.upload("vault.kdbx", "v0".toByteArray()).getOrThrow()
+        assertTrue("弱存储标签必须以弱形态回读", etag0.startsWith("W/"))
+
+        // 以弱形态作预条件覆盖上传：If 头携带 W/"..."，服务器弱比较通过 ⇒ 上传成功而非恒 412
+        val etag1 = p.uploadAtomic("vault.kdbx", "v1".toByteArray(), expectedEtag = etag0).getOrThrow()
+        assertTrue(etag1.startsWith("W/"))
+        assertTrue("MOVE If 头必须携带弱形态 entity-tag", state.moveLog.last().contains("[W/\""))
+
+        // 过期弱基线仍必须被弱比较识破（乐观锁语义不因弱形态而失效）
+        val stale = p.uploadAtomic("vault.kdbx", "v2".toByteArray(), expectedEtag = etag0)
+        assertTrue("过期弱基线必须 412", stale.isFailure)
+        assertTrue(stale.exceptionOrNull() is SyncException.ConflictError)
     }
 
     @Test

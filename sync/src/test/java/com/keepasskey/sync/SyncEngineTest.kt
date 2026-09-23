@@ -265,7 +265,7 @@ class SyncEngineTest {
         engine.openRemote(remotePath)
 
         val mergedData = "merged-final-content".toByteArray()
-        val res = engine.markResolvedAndUpload(remotePath, mergedData)
+        val res = engine.markResolvedAndUpload(remotePath, mergedData, expectedEtag = null)
         assertTrue(res.isSuccess)
         val newEtag = res.getOrThrow()
         assertTrue(newEtag.isNotEmpty())
@@ -478,8 +478,29 @@ class SyncEngineTest {
         val res = engine.markResolvedAndUpload(remotePath, "merged-bytes".toByteArray(), expectedEtag = "etag-1")
         assertTrue(res.isFailure)
         assertTrue(res.exceptionOrNull() is SyncException.ConflictError)
+        // ISSUE-P1-275 AC④：冲突时刻 ETag 必须原样抵达 Provider 预条件（禁止中途替换为重探值）
+        assertEquals("冲突时刻 etag 必须原样透传", "etag-1", fakeProvider.lastExpectedEtag)
         // 远端内容未被覆盖
         assertArrayEquals("concurrent-mod".toByteArray(), fakeProvider.remoteFiles[remotePath]?.data)
+    }
+
+    @Test
+    fun `测试 markResolvedAndUpload 无基线时显式无条件上传而不重探当前值`() = runTest {
+        // ISSUE-P1-275 AC①/AC④：expectedEtag 为空是「无基线可校验」的唯一显式回退情形，
+        // 必须走无条件 PUT——绝不允许回退重探当前远端 ETag 充当预条件（旧实现正是用当前值
+        // 撤除了合并窗口最后一步的乐观锁，使他端窗口内写入被静默覆盖）
+        val v1 = "content-v1".toByteArray()
+        fakeProvider.remoteFiles[remotePath] = FakeRemoteFile(v1, etag = "etag-live-remote")
+        engine.openRemote(remotePath)
+
+        val res = engine.markResolvedAndUpload(remotePath, "merged-bytes".toByteArray(), expectedEtag = null)
+        assertTrue(res.isSuccess)
+        assertEquals(
+            "必须原样下传 null（无条件 PUT），而非重探到的 etag-live-remote",
+            null,
+            fakeProvider.lastExpectedEtag
+        )
+        assertArrayEquals("merged-bytes".toByteArray(), fakeProvider.remoteFiles[remotePath]?.data)
     }
 
     // ===== ISSUE-P2-18：防回滚（旧库重放拒绝 / 其他客户端不误报） =====

@@ -66,6 +66,13 @@ class SyncCoordinatorTest {
         // 与真实 WebDavSyncProvider/S3SyncProvider 在超深 XML / 超大响应下的失败形态同构
         var downloadFailure: Throwable? = null
 
+        // ISSUE-P1-275 AC④：最近一次 upload 收到的期望 ETag（断言预条件真实传递）
+        var lastExpectedEtag: String? = null
+            private set
+
+        // ISSUE-P1-275 AC③：接下来 N 次 upload 一律 412（模拟合并窗口内远端持续被他人修改）
+        var forceConflictUploads: Int = 0
+
         override suspend fun testConnection(): Result<Unit> {
             return if (isReachable) Result.success(Unit) else Result.failure(IOException("Server unreachable"))
         }
@@ -97,8 +104,19 @@ class SyncCoordinatorTest {
         }
 
         override suspend fun upload(remotePath: String, data: ByteArray, expectedEtag: String?): Result<String> {
+            lastExpectedEtag = expectedEtag
             if (!isReachable) return Result.failure(SyncException.NetworkError("Network error"))
             val existing = remoteStorage[remotePath]
+            if (forceConflictUploads > 0) {
+                forceConflictUploads--
+                return Result.failure(
+                    SyncException.ConflictError(
+                        remoteEtag = existing?.second.orEmpty(),
+                        localExpectedEtag = expectedEtag.orEmpty(),
+                        message = "Forced precondition failed"
+                    )
+                )
+            }
             if (expectedEtag != null && existing != null && existing.second != expectedEtag) {
                 return Result.failure(
                     SyncException.ConflictError(
@@ -328,5 +346,89 @@ class SyncCoordinatorTest {
         val savedEntry = databaseSession.databaseFlow.value!!.rootGroup.allEntries()
             .first { it.id == entryId }
         assertEquals("LocalOnly#9", savedEntry.fields[KdbxConstants.Fields.PASSWORD]?.readString())
+    }
+
+    /** 建立基线后：本地新增条目 A（落盘），远端新增条目 B（无字段分叉 ⇒ 自动合并路径） */
+    private suspend fun prepareAutoMergeScenario(
+        memoryProvider: MemorySyncProvider,
+        remotePath: String
+    ) {
+        coordinator.testSyncProvider = memoryProvider
+        coordinator.testRemotePath = remotePath
+        val baseEntry = KdbxEntry(
+            id = KdbxUuid.random(),
+            fields = mapOf(
+                KdbxConstants.Fields.TITLE to ProtectedString("Base Entry", false),
+                KdbxConstants.Fields.PASSWORD to ProtectedString("BasePassword#1", true)
+            )
+        )
+        databaseSession.saveEntry(baseEntry)
+        databaseSession.save()
+        coordinator.syncNow()
+
+        // 本地新增条目 A（与远端改动无字段交集）
+        val localOnlyEntry = KdbxEntry(
+            id = KdbxUuid.random(),
+            fields = mapOf(
+                KdbxConstants.Fields.TITLE to ProtectedString("LocalOnlyEntry", false),
+                KdbxConstants.Fields.PASSWORD to ProtectedString("LocalOnlyPwd#1", true)
+            )
+        )
+        databaseSession.saveEntry(localOnlyEntry)
+        databaseSession.save()
+
+        // 远端新增条目 B，ETag 前移（冲突时刻 ETag = etag_remote_added_B）
+        val remoteDb = databaseSession.databaseFlow.value!!.copy()
+        val remoteOnlyEntry = KdbxEntry(
+            id = KdbxUuid.random(),
+            fields = mapOf(
+                KdbxConstants.Fields.TITLE to ProtectedString("RemoteOnlyEntry", false),
+                KdbxConstants.Fields.PASSWORD to ProtectedString("RemoteOnlyPwd#1", true)
+            )
+        )
+        val updatedRemoteRoot = remoteDb.rootGroup.copy(entries = remoteDb.rootGroup.entries + remoteOnlyEntry)
+        val baos = ByteArrayOutputStream()
+        KdbxFile.save(baos, remoteDb.copy(rootGroup = updatedRemoteRoot), masterPassword)
+        memoryProvider.remoteStorage[remotePath] = Pair(baos.toByteArray(), "etag_remote_added_B")
+    }
+
+    @Test
+    fun `测试自动合并上传必须携带冲突时刻ETag`() = runTest(testDispatcher) {
+        // ISSUE-P1-275 AC①/AC④：自动合并路径（旧实现整个丢弃冲突时刻 ETag、退化为重探当前值）
+        // 的合并上传必须把冲突时刻 ETag 透传到 Provider 预条件
+        val memoryProvider = MemorySyncProvider()
+        val remotePath = "/remote/vault_p275_auto.kdbx"
+        prepareAutoMergeScenario(memoryProvider, remotePath)
+
+        val outcome = coordinator.syncNow()
+        assertTrue("无字段分叉应自动合并并上传: $outcome", outcome is SyncOutcome.MergedAndUploaded)
+        assertEquals(
+            "合并上传必须携带冲突时刻 ETag 作 If 预条件",
+            "etag_remote_added_B",
+            memoryProvider.lastExpectedEtag
+        )
+    }
+
+    @Test
+    fun `测试合并上传412后重新进入冲突流程完成二次合并上传`() = runTest(testDispatcher) {
+        // ISSUE-P1-275 AC③：合并上传遭 412（合并窗口内远端再次变更）必须重新进入冲突流程
+        // （重新合并 + 重新上传），而非归一为一次性错误
+        val memoryProvider = MemorySyncProvider()
+        val remotePath = "/remote/vault_p275_412reentry.kdbx"
+        prepareAutoMergeScenario(memoryProvider, remotePath)
+
+        // 接下来两次 upload 一律 412：① 合并上传本身 412 ⇒ 触发重入；
+        // ② 重入前取最新远端的 commitLocal 上传也 412（基线已过期）⇒ 携最新远端进入二次合并
+        memoryProvider.forceConflictUploads = 2
+
+        val outcome = coordinator.syncNow()
+        assertTrue("412 重入后二次合并上传必须成功: $outcome", outcome is SyncOutcome.MergedAndUploaded)
+        // 二次合并的最终上传携带重入时探测到的最新 ETag
+        assertEquals("etag_remote_added_B", memoryProvider.lastExpectedEtag)
+
+        // 双侧新增均存活
+        val entries = databaseSession.databaseFlow.value!!.rootGroup.allEntries()
+        assertEquals("本地与远端新增条目合并后均存活", 3, entries.size)
+        assertTrue(coordinator.conflictFlow.value.isEmpty())
     }
 }

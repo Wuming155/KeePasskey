@@ -83,19 +83,29 @@ sealed class SyncException(message: String, cause: Throwable? = null) : Exceptio
 }
 
 /**
- * 规范化 ETag：去除前后空白、可选的弱校验前缀 `W/` 与成对包裹引号。
- * 仅做结构级剥离，不会误伤以 W、/ 等字符开头或结尾的合法不透明 ETag 值。
+ * 规范化 ETag（ISSUE-P1-275 AC②）：去除前后空白与成对包裹引号，**保留弱校验标记 `W/`**。
+ *
+ * 规范形态 = 可选 `W/` 前缀 + 不带引号的不透明值（如 `W/abc` / `abc`）。弱标记必须在**剥引号之前**
+ * 依语法形态判定（`W/` 后紧跟引号，RFC 7232 §2.1 弱标签恒为 `W/"opaque"`）：不透明标签的内容本身
+ * 可以 `W/` 开头（如 `"W/abc"`），剥引号后与弱标签不可区分——先判弱再剥引号才能不误伤。
+ *
+ * 保留弱标记是读写两侧一致化的前提：读侧吞掉 `W/` 会让写侧只能发强形态（RFC 7232 §2.3 强比较下
+ * 弱存储标签永不匹配），在严格服务器上退化为恒 412。本函数幂等。
  */
 fun cleanEtag(etag: String?): String {
     var s = etag?.trim().orEmpty()
-    if (s.length >= 2 && s.startsWith("W/", ignoreCase = true)) {
+    val isWeak = s.length >= 3 && s.startsWith("W/", ignoreCase = true) && s[2] == '"'
+    if (isWeak) {
         s = s.substring(2).trim()
     }
     if (s.length >= 2 && s.first() == '"' && s.last() == '"') {
         s = s.substring(1, s.length - 1).trim()
     }
-    return s
+    return if (isWeak) "W/$s" else s
 }
+
+/** 规范形态下是否为弱校验 ETag（`W/` 前缀；不透明值以 `W/` 开头的病态情形按弱处理，写侧退化为安全的 412 → 冲突重检）。 */
+fun isWeakEtag(etag: String?): Boolean = cleanEtag(etag).startsWith("W/")
 
 @JvmName("cleanEtagExtension")
 fun String?.cleanEtag(): String = cleanEtag(this)

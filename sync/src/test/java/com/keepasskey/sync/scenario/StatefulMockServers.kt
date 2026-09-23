@@ -53,16 +53,32 @@ class StatefulDavDispatcher : Dispatcher() {
     /** MOVE 处理日志（调试用） */
     val moveLog = java.util.concurrent.CopyOnWriteArrayList<String>()
 
+    /**
+     * ISSUE-P1-275 AC④：按路径模拟**弱校验 ETag 服务器**（如部分 Apache/mod_dav 配置）。
+     * 命中路径的写入产生 `W/etag-N` 形态存储标签，PROPFIND/GET 回传 `W/"etag-N"`。
+     */
+    val weakEtagPaths: MutableSet<String> = java.util.Collections.newSetFromMap(ConcurrentHashMap())
+
     fun nextEtag(): String = "etag-${counter.incrementAndGet()}"
+
+    /** 对象当前 ETag 的完整形态（弱路径带 `W/` 前缀）；无对象时为 null */
+    fun etagForm(path: String): String? = etags[path]?.let { if (path in weakEtagPaths) "W/$it" else it }
 
     fun tmpResidues(): List<String> = files.keys.filter { it.endsWith(".kpktmp") }.toList()
 
     private fun parseIfEtag(request: RecordedRequest): String? {
-        // RFC 4918 tagged list: If: <http://host/path> (["etag"])
+        // RFC 4918 tagged list: If: <http://host/path> (["etag"]) / ([W/"etag"])
+        // 捕获括号内完整 entity-tag（含可选弱标记与引号），回传剥引号后的不透明值；
+        // 与内部存储形态（bare opaque）比较即 RFC 2616 §13.3.3 弱比较语义
         val header = request.getHeader("If") ?: return null
-        val match = Regex("\\(\\[\"([^\"]*)\"\\]\\)").find(header) ?: return null
-        return match.groupValues[1]
+        val match = Regex("\\(\\[([^\\]]*)\\]\\)").find(header) ?: return null
+        return match.groupValues[1].removePrefix("W/").removeSurrounding("\"")
     }
+
+    /** ETag 响应头完整形态（弱路径带 `W/` 标记） */
+    private fun etagHeader(path: String): String =
+        etags[path]?.let { if (path in weakEtagPaths) "W/\"$it\"" else "\"$it\"" }
+            ?: "\"\""
 
     private fun destinationPath(request: RecordedRequest): String? {
         val dest = request.getHeader("Destination") ?: return null
@@ -74,14 +90,14 @@ class StatefulDavDispatcher : Dispatcher() {
             timeZone = TimeZone.getTimeZone("GMT")
         }.format(Date())
 
-    private fun propfindBody(etag: String, length: Long, isCollection: Boolean): String {
+    private fun propfindBody(etagForm: String, length: Long, isCollection: Boolean): String {
         val resourceType = if (isCollection) "<D:resourcetype><D:collection/></D:resourcetype>" else "<D:resourcetype/>"
         return """<?xml version="1.0" encoding="utf-8"?>
 <D:multistatus xmlns:D="DAV:">
   <D:response>
     <D:propstat>
       <D:prop>
-        <D:getetag>"$etag"</D:getetag>
+        <D:getetag>$etagForm</D:getetag>
         <D:getcontentlength>$length</D:getcontentlength>
         <D:getlastmodified>${httpDate()}</D:getlastmodified>
         $resourceType
@@ -102,7 +118,7 @@ class StatefulDavDispatcher : Dispatcher() {
                     files[path] = request.body.readByteArray()
                     val etag = nextEtag()
                     etags[path] = etag
-                    MockResponse().setResponseCode(201).setHeader("ETag", "\"$etag\"")
+                    MockResponse().setResponseCode(201).setHeader("ETag", etagHeader(path))
                 }
             }
             "GET" -> {
@@ -115,21 +131,22 @@ class StatefulDavDispatcher : Dispatcher() {
                     } else {
                         MockResponse().setResponseCode(200)
                             .setBody(Buffer().write(bytes))
-                            .setHeader("ETag", "\"${etags[path]}\"")
+                            .setHeader("ETag", etagHeader(path))
                     }
                 }
             }
             "PROPFIND" -> {
                 if (path == "/") {
+                    val rootEtag = etags[path] ?: "root-etag"
                     MockResponse().setResponseCode(207)
-                        .setBody(propfindBody(etags[path] ?: "root-etag", 0L, isCollection = true))
+                        .setBody(propfindBody("\"$rootEtag\"", 0L, isCollection = true))
                 } else {
                     val bytes = files[path]
                     if (bytes == null) {
                         MockResponse().setResponseCode(404)
                     } else {
                         MockResponse().setResponseCode(207)
-                            .setBody(propfindBody(etags[path].orEmpty(), bytes.size.toLong(), isCollection = false))
+                            .setBody(propfindBody(etagHeader(path), bytes.size.toLong(), isCollection = false))
                     }
                 }
             }
@@ -160,7 +177,7 @@ class StatefulDavDispatcher : Dispatcher() {
                     files[dest] = src
                     val etag = nextEtag()
                     etags[dest] = etag
-                    MockResponse().setResponseCode(201).setHeader("ETag", "\"$etag\"")
+                    MockResponse().setResponseCode(201).setHeader("ETag", etagHeader(dest))
                 }
             }
             "DELETE" -> {

@@ -4,6 +4,7 @@ import androidx.annotation.VisibleForTesting
 import com.keepasskey.sync.model.RemoteFileMetadata
 import com.keepasskey.sync.model.SyncException
 import com.keepasskey.sync.model.cleanEtag
+import com.keepasskey.sync.model.isWeakEtag
 import com.keepasskey.sync.network.SyncDownloadLimits
 import com.keepasskey.sync.network.SyncEndpointGuard
 import com.keepasskey.sync.network.SyncHttpClientFactory
@@ -207,9 +208,14 @@ class WebDavSyncProvider(
                 .put(WebDavUploadBody.create(data, transferOptions))
                 .header("Authorization", authHeader)
 
-            if (!expectedEtag.isNullOrBlank()) {
+            if (!expectedEtag.isNullOrBlank() && !isWeakEtag(expectedEtag)) {
                 requestBuilder.header("If-Match", WebDavUrlCodec.formatHeaderEtag(expectedEtag))
             }
+            // ISSUE-P1-275 AC②：弱校验 ETag 不得进 If-Match——RFC 7232 §3.1 规定 If-Match 恒用
+            // 强比较，弱标签在合规服务器上永不匹配，发送即恒 412 死锁（RFC 4918 §8.6 明示
+            // "weak ETags … cannot be used in If-Match headers"）。跳过预条件不是静默降级：
+            // 本应用 WebDAV 的目标资源乐观锁由 [uploadAtomic] 的 MOVE `If` 头承担（RFC 4918
+            // §10.4.4 允许弱比较，弱形态可表达），生产写路径不经过本分支。
 
             httpClient.newCall(requestBuilder.build()).execute().use { response ->
                 when {
@@ -290,9 +296,12 @@ class WebDavSyncProvider(
                     .header("Destination", destUrl)
 
                 if (!expectedEtag.isNullOrBlank()) {
-                    // RFC 4918 Section 10.4: tagged list If 头把 ETag 预条件绑定到 MOVE 目标资源
+                    // RFC 4918 Section 10.4: tagged list If 头把 ETag 预条件绑定到 MOVE 目标资源。
+                    // ISSUE-P1-275 AC②：经 formatHeaderEtag 保留弱校验标记（`([W/"abc"])`）——
+                    // RFC 4918 §10.4.4 允许服务器对 If 头用弱或强比较，回传服务器签发的原形态
+                    // （弱存储标签 × 弱比较）才可匹配；剥标记的强形态只在弱比较服务器上恰好同义。
                     moveBuilder.header("Overwrite", overwriteFlag)
-                    moveBuilder.header("If", "<$destUrl> ([\"${cleanEtag(expectedEtag)}\"])")
+                    moveBuilder.header("If", "<$destUrl> ([${WebDavUrlCodec.formatHeaderEtag(expectedEtag)}])")
                 } else {
                     moveBuilder.header("Overwrite", overwriteFlag)
                 }

@@ -4,6 +4,7 @@ import androidx.annotation.VisibleForTesting
 import com.keepasskey.sync.model.RemoteFileMetadata
 import com.keepasskey.sync.model.SyncException
 import com.keepasskey.sync.model.cleanEtag
+import com.keepasskey.sync.model.isWeakEtag
 import com.keepasskey.sync.network.SyncDownloadLimits
 import com.keepasskey.sync.network.SyncEndpointGuard
 import com.keepasskey.sync.network.SyncHttpClientFactory
@@ -258,7 +259,9 @@ class S3SyncProvider(
                         isFirstUpload = false
                         val probedEtag = metaResult.getOrThrow().etag
                         // ISSUE-P2-244：ETag 空白 ⇒ 条件写无从构造，放行即退化为无条件 PUT（选型见方法 KDoc）
-                        if (probedEtag.isBlank()) {
+                        // ISSUE-P1-275 AC②：弱校验 ETag 同样构造不出 If-Match（RFC 7232 §3.1 强比较，
+                        // 弱标签永不匹配），与空白同口径 fail-closed
+                        if (probedEtag.isBlank() || isWeakEtag(probedEtag)) {
                             throw SyncException.ProtocolError(
                                 200, "S3 覆盖前 HEAD 未返回 ETag，无法构造条件写，已拒绝无条件 PUT"
                             )
@@ -281,6 +284,13 @@ class S3SyncProvider(
                         remoteEtag = currentMeta.etag,
                         localExpectedEtag = expectedEtag,
                         message = "S3 远端文件已被其他人更新 (ETag 不匹配)"
+                    )
+                }
+                // ISSUE-P1-275 AC②：弱校验 ETag 构造不出 If-Match（强比较下永不匹配，发即恒 412），
+                // 与 P2-244 的「条件写无从构造即 fail-closed」同口径
+                if (isWeakEtag(expectedEtag)) {
+                    throw SyncException.ProtocolError(
+                        200, "S3 期望 ETag 为弱校验形态，无法构造条件写，已拒绝无条件 PUT"
                     )
                 }
                 precheckEtag = expectedEtag
