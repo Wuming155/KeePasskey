@@ -131,7 +131,15 @@ fun SecuritySettingsScreen(
                         SecuritySwitchRow(
                             icon = Icons.Default.Fingerprint,
                             title = stringResource(R.string.sec_biometric_title),
-                            subtitle = stringResource(R.string.sec_biometric_sub),
+                            // ISSUE-P2-285 AC①：硬件声明按实测安全等级条件渲染——
+                            // 软件级降级（P1-22 实测登记）下如实呈现「无硬件隔离」
+                            subtitle = stringResource(
+                                if (uiState.quickUnlockDowngradeAcknowledged) {
+                                    R.string.sec_biometric_sub_software
+                                } else {
+                                    R.string.sec_biometric_sub
+                                }
+                            ),
                             checked = uiState.biometricEnabled,
                             // ISSUE-P2-212：验证进行中禁用开关，防止并发发起多个 BiometricPrompt
                             enabled = !uiState.biometricVerifying,

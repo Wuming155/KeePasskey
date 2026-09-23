@@ -76,6 +76,15 @@ class SyncCredentialsStore @Inject constructor(
     // 测试注入钩子仍由本类持有并逐次传入，语义不变。
     private val sealer = SyncCredentialSealer(keystoreManager, debugLog, SYNC_KEY_ALIAS)
 
+    /**
+     * ISSUE-P2-285 AC①／AC②：同步凭据封印密钥的**实测**硬件落位等级
+     * （`KeyInfo.securityLevel` 探测；密钥尚未生成 / 无 Keystore 时返回 null，
+     * 调用方按「非硬件」如实呈现降级文案——与解锁面 `UnlockAuthPolicy` 的
+     * SOFTWARE / UNKNOWN 同判口径）。
+     */
+    fun syncSealSecurityLevel(): KeystoreManager.KeySecurityLevel? =
+        keystoreManager?.getKeySecurityLevel(SYNC_KEY_ALIAS)
+
     fun saveProvider(provider: CloudSyncProvider) {
         prefs.edit().putString(KEY_PROVIDER, provider.name).apply()
     }

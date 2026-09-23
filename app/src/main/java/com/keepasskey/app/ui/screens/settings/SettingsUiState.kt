@@ -106,6 +106,8 @@ data class SettingsUiState(
     val syncStatusText: String = "",
     /** 连接是否已通过测试/成功同步验证；未验证时「立即同步」禁用，防误触 */
     val isConnectionVerified: Boolean = false,
+    /** ISSUE-P2-285 AC②：同步凭据封印密钥实测为硬件级（false = 软件级 / 未生成，声明如实降级） */
+    val syncSealHardwareBacked: Boolean = false,
     val autoSyncEnabled: Boolean = true,
     val wifiOnlySync: Boolean = true,
     val isSyncing: Boolean = false,

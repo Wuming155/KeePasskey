@@ -129,6 +129,8 @@ internal fun buildSettingsUiState(
     syncFeedbackMessage = syncState.syncFeedbackMessage,
     syncLastTime = syncState.lastSyncTimeText.ifEmpty { strings.get(R.string.sync_last_time_never) },
     isConnectionVerified = syncState.isConnectionVerified,
+    // ISSUE-P2-285 AC②：凭据封印声明的实测硬件落位（单一真相源 = SyncCredentialsStore 探测）
+    syncSealHardwareBacked = syncState.syncSealHardwareBacked,
     syncStatusText = when {
         syncState.isSyncing -> strings.get(R.string.sync_status_syncing)
         syncState.isConnectionVerified -> strings.get(R.string.sync_status_synced)

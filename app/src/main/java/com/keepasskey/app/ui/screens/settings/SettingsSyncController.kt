@@ -52,7 +52,10 @@ internal class SettingsSyncController(
         // H1 整改：真实同步完成时刻文案（空串=本会话尚未同步成功过）
         val lastSyncTimeText: String = "",
         // 连接是否已验证（测试连接或同步成功后置位；配置变更后复位）
-        val isConnectionVerified: Boolean = false
+        val isConnectionVerified: Boolean = false,
+        // ISSUE-P2-285 AC②：同步凭据封印密钥实测为硬件级（TEE / StrongBox）——
+        // 设置页「凭据封印」声明按此条件渲染（false = 软件级 / 未生成，如实降级呈现）
+        val syncSealHardwareBacked: Boolean = false
     )
 
     private val syncStateFlow = MutableStateFlow(
@@ -61,9 +64,23 @@ internal class SettingsSyncController(
             autoSyncEnabled = true,
             wifiOnlySync = true,
             isSyncing = false,
-            syncFeedbackMessage = null
+            syncFeedbackMessage = null,
+            syncSealHardwareBacked = probeSealHardwareBacked()
         )
     )
+
+    /** ISSUE-P2-285：实测封印密钥落位（判据落点唯一，与解锁面 SOFTWARE / UNKNOWN 同判）。 */
+    private fun probeSealHardwareBacked(): Boolean =
+        when (syncCredentialsStore.syncSealSecurityLevel()) {
+            com.keepasskey.app.security.KeystoreManager.KeySecurityLevel.STRONGBOX,
+            com.keepasskey.app.security.KeystoreManager.KeySecurityLevel.TRUSTED_ENVIRONMENT -> true
+            else -> false
+        }
+
+    /** ISSUE-P2-285：封印密钥可能在保存后新生成 / 轮换，保存成功路径后重测。 */
+    private fun refreshSealHardwareBacked() {
+        syncStateFlow.update { it.copy(syncSealHardwareBacked = probeSealHardwareBacked()) }
+    }
 
     val state: StateFlow<SyncUiState> = syncStateFlow.asStateFlow()
 
@@ -105,6 +122,8 @@ internal class SettingsSyncController(
      */
     fun restoreSyncCredentials() {
         val store = syncCredentialsStore
+        // ISSUE-P2-285：进入设置页即重测封印密钥落位（覆盖历史会话生成的密钥）
+        refreshSealHardwareBacked()
         val savedProvider = store.loadProvider()
         val savedWebDav = store.loadWebDavConfig()
         val savedS3 = store.loadS3Config()
@@ -180,6 +199,8 @@ internal class SettingsSyncController(
         // 保存成功后旧预填通道失效（最新凭据已由存储库持有，重进页面将重新恢复）
         _webdavPasswordPrefill.value?.fill('0')
         _webdavPasswordPrefill.value = null
+        // ISSUE-P2-285：封印密钥可能本次保存新生成，重测硬件落位
+        refreshSealHardwareBacked()
         return true
     }
 
@@ -235,6 +256,8 @@ internal class SettingsSyncController(
         _s3AccessKeyPrefill.value = null
         _s3SecretKeyPrefill.value?.fill('0')
         _s3SecretKeyPrefill.value = null
+        // ISSUE-P2-285：封印密钥可能本次保存新生成，重测硬件落位
+        refreshSealHardwareBacked()
         return true
     }
 

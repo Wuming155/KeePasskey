@@ -41,22 +41,7 @@
 
 ---
 
-## P2 中危缺陷与协议/测试缺口（7 项）
-
-### ISSUE-P2-285：硬件密钥与「明文不落地」类安全声明无条件渲染（5 处文案，其中 1 处被实现直接否证）
-
-- **核实时间点**：2026-09-23 经渲染点穷举 + `UnlockUiState` 生产构造点穷举（第 ① 条另经逐行反校：`hardwareBackedSecurity` 命中 4 处，唯一赋值在 `@Preview`）。
-- **核实方式与清单**（五处**全部无条件渲染**）：
-  ① `app/.../ui/screens/unlock/UnlockScreen.kt:217-221` 在 QUICK_UNLOCK 分支显示 `strings.xml:385`「已通过硬件 KeyStore 保全加密主密钥」；真值字段 `UnlockUiState.hardwareBackedSecurity`（`UnlockUiState.kt:49`）**全仓唯一赋值点在 `@Preview`**（`UnlockContentSections.kt:251-261`，生产构造点 8 处无一回填）；`security/KeystoreKeyMaterial.kt:119-126` 对软件级 Keystore 仅 `debugLog.warn`；进入 QUICK_UNLOCK 不要求硬件级（`UnlockModePolicy.kt:31-36`，`BiometricEnrollmentCoordinator.kt:270-277` 降级路径同样置 `isQuickUnlockAvailable = true`）⇒ 软件级机型上「硬件保全」与同卡片 `:113-129` 的「不提供硬件级保护」**同屏并存**。
-  ② `strings.xml:660 sec_arch_desc`（渲染于 `SecuritySettingsScreen.kt:424`）称「主密钥驻留 Android Keystore 硬件隔离区，**任何明文数据都不会写入磁盘**」——被两处否证：自产明文导出（`strings.xml:557-563` 自述含全部字段值），以及 `app/data/binary/FileBinaryStore.kt` 的 `store()` / `storeFromStream()` **无任何加密调用**（`core/security/BinaryStore.kt` 契约第 3 条只要求文件 0600 / 目录 0700）⇒ 大附件以明文落私有目录。
-  ③ `strings.xml:591 sec_biometric_sub`「密钥由硬件安全模块保护」（`SecuritySettingsScreen.kt:134`），正挂在 ISSUE-P1-22 降级弹窗（`strings.xml:369` 自承软件级、无 TEE/StrongBox）所守护的开关上。
-  ④ `strings.xml:745 sync_credential_auth_notice`「同步凭据经**硬件** Keystore 加密封印」（`CloudSyncSections.kt:306`）：走 `SyncCredentialSealer.kt:55/91` → `KeystoreKeyMaterial.kt:119-126`，且**同步面无解锁面那样的降级声明**。
-  ⑤ `strings.xml:165 detail_passkey_chip`「FIDO2 硬件芯片保护」（`EntryDetailCards.kt:215`）与 `:212`「已绑定 Passkey 硬件凭据」（`EntryEditComponents.kt:141`）：私钥实为库内软件字段（`PasskeyKeyGeneration.kt:53/98/146` 走 BouncyCastle）+ 自证明 `fmt="none"`。
-- **背景与根因**：属本项目明确反对的「界面谎报」族（先例 `ISSUE-P1-241` / `ISSUE-P3-65` / `ISSUE-P2-228` / `ISSUE-P0-02`），且本族**全为安全语义**——用户会据此形成「硬件隔离」「不留明文」的错误认知。限界表与 `产品裁决登记.md` 检索 `SECURITY_LEVEL_SOFTWARE|Keystore` 仅 2 处无关命中 ⇒ 未登记。
-- **涉及文件**：上列 5 个渲染点 + `res/values/strings.xml` 与 `res/values-en/strings.xml` 对应键；真值来源 `KeystoreKeyMaterial` / `BiometricEnrollmentCoordinator` / `FileBinaryStore`。
-- **验收标准**：AC① 硬件类声明改为**按实测安全等级条件渲染**（判据落单一函数，TEE/StrongBox 与软件级两套文案，中英成对），禁硬编码；AC② 同步面补齐与解锁面同形的软件级降级声明；AC③ `sec_arch_desc` 的「任何明文数据都不会写入磁盘」须如实改写（大附件明文落私有目录 + 用户可触发的明文导出两项事实都要反映），或按 AC⑤ 处置后改写；AC④ passkey 徽标与文案去「芯片 / 硬件」表述，如实写「软件密钥（库内加密存储）」；AC⑤ 对「附件明文落盘」单独裁定：加密落盘（则 ② 前半句可保留）或维持现状并如实措辞，结论登记 `PD-*`；AC⑥ 新增接线守卫用例，锁定「文案分支跟随实测等级」（沿用 `AutofillChannelSwitchWiringTest` 的静态消费点计数口径），禁「有真值字段但无生产赋值」复现。
-
----
+## P2 中危缺陷与协议/测试缺口（6 项）
 
 ### ISSUE-P2-286：口令生成器熵读数虚高约 3 倍，且全站三套熵模型并存——同一口令三屏三数
 

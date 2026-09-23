@@ -350,7 +350,7 @@ fun CloudSyncScreen(
 
             // 7. 零知识与端到端加密机制说明
             item {
-                ZeroKnowledgeCard()
+                ZeroKnowledgeCard(sealHardwareBacked = uiState.syncSealHardwareBacked)
             }
 
             item {

@@ -215,7 +215,14 @@ fun UnlockContent(
                 Spacer(modifier = Modifier.height(4.dp))
 
                 Text(
-                    text = if (uiState.unlockMode == UnlockMode.QUICK_UNLOCK) stringResource(R.string.unlock_quick_subtitle) else stringResource(R.string.unlock_subtitle),
+                    // ISSUE-P2-285 AC①：硬件声明按实测安全等级条件渲染——软件级降级态
+                    // （quickUnlockDowngraded，P1-22 实测回填）下如实呈现「无硬件隔离」，
+                    // 禁硬件 / 软件一律渲染硬件文案
+                    text = when {
+                        uiState.unlockMode != UnlockMode.QUICK_UNLOCK -> stringResource(R.string.unlock_subtitle)
+                        uiState.quickUnlockDowngraded -> stringResource(R.string.unlock_quick_subtitle_software)
+                        else -> stringResource(R.string.unlock_quick_subtitle)
+                    },
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

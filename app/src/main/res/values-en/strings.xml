@@ -152,7 +152,7 @@
     <string name="detail_totp_section">Two-Factor Token (TOTP)</string>
     <string name="detail_totp_code">Real-time TOTP Token</string>
     <string name="detail_passkey_section">Passkey Credential (WebAuthn)</string>
-    <string name="detail_passkey_chip">FIDO2 Hardware Security</string>
+    <string name="detail_passkey_chip">FIDO2 software key (stored encrypted in vault)</string>
     <string name="detail_passkey_rp">Relying Party (RP ID): %1$s</string>
     <string name="detail_passkey_desc">Supports Android 14+ Credential Manager passwordless authentication</string>
     <string name="detail_custom_fields_section">Custom Secure Fields</string>
@@ -199,7 +199,7 @@
     <string name="edit_passkey_section">Passkey (WebAuthn)</string>
     <string name="edit_passkey_bind">Bind</string>
     <string name="edit_passkey_unbind">Unbind</string>
-    <string name="edit_passkey_has_bound">Passkey hardware credential bound</string>
+    <string name="edit_passkey_has_bound">Passkey credential bound</string>
     <string name="edit_passkey_create">Create Passkey for this website</string>
     <string name="edit_passkey_desc">Powered by Android 14+ Credential Manager with end-to-end asymmetric keys</string>
     <string name="edit_custom_fields">Custom Fields (Key-Value)</string>
@@ -353,7 +353,6 @@
     <string name="sec_biometric_key_invalidated">Biometric credentials changed, security key invalidated. Please use master password.</string>
     <!-- ISSUE-P1-22: software-level Keystore quick unlock downgrade (explicit consent + resident notice) -->
     <string name="quick_unlock_software_key_notice">Quick unlock on this device falls back to a software key without hardware-level protection</string>
-    <string name="unlock_hardware_backed_security">Hardware-backed key protection</string>
     <string name="unlock_downgrade_dialog_title">Quick unlock security downgrade</string>
     <string name="unlock_downgrade_dialog_body">This device\'s Keystore is software-level (no TEE / StrongBox hardware isolation). Quick unlock seals your master password and key file with a software key that can be extracted offline. Enable anyway?</string>
     <string name="unlock_downgrade_confirm">Enable anyway (software key)</string>
@@ -372,6 +371,8 @@
     <!-- Unlock QuickUnlock -->
     <string name="unlock_quick_title">QuickUnlock Fast Unlock</string>
     <string name="unlock_quick_subtitle">Master key secured by hardware-backed KeyStore</string>
+    <!-- ISSUE-P2-285：实测为软件级 Keystore 时的如实文案（与硬件版成对，禁硬编码单一形态） -->
+    <string name="unlock_quick_subtitle_software">Master key secured by device key (no hardware isolation on this device)</string>
     <string name="unlock_readonly">Open read-only</string>
     <string name="unlock_readonly_desc">View only this session, all writes rejected</string>
     <string name="unlock_switch_to_full">Switch to full master password &amp; key file unlock</string>
@@ -583,6 +584,8 @@
     <string name="sec_section_biometric">Biometrics &amp; quick unlock</string>
     <string name="sec_biometric_title">Biometric unlock</string>
     <string name="sec_biometric_sub">Unlock with fingerprint or face, key protected by secure hardware</string>
+    <!-- ISSUE-P2-285：实测为软件级 Keystore 时的如实文案（与硬件版成对） -->
+    <string name="sec_biometric_sub_software">Unlock with fingerprint or face; key protected by Android Keystore (no hardware isolation on this device)</string>
     <!-- ISSUE-P2-212: the switch is off by default; enabling verifies biometrics on the spot -->
     <string name="sec_biometric_verify_title">Enable biometric unlock</string>
     <string name="sec_biometric_verify_subtitle">Verify your fingerprint or face to confirm you are enabling this</string>
@@ -652,7 +655,7 @@
     <string name="sec_kill_app_title">Wipe process memory on lock</string>
     <string name="sec_kill_app_sub">Release the master key and plaintext caches immediately on lock</string>
     <string name="sec_arch_title">Security architecture</string>
-    <string name="sec_arch_desc">The database is encrypted with KDBX 4 (AES-256 / ChaCha20 + Argon2). The master key lives in the Android Keystore hardware enclave and no plaintext is ever written to disk</string>
+    <string name="sec_arch_desc">The database is encrypted with KDBX 4 (AES-256 / ChaCha20 + Argon2); the vault file is always stored encrypted. The master key is sealed by Android Keystore, with TEE / StrongBox hardware isolation on devices that support it (measured, with an honest notice when unavailable). Large attachments are staged in plaintext in the app-private directory; plaintext export files are produced only with your explicit confirmation</string>
 
     <!-- ===== Sync settings subscreen ===== -->
     <string name="sync_screen_title">Sync &amp; cloud backup</string>
@@ -736,7 +739,9 @@
     <string name="sync_preload_sub">Prefetch the cloud copy on Wi-Fi to speed up unlocking</string>
     <string name="sync_zeroknowledge_title">Zero-knowledge end-to-end encryption</string>
     <string name="sync_zeroknowledge_desc">Your master password never leaves this device. The cloud stores only Argon2-encrypted blocks, so neither the server nor anyone in between can decrypt your vault</string>
-    <string name="sync_credential_auth_notice">Sync credentials are sealed with hardware Keystore encryption, but the sealing key does not require biometric authentication — this ensures background auto-sync works while the device is locked. Credentials are unsealed only during sync and immediately wiped from memory afterward (CharArray borrow semantics + full SigV4 derivation chain zeroing), never persisting as immutable Strings</string>
+    <string name="sync_credential_auth_notice">Sync credentials are sealed with Android Keystore encryption (hardware isolation measured on this device), but the sealing key does not require biometric authentication — this ensures background auto-sync works while the device is locked. Credentials are unsealed only during sync and immediately wiped from memory afterward (CharArray borrow semantics + full SigV4 derivation chain zeroing), never persisting as immutable Strings</string>
+    <!-- ISSUE-P2-285：实测为软件级 Keystore 时的如实降级声明（与解锁面同形，AC②） -->
+    <string name="sync_credential_auth_notice_software">Sync credentials are sealed with Android Keystore encryption, but this device has no hardware isolation (software-level key), and the sealing key does not require biometric authentication — this ensures background auto-sync works while the device is locked. Credentials are unsealed only during sync and immediately wiped from memory afterward (CharArray borrow semantics + full SigV4 derivation chain zeroing), never persisting as immutable Strings</string>
 
     <!-- ===== Theme settings subscreen ===== -->
     <string name="theme_section_mode">Appearance</string>

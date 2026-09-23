@@ -94,20 +94,6 @@ internal fun UnlockQuickUnlockCard(
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            // H1 整改：仅在拿到真实数据时展示，不再渲染写死的假硬件声明/假剩余时长
-            if (uiState.hardwareBackedSecurity.isNotEmpty()) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Security, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = uiState.hardwareBackedSecurity,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                }
-                Spacer(modifier = Modifier.height(4.dp))
-            }
-
             // ISSUE-P1-22：本机快速解锁封印为软件密钥时的常驻声明（AC②：
             // UI 常驻声明「不提供硬件级保护」，与降级确认记录绑定，非一次性提示）
             if (uiState.quickUnlockDowngraded) {
@@ -257,8 +243,7 @@ internal fun UnlockQuickUnlockCardPreview() {
         UnlockQuickUnlockCard(
             uiState = UnlockUiState().copy(
                 hasDatabase = true,
-                unlockMode = UnlockMode.QUICK_UNLOCK,
-                hardwareBackedSecurity = stringResource(R.string.unlock_hardware_backed_security)
+                unlockMode = UnlockMode.QUICK_UNLOCK
             ),
             onBiometricUnlock = {},
             onSwitchMode = {}

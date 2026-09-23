@@ -162,7 +162,7 @@
     <string name="detail_totp_section">二次验证令牌 (TOTP)</string>
     <string name="detail_totp_code">实时动态验证码</string>
     <string name="detail_passkey_section">通行密钥凭据 (WebAuthn)</string>
-    <string name="detail_passkey_chip">FIDO2 硬件芯片保护</string>
+    <string name="detail_passkey_chip">FIDO2 软件密钥（库内加密存储）</string>
     <string name="detail_passkey_rp">关联域名 (RP ID): %1$s</string>
     <string name="detail_passkey_desc">支持 Android 14+ Credential Manager 免密码生物识别自动校验</string>
     <string name="detail_custom_fields_section">自定义安全字段</string>
@@ -209,7 +209,7 @@
     <string name="edit_passkey_section">通行密钥 (Passkey / WebAuthn)</string>
     <string name="edit_passkey_bind">绑定</string>
     <string name="edit_passkey_unbind">解除</string>
-    <string name="edit_passkey_has_bound">已绑定 Passkey 硬件凭据</string>
+    <string name="edit_passkey_has_bound">已绑定 Passkey 凭据</string>
     <string name="edit_passkey_create">为此网站创建 Passkey</string>
     <string name="edit_passkey_desc">基于 Android 14+ 凭据管理器，支持端到端公私钥验证</string>
     <string name="edit_custom_fields">自定义字段 (键值对)</string>
@@ -364,7 +364,6 @@
     <string name="sec_biometric_key_invalidated">系统生物特征发生变更，安全密钥已失效，请使用主密码重新登录</string>
     <!-- ISSUE-P1-22：软件级 Keystore 快速解锁降级（显式确认 + 常驻声明） -->
     <string name="quick_unlock_software_key_notice">本机快速解锁降级为软件密钥，不提供硬件级保护</string>
-    <string name="unlock_hardware_backed_security">硬件级密钥保护</string>
     <string name="unlock_downgrade_dialog_title">快速解锁安全降级</string>
     <string name="unlock_downgrade_dialog_body">本机 Keystore 为软件级（无 TEE / StrongBox 硬件隔离），快速解锁封印的主密码与密钥文件将以软件密钥加密，攻击者可离线解出。是否仍要启用？</string>
     <string name="unlock_downgrade_confirm">仍要启用（软件密钥）</string>
@@ -383,6 +382,8 @@
     <!-- 解锁页 快速解锁 (ISSUE-P1-08：仅强生物识别经硬件密钥承载，锁屏凭据与自研 PIN 均已移除) -->
     <string name="unlock_quick_title">QuickUnlock 极速解锁</string>
     <string name="unlock_quick_subtitle">已通过硬件 KeyStore 保全加密主密钥</string>
+    <!-- ISSUE-P2-285：实测为软件级 Keystore 时的如实文案（与硬件版成对，禁硬编码单一形态） -->
+    <string name="unlock_quick_subtitle_software">已通过设备密钥保全加密主密钥（本机无硬件隔离）</string>
     <string name="unlock_readonly">只读打开</string>
     <string name="unlock_readonly_desc">本次会话仅查看，禁止任何写入</string>
     <string name="unlock_switch_to_full">切换为完整主密码与密钥文件解锁</string>
@@ -595,6 +596,8 @@
     <string name="sec_section_biometric">生物识别与快速解锁</string>
     <string name="sec_biometric_title">生物识别解锁</string>
     <string name="sec_biometric_sub">使用指纹或面容快速解锁，密钥由硬件安全模块保护</string>
+    <!-- ISSUE-P2-285：实测为软件级 Keystore 时的如实文案（与硬件版成对） -->
+    <string name="sec_biometric_sub_software">使用指纹或面容快速解锁，密钥经 Android Keystore 保护（本机无硬件隔离）</string>
     <!-- ISSUE-P2-212：开关默认关闭，开启时当场验证生物识别；以下为验证弹窗与结果反馈文案 -->
     <string name="sec_biometric_verify_title">启用生物识别解锁</string>
     <string name="sec_biometric_verify_subtitle">请验证指纹或面容，以确认由本人启用</string>
@@ -663,7 +666,7 @@
     <string name="sec_kill_app_title">锁定时清杀进程内存</string>
     <string name="sec_kill_app_sub">锁定后立即释放主密钥与明文数据缓存</string>
     <string name="sec_arch_title">安全架构说明</string>
-    <string name="sec_arch_desc">数据库使用 KDBX 4 标准 (AES-256 / ChaCha20 + Argon2) 加密，主密钥驻留 Android Keystore 硬件隔离区，任何明文数据都不会写入磁盘</string>
+    <string name="sec_arch_desc">数据库使用 KDBX 4 标准 (AES-256 / ChaCha20 + Argon2) 加密，库文件始终以密文存储。主密钥经 Android Keystore 封存，支持的设备上启用 TEE / StrongBox 硬件隔离（以实测为准，不支持时如实提示）。大体积附件在应用私有目录以明文暂存；明文导出文件由您显式确认后产生</string>
 
     <!-- ===== 同步设置子页 (WebDavSyncScreen) ===== -->
     <string name="sync_screen_title">同步与云备份</string>
@@ -748,7 +751,9 @@
     <string name="sync_preload_sub">Wi-Fi 下后台预取云端副本，加快解锁速度</string>
     <string name="sync_zeroknowledge_title">零知识端到端加密</string>
     <string name="sync_zeroknowledge_desc">主密码永不离开本机，云端仅存储 Argon2 加密后的数据块，服务器与网络中间人都无法解密你的密码库</string>
-    <string name="sync_credential_auth_notice">同步凭据经硬件 Keystore 加密封印，但封印密钥不绑定生物认证——以确保后台自动同步在锁屏态仍可执行。凭据仅在同步瞬间解封，用毕立即从内存擦除（CharArray 借用语义 + SigV4 派生链全清零），不会以不可变 String 长期驻留</string>
+    <string name="sync_credential_auth_notice">同步凭据经 Android Keystore 加密封印（本机实测支持硬件隔离），但封印密钥不绑定生物认证——以确保后台自动同步在锁屏态仍可执行。凭据仅在同步瞬间解封，用毕立即从内存擦除（CharArray 借用语义 + SigV4 派生链全清零），不会以不可变 String 长期驻留</string>
+    <!-- ISSUE-P2-285：实测为软件级 Keystore 时的如实降级声明（与解锁面同形，AC②） -->
+    <string name="sync_credential_auth_notice_software">同步凭据经 Android Keystore 加密封印，但本机无硬件隔离（密钥为软件级），且不绑定生物认证——以确保后台自动同步在锁屏态仍可执行。凭据仅在同步瞬间解封，用毕立即从内存擦除（CharArray 借用语义 + SigV4 派生链全清零），不会以不可变 String 长期驻留</string>
 
     <!-- ===== 主题设置子页 (ThemeSettingsScreen) ===== -->
     <string name="theme_section_mode">外观模式</string>
