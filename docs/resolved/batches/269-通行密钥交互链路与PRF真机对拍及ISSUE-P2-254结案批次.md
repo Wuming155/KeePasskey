@@ -107,5 +107,5 @@
 
 - 前序批次：[`263-注册响应attestationObject缺失authData键修复批次.md`](263-注册响应attestationObject缺失authData键修复批次.md)（`authData` 键误用修复，
   本批 PRF 链路得以贯通的前置）、[`220-通行密钥互操作对拍与Ed25519-PKCS8形态整改批次.md`](220-通行密钥互操作对拍与Ed25519-PKCS8形态整改批次.md)（文件级对拍）。
-- 产品裁决：`PD-32`（RP 口径放宽）。
+- 产品裁决：`PD-32`（RP 口径放宽）、`PD-33`（本批次同轮登记——Corbado PRF Demo 为通行密钥验证的**常规首选**渠道，含辅助站点与四条不得外推边界）。
 - 归档索引：[`RESOLVED_LOG.md`](../../RESOLVED_LOG.md) §269、[`BATCH_158_PLUS.md`](../BATCH_158_PLUS.md)、[`resolved/README.md`](../README.md)。
