@@ -213,7 +213,7 @@
 
 ---
 
-## P3 低危问题、特性接线与体验优化（11 项）
+## P3 低危问题、特性接线与体验优化（12 项）
 
 ### ISSUE-P3-272：云端同步四项假开关（自动同步 / 事务化写入 / 预加载远程数据库 / 允许的 Wi-Fi SSID）
 
@@ -316,5 +316,18 @@
 - **核实方式**：`app/src/test/java/com/keepasskey/app/security/SecurityTest.kt:158-173` 的 `elapsedMillis = 100000 - 30000` 与 `timeoutMillis = 60 * 1000` **均在测试体内本地算出**，`assertTrue(elapsedMillis >= timeoutMillis)` 不触任何生产代码，恒为真。同行为由生产 `AutoLockTimeoutPolicy.isExpired` 与 `AutoLockTimeoutPolicyTest.kt:26/58-68`（含边界与 `NEVER` / `IMMEDIATE` 档）正确覆盖，`AutoLockSessionGuardTest.kt:90-118` 亦以注入 `now` / `backgroundTimestamp` 覆盖 ⇒ 本条是**冗余弱测**。
 - **涉及文件**：`app/src/test/java/com/keepasskey/app/security/SecurityTest.kt`。
 - **验收标准**：AC① 该断言改走生产判据（注入时钟调 `AutoLockTimeoutPolicy.isExpired`）；AC② **不得删除用例**（测试资产纪律 ①：只可新增或修正为真断言）；AC③ 以机检防复现——沿用「永远为真的断言」检测口径，对本文件跑一次并留结论。
+
+---
+
+### ISSUE-P3-300：弱 ETag 乐观锁的**真实 DAV 服务器矩阵未实测**——弱 ETag 服务器上的同步收敛行为待证（§272 AC⑤ 显式残余）
+
+> 本条**不属**上文「`ISSUE-P1-276` ～ `ISSUE-P3-299`」审查批例外范围：它由 §272（`ISSUE-P1-275` 闭环批）
+> 的 AC⑤ 未执行残余升级为待办承接，与 [`已知工程限界.md`](architecture/已知工程限界.md) §28 互为指针。
+
+- **核实时间点**：2026-09-23（§272 整改当日，随批如实登记）。
+- **核实方式**：① §272 已完成的证据面＝RFC 全文核对（RFC 7232 §2.3 / §3.1、RFC 4918 §8.6 / §10.4.2 / §10.4.4 / §10.4.9，rfc-editor.org 原文）+ 有状态 mock 的头形态与弱比较裁决守卫（`StatefulDavDispatcher.weakEtagPaths`）——**协议层与形态层已证**。② 条目 AC⑤ 要求的**真实服务器矩阵**（Apache/mod_dav、nginx-dav、Nextcloud、IIS）当日无环境可用；`tools/local-sync` 联调链路代理侧不可运行（既有口径）且 `run_webdav.py` 不产 ETag，本就不构成弱面取证 ⇒ **未执行**，登记于批次文档 §3.3 与限界表 §28。
+- **背景与根因**：§272 弱 ETag 收口选定「回传服务器签发原形态」取向（MOVE `If` 头携 `W/"…"`；`If-Match` 弱期望不发送；S3 弱期望 fail-closed）。理论边界已经 RFC 划清：**弱比较**服务器上原形态必匹配；**强比较 × 弱存储标签**的组合下任何客户端的实体标签预条件均不可满足（RFC 7232 §2.3 强比较要求两侧均非弱），属服务器自绝于条件写，本仓退化为 412 → 冲突重检（不静默覆盖、不丢数据，但同步可能反复提示冲突）。**未证的是**：真实服务器对 RFC 4918 §10.4.4「弱或强比较二选一」的实际取向、以及 MOVE 事务写在弱 ETag 服务器上的兼容性——这决定弱 ETag 服务器（Apache/mod_dav 部分文件系统配置为高发面）上同步是正常收敛还是反复冲突提示。
+- **涉及文件**：无生产代码改动面（纯外部验证条目）；实测结果回填 `docs/resolved/batches/272-冲突时刻ETag透传与弱校验收口批次.md` §3.3 与 `docs/architecture/已知工程限界.md` §28。
+- **验收标准**：AC① 四类服务器各实测三项读数并按规则 8 留证（命令 + 原始响应）：签发 ETag 的强/弱形态；MOVE `If` 头对弱形态（`[W/"…"]`）与强形态（`["…"]`）预条件的接受性；PUT+MOVE 事务写兼容性。AC② 实测**证实**「回传原形态」取向 ⇒ 回填两处登记并闭环本条；实测**推翻** ⇒ 不得就地放宽 §272 守卫用例（限界表 §28 边界条款），须另行立条裁决新取向。AC③ 无法取得的环境（如 IIS）逐项如实标注未执行，禁以 mock 绿推定闭环。AC④ 环境不可得期间，本条与限界表 §28 维持开放，不得归档。
 
 ---
