@@ -2,6 +2,7 @@ package com.keepasskey.database.xml
 
 import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.core.model.KdbxGroup
+import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.core.model.MemoryProtectionConfig
 import com.keepasskey.crypto.stream.InnerRandomStreamCipher
 
@@ -17,7 +18,9 @@ object KdbxXmlGroupSerializer {
         /** 数据库级内存保护配置（缺陷 D7），透传至条目写出器。 */
         memoryProtection: MemoryProtectionConfig = MemoryProtectionConfig(),
         /** 二进制池条目数（缺陷 D17 内联回退判定），透传至条目写出器。 */
-        binaryPoolSize: Int = 0
+        binaryPoolSize: Int = 0,
+        /** ISSUE-P2-280 AC②：图标池成员集合（非 null 时校验 `CustomIconRef` 命中），透传至条目写出器。 */
+        customIconPool: Set<KdbxUuid>? = null
     ) {
         writer.startElement(KdbxConstants.Xml.GROUP)
 
@@ -27,6 +30,7 @@ object KdbxXmlGroupSerializer {
         KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.ICON_ID, group.iconId.toString())
 
         group.customIconId?.let {
+            KdbxXmlEntrySerializer.requireIconRefResolvable(customIconPool, it, ownerKind = "分组", ownerId = group.id)
             KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.CUSTOM_ICON_UUID, KdbxXmlValueUtil.encodeUuid(it))
         }
 
@@ -72,12 +76,13 @@ object KdbxXmlGroupSerializer {
                 entry,
                 innerStreamCipher,
                 memoryProtection = memoryProtection,
-                binaryPoolSize = binaryPoolSize
+                binaryPoolSize = binaryPoolSize,
+                customIconPool = customIconPool
             )
         }
 
         for (subgroup in group.subgroups) {
-            serialize(writer, subgroup, innerStreamCipher, memoryProtection, binaryPoolSize)
+            serialize(writer, subgroup, innerStreamCipher, memoryProtection, binaryPoolSize, customIconPool)
         }
 
         writer.endElement()

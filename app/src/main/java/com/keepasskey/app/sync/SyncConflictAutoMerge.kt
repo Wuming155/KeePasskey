@@ -72,7 +72,10 @@ internal suspend fun autoMergeAndUpload(
 ): AutoMergeUploadResult = withContext(Dispatchers.Default) {
     val mergedDb = localDb.copy(
         rootGroup = mergeResult.mergedRoot,
-        deletedObjects = mergeResult.mergedDeletedObjects
+        deletedObjects = mergeResult.mergedDeletedObjects,
+        // ISSUE-P2-280 AC①：合并图标池一并采用——只换树与墓碑会让远端新增图标丢失，
+        // 条目 / 分组的 customIconId 沦为悬空引用（写出侧 AC② 起对此 fail-closed）
+        customIcons = mergeResult.mergedCustomIcons
     )
 
     // ISSUE-P2-278：采纳前「校验-采用」单点（本函数内两处落库共用）。会话树在合并 / 上传

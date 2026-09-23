@@ -70,6 +70,11 @@ class SyncConflictController @Inject constructor(
     private var pendingMergedRoot: KdbxGroup? = null
     private var pendingMergedTombstones: List<DeletedObject> = emptyList()
 
+    // ISSUE-P2-280：待决合并的图标池（A1 同型——用户决策时须随合并产物一并采用，
+    // 否则合并带入的远端图标在决策落库时丢失，customIconId 沦为悬空引用）。
+    // 图标为公开素材（非敏感数据），无擦除义务
+    private var pendingMergedCustomIcons: List<com.keepasskey.core.model.CustomIcon> = emptyList()
+
     // E2 整改：冲突发生时刻的远端 ETag。resolveConflicts 的 If-Match 期望值必须用
     // 该值而非重新探测的当前值，否则用户决策期间远端的再次更新会被静默覆盖
     private var pendingRemoteEtag: String = ""
@@ -140,7 +145,9 @@ class SyncConflictController @Inject constructor(
 
             val mergedDb = localDb.copy(
                 rootGroup = updatedRoot,
-                deletedObjects = pendingMergedTombstones
+                deletedObjects = pendingMergedTombstones,
+                // ISSUE-P2-280：合并图标池随决策一并采用（同 autoMergeAndUpload 口径）
+                customIcons = pendingMergedCustomIcons
             )
             val mergedBytes = codec.serializeLocalDatabase(mergedDb)
                 ?: return@withContext SyncOutcome.Error(strings.get(R.string.sync_error_conflict_serialize_failed))
@@ -376,6 +383,7 @@ class SyncConflictController @Inject constructor(
         pendingRemoteDb = null
         pendingMergedRoot = null
         pendingMergedTombstones = emptyList()
+        pendingMergedCustomIcons = emptyList()
         pendingRemoteEtag = ""
         pendingRemoteCache = null
         // ISSUE-P2-278：仅丢引用——该快照是活动会话树的身份别名，绝不列入擦除面
@@ -444,8 +452,9 @@ class SyncConflictController @Inject constructor(
             }
 
         val base = resolveTrustedBase(codec, baseSnapshotBytes, localBytes)
-        val localLite = KdbxDatabaseLite(localDb.rootGroup, localDb.deletedObjects)
-        val remoteLite = KdbxDatabaseLite(remoteDb.rootGroup, remoteDb.deletedObjects)
+        // ISSUE-P2-280：镜像带图标池——合并产物含对端新增图标，落库时一并采用
+        val localLite = KdbxDatabaseLite(localDb.rootGroup, localDb.deletedObjects, localDb.customIcons)
+        val remoteLite = KdbxDatabaseLite(remoteDb.rootGroup, remoteDb.deletedObjects, remoteDb.customIcons)
         val mergeResult = KdbxMerger.mergeDatabases(base.trustedLite, localLite, remoteLite)
         val decisionConflicts = decisionConflictsOf(
             strategy = strategy,
@@ -528,6 +537,7 @@ class SyncConflictController @Inject constructor(
         pendingRemoteDb = remoteDb
         pendingMergedRoot = mergeResult.mergedRoot
         pendingMergedTombstones = mergeResult.mergedDeletedObjects
+        pendingMergedCustomIcons = mergeResult.mergedCustomIcons
         pendingRemoteEtag = cleanEtag(remoteEtag)
         pendingRemoteCache = syncCache
         // ISSUE-P2-278：待决窗口的起点快照（活动会话树身份，非擦除对象）

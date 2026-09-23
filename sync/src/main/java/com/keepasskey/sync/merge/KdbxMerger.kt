@@ -1,5 +1,6 @@
 package com.keepasskey.sync.merge
 
+import com.keepasskey.core.model.CustomIcon
 import com.keepasskey.core.model.DeletedObject
 import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.core.model.KdbxEntry
@@ -28,21 +29,31 @@ data class ConflictedEntryPair(
 )
 
 /**
- * 数据库轻量级镜像（仅包含分组树与墓碑列表）。
+ * 数据库轻量级镜像（分组树 + 墓碑列表 + 自定义图标池）。
  * 由 sync 模块定义与消费，解耦对 database 模块的直接依赖。
+ *
+ * ISSUE-P2-280：[customIcons] 自本批起参与合并（此前镜像不含图标池，落库恒取本地 ⇒
+ * 对端新增图标变悬空 `CustomIconRef`）。默认空表保持既有构造点源码兼容。
  */
 data class KdbxDatabaseLite(
     val rootGroup: KdbxGroup,
-    val deletedObjects: List<DeletedObject> = emptyList()
+    val deletedObjects: List<DeletedObject> = emptyList(),
+    val customIcons: List<CustomIcon> = emptyList()
 )
 
 /**
  * 三方合并结果模型。
+ *
+ * ISSUE-P2-280：[mergedCustomIcons] 为合并后的自定义图标池（见 [KdbxMerger.mergeCustomIcons]），
+ * 落库时必须一并采用——只换 `rootGroup` / `deletedObjects` 会让远端新增图标丢失、
+ * 条目 / 分组的 `customIconId` 沦为悬空引用。
  */
 data class MergeResult(
     val mergedRoot: KdbxGroup,
     val mergedDeletedObjects: List<DeletedObject>,
-    val conflicts: List<ConflictedEntryPair>
+    val conflicts: List<ConflictedEntryPair>,
+    // 不设默认值：强制每个构造点显式给出图标池（防「忘了采用合并池」式回归）
+    val mergedCustomIcons: List<CustomIcon>
 )
 
 /**
@@ -142,8 +153,38 @@ object KdbxMerger {
         return MergeResult(
             mergedRoot = mergedRootGroup,
             mergedDeletedObjects = mergedDeletedObjects,
-            conflicts = conflicts
+            conflicts = conflicts,
+            // ISSUE-P2-280 AC①：自定义图标池参与合并（对齐官方 MergeInCustomIcons 口径）
+            mergedCustomIcons = mergeCustomIcons(local.customIcons, remote.customIcons)
         )
+    }
+
+    /**
+     * ISSUE-P2-280 AC①：自定义图标池合并——逐字对齐官方 `PwDatabase.MergeInCustomIcons`
+     * （`PwDatabase.cs:945-979`）口径：
+     *
+     * - 按 UUID 求**并集**：对端新增的图标进入合并池（本端条目的 `customIconId` 从此可解析）；
+     * - 同 UUID 两侧内容不一致 ⇒ 按 `lastModificationTime` **LWW** 取胜；
+     *   任一侧时间为 `null` 视为最旧（KDBX 4.0 库无该字段），均 `null` / 相等时取本地侧；
+     * - **只增不删**：图标池不做删除合并（同官方——墓碑只覆盖条目 / 分组，不覆盖图标）；
+     * - **base 不参与**：官方对图标池即双向合并，无三方底版语义。
+     */
+    internal fun mergeCustomIcons(
+        local: List<CustomIcon>,
+        remote: List<CustomIcon>
+    ): List<CustomIcon> {
+        val merged = local.associateBy { it.uuid }.toMutableMap()
+        for (icon in remote) {
+            val existing = merged[icon.uuid]
+            merged[icon.uuid] = when {
+                existing == null -> icon
+                existing == icon -> existing
+                (existing.lastModificationTime ?: Instant.MIN) >=
+                    (icon.lastModificationTime ?: Instant.MIN) -> existing
+                else -> icon
+            }
+        }
+        return merged.values.toList()
     }
 
     /**

@@ -58,7 +58,9 @@ internal suspend fun resolveTrustedBase(
     if (parsedBase != null && trustedBase == null) wipeDiscarded(parsedBase)
     return SyncConflictBaseSnapshot(
         trusted = trustedBase,
-        trustedLite = trustedBase?.let { KdbxDatabaseLite(it.rootGroup, it.deletedObjects) }
+        // ISSUE-P2-280：base 镜像同样带图标池（合并为双向并集，base 图标池不直接参与，
+        // 但保持镜像三面同形，避免后续按镜像取池时拿到空表）
+        trustedLite = trustedBase?.let { KdbxDatabaseLite(it.rootGroup, it.deletedObjects, it.customIcons) }
             ?: KdbxDatabaseLite(KdbxGroup(name = ""), emptyList())
     )
 }

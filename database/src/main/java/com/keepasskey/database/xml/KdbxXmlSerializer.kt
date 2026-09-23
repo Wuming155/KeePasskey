@@ -67,13 +67,15 @@ class KdbxXmlSerializer(
         // 2. 流式写出 <Root> 包裹的根分组
         //    缺陷 D7：透传数据库级 MemoryProtection（标准五字段 Protected 判定依据）
         //    缺陷 D17：透传池条目数（池外附件索引须内联 Base64 写出，不得写出悬空 Ref）
+        //    ISSUE-P2-280 AC②：透传图标池（CustomIconRef 未命中即 fail-closed，禁静默丢图标）
         writer.startElement(KdbxConstants.Xml.ROOT_GROUP)
         KdbxXmlGroupSerializer.serialize(
             writer,
             database.rootGroup,
             innerStreamCipher,
             memoryProtection = database.memoryProtection,
-            binaryPoolSize = database.binaries.size
+            binaryPoolSize = database.binaries.size,
+            customIconPool = database.customIcons.mapTo(mutableSetOf()) { it.uuid }
         )
 
         // 3. 根作用域墓碑列表：官方写在 <Root> 内、根 Group 之后（KdbxFile.Write.cs:430）

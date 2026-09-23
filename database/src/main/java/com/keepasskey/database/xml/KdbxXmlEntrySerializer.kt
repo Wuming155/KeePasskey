@@ -4,6 +4,7 @@ import com.keepasskey.core.model.KdbxAttachment
 import com.keepasskey.core.model.KdbxAutoType
 import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.core.model.KdbxEntry
+import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.core.model.MemoryProtectionConfig
 import com.keepasskey.core.security.ProtectedString
 import com.keepasskey.crypto.stream.InnerRandomStreamCipher
@@ -13,6 +14,25 @@ import java.util.Base64
  * KDBX XML <Entry> 节点序列化写出器（流式）。
  */
 object KdbxXmlEntrySerializer {
+
+    /**
+     * ISSUE-P2-280 AC②：`CustomIconRef` 命中校验（条目与分组写出器共用的单一判据）。
+     * 未命中即抛 [IllegalStateException]——消息只含 UUID（不落条目标题等敏感内容），
+     * 经 `KdbxFile.save` 的异常归一上浮为可辨识的保存失败，**禁静默丢图标**。
+     */
+    internal fun requireIconRefResolvable(
+        customIconPool: Set<KdbxUuid>?,
+        iconId: KdbxUuid,
+        ownerKind: String,
+        ownerId: KdbxUuid
+    ) {
+        if (customIconPool != null && iconId !in customIconPool) {
+            throw IllegalStateException(
+                "${ownerKind} ${ownerId.toHexString()} 引用了悬空的自定义图标 ${iconId.toHexString()}" +
+                    "（不在 Meta 图标池中），拒绝写出以免静默丢图标（ISSUE-P2-280）"
+            )
+        }
+    }
 
     fun serialize(
         writer: KdbxXmlStreamWriter,
@@ -30,7 +50,13 @@ object KdbxXmlEntrySerializer {
          * （官方 `KdbxFile.Write.cs:930-939` 只有 Find 命中才写 `Ref`）。
          * 默认 0＝任何索引都视为池外，源码兼容既有调用点。
          */
-        binaryPoolSize: Int = 0
+        binaryPoolSize: Int = 0,
+        /**
+         * ISSUE-P2-280 AC②：自定义图标池成员 UUID 集合。非 null 时对 `CustomIconRef`
+         * 做命中校验——未命中即抛 [IllegalStateException]（可辨识失败，禁静默丢图标）；
+         * null＝不校验（源码兼容既有直接调用点，生产 `KdbxFile.save` 链路恒传真实池）。
+         */
+        customIconPool: Set<KdbxUuid>? = null
     ) {
         writer.startElement(KdbxConstants.Xml.ENTRY)
 
@@ -38,6 +64,7 @@ object KdbxXmlEntrySerializer {
         KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.ICON_ID, entry.iconId.toString())
 
         entry.customIconId?.let {
+            requireIconRefResolvable(customIconPool, it, ownerKind = "条目", ownerId = entry.id)
             KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.CUSTOM_ICON_UUID, KdbxXmlValueUtil.encodeUuid(it))
         }
         KdbxXmlWriteUtil.optionalTextElement(writer, KdbxConstants.Xml.FOREGROUND_COLOR, entry.foregroundColor)
@@ -91,7 +118,9 @@ object KdbxXmlEntrySerializer {
                     innerStreamCipher,
                     isHistory = true,
                     memoryProtection = memoryProtection,
-                    binaryPoolSize = binaryPoolSize
+                    binaryPoolSize = binaryPoolSize,
+                    // ISSUE-P2-280 AC②：历史快照内的 CustomIconRef 同样校验
+                    customIconPool = customIconPool
                 )
             }
             writer.endElement()

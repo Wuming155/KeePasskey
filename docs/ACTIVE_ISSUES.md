@@ -41,17 +41,7 @@
 
 ---
 
-## P2 中危缺陷与协议/测试缺口（11 项）
-
-### ISSUE-P2-280：Meta 完全不参与合并 ⇒ 对端新增自定义图标变成悬空 `CustomIconRef`，库级配置恒取本地
-
-- **核实时间点**：2026-09-23 经 sync 全模块 `customIcons` 检索与写出路径核对（官方 / KXC 前提已独立开源码核实）。
-- **核实方式**：`KdbxMerger.kt:34-37` 的 `KdbxDatabaseLite` 仅 `rootGroup` + `deletedObjects`；sync 全模块 `customIcons` **零命中**；落库用 `localDb.copy(rootGroup = ..., deletedObjects = ...)`（`SyncConflictController.kt:127-130` 与 `:353-356`）⇒ 图标池恒为本地；写出侧 `KdbxXmlEntrySerializer.kt:40` 直写 `CustomIconRef`，reader 不校验引用是否命中池成员，仅 UI 渲染回落 `EntryIcon.Missing`（`EntryIconPresenter.kt:124`），不修复引用。
-- **对照（前提为真）**：官方 `PwDatabase.cs:936` + `:945-979` 的 `MergeInCustomIcons` 按图标 `LastModificationTime` 做 LWW；KXC `Merger.cpp:700-714` 合并时补图标。`RecycleBinUuid` / `HistoryMaxItems` 等 Meta 项同理恒本地。
-- **涉及文件**：`sync/src/main/java/com/keepasskey/sync/merge/KdbxMerger.kt`、`app/src/main/java/com/keepasskey/app/sync/SyncConflictController.kt`、`database/src/main/java/com/keepasskey/database/xml/KdbxXmlEntrySerializer.kt`。
-- **验收标准**：AC① 合并纳入 `customIcons`（LWW 或并集，口径须与官方一致并写明）；AC② 写出前校验 `CustomIconRef` 命中池成员，未命中须可辨识地失败，禁静默丢图标；AC③ 库级 Meta（`RecycleBinUuid` / `HistoryMaxItems` / `MinVersion`）逐字段给出「合并 / 取 LWW / 以本地为准」结论并登记；AC④ 用例：对端新增图标 + 本端改条目 → 合并后图标**可解析**（含 `:database:` 往返）；AC⑤ 触及外层格式面时按规则 8 对拍。
-
----
+## P2 中危缺陷与协议/测试缺口（10 项）
 
 ### ISSUE-P2-281：仅自定义字段分歧时冲突界面无从裁决，对端改动必然丢失（`modifiedFields` 全仓零消费）
 
