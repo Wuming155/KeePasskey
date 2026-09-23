@@ -61,13 +61,26 @@ internal suspend fun SyncCycleRunner.handleRemoteSynced(
             remoteBytes = openResult.remoteBytes,
             baseSnapshotBytes = ctx.baseSnapshotBytes,
             remoteEtag = openResult.etag,
-            strategy = ctx.conflictStrategy
+            strategy = ctx.conflictStrategy,
+            // ISSUE-P2-278：合并采纳前的会话守卫判据（周期起点快照）
+            expectedSessionSnapshot = ctx.localDbSnapshot
         )
     }
-    val applied = codec.loadAndApplyRemoteBytes(openResult.remoteBytes)
-    if (!applied) return SyncOutcome.Error(strings.get(R.string.sync_error_load_remote_failed))
-    session.lastSyncedDb = databaseSession.databaseFlow.value
-    return SyncOutcome.UpToDate
+    // ISSUE-P2-278：远端整库接管前携带周期起点的会话快照做「校验-采用」——
+    // 装配之后（探测 / 下载的网络往返窗口）UI 写路径仍可能编辑并保存，isDirty /
+    // hasLocalContentChanged 都是 setup 时的旧值；若会话树已被替换，如实中止本周期，
+    // 严禁静默接管（窗口内编辑会从内存与文件同时消失）。下一轮同步按冲突流程收敛。
+    return when (codec.loadAndApplyRemoteBytes(openResult.remoteBytes, ctx.localDbSnapshot)) {
+        SyncDatabaseCodec.ApplyRemoteResult.APPLIED -> {
+            session.lastSyncedDb = databaseSession.databaseFlow.value
+            SyncOutcome.UpToDate
+        }
+        SyncDatabaseCodec.ApplyRemoteResult.SESSION_DIVERGED ->
+            SyncOutcome.Error(strings.get(R.string.sync_error_local_changed_during_sync))
+        SyncDatabaseCodec.ApplyRemoteResult.PARSE_FAILED,
+        SyncDatabaseCodec.ApplyRemoteResult.SAVE_FAILED ->
+            SyncOutcome.Error(strings.get(R.string.sync_error_load_remote_failed))
+    }
 }
 
 /** 引擎判定为冲突：先按 R3 落盘本地会话，再按强制策略 / 三方合并裁决 */
@@ -100,6 +113,8 @@ internal suspend fun SyncCycleRunner.handleConflictDetected(
         strategy = ctx.conflictStrategy,
         // ISSUE-P3-168 ①：本地侧直接取内存树（localBytes 与本快照内容等价，
         // 见 runSyncCycle 内两条来源的证明），免去一次解析回树
-        localDbOverride = ctx.localDbSnapshot
+        localDbOverride = ctx.localDbSnapshot,
+        // ISSUE-P2-278：合并采纳前的会话守卫判据（周期起点快照）
+        expectedSessionSnapshot = ctx.localDbSnapshot
     )
 }

@@ -64,13 +64,47 @@ class SyncDatabaseCodec @Inject constructor(
             }
         }
 
-    suspend fun loadAndApplyRemoteBytes(remoteBytes: ByteArray): Boolean {
-        val remoteDb = parseKdbxBytes(remoteBytes) ?: return false
+    /**
+     * 解析远端字节并采用为会话库。
+     *
+     * ISSUE-P2-278：[expectedSessionSnapshot] 非 null 时走「校验-采用」原子落库
+     * （[DatabaseSession.adoptDatabaseIfUnchanged]）——远端接管是**整树替换**，若同步窗口内
+     * 会话已被 UI 写路径替换（用户编辑并保存），仍静默覆盖将使该编辑从内存与文件同时消失；
+     * 此时如实返回 [ApplyRemoteResult.SESSION_DIVERGED]，由调用方中止本周期。
+     * null（用户显式「以云端为准」策略，覆盖语义已在设置页声明）保持既有直采行为。
+     */
+    suspend fun loadAndApplyRemoteBytes(
+        remoteBytes: ByteArray,
+        expectedSessionSnapshot: KdbxDatabase? = null
+    ): ApplyRemoteResult {
+        val remoteDb = parseKdbxBytes(remoteBytes) ?: return ApplyRemoteResult.PARSE_FAILED
         // 注意：解析产物在此**采用为会话库**，其所有权随之下移给会话的生命周期管理，
         // 故此处**不得**调用 clearSensitiveData()（会连带擦掉活动库的内容——含二进制池）。
-        // 被替换下线的旧库由 updateDatabaseMeta 在同一收口点按身份集合判定擦除树与池
-        // （`ISSUE-P3-258`）。
-        databaseSession.updateDatabaseMeta { remoteDb }
-        return databaseSession.save() is KdbxResult.Success
+        // 被替换下线的旧库由 updateDatabaseMeta / adoptDatabaseIfUnchanged 在同一收口点
+        // 按身份集合判定擦除树与池（`ISSUE-P3-258`）。
+        if (expectedSessionSnapshot != null) {
+            if (!databaseSession.adoptDatabaseIfUnchanged(expectedSessionSnapshot, remoteDb)) {
+                // 未采用：远端解析树失去持有者，必须显式擦除（不得留给 GC）
+                remoteDb.clearSensitiveData()
+                return ApplyRemoteResult.SESSION_DIVERGED
+            }
+        } else {
+            databaseSession.updateDatabaseMeta { remoteDb }
+        }
+        return if (databaseSession.save() is KdbxResult.Success) {
+            ApplyRemoteResult.APPLIED
+        } else {
+            ApplyRemoteResult.SAVE_FAILED
+        }
+    }
+
+    /** [loadAndApplyRemoteBytes] 的终态（调用方据此前馈用户可理解的错误文案）。 */
+    enum class ApplyRemoteResult {
+        APPLIED,
+        PARSE_FAILED,
+        SAVE_FAILED,
+
+        /** ISSUE-P2-278：采用前校验发现会话树在同步窗口内已被本地编辑替换，本轮如实中止。 */
+        SESSION_DIVERGED
     }
 }

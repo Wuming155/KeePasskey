@@ -127,6 +127,36 @@ internal class SessionContentMutations(
         stateFlow.value = DatabaseSession.SessionState.DIRTY
     }
 
+    /**
+     * ISSUE-P2-278：「校验-采用」原子落库——**仅当**当前会话树仍是 [expectedAtCycleStart]
+     * 那一棵实例时，才以 [replacement] 整树替换并置 DIRTY；否则什么都不做并返回 false。
+     *
+     * 存在意义：同步周期（含合并计算 / 网络往返 / 冲突待决窗口）期间 UI 写路径**不取**
+     * `SyncSessionState.mutex`，周期起点之后用户仍可能编辑并保存——本类全部写入入口均为
+     * copy-on-write（`databaseFlow` 实例必被替换），故「实例身份未变」即「窗口内无本地编辑」。
+     * 在会话 Mutex 内完成校验与采用，与全部写路径（mutations / save）互斥，无 TOCTOU；
+     * 调用方拿到 false 必须如实中止（禁静默以旧快照算出的接管树 / 合并树覆盖会话，
+     * 否则窗口内的编辑从内存与文件同时消失）。
+     *
+     * 已知保守面：`save()` 触发按龄修剪历史时也会替换实例（内容变化极小的误判），
+     * 结果是本轮同步如实中止、下轮重试即收敛——宁可误中止，不可静默丢编辑。
+     *
+     * 擦除口径与 [updateDatabaseMeta] 逐字一致（采用点同一收口，身份集合判定）。
+     */
+    suspend fun adoptDatabaseIfUnchanged(
+        expectedAtCycleStart: KdbxDatabase,
+        replacement: KdbxDatabase
+    ): Boolean = mutex.withLock {
+        if (readOnly()) return@withLock false
+        val currentDb = databaseFlow.value ?: return@withLock false
+        if (currentDb !== expectedAtCycleStart) return@withLock false
+        currentDb.rootGroup.clearSupersededSensitiveData(replacement.rootGroup)
+        currentDb.clearBinaryPool(replacement.binaries)
+        databaseFlow.value = replacement
+        stateFlow.value = DatabaseSession.SessionState.DIRTY
+        true
+    }
+
     /** 删除分组。 */
     suspend fun deleteGroup(groupId: KdbxUuid) = mutex.withLock {
         if (readOnly()) return@withLock

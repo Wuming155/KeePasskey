@@ -1291,6 +1291,7 @@
     <!-- %1$s = 失败原因 -->
     <string name="sync_error_merged_upload_local_save_failed">The merged version was uploaded to the cloud but saving locally failed: %1$s</string>
     <string name="sync_error_remote_changed_during_resolve">The cloud changed again while resolving the conflict; sync again to re-merge</string>
+    <string name="sync_error_local_changed_during_sync">New local changes were detected during sync; this cycle was aborted to avoid overwriting them. Sync again</string>
     <!-- %1$s = 失败原因 -->
     <string name="sync_error_upload_resolved_failed">Failed to upload the resolved version: %1$s</string>
     <string name="sync_error_decrypt_local_conflict_failed">Cannot decrypt the local conflict database</string>

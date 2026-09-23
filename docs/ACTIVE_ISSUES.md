@@ -41,17 +41,7 @@
 
 ---
 
-## P2 中危缺陷与协议/测试缺口（13 项）
-
-### ISSUE-P2-278：同步周期起点之后的本地编辑被「远端整库接管」静默覆盖（写路径不参与本周期互斥）
-
-- **核实时间点**：2026-09-23 经接管前置判据与写路径互斥两侧核对。
-- **核实方式**：`isDirty`（`SyncCycleRunner.kt:163`）与 `hasLocalContentChanged`（`:139`）**均只在 setup 取一次**；接管前置为「setup 时无本地变更 且 `remoteBytes != localBytes`」（`SyncCycleRemoteOutcomes.kt:38/42/44/69-73`）；`SyncCycleRunner.kt:204-205` 注释自陈「UI 写路径不取本周期 `SyncSessionState.mutex`」；`save()` 不推进基线（`DatabaseSession.kt:261-322` 不动 `session.lastSyncedDb`）；`isSyncing` 是纯 UI 态（`VaultListComponents.kt:63-96`），全仓无写路径 gate。
-- **后果与边界**：网络往返期间用户编辑并保存（DIRTY 被自身 `save()` 复位）⇒ 走远端接管并落盘，该编辑从内存与文件**同时消失**；合并支同理（`SyncCycleRunner.kt:380` 的 `updateDatabaseMeta` 整树替换）。窗口须有真实远端变更，故窄于 `ISSUE-P1-275`（已闭环，见 `RESOLVED_LOG.md` §272），但同属「同步与用户写入无互斥」一族。`applyForcedConflictStrategy:184-191` 属用户显式策略（`:171` KDoc 已声明覆盖语义），**不计入本条**。
-- **涉及文件**：`app/src/main/java/com/keepasskey/app/sync/SyncCycleRunner.kt`、`app/src/main/java/com/keepasskey/app/sync/SyncCycleRemoteOutcomes.kt`、`database/src/main/java/com/keepasskey/database/session/DatabaseSession.kt`。
-- **验收标准**：AC① 接管 / 合并**落库前**重取一次会话脏态与内容摘要（或令写路径参与同一互斥），二选一但须单点化；AC② 确有未同步编辑时如实转为冲突流程或中止本周期，禁静默接管；AC③ 竞态用例：setup 后注入一次保存，断言「不丢编辑」（含 `updateDatabaseMeta` 侧）；AC④ 若裁定「同步窗口内禁编辑」为交互取舍，须登记 `PD-*` 并在界面呈现，禁保留现状不声明。
-
----
+## P2 中危缺陷与协议/测试缺口（12 项）
 
 ### ISSUE-P2-279：条目 / 分组合并的「判修改集」≠「实际合并集」，图标与覆写 URL 改动静默丢失且不报冲突
 

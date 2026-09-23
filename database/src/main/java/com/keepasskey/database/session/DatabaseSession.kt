@@ -315,6 +315,17 @@ class DatabaseSession(
     suspend fun updateDatabaseMeta(transform: (KdbxDatabase) -> KdbxDatabase) = mutations.updateDatabaseMeta(transform)
 
     /**
+     * ISSUE-P2-278：「校验-采用」原子落库（同步周期接管 / 合并专用）——仅当会话树仍是
+     * [expectedAtCycleStart]（周期起点的 `databaseFlow.value` 实例）时才采用 [replacement]；
+     * 会话在窗口内已被写路径替换（或只读 / 无活动库）时返回 false 且不做任何改动。
+     * 详见 [SessionContentMutations.adoptDatabaseIfUnchanged]。
+     */
+    suspend fun adoptDatabaseIfUnchanged(
+        expectedAtCycleStart: KdbxDatabase,
+        replacement: KdbxDatabase
+    ): Boolean = mutations.adoptDatabaseIfUnchanged(expectedAtCycleStart, replacement)
+
+    /**
      * 删除分组
      */
     suspend fun deleteGroup(groupId: KdbxUuid) = mutations.deleteGroup(groupId)

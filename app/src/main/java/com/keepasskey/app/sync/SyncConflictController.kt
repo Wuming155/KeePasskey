@@ -78,6 +78,13 @@ class SyncConflictController @Inject constructor(
     // 需以缓存基准快照（basecache）作三方合并底版——待决期间基线未动，快照仍可信
     private var pendingRemoteCache: SyncCache? = null
 
+    // ISSUE-P2-278：进入待决时刻的会话树实例（`databaseFlow.value` 的身份快照，仅作
+    // 「校验-采用」判据，**绝不擦除**——它就是（或曾是）活动会话树）。用户决策窗口内
+    // UI 写路径不取会话互斥锁，若该实例已被 copy-on-write 替换，说明窗口内发生了本地
+    // 编辑，采纳合并产物将静默吞掉该编辑 ⇒ 必须如实中止（见 resolveConflicts 与
+    // adoptMergedDatabase 两处守卫）
+    private var pendingSessionSnapshot: KdbxDatabase? = null
+
     private val _conflictFlow = MutableStateFlow<List<ConflictedEntryPair>>(emptyList())
 
     /** 当前待决冲突清单（由 `SyncCoordinator.conflictFlow` 对外暴露，实例与拆分前同为单一 StateFlow）。 */
@@ -106,6 +113,14 @@ class SyncConflictController @Inject constructor(
         val path = pendingRemotePath ?: return SyncOutcome.Error(strings.get(R.string.sync_error_conflict_path_invalid))
         val localDb = pendingLocalDb ?: return SyncOutcome.Error(strings.get(R.string.sync_error_local_snapshot_lost))
         val remoteDb = pendingRemoteDb ?: return SyncOutcome.Error(strings.get(R.string.sync_error_remote_snapshot_lost))
+
+        // ISSUE-P2-278：用户决策窗口内会话已被本地编辑替换 ⇒ 待决合并产物已不覆盖该编辑，
+        // 继续上传 / 采纳将静默吞掉它。如实废弃本轮冲突会话（保留本地编辑），由用户重新同步收敛。
+        val sessionSnapshot = pendingSessionSnapshot
+        if (sessionSnapshot == null || databaseSession.databaseFlow.value !== sessionSnapshot) {
+            clearPendingConflictSession()
+            return SyncOutcome.Error(strings.get(R.string.sync_error_local_changed_during_sync))
+        }
 
         return withContext(Dispatchers.Default) {
             val conflicts = _conflictFlow.value
@@ -184,7 +199,18 @@ class SyncConflictController @Inject constructor(
 
     /** 云端已接收合并版本后的本地采纳与落盘。 */
     private suspend fun adoptMergedDatabase(mergedDb: KdbxDatabase): SyncOutcome {
-        databaseSession.updateDatabaseMeta { mergedDb }
+        // ISSUE-P2-278：采纳前「校验-采用」——上传的网络往返窗口内会话仍可能被本地编辑
+        // 替换（resolveConflicts 入口校验之后的残余窗口），此时合并产物已不覆盖该编辑，
+        // 静默整树替换将使其从内存与文件同时消失 ⇒ 如实中止，下轮同步按冲突流程收敛。
+        val sessionSnapshot = pendingSessionSnapshot
+        val adopted = sessionSnapshot != null &&
+            databaseSession.adoptDatabaseIfUnchanged(sessionSnapshot, mergedDb)
+        if (!adopted) {
+            // 未采用：合并产物与待决树全部失去持有者，按身份集合判定擦除（不含会话快照别名）
+            eraseSupersededPendingTrees(mergedDb)
+            clearPendingConflictSession()
+            return SyncOutcome.Error(strings.get(R.string.sync_error_local_changed_during_sync))
+        }
         // H3 整改：云端已接收合并版本，本地落盘失败必须如实暴露
         val saveResult = databaseSession.save()
         clearPendingConflictSession()
@@ -225,6 +251,9 @@ class SyncConflictController @Inject constructor(
             }
             is SyncCommitResult.ConflictNeedsMerge -> {
                 val cache = pendingRemoteCache
+                // ISSUE-P2-278：重入侧的「校验-采用」判据——clearPendingConflictSession 会置空
+                // 字段，须先取出；该快照即 resolveConflicts 入口校验过的会话树实例
+                val sessionSnapshot = pendingSessionSnapshot
                 eraseSupersededPendingTrees(mergedDb)
                 clearPendingConflictSession()
                 if (cache == null) {
@@ -241,7 +270,8 @@ class SyncConflictController @Inject constructor(
                         baseSnapshotBytes = cache.readBaseContent(path),
                         remoteEtag = fresh.remoteEtag,
                         localDbOverride = null,
-                        isReentry = true
+                        isReentry = true,
+                        expectedSessionSnapshot = sessionSnapshot
                     )
                 }
             }
@@ -277,12 +307,14 @@ class SyncConflictController @Inject constructor(
     ): SyncOutcome? = when (ConflictStrategyPolicy.dispositionOf(strategy)) {
         ConflictDisposition.TakeRemote -> {
             debugLog.warn(SYNC_LOG_TAG, "冲突解决策略=以云端为准：放弃本地未同步修改，采用远端版本")
-            val applied = codec.loadAndApplyRemoteBytes(remoteBytes)
-            if (!applied) {
-                SyncOutcome.Error(strings.get(R.string.sync_error_load_remote_failed))
-            } else {
-                session.lastSyncedDb = databaseSession.databaseFlow.value
-                SyncOutcome.UpToDate
+            // ISSUE-P2-278：用户显式「以云端为准」策略（覆盖语义已在设置页声明，不计入该条
+            // 整改面），不带校验快照直采
+            when (codec.loadAndApplyRemoteBytes(remoteBytes)) {
+                SyncDatabaseCodec.ApplyRemoteResult.APPLIED -> {
+                    session.lastSyncedDb = databaseSession.databaseFlow.value
+                    SyncOutcome.UpToDate
+                }
+                else -> SyncOutcome.Error(strings.get(R.string.sync_error_load_remote_failed))
             }
         }
         ConflictDisposition.TakeLocal -> {
@@ -346,6 +378,8 @@ class SyncConflictController @Inject constructor(
         pendingMergedTombstones = emptyList()
         pendingRemoteEtag = ""
         pendingRemoteCache = null
+        // ISSUE-P2-278：仅丢引用——该快照是活动会话树的身份别名，绝不列入擦除面
+        pendingSessionSnapshot = null
     }
 
     /**
@@ -378,6 +412,10 @@ class SyncConflictController @Inject constructor(
      *   语义与改动前逐字一致。
      * @param isReentry ISSUE-P1-275 AC③：是否为「合并上传 412 重入」轮。重入轮再次 412 时
      *   如实上浮类型化错误（深度界限 1 次），不得无限循环。
+     * @param expectedSessionSnapshot ISSUE-P2-278：「校验-采用」判据——**同步周期起点的
+     *   会话树实例**（`SyncCycleRunner` 的 `ctx.currentDb`，重入轮原样透传；用户决策 412
+     *   重入侧传待决快照）。非 null 时自动合并采纳前在会话 Mutex 内校验会话树未被窗口内
+     *   编辑替换，已替换则如实中止（禁静默以过期合并产物整树覆盖）；null 保持既有直采行为。
      */
     suspend fun handleConflictMerge(
         syncEngine: SyncEngine,
@@ -389,7 +427,8 @@ class SyncConflictController @Inject constructor(
         remoteEtag: String = "",
         strategy: SyncConflictStrategy = SyncConflictStrategy.AUTO_MERGE,
         localDbOverride: KdbxDatabase? = null,
-        isReentry: Boolean = false
+        isReentry: Boolean = false,
+        expectedSessionSnapshot: KdbxDatabase? = null
     ): SyncOutcome = withContext(Dispatchers.Default) {
         val localDb = localDbOverride ?: codec.parseKdbxBytes(localBytes)
             ?: return@withContext SyncOutcome.Error(strings.get(R.string.sync_error_decrypt_local_conflict_failed))
@@ -432,7 +471,8 @@ class SyncConflictController @Inject constructor(
                 remoteDb = remoteDb,
                 trustedBase = base.trusted,
                 mergeResult = mergeResult,
-                conflictEtag = remoteEtag
+                conflictEtag = remoteEtag,
+                expectedSessionSnapshot = expectedSessionSnapshot
             )) {
                 is AutoMergeUploadResult.Completed -> upload.outcome
                 is AutoMergeUploadResult.Superseded -> {
@@ -454,7 +494,9 @@ class SyncConflictController @Inject constructor(
                             remoteEtag = upload.freshEtag,
                             strategy = strategy,
                             localDbOverride = null,
-                            isReentry = true
+                            isReentry = true,
+                            // ISSUE-P2-278：重入轮透传周期起点快照，校验窗口覆盖整个重入过程
+                            expectedSessionSnapshot = expectedSessionSnapshot
                         )
                     }
                 }
@@ -488,6 +530,8 @@ class SyncConflictController @Inject constructor(
         pendingMergedTombstones = mergeResult.mergedDeletedObjects
         pendingRemoteEtag = cleanEtag(remoteEtag)
         pendingRemoteCache = syncCache
+        // ISSUE-P2-278：待决窗口的起点快照（活动会话树身份，非擦除对象）
+        pendingSessionSnapshot = databaseSession.databaseFlow.value
         return SyncOutcome.ConflictNeedsUser(decisionConflicts)
     }
 }

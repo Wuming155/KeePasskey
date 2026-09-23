@@ -67,12 +67,42 @@ internal suspend fun autoMergeAndUpload(
     remoteDb: KdbxDatabase,
     trustedBase: KdbxDatabase?,
     mergeResult: MergeResult,
-    conflictEtag: String
+    conflictEtag: String,
+    expectedSessionSnapshot: KdbxDatabase? = null
 ): AutoMergeUploadResult = withContext(Dispatchers.Default) {
     val mergedDb = localDb.copy(
         rootGroup = mergeResult.mergedRoot,
         deletedObjects = mergeResult.mergedDeletedObjects
     )
+
+    // ISSUE-P2-278：采纳前「校验-采用」单点（本函数内两处落库共用）。会话树在合并 / 上传
+    // 窗口内被 UI 写路径替换时，合并产物已不覆盖该编辑，静默整树替换将使其从内存与文件
+    // 同时消失 ⇒ 返回 false，调用方如实中止本周期（下轮同步按冲突流程收敛）。
+    suspend fun adoptMergedIfSessionUnchanged(): Boolean =
+        if (expectedSessionSnapshot == null) {
+            databaseSession.updateDatabaseMeta { mergedDb }
+            true
+        } else {
+            databaseSession.adoptDatabaseIfUnchanged(expectedSessionSnapshot, mergedDb)
+        }
+
+    /** ISSUE-P2-278：守卫中止的统一出口——全部解析树与合并产物按身份集合判定擦除。 */
+    fun abortDiverged(): AutoMergeUploadResult {
+        eraseDiscardedParseResults(
+            localDb, localDbOwned, remoteDb, trustedBase, mergedDb,
+            databaseSession.databaseFlow.value
+        )
+        return AutoMergeUploadResult.Completed(
+            SyncOutcome.Error(strings.get(R.string.sync_error_local_changed_during_sync))
+        )
+    }
+
+    // ISSUE-P2-278：上传前先拦——合并产物先天不覆盖窗口内编辑时，不做无谓上传
+    if (expectedSessionSnapshot != null &&
+        databaseSession.databaseFlow.value !== expectedSessionSnapshot
+    ) {
+        return@withContext abortDiverged()
+    }
     val mergedBytes = codec.serializeLocalDatabase(mergedDb)
     if (mergedBytes == null) {
         // ISSUE-P3-119：序列化失败即整体放弃本次合并（mergedDb / 双方树均不被采用），
@@ -121,7 +151,8 @@ internal suspend fun autoMergeAndUpload(
                 }
                 is SyncCommitResult.Uploaded -> {
                     // 远端已回退到基线内容：合并产物上传成功 ⇒ 与既有成功分支同语义采纳
-                    databaseSession.updateDatabaseMeta { mergedDb }
+                    // ISSUE-P2-278：412 重试的网络窗口同样在守卫覆盖内，采纳前再校验一次
+                    if (!adoptMergedIfSessionUnchanged()) return@withContext abortDiverged()
                     val saveResult = databaseSession.save()
                     eraseDiscardedParseResults(
                         localDb, localDbOwned, remoteDb, trustedBase, mergedDb = null,
@@ -168,7 +199,8 @@ internal suspend fun autoMergeAndUpload(
             )
         )
     }
-    databaseSession.updateDatabaseMeta { mergedDb }
+    // ISSUE-P2-278：采纳前「校验-采用」（单点见函数顶部）——窗口内会话已被替换则如实中止
+    if (!adoptMergedIfSessionUnchanged()) return@withContext abortDiverged()
     val saveResult = databaseSession.save()
     // ISSUE-P3-235 G2：合并树已被采用为会话库（即存活侧本身，故传 null 不列入擦除面），
     // 三棵来源树中未被复用的实例按身份判定定点擦除、不留给 GC——`wipeDiscarded` 的

@@ -45,6 +45,12 @@ import javax.inject.Singleton
  * 与其共享上下文 [RemoteSyncContext] 已下沉到同包文件 `SyncCycleRemoteOutcomes.kt`（ISSUE-P3-188 第二档）。
  * 互斥语义：本类在 [SyncSessionState.mutex] 内执行整个周期（与拆分前 `mutex.withLock` 覆盖范围一致），
  * 周期内触达 [SyncConflictController] 的各方法不得二次取锁。
+ *
+ * ISSUE-P2-278：UI 写路径**不取**该互斥锁，周期起点之后用户仍可能编辑并保存——故所有
+ * 「整树替换会话」的落库点（远端接管 [SyncDatabaseCodec.loadAndApplyRemoteBytes]、自动合并
+ * [autoMergeAndUpload]、用户裁决采纳 `SyncConflictController.adoptMergedDatabase`）一律经
+ * [DatabaseSession.adoptDatabaseIfUnchanged] 做「校验-采用」：会话树已非周期起点实例时
+ * 如实中止本周期（`sync_error_local_changed_during_sync`），严禁静默覆盖窗口内编辑。
  */
 @Singleton
 class SyncCycleRunner @Inject constructor(
@@ -376,7 +382,9 @@ class SyncCycleRunner @Inject constructor(
                     remoteEtag = commitResult.remoteEtag,
                     strategy = conflictStrategy,
                     // ISSUE-P3-168 ①：本地侧直接取内存树（免去一次解析回树）
-                    localDbOverride = localDbSnapshot
+                    localDbOverride = localDbSnapshot,
+                    // ISSUE-P2-278：合并采纳前的会话守卫判据（周期起点快照）
+                    expectedSessionSnapshot = localDbSnapshot
                 )
             }
             is SyncCommitResult.RemoteUnreachable -> SyncOutcome.Offline

@@ -26,6 +26,7 @@
     <string name="sync_error_conflict_serialize_failed">冲突合并数据库序列化失败</string>
     <string name="sync_error_merged_upload_local_save_failed">合并版本已上传云端，但本地保存失败: %1$s</string>
     <string name="sync_error_remote_changed_during_resolve">云端在冲突解决期间再次更新，请重新同步以重新合并</string>
+    <string name="sync_error_local_changed_during_sync">同步期间检测到新的本地修改，为避免覆盖已中止本次同步，请重新同步</string>
     <string name="sync_error_upload_resolved_failed">上传冲突解决版本失败: %1$s</string>
     <string name="sync_error_decrypt_local_conflict_failed">无法解密本地冲突数据库</string>
     <string name="sync_error_decrypt_remote_conflict_failed">无法解密云端冲突数据库</string>
