@@ -80,6 +80,12 @@ Coroutines + Flow；**文档与代码注释使用简体中文**。
   或 `tools/export_previews/` 生成器后跑；无需设备，`test` 不覆盖它。**用真编译任务 `...Kotlin`**：
   聚合任务 `:app:compileDebugScreenshotTestSources` 只做依赖编排，见到它报 UP-TO-DATE 并不能证明编译发生过；
   需要确凿证据时加 `--rerun`（实测该 Kotlin 任务强制执行约 3s））
+- `export-preview-main.bat` / `export-preview-secondary.bat` — 根目录一键导出 Compose `@Preview` 截图：
+  先跑 `tools/export_previews/generate_screenshot_test_wrappers.py` 重生包装，再
+  `:app:exportMainPreviewScreenshots` / `:app:exportSecondaryPreviewScreenshots`（主屏 20 张白名单
+  vs 其余），产物 `preview-exports/{main,secondary}/{light,dark}/`（gitignore）。另有
+  `pwsh -File tools/export-previews.ps1 [-Filter <文件名子串>]` 走 Android CLI `render-compose-preview`
+  （须有运行中的 Studio；产物 `build/preview-export/`，单次通常仅默认亮/暗变体，限界见脚本文首）
 - `.\gradlew.bat test --rerun-tasks --max-workers=1` — 单元测试（强制真实执行，单会话勿并发）
 - `.\gradlew.bat test -DliveSyncTest` — 追加真实联调（需先起 `tools/local-sync`）
 - `.\gradlew.bat :crypto:connectedDebugAndroidTest` / `:database:connectedDebugAndroidTest` / `:sync:connectedDebugAndroidTest` / `:app:connectedDebugAndroidTest` — instrumented 测试（需设备；**`:sync:` 那层含 `SyncCacheAndroidRuntimeTest`，即 0600 / 0700 仅属主权限不变量——宿主 JVM 恒走降级分支，只有真机可证**）
