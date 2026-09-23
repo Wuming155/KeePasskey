@@ -58,7 +58,12 @@
 
 | 文档 | 用途 |
 |---|---|
-| [`references/`](references/) | 5 个参考项目深度分析 + 索引；借鉴实现思路前先读 |
+| [`references/README.md`](references/README.md) | 参考项目总览：项目列表、**参考优先级层级**（严格执行）与使用方式；借鉴实现思路前先读 |
+| [`references/KeePassDX-架构分析.md`](references/KeePassDX-架构分析.md) | 🥇 **核心参考**（Android / Kotlin+JNI）：Gradle 多模块同构、`DatabaseSession` 生命周期、Argon2 策略、Passkey、Compose 改造 |
+| [`references/keepass2android-架构分析.md`](references/keepass2android-架构分析.md) | 🥈 **云同步参考**（Android / Xamarin）：`IFileStorage` 插件化、WebDAV/S3 适配、离线缓存、ETag 三方冲突、Quick Unlock |
+| [`references/KeePass-2.61.1-架构分析.md`](references/KeePass-2.61.1-架构分析.md) | ⚖️ **格式裁决者**（官方 C#）：`.kdbx` v3/v4 事实标准、`KeePassLib` 加密管线 / Inner Random Stream / Header-HMAC 权威终审 |
+| [`references/KeePassXC-架构分析.md`](references/KeePassXC-架构分析.md) | ⚖️ **合并与 Passkey schema**（C++/Qt）：`Merger` 条目级合并与墓碑复活、`KPEX_PASSKEY_*` 属性、KDBX 读写管线交叉验证 |
+| [`references/Monica-架构分析.md`](references/Monica-架构分析.md) | 🥉 **UI / 本地优先辅助**（Kotlin + Rust `mdbx`）：Material 3 + Compose 动效、本地优先 vault（逻辑历史 / 冲突 / 快照） |
 | [`references/存量5项开放问题的参考项目对照.md`](references/存量5项开放问题的参考项目对照.md) | `ACTIVE_ISSUES.md` 当时 5 项开放条目逐项「参考项目怎么做」取证对照：文件级防回滚 / KDF「只升不降」/ Autofill 不依赖框架重发 / SSRF / 分支保护，含 `路径:行号` 证据与「未找到证据」的区分；其中三条已作为产品裁决迁出，本文件仍是其依据 |
 
 ## resolved/ — 历史批次归档
