@@ -41,15 +41,10 @@
 
 ---
 
-## P2 中危缺陷与协议/测试缺口（1 项）
+## P2 中危缺陷与协议/测试缺口（0 项）
 
-### ISSUE-P2-271：加密算法 / KDF 算法选择器为假开关——对话框只改 UI 回显，库文件头未变
-
-- **核实时间点**：2026-09-23 经全仓定向核对（设置页控制器 / 两个算法对话框 / 屏幕装配 / UI 投影四处）核实。
-- **核实方式**：① `setEncryptionAlgorithm`（`SettingsPreferencesController.kt:161-163`）与 `setKdfAlgorithm`（同文件 `:165-167`）均只 `databaseConfigStateFlow.update`，**无** `updateDatabaseMeta`、**无** `save`。② 两个对话框的 `onSelect` 直连上述 setter（`DatabaseSettingsScreen.kt:226-241` → `CipherAlgorithmDialog` / `KdfAlgorithmDialog`，定义见 `DatabaseAlgorithmDialogs.kt:34-73`），实现体是 `onSelect(name)` + `onDismiss()`——选完即关，无任何写侧动作。③ 显示值唯一来源是文件头映射 `databaseConfigFromHeader`（`SettingsUiStateProjection.kt:261-271`：`cipherLabel` 取自 `header.cipher`、`kdfLabel` 取自 `header.kdfParameters`），故「用户选择值」与「文件头真值」在任一 `databaseFlow` 重发后即分叉 / 回退。④ 同文件 `setArgon2Parameters`（`:181-202`）同为算法面参数却经 `updateDatabaseMeta` + `save()` 真实落盘（KDF 变体字典 I / M / P），对照明确。
-- **背景与根因**：属「展示选择未应用」类，且**触及安全语义**——界面声称已把库切到 ChaCha20 / AES-256 / Twofish 或 Argon2id / Argon2d / AES-KDF，实际文件头一个字节未改；用户据此形成「已更换更强算法」的错误认知。`ISSUE-P2-22`（Argon2 参数假闭环）对同型问题已定 P2 级别与整改口径。
-- **涉及文件**：`app/src/main/java/com/keepasskey/app/ui/screens/settings/SettingsPreferencesController.kt`、`app/src/main/java/com/keepasskey/app/ui/screens/settings/subscreens/DatabaseAlgorithmDialogs.kt`、`app/src/main/java/com/keepasskey/app/ui/screens/settings/subscreens/DatabaseSettingsScreen.kt`、`app/src/main/java/com/keepasskey/app/ui/screens/settings/SettingsUiStateProjection.kt`、`database/src/main/java/com/keepasskey/database/file/KdbxHeader.kt`（`cipher` / `kdfParameters`）、`database/src/main/java/com/keepasskey/database/file/KdbxFile.kt`（保存时按 `header.kdfParameters` 重派生并写出外层头）。
-- **验收标准**：AC① 选定算法**真实写入库头并在保存时生效**（写侧以保存时的 `header.cipher` / `header.kdfParameters` 重派生密钥并写出新外层头），语义与官方 KeePass「算法 / KDF 保存时生效」一致；AC② 换 KDF 变体（Argon2id ↔ Argon2d ↔ AES-KDF）时**补齐目标变体所需参数**（AES-KDF 的 rounds / seed、Argon2 的 I / M / P），不得留下参数缺失的半成品头；AC③ 无活动会话或库头形态不匹配时如实 no-op，禁止只改回显；AC④ 若评估认为「在线更换加密算法」本身属取舍而非缺陷，可先按 `ISSUE-P3-65` 处置口径**如实禁用交互并标注**（不得长期保留可拨动的假开关），该取舍须登记 `docs/architecture/产品裁决登记.md`（`PD-*`）；AC⑤ 新增用例锁定「选择 → 文件头真实变化 → 解锁成功」闭环，并含 `:database:` 端到端往返；AC⑥ 互操作核验：改算法后的产物经官方 KeePass / KeePassXC 打开与解锁成功（按规则 8 对拍口径）。
+> **暂无开放项**（本区归零：§271 闭环 `ISSUE-P2-271`（加密算法 / KDF 算法选择器假开关——对话框只改 UI 回显，库文件头未变）——整改＝两个选择器经 `CipherLabels` 词汇表反查算法 ID 后经 `updateDatabaseMeta` 写 `KdbxHeader.cipherUuid` / `kdfParameters` + `save()` 真实落库，换 KDF 变体补齐目标变体所需参数（Argon2 换型携带 I·M·P、AES-KDF 补官方缺省 rounds）、回显改单一真相源（init 头映射通道统一下发）；`app` 层 6 例 + `:database:` 层 5 例守卫锁定「选择 → 文件头真实变化 → 解锁成功」闭环；官方 keepassxc-cli 2.7.12 端到端对拍本仓产物报「Twofish 256 位 / Argon2d」实证。证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md) 与
+> [`resolved/batches/271-算法选择器真实落库批次.md`](resolved/batches/271-算法选择器真实落库批次.md)。）
 
 ---
 

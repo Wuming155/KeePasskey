@@ -24,6 +24,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.keepasskey.app.R
 import com.keepasskey.app.ui.screens.settings.CipherLabels
+import com.keepasskey.app.ui.screens.settings.KdfLabels
 
 /**
  * 加密算法 / KDF 派生算法选择对话框（ISSUE-P3-29：自 `DatabaseSettingsDialogs.kt` 拆出，纯结构性拆分）。
@@ -62,9 +63,10 @@ internal fun KdfAlgorithmDialog(
     AlgorithmOptionDialog(
         titleRes = R.string.dbset_kdf_dialog_title,
         options = listOf(
-            "Argon2id" to R.string.dbset_kdf_argon2id_desc,
-            "Argon2d" to R.string.dbset_kdf_argon2d_desc,
-            "AES-KDF" to R.string.dbset_kdf_aeskdf_desc
+            // ISSUE-P2-271：标签收敛到 KdfLabels——对话框、头部投影、写侧反查三处共用同一词汇表
+            KdfLabels.ARGON2ID to R.string.dbset_kdf_argon2id_desc,
+            KdfLabels.ARGON2D to R.string.dbset_kdf_argon2d_desc,
+            KdfLabels.AES_KDF to R.string.dbset_kdf_aeskdf_desc
         ),
         isSelected = { currentAlgorithm == it },
         onSelect = onSelect,

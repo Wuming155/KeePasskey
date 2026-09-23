@@ -9,7 +9,9 @@ import com.keepasskey.app.data.repository.SettingsRepository
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.ui.theme.AppThemeMode
 import com.keepasskey.app.ui.theme.AppThemePalette
+import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.crypto.kdf.KdfParameters
+import com.keepasskey.database.file.KdbxDatabase
 import com.keepasskey.database.session.DatabaseSession
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -162,12 +164,97 @@ internal class SettingsPreferencesController(
     }
 
     // ========== 密码库与加密配置 ==========
+
+    /**
+     * 应用外层加密算法（ISSUE-P2-271 整改：真实生效）。
+     *
+     * 此前仅回写设置页内存回显（假开关）：既不改库头也不落盘，文件头一个字节未动，
+     * 用户据界面误信「已更换算法」；任一 databaseFlow 重发后回显还会回退为文件头真值。
+     * 现经 [CipherLabels.cipherUuidForLabel] 反查算法 ID 后接入
+     * [DatabaseSession.updateDatabaseMeta] 写 `KdbxHeader.cipherUuid` 并立即
+     * [DatabaseSession.save]——写侧 `KdbxFile.save` 按保存时 cipherUuid 生成**该算法
+     * 官方长度**的全新 EncryptionIV（ChaCha20 12B / AES、Twofish 16B，P0-4 契约）并以
+     * 新 IV 重派生写出，语义与官方 KeePass「算法保存时生效」一致。回显不再自持状态：
+     * 会话 databaseFlow 重发后由 init 的头映射通道统一下发（P2-19 单一真相源）。
+     *
+     * 无活动会话 / 库未就绪 / 未知标签 / 与现行算法相同（避免无谓重派生）时如实 no-op。
+     */
     fun setEncryptionAlgorithm(algorithm: String) {
-        databaseConfigStateFlow.update { it.copy(encryptionAlgorithm = algorithm) }
+        val session = databaseSession ?: return
+        val current = session.databaseFlow.value ?: return
+        val cipherUuid = CipherLabels.cipherUuidForLabel(algorithm) ?: return
+        if (current.header.cipherUuid == cipherUuid) return
+        scope.launch {
+            session.updateDatabaseMeta { db ->
+                db.copy(header = db.header.copy(cipherUuid = cipherUuid))
+            }
+            session.save()
+        }
     }
 
+    /**
+     * 应用 KDF 派生算法（ISSUE-P2-271 整改：真实生效）。
+     *
+     * 与 [setEncryptionAlgorithm] 同型：此前仅回写内存回显，文件头 KDF 变体字典未动。
+     * 现构造**参数齐备**的目标变体（AC②：换变体不留半成品头）后接入
+     * [DatabaseSession.updateDatabaseMeta] 写 `KdbxHeader.kdfParameters` 并立即
+     * [DatabaseSession.save]——写侧以保存时 kdfParameters（全新随机 salt/seed）重派生
+     * 加密密钥。参数补齐口径：
+     * - Argon2id ↔ Argon2d：携带现行 I/M/P（换型不改强度）；
+     * - → AES-KDF：rounds 取官方缺省 [KdbxConstants.Kdf.DEFAULT_AES_KDF_ROUNDS]；
+     * - → Argon2（自 AES-KDF）：I/M/P 取类型缺省（2 轮 / 64MB / 并行 2）——自 AES-KDF
+     *   换入时 Argon2 参数无处映射（rounds ≠ I/M/P），与官方 KeePass「换 KDF 取新参数
+     *   缺省值」口径一致；用户可在换回后经 Argon2 参数对话框重调。
+     * salt/seed 占位无需随机：`KdbxFile.save` 换新后才参与派生，占位值从不落盘。
+     *
+     * 无活动会话 / 库未就绪 / 未知标签 / 目标变体与现行相同（Argon2 同型或已在 AES-KDF）
+     * 时如实 no-op。
+     */
     fun setKdfAlgorithm(kdf: String) {
-        databaseConfigStateFlow.update { it.copy(kdfAlgorithm = kdf) }
+        val session = databaseSession ?: return
+        val current = session.databaseFlow.value ?: return
+        val target = targetKdfParameters(current, kdf) ?: return
+        if (sameKdfVariant(current.header.kdfParameters, target)) return
+        scope.launch {
+            session.updateDatabaseMeta { db ->
+                db.copy(header = db.header.copy(kdfParameters = target))
+            }
+            session.save()
+        }
+    }
+
+    /** 按显示标签构造参数齐备的目标 KDF 变体；未知标签返回 null。 */
+    private fun targetKdfParameters(db: com.keepasskey.database.file.KdbxDatabase, label: String): KdfParameters? =
+        when (label) {
+            KdfLabels.ARGON2ID -> argon2Parameters(db, KdfParameters.Argon2.Argon2Type.ARGON2ID)
+            KdfLabels.ARGON2D -> argon2Parameters(db, KdfParameters.Argon2.Argon2Type.ARGON2D)
+            KdfLabels.AES_KDF -> when (db.header.kdfParameters) {
+                is KdfParameters.Aes -> db.header.kdfParameters
+                else -> KdfParameters.Aes(
+                    seed = ByteArray(32),
+                    rounds = KdbxConstants.Kdf.DEFAULT_AES_KDF_ROUNDS
+                )
+            }
+            else -> null
+        }
+
+    /** Argon2 目标变体：Argon2 ↔ Argon2 换型携带现行 I/M/P；自 AES-KDF 换入按类型缺省补齐。 */
+    private fun argon2Parameters(
+        db: KdbxDatabase,
+        type: KdfParameters.Argon2.Argon2Type
+    ): KdfParameters.Argon2 {
+        val current = db.header.kdfParameters
+        if (current is KdfParameters.Argon2) {
+            return current.copy(type = type)
+        }
+        return KdfParameters.Argon2(type = type, salt = ByteArray(32))
+    }
+
+    /** KDF 变体同一性（同型同 variant 即视为无变更；不比较 salt/seed——save 恒换新）。 */
+    private fun sameKdfVariant(a: KdfParameters, b: KdfParameters): Boolean = when {
+        a is KdfParameters.Aes && b is KdfParameters.Aes -> true
+        a is KdfParameters.Argon2 && b is KdfParameters.Argon2 -> a.type == b.type
+        else -> false
     }
 
     /**

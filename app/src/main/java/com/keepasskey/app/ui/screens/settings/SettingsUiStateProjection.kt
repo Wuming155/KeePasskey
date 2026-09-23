@@ -251,8 +251,8 @@ internal fun databaseConfigFromHeader(db: KdbxDatabase): DatabaseConfigUiState {
     }
     val kdf = header.kdfParameters
     val kdfLabel = when (kdf) {
-        is KdfParameters.Aes -> "AES-KDF"
-        is KdfParameters.Argon2 -> if (kdf.type == KdfParameters.Argon2.Argon2Type.ARGON2D) "Argon2d" else "Argon2id"
+        is KdfParameters.Aes -> KdfLabels.AES_KDF
+        is KdfParameters.Argon2 -> if (kdf.type == KdfParameters.Argon2.Argon2Type.ARGON2D) KdfLabels.ARGON2D else KdfLabels.ARGON2ID
     }
     val compressionLabel = when (header.compression) {
         KdbxConstants.Compression.GZIP -> "GZip 压缩"
