@@ -166,6 +166,8 @@
     <string name="detail_password_label">密码</string>
     <string name="detail_totp_section">二次验证令牌 (TOTP)</string>
     <string name="detail_totp_code">实时动态验证码</string>
+    <!-- ISSUE-P2-289：TOTP 解析期回落诊断（禁静默改写） -->
+    <string name="detail_totp_fallback_warning">TOTP 参数已按兼容规则回落：%1$s</string>
     <string name="detail_passkey_section">通行密钥凭据 (WebAuthn)</string>
     <string name="detail_passkey_chip">FIDO2 软件密钥（库内加密存储）</string>
     <string name="detail_passkey_rp">关联域名 (RP ID): %1$s</string>

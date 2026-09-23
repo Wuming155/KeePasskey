@@ -18,7 +18,13 @@ class ParsedTotpConfig(
     // ISSUE-P3-49：HOTP（RFC 4226）支持——`otpauth://hotp/...` 类型段与 `counter` 参数。
     // isHotp=false 时 [counter] 无意义（恒 0）。
     val isHotp: Boolean = false,
-    val counter: Long = 0
+    val counter: Long = 0,
+    /**
+     * ISSUE-P2-289 AC③：解析期的**非致命诊断**（如 `digits` 越界回落、
+     * `algorithm` 不支持回落 SHA1）——供 UI 如实呈现，**禁静默改写**。
+     * 仅元数据（不含种子），不参与 equals/hashCode（不影响配置身份）。
+     */
+    val warnings: List<String> = emptyList()
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
@@ -49,7 +55,7 @@ class ParsedTotpConfig(
         // 绝不输出种子内容，仅呈现长度（与 ProtectedString.toString 一致的安全约定）
         return "ParsedTotpConfig(secretLen=" + secret.size + ", period=" + period + ", digits=" + digits +
             ", algorithm=" + algorithm + ", issuer=" + issuer + ", account=" + account +
-            ", isHotp=" + isHotp + ", counter=" + counter + ")"
+            ", isHotp=" + isHotp + ", counter=" + counter + ", warnings=" + warnings.size + ")"
     }
 }
 
@@ -85,6 +91,7 @@ object TotpKeyUriParser {
     private const val BYTE_FF = 0x0C
     private const val BYTE_CR = 0x0D
     private const val BYTE_EQUALS = 0x3D
+    private const val BYTE_PERCENT = 0x25
     private const val BYTE_AMPERSAND = 0x26
     private const val BYTE_QUESTION = 0x3F
     private const val BYTE_SLASH = 0x2F
@@ -146,7 +153,8 @@ object TotpKeyUriParser {
         val restStart = if (slash >= 0) slash + 1 else uri.size
         val question = indexOfByte(uri, BYTE_QUESTION, restStart)
         val labelEnd = if (question >= 0) question else uri.size
-        val label = String(uri, restStart, labelEnd - restStart, StandardCharsets.UTF_8)
+        // ISSUE-P2-289 AC①：label 先百分号解码再归一（`%20` / `%40` 不再原样入库显示）
+        val label = String(percentDecode(uri.copyOfRange(restStart, labelEnd)), StandardCharsets.UTF_8)
 
         val query = if (question >= 0) uri.copyOfRange(question + 1, uri.size) else ByteArray(0)
         var secretRaw: ByteArray? = null
@@ -155,6 +163,7 @@ object TotpKeyUriParser {
         var algorithm = DEFAULT_ALGORITHM
         var issuerParam: String? = null
         var counter = 0L
+        val warnings = mutableListOf<String>()
 
         try {
             var index = 0
@@ -165,24 +174,40 @@ object TotpKeyUriParser {
                 if (eq != null) {
                     val key = String(query, index, eq - index, StandardCharsets.UTF_8)
                     val valueStart = eq + 1
-                    val valueLength = nextAmp - valueStart
+                    // ISSUE-P2-289 AC①：参数值一律先百分号解码再归一（禁自写切分产生语义分歧；
+                    // `secret=...%3D%3D` 不再被解成错误密钥）
                     when {
-                        key.equals(KEY_SECRET, ignoreCase = true) ->
-                            secretRaw = query.copyOfRange(valueStart, nextAmp)
+                        key.equals(KEY_SECRET, ignoreCase = true) -> {
+                            val rawValue = query.copyOfRange(valueStart, nextAmp)
+                            secretRaw = percentDecode(rawValue)
+                            rawValue.fill(0)
+                        }
                         key.equals(KEY_PERIOD, ignoreCase = true) ->
-                            period = String(query, valueStart, valueLength, StandardCharsets.UTF_8)
+                            period = queryValueString(query, valueStart, nextAmp)
                                 .toIntOrNull() ?: DEFAULT_PERIOD
-                        key.equals(KEY_DIGITS, ignoreCase = true) ->
-                            digits = String(query, valueStart, valueLength, StandardCharsets.UTF_8)
-                                .toIntOrNull() ?: DEFAULT_DIGITS
-                        key.equals(KEY_ALGORITHM, ignoreCase = true) ->
-                            algorithm = normalizeAlgorithm(
-                                String(query, valueStart, valueLength, StandardCharsets.UTF_8)
-                            )
+                        key.equals(KEY_DIGITS, ignoreCase = true) -> {
+                            val parsed = queryValueString(query, valueStart, nextAmp).toIntOrNull()
+                            // ISSUE-P2-289 AC③：越界回落带诊断（禁静默改写）；钳制语义不变
+                            if (parsed != null && parsed !in 6..8) {
+                                warnings += "digits=$parsed 超出 6..8，已回落 $DEFAULT_DIGITS 位"
+                            }
+                            digits = parsed ?: DEFAULT_DIGITS
+                        }
+                        key.equals(KEY_ALGORITHM, ignoreCase = true) -> {
+                            val raw = queryValueString(query, valueStart, nextAmp)
+                            val normalized = normalizeAlgorithm(raw)
+                            // ISSUE-P2-289 AC③：不支持的算法回落 SHA1 带诊断（禁静默改写）
+                            if (normalized == DEFAULT_ALGORITHM &&
+                                !raw.equals(DEFAULT_ALGORITHM, ignoreCase = true) && raw.isNotBlank()
+                            ) {
+                                warnings += "algorithm=$raw 不支持，已回落 $DEFAULT_ALGORITHM"
+                            }
+                            algorithm = normalized
+                        }
                         key.equals(KEY_ISSUER, ignoreCase = true) ->
-                            issuerParam = String(query, valueStart, valueLength, StandardCharsets.UTF_8)
+                            issuerParam = queryValueString(query, valueStart, nextAmp)
                         key.equals(KEY_COUNTER, ignoreCase = true) ->
-                            counter = String(query, valueStart, valueLength, StandardCharsets.US_ASCII)
+                            counter = queryValueString(query, valueStart, nextAmp)
                                 .toLongOrNull()?.coerceAtLeast(0L) ?: 0L
                     }
                 }
@@ -192,7 +217,10 @@ object TotpKeyUriParser {
 
             val rawSecret = secretRaw ?: return null
             val normalized = normalizeBase32(rawSecret)
-            if (normalized.isEmpty()) {
+            // ISSUE-P2-289 AC②：新输入解析为**严格口径**——含字母表外字符即解析失败
+            // （调用方如实报「URI 非法」，禁由下游宽容解码静默解出错误密钥）；
+            // 存量库展示的宽容口径在 `OtpEngine.Base32Decoder`（作用域分列，互不外推）
+            if (normalized.isEmpty() || !isBase32Alphabet(normalized)) {
                 normalized.fill(0)
                 return null
             }
@@ -206,12 +234,54 @@ object TotpKeyUriParser {
                 issuer = issuer.ifBlank { null },
                 account = account.ifBlank { null },
                 isHotp = isHotp,
-                counter = if (isHotp) counter else 0L
+                counter = if (isHotp) counter else 0L,
+                warnings = warnings
             )
         } finally {
             query.fill(0)
             secretRaw?.fill(0)
         }
+    }
+
+    /** 查询参数值的百分号解码 + UTF-8 成串（非敏感元数据用；种子走 [percentDecode] 字节路径）。 */
+    private fun queryValueString(query: ByteArray, start: Int, end: Int): String =
+        String(percentDecode(query.copyOfRange(start, end)), StandardCharsets.UTF_8)
+
+    /**
+     * ISSUE-P2-289 AC①：百分号解码（`%XX` → 对应字节；非法 `%` 序列按字面量原样保留）。
+     * 只处理 RFC 3986 百分号编码，`+` 不当空格（URI 规范口径，非表单编码）。
+     * 返回全新数组（原数组不修改）；调用方对含种子语义的产物承担擦除义务。
+     */
+    private fun percentDecode(raw: ByteArray): ByteArray {
+        val out = ByteArray(raw.size)
+        var size = 0
+        var i = 0
+        while (i < raw.size) {
+            val b = raw[i].toInt() and 0xFF
+            if (b == BYTE_PERCENT && i + 2 <= raw.size - 1) {
+                val hi = hexValue(raw[i + 1].toInt() and 0xFF)
+                val lo = hexValue(raw[i + 2].toInt() and 0xFF)
+                if (hi >= 0 && lo >= 0) {
+                    out[size++] = ((hi shl 4) or lo).toByte()
+                    i += 3
+                    continue
+                }
+            }
+            out[size++] = raw[i]
+            i++
+        }
+        if (size == out.size) return out
+        val result = out.copyOf(size)
+        out.fill(0)
+        return result
+    }
+
+    /** 十六进制字符 → 数值（非法返回 -1）。 */
+    private fun hexValue(value: Int): Int = when (value) {
+        in 0x30..0x39 -> value - 0x30
+        in 0x41..0x46 -> value - 0x41 + 10
+        in 0x61..0x66 -> value - 0x61 + 10
+        else -> -1
     }
 
     private fun parsePlainBase32(candidate: ByteArray): ParsedTotpConfig? {

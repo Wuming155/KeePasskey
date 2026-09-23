@@ -367,6 +367,7 @@
 | §293 | 熵读数单一真相源批次：`ISSUE-P2-286` 闭环。随机 / 掩码密码收敛 crypto 内核 `guessesLog10`（字符集代理模型含 `+30` 虚增整体退役）；口令短语按「词数 × log2(词表) + 变形位」建模（50 位——条目括注的「首字母位」经复核为确定性变换、0 位）；编辑页 `4.5 bits/char` 启发式删除改真实熵（`Dispatchers.Default` + 乱序防护）；评估热路径全部下沉。用例 +1 / 改 2；`tests=2638` 全绿 | ISSUE-P2-286 | [`293-熵读数单一真相源批次.md`](resolved/batches/293-熵读数单一真相源批次.md) |
 | §294 | 锁库生成器状态失效批次：`ISSUE-P2-287` 闭环。`clearGeneratedSecrets` 擦除与状态失效原子完成（交出 `ProtectedString.EMPTY` 新引用，`remember` 键失效）；`ProtectedString` 新增只读 `cleared`，复制路径对已擦实例降级为「请重新生成」提示（禁崩溃）；生成器 tab 不门控登记 **`PD-37`**。用例 +1；`tests=2639` 全绿 | ISSUE-P2-287 | [`294-锁库生成器状态失效批次.md`](resolved/batches/294-锁库生成器状态失效批次.md) |
 | §295 | 主口令强度门槛批次：`ISSUE-P2-288` 闭环。`MasterPasswordPolicy` 单一判据（长度 < 8 阻断 + < 40 bits 显式二次确认，内核评估 `Dispatchers.Default`），建库向导与改密对话框两道闸共用（含弱口令确认对话框与 `DebugLogBuffer` 留痕）；阈值登记 **`PD-38`**、主口令不纳入泄露检测登记限界 **`§31`**。用例 +2；`tests=2641` 全绿 + 截图门禁绿 | ISSUE-P2-288 | [`295-主口令强度门槛批次.md`](resolved/batches/295-主口令强度门槛批次.md) |
+| §296 | otpauth 百分号解码批次：`ISSUE-P2-289` 闭环。参数值一律先百分号解码（label / secret / 全参数，RFC 3986 口径）；新输入 Base32 严格判据与存量展示宽容口径作用域分列；`digits` / `algorithm` 回落带诊断并经 `warnings` 透传到详情页呈现（禁静默改写）；条目「digits=7 回落」示例经复核更正（7 在 6..8 内保留）。用例 +6；`tests=2647` 全绿 | ISSUE-P2-289 | [`296-otpauth百分号解码批次.md`](resolved/batches/296-otpauth百分号解码批次.md) |
 
 ## 分册导航
 

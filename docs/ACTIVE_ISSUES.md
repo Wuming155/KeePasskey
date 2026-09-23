@@ -41,17 +41,7 @@
 
 ---
 
-## P2 中危缺陷与协议/测试缺口（3 项）
-
-### ISSUE-P2-289：`otpauth://` 不做百分号解码，编码过的种子被静默解成错误密钥（含 label 不解码）
-
-- **核实时间点**：2026-09-23 经解析侧与 Base32 兜底行为逐环核对（覆盖面比首轮更宽：label 亦不解码）。
-- **核实方式**：唯一生产入口 `app/.../data/repository/VaultEntryTotpMapping.kt:28`；全仓 `Uri.parse` 无一处用于 otpauth ⇒ 上游未解码；`core/.../otp/TotpKeyUriParser.kt:159-191` 以裸字节切 `&` / `=`，`:242-257` 的 `normalizeBase32` 仅大写去空白去 `=`；`core/.../otp/OtpEngine.kt:146-170` 的 `Base32Decoder.decode` **静默丢弃字母表外字符**（其 KDoc 的「宽容」只声明为兼容存量库展示，未声明百分号后果）⇒ `secret=JBSWY3DPEHPK3PXP%3D%3D` 实得 `JBSWY3DPEHPK3PXP3D3D`，出码永远不对且**无报错**；`issuer` / `account` 里的 `%20` / `%40` 原样入库显示（`:149/199-200`）；`digits=7` 在 `:204` 的 `6..8` 判定后静默回落为 6、未知 `algorithm`（含 RFC 4226 允许的 MD5）在 `:235-239` 回落 SHA1，均无诊断。编辑页 / 扫码 / 1Password PUX（`OnePasswordPuxImporter.kt:193-225`）**共用同一条码路**；测试无 `%3D` 命中，无 `ImportWarnings` 承接。
-- **对照**：KeePassDX `OtpEntryFields.kt:152-236` 用 `Uri.getQueryParameter`（框架自带百分号解码）。
-- **涉及文件**：`core/src/main/java/com/keepasskey/core/otp/TotpKeyUriParser.kt`、`core/src/main/java/com/keepasskey/core/otp/OtpEngine.kt`、`app/src/main/java/com/keepasskey/app/data/repository/VaultEntryTotpMapping.kt`。
-- **验收标准**：AC① 参数值一律先百分号解码再归一（label / account 同修），禁自写切分产生语义分歧；AC② Base32 丢弃非法字符时须**可辨识地失败或告警**（禁静默出错码），且不得放宽既有「兼容存量库展示」的宽容口径——两者作用域须写清；AC③ `digits` / `algorithm` 回落须带诊断信息（禁静默改写），并保留既有钳制语义；AC④ 用例含 `%3D%3D` / `%20` / `digits=7` / `algorithm=md5` 四态，并锁定「非 otpauth 的既有字段路径不回归」；AC⑤ 与 `ISSUE-P3-273`（TOTP 字段映射不落盘）划清边界，两条各自验收。
-
----
+## P2 中危缺陷与协议/测试缺口（2 项）
 
 ### ISSUE-P2-290：KDF 派生异常路径跳过 `compositeKey` 清零——实现未达自登契约，且无需正确口令即可稳定触发
 

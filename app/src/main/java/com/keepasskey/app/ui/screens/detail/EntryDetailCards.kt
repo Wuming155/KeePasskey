@@ -139,6 +139,18 @@ internal fun TotpCard(
                     // 与验证码大卡 / 列表同一色语义（success），避免跨页蓝/绿混用
                     style = MonospaceTotpStyle.copy(color = LocalSecurityColors.current.success)
                 )
+                // ISSUE-P2-289 AC③：解析期回落诊断如实呈现（禁静默改写）
+                if (entry.totpWarnings.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = stringResource(
+                            R.string.detail_totp_fallback_warning,
+                            entry.totpWarnings.joinToString("；")
+                        ),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
             }
 
             Row(verticalAlignment = Alignment.CenterVertically) {

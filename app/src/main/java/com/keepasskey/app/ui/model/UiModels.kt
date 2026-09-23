@@ -120,6 +120,8 @@ data class UiVaultEntry(
     val totpPeriod: Int = 30,
     val totpDigits: Int = 6,
     val totpAlgorithm: String = "SHA1",
+    /** ISSUE-P2-289：TOTP 解析期回落诊断（禁静默改写；空列表 = 无回落） */
+    val totpWarnings: List<String> = emptyList(),
     // ISSUE-P3-49：HOTP（RFC 4226）条目——验证码基于持久化计数器而非时间步长，
     // UI 据此隐藏倒计时环并以显式「取码」动作推进计数器
     val isHotp: Boolean = false,

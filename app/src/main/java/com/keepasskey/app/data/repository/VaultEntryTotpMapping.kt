@@ -107,18 +107,22 @@ internal object VaultEntryTotpMapping {
             algorithm = parsedTotp?.algorithm ?: DEFAULT_TOTP_ALGORITHM,
             isHotp = parsedTotp?.isHotp == true,
             code = code,
-            remainingSeconds = OtpEngine.getRemainingSeconds(periodSeconds = period)
+            remainingSeconds = OtpEngine.getRemainingSeconds(periodSeconds = period),
+            // ISSUE-P2-289 AC③：解析期回落诊断透传（禁静默改写）
+            warnings = parsedTotp?.warnings.orEmpty()
         )
     }
 
-    /** TOTP 条目投影（参数 + 实时码 + 周期剩余秒数） */
+    /** TOTP 条目投影（参数 + 实时码 + 周期剩余秒数 + 解析期诊断） */
     data class Projection(
         val period: Int,
         val digits: Int,
         val algorithm: String,
         val isHotp: Boolean,
         val code: String?,
-        val remainingSeconds: Int
+        val remainingSeconds: Int,
+        /** ISSUE-P2-289：解析期非致命诊断（digits / algorithm 回落），空列表 = 无回落 */
+        val warnings: List<String> = emptyList()
     )
 
     private const val DEFAULT_TOTP_PERIOD_SECONDS = 30

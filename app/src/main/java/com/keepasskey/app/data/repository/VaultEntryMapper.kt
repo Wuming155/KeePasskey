@@ -86,6 +86,8 @@ internal class VaultEntryMapper(private val strings: StringsProvider) {
             totpPeriod = totp.period,
             totpDigits = totp.digits,
             totpAlgorithm = totp.algorithm,
+            // ISSUE-P2-289 AC③：解析期回落诊断透传（禁静默改写）
+            totpWarnings = totp.warnings,
             isHotp = totp.isHotp,
             category = if (card.isCardEntry) EntryCategory.CARD else EntryCategory.LOGIN,
             isFavorite = entry.customData[RealVaultRepository.FAVORITE_CUSTOM_DATA_KEY] == "true",
