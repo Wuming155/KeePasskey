@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -95,11 +94,49 @@ internal fun KeyFileOneTimeSaveDialog(
     )
 }
 
+/** 建库向导的 SAF 启动器对（§280 自 [CreateVaultWizardDialog] 拆出）。 */
+private class CreateVaultWizardLaunchers(
+    val pickKeyFile: (Array<String>) -> Unit,
+    val createVaultDocument: (String) -> Unit
+)
+
 /**
- * 新建密码库向导（ISSUE-P3-31 批次 B 自 `DatabasePickerScreen.kt` 拆出，纯结构性改动）。
- *
- * ISSUE-P3-188 §179：密钥文件区、预设芯片与确认按钮下沉至同包 `CreateVaultWizardDialogSections.kt`；
- * **主密码 / 确认密码的 `CharArray` 管线与离场擦除的 `DisposableEffect` 刻意留在本体**（见该文件 KDoc）。
+ * 向导表单状态（§280）：名称 / 密码对 / 密钥文件 / 预设 / 存储位置。
+ * 主密码以 [CharArray] 承载；离场由 [CreateVaultWizardDialog] 擦除。
+ */
+private class CreateVaultWizardState {
+    var vaultName by mutableStateOf("passwords.kdbx")
+    var passwordChars by mutableStateOf(CharArray(0))
+    var confirmChars by mutableStateOf(CharArray(0))
+    var passwordVisible by mutableStateOf(false)
+    var useKeyFile by mutableStateOf(false)
+    var keyFileChoice by mutableStateOf(KeyFileSourceChoice.GENERATE)
+    var selectedKeyFilePath by mutableStateOf("")
+    var selectedKeyFileName by mutableStateOf("")
+    // ISSUE-P2-85：预设改为类型化枚举——芯片与落盘共用 `CreateVaultPreset` 单一真相源
+    var selectedPreset by mutableStateOf(CreateVaultPreset.DEFAULT)
+    // ISSUE-P2-229：新建库的落地位置二选一；选「自选位置」时必须已挑定文档
+    var storageLocation by mutableStateOf(VaultStorageLocation.INTERNAL)
+    var selectedVaultUri by mutableStateOf("")
+    var selectedVaultFileName by mutableStateOf("")
+
+    val isLocationValid get() = storageLocation == VaultStorageLocation.INTERNAL || selectedVaultUri.isNotBlank()
+    val isKeyFileValid get() = !useKeyFile || keyFileChoice == KeyFileSourceChoice.GENERATE ||
+        selectedKeyFilePath.isNotBlank()
+    val isFormValid get() = vaultName.isNotBlank() && passwordChars.isNotEmpty() &&
+        passwordChars.contentEquals(confirmChars) && isKeyFileValid && isLocationValid
+
+    fun wipePasswords() {
+        passwordChars.fill('0')
+        confirmChars.fill('0')
+    }
+}
+
+/**
+ * 新建密码库向导（ISSUE-P3-31 批次 B 自 `DatabasePickerScreen.kt` 拆出）。
+ * ISSUE-P3-188 §179：段落组件下沉 `CreateVaultWizardDialogSections.kt`；
+ * 主密码 / 确认密码的 [CharArray] 管线与离场擦除的 [DisposableEffect] 留在本体。
+ * §280：表单体、SAF 启动器、对话框壳与状态对象下沉本文件私有组件。
  *
  * 主密码全程以 [CharArray] 承载（[SecurePasswordField] 桥接），不进入 String / UiState / StateFlow；
  * 弹窗离场（确认 / 取消 / 进程回收）经 [DisposableEffect] 擦除组件内持有的全部密码副本。
@@ -117,63 +154,54 @@ internal fun CreateVaultWizardDialog(
         targetUri: String?
     ) -> Unit
 ) {
-    val context = LocalContext.current
-    var vaultName by remember { mutableStateOf("passwords.kdbx") }
-    // H2 整改：主密码以 CharArray 承载（SecurePasswordField 桥接），不进入 String / UiState / StateFlow
-    var passwordChars by remember { mutableStateOf(CharArray(0)) }
-    var confirmChars by remember { mutableStateOf(CharArray(0)) }
-    var passwordVisible by remember { mutableStateOf(false) }
-    var useKeyFile by remember { mutableStateOf(false) }
-    var keyFileChoice by remember { mutableStateOf(KeyFileSourceChoice.GENERATE) }
-    var selectedKeyFilePath by remember { mutableStateOf("") }
-    var selectedKeyFileName by remember { mutableStateOf("") }
-    // ISSUE-P2-85：预设改为类型化枚举——芯片与落盘共用 `CreateVaultPreset` 单一真相源，
-    // 消除「裸字符串标签 + 落盘侧只按 contains("AES-KDF") 反推」导致的算法静默丢失。
-    var selectedPreset by remember { mutableStateOf(CreateVaultPreset.DEFAULT) }
-    // ISSUE-P2-229：新建库的落地位置此前**无任何入口**——一律静默写入应用私有目录。
-    // 现由用户二选一；选「自选位置」时必须已在系统面板挑定文档，否则确认按钮保持禁用
-    // （绝不静默回退到内部存储，那会让用户以为库在自己选的位置）。
-    var storageLocation by remember { mutableStateOf(VaultStorageLocation.INTERNAL) }
-    var selectedVaultUri by remember { mutableStateOf("") }
-    var selectedVaultFileName by remember { mutableStateOf("") }
-
-    val keyPickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocument()
-    ) { uri: Uri? ->
-        if (uri != null) {
-            val displayName = queryDocumentDisplayName(context, uri)
-            selectedKeyFileName = displayName
-            selectedKeyFilePath = uri.toString()
+    val state = remember { CreateVaultWizardState() }
+    val launchers = rememberCreateVaultWizardLaunchers(
+        onKeyFilePicked = { name, path ->
+            state.selectedKeyFileName = name
+            state.selectedKeyFilePath = path
+        },
+        onVaultDocumentPicked = { name, path ->
+            state.selectedVaultFileName = name
+            state.selectedVaultUri = path
+        },
+        onVaultDocumentCancelled = {
+            state.storageLocation = VaultStorageLocation.INTERNAL
         }
-    }
-
-    // ISSUE-P2-229：ACTION_CREATE_DOCUMENT 通道（与密钥文件另存为同一 contract 口径）；
-    // 用户在系统面板取消即回落到「应用私有目录」并**即时反映在单选项上**（不留隐式选择）
-    val vaultCreateLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.CreateDocument("application/octet-stream")
-    ) { uri: Uri? ->
-        if (uri != null) {
-            selectedVaultFileName = queryDocumentDisplayName(context, uri)
-            selectedVaultUri = uri.toString()
-        } else {
-            storageLocation = VaultStorageLocation.INTERNAL
-        }
-    }
-
-    val isLocationValid = storageLocation == VaultStorageLocation.INTERNAL || selectedVaultUri.isNotBlank()
-    val isKeyFileValid = !useKeyFile || keyFileChoice == KeyFileSourceChoice.GENERATE ||
-        selectedKeyFilePath.isNotBlank()
-    val isFormValid = vaultName.isNotBlank() && passwordChars.isNotEmpty() &&
-        passwordChars.contentEquals(confirmChars) && isKeyFileValid && isLocationValid
+    )
 
     // 弹窗离场（确认 / 取消 / 进程回收）时擦除组件内持有的全部密码副本
     DisposableEffect(Unit) {
-        onDispose {
-            passwordChars.fill('0')
-            confirmChars.fill('0')
-        }
+        onDispose { state.wipePasswords() }
     }
 
+    CreateVaultWizardAlertDialog(
+        state = state,
+        launchers = launchers,
+        onDismiss = onDismiss,
+        // H2 整改：直接移交组件持有的 CharArray（ViewModel 复制私有副本并自行擦除）
+        // ISSUE-P3-21：SELECT_EXISTING 时上行选中的密钥文件 Uri，其字节真实参与复合密钥
+        // ISSUE-P2-229：仅「自选位置」时上行已挑定的文档 uri；内部存储传 null
+        onConfirm = {
+            onConfirm(
+                state.vaultName,
+                state.passwordChars,
+                state.useKeyFile,
+                state.selectedPreset,
+                if (state.keyFileChoice == KeyFileSourceChoice.SELECT_EXISTING) state.selectedKeyFilePath else null,
+                state.selectedVaultUri.ifBlank { null }
+            )
+        }
+    )
+}
+
+/** 向导对话框壳（§280）：两处 `AlertDialog` 与 `SecureOn` 要求均落在本文件。 */
+@Composable
+private fun CreateVaultWizardAlertDialog(
+    state: CreateVaultWizardState,
+    launchers: CreateVaultWizardLaunchers,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit
+) {
     AlertDialog(
         onDismissRequest = onDismiss,
         // 同 KeyFileOneTimeSaveDialog：本窗含主密码与确认主密码，须显式要求对话框窗口遮罩
@@ -185,125 +213,161 @@ internal fun CreateVaultWizardDialog(
             )
         },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                // 本窗内含**主密码 + 确认主密码**两个 SecurePasswordField：对话框是独立窗口，
-                // 必须在本窗内显式施加 FLAG_SECURE（同 SecureDialog KDoc 的官方依据）
-                com.keepasskey.app.security.SecureDialogWindowEffect()
-                OutlinedTextField(
-                    value = vaultName,
-                    onValueChange = { vaultName = it },
-                    label = { Text(stringResource(R.string.db_picker_vault_name)) },
-                    placeholder = { Text(stringResource(R.string.db_picker_vault_name_hint)) },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                // ISSUE-P2-229：存储位置二选一（内部存储 / 经系统文件选择器自选）
-                VaultStorageLocationSection(
-                    location = storageLocation,
-                    pickedFileName = selectedVaultFileName,
-                    onSelectInternal = {
-                        storageLocation = VaultStorageLocation.INTERNAL
-                        selectedVaultUri = ""
-                        selectedVaultFileName = ""
-                    },
-                    onSelectExternal = {
-                        storageLocation = VaultStorageLocation.EXTERNAL
-                        vaultCreateLauncher.launch(
-                            if (vaultName.endsWith(".kdbx", ignoreCase = true)) vaultName else "$vaultName.kdbx"
-                        )
-                    }
-                )
-
-                SecurePasswordField(
-                    label = stringResource(R.string.db_picker_new_pwd),
-                    onPasswordChanged = { chars ->
-                        passwordChars.fill('0')
-                        passwordChars = chars.copyOf()
-                    },
-                    isPasswordVisible = passwordVisible,
-                    onToggleVisibility = { passwordVisible = !passwordVisible },
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                SecurePasswordField(
-                    label = stringResource(R.string.db_picker_confirm_pwd),
-                    onPasswordChanged = { chars ->
-                        confirmChars.fill('0')
-                        confirmChars = chars.copyOf()
-                    },
-                    isError = confirmChars.isNotEmpty() && !confirmChars.contentEquals(passwordChars),
-                    supportingText = {
-                        if (confirmChars.isNotEmpty() && !confirmChars.contentEquals(passwordChars)) {
-                            Text(stringResource(R.string.db_picker_pwd_mismatch), color = MaterialTheme.colorScheme.error)
-                        }
-                    },
-                    isPasswordVisible = passwordVisible,
-                    onToggleVisibility = { passwordVisible = !passwordVisible },
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                // 文件密钥选择区域 (可选项：可生成新密钥，或选择已有密钥文件)
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(MaterialTheme.colorScheme.surfaceContainerLow)
-                        .padding(10.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    KeyFileToggleRow(
-                        useKeyFile = useKeyFile,
-                        onUseKeyFileChange = { useKeyFile = it }
-                    )
-
-                    if (useKeyFile) {
-                        KeyFileSourceSection(
-                            keyFileChoice = keyFileChoice,
-                            onKeyFileChoiceChange = { keyFileChoice = it },
-                            selectedKeyFileName = selectedKeyFileName,
-                            selectedKeyFilePath = selectedKeyFilePath,
-                            onSelectedKeyFilePathChange = { selectedKeyFilePath = it },
-                            onBrowse = { keyPickerLauncher.launch(arrayOf("*/*")) }
-                        )
-                    }
-                }
-
-                Text(
-                    text = stringResource(R.string.db_picker_encryption_preset),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-
-                CreateVaultPresetChips(
-                    selected = selectedPreset,
-                    onSelect = { selectedPreset = it }
-                )
-            }
+            CreateVaultWizardForm(state = state, launchers = launchers)
         },
         confirmButton = {
-            CreateVaultConfirmButton(
-                enabled = isFormValid,
-                onCreate = {
-                    // H2 整改：直接移交组件持有的 CharArray（ViewModel 复制私有副本并自行擦除）
-                    // ISSUE-P3-21：SELECT_EXISTING 时上行选中的密钥文件 Uri，其字节真实参与复合密钥
-                    onConfirm(
-                        vaultName,
-                        passwordChars,
-                        useKeyFile,
-                        selectedPreset,
-                        if (keyFileChoice == KeyFileSourceChoice.SELECT_EXISTING) selectedKeyFilePath else null,
-                        // ISSUE-P2-229：仅「自选位置」时上行已挑定的文档 uri；内部存储传 null
-                        selectedVaultUri.ifBlank { null }
-                    )
-                }
-            )
+            CreateVaultConfirmButton(enabled = state.isFormValid, onCreate = onConfirm)
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
                 Text(stringResource(R.string.btn_cancel))
             }
         }
+    )
+}
+
+@Composable
+private fun rememberCreateVaultWizardLaunchers(
+    onKeyFilePicked: (displayName: String, path: String) -> Unit,
+    onVaultDocumentPicked: (displayName: String, path: String) -> Unit,
+    onVaultDocumentCancelled: () -> Unit
+): CreateVaultWizardLaunchers {
+    val context = LocalContext.current
+    val keyPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            onKeyFilePicked(queryDocumentDisplayName(context, uri), uri.toString())
+        }
+    }
+    // ISSUE-P2-229：ACTION_CREATE_DOCUMENT 通道（与密钥文件另存为同一 contract 口径）；
+    // 用户在系统面板取消即回落到「应用私有目录」并**即时反映在单选项上**（不留隐式选择）
+    val vaultCreateLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/octet-stream")
+    ) { uri: Uri? ->
+        if (uri != null) {
+            onVaultDocumentPicked(queryDocumentDisplayName(context, uri), uri.toString())
+        } else {
+            onVaultDocumentCancelled()
+        }
+    }
+    return remember(keyPickerLauncher, vaultCreateLauncher) {
+        CreateVaultWizardLaunchers(
+            pickKeyFile = { keyPickerLauncher.launch(it) },
+            createVaultDocument = { vaultCreateLauncher.launch(it) }
+        )
+    }
+}
+
+/**
+ * 向导表单体（§280）：名称 / 存储位置 / 主密码对 / 密钥文件区 / 预设芯片。
+ * 不持有状态；主密码 [CharArray] 管线与离场擦除仍由 [CreateVaultWizardDialog] 持有。
+ */
+@Composable
+private fun CreateVaultWizardForm(
+    state: CreateVaultWizardState,
+    launchers: CreateVaultWizardLaunchers
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        // 本窗内含**主密码 + 确认主密码**两个 SecurePasswordField：对话框是独立窗口，
+        // 必须在本窗内显式施加 FLAG_SECURE（同 SecureDialog KDoc 的官方依据）
+        com.keepasskey.app.security.SecureDialogWindowEffect()
+        OutlinedTextField(
+            value = state.vaultName,
+            onValueChange = { state.vaultName = it },
+            label = { Text(stringResource(R.string.db_picker_vault_name)) },
+            placeholder = { Text(stringResource(R.string.db_picker_vault_name_hint)) },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        // ISSUE-P2-229：存储位置二选一（内部存储 / 经系统文件选择器自选）
+        VaultStorageLocationSection(
+            location = state.storageLocation,
+            pickedFileName = state.selectedVaultFileName,
+            onSelectInternal = {
+                state.storageLocation = VaultStorageLocation.INTERNAL
+                state.selectedVaultUri = ""
+                state.selectedVaultFileName = ""
+            },
+            onSelectExternal = {
+                state.storageLocation = VaultStorageLocation.EXTERNAL
+                launchers.createVaultDocument(
+                    if (state.vaultName.endsWith(".kdbx", ignoreCase = true)) state.vaultName else "${state.vaultName}.kdbx"
+                )
+            }
+        )
+
+        CreateVaultPasswordFields(state = state)
+
+        // 文件密钥选择区域 (可选项：可生成新密钥，或选择已有密钥文件)
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(MaterialTheme.colorScheme.surfaceContainerLow)
+                .padding(10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            KeyFileToggleRow(
+                useKeyFile = state.useKeyFile,
+                onUseKeyFileChange = { state.useKeyFile = it }
+            )
+
+            if (state.useKeyFile) {
+                KeyFileSourceSection(
+                    keyFileChoice = state.keyFileChoice,
+                    onKeyFileChoiceChange = { state.keyFileChoice = it },
+                    selectedKeyFileName = state.selectedKeyFileName,
+                    selectedKeyFilePath = state.selectedKeyFilePath,
+                    onSelectedKeyFilePathChange = { state.selectedKeyFilePath = it },
+                    onBrowse = { launchers.pickKeyFile(arrayOf("*/*")) }
+                )
+            }
+        }
+
+        Text(
+            text = stringResource(R.string.db_picker_encryption_preset),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+
+        CreateVaultPresetChips(
+            selected = state.selectedPreset,
+            onSelect = { state.selectedPreset = it }
+        )
+    }
+}
+
+/** 主密码 + 确认密码（CharArray 管线由 [CreateVaultWizardState] 持有）。 */
+@Composable
+private fun CreateVaultPasswordFields(state: CreateVaultWizardState) {
+    SecurePasswordField(
+        label = stringResource(R.string.db_picker_new_pwd),
+        onPasswordChanged = { chars ->
+            state.passwordChars.fill('0')
+            state.passwordChars = chars.copyOf()
+        },
+        isPasswordVisible = state.passwordVisible,
+        onToggleVisibility = { state.passwordVisible = !state.passwordVisible },
+        modifier = Modifier.fillMaxWidth()
+    )
+
+    SecurePasswordField(
+        label = stringResource(R.string.db_picker_confirm_pwd),
+        onPasswordChanged = { chars ->
+            state.confirmChars.fill('0')
+            state.confirmChars = chars.copyOf()
+        },
+        isError = state.confirmChars.isNotEmpty() && !state.confirmChars.contentEquals(state.passwordChars),
+        supportingText = {
+            if (state.confirmChars.isNotEmpty() && !state.confirmChars.contentEquals(state.passwordChars)) {
+                Text(stringResource(R.string.db_picker_pwd_mismatch), color = MaterialTheme.colorScheme.error)
+            }
+        },
+        isPasswordVisible = state.passwordVisible,
+        onToggleVisibility = { state.passwordVisible = !state.passwordVisible },
+        modifier = Modifier.fillMaxWidth()
     )
 }
 

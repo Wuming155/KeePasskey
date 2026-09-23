@@ -138,7 +138,10 @@ class AppNavigationMotionTest {
 
     @Test
     fun `顶层Tab与解锁页必须配置FadeThrough转场且覆盖设置页`() {
-        val source = stripCommentsOnly(readSource(NAV_GRAPH_SOURCE))
+        // §280：逐条 composable 注册体下沉同包 Routes 文件，按「门面 + 路由体」并集扫描
+        val source = stripCommentsOnly(
+            readSource(NAV_GRAPH_SOURCE) + "\n" + readSource(NAV_GRAPH_ROUTES_SOURCE)
+        )
         listOf(
             "Screen.Unlock.route",
             "Screen.VaultList.route",
@@ -294,6 +297,8 @@ class AppNavigationMotionTest {
         private const val MANIFEST_PATH = "app/src/main/AndroidManifest.xml"
         private const val APP_SOURCE = "app/src/main/java/com/keepasskey/app/ui/KeePasskeyApp.kt"
         private const val NAV_GRAPH_SOURCE = "app/src/main/java/com/keepasskey/app/ui/KeePasskeyNavGraph.kt"
+        private const val NAV_GRAPH_ROUTES_SOURCE =
+            "app/src/main/java/com/keepasskey/app/ui/KeePasskeyNavGraphRoutes.kt"
         private const val MOTION_SOURCE = "app/src/main/java/com/keepasskey/app/ui/navigation/AppNavigationMotion.kt"
         private const val MAIN_SOURCE_DIR = "app/src/main"
 

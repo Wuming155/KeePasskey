@@ -80,7 +80,8 @@ class ThemePaletteMutualExclusionWiringTest {
             "ThemeSettingsScreen 必须透传 onSwitchToBrandPalette",
             screen.contains("onSwitchToBrandPalette = onSwitchToBrandPalette")
         )
-        val navGraph = readSource(NAV_GRAPH)
+        // §280：路由体下沉 Routes 文件，按门面 + 注册体并集扫描
+        val navGraph = readSource(NAV_GRAPH) + readSource(NAV_GRAPH_ROUTES)
         assertTrue(
             "NavGraph 必须把一步切回接线到关闭动态取色（偏好值已落盘，无须另行选择）",
             navGraph.contains("onSwitchToBrandPalette = { settingsViewModel.setDynamicColorEnabled(false) }")
@@ -123,6 +124,8 @@ class ThemePaletteMutualExclusionWiringTest {
         const val COMPONENTS = "$SUBSCREEN_DIR/ThemeSettingsComponents.kt"
         const val SECTIONS = "$SUBSCREEN_DIR/ThemeSettingsSections.kt"
         const val NAV_GRAPH = "app/src/main/java/com/keepasskey/app/ui/KeePasskeySettingsNavGraph.kt"
+        const val NAV_GRAPH_ROUTES =
+            "app/src/main/java/com/keepasskey/app/ui/KeePasskeySettingsNavGraphRoutes.kt"
         const val THEME = "app/src/main/java/com/keepasskey/app/ui/theme/Theme.kt"
 
         /** 仓库根：同时具备 app 与 core 模块源码目录的最近祖先 */

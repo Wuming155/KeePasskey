@@ -38,18 +38,11 @@ import javax.inject.Inject
 /**
  * 设置页面状态容器 ViewModel (涵盖 KeePass2Android 与 KeePassDX 2026 高保真全量偏好)
  *
- * ## ISSUE-P3-29 拆分说明
- *
- * 原 1120 行巨型类已按职责拆为五个协作者，本类只保留「输入流编排 + 对外 API 门面」：
- * - 纯投影与状态流装配：[buildSettingsUiState] / [settingsUiStateFlow]（`SettingsUiStateProjection.kt`）
- * - 子库挂载：[SettingsChildDatabaseController]
- * - 基础偏好与局部状态：[SettingsPreferencesController]
- * - 进阶偏好：[SettingsExtendedPreferencesController]
- * - KDF 基准：[SettingsKdfBenchmarkController]
- * （同步 / 健康 / 导出三个控制器为 TASK-21 既有拆分，本次未动）
- *
- * 拆分为**纯结构性**：公开 API 与状态输出零变化，敏感语义（凭据借用副本用毕清零、
- * 预填通道销毁擦除）原样保留。
+ * ## 拆分说明
+ * 原 1120 行巨型类已按职责拆为协作者，本类只保留「输入流编排 + 对外 API 门面」：
+ * 纯投影 `SettingsUiStateProjection`；子库 / 偏好 / 进阶偏好 / KDF 基准 / 同步 / 健康 / 导出
+ * 控制器；§280 再下沉导入+子库装配（`SettingsFeatureControllers`）与生物识别门
+ * （`SettingsBiometricGate`）。公开 API 与状态输出零变化，敏感语义原样保留。
  */
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
@@ -58,46 +51,37 @@ class SettingsViewModel @Inject constructor(
     private val syncCredentialsStore: SyncCredentialsStore,
     private val syncCoordinator: SyncCoordinator,
     private val debugLogBuffer: DebugLogBuffer,
-    // TASK-12 整改：进阶偏好持久化仓库（冷启动不再静默回落默认值）
+    // TASK-12：进阶偏好持久化仓库（冷启动不再静默回落默认值）
     private val extendedSettingsStore: com.keepasskey.app.data.repository.ExtendedSettingsStore,
-    // TASK-08 整改：周期后台同步调度器（设置变更即时生效）
+    // TASK-08：周期后台同步调度器（设置变更即时生效）
     private val periodicSyncScheduler: com.keepasskey.app.sync.PeriodicSyncScheduler,
-    // TASK-44 整改：自动填充黑名单（真实包名条目，替代无写入方的禁用计数）
+    // TASK-44：自动填充黑名单（真实包名条目）
     private val autofillBlocklistStore: com.keepasskey.app.data.repository.AutofillBlocklistStore,
     // ISSUE-P3-43 ③：保存侧独立黑名单（只禁保存提示，不影响填充）
     private val autofillSaveBlocklistStore: com.keepasskey.app.autofill.AutofillSaveBlocklistStore,
     // ISSUE-P3-43 ②：字段签名级屏蔽（写入方为手动选择器，本页仅计数与整体清除）
     private val autofillFieldBlocklistStore: com.keepasskey.app.autofill.AutofillFieldBlocklistStore,
-    // TASK-47 整改：已泄露密码检测（HIBP k-匿名范围查询，由 breachCheckEnabled 开关门控）
+    // TASK-47：已泄露密码检测（HIBP k-匿名范围查询，由 breachCheckEnabled 开关门控）
     private val breachCheckCoordinator: com.keepasskey.app.data.breach.BreachCheckCoordinator,
-    // ISSUE-P2-11 (ZT-16)：会话级「保存前创建 .bak 备份」偏好下发通道。
-    // 生产 DI 注入由 DatabaseModule 提供的唯一会话实例；允许为 null 仅用于既有单测注入
-    // （未提供时会话保持自身默认偏好 true，不影响其他断言）。
+    // ISSUE-P2-11：会话级「保存前创建 .bak 备份」偏好下发；null 仅用于单测注入
     private val databaseSession: DatabaseSession? = null,
-    // 允许为 null 仅用于单测注入；生产 DI 注入 @ApplicationContext
+    // null 仅用于单测注入；生产 DI 注入 @ApplicationContext
     @ApplicationContext private val appContext: Context? = null,
-    // TASK-21：非 Compose 层文案资源解析通道（生产经 appContext 转发；单测注入假实现）
+    // TASK-21：非 Compose 层文案资源解析通道（单测可注入假实现）
     private val stringsProvider: StringsProvider? = null,
-    // ISSUE-P2-08（ZT-13）：运行完整性扫描快照下发通道（UI 风险提示卡片）。
-    // 允许为 null 仅用于既有单测注入；生产 DI 注入单例 RuntimeIntegrityDetector。
+    // ISSUE-P2-08：运行完整性扫描快照通道；null 时 UI 不渲染风险卡片
     private val runtimeIntegrityDetector: RuntimeIntegrityDetector? = null,
-    // ISSUE-P3-19（ZT-43d）：明文导入控制器（@Singleton，自带 StateFlow，内部完成
-    // 「SAF 读字节 → 解析 → 落库 → 出报告」全链路）。允许为 null 仅用于既有单测注入；
-    // 缺失时 [importState] 恒为 Idle —— 即不呈现任何导入反馈，绝不产生假进度/假回执。
+    // ISSUE-P3-19：明文导入控制器；缺失时 [importState] 恒 Idle，绝不产生假进度/假回执
     private val vaultImportController: VaultImportController? = null,
-    // ISSUE-P3-20：子库挂载会话管理器（@Singleton，核心层已完成）。允许为 null 仅用于既有
-    // 单测注入；缺失时 `childDatabasesCount` 回落 0（**不谎报**），子库对话框如实禁用全部控件。
+    // ISSUE-P3-20：子库挂载会话管理器；缺失时 `childDatabasesCount` 回落 0（不谎报）
     private val childDatabaseSessionManager: ChildDatabaseSessionManager? = null,
-    // ISSUE-P3-20：SAF 持久化读授权 + 密钥文件字节读取通道（复用解锁特性既有契约，
-    // 生产 DI 经 KeyFileAccessModule 注入 SafKeyFileAccess）。允许为 null 仅用于既有单测注入。
+    // ISSUE-P3-20：SAF 持久化读授权 + 密钥文件字节读取通道；null 仅用于单测注入
     private val keyFileAccess: KeyFileAccess? = null,
-    // CM 通道特权浏览器白名单（内置已取证条目 + 用户显式启用的浏览器）。允许为 null 仅用于
-    // 既有单测注入；缺失时列表恒为空（如实「未检测到」，不谎报）。
+    // CM 通道特权浏览器白名单；缺失时列表恒为空（如实「未检测到」）
     private val passkeyPrivilegedBrowserStore: com.keepasskey.app.data.repository.PasskeyPrivilegedBrowserStore? = null,
-    // ISSUE-P2-212：设置页「开启生物识别开关」的当场验证通道。允许为 null 仅用于既有单测注入；
-    // 缺失时开启动作 fail-closed（不写偏好并如实提示），绝不因缺失而静默直开
+    // ISSUE-P2-212：开启生物识别当场验证通道；缺失时开启动作 fail-closed
     private val biometricAuthManager: BiometricAuthManager? = null,
-    // ISSUE-P2-212：封印凭据存在性判定（决定「立即可用」还是「下次主密码解锁后完成登记」）
+    // ISSUE-P2-212：封印凭据存在性判定（决定「立即可用」还是「下次解锁后登记」）
     private val biometricCredentialStorage: BiometricCredentialStorage? = null
 ) : ViewModel() {
 
@@ -106,31 +90,34 @@ class SettingsViewModel @Inject constructor(
         private const val STATE_SUBSCRIBE_TIMEOUT_MILLIS = 5_000L
     }
 
-    // TASK-21 拆分：文案解析通道与领域控制器（同步/健康/导出），ViewModel 保留状态编排
+    // 文案解析通道与领域控制器（同步/健康/导出），ViewModel 保留状态编排
     private val strings: StringsProvider = stringsProvider.orFallback(appContext)
 
-    // ===== ISSUE-P3-19：明文导入（委托 [SettingsImportPresenter]，缺失控制器时恒 Idle） =====
-    private val importPresenter = SettingsImportPresenter(vaultImportController)
-
-    /** 导入状态（Idle / Parsing / Done / Failed）。无控制器时恒为 Idle，UI 不渲染任何导入反馈。 */
-    val importState: StateFlow<ImportUiState> get() = importPresenter.state
-
-    /** 按数据源 + SAF Uri 启动一次导入：解析 → 落库 → 出报告，全部由控制器负责。 */
-    fun startImport(source: ImportSource, uri: Uri) = importPresenter.start(source, uri)
-
-    /** 关闭导入结果报告对话框。 */
-    fun dismissImportReport() = importPresenter.dismissReport()
-
-    // ===== ISSUE-P3-20：子库挂载（UI 接线，委托 [SettingsChildDatabaseController]） =====
-    private val childDatabaseController = SettingsChildDatabaseController(
-        manager = childDatabaseSessionManager,
+    // ===== 明文导入（委托 [SettingsImportPresenter]） =====
+    // §280：导入 / 子库 / 生物识别装配下沉 SettingsFeatureControllers / SettingsBiometricGate
+    private val features = SettingsFeatureControllers(
+        vaultImportController = vaultImportController,
+        childDatabaseSessionManager = childDatabaseSessionManager,
         keyFileAccess = keyFileAccess,
         debugLogBuffer = debugLogBuffer,
         scope = viewModelScope,
         stateSubscribeTimeoutMillis = STATE_SUBSCRIBE_TIMEOUT_MILLIS
     )
+    private val importPresenter = features.importPresenter
 
-    /** 子库挂载面板状态；控制器缺失时如实 `available = false`（UI 整体禁用），不呈现假入口。 */
+    /** 导入状态（Idle / Parsing / Done / Failed）。无控制器时恒为 Idle。 */
+    val importState: StateFlow<ImportUiState> get() = importPresenter.state
+
+    /** 按数据源 + SAF Uri 启动一次导入。 */
+    fun startImport(source: ImportSource, uri: Uri) = importPresenter.start(source, uri)
+
+    /** 关闭导入结果报告对话框。 */
+    fun dismissImportReport() = importPresenter.dismissReport()
+
+    // ===== 子库挂载（UI 接线，委托 [SettingsChildDatabaseController]） =====
+    private val childDatabaseController = features.childDatabaseController
+
+    /** 子库挂载面板状态；控制器缺失时如实 `available = false`。 */
     val childDatabaseState: StateFlow<ChildDatabaseUiState> get() = childDatabaseController.state
 
     fun mountChildDatabase(alias: String, sourceUri: String, passwordChars: CharArray, keyFileUri: String?) =
@@ -140,7 +127,7 @@ class SettingsViewModel @Inject constructor(
     fun unmountChildDatabase(mountId: String) = childDatabaseController.unmount(mountId)
     fun dismissChildDatabaseFeedback() = childDatabaseController.dismissFeedback()
 
-    // ===== TASK-21：同步 / 健康 / 导出控制器 =====
+    // ===== 同步 / 健康 / 导出控制器 =====
     private val syncController = SettingsSyncController(
         syncCredentialsStore, syncCoordinator, extendedSettingsStore, strings, viewModelScope
     )
@@ -197,32 +184,26 @@ class SettingsViewModel @Inject constructor(
         appContext = appContext, strings = strings, scope = viewModelScope
     )
 
-    // ===== ISSUE-P2-212：生物识别开关「开启前当场验证」 =====
-
-    /** 活动库 id（封印凭据就绪判定的数据源）；随仓库库列表流更新 */
-    private var activeDatabaseId: String? = null
-
-    /** 开关开启动作的即时状态（验证中 / 一次性反馈），经投影层并入 [uiState] */
-    private val biometricToggleState = MutableStateFlow(BiometricToggleUiState())
-
-    private val biometricEnableCoordinator = BiometricEnableCoordinator(
+    // ===== 生物识别开关「开启前当场验证」 =====
+    private val biometricGate = SettingsBiometricGate(
         scope = viewModelScope,
         settingsRepository = settingsRepository,
-        activeDbId = { activeDatabaseId },
         biometricAuthManager = biometricAuthManager,
         biometricCredentialStorage = biometricCredentialStorage,
         strings = strings,
-        debugLog = debugLogBuffer,
-        state = biometricToggleState
+        debugLog = debugLogBuffer
     )
 
-    // TASK-21 拆分：同步状态流与凭据明文预填通道由 [SettingsSyncController] 承载
+    /** 开关开启动作的即时状态（验证中 / 一次性反馈），经投影层并入 [uiState] */
+    private val biometricToggleState = biometricGate.toggleState
+
+    // ===== 同步状态流与凭据明文预填通道由 [SettingsSyncController] 承载 =====
     val webdavPasswordPrefill: StateFlow<CharArray?> get() = syncController.webdavPasswordPrefill
     val s3SecretKeyPrefill: StateFlow<CharArray?> get() = syncController.s3SecretKeyPrefill
-    // ISSUE-P2-01：S3 AccessKey ID 一次性预填通道（明文不进 UiState）
+    // ISSUE-P2-01：S3 AccessKey ID 一次性预填通道
     val s3AccessKeyPrefill: StateFlow<CharArray?> get() = syncController.s3AccessKeyPrefill
 
-    /** Wave 15 整改：用户开始编辑密码后终结预填通道生命周期（防旋转后旧值回写覆盖用户输入） */
+    /** Wave 15：用户开始编辑密码后终结预填通道生命周期（防旋转后旧值回写覆盖用户输入） */
     fun clearWebDavPasswordPrefill() = syncController.clearWebDavPasswordPrefill()
     fun clearS3SecretKeyPrefill() = syncController.clearS3SecretKeyPrefill()
     /** ISSUE-P2-01：用户开始编辑 AccessKey 后终结预填通道生命周期（语义同上） */
@@ -235,7 +216,7 @@ class SettingsViewModel @Inject constructor(
     private val integrityReportFlow: Flow<RuntimeIntegrityReport?> =
         runtimeIntegrityDetector?.report ?: MutableStateFlow<RuntimeIntegrityReport?>(null)
 
-    // 状态流装配（纯投影 + combine 编排已拆至 SettingsUiStateProjection.kt）
+    // 状态流装配（纯投影 + combine 编排在 SettingsUiStateProjection.kt）
     val uiState: StateFlow<SettingsUiState> = settingsUiStateFlow(
         scope = viewModelScope,
         timeoutMillis = STATE_SUBSCRIBE_TIMEOUT_MILLIS,
@@ -272,7 +253,9 @@ class SettingsViewModel @Inject constructor(
         // ISSUE-P2-212：跟踪活动库（开启生物识别开关时据此判定封印凭据是否就绪）
         viewModelScope.launch {
             vaultRepository.getDatabases().collect { databases ->
-                activeDatabaseId = (databases.firstOrNull { it.isActive } ?: databases.firstOrNull())?.id
+                biometricGate.onActiveDatabaseChanged(
+                    (databases.firstOrNull { it.isActive } ?: databases.firstOrNull())?.id
+                )
             }
         }
     }
@@ -284,56 +267,40 @@ class SettingsViewModel @Inject constructor(
     fun setOledBlackOptimization(enabled: Boolean) = preferences.setOledBlackOptimization(enabled)
     fun setDynamicColorEnabled(enabled: Boolean) = preferences.setDynamicColorEnabled(enabled)
     /**
-     * ISSUE-P2-212：生物识别开关切换。
-     *
-     * **开启必须当场验证**：委托 [BiometricEnableCoordinator] 发起一次强生物识别验证，
-     * 通过后才写入偏好；取消 / 失败 / 设备无可用强生物识别一律不写入（开关受控回到关闭态）
-     * 并经 [SettingsUiState.biometricToggleNotice] 如实提示。
-     * 关闭无需验证：落偏好并**撤销全部生物识别数据**（封印凭据 + 断言登记记录 + 对应 Keystore 密钥，
-     * ISSUE-P2-253「关闭开关 = 删除」）。
-     *
-     * @param activity 宿主 Activity（发起 `BiometricPrompt` 必需）；由设置页自
-     *   `LocalActivity` 解析后透传，缺失时开启动作 fail-closed。
+     * ISSUE-P2-212：生物识别开关切换。**开启必须当场验证**（委托 [BiometricEnableCoordinator]），
+     * 取消/失败/无强生物识别一律不写偏好；关闭落偏好并**撤销全部生物识别数据**（ISSUE-P2-253）。
+     * @param activity 宿主 Activity（发起 `BiometricPrompt` 必需）；缺失时开启动作 fail-closed。
      */
     fun setBiometricEnabled(enabled: Boolean, activity: FragmentActivity? = null) =
-        biometricEnableCoordinator.setEnabled(enabled, activity)
+        biometricGate.setEnabled(enabled, activity)
     fun setAutoLockBackground(enabled: Boolean) = preferences.setAutoLockBackground(enabled)
     fun setFlagSecureEnabled(enabled: Boolean) = preferences.setFlagSecureEnabled(enabled)
     fun setAutoClearClipboard(enabled: Boolean) = preferences.setAutoClearClipboard(enabled)
 
     /**
-     * ISSUE-P3-236 / PD-15：运行环境完整性检测总开关（出厂默认关闭）。
-     *
-     * 关闭即解除 Root / 调试 / 注入环境对指纹快速解锁与自动填充的阻断；
-     * 探测本身仍在后台运行，设置页据同一份快照呈现环境状态。
+     * ISSUE-P3-236 / PD-15：运行环境完整性检测总开关（出厂默认关闭；关闭即解除 Root/调试/注入
+     * 对指纹快速解锁与自动填充的阻断；探测本身仍在后台运行）。
      */
     fun setIntegrityCheckEnabled(enabled: Boolean) = preferences.setIntegrityCheckEnabled(enabled)
 
     // ===== 同步配置 / 动作（委托 [SettingsSyncController]） =====
     fun setSyncProvider(provider: CloudSyncProvider) = syncController.setSyncProvider(provider)
     /**
-     * Wave 15 整改：密码以 [CharArray] 借用语义提交（消费后立即擦除），明文不回写状态流；
+     * Wave 15：密码以 [CharArray] 借用语义提交（消费后立即擦除），明文不回写状态流。
      * 返回保存结果（https 校验拒绝或凭据封印失败时如实回传 false 并上浮反馈）。
      */
     fun updateWebDavConfig(url: String, username: String, password: CharArray, remotePath: String): Boolean =
         syncController.updateWebDavConfig(url, username, password, remotePath)
-    /**
-     * Wave 15 整改：SecretKey 以 [CharArray] 借用语义提交（语义同 [updateWebDavConfig]）；
-     * ISSUE-P2-01：AccessKey ID 亦改为 [CharArray] 借用语义（消费后即擦除，不驻留状态流）
-     */
-    fun updateS3Config(
-        endpoint: String, bucket: String, region: String, accessKey: CharArray, secretKey: CharArray,
-        objectKey: String, usePathStyle: Boolean = syncController.state.value.s3UsePathStyle
-    ): Boolean = syncController.updateS3Config(endpoint, bucket, region, accessKey, secretKey, objectKey, usePathStyle)
+    /** Wave 15：SecretKey / AccessKey ID 亦为 [CharArray] 借用语义（语义同 [updateWebDavConfig]）。 */
+    fun updateS3Config(endpoint: String, bucket: String, region: String, accessKey: CharArray, secretKey: CharArray, objectKey: String, usePathStyle: Boolean = syncController.state.value.s3UsePathStyle): Boolean = syncController.updateS3Config(endpoint, bucket, region, accessKey, secretKey, objectKey, usePathStyle)
     fun setAutoSyncEnabled(enabled: Boolean) = syncController.setAutoSyncEnabled(enabled)
     fun setWifiOnlySync(enabled: Boolean) = extendedPreferences.setWifiOnlySync(enabled)
     fun triggerSync() = syncController.triggerSync()
     fun testSyncConnection() = syncController.testSyncConnection()
 
     /**
-     * 「保存并同步」的**顺序编排**入口：保存已成功 →（未验证时先）测试连接 → 通过则同步。
-     * 实现与「立规缘由」四点守卫随实现体迁于 [SettingsSyncController.verifyConnectionThenSync]
-     * （ISSUE-P3-257 下沉，本侧仅单语句委托，公开 API 形状不变）。
+     * 「保存并同步」顺序编排：保存成功 →（未验证时先）测试连接 → 通过则同步。
+     * 实现随 `ISSUE-P3-257` 迁于 [SettingsSyncController.verifyConnectionThenSync]。
      */
     fun verifyConnectionThenSync() = syncController.verifyConnectionThenSync()
     fun clearSyncFeedbackMessage() = syncController.clearSyncFeedbackMessage()
@@ -341,11 +308,9 @@ class SettingsViewModel @Inject constructor(
     // ===== 密码库与加密配置 =====
     fun setEncryptionAlgorithm(algorithm: String) = preferences.setEncryptionAlgorithm(algorithm)
     fun setKdfAlgorithm(kdf: String) = preferences.setKdfAlgorithm(kdf)
-    fun setArgon2Parameters(iterations: Long, memoryMb: Long, parallelism: Int) =
-        preferences.setArgon2Parameters(iterations, memoryMb, parallelism)
+    fun setArgon2Parameters(iterations: Long, memoryMb: Long, parallelism: Int) = preferences.setArgon2Parameters(iterations, memoryMb, parallelism)
     /** P0-3 整改：真实调用仓库修改当前数据库的主密钥 */
-    suspend fun changeMasterPassword(newPasswordChars: CharArray): KdbxResult<Unit> =
-        vaultRepository.changeMasterPassword(newPasswordChars)
+    suspend fun changeMasterPassword(newPasswordChars: CharArray): KdbxResult<Unit> = vaultRepository.changeMasterPassword(newPasswordChars)
 
     // ===== M6 整改：KDF 设备自适应基准真实接线 =====
     /** KDF 基准实时状态（运行中 / 推荐参数 / 失败原因） */
@@ -358,14 +323,12 @@ class SettingsViewModel @Inject constructor(
     fun setUnlockThrottleEnabled(enabled: Boolean) = preferences.setUnlockThrottleEnabled(enabled)
     fun setUnlockLockoutMaxSeconds(seconds: Int) = preferences.setUnlockLockoutMaxSeconds(seconds)
     // ISSUE-P2-228：三条通道开关改由扩展偏好承载（持久化 + 真实消费方），门面方法名不变
-    fun setCredentialProviderEnabled(enabled: Boolean) =
-        extendedPreferences.setCredentialProviderEnabled(enabled)
+    fun setCredentialProviderEnabled(enabled: Boolean) = extendedPreferences.setCredentialProviderEnabled(enabled)
 
     fun setPasskeySupportEnabled(enabled: Boolean) = extendedPreferences.setPasskeySupportEnabled(enabled)
     fun setAutofillServiceEnabled(enabled: Boolean) = extendedPreferences.setAutofillServiceEnabled(enabled)
     fun setRecycleBinEnabled(enabled: Boolean) = preferences.setRecycleBinEnabled(enabled)
-    // ISSUE-P3-65：TAN 序列号 / 数据库 UUID 两开关的假 setter 已移除——UI 入口如实禁用，
-    // 待真实语义（TAN 用后标记 / 重复 UUID 扫描）落地后再以可持久化+可消费的形态恢复
+    // ISSUE-P3-65：TAN 序列号 / 数据库 UUID 两开关的假 setter 已移除——UI 入口如实禁用
 
     // ===== 列表显示（仓库直写） =====
     fun setShowUsernameInList(enabled: Boolean) = preferences.setShowUsernameInList(enabled)
@@ -391,34 +354,32 @@ class SettingsViewModel @Inject constructor(
     fun setInlineSuggestionsEnabled(enabled: Boolean) = extendedPreferences.setInlineSuggestionsEnabled(enabled)
     fun setAutoReturnFromQuery(enabled: Boolean) = extendedPreferences.setAutoReturnFromQuery(enabled)
     fun setAutofillCopyTotp(enabled: Boolean) = extendedPreferences.setAutofillCopyTotp(enabled)
-    fun setAutofillShowTotpNotification(enabled: Boolean) =
-        extendedPreferences.setAutofillShowTotpNotification(enabled)
+    fun setAutofillShowTotpNotification(enabled: Boolean) = extendedPreferences.setAutofillShowTotpNotification(enabled)
 
     fun setSkipDalVerification(enabled: Boolean) = extendedPreferences.setSkipDalVerification(enabled)
     fun setOverrideNoAutofill(enabled: Boolean) = extendedPreferences.setOverrideNoAutofill(enabled)
     // ISSUE-P3-42：会话授权宽限开关
-    fun setAutofillSessionGrantEnabled(enabled: Boolean) =
-        extendedPreferences.setAutofillSessionGrantEnabled(enabled)
+    fun setAutofillSessionGrantEnabled(enabled: Boolean) = extendedPreferences.setAutofillSessionGrantEnabled(enabled)
 
     // ===== TASK-44：自动填充黑名单（真实条目生命周期） =====
-    /** 自动填充黑名单快照（按包名升序）；独立于 [uiState] 单独下发，避免 combine 元组膨胀。 */
+    /** 自动填充黑名单快照（按包名升序）；独立于 [uiState] 下发。 */
     val autofillBlockedPackages: StateFlow<List<String>> = preferences.autofillBlockedPackages
 
-    /** 加入黑名单。@return true=新增成功；false=包名非法或已存在（如实提示，不谎报成功） */
+    /** 加入黑名单。@return true=新增成功 */
     fun blockAutofillPackage(packageName: String): Boolean = preferences.blockAutofillPackage(packageName)
 
-    /** 移出黑名单。@return true=移除成功；false=包名非法或本就不在黑名单中 */
+    /** 移出黑名单。@return true=移除成功 */
     fun unblockAutofillPackage(packageName: String): Boolean = preferences.unblockAutofillPackage(packageName)
 
     // ===== CM 通道：特权浏览器白名单（让 Chrome / Firefox 之外的浏览器也能用通行密钥） =====
 
-    /** ISSUE-P3-257：安装扫描 / 启停编排已下沉 [SettingsPrivilegedBrowserController]（store 缺失时恒空，不谎报）。 */
+    /** ISSUE-P3-257：安装扫描 / 启停编排已下沉 [SettingsPrivilegedBrowserController]。 */
     private val privilegedBrowserController = SettingsPrivilegedBrowserController(
         store = passkeyPrivilegedBrowserStore,
         scope = viewModelScope
     )
 
-    /** 已安装浏览器候选 + 启用状态；独立于 [uiState] 下发（避免 combine 元组膨胀）。 */
+    /** 已安装浏览器候选 + 启用状态；独立于 [uiState] 下发。 */
     val privilegedBrowsers:
         StateFlow<List<com.keepasskey.app.data.repository.PasskeyPrivilegedBrowserStore.BrowserApp>>
         get() = privilegedBrowserController.privilegedBrowsers
@@ -432,16 +393,16 @@ class SettingsViewModel @Inject constructor(
     /** 「不再提示保存」名单快照（按包名升序）。 */
     val autofillSaveBlockedPackages: StateFlow<List<String>> = preferences.autofillSaveBlockedPackages
 
-    /** 加入「不再提示保存」名单。@return true=新增成功；false=包名非法或已存在 */
+    /** 加入「不再提示保存」名单。@return true=新增成功 */
     fun blockSavePackage(packageName: String): Boolean = preferences.blockSavePackage(packageName)
 
-    /** 移出「不再提示保存」名单。@return true=移除成功；false=包名非法或本就不在名单中 */
+    /** 移出「不再提示保存」名单。@return true=移除成功 */
     fun unblockSavePackage(packageName: String): Boolean = preferences.unblockSavePackage(packageName)
 
-    /** 已屏蔽字段签名的条数（签名不可逆，故只下发计数，不下发签名本身）。 */
+    /** 已屏蔽字段签名的条数（签名不可逆，故只下发计数）。 */
     val autofillBlockedFieldCount: StateFlow<Int> = preferences.autofillBlockedFieldCount
 
-    /** 清除全部字段级屏蔽（单语句委托，控制器返回的条数有意丢弃；`ISSUE-P3-250` 待消化清单第一项）。 */
+    /** 清除全部字段级屏蔽（单语句委托；`ISSUE-P3-250` 待消化清单第一项）。 */
     fun clearBlockedFields() { preferences.clearBlockedFields() }
 
     // ===== KP2A 扩展：显示与外观交互 =====
@@ -456,19 +417,15 @@ class SettingsViewModel @Inject constructor(
 
     // ===== KP2A 扩展：文件处理与高级同步策略 =====
     fun setUseOfflineCache(enabled: Boolean) = extendedPreferences.setUseOfflineCache(enabled)
-    fun setPeriodicBackgroundSyncEnabled(enabled: Boolean) =
-        extendedPreferences.setPeriodicBackgroundSyncEnabled(enabled)
+    fun setPeriodicBackgroundSyncEnabled(enabled: Boolean) = extendedPreferences.setPeriodicBackgroundSyncEnabled(enabled)
 
-    fun setPeriodicBackgroundSyncInterval(minutes: Int) =
-        extendedPreferences.setPeriodicBackgroundSyncInterval(minutes)
+    fun setPeriodicBackgroundSyncInterval(minutes: Int) = extendedPreferences.setPeriodicBackgroundSyncInterval(minutes)
 
     fun setAllowedWifiSsids(ssids: String) = extendedPreferences.setAllowedWifiSsids(ssids)
     fun setCreateBackupBeforeSave(enabled: Boolean) = extendedPreferences.setCreateBackupBeforeSave(enabled)
-    fun setCheckRemoteChangesBeforeSave(enabled: Boolean) =
-        extendedPreferences.setCheckRemoteChangesBeforeSave(enabled)
+    fun setCheckRemoteChangesBeforeSave(enabled: Boolean) = extendedPreferences.setCheckRemoteChangesBeforeSave(enabled)
 
-    fun setConflictResolution(resolution: ConflictResolution) =
-        extendedPreferences.setConflictResolution(resolution)
+    fun setConflictResolution(resolution: ConflictResolution) = extendedPreferences.setConflictResolution(resolution)
 
     fun setUseFileTransactions(enabled: Boolean) = extendedPreferences.setUseFileTransactions(enabled)
     fun setWebdavChunkedUpload(enabled: Boolean) = extendedPreferences.setWebdavChunkedUpload(enabled)
@@ -476,16 +433,14 @@ class SettingsViewModel @Inject constructor(
     fun setPreloadDatabaseEnabled(enabled: Boolean) = extendedPreferences.setPreloadDatabaseEnabled(enabled)
 
     // ===== KP2A 扩展：TOTP 规范映射 =====
-    fun updateTotpFieldMapping(seedField: String, settingsField: String, stepSeconds: Int, digits: Int) =
-        extendedPreferences.updateTotpFieldMapping(seedField, settingsField, stepSeconds, digits)
+    fun updateTotpFieldMapping(seedField: String, settingsField: String, stepSeconds: Int, digits: Int) = extendedPreferences.updateTotpFieldMapping(seedField, settingsField, stepSeconds, digits)
 
     // ===== TASK-47：已泄露密码检测（联网，默认关闭） =====
     fun setBreachCheckEnabled(enabled: Boolean) = extendedPreferences.setBreachCheckEnabled(enabled)
 
     /**
-     * 开启泄露检测并**就地扫描一次**入口。
-     * 实现与安全边界五点随实现体迁于 [SettingsHealthController.enableBreachCheckAndScan]
-     * （ISSUE-P3-257 下沉，本侧仅单语句委托，公开 API 形状不变）。
+     * 开启泄露检测并**就地扫描一次**。实现随 `ISSUE-P3-257` 迁于
+     * [SettingsHealthController.enableBreachCheckAndScan]（本侧仅单语句委托）。
      */
     fun enableBreachCheckAndScan() = healthController.enableBreachCheckAndScan()
 
@@ -495,7 +450,7 @@ class SettingsViewModel @Inject constructor(
     fun refreshDebugLogs() = preferences.refreshDebugLogs()
     fun clearDebugLogs() = preferences.clearDebugLogs()
 
-    // ===== TASK-21 拆分：导出/模板/调试日志委托 [SettingsExportController] =====
+    // ===== 导出/模板/调试日志委托 [SettingsExportController] =====
     /** SAF 调试日志导出结果反馈（成功/失败），由 Screen 层消费后清除 */
     val debugExportFeedback: StateFlow<UiMessage?> get() = exportController.debugExportFeedback
 
@@ -512,30 +467,20 @@ class SettingsViewModel @Inject constructor(
 
     /**
      * 导出当前数据库为 KeePass 2.x 兼容明文 XML 并写入 SAF 目标 Uri。
-     *
-     * ISSUE-P3-110：必须携带由 [ExportConfirmationPolicy.confirm] 在用户二次确认后签发的令牌。
+     * ISSUE-P3-110：必须携带由 [ExportConfirmationPolicy.confirm] 二次确认后签发的令牌。
      */
-    fun exportVaultXmlTo(targetUri: Uri, ticket: ExportTicket) =
-        exportController.exportVaultXmlTo(targetUri, ticket)
+    fun exportVaultXmlTo(targetUri: Uri, ticket: ExportTicket) = exportController.exportVaultXmlTo(targetUri, ticket)
 
-    /**
-     * ISSUE-P3-73：导出当前数据库为通用明文 CSV 并写入 SAF 目标 Uri。
-     * ISSUE-P3-110：令牌要求同 [exportVaultXmlTo]。
-     */
-    fun exportVaultCsvTo(targetUri: Uri, ticket: ExportTicket) =
-        exportController.exportVaultCsvTo(targetUri, ticket)
+    /** ISSUE-P3-73：导出通用明文 CSV；ISSUE-P3-110：令牌要求同 [exportVaultXmlTo]。 */
+    fun exportVaultCsvTo(targetUri: Uri, ticket: ExportTicket) = exportController.exportVaultCsvTo(targetUri, ticket)
 
-    /**
-     * 导出会话绑定的密钥文件并写入 SAF 目标 Uri。
-     * ISSUE-P3-128：令牌要求同 [exportVaultXmlTo]（密钥文件同属 PLAINTEXT 风险等级）。
-     */
-    fun exportKeyFileTo(targetUri: Uri, ticket: ExportTicket) =
-        exportController.exportKeyFileTo(targetUri, ticket)
+    /** 导出会话绑定的密钥文件；ISSUE-P3-128：令牌要求同 [exportVaultXmlTo]（同属 PLAINTEXT 风险等级）。 */
+    fun exportKeyFileTo(targetUri: Uri, ticket: ExportTicket) = exportController.exportKeyFileTo(targetUri, ticket)
 
     /** 安装条目模板库（真实创建「模板」分组与 5 个模板条目） */
     fun installEntryTemplates() = exportController.installEntryTemplates()
 
-    // ===== TASK-21 拆分：健康检查委托 [SettingsHealthController] =====
+    // ===== 健康检查委托 [SettingsHealthController] =====
     fun rescanHealth() = healthController.rescanHealth()
 
     override fun onCleared() {

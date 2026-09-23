@@ -121,7 +121,9 @@ class OneTapInteractionWiringTest {
 
     @Test
     fun `泄露检测开关开启方向就地触发扫描且互斥守卫不得移除`() {
-        val navGraph = stripComments(readSource(SETTINGS_NAV_GRAPH))
+        val navGraph = stripComments(
+            readSource(SETTINGS_NAV_GRAPH) + readSource(SETTINGS_NAV_GRAPH_ROUTES)
+        )
         val viewModel = stripComments(readSource(SETTINGS_VIEW_MODEL))
         val healthController = stripComments(readSource(HEALTH_CONTROLLER))
 
@@ -233,14 +235,14 @@ class OneTapInteractionWiringTest {
         val targets = listOf(
             DETAIL_CARDS, DETAIL_VIEW_MODEL, DETAIL_COPY_COORDINATOR, VAULT_ROW_LAYOUTS, VAULT_ACTION_CONTROLLER,
             VAULT_LIST_SCREEN, SECURITY_SCREEN, SECURITY_DIALOGS, SECURITY_COMPONENTS,
-            SETTINGS_NAV_GRAPH, SETTINGS_VIEW_MODEL, HEALTH_CONTROLLER,
+            SETTINGS_NAV_GRAPH, SETTINGS_NAV_GRAPH_ROUTES, SETTINGS_VIEW_MODEL, HEALTH_CONTROLLER,
             CLOUD_SYNC_SCREEN, SYNC_CONTROLLER, SYSTEM_SETTINGS_NAV,
             AUTOFILL_HEALTH_CARD, UNLOCK_SCREEN
         )
         targets.forEach { path ->
             assertTrue("扫描目标不存在（路径已漂移）：$path", File(repositoryRoot, path).isFile)
         }
-        assertEquals("扫描目标清单不得被悄悄删项（ISSUE-P3-188 增列复制协作者，16 → 17）", 17, targets.size)
+        assertEquals("扫描目标清单不得被悄悄删项（§280 增列 Settings 路由体，17 → 18）", 18, targets.size)
     }
 
     // ---------------------------------------------------------------- helpers
@@ -298,6 +300,8 @@ class OneTapInteractionWiringTest {
             "app/src/main/java/com/keepasskey/app/ui/screens/settings/subscreens/SecuritySettingsComponents.kt"
         const val SETTINGS_NAV_GRAPH =
             "app/src/main/java/com/keepasskey/app/ui/KeePasskeySettingsNavGraph.kt"
+        const val SETTINGS_NAV_GRAPH_ROUTES =
+            "app/src/main/java/com/keepasskey/app/ui/KeePasskeySettingsNavGraphRoutes.kt"
         const val SETTINGS_VIEW_MODEL =
             "app/src/main/java/com/keepasskey/app/ui/screens/settings/SettingsViewModel.kt"
         const val HEALTH_CONTROLLER =

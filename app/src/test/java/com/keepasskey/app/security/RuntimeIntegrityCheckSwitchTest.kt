@@ -246,7 +246,8 @@ class RuntimeIntegrityCheckSwitchTest {
         get() = readSource("app/src/main/java/com/keepasskey/app/ui/screens/settings/SettingsViewModel.kt")
 
     private val navGraphSource
-        get() = readSource("app/src/main/java/com/keepasskey/app/ui/KeePasskeySettingsNavGraph.kt")
+        get() = readSource("app/src/main/java/com/keepasskey/app/ui/KeePasskeySettingsNavGraph.kt") +
+            readSource("app/src/main/java/com/keepasskey/app/ui/KeePasskeySettingsNavGraphRoutes.kt")
 
     private val zhStringsSource
         get() = readSource("app/src/main/res/values/strings.xml")

@@ -22,6 +22,7 @@ import com.keepasskey.sync.merge.KdbxMerger
 import com.keepasskey.sync.merge.MergeResult
 import com.keepasskey.sync.merge.SyncConflictStrategy
 import com.keepasskey.sync.model.cleanEtag
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -44,6 +45,9 @@ import javax.inject.Singleton
  * 单趟落树 [applyResolvedEntriesToGroup]）下沉到同包 `SyncConflictMergeAdjudication.kt`；
  * `ISSUE-P3-235` G2 的**身份集合判定擦除原语**（[eraseDiscardedDatabase] / [eraseDiscardedGroup] /
  * [eraseDiscardedParseResults]）同置该文件，本类只保留**待决冲突会话上下文**与上传 / 落库编排。
+ *
+ * §280：无条目级冲突的合并上传（原 `autoMergeAndUpload`）下沉同包 `SyncConflictAutoMerge.kt`；
+ * 本类继续持有待决会话字段与用户裁决回写，并保持 [applyResolvedEntriesToGroup] 的单趟落树调用。
  */
 @Singleton
 class SyncConflictController @Inject constructor(
@@ -80,29 +84,11 @@ class SyncConflictController @Inject constructor(
     val conflictFlow: StateFlow<List<ConflictedEntryPair>> = _conflictFlow.asStateFlow()
 
     /**
-     * ISSUE-P1-275 AC①：冲突上传 If 预条件期望值的**唯一判据**——冲突时刻 ETag 规范化后非空
-     * 即原样透传，空（无 ETag 服务器 / 探测失败）才是唯一可走「无基线上传」的显式回退情形。
-     * 用户裁决路径（[resolveConflicts]）与自动合并路径（[autoMergeAndUpload]）共用本判据，
-     * 禁止各自再写第二份；`cleanEtag` 幂等，用户路径的 pending 值已规范化亦不受影响。
+     * ISSUE-P1-275 AC①：冲突上传 If 预条件期望值的**唯一判据**（实现在同包
+     * [conflictUploadExpectedEtag]，用户裁决与自动合并共用）。保留成员形态以便既有调用点。
      */
     internal fun expectedEtagForConflictUpload(conflictMomentEtag: String): String? =
-        cleanEtag(conflictMomentEtag).ifEmpty { null }
-
-    /** [autoMergeAndUpload] 的上传终态（私有信号，供 [handleConflictMerge] 分派 412 重入）。 */
-    private sealed interface AutoMergeUploadResult {
-        data class Completed(val outcome: SyncOutcome) : AutoMergeUploadResult
-
-        /**
-         * 合并上传遭 412 且已取到最新远端：合并窗口内远端再次变更。
-         * 四棵解析树与合并产物**已按身份集合判定擦除**（在取得最新远端之后、返回之前），
-         * [mergedBytes] 为合并产物的密文序列化（擦除不影响既有字节），供重入侧全新解析。
-         */
-        data class Superseded(
-            val mergedBytes: ByteArray,
-            val freshRemoteBytes: ByteArray,
-            val freshEtag: String
-        ) : AutoMergeUploadResult
-    }
+        conflictUploadExpectedEtag(conflictMomentEtag)
 
     /**
      * 解决冲突并执行最终提交回写。
@@ -132,23 +118,7 @@ class SyncConflictController @Inject constructor(
             // 原实现对每条裁决条目各调一次 applyResolvedEntryToGroup，而后者对**每一层**都执行
             // `subgroups.map { … }` + `copy`（目标不在该子树时也照旧复制）
             // ⇒ O(裁决条目数 × 分组数) 次分组对象与列表分配，且全程在 Dispatchers.Default + 会话锁内。
-            val resolvedByParent = mutableMapOf<KdbxUuid, MutableList<KdbxEntry>>()
-            for (pair in conflicts) {
-                val choice = resolutions[pair.entryId] ?: ConflictResolutionChoice.KEEP_LOCAL
-                val fieldChoice = fieldResolutions[pair.entryId]
-                // TASK-30：字段级决策优先——本地为底版、远端仅覆写用户钦点的字段；
-                // 无字段级决策时回退整条目二选一
-                val resolvedEntries = if (fieldChoice != null) {
-                    listOf(KdbxMerger.resolveConflictByFields(pair, fieldChoice))
-                } else {
-                    KdbxMerger.resolveConflict(pair, choice)
-                }
-                for (resolved in resolvedEntries) {
-                    // 父组缺失时落根组——与逐条实现的 `entry.parentGroupId ?: group.id`（顶层即根组）同语义
-                    val parentId = resolved.parentGroupId ?: updatedRoot.id
-                    resolvedByParent.getOrPut(parentId) { mutableListOf() }.add(resolved)
-                }
-            }
+            val resolvedByParent = collectResolvedByParent(conflicts, resolutions, fieldResolutions, updatedRoot.id)
             if (resolvedByParent.isNotEmpty()) {
                 updatedRoot = applyResolvedEntriesToGroup(updatedRoot, resolvedByParent)
             }
@@ -169,85 +139,122 @@ class SyncConflictController @Inject constructor(
                 expectedEtag = expectedEtagForConflictUpload(pendingRemoteEtag)
             )
             if (uploadResult.isSuccess) {
-                databaseSession.updateDatabaseMeta { mergedDb }
-                // H3 整改：云端已接收合并版本，本地落盘失败必须如实暴露
-                val saveResult = databaseSession.save()
-                clearPendingConflictSession()
-                if (saveResult is KdbxResult.Failure) {
-                    SyncOutcome.Error(
-                        strings.get(R.string.sync_error_merged_upload_local_save_failed, saveResult.message)
-                    )
-                } else {
-                    SyncOutcome.MergedAndUploaded
-                }
+                return@withContext adoptMergedDatabase(mergedDb)
+            }
+            val ex = uploadResult.exceptionOrNull()
+            if (ex is com.keepasskey.sync.model.SyncException.ConflictError) {
+                // ISSUE-P1-275 AC③：合并上传 412 ⇒ 重新进入冲突流程，而非归一为一次性错误。
+                return@withContext handleResolveUploadSuperseded(
+                    engine = engine,
+                    path = path,
+                    mergedDb = mergedDb,
+                    mergedBytes = mergedBytes
+                )
+            }
+            SyncOutcome.Error(strings.get(R.string.sync_error_upload_resolved_failed, ex?.message))
+        }
+    }
+
+    /** 将用户裁决结果按目标父组 id 归集（ISSUE-P3-161：单趟落树的前置收集）。 */
+    private fun collectResolvedByParent(
+        conflicts: List<ConflictedEntryPair>,
+        resolutions: Map<String, ConflictResolutionChoice>,
+        fieldResolutions: Map<String, Map<String, ConflictResolutionChoice>>,
+        rootId: KdbxUuid
+    ): Map<KdbxUuid, List<KdbxEntry>> {
+        val resolvedByParent = mutableMapOf<KdbxUuid, MutableList<KdbxEntry>>()
+        for (pair in conflicts) {
+            val choice = resolutions[pair.entryId] ?: ConflictResolutionChoice.KEEP_LOCAL
+            val fieldChoice = fieldResolutions[pair.entryId]
+            // TASK-30：字段级决策优先——本地为底版、远端仅覆写用户钦点的字段；
+            // 无字段级决策时回退整条目二选一
+            val resolvedEntries = if (fieldChoice != null) {
+                listOf(KdbxMerger.resolveConflictByFields(pair, fieldChoice))
             } else {
-                val ex = uploadResult.exceptionOrNull()
-                if (ex is com.keepasskey.sync.model.SyncException.ConflictError) {
-                    // ISSUE-P1-275 AC③：合并上传 412 ⇒ 重新进入冲突流程，而非归一为一次性错误。
-                    // 先以合并产物为本地侧重取最新远端（远端若已回退到基线内容，本次上传即成功，
-                    // 落入与既有成功分支同语义的采纳路径）
-                    val fresh = try {
-                        engine.commitLocal(path, mergedBytes)
-                    } catch (e: kotlinx.coroutines.CancellationException) {
-                        throw e
-                    } catch (e: Throwable) {
-                        eraseSupersededPendingTrees(mergedDb)
-                        clearPendingConflictSession()
-                        return@withContext SyncOutcome.Error(
-                            strings.get(R.string.sync_error_upload_resolved_failed, e.message)
-                        )
-                    }
-                    when (fresh) {
-                        is SyncCommitResult.Uploaded -> {
-                            databaseSession.updateDatabaseMeta { mergedDb }
-                            val saveResult = databaseSession.save()
-                            eraseSupersededPendingTrees(mergedDb)
-                            clearPendingConflictSession()
-                            if (saveResult is KdbxResult.Failure) {
-                                SyncOutcome.Error(
-                                    strings.get(R.string.sync_error_merged_upload_local_save_failed, saveResult.message)
-                                )
-                            } else {
-                                SyncOutcome.MergedAndUploaded
-                            }
-                        }
-                        is SyncCommitResult.ConflictNeedsMerge -> {
-                            val cache = pendingRemoteCache
-                            eraseSupersededPendingTrees(mergedDb)
-                            clearPendingConflictSession()
-                            if (cache == null) {
-                                SyncOutcome.Error(strings.get(R.string.sync_error_remote_changed_during_resolve))
-                            } else {
-                                // 重入侧全新解析（localDbOverride = null），与已擦除的待决树零实例共享；
-                                // base 取缓存基准快照——待决期间基线未动，仍为本轮合并所用底版
-                                handleConflictMerge(
-                                    syncEngine = engine,
-                                    syncCache = cache,
-                                    remotePath = path,
-                                    localBytes = mergedBytes,
-                                    remoteBytes = fresh.remoteBytes,
-                                    baseSnapshotBytes = cache.readBaseContent(path),
-                                    remoteEtag = fresh.remoteEtag,
-                                    localDbOverride = null,
-                                    isReentry = true
-                                )
-                            }
-                        }
-                        is SyncCommitResult.RemoteUnreachable -> {
-                            eraseSupersededPendingTrees(mergedDb)
-                            clearPendingConflictSession()
-                            SyncOutcome.Offline
-                        }
-                        is SyncCommitResult.RollbackRejected -> {
-                            // ISSUE-P2-18：最新远端为设备侧曾接受过的历史版本（回放），拒绝其参与合并
-                            eraseSupersededPendingTrees(mergedDb)
-                            clearPendingConflictSession()
-                            SyncOutcome.Error(strings.get(R.string.sync_error_rollback_rejected))
-                        }
-                    }
+                KdbxMerger.resolveConflict(pair, choice)
+            }
+            for (resolved in resolvedEntries) {
+                // 父组缺失时落根组——与逐条实现的 `entry.parentGroupId ?: group.id`（顶层即根组）同语义
+                val parentId = resolved.parentGroupId ?: rootId
+                resolvedByParent.getOrPut(parentId) { mutableListOf() }.add(resolved)
+            }
+        }
+        return resolvedByParent
+    }
+
+    /** 云端已接收合并版本后的本地采纳与落盘。 */
+    private suspend fun adoptMergedDatabase(mergedDb: KdbxDatabase): SyncOutcome {
+        databaseSession.updateDatabaseMeta { mergedDb }
+        // H3 整改：云端已接收合并版本，本地落盘失败必须如实暴露
+        val saveResult = databaseSession.save()
+        clearPendingConflictSession()
+        return if (saveResult is KdbxResult.Failure) {
+            SyncOutcome.Error(
+                strings.get(R.string.sync_error_merged_upload_local_save_failed, saveResult.message)
+            )
+        } else {
+            SyncOutcome.MergedAndUploaded
+        }
+    }
+
+    /**
+     * 用户裁决上传遭 412：先以合并产物为本地侧重取最新远端（远端若已回退到基线内容，
+     * 本次上传即成功，落入与既有成功分支同语义的采纳路径）。
+     */
+    private suspend fun handleResolveUploadSuperseded(
+        engine: SyncEngine,
+        path: String,
+        mergedDb: KdbxDatabase,
+        mergedBytes: ByteArray
+    ): SyncOutcome {
+        val fresh = try {
+            engine.commitLocal(path, mergedBytes)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            eraseSupersededPendingTrees(mergedDb)
+            clearPendingConflictSession()
+            return SyncOutcome.Error(
+                strings.get(R.string.sync_error_upload_resolved_failed, e.message)
+            )
+        }
+        return when (fresh) {
+            is SyncCommitResult.Uploaded -> {
+                eraseSupersededPendingTrees(mergedDb)
+                adoptMergedDatabase(mergedDb)
+            }
+            is SyncCommitResult.ConflictNeedsMerge -> {
+                val cache = pendingRemoteCache
+                eraseSupersededPendingTrees(mergedDb)
+                clearPendingConflictSession()
+                if (cache == null) {
+                    SyncOutcome.Error(strings.get(R.string.sync_error_remote_changed_during_resolve))
                 } else {
-                    SyncOutcome.Error(strings.get(R.string.sync_error_upload_resolved_failed, ex?.message))
+                    // 重入侧全新解析（localDbOverride = null），与已擦除的待决树零实例共享；
+                    // base 取缓存基准快照——待决期间基线未动，仍为本轮合并所用底版
+                    handleConflictMerge(
+                        syncEngine = engine,
+                        syncCache = cache,
+                        remotePath = path,
+                        localBytes = mergedBytes,
+                        remoteBytes = fresh.remoteBytes,
+                        baseSnapshotBytes = cache.readBaseContent(path),
+                        remoteEtag = fresh.remoteEtag,
+                        localDbOverride = null,
+                        isReentry = true
+                    )
                 }
+            }
+            is SyncCommitResult.RemoteUnreachable -> {
+                eraseSupersededPendingTrees(mergedDb)
+                clearPendingConflictSession()
+                SyncOutcome.Offline
+            }
+            is SyncCommitResult.RollbackRejected -> {
+                // ISSUE-P2-18：最新远端为设备侧曾接受过的历史版本（回放），拒绝其参与合并
+                eraseSupersededPendingTrees(mergedDb)
+                clearPendingConflictSession()
+                SyncOutcome.Error(strings.get(R.string.sync_error_rollback_rejected))
             }
         }
     }
@@ -415,7 +422,17 @@ class SyncConflictController @Inject constructor(
             )
         } else {
             when (val upload = autoMergeAndUpload(
-                syncEngine, remotePath, localDb, localDbOwned, remoteDb, base.trusted, mergeResult, remoteEtag
+                codec = codec,
+                strings = strings,
+                databaseSession = databaseSession,
+                syncEngine = syncEngine,
+                remotePath = remotePath,
+                localDb = localDb,
+                localDbOwned = localDbOwned,
+                remoteDb = remoteDb,
+                trustedBase = base.trusted,
+                mergeResult = mergeResult,
+                conflictEtag = remoteEtag
             )) {
                 is AutoMergeUploadResult.Completed -> upload.outcome
                 is AutoMergeUploadResult.Superseded -> {
@@ -472,145 +489,5 @@ class SyncConflictController @Inject constructor(
         pendingRemoteEtag = cleanEtag(remoteEtag)
         pendingRemoteCache = syncCache
         return SyncOutcome.ConflictNeedsUser(decisionConflicts)
-    }
-
-    /**
-     * 无条目级冲突：合并产物落库并上传远端。
-     *
-     * ISSUE-P1-275 AC①：上传必须携带冲突时刻 ETag（经 [expectedEtagForConflictUpload] 唯一判据，
-     * 与用户裁决路径共用）——「探测远端 → 下载合并 → 上传」窗口含一次 KDF 级全库序列化与一次
-     * 分钟级网络往返，撤除最后一步的乐观锁 = 他端窗口内写入被静默覆盖。
-     *
-     * AC③：上传遭 412（合并窗口内远端再次变更）时**不归一为一次性错误**——先以合并产物为本地侧
-     * 取最新远端，交由 [handleConflictMerge] 重新进入冲突流程（返回 [AutoMergeUploadResult.Superseded]）；
-     * 远端若已回退到基线内容则本次上传成功，走采纳路径。失效树在取得最新远端之后按身份集合判定擦除。
-     */
-    private suspend fun autoMergeAndUpload(
-        syncEngine: SyncEngine,
-        remotePath: String,
-        localDb: KdbxDatabase,
-        localDbOwned: Boolean,
-        remoteDb: KdbxDatabase,
-        trustedBase: KdbxDatabase?,
-        mergeResult: MergeResult,
-        conflictEtag: String
-    ): AutoMergeUploadResult {
-        val mergedDb = localDb.copy(
-            rootGroup = mergeResult.mergedRoot,
-            deletedObjects = mergeResult.mergedDeletedObjects
-        )
-        val mergedBytes = codec.serializeLocalDatabase(mergedDb)
-        if (mergedBytes == null) {
-            // ISSUE-P3-119：序列化失败即整体放弃本次合并（mergedDb / 双方树均不被采用），
-            // 三棵解析产物同批显式擦除（合并产物本身也在此丢弃，不存在共享引用者）。
-            // ISSUE-P3-168：`localDb` 若来自调用方的内存快照则不属于本方法，跳过擦除
-            if (localDbOwned) wipeDiscarded(localDb)
-            wipeDiscarded(remoteDb)
-            wipeDiscarded(trustedBase)
-            return AutoMergeUploadResult.Completed(
-                SyncOutcome.Error(strings.get(R.string.sync_error_serialize_merged_failed))
-            )
-        }
-
-        val uploadResult = syncEngine.markResolvedAndUpload(
-            remotePath,
-            mergedBytes,
-            expectedEtag = expectedEtagForConflictUpload(conflictEtag)
-        )
-        if (!uploadResult.isSuccess) {
-            val ex = uploadResult.exceptionOrNull()
-            if (ex is com.keepasskey.sync.model.SyncException.ConflictError) {
-                // AC③：取最新远端（重放拒绝 / 不可达如实映射）；四棵树在确定失效后擦除。
-                // 注意 mergedBytes 已是密文序列化产物，擦树不影响其字节有效性
-                val fresh: SyncCommitResult = try {
-                    syncEngine.commitLocal(remotePath, mergedBytes)
-                } catch (e: kotlinx.coroutines.CancellationException) {
-                    throw e
-                } catch (e: Throwable) {
-                    eraseDiscardedParseResults(
-                        localDb, localDbOwned, remoteDb, trustedBase, mergedDb,
-                        databaseSession.databaseFlow.value
-                    )
-                    return AutoMergeUploadResult.Completed(
-                        SyncOutcome.Error(
-                            strings.get(R.string.sync_error_upload_merged_failed, e.message)
-                        )
-                    )
-                }
-                return when (fresh) {
-                    is SyncCommitResult.ConflictNeedsMerge -> {
-                        eraseDiscardedParseResults(
-                            localDb, localDbOwned, remoteDb, trustedBase, mergedDb,
-                            databaseSession.databaseFlow.value
-                        )
-                        AutoMergeUploadResult.Superseded(mergedBytes, fresh.remoteBytes, fresh.remoteEtag)
-                    }
-                    is SyncCommitResult.Uploaded -> {
-                        // 远端已回退到基线内容：合并产物上传成功 ⇒ 与既有成功分支同语义采纳
-                        databaseSession.updateDatabaseMeta { mergedDb }
-                        val saveResult = databaseSession.save()
-                        eraseDiscardedParseResults(
-                            localDb, localDbOwned, remoteDb, trustedBase, mergedDb = null,
-                            live = databaseSession.databaseFlow.value
-                        )
-                        AutoMergeUploadResult.Completed(
-                            if (saveResult is KdbxResult.Failure) {
-                                SyncOutcome.Error(
-                                    strings.get(R.string.sync_error_merged_upload_local_save_failed, saveResult.message)
-                                )
-                            } else {
-                                SyncOutcome.MergedAndUploaded
-                            }
-                        )
-                    }
-                    is SyncCommitResult.RemoteUnreachable -> {
-                        eraseDiscardedParseResults(
-                            localDb, localDbOwned, remoteDb, trustedBase, mergedDb,
-                            databaseSession.databaseFlow.value
-                        )
-                        AutoMergeUploadResult.Completed(SyncOutcome.Offline)
-                    }
-                    is SyncCommitResult.RollbackRejected -> {
-                        // ISSUE-P2-18：最新远端为设备侧曾接受过的历史版本（回放），拒绝其参与合并
-                        eraseDiscardedParseResults(
-                            localDb, localDbOwned, remoteDb, trustedBase, mergedDb,
-                            databaseSession.databaseFlow.value
-                        )
-                        AutoMergeUploadResult.Completed(
-                            SyncOutcome.Error(strings.get(R.string.sync_error_rollback_rejected))
-                        )
-                    }
-                }
-            }
-            // ISSUE-P3-235 G2：上传失败 ⇒ 合并产物与本次判定用的三棵解析树**全部**失去持有者，
-            // 按身份集合判定擦除未被活动会话树引用的实例（合并树按原实例复用来源树节点，裸擦会清空活动库）
-            eraseDiscardedParseResults(
-                localDb, localDbOwned, remoteDb, trustedBase, mergedDb,
-                databaseSession.databaseFlow.value
-            )
-            return AutoMergeUploadResult.Completed(
-                SyncOutcome.Error(
-                    strings.get(R.string.sync_error_upload_merged_failed, ex?.message)
-                )
-            )
-        }
-        databaseSession.updateDatabaseMeta { mergedDb }
-        val saveResult = databaseSession.save()
-        // ISSUE-P3-235 G2：合并树已被采用为会话库（即存活侧本身，故传 null 不列入擦除面），
-        // 三棵来源树中未被复用的实例按身份判定定点擦除、不留给 GC——`wipeDiscarded` 的
-        // 「无存活别名」前提在此**不成立**（`KdbxMerger` 对单侧独有对象复用原实例）
-        eraseDiscardedParseResults(
-            localDb, localDbOwned, remoteDb, trustedBase, mergedDb = null,
-            live = databaseSession.databaseFlow.value
-        )
-        return AutoMergeUploadResult.Completed(
-            if (saveResult is KdbxResult.Failure) {
-                SyncOutcome.Error(
-                    strings.get(R.string.sync_error_merged_upload_local_save_failed, saveResult.message)
-                )
-            } else {
-                SyncOutcome.MergedAndUploaded
-            }
-        )
     }
 }

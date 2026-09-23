@@ -11,14 +11,12 @@ import com.keepasskey.database.file.KdbxDatabase
 import com.keepasskey.database.file.KdbxFile
 import com.keepasskey.database.history.HistoryManager
 import com.keepasskey.database.io.WipableByteArrayOutputStream
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import java.io.ByteArrayInputStream
 import java.io.File
 import java.util.Arrays
 
@@ -87,8 +85,7 @@ class DatabaseSession(
     private val mutations = SessionContentMutations(mutex, core.database, core.state) { core.readOnlyMode }
 
     // ISSUE-P1-07：会话终止观察者集合——锁定/关闭时同步通知各派生敏态数据的持有方清理
-    private val sessionLockObservers = LinkedHashSet<SessionLockObserver>()
-    private val observerLock = Any()
+    private val lockRegistry = SessionLockRegistry()
 
     val currentFile: File?
         get() = core.activeFile
@@ -108,31 +105,10 @@ class DatabaseSession(
      *
      * @return 观察者此前未注册时返回 true（重复注册为幂等无操作，返回 false）
      */
-    fun addLockObserver(observer: SessionLockObserver): Boolean = synchronized(observerLock) {
-        sessionLockObservers.add(observer)
-    }
+    fun addLockObserver(observer: SessionLockObserver): Boolean = lockRegistry.add(observer)
 
     /** 注销会话终止观察者；未注册时返回 false */
-    fun removeLockObserver(observer: SessionLockObserver): Boolean = synchronized(observerLock) {
-        sessionLockObservers.remove(observer)
-    }
-
-    /**
-     * 通知全部观察者会话已终止。
-     *
-     * 锁定/关闭是不可失败的原子动作：观察者异常一律隔离吞掉，绝不允许某个派生数据的
-     * 清理失败反噬会话锁定本身（观察者须按 [SessionLockObserver] 契约自行记录失败）。
-     */
-    private fun notifySessionLockObservers() {
-        val snapshot = synchronized(observerLock) { sessionLockObservers.toList() }
-        for (observer in snapshot) {
-            try {
-                observer.onSessionLocked()
-            } catch (_: Throwable) {
-                // 隔离：清理失败不得阻断锁定流程
-            }
-        }
-    }
+    fun removeLockObserver(observer: SessionLockObserver): Boolean = lockRegistry.remove(observer)
 
     /**
      * ISSUE-P2-77：换库前置释放——语义与 [lock] 的清理部分**对齐**
@@ -152,7 +128,7 @@ class DatabaseSession(
         core.database.value?.clearSensitiveData()
         core.database.value = null
         core.state.value = SessionState.LOCKED
-        notifySessionLockObservers()
+        lockRegistry.notifySessionLocked()
     }
 
     /**
@@ -182,29 +158,7 @@ class DatabaseSession(
      *    自 `ISSUE-P3-258` 起该调用一并清零其二进制池）。
      */
     suspend fun parseExternalDatabase(bytes: ByteArray): KdbxResult<KdbxDatabase> =
-        withContext(Dispatchers.Default) {
-            useCredentials { pwd, key ->
-                val pwdClone = pwd?.clone()
-                val keyClone = key?.clone()
-                try {
-                    KdbxResult.Success(
-                        KdbxFile.load(
-                            ByteArrayInputStream(bytes),
-                            pwdClone,
-                            keyClone,
-                            binaryStore
-                        )
-                    )
-                } catch (cancellation: CancellationException) {
-                    throw cancellation
-                } catch (t: Throwable) {
-                    KdbxResult.Failure(t)
-                } finally {
-                    pwdClone?.let { Arrays.fill(it, '0') }
-                    keyClone?.let { Arrays.fill(it, 0.toByte()) }
-                }
-            }
-        }
+        parseExternalKdbxBytes(bytes, ::useCredentials, binaryStore)
 
     /**
      * 创建全新密码库文件并打开会话（ISSUE-P3-21 复合密钥三分支）。
@@ -435,7 +389,7 @@ class DatabaseSession(
         core.database.value = null
         core.state.value = SessionState.LOCKED
         // ISSUE-P1-07：锁定即销毁——连同派生的敏态产物（同步缓存密文快照）一并终止生命周期
-        notifySessionLockObservers()
+        lockRegistry.notifySessionLocked()
     }
 
     /**
@@ -451,7 +405,7 @@ class DatabaseSession(
         core.saveWriter = null
         core.state.value = SessionState.CLOSED
         // ISSUE-P1-07：关闭隐含锁定，派生敏态产物同样必须清理
-        notifySessionLockObservers()
+        lockRegistry.notifySessionLocked()
     }
 
     /**
