@@ -4,7 +4,7 @@ import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.model.KdbxGroup
 import com.keepasskey.database.file.KdbxDatabase
-import java.io.ByteArrayOutputStream
+import com.keepasskey.database.io.WipableByteArrayOutputStream
 
 /**
  * KeePass 2.x 兼容的明文 XML 导出器（TASK-13 整改：设置页「导出 XML」此前仅弹假提示）。
@@ -16,23 +16,32 @@ import java.io.ByteArrayOutputStream
  * 安全声明：导出为**明文**格式——受保护字段的明文按用户导出请求如实写出（不携带
  * `Protected="True"` 属性），导出文件不再受 KDBX 主密码保护；明文风险由导出确认
  * 对话框（`dbset_export_dialog_warning`）显式告知，调用方必须经 SAF 写到用户选定位置。
+ *
+ * ISSUE-P3-296：目标缓冲为 [WipableByteArrayOutputStream]（整份明文 XML 字节的第二副本），
+ * `toByteArray()` 交出**复制**交付后于 `finally` 显式 [WipableByteArrayOutputStream.wipe]——
+ * 成功与失败路径均擦。所有权与擦除钩子登记于
+ * `docs/architecture/敏感缓冲所有权契约.md` §4。
  */
 object KeePassXmlExporter {
 
     fun export(database: KdbxDatabase): ByteArray {
-        val buffer = ByteArrayOutputStream()
-        val writer = KdbxXmlStreamWriter(buffer)
-        writer.startDocument()
-        writer.startElement("KeePassFile")
-        writer.startElement("Meta")
-        KdbxXmlWriteUtil.textElement(writer, "Generator", "KeePasskey")
-        writer.endElement() // Meta
-        writer.startElement("Root")
-        serializeGroup(writer, database.rootGroup)
-        writer.endElement() // Root
-        writer.endElement() // KeePassFile
-        writer.flush()
-        return buffer.toByteArray()
+        val buffer = WipableByteArrayOutputStream()
+        return try {
+            val writer = KdbxXmlStreamWriter(buffer)
+            writer.startDocument()
+            writer.startElement("KeePassFile")
+            writer.startElement("Meta")
+            KdbxXmlWriteUtil.textElement(writer, "Generator", "KeePasskey")
+            writer.endElement() // Meta
+            writer.startElement("Root")
+            serializeGroup(writer, database.rootGroup)
+            writer.endElement() // Root
+            writer.endElement() // KeePassFile
+            writer.flush()
+            buffer.toByteArray()
+        } finally {
+            buffer.wipe()
+        }
     }
 
     private fun serializeGroup(writer: KdbxXmlStreamWriter, group: KdbxGroup) {

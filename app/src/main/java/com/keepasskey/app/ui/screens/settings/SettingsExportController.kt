@@ -199,6 +199,9 @@ internal class SettingsExportController(
         // ISSUE-P3-86（审计 F-02，MEDIUM）：整库序列化缓冲用毕必须清零——明文 XML / CSV 尤甚
         // （该数组是**整库全部字段值**的明文副本）。清零置于 finally，覆盖「写盘成功 / 写盘失败 /
         // 解析器抛异常」三态，且**晚于** `os.write(bytes)`（写前清零会导出全零内容）。
+        // ISSUE-P3-296：此处 `bytes` 是 `toByteArray()` 的**复制**交付副本（R2），由本 finally 负责；
+        // 导出器内部的第二份整份明文字节已由 `WipableByteArrayOutputStream.wipe()` 在
+        // `KdbxCsvExporter` / `KeePassXmlExporter` 的 `finally` 内擦除，两层责任见契约 §4 #10/#19。
         val written = try {
             if (bytes != null && resolver != null) {
                 try {

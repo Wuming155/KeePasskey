@@ -77,6 +77,35 @@ class WipableByteArrayOutputStreamTest {
         )
     }
 
+    /**
+     * ISSUE-P3-296：两个**明文**导出器与加密序列化同口径——具名可擦缓冲 + `finally` 收口 `wipe()`。
+     * 明文 XML / CSV 的内部缓冲是整库全部字段值的第二份明文副本，必须确定性擦除而非等 GC。
+     */
+    @Test
+    fun `两个明文导出器必须用可擦缓冲并在 finally 收口 wipe`() {
+        for (path in PLAINTEXT_EXPORTER_PATHS) {
+            val source = readSource(path)
+
+            assertTrue(
+                "[$path] 明文导出器必须使用 WipableByteArrayOutputStream 承载整份明文字节",
+                source.contains("val buffer = WipableByteArrayOutputStream()")
+            )
+            assertTrue(
+                "[$path] 必须以 finally { buffer.wipe() } 收口（成功与失败路径均擦）",
+                Regex("""finally\s*\{\s*buffer\.wipe\(\)\s*\}""").containsMatchIn(source)
+            )
+            assertTrue(
+                "[$path] 必须在 toByteArray() 之后、return 之前仍有 finally 擦除——" +
+                    "「只清 toByteArray() 交出的副本」正是 ISSUE-P3-296 的缺口",
+                source.indexOf("buffer.toByteArray()") < source.indexOf("buffer.wipe()")
+            )
+            assertFalse(
+                "[$path] 不得回退为不可擦的 ByteArrayOutputStream（内部 buf 将留存至 GC）",
+                Regex("""(?<!Wipable)ByteArrayOutputStream\(""").containsMatchIn(source)
+            )
+        }
+    }
+
     private fun readSource(path: String): String {
         val file = File(repositoryRoot, path)
         assertTrue("源码文件不存在（是否被重命名或移动）：$path", file.isFile)
@@ -86,6 +115,10 @@ class WipableByteArrayOutputStreamTest {
     private companion object {
         const val DATABASE_SESSION_PATH =
             "database/src/main/java/com/keepasskey/database/session/DatabaseSession.kt"
+        val PLAINTEXT_EXPORTER_PATHS = listOf(
+            "database/src/main/java/com/keepasskey/database/csv/KdbxCsvExporter.kt",
+            "database/src/main/java/com/keepasskey/database/xml/KeePassXmlExporter.kt"
+        )
         const val ROOT_SEARCH_DEPTH = 6
 
         /** 仓库根：同时具备 app 与 core 模块源码目录的最近祖先 */

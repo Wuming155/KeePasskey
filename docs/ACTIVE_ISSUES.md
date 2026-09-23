@@ -192,7 +192,7 @@
 
 ---
 
-## P3 低危问题、特性接线与体验优化（12 项）
+## P3 低危问题、特性接线与体验优化（11 项）
 
 ### ISSUE-P3-272：云端同步四项假开关（自动同步 / 事务化写入 / 预加载远程数据库 / 允许的 Wi-Fi SSID）
 
@@ -250,15 +250,6 @@
 - **核实方式**：① `app/.../data/repository/VaultEntrySecretReader.kt:279` 以 `attachments.firstOrNull { it.name == fileName }` 取字节，调用方 `EntryDetailAttachmentExporter.kt:39` 传 `attachment.fileName`，Toast 亦只报文件名 ⇒ 外部库（KeePass XML / Bitwarden / 桌面版）含同名附件时导出 A 得 B 的字节且提示为 A。解析侧逐 `<Binary>` 节点 emit、去重器原样保留 `name`（`KdbxXmlBinaryNode.kt:208-238`、`KdbxBinaryDeduplicator.kt:84-92`）；本仓编辑页按 fileName 视为替换（`EntryEditViewModel.kt:330-341`）故不自产同名。**修法前提**：`VaultEntryMapper.kt:60` 的 UI `id` 就是 `"${entry.id}_${att.name}"`（名字派生），改按 id 无法消歧，**须按 `refIndex` / 列表下标**。② `ui/screens/edit/EntryEditPickers.kt:64` 对 `*/*` 选择结果整份 `readBytes()` 交 `EntryEditViewModel.kt:330-341`；全仓无 `MAX_ATTACHMENT` 类约束（`BinaryStore.kt:47-57` 的 1 MiB 是落盘阈值非上限；`KdbxXmlBinaryNode.kt:58` 的 `AttachmentBudget` 默认 `unlimited()` 且只封解析不可信库）；无路径穿越面（`FileBinaryStore.kt:38` 只用固定目录名）。
 - **涉及文件**：`app/src/main/java/com/keepasskey/app/data/repository/VaultEntrySecretReader.kt`、`app/src/main/java/com/keepasskey/app/ui/screens/detail/EntryDetailAttachmentExporter.kt`、`app/src/main/java/com/keepasskey/app/ui/screens/edit/EntryEditPickers.kt`、`app/src/main/java/com/keepasskey/app/ui/screens/edit/EntryEditViewModel.kt`。
 - **验收标准**：AC① 附件寻址改按 `refIndex`（或树内下标），UI 的 `id` 生成同步去名字依赖；同名场景用例：导入含两个同名附件的第三方库 → 分别导出各自字节；AC② 对「添加无上限」给结论：设尺寸上限并如实提示，或维持现状并登记 `PD-*`（现状属用户自选大文件自伤 OOM，无攻击者面，故 P3）；AC③ 若设上限，须与解析侧预算的口径统一（`ISSUE-P1-276` 已 §273 闭环，现行三面判据与常量见 `database/src/main/java/com/keepasskey/database/xml/KdbxAttachmentBudget.kt`：单条目物化 ≤ 64 MiB / 引用次数 ≤ 1024 / 内联累计 ≤ 64 MiB），禁两套数字。
-
----
-
-### ISSUE-P3-296：明文导出的整份明文字节留在 `ByteArrayOutputStream` 内部缓冲，且两个明文导出器未登记进敏感缓冲所有权契约
-
-- **核实时间点**：2026-09-23 经注释原文与契约条目核对（首轮「注释与实际不符」的定性被**推翻**：`KdbxCsvExporter.kt:19-20` 只声明「不构造整份明文**字符串**」并如实写「写出到目标缓冲」，与代码一致）。
-- **核实方式**：`database/csv/KdbxCsvExporter.kt:33-42` 与 `database/xml/KeePassXmlExporter.kt:23` 以 `ByteArrayOutputStream` 累积全库明文；`SettingsExportController.kt:217-218` 的 `finally` 只清 `toByteArray()` 交出的副本，解析器内部 `buf` 连同 `entry.password?.readString()`（`KdbxCsvExporter.kt:75`、`KeePassXmlExporter.kt:75/91`）产生的不可擦 `String` 留存至 GC。该残余属限界 §2.2（`已知工程限界.md:130-136`）/ §2.4（`:143-149`）已接受的同类（进程内取证在信任边界外），故**不是新缺陷**；本条的可收敛点是**一致性**：仓内已有 `database/io/WipableByteArrayOutputStream.kt:24`（internal，可擦），却只用于加密序列化（`DatabaseSession.kt:304/409/511`），而两个**明文**导出器未出现在 `敏感缓冲所有权契约.md` 表 10 / 表 14 行。
-- **涉及文件**：`database/src/main/java/com/keepasskey/database/csv/KdbxCsvExporter.kt`、`database/src/main/java/com/keepasskey/database/xml/KeePassXmlExporter.kt`、`app/src/main/java/com/keepasskey/app/ui/screens/settings/SettingsExportController.kt`、`docs/architecture/敏感缓冲所有权契约.md`。
-- **验收标准**：AC① 两个明文导出器改用 `WipableByteArrayOutputStream`（提为共用可见性），成功与失败路径均显式擦除；AC② 导出侧的 `readString()` 明文化面须在契约表登记（或改为 `useChars` 路径），禁「契约表只记加密序列化」；AC③ 导出前的 `ExportConfirmationPolicy.Risk.PLAINTEXT` 二次确认保持不变；AC④ **不得**以「参考项目也不擦」为由免登记——本仓契约表是单一真相源。
 
 ---
 

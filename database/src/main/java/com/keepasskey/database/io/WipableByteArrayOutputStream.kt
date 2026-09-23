@@ -20,6 +20,11 @@ import java.io.ByteArrayOutputStream
  *     buffer.wipe()
  * }
  * ```
+ *
+ * **共用可见性（ISSUE-P3-296）**：本类为 `database` 模块内共享原语——加密序列化
+ * （`DatabaseSession`）与两个**明文**导出器（`KdbxCsvExporter` / `KeePassXmlExporter`）
+ * 同属本模块，`internal` 即三处调用方的共用可见性；无跨模块消费者，故不扩为 `public`。
+ * 所有权登记见 `docs/architecture/敏感缓冲所有权契约.md` §4 #10。
  */
 internal class WipableByteArrayOutputStream(initialSize: Int = DEFAULT_SIZE) :
     ByteArrayOutputStream(initialSize) {

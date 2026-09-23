@@ -1,10 +1,10 @@
 package com.keepasskey.database.csv
 
 import com.keepasskey.database.file.KdbxDatabase
+import com.keepasskey.database.io.WipableByteArrayOutputStream
 import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.model.KdbxGroup
 import java.io.BufferedWriter
-import java.io.ByteArrayOutputStream
 import java.io.OutputStreamWriter
 import java.io.Writer
 
@@ -18,6 +18,11 @@ import java.io.Writer
  * 安全声明：本格式**不受主密码保护**——受保护字段（口令）的明文如实写出，明文风险由导出二次确认
  * 对话框显式告知（`ExportConfirmationPolicy.Risk.PLAINTEXT`），调用方必须经 SAF 写到用户选定位置。
  * 为减小明文驻留，逐行流式写出到目标缓冲，不构造整份明文字符串。
+ *
+ * ISSUE-P3-296：目标缓冲为 [WipableByteArrayOutputStream]（整份明文 CSV 字节的第二副本），
+ * `toByteArray()` 交出**复制**交付后于 `finally` 显式 [WipableByteArrayOutputStream.wipe]——
+ * 成功与失败路径均擦。所有权与擦除钩子登记于
+ * `docs/architecture/敏感缓冲所有权契约.md` §4。
  */
 object KdbxCsvExporter {
 
@@ -30,17 +35,21 @@ object KdbxCsvExporter {
     private const val GROUP_SEPARATOR = '\\'
 
     fun export(database: KdbxDatabase): ByteArray {
-        val buffer = ByteArrayOutputStream()
-        val writer = BufferedWriter(OutputStreamWriter(buffer, Charsets.UTF_8))
-        try {
-            writeRow(writer, HEADER)
-            // 根分组自身的条目落至根（空路径）；子分组条目携带自顶向下（不含根分组名）的路径
-            writeGroup(writer, database.rootGroup, ArrayDeque())
-            writer.flush()
+        val buffer = WipableByteArrayOutputStream()
+        return try {
+            val writer = BufferedWriter(OutputStreamWriter(buffer, Charsets.UTF_8))
+            try {
+                writeRow(writer, HEADER)
+                // 根分组自身的条目落至根（空路径）；子分组条目携带自顶向下（不含根分组名）的路径
+                writeGroup(writer, database.rootGroup, ArrayDeque())
+                writer.flush()
+            } finally {
+                writer.close()
+            }
+            buffer.toByteArray()
         } finally {
-            writer.close()
+            buffer.wipe()
         }
-        return buffer.toByteArray()
     }
 
     /**
