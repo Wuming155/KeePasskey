@@ -45,7 +45,13 @@ import java.security.SecureRandom
 data class KdbxHeader(
     val signature1: Int = KdbxConstants.Signature.SIGNATURE_1,
     val signature2: Int = KdbxConstants.Signature.SIGNATURE_2_KDBX,
-    val version: Int = KdbxConstants.Version.VERSION_4_0,
+    // ISSUE-P2-266：新建库声明 KDBX 4.1（0x00040001）——写出的 XML 恒含 4.1 专有元素
+    // （SettingsChanged 等，见 KdbxXmlMetaSerializer / KdbxXmlEntrySerializer），
+    // 版本声明必须与之匹配，禁止「声明 4.0、夹带 4.1」；对齐官方 KeePass 2.53+ / KeePassXC
+    // 新写文件即 4.1 的口径。读取侧仅校验 major，4.0 / 4.1 路径完全一致。
+    // 注意：反序列化路径不走本默认值（deserialize 经 toHeader 原样传入读到的 version），
+    // 故既有 4.0 库往返保留原版本，缺陷面仅限新建库。
+    val version: Int = KdbxConstants.Version.VERSION_4_1,
     val cipherUuid: KdbxUuid = KdbxConstants.Cipher.AES_256_CBC,
     val compression: Int = KdbxConstants.Compression.GZIP,
     val masterSeed: ByteArray = ByteArray(32),
@@ -271,8 +277,8 @@ data class KdbxHeader(
          * ISSUE-P3-126③：**版本策略显式声明为「仅校验 major」**。
          * 4.x 的 minor 递增只引入本仓不依赖的可选特性（本仓读取路径对 4.0 / 4.1 完全一致），
          * 故 minor 原样接受、**不**据此拒绝文件——拒之反而会打不开官方新写的库。
-         * 该声明用于消除「看起来校验了版本」的误读：`KdbxConstants.Version` 亦不保留
-         * 未被引用的 `VERSION_4_1` 死常量（详见该处 KDoc）。
+         * 该声明用于消除「看起来校验了版本」的误读：`KdbxConstants.Version` 中的 `VERSION_4_1`
+         * 是**写侧**常量（新建库声明 4.1，见 ISSUE-P2-266），读取侧不按 minor 分流。
          */
         private fun validateVersion(version: Int) {
             val major = version and KdbxConstants.Version.VERSION_MAJOR_MASK

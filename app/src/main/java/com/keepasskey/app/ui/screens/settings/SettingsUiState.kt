@@ -234,9 +234,11 @@ data class SettingsUiState(
     val appVersion: String = "v1.0.0-Preview (2026 Edition)",
     val buildNumber: String = "Build 2026.09.04",
     // ISSUE-P3-126③：此处原有 `kdbxFormat = "KDBX 4.1 (Argon2id + ChaCha20)"` 字段——
-    // 经全仓检索确认**零消费方**（死字段），且其字面量向用户声明了一个本仓并不写入的
-    // 具体版本（写侧恒为 4.0：`KdbxConstants.Version.VERSION_4_0`；读取侧仅校验 major，
-    // 见 `KdbxHeader` 的版本策略声明）。故整体删除，避免「声明 4.1 / 实写 4.0」的失真。
+    // 经全仓检索确认**零消费方**（死字段），且其字面量向用户声明了一个未经活动库文件头
+    // 核实的具体版本。故整体删除，避免静态字面量失真。
+    // 版本口径（ISSUE-P2-266 后）：新建库写侧恒为 4.1（`KdbxConstants.Version.VERSION_4_1`，
+    // 因写出的 XML 恒含 4.1 专有元素，版本声明须匹配）；既有 4.0 库往返保留原版本；
+    // 读取侧仅校验 major（见 `KdbxHeader` 的版本策略声明）。
     // 若将来确需展示格式行，**必须**取自活动库真实文件头（`KdbxDatabase.header.version`），
     // 不得再写为静态字面量。
 

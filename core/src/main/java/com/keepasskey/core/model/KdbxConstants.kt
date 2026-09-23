@@ -19,10 +19,13 @@ object KdbxConstants {
     /**
      * 版本定义
      *
-     * ISSUE-P3-126③：**版本策略＝仅校验 major**（见 `KdbxHeader` 的解析处）——4.x 的 minor
-     * 只引入本仓不依赖的可选特性，故读取侧对任意 4.x minor 走同一路径，不因 minor 拒绝文件。
-     * 因此本对象**不保留**未被任何代码引用的 `VERSION_4_1` 常量（原为死常量，易被误读为
-     * 「已支持 / 已校验 4.1」）；若将来确需按 minor 分流，应同时补上读取侧判定与用例。
+     * ISSUE-P3-126③：读取侧**版本策略＝仅校验 major**（见 `KdbxHeader` 的解析处）——4.x 的
+     * minor 只引入本仓不依赖的可选特性，故读取侧对任意 4.x minor 走同一路径，不因 minor 拒绝文件。
+     *
+     * ISSUE-P2-266：[VERSION_4_1] 为**写侧**常量——新建库写出的 XML 恒含 KDBX 4.1 专有元素
+     * （SettingsChanged / MasterKeyChangeForceOnce / CustomIcon Name·LastModificationTime /
+     * CustomData Item LastModificationTime / Entry QualityCheck），故声明版本必须同步为
+     * `0x00040001`，不得出现「声明 4.0、夹带 4.1」的文件。读取侧不受影响（仍仅校验 major）。
      */
     object Version {
         const val VERSION_MAJOR_MASK: Int = 0xFFFF0000.toInt()
@@ -30,6 +33,7 @@ object KdbxConstants {
 
         const val VERSION_3_1: Int = 0x00030001
         const val VERSION_4_0: Int = 0x00040000
+        const val VERSION_4_1: Int = 0x00040001
     }
 
     /**

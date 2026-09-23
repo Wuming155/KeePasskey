@@ -8,6 +8,7 @@ import com.keepasskey.core.security.ProtectedString
 import com.keepasskey.crypto.cipher.CipherFactory
 import com.keepasskey.crypto.hash.HashUtil
 import com.keepasskey.crypto.kdf.KdfFactory
+import com.keepasskey.crypto.kdf.KdfParameters
 import com.keepasskey.crypto.stream.InnerRandomStreamCipher
 import com.keepasskey.database.exception.KdbxCorruptFileException
 import com.keepasskey.database.exception.KdbxInvalidCredentialsException
@@ -53,6 +54,47 @@ class KdbxCompatibilityAndSecurityTest {
         assertEquals(32, officialCipher.size)
         assertEquals(32, legacyCipher.size)
         assertFalse(officialCipher.contentEquals(legacyCipher))
+    }
+
+    @Test
+    fun testNewDatabaseDeclaresKdbx41Version() {
+        // ISSUE-P2-266：新建库写出的 XML 恒含 4.1 专有元素（SettingsChanged / QualityCheck 等），
+        // 外层 header 的 version 必须声明 0x00040001，禁止「声明 4.0、夹带 4.1」的文件。
+        assertEquals(
+            KdbxConstants.Version.VERSION_4_1,
+            KdbxHeader.createDefault(useArgon2 = true).version
+        )
+        assertEquals(
+            KdbxConstants.Version.VERSION_4_1,
+            KdbxHeader.createDefault(useArgon2 = false).version
+        )
+
+        // 端到端留证：实际落盘文件外层 header 第 8..11 字节（LE UInt32）为 0x00040001
+        val password = "Version@4.1".toCharArray()
+        val fastAes = KdfParameters.Aes(seed = ByteArray(32) { 7 }, rounds = 10L)
+        val database = KdbxDatabase(
+            header = KdbxHeader.createDefault(useArgon2 = false).copy(kdfParameters = fastAes),
+            rootGroup = KdbxGroup(name = "Root")
+        )
+        val out = ByteArrayOutputStream()
+        KdbxFile.save(out, database, password)
+        val bytes = out.toByteArray()
+        val writtenVersion = (bytes[8].toInt() and 0xFF) or
+                ((bytes[9].toInt() and 0xFF) shl 8) or
+                ((bytes[10].toInt() and 0xFF) shl 16) or
+                ((bytes[11].toInt() and 0xFF) shl 24)
+        assertEquals(0x00040001, writtenVersion)
+
+        // 读取侧仅校验 major：4.1 文件原样读回且版本保留
+        val loaded = KdbxFile.load(ByteArrayInputStream(bytes), password)
+        assertEquals(KdbxConstants.Version.VERSION_4_1, loaded.header.version)
+
+        // 既有 4.0 库往返保留原版本（反序列化不走默认值，缺陷面仅限新建库）
+        val legacy40 = database.copy(header = database.header.copy(version = KdbxConstants.Version.VERSION_4_0))
+        val out40 = ByteArrayOutputStream()
+        KdbxFile.save(out40, legacy40, password)
+        val loaded40 = KdbxFile.load(ByteArrayInputStream(out40.toByteArray()), password)
+        assertEquals(KdbxConstants.Version.VERSION_4_0, loaded40.header.version)
     }
 
     @Test
