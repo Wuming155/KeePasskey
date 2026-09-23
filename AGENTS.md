@@ -99,7 +99,7 @@ Coroutines + Flow；**文档与代码注释使用简体中文**。
   KPEX 字段后必跑**——`ISSUE-P2-211` 正是被它揭出的）
 - `python tools/doc/count_line_tiers.py` / `python tools/doc/long_functions.py` / `python tools/doc/check_md_links.py`
   / `python tools/doc/logic_lines.py <文件> <函数名>` / `python tools/doc/count_test_results.py`
-  / `python tools/doc/check_resolved_index_sync.py`
+  / `python tools/doc/check_resolved_index_sync.py` / `python tools/doc/check_bounded_type_names.py`
   — 五模块行数分档复核（**fail-closed**：`tier1(>500)` 恒 0 + `tier2` 棘轮预算只紧不松）
   / 超长函数复核（**fail-closed**：存在 ≥ 阈值 即退出码 1；CI 用默认阈值 100）
   / `docs/` 相对链接自检（**改任何文档后跑**，断链即退出码 1）
@@ -108,14 +108,17 @@ Coroutines + Flow；**文档与代码注释使用简体中文**。
   那会把截图与真机 `connected` 的旧 XML 算进来，§190 现形过一次）。
   / **`resolved/` 索引一致性**自检（`BATCH_*.md` ↔ `batches/*.md` ↔ `RESOLVED_LOG.md` ↔ `resolved/README.md` 最大编号；
   **改任一批次 / 分册 / 全量索引 / `resolved/README.md` 后跑**，漏登、陈旧行、**重登**即退出码 1）
+  / **类型名有界性**机检（`PD-34`；**新增 `*Manager`/`*Util`/`*Helper`/`*Common` 类型后必跑**——
+  未登记即退出码 1，扩 `ALLOWED` 须同批回写 `PD-34`；`--selftest` 为口径反校）
   这些计数**一律现跑、不得凭记忆或抄上一批文档**，且**度量工具一律用已知值反校**
   （判据与踩坑史写在各脚本文档串里）；逐字搬移复核用
   `python tools/doc/check_verbatim_move.py <原文件> <本体> [段落文件…]`；「多处重复代码是否真逐字相同」
   的前提成立性用 `python tools/doc/scaffold_block_fingerprint.py <git rev> <目录> <页名>…`
   （**目测登记前提曾造成一次真实回归**，见 `ISSUE-P3-195`）
-- CI **`hygiene-gate`**（`.github/workflows/build.yml`）——上述规模 / 链接 / 索引 / 重言断言机检的
-  **fail-closed 硬门禁**（§281）：`count_line_tiers` + `long_functions` + `check_md_links` +
-  `check_resolved_index_sync` + `check_tautological_assertions`，非 0 即红；**严禁** `|| true` 吞掉
+- CI **`hygiene-gate`**（`.github/workflows/build.yml`）——上述规模 / 链接 / 索引 / 重言断言 / 复核 / 类型名机检的
+  **fail-closed 硬门禁**（§281，§285 扩至七条）：`count_line_tiers` + `long_functions` + `check_md_links` +
+  `check_resolved_index_sync` + `check_tautological_assertions` + `check_recheck_consistency` +
+  `check_bounded_type_names`，非 0 即红；**严禁** `|| true` 吞掉
 - `python tools/audit/check_recheck_consistency.py` — 复核报告一致性扫描（**改审计 / 复核报告后必跑**；
   PowerShell 直接可跑。历史命令 `bash …/check_recheck_consistency.sh` 仍可用，薄封装调本文件）
 - `python tools/audit/check_tautological_assertions.py` — **「永远为真的断言」机检**（§275 立规；**改 `*/src/test/**`

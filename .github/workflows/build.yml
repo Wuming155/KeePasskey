@@ -66,16 +66,17 @@ jobs:
   # 判据与棘轮口径见各脚本文档串；本 job 不依赖 JDK / NDK，秒级完成。
   # ---------------------------------------------------------------------------
   hygiene-gate:
-    name: Hygiene gate (line tiers, long functions, docs index, tautological asserts, recheck)
+    name: Hygiene gate (line tiers, long functions, docs index, tautological asserts, recheck, type names)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # 六条机检均为 fail-closed（非 0 即红）。顺序：规模闸门 → 文档链接 →
-      # 归档索引双向一致 → 重言断言 → 复核报告禁用短语。`long_functions` 用默认阈值 100
-      # （§280 收工线 functions_ge_100=0 不得回潮）；传更低阈值仅作本地普查。
+      # 七条机检均为 fail-closed（非 0 即红）。顺序：规模闸门 → 文档链接 →
+      # 归档索引双向一致 → 重言断言 → 复核报告禁用短语 → 类型名有界性（PD-34）。
+      # `long_functions` 用默认阈值 100（§280 收工线 functions_ge_100=0 不得回潮）；
+      # 传更低阈值仅作本地普查。
       - name: 规模与卫生机检（fail-closed）
         run: |
           set -euo pipefail
@@ -85,6 +86,7 @@ jobs:
           python3 tools/doc/check_resolved_index_sync.py
           python3 tools/audit/check_tautological_assertions.py
           python3 tools/audit/check_recheck_consistency.py
+          python3 tools/doc/check_bounded_type_names.py
 
   # ---------------------------------------------------------------------------
   # 门禁 1：快速门禁（不构建原生）
