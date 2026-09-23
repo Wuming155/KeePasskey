@@ -41,15 +41,9 @@
 
 ---
 
-## P2 中危缺陷与协议/测试缺口（1 项）
+## P2 中危缺陷与协议/测试缺口（0 项）
 
-### ISSUE-P2-291：同步配置 / 凭据 / 缓存只按 `remotePath` 键控，无库身份绑定 ⇒ 换库后仍可整库覆盖另一库的云端副本
-
-- **核实时间点**：2026-09-23 经远端路径与凭据解析链核对。**注**：本条在对抗轮未列为独立攻击对象（首轮报告原列 P2），开工前须按规则 6.1② 自行复核「多库 + 多同步配置」的真实装配路径。
-- **核实方式**：`app/.../sync/SyncProviderResolver.kt:113-138` 按库文件名 / 偏好推导 `remotePath`，`SyncCredentialsStore.kt:137` 的缺省远端路径为 `/keepasskey.kdbx`（**不含库身份**），`sync/.../SyncCache.kt:434` 的缓存键同为 `remotePath` ⇒ 两个库若指向同一远端对象（或用户改选库后未重配同步），本库整库字节会被上传覆盖对方云端副本，且基线 / 防回滚记录同样按 `remotePath` 记账，无法辨识「换库」。
-- **背景与根因**：与 `ISSUE-P2-229`（SAF 库不参与同步）不同面——本条是**同步库身份与远端目标缺少绑定校验**。对照 keepass2android 按 `iocInfo`（含库上下文）解析存储对象（`GetFileStorage(iocInfo)`），非以路径字符串为唯一键。后果是跨库整库数据丢失，非字段级。
-- **涉及文件**：`app/src/main/java/com/keepasskey/app/sync/SyncProviderResolver.kt`、`app/src/main/java/com/keepasskey/app/sync/SyncCredentialsStore.kt`、`sync/src/main/java/com/keepasskey/sync/engine/SyncCache.kt`、`sync/src/main/java/com/keepasskey/sync/engine/SyncEngine.kt`。
-- **验收标准**：AC① 同步配置须绑定**库身份**（库头摘要或库 UUID）并参与凭据 / 缓存 / 基线 / 防回滚的键，换库即视为新配置；AC② 首次将「非本配置创建时绑定的库」推向远端时须显式二次确认（说明将整库覆盖），禁静默 PUT；AC③ 用例：两库共用同一 `remotePath` ⇒ 第二个库上传前被拦或需确认，缓存与基线互不串用；AC④ 与 `ISSUE-P1-275`（乐观锁，已闭环，见 `RESOLVED_LOG.md` §272）同批考虑：ETag 基线亦须在库身份变更后失效，不得沿用旧基线。
+> **暂无开放项**。
 
 ---
 

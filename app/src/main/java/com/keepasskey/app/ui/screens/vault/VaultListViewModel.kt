@@ -389,6 +389,17 @@ class VaultListViewModel @Inject constructor(
     /** 下拉手势同步触发：真实执行 SyncCoordinator 全量同步（不再使用演示性假桩） */
     fun triggerPullRefresh() = syncController.triggerPullRefresh()
 
+    /**
+     * `ISSUE-P2-291` AC②：库身份绑定不符待确认位（整库覆盖确认对话框的可见性）。
+     */
+    val pendingBindingTakeover: StateFlow<Boolean> get() = syncController.pendingBindingTakeover
+
+    /** 用户确认整库覆盖云端副本并改绑当前库 */
+    fun confirmBindingTakeover() = syncController.confirmBindingTakeover()
+
+    /** 用户取消整库覆盖（保持本地与云端现状） */
+    fun dismissBindingTakeover() = syncController.dismissBindingTakeover()
+
     fun createGroup(name: String, iconName: String = "folder") = actions.createGroup(name, iconName)
 
     fun renameGroup(group: VaultGroup, newName: String) = actions.renameGroup(group, newName)

@@ -714,6 +714,11 @@
     <string name="vault_conflict_action">去解决冲突</string>
     <string name="vault_op_failed">操作失败：%1$s</string>
     <string name="sync_feedback_offline">当前处于离线模式或网络不可达，已保留本地修改</string>
+    <string name="sync_vault_binding_mismatch">云端副本登记为另一密码库，已中止同步以保护其数据</string>
+    <string name="sync_vault_takeover_title">整库覆盖云端副本？</string>
+    <string name="sync_vault_takeover_message">云端副本登记为另一个密码库所有。确认后将以当前库的完整内容覆盖云端副本，原属于另一库的云端数据将被整体替换且无法恢复。建议先确认另一库已另行备份。</string>
+    <string name="sync_vault_takeover_confirm">覆盖并绑定当前库</string>
+    <string name="sync_error_vault_takeover_failed">整库覆盖上传失败，绑定未生效，可稍后重试</string>
     <string name="sync_feedback_error">同步失败：%1$s</string>
     <string name="sync_error_https_required">拒绝保存：%1$s 端点必须使用 HTTPS（https:// 开头）。明文 HTTP 已被禁止，以保护凭据与密码库传输安全</string>
     <string name="sync_section_offline">离线与后台同步</string>

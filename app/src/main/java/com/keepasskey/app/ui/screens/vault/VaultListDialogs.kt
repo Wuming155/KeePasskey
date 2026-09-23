@@ -204,6 +204,33 @@ internal fun VaultTemplatePickerDialog(
 }
 
 /**
+ * `ISSUE-P2-291` AC②：库身份绑定不符的整库覆盖确认对话框——确认按钮用 error 色
+ * 强化「不可恢复」语义；取消即保持本地与云端现状。
+ */
+@Composable
+internal fun VaultBindingTakeoverDialog(
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.sync_vault_takeover_title)) },
+        text = { Text(stringResource(R.string.sync_vault_takeover_message)) },
+        confirmButton = {
+            TextButton(onClick = onConfirm) {
+                Text(
+                    text = stringResource(R.string.sync_vault_takeover_confirm),
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.btn_cancel)) }
+        }
+    )
+}
+
+/**
  * 批量移动文件夹选择对话框：支持移动到根目录或任一非回收站文件夹
  *
  * [titleRes] 供单条移动等复用场景替换标题（默认沿用批量移动标题）。

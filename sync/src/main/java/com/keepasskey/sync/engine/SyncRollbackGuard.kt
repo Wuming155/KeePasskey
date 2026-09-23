@@ -84,7 +84,13 @@ sealed interface RollbackVerdict {
 class SyncRollbackGuard(
     /** 防回滚状态目录；生产由调用方注入 `filesDir/<STATE_DIR_NAME>`（跨锁定保留），见类 KDoc */
     private val stateDir: File,
-    private val integrityMac: SyncIntegrityMac
+    private val integrityMac: SyncIntegrityMac,
+    /**
+     * `ISSUE-P2-291`：库身份命名空间（口径同 `SyncCache.vaultScope`）——非空时状态键 =
+     * `SHA-256("vaultScope\nremotePath")`，两库共用同一 `remotePath` 时防回滚高水位
+     * 各自独立，换库不沿用旧库状态；空串保持旧键（既有直构造调用方零影响）。
+     */
+    private val vaultScope: String = ""
 ) {
 
     /**
@@ -213,7 +219,28 @@ class SyncRollbackGuard(
     }
 
     private fun stateFile(remotePath: String): File =
-        File(stateDir, SyncCache.sha256Hex(remotePath.toByteArray(Charsets.UTF_8)) + SUFFIX_STATE)
+        File(stateDir, SyncCache.sha256Hex(scopedKey(remotePath).toByteArray(Charsets.UTF_8)) + SUFFIX_STATE)
+
+    /** `ISSUE-P2-291`：库身份命名空间参与后的状态键输入（空命名空间退化为裸 `remotePath`）。 */
+    private fun scopedKey(remotePath: String): String =
+        if (vaultScope.isEmpty()) remotePath else "$vaultScope\n$remotePath"
+
+    /**
+     * `ISSUE-P2-291`：与 `SyncCache.adoptLegacyKeysIfPresent` 同批的一次性迁移——
+     * 旧无命名空间键的防回滚状态文件改名纳入本实例的库身份键（仅当库身份键尚无状态）。
+     * 防回滚高水位对单库老用户零感知延续；rename 失败按「无历史」由后续裁决自然重建。
+     */
+    fun adoptLegacyKeyIfPresent(remotePath: String) {
+        if (vaultScope.isEmpty()) return
+        val legacyFile = File(
+            stateDir,
+            SyncCache.sha256Hex(remotePath.toByteArray(Charsets.UTF_8)) + SUFFIX_STATE
+        )
+        val scopedFile = stateFile(remotePath)
+        if (!scopedFile.exists() && legacyFile.exists()) {
+            legacyFile.renameTo(scopedFile)
+        }
+    }
 
     companion object {
         private const val KEY_SEQUENCE = "sequence"
@@ -222,7 +249,7 @@ class SyncRollbackGuard(
         private const val PREFIX_MAC = "mac="
 
         /**
-         * 状态文件后缀（`<SHA-256(remotePath)>.rollback`）。
+         * 状态文件后缀（`<SHA-256(scopedRemotePath)>.rollback`；`ISSUE-P2-291` 起键含库身份命名空间）。
          *
          * ⚠ 该后缀标识**跨会话安全状态**，不是缓存产物：`SyncCache.clear` / `SyncCache.clearAll`
          * 的删除清单与通配清理**一律不得包含**它（F-23 整改前它被列入 `clear()` 的删除清单，

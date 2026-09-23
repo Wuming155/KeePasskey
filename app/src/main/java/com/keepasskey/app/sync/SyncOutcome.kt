@@ -21,6 +21,13 @@ sealed class SyncOutcome {
     /** 发生条目同字段冲突，需用户在冲突界面决策 */
     data class ConflictNeedsUser(val conflicts: List<ConflictedEntryPair>) : SyncOutcome()
 
+    /**
+     * 云端副本（[remotePath]）登记的归属库与当前库不同（`ISSUE-P2-291`）：
+     * 同步已中止于任何网络写之前，须用户显式确认「整库覆盖并改绑当前库」
+     * （`SyncCoordinator.confirmVaultBindingTakeover`）或取消，严禁静默 PUT。
+     */
+    data class VaultBindingMismatch(val remotePath: String) : SyncOutcome()
+
     /** 离线模式或网络不可达，保留本地安全副本 */
     data object Offline : SyncOutcome()
 

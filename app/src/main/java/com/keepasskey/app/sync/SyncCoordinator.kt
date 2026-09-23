@@ -64,7 +64,10 @@ open class SyncCoordinator @Inject constructor(
     syncDatabaseCodec: SyncDatabaseCodec? = null,
     syncContentChanges: SyncContentChangeDetector? = null,
     syncConflicts: SyncConflictController? = null,
-    syncCycle: SyncCycleRunner? = null
+    syncCycle: SyncCycleRunner? = null,
+    // ISSUE-P2-291：库身份绑定登记（生产 Hilt 注入；既有单测 4/5 参构造点为 null，
+    // 就地装配时同步关闭绑定闸，行为与整改前一致）
+    syncVaultBindingStore: SyncVaultBindingStore? = null
 ) : SessionLockObserver {
     private val effectiveStrings: StringsProvider =
         strings ?: StringsProvider { id, args -> context.getString(id, *args) }
@@ -90,7 +93,8 @@ open class SyncCoordinator @Inject constructor(
             conflicts = conflicts,
             changes = changes,
             preferences = preferences,
-            strings = effectiveStrings
+            strings = effectiveStrings,
+            vaultBindingStore = syncVaultBindingStore
         )
 
     init {
@@ -189,6 +193,19 @@ open class SyncCoordinator @Inject constructor(
         return outcome
     }
 
+    /**
+     * `ISSUE-P2-291` AC②：用户在绑定不符对话框中显式确认「整库覆盖并绑定当前库」后
+     * 的执行入口（语义见 [SyncCycleRunner.takeoverVaultBinding]——改绑归属 + 无预条件
+     * 整库上传，云端原属另一库的副本被整体替换）。与 [syncNow] 共享同一互斥锁。
+     */
+    suspend fun confirmVaultBindingTakeover(): SyncOutcome {
+        debugLog.info(SYNC_LOG_TAG, "库身份改绑确认：整库覆盖上传开始")
+        val outcome = cycle.takeoverVaultBinding()
+        publishSyncEvents()
+        debugLog.info(SYNC_LOG_TAG, "库身份改绑确认结束: ${describeOutcome(outcome)}")
+        return outcome
+    }
+
     private fun describeOutcome(outcome: SyncOutcome): String = when (outcome) {
         is SyncOutcome.UpToDate -> "UpToDate(与云端一致)"
         is SyncOutcome.UploadedLocal -> "UploadedLocal(本地已上传)"
@@ -199,6 +216,8 @@ open class SyncCoordinator @Inject constructor(
         // 直接拼接原始 endpoint），属敏感插值，不得进入调试日志缓冲；
         // 失败详情已由 UI 提示承载，日志只保留结果类型。
         is SyncOutcome.Error -> "Error(同步失败，详情见界面提示)"
+        // ISSUE-P2-291：绑定拦截不携带凭据，但同样只记类型与路径形态，不记库 UUID 全文
+        is SyncOutcome.VaultBindingMismatch -> "VaultBindingMismatch(远端归属另一库，待用户确认)"
     }
 
     /**

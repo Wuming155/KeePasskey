@@ -76,7 +76,14 @@ class SyncCycleRunner @Inject constructor(
     private val rollbackStateDir: File? = null,
     // ISSUE-P2-18：防回滚状态认证密钥来源（生产由 Hilt 注入 KeystoreSyncIntegrityMac；
     // 直接构造路径默认空实现 = 禁用防回滚，保持既有单测行为不变）
-    private val syncIntegrityMac: SyncIntegrityMac = NoopSyncIntegrityMac
+    private val syncIntegrityMac: SyncIntegrityMac = NoopSyncIntegrityMac,
+    /**
+     * `ISSUE-P2-291`：同步目标 ↔ 库身份绑定登记（生产由 Hilt 注入）。
+     * 为 null（既有手工装配路径）时**关闭绑定闸且缓存 / 防回滚沿用旧键**（`SHA-256(remotePath)`），
+     * 行为与整改前逐字节一致；非 null 时缓存 / 基线 / 防回滚键含库身份命名空间，
+     * 且绑定不符的同步中止于任何网络写之前。
+     */
+    private val vaultBindingStore: SyncVaultBindingStore? = null
 ) {
 
     /**
@@ -126,13 +133,23 @@ class SyncCycleRunner @Inject constructor(
 
         val remotePath = session.testRemotePath ?: providerResolver.resolveRemotePath(activeFile.name)
 
+        // ISSUE-P2-291 AC①：库身份（根分组 UUID，建库随机生成、跨保存稳定）参与
+        // 缓存 / 基线 / 防回滚的键——同一 remotePath 被不同库共用时，各库的同步状态
+        // 物理隔离（「换库即视为新配置」）。绑定登记缺失（手工装配路径）时沿用旧键。
+        val vaultScope = vaultBindingStore?.let { currentDb.rootGroup.id.toHexString() }
+        val cacheScope = vaultScope.orEmpty()
+
         // ISSUE-P3-03 (43a)：本次同步周期使用的偏好快照与冲突策略（周期内恒定，避免中途偏好漂移）
         val settings = preferences.currentSettings()
         val conflictStrategy = settings.conflictResolution.toSyncStrategy()
 
         // ISSUE-P1-07：目录名与 SyncCacheEvictor 共用同一常量，杜绝两处字面量漂移
         val syncDir = File(context.cacheDir, SyncCache.CACHE_DIR_NAME).apply { if (!exists()) mkdirs() }
-        val syncCache = syncCacheFactory?.invoke(syncDir) ?: SyncCache(syncDir)
+        val syncCache = if (vaultScope == null) {
+            syncCacheFactory?.invoke(syncDir) ?: SyncCache(syncDir)
+        } else {
+            SyncCache(syncDir, cacheScope)
+        }
         // F-23 整改：防回滚状态**不得**与可丢弃缓存同目录——此前它落在 cacheDir/sync，
         // 而 SyncCache.clear() 把它列入删除清单且由锁库 / 凭据清空触发，导致「用户锁定一次
         // 即可被云端重放旧库」。现注入 filesDir 下的持久目录（跨锁定保留），
@@ -140,8 +157,27 @@ class SyncCycleRunner @Inject constructor(
         // 注入缺失（手动装配路径）时按同一落点惰性兜底，保证两种装配方式落点一致。
         val rollbackGuard = SyncRollbackGuard(
             rollbackStateDir ?: File(context.filesDir, SyncRollbackGuard.STATE_DIR_NAME),
-            syncIntegrityMac
+            syncIntegrityMac,
+            cacheScope
         )
+
+        // ISSUE-P2-291 AC②：库身份绑定闸——在任何网络写（含 getMetadata）之前裁决。
+        // 未登记：当前库即本配置的创建绑定者（登记并把旧无命名空间键迁移到库身份键下，
+        // 单库老用户零感知）；登记一致：放行；登记为**另一库**：中止，须用户显式确认整库覆盖。
+        if (vaultBindingStore != null && vaultScope != null) {
+            when (val bound = vaultBindingStore.loadBinding(remotePath)) {
+                null -> {
+                    vaultBindingStore.saveBinding(remotePath, vaultScope)
+                    syncCache.adoptLegacyKeysIfPresent(remotePath)
+                    rollbackGuard.adoptLegacyKeyIfPresent(remotePath)
+                }
+                vaultScope -> Unit
+                else -> {
+                    preferences.verbose(settings, "库身份绑定拦截：remotePath 归属另一库（bound=${bound.take(8)}…），中止同步")
+                    return CycleSetup(SyncOutcome.VaultBindingMismatch(remotePath))
+                }
+            }
+        }
         val syncEngine = SyncEngine(provider, syncCache, rollbackGuard)
         // 离线开关联动：设置页开关传导至引擎决策树
         syncEngine.isOffline = session.isOfflineMode
@@ -283,6 +319,68 @@ class SyncCycleRunner @Inject constructor(
             // ISSUE-P1-06：同步周期结束（无论成功/失败/异常），显式擦除 S3 凭据 CharArray。
             // WebDAV 侧密码已在 resolveProvider() 构造完成后即时擦除（passwordChars 借用语义），
             // S3 侧因 Provider 需在整个同步周期内多次签名复用，故延迟至此处统一擦除。
+            (providerForErase as? S3SyncProvider)?.clearCredentials()
+        }
+    }
+
+    /**
+     * `ISSUE-P2-291` AC②：用户显式确认「整库覆盖并绑定当前库」后的执行路径。
+     *
+     * 语义（对话框已如实告知）：
+     * 1. `remotePath` 的归属登记**改绑**为当前库（此后另一库再同步将被同一闸拦截）；
+     * 2. 当前库**整库无预条件上传**（`commitLocalForce`，`expectedEtag = null`）——
+     *    云端副本（原属另一库）被整体替换，这正是用户确认的内容；
+     *    不复用旧库 ETag 基线（AC④：库身份变更后旧基线天然不参与新键）；
+     * 3. 新库身份键下的缓存 / 基线 / 防回滚从空开始，由本次上传建立。
+     */
+    suspend fun takeoverVaultBinding(): SyncOutcome = session.mutex.withLock {
+        val activeFile = databaseSession.currentFile
+            ?: return@withLock SyncOutcome.Error(strings.get(R.string.sync_error_no_open_vault_file))
+        val currentDb = databaseSession.databaseFlow.value
+            ?: return@withLock SyncOutcome.Error(strings.get(R.string.sync_error_vault_not_unlocked))
+
+        var providerForErase: SyncProvider? = null
+        try {
+            val provider = session.testSyncProvider ?: providerResolver.resolveProvider()
+                ?: return@withLock SyncOutcome.Error(strings.get(R.string.sync_error_no_sync_credentials))
+            providerForErase = provider
+            val remotePath = session.testRemotePath ?: providerResolver.resolveRemotePath(activeFile.name)
+            val vaultScope = vaultBindingStore?.let { currentDb.rootGroup.id.toHexString() }
+            val cacheScope = vaultScope.orEmpty()
+
+            val outcome = withContext(Dispatchers.IO) {
+                val localBytes = codec.serializeLocalDatabase(currentDb)
+                    ?: return@withContext SyncOutcome.Error(
+                        strings.get(R.string.sync_error_local_serialize_failed)
+                    )
+                // 确认即改绑：此后该远端目标归当前库所有
+                if (vaultScope != null) vaultBindingStore?.saveBinding(remotePath, vaultScope)
+
+                val syncDir = File(context.cacheDir, SyncCache.CACHE_DIR_NAME).apply { if (!exists()) mkdirs() }
+                val syncCache = SyncCache(syncDir, cacheScope)
+                val rollbackGuard = SyncRollbackGuard(
+                    rollbackStateDir ?: File(context.filesDir, SyncRollbackGuard.STATE_DIR_NAME),
+                    syncIntegrityMac,
+                    cacheScope
+                )
+                val engine = SyncEngine(provider, syncCache, rollbackGuard)
+                engine.isOffline = session.isOfflineMode
+                session.lastSyncEngine = engine
+                when (engine.commitLocalForce(remotePath, localBytes)) {
+                    is SyncCommitResult.Uploaded -> {
+                        session.lastSyncedDb = databaseSession.databaseFlow.value
+                        SyncOutcome.UploadedLocal
+                    }
+                    is SyncCommitResult.RemoteUnreachable -> SyncOutcome.Offline
+                    else -> SyncOutcome.Error(strings.get(R.string.sync_error_vault_takeover_failed))
+                }
+            }
+            outcome
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            SyncOutcome.Error(e.message ?: strings.get(R.string.sync_error_vault_takeover_failed))
+        } finally {
             (providerForErase as? S3SyncProvider)?.clearCredentials()
         }
     }

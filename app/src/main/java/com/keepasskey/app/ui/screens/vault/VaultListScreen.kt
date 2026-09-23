@@ -141,6 +141,16 @@ fun VaultListScreen(
         totpLiveCodes = totpLiveCodesState,
         modifier = modifier
     )
+
+    // ISSUE-P2-291 AC②：库身份绑定不符的显式二次确认（下拉刷新被拦截后置位；
+    // 确认 = 整库覆盖并改绑，取消 = 保持本地与云端现状）
+    val pendingBindingTakeover by viewModel.pendingBindingTakeover.collectAsStateWithLifecycle()
+    if (pendingBindingTakeover) {
+        VaultBindingTakeoverDialog(
+            onConfirm = viewModel::confirmBindingTakeover,
+            onDismiss = viewModel::dismissBindingTakeover
+        )
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

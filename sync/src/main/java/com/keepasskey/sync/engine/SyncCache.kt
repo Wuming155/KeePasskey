@@ -24,7 +24,7 @@ data class SyncCacheState(
 /**
  * 纯字节级三哈希本地缓存存储。
  *
- * 磁盘布局（以 SHA-256(remotePath) 规范键命名）：
+ * 磁盘布局（以 SHA-256(规范键) 命名；`ISSUE-P2-291` 起规范键含库身份命名空间，见构造参数）：
  * - `<hash>.cache`：数据库二进制文件内容（安全写入：.tmp -> flush/sync -> rename）
  * - `<hash>.version`：本地版本号（内容 SHA-256 十六进制）
  * - `<hash>.baseversion`：基准版本号（最后确认与云端一致时的 SHA-256 十六进制）
@@ -41,7 +41,16 @@ data class SyncCacheState(
  * `filesDir/<SyncRollbackGuard.STATE_DIR_NAME>`，且 [clear] / [clearAll] 永不删除
  * [SyncRollbackGuard.SUFFIX_STATE] 命名的文件。本目录只放「锁库即可丢弃」的密文快照。
  */
-open class SyncCache(private val cacheDir: File) {
+open class SyncCache(
+    private val cacheDir: File,
+    /**
+     * `ISSUE-P2-291`：库身份命名空间。非空时规范键 = `SHA-256("vaultScope\nremotePath")`，
+     * 使同一 `remotePath` 被不同密码库共用时，缓存 / 版本 / 基线 / ETag 元数据各自独立
+     * （「换库即视为新配置」的物理承载）；空串保持旧键 `SHA-256(remotePath)`——
+     * 附件二进制池（`FileBinaryStore`）与既有直构造调用方零影响。
+     */
+    private val vaultScope: String = ""
+) {
 
     /** 文件层原语（唯一临时名 / fsync / 原子替换 / 权限收敛 / 有界重试删除） */
     private val files = SyncCacheFiles(cacheDir)
@@ -437,7 +446,30 @@ open class SyncCache(private val cacheDir: File) {
     internal fun deleteCacheChild(child: File): Boolean = files.deleteChild(child)
 
     /** 定位缓存目录内的规范键文件（键名与后缀拼接口径见 [SyncCacheFiles.fileFor]） */
-    private fun getFile(remotePath: String, suffix: String): File = files.fileFor(remotePath, suffix)
+    private fun getFile(remotePath: String, suffix: String): File = files.fileFor(scopedKey(remotePath), suffix)
+
+    /** `ISSUE-P2-291`：库身份命名空间参与后的规范键输入（空命名空间退化为裸 `remotePath`）。 */
+    private fun scopedKey(remotePath: String): String =
+        if (vaultScope.isEmpty()) remotePath else "$vaultScope\n$remotePath"
+
+    /**
+     * `ISSUE-P2-291`：库身份键控升级的**一次性迁移**——把旧无命名空间键
+     * （`SHA-256(remotePath)`）下的缓存 / 版本 / 基线 / 元数据文件改名纳入本实例的
+     * 库身份键（仅当库身份键尚无对应文件，rename 失败按「无旧键」由上层重新建立基线）。
+     * 在绑定首次创建（首个把 `remotePath` 与库身份绑定的同步周期）时调用：
+     * 单库老用户的缓存 / 基线 / ETag 零感知延续；多库场景旧键归「最后同步者」，
+     * 另一库的旧键残留由确认闸拦截后重建，绝不串用。
+     */
+    fun adoptLegacyKeysIfPresent(remotePath: String) {
+        if (vaultScope.isEmpty()) return
+        for (suffix in listOf(SUFFIX_CACHE, SUFFIX_VERSION, SUFFIX_BASE_VERSION, SUFFIX_BASE_CACHE, SUFFIX_META)) {
+            val legacyFile = files.fileFor(remotePath, suffix)
+            val scopedFile = getFile(remotePath, suffix)
+            if (!scopedFile.exists() && legacyFile.exists()) {
+                legacyFile.renameTo(scopedFile)
+            }
+        }
+    }
 
     companion object {
         private const val SUFFIX_CACHE = ".cache"

@@ -370,6 +370,7 @@
 | §296 | otpauth 百分号解码批次：`ISSUE-P2-289` 闭环。参数值一律先百分号解码（label / secret / 全参数，RFC 3986 口径）；新输入 Base32 严格判据与存量展示宽容口径作用域分列；`digits` / `algorithm` 回落带诊断并经 `warnings` 透传到详情页呈现（禁静默改写）；条目「digits=7 回落」示例经复核更正（7 在 6..8 内保留）。用例 +6；`tests=2647` 全绿 | ISSUE-P2-289 | [`296-otpauth百分号解码批次.md`](resolved/batches/296-otpauth百分号解码批次.md) |
 | §297 | KDF 异常路径清零与交叉约束批次：`ISSUE-P2-290` 闭环。`compositeKey` / 口令明文字节两处改 `try/finally`（实现回补自登契约），`deriveLegacyKeys` 调用点纳入同一保护；`memory ≥ 8 × parallelism × 1024` 交叉约束读侧 fail-closed 与原生分派谓词两侧补齐（与内核下界逐项对齐）；契约表第 12 行对齐实现。用例 +7；`tests=2654` 全绿；**设备侧义务履行**：Pixel_10 AVD 四层 instrumented **158 例全绿**（crypto 37 / database 17 / sync 24 / app 80，`adb` 定向执行，实体机零接触） | ISSUE-P2-290 | [`297-kdf异常路径清零与交叉约束批次.md`](resolved/batches/297-kdf异常路径清零与交叉约束批次.md) |
 | §298 | 弱 ETag 设备期望迁移批次：`ISSUE-P3-304` 闭环（§297 设备验证中揭出，即登即修）。`WebDavPropfindParserDeviceTest` 弱 ETag 期望自 §151 旧语义迁往 §272「剥引号保留 W/」口径（与宿主 `SyncModelsTest` 同值）；零生产改动。AVD `:sync:` 层 24 例全绿 | ISSUE-P3-304 | [`298-弱etag设备期望迁移批次.md`](resolved/batches/298-弱etag设备期望迁移批次.md) |
+| §299 | 同步库身份绑定批次：`ISSUE-P2-291` 闭环（**P2 区清空**）。库身份（根组 UUID）命名空间参与缓存 / 基线 / 防回滚键控（`SyncCache` / `SyncRollbackGuard` + 旧键一次性迁移）；新增 `SyncVaultBindingStore` 归属登记（与凭据同文件同生命周期）；绑定闸在任何网络写前裁决，不符中止 + 列表页显式二次确认改绑（`takeoverVaultBinding` 整库覆盖）。用例 +3；`tests=2657` 全绿；AVD `:sync:` 24 例额外保障绿 | ISSUE-P2-291 | [`299-同步库身份绑定批次.md`](resolved/batches/299-同步库身份绑定批次.md) |
 
 ## 分册导航
 

@@ -301,6 +301,9 @@ internal class SettingsSyncController(
                 is SyncOutcome.UploadedLocal -> UiMessage(R.string.sync_feedback_uploaded, listOf(provider.protocol))
                 is SyncOutcome.MergedAndUploaded -> UiMessage(R.string.sync_feedback_merged, listOf(provider.protocol))
                 is SyncOutcome.ConflictNeedsUser -> UiMessage(R.string.sync_feedback_conflict)
+                // ISSUE-P2-291 AC②：绑定拦截只提示，确认入口在库列表页（下拉刷新触发），
+                // 设置页不提供第二处「整库覆盖」闸门
+                is SyncOutcome.VaultBindingMismatch -> UiMessage(R.string.sync_vault_binding_mismatch)
                 is SyncOutcome.Offline -> UiMessage(R.string.sync_feedback_offline)
                 is SyncOutcome.Error -> UiMessage(R.string.sync_feedback_error, listOf(outcome.message))
             }

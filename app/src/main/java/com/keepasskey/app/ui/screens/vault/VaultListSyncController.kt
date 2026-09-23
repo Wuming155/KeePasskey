@@ -34,6 +34,15 @@ internal class VaultListSyncController(
     private val isSyncingFlow = MutableStateFlow(false)
     private val lastSyncTimeMillisFlow = MutableStateFlow(0L)
 
+    /**
+     * `ISSUE-P2-291` AC②：绑定不符的显式二次确认位——同步被拦截后置位，由列表页
+     * 对话框消费（确认 → [confirmBindingTakeover] 整库覆盖；取消/关闭 → [dismissBindingTakeover]）。
+     */
+    private val pendingBindingTakeoverFlow = MutableStateFlow(false)
+
+    /** 库身份绑定不符待确认（驱动整库覆盖确认对话框） */
+    val pendingBindingTakeover: StateFlow<Boolean> = pendingBindingTakeoverFlow
+
     /** 云端同步状态（SYNCING / SYNCED / CONFLICT / OFFLINE） */
     val syncStatus: StateFlow<VaultSyncStatus> = syncStatusFlow
 
@@ -76,6 +85,27 @@ internal class VaultListSyncController(
         }
     }
 
+    /**
+     * `ISSUE-P2-291` AC②：用户确认「整库覆盖并绑定当前库」——走协调器改绑确认路径，
+     * 结果复用 [applySyncOutcome] 上浮；确认位先行复位（对话框关闭）。
+     */
+    fun confirmBindingTakeover() {
+        if (!pendingBindingTakeoverFlow.value || isSyncingFlow.value) return
+        pendingBindingTakeoverFlow.value = false
+        scope.launch {
+            isSyncingFlow.value = true
+            syncStatusFlow.value = VaultSyncStatus.SYNCING
+            val outcome = syncCoordinator.confirmVaultBindingTakeover()
+            applySyncOutcome(outcome)
+            isSyncingFlow.value = false
+        }
+    }
+
+    /** 用户取消整库覆盖：复位确认位，保持离线态（本地与云端均无变化）。 */
+    fun dismissBindingTakeover() {
+        pendingBindingTakeoverFlow.value = false
+    }
+
     private fun applySyncOutcome(outcome: SyncOutcome) {
         when (outcome) {
             is SyncOutcome.UpToDate -> {
@@ -92,6 +122,14 @@ internal class VaultListSyncController(
             is SyncOutcome.ConflictNeedsUser -> {
                 syncStatusFlow.value = VaultSyncStatus.CONFLICT
                 onMessage(UiMessage(R.string.sync_feedback_conflict))
+            }
+            // ISSUE-P2-291 AC②：绑定不符——置确认位（对话框承载显式二次确认），
+            // 不上传任何字节；未确认前状态落 OFFLINE
+            is SyncOutcome.VaultBindingMismatch -> {
+                syncStatusFlow.value = VaultSyncStatus.OFFLINE
+                lastSyncTimeMillisFlow.value = 0L
+                pendingBindingTakeoverFlow.value = true
+                onMessage(UiMessage(R.string.sync_vault_binding_mismatch))
             }
             is SyncOutcome.Offline -> {
                 syncStatusFlow.value = VaultSyncStatus.OFFLINE

@@ -703,6 +703,11 @@
     <string name="vault_conflict_action">Resolve conflict</string>
     <string name="vault_op_failed">Operation failed: %1$s</string>
     <string name="sync_feedback_offline">Offline or network unreachable; local changes kept safe</string>
+    <string name="sync_vault_binding_mismatch">The cloud copy is registered to another vault; sync halted to protect it</string>
+    <string name="sync_vault_takeover_title">Overwrite the cloud copy entirely?</string>
+    <string name="sync_vault_takeover_message">The cloud copy is registered to another vault. Confirming will overwrite it with the full contents of the current vault; the other vault\'s cloud data will be replaced and cannot be recovered. Make sure the other vault is backed up first.</string>
+    <string name="sync_vault_takeover_confirm">Overwrite and bind this vault</string>
+    <string name="sync_error_vault_takeover_failed">Overwrite upload failed; binding not applied. You can retry later</string>
     <string name="sync_feedback_error">Sync failed: %1$s</string>
     <string name="sync_section_offline">Offline &amp; background sync</string>
     <string name="sync_offline_cache_title">Offline cache</string>
