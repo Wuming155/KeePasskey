@@ -45,13 +45,16 @@
 
 ---
 
-## P2 中危缺陷与协议/测试缺口（14 项）
+## P2 中危缺陷与协议/测试缺口（13 项）
 
 > **历史归零留痕**（§271 曾闭环 `ISSUE-P2-271`（加密算法 / KDF 算法选择器假开关——对话框只改 UI 回显，库文件头未变）——整改＝两个选择器经 `CipherLabels` 词汇表反查算法 ID 后经 `updateDatabaseMeta` 写 `KdbxHeader.cipherUuid` / `kdfParameters` + `save()` 真实落库，换 KDF 变体补齐目标变体所需参数（Argon2 换型携带 I·M·P、AES-KDF 补官方缺省 rounds）、回显改单一真相源（init 头映射通道统一下发）；`app` 层 6 例 + `:database:` 层 5 例守卫锁定「选择 → 文件头真实变化 → 解锁成功」闭环；官方 keepassxc-cli 2.7.12 端到端对拍本仓产物报「Twofish 256 位 / Argon2d」实证。证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md) 与
 > [`resolved/batches/271-算法选择器真实落库批次.md`](resolved/batches/271-算法选择器真实落库批次.md)。）
 >
 > **§274 闭环 `ISSUE-P2-277`**（同步周期装配段在主线程做 Keystore 解密、整库密文读写与全库比较——该类 KDoc 与实况相反）——整改＝装配段在**调用处整体包裹**下沉 `Dispatchers.IO`，单点覆盖凭据解密 / 整库缓存读 / 全库逐字段比较 / tmp 写 + `fd.sync()` 四类且抗后续新增 IO 回归；类 KDoc 调度边界段改与实况对齐（点明「装配段**绕开** `SyncEngine` 直调 `SyncCache`，引擎内的 IO 兜底覆盖不到它」）；新增「主线程零 IO」守卫 1 例（五类探针 + 栈归因 + 非空性断言——判别力实验：撤销下沉后五类探针全落主线程基准即红，恢复即绿）。残余（`runSyncCycle` 步骤 3 的 `isCached` 统计仍在调用方线程）如实登记于批次正文。证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md) 与
-> [`resolved/batches/274-同步周期装配段下沉IO批次.md`](resolved/batches/274-同步周期装配段下沉IO批次.md)。
+> [`resolved/batches/274-同步周期装配段下沉IO批次.md`](resolved/batches/274-同步周期装配段下沉IO批次.md)。）
+>
+> **§276 闭环 `ISSUE-P2-283`**（自定义图标 `<Data>` 用严格 Base64 解码，折行合法库整库判损坏）——整改＝`IconNode.end()` 复用既有 `KdbxXmlValueUtil.decodeBase64LenientWhitespace`（与 D19 受保护串 / 内联附件同口径，禁再造一份），失败仍 `KdbxCorruptFileException` 不降级；全仓清点其余 `Base64.getDecoder()` 调用点均非同类误拒面。新增 5 例（76 列折行打开 + 字节与渲染输入一致 / 往返 / 混合空白 / 非法仍拒 / 接线守卫）+ 互操作探针 1 例；keepassxc-cli 2.7.12 打开本仓含图标产物。**如实标注**：真实第三方折行样本读侧对拍未执行。证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md) 与
+> [`resolved/batches/276-自定义图标Base64宽松解码批次.md`](resolved/batches/276-自定义图标Base64宽松解码批次.md)。）
 
 ---
 
@@ -102,16 +105,6 @@
 - **对照（已开源码核实）**：官方 `StrUtil.cs:1530` 的 `g_vTagSep = { ',', ';' }`、切分在 `:1625-1636`、文件侧以裸 `;` 写出（`:1616`），并有 `NormalizeTag`（`:1531-1541`）；KeePassDX `Tags.kt:37-45` 双分隔、`:147` 以 `,` 写出；KeePassXC `KdbxXmlWriter.cpp:316/404` 直写逗号串 ⇒ 读第三方逗号库被读成 1 个标签、回写后对方又读成多个，**双向漂移**。
 - **涉及文件**：`database/src/main/java/com/keepasskey/database/xml/KdbxXmlGroupReader.kt`、`database/src/main/java/com/keepasskey/database/xml/KdbxXmlEntrySerializer.kt`、`database/src/main/java/com/keepasskey/database/xml/KdbxXmlGroupSerializer.kt`、`app/src/main/java/com/keepasskey/app/ui/screens/edit/EntryEditSaveProjection.kt`。
 - **验收标准**：AC① 分隔符集合收敛为**单一常量表**（读 / 写 / 输入解析共用）；AC② 补 `NormalizeTag` 等价实现（trim + 大小写 + 去空 + 剔除含分隔符的非法标签，口径对齐官方）；AC③ 写侧分隔符与官方一致并写明「写 `;`、读 `;` 与 `,`」的取舍；AC④ 用例含「逗号库读入 → 标签数正确 → 回写后可被对方正确解析」；AC⑤ 按规则 8 与 keepassxc-cli / pykeepass 对拍标签往返。
-
----
-
-### ISSUE-P2-283：自定义图标 `<Data>` 用严格 Base64 解码器，折行的合法库被整库判损坏（D19 修复未覆盖此处）
-
-- **核实时间点**：2026-09-23 经同族解码路径比对。
-- **核实方式**：`database/.../KdbxXmlMetaReader.kt:268-277` 仅 `trim()`（不剥内部空白）、`:274` 用严格 `Base64.getDecoder()`、`:276` 抛 `KdbxCorruptFileException`；`TextNode`（`KdbxXmlSaxNodes.kt:52-63`）原样累积字符、外层无归一。对照同族已修的宽松解码 `KdbxXmlValueUtil.kt:13-34`（D19 为受保护串与内联附件修过）⇒ **自相矛盾**。
-- **对照**：官方走 .NET `Convert.FromBase64String`，容忍内部空白与换行 ⇒ 被 76 列折行的第三方库官方可读、本仓整库打不开。
-- **涉及文件**：`database/src/main/java/com/keepasskey/database/xml/KdbxXmlMetaReader.kt`、`database/src/main/java/com/keepasskey/database/xml/KdbxXmlValueUtil.kt`。
-- **验收标准**：AC① 复用既有宽松解码器（禁再造一份），并全仓清点其余 `Base64.getDecoder()` 调用点是否同类误拒面；AC② 用例含「76 列折行图标数据 → 打开成功 → 图标可渲染 → 往返一致」；AC③ 按规则 8 对拍（须含真实第三方折行样本；无样本则如实标注未执行）。
 
 ---
 

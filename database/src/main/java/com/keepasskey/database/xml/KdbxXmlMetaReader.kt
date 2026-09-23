@@ -7,7 +7,6 @@ import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.core.model.MemoryProtectionConfig
 import com.keepasskey.database.exception.KdbxCorruptFileException
 import org.xml.sax.Attributes
-import java.util.Base64
 
 /**
  * KDBX XML <Meta> 节点流式解析节点。
@@ -270,9 +269,13 @@ private class IconNode(
             onDone(null)
             return
         }
+        // 缺陷 D19 同族（ISSUE-P2-283）：自定义图标 <Data> 复用宽松解码器。
+        // 官方 `Convert.FromBase64String` 容忍内部换行/空白（第三方写入者常按 76 列折行），
+        // 严格 `Base64.getDecoder()` 会把合法库整库判损坏。解码器单点定义在
+        // [KdbxXmlValueUtil.decodeBase64LenientWhitespace]，禁再造一份。
         val data = try {
-            Base64.getDecoder().decode(encodedData)
-        } catch (e: Exception) {
+            KdbxXmlValueUtil.decodeBase64LenientWhitespace(encodedData)
+        } catch (e: IllegalArgumentException) {
             throw KdbxCorruptFileException("CustomIcon Data Base64 损坏", e)
         }
         onDone(CustomIcon(uuid, data, iconName, lastModificationTime))
