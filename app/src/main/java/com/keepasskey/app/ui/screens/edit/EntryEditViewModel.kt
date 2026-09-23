@@ -9,6 +9,7 @@ import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.app.ui.model.UiMessage
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -18,6 +19,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.UUID
 import javax.inject.Inject
 import java.security.SecureRandom
@@ -153,6 +155,10 @@ class EntryEditViewModel @Inject constructor(
                 protectedFieldChars.putAll(loadedProtected.mapValues { (_, v) -> v.copyOf() })
                 _loadedProtectedFields.value = loadedProtected
                 _uiState.update { applyLoadedEntry(it, entry, password?.size ?: 0) }
+                // ISSUE-P2-286：载入既有条目时同步评估强度（编辑页与详情页同一真相源）
+                if (password != null && password.isNotEmpty()) {
+                    refreshPasswordEntropy(password)
+                }
             }
         }
     }
@@ -180,6 +186,32 @@ class EntryEditViewModel @Inject constructor(
         _loadedPassword.value?.fill('0')
         _loadedPassword.value = null
         _uiState.update { it.copy(passwordLength = passwordChars.size, isDirty = true) }
+        refreshPasswordEntropy(password)
+    }
+
+    /**
+     * ISSUE-P2-286 AC①：编辑页强度条的真实熵（crypto 内核 `guessesLog10`，与详情页同一实现
+     * `PasswordEntropyEstimator`——三屏收敛单一真相源，替代已退役的「长度 × 4.5」启发式）。
+     * CPU 热路径下沉 `Dispatchers.Default`（§3 规则 2）；评估副本用毕即擦，明文不进状态流；
+     * [entropySeq] 保证快速连续输入下只采纳最后一次评估（防乱序回写）。
+     */
+    private var entropySeq = 0L
+
+    private fun refreshPasswordEntropy(password: CharArray) {
+        val seq = ++entropySeq
+        val evalCopy = password.copyOf()
+        viewModelScope.launch {
+            val bits = withContext(Dispatchers.Default) {
+                try {
+                    com.keepasskey.app.ui.screens.detail.PasswordEntropyEstimator.estimateBits(evalCopy)
+                } finally {
+                    evalCopy.fill('0')
+                }
+            }
+            _uiState.update {
+                if (seq == entropySeq) it.copy(passwordEntropyBits = bits) else it
+            }
+        }
     }
 
     // TASK-15：标准图标与自定义图标互斥——选标准图标即清除自定义引用

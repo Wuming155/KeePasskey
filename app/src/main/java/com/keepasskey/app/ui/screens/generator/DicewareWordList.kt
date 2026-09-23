@@ -264,6 +264,9 @@ object PasswordGenerationEngine {
         "zero", "zone", "zoo"
     )
 
+    /** 词表规模（熵模型与用例的单一来源；词表本体保持私有）。 */
+    val DICEWARE_WORD_COUNT: Int = DICEWARE_WORDS.size
+
     // 字符集常量定义 (遵循工程规范杜绝魔法字符串)
     const val CHARS_UPPER = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
     const val CHARS_LOWER = "abcdefghijklmnopqrstuvwxyz"
@@ -325,7 +328,8 @@ object PasswordGenerationEngine {
         }.toMutableList()
 
         if (includeNumber) {
-            val randomNum = secureRandom.nextInt(90) + 10
+            // ISSUE-P2-286：取值域与熵模型单一来源（PASSPHRASE_NUMBER_RANGE）
+            val randomNum = secureRandom.nextInt(PASSPHRASE_NUMBER_RANGE) + 10
             selectedWords[selectedWords.lastIndex] = selectedWords.last() + randomNum
         }
 
@@ -391,18 +395,32 @@ object PasswordGenerationEngine {
 
     /**
      * 计算密码熵值 (Entropy Bits)。
-     * ISSUE-P2-12：改为字符数组实现，调用方可直接消费 CharArray 而不物化 String。
+     *
+     * `ISSUE-P2-286` AC①：委托 crypto 侧强度内核的 `guessesLog10`（**单一真相源**，
+     * 与详情页 `PasswordEntropyEstimator` 同一实现）——原「长度 × log2(观测字符集)」
+     * 代理模型已退役（`poolSize += 30` 对实长 26 的 `CHARS_SYMBOLS` 每字符虚增 +4，
+     * 默认随机密码读数虚高约 3 倍）。字符数组入口不物化 String（ISSUE-P2-12 语义不变）。
+     * 内核不可用（评估失败）时返回 0.0——由 UI 隐藏强度条，绝不谎报。
      */
-    fun calculateEntropy(password: CharArray): Double {
-        if (password.isEmpty()) return 0.0
-        var poolSize = 0
-        if (password.any { it in CHARS_LOWER }) poolSize += 26
-        if (password.any { it in CHARS_UPPER }) poolSize += 26
-        if (password.any { it in CHARS_DIGITS }) poolSize += 10
-        if (password.any { it in CHARS_SYMBOLS }) poolSize += 30
-        if (poolSize == 0) poolSize = 26
+    fun calculateEntropy(password: CharArray): Double =
+        com.keepasskey.app.ui.screens.detail.PasswordEntropyEstimator.estimateBits(password)?.toDouble() ?: 0.0
 
-        val bitsPerChar = kotlin.math.log2(poolSize.toDouble())
-        return password.size * bitsPerChar
+    /**
+     * `ISSUE-P2-286` AC②：Diceware 口令短语的熵模型——
+     * **词数 × log2(词表) + 变形位**（禁「字符集 × 长度」代理）。
+     *
+     * 变形位口径（与 [generatePassphrase] 的实际随机面逐项对齐）：
+     * - `includeNumber`：末词追加 `10..99` 的随机数 ⇒ `log2(90)` 位；
+     * - `capitalize`：**确定性**首字母大写（非逐词随机）⇒ 0 位；
+     * - `separator`：用户在界面选定的固定串（非每代随机）⇒ 0 位。
+     */
+    fun passphraseEntropyBits(wordCount: Int, includeNumber: Boolean): Int {
+        if (wordCount <= 0) return 0
+        val wordsBits = wordCount * kotlin.math.log2(DICEWARE_WORD_COUNT.toDouble())
+        val numberBits = if (includeNumber) kotlin.math.log2(PASSPHRASE_NUMBER_RANGE.toDouble()) else 0.0
+        return (wordsBits + numberBits).toInt()
     }
+
+    /** [generatePassphrase] 的数字变形取值域大小（`nextInt(90) + 10`，单一来源，禁魔法数）。 */
+    private const val PASSPHRASE_NUMBER_RANGE = 90
 }

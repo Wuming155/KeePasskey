@@ -90,15 +90,35 @@ class PasswordGenerationEngineTest {
     }
 
     @Test
-    fun `熵值计算直接消费 CharArray`() {
+    fun `熵值计算直接消费 CharArray 且与详情页同一真相源（ISSUE-P2-286 AC①④）`() {
         val chars = "abcd".toCharArray()
         try {
             val bits = PasswordGenerationEngine.calculateEntropy(chars)
-            // 纯小写字符集 → log2(26) 每字符
-            assertEquals(4 * kotlin.math.log2(26.0), bits, 0.0001)
+            // 字符集代理模型已退役：读数 = crypto 内核 guessesLog10（与详情页同一实现）。
+            // 一致性（AC④）：同一输入经生成器路径与详情页路径读数必须完全一致
+            val detailBits = com.keepasskey.app.ui.screens.detail.PasswordEntropyEstimator
+                .estimateBits(chars)?.toDouble()
+            assertEquals("生成器与详情页读数必须一致（单一真相源）", detailBits, bits)
+            // 旧代理模型的读数（4 × log2(26) ≈ 18.8）必须不再复现
+            assertTrue(
+                "旧「字符集 × 长度」代理读数必须不再复现: $bits",
+                kotlin.math.abs(bits - 4 * kotlin.math.log2(26.0)) > 0.0001
+            )
         } finally {
             chars.fill('0')
         }
+    }
+
+    @Test
+    fun `口令短语熵模型：词数乘 log2 词表加变形位（ISSUE-P2-286 AC②③）`() {
+        // 词表规模钉死（模型的基数来源，词表变更须同步重估）
+        assertEquals(2011, PasswordGenerationEngine.DICEWARE_WORD_COUNT)
+        // 4 词 + 数字变形：4 × log2(2011) + log2(90) ≈ 50.39
+        assertEquals(50, PasswordGenerationEngine.passphraseEntropyBits(wordCount = 4, includeNumber = true))
+        // 无数字变形：4 × log2(2011) ≈ 43.89
+        assertEquals(43, PasswordGenerationEngine.passphraseEntropyBits(wordCount = 4, includeNumber = false))
+        // 边界：0 词恒 0
+        assertEquals(0, PasswordGenerationEngine.passphraseEntropyBits(wordCount = 0, includeNumber = true))
     }
 
     @Test

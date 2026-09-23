@@ -28,6 +28,12 @@ data class EntryEditUiState(
     val username: String = "",
     /** 密码长度（非敏感元数据，用于强度条）；密码明文本身经 ViewModel CharArray 链路 */
     val passwordLength: Int = 0,
+    /**
+     * ISSUE-P2-286 AC①：密码真实熵位数（crypto 内核 `guessesLog10`，与详情页同一实现；
+     * null = 未评估 / 评估不可用，强度条隐藏）。熵由 ViewModel 在 `Dispatchers.Default`
+     * 按最新输入异步评估——密码明文不回流本状态类（铁律不变）。
+     */
+    val passwordEntropyBits: Int? = null,
     val url: String = "",
     val notes: String = "",
     val isPasskey: Boolean = false,

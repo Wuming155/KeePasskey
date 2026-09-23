@@ -1,15 +1,19 @@
 package com.keepasskey.app.ui.screens.generator
 
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
 import com.keepasskey.app.R
 import com.keepasskey.app.security.ClipboardSecurityChannel
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.core.security.ProtectedString
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 @HiltViewModel
@@ -101,15 +105,20 @@ class GeneratorViewModel @Inject constructor(
 
     fun selectHistoryPassword(password: ProtectedString) {
         // ISSUE-P2-12：熵值计算走字符数组通道，不把种子物化为额外 String
-        val entropy = password.useChars { PasswordGenerationEngine.calculateEntropy(it).toInt() }
-        _uiState.update { current ->
-            // 被替换的当前值若未被历史引用则显式擦除（历史项仍是同一实例，不能误清）
-            val previous = current.currentPassword
-            if (current.history.none { it === previous }) previous.clear()
-            current.copy(
-                currentPassword = password,
-                entropyBits = entropy
-            )
+        // ISSUE-P2-286：强度内核为 CPU 热路径，评估段下沉 Dispatchers.Default（§3 规则 2）
+        viewModelScope.launch {
+            val entropy = withContext(Dispatchers.Default) {
+                password.useChars { PasswordGenerationEngine.calculateEntropy(it).toInt() }
+            }
+            _uiState.update { current ->
+                // 被替换的当前值若未被历史引用则显式擦除（历史项仍是同一实例，不能误清）
+                val previous = current.currentPassword
+                if (current.history.none { it === previous }) previous.clear()
+                current.copy(
+                    currentPassword = password,
+                    entropyBits = entropy
+                )
+            }
         }
     }
 
@@ -138,59 +147,71 @@ class GeneratorViewModel @Inject constructor(
 
     private fun generateNewPassword() {
         val currentState = _uiState.value
-        // ISSUE-P2-16：引擎返回 CharArray 独占副本（生成瞬间不再物化不可擦 String）。
-        // 熵值计算与 ProtectedString 密封复用同一副本，密封完成（内部已加密/拷贝）后立即清零。
-        val newPasswordChars = when (currentState.mode) {
-            GeneratorMode.RANDOM -> {
-                PasswordGenerationEngine.generateRandomPassword(
-                    length = currentState.randomLength,
-                    useUpper = currentState.useUpper,
-                    useLower = currentState.useLower,
-                    useDigits = currentState.useDigits,
-                    useSymbols = currentState.useSymbols,
-                    excludeAmbiguous = currentState.excludeAmbiguous
-                )
-            }
-            GeneratorMode.PASSPHRASE -> {
-                PasswordGenerationEngine.generatePassphrase(
-                    wordCount = currentState.wordCount,
-                    separator = currentState.separator,
-                    capitalize = currentState.capitalizeWords,
-                    includeNumber = currentState.includeNumberInPassphrase
-                )
-            }
-            GeneratorMode.MASK -> {
-                PasswordGenerationEngine.generateMaskedPassword(
-                    mask = currentState.maskPattern
-                )
-            }
-        }
+        // ISSUE-P2-286：强度内核评估（CPU 热路径）与生成一并下沉 Dispatchers.Default（§3 规则 2）；
+        // 熵读数收敛单一真相源：随机 / 掩码走 crypto 内核（calculateEntropy），
+        // 口令短语走「词数 × log2(词表) + 变形位」模型（passphraseEntropyBits，AC②）
+        viewModelScope.launch {
+            val (newSecret, entropy) = withContext(Dispatchers.Default) {
+                // ISSUE-P2-16：引擎返回 CharArray 独占副本（生成瞬间不再物化不可擦 String）。
+                // 熵值计算与 ProtectedString 密封复用同一副本，密封完成（内部已加密/拷贝）后立即清零。
+                val newPasswordChars = when (currentState.mode) {
+                    GeneratorMode.RANDOM -> {
+                        PasswordGenerationEngine.generateRandomPassword(
+                            length = currentState.randomLength,
+                            useUpper = currentState.useUpper,
+                            useLower = currentState.useLower,
+                            useDigits = currentState.useDigits,
+                            useSymbols = currentState.useSymbols,
+                            excludeAmbiguous = currentState.excludeAmbiguous
+                        )
+                    }
+                    GeneratorMode.PASSPHRASE -> {
+                        PasswordGenerationEngine.generatePassphrase(
+                            wordCount = currentState.wordCount,
+                            separator = currentState.separator,
+                            capitalize = currentState.capitalizeWords,
+                            includeNumber = currentState.includeNumberInPassphrase
+                        )
+                    }
+                    GeneratorMode.MASK -> {
+                        PasswordGenerationEngine.generateMaskedPassword(
+                            mask = currentState.maskPattern
+                        )
+                    }
+                }
 
-        var entropy = 0
-        val newSecret = try {
-            entropy = PasswordGenerationEngine.calculateEntropy(newPasswordChars).toInt()
-            ProtectedString(newPasswordChars, isProtected = true)
-        } finally {
-            newPasswordChars.fill('0')
-        }
-
-        _uiState.update { current ->
-            val previous = current.currentPassword
-            val unchanged = previous.length > 0 && previous == newSecret
-            val historyWithPrevious = if (previous.length > 0 && !unchanged) {
-                listOf(previous) + current.history
-            } else {
-                current.history
+                try {
+                    val bits = when (currentState.mode) {
+                        GeneratorMode.PASSPHRASE -> PasswordGenerationEngine.passphraseEntropyBits(
+                            wordCount = currentState.wordCount,
+                            includeNumber = currentState.includeNumberInPassphrase
+                        )
+                        else -> PasswordGenerationEngine.calculateEntropy(newPasswordChars).toInt()
+                    }
+                    ProtectedString(newPasswordChars, isProtected = true) to bits
+                } finally {
+                    newPasswordChars.fill('0')
+                }
             }
-            val keptHistory = historyWithPrevious.take(MAX_HISTORY_SIZE)
-            // 淘汰项与未被引用的旧当前值显式清零
-            historyWithPrevious.drop(MAX_HISTORY_SIZE).forEach { it.clear() }
-            if (keptHistory.none { it === previous }) previous.clear()
-            current.copy(
-                currentPassword = newSecret,
-                entropyBits = entropy,
-                history = keptHistory
-            )
+
+            _uiState.update { current ->
+                val previous = current.currentPassword
+                val unchanged = previous.length > 0 && previous == newSecret
+                val historyWithPrevious = if (previous.length > 0 && !unchanged) {
+                    listOf(previous) + current.history
+                } else {
+                    current.history
+                }
+                val keptHistory = historyWithPrevious.take(MAX_HISTORY_SIZE)
+                // 淘汰项与未被引用的旧当前值显式清零
+                historyWithPrevious.drop(MAX_HISTORY_SIZE).forEach { it.clear() }
+                if (keptHistory.none { it === previous }) previous.clear()
+                current.copy(
+                    currentPassword = newSecret,
+                    entropyBits = entropy,
+                    history = keptHistory
+                )
+            }
         }
     }
 

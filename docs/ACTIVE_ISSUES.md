@@ -41,16 +41,7 @@
 
 ---
 
-## P2 中危缺陷与协议/测试缺口（6 项）
-
-### ISSUE-P2-286：口令生成器熵读数虚高约 3 倍，且全站三套熵模型并存——同一口令三屏三数
-
-- **核实时间点**：2026-09-23 经算式复算与模型清点。
-- **核实方式**：`app/.../ui/screens/generator/DicewareWordList.kt:396-407` 以「长度 × log2(观测字符集)」估算；词表实测 **2011** 词，默认口令短语（`wordCount=4` / `capitalize` / `includeNumber` / `separator="-"`）读数 **195.7 位**，真熵 ≈ **54 位**（`4·log2(2011) + log2(90) + 首字母位`）；`:402` 的 `poolSize += 30` 对实长 **26** 的 `CHARS_SYMBOLS`（`:271`）是每字符 +4 的虚增，且按输出中出现的类别判定；`components/SecurityBadge.kt:78` 的 ≥96 档直判「极强」。第二套：`EntryEditFormSections.kt:298` 的 `PASSWORD_BITS_PER_CHAR = 4.5`（`:365`）；第三套：详情页 `detail/PasswordEntropyEstimator.kt:30-49` 调 Rust 真实熵内核。三套共用同一 `PasswordStrengthBar`。文案 `strings.xml:341-344 generator_strength_*` **无任何「理论上限 / 字符集熵」限定**；`PasswordGenerationEngineTest.kt:93-101` 反把字符集模型钉成期望值，无「生成器 = 详情页」对拍。
-- **涉及文件**：`app/src/main/java/com/keepasskey/app/ui/screens/generator/DicewareWordList.kt`、`app/src/main/java/com/keepasskey/app/ui/screens/generator/GeneratorViewModel.kt`（`:169-175`）、`app/src/main/java/com/keepasskey/app/ui/screens/edit/EntryEditFormSections.kt`、`app/src/main/java/com/keepasskey/app/ui/components/SecurityBadge.kt`。
-- **验收标准**：AC① 熵读数**收敛为单一真相源**（走 crypto 侧强度内核的 `guessesLog10`），禁 UI 层自算；AC② 口令短语按「词数 × log2(词表) + 变形位」建模，禁「字符集 × 长度」代理；AC③ `poolSize` 与真实符号集常量绑定（单一来源），禁 `+30` 魔法数；AC④ 一致性用例：同一输出在生成器 / 编辑页 / 详情页读数**一致**（含短语模式）；AC⑤ 既有字符集模型用例只可改期望、不得删除（测试资产纪律 ①）。
-
----
+## P2 中危缺陷与协议/测试缺口（5 项）
 
 ### ISSUE-P2-287：会话锁定后口令生成器仍在屏上显示旧明文，点复制抛 `IllegalStateException`
 

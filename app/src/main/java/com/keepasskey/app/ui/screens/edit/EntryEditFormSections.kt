@@ -294,8 +294,10 @@ internal fun ColumnScope.EntryEditAccountSection(
             )
 
             if (uiState.passwordLength > 0) {
+                // ISSUE-P2-286 AC①：真实熵（crypto 内核 guessesLog10，与详情页同一实现），
+                // 替代已退役的「长度 × 4.5」启发式；未评估 / 不可用时由强度条自行隐藏
                 PasswordStrengthBar(
-                    entropyBits = (uiState.passwordLength * PASSWORD_BITS_PER_CHAR).toInt(),
+                    entropyBits = uiState.passwordEntropyBits,
                     modifier = Modifier.fillMaxWidth()
                 )
             }
@@ -354,12 +356,3 @@ internal fun ColumnScope.EntryEditNotesSection(
     }
 }
 
-/**
- * 编辑页强度条的**长度启发式**系数（每字符约 4.5 bit）。
- *
- * ISSUE-P3-31 批次 C：原为 `EntryEditScreen.kt` 内的裸字面量 `4.5`，搬出时按工程规则
- * 「禁止魔法数字」具名化。**数值与语义未变**：此处刻意只用长度估算，
- * 因为编辑页的密码明文按敏感数据铁律不回流到 UI 状态（只有 `passwordLength`），
- * 故这里不是、也不应是真实熵；详情页的真实熵评估见 `EntryDetailViewModel`。
- */
-private const val PASSWORD_BITS_PER_CHAR = 4.5
