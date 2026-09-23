@@ -41,17 +41,7 @@
 
 ---
 
-## P2 中危缺陷与协议/测试缺口（12 项）
-
-### ISSUE-P2-279：条目 / 分组合并的「判修改集」≠「实际合并集」，图标与覆写 URL 改动静默丢失且不报冲突
-
-- **核实时间点**：2026-09-23 经字段集逐项比对（已核对 `PD-20` / 限界 §10 不覆盖本面，故非既有裁决）。
-- **核实方式**：`sync/.../merge/KdbxEntryMerger.kt:109-123` 的 `isModified` 判定含 `iconId` / `customIconId` / `overrideUrl` / `qualityCheck`，而 `:179-187` 的 `copy` 重建未合并这些字段；`diffFields` 仅由 `mergeStandardFields` / `mergeCustomFields` 填充（`:213-289`）⇒ 这些字段**永不进冲突清单**，无「交用户裁决」退路。分组同型：`KdbxGroupMerger.kt:210-218` 判 `customIconId`、`:261-267` 未合并。可达性：条目侧本仓确有写入者（`app/.../data/repository/VaultEntryWriteCoordinator.kt:80-84` 改 `iconId` / `customIconId` / `overrideUrl`）；分组侧本仓无 `customIconId` 写入者（`VaultGroupCoordinator.kt:69-79` 只设 `iconId`）⇒ 需他端改组图标方可达。sync 测试对 icon 零断言。
-- **对照（已开源码核实）**：KXC `Entry.cpp:971-1011` 的 `calculateDifference` 逐字段（含 Icon / Color / Expiration / Custom Attributes）列差异供人裁决——注意它是**给人看的清单**，其实际裁决为整条 LWW + 历史归档（`Merger.cpp:440-476`），故不得援引为「参考实现逐字段合并图标」。
-- **涉及文件**：`sync/src/main/java/com/keepasskey/sync/merge/KdbxEntryMerger.kt`、`sync/src/main/java/com/keepasskey/sync/merge/KdbxGroupMerger.kt`。
-- **验收标准**：AC① 判定集 / 合并集 / 上报集由**同一词汇表**驱动，禁手写两份清单；AC② 无法自动裁决的字段须进冲突清单或按 LWW 明确裁决并在 `modifiedFields` 留痕；AC③ `qualityCheck` 本仓无写入者（仅序列化写 / 分组读）⇒ 在正文或限界表写明适用范围，禁「判定含它但永不产生」的空转；AC④ 用例：双侧各改不同图标字段，断言不丢且不静默。
-
----
+## P2 中危缺陷与协议/测试缺口（11 项）
 
 ### ISSUE-P2-280：Meta 完全不参与合并 ⇒ 对端新增自定义图标变成悬空 `CustomIconRef`，库级配置恒取本地
 

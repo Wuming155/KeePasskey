@@ -207,16 +207,38 @@ internal object KdbxGroupMerger {
         return assembleGroup(rootId)
     }
 
+    /**
+     * ISSUE-P2-279：分组标量字段的**单一词汇表**——[isGroupModified] 的判修改集与
+     * [mergeGroupsBothModified] 的实际合并集由本表驱动，禁止两处各写一份字段清单。
+     * 此前 `customIconId` 判定进修改集却不进合并集（`local.copy` 原样保留本地值）⇒
+     * 他端改分组图标后同步回本端时静默丢失（本仓无分组 `customIconId` 写入者，
+     * 需 KeePassXC / 官方桌面端改组图标方可达，核实见条目正文）。
+     */
+    private class GroupFieldSpec(
+        val read: (KdbxGroup) -> Any?,
+        val write: (KdbxGroup, Any?) -> KdbxGroup
+    )
+
+    private val MERGED_GROUP_FIELDS: List<GroupFieldSpec> = listOf(
+        GroupFieldSpec({ it.name }, { g, v -> g.copy(name = v as String) }),
+        GroupFieldSpec({ it.notes }, { g, v -> g.copy(notes = v as String) }),
+        GroupFieldSpec({ it.iconId }, { g, v -> g.copy(iconId = v as Int) }),
+        GroupFieldSpec({ it.customIconId }, { g, v -> g.copy(customIconId = v as KdbxUuid?) }),
+        GroupFieldSpec({ it.parentGroupId }, { g, v -> g.copy(parentGroupId = v as KdbxUuid?) })
+    )
+
     private fun isGroupModified(base: KdbxGroup?, current: KdbxGroup): Boolean {
         if (base == null) return true
-        return base.name != current.name ||
-                base.notes != current.notes ||
-                base.iconId != current.iconId ||
-                base.customIconId != current.customIconId ||
-                base.parentGroupId != current.parentGroupId ||
+        // ISSUE-P2-279：判定与合并共用同一词汇表（禁两份清单）
+        return MERGED_GROUP_FIELDS.any { it.read(base) != it.read(current) } ||
                 base.times.lastModificationTime != current.times.lastModificationTime
     }
 
+    /**
+     * 双方均修改时的分组字段级合并：逐字段三方裁决——单侧变更取该侧，双侧同值取本地，
+     * 双侧异值按最后修改时间（LWW）取胜方；时间戳取较晚者。
+     * 词汇表见 [MERGED_GROUP_FIELDS]（ISSUE-P2-279 起含 `customIconId`）。
+     */
     private fun mergeGroupsBothModified(
         base: KdbxGroup?,
         local: KdbxGroup,
@@ -225,45 +247,21 @@ internal object KdbxGroupMerger {
         val lTime = local.times.lastModificationTime
         val rTime = remote.times.lastModificationTime
 
-        val bName = base?.name
-        val name = when {
-            local.name != bName && remote.name == bName -> local.name
-            local.name == bName && remote.name != bName -> remote.name
-            local.name == remote.name -> local.name
-            else -> if (rTime.isAfter(lTime)) remote.name else local.name
-        }
-
-        val bNotes = base?.notes
-        val notes = when {
-            local.notes != bNotes && remote.notes == bNotes -> local.notes
-            local.notes == bNotes && remote.notes != bNotes -> remote.notes
-            local.notes == remote.notes -> local.notes
-            else -> if (rTime.isAfter(lTime)) remote.notes else local.notes
-        }
-
-        val bIconId = base?.iconId
-        val iconId = when {
-            local.iconId != bIconId && remote.iconId == bIconId -> local.iconId
-            local.iconId == bIconId && remote.iconId != bIconId -> remote.iconId
-            else -> if (rTime.isAfter(lTime)) remote.iconId else local.iconId
-        }
-
-        val bParent = base?.parentGroupId
-        val parentGroupId = when {
-            local.parentGroupId != bParent && remote.parentGroupId == bParent -> local.parentGroupId
-            local.parentGroupId == bParent && remote.parentGroupId != bParent -> remote.parentGroupId
-            else -> if (rTime.isAfter(lTime)) remote.parentGroupId else local.parentGroupId
+        var merged = local
+        for (spec in MERGED_GROUP_FIELDS) {
+            val bv = base?.let(spec.read)
+            val lv = spec.read(local)
+            val rv = spec.read(remote)
+            val winner = when {
+                lv != bv && rv == bv -> lv
+                lv == bv && rv != bv -> rv
+                lv == rv -> lv
+                else -> if (rTime.isAfter(lTime)) rv else lv
+            }
+            merged = spec.write(merged, winner)
         }
 
         val maxMod = if (rTime.isAfter(lTime)) rTime else lTime
-        val mergedTimes = local.times.copy(lastModificationTime = maxMod)
-
-        return local.copy(
-            name = name,
-            notes = notes,
-            iconId = iconId,
-            parentGroupId = parentGroupId,
-            times = mergedTimes
-        )
+        return merged.copy(times = local.times.copy(lastModificationTime = maxMod))
     }
 }

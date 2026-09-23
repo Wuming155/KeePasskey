@@ -18,6 +18,39 @@ import com.keepasskey.core.security.ProtectedString
 internal object KdbxEntryMerger {
 
     /**
+     * ISSUE-P2-279：标量字段的**单一词汇表**——[isModified] 的判修改集、
+     * [mergeConflictedEntry] 的实际合并集与 `diffFields` 上报集一律由本表驱动，
+     * 禁止在多处各写一份字段清单。此前图标 / 覆写 URL / 质量检查判定进修改集，
+     * 却不进合并集（`local.copy` 原样保留本地值）与冲突清单 ⇒ 远端改动静默丢失。
+     *
+     * 字段口径：
+     * - `iconId` / `customIconId` / `overrideUrl`：本仓有真实写入者
+     *   （`VaultEntryWriteCoordinator` / `VaultGroupCoordinator`），跨端合并必须生效；
+     * - `qualityCheck`：本仓**无写入者**（仅序列化写出 / 健康检查读取，AC③ 适用范围声明）——
+     *   保留在词汇表内是为合并 KeePassXC / 官方桌面端产生的改动（对端关闭某条目质量检查后
+     *   同步回本端），非「判定含它但永不产生」的空转。
+     *
+     * 类型安全：每条的 `read` / `write` 绑定同一字段，泛型擦除点（`Any?`）的转型
+     * 只在 `write` 闭包内发生，由词汇表自身保证不错位。
+     */
+    private class ScalarFieldSpec(
+        val displayName: String,
+        val read: (KdbxEntry) -> Any?,
+        val write: (KdbxEntry, Any?) -> KdbxEntry
+    )
+
+    private val MERGED_SCALAR_FIELDS: List<ScalarFieldSpec> = listOf(
+        ScalarFieldSpec("图标 (Icon)", { it.iconId }, { e, v -> e.copy(iconId = v as Int) }),
+        ScalarFieldSpec(
+            "自定义图标 (CustomIcon)",
+            { it.customIconId },
+            { e, v -> e.copy(customIconId = v as KdbxUuid?) }
+        ),
+        ScalarFieldSpec("覆写 URL (OverrideUrl)", { it.overrideUrl }, { e, v -> e.copy(overrideUrl = v as String?) }),
+        ScalarFieldSpec("质量检查 (QualityCheck)", { it.qualityCheck }, { e, v -> e.copy(qualityCheck = v as Boolean) })
+    )
+
+    /**
      * 按 UUID 逐条目裁决三方存活集合，并汇总同字段分歧的冲突清单。
      *
      * 返回 `(survivingEntries, conflicts)`，语义与拆分前 `KdbxMerger.mergeDatabases` 内联分支逐字一致。
@@ -115,9 +148,8 @@ internal object KdbxEntryMerger {
         if (base.tags != current.tags) return true
         if (base.attachments != current.attachments) return true
         if (base.parentGroupId != current.parentGroupId) return true
-        if (base.overrideUrl != current.overrideUrl) return true
-        if (base.qualityCheck != current.qualityCheck) return true
-        if (base.iconId != current.iconId || base.customIconId != current.customIconId) return true
+        // ISSUE-P2-279：标量字段判定与合并共用同一词汇表（禁两份清单）
+        if (MERGED_SCALAR_FIELDS.any { it.read(base) != it.read(current) }) return true
         if (base.times.lastModificationTime != current.times.lastModificationTime) return true
         return false
     }
@@ -176,7 +208,7 @@ internal object KdbxEntryMerger {
             local.times.lastModificationTime
         }
 
-        val mergedEntry = local.copy(
+        val mergedEntry = mergeScalarFields(base, local, remote, diffFields).copy(
             fields = mergedFields,
             customFields = mergedCustomFields,
             tags = mergedTags,
@@ -187,6 +219,42 @@ internal object KdbxEntryMerger {
         )
 
         return Pair(mergedEntry, conflictPairOf(local, remote, diffFields))
+    }
+
+    /**
+     * ISSUE-P2-279：标量字段三方合并（判定 / 合并 / 上报同一词汇表 [MERGED_SCALAR_FIELDS] 驱动）。
+     *
+     * 单侧变更取该侧；双侧同值取本地；双侧异值**按 LWW 明确裁决**（与标准字段冲突的
+     * 取胜口径一致）并把字段名记入 [diffFields] 留痕——冲突清单由此覆盖图标 / 覆写 URL /
+     * 质量检查分歧，不再「判定为修改却静默丢远端值」。
+     *
+     * 以 `local` 为底版逐字段覆写取胜值；未变动的字段保持 `read(local)` 原值。
+     */
+    private fun mergeScalarFields(
+        base: KdbxEntry?,
+        local: KdbxEntry,
+        remote: KdbxEntry,
+        diffFields: MutableList<String>
+    ): KdbxEntry {
+        val lTime = local.times.lastModificationTime
+        val rTime = remote.times.lastModificationTime
+        var merged = local
+        for (spec in MERGED_SCALAR_FIELDS) {
+            val bv = base?.let(spec.read)
+            val lv = spec.read(local)
+            val rv = spec.read(remote)
+            val winner = when {
+                lv != bv && rv == bv -> lv
+                lv == bv && rv != bv -> rv
+                lv == rv -> lv
+                else -> {
+                    diffFields.add(spec.displayName)
+                    if (rTime.isAfter(lTime)) rv else lv
+                }
+            }
+            merged = spec.write(merged, winner)
+        }
+        return merged
     }
 
     /**
