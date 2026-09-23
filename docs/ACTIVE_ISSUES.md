@@ -37,26 +37,11 @@
 
 ## P1 高危与核心功能问题（0 项）
 
-> **历史归零留痕**（§246 曾闭环 `ISSUE-P1-241`（「移除密码库关联」的确认文案承诺「不会删除物理文件」，而应用私有库的文件**会被真的删除**）——整改＝确认弹窗文案与动作按**存储类型**分列两套、判据落纯函数并单点化、数据层只在「应用私有库」分支删物理文件（产品口径落 `PD-17`）；真机逐字实证「界面声明与文件系统结果一致」。证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md) 与
-> [`resolved/batches/246-移除密码库确认文案与真实行为一致批次.md`](resolved/batches/246-移除密码库确认文案与真实行为一致批次.md)。）
->
-> **§273 闭环 `ISSUE-P1-276`**（附件引用预算把自产与合法第三方库判为「引用放大攻击」，**整库无法打开**）——整改＝计费口径按**去重 `refIndex`**重定（旧判据 `Σᵢ nᵢ·sᵢ > 2·Σⱼ sⱼ + 1 MiB` 的受害区间 `(512 KiB, 1 MiB]` 已消除），拦截改由「单条目引用次数 ≤ 1024」「单条目物化字节 ≤ 64 MiB」两道 live 判据承担，旧整库字节式保留为记账不变量；`database` 层 9 例守卫（含官方 CLI 产出 fixture 与「1 MiB 附件 + 3 条历史」真实往返），判别力实验以旧口径复现 6 例红；残余面（分散引用的放大上限）登记 [`architecture/已知工程限界.md`](architecture/已知工程限界.md) **§29**。证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md) 与
-> [`resolved/batches/273-附件池引用计费重定口径批次.md`](resolved/batches/273-附件池引用计费重定口径批次.md)。
+> **暂无开放项**。
 
 ---
 
 ## P2 中危缺陷与协议/测试缺口（13 项）
-
-> **历史归零留痕**（§271 曾闭环 `ISSUE-P2-271`（加密算法 / KDF 算法选择器假开关——对话框只改 UI 回显，库文件头未变）——整改＝两个选择器经 `CipherLabels` 词汇表反查算法 ID 后经 `updateDatabaseMeta` 写 `KdbxHeader.cipherUuid` / `kdfParameters` + `save()` 真实落库，换 KDF 变体补齐目标变体所需参数（Argon2 换型携带 I·M·P、AES-KDF 补官方缺省 rounds）、回显改单一真相源（init 头映射通道统一下发）；`app` 层 6 例 + `:database:` 层 5 例守卫锁定「选择 → 文件头真实变化 → 解锁成功」闭环；官方 keepassxc-cli 2.7.12 端到端对拍本仓产物报「Twofish 256 位 / Argon2d」实证。证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md) 与
-> [`resolved/batches/271-算法选择器真实落库批次.md`](resolved/batches/271-算法选择器真实落库批次.md)。）
->
-> **§274 闭环 `ISSUE-P2-277`**（同步周期装配段在主线程做 Keystore 解密、整库密文读写与全库比较——该类 KDoc 与实况相反）——整改＝装配段在**调用处整体包裹**下沉 `Dispatchers.IO`，单点覆盖凭据解密 / 整库缓存读 / 全库逐字段比较 / tmp 写 + `fd.sync()` 四类且抗后续新增 IO 回归；类 KDoc 调度边界段改与实况对齐（点明「装配段**绕开** `SyncEngine` 直调 `SyncCache`，引擎内的 IO 兜底覆盖不到它」）；新增「主线程零 IO」守卫 1 例（五类探针 + 栈归因 + 非空性断言——判别力实验：撤销下沉后五类探针全落主线程基准即红，恢复即绿）。残余（`runSyncCycle` 步骤 3 的 `isCached` 统计仍在调用方线程）如实登记于批次正文。证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md) 与
-> [`resolved/batches/274-同步周期装配段下沉IO批次.md`](resolved/batches/274-同步周期装配段下沉IO批次.md)。）
->
-> **§276 闭环 `ISSUE-P2-283`**（自定义图标 `<Data>` 用严格 Base64 解码，折行合法库整库判损坏）——整改＝`IconNode.end()` 复用既有 `KdbxXmlValueUtil.decodeBase64LenientWhitespace`（与 D19 受保护串 / 内联附件同口径，禁再造一份），失败仍 `KdbxCorruptFileException` 不降级；全仓清点其余 `Base64.getDecoder()` 调用点均非同类误拒面。新增 5 例（76 列折行打开 + 字节与渲染输入一致 / 往返 / 混合空白 / 非法仍拒 / 接线守卫）+ 互操作探针 1 例；keepassxc-cli 2.7.12 打开本仓含图标产物。**如实标注**：真实第三方折行样本读侧对拍未执行（残余已登记限界表 **§30**）。证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md) 与
-> [`resolved/batches/276-自定义图标Base64宽松解码批次.md`](resolved/batches/276-自定义图标Base64宽松解码批次.md)。）
-
----
 
 ### ISSUE-P2-278：同步周期起点之后的本地编辑被「远端整库接管」静默覆盖（写路径不参与本周期互斥）
 

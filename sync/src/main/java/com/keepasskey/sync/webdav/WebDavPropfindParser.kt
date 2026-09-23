@@ -214,8 +214,11 @@ internal object WebDavPropfindParser {
             try {
                 val date = sdf.parse(dateStr)
                 if (date != null) return date.time
-            } catch (_: Exception) {}
+            } catch (e: Exception) {
+                AppLog.d(TAG, "HTTP 日期格式不匹配，尝试下一格式: ${e.javaClass.simpleName}")
+            }
         }
+        AppLog.w(TAG, "HTTP 日期无法解析为任何已知格式，按 0 处理")
         return 0L
     }
 }

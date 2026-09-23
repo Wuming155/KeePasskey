@@ -6,6 +6,7 @@ import android.provider.OpenableColumns
 import com.keepasskey.app.R
 import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.app.ui.model.VaultDatabaseInfo
+import com.keepasskey.core.log.AppLog
 import com.keepasskey.database.session.DatabaseSession
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -54,7 +55,8 @@ internal class VaultDatabaseCatalog(
                     )
                 } else null
             }
-        } catch (_: Throwable) {
+        } catch (t: Throwable) {
+            AppLog.w(TAG, "读取已知密码库列表失败，按空列表回落", t)
             emptyList()
         }
     }
@@ -73,7 +75,8 @@ internal class VaultDatabaseCatalog(
                 ).joinToString(FIELD_SEPARATOR)
             }
             sp.edit().putString(KEY_KNOWN_DATABASES, encoded).apply()
-        } catch (_: Throwable) {
+        } catch (t: Throwable) {
+            AppLog.w(TAG, "写入已知密码库列表失败（条目数=${entries.size}）", t)
         }
     }
 
@@ -81,7 +84,8 @@ internal class VaultDatabaseCatalog(
         return try {
             context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
                 ?.getString(KEY_ACTIVE_DATABASE_ID, null)
-        } catch (_: Throwable) {
+        } catch (t: Throwable) {
+            AppLog.w(TAG, "读取活动库 ID 失败，按未知处理", t)
             null
         }
     }
@@ -94,7 +98,8 @@ internal class VaultDatabaseCatalog(
             } else {
                 sp.edit().putString(KEY_ACTIVE_DATABASE_ID, id).apply()
             }
-        } catch (_: Throwable) {
+        } catch (t: Throwable) {
+            AppLog.w(TAG, "写入活动库 ID 失败", t)
         }
     }
 
@@ -149,7 +154,8 @@ internal class VaultDatabaseCatalog(
                                 (cursor.getLong(sizeIndex) / 1024).coerceAtLeast(1)
                             } else null
                         } ?: 32L
-                    } catch (_: Throwable) {
+                    } catch (t: Throwable) {
+                        AppLog.w(TAG, "查询外部库大小失败，按缺省 32KB 回落", t)
                         32L
                     }
                 }
@@ -207,6 +213,7 @@ internal class VaultDatabaseCatalog(
     }
 
     private companion object {
+        const val TAG = "VaultDbCatalog"
         const val PREFS_NAME = "keepasskey_vault_meta"
         const val KEY_KNOWN_DATABASES = "known_databases_v1"
         const val KEY_ACTIVE_DATABASE_ID = "active_database_id"

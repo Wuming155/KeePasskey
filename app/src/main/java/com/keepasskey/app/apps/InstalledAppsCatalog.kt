@@ -7,6 +7,7 @@ import android.content.pm.ResolveInfo
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.core.graphics.drawable.toBitmap
+import com.keepasskey.core.log.AppLog
 
 /**
  * 已安装应用目录项（应用选择器的一行：应用名 + 包名 + 图标）。
@@ -36,6 +37,8 @@ data class InstalledAppOption(
  */
 object InstalledAppsCatalog {
 
+    private const val TAG = "InstalledApps"
+
     /** 图标解码目标边长（px）：选择器按 36~40dp 绘制，128px 已足以覆盖高密度屏 */
     private const val ICON_TARGET_PX = 128
 
@@ -50,8 +53,9 @@ object InstalledAppsCatalog {
         val launcherIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
         val resolved: List<ResolveInfo> = try {
             pm.queryIntentActivities(launcherIntent, 0)
-        } catch (_: Throwable) {
+        } catch (t: Throwable) {
             // 查询受限 / 系统异常：返回空列表，由调用方如实提示「未读取到应用」而不谎报
+            AppLog.w(TAG, "枚举可启动应用失败，返回空列表", t)
             return emptyList()
         }
 
@@ -109,11 +113,13 @@ object InstalledAppsCatalog {
                 label = label,
                 icon = try {
                     pm.getApplicationIcon(info).toBitmap(ICON_TARGET_PX, ICON_TARGET_PX).asImageBitmap()
-                } catch (_: Throwable) {
+                } catch (t: Throwable) {
+                    AppLog.w(TAG, "读取应用图标失败，回退占位图标", t)
                     null
                 }
             )
-        } catch (_: Throwable) {
+        } catch (t: Throwable) {
+            AppLog.w(TAG, "解析包名显示信息失败，如实回落为包名文本", t)
             null
         }
     }
@@ -128,14 +134,16 @@ object InstalledAppsCatalog {
             // PackageManager#loadLabel 在 compileSdk 37 上返回非空 CharSequence ⇒ 无需安全调用
             // （原 `?.` 是既有基线告警 `Unnecessary safe call on a non-null receiver` 的来源）。
             info.loadLabel(pm).toString().takeIf { it.isNotBlank() } ?: fallback
-        } catch (_: Throwable) {
+        } catch (t: Throwable) {
+            AppLog.w(TAG, "读取应用名失败，回落包名", t)
             fallback
         }
 
     private fun safeIcon(info: ResolveInfo, pm: PackageManager): ImageBitmap? =
         try {
             info.loadIcon(pm)?.toBitmap(ICON_TARGET_PX, ICON_TARGET_PX)?.asImageBitmap()
-        } catch (_: Throwable) {
+        } catch (t: Throwable) {
+            AppLog.w(TAG, "读取应用图标失败，回退占位图标", t)
             null
         }
 }
