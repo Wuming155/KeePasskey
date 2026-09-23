@@ -117,11 +117,13 @@ class VaultListViewModel @Inject constructor(
         scope = viewModelScope,
         strings = strings,
         clipboardSecurityManager = clipboardSecurityManager,
-        isReadOnly = { isReadOnlyFlow.value },
-        currentGroupId = { currentGroupIdFlow.value },
-        currentGroups = { uiState.value.currentGroups },
-        currentEntryIds = { uiState.value.entries.map { it.id } },
-        onMessage = { userMessageFlow.value = it }
+        host = VaultListActionHost(
+            isReadOnly = { isReadOnlyFlow.value },
+            currentGroupId = { currentGroupIdFlow.value },
+            currentGroups = { uiState.value.currentGroups },
+            currentEntryIds = { uiState.value.entries.map { it.id } },
+            onMessage = { userMessageFlow.value = it }
+        )
     )
 
     // ISSUE-P3-29：同步指示与下拉刷新编排
@@ -271,9 +273,11 @@ class VaultListViewModel @Inject constructor(
         batchSyncDecorationsFlow
     ) { (databases, allGroups), allEntries, settings, session, batchSyncDecorations ->
         buildVaultListUiState(
-            databases = databases,
-            allGroups = allGroups,
-            allEntries = allEntries,
+            library = VaultListLibraryState(
+                databases = databases,
+                allGroups = allGroups,
+                allEntries = allEntries
+            ),
             settings = settings,
             session = session,
             batchSyncDecorations = batchSyncDecorations

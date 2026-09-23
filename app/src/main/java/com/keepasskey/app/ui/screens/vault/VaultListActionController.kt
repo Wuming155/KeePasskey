@@ -25,19 +25,29 @@ import kotlinx.coroutines.launch
  *
  * 只读会话（H4）下 2 的写操作一律硬拒绝；`isReadOnly` / `currentGroupId` / `currentGroups` /
  * `currentEntryIds` 均以回调形式从 ViewModel 取当前快照，避免本类反向持有 ViewModel。
+ * §284：五条宿主回调收拢为 [VaultListActionHost]，摘除 `LongParameterList` 压制；行为零变化。
  */
-@Suppress("LongParameterList")
+/** 宿主快照回调集（§284 参数对象化；不反向持有 ViewModel） */
+internal data class VaultListActionHost(
+    val isReadOnly: () -> Boolean,
+    val currentGroupId: () -> String?,
+    val currentGroups: () -> List<VaultGroup>,
+    val currentEntryIds: () -> List<String>,
+    val onMessage: (UiMessage) -> Unit
+)
+
 internal class VaultListActionController(
     private val repository: VaultRepository,
     private val scope: CoroutineScope,
     private val strings: StringsProvider,
     private val clipboardSecurityManager: ClipboardSecurityManager?,
-    private val isReadOnly: () -> Boolean,
-    private val currentGroupId: () -> String?,
-    private val currentGroups: () -> List<VaultGroup>,
-    private val currentEntryIds: () -> List<String>,
-    private val onMessage: (UiMessage) -> Unit
+    private val host: VaultListActionHost
 ) {
+    private val isReadOnly get() = host.isReadOnly
+    private val currentGroupId get() = host.currentGroupId
+    private val currentGroups get() = host.currentGroups
+    private val currentEntryIds get() = host.currentEntryIds
+    private val onMessage get() = host.onMessage
 
     private val isBatchModeFlow = MutableStateFlow(false)
     private val selectedEntryIdsFlow = MutableStateFlow<Set<String>>(emptySet())

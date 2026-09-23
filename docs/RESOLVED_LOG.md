@@ -355,6 +355,8 @@
 
 | §283 | 复核一致性机检移植 Python 单源批次（**非**既有条目整改；触发＝2026-09-23 工程卫生「`check_recheck_consistency.sh` bash-only，PowerShell 不可直接跑」）：① 新建 `tools/audit/check_recheck_consistency.py` 为**逻辑单源**（11 条禁用短语 + 豁免标记 + §12/§15.2 章节豁免 + 退出码 0/1/2 与原 awk 对齐）；② `.sh` 降为 `exec python3` 薄封装，历史 `bash …sh` 命令仍可用；③ `AGENTS.md` / `SECURITY_RECHECK` 用法改 `.py`（顺带更正示例路径 `docs/` → `docs/security/`）；`hygiene-gate` 五→**六**条。**移植踩坑**：短语含 `**` 在 Python `re` 报 multiple repeat，改 `\*\*`（awk 本就字面）。验证＝真实报告 `PASS（1331 行 / 11 条）`；红态样本 EXIT 1、缺文件 EXIT 2、豁免 EXIT 0。**如实声明**：零生产/测试改动；本机无 bash 故未对拍薄封装；无设备侧必跑项 | （工程卫生，无闭环 ISSUE） | [`283-复核一致性机检移植Python单源批次.md`](resolved/batches/283-复核一致性机检移植Python单源批次.md) |
 
+| §284 | LongParameterList 四处参数对象化与展示层 String 限界补全批次（**非**既有条目整改；触发＝2026-09-23 工程卫生两件）：① 4 处 `@Suppress("LongParameterList")` 参数对象化——`NavGraphHostContext`（6→1）/ `SettingsUiStateFlows`（13→4）/ `VaultListLibraryState`（6→4）/ `VaultListActionHost`（9→5），**纯结构性**、压制全摘；② 限界表新增 **§2.7** 单列展示层（`GeneratorScreen` `readString()` / `EntryDetailSecrets` `toDisplayString()` 与三个 `String` 状态）与模型层（`KdbxEntry`/`KdbxGroup` 元数据）驻留，与 §2.4/§2.6 分列；`ISSUE-P3-303` AC⑤ 注记登记已落地、**第 1 类导出侧 `useChars` 仍未实施**。验证＝全量 `test --rerun-tasks` 两轮 BUILD SUCCESSFUL，`xml=374 tests=2590 failures=0 skipped=13`（三项持平）；六条机检 EXIT 0。**如实声明**：展示层/模型层 `String` 未消除（§2.7 客观限界）；`ISSUE-P3-303` 继续开放；无设备侧必跑项 | （工程卫生 + `ISSUE-P3-303` AC⑤ 登记分支） | [`284-LongParameterList参数对象化与展示层String限界补全批次.md`](resolved/batches/284-LongParameterList参数对象化与展示层String限界补全批次.md) |
+
 ## 分册导航
 
 | 分册 | 覆盖批次 | 时间 | 索引 |

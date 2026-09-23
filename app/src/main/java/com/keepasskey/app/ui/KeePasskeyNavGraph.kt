@@ -20,16 +20,20 @@ import com.keepasskey.app.ui.theme.AppThemeMode
  * 重建全部 `NavDestination`。收窄为 `AppThemeMode`（枚举，稳定）后，仅主题变化才会重建。
  *
  * §280：逐条 [composable] 注册体下沉同包 `KeePasskeyNavGraphRoutes.kt`，本门面只按序装配。
+ * §284：六参收拢为 [NavGraphHostContext]（摘除 `LongParameterList` 压制；行为零变化）。
  */
-@Suppress("LongParameterList")
-internal fun NavGraphBuilder.keepasskeyNavGraph(
-    navController: NavHostController,
-    motion: AppNavigationMotion,
-    themeMode: AppThemeMode,
-    toggleTheme: () -> Unit,
-    killAppAction: (() -> Unit)?,
-    autoLockManager: AutoLockManager?
-) {
+/** 路由图装配所需的宿主上下文（§284 参数对象化；字段语义见 [keepasskeyNavGraph] KDoc） */
+internal data class NavGraphHostContext(
+    val navController: NavHostController,
+    val motion: AppNavigationMotion,
+    val themeMode: AppThemeMode,
+    val toggleTheme: () -> Unit,
+    val killAppAction: (() -> Unit)?,
+    val autoLockManager: AutoLockManager?
+)
+
+internal fun NavGraphBuilder.keepasskeyNavGraph(host: NavGraphHostContext) {
+    val (navController, motion, themeMode, toggleTheme, killAppAction, autoLockManager) = host
     unlockRoute(navController, motion, themeMode, toggleTheme, autoLockManager)
     databasePickerRoute(navController)
     vaultListRoute(navController, motion, themeMode, toggleTheme, killAppAction, autoLockManager)

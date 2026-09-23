@@ -24,37 +24,42 @@ import kotlinx.coroutines.flow.stateIn
 /**
  * 组装设置页 [SettingsUiState] 状态流（原 `SettingsViewModel.uiState` 的 combine 编排逐字迁移）。
  *
- * 六路输入流 → `Map`/`Triple` 元组嵌套，避开 combine 的重载上限。
+ * 十路输入流收拢为 [SettingsUiStateFlows]（§284 摘除 `LongParameterList` 压制）；
+ * combine 仍以 `Map`/`Triple` 元组嵌套避开重载上限，行为零变化。
  */
-@Suppress("LongParameterList")
+/** 十路输入流快照（§284 参数对象化；仅承载引用，不产生新订阅） */
+internal data class SettingsUiStateFlows(
+    val userSettings: Flow<UserSettings>,
+    val syncState: Flow<SettingsSyncController.SyncUiState>,
+    val healthState: Flow<SettingsHealthController.HealthCheckUiState>,
+    val databaseConfigState: Flow<DatabaseConfigUiState>,
+    // ISSUE-P2-212：生物识别开关的「验证中 / 一次性反馈」局部状态（与持久化偏好正交）
+    val biometricToggleState: Flow<BiometricToggleUiState>,
+    val securityTimeoutState: Flow<SecurityTimeoutUiState>,
+    val extendedSettings: Flow<ExtendedSettings>,
+    val debugLogLines: Flow<List<String>>,
+    val integrityReport: Flow<RuntimeIntegrityReport?>,
+    val childDatabaseCount: Flow<Int>
+)
+
 internal fun settingsUiStateFlow(
     scope: CoroutineScope,
     timeoutMillis: Long,
-    userSettings: Flow<UserSettings>,
-    syncState: Flow<SettingsSyncController.SyncUiState>,
-    healthState: Flow<SettingsHealthController.HealthCheckUiState>,
-    databaseConfigState: Flow<DatabaseConfigUiState>,
-    // ISSUE-P2-212：生物识别开关的「验证中 / 一次性反馈」局部状态（与持久化偏好正交）
-    biometricToggleState: Flow<BiometricToggleUiState>,
-    securityTimeoutState: Flow<SecurityTimeoutUiState>,
-    extendedSettings: Flow<ExtendedSettings>,
-    debugLogLines: Flow<List<String>>,
-    integrityReport: Flow<RuntimeIntegrityReport?>,
-    childDatabaseCount: Flow<Int>,
+    flows: SettingsUiStateFlows,
     strings: StringsProvider
 ): StateFlow<SettingsUiState> = combine(
-    userSettings,
-    syncState,
-    healthState,
-    combine(databaseConfigState, biometricToggleState) { db, toggle ->
+    flows.userSettings,
+    flows.syncState,
+    flows.healthState,
+    combine(flows.databaseConfigState, flows.biometricToggleState) { db, toggle ->
         Pair(db, toggle)
     },
     combine(
-        combine(securityTimeoutState, extendedSettings, debugLogLines) { sec, ext, logs ->
+        combine(flows.securityTimeoutState, flows.extendedSettings, flows.debugLogLines) { sec, ext, logs ->
             Triple(sec, ext, logs)
         },
-        integrityReport,
-        childDatabaseCount
+        flows.integrityReport,
+        flows.childDatabaseCount
     ) { securityState, report, mountedChildDatabases ->
         Triple(securityState, report, mountedChildDatabases)
     }

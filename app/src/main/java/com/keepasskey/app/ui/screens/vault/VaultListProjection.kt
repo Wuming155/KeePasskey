@@ -70,18 +70,24 @@ internal data class VaultListBatchSyncDecorations(
     val groupIcons: Map<String, BitmapEntryIcon>
 )
 
+/** 整库投影输入（§284 参数对象化：库列表 + 分组树 + 条目流） */
+internal data class VaultListLibraryState(
+    val databases: List<VaultDatabaseInfo>,
+    val allGroups: List<VaultGroup>,
+    val allEntries: List<UiVaultEntry>
+)
+
 /**
  * 把全部输入流快照投影为最终 UI 状态（原 `VaultListViewModel` combine 变换体逐字迁移）。
+ * §284：库三维收拢为 [VaultListLibraryState]，摘除 `LongParameterList` 压制；行为零变化。
  */
-@Suppress("LongParameterList")
 internal fun buildVaultListUiState(
-    databases: List<VaultDatabaseInfo>,
-    allGroups: List<VaultGroup>,
-    allEntries: List<UiVaultEntry>,
+    library: VaultListLibraryState,
     settings: UserSettings,
     session: VaultListSessionState,
     batchSyncDecorations: VaultListBatchSyncDecorations
 ): VaultListUiState {
+    val (databases, allGroups, allEntries) = library
     val batchSync = batchSyncDecorations.batchAndSync
     val content = projectVaultListContent(allGroups, allEntries, session)
     val activeDb = databases.firstOrNull { it.isActive } ?: databases.firstOrNull()

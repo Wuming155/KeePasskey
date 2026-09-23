@@ -382,12 +382,14 @@ private fun AppShellScaffold(
                     predictivePopExitTransition = motion.predictivePopExitTransition
                 ) {
                     keepasskeyNavGraph(
-                        navController = navController,
-                        motion = motion,
-                        themeMode = themeMode,
-                        toggleTheme = toggleTheme,
-                        killAppAction = killAppAction,
-                        autoLockManager = autoLockManager
+                        NavGraphHostContext(
+                            navController = navController,
+                            motion = motion,
+                            themeMode = themeMode,
+                            toggleTheme = toggleTheme,
+                            killAppAction = killAppAction,
+                            autoLockManager = autoLockManager
+                        )
                     )
                 }
             }

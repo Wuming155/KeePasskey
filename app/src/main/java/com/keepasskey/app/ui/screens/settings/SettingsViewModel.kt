@@ -220,18 +220,20 @@ class SettingsViewModel @Inject constructor(
     val uiState: StateFlow<SettingsUiState> = settingsUiStateFlow(
         scope = viewModelScope,
         timeoutMillis = STATE_SUBSCRIBE_TIMEOUT_MILLIS,
-        userSettings = settingsRepository.getSettings(),
-        syncState = syncController.state,
-        healthState = healthController.state,
-        databaseConfigState = preferences.databaseConfigState,
-        // ISSUE-P2-212：生物识别开关的验证中/一次性反馈状态
-        biometricToggleState = biometricToggleState,
-        securityTimeoutState = preferences.securityTimeoutState,
-        extendedSettings = extendedPreferences.settings,
-        debugLogLines = preferences.debugLogLines,
-        integrityReport = integrityReportFlow,
-        // ISSUE-P3-20：子库已挂载计数（替代原先硬编码的 0）
-        childDatabaseCount = childDatabaseController.countFlow,
+        flows = SettingsUiStateFlows(
+            userSettings = settingsRepository.getSettings(),
+            syncState = syncController.state,
+            healthState = healthController.state,
+            databaseConfigState = preferences.databaseConfigState,
+            // ISSUE-P2-212：生物识别开关的验证中/一次性反馈状态
+            biometricToggleState = biometricToggleState,
+            securityTimeoutState = preferences.securityTimeoutState,
+            extendedSettings = extendedPreferences.settings,
+            debugLogLines = preferences.debugLogLines,
+            integrityReport = integrityReportFlow,
+            // ISSUE-P3-20：子库已挂载计数（替代原先硬编码的 0）
+            childDatabaseCount = childDatabaseController.countFlow
+        ),
         strings = strings
     )
 

@@ -304,6 +304,7 @@
 - **验收标准**：
   - **第 1 类（导出侧 `readString()`，可解，本条主整改面）**：AC① 三处 `readString()` 改走 `useChars` + `CharArray` 写出口（`writeField` / `textElement` 须有 `CharArray` 重载或等价路径，XML 转义与 CSV 引号语义逐字节等价）；AC② 产物字节与改前**逐字节等价**（`KdbxCsvExporterTest` 4 例 + XML 既有产物断言原样通过，必要时补对照例）；AC③ 完成后**摘除契约 #19**（或就地改写为「已收口」并留痕），禁「代码已改、契约仍记残留」；AC④ 新增守卫锁定「导出器不得再出现 `readString()`」（静态接线，口径同 `WipableByteArrayOutputStreamTest`）。
   - **第 2 类（模型层字段 `String`，导出器层不可解）**：AC⑤ **不在本条整改**——按限界口径处置：若维持现状，须在限界表登记（或扩写 §2.4 同族）并写明「模型层 `title`/`url`/`userName`/`notes`/分组名以 `String` 驻留，进程内取证在信任边界外」；若要收口，须**另立条目**评估模型层改造（`ProtectedString` 化或 `CharArray` 字段）的牵动面，禁在本条顺手改模型。
+    **（2026-09-23 §284 补全登记）**：AC⑤ 的「维持现状 + 限界登记」分支已落地——限界表新增 **§2.7**，单列**展示层**（`GeneratorScreen` `readString()` / `EntryDetailSecrets` `toDisplayString()` 与三个 `String` 状态）与**模型层**（`KdbxEntry` / `KdbxGroup` 元数据字段）两类驻留，并与 §2.4 / §2.6 分列；解除条件仍须另立条目。第 1 类（导出侧 `useChars`）**仍未实施**，本条继续开放。
   - **通则**：AC⑥ 两类的结论与去向必须**分列写明**，禁以「不可擦 `String` 都是已接受限界」一句带过（第 1 类恰恰**可以**收口）。
 
 ---
