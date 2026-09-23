@@ -2,6 +2,7 @@ package com.keepasskey.database.xml
 
 import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.core.model.KdbxGroup
+import com.keepasskey.core.model.KdbxTags
 import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.core.model.MemoryProtectionConfig
 import com.keepasskey.crypto.stream.InnerRandomStreamCipher
@@ -54,8 +55,9 @@ object KdbxXmlGroupSerializer {
         }
 
         // 官方 Group 级 <Tags>（KeePass 2.51+，分号分隔，语义与条目 Tags 一致）
+        // ISSUE-P2-282：写侧分隔符与官方一致（裸 `;`），分隔符词汇与归一化单一来源
         if (group.tags.isNotEmpty()) {
-            KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.TAGS, group.tags.joinToString("; "))
+            KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.TAGS, KdbxTags.serialize(group.tags))
         }
 
         // 官方 Group 级 <CustomData>

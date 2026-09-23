@@ -4,34 +4,23 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 /**
- * `ISSUE-P3-181` ③：`<Tags>` 单趟解析与旧表达式的**逐项等价**回归。
+ * `<Tags>` 读侧解析口径回归（原 `ISSUE-P3-181` ③ 的「与旧表达式等价」用例，
+ * `ISSUE-P2-282` 起**改锁新口径**：旧表达式只按 `;` 切分、无归一化，已被证为
+ * 跨实现漂移源——逗号库（KeePassXC / pykeepass）读成单个标签）。
  *
- * 旧写法 `raw?.split(";")?.map { it.trim() }?.filter { it.isNotEmpty() }.orEmpty()`
- * 每个 Group / Entry 各产生 3 个中间集合；新实现按 `;` 单趟扫描直接累积最终列表。
- * 唯一可能产生分歧的位置是**空段**（相邻分号、尾随分号、纯空白段），故本类把旧表达式
- * **原样抄录**在测试内作为参照，对含空段的各种畸形输入逐项对拍。
+ * 新口径＝官方 `g_vTagSep { ',', ';' }` 切分 + `NormalizeTags` 同义归一化
+ * （trim + 去空 + 去重 + 自然排序），单一实现 `KdbxTags.parse`（本类经 `parseTagsText`
+ * 代理验证读侧接线；词汇本身的面由 `KdbxTagsTest` 锁定）。
  *
- * 注：`split(";")` 是字面量分隔符、不限段数；`trim()` 不传谓词时即 Kotlin 默认的
- * `Char.isWhitespace()`，与手写实现的 `trim()` 为同一实现——本类只断言**结果**相等，
- * 不依赖对上述两条的推理。
+ * 测试资产纪律①：本类为**修改期望**（原等价参照已随生产口径退役），未删除用例。
  */
 class KdbxTagsParseEquivalenceTest {
 
     @Test
-    fun `畸形分号与空白输入与旧表达式逐项等价`() {
-        inputs().forEach { input ->
-            assertEquals(
-                "输入 ${input?.let { "「$it」" } ?: "null"} 的解析结果必须与旧表达式一致",
-                legacyParse(input),
-                parseTagsText(input)
-            )
-        }
-    }
-
-    @Test
-    fun `空段一律不产出标签且顺序保持`() {
+    fun `分号与逗号同为分隔符且空段一律不产出标签`() {
         assertEquals(listOf("a", "b"), parseTagsText("a;;b;"))
-        assertEquals(listOf("工作", "重要", "同步"), parseTagsText("工作;重要;同步"))
+        assertEquals(listOf("a", "b"), parseTagsText("a,,b,"))
+        assertEquals(listOf("a", "b", "c"), parseTagsText("a;b,c"))
         assertEquals(listOf("a"), parseTagsText("  a  "))
     }
 
@@ -44,13 +33,10 @@ class KdbxTagsParseEquivalenceTest {
         assertEquals(emptyList<String>(), parseTagsText(";;  ;;\t\n"))
     }
 
-    private fun inputs(): List<String?> = listOf(
-        null, "", " ", "  \t\n ", ";", ";;", ";;;", "a", ";a", "a;", ";a;",
-        "a;;b", "a; ;b", "a; ;b;", " a ; b ", "工作;重要", "工作;;重要;",
-        "a;b;c;d;e;", " ; ; ", "\u00A0a\u3000", "a\u000Bb", "a\u001Cb"
-    )
-
-    /** 旧表达式原样抄录（仅作参照，不参与生产路径） */
-    private fun legacyParse(raw: String?): List<String> =
-        raw?.split(";")?.map { it.trim() }?.filter { it.isNotEmpty() }.orEmpty()
+    @Test
+    fun `归一化：去重与自然排序（中文按码位序）`() {
+        assertEquals(listOf("a"), parseTagsText("a;a"))
+        assertEquals(listOf("a2", "a10"), parseTagsText("a10;a2"))
+        assertEquals(listOf("同步", "工作", "重要"), parseTagsText("工作;重要;同步"))
+    }
 }

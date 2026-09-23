@@ -6,6 +6,7 @@ import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.core.model.KdbxCustomField
 import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.model.KdbxGroup
+import com.keepasskey.core.model.KdbxTags
 import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.core.security.ProtectedString
 
@@ -199,8 +200,8 @@ internal object KdbxEntryMerger {
         val mergedFields = mergeStandardFields(base, local, remote, diffFields)
         val mergedCustomFields = mergeCustomFields(base, local, remote, diffFields)
 
-        // 标签合并 (Union)
-        val mergedTags = (local.tags + remote.tags).distinct()
+        // 标签合并 (Union；ISSUE-P2-282：经同一词汇表归一化——去重 + 自然排序与读写侧同口径)
+        val mergedTags = KdbxTags.normalizeTags(local.tags + remote.tags)
 
         val mergedAttachments = mergeAttachments(base, local, remote)
 

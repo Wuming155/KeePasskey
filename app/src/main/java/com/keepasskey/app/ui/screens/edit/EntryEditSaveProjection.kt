@@ -4,6 +4,7 @@ import androidx.annotation.StringRes
 import com.keepasskey.app.R
 import com.keepasskey.app.ui.model.EntryCategory
 import com.keepasskey.app.ui.model.UiVaultEntry
+import com.keepasskey.core.model.KdbxTags
 
 /**
  * 编辑页**保存侧纯投影**（纯结构性拆分：自 `EntryEditViewModel.kt` 拆出）。
@@ -24,9 +25,12 @@ internal fun entrySaveRejectionRes(state: EntryEditUiState): Int? = when {
     else -> null
 }
 
-/** 标签输入解析：以半/全角逗号与空格分隔，去空白、去空项、去重（原逻辑逐字迁移）。 */
-internal fun parseEntryTags(input: String): List<String> =
-    input.split(',', '\uff0c', ' ').map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+/**
+ * 标签输入解析（`ISSUE-P2-282`：与读 / 写侧共用 [KdbxTags] 单一词汇表——
+ * 分隔符集合 `,` / `;`、归一化（trim + 分隔符替换为 `.`）、去空、去重、自然排序，
+ * 口径对齐官方 `StringToTags`；不再按空格 / 全角逗号切分（官方同口径，空格是合法标签字符）。
+ */
+internal fun parseEntryTags(input: String): List<String> = KdbxTags.parse(input)
 
 /**
  * 由编辑状态与时间戳组装待落库的条目投影。

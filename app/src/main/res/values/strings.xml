@@ -374,7 +374,7 @@
     <string name="edit_save_failed">保存失败：%1$s</string>
     <string name="readonly_save_rejected">数据库以只读模式打开，无法保存修改</string>
     <string name="readonly_banner">只读模式：数据库以只读方式打开，编辑与保存已禁用</string>
-    <string name="edit_tags_hint">标签（多个标签用逗号分隔）</string>
+    <string name="edit_tags_hint">标签（多个标签用逗号或分号分隔）</string>
     <string name="edit_autotype_hint">AutoType 键入序列</string>
     <string name="edit_autotype_placeholder">{USERNAME}{TAB}{PASSWORD}{ENTER}</string>
     <string name="edit_override_url_hint">Override URL（自动填充匹配覆盖）</string>

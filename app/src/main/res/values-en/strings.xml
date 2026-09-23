@@ -363,7 +363,7 @@
     <string name="edit_save_failed">Save failed: %1$s</string>
     <string name="readonly_save_rejected">Database is open in read-only mode, saving is disabled</string>
     <string name="readonly_banner">Read-only mode: database was opened read-only, editing and saving are disabled</string>
-    <string name="edit_tags_hint">Tags (separate multiple tags with commas)</string>
+    <string name="edit_tags_hint">Tags (separate multiple tags with commas or semicolons)</string>
     <string name="edit_autotype_hint">AutoType sequence</string>
     <string name="edit_autotype_placeholder">{USERNAME}{TAB}{PASSWORD}{ENTER}</string>
     <string name="edit_override_url_hint">Override URL (autofill matching override)</string>

@@ -4,6 +4,7 @@ import com.keepasskey.core.model.KdbxAttachment
 import com.keepasskey.core.model.KdbxAutoType
 import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.core.model.KdbxEntry
+import com.keepasskey.core.model.KdbxTags
 import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.core.model.MemoryProtectionConfig
 import com.keepasskey.core.security.ProtectedString
@@ -77,7 +78,8 @@ object KdbxXmlEntrySerializer {
             KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.PREVIOUS_PARENT_GROUP, KdbxXmlValueUtil.encodeUuid(it))
         }
         if (entry.tags.isNotEmpty()) {
-            KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.TAGS, entry.tags.joinToString("; "))
+            // ISSUE-P2-282：写侧分隔符与官方一致（裸 `;`），分隔符词汇与归一化单一来源
+            KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.TAGS, KdbxTags.serialize(entry.tags))
         }
 
         KdbxXmlWriteUtil.serializeTimes(writer, entry.times)

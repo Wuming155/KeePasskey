@@ -356,7 +356,8 @@ class KdbxXmlFullRoundtripTest {
 
         val loadedSub = loadedDb.rootGroup.subgroups[0]
         assertEquals("TaggedSubGroup", loadedSub.name)
-        assertEquals(listOf("工作", "重要", "同步"), loadedSub.tags)
+        // ISSUE-P2-282：写侧归一化（官方 NormalizeTags 同义）后标签按自然序落盘
+        assertEquals(listOf("同步", "工作", "重要"), loadedSub.tags)
         assertEquals(mapOf("GroupKey1" to "GroupVal1", "GroupKey2" to "GroupVal2"), loadedSub.customData)
     }
 

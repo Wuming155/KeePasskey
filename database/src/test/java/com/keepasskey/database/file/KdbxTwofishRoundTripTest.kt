@@ -76,7 +76,8 @@ class KdbxTwofishRoundTripTest {
         assertEquals("twofish-user", entries[0].userName)
         assertEquals("Tw0fish!Secret#2026", entries[0].password?.readString())
         assertEquals("4321", entries[0].customFields[0].value.readString())
-        assertEquals(listOf("twofish", "e2e"), entries[0].tags)
+        // ISSUE-P2-282：写侧归一化（官方 NormalizeTags 同义）后标签按自然序落盘
+        assertEquals(listOf("e2e", "twofish"), entries[0].tags)
     }
 
     @Test

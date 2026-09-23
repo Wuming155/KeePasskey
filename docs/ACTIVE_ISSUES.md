@@ -41,17 +41,7 @@
 
 ---
 
-## P2 中危缺陷与协议/测试缺口（9 项）
-
-### ISSUE-P2-282：Tags 分隔符在读 / 写 / 编辑页三处互不相同，且无官方 `NormalizeTag`，标签数跨实现漂移
-
-- **核实时间点**：2026-09-23 经三处分隔符逐一比对。
-- **核实方式**：读侧 `database/.../KdbxXmlGroupReader.kt:43-58`（`:50`）**只按 `;` 切分**；写侧 `KdbxXmlEntrySerializer.kt:52-54` 用 `"; "`；**编辑页输入** `app/.../ui/screens/edit/EntryEditSaveProjection.kt:29` 只按 `,` / `，` / 空格切、**不认 `;`** ⇒ 同一概念三套口径。`KdbxTagsParseEquivalenceTest` 只锁「与旧表达式等价」，未声明逗号非分隔符 ⇒ 不构成刻意锁定。
-- **对照（已开源码核实）**：官方 `StrUtil.cs:1530` 的 `g_vTagSep = { ',', ';' }`、切分在 `:1625-1636`、文件侧以裸 `;` 写出（`:1616`），并有 `NormalizeTag`（`:1531-1541`）；KeePassDX `Tags.kt:37-45` 双分隔、`:147` 以 `,` 写出；KeePassXC `KdbxXmlWriter.cpp:316/404` 直写逗号串 ⇒ 读第三方逗号库被读成 1 个标签、回写后对方又读成多个，**双向漂移**。
-- **涉及文件**：`database/src/main/java/com/keepasskey/database/xml/KdbxXmlGroupReader.kt`、`database/src/main/java/com/keepasskey/database/xml/KdbxXmlEntrySerializer.kt`、`database/src/main/java/com/keepasskey/database/xml/KdbxXmlGroupSerializer.kt`、`app/src/main/java/com/keepasskey/app/ui/screens/edit/EntryEditSaveProjection.kt`。
-- **验收标准**：AC① 分隔符集合收敛为**单一常量表**（读 / 写 / 输入解析共用）；AC② 补 `NormalizeTag` 等价实现（trim + 大小写 + 去空 + 剔除含分隔符的非法标签，口径对齐官方）；AC③ 写侧分隔符与官方一致并写明「写 `;`、读 `;` 与 `,`」的取舍；AC④ 用例含「逗号库读入 → 标签数正确 → 回写后可被对方正确解析」；AC⑤ 按规则 8 与 keepassxc-cli / pykeepass 对拍标签往返。
-
----
+## P2 中危缺陷与协议/测试缺口（8 项）
 
 ### ISSUE-P2-284：分组硬删除只为组自身立墓碑，子条目与子组无墓碑 ⇒ 跨设备合并复活
 

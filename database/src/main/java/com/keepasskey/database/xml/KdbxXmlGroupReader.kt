@@ -6,6 +6,7 @@ import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.core.model.KdbxCustomField
 import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.model.KdbxGroup
+import com.keepasskey.core.model.KdbxTags
 import com.keepasskey.core.model.KdbxTimes
 import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.core.security.ProtectedString
@@ -26,36 +27,16 @@ private const val DEFAULT_IS_EXPANDED = true
 private const val DEFAULT_QUALITY_CHECK = true
 
 /**
- * 解析 `<Tags>` 文本为标签列表（Group / Entry 共用，ISSUE-P3-181）：按 `;` 切分、逐段 `trim()`、
- * 丢弃空段，**单趟扫描**直接产出最终列表。
+ * 解析 `<Tags>` 文本为标签列表（Group / Entry 共用，ISSUE-P3-181）。
  *
- * 与 `raw?.split(";")?.map { it.trim() }?.filter { it.isNotEmpty() }.orEmpty()` 逐项等价：
- * - `split(";")` 为**字面量**分隔符、不限段数，恰好给出相邻分隔符之间（以及末尾分隔符之后的**空段**）
- *   的全部子串——连续分号与尾随分号产生的空段一律被过滤，故不产生任何元素；
- * - 空串与纯空白段同理被丢弃（`trim()` 后为空）；
- * - `trim()` 同为 Kotlin 默认的 `Char.isWhitespace()` 语义（不传谓词时二者是同一实现）。
+ * `ISSUE-P2-282` 起委托 [KdbxTags.parse]（单一词汇表）：切分集合 `{ ',', ';' }`
+ * （官方 `g_vTagSep`，**含逗号**——KeePassXC / pykeepass 以逗号写出的库不再被读成
+ * 单个标签），并做官方 `NormalizeTags` 同义归一化（trim + 分隔符替换为 `.` +
+ * 去空 + 去重 + 自然排序）。
  *
- * 原实现对每个 Group / Entry 各产生 3 个中间集合（切分结果、trim 结果、过滤结果），此处仅累积最终列表。
- *
- * **可见性**：由 `private` 放宽为 `internal`，供等价性用例（`KdbxTagsParseEquivalenceTest`）
- * 与旧表达式逐项对拍；语义与调用面不变（本仓同族先例：`KdbxEntryMerger.isModified`）。
+ * **可见性**：`internal`，供等价性用例（`KdbxTagsParseEquivalenceTest`）定点消费。
  */
-internal fun parseTagsText(raw: String?): List<String> {
-    if (raw == null) return emptyList()
-    val tags = mutableListOf<String>()
-    var start = 0
-    var index = 0
-    // index == raw.length 时结算最后一段（对应 split 的尾段，可能是空串）
-    while (index <= raw.length) {
-        if (index == raw.length || raw[index] == ';') {
-            val segment = raw.substring(start, index).trim()
-            if (segment.isNotEmpty()) tags.add(segment)
-            start = index + 1
-        }
-        index++
-    }
-    return tags
-}
+internal fun parseTagsText(raw: String?): List<String> = KdbxTags.parse(raw)
 
 /**
  * KDBX XML <Group> 节点流式解析节点（递归下降，含 <Entry> / <History> / <Times> / <AutoType> 子树）。
