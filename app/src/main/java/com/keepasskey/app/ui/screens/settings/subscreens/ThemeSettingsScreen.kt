@@ -45,6 +45,8 @@ fun ThemeSettingsScreen(
     onBackClick: () -> Unit,
     onThemeSelected: (AppThemeMode) -> Unit,
     onPaletteSelected: (AppThemePalette) -> Unit = {},
+    // ISSUE-P3-263 AC③：动态取色置灰分区的「一步切回」动作（关闭动态取色，恢复品牌调色盘）
+    onSwitchToBrandPalette: () -> Unit = {},
     onLanguageSelected: (AppLanguage) -> Unit = {},
     onOledOptimizationToggle: (Boolean) -> Unit,
     onDynamicColorToggle: (Boolean) -> Unit = {},
@@ -89,7 +91,8 @@ fun ThemeSettingsScreen(
 
             themePaletteSection(
                 uiState = uiState,
-                onPaletteSelected = onPaletteSelected
+                onPaletteSelected = onPaletteSelected,
+                onSwitchToBrandPalette = onSwitchToBrandPalette
             )
 
             themePeekSection(

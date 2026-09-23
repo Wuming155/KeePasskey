@@ -130,8 +130,17 @@ class RealSettingsRepository @Inject constructor(
     override suspend fun setThemeMode(themeMode: AppThemeMode) =
         edit { it[KEY_THEME_MODE] = themeMode.name }
 
-    override suspend fun setThemePalette(themePalette: AppThemePalette) =
-        edit { it[KEY_THEME_PALETTE] = themePalette.name }
+    /**
+     * ISSUE-P3-263 / PD-30（候选 A「互斥单选」）：调色盘与动态取色同属「配色来源」单维度，
+     * 点选任一调色盘即在**同一次 DataStore 原子事务**内幂等关闭 `dynamic_color_enabled`，
+     * 杜绝「两个偏好同时看似生效」的存储态（整改前两键各写各的、互不感知）。
+     * 动态取色生效期间 UI 侧调色盘整体置灰不可点，本互斥写是**兜底不变量**：
+     * 任何路径写入调色盘后，配色来源必然收敛回品牌调色盘。
+     */
+    override suspend fun setThemePalette(themePalette: AppThemePalette) = edit {
+        it[KEY_THEME_PALETTE] = themePalette.name
+        it[KEY_DYNAMIC_COLOR] = false
+    }
 
     override suspend fun setOledBlackOptimization(enabled: Boolean) =
         edit { it[KEY_OLED_BLACK] = enabled }

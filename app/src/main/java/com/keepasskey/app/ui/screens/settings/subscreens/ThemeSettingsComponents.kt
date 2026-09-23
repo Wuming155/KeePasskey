@@ -28,6 +28,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -173,12 +174,19 @@ internal fun ThemeSelectionCard(
     }
 }
 
-/** 调色盘条目（四色联动预览 + 单选）。 */
+/**
+ * 调色盘条目（四色联动预览 + 单选）。
+ *
+ * ISSUE-P3-263 AC②：动态取色生效期间由调用方传 `enabled = false`——
+ * 条目不可点且不得呈现任何「已选中」形态（ isSelected 只允许在 enabled 时为 true）；
+ * 置灰以整体降透明度呈现，配合分区的行内原因说明。
+ */
 @Composable
 internal fun ThemePaletteItemCard(
     palette: AppThemePalette,
     isSelected: Boolean,
     isDarkTheme: Boolean,
+    enabled: Boolean = true,
     onClick: () -> Unit
 ) {
     val borderColor = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
@@ -191,13 +199,14 @@ internal fun ThemePaletteItemCard(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .alpha(if (enabled) 1f else 0.55f)
             .clip(RoundedCornerShape(14.dp))
             .background(
                 if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f)
                 else MaterialTheme.colorScheme.surface
             )
             .border(borderWidth, borderColor, RoundedCornerShape(14.dp))
-            .clickable(onClick = onClick)
+            .clickable(enabled = enabled, onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween

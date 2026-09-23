@@ -73,8 +73,13 @@ fun KeePasskeyTheme(
     }
 
     // Material You 动态取色（Android 12+）：开启后以系统壁纸取色为基准，品牌调色盘让位；
-    // 语义安全色 (LocalSecurityColors) 保持固定，不随壁纸漂移
-    val useDynamicColor = dynamicColorEnabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+    // 语义安全色 (LocalSecurityColors) 保持固定，不随壁纸漂移。
+    // ISSUE-P3-263 AC①：判据单点化——必须经 resolveColorSource 推导，
+    // 禁止在本层再写第二份「开关 × SDK」条件（与设置页共用同一真值）
+    val useDynamicColor = resolveColorSource(
+        dynamicColorEnabled = dynamicColorEnabled,
+        sdkInt = Build.VERSION.SDK_INT
+    ) == ColorSource.DYNAMIC
     val colorScheme = resolveAppColorScheme(
         useDynamicColor = useDynamicColor,
         darkTheme = darkTheme,

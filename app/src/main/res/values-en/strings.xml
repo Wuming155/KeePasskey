@@ -743,9 +743,13 @@
     <string name="theme_oled_title">OLED true black</string>
     <string name="theme_oled_sub">Use a pure black background in dark mode to save power on OLED screens</string>
     <string name="theme_dynamic_title">Dynamic color (Material You)</string>
-    <string name="theme_dynamic_sub">Tint the app from your wallpaper, overriding the brand palette</string>
+    <!-- ISSUE-P3-263 AC⑤: verifiable wording replacing the vague "overriding" -->
+    <string name="theme_dynamic_sub">Tint the app from your wallpaper; the color palette below isn\'t applied while this is on</string>
     <string name="theme_section_palette">Color palette</string>
-    <string name="theme_palette_pick_desc">Pick a primary color scheme with instant preview</string>
+    <!-- ISSUE-P3-263 AC⑤: picking a palette exclusively switches back to the brand palette (PD-30, option A) -->
+    <string name="theme_palette_pick_desc">Pick a primary color scheme; choosing one switches to the brand palette and turns off dynamic color</string>
+    <string name="theme_palette_dynamic_notice">Dynamic color is on — the color palette isn\'t applied</string>
+    <string name="theme_palette_use_instead">Use the color palette</string>
     <string name="theme_palette_sapphire">Sapphire</string>
     <string name="theme_palette_sapphire_sub">Classic tech blue, default choice</string>
     <string name="theme_palette_emerald">Emerald</string>

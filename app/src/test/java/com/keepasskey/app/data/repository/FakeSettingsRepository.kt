@@ -19,8 +19,9 @@ class FakeSettingsRepository() : SettingsRepository {
         settingsFlow.update { it.copy(themeMode = themeMode) }
     }
 
+    /** ISSUE-P3-263 / PD-30（候选 A）：与生产 DataStore 语义一致——点选调色盘即幂等关闭动态取色 */
     override suspend fun setThemePalette(themePalette: com.keepasskey.app.ui.theme.AppThemePalette) {
-        settingsFlow.update { it.copy(themePalette = themePalette) }
+        settingsFlow.update { it.copy(themePalette = themePalette, dynamicColorEnabled = false) }
     }
 
     override suspend fun setDynamicColorEnabled(enabled: Boolean) {

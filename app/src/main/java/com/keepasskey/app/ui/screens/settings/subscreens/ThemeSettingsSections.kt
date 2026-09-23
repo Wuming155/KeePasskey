@@ -20,7 +20,9 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -32,6 +34,8 @@ import com.keepasskey.app.ui.components.BentoCard
 import com.keepasskey.app.ui.screens.settings.SettingsUiState
 import com.keepasskey.app.ui.theme.AppThemeMode
 import com.keepasskey.app.ui.theme.AppThemePalette
+import com.keepasskey.app.ui.theme.ColorSource
+import com.keepasskey.app.ui.theme.resolveColorSource
 
 /**
  * 外观设置页的主题类分节（1 亮度模式 / 2 调色盘 / 3 防窥遮掩）。
@@ -166,14 +170,33 @@ private fun OledBlackToggleRow(
     }
 }
 
-/** 2. 现代化内置主题调色盘（5 套全色相风格）。 */
+/**
+ * 2. 现代化内置主题调色盘（5 套全色相风格）。
+ *
+ * ISSUE-P3-263 / PD-30（候选 A「互斥单选」）：配色来源判据与 [KeePasskeyTheme] 共用同一
+ * 纯函数 [resolveColorSource]——动态取色生效期间调色盘 5 项整体置灰不可点、
+ * 不呈现任何「已选中」，并附行内原因说明与一步切回动作（关闭动态取色即恢复品牌调色盘，
+ * 偏好值保留不动）。
+ */
 internal fun LazyListScope.themePaletteSection(
     uiState: SettingsUiState,
-    onPaletteSelected: (AppThemePalette) -> Unit
+    onPaletteSelected: (AppThemePalette) -> Unit,
+    onSwitchToBrandPalette: () -> Unit
 ) {
     item { ThemeSectionTitle(stringResource(R.string.theme_section_palette)) }
 
     item {
+        // AC⑤「预览色与生效色同源」：跟随系统时按系统当前明暗渲染预览，不再恒按浅色
+        val previewDarkTheme = when (uiState.themeMode) {
+            AppThemeMode.DARK -> true
+            AppThemeMode.LIGHT -> false
+            AppThemeMode.SYSTEM -> isSystemInDarkTheme()
+        }
+        // AC① 判据单点化：与 Theme 层共用 resolveColorSource，禁止另写「开关 × SDK」推导
+        val paletteUsable =
+            resolveColorSource(uiState.dynamicColorEnabled, Build.VERSION.SDK_INT) ==
+                ColorSource.BRAND_PALETTE
+
         BentoCard(
             modifier = Modifier.fillMaxWidth(),
             backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow
@@ -185,12 +208,31 @@ internal fun LazyListScope.themePaletteSection(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
 
+                // AC③：置灰必须附原因说明 + 一步切换动作，不得让用户靠试错猜
+                if (!paletteUsable) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = stringResource(R.string.theme_palette_dynamic_notice),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.weight(1f)
+                        )
+                        TextButton(onClick = onSwitchToBrandPalette) {
+                            Text(stringResource(R.string.theme_palette_use_instead))
+                        }
+                    }
+                }
+
                 AppThemePalette.entries.forEach { palette ->
-                    val isSelected = uiState.themePalette == palette
                     ThemePaletteItemCard(
                         palette = palette,
-                        isSelected = isSelected,
-                        isDarkTheme = uiState.themeMode == AppThemeMode.DARK,
+                        isSelected = paletteUsable && uiState.themePalette == palette,
+                        isDarkTheme = previewDarkTheme,
+                        enabled = paletteUsable,
                         onClick = { onPaletteSelected(palette) }
                     )
                 }

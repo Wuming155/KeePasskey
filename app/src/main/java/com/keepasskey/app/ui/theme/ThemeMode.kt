@@ -1,5 +1,6 @@
 package com.keepasskey.app.ui.theme
 
+import android.os.Build
 import androidx.annotation.StringRes
 import androidx.compose.ui.graphics.Color
 import com.keepasskey.app.R
@@ -12,6 +13,35 @@ enum class AppThemeMode(@StringRes val displayNameRes: Int) {
     DARK(R.string.theme_mode_dark),
     SYSTEM(R.string.settings_lang_system)
 }
+
+/**
+ * 配色来源（ISSUE-P3-263 / PD-30，候选 A「互斥单选」）。
+ *
+ * [DYNAMIC]：系统壁纸动态取色（Material You）实际生效，品牌调色盘让位；
+ * [BRAND_PALETTE]：品牌调色盘实际生效。
+ *
+ * 这是「当前实际生效」的唯一判据——设置页与 [KeePasskeyTheme] 必须共用
+ * [resolveColorSource]，禁止 UI 与 Theme 层各写一份「开关 × SDK」推导
+ * （否则即复现本条整改前的「UI 不判、Theme 独判」双写漂移）。
+ */
+enum class ColorSource {
+    DYNAMIC,
+    BRAND_PALETTE
+}
+
+/**
+ * 配色来源唯一判据（ISSUE-P3-263 AC① 纯函数）。
+ *
+ * 动态取色命中当且仅当「偏好开启 **且** 设备支持」（Android 12 / API 31 起，
+ * `Build.VERSION_CODES.S`）：`dynamic_color_enabled` 可能经备份恢复为 `true` 而
+ * 设备不支持，此时须显式回落品牌调色盘，不得依赖渲染层隐式兜底。
+ */
+fun resolveColorSource(dynamicColorEnabled: Boolean, sdkInt: Int): ColorSource =
+    if (dynamicColorEnabled && sdkInt >= Build.VERSION_CODES.S) {
+        ColorSource.DYNAMIC
+    } else {
+        ColorSource.BRAND_PALETTE
+    }
 
 /**
  * 现代化内置主题调色盘风格 (满足不同审美偏好与现代感视觉)
