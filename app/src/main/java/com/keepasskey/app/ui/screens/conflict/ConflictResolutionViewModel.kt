@@ -9,6 +9,7 @@ import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.sync.merge.ConflictResolutionChoice
+import com.keepasskey.sync.merge.KdbxMerger
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -47,65 +48,14 @@ class ConflictResolutionViewModel @Inject constructor(
         viewModelScope.launch {
             syncCoordinator.conflictFlow.collect { conflicts ->
                 if (conflicts.isNotEmpty()) {
+                    // ISSUE-P2-281 AC①：差异来源 = 合并器产出的 modifiedFields（单一真相源），
+                    // 本类不再自造五字段 diff（此前自定义字段 / 图标等分歧在界面不可见、无从裁决）
                     val items = conflicts.map { pair ->
-                        val fieldList = mutableListOf<ConflictedField>()
-                        if (pair.localEntry.title != pair.remoteEntry.title) {
-                            fieldList.add(
-                                ConflictedField(
-                                    KdbxConstants.Fields.TITLE,
-                                    strings.get(R.string.conflict_field_title),
-                                    pair.localEntry.title,
-                                    pair.remoteEntry.title
-                                )
-                            )
-                        }
-                        if (pair.localEntry.userName != pair.remoteEntry.userName) {
-                            fieldList.add(
-                                ConflictedField(
-                                    KdbxConstants.Fields.USER_NAME,
-                                    strings.get(R.string.conflict_field_username),
-                                    pair.localEntry.userName,
-                                    pair.remoteEntry.userName
-                                )
-                            )
-                        }
-                        // 敏感数据铁律：冲突对比界面不物化密码明文，仅以掩码呈现「两侧不一致」事实
-                        if (pair.localEntry.password != pair.remoteEntry.password) {
-                            fieldList.add(
-                                ConflictedField(
-                                    KdbxConstants.Fields.PASSWORD,
-                                    strings.get(R.string.conflict_field_password),
-                                    strings.get(R.string.conflict_mask_local),
-                                    strings.get(R.string.conflict_mask_remote),
-                                    isSensitive = true
-                                )
-                            )
-                        }
-                        if (pair.localEntry.url != pair.remoteEntry.url) {
-                            fieldList.add(
-                                ConflictedField(
-                                    KdbxConstants.Fields.URL,
-                                    strings.get(R.string.conflict_field_url),
-                                    pair.localEntry.url,
-                                    pair.remoteEntry.url
-                                )
-                            )
-                        }
-                        if (pair.localEntry.notes != pair.remoteEntry.notes) {
-                            fieldList.add(
-                                ConflictedField(
-                                    KdbxConstants.Fields.NOTES,
-                                    strings.get(R.string.conflict_field_notes),
-                                    pair.localEntry.notes,
-                                    pair.remoteEntry.notes
-                                )
-                            )
-                        }
                         ConflictedEntryItem(
                             id = pair.entryId,
                             title = pair.localEntry.title.ifBlank { pair.remoteEntry.title },
                             groupPath = strings.get(R.string.conflict_group_path),
-                            fields = fieldList
+                            fields = pair.modifiedFields.map { key -> buildConflictedField(pair, key) }
                         )
                     }
                     // H1 整改：两侧修改时间取冲突条目中最新的真实 lastModificationTime，
@@ -136,7 +86,88 @@ class ConflictResolutionViewModel @Inject constructor(
         return "$datePrefix ${local.format(DateTimeFormatter.ofPattern("HH:mm"))}"
     }
 
-    /** [fieldKey] 为字段标准键（[ConflictedField.fieldKey]） */
+    /**
+     * ISSUE-P2-281：把 `modifiedFields` 的一个差异键映射为可裁决的界面行
+     * （键的词汇与合并器同表——标准字段键 / `custom:` 前缀自定义字段键 / 四个标量键）。
+     * 敏感值（密码 / `isProtected` 的自定义字段）一律掩码，不物化明文。
+     */
+    private fun buildConflictedField(
+        pair: com.keepasskey.sync.merge.ConflictedEntryPair,
+        key: String
+    ): ConflictedField {
+        val local = pair.localEntry
+        val remote = pair.remoteEntry
+        return when {
+            key == KdbxConstants.Fields.PASSWORD -> ConflictedField(
+                fieldKey = key,
+                fieldName = strings.get(R.string.conflict_field_password),
+                localValue = strings.get(R.string.conflict_mask_local),
+                remoteValue = strings.get(R.string.conflict_mask_remote),
+                isSensitive = true
+            )
+            key == KdbxConstants.Fields.TITLE || key == KdbxConstants.Fields.USER_NAME ||
+                key == KdbxConstants.Fields.URL || key == KdbxConstants.Fields.NOTES -> {
+                val labelRes = when (key) {
+                    KdbxConstants.Fields.TITLE -> R.string.conflict_field_title
+                    KdbxConstants.Fields.USER_NAME -> R.string.conflict_field_username
+                    KdbxConstants.Fields.URL -> R.string.conflict_field_url
+                    else -> R.string.conflict_field_notes
+                }
+                ConflictedField(
+                    fieldKey = key,
+                    fieldName = strings.get(labelRes),
+                    localValue = local.fields[key]?.readString().orEmpty(),
+                    remoteValue = remote.fields[key]?.readString().orEmpty()
+                )
+            }
+            key.startsWith(KdbxMerger.CUSTOM_FIELD_CONFLICT_PREFIX) -> {
+                val customKey = key.removePrefix(KdbxMerger.CUSTOM_FIELD_CONFLICT_PREFIX)
+                val lv = local.customFields.firstOrNull { it.key == customKey }?.value
+                val rv = remote.customFields.firstOrNull { it.key == customKey }?.value
+                val sensitive = lv?.isProtected == true || rv?.isProtected == true
+                ConflictedField(
+                    fieldKey = key,
+                    fieldName = customKey,
+                    localValue = if (sensitive) strings.get(R.string.conflict_mask_local) else lv?.readString().orEmpty(),
+                    remoteValue = if (sensitive) strings.get(R.string.conflict_mask_remote) else rv?.readString().orEmpty(),
+                    isSensitive = sensitive
+                )
+            }
+            key == KdbxMerger.CONFLICT_KEY_ICON_ID -> ConflictedField(
+                fieldKey = key,
+                fieldName = strings.get(R.string.conflict_field_icon),
+                localValue = local.iconId.toString(),
+                remoteValue = remote.iconId.toString()
+            )
+            key == KdbxMerger.CONFLICT_KEY_CUSTOM_ICON_ID -> ConflictedField(
+                fieldKey = key,
+                fieldName = strings.get(R.string.conflict_field_custom_icon),
+                localValue = local.customIconId?.toHexString() ?: strings.get(R.string.conflict_value_none),
+                remoteValue = remote.customIconId?.toHexString() ?: strings.get(R.string.conflict_value_none)
+            )
+            key == KdbxMerger.CONFLICT_KEY_OVERRIDE_URL -> ConflictedField(
+                fieldKey = key,
+                fieldName = strings.get(R.string.conflict_field_override_url),
+                localValue = local.overrideUrl ?: strings.get(R.string.conflict_value_none),
+                remoteValue = remote.overrideUrl ?: strings.get(R.string.conflict_value_none)
+            )
+            key == KdbxMerger.CONFLICT_KEY_QUALITY_CHECK -> ConflictedField(
+                fieldKey = key,
+                fieldName = strings.get(R.string.conflict_field_quality_check),
+                localValue = strings.get(if (local.qualityCheck) R.string.conflict_value_true else R.string.conflict_value_false),
+                remoteValue = strings.get(if (remote.qualityCheck) R.string.conflict_value_true else R.string.conflict_value_false)
+            )
+            // 词汇外的键：可见呈现（禁静默丢弃差异），resolveConflictByFields 对未知键为安全 no-op
+            else -> ConflictedField(
+                fieldKey = key,
+                fieldName = key,
+                localValue = strings.get(R.string.conflict_value_changed),
+                remoteValue = strings.get(R.string.conflict_value_changed)
+            )
+        }
+    }
+
+    /** [fieldKey] 为差异键（[ConflictedField.fieldKey]，与 `modifiedFields` 同词汇表） */
     fun selectFieldChoice(entryId: String, fieldKey: String, choice: FieldChoice) {
         _uiState.update { state ->
             val updated = state.entries.map { entry ->
@@ -161,26 +192,45 @@ class ConflictResolutionViewModel @Inject constructor(
         }
     }
 
+    /** ISSUE-P2-281 AC②／AC③：条目级裁决方式（整条兜底入口 / 双方保留）。 */
+    fun selectEntryMode(entryId: String, mode: EntryResolutionMode) {
+        _uiState.update { state ->
+            val updated = state.entries.map { entry ->
+                if (entry.id == entryId) entry.copy(mode = mode) else entry
+            }
+            state.copy(entries = updated)
+        }
+    }
+
     fun applyMerge() {
         viewModelScope.launch {
             _uiState.update { it.copy(isResolving = true) }
             // TASK-30 整改：逐字段的用户选择不再塌缩为整条目二选一——每个条目生成
             // 「字段键 → 决策」映射交由 SyncCoordinator 按字段粒度合并
             // （本地为底版，选择「云端」的字段以远端值覆写）。
+            // ISSUE-P2-281：条目级裁决方式为非逐字段时，整条决策走 resolutions 通道
+            // （fieldResolutions 不含该条目 ⇒ resolveConflict 整条分支，DUPLICATE_BOTH 由此可达）
             val resolutions = mutableMapOf<String, ConflictResolutionChoice>()
             val fieldResolutions = mutableMapOf<String, Map<String, ConflictResolutionChoice>>()
             _uiState.value.entries.forEach { entry ->
-                val perField = entry.fields.associate { field ->
-                    field.fieldKey to when (field.selectedChoice) {
-                        FieldChoice.LOCAL -> ConflictResolutionChoice.KEEP_LOCAL
-                        FieldChoice.REMOTE -> ConflictResolutionChoice.KEEP_REMOTE
+                when (entry.mode) {
+                    EntryResolutionMode.FIELD_BY_FIELD -> {
+                        val perField = entry.fields.associate { field ->
+                            field.fieldKey to when (field.selectedChoice) {
+                                FieldChoice.LOCAL -> ConflictResolutionChoice.KEEP_LOCAL
+                                FieldChoice.REMOTE -> ConflictResolutionChoice.KEEP_REMOTE
+                            }
+                        }
+                        // 条目级决策保留为兜底语义：任一字段选择云端即视为 KEEP_REMOTE
+                        val hasRemote = perField.values.any { it == ConflictResolutionChoice.KEEP_REMOTE }
+                        resolutions[entry.id] =
+                            if (hasRemote) ConflictResolutionChoice.KEEP_REMOTE else ConflictResolutionChoice.KEEP_LOCAL
+                        fieldResolutions[entry.id] = perField
                     }
+                    EntryResolutionMode.KEEP_LOCAL -> resolutions[entry.id] = ConflictResolutionChoice.KEEP_LOCAL
+                    EntryResolutionMode.KEEP_REMOTE -> resolutions[entry.id] = ConflictResolutionChoice.KEEP_REMOTE
+                    EntryResolutionMode.DUPLICATE_BOTH -> resolutions[entry.id] = ConflictResolutionChoice.DUPLICATE_BOTH
                 }
-                // 条目级决策保留为兜底语义：任一字段选择云端即视为 KEEP_REMOTE
-                val hasRemote = perField.values.any { it == ConflictResolutionChoice.KEEP_REMOTE }
-                resolutions[entry.id] =
-                    if (hasRemote) ConflictResolutionChoice.KEEP_REMOTE else ConflictResolutionChoice.KEEP_LOCAL
-                fieldResolutions[entry.id] = perField
             }
             val outcome = syncCoordinator.resolveConflicts(resolutions, fieldResolutions)
             val isSuccess = outcome is SyncOutcome.MergedAndUploaded

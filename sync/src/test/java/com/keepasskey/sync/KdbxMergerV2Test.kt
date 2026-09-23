@@ -198,7 +198,8 @@ class KdbxMergerV2Test {
         assertEquals(1, result.conflicts.size)
         val conflict = result.conflicts.first()
         assertEquals(entryUuid.toHexString(), conflict.entryId)
-        assertTrue(conflict.modifiedFields.contains("密码 (Password)"))
+        // ISSUE-P2-281：modifiedFields 词汇改为机读键（KDBX 标准字段键）
+        assertTrue(conflict.modifiedFields.contains(KdbxConstants.Fields.PASSWORD))
     }
 
     @Test
@@ -512,7 +513,8 @@ class KdbxMergerV2Test {
 
         // 仍须生成冲突清单供用户知晓，但字段级仲裁采纳时间戳更晚的本地值
         assertEquals(1, result.conflicts.size)
-        assertTrue(result.conflicts.first().modifiedFields.contains("密码 (Password)"))
+        // ISSUE-P2-281：modifiedFields 词汇改为机读键（KDBX 标准字段键）
+        assertTrue(result.conflicts.first().modifiedFields.contains(KdbxConstants.Fields.PASSWORD))
         val merged = result.mergedRoot.findEntry(entryUuid)
         assertNotNull(merged)
         assertEquals("pwd_local", merged?.password?.readString())
@@ -581,7 +583,10 @@ class KdbxMergerV2Test {
 
         // 同名自定义字段不同值：生成冲突清单，字段级仲裁采纳时间戳更晚的本地值
         assertEquals(1, result.conflicts.size)
-        assertTrue(result.conflicts.first().modifiedFields.contains("自定义字段: OTP"))
+        // ISSUE-P2-281：自定义字段差异键＝前缀 + 字段名（与 resolveConflictByFields 同表）
+        assertTrue(
+            result.conflicts.first().modifiedFields.contains(KdbxMerger.CUSTOM_FIELD_CONFLICT_PREFIX + "OTP")
+        )
         val merged = result.mergedRoot.findEntry(entryUuid)
         assertNotNull(merged)
         assertEquals(1, merged?.customFields?.size)

@@ -41,17 +41,7 @@
 
 ---
 
-## P2 中危缺陷与协议/测试缺口（10 项）
-
-### ISSUE-P2-281：仅自定义字段分歧时冲突界面无从裁决，对端改动必然丢失（`modifiedFields` 全仓零消费）
-
-- **核实时间点**：2026-09-23 经冲突 UI 与合并器双侧核对。
-- **核实方式**：`app/.../ui/screens/conflict/ConflictResolutionViewModel.kt:51-108` 自造 diff，仅覆盖 Title / UserName / Password / URL / Notes 五个标准字段，**不含 `customFields`**；`:172-183` 恒传 `fieldResolutions` ⇒ `SyncConflictController.kt:112` 的 `fieldChoice != null` 恒真，`resolveConflict` / `DUPLICATE_BOTH` 在该路径**不可达**；`KdbxMerger.kt:172-181` 在字段解析表为空时直接返回本地条目 ⇒ 远端改动被丢。`modifiedFields` 生产侧零消费（仅 `ConflictStrategy.kt:106`、`KdbxEntryMerger.kt:206` 产出，余为 4 处测试）。无「整条取云端」入口（`ConflictResolutionScreenSections.kt:133-163` 仅字段行 / 全选）。
-- **定位提示**：冲突界面目录为 `ui/screens/conflict/`（本族首轮曾误写为 `ui/screens/sync/`，该目录不存在）。
-- **涉及文件**：`app/src/main/java/com/keepasskey/app/ui/screens/conflict/ConflictResolutionViewModel.kt`、`app/src/main/java/com/keepasskey/app/ui/screens/conflict/ConflictResolutionScreenSections.kt`、`sync/src/main/java/com/keepasskey/sync/merge/KdbxMerger.kt`、`sync/src/main/java/com/keepasskey/sync/merge/ConflictStrategy.kt`。
-- **验收标准**：AC① 差异来源改为合并器产出的 `modifiedFields`（单一真相源），禁两处各算一份；AC② 自定义字段分歧可见可裁决，并补「整条取本地 / 整条取云端」兜底入口；AC③ 使 `DUPLICATE_BOTH` 等已实现分支真正可达或如实移除；AC④ 用例锁定「仅自定义字段冲突 ⇒ 用户能选且不丢」。
-
----
+## P2 中危缺陷与协议/测试缺口（9 项）
 
 ### ISSUE-P2-282：Tags 分隔符在读 / 写 / 编辑页三处互不相同，且无官方 `NormalizeTag`，标签数跨实现漂移
 

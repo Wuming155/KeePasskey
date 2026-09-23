@@ -148,3 +148,4 @@
 | §286 | 同步窗口内编辑「校验-采用」守卫批次：`ISSUE-P2-278` 闭环。会话层原子「校验-采用」单点（`adoptDatabaseIfUnchanged`，实例身份判据、会话 Mutex 内无 TOCTOU）收口五个整树落库点；守卫不过 ⇒ 如实中止（新字符串中英成对）。用例 +5；`tests=2595` 全绿 | ISSUE-P2-278 | [`286-同步窗口内编辑校验采用守卫批次.md`](batches/286-同步窗口内编辑校验采用守卫批次.md) |
 | §287 | 合并标量字段单一词汇表批次：`ISSUE-P2-279` 闭环。条目 / 分组合并的判定集 / 合并集 / 上报集改由单一词汇表驱动（含图标 / 覆写 URL / qualityCheck / 分组 customIconId）；双侧异值 LWW + 冲突清单留痕。用例 +6；`tests=2601` 全绿 | ISSUE-P2-279 | [`287-合并标量字段单一词汇表批次.md`](batches/287-合并标量字段单一词汇表批次.md) |
 | §288 | 合并图标池与库级 Meta 口径批次：`ISSUE-P2-280` 闭环。`customIcons` 参与合并（官方口径 UUID 并集 + LWW）；写出侧 `CustomIconRef` 悬空 fail-closed；库级 Meta 逐字段口径登记 `PD-35`。用例 +8；`tests=2609` 全绿 | ISSUE-P2-280 | [`288-合并图标池与库级Meta口径批次.md`](batches/288-合并图标池与库级Meta口径批次.md) |
+| §289 | 冲突差异单一词汇表与裁决面批次：`ISSUE-P2-281` 闭环。`modifiedFields` 机读键词汇单一真相源；自定义字段冲突可见可裁决；条目级整条裁决与 `DUPLICATE_BOTH` 恢复可达。用例 +7；`tests=2616` 全绿 | ISSUE-P2-281 | [`289-冲突差异单一词汇表与裁决面批次.md`](batches/289-冲突差异单一词汇表与裁决面批次.md) |

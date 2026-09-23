@@ -20,6 +20,12 @@ enum class ConflictResolutionChoice {
 
 /**
  * 差异检测条目模型
+ *
+ * ISSUE-P2-281 AC①：[modifiedFields] 是冲突差异的**单一真相源**，词汇为机读键
+ * （不再是展示串）：标准字段＝KDBX 标准字段键（[KdbxConstants.Fields.*]）；
+ * 自定义字段＝[KdbxMerger.CUSTOM_FIELD_CONFLICT_PREFIX] + 字段名；标量字段＝
+ * [KdbxMerger.CONFLICT_KEY_ICON_ID] 等四键。冲突界面与 [KdbxMerger.resolveConflictByFields]
+ * 均以同一份词汇消费，禁止再各算一份差异。
  */
 data class ConflictedEntryPair(
     val entryId: String,
@@ -71,6 +77,21 @@ data class MergeResult(
  * [KdbxGroupMerger] / [KdbxEntryMerger] / [KdbxTombstoneMerger]（同包 internal 单元）。
  */
 object KdbxMerger {
+
+    /**
+     * ISSUE-P2-281：冲突差异键的词汇常量（[ConflictedEntryPair.modifiedFields] 的单一词汇表，
+     * 产出侧 `KdbxEntryMerger` / `BothModifiedEntryCollector` 与消费侧冲突界面、
+     * [resolveConflictByFields] 共用）。
+     */
+
+    /** 自定义字段差异键前缀：实际键 = 本前缀 + 自定义字段名（防与标准字段键撞名）。 */
+    const val CUSTOM_FIELD_CONFLICT_PREFIX = "custom:"
+
+    /** 标量字段差异键（`KdbxEntryMerger.MERGED_SCALAR_FIELDS` 的同词汇外显）。 */
+    const val CONFLICT_KEY_ICON_ID = "iconId"
+    const val CONFLICT_KEY_CUSTOM_ICON_ID = "customIconId"
+    const val CONFLICT_KEY_OVERRIDE_URL = "overrideUrl"
+    const val CONFLICT_KEY_QUALITY_CHECK = "qualityCheck"
 
     /**
      * 墓碑感知三方数据库合并。
@@ -198,13 +219,17 @@ object KdbxMerger {
         KdbxEntryMerger.isModified(base, current)
 
     /**
-     * 字段级冲突解决（TASK-30 整改）：按字段粒度应用用户决策——以本地条目为底版，
-     * 用户选择「云端」的字段用远端值覆写，其余字段保留本地值。
+     * 字段级冲突解决（TASK-30 整改；`ISSUE-P2-281` 扩词汇）：按字段粒度应用用户决策——
+     * 以本地条目为底版，用户选择「云端」的字段用远端值覆写，其余字段保留本地值。
      *
      * 合并条目保留本地 UUID（同一冲突条目的就地裁决）；任一字段采用远端值时
      * lastModificationTime 刷新为当前时刻（产物相对两侧均有变化，需触发他端再次合并）。
-     * [fieldChoices] 键为 KDBX 标准字段键（KdbxConstants.Fields.*）；密码等敏感字段
-     * 以 ProtectedString 整体移交，全程不物化明文。
+     * [fieldChoices] 键的词汇与 [ConflictedEntryPair.modifiedFields] 同表
+     * （单一真相源，禁止另造）：标准字段键（[KdbxConstants.Fields.*]）、
+     * [CUSTOM_FIELD_CONFLICT_PREFIX] 前缀的自定义字段键、四个标量键
+     * （[CONFLICT_KEY_ICON_ID] / [CONFLICT_KEY_CUSTOM_ICON_ID] /
+     * [CONFLICT_KEY_OVERRIDE_URL] / [CONFLICT_KEY_QUALITY_CHECK]）。
+     * 密码等敏感字段以 ProtectedString 整体移交，全程不物化明文。
      */
     fun resolveConflictByFields(
         pair: ConflictedEntryPair,
@@ -214,8 +239,28 @@ object KdbxMerger {
         var adoptedRemote = false
         for ((fieldKey, choice) in fieldChoices) {
             if (choice != ConflictResolutionChoice.KEEP_REMOTE) continue
-            val remoteValue = pair.remoteEntry.fields[fieldKey] ?: continue
-            merged = merged.withField(fieldKey, remoteValue)
+            when {
+                fieldKey.startsWith(CUSTOM_FIELD_CONFLICT_PREFIX) -> {
+                    val customKey = fieldKey.removePrefix(CUSTOM_FIELD_CONFLICT_PREFIX)
+                    val remoteField = pair.remoteEntry.customFields.firstOrNull { it.key == customKey }
+                        ?: continue
+                    merged = merged.copy(
+                        customFields = merged.customFields.filterNot { it.key == customKey } + remoteField
+                    )
+                }
+                fieldKey == CONFLICT_KEY_ICON_ID ->
+                    merged = merged.copy(iconId = pair.remoteEntry.iconId)
+                fieldKey == CONFLICT_KEY_CUSTOM_ICON_ID ->
+                    merged = merged.copy(customIconId = pair.remoteEntry.customIconId)
+                fieldKey == CONFLICT_KEY_OVERRIDE_URL ->
+                    merged = merged.copy(overrideUrl = pair.remoteEntry.overrideUrl)
+                fieldKey == CONFLICT_KEY_QUALITY_CHECK ->
+                    merged = merged.copy(qualityCheck = pair.remoteEntry.qualityCheck)
+                else -> {
+                    val remoteValue = pair.remoteEntry.fields[fieldKey] ?: continue
+                    merged = merged.withField(fieldKey, remoteValue)
+                }
+            }
             adoptedRemote = true
         }
         if (!adoptedRemote) return merged

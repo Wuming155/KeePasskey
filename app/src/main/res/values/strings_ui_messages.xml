@@ -46,6 +46,15 @@
     <string name="conflict_field_password">密码 (Password)</string>
     <string name="conflict_field_url">网址 (URL)</string>
     <string name="conflict_field_notes">备注 (Notes)</string>
+    <!-- ISSUE-P2-281：标量字段与自定义字段差异的标签 / 取值呈现 -->
+    <string name="conflict_field_icon">图标 (Icon)</string>
+    <string name="conflict_field_custom_icon">自定义图标 (CustomIcon)</string>
+    <string name="conflict_field_override_url">覆写 URL (OverrideUrl)</string>
+    <string name="conflict_field_quality_check">质量检查 (QualityCheck)</string>
+    <string name="conflict_value_true">是</string>
+    <string name="conflict_value_false">否</string>
+    <string name="conflict_value_none">（无）</string>
+    <string name="conflict_value_changed">（已修改）</string>
     <!-- 敏感数据铁律：冲突对比界面不物化密码明文，仅以掩码呈现「两侧不一致」事实 -->
     <string name="conflict_mask_local">••••••••（本地版本）</string>
     <string name="conflict_mask_remote">••••••••（云端版本）</string>

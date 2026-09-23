@@ -2,6 +2,7 @@ package com.keepasskey.app.ui.screens.conflict
 
 import android.content.res.Configuration
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -13,10 +14,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -36,6 +39,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.keepasskey.app.R
@@ -131,7 +135,8 @@ fun ConflictResolutionScreen(
                     entry = entry,
                     onFieldChoiceChange = { fieldKey, choice ->
                         viewModel.selectFieldChoice(entry.id, fieldKey, choice)
-                    }
+                    },
+                    onModeChange = { mode -> viewModel.selectEntryMode(entry.id, mode) }
                 )
             }
 
@@ -143,7 +148,8 @@ fun ConflictResolutionScreen(
 @Composable
 private fun ConflictedEntryCard(
     entry: ConflictedEntryItem,
-    onFieldChoiceChange: (String, FieldChoice) -> Unit
+    onFieldChoiceChange: (String, FieldChoice) -> Unit,
+    onModeChange: (EntryResolutionMode) -> Unit
 ) {
     BentoCard(
         modifier = Modifier.fillMaxWidth(),
@@ -169,14 +175,62 @@ private fun ConflictedEntryCard(
                 }
             }
 
-            entry.fields.forEach { field ->
-                FieldDiffRow(
-                    field = field,
-                    onChoiceSelected = { choice -> onFieldChoiceChange(field.fieldKey, choice) }
+            // ISSUE-P2-281 AC②／AC③：条目级裁决方式（整条取本地 / 云端兜底与双方保留入口）
+            EntryResolutionModeSelector(
+                mode = entry.mode,
+                onModeChange = onModeChange
+            )
+
+            if (entry.mode == EntryResolutionMode.FIELD_BY_FIELD) {
+                entry.fields.forEach { field ->
+                    FieldDiffRow(
+                        field = field,
+                        onChoiceSelected = { choice -> onFieldChoiceChange(field.fieldKey, choice) }
+                    )
+                }
+            } else {
+                Text(
+                    text = stringResource(R.string.conflict_entry_mode_whole_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }
     }
+}
+
+/** ISSUE-P2-281：条目级裁决方式选择行（逐字段 / 整条本地 / 整条云端 / 双方保留）。 */
+@Composable
+private fun EntryResolutionModeSelector(
+    mode: EntryResolutionMode,
+    onModeChange: (EntryResolutionMode) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        EntryResolutionMode.entries.forEach { option ->
+            FilterChip(
+                selected = mode == option,
+                onClick = { onModeChange(option) },
+                label = {
+                    Text(
+                        text = stringResource(entryModeLabelRes(option)),
+                        fontSize = 11.sp
+                    )
+                }
+            )
+        }
+    }
+}
+
+private fun entryModeLabelRes(mode: EntryResolutionMode): Int = when (mode) {
+    EntryResolutionMode.FIELD_BY_FIELD -> R.string.conflict_entry_mode_field
+    EntryResolutionMode.KEEP_LOCAL -> R.string.conflict_entry_keep_local
+    EntryResolutionMode.KEEP_REMOTE -> R.string.conflict_entry_keep_remote
+    EntryResolutionMode.DUPLICATE_BOTH -> R.string.conflict_entry_duplicate_both
 }
 
 @Composable
@@ -250,7 +304,8 @@ internal fun ConflictedEntryCardPreview() {
                     )
                 )
             ),
-            onFieldChoiceChange = { _, _ -> }
+            onFieldChoiceChange = { _, _ -> },
+            onModeChange = {}
         )
     }
 }

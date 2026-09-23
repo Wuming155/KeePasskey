@@ -68,7 +68,8 @@ class ConflictResolutionViewModelTest {
             entryId = entryId.toHexString(),
             localEntry = local,
             remoteEntry = remote,
-            modifiedFields = listOf("标题 (Title)", "密码 (Password)")
+            // ISSUE-P2-281：modifiedFields 为机读差异键（界面差异行的唯一数据源）
+            modifiedFields = listOf(KdbxConstants.Fields.TITLE, KdbxConstants.Fields.PASSWORD)
         )
 
         val conflictFlowInternal = MutableStateFlow<List<ConflictedEntryPair>>(listOf(conflictPair))

@@ -424,6 +424,12 @@
     <string name="conflict_keep_all_remote">全部保留云端</string>
     <string name="conflict_local_version">本地版本 (修改项)</string>
     <string name="conflict_remote_version">云端版本 (远程副本)</string>
+    <!-- ISSUE-P2-281：条目级裁决方式（整条兜底入口） -->
+    <string name="conflict_entry_mode_field">按字段裁决</string>
+    <string name="conflict_entry_keep_local">整条取本地</string>
+    <string name="conflict_entry_keep_remote">整条取云端</string>
+    <string name="conflict_entry_duplicate_both">双方保留（云端存副本）</string>
+    <string name="conflict_entry_mode_whole_hint">该条目将按上方所选方式整条裁决，字段选择已停用</string>
 
     <!-- 版本差异对比 -->
     <string name="diff_dialog_title">版本差异对比</string>

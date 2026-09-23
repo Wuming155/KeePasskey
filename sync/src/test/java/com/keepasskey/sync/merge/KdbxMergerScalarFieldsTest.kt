@@ -90,8 +90,8 @@ class KdbxMergerScalarFieldsTest {
 
         assertEquals("双侧异值须按 LWW 裁决（远端较新）", 3, merged.iconId)
         assertTrue(
-            "图标分歧必须进冲突清单（modifiedFields 留痕）",
-            conflict!!.modifiedFields.any { it.contains("图标") }
+            "图标分歧必须进冲突清单（modifiedFields 留痕，机读差异键）",
+            conflict!!.modifiedFields.contains(KdbxMerger.CONFLICT_KEY_ICON_ID)
         )
     }
 

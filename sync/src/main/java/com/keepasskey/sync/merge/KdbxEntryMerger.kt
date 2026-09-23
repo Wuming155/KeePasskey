@@ -34,20 +34,29 @@ internal object KdbxEntryMerger {
      * 只在 `write` 闭包内发生，由词汇表自身保证不错位。
      */
     private class ScalarFieldSpec(
-        val displayName: String,
+        /** ISSUE-P2-281：冲突差异键（机读词汇，与 `KdbxMerger.CONFLICT_KEY_*` 同表）。 */
+        val conflictKey: String,
         val read: (KdbxEntry) -> Any?,
         val write: (KdbxEntry, Any?) -> KdbxEntry
     )
 
     private val MERGED_SCALAR_FIELDS: List<ScalarFieldSpec> = listOf(
-        ScalarFieldSpec("图标 (Icon)", { it.iconId }, { e, v -> e.copy(iconId = v as Int) }),
+        ScalarFieldSpec(KdbxMerger.CONFLICT_KEY_ICON_ID, { it.iconId }, { e, v -> e.copy(iconId = v as Int) }),
         ScalarFieldSpec(
-            "自定义图标 (CustomIcon)",
+            KdbxMerger.CONFLICT_KEY_CUSTOM_ICON_ID,
             { it.customIconId },
             { e, v -> e.copy(customIconId = v as KdbxUuid?) }
         ),
-        ScalarFieldSpec("覆写 URL (OverrideUrl)", { it.overrideUrl }, { e, v -> e.copy(overrideUrl = v as String?) }),
-        ScalarFieldSpec("质量检查 (QualityCheck)", { it.qualityCheck }, { e, v -> e.copy(qualityCheck = v as Boolean) })
+        ScalarFieldSpec(
+            KdbxMerger.CONFLICT_KEY_OVERRIDE_URL,
+            { it.overrideUrl },
+            { e, v -> e.copy(overrideUrl = v as String?) }
+        ),
+        ScalarFieldSpec(
+            KdbxMerger.CONFLICT_KEY_QUALITY_CHECK,
+            { it.qualityCheck },
+            { e, v -> e.copy(qualityCheck = v as Boolean) }
+        )
     )
 
     /**
@@ -248,7 +257,8 @@ internal object KdbxEntryMerger {
                 lv == bv && rv != bv -> rv
                 lv == rv -> lv
                 else -> {
-                    diffFields.add(spec.displayName)
+                    // ISSUE-P2-281：留痕用机读差异键（单一词汇表），不再是展示串
+                    diffFields.add(spec.conflictKey)
                     if (rTime.isAfter(lTime)) rv else lv
                 }
             }
@@ -304,8 +314,8 @@ internal object KdbxEntryMerger {
                     if (!isFieldDifferent(lv, rv)) {
                         if (lv != null) mergedFields[key] = lv
                     } else {
-                        // 冲突字段
-                        diffFields.add(getFieldDisplayName(key))
+                        // 冲突字段（ISSUE-P2-281：机读差异键＝KDBX 标准字段键，单一词汇表）
+                        diffFields.add(key)
                         val picked = if (remote.times.lastModificationTime.isAfter(local.times.lastModificationTime)) rv else lv
                         if (picked != null) mergedFields[key] = picked
                     }
@@ -346,7 +356,8 @@ internal object KdbxEntryMerger {
                     if (lc?.value == rc?.value) {
                         if (lc != null) mergedCustomFields.add(lc)
                     } else {
-                        diffFields.add("自定义字段: $key")
+                        // ISSUE-P2-281：机读差异键＝前缀 + 字段名（与 resolveConflictByFields 同表）
+                        diffFields.add(KdbxMerger.CUSTOM_FIELD_CONFLICT_PREFIX + key)
                         val picked = if (remote.times.lastModificationTime.isAfter(local.times.lastModificationTime)) rc else lc
                         if (picked != null) mergedCustomFields.add(picked)
                     }
@@ -392,16 +403,5 @@ internal object KdbxEntryMerger {
         if (a == null || b == null) return true
         // ProtectedString.equals 为字节数组内容比较，不物化明文 String
         return a != b
-    }
-
-    private fun getFieldDisplayName(key: String): String {
-        return when (key) {
-            KdbxConstants.Fields.TITLE -> "标题 (Title)"
-            KdbxConstants.Fields.USER_NAME -> "用户名 (Username)"
-            KdbxConstants.Fields.PASSWORD -> "密码 (Password)"
-            KdbxConstants.Fields.URL -> "网址 (URL)"
-            KdbxConstants.Fields.NOTES -> "备注 (Notes)"
-            else -> key
-        }
     }
 }

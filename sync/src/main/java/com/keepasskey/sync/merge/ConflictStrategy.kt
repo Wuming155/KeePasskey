@@ -103,21 +103,34 @@ object BothModifiedEntryCollector {
                 entryId = entryId,
                 localEntry = localEntry,
                 remoteEntry = remoteEntry,
-                modifiedFields = differingStandardFields(localEntry, remoteEntry)
+                modifiedFields = differingConflictFields(localEntry, remoteEntry)
             )
         }
         return if (extra.isEmpty()) alreadyConflicted else alreadyConflicted + extra
     }
 
     /**
-     * 双方标准字段差异键（与冲突界面 `ConflictedField` 的字段键同源，
-     * 均为 [KdbxConstants.Fields] 标准键），空列表表示差异仅在非标准字段。
+     * 双方差异键（`ISSUE-P2-281`：与 [ConflictedEntryPair.modifiedFields] 同一词汇表——
+     * 标准字段键 + `custom:` 前缀自定义字段键 + 四个标量键；空列表表示差异仅在不入词汇的
+     * 面（如 `times` / 标签并集 / 附件并集）。
      */
-    private fun differingStandardFields(local: KdbxEntry, remote: KdbxEntry): List<String> = buildList {
+    private fun differingConflictFields(local: KdbxEntry, remote: KdbxEntry): List<String> = buildList {
         if (local.title != remote.title) add(KdbxConstants.Fields.TITLE)
         if (local.userName != remote.userName) add(KdbxConstants.Fields.USER_NAME)
         if (local.password != remote.password) add(KdbxConstants.Fields.PASSWORD)
         if (local.url != remote.url) add(KdbxConstants.Fields.URL)
         if (local.notes != remote.notes) add(KdbxConstants.Fields.NOTES)
+        // 自定义字段：按名比对值（ProtectedString.equals 为内容比较，不物化明文）
+        val localCustom = local.customFields.associateBy { it.key }
+        val remoteCustom = remote.customFields.associateBy { it.key }
+        for (key in localCustom.keys + remoteCustom.keys) {
+            if (localCustom[key]?.value != remoteCustom[key]?.value) {
+                add(KdbxMerger.CUSTOM_FIELD_CONFLICT_PREFIX + key)
+            }
+        }
+        if (local.iconId != remote.iconId) add(KdbxMerger.CONFLICT_KEY_ICON_ID)
+        if (local.customIconId != remote.customIconId) add(KdbxMerger.CONFLICT_KEY_CUSTOM_ICON_ID)
+        if (local.overrideUrl != remote.overrideUrl) add(KdbxMerger.CONFLICT_KEY_OVERRIDE_URL)
+        if (local.qualityCheck != remote.qualityCheck) add(KdbxMerger.CONFLICT_KEY_QUALITY_CHECK)
     }
 }

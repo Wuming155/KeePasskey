@@ -360,6 +360,7 @@
 | §286 | 同步窗口内编辑「校验-采用」守卫批次：`ISSUE-P2-278` 闭环。会话层原子「校验-采用」单点（`adoptDatabaseIfUnchanged`，实例身份判据、会话 Mutex 内无 TOCTOU）收口五个整树落库点（远端接管 / 自动合并 ×2 / 用户裁决 ×2）；守卫不过 ⇒ `Error(sync_error_local_changed_during_sync)` 如实中止（新字符串中英成对）。用例 +5（会话层 3 + 下载窗口真实注入竞态 2）；`tests=2595` 全绿 | ISSUE-P2-278 | [`286-同步窗口内编辑校验采用守卫批次.md`](resolved/batches/286-同步窗口内编辑校验采用守卫批次.md) |
 | §287 | 合并标量字段单一词汇表批次：`ISSUE-P2-279` 闭环。条目 `MERGED_SCALAR_FIELDS`（iconId / customIconId / overrideUrl / qualityCheck）与分组 `MERGED_GROUP_FIELDS`（+customIconId）——判定集 / 合并集 / 上报集同表驱动；双侧异值 LWW + `modifiedFields` 留痕进冲突清单（不再静默）；`qualityCheck` 适用范围写入词汇表 KDoc（AC③）。用例 +6；`tests=2601` 全绿 | ISSUE-P2-279 | [`287-合并标量字段单一词汇表批次.md`](resolved/batches/287-合并标量字段单一词汇表批次.md) |
 | §288 | 合并图标池与库级 Meta 口径批次：`ISSUE-P2-280` 闭环。`customIcons` 按 UUID 并集 + LWW 参与合并（对齐官方 `MergeInCustomIcons`，只增不删）；写出侧 `CustomIconRef` 命中校验 fail-closed（条目 / 分组 / 历史快照三处共用判据）；库级 Meta 逐字段结论登记 **`PD-35`**。用例 +8（合并 4 + 整库往返 / 悬空守卫 4）；`tests=2609` 全绿 | ISSUE-P2-280 | [`288-合并图标池与库级Meta口径批次.md`](resolved/batches/288-合并图标池与库级Meta口径批次.md) |
+| §289 | 冲突差异单一词汇表与裁决面批次：`ISSUE-P2-281` 闭环。`modifiedFields` 改**机读键**词汇（标准键 / `custom:` 前缀 / 四标量键，常量化于 `KdbxMerger`），界面与 `resolveConflictByFields` 同表消费（拆两处各算一份）；自定义字段可见可裁决（受保护掩码）；条目级裁决方式选择行（按字段 / 整条本地 / 整条云端 / **双方保留**——`DUPLICATE_BOTH` 恢复可达）。用例 +7；`tests=2616` 全绿 + 截图包装编译门禁绿 | ISSUE-P2-281 | [`289-冲突差异单一词汇表与裁决面批次.md`](resolved/batches/289-冲突差异单一词汇表与裁决面批次.md) |
 
 ## 分册导航
 

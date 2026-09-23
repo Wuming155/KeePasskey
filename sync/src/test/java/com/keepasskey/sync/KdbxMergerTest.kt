@@ -62,7 +62,8 @@ class KdbxMergerTest {
             entryId = sharedId.toHexString(),
             localEntry = localEntry,
             remoteEntry = remoteEntry,
-            modifiedFields = listOf("密码 (Password)")
+            // ISSUE-P2-281：modifiedFields 词汇为机读键（本用例不消费其值，仅保持词汇一致）
+            modifiedFields = listOf(KdbxConstants.Fields.PASSWORD)
         )
 
         val resolved = KdbxMerger.resolveConflict(pair, ConflictResolutionChoice.DUPLICATE_BOTH)

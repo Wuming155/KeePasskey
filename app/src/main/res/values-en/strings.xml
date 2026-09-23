@@ -413,6 +413,12 @@
     <string name="conflict_keep_all_remote">Keep all remote</string>
     <string name="conflict_local_version">Local version (modified)</string>
     <string name="conflict_remote_version">Remote version (cloud copy)</string>
+    <!-- ISSUE-P2-281：条目级裁决方式（整条兜底入口） -->
+    <string name="conflict_entry_mode_field">Per-field</string>
+    <string name="conflict_entry_keep_local">Keep entire local</string>
+    <string name="conflict_entry_keep_remote">Keep entire cloud</string>
+    <string name="conflict_entry_duplicate_both">Keep both (cloud as copy)</string>
+    <string name="conflict_entry_mode_whole_hint">This entry will be resolved as a whole; per-field choices are disabled</string>
 
     <!-- Revision diff -->
     <string name="diff_dialog_title">Revision Diff</string>
@@ -1369,6 +1375,15 @@
     <string name="conflict_field_password">Password</string>
     <string name="conflict_field_url">URL</string>
     <string name="conflict_field_notes">Notes</string>
+    <!-- ISSUE-P2-281：标量字段与自定义字段差异的标签 / 取值呈现 -->
+    <string name="conflict_field_icon">Icon</string>
+    <string name="conflict_field_custom_icon">Custom icon</string>
+    <string name="conflict_field_override_url">Override URL</string>
+    <string name="conflict_field_quality_check">Quality check</string>
+    <string name="conflict_value_true">Yes</string>
+    <string name="conflict_value_false">No</string>
+    <string name="conflict_value_none">(none)</string>
+    <string name="conflict_value_changed">(modified)</string>
     <string name="conflict_mask_local">•••••••• (local version)</string>
     <string name="conflict_mask_remote">•••••••• (cloud version)</string>
     <string name="conflict_group_path">Root / Sync conflicts</string>
