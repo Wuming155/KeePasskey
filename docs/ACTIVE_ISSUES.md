@@ -35,22 +35,13 @@
 
 ---
 
-## P1 高危与核心功能问题（1 项）
+## P1 高危与核心功能问题（0 项）
 
 > **历史归零留痕**（§246 曾闭环 `ISSUE-P1-241`（「移除密码库关联」的确认文案承诺「不会删除物理文件」，而应用私有库的文件**会被真的删除**）——整改＝确认弹窗文案与动作按**存储类型**分列两套、判据落纯函数并单点化、数据层只在「应用私有库」分支删物理文件（产品口径落 `PD-17`）；真机逐字实证「界面声明与文件系统结果一致」。证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md) 与
 > [`resolved/batches/246-移除密码库确认文案与真实行为一致批次.md`](resolved/batches/246-移除密码库确认文案与真实行为一致批次.md)。）
-
-### ISSUE-P1-276：附件引用预算把自产与合法第三方库判为「引用放大攻击」，整库无法打开（合并轮次会把受害窗口撑宽）
-
-- **核实时间点**：2026-09-23 经全仓定向核对 + 两轮独立对抗复核（复核代理 C 组四处攻击全部落空）+ 边界算式与用户共同定版。
-- **核实方式**：① 计费侧 `database/src/main/java/com/keepasskey/database/xml/KdbxXmlBinaryNode.kt:221` 对**每一个**非落盘引用调 `attachmentBudget.accountPoolReference(item.size)`，`:329-335` 越界即抛 `KdbxCorruptFileException` 文案「疑似引用放大攻击」（`:331` 为**严格大于**）。② 上限侧同文件 `:382-385` 的 `forParse(pool)` = `2 × 池总字节 + BUDGET_SLACK_BYTES(1 MiB)`，无第二条更宽上限（`MAX_INLINE_MATERIALIZED_BYTES = 64 MiB` 是另一维度）。③ 落盘阈值侧 `core/src/main/java/com/keepasskey/core/security/BinaryStore.kt:52-57` 为 `size > 1 MiB` **严格大于**⇒ 恰好 1 MiB 的附件仍内联、仍被计费。④ 计费**无 refIndex 去重**：同一池条目被引 N 次即计 N 份整尺寸。⑤ 历史快照确实复用 `<Ref>`——`database/src/main/java/com/keepasskey/database/xml/KdbxXmlEntrySerializer.kt:85-95` 递归序列化 `<History>` 时**原样透传 `binaryPoolSize`**，`:126-129` 命中池即写 `Ref` 属性、不写内联字节；`<History>` 与主条目共用同一预算实例（`KdbxXmlGroupReader.kt:205/259`、`KdbxXmlParser.kt:53` 为唯一生产构造点）。⑥ 回归缺口：`AttachmentReferenceBudgetTest` 只测「2 引用放行 / 5000 引用拒绝」，**未声明 ≥3 引用为预期失败**，`:59` 用例名还自称「不被误拒」。
-- **判据（定版，整改与用例都按此写）**：设池内各条目尺寸为 `sᵢ`、被引用次数为 `nᵢ`，触发拒绝的条件是
-  `Σᵢ nᵢ·sᵢ > 2·Σⱼ sⱼ + 1 MiB`。
-  ① **单条目**情形化简为 `s × (N − 2) > 1 MiB` ⇒ `N ≤ 3` 安全；`N = 4`（主条目 + 3 条历史）需 `s > 512 KiB`；`N = 5` 需 `s > 341 KiB`；`N = 6` 需 `s > 256 KiB`。因内联上界恰为 1 MiB，**受害区间是 `(512 KiB, 1 MiB]`（含 1 MiB 端点）**——正是手机照片附件的常见尺寸。② **多条目不组合成安全**：两个条目各带一个 1 MiB 内联附件、各仅 2 条历史（各 `N = 3`）时，计费 `6 MiB > 2×2 MiB + 1 MiB = 5 MiB` **同样触发**。③ 反直觉处：`> 1 MiB` 的附件因走 spill 分支（`KdbxXmlBinaryNode.kt:209-217` 不计费）**反而免疫**——预算惩罚的是「中等尺寸」而非「大附件」。
-- **与 `ISSUE-P3-291` 的耦合（定级依据之一）**：合并器 `sync/.../merge/KdbxEntryMerger.kt:168` 取 `local + remote + base.history` 三方历史并集且不截断，**每多一条历史快照就给同一池条目多写一个 `<Ref>`**，即 `N` 每轮 +1 ⇒ 受害窗口随合并轮次向更小尺寸、更少本地编辑次数方向持续变宽。用户**全程不碰附件**也会从中止条件滑入触发条件。
-- **背景与根因**：这是自伤型误拒——后果不是降级而是**整库打不开**（只读通道与修复通道同走 `parse`），且本仓产物被自己的解析器判为损坏。三家参考实现均只按 `pool[i]` 取引用、无「按引用次数复制并计费」的机制（官方 `KdbxFile.Read.cs` 的 `ReadProtectedBinary` 直接取池条目），故本护栏属自加且口径错：要封的是「单池条目 + 海量引用」的放大攻击，实际却把「正常历史版本数 × 正常尺寸附件」一并拦下。
-- **涉及文件**：`database/src/main/java/com/keepasskey/database/xml/KdbxXmlBinaryNode.kt`（`:221` 计费、`:329-335` 抛出、`:382-385` 上限、`:209-217` spill 分支）、`core/src/main/java/com/keepasskey/core/security/BinaryStore.kt`（阈值语义）、`database/src/main/java/com/keepasskey/database/xml/KdbxXmlEntrySerializer.kt`（历史透传 `binaryPoolSize`）、`database/src/test/.../AttachmentReferenceBudgetTest.kt`（回归缺口）、`sync/src/main/java/com/keepasskey/sync/merge/KdbxEntryMerger.kt:168`（放大器）。
-- **验收标准**：AC① 计费口径改为**按去重后的 `refIndex` 集合**计量（同一池条目被引 N 次只计 1 份整尺寸），保留对「单条目 + 海量不同引用者」的真实放大面防护；AC② 判据与阈值以**注释内的封闭公式**写明（`Σ nᵢsᵢ` vs `2Σsᵢ + 余量`），禁「魔法数 + 散文说明」；AC③ 回归用例两级：单条目 `N = 4, s ∈ (512 KiB, 1 MiB]` **必须放行**，两条目各 `N = 3, s = 1 MiB` **必须放行**，同时保留「真放大攻击（同一条目被引数千次 / 池外越界索引）」仍被拒的用例——既有 `AttachmentReferenceBudgetTest` 用例只可加不可删；AC④ 端到端往返：`:database:` 层构造「1 MiB 附件 + 3 条历史」的真实产物并断言 `save → load` 成功解锁（对齐 `ISSUE-P2-271` 批次的换轴往返口径）；AC⑤ 与 `ISSUE-P3-292`（合并历史截断）同批或后续批收口，且整改说明须写明二者耦合，禁「只修一个就算闭环」；AC⑥ 触发条件须以**构造文件实测**验证（不得只算式推演），并按规则 8 与官方实现交叉核对同类库的可打开性。
+>
+> **§273 闭环 `ISSUE-P1-276`**（附件引用预算把自产与合法第三方库判为「引用放大攻击」，**整库无法打开**）——整改＝计费口径按**去重 `refIndex`**重定（旧判据 `Σᵢ nᵢ·sᵢ > 2·Σⱼ sⱼ + 1 MiB` 的受害区间 `(512 KiB, 1 MiB]` 已消除），拦截改由「单条目引用次数 ≤ 1024」「单条目物化字节 ≤ 64 MiB」两道 live 判据承担，旧整库字节式保留为记账不变量；`database` 层 9 例守卫（含官方 CLI 产出 fixture 与「1 MiB 附件 + 3 条历史」真实往返），判别力实验以旧口径复现 6 例红；残余面（分散引用的放大上限）登记 [`architecture/已知工程限界.md`](architecture/已知工程限界.md) **§29**。证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md) 与
+> [`resolved/batches/273-附件池引用计费重定口径批次.md`](resolved/batches/273-附件池引用计费重定口径批次.md)。
 
 ---
 
@@ -249,10 +240,10 @@
 
 - **核实时间点**：2026-09-23 经截断挂载点核对（本条由首轮 P2 **降级**为 P3：原「撞 128 MiB 致全端停摆」的定性被否证——历史附件只是 `<Value Ref="x"/>` 短节点，膨胀驱动量是文本，冲破外层 128 MiB 载荷界需量级离谱的快照数）。
 - **核实方式**：`sync/.../merge/KdbxEntryMerger.kt:168` 为 `local.history + remote.history + base.history` 三方并集，仅按 `times.lastModificationTime` 去重；条数 / 体积修剪函数 `pruneHistory` 只挂在 `database/.../history/HistoryManager.kt:48`（`recordHistorySnapshot`）与 `:83`（`rollbackToSnapshot`），保存路径的整树修剪只有 `pruneGroupHistoryByAge`（`:130`，按天数不按条数）⇒ **用户未再编辑过的条目，合并来的历史永久留存**；合并落库与写出（`SyncConflictController.kt:357/380`）不经任何截断。
-- **后果**：① 每个历史快照是完整 `KdbxEntry`（含各自 `ProtectedString`），内存逐快照单调增长；② 回滚界面会出现对端旧版本；③ **与 P1-276 耦合**——每多一条历史就给同一池条目多写一个 `<Ref>`，即 `N` 每轮 +1，把附件预算误拒的受害窗口向更小尺寸持续撑宽。
+- **后果**：① 每个历史快照是完整 `KdbxEntry`（含各自 `ProtectedString`），内存逐快照单调增长；② 回滚界面会出现对端旧版本；③ **与 P1-276 的耦合（`ISSUE-P1-276` 已于 §273 闭环）**——每多一条历史就给同一池条目多写一个 `<Ref>`，即 `N` 每轮 +1。P1-276 整改后该耦合的表现已由「**整库打不开**」降级为「**放大上限被推高**」：新判据「单条目引用次数 ≤ 1024」「单条目物化字节 ≤ 64 MiB」正是按『合并历史未截断』这一现状取的宽值，**故本条不落地，`MAX_REFERENCES_PER_POOL_ITEM` 就不能收紧**（见 [`architecture/已知工程限界.md`](architecture/已知工程限界.md) **§29** 的解除条件）。
 - **对照**：KXC `Merger.cpp:452/598`（合并内 `truncateHistory`）、官方 `PwDatabase.cs:939` → `PwEntry.cs:646-685`（按条数 + 体积修剪）均在合并后截断。
 - **涉及文件**：`sync/src/main/java/com/keepasskey/sync/merge/KdbxEntryMerger.kt`、`app/src/main/java/com/keepasskey/app/sync/SyncConflictController.kt`、`database/src/main/java/com/keepasskey/database/history/HistoryManager.kt`。
-- **验收标准**：AC① 合并产物在落库前按库 Meta 的 `HistoryMaxItems` / `HistoryMaxSize` 截断（与 `pruneHistory` 复用同一函数，禁两份口径）；AC② 用例：双侧各 6 条历史合并后 ≤ 上限，且被截掉的快照仍按既有约定处理；AC③ 正文与 `ISSUE-P1-276` 互设关联指针，禁「只修一个就算闭环」；AC④ 用例只可新增，不得删除既有合并历史用例（测试资产纪律 ①）。
+- **验收标准**：AC① 合并产物在落库前按库 Meta 的 `HistoryMaxItems` / `HistoryMaxSize` 截断（与 `pruneHistory` 复用同一函数，禁两份口径）；AC② 用例：双侧各 6 条历史合并后 ≤ 上限，且被截掉的快照仍按既有约定处理；AC③ 与 `ISSUE-P1-276` 的耦合**已单向闭环**（该条 §273 闭环，指针与耦合说明见 [`resolved/batches/273-附件池引用计费重定口径批次.md`](resolved/batches/273-附件池引用计费重定口径批次.md) 与限界表 **§29**）——**本条落地后必须复评** `KdbxAttachmentBudget.MAX_REFERENCES_PER_POOL_ITEM` 的取值依据（该上限当前正是按「合并历史不截断」取的宽值），复评结论须回填限界表 §29 与本节；禁「只修一个就算闭环」；AC④ 用例只可新增，不得删除既有合并历史用例（测试资产纪律 ①）。
 
 ---
 
@@ -279,7 +270,7 @@
 - **核实时间点**：2026-09-23 经同名可否产生的前提核实（本仓**不可**产生同名不同内容，只能来自外部库；首轮所提「改按 UI 的 id 取字节」的修法前提被否证）。
 - **核实方式**：① `app/.../data/repository/VaultEntrySecretReader.kt:279` 以 `attachments.firstOrNull { it.name == fileName }` 取字节，调用方 `EntryDetailAttachmentExporter.kt:39` 传 `attachment.fileName`，Toast 亦只报文件名 ⇒ 外部库（KeePass XML / Bitwarden / 桌面版）含同名附件时导出 A 得 B 的字节且提示为 A。解析侧逐 `<Binary>` 节点 emit、去重器原样保留 `name`（`KdbxXmlBinaryNode.kt:208-238`、`KdbxBinaryDeduplicator.kt:84-92`）；本仓编辑页按 fileName 视为替换（`EntryEditViewModel.kt:330-341`）故不自产同名。**修法前提**：`VaultEntryMapper.kt:60` 的 UI `id` 就是 `"${entry.id}_${att.name}"`（名字派生），改按 id 无法消歧，**须按 `refIndex` / 列表下标**。② `ui/screens/edit/EntryEditPickers.kt:64` 对 `*/*` 选择结果整份 `readBytes()` 交 `EntryEditViewModel.kt:330-341`；全仓无 `MAX_ATTACHMENT` 类约束（`BinaryStore.kt:47-57` 的 1 MiB 是落盘阈值非上限；`KdbxXmlBinaryNode.kt:58` 的 `AttachmentBudget` 默认 `unlimited()` 且只封解析不可信库）；无路径穿越面（`FileBinaryStore.kt:38` 只用固定目录名）。
 - **涉及文件**：`app/src/main/java/com/keepasskey/app/data/repository/VaultEntrySecretReader.kt`、`app/src/main/java/com/keepasskey/app/ui/screens/detail/EntryDetailAttachmentExporter.kt`、`app/src/main/java/com/keepasskey/app/ui/screens/edit/EntryEditPickers.kt`、`app/src/main/java/com/keepasskey/app/ui/screens/edit/EntryEditViewModel.kt`。
-- **验收标准**：AC① 附件寻址改按 `refIndex`（或树内下标），UI 的 `id` 生成同步去名字依赖；同名场景用例：导入含两个同名附件的第三方库 → 分别导出各自字节；AC② 对「添加无上限」给结论：设尺寸上限并如实提示，或维持现状并登记 `PD-*`（现状属用户自选大文件自伤 OOM，无攻击者面，故 P3）；AC③ 若设上限，须与解析侧预算（`ISSUE-P1-276`）的口径统一，禁两套数字。
+- **验收标准**：AC① 附件寻址改按 `refIndex`（或树内下标），UI 的 `id` 生成同步去名字依赖；同名场景用例：导入含两个同名附件的第三方库 → 分别导出各自字节；AC② 对「添加无上限」给结论：设尺寸上限并如实提示，或维持现状并登记 `PD-*`（现状属用户自选大文件自伤 OOM，无攻击者面，故 P3）；AC③ 若设上限，须与解析侧预算的口径统一（`ISSUE-P1-276` 已 §273 闭环，现行三面判据与常量见 `database/src/main/java/com/keepasskey/database/xml/KdbxAttachmentBudget.kt`：单条目物化 ≤ 64 MiB / 引用次数 ≤ 1024 / 内联累计 ≤ 64 MiB），禁两套数字。
 
 ---
 
