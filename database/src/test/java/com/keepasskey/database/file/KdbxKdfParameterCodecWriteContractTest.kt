@@ -266,7 +266,8 @@ class KdbxKdfParameterCodecWriteContractTest {
             type = KdfParameters.Argon2.Argon2Type.ARGON2ID,
             salt = ByteArray(32) { it.toByte() },
             parallelism = 3,
-            memoryInBytes = 8192L,
+            // ISSUE-P2-290 交叉约束：memory ≥ 8 × parallelism × 1024 = 24576
+            memoryInBytes = 24576L,
             iterations = 5L,
             version = KdfParameters.Argon2.ARGON2_VERSION_13
         )

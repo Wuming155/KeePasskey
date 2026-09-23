@@ -41,17 +41,7 @@
 
 ---
 
-## P2 中危缺陷与协议/测试缺口（2 项）
-
-### ISSUE-P2-290：KDF 派生异常路径跳过 `compositeKey` 清零——实现未达自登契约，且无需正确口令即可稳定触发
-
-- **核实时间点**：2026-09-23 经契约条款、分派谓词与抛错链三方核对（抛错链另经独立复验）。
-- **核实方式**：① 代码：`database/.../file/KdbxKeyDerivation.kt:53-59` 的 `compositeKey` 仅在 `transform` **正常返回后** `Arrays.fill`，无 `finally`；同文件 `:78-82` 与 `:146` 已刻意使用 `try/finally`，构成同文件内直接对照。同族第二处：`compositeFromPassword`（`:119-120`）在 `sha256(passwordBytes)` 抛出时 `passwordBytes` 与 `passwordHash` 均不清零；`KdbxCipherKeyResolver.kt:81` 的 `deriveLegacyKeys()` 调用点亦在 `try(:83)` 之外。② 契约：`docs/architecture/敏感缓冲所有权契约.md:170`（表第 12 行）**已把**该擦除钩子登记为「函数 `finally`」，R4（`:128-135`）亦强制 `finally` ⇒ 属实现未达自登契约，非已接受取舍。③ 触发可达性（关键）：`KdbxKdfParameterCodec.kt:222-231` 对 memory / iterations / parallelism **三项独立判界**（`ARGON2_MIN_MEMORY_BYTES = 8192`、`ARGON2_MAX_PARALLELISM = 64`），**无** `memory ≥ 8 × p × 1024` 交叉约束；`crypto/.../kdf/Argon2KdfEngine.kt:172-176` 的 `isWithinKdfBounds` 同样无交叉 ⇒ `(m=8192 B, p=64)` 通过分派谓词走原生；`NativeArgon2.deriveKey` 对非法参数返回 null（其 KDoc `:86` 明载），`derive`（`:123-124`）归一为 `CryptoException.KdfException`；`transform` 抛出即跳过清零。④ 时序：派生发生在头部 HMAC 校验**之前**（`KdbxFile.kt:145` 早于 `:148`）⇒ **攻击者无需掌握口令**。
-- **泄漏物与定级口径（照此表述，勿夸大）**：滞留的是 **32 字节复合密钥** `SHA-256(SHA-256(口令) ‖ keyFileKey)`——危害是「取得即可绕过 Argon2 直接攻 AES 层」，**不是**主口令明文；口令明文字节的未清零面在 `compositeFromPassword` 那处（两处修法不同，建议同批并修）。须同时写明：进程内取证的读取面仍在限界 §2.2 划定的信任边界之外，本条整改理由是「**契约与代码漂移 + 免密可稳定触发**」，不是「新增高危泄露面」。
-- **涉及文件**：`database/src/main/java/com/keepasskey/database/file/KdbxKeyDerivation.kt`、`database/src/main/java/com/keepasskey/database/file/KdbxCipherKeyResolver.kt`、`database/src/main/java/com/keepasskey/database/file/KdbxKdfParameterCodec.kt`、`crypto/src/main/java/com/keepasskey/crypto/kdf/Argon2KdfEngine.kt`。
-- **验收标准**：AC① 两处（`compositeKey` 与 `compositeFromPassword`）改 `try/finally`，`KdbxCipherKeyResolver.kt:81` 调用点纳入同一保护范围；AC② KDF 参数校验补 **`memory ≥ 8 × parallelism × 1024` 交叉约束**，与内核 fail-closed 条件**逐项对齐**（禁「上游放行、内核拒」的口径缺口），并核对其余原生下界；AC③ 用例：越界库解锁失败后**不留任何未擦缓冲**，并以 `m=8192, p=64` 为固定样本；AC④ 契约表 `:170` 行措辞与实现对齐（改代码或改文档，不得两不相符）；AC⑤ **设备侧义务**：AC② 属改动原生分派谓词，按 AGENTS.md 测试资产纪律 ② 必须在设备上跑完 `:crypto:` / `:database:` / `:sync:` / `:app:` 四层 `connectedDebugAndroidTest` 方准入库，且**必须使用本机 `Pixel_10` AVD**，禁止在装有真实密码库的实体机上执行（§263 事故口径）。
-
----
+## P2 中危缺陷与协议/测试缺口（1 项）
 
 ### ISSUE-P2-291：同步配置 / 凭据 / 缓存只按 `remotePath` 键控，无库身份绑定 ⇒ 换库后仍可整库覆盖另一库的云端副本
 

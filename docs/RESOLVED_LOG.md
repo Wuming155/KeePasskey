@@ -368,6 +368,8 @@
 | §294 | 锁库生成器状态失效批次：`ISSUE-P2-287` 闭环。`clearGeneratedSecrets` 擦除与状态失效原子完成（交出 `ProtectedString.EMPTY` 新引用，`remember` 键失效）；`ProtectedString` 新增只读 `cleared`，复制路径对已擦实例降级为「请重新生成」提示（禁崩溃）；生成器 tab 不门控登记 **`PD-37`**。用例 +1；`tests=2639` 全绿 | ISSUE-P2-287 | [`294-锁库生成器状态失效批次.md`](resolved/batches/294-锁库生成器状态失效批次.md) |
 | §295 | 主口令强度门槛批次：`ISSUE-P2-288` 闭环。`MasterPasswordPolicy` 单一判据（长度 < 8 阻断 + < 40 bits 显式二次确认，内核评估 `Dispatchers.Default`），建库向导与改密对话框两道闸共用（含弱口令确认对话框与 `DebugLogBuffer` 留痕）；阈值登记 **`PD-38`**、主口令不纳入泄露检测登记限界 **`§31`**。用例 +2；`tests=2641` 全绿 + 截图门禁绿 | ISSUE-P2-288 | [`295-主口令强度门槛批次.md`](resolved/batches/295-主口令强度门槛批次.md) |
 | §296 | otpauth 百分号解码批次：`ISSUE-P2-289` 闭环。参数值一律先百分号解码（label / secret / 全参数，RFC 3986 口径）；新输入 Base32 严格判据与存量展示宽容口径作用域分列；`digits` / `algorithm` 回落带诊断并经 `warnings` 透传到详情页呈现（禁静默改写）；条目「digits=7 回落」示例经复核更正（7 在 6..8 内保留）。用例 +6；`tests=2647` 全绿 | ISSUE-P2-289 | [`296-otpauth百分号解码批次.md`](resolved/batches/296-otpauth百分号解码批次.md) |
+| §297 | KDF 异常路径清零与交叉约束批次：`ISSUE-P2-290` 闭环。`compositeKey` / 口令明文字节两处改 `try/finally`（实现回补自登契约），`deriveLegacyKeys` 调用点纳入同一保护；`memory ≥ 8 × parallelism × 1024` 交叉约束读侧 fail-closed 与原生分派谓词两侧补齐（与内核下界逐项对齐）；契约表第 12 行对齐实现。用例 +7；`tests=2654` 全绿；**设备侧义务履行**：Pixel_10 AVD 四层 instrumented **158 例全绿**（crypto 37 / database 17 / sync 24 / app 80，`adb` 定向执行，实体机零接触） | ISSUE-P2-290 | [`297-kdf异常路径清零与交叉约束批次.md`](resolved/batches/297-kdf异常路径清零与交叉约束批次.md) |
+| §298 | 弱 ETag 设备期望迁移批次：`ISSUE-P3-304` 闭环（§297 设备验证中揭出，即登即修）。`WebDavPropfindParserDeviceTest` 弱 ETag 期望自 §151 旧语义迁往 §272「剥引号保留 W/」口径（与宿主 `SyncModelsTest` 同值）；零生产改动。AVD `:sync:` 层 24 例全绿 | ISSUE-P3-304 | [`298-弱etag设备期望迁移批次.md`](resolved/batches/298-弱etag设备期望迁移批次.md) |
 
 ## 分册导航
 

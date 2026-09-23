@@ -169,11 +169,20 @@ class Argon2KdfEngine(
          * 故上界裁决须在引擎侧补齐；越界时**不进入**原生路径，回落 BC 兜底（其自带堆预检）。
          * 取值宽于一切合法用户配置（本仓 `KdfBenchmark` 自荐上限 ≤512 MiB × 20，远小于 4 GiB / 2²⁴）。
          */
+        /**
+         * ISSUE-P2-290 AC②：每通道内存下界（8 × 1024 字节）——原生内核自身的
+         * fail-closed 下界即 `memoryKib ≥ 8 × parallelism`，本谓词与其逐项对齐
+         * （禁「上游放行、内核拒」的口径缺口）。镜像 `KdbxKdfParameterCodec` 同值常量。
+         */
+        private const val ARGON2_MIN_MEMORY_PER_LANE_BYTES = 8L * 1024
+
         fun isWithinKdfBounds(memoryInBytes: Long, iterations: Long, parallelism: Int): Boolean =
             memoryInBytes >= ARGON2_MIN_MEMORY_BYTES &&
                 memoryInBytes <= ARGON2_MAX_MEMORY_BYTES &&
                 iterations in 1..ARGON2_MAX_ITERATIONS &&
-                parallelism in 1..ARGON2_MAX_PARALLELISM
+                parallelism in 1..ARGON2_MAX_PARALLELISM &&
+                // ISSUE-P2-290 AC②：交叉约束（m ≥ 8 × p × 1024），与原生内核下界逐项对齐
+                memoryInBytes >= parallelism.toLong() * ARGON2_MIN_MEMORY_PER_LANE_BYTES
 
         /**
          * ISSUE-P2-59 AC②：受检窄化——超 [Int] 可表达范围时**抛异常**，绝不静默截断。

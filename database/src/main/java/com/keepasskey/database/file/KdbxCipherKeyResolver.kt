@@ -78,13 +78,20 @@ internal object KdbxCipherKeyResolver {
         if (isPlausibleInnerHeaderPrefix(cipherEngine, header.encryptionIv, officialKey, firstBlock, isGzipCompressed)) {
             return Resolution(officialKey, null)
         }
-        val (legacyCipherKey, legacyHmacKey) = deriveLegacyKeys()
+        // ISSUE-P2-290 AC①：deriveLegacyKeys 调用点纳入同一保护范围——其内部
+        // （KdbxKeyDerivation.deriveKeys）的 compositeKey 已由函数 finally 覆盖；
+        // 本层把「取得产物」也收进 try，产物在未取得前为 null，finally 判空擦除
+        var legacyCipherKey: ByteArray? = null
+        var legacyHmacKey: ByteArray? = null
         var legacyAccepted = false
         try {
-            if (isPlausibleInnerHeaderPrefix(cipherEngine, header.encryptionIv, legacyCipherKey, firstBlock, isGzipCompressed)) {
+            val (cipherKey, hmacKey) = deriveLegacyKeys()
+            legacyCipherKey = cipherKey
+            legacyHmacKey = hmacKey
+            if (isPlausibleInnerHeaderPrefix(cipherEngine, header.encryptionIv, cipherKey, firstBlock, isGzipCompressed)) {
                 // 旧派生被选中：原数组交由调用方在解密流建立后擦除（见 Resolution 契约）
                 legacyAccepted = true
-                return Resolution(legacyCipherKey, legacyCipherKey)
+                return Resolution(cipherKey, cipherKey)
             }
             throw KdbxCorruptFileException(
                 "数据解密探针失败：文件已损坏或被篡改（头部认证已通过，凭据正确，故非主密码错误）"
@@ -93,9 +100,9 @@ internal object KdbxCipherKeyResolver {
             // 未被选中的旧派生密钥在任何结果路径（含裁决失败抛异常）下统一清零；
             // hmacKey64 属 transformedKey 直接派生物，无论是否选中均立即擦除
             if (!legacyAccepted) {
-                Arrays.fill(legacyCipherKey, 0.toByte())
+                legacyCipherKey?.let { Arrays.fill(it, 0.toByte()) }
             }
-            Arrays.fill(legacyHmacKey, 0.toByte())
+            legacyHmacKey?.let { Arrays.fill(it, 0.toByte()) }
         }
     }
 

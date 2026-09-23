@@ -43,10 +43,29 @@ class Argon2KdfEngineBoundsTest {
     @Test
     fun `上界镜像_内存边界与 codec 同值`() {
         val gib4 = 4L * 1024 * 1024 * 1024
-        assertTrue("8192B 为官方语义下界，应在界内", Argon2KdfEngine.isWithinKdfBounds(8192L, 2, 2))
+        // ISSUE-P2-290：交叉约束后 p=1 的下界恰为 8192（p=2 需 ≥ 16384，见专项用例）
+        assertTrue("8192B 且 p=1 恰达下界，应在界内", Argon2KdfEngine.isWithinKdfBounds(8192L, 2, 1))
         assertFalse("8191B 低于下界", Argon2KdfEngine.isWithinKdfBounds(8191L, 2, 2))
         assertTrue("4 GiB 恰为封顶，应在界内", Argon2KdfEngine.isWithinKdfBounds(gib4, 2, 2))
         assertFalse("4 GiB + 1B 越界", Argon2KdfEngine.isWithinKdfBounds(gib4 + 1, 2, 2))
+    }
+
+    // ===== ISSUE-P2-290 AC②：交叉约束（memory ≥ 8 × parallelism × 1024），与原生内核下界逐项对齐 =====
+
+    @Test
+    fun `交叉约束_固定样本 m=8192 且 p=64 判越界`() {
+        // 条目固定样本：逐项合法、交叉非法（8192 < 8 × 64 × 1024）
+        assertFalse(
+            "m=8192 且 p=64 必须判越界（禁「上游放行、内核拒」的口径缺口）",
+            Argon2KdfEngine.isWithinKdfBounds(8192L, 2, 64)
+        )
+    }
+
+    @Test
+    fun `交叉约束_恰达与不达每通道下界的逐项判定`() {
+        assertTrue("p=2 且 m=16384 恰达（8×2×1024）", Argon2KdfEngine.isWithinKdfBounds(16384L, 2, 2))
+        assertFalse("p=2 且 m=8192 不达每通道下界", Argon2KdfEngine.isWithinKdfBounds(8192L, 2, 2))
+        assertTrue("p=64 且 m=524288 恰达", Argon2KdfEngine.isWithinKdfBounds(524288L, 2, 64))
     }
 
     @Test

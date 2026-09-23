@@ -128,7 +128,10 @@ class WebDavPropfindParserDeviceTest {
             lastModified = "Wed, 21 Oct 2015 07:28:00 GMT"
         )
         val parsed = WebDavPropfindParser.parse(zeroByte)
-        assertEquals("弱 etag 前缀与引号必须被清洗", "abc123", parsed.etag)
+        // §272（ISSUE-P1-275）读写一致化口径：cleanEtag 剥引号但**保留 W/ 弱标记**
+        // （强比较下弱存储标签永不匹配，吞掉 W/ 会让写侧在严格服务器上退化为恒 412），
+        // 宿主侧锁定见 SyncModelsTest「W/abc123」；本断言原期望「abc123」系 §151 旧语义遗留
+        assertEquals("弱 etag 剥引号且保留 W/ 弱标记（§272 口径）", "W/abc123", parsed.etag)
         assertEquals("零字节文件的长度必须如实采信（不得回退 -1 哨兵）", 0L, parsed.contentLength)
         assertEquals("RFC1123 时间戳必须解析为冻结时刻", FROZEN_EPOCH_MILLIS, parsed.lastModifiedMillis)
         assertFalse("无 collection 元素时不得判为目录", parsed.isDirectory)

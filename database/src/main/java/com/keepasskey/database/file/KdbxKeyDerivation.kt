@@ -53,8 +53,14 @@ internal object KdbxKeyDerivation {
         val compositeKey = deriveCompositeKey(passwordChars, keyFileData)
 
         val kdfEngine = KdfFactory.getEngine(header.kdfParameters.kdfUuid)
-        val transformedKey = kdfEngine.transform(compositeKey, header.kdfParameters)
-        Arrays.fill(compositeKey, 0.toByte())
+        // ISSUE-P2-290 AC①：transform 抛出（如非法 KDF 参数，无需正确口令即可由文件单方触发）
+        // 时 compositeKey（32B 复合密钥）也必须清零——契约表第 12 行登记的「函数 finally」，
+        // 同文件 :compositeFromPasswordAndKeyFile 的既有 try/finally 为直接对照
+        val transformedKey = try {
+            kdfEngine.transform(compositeKey, header.kdfParameters)
+        } finally {
+            Arrays.fill(compositeKey, 0.toByte())
+        }
 
         return deriveCipherAndHmacKeys(header, transformedKey, isLegacy)
     }
@@ -116,8 +122,13 @@ internal object KdbxKeyDerivation {
     private fun compositeFromPassword(passwordChars: CharArray?): ByteArray {
         val hasPassword = passwordChars != null && passwordChars.isNotEmpty()
         val passwordBytes = if (hasPassword) charsToUtf8(passwordChars) else ByteArray(0)
-        val passwordHash = HashUtil.sha256(passwordBytes)
-        Arrays.fill(passwordBytes, 0.toByte())
+        // ISSUE-P2-290 AC①：sha256 抛出时口令明文字节也必须清零（同族第二处，
+        // 与下方 passwordHash 的既有 try/finally 同口径）
+        val passwordHash = try {
+            HashUtil.sha256(passwordBytes)
+        } finally {
+            Arrays.fill(passwordBytes, 0.toByte())
+        }
         try {
             return HashUtil.sha256(passwordHash)
         } finally {

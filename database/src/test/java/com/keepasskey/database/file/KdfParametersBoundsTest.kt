@@ -61,6 +61,35 @@ class KdfParametersBoundsTest {
         }
     }
 
+    // ================= ISSUE-P2-290 AC②③：交叉约束（memory ≥ 8 × parallelism × 1024） =================
+
+    @Test
+    fun `Argon2 交叉约束：固定样本 m=8192 且 p=64 被拒绝（逐项合法交叉非法）`() {
+        // 条目固定样本：8192 ≥ 官方下界、p=64 ≤ 上界，但 8192 < 8 × 64 × 1024 = 524288。
+        // 解析期即 fail-closed ⇒ 派生不再可达，解锁失败路径不产生任何待擦缓冲（结构性收口）
+        assertThrows(KdbxCorruptFileException::class.java) {
+            KdbxHeader.validateArgon2Bounds(
+                memoryInBytes = 8192L, iterations = 1L, parallelism = 64, version = 0x13
+            )
+        }
+    }
+
+    @Test
+    fun `Argon2 交叉约束：恰达下界与更高配置合法通过`() {
+        // p=64 ⇒ 恰达 8 × 64 × 1024 = 524288
+        KdbxHeader.validateArgon2Bounds(
+            memoryInBytes = 524288L, iterations = 1L, parallelism = 64, version = 0x13
+        )
+        // p=1 ⇒ 8192 恰达（与官方下界同值，交叉约束不误伤合法小内存库）
+        KdbxHeader.validateArgon2Bounds(
+            memoryInBytes = 8192L, iterations = 1L, parallelism = 1, version = 0x13
+        )
+        // p=2 且 m=16384 恰达下界
+        KdbxHeader.validateArgon2Bounds(
+            memoryInBytes = 16384L, iterations = 2L, parallelism = 2, version = 0x10
+        )
+    }
+
     @Test
     fun `Argon2 迭代越界被拒绝`() {
         assertThrows(KdbxCorruptFileException::class.java) {

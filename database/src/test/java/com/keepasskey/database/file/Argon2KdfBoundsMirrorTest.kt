@@ -85,15 +85,19 @@ class Argon2KdfBoundsMirrorTest {
 
     @Test
     fun `界内且堆可容纳_两侧一致放行`() {
-        // 8192 B 远小于任何 JVM 堆门槛，故两侧均放行。
         // **ISSUE-P2-49 AC②（§78）**：联合预算已由 `2^40` 收紧为 `2^33`，故「迭代取 2^24」
-        // 不再是界内配置（`2^24 × 8192 = 2^37 > 2^33`）；此处取恰好落在预算边界上的 `I = 2^20`。
-        val memory = 8192L
-        val iterationsAtBudget = 1L shl 20 // 8192 B × 2^20 = 2^33 = 联合预算上界
+        // 不再是界内配置（`2^24 × 16384 = 2^38 > 2^33`）；此处取恰好落在预算边界上的 `I = 2^19`。
+        // **ISSUE-P2-290 AC②**：交叉约束（m ≥ 8 × p × 1024）后，p=2 的下界为 16384——
+        // 原 8192 × p=2 的样本已属交叉非法（两侧一致拒绝，见上方 assertBothReject 族）。
+        val memory = 16384L
+        val iterationsAtBudget = 1L shl 19 // 16384 B × 2^19 = 2^33 = 联合预算上界
         assertTrue("解码侧应放行", codecAccepts(memory, iterationsAtBudget, 2))
         assertTrue("派生入口应界内", Argon2KdfEngine.isWithinKdfBounds(memory, iterationsAtBudget, 2))
-        assertTrue("并行度上界应界内", Argon2KdfEngine.isWithinKdfBounds(memory, 2, 64))
-        assertTrue("下界应界内", Argon2KdfEngine.isWithinKdfBounds(8192L, 1, 1))
+        assertTrue(
+            "并行度上界应界内（m=524288 恰达 8×64×1024 交叉下界）",
+            Argon2KdfEngine.isWithinKdfBounds(524288L, 2, 64)
+        )
+        assertTrue("下界应界内（p=1 恰达 8192）", Argon2KdfEngine.isWithinKdfBounds(8192L, 1, 1))
     }
 
     @Test

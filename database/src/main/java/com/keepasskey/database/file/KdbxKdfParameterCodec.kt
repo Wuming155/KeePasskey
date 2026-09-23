@@ -90,6 +90,9 @@ internal object KdbxKdfParameterCodec {
      */
     private const val ARGON2_MIN_MEMORY_BYTES = 8192L
 
+    /** ISSUE-P2-290 AC②：每通道内存下界（8 × 1024 字节）——`memory ≥ p × 本值`，与原生内核 `memoryKib ≥ 8×p` 同值。 */
+    private const val ARGON2_MIN_MEMORY_PER_LANE_BYTES = 8L * 1024
+
     /** Argon2 内存上界：远超一切合法用户配置的绝对封顶（4 GiB），防恶意文件分配期 OOM。本仓更严封顶。 */
     private const val ARGON2_MAX_MEMORY_BYTES = 4L * 1024 * 1024 * 1024
 
@@ -229,6 +232,16 @@ internal object KdbxKdfParameterCodec {
         }
         if (parallelism < 1 || parallelism > ARGON2_MAX_PARALLELISM) {
             throw KdbxCorruptFileException("Argon2 并行度越界: $parallelism（允许 1 ~ $ARGON2_MAX_PARALLELISM）")
+        }
+        // ISSUE-P2-290 AC②：交叉约束与原生内核 fail-closed 下界逐项对齐——
+        // `memory ≥ 8 × parallelism × 1024`（NativeArgon2 KDoc 的内核下界 `memoryKib ≥ 8×p`）。
+        // 缺它时 (m=8192, p=64) 一类「逐项合法、交叉非法」的参数经解析层放行，
+        // 派生期才被内核拒绝（异常路径无谓触发，且此前连带 compositeKey 未清零，AC①）
+        if (memoryInBytes < parallelism.toLong() * ARGON2_MIN_MEMORY_PER_LANE_BYTES) {
+            throw KdbxCorruptFileException(
+                "Argon2 内存参数低于每通道下界: $memoryInBytes 字节 < 8 × $parallelism × 1024" +
+                    "（memory 须 ≥ 8 × parallelism × 1024，与原生内核下界一致）"
+            )
         }
         if (version != KdfParameters.Argon2.ARGON2_VERSION_10 && version != KdfParameters.Argon2.ARGON2_VERSION_13) {
             // V 由 UInt32 窄化到 Int，高位非零时为负数；按无符号 32 位渲染，
