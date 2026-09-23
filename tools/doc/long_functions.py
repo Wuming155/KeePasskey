@@ -16,6 +16,10 @@
 **本工具是初筛**：签名里带默认 lambda 参数（`cb: () -> Unit = {}`）等写法仍可能失真，
 清单用于裁决前须按 §175 的纪律**实读**确认。已知值反校：`keepasskeySettingsNavGraph` 252、
 `CreateVaultWizardDialog` 158（§179 后）、`OpenExistingVaultDialog` 96（§178 后，故不得出现在 ≥100 清单里）。
+
+**退出码（fail-closed，§281 立规）**：存在任何 ≥ 阈值 的函数即 **1**，否则 0。
+CI `hygiene-gate` 以默认阈值 **100** 作硬门禁（§280 收工线 `functions_ge_100=0` 不得回潮）；
+传 40 等更低阈值仅作本地普查（当前必然命中，**不是** CI 闸门）。
 """
 import re
 import sys
@@ -91,6 +95,9 @@ def main() -> int:
     print(f"files_scanned={scanned}  functions_ge_{threshold}={len(hits)}")
     for n, rel, ln, name in hits:
         print(f"{n:5d}  L{ln:<5} {rel}::{name}")
+    if hits:
+        print(f"::error::存在 {len(hits)} 个 ≥{threshold} 行函数（fail-closed）")
+        return 1
     return 0
 
 

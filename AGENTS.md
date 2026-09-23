@@ -100,7 +100,9 @@ Coroutines + Flow；**文档与代码注释使用简体中文**。
 - `python tools/doc/count_line_tiers.py` / `python tools/doc/long_functions.py` / `python tools/doc/check_md_links.py`
   / `python tools/doc/logic_lines.py <文件> <函数名>` / `python tools/doc/count_test_results.py`
   / `python tools/doc/check_resolved_index_sync.py`
-  — 五模块行数分档复核 / 超长函数复核 / `docs/` 相对链接自检（**改任何文档后跑**，断链即退出码 1）
+  — 五模块行数分档复核（**fail-closed**：`tier1(>500)` 恒 0 + `tier2` 棘轮预算只紧不松）
+  / 超长函数复核（**fail-closed**：存在 ≥ 阈值 即退出码 1；CI 用默认阈值 100）
+  / `docs/` 相对链接自检（**改任何文档后跑**，断链即退出码 1）
   / 装配表「逻辑行」分类计数（`PD-11` 重开条件的可执行判据）
   / **JVM 单测聚合计数的唯一尺子**（`test` 后跑它，**不要**自己 `glob` `test-results/**/*.xml`——
   那会把截图与真机 `connected` 的旧 XML 算进来，§190 现形过一次）。
@@ -111,6 +113,9 @@ Coroutines + Flow；**文档与代码注释使用简体中文**。
   `python tools/doc/check_verbatim_move.py <原文件> <本体> [段落文件…]`；「多处重复代码是否真逐字相同」
   的前提成立性用 `python tools/doc/scaffold_block_fingerprint.py <git rev> <目录> <页名>…`
   （**目测登记前提曾造成一次真实回归**，见 `ISSUE-P3-195`）
+- CI **`hygiene-gate`**（`.github/workflows/build.yml`）——上述规模 / 链接 / 索引 / 重言断言机检的
+  **fail-closed 硬门禁**（§281）：`count_line_tiers` + `long_functions` + `check_md_links` +
+  `check_resolved_index_sync` + `check_tautological_assertions`，非 0 即红；**严禁** `|| true` 吞掉
 - `bash tools/audit/check_recheck_consistency.sh` — 复核报告一致性扫描（**改审计 / 复核报告后必跑**）
 - `python tools/audit/check_tautological_assertions.py` — **「永远为真的断言」机检**（§275 立规；**改 `*/src/test/**`
   的任何断言后必跑**）：判据＝断言实参能否在 `@Test` 函数体内按「纯局部 `val`」口径全部求值，命中即退出码 1；
