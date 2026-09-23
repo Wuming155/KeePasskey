@@ -90,6 +90,7 @@ fun SettingsScreen(
         onNavigateToAbout = onNavigateToAbout,
         onLockClick = onLockClick,
         onChangeMasterPassword = { viewModel.changeMasterPassword(it) },
+        onWeakPasswordConfirmed = { viewModel.noteWeakMasterPasswordConfirmed() },
         onBackClick = onBackClick,
         showBackButton = showBackButton,
         modifier = modifier
@@ -114,6 +115,8 @@ fun SettingsContent(
     onNavigateToAbout: () -> Unit,
     onLockClick: () -> Unit = {},
     onChangeMasterPassword: suspend (CharArray) -> com.keepasskey.core.result.KdbxResult<Unit> = { com.keepasskey.core.result.KdbxResult.Success(Unit) },
+    /** ISSUE-P2-288：弱主口令显式确认后的留痕回调（不落明文） */
+    onWeakPasswordConfirmed: () -> Unit = {},
     onBackClick: () -> Unit = {},
     showBackButton: Boolean = false,
     modifier: Modifier = Modifier
@@ -292,7 +295,8 @@ fun SettingsContent(
             snackbarHostState = snackbarHostState,
             masterKeyUpdatedMsg = masterKeyUpdatedMsg,
             onDismiss = { showMasterKeyDialog = false },
-            onChangeMasterPassword = onChangeMasterPassword
+            onChangeMasterPassword = onChangeMasterPassword,
+            onWeakPasswordConfirmed = onWeakPasswordConfirmed
         )
     }
 }

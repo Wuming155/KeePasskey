@@ -103,6 +103,7 @@ fun DatabasePickerScreen(
         onOpenCreateDialog = viewModel::openCreateDialog,
         onCloseCreateDialog = viewModel::closeCreateDialog,
         onCreateDatabase = viewModel::createDatabase,
+        onWeakPasswordConfirmed = viewModel::noteWeakMasterPasswordConfirmed,
         onSaveKeyFile = viewModel::saveGeneratedKeyFileTo,
         onKeyFileDeliveryDismissed = viewModel::dismissKeyFileDelivery,
         onOpenExistingClick = viewModel::openOpenSourceDialog,
@@ -122,6 +123,8 @@ fun DatabasePickerContent(
     onSelectDatabase: (String) -> Unit,
     onOpenCreateDialog: () -> Unit,
     onCloseCreateDialog: () -> Unit,
+    /** ISSUE-P2-288：弱主口令显式确认后的留痕回调（不落明文） */
+    onWeakPasswordConfirmed: () -> Unit = {},
     onCreateDatabase: (
         name: String,
         pwd: CharArray,
@@ -287,7 +290,8 @@ fun DatabasePickerContent(
     if (uiState.showCreateDialog) {
         CreateVaultWizardDialog(
             onDismiss = onCloseCreateDialog,
-            onConfirm = onCreateDatabase
+            onConfirm = onCreateDatabase,
+            onWeakPasswordConfirmed = onWeakPasswordConfirmed
         )
     }
 

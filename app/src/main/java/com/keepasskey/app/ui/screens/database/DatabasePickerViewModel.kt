@@ -58,8 +58,15 @@ class DatabasePickerViewModel @Inject constructor(
     private val keyFileAccess: KeyFileAccess? = null,
     // ISSUE-P3-21：生成型密钥文件的 SAF 落盘所需上下文。nullable 仅为单测构造；
     // 生产 DI 注入 @ApplicationContext（与 SettingsViewModel 同一既有范式）
-    @ApplicationContext private val appContext: Context? = null
+    @ApplicationContext private val appContext: Context? = null,
+    // ISSUE-P2-288：弱主口令「显式二次确认」留痕通道。nullable 仅为单测构造；生产 DI 恒注入
+    private val debugLog: com.keepasskey.app.data.logger.DebugLogBuffer? = null
 ) : ViewModel() {
+
+    /** ISSUE-P2-288 AC②：弱主口令「显式二次确认」的留痕（不落明文）。 */
+    fun noteWeakMasterPasswordConfirmed() {
+        debugLog?.warn("MasterPasswordPolicy", "用户显式确认使用低于强度门槛的主密码（建库）")
+    }
 
     private val userMessageFlow = MutableStateFlow<UiMessage?>(null)
     private val showCreateDialogFlow = MutableStateFlow(false)

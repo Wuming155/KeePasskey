@@ -314,6 +314,11 @@ class SettingsViewModel @Inject constructor(
     /** P0-3 整改：真实调用仓库修改当前数据库的主密钥 */
     suspend fun changeMasterPassword(newPasswordChars: CharArray): KdbxResult<Unit> = vaultRepository.changeMasterPassword(newPasswordChars)
 
+    /** ISSUE-P2-288 AC②：弱主口令「显式二次确认」的留痕（不落明文 / 不落强度值以外的信息）。 */
+    fun noteWeakMasterPasswordConfirmed() {
+        debugLogBuffer.warn("MasterPasswordPolicy", "用户显式确认使用低于强度门槛的主密码（改密）")
+    }
+
     // ===== M6 整改：KDF 设备自适应基准真实接线 =====
     /** KDF 基准实时状态（运行中 / 推荐参数 / 失败原因） */
     val kdfBenchmark: StateFlow<KdfBenchmarkUiState> get() = kdfBenchmarkController.state

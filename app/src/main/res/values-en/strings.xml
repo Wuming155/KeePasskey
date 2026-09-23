@@ -100,6 +100,11 @@
     <string name="db_picker_new_pwd">Master Password</string>
     <string name="db_picker_confirm_pwd">Confirm Password</string>
     <string name="db_picker_pwd_mismatch">Passwords do not match</string>
+    <!-- ISSUE-P2-288：主口令强度门槛（阻断短口令 + 弱口令显式二次确认） -->
+    <string name="master_pwd_too_short">Master password must be at least %1$d characters</string>
+    <string name="master_pwd_weak_title">Weak master password</string>
+    <string name="master_pwd_weak_body">Current master password strength is about %1$d bits, below the recommended %2$d bits. A weak master password significantly lowers the brute-force resistance of the entire vault. Use it anyway?</string>
+    <string name="master_pwd_weak_confirm">Use anyway</string>
     <string name="db_picker_use_keyfile">Generate auxiliary key file (.key)</string>
     <string name="db_picker_encryption_preset">Encryption &amp; KDF</string>
     <!-- ISSUE-P1-241：见 values/strings.xml 同名键上方注释（应用私有库 = 真删文件且不可恢复；

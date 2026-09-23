@@ -366,6 +366,7 @@
 | §292 | 安全声明按实测等级渲染批次：`ISSUE-P2-285` 闭环。三处硬件声明改按实测条件渲染（解锁副标题 / 生物识别副标题复用 P1-22 实测通道；同步封印声明新接 `syncSealSecurityLevel` 实测链路，`ZeroKnowledgeCard` 无默认值）；`sec_arch_desc` 如实改写（明文附件暂存 + 明文导出两事实）；passkey 文案去硬件表述；附件明文落盘裁定登记 **`PD-36`**；死字段 `hardwareBackedSecurity` 删除。守卫 +6；`tests=2637` 全绿 + 截图门禁绿 | ISSUE-P2-285 | [`292-安全声明按实测等级渲染批次.md`](resolved/batches/292-安全声明按实测等级渲染批次.md) |
 | §293 | 熵读数单一真相源批次：`ISSUE-P2-286` 闭环。随机 / 掩码密码收敛 crypto 内核 `guessesLog10`（字符集代理模型含 `+30` 虚增整体退役）；口令短语按「词数 × log2(词表) + 变形位」建模（50 位——条目括注的「首字母位」经复核为确定性变换、0 位）；编辑页 `4.5 bits/char` 启发式删除改真实熵（`Dispatchers.Default` + 乱序防护）；评估热路径全部下沉。用例 +1 / 改 2；`tests=2638` 全绿 | ISSUE-P2-286 | [`293-熵读数单一真相源批次.md`](resolved/batches/293-熵读数单一真相源批次.md) |
 | §294 | 锁库生成器状态失效批次：`ISSUE-P2-287` 闭环。`clearGeneratedSecrets` 擦除与状态失效原子完成（交出 `ProtectedString.EMPTY` 新引用，`remember` 键失效）；`ProtectedString` 新增只读 `cleared`，复制路径对已擦实例降级为「请重新生成」提示（禁崩溃）；生成器 tab 不门控登记 **`PD-37`**。用例 +1；`tests=2639` 全绿 | ISSUE-P2-287 | [`294-锁库生成器状态失效批次.md`](resolved/batches/294-锁库生成器状态失效批次.md) |
+| §295 | 主口令强度门槛批次：`ISSUE-P2-288` 闭环。`MasterPasswordPolicy` 单一判据（长度 < 8 阻断 + < 40 bits 显式二次确认，内核评估 `Dispatchers.Default`），建库向导与改密对话框两道闸共用（含弱口令确认对话框与 `DebugLogBuffer` 留痕）；阈值登记 **`PD-38`**、主口令不纳入泄露检测登记限界 **`§31`**。用例 +2；`tests=2641` 全绿 + 截图门禁绿 | ISSUE-P2-288 | [`295-主口令强度门槛批次.md`](resolved/batches/295-主口令强度门槛批次.md) |
 
 ## 分册导航
 

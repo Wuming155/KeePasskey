@@ -41,17 +41,7 @@
 
 ---
 
-## P2 中危缺陷与协议/测试缺口（4 项）
-
-### ISSUE-P2-288：主口令建立与修改路径无强度评估、无泄露校验（单字符可建库，健康检查还给满分；官方有硬门槛）
-
-- **核实时间点**：2026-09-23 经强度内核消费点穷举与参考项目定点核实（**「别家也不拦」这一潜在豁免已被否证**，见对照段）。
-- **核实方式**：`app/.../ui/screens/database/CreateVaultWizardDialog.kt:166-167` 的 `isFormValid` 仅要求 `vaultName.isNotBlank() && passwordChars.isNotEmpty() && contentEquals(confirmChars) && isKeyFileValid && isLocationValid`；向导其余步骤强度 / 长度关键词 0 命中（`CreateVaultWizardDialogSections.kt`），`DatabasePickerViewModel.kt:132-160` 直落库；改密路径同口径（`MasterKeyChangeDialog.kt:59/99`）。全仓强度评估的生产消费点仅两处：`app/.../detail/PasswordEntropyEstimator.kt:40` 与 `database/.../audit/HealthCheckEngine.kt:126`（均为条目口令），`BreachCheckCoordinator.kt:55-73` 亦只遍历条目 ⇒ **主口令永不参与**；`KdfStrengthAssessor` 只读外层头 KDF（限界 §8 `已知工程限界.md:328-336`），不覆盖主口令 ⇒ 1 个字符可建库，随后健康检查报 100 分。
-- **对照（经开源码核实）**：官方 `参考项目/KeePass-2.61.1-Source/KeePass/Util/KeyUtil.cs:163-206` 有 `Program.Config.Security.MasterPassword.MinimumLength` 与 `.MinimumQuality` 的**硬失败**，空 / 弱口令走 AskYesNo；`KeyCreationForm.cs:163/265-267` 至少呈现质量条。`PD-01` 只裁 KDF 默认参数，**未**裁主口令强度。
-- **涉及文件**：`app/src/main/java/com/keepasskey/app/ui/screens/database/CreateVaultWizardDialog.kt`、`app/src/main/java/com/keepasskey/app/ui/screens/settings/MasterKeyChangeDialog.kt`、`app/src/main/java/com/keepasskey/app/data/repository/RealVaultRepository.kt`（建库落库处）。
-- **验收标准**：AC① 建库与改密共用**同一门槛判据**（纯函数单点化），至少含长度下限与强度评估（走原生内核，CPU 段置于 `Dispatchers.Default`，遵守 §3 规则 2 的热路径约束）；AC② 低于门槛的处置须明确：阻断或「显式二次确认 + 留痕」，结论登记 `PD-*`，禁默认放行且不声明；AC③ 主口令纳入健康检查与泄露检测口径（或在文档写明不纳入的理由与残余风险并登记限界）；AC④ 泄露检测沿用既有 k-匿名与 fail-closed 口径，禁把主口令明文写入日志或缓存；AC⑤ 用例覆盖「短口令被拒 / 弱口令需确认 / 达门槛直通」三态，中英文案成对。
-
----
+## P2 中危缺陷与协议/测试缺口（3 项）
 
 ### ISSUE-P2-289：`otpauth://` 不做百分号解码，编码过的种子被静默解成错误密钥（含 label 不解码）
 

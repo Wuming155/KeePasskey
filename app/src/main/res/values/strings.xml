@@ -107,6 +107,11 @@
     <string name="db_picker_new_pwd">设置主密码</string>
     <string name="db_picker_confirm_pwd">确认主密码</string>
     <string name="db_picker_pwd_mismatch">两次输入的密码不一致</string>
+    <!-- ISSUE-P2-288：主口令强度门槛（阻断短口令 + 弱口令显式二次确认） -->
+    <string name="master_pwd_too_short">主密码至少 %1$d 个字符</string>
+    <string name="master_pwd_weak_title">主密码强度较弱</string>
+    <string name="master_pwd_weak_body">当前主密码强度约 %1$d bits，低于建议值 %2$d bits。弱主密码会显著降低整个密码库的抗爆破能力。确定仍要使用吗？</string>
+    <string name="master_pwd_weak_confirm">仍要使用</string>
     <string name="db_picker_use_keyfile">同时生成附属密钥文件 (.key)</string>
     <string name="db_picker_encryption_preset">加密算法与 KDF</string>
     <!-- ISSUE-P1-241：移除动作的确认文案按**存储类型**分列两套——应用私有库（filesDir 内的文件）

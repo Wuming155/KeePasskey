@@ -32,7 +32,10 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.SecureFlagPolicy
 import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.CreateVaultPreset
+import com.keepasskey.app.ui.components.MasterPasswordPolicy
+import com.keepasskey.app.ui.components.MasterPasswordWeakConfirmDialog
 import com.keepasskey.app.ui.components.SecurePasswordField
+import com.keepasskey.app.ui.components.rememberMasterPasswordStrengthBits
 import com.keepasskey.app.ui.theme.CapsuleShape
 
 /**
@@ -123,7 +126,9 @@ private class CreateVaultWizardState {
     val isLocationValid get() = storageLocation == VaultStorageLocation.INTERNAL || selectedVaultUri.isNotBlank()
     val isKeyFileValid get() = !useKeyFile || keyFileChoice == KeyFileSourceChoice.GENERATE ||
         selectedKeyFilePath.isNotBlank()
-    val isFormValid get() = vaultName.isNotBlank() && passwordChars.isNotEmpty() &&
+    // ISSUE-P2-288 AC①：主口令长度下限硬阻断（单一判据 MasterPasswordPolicy，与改密共用）
+    val isFormValid get() = vaultName.isNotBlank() &&
+        passwordChars.size >= MasterPasswordPolicy.MIN_LENGTH &&
         passwordChars.contentEquals(confirmChars) && isKeyFileValid && isLocationValid
 
     fun wipePasswords() {
@@ -152,7 +157,9 @@ internal fun CreateVaultWizardDialog(
         preset: CreateVaultPreset,
         keyFileSourceUri: String?,
         targetUri: String?
-    ) -> Unit
+    ) -> Unit,
+    /** ISSUE-P2-288：用户显式确认弱主口令时的留痕回调（不落明文） */
+    onWeakPasswordConfirmed: () -> Unit = {}
 ) {
     val state = remember { CreateVaultWizardState() }
     val launchers = rememberCreateVaultWizardLaunchers(
@@ -190,7 +197,8 @@ internal fun CreateVaultWizardDialog(
                 if (state.keyFileChoice == KeyFileSourceChoice.SELECT_EXISTING) state.selectedKeyFilePath else null,
                 state.selectedVaultUri.ifBlank { null }
             )
-        }
+        },
+        onWeakPasswordConfirmed = onWeakPasswordConfirmed
     )
 }
 
@@ -200,8 +208,26 @@ private fun CreateVaultWizardAlertDialog(
     state: CreateVaultWizardState,
     launchers: CreateVaultWizardLaunchers,
     onDismiss: () -> Unit,
-    onConfirm: () -> Unit
+    onConfirm: () -> Unit,
+    onWeakPasswordConfirmed: () -> Unit
 ) {
+    // ISSUE-P2-288 AC①／AC②：主口令强度评估（内核，Dispatchers.Default）与
+    // 弱口令显式二次确认闸（单一判据 MasterPasswordPolicy，与改密共用）
+    val strengthBits = rememberMasterPasswordStrengthBits(state.passwordChars)
+    var showWeakConfirm by remember { mutableStateOf(false) }
+
+    if (showWeakConfirm) {
+        MasterPasswordWeakConfirmDialog(
+            strengthBits = strengthBits,
+            onConfirm = {
+                showWeakConfirm = false
+                onWeakPasswordConfirmed()
+                onConfirm()
+            },
+            onCancel = { showWeakConfirm = false }
+        )
+    }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         // 同 KeyFileOneTimeSaveDialog：本窗含主密码与确认主密码，须显式要求对话框窗口遮罩
@@ -216,7 +242,18 @@ private fun CreateVaultWizardAlertDialog(
             CreateVaultWizardForm(state = state, launchers = launchers)
         },
         confirmButton = {
-            CreateVaultConfirmButton(enabled = state.isFormValid, onCreate = onConfirm)
+            CreateVaultConfirmButton(
+                enabled = state.isFormValid,
+                onCreate = {
+                    if (MasterPasswordPolicy.verdictOf(state.passwordChars.size, strengthBits) ==
+                        MasterPasswordPolicy.Verdict.WEAK_REQUIRES_CONFIRM
+                    ) {
+                        showWeakConfirm = true
+                    } else {
+                        onConfirm()
+                    }
+                }
+            )
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
@@ -350,6 +387,17 @@ private fun CreateVaultPasswordFields(state: CreateVaultWizardState) {
         },
         isPasswordVisible = state.passwordVisible,
         onToggleVisibility = { state.passwordVisible = !state.passwordVisible },
+        // ISSUE-P2-288：短口令如实提示（硬阻断的用户可辨反馈）
+        supportingText = {
+            if (state.passwordChars.isNotEmpty() &&
+                state.passwordChars.size < MasterPasswordPolicy.MIN_LENGTH
+            ) {
+                Text(
+                    stringResource(R.string.master_pwd_too_short, MasterPasswordPolicy.MIN_LENGTH),
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
+        },
         modifier = Modifier.fillMaxWidth()
     )
 

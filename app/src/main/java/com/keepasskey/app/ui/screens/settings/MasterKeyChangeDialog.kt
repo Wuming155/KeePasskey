@@ -21,7 +21,10 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.SecureFlagPolicy
 import com.keepasskey.app.R
 import com.keepasskey.app.security.SecureDialog
+import com.keepasskey.app.ui.components.MasterPasswordPolicy
+import com.keepasskey.app.ui.components.MasterPasswordWeakConfirmDialog
 import com.keepasskey.app.ui.components.SecurePasswordField
+import com.keepasskey.app.ui.components.rememberMasterPasswordStrengthBits
 import com.keepasskey.app.ui.components.disabledPrimaryButtonBorder
 import com.keepasskey.app.ui.components.disabledPrimaryButtonColors
 import com.keepasskey.app.ui.theme.CapsuleShape
@@ -39,7 +42,9 @@ internal fun MasterKeyChangeDialog(
     snackbarHostState: SnackbarHostState,
     masterKeyUpdatedMsg: String,
     onDismiss: () -> Unit,
-    onChangeMasterPassword: suspend (CharArray) -> KdbxResult<Unit>
+    onChangeMasterPassword: suspend (CharArray) -> KdbxResult<Unit>,
+    /** ISSUE-P2-288：用户显式确认弱主口令时的留痕回调（不落明文） */
+    onWeakPasswordConfirmed: () -> Unit = {}
 ) {
     // M3 整改（加解密审查 2026-09）：新主密码以 CharArray 承载（SecurePasswordField 桥接），
     // 不进入 String 状态——String 副本不可擦除且驻留堆内存
@@ -56,8 +61,50 @@ internal fun MasterKeyChangeDialog(
         confirmPasswordChars = CharArray(0)
     }
 
+    // ISSUE-P2-288 AC①／AC②：长度下限硬阻断 + 弱口令显式二次确认
+    // （单一判据 MasterPasswordPolicy，与建库向导共用；内核评估在 Dispatchers.Default）
+    val strengthBits = rememberMasterPasswordStrengthBits(newPasswordChars)
+    var showWeakConfirm by remember { mutableStateOf(false) }
+
     val passwordsMatch = newPasswordChars.isNotEmpty() &&
         newPasswordChars.contentEquals(confirmPasswordChars)
+
+    /** 门槛闸后的真实提交（原 onClick 内联逻辑，行为逐字不变） */
+    fun submitNewPassword() {
+        if (passwordsMatch) {
+            val pwdChars = newPasswordChars.copyOf()
+            wipeDialogPasswords()
+            onDismiss()
+            coroutineScope.launch {
+                try {
+                    val result = onChangeMasterPassword(pwdChars)
+                    when (result) {
+                        is KdbxResult.Success<*> -> {
+                            snackbarHostState.showSnackbar(masterKeyUpdatedMsg)
+                        }
+                        is KdbxResult.Failure -> {
+                            snackbarHostState.showSnackbar(result.message)
+                        }
+                    }
+                } finally {
+                    // M3 整改：提交副本在任何结果路径用毕即清零
+                    pwdChars.fill('0')
+                }
+            }
+        }
+    }
+
+    if (showWeakConfirm) {
+        MasterPasswordWeakConfirmDialog(
+            strengthBits = strengthBits,
+            onConfirm = {
+                showWeakConfirm = false
+                onWeakPasswordConfirmed()
+                submitNewPassword()
+            },
+            onCancel = { showWeakConfirm = false }
+        )
+    }
 
     AlertDialog(
         onDismissRequest = {
@@ -96,28 +143,15 @@ internal fun MasterKeyChangeDialog(
         },
         confirmButton = {
             MasterKeyChangeConfirmButton(
-                enabled = passwordsMatch,
+                // ISSUE-P2-288 AC①：长度下限硬阻断（单一判据，与建库向导共用）
+                enabled = passwordsMatch && newPasswordChars.size >= MasterPasswordPolicy.MIN_LENGTH,
                 onClick = {
-                    if (passwordsMatch) {
-                        val pwdChars = newPasswordChars.copyOf()
-                        wipeDialogPasswords()
-                        onDismiss()
-                        coroutineScope.launch {
-                            try {
-                                val result = onChangeMasterPassword(pwdChars)
-                                when (result) {
-                                    is KdbxResult.Success<*> -> {
-                                        snackbarHostState.showSnackbar(masterKeyUpdatedMsg)
-                                    }
-                                    is KdbxResult.Failure -> {
-                                        snackbarHostState.showSnackbar(result.message)
-                                    }
-                                }
-                            } finally {
-                                // M3 整改：提交副本在任何结果路径用毕即清零
-                                pwdChars.fill('0')
-                            }
-                        }
+                    if (MasterPasswordPolicy.verdictOf(newPasswordChars.size, strengthBits) ==
+                        MasterPasswordPolicy.Verdict.WEAK_REQUIRES_CONFIRM
+                    ) {
+                        showWeakConfirm = true
+                    } else {
+                        submitNewPassword()
                     }
                 }
             )
