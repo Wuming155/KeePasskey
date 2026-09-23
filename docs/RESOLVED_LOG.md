@@ -353,6 +353,8 @@
 
 | §282 | 文档地图分册登记补齐与索引重登机检批次（**非**既有条目整改；触发＝2026-09-23 工程卫生「`docs/README.md` 分册登记仍只链 `BATCH_01_30.md`『等 5 册』」）：① `docs/README.md` 分册行拆为 **5 行逐册登记**（`BATCH_01_30` / `31_45` / `46_57` / `58_PLUS` / `158_PLUS`，各注覆盖范围），与 `RESOLVED_LOG` / `resolved/README` 三方对齐；② `check_resolved_index_sync.py` 判据 3 → **5**：新增「分册登记不得重登」+「批次正文 → `RESOLVED_LOG` 且不得重登」（旧 `setdefault` 静默吞重登故恒绿；§270 曾漏登全量索引行）；③ 顺带清掉 `BATCH_158_PLUS.md` 现存 **2 条重复 `§280`**（行 144/145）。验证＝**先红后绿**：扩判据后精确报红 `分册登记重复 §280（3 处）: …:142,144,145` EXIT 1 → 去重后 `RESOLVED_INDEX_SYNC=OK（正文 279 / 分册 281 / 全量 281 / 最大 §281）`；`BROKEN_MD_LINKS=0`。**如实声明**：零生产代码 / 零测试增减；未触 `*/src/**` / 原生面 / `androidTest` ⇒ 无设备侧必跑项；未跑 `lint` / 真机 | （工程卫生，无闭环 ISSUE） | [`282-文档地图分册登记补齐与索引重登机检批次.md`](resolved/batches/282-文档地图分册登记补齐与索引重登机检批次.md) |
 
+| §283 | 复核一致性机检移植 Python 单源批次（**非**既有条目整改；触发＝2026-09-23 工程卫生「`check_recheck_consistency.sh` bash-only，PowerShell 不可直接跑」）：① 新建 `tools/audit/check_recheck_consistency.py` 为**逻辑单源**（11 条禁用短语 + 豁免标记 + §12/§15.2 章节豁免 + 退出码 0/1/2 与原 awk 对齐）；② `.sh` 降为 `exec python3` 薄封装，历史 `bash …sh` 命令仍可用；③ `AGENTS.md` / `SECURITY_RECHECK` 用法改 `.py`（顺带更正示例路径 `docs/` → `docs/security/`）；`hygiene-gate` 五→**六**条。**移植踩坑**：短语含 `**` 在 Python `re` 报 multiple repeat，改 `\*\*`（awk 本就字面）。验证＝真实报告 `PASS（1331 行 / 11 条）`；红态样本 EXIT 1、缺文件 EXIT 2、豁免 EXIT 0。**如实声明**：零生产/测试改动；本机无 bash 故未对拍薄封装；无设备侧必跑项 | （工程卫生，无闭环 ISSUE） | [`283-复核一致性机检移植Python单源批次.md`](resolved/batches/283-复核一致性机检移植Python单源批次.md) |
+
 ## 分册导航
 
 | 分册 | 覆盖批次 | 时间 | 索引 |

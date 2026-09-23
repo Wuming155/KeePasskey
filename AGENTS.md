@@ -63,7 +63,7 @@ Coroutines + Flow；**文档与代码注释使用简体中文**。
 - [`docs/security/同步层记录级完整性威胁建模.md`](docs/security/同步层记录级完整性威胁建模.md) — 改同步 / 合并 / 防回滚前
 - [`docs/security/SECURITY_RECHECK_2026-09.md`](docs/security/SECURITY_RECHECK_2026-09.md) — 认领安全条目 / 重评 severity / 发布前
 - [`docs/records/原生Argon2真机验证记录.md`](docs/records/原生Argon2真机验证记录.md) — 声称性能或真机验证前
-- `tools/audit/check_recheck_consistency.sh` — 修改任何审计 / 复核报告后必跑
+- `tools/audit/check_recheck_consistency.py` — 修改任何审计 / 复核报告后必跑（`.sh` 仅 bash 薄封装）
 
 > **索引纪律（ISSUE-P3-81 立规）**：凡记录**已确认缺陷 / 残余风险 / 验证结论**的文档必须登记到文档地图，
 > 且登记的链接**必须可跳转**（相对路径以本文件所在目录为基准，`python tools/doc/check_md_links.py` 自检，§180）。
@@ -116,7 +116,8 @@ Coroutines + Flow；**文档与代码注释使用简体中文**。
 - CI **`hygiene-gate`**（`.github/workflows/build.yml`）——上述规模 / 链接 / 索引 / 重言断言机检的
   **fail-closed 硬门禁**（§281）：`count_line_tiers` + `long_functions` + `check_md_links` +
   `check_resolved_index_sync` + `check_tautological_assertions`，非 0 即红；**严禁** `|| true` 吞掉
-- `bash tools/audit/check_recheck_consistency.sh` — 复核报告一致性扫描（**改审计 / 复核报告后必跑**）
+- `python tools/audit/check_recheck_consistency.py` — 复核报告一致性扫描（**改审计 / 复核报告后必跑**；
+  PowerShell 直接可跑。历史命令 `bash …/check_recheck_consistency.sh` 仍可用，薄封装调本文件）
 - `python tools/audit/check_tautological_assertions.py` — **「永远为真的断言」机检**（§275 立规；**改 `*/src/test/**`
   的任何断言后必跑**）：判据＝断言实参能否在 `@Test` 函数体内按「纯局部 `val`」口径全部求值，命中即退出码 1；
   `--selftest` 为口径反校；**`var` 观测通道一律豁免**（由生产代码经回调写入者恰为最有鉴别力的形态）。

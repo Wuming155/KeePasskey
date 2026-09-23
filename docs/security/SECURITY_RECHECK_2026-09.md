@@ -1247,7 +1247,7 @@ if (builder.length >= DIGEST_HEX_LENGTH) break         // 8 字符后停 → 只
 
 **根因与处置**：手工回改已连续**两轮**失守（第一轮 10 处、本轮 5 处）。
 故 `§15.3` 第 9 条已由"自查声明"升级为**可执行物**：
-`tools/audit/check_recheck_consistency.sh`（由"已撤销/已更正断言清单"驱动的 fail-closed 扫描，
+`tools/audit/check_recheck_consistency.py`（由"已撤销/已更正断言清单"驱动的 fail-closed 扫描，
 已登记 `AGENTS.md` §4 索引与 §5 命令表）。
 **当前状态：`PASS`（1203 行，0 残留）** —— 这是**可复跑的**，不再是自称。
 
@@ -1306,7 +1306,7 @@ if (builder.length >= DIGEST_HEX_LENGTH) break         // 8 字符后停 → 只
 8. **`§43.7` 类"已确认强项"陈述须同样可核**（强项 9 与实际合并清单不符）。
 9. **【第三次复发后立规·已落地为可执行物】报告定稿前必须跑一致性扫描**：
    ```bash
-   bash tools/audit/check_recheck_consistency.sh docs/SECURITY_RECHECK_2026-09.md   # fail-closed
+   python tools/audit/check_recheck_consistency.py docs/security/SECURITY_RECHECK_2026-09.md   # fail-closed
    ```
    机制：脚本内维护「已撤销 / 已更正断言 → 禁用短语」映射（清单见脚本内 heredoc，共 10 条），
    行内含豁免标记词或处于 §12 / §15.2 区间者跳过。**切勿在正文里复述禁用短语**——
