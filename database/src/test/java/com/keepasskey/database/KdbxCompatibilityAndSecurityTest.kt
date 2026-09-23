@@ -12,6 +12,8 @@ import com.keepasskey.crypto.stream.InnerRandomStreamCipher
 import com.keepasskey.database.exception.KdbxCorruptFileException
 import com.keepasskey.database.exception.KdbxInvalidCredentialsException
 import com.keepasskey.database.exception.KdbxUnsupportedVersionException
+import com.keepasskey.database.file.HmacBlockInputStream
+import com.keepasskey.database.file.HmacBlockOutputStream
 import com.keepasskey.database.file.HmacBlockStream
 import com.keepasskey.database.file.InnerHeader
 import com.keepasskey.database.file.KdbxDatabase
@@ -541,19 +543,73 @@ class KdbxCompatibilityAndSecurityTest {
     }
 
     /**
-     * HMAC 块尺寸上限回归（J 项整改）：读取侧单块尺寸不得超过 1 MB，
-     * 防止恶意/损坏文件以超大 blockSize 触发大块内存分配（DoS）。
-     * 构造仅含「32 字节伪 HMAC + 4 字节 blockSize(=2 MiB)」的流，
-     * 该校验在读取 blockData 之前触发，故无需有效 HMAC。
+     * ISSUE-P3-268 回归（读上限移除）：块长超过旧 1 MiB 上限的合法单块**必须被接受**。
+     * 官方 KeePass 2.61.1 / keepass2android / KeePassXC 读侧均只拒绝负数块长，
+     * 规格对块长仅定 Int32——旧 1 MiB 上限会误拒第三方写出的合法大块文件。
+     * 构造单块 1 MiB + 1 字节（恰为旧上限 + 1，旧代码必拒的最小越界块）经真实
+     * writeAll / readAll 往返，内容逐一比对。
      */
     @Test
-    fun readAll_rejectsOversizedBlockSize() {
+    fun readAll_acceptsBlockSizeBeyondLegacy1MiB() {
+        val blockSize = HmacBlockStream.DEFAULT_BLOCK_SIZE + 1
+        val data = ByteArray(blockSize) { (it % 251).toByte() }
+        val sink = ByteArrayOutputStream()
+        HmacBlockStream.writeAll(data, sink, ByteArray(64), blockSize)
+
+        val decoded = HmacBlockStream.readAll(ByteArrayInputStream(sink.toByteArray()), ByteArray(64))
+        assertArrayEquals(data, decoded)
+    }
+
+    /**
+     * ISSUE-P3-268 回归（读上限移除后的 fail-closed 面）：读侧仅拒绝负数块长
+     * （对齐官方 HmacBlockStream.cs `nBlockSize < 0` 语义）。
+     */
+    @Test
+    fun readAll_rejectsNegativeBlockSize() {
+        val badStream = ByteArrayInputStream(
+            ByteArray(32) + LittleEndianUtil.intTo4Bytes(-1)
+        )
+        assertThrows(KdbxCorruptFileException::class.java) {
+            HmacBlockStream.readAll(badStream, ByteArray(64))
+        }
+    }
+
+    /**
+     * ISSUE-P3-268 回归（读上限移除后的 fail-closed 面，沿承原「J 项」用例形态）：
+     * 声明超大块长（2 MiB）而底层流无数据可读时，仍必须以类型化异常拒绝——
+     * 由 readBytes 的 EOF 路径兜底（「HMAC 块读取意外中断」），而非静默通过。
+     * 构造仅含「32 字节伪 HMAC + 4 字节 blockSize(=2 MiB)」的流。
+     */
+    @Test
+    fun readAll_failsClosedOnTruncatedOversizedBlock() {
         val oversized = (2 * 1024 * 1024)
         val badStream = ByteArrayInputStream(
             ByteArray(32) + LittleEndianUtil.intTo4Bytes(oversized)
         )
         assertThrows(KdbxCorruptFileException::class.java) {
             HmacBlockStream.readAll(badStream, ByteArray(64))
+        }
+    }
+
+    /**
+     * ISSUE-P3-268 回归（读上限移除）：流式读取路径（loadNextBlock）同样接受
+     * 超过旧 1 MiB 上限的合法单块——HmacBlockOutputStream 以 1 MiB + 1 字节分块写出
+     * 单个越界块，HmacBlockInputStream 流式读回并校验终止块。
+     */
+    @Test
+    fun streamingPath_acceptsBlockSizeBeyondLegacy1MiB() {
+        val blockSize = HmacBlockStream.DEFAULT_BLOCK_SIZE + 1
+        val data = ByteArray(blockSize) { (it % 251).toByte() }
+        val sink = ByteArrayOutputStream()
+        HmacBlockOutputStream(sink, ByteArray(64), blockSize).use { out ->
+            out.write(data)
+        }
+
+        HmacBlockInputStream(ByteArrayInputStream(sink.toByteArray()), ByteArray(64)).use { input ->
+            val decoded = ByteArrayOutputStream()
+            input.copyTo(decoded)
+            input.verifyEndOfStream()
+            assertArrayEquals(data, decoded.toByteArray())
         }
     }
 }

@@ -25,18 +25,15 @@ private val EMPTY_BLOCK_DATA = ByteArray(0)
  *
  * ISSUE-P3-37：块摘要的五处手工拼装（`writeAll` / `readAll` / `loadNextBlock` / `flushBlock` /
  * `close`）统一收敛到 [BlockHmac]；[HmacBlockStream.computeBlockKey] 作为既有公开 API 保留原样。
- * 块格式、块尺寸上限与异常语义**完全未变**（由既有篡改 / 终止块 / EOF 三类用例锁定）。
+ * 块格式与异常语义**完全未变**（由既有篡改 / 终止块 / EOF 三类用例锁定）；
+ * 读侧块尺寸上限经 ISSUE-P3-268 裁决**移除**（对齐官方 KeePass 2.61.1 / keepass2android /
+ * KeePassXC：读侧仅拒绝负数块长，规格对块长仅定 Int32，1 MiB 只是官方写侧惯例），
+ * 旧 1 MiB 上限曾会误拒「块长 > 1 MiB」的合法第三方文件；恶意分配仍由
+ * [LittleEndianUtil.readBytes] 的 16 MiB 通用护栏（P0-5）与 EOF 路径兜底。
  */
 object HmacBlockStream {
 
     const val DEFAULT_BLOCK_SIZE = 1024 * 1024 // 1 MB
-
-    /**
-     * 读取侧单块尺寸安全上限：等于写入侧块尺寸（官方 KeePass 2.61.1 恒以 1 MB 分块）。
-     * 既防止恶意/损坏文件以超大 blockSize 触发大块内存分配（DoS），
-     * 也确保与写入侧契约一致——我们永不写出超过 1 MB 的块。
-     */
-    const val MAX_READ_BLOCK_SIZE = DEFAULT_BLOCK_SIZE
 
     /// HMAC-SHA256 签名长度（字节）
     const val HMAC_SIZE = 32
@@ -113,9 +110,8 @@ object HmacBlockStream {
                 if (blockSize < 0) {
                     throw KdbxCorruptFileException("非法的负数块大小: $blockSize")
                 }
-                if (blockSize > HmacBlockStream.MAX_READ_BLOCK_SIZE) {
-                    throw KdbxCorruptFileException("HMAC 块大小超出安全上限: $blockSize（上限 ${HmacBlockStream.MAX_READ_BLOCK_SIZE}）")
-                }
+                // ISSUE-P3-268：块长仅受 Int32 域约束（负数拒绝），无上限——对齐官方读侧语义；
+                // 声明超长而流不满足时由 readBytes 的 EOF 路径兜底为损坏文件。
 
                 if (blockSize == 0) {
                     // 终止块校验。
@@ -132,7 +128,13 @@ object HmacBlockStream {
                     break
                 }
 
-                val blockData = LittleEndianUtil.readBytes(inputStream, blockSize)
+                // ISSUE-P3-268：块长无上限，读侧不得因「声明超大块」提前拒绝；
+                // 底层流数据不足时仍以类型化异常 fail-closed（与上方 HMAC 读取处同型）。
+                val blockData = try {
+                    LittleEndianUtil.readBytes(inputStream, blockSize)
+                } catch (e: EOFException) {
+                    throw KdbxCorruptFileException("HMAC 块读取意外中断", e)
+                }
                 val actualHmac = hmacer.compute(blockIndex, blockSize, blockData, 0, blockData.size)
                 if (!java.security.MessageDigest.isEqual(actualHmac, expectedHmac)) {
                     // D20：同上——块 HMAC 失败属完整性失败。此读取条目（readAll）无生产调用方，
@@ -255,9 +257,8 @@ class HmacBlockInputStream(
         if (blockSize < 0) {
             throw KdbxCorruptFileException("非法的负数块大小: $blockSize")
         }
-        if (blockSize > HmacBlockStream.MAX_READ_BLOCK_SIZE) {
-            throw KdbxCorruptFileException("HMAC 块大小超出安全上限: $blockSize（上限 ${HmacBlockStream.MAX_READ_BLOCK_SIZE}）")
-        }
+        // ISSUE-P3-268：块长仅受 Int32 域约束（负数拒绝），无上限——对齐官方读侧语义；
+        // 声明超长而底层流不满足时由 readBytes 的 EOF 路径兜底为损坏文件。
 
         if (blockSize == 0) {
             val actualHmac = hmacer.compute(blockIndex, 0, EMPTY_BLOCK_DATA, 0, 0)
@@ -274,7 +275,13 @@ class HmacBlockInputStream(
             return false
         }
 
-        val blockData = LittleEndianUtil.readBytes(source, blockSize)
+        // ISSUE-P3-268：块长无上限，读侧不得因「声明超大块」提前拒绝；
+        // 底层流数据不足时仍以类型化异常 fail-closed（与上方 HMAC 读取处同型）。
+        val blockData = try {
+            LittleEndianUtil.readBytes(source, blockSize)
+        } catch (e: EOFException) {
+            throw KdbxCorruptFileException("HMAC 块读取意外中断", e)
+        }
         val actualHmac = hmacer.compute(blockIndex, blockSize, blockData, 0, blockData.size)
         if (!java.security.MessageDigest.isEqual(actualHmac, expectedHmac)) {
             // D20：数据块 HMAC 不符属**完整性失败**，不是凭据错误。官方三态语义见

@@ -78,22 +78,28 @@
 
 ---
 
-## P3 低危问题、特性接线与体验优化（1 项）
+## P3 低危问题、特性接线与体验优化（0 项）
 
-### `ISSUE-P3-268`：HMAC 块流读取上限 1 MiB 会拒收「块长 > 1 MiB」的合法 KDBX 文件（规格对块长仅定 Int32）——裁决项
-
-- **核实时间点**：2026-09-22（同 `ISSUE-P2-266` 的格式层核对走查）。
-- **核实方式**：直读 HEAD——`database/src/main/java/com/keepasskey/database/file/HmacBlockStream.kt:32`（`DEFAULT_BLOCK_SIZE = 1024 * 1024`）、`:39`（`MAX_READ_BLOCK_SIZE = DEFAULT_BLOCK_SIZE`），读侧两处（`:116-117`、`:258-259`）块长超限即抛 `KdbxCorruptFileException`；规格对块长 `s` 只定 Int32 并注明「KeePass 当前用 1 MiB」——即 1 MiB 是官方写侧惯例而非格式上限。
-- **背景与影响**：格式本身允许更大块。官方 KeePass 写侧恒 1 MiB、日常互操作无碍；若第三方实现写出 2 MiB 块，本仓会误判为损坏文件。现状是 fail-closed 防 DoS 取向，与仓内加固纪律一致——**本条属裁决项而非明确缺陷**（报告中「KeePassXC 也恒 1 MiB」系第三方行为论断，未实证）。
-- **验收标准**：
-  - AC⓪ **先决**：由用户裁决二选一——(a) 放宽读上限至数 MiB（仍保留上限防 DoS），并补边界值单测与互操作说明；或 (b) 维持 1 MiB，在 [`architecture/已知工程限界.md`](architecture/已知工程限界.md) 登记边界、依据与重开条件。**未裁决不得动代码**；
-  - AC① 按裁决落地；选 (a) 时须证放宽后超上限路径仍 fail-closed 且有单测覆盖边界值（上限、上限+1）；
-  - AC② 若后续实测发现确有客户端写出 > 1 MiB 块，本条自动升 P2 重开。
-- **依据**：`keepass.info/help/kb/kdbx.html`（块格式与 1 MiB 惯例表述）；`database/src/main/java/com/keepasskey/database/file/HmacBlockStream.kt:32-39, 110-120, 252-262`。
+> **暂无开放项**（本区归零：§267 闭环 `ISSUE-P3-268`，P3 1 → **0 项**——HMAC 块流读取上限 1 MiB
+> 经用户裁决**移除**：三家参考实现（官方 KeePass 2.61.1 / keepass2android / KeePassXC）读侧均仅拒绝
+> 负数块长、均无设置项，本仓对齐之；读侧只查负数 + 块数据 EOF 路径补类型化包裹 + 工具层 16 MiB
+> 分配护栏（P0-5）兜底；新增 4 例回归用例（>1 MiB 接受双路径 / 负数拒绝 / 截断 fail-closed）；
+> 裁决登记 `PD-31`。证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md) 与
+> [`resolved/batches/267-HMAC块流读上限移除批次.md`](resolved/batches/267-HMAC块流读上限移除批次.md)。）
 
 ---
 
-> **本区最近一次归零记录**（2026-09-23 §266 闭环 `ISSUE-P3-263`，P3 2 → **1 项**）：动态取色与主题调色盘收敛为
+> **本区最近一次归零记录**（2026-09-23 §267 闭环 `ISSUE-P3-268`，P3 1 → **0 项**）：HMAC 块流读侧
+> 上限 1 MiB **整体移除**（用户裁决「别家都没有上限，咱们也不要设置上限，只检查负数」）——
+> 实证三家参考实现（官方 KeePass 2.61.1 / keepass2android / KeePassXC）读侧均仅拒绝负数块长、
+> 均无设置项，旧上限会把第三方写出的「块长 > 1 MiB」合法文件误判为损坏；读侧两处只查负数，
+> 块数据读取的 EOF 路径补类型化包裹（`KdbxCorruptFileException`），恶意分配由工具层 16 MiB
+> 护栏（P0-5）兜底、该护栏一行未动；旧「2 MiB 必拒」回归用例按测试资产纪律改写 + 新增 3 例
+> （>1 MiB 接受双路径 / 负数拒绝 / 截断 fail-closed）；裁决登记 `PD-31`。
+> 证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md) 与
+> [`resolved/batches/267-HMAC块流读上限移除批次.md`](resolved/batches/267-HMAC块流读上限移除批次.md)。
+>
+> **前次归零记录**（2026-09-23 §266 闭环 `ISSUE-P3-263`，P3 2 → **1 项**）：动态取色与主题调色盘收敛为
 > 「配色来源」**互斥单选**（用户裁决候选 A，登记 `PD-30`）——判据单点化（`resolveColorSource` 纯函数，
 > 设置页与 `KeePasskeyTheme` 共用）、动态取色生效期间调色盘 5 项整节置灰不可点且不呈现任何「已选中」
 > （附行内原因说明 + 「改用主题调色盘」一步切回）、`setThemePalette` 单 DataStore 事务幂等互斥写
