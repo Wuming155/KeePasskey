@@ -103,11 +103,15 @@ internal class RecycleBinCoordinator(
                 (binGroup.subtreeContainsGroup(targetGroup.id) || targetGroup.subtreeContainsGroup(binGroup.id))
 
         if (binRelated || !db.recycleBinEnabled) {
-            // 已在回收站内（或回收站被禁用）：物理删除整组并记录 DeletedObject 墓碑
-            databaseSession.deleteGroup(uuid)
-            databaseSession.updateDatabaseMeta { cur ->
-                cur.copy(deletedObjects = cur.deletedObjects + DeletedObject(id = uuid, deletionTime = Instant.now()))
-            }
+            // 已在回收站内（或回收站被禁用）：物理删除整组。
+            // ISSUE-P2-284：墓碑必须覆盖**整棵子树**（组自身 + 全部子孙条目 / 子组）——
+            // 只为组自身立碑时，他端仍持有的子对象在合并中按「修改胜」复活
+            // （父组墓碑按 UUID 精确匹配，不覆盖子项）；口径对齐官方
+            // `PwGroup.DeleteAllObjects`（`PwGroup.cs:1367-1386`，为每个子孙立碑），
+            // 并与本类 `emptyRecycleBin` 复用同一实现（禁两份）。
+            val subtreeEntries = targetGroup.allEntries().map { it.id }.toSet()
+            val subtreeGroups = targetGroup.allGroups().map { it.id }.toSet()
+            permanentlyDeleteObjects(entryIds = subtreeEntries, groupIds = subtreeGroups)
         } else {
             // 标准回收站语义：整组（含子内容）移入库内回收站组，不产生墓碑
             val targetBin = getOrCreateRecycleBinGroup()
@@ -176,18 +180,33 @@ internal class RecycleBinCoordinator(
         }
 
         val entryIds = entriesToDelete.map { it.id }.toSet()
+        permanentlyDeleteObjects(
+            entryIds = entryIds,
+            groupIds = subgroupsToDelete.map { it.id }.toSet()
+        )
+        return persistSession()
+    }
+
+    /**
+     * 物理删除 + **逐对象墓碑**的单一实现（`ISSUE-P2-284` AC①：组硬删除与清空回收站共用，
+     * 禁止两份墓碑口径漂移）。
+     *
+     * 先批量删条目、再逐组摘除（父组摘除后其子组的删除为安全 no-op），最后一次性追加
+     * 全部墓碑——墓碑集合 = 条目集 ∪ 组集，与被删对象**一一对应**（官方
+     * `PwGroup.DeleteAllObjects` 同口径：每个子孙对象各立一碑）。
+     */
+    private suspend fun permanentlyDeleteObjects(entryIds: Set<KdbxUuid>, groupIds: Set<KdbxUuid>) {
         if (entryIds.isNotEmpty()) {
             databaseSession.batchDeleteEntries(entryIds)
         }
-        for (sub in subgroupsToDelete) {
-            databaseSession.deleteGroup(sub.id)
+        for (groupId in groupIds) {
+            databaseSession.deleteGroup(groupId)
         }
         databaseSession.updateDatabaseMeta { cur ->
-            val tombstones = entryIds.map { DeletedObject(it, Instant.now()) } +
-                    subgroupsToDelete.map { DeletedObject(it.id, Instant.now()) }
+            val now = Instant.now()
+            val tombstones = entryIds.map { DeletedObject(it, now) } + groupIds.map { DeletedObject(it, now) }
             cur.copy(deletedObjects = cur.deletedObjects + tombstones)
         }
-        return persistSession()
     }
 
     /** 批量删除：逐条按回收站语义分流（移入回收站 / 物理删除+墓碑），最后统一落盘 */

@@ -44,17 +44,20 @@ internal object KdbxGroupMerger {
                 }
                 isLocalGroupDeleted && rg != null -> {
                     val rModTime = rg.times.lastModificationTime
+                    // ISSUE-P2-284：墓碑存在时按官方口径比时间（修改晚于删除时刻才复活）；
+                    // 无墓碑时保持「修改方胜」旧口径
                     val reRecreated = ld != null && rModTime.isAfter(ld.deletionTime)
-                    val rModified = isGroupModified(bg, rg)
+                    val rModified = ld == null && isGroupModified(bg, rg)
                     if (reRecreated || rModified) {
-                        // 修改方胜 / 删除后重建胜
+                        // 重建胜（墓碑在且修改更晚）/ 无碑时的修改方胜
                         survivingGroups[groupId] = rg
                     }
                 }
                 isRemoteGroupDeleted && lg != null -> {
                     val lModTime = lg.times.lastModificationTime
+                    // ISSUE-P2-284：同上的镜像分支
                     val leRecreated = rd != null && lModTime.isAfter(rd.deletionTime)
-                    val lModified = isGroupModified(bg, lg)
+                    val lModified = rd == null && isGroupModified(bg, lg)
                     if (leRecreated || lModified) {
                         survivingGroups[groupId] = lg
                     }

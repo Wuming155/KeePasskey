@@ -41,17 +41,7 @@
 
 ---
 
-## P2 中危缺陷与协议/测试缺口（8 项）
-
-### ISSUE-P2-284：分组硬删除只为组自身立墓碑，子条目与子组无墓碑 ⇒ 跨设备合并复活
-
-- **核实时间点**：2026-09-23 经删除分流与墓碑产出核对。**注**：本条在对抗轮未列为独立攻击对象，仅经官方源码旁证（对照段）+ 同文件反向口径支撑，开工前须按规则 6.1② 自行复核调用链。
-- **核实方式**：`app/.../data/repository/RecycleBinCoordinator.kt:105-110` 的物理删除分支（回收站禁用 / 与回收站相关时）只追加 `DeletedObject(id = uuid)` 一条，即**组自身**；底层 `database/.../session/SessionTreeEditor.kt:265-278` 的 `removeGroup` 直接摘除整棵子树、不产出子对象墓碑；`sync/.../merge/KdbxTombstoneMerger.kt:22-27` 按 UUID 精确匹配，父组墓碑**不覆盖**子项 ⇒ 他端仍持有条目并将其作为存活对象合回。同文件 `emptyRecycleBin`（`:178-188`）已采用逐对象墓碑口径，构成同文件内直接对照。
-- **对照（经核实为真）**：官方 `PwGroup.cs:1367-1386` 的 `DeleteAllObjects` 为**每个子孙 entry 与 group** 追加 `PwDeletedObject`。
-- **涉及文件**：`app/src/main/java/com/keepasskey/app/data/repository/RecycleBinCoordinator.kt`、`database/src/main/java/com/keepasskey/database/session/SessionTreeEditor.kt`、`sync/src/main/java/com/keepasskey/sync/merge/KdbxTombstoneMerger.kt`。
-- **验收标准**：AC① 组硬删除递归产出子孙条目 / 子组墓碑，并与 `emptyRecycleBin` **复用同一函数**（禁两份实现）；AC② 用例锁定「删组后本库墓碑数 = 子孙对象数 + 组自身」与「他端存活副本经合并后被清除」；AC③ 补 `:database:` / `:sync:` 端到端合并往返；AC④ 与 §246、`ISSUE-P1-03` 的删除语义一致，不得引入「物理删除但无墓碑」的新分支。
-
----
+## P2 中危缺陷与协议/测试缺口（7 项）
 
 ### ISSUE-P2-285：硬件密钥与「明文不落地」类安全声明无条件渲染（5 处文案，其中 1 处被实现直接否证）
 

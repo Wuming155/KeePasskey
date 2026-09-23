@@ -92,17 +92,22 @@ internal object KdbxEntryMerger {
                 }
                 isLocalDeleted && re != null -> {
                     val rModTime = re.times.lastModificationTime
+                    // ISSUE-P2-284：墓碑存在时删除 vs 修改按官方口径**比时间**——
+                    // 仅「修改晚于删除时刻」才复活（`PwDeletedObject.DeletionTime` vs
+                    // `LastModificationTime`）；无墓碑（仅凭 base 推断删除）时无时刻可比，
+                    // 保持「修改胜」旧口径。否则子对象墓碑会被「自 base 有任意改动即胜」架空
                     val reRecreated = ld != null && rModTime.isAfter(ld.deletionTime)
-                    val reModified = isModified(be, re)
+                    val reModified = ld == null && isModified(be, re)
                     if (reRecreated || reModified) {
-                        // 修改胜 / 重建胜
+                        // 重建胜（墓碑在且修改更晚）/ 无碑时的修改胜
                         survivingEntries.add(re)
                     }
                 }
                 isRemoteDeleted && le != null -> {
                     val lModTime = le.times.lastModificationTime
+                    // ISSUE-P2-284：同上的镜像分支（本地删除时刻 vs 本地修改时刻）
                     val leRecreated = rd != null && lModTime.isAfter(rd.deletionTime)
-                    val leModified = isModified(be, le)
+                    val leModified = rd == null && isModified(be, le)
                     if (leRecreated || leModified) {
                         survivingEntries.add(le)
                     }

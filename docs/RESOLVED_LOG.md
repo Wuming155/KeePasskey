@@ -362,6 +362,7 @@
 | §288 | 合并图标池与库级 Meta 口径批次：`ISSUE-P2-280` 闭环。`customIcons` 按 UUID 并集 + LWW 参与合并（对齐官方 `MergeInCustomIcons`，只增不删）；写出侧 `CustomIconRef` 命中校验 fail-closed（条目 / 分组 / 历史快照三处共用判据）；库级 Meta 逐字段结论登记 **`PD-35`**。用例 +8（合并 4 + 整库往返 / 悬空守卫 4）；`tests=2609` 全绿 | ISSUE-P2-280 | [`288-合并图标池与库级Meta口径批次.md`](resolved/batches/288-合并图标池与库级Meta口径批次.md) |
 | §289 | 冲突差异单一词汇表与裁决面批次：`ISSUE-P2-281` 闭环。`modifiedFields` 改**机读键**词汇（标准键 / `custom:` 前缀 / 四标量键，常量化于 `KdbxMerger`），界面与 `resolveConflictByFields` 同表消费（拆两处各算一份）；自定义字段可见可裁决（受保护掩码）；条目级裁决方式选择行（按字段 / 整条本地 / 整条云端 / **双方保留**——`DUPLICATE_BOTH` 恢复可达）。用例 +7；`tests=2616` 全绿 + 截图包装编译门禁绿 | ISSUE-P2-281 | [`289-冲突差异单一词汇表与裁决面批次.md`](resolved/batches/289-冲突差异单一词汇表与裁决面批次.md) |
 | §290 | 标签分隔符单一词汇表批次：`ISSUE-P2-282` 闭环。`core` 新增 `KdbxTags`（官方 `g_vTagSep { ',', ';' }` + `NormalizeTag(s)` 同义归一化 + 写侧裸 `;`），读 / 写 / 编辑页 / 合并四处接同一词汇表（官方源码经独立开卷核对，AC② 括注「大小写 / 剔除」更正为「替换为点 + 去重 + 自然排序」）；AC④ pykeepass 逗号库 fixture 往返、AC⑤ keepassxc-cli / pykeepass 双向对拍留证。用例 +10；`tests=2626` 全绿 | ISSUE-P2-282 | [`290-标签分隔符单一词汇表批次.md`](resolved/batches/290-标签分隔符单一词汇表批次.md) |
+| §291 | 分组硬删除子树墓碑批次：`ISSUE-P2-284` 闭环。`permanentlyDeleteObjects` 单一实现复用于组硬删除与清空回收站（墓碑 = 组自身 ∪ 子孙条目 ∪ 子孙子组，对齐官方 `DeleteAllObjects`）；合并「删除 vs 修改」判据在墓碑存在时改按官方**比时间**（前提复核揭出的同族根因，不修则墓碑空转）。用例 +5；`tests=2631` 全绿 | ISSUE-P2-284 | [`291-分组硬删除子树墓碑批次.md`](resolved/batches/291-分组硬删除子树墓碑批次.md) |
 
 ## 分册导航
 
