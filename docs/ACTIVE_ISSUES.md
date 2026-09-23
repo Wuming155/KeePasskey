@@ -192,7 +192,7 @@
 
 ---
 
-## P3 低危问题、特性接线与体验优化（13 项）
+## P3 低危问题、特性接线与体验优化（12 项）
 
 ### ISSUE-P3-272：云端同步四项假开关（自动同步 / 事务化写入 / 预加载远程数据库 / 允许的 Wi-Fi SSID）
 
@@ -241,15 +241,6 @@
 - **核实方式**：`app/.../security/ClipboardSecurityManager.kt:200-214` 的 `armScheduledClear` 按 `autoClearClipboard == false` 不调度，但 `:105-120/285-290` 的熄屏广播、`ON_STOP`、`onSessionLocked`、冷启动对账四条路径不查该设置直调 `clearPendingSensitive()` ⇒ 与 `res/values/strings.xml:651` / `values-en:640` 承诺的「一直留在系统剪贴板……直至被下次复制覆盖或设备重启」（并由 `detail_password_copied_no_clear`（`:329`）同向强化）相悖。方向为安全侧，且**行为已登记**于 `docs/resolved/batches/48-…:72-73`：「切后台即清与『自动擦除开关』**独立生效**；关闭自动擦除者亦受此保护」⇒ 属文案未跟上裁决。另 `reconcileOnColdStart`（`:300-306`）无摘要比对即 `clearClipboard()`，**可清除他应用写入的剪贴板内容**，批 48.4① 只登记了「不留口令等价物」，未登记此误清面。
 - **涉及文件**：`app/src/main/java/com/keepasskey/app/security/ClipboardSecurityManager.kt`、`app/src/main/res/values/strings.xml`、`app/src/main/res/values-en/strings.xml`。
 - **验收标准**：AC① 中英文案改为**仅**描述真实行为（写明「切后台 / 锁屏 / 锁库 / 冷启动四类时机不受该开关约束」），禁以 KDoc 或批次结论替代用户可见文案；AC② 冷启动对账须先比对摘要、只在确属本应用写入时清除，或在文案与设置项说明中如实声明「可能清除他应用内容」并登记 `PD-*`；AC③ 用例锁定「关闭开关后四类时机仍清」的既有已登记行为不被误改（防后续以文案为准的改动反向放宽安全性）。
-
----
-
-### ISSUE-P3-294：HIBP 泄露检测未发 `Add-Padding`，批量查询循环内无取消检查
-
-- **核实时间点**：2026-09-23 经官方 API v3 原文核实（`Add-Padding` 为**文档化建议**而非强制，故本条按 P3 记，不作协议缺陷）。
-- **核实方式**：`app/.../data/breach/HibpRangeClient.kt:36-40` 仅带 User-Agent，未发 `Add-Padding: true`（官方语义：把响应对齐到 800–1000 条记录量级，使能截获加密响应长度者无法据大小判断查了哪个前缀）；`BreachCheckCoordinator.kt:35-43` 对每个不同前缀串行一次请求、**循环内无取消检查**（`HibpRangeClient.kt:39` 的阻塞 `execute()` 在途不可中断，但请求**间隙**可检）。失败口径**已合格**：非 2xx 抛错（`:44-46`）、失败转 `FAILED` 且计数回填 null（`SettingsHealthController.kt:147-151`），超时已在 `BreachCheckModule.kt:24-26/38-43` 收口，触发需用户主动开启且有 `isHealthScanning` 互斥（`:196-213`）。
-- **涉及文件**：`app/src/main/java/com/keepasskey/app/data/breach/HibpRangeClient.kt`、`app/src/main/java/com/keepasskey/app/data/breach/BreachCheckCoordinator.kt`。
-- **验收标准**：AC① 补 `Add-Padding: true` 并按官方语义解析（忽略填充行不影响判定）；AC② 循环内加 `ensureActive()` / `isActive` 检查，禁千条目库的扫描在用户退出后继续外联；AC③ 前缀去重与请求数上限须在正文写明取值依据；AC④ 保持既有 fail-closed 口径（失败**不得**当作「未泄露」），用例只可加不可删。
 
 ---
 

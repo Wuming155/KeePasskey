@@ -201,6 +201,9 @@ internal class SettingsHealthController(
         healthStateFlow.update { it.copy(breachCheckStatus = BreachCheckStatus.CHECKING) }
         return try {
             breachCheckCoordinator.check(entries)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            // ISSUE-P3-294：协程取消是「用户退出」而非查询失败——继续上抛，禁转 FAILED
+            throw e
         } catch (e: Exception) {
             BreachCheckOutcome(
                 status = BreachCheckStatus.FAILED,

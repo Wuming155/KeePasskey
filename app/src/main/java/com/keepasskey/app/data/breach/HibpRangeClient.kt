@@ -20,6 +20,11 @@ import java.util.Locale
  * 失败语义：非 2xx 或响应体不可解析一律抛 [BreachCheckException]，绝不回落为空集合
  * （空集合的语义是「该前缀下无泄露」，谎报即等于伪造安全结论）。
  *
+ * 隐私增强（HIBP 官方 v3「Introducing padding」）：恒发 `Add-Padding: true`，服务端把响应
+ * 对齐到 800–1000 条记录，使能截获密文长度者无法据响应大小反推查询了哪个前缀；填充行的
+ * `count` 恒为 0（官方原文「Padded entries always have a password count of 0 and can be
+ * discarded once received」），解析时丢弃、不影响命中判定（真实泄露行 `count ≥ 1`）。
+ *
  * 构造由 [com.keepasskey.app.di.BreachCheckModule] 显式装配（未标注 `@Inject`）：
  * 基址与客户端属部署期配置，交由模块集中声明便于审计与测试替换。
  */
@@ -36,6 +41,7 @@ class HibpRangeClient(
         val request = Request.Builder()
             .url("${baseUrl.trimEnd('/')}$RANGE_PATH$normalizedPrefix")
             .header(HEADER_USER_AGENT, USER_AGENT)
+            .header(HEADER_ADD_PADDING, ADD_PADDING_VALUE)
             .get()
             .build()
 
@@ -54,6 +60,11 @@ class HibpRangeClient(
      * 容错边界：仅跳过无法识别的整行（防御服务端附加内容），绝不因局部异常而返回部分
      * 结果充数——能解析的行全部采纳，无法解析的行静默忽略（泄露检测宁可漏报也不谎报，
      * 但解析失败的整体性已在 [queryRange] 的非 2xx 分支覆盖）。
+     *
+     * Add-Padding 语义：填充行 `count` 恒为 0，官方要求「can be discarded once received」。
+     * 丢弃后不影响命中判定——真实泄露行 `count ≥ 1`，后缀若恰与某填充行重合（随机填充、
+     * 概率极低）按未泄露处理比误报「已泄露」更符合 fail-open-on-padding / fail-closed-on-error
+     * 的分界：填充行不是泄露证据。
      */
     private fun parseRangeBody(body: String): Set<String> {
         val suffixes = LinkedHashSet<String>()
@@ -62,6 +73,9 @@ class HibpRangeClient(
             if (line.isEmpty()) continue
             val match = LINE_PATTERN.matchEntire(line) ?: continue
             val suffix = match.groupValues[1].uppercase(Locale.US)
+            // 「全 0」计数（含 "0" / "00"）＝ Add-Padding 填充行，丢弃；不去 toLong 避免大计数溢出
+            val countToken = match.groupValues[2]
+            if (countToken.trimStart('0').isEmpty()) continue
             if (suffix.isNotEmpty()) suffixes.add(suffix)
         }
         return suffixes
@@ -78,6 +92,10 @@ class HibpRangeClient(
 
         private const val HEADER_USER_AGENT = "User-Agent"
         private const val USER_AGENT = "KeePasskey-Android"
+
+        /** HIBP v3 隐私填充请求头（官方文档化建议，非强制） */
+        internal const val HEADER_ADD_PADDING = "Add-Padding"
+        internal const val ADD_PADDING_VALUE = "true"
 
         private val PREFIX_PATTERN = Regex("^[0-9A-F]{$PREFIX_LENGTH}$")
 

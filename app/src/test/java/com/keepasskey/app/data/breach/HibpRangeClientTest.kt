@@ -109,4 +109,37 @@ class HibpRangeClientTest {
         }
         assertEquals(0, server.requestCount)
     }
+
+    @Test
+    fun `恒发 Add-Padding 请求头（HIBP 官方隐私填充建议）`() = runBlocking {
+        server.enqueue(MockResponse().setResponseCode(200).setBody(""))
+
+        client.queryRange(PREFIX)
+
+        val request = server.takeRequest()
+        assertEquals("true", request.headers["Add-Padding"])
+    }
+
+    @Test
+    fun `Add-Padding 填充行 count 为 0 时丢弃，不影响命中判定`() = runBlocking {
+        // 官方语义：填充行 count 恒 0，可丢弃；真实泄露行 count ≥ 1
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody(
+                "$SUFFIX:10434004\r\n" +
+                    "00000000000000000000000000000000000:0\r\n" +
+                    "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF00:0\r\n" +
+                    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA00:00\r\n" +
+                    "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB01:3\r\n"
+            )
+        )
+
+        val suffixes = client.queryRange(PREFIX)
+
+        assertTrue(suffixes.contains(SUFFIX))
+        assertTrue(suffixes.contains("BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB01"))
+        assertEquals(2, suffixes.size)
+        assertEquals(false, suffixes.contains("00000000000000000000000000000000000"))
+        assertEquals(false, suffixes.contains("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF00"))
+        assertEquals(false, suffixes.contains("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA00"))
+    }
 }

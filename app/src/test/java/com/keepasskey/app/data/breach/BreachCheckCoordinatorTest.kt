@@ -4,6 +4,8 @@ import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.core.security.ProtectedString
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
@@ -110,5 +112,36 @@ class BreachCheckCoordinatorTest {
             runBlocking { BreachCheckCoordinator(client).check(listOf(entry(1, "password"))) }
         }
         assertTrue(error.message!!.contains("模拟网络不可达"))
+    }
+
+    @Test
+    fun `请求间隙取消后不再发起后续外联`() = runBlocking {
+        val queried = mutableListOf<String>()
+        lateinit var job: Job
+        val client = object : BreachRangeClient {
+            override suspend fun queryRange(prefix: String): Set<String> {
+                queried.add(prefix)
+                // 模拟用户在首个请求返回后退出（取消当前扫描作用域）
+                job.cancel()
+                return emptySet()
+            }
+        }
+        // 三个不同口令 → 三个唯一前缀，取消后不应再查第 2、3 个
+        val entries = listOf(
+            entry(1, "password"),
+            entry(2, "UnLeaked-Strong-Pass#2026!"),
+            entry(3, "Third-Distinct-Password#8")
+        )
+
+        job = launch {
+            BreachCheckCoordinator(client).check(entries)
+        }
+        job.join()
+
+        assertEquals(
+            "取消后请求间隙应立即停止外联（ISSUE-P3-294 AC②）",
+            1,
+            queried.size
+        )
     }
 }
