@@ -132,6 +132,12 @@ class GeneratorViewModel @Inject constructor(
      * 按用户配置超时自动物理清空。
      */
     fun copyGeneratedPassword(secret: ProtectedString) {
+        // ISSUE-P2-287 AC②：已擦除实例（锁库后 UI 仍持有的旧引用）如实降级为提示，
+        // 禁交由 ProtectedString 的 fail-fast 抛 IllegalStateException（此前点复制即崩）
+        if (secret.cleared) {
+            _uiState.update { it.copy(userMessage = UiMessage(R.string.generator_locked_regenerate)) }
+            return
+        }
         // ISSUE-P2-16：路径改为 ProtectedString → CharArray（useChars 自动清零）→ 受保护
         // 剪贴板 CharArray 通道，应用侧不再物化不可擦 String；跨进程写入系统服务属框架边界。
         // 自动擦除超时策略仍由 ClipboardSecurityManager 统一负责。
@@ -236,5 +242,17 @@ class GeneratorViewModel @Inject constructor(
         val current = _uiState.value
         current.currentPassword.clear()
         current.history.forEach { it.clear() }
+        // ISSUE-P2-287 AC①：擦除与状态失效**原子完成**——交出全新空实例引用
+        // （`ProtectedString.EMPTY` 共享单例，其 clear 为 no-op、读数恒为空），
+        // 令 UI 的 `remember(currentPassword)` 键变化：旧明文不再随已物化的
+        // remember 值留存屏上（此前「只 clear 不发新态」，键未变 ⇒ 不重算 ⇒
+        // 旧明文继续渲染，且点复制撞上 fail-fast 崩溃）。
+        _uiState.update {
+            it.copy(
+                currentPassword = ProtectedString.EMPTY,
+                entropyBits = 0,
+                history = emptyList()
+            )
+        }
     }
 }

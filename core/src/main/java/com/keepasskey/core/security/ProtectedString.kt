@@ -37,6 +37,14 @@ class ProtectedString(
 
     private var isCleared = false
 
+    /**
+     * 是否已清零（只读观测，不含明文）。
+     * ISSUE-P2-287：调用方据此对已擦实例**降级**（如改提示「请重新生成」），
+     * 而非依赖 fail-fast 异常做流程控制（异常仍保留，作为消费已擦实例的最后防线）。
+     */
+    val cleared: Boolean
+        get() = isCleared
+
     init {
         if (isProtected && bytes.isNotEmpty()) {
             val sealed = InMemoryCipher.seal(bytes)

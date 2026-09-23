@@ -41,17 +41,7 @@
 
 ---
 
-## P2 中危缺陷与协议/测试缺口（5 项）
-
-### ISSUE-P2-287：会话锁定后口令生成器仍在屏上显示旧明文，点复制抛 `IllegalStateException`
-
-- **核实时间点**：2026-09-23 经擦除路径与 Compose 重组键核对（**现象与首轮报告相反**：不是「显示空口令」，而是旧明文留存）。
-- **核实方式**：`app/.../ui/screens/generator/GeneratorViewModel.kt:214-218` 的 `clearGeneratedSecrets()` 只对 `current.currentPassword` 与 `history` 各实例调 `.clear()`，**不更新 `_uiState`**；`GeneratorScreen.kt:163-165` 用 `remember(uiState.currentPassword) { readString() }`——key 是**实例本身**，未变 ⇒ 不重算，已物化的明文 String 继续渲染（`entropyBits` 与旧值自洽，用户不可辨）；此时点复制走 `GeneratorViewModel.kt:129` 的 `secret.useChars { ... }` → `core/security/ProtectedString.kt:92-93` 读点触发 `:172-174` 的 `checkNotCleared()` 抛 `IllegalStateException`，该处无兜底。生成器 tab 可达性只由偏好决定（`RealSettingsRepository.kt:109`、`KeePasskeyApp.kt:195-198`），**不以解锁状态门控** ⇒ 锁库后页面可达。
-- **背景与根因**：与 `ISSUE-P2-65`（锁定即擦除生成结果）的意图**相反**——擦除做了，展示层未失效；属「已清零对象继续被消费」族（`ProtectedString` 的 fail-fast 正是为拦此类消费而设计）。
-- **涉及文件**：`app/src/main/java/com/keepasskey/app/ui/screens/generator/GeneratorViewModel.kt`、`app/src/main/java/com/keepasskey/app/ui/screens/generator/GeneratorScreen.kt`。
-- **验收标准**：AC① 擦除与状态失效原子完成（`_uiState.update` 交出已擦实例的新引用，令 `remember` key 变化），禁「只 clear 不发新态」；AC② 复制路径对已擦实例如实降级为「已锁定，请重新生成」提示，禁崩溃；AC③ 用例锁定「锁库 → UI 不再持有任何明文读数」与「复制不抛异常」；AC④ 生成器 tab 是否应受锁状态门控须给结论（接线或登记 `PD-*`），禁保留现状不声明。
-
----
+## P2 中危缺陷与协议/测试缺口（4 项）
 
 ### ISSUE-P2-288：主口令建立与修改路径无强度评估、无泄露校验（单字符可建库，健康检查还给满分；官方有硬门槛）
 

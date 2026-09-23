@@ -11,6 +11,7 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.setMain
 import kotlinx.coroutines.withTimeout
 import org.junit.After
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -63,5 +64,44 @@ class GeneratorViewModelSessionLockTest {
             "锁定后生成结果必须已清零（readString 抛 IllegalStateException）",
             IllegalStateException::class.java
         ) { generated.readString() }
+    }
+
+    /**
+     * `ISSUE-P2-287` AC③：锁库后 UI 不再持有任何明文读数，且复制已擦实例不崩溃。
+     *
+     * 整改前 `clearGeneratedSecrets()` 只 `clear()` 不发新态——`remember(currentPassword)`
+     * 键未变 ⇒ 已物化明文继续渲染；点复制撞 `ProtectedString` 的 fail-fast 抛
+     * `IllegalStateException`。整改后擦除与状态失效原子完成（新空实例引用），
+     * 复制路径对已擦实例降级为提示。
+     */
+    @Test
+    fun `锁库后 UI 状态失效且复制降级为提示（AC③）`() {
+        val session = DatabaseSession()
+        val vm = GeneratorViewModel(FakeClipboardChannel(), session)
+        MainDispatcherGuard.track(vm)
+
+        val generated = runBlocking {
+            withTimeout(5000) {
+                vm.uiState.first { it.currentPassword.length > 0 }.currentPassword
+            }
+        }
+
+        runBlocking { session.lock() }
+
+        val state = vm.uiState.value
+        assertTrue(
+            "锁库后状态必须交出新的空实例引用（remember 键失效）",
+            state.currentPassword !== generated
+        )
+        assertEquals("锁库后 UI 读数必须为空（不再持有明文）", "", state.currentPassword.readString())
+        assertEquals("锁库后强度读数必须归零", 0, state.entropyBits)
+        assertTrue("锁库后历史必须清空", state.history.isEmpty())
+
+        // 复制已擦除的旧引用：不得抛异常，如实降级为「请重新生成」提示
+        vm.copyGeneratedPassword(generated)
+        assertTrue(
+            "复制已擦实例必须降级为提示（禁崩溃）",
+            vm.uiState.value.userMessage != null
+        )
     }
 }

@@ -329,6 +329,7 @@
     <string name="generator_mode_passphrase">Diceware passphrase</string>
     <string name="generator_mode_mask">Custom mask</string>
     <string name="generator_password_copied">Password copied securely to clipboard</string>
+    <string name="generator_locked_regenerate">Vault locked; generated results were wiped — generate a new one</string>
     <string name="generator_strength_weak">Weak (%1$d bits)</string>
     <string name="generator_strength_medium">Moderate (%1$d bits)</string>
     <string name="generator_strength_strong">Strong (%1$d bits)</string>

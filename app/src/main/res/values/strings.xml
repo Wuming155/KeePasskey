@@ -338,6 +338,7 @@
     <string name="generator_mode_passphrase">Diceware 短语</string>
     <string name="generator_mode_mask">自定义掩码</string>
     <string name="generator_password_copied">密码已安全复制到剪贴板</string>
+    <string name="generator_locked_regenerate">密码库已锁定，生成结果已擦除，请重新生成</string>
     <string name="generator_strength_weak">较弱 (%1$d bits)</string>
     <string name="generator_strength_medium">中等 (%1$d bits)</string>
     <string name="generator_strength_strong">强 (%1$d bits)</string>

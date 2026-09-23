@@ -365,6 +365,7 @@
 | §291 | 分组硬删除子树墓碑批次：`ISSUE-P2-284` 闭环。`permanentlyDeleteObjects` 单一实现复用于组硬删除与清空回收站（墓碑 = 组自身 ∪ 子孙条目 ∪ 子孙子组，对齐官方 `DeleteAllObjects`）；合并「删除 vs 修改」判据在墓碑存在时改按官方**比时间**（前提复核揭出的同族根因，不修则墓碑空转）。用例 +5；`tests=2631` 全绿 | ISSUE-P2-284 | [`291-分组硬删除子树墓碑批次.md`](resolved/batches/291-分组硬删除子树墓碑批次.md) |
 | §292 | 安全声明按实测等级渲染批次：`ISSUE-P2-285` 闭环。三处硬件声明改按实测条件渲染（解锁副标题 / 生物识别副标题复用 P1-22 实测通道；同步封印声明新接 `syncSealSecurityLevel` 实测链路，`ZeroKnowledgeCard` 无默认值）；`sec_arch_desc` 如实改写（明文附件暂存 + 明文导出两事实）；passkey 文案去硬件表述；附件明文落盘裁定登记 **`PD-36`**；死字段 `hardwareBackedSecurity` 删除。守卫 +6；`tests=2637` 全绿 + 截图门禁绿 | ISSUE-P2-285 | [`292-安全声明按实测等级渲染批次.md`](resolved/batches/292-安全声明按实测等级渲染批次.md) |
 | §293 | 熵读数单一真相源批次：`ISSUE-P2-286` 闭环。随机 / 掩码密码收敛 crypto 内核 `guessesLog10`（字符集代理模型含 `+30` 虚增整体退役）；口令短语按「词数 × log2(词表) + 变形位」建模（50 位——条目括注的「首字母位」经复核为确定性变换、0 位）；编辑页 `4.5 bits/char` 启发式删除改真实熵（`Dispatchers.Default` + 乱序防护）；评估热路径全部下沉。用例 +1 / 改 2；`tests=2638` 全绿 | ISSUE-P2-286 | [`293-熵读数单一真相源批次.md`](resolved/batches/293-熵读数单一真相源批次.md) |
+| §294 | 锁库生成器状态失效批次：`ISSUE-P2-287` 闭环。`clearGeneratedSecrets` 擦除与状态失效原子完成（交出 `ProtectedString.EMPTY` 新引用，`remember` 键失效）；`ProtectedString` 新增只读 `cleared`，复制路径对已擦实例降级为「请重新生成」提示（禁崩溃）；生成器 tab 不门控登记 **`PD-37`**。用例 +1；`tests=2639` 全绿 | ISSUE-P2-287 | [`294-锁库生成器状态失效批次.md`](resolved/batches/294-锁库生成器状态失效批次.md) |
 
 ## 分册导航
 
