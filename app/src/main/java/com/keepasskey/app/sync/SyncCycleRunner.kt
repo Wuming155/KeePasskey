@@ -1,6 +1,7 @@
 package com.keepasskey.app.sync
 
 import android.content.Context
+import androidx.annotation.VisibleForTesting
 import com.keepasskey.app.R
 import com.keepasskey.app.di.RollbackStateDir
 import com.keepasskey.app.ui.model.StringsProvider
@@ -20,7 +21,9 @@ import com.keepasskey.sync.model.SyncException
 import com.keepasskey.sync.provider.SyncProvider
 import com.keepasskey.sync.s3.S3SyncProvider
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -30,9 +33,13 @@ import javax.inject.Singleton
  *
  * 职责边界：串联 `DatabaseSession` 状态机、KDBX4 序列化与三哈希字节级 `SyncEngine`，
  * 产出 [SyncOutcome]；冲突决策委派 [SyncConflictController]，编解码委派 [SyncDatabaseCodec]，
- * Provider 构建委派 [SyncProviderResolver]。调度边界与拆分前一致：
- * 加密与合并在 `Dispatchers.Default`（`SyncConflictController` / [SyncDatabaseCodec] 内），
- * 网络与文件写盘在 `Dispatchers.IO`（`sync` 模块内），本类不额外切线程。
+ * Provider 构建委派 [SyncProviderResolver]。调度边界（`ISSUE-P2-277` 整改后已与实况对齐）：
+ * - **装配段整体下沉 `Dispatchers.IO`**（[setupCycleContext]：凭据与偏好读取、整库缓存读 / 写与
+ *   `fd.sync()`、tmp 写 + 原子 rename、全库内容比较）。调用方可能是 `Main.immediate`——前台入口
+ *   （下拉刷新 / 解锁后自动同步 / 设置页触发）持 `viewModelScope`；装配段内的同步调用**绕开**
+ *   `SyncEngine` 直调 `SyncCache`，故引擎内的 `Dispatchers.IO` 兜底覆盖不到它；
+ * - 加密与合并在 `Dispatchers.Default`（`SyncConflictController` / [SyncDatabaseCodec] 内）；
+ * - 网络与文件写盘在 `Dispatchers.IO`（`sync` 模块内）。
  *
  * 接缝（§155）：`openRemote` 的两条远端裁决分支（`handleRemoteSynced` / `handleConflictDetected`）
  * 与其共享上下文 [RemoteSyncContext] 已下沉到同包文件 `SyncCycleRemoteOutcomes.kt`（ISSUE-P3-188 第二档）。
@@ -65,6 +72,18 @@ class SyncCycleRunner @Inject constructor(
     // 直接构造路径默认空实现 = 禁用防回滚，保持既有单测行为不变）
     private val syncIntegrityMac: SyncIntegrityMac = NoopSyncIntegrityMac
 ) {
+
+    /**
+     * 测试钩子（`ISSUE-P2-277` AC③）：注入「记录调用线程」的 [SyncCache] 子类，用于断言缓存
+     * 整库读 / 原子写确不在主线程执行。生产恒为 null ⇒ 就地构造真实实例，行为零变化。
+     *
+     * 与 [SyncSessionState.testSyncProvider] 同一口径——本仓既有的 `@VisibleForTesting` 注入模式，
+     * 并以 `internal` 收窄到本模块单测可见（生产 DI 不注入，外部调用方不可见、不可写）。
+     * 之所以需要注入点：本类在 [setupCycleContext] 内**自行**构造 `SyncCache`（落点与
+     * `SyncCache.CACHE_DIR_NAME` 绑定），而记录型子类只有经此入口才能进入周期。
+     */
+    @VisibleForTesting
+    internal var syncCacheFactory: ((File) -> SyncCache)? = null
 
     /**
      * [setupCycleContext] 的产出：本次同步周期的上下文（引擎、缓存、路径与内容快照）。
@@ -107,7 +126,7 @@ class SyncCycleRunner @Inject constructor(
 
         // ISSUE-P1-07：目录名与 SyncCacheEvictor 共用同一常量，杜绝两处字面量漂移
         val syncDir = File(context.cacheDir, SyncCache.CACHE_DIR_NAME).apply { if (!exists()) mkdirs() }
-        val syncCache = SyncCache(syncDir)
+        val syncCache = syncCacheFactory?.invoke(syncDir) ?: SyncCache(syncDir)
         // F-23 整改：防回滚状态**不得**与可丢弃缓存同目录——此前它落在 cacheDir/sync，
         // 而 SyncCache.clear() 把它列入删除清单且由锁库 / 凭据清空触发，导致「用户锁定一次
         // 即可被云端重放旧库」。现注入 filesDir 下的持久目录（跨锁定保留），
@@ -190,7 +209,13 @@ class SyncCycleRunner @Inject constructor(
         // 取 provider 与装配统一在 setupCycleContext 内完成，此处 finally 擦除持有引用
         var providerForErase: SyncProvider? = null
         try {
-            val setup = setupCycleContext(activeFile, currentDb)
+            // ISSUE-P2-277 AC①：装配段整体下沉 `Dispatchers.IO`。整改前该段在调用方线程上执行，
+            // 而前台入口（下拉刷新 / 解锁后自动 / 设置页）持 `viewModelScope`（`Main.immediate`）
+            // ⇒ Keystore 解密、整库密文读 / 写 + `fd.sync()`、全库逐字段比较全部压在主线程上，
+            // 大库下为数百毫秒至秒级，并与凭据提供者的应答预算争用同一条主线程队列。
+            // 下沉点选在**调用处整体包裹**而非逐个函数改造：装配段内任何后续新增的同步 IO 调用
+            // 自动获得同一保障（对本条四类缺陷一次性收口，且不扩散 `SyncCache` 的 API 变更面）。
+            val setup = withContext(Dispatchers.IO) { setupCycleContext(activeFile, currentDb) }
             if (setup.outcome != null) return@withLock setup.outcome
             val ctx = setup.context!!
             providerForErase = ctx.provider

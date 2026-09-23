@@ -108,8 +108,11 @@ open class SyncCache(private val cacheDir: File) {
      *   为空时按 `data` 现算。`ISSUE-P3-167`：接受远端内容时同一份字节的摘要会被多处使用
      *   （回滚裁决 / 缓存写入 / 高水位记录），由调用方一次算出并贯穿，避免对整库重复计算。
      * @return 写入内容的 SHA-256 十六进制小写摘要
+     *
+     * `open`（`ISSUE-P2-277` AC③）：仅供单元测试子类化，用于断言本方法的执行线程
+     * （主线程零 IO 守卫）。生产无任何子类，语义与可见性实质不变——口径同 [readCache]。
      */
-    fun writeCache(
+    open fun writeCache(
         remotePath: String,
         data: ByteArray,
         updateVersion: Boolean = true,
@@ -268,8 +271,11 @@ open class SyncCache(private val cacheDir: File) {
      * 三方合并需要 base 的完整内容而非仅哈希；本地缓存会被工作副本覆盖，
      * base 内容必须独立落盘，否则冲突会话中断后 base 会被本地修改版污染，
      * 后续合并将退化为"远端全胜"的静默数据丢失。
+     *
+     * `open`（`ISSUE-P2-277` AC③）：仅供单元测试子类化，用于断言本方法的执行线程
+     * （主线程零 IO 守卫）。生产无任何子类，语义与可见性实质不变——口径同 [readCache]。
      */
-    fun readBaseContent(remotePath: String): ByteArray? {
+    open fun readBaseContent(remotePath: String): ByteArray? {
         val file = getFile(remotePath, SUFFIX_BASE_CACHE)
         return if (file.exists() && file.isFile) {
             file.readBytes()

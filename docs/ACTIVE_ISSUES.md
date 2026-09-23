@@ -45,25 +45,13 @@
 
 ---
 
-## P2 中危缺陷与协议/测试缺口（15 项）
+## P2 中危缺陷与协议/测试缺口（14 项）
 
 > **历史归零留痕**（§271 曾闭环 `ISSUE-P2-271`（加密算法 / KDF 算法选择器假开关——对话框只改 UI 回显，库文件头未变）——整改＝两个选择器经 `CipherLabels` 词汇表反查算法 ID 后经 `updateDatabaseMeta` 写 `KdbxHeader.cipherUuid` / `kdfParameters` + `save()` 真实落库，换 KDF 变体补齐目标变体所需参数（Argon2 换型携带 I·M·P、AES-KDF 补官方缺省 rounds）、回显改单一真相源（init 头映射通道统一下发）；`app` 层 6 例 + `:database:` 层 5 例守卫锁定「选择 → 文件头真实变化 → 解锁成功」闭环；官方 keepassxc-cli 2.7.12 端到端对拍本仓产物报「Twofish 256 位 / Argon2d」实证。证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md) 与
 > [`resolved/batches/271-算法选择器真实落库批次.md`](resolved/batches/271-算法选择器真实落库批次.md)。）
-
-### ISSUE-P2-277：同步周期装配段在主线程做 Keystore 解密、整库密文读写与全库比较（该类 KDoc 与实况相反）
-
-- **核实时间点**：2026-09-23 经调度器链逐步核对（铺开与对抗两轮独立得出同一结论；后者以 `grep withContext` 覆盖 `app/.../sync/` 全部文件）。
-- **核实方式**：入口 `app/.../ui/screens/vault/VaultListSyncController.kt:54`（`viewModelScope.launch` = `Main.immediate`）→ `SyncCoordinator.kt:184-190`（无 `withContext`）→ `app/.../sync/SyncCycleRunner.kt:179` → `:95-170` 的 `setupCycleContext`。全链切换点**仅** `SyncConflictController.kt:95/279`、`SyncDatabaseCodec.kt:28`、`SyncCoordinator.kt:221`（`testConnection`），故装配段确在 Main 上执行：`SyncCycleRunner.kt:97` 凭据读取（`SyncCredentialsStore.kt:72/83` SharedPreferences + Keystore 解密，非 suspend）、`:105` 偏好快照（`ExtendedSettingsStore.kt:60`）、`:127/:128/:138` 整库缓存读（`sync/.../SyncCache.kt:59-75/272-279` 的 `file.readBytes()`，**普通非 suspend 函数**）、`:139` 全库逐字段比较（`SyncContentChangeDetector.kt:38-41` + `KdbxContentComparator.kt:55-98`）、`:146` tmp 写 + `fd.sync()` + rename（`SyncCache.kt:112-130`）。`SyncCycleRunner.kt:34-35` 的 KDoc 自称「加密与合并在 Default、网络与写盘在 IO，本类不额外切线程」，与本条实测不符。
-- **背景与根因**：`PeriodicSyncWorker.kt:25-32` 走 WorkManager（Default），故卡顿面限于**两条前台入口**（下拉刷新 `VaultListViewModel.kt:130`、设置页 `SettingsSyncController.kt:265-275`）。大库下为数百毫秒至秒级，并挤占凭据提供者进程的应答预算（本仓真机实测约 3.0 s，见 `app/.../passkey/PublicSuffixList.kt:25-27`，原引用路径有误，2026-09-23 已订正）。
-- **涉及文件**：`app/src/main/java/com/keepasskey/app/sync/SyncCycleRunner.kt`、`sync/src/main/java/com/keepasskey/sync/engine/SyncCache.kt`、`app/src/main/java/com/keepasskey/app/sync/SyncContentChangeDetector.kt`、`app/src/main/java/com/keepasskey/app/sync/SyncCoordinator.kt`。
-- **验收标准**：AC① 装配段整体下沉（`SyncCache` 的读 / 写 / `fd.sync()` 改 suspend 或内部自切，凭据与偏好读取同处理）；AC② 修正 `SyncCycleRunner.kt:34-35` 的 KDoc 使其与实况一致；AC③ 新增「主线程零 IO」守卫用例（沿用 `OffMainComputation.kt` 口径），锁定凭据读取、缓存整库读、内容比较、原子写四类；AC④ 量级须真机实测（大库下拉刷新的帧耗时），无设备时按「未执行」口径如实标注。
-- **前提复核（2026-09-23，开工前独立逐行核对）**：**结论成立**，缺陷面与调用链如正文所述，无一处前提失效。核对方式为逐点读原文 + `grep withContext|Dispatchers\.` 覆盖 `app/.../sync/` 与 `sync/src/main/java/com/keepasskey/sync/` 全量。补充订正与增益如下（行号以本次核对为准）：
-  1. **切换点行号漂移**：`SyncConflictController.kt` 的 `withContext(Dispatchers.Default)` 实为 `:124`（`resolveConflicts`）与 `:386`（远端/本地冲突树解析），非正文所记 `:95/279`；`SyncDatabaseCodec.kt:28`、`SyncCoordinator.kt:221` 两处与正文一致。`sync` 模块侧 IO 切换集中在 `SyncEngine.kt:90/334/406/447` 与两个 Provider 的方法级 `withContext`——**这些恰是正文论点的反证**：`setupCycleContext` 绕开引擎直调 `SyncCache`，故引擎内的 IO 兜底覆盖不到装配段。
-  2. **正文漏列一处同类解密**：`SyncCycleRunner.kt:102` 的 `providerResolver.resolveRemotePath()` 同样在 Main 上走 `SyncCredentialsStore.loadWebDavConfig()`（`:127`）/ `loadS3Config()` → `SyncCredentialSealer.decrypt()`（Keystore AES-GCM）。它与 `:97` 是**两次**独立解密（后者解出口令，前者只为取 `remotePath` 却解出完整凭据），同类缺陷，AC① 须一并收口。
-  3. **`:127` 精确化**：`syncCache.isCached()` 只是 `exists() + length()` 的 stat，不读内容；真正的整库读是 `:128` `readCache()` 与 `:138` `readBaseContent()`（均 `file.readBytes()`，非 suspend）。
-  4. **比较段路径**：`KdbxContentComparator.changed` 位于 `:49`（`entryChanged` 在 `:83`），正文所记 `:55-98` 为漂移；且比较段**必经**（`SyncContentChangeDetector.kt:35-37` 的 `lastSyncedDb != null` 分支直接进比较），仅整库解析被 `DatabaseSession.parseExternalDatabase:184-185` 的 `Dispatchers.Default` 兜住。
-  5. **前台入口**：确为两条（下拉手势与「解锁后自动」共用 `VaultListSyncController` 一条链；设置页 `triggerSync` / `verifyConnectionThenSync` 另一条），两条的 scope 均为 `viewModelScope`（`VaultListViewModel.kt:130`、`SettingsViewModel.kt:144-145`），即 `Main.immediate`；`PeriodicSyncWorker` 走 `CoroutineWorker` 默认派发器，与正文一致。
-  6. **AC③ 口径提示**：`OffMainComputation.kt` 是「等真实线程上的工作完成」的**等待**助手（`awaitOffMainComputation`），本身不是守卫断言——新守卫需自备「记录调用线程」的假实现（如对 `SyncCache` 的读写包一层线程记录），沿用其真实时间轮询口径仅解决等待问题。
+>
+> **§274 闭环 `ISSUE-P2-277`**（同步周期装配段在主线程做 Keystore 解密、整库密文读写与全库比较——该类 KDoc 与实况相反）——整改＝装配段在**调用处整体包裹**下沉 `Dispatchers.IO`，单点覆盖凭据解密 / 整库缓存读 / 全库逐字段比较 / tmp 写 + `fd.sync()` 四类且抗后续新增 IO 回归；类 KDoc 调度边界段改与实况对齐（点明「装配段**绕开** `SyncEngine` 直调 `SyncCache`，引擎内的 IO 兜底覆盖不到它」）；新增「主线程零 IO」守卫 1 例（五类探针 + 栈归因 + 非空性断言——判别力实验：撤销下沉后五类探针全落主线程基准即红，恢复即绿）。残余（`runSyncCycle` 步骤 3 的 `isCached` 统计仍在调用方线程）如实登记于批次正文。证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md) 与
+> [`resolved/batches/274-同步周期装配段下沉IO批次.md`](resolved/batches/274-同步周期装配段下沉IO批次.md)。
 
 ---
 
