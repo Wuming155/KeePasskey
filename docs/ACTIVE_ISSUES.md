@@ -53,7 +53,7 @@
 > **§274 闭环 `ISSUE-P2-277`**（同步周期装配段在主线程做 Keystore 解密、整库密文读写与全库比较——该类 KDoc 与实况相反）——整改＝装配段在**调用处整体包裹**下沉 `Dispatchers.IO`，单点覆盖凭据解密 / 整库缓存读 / 全库逐字段比较 / tmp 写 + `fd.sync()` 四类且抗后续新增 IO 回归；类 KDoc 调度边界段改与实况对齐（点明「装配段**绕开** `SyncEngine` 直调 `SyncCache`，引擎内的 IO 兜底覆盖不到它」）；新增「主线程零 IO」守卫 1 例（五类探针 + 栈归因 + 非空性断言——判别力实验：撤销下沉后五类探针全落主线程基准即红，恢复即绿）。残余（`runSyncCycle` 步骤 3 的 `isCached` 统计仍在调用方线程）如实登记于批次正文。证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md) 与
 > [`resolved/batches/274-同步周期装配段下沉IO批次.md`](resolved/batches/274-同步周期装配段下沉IO批次.md)。）
 >
-> **§276 闭环 `ISSUE-P2-283`**（自定义图标 `<Data>` 用严格 Base64 解码，折行合法库整库判损坏）——整改＝`IconNode.end()` 复用既有 `KdbxXmlValueUtil.decodeBase64LenientWhitespace`（与 D19 受保护串 / 内联附件同口径，禁再造一份），失败仍 `KdbxCorruptFileException` 不降级；全仓清点其余 `Base64.getDecoder()` 调用点均非同类误拒面。新增 5 例（76 列折行打开 + 字节与渲染输入一致 / 往返 / 混合空白 / 非法仍拒 / 接线守卫）+ 互操作探针 1 例；keepassxc-cli 2.7.12 打开本仓含图标产物。**如实标注**：真实第三方折行样本读侧对拍未执行。证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md) 与
+> **§276 闭环 `ISSUE-P2-283`**（自定义图标 `<Data>` 用严格 Base64 解码，折行合法库整库判损坏）——整改＝`IconNode.end()` 复用既有 `KdbxXmlValueUtil.decodeBase64LenientWhitespace`（与 D19 受保护串 / 内联附件同口径，禁再造一份），失败仍 `KdbxCorruptFileException` 不降级；全仓清点其余 `Base64.getDecoder()` 调用点均非同类误拒面。新增 5 例（76 列折行打开 + 字节与渲染输入一致 / 往返 / 混合空白 / 非法仍拒 / 接线守卫）+ 互操作探针 1 例；keepassxc-cli 2.7.12 打开本仓含图标产物。**如实标注**：真实第三方折行样本读侧对拍未执行（残余已登记限界表 **§30**）。证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md) 与
 > [`resolved/batches/276-自定义图标Base64宽松解码批次.md`](resolved/batches/276-自定义图标Base64宽松解码批次.md)。）
 
 ---
