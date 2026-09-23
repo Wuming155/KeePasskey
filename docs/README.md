@@ -71,7 +71,11 @@
 | 文档 | 用途 |
 |---|---|
 | [`resolved/README.md`](resolved/README.md) | 分册体系说明与维护规则 |
-| [`resolved/BATCH_01_30.md`](resolved/BATCH_01_30.md) 等 **5 册** | 分册级索引（各 ≤100 数据行；分册 04 已封卷、05 自 §158 滚动） |
+| [`resolved/BATCH_01_30.md`](resolved/BATCH_01_30.md) | 分册 01 索引（§1 ~ §30） |
+| [`resolved/BATCH_31_45.md`](resolved/BATCH_31_45.md) | 分册 02 索引（§31 ~ §45） |
+| [`resolved/BATCH_46_57.md`](resolved/BATCH_46_57.md) | 分册 03 索引（§46 ~ §57） |
+| [`resolved/BATCH_58_PLUS.md`](resolved/BATCH_58_PLUS.md) | 分册 04 索引（§58 ~ §157，**已封卷**，100 数据行触顶） |
+| [`resolved/BATCH_158_PLUS.md`](resolved/BATCH_158_PLUS.md) | 分册 05 索引（§158 起，**滚动**；文件名固定，不随批次增长改写） |
 | `resolved/batches/` | **一批次一文件**的批次正文（份数与最大 § 编号**一律现查**：`ls docs/resolved/batches \| wc -l`，最大编号见 [`resolved/README.md`](resolved/README.md)；§42 / §43 已归入 `security/`） |
 
 > **回溯约定**：归档正文只搬迁、不改写。拆分前的完整版本见 git `a144d21`。
