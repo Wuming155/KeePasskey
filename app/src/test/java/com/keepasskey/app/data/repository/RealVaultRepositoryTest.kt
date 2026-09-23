@@ -723,6 +723,69 @@ class RealVaultRepositoryTest {
     }
 
     /**
+     * ISSUE-P2-270：库 Meta `recycleBinEnabled = false`（设置页真实关闭回收站）时，
+     * 删除普通条目必须走**物理删除并追加墓碑**，绝不软删移入回收站——
+     * 锁定「删除分流读库 Meta 真值」一侧，禁「UI 有开关、删除语义不变」复现。
+     */
+    @Test
+    fun `回收站禁用时删除条目走物理删除并追加墓碑`() = runTest {
+        val rootId = KdbxUuid.random()
+        val entryId = KdbxUuid.random()
+
+        val entry = KdbxEntry(
+            id = entryId,
+            parentGroupId = rootId,
+            fields = mapOf(KdbxConstants.Fields.TITLE to ProtectedString("With Bin Disabled", false))
+        )
+        val root = KdbxGroup(id = rootId, name = "Root", entries = listOf(entry))
+        val db = KdbxDatabase(
+            header = KdbxHeader.createDefault(),
+            rootGroup = root,
+            recycleBinEnabled = false
+        )
+
+        val session = DatabaseSession()
+        session.setDatabaseForTesting(db)
+        val repository = newRepository(session)
+
+        repository.deleteEntry(entryId.toHexString())
+
+        val after = session.databaseFlow.first()!!
+        assertNull("回收站禁用时条目应被物理删除", after.rootGroup.allEntries().firstOrNull { it.id == entryId })
+        assertTrue("应追加该条目墓碑", after.deletedObjects.any { it.id == entryId })
+        assertFalse("库 Meta 应保持禁用", after.recycleBinEnabled)
+    }
+
+    /**
+     * ISSUE-P2-270：库 Meta `recycleBinEnabled = false` 时，删除普通分组同样必须走
+     * **物理删除并追加墓碑**，不得整组移入回收站（官方 KeePass 分组删除分流同口径）。
+     */
+    @Test
+    fun `回收站禁用时删除分组走物理删除并追加墓碑`() = runTest {
+        val rootId = KdbxUuid.random()
+        val groupId = KdbxUuid.random()
+
+        val target = KdbxGroup(id = groupId, parentGroupId = rootId, name = "Ordinary Group")
+        val root = KdbxGroup(id = rootId, name = "Root", subgroups = listOf(target))
+        val db = KdbxDatabase(
+            header = KdbxHeader.createDefault(),
+            rootGroup = root,
+            recycleBinEnabled = false
+        )
+
+        val session = DatabaseSession()
+        session.setDatabaseForTesting(db)
+        val repository = newRepository(session)
+
+        repository.deleteGroup(groupId.toHexString())
+
+        val after = session.databaseFlow.first()!!
+        assertNull("回收站禁用时分组应被物理删除", after.rootGroup.allGroups().firstOrNull { it.id == groupId })
+        assertTrue("应追加该分组墓碑", after.deletedObjects.any { it.id == groupId })
+        assertFalse("库 Meta 应保持禁用", after.recycleBinEnabled)
+    }
+
+    /**
      * ISSUE-P2-15：仓库密码读取走 CharArray 借用通道后，返回的必须是**独立副本**——
      * 调用方按契约清零副本绝不能抹掉库内原始受保护值。
      */

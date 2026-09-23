@@ -55,6 +55,7 @@ internal class SettingsPreferencesController(
             argon2Iterations = 0L,
             argon2MemoryMb = 0L,
             argon2Parallelism = 0,
+            // ISSUE-P2-270：会话就绪前的一次性占位；真实值由 init 的库 Meta 回填通道统一下发
             recycleBinEnabled = true
             // ISSUE-P3-65：tanExpiresOnUse / checkForDuplicateUuids 字段已移除——
             // 假开关无真实语义与消费方，UI 入口已如实禁用
@@ -149,7 +150,10 @@ internal class SettingsPreferencesController(
                             argon2Iterations = header.argon2Iterations,
                             argon2MemoryMb = header.argon2MemoryMb,
                             argon2Parallelism = header.argon2Parallelism,
-                            compressionAlgorithm = header.compressionAlgorithm
+                            compressionAlgorithm = header.compressionAlgorithm,
+                            // ISSUE-P2-270：回收站回显改由库 Meta 真值统一下发（此前刻意跳过该字段，
+                            // 开关只活在内存 StateFlow，冷启动即回缺省 true，与文件头真值漂移）
+                            recycleBinEnabled = header.recycleBinEnabled
                         )
                     }
                 }
@@ -201,8 +205,26 @@ internal class SettingsPreferencesController(
         }
     }
 
+    /**
+     * 应用回收站开关（ISSUE-P2-270 整改：真实生效）。
+     *
+     * 此前仅回写设置页内存回显（假开关）：删除分流全部读库 Meta 真值
+     * `db.recycleBinEnabled`（RecycleBinCoordinator），与 UI 开关无任何数据通路——
+     * 关闭后界面显示「已关闭」，删除却仍软删移入回收站，方向与界面声明相反。
+     * 现接入 [DatabaseSession.updateDatabaseMeta] 写 `KdbxDatabase.recycleBinEnabled`
+     * 并立即 [DatabaseSession.save]——写侧 `KdbxDatabase.toMetaData()` 将其还原为
+     * `KdbxMetaData.recycleBinEnabled` 写出 `<RecycleBinEnabled>` 元素，与官方
+     * KeePass「回收站禁用后删除即物理删除」语义一致。回显不再自持状态：会话
+     * databaseFlow 重发后由 init 的头映射通道统一下发（单一真相源，同 P2-19）。
+     *
+     * 无活动会话 / 库未就绪时如实 no-op（保持文件头真值，不产生假变更）。
+     */
     fun setRecycleBinEnabled(enabled: Boolean) {
-        databaseConfigStateFlow.update { it.copy(recycleBinEnabled = enabled) }
+        val session = databaseSession ?: return
+        scope.launch {
+            session.updateDatabaseMeta { db -> db.copy(recycleBinEnabled = enabled) }
+            session.save()
+        }
     }
 
     // ISSUE-P3-65：setTanExpiresOnUse / setCheckForDuplicateUuids 已移除——

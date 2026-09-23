@@ -41,17 +41,7 @@
 
 ---
 
-## P2 中危缺陷与协议/测试缺口（2 项）
-
-### ISSUE-P2-270：回收站开关为假开关——`setRecycleBinEnabled` 只改 UI 回显，不写库 Meta，与删除语义相反
-
-- **核实时间点**：2026-09-23 经全仓定向核对（设置页控制器 / 回收站协调器 / UI 投影 / 开关行四处）核实。
-- **核实方式**：① 写侧 `setRecycleBinEnabled`（`SettingsPreferencesController.kt:204-206`）只做 `databaseConfigStateFlow.update { it.copy(recycleBinEnabled = enabled) }`——**无** `databaseSession.updateDatabaseMeta`、**无** `save()`；同文件 `setArgon2Parameters`（`:181-202`）则经 `updateDatabaseMeta` + `session.save()` 真实落盘，构成同文件内的直接对照。② 读侧删除分流全部读**库 Meta 真值** `db.recycleBinEnabled`（`RecycleBinCoordinator.kt:53` 单条 / `:105` 分组 / `:214` 批量），与 UI 开关**无任何数据通路**。③ UI 绑定 `uiState.recycleBinEnabled`（`DatabaseSettingsComponents.kt:215-220`），投影取自 `dbState.recycleBinEnabled`（`SettingsUiStateProjection.kt:106`）；而 `init` 订阅会话 `databaseFlow` 时的回填**刻意跳过**该字段（`SettingsPreferencesController.kt:143-154` 仅 `copy` 八项），故开关值只活在内存 `MutableStateFlow`（同文件 `:58`，缺省 `true`），冷启动即回 `true`。④ 真值映射其实已具备——`SettingsUiStateProjection.kt:270` 的 `databaseConfigFromHeader` 已读 `db.recycleBinEnabled`，只是回填通道未采纳。
-- **背景与根因**：属「密码库 Meta 未回写」类。用户关闭开关后界面显示「已关闭」，而删除仍走软删移入回收站——与「关闭回收站＝删除即永久」的界面声明**方向相反**；用户据此认为敏感条目已彻底删除，实际条目仍在库内并随同步外发。同时因回填跳过该字段，库重载后「界面值」与「文件头真值」仍会分叉，形成**显示漂移**。项目对假开关已有明确反对口径（`ISSUE-P3-65` / `ISSUE-P2-228` / `ISSUE-P0-02`）。
-- **涉及文件**：`app/src/main/java/com/keepasskey/app/ui/screens/settings/SettingsPreferencesController.kt`（setter 与 `init` 回填）、`app/src/main/java/com/keepasskey/app/ui/screens/settings/SettingsUiStateProjection.kt`（投影与 `databaseConfigFromHeader`）、`app/src/main/java/com/keepasskey/app/ui/screens/settings/subscreens/DatabaseSettingsComponents.kt`（开关行）、`app/src/main/java/com/keepasskey/app/data/repository/RecycleBinCoordinator.kt`（唯一读真值处）、`database/src/main/java/com/keepasskey/database/session/DatabaseSession.kt`（`updateDatabaseMeta` / `save`）。
-- **验收标准**：AC① 开关经 `updateDatabaseMeta { it.copy(recycleBinEnabled = ...) }` 写入 `KdbxDatabase.recycleBinEnabled` 并立即 `save()`，口径与 `setArgon2Parameters` 一致——该字段在写盘时经 `KdbxXmlSerializer.kt:13` 的 `KdbxDatabase.toMetaData()` 还原为 `KdbxMetaData.recycleBinEnabled` 并写出 `<RecycleBinEnabled>` 元素（读侧 `KdbxFile.kt:296` 反向装配），故闭环真实成立；关闭后单条 / 分组 / 批量删除**一律物理删除并写入墓碑**，不再移入回收站；AC② 回显改为**单一真相源**（取自会话 `databaseFlow` 的库 Meta，经 `databaseConfigFromHeader` 回填），消除显示漂移，重启后回显用户上次所设；AC③ 无活动会话 / 会话未就绪时如实 no-op 或置禁用态（保持文件头真值，不产生假变更），不得谎报成功；AC④ 新增接线守卫用例，同时锁定「setter 必下发到会话 Meta」与「删除分流读库 Meta」两侧，禁「UI 有开关、库无变化」复现；AC⑤ 互操作核验：关闭 / 开启后写出的 `RecycleBinEnabled` 元素与官方 KeePass / KeePassXC 行为一致（触及外层格式面时按 `AGENTS.md` 规则 8 对拍）。
-
----
+## P2 中危缺陷与协议/测试缺口（1 项）
 
 ### ISSUE-P2-271：加密算法 / KDF 算法选择器为假开关——对话框只改 UI 回显，库文件头未变
 
