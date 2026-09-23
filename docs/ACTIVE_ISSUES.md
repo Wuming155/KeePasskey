@@ -41,19 +41,9 @@
 
 ---
 
-## P2 中危缺陷与协议/测试缺口（1 项）
+## P2 中危缺陷与协议/测试缺口（0 项）
 
-### `ISSUE-P2-254`：通行密钥交互链路端到端验证缺口（收窄后余两项：PRF 未对真实 RP 对拍 / CM 通知渲染未核对）
-
-- **核实时间点**：原始缺口 2026-09-22（文档审核批次 §260 登记）；**2026-09-23 就地修正**（前提变更）。
-- **核实方式**：① §263 批次留痕（2026-09-22 真机 Redmi 4X 在 **demo.yubico.com** 上注册路径双通道通过且留有日志，`rpIdHash` 与 `SHA256("demo.yubico.com")` 逐字节一致）；② 2026-09-23 用户口述补充：同站**登录断言（assertion）亦成功**、系统 CM 选择器 UI 有弹出、**PRF 未测**；③ 2026-09-23 用户裁决 **`PD-32`**：AC① 的 RP 口径放宽为「任一真实 RP 端到端贯通」，github.com 不再必测。
-- **背景与影响**：本条原登记三项缺口（github.com 手工冒烟未执行 / PRF 未对真实 RP 对拍 / CM 选择器 UI 未覆盖）。经上述实证与裁决，**AC① 已实质达成**（demo.yubico.com 注册 + 登录断言端到端；证据等级分层：注册路径有 §263 真机日志、断言路径与选择器弹出系用户口述）；CM 选择器弹出已确认，**通知渲染**未核对。缺口收窄为两项，PRF 是剩余核心面——它影响「通行密钥派生密钥可用性」的对外表述，缺口不补则实现约定 §4.3 / 限界 §4.3 的收窄口径无法解除。
-- **验收标准**：
-  - AC①（**已完成，留档**）：原「github.com 端到端真机贯通 8 步逐项留痕」经 `PD-32` 放宽为任一真实 RP——demo.yubico.com 注册 + 登录断言端到端达成（注册有 §263 日志；断言系口述，归档时按证据等级分层如实登记）；
-  - AC② 完成至少一次 **PRF 与真实 RP** 的对拍；若确客观无可用 RP，须以限界 / 产品裁决登记「不可达」边界并经确认——**不得静默留白**；
-  - AC③ CM **通知渲染**核对留痕（选择器弹出已确认，剩余面仅通知渲染；可与 AC② 同轮）；
-  - AC④ 两项完成后同步收口 `architecture/实现约定与验证现状.md` §4.3 与限界 §4.3 存根的对应边界句（原句保留作留痕）并归档本条。任一项若裁决「不做」，必须以限界 / 产品裁决登记承接。
-- **依据**：`docs/records/通行密钥互操作对拍记录_2026-09-19.md` §6；`docs/architecture/实现约定与验证现状.md` §4.3；`docs/resolved/batches/220-通行密钥互操作对拍与Ed25519-PKCS8形态整改批次.md`（结案如实声明）；`docs/resolved/batches/263-注册响应attestationObject缺失authData键修复批次.md`（demo.yubico.com 注册路径真机日志）；`docs/architecture/产品裁决登记.md` `PD-32`（RP 口径放宽裁决）。
+> **暂无开放项**（本区归零：§269 闭环 `ISSUE-P2-254`——通行密钥交互链路与 PRF 真实 RP 对拍经 2026-09-23 真机在 Corbado / demo.yubico 贯通，CM 通知渲染确认受系统模态与 `FLAG_SECURE` 限制属系统行为。证据与实现约定 §4.3 / 限界 §4.3 已同步收口。证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md) 与 [`resolved/batches/269-通行密钥交互链路与PRF真机对拍及ISSUE-P2-254结案批次.md`](resolved/batches/269-通行密钥交互链路与PRF真机对拍及ISSUE-P2-254结案批次.md)。）
 
 ---
 
@@ -64,6 +54,11 @@
 > 消除「声明 4.0、夹带 4.1 元素」的失真（官方 KeePass 2.53+ / KeePassXC 同口径；
 > 读取侧仅校验 major 一行未动，既有库往返保留原版本）。证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md) 与
 > [`resolved/batches/268-新建库KDBX版本声明4.1批次.md`](resolved/batches/268-新建库KDBX版本声明4.1批次.md)。
+> §269 闭环 `ISSUE-P2-254`——通行密钥交互链路的 PRF 真实 RP 对拍经 2026-09-23 真机在 Corbado
+> PRF Demo 上端到端实证（注册 + 盐值计算 + 登录断言全绿、`Authentication successful (PRF)`）；
+> CM 通知渲染面裁决为系统模态 / `FLAG_SECURE` 硬限制（属系统行为，非本仓缺陷）。
+> 证据见 [RESOLVED_LOG.md](RESOLVED_LOG.md) 与
+> [`resolved/batches/269-通行密钥交互链路与PRF真机对拍及ISSUE-P2-254结案批次.md`](resolved/batches/269-通行密钥交互链路与PRF真机对拍及ISSUE-P2-254结案批次.md)。
 
 ---
 
