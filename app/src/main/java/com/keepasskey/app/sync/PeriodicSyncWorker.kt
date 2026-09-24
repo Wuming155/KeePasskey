@@ -17,6 +17,11 @@ import dagger.hilt.components.SingletonComponent
  *   绝不在后台代做取舍；`Error` 亦不重试——下个周期会自然重试，
  *   避免退避重试风暴打爆弱网环境；
  * - 后台周期同步的凭据复用 [SyncCoordinator] 既有封印/借用擦除链路，无新增明文驻留。
+ *
+ * ISSUE-P3-298 ④：`Result.success()` **不再吞掉可观测性**——每个同步周期的结果由
+ * [SyncCoordinator.syncNow] 写入 `lastOutcome` 流，经 [SyncFailureNotifier]（冷启动订阅）
+ * 在失败时发出静默通知、恢复时撤下；本 Worker 的「不重试」裁决保持不变，
+ * 变化的只是失败从「零感知」变为「通道级静默可见」。
  */
 class PeriodicSyncWorker(
     appContext: Context,

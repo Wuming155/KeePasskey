@@ -137,6 +137,8 @@ class AutofillUnlockActivity : FragmentActivity() {
         if (completed || routeStarted) return
         val usernameId = readAutofillId(AutofillPickerActivity.EXTRA_USERNAME_ID)
         val passwordId = readAutofillId(AutofillPickerActivity.EXTRA_PASSWORD_ID)
+        // ISSUE-P3-298 ⑤：OTP 框 id 只透传、不参与路由判据（无 OTP 框不影响交付链路）
+        val otpId = readAutofillId(AutofillPickerActivity.EXTRA_OTP_ID)
         if (usernameId == null && passwordId == null) {
             // 本次请求未识别到任何目标框（正常下发路径不会出现）：无可填充目标，如实取消
             completed = true
@@ -150,10 +152,10 @@ class AutofillUnlockActivity : FragmentActivity() {
             val routing = resolveRouting(hasTargetField = usernameId != null || passwordId != null)
             when (val route = routing.route) {
                 is AutofillUnlockRouter.Route.Confirm ->
-                    launchConfirm(route.entry, usernameId, passwordId, routing.verifiedWebDomain)
+                    launchConfirm(route.entry, usernameId, passwordId, otpId, routing.verifiedWebDomain)
 
                 AutofillUnlockRouter.Route.Picker ->
-                    launchPicker(usernameId, passwordId)
+                    launchPicker(usernameId, passwordId, otpId)
             }
         }
     }
@@ -221,10 +223,12 @@ class AutofillUnlockActivity : FragmentActivity() {
      * 选中条目后经 `AutofillManager.EXTRA_AUTHENTICATION_RESULT` 回传真实 Dataset，
      * 由 [pickerResultLauncher] 原样转发给框架。
      */
-    private fun launchPicker(usernameId: AutofillId?, passwordId: AutofillId?) {
+    private fun launchPicker(usernameId: AutofillId?, passwordId: AutofillId?, otpId: AutofillId?) {
         val pickerIntent = Intent(this, AutofillPickerActivity::class.java).apply {
             putExtra(AutofillPickerActivity.EXTRA_USERNAME_ID, usernameId)
             putExtra(AutofillPickerActivity.EXTRA_PASSWORD_ID, passwordId)
+            // ISSUE-P3-298 ⑤：OTP 框 id 透传，选择器交付时把当前 TOTP 值填入该框
+            putExtra(AutofillPickerActivity.EXTRA_OTP_ID, otpId)
             putExtra(
                 AutofillPickerActivity.EXTRA_CALLING_PACKAGE,
                 intent.getStringExtra(AutofillPickerActivity.EXTRA_CALLING_PACKAGE)
@@ -250,11 +254,14 @@ class AutofillUnlockActivity : FragmentActivity() {
         entry: KdbxEntry,
         usernameId: AutofillId?,
         passwordId: AutofillId?,
+        otpId: AutofillId?,
         verifiedWebDomain: String?
     ) {
         val confirmIntent = Intent(this, AutofillConfirmActivity::class.java).apply {
             putExtra(AutofillConfirmActivity.EXTRA_TARGET_USERNAME_ID, usernameId)
             putExtra(AutofillConfirmActivity.EXTRA_TARGET_PASSWORD_ID, passwordId)
+            // ISSUE-P3-298 ⑤：OTP 框 id 透传，确认页回传时把当前 TOTP 值填入该框
+            putExtra(AutofillConfirmActivity.EXTRA_TARGET_OTP_ID, otpId)
             putExtra(AutofillConfirmActivity.EXTRA_ENTRY_ID, entry.id.toHexString())
             putExtra(
                 AutofillConfirmActivity.EXTRA_CREDENTIAL_TITLE,

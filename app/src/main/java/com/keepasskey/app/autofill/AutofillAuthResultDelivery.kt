@@ -50,7 +50,10 @@ internal fun buildAuthenticationResultDataset(
     username: String,
     password: String,
     usernameId: AutofillId?,
-    passwordId: AutofillId?
+    passwordId: AutofillId?,
+    // ISSUE-P3-298 ⑤：表单显式声明的 OTP 框 + 该条目当前 TOTP 值（仅 TOTP；由调用方判定）
+    otpId: AutofillId? = null,
+    otpCode: String = ""
 ): Dataset? {
     val views = RemoteViews(packageName, R.layout.autofill_dataset_item).apply {
         setTextViewText(R.id.tv_username, menuTitle)
@@ -74,6 +77,13 @@ internal fun buildAuthenticationResultDataset(
         builder.setField(
             passwordId,
             Field.Builder().setValue(AutofillValue.forText(password)).build()
+        )
+        fieldCount++
+    }
+    if (otpId != null && otpCode.isNotEmpty()) {
+        builder.setField(
+            otpId,
+            Field.Builder().setValue(AutofillValue.forText(otpCode)).build()
         )
         fieldCount++
     }

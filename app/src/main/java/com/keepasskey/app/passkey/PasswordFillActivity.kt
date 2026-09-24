@@ -55,6 +55,10 @@ class PasswordFillActivity : BaseCredentialActivity() {
     @Inject
     lateinit var callerTrustStore: CredentialManagerCallerTrustStore
 
+    /** ISSUE-P3-298 ⑥：条目上次使用时刻记录（回传成功即真实使用点） */
+    @Inject
+    lateinit var credentialLastUsedStore: CredentialLastUsedStore
+
     private var settled = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -204,6 +208,9 @@ class PasswordFillActivity : BaseCredentialActivity() {
 
         val username = entry.userName
         val password = entry.password?.readString().orEmpty()
+
+        // ISSUE-P3-298 ⑥：回传成功 = 用户真实选用了本条目，记录上次使用时刻供候选置顶
+        credentialLastUsedStore.record(entry.id.toHexString())
 
         val response = GetCredentialResponse(PasswordCredential(username, password))
         val resultIntent = Intent()

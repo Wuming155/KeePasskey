@@ -1090,6 +1090,16 @@
     <!-- %1$s = the code, %2$d = remaining seconds (see TotpNotificationPublisher) -->
     <string name="notification_totp_text">%1$s (expires in %2$d s)</string>
 
+    <!-- ===== ISSUE-P3-298 ④: background sync failure notification (fixed generic copy, no user data) ===== -->
+    <string name="notification_channel_sync_failure_name">Sync issues</string>
+    <string name="notification_channel_sync_failure_desc">Silent reminder when a background sync fails; disappears after the next successful sync. Can be disabled in system settings</string>
+    <string name="notification_sync_failure_title">Vault sync failed</string>
+    <string name="notification_sync_failure_text">This background sync did not complete; it will retry automatically. Tap to open the app for details</string>
+
+    <!-- ===== ISSUE-P3-298 ①: "Open with" external open entry (fixed generic copy, no file paths) ===== -->
+    <string name="external_open_invalid">Could not identify a KDBX vault file. Please open it in the app via "Select file"</string>
+    <string name="external_open_failed">Failed to open the vault. Make sure the file is readable and retry inside the app</string>
+
     <!-- ===== ISSUE-P3-21: one-time key file delivery when creating a database ===== -->
     <string name="db_picker_keyfile_generate_desc">A new key file will be generated as a second factor. Save it to a safe location immediately - losing it makes this database impossible to unlock.</string>
     <string name="db_picker_keyfile_backup_title">Save the key file now</string>

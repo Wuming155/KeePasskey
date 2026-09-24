@@ -112,6 +112,18 @@ open class SyncCoordinator @Inject constructor(
     private val _syncEvents = MutableSharedFlow<SyncCacheEvent>(extraBufferCapacity = 64)
     open val syncEvents: SharedFlow<SyncCacheEvent> = _syncEvents.asSharedFlow()
 
+    /**
+     * 最近一次同步周期的结果（ISSUE-P3-298 ④：后台失败可见性的数据源）。
+     *
+     * 此前 [syncEvents] 全仓无订阅者、[SyncOutcome] 又只经返回值交付——周期任务
+     * （`PeriodicSyncWorker` 返回 `Result.success()`）把失败整条吞掉，用户对
+     * 「库已连续数周未同步」零感知。现在每个同步周期收尾处写入本流，
+     * 由 [SyncFailureNotifier] 订阅：`Error` → 静默失败通知；其余结果 → 撤下通知。
+     * null = 本进程尚无同步周期。
+     */
+    private val _lastOutcome = MutableStateFlow<SyncOutcome?>(null)
+    open val lastOutcome: StateFlow<SyncOutcome?> = _lastOutcome.asStateFlow()
+
     private val _recentSyncEvents = MutableStateFlow<List<SyncCacheEvent>>(emptyList())
     open val recentSyncEvents: StateFlow<List<SyncCacheEvent>> = _recentSyncEvents.asStateFlow()
 
@@ -189,6 +201,7 @@ open class SyncCoordinator @Inject constructor(
         debugLog.info(SYNC_LOG_TAG, "手动/自动同步开始")
         val outcome = cycle.runSyncCycle()
         publishSyncEvents()
+        _lastOutcome.value = outcome
         debugLog.info(SYNC_LOG_TAG, "同步结束: ${describeOutcome(outcome)}")
         return outcome
     }
@@ -202,6 +215,7 @@ open class SyncCoordinator @Inject constructor(
         debugLog.info(SYNC_LOG_TAG, "库身份改绑确认：整库覆盖上传开始")
         val outcome = cycle.takeoverVaultBinding()
         publishSyncEvents()
+        _lastOutcome.value = outcome
         debugLog.info(SYNC_LOG_TAG, "库身份改绑确认结束: ${describeOutcome(outcome)}")
         return outcome
     }

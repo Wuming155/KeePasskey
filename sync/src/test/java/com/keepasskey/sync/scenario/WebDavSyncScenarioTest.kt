@@ -345,21 +345,23 @@ class WebDavSyncScenarioTest {
 
     @Test
     fun `场景3 服务端5xx与401错误如实映射类型化异常`() = runTest {
-        // GET 500 -> ProtocolError
+        // GET 500 -> ProtocolError（ISSUE-P3-298 ③：瞬时 5xx 先重试，耗尽后仍映射 ProtocolError）
         startQueued()
+        server.enqueue(MockResponse().setResponseCode(500).setBody("boom"))
+        server.enqueue(MockResponse().setResponseCode(500).setBody("boom"))
         server.enqueue(MockResponse().setResponseCode(500).setBody("boom"))
         val r500 = provider().downloadBytes("vault.kdbx")
         assertTrue(r500.exceptionOrNull() is SyncException.ProtocolError)
         server.shutdown()
 
-        // GET 401 -> AuthenticationError
+        // GET 401 -> AuthenticationError（401 是确定性结论，不在瞬时重试面）
         server = MockWebServer(); startQueued()
         server.enqueue(MockResponse().setResponseCode(401))
         val r401 = provider().downloadBytes("vault.kdbx")
         assertTrue(r401.exceptionOrNull() is SyncException.AuthenticationError)
         server.shutdown()
 
-        // PUT 503 -> ProtocolError
+        // PUT 503 -> ProtocolError（无期望 ETag = 无条件 PUT，AC③ 禁止重试，恒单次）
         server = MockWebServer(); startQueued()
         server.enqueue(MockResponse().setResponseCode(503).setBody("unavailable"))
         val r503 = provider().upload("vault.kdbx", "x".toByteArray())

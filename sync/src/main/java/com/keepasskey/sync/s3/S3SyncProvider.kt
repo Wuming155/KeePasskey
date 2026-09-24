@@ -9,6 +9,7 @@ import com.keepasskey.sync.network.SyncDownloadLimits
 import com.keepasskey.sync.network.SyncEndpointGuard
 import com.keepasskey.sync.network.SyncHttpClientFactory
 import com.keepasskey.sync.network.SyncNetworkOptions
+import com.keepasskey.sync.network.TransientHttpRetry
 import com.keepasskey.sync.provider.SyncProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -373,7 +374,26 @@ class S3SyncProvider(
         var skewRetried = false
         while (true) {
             val offsetBeforeSigning = clockSkew.clockOffsetMillis
-            val response = send(clockSkew.signingDate())
+            // ISSUE-P3-298 ③：请求级瞬时错误重试——本协议全部写请求都携带服务器预条件
+            // （首传 If-None-Match: * / 覆盖 If-Match，条件写无从构造时已 fail-closed 拒发），
+            // 故所有方法统一允许传输级重试；预条件在服务端逐次重验，基线被推进即 412 →
+            // ConflictError，满足「重试前重新校验基线」。可重试状态码的响应在重试前关闭。
+            val response = try {
+                TransientHttpRetry.run(
+                    maxAttempts = networkOptions.transientRetryAttempts,
+                    baseDelayMs = networkOptions.transientRetryBaseDelayMs
+                ) {
+                    val attempt = send(clockSkew.signingDate())
+                    if (TransientHttpRetry.isRetryableStatus(attempt.code)) {
+                        attempt.close()
+                        throw TransientHttpRetry.RetryableStatus(attempt.code)
+                    }
+                    attempt
+                }
+            } catch (r: TransientHttpRetry.RetryableStatus) {
+                // 重试耗尽仍是瞬时可重试状态码：按既有状态映射口径收敛为类型化 ProtocolError
+                throw SyncException.ProtocolError(r.code, "服务器持续返回可重试状态码 (HTTP ${r.code})")
+            }
             response.use {
                 val refreshed = clockSkew.refreshFrom(it)
                 val skewRejected = !skewRetried && refreshed &&

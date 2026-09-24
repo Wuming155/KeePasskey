@@ -10,6 +10,7 @@ import com.keepasskey.sync.network.SyncEndpointGuard
 import com.keepasskey.sync.network.SyncHttpClientFactory
 import com.keepasskey.sync.network.SyncNetworkOptions
 import com.keepasskey.sync.network.SyncTransferOptions
+import com.keepasskey.sync.network.TransientHttpRetry
 import com.keepasskey.sync.provider.SyncProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -85,6 +86,39 @@ class WebDavSyncProvider(
         passwordChars.fill('0')
     }
 
+    /**
+     * ISSUE-P3-298 ③：请求级瞬时错误重试的统一出口（[TransientHttpRetry]）。
+     *
+     * @param retryable 请求是否允许传输级重试——幂等读（PROPFIND / GET / DELETE）或**实际携带
+     *   服务器预条件**（`If-Match` / `If` 头）的写才为 true；无条件写（临时文件 PUT）恒 false，
+     *   杜绝「重试即无条件 PUT」。带预条件的重试由服务端逐次重验基线：基线被推进即 412 →
+     *   `ConflictError`（「重试前重新校验基线」的协议级实现）。
+     * @param requestFactory 每次尝试重建请求（避免任何一次性 RequestBody 的复用疑义）
+     */
+    private suspend fun executeTransientRetryable(
+        retryable: Boolean,
+        requestFactory: () -> Request
+    ): Response {
+        if (!retryable) return httpClient.newCall(requestFactory()).execute()
+        return try {
+            TransientHttpRetry.run(
+                maxAttempts = networkOptions.transientRetryAttempts,
+                baseDelayMs = networkOptions.transientRetryBaseDelayMs
+            ) {
+                val response = httpClient.newCall(requestFactory()).execute()
+                if (TransientHttpRetry.isRetryableStatus(response.code)) {
+                    response.close()
+                    throw TransientHttpRetry.RetryableStatus(response.code)
+                }
+                response
+            }
+        } catch (r: TransientHttpRetry.RetryableStatus) {
+            // 重试耗尽仍是瞬时可重试状态码：按既有状态映射口径收敛为类型化 ProtocolError，
+            // 不以裸 IOException 上浮（调用方按 SyncException 家族归类用户文案）
+            throw SyncException.ProtocolError(r.code, "服务器持续返回可重试状态码 (HTTP ${r.code})")
+        }
+    }
+
     override suspend fun testConnection(): Result<Unit> = withContext(Dispatchers.IO) {
         runCatching {
             val url = serverUrl.trimEnd('/')
@@ -95,7 +129,7 @@ class WebDavSyncProvider(
                 .header("Depth", "0")
                 .build()
 
-            httpClient.newCall(request).execute().use { response ->
+            executeTransientRetryable(retryable = true) { request }.use { response ->
                 when {
                     response.isSuccessful || response.code == 207 -> Unit
                     response.code == 401 || response.code == 403 ->
@@ -116,7 +150,7 @@ class WebDavSyncProvider(
                 .header("Depth", "0")
                 .build()
 
-            httpClient.newCall(request).execute().use { response ->
+            executeTransientRetryable(retryable = true) { request }.use { response ->
                 when {
                     response.code == 404 -> throw SyncException.FileNotFound("远程文件不存在: $remotePath")
                     response.code == 401 || response.code == 403 ->
@@ -174,7 +208,7 @@ class WebDavSyncProvider(
                     .header("Authorization", authHeader)
                     .build()
 
-                httpClient.newCall(request).execute().use { response ->
+                executeTransientRetryable(retryable = true) { request }.use { response ->
                     when {
                         response.code == 404 -> throw SyncException.FileNotFound("远程文件不存在: $remotePath")
                         response.code == 401 || response.code == 403 ->
@@ -217,7 +251,11 @@ class WebDavSyncProvider(
             // 本应用 WebDAV 的目标资源乐观锁由 [uploadAtomic] 的 MOVE `If` 头承担（RFC 4918
             // §10.4.4 允许弱比较，弱形态可表达），生产写路径不经过本分支。
 
-            httpClient.newCall(requestBuilder.build()).execute().use { response ->
+            // ISSUE-P3-298 ③：仅当 PUT 实际携带 If-Match 预条件时才允许传输级重试——
+            // 预条件在服务端逐次重验（基线被推进即 412 → ConflictError）；无预条件（expectedEtag
+            // 空白或弱形态，If-Match 被 ISSUE-P1-275 AC② 剥除）属无条件 PUT，重试被禁
+            val conditionalPut = !expectedEtag.isNullOrBlank() && !isWeakEtag(expectedEtag)
+            executeTransientRetryable(retryable = conditionalPut) { requestBuilder.build() }.use { response ->
                 when {
                     response.code == 412 -> {
                         val currentMeta = getMetadata(remotePath).getOrNull()
@@ -314,7 +352,11 @@ class WebDavSyncProvider(
 
             for (attempt in 0..1) {
                 try {
-                    val resp = httpClient.newCall(createMoveRequest()).execute()
+                    // ISSUE-P3-298 ③：MOVE 携带目标 ETag 预条件（If tagged list）时允许传输级重试，
+                    // 预条件服务端逐次重验；无预条件 MOVE（Overwrite: T/F 无 If 头）恒单次
+                    val resp = executeTransientRetryable(
+                        retryable = !expectedEtag.isNullOrBlank()
+                    ) { createMoveRequest() }
                     if (resp.code == 412) {
                         val currentMeta = getMetadata(remotePath).getOrNull()
                         conflictError = SyncException.ConflictError(
@@ -362,7 +404,7 @@ class WebDavSyncProvider(
                 .header("Authorization", authHeader)
                 .build()
 
-            httpClient.newCall(request).execute().use { response ->
+            executeTransientRetryable(retryable = true) { request }.use { response ->
                 if (!response.isSuccessful && response.code != 404) {
                     throw SyncException.ProtocolError(response.code, response.message)
                 }

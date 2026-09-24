@@ -108,6 +108,33 @@
             </intent-filter>
         </activity>
 
+        <!-- ISSUE-P3-298 ①：「打开方式」外部打开入口——文件管理器 / 云盘对 `.kdbx` 选择
+             「打开方式」时承接 ACTION_VIEW / ACTION_SEND。导入到既有  `importExternalDatabase`
+             链路（与页内 SAF 选择器同一入口）后拉起主界面进入解锁流程。
+             安全边界：本页是有意新增的受控数据消费入口（与 MainActivity 的「不消费任何外部
+             intent 数据」裁决互不冲突）——只接受 VIEW/SEND、只接受 content/file、只接受
+             `.kdbx` 文件名，非法输入一律拒绝回落；白名单登记见 ExportedComponentHygieneTest。 -->
+        <activity
+            android:name=".OpenVaultEntryActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:theme="@style/Theme.KeePasskey">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <!-- .kdbx 无标准 MIME：文件管理器普遍按 octet-stream 提供；x-kdbx 覆盖
+                     部分云盘显式标注的形态。不登记更宽的通配 MIME（最小可达性原则）。 -->
+                <data android:mimeType="application/octet-stream" />
+                <data android:mimeType="application/x-kdbx" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/octet-stream" />
+                <data android:mimeType="application/x-kdbx" />
+            </intent-filter>
+        </activity>
+
         <!-- Credential Manager 凭据注册与断言交互 Activity (exported=false) -->
         <activity
             android:name=".passkey.PasskeyCreateActivity"

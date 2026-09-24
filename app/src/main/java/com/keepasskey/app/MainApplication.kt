@@ -10,6 +10,7 @@ import com.keepasskey.app.security.ClipboardSecurityManager
 import com.keepasskey.app.security.RuntimeIntegrityDetector
 import com.keepasskey.app.sync.PeriodicSyncScheduler
 import com.keepasskey.app.sync.SyncCacheEvictor
+import com.keepasskey.app.sync.SyncFailureNotifier
 import com.keepasskey.core.log.AppLog
 import dagger.hilt.android.HiltAndroidApp
 import kotlinx.coroutines.CoroutineScope
@@ -54,6 +55,11 @@ class MainApplication : Application(), Configuration.Provider {
 
     @Inject
     lateinit var unlockedNotificationController: UnlockedNotificationController
+
+    // ISSUE-P3-298 ④：后台同步失败可见性——订阅 SyncCoordinator.lastOutcome / syncEvents，
+    // 失败亮静默通知、恢复即撤，替代此前「周期任务 Result.success() 吞掉全部失败」的零感知状态。
+    @Inject
+    lateinit var syncFailureNotifier: SyncFailureNotifier
 
     // F-13（P1）：附件明文缓存的冷启动清理入口。注入既有 @Singleton 单例（不新建并行实现），
     // 与 DatabaseModule 注册的同一实例（锁定观察者）共用一份 `cacheDir/attachments` 目录。
@@ -149,6 +155,9 @@ class MainApplication : Application(), Configuration.Provider {
         // ISSUE-P3-18：已解锁常驻通知控制器——观察 DatabaseSession 会话态，
         // 解锁（OPENED/DIRTY）即发、锁定/关闭即撤，受 showUnlockedNotification 偏好与通知权限双闸门约束。
         unlockedNotificationController.start()
+        // ISSUE-P3-298 ④：同步失败可见性订阅器（进程级唯一冷启动点启动，幂等；
+        // 内部自带通知权限闸门，未授权即静默降级，不参与任何门控判定）
+        syncFailureNotifier.start()
     }
 
     /**

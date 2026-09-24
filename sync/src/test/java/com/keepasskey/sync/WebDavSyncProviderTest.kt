@@ -2,6 +2,7 @@ package com.keepasskey.sync
 
 import com.keepasskey.sync.model.RemoteFileMetadata
 import com.keepasskey.sync.model.SyncException
+import com.keepasskey.sync.network.SyncNetworkOptions
 import com.keepasskey.sync.webdav.WebDavSyncProvider
 import kotlinx.coroutines.test.runTest
 import okhttp3.mockwebserver.MockResponse
@@ -378,5 +379,112 @@ class WebDavSyncProviderTest {
             )
         }.exceptionOrNull()
         assertTrue("userinfo（@）注入端点必须被拒", ex is SyncException.InvalidEndpointError)
+    }
+
+    // ===== ISSUE-P3-298 ③：请求级瞬时错误重试 =====
+    // 重试参数经 SyncNetworkOptions 注入极小退避（withContext(Dispatchers.IO) 是真实时间，
+    // 虚拟时钟管不到），避免用例真实等待。
+
+    /** 瞬时重试用极小退避配置（3 次尝试、1ms 基准） */
+    private val retryFastOptions = SyncNetworkOptions(
+        transientRetryAttempts = 3,
+        transientRetryBaseDelayMs = 1L
+    )
+
+    @Test
+    fun `读请求遇瞬时 5xx 自动重试至成功`() = runTest {
+        val propfindXml = """<?xml version="1.0" encoding="utf-8"?>
+<d:multistatus xmlns:d="DAV:"><d:response><d:propstat><d:prop><d:getetag>"etag-ok"</d:getetag></d:prop></d:propstat></d:response></d:multistatus>"""
+        server.enqueue(MockResponse().setResponseCode(503))
+        server.enqueue(MockResponse().setResponseCode(502))
+        server.enqueue(MockResponse().setResponseCode(207).setBody(propfindXml))
+
+        val provider = WebDavSyncProvider(
+            serverUrl = server.url("/").toString(),
+            username = "admin",
+            passwordChars = "pass123".toCharArray(),
+            networkOptions = retryFastOptions,
+            client = plainLoopbackClient
+        )
+
+        val meta = provider.getMetadata("test.kdbx")
+        assertTrue(meta.isSuccess)
+        assertEquals("etag-ok", meta.getOrThrow().etag)
+        assertEquals("瞬时 5xx 后应共发出 3 次请求", 3, server.requestCount)
+    }
+
+    @Test
+    fun `无条件 PUT（无期望 ETag）遇 5xx 不重试`() = runTest {
+        server.enqueue(MockResponse().setResponseCode(500))
+
+        val provider = WebDavSyncProvider(
+            serverUrl = server.url("/").toString(),
+            username = "admin",
+            passwordChars = "pass123".toCharArray(),
+            networkOptions = retryFastOptions,
+            client = plainLoopbackClient
+        )
+
+        val result = provider.upload("test.kdbx", "data".toByteArray(), expectedEtag = null)
+        assertTrue(result.isFailure)
+        assertTrue(result.exceptionOrNull() is SyncException.ProtocolError)
+        assertEquals("无条件 PUT 禁止重试（AC③），应只有 1 次请求", 1, server.requestCount)
+    }
+
+    @Test
+    fun `带 If-Match 预条件的 PUT 遇 5xx 自动重试且重试仍携带预条件`() = runTest {
+        server.enqueue(MockResponse().setResponseCode(503))
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(201)
+                .setHeader("ETag", "\"new-etag\"")
+        )
+
+        val provider = WebDavSyncProvider(
+            serverUrl = server.url("/").toString(),
+            username = "admin",
+            passwordChars = "pass123".toCharArray(),
+            networkOptions = retryFastOptions,
+            client = plainLoopbackClient
+        )
+
+        val result = provider.upload("test.kdbx", "data".toByteArray(), expectedEtag = "etag-1")
+        assertTrue(result.isSuccess)
+        assertEquals("new-etag", result.getOrThrow())
+        assertEquals("条件 PUT 应重试，共 2 次请求", 2, server.requestCount)
+        // 两次尝试都必须携带同一 If-Match 预条件：重试基线由服务端逐次重验（AC③）
+        val first = server.takeRequest()
+        val second = server.takeRequest()
+        assertEquals("\"etag-1\"", first.getHeader("If-Match"))
+        assertEquals("\"etag-1\"", second.getHeader("If-Match"))
+    }
+
+    @Test
+    fun `412 冲突属确定性结论不重试`() = runTest {
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(412)
+                .setBody("Precondition Failed")
+        )
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(207)
+                .setHeader("ETag", "\"remote-latest\"")
+                .setBody(
+                    """<?xml version="1.0" encoding="utf-8"?><d:multistatus xmlns:d="DAV:"><d:response><d:propstat><d:prop><d:getetag>"remote-latest"</d:getetag></d:prop></d:propstat></d:response></d:multistatus>"""
+                )
+        )
+
+        val provider = WebDavSyncProvider(
+            serverUrl = server.url("/").toString(),
+            username = "admin",
+            passwordChars = "pass123".toCharArray(),
+            networkOptions = retryFastOptions,
+            client = plainLoopbackClient
+        )
+
+        val result = provider.upload("test.kdbx", "data".toByteArray(), expectedEtag = "stale")
+        assertTrue(result.exceptionOrNull() is SyncException.ConflictError)
+        assertEquals("412 不在瞬时重试面，PUT 仅 1 次（随后 1 次 PROPFIND 取最新元数据）", 2, server.requestCount)
     }
 }

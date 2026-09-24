@@ -89,7 +89,8 @@ internal fun KeePasskeyAutofillService.buildLockedUnlockDataset(
     passwordId: AutofillId?,
     callingPkg: String,
     webDomain: String?,
-    inlineRequest: InlineSuggestionsRequest?
+    inlineRequest: InlineSuggestionsRequest?,
+    otpId: AutofillId? = null
 ): FillResponse? {
     // 库已锁定：提供解锁 Action Dataset
     if (!vaultRepository.isLocked()) return null
@@ -104,6 +105,8 @@ internal fun KeePasskeyAutofillService.buildLockedUnlockDataset(
     val unlockIntent = Intent(this, AutofillUnlockActivity::class.java).apply {
         putExtra(AutofillPickerActivity.EXTRA_USERNAME_ID, usernameId)
         putExtra(AutofillPickerActivity.EXTRA_PASSWORD_ID, passwordId)
+        // ISSUE-P3-298 ⑤：OTP 框 id 随链路转发（解锁后选择器 / 确认页才能把 TOTP 值填入该框）
+        putExtra(AutofillPickerActivity.EXTRA_OTP_ID, otpId)
         putExtra(AutofillPickerActivity.EXTRA_CALLING_PACKAGE, callingPkg)
         putExtra(AutofillPickerActivity.EXTRA_WEB_DOMAIN, webDomain.orEmpty())
     }
@@ -140,6 +143,11 @@ internal fun KeePasskeyAutofillService.buildLockedUnlockDataset(
         @Suppress("DEPRECATION")
         dsBuilder.setValue(passwordId, null)
     }
+    if (otpId != null) {
+        // ISSUE-P3-298 ⑤：与解锁引导数据集同语义——值在解锁后回传的数据集中才可用
+        @Suppress("DEPRECATION")
+        dsBuilder.setValue(otpId, null)
+    }
     dsBuilder.setAuthentication(pendingIntent.intentSender)
 
     return FillResponse.Builder().apply { addDataset(dsBuilder.build()) }.build()
@@ -154,7 +162,8 @@ internal suspend fun KeePasskeyAutofillService.appendUnlockedDatasets(
     scanResult: ScanResult,
     usernameId: AutofillId?,
     passwordId: AutofillId?,
-    inlineRequest: InlineSuggestionsRequest?
+    inlineRequest: InlineSuggestionsRequest?,
+    otpId: AutofillId? = null
 ) {
     val candidates = resolveUnlockedCandidates(callingPkg, scanResult)
     val context = UnlockedDatasetContext(
@@ -163,6 +172,7 @@ internal suspend fun KeePasskeyAutofillService.appendUnlockedDatasets(
         usernameId = usernameId,
         passwordId = passwordId,
         inlineRequest = inlineRequest,
+        otpId = otpId,
         // ISSUE-P2-88：官方契约（`Dataset.Builder#setAuthentication` 原文）对认证数据集有**两条**强制要求：
         // ① 认证 PendingIntent 不得不可变（平台要注入认证参数）⇒ `FLAG_MUTABLE`；
         // ② 认证结束后必须经 `AutofillManager.EXTRA_AUTHENTICATION_RESULT` 回传「fully populated
@@ -173,6 +183,8 @@ internal suspend fun KeePasskeyAutofillService.appendUnlockedDatasets(
         confirmIntent = Intent(this, AutofillConfirmActivity::class.java).apply {
             putExtra(AutofillConfirmActivity.EXTRA_TARGET_USERNAME_ID, usernameId)
             putExtra(AutofillConfirmActivity.EXTRA_TARGET_PASSWORD_ID, passwordId)
+            // ISSUE-P3-298 ⑤：OTP 框 id 随认证 Intent 下发，确认页回传时把当前 TOTP 值填入
+            putExtra(AutofillConfirmActivity.EXTRA_TARGET_OTP_ID, otpId)
         },
         skipRepeatConfirmation = unlockedConfirmationPolicy(callingPkg, candidates, passwordId)
     )
@@ -193,6 +205,8 @@ private data class UnlockedDatasetContext(
     val usernameId: AutofillId?,
     val passwordId: AutofillId?,
     val inlineRequest: InlineSuggestionsRequest?,
+    // ISSUE-P3-298 ⑤：显式声明的 OTP 框（命中 TOTP 的候选把当前码填入）
+    val otpId: AutofillId?,
     val confirmIntent: Intent,
     val skipRepeatConfirmation: Boolean
 )
@@ -320,6 +334,18 @@ private suspend fun KeePasskeyAutofillService.buildCandidateDataset(
     if (ctx.passwordId != null && password.isNotEmpty()) {
         dsBuilder.setField(ctx.passwordId, Field.Builder().setValue(AutofillValue.forText(password)).build())
     }
+    // ISSUE-P3-298 ⑤：表单显式声明 OTP 框且条目命中 TOTP → 经 AutofillValue 正规通道直填
+    // 当前验证码。**仅 TOTP**：HOTP 的当前码不推进计数器（推进是「取下一个码」的显式动作），
+    // 直填会给出与服务端不同步的旧值，故 HOTP 条目不参与直填（复制 / 通知路径不受影响）。
+    if (ctx.otpId != null) {
+        val otpSnapshot = vaultRepository.calculateEntryTotp(entryIdHex)
+        if (otpSnapshot != null && !otpSnapshot.isHotp && otpSnapshot.code.isNotEmpty()) {
+            dsBuilder.setField(
+                ctx.otpId,
+                Field.Builder().setValue(AutofillValue.forText(otpSnapshot.code)).build()
+            )
+        }
+    }
     if (!ctx.skipRepeatConfirmation) {
         attachConfirmationAuth(dsBuilder, entryIdHex, displayName, ctx)
     }
@@ -360,7 +386,8 @@ internal fun KeePasskeyAutofillService.buildPickerDataset(
     callingPkg: String,
     scanResult: ScanResult,
     usernameId: AutofillId?,
-    passwordId: AutofillId?
+    passwordId: AutofillId?,
+    otpId: AutofillId? = null
 ) {
     // ISSUE-P3-40：手动搜索兜底入口（自动匹配零候选/候选不含目标条目时使用）。
     // 以「认证数据集」形式挂入：值在用户于选择器中选中并确认后才经
@@ -368,6 +395,8 @@ internal fun KeePasskeyAutofillService.buildPickerDataset(
     val pickerIntent = Intent(this, AutofillPickerActivity::class.java).apply {
         putExtra(AutofillPickerActivity.EXTRA_USERNAME_ID, usernameId)
         putExtra(AutofillPickerActivity.EXTRA_PASSWORD_ID, passwordId)
+        // ISSUE-P3-298 ⑤：OTP 框 id 随链路转发，选择器交付时把当前 TOTP 值填入该框
+        putExtra(AutofillPickerActivity.EXTRA_OTP_ID, otpId)
         // ISSUE-P3-43 ②：下传「字段签名」所需上下文，使选择器成为字段级屏蔽的写入入口。
         // 只传包名与表单自报域（均为非敏感标识），不传任何表单内容或凭据。
         putExtra(AutofillPickerActivity.EXTRA_CALLING_PACKAGE, callingPkg)
@@ -398,6 +427,11 @@ internal fun KeePasskeyAutofillService.buildPickerDataset(
     if (passwordId != null) {
         @Suppress("DEPRECATION")
         pickerBuilder.setValue(passwordId, null)
+    }
+    if (otpId != null) {
+        // ISSUE-P3-298 ⑤：与解锁引导数据集同语义——值在认证后（选择器回传时）才可用
+        @Suppress("DEPRECATION")
+        pickerBuilder.setValue(otpId, null)
     }
     pickerBuilder.setAuthentication(pickerPendingIntent.intentSender)
     responseBuilder.addDataset(pickerBuilder.build())

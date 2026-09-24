@@ -46,6 +46,10 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
     @Inject
     lateinit var callerTrustStore: CredentialManagerCallerTrustStore
 
+    /** ISSUE-P3-298 ⑥：条目上次使用时刻记录（断言回传成功即真实使用点） */
+    @Inject
+    lateinit var credentialLastUsedStore: CredentialLastUsedStore
+
     /**
      * ISSUE-P2-199：特权浏览器白名单——供请求面解析器按**本次**系统背书的 CallingAppInfo
      * 重新派生 origin，并与组装期副本交叉核对（覆盖判定即 fail-closed）。
@@ -253,6 +257,8 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
                 }
 
                 // ISSUE-P3-27 子项 2：计数器已落库后才回传 RP
+                // ISSUE-P3-298 ⑥：回传成功 = 用户真实选用了本条目，记录上次使用时刻
+                credentialLastUsedStore.record(entryId)
                 val resultIntent = Intent()
                 val response = GetCredentialResponse(PublicKeyCredential(assertionJson))
                 PendingIntentHandler.setGetCredentialResponse(resultIntent, response)

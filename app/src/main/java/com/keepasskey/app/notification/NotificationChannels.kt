@@ -42,6 +42,18 @@ enum class NotificationChannelSpec(
         nameRes = R.string.notification_channel_totp_name,
         descriptionRes = R.string.notification_channel_totp_desc,
         importance = NotificationManager.IMPORTANCE_DEFAULT
+    ),
+
+    /**
+     * 后台同步失败通知（ISSUE-P3-298 ④）：低重要度（静默、无横幅、不响铃），
+     * 仅让「库已连续未同步成功」对用户可见。可关：用户可随时在系统通知设置中
+     * 关闭该通道（通道级开关即本通知的关闭面，应用内不另设重复开关）。
+     */
+    SYNC_FAILURE(
+        channelId = "keepasskey_sync_failure",
+        nameRes = R.string.notification_channel_sync_failure_name,
+        descriptionRes = R.string.notification_channel_sync_failure_desc,
+        importance = NotificationManager.IMPORTANCE_LOW
     )
 }
 
@@ -58,6 +70,9 @@ object NotificationChannels {
 
     /** 自动填充验证码通知的通知 id */
     const val ID_AUTOFILL_TOTP = 1002
+
+    /** 后台同步失败通知的通知 id（ISSUE-P3-298 ④；失败复用同一 id，恢复即撤销） */
+    const val ID_SYNC_FAILURE = 1003
 
     /**
      * 通知小图标。
@@ -105,11 +120,17 @@ internal object NotificationIntents {
     /** 验证码通知的跳转请求码 */
     private const val REQUEST_CODE_AUTOFILL_TOTP = 3002
 
+    /** 同步失败通知的跳转请求码（ISSUE-P3-298 ④） */
+    private const val REQUEST_CODE_SYNC_FAILURE = 3003
+
     fun openAppForUnlockedStatus(context: Context): PendingIntent =
         openApp(context, REQUEST_CODE_UNLOCKED_STATUS)
 
     fun openAppForTotp(context: Context): PendingIntent =
         openApp(context, REQUEST_CODE_AUTOFILL_TOTP)
+
+    fun openAppForSyncFailure(context: Context): PendingIntent =
+        openApp(context, REQUEST_CODE_SYNC_FAILURE)
 
     private fun openApp(context: Context, requestCode: Int): PendingIntent {
         val intent = Intent(context, MainActivity::class.java).apply {

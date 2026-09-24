@@ -226,22 +226,26 @@ class S3SyncScenarioTest {
 
     @Test
     fun `场景3 服务端5xx与401错误如实映射类型化异常`() = runTest {
-        // GET 500 -> ProtocolError
+        // GET 500 -> ProtocolError（ISSUE-P3-298 ③：瞬时 5xx 先重试，耗尽后仍映射 ProtocolError）
         startQueued()
+        server.enqueue(MockResponse().setResponseCode(500).setBody("boom"))
+        server.enqueue(MockResponse().setResponseCode(500).setBody("boom"))
         server.enqueue(MockResponse().setResponseCode(500).setBody("boom"))
         val r500 = provider().downloadBytes("vault.kdbx")
         assertTrue(r500.exceptionOrNull() is SyncException.ProtocolError)
         server.shutdown()
 
-        // GET 401 -> AuthenticationError
+        // GET 401 -> AuthenticationError（401 是确定性结论，不在瞬时重试面）
         server = MockWebServer(); startQueued()
         server.enqueue(MockResponse().setResponseCode(401))
         val r401 = provider().downloadBytes("vault.kdbx")
         assertTrue(r401.exceptionOrNull() is SyncException.AuthenticationError)
         server.shutdown()
 
-        // testConnection HEAD 500 -> ProtocolError
+        // testConnection HEAD 500 -> ProtocolError（同上：重试耗尽后映射）
         server = MockWebServer(); startQueued()
+        server.enqueue(MockResponse().setResponseCode(500))
+        server.enqueue(MockResponse().setResponseCode(500))
         server.enqueue(MockResponse().setResponseCode(500))
         val rConn = provider().testConnection()
         assertTrue("testConnection 5xx 必须如实失败: ${rConn.getOrNull()}", rConn.isFailure)

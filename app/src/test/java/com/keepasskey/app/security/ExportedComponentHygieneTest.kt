@@ -151,8 +151,17 @@ class ExportedComponentHygieneTest {
         val EXPORTED_WITHOUT_PERMISSION: Map<String, String> = mapOf(
             LAUNCHER_ACTIVITY to
                 "启动器入口：必须导出才能被 Launcher 拉起；无权限可用，改以「不消费外部 intent" +
-                " + singleTask + taskAffinity=\"\"」收敛攻击面（见同文件另两条用例）"
+                " + singleTask + taskAffinity=\"\"」收敛攻击面（见同文件另两条用例）",
+            EXTERNAL_OPEN_ACTIVITY to
+                "ISSUE-P3-298 ①：「打开方式」外部打开入口——承接 ACTION_VIEW / ACTION_SEND " +
+                "的 .kdbx 库文件（文件管理器 / 云盘「打开方式」直达）。属有意新增的受控数据" +
+                "消费入口：仅接受 content/file scheme 且文件名以 .kdbx 结尾的对象，非法输入" +
+                "拒绝回落主界面；导入复用页内 SAF 同一 importExternalDatabase 链路（持久化" +
+                "授权尝试 + 脱敏告警），库可用性仍由主密码解密 fail-closed 裁决"
         )
+
+        /** ISSUE-P3-298 ①：外部打开入口（无权限可用的导出组件，理由见白名单） */
+        const val EXTERNAL_OPEN_ACTIVITY = ".OpenVaultEntryActivity"
 
         /** `<activity|service|receiver|provider ...>` 起始标签整体（跨行） */
         val COMPONENT_REGEX = Regex(

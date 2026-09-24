@@ -5,7 +5,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
-
 /**
  * ISSUE-P3-18 验收标准 1：「建立通知通道」的**声明式契约**单测。
  *
@@ -22,7 +21,12 @@ class NotificationChannelSpecTest {
     @Test
     fun `必需通道齐备且无冗余`() {
         assertEquals(
-            setOf(NotificationChannelSpec.UNLOCKED_STATUS, NotificationChannelSpec.AUTOFILL_TOTP),
+            setOf(
+                NotificationChannelSpec.UNLOCKED_STATUS,
+                NotificationChannelSpec.AUTOFILL_TOTP,
+                // ISSUE-P3-298 ④：后台同步失败通知通道（低重要度静默，系统设置可关）
+                NotificationChannelSpec.SYNC_FAILURE
+            ),
             NotificationChannelSpec.entries.toSet()
         )
     }
@@ -66,13 +70,23 @@ class NotificationChannelSpecTest {
     }
 
     @Test
-    fun `两条通知的通知 id 互不相同且为正数`() {
+    fun `同步失败通道为低重要度静默通道（可静音）`() {
+        assertEquals(
+            NotificationManager.IMPORTANCE_LOW,
+            NotificationChannelSpec.SYNC_FAILURE.importance
+        )
+    }
+
+    @Test
+    fun `三条通知的通知 id 互不相同且为正数`() {
         val unlocked = NotificationChannels.ID_UNLOCKED_STATUS
         val totp = NotificationChannels.ID_AUTOFILL_TOTP
+        val syncFailure = NotificationChannels.ID_SYNC_FAILURE
 
         assertTrue(unlocked > 0)
         assertTrue(totp > 0)
-        assertNotEquals(unlocked, totp)
+        assertTrue(syncFailure > 0)
+        assertEquals(setOf(unlocked, totp, syncFailure).size, 3)
     }
 
     @Test

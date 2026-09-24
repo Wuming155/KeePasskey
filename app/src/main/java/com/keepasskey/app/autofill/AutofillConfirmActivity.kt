@@ -301,10 +301,19 @@ class AutofillConfirmActivity : FragmentActivity() {
         val entryId = intent.getStringExtra(EXTRA_ENTRY_ID)?.takeIf { it.isNotBlank() } ?: return null
         val usernameId = readAutofillId(EXTRA_TARGET_USERNAME_ID)
         val passwordId = readAutofillId(EXTRA_TARGET_PASSWORD_ID)
+        val otpId = readAutofillId(EXTRA_TARGET_OTP_ID)
         if (usernameId == null && passwordId == null) return null
 
         val credentials = pickerViewModel.resolveCredentials(entryId) ?: return null
         val credentialTitle = intent.getStringExtra(EXTRA_CREDENTIAL_TITLE).orEmpty()
+        // ISSUE-P3-298 ⑤：回传时刻现算 TOTP（值新鲜度以交付时刻为准）；仅 TOTP 参与
+        // 直填——HOTP 当前码不推进计数器，直填会给出与服务端不同步的旧值
+        val otpCode = if (otpId != null) {
+            vaultRepository.calculateEntryTotp(entryId)
+                ?.takeIf { !it.isHotp }?.code.orEmpty()
+        } else {
+            ""
+        }
         val dataset = buildAuthenticationResultDataset(
             packageName = packageName,
             menuTitle = credentials.username.ifBlank { credentialTitle },
@@ -312,14 +321,17 @@ class AutofillConfirmActivity : FragmentActivity() {
             username = credentials.username,
             password = credentials.password,
             usernameId = usernameId,
-            passwordId = passwordId
+            passwordId = passwordId,
+            otpId = otpId,
+            otpCode = otpCode
         ) ?: return null
         // 只记录「哪些字段真的有值」，不含任何凭据内容 / 用户名 / 条目名 / 包名
         AppLog.d(
             TAG,
             "确认后回传数据集：用户名有值=${credentials.username.isNotEmpty()}" +
                 " 口令有值=${credentials.password.isNotEmpty()}" +
-                " 用户名框=${usernameId != null} 密码框=${passwordId != null}"
+                " 验证码有值=${otpCode.isNotEmpty()}" +
+                " 用户名框=${usernameId != null} 密码框=${passwordId != null} 验证码框=${otpId != null}"
         )
         return authenticationResultIntent(dataset)
     }
@@ -362,5 +374,8 @@ class AutofillConfirmActivity : FragmentActivity() {
 
         /** ISSUE-P2-88：目标**密码框** id（可为 null——纯用户名表单） */
         const val EXTRA_TARGET_PASSWORD_ID = "com.keepasskey.app.autofill.EXTRA_CONFIRM_PASSWORD_ID"
+
+        /** ISSUE-P3-298 ⑤：目标 **OTP 验证码框** id（可为 null——表单未显式声明时） */
+        const val EXTRA_TARGET_OTP_ID = "com.keepasskey.app.autofill.EXTRA_CONFIRM_OTP_ID"
     }
 }

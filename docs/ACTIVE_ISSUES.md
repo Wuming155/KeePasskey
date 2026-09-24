@@ -47,16 +47,7 @@
 
 ---
 
-## P3 低危问题、特性接线与体验优化（3 项）
-
-### ISSUE-P3-298：借鉴参考项目仍缺的可达性与反馈能力（外部打开入口 / 大屏双栏 / 请求级重试 / 后台失败可见 / OTP 直填 / CM 排序）
-
-- **核实时间点**：2026-09-23 经 Manifest、调度链与参考项目定点核实；其中后四项第一轮由 sync 代理提出、**未经对抗轮单独攻击**，认领时须自行复核。
-- **核实方式与清单**：① 无 `.kdbx` 的 `ACTION_VIEW` / `SEND` intent-filter——三份 Manifest 检索后唯一 VIEW 出现在 `<queries>`（`AndroidManifest.xml:42-45`，属包可见性非入口）；SAF 已在页内承接（`DatabasePickerScreen.kt:157`、`OpenExistingVaultDialog.kt:43`），限界 §24（`已知工程限界.md:598`）认 SAF 为准 ⇒ 属**习惯可达性**缺口（官方 / KeePassDX 支持「打开方式」直达）。② 宽屏仅换 NavigationRail（`KeePasskeyApp.kt:362-369`，`screenWidthDp >= 600`），无 `ListDetailPaneScaffold` / `WindowWidthSizeClass` 命中 ⇒ 大屏仍逐页跳。③ 无请求级重试与退避：`app/.../sync/PeriodicSyncWorker.kt:31-41`（含异常也 `Result.success()`）、`sync/.../network/SyncHttpClientFactory.kt:38-51` 只设超时 ⇒ 瞬时 5xx / 429 只能等下个周期（对照 kp2a `BackgroundSyncService` 按状态码重试）。④ 后台同步失败零可见：`SyncCoordinator.kt:108-112` 的 `syncEvents` **全仓无订阅者**，`app/.../notification/NotificationChannels.kt:31-45` 仅「已解锁」与「填充验证码」两条通道 ⇒ 库可连续数周未同步而用户无感（与 `ISSUE-P3-272` 的「自动同步开关是假的」不同面）。⑤ OTP 字段从不直填：`AutofillPostFillTotpActions.kt:52-74` 只复制 / 通知，`AutofillFieldScanner.kt:124-131` 无 `one-time-code` / `SMS_OTP` 通道（定向检索 0 命中）；KeePassDX 有独立 `otpTokenId` 槽并真实填充（`StructureParser.kt:149/339` → `AutofillHelper.kt:314-323`），KeePassXC 有 `get-totp`。设置项文案自我限定为「复制到剪贴板 / 通知」（`strings.xml:861-866`），未宣称填充 ⇒ 属未实现的对齐项、非谎报。⑥ CM 通道无「上次使用置顶」：`CredentialResponseAssembler.kt:137-155` 未用 `AutofillLastFilledStore`——但本仓服务**未实现** `onCompleteGetCredentialRequest`（全仓 0 命中），CM 侧当前无「被选凭据」信号可作数据源 ⇒ 属框架接线面。
-- **涉及文件**：`app/src/main/AndroidManifest.xml`、`app/.../ui/KeePasskeyApp.kt`、`app/.../sync/PeriodicSyncWorker.kt`、`sync/.../network/SyncHttpClientFactory.kt`、`app/.../notification/NotificationChannels.kt`、`app/.../autofill/AutofillPostFillTotpActions.kt`、`app/.../passkey/CredentialResponseAssembler.kt`。
-- **验收标准**：AC① 逐项给「补齐 / 维持并登记 `PD-*` / 记限界」结论，禁停留在清单状态；AC② 若补④：须新增同步失败通知渠道（可静音、可关）并让 `syncEvents` 有真实订阅者，同时保持 `PeriodicSyncWorker` 的 `Result.success()` 不再吞掉可观测性；AC③ 若补③：重试须与 `ISSUE-P1-275` 的乐观锁语义合流（已闭环，见 `RESOLVED_LOG.md` §272；重试前重新校验基线），禁「重试即无条件 PUT」；AC④ 若补⑤：不得移除既有复制 / 通知路径，且须走 `AutofillValue` 正规通道；AC⑤ ⑥须先取框架侧权威依据（Credential Manager 回调契约）再定可行性，取不到则如实标注未证实。
-
----
+## P3 低危问题、特性接线与体验优化（2 项）
 
 ### ISSUE-P3-300：弱 ETag 乐观锁的**真实 DAV 服务器矩阵未实测**——弱 ETag 服务器上的同步收敛行为待证（§272 AC⑤ 显式残余）
 

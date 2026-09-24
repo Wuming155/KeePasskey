@@ -19,6 +19,7 @@ import com.keepasskey.core.log.AppLog
 import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.model.PasskeyData
 import dagger.hilt.android.qualifiers.ApplicationContext
+import java.time.Instant
 import org.json.JSONObject
 import javax.inject.Inject
 
@@ -49,7 +50,9 @@ class CredentialResponseAssembler @Inject constructor(
     /** 特权浏览器白名单（内置已取证 + 用户显式启用的浏览器） */
     private val privilegedBrowserStore: com.keepasskey.app.data.repository.PasskeyPrivilegedBrowserStore,
     /** ISSUE-P2-228：「通行密钥支持」开关的持久化来源（关闭后本类不产出任何公钥候选） */
-    private val settingsStore: com.keepasskey.app.data.repository.ExtendedSettingsStore
+    private val settingsStore: com.keepasskey.app.data.repository.ExtendedSettingsStore,
+    /** ISSUE-P3-298 ⑥：条目上次使用时刻记录（候选置顶的数据源；交付落地页写入） */
+    private val credentialLastUsedStore: CredentialLastUsedStore
 ) {
 
     /**
@@ -236,6 +239,10 @@ class CredentialResponseAssembler @Inject constructor(
         if (passkey.userDisplayName.isNotBlank()) {
             entryBuilder.setDisplayName(passkey.userDisplayName)
         }
+        // ISSUE-P3-298 ⑥：上次使用时刻置顶——数据源为本应用自己的 CM 交付落地页
+        // （PasswordFill / PasskeyAssertion 回传成功时记录），候选组装侧如实下发给系统 UI
+        credentialLastUsedStore.lastUsedMillis(entry.id.toHexString())
+            ?.let { entryBuilder.setLastUsedTime(Instant.ofEpochMilli(it)) }
 
         // ISSUE-P0-03 (ZT-03)：不再在候选条目上挂 BiometricPromptData——它只是「看起来已验证」
         // 的假门控，无法判定系统门控是否真的通过，且会与 PasskeyAssertionActivity 窗口内验证
@@ -320,6 +327,10 @@ class CredentialResponseAssembler @Inject constructor(
                 option
             ).setDisplayName(entry.title)
                 .setIcon(Icon.createWithResource(context, R.drawable.ic_launcher))
+
+            // ISSUE-P3-298 ⑥：同 Passkey 候选——上次使用时刻来自本应用交付落地页的记录
+            credentialLastUsedStore.lastUsedMillis(entry.id.toHexString())
+                ?.let { entryBuilder.setLastUsedTime(Instant.ofEpochMilli(it)) }
 
             responseBuilder.addCredentialEntry(entryBuilder.build())
         }

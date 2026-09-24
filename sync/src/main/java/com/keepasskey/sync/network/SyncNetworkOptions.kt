@@ -22,12 +22,21 @@ data class SyncNetworkOptions(
      * 命中的主机跳过构造期字面 IP/保留名校验与连接期 [SsrfGuardDns] 解析网段校验，
      * 供确需直连特定主机的场景经上层显式、可审计地放行；生产默认恒为空。
      */
-    val ssrfAllowedHosts: Set<String> = emptySet()
+    val ssrfAllowedHosts: Set<String> = emptySet(),
+    /**
+     * ISSUE-P3-298 ③：请求级瞬时错误重试的最大尝试次数（含首次）。
+     * 仅作用于读请求与携带服务器预条件的写请求（见 [TransientHttpRetry] 安全边界）。
+     */
+    val transientRetryAttempts: Int = DEFAULT_TRANSIENT_RETRY_ATTEMPTS,
+    /** 请求级重试的指数退避基准延迟（毫秒）：`base × 2^attempt`，封顶 [TransientHttpRetry.DEFAULT_MAX_DELAY_MS] */
+    val transientRetryBaseDelayMs: Long = DEFAULT_TRANSIENT_RETRY_BASE_DELAY_MS
 ) {
     companion object {
         const val DEFAULT_CONNECT_TIMEOUT_MS = 10_000L
         const val DEFAULT_READ_TIMEOUT_MS = 30_000L
         const val DEFAULT_WRITE_TIMEOUT_MS = 30_000L
         const val DEFAULT_CALL_TIMEOUT_MS = 300_000L
+        const val DEFAULT_TRANSIENT_RETRY_ATTEMPTS = 3
+        const val DEFAULT_TRANSIENT_RETRY_BASE_DELAY_MS = 500L
     }
 }

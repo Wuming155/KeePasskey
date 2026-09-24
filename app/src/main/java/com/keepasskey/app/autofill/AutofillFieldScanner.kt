@@ -64,7 +64,13 @@ data class ScanResult(
     val usernameConfidence: FieldConfidence = FieldConfidence.NONE,
     val passwordConfidence: FieldConfidence = FieldConfidence.NONE,
     /** 仅识别到密码框、未识别到账号框（纯密码登录页） */
-    val isPasswordOnlyLogin: Boolean = false
+    val isPasswordOnlyLogin: Boolean = false,
+    /**
+     * ISSUE-P3-298 ⑤：显式声明的 OTP 验证码输入框（W3C `one-time-code` / 平台
+     * `smsOtpCode` / `2faAppOtpCode` hint，或 htmlName/idEntry 含 `otp`）。
+     * 仅供数据集直填当前 TOTP 值，不参与账号 / 密码的任何匹配与放行判定。
+     */
+    val otpId: String? = null
 )
 
 /**
@@ -112,6 +118,12 @@ object AutofillFieldScanner {
     /** 密码类 label 词（token 精确匹配） */
     private val PASSWORD_TOKEN_TERMS = setOf("password", "passwd", "pwd", "pass", "passphrase", "clave")
 
+    /**
+     * OTP 验证码 hint 白名单（ISSUE-P3-298 ⑤，归一化比较：去 `-`/`_` 转小写）。
+     * 覆盖 W3C autocomplete `one-time-code` 与平台 hint `smsOtpCode` / `2faAppOtpCode`。
+     */
+    private val OTP_HINTS = setOf("onetimecode", "smsotpcode", "2faappotpcode")
+
     /** 搜索框排除词（子串，含拼接形态如 searchInput） */
     private val SEARCH_SUBSTRING_TERMS = listOf(
         "搜索", "搜尋", "查询", "查詢", "筛选", "篩選", "search", "query", "keyword"
@@ -152,6 +164,7 @@ object AutofillFieldScanner {
 
         val usernameCandidates = mutableListOf<Candidate>()
         val passwordCandidates = mutableListOf<Candidate>()
+        val otpCandidates = mutableListOf<Candidate>()
 
         for (node in nodes) {
             if (resolvedWebDomain == null && !node.webDomain.isNullOrBlank()) {
@@ -159,6 +172,18 @@ object AutofillFieldScanner {
             }
             if (resolvedPackageName == null && node.packageName.isNotBlank()) {
                 resolvedPackageName = node.packageName.trim()
+            }
+
+            // ISSUE-P3-298 ⑤：OTP 通道优先于搜索 / 非凭据排除——`otp` 一词同时也在
+            // 非凭据排除词表内（那是针对「别把验证码框当账号框」的旧语义），显式声明的
+            // OTP 框如今要被捕获为直填目标，故必须先判 OTP 再走排除。OTP 框不可见时
+            // 不参与（填充目标不可见无意义，与账号框同口径）。
+            if (node.isVisible) {
+                val otpConfidence = otpSignal(node)
+                if (otpConfidence != FieldConfidence.NONE) {
+                    otpCandidates.add(Candidate(node.id, rank(otpConfidence, node.isFocused)))
+                    continue
+                }
             }
 
             // 搜索框与非凭据字段（验证码/评论等）一律不参与
@@ -185,6 +210,7 @@ object AutofillFieldScanner {
 
         val bestUsername = usernameCandidates.maxByOrNull { it.score }
         val bestPassword = passwordCandidates.maxByOrNull { it.score }
+        val bestOtp = otpCandidates.maxByOrNull { it.score }
 
         return ScanResult(
             usernameId = bestUsername?.id,
@@ -193,8 +219,28 @@ object AutofillFieldScanner {
             packageName = resolvedPackageName,
             usernameConfidence = bestUsername?.let { confidenceOf(it.score) } ?: FieldConfidence.NONE,
             passwordConfidence = bestPassword?.let { confidenceOf(it.score) } ?: FieldConfidence.NONE,
-            isPasswordOnlyLogin = bestPassword != null && bestUsername == null
+            isPasswordOnlyLogin = bestPassword != null && bestUsername == null,
+            otpId = bestOtp?.id
         )
+    }
+
+    /** OTP 验证码信号强度（ISSUE-P3-298 ⑤）：hint > htmlName；**不用 label**——「验证码」一词同时用于短信验证码与图形验证码，误填风险高 */
+    private fun otpSignal(node: ScanNode): FieldConfidence = when {
+        node.autofillHints.any { isOtpHint(it) } -> FieldConfidence.HIGH
+        isOtpHtmlName(node.htmlName) -> FieldConfidence.MEDIUM
+        else -> FieldConfidence.NONE
+    }
+
+    /** 平台 / W3C 的 OTP hint（归一化精确匹配；不匹配用户名/密码 hint 的包含形态） */
+    fun isOtpHint(hint: String): Boolean {
+        val normalized = hint.lowercase().replace("-", "").replace("_", "").trim()
+        return normalized in OTP_HINTS
+    }
+
+    /** htmlName / idEntry 含 `otp`（覆盖 `totp` / `hotp` / `otpcode` / `one_time_code` 等拼接形态） */
+    fun isOtpHtmlName(name: String?): Boolean {
+        if (name.isNullOrBlank()) return false
+        return name.lowercase().trim().contains("otp")
     }
 
     /** 密码信号强度：hint > inputType/htmlName > label */

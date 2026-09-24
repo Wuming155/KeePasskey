@@ -281,6 +281,15 @@ class AutofillPickerActivity : FragmentActivity() {
             }
             // 载荷构造已收敛到 [buildAuthenticationResultDataset]（与二次确认页共用同一份，
             // 避免同语义两处实现再次漂移成「只回传成功、不回传数据集」）
+            // ISSUE-P3-298 ⑤：表单显式声明 OTP 框时按所选条目现算 TOTP 交付（仅 TOTP；
+            // HOTP 当前码不推进计数器，直填会给出与服务端不同步的旧值）
+            val otpId = readAutofillId(EXTRA_OTP_ID)
+            val otpCode = if (otpId != null) {
+                vaultRepository.calculateEntryTotp(entryId)
+                    ?.takeIf { !it.isHotp }?.code.orEmpty()
+            } else {
+                ""
+            }
             val dataset = buildAuthenticationResultDataset(
                 packageName = packageName,
                 menuTitle = credentials.username.ifBlank { getString(R.string.autofill_picker_title) },
@@ -288,7 +297,9 @@ class AutofillPickerActivity : FragmentActivity() {
                 username = credentials.username,
                 password = credentials.password,
                 usernameId = readAutofillId(EXTRA_USERNAME_ID),
-                passwordId = readAutofillId(EXTRA_PASSWORD_ID)
+                passwordId = readAutofillId(EXTRA_PASSWORD_ID),
+                otpId = otpId,
+                otpCode = otpCode
             )
             if (dataset == null) {
                 // 无可写字段（无目标框 / 凭据为空）：如实取消，绝不回传空数据集谎报成功
@@ -348,6 +359,9 @@ class AutofillPickerActivity : FragmentActivity() {
 
         /** 目标密码框（可为 null） */
         const val EXTRA_PASSWORD_ID = "com.keepasskey.app.autofill.EXTRA_PICKER_PASSWORD_ID"
+
+        /** ISSUE-P3-298 ⑤：目标 OTP 验证码框（可为 null——表单未显式声明时） */
+        const val EXTRA_OTP_ID = "com.keepasskey.app.autofill.EXTRA_PICKER_OTP_ID"
 
         /** ISSUE-P3-43：调用应用包名（字段签名输入之一，非敏感标识） */
         const val EXTRA_CALLING_PACKAGE = "com.keepasskey.app.autofill.EXTRA_PICKER_PACKAGE"

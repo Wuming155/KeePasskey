@@ -1208,6 +1208,16 @@
     <!-- %1$s = 验证码，%2$d = 剩余有效秒数（见 TotpNotificationPublisher） -->
     <string name="notification_totp_text">%1$s（%2$d 秒后失效）</string>
 
+    <!-- ===== ISSUE-P3-298 ④：后台同步失败通知（固定通用文案，不含库文件名等用户数据） ===== -->
+    <string name="notification_channel_sync_failure_name">同步异常</string>
+    <string name="notification_channel_sync_failure_desc">后台同步失败时的静默提醒；下一次同步成功后自动消失，可在系统设置中关闭</string>
+    <string name="notification_sync_failure_title">密码库同步失败</string>
+    <string name="notification_sync_failure_text">本次后台同步未完成，稍后将自动重试；点击打开应用查看详情</string>
+
+    <!-- ===== ISSUE-P3-298 ①：「打开方式」外部打开入口（固定通用文案，不含文件路径等） ===== -->
+    <string name="external_open_invalid">未识别到 KDBX 密码库文件，请在应用内通过「选择文件」打开</string>
+    <string name="external_open_failed">打开密码库失败，请确认文件可读后在应用内重试</string>
+
     <!-- ===== ISSUE-P3-21：建库密钥文件的一次性交付（丢失即无法解锁，必须明示） ===== -->
     <string name="db_picker_keyfile_generate_desc">将生成新的密钥文件作为第二因子；生成后必须立即保存到安全位置——丢失将无法再解锁本库</string>
     <string name="db_picker_keyfile_backup_title">请立即保存密钥文件</string>

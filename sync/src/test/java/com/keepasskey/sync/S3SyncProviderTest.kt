@@ -237,7 +237,11 @@ class S3SyncProviderTest {
     @Test
     fun `测试首传前置探测网络失败时快速失败不发无条件PUT`() = runTest {
         // F6 修复：expectedEtag 为空且 HEAD 探测遭遇非 404 失败（网络错误/5xx）时必须
-        // 快速失败——若退化为无条件 PUT，远端存在他人更新时将被静默覆盖
+        // 快速失败——若退化为无条件 PUT，远端存在他人更新时将被静默覆盖。
+        // ISSUE-P3-298 ③：HEAD 探测属幂等读，瞬时 5xx 先按请求级重试处理（耗尽退避），
+        // 但**最终语义不变**：重试耗尽后仍 fail-closed，绝无 PUT 发出。
+        server.enqueue(MockResponse().setResponseCode(500).setBody("Internal Server Error"))
+        server.enqueue(MockResponse().setResponseCode(500).setBody("Internal Server Error"))
         server.enqueue(MockResponse().setResponseCode(500).setBody("Internal Server Error"))
 
         val provider = S3SyncProvider(
@@ -252,9 +256,11 @@ class S3SyncProviderTest {
         val result = provider.upload("vault.kdbx", "data".toByteArray(), expectedEtag = null)
         assertTrue("探测失败必须 fail-fast: ${result.exceptionOrNull()}", result.isFailure)
         assertTrue(result.exceptionOrNull() is SyncException.ProtocolError)
-        // 仅 HEAD 探测，绝无 PUT 发出
+        // 重试耗尽（默认 3 次尝试），全部为 HEAD 探测，绝无 PUT 发出
         assertEquals("HEAD", server.takeRequest().method)
-        assertEquals(1, server.requestCount)
+        assertEquals("HEAD", server.takeRequest().method)
+        assertEquals("HEAD", server.takeRequest().method)
+        assertEquals(3, server.requestCount)
     }
 
     @Test

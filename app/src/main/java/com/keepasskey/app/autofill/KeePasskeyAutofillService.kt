@@ -147,6 +147,7 @@ class KeePasskeyAutofillService : AutofillService() {
         }
         val usernameId = targets.usernameId
         val passwordId = targets.passwordId
+        val otpId = targets.otpId
         val scanResult = targets.scanResult
 
         val responseBuilder = FillResponse.Builder()
@@ -160,6 +161,7 @@ class KeePasskeyAutofillService : AutofillService() {
         buildLockedUnlockDataset(
             usernameId = usernameId,
             passwordId = passwordId,
+            otpId = otpId,
             callingPkg = callingPkg,
             webDomain = scanResult.webDomain,
             inlineRequest = inlineRequest
@@ -179,6 +181,7 @@ class KeePasskeyAutofillService : AutofillService() {
             scanResult = scanResult,
             usernameId = usernameId,
             passwordId = passwordId,
+            otpId = otpId,
             inlineRequest = inlineRequest
         )
     }
@@ -215,49 +218,6 @@ class KeePasskeyAutofillService : AutofillService() {
             null -> false
         }
 
-    /** 表单目标框 + 字段级屏蔽后的可用 id；无可填充目标（或未通过屏蔽判定）时为 null */
-    private data class TargetFields(
-        val usernameId: AutofillId?,
-        val passwordId: AutofillId?,
-        val scanResult: ScanResult
-    )
-
-    private fun resolveTargetFields(structure: AssistStructure, callingPkg: String): TargetFields? {
-        val scanned = AutofillStructureScanner.scan(structure, callingPkg)
-        val parsedNodes = scanned.viewNodes
-
-        val scanResult = AutofillFieldScanner.scan(
-            scanned.scanNodes,
-            respectImportantForAutofill = !settingsStore.isOverrideNoAutofillEnabled()
-        )
-        val usernameParsed = scanResult.usernameId?.toIntOrNull()?.let { parsedNodes.getOrNull(it) }
-        val passwordParsed = scanResult.passwordId?.toIntOrNull()?.let { parsedNodes.getOrNull(it) }
-
-        val scannedUsernameId: AutofillId? = usernameParsed?.autofillId
-        val scannedPasswordId: AutofillId? = passwordParsed?.autofillId
-        if (scannedUsernameId == null && scannedPasswordId == null) return null
-
-        // ISSUE-P3-43 ②：字段签名级屏蔽——判定先于「库锁定引导」与任何数据集构建，
-        // 因此被屏蔽的框连解锁引导都不会收到（更保守）。签名的域取表单**自报**的
-        // scanResult.webDomain（用户屏蔽的是他当时看到的那个表单），
-        // 与后续用于凭据匹配的「归属校验后 webDomain」是两个独立用途，不可互替。
-        val fieldDecision = AutofillFieldBlockPolicy.decide(
-            hasUsernameField = scannedUsernameId != null,
-            hasPasswordField = scannedPasswordId != null
-        ) { role ->
-            autofillFieldBlocklistStore.isBlocked(callingPkg, scanResult.webDomain, role)
-        }
-        if (fieldDecision.blocksEntireForm) {
-            AppLog.i(TAG, "本表单字段已被用户逐字段屏蔽，拒绝下发数据集")
-            return null
-        }
-        return TargetFields(
-            usernameId = scannedUsernameId.takeIf { fieldDecision.allowUsername },
-            passwordId = scannedPasswordId.takeIf { fieldDecision.allowPassword },
-            scanResult = scanResult
-        )
-    }
-
     /** 库已解锁：候选数据集 + 手动搜索兜底入口 + SaveInfo，一次装配合并后回给框架 */
     private suspend fun deliverUnlockedResponse(
         responseBuilder: FillResponse.Builder,
@@ -266,6 +226,7 @@ class KeePasskeyAutofillService : AutofillService() {
         scanResult: ScanResult,
         usernameId: AutofillId?,
         passwordId: AutofillId?,
+        otpId: AutofillId?,
         inlineRequest: InlineSuggestionsRequest?
     ) {
         appendUnlockedDatasets(
@@ -274,6 +235,7 @@ class KeePasskeyAutofillService : AutofillService() {
             scanResult = scanResult,
             usernameId = usernameId,
             passwordId = passwordId,
+            otpId = otpId,
             inlineRequest = inlineRequest
         )
         // ISSUE-P3-40：手动搜索兜底入口
@@ -282,7 +244,8 @@ class KeePasskeyAutofillService : AutofillService() {
             callingPkg = callingPkg,
             scanResult = scanResult,
             usernameId = usernameId,
-            passwordId = passwordId
+            passwordId = passwordId,
+            otpId = otpId
         )
         // 注册 SaveInfo 以便在用户提交时捕获新账密
         applySaveInfoIfNeeded(
