@@ -7,31 +7,40 @@ import org.junit.Test
 import java.io.File
 
 /**
- * 测试调度器跨用例污染防护的**接线守卫**（`ISSUE-P3-189`；根因与路线见批次 §152 / §153）。
+ * 测试调度器跨用例污染防护的**接线守卫**（`ISSUE-P3-189`，根因与路线见批次 §152 / §153；
+ * 口径自 `ISSUE-P2-307` / §309 起由「只装不卸」修订为「**装新不卸**」）。
  *
  * 本条缺陷的形态是「**偶发红、位置随执行顺序漂移**」（§152 实测命中率 1/4）——跑几轮绿不构成修复证据，
  * 而漏防护的用例污染的是**别人**（表现为无关用例红）。故验收不靠多轮实跑，而靠静态扫描把口径锁成
  * 编译期可见的硬判据。本仓静态源码守卫先例：`AlgoHotPathGuardsTest`。
  *
- * **背景（路线①，§152 第 4 轮实测反证）**：`withContext(Dispatchers.Default)` 的块正常跑完后，
+ * **背景（路线① → §309 修订）**：`withContext(Dispatchers.Default)` 的块正常跑完后，
  * 回送结果给父协程时仍要访问父作用域的 `Dispatchers.Main`（`DispatchedCoroutine.afterResume` →
  * `safeIsDispatchNeeded` → `TestMainDispatcher.isDispatchNeeded`）。所以「先 cancel 再 `resetMain()`」
  * 只保证续体不被执行、**不保证不再访问 Main**，而 `resetMain()` 之后 Main 处于 absent 态、访问即抛，
  * 异常又落在真实线程上 ⇒ 记给下一个用例。口径因此改为**只装不卸**：Main 由每个用例的 `@Before`
  * 各自 `setMain(新实例)` 覆盖，永不卸载。
  *
- * 四条判据（断言前一律**剥离注释**，否则本文件与被守卫文件的 KDoc 引用会自造违例）：
+ * **§309 修订（装新不卸）**：`ISSUE-P2-307` 定位出「只装不卸」的残余危害——`@Before` 装的
+ * `StandardTestDispatcher` 会留给不装 Main 的后续类，依赖 `viewModelScope.launch` **实时执行**的用例
+ * 落进无人推进的死调度器 ⇒ 实时等待超时偶发假红。守卫 [tearDown][com.keepasskey.app.testutil.MainDispatcherGuard.tearDown]
+ * 故改为收尾**装新**（装新鲜 eager 默认 Main，仍绝不 `resetMain`）；运行期回归锁见
+ * `MainDispatcherGuardNormalizationTest`。
+ *
+ * 六条判据（断言前一律**剥离注释**，否则本文件与被守卫文件的 KDoc 引用会自造违例）：
  * 1. 守卫本体之外，`app/src/test` 不得出现 `Dispatchers.resetMain()`——一次 reset 就让整个 JVM 重新
  *    回到「absent 可抛」态，路线①即失效；
- * 2. 凡构造 ViewModel 的用例必须登记到 `MainDispatcherGuard.track(`（否则其在途作用域无人取消）；
- * 3. 凡登记到守卫的用例必须自行 `Dispatchers.setMain(`（安装与收尾两处必须同时存在）。
- *    > **已知残余（如实登记，不得当作已解决）**：路线①换掉的是「忘装 Main 会立刻抛错」这一检测。
- *    > 本批**不**强制「凡构造 ViewModel 者必须装 Main」——现不装 Main 的仓库面确实不触达 `Main`，
- *    > 而为它们装 `StandardTestDispatcher` 会一并改掉 `Main.immediate` 的**就地执行**语义（属行为改动）。
- *    > 残余后果：忘装 Main 时迟到回跳会落进**上一个**用例的调度器且无人推进 ⇒ 该用例多半因「工作没跑」
- *    > 而自身变红（仍会暴露，只是不再是干净的报错）。已作为残余登记 `ISSUE-P3-189`。
+ * 2. 凡构造 ViewModel 的用例必须登记到 `MainDispatcherGuard.track(`（否则其在途作用域无人取消）。
+ *    §309 起**不再以「有 setMain」为前提**——§153 残余「不装 Main 的仓库面不触达 Main」已被 autofill
+ *    两个测试类证伪（它们经 `viewModelScope` 触达 Main），前提不成立即闭合；
+ * 3. 凡登记到守卫的用例必须自行 `Dispatchers.setMain(`（安装与收尾两处必须同时存在）；
  * 4. 守卫内「取消作用域」必须早于任何 Main 生命周期操作，且不得出现 `try {` / `runCatching`
- *    （条目明令禁止的两种「掩盖污染而非修复」形态）。
+ *    （条目明令禁止的两种「掩盖污染而非修复」形态）；
+ * 5. 守卫收尾必须**装新**（`tearDown` 内存在 `Dispatchers.setMain(` 且位于取消之后）——「只装不卸」
+ *    原样会把死调度器留给后续类（`ISSUE-P2-307` 根因）；
+ * 6. 凡引用 `Dispatchers.Main` 的用例必须自行 `Dispatchers.setMain(`——这是「装新」修复后唯一剩余的
+ *    可污染面（不装 Main 而直接触达 Main 的类只能继承收尾默认态；该态已是 eager 初始等价态，但
+ *    依赖它属于隐式耦合，静态点名强制显式化）。
  */
 class MainDispatcherPollutionGuardTest {
 
@@ -42,8 +51,9 @@ class MainDispatcherPollutionGuardTest {
             relative(file) != GUARD && relative(file) != SELF && stripped(file).contains(RESET_CALL)
         }
         failIfNotEmpty(
-            "以下用例调用了 " + RESET_CALL + "。Main 采「只装不卸」口径（ISSUE-P3-189 路线①）：" +
-                "任何一次卸载都会让同 JVM 重新回到「访问即抛」态，迟到回跳即污染后续用例：\n",
+            "以下用例调用了 " + RESET_CALL + "。Main 采「装新不卸」口径（ISSUE-P3-189 路线①，" +
+                "ISSUE-P2-307 修订）：任何一次 reset 都会让同 JVM 重新回到「访问即抛」态，" +
+                "迟到回跳即污染后续用例：\n",
             offenders
         )
     }
@@ -52,8 +62,9 @@ class MainDispatcherPollutionGuardTest {
     fun `构造 ViewModel 的用例必须把实例登记到守卫`() {
         val offenders = testSources().filter { file ->
             val source = stripped(file)
-            source.contains("Dispatchers.setMain(") &&
-                VIEWMODEL_CONSTRUCTION.containsMatchIn(source) &&
+            // §309 起不再要求「有 setMain」为前提：§153 残余前提（不装 Main 的面不触达 Main）
+            // 已被 autofill 两个测试类证伪——它们经 viewModelScope 触达 Main 而从不 setMain
+            VIEWMODEL_CONSTRUCTION.containsMatchIn(source) &&
                 !source.contains("MainDispatcherGuard.track(")
         }
         failIfNotEmpty(
@@ -72,25 +83,55 @@ class MainDispatcherPollutionGuardTest {
                 !source.contains("Dispatchers.setMain(")
         }
         failIfNotEmpty(
-            "以下用例登记了作用域取消却未自行 Dispatchers.setMain()（「只装不卸」口径下装与卸必须同处守卫一侧发生）：",
+            "以下用例登记了作用域取消却未自行 Dispatchers.setMain()（「装新不卸」口径下装与卸必须同处守卫一侧发生）：",
             offenders
         )
     }
 
     @Test
     fun `守卫必须先取消作用域且不得吞掉收尾异常`() {
-        val source = readSource(GUARD)
+        // 断言前剥注释：守卫 KDoc 会引用判据字面量（try { / runCatching），原始扫描会自造违例
+        val source = stripped(guardFile)
         val cancelAt = source.indexOf(".cancel()")
         assertTrue("守卫须包含取消作用域这一步（定位失败即签名已变）", cancelAt >= 0)
         assertTrue(
             "守卫不得再卸载 Main（路线①）",
-            !source.lines()
-                .filterNot { it.trimStart().startsWith("*") || it.trimStart().startsWith("//") }
-                .any { it.contains(RESET_CALL) }
+            !source.contains(RESET_CALL)
         )
         assertTrue(
             "守卫不得以 try/catch 或 runCatching 吞掉收尾异常（那是掩盖污染而非修复）",
             !source.contains("runCatching") && !source.contains("try {")
+        )
+    }
+
+    @Test
+    fun `守卫收尾必须装新且装新晚于取消`() {
+        val source = stripped(guardFile)
+        val setMainAt = source.indexOf("Dispatchers.setMain(")
+        val cancelAt = source.indexOf(".cancel()")
+        assertTrue(
+            "守卫收尾必须为下一个用例装上新鲜默认 Main（ISSUE-P2-307：「只装不卸」原样会把 " +
+                "StandardTestDispatcher 死调度器留给不装 Main 的后续类）——tearDown 内应有 Dispatchers.setMain(",
+            setMainAt >= 0
+        )
+        assertTrue(
+            "守卫的「装新」必须发生在「取消作用域」之后（先终止在途工作、再换装 Main；顺序即语义）",
+            setMainAt > cancelAt
+        )
+    }
+
+    @Test
+    fun `引用 Main 的用例必须自行安装 Main 派发器`() {
+        val offenders = testSources().filter { file ->
+            val source = stripped(file)
+            relative(file) != GUARD && relative(file) != SELF &&
+                source.contains(MAIN_REFERENCE) &&
+                !source.contains("Dispatchers.setMain(")
+        }
+        failIfNotEmpty(
+            "以下用例引用了 Dispatchers.Main 却未自行 Dispatchers.setMain()——它将静默继承上一个用例" +
+                "（或守卫收尾默认态）的派发器；显式安装是「装新不卸」口径下唯一被允许的 Main 获取方式：\n",
+            offenders
         )
     }
 
@@ -126,8 +167,17 @@ class MainDispatcherPollutionGuardTest {
         const val GUARD = "app/src/test/java/com/keepasskey/app/testutil/MainDispatcherGuard.kt"
         const val SELF = "app/src/test/java/com/keepasskey/app/quality/MainDispatcherPollutionGuardTest.kt"
 
+        /** 守卫文件（判据四 / 五对它逐字符断言；经 [stripped] 剥注释后扫描） */
+        private val guardFile: File by lazy { File(repositoryRoot, GUARD) }
+
         /** 拼接而成：本类自身源码若含完整字面量，扫描会自造违例（规则 1 的误报源） */
         val RESET_CALL = "Dispatchers." + "resetMain()"
+
+        /**
+         * 拼接而成（同 [RESET_CALL] 的自造违例防御）：「引用 Main」的判据字面量。
+         * `Dispatchers.setMain(` 不含该子串（setMain 的 set 不匹配），无交叉误报。
+         */
+        val MAIN_REFERENCE = "Dispatchers." + "Main"
 
         /** 形如 `val viewModel = EntryDetailViewModel(` 的直接构造点 */
         val VIEWMODEL_CONSTRUCTION = Regex("=\\s*[A-Z]\\w*ViewModel\\(")

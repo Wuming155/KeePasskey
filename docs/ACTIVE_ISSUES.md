@@ -41,20 +41,9 @@
 
 ---
 
-## P2 中危缺陷与协议/测试缺口（1 项）
+## P2 中危缺陷与协议/测试缺口（0 项）
 
-### ISSUE-P2-307：选择器缓存三例**非确定性失败**（全量套件偶发红、隔离与成对跑皆绿）——测试有效性缺口
-
-- **核实时间点**：2026-09-24（`ISSUE-P3-301` 批次全量回归中偶发出现；复跑同一命令即绿，无代码变更）。
-- **核实方式**：
-  1. **现象**：`.\gradlew.bat test --max-workers=1` 一次运行报 3 例红——`AutofillPickerViewModelCredentialLookupTest.选择器页缓存命中时不回查仓库单条`（`expected:<0> but was:<1>`）、`AutofillPickerViewModelSessionLockTest.会话锁定后选择器缓存条目被清空`（`测试前提：选择器应已缓存条目`）、`AutofillPickerViewModelSessionLockTest.锁定竞态下读取已清零条目_search与用户名按空降级而非崩溃`（`expected:<1> but was:<0>`）；同一命令**原地复跑即 BUILD SUCCESSFUL（`tests=2688 failures=0`）**，期间无任何代码改动。
-  2. **隔离**：`--tests "com.keepasskey.app.autofill.AutofillPickerViewModel*"` 单跑 **BUILD SUCCESSFUL**。
-  3. **成对**：与最可疑的邻居 `com.keepasskey.app.sync.SyncAssemblyOffMainThreadTest` 同批跑 **BUILD SUCCESSFUL**（该测试文件的 `HEAD` 版与待提交版**两种都试过，皆绿**）⇒ 「与该文件同分叉即失败」的假设**未成立**。
-  4. **未定位**：失败无堆栈归因（皆为断言差异），未取得可复现的最小条件。
-- **背景与根因（**待定位**，以下为假设而非结论）**：`SyncAssemblyOffMainThreadTest` 的 `tearDown` 按 `ISSUE-P3-189` 路线①采用「**只装不卸**」口径（不调 `resetMain`，仅走 `MainDispatcherGuard`），即该测试类结束后 JVM 内的 `Dispatchers.Main` 仍是它安装的 `TestDispatcher`。若同分叉内后续测试类**依赖真实 Main**（未自行 `setMain`），其挂起工作可能永不推进 ⇒ 呈现为「缓存应命中却未命中 / 应已缓存却为空」一类断言差异，与本次 3 例的形态吻合。**但该假设未获证据支持**（第 3 步成对实验即为否证尝试）。
-- **后果**：CI 会出现**与代码无关的假红**，侵蚀「红=真问题」的信号价值（与 `ISSUE-P3-305` 的红态长期化属不同面：那是门禁恒红，这是偶发假红）。
-- **涉及文件**：`app/src/test/java/com/keepasskey/app/autofill/AutofillPickerViewModelCredentialLookupTest.kt`、`app/src/test/java/com/keepasskey/app/autofill/AutofillPickerViewModelSessionLockTest.kt`；高度相关：`app/src/test/java/com/keepasskey/app/sync/SyncAssemblyOffMainThreadTest.kt`（Main「只装不卸」）与其依赖的 `MainDispatcherGuard`；`app/src/test/java/com/keepasskey/app/testutil/MainDispatcherGuard.kt`。
-- **验收标准**：AC① **先定位**：取得可复现的最小条件（建议手段：`--max-workers=1` 固定分叉 + 逐类二分加入，或在 `MainDispatcherGuard` 记录「装上 / 卸下」事件并断言套件结束时 Main 已复位）；AC② 定位后**修根因**（`resetMain` 口径的取舍须一次性贯通，禁只给单个用例打补丁）；AC③ 若根因确为 Main 泄漏，须评估 `ISSUE-P3-189` 路线①的既有裁决是否需修订，并同步该裁决的登记处；AC④ 未定位前**不得**以下调断言强度 / 加 `@Ignore` / 放宽比较的方式让套件变绿（假绿比假红更危险）；AC⑤ 补一条守卫：套件级断言「测试结束时 `Dispatchers.Main` 已复位或与初始一致」，使同类泄漏当场可见。
+> **暂无开放项**。
 
 ---
 

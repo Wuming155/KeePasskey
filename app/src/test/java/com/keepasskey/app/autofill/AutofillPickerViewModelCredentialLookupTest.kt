@@ -2,15 +2,21 @@ package com.keepasskey.app.autofill
 
 import com.keepasskey.app.data.repository.FakeVaultRepository
 import com.keepasskey.app.data.repository.VaultRepository
+import com.keepasskey.app.testutil.MainDispatcherGuard
 import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.core.security.ProtectedString
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.setMain
 import kotlinx.coroutines.withContext
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Test
 
 /**
@@ -31,7 +37,25 @@ import org.junit.Test
  *
  * 口令仍只经既有按需解密通道（[VaultRepository.getEntryPasswordChars]）取得。
  */
+@OptIn(ExperimentalCoroutinesApi::class)
 class AutofillPickerViewModelCredentialLookupTest {
+
+    /**
+     * `ISSUE-P2-307`：本类三个用例均构造 ViewModel 并依赖 `viewModelScope.launch` 的**实时执行**
+     * （下方 `awaitEntries` 的实时等待模式）——必须显式装 eager Main（[UnconfinedTestDispatcher]，
+     * 与新 JVM 的 ServiceLoader 初始态等价），不得继承上一个测试类「装而不卸」遗留的
+     * `StandardTestDispatcher`（无人推进 ⇒ 实时等待超时 ⇒ 本文件三连假红的根因）。
+     * 收尾走守卫「装新不卸」（不调 `resetMain`，见 `MainDispatcherGuard` 类 KDoc）。
+     */
+    @Before
+    fun setUp() {
+        Dispatchers.setMain(UnconfinedTestDispatcher())
+    }
+
+    @After
+    fun tearDown() {
+        MainDispatcherGuard.tearDown()
+    }
 
     @Test
     fun `确认路径不装载整库投影_且仍取到用户名与口令`() = runBlocking {
@@ -54,7 +78,7 @@ class AutofillPickerViewModelCredentialLookupTest {
         }
 
         // 确认页形态：VM 按需创建，**从不**调用 loadEntries（该页不做整库装载）
-        val viewModel = AutofillPickerViewModel(repository)
+        val viewModel = MainDispatcherGuard.track(AutofillPickerViewModel(repository))
         val credentials = viewModel.resolveCredentials(entryUuid.toHexString())
 
         assertEquals("用户名须经单条查询取回（不得只依赖缓存）", TEST_USERNAME, credentials?.username)
@@ -81,7 +105,7 @@ class AutofillPickerViewModelCredentialLookupTest {
         }
 
         // 选择器页形态：显式发起整库装载（搜索用），之后选中条目
-        val viewModel = AutofillPickerViewModel(repository)
+        val viewModel = MainDispatcherGuard.track(AutofillPickerViewModel(repository))
         viewModel.loadEntries()
         awaitEntries(viewModel)
 
@@ -103,7 +127,7 @@ class AutofillPickerViewModelCredentialLookupTest {
             override suspend fun getEntryPasswordChars(entryId: String): CharArray? = null
         }
 
-        val viewModel = AutofillPickerViewModel(repository)
+        val viewModel = MainDispatcherGuard.track(AutofillPickerViewModel(repository))
         val credentials = viewModel.resolveCredentials(KdbxUuid.random().toHexString())
 
         assertEquals("条目不可读 ⇒ 空用户名降级", "", credentials?.username)

@@ -2,16 +2,22 @@ package com.keepasskey.app.autofill
 
 import com.keepasskey.app.data.repository.FakeVaultRepository
 import com.keepasskey.app.data.repository.VaultRepository
+import com.keepasskey.app.testutil.MainDispatcherGuard
 import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.core.security.ProtectedString
 import com.keepasskey.database.session.DatabaseSession
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.setMain
 import kotlinx.coroutines.withContext
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Test
 
 /**
@@ -23,12 +29,29 @@ import org.junit.Test
  * - 清零与通知之间存在固有竞态窗口：`search` / `resolveCredentials` 的非敏感字段读取
  *   必须 fail-safe（空结果 / 空用户名），不得让锁定竞态演变为选择器崩溃。
  */
+@OptIn(ExperimentalCoroutinesApi::class)
 class AutofillPickerViewModelSessionLockTest {
+
+    /**
+     * `ISSUE-P2-307`：本类用例依赖 `viewModelScope.launch` 的**实时执行**（下方实时等待模式）——
+     * 必须显式装 eager Main（[UnconfinedTestDispatcher]，与新 JVM 的 ServiceLoader 初始态等价），
+     * 不得继承上一个测试类「装而不卸」遗留的 `StandardTestDispatcher`（无人推进 ⇒ 实时等待超时
+     * ⇒「测试前提：选择器应已缓存条目」类假红的根因）。收尾走守卫「装新不卸」。
+     */
+    @Before
+    fun setUp() {
+        Dispatchers.setMain(UnconfinedTestDispatcher())
+    }
+
+    @After
+    fun tearDown() {
+        MainDispatcherGuard.tearDown()
+    }
 
     @Test
     fun `会话锁定后选择器缓存条目被清空`() {
         val session = DatabaseSession()
-        val vm = AutofillPickerViewModel(FakeVaultRepository(), session)
+        val vm = MainDispatcherGuard.track(AutofillPickerViewModel(FakeVaultRepository(), session))
         // ISSUE-P3-148：整库装载不再于 init 自动发生，改由选择器页显式发起（本用例模拟该页）
         vm.loadEntries()
 
@@ -63,7 +86,7 @@ class AutofillPickerViewModelSessionLockTest {
         val repo = object : VaultRepository by FakeVaultRepository() {
             override suspend fun getKdbxEntries(): List<KdbxEntry> = listOf(clearedEntry)
         }
-        val vm = AutofillPickerViewModel(repo, null)
+        val vm = MainDispatcherGuard.track(AutofillPickerViewModel(repo, null))
         // ISSUE-P3-148：显式触发整库装载（选择器页路径）
         vm.loadEntries()
 
