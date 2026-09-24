@@ -36,10 +36,18 @@ internal suspend fun SyncCycleRunner.handleRemoteSynced(
     openResult: SyncOpenResult.RemoteSynced
 ): SyncOutcome {
     if (openResult.remoteBytes.contentEquals(ctx.localBytes)) {
+        // ISSUE-P2-308：内容与本轮本地字节一致也必须结算——交付缓存并把基线前移到远端 ETag，
+        // 否则基线滞留旧值、每轮都重新下载
+        openResult.adoption?.accept()
         session.lastSyncedDb = databaseSession.databaseFlow.value
         return SyncOutcome.UpToDate
     }
     if (ctx.isDirty || ctx.hasLocalContentChanged) {
+        // ISSUE-P2-308：转入三方合并——远端字节已完整持有（openResult.remoteBytes），
+        // 下载回执弃置、基线保持原状；合并上传成功后由 markResolvedAndUpload 前移基线。
+        // 此前基线在进入本分支前已被引擎前移到远端内容，合并失败后将触发
+        // 「本地陈旧树本地赢上传」静默覆盖他端改动
+        openResult.adoption?.reject()
         // F1 修复：本地存在未同步修改（缓存被回收导致步骤 3 快速提交被跳过时
         // 尤其危险——Android 官方文档明确 cacheDir 会在存储不足时被系统自动
         // 回收，读取前必须检查存在性）。判据用 isDirty || hasLocalContentChanged：
@@ -72,14 +80,23 @@ internal suspend fun SyncCycleRunner.handleRemoteSynced(
     // 严禁静默接管（窗口内编辑会从内存与文件同时消失）。下一轮同步按冲突流程收敛。
     return when (codec.loadAndApplyRemoteBytes(openResult.remoteBytes, ctx.localDbSnapshot)) {
         SyncDatabaseCodec.ApplyRemoteResult.APPLIED -> {
+            // ISSUE-P2-308：采纳确认（远端树已落库且保存成功）后才落地基线三步
+            openResult.adoption?.accept()
             session.lastSyncedDb = databaseSession.databaseFlow.value
             SyncOutcome.UpToDate
         }
-        SyncDatabaseCodec.ApplyRemoteResult.SESSION_DIVERGED ->
+        SyncDatabaseCodec.ApplyRemoteResult.SESSION_DIVERGED -> {
+            // ISSUE-P2-308：采纳失败 ⇒ 基线保持原状不前移，下轮同步重新下载重试
+            openResult.adoption?.reject()
             SyncOutcome.Error(strings.get(R.string.sync_error_local_changed_during_sync))
+        }
         SyncDatabaseCodec.ApplyRemoteResult.PARSE_FAILED,
-        SyncDatabaseCodec.ApplyRemoteResult.SAVE_FAILED ->
+        SyncDatabaseCodec.ApplyRemoteResult.SAVE_FAILED -> {
+            // ISSUE-P2-308：同上——采纳失败不前移基线（整改前 base 已前移且无回滚，
+            // 陈旧内存树会在下轮被 contentEquals 短路记为 lastSyncedDb 并整库覆盖远端）
+            openResult.adoption?.reject()
             SyncOutcome.Error(strings.get(R.string.sync_error_load_remote_failed))
+        }
     }
 }
 

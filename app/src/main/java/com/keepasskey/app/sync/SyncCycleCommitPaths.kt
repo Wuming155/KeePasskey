@@ -39,6 +39,8 @@ internal suspend fun SyncCycleRunner.establishRemoteBaselineIfMissing(
             val uploadResult = syncEngine.commitLocal(remotePath, localBytes, remoteExists = false)
             return when (uploadResult) {
                 is SyncCommitResult.Uploaded -> {
+                    // ISSUE-P2-308：首传内容即当前会话库内容，采纳已隐式完成，立即落地基线
+                    uploadResult.settlement?.accept()
                     session.lastSyncedDb = databaseSession.databaseFlow.value
                     SyncOutcome.UploadedLocal
                 }
@@ -84,10 +86,16 @@ internal suspend fun SyncCycleRunner.tryFastCommitPath(
             // H3 整改：缓存已上传云端但本地正式文件保存失败时如实报错，不再静默
             val saveResult = databaseSession.save()
             if (saveResult is KdbxResult.Failure) {
+                // ISSUE-P2-308：本地落盘（采纳确认）失败 ⇒ 基线保持原状不前移。
+                // 整改前基线已随上传前移，进程死亡后重启将以旧正式文件内容
+                // 整库「本地赢」覆盖远端（他端改动丢失）
+                commitResult.settlement?.reject()
                 return SyncOutcome.Error(
                     strings.get(R.string.sync_error_remote_updated_local_save_failed, saveResult.message)
                 )
             }
+            // ISSUE-P2-308：采纳确认（落盘成功）后落地基线前移与高水位记录
+            commitResult.settlement?.accept()
             session.lastSyncedDb = databaseSession.databaseFlow.value
             SyncOutcome.UploadedLocal
         }

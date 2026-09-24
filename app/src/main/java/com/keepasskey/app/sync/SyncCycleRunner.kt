@@ -252,8 +252,10 @@ class SyncCycleRunner @Inject constructor(
                 val engine = SyncEngine(provider, syncCache, rollbackGuard)
                 engine.isOffline = session.isOfflineMode
                 session.lastSyncEngine = engine
-                when (engine.commitLocalForce(remotePath, localBytes)) {
+                when (val takeoverCommit = engine.commitLocalForce(remotePath, localBytes)) {
                     is SyncCommitResult.Uploaded -> {
+                        // ISSUE-P2-308：上传内容即当前会话库内容，采纳已隐式完成，立即落地基线
+                        takeoverCommit.settlement?.accept()
                         session.lastSyncedDb = databaseSession.databaseFlow.value
                         SyncOutcome.UploadedLocal
                     }

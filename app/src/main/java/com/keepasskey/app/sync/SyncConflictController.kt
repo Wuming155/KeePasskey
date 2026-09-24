@@ -154,10 +154,12 @@ class SyncConflictController @Inject constructor(
         }
         ConflictDisposition.TakeLocal -> {
             debugLog.warn(SYNC_LOG_TAG, "冲突解决策略=以本地为准：本地版本覆盖云端")
-            when (syncEngine.commitLocalForce(remotePath, localBytes)) {
+            when (val forcedCommit = syncEngine.commitLocalForce(remotePath, localBytes)) {
                 is SyncCommitResult.Uploaded -> {
                     val saveResult = databaseSession.save()
                     if (saveResult is KdbxResult.Failure) {
+                        // ISSUE-P2-308：落盘（采纳确认）失败 ⇒ 基线保持原状不前移，下轮重试
+                        forcedCommit.settlement?.reject()
                         SyncOutcome.Error(
                             strings.get(
                                 R.string.sync_error_remote_updated_local_save_failed,
@@ -165,6 +167,8 @@ class SyncConflictController @Inject constructor(
                             )
                         )
                     } else {
+                        // ISSUE-P2-308：采纳确认（落盘成功）后落地基线前移
+                        forcedCommit.settlement?.accept()
                         session.lastSyncedDb = databaseSession.databaseFlow.value
                         SyncOutcome.UploadedLocal
                     }

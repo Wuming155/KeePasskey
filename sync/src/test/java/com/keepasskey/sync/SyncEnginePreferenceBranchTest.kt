@@ -55,6 +55,8 @@ class SyncEnginePreferenceBranchTest {
         assertTrue(result is SyncCommitResult.Uploaded)
         assertNull("强制路径严禁携带乐观锁预条件", provider.lastExpectedEtag)
         assertArrayEquals("本地版本必须覆盖远端", localBytes, provider.remoteFiles[remotePath]?.data)
+        // ISSUE-P2-308：基线前移随采纳确认结算，模拟 app 层落盘成功
+        (result as SyncCommitResult.Uploaded).settlement!!.accept()
         assertTrue("基线须前移（否则下次同步会重复上传）", !syncCache.hasLocalChanges(remotePath))
     }
 

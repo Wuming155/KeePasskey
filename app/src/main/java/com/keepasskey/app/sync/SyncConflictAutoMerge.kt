@@ -159,12 +159,22 @@ internal suspend fun autoMergeAndUpload(
                 is SyncCommitResult.Uploaded -> {
                     // 远端已回退到基线内容：合并产物上传成功 ⇒ 与既有成功分支同语义采纳
                     // ISSUE-P2-278：412 重试的网络窗口同样在守卫覆盖内，采纳前再校验一次
-                    if (!adoptMergedIfSessionUnchanged()) return@withContext abortDiverged()
+                    if (!adoptMergedIfSessionUnchanged()) {
+                        // ISSUE-P2-308：采纳失败 ⇒ 基线保持原状不前移，下轮按冲突流程收敛
+                        fresh.settlement?.reject()
+                        return@withContext abortDiverged()
+                    }
                     val saveResult = databaseSession.save()
                     eraseDiscardedParseResults(
                         localDb, localDbOwned, remoteDb, trustedBase, mergedDb = null,
                         live = databaseSession.databaseFlow.value
                     )
+                    // ISSUE-P2-308：采纳确认（落库成功）后落地基线前移；落盘失败则保持原状
+                    if (saveResult is KdbxResult.Failure) {
+                        fresh.settlement?.reject()
+                    } else {
+                        fresh.settlement?.accept()
+                    }
                     AutoMergeUploadResult.Completed(
                         if (saveResult is KdbxResult.Failure) {
                             SyncOutcome.Error(

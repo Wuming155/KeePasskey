@@ -219,6 +219,62 @@ class SyncMidCycleEditGuardTest {
             assertFalse("中止时不得把过期合并产物推上云端: $remoteTitles", "本地新增" in remoteTitles)
         }
 
+    @Test
+    fun `采纳失败后第三轮重试：对端新增条目不被本地陈旧树覆盖（ISSUE-P2-308 AC②）`() =
+        runTest(testDispatcher) {
+            val fx = newFixture("adoptretry")
+            createVault(fx, "adoptretry")
+
+            // 第一轮：建立远端基线与本地缓存（远端内容 = L0）
+            val baseline = fx.cycle.runSyncCycle()
+            assertTrue("首轮应建立基线: $baseline", baseline is SyncOutcome.UploadedLocal)
+
+            // 远端推进到 L1（对端新增「远端新增」条目；会话树保持 L0 不动）
+            val l0 = fx.databaseSession.databaseFlow.value!!
+            val remoteEntry = entry("远端新增")
+            val l1Bytes = fx.codec.serializeLocalDatabase(
+                l0.copy(rootGroup = l0.rootGroup.copy(entries = l0.rootGroup.entries + remoteEntry))
+            )!!
+            fx.provider.upload(fx.remotePath, l1Bytes, null)
+
+            // 第二轮：下载窗口内注入「用户编辑并保存」⇒ 校验-采用如实中止（SESSION_DIVERGED）
+            val midCycleEdit = entry("窗口内编辑")
+            fx.provider.onNextDownload = {
+                fx.databaseSession.saveEntry(midCycleEdit)
+                fx.databaseSession.save()
+            }
+            val diverged = fx.cycle.runSyncCycle()
+            assertTrue("采纳失败必须如实中止: $diverged", diverged is SyncOutcome.Error)
+
+            // 第三轮（AC②）：重试必须不丢失对端数据——整改前基线已在第二轮前移到远端内容，
+            // 本轮会以「本地陈旧树 + 窗口内编辑」本地赢整库上传，把对端新增条目从云端抹掉；
+            // 整改后基线未动，本轮按冲突三方合并收敛
+            val outcome = fx.cycle.runSyncCycle()
+            assertTrue(
+                "第三轮应按冲突合并收敛成功: $outcome",
+                outcome is SyncOutcome.MergedAndUploaded || outcome is SyncOutcome.UploadedLocal
+            )
+
+            val remoteTitles = titlesOf(
+                com.keepasskey.database.file.KdbxFile.load(
+                    fx.provider.remoteBytes(fx.remotePath).inputStream(),
+                    "MidCycleGuard#2026".toCharArray(),
+                    null
+                )
+            )
+            assertTrue(
+                "对端新增条目不得被本地陈旧树覆盖: $remoteTitles",
+                "远端新增" in remoteTitles
+            )
+            assertTrue("本地窗口内编辑不得丢失: $remoteTitles", "窗口内编辑" in remoteTitles)
+
+            val sessionTitles = titlesOf(fx.databaseSession.databaseFlow.value)
+            assertTrue(
+                "会话树应收敛到含双方改动的合并结果: $sessionTitles",
+                "远端新增" in sessionTitles && "窗口内编辑" in sessionTitles
+            )
+        }
+
     /** 进程内假 Provider：支持「下一次下载前注入一次动作」的窗口编辑钩子。 */
     private class MidCycleEditProvider : SyncProvider {
 

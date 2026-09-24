@@ -16,12 +16,18 @@ import kotlinx.coroutines.withContext
  */
 class SyncEngine(
     private val provider: SyncProvider,
-    private val cache: SyncCache,
+    /**
+     * 三哈希缓存。`ISSUE-P2-308` 起由 `private` 放宽为 `internal`（仅同模块可见）：
+     * 延迟落地结算句柄 [DeferredBaselineSettlement]（同包协作类）须在其 accept() 内
+     * 前移基线——口径同 `SyncCycleRunner` / `SyncConflictController` 的既有放宽先例。
+     */
+    internal val cache: SyncCache,
     /**
      * 防回滚守卫（ISSUE-P2-18）：由 app 层以 AndroidKeystore HMAC 认证实现注入；
      * 默认 null 表示未接线（行为与接线前逐字节一致，既有单测不受影响）。
+     * `ISSUE-P2-308` 起由 `private` 放宽为 `internal`（同上，供结算句柄记录高水位）。
      */
-    private val rollbackGuard: SyncRollbackGuard? = null
+    internal val rollbackGuard: SyncRollbackGuard? = null
 ) {
     val events = MutableSharedFlow<SyncCacheEvent>(replay = 16, extraBufferCapacity = 64)
 
@@ -45,8 +51,12 @@ class SyncEngine(
         recordAccepted(remotePath, SyncCache.sha256Hex(bytes))
     }
 
-    /** 同上，摘要由调用方提供（须为内容的 SHA-256 十六进制小写摘要）。 */
-    private fun recordAccepted(remotePath: String, contentDigest: String) {
+    /**
+     * 同上，摘要由调用方提供（须为内容的 SHA-256 十六进制小写摘要）。
+     * `ISSUE-P2-308` 起由 `private` 放宽为 `internal`：延迟落地结算句柄（同包协作类）
+     * 在采纳确认后调用，单一实现不复制。
+     */
+    internal fun recordAccepted(remotePath: String, contentDigest: String) {
         rollbackGuard?.recordAccepted(remotePath, contentDigest)
     }
 
@@ -81,6 +91,10 @@ class SyncEngine(
      * 4. 本地有修改且 base != 远端 -> [SyncOpenResult.ConflictDetected]
      * 5. 远端 404 且有缓存 -> 上传恢复 -> [SyncOpenResult.RemoteLostRestored]
      * 6. 网络错误且有缓存 -> [SyncOpenResult.RemoteUnreachableUsingCache]
+     *
+     * ISSUE-P2-308：分支 1 / 2 的「基线三步」（缓存交付 / updateBase / writeBaseContent /
+     * recordAccepted）**不在本方法内落地**，随 [SyncOpenResult.RemoteSynced.adoption] 延后到
+     * app 层采纳确认之后结算；分支 3 / 5 上传的是本地既有内容、无采纳窗口，基线照常即时前移。
      *
      * 远端一致性双通道裁决：ETag 可用时按乐观锁比对（零下载）；
      * 无 ETag 服务器（部分极简 WebDAV 不返回 ETag）回退内容哈希裁决——
@@ -170,11 +184,17 @@ class SyncEngine(
         }
 
         val remoteBytes = receipt.readBytes()
-        receipt.commit()
-        advanceBaseAndPersist(cache, remotePath, meta.etag, receipt.digest, remoteBytes)
-        recordAccepted(remotePath, receipt.digest)
-        events.tryEmit(SyncCacheEvent.LoadedFromRemoteInSync(remotePath))
-        return SyncOpenResult.RemoteSynced(remoteBytes, meta.etag)
+        // ISSUE-P2-308：基线三步延后——回执 tmp 暂不交付、基线不前移、高水位不记录；
+        // app 层采纳确认后经结算句柄 accept() 落地，采纳失败 reject() 弃置 tmp，
+        // 下轮同步重新下载重试（重试不构成重放：digest 尚未进入已接受历史）
+        return SyncOpenResult.RemoteSynced(
+            remoteBytes,
+            meta.etag,
+            DeferredBaselineSettlement(
+                this@SyncEngine, remotePath, receipt, remoteBytes, receipt.digest, meta.etag,
+                SyncCacheEvent.LoadedFromRemoteInSync(remotePath)
+            )
+        )
     }
 
     /**
@@ -231,13 +251,17 @@ class SyncEngine(
             return SyncOpenResult.RollbackRejected(remoteBytes, remoteEtag)
         }
         val remoteBytes = receipt.readBytes()
-        receipt.commit()
-        val newHash = receipt.digest
-        cache.updateBase(remotePath, newHash, remoteEtag)
-        cache.writeBaseContent(remotePath, remoteBytes)
-        recordAccepted(remotePath, newHash)
-        events.tryEmit(SyncCacheEvent.UpdatedCachedFileOnLoad(remotePath))
-        return SyncOpenResult.RemoteSynced(remoteBytes, remoteEtag)
+        // ISSUE-P2-308：基线三步延后（同 openUncached）——此前 base 在「app 采纳」之前即已
+        // 前移并写盘，采纳失败（PARSE_FAILED / SAVE_FAILED / SESSION_DIVERGED）后引擎无回滚，
+        // 下轮同步将以本地陈旧树整库上传覆盖他端改动
+        return SyncOpenResult.RemoteSynced(
+            remoteBytes,
+            remoteEtag,
+            DeferredBaselineSettlement(
+                this@SyncEngine, remotePath, receipt, remoteBytes, receipt.digest, remoteEtag,
+                SyncCacheEvent.UpdatedCachedFileOnLoad(remotePath)
+            )
+        )
     }
 
     /**
@@ -326,8 +350,7 @@ class SyncEngine(
      * 冲突后下载远端内容失败时，严禁以空字节伪造冲突远端——本地缓存已安全保留，
      * 如实返回 [SyncCommitResult.RemoteUnreachable]，待网络恢复后重新同步触发完整冲突流程；
      * 普通网络失败同样保留本地缓存并返回 [SyncCommitResult.RemoteUnreachable]。
-     */
-    suspend fun commitLocal(
+     */    suspend fun commitLocal(
         remotePath: String,
         localBytes: ByteArray,
         remoteExists: Boolean? = null
@@ -347,9 +370,14 @@ class SyncEngine(
         val uploadResult = provider.uploadAtomic(remotePath, localBytes, expectedEtag, remoteExists)
         if (uploadResult.isSuccess) {
             val newEtag = uploadResult.getOrThrow()
-            advanceBaseAndPersist(cache, remotePath, newEtag, localHash, localBytes)
-            recordAccepted(remotePath, localBytes)
-            SyncCommitResult.Uploaded(newEtag)
+            // ISSUE-P2-308：基线前移延后到 app 层采纳确认（本地落盘保存成功）之后；
+            // 落盘失败 reject() ⇒ 基线保持原状，缓存工作副本（步骤 1）保留本次内容供下轮重试
+            SyncCommitResult.Uploaded(
+                newEtag,
+                DeferredBaselineSettlement(
+                    this@SyncEngine, remotePath, null, localBytes, localHash, newEtag, null
+                )
+            )
         } else {
             val ex = uploadResult.exceptionOrNull()
             if (ex is SyncException.ConflictError) {
@@ -415,9 +443,13 @@ class SyncEngine(
         val uploadResult = provider.uploadAtomic(remotePath, localBytes, expectedEtag = null)
         if (uploadResult.isSuccess) {
             val newEtag = uploadResult.getOrThrow()
-            advanceBaseAndPersist(cache, remotePath, newEtag, localHash, localBytes)
-            recordAccepted(remotePath, localBytes)
-            SyncCommitResult.Uploaded(newEtag)
+            // ISSUE-P2-308：与 commitLocal 同口径——基线前移延后到采纳确认之后
+            SyncCommitResult.Uploaded(
+                newEtag,
+                DeferredBaselineSettlement(
+                    this@SyncEngine, remotePath, null, localBytes, localHash, newEtag, null
+                )
+            )
         } else {
             val ex = uploadResult.exceptionOrNull()
             events.tryEmit(SyncCacheEvent.CouldntSaveToRemote(remotePath, ex))

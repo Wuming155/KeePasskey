@@ -5,6 +5,7 @@ import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.database.file.KdbxDatabase
+import com.keepasskey.sync.engine.RemoteAdoptionSettlement
 import com.keepasskey.sync.engine.SyncCache
 import com.keepasskey.sync.engine.SyncCommitResult
 import com.keepasskey.sync.engine.SyncEngine
@@ -136,8 +137,17 @@ private fun SyncConflictController.collectResolvedByParent(
     return resolvedByParent
 }
 
-/** 云端已接收合并版本后的本地采纳与落盘。 */
-private suspend fun SyncConflictController.adoptMergedDatabase(mergedDb: KdbxDatabase): SyncOutcome {
+/**
+ * 云端已接收合并版本后的本地采纳与落盘。
+ *
+ * ISSUE-P2-308：[settlement] 非 null（commitLocal 重入路径）时基线前移随采纳结论结算——
+ * 校验-采用失败或落盘失败 reject（基线保持原状，下轮按冲突流程收敛），全部成功 accept。
+ * null（markResolvedAndUpload 主路径，其基线前移仍在引擎内即时落地）保持既有行为。
+ */
+private suspend fun SyncConflictController.adoptMergedDatabase(
+    mergedDb: KdbxDatabase,
+    settlement: RemoteAdoptionSettlement? = null
+): SyncOutcome {
     // ISSUE-P2-278：采纳前「校验-采用」——上传的网络往返窗口内会话仍可能被本地编辑
     // 替换（resolveConflicts 入口校验之后的残余窗口），此时合并产物已不覆盖该编辑，
     // 静默整树替换将使其从内存与文件同时消失 ⇒ 如实中止，下轮同步按冲突流程收敛。
@@ -146,6 +156,7 @@ private suspend fun SyncConflictController.adoptMergedDatabase(mergedDb: KdbxDat
         databaseSession.adoptDatabaseIfUnchanged(sessionSnapshot, mergedDb)
     if (!adopted) {
         // 未采用：合并产物与待决树全部失去持有者，按身份集合判定擦除（不含会话快照别名）
+        settlement?.reject()
         eraseSupersededPendingTrees(mergedDb)
         clearPendingConflictSession()
         return SyncOutcome.Error(strings.get(R.string.sync_error_local_changed_during_sync))
@@ -154,10 +165,13 @@ private suspend fun SyncConflictController.adoptMergedDatabase(mergedDb: KdbxDat
     val saveResult = databaseSession.save()
     clearPendingConflictSession()
     return if (saveResult is KdbxResult.Failure) {
+        // ISSUE-P2-308：落盘失败 ⇒ 基线保持原状不前移
+        settlement?.reject()
         SyncOutcome.Error(
             strings.get(R.string.sync_error_merged_upload_local_save_failed, saveResult.message)
         )
     } else {
+        settlement?.accept()
         SyncOutcome.MergedAndUploaded
     }
 }
@@ -186,7 +200,7 @@ private suspend fun SyncConflictController.handleResolveUploadSuperseded(
     return when (fresh) {
         is SyncCommitResult.Uploaded -> {
             eraseSupersededPendingTrees(mergedDb)
-            adoptMergedDatabase(mergedDb)
+            adoptMergedDatabase(mergedDb, fresh.settlement)
         }
         is SyncCommitResult.ConflictNeedsMerge -> {
             val cache = pendingRemoteCache

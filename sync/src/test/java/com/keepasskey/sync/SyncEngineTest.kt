@@ -56,6 +56,19 @@ class SyncEngineTest {
         syncCache.clear(remotePath)
     }
 
+    /**
+     * ISSUE-P2-308：模拟 app 层采纳确认——远端新内容路径（openUncached / 远端刷新）的
+     * 基线三步随 [SyncOpenResult.RemoteSynced.adoption] 延后，结算前缓存与基线不落地。
+     */
+    private suspend fun acceptAdoption(result: SyncOpenResult) {
+        (result as? SyncOpenResult.RemoteSynced)?.adoption?.accept()
+    }
+
+    /** 同上，commitLocal 系采纳确认（本地落盘保存成功后的结算）。 */
+    private suspend fun acceptCommit(result: SyncCommitResult) {
+        (result as? SyncCommitResult.Uploaded)?.settlement?.accept()
+    }
+
     @Test
     fun `测试未缓存首次下载状态机`() = runTest {
         val remoteData = "remote-content-v1".toByteArray()
@@ -65,7 +78,10 @@ class SyncEngineTest {
         assertTrue(result is SyncOpenResult.RemoteSynced)
         assertArrayEquals(remoteData, (result as SyncOpenResult.RemoteSynced).remoteBytes)
         assertEquals("etag-1", result.etag)
+        // ISSUE-P2-308：采纳确认前基线三步不落地
+        assertFalse("采纳确认前缓存不得交付", syncCache.isCached(remotePath))
 
+        acceptAdoption(result)
         // 验证缓存建立与基线记录
         assertTrue(syncCache.isCached(remotePath))
         assertFalse(syncCache.hasLocalChanges(remotePath))
@@ -87,6 +103,7 @@ class SyncEngineTest {
         assertTrue(result is SyncOpenResult.RemoteSynced)
         assertArrayEquals(v2, (result as SyncOpenResult.RemoteSynced).remoteBytes)
         assertEquals("etag-2", result.etag)
+        acceptAdoption(result)
         assertEquals("etag-2", syncCache.getState(remotePath)?.etag)
     }
 
@@ -94,7 +111,7 @@ class SyncEngineTest {
     fun `测试已缓存且两端无修改时直接加载一致`() = runTest {
         val v1 = "content-v1".toByteArray()
         fakeProvider.remoteFiles[remotePath] = FakeRemoteFile(v1, etag = "etag-1")
-        engine.openRemote(remotePath)
+        acceptAdoption(engine.openRemote(remotePath))
 
         // 远端未变
         val result = engine.openRemote(remotePath)
@@ -106,7 +123,7 @@ class SyncEngineTest {
     fun `测试本地赢场景自动上传与基线前移`() = runTest {
         val v1 = "content-v1".toByteArray()
         fakeProvider.remoteFiles[remotePath] = FakeRemoteFile(v1, etag = "etag-1")
-        engine.openRemote(remotePath)
+        acceptAdoption(engine.openRemote(remotePath))
 
         // 本地写入新数据
         val localNew = "content-local-edited".toByteArray()
@@ -130,7 +147,7 @@ class SyncEngineTest {
         // 时，绝不能以空字节数组继续——空数组命中本地赢路径会把远端全库覆盖为空
         val v1 = "content-v1".toByteArray()
         fakeProvider.remoteFiles[remotePath] = FakeRemoteFile(v1, etag = "etag-1")
-        engine.openRemote(remotePath)
+        acceptAdoption(engine.openRemote(remotePath))
 
         // 模拟「isCached 为 true 但 readCache 失败返回 null」的竞态窗口
         val flakyCache = object : SyncCache(cacheDir) {
@@ -153,7 +170,7 @@ class SyncEngineTest {
     fun `测试双方修改触发冲突检测`() = runTest {
         val v1 = "content-v1".toByteArray()
         fakeProvider.remoteFiles[remotePath] = FakeRemoteFile(v1, etag = "etag-1")
-        engine.openRemote(remotePath)
+        acceptAdoption(engine.openRemote(remotePath))
 
         // 本地修改
         val localNew = "content-local-edited".toByteArray()
@@ -175,7 +192,7 @@ class SyncEngineTest {
     fun `测试远端404丢失自愈恢复`() = runTest {
         val v1 = "content-v1".toByteArray()
         fakeProvider.remoteFiles[remotePath] = FakeRemoteFile(v1, etag = "etag-1")
-        engine.openRemote(remotePath)
+        acceptAdoption(engine.openRemote(remotePath))
 
         // 远端文件被删除
         fakeProvider.remoteFiles.remove(remotePath)
@@ -191,7 +208,7 @@ class SyncEngineTest {
     fun `测试网络不可达降级使用本地缓存`() = runTest {
         val v1 = "content-v1".toByteArray()
         fakeProvider.remoteFiles[remotePath] = FakeRemoteFile(v1, etag = "etag-1")
-        engine.openRemote(remotePath)
+        acceptAdoption(engine.openRemote(remotePath))
 
         // 模拟网络异常
         fakeProvider.networkError = true
@@ -205,7 +222,7 @@ class SyncEngineTest {
     fun `测试离线开关直接返回缓存`() = runTest {
         val v1 = "content-v1".toByteArray()
         fakeProvider.remoteFiles[remotePath] = FakeRemoteFile(v1, etag = "etag-1")
-        engine.openRemote(remotePath)
+        acceptAdoption(engine.openRemote(remotePath))
 
         engine.isOffline = true
         fakeProvider.networkError = true // 即使网络断开
@@ -219,12 +236,13 @@ class SyncEngineTest {
     fun `测试 commitLocal 成功上传与并发 412 转冲突`() = runTest {
         val v1 = "content-v1".toByteArray()
         fakeProvider.remoteFiles[remotePath] = FakeRemoteFile(v1, etag = "etag-1")
-        engine.openRemote(remotePath)
+        acceptAdoption(engine.openRemote(remotePath))
 
         // 正常提交
         val v2 = "content-v2".toByteArray()
         val commitResult = engine.commitLocal(remotePath, v2)
         assertTrue(commitResult is SyncCommitResult.Uploaded)
+        acceptCommit(commitResult)
 
         // 模拟他人修改引发 ETag 冲突 (412)
         fakeProvider.remoteFiles[remotePath] = FakeRemoteFile("concurrent-mod".toByteArray(), etag = "etag-other")
@@ -240,7 +258,7 @@ class SyncEngineTest {
     fun `测试 commitLocal 冲突后下载失败返回远端不可达而非伪造空冲突`() = runTest {
         val v1 = "content-v1".toByteArray()
         fakeProvider.remoteFiles[remotePath] = FakeRemoteFile(v1, etag = "etag-1")
-        engine.openRemote(remotePath)
+        acceptAdoption(engine.openRemote(remotePath))
 
         // 远端被他人修改引发 412 冲突；随后下载远端内容失败（412 之后网络中断）
         fakeProvider.remoteFiles[remotePath] = FakeRemoteFile("concurrent-mod".toByteArray(), etag = "etag-other")
@@ -262,7 +280,7 @@ class SyncEngineTest {
     fun `测试 markResolvedAndUpload 合并解决提交基线前移`() = runTest {
         val v1 = "content-v1".toByteArray()
         fakeProvider.remoteFiles[remotePath] = FakeRemoteFile(v1, etag = "etag-1")
-        engine.openRemote(remotePath)
+        acceptAdoption(engine.openRemote(remotePath))
 
         val mergedData = "merged-final-content".toByteArray()
         val res = engine.markResolvedAndUpload(remotePath, mergedData, expectedEtag = null)
@@ -291,13 +309,13 @@ class SyncEngineTest {
         // 1. LoadedFromRemoteInSync: 首次加载
         val v1 = "content-v1".toByteArray()
         fakeProvider.remoteFiles[remotePath] = FakeRemoteFile(v1, etag = "etag-1")
-        engine.openRemote(remotePath)
+        acceptAdoption(engine.openRemote(remotePath))
         assertTrue(engine.events.replayCache.any { it is SyncCacheEvent.LoadedFromRemoteInSync })
 
-        // 2. UpdatedCachedFileOnLoad: 远端变更刷新缓存
+        // 2. UpdatedCachedFileOnLoad: 远端变更刷新缓存（ISSUE-P2-308 起随采纳确认发布）
         val v2 = "content-v2".toByteArray()
         fakeProvider.remoteFiles[remotePath] = FakeRemoteFile(v2, etag = "etag-2")
-        engine.openRemote(remotePath)
+        acceptAdoption(engine.openRemote(remotePath))
         assertTrue(engine.events.replayCache.any { it is SyncCacheEvent.UpdatedCachedFileOnLoad })
 
         // 3. UpdatedRemoteFileOnLoad: 本地修改远端未变，本地赢自动推送
@@ -328,7 +346,7 @@ class SyncEngineTest {
         // 服务器不返回 ETag（etag 为空串）：只能依赖内容哈希裁决
         val v1 = "content-v1".toByteArray()
         fakeProvider.remoteFiles[remotePath] = FakeRemoteFile(v1, etag = "")
-        engine.openRemote(remotePath)
+        acceptAdoption(engine.openRemote(remotePath))
 
         // 远端内容未变（etag 仍为空）：应判定一致而非"远端有更新/冲突"
         val result = engine.openRemote(remotePath)
@@ -340,7 +358,7 @@ class SyncEngineTest {
     fun `测试无ETag服务器本地修改且远端内容未变时本地赢`() = runTest {
         val v1 = "content-v1".toByteArray()
         fakeProvider.remoteFiles[remotePath] = FakeRemoteFile(v1, etag = "")
-        engine.openRemote(remotePath)
+        acceptAdoption(engine.openRemote(remotePath))
 
         val localNew = "content-local-edited".toByteArray()
         syncCache.writeCache(remotePath, localNew)
@@ -355,7 +373,7 @@ class SyncEngineTest {
     fun `测试无ETag服务器远端内容变化时触发冲突检测`() = runTest {
         val v1 = "content-v1".toByteArray()
         fakeProvider.remoteFiles[remotePath] = FakeRemoteFile(v1, etag = "")
-        engine.openRemote(remotePath)
+        acceptAdoption(engine.openRemote(remotePath))
 
         val localNew = "content-local-edited".toByteArray()
         syncCache.writeCache(remotePath, localNew)
@@ -371,7 +389,7 @@ class SyncEngineTest {
         // 首次下载：base 内容 = 远端内容
         val v1 = "content-v1".toByteArray()
         fakeProvider.remoteFiles[remotePath] = FakeRemoteFile(v1, etag = "etag-1")
-        engine.openRemote(remotePath)
+        acceptAdoption(engine.openRemote(remotePath))
         assertArrayEquals(v1, syncCache.readBaseContent(remotePath))
 
         // 本地修改并本地赢上传：base 内容前移为本地新内容
@@ -383,7 +401,7 @@ class SyncEngineTest {
         // 远端更新下载刷新：base 内容前移为最新远端内容
         val v2 = "content-v2".toByteArray()
         fakeProvider.remoteFiles[remotePath] = FakeRemoteFile(v2, etag = "etag-2")
-        engine.openRemote(remotePath)
+        acceptAdoption(engine.openRemote(remotePath))
         assertArrayEquals(v2, syncCache.readBaseContent(remotePath))
     }
 
@@ -391,7 +409,7 @@ class SyncEngineTest {
     fun `测试 markResolvedAndUpload 失败不污染缓存与基线`() = runTest {
         val v1 = "content-v1".toByteArray()
         fakeProvider.remoteFiles[remotePath] = FakeRemoteFile(v1, etag = "etag-1")
-        engine.openRemote(remotePath)
+        acceptAdoption(engine.openRemote(remotePath))
 
         // 本地有未同步修改
         val localNew = "content-local-unsynced".toByteArray()
@@ -413,7 +431,7 @@ class SyncEngineTest {
     fun `测试本地赢自动上传携带基线 ETag 预检`() = runTest {
         val v1 = "content-v1".toByteArray()
         fakeProvider.remoteFiles[remotePath] = FakeRemoteFile(v1, etag = "etag-1")
-        engine.openRemote(remotePath)
+        acceptAdoption(engine.openRemote(remotePath))
 
         // 本地有修改且远端未变 → 本地赢自动上传
         syncCache.writeCache(remotePath, "content-local-edited".toByteArray())
@@ -428,10 +446,11 @@ class SyncEngineTest {
     fun `测试 commitLocal 上传携带基线 ETag 预检`() = runTest {
         val v1 = "content-v1".toByteArray()
         fakeProvider.remoteFiles[remotePath] = FakeRemoteFile(v1, etag = "etag-1")
-        engine.openRemote(remotePath)
+        acceptAdoption(engine.openRemote(remotePath))
 
         val result = engine.commitLocal(remotePath, "content-v2".toByteArray())
         assertTrue(result is SyncCommitResult.Uploaded)
+        acceptCommit(result)
 
         // 提交必须以缓存基线 ETag 做乐观锁预检，冲突时才能被 412 拦截
         assertEquals("etag-1", fakeProvider.lastExpectedEtag)
@@ -470,7 +489,7 @@ class SyncEngineTest {
     fun `测试 markResolvedAndUpload 使用冲突时刻 etag 遭遇并发修改时失败`() = runTest {
         val v1 = "content-v1".toByteArray()
         fakeProvider.remoteFiles[remotePath] = FakeRemoteFile(v1, etag = "etag-1")
-        engine.openRemote(remotePath)
+        acceptAdoption(engine.openRemote(remotePath))
 
         // 模拟用户决策期间远端又被他人修改：以冲突时刻的旧 etag 提交必须 412 失败，
         // 而不是通过校验静默覆盖他端更新
@@ -491,7 +510,7 @@ class SyncEngineTest {
         // 撤除了合并窗口最后一步的乐观锁，使他端窗口内写入被静默覆盖）
         val v1 = "content-v1".toByteArray()
         fakeProvider.remoteFiles[remotePath] = FakeRemoteFile(v1, etag = "etag-live-remote")
-        engine.openRemote(remotePath)
+        acceptAdoption(engine.openRemote(remotePath))
 
         val res = engine.markResolvedAndUpload(remotePath, "merged-bytes".toByteArray(), expectedEtag = null)
         assertTrue(res.isSuccess)
@@ -511,11 +530,11 @@ class SyncEngineTest {
 
         val v1 = "remote-v1".toByteArray()
         fakeProvider.remoteFiles[remotePath] = FakeRemoteFile(v1, etag = "etag-1")
-        assertTrue(guardedEngine.openRemote(remotePath) is SyncOpenResult.RemoteSynced)
+        acceptAdoption(guardedEngine.openRemote(remotePath))
 
         val v2 = "remote-v2".toByteArray()
         fakeProvider.remoteFiles[remotePath] = FakeRemoteFile(v2, etag = "etag-2")
-        assertTrue(guardedEngine.openRemote(remotePath) is SyncOpenResult.RemoteSynced)
+        acceptAdoption(guardedEngine.openRemote(remotePath))
 
         // 被入侵端点返回设备侧曾接受过的旧版本 v1（重放）
         fakeProvider.remoteFiles[remotePath] = FakeRemoteFile(v1, etag = "etag-attacker")
@@ -530,11 +549,11 @@ class SyncEngineTest {
         val guardedEngine = SyncEngine(fakeProvider, syncCache, SyncRollbackGuard(cacheDir, testMac()))
 
         fakeProvider.remoteFiles[remotePath] = FakeRemoteFile("v1".toByteArray(), etag = "e1")
-        guardedEngine.openRemote(remotePath)
+        acceptAdoption(guardedEngine.openRemote(remotePath))
 
         // 其他官方客户端写入的是全新内容（新摘要）→ 必须正常同步，不得判为回退
         fakeProvider.remoteFiles[remotePath] = FakeRemoteFile("v2-from-keepassxc".toByteArray(), etag = "e2")
-        assertTrue(guardedEngine.openRemote(remotePath) is SyncOpenResult.RemoteSynced)
+        acceptAdoption(guardedEngine.openRemote(remotePath))
     }
 
     @Test
@@ -543,11 +562,11 @@ class SyncEngineTest {
 
         val v1 = "remote-v1".toByteArray()
         fakeProvider.remoteFiles[remotePath] = FakeRemoteFile(v1, etag = "etag-1")
-        guardedEngine.openRemote(remotePath)
+        acceptAdoption(guardedEngine.openRemote(remotePath))
 
         val v2 = "remote-v2".toByteArray()
         fakeProvider.remoteFiles[remotePath] = FakeRemoteFile(v2, etag = "etag-2")
-        guardedEngine.openRemote(remotePath)
+        acceptAdoption(guardedEngine.openRemote(remotePath))
         assertArrayEquals("前置：本地已缓存 v2", v2, syncCache.readCache(remotePath))
 
         // 被入侵端点重放设备侧曾接受过的 v1
@@ -573,11 +592,11 @@ class SyncEngineTest {
 
         val v1 = "remote-v1".toByteArray()
         fakeProvider.remoteFiles[remotePath] = FakeRemoteFile(v1, etag = "etag-1")
-        guardedEngine.openRemote(remotePath)
+        acceptAdoption(guardedEngine.openRemote(remotePath))
 
         val v2 = "remote-v2".toByteArray()
         fakeProvider.remoteFiles[remotePath] = FakeRemoteFile(v2, etag = "etag-2")
-        guardedEngine.openRemote(remotePath)
+        acceptAdoption(guardedEngine.openRemote(remotePath))
         // 此时 v1 已进入「曾接受」历史
 
         // 本地修改后上传：预期 etag-2，远端却被换成 v1（重放）⇒ ETag 预检冲突 → 下载到 v1
@@ -598,6 +617,87 @@ class SyncEngineTest {
             "本地缓存必须保留本次本地内容，不得被重放内容覆盖",
             local, syncCache.readCache(remotePath)
         )
+    }
+
+    // ===== ISSUE-P2-308：基线三步延后到采纳确认之后 =====
+
+    @Test
+    fun `ISSUE_P2_308 采纳失败 reject 后缓存与基线保持原状且可重试`() = runTest {
+        val guardedEngine = SyncEngine(fakeProvider, syncCache, SyncRollbackGuard(cacheDir, testMac()))
+        val v1 = "remote-v1".toByteArray()
+        fakeProvider.remoteFiles[remotePath] = FakeRemoteFile(v1, etag = "etag-1")
+        acceptAdoption(guardedEngine.openRemote(remotePath))
+        val baseBefore = syncCache.getState(remotePath)?.baseVersion
+
+        // 远端推进到 v2，app 层采纳失败（PARSE_FAILED / SAVE_FAILED / SESSION_DIVERGED）⇒ reject
+        val v2 = "remote-v2".toByteArray()
+        fakeProvider.remoteFiles[remotePath] = FakeRemoteFile(v2, etag = "etag-2")
+        val result = guardedEngine.openRemote(remotePath)
+        assertTrue(result is SyncOpenResult.RemoteSynced)
+        (result as SyncOpenResult.RemoteSynced).adoption!!.reject()
+
+        // 缓存工作副本、基线内容、ETag 与基线版本全部保持原状
+        assertArrayEquals("缓存不得被未采纳的远端内容覆盖", v1, syncCache.readCache(remotePath))
+        assertArrayEquals("基线快照不得前移", v1, syncCache.readBaseContent(remotePath))
+        assertEquals("ETag 元数据不得前移", "etag-1", syncCache.getState(remotePath)?.etag)
+        assertEquals("基线版本不得前移", baseBefore, syncCache.getState(remotePath)?.baseVersion)
+        assertFalse(syncCache.hasLocalChanges(remotePath))
+
+        // 下轮重试：同一份远端内容不构成重放（digest 未进入已接受历史），可再次下载
+        val retry = guardedEngine.openRemote(remotePath)
+        assertTrue("采纳失败后重试不得被防回滚误判", retry is SyncOpenResult.RemoteSynced)
+        assertArrayEquals(v2, (retry as SyncOpenResult.RemoteSynced).remoteBytes)
+        // 重试采纳成功 ⇒ 基线正常前移
+        retry.adoption!!.accept()
+        assertArrayEquals(v2, syncCache.readBaseContent(remotePath))
+        assertEquals("etag-2", syncCache.getState(remotePath)?.etag)
+    }
+
+    @Test
+    fun `ISSUE_P2_308 commitLocal 采纳失败 reject 后基线不前移且缓存保留`() = runTest {
+        val v1 = "content-v1".toByteArray()
+        fakeProvider.remoteFiles[remotePath] = FakeRemoteFile(v1, etag = "etag-1")
+        acceptAdoption(engine.openRemote(remotePath))
+        val baseBefore = syncCache.getState(remotePath)?.baseVersion
+
+        val v2 = "local-v2".toByteArray()
+        val result = engine.commitLocal(remotePath, v2)
+        assertTrue(result is SyncCommitResult.Uploaded)
+        (result as SyncCommitResult.Uploaded).settlement!!.reject()
+
+        // 上传已发生（远端已有 v2）但基线未前移：缓存工作副本保留 v2、hasLocalChanges 保持 TRUE，
+        // 下轮同步将重试上传而非误判「已同步」
+        assertArrayEquals(v2, syncCache.readCache(remotePath))
+        assertEquals("基线版本不得前移", baseBefore, syncCache.getState(remotePath)?.baseVersion)
+        assertTrue(syncCache.hasLocalChanges(remotePath))
+
+        // 采纳确认（accept）后基线落地。重试用无预条件强制提交：reject 后 meta ETag 仍为
+        // etag-1，而远端已被首次上传前移，带预条件重试将 412 转冲突（保守语义下的正确收敛），
+        // 与本用例要验证的「accept 落地基线」无关
+        val retry = engine.commitLocalForce(remotePath, v2)
+        assertTrue(retry is SyncCommitResult.Uploaded)
+        (retry as SyncCommitResult.Uploaded).settlement!!.accept()
+        assertFalse(syncCache.hasLocalChanges(remotePath))
+    }
+
+    @Test
+    fun `ISSUE_P2_308 结算句柄幂等且 reject 后 accept 不再落地`() = runTest {
+        val v1 = "remote-v1".toByteArray()
+        fakeProvider.remoteFiles[remotePath] = FakeRemoteFile(v1, etag = "etag-1")
+        val first = engine.openRemote(remotePath)
+        val adoption = (first as SyncOpenResult.RemoteSynced).adoption!!
+        adoption.accept()
+        adoption.accept() // 重复 accept 为 no-op
+
+        val v2 = "remote-v2".toByteArray()
+        fakeProvider.remoteFiles[remotePath] = FakeRemoteFile(v2, etag = "etag-2")
+        val second = engine.openRemote(remotePath)
+        val adoption2 = (second as SyncOpenResult.RemoteSynced).adoption!!
+        adoption2.reject()
+        adoption2.reject() // 重复 reject 为 no-op
+        adoption2.accept() // reject 后 accept 不得再落地（句柄已终结）
+        assertArrayEquals("reject 已终结算力，accept 不得补写缓存", v1, syncCache.readCache(remotePath))
+        assertArrayEquals("基线同样不得补写", v1, syncCache.readBaseContent(remotePath))
     }
 
     /** 固定密钥的等价 HMAC（JVM 可测） */

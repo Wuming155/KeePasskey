@@ -45,15 +45,16 @@
 
 > 本批出自 2026-09-24 同步/加密/passkey 安全审计（逐行反校 + 4 并行核查代理），均为数据完整性 / 密钥残留类，
 > 按「库永不丢、永不自己搞坏」定位列为 P2（Tier 0 优先整改）。
-> `ISSUE-P2-309`（合并 base 取工作副本兜底）与 `ISSUE-P2-312`（凭据克隆漏擦）已于 §315 闭环。
+> `ISSUE-P2-309`（合并 base 取工作副本兜底）与 `ISSUE-P2-312`（凭据克隆漏擦）已于 §315 闭环；
+> `ISSUE-P2-308`（同步采纳失败后引擎状态不回滚）已于 §317 闭环（其整改中发现的合并主路径同型残余补登为 `ISSUE-P2-313`）。
 
-### ISSUE-P2-308：同步采纳失败后引擎状态不回滚 → 整库回滚跨端传播（★）
+### ISSUE-P2-313：合并主路径（markResolvedAndUpload）基线前移仍先于本地采纳——采纳失败后同型「陈旧树本地赢覆盖」损失链（§317 整改中发现的同型残余）
 
-- **核实时间点**：2026-09-24（本轮审计，逐行反校）。
-- **核实方式**：并行核查代理直读 `SyncEngine.kt` / `SyncCycleRemoteOutcomes.kt` / `SyncCycleCommitPaths.kt` 并 quote 实际代码；行号漂移已校正（原引 233-240 实为 `openCachedWithoutLocalChanges` 分支 commit 在 234、updateBase 在 236；83-90 实为 `return SyncOutcome.Error` 而非「仅日志」）。
-- **背景与根因**：引擎在把 `RemoteSynced` 交还 app 层**之前**即已执行 `receipt.commit → updateBase → writeBaseContent → recordAccepted`（`SyncEngine.kt:233-240` 区间，`openCachedWithoutLocalChanges` 分支；同模式亦见于 `openUncached:173-175`、`openCachedWithLocalChanges:290-291`），即 base 已在「app 采纳」之前前移并写盘。采纳 / 应用远端失败（PARSE_FAILED / SAVE_FAILED / SESSION_DIVERGED）在 `SyncCycleRemoteOutcomes.kt:73-83` 仅 `return SyncOutcome.Error`，全仓无回滚引擎状态的函数。下一周期 `SyncCycleRemoteOutcomes.kt:38-40` 的 `contentEquals` 短路把陈旧内存树记为 `lastSyncedDb`。`SyncCycleCommitPaths.kt:83-93` 上传成功后本地 `save()` 失败仅 `return Error`，base 已前移不回退。后果：此后本地编辑以 `V_prev+edit` 整库上传，他端改动被覆盖；每次保存重生成 masterSeed/IV/KDF salt ⇒ 字节摘要全新，`SyncRollbackGuard` 仅比对字节级 sha256（`SyncRollbackGuard.kt:134-142` 比对 `sha256Hex(content)`）⇒ 各端判 Accept。**无需攻击者、无需服务器配合**即可跨端灭数据。残余（如实登记）：干净锁库经 `SyncCacheEvictor`（SessionLockObserver）清缓存自愈 ⇒ 窗口＝不锁库继续用 / 进程被杀（无冷启动 cacheDir 清理）。
-- **涉及文件**：`app/src/main/java/com/keepasskey/app/sync/SyncEngine.kt`、`SyncCycleRemoteOutcomes.kt`、`SyncCycleCommitPaths.kt`、`SyncRollbackGuard.kt`。
-- **验收标准**：AC① 把引擎侧三步落地（updateBase / writeBaseContent / recordAccepted）延后到 app 层采纳确认之后；采纳失败须回滚或保持 base 不动，不得前移。AC② 沿用 `SyncMidCycleEditGuardTest`，追加第三轮 `runSyncCycle` 断言 provider 侧对象字节仍含远端新增条目（即接受失败后重试不丢失对端数据）。AC③ `test` 全绿 + `gate_readings.py` 7/7 PASS。
+- **核实时间点**：2026-09-25（`ISSUE-P2-308` 整改批逐行反校；412 重入侧已随该批接入采纳结算句柄，主路径未接入）。
+- **核实方式**：直读 `SyncEngine.markResolvedAndUpload`（上传 → `writeCache` → `advanceBaseAndPersist` → `recordAccepted` 全部在引擎内即时落地，返回 `Result<String>` 不携带结算句柄）与两处采纳点：`autoMergeAndUpload`（`SyncConflictAutoMerge.kt`：上传成功 → `adoptMergedIfSessionUnchanged` 失败走 `abortDiverged`）与 `resolveConflicts` → `adoptMergedDatabase`（`SyncConflictResolution.kt`：采纳失败 / `save()` 失败仅返回 `Error`）。
+- **背景与根因**：与 `ISSUE-P2-308` 同型——合并产物上传成功时引擎已把基线前移到 merged 内容（cache=merged、baseversion=sha(merged)、ETag 前移），而本地采纳在**上传之后**；采纳失败（校验-采用发现窗口内会话被 UI 编辑替换，或落盘失败）只返回 Error、基线不回退。下一周期：lastSyncedDb 滞留旧树 ⇒ `hasLocalContentChanged` 判真 ⇒ 以「旧树+窗口编辑」重写缓存 ⇒ `hasLocalChanges` 为真而 baseEtag==remoteEtag ⇒ **本地赢整库上传**，把云端刚接收的 merged 内容（含他端改动）静默覆盖。触发前提＝合并上传网络窗口内发生 UI 编辑并保存（`adoptDatabaseIfUnchanged` 守卫命中）或本地落盘失败，比 P2-308 的「解析/保存失败」窗口更窄，但损失形态相同（跨端灭他端数据）。`ISSUE-P2-308` 批已修：`commitLocal` / `commitLocalForce` / `RemoteSynced` 三类结果的采纳结算（含 autoMerge 412 重入与用户裁决 412 重入侧）；**主路径 `markResolvedAndUpload` 因返回 `Result<String>` 无法携带句柄而未动**。
+- **涉及文件**：`sync/.../engine/SyncEngine.kt`（`markResolvedAndUpload` 返回类型）、`app/.../sync/SyncConflictAutoMerge.kt`、`SyncConflictResolution.kt`。
+- **验收标准**：AC① `markResolvedAndUpload` 改为携带 [RemoteAdoptionSettlement] 的类型化终态（上传成功 ⇒ Uploaded(etag, settlement)，基线三步延后），两处调用方在采纳确认成功后 `accept`、采纳失败 / 落盘失败 `reject`；AC② 参数化用例锁定「采纳失败 ⇒ 基线保持旧值、下轮按冲突收敛且云端 merged 内容不被陈旧树覆盖」；AC③ `test` 全绿 + `gate_readings.py` 7/7 PASS。
 
 ### ISSUE-P2-310：附件被系统回收后 fail-open 返空字节 → 保存产出矛盾内层头 → 整库打不开（○）
 

@@ -25,11 +25,43 @@ sealed class SyncCacheEvent {
 }
 
 /**
+ * ISSUE-P2-308：引擎基线三步（缓存交付 / `updateBase` / `writeBaseContent` / `recordAccepted`）
+ * 的**延迟落地句柄**。
+ *
+ * 引擎在把远端新内容交还 app 层时**不再先行前移基线**——采纳（远端解析落库 / 本地落盘保存）
+ * 结论出来后，调用方必须对本句柄**恰好结算一次**：
+ * - [accept]：采纳成功，落地基线三步（幂等）；
+ * - [reject]：采纳失败或转入合并路径，弃置下载 tmp、基线保持原状不前移（幂等）。
+ *
+ * 未结算的代价是基线不前移（下轮同步重试同一份远端内容），绝不会静默前移——
+ * 这正是本条整改要消除的「采纳失败后本地陈旧树以 V_prev+edit 整库覆盖他端」损失链的根。
+ */
+interface RemoteAdoptionSettlement {
+
+    /** 采纳成功：落地基线三步（缓存交付 + 基线前移 + 防回滚高水位记录）。幂等。 */
+    suspend fun accept()
+
+    /** 采纳失败 / 转入合并：不落地、不前移；下载回执 tmp 弃置。幂等。 */
+    suspend fun reject()
+}
+
+/**
  * openRemote 决策状态机结果。
  */
 sealed class SyncOpenResult {
-    /** 成功与远端一致（下载刷新或直接匹配） */
-    data class RemoteSynced(val remoteBytes: ByteArray, val etag: String) : SyncOpenResult() {
+    /**
+     * 成功与远端一致（下载刷新或直接匹配）。
+     *
+     * [adoption] 非 null（远端有新内容的路径）时表示基线三步**尚未落地**，调用方（app 层
+     * 采纳分支）必须结算；null（远端未变、仅刷新元数据的路径）表示无待结算状态。
+     * [equals] / [hashCode] 刻意不含 [adoption]：句柄是身份而非值，两份「同字节同 ETag」
+     * 的结果语义相等。
+     */
+    data class RemoteSynced(
+        val remoteBytes: ByteArray,
+        val etag: String,
+        val adoption: RemoteAdoptionSettlement? = null
+    ) : SyncOpenResult() {
         override fun equals(other: Any?): Boolean {
             if (this === other) return true
             if (javaClass != other?.javaClass) return false
@@ -112,8 +144,18 @@ sealed class SyncOpenResult {
  * commitLocal 提交写结果。
  */
 sealed class SyncCommitResult {
-    /** 成功保存并推送至远端 */
-    data class Uploaded(val newEtag: String) : SyncCommitResult()
+    /**
+     * 成功保存并推送至远端。
+     *
+     * [settlement] 非 null 时基线前移**尚未落地**：app 层采纳确认（本地落盘保存成功 /
+     * 冲突合并产物落库成功）后须 [RemoteAdoptionSettlement.accept]；落盘失败须
+     * [RemoteAdoptionSettlement.reject]（ISSUE-P2-308：否则上传成功而落盘失败时基线已前移，
+     * 进程死亡后重启将以旧正式文件内容整库覆盖远端）。
+     */
+    data class Uploaded(
+        val newEtag: String,
+        val settlement: RemoteAdoptionSettlement? = null
+    ) : SyncCommitResult()
 
     /** 远端已被修改并发冲突，需要执行三方合并 */
     data class ConflictNeedsMerge(val remoteBytes: ByteArray, val remoteEtag: String) : SyncCommitResult() {
