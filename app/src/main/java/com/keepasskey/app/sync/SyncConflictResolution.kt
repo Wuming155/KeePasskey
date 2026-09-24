@@ -109,7 +109,8 @@ internal suspend fun SyncConflictController.resolveConflicts(
                         mergedBytes = mergedBytes
                     )
                 }
-                SyncOutcome.Error(strings.get(R.string.sync_error_upload_resolved_failed, ex.message))
+                // ISSUE-P3-311 项 3：只透出异常类型名，不透传服务器可控 message
+                SyncOutcome.Error(strings.get(R.string.sync_error_upload_resolved_failed, ex.javaClass.simpleName))
             }
         }
     }
@@ -199,7 +200,7 @@ private suspend fun SyncConflictController.handleResolveUploadSuperseded(
         eraseSupersededPendingTrees(mergedDb)
         clearPendingConflictSession()
         return SyncOutcome.Error(
-            strings.get(R.string.sync_error_upload_resolved_failed, e.message)
+            strings.get(R.string.sync_error_upload_resolved_failed, e.javaClass.simpleName)
         )
     }
     return when (fresh) {

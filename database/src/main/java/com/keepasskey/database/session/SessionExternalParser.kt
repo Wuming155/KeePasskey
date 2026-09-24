@@ -7,6 +7,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayInputStream
+import java.io.InputStream
 import java.util.Arrays
 
 /**
@@ -23,22 +24,54 @@ internal suspend fun parseExternalKdbxBytes(
     useCredentials { pwd, key ->
         val pwdClone = pwd?.clone()
         val keyClone = key?.clone()
+        // ISSUE-P3-311 项 1：解析期落盘键记录——失败时回滚本次新落盘的附件，
+        // 不再滞留 cacheDir（明文附件残留窗口此前只能靠锁库归零）
+        val recorder = binaryStore?.let { SpillRecordingBinaryStore(it) }
         try {
             KdbxResult.Success(
                 KdbxFile.load(
                     ByteArrayInputStream(bytes),
                     pwdClone,
                     keyClone,
-                    binaryStore
+                    recorder ?: binaryStore
                 )
             )
         } catch (cancellation: CancellationException) {
+            recorder?.purge()
             throw cancellation
         } catch (t: Throwable) {
+            recorder?.purge()
             KdbxResult.Failure(t)
         } finally {
             pwdClone?.let { Arrays.fill(it, '0') }
             keyClone?.let { Arrays.fill(it, 0.toByte()) }
         }
+    }
+}
+
+/**
+ * 解析期落盘键记录器（ISSUE-P3-311 项 1）。
+ *
+ * 记录本次解析**新落盘**的附件 key（store / storeFromStream）；解析失败时 [purge] 逐一删除，
+ * 使「失败解析的附件明文」不再滞留 cacheDir。成功解析时记录自然作废（键归解析产物所有，
+ * 后续由 `KdbxDatabase.clearBinaryPool` 的池所有权机制管理，ISSUE-P3-258）。
+ * 读路径与 clear 透传委托；记录表仅本解析实例可见，并发解析互不干扰（键为随机 UUID）。
+ */
+internal class SpillRecordingBinaryStore(
+    private val delegate: com.keepasskey.core.security.BinaryStore
+) : com.keepasskey.core.security.BinaryStore by delegate {
+
+    private val recorded = mutableListOf<String>()
+
+    override fun store(bytes: ByteArray): String =
+        delegate.store(bytes).also { recorded.add(it) }
+
+    override fun storeFromStream(input: InputStream, size: Long): String =
+        delegate.storeFromStream(input, size).also { recorded.add(it) }
+
+    /** 失败路径回滚：删除本次解析新落盘的全部条目（幂等；单键删除失败不掩盖原异常） */
+    fun purge() {
+        recorded.forEach { runCatching { delegate.delete(it) } }
+        recorded.clear()
     }
 }

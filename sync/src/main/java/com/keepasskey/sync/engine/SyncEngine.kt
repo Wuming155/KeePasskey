@@ -123,7 +123,7 @@ class SyncEngine(
         val metaResult = provider.getMetadata(remotePath)
         if (metaResult.isFailure) {
             return@withContext recoverFromMetaFailure(
-                remotePath, cachedBytes, state?.localVersion,
+                remotePath, cachedBytes,
                 metaResult.exceptionOrNull()
             )
         }
@@ -204,14 +204,15 @@ class SyncEngine(
     private suspend fun recoverFromMetaFailure(
         remotePath: String,
         cachedBytes: ByteArray,
-        localVersion: String?,
         ex: Throwable?
     ): SyncOpenResult = when (ex) {
         is SyncException.FileNotFound -> {
             // 远端 404 且有缓存 -> 上传恢复远端
             val uploadResult = provider.uploadAtomic(remotePath, cachedBytes, expectedEtag = null)
             val newEtag = uploadResult.getOrThrow()
-            advanceBaseAndPersist(cache, remotePath, newEtag, localVersion, cachedBytes)
+            // ISSUE-P3-311 项 2：baseversion 必须取**本次所写字节的摘要**（真值），
+            // 而非磁盘 `.version` 内容——崩溃窗内两者可能失配，取后者会把陈旧版本固化进基线
+            advanceBaseAndPersist(cache, remotePath, newEtag, null, cachedBytes)
             recordAccepted(remotePath, cachedBytes)
             events.tryEmit(SyncCacheEvent.UpdatedRemoteFileOnLoad(remotePath))
             SyncOpenResult.RemoteLostRestored(newEtag)

@@ -366,7 +366,8 @@ internal class SettingsSyncController(
             } else {
                 UiMessage(
                     R.string.sync_feedback_error,
-                    listOf(result.exceptionOrNull()?.message ?: strings.get(R.string.sync_test_connection_failed))
+                    // ISSUE-P3-311 项 3：测试连接的异常 message 可能内嵌服务器响应内容，只出固定文案
+                    listOf(strings.get(R.string.sync_test_connection_failed))
                 )
             }
             syncStateFlow.update {

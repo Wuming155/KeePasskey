@@ -62,7 +62,8 @@ internal suspend fun SyncCycleRunner.setupCycleContext(
     val provider = try {
         session.testSyncProvider ?: providerResolver.resolveProvider()
     } catch (e: SyncException.InvalidEndpointError) {
-        return CycleSetup(SyncOutcome.Error(e.message ?: strings.get(R.string.sync_error_invalid_endpoint)))
+        // ISSUE-P3-311 项 3：e.message 可能内嵌服务器可控的端点内容，UI 只出固定文案
+        return CycleSetup(SyncOutcome.Error(strings.get(R.string.sync_error_invalid_endpoint)))
     } ?: return CycleSetup(SyncOutcome.Error(strings.get(R.string.sync_error_no_sync_credentials)))
 
     val remotePath = session.testRemotePath ?: providerResolver.resolveRemotePath(activeFile.name)

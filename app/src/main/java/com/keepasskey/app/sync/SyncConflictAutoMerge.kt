@@ -177,7 +177,8 @@ internal suspend fun autoMergeAndUpload(
                     )
                     return@withContext AutoMergeUploadResult.Completed(
                         SyncOutcome.Error(
-                            strings.get(R.string.sync_error_upload_merged_failed, e.message)
+                            // ISSUE-P3-311 项 3：只透出异常类型名
+                            strings.get(R.string.sync_error_upload_merged_failed, e.javaClass.simpleName)
                         )
                     )
                 }

@@ -200,7 +200,8 @@ class SyncCycleRunner @Inject constructor(
             // ISSUE-P0-09：openRemote 之外的周期步骤（本地序列化 / 首传基线 / 快速提交与冲突合并）
             // 同样存在 provider-引擎重抛链未覆盖的 Error 面（如合并超深结构栈溢出），
             // 一律遏制为「本次同步失败」而非进程崩溃，与 handleOpenRemote 的归一口径一致
-            SyncOutcome.Error(e.message ?: strings.get(R.string.sync_error_unknown))
+            // ISSUE-P3-311 项 3：异常 message 可能携带服务器可控串，UI 只出固定通用文案
+            SyncOutcome.Error(strings.get(R.string.sync_error_unknown))
         } finally {
             // ISSUE-P1-06：同步周期结束（无论成功/失败/异常），显式擦除 S3 凭据 CharArray。
             // WebDAV 侧密码已在 resolveProvider() 构造完成后即时擦除（passwordChars 借用语义），
@@ -267,7 +268,8 @@ class SyncCycleRunner @Inject constructor(
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: Exception) {
-            SyncOutcome.Error(e.message ?: strings.get(R.string.sync_error_vault_takeover_failed))
+            // ISSUE-P3-311 项 3：同上——固定通用文案，不透传异常 message
+            SyncOutcome.Error(strings.get(R.string.sync_error_vault_takeover_failed))
         } finally {
             (providerForErase as? S3SyncProvider)?.clearCredentials()
         }
@@ -335,7 +337,8 @@ class SyncCycleRunner @Inject constructor(
             // 经引擎 getOrThrow 原样重抛；仅捕 Exception 时 Error 在此脱网并杀死进程，
             // 且每个同步周期自动复发。远端可单方面触发该链路，必须在同步边界
             // 遏制为「本次同步失败」，不允许绕过应用自身的错误遏制框架。
-            SyncOutcome.Error(e.message ?: strings.get(R.string.sync_error_unknown))
+            // ISSUE-P3-311 项 3：异常 message 可能携带服务器可控串，UI 只出固定通用文案
+            SyncOutcome.Error(strings.get(R.string.sync_error_unknown))
         }
     }
 }

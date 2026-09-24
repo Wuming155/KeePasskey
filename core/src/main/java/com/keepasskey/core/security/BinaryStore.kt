@@ -39,6 +39,13 @@ interface BinaryStore {
 
     /** 清空全部落盘数据（会话锁定 / 关闭时调用）。 */
     fun clear()
+
+    /**
+     * 删除单个落盘条目（ISSUE-P3-311 项 1：失败解析会话的附件残留回滚通道）。
+     * 默认空实现仅为既有实现方（测试 fake）兼容；生产实现（FileBinaryStore）必须真实删除。
+     * 幂等：key 不存在时为 no-op。
+     */
+    fun delete(key: String) {}
 }
 
 /**

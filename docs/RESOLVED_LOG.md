@@ -393,6 +393,8 @@
 
 | §321 | 加密 / passkey 卫生批次：`ISSUE-P3-311` 四项闭环（P3 4 → 3）。①内层随机流**密钥字段存在性断言**：Salsa20/ChaCha20 下密钥字段缺失抛类型化异常（None 缺省合法），不再静默全零兜底——**跨实现对拍**：AVD 上 `:database:connected` 17/17 全绿，官方 KeePassXC 语料（恒含密钥字段）零误拒；②v1 legacy 私钥 **DER 分支钉死曲线**：非 EC / 非 P-256 域 fail-closed 拒绝（此前仅以 P-256 的 n 判界）；③hex 文本私钥**逐字节解析**（中间副本清零），不再物化为不可擦 String，合法输入语义与旧口径同值；④`.kdbx.bak` **数据块补 fsync**（`FileChannel.force(true)`，force 失败按备份不可用承接）——此前仅目录项固化，delayed writeback 下断电可能留空洞 .bak。**如实声明**：AC 的「AVD 实验确认 delayed-allocation 语义」未执行——风险窗仅断电可观测，kill -9 不丢页缓存，夹具无法构造故障注入。`tests=2771`（+9）全绿；门禁 7/7 PASS | `ISSUE-P3-311` | [`321-加密passkey卫生批次.md`](resolved/batches/321-加密passkey卫生批次.md) |
 
+| §322 | 同步层卫生批次：`ISSUE-P3-310` 三项闭环（P3 3 → 2）。①**失败解析附件回滚**（核心）：`BinaryStore` 新增 `delete(key)` 默认方法（生产 `FileBinaryStore` 经 `SyncCache.clear(key)` 真实删除）+ `SpillRecordingBinaryStore` 记录器——`parseExternalKdbxBytes` 失败（含取消）路径 `purge()` 逐一删除本次新落盘条目，失败解析的附件明文不再滞留 cacheDir（AC 取「回滚」分支，「登记量级」不再需要）；②**崩溃窗 baseversion 自愈**：404 自愈分支 `advanceBaseAndPersist` 改传 null（按本次所写字节现算摘要），不再以磁盘 `.version` 内容充当基线——失配窗内陈旧版本不再被固化，`hasLocalChanges` 判真下轮收敛；③**服务器可控串出显面收口**：周期边界 / 端点非法 / 上传失败 / 测试连接共 9 处生成侧透传改固定通用文案或仅异常类型名；`saveResult.message` 类本地 IO 参数与消费侧展示如实声明保留。`tests=2774`（+3）全绿；门禁 7/7 PASS | `ISSUE-P3-310` | [`322-同步层卫生批次.md`](resolved/batches/322-同步层卫生批次.md) |
+
 ## 分册导航
 
 | 分册 | 覆盖批次 | 时间 | 索引 |

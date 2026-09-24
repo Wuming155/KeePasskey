@@ -57,6 +57,14 @@ class FileBinaryStore @Inject constructor(
     override fun sizeOf(key: String): Long = cache.cacheSize(key)
 
     /**
+     * 删除单个落盘条目（ISSUE-P3-311 项 1：失败解析会话的附件残留回滚通道）。
+     * 复用 [SyncCache.clear] 的按键清理（该键的全部缓存文件，幂等）。
+     */
+    override fun delete(key: String) {
+        cache.clear(key)
+    }
+
+    /**
      * 清空全部落盘数据（[BinaryStore] 契约：会话锁定 / 关闭时调用）。
      *
      * **时序前提（冷启动路径，F-13）**：进程冷启动阶段由 `MainApplication.onCreate()`

@@ -203,6 +203,9 @@ class SyncEngineTest {
         // 远端已被自愈恢复
         assertTrue(fakeProvider.remoteFiles.containsKey(remotePath))
         assertArrayEquals(v1, fakeProvider.remoteFiles[remotePath]?.data)
+        // ISSUE-P3-311 项 2：baseversion 必须取本次所写字节的摘要（真值），
+        // 与 `.version` 一致 ⇒ hasLocalChanges 为 false（不因崩溃窗口径误判有本地修改）
+        assertEquals(SyncCache.sha256Hex(v1), syncCache.getState(remotePath)?.baseVersion)
     }
 
     @Test

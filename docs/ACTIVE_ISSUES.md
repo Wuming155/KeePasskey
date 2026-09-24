@@ -50,7 +50,7 @@
 > `ISSUE-P2-310`（附件被系统回收 fail-open）已于 §318 闭环；
 > `ISSUE-P2-311`（64 MiB 附件写读口径互斥）已于 §319 闭环。
 
-## P3 低危问题、特性接线与体验优化（3 项）
+## P3 低危问题、特性接线与体验优化（2 项）
 
 ### ISSUE-P3-300：弱 ETag 乐观锁的**真实 DAV 服务器矩阵未实测**——弱 ETag 服务器上的同步收敛行为待证（§272 AC⑤ 显式残余）
 
@@ -64,18 +64,6 @@
 - **验收标准**：AC① 四类服务器各实测三项读数并按规则 8 留证（命令 + 原始响应）：签发 ETag 的强/弱形态；MOVE `If` 头对弱形态（`[W/"…"]`）与强形态（`["…"]`）预条件的接受性；PUT+MOVE 事务写兼容性。AC② 实测**证实**「回传原形态」取向 ⇒ 回填两处登记并闭环本条；实测**推翻** ⇒ 不得就地放宽 §272 守卫用例（限界表 §28 边界条款），须另行立条裁决新取向。AC③ 无法取得的环境（如 IIS）逐项如实标注未执行，禁以 mock 绿推定闭环。AC④ 环境不可得期间，本条与限界表 §28 维持开放，不得归档。**AC⑤（§316 自 `ISSUE-P3-302` AC⑤ 迁入，随本条一并执行）**「404 恢复分支未下传 `remoteExists`」的同目标并发实验（原属 `ISSUE-P2` 审计项），按本仓目标后端分两类：**(a) 标准 WebDAV（RFC 4918 合规实现，即 mod_dav 类参考实现口径）**——对「本地已 PUT、他端并发创建」的目标，第二客户端以 `MOVE(Overwrite:F)` 期望 412，验证 `SyncEngine.kt:190-198` 404 恢复分支缺省 `remoteExists` 导致的 TOCTOU 在真实服务器上的实际效力（即强制 `Overwrite:F` 是否真被尊重、412 是否返回；若服务器忽略 `Overwrite:F` 静默覆盖，则该 TOCTOU 为真实残余，需换用 `If` 预条件而非 Overwrite 头）；**(b) 兼容 S3 协议存储**——S3 路径走原子条件 PUT（`If-None-Match:*` 首传 / `If-Match` 覆盖，`S3SyncProvider.kt:32` KDoc 已声明「无 TOCTOU 竞争窗口」），本就不存在 MOVE+Overwrite 竞争，故**无需 Overwrite:F 实验**；实验只需验证目标 S3 兼容端**是否真正尊重条件写头**（少数非合规实现会忽略 `If-Match`/`If-None-Match:*`，见 `S3SyncProvider.kt:239`），以「对**已存在**对象 PUT `If-None-Match:*` 期望 412 而非 200」一轮即可。注：Nextcloud 等具体产品端点不在本仓目标范围，不纳入实验矩阵。
 
 ---
-
-### ISSUE-P3-310：同步层卫生批量登记（3 项）（「建议并表，不逐条占位」）
-
-> 本条目合并 3 个低危同步卫生发现，逐项附核实结论与验收要点；其中「404 恢复分支 TOCTOU」已并入 `ISSUE-P3-300` AC⑤ 实验面，不在本条目单列。
-
-- **核实时间点**：2026-09-24（本轮审计，逐行反校）。
-- **核实方式**：并行核查代理直读 `SessionExternalParser.kt:35-43` / `SyncCache.kt:137-144` / `SyncEngine.kt:194,262,290` / `SyncCycleRunner.kt:203` 等，并比对 `SyncOutcome.kt:35` 与 `SyncException.ProtocolError` 站点。
-- **项 1 — 解析失败会话的附件残留不回滚（成立，核心）**：`SessionExternalParser.kt:37-42` 的 `finally` 只擦 `pwdClone/keyClone`，未对 `binaryStore` 本次 spilled 的附件做回滚；`catch` 仅包装为 `KdbxResult.Failure`。真实口径＝不锁库时 ≈ 周期数 × ≤4 × 池体积，锁定即归零（非「单次 128 MiB 上界」亦非「无上界」）。AC：失败解析会话在 `onSessionLocked()`/`clear()` 路径补附件回滚，或文档登记该残留量级与窗口。
-- **项 2 — N1：.version 与 .basecache 两步写盘可失配（部分成立）**：`SyncCache.kt:137-144` 写序 `updateBase(.baseversion) → writeBaseContent(.basecache)`；`SyncEngine.kt:194/262/290` 的 `advanceBaseAndPersist` 用 `state.localVersion`（＝ `.version` 内容）充当 baseVersion。正常路径下 `.version == sha256(.cache)` 一致，`hasLocalChanges` 返 FALSE 是正确态（非「恒真」亦非缺陷）；**残余仅为崩溃窗内不一致**（代码自承于 `SyncEngineSupport.kt:70-72`）。AC：崩溃窗内的 `.version`/`.cache` 失配须自愈或显式登记为已接受限界；修复建议 `advanceBaseAndPersist` 传 `sha256Hex(bytes)`。
-- **项 3 — 同步失败文案透传服务器可控字符串（部分成立）**：`SyncOutcome.Error(message)` 承载文本，`SyncCycleRunner.kt:203/268/336`、`SyncCycleSetup.kt:65`、`SyncConflictResolution.kt:108` 等少量站点以 `e.message`（服务器可控）直达 UI（`ConflictResolutionViewModel.kt:245`、`SettingsSyncController.kt:313`）；多数站点已用 `strings.get(R.string.fixed_xxx)` 合规。真实缺口＝与 `ISSUE-P1-10`「禁止透传 t.message」口径**部分冲突**而非整体违反。AC：上述透传站点改走固定通用文案（保留 type 供日志），消除服务器可控串外显面。
-- **涉及文件**：`SessionExternalParser.kt`、`SyncCache.kt`、`SyncEngine.kt`、`SyncCycleRunner.kt`、`SyncOutcome.kt`、`SyncConflictResolution.kt`、`ConflictResolutionViewModel.kt`、`SettingsSyncController.kt`。
-- **验收标准**：三项各自 AC 达成（项 1 回滚或登记；项 2 崩溃窗自愈/登记；项 3 透传站点改固定文案）；`test` + `gate_readings.py` 7/7 PASS。
 
 ### ISSUE-P3-313：同步周期「内容一变即整库重序列化」在低端真机上是 4.8 秒 CPU 成本（量级已由 §316 实测）
 
