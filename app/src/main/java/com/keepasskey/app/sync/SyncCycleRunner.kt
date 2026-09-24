@@ -282,7 +282,22 @@ class SyncCycleRunner @Inject constructor(
             }
 
             // 3. 若本地为未落盘的修改态且本地已存在历史缓存基线，尝试快速提交
-            if (ctx.isDirty && ctx.syncCache.isCached(ctx.remotePath)) {
+            // ISSUE-P3-301：本判据 `SyncCache.isCached` = `exists() && length() > 0`，是**一次 stat
+            // 级系统调用**，且位于装配段 `withContext(Dispatchers.IO)` **之外**——前台入口
+            // （下拉刷新 / 解锁后自动 / 设置页）持 `viewModelScope`（`Main.immediate`），
+            // 故此前它在主线程上执行。按 AC①(b) 保留重取并以 `Dispatchers.IO` 包裹：
+            // 语义等价（同一位置、同一表达式、同一时刻求值），只换执行线程。
+            //
+            // **为何不改读装配段取样值 `ctx.isCached`**（AC①(b) 要求写明）：该取样发生在
+            // **步骤 2 之前**，而步骤 2 的 `establishRemoteBaselineIfMissing` **仅在**
+            // `FileNotFound` 分支 `commitLocal` 之后写入缓存（其余分支返回 null 且**不写缓存**）。
+            // 即「步骤 2 与步骤 3 之间缓存状态不变」依赖一条尚未显式论证 / 断言的不变量——
+            // 一旦该分支行为变化，改用 `ctx.isCached` 会让快速提交路径在「刚建立基线」的同一轮
+            // 被误判进入，属状态机判定改变（AC② 禁止）。本次不动状态机。
+            val cachedBeforeFastCommit = withContext(Dispatchers.IO) {
+                ctx.syncCache.isCached(ctx.remotePath)
+            }
+            if (ctx.isDirty && cachedBeforeFastCommit) {
                 return@withLock tryFastCommitPath(
                     syncEngine = ctx.syncEngine,
                     syncCache = ctx.syncCache,

@@ -41,13 +41,24 @@
 
 ---
 
-## P2 中危缺陷与协议/测试缺口（0 项）
+## P2 中危缺陷与协议/测试缺口（1 项）
 
-> **暂无开放项**。
+### ISSUE-P2-307：选择器缓存三例**非确定性失败**（全量套件偶发红、隔离与成对跑皆绿）——测试有效性缺口
+
+- **核实时间点**：2026-09-24（`ISSUE-P3-301` 批次全量回归中偶发出现；复跑同一命令即绿，无代码变更）。
+- **核实方式**：
+  1. **现象**：`.\gradlew.bat test --max-workers=1` 一次运行报 3 例红——`AutofillPickerViewModelCredentialLookupTest.选择器页缓存命中时不回查仓库单条`（`expected:<0> but was:<1>`）、`AutofillPickerViewModelSessionLockTest.会话锁定后选择器缓存条目被清空`（`测试前提：选择器应已缓存条目`）、`AutofillPickerViewModelSessionLockTest.锁定竞态下读取已清零条目_search与用户名按空降级而非崩溃`（`expected:<1> but was:<0>`）；同一命令**原地复跑即 BUILD SUCCESSFUL（`tests=2688 failures=0`）**，期间无任何代码改动。
+  2. **隔离**：`--tests "com.keepasskey.app.autofill.AutofillPickerViewModel*"` 单跑 **BUILD SUCCESSFUL**。
+  3. **成对**：与最可疑的邻居 `com.keepasskey.app.sync.SyncAssemblyOffMainThreadTest` 同批跑 **BUILD SUCCESSFUL**（该测试文件的 `HEAD` 版与待提交版**两种都试过，皆绿**）⇒ 「与该文件同分叉即失败」的假设**未成立**。
+  4. **未定位**：失败无堆栈归因（皆为断言差异），未取得可复现的最小条件。
+- **背景与根因（**待定位**，以下为假设而非结论）**：`SyncAssemblyOffMainThreadTest` 的 `tearDown` 按 `ISSUE-P3-189` 路线①采用「**只装不卸**」口径（不调 `resetMain`，仅走 `MainDispatcherGuard`），即该测试类结束后 JVM 内的 `Dispatchers.Main` 仍是它安装的 `TestDispatcher`。若同分叉内后续测试类**依赖真实 Main**（未自行 `setMain`），其挂起工作可能永不推进 ⇒ 呈现为「缓存应命中却未命中 / 应已缓存却为空」一类断言差异，与本次 3 例的形态吻合。**但该假设未获证据支持**（第 3 步成对实验即为否证尝试）。
+- **后果**：CI 会出现**与代码无关的假红**，侵蚀「红=真问题」的信号价值（与 `ISSUE-P3-305` 的红态长期化属不同面：那是门禁恒红，这是偶发假红）。
+- **涉及文件**：`app/src/test/java/com/keepasskey/app/autofill/AutofillPickerViewModelCredentialLookupTest.kt`、`app/src/test/java/com/keepasskey/app/autofill/AutofillPickerViewModelSessionLockTest.kt`；高度相关：`app/src/test/java/com/keepasskey/app/sync/SyncAssemblyOffMainThreadTest.kt`（Main「只装不卸」）与其依赖的 `MainDispatcherGuard`；`app/src/test/java/com/keepasskey/app/testutil/MainDispatcherGuard.kt`。
+- **验收标准**：AC① **先定位**：取得可复现的最小条件（建议手段：`--max-workers=1` 固定分叉 + 逐类二分加入，或在 `MainDispatcherGuard` 记录「装上 / 卸下」事件并断言套件结束时 Main 已复位）；AC② 定位后**修根因**（`resetMain` 口径的取舍须一次性贯通，禁只给单个用例打补丁）；AC③ 若根因确为 Main 泄漏，须评估 `ISSUE-P3-189` 路线①的既有裁决是否需修订，并同步该裁决的登记处；AC④ 未定位前**不得**以下调断言强度 / 加 `@Ignore` / 放宽比较的方式让套件变绿（假绿比假红更危险）；AC⑤ 补一条守卫：套件级断言「测试结束时 `Dispatchers.Main` 已复位或与初始一致」，使同类泄漏当场可见。
 
 ---
 
-## P3 低危问题、特性接线与体验优化（11 项）
+## P3 低危问题、特性接线与体验优化（10 项）
 
 ### ISSUE-P3-293：剪贴板自动擦除的界面承诺与**已登记口径**不符，且冷启动对账可清除其它应用的内容
 
@@ -95,16 +106,6 @@
 - **背景与根因**：§272 弱 ETag 收口选定「回传服务器签发原形态」取向（MOVE `If` 头携 `W/"…"`；`If-Match` 弱期望不发送；S3 弱期望 fail-closed）。理论边界已经 RFC 划清：**弱比较**服务器上原形态必匹配；**强比较 × 弱存储标签**的组合下任何客户端的实体标签预条件均不可满足（RFC 7232 §2.3 强比较要求两侧均非弱），属服务器自绝于条件写，本仓退化为 412 → 冲突重检（不静默覆盖、不丢数据，但同步可能反复提示冲突）。**未证的是**：真实服务器对 RFC 4918 §10.4.4「弱或强比较二选一」的实际取向、以及 MOVE 事务写在弱 ETag 服务器上的兼容性——这决定弱 ETag 服务器（Apache/mod_dav 部分文件系统配置为高发面）上同步是正常收敛还是反复冲突提示。
 - **涉及文件**：无生产代码改动面（纯外部验证条目）；实测结果回填 `docs/resolved/batches/272-冲突时刻ETag透传与弱校验收口批次.md` §3.3 与 `docs/architecture/已知工程限界.md` §28。
 - **验收标准**：AC① 四类服务器各实测三项读数并按规则 8 留证（命令 + 原始响应）：签发 ETag 的强/弱形态；MOVE `If` 头对弱形态（`[W/"…"]`）与强形态（`["…"]`）预条件的接受性；PUT+MOVE 事务写兼容性。AC② 实测**证实**「回传原形态」取向 ⇒ 回填两处登记并闭环本条；实测**推翻** ⇒ 不得就地放宽 §272 守卫用例（限界表 §28 边界条款），须另行立条裁决新取向。AC③ 无法取得的环境（如 IIS）逐项如实标注未执行，禁以 mock 绿推定闭环。AC④ 环境不可得期间，本条与限界表 §28 维持开放，不得归档。
-
----
-
-### ISSUE-P3-301：`runSyncCycle` 步骤 3 的 `isCached` 判据仍在调用方线程（§274 显式残余）
-
-- **核实时间点**：2026-09-23（§274 整改当日，随批如实登记）。
-- **核实方式**：① §274 已把**装配段**（`setupCycleContext`）整体下沉 `Dispatchers.IO`（`SyncCycleRunner.kt:218`），并以 `SyncAssemblyOffMainThreadTest` 锁定凭据解密 / 整库缓存读 / 全库比较 / 原子写四类的执行线程（含栈归因与判别力实验）；② **本条所指调用点不属装配段**——`SyncCycleRunner.kt:243` 的 `if (ctx.isDirty && ctx.syncCache.isCached(ctx.remotePath))`（步骤 3 前置判据）位于该 `withContext` **之外**，仍执行在调用方线程（前台入口持 `viewModelScope`，即 `Main.immediate`）；③ 该调用为 `SyncCache.isCached()`（`SyncCache.kt:59-62`）＝ `exists() && length() > 0`，**一次 stat 级系统调用**，不读内容、不 `fsync`，与四类的量级相差数个数量级——§274 的「主线程零 IO」口径据此把四类与它分列。
-- **背景与根因**：§274 整改时**刻意不动**该点，理由是「改它需先论证 `ctx.isCached`（装配段取样值）与步骤 3 重取恒等价」，而该等价依赖「步骤 2 只在返回非 null 时写缓存」这一耦合推理（`establishRemoteBaselineIfMissing` **仅在** `FileNotFound` 分支 `commitLocal` 后 `return`，其余分支返回 null 且不写缓存），牵动同步状态机判定，风险高于收益 ⇒ 当批以「残余如实登记、不宣称为主线程零 IO」收口，本条承接后续处置。
-- **涉及文件**：`app/src/main/java/com/keepasskey/app/sync/SyncCycleRunner.kt`（`:243` 重取点；`setupCycleContext` 内 `:127` 为首次取样）、`sync/src/main/java/com/keepasskey/sync/engine/SyncCache.kt`。
-- **验收标准**：AC① 二选一但须**单点化**——(a) 把该判据并入已下沉的装配段产出（**不得**直接换成 `ctx.isCached` 了事，须先补「步骤 2 与步骤 3 之间缓存状态不变」的显式不变量声明或断言）；或 (b) 保留重取但以 `withContext(Dispatchers.IO)` 包裹，并写明为何不接受 `ctx.isCached`；AC② 判据语义不得改变：两步之间的**可观测差异**（若存在）须在条目正文写明，禁「为消除一次 stat 而改动状态机判定」；AC③ 新增或扩展守卫，断言该判据不在主线程执行（沿用 `SyncAssemblyOffMainThreadTest` 的探针 + 栈归因口径）；AC④ 若最终裁定「一次 stat 可接受、不作处理」，须登记 [`docs/architecture/已知工程限界.md`](architecture/已知工程限界.md) 并写明解除条件，不得无声留着。
 
 ---
 

@@ -64,8 +64,13 @@ open class SyncCache(
 
     /**
      * 判断指定远端路径是否已在本地建立缓存。
+     *
+     * `ISSUE-P3-301`：与 [readCache] / [writeCache] / [readBaseContent] 等 IO 原语同为 `open`
+     * ——本方法是一次 `exists()` + `length()` 的 **stat 级系统调用**，不读内容、不 `fsync`
+     * （`ISSUE-P2-277` §274 据此把它与四类重活分列），但它同样是文件系统 IO，
+     * 其执行线程由 `SyncAssemblyOffMainThreadTest` 以探针形式锁定（判据需与四类同源可证）。
      */
-    fun isCached(remotePath: String): Boolean {
+    open fun isCached(remotePath: String): Boolean {
         val cacheFile = getFile(remotePath, SUFFIX_CACHE)
         return cacheFile.exists() && cacheFile.length() > 0
     }

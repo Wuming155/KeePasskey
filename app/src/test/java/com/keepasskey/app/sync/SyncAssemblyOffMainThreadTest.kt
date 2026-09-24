@@ -225,6 +225,28 @@ class SyncAssemblyOffMainThreadTest {
             "装配段/引擎的同步调用落在主线程上（ISSUE-P2-277 回归）: $onMainThread",
             onMainThread.isEmpty()
         )
+
+        // ── 第三轮（ISSUE-P3-301）：制造 DIRTY 态 ⇒ 步骤 3 的缓存判据被**真实求值** ──
+        // 前两轮该判据都被 `ctx.isDirty && …` 的短路跳过（落盘后状态为 CLEAN），故上面的
+        // 「主线程零 IO」断言对步骤 3 并不成立。本轮只做 `saveEntry` **不** `save()`，
+        // 使 `isDirty` 为真 ⇒ 判据必被求值：整改前它在主线程上执行，下方断言即红。
+        records.clear()
+        databaseSession.saveEntry(
+            KdbxEntry(
+                id = KdbxUuid.random(),
+                fields = mapOf(KdbxConstants.Fields.TITLE to ProtectedString("未落盘修改", false))
+            )
+        )
+        cycle.runSyncCycle()
+        assertTrue(
+            "步骤 3 的缓存判据未被观测到（DIRTY 未生效，本用例对该点空转）",
+            records.any { it.probe == PROBE_CACHE_IS_CACHED }
+        )
+        assertTrue(
+            "步骤 3 的缓存判据落在主线程上（ISSUE-P3-301 回归）: " +
+                records.filter { it.thread === mainThread },
+            records.none { it.thread === mainThread }
+        )
     }
 
     private fun record(probe: String) {
@@ -254,6 +276,12 @@ class SyncAssemblyOffMainThreadTest {
         override fun readCache(remotePath: String): ByteArray? {
             onProbe(PROBE_CACHE_READ)
             return super.readCache(remotePath)
+        }
+
+        /** ISSUE-P3-301：步骤 3 的缓存判据（stat 级）探针 */
+        override fun isCached(remotePath: String): Boolean {
+            onProbe(PROBE_CACHE_IS_CACHED)
+            return super.isCached(remotePath)
         }
 
         override fun readBaseContent(remotePath: String): ByteArray? {
@@ -360,6 +388,9 @@ class SyncAssemblyOffMainThreadTest {
         const val PROBE_BASE_READ = "基准内容读 readBaseContent"
         const val PROBE_COMPARISON = "内容比较 KdbxContentComparator"
         const val PROBE_CACHE_WRITE = "原子写 writeCache"
+
+        /** ISSUE-P3-301：步骤 3 前置判据 `SyncCache.isCached`（stat 级） */
+        const val PROBE_CACHE_IS_CACHED = "步骤3缓存判据 isCached"
 
         /** 四类锁定对应的必测探针（构造探针只作参考，不参与必测集）。 */
         val PROBES = listOf(
