@@ -1,6 +1,5 @@
 package com.keepasskey.app.data.repository
 
-import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.core.security.ProtectedString
@@ -51,11 +50,20 @@ internal class VaultEntrySecretReader(
      * 墙钟读取器——验证码缓存以「周期号」判定命中，故必须与真实时间同源。
      * 生产为 [System.currentTimeMillis]；单测注入可控时钟，使「跨周期即失效」可被确定性断言。
      */
-    private val nowMillis: () -> Long = System::currentTimeMillis
+    private val nowMillis: () -> Long = System::currentTimeMillis,
+    /**
+     * ISSUE-P3-273：TOTP 解析参数通道（字段名映射 + 默认步长 / 位数）。
+     * 缺省为 [TotpPreferences.DEFAULT]（纯 JVM 单测未注入时的回落）。
+     */
+    private val totpPreferences: () -> TotpPreferences = { TotpPreferences.DEFAULT }
 ) {
 
-    /** 单条验证码缓存项：命中判据为「同一周期号」，跨周期即自然失效。 */
-    private class CachedTotp(val periodIndex: Long, val snapshot: EntryTotpSnapshot)
+    /** 单条验证码缓存项：命中判据为「同一周期号，且解析参数未变」。 */
+    private class CachedTotp(
+        val periodIndex: Long,
+        val preferences: TotpPreferences,
+        val snapshot: EntryTotpSnapshot
+    )
 
     /** `entryId → 本周期验证码`（并发安全；HOTP 从不写入） */
     private val totpCache = ConcurrentHashMap<String, CachedTotp>()
@@ -87,8 +95,9 @@ internal class VaultEntrySecretReader(
         }
     }
 
-    /** ISSUE-P2-15：返回受保护值的 CharArray 独占副本（或 null），清零责任随借用契约移交调用方 */
-    internal fun readErasableChars(value: ProtectedString?): CharArray? = value?.readChars()
+    // 原 readErasableChars（ProtectedString? → CharArray?）随 ISSUE-P3-273 的字段定位收敛
+    // 失去全部调用点（修订快照改走 VaultEntryTotpMapping.locateConfigSource().readChars()），
+    // 按「删除死代码」口径移除；需要该能力处直接调 ProtectedString.readChars()（同为独占副本语义）。
 
     suspend fun getEntryPassword(entryId: String): String? {
         val targetUuid = parseKdbxUuidOrNull(entryId) ?: return null
@@ -147,13 +156,9 @@ internal class VaultEntrySecretReader(
             }
         }
         // ISSUE-P2-15：TOTP 原文以 CharArray 独占副本返回，不再物化不可擦 String
-        val totpRawChars = readErasableChars(revision.fields[KdbxConstants.Fields.OTP])
-            ?: readErasableChars(
-                revision.customFields.firstOrNull {
-                    it.key.equals(KdbxConstants.Fields.OTP, ignoreCase = true) ||
-                        it.key.startsWith(VaultEntryMapper.TOTP_CUSTOM_FIELD_PREFIX, ignoreCase = true)
-                }?.value
-            )
+        // ISSUE-P3-273：字段定位改走单一真相源（设置值优先 → otp → TOTP 前缀）
+        val totpRawChars = VaultEntryTotpMapping.locateConfigSource(revision, totpPreferences())
+            ?.readChars()
             ?: CharArray(0)
         return EntryRevisionSnapshot(
             entry = projection.copy(customFields = decryptedFields),
@@ -221,7 +226,8 @@ internal class VaultEntrySecretReader(
      * @param now 取值时刻：**出码与周期号判定共用本时刻**，杜绝两者错配。
      */
     private fun computeAndCacheTotp(entryId: String, entry: KdbxEntry, now: Long): EntryTotpSnapshot? {
-        val config = entryMapper.parseTotpConfig(entry) ?: return null
+        val preferences = totpPreferences()
+        val config = entryMapper.parseTotpConfig(entry, preferences) ?: return null
         return try {
             val snapshot = entryMapper.computeTotpCode(config, now)?.let { code ->
                 EntryTotpSnapshot(
@@ -236,6 +242,7 @@ internal class VaultEntrySecretReader(
             if (snapshot != null && !snapshot.isHotp && snapshot.periodSeconds > 0) {
                 totpCache[entryId] = CachedTotp(
                     periodIndex = periodIndexOf(now, snapshot.periodSeconds),
+                    preferences = preferences,
                     snapshot = snapshot
                 )
             }
@@ -246,9 +253,16 @@ internal class VaultEntrySecretReader(
         }
     }
 
-    /** 命中缓存则返回本周期验证码；未命中 / HOTP / 周期非法返回 null（调用方走现算路径）。 */
+    /**
+     * 命中缓存则返回本周期验证码；未命中 / HOTP / 周期非法 / **解析参数已变**返回 null
+     * （调用方走现算路径）。
+     *
+     * ISSUE-P3-273：用户在设置页改动字段名或默认步长 / 位数后，缓存内按旧参数算出的
+     * 码不再可信——新增 [TotpPreferences] 等值判据使其立即失效，不必等会话变更。
+     */
     private fun cachedTotpOrNull(entryId: String, nowMillis: Long): EntryTotpSnapshot? {
         val cached = totpCache[entryId] ?: return null
+        if (cached.preferences != totpPreferences()) return null
         val period = cached.snapshot.periodSeconds
         if (cached.snapshot.isHotp || period <= 0) return null
         return cached.snapshot.takeIf { periodIndexOf(nowMillis, period) == cached.periodIndex }
@@ -262,14 +276,11 @@ internal class VaultEntrySecretReader(
         val targetUuid = parseKdbxUuidOrNull(entryId) ?: return null
         val currentDb = databaseSession.databaseFlow.first() ?: return null
         val entry = currentDb.rootGroup.findEntry(targetUuid) ?: return null
-        // 断点4 整改：与 parseTotpConfig 同源读取（otp 字段优先，回退 TOTP 开头的自定义字段）。
+        // 断点4 整改：与 parseTotpConfig 同源读取。
+        // ISSUE-P3-273：改为直接复用单一真相源（原为本地重写一份优先序，与解析侧漂移即出错）
         // TASK-10：返回配置原文独占 CharArray 副本（otpauth:// URI 或 Base32 种子）供编辑页回填，
         // 调用方按借用语义用毕清零
-        return entry.fields[KdbxConstants.Fields.OTP]?.readChars()
-            ?: entry.customFields.firstOrNull {
-                it.key.equals(KdbxConstants.Fields.OTP, ignoreCase = true) ||
-                    it.key.startsWith(VaultEntryMapper.TOTP_CUSTOM_FIELD_PREFIX, ignoreCase = true)
-            }?.value?.readChars()
+        return VaultEntryTotpMapping.locateConfigSource(entry, totpPreferences())?.readChars()
     }
 
     suspend fun getAttachmentData(entryId: String, fileName: String): ByteArray? {

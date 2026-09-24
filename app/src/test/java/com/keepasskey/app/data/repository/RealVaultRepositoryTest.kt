@@ -113,7 +113,9 @@ class RealVaultRepositoryTest {
         session,
         com.keepasskey.app.data.logger.DebugLogBuffer(),
         createTestStrings(),
-        projectionDispatcher
+        projectionDispatcher,
+        // ISSUE-P3-273：TOTP 解析参数通道（本测试不涉解析参数语义，注入内置缺省快照）
+        TotpPreferencesSource { TotpPreferences.DEFAULT }
     )
 
     /**

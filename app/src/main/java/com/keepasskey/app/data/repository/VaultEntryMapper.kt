@@ -25,7 +25,14 @@ import java.util.Locale
  * 职责单一：投影映射、图标名↔KDBX 标准 iconId 反演、TOTP 配置解析与即时计算、
  * MIME 推断与 UUID 解析；不持有会话状态，可被仓库与协调器复用。
  */
-internal class VaultEntryMapper(private val strings: StringsProvider) {
+internal class VaultEntryMapper(
+    private val strings: StringsProvider,
+    /**
+     * TOTP 解析参数读取通道（ISSUE-P3-273）：字段名映射与默认步长 / 位数。
+     * 缺省为 [TotpPreferences.DEFAULT]（纯 JVM 单测未注入时的回落，与「用户从未改动 TOTP 设置」同义）。
+     */
+    private val totpPreferences: () -> TotpPreferences = { TotpPreferences.DEFAULT }
+) {
 
     /**
      * KDBX 条目 → UI 投影。
@@ -157,14 +164,19 @@ internal class VaultEntryMapper(private val strings: StringsProvider) {
     )
 
     /** TOTP 面（**§163 下沉**至 [VaultEntryTotpMapping]：三者是无状态纯函数，不读仓库与会话状态；
-     * 种子与解码产物的 `finally` 擦除语义随代码同迁，未放宽）。 */
-    fun parseTotpConfig(entry: KdbxEntry): ParsedTotpConfig? = VaultEntryTotpMapping.parseTotpConfig(entry)
+     * 种子与解码产物的 `finally` 擦除语义随代码同迁，未放宽）。
+     * **ISSUE-P3-273**：解析参数（字段名 / 默认步长 / 位数）经构造注入的通道现读，
+     * 不再是「写死 30 / 6 且与设置无关」。 */
+    fun parseTotpConfig(
+        entry: KdbxEntry,
+        preferences: TotpPreferences = totpPreferences()
+    ): ParsedTotpConfig? = VaultEntryTotpMapping.parseTotpConfig(entry, preferences)
 
     fun computeTotpCode(config: ParsedTotpConfig, timestampMillis: Long = System.currentTimeMillis()): String? =
         VaultEntryTotpMapping.computeTotpCode(config, timestampMillis)
 
     private fun projectTotpFields(entry: KdbxEntry): VaultEntryTotpMapping.Projection =
-        VaultEntryTotpMapping.projectTotpFields(entry)
+        VaultEntryTotpMapping.projectTotpFields(entry, totpPreferences())
 
     fun mapIconIdToName(iconId: Int): String {
         return when (iconId) {

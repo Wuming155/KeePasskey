@@ -1003,14 +1003,14 @@
 
     <!-- ===== TOTP settings subscreen ===== -->
     <string name="totp_section_presets">Preset field names</string>
-    <string name="totp_presets_desc">Desktop KeePass plugins use different TOTP seed field names; pick a preset for better compatibility</string>
-    <string name="totp_preset_traytotp">TrayTotp ·otp</string>
-    <string name="totp_preset_keeotp">KeeOtp ·otp</string>
+    <string name="totp_presets_desc">Plugins keep TOTP data in different custom fields; a preset fills in the matching field names. The configured names are looked up first; if nothing matches, the official otp field and custom fields starting with TOTP are used instead</string>
+    <string name="totp_preset_traytotp">TrayTotp</string>
+    <string name="totp_preset_keeotp">KeeOtp</string>
     <string name="totp_section_fields">Entry fields</string>
     <string name="totp_seed_label">TOTP seed field name</string>
     <string name="totp_settings_label">Settings field name</string>
     <string name="totp_mapping_saved">TOTP field mapping saved</string>
-    <string name="totp_section_defaults">Defaults</string>
+    <string name="totp_section_defaults">Defaults (used only when the entry does not specify)</string>
     <string name="totp_digits_label">Code length</string>
     <string name="totp_digits_6">6 digits</string>
     <string name="totp_digits_8">8 digits</string>
@@ -1019,7 +1019,7 @@
     <string name="totp_step_30">30 seconds</string>
     <string name="totp_step_60">60 seconds</string>
     <string name="totp_save_btn">Save settings</string>
-    <string name="totp_info_desc">The KeePasskey engine is fully compatible with RFC 6238 HMAC-SHA1 / SHA256 and auto-corrects system clock drift. Custom field names mainly serve interoperability with third-party desktop KeePass plugins</string>
+    <string name="totp_info_desc">Lookup order: the field names configured above first; on a miss, the official otp field and custom fields starting with TOTP are used. Refresh period and code length apply only when the entry itself does not specify them, and the length is always clamped to 6-8 digits (out-of-range values fall back with a notice). The engine is compatible with RFC 6238 HMAC-SHA1 / SHA256 / SHA512 and auto-corrects system clock drift</string>
 
     <!-- ===== Credential Provider & Autofill ===== -->
     <string name="cred_unlock_action_title">Unlock KeePasskey to fill</string>

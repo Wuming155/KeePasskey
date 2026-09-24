@@ -6,26 +6,59 @@ import com.keepasskey.core.otp.Base32Decoder
 import com.keepasskey.core.otp.OtpEngine
 import com.keepasskey.core.otp.ParsedTotpConfig
 import com.keepasskey.core.otp.TotpKeyUriParser
+import com.keepasskey.core.security.ProtectedString
 
 internal object VaultEntryTotpMapping {
 
     /**
-     * 解析条目中的 TOTP 配置（标准 otp 字段优先，回退 TOTP 开头的自定义字段）。
+     * 定位条目 TOTP 配置所在的字段（**ISSUE-P3-273** 单一真相源；解析、编辑页回填、
+     * 修订快照三处共用本函数，禁各自再写一份优先序）。
+     *
+     * 优先序（**设置值优先、官方键回退**，三者缺一不可）：
+     * ① 用户设置的两个字段名（种子字段名 → 设置字段名；`fields` 与 `customFields` 两处查找，
+     *    忽略大小写）——用户显式配置即代表其库的真实结构；
+     * ② 官方标准 `otp` 字段（KeePass / KeePassXC 通用口径）；
+     * ③ `TOTP` 前缀自定义字段（KeePass2Android 系插件口径，含与 `otp` 同名的自定义字段）。
+     *
+     * ②③ 是官方 / 第三方兼容性底线，**不得**因 ① 存在而移除。
+     */
+    fun locateConfigSource(
+        entry: KdbxEntry,
+        preferences: TotpPreferences = TotpPreferences.DEFAULT
+    ): ProtectedString? {
+        listOf(preferences.seedFieldName, preferences.settingsFieldName)
+            .filter { it.isNotBlank() }
+            .forEach { name -> lookupByName(entry, name)?.let { return it } }
+        entry.fields[KdbxConstants.Fields.OTP]?.let { return it }
+        return entry.customFields.firstOrNull {
+            it.key.equals(KdbxConstants.Fields.OTP, ignoreCase = true) ||
+                it.key.startsWith(VaultEntryMapper.TOTP_CUSTOM_FIELD_PREFIX, ignoreCase = true)
+        }?.value
+    }
+
+    /** 按字段名在标准字段与自定义字段两处查找（`customFields` 走忽略大小写匹配）。 */
+    private fun lookupByName(entry: KdbxEntry, name: String): ProtectedString? =
+        entry.fields[name]
+            ?: entry.fields.entries.firstOrNull { it.key.equals(name, ignoreCase = true) }?.value
+            ?: entry.customFields.firstOrNull { it.key.equals(name, ignoreCase = true) }?.value
+
+    /**
+     * 解析条目中的 TOTP 配置（字段定位见 [locateConfigSource]）。
      *
      * ISSUE-P2-12：种子读取走 [ProtectedString.readUtf8] 字节语义，解析层不物化
      * otpauth URI / 种子 String；[ProtectedString] 的明文副本用毕即擦。
+     * ISSUE-P3-273：[preferences] 的缺省刷新周期 / 位数作为条目未声明时的回落值传入
+     * （钳制语义仍在 `TotpKeyUriParser` 内，不绕过）。
      * 返回配置的 secret 为调用方独占的 Base32 文本字节，消费后须显式清零。
      */
-    fun parseTotpConfig(entry: KdbxEntry): ParsedTotpConfig? {
-        val source = entry.fields[KdbxConstants.Fields.OTP]
-            ?: entry.customFields.firstOrNull {
-                it.key.equals(KdbxConstants.Fields.OTP, ignoreCase = true) ||
-                    it.key.startsWith(VaultEntryMapper.TOTP_CUSTOM_FIELD_PREFIX, ignoreCase = true)
-            }?.value
-            ?: return null
+    fun parseTotpConfig(
+        entry: KdbxEntry,
+        preferences: TotpPreferences = TotpPreferences.DEFAULT
+    ): ParsedTotpConfig? {
+        val source = locateConfigSource(entry, preferences) ?: return null
         val rawBytes = source.readUtf8()
         return try {
-            TotpKeyUriParser.parse(rawBytes)
+            TotpKeyUriParser.parse(rawBytes, preferences.defaultStepSeconds, preferences.defaultDigits)
         } finally {
             rawBytes.fill(0)
         }
@@ -93,9 +126,13 @@ internal object VaultEntryTotpMapping {
      * 验证器页经 [RealVaultRepository.calculateEntryTotp] 按需重算。
      * ISSUE-P2-12：配置内的 Base32 种子字节用毕即擦（不再以 String 形态驻留）。
      */
-    fun projectTotpFields(entry: KdbxEntry): Projection {
-        val parsedTotp = parseTotpConfig(entry)
-        val period = parsedTotp?.period ?: DEFAULT_TOTP_PERIOD_SECONDS
+    fun projectTotpFields(
+        entry: KdbxEntry,
+        preferences: TotpPreferences = TotpPreferences.DEFAULT
+    ): Projection {
+        val parsedTotp = parseTotpConfig(entry, preferences)
+        // ISSUE-P3-273：缺省周期 / 位数取用户设置值（原为写死的 30 / 6）
+        val period = parsedTotp?.period ?: preferences.defaultStepSeconds
         val code = try {
             parsedTotp?.let { computeTotpCode(it) }
         } finally {
@@ -103,7 +140,7 @@ internal object VaultEntryTotpMapping {
         }
         return Projection(
             period = period,
-            digits = parsedTotp?.digits ?: DEFAULT_TOTP_DIGITS,
+            digits = parsedTotp?.digits ?: preferences.defaultDigits,
             algorithm = parsedTotp?.algorithm ?: DEFAULT_TOTP_ALGORITHM,
             isHotp = parsedTotp?.isHotp == true,
             code = code,
@@ -125,7 +162,5 @@ internal object VaultEntryTotpMapping {
         val warnings: List<String> = emptyList()
     )
 
-    private const val DEFAULT_TOTP_PERIOD_SECONDS = 30
-    private const val DEFAULT_TOTP_DIGITS = 6
     private const val DEFAULT_TOTP_ALGORITHM = "SHA1"
 }

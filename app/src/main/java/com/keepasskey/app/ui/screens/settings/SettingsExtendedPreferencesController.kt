@@ -177,20 +177,23 @@ internal class SettingsExtendedPreferencesController(
 
     // ========== KP2A 扩展：TOTP 规范映射 ==========
     /**
-     * 更新 TOTP 字段映射。
+     * 更新 TOTP 字段映射与默认参数（字段名 × 2 + 刷新周期 + 位数）。
      *
-     * **注意（ISSUE-P3-29 如实标注）**：与原实现一致，本方法**只更新内存 Flow、不落盘**
-     * （未走 [updateExtended]）——这是拆分前的既有行为，本次拆分严格逐字保留，未借机改变语义。
+     * **ISSUE-P3-273**：原实现只 `publish` 内存快照、**不落盘**（重启即回默认值，且解析侧
+     * 从不读它 —— 兼具「改了不落盘」与「落盘也不消费」两类缺陷）。现改走 [updateExtended]
+     * （内存 + 持久化原子完成），并已接通解析侧：字段名以「设置值优先、官方 `otp` /
+     * `TOTP` 前缀回退」参与 `VaultEntryTotpMapping.locateConfigSource`，默认周期 / 位数作为
+     * 条目未声明时的回落值传入 `TotpKeyUriParser`（钳制语义仍在解析器内）。
      */
     fun updateTotpFieldMapping(seedField: String, settingsField: String, stepSeconds: Int, digits: Int) {
-        extendedSettingsStore.publish(
-            extendedSettingsFlow.value.copy(
+        updateExtended {
+            it.copy(
                 totpSeedFieldName = seedField,
                 totpSettingsFieldName = settingsField,
                 defaultTotpStepSeconds = stepSeconds,
                 defaultTotpDigits = digits
             )
-        )
+        }
     }
 
     // ========== TASK-47：已泄露密码检测（联网，默认关闭） ==========

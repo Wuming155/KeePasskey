@@ -73,6 +73,10 @@ object TotpKeyUriParser {
     private const val DEFAULT_DIGITS = 6
     private const val DEFAULT_ALGORITHM = "SHA1"
 
+    /** RFC 6238 / 官方实现共同接受的验证码位数区间（钳制上下界，ISSUE-P3-273 复用）。 */
+    private const val DIGITS_MIN = 6
+    private const val DIGITS_MAX = 8
+
     private const val KEY_SECRET = "secret"
     private const val KEY_PERIOD = "period"
     private const val KEY_DIGITS = "digits"
@@ -109,15 +113,26 @@ object TotpKeyUriParser {
      * 字节语义解析入口（ISSUE-P2-12）：输入不物化为 String，种子全程以 ASCII 字节承载。
      * [uriOrSecret] 归调用方所有，本方法只读不写；返回配置的 [ParsedTotpConfig.secret]
      * 为**全新副本**，用毕须由调用方 fill(0) 擦除。
+     *
+     * ISSUE-P3-273：`period` / `digits` 的**缺省值可由调用方注入**（用户偏好「默认刷新周期 /
+     * 验证码位数」）——只在条目自身未声明该参数时生效（[parsePlainBase32] 的纯 Base32 种子、
+     * 或 otpauth URI 缺 `period` / `digits` 参数）。注入值**同样过钳制**：
+     * 非正的周期与不在 `6..8` 的位数一律回落内置常量，故「不得绕过钳制语义」不被破坏。
      */
-    fun parse(uriOrSecret: ByteArray?): ParsedTotpConfig? {
+    fun parse(
+        uriOrSecret: ByteArray?,
+        defaultPeriodSeconds: Int = DEFAULT_PERIOD,
+        defaultDigits: Int = DEFAULT_DIGITS
+    ): ParsedTotpConfig? {
         if (uriOrSecret == null || uriOrSecret.isEmpty()) return null
+        val period = if (defaultPeriodSeconds > 0) defaultPeriodSeconds else DEFAULT_PERIOD
+        val digits = if (defaultDigits in DIGITS_MIN..DIGITS_MAX) defaultDigits else DEFAULT_DIGITS
         val working = trimAsciiWhitespace(uriOrSecret)
         return try {
             when {
                 working.isEmpty() -> null
-                startsWithIgnoreCase(working, OTPAUTH_PREFIX) -> parseOtpAuthUri(working)
-                else -> parsePlainBase32(working)
+                startsWithIgnoreCase(working, OTPAUTH_PREFIX) -> parseOtpAuthUri(working, period, digits)
+                else -> parsePlainBase32(working, period, digits)
             }
         } finally {
             // 工作副本含种子字节，成功/失败路径一律擦除
@@ -133,17 +148,25 @@ object TotpKeyUriParser {
      * ISSUE-P2-15：收敛为**仅测试可见**（`internal`）——String 入参本身即不可擦除的种子物化入口，
      * 生产代码不得再经此重载；核心单测（`core/src/test`）因同模块 friend 可见性仍可调用。
      */
-    internal fun parse(uriOrSecret: String?): ParsedTotpConfig? {
+    internal fun parse(
+        uriOrSecret: String?,
+        defaultPeriodSeconds: Int = DEFAULT_PERIOD,
+        defaultDigits: Int = DEFAULT_DIGITS
+    ): ParsedTotpConfig? {
         if (uriOrSecret.isNullOrBlank()) return null
         val bytes = uriOrSecret.toByteArray(StandardCharsets.UTF_8)
         return try {
-            parse(bytes)
+            parse(bytes, defaultPeriodSeconds, defaultDigits)
         } finally {
             bytes.fill(0)
         }
     }
 
-    private fun parseOtpAuthUri(uri: ByteArray): ParsedTotpConfig? {
+    private fun parseOtpAuthUri(
+        uri: ByteArray,
+        defaultPeriodSeconds: Int,
+        defaultDigits: Int
+    ): ParsedTotpConfig? {
         // 形如 otpauth://<type>/<label>?<query>
         val slash = indexOfByte(uri, BYTE_SLASH, OTPAUTH_PREFIX.size)
         // ISSUE-P3-49：类型段（totp / hotp）
@@ -158,8 +181,8 @@ object TotpKeyUriParser {
 
         val query = if (question >= 0) uri.copyOfRange(question + 1, uri.size) else ByteArray(0)
         var secretRaw: ByteArray? = null
-        var period = DEFAULT_PERIOD
-        var digits = DEFAULT_DIGITS
+        var period = defaultPeriodSeconds
+        var digits = defaultDigits
         var algorithm = DEFAULT_ALGORITHM
         var issuerParam: String? = null
         var counter = 0L
@@ -184,14 +207,14 @@ object TotpKeyUriParser {
                         }
                         key.equals(KEY_PERIOD, ignoreCase = true) ->
                             period = queryValueString(query, valueStart, nextAmp)
-                                .toIntOrNull() ?: DEFAULT_PERIOD
+                                .toIntOrNull() ?: defaultPeriodSeconds
                         key.equals(KEY_DIGITS, ignoreCase = true) -> {
                             val parsed = queryValueString(query, valueStart, nextAmp).toIntOrNull()
                             // ISSUE-P2-289 AC③：越界回落带诊断（禁静默改写）；钳制语义不变
-                            if (parsed != null && parsed !in 6..8) {
-                                warnings += "digits=$parsed 超出 6..8，已回落 $DEFAULT_DIGITS 位"
+                            if (parsed != null && parsed !in DIGITS_MIN..DIGITS_MAX) {
+                                warnings += "digits=$parsed 超出 $DIGITS_MIN..$DIGITS_MAX，已回落 $defaultDigits 位"
                             }
-                            digits = parsed ?: DEFAULT_DIGITS
+                            digits = parsed ?: defaultDigits
                         }
                         key.equals(KEY_ALGORITHM, ignoreCase = true) -> {
                             val raw = queryValueString(query, valueStart, nextAmp)
@@ -228,8 +251,8 @@ object TotpKeyUriParser {
             val issuer = (issuerParam ?: label.substringBefore(':')).trim()
             return ParsedTotpConfig(
                 secret = normalized,
-                period = if (period > 0) period else DEFAULT_PERIOD,
-                digits = if (digits in 6..8) digits else DEFAULT_DIGITS,
+                period = if (period > 0) period else defaultPeriodSeconds,
+                digits = if (digits in DIGITS_MIN..DIGITS_MAX) digits else defaultDigits,
                 algorithm = algorithm,
                 issuer = issuer.ifBlank { null },
                 account = account.ifBlank { null },
@@ -284,7 +307,11 @@ object TotpKeyUriParser {
         else -> -1
     }
 
-    private fun parsePlainBase32(candidate: ByteArray): ParsedTotpConfig? {
+    private fun parsePlainBase32(
+        candidate: ByteArray,
+        defaultPeriodSeconds: Int,
+        defaultDigits: Int
+    ): ParsedTotpConfig? {
         val clean = normalizeBase32(candidate)
         return try {
             if (clean.isEmpty() || !isBase32Alphabet(clean)) {
@@ -292,8 +319,8 @@ object TotpKeyUriParser {
             } else {
                 ParsedTotpConfig(
                     secret = clean.copyOf(),
-                    period = DEFAULT_PERIOD,
-                    digits = DEFAULT_DIGITS,
+                    period = defaultPeriodSeconds,
+                    digits = defaultDigits,
                     algorithm = DEFAULT_ALGORITHM
                 )
             }

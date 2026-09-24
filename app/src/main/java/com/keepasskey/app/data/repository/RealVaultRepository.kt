@@ -47,7 +47,10 @@ class RealVaultRepository @Inject constructor(
     private val strings: com.keepasskey.app.ui.model.StringsProvider,
     // ISSUE-P3-154：整库投影调度器（生产 Dispatchers.Default；单测注入测试调度器）。
     // **刻意不给默认值**——默认值会让调用点悄悄退化为「投影落在收集上下文」，正是本条要消除的行为
-    @VaultProjectionDispatcher private val projectionDispatcher: CoroutineDispatcher
+    @VaultProjectionDispatcher private val projectionDispatcher: CoroutineDispatcher,
+    // ISSUE-P3-273：TOTP 解析参数通道（种子 / 设置字段名 + 默认步长 / 位数）。
+    // 解析、编辑页回填、修订快照三处同源消费，使「设置值真实参与解析」成立
+    private val totpPreferencesSource: TotpPreferencesSource
 ) : VaultRepository {
 
     private val repositoryScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -55,7 +58,7 @@ class RealVaultRepository @Inject constructor(
     private val databasesFlow = MutableStateFlow<List<VaultDatabaseInfo>>(emptyList())
 
     // TASK-21 拆分：投影映射器与领域协调器（回收站/Passkey/模板），仓库仅保留 CRUD 编排
-    private val entryMapper = VaultEntryMapper(strings)
+    private val entryMapper = VaultEntryMapper(strings) { totpPreferencesSource.read() }
     private val recycleBin = RecycleBinCoordinator(strings, databaseSession) { persistSession() }
     private val entryDuplicator = EntryDuplicateCoordinator(strings, databaseSession) { persistSession() }
     private val customIcons = CustomIconCoordinator(strings, databaseSession) { persistSession() }
@@ -71,7 +74,11 @@ class RealVaultRepository @Inject constructor(
         selectDatabase = ::selectDatabase
     )
     private val entryWriter = VaultEntryWriteCoordinator(strings, databaseSession, entryMapper) { persistSession() }
-    private val secretReader = VaultEntrySecretReader(databaseSession, entryMapper)
+    private val secretReader = VaultEntrySecretReader(
+        databaseSession,
+        entryMapper,
+        totpPreferences = { totpPreferencesSource.read() }
+    )
     private val groups = VaultGroupCoordinator(databaseSession, entryMapper) { persistSession() }
     private val exporter = VaultExportCoordinator(context, strings, databaseSession) { persistSession() }
 
