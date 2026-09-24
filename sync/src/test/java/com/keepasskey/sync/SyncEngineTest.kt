@@ -6,6 +6,7 @@ import com.keepasskey.sync.engine.SyncCommitResult
 import com.keepasskey.sync.engine.SyncEngine
 import com.keepasskey.sync.engine.SyncIntegrityMac
 import com.keepasskey.sync.engine.SyncOpenResult
+import com.keepasskey.sync.engine.SyncResolveUploadResult
 import com.keepasskey.sync.engine.SyncRollbackGuard
 import com.keepasskey.sync.model.RemoteFileMetadata
 import com.keepasskey.sync.model.SyncException
@@ -284,8 +285,10 @@ class SyncEngineTest {
 
         val mergedData = "merged-final-content".toByteArray()
         val res = engine.markResolvedAndUpload(remotePath, mergedData, expectedEtag = null)
-        assertTrue(res.isSuccess)
-        val newEtag = res.getOrThrow()
+        assertTrue(res is SyncResolveUploadResult.Uploaded)
+        // ISSUE-P2-313：基线前移随采纳确认结算（引擎级测试直接结算）
+        (res as SyncResolveUploadResult.Uploaded).settlement.accept()
+        val newEtag = res.newEtag
         assertTrue(newEtag.isNotEmpty())
 
         assertFalse(syncCache.hasLocalChanges(remotePath))
@@ -418,7 +421,7 @@ class SyncEngineTest {
 
         fakeProvider.networkError = true
         val res = engine.markResolvedAndUpload(remotePath, "merged-bytes".toByteArray(), expectedEtag = "etag-1")
-        assertTrue(res.isFailure)
+        assertTrue(res is SyncResolveUploadResult.Failed)
 
         // 写序约定（先上传后落缓存）：失败时缓存与基线保持原状，
         // 本地未同步修改仍在，下次同步自动重试
@@ -495,8 +498,8 @@ class SyncEngineTest {
         // 而不是通过校验静默覆盖他端更新
         fakeProvider.remoteFiles[remotePath] = FakeRemoteFile("concurrent-mod".toByteArray(), etag = "etag-other")
         val res = engine.markResolvedAndUpload(remotePath, "merged-bytes".toByteArray(), expectedEtag = "etag-1")
-        assertTrue(res.isFailure)
-        assertTrue(res.exceptionOrNull() is SyncException.ConflictError)
+        assertTrue(res is SyncResolveUploadResult.Failed)
+        assertTrue((res as SyncResolveUploadResult.Failed).error is SyncException.ConflictError)
         // ISSUE-P1-275 AC④：冲突时刻 ETag 必须原样抵达 Provider 预条件（禁止中途替换为重探值）
         assertEquals("冲突时刻 etag 必须原样透传", "etag-1", fakeProvider.lastExpectedEtag)
         // 远端内容未被覆盖
@@ -513,7 +516,8 @@ class SyncEngineTest {
         acceptAdoption(engine.openRemote(remotePath))
 
         val res = engine.markResolvedAndUpload(remotePath, "merged-bytes".toByteArray(), expectedEtag = null)
-        assertTrue(res.isSuccess)
+        assertTrue(res is SyncResolveUploadResult.Uploaded)
+        (res as SyncResolveUploadResult.Uploaded).settlement.accept()
         assertEquals(
             "必须原样下传 null（无条件 PUT），而非重探到的 etag-live-remote",
             null,
@@ -698,6 +702,34 @@ class SyncEngineTest {
         adoption2.accept() // reject 后 accept 不得再落地（句柄已终结）
         assertArrayEquals("reject 已终结算力，accept 不得补写缓存", v1, syncCache.readCache(remotePath))
         assertArrayEquals("基线同样不得补写", v1, syncCache.readBaseContent(remotePath))
+    }
+
+    @Test
+    fun `ISSUE_P2_313 markResolvedAndUpload 采纳失败 reject 后基线保持旧值且下轮按冲突收敛`() = runTest {
+        val v1 = "content-v1".toByteArray()
+        fakeProvider.remoteFiles[remotePath] = FakeRemoteFile(v1, etag = "etag-1")
+        acceptAdoption(engine.openRemote(remotePath))
+        val baseBefore = syncCache.getState(remotePath)?.baseVersion
+
+        // 合并产物上传成功，但采纳失败（校验-采用 / 落盘失败）⇒ reject
+        val merged = "merged-final-content".toByteArray()
+        val res = engine.markResolvedAndUpload(remotePath, merged, expectedEtag = "etag-1")
+        assertTrue(res is SyncResolveUploadResult.Uploaded)
+        (res as SyncResolveUploadResult.Uploaded).settlement.reject()
+
+        // 云端已有 merged、缓存工作副本已含 merged，但基线保持旧值 ⇒ hasLocalChanges 为真
+        assertArrayEquals("云端必须已接收合并产物", merged, fakeProvider.remoteFiles[remotePath]?.data)
+        assertArrayEquals("缓存工作副本必须含合并产物", merged, syncCache.readCache(remotePath))
+        assertEquals("基线版本不得前移", baseBefore, syncCache.getState(remotePath)?.baseVersion)
+        assertEquals("ETag 元数据不得前移", "etag-1", syncCache.getState(remotePath)?.etag)
+        assertTrue("下轮必须按冲突流程收敛而非误判已同步", syncCache.hasLocalChanges(remotePath))
+
+        // 模拟下轮：本地同内容重试上传 → 基线前移落地（收敛）
+        val retry = engine.commitLocalForce(remotePath, merged)
+        assertTrue(retry is SyncCommitResult.Uploaded)
+        (retry as SyncCommitResult.Uploaded).settlement!!.accept()
+        assertFalse(syncCache.hasLocalChanges(remotePath))
+        assertArrayEquals(merged, syncCache.readBaseContent(remotePath))
     }
 
     /** 固定密钥的等价 HMAC（JVM 可测） */

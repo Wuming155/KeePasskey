@@ -141,6 +141,26 @@ sealed class SyncOpenResult {
 }
 
 /**
+ * ISSUE-P2-313：`markResolvedAndUpload` 的终态（基线三步延后为采纳结算句柄）。
+ *
+ * 合并产物上传成功时本地采纳（校验-采用 + 落盘）仍在**之后**——基线若已即时前移到 merged 内容，
+ * 采纳失败后引擎无回滚，下轮将以陈旧树「本地赢」整库覆盖云端刚接收的 merged 内容
+ * （他端改动丢失）。故终态携带 [RemoteAdoptionSettlement]：调用方在采纳确认成功后
+ * `accept`、采纳失败 / 落盘失败 `reject`（基线保持旧值，下轮按冲突流程收敛，不丢任何一侧）。
+ */
+sealed interface SyncResolveUploadResult {
+
+    /** 上传成功：基线前移**尚未落地**，须在采纳确认后结算 */
+    data class Uploaded(
+        val newEtag: String,
+        val settlement: RemoteAdoptionSettlement
+    ) : SyncResolveUploadResult
+
+    /** 上传失败（含 412 `SyncException.ConflictError`，调用方按原口径取 [error] 分派重入） */
+    data class Failed(val error: Throwable) : SyncResolveUploadResult
+}
+
+/**
  * commitLocal 提交写结果。
  */
 sealed class SyncCommitResult {

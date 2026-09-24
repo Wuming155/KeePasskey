@@ -50,14 +50,6 @@
 > `ISSUE-P2-310`（附件被系统回收 fail-open）已于 §318 闭环；
 > `ISSUE-P2-311`（64 MiB 附件写读口径互斥）已于 §319 闭环。
 
-### ISSUE-P2-313：合并主路径（markResolvedAndUpload）基线前移仍先于本地采纳——采纳失败后同型「陈旧树本地赢覆盖」损失链（§317 整改中发现的同型残余）
-
-- **核实时间点**：2026-09-25（`ISSUE-P2-308` 整改批逐行反校；412 重入侧已随该批接入采纳结算句柄，主路径未接入）。
-- **核实方式**：直读 `SyncEngine.markResolvedAndUpload`（上传 → `writeCache` → `advanceBaseAndPersist` → `recordAccepted` 全部在引擎内即时落地，返回 `Result<String>` 不携带结算句柄）与两处采纳点：`autoMergeAndUpload`（`SyncConflictAutoMerge.kt`：上传成功 → `adoptMergedIfSessionUnchanged` 失败走 `abortDiverged`）与 `resolveConflicts` → `adoptMergedDatabase`（`SyncConflictResolution.kt`：采纳失败 / `save()` 失败仅返回 `Error`）。
-- **背景与根因**：与 `ISSUE-P2-308` 同型——合并产物上传成功时引擎已把基线前移到 merged 内容（cache=merged、baseversion=sha(merged)、ETag 前移），而本地采纳在**上传之后**；采纳失败（校验-采用发现窗口内会话被 UI 编辑替换，或落盘失败）只返回 Error、基线不回退。下一周期：lastSyncedDb 滞留旧树 ⇒ `hasLocalContentChanged` 判真 ⇒ 以「旧树+窗口编辑」重写缓存 ⇒ `hasLocalChanges` 为真而 baseEtag==remoteEtag ⇒ **本地赢整库上传**，把云端刚接收的 merged 内容（含他端改动）静默覆盖。触发前提＝合并上传网络窗口内发生 UI 编辑并保存（`adoptDatabaseIfUnchanged` 守卫命中）或本地落盘失败，比 P2-308 的「解析/保存失败」窗口更窄，但损失形态相同（跨端灭他端数据）。`ISSUE-P2-308` 批已修：`commitLocal` / `commitLocalForce` / `RemoteSynced` 三类结果的采纳结算（含 autoMerge 412 重入与用户裁决 412 重入侧）；**主路径 `markResolvedAndUpload` 因返回 `Result<String>` 无法携带句柄而未动**。
-- **涉及文件**：`sync/.../engine/SyncEngine.kt`（`markResolvedAndUpload` 返回类型）、`app/.../sync/SyncConflictAutoMerge.kt`、`SyncConflictResolution.kt`。
-- **验收标准**：AC① `markResolvedAndUpload` 改为携带 [RemoteAdoptionSettlement] 的类型化终态（上传成功 ⇒ Uploaded(etag, settlement)，基线三步延后），两处调用方在采纳确认成功后 `accept`、采纳失败 / 落盘失败 `reject`；AC② 参数化用例锁定「采纳失败 ⇒ 基线保持旧值、下轮按冲突收敛且云端 merged 内容不被陈旧树覆盖」；AC③ `test` 全绿 + `gate_readings.py` 7/7 PASS。
-
 ## P3 低危问题、特性接线与体验优化（4 项）
 
 ### ISSUE-P3-300：弱 ETag 乐观锁的**真实 DAV 服务器矩阵未实测**——弱 ETag 服务器上的同步收敛行为待证（§272 AC⑤ 显式残余）

@@ -458,7 +458,7 @@ class SyncEngine(
     }
 
     /**
-     * 在冲突合并解决完成后提交最终数据，并将基准版本前移。
+     * 在冲突合并解决完成后提交最终数据，并**待采纳确认后**前移基准版本。
      *
      * @param expectedEtag 冲突发生时刻记录的远端 ETag。必须使用该值做 If 预条件乐观锁，
      *   而非重新探测的当前 ETag——用户决策期间远端可能再次被修改，
@@ -471,19 +471,28 @@ class SyncEngine(
      * 写序约定（先上传后落缓存）：上传失败时缓存与基线保持原状
      * （本地未同步修改仍在，下次同步自动重试），避免"缓存已含合并结果但
      * 基线未动、内存会话未更新"的三处不一致状态。
+     *
+     * ISSUE-P2-313：基线前移与高水位记录随 [SyncResolveUploadResult.Uploaded.settlement]
+     * 延后到调用方采纳确认（校验-采用 + 本地落盘）成功之后——采纳失败 reject ⇒ 基线保持旧值，
+     * 下轮按冲突流程收敛，云端 merged 内容不被陈旧树覆盖。
      */
     suspend fun markResolvedAndUpload(
         remotePath: String,
         mergedBytes: ByteArray,
         expectedEtag: String?
-    ): Result<String> = withContext(Dispatchers.IO) {
-        runCatching {
+    ): SyncResolveUploadResult = withContext(Dispatchers.IO) {
+        try {
             val newEtag = provider.uploadAtomic(remotePath, mergedBytes, expectedEtag?.takeIf { it.isNotBlank() })
                 .getOrThrow()
             val localHash = cache.writeCache(remotePath, mergedBytes)
-            advanceBaseAndPersist(cache, remotePath, newEtag, localHash, mergedBytes)
-            recordAccepted(remotePath, mergedBytes)
-            newEtag
+            SyncResolveUploadResult.Uploaded(
+                newEtag,
+                DeferredBaselineSettlement(
+                    this@SyncEngine, remotePath, null, mergedBytes, localHash, newEtag, null
+                )
+            )
+        } catch (t: Throwable) {
+            SyncResolveUploadResult.Failed(t)
         }
     }
 }

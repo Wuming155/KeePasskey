@@ -389,6 +389,8 @@
 
 | §319 | 附件写读口径同源批次：`ISSUE-P2-311` 闭环（P2 2 → 1）。**AC① 同源派生**：`AttachmentSizeLimits.MAX_ATTACHMENT_BYTES` 由独立字面量 64 MiB 改为 `InnerHeader.MAX_INNER_FIELD_BYTES − 1`（BINARY 字段 = 1 flags + 内容），UI 放行的最大附件写出的恰是读侧能接受的最长合法字段，写读互斥被取值关系本身消除；`MAX_INLINE_MATERIALIZED_BYTES` / `MAX_POOL_ITEM_MATERIALIZED_BYTES` 随之 const→val，超限文案改 1 MiB 向上取整显示。**AC② 写侧累计闸**：新增 `KdbxAttachmentPoolBudgetExceededException`，`serialize` 在任何字段写出之前判池累计 `> MAX_BINARY_POOL_TOTAL_BYTES`（读侧同一单值同一判式），与 §318 `verifySpillIntact` 合并为写前置守卫段。**AC③ 参数化往返**：单附件 = 上界值本身、多附件累计临界（128 MiB − 2 KiB）两组逐字节等价必通；3 × 50 MiB 组合保存期被类型化异常拦截。**实测新发现（如实登记）**：池累计的可过临界受**整包解压上限**（128 MiB 含池+XML）先于池闸约束——恰为 2 × (64 MiB − 1) 的组合先撞整包 GZip 守卫，与池闸「非 binding」既有定位一致，两闸同源（均由整包上限派生）写读不互斥。InnerHeader.kt 触 tier1 线 ⇒ `InnerHeaderReader` 外置同包协作类（函数体逐行搬运，5 常量 private→internal）。`tests=2760`（+3）全绿；门禁 7/7 PASS | `ISSUE-P2-311` | [`319-附件写读口径同源批次.md`](resolved/batches/319-附件写读口径同源批次.md) |
 
+| §320 | 合并主路径采纳结算批次：`ISSUE-P2-313` 闭环（**P2 区清零**）。`markResolvedAndUpload` 终态由 `Result<String>` 改为 `SyncResolveUploadResult`（`Uploaded(newEtag, settlement)` / `Failed(error)`），基线前移与高水位记录延后到调用方采纳确认之后：用户裁决路径经 `adoptMergedDatabase` 结算（§317 已有结算参数，本批接通主路径）、自动合并路径在 `adoptMergedIfSessionUnchanged` 失败 / 落盘失败时 `reject`、全部成功 `accept`；`Failed` 的 412 重入与错误口径与 `Result` 时期一致。**AC②**：引擎级 1 例（reject ⇒ 云端已含 merged、基线保持旧值、hasLocalChanges 为真按冲突收敛）+ 端到端 1 例（合并上传窗口注入窗口编辑 ⇒ abortDiverged；第三轮 provider 字节仍含远端新增且双侧内容保留——整改前陈旧树本地赢覆盖对端条目）；既有 4 例适配新终态；fake Provider 增上传钩子。`tests=2762`（+2）全绿；门禁 7/7 PASS | `ISSUE-P2-313` | [`320-合并主路径采纳结算批次.md`](resolved/batches/320-合并主路径采纳结算批次.md) |
+
 ## 分册导航
 
 | 分册 | 覆盖批次 | 时间 | 索引 |

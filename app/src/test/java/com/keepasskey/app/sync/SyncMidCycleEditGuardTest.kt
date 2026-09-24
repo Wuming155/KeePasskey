@@ -275,6 +275,57 @@ class SyncMidCycleEditGuardTest {
             )
         }
 
+    @Test
+    fun `合并采纳失败后重试：云端合并产物不被本地陈旧树覆盖（ISSUE-P2-313 AC②）`() =
+        runTest(testDispatcher) {
+            val fx = newFixture("mergedretry")
+            createVault(fx, "mergedretry")
+
+            // 第一轮：建立远端基线（L0）
+            val baseline = fx.cycle.runSyncCycle()
+            assertTrue("首轮应建立基线: $baseline", baseline is SyncOutcome.UploadedLocal)
+            val l0 = fx.databaseSession.databaseFlow.value!!
+
+            // 本地未同步修改（本地新增）＋ 远端独立推进 L1（远端新增）⇒ 双方无条目级冲突
+            // ⇒ 第二轮走自动合并上传（markResolvedAndUpload 主路径）
+            fx.databaseSession.saveEntry(entry("本地新增"))
+            val remoteEntry = entry("远端新增")
+            val l1rBytes = fx.codec.serializeLocalDatabase(
+                l0.copy(rootGroup = l0.rootGroup.copy(entries = l0.rootGroup.entries + remoteEntry))
+            )!!
+            fx.provider.upload(fx.remotePath, l1rBytes, null)
+
+            // 第二轮：合并上传窗口内注入「用户编辑并保存」⇒ 校验-采用如实中止（abortDiverged）
+            fx.provider.onNextUpload = {
+                fx.databaseSession.saveEntry(entry("窗口内编辑"))
+                fx.databaseSession.save()
+            }
+            val diverged = fx.cycle.runSyncCycle()
+            assertTrue("合并采纳失败必须如实中止: $diverged", diverged is SyncOutcome.Error)
+
+            // 第三轮（AC②）：整改前基线已前移到 merged 内容，本轮会以「旧树+窗口编辑」
+            // 本地赢整库上传，把云端 merged（含远端新增）静默覆盖；整改后基线保持 L0，
+            // 本轮按冲突三方合并收敛，双侧内容全部保留
+            val outcome = fx.cycle.runSyncCycle()
+            assertTrue(
+                "第三轮应按冲突合并收敛成功: $outcome",
+                outcome is SyncOutcome.MergedAndUploaded || outcome is SyncOutcome.UploadedLocal
+            )
+            val remoteTitles = titlesOf(
+                com.keepasskey.database.file.KdbxFile.load(
+                    fx.provider.remoteBytes(fx.remotePath).inputStream(),
+                    "MidCycleGuard#2026".toCharArray(),
+                    null
+                )
+            )
+            assertTrue(
+                "云端合并产物中的对端新增条目不得被陈旧树覆盖: $remoteTitles",
+                "远端新增" in remoteTitles
+            )
+            assertTrue("本地新增不得丢失: $remoteTitles", "本地新增" in remoteTitles)
+            assertTrue("窗口内编辑不得丢失: $remoteTitles", "窗口内编辑" in remoteTitles)
+        }
+
     /** 进程内假 Provider：支持「下一次下载前注入一次动作」的窗口编辑钩子。 */
     private class MidCycleEditProvider : SyncProvider {
 
@@ -282,6 +333,9 @@ class SyncMidCycleEditGuardTest {
 
         /** 非 null 时在下一次 download 内执行一次后自动清除（模拟窗口内用户编辑）。 */
         var onNextDownload: (suspend () -> Unit)? = null
+
+        /** 非 null 时在下一次 upload 落库**之后**执行一次并自动清除（模拟上传窗口内用户编辑）。 */
+        var onNextUpload: (suspend () -> Unit)? = null
 
         fun remoteBytes(remotePath: String): ByteArray = remote.getValue(remotePath).first
 
@@ -329,6 +383,10 @@ class SyncMidCycleEditGuardTest {
             // ETag 必须随内容变化（内容增长时 size 变化，保证引擎能观测到「远端已更新」）
             val etag = "etag_${data.size}_${data.fold(0) { acc, b -> (acc + b) and 0x7FFF }}"
             remote[remotePath] = Pair(data, etag)
+            onNextUpload?.let { hook ->
+                onNextUpload = null
+                hook()
+            }
             return Result.success(etag)
         }
 

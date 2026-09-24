@@ -7,6 +7,7 @@ import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.database.file.KdbxDatabase
 import com.keepasskey.sync.engine.RemoteAdoptionSettlement
 import com.keepasskey.sync.engine.SyncCache
+import com.keepasskey.sync.engine.SyncResolveUploadResult
 import com.keepasskey.sync.engine.SyncCommitResult
 import com.keepasskey.sync.engine.SyncEngine
 import com.keepasskey.sync.merge.ConflictResolutionChoice
@@ -93,20 +94,24 @@ internal suspend fun SyncConflictController.resolveConflicts(
             mergedBytes,
             expectedEtag = expectedEtagForConflictUpload(pendingRemoteEtag)
         )
-        if (uploadResult.isSuccess) {
-            return@withContext adoptMergedDatabase(mergedDb)
+        when (uploadResult) {
+            is SyncResolveUploadResult.Uploaded ->
+                // ISSUE-P2-313：采纳结论随结算句柄回写（adoptMergedDatabase 内 accept/reject）
+                return@withContext adoptMergedDatabase(mergedDb, uploadResult.settlement)
+            is SyncResolveUploadResult.Failed -> {
+                val ex = uploadResult.error
+                if (ex is com.keepasskey.sync.model.SyncException.ConflictError) {
+                    // ISSUE-P1-275 AC③：合并上传 412 ⇒ 重新进入冲突流程，而非归一为一次性错误。
+                    return@withContext handleResolveUploadSuperseded(
+                        engine = engine,
+                        path = path,
+                        mergedDb = mergedDb,
+                        mergedBytes = mergedBytes
+                    )
+                }
+                SyncOutcome.Error(strings.get(R.string.sync_error_upload_resolved_failed, ex.message))
+            }
         }
-        val ex = uploadResult.exceptionOrNull()
-        if (ex is com.keepasskey.sync.model.SyncException.ConflictError) {
-            // ISSUE-P1-275 AC③：合并上传 412 ⇒ 重新进入冲突流程，而非归一为一次性错误。
-            return@withContext handleResolveUploadSuperseded(
-                engine = engine,
-                path = path,
-                mergedDb = mergedDb,
-                mergedBytes = mergedBytes
-            )
-        }
-        SyncOutcome.Error(strings.get(R.string.sync_error_upload_resolved_failed, ex?.message))
     }
 }
 
