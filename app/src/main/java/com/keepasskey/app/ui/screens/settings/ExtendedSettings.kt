@@ -27,7 +27,6 @@ data class ExtendedSettings(
     val lockWhenScreenOff: Boolean = true,
     val lockWhenNavigateBack: Boolean = false,
     val clearPasswordOnLeave: Boolean = false,
-    val rememberRecentFiles: Boolean = true,
     val rememberKeyFileLocation: Boolean = true,
     val showKillAppOption: Boolean = false,
 
@@ -77,7 +76,6 @@ data class ExtendedSettings(
     val showGroupInEntry: Boolean = false,
     val listDensity: ListDensity = ListDensity.NORMAL,
     val autoActivateSearchOnOpen: Boolean = false,
-    val iconSet: IconSetOption = IconSetOption.MATERIAL,
 
     // TOTP 规范字段映射
     val totpSeedFieldName: String = "TOTP Seed",

@@ -63,8 +63,6 @@ internal class SettingsExtendedPreferencesController(
 
     fun setClearPasswordOnLeave(enabled: Boolean) = updateExtended { it.copy(clearPasswordOnLeave = enabled) }
 
-    fun setRememberRecentFiles(enabled: Boolean) = updateExtended { it.copy(rememberRecentFiles = enabled) }
-
     fun setRememberKeyFileLocation(enabled: Boolean) = updateExtended { it.copy(rememberKeyFileLocation = enabled) }
 
     fun setShowKillAppOption(enabled: Boolean) = updateExtended { it.copy(showKillAppOption = enabled) }
@@ -120,8 +118,6 @@ internal class SettingsExtendedPreferencesController(
     fun setListDensity(density: ListDensity) = updateExtended { it.copy(listDensity = density) }
 
     fun setAutoActivateSearchOnOpen(enabled: Boolean) = updateExtended { it.copy(autoActivateSearchOnOpen = enabled) }
-
-    fun setIconSet(iconSet: IconSetOption) = updateExtended { it.copy(iconSet = iconSet) }
 
     // ========== KP2A 扩展：文件处理与高级同步策略 ==========
     fun setUseOfflineCache(enabled: Boolean) {

@@ -174,7 +174,6 @@ internal fun buildSettingsUiState(
     lockWhenScreenOff = extState.lockWhenScreenOff,
     lockWhenNavigateBack = extState.lockWhenNavigateBack,
     clearPasswordOnLeave = extState.clearPasswordOnLeave,
-    rememberRecentFiles = extState.rememberRecentFiles,
     rememberKeyFileLocation = extState.rememberKeyFileLocation,
     showKillAppOption = extState.showKillAppOption,
     // ISSUE-P3-68：重试节流开关与最长锁定时长（仓库直写项，userSettings 为单一真相源）
@@ -202,7 +201,6 @@ internal fun buildSettingsUiState(
     showGroupInEntry = extState.showGroupInEntry,
     listDensity = extState.listDensity,
     autoActivateSearchOnOpen = extState.autoActivateSearchOnOpen,
-    iconSet = extState.iconSet,
     showAuthenticatorTab = userSettings.showAuthenticatorTab,
     showGeneratorTab = userSettings.showGeneratorTab,
 

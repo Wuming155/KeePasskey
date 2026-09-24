@@ -186,7 +186,6 @@ internal fun NavGraphBuilder.settingsSecurityRoute(navController: NavHostControl
             onLockWhenScreenOffToggle = settingsViewModel::setLockWhenScreenOff,
             onLockWhenNavigateBackToggle = settingsViewModel::setLockWhenNavigateBack,
             onClearPasswordOnLeaveToggle = settingsViewModel::setClearPasswordOnLeave,
-            onRememberRecentFilesToggle = settingsViewModel::setRememberRecentFiles,
             onRememberKeyFileLocationToggle = settingsViewModel::setRememberKeyFileLocation,
             onShowKillAppOptionToggle = settingsViewModel::setShowKillAppOption
         )
@@ -222,7 +221,6 @@ internal fun NavGraphBuilder.settingsThemeRoute(navController: NavHostController
             onShowGroupInEntryToggle = settingsViewModel::setShowGroupInEntry,
             onListDensitySelected = settingsViewModel::setListDensity,
             onAutoActivateSearchOnOpenToggle = settingsViewModel::setAutoActivateSearchOnOpen,
-            onIconSetSelected = settingsViewModel::setIconSet,
             onShowAuthenticatorTabToggle = settingsViewModel::setShowAuthenticatorTab,
             onShowGeneratorTabToggle = settingsViewModel::setShowGeneratorTab
         )

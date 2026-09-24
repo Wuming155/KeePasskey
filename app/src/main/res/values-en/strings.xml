@@ -658,8 +658,6 @@
     <string name="sec_section_memory">Memory &amp; key protection</string>
     <string name="sec_keyfile_title">Key file policy</string>
     <string name="sec_keyfile_sub">The key file stays in memory only while unlocked and is wiped on lock</string>
-    <string name="sec_recent_files_title">Clear recent files</string>
-    <string name="sec_recent_files_sub">Remove vault open history</string>
     <string name="sec_kill_app_title">Wipe process memory on lock</string>
     <string name="sec_kill_app_sub">Release the master key and plaintext caches immediately on lock</string>
     <string name="sec_arch_title">Security architecture</string>
@@ -825,13 +823,6 @@
     <!-- ISSUE-P3-18 honesty fix: the previous copy promised a "quick lock shortcut", but this
          notification carries NO action button (status + tap-to-open only). Aligned with reality. -->
     <string name="theme_unlocked_notif_sub">Show the current unlocked status in the notification bar; tap to return to the app</string>
-    <string name="theme_section_iconset">Icon set</string>
-    <string name="theme_iconset_material">Material</string>
-    <string name="theme_iconset_material_desc">Modern rounded icons consistent with the system</string>
-    <string name="theme_iconset_classic">KeePass classic</string>
-    <string name="theme_iconset_classic_desc">Icons recreated from desktop KeePass</string>
-    <string name="theme_iconset_mono">Minimal mono</string>
-    <string name="theme_iconset_mono_desc">Monochrome line icons, minimalist style</string>
     <string name="theme_lang_system_desc">Follow the system language</string>
     <string name="theme_lang_zh_desc">Display the interface in Simplified Chinese</string>
 

@@ -25,7 +25,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.AppLanguage
-import com.keepasskey.app.ui.screens.settings.IconSetOption
 import com.keepasskey.app.ui.screens.settings.ListDensity
 import com.keepasskey.app.ui.screens.settings.SettingsUiState
 import com.keepasskey.app.ui.theme.AppThemeMode
@@ -66,7 +65,6 @@ fun ThemeSettingsScreen(
     onShowGroupInEntryToggle: (Boolean) -> Unit = {},
     onListDensitySelected: (ListDensity) -> Unit = {},
     onAutoActivateSearchOnOpenToggle: (Boolean) -> Unit = {},
-    onIconSetSelected: (IconSetOption) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     SettingsSubscreenScaffold(
@@ -120,11 +118,6 @@ fun ThemeSettingsScreen(
                 onAutoActivateSearchOnOpenToggle = onAutoActivateSearchOnOpenToggle,
                 onShowGroupInSearchResultToggle = onShowGroupInSearchResultToggle,
                 onShowGroupInEntryToggle = onShowGroupInEntryToggle
-            )
-
-            themeIconSetSection(
-                uiState = uiState,
-                onIconSetSelected = onIconSetSelected
             )
 
             themeLanguageSection(

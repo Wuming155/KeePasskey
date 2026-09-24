@@ -669,8 +669,6 @@
     <string name="sec_section_memory">内存与密钥保护</string>
     <string name="sec_keyfile_title">密钥文件策略</string>
     <string name="sec_keyfile_sub">密钥文件仅在解锁期间驻留内存，锁定后立即擦除</string>
-    <string name="sec_recent_files_title">清除最近文件记录</string>
-    <string name="sec_recent_files_sub">移除密码库的历史打开记录</string>
     <string name="sec_kill_app_title">锁定时清杀进程内存</string>
     <string name="sec_kill_app_sub">锁定后立即释放主密钥与明文数据缓存</string>
     <string name="sec_arch_title">安全架构说明</string>
@@ -836,13 +834,6 @@
     <!-- ISSUE-P3-18 诚实化修正：原文案承诺「快捷锁定入口」，但本轮通知**不含任何 action 按钮**
          （仅显示状态 + 点击返回应用）。文案已改为与实现一致，避免反向的不诚实。 -->
     <string name="theme_unlocked_notif_sub">通知栏显示当前解锁状态，点击可返回应用</string>
-    <string name="theme_section_iconset">图标风格</string>
-    <string name="theme_iconset_material">Material</string>
-    <string name="theme_iconset_material_desc">现代化圆润图标，与系统风格一致</string>
-    <string name="theme_iconset_classic">KeePass 经典</string>
-    <string name="theme_iconset_classic_desc">复刻桌面版 KeePass 的经典图标</string>
-    <string name="theme_iconset_mono">极简单色</string>
-    <string name="theme_iconset_mono_desc">单色线性图标，极简风格</string>
     <string name="theme_lang_system_desc">跟随系统语言设置</string>
     <string name="theme_lang_zh_desc">界面文案以简体中文显示</string>
 

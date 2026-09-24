@@ -4,7 +4,6 @@ import android.content.Context
 import android.content.SharedPreferences
 import com.keepasskey.app.ui.screens.settings.ConflictResolution
 import com.keepasskey.app.ui.screens.settings.ExtendedSettings
-import com.keepasskey.app.ui.screens.settings.IconSetOption
 import com.keepasskey.app.ui.screens.settings.ListDensity
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -86,7 +85,6 @@ class ExtendedSettingsStore @Inject constructor(
             lockWhenScreenOff = p.getBoolean(K_LOCK_WHEN_SCREEN_OFF, defaults.lockWhenScreenOff),
             lockWhenNavigateBack = p.getBoolean(K_LOCK_WHEN_NAVIGATE_BACK, defaults.lockWhenNavigateBack),
             clearPasswordOnLeave = p.getBoolean(K_CLEAR_PASSWORD_ON_LEAVE, defaults.clearPasswordOnLeave),
-            rememberRecentFiles = p.getBoolean(K_REMEMBER_RECENT_FILES, defaults.rememberRecentFiles),
             rememberKeyFileLocation = p.getBoolean(
                 K_REMEMBER_KEY_FILE_LOCATION, defaults.rememberKeyFileLocation
             ),
@@ -134,7 +132,6 @@ class ExtendedSettingsStore @Inject constructor(
             autoActivateSearchOnOpen = p.getBoolean(
                 K_AUTO_ACTIVATE_SEARCH_ON_OPEN, defaults.autoActivateSearchOnOpen
             ),
-            iconSet = enumOrDefault(p.getString(K_ICON_SET, null), defaults.iconSet),
 
             // TOTP 规范字段映射
             totpSeedFieldName = p.getString(K_TOTP_SEED_FIELD_NAME, null)
@@ -171,7 +168,6 @@ class ExtendedSettingsStore @Inject constructor(
             .putBoolean(K_LOCK_WHEN_SCREEN_OFF, settings.lockWhenScreenOff)
             .putBoolean(K_LOCK_WHEN_NAVIGATE_BACK, settings.lockWhenNavigateBack)
             .putBoolean(K_CLEAR_PASSWORD_ON_LEAVE, settings.clearPasswordOnLeave)
-            .putBoolean(K_REMEMBER_RECENT_FILES, settings.rememberRecentFiles)
             .putBoolean(K_REMEMBER_KEY_FILE_LOCATION, settings.rememberKeyFileLocation)
             .putBoolean(K_SHOW_KILL_APP_OPTION, settings.showKillAppOption)
             .putBoolean(K_OFFER_SAVE_CREDENTIALS, settings.offerSaveCredentials)
@@ -192,7 +188,6 @@ class ExtendedSettingsStore @Inject constructor(
             .putBoolean(K_SHOW_GROUP_IN_ENTRY, settings.showGroupInEntry)
             .putString(K_LIST_DENSITY, settings.listDensity.name)
             .putBoolean(K_AUTO_ACTIVATE_SEARCH_ON_OPEN, settings.autoActivateSearchOnOpen)
-            .putString(K_ICON_SET, settings.iconSet.name)
             .putString(K_TOTP_SEED_FIELD_NAME, settings.totpSeedFieldName)
             .putString(K_TOTP_SETTINGS_FIELD_NAME, settings.totpSettingsFieldName)
             .putInt(K_DEFAULT_TOTP_STEP_SECONDS, settings.defaultTotpStepSeconds)
@@ -324,7 +319,6 @@ class ExtendedSettingsStore @Inject constructor(
         const val K_LOCK_WHEN_SCREEN_OFF = "lock_when_screen_off"
         const val K_LOCK_WHEN_NAVIGATE_BACK = "lock_when_navigate_back"
         const val K_CLEAR_PASSWORD_ON_LEAVE = "clear_password_on_leave"
-        const val K_REMEMBER_RECENT_FILES = "remember_recent_files"
         const val K_REMEMBER_KEY_FILE_LOCATION = "remember_key_file_location"
         const val K_SHOW_KILL_APP_OPTION = "show_kill_app_option"
         const val K_OFFER_SAVE_CREDENTIALS = "offer_save_credentials"
@@ -357,7 +351,6 @@ class ExtendedSettingsStore @Inject constructor(
         const val K_SHOW_GROUP_IN_ENTRY = "show_group_in_entry"
         const val K_LIST_DENSITY = "list_density"
         const val K_AUTO_ACTIVATE_SEARCH_ON_OPEN = "auto_activate_search_on_open"
-        const val K_ICON_SET = "icon_set"
         const val K_TOTP_SEED_FIELD_NAME = "totp_seed_field_name"
         const val K_TOTP_SETTINGS_FIELD_NAME = "totp_settings_field_name"
         const val K_DEFAULT_TOTP_STEP_SECONDS = "default_totp_step_seconds"

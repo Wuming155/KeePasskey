@@ -32,18 +32,6 @@ enum class ListDensity(
 }
 
 /**
- * 图标集风格
- */
-enum class IconSetOption(
-    @StringRes val labelRes: Int,
-    @StringRes val descRes: Int
-) {
-    MATERIAL(R.string.theme_iconset_material, R.string.theme_iconset_material_desc),
-    KEEPASS_CLASSIC(R.string.theme_iconset_classic, R.string.theme_iconset_classic_desc),
-    MINIMAL_MONOCHROME(R.string.theme_iconset_mono, R.string.theme_iconset_mono_desc)
-}
-
-/**
  * 冲突解决策略
  */
 enum class ConflictResolution(
@@ -163,7 +151,6 @@ data class SettingsUiState(
     val lockWhenScreenOff: Boolean = true, // 熄屏时立即锁定
     val lockWhenNavigateBack: Boolean = false, // 返回退出应用时锁定
     val clearPasswordOnLeave: Boolean = false, // 离开密码页清空已输入字符
-    val rememberRecentFiles: Boolean = true, // 记住最近打开的数据库
     val rememberKeyFileLocation: Boolean = true, // 记住密钥文件关联位置
     val showKillAppOption: Boolean = false, // 提供彻底杀死/终止应用进程入口
     // ISSUE-P3-68：解锁失败重试节流开关与最长锁定时长（2026-09-12 用户裁决：默认关闭 + 30 分钟封顶）
@@ -192,7 +179,6 @@ data class SettingsUiState(
     val showGroupInEntry: Boolean = false, // KP2A: 条目详情页标识所属分组
     val listDensity: ListDensity = ListDensity.NORMAL, // KP2A: 列表显示紧凑度
     val autoActivateSearchOnOpen: Boolean = false, // KP2A: 打开数据库后自动聚焦搜索栏
-    val iconSet: IconSetOption = IconSetOption.MATERIAL, // KP2A: 图标集风格
     val showAuthenticatorTab: Boolean = true, // 是否在底部导航栏显示「验证码」
     val showGeneratorTab: Boolean = true, // 是否在底部导航栏显示「密码生成器」
 

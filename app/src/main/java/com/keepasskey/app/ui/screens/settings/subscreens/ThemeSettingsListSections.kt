@@ -21,7 +21,6 @@ import androidx.compose.ui.unit.dp
 import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.AppLanguage
 import com.keepasskey.app.ui.components.BentoCard
-import com.keepasskey.app.ui.screens.settings.IconSetOption
 import com.keepasskey.app.ui.screens.settings.ListDensity
 import com.keepasskey.app.ui.screens.settings.SettingsUiState
 
@@ -220,34 +219,6 @@ internal fun LazyListScope.themeNavSearchSection(
                     checked = uiState.showGroupInEntry,
                     onCheckedChange = onShowGroupInEntryToggle
                 )
-            }
-        }
-    }
-}
-
-/** 6. 图标风格集（KP2A 特性）。 */
-internal fun LazyListScope.themeIconSetSection(
-    uiState: SettingsUiState,
-    onIconSetSelected: (IconSetOption) -> Unit
-) {
-    item { ThemeSectionTitle(stringResource(R.string.theme_section_iconset)) }
-
-    item {
-        BentoCard(
-            modifier = Modifier.fillMaxWidth(),
-            backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow
-        ) {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                IconSetOption.entries.forEach { option ->
-                    ThemeRadioOptionRow(
-                        label = stringResource(option.labelRes),
-                        description = stringResource(option.descRes),
-                        isSelected = uiState.iconSet == option,
-                        cornerRadius = 8,
-                        verticalPadding = 6,
-                        onClick = { onIconSetSelected(option) }
-                    )
-                }
             }
         }
     }

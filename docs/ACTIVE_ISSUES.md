@@ -47,17 +47,7 @@
 
 ---
 
-## P3 低危问题、特性接线与体验优化（11 项）
-
-### ISSUE-P3-274：安全与外观两项假开关（记住最近打开的数据库 / 图标集风格）
-
-- **核实时间点**：2026-09-23 经全仓定向 grep 核实。
-- **核实方式**：① **记住最近打开的数据库** `rememberRecentFiles` 有持久化键（`ExtendedSettingsStore.kt:91/178/332`，缺省 `true`），全仓命中仅 setter（`SettingsExtendedPreferencesController.kt:66`）/ 投影（`SettingsUiStateProjection.kt:172`）/ 设置页开关（`SecuritySettingsScreen.kt:375-378`）——**零消费方**，全仓无「最近数据库」列表或记录存取实现；**对照**同卡相邻的 `rememberKeyFileLocation` 真实接线于解锁侧（`SafKeyFileAccess.kt:43` 实际读取该偏好），故本项不能以「同类均未接线」为由豁免。② **图标集风格** `iconSet` 有持久化键（`ExtendedSettingsStore.kt:139/199`），可三选一（Material / KeePass 经典 / 极简单色，`ThemeSettingsListSections.kt:241-245`），但全仓 `IconSetOption` 命中仅 settings 域（`ExtendedSettings.kt` / `SettingsExtendedPreferencesController.kt` / `SettingsUiState.kt` / `SettingsViewModel.kt` / `ThemeSettingsScreen.kt` / `ThemeSettingsListSections.kt`）+ store——**渲染侧无任何消费**。
-- **背景与根因**：均为「偏好只落盘不消费」。`rememberRecentFiles` 的界面语义是**安全项**（是否保留打开历史），实际不记录任何东西，用户以为「关闭即不留痕」——属安全语义误导；`iconSet` 属展示类，改选后全站图标无变化。
-- **涉及文件**：`app/src/main/java/com/keepasskey/app/ui/screens/settings/SettingsExtendedPreferencesController.kt`、`app/src/main/java/com/keepasskey/app/ui/screens/settings/SettingsUiStateProjection.kt`、`app/src/main/java/com/keepasskey/app/ui/screens/settings/subscreens/SecuritySettingsScreen.kt`、`app/src/main/java/com/keepasskey/app/ui/screens/settings/subscreens/ThemeSettingsListSections.kt`、`app/src/main/java/com/keepasskey/app/data/repository/ExtendedSettingsStore.kt`（消费方落点待定：最近库记录源 / 图标渲染层）。
-- **验收标准**：AC① 两项逐一给出「真实接线」或「如实移除 / 禁用并标注」结论；AC② `rememberRecentFiles`：若接线，须有真实的「最近打开库」记录源与清理逻辑，**关闭即不写入且清理既有记录**（对齐 `createBackupBeforeSave` 关闭时顺带清理历史 `.bak` 的既有口径），并说明记录存储位置与清理时机；若不接线则**移除**该项（安全项不得停留在「看起来能控制痕迹」的假状态）；AC③ `iconSet`：若接线，须把选择真实接入图标渲染层并覆盖三种风格；若不接线则如实禁用并标注（避免「可三选一但全站无变化」）；AC④ 修订中英文案，使其**仅**描述真实行为；AC⑤ 新增接线守卫用例，禁「UI 有开关、生产无消费方」复现。
-
----
+## P3 低危问题、特性接线与体验优化（10 项）
 
 ### ISSUE-P3-292：合并历史取三方并集且不截断（未编辑过的条目永久留存对端快照，并放大 `ISSUE-P1-276` 的引用计数）
 

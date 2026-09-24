@@ -19,7 +19,6 @@ import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.ContentPasteGo
 import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.GppBad
-import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.LockClock
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.ScreenLockPortrait
@@ -72,7 +71,6 @@ fun SecuritySettingsScreen(
     onLockWhenScreenOffToggle: (Boolean) -> Unit = {},
     onLockWhenNavigateBackToggle: (Boolean) -> Unit = {},
     onClearPasswordOnLeaveToggle: (Boolean) -> Unit = {},
-    onRememberRecentFilesToggle: (Boolean) -> Unit = {},
     onRememberKeyFileLocationToggle: (Boolean) -> Unit = {},
     onShowKillAppOptionToggle: (Boolean) -> Unit = {},
     // ISSUE-P2-08 (ZT-13)：运行环境完整性快照（宿主注入；缺省或 TRUSTED/UNDETERMINED 时不渲染提示）
@@ -378,14 +376,9 @@ fun SecuritySettingsScreen(
                     backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow
                 ) {
                     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                        SecuritySwitchRow(
-                            icon = Icons.Default.History,
-                            title = stringResource(R.string.sec_recent_files_title),
-                            subtitle = stringResource(R.string.sec_recent_files_sub),
-                            checked = uiState.rememberRecentFiles,
-                            onCheckedChange = onRememberRecentFilesToggle
-                        )
-
+                        // ISSUE-P3-274：「清除最近文件记录」开关已移除（PD-40）——本应用
+                        // 从未实现「最近打开的数据库」记录源，该开关无任何可清理对象；
+                        // 安全语义项不得停留在「看起来能控制痕迹」的假状态。
                         SecuritySwitchRow(
                             icon = Icons.Default.Bookmark,
                             title = stringResource(R.string.sec_keyfile_title),

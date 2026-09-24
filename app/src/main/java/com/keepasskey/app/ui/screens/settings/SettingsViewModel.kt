@@ -352,7 +352,6 @@ class SettingsViewModel @Inject constructor(
     fun setLockWhenScreenOff(enabled: Boolean) = extendedPreferences.setLockWhenScreenOff(enabled)
     fun setLockWhenNavigateBack(enabled: Boolean) = extendedPreferences.setLockWhenNavigateBack(enabled)
     fun setClearPasswordOnLeave(enabled: Boolean) = extendedPreferences.setClearPasswordOnLeave(enabled)
-    fun setRememberRecentFiles(enabled: Boolean) = extendedPreferences.setRememberRecentFiles(enabled)
     fun setRememberKeyFileLocation(enabled: Boolean) = extendedPreferences.setRememberKeyFileLocation(enabled)
     fun setShowKillAppOption(enabled: Boolean) = extendedPreferences.setShowKillAppOption(enabled)
 
@@ -420,7 +419,6 @@ class SettingsViewModel @Inject constructor(
     fun setShowGroupInEntry(enabled: Boolean) = extendedPreferences.setShowGroupInEntry(enabled)
     fun setListDensity(density: ListDensity) = extendedPreferences.setListDensity(density)
     fun setAutoActivateSearchOnOpen(enabled: Boolean) = extendedPreferences.setAutoActivateSearchOnOpen(enabled)
-    fun setIconSet(iconSet: IconSetOption) = extendedPreferences.setIconSet(iconSet)
 
     // ===== KP2A 扩展：文件处理与高级同步策略 =====
     fun setUseOfflineCache(enabled: Boolean) = extendedPreferences.setUseOfflineCache(enabled)
