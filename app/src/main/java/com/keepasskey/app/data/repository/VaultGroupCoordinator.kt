@@ -11,7 +11,9 @@ import kotlinx.coroutines.flow.map
 /**
  * 分组协调器（ISSUE-P3-31 批次 B 自 `RealVaultRepository` 拆出，纯结构性改动）。
  *
- * 职责单一：KDBX 分组树的 UI 投影（含回收站识别与自定义图标投影）与分组保存。
+ * 职责单一：KDBX 分组树的 UI 投影（含回收站识别与自定义图标投影）、分组保存，
+ * 以及**条目跨分组的批量移动**（ISSUE-P3-305 自仓库门面搬出——该操作的落点即分组树，
+ * 与会话层 `batchMoveEntries` 同源）。
  *
  * 分组保存沿用 P0-1 修复语义：重命名/改图标**必须**基于会话内既有分组 `copy`，
  * 严禁以新建空分组覆盖既有分组（否则其全部子条目与子分组被清空）。
@@ -84,6 +86,19 @@ internal class VaultGroupCoordinator(
             )
         }
         databaseSession.saveGroup(kdbxGroup)
+        return persistSession()
+    }
+
+    /**
+     * 批量移动条目至目标分组（ISSUE-P3-305：自 `RealVaultRepository` 逐行搬出）。
+     *
+     * 目标分组为 null 表示移至根组；id 非法者按既有口径静默丢弃（`mapNotNull`）。
+     * 树变换由会话层在同一次受控变换内完成，随后统一落盘。
+     */
+    suspend fun batchMoveEntries(entryIds: Set<String>, targetGroupId: String?): KdbxResult<Unit> {
+        val uuidSet = entryIds.mapNotNull { parseKdbxUuidOrNull(it) }.toSet()
+        val targetUuid = targetGroupId?.let { parseKdbxUuidOrNull(it) }
+        databaseSession.batchMoveEntries(uuidSet, targetUuid)
         return persistSession()
     }
 }

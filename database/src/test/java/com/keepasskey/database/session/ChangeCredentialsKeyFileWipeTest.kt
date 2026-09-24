@@ -80,7 +80,9 @@ class ChangeCredentialsKeyFileWipeTest {
 
     @Test
     fun `单参重载必须自持快照并清零且双参重载不得再有默认值`() {
-        val source = readSource(DATABASE_SESSION_PATH)
+        // ISSUE-P3-305：换密实现已自门面下沉到同包 `SessionPersistence.kt`，静态接线判据按
+        // 「门面 + 协调器」**并集**扫描（口径同 §155 / §280）；下列断言逐条未改强度。
+        val source = readSource(DATABASE_SESSION_PATH) + "\n" + readSource(SESSION_PERSISTENCE_PATH)
 
         assertTrue(
             "必须存在单参重载 changeCredentials(newPasswordChars)：由它自持密钥文件快照",
@@ -110,6 +112,13 @@ class ChangeCredentialsKeyFileWipeTest {
     private companion object {
         const val DATABASE_SESSION_PATH =
             "database/src/main/java/com/keepasskey/database/session/DatabaseSession.kt"
+
+        /**
+         * ISSUE-P3-305：换密（含 ISSUE-P3-99 的密钥文件快照自持与 `finally` 清零）已自门面
+         * 下沉到该协调器，静态接线判据按**门面 + 协调器并集**扫描。
+         */
+        const val SESSION_PERSISTENCE_PATH =
+            "database/src/main/java/com/keepasskey/database/session/SessionPersistence.kt"
         const val ROOT_SEARCH_DEPTH = 6
 
         /** 仓库根：同时具备 app 与 core 模块源码目录的最近祖先 */

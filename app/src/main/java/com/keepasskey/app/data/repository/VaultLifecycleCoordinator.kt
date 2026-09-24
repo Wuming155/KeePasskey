@@ -25,7 +25,8 @@ import java.io.InputStream
  * 密码库生命周期协调器（ISSUE-P3-31 批次 B 自 `RealVaultRepository` 拆出，纯结构性改动）。
  *
  * 职责单一：解锁（含 `content://` 流式通道与文件不存在时的初始化建库）、显式密钥文件因子建库、
- * 移除已知库、登记外部库。所有列表刷新与活动库切换经构造参数回调回仓库，
+ * 移除已知库、登记外部库，以及会话级凭据轮换 / 锁定 / 锁定态查询（ISSUE-P3-305 并入）。
+ * 所有列表刷新与活动库切换经构造参数回调回仓库，
  * 不改变任何既有顺序语义（如「先 selectDatabase 再 refreshDatabases」）。
  */
 internal class VaultLifecycleCoordinator(
@@ -302,6 +303,29 @@ internal class VaultLifecycleCoordinator(
      * 打开密码库来源的读取流：`content://` 走 SAF，其余按本地文件路径。
      * 来源不可用（非本地文件的远端地址 / 提供方拒绝 / 文件不存在）返回 null。
      */
+    /**
+     * 更换主凭据：会话层重加密写盘（`DatabaseSession.changeCredentials`），
+     * **仅成功时**刷新库列表（ISSUE-P3-305 自 `RealVaultRepository` 逐行搬出）。
+     */
+    suspend fun changeMasterPassword(newPassword: CharArray): KdbxResult<Unit> {
+        val result = databaseSession.changeCredentials(newPassword)
+        if (result is KdbxResult.Success) {
+            refresh()
+        }
+        return result
+    }
+
+    /** 锁定当前库并刷新库列表（顺序与拆分前一致：先 `lock()` 再刷新）。 */
+    suspend fun lockDatabase() {
+        databaseSession.lock()
+        refresh()
+    }
+
+    /** 当前会话是否**非** `OPENED`（锁定 / 关闭 / 未打开一律为 true）。 */
+    fun isLocked(): Boolean {
+        return databaseSession.state.value != DatabaseSession.SessionState.OPENED
+    }
+
     private fun openVaultSourceStream(path: String): InputStream? =
         if (path.startsWith("content://")) {
             context.contentResolver.openInputStream(Uri.parse(path))

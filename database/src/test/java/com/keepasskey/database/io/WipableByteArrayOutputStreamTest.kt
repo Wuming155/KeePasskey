@@ -56,19 +56,29 @@ class WipableByteArrayOutputStreamTest {
 
     @Test
     fun `DatabaseSession 三条序列化路径必须用具名缓冲并收口 wipe`() {
-        val source = readSource(DATABASE_SESSION_PATH)
+        // ISSUE-P3-305：三条路径的实现已自门面下沉到同包 `SessionPersistence.kt`，且**收敛为
+        // 单一具名缓冲**（原为三处逐字重复的同一段代码，见 `serializeToBytes`）。故判据按
+        // 「门面 + 协调器」**并集**扫描，口径由「≥3 处各自持有缓冲」升级为更强的
+        // 「三条入口都必须经同一收口实现」——强度不降反升（AGENTS.md §3 测试资产纪律）。
+        val source = readSource(DATABASE_SESSION_PATH) + "\n" + readSource(SESSION_PERSISTENCE_PATH)
         val namedBuffers = Regex("""val buffer = WipableByteArrayOutputStream\(\)""")
             .findAll(source).count()
         val wipes = Regex("""buffer\.wipe\(\)""").findAll(source).count()
 
+        assertEquals(
+            "具名可擦缓冲必须收敛为**单一**实现（三路径共用 serializeToBytes，禁再复制第二份）",
+            1,
+            namedBuffers
+        )
+        assertEquals("该缓冲必须恰有一次 wipe() 收口", 1, wipes)
         assertTrue(
-            "三条序列化路径（save / exportToBytes / changeCredentials）都必须使用具名可擦缓冲" +
-                "（实际具名缓冲 $namedBuffers 处）",
-            namedBuffers >= 3
+            "三条序列化路径（save / exportToBytes / changeCredentials）都必须经同一具名缓冲收口" +
+                "（1 处定义 + 3 处调用；任何一条另起炉灶即等于新增一条缓冲无处可擦的路径）",
+            Regex("""serializeToBytes\(""").findAll(source).count() >= 4
         )
         assertTrue(
-            "每处具名缓冲都必须有对应的 buffer.wipe() 收口（实际 $wipes 处 vs 缓冲 $namedBuffers 处）",
-            wipes >= namedBuffers
+            "收口实现必须以 finally { buffer.wipe() } 包裹（成功与失败路径均擦）",
+            Regex("""finally\s*\{\s*buffer\.wipe\(\)\s*\}""").containsMatchIn(source)
         )
         assertFalse(
             "不得残留匿名链式写法 `ByteArrayOutputStream().also { … }.toByteArray()`——" +
@@ -115,6 +125,13 @@ class WipableByteArrayOutputStreamTest {
     private companion object {
         const val DATABASE_SESSION_PATH =
             "database/src/main/java/com/keepasskey/database/session/DatabaseSession.kt"
+
+        /**
+         * ISSUE-P3-305：整库序列化写盘（save / exportToBytes / changeCredentials）已自门面
+         * 下沉到该协调器，静态接线判据按**门面 + 协调器并集**扫描（口径同 §155 / §280）。
+         */
+        const val SESSION_PERSISTENCE_PATH =
+            "database/src/main/java/com/keepasskey/database/session/SessionPersistence.kt"
         val PLAINTEXT_EXPORTER_PATHS = listOf(
             "database/src/main/java/com/keepasskey/database/csv/KdbxCsvExporter.kt",
             "database/src/main/java/com/keepasskey/database/xml/KeePassXmlExporter.kt"

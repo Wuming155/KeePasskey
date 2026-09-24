@@ -42,7 +42,8 @@ private val TEST_STRINGS = StringsProvider { _, _ -> "" }
  *
  * ## 锁定的缺陷
  *
- * `SyncCycleRunner.setupCycleContext`（同步周期装配段）内的每一步都是**普通非 suspend 调用**：
+ * `SyncCycleRunner.setupCycleContext`（同步周期装配段；ISSUE-P3-305 起实现位于同包
+ * `SyncCycleSetup.kt`）内的每一步都是**普通非 suspend 调用**：
  * 凭据 Keystore 解密（`SyncProviderResolver.resolveProvider` / `resolveRemotePath`）、整库缓存读
  * （`SyncCache.readCache` / `readBaseContent`）、全库逐字段比较（`KdbxContentComparator`）、
  * 整库密文写 + `fd.sync()` + 原子 rename（`SyncCache.writeCache`）。整改前它们全部在**调用方线程**
@@ -60,7 +61,8 @@ private val TEST_STRINGS = StringsProvider { _, _ -> "" }
  *
  * ## 两条断言，缺一不可
  *
- * ① **非空性**：五类探针都必须被观测到，且**归因于装配段**（栈上存在 `SyncCycleRunner.setupCycleContext`）
+ * ① **非空性**：五类探针都必须被观测到，且**归因于装配段**（栈上存在 `setupCycleContext`
+ * ——ISSUE-P3-305 起其实现位于同包 `SyncCycleSetup.kt`，归因按入口类集合判定）
  * ——否则断言会在「装配段根本没跑到那一步」的情况下空转通过；
  * ② **零主线程 IO**：所有记录（含引擎侧经同一 `SyncCache` 实例的同名调用）的执行线程都**不得**等于
  * 本用例的主线程。
@@ -254,14 +256,19 @@ class SyncAssemblyOffMainThreadTest {
     }
 
     /**
-     * 归因：栈上存在 `SyncCycleRunner.setupCycleContext` 即视为来自装配段。
-     * 引擎侧的同名缓存调用经 `SyncCycleRunner.handleOpenRemote` 发起，栈上**没有** `setupCycleContext`，
-     * 故不会被误判为装配段。
+     * 归因：栈上存在**装配段文件**的任一帧（`SyncCycleSetup.kt` 的产物类
+     * `com.keepasskey.app.sync.SyncCycleSetupKt`）即视为来自装配段。
+     *
+     * ISSUE-P3-305：装配段自 [SyncCycleRunner] 整体搬到同包 `SyncCycleSetup.kt` 后，栈帧类名随之改变；
+     * 且段内存在**真实挂起点**（`SyncDatabaseCodec.serializeLocalDatabase` 的
+     * `withContext(Dispatchers.Default)`），挂起后的续体栈上只剩段内**最内层**函数帧
+     * ⇒ 归因按**文件（产物类）**判定而非具体函数名。该文件只含装配段
+     * （`setupCycleContext` + 其私有 `buildCycleContext`），判据不外溢。
+     * 引擎侧的同名缓存调用经 `SyncCycleRunner.handleOpenRemote` 发起，栈上**没有**该文件的帧，
+     * 故不会被误判为装配段（非空性要求不变：每个必测探针仍须被观测到且 `fromAssemblySegment` 为真）。
      */
     private fun inAssemblySegment(): Boolean =
-        Thread.currentThread().stackTrace.any {
-            it.className == SYNC_CYCLE_RUNNER && it.methodName == SETUP_CYCLE_CONTEXT
-        }
+        Thread.currentThread().stackTrace.any { it.className == ASSEMBLY_SEGMENT_CLASS }
 
     /** 整库缓存读 / 基准内容读 / 原子写的记录型替身（三类共用同一注入点）。 */
     private class RecordingCache(
@@ -379,8 +386,11 @@ class SyncAssemblyOffMainThreadTest {
     }
 
     private companion object {
-        const val SYNC_CYCLE_RUNNER = "com.keepasskey.app.sync.SyncCycleRunner"
-        const val SETUP_CYCLE_CONTEXT = "setupCycleContext"
+        /**
+         * ISSUE-P3-305：装配段所在文件 `SyncCycleSetup.kt` 的 JVM 产物类名（顶层声明容器）。
+         * 该文件只含装配段实现，故「栈上存在本类帧」等价于「调用发生在装配段内」。
+         */
+        const val ASSEMBLY_SEGMENT_CLASS = "com.keepasskey.app.sync.SyncCycleSetupKt"
 
         const val PROBE_CREDENTIAL = "凭据读取（Keystore 解密）"
         const val PROBE_CACHE_CONSTRUCT = "缓存实例构造"

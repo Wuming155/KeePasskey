@@ -19,7 +19,6 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -37,6 +36,10 @@ import javax.inject.Singleton
  * [RecycleBinCoordinator] 回收站 / [EntryDuplicateCoordinator] 克隆 /
  * [CustomIconCoordinator] 自定义图标 / [PasskeyEntryCoordinator] Passkey 条目），
  * 本类仅保留状态流持有、会话生命周期与委托分发；拆分是**纯结构性**的，不含行为变更。
+ *
+ * ISSUE-P3-305：继续下沉两个仍有独立编排职责的面——条目只读查询与 `{REF:...}` 解析
+ * （[VaultEntryQueryCoordinator]）、HOTP 计数器推进（[HotpAdvanceCoordinator]）；
+ * 条目批量移动改由 [VaultGroupCoordinator] 承接。
  */
 @Singleton
 class RealVaultRepository @Inject constructor(
@@ -81,6 +84,9 @@ class RealVaultRepository @Inject constructor(
     )
     private val groups = VaultGroupCoordinator(databaseSession, entryMapper) { persistSession() }
     private val exporter = VaultExportCoordinator(context, strings, databaseSession) { persistSession() }
+    // ISSUE-P3-305：条目只读查询面与 HOTP 推进面（各自成器，见类 KDoc）
+    private val queries = VaultEntryQueryCoordinator(databaseSession, entryMapper, projectionDispatcher)
+    private val hotp = HotpAdvanceCoordinator(secretReader, entryWriter, strings)
 
     init {
         // TASK-42 整改（P2-31）：构造期不再同步扫盘——@Singleton 构造发生在主线程，
@@ -125,22 +131,15 @@ class RealVaultRepository @Inject constructor(
         readOnly = readOnly
     )
 
-    override suspend fun changeMasterPassword(newPassword: CharArray): KdbxResult<Unit> {
-        val result = databaseSession.changeCredentials(newPassword)
-        if (result is KdbxResult.Success) {
-            refreshDatabases()
-        }
-        return result
-    }
+    /** ISSUE-P3-305：凭据轮换下沉 [VaultLifecycleCoordinator]（仅成功时刷新库列表）。 */
+    override suspend fun changeMasterPassword(newPassword: CharArray): KdbxResult<Unit> =
+        lifecycle.changeMasterPassword(newPassword)
 
-    override suspend fun lockDatabase() {
-        databaseSession.lock()
-        refreshDatabases()
-    }
+    /** ISSUE-P3-305：锁定与刷新下沉 [VaultLifecycleCoordinator]。 */
+    override suspend fun lockDatabase() = lifecycle.lockDatabase()
 
-    override fun isLocked(): Boolean {
-        return databaseSession.state.value != DatabaseSession.SessionState.OPENED
-    }
+    /** ISSUE-P3-305：锁定态查询下沉 [VaultLifecycleCoordinator]。 */
+    override fun isLocked(): Boolean = lifecycle.isLocked()
 
     override suspend fun createDatabase(
         name: String,
@@ -203,62 +202,22 @@ class RealVaultRepository @Inject constructor(
     override suspend fun deleteGroup(id: String): KdbxResult<Unit> = recycleBin.deleteGroup(id)
 
     /**
-     * 全部条目的 UI 投影流。
-     *
-     * ISSUE-P3-154：投影（`KdbxEntry` → `UiVaultEntry`，逐字段解密 + 时间格式化）经
-     * [projectionDispatcher] 执行，**不落在收集上下文**——列表页 / 自动填充 / 子库各自的
-     * 收集上下文（`viewModelScope`、服务协程）一律不再承担这段 CPU 工作。
-     *
-     * 语义零变更：上游 `databaseFlow` 本就是 `StateFlow`（已合流），`flowOn` 只搬移执行线程。
+     * 全部条目的 UI 投影流（ISSUE-P3-305：实现下沉 [VaultEntryQueryCoordinator]，
+     * ISSUE-P3-154 的 `projectionDispatcher` 调度边界不变）。
      */
-    override fun getEntries(): Flow<List<UiVaultEntry>> {
-        return databaseSession.databaseFlow.map { db ->
-            if (db == null) {
-                emptyList()
-            } else {
-                db.rootGroup.allEntries().map { kdbxEntry ->
-                    entryMapper.mapKdbxEntryToUi(kdbxEntry)
-                }
-            }
-        }.flowOn(projectionDispatcher)
-    }
+    override fun getEntries(): Flow<List<UiVaultEntry>> = queries.entriesFlow()
 
-    /**
-     * 单条条目投影流。
-     *
-     * ISSUE-P3-149：**不再以「整库投影 + `find`」实现**——原实现为一个条目付出
-     * O(N × 字段数) 的全库映射（详情页一次组合挂了 3 条这样的链），本实现改为
-     * `KdbxGroup.findEntry`（深度优先短路）只映射命中的那一条。
-     *
-     * 语义与旧实现等价（同为深度优先首命中，未命中返回 null）；差异仅在容错面上更宽：
-     * 传入**小写** hex id 时旧实现因与 `toHexString()`（大写）字符串不等而落空，
-     * 本实现按 UUID 字节比较可正常命中（调用方恒传大写，属放宽而非行为变更）。
-     */
-    override fun getEntry(id: String): Flow<UiVaultEntry?> {
-        val targetUuid = parseKdbxUuidOrNull(id)
-        return databaseSession.databaseFlow.map { db ->
-            val entry = if (targetUuid == null) null else db?.rootGroup?.findEntry(targetUuid)
-            entry?.let { entryMapper.mapKdbxEntryToUi(it) }
-        }
-    }
+    /** 单条条目投影流（ISSUE-P3-305：实现下沉 [VaultEntryQueryCoordinator]）。 */
+    override fun getEntry(id: String): Flow<UiVaultEntry?> = queries.entryFlow(id)
 
+    /** ISSUE-P3-305：擦除契约与保存主体同处 [VaultEntryWriteCoordinator]。 */
     override suspend fun saveEntry(
         entry: UiVaultEntry,
         passwordChars: CharArray?,
         totpSecretChars: CharArray?,
         protectedFieldChars: Map<String, CharArray>
-    ): KdbxResult<Unit> {
-        // 擦除契约（加解密审查 2026-09）：任何结果路径（成功/失败/异常）用毕清零传入副本，
-        // 与 saveAutofillCredential / FakeVaultRepository 同一契约。
-        // TASK-10：TOTP 种子与受保护自定义字段明文副本同样纳入擦除契约
-        try {
-            return entryWriter.saveEntryInternal(entry, passwordChars, totpSecretChars, protectedFieldChars)
-        } finally {
-            passwordChars?.fill('0')
-            totpSecretChars?.fill('0')
-            protectedFieldChars.values.forEach { it.fill('0') }
-        }
-    }
+    ): KdbxResult<Unit> =
+        entryWriter.saveEntryWithEraseContract(entry, passwordChars, totpSecretChars, protectedFieldChars)
 
     override suspend fun setEntryFavorite(entryId: String, favorite: Boolean): KdbxResult<Unit> =
         entryWriter.setEntryFavorite(entryId, favorite)
@@ -272,56 +231,34 @@ class RealVaultRepository @Inject constructor(
     override suspend fun addCustomIcon(pngBytes: ByteArray): KdbxResult<String> =
         customIcons.addCustomIcon(pngBytes)
 
+    /** ISSUE-P3-305：图标池快照下沉 [CustomIconCoordinator]（空会话回退空表语义不变）。 */
     override suspend fun getCustomIconBytes(): Map<String, ByteArray> =
-        databaseSession.databaseFlow.first()
-            ?.let { customIcons.snapshotIconBytes(it) }
-            ?: emptyMap()
+        customIcons.snapshotIconBytesOrEmpty()
 
     // TASK-17：{REF:...} 字段引用解析（仅消费点调用，投影层不展开）
-    // ISSUE-P0-08：消费点面白名单由调用方声明、引擎全程约束（非口令通道遇 P 一律掩码）
+    // ISSUE-P3-305：实现下沉 [VaultEntryQueryCoordinator]（含 ISSUE-P0-08 消费点面白名单约束）
     override suspend fun resolveFieldReferences(
         entryId: String,
         rawText: String,
         consumerField: com.keepasskey.database.fieldref.FieldReferenceEngine.RefField
-    ): String? {
-        if (!com.keepasskey.database.fieldref.FieldReferenceEngine.containsReference(rawText)) {
-            return rawText
-        }
-        val uuid = parseKdbxUuidOrNull(entryId) ?: return null
-        val currentDb = databaseSession.databaseFlow.first() ?: return null
-        // 条目存在性校验：引用解析仅对库内真实条目开放
-        if (currentDb.rootGroup.allEntries().none { it.id == uuid }) return null
-        return com.keepasskey.database.fieldref.FieldReferenceEngine.resolve(rawText, currentDb.rootGroup, consumerField)
-    }
+    ): String? = queries.resolveFieldReferences(entryId, rawText, consumerField)
 
     override suspend fun restoreEntry(id: String): KdbxResult<Unit> = recycleBin.restoreEntry(id)
 
     override suspend fun emptyRecycleBin(): KdbxResult<Unit> = recycleBin.emptyRecycleBin()
 
-    override suspend fun batchMoveEntries(entryIds: Set<String>, targetGroupId: String?): KdbxResult<Unit> {
-        val uuidSet = entryIds.mapNotNull { parseKdbxUuidOrNull(it) }.toSet()
-        val targetUuid = targetGroupId?.let { parseKdbxUuidOrNull(it) }
-        databaseSession.batchMoveEntries(uuidSet, targetUuid)
-        return persistSession()
-    }
+    /** ISSUE-P3-305：条目批量移动下沉 [VaultGroupCoordinator]（落点即分组树）。 */
+    override suspend fun batchMoveEntries(entryIds: Set<String>, targetGroupId: String?): KdbxResult<Unit> =
+        groups.batchMoveEntries(entryIds, targetGroupId)
 
     override suspend fun batchDeleteEntries(entryIds: Set<String>): KdbxResult<Unit> =
         recycleBin.batchDeleteEntries(entryIds)
 
-    override suspend fun getKdbxEntries(): List<KdbxEntry> {
-        val db = databaseSession.databaseFlow.first() ?: return emptyList()
-        return db.rootGroup.allEntries()
-    }
+    /** ISSUE-P3-305：整份条目快照下沉 [VaultEntryQueryCoordinator]。 */
+    override suspend fun getKdbxEntries(): List<KdbxEntry> = queries.allEntries()
 
-    /**
-     * ISSUE-P3-148：单条查询走 [com.keepasskey.core.model.KdbxGroup.findEntry]（深度优先短路），
-     * **不**物化整份条目列表——自动填充确认路径每次只处理一条，付不起与库规模成正比的装载成本。
-     */
-    override suspend fun getKdbxEntry(entryId: String): KdbxEntry? {
-        val uuid = parseKdbxUuidOrNull(entryId) ?: return null
-        val db = databaseSession.databaseFlow.first() ?: return null
-        return db.rootGroup.findEntry(uuid)
-    }
+    /** ISSUE-P3-148 / ISSUE-P3-305：单条查询下沉 [VaultEntryQueryCoordinator]（深度优先短路）。 */
+    override suspend fun getKdbxEntry(entryId: String): KdbxEntry? = queries.entryById(entryId)
 
     override suspend fun findEntriesForRpId(rpId: String): List<KdbxEntry> =
         passkeyEntries.findEntriesForRpId(rpId)
@@ -365,45 +302,11 @@ class RealVaultRepository @Inject constructor(
     /**
      * ISSUE-P3-49：推进 HOTP 计数器并回传本次所出之码。
      *
-     * 顺序严格为「先算码 → 计数器 +1 落库成功 → 返回该码」：任何一步失败都 fail-closed，
-     * 绝不返回一个未推进的码（否则同一计数器会被重复使用）。计数器推进经
-     * [VaultEntryWriteCoordinator.updateEntryOtpConfig]，**不产生历史修订**。
+     * ISSUE-P3-305：实现下沉 [HotpAdvanceCoordinator]——「先算码 → 计数器落库成功 → 返回该码」
+     * 的原子序与擦除契约（配置原文与推进值用毕即 `fill('0')`）随实现一并搬出，逐行未改。
      */
-    override suspend fun advanceEntryHotpCounter(entryId: String): KdbxResult<EntryTotpSnapshot> {
-        val snapshot = secretReader.calculateEntryTotp(entryId)
-            ?: return KdbxResult.Failure(
-                IllegalStateException("entry missing or no OTP configured"),
-                strings.get(R.string.repo_hotp_not_applicable)
-            )
-        if (!snapshot.isHotp) {
-            return KdbxResult.Failure(
-                IllegalStateException("not an HOTP entry"),
-                strings.get(R.string.repo_hotp_not_applicable)
-            )
-        }
-        val raw = secretReader.getEntryTotpSecretChars(entryId)
-            ?: return KdbxResult.Failure(
-                IllegalStateException("HOTP config unreadable"),
-                strings.get(R.string.repo_hotp_not_applicable)
-            )
-        val next = try {
-            com.keepasskey.core.otp.HotpCounterSupport.incrementCounter(raw)
-        } finally {
-            raw.fill('0')
-        } ?: return KdbxResult.Failure(
-            IllegalStateException("invalid HOTP counter"),
-            strings.get(R.string.repo_hotp_not_applicable)
-        )
-        val writeResult = try {
-            entryWriter.updateEntryOtpConfig(entryId, next)
-        } finally {
-            next.fill('0')
-        }
-        return when (writeResult) {
-            is KdbxResult.Success -> KdbxResult.Success(snapshot)
-            is KdbxResult.Failure -> KdbxResult.Failure(writeResult.error, writeResult.userMessage)
-        }
-    }
+    override suspend fun advanceEntryHotpCounter(entryId: String): KdbxResult<EntryTotpSnapshot> =
+        hotp.advance(entryId)
 
     override suspend fun getEntryTotpSecretChars(entryId: String): CharArray? =
         secretReader.getEntryTotpSecretChars(entryId)

@@ -3,69 +3,15 @@ package com.keepasskey.core.otp
 import java.nio.charset.StandardCharsets
 
 /**
- * 解析后的 TOTP 配置模型。
- *
- * ISSUE-P2-12 整改：[secret] 由不可擦除的 String 改为 **Base32 文本字节（ASCII）**，
- * 归调用方所有，消费后须显式 fill(0) 擦除；解析层不再物化种子 String。
- */
-class ParsedTotpConfig(
-    val secret: ByteArray,
-    val period: Int = 30,
-    val digits: Int = 6,
-    val algorithm: String = "SHA1",
-    val issuer: String? = null,
-    val account: String? = null,
-    // ISSUE-P3-49：HOTP（RFC 4226）支持——`otpauth://hotp/...` 类型段与 `counter` 参数。
-    // isHotp=false 时 [counter] 无意义（恒 0）。
-    val isHotp: Boolean = false,
-    val counter: Long = 0,
-    /**
-     * ISSUE-P2-289 AC③：解析期的**非致命诊断**（如 `digits` 越界回落、
-     * `algorithm` 不支持回落 SHA1）——供 UI 如实呈现，**禁静默改写**。
-     * 仅元数据（不含种子），不参与 equals/hashCode（不影响配置身份）。
-     */
-    val warnings: List<String> = emptyList()
-) {
-    override fun equals(other: Any?): Boolean {
-        if (this === other) return true
-        if (other !is ParsedTotpConfig) return false
-        return secret.contentEquals(other.secret) &&
-            period == other.period &&
-            digits == other.digits &&
-            algorithm == other.algorithm &&
-            issuer == other.issuer &&
-            account == other.account &&
-            isHotp == other.isHotp &&
-            counter == other.counter
-    }
-
-    override fun hashCode(): Int {
-        var result = secret.contentHashCode()
-        result = 31 * result + period
-        result = 31 * result + digits
-        result = 31 * result + algorithm.hashCode()
-        result = 31 * result + (issuer?.hashCode() ?: 0)
-        result = 31 * result + (account?.hashCode() ?: 0)
-        result = 31 * result + isHotp.hashCode()
-        result = 31 * result + counter.hashCode()
-        return result
-    }
-
-    override fun toString(): String {
-        // 绝不输出种子内容，仅呈现长度（与 ProtectedString.toString 一致的安全约定）
-        return "ParsedTotpConfig(secretLen=" + secret.size + ", period=" + period + ", digits=" + digits +
-            ", algorithm=" + algorithm + ", issuer=" + issuer + ", account=" + account +
-            ", isHotp=" + isHotp + ", counter=" + counter + ", warnings=" + warnings.size + ")"
-    }
-}
-
-/**
  * TOTP KeyUri 解析器。
  * 支持标准 RFC 6238 KeyUri（如 otpauth://totp/Issuer:Account?secret=...&period=30&digits=6&algorithm=SHA1）
  * 以及纯 Base32 密钥格式。宽容解析缺省参数，非法输入返回 null。
  *
  * ISSUE-P2-12：解析全程字节语义——otpauth URI 与种子均不物化为 String，
  * 仅 label / issuer / account 等非敏感描述转字符串；种子以 ASCII Base32 字节承载。
+ *
+ * ISSUE-P3-305：产出模型 [ParsedTotpConfig] 已自本文件按**纯结构性拆分**搬出至同包同名文件；
+ * 同时把原 103 行的 `parseOtpAuthUri` 内的查询段扫描拆为 [scanQueryParameters]（函数体逐行搬运）。
  */
 object TotpKeyUriParser {
 
@@ -162,6 +108,21 @@ object TotpKeyUriParser {
         }
     }
 
+    /**
+     * 查询段扫描产出（ISSUE-P3-305：原 `parseOtpAuthUri` 内联变量按职责聚合）。
+     *
+     * [secretRaw] 归调用方所有——调用方在 `finally` 中一律 `fill(0)`（与拆分前同一擦除口径）。
+     */
+    private class QueryScan(
+        val secretRaw: ByteArray?,
+        val period: Int,
+        val digits: Int,
+        val algorithm: String,
+        val issuerParam: String?,
+        val counter: Long,
+        val warnings: List<String>
+    )
+
     private fun parseOtpAuthUri(
         uri: ByteArray,
         defaultPeriodSeconds: Int,
@@ -180,65 +141,9 @@ object TotpKeyUriParser {
         val label = String(percentDecode(uri.copyOfRange(restStart, labelEnd)), StandardCharsets.UTF_8)
 
         val query = if (question >= 0) uri.copyOfRange(question + 1, uri.size) else ByteArray(0)
-        var secretRaw: ByteArray? = null
-        var period = defaultPeriodSeconds
-        var digits = defaultDigits
-        var algorithm = DEFAULT_ALGORITHM
-        var issuerParam: String? = null
-        var counter = 0L
-        val warnings = mutableListOf<String>()
-
+        val scan = scanQueryParameters(query, defaultPeriodSeconds, defaultDigits)
         try {
-            var index = 0
-            while (index <= query.size) {
-                var nextAmp = indexOfByte(query, BYTE_AMPERSAND, index)
-                if (nextAmp < 0) nextAmp = query.size
-                val eq = indexOfByte(query, BYTE_EQUALS, index).takeIf { it in index until nextAmp }
-                if (eq != null) {
-                    val key = String(query, index, eq - index, StandardCharsets.UTF_8)
-                    val valueStart = eq + 1
-                    // ISSUE-P2-289 AC①：参数值一律先百分号解码再归一（禁自写切分产生语义分歧；
-                    // `secret=...%3D%3D` 不再被解成错误密钥）
-                    when {
-                        key.equals(KEY_SECRET, ignoreCase = true) -> {
-                            val rawValue = query.copyOfRange(valueStart, nextAmp)
-                            secretRaw = percentDecode(rawValue)
-                            rawValue.fill(0)
-                        }
-                        key.equals(KEY_PERIOD, ignoreCase = true) ->
-                            period = queryValueString(query, valueStart, nextAmp)
-                                .toIntOrNull() ?: defaultPeriodSeconds
-                        key.equals(KEY_DIGITS, ignoreCase = true) -> {
-                            val parsed = queryValueString(query, valueStart, nextAmp).toIntOrNull()
-                            // ISSUE-P2-289 AC③：越界回落带诊断（禁静默改写）；钳制语义不变
-                            if (parsed != null && parsed !in DIGITS_MIN..DIGITS_MAX) {
-                                warnings += "digits=$parsed 超出 $DIGITS_MIN..$DIGITS_MAX，已回落 $defaultDigits 位"
-                            }
-                            digits = parsed ?: defaultDigits
-                        }
-                        key.equals(KEY_ALGORITHM, ignoreCase = true) -> {
-                            val raw = queryValueString(query, valueStart, nextAmp)
-                            val normalized = normalizeAlgorithm(raw)
-                            // ISSUE-P2-289 AC③：不支持的算法回落 SHA1 带诊断（禁静默改写）
-                            if (normalized == DEFAULT_ALGORITHM &&
-                                !raw.equals(DEFAULT_ALGORITHM, ignoreCase = true) && raw.isNotBlank()
-                            ) {
-                                warnings += "algorithm=$raw 不支持，已回落 $DEFAULT_ALGORITHM"
-                            }
-                            algorithm = normalized
-                        }
-                        key.equals(KEY_ISSUER, ignoreCase = true) ->
-                            issuerParam = queryValueString(query, valueStart, nextAmp)
-                        key.equals(KEY_COUNTER, ignoreCase = true) ->
-                            counter = queryValueString(query, valueStart, nextAmp)
-                                .toLongOrNull()?.coerceAtLeast(0L) ?: 0L
-                    }
-                }
-                if (nextAmp >= query.size) break
-                index = nextAmp + 1
-            }
-
-            val rawSecret = secretRaw ?: return null
+            val rawSecret = scan.secretRaw ?: return null
             val normalized = normalizeBase32(rawSecret)
             // ISSUE-P2-289 AC②：新输入解析为**严格口径**——含字母表外字符即解析失败
             // （调用方如实报「URI 非法」，禁由下游宽容解码静默解出错误密钥）；
@@ -248,22 +153,93 @@ object TotpKeyUriParser {
                 return null
             }
             val account = if (label.contains(':')) label.substringAfter(':').trim() else label.trim()
-            val issuer = (issuerParam ?: label.substringBefore(':')).trim()
+            val issuer = (scan.issuerParam ?: label.substringBefore(':')).trim()
             return ParsedTotpConfig(
                 secret = normalized,
-                period = if (period > 0) period else defaultPeriodSeconds,
-                digits = if (digits in DIGITS_MIN..DIGITS_MAX) digits else defaultDigits,
-                algorithm = algorithm,
+                period = if (scan.period > 0) scan.period else defaultPeriodSeconds,
+                digits = if (scan.digits in DIGITS_MIN..DIGITS_MAX) scan.digits else defaultDigits,
+                algorithm = scan.algorithm,
                 issuer = issuer.ifBlank { null },
                 account = account.ifBlank { null },
                 isHotp = isHotp,
-                counter = if (isHotp) counter else 0L,
-                warnings = warnings
+                counter = if (isHotp) scan.counter else 0L,
+                warnings = scan.warnings
             )
         } finally {
             query.fill(0)
-            secretRaw?.fill(0)
+            scan.secretRaw?.fill(0)
         }
+    }
+
+    /**
+     * 扫描 `?` 之后的查询段（ISSUE-P3-305：自 `parseOtpAuthUri` 逐行搬出，判定顺序与
+     * 各键的解析口径一字未改）。
+     *
+     * `query` 归调用方所有（本方法只读不写）；返回的 [QueryScan.secretRaw] 为**全新数组**，
+     * 由调用方按擦除义务清零。
+     */
+    private fun scanQueryParameters(
+        query: ByteArray,
+        defaultPeriodSeconds: Int,
+        defaultDigits: Int
+    ): QueryScan {
+        var secretRaw: ByteArray? = null
+        var period = defaultPeriodSeconds
+        var digits = defaultDigits
+        var algorithm = DEFAULT_ALGORITHM
+        var issuerParam: String? = null
+        var counter = 0L
+        val warnings = mutableListOf<String>()
+
+        var index = 0
+        while (index <= query.size) {
+            var nextAmp = indexOfByte(query, BYTE_AMPERSAND, index)
+            if (nextAmp < 0) nextAmp = query.size
+            val eq = indexOfByte(query, BYTE_EQUALS, index).takeIf { it in index until nextAmp }
+            if (eq != null) {
+                val key = String(query, index, eq - index, StandardCharsets.UTF_8)
+                val valueStart = eq + 1
+                // ISSUE-P2-289 AC①：参数值一律先百分号解码再归一（禁自写切分产生语义分歧；
+                // `secret=...%3D%3D` 不再被解成错误密钥）
+                when {
+                    key.equals(KEY_SECRET, ignoreCase = true) -> {
+                        val rawValue = query.copyOfRange(valueStart, nextAmp)
+                        secretRaw = percentDecode(rawValue)
+                        rawValue.fill(0)
+                    }
+                    key.equals(KEY_PERIOD, ignoreCase = true) ->
+                        period = queryValueString(query, valueStart, nextAmp)
+                            .toIntOrNull() ?: defaultPeriodSeconds
+                    key.equals(KEY_DIGITS, ignoreCase = true) -> {
+                        val parsed = queryValueString(query, valueStart, nextAmp).toIntOrNull()
+                        // ISSUE-P2-289 AC③：越界回落带诊断（禁静默改写）；钳制语义不变
+                        if (parsed != null && parsed !in DIGITS_MIN..DIGITS_MAX) {
+                            warnings += "digits=$parsed 超出 $DIGITS_MIN..$DIGITS_MAX，已回落 $defaultDigits 位"
+                        }
+                        digits = parsed ?: defaultDigits
+                    }
+                    key.equals(KEY_ALGORITHM, ignoreCase = true) -> {
+                        val raw = queryValueString(query, valueStart, nextAmp)
+                        val normalized = normalizeAlgorithm(raw)
+                        // ISSUE-P2-289 AC③：不支持的算法回落 SHA1 带诊断（禁静默改写）
+                        if (normalized == DEFAULT_ALGORITHM &&
+                            !raw.equals(DEFAULT_ALGORITHM, ignoreCase = true) && raw.isNotBlank()
+                        ) {
+                            warnings += "algorithm=$raw 不支持，已回落 $DEFAULT_ALGORITHM"
+                        }
+                        algorithm = normalized
+                    }
+                    key.equals(KEY_ISSUER, ignoreCase = true) ->
+                        issuerParam = queryValueString(query, valueStart, nextAmp)
+                    key.equals(KEY_COUNTER, ignoreCase = true) ->
+                        counter = queryValueString(query, valueStart, nextAmp)
+                            .toLongOrNull()?.coerceAtLeast(0L) ?: 0L
+                }
+            }
+            if (nextAmp >= query.size) break
+            index = nextAmp + 1
+        }
+        return QueryScan(secretRaw, period, digits, algorithm, issuerParam, counter, warnings)
     }
 
     /** 查询参数值的百分号解码 + UTF-8 成串（非敏感元数据用；种子走 [percentDecode] 字节路径）。 */

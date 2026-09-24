@@ -225,6 +225,9 @@ private fun EntryUrlField(
  *
  * M1 整改：密码输入走 [SecurePasswordField]——显示用 String 仅存活于组件内部，
  * CharArray 直达 ViewModel；既有密码经 [loadedPassword] 一次性预填。
+ *
+ * ISSUE-P3-305：原 100 行的单函数把密码生成器模块拆为 [EntryEditGeneratorSection]
+ * （逐行搬运，卡片层级与 `ColumnScope` 子节点关系不变）。
  */
 @Composable
 internal fun ColumnScope.EntryEditAccountSection(
@@ -241,9 +244,6 @@ internal fun ColumnScope.EntryEditAccountSection(
     onToggleDigits: () -> Unit,
     onToggleSymbols: () -> Unit
 ) {
-    // ISSUE-P3-261 AC⑤：内容层动效参数取自主题 MotionScheme（见下方 AnimatedVisibility 注释）
-    val generatorFade = MaterialTheme.motionScheme.defaultEffectsSpec<Float>()
-    val generatorSize = MaterialTheme.motionScheme.defaultSpatialSpec<IntSize>()
     Text(
         text = stringResource(R.string.edit_account_pwd),
         style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
@@ -302,29 +302,59 @@ internal fun ColumnScope.EntryEditAccountSection(
                 )
             }
 
-            // 密码生成器模块
-            // ISSUE-P3-261 AC⑤：原为无 enter / exit 的默认 `expandIn` + `fadeIn`，现显式取主题
-            // MotionScheme 的空间（展开/收起）与效果（淡化）spec。
-            AnimatedVisibility(
-                visible = uiState.showGenerator,
-                enter = fadeIn(generatorFade) + expandVertically(generatorSize),
-                exit = fadeOut(generatorFade) + shrinkVertically(generatorSize)
-            ) {
-                PasswordGeneratorWidget(
-                    passLength = uiState.passLength,
-                    useUpper = uiState.useUpper,
-                    useLower = uiState.useLower,
-                    useDigits = uiState.useDigits,
-                    useSymbols = uiState.useSymbols,
-                    onPassLengthChange = onPassLengthChange,
-                    onRegenerate = onGeneratePassword,
-                    onToggleUpper = onToggleUpper,
-                    onToggleLower = onToggleLower,
-                    onToggleDigits = onToggleDigits,
-                    onToggleSymbols = onToggleSymbols
-                )
-            }
+            // ISSUE-P3-261 AC⑤：密码生成器模块整体为独立分节（动效参数取自主题 MotionScheme，
+            // 见 [EntryEditGeneratorSection]）；保持 `ColumnScope` 扩展，使其仍是父 `Column` 的直接子节点
+            EntryEditGeneratorSection(
+                uiState = uiState,
+                onPassLengthChange = onPassLengthChange,
+                onGeneratePassword = onGeneratePassword,
+                onToggleUpper = onToggleUpper,
+                onToggleLower = onToggleLower,
+                onToggleDigits = onToggleDigits,
+                onToggleSymbols = onToggleSymbols
+            )
         }
+    }
+}
+
+/**
+ * 密码生成器分节（ISSUE-P3-305：自 100 行的 [EntryEditAccountSection] 按职责搬出，逐行未改）。
+ *
+ * 声明为 `ColumnScope` 扩展以保持拆分前的 `ColumnScope.AnimatedVisibility` 重载解析
+ * （同文件各分节的既有约束，见文件头 KDoc）。
+ */
+@Composable
+private fun ColumnScope.EntryEditGeneratorSection(
+    uiState: EntryEditUiState,
+    onPassLengthChange: (Float) -> Unit,
+    onGeneratePassword: () -> Unit,
+    onToggleUpper: () -> Unit,
+    onToggleLower: () -> Unit,
+    onToggleDigits: () -> Unit,
+    onToggleSymbols: () -> Unit
+) {
+    // ISSUE-P3-261 AC⑤：原为无 enter / exit 的默认 `expandIn` + `fadeIn`，现显式取主题
+    // MotionScheme 的空间（展开/收起）与效果（淡化）spec。
+    val generatorFade = MaterialTheme.motionScheme.defaultEffectsSpec<Float>()
+    val generatorSize = MaterialTheme.motionScheme.defaultSpatialSpec<IntSize>()
+    AnimatedVisibility(
+        visible = uiState.showGenerator,
+        enter = fadeIn(generatorFade) + expandVertically(generatorSize),
+        exit = fadeOut(generatorFade) + shrinkVertically(generatorSize)
+    ) {
+        PasswordGeneratorWidget(
+            passLength = uiState.passLength,
+            useUpper = uiState.useUpper,
+            useLower = uiState.useLower,
+            useDigits = uiState.useDigits,
+            useSymbols = uiState.useSymbols,
+            onPassLengthChange = onPassLengthChange,
+            onRegenerate = onGeneratePassword,
+            onToggleUpper = onToggleUpper,
+            onToggleLower = onToggleLower,
+            onToggleDigits = onToggleDigits,
+            onToggleSymbols = onToggleSymbols
+        )
     }
 }
 

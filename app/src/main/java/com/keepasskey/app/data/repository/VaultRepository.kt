@@ -12,8 +12,12 @@ import kotlinx.coroutines.flow.Flow
  *
  * ISSUE-P3-29：本接口的伴随值对象（[EntryRevisionSnapshot] / [EntryTotpSnapshot] /
  * [CreateKeyFileFactor]）已拆至同包 `VaultRepositoryTypes.kt`，全限定名不变。
+ *
+ * ISSUE-P3-305：本接口按**容量面**继续分列（纯结构性改动，接口方法全限定名与调用点零改动）——
+ * 敏感值按需读取通道见 [VaultSecretAccess]，Passkey 凭据面见 [VaultPasskeyRepository]；
+ * 本文件只保留库生命周期、分组与条目 CRUD、条目投影 / 查询、导出与模板。
  */
-interface VaultRepository {
+interface VaultRepository : VaultSecretAccess, VaultPasskeyRepository {
     /**
      * 获取所有已知密码库列表
      */
@@ -285,155 +289,13 @@ interface VaultRepository {
      */
     suspend fun getKdbxEntry(entryId: String): com.keepasskey.core.model.KdbxEntry?
 
-    /**
-     * 按需解密单条凭据的密码（M1 整改）。
-     * 仅在用户显式查看/复制密码时调用，杜绝全库密码明文驻留 StateFlow / 堆内存；
-     * 返回 String 由调用方用毕自然丢弃（UI 显示边界），条目不存在或无密码时返回 null。
-     *
-     * ISSUE-P2-15：返回值为不可擦除 String，已列入下线通道；新代码一律改用
-     * [getEntryPasswordChars]（CharArray 独占副本，调用方用毕 `fill('0')`）。
-     * 仅剩 {REF:...} 字段引用解析等 String 语义引擎不得不用时保留。
-     */
-    @Deprecated(
-        message = "String 明文不可显式擦除；请改用 getEntryPasswordChars 并在 finally 中清零",
-        replaceWith = ReplaceWith("getEntryPasswordChars(entryId)")
-    )
-    suspend fun getEntryPassword(entryId: String): String?
+    // ISSUE-P3-305：原位于此处的敏感值读取通道（单条/批量取码、HOTP 推进、TOTP 配置原文、
+    // 附件字节，以及 String 语义的下线通道）已整体迁往 [VaultSecretAccess]；本接口继承之，
+    // 故既有调用点（`vaultRepository.getEntryPasswordChars(...)` 等）零改动。
 
-    /**
-     * 按需解密单条凭据的密码为 CharArray（加解密审查 2026-09 M1 整改，编辑页 CharArray 直通链路）。
-     * 返回的数组是分配给调用方的独占副本，调用方使用完毕必须显式清零
-     * （`Arrays.fill(chars, '0')`）；条目不存在或无密码时返回 null。
-     */
-    suspend fun getEntryPasswordChars(entryId: String): CharArray?
-
-    /**
-     * 按需解密单条历史修订的密码（M1 整改，供详情页回滚/对比使用），语义同 [getEntryPassword]。
-     *
-     * ISSUE-P2-15：同属待下线 String 通道，请改用 [getEntryRevisionPasswordChars]
-     * （CharArray 独占副本，调用方用毕 `fill('0')` 或交由 [saveEntry] 擦除）。
-     */
-    @Deprecated(
-        message = "String 明文不可显式擦除；请改用 getEntryRevisionPasswordChars 并在 finally 中清零",
-        replaceWith = ReplaceWith("getEntryRevisionPasswordChars(entryId, revisionId)")
-    )
-    suspend fun getEntryRevisionPassword(entryId: String, revisionId: String): String?
-
-    /**
-     * 按需解密单条历史修订的密码为 CharArray（加解密审查 2026-09 M2 整改，回滚路径专用：
-     * 全程 CharArray、不经 String 中转）。返回的数组是分配给调用方的独占副本，调用方
-     * 使用完毕必须显式清零；修订不存在或无密码时返回 null。
-     */
-    suspend fun getEntryRevisionPasswordChars(entryId: String, revisionId: String): CharArray?
-
-    /**
-     * 读取单条历史修订的完整回滚快照（断点8 整改，供详情页全字段回滚）。
-     * 返回的 [EntryRevisionSnapshot.entry] 中受保护字段已解密（仅驻留编辑会话），
-     * [EntryRevisionSnapshot.totpSecretChars] 为该修订 TOTP 配置原文独占 CharArray 副本
-     * （无则空数组），调用方按借用语义用毕清零或交由 [saveEntry] 擦除；修订不存在时返回 null。
-     */
-    suspend fun getEntryRevisionSnapshot(entryId: String, revisionId: String): EntryRevisionSnapshot?
-
-    /**
-     * 按需解密单条凭据的受保护自定义字段为 CharArray（TASK-10：编辑态 CharArray 化，
-     * 与 [getEntryPasswordChars] 同一借用语义）。
-     * 仅在用户显式编辑该字段时调用；返回的数组是分配给调用方的独占副本，调用方使用完毕
-     * 必须显式清零；条目或字段不存在时返回 null，未加保护的字段直接返回其值副本。
-     */
-    suspend fun getEntryProtectedFieldChars(entryId: String, fieldKey: String): CharArray?
-
-    /**
-     * 按需计算单条凭据的当前 TOTP 验证码（F2 整改）。
-     * TOTP 种子绝不离开数据层——种子解析与验证码计算均在仓库内部完成并即时丢弃，
-     * UI 层仅取得验证码与展示配置；条目未配置 TOTP 时返回 null。
-     *
-     * ISSUE-P2-90：同一周期内的重复调用由数据层缓存吸收（不重复解密 / 不重复计算），
-     * 调用方无需自行节流。
-     */
-    suspend fun calculateEntryTotp(entryId: String): EntryTotpSnapshot?
-
-    /**
-     * ISSUE-P2-90：批量计算多条凭据的当前验证码——**一次会话读取 + 一次条目索引**，
-     * 适用于「同一时刻要拿一批码」的场景（列表页每周期重算），
-     * 相对逐条调用 [calculateEntryTotp] 可把 O(T×N) 的条目定位收敛为 O(N + T)。
-     *
-     * 条目不存在 / 未配置 TOTP / 计算失败的 id **不出现在返回值中**（与单条通道返回 null 同义）。
-     */
-    suspend fun calculateEntryTotps(entryIds: List<String>): Map<String, EntryTotpSnapshot>
-
-    /**
-     * ISSUE-P3-49：推进 HOTP（RFC 4226）条目的计数器并返回**本次所出之码**。
-     *
-     * 语义（对齐 KeePassXC）：
-     * 1. 读取条目 `otp` 字段的 `otpauth://hotp/...&counter=N` 配置；
-     * 2. 计算计数器 N 对应的验证码并**先把计数器 N+1 落库**，成功后才返回该码——
-     *    落库失败则整体失败（绝不返回一个「未推进」的码，否则同一计数器会被重复使用）；
-     * 3. 计数器推进**不产生历史修订**（属口令取用而非内容修订）。
-     *
-     * 非 HOTP 条目（TOTP / 无 OTP）返回 [com.keepasskey.core.result.KdbxResult.Failure]；
-     * 计数器非法 / URI 非法时 fail-closed 失败，不落库。
-     */
-    suspend fun advanceEntryHotpCounter(entryId: String): com.keepasskey.core.result.KdbxResult<EntryTotpSnapshot>
-
-    /**
-     * 根据依赖方标识 (RP ID) 或域名查询匹配的凭据条目
-     */
-    suspend fun findEntriesForRpId(rpId: String): List<com.keepasskey.core.model.KdbxEntry>
-
-    /**
-     * 根据 Base64URL 编码的 Credential ID 查找对应的 Passkey 凭据条目
-     */
-    suspend fun findPasskeyByCredentialId(credentialId: String): com.keepasskey.core.model.KdbxEntry?
-
-    /**
-     * 保存全新的 Passkey 凭据条目至根群组。
-     * [boundPackage] 非空时（普通应用创建路径）条目 url 记录为 android://<包名>，
-     * 供凭据查询按严格包名边界匹配；为空时记录为 https://<rpId>。
-     */
-    suspend fun saveNewPasskeyEntry(
-        data: com.keepasskey.core.model.PasskeyData,
-        boundPackage: String? = null
-    ): com.keepasskey.core.model.KdbxEntry
-
-    /**
-     * 新建或**原地替换** Passkey 凭据条目。
-     *
-     * 复用条件：同 rpId（域匹配）+ 同用户名的既有 Passkey 条目 —— 命中时保留条目其它内容
-     * （标题 / 备注 / 密码 / 标签 / 历史 / 附件），仅整体换新 Passkey schema 字段；
-     * 未命中则等价于 [saveNewPasskeyEntry]。整改动机：同站点重复注册曾产生多条重复条目。
-     */
-    suspend fun saveOrReplacePasskeyEntry(
-        data: com.keepasskey.core.model.PasskeyData,
-        boundPackage: String? = null
-    ): com.keepasskey.core.model.KdbxEntry
-
-    /**
-     * `excludeCredentials` 查重（WebAuthn 规范）：返回 [credentialIds] 中**已存在于库内**的
-     * credentialId 子集（空集表示全部未被占用）。命中即由调用方 fail-closed 拒绝注册。
-     */
-    suspend fun findExistingPasskeyCredentialIds(credentialIds: Set<String>): Set<String>
-
-    /**
-     * 递增并写回 Passkey 条目的签名计数器 (SignCount)。
-     *
-     * ISSUE-P3-27 子项 2：本入口不向调用方回传落库值，**断言路径不得使用它**——
-     * 需要把计数器写进 AuthenticatorData 的调用方必须改用 [incrementPasskeySignCount]。
-     */
-    suspend fun patchPasskeySignCount(entryId: String, newCount: Int)
-
-    /**
-     * 原子递增并返回**本次实际落库**的签名计数器（ISSUE-P3-27 子项 2）。
-     *
-     * 断言路径必须使用本返回值，禁止用锁外快照自行计算（`快照 + 1`）：
-     * 快照在进入断言时读取、与落库不在同一临界区，两个并发断言会算出同一个值并各自
-     * 向 RP 交出**重复**的 signCount（违反 WebAuthn 单调性）；「已签名回传、落盘前进程中断」
-     * 的重试同样会再交一次同值。本方法的递增与落库属同一受控原子变换，故返回值即「已提交」
-     * 的计数器，且返回值已写进响应时库内计数器必然已推进。
-     *
-     * @return 实际落库的计数器值；条目不存在 / entryId 非法时返回 null
-     *   （调用方此时必须 fail-closed 拒绝签发，不得回退为自算值）。
-     */
-    suspend fun incrementPasskeySignCount(entryId: String): Int?
+    // ISSUE-P3-305：原位于此处的 Passkey 凭据面（RP/Credential ID 查询、新建与原地替换、
+    // `excludeCredentials` 查重、签名计数器写回与原子递增）已整体迁往 [VaultPasskeyRepository]；
+    // 本接口继承之，故既有调用点（`vaultRepository.findPasskeyByCredentialId(...)` 等）零改动。
 
     /**
      * 保存传统自动填充捕获的凭据：匹配既有条目则更新密码，否则新建条目。用毕显式擦除密码字符。
@@ -444,26 +306,6 @@ interface VaultRepository {
         username: String,
         passwordChars: CharArray
     ): com.keepasskey.core.result.KdbxResult<Unit>
-
-    /**
-     * 按需读取单条凭据的 TOTP 配置原文为 CharArray（断点4 整改 + TASK-10 编辑态 CharArray 化）。
-     * 与 [calculateEntryTotp] 同源：标准 otp 字段优先，回退 TOTP 开头的自定义字段；
-     * 未配置时返回 null。返回的数组是分配给调用方的独占副本，调用方使用完毕必须显式清零。
-     */
-    suspend fun getEntryTotpSecretChars(entryId: String): CharArray?
-
-    /**
-     * 按需解析单条凭据指定附件的二进制内容（断点3 整改，SAF 导出用）。
-     *
-     * `ISSUE-P3-295`：寻址参数由**文件名**改为**附件下标 `refIndex`**（条目 `attachments`
-     * 列表中的位置）。外部库（KeePass XML / Bitwarden / 桌面版）可含**同名不同内容**的附件，
-     * 按名字取会「导出 A 得 B 的字节且提示为 A」；下标寻址恒精确。
-     * 下标越界或该附件为空字节时返回 null（空字节语义与改前一致）。
-     *
-     * 返回的是**调用方独占的独立副本**（内存附件走 `copyOf()`，落盘附件走 `source.load()`，
-     * 见 ISSUE-P3-105）；调用方用毕应自行 `fill(0)` 清零，勿长期持有。
-     */
-    suspend fun getAttachmentData(entryId: String, refIndex: Int): ByteArray?
 
     /**
      * 当前会话是否以只读模式打开（H4-只读整改）。锁定/关闭状态下返回 false。

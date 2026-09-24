@@ -101,23 +101,6 @@
 
 ---
 
-### ISSUE-P3-305：CI `hygiene-gate` 在 `main` 上为**红态**——`tier1(>500)=4`、`functions_ge_100=2`（§280 收工线已破）
-
-- **核实时间点**：2026-09-24（§300 批次机检复核时发现；随即逐文件与 `HEAD` 对拍，确认为**既存**红态，非该批引入）。
-- **核实方式**：
-  1. `python tools/doc/count_line_tiers.py` → **EXIT 1**，`tier1(>500)=4`（闸门要求恒为 0）：
-     `app/src/main/java/com/keepasskey/app/sync/SyncCycleRunner.kt` **561**、`app/src/main/java/com/keepasskey/app/sync/SyncConflictController.kt` **547**、
-     `sync/src/main/java/com/keepasskey/sync/engine/SyncCache.kt` **507**、`database/src/main/java/com/keepasskey/database/session/DatabaseSession.kt` **501**；
-     同次读数 `tier2(400~500)=33  budget=37`。
-  2. `python tools/doc/long_functions.py` → **EXIT 1**，`functions_ge_100=2`：
-     `SyncCycleRunner.kt::setupCycleContext`（105 行，L127）、`EntryEditFormSections.kt::EntryEditAccountSection`（100 行，L230）。
-  3. **既存性证明**：对上述 4 个超大文件 + `EntryEditFormSections.kt` 逐文件 `wc -l` 与 `git show HEAD:<path> | wc -l` 比对，**行数完全一致**，且 5 个文件**均不在 §300 改动面内**。
-  4. **CI 调用面**：`.github/workflows/build.yml` 的 `hygiene-gate` 第 3 / 第 4 条正是**无参数**调用这两个脚本 ⇒ 当前 `main`（`dbdf1a34`）上的该 gate 为红。
-- **背景与根因**：§280 把「超长函数与超大文件」一次性压到 `functions_ge_100=0` / `tier1=0` 并立为**收工线**，§281 又把六条自研机检挂成 CI 硬门禁；§285 记 `tier1=0 tier2=37` / `functions_ge_100=0`。此后 §286~§299 的连续整改（合并标量词汇表 / 图标池 / KDF / 同步库身份绑定等）在这些同步与数据库类上净增行数，**越线未被察觉**——历史批次仅以「`.\gradlew.bat test` 全绿」结案，**未逐条复核门禁面读数**，形成「闸门存在 ≠ 闸门被执行」的缺口。
-- **后果**：不影响运行时行为与用户可见功能；真正代价是 **fail-closed 硬门禁的信号价值被稀释**（红态长期化后，后续真正的越线不再被当作异常）。
-- **涉及文件**：上列 4 个超大文件 + 2 个超长函数所在文件（`app/.../ui/screens/edit/EntryEditFormSections.kt`）；CI 配置无需改动。
-- **验收标准**：AC① 4 个 `tier1` 文件与 2 个 ≥100 行函数按**职责拆分**整改至 `tier1=0` / `functions_ge_100=0`——**禁**以放宽阈值、扩白名单、调 `--max` 或改判据口径逃避；AC② 拆分为**纯结构性**（行为零变更），既有用例原样全绿，**不得删改任何既有用例**（测试资产纪律 ①）；AC③ 拆完复核 `tier2` 棘轮预算**只紧不松**（当前 33 / 37）；AC④ 复盘「§285 之后逐批未发现门禁转红」并落一条防回潮机制（批次文档须**逐条登记机检读数**，不得只写「六条机检 EXIT 0」）；AC⑤ 无设备侧义务（不动 `*/src/androidTest/**`）。
-
 ### ISSUE-P3-306：KDBX `<History>` 列表方向未在**读取侧归一**——官方 KeePass 形态的库（最旧在前）在本仓会按位置裁错端、修订列表倒序
 
 - **核实时间点**：2026-09-24（`ISSUE-P3-292` 整改中，因「截断须裁最旧端」而逐侧核对方向时发现）。
@@ -130,5 +113,19 @@
 - **后果**：① 此类库在本仓编辑后触发保存路径的 `pruneHistory` 时，**按位置裁掉的是最新快照**（`take(maxItems)` 保留头部 = 保留最旧一侧）——数据损失方向，仅在历史条数超过库级上限时显现；② 该库的修订列表在详情页**倒序**显示；③ 写回文件的历史顺序与本仓自产库不一致（官方读取端按时间戳维护，功能不受影响，属展示序差异）。
 - **涉及文件**：`database/src/main/java/com/keepasskey/database/xml/KdbxXmlGroupReader.kt`（读侧装配点）、`database/src/main/java/com/keepasskey/database/xml/KdbxXmlEntrySerializer.kt`（写侧）、`database/src/main/java/com/keepasskey/database/history/HistoryManager.kt`（`pruneHistory` 的位置口径）、`app/src/main/java/com/keepasskey/app/data/repository/VaultEntryMapper.kt`（修订投影）。
 - **验收标准**：AC① 先**裁决方向**——以「内存 / 文件均为头部最新」为准归一（与本仓既有约定及 `HistoryManagerTest` 一致），或改为官方「最旧在前」并同步翻转 `recordHistorySnapshot` / `pruneHistory` / 修订列表 UI（**两条路都须一次性贯通**，禁只改一半）；AC② 选定后在**读取侧归一**（装配时按 `lastModificationTime` 排序），使任一来源的库进入内存后方向恒一致，从而位置口径恒正确；AC③ 用例：以**升序**（官方形态）输入的库为 fixture，断言保存路径裁掉的是**最旧**一端、且修订列表顺序与本仓自产库一致；AC④ 归一**只调序、不得改写快照内容**，并复核 `KdbxMergerTest` 既有方向断言不被二次翻转；AC⑤ 若判定「文件序须与官方一致」，须按规则 8 以官方实现端到端对拍留证。
+
+---
+
+### ISSUE-P3-308：`SyncCache.clear(remotePath)` 的**孤儿 tmp 清理**按「未加库身份命名空间的键」通配——scoped 缓存目录里的崩溃残留 tmp 永不被清掉
+
+- **核实时间点**：2026-09-24（`ISSUE-P3-305` 批次拆分 `SyncCacheMaintenance` 时逐行核对键口径发现；**潜在**缺陷，当前无生产调用点）。
+- **核实方式**：
+  1. **读侧**：`sync/src/main/java/com/keepasskey/sync/engine/SyncCacheFiles.kt` 的 `deleteOrphanTmpFiles(remotePath)` 以 `sha256Hex(remotePath)` 为**前缀**通配 `cacheDir` 下的 `*.tmp`；
+  2. **写侧**：tmp 名由 `tmpFileFor(targetFile)` 生成，而 `targetFile = files.fileFor(scopedKey(remotePath), suffix)`——`ISSUE-P2-291` 起非空库身份命名空间下 `scopedKey(remotePath) == "<vaultScope>\n<remotePath>"` ⇒ 文件名的 sha256 前缀与通配前缀**恒不相等**，通配永不命中；
+  3. **调用面**：全仓 `grep deleteOrphanTmpFiles` 唯一调用点是 `SyncCache.clear(remotePath)`；而 `clear(remotePath)` **当前无生产调用点**（锁库 / 凭据销毁走 `clearAll()`，它按目录清单删除、不受此影响）⇒ 登记为**潜在**缺陷。
+- **背景与根因**：`SyncCacheFiles.deleteOrphanTmpFiles` 的通配口径停留在 `ISSUE-P2-291` 之前的「裸 `remotePath` 键」；引入库身份命名空间时只改了 `getFile` 的定位，未同步该清理入口（`SyncRollbackGuard` 另有一份独立的 `scopedKey`，同类风险面一并纳入 AC④）。
+- **后果**：一旦 `clear(remotePath)` 被接线，scoped 库崩溃残留的 `<sha256(scoped)>.cache.<uuid>.tmp`（**完整 KDBX 密文**）不会被该路径清除，只能等下一次 `clearAll()`（锁库）；磁盘占用与密文落盘窗口被延长。无明文暴露、无越权读取面（`cacheDir` 为应用私有且 0600 / 0700）。
+- **涉及文件**：`sync/src/main/java/com/keepasskey/sync/engine/SyncCacheFiles.kt`（`deleteOrphanTmpFiles`）、`sync/src/main/java/com/keepasskey/sync/engine/SyncCacheMaintenance.kt`（`clear` 的调用点）。
+- **验收标准**：AC① 裁决键口径——`deleteOrphanTmpFiles` 改收**规范键**（调用方传 `scopedKey(remotePath)`），或由 `SyncCacheFiles` 自持命名空间统一派生；**禁**两处各写一份键派生；AC② 用例：以 scoped 实例写入 tmp 残留后调 `clear(remotePath)` 必须清除它（当前必红），并断言**未加命名空间的旧键残留同样被清**（两代键都不得漏）；AC③ 若同批把 `clear(remotePath)` 接进生产路径，须同时验证 evictor 行为不回归；AC④ 复核 `SyncRollbackGuard` 的同名键派生是否同型（其 `scopedKey` 为独立副本），同型则一并对齐或如实登记；AC⑤ 无设备侧义务。
 
 ---

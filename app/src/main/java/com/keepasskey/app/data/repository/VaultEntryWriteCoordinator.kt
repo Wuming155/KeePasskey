@@ -26,8 +26,8 @@ import java.util.Arrays
  * 职责单一：条目的合并保存（含历史快照、受保护字段回填、附件重挂、图标与 AutoType 合并）、
  * 收藏标记写入，以及自动填充凭据的 upsert 保存。
  *
- * 擦除契约**不随本拆分改变**：
- * - `saveEntry` 的入参副本清零仍由仓库在 `finally` 中统一执行（本类不重复清零，避免二次擦除混淆所有权）；
+ * 擦除契约（ISSUE-P3-305 起**两条写路径均收口于本类**，仓库门面只作转发不二次擦除）：
+ * - `saveEntry` 的入参副本清零在 [saveEntryWithEraseContract] 的 `finally` 中统一执行；
  * - `saveAutofillCredential` 的入参清零保留在本类内（其调用链是单入口且无中间投影）。
  */
 internal class VaultEntryWriteCoordinator(
@@ -36,6 +36,31 @@ internal class VaultEntryWriteCoordinator(
     private val entryMapper: VaultEntryMapper,
     private val persistSession: suspend () -> KdbxResult<Unit>
 ) {
+
+    /**
+     * 条目保存入口（含擦除契约）。
+     *
+     * 擦除契约（加解密审查 2026-09）：任何结果路径（成功 / 失败 / 异常）用毕清零传入副本，
+     * 与 `saveAutofillCredential` / `FakeVaultRepository` 同一契约。
+     * TASK-10：TOTP 种子与受保护自定义字段明文副本同样纳入擦除契约。
+     *
+     * ISSUE-P3-305：自 `RealVaultRepository.saveEntry` 逐行搬出——清零动作与保存主体同处一器，
+     * 调用方（仓库门面）只转发，不再重复清零。
+     */
+    suspend fun saveEntryWithEraseContract(
+        entry: UiVaultEntry,
+        passwordChars: CharArray?,
+        totpSecretChars: CharArray?,
+        protectedFieldChars: Map<String, CharArray>
+    ): KdbxResult<Unit> {
+        try {
+            return saveEntryInternal(entry, passwordChars, totpSecretChars, protectedFieldChars)
+        } finally {
+            passwordChars?.fill('0')
+            totpSecretChars?.fill('0')
+            protectedFieldChars.values.forEach { it.fill('0') }
+        }
+    }
 
     /** 条目保存主体：既有条目合并更新（含历史修订），未命中则新建 */
     suspend fun saveEntryInternal(

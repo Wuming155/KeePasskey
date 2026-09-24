@@ -5,8 +5,6 @@ import androidx.annotation.VisibleForTesting
 import com.keepasskey.app.R
 import com.keepasskey.app.di.RollbackStateDir
 import com.keepasskey.app.ui.model.StringsProvider
-import com.keepasskey.app.ui.screens.settings.ExtendedSettings
-import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.database.file.KdbxDatabase
 import com.keepasskey.database.session.DatabaseSession
 import com.keepasskey.sync.engine.NoopSyncIntegrityMac
@@ -17,7 +15,6 @@ import com.keepasskey.sync.engine.SyncIntegrityMac
 import com.keepasskey.sync.engine.SyncOpenResult
 import com.keepasskey.sync.engine.SyncRollbackGuard
 import com.keepasskey.sync.merge.SyncConflictStrategy
-import com.keepasskey.sync.model.SyncException
 import com.keepasskey.sync.provider.SyncProvider
 import com.keepasskey.sync.s3.S3SyncProvider
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -34,7 +31,7 @@ import javax.inject.Singleton
  * 职责边界：串联 `DatabaseSession` 状态机、KDBX4 序列化与三哈希字节级 `SyncEngine`，
  * 产出 [SyncOutcome]；冲突决策委派 [SyncConflictController]，编解码委派 [SyncDatabaseCodec]，
  * Provider 构建委派 [SyncProviderResolver]。调度边界（`ISSUE-P2-277` 整改后已与实况对齐）：
- * - **装配段整体下沉 `Dispatchers.IO`**（[setupCycleContext]：凭据与偏好读取、整库缓存读 / 写与
+ * - **装配段整体下沉 `Dispatchers.IO`**（`setupCycleContext`：凭据与偏好读取、整库缓存读 / 写与
  *   `fd.sync()`、tmp 写 + 原子 rename、全库内容比较）。调用方可能是 `Main.immediate`——前台入口
  *   （下拉刷新 / 解锁后自动同步 / 设置页触发）持 `viewModelScope`；装配段内的同步调用**绕开**
  *   `SyncEngine` 直调 `SyncCache`，故引擎内的 `Dispatchers.IO` 兜底覆盖不到它；
@@ -42,26 +39,31 @@ import javax.inject.Singleton
  * - 网络与文件写盘在 `Dispatchers.IO`（`sync` 模块内）。
  *
  * 接缝（§155）：`openRemote` 的两条远端裁决分支（`handleRemoteSynced` / `handleConflictDetected`）
- * 与其共享上下文 [RemoteSyncContext] 已下沉到同包文件 `SyncCycleRemoteOutcomes.kt`（ISSUE-P3-188 第二档）。
+ * 与其共享上下文 `RemoteSyncContext` 已下沉到同包文件 `SyncCycleRemoteOutcomes.kt`（ISSUE-P3-188 第二档）。
  * 互斥语义：本类在 [SyncSessionState.mutex] 内执行整个周期（与拆分前 `mutex.withLock` 覆盖范围一致），
  * 周期内触达 [SyncConflictController] 的各方法不得二次取锁。
  *
  * ISSUE-P2-278：UI 写路径**不取**该互斥锁，周期起点之后用户仍可能编辑并保存——故所有
  * 「整树替换会话」的落库点（远端接管 [SyncDatabaseCodec.loadAndApplyRemoteBytes]、自动合并
- * [autoMergeAndUpload]、用户裁决采纳 `SyncConflictController.adoptMergedDatabase`）一律经
+ * [SyncConflictController.handleConflictMerge]、用户裁决采纳 `SyncConflictController.adoptMergedDatabase`）一律经
  * [DatabaseSession.adoptDatabaseIfUnchanged] 做「校验-采用」：会话树已非周期起点实例时
  * 如实中止本周期（`sync_error_local_changed_during_sync`），严禁静默覆盖窗口内编辑。
+ *
+ * ISSUE-P3-305：本文件继续按容量面分列——前置装配（`SyncCycleSetup.kt`）与步骤 2 / 3
+ * 提交路径（`SyncCycleCommitPaths.kt`）各自成文件，函数体逐行搬运；本类只保留
+ * 「取锁 + 装配调用 + 决策分派 + 绑定接管」。可见性代价：七个成员由 `private` 放宽为
+ * `internal`（仅同模块可见，公开 API 与行为零变化）。
  */
 @Singleton
 class SyncCycleRunner @Inject constructor(
-    @ApplicationContext private val context: Context,
+    @ApplicationContext internal val context: Context,
     internal val databaseSession: DatabaseSession,
     internal val session: SyncSessionState,
-    private val providerResolver: SyncProviderResolver,
+    internal val providerResolver: SyncProviderResolver,
     internal val codec: SyncDatabaseCodec,
     internal val conflicts: SyncConflictController,
-    private val changes: SyncContentChangeDetector,
-    private val preferences: SyncPreferences,
+    internal val changes: SyncContentChangeDetector,
+    internal val preferences: SyncPreferences,
     internal val strings: StringsProvider,
     /**
      * F-23 整改：防回滚状态目录，生产由 DI 注入 `filesDir/<SyncRollbackGuard.STATE_DIR_NAME>`
@@ -73,17 +75,17 @@ class SyncCycleRunner @Inject constructor(
      * 内按**同一生产落点**惰性解析；Hilt 恒注入真实目录（该路径同时禁用防回滚，见下）。
      */
     @RollbackStateDir
-    private val rollbackStateDir: File? = null,
+    internal val rollbackStateDir: File? = null,
     // ISSUE-P2-18：防回滚状态认证密钥来源（生产由 Hilt 注入 KeystoreSyncIntegrityMac；
     // 直接构造路径默认空实现 = 禁用防回滚，保持既有单测行为不变）
-    private val syncIntegrityMac: SyncIntegrityMac = NoopSyncIntegrityMac,
+    internal val syncIntegrityMac: SyncIntegrityMac = NoopSyncIntegrityMac,
     /**
      * `ISSUE-P2-291`：同步目标 ↔ 库身份绑定登记（生产由 Hilt 注入）。
      * 为 null（既有手工装配路径）时**关闭绑定闸且缓存 / 防回滚沿用旧键**（`SHA-256(remotePath)`），
      * 行为与整改前逐字节一致；非 null 时缓存 / 基线 / 防回滚键含库身份命名空间，
      * 且绑定不符的同步中止于任何网络写之前。
      */
-    private val vaultBindingStore: SyncVaultBindingStore? = null
+    internal val vaultBindingStore: SyncVaultBindingStore? = null
 ) {
 
     /**
@@ -92,149 +94,18 @@ class SyncCycleRunner @Inject constructor(
      *
      * 与 [SyncSessionState.testSyncProvider] 同一口径——本仓既有的 `@VisibleForTesting` 注入模式，
      * 并以 `internal` 收窄到本模块单测可见（生产 DI 不注入，外部调用方不可见、不可写）。
-     * 之所以需要注入点：本类在 [setupCycleContext] 内**自行**构造 `SyncCache`（落点与
+     * 之所以需要注入点：本类在 `setupCycleContext` 内**自行**构造 `SyncCache`（落点与
      * `SyncCache.CACHE_DIR_NAME` 绑定），而记录型子类只有经此入口才能进入周期。
      */
     @VisibleForTesting
     internal var syncCacheFactory: ((File) -> SyncCache)? = null
 
     /**
-     * [setupCycleContext] 的产出：本次同步周期的上下文（引擎、缓存、路径与内容快照）。
-     */
-    private data class SyncCycleContext(
-        val provider: SyncProvider,
-        val syncEngine: SyncEngine,
-        val syncCache: SyncCache,
-        val remotePath: String,
-        val isCached: Boolean,
-        val settings: ExtendedSettings,
-        val conflictStrategy: SyncConflictStrategy,
-        val isDirty: Boolean,
-        val localBytes: ByteArray,
-        val baseSnapshotBytes: ByteArray?,
-        val hasLocalContentChanged: Boolean,
-        val currentDb: KdbxDatabase
-    )
-
-    /**
-     * 周期前置装配（原 [runSyncCycle] 主体前段逐行搬运）：Provider 解析、引擎与缓存构造、
-     * 偏好快照、基线内容读取与本地字节获取。
-     *
-     * @return [SyncOutcome] 表示前置步骤即有结论（错误早退）；null 表示装配完成，见 [outcome]。
-     */
-    private data class CycleSetup(val outcome: SyncOutcome?, val context: SyncCycleContext? = null)
-
-    private suspend fun setupCycleContext(activeFile: File, currentDb: KdbxDatabase): CycleSetup {
-        val provider = try {
-            session.testSyncProvider ?: providerResolver.resolveProvider()
-        } catch (e: SyncException.InvalidEndpointError) {
-            return CycleSetup(SyncOutcome.Error(e.message ?: strings.get(R.string.sync_error_invalid_endpoint)))
-        } ?: return CycleSetup(SyncOutcome.Error(strings.get(R.string.sync_error_no_sync_credentials)))
-
-        val remotePath = session.testRemotePath ?: providerResolver.resolveRemotePath(activeFile.name)
-
-        // ISSUE-P2-291 AC①：库身份（根分组 UUID，建库随机生成、跨保存稳定）参与
-        // 缓存 / 基线 / 防回滚的键——同一 remotePath 被不同库共用时，各库的同步状态
-        // 物理隔离（「换库即视为新配置」）。绑定登记缺失（手工装配路径）时沿用旧键。
-        val vaultScope = vaultBindingStore?.let { currentDb.rootGroup.id.toHexString() }
-        val cacheScope = vaultScope.orEmpty()
-
-        // ISSUE-P3-03 (43a)：本次同步周期使用的偏好快照与冲突策略（周期内恒定，避免中途偏好漂移）
-        val settings = preferences.currentSettings()
-        val conflictStrategy = settings.conflictResolution.toSyncStrategy()
-
-        // ISSUE-P1-07：目录名与 SyncCacheEvictor 共用同一常量，杜绝两处字面量漂移
-        val syncDir = File(context.cacheDir, SyncCache.CACHE_DIR_NAME).apply { if (!exists()) mkdirs() }
-        val syncCache = if (vaultScope == null) {
-            syncCacheFactory?.invoke(syncDir) ?: SyncCache(syncDir)
-        } else {
-            SyncCache(syncDir, cacheScope)
-        }
-        // F-23 整改：防回滚状态**不得**与可丢弃缓存同目录——此前它落在 cacheDir/sync，
-        // 而 SyncCache.clear() 把它列入删除清单且由锁库 / 凭据清空触发，导致「用户锁定一次
-        // 即可被云端重放旧库」。现注入 filesDir 下的持久目录（跨锁定保留），
-        // 状态仅含 SHA-256 摘要 + Keystore HMAC（无明文）。
-        // 注入缺失（手动装配路径）时按同一落点惰性兜底，保证两种装配方式落点一致。
-        val rollbackGuard = SyncRollbackGuard(
-            rollbackStateDir ?: File(context.filesDir, SyncRollbackGuard.STATE_DIR_NAME),
-            syncIntegrityMac,
-            cacheScope
-        )
-
-        // ISSUE-P2-291 AC②：库身份绑定闸——在任何网络写（含 getMetadata）之前裁决。
-        // 未登记：当前库即本配置的创建绑定者（登记并把旧无命名空间键迁移到库身份键下，
-        // 单库老用户零感知）；登记一致：放行；登记为**另一库**：中止，须用户显式确认整库覆盖。
-        if (vaultBindingStore != null && vaultScope != null) {
-            when (val bound = vaultBindingStore.loadBinding(remotePath)) {
-                null -> {
-                    vaultBindingStore.saveBinding(remotePath, vaultScope)
-                    syncCache.adoptLegacyKeysIfPresent(remotePath)
-                    rollbackGuard.adoptLegacyKeyIfPresent(remotePath)
-                }
-                vaultScope -> Unit
-                else -> {
-                    preferences.verbose(settings, "库身份绑定拦截：remotePath 归属另一库（bound=${bound.take(8)}…），中止同步")
-                    return CycleSetup(SyncOutcome.VaultBindingMismatch(remotePath))
-                }
-            }
-        }
-        val syncEngine = SyncEngine(provider, syncCache, rollbackGuard)
-        // 离线开关联动：设置页开关传导至引擎决策树
-        syncEngine.isOffline = session.isOfflineMode
-        // ISSUE-P3-03 (43a)：关闭「同步前检查远程变更」= 上传前不比对方版本，本地修改直接覆盖远端
-        syncEngine.overwriteRemoteWithoutPrecondition = !settings.checkRemoteChangesBeforeSave
-        session.lastSyncEngine = syncEngine
-
-        val isCached = syncCache.isCached(remotePath)
-        val cachedSnapshotBytes = if (isCached) syncCache.readCache(remotePath) else null
-        preferences.verbose(
-            settings,
-            "同步周期开始: cached=$isCached, dirty=${databaseSession.state.value}, " +
-                "远端比对=${settings.checkRemoteChangesBeforeSave}, 冲突策略=$conflictStrategy, " +
-                "分块上传=${settings.webdavChunkedUpload}(${settings.webdavChunkSizeMb}MB)"
-        )
-        // A2 整改：三方合并的 base 必须取"最后确认与远端一致"的独立内容快照（basecache）。
-        // 本地缓存会被工作副本反复覆盖，绝不能再兼任 base 内容来源——
-        // 否则冲突会话中断后 base 会被本地修改版污染，后续合并退化为远端全胜
-        val baseSnapshotBytes = syncCache.readBaseContent(remotePath) ?: cachedSnapshotBytes
-        val hasLocalContentChanged = changes.resolveLocalContentChanged(currentDb, cachedSnapshotBytes)
-
-        // 1. 获取本地数据库字节：若无内容变更且已缓存，复用缓存规避 KDBX4 随机 IV 导致的不必要哈希漂移；否则序列化并写缓存
-        val localBytes = if (!isCached || hasLocalContentChanged) {
-            val bytes = codec.serializeLocalDatabase(currentDb)
-                ?: return CycleSetup(SyncOutcome.Error(strings.get(R.string.sync_error_local_serialize_failed)))
-            if (isCached) {
-                syncCache.writeCache(remotePath, bytes)
-            }
-            bytes
-        } else {
-            cachedSnapshotBytes ?: codec.serializeLocalDatabase(currentDb)!!
-        }
-
-        return CycleSetup(
-            outcome = null,
-            context = SyncCycleContext(
-                provider = provider,
-                syncEngine = syncEngine,
-                syncCache = syncCache,
-                remotePath = remotePath,
-                isCached = isCached,
-                settings = settings,
-                conflictStrategy = conflictStrategy,
-                isDirty = databaseSession.state.value == DatabaseSession.SessionState.DIRTY,
-                localBytes = localBytes,
-                baseSnapshotBytes = baseSnapshotBytes,
-                hasLocalContentChanged = hasLocalContentChanged,
-                currentDb = currentDb
-            )
-        )
-    }
-
-    /**
      * 执行全量同步周期的决策树（原 `SyncCoordinator.runSyncCycle` 主体，逐行搬运）。
      *
      * 周期内四个步骤的判定顺序、早退语义与缓存写入时机均保持不变；
-     * 前置装配见 [setupCycleContext]，各步骤的独立片段拆为下方私有方法，
+     * 前置装配见 `setupCycleContext`（ISSUE-P3-305 起实现位于同包 `SyncCycleSetup.kt`），
+     * 步骤 2 / 3 的实现位于同包 `SyncCycleCommitPaths.kt`，
      * `return@withLock` 语义由返回值等价承载。
      */
     suspend fun runSyncCycle(): SyncOutcome = session.mutex.withLock {
@@ -397,114 +268,6 @@ class SyncCycleRunner @Inject constructor(
             SyncOutcome.Error(e.message ?: strings.get(R.string.sync_error_vault_takeover_failed))
         } finally {
             (providerForErase as? S3SyncProvider)?.clearCredentials()
-        }
-    }
-
-    /**
-     * 步骤 2（原样搬运）：首次同步且尚未缓存时，若远端尚未创建该文件，直接上传本地库建立基线。
-     *
-     * @return null 表示远端已存在（本步骤无结论，调用方继续后续决策）；非 null 即本步骤的同步结论。
-     */
-    private suspend fun establishRemoteBaselineIfMissing(
-        provider: SyncProvider,
-        syncEngine: SyncEngine,
-        remotePath: String,
-        localBytes: ByteArray
-    ): SyncOutcome? {
-        val metaResult = provider.getMetadata(remotePath)
-        if (metaResult.isFailure) {
-            val ex = metaResult.exceptionOrNull()
-            if (ex is com.keepasskey.sync.model.SyncException.FileNotFound) {
-                // ISSUE-P3-180：上面的 getMetadata 已给出「远端不存在」的结论，下传给上传路径，
-                // 使首传不必在 Provider 侧再探一次存在性（WebDAV 的 Overwrite 判定）
-                val uploadResult = syncEngine.commitLocal(remotePath, localBytes, remoteExists = false)
-                return when (uploadResult) {
-                    is SyncCommitResult.Uploaded -> {
-                        session.lastSyncedDb = databaseSession.databaseFlow.value
-                        SyncOutcome.UploadedLocal
-                    }
-                    else -> SyncOutcome.Error(strings.get(R.string.sync_error_first_upload_failed))
-                }
-            } else {
-                return SyncOutcome.Offline
-            }
-        }
-        return null
-    }
-
-    /**
-     * 步骤 3（原样搬运）：本地未落盘修改 + 已有缓存基线 → 快速提交路径。
-     *
-     * 前置判据 `isDirty && syncCache.isCached(remotePath)` 由调用方判定（与拆分前同一表达式）；
-     * 进入本方法后三分支（Uploaded / ConflictNeedsMerge / RemoteUnreachable）恒返回结论。
-     *
-     * @param localDbSnapshot ISSUE-P3-168 ①：与 [localBytes] 内容等价的本地内存树，
-     *   转三方合并时直接充当本地侧（免去一次「解析 localBytes 回树」的整库解密）。
-     */
-    private suspend fun tryFastCommitPath(
-        syncEngine: SyncEngine,
-        syncCache: SyncCache,
-        remotePath: String,
-        localBytes: ByteArray,
-        localDbSnapshot: KdbxDatabase,
-        baseSnapshotBytes: ByteArray?,
-        settings: ExtendedSettings,
-        conflictStrategy: SyncConflictStrategy
-    ): SyncOutcome {
-        preferences.verbose(settings, "命中快速提交路径（本地未落盘修改 + 已有缓存基线）")
-        // ISSUE-P3-03 (43a)：用户关闭「同步前检查远程变更」时走无预条件覆盖上传
-        // （不做 ETag 比对，本地版本直接覆盖远端）；默认开启时保持乐观锁语义不变
-        val commitResult = if (settings.checkRemoteChangesBeforeSave) {
-            syncEngine.commitLocal(remotePath, localBytes)
-        } else {
-            preferences.verbose(settings, "已关闭上传前远端比对：无 ETag 预条件覆盖上传")
-            syncEngine.commitLocalForce(remotePath, localBytes)
-        }
-        return when (commitResult) {
-            is SyncCommitResult.Uploaded -> {
-                // H3 整改：缓存已上传云端但本地正式文件保存失败时如实报错，不再静默
-                val saveResult = databaseSession.save()
-                if (saveResult is KdbxResult.Failure) {
-                    return SyncOutcome.Error(
-                        strings.get(R.string.sync_error_remote_updated_local_save_failed, saveResult.message)
-                    )
-                }
-                session.lastSyncedDb = databaseSession.databaseFlow.value
-                SyncOutcome.UploadedLocal
-            }
-            is SyncCommitResult.ConflictNeedsMerge -> {
-                // R3 整改：本地未同步修改必须先落盘正式库文件——冲突会话可能在
-                // 用户退出/进程被杀时中断，仅存于缓存与内存的本地修改会随重启丢失
-                databaseSession.save()
-                // ISSUE-P3-03 (43a)：先应用「以云端为准 / 以本地为准」强制策略；
-                // 返回 null（自动合并 / 每次询问）时继续走三方合并。
-                // 必须整体 return —— 强制策略的结果就是本次同步结论，不得落入后续分支
-                conflicts.applyForcedConflictStrategy(
-                    strategy = conflictStrategy,
-                    syncEngine = syncEngine,
-                    remotePath = remotePath,
-                    localBytes = localBytes,
-                    remoteBytes = commitResult.remoteBytes
-                ) ?: conflicts.handleConflictMerge(
-                    syncEngine = syncEngine,
-                    syncCache = syncCache,
-                    remotePath = remotePath,
-                    localBytes = localBytes,
-                    remoteBytes = commitResult.remoteBytes,
-                    baseSnapshotBytes = baseSnapshotBytes,
-                    remoteEtag = commitResult.remoteEtag,
-                    strategy = conflictStrategy,
-                    // ISSUE-P3-168 ①：本地侧直接取内存树（免去一次解析回树）
-                    localDbOverride = localDbSnapshot,
-                    // ISSUE-P2-278：合并采纳前的会话守卫判据（周期起点快照）
-                    expectedSessionSnapshot = localDbSnapshot
-                )
-            }
-            is SyncCommitResult.RemoteUnreachable -> SyncOutcome.Offline
-            // ISSUE-P2-18：远端内容为设备侧曾接受过的旧版本（回退/重放）→ 拒绝应用并提示用户
-            is SyncCommitResult.RollbackRejected -> SyncOutcome.Error(
-                strings.get(R.string.sync_error_rollback_rejected)
-            )
         }
     }
 

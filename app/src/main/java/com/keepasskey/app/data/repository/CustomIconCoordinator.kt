@@ -135,6 +135,17 @@ internal class CustomIconCoordinator(
     fun snapshotIconBytes(db: com.keepasskey.database.file.KdbxDatabase): Map<String, ByteArray> =
         db.customIcons.associate { it.uuid.toHexString() to it.data }
 
+    /**
+     * 库内自定义图标池快照（UUID hex → PNG 字节），供 UI 解码渲染。
+     *
+     * ISSUE-P3-305：自 `RealVaultRepository.getCustomIconBytes()` 逐行搬出——
+     * 「会话为空 ⇒ 空表」的回退语义与拆分前一致。
+     */
+    suspend fun snapshotIconBytesOrEmpty(): Map<String, ByteArray> =
+        databaseSession.databaseFlow.first()
+            ?.let { snapshotIconBytes(it) }
+            ?: emptyMap()
+
     companion object {
         /** PNG 文件魔数：\x89PNG\r\n\x1a\n */
         private val PNG_SIGNATURE = byteArrayOf(

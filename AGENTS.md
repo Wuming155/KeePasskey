@@ -38,7 +38,9 @@ Coroutines + Flow；**文档与代码注释使用简体中文**。
 5. **无需中间计划文件**：严禁创建 plan 文档；背景与验收标准直接自包含在 `ACTIVE_ISSUES.md`。
 6. **极简闭环工作流（认领 → 整改+验证 → 流转归档 → 提交推送）**：
    1. **认领**：从 `ACTIVE_ISSUES.md` 顶部按优先级认领；发现新问题即时补登（**严禁只记聊天或脑中**），新条目附「核实时间点 + 核实方式」。
-   2. **整改 + 验证**：`.\gradlew.bat test` 全绿（含相关回归）方准入库。
+   2. **整改 + 验证**：`.\gradlew.bat test` 全绿（含相关回归）**且** `python tools/doc/gate_readings.py` **7/7 PASS** 方准入库；
+      批次文档须**原样粘贴该脚本输出的读数块**（逐条 EXIT + 读数行），**禁止**只写「机检全绿 / EXIT 0」——
+      「闸门存在 ≠ 闸门被执行」正是 `ISSUE-P3-305` 的根因，§308 立规。
    3. **流转归档**：整条**剪切**出 `ACTIVE_ISSUES.md` → `RESOLVED_LOG.md` 加一行 → `docs/resolved/batches/` 新增
       `<NN>-<中文短名>.md`（原样收录，编号续用不复用）。
    4. **提交推送**：文档与代码**同一次 `git commit`** 并**立即 `git push`**；信息以 `TASK-xx` / `ISSUE-xx` 引用并简述主题。
@@ -97,6 +99,9 @@ Coroutines + Flow；**文档与代码注释使用简体中文**。
   先跑 `:database:` 的 `PasskeyInteropProbeTest` 产出产物；判据含 `keepassxc-cli` / `pykeepass` 双实现读数与
   `cryptography` 独立解析 PEM 并重导出公钥，退出码 1 即失败。**改 `PasskeyData` schema / `PasskeyPkcs8Codec` /
   KPEX 字段后必跑**——`ISSUE-P2-211` 正是被它揭出的）
+- `python tools/doc/gate_readings.py` — **门禁读数单点采集**（§308 立规；清单**直接解析**
+  `.github/workflows/build.yml` 的 `hygiene-gate` 段落，故与 CI 不可能漂移；任一条非 0 即退出码 1，
+  解析不到命令同样报红）。**每批结案前跑它，并把输出原样贴入批次文档 §3**
 - `python tools/doc/count_line_tiers.py` / `python tools/doc/long_functions.py` / `python tools/doc/check_md_links.py`
   / `python tools/doc/logic_lines.py <文件> <函数名>` / `python tools/doc/count_test_results.py`
   / `python tools/doc/check_resolved_index_sync.py` / `python tools/doc/check_bounded_type_names.py`

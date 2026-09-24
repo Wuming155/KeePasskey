@@ -1,6 +1,8 @@
 package com.keepasskey.app.ui.screens.edit
 
 import android.graphics.BitmapFactory
+import android.net.Uri
+import androidx.activity.compose.ManagedActivityResultLauncher
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -60,15 +62,55 @@ private fun attachmentTooLargeMessage(): UiMessage =
  * - 扫码结果（框架边界 String）**即刻**转 `CharArray` 走安全桥接上行（TASK-10）；
  * - 相册图片先经 [decodeAndScaleToPng] 降采样，解码失败如实提示；
  * - 扫码提示文案在 Composable 内解析后捕获，避免 stale 引用（原 LINT 修正）。
+ *
+ * ISSUE-P3-305：原 105 行单函数按「三个选择器各自成器」拆为下方三个私有工厂
+ * （[rememberAttachmentPicker] / [rememberDecodedCustomIcons] / [rememberCustomIconPicker]），
+ * 装配序列、`remember`/`LaunchedEffect` 的调用顺序与各回调体逐行搬运，行为零变更。
  */
 @Composable
 internal fun rememberEntryEditPickers(
     viewModel: EntryEditViewModel,
     scope: CoroutineScope
 ): EntryEditPickers {
-    val context = LocalContext.current
+    val attachmentPicker = rememberAttachmentPicker(viewModel, scope)
 
-    val attachmentPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+    val qrScanner = rememberLauncherForActivityResult(ScanContract()) { result ->
+        result.contents?.let { viewModel.onTotpSecretChangeSecure(it.toCharArray()) }
+    }
+
+    val decodedCustomIcons = rememberDecodedCustomIcons(viewModel)
+    val photoPicker = rememberCustomIconPicker(viewModel, scope)
+
+    val scanPrompt = stringResource(R.string.edit_scan_totp_qr)
+
+    return EntryEditPickers(
+        decodedCustomIcons = decodedCustomIcons,
+        pickAttachment = { attachmentPicker.launch("*/*") },
+        scanTotpQr = {
+            val options = ScanOptions()
+            options.setDesiredBarcodeFormats(ScanOptions.QR_CODE)
+            options.setPrompt(scanPrompt)
+            options.setBeepEnabled(false)
+            options.setOrientationLocked(true)
+            // ISSUE-P3-71：改用受保护取景窗口（FLAG_SECURE + 反悬浮窗覆盖），
+            // 避免密钥种子二维码取景画面被截屏 / 录屏 / 多任务缩略图捕获。
+            options.setCaptureActivity(SecureCaptureActivity::class.java)
+            qrScanner.launch(options)
+        },
+        pickCustomIcon = {
+            photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+        }
+    )
+}
+
+/** SAF 附件选择器（ISSUE-P3-295 AC②：先按申报长度拦一次，再整份读入；异常与空文件如实提示）。 */
+@Composable
+private fun rememberAttachmentPicker(
+    viewModel: EntryEditViewModel,
+    scope: CoroutineScope
+): ManagedActivityResultLauncher<String, Uri?> {
+    val context = LocalContext.current
+    return rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) {
             scope.launch(Dispatchers.IO) {
                 try {
@@ -107,15 +149,14 @@ internal fun rememberEntryEditPickers(
             }
         }
     }
+}
 
-    val qrScanner = rememberLauncherForActivityResult(ScanContract()) { result ->
-        result.contents?.let { viewModel.onTotpSecretChangeSecure(it.toCharArray()) }
-    }
-
+/** 库内自定义图标池的位图解码（PNG → ImageBitmap 为 CPU 操作，移出主线程）。 */
+@Composable
+private fun rememberDecodedCustomIcons(viewModel: EntryEditViewModel): List<CustomIconItem> {
     val customIconOptions by viewModel.customIconOptions.collectAsStateWithLifecycle()
     var decodedCustomIcons by remember { mutableStateOf<List<CustomIconItem>>(emptyList()) }
     LaunchedEffect(customIconOptions) {
-        // PNG → ImageBitmap 解码为 CPU 操作，移出主线程
         decodedCustomIcons = withContext(Dispatchers.Default) {
             customIconOptions.mapNotNull { (id, bytes) ->
                 BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.let {
@@ -124,7 +165,17 @@ internal fun rememberEntryEditPickers(
             }
         }
     }
-    val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+    return decodedCustomIcons
+}
+
+/** 相册 Photo Picker（TASK-15：选图降采样为 ≤128px PNG 后上传，解码失败如实提示）。 */
+@Composable
+private fun rememberCustomIconPicker(
+    viewModel: EntryEditViewModel,
+    scope: CoroutineScope
+): ManagedActivityResultLauncher<PickVisualMediaRequest, Uri?> {
+    val context = LocalContext.current
+    return rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri != null) {
             scope.launch(Dispatchers.IO) {
                 try {
@@ -145,25 +196,4 @@ internal fun rememberEntryEditPickers(
             }
         }
     }
-
-    val scanPrompt = stringResource(R.string.edit_scan_totp_qr)
-
-    return EntryEditPickers(
-        decodedCustomIcons = decodedCustomIcons,
-        pickAttachment = { attachmentPicker.launch("*/*") },
-        scanTotpQr = {
-            val options = ScanOptions()
-            options.setDesiredBarcodeFormats(ScanOptions.QR_CODE)
-            options.setPrompt(scanPrompt)
-            options.setBeepEnabled(false)
-            options.setOrientationLocked(true)
-            // ISSUE-P3-71：改用受保护取景窗口（FLAG_SECURE + 反悬浮窗覆盖），
-            // 避免密钥种子二维码取景画面被截屏 / 录屏 / 多任务缩略图捕获。
-            options.setCaptureActivity(SecureCaptureActivity::class.java)
-            qrScanner.launch(options)
-        },
-        pickCustomIcon = {
-            photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-        }
-    )
 }
