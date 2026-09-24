@@ -11,6 +11,7 @@ import com.keepasskey.app.ui.model.UiVaultEntry
 import com.keepasskey.app.ui.model.VaultDatabaseInfo
 import com.keepasskey.app.ui.model.VaultGroup
 import com.keepasskey.app.ui.screens.settings.ExtendedSettings
+import com.keepasskey.app.ui.screens.settings.SearchMatchMode
 
 /**
  * 密码库列表的**纯投影层**（ISSUE-P3-29：自 `VaultListViewModel.kt` 拆出）。
@@ -177,7 +178,8 @@ private fun projectVaultListContent(
         effectiveGroupId = effectiveGroupId,
         sortOption = session.filterParams.sortOption,
         selectedTag = session.filterParams.selectedTag,
-        favoriteOnly = session.filterParams.favoriteOnly
+        favoriteOnly = session.filterParams.favoriteOnly,
+        searchMatchMode = session.extended.searchMatchMode
     )
     // 4. ISSUE-P3-17：搜索结果行的分组路径（仅在「搜索中 + 开关开启」时装配）
     val entryGroupPaths = searchEntryGroupPaths(allGroups, sortedEntries, session, isSearching)
@@ -278,7 +280,8 @@ private fun selectSortedEntries(
     effectiveGroupId: String?,
     sortOption: VaultSortOption,
     selectedTag: String?,
-    favoriteOnly: Boolean
+    favoriteOnly: Boolean,
+    searchMatchMode: SearchMatchMode
 ): List<UiVaultEntry> {
     val targetEntries = if (isSearching) {
         allEntries.filter { if (!isInsideRecycleBin) it.groupId !in recycleBinGroupIds else true }
@@ -287,7 +290,7 @@ private fun selectSortedEntries(
     }
     return sortEntries(
         targetEntries.filter {
-            matchesSearchQuery(it, query) &&
+            matchesSearchQuery(it, query, searchMatchMode) &&
                 (!favoriteOnly || it.isFavorite) &&
                 (selectedTag == null || selectedTag in it.tags)
         },
@@ -343,29 +346,6 @@ private fun buildTemplateEntries(
         emptyList()
     } else {
         allEntries.filter { it.groupId in templateGroupIds }.sortedBy { it.orderIndex }
-    }
-}
-
-/**
- * 全文搜索匹配：命中条目任一处非受保护文本即算匹配。
- *
- * 覆盖范围（对齐 README「全文搜索」契约）：标题 / 用户名 / URL / 备注 / 标签 /
- * 自定义字段的键与**非受保护**值。受保护字段（`isProtected=true`）的明文不进投影
- * （见 [com.keepasskey.app.ui.model.UiCustomField]），故天然不参与命中，
- * 避免搜索侧信道泄露机密；其字段**键**属元数据（如 `TOTP Seed`）仍可命中。
- *
- * 空查询恒为真（未搜索时不过滤）。
- */
-internal fun matchesSearchQuery(entry: UiVaultEntry, query: String): Boolean {
-    if (query.isBlank()) return true
-    if (entry.title.contains(query, ignoreCase = true)) return true
-    if (entry.username.contains(query, ignoreCase = true)) return true
-    if (entry.url.contains(query, ignoreCase = true)) return true
-    if (entry.notes.contains(query, ignoreCase = true)) return true
-    if (entry.tags.any { it.contains(query, ignoreCase = true) }) return true
-    return entry.customFields.any { field ->
-        field.key.contains(query, ignoreCase = true) ||
-            (!field.isProtected && field.value.contains(query, ignoreCase = true))
     }
 }
 

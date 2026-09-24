@@ -388,6 +388,11 @@
     <string name="edit_autotype_note">本应用不执行键入序列，仅为与其他密码管理器兼容而保存</string>
     <string name="edit_override_url_hint">Override URL（自动填充匹配覆盖）</string>
     <string name="edit_extra_section">高级属性</string>
+    <string name="edit_expiry_title">过期时间</string>
+    <string name="edit_expiry_never">永不过期</string>
+    <string name="edit_expiry_pick_date">选择过期日期</string>
+    <string name="detail_expired_badge">已过期</string>
+    <string name="detail_expires_on">将于该日期过期</string>
 
     <!-- 解锁页 快速解锁 (ISSUE-P1-08：仅强生物识别经硬件密钥承载，锁屏凭据与自研 PIN 均已移除) -->
     <string name="unlock_quick_title">QuickUnlock 极速解锁</string>
@@ -816,6 +821,12 @@
     <string name="theme_density_normal_desc">均衡的信息密度与可读性</string>
     <string name="theme_density_comfortable">宽松</string>
     <string name="theme_density_comfortable_desc">更大间距，阅读更轻松</string>
+    <string name="theme_search_mode_title">搜索匹配方式</string>
+    <string name="theme_search_mode_desc">「全部词」要求每个空白分隔的词都命中，可减少短查询的误报</string>
+    <string name="theme_search_mode_contains">包含</string>
+    <string name="theme_search_mode_contains_desc">关键词整体匹配字段文本</string>
+    <string name="theme_search_mode_all_terms">全部词</string>
+    <string name="theme_search_mode_all_terms_desc">每个词都须命中才算匹配</string>
     <string name="theme_haptic_title">触感反馈</string>
     <string name="theme_haptic_sub">复制、解锁等关键操作提供振动反馈</string>
     <string name="theme_hide_fab_title">滚动时隐藏创建按钮</string>

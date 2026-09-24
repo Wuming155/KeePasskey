@@ -107,7 +107,9 @@ internal class VaultEntryWriteCoordinator(
             tags = entry.tags,
             overrideUrl = entry.overrideUrl?.takeIf { it.isNotBlank() },
             // KP2A 能力补齐：tags / overrideUrl / AutoType 序列
-            autoType = entryMapper.mergeAutoType(existing.autoType, entry.autoTypeSequence)
+            autoType = entryMapper.mergeAutoType(existing.autoType, entry.autoTypeSequence),
+            // ISSUE-P3-310：过期两态写入（null = 关闭过期，写 expires=false；非 null = 指定到期时刻）
+            times = mergeEntryTimes(existing.times, entry.expiresAt)
         )
 
         // P3-4 整改：历史修剪遵从库级 Meta 配置（historyMaxItems / historyMaxSize），
@@ -124,6 +126,13 @@ internal class VaultEntryWriteCoordinator(
         }
         databaseSession.saveEntry(finalEntry)
     }
+
+    /** ISSUE-P3-310：过期两态合并——只改 `expires` / `expiryTime`，其余时间属性原样保留。 */
+    private fun mergeEntryTimes(existing: com.keepasskey.core.model.KdbxTimes, expiresAt: Instant?): com.keepasskey.core.model.KdbxTimes =
+        when (expiresAt) {
+            null -> existing.copy(expires = false)
+            else -> existing.copy(expires = true, expiryTime = expiresAt)
+        }
 
     /** 标准字段：保留既有映射，仅覆盖提交字段（M1：密码仅在显式提交时更新） */
     private fun mergeStandardFields(

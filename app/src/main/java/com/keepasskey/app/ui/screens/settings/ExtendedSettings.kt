@@ -76,6 +76,8 @@ data class ExtendedSettings(
     val showGroupInEntry: Boolean = false,
     val listDensity: ListDensity = ListDensity.NORMAL,
     val autoActivateSearchOnOpen: Boolean = false,
+    // ISSUE-P3-309：全文搜索匹配档（默认维持子串口径，行为零变更；分词档见 SearchMatchMode KDoc）
+    val searchMatchMode: SearchMatchMode = SearchMatchMode.CONTAINS,
 
     // TOTP 规范字段映射
     val totpSeedFieldName: String = "TOTP Seed",

@@ -132,6 +132,8 @@ class ExtendedSettingsStore @Inject constructor(
             autoActivateSearchOnOpen = p.getBoolean(
                 K_AUTO_ACTIVATE_SEARCH_ON_OPEN, defaults.autoActivateSearchOnOpen
             ),
+            // ISSUE-P3-309：全文搜索匹配档（默认子串口径）
+            searchMatchMode = enumOrDefault(p.getString(K_SEARCH_MATCH_MODE, null), defaults.searchMatchMode),
 
             // TOTP 规范字段映射
             totpSeedFieldName = p.getString(K_TOTP_SEED_FIELD_NAME, null)
@@ -188,6 +190,7 @@ class ExtendedSettingsStore @Inject constructor(
             .putBoolean(K_SHOW_GROUP_IN_ENTRY, settings.showGroupInEntry)
             .putString(K_LIST_DENSITY, settings.listDensity.name)
             .putBoolean(K_AUTO_ACTIVATE_SEARCH_ON_OPEN, settings.autoActivateSearchOnOpen)
+            .putString(K_SEARCH_MATCH_MODE, settings.searchMatchMode.name)
             .putString(K_TOTP_SEED_FIELD_NAME, settings.totpSeedFieldName)
             .putString(K_TOTP_SETTINGS_FIELD_NAME, settings.totpSettingsFieldName)
             .putInt(K_DEFAULT_TOTP_STEP_SECONDS, settings.defaultTotpStepSeconds)
@@ -351,6 +354,8 @@ class ExtendedSettingsStore @Inject constructor(
         const val K_SHOW_GROUP_IN_ENTRY = "show_group_in_entry"
         const val K_LIST_DENSITY = "list_density"
         const val K_AUTO_ACTIVATE_SEARCH_ON_OPEN = "auto_activate_search_on_open"
+        /** ISSUE-P3-309：全文搜索匹配档（默认 CONTAINS = 既有子串口径） */
+        const val K_SEARCH_MATCH_MODE = "search_match_mode"
         const val K_TOTP_SEED_FIELD_NAME = "totp_seed_field_name"
         const val K_TOTP_SETTINGS_FIELD_NAME = "totp_settings_field_name"
         const val K_DEFAULT_TOTP_STEP_SECONDS = "default_totp_step_seconds"

@@ -377,6 +377,11 @@
     <string name="edit_autotype_note">This app does not execute AutoType sequences; saved for compatibility with other password managers only</string>
     <string name="edit_override_url_hint">Override URL (autofill matching override)</string>
     <string name="edit_extra_section">Advanced Properties</string>
+    <string name="edit_expiry_title">Expiry</string>
+    <string name="edit_expiry_never">Never expires</string>
+    <string name="edit_expiry_pick_date">Pick expiry date</string>
+    <string name="detail_expired_badge">Expired</string>
+    <string name="detail_expires_on">Expires on</string>
 
     <!-- Unlock QuickUnlock -->
     <string name="unlock_quick_title">QuickUnlock Fast Unlock</string>
@@ -805,6 +810,12 @@
     <string name="theme_density_normal_desc">Balanced density and readability</string>
     <string name="theme_density_comfortable">Comfortable</string>
     <string name="theme_density_comfortable_desc">More spacing, easier reading</string>
+    <string name="theme_search_mode_title">Search matching</string>
+    <string name="theme_search_mode_desc">"All terms" requires every whitespace-separated word to match, reducing false positives for short queries</string>
+    <string name="theme_search_mode_contains">Contains</string>
+    <string name="theme_search_mode_contains_desc">Match the whole query as a substring</string>
+    <string name="theme_search_mode_all_terms">All terms</string>
+    <string name="theme_search_mode_all_terms_desc">Every word must match</string>
     <string name="theme_haptic_title">Haptic feedback</string>
     <string name="theme_haptic_sub">Vibrate on key actions like copy and unlock</string>
     <string name="theme_hide_fab_title">Hide create button on scroll</string>

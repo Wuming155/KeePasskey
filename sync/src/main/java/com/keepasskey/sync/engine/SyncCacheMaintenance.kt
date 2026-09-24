@@ -13,8 +13,8 @@ import java.io.File
  * 持有——那些成员是单元测试子类化的注入点，不可搬迁。
  *
  * 键派生：构造时注入 [keyOf]（即 [SyncCache] 的 `scopedKey`），使「库身份命名空间参与规范键」
- * 只有一份实现；[SyncCacheFiles.deleteOrphanTmpFiles] 的调用参数沿用**未加命名空间的 remotePath**
- * （与拆分前逐字一致，本轮不改变其口径）。
+ * 只有一份实现；[SyncCacheFiles.deleteOrphanTmpFiles] 的调用参数同样经 [keyOf] 派生的规范键
+ * （`ISSUE-P3-308`：拆分时曾沿用未加命名空间的 remotePath，scoped 实例下通配永不命中）。
  */
 internal class SyncCacheMaintenance(
     private val files: SyncCacheFiles,
@@ -157,7 +157,12 @@ internal class SyncCacheMaintenance(
                 files.deleteChild(file)
             }
         }
-        files.deleteOrphanTmpFiles(remotePath)
+        // ISSUE-P3-308：通配清理按规范键派生（scoped 实例下裸 remotePath 前缀恒不命中）；
+        // P2-291 前旧无命名空间键下的崩溃残留 tmp 不随 adoptLegacyKeysIfPresent 迁移（仅搬已交付文件），
+        // 故两代键各通配一遍，任何一代残留的密文 tmp 都不待 clearAll() 才清。
+        val scoped = keyOf(remotePath)
+        files.deleteOrphanTmpFiles(scoped)
+        if (scoped != remotePath) files.deleteOrphanTmpFiles(remotePath)
     }
 
     /**

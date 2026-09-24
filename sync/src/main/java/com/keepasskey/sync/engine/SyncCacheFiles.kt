@@ -100,13 +100,17 @@ internal class SyncCacheFiles(private val cacheDir: File) {
     }
 
     /**
-     * 通配清理本 remotePath 的全部残留 tmp 文件。
-     * tmp 名含随机成分后，固定名清单不再完备；以「缓存键前缀 + tmp 后缀」通配兜底，
+     * 通配清理本规范键的全部残留 tmp 文件（ISSUE-P3-308）。
+     * tmp 名含随机成分后，固定名清单不再完备；以「缓存键哈希前缀 + tmp 后缀」通配兜底，
      * 防止进程崩溃残留的 tmp 文件累积泄漏磁盘。
+     *
+     * [key] 语义与 [fileFor] 一致：**调用方已派生的规范键**（含库身份命名空间），
+     * 本方法只做 `SHA-256` 命名派生，不自持命名空间（键派生唯一实现在 [SyncCache.scopedKey]）。
+     * `ISSUE-P2-291` 之前本参数是裸 `remotePath`，scoped 实例下前缀恒不匹配、通配永不命中。
      */
-    fun deleteOrphanTmpFiles(remotePath: String) {
-        val key = SyncCache.sha256Hex(remotePath.toByteArray(Charsets.UTF_8))
-        cacheDir.listFiles { file -> file.name.startsWith(key) && file.name.endsWith(SUFFIX_TMP) }
+    fun deleteOrphanTmpFiles(key: String) {
+        val keyHash = SyncCache.sha256Hex(key.toByteArray(Charsets.UTF_8))
+        cacheDir.listFiles { file -> file.name.startsWith(keyHash) && file.name.endsWith(SUFFIX_TMP) }
             ?.forEach { it.delete() }
     }
 

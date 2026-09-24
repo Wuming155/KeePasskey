@@ -105,6 +105,8 @@ fun EntryEditScreen(
         onTagsInputChange = viewModel::onTagsInputChange,
         onAutoTypeSequenceChange = viewModel::onAutoTypeSequenceChange,
         onOverrideUrlChange = viewModel::onOverrideUrlChange,
+        onToggleExpiry = viewModel::onToggleExpiry,
+        onExpiryDateSelected = viewModel::onExpiryDateSelected,
         onAddCustomField = viewModel::addCustomField,
         onUpdateCustomField = viewModel::updateCustomField,
         onRemoveCustomField = viewModel::removeCustomField,
@@ -162,6 +164,9 @@ fun EntryEditContent(
     onTagsInputChange: (String) -> Unit,
     onAutoTypeSequenceChange: (String) -> Unit,
     onOverrideUrlChange: (String) -> Unit,
+    // ISSUE-P3-310：过期编辑两态
+    onToggleExpiry: (Boolean) -> Unit = {},
+    onExpiryDateSelected: (java.time.LocalDate) -> Unit = {},
     onAddCustomField: () -> Unit,
     onUpdateCustomField: (String, String, String, Boolean) -> Unit,
     onRemoveCustomField: (String) -> Unit,
@@ -272,14 +277,18 @@ fun EntryEditContent(
                 onRemoveAttachment = onRemoveAttachment
             )
 
-            // KP2A 能力补齐：高级属性（标签 / AutoType / Override URL）
+            // KP2A 能力补齐：高级属性（标签 / AutoType / Override URL / 过期编辑）
             EntryEditExtraSection(
                 tagsInput = uiState.tagsInput,
                 onTagsInputChange = onTagsInputChange,
                 autoTypeSequence = uiState.autoTypeSequence,
                 onAutoTypeSequenceChange = onAutoTypeSequenceChange,
                 overrideUrl = uiState.overrideUrl,
-                onOverrideUrlChange = onOverrideUrlChange
+                onOverrideUrlChange = onOverrideUrlChange,
+                expiresEnabled = uiState.expiresEnabled,
+                expiryDate = uiState.expiryDate,
+                onToggleExpiry = onToggleExpiry,
+                onExpiryDateSelected = onExpiryDateSelected
             )
 
             // 安全备注

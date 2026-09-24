@@ -154,7 +154,9 @@ data class UiVaultEntry(
     // KP2A 能力补齐：标签 / AutoType 序列 / Override URL 的 UI 编辑通道（H4-断点补齐）
     val tags: List<String> = emptyList(),
     val autoTypeSequence: String = "",
-    val overrideUrl: String? = null
+    val overrideUrl: String? = null,
+    // ISSUE-P3-310：条目过期时间（KDBX Times.expires / expiryTime 的 UI 投影）；null = 永不过期
+    val expiresAt: java.time.Instant? = null
 ) {
     /**
      * ISSUE-P2-68（审计 M6）：**覆写默认 `toString()`**。

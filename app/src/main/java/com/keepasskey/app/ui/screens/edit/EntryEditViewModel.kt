@@ -267,6 +267,15 @@ class EntryEditViewModel @Inject constructor(
 
     fun onOverrideUrlChange(url: String) = _uiState.update { it.copy(overrideUrl = url, isDirty = true) }
 
+    // ISSUE-P3-310：过期编辑两态（关闭 = 永不过期；选择日期 = 当日 23:59:59 过期）
+    fun onToggleExpiry(enabled: Boolean) = _uiState.update {
+        it.copy(expiresEnabled = enabled, isDirty = true)
+    }
+
+    fun onExpiryDateSelected(date: java.time.LocalDate) = _uiState.update {
+        it.copy(expiresEnabled = true, expiryDate = date, isDirty = true)
+    }
+
     fun onTogglePasswordVisibility() = _uiState.update { it.copy(isPasswordVisible = !it.isPasswordVisible) }
     fun onToggleGenerator() = _uiState.update { it.copy(showGenerator = !it.showGenerator) }
 

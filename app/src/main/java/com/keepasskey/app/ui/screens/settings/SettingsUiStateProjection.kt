@@ -201,6 +201,7 @@ internal fun buildSettingsUiState(
     showGroupInEntry = extState.showGroupInEntry,
     listDensity = extState.listDensity,
     autoActivateSearchOnOpen = extState.autoActivateSearchOnOpen,
+    searchMatchMode = extState.searchMatchMode,
     showAuthenticatorTab = userSettings.showAuthenticatorTab,
     showGeneratorTab = userSettings.showGeneratorTab,
 

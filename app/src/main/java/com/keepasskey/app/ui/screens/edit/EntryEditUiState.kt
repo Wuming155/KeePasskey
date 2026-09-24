@@ -43,6 +43,9 @@ data class EntryEditUiState(
     val tagsInput: String = "",
     val autoTypeSequence: String = "",
     val overrideUrl: String = "",
+    // ISSUE-P3-310：过期编辑两态（false = 永不过期；expiryDate 取当日 23:59:59 本地时刻落库）
+    val expiresEnabled: Boolean = false,
+    val expiryDate: java.time.LocalDate? = null,
     val isPasswordVisible: Boolean = false,
     val showGenerator: Boolean = false,
     val passLength: Float = 20f,

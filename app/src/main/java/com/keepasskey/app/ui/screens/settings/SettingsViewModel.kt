@@ -419,6 +419,8 @@ class SettingsViewModel @Inject constructor(
     fun setShowGroupInEntry(enabled: Boolean) = extendedPreferences.setShowGroupInEntry(enabled)
     fun setListDensity(density: ListDensity) = extendedPreferences.setListDensity(density)
     fun setAutoActivateSearchOnOpen(enabled: Boolean) = extendedPreferences.setAutoActivateSearchOnOpen(enabled)
+    /** ISSUE-P3-309：全文搜索匹配档（默认子串口径；分词档收紧短查询误报） */
+    fun setSearchMatchMode(mode: SearchMatchMode) = extendedPreferences.setSearchMatchMode(mode)
 
     // ===== KP2A 扩展：文件处理与高级同步策略 =====
     fun setUseOfflineCache(enabled: Boolean) = extendedPreferences.setUseOfflineCache(enabled)

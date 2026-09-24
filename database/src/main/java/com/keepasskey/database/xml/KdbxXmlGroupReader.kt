@@ -192,6 +192,12 @@ internal class EntryNode(
         // 与分组 <Tags> 共用同一单趟扫描实现（ISSUE-P3-181）
         val tags = parseTagsText(tagsStr)
 
+        // ISSUE-P3-306：读侧方向归一——本仓约定 history 头部为最新，官方 KeePass 写出为最旧在前
+        // （PwEntry.CreateBackup 追加到尾部），按文档序装配会使官方库在本仓内存中方向倒置，
+        // 保存路径的 pruneHistory（take(maxItems) 保留头部）将误裁最新端。稳定排序保证同刻快照保持文档序。
+        val normalizedHistory = history.toList()
+            .sortedByDescending { it.times.lastModificationTime }
+
         onDone(
             KdbxEntry(
                 id = requireUuid(id, "Entry"),
@@ -206,7 +212,7 @@ internal class EntryNode(
                 fields = fields.toMap(),
                 customFields = customFields.toList(),
                 times = times ?: KdbxXmlTimeHelper.ancientTimes(),
-                history = history.toList(),
+                history = normalizedHistory,
                 tags = tags,
                 attachments = attachments.toList(),
                 autoType = autoType,

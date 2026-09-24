@@ -22,6 +22,7 @@ import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.AppLanguage
 import com.keepasskey.app.ui.components.BentoCard
 import com.keepasskey.app.ui.screens.settings.ListDensity
+import com.keepasskey.app.ui.screens.settings.SearchMatchMode
 import com.keepasskey.app.ui.screens.settings.SettingsUiState
 
 /**
@@ -172,6 +173,44 @@ private fun ThemeDensitySelector(
 }
 
 /**
+ * 全文搜索匹配档选择器（标题 + 说明 + 二态 FilterChip 行，结构对齐 [ThemeDensitySelector]）。
+ * ISSUE-P3-309：子串（默认，行为零变更）与分词 AND 两档。
+ */
+@Composable
+private fun SearchMatchModeSelector(
+    selected: SearchMatchMode,
+    onSelected: (SearchMatchMode) -> Unit
+) {
+    Column {
+        Text(
+            text = stringResource(R.string.theme_search_mode_title),
+            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+            color = MaterialTheme.colorScheme.onSurface
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = stringResource(R.string.theme_search_mode_desc),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            SearchMatchMode.entries.forEach { mode ->
+                FilterChip(
+                    selected = selected == mode,
+                    onClick = { onSelected(mode) },
+                    label = { Text(stringResource(mode.labelRes)) },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                        selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                )
+            }
+        }
+    }
+}
+
+/**
  * 5. 搜索、分组与常驻通知（KP2A 特性）。
  *
  * ISSUE-P3-18：`showUnlockedNotification` 真实控制常驻通知的收发（通知通道 + POST_NOTIFICATIONS 已落地）。
@@ -182,7 +221,8 @@ internal fun LazyListScope.themeNavSearchSection(
     onShowUnlockedNotificationToggle: (Boolean) -> Unit,
     onAutoActivateSearchOnOpenToggle: (Boolean) -> Unit,
     onShowGroupInSearchResultToggle: (Boolean) -> Unit,
-    onShowGroupInEntryToggle: (Boolean) -> Unit
+    onShowGroupInEntryToggle: (Boolean) -> Unit,
+    onSearchMatchModeSelected: (SearchMatchMode) -> Unit = {}
 ) {
     item { ThemeSectionTitle(stringResource(R.string.theme_section_nav_search)) }
 
@@ -204,6 +244,12 @@ internal fun LazyListScope.themeNavSearchSection(
                     subtitle = stringResource(R.string.theme_auto_search_sub),
                     checked = uiState.autoActivateSearchOnOpen,
                     onCheckedChange = onAutoActivateSearchOnOpenToggle
+                )
+
+                // ISSUE-P3-309：全文搜索匹配档（子串 / 分词 AND）
+                SearchMatchModeSelector(
+                    selected = uiState.searchMatchMode,
+                    onSelected = onSearchMatchModeSelected
                 )
 
                 DisplayPrefRow(

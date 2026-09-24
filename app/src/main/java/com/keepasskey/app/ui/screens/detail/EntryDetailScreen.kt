@@ -297,6 +297,11 @@ fun EntryDetailContent(
                     NotesCard(notesText = notesText, updatedAt = entry.updatedAt)
                 }
 
+                // ISSUE-P3-310：过期状态呈现（未设置过期时无卡片）
+                entry.expiresAt?.let { expiresAt ->
+                    ExpiryStatusCard(expiresAt = expiresAt)
+                }
+
                 Spacer(modifier = Modifier.height(30.dp))
             }
         }

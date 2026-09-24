@@ -114,7 +114,9 @@ internal class VaultEntryMapper(
             revisions = uiRevisions,
             tags = entry.tags,
             autoTypeSequence = entry.autoType?.defaultSequence.orEmpty(),
-            overrideUrl = entry.overrideUrl
+            overrideUrl = entry.overrideUrl,
+            // ISSUE-P3-310：过期时间投影（expires=false 时 null，与编辑页「永不过期」两态对齐）
+            expiresAt = entry.times.takeIf { it.expires }?.expiryTime
         )
     }
 
@@ -309,7 +311,11 @@ internal class VaultEntryMapper(
             tags = entry.tags,
             attachments = attachments,
             autoType = mergeAutoType(null, entry.autoTypeSequence),
-            overrideUrl = entry.overrideUrl?.takeIf { it.isNotBlank() }
+            overrideUrl = entry.overrideUrl?.takeIf { it.isNotBlank() },
+            // ISSUE-P3-310：新建路径同样携带过期两态
+            times = entry.expiresAt?.let {
+                com.keepasskey.core.model.KdbxTimes(expires = true, expiryTime = it)
+            } ?: com.keepasskey.core.model.KdbxTimes()
         )
     }
 

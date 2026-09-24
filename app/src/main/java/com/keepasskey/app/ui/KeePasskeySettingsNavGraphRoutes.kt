@@ -221,6 +221,7 @@ internal fun NavGraphBuilder.settingsThemeRoute(navController: NavHostController
             onShowGroupInEntryToggle = settingsViewModel::setShowGroupInEntry,
             onListDensitySelected = settingsViewModel::setListDensity,
             onAutoActivateSearchOnOpenToggle = settingsViewModel::setAutoActivateSearchOnOpen,
+            onSearchMatchModeSelected = settingsViewModel::setSearchMatchMode,
             onShowAuthenticatorTabToggle = settingsViewModel::setShowAuthenticatorTab,
             onShowGeneratorTabToggle = settingsViewModel::setShowGeneratorTab
         )

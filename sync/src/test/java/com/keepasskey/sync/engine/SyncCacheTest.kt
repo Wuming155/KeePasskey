@@ -317,4 +317,34 @@ class SyncCacheTest {
         assertFalse("未交付的状态 .tmp 亦按 tmp 规则清理: ${undeliveredStateTmp.name}", undeliveredStateTmp.exists())
         assertTrue("已交付的防回滚状态必须保留", deliveredState.isFile)
     }
+
+    // ===== ISSUE-P3-308：通配清理按规范键派生（scoped 与旧裸键两代都不得漏） =====
+
+    @Test
+    fun `clear 通配清理 scoped 键与旧裸键两代的崩溃残留tmp`() {
+        // 整改前：deleteOrphanTmpFiles 以 sha256(裸 remotePath) 为前缀通配，
+        // 而 P2-291 起 tmp 名前缀是 sha256(scopedKey) ⇒ scoped 库的崩溃残留 tmp 永不被清。
+        val dir = tmpFolder.newFolder("scoped-tmp-residue")
+        val vaultScope = "root-group-uuid"
+        val cache = SyncCache(dir, vaultScope)
+        val remotePath = "remote/vault.kdbx"
+        val uuid = "11111111-2222-3333-4444-555555555555"
+        val scopedTmp = File(
+            dir,
+            "${SyncCache.sha256Hex("$vaultScope\n$remotePath".toByteArray(Charsets.UTF_8))}.cache.$uuid.tmp"
+        ).apply { writeBytes("partial-ciphertext".toByteArray()) }
+        val legacyTmp = File(
+            dir,
+            "${SyncCache.sha256Hex(remotePath.toByteArray(Charsets.UTF_8))}.cache.$uuid.tmp"
+        ).apply { writeBytes("partial-ciphertext".toByteArray()) }
+        // 他人路径的残留：通配不得越界
+        val foreignTmp = File(dir, "${"f".repeat(64)}.cache.$uuid.tmp")
+            .apply { writeBytes("other-path".toByteArray()) }
+
+        cache.clear(remotePath)
+
+        assertFalse("scoped 键残留 tmp 必须被清: ${scopedTmp.name}", scopedTmp.exists())
+        assertFalse("旧裸键残留 tmp 亦必须被清（两代键都不得漏）: ${legacyTmp.name}", legacyTmp.exists())
+        assertTrue("他人路径的 tmp 不得被越界清理: ${foreignTmp.name}", foreignTmp.isFile)
+    }
 }

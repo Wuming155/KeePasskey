@@ -173,7 +173,12 @@ internal fun EntryEditExtraSection(
     autoTypeSequence: String,
     onAutoTypeSequenceChange: (String) -> Unit,
     overrideUrl: String,
-    onOverrideUrlChange: (String) -> Unit
+    onOverrideUrlChange: (String) -> Unit,
+    // ISSUE-P3-310：过期编辑两态（默认关闭 = 永不过期；预览与既有调用零影响）
+    expiresEnabled: Boolean = false,
+    expiryDate: java.time.LocalDate? = null,
+    onToggleExpiry: (Boolean) -> Unit = {},
+    onExpiryDateSelected: (java.time.LocalDate) -> Unit = {}
 ) {
     Text(
         text = stringResource(R.string.edit_extra_section),
@@ -216,6 +221,14 @@ internal fun EntryEditExtraSection(
                 singleLine = true,
                 shape = MaterialTheme.shapes.medium,
                 modifier = Modifier.fillMaxWidth()
+            )
+
+            // ISSUE-P3-310：过期编辑两态（行组件见 EntryEditExpiryEditor.kt）
+            ExpiryEditorRow(
+                expiresEnabled = expiresEnabled,
+                expiryDate = expiryDate,
+                onToggleExpiry = onToggleExpiry,
+                onExpiryDateSelected = onExpiryDateSelected
             )
         }
     }

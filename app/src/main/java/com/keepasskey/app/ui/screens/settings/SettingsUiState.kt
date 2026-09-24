@@ -179,6 +179,7 @@ data class SettingsUiState(
     val showGroupInEntry: Boolean = false, // KP2A: 条目详情页标识所属分组
     val listDensity: ListDensity = ListDensity.NORMAL, // KP2A: 列表显示紧凑度
     val autoActivateSearchOnOpen: Boolean = false, // KP2A: 打开数据库后自动聚焦搜索栏
+    val searchMatchMode: SearchMatchMode = SearchMatchMode.CONTAINS, // ISSUE-P3-309: 全文搜索匹配档
     val showAuthenticatorTab: Boolean = true, // 是否在底部导航栏显示「验证码」
     val showGeneratorTab: Boolean = true, // 是否在底部导航栏显示「密码生成器」
 

@@ -40,6 +40,9 @@ internal fun applyLoadedEntry(
     tagsInput = entry.tags.joinToString(", "),
     autoTypeSequence = entry.autoTypeSequence,
     overrideUrl = entry.overrideUrl.orEmpty(),
+    // ISSUE-P3-310：既有过期值回填编辑表单（Instant → 本地日期）
+    expiresEnabled = entry.expiresAt != null,
+    expiryDate = entry.expiresAt?.atZone(java.time.ZoneId.systemDefault())?.toLocalDate(),
     isDirty = false
 )
 

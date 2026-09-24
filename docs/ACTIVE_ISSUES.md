@@ -47,7 +47,7 @@
 
 ---
 
-## P3 低危问题、特性接线与体验优化（7 项）
+## P3 低危问题、特性接线与体验优化（3 项）
 
 ### ISSUE-P3-298：借鉴参考项目仍缺的可达性与反馈能力（外部打开入口 / 大屏双栏 / 请求级重试 / 后台失败可见 / OTP 直填 / CM 排序）
 
@@ -78,54 +78,4 @@
 - **背景与根因**：§274 的整改依据「大库下为**数百毫秒至秒级**」是**估算**（同一主线程上做 Keystore 解密 + 整库密文读 + 全库逐字段比较 + 整库写 + `fd.sync()` 的量级推理，非本机实测）。按定义整改后主线程应只剩一次 stat，但**未证的是**：真实大库（万级条目 / 含附件）下装配段下沉后的实际主线程阻塞与帧耗时，以及把该段整体挪到 `Dispatchers.IO` 后对**同步总时长**的影响（阻塞被移走，该段本身仍须执行完）。
 - **涉及文件**：无生产代码改动面（纯外部验证条目）；实测结果回填 [`resolved/batches/274-同步周期装配段下沉IO批次.md`](resolved/batches/274-同步周期装配段下沉IO批次.md) §2.4 / §3.4，并按需登记 [`architecture/已知工程限界.md`](architecture/已知工程限界.md)。
 - **验收标准**：AC① 接入设备后构造**大库**（万级条目，含 ≥1 MiB 落盘附件与历史快照）实测下拉刷新：记录装配段耗时、主线程最长连续阻塞、掉帧数与同步总时长，并按「量级须实测」留证（工具 + 原始读数）；AC② 实测**证实**「主线程无同步重活」⇒ 回填批次 §2.4 / §3.4 并闭环本条；实测**推翻**（仍见秒级主线程阻塞）⇒ 另行立条定位残余阻塞点（含 `ISSUE-P3-301` 的 stat 面与 `SyncCache` 之外的调用），**不得**就地改判 §274 的守卫口径；AC③ 无设备期间本条维持开放，**不得**以 §274 的 JVM 守卫绿推定量级已证；AC④ 若同批接入设备，与 `ISSUE-P3-300`（真实 DAV 矩阵）一并执行以减少设备占用。
-
----
-
-### ISSUE-P3-306：KDBX `<History>` 列表方向未在**读取侧归一**——官方 KeePass 形态的库（最旧在前）在本仓会按位置裁错端、修订列表倒序
-
-- **核实时间点**：2026-09-24（`ISSUE-P3-292` 整改中，因「截断须裁最旧端」而逐侧核对方向时发现）。
-- **核实方式**：
-  1. **本仓约定 = 头部最新**（`HistoryManagerTest` 锁定）：`recordHistorySnapshot` 头插新快照；`pruneHistory` 以 `take(maxItems)` **保留头部**；`VaultEntryMapper` 按列表序原样产出 `UiEntryRevision`，详情页（`EntryDetailSections`）不再排序。
-  2. **合并路径已改为同向**（`ISSUE-P3-292` / §303）：`KdbxEntryMerger` 由 `sortedBy` 改 `sortedByDescending`，`KdbxMergerTest` / `KdbxMergerV2Test` 的按升序断言随之更正。
-  3. **读取侧未归一**：`KdbxXmlGroupReader` 以 `history.add(it)` 按**文档顺序**装配，写入侧 `KdbxXmlEntrySerializer` 亦按列表序写回 ⇒ **文件序 == 内存序**，方向完全取决于输入文件。
-  4. **官方实现为「最旧在前」**：`参考项目/KeePass-2.61.1-Source/KeePassLib/PwEntry.cs` 的 `CreateBackup` 明注 `m_lHistory.Add(peCopy); // Must be added at end`；`RemoveOldestBackup` 扫描找**时间戳最小**者移除（按时间戳而非位置）。
-- **背景与根因**：方向约束只在「本仓自产 / 合并产出」的路径上被满足，**读取侧从文件进入内存时不做归一**。故一条来自官方 KeePass 或其它遵从官方顺序的实现所产出的库，其内存历史方向与本仓约定相反。
-- **后果**：① 此类库在本仓编辑后触发保存路径的 `pruneHistory` 时，**按位置裁掉的是最新快照**（`take(maxItems)` 保留头部 = 保留最旧一侧）——数据损失方向，仅在历史条数超过库级上限时显现；② 该库的修订列表在详情页**倒序**显示；③ 写回文件的历史顺序与本仓自产库不一致（官方读取端按时间戳维护，功能不受影响，属展示序差异）。
-- **涉及文件**：`database/src/main/java/com/keepasskey/database/xml/KdbxXmlGroupReader.kt`（读侧装配点）、`database/src/main/java/com/keepasskey/database/xml/KdbxXmlEntrySerializer.kt`（写侧）、`database/src/main/java/com/keepasskey/database/history/HistoryManager.kt`（`pruneHistory` 的位置口径）、`app/src/main/java/com/keepasskey/app/data/repository/VaultEntryMapper.kt`（修订投影）。
-- **验收标准**：AC① 先**裁决方向**——以「内存 / 文件均为头部最新」为准归一（与本仓既有约定及 `HistoryManagerTest` 一致），或改为官方「最旧在前」并同步翻转 `recordHistorySnapshot` / `pruneHistory` / 修订列表 UI（**两条路都须一次性贯通**，禁只改一半）；AC② 选定后在**读取侧归一**（装配时按 `lastModificationTime` 排序），使任一来源的库进入内存后方向恒一致，从而位置口径恒正确；AC③ 用例：以**升序**（官方形态）输入的库为 fixture，断言保存路径裁掉的是**最旧**一端、且修订列表顺序与本仓自产库一致；AC④ 归一**只调序、不得改写快照内容**，并复核 `KdbxMergerTest` 既有方向断言不被二次翻转；AC⑤ 若判定「文件序须与官方一致」，须按规则 8 以官方实现端到端对拍留证。
-
----
-
-### ISSUE-P3-308：`SyncCache.clear(remotePath)` 的**孤儿 tmp 清理**按「未加库身份命名空间的键」通配——scoped 缓存目录里的崩溃残留 tmp 永不被清掉
-
-- **核实时间点**：2026-09-24（`ISSUE-P3-305` 批次拆分 `SyncCacheMaintenance` 时逐行核对键口径发现；**潜在**缺陷，当前无生产调用点）。
-- **核实方式**：
-  1. **读侧**：`sync/src/main/java/com/keepasskey/sync/engine/SyncCacheFiles.kt` 的 `deleteOrphanTmpFiles(remotePath)` 以 `sha256Hex(remotePath)` 为**前缀**通配 `cacheDir` 下的 `*.tmp`；
-  2. **写侧**：tmp 名由 `tmpFileFor(targetFile)` 生成，而 `targetFile = files.fileFor(scopedKey(remotePath), suffix)`——`ISSUE-P2-291` 起非空库身份命名空间下 `scopedKey(remotePath) == "<vaultScope>\n<remotePath>"` ⇒ 文件名的 sha256 前缀与通配前缀**恒不相等**，通配永不命中；
-  3. **调用面**：全仓 `grep deleteOrphanTmpFiles` 唯一调用点是 `SyncCache.clear(remotePath)`；而 `clear(remotePath)` **当前无生产调用点**（锁库 / 凭据销毁走 `clearAll()`，它按目录清单删除、不受此影响）⇒ 登记为**潜在**缺陷。
-- **背景与根因**：`SyncCacheFiles.deleteOrphanTmpFiles` 的通配口径停留在 `ISSUE-P2-291` 之前的「裸 `remotePath` 键」；引入库身份命名空间时只改了 `getFile` 的定位，未同步该清理入口（`SyncRollbackGuard` 另有一份独立的 `scopedKey`，同类风险面一并纳入 AC④）。
-- **后果**：一旦 `clear(remotePath)` 被接线，scoped 库崩溃残留的 `<sha256(scoped)>.cache.<uuid>.tmp`（**完整 KDBX 密文**）不会被该路径清除，只能等下一次 `clearAll()`（锁库）；磁盘占用与密文落盘窗口被延长。无明文暴露、无越权读取面（`cacheDir` 为应用私有且 0600 / 0700）。
-- **涉及文件**：`sync/src/main/java/com/keepasskey/sync/engine/SyncCacheFiles.kt`（`deleteOrphanTmpFiles`）、`sync/src/main/java/com/keepasskey/sync/engine/SyncCacheMaintenance.kt`（`clear` 的调用点）。
-- **验收标准**：AC① 裁决键口径——`deleteOrphanTmpFiles` 改收**规范键**（调用方传 `scopedKey(remotePath)`），或由 `SyncCacheFiles` 自持命名空间统一派生；**禁**两处各写一份键派生；AC② 用例：以 scoped 实例写入 tmp 残留后调 `clear(remotePath)` 必须清除它（当前必红），并断言**未加命名空间的旧键残留同样被清**（两代键都不得漏）；AC③ 若同批把 `clear(remotePath)` 接进生产路径，须同时验证 evictor 行为不回归；AC④ 复核 `SyncRollbackGuard` 的同名键派生是否同型（其 `scopedKey` 为独立副本），同型则一并对齐或如实登记；AC⑤ 无设备侧义务。
-
----
-
-### ISSUE-P3-309：搜索增强——全文匹配为纯子串 `contains`，无整词 / 分词 / 正则档（自 `ISSUE-P3-297` AC⑤ 拆出）
-
-- **核实时间点**：2026-09-24（`ISSUE-P3-297` 整改中按 AC⑤ 拆出为能力补齐条目）。
-- **核实方式**：全仓唯一搜索匹配点为 `app/src/main/java/com/keepasskey/app/ui/screens/vault/VaultListProjection.kt` 的 `matchesSearchQuery`：逐字段 `contains(query, ignoreCase = true)`；无整词 / 分词 / 正则入口（`Regex|toRegex|wordBoundary` 于 `app/src/main` 搜索零命中）。既有契约：覆盖标题 / 用户名 / URL / 备注 / 标签 / 自定义字段键与非受保护值，受保护字段明文不进投影故不参与命中（`VaultListProjectionSearchTest` 锁定）。
-- **背景**：子串匹配对短查询误报多（如 `in` 命中一切含该子串的字段）；整词 / 分词属体验增强，非缺陷。
-- **涉及文件**：`app/.../ui/screens/vault/VaultListProjection.kt`（匹配函数与候选装配）、`app/src/main/res/values/strings.xml` 与 `values-en/strings.xml`。
-- **验收标准**：AC① 新增匹配档须中英文案成对并在设置或搜索入口可达；AC② 不得引入受保护字段明文物化（「受保护值不参与命中」契约须保持并有测试锁定）；AC③ 匹配段在状态层且搜索已有 300ms 防抖，引入正则 / 分词须评估大库投影重算成本并留证；AC④ 现有 `VaultListProjectionSearchTest` 语义不得回退。
-
----
-
-### ISSUE-P3-310：`KdbxTimes.expires/expiryTime` 有读端与序列化但 app 侧零编辑入口（自 `ISSUE-P3-297` AC⑤ 拆出）
-
-- **核实时间点**：2026-09-24（`ISSUE-P3-297` 整改中按 AC⑤ 拆出为能力补齐条目）。
-- **核实方式**：`KdbxTimes` 的 `expires/expiryTime` 有读端（比较 / 合并路径消费）与序列化写端（KDBX XML），但 app 编辑页无任何过期编辑入口；`KdbxContentComparator.kt:32` 自证「无写入者」；列表行的 `cardExpiry` 是银行卡**自定义字段**、与 KDBX 过期时间无关。
-- **背景**：KeePass 系客户端均支持条目过期（到到期日高亮 / 归档）；本仓保存时不破坏既有过期值，但用户无法设置。
-- **涉及文件**：`app/.../ui/screens/edit/`（编辑页表单与 ViewModel）、`app/.../ui/screens/detail/`（详情页过期状态呈现）、`app/src/main/res/values/strings.xml` 与 `values-en/strings.xml`。
-- **验收标准**：AC① 编辑页提供过期编辑（「永不过期」+ 指定日期两态），中英文案成对；AC② 写回后 KDBX `Times` 字段互操作按规则 8 留证（改动触及序列化则必跑 `python tools/kdbx-corpus/generate_corpus.py --check`，触及 Passkey schema 无关面不强制 `verify_interop`）；AC③ 详情页呈现过期状态（如「已过期」标注），是否进列表排序 / 筛选可另拆条目；AC④ 合并与历史回滚路径对 `expires` 的既有语义不得回退。
-
 ---

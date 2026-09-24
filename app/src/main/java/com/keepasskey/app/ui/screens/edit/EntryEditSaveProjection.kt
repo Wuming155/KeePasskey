@@ -56,5 +56,10 @@ internal fun buildEntrySaveSnapshot(
     attachments = state.attachments,
     tags = parseEntryTags(state.tagsInput),
     autoTypeSequence = state.autoTypeSequence,
-    overrideUrl = state.overrideUrl.trim().takeIf { it.isNotEmpty() }
+    overrideUrl = state.overrideUrl.trim().takeIf { it.isNotEmpty() },
+    // ISSUE-P3-310：过期两态回投影——关闭 = null（写 expires=false）；开启 = 当日 23:59:59 本地时刻
+    expiresAt = state.takeIf { it.expiresEnabled }?.expiryDate
+        ?.atTime(23, 59, 59)
+        ?.atZone(java.time.ZoneId.systemDefault())
+        ?.toInstant()
 )

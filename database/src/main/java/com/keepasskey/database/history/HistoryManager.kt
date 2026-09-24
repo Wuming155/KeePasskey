@@ -214,10 +214,10 @@ object HistoryManager {
      * history 列表约定头部为最新、尾部为最旧，因此「移除最旧」即移除尾部。
      *
      * **该位置口径成立的前提是「调用方传入的列表已是头部最新」**——本仓的记录路径
-     * （[recordHistorySnapshot] / [rollbackToSnapshot] 头插）与合并路径
-     * （[com.keepasskey.sync.merge.KdbxEntryMerger] `ISSUE-P3-292` 起改 `sortedByDescending`）
-     * 均已满足；**读取侧尚未归一文件顺序**（官方 KeePass 产出的库为升序）这一残余
-     * 已登记为 `ISSUE-P3-306`。
+     * （[recordHistorySnapshot] / [rollbackToSnapshot] 头插）、合并路径
+     * （[com.keepasskey.sync.merge.KdbxEntryMerger] `ISSUE-P3-292` 起 `sortedByDescending`）
+     * 与读取侧（`KdbxXmlGroupReader` `ISSUE-P3-306` 起按 `lastModificationTime` 归一）
+     * 均已满足。
      */
     private fun pruneHistory(history: List<KdbxEntry>, maxItems: Int, maxSize: Long): List<KdbxEntry> {
         val countTrimmed = if (maxItems >= 0) history.take(maxItems) else history

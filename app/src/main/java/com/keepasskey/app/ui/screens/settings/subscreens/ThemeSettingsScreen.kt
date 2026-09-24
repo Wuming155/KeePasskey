@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.dp
 import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.AppLanguage
 import com.keepasskey.app.ui.screens.settings.ListDensity
+import com.keepasskey.app.ui.screens.settings.SearchMatchMode
 import com.keepasskey.app.ui.screens.settings.SettingsUiState
 import com.keepasskey.app.ui.theme.AppThemeMode
 import com.keepasskey.app.ui.theme.AppThemePalette
@@ -65,6 +66,7 @@ fun ThemeSettingsScreen(
     onShowGroupInEntryToggle: (Boolean) -> Unit = {},
     onListDensitySelected: (ListDensity) -> Unit = {},
     onAutoActivateSearchOnOpenToggle: (Boolean) -> Unit = {},
+    onSearchMatchModeSelected: (SearchMatchMode) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     SettingsSubscreenScaffold(
@@ -117,7 +119,8 @@ fun ThemeSettingsScreen(
                 onShowUnlockedNotificationToggle = onShowUnlockedNotificationToggle,
                 onAutoActivateSearchOnOpenToggle = onAutoActivateSearchOnOpenToggle,
                 onShowGroupInSearchResultToggle = onShowGroupInSearchResultToggle,
-                onShowGroupInEntryToggle = onShowGroupInEntryToggle
+                onShowGroupInEntryToggle = onShowGroupInEntryToggle,
+                onSearchMatchModeSelected = onSearchMatchModeSelected
             )
 
             themeLanguageSection(
