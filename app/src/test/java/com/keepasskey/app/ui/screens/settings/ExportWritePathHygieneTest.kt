@@ -78,6 +78,43 @@ class ExportWritePathHygieneTest {
     private fun lenOfFirstDigest(): Int =
         ExportAuditSanitizer.targetMarker(TARGETS.first()).substringAfter('#').length
 
+    /**
+     * `ISSUE-P3-303` AC④：**导出器不得再物化不可擦 `String`**。
+     *
+     * 缺陷背景：两个导出器原以 `ProtectedString.readString()` 取受保护字段（口令 / 自定义字段值），
+     * 物化出的 `String` 无法清零、驻留至 GC（契约 §4 #19 的「不可擦残留」面）。
+     * 整改后三处改走 `useChars` + 新增的 `CharArray` 写出通道 ⇒ 本用例把该形态**锁死**：
+     * 任一导出器再出现 `readString()` 即红。
+     *
+     * 反空转正控制：同一次扫描必须在 `KdbxXmlWriteUtil` 中看到 `CharArray` 重载，
+     * 否则说明扫描面已失效（例如路径漂移），「零命中」将不再有判别力。
+     */
+    @Test
+    fun `导出器不得再物化不可擦 String`() {
+        listOf("CSV 导出器" to CSV_EXPORTER, "XML 导出器" to XML_EXPORTER).forEach { (label, path) ->
+            val code = stripComments(readSource(path))
+            assertFalse(
+                "[$path] $label 仍出现 readString()——受保护字段须走 useChars + CharArray 写出通道" +
+                    "（ISSUE-P3-303）",
+                code.contains("readString()")
+            )
+            assertTrue(
+                "[$path] $label 必须确实经 useChars 取受保护字段",
+                code.contains("useChars")
+            )
+        }
+
+        // 正控制：写出通道的 CharArray 重载必须存在且可被同一次扫描看见
+        assertTrue(
+            "正控制失守：KdbxXmlWriteUtil 未见 CharArray 的 textElement 重载",
+            readSource(XML_WRITE_UTIL).contains("text: CharArray")
+        )
+        assertTrue(
+            "正控制失守：KdbxXmlStreamWriter 未见 CharArray 的 text 重载",
+            readSource(XML_STREAM_WRITER).contains("value: CharArray")
+        )
+    }
+
     /** 源码全文；路径相对仓库根（app 模块测试工作目录为 app/，向上回溯定位仓库根） */
     private fun readSource(path: String): String {
         val file = File(repositoryRoot, path)
@@ -113,6 +150,14 @@ class ExportWritePathHygieneTest {
     private companion object {
         const val CONTROLLER_SOURCE =
             "app/src/main/java/com/keepasskey/app/ui/screens/settings/SettingsExportController.kt"
+        const val CSV_EXPORTER =
+            "database/src/main/java/com/keepasskey/database/csv/KdbxCsvExporter.kt"
+        const val XML_EXPORTER =
+            "database/src/main/java/com/keepasskey/database/xml/KeePassXmlExporter.kt"
+        const val XML_WRITE_UTIL =
+            "database/src/main/java/com/keepasskey/database/xml/KdbxXmlWriteUtil.kt"
+        const val XML_STREAM_WRITER =
+            "database/src/main/java/com/keepasskey/database/xml/KdbxXmlStreamWriter.kt"
         const val SENSITIVE_TARGET =
             "content://com.android.providers.downloads.documents/document/primary%3ADownload%2FMySecretVault.csv"
 

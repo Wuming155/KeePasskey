@@ -50,6 +50,17 @@ class KdbxXmlStreamWriter(
         escape(value, escapeNewLines = false)
     }
 
+    /**
+     * `ISSUE-P3-303`：文本写出的 **CharArray** 通道——供「归调用方所有、用毕即擦」的
+     * 敏感文本（如条目口令）直接写出，**不再经 `readString()` 物化不可擦 `String`**。
+     *
+     * 与 [text] 逐字节等价（同一 `escape` 分支表与区间批量写出策略），仅数据载体不同。
+     */
+    fun text(value: CharArray) {
+        finishStartTag()
+        escape(value, escapeNewLines = false)
+    }
+
     fun endElement() {
         val name = elementStack.removeLast()
         if (insideStartTag) {
@@ -124,6 +135,47 @@ class KdbxXmlStreamWriter(
         }
         if (value.length > runStart) {
             writer.write(value, runStart, value.length - runStart)
+        }
+    }
+
+    /**
+     * `ISSUE-P3-303`：[escape] 的 **CharArray** 版，供敏感文本（口令等）不经 `String` 直接写出。
+     *
+     * **刻意逐字节复刻**（而非抽公共内核传 lambda）：本函数位于**保存热路径**上
+     * （大库每个文本节点都会经过它，`ISSUE-P3-151` 正是为此把逐字符 `write(int)` 改成区间批量写出），
+     * 抽公共内核需要引入 `codePointAt` / 写出区间两个 lambda ⇒ 每次调用各分配一次闭包，
+     * 与 §151 的优化方向相反。两版必须**同步维护**：分支表、`needsEscape` 判据、
+     * 「非法码点剔除」与 CR 转义口径的任何改动都要同时落到两处（回归锁见
+     * `KdbxXmlFullRoundtripTest` 的往返用例与 `ExportWritePathHygieneTest`）。
+     */
+    private fun escape(value: CharArray, escapeNewLines: Boolean) {
+        var index = 0
+        var runStart = 0
+        while (index < value.size) {
+            val codePoint = Character.codePointAt(value, index)
+            val charCount = Character.charCount(codePoint)
+            if (isLegalXmlCodePoint(codePoint) && !needsEscape(codePoint, escapeNewLines)) {
+                index += charCount
+                continue
+            }
+            if (index > runStart) {
+                writer.write(value, runStart, index - runStart)
+            }
+            when {
+                codePoint == '&'.code -> writer.write("&amp;")
+                codePoint == '<'.code -> writer.write("&lt;")
+                codePoint == '>'.code -> writer.write("&gt;")
+                codePoint == '"'.code && escapeNewLines -> writer.write("&quot;")
+                codePoint == '\r'.code -> writer.write("&#xD;")
+                codePoint == '\n'.code && escapeNewLines -> writer.write("&#10;")
+                codePoint == '\t'.code && escapeNewLines -> writer.write("&#9;")
+                else -> {}
+            }
+            index += charCount
+            runStart = index
+        }
+        if (value.size > runStart) {
+            writer.write(value, runStart, value.size - runStart)
         }
     }
 

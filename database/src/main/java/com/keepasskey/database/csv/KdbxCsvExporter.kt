@@ -74,19 +74,24 @@ object KdbxCsvExporter {
         }
     }
 
-    /** ISSUE-P3-181：路径字符串由 [writeGroup] 在组级拼好传入，此处不再逐条目重拼。 */
+    /** ISSUE-P3-181：路径字符串由 [writeGroup] 在组级拼好传入，此处不再逐条目重拼。
+     *  `ISSUE-P3-303`：口令改走 **CharArray** 通道（`useChars` 用毕自动清零），不再
+     *  `readString()` 物化不可擦 `String`；行改为**逐字段写出**（原为组 `List<String>` 再逐项写），
+     *  字段顺序、分隔符位置与引号语义**逐字节等价**。 */
     private fun writeEntry(writer: Writer, entry: KdbxEntry, groupPath: String) {
-        writeRow(
-            writer,
-            listOf(
-                entry.title,
-                entry.url,
-                entry.userName,
-                entry.password?.readString().orEmpty(),
-                entry.notes,
-                groupPath
-            )
-        )
+        writeField(writer, entry.title)
+        writer.write(FIELD_SEPARATOR.code)
+        writeField(writer, entry.url)
+        writer.write(FIELD_SEPARATOR.code)
+        writeField(writer, entry.userName)
+        writer.write(FIELD_SEPARATOR.code)
+        // 口令缺失时写出空字段——与改前 `?.readString().orEmpty()` 同义（空串不需引号、不写内容）
+        entry.password?.useChars { writeField(writer, it) }
+        writer.write(FIELD_SEPARATOR.code)
+        writeField(writer, entry.notes)
+        writer.write(FIELD_SEPARATOR.code)
+        writeField(writer, groupPath)
+        writer.write(LINE_SEPARATOR)
     }
 
     private fun writeRow(writer: Writer, fields: List<String>) {
@@ -101,6 +106,30 @@ object KdbxCsvExporter {
     private fun writeField(writer: Writer, value: String) {
         val needsQuoting = value.any {
             it == FIELD_SEPARATOR || it == QUOTE || it == '\n' || it == '\r'
+        }
+        if (!needsQuoting) {
+            writer.write(value)
+            return
+        }
+        writer.write(QUOTE.code)
+        for (ch in value) {
+            if (ch == QUOTE) writer.write(QUOTE.code)
+            writer.write(ch.code)
+        }
+        writer.write(QUOTE.code)
+    }
+
+    /**
+     * `ISSUE-P3-303`：[writeField] 的 **CharArray** 版——敏感字段（口令）不经 `String` 写出。
+     * 引号化判据与转义规则与 String 重载**逐字节等价**（同一组常量与同一遍历顺序）。
+     */
+    private fun writeField(writer: Writer, value: CharArray) {
+        var needsQuoting = false
+        for (ch in value) {
+            if (ch == FIELD_SEPARATOR || ch == QUOTE || ch == '\n' || ch == '\r') {
+                needsQuoting = true
+                break
+            }
         }
         if (!needsQuoting) {
             writer.write(value)

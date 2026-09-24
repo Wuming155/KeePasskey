@@ -26,6 +26,17 @@ object KdbxXmlWriteUtil {
         writer.endElement()
     }
 
+    /**
+     * `ISSUE-P3-303`：**CharArray** 文本元素通道——敏感文本（条目口令等）不经
+     * `readString()` 物化不可擦 `String` 即写出。输出与 [textElement] 的 String 重载
+     * **逐字节等价**（同一转义实现的分支表）。
+     */
+    fun textElement(writer: KdbxXmlStreamWriter, tag: String, text: CharArray) {
+        writer.startElement(tag)
+        writer.text(text)
+        writer.endElement()
+    }
+
     fun optionalTextElement(writer: KdbxXmlStreamWriter, tag: String, text: String?) {
         if (text != null) {
             textElement(writer, tag, text)

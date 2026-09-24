@@ -81,7 +81,9 @@ object KeePassXmlExporter {
             writer.startElement("String")
             KdbxXmlWriteUtil.textElement(writer, "Key", KdbxConstants.Fields.PASSWORD)
             // 明文导出语义：不携带 Protected 属性，明文如实写出（见类 KDoc 安全声明）
-            KdbxXmlWriteUtil.textElement(writer, "Value", password.readString())
+            // ISSUE-P3-303：改走 CharArray 通道（`useChars` 用毕自动清零），
+            // 不再 `readString()` 物化不可擦 String
+            password.useChars { KdbxXmlWriteUtil.textElement(writer, "Value", it) }
             writer.endElement()
         }
 
@@ -97,7 +99,8 @@ object KeePassXmlExporter {
         entry.customFields.forEach { field ->
             writer.startElement("String")
             KdbxXmlWriteUtil.textElement(writer, "Key", field.key)
-            KdbxXmlWriteUtil.textElement(writer, "Value", field.value.readString())
+            // ISSUE-P3-303：自定义字段值同样走 CharArray 通道（可能承载私钥 / 恢复码等敏感值）
+            field.value.useChars { KdbxXmlWriteUtil.textElement(writer, "Value", it) }
             writer.endElement()
         }
 

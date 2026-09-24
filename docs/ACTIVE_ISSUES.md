@@ -58,7 +58,7 @@
 
 ---
 
-## P3 低危问题、特性接线与体验优化（9 项）
+## P3 低危问题、特性接线与体验优化（8 项）
 
 ### ISSUE-P3-295：附件面两处——按文件名（而非 `refIndex`）取字节致同名导出错内容；添加时无尺寸上限
 
@@ -107,26 +107,6 @@
 - **背景与根因**：§274 的整改依据「大库下为**数百毫秒至秒级**」是**估算**（同一主线程上做 Keystore 解密 + 整库密文读 + 全库逐字段比较 + 整库写 + `fd.sync()` 的量级推理，非本机实测）。按定义整改后主线程应只剩一次 stat，但**未证的是**：真实大库（万级条目 / 含附件）下装配段下沉后的实际主线程阻塞与帧耗时，以及把该段整体挪到 `Dispatchers.IO` 后对**同步总时长**的影响（阻塞被移走，该段本身仍须执行完）。
 - **涉及文件**：无生产代码改动面（纯外部验证条目）；实测结果回填 [`resolved/batches/274-同步周期装配段下沉IO批次.md`](resolved/batches/274-同步周期装配段下沉IO批次.md) §2.4 / §3.4，并按需登记 [`architecture/已知工程限界.md`](architecture/已知工程限界.md)。
 - **验收标准**：AC① 接入设备后构造**大库**（万级条目，含 ≥1 MiB 落盘附件与历史快照）实测下拉刷新：记录装配段耗时、主线程最长连续阻塞、掉帧数与同步总时长，并按「量级须实测」留证（工具 + 原始读数）；AC② 实测**证实**「主线程无同步重活」⇒ 回填批次 §2.4 / §3.4 并闭环本条；实测**推翻**（仍见秒级主线程阻塞）⇒ 另行立条定位残余阻塞点（含 `ISSUE-P3-301` 的 stat 面与 `SyncCache` 之外的调用），**不得**就地改判 §274 的守卫口径；AC③ 无设备期间本条维持开放，**不得**以 §274 的 JVM 守卫绿推定量级已证；AC④ 若同批接入设备，与 `ISSUE-P3-300`（真实 DAV 矩阵）一并执行以减少设备占用。
-
----
-
-### ISSUE-P3-303：不可擦 `String` 明文残留分层——导出侧 `readString()` 可收口，模型层字段 `String` 不可在导出器层解决
-
-> 本条承接 [`敏感缓冲所有权契约.md`](architecture/敏感缓冲所有权契约.md) §4 **#19** 的摘除条件
-> （「若日后改走 `useChars` 路径可摘除本行」）与 §278 批次 §5.1 的如实声明；两类残留**性质不同**，
-> 判据与去向分列，禁混为一谈。
-
-- **核实时间点**：2026-09-23（§278 整改当日，就「不可擦 `String` 能不能解决」命题逐层核对模型与写出口）。
-- **核实方式**：
-  1. **导出侧 `readString()`（可解）**：`KdbxCsvExporter.kt:76` 的 `entry.password?.readString().orEmpty()`、`KeePassXmlExporter.kt:75/91` 的 `password.readString()` / `field.value.readString()` 三处，物化 JVM `String` 后驻留至 GC。`ProtectedString` 已提供 `useChars` 闭包（`ProtectedString.kt:132-139`，`CharArray` 用毕自动 `fill`）；写出口现状只收 `String`——`KdbxCsvExporter.writeField(writer, value: String)`、`KdbxXmlWriteUtil.textElement(..., text: String)`。⇒ **技术上可解**：加 `CharArray` 写出口（含 XML 转义 / CSV RFC 4180 引号化的 `CharArray` 版），三处改走 `useChars`，产物字节不变。
-  2. **模型层字段 `String`（导出器层不可解）**：`KdbxEntry` 的 `title` / `userName` / `url` / `notes`（`KdbxEntry.kt:28-40`）与 `KdbxGroup.name` / `notes`（`KdbxGroup.kt:10`）在**模型上就是 `String`**，导出器只是读取既有 `String`——`readString()` 只出现在 `ProtectedString` 字段（口令、自定义字段值）。清这批须改模型层形态（`ProtectedString` / `CharArray`），牵动映射 / 合并 / 比较 / UI / 序列化全链，**不在导出器层可解**；其性质与限界 §2.4（Compose 文本状态不可擦 `String`）/ RC-01 同族。
-- **背景与根因**：§278 按 AC② 二选一取了「登记」分支（限界已接受 + 可收敛点是一致性），把「改 `useChars`」留作摘除条件未实施。用户 2026-09-23 追问「不可擦 `String` 能不能解决」后逐层核实：**一半能、一半不能**，须分开登记，避免「已登记限界」被读作「两类都动不了」或「改 `useChars` 就全干净了」。
-- **涉及文件**（仅第 1 类）：`database/src/main/java/com/keepasskey/database/csv/KdbxCsvExporter.kt`、`database/src/main/java/com/keepasskey/database/xml/KeePassXmlExporter.kt`、`database/src/main/java/com/keepasskey/database/xml/KdbxXmlWriteUtil.kt`（`textElement` 增 `CharArray` 出口）；契约 [`敏感缓冲所有权契约.md`](architecture/敏感缓冲所有权契约.md) §4 #19。
-- **验收标准**：
-  - **第 1 类（导出侧 `readString()`，可解，本条主整改面）**：AC① 三处 `readString()` 改走 `useChars` + `CharArray` 写出口（`writeField` / `textElement` 须有 `CharArray` 重载或等价路径，XML 转义与 CSV 引号语义逐字节等价）；AC② 产物字节与改前**逐字节等价**（`KdbxCsvExporterTest` 4 例 + XML 既有产物断言原样通过，必要时补对照例）；AC③ 完成后**摘除契约 #19**（或就地改写为「已收口」并留痕），禁「代码已改、契约仍记残留」；AC④ 新增守卫锁定「导出器不得再出现 `readString()`」（静态接线，口径同 `WipableByteArrayOutputStreamTest`）。
-  - **第 2 类（模型层字段 `String`，导出器层不可解）**：AC⑤ **不在本条整改**——按限界口径处置：若维持现状，须在限界表登记（或扩写 §2.4 同族）并写明「模型层 `title`/`url`/`userName`/`notes`/分组名以 `String` 驻留，进程内取证在信任边界外」；若要收口，须**另立条目**评估模型层改造（`ProtectedString` 化或 `CharArray` 字段）的牵动面，禁在本条顺手改模型。
-    **（2026-09-23 §284 补全登记）**：AC⑤ 的「维持现状 + 限界登记」分支已落地——限界表新增 **§2.7**，单列**展示层**（`GeneratorScreen` `readString()` / `EntryDetailSecrets` `toDisplayString()` 与三个 `String` 状态）与**模型层**（`KdbxEntry` / `KdbxGroup` 元数据字段）两类驻留，并与 §2.4 / §2.6 分列；解除条件仍须另立条目。第 1 类（导出侧 `useChars`）**仍未实施**，本条继续开放。
-  - **通则**：AC⑥ 两类的结论与去向必须**分列写明**，禁以「不可擦 `String` 都是已接受限界」一句带过（第 1 类恰恰**可以**收口）。
 
 ---
 
