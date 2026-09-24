@@ -654,7 +654,7 @@
     <string name="sec_clipboard_title">Clipboard protection</string>
     <string name="sec_clipboard_sub">Copied secrets are marked sensitive: the system copy confirmation hides them, and they are auto-cleared after the set duration</string>
     <string name="sec_clipboard_countdown_title">Clipboard retention</string>
-    <string name="sec_clipboard_risk_notice">Auto-clear is off: copied passwords/one-time codes stay in the system clipboard and any foreground app can read them until overwritten or the device reboots. Keep it on, or use autofill to fill forms directly.</string>
+    <string name="sec_clipboard_risk_notice">Auto-clear is off: copied passwords/codes are not cleared on the set timer, but the clipboard is still wiped at four moments — when you leave the app, on screen-off/lock, when the vault is locked, and on cold-start reconciliation (the last one may also clear content written by other apps when it cannot compare). Keep it on, or use autofill to fill forms directly.</string>
     <string name="sec_section_memory">Memory &amp; key protection</string>
     <string name="sec_keyfile_title">Key file policy</string>
     <string name="sec_keyfile_sub">The key file stays in memory only while unlocked and is wiped on lock</string>

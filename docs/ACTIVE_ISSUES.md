@@ -58,16 +58,7 @@
 
 ---
 
-## P3 低危问题、特性接线与体验优化（10 项）
-
-### ISSUE-P3-293：剪贴板自动擦除的界面承诺与**已登记口径**不符，且冷启动对账可清除其它应用的内容
-
-- **核实时间点**：2026-09-23 经实现分支与归档批次原文核对（行为本身**已登记**，本条的是文案与未登记的误清面）。
-- **核实方式**：`app/.../security/ClipboardSecurityManager.kt:200-214` 的 `armScheduledClear` 按 `autoClearClipboard == false` 不调度，但 `:105-120/285-290` 的熄屏广播、`ON_STOP`、`onSessionLocked`、冷启动对账四条路径不查该设置直调 `clearPendingSensitive()` ⇒ 与 `res/values/strings.xml:651` / `values-en:640` 承诺的「一直留在系统剪贴板……直至被下次复制覆盖或设备重启」（并由 `detail_password_copied_no_clear`（`:329`）同向强化）相悖。方向为安全侧，且**行为已登记**于 `docs/resolved/batches/48-…:72-73`：「切后台即清与『自动擦除开关』**独立生效**；关闭自动擦除者亦受此保护」⇒ 属文案未跟上裁决。另 `reconcileOnColdStart`（`:300-306`）无摘要比对即 `clearClipboard()`，**可清除他应用写入的剪贴板内容**，批 48.4① 只登记了「不留口令等价物」，未登记此误清面。
-- **涉及文件**：`app/src/main/java/com/keepasskey/app/security/ClipboardSecurityManager.kt`、`app/src/main/res/values/strings.xml`、`app/src/main/res/values-en/strings.xml`。
-- **验收标准**：AC① 中英文案改为**仅**描述真实行为（写明「切后台 / 锁屏 / 锁库 / 冷启动四类时机不受该开关约束」），禁以 KDoc 或批次结论替代用户可见文案；AC② 冷启动对账须先比对摘要、只在确属本应用写入时清除，或在文案与设置项说明中如实声明「可能清除他应用内容」并登记 `PD-*`；AC③ 用例锁定「关闭开关后四类时机仍清」的既有已登记行为不被误改（防后续以文案为准的改动反向放宽安全性）。
-
----
+## P3 低危问题、特性接线与体验优化（9 项）
 
 ### ISSUE-P3-295：附件面两处——按文件名（而非 `refIndex`）取字节致同名导出错内容；添加时无尺寸上限
 
