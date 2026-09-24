@@ -4,6 +4,7 @@ import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.core.security.BinarySource
 import com.keepasskey.core.security.BinaryStore
 import com.keepasskey.core.security.BinaryStorePolicy
+import com.keepasskey.database.exception.KdbxAttachmentSpillMissingException
 import com.keepasskey.database.exception.KdbxCorruptFileException
 import com.keepasskey.database.io.LittleEndianUtil
 import java.io.ByteArrayInputStream
@@ -124,6 +125,25 @@ data class InnerHeader(
             }
         }
 
+        /**
+         * 写前校验落盘条目的实际字节量仍与解析期登记的 [spilledSize] 一致（ISSUE-P2-310）。
+         *
+         * 附件落盘缓存（`cacheDir`）被系统回收 / 提前清理后，[BinaryStore] 按 fail-open
+         * 契约返回空流；若无此校验，`serialize` 仍按声明值写字段头而实际写出 0 字节 ⇒
+         * 内层头长度自相矛盾 ⇒ 整库下次打开判损坏。**保存必须 fail-closed**：
+         * 字节量不一致即抛类型化异常终止本次保存（读侧 fail-open 契约不动）。
+         */
+        internal fun verifySpillIntact() {
+            if (spillKey == null) return
+            val actual = store!!.sizeOf(spillKey)
+            if (actual != spilledSize) {
+                throw KdbxAttachmentSpillMissingException(
+                    "落盘附件字节量与解析期登记不一致: 声明=$spilledSize, 实际=$actual" +
+                            "（附件落盘缓存可能已被系统回收或提前清理，附件内容已不可读）"
+                )
+            }
+        }
+
         private fun asStream(): InputStream = openStream()
 
         override fun equals(other: Any?): Boolean {
@@ -172,6 +192,9 @@ data class InnerHeader(
 
         // 字段 3: Binaries —— 落盘条目流式写出（字段长度 = 1(flags) + 内容字节数），不整份物化
         for (bin in binaries) {
+            // ISSUE-P2-310：写前校验（保存 fail-closed）——落盘条目被回收时若仍按声明的
+            // spilledSize 写字段头而实际写出 0 字节，内层头长度自相矛盾 ⇒ 整库下次打开判损坏
+            bin.verifySpillIntact()
             writeFieldHeader(outputStream, KdbxConstants.InnerHeaderFieldId.BINARY, bin.size + FLAGS_FIELD_BYTES)
             outputStream.write(bin.flags.toInt())
             bin.writeTo(outputStream)
