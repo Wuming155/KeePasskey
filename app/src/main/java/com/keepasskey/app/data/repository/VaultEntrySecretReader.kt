@@ -283,11 +283,15 @@ internal class VaultEntrySecretReader(
         return VaultEntryTotpMapping.locateConfigSource(entry, totpPreferences())?.readChars()
     }
 
-    suspend fun getAttachmentData(entryId: String, fileName: String): ByteArray? {
+    /**
+     * `ISSUE-P3-295`：按**附件下标**取字节（原按文件名匹配 ⇒ 同名附件会导出错内容）。
+     * 下标是 `entry.attachments` 列表中的位置，调用方由 `UiAttachment.refIndex` 提供。
+     */
+    suspend fun getAttachmentData(entryId: String, refIndex: Int): ByteArray? {
         val targetUuid = parseKdbxUuidOrNull(entryId) ?: return null
         val currentDb = databaseSession.databaseFlow.first() ?: return null
         val entry = currentDb.rootGroup.findEntry(targetUuid) ?: return null
-        val attachment = entry.attachments.firstOrNull { it.name == fileName } ?: return null
+        val attachment = entry.attachments.getOrNull(refIndex) ?: return null
         // ISSUE-P2-24：按需读取本附件字节（落盘大附件由 source 流式读回），
         // 不再把整个二进制池 map 成字节数组把全库附件拉回内存。
         // ISSUE-P3-105：按来源分流，消除落盘路径的双重拷贝——`source.load()` 已返回独立副本，

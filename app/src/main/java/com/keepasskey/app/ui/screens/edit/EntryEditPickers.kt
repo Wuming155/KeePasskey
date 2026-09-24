@@ -42,6 +42,17 @@ internal data class EntryEditPickers(
 )
 
 /**
+ * `ISSUE-P3-295` AC②：单附件添加上界——**与解析侧预算同一数字**
+ * （[com.keepasskey.database.xml.AttachmentSizeLimits.MAX_ATTACHMENT_BYTES]）。
+ */
+private val MAX_ATTACHMENT_BYTES: Long =
+    com.keepasskey.database.xml.AttachmentSizeLimits.MAX_ATTACHMENT_BYTES
+
+/** 超限提示：数值经参数注入，避免在文案里再写一份上限。 */
+private fun attachmentTooLargeMessage(): UiMessage =
+    UiMessage(R.string.edit_attachment_too_large, listOf(MAX_ATTACHMENT_BYTES / (1024L * 1024L)))
+
+/**
  * 装配编辑页的三个选择器。
  *
  * 语义与拆分前逐条一致：
@@ -61,11 +72,27 @@ internal fun rememberEntryEditPickers(
         if (uri != null) {
             scope.launch(Dispatchers.IO) {
                 try {
+                    // ISSUE-P3-295 AC②：单附件尺寸上界——**先按 ContentResolver 申报长度拦一次**，
+                    // 再把整份字节读进内存；顺序反过来就等于「读爆内存之后才判超限」。
+                    // 上界与解析侧预算同源（`AttachmentSizeLimits.MAX_ATTACHMENT_BYTES`），禁两套数字。
+                    val declaredLength = runCatching {
+                        context.contentResolver.openAssetFileDescriptor(uri, "r")?.use { it.length }
+                    }.getOrNull()
+                    if (declaredLength != null && declaredLength > MAX_ATTACHMENT_BYTES) {
+                        withContext(Dispatchers.Main) { viewModel.showMessage(attachmentTooLargeMessage()) }
+                        return@launch
+                    }
                     val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
                     if (bytes == null || bytes.isEmpty()) {
                         withContext(Dispatchers.Main) {
                             viewModel.showMessage(UiMessage(R.string.edit_attachment_empty))
                         }
+                        return@launch
+                    }
+                    // 兜底：申报长度不可得（provider 返回 UNKNOWN_LENGTH）或流实际更长时二次判定
+                    if (bytes.size > MAX_ATTACHMENT_BYTES) {
+                        bytes.fill(0)
+                        withContext(Dispatchers.Main) { viewModel.showMessage(attachmentTooLargeMessage()) }
                         return@launch
                     }
                     val displayName = queryDisplayName(context, uri) ?: "attachment.bin"

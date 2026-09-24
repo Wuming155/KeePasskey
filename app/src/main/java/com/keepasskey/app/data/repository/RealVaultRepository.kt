@@ -408,8 +408,8 @@ class RealVaultRepository @Inject constructor(
     override suspend fun getEntryTotpSecretChars(entryId: String): CharArray? =
         secretReader.getEntryTotpSecretChars(entryId)
 
-    override suspend fun getAttachmentData(entryId: String, fileName: String): ByteArray? =
-        secretReader.getAttachmentData(entryId, fileName)
+    override suspend fun getAttachmentData(entryId: String, refIndex: Int): ByteArray? =
+        secretReader.getAttachmentData(entryId, refIndex)
 
     override fun isSessionReadOnly(): Boolean = databaseSession.isReadOnly
 

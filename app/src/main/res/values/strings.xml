@@ -378,6 +378,7 @@
     <string name="unlock_downgrade_decline">不启用</string>
 <string name="edit_scan_totp_qr">呼起相机扫描 TOTP 二维码</string>
     <string name="edit_attachment_empty">附件内容为空，未添加</string>
+    <string name="edit_attachment_too_large">附件超过 %1$d MB，未添加</string>
     <string name="edit_save_failed">保存失败：%1$s</string>
     <string name="readonly_save_rejected">数据库以只读模式打开，无法保存修改</string>
     <string name="readonly_banner">只读模式：数据库以只读方式打开，编辑与保存已禁用</string>

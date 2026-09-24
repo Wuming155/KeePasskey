@@ -173,7 +173,7 @@ internal class AttachmentBudget(
          * 内联附件（含解压产物）的**本次解析累计**字节上限：64 MiB。
          * 取值依据与堆界关系见类 KDoc。
          */
-        const val MAX_INLINE_MATERIALIZED_BYTES: Long = 64L * 1024 * 1024
+        const val MAX_INLINE_MATERIALIZED_BYTES: Long = AttachmentSizeLimits.MAX_ATTACHMENT_BYTES
 
         /** 内联压缩附件节点数上限：与二进制池条目上限同量级，远高于合法库的附件总量。 */
         const val MAX_INLINE_COMPRESSED_NODES: Int = 1024

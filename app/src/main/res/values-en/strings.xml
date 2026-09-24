@@ -367,6 +367,7 @@
     <string name="unlock_downgrade_decline">Don\'t enable</string>
 <string name="edit_scan_totp_qr">Open camera to scan TOTP QR code</string>
     <string name="edit_attachment_empty">Attachment is empty, not added</string>
+    <string name="edit_attachment_too_large">Attachment exceeds %1$d MB and was not added</string>
     <string name="edit_save_failed">Save failed: %1$s</string>
     <string name="readonly_save_rejected">Database is open in read-only mode, saving is disabled</string>
     <string name="readonly_banner">Read-only mode: database was opened read-only, editing and saving are disabled</string>

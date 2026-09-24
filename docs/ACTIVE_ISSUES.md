@@ -58,16 +58,7 @@
 
 ---
 
-## P3 低危问题、特性接线与体验优化（8 项）
-
-### ISSUE-P3-295：附件面两处——按文件名（而非 `refIndex`）取字节致同名导出错内容；添加时无尺寸上限
-
-- **核实时间点**：2026-09-23 经同名可否产生的前提核实（本仓**不可**产生同名不同内容，只能来自外部库；首轮所提「改按 UI 的 id 取字节」的修法前提被否证）。
-- **核实方式**：① `app/.../data/repository/VaultEntrySecretReader.kt:279` 以 `attachments.firstOrNull { it.name == fileName }` 取字节，调用方 `EntryDetailAttachmentExporter.kt:39` 传 `attachment.fileName`，Toast 亦只报文件名 ⇒ 外部库（KeePass XML / Bitwarden / 桌面版）含同名附件时导出 A 得 B 的字节且提示为 A。解析侧逐 `<Binary>` 节点 emit、去重器原样保留 `name`（`KdbxXmlBinaryNode.kt:208-238`、`KdbxBinaryDeduplicator.kt:84-92`）；本仓编辑页按 fileName 视为替换（`EntryEditViewModel.kt:330-341`）故不自产同名。**修法前提**：`VaultEntryMapper.kt:60` 的 UI `id` 就是 `"${entry.id}_${att.name}"`（名字派生），改按 id 无法消歧，**须按 `refIndex` / 列表下标**。② `ui/screens/edit/EntryEditPickers.kt:64` 对 `*/*` 选择结果整份 `readBytes()` 交 `EntryEditViewModel.kt:330-341`；全仓无 `MAX_ATTACHMENT` 类约束（`BinaryStore.kt:47-57` 的 1 MiB 是落盘阈值非上限；`KdbxXmlBinaryNode.kt:58` 的 `AttachmentBudget` 默认 `unlimited()` 且只封解析不可信库）；无路径穿越面（`FileBinaryStore.kt:38` 只用固定目录名）。
-- **涉及文件**：`app/src/main/java/com/keepasskey/app/data/repository/VaultEntrySecretReader.kt`、`app/src/main/java/com/keepasskey/app/ui/screens/detail/EntryDetailAttachmentExporter.kt`、`app/src/main/java/com/keepasskey/app/ui/screens/edit/EntryEditPickers.kt`、`app/src/main/java/com/keepasskey/app/ui/screens/edit/EntryEditViewModel.kt`。
-- **验收标准**：AC① 附件寻址改按 `refIndex`（或树内下标），UI 的 `id` 生成同步去名字依赖；同名场景用例：导入含两个同名附件的第三方库 → 分别导出各自字节；AC② 对「添加无上限」给结论：设尺寸上限并如实提示，或维持现状并登记 `PD-*`（现状属用户自选大文件自伤 OOM，无攻击者面，故 P3）；AC③ 若设上限，须与解析侧预算的口径统一（`ISSUE-P1-276` 已 §273 闭环，现行三面判据与常量见 `database/src/main/java/com/keepasskey/database/xml/KdbxAttachmentBudget.kt`：单条目物化 ≤ 64 MiB / 引用次数 ≤ 1024 / 内联累计 ≤ 64 MiB），禁两套数字。
-
----
+## P3 低危问题、特性接线与体验优化（7 项）
 
 ### ISSUE-P3-297：五项「可填 / 可存但界面无消费」的半成品能力（AutoType 序列 / 标签 / 收藏 / `VaultSyncStatus` / 搜索与到期字段）
 

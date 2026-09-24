@@ -63,10 +63,12 @@ internal class VaultEntryMapper(
 
         // ISSUE-P2-24：投影只需字节数，直接取 attachment.size——
         // 不再把整个二进制池 map 成字节数组（那会令落盘大附件被整批读回内存）。
-        val uiAttachments = entry.attachments.map { att ->
+        val uiAttachments = entry.attachments.mapIndexed { index, att ->
             UiAttachment(
-                id = "${entry.id.toHexString()}_${att.name}",
+                // ISSUE-P3-295：id 不再由名字派生（同名附件会撞 id），改用下标
+                id = "${entry.id.toHexString()}_$index",
                 fileName = att.name,
+                refIndex = index,
                 fileSizeFormatted = formatAttachmentSize(att.size),
                 mimeType = determineMimeType(att.name),
                 addedAt = formatInstant(entry.times.creationTime)

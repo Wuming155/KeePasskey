@@ -46,6 +46,11 @@ data class UiAttachment(
     val id: String,
     val fileName: String,
     val fileSizeFormatted: String,
+    /**
+     * `ISSUE-P3-295`：该附件在条目 `attachments` 列表中的**下标**——导出取字节的唯一寻址键。
+     * `-1` 表示「无库内下标」（仅编辑会话中新添加、尚未落库的附件由 [data] 携带字节）。
+     */
+    val refIndex: Int = -1,
     val mimeType: String = "application/octet-stream",
     val addedAt: String = "",
     /**

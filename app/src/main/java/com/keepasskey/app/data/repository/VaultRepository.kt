@@ -454,12 +454,16 @@ interface VaultRepository {
 
     /**
      * 按需解析单条凭据指定附件的二进制内容（断点3 整改，SAF 导出用）。
-     * 附件不存在或名称不匹配时返回 null。
+     *
+     * `ISSUE-P3-295`：寻址参数由**文件名**改为**附件下标 `refIndex`**（条目 `attachments`
+     * 列表中的位置）。外部库（KeePass XML / Bitwarden / 桌面版）可含**同名不同内容**的附件，
+     * 按名字取会「导出 A 得 B 的字节且提示为 A」；下标寻址恒精确。
+     * 下标越界或该附件为空字节时返回 null（空字节语义与改前一致）。
      *
      * 返回的是**调用方独占的独立副本**（内存附件走 `copyOf()`，落盘附件走 `source.load()`，
      * 见 ISSUE-P3-105）；调用方用毕应自行 `fill(0)` 清零，勿长期持有。
      */
-    suspend fun getAttachmentData(entryId: String, fileName: String): ByteArray?
+    suspend fun getAttachmentData(entryId: String, refIndex: Int): ByteArray?
 
     /**
      * 当前会话是否以只读模式打开（H4-只读整改）。锁定/关闭状态下返回 false。

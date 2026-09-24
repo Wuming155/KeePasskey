@@ -25,6 +25,9 @@ import java.io.InputStream
 /**
  * 附件字节交付侧的所有权口径（ISSUE-P3-105）。
  *
+ * `ISSUE-P3-295`：寻址参数由**文件名**改为**附件下标 `refIndex`**（同名附件按名字取会导出错内容），
+ * 本用例的相应断言随之改为下标口径——**只改寻址参数，所有权 / 清零语义的断言原样保留**。
+ *
  * 缺陷背景：`VaultEntrySecretReader.getAttachmentData` 原先一律 `attachment.data` 后再
  * `.copyOf()`。由于 [KdbxAttachment.data] 对**落盘附件**已经返回 `source.load()` 的独立副本
  * （见 ISSUE-P3-104 口径），第二份 `.copyOf()` 纯属冗余，且**第一份副本无人持有、无人清零**，
@@ -76,7 +79,7 @@ class AttachmentDataOwnershipTest {
         )
         val (reader, entryId) = readerFor(entry)
 
-        val returned = reader.getAttachmentData(entryId, "disk.bin")
+        val returned = reader.getAttachmentData(entryId, 0)
 
         assertNotNull(returned)
         assertArrayEquals(payload, returned)
@@ -95,7 +98,7 @@ class AttachmentDataOwnershipTest {
         val entry = KdbxEntry(attachments = listOf(attachment))
         val (reader, entryId) = readerFor(entry)
 
-        val returned = reader.getAttachmentData(entryId, "mem.bin")
+        val returned = reader.getAttachmentData(entryId, 0)
 
         assertNotNull(returned)
         assertArrayEquals(payload, returned)
@@ -120,9 +123,9 @@ class AttachmentDataOwnershipTest {
         )
         val (reader, entryId) = readerFor(entry)
 
-        assertNull("名称不匹配必须返回 null", reader.getAttachmentData(entryId, "missing.bin"))
-        assertNull("空字节附件按既有语义返回 null", reader.getAttachmentData(entryId, "empty.bin"))
-        assertNull("uuid 非法必须返回 null", reader.getAttachmentData("not-a-uuid", "mem.bin"))
+        assertNull("下标越界必须返回 null", reader.getAttachmentData(entryId, 99))
+        assertNull("空字节附件按既有语义返回 null", reader.getAttachmentData(entryId, 1))
+        assertNull("uuid 非法必须返回 null", reader.getAttachmentData("not-a-uuid", 0))
     }
 
     // ===== 下游写出侧：交付副本用毕必须清零 =====

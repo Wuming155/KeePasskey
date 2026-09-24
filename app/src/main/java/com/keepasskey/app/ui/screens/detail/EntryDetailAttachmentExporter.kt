@@ -36,7 +36,8 @@ internal class EntryDetailAttachmentExporter(
     suspend fun export(entryId: String, attachment: UiAttachment, targetUri: Uri): UiMessage {
         val rawTarget = targetUri.toString()
         return try {
-            val bytes = vaultRepository.getAttachmentData(entryId, attachment.fileName)
+            // ISSUE-P3-295：按下标寻址（原按 fileName ⇒ 同名附件导出错内容）
+            val bytes = vaultRepository.getAttachmentData(entryId, attachment.refIndex)
             if (bytes == null) return recordFailure(rawTarget, targetUri)
 
             // ISSUE-P3-105 归口：`getAttachmentData` 交付的是调用方独占副本，用毕必须清零——

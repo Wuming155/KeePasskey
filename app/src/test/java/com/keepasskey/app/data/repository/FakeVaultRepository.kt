@@ -833,7 +833,7 @@ class FakeVaultRepository(
 
     override suspend fun getEntryRevisionSnapshot(entryId: String, revisionId: String): EntryRevisionSnapshot? = null
 
-    override suspend fun getAttachmentData(entryId: String, fileName: String): ByteArray? = null
+    override suspend fun getAttachmentData(entryId: String, refIndex: Int): ByteArray? = null
 
     override fun isSessionReadOnly(): Boolean = false
 
