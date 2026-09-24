@@ -45,7 +45,6 @@ internal class SettingsSyncController(
         val s3Region: String = "auto",
         val s3ObjectKey: String = "keepasskey.kdbx",
         val s3UsePathStyle: Boolean = false,
-        val autoSyncEnabled: Boolean = true,
         val wifiOnlySync: Boolean = true,
         val isSyncing: Boolean = false,
         val syncFeedbackMessage: UiMessage? = null,
@@ -61,7 +60,6 @@ internal class SettingsSyncController(
     private val syncStateFlow = MutableStateFlow(
         SyncUiState(
             provider = CloudSyncProvider.WEBDAV,
-            autoSyncEnabled = true,
             wifiOnlySync = true,
             isSyncing = false,
             syncFeedbackMessage = null,
@@ -273,8 +271,15 @@ internal class SettingsSyncController(
         return if (withScheme.startsWith("https://", ignoreCase = true)) withScheme else null
     }
 
+    /**
+     * ISSUE-P3-272：自动同步总开关改走进阶偏好统一通道（内存快照 + 持久化原子完成）——
+     * 原实现只写本控制器内存 StateFlow（不落盘、无消费方），重启即回默认值的假开关。
+     * 真实消费点为 `VaultListViewModel` init 的「解锁后自动同步一次」触发点。
+     */
     fun setAutoSyncEnabled(enabled: Boolean) {
-        syncStateFlow.update { it.copy(autoSyncEnabled = enabled) }
+        val next = extendedSettingsStore.settings.value.copy(autoSyncEnabled = enabled)
+        extendedSettingsStore.publish(next)
+        extendedSettingsStore.save(next)
     }
 
     /** 内存态即时更新（持久化与周期任务重排由 ViewModel 统一编排） */

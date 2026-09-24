@@ -428,16 +428,13 @@ class SettingsViewModel @Inject constructor(
 
     fun setPeriodicBackgroundSyncInterval(minutes: Int) = extendedPreferences.setPeriodicBackgroundSyncInterval(minutes)
 
-    fun setAllowedWifiSsids(ssids: String) = extendedPreferences.setAllowedWifiSsids(ssids)
     fun setCreateBackupBeforeSave(enabled: Boolean) = extendedPreferences.setCreateBackupBeforeSave(enabled)
     fun setCheckRemoteChangesBeforeSave(enabled: Boolean) = extendedPreferences.setCheckRemoteChangesBeforeSave(enabled)
 
     fun setConflictResolution(resolution: ConflictResolution) = extendedPreferences.setConflictResolution(resolution)
 
-    fun setUseFileTransactions(enabled: Boolean) = extendedPreferences.setUseFileTransactions(enabled)
     fun setWebdavChunkedUpload(enabled: Boolean) = extendedPreferences.setWebdavChunkedUpload(enabled)
     fun setWebdavChunkSizeMb(sizeMb: Int) = extendedPreferences.setWebdavChunkSizeMb(sizeMb)
-    fun setPreloadDatabaseEnabled(enabled: Boolean) = extendedPreferences.setPreloadDatabaseEnabled(enabled)
 
     // ===== KP2A 扩展：TOTP 规范映射 =====
     fun updateTotpFieldMapping(seedField: String, settingsField: String, stepSeconds: Int, digits: Int) = extendedPreferences.updateTotpFieldMapping(seedField, settingsField, stepSeconds, digits)

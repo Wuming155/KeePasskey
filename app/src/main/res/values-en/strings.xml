@@ -715,7 +715,7 @@
     <string name="sync_cold_start_title">Sync on cold start</string>
     <string name="sync_cold_start_sub">Check for cloud updates automatically on launch</string>
     <string name="sync_auto_sync_title">Auto sync</string>
-    <string name="sync_auto_sync_sub">Push changes to the cloud automatically</string>
+    <string name="sync_auto_sync_sub">Sync with the cloud once after unlock; when off, manual sync only</string>
     <string name="sync_periodic_title">Periodic background sync</string>
     <string name="sync_periodic_sub">Check cloud changes at a fixed interval</string>
     <string name="sync_interval_title">Background sync interval</string>
@@ -730,8 +730,9 @@
     <string name="sync_backup_sub">Keeps the previous version as a .kdbx.bak file next to the vault before each save (deleted after a successful master password change)</string>
     <string name="sync_check_remote_title">Check remote before sync</string>
     <string name="sync_check_remote_sub">Compare the cloud version before uploading to avoid overwriting other changes</string>
-    <string name="sync_file_tx_title">Transactional writes</string>
-    <string name="sync_file_tx_sub">Write to a temp file then swap atomically, safe against interruptions</string>
+    <!-- ISSUE-P3-272 (PD-39): the "Transactional writes" and "Preload remote database"
+         fake switches were removed. The former is a non-disableable data-safety invariant,
+         the latter had no production implementation. Their string keys went with them. -->
     <string name="sync_wifi_only_title">Sync on Wi-Fi only</string>
     <string name="sync_wifi_only_sub">Pause large transfers on mobile data</string>
     <string name="sync_conflict_title">Conflict resolution</string>
@@ -748,8 +749,6 @@
     <string name="sync_section_network">Network security</string>
     <string name="sync_chunked_title">Chunked transfer</string>
     <string name="sync_chunked_sub">Upload and download large files in chunks, more stable on weak networks</string>
-    <string name="sync_preload_title">Preload remote database</string>
-    <string name="sync_preload_sub">Prefetch the cloud copy on Wi-Fi to speed up unlocking</string>
     <string name="sync_zeroknowledge_title">Zero-knowledge end-to-end encryption</string>
     <string name="sync_zeroknowledge_desc">Your master password never leaves this device. The cloud stores only Argon2-encrypted blocks, so neither the server nor anyone in between can decrypt your vault</string>
     <string name="sync_credential_auth_notice">Sync credentials are sealed with Android Keystore encryption (hardware isolation measured on this device), but the sealing key does not require biometric authentication — this ensures background auto-sync works while the device is locked. Credentials are unsealed only during sync and immediately wiped from memory afterward (CharArray borrow semantics + full SigV4 derivation chain zeroing), never persisting as immutable Strings</string>

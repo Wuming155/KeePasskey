@@ -123,7 +123,8 @@ internal fun buildSettingsUiState(
     s3Region = syncState.s3Region,
     s3ObjectKey = syncState.s3ObjectKey,
     s3UsePathStyle = syncState.s3UsePathStyle,
-    autoSyncEnabled = syncState.autoSyncEnabled,
+    // ISSUE-P3-272：autoSyncEnabled 改由持久化的 extState 投影（原读 SyncUiState 内存态，重启即回弹）
+    autoSyncEnabled = extState.autoSyncEnabled,
     wifiOnlySync = syncState.wifiOnlySync,
     isSyncing = syncState.isSyncing,
     syncFeedbackMessage = syncState.syncFeedbackMessage,
@@ -140,14 +141,11 @@ internal fun buildSettingsUiState(
     syncOnColdStart = userSettings.syncOnColdStart,
     periodicBackgroundSyncEnabled = extState.periodicBackgroundSyncEnabled,
     periodicBackgroundSyncIntervalMinutes = extState.periodicBackgroundSyncIntervalMinutes,
-    allowedWifiSsids = extState.allowedWifiSsids,
     createBackupBeforeSave = extState.createBackupBeforeSave,
     checkRemoteChangesBeforeSave = extState.checkRemoteChangesBeforeSave,
     conflictResolution = extState.conflictResolution,
-    useFileTransactions = extState.useFileTransactions,
     webdavChunkedUpload = extState.webdavChunkedUpload,
     webdavChunkSizeMb = extState.webdavChunkSizeMb,
-    preloadDatabaseEnabled = extState.preloadDatabaseEnabled,
 
     // 3. 表单自动填充与 Passkey
     // ISSUE-P2-228：三条通道开关取自持久化的 extState（迁移前来自内存态 AutofillUiState，重启即回弹）

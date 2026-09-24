@@ -117,16 +117,13 @@ data class SettingsUiState(
     val syncOnColdStart: Boolean = true, // 软件杀死后重新启动时自动与云端同步 (冷启动自动同步)
     val periodicBackgroundSyncEnabled: Boolean = false, // KP2A: 周期性定时后台同步
     val periodicBackgroundSyncIntervalMinutes: Int = 30, // KP2A: 定时同步周期 (分钟)
-    val allowedWifiSsids: String = "", // KP2A: 仅在指定 SSID Wi-Fi 下允许同步
     val createBackupBeforeSave: Boolean = true, // KP2A: 保存覆盖前生成 .bak 备份
     val checkRemoteChangesBeforeSave: Boolean = true, // KP2A: 保存前检查远端修改
     val conflictResolution: ConflictResolution = ConflictResolution.AUTO_MERGE, // KP2A: 冲突解决策略
-    val useFileTransactions: Boolean = true, // KP2A: 原子事务写盘
     // Wave 12 传输加固：「允许明文流量」与「信任自签名证书」假开关已整体移除——
     // 同步客户端恒定 TLS-only（SyncHttpClientFactory），二者均属无消费者的空实现且语义不安全
     val webdavChunkedUpload: Boolean = false, // KP2A: WebDAV 分块传输
     val webdavChunkSizeMb: Int = 10, // KP2A: 分块大小
-    val preloadDatabaseEnabled: Boolean = true, // KP2A: 预加载数据库加速解锁
 
     // 3. 表单自动填充与 Passkey (Autofill & Passkey)
     val credentialProviderEnabled: Boolean = true,

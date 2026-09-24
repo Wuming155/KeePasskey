@@ -49,16 +49,6 @@
 
 ## P3 低危问题、特性接线与体验优化（12 项）
 
-### ISSUE-P3-272：云端同步四项假开关（自动同步 / 事务化写入 / 预加载远程数据库 / 允许的 Wi-Fi SSID）
-
-- **核实时间点**：2026-09-23 经全仓定向 grep 与消费方逐个核对核实。
-- **核实方式**：① **自动同步** `autoSyncEnabled` 只活在 `SettingsSyncController` 的内存 `StateFlow`（`SettingsSyncController.kt:48/61/253-255`），`ExtendedSettingsStore` **无对应持久化键**；全仓 `autoSync` 命中仅设置页 / 投影 / 导航图，**无生产消费方**；缺省 `true`，重启即回 `true`。② **事务化写入** `useFileTransactions` **有**持久化键（`ExtendedSettingsStore.kt:82/171`，缺省 `true`），但全仓除 setter（`SettingsExtendedPreferencesController.kt:176`）/ 投影 / UI 外**无消费方**；本地写盘恒走 `AtomicFileWriter.writeAtomic`（`SessionFileWriter.kt:26-32`，条件仅为「是否生成 `.bak`」），上传恒走 `provider.uploadAtomic`（`SyncEngine.kt:192/259/287/347/415/448`，生产侧**无** `.upload(` 调用）——开关关不掉原子写。③ **预加载远程数据库** `preloadDatabaseEnabled` 有持久化键（`ExtendedSettingsStore.kt:85/174`），**零消费方**。④ **允许的 Wi-Fi SSID** `allowedWifiSsids` 有持久化键（同文件 `:72/167`），**零消费方**；同卡真正接线的只有 `wifiOnlySync`（`PeriodicSyncScheduler.kt:40/52` 映射 UNMETERED / CONNECTED）。
-- **背景与根因**：三项「偏好只落盘不消费」+ 一项「偏好不落盘不消费」。前三项的界面文案已向用户承诺具体行为（`strings.xml`：`sync_auto_sync_sub`「数据变更后自动推送到云端」、`sync_file_tx_sub`「先写入临时文件再原子替换，意外中断不损坏数据库」、`sync_preload_sub`「Wi-Fi 下后台预取云端副本，加快解锁速度」）与「仅在指定 SSID Wi-Fi 下允许同步」（`SettingsUiState.kt:118`），实际行为与承诺无关；自动同步连回显都在重启后归位，属 `ISSUE-P2-228` 同型假开关。
-- **涉及文件**：`app/src/main/java/com/keepasskey/app/ui/screens/settings/SettingsSyncController.kt`、`app/src/main/java/com/keepasskey/app/ui/screens/settings/SettingsExtendedPreferencesController.kt`、`app/src/main/java/com/keepasskey/app/ui/screens/settings/subscreens/CloudSyncSections.kt`、`app/src/main/java/com/keepasskey/app/data/repository/ExtendedSettingsStore.kt`、`app/src/main/java/com/keepasskey/app/sync/PeriodicSyncScheduler.kt`、`app/src/main/java/com/keepasskey/app/sync/SyncProviderResolver.kt`、`database/src/main/java/com/keepasskey/database/session/SessionFileWriter.kt`、`sync/src/main/java/com/keepasskey/sync/engine/SyncEngine.kt`、`sync/src/main/java/com/keepasskey/sync/provider/SyncProvider.kt`。
-- **验收标准**：AC① 四项逐一给出**明确结论**——「真实接线」或「如实移除 / 禁用并标注」（对齐 `ISSUE-P3-65`：不得长期保留可拨动的假开关）；AC② 若接线：Wi-Fi SSID 须接入网络约束判定并与 `wifiOnlySync` 合流为**同一判据**（避免两个入口语义重叠）、预加载与自动同步须接到具体触发点（冷启动 / 变更后 / 保存后）；**事务化写入**须先裁定其是否属可关闭项——原子写是本仓数据安全不变量（`AtomicFileWriter` / `uploadAtomic` 全路径无绕过），若裁定「不可关闭」，则**如实移除该开关**（或改只读展示并写明恒为开启）并登记 `PD-*`，不得保留「关了也没变化」的开关；AC③ 若移除：同步删除 setter / 状态字段 / 投影 / 字符串键（中英两侧），并核对字符串键成对与总数；AC④ 任一改动都须同步修订 `strings.xml` 与 `values-en/strings.xml` 文案，使其**仅**描述真实行为；AC⑤ 新增接线守卫用例，禁「UI 有开关、生产无消费方」复现（沿用 `AutofillChannelSwitchWiringTest` 的静态消费点计数口径）。
-
----
-
 ### ISSUE-P3-273：TOTP 字段映射与默认参数四项「假开关 + 不落盘」（种子字段名 / 设置字段名 / 默认步长 / 默认位数）
 
 - **核实时间点**：2026-09-23 经全仓定向 grep 与解析侧逐点核对核实。
@@ -176,5 +166,24 @@
   - **第 2 类（模型层字段 `String`，导出器层不可解）**：AC⑤ **不在本条整改**——按限界口径处置：若维持现状，须在限界表登记（或扩写 §2.4 同族）并写明「模型层 `title`/`url`/`userName`/`notes`/分组名以 `String` 驻留，进程内取证在信任边界外」；若要收口，须**另立条目**评估模型层改造（`ProtectedString` 化或 `CharArray` 字段）的牵动面，禁在本条顺手改模型。
     **（2026-09-23 §284 补全登记）**：AC⑤ 的「维持现状 + 限界登记」分支已落地——限界表新增 **§2.7**，单列**展示层**（`GeneratorScreen` `readString()` / `EntryDetailSecrets` `toDisplayString()` 与三个 `String` 状态）与**模型层**（`KdbxEntry` / `KdbxGroup` 元数据字段）两类驻留，并与 §2.4 / §2.6 分列；解除条件仍须另立条目。第 1 类（导出侧 `useChars`）**仍未实施**，本条继续开放。
   - **通则**：AC⑥ 两类的结论与去向必须**分列写明**，禁以「不可擦 `String` 都是已接受限界」一句带过（第 1 类恰恰**可以**收口）。
+
+---
+
+### ISSUE-P3-305：CI `hygiene-gate` 在 `main` 上为**红态**——`tier1(>500)=4`、`functions_ge_100=2`（§280 收工线已破）
+
+- **核实时间点**：2026-09-24（§300 批次机检复核时发现；随即逐文件与 `HEAD` 对拍，确认为**既存**红态，非该批引入）。
+- **核实方式**：
+  1. `python tools/doc/count_line_tiers.py` → **EXIT 1**，`tier1(>500)=4`（闸门要求恒为 0）：
+     `app/src/main/java/com/keepasskey/app/sync/SyncCycleRunner.kt` **561**、`app/src/main/java/com/keepasskey/app/sync/SyncConflictController.kt` **547**、
+     `sync/src/main/java/com/keepasskey/sync/engine/SyncCache.kt` **507**、`database/src/main/java/com/keepasskey/database/session/DatabaseSession.kt` **501**；
+     同次读数 `tier2(400~500)=33  budget=37`。
+  2. `python tools/doc/long_functions.py` → **EXIT 1**，`functions_ge_100=2`：
+     `SyncCycleRunner.kt::setupCycleContext`（105 行，L127）、`EntryEditFormSections.kt::EntryEditAccountSection`（100 行，L230）。
+  3. **既存性证明**：对上述 4 个超大文件 + `EntryEditFormSections.kt` 逐文件 `wc -l` 与 `git show HEAD:<path> | wc -l` 比对，**行数完全一致**，且 5 个文件**均不在 §300 改动面内**。
+  4. **CI 调用面**：`.github/workflows/build.yml` 的 `hygiene-gate` 第 3 / 第 4 条正是**无参数**调用这两个脚本 ⇒ 当前 `main`（`dbdf1a34`）上的该 gate 为红。
+- **背景与根因**：§280 把「超长函数与超大文件」一次性压到 `functions_ge_100=0` / `tier1=0` 并立为**收工线**，§281 又把六条自研机检挂成 CI 硬门禁；§285 记 `tier1=0 tier2=37` / `functions_ge_100=0`。此后 §286~§299 的连续整改（合并标量词汇表 / 图标池 / KDF / 同步库身份绑定等）在这些同步与数据库类上净增行数，**越线未被察觉**——历史批次仅以「`.\gradlew.bat test` 全绿」结案，**未逐条复核门禁面读数**，形成「闸门存在 ≠ 闸门被执行」的缺口。
+- **后果**：不影响运行时行为与用户可见功能；真正代价是 **fail-closed 硬门禁的信号价值被稀释**（红态长期化后，后续真正的越线不再被当作异常）。
+- **涉及文件**：上列 4 个超大文件 + 2 个超长函数所在文件（`app/.../ui/screens/edit/EntryEditFormSections.kt`）；CI 配置无需改动。
+- **验收标准**：AC① 4 个 `tier1` 文件与 2 个 ≥100 行函数按**职责拆分**整改至 `tier1=0` / `functions_ge_100=0`——**禁**以放宽阈值、扩白名单、调 `--max` 或改判据口径逃避；AC② 拆分为**纯结构性**（行为零变更），既有用例原样全绿，**不得删改任何既有用例**（测试资产纪律 ①）；AC③ 拆完复核 `tier2` 棘轮预算**只紧不松**（当前 33 / 37）；AC④ 复盘「§285 之后逐批未发现门禁转红」并落一条防回潮机制（批次文档须**逐条登记机检读数**，不得只写「六条机检 EXIT 0」）；AC⑤ 无设备侧义务（不动 `*/src/androidTest/**`）。
 
 ---

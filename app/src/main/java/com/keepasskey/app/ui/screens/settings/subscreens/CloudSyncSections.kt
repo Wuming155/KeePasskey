@@ -150,8 +150,7 @@ internal fun FileSafetySection(
     uiState: SettingsUiState,
     onCreateBackupBeforeSaveToggle: (Boolean) -> Unit,
     onCheckRemoteChangesToggle: (Boolean) -> Unit,
-    onShowConflictDialog: () -> Unit,
-    onUseFileTransactionsToggle: (Boolean) -> Unit
+    onShowConflictDialog: () -> Unit
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(
@@ -209,13 +208,8 @@ internal fun FileSafetySection(
                 Icon(Icons.AutoMirrored.Filled.ArrowForwardIos, contentDescription = null, tint = MaterialTheme.colorScheme.outlineVariant, modifier = Modifier.size(14.dp))
             }
 
-            SyncSwitchItem(
-                icon = Icons.Default.Save,
-                title = stringResource(R.string.sync_file_tx_title),
-                subtitle = stringResource(R.string.sync_file_tx_sub),
-                checked = uiState.useFileTransactions,
-                onCheckedChange = onUseFileTransactionsToggle
-            )
+            // ISSUE-P3-272：「事务化写入」假开关已移除（PD-39）——原子写（AtomicFileWriter /
+            // uploadAtomic）是本仓数据安全不变量，全路径无绕过，不存在「可关闭」的语义。
         }
     }
 }
@@ -226,8 +220,7 @@ internal fun FileSafetySection(
 @Composable
 internal fun NetworkOptionsSection(
     uiState: SettingsUiState,
-    onWebdavChunkedUploadToggle: (Boolean) -> Unit,
-    onPreloadDatabaseEnabledToggle: (Boolean) -> Unit
+    onWebdavChunkedUploadToggle: (Boolean) -> Unit
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(
@@ -257,13 +250,8 @@ internal fun NetworkOptionsSection(
                 onCheckedChange = onWebdavChunkedUploadToggle
             )
 
-            SyncSwitchItem(
-                icon = Icons.Default.Cached,
-                title = stringResource(R.string.sync_preload_title),
-                subtitle = stringResource(R.string.sync_preload_sub),
-                checked = uiState.preloadDatabaseEnabled,
-                onCheckedChange = onPreloadDatabaseEnabledToggle
-            )
+            // ISSUE-P3-272：「预加载远程数据库」假开关已移除（PD-39）——无任何生产实现，
+            // 移除以兑现「不得保留可拨动的假开关」纪律（重开条件见裁决登记）。
         }
     }
 }

@@ -90,13 +90,10 @@ fun CloudSyncScreen(
     onSyncOnColdStartToggle: (Boolean) -> Unit = {},
     onPeriodicBackgroundSyncToggle: (Boolean) -> Unit = {},
     onPeriodicIntervalChange: (Int) -> Unit = {},
-    onAllowedWifiSsidsChange: (String) -> Unit = {},
     onCreateBackupBeforeSaveToggle: (Boolean) -> Unit = {},
     onCheckRemoteChangesToggle: (Boolean) -> Unit = {},
     onConflictResolutionChange: (ConflictResolution) -> Unit = {},
-    onUseFileTransactionsToggle: (Boolean) -> Unit = {},
     onWebdavChunkedUploadToggle: (Boolean) -> Unit = {},
-    onPreloadDatabaseEnabledToggle: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
@@ -334,8 +331,7 @@ fun CloudSyncScreen(
                     uiState = uiState,
                     onCreateBackupBeforeSaveToggle = onCreateBackupBeforeSaveToggle,
                     onCheckRemoteChangesToggle = onCheckRemoteChangesToggle,
-                    onShowConflictDialog = { showConflictDialog = true },
-                    onUseFileTransactionsToggle = onUseFileTransactionsToggle
+                    onShowConflictDialog = { showConflictDialog = true }
                 )
             }
 
@@ -343,8 +339,7 @@ fun CloudSyncScreen(
             item {
                 NetworkOptionsSection(
                     uiState = uiState,
-                    onWebdavChunkedUploadToggle = onWebdavChunkedUploadToggle,
-                    onPreloadDatabaseEnabledToggle = onPreloadDatabaseEnabledToggle
+                    onWebdavChunkedUploadToggle = onWebdavChunkedUploadToggle
                 )
             }
 

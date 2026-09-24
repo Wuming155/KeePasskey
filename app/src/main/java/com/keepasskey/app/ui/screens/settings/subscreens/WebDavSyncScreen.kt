@@ -35,13 +35,10 @@ fun WebDavSyncScreen(
     onSyncOnColdStartToggle: (Boolean) -> Unit = {},
     onPeriodicBackgroundSyncToggle: (Boolean) -> Unit = {},
     onPeriodicIntervalChange: (Int) -> Unit = {},
-    onAllowedWifiSsidsChange: (String) -> Unit = {},
     onCreateBackupBeforeSaveToggle: (Boolean) -> Unit = {},
     onCheckRemoteChangesToggle: (Boolean) -> Unit = {},
     onConflictResolutionChange: (ConflictResolution) -> Unit = {},
-    onUseFileTransactionsToggle: (Boolean) -> Unit = {},
     onWebdavChunkedUploadToggle: (Boolean) -> Unit = {},
-    onPreloadDatabaseEnabledToggle: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     CloudSyncScreen(
@@ -65,13 +62,10 @@ fun WebDavSyncScreen(
         onSyncOnColdStartToggle = onSyncOnColdStartToggle,
         onPeriodicBackgroundSyncToggle = onPeriodicBackgroundSyncToggle,
         onPeriodicIntervalChange = onPeriodicIntervalChange,
-        onAllowedWifiSsidsChange = onAllowedWifiSsidsChange,
         onCreateBackupBeforeSaveToggle = onCreateBackupBeforeSaveToggle,
         onCheckRemoteChangesToggle = onCheckRemoteChangesToggle,
         onConflictResolutionChange = onConflictResolutionChange,
-        onUseFileTransactionsToggle = onUseFileTransactionsToggle,
         onWebdavChunkedUploadToggle = onWebdavChunkedUploadToggle,
-        onPreloadDatabaseEnabledToggle = onPreloadDatabaseEnabledToggle,
         modifier = modifier
     )
 }

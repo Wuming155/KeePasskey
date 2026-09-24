@@ -69,7 +69,7 @@ class ExtendedSettingsStore @Inject constructor(
             periodicBackgroundSyncIntervalMinutes = p.getInt(
                 K_PERIODIC_SYNC_INTERVAL, defaults.periodicBackgroundSyncIntervalMinutes
             ),
-            allowedWifiSsids = p.getString(K_ALLOWED_WIFI_SSIDS, null) ?: defaults.allowedWifiSsids,
+            autoSyncEnabled = p.getBoolean(K_AUTO_SYNC_ENABLED, defaults.autoSyncEnabled),
             createBackupBeforeSave = p.getBoolean(
                 K_CREATE_BACKUP_BEFORE_SAVE, defaults.createBackupBeforeSave
             ),
@@ -79,10 +79,8 @@ class ExtendedSettingsStore @Inject constructor(
             conflictResolution = enumOrDefault(
                 p.getString(K_CONFLICT_RESOLUTION, null), defaults.conflictResolution
             ),
-            useFileTransactions = p.getBoolean(K_USE_FILE_TRANSACTIONS, defaults.useFileTransactions),
             webdavChunkedUpload = p.getBoolean(K_WEBDAV_CHUNKED_UPLOAD, defaults.webdavChunkedUpload),
             webdavChunkSizeMb = p.getInt(K_WEBDAV_CHUNK_SIZE_MB, defaults.webdavChunkSizeMb),
-            preloadDatabaseEnabled = p.getBoolean(K_PRELOAD_DATABASE, defaults.preloadDatabaseEnabled),
 
             // 安全锁定规则与环境
             lockWhenScreenOff = p.getBoolean(K_LOCK_WHEN_SCREEN_OFF, defaults.lockWhenScreenOff),
@@ -164,14 +162,12 @@ class ExtendedSettingsStore @Inject constructor(
             .putBoolean(K_USE_OFFLINE_CACHE, settings.useOfflineCache)
             .putBoolean(K_PERIODIC_SYNC_ENABLED, settings.periodicBackgroundSyncEnabled)
             .putInt(K_PERIODIC_SYNC_INTERVAL, settings.periodicBackgroundSyncIntervalMinutes)
-            .putString(K_ALLOWED_WIFI_SSIDS, settings.allowedWifiSsids)
+            .putBoolean(K_AUTO_SYNC_ENABLED, settings.autoSyncEnabled)
             .putBoolean(K_CREATE_BACKUP_BEFORE_SAVE, settings.createBackupBeforeSave)
             .putBoolean(K_CHECK_REMOTE_CHANGES_BEFORE_SAVE, settings.checkRemoteChangesBeforeSave)
             .putString(K_CONFLICT_RESOLUTION, settings.conflictResolution.name)
-            .putBoolean(K_USE_FILE_TRANSACTIONS, settings.useFileTransactions)
             .putBoolean(K_WEBDAV_CHUNKED_UPLOAD, settings.webdavChunkedUpload)
             .putInt(K_WEBDAV_CHUNK_SIZE_MB, settings.webdavChunkSizeMb)
-            .putBoolean(K_PRELOAD_DATABASE, settings.preloadDatabaseEnabled)
             .putBoolean(K_LOCK_WHEN_SCREEN_OFF, settings.lockWhenScreenOff)
             .putBoolean(K_LOCK_WHEN_NAVIGATE_BACK, settings.lockWhenNavigateBack)
             .putBoolean(K_CLEAR_PASSWORD_ON_LEAVE, settings.clearPasswordOnLeave)
@@ -318,14 +314,13 @@ class ExtendedSettingsStore @Inject constructor(
         const val K_USE_OFFLINE_CACHE = "use_offline_cache"
         const val K_PERIODIC_SYNC_ENABLED = "periodic_sync_enabled"
         const val K_PERIODIC_SYNC_INTERVAL = "periodic_sync_interval_minutes"
-        const val K_ALLOWED_WIFI_SSIDS = "allowed_wifi_ssids"
+        // ISSUE-P3-272：自动同步总开关（控制解锁后自动同步触发点）
+        const val K_AUTO_SYNC_ENABLED = "auto_sync_enabled"
         const val K_CREATE_BACKUP_BEFORE_SAVE = "create_backup_before_save"
         const val K_CHECK_REMOTE_CHANGES_BEFORE_SAVE = "check_remote_changes_before_save"
         const val K_CONFLICT_RESOLUTION = "conflict_resolution"
-        const val K_USE_FILE_TRANSACTIONS = "use_file_transactions"
         const val K_WEBDAV_CHUNKED_UPLOAD = "webdav_chunked_upload"
         const val K_WEBDAV_CHUNK_SIZE_MB = "webdav_chunk_size_mb"
-        const val K_PRELOAD_DATABASE = "preload_database_enabled"
         const val K_LOCK_WHEN_SCREEN_OFF = "lock_when_screen_off"
         const val K_LOCK_WHEN_NAVIGATE_BACK = "lock_when_navigate_back"
         const val K_CLEAR_PASSWORD_ON_LEAVE = "clear_password_on_leave"

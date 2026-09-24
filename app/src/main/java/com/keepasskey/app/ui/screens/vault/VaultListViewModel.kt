@@ -173,8 +173,14 @@ class VaultListViewModel @Inject constructor(
             }
         }
         // 断点11 整改：解锁进入列表页即自动重同步一次（配置了云同步才触发），
-        // 避免解锁后停留在缓存旧数据直到手动下拉刷新
-        if (syncController.isSyncConfigured()) {
+        // 避免解锁后停留在缓存旧数据直到手动下拉刷新。
+        // ISSUE-P3-272：「自动同步」开关真实接线于此——关闭后本触发点不再自动同步，
+        // 仅保留手动下拉刷新 / 设置页手动同步（开关经 ExtendedSettingsStore 持久化）。
+        // 显式取值而非内联：`?:` 的优先级高于 `&&`，内联写法虽等价但读起来像
+        // 「关掉开关即恒不触发」被短路——本开关与「是否已配置云同步」是**两个独立合取项**。
+        // 无偏好通道（纯 JVM 单测未注入）时按默认开启判定，与 ExtendedSettings 默认值一致。
+        val autoSyncOnUnlock = extendedSettingsSource?.load()?.autoSyncEnabled ?: true
+        if (autoSyncOnUnlock && syncController.isSyncConfigured()) {
             triggerPullRefresh()
         }
     }

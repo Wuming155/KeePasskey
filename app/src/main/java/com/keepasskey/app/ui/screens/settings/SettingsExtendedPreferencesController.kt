@@ -158,8 +158,6 @@ internal class SettingsExtendedPreferencesController(
         }
     }
 
-    fun setAllowedWifiSsids(ssids: String) = updateExtended { it.copy(allowedWifiSsids = ssids) }
-
     fun setCreateBackupBeforeSave(enabled: Boolean) {
         updateExtended { it.copy(createBackupBeforeSave = enabled) }
         // ISSUE-P2-11 (ZT-16)：设置即下发到唯一会话实例，下一次写盘立即遵循新偏好
@@ -173,13 +171,9 @@ internal class SettingsExtendedPreferencesController(
     fun setConflictResolution(resolution: ConflictResolution) =
         updateExtended { it.copy(conflictResolution = resolution) }
 
-    fun setUseFileTransactions(enabled: Boolean) = updateExtended { it.copy(useFileTransactions = enabled) }
-
     fun setWebdavChunkedUpload(enabled: Boolean) = updateExtended { it.copy(webdavChunkedUpload = enabled) }
 
     fun setWebdavChunkSizeMb(sizeMb: Int) = updateExtended { it.copy(webdavChunkSizeMb = sizeMb) }
-
-    fun setPreloadDatabaseEnabled(enabled: Boolean) = updateExtended { it.copy(preloadDatabaseEnabled = enabled) }
 
     // ========== KP2A 扩展：TOTP 规范映射 ==========
     /**

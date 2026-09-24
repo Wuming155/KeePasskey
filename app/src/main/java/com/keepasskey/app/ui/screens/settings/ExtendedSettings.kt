@@ -14,14 +14,14 @@ data class ExtendedSettings(
     val useOfflineCache: Boolean = true,
     val periodicBackgroundSyncEnabled: Boolean = false,
     val periodicBackgroundSyncIntervalMinutes: Int = 30,
-    val allowedWifiSsids: String = "",
+    // ISSUE-P3-272：自动同步总开关真实接线——控制「解锁后进入列表页自动同步一次」
+    // （VaultListViewModel init 消费点）；关闭后仅手动下拉刷新 / 设置页手动同步触发。
+    val autoSyncEnabled: Boolean = true,
     val createBackupBeforeSave: Boolean = true,
     val checkRemoteChangesBeforeSave: Boolean = true,
     val conflictResolution: ConflictResolution = ConflictResolution.AUTO_MERGE,
-    val useFileTransactions: Boolean = true,
     val webdavChunkedUpload: Boolean = false,
     val webdavChunkSizeMb: Int = 10,
-    val preloadDatabaseEnabled: Boolean = true,
 
     // 安全锁定规则与环境
     val lockWhenScreenOff: Boolean = true,

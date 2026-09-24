@@ -727,7 +727,7 @@
     <string name="sync_cold_start_title">冷启动自动同步</string>
     <string name="sync_cold_start_sub">应用启动时自动检查云端更新</string>
     <string name="sync_auto_sync_title">自动同步</string>
-    <string name="sync_auto_sync_sub">数据变更后自动推送到云端</string>
+    <string name="sync_auto_sync_sub">解锁后自动与云端同步一次；关闭后仅手动同步</string>
     <string name="sync_periodic_title">周期性后台同步</string>
     <string name="sync_periodic_sub">按固定间隔在后台检查云端变更</string>
     <string name="sync_interval_title">后台同步间隔</string>
@@ -742,8 +742,8 @@
     <string name="sync_backup_sub">每次保存前把上一版本留为同目录的 .kdbx.bak（成功更换主密码后自动删除）</string>
     <string name="sync_check_remote_title">同步前检查远程变更</string>
     <string name="sync_check_remote_sub">上传前先比对云端版本，避免覆盖他人修改</string>
-    <string name="sync_file_tx_title">事务化写入</string>
-    <string name="sync_file_tx_sub">先写入临时文件再原子替换，意外中断不损坏数据库</string>
+    <!-- ISSUE-P3-272（PD-39）：「事务化写入」与「预加载远程数据库」假开关已移除。
+         前者是不可关闭的数据安全不变量，后者无任何生产实现；其字符串键随开关一并删除。 -->
     <string name="sync_wifi_only_title">仅 Wi-Fi 同步</string>
     <string name="sync_wifi_only_sub">移动网络下暂停大文件同步以节省流量</string>
     <string name="sync_conflict_title">冲突解决策略</string>
@@ -760,8 +760,6 @@
     <string name="sync_section_network">网络安全</string>
     <string name="sync_chunked_title">分块传输</string>
     <string name="sync_chunked_sub">大文件分块上传下载，弱网环境更稳定</string>
-    <string name="sync_preload_title">预加载远程数据库</string>
-    <string name="sync_preload_sub">Wi-Fi 下后台预取云端副本，加快解锁速度</string>
     <string name="sync_zeroknowledge_title">零知识端到端加密</string>
     <string name="sync_zeroknowledge_desc">主密码永不离开本机，云端仅存储 Argon2 加密后的数据块，服务器与网络中间人都无法解密你的密码库</string>
     <string name="sync_credential_auth_notice">同步凭据经 Android Keystore 加密封印（本机实测支持硬件隔离），但封印密钥不绑定生物认证——以确保后台自动同步在锁屏态仍可执行。凭据仅在同步瞬间解封，用毕立即从内存擦除（CharArray 借用语义 + SigV4 派生链全清零），不会以不可变 String 长期驻留</string>

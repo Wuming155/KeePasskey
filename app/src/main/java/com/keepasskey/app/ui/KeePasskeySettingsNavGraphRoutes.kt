@@ -103,13 +103,10 @@ internal fun NavGraphBuilder.settingsSyncRoute(navController: NavHostController)
             onSyncOnColdStartToggle = settingsViewModel::setSyncOnColdStart,
             onPeriodicBackgroundSyncToggle = settingsViewModel::setPeriodicBackgroundSyncEnabled,
             onPeriodicIntervalChange = settingsViewModel::setPeriodicBackgroundSyncInterval,
-            onAllowedWifiSsidsChange = settingsViewModel::setAllowedWifiSsids,
             onCreateBackupBeforeSaveToggle = settingsViewModel::setCreateBackupBeforeSave,
             onCheckRemoteChangesToggle = settingsViewModel::setCheckRemoteChangesBeforeSave,
             onConflictResolutionChange = settingsViewModel::setConflictResolution,
-            onUseFileTransactionsToggle = settingsViewModel::setUseFileTransactions,
-            onWebdavChunkedUploadToggle = settingsViewModel::setWebdavChunkedUpload,
-            onPreloadDatabaseEnabledToggle = settingsViewModel::setPreloadDatabaseEnabled
+            onWebdavChunkedUploadToggle = settingsViewModel::setWebdavChunkedUpload
         )
     }
 }
