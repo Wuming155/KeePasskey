@@ -170,10 +170,12 @@ internal class AttachmentBudget(
         const val BUDGET_SLACK_BYTES: Long = 1L * 1024 * 1024
 
         /**
-         * 内联附件（含解压产物）的**本次解析累计**字节上限：64 MiB。
+         * 内联附件（含解压产物）的**本次解析累计**字节上限：64 MiB − 1（由
+         * [AttachmentSizeLimits.MAX_ATTACHMENT_BYTES] 派生；`ISSUE-P2-311` AC① 起该值
+         * 同源自写侧单字段上限，故由 `const` 放宽为 `val`）。
          * 取值依据与堆界关系见类 KDoc。
          */
-        const val MAX_INLINE_MATERIALIZED_BYTES: Long = AttachmentSizeLimits.MAX_ATTACHMENT_BYTES
+        val MAX_INLINE_MATERIALIZED_BYTES: Long = AttachmentSizeLimits.MAX_ATTACHMENT_BYTES
 
         /** 内联压缩附件节点数上限：与二进制池条目上限同量级，远高于合法库的附件总量。 */
         const val MAX_INLINE_COMPRESSED_NODES: Int = 1024
@@ -212,8 +214,10 @@ internal class AttachmentBudget(
          * （同一「单节点在低端机堆界内的峰值」论证，见类 KDoc），故直接取自该常量而非另立
          * 字面量。它是「单条目 × 海量引用者」这一放大面的内存维度真拦截：引用倍数若把
          * 单个池条目的物化量推过该界即 fail-closed。
+         * （`ISSUE-P2-311` AC①：随 MAX_INLINE_MATERIALIZED_BYTES 一并由 `const` 放宽为 `val`——
+         * 上游取值改为同源派生后不再是编译期常量。）
          */
-        const val MAX_POOL_ITEM_MATERIALIZED_BYTES: Long = MAX_INLINE_MATERIALIZED_BYTES
+        val MAX_POOL_ITEM_MATERIALIZED_BYTES: Long = MAX_INLINE_MATERIALIZED_BYTES
 
         /** 依池内容构造预算：去重判据的预算为 `2 × 池总字节 + 余量`（见类 KDoc 新①）。 */
         fun forParse(pool: List<InnerHeader.BinaryItem>): AttachmentBudget {

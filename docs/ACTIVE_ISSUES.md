@@ -41,13 +41,14 @@
 
 ---
 
-## P2 中危缺陷与协议/测试缺口（2 项）
+## P2 中危缺陷与协议/测试缺口（1 项）
 
 > 本批出自 2026-09-24 同步/加密/passkey 安全审计（逐行反校 + 4 并行核查代理），均为数据完整性 / 密钥残留类，
 > 按「库永不丢、永不自己搞坏」定位列为 P2（Tier 0 优先整改）。
 > `ISSUE-P2-309`（合并 base 取工作副本兜底）与 `ISSUE-P2-312`（凭据克隆漏擦）已于 §315 闭环；
 > `ISSUE-P2-308`（同步采纳失败后引擎状态不回滚）已于 §317 闭环（其整改中发现的合并主路径同型残余补登为 `ISSUE-P2-313`）；
-> `ISSUE-P2-310`（附件被系统回收 fail-open）已于 §318 闭环。
+> `ISSUE-P2-310`（附件被系统回收 fail-open）已于 §318 闭环；
+> `ISSUE-P2-311`（64 MiB 附件写读口径互斥）已于 §319 闭环。
 
 ### ISSUE-P2-313：合并主路径（markResolvedAndUpload）基线前移仍先于本地采纳——采纳失败后同型「陈旧树本地赢覆盖」损失链（§317 整改中发现的同型残余）
 
@@ -56,16 +57,6 @@
 - **背景与根因**：与 `ISSUE-P2-308` 同型——合并产物上传成功时引擎已把基线前移到 merged 内容（cache=merged、baseversion=sha(merged)、ETag 前移），而本地采纳在**上传之后**；采纳失败（校验-采用发现窗口内会话被 UI 编辑替换，或落盘失败）只返回 Error、基线不回退。下一周期：lastSyncedDb 滞留旧树 ⇒ `hasLocalContentChanged` 判真 ⇒ 以「旧树+窗口编辑」重写缓存 ⇒ `hasLocalChanges` 为真而 baseEtag==remoteEtag ⇒ **本地赢整库上传**，把云端刚接收的 merged 内容（含他端改动）静默覆盖。触发前提＝合并上传网络窗口内发生 UI 编辑并保存（`adoptDatabaseIfUnchanged` 守卫命中）或本地落盘失败，比 P2-308 的「解析/保存失败」窗口更窄，但损失形态相同（跨端灭他端数据）。`ISSUE-P2-308` 批已修：`commitLocal` / `commitLocalForce` / `RemoteSynced` 三类结果的采纳结算（含 autoMerge 412 重入与用户裁决 412 重入侧）；**主路径 `markResolvedAndUpload` 因返回 `Result<String>` 无法携带句柄而未动**。
 - **涉及文件**：`sync/.../engine/SyncEngine.kt`（`markResolvedAndUpload` 返回类型）、`app/.../sync/SyncConflictAutoMerge.kt`、`SyncConflictResolution.kt`。
 - **验收标准**：AC① `markResolvedAndUpload` 改为携带 [RemoteAdoptionSettlement] 的类型化终态（上传成功 ⇒ Uploaded(etag, settlement)，基线三步延后），两处调用方在采纳确认成功后 `accept`、采纳失败 / 落盘失败 `reject`；AC② 参数化用例锁定「采纳失败 ⇒ 基线保持旧值、下轮按冲突收敛且云端 merged 内容不被陈旧树覆盖」；AC③ `test` 全绿 + `gate_readings.py` 7/7 PASS。
-
-### ISSUE-P2-311：自产 64 MiB 附件被自家解析器判损坏（写读两侧对同一常量口径互斥）（★）
-
-- **核实时间点**：2026-09-24（本轮审计，逐行反校）。
-- **核实方式**：并行核查代理直读 `AttachmentSizeLimits.kt:21` / `EntryEditPickers.kt:123,135` / `InnerHeader.kt:175,212,231-232,357,447` / `KdbxFile.kt:86`，并确认绿测 `InnerHeaderSecurityTest` / `KdbxInnerResourceLimitsInvariantTest` 断言全在读侧。
-- **背景与根因**：`AttachmentSizeLimits.kt:21` `MAX_ATTACHMENT_BYTES = 64 MiB`。`EntryEditPickers.kt:123` 与 `:135` 两道关卡均用 `>` ⇒ 恰好 64 MiB 放行。写侧 `InnerHeader.kt:175` 写字段长 `bin.size + FLAGS_FIELD_BYTES = 64 MiB + 1`；`MAX_INNER_FIELD_BYTES = KdbxFile.MAX_DECOMPRESSED_PAYLOAD_BYTES(128 MiB) / FIELD_CAP_SHARE_DIVISOR(2) = 64 MiB`（`:212 / :231-232`）；读侧 `:357` 用 `>` 判 ⇒ 下次打开整库判损坏。**写侧零累计闸**：`MAX_BINARY_POOL_TOTAL_BYTES`（`:280-281` = 128 MiB）仅活在读侧 `:447` 与 init 断言 ⇒ 3×50 MiB 附件同样写得出、读不进。绿测 `InnerHeaderSecurityTest` / `KdbxInnerResourceLimitsInvariantTest` 断言全在读侧/常量层，把矛盾固化。
-- **涉及文件**：`database/.../inner/InnerHeader.kt`、`AttachmentSizeLimits.kt`、`app/.../EntryEditPickers.kt`、`KdbxFile.kt`。
-- **验收标准**：AC① UI 上界取 `MAX_INNER_FIELD_BYTES − 1` 并同源派生（消除写读互斥）。AC② `serialize` 前加池累计判据（单值同读侧 `MAX_BINARY_POOL_TOTAL_BYTES`）。AC③ 参数化 save→load 往返测试：UI 上界值（含 64 MiB−1、多附件累计临界）必通。`test` + `gate_readings.py` 7/7 PASS。
-
----
 
 ## P3 低危问题、特性接线与体验优化（4 项）
 

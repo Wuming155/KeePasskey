@@ -50,9 +50,14 @@ internal data class EntryEditPickers(
 private val MAX_ATTACHMENT_BYTES: Long =
     com.keepasskey.database.xml.AttachmentSizeLimits.MAX_ATTACHMENT_BYTES
 
-/** 超限提示：数值经参数注入，避免在文案里再写一份上限。 */
+/** 超限提示：数值经参数注入，避免在文案里再写一份上限。
+ *  ISSUE-P2-311：上界值（64 MiB − 1）按 1 MiB **向上取整**显示为 64——floor 会显示 63，
+ *  与「附件不超过 64 MiB 即可添加」的实际语义相悖。 */
 private fun attachmentTooLargeMessage(): UiMessage =
-    UiMessage(R.string.edit_attachment_too_large, listOf(MAX_ATTACHMENT_BYTES / (1024L * 1024L)))
+    UiMessage(
+        R.string.edit_attachment_too_large,
+        listOf((MAX_ATTACHMENT_BYTES + 1024L * 1024L - 1) / (1024L * 1024L))
+    )
 
 /**
  * 装配编辑页的三个选择器。
