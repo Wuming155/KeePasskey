@@ -201,6 +201,9 @@ internal fun EntryEditExtraSection(
                 onValueChange = onAutoTypeSequenceChange,
                 label = { Text(stringResource(R.string.edit_autotype_hint)) },
                 placeholder = { Text(stringResource(R.string.edit_autotype_placeholder)) },
+                // ISSUE-P3-297 AC②（PD-42）：本应用无 AutoType 执行方，序列仅随 KDBX 兼容保存——
+                // 以字段说明如实标注，禁止让输入项呈现「可被执行」的假象
+                supportingText = { Text(stringResource(R.string.edit_autotype_note)) },
                 singleLine = true,
                 shape = MaterialTheme.shapes.medium,
                 modifier = Modifier.fillMaxWidth()

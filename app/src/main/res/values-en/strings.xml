@@ -127,6 +127,7 @@
     <string name="vault_sort_created">Sort by Created</string>
     <string name="vault_current_sort">Sorted by: %1$s</string>
     <string name="vault_reset_sort">Reset</string>
+    <string name="vault_filter_favorites">Favorites</string>
     <string name="vault_root_dir">Root</string>
     <string name="vault_empty_title">Empty Directory</string>
     <string name="vault_empty_desc">No entries or folders found here. Tap the plus button below to add one</string>
@@ -152,6 +153,7 @@
     <string name="detail_btn_copy_user">Copy User</string>
     <string name="detail_btn_copy_pwd">Copy Password</string>
     <string name="detail_basic_section">Credentials</string>
+    <string name="detail_tags_section">Tags</string>
     <string name="detail_username_label">Username / Email</string>
     <string name="detail_password_label">Password</string>
     <string name="detail_totp_section">Two-Factor Token (TOTP)</string>
@@ -297,8 +299,6 @@
     <string name="sync_status_synced">Synced</string>
     <string name="sync_status_unverified">Not verified</string>
     <string name="sync_status_syncing">Syncing...</string>
-    <string name="sync_status_offline">Offline cache</string>
-    <string name="sync_status_conflict">Conflict</string>
     <string name="sort_option_default">Default order</string>
     <string name="sort_option_name_asc">By name · Ascending (A to Z)</string>
     <string name="sort_option_name_desc">By name · Descending (Z to A)</string>
@@ -374,6 +374,7 @@
     <string name="edit_tags_hint">Tags (separate multiple tags with commas or semicolons)</string>
     <string name="edit_autotype_hint">AutoType sequence</string>
     <string name="edit_autotype_placeholder">{USERNAME}{TAB}{PASSWORD}{ENTER}</string>
+    <string name="edit_autotype_note">This app does not execute AutoType sequences; saved for compatibility with other password managers only</string>
     <string name="edit_override_url_hint">Override URL (autofill matching override)</string>
     <string name="edit_extra_section">Advanced Properties</string>
 

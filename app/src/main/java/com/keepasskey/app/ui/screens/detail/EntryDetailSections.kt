@@ -130,6 +130,39 @@ internal fun CustomFieldsCard(
 }
 
 /**
+ * 标签卡片区（ISSUE-P3-297 处置③：标签此前只有编辑页输入与搜索命中两个消费点，
+ * 详情页零渲染——现按 KDBX 标签原样只读呈现）
+ */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+internal fun TagsCard(entry: UiVaultEntry) {
+    BentoCard(
+        modifier = Modifier.fillMaxWidth(),
+        backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow
+    ) {
+        androidx.compose.foundation.layout.FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            entry.tags.forEach { tag ->
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(MaterialTheme.colorScheme.secondaryContainer)
+                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                ) {
+                    Text(
+                        text = tag,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
  * 附件文件列表卡片区
  */
 @Composable

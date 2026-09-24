@@ -21,18 +21,21 @@ import com.keepasskey.app.ui.screens.settings.ExtendedSettings
  * 逐字迁移至此，行为零变更。
  */
 
-/** 搜索防抖后的过滤参数快照 */
+/** 搜索与列表筛选（标签 / 收藏档）的防抖后参数快照 */
 internal data class VaultListFilterParams(
     val query: String,
     val isSearchActive: Boolean,
-    val sortOption: VaultSortOption
+    val sortOption: VaultSortOption,
+    // ISSUE-P3-297 处置③：标签筛选档（null = 未按标签筛选）
+    val selectedTag: String? = null,
+    // ISSUE-P3-297 处置③：是否只看收藏条目
+    val favoriteOnly: Boolean = false
 )
 
 /** 批量选择与同步指示的聚合快照 */
 internal data class VaultListBatchAndSyncState(
     val isBatchMode: Boolean,
     val selectedEntryIds: Set<String>,
-    val syncStatus: VaultSyncStatus,
     val isSyncing: Boolean,
     val lastSyncTimeText: String,
     val hasPendingConflict: Boolean = false,
@@ -105,7 +108,6 @@ internal fun buildVaultListUiState(
         databaseName = activeDb?.name.orEmpty(),
         isBatchMode = batchSync.isBatchMode,
         selectedEntryIds = batchSync.selectedEntryIds,
-        syncStatus = batchSync.syncStatus,
         isSyncing = batchSync.isSyncing,
         lastSyncTimeText = batchSync.lastSyncTimeText,
         hasPendingConflict = batchSync.hasPendingConflict,
@@ -125,11 +127,15 @@ internal fun buildVaultListUiState(
         childEntryGroups = content.childEntryGroups,
         mountedChildDatabaseCount = session.childDatabase.mountedCount,
         childEntrySectionVisible = content.childEntrySectionVisible,
-        templateEntries = content.templateEntries
+        templateEntries = content.templateEntries,
+        availableTags = content.availableTags,
+        hasFavoriteEntries = content.hasFavoriteEntries,
+        selectedTag = session.filterParams.selectedTag,
+        favoriteOnly = session.filterParams.favoriteOnly
     )
 }
 
-/** 列表内容投影结果（面包屑 / 条目 / 分组 / 搜索路径 / 子库分区 / 模板条目） */
+/** 列表内容投影结果（面包屑 / 条目 / 分组 / 搜索路径 / 子库分区 / 模板条目 / 筛选候选） */
 private data class VaultListContent(
     val isInsideRecycleBin: Boolean,
     val breadcrumbs: List<VaultGroup>,
@@ -138,7 +144,10 @@ private data class VaultListContent(
     val entryGroupPaths: Map<String, String>,
     val childEntryGroups: List<ChildVaultEntryGroup>,
     val childEntrySectionVisible: Boolean,
-    val templateEntries: List<UiVaultEntry>
+    val templateEntries: List<UiVaultEntry>,
+    // ISSUE-P3-297 处置③：全库去重标签与「是否有收藏」——筛选芯片行的可见性与候选
+    val availableTags: List<String>,
+    val hasFavoriteEntries: Boolean
 )
 
 private fun projectVaultListContent(
@@ -166,7 +175,9 @@ private fun projectVaultListContent(
         isInsideRecycleBin = isInsideRecycleBin,
         recycleBinGroupIds = recycleBinGroupIds,
         effectiveGroupId = effectiveGroupId,
-        sortOption = session.filterParams.sortOption
+        sortOption = session.filterParams.sortOption,
+        selectedTag = session.filterParams.selectedTag,
+        favoriteOnly = session.filterParams.favoriteOnly
     )
     // 4. ISSUE-P3-17：搜索结果行的分组路径（仅在「搜索中 + 开关开启」时装配）
     val entryGroupPaths = searchEntryGroupPaths(allGroups, sortedEntries, session, isSearching)
@@ -188,9 +199,20 @@ private fun projectVaultListContent(
         entryGroupPaths = entryGroupPaths,
         childEntryGroups = childEntryGroups,
         childEntrySectionVisible = childEntrySectionVisible,
-        templateEntries = buildTemplateEntries(allGroups, allEntries)
+        templateEntries = buildTemplateEntries(allGroups, allEntries),
+        availableTags = buildAvailableTags(allEntries),
+        hasFavoriteEntries = allEntries.any { it.isFavorite }
     )
 }
+
+/**
+ * ISSUE-P3-297 处置③：全库条目的去重标签候选（大小写不敏感排序）。
+ * 空查询 / 无标签均得空表，UI 据此隐藏筛选行。
+ */
+private fun buildAvailableTags(allEntries: List<UiVaultEntry>): List<String> = allEntries
+    .flatMap { it.tags }
+    .distinct()
+    .sortedWith(String.CASE_INSENSITIVE_ORDER)
 
 /**
  * ISSUE-P3-17：搜索结果行的分组路径——仅在「搜索中 + 开关开启」时装配，否则空表。
@@ -245,7 +267,8 @@ private fun buildRecycleBinGroupIds(
     }
 }
 
-/** 1. 过滤条目：搜索时全局匹配（排除回收站内容），正常时只展示当前文件夹下的条目 */
+/** 1. 过滤条目：搜索时全局匹配（排除回收站内容），正常时只展示当前文件夹下的条目；
+ * 再叠加 ISSUE-P3-297 处置③的标签 / 收藏筛选档（与搜索独立、可叠加） */
 private fun selectSortedEntries(
     allEntries: List<UiVaultEntry>,
     query: String,
@@ -253,14 +276,23 @@ private fun selectSortedEntries(
     isInsideRecycleBin: Boolean,
     recycleBinGroupIds: Set<String>,
     effectiveGroupId: String?,
-    sortOption: VaultSortOption
+    sortOption: VaultSortOption,
+    selectedTag: String?,
+    favoriteOnly: Boolean
 ): List<UiVaultEntry> {
     val targetEntries = if (isSearching) {
         allEntries.filter { if (!isInsideRecycleBin) it.groupId !in recycleBinGroupIds else true }
     } else {
         allEntries.filter { it.groupId == effectiveGroupId }
     }
-    return sortEntries(targetEntries.filter { matchesSearchQuery(it, query) }, sortOption)
+    return sortEntries(
+        targetEntries.filter {
+            matchesSearchQuery(it, query) &&
+                (!favoriteOnly || it.isFavorite) &&
+                (selectedTag == null || selectedTag in it.tags)
+        },
+        sortOption
+    )
 }
 
 /** 2. 排序条目 */

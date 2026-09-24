@@ -234,6 +234,12 @@ fun EntryDetailContent(
                     onCopyUsername = onCopyUsername
                 )
 
+                // 标签卡片区（ISSUE-P3-297 处置③：有标签才呈现）
+                if (entry.tags.isNotEmpty()) {
+                    SectionTitle(textRes = R.string.detail_tags_section)
+                    TagsCard(entry = entry)
+                }
+
                 // TOTP 卡片
                 if (entry.totpCode != null) {
                     SectionTitle(textRes = R.string.detail_totp_section)

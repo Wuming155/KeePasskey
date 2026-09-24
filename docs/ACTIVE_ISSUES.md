@@ -49,15 +49,6 @@
 
 ## P3 低危问题、特性接线与体验优化（7 项）
 
-### ISSUE-P3-297：五项「可填 / 可存但界面无消费」的半成品能力（AutoType 序列 / 标签 / 收藏 / `VaultSyncStatus` / 搜索与到期字段）
-
-- **核实时间点**：2026-09-23 经多口径交叉检索（符号名 + `R.string` 引用 + Manifest + 渲染点穷举）逐项确认。
-- **核实方式**：① **AutoType 键入序列**可编辑并写回 KDBX（`EntryEditComponents.kt:199-206`、`strings.xml:378-379` 含 `{USERNAME}{TAB}{PASSWORD}{ENTER}` 占位符且**无免责措辞**），但全仓除映射 / 合并 / 比较（`VaultEntryMapper.kt:104/224/293`、`KdbxContentComparator.kt:86-95`）外**零执行方**，`app/autofill/` 与 `app/passkey/` 内 `autoType|overrideUrl` 0 命中。② **标签**只写不读：`app/src/main` 内 26 处命中，UI 侧仅编辑页输入（`EntryEditComponents.kt:191`）与搜索命中（`VaultListProjection.kt:327`），详情页 / 列表 / 导出零渲染。③ **收藏**能标不能看：`EntryDetailTopBar.kt:62-66` 唯一渲染点，持久化到 customData（`VaultEntryMapper.kt:91`），列表无徽标、`VaultSortOption`（`VaultListUiState.kt:24-32`）与筛选无收藏档。④ `VaultSyncStatus`（`VaultListUiState.kt:37/59`）枚举带 `labelRes` 却**零解析**（`sync_status_*` 实际由 `CloudSyncStatusSections.kt:76` 的 `syncStatusText` 承载）⇒ 纯冗余；CONFLICT / OFFLINE 已由 `VaultListScreen.kt:280` 的 `hasPendingConflict` 旁路。⑤ **搜索**为纯 `contains(ignoreCase)` 子串（`VaultListProjection.kt:320-331`，无整词 / 正则 / 含子组）；`KdbxTimes.expires/expiryTime` 有读端与序列化写端但 app 侧**零编辑入口**（`KdbxContentComparator.kt:32` 自证无写入者，`cardExpiry` 系银行卡自定义字段、非 KDBX 过期）。
-- **涉及文件**：上列各文件 + `app/src/main/res/values/strings.xml` 与 `values-en/`。
-- **验收标准**：AC① 逐项给「接线 / 如实标注 / 移除」三选一结论（对齐 `ISSUE-P3-65` 假开关处置口径），禁继续保留「可填可存但行为为零」的输入项；AC② AutoType 若维持无执行方，须在字段说明中如实标注「本应用不执行键入序列，仅为兼容性保存」并登记 `PD-*`；AC③ 标签 / 收藏若接线，须同时进详情页渲染与列表筛选（禁只补一半）；AC④ `VaultSyncStatus` 冗余枚举按「删除死代码」口径处置；AC⑤ 搜索增强与 `expires` 编辑入口属能力补齐，可拆独立条目，须中英文案成对。
-
----
-
 ### ISSUE-P3-298：借鉴参考项目仍缺的可达性与反馈能力（外部打开入口 / 大屏双栏 / 请求级重试 / 后台失败可见 / OTP 直填 / CM 排序）
 
 - **核实时间点**：2026-09-23 经 Manifest、调度链与参考项目定点核实；其中后四项第一轮由 sync 代理提出、**未经对抗轮单独攻击**，认领时须自行复核。
@@ -116,5 +107,25 @@
 - **后果**：一旦 `clear(remotePath)` 被接线，scoped 库崩溃残留的 `<sha256(scoped)>.cache.<uuid>.tmp`（**完整 KDBX 密文**）不会被该路径清除，只能等下一次 `clearAll()`（锁库）；磁盘占用与密文落盘窗口被延长。无明文暴露、无越权读取面（`cacheDir` 为应用私有且 0600 / 0700）。
 - **涉及文件**：`sync/src/main/java/com/keepasskey/sync/engine/SyncCacheFiles.kt`（`deleteOrphanTmpFiles`）、`sync/src/main/java/com/keepasskey/sync/engine/SyncCacheMaintenance.kt`（`clear` 的调用点）。
 - **验收标准**：AC① 裁决键口径——`deleteOrphanTmpFiles` 改收**规范键**（调用方传 `scopedKey(remotePath)`），或由 `SyncCacheFiles` 自持命名空间统一派生；**禁**两处各写一份键派生；AC② 用例：以 scoped 实例写入 tmp 残留后调 `clear(remotePath)` 必须清除它（当前必红），并断言**未加命名空间的旧键残留同样被清**（两代键都不得漏）；AC③ 若同批把 `clear(remotePath)` 接进生产路径，须同时验证 evictor 行为不回归；AC④ 复核 `SyncRollbackGuard` 的同名键派生是否同型（其 `scopedKey` 为独立副本），同型则一并对齐或如实登记；AC⑤ 无设备侧义务。
+
+---
+
+### ISSUE-P3-309：搜索增强——全文匹配为纯子串 `contains`，无整词 / 分词 / 正则档（自 `ISSUE-P3-297` AC⑤ 拆出）
+
+- **核实时间点**：2026-09-24（`ISSUE-P3-297` 整改中按 AC⑤ 拆出为能力补齐条目）。
+- **核实方式**：全仓唯一搜索匹配点为 `app/src/main/java/com/keepasskey/app/ui/screens/vault/VaultListProjection.kt` 的 `matchesSearchQuery`：逐字段 `contains(query, ignoreCase = true)`；无整词 / 分词 / 正则入口（`Regex|toRegex|wordBoundary` 于 `app/src/main` 搜索零命中）。既有契约：覆盖标题 / 用户名 / URL / 备注 / 标签 / 自定义字段键与非受保护值，受保护字段明文不进投影故不参与命中（`VaultListProjectionSearchTest` 锁定）。
+- **背景**：子串匹配对短查询误报多（如 `in` 命中一切含该子串的字段）；整词 / 分词属体验增强，非缺陷。
+- **涉及文件**：`app/.../ui/screens/vault/VaultListProjection.kt`（匹配函数与候选装配）、`app/src/main/res/values/strings.xml` 与 `values-en/strings.xml`。
+- **验收标准**：AC① 新增匹配档须中英文案成对并在设置或搜索入口可达；AC② 不得引入受保护字段明文物化（「受保护值不参与命中」契约须保持并有测试锁定）；AC③ 匹配段在状态层且搜索已有 300ms 防抖，引入正则 / 分词须评估大库投影重算成本并留证；AC④ 现有 `VaultListProjectionSearchTest` 语义不得回退。
+
+---
+
+### ISSUE-P3-310：`KdbxTimes.expires/expiryTime` 有读端与序列化但 app 侧零编辑入口（自 `ISSUE-P3-297` AC⑤ 拆出）
+
+- **核实时间点**：2026-09-24（`ISSUE-P3-297` 整改中按 AC⑤ 拆出为能力补齐条目）。
+- **核实方式**：`KdbxTimes` 的 `expires/expiryTime` 有读端（比较 / 合并路径消费）与序列化写端（KDBX XML），但 app 编辑页无任何过期编辑入口；`KdbxContentComparator.kt:32` 自证「无写入者」；列表行的 `cardExpiry` 是银行卡**自定义字段**、与 KDBX 过期时间无关。
+- **背景**：KeePass 系客户端均支持条目过期（到到期日高亮 / 归档）；本仓保存时不破坏既有过期值，但用户无法设置。
+- **涉及文件**：`app/.../ui/screens/edit/`（编辑页表单与 ViewModel）、`app/.../ui/screens/detail/`（详情页过期状态呈现）、`app/src/main/res/values/strings.xml` 与 `values-en/strings.xml`。
+- **验收标准**：AC① 编辑页提供过期编辑（「永不过期」+ 指定日期两态），中英文案成对；AC② 写回后 KDBX `Times` 字段互操作按规则 8 留证（改动触及序列化则必跑 `python tools/kdbx-corpus/generate_corpus.py --check`，触及 Passkey schema 无关面不强制 `verify_interop`）；AC③ 详情页呈现过期状态（如「已过期」标注），是否进列表排序 / 筛选可另拆条目；AC④ 合并与历史回滚路径对 `expires` 的既有语义不得回退。
 
 ---

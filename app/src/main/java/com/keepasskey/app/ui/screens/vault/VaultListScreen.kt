@@ -1,6 +1,5 @@
 package com.keepasskey.app.ui.screens.vault
 
-import android.content.res.Configuration
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
@@ -97,6 +96,9 @@ fun VaultListScreen(
         snackbarHostState = snackbarHostState,
         onSearchQueryChange = viewModel::onSearchQueryChange,
         onSortOptionSelect = viewModel::setSortOption,
+        // ISSUE-P3-297 处置③：标签 / 收藏筛选档上行
+        onFavoriteFilterChange = viewModel::onFavoriteFilterChange,
+        onTagFilterChange = viewModel::onTagFilterChange,
         onGroupClick = viewModel::enterGroup,
         onNavigateUp = viewModel::navigateUp,
         onNavigateToBreadcrumb = viewModel::navigateToBreadcrumb,
@@ -160,6 +162,9 @@ fun VaultListContent(
     snackbarHostState: SnackbarHostState,
     onSearchQueryChange: (String) -> Unit,
     onSortOptionSelect: (VaultSortOption) -> Unit,
+    // ISSUE-P3-297 处置③：标签 / 收藏筛选档上行（预览与既有调用方可走缺省）
+    onFavoriteFilterChange: (Boolean) -> Unit = {},
+    onTagFilterChange: (String?) -> Unit = {},
     onGroupClick: (String) -> Unit,
     onNavigateUp: () -> Unit,
     onNavigateToBreadcrumb: (String?) -> Unit,
@@ -318,6 +323,22 @@ fun VaultListContent(
                     }
                 }
 
+                // 3.0 ISSUE-P3-297 处置③：标签 / 收藏筛选芯片行（有候选时才渲染，回收站内不呈现）
+                if ((uiState.hasFavoriteEntries || uiState.availableTags.isNotEmpty()) &&
+                    !uiState.isInsideRecycleBin
+                ) {
+                    item(key = FILTER_CHIP_ROW_KEY) {
+                        VaultFilterChipRow(
+                            availableTags = uiState.availableTags,
+                            hasFavoriteEntries = uiState.hasFavoriteEntries,
+                            favoriteOnly = uiState.favoriteOnly,
+                            selectedTag = uiState.selectedTag,
+                            onFavoriteFilterChange = onFavoriteFilterChange,
+                            onTagFilterChange = onTagFilterChange
+                        )
+                    }
+                }
+
                 // 3.1 ISSUE-P3-30：搜索态下如实说明子库条目不参与搜索（有已挂载子库时才提示）
                 if (isSearching && uiState.mountedChildDatabaseCount > 0) {
                     item(key = CHILD_DB_SEARCH_HINT_KEY) { ChildDatabaseSearchExclusionHint() }
@@ -431,51 +452,5 @@ fun VaultListContent(
 /** ISSUE-P3-30：搜索态子库排除提示行的稳定 key（不同排序 / 筛选下不重建） */
 private const val CHILD_DB_SEARCH_HINT_KEY = "child_db_search_exclusion"
 
-// IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
-@androidx.compose.ui.tooling.preview.Preview(name = "密码库列表 - 浅色", showBackground = true)
-@androidx.compose.ui.tooling.preview.Preview(name = "密码库列表 - 深色", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
-@Composable
-internal fun VaultListContentPreview() {
-    com.keepasskey.app.ui.theme.KeePasskeyTheme {
-        VaultListContent(
-            uiState = VaultListUiState().copy(
-                databaseName = "Preview Vault.kdbx",
-                currentGroups = com.keepasskey.app.ui.preview.PreviewGroups,
-                entries = com.keepasskey.app.ui.preview.PreviewEntries,
-                totalEntriesCount = 4,
-                sortOption = VaultSortOption.NAME_ASC,
-                lastSyncTimeText = "预览同步时间 10:25",
-                decorations = com.keepasskey.app.ui.preview.PreviewDecorations
-            ),
-            snackbarHostState = remember { SnackbarHostState() },
-            onSearchQueryChange = {},
-            onSortOptionSelect = {},
-            onGroupClick = {},
-            onNavigateUp = {},
-            onNavigateToBreadcrumb = {},
-            onEntryClick = {},
-            onEntryLongClick = {},
-            onCopyPassword = {},
-            onCopyUsername = {},
-            onCopyTotp = {},
-            onAddEntryClick = {},
-            onCreateFromTemplate = {},
-            onCreateGroup = { _, _ -> },
-            onRenameGroup = { _, _ -> },
-            onChangeGroupIcon = { _, _ -> },
-            onDeleteGroup = {},
-            onRestoreEntry = {},
-            onPurgeEntry = {},
-            onEmptyRecycleBin = {},
-            onTriggerSync = {},
-            onNavigateToConflictResolver = {},
-            onLockClick = {},
-            onSelectAllBatch = {},
-            onClearBatch = {},
-            onBatchDelete = {},
-            onBatchMove = {},
-            onKillApp = null,
-            onAutoActivateSearchConsumed = {}
-        )
-    }
-}
+/** ISSUE-P3-297 处置③：筛选芯片行的稳定 key */
+private const val FILTER_CHIP_ROW_KEY = "vault_filter_chip_row"

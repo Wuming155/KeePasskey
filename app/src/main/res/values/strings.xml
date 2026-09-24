@@ -137,6 +137,7 @@
     <string name="vault_sort_created">按创建日期排序</string>
     <string name="vault_current_sort">当前排序：%1$s</string>
     <string name="vault_reset_sort">恢复默认</string>
+    <string name="vault_filter_favorites">收藏</string>
     <string name="vault_root_dir">根目录</string>
     <string name="vault_empty_title">暂无内容</string>
     <string name="vault_empty_desc">当前目录下没有凭据或文件夹，点击下方新建</string>
@@ -162,6 +163,7 @@
     <string name="detail_btn_copy_user">复制账号</string>
     <string name="detail_btn_copy_pwd">复制密码</string>
     <string name="detail_basic_section">基础凭据</string>
+    <string name="detail_tags_section">标签</string>
     <string name="detail_username_label">用户名 / 登录邮箱</string>
     <string name="detail_password_label">密码</string>
     <string name="detail_totp_section">二次验证令牌 (TOTP)</string>
@@ -306,8 +308,6 @@
     <string name="sync_status_synced">已同步</string>
     <string name="sync_status_unverified">未验证</string>
     <string name="sync_status_syncing">正在同步...</string>
-    <string name="sync_status_offline">离线缓存</string>
-    <string name="sync_status_conflict">存在冲突</string>
     <string name="sort_option_default">默认顺序</string>
     <string name="sort_option_name_asc">按名称排序 · 升序 (A → Z)</string>
     <string name="sort_option_name_desc">按名称排序 · 降序 (Z → A)</string>
@@ -385,6 +385,7 @@
     <string name="edit_tags_hint">标签（多个标签用逗号或分号分隔）</string>
     <string name="edit_autotype_hint">AutoType 键入序列</string>
     <string name="edit_autotype_placeholder">{USERNAME}{TAB}{PASSWORD}{ENTER}</string>
+    <string name="edit_autotype_note">本应用不执行键入序列，仅为与其他密码管理器兼容而保存</string>
     <string name="edit_override_url_hint">Override URL（自动填充匹配覆盖）</string>
     <string name="edit_extra_section">高级属性</string>
 

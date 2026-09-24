@@ -47,9 +47,9 @@ class AlgoHotPathGuardsTest {
         )
         assertTrue("面包屑必须走索引查表 + 前插队列", source.contains("addFirst("))
         assertEquals(
-            "两处名称排序都必须改用不敏感比较器（原 `sortedBy { it.title.lowercase() }` 的选择器" +
-                "在每次比较中被调用）",
-            2,
+            "三处排序都必须用不敏感比较器（原 `sortedBy { it.title.lowercase() }` 的选择器" +
+                "在每次比较中被调用；ISSUE-P3-297 的候选标签装配加入第三处同型用法，计数 2→3）",
+            3,
             Regex("String\\.CASE_INSENSITIVE_ORDER").findAll(source).count()
         )
         assertFalse(

@@ -30,7 +30,6 @@ internal class VaultListSyncController(
     private val onMessage: (UiMessage) -> Unit
 ) {
 
-    private val syncStatusFlow = MutableStateFlow(VaultSyncStatus.SYNCED)
     private val isSyncingFlow = MutableStateFlow(false)
     private val lastSyncTimeMillisFlow = MutableStateFlow(0L)
 
@@ -42,9 +41,6 @@ internal class VaultListSyncController(
 
     /** 库身份绑定不符待确认（驱动整库覆盖确认对话框） */
     val pendingBindingTakeover: StateFlow<Boolean> = pendingBindingTakeoverFlow
-
-    /** 云端同步状态（SYNCING / SYNCED / CONFLICT / OFFLINE） */
-    val syncStatus: StateFlow<VaultSyncStatus> = syncStatusFlow
 
     /** 是否正在执行同步（驱动下拉指示区） */
     val isSyncing: StateFlow<Boolean> = isSyncingFlow
@@ -62,7 +58,6 @@ internal class VaultListSyncController(
         if (isSyncingFlow.value) return
         scope.launch {
             isSyncingFlow.value = true
-            syncStatusFlow.value = VaultSyncStatus.SYNCING
             val outcome = syncCoordinator.syncNow()
             applySyncOutcome(outcome)
             surfaceSyncCacheEvents()
@@ -94,7 +89,6 @@ internal class VaultListSyncController(
         pendingBindingTakeoverFlow.value = false
         scope.launch {
             isSyncingFlow.value = true
-            syncStatusFlow.value = VaultSyncStatus.SYNCING
             val outcome = syncCoordinator.confirmVaultBindingTakeover()
             applySyncOutcome(outcome)
             isSyncingFlow.value = false
@@ -109,34 +103,28 @@ internal class VaultListSyncController(
     private fun applySyncOutcome(outcome: SyncOutcome) {
         when (outcome) {
             is SyncOutcome.UpToDate -> {
-                syncStatusFlow.value = VaultSyncStatus.SYNCED
                 lastSyncTimeMillisFlow.value = System.currentTimeMillis()
                 onMessage(UiMessage(R.string.vault_sync_completed))
             }
             is SyncOutcome.UploadedLocal,
             is SyncOutcome.MergedAndUploaded -> {
-                syncStatusFlow.value = VaultSyncStatus.SYNCED
                 lastSyncTimeMillisFlow.value = System.currentTimeMillis()
                 onMessage(UiMessage(R.string.vault_sync_uploaded))
             }
             is SyncOutcome.ConflictNeedsUser -> {
-                syncStatusFlow.value = VaultSyncStatus.CONFLICT
                 onMessage(UiMessage(R.string.sync_feedback_conflict))
             }
             // ISSUE-P2-291 AC②：绑定不符——置确认位（对话框承载显式二次确认），
-            // 不上传任何字节；未确认前状态落 OFFLINE
+            // 不上传任何字节
             is SyncOutcome.VaultBindingMismatch -> {
-                syncStatusFlow.value = VaultSyncStatus.OFFLINE
                 lastSyncTimeMillisFlow.value = 0L
                 pendingBindingTakeoverFlow.value = true
                 onMessage(UiMessage(R.string.sync_vault_binding_mismatch))
             }
             is SyncOutcome.Offline -> {
-                syncStatusFlow.value = VaultSyncStatus.OFFLINE
                 onMessage(UiMessage(R.string.sync_feedback_offline))
             }
             is SyncOutcome.Error -> {
-                syncStatusFlow.value = VaultSyncStatus.OFFLINE
                 onMessage(UiMessage(R.string.sync_feedback_error, listOf(outcome.message)))
             }
         }

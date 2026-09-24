@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Restore
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -90,6 +91,20 @@ private const val GROUP_PATH_ICON_SIZE_DP = 12
 
 /** 分组路径行前导图标与文案间距（dp） */
 private const val GROUP_PATH_ICON_GAP_DP = 4
+
+/**
+ * 列表行收藏徽标（ISSUE-P3-297 处置③：收藏此前只有详情页顶栏一个渲染点，
+ * 列表侧零展示——现于标题旁以星形徽标呈现，与详情页星标同色语义）。
+ */
+@Composable
+internal fun EntryFavoriteBadge(modifier: Modifier = Modifier) {
+    Icon(
+        imageVector = Icons.Default.Star,
+        contentDescription = stringResource(R.string.cd_favorite),
+        tint = LocalSecurityColors.current.warning,
+        modifier = modifier.size(16.dp)
+    )
+}
 
 @Composable
 internal fun StandardEntryLayout(
@@ -178,6 +193,11 @@ internal fun StandardEntryLayout(
                 if (entry.isPasskey && showPasskeyBadge) {
                     Spacer(modifier = Modifier.width(6.dp))
                     PasskeyBadge()
+                }
+                // ISSUE-P3-297 处置③：收藏条目在列表行的星形徽标
+                if (entry.isFavorite) {
+                    Spacer(modifier = Modifier.width(6.dp))
+                    EntryFavoriteBadge()
                 }
             }
 

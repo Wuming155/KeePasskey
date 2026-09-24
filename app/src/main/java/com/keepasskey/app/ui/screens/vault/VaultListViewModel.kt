@@ -92,6 +92,9 @@ class VaultListViewModel @Inject constructor(
     private val searchQueryFlow = MutableStateFlow("")
     private val isSearchActiveFlow = MutableStateFlow(false)
     private val sortOptionFlow = MutableStateFlow(VaultSortOption.DEFAULT)
+    // ISSUE-P3-297 处置③：标签 / 收藏筛选档（会话态，随排序同口径不持久化）
+    private val selectedTagFlow = MutableStateFlow<String?>(null)
+    private val favoriteOnlyFlow = MutableStateFlow(false)
     private val userMessageFlow = MutableStateFlow<UiMessage?>(null)
 
     // H2 整改：存在待解决的冲突会话时驱动「去解决冲突」入口
@@ -204,19 +207,20 @@ class VaultListViewModel @Inject constructor(
     private val filterParamsFlow = combine(
         debouncedSearchQueryFlow,
         isSearchActiveFlow,
-        sortOptionFlow
-    ) { query, isSearchActive, sortOption ->
-        VaultListFilterParams(query, isSearchActive, sortOption)
+        sortOptionFlow,
+        selectedTagFlow,
+        favoriteOnlyFlow
+    ) { query, isSearchActive, sortOption, selectedTag, favoriteOnly ->
+        VaultListFilterParams(query, isSearchActive, sortOption, selectedTag, favoriteOnly)
     }
 
     private val batchAndSyncFlow = combine(
         actions.isBatchMode,
         actions.selectedEntryIds,
-        syncController.syncStatus,
         syncController.isSyncing,
         syncController.lastSyncTimeText
-    ) { isBatch, selected, status, syncing, lastSyncText ->
-        VaultListBatchAndSyncState(isBatch, selected, status, syncing, lastSyncText)
+    ) { isBatch, selected, syncing, lastSyncText ->
+        VaultListBatchAndSyncState(isBatch, selected, syncing, lastSyncText)
     }.combine(hasPendingConflictFlow) { state, hasConflict ->
         state.copy(hasPendingConflict = hasConflict)
     }.combine(isReadOnlyFlow) { state, readOnly ->
@@ -366,6 +370,16 @@ class VaultListViewModel @Inject constructor(
 
     fun setSortOption(sortOption: VaultSortOption) {
         sortOptionFlow.value = sortOption
+    }
+
+    /** ISSUE-P3-297 处置③：切换标签筛选档（再点同一标签 = 取消） */
+    fun onTagFilterChange(tag: String?) {
+        selectedTagFlow.value = tag
+    }
+
+    /** ISSUE-P3-297 处置③：切换「只看收藏」筛选档 */
+    fun onFavoriteFilterChange(favoriteOnly: Boolean) {
+        favoriteOnlyFlow.value = favoriteOnly
     }
 
     fun copyPassword(entry: UiVaultEntry) = actions.copyPassword(entry)
