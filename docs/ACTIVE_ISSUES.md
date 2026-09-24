@@ -50,7 +50,7 @@
 > `ISSUE-P2-310`（附件被系统回收 fail-open）已于 §318 闭环；
 > `ISSUE-P2-311`（64 MiB 附件写读口径互斥）已于 §319 闭环。
 
-## P3 低危问题、特性接线与体验优化（4 项）
+## P3 低危问题、特性接线与体验优化（3 项）
 
 ### ISSUE-P3-300：弱 ETag 乐观锁的**真实 DAV 服务器矩阵未实测**——弱 ETag 服务器上的同步收敛行为待证（§272 AC⑤ 显式残余）
 
@@ -76,18 +76,6 @@
 - **项 3 — 同步失败文案透传服务器可控字符串（部分成立）**：`SyncOutcome.Error(message)` 承载文本，`SyncCycleRunner.kt:203/268/336`、`SyncCycleSetup.kt:65`、`SyncConflictResolution.kt:108` 等少量站点以 `e.message`（服务器可控）直达 UI（`ConflictResolutionViewModel.kt:245`、`SettingsSyncController.kt:313`）；多数站点已用 `strings.get(R.string.fixed_xxx)` 合规。真实缺口＝与 `ISSUE-P1-10`「禁止透传 t.message」口径**部分冲突**而非整体违反。AC：上述透传站点改走固定通用文案（保留 type 供日志），消除服务器可控串外显面。
 - **涉及文件**：`SessionExternalParser.kt`、`SyncCache.kt`、`SyncEngine.kt`、`SyncCycleRunner.kt`、`SyncOutcome.kt`、`SyncConflictResolution.kt`、`ConflictResolutionViewModel.kt`、`SettingsSyncController.kt`。
 - **验收标准**：三项各自 AC 达成（项 1 回滚或登记；项 2 崩溃窗自愈/登记；项 3 透传站点改固定文案）；`test` + `gate_readings.py` 7/7 PASS。
-
-### ISSUE-P3-311：加密/passkey 卫生批量登记（4 项）（「建议并表，不逐条占位」）
-
-- **核实时间点**：2026-09-24（本轮审计，逐行反校）。
-- **核实方式**：并行核查代理直读 `InnerHeader.kt:336,417-424` / `PasskeyKeyCodec.kt:100,107-111,114,143-149` / `PasskeyAssertionPayload.kt:184` / `PasskeyCryptoEngine.kt:241` / `AtomicFileWriter.kt:148-167,170-183,201` / `InnerRandomStreamCipher.kt:69-79`。
-- **项 1 — 内层随机流密钥字段缺失兜底全零、无类型化诊断（成立）**：`InnerHeader.kt:336` 默认 `ByteArray(64)`；`:417-424` 的 `acceptStreamKey` 只查上界 1024、不查字段是否出现 ⇒ 字段缺失静默全零。修复只能做存在性断言（ID∈{2,3} 时字段必须出现）；钉 `==64` 会误拒本仓可解的 32 字节 Salsa20（`InnerRandomStreamCipher.kt:69-79` 对 key 长度无约束，SHA-256 吸收任意输入）。AC：补字段存在性断言 + 跨实现等价对拍。
-- **项 2 — v1 legacy 私钥 DER 分支不钉曲线（成立）**：`PasskeyKeyCodec.kt:107-111` 返回 DER 自带 `ECPrivateKeyParameters`；`:143-149` 仅用 P-256 的 `n` 判界。可达链 `PasskeyAssertionPayload.kt:184 → PasskeyCryptoEngine.kt:241 → Base64 分支`。后果止于单凭据 self-DoS，无伪造面。AC：解析时钉死曲线（拒绝 DER 自带非 P-256 域）或显式 fail-closed。
-- **项 3 — 私钥物化为不可擦 String（成立）**：`PasskeyKeyCodec.kt:100` 与 `:114` 均先 `String(bytes, UTF_8)` 再 `BigInteger(...)`；`:114` 在 DER 异常回退路径更易触发（非 32 字节非法 EC 私钥文本）。AC：避免 `String` 物化（以 `BigInteger(1, bytes)` 直接构造或复用字节），修复后无不可擦 String 副本。
-- **项 4 — .kdbx.bak 无数据块 fsync，但 KDoc 承诺可恢复（成立）**：`AtomicFileWriter.kt:150-156` 仅 `Files.copy` + 父目录 `syncDirectory`，tmp 才有 `fos.fd.sync()`（`:124`）；`:178-179` KDoc 承诺「可自备份恢复」。PD-17 管删除语义、§1.4 管旧口令可解，均不覆盖 durability。AC：`.bak` 数据块补 `fd.sync()`（或等效）；fsync/delayed-allocation 语义需 AVD 实验确认。
-- **涉及文件**：`InnerHeader.kt`、`PasskeyKeyCodec.kt`、`PasskeyAssertionPayload.kt`、`PasskeyCryptoEngine.kt`、`AtomicFileWriter.kt`、`InnerRandomStreamCipher.kt`。
-- **验收标准**：四项各自 AC 达成；`test` + `gate_readings.py` 7/7 PASS。
-
 
 ### ISSUE-P3-313：同步周期「内容一变即整库重序列化」在低端真机上是 4.8 秒 CPU 成本（量级已由 §316 实测）
 

@@ -25,6 +25,9 @@ internal class InnerHeaderReader(
         private set
     var streamKey = ByteArray(INNER_RANDOM_STREAM_KEY_SIZE)
         private set
+
+    /** ISSUE-P3-311 项 1：是否真实出现过 InnerRandomStreamKey 字段（存在性断言判据） */
+    private var streamKeySeen = false
     val binaries = mutableListOf<InnerHeader.BinaryItem>()
 
     /** Wave 12 解析炸弹防线：二进制池累计字节数封顶（条目数封顶见 [enforceBinaryPoolEntryLimit]） */
@@ -52,6 +55,17 @@ internal class InnerHeaderReader(
             }
 
             if (fieldId == KdbxConstants.InnerHeaderFieldId.END) {
+                // ISSUE-P3-311 项 1：字段存在性断言（fail-closed）——内层随机流算法为
+                // Salsa20 / ChaCha20 时密钥字段必须出现；缺失即损坏/异常构造的文件，
+                // 严禁静默回落全零密钥解密受保护字段（类型化诊断而非无声全零兜底）
+                if (!streamKeySeen &&
+                    (streamId == KdbxConstants.InnerRandomStream.SALSA20 ||
+                            streamId == KdbxConstants.InnerRandomStream.CHACHA20)
+                ) {
+                    throw KdbxCorruptFileException(
+                        "内层随机流密钥字段缺失（streamId=$streamId 要求随附密钥字段）"
+                    )
+                }
                 break
             }
 
@@ -105,6 +119,7 @@ internal class InnerHeaderReader(
     }
 
     private fun acceptStreamKey(fieldData: ByteArray) {
+        streamKeySeen = true
         if (fieldData.size > InnerHeader.MAX_INNER_RANDOM_STREAM_KEY_BYTES) {
             throw KdbxCorruptFileException(
                 "InnerRandomStreamKey 字段长度非法或超过安全上限: ${fieldData.size}" +

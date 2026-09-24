@@ -96,8 +96,9 @@ internal object PasskeyKeyCodec {
             }
             bytes.size == 64 -> {
                 // 兼容 hex 字符串对应的 ASCII 字节流
+                // （ISSUE-P3-311 项 3：逐字节解析，不再物化为不可擦 String）
                 try {
-                    newEcPrivateKey(BigInteger(String(bytes, Charsets.UTF_8), 16))
+                    newEcPrivateKey(hexTextToBigInteger(bytes))
                 } catch (e: CryptoException.InvalidKeyException) {
                     throw e
                 } catch (e: Exception) {
@@ -106,12 +107,27 @@ internal object PasskeyKeyCodec {
             }
             else -> {
                 try {
-                    val keyParam = PrivateKeyFactory.createKey(bytes) as ECPrivateKeyParameters
+                    val keyParam = PrivateKeyFactory.createKey(bytes)
+                    if (keyParam !is ECPrivateKeyParameters) {
+                        throw CryptoException.InvalidKeyException(
+                            "私钥 DER 不是 EC 私钥（${keyParam.javaClass.simpleName}），已拒绝解析"
+                        )
+                    }
+                    // ISSUE-P3-311 项 2：钉死曲线——DER 自带域参数，此前仅以 P-256 的 n 判界，
+                    // 非 P-256 域的私钥会被错误地放进 ES256 签名运算；fail-closed 拒绝
+                    if (keyParam.parameters.curve != domainParams.curve) {
+                        throw CryptoException.InvalidKeyException(
+                            "v1 legacy 私钥 DER 自带非 P-256 域参数，已拒绝解析（仅支持 ES256/P-256）"
+                        )
+                    }
                     keyParam
+                } catch (e: CryptoException.InvalidKeyException) {
+                    throw e
                 } catch (e: Exception) {
                     try {
                         // 回退尝试当作 UTF-8 hex 文本
-                        newEcPrivateKey(BigInteger(String(bytes, Charsets.UTF_8), 16))
+                        // （ISSUE-P3-311 项 3：逐字节解析，不再物化为不可擦 String）
+                        newEcPrivateKey(hexTextToBigInteger(bytes))
                     } catch (e2: CryptoException.InvalidKeyException) {
                         throw e2
                     } catch (e2: Exception) {
@@ -123,6 +139,38 @@ internal object PasskeyKeyCodec {
         // 权威检查点：显式标量范围校验（不依赖库层构造器的行为）
         validateEcScalarRange(privKey.d)
         return privKey
+    }
+
+    /**
+     * 以字节面解析 UTF-8 hex 文本为 BigInteger（ISSUE-P3-311 项 3）：
+     * 原 `BigInteger(String(bytes, UTF_8), 16)` 把私钥文本物化为**不可擦的 String**；
+     * 现逐字节校验并拼装（中间副本 `parsed` 在 finally 中清零）。
+     * 严格口径：非零偶数长度、纯 [0-9a-fA-F]；带符号 / 空白等宽松形态不再被本解析接受，
+     * 由调用方既有回退路径（原始字节重试）承接——合法密钥 hex 文本语义不变。
+     */
+    private fun hexTextToBigInteger(bytes: ByteArray): BigInteger {
+        if (bytes.isEmpty() || bytes.size % 2 != 0) {
+            throw NumberFormatException("hex 文本长度必须为非零偶数: ${bytes.size}")
+        }
+        val parsed = ByteArray(bytes.size / 2)
+        try {
+            for (i in parsed.indices) {
+                val hi = hexDigitValue(bytes[2 * i])
+                val lo = hexDigitValue(bytes[2 * i + 1])
+                parsed[i] = ((hi shl 4) or lo).toByte()
+            }
+            return BigInteger(1, parsed)
+        } finally {
+            Arrays.fill(parsed, 0.toByte())
+        }
+    }
+
+    /** 单个 ASCII hex 字符的数值；非法字符抛 NumberFormatException（走调用方回退） */
+    private fun hexDigitValue(b: Byte): Int = when (b.toInt()) {
+        in '0'.code..'9'.code -> b.toInt() - '0'.code
+        in 'a'.code..'f'.code -> b.toInt() - 'a'.code + 10
+        in 'A'.code..'F'.code -> b.toInt() - 'A'.code + 10
+        else -> throw NumberFormatException("非法 hex 字符: 0x${"%02x".format(b.toInt())}")
     }
 
     /**

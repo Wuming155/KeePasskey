@@ -391,6 +391,8 @@
 
 | §320 | 合并主路径采纳结算批次：`ISSUE-P2-313` 闭环（**P2 区清零**）。`markResolvedAndUpload` 终态由 `Result<String>` 改为 `SyncResolveUploadResult`（`Uploaded(newEtag, settlement)` / `Failed(error)`），基线前移与高水位记录延后到调用方采纳确认之后：用户裁决路径经 `adoptMergedDatabase` 结算（§317 已有结算参数，本批接通主路径）、自动合并路径在 `adoptMergedIfSessionUnchanged` 失败 / 落盘失败时 `reject`、全部成功 `accept`；`Failed` 的 412 重入与错误口径与 `Result` 时期一致。**AC②**：引擎级 1 例（reject ⇒ 云端已含 merged、基线保持旧值、hasLocalChanges 为真按冲突收敛）+ 端到端 1 例（合并上传窗口注入窗口编辑 ⇒ abortDiverged；第三轮 provider 字节仍含远端新增且双侧内容保留——整改前陈旧树本地赢覆盖对端条目）；既有 4 例适配新终态；fake Provider 增上传钩子。`tests=2762`（+2）全绿；门禁 7/7 PASS | `ISSUE-P2-313` | [`320-合并主路径采纳结算批次.md`](resolved/batches/320-合并主路径采纳结算批次.md) |
 
+| §321 | 加密 / passkey 卫生批次：`ISSUE-P3-311` 四项闭环（P3 4 → 3）。①内层随机流**密钥字段存在性断言**：Salsa20/ChaCha20 下密钥字段缺失抛类型化异常（None 缺省合法），不再静默全零兜底——**跨实现对拍**：AVD 上 `:database:connected` 17/17 全绿，官方 KeePassXC 语料（恒含密钥字段）零误拒；②v1 legacy 私钥 **DER 分支钉死曲线**：非 EC / 非 P-256 域 fail-closed 拒绝（此前仅以 P-256 的 n 判界）；③hex 文本私钥**逐字节解析**（中间副本清零），不再物化为不可擦 String，合法输入语义与旧口径同值；④`.kdbx.bak` **数据块补 fsync**（`FileChannel.force(true)`，force 失败按备份不可用承接）——此前仅目录项固化，delayed writeback 下断电可能留空洞 .bak。**如实声明**：AC 的「AVD 实验确认 delayed-allocation 语义」未执行——风险窗仅断电可观测，kill -9 不丢页缓存，夹具无法构造故障注入。`tests=2771`（+9）全绿；门禁 7/7 PASS | `ISSUE-P3-311` | [`321-加密passkey卫生批次.md`](resolved/batches/321-加密passkey卫生批次.md) |
+
 ## 分册导航
 
 | 分册 | 覆盖批次 | 时间 | 索引 |

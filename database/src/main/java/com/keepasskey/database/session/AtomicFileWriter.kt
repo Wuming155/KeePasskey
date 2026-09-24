@@ -4,8 +4,10 @@ import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
 import java.io.OutputStream
+import java.nio.channels.FileChannel
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
+import java.nio.file.StandardOpenOption
 import java.util.logging.Level
 import java.util.logging.Logger
 
@@ -152,6 +154,11 @@ object AtomicFileWriter {
                 bakFile.toPath(),
                 StandardCopyOption.REPLACE_EXISTING
             )
+            // ISSUE-P3-311 项 4：.bak **数据块** fsync——此前只固化目录项（钩子①），
+            // 数据块本身未同步：delayed writeback 语义下断电可能留下空洞 / 零页 .bak，
+            // 「可自备份恢复」的承诺落空。force(true) 一并固化数据与元数据；
+            // 失败按「备份不可用」如实返回 false（主流程与降级分支既有口径承接）。
+            FileChannel.open(bakFile.toPath(), StandardOpenOption.READ).use { it.force(true) }
             // ISSUE-P2-05：备份目录项变更同样需要 fsync 固化（钩子①）
             syncDirectory(parentDir, directorySync)
             true
