@@ -4,6 +4,7 @@ import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.model.KdbxGroup
 import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.database.file.KdbxDatabase
+import com.keepasskey.database.history.HistoryManager
 import com.keepasskey.sync.merge.BothModifiedEntryCollector
 import com.keepasskey.sync.merge.ConflictDisposition
 import com.keepasskey.sync.merge.ConflictStrategyPolicy
@@ -104,6 +105,33 @@ internal fun decisionConflictsOf(
  */
 internal fun wipeDiscarded(db: KdbxDatabase?) {
     db?.clearSensitiveData()
+}
+
+/**
+ * `ISSUE-P3-292`：合并产物在**序列化 / 上传 / 落库之前**按库级 Meta 上限截断每条目历史。
+ *
+ * 缺陷背景：`KdbxEntryMerger` 的合并产物是 `local.history + remote.history + base.history`
+ * 的三方**并集**（仅按 `lastModificationTime` 去重），而合并路径此前不经任何截断——
+ * ① 未被用户再编辑过的条目，其合并来的历史**永久留存**；② 每个历史快照都是完整 `KdbxEntry`
+ * （含各自 `ProtectedString`），内存逐快照单调增长；③ 与附件池引用计费耦合（限界表 §29
+ * 的「单条目引用次数 ≤ 1024」正是按「合并历史未截断」取的宽值，本函数落地后该值已可复评）。
+ *
+ * 两条合并路径**共用本函数**（自动合并 / 用户裁决），且都在 `serializeLocalDatabase` 之前调用
+ * ——上传给云端的字节与本地落库的树取自同一个已截断的 `mergedDb`，不存在「本地截了、远端没截」。
+ *
+ * 截断判据一律取自**库级 Meta**（[KdbxDatabase.historyMaxItems] / [KdbxDatabase.historyMaxSize]，
+ * 即官方 `PwDatabase.MaintainHistory` 的两个上限），与保存路径的既有修剪口径同源
+ * （[HistoryManager.pruneGroupHistoryByLimit] 与 `recordHistorySnapshot` 复用同一 `pruneHistory`）。
+ *
+ * **未发生修剪时返回同一实例**（`rootGroup` 身份不变），调用方免于无谓的整库对象重建。
+ */
+internal fun truncateMergedHistory(db: KdbxDatabase): KdbxDatabase {
+    val prunedRoot = HistoryManager.pruneGroupHistoryByLimit(
+        group = db.rootGroup,
+        maxItems = db.historyMaxItems,
+        maxSize = db.historyMaxSize
+    )
+    return if (prunedRoot === db.rootGroup) db else db.copy(rootGroup = prunedRoot)
 }
 
 /**

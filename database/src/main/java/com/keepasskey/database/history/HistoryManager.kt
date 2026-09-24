@@ -163,10 +163,61 @@ object HistoryManager {
     }
 
     /**
+     * 对整棵分组树按**库级 Meta 上限**递归执行历史截断（数量 + 体积两级）。
+     *
+     * `ISSUE-P3-292`：三方合并的合并产物是 `local.history + remote.history + base.history`
+     * 的**并集**（仅按 `lastModificationTime` 去重），而合并路径此前不经任何截断——
+     * 用户未再编辑过的条目，合并来的历史会永久留存（每个快照都是完整条目），
+     * 并与附件池引用计费耦合（限界表 §29 的上限即按「合并历史不截断」取宽值）。
+     * 本函数是**合并产物落库 / 上传前的截断入口**，与 [recordHistorySnapshot] /
+     * [rollbackToSnapshot] 复用同一 [pruneHistory] 口径（**禁两份数字**）。
+     *
+     * 与 [pruneGroupHistoryByAge] 同构：仅在实际发生修剪时才重建对应节点，
+     * 全树无变化（或库级上限为「不限制」且无超额）时返回**同一根实例**，便于调用方免拷贝判定。
+     */
+    fun pruneGroupHistoryByLimit(
+        group: KdbxGroup,
+        maxItems: Int = DEFAULT_MAX_HISTORY_ITEMS,
+        maxSize: Long = DEFAULT_MAX_HISTORY_SIZE
+    ): KdbxGroup {
+        var newEntries: MutableList<KdbxEntry>? = null
+        group.entries.forEachIndexed { index, entry ->
+            if (entry.history.isEmpty()) return@forEachIndexed
+            // pruneHistory 只会**移除**快照，故「长度不变」等价于「未发生修剪」
+            val trimmed = pruneHistory(entry.history, maxItems, maxSize)
+            if (trimmed.size != entry.history.size) {
+                val list = newEntries ?: group.entries.toMutableList().also { newEntries = it }
+                list[index] = entry.copy(history = trimmed)
+            }
+        }
+
+        var newSubgroups: MutableList<KdbxGroup>? = null
+        group.subgroups.forEachIndexed { index, sub ->
+            val pruned = pruneGroupHistoryByLimit(sub, maxItems, maxSize)
+            if (pruned !== sub) {
+                val list = newSubgroups ?: group.subgroups.toMutableList().also { newSubgroups = it }
+                list[index] = pruned
+            }
+        }
+
+        if (newEntries == null && newSubgroups == null) return group
+        return group.copy(
+            entries = newEntries ?: group.entries,
+            subgroups = newSubgroups ?: group.subgroups
+        )
+    }
+
+    /**
      * 官方两级修剪（KeePass MaintainHistory / KeePassXC truncateHistory）：
      * 1. 数量上限（maxItems &gt;= 0 时生效）：仅保留最新的 maxItems 个快照；
      * 2. 体积上限（maxSize &gt;= 0 时生效）：历史总大小超过上限时自最旧端逐项移除。
      * history 列表约定头部为最新、尾部为最旧，因此「移除最旧」即移除尾部。
+     *
+     * **该位置口径成立的前提是「调用方传入的列表已是头部最新」**——本仓的记录路径
+     * （[recordHistorySnapshot] / [rollbackToSnapshot] 头插）与合并路径
+     * （[com.keepasskey.sync.merge.KdbxEntryMerger] `ISSUE-P3-292` 起改 `sortedByDescending`）
+     * 均已满足；**读取侧尚未归一文件顺序**（官方 KeePass 产出的库为升序）这一残余
+     * 已登记为 `ISSUE-P3-306`。
      */
     private fun pruneHistory(history: List<KdbxEntry>, maxItems: Int, maxSize: Long): List<KdbxEntry> {
         val countTrimmed = if (maxItems >= 0) history.take(maxItems) else history

@@ -672,12 +672,13 @@ class KdbxMergerV2Test {
 
         val result = KdbxMerger.mergeDatabases(baseDb, localDb, remoteDb)
 
-        // 三方历史并集按最后修改时间去重后升序排列（对齐官方 MergeIn）
+        // 三方历史并集按最后修改时间去重后**降序（头部最新）**排列——ISSUE-P3-292 起
+        // 方向对齐本仓历史约定（HistoryManager 头部最新）；集合与去重判据未变
         assertEquals(1, result.conflicts.size)
         val merged = result.mergedRoot.findEntry(entryUuid)
         assertNotNull(merged)
         assertEquals(
-            listOf(500L, 1500L, 2000L),
+            listOf(2000L, 1500L, 500L),
             merged?.history?.map { it.times.lastModificationTime.toEpochMilli() }
         )
     }

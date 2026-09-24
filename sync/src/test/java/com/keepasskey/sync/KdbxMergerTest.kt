@@ -110,10 +110,13 @@ class KdbxMergerTest {
 
         // 标题双方均修改且不同 -> 冲突清单
         assertTrue(result.conflicts.isNotEmpty())
-        // 合并产物（mergedRoot）中的条目历史应为三方并集并按时间升序
+        // 合并产物（mergedRoot）中的条目历史应为三方并集，并按**降序（头部最新）**排列
+        // ——ISSUE-P3-292：方向改对齐本仓历史约定（原为升序，与 HistoryManager 的
+        // 「头部最新」相反，且会令历史截断裁到最新一端）。本断言随口径更正而更新，
+        // 覆盖的集合（三方并集）与去重判据均未变。
         val merged = result.mergedRoot.allEntries().first { it.id == sharedId }
         val historyTimes = merged.history.map { it.times.lastModificationTime.toEpochMilli() }
-        assertEquals(listOf(1000L, 2000L, 3000L), historyTimes)
+        assertEquals(listOf(3000L, 2000L, 1000L), historyTimes)
     }
 
     @Test

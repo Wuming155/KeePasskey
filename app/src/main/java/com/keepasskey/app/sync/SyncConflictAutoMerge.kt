@@ -70,12 +70,16 @@ internal suspend fun autoMergeAndUpload(
     conflictEtag: String,
     expectedSessionSnapshot: KdbxDatabase? = null
 ): AutoMergeUploadResult = withContext(Dispatchers.Default) {
-    val mergedDb = localDb.copy(
-        rootGroup = mergeResult.mergedRoot,
-        deletedObjects = mergeResult.mergedDeletedObjects,
-        // ISSUE-P2-280 AC①：合并图标池一并采用——只换树与墓碑会让远端新增图标丢失，
-        // 条目 / 分组的 customIconId 沦为悬空引用（写出侧 AC② 起对此 fail-closed）
-        customIcons = mergeResult.mergedCustomIcons
+    // ISSUE-P3-292：合并历史在序列化 / 上传 / 落库之前按库级 Meta 上限截断
+    // （两条合并路径共用同一截断口径；上传字节与落库树取自同一产物）
+    val mergedDb = truncateMergedHistory(
+        localDb.copy(
+            rootGroup = mergeResult.mergedRoot,
+            deletedObjects = mergeResult.mergedDeletedObjects,
+            // ISSUE-P2-280 AC①：合并图标池一并采用——只换树与墓碑会让远端新增图标丢失，
+            // 条目 / 分组的 customIconId 沦为悬空引用（写出侧 AC② 起对此 fail-closed）
+            customIcons = mergeResult.mergedCustomIcons
+        )
     )
 
     // ISSUE-P2-278：采纳前「校验-采用」单点（本函数内两处落库共用）。会话树在合并 / 上传

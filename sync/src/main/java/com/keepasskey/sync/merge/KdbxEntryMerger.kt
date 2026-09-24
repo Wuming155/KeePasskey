@@ -210,11 +210,17 @@ internal object KdbxEntryMerger {
 
         val mergedAttachments = mergeAttachments(base, local, remote)
 
-        // 历史版本合并（对齐官方 MergeIn：三方历史并集，按最后修改时间去重后升序排列；
-        // 时间戳碰撞时优先保留本地侧快照）
+        // 历史版本合并（对齐官方 MergeIn：三方历史并集，按最后修改时间去重；
+        // 时间戳碰撞时优先保留本地侧快照）。
+        // ISSUE-P3-292：排序方向改为**降序（头部最新）**——本仓历史列表的既有约定是
+        // 「头部最新、尾部最旧」（`HistoryManager.recordHistorySnapshot` 头插、
+        // `HistoryManager.pruneHistory` 以 `take(maxItems)` 保留头部，二者由
+        // `HistoryManagerTest` 锁定；修订列表 UI 亦按列表序原样渲染）。
+        // 原实现按升序输出，使**合并来的历史**在内存与界面中方向与本仓其余路径相反，
+        // 且会令 `pruneHistory` 的历史截断裁到**最新**一端（数据损失方向）。
         val mergedHistory = (local.history + remote.history + base?.history.orEmpty())
             .distinctBy { it.times.lastModificationTime }
-            .sortedBy { it.times.lastModificationTime }
+            .sortedByDescending { it.times.lastModificationTime }
 
         // 时间戳取最新
         val maxMod = if (remote.times.lastModificationTime.isAfter(local.times.lastModificationTime)) {

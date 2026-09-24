@@ -47,18 +47,7 @@
 
 ---
 
-## P3 低危问题、特性接线与体验优化（10 项）
-
-### ISSUE-P3-292：合并历史取三方并集且不截断（未编辑过的条目永久留存对端快照，并放大 `ISSUE-P1-276` 的引用计数）
-
-- **核实时间点**：2026-09-23 经截断挂载点核对（本条由首轮 P2 **降级**为 P3：原「撞 128 MiB 致全端停摆」的定性被否证——历史附件只是 `<Value Ref="x"/>` 短节点，膨胀驱动量是文本，冲破外层 128 MiB 载荷界需量级离谱的快照数）。
-- **核实方式**：`sync/.../merge/KdbxEntryMerger.kt:168` 为 `local.history + remote.history + base.history` 三方并集，仅按 `times.lastModificationTime` 去重；条数 / 体积修剪函数 `pruneHistory` 只挂在 `database/.../history/HistoryManager.kt:48`（`recordHistorySnapshot`）与 `:83`（`rollbackToSnapshot`），保存路径的整树修剪只有 `pruneGroupHistoryByAge`（`:130`，按天数不按条数）⇒ **用户未再编辑过的条目，合并来的历史永久留存**；合并落库与写出（`SyncConflictController.kt:357/380`）不经任何截断。
-- **后果**：① 每个历史快照是完整 `KdbxEntry`（含各自 `ProtectedString`），内存逐快照单调增长；② 回滚界面会出现对端旧版本；③ **与 P1-276 的耦合（`ISSUE-P1-276` 已于 §273 闭环）**——每多一条历史就给同一池条目多写一个 `<Ref>`，即 `N` 每轮 +1。P1-276 整改后该耦合的表现已由「**整库打不开**」降级为「**放大上限被推高**」：新判据「单条目引用次数 ≤ 1024」「单条目物化字节 ≤ 64 MiB」正是按『合并历史未截断』这一现状取的宽值，**故本条不落地，`MAX_REFERENCES_PER_POOL_ITEM` 就不能收紧**（见 [`architecture/已知工程限界.md`](architecture/已知工程限界.md) **§29** 的解除条件）。
-- **对照**：KXC `Merger.cpp:452/598`（合并内 `truncateHistory`）、官方 `PwDatabase.cs:939` → `PwEntry.cs:646-685`（按条数 + 体积修剪）均在合并后截断。
-- **涉及文件**：`sync/src/main/java/com/keepasskey/sync/merge/KdbxEntryMerger.kt`、`app/src/main/java/com/keepasskey/app/sync/SyncConflictController.kt`、`database/src/main/java/com/keepasskey/database/history/HistoryManager.kt`。
-- **验收标准**：AC① 合并产物在落库前按库 Meta 的 `HistoryMaxItems` / `HistoryMaxSize` 截断（与 `pruneHistory` 复用同一函数，禁两份口径）；AC② 用例：双侧各 6 条历史合并后 ≤ 上限，且被截掉的快照仍按既有约定处理；AC③ 与 `ISSUE-P1-276` 的耦合**已单向闭环**（该条 §273 闭环，指针与耦合说明见 [`resolved/batches/273-附件池引用计费重定口径批次.md`](resolved/batches/273-附件池引用计费重定口径批次.md) 与限界表 **§29**）——**本条落地后必须复评** `KdbxAttachmentBudget.MAX_REFERENCES_PER_POOL_ITEM` 的取值依据（该上限当前正是按「合并历史不截断」取的宽值），复评结论须回填限界表 §29 与本节；禁「只修一个就算闭环」；AC④ 用例只可新增，不得删除既有合并历史用例（测试资产纪律 ①）。
-
----
+## P3 低危问题、特性接线与体验优化（11 项）
 
 ### ISSUE-P3-293：剪贴板自动擦除的界面承诺与**已登记口径**不符，且冷启动对账可清除其它应用的内容
 
@@ -165,5 +154,18 @@
 - **后果**：不影响运行时行为与用户可见功能；真正代价是 **fail-closed 硬门禁的信号价值被稀释**（红态长期化后，后续真正的越线不再被当作异常）。
 - **涉及文件**：上列 4 个超大文件 + 2 个超长函数所在文件（`app/.../ui/screens/edit/EntryEditFormSections.kt`）；CI 配置无需改动。
 - **验收标准**：AC① 4 个 `tier1` 文件与 2 个 ≥100 行函数按**职责拆分**整改至 `tier1=0` / `functions_ge_100=0`——**禁**以放宽阈值、扩白名单、调 `--max` 或改判据口径逃避；AC② 拆分为**纯结构性**（行为零变更），既有用例原样全绿，**不得删改任何既有用例**（测试资产纪律 ①）；AC③ 拆完复核 `tier2` 棘轮预算**只紧不松**（当前 33 / 37）；AC④ 复盘「§285 之后逐批未发现门禁转红」并落一条防回潮机制（批次文档须**逐条登记机检读数**，不得只写「六条机检 EXIT 0」）；AC⑤ 无设备侧义务（不动 `*/src/androidTest/**`）。
+
+### ISSUE-P3-306：KDBX `<History>` 列表方向未在**读取侧归一**——官方 KeePass 形态的库（最旧在前）在本仓会按位置裁错端、修订列表倒序
+
+- **核实时间点**：2026-09-24（`ISSUE-P3-292` 整改中，因「截断须裁最旧端」而逐侧核对方向时发现）。
+- **核实方式**：
+  1. **本仓约定 = 头部最新**（`HistoryManagerTest` 锁定）：`recordHistorySnapshot` 头插新快照；`pruneHistory` 以 `take(maxItems)` **保留头部**；`VaultEntryMapper` 按列表序原样产出 `UiEntryRevision`，详情页（`EntryDetailSections`）不再排序。
+  2. **合并路径已改为同向**（`ISSUE-P3-292` / §303）：`KdbxEntryMerger` 由 `sortedBy` 改 `sortedByDescending`，`KdbxMergerTest` / `KdbxMergerV2Test` 的按升序断言随之更正。
+  3. **读取侧未归一**：`KdbxXmlGroupReader` 以 `history.add(it)` 按**文档顺序**装配，写入侧 `KdbxXmlEntrySerializer` 亦按列表序写回 ⇒ **文件序 == 内存序**，方向完全取决于输入文件。
+  4. **官方实现为「最旧在前」**：`参考项目/KeePass-2.61.1-Source/KeePassLib/PwEntry.cs` 的 `CreateBackup` 明注 `m_lHistory.Add(peCopy); // Must be added at end`；`RemoveOldestBackup` 扫描找**时间戳最小**者移除（按时间戳而非位置）。
+- **背景与根因**：方向约束只在「本仓自产 / 合并产出」的路径上被满足，**读取侧从文件进入内存时不做归一**。故一条来自官方 KeePass 或其它遵从官方顺序的实现所产出的库，其内存历史方向与本仓约定相反。
+- **后果**：① 此类库在本仓编辑后触发保存路径的 `pruneHistory` 时，**按位置裁掉的是最新快照**（`take(maxItems)` 保留头部 = 保留最旧一侧）——数据损失方向，仅在历史条数超过库级上限时显现；② 该库的修订列表在详情页**倒序**显示；③ 写回文件的历史顺序与本仓自产库不一致（官方读取端按时间戳维护，功能不受影响，属展示序差异）。
+- **涉及文件**：`database/src/main/java/com/keepasskey/database/xml/KdbxXmlGroupReader.kt`（读侧装配点）、`database/src/main/java/com/keepasskey/database/xml/KdbxXmlEntrySerializer.kt`（写侧）、`database/src/main/java/com/keepasskey/database/history/HistoryManager.kt`（`pruneHistory` 的位置口径）、`app/src/main/java/com/keepasskey/app/data/repository/VaultEntryMapper.kt`（修订投影）。
+- **验收标准**：AC① 先**裁决方向**——以「内存 / 文件均为头部最新」为准归一（与本仓既有约定及 `HistoryManagerTest` 一致），或改为官方「最旧在前」并同步翻转 `recordHistorySnapshot` / `pruneHistory` / 修订列表 UI（**两条路都须一次性贯通**，禁只改一半）；AC② 选定后在**读取侧归一**（装配时按 `lastModificationTime` 排序），使任一来源的库进入内存后方向恒一致，从而位置口径恒正确；AC③ 用例：以**升序**（官方形态）输入的库为 fixture，断言保存路径裁掉的是**最旧**一端、且修订列表顺序与本仓自产库一致；AC④ 归一**只调序、不得改写快照内容**，并复核 `KdbxMergerTest` 既有方向断言不被二次翻转；AC⑤ 若判定「文件序须与官方一致」，须按规则 8 以官方实现端到端对拍留证。
 
 ---

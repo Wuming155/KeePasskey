@@ -143,11 +143,15 @@ class SyncConflictController @Inject constructor(
                 updatedRoot = applyResolvedEntriesToGroup(updatedRoot, resolvedByParent)
             }
 
-            val mergedDb = localDb.copy(
-                rootGroup = updatedRoot,
-                deletedObjects = pendingMergedTombstones,
-                // ISSUE-P2-280：合并图标池随决策一并采用（同 autoMergeAndUpload 口径）
-                customIcons = pendingMergedCustomIcons
+            // ISSUE-P3-292：合并历史在序列化 / 上传 / 落库之前按库级 Meta 上限截断
+            // （上传字节与落库树取自同一产物，不存在「本地截了、远端没截」）
+            val mergedDb = truncateMergedHistory(
+                localDb.copy(
+                    rootGroup = updatedRoot,
+                    deletedObjects = pendingMergedTombstones,
+                    // ISSUE-P2-280：合并图标池随决策一并采用（同 autoMergeAndUpload 口径）
+                    customIcons = pendingMergedCustomIcons
+                )
             )
             val mergedBytes = codec.serializeLocalDatabase(mergedDb)
                 ?: return@withContext SyncOutcome.Error(strings.get(R.string.sync_error_conflict_serialize_failed))
