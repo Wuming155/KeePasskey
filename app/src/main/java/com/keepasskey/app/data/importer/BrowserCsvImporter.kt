@@ -24,6 +24,10 @@ import javax.inject.Singleton
  * 编码：UTF-8（含 BOM 剥离）；非法字节序列按替换字符处理并记 [ImportWarningReason.INVALID_UTF8]
  * 警告；UTF-16/32 或含 NUL 的伪文本 fail-closed（[ImportEncodingException]）。
  *
+ * 公式注入（ISSUE-P3-312 项 1）：任一「将随明文 CSV 再导出」的字段以 `=` / `+` / `-` / `@` /
+ * 制表符 / 回车开头时记 [ImportWarningReason.FORMULA_INJECTION_RISK] 行级警告（每行最多一条）。
+ * **只告警、不改写**：以撇号前缀中和会改坏源值本身（口令首字符即被污染），处置权交给用户。
+ *
  * 敏感数据：CSV 表头（非敏感）转为 `String`；数据行字段由 [CsvRecordReader] 以 `CharArray`
  * 交出，密码列**直接转交** [ImportedEntry.password]（不经 `String`），其余列才转 `String`。
  *
@@ -122,6 +126,10 @@ class BrowserCsvImporter @Inject constructor() : EntryImporter {
             cells.totp?.fill(NUL_CHAR)
             return
         }
+        // ISSUE-P3-312 项 1：公式注入只告警不改写——每行最多一条警告，避免多字段命中刷屏
+        if (cells.hasFormulaInjection()) {
+            warnings.add(ImportWarningLocation.row(recordIndex + 1), ImportWarningReason.FORMULA_INJECTION_RISK)
+        }
         produced += ImportedEntry(
             title = cells.title,
             username = cells.username,
@@ -195,6 +203,21 @@ class BrowserCsvImporter @Inject constructor() : EntryImporter {
 
     private fun CharArray.isBlankField(): Boolean = all { it.isWhitespace() }
 
+    /**
+     * ISSUE-P3-312 项 1：本行是否有任一「将随明文 CSV 再导出」的字段以公式触发字符开头。
+     * 判据只看**首字符**（表格软件的公式判定即看首个非空白字符），不做全文扫描。
+     */
+    private fun CsvCells.hasFormulaInjection(): Boolean =
+        title.startsFormulaTrigger() || username.startsFormulaTrigger() ||
+            url.startsFormulaTrigger() || notes.startsFormulaTrigger() ||
+            groupPath.any { it.startsFormulaTrigger() } ||
+            password.startsFormulaTrigger()
+
+    private fun String.startsFormulaTrigger(): Boolean = isNotEmpty() && first() in FORMULA_TRIGGERS
+
+    private fun CharArray?.startsFormulaTrigger(): Boolean =
+        this != null && isNotEmpty() && this[0] in FORMULA_TRIGGERS
+
     /** 单次扫描的可变状态（刻意不做成字段：解析器是 `@Singleton`，不得持有解析态）。 */
     private class CsvScanState {
         var mapping: Map<Int, CsvColumnRole>? = null
@@ -222,6 +245,12 @@ class BrowserCsvImporter @Inject constructor() : EntryImporter {
         const val NUL_CHAR = '\u0000'
         const val EMPTY_HEADER = "CSV 文件为空，缺少表头行"
         const val MISSING_REQUIRED_COLUMN = "CSV 表头缺少必需列（name 或 password）"
+
+        /**
+         * ISSUE-P3-312 项 1：表格软件把单元格当作公式执行的常见触发首字符（含制表符 / 回车，
+         * 二者会使后续内容被按列拆分）。
+         */
+        val FORMULA_TRIGGERS = charArrayOf('=', '+', '-', '@', '\t', '\r')
 
         val NAME_HEADERS = setOf("name", "title")
         val USERNAME_HEADERS = setOf("username", "login_username", "user")

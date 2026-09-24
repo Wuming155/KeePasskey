@@ -41,9 +41,11 @@
 
 ---
 
-## P2 中危缺陷与协议/测试缺口（5 项）
+## P2 中危缺陷与协议/测试缺口（3 项）
 
-> 本批 5 项出自 2026-09-24 同步/加密/passkey 安全审计（逐行反校 + 4 并行核查代理），均为数据完整性 / 密钥残留类，按「库永不丢、永不自己搞坏」定位列为 P2（Tier 0 优先整改）。
+> 本批出自 2026-09-24 同步/加密/passkey 安全审计（逐行反校 + 4 并行核查代理），均为数据完整性 / 密钥残留类，
+> 按「库永不丢、永不自己搞坏」定位列为 P2（Tier 0 优先整改）。
+> `ISSUE-P2-309`（合并 base 取工作副本兜底）与 `ISSUE-P2-312`（凭据克隆漏擦）已于 §315 闭环。
 
 ### ISSUE-P2-308：同步采纳失败后引擎状态不回滚 → 整库回滚跨端传播（★）
 
@@ -52,14 +54,6 @@
 - **背景与根因**：引擎在把 `RemoteSynced` 交还 app 层**之前**即已执行 `receipt.commit → updateBase → writeBaseContent → recordAccepted`（`SyncEngine.kt:233-240` 区间，`openCachedWithoutLocalChanges` 分支；同模式亦见于 `openUncached:173-175`、`openCachedWithLocalChanges:290-291`），即 base 已在「app 采纳」之前前移并写盘。采纳 / 应用远端失败（PARSE_FAILED / SAVE_FAILED / SESSION_DIVERGED）在 `SyncCycleRemoteOutcomes.kt:73-83` 仅 `return SyncOutcome.Error`，全仓无回滚引擎状态的函数。下一周期 `SyncCycleRemoteOutcomes.kt:38-40` 的 `contentEquals` 短路把陈旧内存树记为 `lastSyncedDb`。`SyncCycleCommitPaths.kt:83-93` 上传成功后本地 `save()` 失败仅 `return Error`，base 已前移不回退。后果：此后本地编辑以 `V_prev+edit` 整库上传，他端改动被覆盖；每次保存重生成 masterSeed/IV/KDF salt ⇒ 字节摘要全新，`SyncRollbackGuard` 仅比对字节级 sha256（`SyncRollbackGuard.kt:134-142` 比对 `sha256Hex(content)`）⇒ 各端判 Accept。**无需攻击者、无需服务器配合**即可跨端灭数据。残余（如实登记）：干净锁库经 `SyncCacheEvictor`（SessionLockObserver）清缓存自愈 ⇒ 窗口＝不锁库继续用 / 进程被杀（无冷启动 cacheDir 清理）。
 - **涉及文件**：`app/src/main/java/com/keepasskey/app/sync/SyncEngine.kt`、`SyncCycleRemoteOutcomes.kt`、`SyncCycleCommitPaths.kt`、`SyncRollbackGuard.kt`。
 - **验收标准**：AC① 把引擎侧三步落地（updateBase / writeBaseContent / recordAccepted）延后到 app 层采纳确认之后；采纳失败须回滚或保持 base 不动，不得前移。AC② 沿用 `SyncMidCycleEditGuardTest`，追加第三轮 `runSyncCycle` 断言 provider 侧对象字节仍含远端新增条目（即接受失败后重试不丢失对端数据）。AC③ `test` 全绿 + `gate_readings.py` 7/7 PASS。
-
-### ISSUE-P2-309：三方合并 base 取工作副本兜底，违反同函数注释明令禁止（○）
-
-- **核实时间点**：2026-09-24（本轮审计直读复核）。
-- **核实方式**：主代理直读 `SyncCycleSetup.kt:154-157` 与 `SyncConflictController.kt:333` / `SyncConflictResolution.kt:209`，确认注释与代码矛盾及另两处无兜底；「零测试锁定」未专门核实测试面。
-- **背景与根因**：`SyncCycleSetup.kt:154-156` 注释明令「本地缓存会被工作副本反复覆盖，绝不能再兼任 base 内容来源——否则冲突会话中断后 base 会被本地修改版污染，后续合并退化为远端全胜」；但紧接 `:157` `val baseSnapshotBytes = syncCache.readBaseContent(remotePath) ?: cachedSnapshotBytes` 正是用工作副本（`cachedSnapshotBytes = readCache`）兜底 base。`SyncConflictController.kt:333` 与 `SyncConflictResolution.kt:209` 调 `readBaseContent` **无兜底**，三处不一致。后果：`.basecache` 单文件被 cacheDir 回收且本地确有编辑时，共同祖先被上一版工作副本顶替 ⇒ 远端字段被「local==base」判走远端，本地编辑静默丢弃。
-- **涉及文件**：`app/src/main/java/com/keepasskey/app/sync/SyncCycleSetup.kt`、`SyncConflictController.kt`、`SyncConflictResolution.kt`。
-- **验收标准**：AC① 删 `SyncCycleSetup.kt:157` 的 `?: cachedSnapshotBytes`，`readBaseContent` 返回 null 即走 F2 空库并集（宁多冲突不丢数据）。AC② `SyncConflictController.kt:333` / `SyncConflictResolution.kt:209` 维持无兜底（与修复后 setup 一致）。AC③ 补一条覆盖「.basecache 缺失 + 本地有编辑」的合并用例，断言本地编辑不被静默丢弃。`test` + `gate_readings.py` 7/7 PASS。
 
 ### ISSUE-P2-310：附件被系统回收后 fail-open 返空字节 → 保存产出矛盾内层头 → 整库打不开（○）
 
@@ -77,17 +71,9 @@
 - **涉及文件**：`database/.../inner/InnerHeader.kt`、`AttachmentSizeLimits.kt`、`app/.../EntryEditPickers.kt`、`KdbxFile.kt`。
 - **验收标准**：AC① UI 上界取 `MAX_INNER_FIELD_BYTES − 1` 并同源派生（消除写读互斥）。AC② `serialize` 前加池累计判据（单值同读侧 `MAX_BINARY_POOL_TOTAL_BYTES`）。AC③ 参数化 save→load 往返测试：UI 上界值（含 64 MiB−1、多附件累计临界）必通。`test` + `gate_readings.py` 7/7 PASS。
 
-### ISSUE-P2-312：useCredentials 借出主密码/密钥文件克隆从不归零（漏擦，对齐 P2-290 标尺）（★ 待定级→P2）
-
-- **核实时间点**：2026-09-24（本轮审计；定级由「待定级」改判 P2）。
-- **核实方式**：并行核查代理直读 `SessionCredentialCache.kt:28-32` / `SyncDatabaseCodec.kt:30-31,42-43` / `SessionExternalParser.kt:24-25,40-41` / `KdbxFile.kt:401-404`；并核实先例 `RESOLVED_LOG.md:371`（ISSUE-P2-290，compositeKey/口令明文漏擦，P2）与 `resolved/batches/238-待决冲突解析树身份判定擦除批次.md:35`（ISSUE-P3-119 判「不可擦而非漏擦」）。
-- **背景与根因**：`SessionCredentialCache.kt:28-32` 的 `useCredentials` 只 clone 并传给 block，**自身无 finally 归零借出克隆**，契约靠 KDoc「调用方用毕必须显式清零」。两生产调用点（`SyncDatabaseCodec.kt:30-31/42-43`、`SessionExternalParser.kt:24-25/40-41`）仅擦内层再克隆；`KdbxFile.kt:401-404` 的 finally 只擦派生 `cipherKey/hmacKey64`，**不擦入参 `passwordChars/keyFileData`** ⇒ 借出的外层克隆全程未归零，主密码/密钥文件明文克隆滞留内存至 GC。此为**漏擦**（可清零而未清），形状与 `ISSUE-P2-290`（口令明文字节漏擦）同型 ⇒ 定 P2；与 `ISSUE-P3-119`（判「不可擦」）性质不同，上一轮引其作证属误引。
-- **涉及文件**：`database/.../session/SessionCredentialCache.kt`、`SyncDatabaseCodec.kt`、`SessionExternalParser.kt`、`KdbxFile.kt`。
-- **验收标准**：AC① 在 `useCredentials` 的 `block` 调用后加 `finally` 清零借出的 `pwdClone/keyClone`（2 行级修复）。AC② 补用例断言借出克隆在 block 返回后内存被清零（单元断言 clone 内容在 `useCredentials` 返回前被 `fill`）。AC③ `test` + `gate_readings.py` 7/7 PASS。
-
 ---
 
-## P3 低危问题、特性接线与体验优化（5 项）
+## P3 低危问题、特性接线与体验优化（4 项）
 
 ### ISSUE-P3-300：弱 ETag 乐观锁的**真实 DAV 服务器矩阵未实测**——弱 ETag 服务器上的同步收敛行为待证（§272 AC⑤ 显式残余）
 
@@ -134,12 +120,4 @@
 - **涉及文件**：`InnerHeader.kt`、`PasskeyKeyCodec.kt`、`PasskeyAssertionPayload.kt`、`PasskeyCryptoEngine.kt`、`AtomicFileWriter.kt`、`InnerRandomStreamCipher.kt`。
 - **验收标准**：四项各自 AC 达成；`test` + `gate_readings.py` 7/7 PASS。
 
-### ISSUE-P3-312：导出/文档卫生批量登记（2 项）（「建议并表，不逐条占位」）
-
-- **核实时间点**：2026-09-24（本轮审计，逐行反校）。
-- **核实方式**：并行核查代理直读 `KdbxCsvExporter.kt:105-144` / `ImportWarnings.kt`（全枚举） / `BrowserCsvImporter.kt:149,228`；并直读 `docs/architecture/产品裁决登记.md:686-689` 与 `SyncEngine.kt:111,128,190-198`。
-- **项 1 — CSV 公式注入零中和（成立，P3）**：`KdbxCsvExporter.kt:105-144` 仅 RFC 4180 引号化（判 `FIELD_SEPARATOR/QUOTE/\n/\r`），无前导 `= + - @` / 制表符中和；导入侧 `ImportWarnings.kt` 零公式注入编码（`BrowserCsvImporter.kt:149` 按表头原样转交 password）。触发需 3 次用户动作 + 绕过现代 Office 默认 DDE 阻断 ⇒ P3 加固。修复只能导入侧告警 + 导出确认文案提示（password 列不能撇号中和，会改坏口令本身）。AC：导入侧新增公式注入警告项 + 导出确认文案提示风险。
-- **项 2 — PD-21 括注失实（文档诚信，成立）**：`产品裁决登记.md:688-689` 记 `recoverFromMetaFailure` 的 404 恢复分支「本周期无本地内容变更」；但 `SyncEngine.kt:111` 在 `metaResult.isFailure` 时即 `return recoverFromMetaFailure(...)`，**早于 `:128` 的 `hasLocalChanges` 判定**——该括注作行为背书缺代码支撑，且曾被上一轮审计当免检理由引用。AC：修订 PD-21 括注，删除「本周期无本地内容变更」或改述为「该分支在 hasLocalChanges 判定之前返回」，并登记为文档诚信更正。
-- **涉及文件**：`KdbxCsvExporter.kt`、`ImportWarnings.kt`、`BrowserCsvImporter.kt`、`docs/architecture/产品裁决登记.md`、`SyncEngine.kt`。
-- **验收标准**：两项各自 AC 达成；如涉及文档改动，须 `check_md_links.py` / `check_resolved_index_sync.py` PASS。
 ---

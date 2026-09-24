@@ -135,7 +135,8 @@ class DatabaseSession(
      *
      * 注意事项（敏感数据铁律）：
      * 传入 [block] 的 [CharArray] 与 [ByteArray] 为克隆出的独立副本，
-     * 调用方在使用完毕后必须显式清零返回数组（例如 `Arrays.fill(...)`），绝不可长期驻留堆内存。
+     * **本方法返回前（含 [block] 抛异常路径）由 [SessionCredentialCache] 显式清零**
+     * （ISSUE-P2-312）——调用方无需也不得依赖「借出副本在本方法返回后仍可读」。
      */
     fun <T> useCredentials(block: (CharArray?, ByteArray?) -> T): T = credentials.useCredentials(block)
 

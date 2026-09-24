@@ -264,6 +264,61 @@ class BrowserCsvImporterTest {
         assertTrue("超出条目上限必须 fail-closed", result.isFailure)
     }
 
+    // ---------- ISSUE-P3-312 项 1：CSV 公式注入只告警、不改写 ----------
+
+    /** 触发字符取自「导出的 CSV 再被表格软件打开」这一后续动作，故命中即行级警告一条。 */
+    @Test
+    fun `标题以等号开头时记公式注入行级警告且不改写源值`() = runTest {
+        val csv = "name,url,username,password\n" +
+            "=cmd|/C calc!A0,https://a.example,user,$FAKE_PASSWORD\n"
+
+        val batch = parseSuccess(csv)
+
+        val warning = batch.report.warnings.single {
+            it.reason == ImportWarningReason.FORMULA_INJECTION_RISK.code
+        }
+        assertEquals("row:2", warning.location)
+        assertEquals("=cmd|/C calc!A0", batch.entries.single().title)
+    }
+
+    @Test
+    fun `口令以触发字符开头同样告警但字节序列原样保留`() = runTest {
+        val injectionTriggeredPassword = "@verge123"
+        val csv = "name,url,username,password\n" +
+            "站点,https://a.example,user,$injectionTriggeredPassword\n"
+
+        val batch = parseSuccess(csv)
+
+        assertTrue(batch.report.warnings.any { it.reason == ImportWarningReason.FORMULA_INJECTION_RISK.code })
+        // 撇号前缀式中和会把口令本身改坏 ⇒ 源值必须逐字符保持原样
+        val password = batch.entries.single().password
+        assertEquals(injectionTriggeredPassword.length, password.size)
+        assertTrue(password.contentEquals(injectionTriggeredPassword.toCharArray()))
+    }
+
+    @Test
+    fun `同一行多字段命中只记一条行级警告`() = runTest {
+        val csv = "name,url,username,password,group\n" +
+            "站点,+https://a.example,-user,$FAKE_PASSWORD,Work\n"
+
+        val batch = parseSuccess(csv)
+
+        assertEquals(
+            1,
+            batch.report.warnings.count { it.reason == ImportWarningReason.FORMULA_INJECTION_RISK.code }
+        )
+    }
+
+    @Test
+    fun `普通字段不记公式注入警告`() = runTest {
+        val csv = "name,url,username,password\n" +
+            "站点甲,https://a.example,user-$FAKE_PASSWORD,$FAKE_PASSWORD\n"
+
+        val batch = parseSuccess(csv)
+
+        assertTrue(batch.report.warnings.none { it.reason == ImportWarningReason.FORMULA_INJECTION_RISK.code })
+    }
+
     // ---------- 辅助 ----------
 
     private suspend fun parseSuccess(csv: String): ImportBatch =

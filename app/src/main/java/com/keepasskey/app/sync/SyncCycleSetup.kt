@@ -154,7 +154,11 @@ private suspend fun SyncCycleRunner.buildCycleContext(
     // A2 整改：三方合并的 base 必须取"最后确认与远端一致"的独立内容快照（basecache）。
     // 本地缓存会被工作副本反复覆盖，绝不能再兼任 base 内容来源——
     // 否则冲突会话中断后 base 会被本地修改版污染，后续合并退化为远端全胜
-    val baseSnapshotBytes = syncCache.readBaseContent(remotePath) ?: cachedSnapshotBytes
+    // ISSUE-P2-309：缺失即以 null 交给 `resolveTrustedBase`（退化为空库并集，宁多冲突不丢数据）。
+    // 原 `?: cachedSnapshotBytes` 兜底正是本注释明令禁止的那条路，且 `resolveTrustedBase` 的
+    // 字节级污染判据救不了它——KDBX4 每次保存重生成 masterSeed / IV / KDF salt，
+    // 同一内容的两次序列化字节必然不同，`contentEquals` 无从命中。
+    val baseSnapshotBytes = syncCache.readBaseContent(remotePath)
     val hasLocalContentChanged = changes.resolveLocalContentChanged(currentDb, cachedSnapshotBytes)
 
     // 1. 获取本地数据库字节：若无内容变更且已缓存，复用缓存规避 KDBX4 随机 IV 导致的不必要哈希漂移；否则序列化并写缓存

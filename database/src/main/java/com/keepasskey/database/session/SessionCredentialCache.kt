@@ -23,12 +23,20 @@ internal class SessionCredentialCache {
     /**
      * 在锁保护下获取当前缓存凭据的克隆副本并执行 [block]。
      *
-     * 传入 [block] 的数组为克隆出的独立副本，调用方用毕必须显式清零。
+     * 传入 [block] 的数组为克隆出的独立副本，**本函数在 [block] 返回前（含抛异常路径）
+     * 负责将其清零**（ISSUE-P2-312）——清零不再依赖调用方自觉，与
+     * `ChildDatabaseCredentialStore.useCredentials` 的强契约同口径。调用方若需在该副本上
+     * 再做一次内层克隆（如交给 `KdbxFile.save` / `load` 的入参），内层副本仍由调用方自行清零。
      */
     fun <T> useCredentials(block: (CharArray?, ByteArray?) -> T): T = synchronized(credentialLock) {
         val pwdClone = passwordCache?.clone()
         val keyClone = keyFileCache?.clone()
-        block(pwdClone, keyClone)
+        try {
+            block(pwdClone, keyClone)
+        } finally {
+            pwdClone?.let { Arrays.fill(it, '0') }
+            keyClone?.let { Arrays.fill(it, 0.toByte()) }
+        }
     }
 
     /** 当前主密码引用（供序列化复用，不克隆——与拆分前传递同一引用一致）。 */

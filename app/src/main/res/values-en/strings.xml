@@ -570,7 +570,7 @@
     <string name="dbset_export_plain_warn_confirm">I understand, export anyway</string>
     <!-- ISSUE-P3-73: plaintext CSV export confirmation (wording must say "plaintext") -->
     <string name="dbset_export_csv_plain_warn_title">Confirm plaintext CSV export</string>
-    <string name="dbset_export_csv_plain_warn_message">You are about to export an unencrypted CSV file containing every entry field value in the vault:\n- Plaintext: its contents are directly readable and are not protected by the master password;\n- Unprotected: once written to Downloads or a cloud drive, any app or person with access to that location can read it;\n- Delete it yourself: this app will not clean it up. Delete it immediately after use and empty the cloud recycle bin.</string>
+    <string name="dbset_export_csv_plain_warn_message">You are about to export an unencrypted CSV file containing every entry field value in the vault:\n- Plaintext: its contents are directly readable and are not protected by the master password;\n- Unprotected: once written to Downloads or a cloud drive, any app or person with access to that location can read it;\n- Delete it yourself: this app will not clean it up. Delete it immediately after use and empty the cloud recycle bin;\n- Formula risk (ISSUE-P3-312): a field starting with = + - @ or a tab may be executed as a formula once this CSV is opened in a spreadsheet app.</string>
     <!-- ISSUE-P3-128: key file export confirmation (the key file is the second unlock factor) -->
     <string name="dbset_keyfile_export_warn_title">Confirm key file export</string>
     <string name="dbset_keyfile_export_warn_message">You are about to export this vault\u2019s key file (the second unlock factor):\n- This single file can be combined with the vault file to attempt an unlock, so store it separately from the .kdbx;\n- Once written to Downloads or a cloud drive, any app or person with access to that location can obtain the factor;\n- Delete it yourself: this app will not clean it up.</string>
@@ -1156,6 +1156,8 @@
     <string name="import_warn_optional_field_invalid">Invalid optional field treated as empty</string>
     <string name="import_warn_title_missing">Item title is empty; a default name will be used</string>
     <string name="import_warn_group_name_missing">Account and vault names are both empty; items were placed in the root group</string>
+    <!-- ISSUE-P3-312 item 1: CSV formula injection risk (warn only, source value untouched) -->
+    <string name="import_warn_formula_injection">A field starts with = + - @ or a tab; if this CSV is later opened in a spreadsheet app, that cell may be executed as a formula (the imported value was not rewritten, please review it yourself)</string>
 
     <!-- ===== ISSUE-P3-17: overflow-menu action for showKillAppOption ===== -->
     <string name="sec_kill_app_action">Exit app completely</string>

@@ -65,7 +65,18 @@ enum class ImportWarningReason(val code: String) {
     TITLE_MISSING("TITLE_MISSING"),
 
     /** 1PUX：账户名与保险库名均为空，条目落至根分组。 */
-    GROUP_NAME_MISSING("GROUP_NAME_MISSING");
+    GROUP_NAME_MISSING("GROUP_NAME_MISSING"),
+
+    // ===== ISSUE-P3-312 项 1：CSV 公式注入风险（只告警、不中和）=====
+
+    /**
+     * 某字段以 `=` / `+` / `-` / `@` / 制表符 / 回车开头：该条目日后随明文 CSV 再导出、
+     * 或被复制进表格软件时，该单元格可能被当作**公式**执行（CSV 注入）。
+     *
+     * 导入侧**只告警不改写**：以撇号前缀中和会改坏源值本身（口令 / 用户名首字符即被污染），
+     * 代价高于收益；处置权交给用户。
+     */
+    FORMULA_INJECTION_RISK("FORMULA_INJECTION_RISK");
 
     companion object {
         /** 按稳定编码反查；未知编码返回 null（UI 层回退为「未知警告」资源文案）。 */

@@ -582,7 +582,7 @@
     <string name="dbset_export_plain_warn_confirm">我已知悉，仍要导出</string>
     <!-- ISSUE-P3-73：明文 CSV 导出二次确认（文案须明确「明文」） -->
     <string name="dbset_export_csv_plain_warn_title">确认导出明文 CSV</string>
-    <string name="dbset_export_csv_plain_warn_message">即将导出的是未加密的明文 CSV，包含密码库的全部条目字段值：\n· 明文：文件内容可直接阅读，不受主密码保护；\n· 不受保护：写入下载目录或云盘后，任何可访问该位置的应用或人员都能读取；\n· 需自行删除：本应用不会代为清理，请用毕立即删除并清空云盘回收站。</string>
+    <string name="dbset_export_csv_plain_warn_message">即将导出的是未加密的明文 CSV，包含密码库的全部条目字段值：\n· 明文：文件内容可直接阅读，不受主密码保护；\n· 不受保护：写入下载目录或云盘后，任何可访问该位置的应用或人员都能读取；\n· 需自行删除：本应用不会代为清理，请用毕立即删除并清空云盘回收站；\n· 公式风险（ISSUE-P3-312）：以 = + - @ 或制表符开头的字段，用表格软件打开该文件时单元格可能被当作公式执行，导出前请在导入报告中核对该警告。</string>
     <!-- ISSUE-P3-128：密钥文件导出二次确认（密钥文件是开库第二因子） -->
     <string name="dbset_keyfile_export_warn_title">确认导出密钥文件</string>
     <string name="dbset_keyfile_export_warn_message">即将导出的是本库的密钥文件（第二重凭据）：\n· 单文件即可配合库文件尝试开库，请与 .kdbx 分开存放；\n· 写入下载目录或云盘后，任何可访问该位置的应用或人员都能取得该因子；\n· 需自行删除：本应用不会代为清理。</string>
@@ -1273,6 +1273,8 @@
     <string name="import_warn_optional_field_invalid">可选字段类型非法，已按空值处理</string>
     <string name="import_warn_title_missing">条目标题为空，将使用默认名</string>
     <string name="import_warn_group_name_missing">账户名与保险库名均为空，条目已落至根分组</string>
+    <!-- ISSUE-P3-312 项 1：CSV 公式注入风险（只告警、不改写源值） -->
+    <string name="import_warn_formula_injection">字段以 = + - @ 或制表符开头，若日后在表格软件中打开该 CSV，此单元格可能被当作公式执行（导入未改写该值，请自行核对）</string>
 
     <!-- ===== ISSUE-P3-17：showKillAppOption 溢出菜单入口动作 ===== -->
     <!-- 原实现误用 sec_kill_app_title（「锁定时清杀进程内存」，语义不符），此处补齐专用动作文案 -->
