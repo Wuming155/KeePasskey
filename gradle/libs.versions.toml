@@ -38,7 +38,7 @@ composeBom = "2026.08.00"
 #   - 约束：本值仅允许在 1.5.0-alphaN 内部随安全修复上调，禁止跨 minor 跳跃；
 #   - 退出条件：material3 1.5.0 stable 发布后，删除本项与 compose-material3-alpha 别名，
 #     回归 Compose BOM 托管（升级判据与步骤见 docs/records/退役依据承接-ISSUE-P3-09.md）。
-material3 = "1.5.0-alpha27"
+material3 = "1.5.0-alpha28"
 lifecycle = "2.9.0"
 activityCompose = "1.10.0"
 navigationCompose = "2.10.0"
