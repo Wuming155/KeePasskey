@@ -10,7 +10,7 @@ import java.io.File
 
 /**
  * 三条凭据通道开关的接线守卫（**ISSUE-P2-228** 验收 AC②③⑤，静态源码比对，
- * 体例沿用 [com.keepasskey.app.security.AccessibilityNoticeWiringTest]）。
+ * 体例沿用原 `AccessibilityNoticeWiringTest`（ISSUE-P3-324 已随被测链路移除删除）。
  *
  * 本批修掉的不是「判定算错」，而是**整条链路是摆设**：整改前三个开关只回写一个纯内存
  * `StateFlow`——无持久化键（重启回弹）、无生产消费方（关掉啥也不影响）、
@@ -98,6 +98,15 @@ class AutofillChannelSwitchWiringTest {
             assertTrue("$key 缺读侧", storeSource.contains("$key, defaults."))
             assertTrue("$key 缺写侧", storeSource.contains(".putBoolean($key"))
         }
+        // ISSUE-P3-324：旧版无障碍通道开关键同口径（默认 false，见 LegacyAutofillWiringTest）
+        assertTrue(
+            "K_AUTOFILL_LEGACY_ACCESSIBILITY_ENABLED 缺读侧",
+            storeSource.contains("K_AUTOFILL_LEGACY_ACCESSIBILITY_ENABLED, defaults.")
+        )
+        assertTrue(
+            "K_AUTOFILL_LEGACY_ACCESSIBILITY_ENABLED 缺写侧",
+            storeSource.contains(".putBoolean(K_AUTOFILL_LEGACY_ACCESSIBILITY_ENABLED")
+        )
     }
 
     @Test
@@ -105,7 +114,9 @@ class AutofillChannelSwitchWiringTest {
         listOf(
             "credentialProviderEnabled = extState.credentialProviderEnabled",
             "passkeySupportEnabled = extState.passkeySupportEnabled",
-            "autofillServiceEnabled = extState.autofillServiceEnabled"
+            "autofillServiceEnabled = extState.autofillServiceEnabled",
+            // ISSUE-P3-324：旧版无障碍通道开关同口径
+            "autofillLegacyAccessibilityEnabled = extState.autofillLegacyAccessibilityEnabled"
         ).forEach {
             assertTrue("投影未经持久化快照：$it", projectionSource.contains(it))
         }
@@ -148,12 +159,18 @@ class AutofillChannelSwitchWiringTest {
     // ========== AC①：虚假措辞不得残留、不得回归 ==========
 
     @Test
-    fun `自动填充卡文案不再声称需要无障碍权限`() {
-        // 本应用未注册任何 AccessibilityService（Manifest 只有 AutofillService 与 CredentialProviderService），
-        // 「无障碍填充方式」这句措辞既无对应实现，又与设置页「已启用无障碍服务」提示相撞造成误读。
+    fun `自动填充卡文案不再声称虚假的无障碍权限`() {
+        // ISSUE-P2-228：三条框架通道的文案不得再声称「无障碍填充方式」（当时无对应实现）。
+        // ISSUE-P3-324 更新：旧版无障碍自动填充通道已真实落地（LegacyAutofillAccessibilityService），
+        // 其 autofill_legacy_accessibility_* 文案中的「无障碍」措辞**如实**描述真实存在的服务，
+        // 属白名单例外；其余 autofill* 文案仍不得出现无障碍措辞。
         // 逐条按 <string> 元素取值比对——整文件正则会把相邻元素连成一片而误报（首版即踩到）。
         val zh = readSource("app/src/main/res/values/strings.xml")
         val en = readSource("app/src/main/res/values-en/strings.xml")
+        val legacyKeys = setOf(
+            "autofill_legacy_accessibility_title",
+            "autofill_legacy_accessibility_sub"
+        )
 
         listOf(
             "中文" to zh,
@@ -165,13 +182,17 @@ class AutofillChannelSwitchWiringTest {
                 "$label 侧至少应解析出 10 条 autofill* 文案（实际 ${values.size}，解析正则已失效）",
                 values.size >= 10
             )
+            // 白名单键必须存在（旧版通道文案本体不得被误删）
+            assertTrue(
+                "$label 侧旧版通道文案缺失（须含 $legacyKeys）",
+                values.map { it.first }.toSet().containsAll(legacyKeys)
+            )
             val offenders = values
+                .filter { (name, value) -> name !in legacyKeys }
                 .filter { (_, value) -> value.contains("无障碍") || value.contains("ccessibilit") }
                 .map { it.first }
-            assertTrue("$label 仍有无障碍填充措辞：$offenders", offenders.isEmpty())
+            assertTrue("$label 仍有框架通道的无障碍措辞：$offenders", offenders.isEmpty())
         }
-        assertFalse("autofill_legacy 键须已改名", zh.contains("autofill_legacy_"))
-        assertFalse("autofill_legacy 键须已改名", en.contains("autofill_legacy_"))
     }
 
     /** 提取全部 `autofill*` 字符串资源的 name 与 value（限定在单个元素内，不跨行拼接） */

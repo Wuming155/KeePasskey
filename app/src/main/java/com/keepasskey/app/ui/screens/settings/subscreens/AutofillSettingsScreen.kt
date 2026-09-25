@@ -41,6 +41,8 @@ fun AutofillSettingsScreen(
     onCredentialProviderToggle: (Boolean) -> Unit,
     onPasskeySupportToggle: (Boolean) -> Unit,
     onAutofillServiceToggle: (Boolean) -> Unit,
+    // ISSUE-P3-324：旧版无障碍自动填充通道开关
+    onAutofillLegacyAccessibilityToggle: (Boolean) -> Unit = {},
     onAutoClearClipboardToggle: (Boolean) -> Unit,
     // KP2A 扩展自动填充操作
     onOfferSaveCredentialsToggle: (Boolean) -> Unit = {},
@@ -107,7 +109,8 @@ fun AutofillSettingsScreen(
                     onCredentialProviderToggle = onCredentialProviderToggle,
                     onPasskeySupportToggle = onPasskeySupportToggle,
                     onAutofillServiceToggle = onAutofillServiceToggle,
-                    onAutofillSessionGrantToggle = onAutofillSessionGrantToggle
+                    onAutofillSessionGrantToggle = onAutofillSessionGrantToggle,
+                    onAutofillLegacyAccessibilityToggle = onAutofillLegacyAccessibilityToggle
                 )
             }
 

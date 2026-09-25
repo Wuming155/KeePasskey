@@ -286,9 +286,9 @@ fun UnlockContent(
                         onSwitchMode = onSwitchMode
                     )
                 } else {
-                    // ISSUE-P3-215：无障碍服务状态提示已迁至设置页安全分区——解锁页（首页）不再
-                    // 承载该信息（与主密码输入无直接交互关系，属纯冗余）；判定与「只提示、不降级」
-                    // 语义不变，见 RuntimeIntegrityPolicy.requiresAccessibilityNotice。
+                    // ISSUE-P3-215 曾在此承载无障碍提示、后迁设置页；ISSUE-P3-324 该提示与
+                    // 整条信号链路一并移除（含系统预装服务的口径对未开无障碍用户构成假提示），
+                    // 解锁页同样不得回潮渲染任何无障碍状态卡。
                     UnlockStandardUnlockContent(
                         uiState = uiState,
                         onPasswordChange = onPasswordChange,

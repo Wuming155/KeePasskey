@@ -15,6 +15,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.Block
+import androidx.compose.material.icons.filled.Accessibility
 import androidx.compose.material.icons.filled.ContentPasteGo
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Keyboard
@@ -67,7 +68,9 @@ internal fun AutofillProviderCard(
     onCredentialProviderToggle: (Boolean) -> Unit,
     onPasskeySupportToggle: (Boolean) -> Unit,
     onAutofillServiceToggle: (Boolean) -> Unit,
-    onAutofillSessionGrantToggle: (Boolean) -> Unit
+    onAutofillSessionGrantToggle: (Boolean) -> Unit,
+    // ISSUE-P3-324：旧版无障碍自动填充通道（默认关闭；需系统侧启用本应用无障碍服务）
+    onAutofillLegacyAccessibilityToggle: (Boolean) -> Unit = {}
 ) {
     BentoCard(
         modifier = Modifier.fillMaxWidth(),
@@ -96,6 +99,17 @@ internal fun AutofillProviderCard(
                 subtitle = stringResource(R.string.autofill_service_sub),
                 checked = uiState.autofillServiceEnabled,
                 onCheckedChange = onAutofillServiceToggle
+            )
+
+            // ISSUE-P3-324：旧版无障碍自动填充通道（参考 KeePassDX / keepass2android 的
+            // 无障碍填充通道）。系统自动填充框架不可用的应用 / 设备上的兜底通道：
+            // 服务在目标应用出现口令框时发通知，点按进选择器挑条目回填。
+            AutofillSwitchRow(
+                icon = Icons.Default.Accessibility,
+                title = stringResource(R.string.autofill_legacy_accessibility_title),
+                subtitle = stringResource(R.string.autofill_legacy_accessibility_sub),
+                checked = uiState.autofillLegacyAccessibilityEnabled,
+                onCheckedChange = onAutofillLegacyAccessibilityToggle
             )
 
             // ISSUE-P0-02：下发前二次确认为**默认强制**安全策略（库锁定必先解锁）。
@@ -419,7 +433,8 @@ internal fun AutofillProviderCardPreview() {
             onCredentialProviderToggle = {},
             onPasskeySupportToggle = {},
             onAutofillServiceToggle = {},
-            onAutofillSessionGrantToggle = {}
+            onAutofillSessionGrantToggle = {},
+            onAutofillLegacyAccessibilityToggle = {}
         )
     }
 }

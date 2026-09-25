@@ -117,6 +117,8 @@ data class SettingsUiState(
     val credentialProviderEnabled: Boolean = true,
     val passkeySupportEnabled: Boolean = true,
     val autofillServiceEnabled: Boolean = true,
+    // ISSUE-P3-324：旧版无障碍自动填充通道（默认关闭；投影取自持久化 extState）
+    val autofillLegacyAccessibilityEnabled: Boolean = false,
     val offerSaveCredentials: Boolean = true, // KP2A: 提示保存新登录凭证
     // ISSUE-P2-71：默认关闭——该通道把候选用户名 / 条目标题交给输入法（见 ExtendedSettings 同名字段）
     val inlineSuggestionsEnabled: Boolean = false, // KP2A: 键盘上方内联候选条 (Android 11+)

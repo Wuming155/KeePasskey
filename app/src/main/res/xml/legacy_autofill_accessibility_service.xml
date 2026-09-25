@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- ISSUE-P3-324：旧版无障碍自动填充通道的服务配置。
+     事件类型仅窗口切换 / 内容变化（触发扫描的必要条件）；canRetrieveWindowContent 必须
+     为 true（无内容读取就无法识别口令框）；不声明 typeViewText 变更级事件——内容变化
+     通知由 typeWindowContentChanged 覆盖，避免高频事件拖垮主线程。 -->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagReportViewIds|flagRetrieveInteractiveWindows"
+    android:canRetrieveWindowContent="true"
+    android:description="@string/legacy_autofill_service_desc"
+    android:notificationTimeout="300" />

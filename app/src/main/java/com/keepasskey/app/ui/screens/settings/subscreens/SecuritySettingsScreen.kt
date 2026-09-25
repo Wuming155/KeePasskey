@@ -93,9 +93,6 @@ fun SecuritySettingsScreen(
     } else {
         null
     }
-    // ISSUE-P3-215：无障碍服务状态是「本机可及性配置」的**信息性**展示，与风险等级正交
-    // （TRUSTED 下也可能为真）；只告知、不降级任何通道——见该卡 KDoc
-    val accessibilityNotice = RuntimeIntegrityPolicy.requiresAccessibilityNotice(integrityReport)
 
     SettingsSubscreenScaffold(
         titleRes = R.string.sec_screen_title,
@@ -302,12 +299,9 @@ fun SecuritySettingsScreen(
                 }
             }
 
-            // ISSUE-P3-215：无障碍服务状态提示（自解锁页迁入；仅信号为真时渲染，只告知不降级）
-            if (accessibilityNotice) {
-                item {
-                    AccessibilityStatusCard()
-                }
-            }
+            // ISSUE-P3-324：原「已启用无障碍服务」状态卡已整体移除——「含系统预装服务」的
+            // 探测口径对未开无障碍的用户构成假提示；本应用现自有旧版无障碍填充通道
+            // （autofill/legacy/，开关在自动填充设置页），该告知语义随之失效。
 
             item {
                 BentoCard(

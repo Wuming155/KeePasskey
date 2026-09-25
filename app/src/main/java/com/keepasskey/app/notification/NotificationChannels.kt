@@ -54,6 +54,18 @@ enum class NotificationChannelSpec(
         nameRes = R.string.notification_channel_sync_failure_name,
         descriptionRes = R.string.notification_channel_sync_failure_desc,
         importance = NotificationManager.IMPORTANCE_LOW
+    ),
+
+    /**
+     * 旧版无障碍自动填充的「检测到口令框」通知（ISSUE-P3-324）：默认重要度（通知栏可见）。
+     * 该通知是本通道的**唯一用户入口**（点按进选择器），不设横幅级重要度——
+     * 通道可关：用户在系统通知设置关闭本通道即等效于临时静默该通道，应用内不另设重复开关。
+     */
+    LEGACY_AUTOFILL(
+        channelId = "keepasskey_legacy_autofill",
+        nameRes = R.string.notification_channel_legacy_autofill_name,
+        descriptionRes = R.string.notification_channel_legacy_autofill_desc,
+        importance = NotificationManager.IMPORTANCE_DEFAULT
     )
 }
 
@@ -73,6 +85,9 @@ object NotificationChannels {
 
     /** 后台同步失败通知的通知 id（ISSUE-P3-298 ④；失败复用同一 id，恢复即撤销） */
     const val ID_SYNC_FAILURE = 1003
+
+    /** 旧版无障碍自动填充「检测到口令框」通知的通知 id（ISSUE-P3-324；同 id 复用去重） */
+    const val ID_LEGACY_AUTOFILL = 1004
 
     /**
      * 通知小图标。

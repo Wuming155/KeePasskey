@@ -6,7 +6,7 @@ import java.io.File
 
 /**
  * 新建库落地位置的接线守卫（**ISSUE-P2-229** 验收 AC②③，静态源码比对，
- * 体例沿用 [com.keepasskey.app.security.AccessibilityNoticeWiringTest]）。
+ * 体例沿用原 `AccessibilityNoticeWiringTest`（ISSUE-P3-324 已随被测链路移除删除）。
  *
  * 本项的失效形态全是**静默**的，而行为级证据只有真机才能给出（SAF 面板与各 provider 的差异），
  * 故以源码顺序与调用存在性锁定五条不可回退的编排约束：

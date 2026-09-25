@@ -8,7 +8,7 @@ import java.io.File
 /**
  * `ISSUE-P2-240` 守护用例：锁定「**界面文案 ↔ 偏好字段 ↔ 生产消费方**」三者对应关系
  * （AC⑤），体例沿用 [com.keepasskey.app.ui.AutofillChannelSwitchWiringTest] /
- * [com.keepasskey.app.security.AccessibilityNoticeWiringTest]（静态源码比对）。
+ * 原 `AccessibilityNoticeWiringTest` 体例（静态源码比对；该类已随 ISSUE-P3-324 移除）。
  *
  * ## 本项要防的失效形态
  * 整改前该行是「措辞指向另一件事」的典型：界面写「跳过浏览器兼容层 / 不通过浏览器兼容适配直接填充

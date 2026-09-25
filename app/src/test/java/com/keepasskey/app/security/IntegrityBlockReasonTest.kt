@@ -49,15 +49,8 @@ class IntegrityBlockReasonTest {
         }
     }
 
-    @Test
-    fun `无障碍信号不得被当作降级原因`() {
-        // 该信号「只提示、不降级」（ISSUE-P2-44），若被列进原因清单即构成对可及性配置的误指控
-        val reasons = IntegrityBlockReason.from(
-            IntegritySignals(thirdPartyAccessibilityEnabled = true),
-            undetermined = false
-        )
-        assertTrue("无障碍命中不得产出降级原因", reasons.isEmpty())
-    }
+    // ISSUE-P3-324：原「无障碍信号不得被当作降级原因」随该信号字段整体移除而删除
+    //（thirdPartyAccessibilityEnabled 已不存在，IntegrityBlockReason.from 的输入域不再含它）。
 
     @Test
     fun `清单顺序即危害度降序且解锁提示取到攻击特征`() {

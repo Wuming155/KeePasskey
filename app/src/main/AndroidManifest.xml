@@ -206,6 +206,28 @@
             android:exported="false"
             android:theme="@style/Theme.KeePasskey" />
 
+        <!-- ISSUE-P3-324：旧版无障碍自动填充通道（系统自动填充框架不可用时的兜底）。
+             exported=true + BIND_ACCESSIBILITY_SERVICE 权限保护（系统绑定必需，
+             第三方无法拉起）；开关在应用内自动填充设置页，默认关闭（双闸门）。 -->
+        <service
+            android:name=".autofill.legacy.LegacyAutofillAccessibilityService"
+            android:exported="true"
+            android:label="@string/autofill_legacy_accessibility_title"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/legacy_autofill_accessibility_service" />
+        </service>
+
+        <!-- ISSUE-P3-324：旧版无障碍通道的条目选择器（通知拉起；受保护窗口，同框架选择器） -->
+        <activity
+            android:name=".autofill.legacy.LegacyFillPickerActivity"
+            android:exported="false"
+            android:theme="@style/Theme.KeePasskey" />
+
         <!-- 传统系统自动填充服务 (AutofillService) 兼容层 -->
         <service
             android:name=".autofill.KeePasskeyAutofillService"

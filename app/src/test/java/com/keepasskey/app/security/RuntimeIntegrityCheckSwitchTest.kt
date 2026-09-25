@@ -23,7 +23,7 @@ import java.io.File
  *    「开了开关指纹照样不可用」。
  *
  * 故本文件分两层：**裁决内核走行为断言**（纯函数，确定性），**接线走源码比对**
- * （体例沿用 [AccessibilityNoticeWiringTest] / `AlgoHotPathGuardsTest`——
+ * （体例沿用原 `AccessibilityNoticeWiringTest` / `AlgoHotPathGuardsTest`——
  * 这类失效只有静态比对能稳定捕获，行为用例在宿主 JVM 上无法构造 Root 环境）。
  */
 class RuntimeIntegrityCheckSwitchTest {
@@ -93,19 +93,8 @@ class RuntimeIntegrityCheckSwitchTest {
         )
     }
 
-    @Test
-    fun `关闭检测不影响无障碍提示的正交语义`() {
-        val report = RuntimeIntegrityPolicy.evaluate(
-            IntegritySignals(thirdPartyAccessibilityEnabled = true),
-            enforcementEnabled = false
-        )
-
-        assertTrue(
-            "无障碍提示由合法可及性配置驱动，与总开关无关（只提示、不降级）",
-            report.enforcement.requireAccessibilityNotice
-        )
-        assertFalse(report.enforcement.disableBiometricQuickUnlock)
-    }
+    // ISSUE-P3-324：原「关闭检测不影响无障碍提示的正交语义」随无障碍信号链路整体移除而删除
+    // （thirdPartyAccessibilityEnabled / requireAccessibilityNotice 已不存在，无对象可测）。
 
     @Test
     fun `开启检测时既有 fail-closed 后果逐项不变`() {

@@ -104,6 +104,10 @@ internal class SettingsExtendedPreferencesController(
     fun setAutofillServiceEnabled(enabled: Boolean) =
         updateExtended { it.copy(autofillServiceEnabled = enabled) }
 
+    /** ISSUE-P3-324：旧版无障碍自动填充通道总开关（默认关闭） */
+    fun setAutofillLegacyAccessibilityEnabled(enabled: Boolean) =
+        updateExtended { it.copy(autofillLegacyAccessibilityEnabled = enabled) }
+
     // ========== KP2A 扩展：显示与外观交互 ==========
     fun setMaskPasswordsDefault(enabled: Boolean) = updateExtended { it.copy(maskPasswordsDefault = enabled) }
 

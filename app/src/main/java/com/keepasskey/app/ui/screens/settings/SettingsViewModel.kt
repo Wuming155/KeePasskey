@@ -331,9 +331,10 @@ class SettingsViewModel @Inject constructor(
     fun setUnlockLockoutMaxSeconds(seconds: Int) = preferences.setUnlockLockoutMaxSeconds(seconds)
     // ISSUE-P2-228：三条通道开关改由扩展偏好承载（持久化 + 真实消费方），门面方法名不变
     fun setCredentialProviderEnabled(enabled: Boolean) = extendedPreferences.setCredentialProviderEnabled(enabled)
-
     fun setPasskeySupportEnabled(enabled: Boolean) = extendedPreferences.setPasskeySupportEnabled(enabled)
     fun setAutofillServiceEnabled(enabled: Boolean) = extendedPreferences.setAutofillServiceEnabled(enabled)
+    fun setAutofillLegacyAccessibilityEnabled(enabled: Boolean) =
+        extendedPreferences.setAutofillLegacyAccessibilityEnabled(enabled)
     fun setRecycleBinEnabled(enabled: Boolean) = preferences.setRecycleBinEnabled(enabled)
     // ISSUE-P3-65：TAN 序列号 / 数据库 UUID 两开关的假 setter 已移除——UI 入口如实禁用
 

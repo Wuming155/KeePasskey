@@ -651,12 +651,13 @@
     <string name="sec_flag_secure_risk_confirm">仍要关闭</string>
     <string name="sec_flag_secure_risk_cancel">保持开启</string>
     <!-- ISSUE-P2-08 (ZT-13)：运行环境完整性风险提示（ELEVATED / COMPROMISED 两档） -->
+    <string name="legacy_autofill_notification_title">检测到密码输入框</string>
+    <string name="legacy_autofill_notification_body">点按选择要填充的条目（旧版无障碍通道）</string>
+    <!-- 无障碍服务在系统设置页展示的服务说明（必须如实描述读取范围） -->
+    <string name="legacy_autofill_service_desc">KeePasskey 的旧版自动填充通道：在系统自动填充不可用的应用中检测口令输入框并代为填充。本服务仅在你从 KeePasskey 选择条目时读取并写入相关输入框的内容，不后台收集或上传任何屏幕内容，且受应用内「旧版自动填充服务」开关控制。</string>
     <string name="sec_integrity_risk_title">运行环境风险提示</string>
     <string name="sec_integrity_risk_elevated">检测到可疑运行环境（可调试构建或非受信任安装来源）。出于安全考虑，已禁用生物识别快速解锁，请谨慎处理敏感凭据。</string>
     <string name="sec_integrity_risk_compromised">检测到明确的动态攻击特征（调试器附加、Root/Magisk 或注入框架）。已禁用生物识别快速解锁与自动填充，请立即停止在本设备处理敏感凭据。</string>
-    <!-- ISSUE-P3-215：无障碍服务状态（自解锁页迁入安全分区；信息性告知，不降级任何通道） -->
-    <string name="sec_accessibility_notice_title">已启用无障碍服务</string>
-    <string name="sec_accessibility_notice_body">本机已启用无障碍服务（非本应用）。该类服务可读取你在屏幕上输入的内容，包括主密码。若你并非因可及性需要而开启，建议前往系统设置关闭。本提示仅作告知，不影响本应用的解锁与自动填充。</string>
     <!-- ISSUE-P2-08 (ZT-13)：风险态降级路径对系统的非敏感回调文案 -->
     <string name="sec_biometric_integrity_blocked">设备存在安全风险，已禁用生物识别快速解锁，请改用主密码解锁</string>
     <!-- ISSUE-P2-227：生物识别被完整性闸门拦下时点名**具体命中信号**（每句自带处置指引，无插值） -->
@@ -876,6 +877,9 @@
     <string name="settings_passkey_privileged_sub">让 Chrome / Firefox 之外的浏览器也能使用通行密钥</string>
     <string name="settings_passkey_privileged_warning">启用某个应用等于允许它以任意网站身份发起通行密钥请求（浏览器委派的固有语义）。请仅启用你信任的浏览器：指纹取自该应用自身的签名证书，换签名或同包名顶替会立即失效。</string>
     <string name="settings_passkey_privileged_empty">未检测到可用的浏览器应用。</string>
+    <!-- ISSUE-P3-324：旧版无障碍自动填充通道（默认关闭；系统自动填充框架不可用时的兜底通道） -->
+    <string name="autofill_legacy_accessibility_title">旧版自动填充服务（无障碍）</string>
+    <string name="autofill_legacy_accessibility_sub">在系统自动填充不可用的应用或设备上，经无障碍服务检测口令输入框并代为填充：检测到口令框时发出通知，点按选择要填充的条目。开启后须在系统设置中启用本应用的无障碍服务；默认关闭。</string>
     <string name="autofill_service_title">系统自动填充服务</string>
     <!-- ISSUE-P2-228：原「旧版自动填充服务 / 兼容低版本 Android 的无障碍填充方式」为虚假描述——
          本应用没有注册任何 AccessibilityService（minSdk 36，AutofillService 自 API 26 起即为唯一
@@ -1214,6 +1218,8 @@
     <string name="notification_totp_text">%1$s（%2$d 秒后失效）</string>
 
     <!-- ===== ISSUE-P3-298 ④：后台同步失败通知（固定通用文案，不含库文件名等用户数据） ===== -->
+    <string name="notification_channel_legacy_autofill_name">旧版自动填充（无障碍）</string>
+    <string name="notification_channel_legacy_autofill_desc">检测到口令输入框时的填充入口通知</string>
     <string name="notification_channel_sync_failure_name">同步异常</string>
     <string name="notification_channel_sync_failure_desc">后台同步失败时的静默提醒；下一次同步成功后自动消失，可在系统设置中关闭</string>
     <string name="notification_sync_failure_title">密码库同步失败</string>

@@ -127,6 +127,7 @@ internal fun NavGraphBuilder.settingsAutofillRoute(navController: NavHostControl
             onCredentialProviderToggle = settingsViewModel::setCredentialProviderEnabled,
             onPasskeySupportToggle = settingsViewModel::setPasskeySupportEnabled,
             onAutofillServiceToggle = settingsViewModel::setAutofillServiceEnabled,
+            onAutofillLegacyAccessibilityToggle = settingsViewModel::setAutofillLegacyAccessibilityEnabled,
             onAutoClearClipboardToggle = settingsViewModel::setAutoClearClipboard,
             onOfferSaveCredentialsToggle = settingsViewModel::setOfferSaveCredentials,
             onInlineSuggestionsToggle = settingsViewModel::setInlineSuggestionsEnabled,

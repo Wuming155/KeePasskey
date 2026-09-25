@@ -115,6 +115,8 @@ class ExtendedSettingsStore @Inject constructor(
             autofillServiceEnabled = p.getBoolean(
                 K_AUTOFILL_SERVICE_ENABLED, defaults.autofillServiceEnabled
             ),
+            autofillLegacyAccessibilityEnabled =
+                p.getBoolean(K_AUTOFILL_LEGACY_ACCESSIBILITY_ENABLED, defaults.autofillLegacyAccessibilityEnabled),
             // TASK-44：自动填充黑名单改由 AutofillBlocklistStore 持久化真实包名条目，
             // 原 disabledAutofillQueriesCount（无写入方计数）及其持久化键一并下架
 
@@ -183,6 +185,7 @@ class ExtendedSettingsStore @Inject constructor(
             .putBoolean(K_CREDENTIAL_PROVIDER_ENABLED, settings.credentialProviderEnabled)
             .putBoolean(K_PASSKEY_SUPPORT_ENABLED, settings.passkeySupportEnabled)
             .putBoolean(K_AUTOFILL_SERVICE_ENABLED, settings.autofillServiceEnabled)
+            .putBoolean(K_AUTOFILL_LEGACY_ACCESSIBILITY_ENABLED, settings.autofillLegacyAccessibilityEnabled)
             .putBoolean(K_MASK_PASSWORDS_DEFAULT, settings.maskPasswordsDefault)
             .putBoolean(K_MASK_TOTP_DEFAULT, settings.maskTotpDefault)
             .putBoolean(K_SHOW_UNLOCKED_NOTIFICATION, settings.showUnlockedNotification)
@@ -279,6 +282,17 @@ class ExtendedSettingsStore @Inject constructor(
         prefs?.getBoolean(K_AUTOFILL_SERVICE_ENABLED, CHANNEL_SWITCH_DEFAULT) ?: CHANNEL_SWITCH_DEFAULT
 
     /**
+     * ISSUE-P3-324：旧版无障碍自动填充通道总开关（默认**关闭**）。
+     *
+     * 消费方：[com.keepasskey.app.autofill.legacy.LegacyAutofillAccessibilityService] 在每个
+     * 无障碍事件上求值——关闭即整条通道静默（不扫描、不通知、不回填）。系统侧是否已启用
+     * 本应用的无障碍服务是另一回事（未启用时服务根本不会收到事件），两者共同构成该通道
+     * 的双闸门。
+     */
+    fun isAutofillLegacyAccessibilityEnabled(): Boolean =
+        prefs?.getBoolean(K_AUTOFILL_LEGACY_ACCESSIBILITY_ENABLED, false) ?: false
+
+    /**
      * ISSUE-P3-43：是否覆盖页面的 `importantForAutofill=no` 标记（默认 false = 尊重页面标记）。
      *
      * 供 [com.keepasskey.app.autofill.KeePasskeyAutofillService] 在每次填充/保存请求时求值；
@@ -338,6 +352,9 @@ class ExtendedSettingsStore @Inject constructor(
         const val K_CREDENTIAL_PROVIDER_ENABLED = "credential_provider_enabled"
         const val K_PASSKEY_SUPPORT_ENABLED = "passkey_support_enabled"
         const val K_AUTOFILL_SERVICE_ENABLED = "autofill_service_enabled"
+
+        /** ISSUE-P3-324：旧版无障碍自动填充通道总开关（默认 false，未持久化时按关闭处理） */
+        const val K_AUTOFILL_LEGACY_ACCESSIBILITY_ENABLED = "autofill_legacy_accessibility_enabled"
 
         /**
          * 三条通道总开关的**共同缺省值**（ISSUE-P2-228）。

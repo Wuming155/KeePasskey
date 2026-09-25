@@ -34,19 +34,6 @@ data class IntegritySignals(
     val magiskDetected: Boolean = false,
     val hookFrameworkDetected: Boolean = false,
     /**
-     * 已启用**本应用以外**的无障碍服务（ISSUE-P2-44）。
-     *
-     * **判定口径（保守、如实声明）**：`AccessibilityManager.getEnabledAccessibilityServiceList()`
-     * 返回的任一服务，其包名 **≠ 本应用包名** 即为真——**包含系统预装的 TalkBack 等**。
-     * 之所以不排除系统应用：无障碍服务**同等具备读取（乃至代填）任意输入内容的能力**，
-     * 系统签名并不改变这一能力；对密码管理器而言这是必须向用户披露的信号。
-     *
-     * **不参与风险等级判定**：启用无障碍是**合法且必要的可及性配置**（视障用户依赖它），
-     * 若因此降级生物解锁 / 自动填充，等于用安全名义剥夺可及性。故本信号只置
-     * [IntegrityEnforcement.requireAccessibilityNotice]，**不改变** [RuntimeRiskLevel]。
-     */
-    val thirdPartyAccessibilityEnabled: Boolean = false,
-    /**
      * 正被其他进程 `ptrace`（`/proc/self/status` 的 `TracerPid > 0`，ISSUE-P3-83）。
      *
      * **口径**：由 [ProcTracerPid] 解析、[TracedProcessProbe] 同步读取。该信号覆盖
@@ -80,15 +67,6 @@ data class IntegrityEnforcement(
     val disableBiometricQuickUnlock: Boolean,
     val disableAutofill: Boolean,
     val requireRiskNotice: Boolean,
-    /**
-     * 是否需在设置页安全分区展示「已启用无障碍服务」状态
-     * （ISSUE-P2-44；ISSUE-P3-215 自解锁页迁入——该信号与主密码输入无交互关系，常驻首页属冗余）。
-     *
-     * 与 [requireRiskNotice] **分离**：后者由完整性等级（ELEVATED / COMPROMISED）驱动并伴随通道降级；
-     * 本项由**合法可及性配置**驱动，**只提示、不降级**——判据见
-     * [IntegritySignals.thirdPartyAccessibilityEnabled] 的 KDoc。
-     */
-    val requireAccessibilityNotice: Boolean = false,
     /**
      * 生物识别快速解锁被禁用时的**具体命中信号**，按危害度降序（ISSUE-P2-227）。
      *
@@ -168,16 +146,6 @@ object RuntimeIntegrityPolicy {
     fun requiresRiskNotice(report: RuntimeIntegrityReport?): Boolean =
         report?.enforcement?.requireRiskNotice == true
 
-    /**
-     * 是否必须在**设置页安全分区**展示「已启用无障碍服务」状态
-     * （ISSUE-P2-44 的唯一消费点；ISSUE-P3-215 自解锁页迁入，判定与「只提示、不降级」语义不变）。
-     *
-     * 与 [requiresRiskNotice] 正交：本项**不**随等级变化，故 `TRUSTED` 等级下也可能为 true；
-     * 未注入快照（null，仅单测 / 异常装配）恒为 false，绝不回填「有风险」假值。
-     */
-    fun requiresAccessibilityNotice(report: RuntimeIntegrityReport?): Boolean =
-        report?.enforcement?.requireAccessibilityNotice == true
-
     fun evaluate(
         signals: IntegritySignals,
         /**
@@ -189,8 +157,6 @@ object RuntimeIntegrityPolicy {
          */
         enforcementEnabled: Boolean = true
     ): RuntimeIntegrityReport {
-        // ISSUE-P2-44：无障碍信号只影响「是否提示」（设置页安全分区展示），不影响等级与通道降级
-        val accessibilityNotice = signals.thirdPartyAccessibilityEnabled
         // ISSUE-P2-227：命中信号清单与等级同源产出（声明顺序即危害度降序），供 UI 点名归因
         val blockReasons = IntegrityBlockReason.from(signals, undetermined = false)
         val level = riskLevelOf(signals)
@@ -199,7 +165,7 @@ object RuntimeIntegrityPolicy {
             level = level,
             signals = signals,
             enforcement = if (enforcementEnabled) {
-                enforcingEnforcement(level, accessibilityNotice, blockReasons)
+                enforcingEnforcement(level, blockReasons)
             } else {
                 // ISSUE-P3-236 / PD-15：用户已显式关闭检测 ⇒ 不降级任何通道。
                 // `biometricBlockReasons` 按既有约定在放行态恒为空清单——即使信号命中，
@@ -207,8 +173,7 @@ object RuntimeIntegrityPolicy {
                 IntegrityEnforcement(
                     disableBiometricQuickUnlock = false,
                     disableAutofill = false,
-                    requireRiskNotice = false,
-                    requireAccessibilityNotice = accessibilityNotice
+                    requireRiskNotice = false
                 )
             }
         )
@@ -240,14 +205,12 @@ object RuntimeIntegrityPolicy {
      */
     private fun enforcingEnforcement(
         level: RuntimeRiskLevel,
-        accessibilityNotice: Boolean,
         blockReasons: List<IntegrityBlockReason>
     ): IntegrityEnforcement = when (level) {
         RuntimeRiskLevel.COMPROMISED -> IntegrityEnforcement(
             disableBiometricQuickUnlock = true,
             disableAutofill = true,
             requireRiskNotice = true,
-            requireAccessibilityNotice = accessibilityNotice,
             biometricBlockReasons = blockReasons
         )
 
@@ -255,15 +218,13 @@ object RuntimeIntegrityPolicy {
             disableBiometricQuickUnlock = true,
             disableAutofill = false,
             requireRiskNotice = true,
-            requireAccessibilityNotice = accessibilityNotice,
             biometricBlockReasons = blockReasons
         )
 
         else -> IntegrityEnforcement(
             disableBiometricQuickUnlock = false,
             disableAutofill = false,
-            requireRiskNotice = false,
-            requireAccessibilityNotice = accessibilityNotice
+            requireRiskNotice = false
         )
     }
 

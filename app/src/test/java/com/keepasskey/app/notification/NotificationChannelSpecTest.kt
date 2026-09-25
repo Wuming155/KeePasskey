@@ -25,7 +25,9 @@ class NotificationChannelSpecTest {
                 NotificationChannelSpec.UNLOCKED_STATUS,
                 NotificationChannelSpec.AUTOFILL_TOTP,
                 // ISSUE-P3-298 ④：后台同步失败通知通道（低重要度静默，系统设置可关）
-                NotificationChannelSpec.SYNC_FAILURE
+                NotificationChannelSpec.SYNC_FAILURE,
+                // ISSUE-P3-324：旧版无障碍自动填充「检测到口令框」通知通道（本通道唯一用户入口）
+                NotificationChannelSpec.LEGACY_AUTOFILL
             ),
             NotificationChannelSpec.entries.toSet()
         )

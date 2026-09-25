@@ -65,6 +65,11 @@ data class ExtendedSettings(
     val credentialProviderEnabled: Boolean = true,
     val passkeySupportEnabled: Boolean = true,
     val autofillServiceEnabled: Boolean = true,
+    // ISSUE-P3-324：旧版无障碍自动填充通道总开关（默认**关闭**）。
+    // 与上面三条通道开关不同：本通道依赖用户在系统设置中显式启用本应用的无障碍服务，
+    // 出厂即关闭（多一重「用户显式开启」闸门）；消费方为 LegacyAutofillAccessibilityService
+    // （每个无障碍事件都求值），设置页开关行见 AutofillProviderCard。
+    val autofillLegacyAccessibilityEnabled: Boolean = false,
     // 自动填充黑名单已由 AutofillBlocklistStore 承载（TASK-44）：
     // 原 disabledAutofillQueriesCount 计数无任何写入方，随本次整改一并下架
 

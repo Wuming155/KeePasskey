@@ -152,6 +152,7 @@ internal fun buildSettingsUiState(
     credentialProviderEnabled = extState.credentialProviderEnabled,
     passkeySupportEnabled = extState.passkeySupportEnabled,
     autofillServiceEnabled = extState.autofillServiceEnabled,
+    autofillLegacyAccessibilityEnabled = extState.autofillLegacyAccessibilityEnabled,
     offerSaveCredentials = extState.offerSaveCredentials,
     inlineSuggestionsEnabled = extState.inlineSuggestionsEnabled,
     autoReturnFromQuery = extState.autoReturnFromQuery,
