@@ -47,36 +47,11 @@
 > 已全部闭环：§315（309 / 312）、§317（308）、§318（310）、§319（311）、§320（313）；
 > 2026-09-25 CI 设备门禁与供应链扫描两条（`ISSUE-P2-314` / `ISSUE-P2-315`）闭环见 §325。
 
-## P3 低危问题、特性接线与体验优化（1 项）
+## P3 低危问题、特性接线与体验优化（0 项）
 
 > 2026-09-25 CI 触发频率治理（`ISSUE-P3-316`）闭环见 §326；
 > ReDoS 正则修复（`ISSUE-P3-318`）闭环见 §327 / §328；
-> 扫码栈迁移（`ISSUE-P3-319`）与扫码回显（`ISSUE-P3-320`）闭环见 §328。
-
-### ISSUE-P3-317：CodeQL 默认设置未按 ISSUE-P3-57 前置条件停用，Security 面板双语言配置持续报错
-
-- **优先级**：P3（面板红 / 运维残留；**不削弱实际有效覆盖**——rust / python / actions 由自管高级配置正常产出分析）。
-- **核实时间点**：2026-09-25。
-- **核实方式**：① Security → Code scanning 面板实测截图：`language:c-cpp` 与 `language:java-kotlin` 两配置均报
-  「CodeQL exited with errors」+「No code scanning results」，last scan 为 2 周前（commit `6941b89b`）；
-  ② `GET /repos/Wuming155/KeePasskey/code-scanning/analyses` 实测 2026-09-25 当日多条
-  `.github/workflows/codeql.yml:analyze` 分析 `error` 为空——**自管高级配置工作流本身运行正常**；
-  ③ `GET` / `PATCH /repos/.../code-scanning/default-setup` 实测 403（当前细粒度 PAT 无
-  「Code scanning alerts」写权限），故停用动作无法经现令牌 API 化。
-- **背景**：`ISSUE-P3-57`（§23.4，`docs/resolved/batches/23-*.md` 第 78 行）切换到 advanced setup 时立有
-  **启用前置条件（人工运维动作）**：须在 Settings → Code security → Code scanning → CodeQL analysis →
-  **Default setup → Disable** 关闭默认设置。该动作至今未完成，残留的默认设置对 java-kotlin / c-cpp
-  做周期扫描——二者在本仓无真实构建支撑（Android/Gradle 与 C/C++ 工具链均未在默认设置中配置），
-  恒以「构建失败 → 空分析（rules=0, results=0）」告终并令面板报错；且两套设置并存时，advanced 配置的
-  分析上传会被 GitHub 拒绝处理、告警会被默认设置反复重新登记（`.github/workflows/codeql.yml` 头部注释）。
-- **整改方案**（人工运维动作）：GitHub 网页 Settings → Code security and quality → Code scanning →
-  CodeQL analysis → Default setup → **Disable**。若需代理代办：为 `GITHUB_TOKEN` 增授细粒度权限
-  「Repository permissions → Code scanning alerts → Read and write」后，由代理执行
-  `PATCH /repos/Wuming155/KeePasskey/code-scanning/default-setup`（body `{"state":"disabled"}`）。
-  > **代办复核实录（2026-09-25，§327 批次代理）**：`gh api repos/…/code-scanning/default-setup`
-  > 实跑仍 **403**（`Resource not accessible by personal access token`，读均不可得）——现令牌
-  > 无「Code scanning alerts」权限，API 化停用仍被阻塞；告警**列表读数**（`GET …/alerts`）可用，
-  > 同日实读 #355 / #356 仍 `state=open`。须由用户完成网页停用或增授权限后由代理复跑。
-- **验收标准**：① Security → Code scanning 不再出现默认设置（c-cpp / java-kotlin）的错误条目；
-  ② `.github/workflows/codeql.yml` 每周巡检与手动触发仍正常上传 SARIF（analyses 列表 `error` 为空、
-  `analysis_key` 仍为 `codeql.yml:analyze`）；③ 闭环批次文档记录停用后的面板或 API 读数。
+> 扫码栈迁移（`ISSUE-P3-319`）与扫码回显（`ISSUE-P3-320`）闭环见 §328；
+> CodeQL 默认设置停用（`ISSUE-P3-317`，用户网页操作）闭环见 §329。
+>
+> **全量待办清零（P0 → P3）。**
