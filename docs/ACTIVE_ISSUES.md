@@ -43,6 +43,7 @@
 - **核实时间点**：2026-09-25（直读 `app/src/main` 全部相关源码 + 单测 + `SettingsRepository` 默认值 + `AndroidManifest.xml` / `res/xml/data_extraction_rules.xml`）。
 - **核实方式**：逐行直读 `UnlockThrottle.kt` / `UnlockThrottleIntegrity.kt` / `MasterPasswordUnlockSession.kt` / `ChildDatabaseSessionManager.kt` 的 `gate` 消费链；出厂默认值经 `SettingsRepository.kt:56` 与 `RealSettingsRepository.kt:114` 双向核对；「全仓无删除点」经定向检索别名 `unlock_throttle_integrity` 确认（仅命中其定义处）。
 - **涉及文件**：`app/src/main/java/com/keepasskey/app/security/UnlockThrottle.kt`、`UnlockThrottleIntegrity.kt`、`app/.../ui/screens/unlock/MasterPasswordUnlockSession.kt`、`app/.../data/childdb/ChildDatabaseSessionManager.kt`、`app/.../data/repository/{SettingsRepository,RealSettingsRepository}.kt`、`app/src/androidTest/.../UnlockThrottleDeletionBypassDeviceTest.kt`。
+- **参考项目对照**：[`references/本地文件级防护层的参考项目对照.md`](references/本地文件级防护层的参考项目对照.md) §1（2026-09-25：五项目**无一实现**主密码失败计数 / 锁定；kp2a 仅 QuickUnlock PIN 有计数且不落盘；Monica 明示「Android owns retry/lockout policy」）。
 - **背景**：本层由 `ISSUE-P3-54`（Keystore HMAC）与 `ISSUE-P2-45`（每库一条存在性标记 + `reset` 改写零值记录）构成，目的是封死「删掉 `shared_prefs` 三个键即复位失败计数」的旁路；层内自陈的威胁模型边界见 `UnlockThrottleIntegrity.kt:94-96`。
 - **问题 ①（缺开关门控）**：`gate` 的完整性分支排在 `if (!config.enabled)` **之前**，且锁定上限硬编码 `UnlockThrottlePolicy.MAX_BACKOFF_MS`（30 分钟）而非 `config.maxBackoffMs`（`UnlockThrottle.kt:286-298`）；而 `unlockThrottleEnabled` 出厂为 `false`（`SettingsRepository.kt:56` / `RealSettingsRepository.kt:114`）⇒ **从未开启过节流的用户同样会被这条 fail-closed 拒绝**，其自订的最长锁定（合法域下限 60s）对该分支无效。
 - **问题 ②（不可自愈，KDoc「有界」不成立）**：`read` 把**空串 MAC** 当作缺失（`UnlockThrottle.kt:93-94` 的 `takeIf { it.isNotEmpty() }`），而 `persist` 恰在 `integrity.mac()` 返回 null 时写入**空串**（`:114-116` 的 `.orEmpty()`）⇒ 只要 Keystore HMAC 持续不可用（`UnlockThrottleIntegrity.kt:105-116` 的 `catch → null`），`gate` 每次都会重写一条 MAC 仍为空的锁定记录并再判 `integrityIntact=false`，**每次调用重锁 30 分钟**。`UnlockThrottle.kt:124-130` 所称「当前 Keystore 故障下首启也只遇一次有界锁定（上限 `MAX_BACKOFF_MS`）」据此**不成立**。消费侧 `MasterPasswordUnlockSession.unlock:95-108` 与 `ChildDatabaseSessionManager.mount:229-231` 在 `Locked` 时直接返回 ⇒ 在这条链上主密码解锁恒被拒，而用户看到的仍是「请等待 N 分钟」（等待无效）。
@@ -73,6 +74,10 @@
 > 三条的共同前提：目标对手同为「本地文件级写者」，而该角色在本机上可读同目录 `filesDir/*.kdbx`
 > （离线爆破或直接替换库文件），且**无代码执行的文件写入路径**已被 `allowBackup="false"`
 > （`AndroidManifest.xml:77`）与 `res/xml/data_extraction_rules.xml`（cloud-backup / device-transfer 九域全 exclude）封闭。
+>
+> **参考项目对照已完成**：见 [`references/本地文件级防护层的参考项目对照.md`](references/本地文件级防护层的参考项目对照.md)
+> （2026-09-25；§2 / §3 / §4 分别对应 `ISSUE-P3-326` / `327` / `328`）。净结论：四条均属**本仓自创加固**，
+> 品类内**无可援引的保留依据**，亦**不得**以「参考项目都没做」作为移除依据；唯一可用判据是「对在模型内的对手是否有增量」。
 
 ### ISSUE-P3-326 防回滚状态文件的 Keystore MAC（`KeystoreSyncIntegrityMac`）：冗余性评估与威胁模型口径登记
 
