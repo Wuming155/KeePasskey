@@ -579,8 +579,13 @@ jobs:
           adb devices
 
       - name: 全模块 connected 测试（device 层门禁真实执行）
-        run: ./gradlew connectedDebugAndroidTest --console=plain \
-          -Pandroid.testInstrumentationRunnerArguments.notClass=com.keepasskey.app.autofill.AutofillAuthChainDeviceTest
+        # ISSUE-P2-314：run #354 实证此处原为「行内 plain scalar + 反斜杠续行」——YAML 把
+        # 「反斜杠+换行」折叠为「反斜杠+空格」，bash 将 `\ ` 解释为转义空格，gradle 收到
+        # 带前导空格的 " -Pandroid…notClass=…" 误判为任务名（Task not found），connected
+        # 自该写法引入起从未真正执行。改块字面量令反斜杠+换行成为真实续行。
+        run: |
+          ./gradlew connectedDebugAndroidTest --console=plain \
+            -Pandroid.testInstrumentationRunnerArguments.notClass=com.keepasskey.app.autofill.AutofillAuthChainDeviceTest
 
       - name: 归档 connected 测试报告
         if: always()

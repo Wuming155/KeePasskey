@@ -61,10 +61,16 @@ runner 镜像未把 `$ANDROID_SDK_ROOT/emulator` 放入 PATH，模拟器从未�
 **二层修（ANDROID_AVD_HOME 钉死 + ini 落位断言迁移）后 run #353 暴露第三层问题**：AVD 已被找到，
 但 runner 镜像的 `/dev/kvm` 存在而当前用户不在 kvm 组（`ProbeKVM: This user doesn't have permissions
 to use KVM (/dev/kvm)`），模拟器秒退，兜底循环 20 分钟如实报错——等待纪律已正确工作，根因在宿主权限。
-影响面：近 40 次 build run（#313–#353，2026-09-23 起）Device gate 无一 success——
+**三层修（/dev/kvm 断言 + 放权）后 run #354 暴露第四层问题**：模拟器 55 秒完成启动、`emulator-5554`
+正常上线（前三层修复经 CI 实证全部生效），但 connected 测试步骤自身是「行内 plain scalar + 反斜杠
+续行」——YAML 把「反斜杠+换行」折叠为「反斜杠+空格」，bash 将 `\ ` 解释为转义空格，gradle 收到带
+前导空格的 ` -Pandroid…notClass=…` 误判为任务名（`Task not found`），**connected 自该写法引入起从未
+真正执行**。
+影响面：近 40 次 build run（#313–#354，2026-09-23 起）Device gate 无一 success——
 `ISSUE-P2-192` 第 7 项建立的设备层门禁在 CI 持续缺位。
 
-**涉及文件**：`.github/workflows/build.yml` device-gate「启动 Android 模拟器」步骤。
+**涉及文件**：`.github/workflows/build.yml` device-gate「启动 Android 模拟器」步骤与
+「全模块 connected 测试」步骤。
 
 **验收标准**：
 1. emulator 改以 `${ANDROID_SDK_ROOT}/emulator/emulator` 全路径调用，且启动前 `test -x` 断言二进制存在
@@ -75,8 +81,10 @@ to use KVM (/dev/kvm)`），模拟器秒退，兜底循环 20 分钟如实报错
    连同 `.avd` 目录迁移并留痕，完全未产出则秒级显式报错。
 4. 模拟器启动前对 `/dev/kvm` 做存在断言并放权（`chmod 666`，一次性 runner 环境无持久化风险）；
    `/dev/kvm` 缺失即秒级显式报错。
-5. 模拟器失败场景下 job 至多约 20 分钟内以明确 error 退出，不再挂满 120 分钟。
-6. push 触发的下一轮 CI run 中 device-gate job conclusion=success（connected 全模块真实执行）。
+5. connected 测试步骤改块字面量，gradle 实际收到 `-Pandroid.testInstrumentationRunnerArguments.notClass=…`
+   过滤参数（不再有伪任务名）。
+6. 模拟器失败场景下 job 至多约 20 分钟内以明确 error 退出，不再挂满 120 分钟。
+7. push 触发的下一轮 CI run 中 device-gate job conclusion=success（connected 全模块真实执行）。
 
 ### ISSUE-P2-315 CI OWASP Dependency-Check：NVD 库无 runner 缓存 + 60 分钟超时不足，扫描反复被强杀
 
