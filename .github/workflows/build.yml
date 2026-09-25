@@ -548,6 +548,12 @@ jobs:
             fi
           fi
           adb start-server
+          # ISSUE-P2-314：run #353 实证 runner 镜像的 /dev/kvm 存在但当前用户不在 kvm 组
+          # （`This user doesn't have permissions to use KVM`，/etc/group 的 kvm 行无用户名）
+          # ——runner 为一次性环境，放权无持久化风险；/dev/kvm 缺失（宿主未开嵌套虚拟化）
+          # 则秒级显式报错而非空等兜底。
+          test -e /dev/kvm || { echo "::error::/dev/kvm 不存在（runner 宿主未提供嵌套虚拟化）"; exit 1; }
+          sudo chmod 666 /dev/kvm
           # ISSUE-P2-314：ubuntu-24.04 runner 镜像不把 emulator 目录放进 PATH
           # （2026-09-24 run #351 实证 `emulator: command not found`），必须走 SDK 内全路径；
           # 并先断言二进制存在，把该类失败从「后台静默 + 等待挂死」提前到秒级显式报错。

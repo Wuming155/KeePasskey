@@ -58,7 +58,10 @@ runner 镜像未把 `$ANDROID_SDK_ROOT/emulator` 放入 PATH，模拟器从未�
 `wait-for-device`）后 run #352 暴露第二层问题**：新版 runner 镜像 + emulator 37.1.11 下
 `avdmanager` 创建的 AVD 落位与 emulator 查找路径不一致（`Unknown AVD name [ci-device]`，ini 不在
 `$HOME/.android/avd`），20 分钟兜底此时真实可达并按设计报错退出（挂死形态已消除，但启动仍未成）。
-影响面：近 40 次 build run（#313–#352，2026-09-23 起）Device gate 无一 success——
+**二层修（ANDROID_AVD_HOME 钉死 + ini 落位断言迁移）后 run #353 暴露第三层问题**：AVD 已被找到，
+但 runner 镜像的 `/dev/kvm` 存在而当前用户不在 kvm 组（`ProbeKVM: This user doesn't have permissions
+to use KVM (/dev/kvm)`），模拟器秒退，兜底循环 20 分钟如实报错——等待纪律已正确工作，根因在宿主权限。
+影响面：近 40 次 build run（#313–#353，2026-09-23 起）Device gate 无一 success——
 `ISSUE-P2-192` 第 7 项建立的设备层门禁在 CI 持续缺位。
 
 **涉及文件**：`.github/workflows/build.yml` device-gate「启动 Android 模拟器」步骤。
@@ -70,8 +73,10 @@ runner 镜像未把 `$ANDROID_SDK_ROOT/emulator` 放入 PATH，模拟器从未�
    兜底报错真实可达。
 3. `ANDROID_AVD_HOME` 显式钉死且两侧共用；创建后硬断言 `ci-device.ini` 落位，avdmanager 落位不一致时
    连同 `.avd` 目录迁移并留痕，完全未产出则秒级显式报错。
-4. 模拟器失败场景下 job 至多约 20 分钟内以明确 error 退出，不再挂满 120 分钟。
-5. push 触发的下一轮 CI run 中 device-gate job conclusion=success（connected 全模块真实执行）。
+4. 模拟器启动前对 `/dev/kvm` 做存在断言并放权（`chmod 666`，一次性 runner 环境无持久化风险）；
+   `/dev/kvm` 缺失即秒级显式报错。
+5. 模拟器失败场景下 job 至多约 20 分钟内以明确 error 退出，不再挂满 120 分钟。
+6. push 触发的下一轮 CI run 中 device-gate job conclusion=success（connected 全模块真实执行）。
 
 ### ISSUE-P2-315 CI OWASP Dependency-Check：NVD 库无 runner 缓存 + 60 分钟超时不足，扫描反复被强杀
 
