@@ -230,8 +230,13 @@ dependencies {
     // Autofill IME 内联建议（官方 androidx.autofill.inline v1 内容模型）：
     // 服务侧 InlineSuggestionUi Slice 构建自 1.1.0 起可用，1.3.0 为当前稳定版
     implementation(libs.autofill)
-    // TOTP 二维码扫描（断点5 整改：扫码按钮真实化）
-    implementation(libs.zxing.embedded)
+    // ISSUE-P3-319：TOTP 扫码栈——CameraX 取景 + zxing:core 纯算法 QR 解码，
+    // 替代停更的 zxing-android-embedded（其取景建立在废弃的 Camera1 API 上）
+    implementation(libs.camera.core)
+    implementation(libs.camera.camera2)
+    implementation(libs.camera.lifecycle)
+    implementation(libs.camera.view)
+    implementation(libs.zxing.core)
 
     debugImplementation(libs.compose.ui.tooling)
 

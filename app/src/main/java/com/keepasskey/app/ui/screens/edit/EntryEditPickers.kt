@@ -14,12 +14,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.journeyapps.barcodescanner.ScanContract
-import com.journeyapps.barcodescanner.ScanOptions
 import com.keepasskey.app.R
-import com.keepasskey.app.security.SecureCaptureActivity
 import com.keepasskey.app.ui.components.CustomIconItem
 import com.keepasskey.app.ui.model.UiMessage
 import kotlinx.coroutines.CoroutineScope
@@ -37,7 +33,7 @@ internal data class EntryEditPickers(
     val decodedCustomIcons: List<CustomIconItem>,
     /** 断点1：拉起 SAF 任意文件选择，选中后随编辑会话提交附件。 */
     val pickAttachment: () -> Unit,
-    /** 断点5：拉起 zxing 扫码，结果以 CharArray 上行回填 TOTP 种子。 */
+    /** 断点5：打开受保护扫码对话框（ISSUE-P3-319），结果以 CharArray 上行回填 TOTP 种子。 */
     val scanTotpQr: () -> Unit,
     /** TASK-15：拉起系统相册 Photo Picker，选图降采样为 ≤128px PNG 后上传。 */
     val pickCustomIcon: () -> Unit
@@ -66,11 +62,16 @@ private fun attachmentTooLargeMessage(): UiMessage =
  * - 附件读取跑 `Dispatchers.IO`，空文件与异常均如实提示（不静默丢弃）；
  * - 扫码结果（框架边界 String）**即刻**转 `CharArray` 走安全桥接上行（TASK-10）；
  * - 相册图片先经 [decodeAndScaleToPng] 降采样，解码失败如实提示；
- * - 扫码提示文案在 Composable 内解析后捕获，避免 stale 引用（原 LINT 修正）。
+ * - 扫码提示文案（原 ScanOptions prompt）随 ISSUE-P3-319 迁移至对话框标题文案，此处不再解析。
  *
  * ISSUE-P3-305：原 105 行单函数按「三个选择器各自成器」拆为下方三个私有工厂
  * （[rememberAttachmentPicker] / [rememberDecodedCustomIcons] / [rememberCustomIconPicker]），
  * 装配序列、`remember`/`LaunchedEffect` 的调用顺序与各回调体逐行搬运，行为零变更。
+ *
+ * ISSUE-P3-319：TOTP 扫码由 zxing `ScanContract` 拉起独立 CaptureActivity 改为**置位
+ * 对话框状态**、渲染本文件内的 [TotpScanDialog]（CameraX 取景 + zxing:core 解码，
+ * 加固面等效迁移见该组件 KDoc）；解码结果同样即刻转 CharArray 走
+ * `onTotpSecretChangeSecure` 上行。
  */
 @Composable
 internal fun rememberEntryEditPickers(
@@ -79,29 +80,22 @@ internal fun rememberEntryEditPickers(
 ): EntryEditPickers {
     val attachmentPicker = rememberAttachmentPicker(viewModel, scope)
 
-    val qrScanner = rememberLauncherForActivityResult(ScanContract()) { result ->
-        result.contents?.let { viewModel.onTotpSecretChangeSecure(it.toCharArray()) }
-    }
+    var showTotpScanDialog by remember { mutableStateOf(false) }
 
     val decodedCustomIcons = rememberDecodedCustomIcons(viewModel)
     val photoPicker = rememberCustomIconPicker(viewModel, scope)
 
-    val scanPrompt = stringResource(R.string.edit_scan_totp_qr)
+    if (showTotpScanDialog) {
+        TotpScanDialog(
+            onDecoded = viewModel::onTotpSecretChangeSecure,
+            onDismiss = { showTotpScanDialog = false }
+        )
+    }
 
     return EntryEditPickers(
         decodedCustomIcons = decodedCustomIcons,
         pickAttachment = { attachmentPicker.launch("*/*") },
-        scanTotpQr = {
-            val options = ScanOptions()
-            options.setDesiredBarcodeFormats(ScanOptions.QR_CODE)
-            options.setPrompt(scanPrompt)
-            options.setBeepEnabled(false)
-            options.setOrientationLocked(true)
-            // ISSUE-P3-71：改用受保护取景窗口（FLAG_SECURE + 反悬浮窗覆盖），
-            // 避免密钥种子二维码取景画面被截屏 / 录屏 / 多任务缩略图捕获。
-            options.setCaptureActivity(SecureCaptureActivity::class.java)
-            qrScanner.launch(options)
-        },
+        scanTotpQr = { showTotpScanDialog = true },
         pickCustomIcon = {
             photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
         }

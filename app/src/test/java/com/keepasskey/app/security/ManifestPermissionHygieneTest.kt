@@ -15,7 +15,8 @@ import java.io.File
  *    （合并器已去重），「冗余」仅存在于源文件层面；
  * 2. `USE_FINGERPRINT`（API 28 起弃用，仅由 `androidx.biometric` 旧兼容路径注入）加
  *    `tools:node="remove"`——minSdk 36 ⇒ 该路径永不执行；
- * 3. **保留** `CAMERA`（zxing 扫码取景所需），不得被移除。
+ * 3. **保留并显式声明** `CAMERA`（ISSUE-P3-319 起为本清单显式声明——原由 zxing
+ *    注入传递声明，移除该依赖后扫码运行期需求改由本模块自身声明），不得被移除。
  *
  * 断言前剔除 XML 注释（整改说明自身会提到权限名与 `tools:node` 字样）。
  */
@@ -46,9 +47,9 @@ class ManifestPermissionHygieneTest {
     }
 
     @Test
-    fun `CAMERA 不得被移除（zxing 扫码取景所需）`() {
+    fun `CAMERA 不得被移除（TOTP 扫码运行期所需）`() {
         assertFalse(
-            "CAMERA 由 zxing 注入且为扫码功能所需，禁止对其施加 tools:node=\"remove\"",
+            "CAMERA 为 TOTP 扫码运行期所需（ISSUE-P3-319 起本清单显式声明），禁止对其施加 tools:node=\"remove\"",
             Regex(
                 """<uses-permission\s+android:name="android\.permission\.CAMERA"\s+tools:node="remove""""
             ).containsMatchIn(declarations)
@@ -63,6 +64,8 @@ class ManifestPermissionHygieneTest {
             "android.permission.INTERNET",
             "android.permission.ACCESS_NETWORK_STATE",
             "android.permission.USE_BIOMETRIC",
+            // ISSUE-P3-319：原由 zxing-embedded 传递注入，移除该依赖后必须保持显式声明
+            "android.permission.CAMERA",
             "android.permission.HIDE_OVERLAY_WINDOWS",
             "android.permission.POST_NOTIFICATIONS"
         )) {

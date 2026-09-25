@@ -47,9 +47,20 @@
 > 已全部闭环：§315（309 / 312）、§317（308）、§318（310）、§319（311）、§320（313）；
 > 2026-09-25 CI 设备门禁与供应链扫描两条（`ISSUE-P2-314` / `ISSUE-P2-315`）闭环见 §325。
 
-## P3 低危问题、特性接线与体验优化（3 项）
+## P3 低危问题、特性接线与体验优化（2 项）
 
-> 2026-09-25 CI 触发频率治理（`ISSUE-P3-316`）闭环见 §326。
+> 2026-09-25 CI 触发频率治理（`ISSUE-P3-316`）闭环见 §326；
+> ReDoS 正则修复（`ISSUE-P3-318`）闭环见 §327。
+
+### ISSUE-P3-319：扫码栈依赖治理——移除停更且依赖废弃 Camera1 的 `com.journeyapps:zxing-android-embedded`，重构为 CameraX + `zxing:core` 纯离线 Compose 对话框
+
+> **整改进展（2026-09-25，§327）**：整改代码已全部入库（依赖替换 / `TotpScanDialog` Compose 对话框 /
+> `SecureCaptureActivity` 与 Manifest 声明删除 / `CAMERA`+`uses-feature` 显式声明 / 守卫测试迁移），
+> 全量单测 2774 全绿、门禁见 §327 §4。真机（`1c859bcc7d24`，未装库状态）已实证：权限请求 /
+> 拒绝不崩溃有如实提示 / 重试授权后 CameraX 取景流出现 / 对话框窗口 `fl=…SECURE…` +
+> `pfl=…HIDE_NON_SYSTEM_OVERLAY_WINDOWS…`（dumpsys 实读，宿主 Activity 窗口 SECURE 同证）。
+> **唯一未竟**：AC③ 前半「实拍 TOTP 二维码成功回填种子」——二维码已投至 PC 屏幕轮询 2 分钟未识别，
+> 系真机未对准屏幕（物理朝向仅用户可调整）；取得实拍读数后按小批闭环归档。
 
 ### ISSUE-P3-319：扫码栈依赖治理——移除停更且依赖废弃 Camera1 的 `com.journeyapps:zxing-android-embedded`，重构为 CameraX + `zxing:core` 纯离线 Compose 对话框
 
@@ -64,17 +75,6 @@
   ④ **加固迁移口径（本条安全约束核心）**：对话框挂载在编辑页所在 Activity 窗口内，须逐项核实并登记三点——(a) 承载 Activity 的 `FLAG_SECURE` 生效（`FlagSecureGuard` 覆盖面核实）；(b) `setHideOverlayWindows(true)` / `filterTouchesWhenObscured` 两层在承载窗口的等效覆盖（如未覆盖，须在对话框挂载路径补齐或在批次文档登记取舍理由）；(c) 原 `sensorLandscape` 方向策略是否保留的裁决；
   ⑤ Manifest：`<uses-permission android:name="android.permission.CAMERA"/>` **显式声明**（替换原 zxing 传递注入），同步改写注释 ③ 的权限口径；运行时权限经 `ActivityResultContracts.RequestPermission` 请求，拒绝时如实提示并保持扫码入口可见（不静默失效）。
 - **验收标准**：① `.\gradlew.bat test` 全绿、`python tools/doc/gate_readings.py` 7/7 PASS（读数块原样入批次文档 §3）；`lint` 计数口径（`grep -cE "^ *<issue$" app/build/reports/lint-results-debug.xml`）不劣于基线；② 合并清单中无任何 `com.journeyapps` 组件 / 资源 / `zxing_CaptureTheme` 残留，`CAMERA` 权限为源清单显式声明；③ 扫码端到端验证：AVD（本机 `Pixel_10`）或真机实拍 TOTP 二维码成功回填种子（§263 设备数据保护立规适用，禁直接对装库设备跑 connected）；权限拒绝路径不崩溃、有如实提示；④ `FlagSecureGuard` / 加固迁移口径逐项核实结论写入批次文档；⑤ 若改动了 `@Preview` 或截图包装生成器，须跑 `.\gradlew.bat :app:compileDebugScreenshotTestKotlin --rerun` 门禁。
-
-### ISSUE-P3-318：CodeQL py/redos 两条高严重度告警未登记未处置——截图包装生成器 `PREVIEW_BLOCK` 正则指数回溯
-
-- **优先级**：P3（开发者本机工具链脚本，输入源为本仓源码文件、非不可信运行时输入；真实可利用面极小，但属 CodeQL **high** 且 Security 面板计入徽标计数）。
-- **核实时间点**：2026-09-25。
-- **核实方式**：① `GET /repos/Wuming155/KeePasskey/code-scanning/alerts?state=open` 实测：#355 / #356（rule `py/redos`，CodeQL 2.27.1，security_severity_level **high**）创建于 2026-09-16，`most_recent_instance` 停留于 main 分支 commit `cd29e7ef`（当前 HEAD）——**每轮扫描仍在复检出现，非孤儿告警**；
-  ② 两条告警的实例路径均为 `tools/export_previews/generate_screenshot_test_wrappers.py:30`，即 `PREVIEW_BLOCK` 的预览注解参数组 `r"(?:\((?:[^()\n]|\([^()\n]*\))*\))?"`——CodeQL 判其存在嵌套量词交替的指数回溯（「strings starting with `@Preview\n@` and containing many repetitions of `00\n@`」形态）；
-  ③ 全仓 `grep` `docs/`（含 ACTIVE_ISSUES / RESOLVED_LOG / 已知工程限界 / records）确认该问题**从未登记**，亦无任何 dismiss 记录（`dismissed_at` 为空）。
-- **背景**：该正则用于解析 `app/src/main/java` 下 Compose 预览函数声明，形如 `(?:A|B)*` 且 `B` 可整体匹配 `A` 前缀的嵌套回溯形态；实际输入是本仓受版本控制的源码、不含对抗性内容，故风险为理论面，但 CodeQL 高严重度条目长期挂账且零登记，违反「新问题即时补登」纪律（本条即为补登）。同批排查结论（本条无关但同一面板）：Security 徽标其余 5 条为 `CVE-2020-29582`（kotlin 工具链构件，CVSS 5.3 低于 7.0 硬阈值），系 `ISSUE-P2-219` / PD-25 明文裁决「低于阈值，如实保留可见」的**有意保留项**，不属未闭环缺陷。
-- **整改方案**：① 将 `PREVIEW_BLOCK` 中预览注解参数组改写为线性时间等价形态（如展开嵌套组或利用 Python 3.11+ 原子组 `(?>...)`，消除「同一起点可被两条交替分支重复消费」的回溯结构），行为零变更——以 `promoted` / `wrappers` 计数与生成产物逐字节不变为证；② 复跑 `python tools/export_previews/generate_screenshot_test_wrappers.py` 与 `.\gradlew.bat :app:compileDebugScreenshotTestKotlin --rerun`；③ 不采用 dismiss：告警系真实回溯结构，修复后待下一轮 CodeQL 巡检自动判定 fixed。
-- **验收标准**：① CodeQL 巡检（`.github/workflows/codeql.yml`，每周 + 手动）后 #355 / #356 状态转为 `fixed`（或闭环批次文档记录 API 读数证明已消除）；② 生成器输出 `promoted=79 wrappers=79 packages=17` 计数与改动前一致，截图测试包装编译门禁绿；③ 批次文档 §3 原样粘贴 `python tools/doc/gate_readings.py` 读数块。
 
 ### ISSUE-P3-317：CodeQL 默认设置未按 ISSUE-P3-57 前置条件停用，Security 面板双语言配置持续报错
 
@@ -96,6 +96,10 @@
   CodeQL analysis → Default setup → **Disable**。若需代理代办：为 `GITHUB_TOKEN` 增授细粒度权限
   「Repository permissions → Code scanning alerts → Read and write」后，由代理执行
   `PATCH /repos/Wuming155/KeePasskey/code-scanning/default-setup`（body `{"state":"disabled"}`）。
+  > **代办复核实录（2026-09-25，§327 批次代理）**：`gh api repos/…/code-scanning/default-setup`
+  > 实跑仍 **403**（`Resource not accessible by personal access token`，读均不可得）——现令牌
+  > 无「Code scanning alerts」权限，API 化停用仍被阻塞；告警**列表读数**（`GET …/alerts`）可用，
+  > 同日实读 #355 / #356 仍 `state=open`。须由用户完成网页停用或增授权限后由代理复跑。
 - **验收标准**：① Security → Code scanning 不再出现默认设置（c-cpp / java-kotlin）的错误条目；
   ② `.github/workflows/codeql.yml` 每周巡检与手动触发仍正常上传 SARIF（analyses 列表 `error` 为空、
   `analysis_key` 仍为 `codeql.yml:analyze`）；③ 闭环批次文档记录停用后的面板或 API 读数。

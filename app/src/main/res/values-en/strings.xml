@@ -365,7 +365,12 @@
     <string name="unlock_downgrade_dialog_body">This device\'s Keystore is software-level (no TEE / StrongBox hardware isolation). Quick unlock seals your master password and key file with a software key that can be extracted offline. Enable anyway?</string>
     <string name="unlock_downgrade_confirm">Enable anyway (software key)</string>
     <string name="unlock_downgrade_decline">Don\'t enable</string>
-<string name="edit_scan_totp_qr">Open camera to scan TOTP QR code</string>
+    <!-- ISSUE-P3-319: protected scan dialog (CameraX + zxing:core, replaces zxing-embedded CaptureActivity) -->
+    <string name="edit_scan_dialog_title">Scan TOTP QR code</string>
+    <string name="edit_scan_hint">Align the QR code within the frame</string>
+    <string name="edit_scan_camera_permission_denied">Camera permission was denied, scanning is unavailable. Tap the button below to grant again, or enable camera permission in system settings</string>
+    <string name="edit_scan_retry">Retry permission</string>
+    <string name="edit_scan_camera_error">Failed to start camera (it may be in use by another app). Please close and retry</string>
     <string name="edit_attachment_empty">Attachment is empty, not added</string>
     <string name="edit_attachment_too_large">Attachment exceeds %1$d MB and was not added</string>
     <string name="edit_save_failed">Save failed: %1$s</string>

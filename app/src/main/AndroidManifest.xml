@@ -11,7 +11,9 @@
          ② `USE_FINGERPRINT` 加 `tools:node="remove"`（AC② 采纳）：该权限已被 API 28 弃用，
             仅由 `androidx.biometric` 的**旧版 FingerprintManager 兼容路径**注入；
             minSdk 36 ⇒ 该路径永不执行，保留只会扩大「已弃用权限」面。
-         ③ **保留** `CAMERA`（AC③）：由 zxing 注入用于扫码取景，不在本清单干涉。 -->
+         ③ **显式声明** `CAMERA`（ISSUE-P3-319：原由 zxing-embedded 清单传递注入，
+            移除该依赖后改由本清单显式声明——运行期需求不依赖第三方库传递声明的
+            同一裁决口径；运行时权限经 `ActivityResultContracts.RequestPermission` 请求）。 -->
     <uses-permission
         android:name="android.permission.USE_FINGERPRINT"
         tools:node="remove" />
@@ -19,6 +21,12 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
+    <uses-permission android:name="android.permission.CAMERA" />
+    <!-- ISSUE-P3-319：CAMERA 显式声明后需配套硬件特征声明（原由 zxing 清单传递注入）；
+         required=false：无相机设备（ChromeOS 大屏等）仍可安装，扫码功能按权限拒绝路径如实降级。 -->
+    <uses-feature
+        android:name="android.hardware.camera"
+        android:required="false" />
     <!-- 官方反欺诈加固（API 31+，minSdk 36 无兼容负担）：配合各敏感 Activity 的
          setHideOverlayWindows(true) 屏蔽其它应用的 TYPE_APPLICATION_OVERLAY 悬浮窗
          覆盖敏感窗口，防御 cloak-and-dagger 类 overlay 攻击——官方明确 FLAG_SECURE
@@ -211,17 +219,9 @@
                 android:resource="@xml/autofill_service" />
         </service>
 
-        <!-- ISSUE-P3-71：TOTP 扫码取景窗口——继承 zxing 默认 CaptureActivity 并强制 FLAG_SECURE +
-             反悬浮窗覆盖，防止含密钥种子的二维码取景画面被截屏 / 录屏 / 多任务缩略图捕获。
-             声明属性与 zxing 库默认声明保持一致（见合并清单）。 -->
-        <activity
-            android:name=".security.SecureCaptureActivity"
-            android:exported="false"
-            android:clearTaskOnLaunch="true"
-            android:screenOrientation="sensorLandscape"
-            android:stateNotNeeded="true"
-            android:theme="@style/zxing_CaptureTheme"
-            android:windowSoftInputMode="stateAlwaysHidden" />
+        <!-- ISSUE-P3-319：原 ISSUE-P3-71 的 SecureCaptureActivity（zxing CaptureActivity 加固壳）
+             已随 zxing-android-embedded 移除；TOTP 取景改为编辑页窗口内的受保护 Compose
+             对话框 TotpScanDialog（加固面等效迁移见其 KDoc 与批次文档）。 -->
     </application>
 
 </manifest>

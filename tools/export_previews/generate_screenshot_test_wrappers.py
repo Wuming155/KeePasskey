@@ -24,9 +24,13 @@ OUT_ROOT = ROOT / "app" / "src" / "screenshotTest" / "kotlin"
 DEFAULT_LOCALE = "zh-CN"
 
 # 匹配：@Preview（可跨行）+ 可选中间注解（@OptIn 等）+ @Composable + private/internal fun Name() {
+# ISSUE-P3-318：参数组原写作 `(?:\((?:[^()\n]|\([^()\n]*\))*\))?`，其 `(?:A|B)*` 结构被
+# CodeQL 判为 py/redos 指数回溯（high，#355/#356）。现改写为**线性时间等价**形态
+# `[^()\n]*(?:\([^()\n]*\)[^()\n]*)*`——无交替分支重叠，任一位置只有唯一解析路径
+# （`(` 只能开组、组内只能是非括号字符），语言完全等价，匹配结果零变更。
 PREVIEW_BLOCK = re.compile(
     r"(?P<ann>(?:[ \t]*(?:@androidx\.compose\.ui\.tooling\.preview\.Preview|@Preview)"
-    r"(?:\((?:[^()\n]|\([^()\n]*\))*\))?\n)+)"
+    r"(?:\([^()\n]*(?:\([^()\n]*\)[^()\n]*)*\))?\n)+)"
     r"(?P<extra>(?:[ \t]*@\w+(?:\([^)\n]*\))?[^\n]*\n)*?)"
     r"(?P<composable>[ \t]*@Composable\n)"
     r"(?P<vis>[ \t]*)(?P<mods>private|internal)\s+fun\s+(?P<name>\w+)\s*\(\s*\)\s*\{",

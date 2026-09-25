@@ -129,10 +129,11 @@
 -keep class androidx.work.impl.WorkDatabase_Impl { public <init>(); }
 
 # 11. ZXing / 条形码与二维码扫描库
--keep class com.journeyapps.barcodescanner.** { *; }
+#     ISSUE-P3-319：zxing-android-embedded 已移除（其 keep / dontwarn 规则随之删除）；
+#     现依赖 com.google.zxing:core 为纯算法库、全仓无反射消费方，无需 keep，
+#     仅保留 dontwarn 兜底（保守起见，不改变既有 release 混淆行为）。
 -keep class com.google.zxing.** { *; }
 -dontwarn com.google.zxing.**
--dontwarn com.journeyapps.barcodescanner.**
 
 # 12. 日志剥离（ISSUE-P1-10 / ZT-10；ISSUE-P3-98 修正签名）
 #     release 直接剥离 verbose/debug 日志调用点（AppLog.v/d 与框架 Log.v/d 双重剥离）；

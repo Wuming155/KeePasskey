@@ -6,40 +6,46 @@ import org.junit.Test
 import java.io.File
 
 /**
- * 敏感**独立窗口**加固接线守护（ISSUE-P3-103）。
+ * 敏感**独立窗口**加固接线守护（ISSUE-P3-103，ISSUE-P3-319 迁移后口径）。
  *
- * 缺口背景：TOTP 二维码取景窗口（[SecureCaptureActivity]，继承 zxing `CaptureActivity`）
- * 游离于 `FlagSecureGuard` 的 attach 体系之外（后者只覆盖 `MainActivity` 与
- * `BaseCredentialActivity` 体系），因此必须**自行**接线全部三层防护。
+ * 缺口背景：TOTP 二维码取景原为独立 zxing CaptureActivity（[SecureCaptureActivity]
+ * 加固壳，ISSUE-P3-71）；ISSUE-P3-319 移除 zxing-android-embedded 后取景改为
+ * **Compose 对话框**（`TotpScanDialog`）——Compose `Dialog` 创建**独立窗口**
+ * （`DialogLayout`），加固属性不从 Activity 窗口传播，故仍须对对话框窗口逐项接线。
  * 该类防护的失效形态是「接线被静默删除」——JVM 无法构造真实取景窗口，
- * 故本用例以静态守卫锁定三处调用形态（断言前剔除注释，避免整改说明自身命中）。
+ * 故本用例以静态守卫锁定调用形态（断言前剔除注释，避免整改说明自身命中）。
  *
  * 三层防护各自不可替代（详见 `docs/architecture/已知工程限界.md` §3.3）：
- * - `FLAG_SECURE`：取景画面（可能含密钥种子二维码）禁截屏 / 录屏 / 多任务缩略图；
+ * - `FLAG_SECURE`：取景画面（可能含密钥种子二维码）禁截屏 / 录屏 / 多任务缩略图——
+ *   对话框窗口该 flag 的实际决定者是 `DialogProperties.securePolicy`，调用点必须传
+ *   `SecureFlagPolicy.SecureOn`（`ISSUE-P2-246`：默认 `Inherit` 会按宿主窗口清除）；
  * - `setHideOverlayWindows(true)`：阻断其它应用**新绘制** TYPE_APPLICATION_OVERLAY 悬浮窗；
- * - `decorView.filterTouchesWhenObscured = true`：遮挡态下丢弃整棵视图子树的触摸（反点击劫持），
- *   对**已存在**的遮挡窗口同样生效。
+ * - `decorView.filterTouchesWhenObscured = true`：遮挡态下丢弃整棵视图子树的触摸
+ *   （反点击劫持），由统一包装 [SecureDialogWindowEffect] 施加，对**已存在**的遮挡窗口同样生效。
  *
  * 未覆盖（需设备侧验证）：真实截屏屏蔽、悬浮窗阻断与遮挡触摸丢弃的运行时效果。
  */
 class SensitiveWindowHardeningTest {
 
     @Test
-    fun `TOTP 取景窗口必须同时接线防截屏与反遮挡两路防护`() {
-        val code = stripComments(readSource(SECURE_CAPTURE_SOURCE))
+    fun `TOTP 扫码对话框必须同时接线防截屏与反遮挡两路防护`() {
+        val code = stripComments(readSource(SCAN_DIALOG_SOURCE))
 
         assertTrue(
-            "[$SECURE_CAPTURE_SOURCE] 缺少 FLAG_SECURE：取景画面（含密钥种子二维码）会进截屏 / Recents 缩略图",
-            code.contains("WindowManager.LayoutParams.FLAG_SECURE")
+            "[$SCAN_DIALOG_SOURCE] 对话框未传 securePolicy = SecureFlagPolicy.SecureOn：" +
+                "默认 Inherit 会按宿主窗口清除对话框窗口的 FLAG_SECURE（ISSUE-P2-246），" +
+                "取景画面（含密钥种子二维码）会进截屏 / Recents 缩略图",
+            code.contains("SecureFlagPolicy.SecureOn")
         )
         assertTrue(
-            "[$SECURE_CAPTURE_SOURCE] 缺少 setHideOverlayWindows(true)：无法阻断悬浮窗覆盖",
+            "[$SCAN_DIALOG_SOURCE] 缺少 setHideOverlayWindows(true)：无法阻断悬浮窗覆盖",
             code.contains("setHideOverlayWindows(true)")
         )
         assertTrue(
-            "[$SECURE_CAPTURE_SOURCE] 缺少 decorView.filterTouchesWhenObscured = true：" +
-                "遮挡态触摸未被丢弃（反点击劫持缺口）",
-            code.contains("decorView.filterTouchesWhenObscured = true")
+            "[$SCAN_DIALOG_SOURCE] 缺少 SecureDialogWindowEffect() 接线：" +
+                "该包装承担 decorView.filterTouchesWhenObscured = true（遮挡态触摸未被丢弃，" +
+                "反点击劫持缺口）与同窗 FLAG_SECURE 防御性施加",
+            code.contains("SecureDialogWindowEffect()")
         )
     }
 
@@ -56,8 +62,8 @@ class SensitiveWindowHardeningTest {
      */
     private fun stripComments(source: String): String = stripCommentsOnly(source)
     private companion object {
-        const val SECURE_CAPTURE_SOURCE =
-            "app/src/main/java/com/keepasskey/app/security/SecureCaptureActivity.kt"
+        const val SCAN_DIALOG_SOURCE =
+            "app/src/main/java/com/keepasskey/app/ui/screens/edit/TotpScanDialog.kt"
 
 
         /** 仓库根：同时具备 app 与 core 模块源码目录的最近祖先 */
