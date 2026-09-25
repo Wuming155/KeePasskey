@@ -58,12 +58,6 @@ class QuickUnlockSealDowngradeDeviceTest {
 
     private val context = InstrumentationRegistry.getInstrumentation().targetContext
 
-    /** 完整性闸门假实现：固定放行（本用例不测完整性信号，仅满足构造依赖） */
-    private class AllowAllIntegrityGate : RuntimeIntegrityGate {
-        override fun currentEnforcement(): IntegrityEnforcement = IntegrityEnforcement.ALLOWED
-        override suspend fun awaitEnforcement(): IntegrityEnforcement = IntegrityEnforcement.ALLOWED
-    }
-
     /** 组装封印协调器（各用例共用；封印密钥供给替身由调用方按需注入） */
     private fun buildCoordinator(
         uiState: MutableStateFlow<UnlockUiState>,
@@ -83,7 +77,7 @@ class QuickUnlockSealDowngradeDeviceTest {
     @Test
     fun `AndroidKeyStore真实密钥落位在设备侧返回真实等级`() {
         val keystoreManager = KeystoreManager(context, DebugLogBuffer())
-        val authManager = BiometricAuthManager(keystoreManager, AllowAllIntegrityGate())
+        val authManager = BiometricAuthManager(keystoreManager)
         try {
             // 生产同规格生成（落位属性与授权规格无关）：无认证门控密钥，
             // 规避「未录入生物识别无法生成 per-operation 认证密钥」的平台硬约束
@@ -128,7 +122,7 @@ class QuickUnlockSealDowngradeDeviceTest {
     @Test
     fun `未录入强生物识别时封印fail-closed且不请求降级确认`() = runBlocking<Unit> {
         val keystoreManager = KeystoreManager(context, DebugLogBuffer())
-        val authManager = BiometricAuthManager(keystoreManager, AllowAllIntegrityGate())
+        val authManager = BiometricAuthManager(keystoreManager)
         val settings = RealSettingsRepository(context)
         settings.setBiometricEnabled(true)
         settings.setQuickUnlockDowngradeAcknowledged(false)
@@ -177,7 +171,7 @@ class QuickUnlockSealDowngradeDeviceTest {
     @Test
     fun `SOFTWARE落位降级确认闸门在设备侧闭环`() = runBlocking<Unit> {
         val keystoreManager = KeystoreManager(context, DebugLogBuffer())
-        val authManager = BiometricAuthManager(keystoreManager, AllowAllIntegrityGate())
+        val authManager = BiometricAuthManager(keystoreManager)
         val settings = RealSettingsRepository(context)
         val storage = BiometricCredentialStorage(context)
 

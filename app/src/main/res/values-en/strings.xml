@@ -638,27 +638,6 @@
     <string name="sec_flag_secure_risk_message">With it off, passwords, one-time codes and passkeys may be captured by screenshots or screen recording and shown in the recents preview, leaking credentials. Keeping it on is recommended.</string>
     <string name="sec_flag_secure_risk_confirm">Turn it off anyway</string>
     <string name="sec_flag_secure_risk_cancel">Keep it on</string>
-    <!-- ISSUE-P2-08 (ZT-13): runtime integrity risk notice (ELEVATED / COMPROMISED) -->
-    <string name="sec_integrity_risk_title">Runtime environment risk</string>
-    <string name="sec_integrity_risk_elevated">A suspicious runtime environment was detected (debuggable build or untrusted install source). Biometric quick unlock has been disabled; handle sensitive credentials with care.</string>
-    <string name="sec_integrity_risk_compromised">Clear signs of dynamic attack were detected (debugger attached, root/Magisk or an injection framework). Biometric quick unlock and autofill have been disabled; stop handling sensitive credentials on this device.</string>
-    <!-- ISSUE-P2-08 (ZT-13): non-sensitive system callback text for the degraded path -->
-    <string name="sec_biometric_integrity_blocked">This device is at risk, so biometric quick unlock is disabled. Use your master password instead.</string>
-    <!-- ISSUE-P2-227: name the exact signal that blocked biometrics (self-contained, no interpolation) -->
-    <string name="sec_biometric_block_debugger">A debugger is attached to this app, so biometric quick unlock is disabled. Use your master password instead.</string>
-    <string name="sec_biometric_block_traced">This app is being traced by another process, so biometric quick unlock is disabled. Use your master password instead.</string>
-    <string name="sec_biometric_block_hook">An injection framework (Frida / Xposed class) was detected, so biometric quick unlock is disabled. Use your master password instead.</string>
-    <string name="sec_biometric_block_root">Root artifacts (su binaries) were detected, so biometric quick unlock is disabled. Use your master password instead.</string>
-    <string name="sec_biometric_block_magisk">Magisk artifacts were detected, so biometric quick unlock is disabled. Use your master password instead.</string>
-    <string name="sec_biometric_block_debuggable">You installed a debuggable (debug) build, so biometric quick unlock is disabled by our zero-trust policy. Use your master password, or install a release build for daily use.</string>
-    <string name="sec_biometric_block_undetermined">The security environment scan has not finished yet, so biometric quick unlock is temporarily disabled. Try again shortly or use your master password.</string>
-    <!-- ISSUE-P2-227: settings security section lists every currently matched reason -->
-    <string name="sec_integrity_risk_reasons_prefix">Matched now:</string>
-    <!-- ISSUE-P3-236 / PD-15: master switch for runtime integrity checks (off by default; turning it off only lifts blocking, detection still runs) -->
-    <string name="sec_integrity_check_title">Runtime integrity checks</string>
-    <string name="sec_integrity_check_sub">When on, blocks fingerprint quick unlock and autofill on rooted / Magisk, debugger-attached or hooked environments; when off (default) fingerprint still works there</string>
-    <string name="sec_integrity_check_off_notice">Checks are off (default): on a rooted device (incl. Magisk), with a debugger attached or with an injection framework, fingerprint quick unlock and autofill are no longer blocked, and detected risks no longer downgrade anything. Keeping it off suits a device you fully control; turn it on for devices you do not.</string>
-    <string name="autofill_save_integrity_blocked">This device is at risk, so saving credentials is disabled.</string>
     <string name="autofill_save_blocked">This app is on the autofill blocklist, so saving credentials was rejected.</string>
     <string name="sec_clipboard_title">Clipboard protection</string>
     <string name="sec_clipboard_sub">Copied secrets are marked sensitive: the system copy confirmation hides them, and they are auto-cleared after the set duration</string>

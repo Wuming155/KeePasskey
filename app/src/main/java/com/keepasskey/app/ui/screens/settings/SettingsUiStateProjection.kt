@@ -2,7 +2,6 @@ package com.keepasskey.app.ui.screens.settings
 
 import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.UserSettings
-import com.keepasskey.app.security.RuntimeIntegrityReport
 import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.crypto.kdf.KdfParameters
@@ -24,10 +23,10 @@ import kotlinx.coroutines.flow.stateIn
 /**
  * 组装设置页 [SettingsUiState] 状态流（原 `SettingsViewModel.uiState` 的 combine 编排逐字迁移）。
  *
- * 十路输入流收拢为 [SettingsUiStateFlows]（§284 摘除 `LongParameterList` 压制）；
+ * 九路输入流收拢为 [SettingsUiStateFlows]（§284 摘除 `LongParameterList` 压制）；
  * combine 仍以 `Map`/`Triple` 元组嵌套避开重载上限，行为零变化。
  */
-/** 十路输入流快照（§284 参数对象化；仅承载引用，不产生新订阅） */
+/** 九路输入流快照（§284 参数对象化；仅承载引用，不产生新订阅） */
 internal data class SettingsUiStateFlows(
     val userSettings: Flow<UserSettings>,
     val syncState: Flow<SettingsSyncController.SyncUiState>,
@@ -38,7 +37,6 @@ internal data class SettingsUiStateFlows(
     val securityTimeoutState: Flow<SecurityTimeoutUiState>,
     val extendedSettings: Flow<ExtendedSettings>,
     val debugLogLines: Flow<List<String>>,
-    val integrityReport: Flow<RuntimeIntegrityReport?>,
     val childDatabaseCount: Flow<Int>
 )
 
@@ -58,12 +56,11 @@ internal fun settingsUiStateFlow(
         combine(flows.securityTimeoutState, flows.extendedSettings, flows.debugLogLines) { sec, ext, logs ->
             Triple(sec, ext, logs)
         },
-        flows.integrityReport,
         flows.childDatabaseCount
-    ) { securityState, report, mountedChildDatabases ->
-        Triple(securityState, report, mountedChildDatabases)
+    ) { securityState, mountedChildDatabases ->
+        Pair(securityState, mountedChildDatabases)
     }
-) { settings, sync, health, (db, biometricToggle), (securityState, report, mounted) ->
+) { settings, sync, health, (db, biometricToggle), (securityState, mounted) ->
     val (secState, extState, logs) = securityState
     buildSettingsUiState(
         userSettings = settings,
@@ -74,7 +71,6 @@ internal fun settingsUiStateFlow(
         secState = secState,
         extState = extState,
         debugLogLines = logs,
-        integrityReport = report,
         mountedChildDatabases = mounted,
         strings = strings
     )
@@ -94,7 +90,6 @@ internal fun buildSettingsUiState(
     secState: SecurityTimeoutUiState,
     extState: ExtendedSettings,
     debugLogLines: List<String>,
-    integrityReport: RuntimeIntegrityReport?,
     mountedChildDatabases: Int,
     strings: StringsProvider
 ): SettingsUiState = SettingsUiState(
@@ -229,13 +224,7 @@ internal fun buildSettingsUiState(
     // 8. 调试日志
     debugLogEnabled = extState.debugLogEnabled,
     verboseSyncLog = extState.verboseSyncLog,
-    debugLogLines = debugLogLines,
-
-    // 9. 运行环境完整性（ISSUE-P2-08 风险提示数据源）
-    integrityReport = integrityReport,
-
-    // 10. 运行环境完整性检测总开关（ISSUE-P3-236 / PD-15；仓库直写项，userSettings 为单一真相源）
-    integrityCheckEnabled = userSettings.integrityCheckEnabled
+    debugLogLines = debugLogLines
 )
 
 /**

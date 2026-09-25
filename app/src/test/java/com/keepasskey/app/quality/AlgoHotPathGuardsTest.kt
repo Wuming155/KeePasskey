@@ -13,7 +13,7 @@ import java.io.File
  * 本批改动的验收判据是「**不再产生某类工作**」——源文件内不再有逐次新建的重对象、
  * 不再有全表线性扫描——而「某对象被新建了几次」对运行时用例不可观测。
  * 本仓既有先例（`AutofillAuthResultWiringTest` / `TotpPeriodWiringGuardTest` /
- * `RuntimeIntegrityDetectionSurfaceTest`）一律以**源码文本**作守卫，本类沿用同一口径。
+ * `AutofillSaveTimeoutWiringTest`）一律以**源码文本**作守卫，本类沿用同一口径。
  *
  * **断言前先剥离注释**（§116 的教训）：本批的就地 KDoc 为解释动机**刻意引用了旧写法**
  * （如「原 `sortedBy { it.title.lowercase() }`」），直接全文断言会把「解释为什么改」
@@ -291,39 +291,6 @@ class AlgoHotPathGuardsTest {
             "uiState 的整库投影（全库过滤 / 排序 / 面包屑 / 回收站 / 分组路径）必须补 `flowOn`——" +
                 "`stateIn` 的收集上下文是 `viewModelScope`（Main），与数据层两条投影流（§117）同口径",
             Regex("\\.flowOn\\(displayDispatcher\\)\\s*\\n\\s*\\.stateIn\\(").containsMatchIn(vm)
-        )
-    }
-
-    @Test
-    fun `完整性探测必须字节级化且缓冲复用`() {
-        val detector =
-            stripped("app/src/main/java/com/keepasskey/app/security/RuntimeIntegrityDetector.kt")
-        assertFalse(
-            "maps 扫描不得再逐行解码成 String（useLines / 逐行 contains(ignoreCase)）",
-            detector.contains("useLines") || detector.contains("line.contains(")
-        )
-        assertTrue("必须走流式字节匹配", detector.contains("internal fun containsHookMarker("))
-        assertTrue(
-            "块间必须保留重叠窗口（否则跨块特征串会漏报）",
-            detector.contains("arraycopy(chunk, filled - overlap")
-        )
-
-        val probe = stripped("app/src/main/java/com/keepasskey/app/security/TracedProcessProbe.kt")
-        assertTrue(
-            "读取缓冲必须按线程复用（原每次调用新分配 8 KiB 并物化整份 status）",
-            probe.contains(
-                "private val statusBuffers = ThreadLocal.withInitial { ByteArray(MAX_STATUS_BYTES) }"
-            )
-        )
-        assertFalse(
-            "不得再把整份 status 物化成 String",
-            probe.contains("String(buffer, 0, read, Charsets.UTF_8)")
-        )
-        assertTrue("必须走字节级解析重载", probe.contains("ProcTracerPid.parse(buffer, read)"))
-        assertEquals(
-            "字节级与字符串两个入口必须共用同一取值实现（否则两者会漂移）",
-            1,
-            Regex("raw\\.trim\\(\\)\\.toIntOrNull\\(\\)").findAll(probe).count()
         )
     }
 

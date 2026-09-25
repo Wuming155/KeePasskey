@@ -30,14 +30,11 @@ sealed interface BiometricResult {
     /**
      * 认证失败结果。
      *
-     * [errString] 是**内部诊断标识**——可能来自系统 [BiometricPrompt.AuthenticationCallback.onAuthenticationError]
-     * 的错误描述透传，也可能是本工程定义的稳定英文诊断码（如
-     * [BiometricAuthManager.INTEGRITY_BLOCKED_DIAGNOSTIC]）。它**仅**用于日志留痕与失败分型判据，
+     * [errString] 是**内部诊断标识**——来自系统 [BiometricPrompt.AuthenticationCallback.onAuthenticationError]
+     * 的错误描述透传。它**仅**用于日志留痕与失败分型判据，
      * **任何一处都不得直接展示给用户**（ISSUE-P3-14）。
      *
-     * 用户可见文案一律由消费侧按 [errorCode] 映射到已资源化字符串
-     * （见 `com.keepasskey.app.ui.screens.unlock.BiometricFailureMessagePolicy`：
-     * [BiometricAuthManager.ERROR_INTEGRITY_BLOCKED] → `R.string.sec_biometric_integrity_blocked`），
+     * 用户可见文案一律由消费侧按 [errorCode] 映射到已资源化字符串，
      * 从而保证中英双语一致，且文案不再随系统语言漂移。当前全部消费点（app 模块）：
      * - `UnlockViewModel.handleBiometricResult`：按错误码映射资源后展示，诊断串仅落日志；
      * - `BiometricEnrollmentCoordinator.requestBiometricEnrollment`：登记失败为 fail-safe 静默语义，仅落日志
@@ -47,14 +44,7 @@ sealed interface BiometricResult {
      */
     data class Error(
         val errorCode: Int,
-        val errString: String,
-        /**
-         * 完整性闸门拦下时的**具体命中信号**（按危害度降序，ISSUE-P2-227），其余失败为空清单。
-         *
-         * 与 [errString] 的区别即本字段的存在理由：它是工程自己产出的**枚举**，
-         * 由消费侧映射到已资源化文案（可安全展示）；[errString] 是系统透传的诊断串，禁止外显。
-         */
-        val blockReasons: List<IntegrityBlockReason> = emptyList()
+        val errString: String
     ) : BiometricResult
 
     data object Failed : BiometricResult
@@ -74,14 +64,11 @@ sealed interface BiometricResult {
  *   官方硬性要求「解锁加密操作请求的认证器集合必须与密钥生成时一致」；
  * - 官方互斥约束：允许 DEVICE_CREDENTIAL 时系统以「使用锁屏凭据」入口取代负向按钮，
  *   此时调用 setNegativeButtonText 属于错误用法，本类强制规避；
- * - 纯解锁/封印场景默认免二次确认（confirmationRequired=false，仅影响生物识别路径）；
- * - ISSUE-P2-08（ZT-13）：设备运行完整性风险态下禁用生物快速解锁（fail-closed）——
- *   由 [RuntimeIntegrityGate] 注入裁决，风险态不弹生物识别、回落主密码路径。
+ * - 纯解锁/封印场景默认免二次确认（confirmationRequired=false，仅影响生物识别路径）
  */
 @Singleton
 class BiometricAuthManager @Inject constructor(
-    private val keystoreManager: KeystoreManager,
-    private val runtimeIntegrityGate: RuntimeIntegrityGate
+    private val keystoreManager: KeystoreManager
 ) {
 
     /**
@@ -121,21 +108,6 @@ class BiometricAuthManager @Inject constructor(
         negativeButtonText: String? = null,
         onResult: (BiometricResult) -> Unit
     ) {
-        // ISSUE-P2-08：完整性风险态（含扫描未完成的未判定态）禁用生物快速解锁，
-        // 以显式失败结果回落主密码路径，绝不静默放行；
-        // ISSUE-P2-227：同时把**具体命中信号**随结果下行，供消费侧点名归因而非笼统报「设备有风险」
-        val enforcement = runtimeIntegrityGate.currentEnforcement()
-        if (enforcement.disableBiometricQuickUnlock) {
-            onResult(
-                BiometricResult.Error(
-                    errorCode = ERROR_INTEGRITY_BLOCKED,
-                    errString = INTEGRITY_BLOCKED_DIAGNOSTIC,
-                    blockReasons = enforcement.biometricBlockReasons
-                )
-            )
-            return
-        }
-
         val executor = ContextCompat.getMainExecutor(activity)
         val usesDeviceCredential =
             authenticators and BiometricManager.Authenticators.DEVICE_CREDENTIAL != 0
@@ -247,9 +219,6 @@ class BiometricAuthManager @Inject constructor(
     }
 
     companion object {
-        /** ISSUE-P2-08：设备完整性风险导致生物快速解锁被禁用的结果码（区别于系统错误码） */
-        const val ERROR_INTEGRITY_BLOCKED = -2
-
         /** ISSUE-P3-01/14：宿主 Activity 销毁等极端情形下系统不回调、登记侧超时熔断的结果码（区别于系统错误码） */
         const val ERROR_AUTH_TIMEOUT = -3
 
@@ -262,18 +231,14 @@ class BiometricAuthManager @Inject constructor(
         const val ERROR_NO_HOST_ACTIVITY = -4
 
         /**
-         * ISSUE-P3-14：完整性风险禁用生物快速解锁的**内部诊断标识**（稳定英文码，非用户可见文案）。
+         * ISSUE-P3-14：认证超时熔断的内部诊断标识（稳定英文码，仅日志留痕，不对外展示）。
          *
-         * 用户可见文案统一经消费侧按 [ERROR_INTEGRITY_BLOCKED] 映射到
-         * `R.string.sec_biometric_integrity_blocked`（中英双语已具备），
-         * 本类不再持有任何硬编码中文文案，失败语义与 UI 完全解耦。
+         * 用户可见文案统一经消费侧按错误码映射到已资源化字符串，
+         * 本类不持有任何硬编码文案，失败语义与 UI 完全解耦。
          */
-        const val INTEGRITY_BLOCKED_DIAGNOSTIC = "INTEGRITY_BLOCKED"
-
-        /** ISSUE-P3-14：认证超时熔断的内部诊断标识（同 [INTEGRITY_BLOCKED_DIAGNOSTIC]，仅日志留痕，不对外展示） */
         const val AUTH_TIMEOUT_DIAGNOSTIC = "AUTH_TIMEOUT"
 
-        /** ISSUE-P2-212：缺少宿主 Activity 的内部诊断标识（语义同 [INTEGRITY_BLOCKED_DIAGNOSTIC]，仅日志留痕） */
+        /** ISSUE-P2-212：缺少宿主 Activity 的内部诊断标识（同 [AUTH_TIMEOUT_DIAGNOSTIC]，仅日志留痕） */
         const val NO_HOST_ACTIVITY_DIAGNOSTIC = "NO_HOST_ACTIVITY"
 
         /**

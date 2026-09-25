@@ -650,31 +650,10 @@
     <string name="sec_flag_secure_risk_message">关闭后，密码明文、一次性验证码与通行密钥可能被截屏、录屏捕获，并出现在最近任务预览中，造成凭据泄露。建议保持开启。</string>
     <string name="sec_flag_secure_risk_confirm">仍要关闭</string>
     <string name="sec_flag_secure_risk_cancel">保持开启</string>
-    <!-- ISSUE-P2-08 (ZT-13)：运行环境完整性风险提示（ELEVATED / COMPROMISED 两档） -->
     <string name="legacy_autofill_notification_title">检测到密码输入框</string>
     <string name="legacy_autofill_notification_body">点按选择要填充的条目（旧版无障碍通道）</string>
     <!-- 无障碍服务在系统设置页展示的服务说明（必须如实描述读取范围） -->
     <string name="legacy_autofill_service_desc">KeePasskey 的旧版自动填充通道：在系统自动填充不可用的应用中检测口令输入框并代为填充。本服务仅在你从 KeePasskey 选择条目时读取并写入相关输入框的内容，不后台收集或上传任何屏幕内容，且受应用内「旧版自动填充服务」开关控制。</string>
-    <string name="sec_integrity_risk_title">运行环境风险提示</string>
-    <string name="sec_integrity_risk_elevated">检测到可疑运行环境（可调试构建或非受信任安装来源）。出于安全考虑，已禁用生物识别快速解锁，请谨慎处理敏感凭据。</string>
-    <string name="sec_integrity_risk_compromised">检测到明确的动态攻击特征（调试器附加、Root/Magisk 或注入框架）。已禁用生物识别快速解锁与自动填充，请立即停止在本设备处理敏感凭据。</string>
-    <!-- ISSUE-P2-08 (ZT-13)：风险态降级路径对系统的非敏感回调文案 -->
-    <string name="sec_biometric_integrity_blocked">设备存在安全风险，已禁用生物识别快速解锁，请改用主密码解锁</string>
-    <!-- ISSUE-P2-227：生物识别被完整性闸门拦下时点名**具体命中信号**（每句自带处置指引，无插值） -->
-    <string name="sec_biometric_block_debugger">检测到调试器正附加在本应用上，已禁用生物识别快速解锁，请改用主密码解锁</string>
-    <string name="sec_biometric_block_traced">检测到本应用正被其他进程跟踪，已禁用生物识别快速解锁，请改用主密码解锁</string>
-    <string name="sec_biometric_block_hook">检测到注入框架（Frida / Xposed 类）痕迹，已禁用生物识别快速解锁，请改用主密码解锁</string>
-    <string name="sec_biometric_block_root">检测到 Root 痕迹（su 可执行文件），已禁用生物识别快速解锁，请改用主密码解锁</string>
-    <string name="sec_biometric_block_magisk">检测到 Magisk 痕迹，已禁用生物识别快速解锁，请改用主密码解锁</string>
-    <string name="sec_biometric_block_debuggable">当前安装的是可调试构建（debug 版），按零信任策略禁用生物识别快速解锁，请改用主密码解锁；正式使用请安装 release 版</string>
-    <string name="sec_biometric_block_undetermined">安全环境扫描尚未完成，暂时禁用生物识别快速解锁，请稍后重试或改用主密码解锁</string>
-    <!-- ISSUE-P2-227：设置页安全分区逐条列出当前命中的降级原因 -->
-    <string name="sec_integrity_risk_reasons_prefix">当前命中项：</string>
-    <!-- ISSUE-P3-236 / PD-15：运行环境完整性检测总开关（出厂默认关闭；关闭只解除阻断，探测照常运行） -->
-    <string name="sec_integrity_check_title">运行环境完整性检测</string>
-    <string name="sec_integrity_check_sub">开启后在 Root / Magisk、调试器附加或注入框架环境下拦截指纹快速解锁与自动填充；关闭（默认）则这些环境下指纹仍可用</string>
-    <string name="sec_integrity_check_off_notice">检测已关闭（默认）：在 Root（含 Magisk）、调试器附加或注入框架环境下，指纹快速解锁与自动填充不再被拦截，检测到的风险也不会再触发任何降级。关闭适合你自己完整掌控的设备；在他人设备或用途不明的设备上建议开启。</string>
-    <string name="autofill_save_integrity_blocked">设备存在安全风险，已禁用凭据保存</string>
     <string name="sec_clipboard_title">剪贴板保护</string>
     <string name="sec_clipboard_sub">复制的敏感内容标记为敏感：系统复制提示不显示明文，并在设定时长后自动擦除</string>
     <string name="sec_clipboard_countdown_title">剪贴板保留时长</string>

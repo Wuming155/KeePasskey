@@ -15,7 +15,6 @@ import android.view.inputmethod.InlineSuggestionsRequest
 import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.passkey.PasswordSaveActivity
-import com.keepasskey.app.security.RuntimeIntegrityGate
 import com.keepasskey.core.log.AppLog
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CancellationException
@@ -53,10 +52,6 @@ class KeePasskeyAutofillService : AutofillService() {
     // TASK-44：自动填充黑名单（命中即不下发任何数据集，fail-closed）
     @Inject
     lateinit var autofillBlocklistStore: com.keepasskey.app.data.repository.AutofillBlocklistStore
-
-    // ISSUE-P2-08：运行完整性风险闸门（风险态禁用自动填充，fail-closed）
-    @Inject
-    lateinit var runtimeIntegrityGate: RuntimeIntegrityGate
 
     // ISSUE-P2-07：webDomain 归属解析（受信浏览器白名单 / DAL 校验，无法验证即 fail-closed）
     @Inject
@@ -187,26 +182,20 @@ class KeePasskeyAutofillService : AutofillService() {
     }
 
     /**
-     * ISSUE-P2-08：完整性风险态禁用自动填充；ISSUE-P2-226：调用方即本应用自身；
-     * TASK-44：黑名单命中 fail-closed——三者均不下发数据集（含解锁引导与 SaveInfo），
-     * 等价于「该应用从未注册过本填充服务」，不降级已有填充语义也不返回错误。
+     * ISSUE-P2-226：调用方即本应用自身；TASK-44：黑名单命中 fail-closed——两者均不下发
+     * 数据集（含解锁引导与 SaveInfo），等价于「该应用从未注册过本填充服务」，
+     * 不降级已有填充语义也不返回错误。
      *
      * @return true = 本次请求不予下发（调用方据此 `onSuccess(null)`）
      */
     private suspend fun rejectsDatasetDelivery(callingPkg: String): Boolean =
         when (
             AutofillAccessPolicy.rejectReason(
-                runtimeIntegrityGate.awaitEnforcement(),
                 callingPkg,
                 packageName,
                 autofillBlocklistStore::isBlocked
             )
         ) {
-            AutofillRejection.INTEGRITY_RISK -> {
-                // ISSUE-P1-10：日志不得携带调用包名等敏感标识
-                AppLog.i(TAG, "设备完整性风险，拒绝下发自动填充数据集")
-                true
-            }
             AutofillRejection.SELF_APP -> {
                 AppLog.i(TAG, "调用方即本应用，拒绝下发自动填充数据集")
                 true
@@ -278,7 +267,6 @@ class KeePasskeyAutofillService : AutofillService() {
         serviceScope.launch {
             // ISSUE-P3-122（IPC-10）：保存请求整体加**超时预算**。
             // 平台对 onSaveRequest **不提供** CancellationSignal，故无上限即「系统保存 UI 永久等待」：
-            // `runtimeIntegrityGate.awaitEnforcement()` 在首次扫描未完成时可等待一整个扫描周期，
             // 库侧 Save 亦可能长时间不返回。超时按「本次无需保存」收尾（onSuccess）：给系统明确答复，
             // 不落库、不报错——与「用户关闭保存提示」同一收敛语义。
             // 注：处理体抽为 [handleSaveRequest] 而非就地包一层——`withTimeoutOrNull` **不是** inline，
@@ -313,15 +301,9 @@ class KeePasskeyAutofillService : AutofillService() {
                 return
             }
 
-            // ISSUE-P2-08 / TASK-44：保存侧同样前置于完整性闸门与黑名单检查——
-            // 命中即拒绝落库并向系统回调非敏感提示，绝不让被屏蔽/风险环境写入任何凭据
-            val enforcement = runtimeIntegrityGate.awaitEnforcement()
-            when (AutofillAccessPolicy.rejectReason(enforcement, callingPkg, packageName, autofillBlocklistStore::isBlocked)) {
-                AutofillRejection.INTEGRITY_RISK -> {
-                    AppLog.i(TAG, "设备完整性风险，拒绝保存自动填充凭据")
-                    callback.onFailure(getString(R.string.autofill_save_integrity_blocked))
-                    return
-                }
+            // TASK-44：保存侧同样前置于黑名单检查——
+            // 命中即拒绝落库并向系统回调非敏感提示，绝不让被屏蔽的应用写入任何凭据
+            when (AutofillAccessPolicy.rejectReason(callingPkg, packageName, autofillBlocklistStore::isBlocked)) {
                 AutofillRejection.SELF_APP -> {
                     AppLog.i(TAG, "调用方即本应用，跳过框架保存通道")
                     callback.onSuccess()
@@ -455,7 +437,7 @@ class KeePasskeyAutofillService : AutofillService() {
         /** ISSUE-P1-224：密码库锁定时保存凭据拉起解锁保存 Activity 的 requestCode */
         internal const val REQUEST_CODE_SAVE = 2300
 
-        // ISSUE-P2-07/08：保存被拒的提示文案已迁入 strings.xml
-        // （autofill_save_blocked / autofill_save_integrity_blocked），与填充侧同源资源化。
+        // ISSUE-P2-07：保存被拒的提示文案已迁入 strings.xml
+        // （autofill_save_blocked），与填充侧同源资源化。
     }
 }

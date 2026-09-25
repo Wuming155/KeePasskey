@@ -126,8 +126,4 @@ class FakeSettingsRepository() : SettingsRepository {
         settingsFlow.update { it.copy(quickUnlockDowngradeAcknowledged = acknowledged) }
     }
 
-    /** ISSUE-P3-236 / PD-15：运行环境完整性检测总开关入内存流（与生产 DataStore 语义一致） */
-    override suspend fun setIntegrityCheckEnabled(enabled: Boolean) {
-        settingsFlow.update { it.copy(integrityCheckEnabled = enabled) }
-    }
 }

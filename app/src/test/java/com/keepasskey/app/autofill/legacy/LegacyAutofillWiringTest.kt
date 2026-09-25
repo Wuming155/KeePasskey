@@ -106,10 +106,6 @@ class LegacyAutofillWiringTest {
             serviceSource.contains("AutofillAccessPolicy.isSelfApp(")
         )
         assertTrue(
-            "完整性闸门必须在发通知前求值（ISSUE-P2-08）",
-            serviceSource.contains("runtimeIntegrityGate.awaitEnforcement()")
-        )
-        assertTrue(
             "黑名单命中不得发通知（TASK-44）",
             serviceSource.contains("autofillBlocklistStore::isBlocked")
         )

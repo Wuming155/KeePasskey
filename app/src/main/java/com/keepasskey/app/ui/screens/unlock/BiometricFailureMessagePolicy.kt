@@ -1,7 +1,6 @@
 package com.keepasskey.app.ui.screens.unlock
 
 import com.keepasskey.app.R
-import com.keepasskey.app.security.BiometricAuthManager
 import com.keepasskey.app.security.BiometricResult
 import com.keepasskey.app.ui.model.UiMessage
 
@@ -23,17 +22,9 @@ internal object BiometricFailureMessagePolicy {
     /**
      * 映射失败结果到用户可见文案。
      *
-     * 完整性风险态（ISSUE-P2-08 闸门 fail-closed）按 [BiometricResult.Error.blockReasons] 的
-     * **首项（危害度最高）** 取该信号专属文案，逐条已含「请改用主密码解锁」指引（ISSUE-P2-227）；
-     * 清单为空（异常装配 / 未来新增拦下路径而未点名信号）时回落到既有的通用禁用提示
-     * [R.string.sec_biometric_integrity_blocked]——**绝不凭空造一个原因**。
-     * 其余系统错误统一为通用失败提示 [R.string.sec_biometric_auth_failed]。
+     * [R.string.sec_biometric_auth_failed]。
      */
     fun of(error: BiometricResult.Error): UiMessage = when (error.errorCode) {
-        BiometricAuthManager.ERROR_INTEGRITY_BLOCKED -> UiMessage(
-            error.blockReasons.firstOrNull()?.messageRes
-                ?: R.string.sec_biometric_integrity_blocked
-        )
         else -> UiMessage(R.string.sec_biometric_auth_failed)
     }
 }

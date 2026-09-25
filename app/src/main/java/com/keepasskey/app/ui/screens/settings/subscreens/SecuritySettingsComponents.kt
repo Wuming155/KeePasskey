@@ -1,6 +1,5 @@
 package com.keepasskey.app.ui.screens.settings.subscreens
 
-import android.content.res.Configuration
 import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -13,8 +12,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -28,10 +25,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.keepasskey.app.R
-import com.keepasskey.app.security.RuntimeRiskLevel
-import com.keepasskey.app.ui.components.BentoCard
 
 @Composable
 internal fun SecuritySwitchRow(
@@ -166,84 +160,5 @@ internal fun SecurityChoiceChips(
                 )
             }
         }
-    }
-}
-
-/**
- * ISSUE-P2-08 (ZT-13)：运行环境完整性风险提示卡。
- * 命中可疑 / 攻击特征时明确告知用户当前生效的降级策略，杜绝静默放行。
- *
- * ISSUE-P2-227：[reasons] 非空时改为**逐条点名当前命中项**（由 `RuntimeIntegrityPolicy` 与等级同源产出，
- * 无第二数据源），取代整改前那句「可调试构建**或**非受信任安装来源」的笼统枚举；
- * 清单为空（异常装配）时回落原等级文案，绝不凭空造原因。
- */
-@Composable
-internal fun IntegrityRiskCard(
-    level: RuntimeRiskLevel,
-    reasons: List<com.keepasskey.app.security.IntegrityBlockReason> = emptyList()
-) {
-    val messageRes = if (level == RuntimeRiskLevel.COMPROMISED) {
-        R.string.sec_integrity_risk_compromised
-    } else {
-        R.string.sec_integrity_risk_elevated
-    }
-    BentoCard(
-        modifier = Modifier.fillMaxWidth(),
-        backgroundColor = MaterialTheme.colorScheme.errorContainer
-    ) {
-        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    imageVector = Icons.Default.Warning,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.size(20.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = stringResource(R.string.sec_integrity_risk_title),
-                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                    color = MaterialTheme.colorScheme.onErrorContainer
-                )
-            }
-            if (reasons.isEmpty()) {
-                Text(
-                    text = stringResource(messageRes),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onErrorContainer,
-                    lineHeight = 18.sp
-                )
-            } else {
-                Text(
-                    text = stringResource(R.string.sec_integrity_risk_reasons_prefix),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onErrorContainer,
-                    lineHeight = 18.sp
-                )
-                reasons.forEach { reason ->
-                    Text(
-                        text = "· " + stringResource(reason.messageRes),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onErrorContainer,
-                        lineHeight = 18.sp
-                    )
-                }
-            }
-        }
-    }
-}
-
-// IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
-// 说明：SecuritySwitchRow 需要 ImageVector 入参（图标为扩展属性，
-// 无法以全限定名构造），故预览本文件中仅依赖枚举、可全限定名构造的 IntegrityRiskCard
-// 为遵守「不新增 import 语句」约束，@Preview 采用全限定名写法
-@androidx.compose.ui.tooling.preview.Preview(name = "运行环境完整性风险卡 - 浅色", showBackground = true)
-@androidx.compose.ui.tooling.preview.Preview(name = "运行环境完整性风险卡 - 深色", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
-@Composable
-internal fun SecuritySettingsComponentsPreview() {
-    com.keepasskey.app.ui.theme.KeePasskeyTheme {
-        IntegrityRiskCard(
-            level = com.keepasskey.app.security.RuntimeRiskLevel.ELEVATED
-        )
     }
 }

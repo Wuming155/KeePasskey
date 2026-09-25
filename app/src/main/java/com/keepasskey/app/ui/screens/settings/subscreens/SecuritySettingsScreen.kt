@@ -43,8 +43,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.fragment.app.FragmentActivity
 import com.keepasskey.app.R
-import com.keepasskey.app.security.RuntimeIntegrityPolicy
-import com.keepasskey.app.security.RuntimeIntegrityReport
 import com.keepasskey.app.ui.components.BentoCard
 import com.keepasskey.app.ui.model.resolveText
 import com.keepasskey.app.ui.screens.settings.SettingsUiState
@@ -59,8 +57,6 @@ fun SecuritySettingsScreen(
     onBackClick: () -> Unit,
     // ISSUE-P2-212：第二参数为宿主 Activity——「开启」须当场发起 BiometricPrompt 验证，缺失时 fail-closed
     onBiometricToggle: (Boolean, FragmentActivity?) -> Unit,
-    // ISSUE-P3-236 / PD-15：运行环境完整性检测总开关（默认关闭）
-    onIntegrityCheckToggle: (Boolean) -> Unit = {},
     onAutoLockToggle: (Boolean) -> Unit,
     onFlagSecureToggle: (Boolean) -> Unit,
     onAutoClearClipboardToggle: (Boolean) -> Unit,
@@ -73,8 +69,6 @@ fun SecuritySettingsScreen(
     onClearPasswordOnLeaveToggle: (Boolean) -> Unit = {},
     onRememberKeyFileLocationToggle: (Boolean) -> Unit = {},
     onShowKillAppOptionToggle: (Boolean) -> Unit = {},
-    // ISSUE-P2-08 (ZT-13)：运行环境完整性快照（宿主注入；缺省或 TRUSTED/UNDETERMINED 时不渲染提示）
-    integrityReport: RuntimeIntegrityReport? = null,
     modifier: Modifier = Modifier
 ) {
     // 本批整改：自动锁定超时 / 最长锁定时长 / 剪贴板清空倒计时三处改为**就地** `FilterChip` 选择
@@ -85,14 +79,6 @@ fun SecuritySettingsScreen(
     // 经 `LocalActivity` 直取（而非 `LocalContext.current as? Activity`）——后者触发
     // AndroidLint `ContextCastToActivity`，且 LocalActivity 已由宿主 Activity 精确提供
     val hostActivity = LocalActivity.current as? FragmentActivity
-    // ISSUE-P2-08：是否提示由策略字段 requireRiskNotice 单一裁决（不再由 UI 自行按等级推断，
-    // 使「声明式判定 ⇄ 用户可见提示」真正闭环）；requireRiskNotice 为 true 时等级必为
-    // ELEVATED / COMPROMISED，文案仍按等级取字符串资源
-    val integrityLevel = if (RuntimeIntegrityPolicy.requiresRiskNotice(integrityReport)) {
-        integrityReport?.level
-    } else {
-        null
-    }
 
     SettingsSubscreenScaffold(
         titleRes = R.string.sec_screen_title,
@@ -170,29 +156,6 @@ fun SecuritySettingsScreen(
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.error,
                                 modifier = Modifier.padding(start = 4.dp)
-                            )
-                        }
-
-                        // ISSUE-P3-236 / PD-15：运行环境完整性检测总开关（出厂默认关闭）。
-                        // 归入本卡片而非「系统环境防泄露保护」分区，是因为它存在的唯一目的
-                        // 就是决定「指纹在 Root / 调试 / 注入环境下是否还能用」——放在生物识别
-                        // 名称旁边，用户在看到指纹被拦的提示后能就地找到它。
-                        SecuritySwitchRow(
-                            icon = Icons.Default.GppBad,
-                            title = stringResource(R.string.sec_integrity_check_title),
-                            subtitle = stringResource(R.string.sec_integrity_check_sub),
-                            checked = uiState.integrityCheckEnabled,
-                            onCheckedChange = onIntegrityCheckToggle
-                        )
-
-                        // AC③：关闭（出厂默认）即为「放弃拦截」，代价必须显式告知而非留给用户推断
-                        // （语义与「关闭自动擦除剪贴板」的常驻提示一致）。
-                        if (!uiState.integrityCheckEnabled) {
-                            Text(
-                                text = stringResource(R.string.sec_integrity_check_off_notice),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.error,
-                                modifier = Modifier.padding(start = 16.dp, end = 16.dp)
                             )
                         }
                     }
@@ -286,17 +249,6 @@ fun SecuritySettingsScreen(
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.padding(start = 4.dp)
                 )
-            }
-
-            // ISSUE-P2-08 (ZT-13)：运行环境完整性风险提示（不静默放行；仅风险档渲染）
-            // ISSUE-P2-227：命中清单与等级同源自同一份快照，逐条点名而非只给档级
-            integrityLevel?.let { level ->
-                item {
-                    IntegrityRiskCard(
-                        level = level,
-                        reasons = integrityReport?.enforcement?.biometricBlockReasons.orEmpty()
-                    )
-                }
             }
 
             // ISSUE-P3-324：原「已启用无障碍服务」状态卡已整体移除——「含系统预装服务」的

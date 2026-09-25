@@ -31,7 +31,7 @@ class AutofillAuthBindingPolicyTest {
         assertFalse(AutofillAuthBindingPolicy.isBound(BiometricResult.Cancelled))
         assertFalse(
             AutofillAuthBindingPolicy.isBound(
-                BiometricResult.Error(BiometricAuthManager.ERROR_INTEGRITY_BLOCKED, "INTEGRITY_BLOCKED")
+                BiometricResult.Error(7, "some system error")
             )
         )
     }

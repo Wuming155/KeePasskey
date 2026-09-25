@@ -5,7 +5,6 @@ import com.keepasskey.app.data.repository.FakeSettingsRepository
 import com.keepasskey.app.data.repository.FakeVaultRepository
 import com.keepasskey.app.data.repository.UserSettings
 import com.keepasskey.app.security.BiometricAuthManager
-import com.keepasskey.app.security.FakeRuntimeIntegrityGate
 import com.keepasskey.app.security.KeystoreManager
 import com.keepasskey.app.security.UnlockAuthPolicy
 import com.keepasskey.app.testutil.MainDispatcherGuard
@@ -89,7 +88,7 @@ class QuickUnlockSealDowngradeTest {
         val viewModel = UnlockViewModel(
             FakeVaultRepository(),
             settings,
-            BiometricAuthManager(KeystoreManager(context = null), FakeRuntimeIntegrityGate()),
+            BiometricAuthManager(KeystoreManager(context = null)),
             null,
             DebugLogBuffer()
         )

@@ -10,8 +10,7 @@ import java.io.File
  *
  * ## 缺陷形态
  *
- * `onSaveRequest` 原实现**无任何上限**：`runtimeIntegrityGate.awaitEnforcement()` 在首次扫描未完成时
- * 可等待一整个扫描周期，库侧 `Save` 亦可能长时间不返回；而平台对该回调**不提供**
+ * `onSaveRequest` 原实现**无任何上限**：库侧 `Save` 亦可能长时间不返回；而平台对该回调**不提供**
  * `CancellationSignal`，故无上限的直接后果是**系统的保存 UI 永久等待**。
  *
  * ## 判据为什么是源码扫描

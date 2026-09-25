@@ -171,12 +171,8 @@ internal fun NavGraphBuilder.settingsSecurityRoute(navController: NavHostControl
         val settingsState by settingsViewModel.uiState.collectAsStateWithLifecycle()
         SecuritySettingsScreen(
             uiState = settingsState,
-            // ISSUE-P2-08：下发运行完整性快照，驱动风险提示卡片（不静默放行）
-            integrityReport = settingsState.integrityReport,
             onBackClick = { navController.popBackStack() },
             onBiometricToggle = settingsViewModel::setBiometricEnabled,
-            // ISSUE-P3-236 / PD-15：运行环境完整性检测总开关（默认关闭，关闭时不阻断指纹）
-            onIntegrityCheckToggle = settingsViewModel::setIntegrityCheckEnabled,
             onAutoLockToggle = settingsViewModel::setAutoLockBackground,
             onFlagSecureToggle = settingsViewModel::setFlagSecureEnabled,
             onAutoClearClipboardToggle = settingsViewModel::setAutoClearClipboard,

@@ -229,15 +229,6 @@ data class SettingsUiState(
     // 读取侧仅校验 major（见 `KdbxHeader` 的版本策略声明）。
     // 若将来确需展示格式行，**必须**取自活动库真实文件头（`KdbxDatabase.header.version`），
     // 不得再写为静态字面量。
-
-    // ISSUE-P2-08（ZT-13）：运行环境完整性扫描快照——风险提示卡片数据源。
-    // null = 尚未接入 / 未注入（不渲染风险卡片，也绝不回填「安全」假值）
-    val integrityReport: com.keepasskey.app.security.RuntimeIntegrityReport? = null,
-
-    // 10. 运行环境完整性检测开关（ISSUE-P3-236 / PD-15）
-    // 出厂默认**关闭**（与 UserSettings 一致）：关闭时 Root / 调试 / 注入环境下指纹与
-    // 自动填充照常可用，仅保留用户可见的风险说明；仓库直写项，回显经设置流投影。
-    val integrityCheckEnabled: Boolean = false
 )
 
 /**

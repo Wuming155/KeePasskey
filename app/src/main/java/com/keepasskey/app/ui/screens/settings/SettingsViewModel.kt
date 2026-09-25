@@ -13,8 +13,6 @@ import com.keepasskey.app.data.repository.SettingsRepository
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.security.BiometricAuthManager
 import com.keepasskey.app.security.BiometricCredentialStorage
-import com.keepasskey.app.security.RuntimeIntegrityDetector
-import com.keepasskey.app.security.RuntimeIntegrityReport
 import com.keepasskey.app.sync.SyncCoordinator
 import com.keepasskey.app.sync.SyncCredentialsStore
 import com.keepasskey.app.ui.model.orFallback
@@ -30,7 +28,6 @@ import com.keepasskey.database.session.DatabaseSession
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -69,8 +66,6 @@ class SettingsViewModel @Inject constructor(
     @ApplicationContext private val appContext: Context? = null,
     // TASK-21：非 Compose 层文案资源解析通道（单测可注入假实现）
     private val stringsProvider: StringsProvider? = null,
-    // ISSUE-P2-08：运行完整性扫描快照通道；null 时 UI 不渲染风险卡片
-    private val runtimeIntegrityDetector: RuntimeIntegrityDetector? = null,
     // ISSUE-P3-19：明文导入控制器；缺失时 [importState] 恒 Idle，绝不产生假进度/假回执
     private val vaultImportController: VaultImportController? = null,
     // ISSUE-P3-20：子库挂载会话管理器；缺失时 `childDatabasesCount` 回落 0（不谎报）
@@ -209,13 +204,6 @@ class SettingsViewModel @Inject constructor(
     /** ISSUE-P2-01：用户开始编辑 AccessKey 后终结预填通道生命周期（语义同上） */
     fun clearS3AccessKeyPrefill() = syncController.clearS3AccessKeyPrefill()
 
-    /**
-     * ISSUE-P2-08：完整性扫描快照流。未注入检测器时恒为 null（UI 不渲染风险卡片），
-     * 绝不回填「安全」假值误导用户。
-     */
-    private val integrityReportFlow: Flow<RuntimeIntegrityReport?> =
-        runtimeIntegrityDetector?.report ?: MutableStateFlow<RuntimeIntegrityReport?>(null)
-
     // 状态流装配（纯投影 + combine 编排在 SettingsUiStateProjection.kt）
     val uiState: StateFlow<SettingsUiState> = settingsUiStateFlow(
         scope = viewModelScope,
@@ -230,7 +218,6 @@ class SettingsViewModel @Inject constructor(
             securityTimeoutState = preferences.securityTimeoutState,
             extendedSettings = extendedPreferences.settings,
             debugLogLines = preferences.debugLogLines,
-            integrityReport = integrityReportFlow,
             // ISSUE-P3-20：子库已挂载计数（替代原先硬编码的 0）
             childDatabaseCount = childDatabaseController.countFlow
         ),
@@ -278,12 +265,6 @@ class SettingsViewModel @Inject constructor(
     fun setAutoLockBackground(enabled: Boolean) = preferences.setAutoLockBackground(enabled)
     fun setFlagSecureEnabled(enabled: Boolean) = preferences.setFlagSecureEnabled(enabled)
     fun setAutoClearClipboard(enabled: Boolean) = preferences.setAutoClearClipboard(enabled)
-
-    /**
-     * ISSUE-P3-236 / PD-15：运行环境完整性检测总开关（出厂默认关闭；关闭即解除 Root/调试/注入
-     * 对指纹快速解锁与自动填充的阻断；探测本身仍在后台运行）。
-     */
-    fun setIntegrityCheckEnabled(enabled: Boolean) = preferences.setIntegrityCheckEnabled(enabled)
 
     // ===== 同步配置 / 动作（委托 [SettingsSyncController]） =====
     fun setSyncProvider(provider: CloudSyncProvider) = syncController.setSyncProvider(provider)

@@ -1,7 +1,6 @@
 package com.keepasskey.app.autofill
 
 import com.keepasskey.app.data.repository.AutofillBlocklistStore
-import com.keepasskey.app.security.IntegrityEnforcement
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -9,18 +8,20 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * AutofillAccessPolicy 访问闸门单元测试（ISSUE-P2-07 / ZT-12、ISSUE-P2-08 / ZT-13、ISSUE-P2-226）。
+ * AutofillAccessPolicy 访问闸门单元测试（ISSUE-P2-07 / ZT-12、ISSUE-P2-226）。
  *
  * 覆盖「填充与保存两条路径」共用的拒绝决策，尤其：
  * - onSaveRequest 命中黑名单必须拒绝（等价于不落库）；
  * - 合法性无法判定的包名经 [AutofillBlocklistStore] fail-closed 后同样被拒绝；
- * - 完整性风险态优先拒绝，且仅在 disableAutofill 时生效（可疑级保留自动填充）；
  * - 调用方即本应用自身时拒绝（ISSUE-P2-226，密码管理器不给自己填）。
+ *
+ * 原「完整性风险态优先拒绝」三例（ISSUE-P2-08）随运行环境完整性门整体移除
+ * （ISSUE-P3-325），`rejectReason` 不再接受 `IntegrityEnforcement` 入参。
  */
 class AutofillAccessPolicyTest {
 
     private fun allowed(calling: String, self: String = SELF, blocked: Boolean = false): AutofillRejection? =
-        AutofillAccessPolicy.rejectReason(IntegrityEnforcement.ALLOWED, calling, self) { blocked }
+        AutofillAccessPolicy.rejectReason(calling, self) { blocked }
 
     @Test
     fun `无风险且未命中黑名单时放行`() {
@@ -34,7 +35,6 @@ class AutofillAccessPolicyTest {
 
         // 保存侧：rejectReason 非空即代表不落库
         val rejection = AutofillAccessPolicy.rejectReason(
-            IntegrityEnforcement.ALLOWED,
             "com.example.bank",
             SELF,
             store::isBlocked
@@ -50,43 +50,7 @@ class AutofillAccessPolicyTest {
 
         assertEquals(
             AutofillRejection.BLOCKLISTED,
-            AutofillAccessPolicy.rejectReason(IntegrityEnforcement.ALLOWED, "", SELF) { store.isBlocked(it) }
-        )
-    }
-
-    @Test
-    fun `完整性风险态禁用自动填充时拒绝`() {
-        assertEquals(
-            AutofillRejection.INTEGRITY_RISK,
-            AutofillAccessPolicy.rejectReason(
-                IntegrityEnforcement.UNDETERMINED,
-                "com.example.bank",
-                SELF
-            ) { false }
-        )
-    }
-
-    @Test
-    fun `完整性风险优先于黑名单并被优先报告`() {
-        assertEquals(
-            AutofillRejection.INTEGRITY_RISK,
-            AutofillAccessPolicy.rejectReason(
-                IntegrityEnforcement.UNDETERMINED,
-                "com.example.bank",
-                SELF
-            ) { true }
-        )
-    }
-
-    @Test
-    fun `可疑级仅禁用生物快速解锁时自动填充仍放行`() {
-        val elevated = IntegrityEnforcement(
-            disableBiometricQuickUnlock = true,
-            disableAutofill = false,
-            requireRiskNotice = true
-        )
-        assertNull(
-            AutofillAccessPolicy.rejectReason(elevated, "com.example.bank", SELF) { false }
+            AutofillAccessPolicy.rejectReason("", SELF) { store.isBlocked(it) }
         )
     }
 

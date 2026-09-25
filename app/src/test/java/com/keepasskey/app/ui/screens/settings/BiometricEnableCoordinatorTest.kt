@@ -9,7 +9,6 @@ import com.keepasskey.app.data.repository.UserSettings
 import com.keepasskey.app.security.BiometricAuthManager
 import com.keepasskey.app.security.BiometricCredentialStorage
 import com.keepasskey.app.security.BiometricResult
-import com.keepasskey.app.security.FakeRuntimeIntegrityGate
 import com.keepasskey.app.security.KeystoreManager
 import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.app.ui.model.UiMessage
@@ -261,7 +260,7 @@ class BiometricEnableCoordinatorTest {
         // KeystoreManager(null)：JVM 下无 AndroidKeyStore ⇒ 解密 Cipher 准备必然失败
         val f = createFixture(
             storage = storage,
-            authManager = BiometricAuthManager(KeystoreManager(null), FakeRuntimeIntegrityGate())
+            authManager = BiometricAuthManager(KeystoreManager(null))
         )
         f.coordinator.strongBiometricAvailableOverride = { true }
         var promptInvoked = false

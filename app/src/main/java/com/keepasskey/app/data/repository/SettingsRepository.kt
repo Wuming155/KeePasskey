@@ -61,18 +61,7 @@ data class UserSettings(
     // 「仍要启用」时置位；硬件落位（TEE / StrongBox）不依赖本标记。
     // 该标记同时驱动解锁页与安全设置页的常驻声明
     // 「本机快速解锁降级为软件密钥，不提供硬件级保护」。
-    val quickUnlockDowngradeAcknowledged: Boolean = false,
-    // ISSUE-P3-236（2026-09-21 用户裁决，登记为 PD-15）：运行环境完整性检测的**总开关**。
-    //
-    // 该检测（ISSUE-P2-08 / ZT-13）此前**恒开且无配置入口**：一旦命中 Root / Magisk 落点、
-    // 调试器附加、`ptrace` 或注入框架，即禁用生物快速解锁与自动填充——对「自有且已 Root」
-    // 的设备而言，等于把指纹解锁彻底锁死，而用户既看不到原因也无法选择。
-    //
-    // 现改为用户可配置的显式开关，**出厂默认关闭**：
-    // - 关闭（默认）：探测仍在后台如实运行（设置页可据快照呈现环境状态），但**不降级任何
-    //   通道**——`RuntimeIntegrityGate` 恒返回放行策略，Root 环境下指纹照常可用；
-    // - 开启：完整恢复既有 fail-closed 后果（阻断 + 风险提示 + 命中归因）。
-    val integrityCheckEnabled: Boolean = false
+    val quickUnlockDowngradeAcknowledged: Boolean = false
 )
 
 /**
@@ -125,12 +114,4 @@ interface SettingsRepository {
      * 置位即代表用户已在风险提示弹窗中明确选择在无硬件隔离的软件密钥上继续使用快速解锁。
      */
     suspend fun setQuickUnlockDowngradeAcknowledged(acknowledged: Boolean)
-
-    /**
-     * ISSUE-P3-236 / PD-15：运行环境完整性检测总开关（**出厂默认关闭**）。
-     *
-     * 关闭时 [com.keepasskey.app.security.RuntimeIntegrityGate] 不再降级生物快速解锁与
-     * 自动填充（Root 环境下指纹照常可用）；开启即恢复既有 fail-closed 后果。
-     */
-    suspend fun setIntegrityCheckEnabled(enabled: Boolean)
 }

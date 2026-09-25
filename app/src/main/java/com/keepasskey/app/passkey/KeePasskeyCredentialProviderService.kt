@@ -56,9 +56,6 @@ import javax.inject.Inject
  * 5. ISSUE-P1-01：全部条目的 PendingIntent 统一使用 [CredentialPendingIntents.ENTRY_FLAGS]
  *    （`FLAG_MUTABLE`）——系统以 fillIn Intent 注入最终请求，误用 `FLAG_IMMUTABLE` 会让注入的
  *    extras 被静默丢弃，链式解锁与密码保存全链路握手失败（详见该常量 KDoc）。
- * 6. ISSUE-P2-53（审计 F-24）：**运行完整性门控在两条入口统一收口**——get / create 均在最先
- *    裁决 [com.keepasskey.app.security.RuntimeIntegrityGate.awaitEnforcement]，风险态返回空响应；
- *    此前 CM 主通道零命中完整性门控（自动填充 fail-closed 而 CM fail-open，构成策略绕过）。
  */
 @AndroidEntryPoint
 class KeePasskeyCredentialProviderService : CredentialProviderService() {
@@ -72,16 +69,6 @@ class KeePasskeyCredentialProviderService : CredentialProviderService() {
     // TASK-44：自动填充黑名单（命中即不返回任何凭据候选，fail-closed）
     @Inject
     lateinit var autofillBlocklistStore: com.keepasskey.app.data.repository.AutofillBlocklistStore
-
-    /**
-     * ISSUE-P2-53（审计 F-24）：运行完整性门控——CM 主通道与自动填充通道统一收口。
-     *
-     * 此前完整性裁决只在自动填充 fail-closed，CM 通道（本服务）**零命中**：
-     * 风险态下系统凭据弹窗仍可取得候选，等于绕过策略。现于两条入口（get / create）
-     * 各做一次 await 裁决，风险态一律返回**空响应**（不下发任何数据集 / 解锁引导 / 保存入口）。
-     */
-    @Inject
-    lateinit var runtimeIntegrityGate: com.keepasskey.app.security.RuntimeIntegrityGate
 
     /**
      * 特权浏览器白名单（内置已取证指纹 + 用户显式启用的浏览器）。
@@ -144,13 +131,6 @@ class KeePasskeyCredentialProviderService : CredentialProviderService() {
         // 不产出候选、解锁引导或保存入口。
         if (!settingsStore.isCredentialProviderEnabled()) {
             AppLog.i(TAG, "凭据管理器通道已在设置中关闭，返回空响应")
-            return responseBuilder.build()
-        }
-
-        // ISSUE-P2-53：完整性门控收口——风险态一律不下发任何数据集 / 解锁引导。
-        // 与自动填充通道（KeePasskeyAutofillService.awaitEnforcement）同一判据，消除通道不对称。
-        if (runtimeIntegrityGate.awaitEnforcement().disableAutofill) {
-            AppLog.i(TAG, "运行环境完整性风险态，拒绝返回凭据候选")
             return responseBuilder.build()
         }
 
@@ -232,12 +212,6 @@ class KeePasskeyCredentialProviderService : CredentialProviderService() {
         // ISSUE-P2-228：通道总开关关闭 ⇒ 不产出任何保存入口（与 get 通道同口径）
         if (!settingsStore.isCredentialProviderEnabled()) {
             AppLog.i(TAG, "凭据管理器通道已在设置中关闭，不产出保存入口")
-            return responseBuilder.build()
-        }
-
-        // ISSUE-P2-53：完整性门控收口——风险态不下发保存入口（与 get 通道同判据）。
-        if (runtimeIntegrityGate.awaitEnforcement().disableAutofill) {
-            AppLog.i(TAG, "运行环境完整性风险态，拒绝返回凭据保存入口")
             return responseBuilder.build()
         }
 

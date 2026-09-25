@@ -308,32 +308,6 @@ class UnlockViewModelBiometricAutoPromptTest {
         assertFalse(viewModel.onBiometricAutoPromptRequested(null))
     }
 
-    // ── ISSUE-P3-14：完整性风险态文案在消费侧按资源解析 ─────────────────────
-
-    @Test
-    fun `完整性风险失败映射到已资源化文案并回落主密码输入`() = runTest {
-        val storage = InMemorySealedCredentialStore().also { it.sealPlaceholderCredential() }
-        val viewModel = createViewModel(enabledSettings(), storage.storage)
-
-        viewModel.handleBiometricResult(
-            BiometricResult.Error(
-                BiometricAuthManager.ERROR_INTEGRITY_BLOCKED,
-                BiometricAuthManager.INTEGRITY_BLOCKED_DIAGNOSTIC
-            ),
-            storage.storage,
-            activeDbId,
-            ByteArray(0)
-        )
-
-        val state = viewModel.uiState.value
-        assertEquals(
-            "风险态必须经已资源化文案输出（中英双语由 strings.xml 承载）",
-            R.string.sec_biometric_integrity_blocked,
-            state.errorMessage?.resId
-        )
-        assertEquals("风险态必须回落主密码输入", UnlockMode.STANDARD, state.unlockMode)
-    }
-
     // ── 验收标准 2：生物识别成功 → 走既有解锁路径 ──────────────────────────
 
     /**

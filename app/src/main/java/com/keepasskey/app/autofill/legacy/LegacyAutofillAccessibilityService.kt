@@ -17,7 +17,6 @@ import com.keepasskey.app.data.repository.ExtendedSettingsStore
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.notification.NotificationChannelSpec
 import com.keepasskey.app.notification.NotificationChannels
-import com.keepasskey.app.security.RuntimeIntegrityGate
 import com.keepasskey.core.log.AppLog
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
@@ -38,8 +37,7 @@ import javax.inject.Inject
  * 1. **触发**：目标应用窗口出现「可编辑且无内容的口令框」（[LegacyFieldPolicy] 判定）时
  *    发通知；口令框是唯一锚点，普通文本界面不触发；
  * 2. **放行前求值**（缺一不发）：应用内「旧版自动填充服务」开关开启 + 库已解锁 +
- *    完整性闸门放行（[RuntimeIntegrityGate.awaitEnforcement]）+ 非本应用窗口（自我排除，
- *    对齐 ISSUE-P2-226）+ 非自动填充黑名单（对齐 TASK-44）；
+ *    非本应用窗口（自我排除，对齐 ISSUE-P2-226）+ 非自动填充黑名单（对齐 TASK-44）；
  * 3. **交付**：通知点按进 [LegacyFillPickerActivity]（受保护窗口 + 生物识别确认），
  *    用户选中条目后经 [LegacyAutofillCoordinator] 递交回本服务，重扫当前窗口并复核
  *    「窗口包名 = 通知时的目标包名」后才以 `ACTION_SET_TEXT` 回填——不在陈旧窗口上写入；
@@ -54,9 +52,6 @@ class LegacyAutofillAccessibilityService : AccessibilityService() {
 
     @Inject
     lateinit var vaultRepository: VaultRepository
-
-    @Inject
-    lateinit var runtimeIntegrityGate: RuntimeIntegrityGate
 
     @Inject
     lateinit var settingsStore: ExtendedSettingsStore
@@ -107,7 +102,7 @@ class LegacyAutofillAccessibilityService : AccessibilityService() {
 
     /**
      * 事件触发的放行判定与提示：全部闸门通过且窗口存在可填充口令框才发通知。
-     * 判定顺序刻意**先廉价后昂贵**（开关 → 锁定 → 窗口包名 → 闸门/黑名单 → 扫描）。
+     * 判定顺序刻意**先廉价后昂贵**（开关 → 锁定 → 窗口包名 → 自我排除/黑名单 → 扫描）。
      */
     private suspend fun evaluateAndOffer(eventPkg: String) {
         if (!settingsStore.isAutofillLegacyAccessibilityEnabled()) return
@@ -120,7 +115,6 @@ class LegacyAutofillAccessibilityService : AccessibilityService() {
         if (AutofillAccessPolicy.isSelfApp(targetPkg, packageName)) return
 
         val rejection = AutofillAccessPolicy.rejectReason(
-            runtimeIntegrityGate.awaitEnforcement(),
             targetPkg,
             packageName,
             autofillBlocklistStore::isBlocked
