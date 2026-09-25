@@ -526,10 +526,27 @@ jobs:
       - name: 启动 Android 模拟器（API 36.1 x86_64，headless + KVM）并等待启动完成
         run: |
           set -euo pipefail
+          # ISSUE-P2-314：avdmanager 与 emulator 对 AVD home 各自解析，新版 runner 镜像 +
+          # emulator 37.1.11 下两者不一致（run #352 实证 `Unknown AVD name [ci-device]`、
+          # ini 不在 $HOME/.android/avd）——显式钉死 ANDROID_AVD_HOME 令两侧共用同一路径。
+          export ANDROID_AVD_HOME="$HOME/.android/avd"
+          mkdir -p "$ANDROID_AVD_HOME"
           echo "no" | avdmanager create avd \
             --name ci-device \
             --package "system-images;android-36.1;google_apis;x86_64" \
             --device pixel
+          # 创建后立即硬断言 ini 落位：avdmanager 落到别处（如 ANDROID_USER_HOME/avd）
+          # 时连同 .avd 目录迁移并留痕；完全未产出则秒级显式报错，不空等兜底循环。
+          if [ ! -f "$ANDROID_AVD_HOME/ci-device.ini" ]; then
+            SRC="$(find "$HOME" -maxdepth 6 -name 'ci-device.ini' 2>/dev/null | head -1)"
+            if [ -n "$SRC" ]; then
+              echo "avdmanager 落位与 ANDROID_AVD_HOME 不一致：$SRC → 迁移"
+              cp -a "$(dirname "$SRC")"/ci-device.ini "$(dirname "$SRC")"/ci-device.avd "$ANDROID_AVD_HOME"/
+            else
+              echo "::error::avdmanager 未产出 ci-device.ini"
+              exit 1
+            fi
+          fi
           adb start-server
           # ISSUE-P2-314：ubuntu-24.04 runner 镜像不把 emulator 目录放进 PATH
           # （2026-09-24 run #351 实证 `emulator: command not found`），必须走 SDK 内全路径；

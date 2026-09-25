@@ -54,8 +54,12 @@
 runner 镜像未把 `$ANDROID_SDK_ROOT/emulator` 放入 PATH，模拟器从未启动（`adb` / `avdmanager` 经日志
 证实可用，仅 `emulator` 缺位）。其后裸 `adb wait-for-device` 无设备可等、无限阻塞；20 分钟启动兜底
 循环（`seq 1 120` × `sleep 10`）写在 `wait-for-device` 之后而**执行不到**，兜底形同虚设。job 挂满
-`timeout-minutes: 120` 被强杀，connected 测试零执行、报告产物为空。影响面：近 8 次 build run
-（#344–#351，2026-09-24 全天）结论全为 cancelled——`ISSUE-P2-192` 第 7 项建立的设备层门禁在 CI 持续缺位。
+`timeout-minutes: 120` 被强杀，connected 测试零执行、报告产物为空。**首修（全路径 + 删
+`wait-for-device`）后 run #352 暴露第二层问题**：新版 runner 镜像 + emulator 37.1.11 下
+`avdmanager` 创建的 AVD 落位与 emulator 查找路径不一致（`Unknown AVD name [ci-device]`，ini 不在
+`$HOME/.android/avd`），20 分钟兜底此时真实可达并按设计报错退出（挂死形态已消除，但启动仍未成）。
+影响面：近 40 次 build run（#313–#352，2026-09-23 起）Device gate 无一 success——
+`ISSUE-P2-192` 第 7 项建立的设备层门禁在 CI 持续缺位。
 
 **涉及文件**：`.github/workflows/build.yml` device-gate「启动 Android 模拟器」步骤。
 
@@ -64,8 +68,10 @@ runner 镜像未把 `$ANDROID_SDK_ROOT/emulator` 放入 PATH，模拟器从未�
    （不存在即秒级显式报错，不得后台静默）。
 2. 移除裸 `adb wait-for-device`；等待由 getprop 探测循环承担（同时覆盖设备上线与启动完成两阶段），
    兜底报错真实可达。
-3. 模拟器失败场景下 job 至多约 20 分钟内以明确 error 退出，不再挂满 120 分钟。
-4. push 触发的下一轮 CI run 中 device-gate job conclusion=success（connected 全模块真实执行）。
+3. `ANDROID_AVD_HOME` 显式钉死且两侧共用；创建后硬断言 `ci-device.ini` 落位，avdmanager 落位不一致时
+   连同 `.avd` 目录迁移并留痕，完全未产出则秒级显式报错。
+4. 模拟器失败场景下 job 至多约 20 分钟内以明确 error 退出，不再挂满 120 分钟。
+5. push 触发的下一轮 CI run 中 device-gate job conclusion=success（connected 全模块真实执行）。
 
 ### ISSUE-P2-315 CI OWASP Dependency-Check：NVD 库无 runner 缓存 + 60 分钟超时不足，扫描反复被强杀
 
