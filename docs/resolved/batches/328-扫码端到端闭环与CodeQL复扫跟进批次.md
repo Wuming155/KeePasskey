@@ -109,8 +109,13 @@ xml=412 tests=2774 failures=0 errors=0 skipped=13
 ```
 
 **CodeQL 复扫读数（P3-318 闭环判据 AC①）**：推送本批 commit 后 `workflow_dispatch` 触发
-`codeql.yml`（run [RUN_ID]），完成后 `GET /code-scanning/alerts/355` / `356` 实读：
-`state = fixed`、`fixed_at` 非空（[ALERT_EVIDENCE]）。
+`codeql.yml`（run **36119079938**，success），完成后 `GET /code-scanning/alerts` 实读：
+
+```
+#355  state=fixed  fixed_at=2026-09-25T09:33:58Z
+#356  state=fixed  fixed_at=2026-09-25T09:33:58Z
+open py/redos alerts = 0
+```
 
 ## 5. 涉及文件
 
