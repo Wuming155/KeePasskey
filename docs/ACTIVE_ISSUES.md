@@ -47,29 +47,6 @@
 > 已全部闭环：§315（309 / 312）、§317（308）、§318（310）、§319（311）、§320（313）；
 > 2026-09-25 CI 设备门禁与供应链扫描两条（`ISSUE-P2-314` / `ISSUE-P2-315`）闭环见 §325。
 
-## P3 低危问题、特性接线与体验优化（1 项）
+## P3 低危问题、特性接线与体验优化（0 项）
 
-### ISSUE-P3-316 CI 触发频率治理：三 workflow 每 push 全量触发，配额消耗与计数膨胀
-
-- **核实时间点**：2026-09-25（GitHub API 聚合现存 run：09-20 起 5 天 382 次 = build 126 +
-  dependency-scan 127 + CodeQL 129，用户口径含已删 run 本月约千次）。
-- **核实方式**：`GET /actions/runs` 分页聚合 + 三个 workflow `on:` 块现行内容比对。
-
-**背景**：三 workflow 均「每 push 必跑」，而本仓为高频直接 push main（每闭环批次 1 推 + 文档修正推送），
-纯文档提交也跑满 5 job build（含 120 分钟上限的 Device gate）、约 55 分钟 OWASP 全量扫描与三路
-CodeQL；`cancel-in-progress` 使连续推送时旧 run 成批 cancelled——计数膨胀且白烧分钟数。
-影响面：CI 配额；不构成安全缺陷（各门禁语义不变）。
-
-**涉及文件**：`.github/workflows/build.yml` / `dependency-scan.yml` / `codeql.yml` 的 `on:` 块与
-相关头注释。
-
-**验收标准**：
-1. build 改每日定时巡检（含 Device gate 全量）+ `workflow_dispatch`；移除 push / PR 触发。
-2. dependency-scan 改每周定时巡检（与 NVD 周粒度缓存 key 对齐）+ `workflow_dispatch`；移除 push / PR
-   触发；头注释「触发策略」同步更正（防声明漂移）。
-3. CodeQL 移除 push / PR 触发，保留既有每周兜底巡检 + `workflow_dispatch`。
-4. 各门禁 job 语义、fail-closed 断言、timeout 一律不变（本条目只动触发面）。
-5. 三个 workflow 经 `workflow_dispatch` 各实跑一次转绿（证明触发配置改动后 pipeline 可触发且通过）；
-   定时首轮触发由下一周期自然验证。
-
----
+> **暂无开放项**。2026-09-25 CI 触发频率治理（`ISSUE-P3-316`）闭环见 §326。

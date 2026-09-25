@@ -401,6 +401,8 @@
 
 | §325 | CI 设备门禁与供应链扫描修复批次：`ISSUE-P2-314` + `ISSUE-P2-315` 闭环（P2 2 → **0**，全量待办再次归零）。Device gate 五层根因逐层实证逐层修（run #351–#354 job 日志取证）：①emulator 全路径 + `test -x` 断言（ubuntu-24.04 镜像不放 PATH，run #351 实证 `command not found` 后挂满 120 分钟）；②删裸 `adb wait-for-device` 使 20 分钟兜底真实可达（原兜底写在其后执行不到）；③`ANDROID_AVD_HOME` 钉死 + AVD ini 落位硬断言与迁移（run #352 实证 avdmanager / emulator 37.1.11 解析不一致）；④`/dev/kvm` 存在断言 + `chmod 666` 放权（run #353 实证 runner 用户不在 kvm 组）；⑤connected 步骤改块字面量——行内 plain scalar 把「反斜杠+换行」折叠为「反斜杠+空格」，gradle 收到带前导空格伪任务名，**connected 在 CI 从未真正执行过**（run #354 实证）。OWASP：`timeout-minutes` 60→90 + NVD 库（`GRADLE_USER_HOME/dependency-check-data`，setup-gradle 缓存不含，每推全量重下）周粒度 `actions/cache` + 头注释声明漂移更正。**CI 实证**：run 36085771258 五 job 全绿、connected 165 例 0 失败（app 1 跳过预期内）；run 36085771251 success、`BUILD SUCCESSFUL in 54m 12s`、CVSS 闸门通过、报告+SARIF 上传（NVD 冷启全量 54 分钟——旧 60 分钟上限下必死）。`tests=2774` 持平；门禁 7/7 PASS | `ISSUE-P2-314` / `ISSUE-P2-315` | [`325-CI设备门禁与供应链扫描修复批次.md`](resolved/batches/325-CI设备门禁与供应链扫描修复批次.md) |
 
+| §326 | CI 触发频率治理批次：`ISSUE-P3-316` 闭环（P3 1 → **0**，全量待办再次归零）。三 workflow 原「每 push 全量触发」下 09-20 起 5 天 382 次 run（build 126 / dependency-scan 127 / CodeQL 129，纯文档提交亦跑满 5 job + 55 分钟 OWASP + 三路 CodeQL），按用户裁决改**纯定时巡检 + 手动触发**：build 每日 `0 21 * * *`（北京 05:00，含 Device gate 全量）、OWASP 每周一 `0 3 * * 1`（与 §325 NVD 周粒度缓存 key 天然对齐）、CodeQL 仅保留既有周巡检；push / PR 触发全部移除，头注释同步更正（防声明漂移）。**实证**：推送触发面整改 commit 后 60 秒 `runs?head_sha=…` 返回 0（push 触发确实移除）；三 workflow 各 dispatch 一次全部 success（36090529506 / 36090534765 / 36090539694）；cron 现查与注释逐字符一致。门禁语义 / fail-closed / timeout 未动；本地门禁仍是入库前置，CI 转为每日 / 每周独立复核层，预期约 15 次/周（原约 270 次/周）。`tests=2774` 持平；门禁 7/7 PASS | `ISSUE-P3-316` | [`326-CI触发频率治理批次.md`](resolved/batches/326-CI触发频率治理批次.md) |
+
 ## 分册导航
 
 | 分册 | 覆盖批次 | 时间 | 索引 |
