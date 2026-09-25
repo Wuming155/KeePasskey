@@ -399,6 +399,8 @@
 
 | §324 | 真实 DAV 服务器矩阵实测批次：`ISSUE-P3-300` 闭环（**P3 清零，全量待办归零**）。本机自建真实服务器（Apache 2.4.68 mod_dav 参考实现 + nginx 1.30.5 dav，非 mock）完成 AC① 三项读数 + AC⑤(a) 实验：①**mod_dav 自身签发弱 ETag**（W/"size-mtime"）——§272 担心的弱签发服务器就是参考实现本身；`MOVE If` 原形态回传（弱→弱）实测 201 接受、强化形态 400 响亮失败、错值 412 如实暴露 ⇒ **「回传原形态」取向经 AC② 证实分支闭环**；②nginx 对 MOVE 的 `If` 整体忽略（无 412 误报亦无保护，如实登记）；③PUT+MOVE 事务写两类均兼容；④**`Overwrite:F` 两类均真实尊重（412）** ⇒ 404 恢复分支 TOCTOU 非真实残余。Nextcloud / IIS / S3 样本环境不可得按 AC③ 如实标注未执行，残余收窄登记限界表 §28（§28 改写为收窄态），272 批次 §3.3.1 回填。裁决透明声明：AC④「维持开放」针对 §272 完全无证据态，本批已触发 AC② 证实分支故闭环。`tests=2774` 持平；门禁 7/7 PASS | `ISSUE-P3-300` | [`324-真实DAV矩阵实测批次.md`](resolved/batches/324-真实DAV矩阵实测批次.md) |
 
+| §325 | CI 设备门禁与供应链扫描修复批次：`ISSUE-P2-314` + `ISSUE-P2-315` 闭环（P2 2 → **0**，全量待办再次归零）。Device gate 五层根因逐层实证逐层修（run #351–#354 job 日志取证）：①emulator 全路径 + `test -x` 断言（ubuntu-24.04 镜像不放 PATH，run #351 实证 `command not found` 后挂满 120 分钟）；②删裸 `adb wait-for-device` 使 20 分钟兜底真实可达（原兜底写在其后执行不到）；③`ANDROID_AVD_HOME` 钉死 + AVD ini 落位硬断言与迁移（run #352 实证 avdmanager / emulator 37.1.11 解析不一致）；④`/dev/kvm` 存在断言 + `chmod 666` 放权（run #353 实证 runner 用户不在 kvm 组）；⑤connected 步骤改块字面量——行内 plain scalar 把「反斜杠+换行」折叠为「反斜杠+空格」，gradle 收到带前导空格伪任务名，**connected 在 CI 从未真正执行过**（run #354 实证）。OWASP：`timeout-minutes` 60→90 + NVD 库（`GRADLE_USER_HOME/dependency-check-data`，setup-gradle 缓存不含，每推全量重下）周粒度 `actions/cache` + 头注释声明漂移更正。**CI 实证**：run 36085771258 五 job 全绿、connected 165 例 0 失败（app 1 跳过预期内）；run 36085771251 success、`BUILD SUCCESSFUL in 54m 12s`、CVSS 闸门通过、报告+SARIF 上传（NVD 冷启全量 54 分钟——旧 60 分钟上限下必死）。`tests=2774` 持平；门禁 7/7 PASS | `ISSUE-P2-314` / `ISSUE-P2-315` | [`325-CI设备门禁与供应链扫描修复批次.md`](resolved/batches/325-CI设备门禁与供应链扫描修复批次.md) |
+
 ## 分册导航
 
 | 分册 | 覆盖批次 | 时间 | 索引 |
