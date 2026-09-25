@@ -47,9 +47,20 @@
 > 已全部闭环：§315（309 / 312）、§317（308）、§318（310）、§319（311）、§320（313）；
 > 2026-09-25 CI 设备门禁与供应链扫描两条（`ISSUE-P2-314` / `ISSUE-P2-315`）闭环见 §325。
 
-## P3 低危问题、特性接线与体验优化（1 项）
+## P3 低危问题、特性接线与体验优化（2 项）
 
 > 2026-09-25 CI 触发频率治理（`ISSUE-P3-316`）闭环见 §326。
+
+### ISSUE-P3-318：CodeQL py/redos 两条高严重度告警未登记未处置——截图包装生成器 `PREVIEW_BLOCK` 正则指数回溯
+
+- **优先级**：P3（开发者本机工具链脚本，输入源为本仓源码文件、非不可信运行时输入；真实可利用面极小，但属 CodeQL **high** 且 Security 面板计入徽标计数）。
+- **核实时间点**：2026-09-25。
+- **核实方式**：① `GET /repos/Wuming155/KeePasskey/code-scanning/alerts?state=open` 实测：#355 / #356（rule `py/redos`，CodeQL 2.27.1，security_severity_level **high**）创建于 2026-09-16，`most_recent_instance` 停留于 main 分支 commit `cd29e7ef`（当前 HEAD）——**每轮扫描仍在复检出现，非孤儿告警**；
+  ② 两条告警的实例路径均为 `tools/export_previews/generate_screenshot_test_wrappers.py:30`，即 `PREVIEW_BLOCK` 的预览注解参数组 `r"(?:\((?:[^()\n]|\([^()\n]*\))*\))?"`——CodeQL 判其存在嵌套量词交替的指数回溯（「strings starting with `@Preview\n@` and containing many repetitions of `00\n@`」形态）；
+  ③ 全仓 `grep` `docs/`（含 ACTIVE_ISSUES / RESOLVED_LOG / 已知工程限界 / records）确认该问题**从未登记**，亦无任何 dismiss 记录（`dismissed_at` 为空）。
+- **背景**：该正则用于解析 `app/src/main/java` 下 Compose 预览函数声明，形如 `(?:A|B)*` 且 `B` 可整体匹配 `A` 前缀的嵌套回溯形态；实际输入是本仓受版本控制的源码、不含对抗性内容，故风险为理论面，但 CodeQL 高严重度条目长期挂账且零登记，违反「新问题即时补登」纪律（本条即为补登）。同批排查结论（本条无关但同一面板）：Security 徽标其余 5 条为 `CVE-2020-29582`（kotlin 工具链构件，CVSS 5.3 低于 7.0 硬阈值），系 `ISSUE-P2-219` / PD-25 明文裁决「低于阈值，如实保留可见」的**有意保留项**，不属未闭环缺陷。
+- **整改方案**：① 将 `PREVIEW_BLOCK` 中预览注解参数组改写为线性时间等价形态（如展开嵌套组或利用 Python 3.11+ 原子组 `(?>...)`，消除「同一起点可被两条交替分支重复消费」的回溯结构），行为零变更——以 `promoted` / `wrappers` 计数与生成产物逐字节不变为证；② 复跑 `python tools/export_previews/generate_screenshot_test_wrappers.py` 与 `.\gradlew.bat :app:compileDebugScreenshotTestKotlin --rerun`；③ 不采用 dismiss：告警系真实回溯结构，修复后待下一轮 CodeQL 巡检自动判定 fixed。
+- **验收标准**：① CodeQL 巡检（`.github/workflows/codeql.yml`，每周 + 手动）后 #355 / #356 状态转为 `fixed`（或闭环批次文档记录 API 读数证明已消除）；② 生成器输出 `promoted=79 wrappers=79 packages=17` 计数与改动前一致，截图测试包装编译门禁绿；③ 批次文档 §3 原样粘贴 `python tools/doc/gate_readings.py` 读数块。
 
 ### ISSUE-P3-317：CodeQL 默认设置未按 ISSUE-P3-57 前置条件停用，Security 面板双语言配置持续报错
 
