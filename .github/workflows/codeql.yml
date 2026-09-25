@@ -29,10 +29,8 @@
 name: CodeQL
 
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+  # ISSUE-P3-316：移除 push / PR 触发（5 天 129 次 run，纯文档提交亦全量分析）；
+  # 保留每周兜底巡检 + 手动触发；需要即时验证时在 Actions 页手动 Run workflow。
   schedule:
     - cron: "23 4 * * 1" # 每周一次兜底巡检（默认设置原有周期性分析由本项承接）
   workflow_dispatch:

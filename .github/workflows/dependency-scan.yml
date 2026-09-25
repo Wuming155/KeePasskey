@@ -8,9 +8,11 @@
 #    不跨大版本升级（上游已有新 major，升级需另行验证，见 docs/records/退役依据承接-ISSUE-P3-09.md）。
 # 3. 除本巡检外，构建/测试/Lint 门禁与 Rust 供应链闸门见 .github/workflows/build.yml。
 #
-# 触发策略（ISSUE-P2-54 整改：PR / push 路径纳入依赖扫描）：
-# - `pull_request` + `push{branches:[main]}`：PR 与主干推送均触发全量扫描
-#   （NVD 库经下方周粒度 actions/cache 持久化，命中后由插件增量更新；扫描完整性优先于耗时）；
+# 触发策略（ISSUE-P2-54 整改：PR / push 路径纳入依赖扫描；ISSUE-P3-316 治理为定时巡检）：
+# - `schedule`：每周一全量扫描一次——与下方 NVD 周粒度缓存 key 天然对齐（每周首跑恢复上周库
+#   增量更新），保证依赖未变时新 CVE 仍会被巡检出来；扫描完整性优先于耗时；
+# - `workflow_dispatch`：改依赖 / 发布前随时在 Actions 页手动 Run workflow。
+# - 原 push(main)+PR 每 push 全量触发已于 ISSUE-P3-316 移除（5 天 127 次 run，依赖树未变亦全量扫描）；
 # - `workflow_dispatch`：随时可到 Actions 页手动 Run workflow；
 # - 报告以 artifact 归档并按 CVSS 阈值阻断；SARIF 上传 GitHub Code Scanning
 #   （Security 页可视化）；误报经**逐条人工核实**后登记 suppression 白名单
@@ -23,10 +25,10 @@
 name: dependency-scan
 
 on:
+  # ISSUE-P3-316：改为每周定时巡检 + 手动触发（原 push(main)+PR 每 push 全量触发已移除，见头注释）
+  schedule:
+    - cron: "0 3 * * 1" # 每周一 UTC 03:00（北京 11:00）全量扫描
   workflow_dispatch:
-  pull_request:
-  push:
-    branches: [main]
 
 permissions:
   contents: read
