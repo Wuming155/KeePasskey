@@ -10,7 +10,7 @@
 #
 # 触发策略（ISSUE-P2-54 整改：PR / push 路径纳入依赖扫描）：
 # - `pull_request` + `push{branches:[main]}`：PR 与主干推送均触发全量扫描
-#   （首次 NVD 缓存被 runner 缓存吸收后增量扫描耗时可控；扫描完整性优先于耗时）；
+#   （NVD 库经下方周粒度 actions/cache 持久化，命中后由插件增量更新；扫描完整性优先于耗时）；
 # - `workflow_dispatch`：随时可到 Actions 页手动 Run workflow；
 # - 报告以 artifact 归档并按 CVSS 阈值阻断；SARIF 上传 GitHub Code Scanning
 #   （Security 页可视化）；误报经**逐条人工核实**后登记 suppression 白名单
@@ -40,7 +40,9 @@ jobs:
   owasp-dependency-check:
     name: OWASP Dependency-Check
     runs-on: ubuntu-latest
-    timeout-minutes: 60 # 首次 NVD 数据同步较慢，预留余量
+    # ISSUE-P2-315：run #344–#351（2026-09-24）实证 60 分钟在 NVD 数据源慢日不够
+    # （全量重下超时被强杀、供应链结论缺位），提高至 90；NVD 库持久化由下方 cache 步骤承担。
+    timeout-minutes: 90
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -56,6 +58,26 @@ jobs:
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+
+      # =====================================================================================
+      # ISSUE-P2-315：NVD 数据库周粒度缓存。
+      # 插件把 NVD H2 库默认落 ${GRADLE_USER_HOME}/dependency-check-data/<ver>
+      # （dependency-check-gradle 插件 DataExtension.groovy 实证），而 setup-gradle 的
+      # 缓存只覆盖 caches / wrapper 子目录，不含该目录 ⇒ 原状每次推送全量重下 NVD，
+      # 数据源慢日撞 job 超时被强杀（run #344–#351 全 cancelled，供应链结论持续缺位）。
+      # 周粒度 key（ISO 周）+ 前缀 restore-keys：同周内共享全量库，跨周命中上周库后
+      # 由插件按 validForHours（默认 4h）增量更新，不再全量重下。
+      # =====================================================================================
+      - name: 计算周粒度缓存键（ISO 周，UTC）
+        run: echo "NVD_CACHE_WEEK=$(date -u +%G-%V)" >> "$GITHUB_ENV"
+
+      - name: 缓存 NVD 数据库（dependency-check-data）
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.gradle/dependency-check-data
+          key: dependency-check-nvd-${{ env.NVD_CACHE_WEEK }}
+          restore-keys: |
+            dependency-check-nvd-
 
       # 本步骤失败即整条流水线失败（CVSS ≥ 7.0 或扫描内部错误），不再被 continue-on-error 掩盖
       - name: Run OWASP Dependency-Check (aggregate)

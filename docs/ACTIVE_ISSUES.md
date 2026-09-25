@@ -41,9 +41,56 @@
 
 ---
 
-## P2 中危缺陷与协议/测试缺口（0 项）
+## P2 中危缺陷与协议/测试缺口（2 项）
 
-> **暂无开放项**。2026-09-24 同步/加密/passkey 安全审计批五条（`ISSUE-P2-308` ~ `ISSUE-P2-312`）
+### ISSUE-P2-314 CI Device gate：`emulator` 不在 PATH + 启动兜底不可达，job 挂满 120 分钟被超时强杀
+
+- **核实时间点**：2026-09-25（GitHub API 拉取 run #351 / run 36045541051 的 job 107788644219 日志逐段取证；
+  注：GitHub MCP 服务器凭据失效（`Bad credentials`），改用本机 Git 凭据管理器 token 走 REST API）。
+- **核实方式**：job 日志取证（`19:08:47` 实证 `emulator: command not found`；`21:05:31` 实证
+  `The operation was canceled`）+ `.github/workflows/build.yml` 现行内容比对。
+
+**背景**：device-gate 启动步骤以裸命令 `emulator -avd ci-device … &` 后台起模拟器，但 ubuntu-24.04
+runner 镜像未把 `$ANDROID_SDK_ROOT/emulator` 放入 PATH，模拟器从未启动（`adb` / `avdmanager` 经日志
+证实可用，仅 `emulator` 缺位）。其后裸 `adb wait-for-device` 无设备可等、无限阻塞；20 分钟启动兜底
+循环（`seq 1 120` × `sleep 10`）写在 `wait-for-device` 之后而**执行不到**，兜底形同虚设。job 挂满
+`timeout-minutes: 120` 被强杀，connected 测试零执行、报告产物为空。影响面：近 8 次 build run
+（#344–#351，2026-09-24 全天）结论全为 cancelled——`ISSUE-P2-192` 第 7 项建立的设备层门禁在 CI 持续缺位。
+
+**涉及文件**：`.github/workflows/build.yml` device-gate「启动 Android 模拟器」步骤。
+
+**验收标准**：
+1. emulator 改以 `${ANDROID_SDK_ROOT}/emulator/emulator` 全路径调用，且启动前 `test -x` 断言二进制存在
+   （不存在即秒级显式报错，不得后台静默）。
+2. 移除裸 `adb wait-for-device`；等待由 getprop 探测循环承担（同时覆盖设备上线与启动完成两阶段），
+   兜底报错真实可达。
+3. 模拟器失败场景下 job 至多约 20 分钟内以明确 error 退出，不再挂满 120 分钟。
+4. push 触发的下一轮 CI run 中 device-gate job conclusion=success（connected 全模块真实执行）。
+
+### ISSUE-P2-315 CI OWASP Dependency-Check：NVD 库无 runner 缓存 + 60 分钟超时不足，扫描反复被强杀
+
+- **核实时间点**：2026-09-25（GitHub API 拉取 dependency-scan run 36045541019 的 job 107788455656 日志；
+  插件行为经 dependency-check-gradle 插件源码 `DataExtension.groovy` 核实）。
+- **核实方式**：job 日志取证（`19:05:34` 进入 NVD 阶段后一小时零输出，`20:05:02` 撞 `timeout-minutes: 60`
+  被取消）+ 插件源码核实默认数据目录。
+
+**背景**：插件 NVD H2 库默认落 `${GRADLE_USER_HOME}/dependency-check-data/<ver>`（源码实证），CI 上
+`GRADLE_USER_HOME=/home/runner/.gradle`，而 `gradle/actions/setup-gradle` 只缓存 caches/wrapper 子目录
+**不含** dependency-check-data ⇒ 每次推送全量重下 NVD，数据源慢日必然撞 60 分钟顶被强杀；随后
+fail-closed 断言按设计报「报告不存在」（该链路工作正常），但供应链结论持续缺位。文件头注释
+「首次 NVD 缓存被 runner 缓存吸收后增量扫描耗时可控」与上述事实不符（声明漂移），须一并更正。
+影响面：近 8 次 run（#344–#351）全部 cancelled；Code Scanning 现存 5 条 medium CVE 告警来自更早
+一次成功运行的快照。
+
+**涉及文件**：`.github/workflows/dependency-scan.yml`。
+
+**验收标准**：
+1. 为 `~/.gradle/dependency-check-data` 增加 `actions/cache`（周粒度 key + 前缀 restore-keys，命中后增量更新）。
+2. job `timeout-minutes` 由 60 提高（≥90），并同步更正相关注释使其与事实一致。
+3. fail-closed 断言与报告上传步骤语义不变（不得以调低阈值 / 删除断言换绿）。
+4. push 触发的下一轮 dependency-scan run 中 OWASP job conclusion=success 且产出报告 artifact / SARIF。
+
+> **历史批注**：2026-09-24 同步/加密/passkey 安全审计批五条（`ISSUE-P2-308` ~ `ISSUE-P2-312`）
 > 已全部闭环：§315（309 / 312）、§317（308）、§318（310）、§319（311）、§320（313）。
 
 ## P3 低危问题、特性接线与体验优化（0 项）

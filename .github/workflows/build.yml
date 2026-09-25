@@ -531,16 +531,24 @@ jobs:
             --package "system-images;android-36.1;google_apis;x86_64" \
             --device pixel
           adb start-server
-          emulator -avd ci-device \
+          # ISSUE-P2-314：ubuntu-24.04 runner 镜像不把 emulator 目录放进 PATH
+          # （2026-09-24 run #351 实证 `emulator: command not found`），必须走 SDK 内全路径；
+          # 并先断言二进制存在，把该类失败从「后台静默 + 等待挂死」提前到秒级显式报错。
+          EMU_BIN="${ANDROID_SDK_ROOT}/emulator/emulator"
+          test -x "$EMU_BIN" || { echo "::error::emulator 二进制不存在：$EMU_BIN"; exit 1; }
+          "$EMU_BIN" -avd ci-device \
             -no-window -no-audio -no-boot-anim -no-snapshot \
             -gpu swiftshader_indirect -accel on -port 5554 &
-          adb wait-for-device
+          # ISSUE-P2-314：裸 `adb wait-for-device` 在设备永不出现时无限阻塞，且原写法位于
+          # 启动兜底循环之前，使 20 分钟兜底执行不到（run #351 挂满 120 分钟被超时强杀）。
+          # 删除该调用：循环内的 getprop 探测同时覆盖「设备上线」与「启动完成」两阶段，
+          # 设备未上线时 adb shell 立即报错、经 `|| true` 降级为空读数后按轮重试。
           for i in $(seq 1 120); do
-            boot="$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')"
+            boot="$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || true)"
             [ "$boot" = "1" ] && break
             sleep 10
           done
-          boot="$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')"
+          boot="$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || true)"
           if [ "$boot" != "1" ]; then
             echo "::error::模拟器 20 分钟内未完成启动"
             exit 1
