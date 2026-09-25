@@ -47,34 +47,11 @@
 > 已全部闭环：§315（309 / 312）、§317（308）、§318（310）、§319（311）、§320（313）；
 > 2026-09-25 CI 设备门禁与供应链扫描两条（`ISSUE-P2-314` / `ISSUE-P2-315`）闭环见 §325。
 
-## P3 低危问题、特性接线与体验优化（2 项）
+## P3 低危问题、特性接线与体验优化（1 项）
 
 > 2026-09-25 CI 触发频率治理（`ISSUE-P3-316`）闭环见 §326；
-> ReDoS 正则修复（`ISSUE-P3-318`）闭环见 §327。
-
-### ISSUE-P3-319：扫码栈依赖治理——移除停更且依赖废弃 Camera1 的 `com.journeyapps:zxing-android-embedded`，重构为 CameraX + `zxing:core` 纯离线 Compose 对话框
-
-> **整改进展（2026-09-25，§327）**：整改代码已全部入库（依赖替换 / `TotpScanDialog` Compose 对话框 /
-> `SecureCaptureActivity` 与 Manifest 声明删除 / `CAMERA`+`uses-feature` 显式声明 / 守卫测试迁移），
-> 全量单测 2774 全绿、门禁见 §327 §4。真机（`1c859bcc7d24`，未装库状态）已实证：权限请求 /
-> 拒绝不崩溃有如实提示 / 重试授权后 CameraX 取景流出现 / 对话框窗口 `fl=…SECURE…` +
-> `pfl=…HIDE_NON_SYSTEM_OVERLAY_WINDOWS…`（dumpsys 实读，宿主 Activity 窗口 SECURE 同证）。
-> **唯一未竟**：AC③ 前半「实拍 TOTP 二维码成功回填种子」——二维码已投至 PC 屏幕轮询 2 分钟未识别，
-> 系真机未对准屏幕（物理朝向仅用户可调整）；取得实拍读数后按小批闭环归档。
-
-### ISSUE-P3-319：扫码栈依赖治理——移除停更且依赖废弃 Camera1 的 `com.journeyapps:zxing-android-embedded`，重构为 CameraX + `zxing:core` 纯离线 Compose 对话框
-
-- **优先级**：P3（依赖现代化与合规瘦身；迁移过程中**不得**回退 `ISSUE-P3-71` / `ISSUE-P3-103` 已建立的防截屏 / 反 overlay / 反点击劫持加固面，故含安全约束）。
-- **核实时间点**：2026-09-25。
-- **核实方式**：① 全仓 `grep -iE "zxing|journeyapps"`（排除 `build/` 产物）：源码消费方仅 2 处——`app/src/main/java/com/keepasskey/app/ui/screens/edit/EntryEditPickers.kt:82`（`rememberLauncherForActivityResult(ScanContract())` + `ScanOptions`，QR_CODE 单格式、结果经 `onTotpSecretChangeSecure` 以 CharArray 上行）与 `app/src/main/java/com/keepasskey/app/security/SecureCaptureActivity.kt`（继承 zxing `CaptureActivity`，onCreate 强制 `FLAG_SECURE` + `setHideOverlayWindows(true)` + `decorView.filterTouchesWhenObscured=true`）；另 `app/src/main/AndroidManifest.xml:217` 声明该 Activity（`zxing_CaptureTheme` / `sensorLandscape`）；② `AndroidManifest.xml:14` 注释 ③ 实证：`CAMERA` 权限目前**由 zxing 清单传递注入**（源清单未显式声明），移库后必须显式声明补位；③ Maven 元数据核实（2026-09-25）：`com.journeyapps:zxing-android-embedded` 最新 4.3.0（2023 后停更，内部依赖已废弃的 android.hardware.Camera1 API）；`androidx.camera:camera-camera2` stable 最新 **1.6.2**（latest 1.7.0-alpha03）；`com.google.zxing:core` 最新 **3.5.4**（Maven Central，2025-11-11）——现版本 3.4.1 系 zxing-embedded 传递依赖。
-- **背景**：TOTP 种子二维码扫码是全仓唯一扫码场景。zxing-android-embedded 停更且取景建立在 Camera1 之上，Camera1 自 API 21 起弃用；库自带的 `CaptureActivity` 游离于 `FlagSecureGuard`（仅 attach 至 `MainActivity` 与 passkey Activity 体系）的加固范围之外，`ISSUE-P3-71` 才为其单独立了 `SecureCaptureActivity` 补防截屏。改为**承载于受保护窗口内的原生 Compose 对话框**后，取景画面天然落入 `FLAG_SECURE` 保护域，同时消除一个停更第三方 UI 依赖（含其注入的全部资源 / 主题 / 清单组件），扫码路径收敛为「CameraX 取景 + zxing:core 纯算法解码」，零网络、零遥测、零 ML Kit。
-- **整改方案**：
-  ① 依赖替换：`libs.versions.toml` 删除 `zxing-embedded` 别名与 `zxing = "4.3.0"` 版本项，新增 `androidx.camera`（camera-core / camera-camera2 / camera-lifecycle / camera-view，**1.6.2 stable**）与 `com.google.zxing:core`（**3.5.4**）；
-  ② 新增 Compose 扫码对话框（`AndroidView(PreviewView)` + `ImageAnalysis` YUV 帧喂 `MultiFormatReader`，仅 QR_CODE，与现 `ScanOptions.QR_CODE` 等价；解码跑后台线程，结果以 CharArray 通道接回 `onTotpSecretChangeSecure`，**不得**新增 String 落地敏感种子的路径）；
-  ③ `EntryEditPickers.kt` 的 `scanTotpQr` 由 `ScanContract` 启动改为置位对话框状态；删除 `SecureCaptureActivity.kt` 与 Manifest 对应 `<activity>` 声明；
-  ④ **加固迁移口径（本条安全约束核心）**：对话框挂载在编辑页所在 Activity 窗口内，须逐项核实并登记三点——(a) 承载 Activity 的 `FLAG_SECURE` 生效（`FlagSecureGuard` 覆盖面核实）；(b) `setHideOverlayWindows(true)` / `filterTouchesWhenObscured` 两层在承载窗口的等效覆盖（如未覆盖，须在对话框挂载路径补齐或在批次文档登记取舍理由）；(c) 原 `sensorLandscape` 方向策略是否保留的裁决；
-  ⑤ Manifest：`<uses-permission android:name="android.permission.CAMERA"/>` **显式声明**（替换原 zxing 传递注入），同步改写注释 ③ 的权限口径；运行时权限经 `ActivityResultContracts.RequestPermission` 请求，拒绝时如实提示并保持扫码入口可见（不静默失效）。
-- **验收标准**：① `.\gradlew.bat test` 全绿、`python tools/doc/gate_readings.py` 7/7 PASS（读数块原样入批次文档 §3）；`lint` 计数口径（`grep -cE "^ *<issue$" app/build/reports/lint-results-debug.xml`）不劣于基线；② 合并清单中无任何 `com.journeyapps` 组件 / 资源 / `zxing_CaptureTheme` 残留，`CAMERA` 权限为源清单显式声明；③ 扫码端到端验证：AVD（本机 `Pixel_10`）或真机实拍 TOTP 二维码成功回填种子（§263 设备数据保护立规适用，禁直接对装库设备跑 connected）；权限拒绝路径不崩溃、有如实提示；④ `FlagSecureGuard` / 加固迁移口径逐项核实结论写入批次文档；⑤ 若改动了 `@Preview` 或截图包装生成器，须跑 `.\gradlew.bat :app:compileDebugScreenshotTestKotlin --rerun` 门禁。
+> ReDoS 正则修复（`ISSUE-P3-318`）闭环见 §327 / §328；
+> 扫码栈迁移（`ISSUE-P3-319`）与扫码回显（`ISSUE-P3-320`）闭环见 §328。
 
 ### ISSUE-P3-317：CodeQL 默认设置未按 ISSUE-P3-57 前置条件停用，Security 面板双语言配置持续报错
 

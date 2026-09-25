@@ -327,27 +327,50 @@ private fun ScanCameraViewport(
 
 /**
  * 单帧 QR 解码：Y 平面（灰度）→ [PlanarYUVLuminanceSource] → [HybridBinarizer]，
- * 未命中则逆时针旋转位图重试（覆盖传感器旋转 90°/270° 与倒置），4 个方向均失败返回 null。
+ * 未命中则**字节级手工旋转** Y 平面后重试——4 个方向均失败返回 null。 *
+ * 旋转必须自己做：[PlanarYUVLuminanceSource] 不支持
+ * `BinaryBitmap.rotateCounterClockwise()`（真机实证抛 `UnsupportedOperationException`，
+ * 依赖它会令多方向重试沦为死代码）。CameraX 只给 `rotationDegrees` 元数据、不旋转像素，
+ * 故设备竖拍时帧相对显示旋转 90°/270°，只有尝试全部朝向才与拍摄角度无关地可解。
  */
 private fun decodeQrFrame(image: ImageProxy, reader: MultiFormatReader): String? {
     val plane = image.planes[0]
     val rowStride = plane.rowStride
     val width = image.width
     val height = image.height
-    // Y 平面按行距拷出（帧缓冲行尾可能带对齐 padding），Source 以 rowStride 为 dataWidth 逐行取
-    val yBytes = ByteArray(rowStride * height)
-    plane.buffer.get(yBytes, 0, minOf(plane.buffer.remaining(), yBytes.size))
-    val source = PlanarYUVLuminanceSource(yBytes, rowStride, height, 0, 0, width, height, false)
-    var bitmap = BinaryBitmap(HybridBinarizer(source))
+    // Y 平面按行距拷出并剥去行对齐 padding：得到连续的 width x height 灰度图
+    val padded = ByteArray(rowStride * height)
+    plane.buffer.get(padded, 0, minOf(plane.buffer.remaining(), padded.size))
+    var data = ByteArray(width * height)
+    for (row in 0 until height) {
+        System.arraycopy(padded, row * rowStride, data, row * width, width)
+    }
+    var w = width
+    var h = height
     repeat(4) {
         try {
-            return reader.decodeWithState(bitmap).text
+            val source = PlanarYUVLuminanceSource(data, w, h, 0, 0, w, h, false)
+            return reader.decodeWithState(BinaryBitmap(HybridBinarizer(source))).text
         } catch (e: NotFoundException) {
             // 换方向重试
         }
-        bitmap = bitmap.rotateCounterClockwise()
+        val rotated = rotateYPlane90(data, w, h)
+        data = rotated.first
+        w = rotated.second
+        h = rotated.third
     }
     return null
+}
+
+/** Y 平面顺时针旋转 90°：返回 (旋转后字节, 新宽, 新高)。迭代 4 次即覆盖全部朝向，方向无谓。 */
+private fun rotateYPlane90(src: ByteArray, w: Int, h: Int): Triple<ByteArray, Int, Int> {
+    val out = ByteArray(src.size)
+    for (y in 0 until h) {
+        for (x in 0 until w) {
+            out[x * h + (h - 1 - y)] = src[y * w + x]
+        }
+    }
+    return Triple(out, h, w)
 }
 
 private fun hasCameraPermission(context: Context): Boolean =

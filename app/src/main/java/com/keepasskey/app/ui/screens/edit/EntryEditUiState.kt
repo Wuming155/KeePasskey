@@ -56,6 +56,13 @@ data class EntryEditUiState(
     val excludeConfusing: Boolean = true,
     val userMessage: UiMessage? = null,
     val isSaved: Boolean = false,
+    /**
+     * ISSUE-P3-320：TOTP 预填回显轮次（非敏感元数据）。扫码回填成功后自增，
+     * 作为 [com.keepasskey.app.ui.components.SecurePasswordField] 的 initialKey 组成部分
+     * 驱动预填通道以**新种子**重新消费一次（字段即时回显扫码结果）。种子明文本身
+     * 仍经 ViewModel 的 CharArray 预填通道承载，不进本状态类（铁律不变）。
+     */
+    val totpPrefillEpoch: Int = 0,
     // H4-只读整改：数据库以只读模式打开时禁用保存
     val isReadOnly: Boolean = false,
     // 表单脏标记：发生任何未保存修改后为 true，驱动返回前的丢弃确认

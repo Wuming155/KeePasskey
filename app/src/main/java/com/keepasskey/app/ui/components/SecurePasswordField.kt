@@ -72,16 +72,19 @@ fun SecurePasswordField(
     // 预填消费闩：同一 initialKey 只消费一次，避免输入过程中被重复回写覆盖
     var consumedInitialKey by remember { mutableStateOf<Any?>(null) }
 
-    LaunchedEffect(initialKey, initialPassword) {
-        val initial = initialPassword
-        if (initial != null && initialKey != null && consumedInitialKey != initialKey) {
-            consumedInitialKey = initialKey
-            charBridge.fill('0')
-            charBridge = initial.copyOf()
-            // 显示用 String：仅存活于组件内部（框架边界），离开组合即释放；
-            // 预填不回写 onPasswordChanged——预填不是用户编辑，不产生脏标记
-            displayText = String(initial)
-        }
+    // 预填必须**组合期同步消费**（ISSUE-P3-320）：若经 LaunchedEffect 延迟协程消费，
+    // 调用方的「用毕清零」（如 EntryEditViewModel.loadEntry 重载时对上一预填数组原地
+    // fill('0')）可能在协程体执行前落地——消费到的已是擦成 '0' 的数组，输入框显示
+    // 整串 0（真机实证）。同步消费后，清零只可能发生在消费完成之后，竞态消除。
+    // 守卫使写入幂等收敛（同一 initialKey 至多消费一次），不会造成组合期反复回写。
+    val pendingInitial = initialPassword
+    if (pendingInitial != null && initialKey != null && consumedInitialKey != initialKey) {
+        consumedInitialKey = initialKey
+        charBridge.fill('0')
+        charBridge = pendingInitial.copyOf()
+        // 显示用 String：仅存活于组件内部（框架边界），离开组合即释放；
+        // 预填不回写 onPasswordChanged——预填不是用户编辑，不产生脏标记
+        displayText = String(pendingInitial)
     }
 
     fun wipeSecret() {

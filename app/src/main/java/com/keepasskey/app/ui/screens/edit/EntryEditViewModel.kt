@@ -256,9 +256,13 @@ class EntryEditViewModel @Inject constructor(
     fun onTotpSecretChangeSecure(secret: CharArray) {
         totpSecretChars.fill('0')
         totpSecretChars = secret.copyOf()
+        // ISSUE-P3-320：扫码回填后经预填通道**回显新种子**（新鲜副本 + epoch 递增换 key，
+        // 驱动 SecurePasswordField 重新消费一次），字段即时可见扫码结果——旧实现将通道置 null
+        // 且不换 key，字段停留旧内容（或被下一轮清零竞态刷成 '0' 串），用户无法感知扫码成功。
+        // 旧预填数组仍按「用毕清零」原地擦除（SecurePasswordField 已组合期同步消费完毕，无竞态）。
         _loadedTotpSecret.value?.fill('0')
-        _loadedTotpSecret.value = null
-        _uiState.update { it.copy(isDirty = true) }
+        _loadedTotpSecret.value = secret.copyOf()
+        _uiState.update { it.copy(isDirty = true, totpPrefillEpoch = it.totpPrefillEpoch + 1) }
     }
 
     fun onTagsInputChange(input: String) = _uiState.update { it.copy(tagsInput = input, isDirty = true) }

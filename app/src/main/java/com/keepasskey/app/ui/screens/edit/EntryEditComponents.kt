@@ -68,6 +68,8 @@ internal fun formatAttachmentSize(bytes: Int): String {
 internal fun EntryEditTotpSection(
     entryId: String?,
     loadedTotpSecret: CharArray?,
+    // ISSUE-P3-320：扫码回填轮次——进 initialKey 使回填种子经预填通道重新消费一次（字段回显）
+    totpPrefillEpoch: Int = 0,
     onTotpSecretChangeSecure: (CharArray) -> Unit,
     onScanTotpQr: () -> Unit
 ) {
@@ -93,7 +95,7 @@ internal fun EntryEditTotpSection(
             isPasswordVisible = totpVisible,
             onToggleVisibility = { totpVisible = !totpVisible },
             initialPassword = loadedTotpSecret,
-            initialKey = entryId?.let { "totp-$it" } ?: "totp-new-entry",
+            initialKey = "${entryId?.let { "totp-$it" } ?: "totp-new-entry"}#$totpPrefillEpoch",
             trailingIcon = {
                 // 断点5 整改：按钮直接呼起真实扫码
                 IconButton(onClick = onScanTotpQr) {

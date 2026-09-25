@@ -250,6 +250,7 @@ fun EntryEditContent(
             EntryEditTotpSection(
                 entryId = uiState.entryId,
                 loadedTotpSecret = loadedTotpSecret,
+                totpPrefillEpoch = uiState.totpPrefillEpoch,
                 onTotpSecretChangeSecure = onTotpSecretChangeSecure,
                 onScanTotpQr = onScanTotpQr
             )
