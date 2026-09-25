@@ -221,10 +221,12 @@ fun VaultListContent(
     val isSearching = uiState.searchQuery.isNotBlank()
 
     // ISSUE-P3-261 AC⑧：列表内容层动效与主题 MotionScheme 同族——条目增删 / 重排不再瞬移。
-    // 在**本层**取值后传入 `animateItem`（`items` 的 content lambda 是 `@Composable`，
-    // 但把 `MaterialTheme` 读取下沉到每个条目会让 N 个 item 各注册一次组合局部读取）。
-    val itemFadeSpec = MaterialTheme.motionScheme.fastEffectsSpec<Float>()
-    val itemPlacementSpec = MaterialTheme.motionScheme.fastSpatialSpec<IntOffset>()
+    // ISSUE-P3-323 降档：fade fast→default（3800→1600，增删不再近瞬消）、placement
+    // fast→default（800/0.6→380/0.8，重排不再欠阻尼过冲）；仍在**本层**取值后传入 `animateItem`
+    // （`items` 的 content lambda 是 `@Composable`，但把 `MaterialTheme` 读取下沉到每个条目
+    // 会让 N 个 item 各注册一次组合局部读取）。
+    val itemFadeSpec = MaterialTheme.motionScheme.defaultEffectsSpec<Float>()
+    val itemPlacementSpec = MaterialTheme.motionScheme.defaultSpatialSpec<IntOffset>()
 
     Scaffold(
         modifier = modifier.fillMaxSize(),

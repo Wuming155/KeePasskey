@@ -12,13 +12,14 @@ import java.io.File
 /**
  * 全局导航与退出动效接线守卫（`ISSUE-P3-222` 立规，`ISSUE-P3-261` 按定标口径重写）。
  *
- * 锁定四类转场的不变式：共享轴 X（下钻 / 返回镜像）、顶层 Tab 贯穿淡入淡出（Fade Through）、
+ * 锁定四类转场的不变式：共享轴 X（下钻 / 返回镜像）、顶层 Tab 双向交叉淡化（`ISSUE-P3-323` 起）、
  * 预测性返回全屏表面、内容层（`MotionScheme` spec + 列表项动效），以及
  * `ISSUE-P2-260` 的「顶层 Tab 切换必须真正替换返回栈」。
  *
  * **用例取名口径（`ISSUE-P3-261` AC⑨）**：原名「动效规范时长与缓动常量必须符合 Material3 规范」
  * 与取值不符（当时既非 M3 token 时长、也非 M3 缓动），现按**实际基准栏**取名——
  * 空间段对齐 `MotionScheme`（AndroidX 实现）、效果段对齐设计规范的顺序淡化时间轴。
+ * `ISSUE-P3-323` 复定标后：空间段取 slow / default 档，顶层 Tab 偏离顺序淡化改交叉淡化（`PD-44`）。
  */
 class AppNavigationMotionTest {
 
@@ -30,7 +31,7 @@ class AppNavigationMotionTest {
         assertEquals(90, AppNavigationMotion.FADE_IN_DELAY_MS)
         assertEquals(35, AppNavigationMotion.FADE_THROUGH_THRESHOLD_PERCENT)
 
-        // 不变式①：滑动结束 = 淡化结束（入向淡化收尾恰落在滑动终点）
+        // 不变式①：入向淡化收尾不晚于淡化时间轴总长（出向淡出先收尾，入向淡化收尾落轴上）
         assertEquals(
             AppNavigationMotion.SHARED_AXIS_SLIDE_MS,
             AppNavigationMotion.FADE_IN_DELAY_MS + AppNavigationMotion.FADE_IN_MS
@@ -48,6 +49,48 @@ class AppNavigationMotionTest {
             "入向淡化延迟 ${AppNavigationMotion.FADE_IN_DELAY_MS}ms 必须 ≥ 出向淡化 " +
                 "${AppNavigationMotion.FADE_OUT_MS}ms",
             AppNavigationMotion.FADE_IN_DELAY_MS >= AppNavigationMotion.FADE_OUT_MS
+        )
+    }
+
+    @Test
+    fun `顶层Tab必须为同时交叉淡化且时长取官方同档总时长`() {
+        // ISSUE-P3-323 / PD-44：顶层 Tab 有意偏离官方 fade through 顺序淡化（空窗被用户实证反馈为
+        // 「一闪而过」），改双向同时交叉淡化；单侧时长取官方 shared axis 同档总时长 300ms。
+        assertEquals(300, AppNavigationMotion.TOP_LEVEL_FADE_MS)
+        // 同时淡化的判据＝单侧时长与淡化时间轴同档、且**不得**复用共享轴的入向延迟（延迟即空窗）。
+        assertEquals(AppNavigationMotion.SHARED_AXIS_SLIDE_MS, AppNavigationMotion.TOP_LEVEL_FADE_MS)
+        val motion = stripCommentsOnly(readSource(MOTION_SOURCE))
+        assertTrue(
+            "[$MOTION_SOURCE] 顶层入向淡化不得带 delayMillis（延迟即空窗，须与出向同时起跑）",
+            motion.contains("tween(durationMillis = TOP_LEVEL_FADE_MS, easing = FADE_IN_EASING)")
+        )
+        assertTrue(
+            "[$MOTION_SOURCE] 顶层出向淡化必须同用 TOP_LEVEL_FADE_MS（双向同时）",
+            motion.contains("tween(durationMillis = TOP_LEVEL_FADE_MS, easing = FADE_OUT_EASING)")
+        )
+        assertFalse(
+            "[$MOTION_SOURCE] 顶层转场不得再走共享轴的延迟淡化对（fadeInSpec/fadeOutSpec）",
+            motion.substringAfter("topLevelEnterTransition").substringBefore("private fun fadeInSpec")
+                .contains("fadeInSpec()")
+        )
+    }
+
+    @Test
+    fun `空间段档位必须取slow与default且不得再用fast档`() {
+        // ISSUE-P3-323 / PD-44：整屏滑动 slow 档（200/0.8，页面级从容）、视差 default 档
+        // （380/0.8，去 fast 档 800/0.6 的欠阻尼过冲）；fast 档仅保留给内容层 FAB。
+        val motion = stripCommentsOnly(readSource(MOTION_SOURCE))
+        assertTrue(
+            "[$MOTION_SOURCE] from() 必须以 slowSpatialSpec 构造整屏滑动",
+            motion.contains("fullSlideSpec = scheme.slowSpatialSpec()")
+        )
+        assertTrue(
+            "[$MOTION_SOURCE] from() 必须以 defaultSpatialSpec 构造视差位移",
+            motion.contains("parallaxSpec = scheme.defaultSpatialSpec()")
+        )
+        assertFalse(
+            "[$MOTION_SOURCE] 导航转场不得再取 fastSpatialSpec（欠阻尼过冲，「傻快」来源）",
+            motion.contains("fastSpatialSpec")
         )
     }
 
@@ -137,7 +180,7 @@ class AppNavigationMotionTest {
     }
 
     @Test
-    fun `顶层Tab与解锁页必须配置FadeThrough转场且覆盖设置页`() {
+    fun `顶层Tab与解锁页必须配置交叉淡化转场且覆盖设置页`() {
         // §280：逐条 composable 注册体下沉同包 Routes 文件，按「门面 + 路由体」并集扫描
         val source = stripCommentsOnly(
             readSource(NAV_GRAPH_SOURCE) + "\n" + readSource(NAV_GRAPH_ROUTES_SOURCE)

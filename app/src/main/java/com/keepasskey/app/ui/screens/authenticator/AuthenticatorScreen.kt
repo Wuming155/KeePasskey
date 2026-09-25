@@ -165,9 +165,10 @@ fun AuthenticatorScreen(
             )
         }
     ) { innerPadding ->
-        // ISSUE-P3-261 AC⑧：列表内容层动效与主题 MotionScheme 同族（见 `items` 内 `animateItem`）
-        val itemFadeSpec = MaterialTheme.motionScheme.fastEffectsSpec<Float>()
-        val itemPlacementSpec = MaterialTheme.motionScheme.fastSpatialSpec<IntOffset>()
+        // ISSUE-P3-261 AC⑧：列表内容层动效与主题 MotionScheme 同族（见 `items` 内 `animateItem`）；
+        // ISSUE-P3-323 降档 fast→default（与 VaultList 同口径：增删不再近瞬消、重排不再过冲）
+        val itemFadeSpec = MaterialTheme.motionScheme.defaultEffectsSpec<Float>()
+        val itemPlacementSpec = MaterialTheme.motionScheme.defaultSpatialSpec<IntOffset>()
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
