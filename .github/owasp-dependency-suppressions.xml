@@ -177,4 +177,64 @@
         <packageUrl regex="true">^pkg:maven/org\.jetbrains\.kotlin/.*@(1\.6\.10|1\.8\.\d+|2\.2\.\d+|2\.3\.\d+|2\.4\.\d+)$</packageUrl>
         <cve>CVE-2026-53914</cve>
     </suppress>
+
+    <!-- ================= ISSUE-P3-321：已人工核实的误报（登记于 2026-09-25，批次 §330） ================= -->
+    <suppress>
+        <notes><![CDATA[
+            核实结论：误报（**版本不可达**）。CVE-2020-29582 的受影响面是 Kotlin < 1.4.21
+            （CVE 描述原文 "In JetBrains Kotlin before 1.4.21"；JetBrains 1.4.21 安全版把
+            kotlin.io.createTempFile/createTempDir 改走 NIO Files API 修复，与 Guava
+            CVE-2020-8908 同源问题）；而 NVD 对该 CVE 的 CPE 上界写成
+            `cpe:2.3:a:jetbrains:kotlin:*` + `versionEndExcluding: 2.1.0`
+            （2026-09-25 NVD API v2.0 实查），与其自身描述矛盾——这正是 1.6.10 / 1.8.x
+            构件被继续命中的根因。
+
+            命中构件与引入面（run 36123416214 的 dependency-check-report.json，
+            projectReferences / includedBy 逐条可复现）：
+            1. kotlin-reflect@1.6.10：经 hilt-compiler@2.60.1 / kotlin-build-tools-impl
+               承载于 kotlinCompilerClasspath / kspClasspath / hiltAnnotationProcessor 等
+               **编译器工具链配置**（构建期 JVM 面，不入 APK）；
+            2. kotlin-stdlib-jdk7@1.8.0 / kotlin-stdlib-jdk8@1.8.0：同上（hilt-compiler 传递）；
+            3. kotlin-stdlib-jdk7@1.8.22 / kotlin-stdlib-jdk8@1.8.22：androidx 构件以旧
+               Kotlin 工具链构建、POM 声明 stdlib-jdk8 传递引入（1.8.20 起 jdk7/jdk8
+               构件已并回 kotlin-stdlib、为空壳构件，实际运行时 stdlib 为 2.4.20 ≥ 1.4.21）。
+
+            范围护栏：本豁免只覆盖 kotlin-reflect / kotlin-stdlib-jdk7 / kotlin-stdlib-jdk8
+            三个 artifactId、且版本段显式限定 1.6.10 / 1.8.x（即本仓依赖图实际出现的版本族）；
+            kotlin-stdlib 主构件**不在**豁免内（其 2.4.20 未命中该 CVE）。若将来这些构件出现
+            低于 1.4.21 的版本（如降级 PR），regex 不再匹配、闸门照常报红——fail-closed。
+
+            登记于 ISSUE-P3-321 / 批次 §330；核实方式与读数见批次文档。
+        ]]></notes>
+        <packageUrl regex="true">^pkg:maven/org\.jetbrains\.kotlin/(kotlin-reflect|kotlin-stdlib-jdk7|kotlin-stdlib-jdk8)@(1\.6\.10|1\.8\.\d+)$</packageUrl>
+        <cve>CVE-2020-29582</cve>
+    </suppress>
+    <suppress>
+        <notes><![CDATA[
+            核实结论：误报（**CPE 产品名称碰撞**）。androidx.camera 的 camera-lifecycle /
+            camera-video 两个构件被 dependency-check 经 CPE 比对挂上两个语义零关联的 CVE：
+            1. CVE-2007-4234：受影响产品为 **Camera Life**（PHP 相册 Web 应用，2.6 之前，
+               MITRE 记录原文 "Unspecified vulnerability in Camera Life before 2.6 allows
+               remote attackers to download private photos"；2026-09-25 MITRE CVE API 实查
+               该记录无 CPE 数据）；androidx.camera 是 Android 相机 Jetpack 库，非该产品。
+            2. CVE-2015-3362：受影响产品为 **Drupal Video 模块**（7.x-2.11 之前，NVD CPE
+               `cpe:2.3:a:video_project:video:*:*:*:*:*:drupal:*:*`，2026-09-25 NVD API
+               实查）；camera-video 与其仅共享 "video" 一词。
+            两者均无任何代码路径交集，升级 androidx.camera 亦无法消除（产品名不匹配是
+            机理性的）——与 androidx.sqlite 误报（本文件 ISSUE-P3-32 条目）同类。
+
+            命中构件：camera-lifecycle@1.6.2 / camera-video@1.6.2（§327 扫码栈迁移引入的
+            生产依赖，TotpScanDialog CameraX 取景栈），run 36123416214 报告可复现。
+
+            范围护栏：本豁免只覆盖 camera-lifecycle / camera-video 两个 artifactId、版本段
+            显式限定 1.6.x（当前依赖面）；其余 androidx.camera 构件（camera-core /
+            camera-camera2 / camera-view 等）**不在**豁免内。camera 升级到 1.7+ 后本条
+            不再匹配、若命中间类误报须重新核实登记——fail-closed。
+
+            登记于 ISSUE-P3-321 / 批次 §330；核实方式与读数见批次文档。
+        ]]></notes>
+        <packageUrl regex="true">^pkg:maven/androidx\.camera/(camera-lifecycle|camera-video)@1\.6\.\d+$</packageUrl>
+        <cve>CVE-2007-4234</cve>
+        <cve>CVE-2015-3362</cve>
+    </suppress>
 </suppressions>
