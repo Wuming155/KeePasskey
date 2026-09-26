@@ -472,7 +472,8 @@
   **① `ISSUE-P3-338`（0.5 人日，独立批次先闭环）—— 已完成（§342）**
   它只是撤回一个无实现支撑的元数据值，
   却能把「参考实现都这么做」这类伪依据从 KDoc 里清掉；留着它就是缺陷再生成器。
-  **② 第 1 片 `ScanPayloadClassifier`（下一步）** —— 纯函数、零外部依赖，先把分流边界钉住
+  **② 第 1 片 `ScanPayloadClassifier` —— 已完成（留痕见下「分片进度留痕」）**
+  纯函数、零外部依赖，先把分流边界钉住
   （338 的文案影响已随 §342 消除：`Unknown` 分支复用现键 `vault_scan_invalid_qr`，无新增对外声明）。
   **③ 第 2 片 `PasskeyCxfReader`**（含 AC② 的别名 / 未知 algorithm / 混合类型 / 版本门四组新用例，
   夹具直取规范附录 A）—— 解析器是全条目最大单项，先于任何 UI 与落库改动完成。
@@ -483,3 +484,28 @@
   —— 本片的计数写入必须与限界表登记同批，未登记不得声称闭环。
   **⑥ 第 4 片 两个入口接线 + 确认对话框（含 4′ 的不兼容清单与「另有 N 把」点名）+ 守卫重盘点**
   **⑦ 第 5 / 6 片 真机端到端 + 实拍取样 + 全量 test + 门禁 7/7 + 批次归档**
+
+- **分片进度留痕（2026-09-26 起逐片追加；条目闭环时随正文一并剪切入批次）**：
+  - **第 1 片 `ScanPayloadClassifier`（口径 1 / AC①）—— 已完成**。新增
+    `app/src/main/java/com/keepasskey/app/passkey/ScanPayloadClassifier.kt`（`object` +
+    `enum class ScanPayloadKind { Totp, Passkey, Unknown }`，零 Android 依赖）与同目录
+    `ScanPayloadClassifierTest`（**4 例 / 表驱动 23 行**：三条路径 × 前导空白（空格、`\t\r\n`）×
+    大小写（`OTPAUTH://`、`OtpAuth://`）× `{`/`[` 起始 × 纯字母文本与裸 Base32 种子 ×
+    方案名缺冒号 / 截断 / 出现在中部 × 空载荷与纯空白；另锁「判定只依赖首部形态、内容含另一种形态
+    标记不改归属」「**只读不改入参**（擦除义务归调用链，分流函数写入即破坏上行种子）」
+    「畸形与边界载荷（零长数组、`\u0000`）不抛异常」三条契约）。
+    ⚠️ **本片不接线**：`VaultListViewModel.onQrCodeDecoded` 与 `addEntryFromScannedOtpauth` 一行未动。
+    理由＝CXF 解析器（第 2 片）尚不存在时，把 `Passkey` 分支接到任何现有文案都构成不实陈述
+    （合法 CXF 载荷会被报成「二维码无效」），而新增文案又会先于 AC⑥ 的守卫盘点落地
+    ⇒ 接线随**第 4 片（两个入口 + 确认对话框）**同批完成，本片只交付「分流边界钉死 + 无回退猜测」的纯函数。
+    ⚠️ **实现取向偏离口径 1 原文两处，均登记理由**：① `classify` 取 `CharArray` 而非 `ByteArray`
+    （判据只用 ASCII 前缀，字符级与字节级**逐值等价**（非 ASCII 的 UTF-8 首字节 ≥ `0xC2` 不可能命中前缀），
+    而字符级不必为注定被拒的任意二维码额外物化一份 UTF-8 缓冲；字节通道在选中 `Passkey` 分支后才开启，
+    与 TOTP 现链同口径）；② 分流前缀取 `otpauth:`（**弱于** TOTP 分支自身的 `otpauth://`），
+    畸形形态仍由 TOTP 分支如实拒绝 ⇒ 恰满足「TOTP 分支一字不改」，`Totp` 只表示「归 TOTP 链裁决」。
+    验证读数：定向类 `BUILD SUCCESSFUL`；全量 `test --rerun-tasks --max-workers=1`
+    `BUILD SUCCESSFUL in 3m 34s`、`114 actionable tasks: 114 executed`、聚合
+    `xml=403 tests=2677 failures=0 errors=0 skipped=13`（§342 基线 2673 + 本片新例 4）；
+    `gate_readings.py` **7/7 PASS**（`tier1=0` / `tier2=34 budget=37` 持平、
+    `check_tautological_assertions` 命中 0 处 / 扫描 **460** 个测试文件（+1 新文件）、
+    `check_bounded_type_names` `allowed=12` 不受新类型名影响——`*Classifier` 不属 `PD-34` 受限后缀）。
