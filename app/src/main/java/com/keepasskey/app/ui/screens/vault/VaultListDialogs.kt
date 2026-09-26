@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -59,23 +60,34 @@ internal fun VaultSortDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.cd_sort)) },
-        text = {
+        // 紧凑化②（空间利用）：标题与选项列表**都放 title 槽**——
+        // ① 丢掉 headlineSmall 大行高（32dp 行）与自带 16dp 下间距，改为 titleLarge 28dp
+        //    行高 + 自管 4dp 间距；
+        // ② 不用 text 槽 ⇒ 其**固定的 24dp 底部 padding**（列表与「关闭」之间的空白）
+        //    换成 title 槽自带的 16dp，净省 8dp；
+        // ③ 选项显式 onSurfaceVariant：挪槽后 LocalContentColor 变为标题的 onSurface，
+        //    显式着色保持原 text 槽观感（正文体色未写时会继承槽位颜色）。
+        title = {
             Column {
+                Text(
+                    text = stringResource(R.string.cd_sort),
+                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.SemiBold)
+                )
+                Spacer(modifier = Modifier.height(4.dp))
                 VaultSortOption.entries.forEach { option ->
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(8.dp))
-                            // 紧凑化：整行 selectable（自带 Role.RadioButton 语义）替代
-                            // 「行 clickable + 圈自身 48dp 最小触控」的双重命中区——否则每行被
-                            // 撑到约 68dp；圈传 onClick = null 后只按 20dp 视觉尺寸排版。
+                            // 整行 selectable（自带 Role.RadioButton 语义）替代
+                            // 「行 clickable + 圈自身 48dp 最小触控」的双重命中区；
+                            // 圈传 onClick = null 后只按 20dp 视觉尺寸排版。
                             .selectable(
                                 selected = currentOption == option,
                                 onClick = { onSelect(option) },
                                 role = Role.RadioButton
                             )
-                            .padding(vertical = 6.dp, horizontal = 4.dp),
+                            .padding(vertical = 4.dp, horizontal = 4.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         RadioButton(
@@ -83,7 +95,11 @@ internal fun VaultSortDialog(
                             onClick = null
                         )
                         Spacer(modifier = Modifier.width(10.dp))
-                        Text(text = stringResource(option.labelRes), style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            text = stringResource(option.labelRes),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                 }
             }
