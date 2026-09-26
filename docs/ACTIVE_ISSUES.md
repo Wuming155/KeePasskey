@@ -418,10 +418,16 @@
      故不入 `PD` 表）**：新增可空路由参数 `focusSection`（取值 `"passkey"`，为空即不定位），
      仅驱动编辑页滚动 / 焦点落位，**不得**承载任何凭据类值（核实 5d 的红线不变）。
      导航能力本身已核实为现成（见 5d），此项零风险。
-  4. **高密度 QR 的实际解码成功率**（2026-09-26 依核实 11 收敛为**实测项**，不再是无数据的猜）：
-     合成图已给出**乐观 floor 2–3 px/模块**，据此可判定「默认 640×480 分析流 + 900 B 文档信封」
-     的组合**余量为零**（⇒ 口径 10 提分辨率），而相册通路（2400 px）余量 4–5 倍；
-     仍**不得**在 AC⑧ 实拍取样前声称「相册导入通行密钥可用」——合成模型不含透视、色偏、摩尔纹与失焦梯度。
+  4. **高密度 QR 的实际解码成功率**（2026-09-26 依核实 11 收敛为**实测项**；**第 2.5 片已实测，结论见下**）：
+     合成图曾给出**乐观 floor 2–3 px/模块**，据此判定「默认 640×480 分析流 + 文档信封载荷」
+     **余量为零**（⇒ 口径 10 提分辨率，已落地并经真机回读确认交付 1280×960）。
+     ⚠️ **本轮实测把结论收窄**：两种合成退化模型（整数最近邻+3×3均值±20噪声 / 亚像素覆盖±20噪声）
+     **互相矛盾且各自非单调**，后者在 1.98 px/模块 仍解得出 ⇒ **合成模型对相机面没有鉴别力**，
+     「相机也能扫」**不得**据任何合成表声称，必须由 AC⑧③ 实拍判定。
+     相册面：**解码层面已证**（生产解码器 `decodeQrFromPixels` 在 2400 短边、9.92~24.94 px/模块
+     的 12 个档位全部可解）；框架通路（`ContentResolver` + `BitmapFactory`）已由 §341 用户真机复验，
+     但那是普通 otpauth 码 ⇒ **「同一张高密度 CXF 码经相册导入」仍待 AC⑧② 的实拍取样**。
+     实拍夹具已生成并登记于第 2.5 片留痕（`build/qr-probe/`，4 张码含模块数与 sha256）。
   5. ~~`key` 成员"PKCS#8 DER 的 Base64URL"未逐字取到~~ —— **已关闭**（2026-09-26 取到 §3.3.12 原文：
      「The private key associated to this passkey instance. The value MUST be **PKCS#8 ASN.1 DER** formatted
      byte string which is then Base64url encoded.」，与 `PD-08` 第 1 项一致，已同步写入 PD-08 第 4 项补记）。
@@ -477,8 +483,10 @@
   （338 的文案影响已随 §342 消除：`Unknown` 分支复用现键 `vault_scan_invalid_qr`，无新增对外声明）。
   **③ 第 2 片 `PasskeyCxfReader` —— 已完成（留痕见下）**（含 AC② 的别名 / 未知 algorithm /
   混合类型 / 版本门四组新用例，夹具直取规范附录 A）—— 解析器是全条目最大单项，先于任何 UI 与落库改动完成。
-  **④ 真机分辨率探针（半日，不入库；下一步）** —— 在第 3 片之前做：因为 AC⑤′ 的例外虽已获准，
-  但「提分辨率能否真的解出 **1697 B 完整文档信封 / 472 B 裸对象**码」（原记 900 B，实测校正见第 2 片留痕）
+  **④ 真机分辨率探针（半日，不入库）—— 已完成（留痕见下「第 2.5 片」；口径 10 已同批落地）**
+  —— 第 3 片之前做的原因成立：AC⑤′ 的例外虽已获准，
+  但「提分辨率能否真的解出 **749 B 单凭据文档信封 / 472 B 裸对象**码」（原记 900 B；按附录 A 全结构
+  套信封则 1 697 B，两档实测校正见第 2 / 第 2.5 片留痕）
   只有真机能证；结论决定 AC⑧ 的声称范围是
   「相机 + 相册」还是「相册为主」，越早拿到越少返工。
   **⑤ 第 3 片 落库接线（含 `PD-49` 裁决一的随机高位起点 + 限界表登记 + `Passkey.PrfNoUv` + 对拍重跑）**
@@ -561,4 +569,60 @@
     `check_tautological_assertions` 命中 0 处 / 扫描 **462** 个测试文件（+2 新文件，
     全部断言实参取自被测 `read()` / `scan()` 返回值）、`check_bounded_type_names` `allowed=12` 不受影响
     （`*Scanner` / `*Reader` 不属 `PD-34` 受限后缀））。
+
+  - **第 2.5 片 真机分辨率实测 + 口径 10 落地（AC⑤′）—— 已完成**（2026-09-26，设备：Redmi 4X
+    `1c859bcc7d24`，LineageOS / API 37，用户 2026-09-24 明示的实验机 ⇒ §263 前置闸门豁免适用）。
+    **真机读数（`ImageProxy` 原样回读，非推定）**：
+    ```
+    A_默认配置(不设 setResolutionSelector，官方 bound 640×480) ImageProxy=640x480  format=35 planes=3 rowStride0=640
+    B_口径10配置(bound 1280×960)                              ImageProxy=1280x960 format=35 planes=3 rowStride0=1280
+    C_极限请求(bound 4000×3000)                               ImageProxy=4000x3000 format=35 planes=3 rowStride0=4032
+    device=Redmi 4X api=37   （format 35 = ImageFormat.YUV_420_888）
+    ```
+    ⇒ **硬件不是瓶颈**：该低端机（1.8 GB RAM）确实交付 1280×960，且往上请求不被降级；
+    AC⑤′③ 的「如实登记降级读数」在本设备上无降级可登记。
+    **代码落地（口径 10，AC⑤ 的唯一例外）**：`TotpScanDialog.kt` 抽出 `buildQrAnalysis()`，
+    以 `ResolutionSelector + ResolutionStrategy(Size(1280, 960), CLOSEST_HIGHER_THEN_LOWER)`
+    替代「不设分辨率」；**未**用已废弃的 `setTargetResolution` / `setTargetAspectRatio`
+    （与 `setResolutionSelector` 互斥、混用 `build()` 即抛 `IllegalArgumentException`）。
+    守卫 `TotpScanCameraResolutionGuardTest` **3 例**：①选择器在场且 bound 走命名常量
+    ②废弃 API 不得出现 ③**口径反校**（无选择器的坏样本必须不被认出、含 `setTargetResolution`
+    的坏样本必须被抓、正常形态不误报）。
+    **密度实测 `QrDecodeDensityTest` 3 例**（喂**生产解码器** `decodeQrFromPixels`）：
+    模块数 裸对象 472 B → `EC=L 77 / EC=Q 97`；文档信封 749 B → `EC=L 93 / EC=Q 121`
+    （信封尺寸与解析器用例的 749 B 同一口径；附录 A 原样混装 15 条时紧凑 11 863 B、整块 28 854 B）；
+    **相册短边 2400 的 12 个档位全部可解**（9.92~24.94 px/模块）⇒「相册导入通行密钥」在解码层面成立。
+    ⚠️ **本轮最重要的发现是负面的：合成模型对相机面没有鉴别力。** 先后实现两种退化模型：
+    ①「整数 px/模块最近邻 + 3×3 均值 + ±20 噪声」——默认 640×480 全档**不可解**，
+    但同一模型在 2400 短边出现**非单调**（0.5 可解 / 0.65 不可解 / 0.8 可解），说明它把
+    「码在帧中的整数对齐」当成了变量，不配作定量依据；
+    ②「亚像素 3×3 覆盖积分 + ±20 噪声」——从 **1.98 px/模块**（文档信封 EC=Q、480 短边、填充 0.5）
+    起几乎全部可解，同样存在个别非单调点。
+    两模型互相矛盾 ⇒ **禁止**以合成表声称「相机也能扫」；相机面的结论只能来自 AC⑧③ 实拍。
+    该事实被 `QrDecodeDensityTest` 的「二 合成帧在默认短边最坏档位下仍可解 故不得据其声称相机可用」
+    显式锁住（断言方向反直觉，作用是防止后来者拿本表当相机可用性证据）。
+    ⇒ **声称范围定稿**：相册导入 = 可声称（解码层面，余量 5~25 倍）；相机扫码 = **待实拍**，
+    第 6 片端到端前不得写「相机也能扫」。
+    **实拍夹具已生成**（`build/qr-probe/`，不入库；配方＝附录 A 载荷紧凑 JSON +
+    `qrcode` 库 `box_size=8, border=4`，EC=L/Q 各一版）：
+    `bare-472B-ECL.png` 77 模块 680×680 sha256 前缀 `87f483ff49ace46c`；
+    `bare-472B-ECQ.png` 97 模块 840×840 `b1b95b75d76f6354`；
+    `doc-749B-ECL.png` 93 模块 808×808 `7fe1b83f4f9d4d9e`；
+    `doc-749B-ECQ.png` 121 模块 1032×1032 `c5e68f45f22fe491`（`MANIFEST.txt` 同目录，
+    含「960/2400 短边 @0.65 填充 → px/模块」换算列）。
+    **开发期坑（如实留痕，均已写进设备用例注释）**：①`LifecycleRegistry` 普通构造报
+    `Method setCurrentState must be called on the main thread` ⇒ `createUnsafe`；
+    ②`ProcessCameraProvider.bind/unbind` 报 `Not in application's main thread` ⇒ `runOnMainSync` 提交绑定、
+    在 Instrumentation 线程等帧；③`connectedDebugAndroidTest` 跑完会**卸载宿主包**（随后 `pm grant`
+    报 `package not found`），且 AGP 未自动授予 CAMERA ⇒ 相机报 `ERROR_SECURITY_EXCEPTION`、
+    一帧都拿不到 ⇒ 设备探针改走 `adb install -g` + `am instrument -w -e class ...`。
+    ⚠️ 闸门拦下一次：给 `TotpScanDialog` 直接内联 20 行选择器后 `functions_ge_100=1`
+    （`TotpCameraPreview` 104 行）⇒ 抽出 `buildQrAnalysis()` 后回到 0。
+    验证读数：新增设备用例 `am instrument` `OK (1 test)`（读数即上表）；
+    全量 `test --rerun-tasks --max-workers=1` `BUILD SUCCESSFUL in 3m 24s`、`114/114 executed`、
+    `xml=407 tests=2712 failures=0 errors=0 skipped=13`（上片 2706 + 本片 6 例：密度 3 + 守卫 3）；
+    `gate_readings.py` **7/7 PASS**（`tier1=0` / `tier2=35 budget=37`、`long_functions=0`、
+    `check_tautological_assertions` 命中 0 / 扫描 **465** 文件（+3））。
+  - **第 3 片 落库接线（下一步）**：`Passkey.PrfNoUv` 扩展键 + `PD-49` 裁决一的随机高位起点
+    + 限界表登记同批 + `PasskeyInteropProbeTest` 键集判据更新与对拍重跑。
 

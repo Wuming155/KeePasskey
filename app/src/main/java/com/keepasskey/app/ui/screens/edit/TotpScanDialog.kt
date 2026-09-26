@@ -5,12 +5,15 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Handler
 import android.os.Looper
+import android.util.Size
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
+import androidx.camera.core.resolutionselector.ResolutionSelector
+import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.background
@@ -279,9 +282,7 @@ private fun TotpCameraPreview(
             val preview = Preview.Builder().build().also {
                 it.setSurfaceProvider(previewView.surfaceProvider)
             }
-            val analysis = ImageAnalysis.Builder()
-                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                .build()
+            val analysis = buildQrAnalysis()
             analysis.setAnalyzer(decodeExecutor) { image ->
                 var decoded: String? = null
                 try {
@@ -417,3 +418,40 @@ private suspend fun <T> ListenableFuture<T>.awaitOn(executor: java.util.concurre
             }
         }, executor)
     }
+
+/**
+ * 构造二维码分析用例（`ISSUE-P3-337` 口径 10；AC⑤′ 登记的**唯一** TOTP 共享面例外，`PD-49` 裁决四获准）。
+ *
+ * 不设分辨率时官方默认是「`ResolutionStrategy` bound 640×480」
+ * （developer.android.com `ImageAnalysis.Builder#setResolutionSelector`），而 CXF 单凭据载荷
+ * （裸对象 472 B / 文档信封 749 B）对应 **77~121 模块**，短边 480 只有 2~5 px/模块。
+ * 真机回读（Redmi 4X / API 37，读数在条目留痕）：默认配置实拿 `640×480`，
+ * 请求 1280×960 **确实拿到** `1280×960`，极限请求拿到 `4000×3000` ⇒ 硬件不是瓶颈，
+ * 瓶颈在光学（能否真扫由 AC⑧ 实拍判定，不得以「已设分辨率」推定）。
+ *
+ * ⚠️ 禁止改用 `setTargetResolution` / `setTargetAspectRatio`：两者自 camera 1.3.0 起**已废弃**，
+ * 且与 `setResolutionSelector` 互斥、混用时 `build()` 抛 `IllegalArgumentException`
+ * ——扫码对话框会在 `LaunchedEffect` 里直接崩。守卫见 `TotpScanCameraResolutionGuardTest`。
+ */
+private fun buildQrAnalysis(): ImageAnalysis = ImageAnalysis.Builder()
+    .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+    .setResolutionSelector(
+        ResolutionSelector.Builder()
+            .setResolutionStrategy(
+                ResolutionStrategy(
+                    Size(CAMERA_ANALYSIS_WIDTH, CAMERA_ANALYSIS_HEIGHT),
+                    ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER
+                )
+            )
+            .build()
+    )
+    .build()
+
+/**
+ * 分析流请求分辨率的长宽（`ISSUE-P3-337` 口径 10）。取值依据：CXF 单凭据载荷 77~121 模块，
+ * 短边 960 在 0.65 填充率下拿到 5~8 px/模块（默认 480 只有 2~4），且真机回读确认该请求
+ * 在实验机上被原样交付（未降级）。每帧像素 ×4 的解码 CPU 代价由既有
+ * `STRATEGY_KEEP_ONLY_LATEST` + 单线程解码器吸收。
+ */
+private const val CAMERA_ANALYSIS_WIDTH = 1280
+private const val CAMERA_ANALYSIS_HEIGHT = 960
