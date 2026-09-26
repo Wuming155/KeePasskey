@@ -145,7 +145,7 @@ class UnlockImportKdfStrengthNoticeTest {
 
         val state = viewModel.uiState.value
         assertNotNull(state.errorMessage)
-        assertEquals(R.string.vault_op_failed, state.errorMessage?.resId)
+        assertEquals(R.string.op_failed, state.errorMessage?.resId)
         assertNull("失败分支不得置 infoMessage", state.infoMessage)
     }
 

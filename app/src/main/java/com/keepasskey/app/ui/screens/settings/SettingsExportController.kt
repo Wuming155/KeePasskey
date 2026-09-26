@@ -147,7 +147,7 @@ internal class SettingsExportController(
     private fun rejectTicket(artifactKind: ExportArtifactKind, targetUri: Uri): UiMessage {
         exportAuditRecorder.record(artifactKind, targetUri.toString(), success = false)
         SafDocumentCleanup.deleteCreatedDocument(appContext, targetUri)
-        return UiMessage(R.string.settings_action_failed, listOf(strings.get(R.string.export_confirmation_missing)))
+        return UiMessage(R.string.op_failed, listOf(strings.get(R.string.export_confirmation_missing)))
     }
 
     /**
@@ -171,7 +171,7 @@ internal class SettingsExportController(
                 UiMessage(R.string.dbset_templates_installed)
             } else {
                 UiMessage(
-                    R.string.settings_action_failed,
+                    R.string.op_failed,
                     listOf((result as com.keepasskey.core.result.KdbxResult.Failure).message)
                 )
             }
@@ -192,7 +192,7 @@ internal class SettingsExportController(
             exportAuditRecorder.record(artifactKind, rawTarget, success = false)
             // ISSUE-P2-20：序列化已失败，SAF 目标必然仍是空文档——清理不留 0 字节残留
             SafDocumentCleanup.deleteCreatedDocument(appContext, targetUri)
-            return UiMessage(R.string.settings_action_failed, listOf(failure.message))
+            return UiMessage(R.string.op_failed, listOf(failure.message))
         }
         val bytes = result.getOrNull()
         val resolver = appContext?.contentResolver
@@ -228,7 +228,7 @@ internal class SettingsExportController(
             // ISSUE-P2-20：写盘失败（含会话熔断/流不可得/异常），清理空或残缺目标文档，
             // 不向用户目录静默遗留 0 字节产物
             SafDocumentCleanup.deleteCreatedDocument(appContext, targetUri)
-            UiMessage(R.string.settings_action_failed, listOf(strings.get(R.string.export_saf_write_failed)))
+            UiMessage(R.string.op_failed, listOf(strings.get(R.string.export_saf_write_failed)))
         }
     }
 }

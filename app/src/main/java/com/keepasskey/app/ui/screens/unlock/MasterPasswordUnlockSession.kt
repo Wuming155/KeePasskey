@@ -189,7 +189,7 @@ internal class MasterPasswordUnlockSession(
             invalidCredentials && usedKeyFile ->
                 UiMessage(R.string.keyfile_or_password_mismatch)
             invalidCredentials -> UiMessage(R.string.unlock_error_invalid_password)
-            else -> UiMessage(R.string.vault_op_failed, listOf(result.message))
+            else -> UiMessage(R.string.op_failed, listOf(result.message))
         }
         // ISSUE-P1-04：失败路径无条件清零主密码（不再保留错误密码驻留堆内存）
         wipe()

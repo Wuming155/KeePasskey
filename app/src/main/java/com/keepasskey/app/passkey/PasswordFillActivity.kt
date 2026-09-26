@@ -165,7 +165,7 @@ class PasswordFillActivity : BaseCredentialActivity() {
             fillVerifier = fillVerifier,
             title = getString(R.string.cred_fill_confirm_title),
             biometricSubtitle = getString(
-                R.string.cred_fill_confirm_biometric_subtitle,
+                R.string.fill_confirm_biometric_subtitle,
                 credentialLabel
             ),
             manualHint = getString(R.string.cred_fill_confirm_manual_hint, credentialLabel),

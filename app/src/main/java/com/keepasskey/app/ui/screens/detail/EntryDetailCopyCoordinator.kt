@@ -107,7 +107,7 @@ internal class EntryDetailCopyCoordinator(
                     showMessage(UiMessage(R.string.detail_hotp_copied, listOf(code)))
                 }
                 is KdbxResult.Failure ->
-                    showMessage(UiMessage(R.string.vault_op_failed, listOf(result.message)))
+                    showMessage(UiMessage(R.string.op_failed, listOf(result.message)))
             }
         }
     }

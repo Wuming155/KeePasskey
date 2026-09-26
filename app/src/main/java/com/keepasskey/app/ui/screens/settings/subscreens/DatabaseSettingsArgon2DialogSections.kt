@@ -108,10 +108,13 @@ internal fun Argon2MemoryChipRow(
     onMemoryMbChange: (Long) -> Unit
 ) {
     Column {
-        Text(stringResource(R.string.dbset_argon2_memory_label, memoryMb), style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium))
+        // ISSUE-P3-330 A4：标签不再内嵌当前值（与选中 chip 同值重复）；当前值不在预设档位时
+        // 追加为临时 chip，保证数值仍恰好展示一次（库参数可来自外部工具，档位并集兜底）
+        Text(stringResource(R.string.dbset_argon2_memory_label), style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium))
         Spacer(modifier = Modifier.height(6.dp))
         FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            MEMORY_MB_OPTIONS.forEach { mb ->
+            val options = if (memoryMb > 0) MEMORY_MB_OPTIONS + memoryMb else MEMORY_MB_OPTIONS
+            options.distinct().forEach { mb ->
                 FilterChip(
                     selected = memoryMb == mb,
                     onClick = { onMemoryMbChange(mb) },
@@ -134,10 +137,12 @@ internal fun Argon2ParallelismChipRow(
     onParallelismChange: (Int) -> Unit
 ) {
     Column {
-        Text(stringResource(R.string.dbset_argon2_parallelism_label, parallelism), style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium))
+        // ISSUE-P3-330 A4：同 Argon2MemoryChipRow——标签去数值，档位并集兜底展示当前值
+        Text(stringResource(R.string.dbset_argon2_parallelism_label), style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium))
         Spacer(modifier = Modifier.height(6.dp))
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            PARALLELISM_OPTIONS.forEach { threads ->
+            val options = if (parallelism > 0) PARALLELISM_OPTIONS + parallelism else PARALLELISM_OPTIONS
+            options.distinct().forEach { threads ->
                 FilterChip(
                     selected = parallelism == threads,
                     onClick = { onParallelismChange(threads) },

@@ -117,7 +117,7 @@ class AutofillConfirmActivity : FragmentActivity() {
         // 签名摘要经 PackageManager 现场读取（包可见性受限时为 null，展示侧如实标注）。
         val callerAttribution = resolveCallerAttribution()
         val subtitle = buildString {
-            append(getString(R.string.autofill_confirm_biometric_subtitle, credentialTitle))
+            append(getString(R.string.fill_confirm_biometric_subtitle, credentialTitle))
             // 已授权目标走系统认证弹窗时无法渲染归属块，把不可伪造锚点（包名）并入副标题
             callerAttribution?.let {
                 append('\n')
@@ -316,8 +316,9 @@ class AutofillConfirmActivity : FragmentActivity() {
         }
         val dataset = buildAuthenticationResultDataset(
             packageName = packageName,
+            // ISSUE-P3-330：用户名为空时标题行即条目标题，副行留空——避免两行同文
             menuTitle = credentials.username.ifBlank { credentialTitle },
-            menuSubtitle = credentialTitle,
+            menuSubtitle = if (credentials.username.isNotBlank()) credentialTitle else "",
             username = credentials.username,
             password = credentials.password,
             usernameId = usernameId,

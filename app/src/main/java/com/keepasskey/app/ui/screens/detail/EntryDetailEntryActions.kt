@@ -62,7 +62,7 @@ internal class EntryDetailEntryActions(
             when (val result = vaultRepository.deleteEntry(entryId)) {
                 is KdbxResult.Success -> onEntryDeleted()
                 is KdbxResult.Failure ->
-                    showMessage(UiMessage(R.string.vault_op_failed, listOf(result.message)))
+                    showMessage(UiMessage(R.string.op_failed, listOf(result.message)))
             }
         }
     }
@@ -79,7 +79,7 @@ internal class EntryDetailEntryActions(
             when (val result = vaultRepository.batchMoveEntries(setOf(entryId), targetGroupId)) {
                 is KdbxResult.Success -> showMessage(UiMessage(R.string.detail_move_success))
                 is KdbxResult.Failure ->
-                    showMessage(UiMessage(R.string.vault_op_failed, listOf(result.message)))
+                    showMessage(UiMessage(R.string.op_failed, listOf(result.message)))
             }
         }
     }
@@ -103,7 +103,7 @@ internal class EntryDetailEntryActions(
             when (val result = admin.deleteCustomIcon(iconId)) {
                 is KdbxResult.Success -> showMessage(UiMessage(R.string.vault_icon_delete_done))
                 is KdbxResult.Failure ->
-                    showMessage(UiMessage(R.string.vault_op_failed, listOf(result.message)))
+                    showMessage(UiMessage(R.string.op_failed, listOf(result.message)))
             }
         }
     }

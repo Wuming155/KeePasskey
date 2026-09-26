@@ -161,7 +161,7 @@ class AuthenticatorViewModel @Inject constructor(
                     userMessageFlow.value = UiMessage(R.string.auth_totp_copied, listOf(code))
                 }
                 is com.keepasskey.core.result.KdbxResult.Failure ->
-                    userMessageFlow.value = UiMessage(R.string.vault_op_failed, listOf(result.message))
+                    userMessageFlow.value = UiMessage(R.string.op_failed, listOf(result.message))
             }
         }
     }

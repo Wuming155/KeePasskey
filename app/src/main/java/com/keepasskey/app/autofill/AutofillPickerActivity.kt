@@ -290,10 +290,17 @@ class AutofillPickerActivity : FragmentActivity() {
             } else {
                 ""
             }
+            // ISSUE-P3-330 A3：标题/副行分工——用户名为首选行；副行只在用户名非空且能取到
+            // 条目标题时展示标题（用户名为空时标题行即条目标题，副行留空），杜绝两行同文
+            val entryTitle = runCatching {
+                vaultRepository.getKdbxEntry(entryId)?.title.orEmpty()
+            }.getOrDefault("")
             val dataset = buildAuthenticationResultDataset(
                 packageName = packageName,
-                menuTitle = credentials.username.ifBlank { getString(R.string.autofill_picker_title) },
-                menuSubtitle = getString(R.string.autofill_picker_title),
+                menuTitle = credentials.username.ifBlank {
+                    entryTitle.ifBlank { getString(R.string.autofill_picker_title) }
+                },
+                menuSubtitle = if (credentials.username.isNotBlank()) entryTitle else "",
                 username = credentials.username,
                 password = credentials.password,
                 usernameId = readAutofillId(EXTRA_USERNAME_ID),

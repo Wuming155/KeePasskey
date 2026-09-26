@@ -215,7 +215,7 @@ class UnlockViewModel @Inject constructor(
             _uiState.update { it.copy(isLoading = false) }
             if (result is KdbxResult.Failure) {
                 // 失败路径只置 errorMessage：成功/失败是互斥结论，不得同时给出告警
-                _uiState.update { it.copy(errorMessage = UiMessage(R.string.vault_op_failed, listOf(result.message))) }
+                _uiState.update { it.copy(errorMessage = UiMessage(R.string.op_failed, listOf(result.message))) }
             } else {
                 val belowBaseline = vaultRepository.assessKdfStrength(path)?.isBelowBaseline == true
                 _uiState.update {

@@ -316,7 +316,7 @@ class CustomIconDeleteTest {
         viewModel.deleteCustomIcon()
         testScheduler.runCurrent()
 
-        assertEquals(R.string.vault_op_failed, viewModel.uiState.value.userMessage?.resId)
+        assertEquals(R.string.op_failed, viewModel.uiState.value.userMessage?.resId)
         assertEquals(listOf("磁盘错误"), viewModel.uiState.value.userMessage?.args)
     }
 

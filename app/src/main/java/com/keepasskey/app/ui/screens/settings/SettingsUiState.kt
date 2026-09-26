@@ -21,14 +21,16 @@ enum class CloudSyncProvider(
 
 /**
  * 列表视图展示密度
+ *
+ * ISSUE-P3-330：原 descRes（各档位说明）声明后从未被渲染，已连同字符串一并移除；
+ * 界面说明统一由 section 级 theme_density_desc 承载，不得再加回死声明。
  */
 enum class ListDensity(
-    @StringRes val labelRes: Int,
-    @StringRes val descRes: Int
+    @StringRes val labelRes: Int
 ) {
-    COMPACT(R.string.theme_density_compact, R.string.theme_density_compact_desc),
-    NORMAL(R.string.theme_density_normal, R.string.theme_density_normal_desc),
-    COMFORTABLE(R.string.theme_density_comfortable, R.string.theme_density_comfortable_desc)
+    COMPACT(R.string.theme_density_compact),
+    NORMAL(R.string.theme_density_normal),
+    COMFORTABLE(R.string.theme_density_comfortable)
 }
 
 /**

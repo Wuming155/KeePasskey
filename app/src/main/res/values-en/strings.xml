@@ -4,22 +4,18 @@
 
     <!-- General Buttons & Actions -->
     <string name="btn_cancel">Cancel</string>
-    <string name="btn_confirm">Confirm</string>
     <string name="btn_lock">Lock</string>
     <string name="cd_lock">Lock Database</string>
     <string name="btn_save">Save</string>
     <string name="btn_delete">Delete</string>
-    <string name="btn_edit">Edit</string>
     <string name="btn_close">Close</string>
     <string name="btn_discard">Discard</string>
     <string name="btn_continue_edit">Keep Editing</string>
     <string name="btn_copy">Copy</string>
     <string name="btn_restore">Restore</string>
     <string name="btn_empty">Empty</string>
-    <string name="btn_select">Select</string>
     <string name="btn_create">Create</string>
     <string name="btn_add">Add</string>
-    <string name="btn_open">Open</string>
     <string name="btn_back">Back</string>
     <string name="btn_more">More</string>
 
@@ -46,8 +42,6 @@
     <string name="cd_copy_password">Copy password</string>
     <string name="cd_vault_locked">Vault locked</string>
     <string name="cd_active_database">Active database status</string>
-    <string name="cd_keyfile">Key file</string>
-    <string name="cd_biometric">Biometric unlock</string>
     <string name="cd_search">Search</string>
     <string name="cd_clear_search">Clear search</string>
     <string name="cd_sort">Sort</string>
@@ -82,9 +76,7 @@
     <string name="keyfile_permission_not_persisted">This file provider does not support persistent access, so the key file works for this session only and cannot be remembered</string>
     <string name="keyfile_restored_from_memory">Remembered key file loaded: %1$s</string>
     <string name="unlock_btn_unlock">U N L O C K   V A U L T</string>
-    <string name="unlock_btn_biometric">Quick unlock with Fingerprint or Face</string>
     <string name="unlock_switch_vault">Switch Vault</string>
-    <string name="unlock_status_local">Locally encrypted • Synced with WebDAV cloud</string>
     <string name="unlock_biometric_primary_btn">Unlock with Biometrics</string>
 
     <!-- Database Picker & Manager -->
@@ -104,7 +96,6 @@
     <string name="master_pwd_weak_title">Weak master password</string>
     <string name="master_pwd_weak_body">Current master password strength is about %1$d bits, below the recommended %2$d bits. A weak master password significantly lowers the brute-force resistance of the entire vault. Use it anyway?</string>
     <string name="master_pwd_weak_confirm">Use anyway</string>
-    <string name="db_picker_use_keyfile">Generate auxiliary key file (.key)</string>
     <string name="db_picker_encryption_preset">Encryption &amp; KDF</string>
     <!-- ISSUE-P1-241：见 values/strings.xml 同名键上方注释（应用私有库 = 真删文件且不可恢复；
          外部库 = 只摘登记，不动物理文件）。两套三处措辞均不同，不得合并。 -->
@@ -114,16 +105,9 @@
     <string name="db_picker_remove_external_title">Remove vault connection?</string>
     <string name="db_picker_remove_external_desc">The physical file of this vault lives outside the app, so this only removes the entry from the quick switch list. The original physical file will not be deleted.</string>
     <string name="db_picker_remove_external_confirm">Remove link only</string>
-    <string name="db_picker_opened_external_toast">External database imported successfully</string>
-    <string name="db_picker_created_toast">New vault created and activated successfully</string>
 
     <!-- Vault List Screen -->
     <string name="vault_search_hint">Search entries, passkeys, or folders...</string>
-    <string name="vault_sort_default">Default</string>
-    <string name="vault_sort_name">Sort by Name</string>
-    <string name="vault_sort_date">Sort by Date</string>
-    <string name="vault_sort_modified">Sort by Modified</string>
-    <string name="vault_sort_created">Sort by Created</string>
     <string name="vault_current_sort">Sorted by: %1$s</string>
     <string name="vault_reset_sort">Reset</string>
     <string name="vault_filter_favorites">Favorites</string>
@@ -138,7 +122,6 @@
     <string name="vault_folder_change_icon">Change Icon</string>
     <string name="vault_folder_delete">Delete Folder</string>
     <string name="vault_folder_delete_desc">Deleting this folder will remove all child items inside. Continue?</string>
-    <string name="vault_recycle_bin_title">Recycle Bin</string>
     <string name="vault_recycle_bin_banner">Currently in the Recycle Bin. Items can be restored or purged permanently.</string>
     <string name="vault_recycle_bin_count">Deleted items: %1$d</string>
     <string name="vault_empty_recycle_bin">Empty Recycle Bin</string>
@@ -165,7 +148,6 @@
     <string name="detail_passkey_desc">Supports Android 14+ Credential Manager passwordless authentication</string>
     <string name="detail_custom_fields_section">Custom Secure Fields</string>
     <string name="detail_attachments_section">Attachments &amp; Certificates</string>
-    <string name="detail_attachment_preview">Preview</string>
     <string name="detail_attachment_export">Export to Storage</string>
     <string name="detail_attachment_export_failed">Attachment export failed, please retry</string>
     <string name="detail_attachment_export_toast">Attachment %1$s exported to Downloads</string>
@@ -192,7 +174,6 @@
     <!-- Entry Edit Screen -->
     <string name="edit_title_new">New Entry</string>
     <string name="edit_title_edit">Edit Entry</string>
-    <string name="edit_category_label">Credential Type</string>
     <string name="edit_group_label">Folder / Group</string>
     <string name="edit_group_root">Root (Uncategorized)</string>
     <string name="edit_basic_info">Basic Info</string>
@@ -284,8 +265,6 @@
     <string name="vault_move_to_root">Move to root</string>
     <string name="vault_create_location_with">Location: %1$s</string>
     <string name="vault_create_location_root">Location: Root</string>
-    <string name="vault_action_sync">Sync</string>
-    <string name="vault_action_resolve_conflict">Resolve conflict</string>
     <string name="vault_last_sync_time">Last synced · %1$s</string>
 
     <!-- ISSUE-P3-30: read-only child-database section in the vault list -->
@@ -535,9 +514,9 @@
     <string name="dbset_argon2_rounds_hint">More rounds resist brute force better but slow down unlocking</string>
     <string name="dbset_cd_decrease_rounds">Decrease iterations</string>
     <string name="dbset_cd_increase_rounds">Increase iterations</string>
-    <string name="dbset_argon2_memory_label">Memory: %1$d MB</string>
+    <string name="dbset_argon2_memory_label">Memory</string>
     <string name="dbset_argon2_memory_chip">%1$d MB</string>
-    <string name="dbset_argon2_parallelism_label">Parallelism: %1$d</string>
+    <string name="dbset_argon2_parallelism_label">Parallelism</string>
     <string name="dbset_argon2_threads_chip">%1$d threads</string>
     <string name="dbset_benchmark_btn">Run benchmark</string>
     <string name="dbset_benchmark_running">Running KDF benchmark (measuring device throughput, may take a few seconds)…</string>
@@ -686,7 +665,7 @@
     <string name="sync_feedback_merged">Changes automatically merged and synced to %1$s</string>
     <string name="sync_feedback_conflict">Conflict detected, please resolve in conflict screen</string>
     <string name="vault_conflict_action">Resolve conflict</string>
-    <string name="vault_op_failed">Operation failed: %1$s</string>
+    <string name="op_failed">Operation failed: %1$s</string>
     <string name="sync_feedback_offline">Offline or network unreachable; local changes kept safe</string>
     <string name="sync_vault_binding_mismatch">The cloud copy is registered to another vault; sync halted to protect it</string>
     <string name="sync_vault_takeover_title">Overwrite the cloud copy entirely?</string>
@@ -752,7 +731,7 @@
     <string name="theme_oled_sub">Use a pure black background in dark mode to save power on OLED screens</string>
     <string name="theme_dynamic_title">Dynamic color (Material You)</string>
     <!-- ISSUE-P3-263 AC⑤: verifiable wording replacing the vague "overriding" -->
-    <string name="theme_dynamic_sub">Tint the app from your wallpaper; the color palette below isn\'t applied while this is on</string>
+    <string name="theme_dynamic_sub">Tint the app from your wallpaper</string>
     <string name="theme_section_palette">Color palette</string>
     <!-- ISSUE-P3-263 AC⑤: picking a palette exclusively switches back to the brand palette (PD-30, option A) -->
     <string name="theme_palette_pick_desc">Pick a primary color scheme; choosing one switches to the brand palette and turns off dynamic color</string>
@@ -785,17 +764,12 @@
     <string name="theme_density_title">Display density</string>
     <string name="theme_density_desc">Adjust how compact lists and cards look</string>
     <string name="theme_density_compact">Compact</string>
-    <string name="theme_density_compact_desc">Fit more entries on one screen</string>
     <string name="theme_density_normal">Standard</string>
-    <string name="theme_density_normal_desc">Balanced density and readability</string>
     <string name="theme_density_comfortable">Comfortable</string>
-    <string name="theme_density_comfortable_desc">More spacing, easier reading</string>
     <string name="theme_search_mode_title">Search matching</string>
     <string name="theme_search_mode_desc">"All terms" requires every whitespace-separated word to match, reducing false positives for short queries</string>
     <string name="theme_search_mode_contains">Contains</string>
-    <string name="theme_search_mode_contains_desc">Match the whole query as a substring</string>
     <string name="theme_search_mode_all_terms">All terms</string>
-    <string name="theme_search_mode_all_terms_desc">Every word must match</string>
     <string name="theme_haptic_title">Haptic feedback</string>
     <string name="theme_haptic_sub">Vibrate on key actions like copy and unlock</string>
     <string name="theme_hide_fab_title">Hide create button on scroll</string>
@@ -866,7 +840,6 @@
     <string name="autofill_save_prompt_sub">Ask to save when a new or changed password is detected</string>
     <string name="autofill_override_title">Override app filling</string>
     <string name="autofill_override_sub">Prefer this app over the system default fill service</string>
-    <string name="settings_action_failed">Action failed: %1$s</string>
     <!-- ISSUE-P2-240: the old copy ("skip browser compatibility layer") described something else
          entirely — no such layer exists in this app. This switch actually gates the passkey
          registration gate (DigitalAssetLinksVerifier ownership check) in PasskeyCreateActivity. -->
@@ -967,12 +940,6 @@
     <string name="health_breach_toggle_sub">Off by default. When enabled, rescanning queries a public breach corpus (Have I Been Pwned) with k-anonymity: only the first 5 characters of the password SHA-1 are sent — neither the password nor the full hash leaves the device. While off, no related request is ever sent</string>
     <string name="health_tips_title">Security tips</string>
     <string name="health_tips_desc">Use a unique strong password for every account and enable two-factor authentication. KeePasskey can generate and remember them for you</string>
-    <string name="health_level_excellent">Excellent</string>
-    <string name="health_level_good">Good</string>
-    <string name="health_level_fair">Fair</string>
-    <string name="health_level_poor">Needs Improvement</string>
-    <string name="health_not_scanned">Not scanned</string>
-    <string name="health_not_scanned_desc">Tap rescan to evaluate the security health of your vault</string>
 
     <!-- ===== Security settings extras ===== -->
     <string name="sec_autolock_dialog_desc">Choose how long to wait before auto-locking after inactivity</string>
@@ -990,7 +957,7 @@
 
     <!-- ===== TOTP settings subscreen ===== -->
     <string name="totp_section_presets">Preset field names</string>
-    <string name="totp_presets_desc">Plugins keep TOTP data in different custom fields; a preset fills in the matching field names. The configured names are looked up first; if nothing matches, the official otp field and custom fields starting with TOTP are used instead</string>
+    <string name="totp_presets_desc">Plugins keep TOTP data in different custom fields; a preset fills in the matching field names</string>
     <string name="totp_preset_traytotp">TrayTotp</string>
     <string name="totp_preset_keeotp">KeeOtp</string>
     <string name="totp_section_fields">Entry fields</string>
@@ -1010,14 +977,13 @@
 
     <!-- ===== Credential Provider & Autofill ===== -->
     <string name="cred_unlock_action_title">Unlock KeePasskey to fill</string>
-    <string name="cred_unlock_action_subtitle">Vault is locked. Tap to authenticate and unlock</string>
     <string name="cred_create_entry_title">Save in KeePasskey</string>
     <string name="cred_create_entry_subtitle">Save passkey or password to active vault</string>
     <string name="cred_autofill_unlock_prompt">Unlock KeePasskey to view credentials</string>
     <string name="cred_autofill_locked_subtitle">Tap to unlock vault and autofill</string>
     <!-- TASK-11: secondary confirmation for the unlocked branch (AutofillConfirmActivity) -->
     <string name="autofill_confirm_title">Confirm Autofill</string>
-    <string name="autofill_confirm_biometric_subtitle">Authenticate to fill credential \"%1$s\" into the current app</string>
+    <string name="fill_confirm_biometric_subtitle">Authenticate to fill credential \"%1$s\" into the current app</string>
     <string name="autofill_confirm_manual_hint">Credential \"%1$s\" is about to be filled into the current app. Confirm below to continue.</string>
     <string name="autofill_confirm_ok">Confirm Fill</string>
     <string name="autofill_confirm_cancel">Cancel</string>
@@ -1033,10 +999,7 @@
     <string name="autofill_confirm_already_trusted">This app was explicitly authorized by you before (a re-signed APK of the same package will require authorization again).</string>
     <string name="cred_passkey_create_title">Create Passkey</string>
     <string name="cred_passkey_assert_title">Verify Passkey</string>
-    <string name="cred_password_save_title">Save Password</string>
-    <string name="cred_password_fill_title">Fill Password</string>
     <string name="cred_error_vault_locked">Vault is locked, cannot perform this operation</string>
-    <string name="cred_error_entry_not_found">Credential entry not found</string>
     <string name="cred_error_unknown">An error occurred while handling credential request</string>
 
     <!-- ISSUE-P3-15: honest notice when the entry's bound package is invalid/missing (never claim blocked/restored) -->
@@ -1186,11 +1149,8 @@
     <string name="unlock_empty_vault_subtitle">No vault selected or created yet. Choose how to start below:</string>
     <string name="unlock_empty_create_btn">Create vault</string>
     <string name="unlock_empty_create_desc">Create a new .kdbx encrypted file</string>
-    <string name="unlock_empty_open_btn">Open existing vault (.kdbx)</string>
     <string name="unlock_empty_open_title">Open existing vault</string>
     <string name="unlock_empty_open_desc">Import a .kdbx file from storage or cloud</string>
-    <string name="unlock_empty_manage_btn">Go to vault management</string>
-    <string name="unlock_error_pin_length">Enter the 4-digit PIN</string>
     <string name="autofill_fill_confirm_title">Confirm before filling</string>
     <string name="autofill_fill_confirm_sub">Biometric or manual confirmation is required before filling a password by default (unlock first while the vault is locked)</string>
     <string name="settings_always_on_badge">Always on</string>
@@ -1219,7 +1179,6 @@
     <string name="autofill_picker_entry_sub">Choose a credential manually</string>
     <string name="cred_fill_confirm_title">Confirm credential fill</string>
     <!-- %1$s = 凭据名称 -->
-    <string name="cred_fill_confirm_biometric_subtitle">Verify your identity to fill the credential %1$s into the current app</string>
     <!-- %1$s = 凭据名称 -->
     <string name="cred_fill_confirm_manual_hint">About to fill the credential %1$s into the current app. This device has no usable biometric or lock-screen credential, so confirm manually below to continue.</string>
     <string name="autofill_fill_failed">Failed to handle the autofill request. Please try again</string>
@@ -1258,7 +1217,6 @@
     <!-- %1$s = 分组名 -->
     <string name="repo_templates_already_installed">The template group %1$s already exists; no need to install it again</string>
     <string name="repo_sync_type_local">Local storage</string>
-    <string name="repo_last_opened_not_created">Not created yet</string>
     <string name="repo_sync_type_local_device">On-device storage</string>
     <string name="repo_last_opened_in_use">Currently in use</string>
     <string name="repo_last_opened_ready">Ready locally</string>
@@ -1384,9 +1342,6 @@
     <string name="picker_file_selected">Selected file: %1$s</string>
     <string name="picker_file_not_selected">No file selected yet; tap the button to choose one</string>
     <string name="picker_file_read_error">Failed to read the selected file; check its permissions and try again</string>
-    <string name="picker_source_local_desc">Open a .kdbx file from device storage or an SD card via the system file picker</string>
-    <string name="picker_source_webdav_desc">Import from Nextcloud / Nutstore / Synology NAS / ownCloud</string>
-    <string name="picker_source_s3_desc">Import from Cloudflare R2 / AWS S3 / MinIO / Alibaba Cloud OSS</string>
     <string name="conflict_field_title">Title</string>
     <string name="conflict_field_username">Username</string>
     <string name="conflict_field_password">Password</string>

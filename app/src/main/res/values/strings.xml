@@ -4,20 +4,16 @@
 
     <!-- 通用按钮与动作 -->
     <string name="btn_cancel">取消</string>
-    <string name="btn_confirm">确定</string>
     <string name="btn_save">保存</string>
     <string name="btn_delete">删除</string>
-    <string name="btn_edit">编辑</string>
     <string name="btn_close">关闭</string>
     <string name="btn_discard">丢弃</string>
     <string name="btn_continue_edit">继续编辑</string>
     <string name="btn_copy">复制</string>
     <string name="btn_restore">还原</string>
     <string name="btn_empty">清空</string>
-    <string name="btn_select">选择</string>
     <string name="btn_create">创建</string>
     <string name="btn_add">添加</string>
-    <string name="btn_open">打开</string>
     <string name="btn_back">返回</string>
     <string name="btn_more">更多</string>
     <string name="btn_lock">锁定</string>
@@ -46,8 +42,6 @@
     <string name="cd_copy_password">复制密码</string>
     <string name="cd_vault_locked">密码库已锁定</string>
     <string name="cd_active_database">当前数据库状态</string>
-    <string name="cd_keyfile">密钥文件</string>
-    <string name="cd_biometric">生物识别解锁</string>
     <string name="cd_search">搜索</string>
     <string name="cd_clear_search">清空搜索</string>
     <string name="cd_sort">排序</string>
@@ -81,18 +75,14 @@
     <string name="keyfile_permission_not_persisted">该文件提供方不支持长期授权，密钥文件仅本次可用，无法记住</string>
     <string name="keyfile_restored_from_memory">已自动载入记住的密钥文件: %1$s</string>
     <string name="unlock_btn_unlock">解 锁 密 码 库</string>
-    <string name="unlock_btn_biometric">使用系统指纹或面容快速解锁</string>
     <string name="unlock_switch_vault">切换密码库</string>
-    <string name="unlock_status_local">本地已加密存储 • 关联 WebDAV 云端备份</string>
     <string name="unlock_biometric_primary_btn">使用生物识别解锁</string>
     <string name="unlock_empty_vault_title">欢迎使用 KeePasskey</string>
     <string name="unlock_empty_vault_subtitle">尚未选择或创建密码库，请从下方选择开始方式：</string>
     <string name="unlock_empty_create_btn">新建密码库</string>
     <string name="unlock_empty_create_desc">创建全新的 .kdbx 加密文件</string>
-    <string name="unlock_empty_open_btn">打开已有密码库 (.kdbx)</string>
     <string name="unlock_empty_open_title">打开已有密码库</string>
     <string name="unlock_empty_open_desc">从本机存储或云盘导入 .kdbx</string>
-    <string name="unlock_empty_manage_btn">前往密码库管理</string>
 
     <!-- 密码库管理器 / 选择器 -->
     <string name="db_picker_title">密码库管理</string>
@@ -111,7 +101,6 @@
     <string name="master_pwd_weak_title">主密码强度较弱</string>
     <string name="master_pwd_weak_body">当前主密码强度约 %1$d bits，低于建议值 %2$d bits。弱主密码会显著降低整个密码库的抗爆破能力。确定仍要使用吗？</string>
     <string name="master_pwd_weak_confirm">仍要使用</string>
-    <string name="db_picker_use_keyfile">同时生成附属密钥文件 (.key)</string>
     <string name="db_picker_encryption_preset">加密算法与 KDF</string>
     <!-- ISSUE-P1-241：移除动作的确认文案按**存储类型**分列两套——应用私有库（filesDir 内的文件）
          移除即**真删文件、不可恢复**，外部库（content:// 等沙盒外来源）只摘登记、不动物理文件。
@@ -124,16 +113,9 @@
     <string name="db_picker_remove_external_title">移除密码库关联？</string>
     <string name="db_picker_remove_external_desc">该库的物理文件在本应用之外，这只会从本机的密码库切换列表中移除该条目，不会删除物理文件。</string>
     <string name="db_picker_remove_external_confirm">仅移除关联</string>
-    <string name="db_picker_opened_external_toast">已成功导入并载入外部数据库</string>
-    <string name="db_picker_created_toast">新密码库已成功创建并设为当前活动库</string>
 
     <!-- 密码库列表页面 -->
     <string name="vault_search_hint">搜索凭据、通行密钥或文件夹...</string>
-    <string name="vault_sort_default">默认顺序</string>
-    <string name="vault_sort_name">按名称排序</string>
-    <string name="vault_sort_date">按日期排序</string>
-    <string name="vault_sort_modified">按修改日期排序</string>
-    <string name="vault_sort_created">按创建日期排序</string>
     <string name="vault_current_sort">当前排序：%1$s</string>
     <string name="vault_reset_sort">恢复默认</string>
     <string name="vault_filter_favorites">收藏</string>
@@ -148,7 +130,6 @@
     <string name="vault_folder_change_icon">更换文件夹图标</string>
     <string name="vault_folder_delete">删除文件夹</string>
     <string name="vault_folder_delete_desc">删除该文件夹将会一并移除其包含的子项目，确定继续吗？</string>
-    <string name="vault_recycle_bin_title">回收站</string>
     <string name="vault_recycle_bin_banner">当前处于回收站目录。条目处于归档待清理状态，可随时还原或彻底永久删除。</string>
     <string name="vault_recycle_bin_count">已删除条目：%1$d</string>
     <string name="vault_empty_recycle_bin">清空回收站</string>
@@ -175,7 +156,6 @@
     <string name="detail_passkey_desc">支持 Android 14+ Credential Manager 免密码生物识别自动校验</string>
     <string name="detail_custom_fields_section">自定义安全字段</string>
     <string name="detail_attachments_section">附件与证书文件</string>
-    <string name="detail_attachment_preview">预览</string>
     <string name="detail_attachment_export">导出到存储</string>
     <string name="detail_attachment_export_failed">附件导出失败，请重试</string>
     <string name="detail_attachment_export_toast">附件 %1$s 已成功导出到系统下载文件夹</string>
@@ -202,7 +182,6 @@
     <!-- 凭据编辑页面 -->
     <string name="edit_title_new">新建条目</string>
     <string name="edit_title_edit">编辑条目</string>
-    <string name="edit_category_label">凭据类型</string>
     <string name="edit_group_label">所属群组 (文件夹)</string>
     <string name="edit_group_root">根目录 (未分类)</string>
     <string name="edit_basic_info">基本信息</string>
@@ -293,8 +272,6 @@
     <string name="vault_move_to_root">移动至根目录</string>
     <string name="vault_create_location_with">位置：%1$s</string>
     <string name="vault_create_location_root">位置：根目录</string>
-    <string name="vault_action_sync">同步</string>
-    <string name="vault_action_resolve_conflict">解决冲突</string>
     <string name="vault_last_sync_time">上次同步 · %1$s</string>
 
     <!-- ISSUE-P3-30：库列表中的子库只读分区（已解锁子库的条目以只读形式并列展示） -->
@@ -362,7 +339,6 @@
     <string name="unlock_error_locked_out_seconds">连续多次解锁失败，密码库已临时锁定，请在 %1$d 秒后重试</string>
     <string name="unlock_error_locked_out_minutes">连续多次解锁失败，密码库已临时锁定，请在 %1$d 分钟后重试</string>
     <!-- 既有构建债顺手整改：values-en 存在此条翻译但默认 locale 缺失，lintVitalRelease 因此 fail（阻塞 assembleRelease） -->
-    <string name="unlock_error_pin_length">请输入 4 位 PIN 码</string>
     <string name="unlock_biometric_title">生物识别解锁</string>
     <string name="unlock_biometric_subtitle">请验证指纹或面容以解锁密码库</string>
     <string name="unlock_biometric_enroll_title">启用生物识别解锁</string>
@@ -547,9 +523,9 @@
     <string name="dbset_argon2_rounds_hint">轮数越高越抗暴力破解，解锁耗时也越长</string>
     <string name="dbset_cd_decrease_rounds">减少迭代轮数</string>
     <string name="dbset_cd_increase_rounds">增加迭代轮数</string>
-    <string name="dbset_argon2_memory_label">内存占用：%1$d MB</string>
+    <string name="dbset_argon2_memory_label">内存占用</string>
     <string name="dbset_argon2_memory_chip">%1$d MB</string>
-    <string name="dbset_argon2_parallelism_label">并行线程数：%1$d</string>
+    <string name="dbset_argon2_parallelism_label">并行线程数</string>
     <string name="dbset_argon2_threads_chip">%1$d 线程</string>
     <string name="dbset_benchmark_btn">运行性能基准测试</string>
     <string name="dbset_benchmark_running">正在运行 KDF 基准测试（实测设备吞吐，约需数秒）…</string>
@@ -701,7 +677,7 @@
     <string name="sync_feedback_merged">云端与本地修改已自动合并并同步至 %1$s</string>
     <string name="sync_feedback_conflict">检测到多端并发冲突，请在冲突解决界面处理</string>
     <string name="vault_conflict_action">去解决冲突</string>
-    <string name="vault_op_failed">操作失败：%1$s</string>
+    <string name="op_failed">操作失败：%1$s</string>
     <string name="sync_feedback_offline">当前处于离线模式或网络不可达，已保留本地修改</string>
     <string name="sync_vault_binding_mismatch">云端副本登记为另一密码库，已中止同步以保护其数据</string>
     <string name="sync_vault_takeover_title">整库覆盖云端副本？</string>
@@ -767,7 +743,7 @@
     <string name="theme_oled_sub">深色模式下使用纯黑背景，为 OLED 屏幕省电</string>
     <string name="theme_dynamic_title">动态取色（Material You）</string>
     <!-- ISSUE-P3-263 AC⑤：以「可验证描述」替换模糊的「覆盖」——开启期间调色盘置灰不生效 -->
-    <string name="theme_dynamic_sub">跟随系统壁纸自动取色；开启期间下方主题调色盘暂不生效</string>
+    <string name="theme_dynamic_sub">跟随系统壁纸自动取色</string>
     <string name="theme_section_palette">主题调色盘</string>
     <!-- ISSUE-P3-263 AC⑤：点选调色盘即互斥切回品牌配色（PD-30 候选 A） -->
     <string name="theme_palette_pick_desc">选择一组主色配色方案；点选即改用品牌配色并自动关闭动态取色</string>
@@ -800,17 +776,12 @@
     <string name="theme_density_title">界面密度</string>
     <string name="theme_density_desc">调整列表与卡片的显示紧凑程度</string>
     <string name="theme_density_compact">紧凑</string>
-    <string name="theme_density_compact_desc">单屏展示更多条目</string>
     <string name="theme_density_normal">标准</string>
-    <string name="theme_density_normal_desc">均衡的信息密度与可读性</string>
     <string name="theme_density_comfortable">宽松</string>
-    <string name="theme_density_comfortable_desc">更大间距，阅读更轻松</string>
     <string name="theme_search_mode_title">搜索匹配方式</string>
     <string name="theme_search_mode_desc">「全部词」要求每个空白分隔的词都命中，可减少短查询的误报</string>
     <string name="theme_search_mode_contains">包含</string>
-    <string name="theme_search_mode_contains_desc">关键词整体匹配字段文本</string>
     <string name="theme_search_mode_all_terms">全部词</string>
-    <string name="theme_search_mode_all_terms_desc">每个词都须命中才算匹配</string>
     <string name="theme_haptic_title">触感反馈</string>
     <string name="theme_haptic_sub">复制、解锁等关键操作提供振动反馈</string>
     <string name="theme_hide_fab_title">滚动时隐藏创建按钮</string>
@@ -882,7 +853,6 @@
     <string name="autofill_save_prompt_sub">检测到新注册或修改的密码时询问是否保存</string>
     <string name="autofill_override_title">覆盖应用填充</string>
     <string name="autofill_override_sub">优先使用本应用替代系统默认填充服务</string>
-    <string name="settings_action_failed">操作失败：%1$s</string>
     <!-- ISSUE-P2-240：原文案「跳过浏览器兼容层 / 不通过浏览器兼容适配直接填充原生表单」描述的是
          **另一件事**——本开关的真实消费方是 PasskeyCreateActivity 的 PasskeyRegistrationGate，
          决定是否对调用方执行 DigitalAssetLinksVerifier 远程归属声明校验（「浏览器兼容层」既无实现
@@ -1018,12 +988,6 @@
     <string name="health_breach_toggle_sub">默认关闭。开启后重新扫描时以 k-匿名方式查询公开泄露库（Have I Been Pwned）：仅发送密码 SHA-1 的前 5 位，密码明文与完整哈希均不出设备；关闭时本应用不发起任何相关网络请求</string>
     <string name="health_tips_title">安全建议</string>
     <string name="health_tips_desc">为每个账户使用唯一的高强度密码，并开启双重认证；KeePasskey 可以帮你生成并记住它们</string>
-    <string name="health_level_excellent">优秀</string>
-    <string name="health_level_good">良好</string>
-    <string name="health_level_fair">一般</string>
-    <string name="health_level_poor">需改进</string>
-    <string name="health_not_scanned">未扫描</string>
-    <string name="health_not_scanned_desc">点击重新扫描以评估密码库安全健康状态</string>
 
     <!-- ===== 安全设置补充 (SecuritySettingsScreen) ===== -->
     <string name="sec_autolock_dialog_desc">选择无操作时的自动锁定等待时长，超时后需重新解锁密码库</string>
@@ -1041,7 +1005,7 @@
 
     <!-- ===== 双重认证设置子页 (TotpSettingsScreen) ===== -->
     <string name="totp_section_presets">预设字段名</string>
-    <string name="totp_presets_desc">不同插件把 TOTP 数据放在不同的自定义字段里，选择预设可一键填入对应字段名。配置的字段名会优先用于查找；未命中时回退官方 otp 字段与 TOTP 开头的自定义字段</string>
+    <string name="totp_presets_desc">不同插件把 TOTP 数据放在不同的自定义字段里，选择预设可一键填入对应字段名</string>
     <string name="totp_preset_traytotp">TrayTotp</string>
     <string name="totp_preset_keeotp">KeeOtp</string>
     <string name="totp_section_fields">条目字段</string>
@@ -1061,14 +1025,13 @@
 
     <!-- ===== 系统凭据提供与自动填充 (Credential Provider & Autofill) ===== -->
     <string name="cred_unlock_action_title">解锁 KeePasskey 填充凭据</string>
-    <string name="cred_unlock_action_subtitle">密码库已锁定，轻触以验证身份并解锁</string>
     <string name="cred_create_entry_title">在 KeePasskey 中保存</string>
     <string name="cred_create_entry_subtitle">将通行密钥或密码保存至活动密码库</string>
     <string name="cred_autofill_unlock_prompt">解锁 KeePasskey 查看凭据</string>
     <string name="cred_autofill_locked_subtitle">点击解锁密码库后自动填充</string>
     <!-- TASK-11：已解锁分支二次确认（AutofillConfirmActivity） -->
     <string name="autofill_confirm_title">确认自动填充</string>
-    <string name="autofill_confirm_biometric_subtitle">验证身份后向当前应用填充凭据「%1$s」</string>
+    <string name="fill_confirm_biometric_subtitle">验证身份后向当前应用填充凭据「%1$s」</string>
     <string name="autofill_confirm_manual_hint">即将向当前应用填充凭据「%1$s」。请在下方确认后继续。</string>
     <string name="autofill_confirm_ok">确认填充</string>
     <string name="autofill_confirm_cancel">取消</string>
@@ -1084,14 +1047,10 @@
     <string name="autofill_confirm_already_trusted">此应用此前已获你显式授权（同包名换签名将重新要求授权）。</string>
     <!-- ISSUE-P0-02：Credential Manager 密码下发前的强制用户验证（PasswordFillActivity） -->
     <string name="cred_fill_confirm_title">确认填充凭据</string>
-    <string name="cred_fill_confirm_biometric_subtitle">验证身份后向当前应用填充凭据「%1$s」</string>
     <string name="cred_fill_confirm_manual_hint">即将向当前应用填充凭据「%1$s」。本设备无可用生物识别或锁屏凭据，请在下方手动确认后继续。</string>
     <string name="cred_passkey_create_title">创建通行密钥</string>
     <string name="cred_passkey_assert_title">验证通行密钥</string>
-    <string name="cred_password_save_title">保存密码凭据</string>
-    <string name="cred_password_fill_title">填充密码凭据</string>
     <string name="cred_error_vault_locked">密码库处于锁定状态，无法执行此操作</string>
-    <string name="cred_error_entry_not_found">未找到对应的凭据条目</string>
     <string name="cred_error_unknown">处理凭据请求时发生异常</string>
     <!-- ISSUE-P1-10 (ZT-10)：自动填充对外回调的预定义用户文案（禁止透传异常 message） -->
     <string name="autofill_fill_failed">自动填充请求处理失败，请重试</string>
@@ -1130,7 +1089,6 @@
     <string name="repo_no_keyfile_to_export">当前会话未使用密钥文件，无密钥文件可导出</string>
     <string name="repo_templates_already_installed">模板分组「%1$s」已存在，无需重复安装</string>
     <string name="repo_sync_type_local">本地存储</string>
-    <string name="repo_last_opened_not_created">尚未创建</string>
     <string name="repo_sync_type_local_device">本地设备存储</string>
     <string name="repo_last_opened_in_use">当前使用中</string>
     <string name="repo_last_opened_ready">本地就绪</string>

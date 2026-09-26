@@ -152,7 +152,7 @@ internal class VaultListActionController(
                 onMessage(UiMessage(R.string.vault_batch_moved, listOf(selected.size)))
                 clearBatchSelection()
             } else {
-                onMessage(UiMessage(R.string.vault_op_failed, listOf((result as KdbxResult.Failure).message)))
+                onMessage(UiMessage(R.string.op_failed, listOf((result as KdbxResult.Failure).message)))
             }
         }
     }
@@ -166,7 +166,7 @@ internal class VaultListActionController(
                 onMessage(UiMessage(R.string.vault_batch_deleted, listOf(selected.size)))
                 clearBatchSelection()
             } else {
-                onMessage(UiMessage(R.string.vault_op_failed, listOf((result as KdbxResult.Failure).message)))
+                onMessage(UiMessage(R.string.op_failed, listOf((result as KdbxResult.Failure).message)))
             }
         }
     }
@@ -191,7 +191,7 @@ internal class VaultListActionController(
             if (result is KdbxResult.Success) {
                 onMessage(UiMessage(R.string.vault_group_created, listOf(name.trim())))
             } else {
-                onMessage(UiMessage(R.string.vault_op_failed, listOf((result as KdbxResult.Failure).message)))
+                onMessage(UiMessage(R.string.op_failed, listOf((result as KdbxResult.Failure).message)))
             }
         }
     }
@@ -205,7 +205,7 @@ internal class VaultListActionController(
             if (result is KdbxResult.Success) {
                 onMessage(UiMessage(R.string.vault_group_renamed, listOf(newName.trim())))
             } else {
-                onMessage(UiMessage(R.string.vault_op_failed, listOf((result as KdbxResult.Failure).message)))
+                onMessage(UiMessage(R.string.op_failed, listOf((result as KdbxResult.Failure).message)))
             }
         }
     }
@@ -227,7 +227,7 @@ internal class VaultListActionController(
             if (result is KdbxResult.Success) {
                 onMessage(UiMessage(R.string.vault_group_deleted))
             } else {
-                onMessage(UiMessage(R.string.vault_op_failed, listOf((result as KdbxResult.Failure).message)))
+                onMessage(UiMessage(R.string.op_failed, listOf((result as KdbxResult.Failure).message)))
             }
         }
     }
@@ -239,7 +239,7 @@ internal class VaultListActionController(
             if (result is KdbxResult.Success) {
                 onMessage(UiMessage(R.string.vault_entry_restored))
             } else {
-                onMessage(UiMessage(R.string.vault_op_failed, listOf((result as KdbxResult.Failure).message)))
+                onMessage(UiMessage(R.string.op_failed, listOf((result as KdbxResult.Failure).message)))
             }
         }
     }
@@ -251,7 +251,7 @@ internal class VaultListActionController(
             if (result is KdbxResult.Success) {
                 onMessage(UiMessage(R.string.vault_entry_purged))
             } else {
-                onMessage(UiMessage(R.string.vault_op_failed, listOf((result as KdbxResult.Failure).message)))
+                onMessage(UiMessage(R.string.op_failed, listOf((result as KdbxResult.Failure).message)))
             }
         }
     }
@@ -263,7 +263,7 @@ internal class VaultListActionController(
             if (result is KdbxResult.Success) {
                 onMessage(UiMessage(R.string.vault_recycle_emptied))
             } else {
-                onMessage(UiMessage(R.string.vault_op_failed, listOf((result as KdbxResult.Failure).message)))
+                onMessage(UiMessage(R.string.op_failed, listOf((result as KdbxResult.Failure).message)))
             }
         }
     }

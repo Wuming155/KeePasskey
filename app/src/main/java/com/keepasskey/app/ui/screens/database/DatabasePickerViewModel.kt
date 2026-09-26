@@ -177,7 +177,7 @@ class DatabasePickerViewModel @Inject constructor(
                     // 以文件名下行的选中事件对这类库无效
                     _events.emit(DatabasePickerEvent.DatabaseSelected(targetUri ?: fileName))
                 } else {
-                    userMessageFlow.value = UiMessage(R.string.vault_op_failed, listOf((result as KdbxResult.Failure).message))
+                    userMessageFlow.value = UiMessage(R.string.op_failed, listOf((result as KdbxResult.Failure).message))
                 }
             } finally {
                 pwd.fill('0')
@@ -269,7 +269,7 @@ class DatabasePickerViewModel @Inject constructor(
                 userMessageFlow.value = UiMessage(R.string.db_picker_msg_opened)
                 _events.emit(DatabasePickerEvent.DatabaseSelected(fileName))
             } else {
-                userMessageFlow.value = UiMessage(R.string.vault_op_failed, listOf((result as KdbxResult.Failure).message))
+                userMessageFlow.value = UiMessage(R.string.op_failed, listOf((result as KdbxResult.Failure).message))
             }
         }
     }
@@ -289,7 +289,7 @@ class DatabasePickerViewModel @Inject constructor(
             if (result is KdbxResult.Success) {
                 userMessageFlow.value = UiMessage(R.string.db_picker_msg_removed)
             } else {
-                userMessageFlow.value = UiMessage(R.string.vault_op_failed, listOf((result as KdbxResult.Failure).message))
+                userMessageFlow.value = UiMessage(R.string.op_failed, listOf((result as KdbxResult.Failure).message))
             }
         }
     }
