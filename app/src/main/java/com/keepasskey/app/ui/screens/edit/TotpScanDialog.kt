@@ -215,7 +215,8 @@ private fun ScanDialogWindowHardening(flagSecureEnabled: Boolean) {
 /**
  * CameraX 取景 + 后台线程 QR 解码。
  *
- * - 取景：[PreviewView] 承载 [Preview] 流；分析流 [ImageAnalysis] 用
+ * - 取景：[PreviewView] 承载 [Preview] 流（强制 `COMPATIBLE`/TextureView 实现模式，防 Surface 图层
+ *   溢出透明对话框窗口泄漏相机画面，`ISSUE-P3-333`，见 [TotpCameraPreview] 内注释）；分析流 [ImageAnalysis] 用
  *   `STRATEGY_KEEP_ONLY_LATEST`（丢帧保延迟）；
  * - 解码：单线程执行器（**后台线程**，不在主线程做 CPU 解码）喂 [MultiFormatReader]，
  *   仅 QR_CODE；帧内按 4 个旋转方向重试（相机传感器方向与竖屏显示不一致时帧可能旋转
@@ -230,7 +231,16 @@ private fun TotpCameraPreview(
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    val previewView = remember { PreviewView(context) }
+    // 强制 COMPATIBLE（TextureView）而非默认 PERFORMANCE（SurfaceView）：SurfaceView 模式下内部
+    // SurfaceView 按相机分辨率布局、再经 FILL_CENTER 视图矩阵放大，其独立 Surface 图层不受视图
+    // 层级 clipChildren 裁剪；本对话框窗口在卡片外透明，取景区上下各溢出的约 177px 会从卡片上缘
+    // 漏成一条相机画面条带（ISSUE-P3-333；SurfaceFlinger 图层读数与 camera-view 1.6.2 源码对拍实证：
+    // 源码推导 scale=max(1072/1200,1076/1600)=0.893、上溢177px，与实测 y[681..2111] vs 视图 y[857..1933] 吻合）。
+    val previewView = remember {
+        PreviewView(context).apply {
+            implementationMode = PreviewView.ImplementationMode.COMPATIBLE
+        }
+    }
     // 解码独占单线程：MultiFormatReader 非线程安全，单线程串行喂帧即满足契约
     val decodeExecutor = remember {
         Executors.newSingleThreadExecutor { r -> Thread(r, "totp-qr-decode") }

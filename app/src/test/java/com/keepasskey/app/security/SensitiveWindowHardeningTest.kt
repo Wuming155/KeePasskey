@@ -61,6 +61,15 @@ class SensitiveWindowHardeningTest {
                 "反点击劫持缺口，恒施加）与同窗 FLAG_SECURE 按开关条件施加（PD-47）",
             code.contains("SecureDialogWindowEffect(flagSecure = flagSecureEnabled)")
         )
+        // ISSUE-P3-333：PreviewView 必须强制 COMPATIBLE（TextureView）——默认 PERFORMANCE（SurfaceView）
+        // 的独立 Surface 图层不受视图层级 clipChildren 裁剪，FILL_CENTER 放大后的上下溢出会从
+        // 透明对话框窗口的卡片上缘漏出相机画面条带（SurfaceFlinger 读数实证，回退即复发）。
+        assertTrue(
+            "[$SCAN_DIALOG_SOURCE] 缺少 implementationMode = PreviewView.ImplementationMode.COMPATIBLE" +
+                "（回退默认 PERFORMANCE/SurfaceView ⇒ Surface 图层溢出透明对话框窗口，" +
+                "卡片上缘重现相机画面条带，ISSUE-P3-333 复发）",
+            code.contains("implementationMode = PreviewView.ImplementationMode.COMPATIBLE")
+        )
     }
 
     @Test
