@@ -20,7 +20,9 @@
       测试源（`src/test` / `src/androidTest` / `screenshotTest`）与生成目录不入扫。
     - **不**解析 Kotlin 语义：同名不同类型若后缀命中，按简单名放行 / 拦截；
       `typealias` / 局部匿名对象 / 注解类上的元注释形态可能漏报或误报，命中后人工复核。
-    - 白名单只收**简单名**；同名跨包共用一条豁免（当前 13 个简单名均全局唯一）。
+    - 白名单只收**简单名**；同名跨包共用一条豁免（当前 12 个简单名均全局唯一）。
+      集合的增 / 减都须同步 `PD-34`（`§335` 补正：`UnlockPasskeyManager` 随 `§334` 整层移除后
+      本集合同步下线，避免对已不存在的类型名**预授权**）。
 """
 from __future__ import annotations
 
@@ -44,7 +46,6 @@ ALLOWED = frozenset(
         "AutoLockManager",
         "ClipboardSecurityManager",
         "BiometricAuthManager",
-        "UnlockPasskeyManager",
         "UnlockThrottleManager",
         "ChildDatabaseSessionManager",
     }

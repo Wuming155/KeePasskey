@@ -48,8 +48,43 @@
 > 已全部闭环：§315（309 / 312）、§317（308）、§318（310）、§319（311）、§320（313）；
 > 2026-09-25 CI 设备门禁与供应链扫描两条（`ISSUE-P2-314` / `ISSUE-P2-315`）闭环见 §325。
 
-## P3 低危问题、特性接线与体验优化（0 项）
+## P3 低危问题、特性接线与体验优化（1 项）
 
-> **暂无开放项（全量待办归零）**。2026-09-25 本地纵深防御四层（节流完整性层 / 防回滚状态 MAC /
+> 2026-09-25 本地纵深防御四层（节流完整性层 / 防回滚状态 MAC /
 > 快速解锁断言层 / 字段签名 HMAC）经用户裁决**全部移除**（`ISSUE-P3-326` ~ `P3-328`，
-> `PD-46`），与 `ISSUE-P1-277` 同批闭环见 §334；更早的 P3 闭环流水见 `RESOLVED_LOG.md` §326 ~ §333。
+> `PD-46`），与 `ISSUE-P1-277` 同批闭环见 §334；`PD-34` 白名单棘轮补正（`ISSUE-P3-329` 补登并同批闭环）见 §335；
+> 更早的 P3 闭环流水见 `RESOLVED_LOG.md` §326 ~ §333。
+
+### ISSUE-P3-330 UI 冗余提示文本清理（同屏重复说明 + 死字符串 + 未渲染 descRes）
+
+**背景（2026-09-26 用户要求排查「UI 上冗余的提示文本」）**：四类冗余，按处置方式分组——
+
+**A. 同屏重复渲染（真实显示给用户的重复提示，4 处）**
+
+| # | 位置（核实于 2026-09-26） | 冗余内容 |
+|---|---|---|
+| A1 | `TotpSettingsScreen.kt:107`（`totp_presets_desc`）与 `:293`（`totp_info_desc`） | 同一 TOTP 设置页两处复述同一条查找顺序：「配置的字段名优先 → 未命中回退官方 `otp` 字段与 TOTP 开头的自定义字段」。顶部卡片说明一次、底部信息卡再整段说一次 |
+| A2 | `ThemeSettingsSections.kt:119`（`theme_dynamic_sub`）与 `:219`（`:206` 的 `theme_palette_pick_desc` 为第三处） | 动态取色开启时同一屏出现近乎同义的三句话：行副标题含「开启期间下方主题调色盘暂不生效」、调色盘置灰提示又整句重复「动态取色已开启，主题调色盘暂不生效」、`theme_palette_pick_desc` 再述同一互斥关系 |
+| A3 | `AutofillPickerActivity.kt:295-296` → `AutofillAuthResultDelivery.kt:59-60` | `menuSubtitle` 恒为 `autofill_picker_title`，`menuTitle` 在用户名为空时也回退同一字符串 ⇒ 系统填充下拉中标题、副标题两行逐字相同（「选择要填充的凭据」×2） |
+| A4 | `DatabaseSettingsArgon2DialogSections.kt:111/118`（内存）、`:137/144`（并行度） | 行标签已内嵌当前值（「内存占用：64 MB」/「并行线程数：4」），下方选中 chip 又显示同一数字（「64 MB」/「4 线程」），当前值同屏出现两次 |
+
+**B. 零引用死字符串（35 条）**：解析 `values/strings.xml` 共 1109 条，全仓 `.kt`/`.xml`（含 test 源集，测试独占引用 = 0）扫描 `R.string.*` / `@string/*` 后 35 条零命中。分组：
+
+- 已被同语义键取代：`vault_sort_default/name/date/modified/created`（5，已由 `sort_option_*` 取代）、`health_level_excellent/good/fair/poor`（4，已由 `health_status_*` 取代）、`health_not_scanned` + `health_not_scanned_desc`（后者与在用的 `health_scan_hint_idle` **值完全相同**）、`unlock_empty_open_btn`（与在用的 `unlock_empty_open_title` 近同义）、`db_picker_created_toast` / `db_picker_opened_external_toast`（与 `db_picker_msg_created` / `db_picker_msg_opened` 同义）。
+- 功能已移除/未接线：`unlock_error_pin_length`（自研 PIN 已于 ISSUE-P1-08 移除）、`unlock_btn_biometric`、`db_picker_use_keyfile`、`edit_category_label`、`detail_attachment_preview`、`vault_action_sync`、`vault_action_resolve_conflict`、`vault_recycle_bin_title`、`cd_keyfile`、`cd_biometric`、`cred_unlock_action_subtitle`、`cred_password_save_title`、`cred_password_fill_title`、`cred_error_entry_not_found`、`repo_last_opened_not_created`、`unlock_status_local`。
+- 疑似通用按钮预留：`btn_confirm`、`btn_edit`、`btn_select`、`btn_open`。
+
+**C. 枚举 `descRes` 声明但从未渲染（5 条）**：`theme_density_compact/normal/comfortable_desc`（`ListDensity.descRes`，全仓无 `density.descRes` 读取方，界面只渲染 `labelRes` + `theme_density_desc`）与 `theme_search_mode_contains_desc` / `theme_search_mode_all_terms_desc`（`SearchMatchMode.descRes` 同样无读取方，`ThemeSettingsListSections.kt:192` 只渲染总述 `theme_search_mode_desc`）——「声明了说明文案却从不显示」，属半接线状态。
+
+**D. 在用但值完全相同的重复键（2 对）**：`vault_op_failed` ≡ `settings_action_failed`（同为「操作失败：%1$s」，各有调用方）；`autofill_confirm_biometric_subtitle` ≡ `cred_fill_confirm_biometric_subtitle`（同为「验证身份后向当前应用填充凭据「%1$s」」）。`btn_*`/`cd_*` 成对同值属无障碍描述复用，**不算**冗余、不在整改范围。
+
+**核实时间点与核实方式（2026-09-26，对工作区当前状态）**：① Python 正则解析 `app/src/main/res/values/strings.xml` 全量键值（1109 条）；② 全仓 `*.kt` + 非 values 目录 `*.xml` 扫描 `R.string.<name>` / `@string/<name>` 引用（排除 `build/` 与 `参考项目/`，含 test 源集）；③ 对 A 组逐处打开调用点文件核对**同屏共现**（非仅「都被引用」）；④ C 组经 `descRes` 全部读取点枚举核实（仅 `CloudSyncComponents.kt:167` / `CloudSyncSections.kt:382` 有读取，分别属 `CloudSyncProvider` / `ConflictResolution`）。行号为核实时刻快照。
+
+**验收标准**：
+
+1. A 组 4 处各收敛为单点说明。**A2 不得整句删除**——「置灰附原因说明」是 `ISSUE-P3-263` AC⑤ 的硬要求，只能合并去重（保留调色盘侧提示，`theme_dynamic_sub` 摘除重复从句），口径不得降级。
+2. A3 修复为 title/subtitle 语义分工（如用户名空时 subtitle 用条目标题或省略），系统填充下拉不再出现两行同文。
+3. B 组逐条复核仍零引用后删除，`values-en/strings.xml` 对应条目**同批**删除；`btn_confirm` 等 4 条通用按钮键删除前须再确认无未来接线计划（无则删）。
+4. C 组择一处置：接线渲染（在选择器中展示选项说明）**或**连 `descRes` 字段一并删除——禁止留死声明。
+5. D 组合并为单键或在两条键旁注释说明分立理由。
+6. 整改后 `.\gradlew.bat test` 全绿 **且** `python tools/doc/gate_readings.py` 7/7 PASS，读数块原样贴入批次文档 §3（§308）；若删除字符串涉及已渲染界面，另跑 `.\gradlew.bat :app:compileDebugScreenshotTestKotlin --rerun`。
