@@ -6,7 +6,6 @@ import android.content.ContextWrapper
 import android.content.SharedPreferences
 import androidx.lifecycle.viewModelScope
 import com.keepasskey.app.R
-import com.keepasskey.app.autofill.testHmacFieldSignatureSource
 import com.keepasskey.app.data.breach.BreachCheckCoordinator
 import com.keepasskey.app.data.childdb.ChildDatabaseCredentialStore
 import com.keepasskey.app.data.childdb.ChildDatabaseFixtures
@@ -448,7 +447,7 @@ class ChildDatabaseSettingsWiringTest {
             AutofillBlocklistStore(null),
             // ISSUE-P3-43：保存侧黑名单与字段级屏蔽（内存语义）
             com.keepasskey.app.autofill.AutofillSaveBlocklistStore(null),
-            com.keepasskey.app.autofill.AutofillFieldBlocklistStore(null, testHmacFieldSignatureSource()),
+            com.keepasskey.app.autofill.AutofillFieldBlocklistStore(null),
             BreachCheckCoordinator(NoOpBreachRangeClient),
             stringsProvider = TEST_STRINGS,
             childDatabaseSessionManager = manager,

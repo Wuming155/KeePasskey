@@ -2,7 +2,6 @@ package com.keepasskey.app.ui.screens.settings
 
 import com.keepasskey.app.testutil.MainDispatcherGuard
 import androidx.lifecycle.viewModelScope
-import com.keepasskey.app.autofill.testHmacFieldSignatureSource
 import com.keepasskey.app.data.repository.FakeSettingsRepository
 import com.keepasskey.app.data.repository.FakeVaultRepository
 import com.keepasskey.app.data.repository.VaultRepository
@@ -122,7 +121,7 @@ class HealthCheckViewModelTest {
             com.keepasskey.app.data.repository.AutofillBlocklistStore(null),
             // ISSUE-P3-43：保存侧黑名单与字段级屏蔽（内存语义）
             com.keepasskey.app.autofill.AutofillSaveBlocklistStore(null),
-            com.keepasskey.app.autofill.AutofillFieldBlocklistStore(null, testHmacFieldSignatureSource()),
+            com.keepasskey.app.autofill.AutofillFieldBlocklistStore(null),
             // TASK-47：已泄露密码检测协调器（测试用假客户端：无真实外联）
             com.keepasskey.app.data.breach.BreachCheckCoordinator(
                 com.keepasskey.app.ui.screens.settings.NoOpBreachRangeClient

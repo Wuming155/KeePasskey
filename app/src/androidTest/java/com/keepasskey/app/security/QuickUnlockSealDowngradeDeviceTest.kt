@@ -70,7 +70,6 @@ class QuickUnlockSealDowngradeDeviceTest {
         keyFileBytes = { null },
         biometricAuthManager = authManager,
         biometricCredentialStorage = BiometricCredentialStorage(context),
-        unlockPasskeyManager = null,
         debugLog = DebugLogBuffer()
     )
 

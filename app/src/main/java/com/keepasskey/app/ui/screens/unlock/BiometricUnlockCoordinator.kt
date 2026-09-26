@@ -8,8 +8,6 @@ import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.security.BiometricAuthManager
 import com.keepasskey.app.security.BiometricCredentialStorage
 import com.keepasskey.app.security.BiometricResult
-import com.keepasskey.app.security.UnlockPasskeyGate
-import com.keepasskey.app.security.UnlockPasskeyManager
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.core.result.KdbxResult
 import kotlinx.coroutines.CoroutineScope
@@ -37,7 +35,6 @@ internal class BiometricUnlockCoordinator(
     private val activeDbId: () -> String?,
     private val biometricAuthManager: BiometricAuthManager?,
     private val biometricCredentialStorage: BiometricCredentialStorage?,
-    private val unlockPasskeyManager: UnlockPasskeyManager?,
     private val debugLog: DebugLogBuffer
 ) {
 
@@ -116,46 +113,6 @@ internal class BiometricUnlockCoordinator(
     }
 
     /**
-     * 解锁通行密钥断言验证（TASK-18 / ISSUE-P1-09 fail-closed 化）。
-     *
-     * 每次快速解锁生成一次性随机 challenge，要求硬件私钥对
-     * AuthenticatorData || SHA-256(clientDataJSON) 签名，并本地复核
-     * clientDataJSON 规范性（type/challenge/origin）、rpIdHash 归属与 signCount
-     * 严格单调。私钥不绑定用户认证——认证闸门是封印密钥（per-operation +
-     * `CryptoObject` 密码学绑定），理由见 [UnlockPasskeyKeyPolicy]。
-     *
-     * 未登记（记录被删/被篡改/未登记，[UnlockPasskeyGate.NotEnrolled]）与硬件
-     * 签名失败一律 fail-closed——清除封印凭据与通行密钥登记（视为凭据被克隆/
-     * 篡改），引导用户以主密码完整解锁后重新登记。原「旧凭据兼容通道」（未登记
-     * 即跳过断言并后台补登记）已移除：任何能写应用私有数据者删除 3 个 key 即可
-     * 一步绕过反克隆断言，静默放行语义不可接受。
-     */
-    private suspend fun verifyUnlockPasskey(
-        storage: BiometricCredentialStorage,
-        dbId: String
-    ): Boolean {
-        val passkeyManager = unlockPasskeyManager ?: return true
-        val challenge = passkeyManager.newChallenge()
-        val gate = passkeyManager.assertUnlock(dbId, challenge)
-        val assertion = (gate as? UnlockPasskeyGate.AssertionReady)?.assertion
-        if (assertion == null || !passkeyManager.verifyAndCommit(dbId, assertion, challenge)) {
-            debugLog.warn(TAG, "解锁通行密钥断言不可用/未通过（gate=$gate），fail-closed 拒绝快速解锁")
-            storage.clearCredential(dbId)
-            passkeyManager.clear(dbId)
-            uiState.update {
-                it.copy(
-                    isLoading = false,
-                    isQuickUnlockAvailable = false,
-                    errorMessage = UiMessage(R.string.unlock_passkey_verify_failed)
-                )
-            }
-            fallbackToMasterPasswordMode()
-            return false
-        }
-        return true
-    }
-
-    /**
      * 生物识别解锁：结合 AndroidX Biometric 与硬件 Keystore 解封。
      * 缺少宿主 Activity / 硬件依赖 / 活动数据库时一律 fail-closed（不假解锁、不发成功事件）。
      *
@@ -205,7 +162,6 @@ internal class BiometricUnlockCoordinator(
         } catch (e: KeyPermanentlyInvalidatedException) {
             // 系统指纹增删导致密钥作废：清空失效凭据与硬件密钥别名，提示用户使用主密码重新验证
             storage.clearCredential(dbId)
-            unlockPasskeyManager?.clear(dbId)
             authManager.deleteKeyForDatabase(dbId)
             uiState.update {
                 it.copy(
@@ -282,12 +238,8 @@ internal class BiometricUnlockCoordinator(
         scope.launch {
             try {
                 val decryptedBytes = authedCipher.doFinal(sealedCiphertext)
-                // TASK-18 / ISSUE-P1-09：生物识别门控通过后，执行解锁通行密钥断言
-                // （随机 challenge + clientDataJSON + 认证绑定私钥签名 + signCount
-                // 严格单调防克隆；记录缺失/被删与签名失败均 fail-closed）
-                if (verifyUnlockPasskey(storage, dbId)) {
-                    completeBiometricUnlock(decryptedBytes, storage, dbId)
-                }
+                // ISSUE-P3-327：解锁断言层已整体移除，快速解锁 = 生物识别授权 → 解封封印凭据
+                completeBiometricUnlock(decryptedBytes, storage, dbId)
             } catch (e: Exception) {
                 // ISSUE-P1-08 迁移容错：密钥经生物录入变更吊销（KeyPermanentlyInvalidated）
                 // 或旧「BIOMETRIC_STRONG|DEVICE_CREDENTIAL」密钥迁移重建后，
@@ -295,7 +247,6 @@ internal class BiometricUnlockCoordinator(
                 // 下次主密码解锁自动重新封印，杜绝「永远解不开又永不重登记」的死循环态
                 debugLog.warn(TAG, "生物识别解封失败: ${e.javaClass.simpleName}")
                 storage.clearCredential(dbId)
-                unlockPasskeyManager?.clear(dbId)
                 uiState.update {
                     it.copy(
                         isLoading = false,

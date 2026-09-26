@@ -18,7 +18,7 @@ import java.io.File
  * 形态沿用同包既有先例 `SyncCycleRemoteOutcomes.kt`：门面类的装配段移为**同包 `internal`
  * 扩展函数**，使 `SyncCycleRunner` 只保留「取锁 + 装配调用 + 决策分派」的编排面。
  * 可见性代价：`context` / `providerResolver` / `preferences` / `vaultBindingStore` /
- * `syncIntegrityMac` / `rollbackStateDir` / `changes` 七个成员由 `private` 放宽为 `internal`
+ * `rollbackStateDir` / `changes` 六个成员由 `private` 放宽为 `internal`
  * （仅同模块可见，公开 API 与行为零变化）。
  */
 
@@ -87,12 +87,10 @@ internal suspend fun SyncCycleRunner.setupCycleContext(
     }
     // F-23 整改：防回滚状态**不得**与可丢弃缓存同目录——此前它落在 cacheDir/sync，
     // 而 SyncCache.clear() 把它列入删除清单且由锁库 / 凭据清空触发，导致「用户锁定一次
-    // 即可被云端重放旧库」。现注入 filesDir 下的持久目录（跨锁定保留），
-    // 状态仅含 SHA-256 摘要 + Keystore HMAC（无明文）。
+    // 即可被云端重放旧库」。现注入 filesDir 下的持久目录（跨锁定保留）。
     // 注入缺失（手动装配路径）时按同一落点惰性兜底，保证两种装配方式落点一致。
     val rollbackGuard = SyncRollbackGuard(
         rollbackStateDir ?: File(context.filesDir, SyncRollbackGuard.STATE_DIR_NAME),
-        syncIntegrityMac,
         cacheScope
     )
 

@@ -39,7 +39,6 @@
     <string name="icon_custom_upload">上传图片</string>
     <string name="icon_invalid_not_png">所选文件不是有效图片</string>
     <string name="icon_too_large">图片过大，请选择小于 256 KB 的图片</string>
-    <string name="unlock_passkey_verify_failed">快速解锁凭据校验未通过，请使用主密码解锁后重新登记</string>
     <string name="cd_hide_password">隐藏密码</string>
     <string name="cd_show_password">显示密码</string>
     <string name="cd_toggle_password_visibility">密码显示与隐藏</string>
@@ -905,7 +904,6 @@
     <string name="autofill_health_issue_app_disabled">应用内「系统自动填充服务」开关已关闭</string>
     <string name="autofill_health_issue_system_disabled">系统未选择本应用为自动填充服务，请前往系统设置启用</string>
     <string name="autofill_health_issue_cm_unavailable">凭据管理器 (Credential Manager) 不可用</string>
-    <string name="autofill_health_issue_field_signature_unavailable">字段屏蔽校验暂不可用（系统密钥库不可用），自动填充已按「保守不填充」处理；重启设备后重试，若持续存在请检查系统安全设置</string>
     <!-- ISSUE-P2-239：凭据提供者通道（CM）的系统登记状态两态——「未登记」给出修复路径（§240 E1/E3
          实测：系统未登记本应用时框架层直接丢弃创建请求，且 credential_service_primary 单独写入不放行）；
          「未知」如实声明读不到，**不得**渲染成「正常」。文案不得声称「已从系统移除」——
@@ -954,13 +952,13 @@
     <string name="autofill_picker_block_username">不再填充账号框</string>
     <string name="autofill_picker_block_password">不再填充密码框</string>
     <string name="autofill_picker_block_confirm_title">不再填充此字段？</string>
-    <string name="autofill_picker_block_confirm_desc">今后在同一应用、同一网址的同类输入框中不再提供填充建议。屏蔽记录以不可逆签名保存（不记录网址明文），可在「设置 → 自动填充」中整体清除。本次填充将取消。</string>
+    <string name="autofill_picker_block_confirm_desc">今后在同一应用、同一网址的同类输入框中不再提供填充建议。屏蔽记录保存于应用私有存储，可在「设置 → 自动填充」中整体清除。本次填充将取消。</string>
     <string name="autofill_picker_block_confirm_btn">不再填充</string>
     <string name="autofill_field_block_row_title">已屏蔽的表单字段</string>
     <string name="autofill_field_block_count">已屏蔽 %1$d 个字段</string>
     <string name="autofill_field_block_empty">暂无屏蔽的字段</string>
     <string name="autofill_field_block_dialog_title">字段级屏蔽</string>
-    <string name="autofill_field_block_dialog_desc">屏蔽记录以不可逆签名（应用 + 网址 + 字段角色）保存，因此无法在此列出具体网址——只能整体清除。清除后这些字段会重新提供填充建议。</string>
+    <string name="autofill_field_block_dialog_desc">屏蔽记录（应用 + 网址 + 字段角色）保存于应用私有存储，仅本应用可读——在此只能整体清除。清除后这些字段会重新提供填充建议。</string>
     <string name="autofill_field_block_clear_btn">全部清除</string>
 
     <!-- ISSUE-P3-43 ③：保存侧独立黑名单（只禁保存提示，不影响填充） -->

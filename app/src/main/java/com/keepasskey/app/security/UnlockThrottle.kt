@@ -7,7 +7,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
-import java.util.Base64
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.time.Duration.Companion.seconds
@@ -17,14 +16,10 @@ import kotlin.time.Duration.Companion.seconds
  *
  * @param failureCount        连续失败次数（成功解锁后归零）
  * @param lockoutUntilEpochMs 锁定截止时间戳（epoch millis，`0` 表示当前未锁定）
- * @param integrityIntact     记录完整性是否通过校验（ISSUE-P3-54：false 表示被删除 / 篡改，
- *                            由 [UnlockThrottleManager.gate] fail-closed 处理；
- *                            默认 true 以兼容 JVM 测试用内存实现）
  */
 data class UnlockThrottleRecord(
     val failureCount: Int = 0,
-    val lockoutUntilEpochMs: Long = 0L,
-    val integrityIntact: Boolean = true
+    val lockoutUntilEpochMs: Long = 0L
 )
 
 /**
@@ -60,22 +55,20 @@ interface UnlockThrottleStore {
 
 /**
  * [UnlockThrottleStore] 的 SharedPreferences 实现：计数与锁定截止落盘，
- * 卸载应用或清除数据前持久有效。
+ * 卸载应用或清除数据前持久有效，杜绝「杀进程即重置计数」的绕过路径。
  *
- * ISSUE-P3-54：追加 Keystore 密钥的 HMAC（[UnlockThrottleIntegrity]）完整性绑定——
- * 记录被篡改时 MAC 校验失败，由 [UnlockThrottleManager.gate] fail-closed 处置。
- *
- * ISSUE-P2-45：HMAC 只能证明**在案**记录未被改动，对「三个键被整组删除」无能为力
- * （整改前把该状态直接等同于全新安装，等于留了一条「删键复位」旁路）。现以两条改动封堵：
- * ① [reset] 不再删键，改写一条带有效 MAC 的**零值记录**——于是「三键全缺」在首次写入之后
- * 不再有任何合法来源；
- * ② 「三键全缺」改由 Keystore 内的**存在性标记**裁决（见 [UnlockThrottleIntegrity]）：
- * 标记在案 ⇒ 该库曾写入过记录 ⇒ 键是被删除的，按篡改 fail-closed；标记不案 ⇒ 真正的全新安装。
+ * ISSUE-P1-277（PD-46）：原 ISSUE-P3-54 的 Keystore HMAC 完整性层与 ISSUE-P2-45 的
+ * 存在性标记**整体移除**——该层目标对手（本地文件级写者）在本机上要么不存在
+ * （`allowBackup="false"` + 数据提取规则九域全 exclude 封死无代码执行的写路径），
+ * 要么升级为同 UID / root（可直读 `filesDir` 下的 `*.kdbx` 离线爆破，节流对其本就无意义），
+ * 且其 MAC 载荷无新鲜性来源（回写旧低计数组即可复位）、Keystore 故障时落入
+ * 「每次 gate 重锁 30 分钟」的不可自愈循环。对在威胁模型内的对手零增量、
+ * 反而引入独有失效面，故按「对模型内对手是否有增量」统一判据裁定移除。
+ * 节流状态可被文件级删除复位的残余面登记于 `已知工程限界.md` §33。
  */
 @Singleton
 class SharedPrefsUnlockThrottleStore @Inject constructor(
-    @ApplicationContext context: Context,
-    private val integrity: UnlockThrottleIntegrity
+    @ApplicationContext context: Context
 ) : UnlockThrottleStore {
 
     private val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -83,55 +76,26 @@ class SharedPrefsUnlockThrottleStore @Inject constructor(
     override fun read(databaseId: String): UnlockThrottleRecord {
         val count = prefs.getInt(keyCount(databaseId), 0)
         val lockUntil = prefs.getLong(keyLock(databaseId), 0L)
-        val storedMac = prefs.getString(keyMac(databaseId), null)
-        // 三键全缺：由存在性标记区分「从未写入过」与「记录被删除」（ISSUE-P2-45）
-        if (count == 0 && lockUntil == 0L && storedMac == null) {
-            return UnlockThrottleRecord(integrityIntact = !existenceMarkerPresent(databaseId))
-        }
-
-        val record = UnlockThrottleRecord(count, lockUntil)
-        val macBytes = storedMac?.takeIf { it.isNotEmpty() }
-            ?.let { runCatching { Base64.getDecoder().decode(it) }.getOrNull() }
-        return record.copy(integrityIntact = integrity.verify(databaseId, record, macBytes))
+        return UnlockThrottleRecord(count, lockUntil)
     }
 
     override fun write(databaseId: String, record: UnlockThrottleRecord) {
-        // 标记必须先于记录落定：若两步之间进程终止，留下「标记在案 + 记录缺失」，
-        // 后续 read 按篡改 fail-closed（有界锁定）；反序则会留下「记录在案 + 标记缺失」
-        // 那种「日后被删除即复位」的 fail-open 残局。
-        integrity.ensureExistenceMarker(databaseId)
-        persist(databaseId, record)
-    }
-
-    override fun reset(databaseId: String) {
-        // 成功解锁：写零值记录而非删键——保留「该库曾在案」这一事实，
-        // 使「三键全缺」重新成为只可能由外部删除产生的状态（ISSUE-P2-45 ①）。
-        integrity.ensureExistenceMarker(databaseId)
-        persist(databaseId, UnlockThrottleRecord())
-    }
-
-    private fun persist(databaseId: String, record: UnlockThrottleRecord) {
-        val encodedMac = integrity.mac(databaseId, record)
-            ?.let { Base64.getEncoder().encodeToString(it) }
-            .orEmpty()
         prefs.edit()
             .putInt(keyCount(databaseId), record.failureCount)
             .putLong(keyLock(databaseId), record.lockoutUntilEpochMs)
-            .putString(keyMac(databaseId), encodedMac)
             .apply()
     }
 
-    /**
-     * 存在性标记查询（ISSUE-P2-45）。与 [UnlockThrottleIntegrity.existenceMarkerPresent] 的契约一致：
-     * 异常**不得**被吞成「标记不存在」（那会把 Keystore 故障变成复位旁路），故按「标记在案」
-     * fail-closed 处置——代价是 Keystore 故障时首启也会遇到一次有界锁定（上限 `MAX_BACKOFF_MS`）。
-     */
-    private fun existenceMarkerPresent(databaseId: String): Boolean =
-        runCatching { integrity.existenceMarkerPresent(databaseId) }.getOrDefault(true)
+    override fun reset(databaseId: String) {
+        // 成功解锁：清零计数与锁定截止（键移除后 read 回落默认零值记录）
+        prefs.edit()
+            .remove(keyCount(databaseId))
+            .remove(keyLock(databaseId))
+            .apply()
+    }
 
     private fun keyCount(databaseId: String): String = "${databaseId}_unlock_fail_count"
     private fun keyLock(databaseId: String): String = "${databaseId}_unlock_lock_until"
-    private fun keyMac(databaseId: String): String = "${databaseId}_unlock_mac"
 
     private companion object {
         const val PREFS_NAME = "com.keepasskey.unlock_throttle"
@@ -259,7 +223,7 @@ class UnlockThrottleConfigProvider @Inject constructor(
  *
  * ISSUE-P3-68：运行时配置经 [UnlockThrottleConfigProvider] 注入——总开关关闭时 `gate` 放行、
  * 失败不再退避；封顶时长随用户自定义。`configProvider` 可空（缺省 [ThrottleConfig] 安全默认），
- * 仅用于 JVM 单测零改动注入；生产 DI 恒注入真实实例。**记录完整性 fail-closed 处置不受开关影响**。
+ * 仅用于 JVM 单测零改动注入；生产 DI 恒注入真实实例。
  */
 @Singleton
 class UnlockThrottleManager @Inject constructor(
@@ -275,25 +239,10 @@ class UnlockThrottleManager @Inject constructor(
      * 解锁前闸门：锁定期内返回 [ThrottleGate.Locked]（fail-closed），否则 [ThrottleGate.Allowed]。
      * 调用方拿到 Locked 时**必须拒绝解锁**，不得进入 KDF/解密流程。
      *
-     * ISSUE-P3-68：节流开关关闭时忽略既有锁定截止直接放行；但记录完整性校验失败
-     * （ISSUE-P3-54 防篡改语义）**不受开关影响**，恒 fail-closed。
+     * ISSUE-P3-68：节流开关关闭时忽略既有锁定截止直接放行（放行不注销计数）。
      */
     fun gate(databaseId: String, now: Long = System.currentTimeMillis()): ThrottleGate {
         val record = store.read(databaseId)
-        // ISSUE-P3-54：记录完整性校验失败（被删除 / 篡改）→ fail-closed。
-        // 落一个带有效 MAC 的**有界**锁定期记录后返回 Locked：既不因记录被动过而放行，
-        // 也不永久锁死用户（锁定期上限 MAX_BACKOFF_MS）。
-        if (!record.integrityIntact) {
-            val locked = UnlockThrottleRecord(
-                failureCount = UnlockThrottlePolicy.FAILURE_THRESHOLD,
-                lockoutUntilEpochMs = now + UnlockThrottlePolicy.MAX_BACKOFF_MS
-            )
-            store.write(databaseId, locked)
-            return ThrottleGate.Locked(
-                UnlockThrottlePolicy.FAILURE_THRESHOLD,
-                UnlockThrottlePolicy.MAX_BACKOFF_MS
-            )
-        }
         // ISSUE-P3-68：用户显式退出重试节流——既有锁定截止不再生效（放行不注销计数）
         if (!config.enabled) return ThrottleGate.Allowed(record.failureCount)
         val remaining = record.lockoutUntilEpochMs - now

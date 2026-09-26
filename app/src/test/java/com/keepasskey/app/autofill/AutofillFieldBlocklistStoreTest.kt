@@ -9,13 +9,14 @@ import org.junit.Test
  * 字段签名级屏蔽仓库单元测试（ISSUE-P3-43 ② 验收标准 3：非法输入 fail-closed）。
  *
  * 覆盖内存语义下的完整生命周期：按「包名 + 域 + 角色」三维键屏蔽 → 命中 → 解除 → 清空，
- * 以及非法包名与密钥不可用在**判定与写入两个方向**上的 fail-closed 语义。
- * （签名不可逆，故列表断言只能对**条数**进行——这本身就是设计约束的体现。
- * ISSUE-P3-46：密钥来源经 [HmacFieldSignatureSource] 注入测试密钥。）
+ * 以及非法包名在**判定与写入两个方向**上的 fail-closed 语义。
+ * （ISSUE-P3-328：目标键改明文、去 Keystore 依赖——原「密钥不可用」三例
+ * `密钥不可用时写入失败且判定保持 fail-closed` / `密钥不可用时置位可观测标志而判定仍 fail-closed` /
+ * `非法包名不置位可观测标志` / `正常判定路径不置位可观测标志` 随被测生产代码移除，登记于批次 §2.4。）
  */
 class AutofillFieldBlocklistStoreTest {
 
-    private fun store() = AutofillFieldBlocklistStore(null, testHmacFieldSignatureSource())
+    private fun store() = AutofillFieldBlocklistStore(null)
 
     @Test
     fun `初始为空且任意上下文均未屏蔽`() {
@@ -81,18 +82,6 @@ class AutofillFieldBlocklistStoreTest {
     }
 
     @Test
-    fun `密钥不可用时写入失败且判定保持 fail-closed`() {
-        val store = AutofillFieldBlocklistStore(null, unavailableHmacFieldSignatureSource)
-
-        // 写入方向：密钥不可用 → 签名不可计算 → 拒绝入库
-        assertFalse(store.block("com.example.bank", "a.example.com", AutofillFieldRole.PASSWORD))
-        assertEquals(0, store.blockedSignatures.value.size)
-
-        // 判定方向：fail-closed——密钥不可用视为已屏蔽，绝不放行填充
-        assertTrue(store.isBlocked("com.example.bank", "a.example.com", AutofillFieldRole.PASSWORD))
-    }
-
-    @Test
     fun `解除屏蔽后恢复填充`() {
         val store = store()
         store.block("com.example.bank", "accounts.example.com", AutofillFieldRole.PASSWORD)
@@ -125,43 +114,17 @@ class AutofillFieldBlocklistStoreTest {
         assertEquals(0, store.clearAll())
     }
 
-    // ===== ISSUE-P3-113：fail-closed 故障的可观测性 =====
-
     @Test
-    fun `密钥不可用时置位可观测标志而判定仍 fail-closed`() {
-        val store = AutofillFieldBlocklistStore(null, unavailableHmacFieldSignatureSource)
-
-        assertFalse("初始态不得误报", store.signatureUnavailable.value)
-
-        assertTrue(store.isBlocked("com.example.bank", "a.example.com", AutofillFieldRole.PASSWORD))
-        assertTrue(
-            "密钥不可用必须置位标志（否则填充被静默放弃、用户无从归因）",
-            store.signatureUnavailable.value
-        )
-    }
-
-    @Test
-    fun `非法包名不置位可观测标志`() {
-        val store = store() // 密钥可用
-
-        // 判定方向仍是 fail-closed（视为已屏蔽）
-        assertTrue(store.isBlocked("", "a.example.com", AutofillFieldRole.PASSWORD))
-        assertTrue(store.isBlocked("com..example", "a.example.com", AutofillFieldRole.PASSWORD))
-
-        // 但「输入非法」是查询侧的正常干扰项，不得据此对用户报出密钥故障告警
-        assertFalse(
-            "非法包名不得置位密钥不可用标志（否则健康卡片会误报）",
-            store.signatureUnavailable.value
-        )
-    }
-
-    @Test
-    fun `正常判定路径不置位可观测标志`() {
+    fun `落盘目标键为本版本格式且含归一化目标明文`() {
         val store = store()
-        store.block("com.example.bank", "a.example.com", AutofillFieldRole.PASSWORD)
+        store.block("com.example.bank", "accounts.example.com", AutofillFieldRole.PASSWORD)
 
-        assertTrue(store.isBlocked("com.example.bank", "a.example.com", AutofillFieldRole.PASSWORD))
-        assertFalse(store.isBlocked("com.example.bank", null, AutofillFieldRole.USERNAME))
-        assertFalse(store.signatureUnavailable.value)
+        val entry = store.blockedSignatures.value.single()
+        assertTrue(
+            "目标键必须为本版本格式（读取侧据此丢弃旧格式残留）",
+            AutofillFieldSignature.isWellFormedTarget(entry)
+        )
+        assertTrue("目标键含包名明文（ISSUE-P3-328 口径）", entry.contains("com.example.bank"))
+        assertTrue("目标键含归一化域名明文", entry.contains("accounts.example.com"))
     }
 }

@@ -7,11 +7,9 @@ import com.keepasskey.app.di.RollbackStateDir
 import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.database.file.KdbxDatabase
 import com.keepasskey.database.session.DatabaseSession
-import com.keepasskey.sync.engine.NoopSyncIntegrityMac
 import com.keepasskey.sync.engine.SyncCache
 import com.keepasskey.sync.engine.SyncCommitResult
 import com.keepasskey.sync.engine.SyncEngine
-import com.keepasskey.sync.engine.SyncIntegrityMac
 import com.keepasskey.sync.engine.SyncOpenResult
 import com.keepasskey.sync.engine.SyncRollbackGuard
 import com.keepasskey.sync.merge.SyncConflictStrategy
@@ -76,9 +74,6 @@ class SyncCycleRunner @Inject constructor(
      */
     @RollbackStateDir
     internal val rollbackStateDir: File? = null,
-    // ISSUE-P2-18：防回滚状态认证密钥来源（生产由 Hilt 注入 KeystoreSyncIntegrityMac；
-    // 直接构造路径默认空实现 = 禁用防回滚，保持既有单测行为不变）
-    internal val syncIntegrityMac: SyncIntegrityMac = NoopSyncIntegrityMac,
     /**
      * `ISSUE-P2-291`：同步目标 ↔ 库身份绑定登记（生产由 Hilt 注入）。
      * 为 null（既有手工装配路径）时**关闭绑定闸且缓存 / 防回滚沿用旧键**（`SHA-256(remotePath)`），
@@ -247,7 +242,6 @@ class SyncCycleRunner @Inject constructor(
                 val syncCache = SyncCache(syncDir, cacheScope)
                 val rollbackGuard = SyncRollbackGuard(
                     rollbackStateDir ?: File(context.filesDir, SyncRollbackGuard.STATE_DIR_NAME),
-                    syncIntegrityMac,
                     cacheScope
                 )
                 val engine = SyncEngine(provider, syncCache, rollbackGuard)

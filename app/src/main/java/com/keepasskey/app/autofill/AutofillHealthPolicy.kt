@@ -21,15 +21,6 @@ enum class AutofillHealthIssue {
     CREDENTIAL_MANAGER_UNAVAILABLE,
 
     /**
-     * 字段屏蔽签名密钥不可用（ISSUE-P3-113）。
-     *
-     * 该状态下 `AutofillFieldBlocklistStore.isBlocked` 按 fail-closed 视为「已屏蔽」，
-     * 结果是**整条字段级屏蔽判定恒为真** ⇒ 填充侧静态放弃下发候选；用户只看到「不出候选」，
-     * 无从归因。此项即为该静默故障的显式化出口。
-     */
-    FIELD_BLOCK_SIGNATURE_UNAVAILABLE,
-
-    /**
      * 系统未把本应用登记为凭据提供者（`ISSUE-P2-239`）。
      *
      * 该状态下系统的创建请求在框架层即被丢弃（`TYPE_NO_CREATE_OPTIONS`），
@@ -57,8 +48,6 @@ data class AutofillHealthReport(
     val appEnabled: Boolean,
     val systemEnabled: Boolean,
     val credentialManagerAvailable: Boolean,
-    /** 字段屏蔽签名密钥是否不可用（ISSUE-P3-113）；默认 false 以兼容既有调用与用例 */
-    val fieldBlockSignatureUnavailable: Boolean = false,
     /**
      * 系统侧凭据提供者登记状态（`ISSUE-P2-239`）。
      *
@@ -76,9 +65,6 @@ data class AutofillHealthReport(
             if (!appEnabled) add(AutofillHealthIssue.APP_DISABLED)
             if (!systemEnabled) add(AutofillHealthIssue.SYSTEM_NOT_ENABLED)
             if (!credentialManagerAvailable) add(AutofillHealthIssue.CREDENTIAL_MANAGER_UNAVAILABLE)
-            if (fieldBlockSignatureUnavailable) {
-                add(AutofillHealthIssue.FIELD_BLOCK_SIGNATURE_UNAVAILABLE)
-            }
             // ISSUE-P2-239：凭据提供者通道的两态各自成项——「未登记」给出修复指引、
             // 「未知」如实声明读不到（**不得**并入正常）
             when (credentialProviderRegistration) {
@@ -116,7 +102,6 @@ object AutofillHealthPolicy {
         appEnabled: Boolean,
         systemEnabled: Boolean,
         credentialManagerAvailable: Boolean,
-        fieldBlockSignatureUnavailable: Boolean = false,
         /** `ISSUE-P2-239`：由 [com.keepasskey.app.passkey.CredentialProviderHealthProbe] 采集 */
         credentialProviderRegistration: CredentialProviderRegistration
     ): AutofillHealthReport = AutofillHealthReport(
@@ -124,7 +109,6 @@ object AutofillHealthPolicy {
         appEnabled = appEnabled,
         systemEnabled = systemEnabled,
         credentialManagerAvailable = credentialManagerAvailable,
-        fieldBlockSignatureUnavailable = fieldBlockSignatureUnavailable,
         credentialProviderRegistration = credentialProviderRegistration
     )
 }

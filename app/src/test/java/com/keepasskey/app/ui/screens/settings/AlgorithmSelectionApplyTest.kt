@@ -2,7 +2,6 @@ package com.keepasskey.app.ui.screens.settings
 
 import com.keepasskey.app.autofill.AutofillFieldBlocklistStore
 import com.keepasskey.app.autofill.AutofillSaveBlocklistStore
-import com.keepasskey.app.autofill.testHmacFieldSignatureSource
 import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.app.data.repository.AutofillBlocklistStore
 import com.keepasskey.app.data.repository.FakeSettingsRepository
@@ -69,7 +68,7 @@ class AlgorithmSelectionApplyTest {
             vaultRepository = FakeVaultRepository(),
             autofillBlocklistStore = AutofillBlocklistStore(null),
             autofillSaveBlocklistStore = AutofillSaveBlocklistStore(null),
-            autofillFieldBlocklistStore = AutofillFieldBlocklistStore(null, testHmacFieldSignatureSource()),
+            autofillFieldBlocklistStore = AutofillFieldBlocklistStore(null),
             debugLogBuffer = DebugLogBuffer(),
             databaseSession = session,
             scope = scope

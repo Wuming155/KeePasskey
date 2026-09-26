@@ -39,7 +39,6 @@
     <string name="icon_custom_upload">Upload image</string>
     <string name="icon_invalid_not_png">The selected file is not a valid image</string>
     <string name="icon_too_large">Image too large; please choose one under 256 KB</string>
-    <string name="unlock_passkey_verify_failed">Quick unlock credential verification failed; unlock with master password and re-enroll</string>
     <string name="cd_hide_password">Hide password</string>
     <string name="cd_show_password">Show password</string>
     <string name="cd_toggle_password_visibility">Toggle password visibility</string>
@@ -902,13 +901,13 @@
     <string name="autofill_picker_block_username">Never fill username here</string>
     <string name="autofill_picker_block_password">Never fill password here</string>
     <string name="autofill_picker_block_confirm_title">Stop filling this field?</string>
-    <string name="autofill_picker_block_confirm_desc">Suggestions will no longer appear for this kind of field on the same app and website. The record is stored as an irreversible signature (the URL is never stored in clear text) and can be cleared as a whole in Settings → Autofill. This fill will be cancelled.</string>
+    <string name="autofill_picker_block_confirm_desc">Suggestions will no longer appear for this kind of field on the same app and website. The record is stored in this app’s private storage and can be cleared as a whole in Settings → Autofill. This fill will be cancelled.</string>
     <string name="autofill_picker_block_confirm_btn">Stop filling</string>
     <string name="autofill_field_block_row_title">Blocked form fields</string>
     <string name="autofill_field_block_count">%1$d field(s) blocked</string>
     <string name="autofill_field_block_empty">No blocked fields</string>
     <string name="autofill_field_block_dialog_title">Field-level blocking</string>
-    <string name="autofill_field_block_dialog_desc">Records are stored as irreversible signatures (app + website + field role), so the individual websites cannot be listed here — they can only be cleared as a whole. After clearing, these fields will receive suggestions again.</string>
+    <string name="autofill_field_block_dialog_desc">Records (app + website + field role) are stored in this app’s private storage, readable only by this app — they can only be cleared as a whole here. After clearing, these fields will receive suggestions again.</string>
     <string name="autofill_field_block_clear_btn">Clear all</string>
 
     <!-- ISSUE-P3-43 (3): save-side blocklist (blocks save prompts only, filling still works) -->
@@ -1203,7 +1202,6 @@
     <string name="autofill_health_issue_app_disabled">The in-app "System autofill service" switch is turned off</string>
     <string name="autofill_health_issue_system_disabled">This app is not selected as the autofill service; enable it in system settings</string>
     <string name="autofill_health_issue_cm_unavailable">Credential Manager is unavailable</string>
-    <string name="autofill_health_issue_field_signature_unavailable">Field-block verification is temporarily unavailable (system keystore unavailable), so autofill is conservatively not filling; retry after rebooting, and check your system security settings if it persists</string>
     <!-- ISSUE-P2-239: see the same keys in values/strings.xml (CM channel registration: not
          registered = repair path; unknown = honestly unreadable, never rendered as "normal"). -->
     <string name="autofill_health_issue_cp_not_registered">The system has not registered this app as a credential provider, so password / passkey save requests are never routed here (tapping "Save" does nothing); open system settings, go to credential providers and select KeePasskey as the current service</string>

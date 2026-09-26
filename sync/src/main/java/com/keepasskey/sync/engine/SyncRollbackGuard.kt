@@ -1,7 +1,6 @@
 package com.keepasskey.sync.engine
 
 import java.io.File
-import java.util.Base64
 
 /**
  * 防回滚裁决（ISSUE-P2-18）。
@@ -27,9 +26,10 @@ sealed interface RollbackVerdict {
  * 既有三哈希状态机（baseEtag / baseVersionHash / 内容哈希）只解决并发一致性与数据丢失，
  * **不解决版本回退**——「远端 ≠ base 即下载应用」会使被入侵端点复活已删条目、回退已更新字段。
  *
- * ## 方案：本地认证的「已见内容摘要链」
+ * ## 方案：「已见内容摘要链」
  *
- * 为每个远端路径维护一份由本地 Keystore 密钥 MAC 认证的状态：
+ * 为每个远端路径维护一份本地状态（`ISSUE-P3-326` 用户裁决移除原 Keystore MAC 认证层，
+ * 状态文件为**明文摘要文件**——不含明文口令 / 凭据，仅内容 SHA-256 摘要，无逆推价值）：
  * - `current`：最近一次被设备接受的远端内容摘要；
  * - `recent`：有界（[MAX_RECENT_DIGESTS] 条）的历史已接受摘要。
  *
@@ -48,7 +48,7 @@ sealed interface RollbackVerdict {
  * 2. `SyncCache.clear` / `SyncCache.clearAll` **永不触碰** [SUFFIX_STATE] 命名的文件
  *    （即便状态目录被误配到缓存目录，缓存清理也不得摧毁安全状态）。
  *
- * 状态文件内容为 SHA-256 摘要 + Keystore HMAC，**不含任何明文**，无逆推价值；
+ * 状态文件内容为 SHA-256 摘要行（`ISSUE-P3-326` 起不再附加 MAC），不含任何明文，无逆推价值；
  * 目录位于应用私有 `filesDir`，不随缓存回收策略被系统回收。
  *
  * **保留策略（刻意为之）**：状态不随会话锁定、同步凭据清空（换服务器 / 退出同步）而删除——
@@ -58,11 +58,12 @@ sealed interface RollbackVerdict {
  *
  * ## 状态缺失 / 被篡改时的裁决（fail-open，取舍已留痕）
  *
- * 状态文件缺失或 MAC 校验失败时一律按「无历史」处理（[load] 返回空 [State]）并继续接受远端内容：
+ * 状态文件缺失或解析失败时一律按「无历史」处理（[load] 返回空 [State]）并继续接受远端内容：
  * - 缺失：首次运行、以及**升级迁移后的首轮同步**——历史状态落在旧的 `cacheDir/sync`，本批
  *   整改**不做搬运**（`inspect` 对旧目录一无所知），故升级后首轮按「无历史」放行，
  *   由 [recordAccepted] 重新建立高水位；
- * - MAC 失效：被篡改、Keystore 密钥轮换、或调用方注入 `NoopSyncIntegrityMac`（禁用防回滚）。
+ * - 内容不可解析：被截断 / 破损（`ISSUE-P3-326` 起**不再有 MAC 失效**这一分支——原 MAC 层
+ *   失效本就是 fail-open，移除后行为不回退；遗留状态文件中的 `mac=` 行按遗留兼容过滤）。
  *
  * 取舍理由：宁可漏判一次重放，也不制造**无法自愈的误报回退**把用户永久锁在同步之外
  * （状态不可信时若判回退，用户将没有任何恢复路径）。代价是升级后首轮 / 状态被删时存在一次
@@ -84,7 +85,6 @@ sealed interface RollbackVerdict {
 class SyncRollbackGuard(
     /** 防回滚状态目录；生产由调用方注入 `filesDir/<STATE_DIR_NAME>`（跨锁定保留），见类 KDoc */
     private val stateDir: File,
-    private val integrityMac: SyncIntegrityMac,
     /**
      * `ISSUE-P2-291`：库身份命名空间（口径同 `SyncCache.vaultScope`）——非空时状态键 =
      * `SHA-256("vaultScope\nremotePath")`，两库共用同一 `remotePath` 时防回滚高水位
@@ -123,7 +123,7 @@ class SyncRollbackGuard(
     /**
      * 裁决远端内容是否可接受。**不修改**状态；接受后须调用 [recordAccepted] 前移高水位。
      *
-     * 状态文件缺失 / MAC 校验失败时按「无历史」处理 → 返回 [RollbackVerdict.Accept]
+     * 状态文件缺失 / 内容不可解析时按「无历史」处理 → 返回 [RollbackVerdict.Accept]
      * （fail-open，取舍与代价见类 KDoc「状态缺失 / 被篡改时的裁决」）。
      */
     fun inspect(remotePath: String, content: ByteArray): RollbackVerdict {
@@ -169,12 +169,9 @@ class SyncRollbackGuard(
         } catch (_: Throwable) {
             return State()
         }
-        val macLine = lines.firstOrNull { it.startsWith(PREFIX_MAC) }
+        // 遗留兼容（ISSUE-P3-326）：升级前状态文件带 `mac=` 行，明文摘要域不含该键，
+        // 过滤掉以防其 Base64 `=` 填充干扰下方 key/value 切分（该行本身不再有任何语义）。
         val payloadLines = lines.filterNot { it.startsWith(PREFIX_MAC) }
-        val payload = payloadLines.joinToString("\n").toByteArray(Charsets.UTF_8)
-        val mac = macLine?.removePrefix(PREFIX_MAC)?.takeIf { it.isNotEmpty() }
-            ?.let { runCatching { Base64.getDecoder().decode(it) }.getOrNull() }
-        if (!integrityMac.verify(payload, mac)) return State()
 
         var sequence = 0L
         var current: String? = null
@@ -194,16 +191,12 @@ class SyncRollbackGuard(
     }
 
     private fun persist(remotePath: String, state: State) {
-        // 载荷不含尾随换行，保证 [load] 以 `readLines` 重组后逐字节一致（MAC 校验依赖此不变式）
         val payloadLines = listOf(
             "$KEY_SEQUENCE=${state.sequence}",
             "$KEY_CURRENT=${state.current.orEmpty()}",
             "$KEY_RECENT=${state.recent.joinToString(",")}"
         )
-        val payload = payloadLines.joinToString("\n").toByteArray(Charsets.UTF_8)
-        val mac = integrityMac.compute(payload)
-        val encodedMac = mac?.let { Base64.getEncoder().encodeToString(it) }.orEmpty()
-        val content = (payloadLines.joinToString("\n") + "\n$PREFIX_MAC$encodedMac\n")
+        val content = (payloadLines.joinToString("\n") + "\n")
             .toByteArray(Charsets.UTF_8)
 
         // ISSUE-P3-202：tmp 写入经 [SyncCacheFiles.writeTmpSynced]（落盘第一字节起即仅属主），
@@ -246,6 +239,7 @@ class SyncRollbackGuard(
         private const val KEY_SEQUENCE = "sequence"
         private const val KEY_CURRENT = "current"
         private const val KEY_RECENT = "recent"
+        /** 遗留兼容（ISSUE-P3-326）：升级前状态文件的 MAC 行前缀，仅用于 `load` 过滤，不再产出 */
         private const val PREFIX_MAC = "mac="
 
         /**

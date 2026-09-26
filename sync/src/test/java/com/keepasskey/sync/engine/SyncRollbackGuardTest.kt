@@ -7,17 +7,19 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
-import java.security.MessageDigest
-import javax.crypto.Mac
-import javax.crypto.spec.SecretKeySpec
 
 /**
- * 同步防回滚守卫单元测试（ISSUE-P2-18 + F-23 整改回归）。
+ * 同步防回滚守卫单元测试（ISSUE-P2-18 + F-23 整改回归；ISSUE-P3-326 收窄）。
  *
  * 覆盖：首次内容可接受、同一内容视为未变、曾接受过的历史版本被判重放、
- * 全新内容（其他客户端写入）不误报、状态被篡改 / 缺失时按无历史处理不误报；
+ * 全新内容（其他客户端写入）不误报、状态被截断 / 缺失时按无历史处理不误报、
+ * 升级前遗留状态文件（带 `mac=` 行）可被读取且该行被忽略；
  * 以及 **F-23 核心不变式**——状态落在跨锁定保留的 `filesDir` 目录，
  * 缓存清理（`SyncCache.clear` / `clearAll`，即锁库销毁路径）不得摧毁重放防护。
+ *
+ * ISSUE-P3-326（用户裁决）：原「状态 MAC 认证」层整体移除，
+ * `状态MAC失效时按无历史处理不产生误报回退`（原 `:199-212`）与 `FixedMac`（原 `:214-225`）
+ * 随被测生产代码一同删除（登记于批次 §2.4）——原 MAC 失效本就是 fail-open，行为不回退。
  */
 class SyncRollbackGuardTest {
 
@@ -35,7 +37,7 @@ class SyncRollbackGuardTest {
 
     @Test
     fun `首次内容可接受且记录后同一内容视为未变`() {
-        val guard = SyncRollbackGuard(stateDir(), FixedMac("key-A"))
+        val guard = SyncRollbackGuard(stateDir())
         val v1 = "content-v1".toByteArray()
 
         assertEquals(RollbackVerdict.Accept, guard.inspect(remotePath, v1))
@@ -52,7 +54,7 @@ class SyncRollbackGuardTest {
      */
     @Test
     fun `摘要重载与字节重载的裁决逐项一致`() {
-        val guard = SyncRollbackGuard(stateDir(), FixedMac("key-A"))
+        val guard = SyncRollbackGuard(stateDir())
         val v1 = "content-v1".toByteArray()
         val v2 = "content-v2".toByteArray()
         val d1 = SyncCache.sha256Hex(v1)
@@ -79,7 +81,7 @@ class SyncRollbackGuardTest {
 
     @Test
     fun `曾接受过的历史版本被判为重放`() {
-        val guard = SyncRollbackGuard(stateDir(), FixedMac("key-A"))
+        val guard = SyncRollbackGuard(stateDir())
         val v1 = "content-v1".toByteArray()
         val v2 = "content-v2".toByteArray()
 
@@ -92,7 +94,7 @@ class SyncRollbackGuardTest {
 
     @Test
     fun `全新内容不误报以兼容其他客户端写入`() {
-        val guard = SyncRollbackGuard(stateDir(), FixedMac("key-A"))
+        val guard = SyncRollbackGuard(stateDir())
         guard.recordAccepted(remotePath, "content-v1".toByteArray())
 
         // 其它官方客户端写入的是全新内容（新摘要）→ 必须接受
@@ -111,8 +113,7 @@ class SyncRollbackGuardTest {
         val filesDir = File(tempFolder.root, "filesDir").apply { mkdirs() }
         val cache = SyncCache(cacheDir)
         val guard = SyncRollbackGuard(
-            File(filesDir, SyncRollbackGuard.STATE_DIR_NAME),
-            FixedMac("key-A")
+            File(filesDir, SyncRollbackGuard.STATE_DIR_NAME)
         )
 
         val v1 = "content-v1".toByteArray()
@@ -142,7 +143,7 @@ class SyncRollbackGuardTest {
         val cache = SyncCache(cacheDir)
         cache.writeCache(remotePath, "cached-v1".toByteArray())
 
-        val guard = SyncRollbackGuard(cacheDir, FixedMac("key-A"))
+        val guard = SyncRollbackGuard(cacheDir)
         val v1 = "content-v1".toByteArray()
         guard.recordAccepted(remotePath, v1)
 
@@ -165,7 +166,7 @@ class SyncRollbackGuardTest {
 
     @Test
     fun `F23 状态文件缺失时按无历史处理`() {
-        val guard = SyncRollbackGuard(stateDir(), FixedMac("key-A"))
+        val guard = SyncRollbackGuard(stateDir())
         val v1 = "content-v1".toByteArray()
         guard.recordAccepted(remotePath, v1)
         assertEquals(RollbackVerdict.Unchanged, guard.inspect(remotePath, v1))
@@ -181,10 +182,10 @@ class SyncRollbackGuardTest {
         // 升级前状态落在 cacheDir/sync（<hash>.rollback）；整改后守卫只读 filesDir/<STATE_DIR_NAME>，
         // 本批不做搬运：旧状态对守卫不可见 → 首轮同步按「无历史」接受（已留痕的迁移取舍）
         val legacyDir = tempFolder.newFolder("legacy-cache-sync")
-        SyncRollbackGuard(legacyDir, FixedMac("key-A")).recordAccepted(remotePath, "content-v1".toByteArray())
+        SyncRollbackGuard(legacyDir).recordAccepted(remotePath, "content-v1".toByteArray())
         assertTrue("旧布局状态应存在于 legacy 目录", stateFileIn(legacyDir).isFile)
 
-        val migrated = SyncRollbackGuard(stateDir(), FixedMac("key-A"))
+        val migrated = SyncRollbackGuard(stateDir())
 
         // 旧目录中的历史版本对守卫不可见：首轮按「无历史」放行（已留痕的迁移取舍）
         assertEquals(RollbackVerdict.Accept, migrated.inspect(remotePath, "content-v1".toByteArray()))
@@ -197,30 +198,24 @@ class SyncRollbackGuardTest {
     }
 
     @Test
-    fun `状态MAC失效时按无历史处理不产生误报回退`() {
+    fun `遗留带mac行的状态文件可被读取且该行被忽略`() {
+        // ISSUE-P3-326 遗留兼容：升级前状态文件尾部带 `mac=` 行（Base64 含 `=` 填充），
+        // 现摘要域不再有该键，load 必须过滤之（不得误切 key/value、也不得因它判无历史）
+        val dir = stateDir()
         val v1 = "content-v1".toByteArray()
         val v2 = "content-v2".toByteArray()
-        val original = SyncRollbackGuard(stateDir(), FixedMac("key-A"))
-        original.recordAccepted(remotePath, v1)
-        original.recordAccepted(remotePath, v2)
-        assertEquals(RollbackVerdict.ReplayDetected, original.inspect(remotePath, v1))
+        val stateFile = stateFileIn(dir)
+        stateFile.writeText(
+            "sequence=2\n" +
+                "current=${SyncCache.sha256Hex(v2)}\n" +
+                "recent=${SyncCache.sha256Hex(v1)}\n" +
+                "mac=QSXCR+Q6sek8bf92/iwkAPT7PK4dNWgGXPL+p27D9bY=\n",
+            Charsets.UTF_8
+        )
 
-        // 模拟状态文件被篡改 / 密钥不匹配：MAC 校验失败 → 状态不可信 → 无历史，不误报回退
-        // （fail-open 取舍：宁可漏判一次重放，也不制造用户无法自愈的误报回退）
-        val tamperReader = SyncRollbackGuard(stateDir(), FixedMac("key-B"))
-        assertEquals(RollbackVerdict.Accept, tamperReader.inspect(remotePath, v1))
-    }
+        val guard = SyncRollbackGuard(dir)
 
-    /** 固定密钥的等价 HMAC 实现（JVM 可测，语义与 AndroidKeyStore 实现一致） */
-    private class FixedMac(keyMaterial: String) : SyncIntegrityMac {
-        private val key = SecretKeySpec(keyMaterial.toByteArray(), "HmacSHA256")
-
-        override fun compute(data: ByteArray): ByteArray =
-            Mac.getInstance("HmacSHA256").apply { init(key) }.doFinal(data)
-
-        override fun verify(data: ByteArray, mac: ByteArray?): Boolean {
-            if (mac == null) return false
-            return MessageDigest.isEqual(compute(data), mac)
-        }
+        assertEquals(RollbackVerdict.Unchanged, guard.inspect(remotePath, v2))
+        assertEquals(RollbackVerdict.ReplayDetected, guard.inspect(remotePath, v1))
     }
 }

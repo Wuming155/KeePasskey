@@ -115,31 +115,6 @@ class UnlockThrottleManagerTest {
         assertEquals(7, gate.failureCount)
     }
 
-    // ── ISSUE-P3-54：记录完整性 fail-closed ────────────────────────────
-
-    @Test
-    fun `记录完整性校验失败时闸门failClosed并落有效锁定期`() {
-        val store = FakeUnlockThrottleStore()
-        val manager = UnlockThrottleManager(store)
-        val now = 30_000_000L
-        // 模拟「计数 / 锁定记录被删除或篡改」：完整性标记为失效
-        store.seed(
-            dbId,
-            UnlockThrottleRecord(failureCount = 0, lockoutUntilEpochMs = 0L, integrityIntact = false)
-        )
-
-        val gate = manager.gate(dbId, now)
-
-        assertTrue("完整性失效必须 fail-closed 为锁定", gate is ThrottleGate.Locked)
-        assertEquals(UnlockThrottlePolicy.FAILURE_THRESHOLD, gate.failureCount)
-        assertEquals(UnlockThrottlePolicy.MAX_BACKOFF_MS, (gate as ThrottleGate.Locked).remainingMs)
-        // 已回写一条带有效 MAC 的有界锁定期记录（不再永久失效）
-        val persisted = store.read(dbId)
-        assertTrue(persisted.integrityIntact)
-        assertEquals(UnlockThrottlePolicy.FAILURE_THRESHOLD, persisted.failureCount)
-        assertEquals(now + UnlockThrottlePolicy.MAX_BACKOFF_MS, persisted.lockoutUntilEpochMs)
-    }
-
     // ── ISSUE-P3-68：运行时配置（总开关 / 自定义封顶） ──────────────────
 
     private fun sourceOf(config: ThrottleConfig) = object : ThrottleConfigSource {
@@ -203,21 +178,5 @@ class UnlockThrottleManagerTest {
         repeat(UnlockThrottlePolicy.FAILURE_THRESHOLD + 1) { gate = manager.registerFailure(dbId, now) }
         assertTrue(gate is ThrottleGate.Locked)
         assertEquals(capMs, (gate as ThrottleGate.Locked).remainingMs)
-    }
-
-    @Test
-    fun `完整性failClosed不受开关关闭影响`() {
-        val store = FakeUnlockThrottleStore()
-        val manager = UnlockThrottleManager(store, sourceOf(ThrottleConfig(enabled = false)))
-        val now = 70_000_000L
-        store.seed(
-            dbId,
-            UnlockThrottleRecord(failureCount = 0, lockoutUntilEpochMs = 0L, integrityIntact = false)
-        )
-
-        val gate = manager.gate(dbId, now)
-
-        assertTrue("防篡改语义不得被用户开关旁路", gate is ThrottleGate.Locked)
-        assertEquals(UnlockThrottlePolicy.MAX_BACKOFF_MS, (gate as ThrottleGate.Locked).remainingMs)
     }
 }

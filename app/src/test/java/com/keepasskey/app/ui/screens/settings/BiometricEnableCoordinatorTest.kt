@@ -156,12 +156,10 @@ class BiometricEnableCoordinatorTest {
     }
 
     @Test
-    fun `关闭开关撤销全部封印凭据与断言登记记录`() = runTest {
+    fun `关闭开关撤销全部封印凭据`() = runTest {
         val storage = inMemoryCredentialStorage()
         storage.saveEncryptedCredential("db_a", IV, CIPHERTEXT)
         storage.saveEncryptedCredential("db_b", IV, CIPHERTEXT)
-        storage.saveUnlockPasskey("db_a", "PUB_A", "CRED_A", 1)
-        storage.saveUnlockPasskey("db_b", "PUB_B", "CRED_B", 2)
         val f = createFixture(storage = storage)
         f.settings.setBiometricEnabled(true)
 
@@ -171,8 +169,6 @@ class BiometricEnableCoordinatorTest {
         assertFalse(f.settings.current().biometricEnabled)
         assertFalse("关闭必须删除库 A 封印凭据（关闭 = 删除）", storage.hasEncryptedCredential("db_a"))
         assertFalse("关闭必须删除库 B 封印凭据（关闭 = 删除）", storage.hasEncryptedCredential("db_b"))
-        assertNull("关闭必须删除断言登记记录", storage.getUnlockPasskey("db_a"))
-        assertNull(storage.getUnlockPasskey("db_b"))
     }
 
     // ── 3b. 登记协调器的关闭撤销接线（源码守卫）─────────────────────────

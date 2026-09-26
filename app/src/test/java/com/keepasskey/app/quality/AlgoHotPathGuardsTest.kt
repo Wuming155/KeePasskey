@@ -241,24 +241,7 @@ class AlgoHotPathGuardsTest {
             resolver.contains("certDigests: CallerCertDigests = callingAppCertDigests(callingPackage)")
         )
         assertFalse("不得残留逐字节 format 的 hex 生成", resolver.contains("\"%02X\".format("))
-
-        assertFalse(
-            "字段签名同样不得逐字节 format",
-            stripped("app/src/main/java/com/keepasskey/app/autofill/AutofillFieldSignature.kt")
-                .contains("\"%02x\".format(")
-        )
-
-        val keystore =
-            stripped("app/src/main/java/com/keepasskey/app/autofill/KeystoreHmacFieldSignatureSource.kt")
-        assertTrue(
-            "Keystore 密钥句柄必须缓存（containsAlias + getEntry 都是 IPC 往返）",
-            keystore.contains("private var cachedKeyEntry: KeyStore.SecretKeyEntry? = null")
-        )
-        assertEquals(
-            "containsAlias 只允许出现在加载路径一处",
-            1,
-            Regex("containsAlias\\(KEY_ALIAS\\)").findAll(keystore).count()
-        )
+        // ISSUE-P3-328：原「字段签名 hex 生成 / Keystore 句柄缓存」两组断言随对应生产层移除而删除（批次 §2.4）。
     }
 
     @Test

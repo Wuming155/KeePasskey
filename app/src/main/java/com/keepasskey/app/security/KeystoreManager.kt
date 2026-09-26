@@ -183,39 +183,6 @@ class KeystoreManager @Inject constructor(
         keyMaterial.deleteKeyEntry(alias)
     }
 
-    /**
-     * 获取或生成设备绑定「解锁通行密钥」ES256（P-256 ECDSA）密钥对（TASK-18）。
-     *
-     * 私钥生成于 Keystore 硬件内（StrongBox 优先，回退 TEE），**不可导出**；规格（含
-     * 「**不**要求用户认证」）由 [UnlockPasskeyKeyPolicy] 单点声明。快速解锁的认证闸门是
-     * **封印密钥**（per-operation 强生物识别 + `BiometricPrompt.CryptoObject` 密码学绑定），
-     * 断言私钥只承担凭据持有性证明、signCount 反克隆与登记记录防篡改。
-     *
-     * 读路径**不做规格探测、不轮换**：命中既有别名即原样返回（公钥 + 私钥）；轮换只在
-     * [UnlockPasskeyManager.enroll] 的「删别名 → 重建 → 重写登记记录」序列内。
-     * `ISSUE-P1-242` 的故障恰是读路径轮换：其探测前提（私钥已绑定用户认证）在本仓的密钥形态下
-     * 恒不成立 ⇒ 每次断言都删钥重建 ⇒ 新公钥与既有登记记录脱钩 ⇒ 每一次快速解锁都被断言门控
-     * fail-closed 拒绝（用户可见「快速解锁凭据校验未通过」）。
-     */
-    @Synchronized
-    fun getOrCreateUnlockPasskeyPair(alias: String): KeyPair? {
-        return keyMaterial.getOrCreateUnlockPasskeyPair(alias)
-    }
-
-    /**
-     * 获取或生成解锁通行密钥登记记录的**防篡改完整性 HMAC 密钥**（ISSUE-P1-09）。
-     *
-     * HmacSHA256，硬件内不可导出，无用户认证门控（完整性校验在解锁流程内执行，
-     * 设备必为解锁态）；用于对登记记录（公钥/credentialId/signCount）计算 MAC，
-     * 使「仅具备文件级写能力」（ADB 备份恢复 / 取证 / 同 UID 之外写入）的攻击者
-     * 无法在不触发校验失败的前提下篡改 signCount 或替换公钥——校验失败按记录
-     * 缺失处理（fail-closed，见 [BiometricCredentialStorage.getUnlockPasskey]）。
-     */
-    @Synchronized
-    fun getOrCreateUnlockPasskeyIntegrityMac(): javax.crypto.Mac? {
-        return keyMaterial.getOrCreateUnlockPasskeyIntegrityMac()
-    }
-
     companion object {
         const val ANDROID_KEY_STORE = "AndroidKeyStore"
         const val BIOMETRIC_KEY_ALIAS = "com.keepasskey.biometric_master_key"
@@ -233,8 +200,11 @@ class KeystoreManager @Inject constructor(
          */
         const val LEGACY_QUICK_UNLOCK_KEY_ALIAS = "com.keepasskey.quick_unlock_key"
 
-        /** 解锁通行密钥登记记录防篡改 HMAC 密钥别名（ISSUE-P1-09） */
-        const val UNLOCK_PASSKEY_INTEGRITY_KEY_ALIAS = "com.keepasskey.unlock_passkey_integrity"
+        /**
+         * 遗留（ISSUE-P3-327 用户裁决移除解锁断言体系）：登记记录防篡改 HMAC 密钥别名。
+         * 不再生成新密钥，仅供 [BiometricCredentialStorage] 启动期一次性清理旧别名。
+         */
+        const val LEGACY_UNLOCK_PASSKEY_INTEGRITY_KEY_ALIAS = "com.keepasskey.unlock_passkey_integrity"
 
         /**
          * 各数据库封印密钥别名（per-database，ISSUE-P2-253 收敛为单点构造）：
@@ -244,11 +214,12 @@ class KeystoreManager @Inject constructor(
         fun sealAliasFor(databaseId: String): String = "${BIOMETRIC_KEY_ALIAS}_$databaseId"
 
         /**
-         * 各数据库解锁通行密钥（断言 ES256）别名（per-database，ISSUE-P2-253 收敛为单点构造）：
-         * `BIOMETRIC_KEY_ALIAS_passkey_<dbId>`。[UnlockPasskeyManager] 与
-         * [BiometricCredentialStorage.revokeAllBiometricData] 均经本函数取值。
+         * 遗留（ISSUE-P3-327）：各数据库解锁断言（ES256）别名格式
+         * `BIOMETRIC_KEY_ALIAS_passkey_<dbId>`。不再生成新密钥，
+         * 仅供 [BiometricCredentialStorage] 启动期一次性清理旧别名。
          */
-        fun unlockPasskeyAliasFor(databaseId: String): String = "${BIOMETRIC_KEY_ALIAS}_passkey_$databaseId"
+        fun legacyUnlockPasskeyAliasFor(databaseId: String): String =
+            "${BIOMETRIC_KEY_ALIAS}_passkey_$databaseId"
 
         /**
          * 快速解锁密钥的授权集合：仅 Class 3 强生物识别（per-operation）。

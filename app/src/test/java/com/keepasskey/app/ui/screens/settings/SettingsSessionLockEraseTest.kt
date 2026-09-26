@@ -2,7 +2,6 @@ package com.keepasskey.app.ui.screens.settings
 
 import com.keepasskey.app.testutil.InMemorySharedPreferences
 import com.keepasskey.app.testutil.MainDispatcherGuard
-import com.keepasskey.app.autofill.testHmacFieldSignatureSource
 import com.keepasskey.app.data.breach.BreachCheckCoordinator
 import com.keepasskey.app.data.breach.BreachRangeClient
 import com.keepasskey.app.data.logger.DebugLogBuffer
@@ -146,7 +145,7 @@ class SettingsSessionLockEraseTest {
             PeriodicSyncScheduler(context, ExtendedSettingsStore(null)),
             com.keepasskey.app.data.repository.AutofillBlocklistStore(null),
             com.keepasskey.app.autofill.AutofillSaveBlocklistStore(null),
-            com.keepasskey.app.autofill.AutofillFieldBlocklistStore(null, testHmacFieldSignatureSource()),
+            com.keepasskey.app.autofill.AutofillFieldBlocklistStore(null),
             BreachCheckCoordinator(NoOpBreachRangeClient),
             databaseSession = session,
             stringsProvider = TEST_STRINGS

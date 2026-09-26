@@ -8,12 +8,9 @@ import android.security.keystore.KeyPermanentlyInvalidatedException
 import android.security.keystore.KeyProperties
 import android.security.keystore.StrongBoxUnavailableException
 import com.keepasskey.app.data.logger.DebugLogBuffer
-import java.security.KeyPair
-import java.security.KeyPairGenerator
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
-import javax.crypto.Mac
 import javax.crypto.SecretKey
 import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.GCMParameterSpec
@@ -253,98 +250,6 @@ internal class KeystoreKeyMaterial(
             // 系统指纹增删导致密钥永久失效，立即移除已废弃的密钥别名
             onDeleteKey(alias)
             throw e
-        }
-    }
-
-    /**
-     * [KeystoreManager.getOrCreateUnlockPasskeyPair] 实现。
-     *
-     * **读路径不做规格探测、不轮换**：命中既有别名即原样返回（公钥 + 私钥）。
-     * 轮换只发生在 [UnlockPasskeyManager.enroll] 的「删别名 → 重建 → 重写登记记录」序列内，
-     * 那里公钥与登记记录同时刷新、不存在中间态。
-     *
-     * 反例（`ISSUE-P1-09` 的失效形态，切勿恢复）：在断言路径上「规格探测失败即删钥重建」会让
-     * 新公钥与既有登记记录脱钩——重建后签名必然与记录里的公钥不匹配，把一次探测异常放大成
-     * 「每次快速解锁都失败」的永久故障。
-     */
-    fun getOrCreateUnlockPasskeyPair(alias: String): KeyPair? {
-        try {
-            if (keyStore.containsAlias(alias)) {
-                val entry = keyStore.getEntry(alias, null) as? KeyStore.PrivateKeyEntry
-                if (entry != null) {
-                    return KeyPair(entry.certificate.publicKey, entry.privateKey)
-                }
-            }
-            return generateUnlockPasskeyPair(alias)
-        } catch (e: Exception) {
-            debugLog?.warn(TAG, "解锁通行密钥生成/读取失败: ${e.javaClass.simpleName}")
-            return null
-        }
-    }
-
-    /** 生成解锁断言密钥对（StrongBox 优先，不可用回退 TEE）；规格见 [buildUnlockPasskeySpec]。 */
-    private fun generateUnlockPasskeyPair(alias: String): KeyPair {
-        val generator = KeyPairGenerator.getInstance(
-            KeyProperties.KEY_ALGORITHM_EC,
-            KeystoreManager.ANDROID_KEY_STORE
-        )
-        val purposes = KeyProperties.PURPOSE_SIGN or KeyProperties.PURPOSE_VERIFY
-        if (isStrongBoxSupported) {
-            try {
-                generator.initialize(buildUnlockPasskeySpec(alias, purposes, strongBox = true))
-                return generator.generateKeyPair()
-            } catch (_: StrongBoxUnavailableException) {
-                // StrongBox 缺席：回退 TEE 生成
-            }
-        }
-        generator.initialize(buildUnlockPasskeySpec(alias, purposes, strongBox = false))
-        return generator.generateKeyPair()
-    }
-
-    /**
-     * 断言私钥规格：**不绑定用户认证**（规格取值由 [UnlockPasskeyKeyPolicy] 单点声明，
-     * 平台约束与安全后果见其 KDoc），仅保留「设备须处于解锁态」这一纵深约束。
-     *
-     * 切勿在此改用 `setUserAuthenticationParameters(...)`：它只**配置**认证参数、**不**开启认证要求
-     * （要求仅由 `setUserAuthenticationRequired(true)` 开启），单写它既拿不到认证门控，又会让
-     * 「按 `KeyInfo` 判形态」一类判据与真实密钥不一致（`ISSUE-P1-09` 的失形态）；而补上
-     * `setUserAuthenticationRequired(true)` 则撞平台约束（一次认证只能授权一个密钥操作）⇒
-     * 签名恒抛 `UserNotAuthenticatedException`。两条路都会让断言门控 fail-closed 拒绝**每一次**
-     * 快速解锁（`ISSUE-P1-242`）。
-     */
-    private fun buildUnlockPasskeySpec(alias: String, purposes: Int, strongBox: Boolean): KeyGenParameterSpec {
-        return KeyGenParameterSpec.Builder(alias, purposes)
-            .setDigests(KeyProperties.DIGEST_SHA256)
-            .setUserAuthenticationRequired(UnlockPasskeyKeyPolicy.REQUIRES_USER_AUTHENTICATION)
-            .setUnlockedDeviceRequired(UnlockPasskeyKeyPolicy.UNLOCKED_DEVICE_REQUIRED)
-            .apply { if (strongBox) setIsStrongBoxBacked(true) }
-            .build()
-    }
-
-    /** [KeystoreManager.getOrCreateUnlockPasskeyIntegrityMac] 实现。 */
-    fun getOrCreateUnlockPasskeyIntegrityMac(): Mac? {
-        return try {
-            val alias = KeystoreManager.UNLOCK_PASSKEY_INTEGRITY_KEY_ALIAS
-            if (!keyStore.containsAlias(alias)) {
-                val generator = KeyGenerator.getInstance(
-                    KeyProperties.KEY_ALGORITHM_HMAC_SHA256,
-                    KeystoreManager.ANDROID_KEY_STORE
-                )
-                generator.init(
-                    KeyGenParameterSpec.Builder(
-                        alias,
-                        KeyProperties.PURPOSE_SIGN or KeyProperties.PURPOSE_VERIFY
-                    )
-                        .setKeySize(KEY_SIZE_BITS)
-                        .build()
-                )
-                generator.generateKey()
-            }
-            val entry = keyStore.getEntry(alias, null) as? KeyStore.SecretKeyEntry ?: return null
-            Mac.getInstance("HmacSHA256").apply { init(entry.secretKey) }
-        } catch (e: Exception) {
-            debugLog?.warn(TAG, "解锁通行密钥完整性 HMAC 密钥获取失败: ${e.javaClass.simpleName}")
-            null
         }
     }
 

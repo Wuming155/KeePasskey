@@ -17,7 +17,6 @@ import com.keepasskey.database.file.KdbxDatabase
 import com.keepasskey.database.file.KdbxFile
 import com.keepasskey.database.file.KdbxHeader
 import com.keepasskey.database.session.DatabaseSession
-import com.keepasskey.sync.engine.NoopSyncIntegrityMac
 import com.keepasskey.sync.engine.SyncCache
 import com.keepasskey.sync.engine.SyncEngine
 import com.keepasskey.sync.engine.SyncRollbackGuard
@@ -567,7 +566,7 @@ class SyncPendingTreeErasureTest {
         return SyncEngine(
             provider,
             SyncCache(File(workDir, "engine-cache").apply { mkdirs() }),
-            SyncRollbackGuard(File(workDir, "rollback").apply { mkdirs() }, NoopSyncIntegrityMac)
+            SyncRollbackGuard(File(workDir, "rollback").apply { mkdirs() })
         )
     }
 

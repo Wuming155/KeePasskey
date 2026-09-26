@@ -142,9 +142,8 @@ class RawFileWritePermissionDeviceTest {
             deleteRecursively()
             mkdirs()
         }
-        // NoopSyncIntegrityMac 仅禁用完整性认证（verify 恒 false），persist 照常落盘——
-        // 本用例只裁决权限面，与 MAC 语义无关
-        val guard = SyncRollbackGuard(probeDir, NoopSyncIntegrityMac)
+        // ISSUE-P3-326 起状态文件不再附 MAC，persist 照常落盘——本用例只裁决权限面
+        val guard = SyncRollbackGuard(probeDir)
         guard.recordAccepted("p3-202-probe-remote", byteArrayOf(9))
 
         assertEquals(

@@ -10,7 +10,6 @@ import com.keepasskey.app.security.BiometricCredentialStorage
 import com.keepasskey.app.security.BiometricResult
 import com.keepasskey.app.security.KeystoreManager
 import com.keepasskey.app.security.UnlockAuthPolicy
-import com.keepasskey.app.security.UnlockPasskeyManager
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
@@ -35,7 +34,6 @@ internal class BiometricEnrollmentCoordinator(
     private val keyFileBytes: () -> ByteArray?,
     private val biometricAuthManager: BiometricAuthManager?,
     private val biometricCredentialStorage: BiometricCredentialStorage?,
-    private val unlockPasskeyManager: UnlockPasskeyManager?,
     private val debugLog: DebugLogBuffer
 ) {
 
@@ -257,7 +255,7 @@ internal class BiometricEnrollmentCoordinator(
         return sealed?.let { cipher.iv to it }
     }
 
-    /** 封印成功落库 + best-effort 登记解锁通行密钥（TASK-18）+ 置位快速解锁可用性。 */
+    /** 封印成功落库 + 置位快速解锁可用性。 */
     private fun persistSealedCredential(
         storage: BiometricCredentialStorage,
         dbId: String,
@@ -265,10 +263,6 @@ internal class BiometricEnrollmentCoordinator(
         downgradedSeal: Boolean
     ) {
         storage.saveEncryptedCredential(dbId, encrypted.first, encrypted.second)
-        // TASK-18：随快速解锁凭据登记设备绑定解锁通行密钥（best-effort，失败不影响本次解锁）
-        if (unlockPasskeyManager?.enroll(dbId) == false) {
-            debugLog.warn(TAG, "解锁通行密钥登记未成功，本次快速解锁回退为纯封印语义")
-        }
         uiState.update {
             it.copy(
                 isQuickUnlockAvailable = true,

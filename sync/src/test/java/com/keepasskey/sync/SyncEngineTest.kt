@@ -4,7 +4,6 @@ import com.keepasskey.sync.engine.SyncCache
 import com.keepasskey.sync.engine.SyncCacheEvent
 import com.keepasskey.sync.engine.SyncCommitResult
 import com.keepasskey.sync.engine.SyncEngine
-import com.keepasskey.sync.engine.SyncIntegrityMac
 import com.keepasskey.sync.engine.SyncOpenResult
 import com.keepasskey.sync.engine.SyncResolveUploadResult
 import com.keepasskey.sync.engine.SyncRollbackGuard
@@ -25,9 +24,6 @@ import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
 import java.io.OutputStream
-import java.security.MessageDigest
-import javax.crypto.Mac
-import javax.crypto.spec.SecretKeySpec
 
 /**
  * SyncEngine 三哈希状态机全路径单元测试。
@@ -533,7 +529,7 @@ class SyncEngineTest {
 
     @Test
     fun `ISSUE_P2_18 被入侵端点重放旧库被拒绝应用`() = runTest {
-        val guardedEngine = SyncEngine(fakeProvider, syncCache, SyncRollbackGuard(cacheDir, testMac()))
+        val guardedEngine = SyncEngine(fakeProvider, syncCache, SyncRollbackGuard(cacheDir))
 
         val v1 = "remote-v1".toByteArray()
         fakeProvider.remoteFiles[remotePath] = FakeRemoteFile(v1, etag = "etag-1")
@@ -553,7 +549,7 @@ class SyncEngineTest {
 
     @Test
     fun `ISSUE_P2_18 其他客户端写入的全新内容不误报`() = runTest {
-        val guardedEngine = SyncEngine(fakeProvider, syncCache, SyncRollbackGuard(cacheDir, testMac()))
+        val guardedEngine = SyncEngine(fakeProvider, syncCache, SyncRollbackGuard(cacheDir))
 
         fakeProvider.remoteFiles[remotePath] = FakeRemoteFile("v1".toByteArray(), etag = "e1")
         acceptAdoption(guardedEngine.openRemote(remotePath))
@@ -565,7 +561,7 @@ class SyncEngineTest {
 
     @Test
     fun `ISSUE_P2_18 重放被拒后本地缓存与基线不被覆盖`() = runTest {
-        val guardedEngine = SyncEngine(fakeProvider, syncCache, SyncRollbackGuard(cacheDir, testMac()))
+        val guardedEngine = SyncEngine(fakeProvider, syncCache, SyncRollbackGuard(cacheDir))
 
         val v1 = "remote-v1".toByteArray()
         fakeProvider.remoteFiles[remotePath] = FakeRemoteFile(v1, etag = "etag-1")
@@ -595,7 +591,7 @@ class SyncEngineTest {
 
     @Test
     fun `ISSUE_P2_18 上传路径遇远端重放拒绝合并并保留本地`() = runTest {
-        val guardedEngine = SyncEngine(fakeProvider, syncCache, SyncRollbackGuard(cacheDir, testMac()))
+        val guardedEngine = SyncEngine(fakeProvider, syncCache, SyncRollbackGuard(cacheDir))
 
         val v1 = "remote-v1".toByteArray()
         fakeProvider.remoteFiles[remotePath] = FakeRemoteFile(v1, etag = "etag-1")
@@ -630,7 +626,7 @@ class SyncEngineTest {
 
     @Test
     fun `ISSUE_P2_308 采纳失败 reject 后缓存与基线保持原状且可重试`() = runTest {
-        val guardedEngine = SyncEngine(fakeProvider, syncCache, SyncRollbackGuard(cacheDir, testMac()))
+        val guardedEngine = SyncEngine(fakeProvider, syncCache, SyncRollbackGuard(cacheDir))
         val v1 = "remote-v1".toByteArray()
         fakeProvider.remoteFiles[remotePath] = FakeRemoteFile(v1, etag = "etag-1")
         acceptAdoption(guardedEngine.openRemote(remotePath))
@@ -733,17 +729,6 @@ class SyncEngineTest {
         (retry as SyncCommitResult.Uploaded).settlement!!.accept()
         assertFalse(syncCache.hasLocalChanges(remotePath))
         assertArrayEquals(merged, syncCache.readBaseContent(remotePath))
-    }
-
-    /** 固定密钥的等价 HMAC（JVM 可测） */
-    private fun testMac(): SyncIntegrityMac = object : SyncIntegrityMac {
-        private val key = SecretKeySpec("test-rollback-integrity-key".toByteArray(), "HmacSHA256")
-
-        override fun compute(data: ByteArray): ByteArray =
-            Mac.getInstance("HmacSHA256").apply { init(key) }.doFinal(data)
-
-        override fun verify(data: ByteArray, mac: ByteArray?): Boolean =
-            mac != null && MessageDigest.isEqual(compute(data), mac)
     }
 
     private class FakeRemoteFile(

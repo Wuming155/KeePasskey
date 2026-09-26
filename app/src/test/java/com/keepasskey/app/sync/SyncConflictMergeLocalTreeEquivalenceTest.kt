@@ -11,7 +11,6 @@ import com.keepasskey.core.security.ProtectedString
 import com.keepasskey.database.file.KdbxDatabase
 import com.keepasskey.database.file.KdbxFile
 import com.keepasskey.database.session.DatabaseSession
-import com.keepasskey.sync.engine.NoopSyncIntegrityMac
 import com.keepasskey.sync.engine.SyncCache
 import com.keepasskey.sync.engine.SyncEngine
 import com.keepasskey.sync.engine.SyncRollbackGuard
@@ -259,7 +258,7 @@ class SyncConflictMergeLocalTreeEquivalenceTest {
         val engine = SyncEngine(
             provider,
             cache,
-            SyncRollbackGuard(File(workDir, "rollback").apply { mkdirs() }, NoopSyncIntegrityMac)
+            SyncRollbackGuard(File(workDir, "rollback").apply { mkdirs() })
         )
         val controller = SyncConflictController(
             databaseSession = session,
@@ -359,7 +358,7 @@ class SyncConflictMergeLocalTreeEquivalenceTest {
             val engine = SyncEngine(
                 provider,
                 cache,
-                SyncRollbackGuard(File(workDir, "rollback").apply { mkdirs() }, NoopSyncIntegrityMac)
+                SyncRollbackGuard(File(workDir, "rollback").apply { mkdirs() })
             )
             val controller = SyncConflictController(
                 databaseSession = session,

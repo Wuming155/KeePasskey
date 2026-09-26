@@ -14,7 +14,6 @@ import com.keepasskey.app.security.BiometricAuthManager
 import com.keepasskey.app.security.BiometricCredentialStorage
 import com.keepasskey.app.security.BiometricResult
 import com.keepasskey.app.security.KeystoreManager
-import com.keepasskey.app.security.UnlockPasskeyManager
 import com.keepasskey.app.security.UnlockThrottleManager
 import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.app.ui.model.UiMessage
@@ -59,8 +58,6 @@ class UnlockViewModel @Inject constructor(
     private val debugLog: DebugLogBuffer,
     // TASK-21：非 Compose 层文案资源解析通道（生产 DI 注入真实现；单测注入假实现）
     private val stringsProvider: StringsProvider? = null,
-    // TASK-18：设备绑定解锁通行密钥（nullable 仅用于单测注入；生产 DI 恒注入真实实例）
-    private val unlockPasskeyManager: UnlockPasskeyManager? = null,
     // ISSUE-P1-04：主密码解锁失败节流管理器（nullable 仅用于单测；生产 DI 恒注入真实实例）
     private val unlockThrottleManager: UnlockThrottleManager? = null,
     // ISSUE-P3-04：密钥文件（复合密钥第二因子）SAF 访问通道。nullable 仅用于单测注入空实现；
@@ -102,7 +99,6 @@ class UnlockViewModel @Inject constructor(
         activeDbId = { activeDatabaseId },
         biometricAuthManager = biometricAuthManager,
         biometricCredentialStorage = biometricCredentialStorage,
-        unlockPasskeyManager = unlockPasskeyManager,
         debugLog = debugLog
     )
 
@@ -115,7 +111,6 @@ class UnlockViewModel @Inject constructor(
         keyFileBytes = { keyFileSession.keyFileData },
         biometricAuthManager = biometricAuthManager,
         biometricCredentialStorage = biometricCredentialStorage,
-        unlockPasskeyManager = unlockPasskeyManager,
         debugLog = debugLog
     )
 

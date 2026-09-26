@@ -141,25 +141,6 @@ class AutofillAuthChainDeviceTest {
                 " / " + probe.shell("getprop ro.product.cpu.abi").trim()
         )
 
-        // 完整性闸门取值：必须不是 COMPROMISED（该档 disableAutofill=true 会拒绝全部数据集）。
-        // 取证纪律：logcat 环形缓冲跨运行持久，直接 tag 过滤可能读到**上一次运行**的陈旧值，
-        // 故只认「PID 等于本进程」的行——本进程即被测应用进程，其启动扫描/周期重扫均打此留痕。
-        val integrityLevel = awaitIntegrityLevel(INTEGRITY_WAIT_MS)
-        evidence.write(
-            "完整性扫描留痕（本进程 pid=${android.os.Process.myPid()}）: level=${integrityLevel ?: "未捕获"}"
-        )
-        assertTrue(
-            "本进程（pid=${android.os.Process.myPid()}）未打出完整性扫描留痕——" +
-                "无法证明闸门取值，不得据此宣称链路可驱动",
-            integrityLevel != null
-        )
-        assertEquals(
-            "完整性闸门处于 COMPROMISED（disableAutofill=true）时认证链路必然不可驱动；" +
-                "应先清理注入痕迹后冷启动重测，不得削弱生产判定",
-            false,
-            integrityLevel == "COMPROMISED"
-        )
-
         // 清空 logcat，使后续留痕只属于本用例（放在闸门取证之后，避免误清本次扫描留痕）
         probe.shell("logcat -c")
 
@@ -611,24 +592,6 @@ class AutofillAuthChainDeviceTest {
     private fun logcatDump(): String = probe.shell("logcat -d -v threadtime")
 
     /**
-     * 完整性扫描留痕取值：**只认本进程 pid 的行**，从而排除 logcat 环形缓冲里
-     * 上一次运行残留的同名留痕（陈旧值 = 假绿）。
-     */
-    private fun awaitIntegrityLevel(timeoutMs: Long): String? {
-        val myPid = android.os.Process.myPid().toString()
-        val deadline = SystemClock.uptimeMillis() + timeoutMs
-        while (SystemClock.uptimeMillis() < deadline) {
-            val level = logcatDump().lineSequence()
-                .filter { it.contains("运行完整性扫描完成") && linePid(it) == myPid }
-                .mapNotNull { LEVEL_PATTERN.find(it)?.groupValues?.get(1) }
-                .lastOrNull()
-            if (level != null) return level
-            SystemClock.sleep(POLL_MS)
-        }
-        return null
-    }
-
-    /**
      * threadtime 格式第 3 列是 pid；解析失败返回 null（该行即被丢弃）。
      *
      * §204 纠偏：threadtime 的 pid/tid **右对齐 5 位宽**——4 位 pid 前有 2 个空格，
@@ -752,7 +715,6 @@ class AutofillAuthChainDeviceTest {
         /** 客户端界面状态文本前缀（其内容含 username / passwordFilled 等字段现状） */
         const val CLIENT_STATUS_TRACE = AutofillClientActivity.STATUS_PREFIX
 
-        val LEVEL_PATTERN = Regex("运行完整性扫描完成: level=(\\w+)")
 
         const val POLL_MS = 200L
         const val UI_SETTLE_MS = 1_200L
@@ -762,7 +724,6 @@ class AutofillAuthChainDeviceTest {
         // 放宽）——阶段 0 的 logcat -c 已把进程启动时那拍留痕清掉，等待只能依赖**下一拍周期重扫**；
         // 窗口 < 周期时相位错过即恒等不到（2026-09-19 真机/模拟器同时现形，此前真机两轮绿系相位命中）。
         // 改为 > 一个完整周期（35s），保证窗口内必有一拍；断言强度不变（仍要求 level 非空且非 COMPROMISED）。
-        const val INTEGRITY_WAIT_MS = 35_000L
         const val KEYGUARD_WAIT_MS = 10_000L
         const val REQUEST_FILL_WAIT_MS = 12_000L
         const val ACTIVITY_WAIT_MS = 15_000L

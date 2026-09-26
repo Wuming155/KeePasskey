@@ -4,9 +4,9 @@ package com.keepasskey.app.security
  * [UnlockThrottleStore] 的内存实现，仅供 JVM 单元测试使用（ISSUE-P1-04）。
  * 生产环境使用 [SharedPrefsUnlockThrottleStore]，本类不得绑定生产 DI。
  *
- * 注意：本类 [reset] 直接移除记录，只模拟**逻辑上的清零**；生产实现自 ISSUE-P2-45 起
- * 改为「写零值记录而非删键」（删键与「记录被删除」不可区分）。「删键复位」判定的回归
- * 由 [SharedPrefsUnlockThrottleStoreTest] 覆盖——那需要真实持久化语义，内存实现无法承载。
+ * 注意：本类 [reset] 直接移除记录，只模拟**逻辑上的清零**；持久化维度的回归
+ * （落盘读写 / 重置清零 / 键按库隔离）由 [SharedPrefsUnlockThrottleStoreTest] 覆盖——
+ * 那需要真实持久化语义，内存实现无法承载。
  */
 class FakeUnlockThrottleStore : UnlockThrottleStore {
 

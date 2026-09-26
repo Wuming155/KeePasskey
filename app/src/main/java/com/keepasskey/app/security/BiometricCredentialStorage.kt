@@ -2,34 +2,9 @@ package com.keepasskey.app.security
 
 import android.content.Context
 import dagger.hilt.android.qualifiers.ApplicationContext
-import java.nio.charset.StandardCharsets
 import java.util.Base64
 import javax.inject.Inject
 import javax.inject.Singleton
-
-/** 解锁通行密钥登记记录（TASK-18）：公钥 / 凭据 ID / 最新 signCount */
-data class UnlockPasskeyRecord(
-    val publicKeyB64: String,
-    val credentialIdB64: String,
-    val signCount: Int
-)
-
-/**
- * 解锁通行密钥登记记录存储抽象（ISSUE-P1-09 接口化，对齐 [UnlockThrottleStore] 模式）：
- * 生产实现落 SharedPreferences + 硬件 HMAC 防篡改封存；JVM 单测注入内存实现。
- */
-interface UnlockPasskeyStore {
-    fun saveUnlockPasskey(databaseId: String, publicKeyB64: String, credentialIdB64: String, signCount: Int)
-
-    /** 读取登记记录；未登记 / 记录被删 / **防篡改校验未通过** 一律返回 null（fail-closed） */
-    fun getUnlockPasskey(databaseId: String): UnlockPasskeyRecord?
-
-    /** 累进 signCount（成功断言后提交，防克隆语义见 [UnlockPasskeyManager]） */
-    fun commitSignCount(databaseId: String, newSignCount: Int)
-
-    /** 清除解锁通行密钥登记记录 */
-    fun clearUnlockPasskey(databaseId: String)
-}
 
 /**
  * 经 Android Keystore 硬件加密的统一快速解锁主凭据安全存储仓库（Wave 12 收敛）。
@@ -52,11 +27,44 @@ class BiometricCredentialStorage @Inject constructor(
     @ApplicationContext private val context: Context,
     // 允许为 null 仅用于 JVM 单测注入空实现；生产 DI 注入 @Singleton 真实实例
     private val keystoreManager: KeystoreManager? = null
-) : UnlockPasskeyStore {
+) {
     private val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
     init {
         cleanupLegacyQuickUnlockData()
+        cleanupLegacyUnlockPasskeyData()
+    }
+
+    /**
+     * 一次性清理 ISSUE-P3-327 移除的解锁断言体系残留（2026-09-25 用户裁决）：
+     * 遗留 `_passkey_*` prefs 键与两类 Keystore 别名（per-database 断言密钥对 +
+     * 登记记录防篡改 HMAC 密钥）。断言层移除后 [revokeAllBiometricData] 的枚举后缀
+     * 不再包含 `_passkey_*`，若不在此清理，两者将成为无人管理残留
+     * （Wave 12 清退旧 PIN 体系即同一模式；Keystore 不可达时跳过，下次启动重试）。
+     */
+    private fun cleanupLegacyUnlockPasskeyData() {
+        // best-effort：prefs 枚举 / Keystore 访问任一失败都不得阻断构造（JVM 测试假 prefs
+        // 未实现 getAll、真机 Keystore 不可达等），残留随下次启动重试
+        runCatching {
+            val legacySuffixes = listOf("_passkey_pub", "_passkey_cred", "_passkey_count", "_passkey_mac")
+            val dbIds = mutableSetOf<String>()
+            val editor = prefs.edit()
+            for (key in prefs.all.keys) {
+                for (suffix in legacySuffixes) {
+                    if (key.endsWith(suffix)) {
+                        editor.remove(key)
+                        key.dropLast(suffix.length).takeIf { it.isNotEmpty() }?.let { dbIds.add(it) }
+                        break
+                    }
+                }
+            }
+            editor.apply()
+            val km = keystoreManager ?: return
+            for (dbId in dbIds) {
+                runCatching { km.deleteKey(KeystoreManager.legacyUnlockPasskeyAliasFor(dbId)) }
+            }
+            runCatching { km.deleteKey(KeystoreManager.LEGACY_UNLOCK_PASSKEY_INTEGRITY_KEY_ALIAS) }
+        }
     }
 
     /** 一次性清理 Wave 12 前遗留的 QuickUnlock PIN 体系数据（遗留 prefs 文件 + 非认证硬件密钥别名） */
@@ -126,15 +134,15 @@ class BiometricCredentialStorage @Inject constructor(
     /**
      * 撤销全部生物识别数据（ISSUE-P2-253：**关闭开关 = 删除**）。
      *
-     * ① 从 prefs 键集合按已知后缀解析出全部已登记库 ID，逐库删除其**封印密钥**与
-     *   **解锁通行密钥对**的 Keystore 别名（单点构造见 [KeystoreManager.sealAliasFor] /
-     *   [KeystoreManager.unlockPasskeyAliasFor]）——逐项 `runCatching`，单个别名删除失败
-     *   不阻断其余撤销（Keystore 不可达时跳过密钥删除，**prefs 清空仍必须执行**）；
-     * ② 清空全部 prefs（各库封印 `iv`/`cipher` + 解锁通行密钥登记记录及其 MAC）。
+     * ① 从 prefs 键集合按已知后缀解析出全部已登记库 ID，逐库删除其**封印密钥**的
+     *   Keystore 别名（单点构造见 [KeystoreManager.sealAliasFor]）——逐项 `runCatching`，
+     *   单个别名删除失败不阻断其余撤销（Keystore 不可达时跳过密钥删除，
+     *   **prefs 清空仍必须执行**）；
+     * ② 清空全部 prefs（各库封印 `iv`/`cipher`）。
      *
-     * **刻意不删**：[KeystoreManager.AUTOFILL_AUTH_KEY_ALIAS]（自动填充放行绑定与本开关无关）、
-     * [KeystoreManager.UNLOCK_PASSKEY_INTEGRITY_KEY_ALIAS]（登记记录防篡改 HMAC 密钥，
-     * 无认证门控、不承载秘密，供重新登记复用）。
+     * **刻意不删**：[KeystoreManager.AUTOFILL_AUTH_KEY_ALIAS]（自动填充放行绑定与本开关无关）。
+     * 解锁断言体系的别名残留由 [cleanupLegacyUnlockPasskeyData] 启动期一次性清理
+     * （ISSUE-P3-327）。
      */
     fun revokeAllBiometricData() {
         val dbIds = mutableSetOf<String>()
@@ -151,76 +159,9 @@ class BiometricCredentialStorage @Inject constructor(
             for (dbId in dbIds) {
                 // 单个别名删除失败不阻断其余撤销（残留别名不含明文，且下次撤销重试）
                 runCatching { km.deleteKey(KeystoreManager.sealAliasFor(dbId)) }
-                runCatching { km.deleteKey(KeystoreManager.unlockPasskeyAliasFor(dbId)) }
             }
         }
         clearAll()
-    }
-
-    // ── 解锁通行密钥记录（TASK-18 / ISSUE-P1-09 防篡改化）──────────────────
-    //
-    // 登记记录（公钥/credentialId/signCount）经硬件 HMAC 封存：任何仅具备文件级
-    // 写能力的篡改（改小 signCount 绕过单调校验、替换公钥自证同源）都会导致
-    // MAC 不匹配 → 记录按缺失处理（fail-closed，拒绝快速解锁）。
-    // 诚实边界：同 UID 任意代码执行者可调用 Keystore 重算 MAC，该威胁域本层不设防。
-
-    /** 保存解锁通行密钥登记记录（公钥 X.509 编码 Base64 / 凭据 ID Base64 / signCount + 完整性 MAC） */
-    override fun saveUnlockPasskey(databaseId: String, publicKeyB64: String, credentialIdB64: String, signCount: Int) {
-        val record = UnlockPasskeyRecord(publicKeyB64, credentialIdB64, signCount)
-        prefs.edit()
-            .putString("${databaseId}_passkey_pub", publicKeyB64)
-            .putString("${databaseId}_passkey_cred", credentialIdB64)
-            .putInt("${databaseId}_passkey_count", signCount)
-            .putString("${databaseId}_passkey_mac", integrityMac(databaseId, record))
-            .apply()
-    }
-
-    /** 读取解锁通行密钥登记记录；未登记 / 记录被删 / 防篡改校验未通过返回 null（fail-closed） */
-    override fun getUnlockPasskey(databaseId: String): UnlockPasskeyRecord? {
-        val pubB64 = prefs.getString("${databaseId}_passkey_pub", null) ?: return null
-        val credB64 = prefs.getString("${databaseId}_passkey_cred", null) ?: return null
-        val count = prefs.getInt("${databaseId}_passkey_count", 0)
-        val record = UnlockPasskeyRecord(publicKeyB64 = pubB64, credentialIdB64 = credB64, signCount = count)
-        // keystoreManager == null 仅存在于 JVM 单测注入场景：跳过完整性校验
-        if (keystoreManager == null) return record
-        val storedMac = prefs.getString("${databaseId}_passkey_mac", null) ?: return null
-        return if (storedMac == integrityMac(databaseId, record)) record else null
-    }
-
-    /** 累进 signCount（成功断言后提交）；同步重算完整性 MAC，杜绝「改计数留旧 MAC」 */
-    override fun commitSignCount(databaseId: String, newSignCount: Int) {
-        val pubB64 = prefs.getString("${databaseId}_passkey_pub", null) ?: return
-        val credB64 = prefs.getString("${databaseId}_passkey_cred", null) ?: return
-        val record = UnlockPasskeyRecord(publicKeyB64 = pubB64, credentialIdB64 = credB64, signCount = newSignCount)
-        prefs.edit()
-            .putInt("${databaseId}_passkey_count", newSignCount)
-            .putString("${databaseId}_passkey_mac", integrityMac(databaseId, record))
-            .apply()
-    }
-
-    /** 清除解锁通行密钥登记记录（含完整性 MAC） */
-    override fun clearUnlockPasskey(databaseId: String) {
-        prefs.edit()
-            .remove("${databaseId}_passkey_pub")
-            .remove("${databaseId}_passkey_cred")
-            .remove("${databaseId}_passkey_count")
-            .remove("${databaseId}_passkey_mac")
-            .apply()
-    }
-
-    /** 登记记录的完整性 MAC（Base64）；Keystore 不可达时返回 null（读取侧按校验失败 fail-closed） */
-    private fun integrityMac(databaseId: String, record: UnlockPasskeyRecord): String? {
-        val mac = keystoreManager?.getOrCreateUnlockPasskeyIntegrityMac() ?: return null
-        return try {
-            // 绑定 databaseId 防跨库挪用记录；字段以 '|' 分隔并经 Base64 消除歧义
-            val payload = Base64.getEncoder().encodeToString(
-                "$databaseId|${record.publicKeyB64}|${record.credentialIdB64}|${record.signCount}"
-                    .toByteArray(StandardCharsets.UTF_8)
-            )
-            Base64.getEncoder().encodeToString(mac.doFinal(payload.toByteArray(StandardCharsets.UTF_8)))
-        } catch (e: Exception) {
-            null
-        }
     }
 
     companion object {
@@ -235,11 +176,7 @@ class BiometricCredentialStorage @Inject constructor(
          */
         private val DB_KEY_SUFFIXES = listOf(
             "_iv",
-            "_cipher",
-            "_passkey_pub",
-            "_passkey_cred",
-            "_passkey_count",
-            "_passkey_mac"
+            "_cipher"
         )
     }
 }

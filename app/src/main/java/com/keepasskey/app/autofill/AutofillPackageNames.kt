@@ -5,7 +5,7 @@ import java.util.Locale
 /**
  * Android 包名的归一化与严格校验（ISSUE-P3-43）。
  *
- * 单一来源：包级黑名单（`AutofillBlocklistStore`）、字段签名（[AutofillFieldSignature]）
+ * 单一来源：包级黑名单（`AutofillBlocklistStore`）、字段屏蔽目标键（[AutofillFieldSignature]）
  * 与保存侧黑名单（`AutofillSaveBlocklistStore`）**共用同一判据**，
  * 避免三处各写一份正则而随时间漂移——那会造成「A 处认为合法、B 处认为非法」的判定裂缝。
  *
