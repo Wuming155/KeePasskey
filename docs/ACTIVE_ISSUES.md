@@ -494,7 +494,8 @@
   **⑤ 第 3 片 落库接线 —— 已完成（留痕见下：含 `PD-49` 裁决一的随机高位起点 + 限界表 §34 登记
   + `Passkey.PrfNoUv` + 对拍重跑 161 条全绿）**
   —— 本片的计数写入与限界表登记已同批入库。
-  **⑥ 第 4 片 两个入口接线 + 确认对话框（含 4′ 的不兼容清单与「另有 N 把」点名）+ 守卫重盘点——下一步**
+  **⑥ 第 4 片 两个入口接线 + 确认对话框（含 4′ 的不兼容清单与「另有 N 把」点名）+ 守卫重盘点
+  —— 顶栏主入口已完成（留痕「第 4 片（上）」），编辑页 Q1 附加入口与 AC⑪① 只读锁待做**
   **⑦ 第 5 / 6 片 真机端到端 + 实拍取样 + 全量 test + 门禁 7/7 + 批次归档**
 
 - **分片进度留痕（2026-09-26 起逐片追加；条目闭环时随正文一并剪切入批次）**：
@@ -670,7 +671,53 @@
     `HMAC-SHA-256(seed, SHA-256("WebAuthn PRF"‖0x00‖input))` 比对 `PasskeyPrf.computeValue` 输出；
     随机区间 200 取样、非 32 字节种子「存得下 + 计算必拒」双向锁）与
     `PasskeyImportWritePathTest` **4 例**；`:database:` probe 用例绿 + 脚本 161 条全绿。
-  - **第 4 片 两个入口 + 确认对话框（下一步）**：顶栏分流接线 + 编辑页按 entryId 替换 +
-    确认对话框（4′ 不兼容清单、「另有 N 把」点名、FLAG_SECURE 跟随开关）+ `PopupSecureFlagInventoryTest` 重盘点
-    + AC③ 行为级擦除断言 + AC⑪① 只读字段用例。
+  - **第 4 片（上）顶栏分流接线 + 导入前确认对话框（Q2、口径 1 / 4 / 4′，AC①③⑤⑥⑩⑪）—— 已完成**
+    （2026-09-26）。**分流落地**：`VaultListViewModel.onQrCodeDecoded` 改为
+    `ScanPayloadClassifier.classify` 三向分派（`Totp` → 原 `addEntryFromScannedOtpauth` **一字未改**；
+    `Passkey` → `beginPasskeyImportFromScan`；`Unknown` → `rejectUnknownScannedQr`，
+    复用现键 `vault_scan_invalid_qr`、擦除后提示、不回显内容）——**无回退式猜测路径**。
+    **草案承载**：新增 `PasskeyImportDraft(credential, notes)`（`PasskeyCxfOutcome.kt`），
+    只活在 ViewModel 内存里（⚠️ 路由参数 / `SavedStateHandle` 一律禁用，`P2-105` 同源）；
+    确认 → `PasskeyImportFactory` → `repository.saveNewPasskeyEntry(..., parentGroupId=当前分组)`
+    → 交出一条性的 `openEntryEditId`（**只带 id**）→ `VaultListScreen` 的 `LaunchedEffect` 消费并调
+    `onNavigateToEntryEdit`（新增回调，nav graph 走 `Screen.EntryEdit.createRoute(id)` 现成路）；
+    取消 → `dismissPasskeyImport()` 擦除、不落库、不导航。**两条路径的擦除都有断言**（AC③）。
+    **确认对话框** `PasskeyImportConfirmDialog.kt`：正文抽成纯函数 `passkeyImportSummary(draft, text)`
+    以便宿主逐条机检；`FLAG_SECURE` **跟随开关**（`PD-48` 裁决三），
+    `SecureDialogWindowEffect(flagSecure = …)` 始终施加反 overlay / 点击过滤两层。
+    ⚠️ **两行语义分开**（本轮实现时收紧，与 AC⑪② 的排除条款对齐）：
+    「本库不能保存的扩展」行只列 `credBlob`/`largeBlob`/`payments(true)`/算法值无法识别的 PRF 项；
+    `credWithoutUV` 因**全量存入** `Passkey.PrfNoUv` 不得进该行，而「规范形缺一枚种子」
+    属**来源缺陷** ⇒ 归「来源未提供 / 不完整」行。用例「二」双向锁住（缺种子出现在来源行、
+    且**不得**出现在不会导入行）。
+    ⚠️ 文案纪律的**资源面**守卫不可省：哨兵标签只能证明「代码取了哪个资源」，证明不了
+    「那个资源说了什么」⇒ 用例「四」直接扫 `strings_sync_passkey.xml` / `values-en/strings.xml`
+    断言类型行含「FIDO2 软件密钥」「库内加密存储」且不含「芯片/硬件/chip/hardware/secure element」
+    （`§292` AC④ 同源）。双语各新增 19 个 `passkey_import_*` 键（**成对入库**，
+    防 §335 那类 `MissingTranslation` 再犯）。
+    **AC⑥ 守卫账目已重盘点**：`PopupSecureFlagInventoryTest` KDoc 加 2026-09-26 一行——
+    分流**不新增菜单项**（顶栏仍那一个「扫码」项）、新增的是 1 个确认对话框且它**不属于**
+    「无条件强制遮罩」那 4 类 ⇒ 调用点仍 4 处、菜单项仍 11 个，`SecureDialogFlagPolicyTest` /
+    `SensitiveWindowHardeningTest` 均不改而绿（现跑在案）。
+    **本片未做（第 4 片（下）的范围，不得据此条声称 Q1 已落地）**：① 编辑页通行密钥区块的
+    扫码 / 相册导入附加入口（Q1，落库须走第 3 片新增的 `replacePasskeyOnEntry`）；
+    ② AC⑪① 的「导入后 `rpId`/`credentialId`/`userHandle`/私钥在编辑页不可手改」只读锁与用例；
+    ③ AC⑧ 真机端到端（含 `§340` 留痕的实拍取样）。
+    验证读数：新增 `PasskeyImportConfirmDialogTest` 4 例 + `VaultListViewModelTest` 追加 5 例
+    （原 22 例一字未改，含三条既有扫码用例）；全量 `test --rerun-tasks --max-workers=1`
+    `BUILD SUCCESSFUL in 3m 29s`、`xml=410 tests=2733 failures=0 errors=0 skipped=13`
+    （上片 2724 + 本片 9 例）；`lint` **0 errors、201 warnings**；`gate_readings.py` **7/7 PASS**。
+    ⚠️ **本片的三次闸门拦截如实留痕**（都是「不跑就带病入库」的形态）：
+    ① `lint` 报 **error** `LocalContextGetResourceValueCall`——首版在 @Composable 里用
+      `context.getString(id)` 取文案，改为「@Composable 里一次性 `stringResource` 解析成表 →
+      纯函数查表」后 0 errors（该规则的存在理由是配置变更时文案不重组）；
+    ② `count_line_tiers` 报 **tier1=1**——接线把 `VaultListScreen.kt` 推到 503 行，
+      将确认环节宿主抽成 `PasskeyImportConfirmationHost`（同文件同职责）后回到 492 行；
+    ③ `+1` warning 是**本片新增键** `passkey_import_extra_credentials`（`%1$d more passkey(s)…`）
+      触发的 `PluralsCandidate`（本仓既有同类 43 条，属基线内形态，未改 plurals 以免与
+      全站「单行 + 计数」文案风格割裂——登记而非掩盖）。
+    ⚠️ **行数棘轮额度已接近用尽**：`tier2(400~500)=36 / budget=37`（本片 `VaultListActionController`
+    进 492 行占 1 席）⇒ **第 4 片（下）与第 5/6 片不得再新增 tier2 文件**，须先压缩或拆分既有文件。
+  - **第 4 片（下）编辑页附加入口 + 字段只读锁（下一步）**：Q1 入口接 `replacePasskeyOnEntry` +
+    AC⑪① 只读用例（§3.3.12.1「MUST NOT be user editable」）。
 

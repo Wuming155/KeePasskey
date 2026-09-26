@@ -73,4 +73,26 @@
     <string name="cred_reject_browser_added">已添加「%1$s」。请回到浏览器重新发起创建。</string>
     <string name="cred_reject_browser_add_failed">添加失败：无法读取该应用的签名信息，请稍后在「设置 → 自动填充」中重试。</string>
 
+    <!-- ISSUE-P3-337 扫码导入通行密钥（顶栏分流 + 确认在先）。措辞纪律 §292：一律写
+         「FIDO2 软件密钥（库内加密存储）」，禁用「芯片 / 硬件」类表述。 -->
+    <string name="passkey_import_confirm_title">导入这把通行密钥？</string>
+    <string name="passkey_import_action">导入</string>
+    <string name="passkey_import_site">网站：%1$s</string>
+    <string name="passkey_import_kind">类型：FIDO2 软件密钥（库内加密存储）</string>
+    <string name="passkey_import_entry_title">将新建条目：%1$s</string>
+    <string name="passkey_import_dropped">以下扩展项本库不能保存，导入时不会写入：%1$s</string>
+    <string name="passkey_import_drop_cred_blob">credBlob</string>
+    <string name="passkey_import_drop_large_blob">largeBlob</string>
+    <string name="passkey_import_drop_payments">payments</string>
+    <string name="passkey_import_drop_hmac_unknown">PRF 扩展（算法值无法识别）</string>
+    <string name="passkey_import_extra_credentials">文档内另有 %1$d 把通行密钥未导入</string>
+    <string name="passkey_import_source_missing">来源未提供 / 不完整：%1$s</string>
+    <string name="passkey_import_source_incomplete_prf">PRF 扩展缺少一枚种子</string>
+    <string name="passkey_import_missing_username">用户名</string>
+    <string name="passkey_import_missing_display_name">显示名</string>
+    <string name="passkey_import_created">已导入通行密钥「%1$s」</string>
+    <string name="passkey_import_failed_invalid">二维码内容不是可导入的通行密钥</string>
+    <string name="passkey_import_failed_no_credential">二维码里没有可导入的通行密钥</string>
+    <string name="passkey_import_failed_too_large">单张二维码放不下该载荷，请改用只含单把凭据的导出</string>
+
 </resources>

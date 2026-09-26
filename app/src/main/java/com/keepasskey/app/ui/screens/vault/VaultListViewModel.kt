@@ -5,6 +5,8 @@ import androidx.lifecycle.viewModelScope
 import com.keepasskey.app.data.childdb.ChildDatabaseSessionManager
 import com.keepasskey.app.data.repository.SettingsRepository
 import com.keepasskey.app.data.repository.VaultRepository
+import com.keepasskey.app.passkey.ScanPayloadClassifier
+import com.keepasskey.app.passkey.ScanPayloadKind
 import com.keepasskey.app.security.ClipboardSecurityManager
 import com.keepasskey.app.ui.model.EntryDisplayDispatcher
 import com.keepasskey.app.ui.model.StringsProvider
@@ -446,9 +448,34 @@ class VaultListViewModel @Inject constructor(
 
     /**
      * 顶栏「扫码」解码上行（PD-47 同链路：框架边界 String 已由对话框转 CharArray，
-     * 擦除义务移交写编排 [VaultListActionController.addEntryFromScannedOtpauth]）。
+     * 擦除义务移交写编排）。
+     *
+     * `ISSUE-P3-337` 口径 1：**先分流再处理**——`otpauth:` 走既有 TOTP 链（一字未改），
+     * JSON 形态走通行密钥链（解析后只进确认草案），其余一律如实拒绝。
+     * **禁止回退式猜测**（不得「先按 TOTP 解、失败再按通行密钥解」）：两个解析器都留了
+     * 宽容面，顺序猜错就是把任意文本当口令种子落库、或错拒一把完好凭据。
      */
-    fun onQrCodeDecoded(decoded: CharArray) = actions.addEntryFromScannedOtpauth(decoded)
+    fun onQrCodeDecoded(decoded: CharArray) {
+        when (ScanPayloadClassifier.classify(decoded)) {
+            ScanPayloadKind.Totp -> actions.addEntryFromScannedOtpauth(decoded)
+            ScanPayloadKind.Passkey -> actions.beginPasskeyImportFromScan(decoded)
+            ScanPayloadKind.Unknown -> actions.rejectUnknownScannedQr(decoded)
+        }
+    }
+
+    /** 待确认的通行密钥导入草案（非空即确认对话框可见；仅内存持有，见 `PasskeyImportDraft`）。 */
+    val pendingPasskeyImport get() = actions.pendingPasskeyImport
+
+    /** 用户在确认对话框点「导入」。 */
+    fun confirmPasskeyImport() = actions.confirmPasskeyImport()
+
+    /** 用户取消导入（草案即刻擦除，不落库不导航）。 */
+    fun dismissPasskeyImport() = actions.dismissPasskeyImport()
+
+    /** 导入成功后待打开的条目 id（一次性消费；只带 id，不承载任何凭据值）。 */
+    val openEntryEditId get() = actions.openEntryEditId
+
+    fun consumeOpenEntryEditId() = actions.consumeOpenEntryEditId()
 
     private companion object {
         /** 搜索输入停顿多久后才触发列表重算（毫秒） */

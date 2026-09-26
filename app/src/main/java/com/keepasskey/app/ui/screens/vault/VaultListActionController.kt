@@ -2,11 +2,18 @@ package com.keepasskey.app.ui.screens.vault
 
 import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.VaultRepository
+import com.keepasskey.app.data.repository.parseKdbxUuidOrNull
+import com.keepasskey.app.passkey.PasskeyCxfReader
+import com.keepasskey.app.passkey.PasskeyCxfOutcome
+import com.keepasskey.app.passkey.PasskeyCxfReject
+import com.keepasskey.app.passkey.PasskeyImportDraft
+import com.keepasskey.app.passkey.PasskeyImportFactory
 import com.keepasskey.app.security.ClipboardSecurityManager
 import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.model.UiVaultEntry
 import com.keepasskey.app.ui.model.VaultGroup
+import com.keepasskey.core.model.PasskeyData
 import com.keepasskey.core.otp.TotpKeyUriParser
 import com.keepasskey.core.result.KdbxResult
 import kotlinx.coroutines.CoroutineScope
@@ -360,6 +367,123 @@ internal class VaultListActionController(
         if (chars.size - start < prefix.length) return false
         return prefix.indices.all { chars[start + it].lowercaseChar() == prefix[it] }
     }
+
+    // ---------------------------------------------------------------------
+    // 顶栏扫码：通行密钥 (CXF) 载荷分支（ISSUE-P3-337 口径 1 / 4，Q2 确认在先）
+    // ---------------------------------------------------------------------
+
+    private val pendingPasskeyImportFlow = MutableStateFlow<PasskeyImportDraft?>(null)
+
+    /** 待确认的通行密钥导入草案（非空即确认对话框可见）；仅内存持有，见 [PasskeyImportDraft]。 */
+    val pendingPasskeyImport: StateFlow<PasskeyImportDraft?> = pendingPasskeyImportFlow
+
+    private val openEntryEditIdFlow = MutableStateFlow<String?>(null)
+
+    /** 导入成功后待打开的条目 id（UI 消费一次即清空；不承载任何凭据值）。 */
+    val openEntryEditId: StateFlow<String?> = openEntryEditIdFlow
+
+    fun consumeOpenEntryEditId() {
+        openEntryEditIdFlow.value = null
+    }
+
+    /**
+     * 通行密钥分支：解析载荷 → 成功则**只把草案放进本作用域**，等用户在确认对话框里点头。
+     *
+     * 与 [addEntryFromScannedOtpauth] 同族的字节通道口径：CharArray → UTF-8 字节（编码器内部
+     * buffer 一并清零）→ 解析器 → 草案（含私钥 PEM 字符与 PRF 种子）。
+     * 任何路径都**不回显载荷内容**（错误一律静态文案），且解析后即清零工作字节。
+     *
+     * @return 是否已进入确认环节（false 表示已按静态文案拒绝）
+     */
+    fun beginPasskeyImportFromScan(decoded: CharArray): Boolean {
+        if (isReadOnly()) {
+            decoded.fill('0')
+            onMessage(UiMessage(R.string.readonly_save_rejected))
+            return false
+        }
+        val bytes = CharBuffer.wrap(decoded).let { buffer ->
+            val utf8 = StandardCharsets.UTF_8.encode(buffer)
+            ByteArray(utf8.remaining()).also { out ->
+                utf8.get(out)
+                if (utf8.hasArray()) utf8.array().fill(0)
+            }
+        }
+        val outcome = try {
+            PasskeyCxfReader.read(bytes)
+        } finally {
+            bytes.fill(0)
+        }
+        decoded.fill('0')
+        return when (outcome) {
+            is PasskeyCxfOutcome.Rejected -> {
+                onMessage(UiMessage(rejectReasonRes(outcome.reason)))
+                false
+            }
+
+            is PasskeyCxfOutcome.Parsed -> {
+                pendingPasskeyImportFlow.value = PasskeyImportDraft(outcome.credential, outcome.notes)
+                true
+            }
+        }
+    }
+
+    /** 拒收原因 → 静态文案（**不拼接载荷内容**，AC②/口径 3 末句）。 */
+    private fun rejectReasonRes(reason: PasskeyCxfReject): Int = when (reason) {
+        PasskeyCxfReject.PayloadTooLarge -> R.string.passkey_import_failed_too_large
+        PasskeyCxfReject.NoPasskeyCredential -> R.string.passkey_import_failed_no_credential
+        PasskeyCxfReject.MissingCeremonyField,
+        PasskeyCxfReject.InvalidBase64Url,
+        PasskeyCxfReject.UnsupportedKeyAlgorithm,
+        PasskeyCxfReject.NestingMismatch,
+        PasskeyCxfReject.DocumentVersionUnsupported,
+        PasskeyCxfReject.NotPasskeyCredential,
+        PasskeyCxfReject.MalformedJson -> R.string.passkey_import_failed_invalid
+    }
+
+    /**
+     * 用户在确认对话框点「导入」：草案 → [PasskeyData] → 落库到**当下所在分组**，
+     * 成功后按 id 打开该条目编辑页（Q2：确认在先、不静默建条目；口径 4：私钥不跨页承载）。
+     *
+     * 草案在所有路径（含保存失败）都被擦除并置空——它是明文私钥的唯一持有者。
+     */
+    fun confirmPasskeyImport() {
+        val draft = pendingPasskeyImportFlow.value ?: return
+        pendingPasskeyImportFlow.value = null
+        if (isReadOnly()) {
+            draft.wipe()
+            onMessage(UiMessage(R.string.readonly_save_rejected))
+            return
+        }
+        val data = PasskeyImportFactory.toPasskeyData(draft.credential)
+        draft.wipe()
+        scope.launch {
+            val groupId = currentGroupId()?.let { parseKdbxUuidOrNull(it) }
+            val saved = repository.saveNewPasskeyEntry(data, boundPackage = null, parentGroupId = groupId)
+            // 落盘失败由协调器内部留痕（PasskeyEntryCoordinator 的既有契约：条目已在会话内生效，
+            // 序列化失败只记日志），故此处按「已建条目」如实提示并交出导航意图，不再二次探测。
+            onMessage(UiMessage(R.string.passkey_import_created, listOf(passkeyImportTitle(data))))
+            openEntryEditIdFlow.value = saved.id.toHexString()
+        }
+    }
+
+    /** 用户取消：擦除草案、不落库、不导航（AC③ 的取消路径断言即打在这里）。 */
+    fun dismissPasskeyImport() {
+        pendingPasskeyImportFlow.value?.wipe()
+        pendingPasskeyImportFlow.value = null
+    }
+
+    /**
+     * 两条链都不是（既非 `otpauth:` 也非 JSON 形态）：擦除后按现键 `vault_scan_invalid_qr`
+     * 如实提示，**不回显内容、不落库**（口径 1 的 `Unknown` 分支）。
+     */
+    fun rejectUnknownScannedQr(decoded: CharArray) {
+        decoded.fill('0')
+        onMessage(UiMessage(R.string.vault_scan_invalid_qr))
+    }
+
+    /** 条目标题口径与注册路径同源（`PasskeyEntryCoordinator.passkeyTitle`）：`用户名@rpId` */
+    private fun passkeyImportTitle(data: PasskeyData): String =
+        "${data.userName}@${data.relyingPartyId}"
 
     private companion object {
         /** 本扫码入口只接受的 URI 方案前缀（全小写，比较前逐字符 lowercase）。 */

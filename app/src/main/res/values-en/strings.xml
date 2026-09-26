@@ -1389,4 +1389,26 @@
     <string name="time_just_now">Just now</string>
     <string name="detail_rollback_updated_at">Just now (rolled back from a previous revision)</string>
 
+    <!-- ISSUE-P3-337 passkey import by QR (top-bar dispatch, confirm before storing).
+         Wording rule §292: always "FIDO2 software key (encrypted in vault)", never "chip / hardware". -->
+    <string name="passkey_import_confirm_title">Import this passkey?</string>
+    <string name="passkey_import_action">Import</string>
+    <string name="passkey_import_site">Site: %1$s</string>
+    <string name="passkey_import_kind">Type: FIDO2 software key (encrypted in vault)</string>
+    <string name="passkey_import_entry_title">New entry: %1$s</string>
+    <string name="passkey_import_dropped">These extensions cannot be stored by this app and will not be saved: %1$s</string>
+    <string name="passkey_import_drop_cred_blob">credBlob</string>
+    <string name="passkey_import_drop_large_blob">largeBlob</string>
+    <string name="passkey_import_drop_payments">payments</string>
+    <string name="passkey_import_drop_hmac_unknown">PRF extension (unrecognized algorithm)</string>
+    <string name="passkey_import_extra_credentials">%1$d more passkey(s) in the document were not imported</string>
+    <string name="passkey_import_source_missing">Not provided / incomplete in the source: %1$s</string>
+    <string name="passkey_import_source_incomplete_prf">PRF extension is missing one seed</string>
+    <string name="passkey_import_missing_username">username</string>
+    <string name="passkey_import_missing_display_name">display name</string>
+    <string name="passkey_import_created">Passkey \"%1$s\" imported</string>
+    <string name="passkey_import_failed_invalid">This QR code is not an importable passkey</string>
+    <string name="passkey_import_failed_no_credential">This QR code contains no importable passkey</string>
+    <string name="passkey_import_failed_too_large">The payload does not fit a single QR code; export just one credential instead</string>
+
 </resources>

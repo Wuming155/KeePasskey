@@ -45,6 +45,11 @@ fun VaultListScreen(
     onThemeToggle: () -> Unit = {},
     onEntryClick: (String) -> Unit,
     onAddEntryClick: (String?) -> Unit,
+    /**
+     * `ISSUE-P3-337` 口径 4：扫码导入通行密钥成功后按 id 打开该条目编辑页。
+     * 只传条目 id —— 私钥等凭据值**一律不经路由承载**（`P2-105` 同源红线）。
+     */
+    onNavigateToEntryEdit: (String) -> Unit = {},
     // ISSUE-P3-51：从模板新建（groupId 为新建落点，templateId 为选中模板）
     onAddFromTemplateClick: (String?, String) -> Unit = { _, _ -> },
     onLockClick: () -> Unit = {},
@@ -161,6 +166,14 @@ fun VaultListScreen(
             onDismiss = { showScanDialog = false }
         )
     }
+
+    // ISSUE-P3-337 Q2：扫到通行密钥载荷 → **先确认再落库**（正文与一次性导航意图的消费
+    // 收在 PasskeyImportConfirmationHost 内，见该函数 KDoc）
+    PasskeyImportConfirmationHost(
+        viewModel = viewModel,
+        flagSecureEnabled = flagSecureEnabled,
+        onNavigateToEntryEdit = onNavigateToEntryEdit
+    )
 
     // ISSUE-P2-291 AC②：库身份绑定不符的显式二次确认（下拉刷新被拦截后置位；
     // 确认 = 整库覆盖并改绑，取消 = 保持本地与云端现状）

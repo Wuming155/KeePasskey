@@ -494,4 +494,145 @@ class VaultListViewModelTest {
             viewModel.uiState.value.userMessage?.resId
         )
     }
+
+    // ---------------------------------------------------------------------
+    // ISSUE-P3-337：顶栏扫码的通行密钥分支（Q2「确认在先」+ AC①③④ 的接线层）
+    // ---------------------------------------------------------------------
+
+    /**
+     * 规范附录 A 那把 passkey 的裸 `Passkey` 对象（`key` 为其原样值：Base64URL → PKCS#8 DER 138 B，
+     * ES256）。多行只是 JSON 空白，不影响形态判定。
+     */
+    private fun cxfPasskeyJson(type: String = "passkey"): String = """
+        {"type":"$type","credentialId":"Y3JlZGVudGlhbElkRXhhbXBsZQ","rpId":"webauthn.io",
+         "username":"johndoe","userDisplayName":"John Doe",
+         "userHandle":"cnEzaNHWcYK3coWZjvoaV1Hj9gnI12mKe2dL2HZVFlY",
+         "key":"MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgARu_0sCt20EpgVxb4Puq3Ga5VVLpuTY75ngvZlyq3X6hRANCAASmdk1xLsK0oOlhxIPp0d1ZuS0sT9nf6BZtSelhqvLBW0fOL33l_bXgsr_STUHjCLn8l6gcRJwe7OQvbQubZ1dY"}
+    """.trimIndent()
+
+    @Test
+    fun `扫码 CXF 载荷只进确认草案 不静默落库`() = runTest {
+        val repository = FakeVaultRepository()
+        val viewModel = newViewModel(repository)
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { viewModel.uiState.collect {} }
+        testScheduler.runCurrent()
+        val before = repository.getEntries().first().size
+
+        val decoded = cxfPasskeyJson().toCharArray()
+        viewModel.onQrCodeDecoded(decoded)
+        testScheduler.runCurrent()
+
+        assertEquals("Q2：未经确认不得建条目", before, repository.getEntries().first().size)
+        assertTrue("上行原文在移交后即清零（草案承载的是自己的副本）", decoded.all { it == '0' })
+        val draft = viewModel.pendingPasskeyImport.value
+        assertNotNull("合法 CXF 载荷必须进入确认环节", draft)
+        assertEquals("webauthn.io", draft!!.credential.relyingPartyId)
+        assertNull("确认前不得有导航意图", viewModel.openEntryEditId.value)
+        assertNull("确认前不得落库", repository.lastSavedPasskeyByEntry.values.firstOrNull())
+        draft.wipe()
+    }
+
+    @Test
+    fun `确认导入后落库于当前分组并交出条目id 草案即刻擦除`() = runTest {
+        val repository = FakeVaultRepository()
+        val viewModel = newViewModel(repository)
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { viewModel.uiState.collect {} }
+        val group = com.keepasskey.core.model.KdbxUuid.random()
+        viewModel.enterGroup(group.toHexString())
+        testScheduler.runCurrent()
+
+        viewModel.onQrCodeDecoded(cxfPasskeyJson().toCharArray())
+        testScheduler.runCurrent()
+        val draft = requireNotNull(viewModel.pendingPasskeyImport.value)
+        val pemBefore = draft.credential.privateKeyPemChars.copyOf()
+
+        viewModel.confirmPasskeyImport()
+        testScheduler.runCurrent()
+
+        assertNull("确认即消费草案（不得二次落库）", viewModel.pendingPasskeyImport.value)
+        assertTrue(
+            "草案承载的私钥必须在落库后被清零（AC③）",
+            draft.credential.privateKeyPemChars.all { it == '0' }
+        )
+        assertFalse("清零是改写而不是重新赋值：长度须保持", draft.credential.privateKeyPemChars.isEmpty())
+        assertTrue("原私钥字符确实非空（否则上面断言为空转）", pemBefore.any { it != '0' })
+        val saved = repository.lastSavedPasskeyByEntry
+        assertEquals("只落一条", 1, saved.size)
+        val fields = saved.getValue(saved.keys.single())
+        assertTrue(
+            "第二枚 PRF 种子不在此次载荷里 ⇒ 该扩展键不得写出",
+            fields.none { it.key == com.keepasskey.core.model.PasskeyData.FIELD_PRF_NO_UV }
+        )
+        assertTrue(
+            "私钥字段必须受保护",
+            fields.first { it.key == com.keepasskey.core.model.PasskeyData.FIELD_PRIVATE_KEY }.value.isProtected
+        )
+        val savedId = saved.keys.single()
+        val entry = repository.getKdbxEntries().first { it.id.toHexString() == savedId }
+        assertEquals("顶栏导入须落在用户当下所在分组", group, entry.parentGroupId)
+        assertEquals(R.string.passkey_import_created, viewModel.uiState.value.userMessage?.resId)
+        assertEquals("成功后交出「打开该条目编辑页」的一次性意图", groupEntryEditId(viewModel), entry.id.toHexString())
+    }
+
+    /** 读取并消费一次性导航意图（同时验证「消费后归零」）。 */
+    private fun groupEntryEditId(viewModel: VaultListViewModel): String? {
+        val id = viewModel.openEntryEditId.value
+        viewModel.consumeOpenEntryEditId()
+        return id
+    }
+
+    @Test
+    fun `取消导入不落库且同样擦除私钥`() = runTest {
+        val repository = FakeVaultRepository()
+        val viewModel = newViewModel(repository)
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { viewModel.uiState.collect {} }
+        testScheduler.runCurrent()
+        val before = repository.getEntries().first().size
+
+        viewModel.onQrCodeDecoded(cxfPasskeyJson().toCharArray())
+        testScheduler.runCurrent()
+        val draft = requireNotNull(viewModel.pendingPasskeyImport.value)
+
+        viewModel.dismissPasskeyImport()
+        testScheduler.runCurrent()
+
+        assertEquals("取消不得建条目", before, repository.getEntries().first().size)
+        assertNull(viewModel.pendingPasskeyImport.value)
+        assertTrue("取消路径同样必须清零私钥（AC③ 点名的取消分支）", draft.credential.privateKeyPemChars.all { it == '0' })
+        assertNull("取消不得交出导航意图", viewModel.openEntryEditId.value)
+    }
+
+    @Test
+    fun `分流按形态单义判定 CXF 缺私钥时走通行密钥错误码而非回退猜测`() = runTest {
+        val repository = FakeVaultRepository()
+        val viewModel = newViewModel(repository)
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { viewModel.uiState.collect {} }
+        testScheduler.runCurrent()
+        val before = repository.getEntries().first().size
+
+        val json = cxfPasskeyJson().replace(Regex("\"key\":\"[^\"]*\""), "\"other\":\"x\"")
+        val decoded = json.toCharArray()
+        viewModel.onQrCodeDecoded(decoded)
+        testScheduler.runCurrent()
+
+        assertEquals("缺 `key` 属仪式字段缺失，一律拒收", before, repository.getEntries().first().size)
+        assertNull("拒收不得留下草案", viewModel.pendingPasskeyImport.value)
+        assertEquals(R.string.passkey_import_failed_invalid, viewModel.uiState.value.userMessage?.resId)
+        assertTrue("被拒载荷同样清零", decoded.all { it == '0' })
+    }
+
+    @Test
+    fun `分流不新增菜单项与跳转 只有确认对话框`() = runTest {
+        val repository = FakeVaultRepository()
+        val viewModel = newViewModel(repository)
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { viewModel.uiState.collect {} }
+        testScheduler.runCurrent()
+        viewModel.onQrCodeDecoded(cxfPasskeyJson(type = "totp").toCharArray())
+        testScheduler.runCurrent()
+        assertNull(
+            "裸单对象形态 type 非 passkey ⇒ 静态拒收（文档内混装才是「跳过并计数」）",
+            viewModel.pendingPasskeyImport.value
+        )
+        assertEquals(R.string.passkey_import_failed_invalid, viewModel.uiState.value.userMessage?.resId)
+    }
 }

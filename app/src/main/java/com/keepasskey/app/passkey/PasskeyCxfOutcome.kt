@@ -136,6 +136,21 @@ class ImportedPasskey(
 }
 
 /**
+ * 待确认的导入草案（`ISSUE-P3-337` 口径 4：确认对话框**在当前作用域**持有，落库或取消即擦除）。
+ *
+ * ⚠️ 只能存在于 ViewModel / 编排器的内存状态里：**禁止**经路由参数、`SavedStateHandle`
+ * 或任何框架缓存承载（`P2-105` 立过「不得经框架缓存敏感值」的规矩——草案里的私钥是明文驻留，
+ * 框架一旦把它写进持久化 Bundle 就彻底失控）。
+ */
+class PasskeyImportDraft(
+    val credential: ImportedPasskey,
+    val notes: PasskeyCxfNotes
+) {
+    /** 用户取消或落库完成后调用；两条路径都必须擦（AC③ 锁的正是「取消路径同样已清零」）。 */
+    fun wipe() = credential.wipeSecrets()
+}
+
+/**
  * Base64 编解码门面（字节进、字节出；**不出 String**）。
  *
  * 解码**先试 Base64URL、再试标准 Base64**：CXF 的 `b64url` 是无填充 Base64URL，

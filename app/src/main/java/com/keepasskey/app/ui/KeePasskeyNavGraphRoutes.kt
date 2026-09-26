@@ -103,6 +103,10 @@ internal fun NavGraphBuilder.vaultListRoute(
             onAddEntryClick = { groupId ->
                 navController.navigate(Screen.EntryEdit.createRoute(groupId = groupId))
             },
+            // ISSUE-P3-337：扫码导入通行密钥成功后打开该条目编辑页（路由只带 id）
+            onNavigateToEntryEdit = { entryId ->
+                navController.navigate(Screen.EntryEdit.createRoute(entryId))
+            },
             // ISSUE-P3-51：从模板新建——携带模板 id 进入编辑页，由状态层预填为**新条目**
             onAddFromTemplateClick = { groupId, templateId ->
                 navController.navigate(Screen.EntryEdit.createRoute(groupId = groupId, templateId = templateId))
