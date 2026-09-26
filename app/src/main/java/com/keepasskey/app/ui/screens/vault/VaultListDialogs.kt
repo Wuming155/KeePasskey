@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -37,6 +38,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -65,13 +67,20 @@ internal fun VaultSortDialog(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(8.dp))
-                            .clickable { onSelect(option) }
-                            .padding(vertical = 10.dp, horizontal = 4.dp),
+                            // 紧凑化：整行 selectable（自带 Role.RadioButton 语义）替代
+                            // 「行 clickable + 圈自身 48dp 最小触控」的双重命中区——否则每行被
+                            // 撑到约 68dp；圈传 onClick = null 后只按 20dp 视觉尺寸排版。
+                            .selectable(
+                                selected = currentOption == option,
+                                onClick = { onSelect(option) },
+                                role = Role.RadioButton
+                            )
+                            .padding(vertical = 6.dp, horizontal = 4.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         RadioButton(
                             selected = currentOption == option,
-                            onClick = { onSelect(option) }
+                            onClick = null
                         )
                         Spacer(modifier = Modifier.width(10.dp))
                         Text(text = stringResource(option.labelRes), style = MaterialTheme.typography.bodyMedium)
