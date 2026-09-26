@@ -143,7 +143,6 @@
     <!-- ISSUE-P2-289：TOTP 解析期回落诊断（禁静默改写） -->
     <string name="detail_totp_fallback_warning">Some TOTP parameters were adjusted for compatibility: %1$s</string>
     <string name="detail_passkey_section">Passkey Credential (WebAuthn)</string>
-    <string name="detail_passkey_chip">FIDO2 software key (stored encrypted in vault)</string>
     <string name="detail_passkey_rp">Relying Party (RP ID): %1$s</string>
     <string name="detail_passkey_desc">Supports Android 14+ Credential Manager passwordless authentication</string>
     <string name="detail_custom_fields_section">Custom Secure Fields</string>

@@ -20,7 +20,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Autorenew
 import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Icon
@@ -37,7 +36,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -214,23 +212,6 @@ internal fun PasskeyCard(entry: UiVaultEntry) {
         borderColor = securityColors.passkey.copy(alpha = 0.5f)
     ) {
         Column {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    imageVector = Icons.Default.Key,
-                    contentDescription = stringResource(R.string.cd_passkey),
-                    tint = securityColors.passkey,
-                    modifier = Modifier.size(20.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = stringResource(R.string.detail_passkey_chip),
-                    style = MaterialTheme.typography.titleMedium.copy(
-                        fontWeight = FontWeight.Bold,
-                        color = securityColors.passkey
-                    )
-                )
-            }
-            Spacer(modifier = Modifier.height(6.dp))
             Text(
                 text = stringResource(R.string.detail_passkey_rp, entry.passkeyRpId ?: entry.url),
                 style = MaterialTheme.typography.bodyMedium,
