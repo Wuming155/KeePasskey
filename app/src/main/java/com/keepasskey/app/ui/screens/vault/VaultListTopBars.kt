@@ -96,10 +96,12 @@ internal fun VaultListBatchModeTopBar(
 /**
  * 主顶栏：标题位为胶囊形搜索框；进入回收站后操作区替换为「清空回收站」入口。
  *
+ * 常规态操作区收敛为一个竖排三点（MoreVert）溢出菜单，内含「排序」「锁定」两项。
+ *
  * ISSUE-P3-17：
  * - [autoActivateSearch] 为 true 时聚焦搜索框并弹出输入法（一次性意图，消费后经
  *   [onAutoActivateSearchConsumed] 回执，避免重组反复抢焦点）；
- * - [onKillApp] 非空时在溢出菜单暴露「彻底退出应用」入口（偏好开启且宿主可终止才会非空）。
+ * - [onKillApp] 非空时溢出菜单追加「彻底退出应用」入口（偏好开启且宿主可终止才会非空）。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -198,34 +200,45 @@ internal fun VaultListSearchTopBar(
                     )
                 }
             } else {
-                IconButton(onClick = onSortClick) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.Sort,
-                        contentDescription = stringResource(R.string.cd_sort),
-                        tint = if (sortOption != VaultSortOption.DEFAULT) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                IconButton(onClick = onLockClick) {
-                    Icon(
-                        imageVector = Icons.Default.Lock,
-                        contentDescription = stringResource(R.string.cd_lock),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                // ISSUE-P3-17：showKillAppOption 开启且宿主可终止时的「彻底退出应用」入口
-                if (onKillApp != null) {
-                    Box {
-                        IconButton(onClick = { showOverflowMenu = true }) {
-                            Icon(
-                                imageVector = Icons.Default.MoreVert,
-                                contentDescription = stringResource(R.string.btn_more),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        DropdownMenu(
-                            expanded = showOverflowMenu,
-                            onDismissRequest = { showOverflowMenu = false }
-                        ) {
+                // 收敛后的竖排三点溢出菜单：排序 / 锁定 /（可选）彻底退出
+                Box {
+                    IconButton(onClick = { showOverflowMenu = true }) {
+                        Icon(
+                            imageVector = Icons.Default.MoreVert,
+                            contentDescription = stringResource(R.string.btn_more),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = showOverflowMenu,
+                        onDismissRequest = { showOverflowMenu = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.cd_sort)) },
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.Sort,
+                                    contentDescription = null,
+                                    tint = if (sortOption != VaultSortOption.DEFAULT) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            },
+                            onClick = {
+                                showOverflowMenu = false
+                                onSortClick()
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.cd_lock)) },
+                            leadingIcon = {
+                                Icon(Icons.Default.Lock, contentDescription = null)
+                            },
+                            onClick = {
+                                showOverflowMenu = false
+                                onLockClick()
+                            }
+                        )
+                        // ISSUE-P3-17：showKillAppOption 开启且宿主可终止时的「彻底退出应用」入口
+                        if (onKillApp != null) {
                             DropdownMenuItem(
                                 text = { Text(stringResource(R.string.sec_kill_app_action)) },
                                 leadingIcon = {

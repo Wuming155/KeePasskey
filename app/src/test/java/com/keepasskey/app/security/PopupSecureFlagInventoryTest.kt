@@ -13,6 +13,8 @@ import java.io.File
  * 条目 AC③ 明确要求：**无敏感内容的调用点留痕说明「无需接线」，避免「全量加 flag」的过度改动**。
  * 2026-09-15 逐点直读源码核实（结论写入 `SecureDialog` 的 KDoc）：全仓 Popup 调用点恰好 4 处、
  * 8 个菜单项**全部为静态动作文案 / provider 名称**，无任何凭据类插值 ⇒ 无需接线。
+ * 2026-09-26 顶栏「排序 / 锁定」收敛进溢出菜单后重新盘点：调用点仍 4 处、菜单项 10 个，
+ * 新增两项均为静态动作文案 ⇒ 结论不变。
  *
  * 但「今天无需接线」不等于「永远无需」：一旦某个菜单开始渲染口令 / TOTP，或新增了第 5 个
  * Popup 调用点，前次的结论即失效。故把该前提**变成可执行的守卫**：
@@ -75,8 +77,8 @@ class PopupSecureFlagInventoryTest {
             itemCount > 0
         )
         assertEquals(
-            "菜单项计数须与已核实清单一致（8 项）；计数变化说明菜单结构变动，须重新盘点",
-            8,
+            "菜单项计数须与已核实清单一致（10 项）；计数变化说明菜单结构变动，须重新盘点",
+            10,
             itemCount
         )
     }
@@ -139,7 +141,8 @@ class PopupSecureFlagInventoryTest {
         val POPUP_CALL_MARKERS = listOf("DropdownMenu(", "ExposedDropdownMenuBox(")
 
         /**
-         * **已核实清单（2026-09-15 逐点直读源码）**：4 处调用点、8 个菜单项，全部静态文案 ⇒ 无需接线。
+         * **已核实清单（2026-09-15 逐点直读源码；2026-09-26 随顶栏菜单收敛重新盘点为
+         * 4 处调用点、10 个菜单项）**：全部静态文案 ⇒ 无需接线。
          * 该清单与 `SecureDialog` 的 KDoc「未能覆盖」一节保持同步。
          */
         val VERIFIED_POPUP_CALL_SITES = setOf(
@@ -147,7 +150,8 @@ class PopupSecureFlagInventoryTest {
             "app/src/main/java/com/keepasskey/app/ui/screens/vault/VaultGroupRow.kt",
             // §194：详情页顶栏的溢出菜单**原样**下沉到同包段落组件，调用点随之迁到新文件。
             // 重新盘点结论不变：3 个菜单项全是静态动作文案（移动到分组 / 删除条目 / 删除共享图标），
-            // 无口令 / TOTP / 密钥 / 用户数据插值 ⇒ 仍无需接线；菜单项总数 8 未变，
+            // 无口令 / TOTP / 密钥 / 用户数据插值 ⇒ 仍无需接线；当时菜单项总数 8 未变
+            // （2026-09-26 顶栏「排序 / 锁定」收敛进溢出菜单后现为 10），
             // 由本测试的「菜单块敏感记号扫描」与「计数判据」当场复验（只换定位，不放宽强度）。
             "app/src/main/java/com/keepasskey/app/ui/screens/detail/EntryDetailTopBarSections.kt",
             "app/src/main/java/com/keepasskey/app/ui/screens/settings/subscreens/CloudSyncComponents.kt"

@@ -109,12 +109,13 @@ import androidx.compose.ui.window.DialogWindowProvider
  * [`PopupProperties(securePolicy = SecureFlagPolicy.SecureOn)`](https://developer.android.com/reference/kotlin/androidx/compose/ui/window/securePolicy)
  * （`DropdownMenu` / `ExposedDropdownMenuBox` 的 `properties` 参数）。
  *
- * **ISSUE-P3-79 盘点结论（2026-09-15 逐点直读源码核实，**无需接线**）**：
- * 全仓 Popup 调用点**恰好 4 处**——`VaultListTopBars`（顶栏溢出，1 项）、`VaultGroupRow`（分组操作，3 项）、
+ * **ISSUE-P3-79 盘点结论（2026-09-15 逐点直读源码核实；2026-09-26 随顶栏菜单收敛重新盘点，
+ * 结论不变——**无需接线**）**：全仓 Popup 调用点**恰好 4 处**——`VaultListTopBars`（顶栏溢出，
+ * 3 项：排序 / 锁定密码库 / 彻底退出应用）、`VaultGroupRow`（分组操作，3 项）、
  * `EntryDetailTopBarSections`（条目操作，3 项；§194 前该菜单在 `EntryDetailTopBar` 内）、`CloudSyncComponents`（`ExposedDropdownMenuBox` + `DropdownMenu`，
- * 1 项 × provider 数）。上述 **8 个 `DropdownMenuItem` 全部为静态动作文案 / provider 名称**
- * （彻底退出应用 / 重命名 / 更改图标 / 删除分组 / 移动到分组 / 删除条目 / 删除共享图标 /
- * WebDAV·S3 provider 名与描述），**无任何口令、TOTP、密钥或用户数据插值**；
+ * 1 项 × provider 数）。上述 **10 个 `DropdownMenuItem` 全部为静态动作文案 / provider 名称**
+ * （排序 / 锁定密码库 / 彻底退出应用 / 重命名 / 更改图标 / 删除分组 / 移动到分组 / 删除条目 /
+ * 删除共享图标 / WebDAV·S3 provider 名与描述），**无任何口令、TOTP、密钥或用户数据插值**；
  * 全仓亦无其它 `Popup(` / `TooltipBox(` / `ModalBottomSheet(` 调用点。
  *
  * ⇒ **不接线**（避免「全量加 flag」的过度改动）。**接线条件（须遵守）**：一旦任一 Popup
