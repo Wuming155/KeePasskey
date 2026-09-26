@@ -4,6 +4,7 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import com.keepasskey.app.R
 import androidx.lifecycle.viewModelScope
+import com.keepasskey.app.data.repository.SettingsRepository
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.app.ui.model.StringsProvider
@@ -17,6 +18,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -48,7 +50,9 @@ class EntryEditViewModel @Inject constructor(
     // TASK-21：非 Compose 层文案资源解析通道（生产 DI 注入真实现；单测注入假实现）
     private val stringsProvider: StringsProvider? = null,
     // ISSUE-P2-65：会话锁定观察者注册点（null 仅用于纯 JVM 单测）
-    private val databaseSession: com.keepasskey.database.session.DatabaseSession? = null
+    private val databaseSession: com.keepasskey.database.session.DatabaseSession? = null,
+    // PD-47：防截屏开关读取（生产 DI 注入真实现；单测注入 null 时恒 true = fail-closed）
+    private val settingsRepository: SettingsRepository? = null
 ) : ViewModel() {
 
     // P3-23：null 时回退空串实现（生产 Hilt 恒注入 StringsProviderModule 真实现）
@@ -89,6 +93,10 @@ class EntryEditViewModel @Inject constructor(
     private val _loadedProtectedFields = MutableStateFlow<Map<String, CharArray>>(emptyMap())
     val loadedProtectedFields: StateFlow<Map<String, CharArray>> = _loadedProtectedFields.asStateFlow()
 
+    /** PD-47：防截屏开关快照（扫码对话框 FLAG_SECURE 跟随）；无仓库注入（纯 JVM 单测）恒 true = fail-closed。 */
+    private val _flagSecureEnabled = MutableStateFlow(true)
+    val flagSecureEnabled: StateFlow<Boolean> = _flagSecureEnabled.asStateFlow()
+
     init {
         // H4-只读整改：会话只读时编辑页禁用保存
         _uiState.update { it.copy(isReadOnly = vaultRepository.isSessionReadOnly()) }
@@ -113,6 +121,13 @@ class EntryEditViewModel @Inject constructor(
         // TASK-15：加载库内自定义图标池（上传/选择界面数据源）
         viewModelScope.launch {
             _customIconOptions.value = vaultRepository.getCustomIconBytes()
+        }
+
+        // PD-47：随设置流刷新防截屏开关快照（扫码对话框在组合时消费当前值）
+        settingsRepository?.let { repo ->
+            viewModelScope.launch {
+                repo.getSettings().map { it.flagSecureEnabled }.collect { _flagSecureEnabled.value = it }
+            }
         }
     }
 

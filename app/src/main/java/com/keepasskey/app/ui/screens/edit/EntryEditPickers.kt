@@ -81,12 +81,15 @@ internal fun rememberEntryEditPickers(
     val attachmentPicker = rememberAttachmentPicker(viewModel, scope)
 
     var showTotpScanDialog by remember { mutableStateOf(false) }
+    // PD-47：扫码对话框 FLAG_SECURE 跟随设置页「禁止截屏与录屏」开关
+    val flagSecureEnabled by viewModel.flagSecureEnabled.collectAsStateWithLifecycle()
 
     val decodedCustomIcons = rememberDecodedCustomIcons(viewModel)
     val photoPicker = rememberCustomIconPicker(viewModel, scope)
 
     if (showTotpScanDialog) {
         TotpScanDialog(
+            flagSecureEnabled = flagSecureEnabled,
             onDecoded = viewModel::onTotpSecretChangeSecure,
             onDismiss = { showTotpScanDialog = false }
         )

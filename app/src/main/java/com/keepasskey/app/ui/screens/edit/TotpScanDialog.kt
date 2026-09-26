@@ -77,18 +77,24 @@ import kotlin.coroutines.resumeWithException
  * 解码改为 `com.google.zxing:core` 3.5.4 纯算法 [MultiFormatReader]（仅 QR_CODE，
  * 与原 `ScanOptions.QR_CODE` 等价）——零网络、零遥测、零 ML Kit。
  *
- * ## 承载与加固迁移口径（ISSUE-P3-71 / P3-103 的等效覆盖）
+ * ## 承载与加固迁移口径（ISSUE-P3-71 / P3-103 的等效覆盖；PD-47 改判见下）
  *
  * 对话框由 Compose [Dialog] 创建**独立窗口**，挂在编辑页所在 Activity 的组合内
  * （`FLAG_SECURE` 是窗口级属性，不会从 Activity 窗口传播，见 [SecureDialogWindowEffect]
  * 的缺口说明）。原 `SecureCaptureActivity` 的三层防护在本对话框逐项等效落地：
- * - `FLAG_SECURE`：[DialogProperties.securePolicy] 传 **`SecureFlagPolicy.SecureOn`**
- *   （对话框窗口该 flag 的实际决定者，`ISSUE-P2-246`），并由 [SecureDialogWindowEffect]
- *   做同窗内的一次防御性显式施加；
+ * - `FLAG_SECURE`：**跟随设置页「禁止截屏与录屏」开关**（`flagSecureEnabled`，`PD-47` 2026-09-26 改判，
+ *   推翻 ISSUE-P3-71 以来的无条件遮罩口径）——开关开 ⇒ `DialogProperties.securePolicy` 传
+ *   `SecureFlagPolicy.SecureOn` + [SecureDialogWindowEffect] 施加；开关关 ⇒ `SecureFlagPolicy.SecureOff`
+ *   + 包装不施加（可截屏）。对话框窗口该 flag 的实际决定者是 `securePolicy`（`ISSUE-P2-246`：
+ *   默认 `Inherit` 会按宿主窗口清除），故**不得**改回无条件 `SecureOn` 或省略该参数；
  * - `setHideOverlayWindows(true)`：在 [ScanDialogWindowHardening] 内对**对话框窗口**
- *   直接施加（权限 `HIDE_OVERLAY_WINDOWS` 已在 Manifest 显式声明）；
+ *   直接施加（权限 `HIDE_OVERLAY_WINDOWS` 已在 Manifest 显式声明）——**不随开关变化**；
  * - `decorView.filterTouchesWhenObscured = true`：由 [SecureDialogWindowEffect]
- *   统一施加（遮挡态下丢弃整棵视图子树的触摸，反点击劫持）。
+ *   统一施加（遮挡态下丢弃整棵视图子树的触摸，反点击劫持）——**不随开关变化**（`flagSecure=false`
+ *   只跳过 `FLAG_SECURE`，过滤照常）。
+ *
+ * 静态守卫：`SensitiveWindowHardeningTest` 锁定「`securePolicy` 由 `flagSecureEnabled` 条件驱动」
+ * 与「设置值经 `EntryEditViewModel` → `EntryEditPickers` → 本对话框的上行链路」，回退无条件 `SecureOn` 即报红。
  *
  * 原 CaptureActivity 的 `sensorLandscape` 方向锁**不再保留**：方向锁是 zxing 全屏
  * 取景 UX 的产物，本对话框嵌入编辑页流内、跟随 Activity 既有方向行为（裁决登记见
@@ -109,6 +115,8 @@ import kotlin.coroutines.resumeWithException
  */
 @Composable
 internal fun TotpScanDialog(
+    /** 是否施加 `FLAG_SECURE`：设置页「禁止截屏与录屏」开关值（`PD-47`，跟随开关）。 */
+    flagSecureEnabled: Boolean,
     /** 解码成功回调：参数为二维码文本即刻转出的 CharArray，消费侧负责清零。 */
     onDecoded: (CharArray) -> Unit,
     onDismiss: () -> Unit
@@ -116,13 +124,19 @@ internal fun TotpScanDialog(
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(
-            // 对话框窗口 FLAG_SECURE 的实际决定者（ISSUE-P2-246：默认 Inherit 会按宿主窗口清除）
-            securePolicy = SecureFlagPolicy.SecureOn,
+            // 跟随防截屏开关（PD-47）：开 ⇒ SecureOn 强制遮罩；关 ⇒ SecureOff 显式不遮罩。
+            // 对话框窗口 FLAG_SECURE 的实际决定者（ISSUE-P2-246：默认 Inherit 会按宿主窗口清除），
+            // 故两支都必须显式写出，不得回退为省略参数的 Inherit
+            securePolicy = if (flagSecureEnabled) {
+                SecureFlagPolicy.SecureOn
+            } else {
+                SecureFlagPolicy.SecureOff
+            },
             dismissOnClickOutside = false,
             usePlatformDefaultWidth = false
         )
     ) {
-        ScanDialogWindowHardening()
+        ScanDialogWindowHardening(flagSecureEnabled)
         val context = LocalContext.current
         var cameraPermissionGranted by remember {
             mutableStateOf(hasCameraPermission(context))
@@ -179,11 +193,13 @@ internal fun TotpScanDialog(
 
 /**
  * 对话框窗口的反 overlay 加固：对**本对话框窗口**施加 `setHideOverlayWindows(true)`，
- * 退出组合时复位——与 [SecureDialogWindowEffect]（FLAG_SECURE 防御性施加 +
+ * 退出组合时复位——与 [SecureDialogWindowEffect]（`FLAG_SECURE` 按 [flagSecureEnabled] 条件施加 +
  * 遮挡触摸过滤）互补，共同构成原 `SecureCaptureActivity` 三层防护的等效迁移。
+ *
+ * 反 overlay 与遮挡触摸过滤**不随防截屏开关变化**（`PD-47` 只改 `FLAG_SECURE` 一路）。
  */
 @Composable
-private fun ScanDialogWindowHardening() {
+private fun ScanDialogWindowHardening(flagSecureEnabled: Boolean) {
     val view = LocalView.current
     DisposableEffect(view) {
         val dialogWindow = view.dialogWindowOrNull()
@@ -192,8 +208,8 @@ private fun ScanDialogWindowHardening() {
             dialogWindow?.setHideOverlayWindows(false)
         }
     }
-    // 既有统一包装：同窗显式 FLAG_SECURE + decorView.filterTouchesWhenObscured = true
-    SecureDialogWindowEffect()
+    // 统一包装：同窗 FLAG_SECURE（跟随开关，PD-47）+ decorView.filterTouchesWhenObscured = true（恒施加）
+    SecureDialogWindowEffect(flagSecure = flagSecureEnabled)
 }
 
 /**

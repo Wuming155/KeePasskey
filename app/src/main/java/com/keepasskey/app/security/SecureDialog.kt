@@ -79,6 +79,11 @@ import androidx.compose.ui.window.DialogWindowProvider
  * 密码明文差异），故**不读取** `SettingsRepository` 的用户开关，一律遮罩（[FlagSecureGuard]
  * 对 Activity 窗口则是「锁定态强制 ∨ 开关」的动态模型）。用户关闭开关时已在设置页履行过风险确认。
  *
+ * **例外（2026-09-26 `PD-47`）**：TOTP 扫码取景对话框（`TotpScanDialog`）**不属**上述四类——
+ * 其 `FLAG_SECURE` 经 [SecureDialogWindowEffect] 的 `flagSecure` 参数与 `DialogProperties.securePolicy`
+ * **跟随**用户开关（开关关 ⇒ 可截屏；静态守卫见 `SensitiveWindowHardeningTest`）；其反 overlay 与
+ * 遮挡触摸过滤两层不随开关变化。本节四类的强制遮罩口径**不受**该裁决影响。
+ *
  * **该意图的实现方式（2026-09-21 §254 更正，`ISSUE-P2-246`）**：对话框窗口的 `FLAG_SECURE`
  * 实际由 **Compose 的 `SecureFlagPolicy`** 决定——`DialogProperties.securePolicy` 默认 `Inherit`，
  * 其「继承源」是**调用方（宿主 Activity）窗口**的该 flag 位（`AndroidDialog.android.kt` 取
@@ -152,13 +157,18 @@ internal fun SecureDialog(content: @Composable () -> Unit) {
  *
  * 必须在**对话框自身的内容槽位内**调用；在 `AlertDialog(...)` 之外调用取不到对话框窗口，
  * 按 fail-safe 静默不动作。
+ *
+ * @param flagSecure 是否在本包装内施加 `FLAG_SECURE`。默认 `true` 维持四类敏感对话框的
+ *   **无条件强制遮罩**语义；TOTP 扫码取景对话框传 `flagSecureEnabled`（`PD-47`，跟随用户开关，
+ *   开关关 ⇒ 本包装不施加、由调用点 `SecureFlagPolicy.SecureOff` 一并保证不遮罩）。
+ *   **遮挡触摸过滤不受该参数影响**，始终施加（两层防护正交，反点击劫持不随开关放宽）。
  */
 @Composable
-internal fun SecureDialogWindowEffect() {
+internal fun SecureDialogWindowEffect(flagSecure: Boolean = true) {
     val view = LocalView.current
-    DisposableEffect(view) {
+    DisposableEffect(view, flagSecure) {
         val dialogWindow = view.dialogWindowOrNull()
-        val addedByThisWrapper =
+        val addedByThisWrapper = flagSecure &&
             SecureDialogFlagPolicy.onEnter(dialogWindowResolved = dialogWindow != null) ==
                 SecureDialogFlagAction.ADD_SECURE
         if (addedByThisWrapper) {

@@ -2,6 +2,7 @@ package com.keepasskey.app.ui.screens.edit
 
 import com.keepasskey.app.testutil.MainDispatcherGuard
 import androidx.lifecycle.SavedStateHandle
+import com.keepasskey.app.data.repository.FakeSettingsRepository
 import com.keepasskey.app.data.repository.FakeVaultRepository
 import com.keepasskey.app.ui.model.UiVaultEntry
 import com.keepasskey.database.session.DatabaseSession
@@ -17,6 +18,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -163,6 +165,36 @@ class EntryEditViewModelTest {
         assertTrue(
             "锁定后保存不得再带口令明文（证私有副本已擦除，而非仅清了预填通道）",
             storedAfterLock == null || storedAfterLock.isEmpty()
+        )
+    }
+
+    /**
+     * `PD-47`（`ISSUE-P3-332`）：设置仓库的「禁止截屏与录屏」开关必须流入
+     * [EntryEditViewModel.flagSecureEnabled]——它是扫码取景对话框 `FLAG_SECURE` 的唯一取值来源，
+     * 断流即遮罩恒开关无效（正是用户直报的失效形态）。同时锁定「未注入仓库时恒 `true`」的
+     * fail-closed 缺省：缺省为 false 会让纯 JVM 单测形态默认放宽遮罩，违反保守方向。
+     */
+    @Test
+    fun `防截屏开关经设置仓库流入状态流且缺省 fail-closed`() = runTest {
+        val settings = FakeSettingsRepository()
+        val viewModel = EntryEditViewModel(
+            SavedStateHandle(),
+            FakeVaultRepository(),
+            settingsRepository = settings
+        )
+        MainDispatcherGuard.track(viewModel)
+        testScheduler.runCurrent()
+        assertTrue("出厂默认（UserSettings()）应为开启", viewModel.flagSecureEnabled.value)
+
+        settings.setFlagSecureEnabled(false)
+        testScheduler.runCurrent()
+        assertFalse("关闭开关后状态流必须跟随为 false", viewModel.flagSecureEnabled.value)
+
+        val noRepoViewModel = EntryEditViewModel(SavedStateHandle(), FakeVaultRepository())
+        MainDispatcherGuard.track(noRepoViewModel)
+        assertTrue(
+            "未注入 SettingsRepository（纯 JVM 单测形态）必须恒 true（fail-closed，不因缺注入放宽遮罩）",
+            noRepoViewModel.flagSecureEnabled.value
         )
     }
 
