@@ -50,6 +50,21 @@ class FakeVaultRepository(
         private set
 
     /**
+     * 最近一次 passkey 写库实际收到的自定义字段（条目 id → 字段表；仅测试观测点，
+     * `ISSUE-P3-337` AC④ 加）。
+     *
+     * 为什么必须存 [KdbxCustomField] 而不是 `Map<String, String>`：AC④② 要逐键核验
+     * **保护位**（明文四键 / 受保护四键的划分），String 形态会把 `isProtected` 丢掉，
+     * 于是「逐键受保护」的断言会因观测点丢位而空转通过（真假绿路径）。
+     */
+    var lastSavedPasskeyByEntry: Map<String, List<KdbxCustomField>> = emptyMap()
+        private set
+
+    protected fun recordPasskeyFields(entryId: String, fields: List<KdbxCustomField>) {
+        lastSavedPasskeyByEntry = lastSavedPasskeyByEntry + (entryId to fields)
+    }
+
+    /**
      * ISSUE-P3-04：最近一次解锁调用实际收到的密钥文件字节（克隆副本，null 表示未携带）。
      * 供「有 KeyFile / 无 KeyFile 走不同复合密钥通道」的透传断言使用。
      */
@@ -452,7 +467,11 @@ class FakeVaultRepository(
     override suspend fun advanceEntryHotpCounter(entryId: String): KdbxResult<EntryTotpSnapshot> =
         KdbxResult.Failure(UnsupportedOperationException("fake repository does not support HOTP advance"))
 
-    override suspend fun saveNewPasskeyEntry(data: PasskeyData, boundPackage: String?): KdbxEntry {
+    override suspend fun saveNewPasskeyEntry(
+        data: PasskeyData,
+        boundPackage: String?,
+        parentGroupId: KdbxUuid?
+    ): KdbxEntry {
         val title = "${data.userName}@${data.relyingPartyId}"
         val url = if (boundPackage.isNullOrBlank()) "https://${data.relyingPartyId}" else "android://$boundPackage"
         val fields = mapOf(
@@ -462,12 +481,30 @@ class FakeVaultRepository(
         )
         val newEntry = KdbxEntry(
             id = KdbxUuid.random(),
-            parentGroupId = null,
+            parentGroupId = parentGroupId,
             fields = fields,
             customFields = data.toCustomFields()
         )
+        lastSavedPasskeyByEntry = lastSavedPasskeyByEntry +
+            (newEntry.id.toHexString() to newEntry.customFields)
         extraKdbxEntries.value = extraKdbxEntries.value + newEntry
         return newEntry
+    }
+
+    /**
+     * 测试替身：按 **entryId** 整体替换既有条目的 Passkey schema 字段
+     * （与生产 `PasskeyEntryCoordinator.replacePasskeyOnEntry` 同语义：非 passkey 字段全保留、
+     * 全部 schema 键换新、未命中不写入并返回 null）。
+     */
+    override suspend fun replacePasskeyOnEntry(entryId: String, data: PasskeyData): KdbxEntry? {
+        val current = extraKdbxEntries.value
+        val index = current.indexOfFirst { it.id.toHexString() == entryId }
+        if (index < 0) return null
+        val preserved = current[index].customFields.filterNot { PasskeyData.isPasskeyFieldKey(it.key) }
+        val updated = current[index].copy(customFields = preserved + data.toCustomFields())
+        lastSavedPasskeyByEntry = lastSavedPasskeyByEntry + (entryId to updated.customFields)
+        extraKdbxEntries.value = current.toMutableList().also { it[index] = updated }
+        return updated
     }
 
     /**
@@ -485,6 +522,8 @@ class FakeVaultRepository(
 
         val preserved = current[index].customFields.filterNot { PasskeyData.isPasskeyFieldKey(it.key) }
         val updated = current[index].copy(customFields = preserved + data.toCustomFields())
+        lastSavedPasskeyByEntry = lastSavedPasskeyByEntry +
+            (updated.id.toHexString() to updated.customFields)
         extraKdbxEntries.value = current.toMutableList().also { it[index] = updated }
         return updated
     }

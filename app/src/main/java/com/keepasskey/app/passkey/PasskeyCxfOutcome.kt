@@ -119,7 +119,21 @@ class ImportedPasskey(
     val algorithmId: Int,
     val prfWithUv: ByteArray?,
     val prfWithoutUv: ByteArray?
-)
+) {
+    /**
+     * 就地清零本对象承载的全部秘密材料（私钥 PEM 字符与两枚 PRF 种子）。
+     *
+     * 为什么由模型自己提供这个动作：调用链上有两条退出路径都要擦——「用户确认落库后」与
+     * 「用户取消」——而取消路径**根本不经过**任何写库代码，最容易漏。把擦除收成一个方法，
+     * AC③ 就能用一条断言同时锁住两支（`ISSUE-P3-337` 口径 4「私钥不跨页承载」的落地件）。
+     * 幂等：重复调用无副作用。
+     */
+    fun wipeSecrets() {
+        privateKeyPemChars.fill('0')
+        prfWithUv?.fill(0)
+        prfWithoutUv?.fill(0)
+    }
+}
 
 /**
  * Base64 编解码门面（字节进、字节出；**不出 String**）。

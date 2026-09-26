@@ -349,7 +349,9 @@
     （提示语无凭据类插值）；`PD-47` 的 `FLAG_SECURE` 接线在确认对话框与两个入口均落实；
     确认对话框的**归类已定稿**（`PD-48` 裁决三：跟随开关），本 AC 只核验接线，不再涉及归类裁决。
   - **AC⑦ 互操作对拍（`AGENTS.md` §5 / 规则 8）**：导入得到的凭据入库后跑
-    `:database: PasskeyInteropProbeTest` → `python tools/passkey-interop/verify_interop.py`（114 判据），
+    `:database: PasskeyInteropProbeTest` → `python tools/passkey-interop/verify_interop.py`
+    （判据数：2026-09-26 第 3 片起为 **161 条 / 4 条目**，原 114 条 / 3 条目——新增第四条
+    「Passkey Imported ES256」以实证 `Passkey.PrfNoUv` 对其它管理器无害），
     ES256 必过；`Ed25519` / `RS256` 按白名单实际放行范围读数原样进批次文档。
   - **AC⑧ 真机端到端（只有真机能证伪）**：在 **AVD `Pixel_10` 或实验机**上（⚠️ 当前在连的小米 M332BF
     装着真实密码库与 `hyperpasskey` 模块，**禁跑 `connectedDebugAndroidTest`**）验证「导入的通行密钥
@@ -489,9 +491,10 @@
   套信封则 1 697 B，两档实测校正见第 2 / 第 2.5 片留痕）
   只有真机能证；结论决定 AC⑧ 的声称范围是
   「相机 + 相册」还是「相册为主」，越早拿到越少返工。
-  **⑤ 第 3 片 落库接线（含 `PD-49` 裁决一的随机高位起点 + 限界表登记 + `Passkey.PrfNoUv` + 对拍重跑）**
-  —— 本片的计数写入必须与限界表登记同批，未登记不得声称闭环。
-  **⑥ 第 4 片 两个入口接线 + 确认对话框（含 4′ 的不兼容清单与「另有 N 把」点名）+ 守卫重盘点**
+  **⑤ 第 3 片 落库接线 —— 已完成（留痕见下：含 `PD-49` 裁决一的随机高位起点 + 限界表 §34 登记
+  + `Passkey.PrfNoUv` + 对拍重跑 161 条全绿）**
+  —— 本片的计数写入与限界表登记已同批入库。
+  **⑥ 第 4 片 两个入口接线 + 确认对话框（含 4′ 的不兼容清单与「另有 N 把」点名）+ 守卫重盘点——下一步**
   **⑦ 第 5 / 6 片 真机端到端 + 实拍取样 + 全量 test + 门禁 7/7 + 批次归档**
 
 - **分片进度留痕（2026-09-26 起逐片追加；条目闭环时随正文一并剪切入批次）**：
@@ -623,6 +626,51 @@
     `xml=407 tests=2712 failures=0 errors=0 skipped=13`（上片 2706 + 本片 6 例：密度 3 + 守卫 3）；
     `gate_readings.py` **7/7 PASS**（`tier1=0` / `tier2=35 budget=37`、`long_functions=0`、
     `check_tautological_assertions` 命中 0 / 扫描 **465** 文件（+3））。
-  - **第 3 片 落库接线（下一步）**：`Passkey.PrfNoUv` 扩展键 + `PD-49` 裁决一的随机高位起点
-    + 限界表登记同批 + `PasskeyInteropProbeTest` 键集判据更新与对拍重跑。
+  - **第 3 片 落库接线（口径 5 / 6 / 11，`PD-48` 裁决二、`PD-49` 裁决一，AC④⑦）—— 已完成**（2026-09-26）。
+    **schema 侧**：`PasskeyData` 新增受保护扩展键 `Passkey.PrfNoUv`（常量 `FIELD_PRF_NO_UV` +
+    数据类字段 `prfNoUvSecret` + `toCustomFields` 写出 + `fromCustomFields` 读回 +
+    **登记进 `SCHEMA_FIELD_KEYS`**——漏这一步则三处「原地替换」都不剥离它、旧值残留）。
+    ⚠️ 该文件原已 489 行，直接追加注释把 `PasskeyData.kt` 推过 500 ⇒ `tier1=1` 硬红；
+    按 §332 先例**就地压缩自身新增**（长 KDoc 改为指向 `PD-48` / 限界表 §34 的短注）后
+    落在 **500 行整**、`tier1=0`、`tier2=35` 不变。
+    **构造侧**：新增 `app/passkey/PasskeyImportFactory.kt`——`ImportedPasskey → PasskeyData`，
+    三处口径各有出处：① PRF 种子**重新编码为标准 Base64** 才驻留（消费方 `PasskeyPrf.decodeSecret`
+    用 `Base64.getDecoder()`，生成侧同器；若原样存载荷里的 Base64URL，含 `+`/`/` 的种子会在断言时
+    抛异常 ⇒ 完好凭据的 prf 静默失效）；② 计数器 = `[2^20, 2^24)` 内 `SecureRandom` 随机高位起点
+    （`PD-49` 裁决一 (γ′)，断言链零改动）；③ 第二枚种子写 `Passkey.PrfNoUv`、**只存不用**。
+    `publicKeyBase64` 留空（外部材料口径），BE/BS 取 true/true 并在 KDoc 写明理由（载荷能到本仓即已
+    过一次导出；这两位会经 AuthenticatorData 交给 RP，属我方裁量故不留白）。
+    **擦除义务**：工厂**不**清零入参；新增 `ImportedPasskey.wipeSecrets()` 作为调用链的统一擦除动作
+    （取消路径不经工厂，故不能靠工厂擦）。
+    **写库侧**：`saveNewPasskeyEntry` 加 `parentGroupId` 参数（null＝根组的既定语义不变，
+    顶栏需要落当前分组必须显式传）；新增 `replacePasskeyOnEntry(entryId, data)`——
+    ⚠️ **既有的 `saveOrReplacePasskeyEntry` 不满足 Q1**：它按 `rpId + userName` 检索条目，
+    库里存在同站点同用户名的另一条时会写到**那条**上而非正在编辑的条目；
+    用例「四」把这一分岔做成可判定对照（两条同站点条目 + 断言命中的是第一条）。
+    新入口走 `DatabaseSession.updateEntryById`（会话 Mutex 内单次原子替换，与计数器补丁同源），
+    非 passkey 字段按引用复用，未命中返回 null 且零写入。`FakeVaultRepository` 新增观测点
+    `lastSavedPasskeyByEntry: Map<String, List<KdbxCustomField>>`——**必须存字段对象而非 String 映射**，
+    否则 AC④② 的逐键保护位断言会因观测点丢位而假绿（条目原文点名的真假绿路径）。
+    **互操作面（AC⑦）**：`PasskeyInteropProbeTest` 增设**第四条对拍条目**「Passkey Imported ES256」
+    （ES256 + 两枚种子＝导入形状），并在 `assertKpexSchemaShape` 加 `expectPrfNoUv` 判据
+    ——自产三条断言**不得写出**该键、第四条断言**必须在场且受保护**且为 32 字节；
+    `verify_interop.py` 同步加 `K_PRF_NO_UV` 进 `PROTECTED_KEYS` / `KNOWN_KEYS`
+    （**`KNOWN_KEYS` 必加**：否则多行值解析会把 `Passkey.PrfNoUv: …` 当成上一个键的续行吞掉）
+    并加 6b 段判据。重跑读数：`pykeepass 4.2.0` 解锁 4 条目、`keepassxc-cli 2.7.12` 四条交叉核对一致、
+    **✓ 对拍通过：161 条判据全部成立**（原 114 条 / 3 条目），产物
+    `keepasskey-passkey-probe.kdbx` SHA-256 `f6b2752a78a4e80d17dd80bbf8a3a00aa51a9b23ee9e015ebbbbefc99df07355`
+    ⇒ 「扩展键对其它管理器是无关属性」这句 PD-09 的立身之本第一次拿到**带新键的**官方实现实证。
+    **文档同批**：`已知工程限界.md` 新立 **§34**（① 导入凭据计数器不再具备克隆检测语义；
+    ② 非 32 字节 PRF 种子「存得下但用不了」——`decodeSecret` 硬判 32 字节，是本轮实现时才发现的
+    既有约束，`PD-49` 裁决二只说了「不判不裁不拒收」，未预见消费方会 fail-closed 拒绝 ⇒ 二者合并登记）；
+    `PD-09` 第 3 项补记新扩展键与判据数变化；AC⑦ 文本的「114 判据」就地改为 161/4 条目并留原值。
+    ⚠️ **本片仍未接线**：`PasskeyImportFactory` / `replacePasskeyOnEntry` 的生产调用点随第 4 片
+    （两个入口 + 确认对话框）出现；AC③ 的「回调返回后已清零」行为级断言亦属第 4 片。
+    验证读数：新增 `PasskeyImportFactoryTest` **8 例**（含真实消费路径——本地独立算一遍
+    `HMAC-SHA-256(seed, SHA-256("WebAuthn PRF"‖0x00‖input))` 比对 `PasskeyPrf.computeValue` 输出；
+    随机区间 200 取样、非 32 字节种子「存得下 + 计算必拒」双向锁）与
+    `PasskeyImportWritePathTest` **4 例**；`:database:` probe 用例绿 + 脚本 161 条全绿。
+  - **第 4 片 两个入口 + 确认对话框（下一步）**：顶栏分流接线 + 编辑页按 entryId 替换 +
+    确认对话框（4′ 不兼容清单、「另有 N 把」点名、FLAG_SECURE 跟随开关）+ `PopupSecureFlagInventoryTest` 重盘点
+    + AC③ 行为级擦除断言 + AC⑪① 只读字段用例。
 

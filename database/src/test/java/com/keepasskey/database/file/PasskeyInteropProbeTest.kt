@@ -162,6 +162,23 @@ class PasskeyInteropProbeTest {
             userDisplayName = "Interop Probe User"
         )
 
+        /**
+         * 「导入形状」条目（`ISSUE-P3-337` 第 3 片，`PD-48` 裁决二）：ES256 + 两枚 PRF 种子，
+         * 第二枚落在本仓扩展键 `Passkey.PrfNoUv` 上。
+         *
+         * 为什么必须进对拍产物：`Passkey.PrfNoUv` 是**新增**的 schema 成员，而 PD-09 的立身之本是
+         * 「扩展键对其它管理器是无关属性，读写均忽略，不破坏互操作」。这句话此前只被
+         * 「自家生成的条目里没有扩展之外的键」间接支持过——真正要证的恰是**带新扩展键的条目**
+         * 仍能被 `keepassxc-cli` / `pykeepass` 读出且 KPEX 侧字段逐字一致。少了这一条，
+         * 新键的互操作影响就是**未验证**（规则 8：互操作性只认官方实现端到端对拍）。
+         */
+        val importedShape = PasskeyCryptoEngine.generateEs256KeyPair(
+            relyingPartyId = PROBE_RP_ID,
+            userName = IMPORTED_USER_NAME,
+            userHandle = PROBE_USER_HANDLE,
+            userDisplayName = "Interop Probe Imported"
+        ).copy(prfSecret = randomPrfSecret(), prfNoUvSecret = randomPrfSecret())
+
         val database = KdbxDatabase(
             header = probeHeader(),
             databaseName = "PasskeyInteropProbe",
@@ -171,7 +188,8 @@ class PasskeyInteropProbeTest {
                 entries = listOf(
                     passkeyEntry(es256, ES256_ENTRY_TITLE, time),
                     passkeyEntry(ed25519, ED25519_ENTRY_TITLE, time),
-                    passkeyEntry(rs256, RS256_ENTRY_TITLE, time)
+                    passkeyEntry(rs256, RS256_ENTRY_TITLE, time),
+                    passkeyEntry(importedShape, IMPORTED_ENTRY_TITLE, time)
                 )
             )
         )
@@ -189,9 +207,11 @@ class PasskeyInteropProbeTest {
         val loadedEd25519 = requireNotNull(entriesByTitle[ED25519_ENTRY_TITLE]) { "Ed25519 条目必须可读回" }
         val loadedRs256 = requireNotNull(entriesByTitle[RS256_ENTRY_TITLE]) { "RS256 条目必须可读回" }
 
-        assertKpexSchemaShape(loadedEs256, expectPrf = true)
-        assertKpexSchemaShape(loadedEd25519, expectPrf = false)
-        assertKpexSchemaShape(loadedRs256, expectPrf = false)
+        assertKpexSchemaShape(loadedEs256, expectPrf = true, expectPrfNoUv = false)
+        assertKpexSchemaShape(loadedEd25519, expectPrf = false, expectPrfNoUv = false)
+        assertKpexSchemaShape(loadedRs256, expectPrf = false, expectPrfNoUv = false)
+        val loadedImported = requireNotNull(entriesByTitle[IMPORTED_ENTRY_TITLE]) { "导入形状条目必须可读回" }
+        assertKpexSchemaShape(loadedImported, expectPrf = true, expectPrfNoUv = true)
 
         val restoredEs256 = PasskeyData.fromCustomFields(loadedEs256.customFields)
         assertNotNull("ES256 条目必须能还原为 PasskeyData", restoredEs256)
@@ -224,7 +244,7 @@ class PasskeyInteropProbeTest {
         outFile.writeBytes(fileBytes)
 
         val sha256Hex = HashUtil.sha256(fileBytes).joinToString("") { "%02x".format(it) }
-        File(outDir, PROBE_MANIFEST_NAME).writeText(buildManifest(es256, ed25519, rs256))
+        File(outDir, PROBE_MANIFEST_NAME).writeText(buildManifest(es256, ed25519, rs256, importedShape))
         File(outDir, PROBE_NOTE_NAME).writeText(
             buildNote(outFile, fileBytes.size, sha256Hex)
         )
@@ -241,7 +261,7 @@ class PasskeyInteropProbeTest {
      * 扩展键齐备、`PRF` 按需出现。任一漂移都会让官方客户端读不到 / 读错——这是**本仓一侧**的
      * 责任面，外部对拍无法替代（外部只能反映结果）。
      */
-    private fun assertKpexSchemaShape(entry: KdbxEntry, expectPrf: Boolean) {
+    private fun assertKpexSchemaShape(entry: KdbxEntry, expectPrf: Boolean, expectPrfNoUv: Boolean) {
         val byKey = entry.customFields.associateBy { it.key }
 
         // 必需 KPEX 键（KeePassXC 写入口径：受保护者 = USER_HANDLE / CREDENTIAL_ID / PRIVATE_KEY_PEM）
@@ -294,6 +314,26 @@ class PasskeyInteropProbeTest {
             }
         } else {
             assertFalse("未携带 prf 的条目不得写入 KPEX_PASSKEY_PRF", byKey.containsKey(PasskeyData.KPEX_FIELD_PRF))
+        }
+
+        // 第二枚 PRF 种子（`Passkey.PrfNoUv`，`PD-48` 裁决二）：**只在导入形状条目上出现**，
+        // 且与 KPEX_PASSKEY_PRF 同为受保护字段；自产条目没有第二枚种子，必须**不写出该键**
+        // （写出空值会让读侧把「有扩展」误判成「有种子」）。
+        if (expectPrfNoUv) {
+            val noUv = byKey[PasskeyData.FIELD_PRF_NO_UV]
+            assertNotNull("导入形状条目必须写入扩展键 Passkey.PrfNoUv（不存即永失）", noUv)
+            assertTrue("Passkey.PrfNoUv 必须受保护（同为凭据秘密）", noUv!!.isProtected)
+            val decoded = noUv.value.useUtf8 { Base64.getDecoder().decode(it) }
+            try {
+                assertEquals("第二枚种子同为 32 字节材料", PRF_SECRET_BYTES, decoded.size)
+            } finally {
+                Arrays.fill(decoded, 0.toByte())
+            }
+        } else {
+            assertFalse(
+                "自产凭据无第二枚种子，不得写出 Passkey.PrfNoUv",
+                byKey.containsKey(PasskeyData.FIELD_PRF_NO_UV)
+            )
         }
     }
 
@@ -390,20 +430,27 @@ class PasskeyInteropProbeTest {
     private fun buildManifest(
         es256: PasskeyData,
         ed25519: PasskeyData,
-        rs256: PasskeyData
+        rs256: PasskeyData,
+        importedShape: PasskeyData
     ): String = buildString {
         appendLine("{")
         appendLine("  \"password\": \"$PROBE_PASSWORD\",")
         appendLine("  \"rpId\": \"$PROBE_RP_ID\",")
         appendLine("  \"entries\": [")
-        appendLine(manifestEntry(ES256_ENTRY_TITLE, es256, expectPrf = true) + ",")
-        appendLine(manifestEntry(ED25519_ENTRY_TITLE, ed25519, expectPrf = false) + ",")
-        appendLine(manifestEntry(RS256_ENTRY_TITLE, rs256, expectPrf = false))
+        appendLine(manifestEntry(ES256_ENTRY_TITLE, es256, expectPrf = true, expectPrfNoUv = false) + ",")
+        appendLine(manifestEntry(ED25519_ENTRY_TITLE, ed25519, expectPrf = false, expectPrfNoUv = false) + ",")
+        appendLine(manifestEntry(RS256_ENTRY_TITLE, rs256, expectPrf = false, expectPrfNoUv = false) + ",")
+        appendLine(manifestEntry(IMPORTED_ENTRY_TITLE, importedShape, expectPrf = true, expectPrfNoUv = true))
         appendLine("  ]")
         appendLine("}")
     }
 
-    private fun manifestEntry(title: String, passkey: PasskeyData, expectPrf: Boolean): String = buildString {
+    private fun manifestEntry(
+        title: String,
+        passkey: PasskeyData,
+        expectPrf: Boolean,
+        expectPrfNoUv: Boolean
+    ): String = buildString {
         append("    {")
         append("\"title\": \"$title\", ")
         append("\"userName\": \"${passkey.userName}\", ")
@@ -412,7 +459,8 @@ class PasskeyInteropProbeTest {
         append("\"userHandle\": \"${passkey.userHandle}\", ")
         append("\"publicKeyBase64\": \"${passkey.publicKeyBase64}\", ")
         append("\"privateKeyPemDerSha256\": \"${passkey.usePrivateKeyBytes { pemSha256Hex(it) }}\", ")
-        append("\"prfPresent\": $expectPrf")
+        append("\"prfPresent\": $expectPrf, ")
+        append("\"prfNoUvPresent\": $expectPrfNoUv")
         append("}")
     }
 
@@ -476,9 +524,12 @@ class PasskeyInteropProbeTest {
         const val ES256_ENTRY_TITLE = "Passkey ES256 (passkey-interop.example)"
         const val ED25519_ENTRY_TITLE = "Passkey Ed25519 (passkey-interop.example)"
         const val RS256_ENTRY_TITLE = "Passkey RS256 (passkey-interop.example)"
+        /** 导入形状条目（带第二枚 PRF 种子 `Passkey.PrfNoUv`，`ISSUE-P3-337` 第 3 片） */
+        const val IMPORTED_ENTRY_TITLE = "Passkey Imported ES256 (passkey-interop.example)"
         const val ES256_USER_NAME = "es256-user@passkey-interop.example"
         const val ED25519_USER_NAME = "ed25519-user@passkey-interop.example"
         const val RS256_USER_NAME = "rs256-user@passkey-interop.example"
+        const val IMPORTED_USER_NAME = "imported-user@passkey-interop.example"
 
         const val KPEX_PEM_KEY = "KPEX_PASSKEY_PRIVATE_KEY_PEM"
 

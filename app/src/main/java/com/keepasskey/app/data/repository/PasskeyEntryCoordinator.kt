@@ -107,8 +107,20 @@ internal class PasskeyEntryCoordinator(
         }
     }
 
-    /** 新建 Passkey 条目并立即落盘；写库成功但序列化失败时如实留痕日志 */
-    suspend fun saveNewPasskeyEntry(data: PasskeyData, boundPackage: String?): KdbxEntry {
+    /**
+     * 新建 Passkey 条目并立即落盘；写库成功但序列化失败时如实留痕日志。
+     *
+     * `ISSUE-P3-337` 第 3 片加 [parentGroupId]：`null` 的既定语义是**根分组**
+     * （`SessionTreeEditor.updateOrAddEntry` 的规范化，ISSUE-P3-63 在案），而顶栏扫码入口要求
+     * 「落在用户当下所在分组」，故必须由调用方显式传入，不能靠默认值。
+     * ⚠️ 返回值是**传入的实例**（其 `parentGroupId` 可能仍是 null——规范化发生在树内副本上），
+     * 调用方要拿落组后的真实 id 请读返回值里的 [KdbxEntry.id]，不要反过来依赖 parentGroupId。
+     */
+    suspend fun saveNewPasskeyEntry(
+        data: PasskeyData,
+        boundPackage: String?,
+        parentGroupId: KdbxUuid? = null
+    ): KdbxEntry {
         val title = passkeyTitle(data)
         val url = passkeyUrl(data, boundPackage)
         val fields = mapOf(
@@ -118,7 +130,7 @@ internal class PasskeyEntryCoordinator(
         )
         val newEntry = KdbxEntry(
             id = KdbxUuid.random(),
-            parentGroupId = null,
+            parentGroupId = parentGroupId,
             fields = fields,
             customFields = data.toCustomFields()
         )
@@ -128,6 +140,42 @@ internal class PasskeyEntryCoordinator(
             debugLog.warn(TAG, "Passkey 条目创建成功但落盘失败: ${saved.error.javaClass.simpleName}")
         }
         return newEntry
+    }
+
+    /**
+     * 把 Passkey 数据**整体替换到指定 entryId 的既有条目**上（`ISSUE-P3-337` Q1 编辑页导入）。
+     *
+     * 为什么不能用 [saveOrReplacePasskeyEntry]：后者的定位条件是「同 rpId 域匹配 + 同 userName 的
+     * 既有 passkey 条目」（[findReusablePasskeyEntry]），**不是**「用户正在编辑的这一条」——
+     * 导入一把别的站点的凭据时它会另找条目或直接新建，与 Q1 的「挂当前条目、整体替换」不符。
+     *
+     * 语义：按 id 定位 → 保留全部非 passkey 字段（标题 / 备注 / 密码 / 附件等，按引用复用）
+     * → 剥离 `PasskeyData.isPasskeyFieldKey` 覆盖的全部 schema 键（含 v1 旧键与本仓扩展键，
+     * 故 `Passkey.PrfNoUv` 已登记进 [com.keepasskey.core.model.PasskeyData] 的 SCHEMA_FIELD_KEYS
+     * 是**前提**，否则旧值会残留）→ 写入新字段。整场变换走
+     * [DatabaseSession.updateEntryById] 的**会话 Mutex 内单次原子替换**，与计数器补丁同源：
+     * 被替换下线的旧条目敏感实例由该入口的定点擦除清零（私钥不留第二份驻留实例）。
+     *
+     * @return 落树上线的条目；`entryId` 非法 / 条目不存在 / 只读态时返回 null 且**无任何写入**。
+     */
+    suspend fun replacePasskeyOnEntry(entryId: String, data: PasskeyData): KdbxEntry? {
+        val targetUuid = parseKdbxUuidOrNull(entryId) ?: return null
+        val replacement = databaseSession.updateEntryById(targetUuid) { entry ->
+            val preserved = entry.customFields.filterNot { PasskeyData.isPasskeyFieldKey(it.key) }
+            entry.copy(
+                customFields = preserved + data.toCustomFields(),
+                times = entry.times.withModified()
+            )
+        }
+        if (replacement == null) {
+            debugLog.warn(TAG, "按 entryId 替换通行密钥字段未命中条目，未做任何写入")
+            return null
+        }
+        val saved = persistSession()
+        if (saved is KdbxResult.Failure) {
+            debugLog.warn(TAG, "通行密钥字段已替换但落盘失败: ${saved.error.javaClass.simpleName}")
+        }
+        return replacement
     }
 
     /**

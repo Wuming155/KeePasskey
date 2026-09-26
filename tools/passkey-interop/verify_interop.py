@@ -60,10 +60,11 @@ K_PRIVATE_KEY_PEM = "KPEX_PASSKEY_PRIVATE_KEY_PEM"
 K_FLAG_BE = "KPEX_PASSKEY_FLAG_BE"
 K_FLAG_BS = "KPEX_PASSKEY_FLAG_BS"
 K_PRF = "KPEX_PASSKEY_PRF"
+K_PRF_NO_UV = "Passkey.PrfNoUv"  # 本仓扩展键：CXF 导入的第二枚 PRF 种子（PD-48 裁决二）
 K_ALGORITHM = "Passkey.Algorithm"
 K_PUBLIC_KEY = "Passkey.PublicKey"
 
-PROTECTED_KEYS = {K_USER_HANDLE, K_CREDENTIAL_ID, K_PRIVATE_KEY_PEM, K_PRF}
+PROTECTED_KEYS = {K_USER_HANDLE, K_CREDENTIAL_ID, K_PRIVATE_KEY_PEM, K_PRF, K_PRF_NO_UV}
 ALGORITHM_ES256 = -7
 ALGORITHM_ED25519 = -8
 ALGORITHM_RS256 = -257
@@ -79,7 +80,7 @@ EXPECTED_KEY_TYPE = {
 STANDARD_FIELDS = {"Title", "UserName", "Password", "URL", "Notes", "Uuid", "Tags"}
 KNOWN_KEYS = {
     K_RP, K_USERNAME, K_USER_HANDLE, K_CREDENTIAL_ID, K_PRIVATE_KEY_PEM,
-    K_FLAG_BE, K_FLAG_BS, K_PRF, K_ALGORITHM, K_PUBLIC_KEY,
+    K_FLAG_BE, K_FLAG_BS, K_PRF, K_PRF_NO_UV, K_ALGORITHM, K_PUBLIC_KEY,
     "Passkey.SignCount", "Passkey.UserDisplayName", "Passkey.CreatedAt",
 } | STANDARD_FIELDS
 
@@ -175,6 +176,8 @@ def verify_entry(db_path: pathlib.Path, kp: PyKeePass, spec: dict, rp_id: str) -
     for key in PROTECTED_KEYS:
         if key == K_PRF and not spec.get("prfPresent"):
             continue
+        if key == K_PRF_NO_UV and not spec.get("prfNoUvPresent"):
+            continue
         check(key in props, f"{label} 缺少受保护键 {key}")
         if key in props:
             check(entry.is_custom_property_protected(key), f"{label} {key} 必须是受保护属性")
@@ -225,6 +228,17 @@ def verify_entry(db_path: pathlib.Path, kp: PyKeePass, spec: dict, rp_id: str) -
             check(len(base64.b64decode(prf)) == 32, f"{label} PRF 秘密应为 32 字节")
     else:
         check(K_PRF not in props, f"{label} 不应含 KPEX_PASSKEY_PRF")
+
+    # 6b) 第二枚 PRF 种子（本仓扩展键）：导入形状条目必须在场且受保护，自产条目必须缺席。
+    #     这一条同时是「扩展键对其它管理器是无关属性」的实证——它出现在库里时
+    #     pykeepass / keepassxc-cli 仍须能读出该条目的全部 KPEX 字段（前面的判据已覆盖）。
+    if spec.get("prfNoUvPresent"):
+        no_uv = entry.get_custom_property(K_PRF_NO_UV)
+        check(no_uv is not None, f"{label} 应含扩展键 {K_PRF_NO_UV}（导入凭据的第二枚种子，不存即永失）")
+        if no_uv is not None:
+            check(len(base64.b64decode(no_uv)) == 32, f"{label} {K_PRF_NO_UV} 应为 32 字节材料")
+    else:
+        check(K_PRF_NO_UV not in props, f"{label} 自产凭据无第二枚种子，不应含 {K_PRF_NO_UV}")
 
     # 7) 双实现交叉核对：keepassxc-cli 与 pykeepass 读数必须一致
     cli_attrs = read_with_keepassxc_cli(db_path, _PASSWORD[0], title)

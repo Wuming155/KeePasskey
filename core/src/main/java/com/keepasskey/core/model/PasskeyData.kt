@@ -23,7 +23,7 @@ import com.keepasskey.core.security.ProtectedString
  *
  * KPEX schema **不含**签名计数器、公钥与展示名，本仓以 `Passkey.*` 前缀的**扩展键**承载
  * （`Passkey.SignCount` / `Passkey.PublicKey` / `Passkey.Algorithm` / `Passkey.UserDisplayName`
- * / `Passkey.CreatedAt`）：扩展键对其它管理器是无关属性，读写均忽略，不破坏互操作；
+ * / `Passkey.CreatedAt` / `Passkey.PrfNoUv`）：扩展键对其它管理器是无关属性，读写均忽略，不破坏互操作；
  * 其中 `Passkey.Algorithm` 的存在使热路径（自动填充候选评分）无需解密私钥嗅探算法。
  *
  * **历史 schema（v1，`Passkey.RelyingParty` / `Passkey.CredentialId` / `Passkey.PrivateKey` /
@@ -124,13 +124,16 @@ data class PasskeyData(
      * 仅当注册请求携带 `extensions.prf` 时才生成；断言时用于按请求的 salt 计算
      * `HMAC-SHA-256(secret, SHA-256("WebAuthn PRF" || 0x00 || salt))`。
      */
-    val prfSecret: ProtectedString? = null
+    val prfSecret: ProtectedString? = null,
+
+    /** 第二枚 PRF 种子（CXF `credWithoutUV`）→ 扩展键 [FIELD_PRF_NO_UV]；仅导入路径写入，断言链不消费。 */
+    val prfNoUvSecret: ProtectedString? = null
 ) {
     /**
      * 将通行密钥数据映射为 KDBX 条目自定义字段列表（**KeePassXC / KeePassDX 兼容 schema**）。
      *
-     * 零拷贝别名语义（ISSUE-P1-02）：[FIELD_PRIVATE_KEY] 与 [KPEX_FIELD_PRF] 字段**直接引用**
-     * [privateKey] / [prfSecret] 同一 [ProtectedString] 实例（不克隆、不物化明文副本）。
+     * 零拷贝别名语义（ISSUE-P1-02）：[FIELD_PRIVATE_KEY] 与 [KPEX_FIELD_PRF]、[FIELD_PRF_NO_UV]
+     * 直接引用 [privateKey] / [prfSecret] / [prfNoUvSecret] 同一 [ProtectedString] 实例（不克隆、不物化明文副本）。
      * 因此落库完成前**严禁**对本对象执行任何 `clear()`——否则会连同库内驻留字段一并置为
      * 已清零态，后续断言读取将 fail。
      */
@@ -149,6 +152,7 @@ data class PasskeyData(
         fields += KdbxCustomField(KPEX_FIELD_FLAG_BE, ProtectedString(flagToFieldValue(backupEligible), isProtected = false))
         fields += KdbxCustomField(KPEX_FIELD_FLAG_BS, ProtectedString(flagToFieldValue(backupState), isProtected = false))
         prfSecret?.let { fields += KdbxCustomField(KPEX_FIELD_PRF, it) }
+        prfNoUvSecret?.let { fields += KdbxCustomField(FIELD_PRF_NO_UV, it) }
         fields += KdbxCustomField(FIELD_SIGN_COUNT, ProtectedString(clampSignCount(signCount).toString(), isProtected = false))
         fields += KdbxCustomField(FIELD_USER_DISPLAY_NAME, ProtectedString(userDisplayName, isProtected = false))
         fields += KdbxCustomField(FIELD_CREATED_AT, ProtectedString(createdAtMillis.toString(), isProtected = false))
@@ -221,6 +225,12 @@ data class PasskeyData(
         /** 扩展：创建时间（毫秒） */
         const val FIELD_CREATED_AT = "${FIELD_PREFIX}CreatedAt"
 
+        /**
+         * 扩展：**第二枚 PRF 种子**（CXF `credWithoutUV`），受保护；只存不用，仅导入路径写入。
+         * 裁决与残余面：`docs/architecture/产品裁决登记.md` `PD-48` 裁决二、`已知工程限界.md` §34。
+         */
+        const val FIELD_PRF_NO_UV = "${FIELD_PREFIX}PrfNoUv"
+
         // ---------------- 历史 v1 schema（**只读兼容**，不再写入） ----------------
 
         /** v1：`Passkey.RelyingParty` */
@@ -259,6 +269,7 @@ data class PasskeyData(
             FIELD_SIGN_COUNT,
             FIELD_USER_DISPLAY_NAME,
             FIELD_CREATED_AT,
+            FIELD_PRF_NO_UV,
             LEGACY_FIELD_RP_ID,
             LEGACY_FIELD_CREDENTIAL_ID,
             LEGACY_FIELD_PRIVATE_KEY,
@@ -481,7 +492,8 @@ data class PasskeyData(
                 backupEligible = backupEligible,
                 backupState = backupState,
                 createdAtMillis = createdAt,
-                prfSecret = map[KPEX_FIELD_PRF]?.value
+                prfSecret = map[KPEX_FIELD_PRF]?.value,
+                prfNoUvSecret = map[FIELD_PRF_NO_UV]?.value
             )
         }
     }

@@ -1,6 +1,7 @@
 package com.keepasskey.app.data.repository
 
 import com.keepasskey.core.model.KdbxEntry
+import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.core.model.PasskeyData
 
 /**
@@ -26,14 +27,31 @@ interface VaultPasskeyRepository {
     suspend fun findPasskeyByCredentialId(credentialId: String): KdbxEntry?
 
     /**
-     * 保存全新的 Passkey 凭据条目至根群组。
+     * 保存全新的 Passkey 凭据条目。
      * [boundPackage] 非空时（普通应用创建路径）条目 url 记录为 android://<包名>，
      * 供凭据查询按严格包名边界匹配；为空时记录为 https://<rpId>。
+     *
+     * `parentGroupId`（`ISSUE-P3-337` 第 3 片新增）：为 null 时落**根群组**（既定语义），
+     * 需要落在用户当下所在分组的调用方（顶栏扫码导入）必须显式传入。
      */
     suspend fun saveNewPasskeyEntry(
         data: PasskeyData,
-        boundPackage: String? = null
+        boundPackage: String? = null,
+        parentGroupId: KdbxUuid? = null
     ): KdbxEntry
+
+    /**
+     * 把 Passkey 数据**整体替换到指定 [entryId] 的既有条目**上（`ISSUE-P3-337` Q1 编辑页导入）。
+     *
+     * 与 [saveOrReplacePasskeyEntry] 的区别是定位方式：本入口按 **entryId** 定位，
+     * 后者按「同 rpId + 同用户名」找可复用条目——两者在「用户正在编辑这一条」的语义下
+     * **不等价**（后者可能命中另一条目或另建），故导入路径必须用本入口。
+     * 非 passkey 字段（标题 / 备注 / 密码 / 附件 / 历史等）全部保留；全部 passkey schema 键
+     * （含 v1 旧键与本仓扩展键）整体换新，不残留旧值。
+     *
+     * @return 落树上线的条目；[entryId] 非法 / 条目不存在 / 只读态时返回 null 且无任何写入。
+     */
+    suspend fun replacePasskeyOnEntry(entryId: String, data: PasskeyData): KdbxEntry?
 
     /**
      * 新建或**原地替换** Passkey 凭据条目。

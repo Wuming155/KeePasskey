@@ -7,6 +7,7 @@ import com.keepasskey.app.ui.model.VaultDatabaseInfo
 import com.keepasskey.app.ui.model.VaultGroup
 import com.keepasskey.app.ui.model.VaultRemovalKind
 import com.keepasskey.core.model.KdbxEntry
+import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.core.model.PasskeyData
 import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.database.file.KdbxKdfStrengthAssessment
@@ -316,8 +317,14 @@ class RealVaultRepository @Inject constructor(
 
     override fun isSessionReadOnly(): Boolean = databaseSession.isReadOnly
 
-    override suspend fun saveNewPasskeyEntry(data: PasskeyData, boundPackage: String?): KdbxEntry =
-        passkeyEntries.saveNewPasskeyEntry(data, boundPackage)
+    override suspend fun saveNewPasskeyEntry(
+        data: PasskeyData,
+        boundPackage: String?,
+        parentGroupId: KdbxUuid?
+    ): KdbxEntry = passkeyEntries.saveNewPasskeyEntry(data, boundPackage, parentGroupId)
+
+    override suspend fun replacePasskeyOnEntry(entryId: String, data: PasskeyData): KdbxEntry? =
+        passkeyEntries.replacePasskeyOnEntry(entryId, data)
 
     override suspend fun saveOrReplacePasskeyEntry(data: PasskeyData, boundPackage: String?): KdbxEntry =
         passkeyEntries.saveOrReplacePasskeyEntry(data, boundPackage)
