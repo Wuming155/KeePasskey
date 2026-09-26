@@ -66,6 +66,7 @@
 | [`references/Monica-架构分析.md`](references/Monica-架构分析.md) | 🥉 **UI / 本地优先辅助**（Kotlin + Rust `mdbx`）：Material 3 + Compose 动效、本地优先 vault（逻辑历史 / 冲突 / 快照） |
 | [`references/存量5项开放问题的参考项目对照.md`](references/存量5项开放问题的参考项目对照.md) | `ACTIVE_ISSUES.md` 当时 5 项开放条目逐项「参考项目怎么做」取证对照：文件级防回滚 / KDF「只升不降」/ Autofill 不依赖框架重发 / SSRF / 分支保护，含 `路径:行号` 证据与「未找到证据」的区分；其中三条已作为产品裁决迁出，本文件仍是其依据 |
 | [`references/本地文件级防护层的参考项目对照.md`](references/本地文件级防护层的参考项目对照.md) | `ISSUE-P1-277` / `ISSUE-P3-326` / `ISSUE-P3-327` / `ISSUE-P3-328` 四条「纵深防御层冗余性」条目的取证对照：解锁失败节流 / 本地防回滚状态 MAC / Passkey signCount 反克隆与记录防篡改 / 自动填充屏蔽形态，五项目逐项对照 + 检索符号清单 + 未命中声明 |
+| [`references/扫码导入通行密钥的参考项目对照.md`](references/扫码导入通行密钥的参考项目对照.md) | `ISSUE-P3-337` / `ISSUE-P3-338` 的 passkey 专项取证对照（`参考项目/passkeys参考/` 三副本：Authnkey MIT / fenris **无 LICENSE 文件** / open-passkey MIT）：**零 CXF 实现、零 CTAP hybrid 传输**（含未命中声明）、fenris passkey 落库字段集与 QR 备份容器形态、`transports` 两种相反先例（虚报 vs 只报实际）、导入前「不兼容清单」确认模式、open-passkey 的 RP 侧算法实证与回滚判据；含采纳 / 不采纳 / 待裁决三档与检索符号清单 |
 
 ## resolved/ — 历史批次归档
 

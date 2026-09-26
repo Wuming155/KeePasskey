@@ -1,6 +1,8 @@
 # 参考项目总览
 
-本目录是 KeePasskey 项目的实现思路参考库，收录了 5 个开源密码管理器项目。**目录内各项目源码只读，仅作借鉴，严禁修改或将其代码复制入库**（许可证约束，详见各项目自带 LICENSE / license 文件）。
+本目录是 KeePasskey 项目的实现思路参考库，收录了 5 个开源密码管理器项目，另有 **passkey 专项三副本**
+（源码位于 `参考项目/passkeys参考/`，见下方「passkey 专项参考」节）。**目录内各项目源码只读，仅作借鉴，
+严禁修改或将其代码复制入库**（许可证约束，详见各项目自带 LICENSE / license 文件）。
 
 ## 项目列表
 
@@ -11,6 +13,19 @@
 | **keepass2android-main** | Android / C# (Xamarin) + Java 绑定 | 功能最全的 Android KeePass 客户端之一，内置多网盘同步（Dropbox / OneDrive / WebDAV / SFTP 等）、键盘与 Autofill 填充 | [keepass2android-架构分析.md](keepass2android-架构分析.md) |
 | **Monica-main** | Android (Kotlin) + Rust | 现代 Android 密码管理器，Material 3 + Compose 风格 UI；附带的 `mdbx` 是其 Rust 实现的本地优先加密 vault 格式（含类 Git 历史、同步冲突处理、快照恢复） | [Monica-架构分析.md](Monica-架构分析.md) |
 | **keepassxc-develop** | 跨平台桌面 / C++ (Qt) + CMake | KeePassXC（develop 分支），KeePass 生态中质量最高的社区实现：KDBX 3/4 读写、Argon2/AES-KDF、Twofish/ChaCha20、浏览器集成与通行密钥、`Merger` KDBX 合并引擎 | [KeePassXC-架构分析.md](KeePassXC-架构分析.md) |
+
+## passkey 专项参考（`参考项目/passkeys参考/`，2026-09-26 登记）
+
+> **定位**：**不是**密码管理器，而是「passkey 协议面上离本仓最近或判据上可校准」的三类实现，
+> 服务 `ISSUE-P3-337`（扫码导入通行密钥）与 `ISSUE-P3-338`（`transports` 虚报）的取证对照。
+> 已核验：**三者均不实现 FIDO CXF、均无 CTAP hybrid / caBLE 传输**（零命中取证见对照文档 §1、§4）
+> ⇒ 只可作**判据与形态对照**，**不可**作为「通行做法」的依据。
+
+| 项目 | 许可证 | 平台 / 语言 | 简介与参考价值 | 对照文档 |
+|------|--------|-------------|----------------|----------|
+| **Authnkey-main** | MIT（`LICENSE` 在案） | Android / Kotlin | 不依赖 GMS 的凭据提供方，把 CTAP2 代理到 **NFC / USB 硬件密钥**：`CredentialProviderService` 接线、自研零依赖 CBOR、CTAPHID 帧、PIN 协议 v1、`authenticatorGetInfo` 能力探测。**`transports` 只上报实际所用传输**（`ISSUE-P3-338` 的正向先例） | [扫码导入通行密钥的参考项目对照.md](扫码导入通行密钥的参考项目对照.md) §2.4 / §2.6 / §2.7 |
+| **fenris-authenticator-main** | ⚠️ **根目录无 `LICENSE` 文件**（许可证未声明 ⇒ **绝对禁止**复制其任何代码） | Android / Kotlin | 与本仓形态最近邻的 **passkey + TOTP 认证器**：自带凭据提供方、SE/TEE 密钥驻留、QR 离线备份、导入前「不兼容清单」确认 UI。passkey 落库字段集与 `KPEX_PASSKEY_*` 同构，但**不存** PRF / signCount / `transports`，且**虚报** `["internal","hybrid"]` | 同上 §2.1 / §2.2 / §2.4 / §2.5 |
+| **open-passkey-main** | MIT（`LICENSE` 在案） | TS / Go / Py / Java / .NET / Rust / PHP / Ruby | **RP / 服务端** WebAuthn 验证库 + 软件认证器 + 31 条跨语言测试向量。价值在**判据校准**：算法只从存储的 COSE key 实证读取（与本仓「CXF 无 `alg` ⇒ 由 PKCS#8 OID 判定」同向）、回滚检测 `stored>0 && new<=stored`、BE/BS 一致性 | 同上 §2.3 |
 
 ## 参考优先级层级（严格执行）
 
@@ -24,6 +39,10 @@
    - `Merger`（`src/core/Merger.cpp`）的条目级合并与墓碑复活规则是 `KdbxMerger` 的直接算法参考；浏览器集成中的 `KPEX_PASSKEY_*` Entry 属性 schema 对 `PasskeyData` 互操作有直接价值；KDBX 3/4 读写器管线可作为 `database` 模块的实现交叉验证。
 5. 🥉 **辅助参考（不做重点）**：**Monica**
    - 辅助参考，不做重点。仅用于拓宽现代 Compose UI 动效与本地优先数据流的设计思路。
+6. ⚖️ **协议面判据参考（passkey 专项，2026-09-26 登记）**：**Authnkey** / **fenris** / **open-passkey**
+   - 只用于「认证器侧接线形态」「RP 侧判据」两类**交叉校准**，**不进入**密码管理器优先级序列。
+     已实证三者**零 CXF 实现、零 hybrid 传输**（对照文档 §1、§4）⇒
+     **禁止**以「参考项目也这么做」作为任何 passkey 口径的依据（`ISSUE-P3-338` 即为该禁令的反例教训）。
 
 ## 各项目对 KeePasskey 的参考价值
 
@@ -37,4 +56,6 @@
 
 1. 实现某模块前，先查阅 `docs/architecture/reference-projects.md` 中的参考项目地图，定位应参照的具体文件。
 2. 再阅读本项目录中对应的架构分析文档，建立整体认识。
-3. **只读约束**：任何操作不得改动本目录下 5 个项目目录中的任何文件；新增文档只允许放在本目录根下。
+3. **只读约束**：任何操作不得改动 `参考项目/` 下 8 个项目目录（密码管理器 5 + `passkeys参考/` 3）中的任何文件；
+   新增分析 / 对照文档只允许放在本目录根下。**特别提示**：`fenris-authenticator-main` 无 LICENSE 文件，
+   其代码**连"借鉴式改写"都不允许**，只可引用「路径 + 行号 + 结论」。

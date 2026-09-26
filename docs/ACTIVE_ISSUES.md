@@ -48,11 +48,61 @@
 > 已全部闭环：§315（309 / 312）、§317（308）、§318（310）、§319（311）、§320（313）；
 > 2026-09-25 CI 设备门禁与供应链扫描两条（`ISSUE-P2-314` / `ISSUE-P2-315`）闭环见 §325。
 
-## P3 低危问题、特性接线与体验优化（1 项）
+## P3 低危问题、特性接线与体验优化（2 项）
 
-> **开放项 1 条**（`ISSUE-P3-337` 扫码导入通行密钥，2026-09-26 立项）。
+> **开放项 2 条**（`ISSUE-P3-338` 注册响应虚报 `hybrid` 传输，2026-09-26 立项；
+> `ISSUE-P3-337` 扫码导入通行密钥，2026-09-26 立项）。
 > 2026-09-26 相册导入读尺寸判空修复（`ISSUE-P3-336`）闭环见 §341；
 > 更早的 P3 闭环流水见 `RESOLVED_LOG.md` §326 ~ §340。
+
+### ISSUE-P3-338：注册响应 `transports` 声明 `hybrid` 而本仓无任何 hybrid / 蓝牙实现——撤回为 `internal`
+
+- **优先级理由**：P3（不影响既有认证成败，属「对外自述能力与实际能力不符」的如实呈现缺陷）；
+  但它是任何 hybrid / caBLE 工作的**前置清洁项**，故排在同 section 顶部。
+- **核实时间点**：2026-09-26（本机会话内完成）。
+- **核实方式**（逐条可复跑）：
+  1. **代码事实**：`app/.../passkey/PasskeyRegistrationPayload.kt:180` 无条件交出
+     `listOf(WebAuthnJson.TRANSPORT_INTERNAL, WebAuthnJson.TRANSPORT_HYBRID)`；
+     同函数 KDoc `:149` 的理由是「**参考实现均声明 `hybrid`**（跨设备扫码），本仓此前只声明 `internal`」，
+     且该 KDoc 段落整体出自 `ISSUE-P2-265`「与两个参考实现对齐，补齐三项被消费方读取的字段」。
+     锁该值的断言两处：`app/src/test/.../PasskeyRegistrationMaterialInteropTest.kt:239`
+     （`assertTrue("transports 必须含 hybrid", …)`）、`PasskeyRegistrationPayloadBuildTest.kt:115`。
+  2. **实现事实**：`AndroidManifest.xml` 权限清单一行蓝牙都没有（现声明仅
+     `USE_FINGERPRINT` / `INTERNET` / `ACCESS_NETWORK_STATE` / `USE_BIOMETRIC` / `CAMERA` /
+     `POST_NOTIFICATIONS` / `HIDE_OVERLAY_WINDOWS`，见 `:17-37`），五模块 `src/main` 内
+     `bluetooth` / `BLE_ADVERTISE` / `websocket` 符号**零命中**（唯 6 处 `cable` 子串命中
+     属 Diceware 词表一类噪声）。CTAP2.2 §11.5 的 hybrid 传输**必须**有 BLE 广播
+     （`BluetoothLeAdvertiser` + `BLUETOOTH_ADVERTISE`）与会话隧道 ⇒ **本仓在权限层面即不可能完成 hybrid**。
+  3. **对照取证**（[`references/扫码导入通行密钥的参考项目对照.md`](references/扫码导入通行密钥的参考项目对照.md) §2.4）：
+     `fenris-authenticator` 的 `credentialprovider/webauthn/CreateResponse.kt:66` 同样硬编码
+     `listOf("internal", "hybrid")`，而该仓**全仓无一行蓝牙代码**（12 处 `cable` 命中经逐条核验
+     全是 `Cancelable` 一类子串）⇒ 本仓 KDoc 那句「参考实现均声明 hybrid」**恰好能在这一类实现上找到出处，
+     但被参照者自身并无该能力，不构成规范依据**；
+     反例是 `Authnkey`：`CredentialProviderActivity.kt:1030-1050` 只上报
+     「当前实际所用传输 ∪ `authenticatorGetInfo` 声明」，`HYBRID` / `BLE` 在其仓内是
+     **从未被引用的死常量**（`TransportType.kt:17,19`）。
+- **背景**：`transports` 是注册响应 `response` 里的**能力自述元数据**，供 RP / 平台决定
+  「下一步该引导用户走哪条传输」。声明一条不存在的传输，等于让对端为不可能完成的路径做 UI 与重试。
+- **整改口径**：
+  1. `PasskeyRegistrationPayload.kt:180` 降为 `listOf(WebAuthnJson.TRANSPORT_INTERNAL)` 单值。
+  2. 同函数 KDoc `:149` 那句「参考实现均声明 `hybrid`」**必须删除并改写**为可核验的表述：
+     本仓无 hybrid 传输（无蓝牙权限、无 BLE 广播、无会话隧道）⇒ 不得声明；
+     恢复条件是 **CTAP2.2 §11.5 全链可用**，而非「有实现参考」。
+     ⚠️ 该 KDoc 是**本缺陷的再生成器**：留着它，下一个人还会照抄。
+  3. 两处断言（核实 1 所列）同批改锁 `[internal]` 单值，失败消息须点名 `ISSUE-P3-338`。
+- **验收标准**：
+  - **AC①** 上述两断言改后仍绿，且**反向反校**：把 `TRANSPORT_HYBRID` 加回即红。
+  - **AC②** 全量 `.\gradlew.bat test --rerun-tasks --max-workers=1` 绿（计数只用
+    `python tools/doc/count_test_results.py`）+ `python tools/doc/gate_readings.py` **7/7 PASS**
+    且读数块原样贴入批次文档 §3。
+  - **AC③** 互操作面无回归：`transports` 属**注册响应元数据**、不写进 `KPEX_PASSKEY_*`，
+    故预期 `verify_interop.py` 判据不受影响 —— **开工首步先核实该预期**（若 probe 判据确含 `transports`，
+    须在本条目内登记并按新值重取基线，不得默默改判据）。
+- **未决与风险**：具体 RP / 平台是否因 `hybrid` 声明改变可观察行为（如提示"用另一台设备"路径），
+  **本条目未取证** ⇒ 不作为撤回的前提，也不构成「无害」的证据。
+- **粗估**：**0.5 人日**（一处取值 + 两处断言 + 一段 KDoc）。
+- **关联**：`ISSUE-P3-337`（同属 passkey 面；hybrid 落地时两条同批复核）/ `ISSUE-P2-265`
+  （本缺陷的引入批次）/ `references/扫码导入通行密钥的参考项目对照.md` §2.4（两种相反先例的取证）。
 
 ### ISSUE-P3-337：PD-08 扫码导入通行密钥落地——顶栏扫码按载荷分流（TOTP / 通行密钥），确认在先、字节通道解析、落 `KPEX_PASSKEY_*`
 
@@ -115,6 +165,70 @@
      ⇒ **裁决文档内的过时组件引用，已随本条目 2026-09-26 改写第 2 项时一并勘误**。
   8. `PopupSecureFlagInventoryTest`（`app/src/test/.../security/`，2026-09-26 盘点结论：调用点 4 处 /
      菜单项 11 个，全部静态文案）与 `PD-47`（扫码对话框 `FLAG_SECURE` 跟随设置开关）为本条目的守卫账目。
+  9. **同类实现对照（2026-09-26，`参考项目/passkeys参考/` 三副本只读取证；全量读数、检索符号清单与
+     未命中声明见 [`references/扫码导入通行密钥的参考项目对照.md`](references/扫码导入通行密钥的参考项目对照.md)）**：
+     `Authnkey-main`（MIT，CTAP2 over NFC/USB 硬件密钥）/ `fenris-authenticator-main`
+     （⚠️ **根目录无 `LICENSE` 文件**）/ `open-passkey-main`（MIT，RP 侧验证库）三家**均不实现 CXF**
+     （`hmacCredentials` / `credWithUV` / `Credential Exchange Format` 三符号全目录**零命中**），
+     也**均不消费** `fido2Extensions`；fenris 唯一的「passkey 导入」字样是**无人填充的死钩子**
+     （`importformat/ImportFormatDecoder.kt:16` 的 `DecodedImport.passkeys`、`vault/Passkey.kt:94` 的
+     `NewPasskey.privateKeyDER`）⇒ **本条通路在开源品类内无可抄对象**，正确性只能由规范原文 +
+     规则 8 的互操作对拍担保。同批两条判据级读数：① fenris 相机解码裁「中心 2/3」而取景框画 0.65、
+     两常数不同源（`codec/QrCode.kt:55-72` vs `ui/components/QrScanner.kt:236-259`），而本仓相机通路
+     **整帧解码不裁剪**（`TotpScanDialog.kt:282-301`）⇒ 本仓的对应风险点是**分辨率**而非裁剪区（核实 11）；
+     ② 同类实现**都不存** PRF / `credBlob` / `largeBlob` / signCount（`CreateResponse.kt:83`、
+     `AuthResponse.kt:23-24`）⇒ 本条目的扩展字段处理面**无先例**。
+  10. **CXF 规范自身的内部不一致 + 三条解析器硬事实（2026-09-26，逐字回读 `cxf-v1.0-ps-20250814` 全文）**：
+     - **附录 A 示例**那把 passkey 的扩展写成
+       `"fido2Extensions":{"hmacSecret":{"algorithm":"HS256","secret":"c2VjcmV0X2tleV9kYXRh"}}`，
+       而 **§3.3.12.2/.3 的 CDDL** 是 `hmacCredentials{algorithm, credWithUV, credWithoutUV}`、
+       **§3.3.12.4** 枚举唯一值 `"hmac-sha256"` ⇒ **键名 / 成员数 / 算法值三项全部冲突**，
+       且 `hmacSecret` 与 `HS256` 在整份规范里**只出现这一次**（恰在最易被照抄的示例段）。
+     - §3.3.12.3 原文「Importing providers that encounter an unknown algorithm **SHOULD ignore this entry**」
+       ⇒ 照字面实现「未知 algorithm 即忽略」，**规范自己的示例值 `HS256` 会被判为未知而丢掉 PRF**。
+     - 硬事实三条：① §3.1 `Header = {version{major,minor}, exporterRpId, exporterDisplayName, timestamp,
+       accounts}` —— **无 `documents` 外层**（本条目初稿臆造的 `{"documents":[…]}` 信封不成立，已作废）；
+       ② §3.1.1「Any participant using this format **MUST ignore unknown fields or enumeration values**」
+       ⇒ 未知成员**不得**当拒收理由（AC② 原「未知 `type` 值 ⇒ 拒」已按 口径 2″ 分层更正）；
+       ③ 附录 A 示例文档混装 **15 条凭据 / 14 种 `type`**（`totp` / `credit-card` / `ssh-key` / `wifi` /
+       `passport` …），passkey 只占 1 条 ⇒「扫到合法 CXF 文档但里面没有通行密钥」是**常态分支**、不是畸形载荷。
+     - 示例内那把 passkey 的 `key` 实测：b64url 184 字符 → **PKCS#8 DER 138 B**，含
+       `06 07 2A 86 48 CE 3D 02 01`（ecPublicKey）与 `prime256v1` 参数、内层带 `[1]` 公钥位
+       ⇒ 本仓 `PasskeyKeyText.sniffAlgorithmId` 的 ES256 判据**在该官方样本上逐字节命中**（口径 3 的实证依据）。
+  11. **载荷尺寸与 QR 密度实测（2026-09-26，`com.google.zxing:core` 3.5.4 本机直跑，与相机通路同配置：
+      `POSSIBLE_FORMATS=[QR_CODE]` + `TRY_HARDER` + `PlanarYUVLuminanceSource` + `HybridBinarizer`）**：
+     - 紧凑 JSON 字节：**规范附录 A 单 passkey 对象 471 B**；改按 §3.3.12.3 双值口径的等价对象 **570 B**；
+       再套 §3.1 `Header` + `accounts/items` 信封（仍只 1 把凭据）**900 B**；附录 A 全示例（15 凭据）
+       **11 863 B**。现状基线 otpauth URI **127 B** 作对照。
+     - 单张 QR 容量上限（同库二分实测；已知值反校：v40-L = 2953 B 与 ISO 表一致）：
+       **L 2953 / M 2331 / Q 1663 / H 1273 B** ⇒ 附录 A 全示例抛 `WriterException: Data too big`
+       ⇒ **文档级多凭据载荷物理上装不进单张 QR**（口径 9 的依据）。
+     - 版本与模块数：471 B → v15(77)@L / v20(97)@Q；570 B → v16(81) / v23(109)；
+       **900 B → v21(101)@L / v29(133)@Q**。
+     - 每模块像素数（px/模块）：最近邻渲染 + 「3×3 均值＝PSF≈1 采样像素」失焦模型 + ±20 灰阶噪声，
+       **上述全部载荷的最小可解值一致为 清晰 2 / 失焦 3 / 失焦+噪声 3 px/模块**。
+       ⚠️ 该模型是**乐观上界**（理想对齐、无透视、二值对比），真机只会更差 ⇒ 阈值最终由 AC⑧ 实拍定。
+     - 落到本仓相机通路：`TotpScanDialog.kt:282-284` 建 `ImageAnalysis` **只设了背压策略、未设分辨率**，
+       而官方文档原文为「**ImageAnalysis has a default ResolutionStrategy with bound size as 640x480**
+       and fallback rule of `FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER`」
+       （developer.android.com `ImageAnalysis.Builder#setResolutionSelector`）⇒ 短边 480 px 下
+       900 B 文档（101 模块）在码占画面 50%/65%/80% 时分别为 **2.4 / 3.1 / 3.8 px/模块（@L）**、
+       **1.8 / 2.3 / 2.9（@Q）** —— 前者贴乐观 floor、后者**连乐观模型都不过**；
+       同载荷在短边 1080 px 下为 4.1 / 5.3 / 6.5（@Q）与 5.3 / 7.0 / 8.6（@L）⇒ 有余量（⇒ 口径 10）。
+     - 相册侧不受此限：`MAX_GALLERY_IMAGE_DIMENSION=2400`（`TotpGalleryImport.kt:67`）下
+       101 模块在 50%/65% 填充时为 11.9 / 15.4 px/模块。
+  12. **导入凭据的计数器起点（2026-09-26，WebAuthn L3 逐字回读 + 本仓现状核对）**：
+     §6.1.1 *Signature Counter Considerations* 原文「Authenticators that do not implement a signature counter
+     leave the `signCount` in the authenticator data **constant at zero**. … **If either is non-zero, and the new
+     signCount value is less than or equal to the stored value, a cloned authenticator may exist**, or the
+     authenticator may be malfunctioning, or a race condition might exist…」；§7.2 断言验证子步同向。
+     本仓现状：`PasskeyData.kt:105-107` 以扩展键 `Passkey.SignCount` 承载计数（KPEX schema 无该键）、
+     `:319 SIGN_COUNT_UNKNOWN=0`、`:396 nextSignCount` 恒 +1 饱和、断言侧
+     `PasskeyAssertionActivity.kt:238 incrementPasskeySignCount(entryId)` 的返回值写进 authData。
+     ⇒ 一把**外部注册**的凭据导入后，RP 侧存的是**别家认证器**给的计数（很可能 >0 且我方不可见），
+     而我方默认「无该键 → 0 → 首次断言发 1」起步 ⇒ **正落入 §6.1.1 的「≤ stored ⇒ 克隆嫌疑」区间**。
+     该判据不是纸面推演：open-passkey 的回滚检测正是 `storedSignCount > 0 && new <= stored`
+     （`packages/core-ts/src/authentication.ts:246`）⇒ 需裁决，见**未决 6**。
 
 - **背景**：`PD-08`（2026-09-18）已裁决载荷 = **FIDO CXF v1.0 单凭据 `Passkey` 字典 JSON**（`credentialId` /
   `userHandle` / `key` 为 Base64URL，`key` = PKCS#8 ASN.1 DER），解析器须兼容三级形态（裸 Passkey 对象 →
@@ -141,6 +255,20 @@
      （**`collections[].items[]` 是 `LinkedItem` 引用，不含凭据，不得当取凭据路径**）。
      KDoc 须写明「为何不用 `SimpleJson` / 不用 `org.json`」（前者入参 `String` 违反 §3；后者在宿主单测为
      未实现桩，同 `CallingOriginResolver.kt:136-138` 既有理由）。
+     **2′ 扩展键别名（处置规范自身的不一致，见核实 10）**：白名单**必须同时认** §3.3.12.2 的
+     `hmacCredentials`（`credWithUV` / `credWithoutUV`）与**规范附录 A 示例**的遗留形
+     `hmacSecret`（单成员 `secret`）——只按 CDDL 拼写取值会让**规范自己的示例**解出「无 PRF」，
+     而 `PD-48` 裁决二的前提正是「双值不可恢复，这次不存永远补不回」。
+     `algorithm` 认 `hmac-sha256`（§3.3.12.4 唯一枚举）与 `HS256`（示例值）为**同义**（两者都指
+     HMAC-SHA-256，与本库 `PasskeyPrf` 同式）；其余值按 §3.3.12.3「unknown algorithm **SHOULD ignore
+     this entry**」——**只丢该扩展项、保留凭据**，并进口径 4′ 的确认清单。
+     双值长度规范用词是「**SHOULD** be 32 bytes」⇒ 非 32 字节**不拒收**（处置见未决 7）。
+     **2″ 未知成员 / 多凭据文档（§3.1.1 与示例实证）**：① §3.1.1「MUST ignore unknown fields or
+     enumeration values」⇒ 未知成员一律**忽略而非拒收**（新增字段与新增枚举值按 §3.1.1 明文**不算**
+     破坏性变更）；② 一份文档可混装 14 种 `type`（核实 10③）⇒ 非 `passkey` 凭据**跳过并计数**，
+     「未知 `type` 即拒」只适用于**裸单对象**形态（AC② 原写法已按此分层更正）；
+     ③ 文档形态须读 §3.1 `Header.version.major`，**非 1 即拒**；④ 文档内 **≥2 把 passkey** 时
+     「取首个」等于静默丢弃其余，与 AC⑪② 自相矛盾 ⇒ 必须在确认对话框点名「另有 N 把未导入」（未决 8）。
   3. **算法与字段判据（fail-closed，逐值写死）**：**规范无 `alg` 成员** ⇒ 算法一律由
      `PasskeyKeyText.sniffAlgorithmId(der)` **从 PKCS#8 DER 的 OID 判定**，判定为空（无已知 OID）即拒；
      **不得**再写「`key.alg` 与嗅探交叉核对」（该判据对 CXF 载荷恒不触发，属虚构）。
@@ -166,6 +294,12 @@
      ⚠️→✅ 确认对话框的 `FLAG_SECURE` 归类**已裁决**（2026-09-26 用户，`PD-48` 裁决三）：
      **跟随「禁止截屏与录屏」开关**，与 `PD-47` 同一口径，**不**列入 4 类无条件强制遮罩对话框；
      另两层防护（反 overlay / 点击劫持过滤）始终施加。
+     **4′ 确认在先（同类实现印证的更强口径，取代「导入后告知」）**：fenris 的导入通路把「本实现不支持的项」
+     建成显式 `incompatible: List<IncompatibleItem>`（`importformat/ImportFormatDecoder.kt:17,20-27`），
+     由 `ConfirmImportSheet` **先列清单、用户确认后才导**（对照见
+     [`references/扫码导入通行密钥的参考项目对照.md`](references/扫码导入通行密钥的参考项目对照.md) §2.5）。
+     ⇒ AC⑪② 的提示时机**由「导入后告知」提前到「导入前列清单等确认」**，与本口径 4 的确认对话框
+     **合用同一个**，不新增对话框、不新增 `FLAG_SECURE` 账目（AC⑥ 的计数不变）。
   5. **Q1 编辑页入口**：通行密钥区块新增「扫码 / 相册导入」，复用同一对话框与同一 `PasskeyCxfReader`，
      落库**须复用 `PasskeyEntryCoordinator.saveOrReplacePasskeyEntry`**（`:40`，其 `:83
      findReusablePasskeyEntry` 已实现「找到可复用条目则整体替换」，正是 Q1 语义），
@@ -187,6 +321,26 @@
   8. **同批文档流转**：改写 `PD-08` 的入口口径（编辑页双入口 → **顶栏分流为主入口 + 编辑页保留附加入口**）
      并登记改写日期与理由；修正其「复用 `SecureCaptureActivity`」过时引用为现件；`PD-34` 类型名有界性
      机检若命中新类型名则同批扩登记。
+  9. **载荷尺寸上限与「不分片」（核实 11 实测）**：单张 QR 的物理上限是 **v40-L 2953 B**（纠错等级越高越低：
+     M 2331 / Q 1663 / H 1273），而文档级多凭据载荷（规范附录 A 全示例 11 863 B）**装不进单张 QR**
+     ⇒ **v1 明确不做多张装配 / 动画 QR**（三家参考项目亦无分片协议可抄，对照文档 §2.1）。
+     同时给手写扫描器一个**硬界**：`MAX_IMPORT_PAYLOAD_BYTES = 4096`（> 任何单张 QR 的解出上限，
+     又给解析器常量界）；超界 → 静态错误码文案、不落库、不回显，并在文案里如实指引
+     「单张二维码放不下该载荷」（指引的是**换用只含单把凭据的导出**，不得指引用户去访问任何链接）。
+  10. **相机分析流分辨率（本条目**唯一**触及 TOTP 共享面的改动）**：`TotpScanDialog.kt:282-284` 建
+     `ImageAnalysis` 未设分辨率，官方默认为 **640×480**（核实 11 原文），而 900 B 文档级载荷对应
+     101 模块 ⇒ 480 短边只有 2.4–3.8 px/模块，**贴乐观 floor（2–3）、零真实相机余量**。
+     ⇒ 给**共享取景器**改设
+     `setResolutionSelector(ResolutionSelector.Builder().setResolutionStrategy(ResolutionStrategy(Size(1280, 960), FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER)).build())`；
+     **不得**用 `setTargetResolution` / `setTargetAspectRatio`（自 camera 1.3.0 起**已废弃**，且与
+     `setResolutionSelector` 互斥、混用 build 时抛 `IllegalArgumentException` —— 官方文档原文）。
+     **判据先行**：解码前无从知道载荷类型，该设置**必然同时作用于 TOTP**（127 B / 41 模块在 480 下已有
+     5.9–9.4 px/模块，提分辨率只会更好）；代价是每帧像素 ×4 的解码 CPU，由既有
+     `STRATEGY_KEEP_ONLY_LATEST` + 单线程解码器吸收。⚠️ 设备硬件等级会限制实际可达尺寸，
+     **真机须回读 `ImageProxy.width/height` 实际值**进批次文档（不得以「已设 1280×960」推定拿到）。
+     这一改动**不属** AC⑤「TOTP 分支一字不改」的参数化范围 ⇒ 按 **AC⑤′** 登记为唯一例外。
+  11. **导入凭据的计数器口径**：**待裁决**（未决 6）。裁决前**不得**改断言链的任何计数行为，
+     导入路径只负责**不写** `Passkey.SignCount` 键（保持缺省语义），**禁止**在导入时臆造起点值。
 
 - **验收标准**：
   - **AC①** 分流纯函数表驱动用例穷举 `Totp / Passkey / Unknown` × 前导空白 × 大小写 × `{`/`[` 起始 ×
@@ -195,9 +349,19 @@
     `accounts[].items[].credentials[]` 构造，并加一条「凭据挂在 `collections[].items[]` 下」的**负例**，
     锁死不再照抄错误路径）、KeePassXC `.passkey` 正例、`fido2Extensions.hmacCredentials` 正例、
     拒绝路径 **≥8 条**（缺 `credentialId` / 缺 `userHandle` / 缺 `key` / 非法 Base64URL / DER 无已知 OID /
-    未知 `type` 值 / 嵌套畸形 / 超长载荷），且断言实参一律取自被测返回值（过 `check_tautological_assertions.py`）。
-    ⚠️ 夹具纪律：KeePassXC `.passkey` 正例**须取真实产物**（由本机 `keepassxc-cli` 导出或取仓库语料），
-    **不得**按文档臆造字段。
+    **裸单对象 `type` 非 `passkey`**（口径 2″②：文档内混装的非 passkey 凭据是**跳过**，不属拒绝路径）/
+    嵌套畸形 / 超 口径 9 上限），且断言实参一律取自被测返回值（过 `check_tautological_assertions.py`）。
+    **2026-09-26 依核实 10 追加四组用例（前两组是「规范自己打自己」的必测面）**：
+    ① **别名正例**——把规范附录 A 的 `hmacSecret{algorithm:"HS256",secret}` 原样作输入，
+    断言 PRF 被**取出**（若解析器只认 CDDL 拼写，该例会红并暴露 `PD-48` 裁决二落空）；
+    ② **未知 algorithm 降级例**——`algorithm:"hmac-sm3"` 之类 ⇒ **凭据仍入库、扩展项被丢且出现在确认清单**
+    （锁住「ignore this entry」不等于 ignore this credential）；
+    ③ **混合类型文档跳过例**——14 类凭据混装、passkey 排第 k 位，断言取到第 k 把且计数如实；
+    ④ **版本门**——`version.major=2` 拒、`version.minor=9` 放行（§3.1.1 只增不改）。
+    ⚠️ 夹具纪律（**本轮据核实 10 改写**）：**规范附录 A 的示例 JSON 本身即权威夹具**，
+    其 `key` 字段已实测为合法 PKCS#8 DER 138 B（ecPublicKey + prime256v1）⇒ 直接取用，
+    **不得**再按臆想字段自造「规范示例」；KeePassXC `.passkey` 正例**另须取真实产物**
+    （本机 `keepassxc-cli` 导出或仓库语料）作**互操作**夹具，两者不可互相顶替（规则 8）。
     ⚠️ 第 2 片与「未决 2」的边界：PRF 落库口径**已定 (`PD-48` 裁决二)**，故本片不仅要**检出载荷含
     `fido2Extensions.hmacCredentials` 及其双值**（供 AC⑪② 的丢弃清单与后续扩展键落库复用），
     双值本身也须随本片一并解析出来（供第 3 片写 `Passkey.PrfNoUv` 使用）。
@@ -216,6 +380,12 @@
   - **AC⑤ TOTP 零回归**：`ISSUE-P3-332` 顶栏扫码链与编辑页 TOTP 扫码的既有用例（含
     `VaultListScanEntryPointTest`）不改一字仍绿；`TotpScanDialog` 的取景/相册实现只允许**参数化**，
     不允许复制第二份。
+  - **AC⑤′ 共享取景器改动的唯一例外登记（2026-09-26 依核实 11 新增）**：AC⑤ 的「一字不改」**只**豁免
+    口径 10 的 `ImageAnalysis` 分辨率一处改动。该例外的边界：① 改动**只**限 `ResolutionSelector` 构造，
+    **不得**顺带改裁剪、朝向、hints 或线程模型；② 批次文档须写明改前/改后的**实测读数**——
+    `ImageProxy.width/height` 真值（证明确实拿到更高帧）+ 同一张高密度 QR 改前改后的取景/相册成功与否对照；
+    ③ 若真机因硬件等级拿不到 1280×960，**如实登记降级读数**并按未决 4 的结论调整 AC⑧ 的声称范围，
+    **禁止**以「已设分辨率」推定「已拿到分辨率」。
   - **AC⑥ 守卫账目同步**：新增确认对话框后，`PopupSecureFlagInventoryTest` 重新盘点（计数与结论注释
     写明「2026-09-26 分流不新增菜单项 / 新增 1 个确认对话框」），静态文案判据继续成立
     （提示语无凭据类插值）；`PD-47` 的 `FLAG_SECURE` 接线在确认对话框与两个入口均落实；
@@ -228,6 +398,16 @@
     能经 CM 通道对真实 RP 完成 GetAssertion」（RP 渠道按 `PD-32` / `PD-33`）；**并**用真机实拍的高密度
     QR 取样相册识码（§340 留痕「相册通路真机冒烟未做」，而 CXF JSON 远长于 otpauth URI、码密度更高，
     合成图断言不足以证明可用）。
+    **2026-09-26 依核实 10 / 11 / 12 把本条做实（取样夹具与判据都要可复跑）**：
+    ① 夹具**必须**是核实 11 实测的两档真实尺寸——**471 B 单凭据对象**与 **900 B 文档信封**
+    （规范附录 A 内容生成，EC 等级 L 与 Q **各出一版**，因为导出方的纠错等级我方不可控，
+    而它直接决定模块数 101 → 133）；
+    ② 每组取样**须记录码在画面中的填充率**（本仓相机通路整帧解码、不裁剪，故填充率就是 px/模块的
+    唯一变量，见核实 11 末行）；判据以核实 11 的**乐观 floor 2–3 px/模块**为参照——
+    任何实测失败的组合都要把「短边像素 × 填充率 → px/模块」算式一并登记，不得只写「解不出」；
+    ③ 断言链须回读**首次 GetAssertion 是否被 RP 判为克隆**（未决 6 的实测出口）；
+    RP 侧计数不可见时，改以「同库自造凭据先注册一次、再从相册导入同一把」的对拍取样口径，
+    并如实写明该对拍**不能**代表全网 RP 的严判行为。
   - **AC⑨ 全量与门禁**：`.\gradlew.bat test --rerun-tasks --max-workers=1` 全绿
     （计数只用 `python tools/doc/count_test_results.py`）+ `python tools/doc/gate_readings.py` **7/7 PASS**
     且读数块**原样**贴入批次文档 §3（逐条 EXIT）+ `check_md_links.py` + `check_resolved_index_sync.py`。
@@ -277,14 +457,42 @@
      正是 §10.1.4 的 MUST；② 「(c) 的范围含断言链按 UV 选种子」——不成立，断言逻辑零改动；
      ③ 「宁取 (b) 不取 (a)」——收回，(b) 被 (a) 支配。
   3. 「聚焦通行密钥区块」需给 `Screen.EntryEdit` 加一个可选字符串参数（导航能力本身已核实为现成，见 5d）。
-  4. 高密度 QR 的实际解码成功率（AC⑧ 实拍取样后才可声称"相册导入通行密钥可用"）。
+  4. **高密度 QR 的实际解码成功率**（2026-09-26 依核实 11 收敛为**实测项**，不再是无数据的猜）：
+     合成图已给出**乐观 floor 2–3 px/模块**，据此可判定「默认 640×480 分析流 + 900 B 文档信封」
+     的组合**余量为零**（⇒ 口径 10 提分辨率），而相册通路（2400 px）余量 4–5 倍；
+     仍**不得**在 AC⑧ 实拍取样前声称「相册导入通行密钥可用」——合成模型不含透视、色偏、摩尔纹与失焦梯度。
   5. ~~`key` 成员"PKCS#8 DER 的 Base64URL"未逐字取到~~ —— **已关闭**（2026-09-26 取到 §3.3.12 原文：
      「The private key associated to this passkey instance. The value MUST be **PKCS#8 ASN.1 DER** formatted
      byte string which is then Base64url encoded.」，与 `PD-08` 第 1 项一致，已同步写入 PD-08 第 4 项补记）。
+  6. **导入凭据的 signCount 起点（2026-09-26 新发现，须用户裁决；裁决前第 3 片不得改计数行为）**：
+     事实与推导见核实 12。RP 侧对**导入前**由别家认证器产生的计数我方永远不可见，故三条候选都不完美：
+     - **(α) 恒发 0**（声明「本认证器无计数器」）：当 RP 存的 stored>0 时**每一**次断言都满足
+       「either is non-zero 且 new ≤ stored」⇒ **永久**落在克隆嫌疑区，**永不恢复**；
+     - **(β) 维持现状**（导入不写键 ⇒ 从 0 起步、首断言发 1、此后单调）：stored>0 时前 stored 次断言
+       落在嫌疑区，但**会自行爬出**；stored=0（不少平台认证器即如此）时完全无害；
+     - **(γ) 导入时预置随机高位起点**（如 `[2^16, 2^24)`）：大概率一步跨过 unknown stored，
+       代价是「凭据第一次被使用就交出一个来历不明的大计数」，且若 stored 恰更高则退回 (β) 的行为。
+     **推荐 (β) 起步 + AC⑧③ 实测**：(β) 是本仓**当前既有行为**（零改动、零臆造值），
+     (γ) 只在实测到真实 RP 严判时才引入，(α) 排除（永不恢复）。
+     与同类实现的对照读数是**反向**的：fenris 恒发 4 字节零（`AuthResponse.kt:23-24`）、
+     open-passkey 的 RP 侧对 stored=0 一律放行（`authentication.ts:246`）——
+     两家都不能证明「恒 0 在真实 RP 上安全」。
+  7. **PRF 双值的长度与单值遗留形（2026-09-26 依核实 10 新增）**：规范对 `credWithUV` / `credWithoutUV`
+     的用词是「**SHOULD** be 32 bytes」，而附录 A 示例的 `secret` 是 14 B 的样例值。
+     待定：① 非 32 字节是**原样存**（保真优先，与 §3.3.12.3「MUST store … as-is」一致，本条目倾向）
+     还是**拒收扩展项**；② 别名形 `hmacSecret{secret}` 只有**一枚**值 ⇒ 存进 `KPEX_PASSKEY_PRF` 时
+     `Passkey.PrfNoUv` **留空即可**（不得凭空复制出第二枚，那会制造一个假种子）——
+     须在 AC② 的别名为例上锁死「只有一枚时不生成第二枚」。
+  8. **文档内多把通行密钥的处置（依核实 10③ 新增）**：`PD-08` 原文只写「取首个有效凭据」，
+     而口径 4′ 的确认清单已要求「不承载项必须点名」⇒ 二者叠加后须敲定：
+     是「导第一把 + 明示另有 N 把未导」，还是「弹选择列表逐把导」。本条目倾向**前者**
+     （后者需要把多枚私钥同时驻留内存，与 §3 铁律的擦除义务面成倍扩大不成比例）。
 
-- **粗估**：**5–7 人日**。构成：手写字节扫描器（含转义与三条嵌套定位）为最大项；**新增** `PD-48` 裁决二
-  带来的本仓扩展键（`Passkey.PrfNoUv`）+ `PasskeyInteropProbeTest` 键集判据更新 + 对拍重跑；
-  **减少** 相册解码器（零新增，见核实 5）与路由搭建（现成，见 5d）两处。
+- **粗估**：**6–8 人日**（2026-09-26 由 5–7 上修）。构成：手写字节扫描器（含转义与三条嵌套定位）为最大项；
+  **新增** `PD-48` 裁决二带来的本仓扩展键（`Passkey.PrfNoUv`）+ `PasskeyInteropProbeTest` 键集判据更新
+  + 对拍重跑；**本轮再加**三项：口径 2′/2″ 的别名与混合类型处理（含 4 组新用例）、口径 10 的分辨率改动
+  及其真机改前/改后对照（AC⑤′）、口径 9 的载荷上限常量与文案；**减少** 相册解码器（零新增，见核实 5）
+  与路由搭建（现成，见 5d）两处。
 
 - **关联**：`PD-08`（载荷与入口裁决。本条目**同时勘误其两处规范引用错误**：凭据路径应为
   `accounts[].items[].credentials[]`、取景组件已由 `SecureCaptureActivity` 更为 `TotpScanDialog`；
@@ -298,3 +506,8 @@
   `ISSUE-P3-332`（顶栏扫码入口）/ §340 §341（相册识码通路与其真机冒烟留痕）/
   **跨设备扫码注册（hybrid / caBLE）不在本条目范围**——它需要自建隧道中继与 CTAP2 传输栈，
   结论与判据另见后续裁决条目。
+  **2026-09-26 同批新增依据**：[`references/扫码导入通行密钥的参考项目对照.md`](references/扫码导入通行密钥的参考项目对照.md)
+  （三同类项目只读取证：零 CXF 实现、零 hybrid 实现、`transports` 两种相反先例、`IncompatibleItem`
+  确认在先模式）/ `ISSUE-P3-338`（本仓注册响应虚报 `hybrid`：hybrid 落地前须先撤回，与本条目同属
+  passkey 面但**独立闭环**）/ CameraX 官方文档 `ImageAnalysis.Builder#setResolutionSelector`
+  （核实 11 的 640×480 默认值出处，口径 10 与 AC⑤′ 的依据）。
