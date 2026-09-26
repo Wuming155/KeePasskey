@@ -99,11 +99,14 @@ internal object WebAuthnJson {
     /** `response.publicKeyAlgorithm`：COSE 算法号（**数字**，如 ES256 = `-7`） */
     const val PUBLIC_KEY_ALGORITHM = "publicKeyAlgorithm"
 
-    /** `transports[]` 取值：仅本设备内部凭据 */
+    /**
+     * `transports[]` 取值：仅本设备内部凭据。**本仓当前只产出该值**。
+     *
+     * `hybrid`（混合传输，本机 + 其它设备）**已从此常量表删除**——本仓无蓝牙权限、无 BLE 广播、
+     * 无会话隧道，声明它属对外虚报能力（`ISSUE-P3-338`）；恢复该常量的前提是 CTAP2.2 §11.5 全链可用，
+     * 判据与两种相反先例见 [com.keepasskey.app.passkey.PasskeyRegistrationPayload] 的 `transports` 段。
+     */
     const val TRANSPORT_INTERNAL = "internal"
-
-    /** `transports[]` 取值：混合传输（本机 + 其它设备），参考实现同样声明 */
-    const val TRANSPORT_HYBRID = "hybrid"
 
     // ---------------- clientDataJSON（§5.4.1 / §6.4.1） ----------------
 

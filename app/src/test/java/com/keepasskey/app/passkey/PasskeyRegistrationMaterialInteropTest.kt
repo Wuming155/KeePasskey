@@ -233,10 +233,13 @@ class PasskeyRegistrationMaterialInteropTest {
             SimpleJson.int(response, WebAuthnJson.PUBLIC_KEY_ALGORITHM)
         )
 
-        // transports 必须同时声明 internal 与 hybrid（对齐两个参考实现）
+        // transports 只声明 internal：本仓无 hybrid / caBLE 实现，加回 hybrid 即红（ISSUE-P3-338）
         val transports = SimpleJson.arrayAt(response, WebAuthnJson.TRANSPORTS).orEmpty()
-        assertTrue("transports 必须含 internal", transports.contains(WebAuthnJson.TRANSPORT_INTERNAL))
-        assertTrue("transports 必须含 hybrid", transports.contains(WebAuthnJson.TRANSPORT_HYBRID))
+        assertEquals(
+            "transports 必须恰为 [internal]",
+            listOf(WebAuthnJson.TRANSPORT_INTERNAL),
+            transports
+        )
 
         // clientDataJSON：type/challenge/origin 三项必须存在且取值正确
         val clientData = SimpleJson.asObject(

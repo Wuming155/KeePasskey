@@ -4,6 +4,7 @@ import com.keepasskey.core.model.PasskeyData
 import com.keepasskey.crypto.passkey.PasskeyCryptoEngine
 import java.util.Base64
 import org.junit.Assert.assertArrayEquals
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
@@ -26,7 +27,7 @@ import org.junit.Test
  * | `response.authenticatorData` | ✅ | ✅ | ✅ 存在且为同一份 authData |
  * | `response.publicKey` | ✅ (COSE) | ✅ (SPKI) | ✅ 存在（本仓取 COSE 口径） |
  * | `response.publicKeyAlgorithm` | ✅ 数字 | ✅ 数字 | ✅ 等于 COSE 编号 |
- * | `response.transports` | internal+hybrid | internal+hybrid | ✅ 含 `hybrid` |
+ * | `response.transports` | internal+hybrid | internal+hybrid | ✅ **只 `[internal]`**——本仓无 hybrid 传输（无蓝牙权限/BLE 广播/会话隧道）故不跟随，`ISSUE-P3-338` |
  * | `credProps` | 注册恒回 | 请求才回 | ✅ **请求才回**（取更规范的一侧） |
  * | `clientDataJSON.crossOrigin` | 可选 | 显式 `false` | ✅ 显式 `false` |
  *
@@ -109,10 +110,10 @@ class PasskeyRegistrationPayloadBuildTest {
         val transports = requireNotNull(SimpleJson.arrayAt(response, WebAuthnJson.TRANSPORTS)) {
             "缺少 response.transports"
         }
-        assertTrue("transports 必须含 internal", WebAuthnJson.TRANSPORT_INTERNAL in transports)
-        assertTrue(
-            "transports 必须含 hybrid（两个参考实现均声明）",
-            WebAuthnJson.TRANSPORT_HYBRID in transports
+        assertEquals(
+            "transports 只能是 [internal]：本仓无 hybrid / caBLE 传输实现，不得声明（ISSUE-P3-338）",
+            listOf(WebAuthnJson.TRANSPORT_INTERNAL),
+            transports
         )
 
         // 信封顶层字段

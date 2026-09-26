@@ -146,7 +146,12 @@ internal object PasskeyRegistrationPayload {
      * 对齐 Monica 的 `keyPair.public.encoded`），**不再是** COSE_Key CBOR——
      * COSE 编码只保留在 `attestationObject.authData.credentialPublicKey`。
      * 缺失时消费方需自行解 CBOR，补齐可省掉该解析并提升互操作性。
-     * 参考实现均声明 `hybrid`（跨设备扫码），本仓此前只声明 `internal`。
+     * `transports` **只声明 `internal`**（`ISSUE-P3-338`）：本仓无 hybrid / caBLE 传输——`AndroidManifest.xml`
+     * 一行蓝牙权限都没有，既无 `BluetoothLeAdvertiser` 广播也无会话隧道，而 CTAP2.2 §11.5 的 hybrid 传输
+     * **必须**具备该全链 ⇒ 声明一条不存在的传输等于让 RP / 平台为不可能完成的路径做 UI 与重试。
+     * **恢复条件是「CTAP2.2 §11.5 全链可用」，而非「有实现参考可抄」**——曾被引为依据的同类实现自身
+     * 同样硬编码 `hybrid` 而全仓无一行蓝牙代码（取证见 `docs/references/扫码导入通行密钥的参考项目对照.md` §2.4），
+     * 被参照者无该能力不构成规范依据。
      */
     private fun buildRegistrationJson(
         passkeyData: PasskeyData,
@@ -177,7 +182,7 @@ internal object PasskeyRegistrationPayload {
             int(WebAuthnJson.PUBLIC_KEY_ALGORITHM, passkeyData.algorithmId)
             strArray(
                 WebAuthnJson.TRANSPORTS,
-                listOf(WebAuthnJson.TRANSPORT_INTERNAL, WebAuthnJson.TRANSPORT_HYBRID)
+                listOf(WebAuthnJson.TRANSPORT_INTERNAL)
             )
         })
     }

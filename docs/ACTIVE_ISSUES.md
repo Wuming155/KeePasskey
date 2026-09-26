@@ -48,61 +48,11 @@
 > 已全部闭环：§315（309 / 312）、§317（308）、§318（310）、§319（311）、§320（313）；
 > 2026-09-25 CI 设备门禁与供应链扫描两条（`ISSUE-P2-314` / `ISSUE-P2-315`）闭环见 §325。
 
-## P3 低危问题、特性接线与体验优化（2 项）
+## P3 低危问题、特性接线与体验优化（1 项）
 
-> **开放项 2 条**（`ISSUE-P3-338` 注册响应虚报 `hybrid` 传输，2026-09-26 立项；
-> `ISSUE-P3-337` 扫码导入通行密钥，2026-09-26 立项）。
-> 2026-09-26 相册导入读尺寸判空修复（`ISSUE-P3-336`）闭环见 §341；
-> 更早的 P3 闭环流水见 `RESOLVED_LOG.md` §326 ~ §340。
-
-### ISSUE-P3-338：注册响应 `transports` 声明 `hybrid` 而本仓无任何 hybrid / 蓝牙实现——撤回为 `internal`
-
-- **优先级理由**：P3（不影响既有认证成败，属「对外自述能力与实际能力不符」的如实呈现缺陷）；
-  但它是任何 hybrid / caBLE 工作的**前置清洁项**，故排在同 section 顶部。
-- **核实时间点**：2026-09-26（本机会话内完成）。
-- **核实方式**（逐条可复跑）：
-  1. **代码事实**：`app/.../passkey/PasskeyRegistrationPayload.kt:180` 无条件交出
-     `listOf(WebAuthnJson.TRANSPORT_INTERNAL, WebAuthnJson.TRANSPORT_HYBRID)`；
-     同函数 KDoc `:149` 的理由是「**参考实现均声明 `hybrid`**（跨设备扫码），本仓此前只声明 `internal`」，
-     且该 KDoc 段落整体出自 `ISSUE-P2-265`「与两个参考实现对齐，补齐三项被消费方读取的字段」。
-     锁该值的断言两处：`app/src/test/.../PasskeyRegistrationMaterialInteropTest.kt:239`
-     （`assertTrue("transports 必须含 hybrid", …)`）、`PasskeyRegistrationPayloadBuildTest.kt:115`。
-  2. **实现事实**：`AndroidManifest.xml` 权限清单一行蓝牙都没有（现声明仅
-     `USE_FINGERPRINT` / `INTERNET` / `ACCESS_NETWORK_STATE` / `USE_BIOMETRIC` / `CAMERA` /
-     `POST_NOTIFICATIONS` / `HIDE_OVERLAY_WINDOWS`，见 `:17-37`），五模块 `src/main` 内
-     `bluetooth` / `BLE_ADVERTISE` / `websocket` 符号**零命中**（唯 6 处 `cable` 子串命中
-     属 Diceware 词表一类噪声）。CTAP2.2 §11.5 的 hybrid 传输**必须**有 BLE 广播
-     （`BluetoothLeAdvertiser` + `BLUETOOTH_ADVERTISE`）与会话隧道 ⇒ **本仓在权限层面即不可能完成 hybrid**。
-  3. **对照取证**（[`references/扫码导入通行密钥的参考项目对照.md`](references/扫码导入通行密钥的参考项目对照.md) §2.4）：
-     `fenris-authenticator` 的 `credentialprovider/webauthn/CreateResponse.kt:66` 同样硬编码
-     `listOf("internal", "hybrid")`，而该仓**全仓无一行蓝牙代码**（12 处 `cable` 命中经逐条核验
-     全是 `Cancelable` 一类子串）⇒ 本仓 KDoc 那句「参考实现均声明 hybrid」**恰好能在这一类实现上找到出处，
-     但被参照者自身并无该能力，不构成规范依据**；
-     反例是 `Authnkey`：`CredentialProviderActivity.kt:1030-1050` 只上报
-     「当前实际所用传输 ∪ `authenticatorGetInfo` 声明」，`HYBRID` / `BLE` 在其仓内是
-     **从未被引用的死常量**（`TransportType.kt:17,19`）。
-- **背景**：`transports` 是注册响应 `response` 里的**能力自述元数据**，供 RP / 平台决定
-  「下一步该引导用户走哪条传输」。声明一条不存在的传输，等于让对端为不可能完成的路径做 UI 与重试。
-- **整改口径**：
-  1. `PasskeyRegistrationPayload.kt:180` 降为 `listOf(WebAuthnJson.TRANSPORT_INTERNAL)` 单值。
-  2. 同函数 KDoc `:149` 那句「参考实现均声明 `hybrid`」**必须删除并改写**为可核验的表述：
-     本仓无 hybrid 传输（无蓝牙权限、无 BLE 广播、无会话隧道）⇒ 不得声明；
-     恢复条件是 **CTAP2.2 §11.5 全链可用**，而非「有实现参考」。
-     ⚠️ 该 KDoc 是**本缺陷的再生成器**：留着它，下一个人还会照抄。
-  3. 两处断言（核实 1 所列）同批改锁 `[internal]` 单值，失败消息须点名 `ISSUE-P3-338`。
-- **验收标准**：
-  - **AC①** 上述两断言改后仍绿，且**反向反校**：把 `TRANSPORT_HYBRID` 加回即红。
-  - **AC②** 全量 `.\gradlew.bat test --rerun-tasks --max-workers=1` 绿（计数只用
-    `python tools/doc/count_test_results.py`）+ `python tools/doc/gate_readings.py` **7/7 PASS**
-    且读数块原样贴入批次文档 §3。
-  - **AC③** 互操作面无回归：`transports` 属**注册响应元数据**、不写进 `KPEX_PASSKEY_*`，
-    故预期 `verify_interop.py` 判据不受影响 —— **开工首步先核实该预期**（若 probe 判据确含 `transports`，
-    须在本条目内登记并按新值重取基线，不得默默改判据）。
-- **未决与风险**：具体 RP / 平台是否因 `hybrid` 声明改变可观察行为（如提示"用另一台设备"路径），
-  **本条目未取证** ⇒ 不作为撤回的前提，也不构成「无害」的证据。
-- **粗估**：**0.5 人日**（一处取值 + 两处断言 + 一段 KDoc）。
-- **关联**：`ISSUE-P3-337`（同属 passkey 面；hybrid 落地时两条同批复核）/ `ISSUE-P2-265`
-  （本缺陷的引入批次）/ `references/扫码导入通行密钥的参考项目对照.md` §2.4（两种相反先例的取证）。
+> **开放项 1 条**（`ISSUE-P3-337` 扫码导入通行密钥，2026-09-26 立项；开工顺序①已完成、②起待续）。
+> 2026-09-26 注册响应 `transports` 撤回虚报 `hybrid`（`ISSUE-P3-338`）闭环见 §342；
+> 更早的 P3 闭环流水见 `RESOLVED_LOG.md` §326 ~ §341。
 
 ### ISSUE-P3-337：PD-08 扫码导入通行密钥落地——顶栏扫码按载荷分流（TOTP / 通行密钥），确认在先、字节通道解析、落 `KPEX_PASSKEY_*`
 
@@ -512,16 +462,18 @@
   结论与判据另见后续裁决条目。
   **2026-09-26 同批新增依据**：[`references/扫码导入通行密钥的参考项目对照.md`](references/扫码导入通行密钥的参考项目对照.md)
   （三同类项目只读取证：零 CXF 实现、零 hybrid 实现、`transports` 两种相反先例、`IncompatibleItem`
-  确认在先模式）/ `ISSUE-P3-338`（本仓注册响应虚报 `hybrid`：hybrid 落地前须先撤回，与本条目同属
-  passkey 面但**独立闭环**）/ CameraX 官方文档 `ImageAnalysis.Builder#setResolutionSelector`
+  确认在先模式）/ `ISSUE-P3-338`（本仓注册响应虚报 `hybrid`：**已于 §342 撤回为单值 `internal`**，
+  hybrid 落地时按该批 KDoc 登记的恢复前提（CTAP2.2 §11.5 全链）复核）/ CameraX 官方文档 `ImageAnalysis.Builder#setResolutionSelector`
   （核实 11 的 640×480 默认值出处，口径 10 与 AC⑤′ 的依据）/
   **`PD-49`**（2026-09-26 代理裁决，承载本条目「未决 6 / 7 / 8」与 AC⑤′ 例外的定稿：
   计数采随机高位起点、PRF 长度不校验、多把凭据导第一把并点名、共享取景器分辨率例外获准）。
 
-- **开工顺序（2026-09-26 代理裁决，理由附后）**：
-  **① `ISSUE-P3-338`（0.5 人日，独立批次先闭环）** —— 它只是撤回一个无实现支撑的元数据值，
+- **开工顺序（2026-09-26 代理裁决，理由附后；2026-09-26 §342 同步进度）**：
+  **① `ISSUE-P3-338`（0.5 人日，独立批次先闭环）—— 已完成（§342）**
+  它只是撤回一个无实现支撑的元数据值，
   却能把「参考实现都这么做」这类伪依据从 KDoc 里清掉；留着它就是缺陷再生成器。
-  **② 第 1 片 `ScanPayloadClassifier`** —— 纯函数、零外部依赖，先把分流边界与 338 的文案影响钉住。
+  **② 第 1 片 `ScanPayloadClassifier`（下一步）** —— 纯函数、零外部依赖，先把分流边界钉住
+  （338 的文案影响已随 §342 消除：`Unknown` 分支复用现键 `vault_scan_invalid_qr`，无新增对外声明）。
   **③ 第 2 片 `PasskeyCxfReader`**（含 AC② 的别名 / 未知 algorithm / 混合类型 / 版本门四组新用例，
   夹具直取规范附录 A）—— 解析器是全条目最大单项，先于任何 UI 与落库改动完成。
   **④ 真机分辨率探针（半日，不入库）** —— 在第 3 片之前做：因为 AC⑤′ 的例外虽已获准，
