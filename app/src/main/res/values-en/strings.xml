@@ -350,9 +350,13 @@
     <!-- ISSUE-P3-319: protected scan dialog (CameraX + zxing:core, replaces zxing-embedded CaptureActivity) -->
     <string name="edit_scan_dialog_title">Scan TOTP QR code</string>
     <string name="edit_scan_hint">Align the QR code within the frame</string>
-    <string name="edit_scan_camera_permission_denied">Camera permission was denied, scanning is unavailable. Tap the button below to grant again, or enable camera permission in system settings</string>
+    <string name="edit_scan_camera_permission_denied">Camera permission was denied, camera scanning is unavailable. Tap the button below to grant again, enable camera permission in system settings, or import a QR code from the gallery</string>
     <string name="edit_scan_retry">Retry permission</string>
     <string name="edit_scan_camera_error">Failed to start camera (it may be in use by another app). Please close and retry</string>
+    <string name="edit_scan_from_gallery">Import from gallery</string>
+    <string name="edit_scan_gallery_decoding">Recognizing…</string>
+    <string name="edit_scan_gallery_no_qr">No QR code found in the selected image, please try another one</string>
+    <string name="edit_scan_gallery_read_error">Failed to read the image, please try another one</string>
     <string name="edit_attachment_empty">Attachment is empty, not added</string>
     <string name="edit_attachment_too_large">Attachment exceeds %1$d MB and was not added</string>
     <string name="edit_save_failed">Save failed: %1$s</string>
@@ -620,6 +624,10 @@
     <string name="sec_flag_secure_risk_message">With it off, passwords, one-time codes and passkeys may be captured by screenshots or screen recording and shown in the recents preview, leaking credentials. Keeping it on is recommended.</string>
     <string name="sec_flag_secure_risk_confirm">Turn it off anyway</string>
     <string name="sec_flag_secure_risk_cancel">Keep it on</string>
+    <string name="legacy_autofill_notification_title">Password field detected</string>
+    <string name="legacy_autofill_notification_body">Tap to choose an entry to fill (legacy accessibility channel)</string>
+    <!-- Service description shown in system settings (must describe the read scope faithfully) -->
+    <string name="legacy_autofill_service_desc">The legacy autofill channel of KeePasskey: detects password fields and fills them in apps where system autofill is unavailable. This service only reads from and writes to the relevant fields when you choose an entry from KeePasskey; it does not collect or upload any screen content in the background, and it is controlled by the in-app Legacy autofill service toggle.</string>
     <string name="autofill_save_blocked">This app is on the autofill blocklist, so saving credentials was rejected.</string>
     <string name="sec_clipboard_title">Clipboard protection</string>
     <string name="sec_clipboard_sub">Copied secrets are marked sensitive: the system copy confirmation hides them, and they are auto-cleared after the set duration</string>

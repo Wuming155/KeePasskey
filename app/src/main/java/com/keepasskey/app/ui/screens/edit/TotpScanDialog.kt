@@ -183,6 +183,8 @@ internal fun TotpScanDialog(
                     }
                 }
                 Spacer(modifier = Modifier.height(8.dp))
+                // ISSUE-P3-334：相册导入二维码通路（权限被拒态同样渲染，作为替代识别手段）
+                TotpGalleryImport(onDecoded = onDecoded, onDismiss = onDismiss)
                 TextButton(onClick = onDismiss) {
                     Text(stringResource(R.string.btn_cancel))
                 }
@@ -388,8 +390,9 @@ private fun decodeQrFrame(image: ImageProxy, reader: MultiFormatReader): String?
     return null
 }
 
-/** Y 平面顺时针旋转 90°：返回 (旋转后字节, 新宽, 新高)。迭代 4 次即覆盖全部朝向，方向无谓。 */
-private fun rotateYPlane90(src: ByteArray, w: Int, h: Int): Triple<ByteArray, Int, Int> {
+/** Y 平面顺时针旋转 90°：返回 (旋转后字节, 新宽, 新高)。迭代 4 次即覆盖全部朝向，方向无谓。
+ *  `internal`：相册导入通路（[TotpGalleryImport]，ISSUE-P3-334）复用同一旋转实现。 */
+internal fun rotateYPlane90(src: ByteArray, w: Int, h: Int): Triple<ByteArray, Int, Int> {
     val out = ByteArray(src.size)
     for (y in 0 until h) {
         for (x in 0 until w) {

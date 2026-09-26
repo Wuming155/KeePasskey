@@ -358,9 +358,13 @@
     <!-- ISSUE-P3-319：受保护扫码对话框（CameraX + zxing:core，替代 zxing-embedded CaptureActivity） -->
     <string name="edit_scan_dialog_title">扫描 TOTP 二维码</string>
     <string name="edit_scan_hint">将二维码对准取景框</string>
-    <string name="edit_scan_camera_permission_denied">相机权限被拒绝，无法扫码。可点击下方按钮重新授权，或到系统设置中开启相机权限</string>
+    <string name="edit_scan_camera_permission_denied">相机权限被拒绝，无法相机扫码。可点击下方按钮重新授权、到系统设置中开启相机权限，或从相册导入二维码</string>
     <string name="edit_scan_retry">重试授权</string>
     <string name="edit_scan_camera_error">相机启动失败（可能被其它应用占用），请关闭后重试</string>
+    <string name="edit_scan_from_gallery">从相册导入</string>
+    <string name="edit_scan_gallery_decoding">正在识别…</string>
+    <string name="edit_scan_gallery_no_qr">未在所选图片中识别到二维码，请更换图片重试</string>
+    <string name="edit_scan_gallery_read_error">图片读取失败，请更换图片重试</string>
     <string name="edit_attachment_empty">附件内容为空，未添加</string>
     <string name="edit_attachment_too_large">附件超过 %1$d MB，未添加</string>
     <string name="edit_save_failed">保存失败：%1$s</string>
