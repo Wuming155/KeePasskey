@@ -133,10 +133,7 @@ Coroutines + Flow；**文档与代码注释使用简体中文**。
 - `"$env:USERPROFILE\.android\bin\android-cli.exe" studio <子命令>` — IDE / 设备侧调试首选入口（Android CLI，见下条约定；
   **PowerShell 写法**；Git Bash / MSYS 下同义写法为 `"$USERPROFILE/.android/bin/android-cli.exe"`）
 
-> **Android CLI 调试约定（2026-09-15 立规，强制）**：IDE 侧与设备侧调试**统一走 Android CLI，不得直接使用 `adb`**；IDE 能力一律在
-> `android studio` 之下（sync / build / Compose 预览 / PSI 代码分析 / IDE Lint），设备操作由该 CLI 内部调用 ADB，无对应能力时**如实说明并给出退路**。
-> 本机 `android` **未加入 `PATH`**（数据在 `%USERPROFILE%\.android\cli\`），故按上表用启动器全路径调用。
-> Android CLI不可用的情况下，可以使用ADB。
+> **Android 调试约定**：设备侧调试**统一走  `adb`**；
 
 > **设备侧测试前置检查（2026-09-22 §263 立规，强制）**：对**装有需要保留的数据／应用**的设备，**禁止**直接运行
 > `connectedDebugAndroidTest`——若设备上已装应用的签名与测试包不一致（如设备上装的是 `assembleRelease` 包、测试装的是
