@@ -6,11 +6,13 @@ import com.keepasskey.app.R
 import androidx.lifecycle.viewModelScope
 import com.keepasskey.app.data.repository.SettingsRepository
 import com.keepasskey.app.data.repository.VaultRepository
+import com.keepasskey.app.passkey.PasskeyImportDraft
+import com.keepasskey.app.passkey.ScanPayloadClassifier
+import com.keepasskey.app.passkey.ScanPayloadKind
 import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.app.ui.model.UiMessage
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -21,7 +23,6 @@ import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.util.UUID
 import javax.inject.Inject
 import java.security.SecureRandom
@@ -97,6 +98,39 @@ class EntryEditViewModel @Inject constructor(
     private val _flagSecureEnabled = MutableStateFlow(true)
     val flagSecureEnabled: StateFlow<Boolean> = _flagSecureEnabled.asStateFlow()
 
+    /** ISSUE-P2-286 AC① / ISSUE-P3-337 搬移：强度评估调度（见该类 KDoc，行为逐字不变）。 */
+    private val entropyRefresh = EntryEditEntropyRefresh(viewModelScope, _uiState::update)
+
+    /**
+     * ISSUE-P3-337 Q1：编辑页「扫码 / 相册导入通行密钥」会话（挂当前条目、原地替换）。
+     * 解析与草案承载走与顶栏同一个 [com.keepasskey.app.passkey.PasskeyImportDraftHost]；
+     * 声明在 `init` 之前是为 `UnconfinedTestDispatcher` 下 `loadEntry` 可同步读到它。
+     */
+    private val passkeyImport = EntryEditPasskeyImport(
+        scope = viewModelScope,
+        repository = vaultRepository,
+        host = EntryEditPasskeyImportHost(
+            isReadOnly = { _uiState.value.isReadOnly },
+            entryId = { _uiState.value.entryId },
+            hasUnsavedEdits = { _uiState.value.isDirty },
+            onNotice = { res -> showMessage(UiMessage(res)) },
+            onReplaced = { _uiState.value.entryId?.let { loadEntry(it) } }
+        )
+    )
+
+    /** 待确认的通行密钥导入草案（非空即确认对话框可见；仅内存持有，不经路由 / SavedStateHandle）。 */
+    val pendingPasskeyImport: StateFlow<PasskeyImportDraft?> = passkeyImport.pendingPasskeyImport
+
+    /**
+     * ISSUE-P3-337 搬移：自定义字段四写入口的执行者（AC⑪① 只读锁在 [protectedFieldChars] 一侧
+     * 由它执行，见该类 KDoc）。
+     */
+    private val customFields = EntryEditCustomFieldEditor(
+        state = { _uiState.value },
+        update = { transform -> _uiState.update(transform) },
+        protectedChars = protectedFieldChars
+    )
+
     init {
         // H4-只读整改：会话只读时编辑页禁用保存
         _uiState.update { it.copy(isReadOnly = vaultRepository.isSessionReadOnly()) }
@@ -143,7 +177,10 @@ class EntryEditViewModel @Inject constructor(
                 // UI 投影中受保护字段值恒为空串（保存时未编辑字段由仓库回填既有值）
                 val loadedProtected = mutableMapOf<String, CharArray>()
                 for (cf in entry.customFields) {
-                    if (cf.isProtected) {
+                    // AC⑪①：被只读锁定的凭据材料**不解密进编辑态**——编辑页既改不动它，
+                    // 就没有把它（私钥 PEM / userHandle / PRF 种子）物化到本 ViewModel 的理由；
+                    // 保存路径由 VaultEntryWriteCoordinator 的回填分支按既有值原样写回。
+                    if (cf.isProtected && !isLockedPasskeyFieldKey(cf.key)) {
                         vaultRepository.getEntryProtectedFieldChars(entry.id, cf.key)?.let { chars ->
                             loadedProtected[cf.id] = chars
                         }
@@ -172,7 +209,7 @@ class EntryEditViewModel @Inject constructor(
                 _uiState.update { applyLoadedEntry(it, entry, password?.size ?: 0) }
                 // ISSUE-P2-286：载入既有条目时同步评估强度（编辑页与详情页同一真相源）
                 if (password != null && password.isNotEmpty()) {
-                    refreshPasswordEntropy(password)
+                    entropyRefresh.refresh(password)
                 }
             }
         }
@@ -201,32 +238,7 @@ class EntryEditViewModel @Inject constructor(
         _loadedPassword.value?.fill('0')
         _loadedPassword.value = null
         _uiState.update { it.copy(passwordLength = passwordChars.size, isDirty = true) }
-        refreshPasswordEntropy(password)
-    }
-
-    /**
-     * ISSUE-P2-286 AC①：编辑页强度条的真实熵（crypto 内核 `guessesLog10`，与详情页同一实现
-     * `PasswordEntropyEstimator`——三屏收敛单一真相源，替代已退役的「长度 × 4.5」启发式）。
-     * CPU 热路径下沉 `Dispatchers.Default`（§3 规则 2）；评估副本用毕即擦，明文不进状态流；
-     * [entropySeq] 保证快速连续输入下只采纳最后一次评估（防乱序回写）。
-     */
-    private var entropySeq = 0L
-
-    private fun refreshPasswordEntropy(password: CharArray) {
-        val seq = ++entropySeq
-        val evalCopy = password.copyOf()
-        viewModelScope.launch {
-            val bits = withContext(Dispatchers.Default) {
-                try {
-                    com.keepasskey.app.ui.screens.detail.PasswordEntropyEstimator.estimateBits(evalCopy)
-                } finally {
-                    evalCopy.fill('0')
-                }
-            }
-            _uiState.update {
-                if (seq == entropySeq) it.copy(passwordEntropyBits = bits) else it
-            }
-        }
+        entropyRefresh.refresh(password)
     }
 
     // TASK-15：标准图标与自定义图标互斥——选标准图标即清除自定义引用
@@ -280,6 +292,29 @@ class EntryEditViewModel @Inject constructor(
         _uiState.update { it.copy(isDirty = true, totpPrefillEpoch = it.totpPrefillEpoch + 1) }
     }
 
+    /**
+     * 扫码 / 相册导入对话框上行的解码文本按载荷分流（`ISSUE-P3-337` Q1 + 口径 1）。
+     *
+     * 只有**通行密钥形态**改走导入会话；其余一律沿用本页原有行为——直接把解码文本当种子回填
+     * （[onTotpSecretChangeSecure] 一字未改）。AC⑤ 的「TOTP 分支一字不改」在本页按
+     * 「非通行密钥形态即旧通路」落地：编辑页的手填兼容通道本就接受纯 Base32 等宽松形态，
+     * 顶栏那条「Unknown 即拒」在这里**不适用**——这里回填的是用户看得见、可撤销的输入框，
+     * 不是静默建条目；按顶栏口径拒绝反而会让「扫一张旧种子二维码」这条既有通路回归。
+     */
+    fun onQrPayloadDecoded(decoded: CharArray) {
+        if (ScanPayloadClassifier.classify(decoded) == ScanPayloadKind.Passkey) {
+            passkeyImport.beginFromScan(decoded)
+        } else {
+            onTotpSecretChangeSecure(decoded)
+        }
+    }
+
+    /** 用户在确认对话框点「替换通行密钥」（Q1）；草案的擦除义务见 [EntryEditPasskeyImport.confirm]。 */
+    fun confirmPasskeyImport() = passkeyImport.confirm()
+
+    /** 用户取消导入：擦除草案、不写库（AC③ 取消路径）。 */
+    fun dismissPasskeyImport() = passkeyImport.dismiss()
+
     fun onTagsInputChange(input: String) = _uiState.update { it.copy(tagsInput = input, isDirty = true) }
 
     fun onAutoTypeSequenceChange(sequence: String) = _uiState.update { it.copy(autoTypeSequence = sequence, isDirty = true) }
@@ -332,56 +367,21 @@ class EntryEditViewModel @Inject constructor(
 
     fun onGroupChange(groupId: String?) = _uiState.update { it.copy(groupId = groupId, isDirty = true) }
 
-    fun addCustomField() {
-        val newField = buildNewCustomField("field_${System.currentTimeMillis()}")
-        _uiState.update { it.copy(customFields = it.customFields + newField, isDirty = true) }
-    }
+    fun addCustomField() = customFields.add()
 
-    /**
-     * 非受保护字段明文 / 键名 / 保护标记的通用编辑入口。
-     * TASK-10：保护标记切换时同步迁移明文存储位置——
-     * - 非受保护 → 受保护：明文迁入 CharArray 私有链路，状态值转为空串（掩码投影语义）；
-     * - 受保护 → 非受保护：明文迁回状态 String（非受保护字段按格式边界以明文存储），Char 副本擦除。
-     */
-    fun updateCustomField(id: String, key: String, value: String, isProtected: Boolean) {
-        val previous = _uiState.value.customFields.firstOrNull { it.id == id }
-        var effectiveValue = value
-        when {
-            previous != null && !previous.isProtected && isProtected && value.isNotEmpty() -> {
-                protectedFieldChars[id]?.fill('0')
-                protectedFieldChars[id] = value.toCharArray()
-                effectiveValue = ""
-            }
-            previous != null && previous.isProtected && !isProtected -> {
-                val chars = protectedFieldChars.remove(id)
-                if (chars != null) {
-                    effectiveValue = String(chars)
-                    chars.fill('0')
-                }
-            }
-        }
-        _uiState.update { state ->
-            state.copy(
-                customFields = withUpdatedCustomField(state.customFields, id, key, effectiveValue, isProtected),
-                isDirty = true
-            )
-        }
-    }
+    /** 非受保护字段明文 / 键名 / 保护标记编辑入口（被锁的通行密钥字段就地拒绝，见执行者 KDoc）。 */
+    fun updateCustomField(id: String, key: String, value: String, isProtected: Boolean) =
+        customFields.updateField(id, key, value, isProtected)
 
     /**
      * TASK-10：受保护字段明文输入的 CharArray 桥接上行（语义同 [onPasswordChangeSecure]）。
-     * 桥接数组归组件所有（组件自行清零），此处复制私有副本长期持有。
+     * AC⑪①：私钥 PEM / `userHandle` 等被锁字段在 [EntryEditCustomFieldEditor.updateProtectedValue]
+     * 内直接拒收。
      */
-    fun updateProtectedFieldValue(id: String, chars: CharArray) {
-        protectedFieldChars[id]?.fill('0')
-        protectedFieldChars[id] = chars.copyOf()
-        _uiState.update { it.copy(isDirty = true) }
-    }
+    fun updateProtectedFieldValue(id: String, chars: CharArray) =
+        customFields.updateProtectedValue(id, chars)
 
-    fun removeCustomField(id: String) {
-        protectedFieldChars.remove(id)?.fill('0')
-        _uiState.update { state -> state.copy(customFields = withoutCustomField(state.customFields, id), isDirty = true) }
-    }
+    fun removeCustomField(id: String) = customFields.remove(id)
 
     /**
      * 断点1 整改：真实附件添加——读取用户经 SAF 选择文件的字节并随编辑会话驻留内存，
@@ -490,5 +490,7 @@ class EntryEditViewModel @Inject constructor(
         protectedFieldChars.clear()
         _loadedProtectedFields.value.values.forEach { it.fill('0') }
         _loadedProtectedFields.value = emptyMap()
+        // ISSUE-P3-337 AC③：会话锁定 / 销毁时，尚未确认的导入草案（私钥明文唯一持有者）一并擦除
+        passkeyImport.wipeAll()
     }
 }

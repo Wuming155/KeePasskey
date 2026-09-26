@@ -8,9 +8,11 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.QrCodeScanner
@@ -22,6 +24,7 @@ import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -114,11 +117,20 @@ internal fun EntryEditTotpSection(
 /**
  * 通行密钥 Passkey 注册绑定区：区块标题 + 绑定状态卡片（TASK-21 拆分：自
  * [EntryEditContent] 整体搬移；LocalSecurityColors 改在本区块内读取，组合输出不变）
+ *
+ * `ISSUE-P3-337` Q1：已绑定且**已落库**的条目额外给一条「扫码 / 相册导入」附加入口
+ * （主入口在顶栏分流，见 `PD-08` 改写后的口径）。两个前置条件各有其所以至于：
+ * - 未绑定通行密钥的条目没有「可替换的凭据」，其凭据应由注册仪式产生；
+ * - **新建表单**（`entryId == null`）根本没有「当前条目」可挂，替换按 id 定位；
+ *   故此处不给一个点了只会失败的按钮，未保存改动的拦截同理放在确认之后那一步
+ *   （见 [EntryEditPasskeyImport.confirm]）。
  */
 @Composable
 internal fun EntryEditPasskeySection(
     isPasskey: Boolean,
-    onTogglePasskey: () -> Unit
+    onTogglePasskey: () -> Unit,
+    canImportPasskey: Boolean = false,
+    onImportPasskey: () -> Unit = {}
 ) {
     val securityColors = LocalSecurityColors.current
     Text(
@@ -158,6 +170,21 @@ internal fun EntryEditPasskeySection(
                 )
             ) {
                 Text(if (isPasskey) stringResource(R.string.edit_passkey_unbind) else stringResource(R.string.edit_passkey_bind))
+            }
+        }
+        if (isPasskey && canImportPasskey) {
+            OutlinedButton(
+                onClick = onImportPasskey,
+                shape = CapsuleShape,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(
+                    imageVector = Icons.Default.QrCodeScanner,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(stringResource(R.string.edit_passkey_import_scan))
             }
         }
     }

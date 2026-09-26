@@ -94,5 +94,10 @@
     <string name="passkey_import_failed_invalid">二维码内容不是可导入的通行密钥</string>
     <string name="passkey_import_failed_no_credential">二维码里没有可导入的通行密钥</string>
     <string name="passkey_import_failed_too_large">单张二维码放不下该载荷，请改用只含单把凭据的导出</string>
+    <!-- ISSUE-P3-337 Q1 编辑页入口：替换语义（正文与按钮都得说「替换」，说「新建」就是撒谎） -->
+    <string name="passkey_import_replace_target">将替换本条目的通行密钥（标题、备注等其余内容保持不变）</string>
+    <string name="passkey_import_action_replace">替换</string>
+    <string name="passkey_import_replaced">已替换本条目的通行密钥</string>
+    <string name="passkey_import_entry_missing">该条目已不存在，未做任何改动</string>
 
 </resources>

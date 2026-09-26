@@ -18,6 +18,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.keepasskey.app.R
 import com.keepasskey.app.ui.components.CustomIconItem
 import com.keepasskey.app.ui.model.UiMessage
+import com.keepasskey.app.ui.screens.vault.PasskeyImportConfirmDialog
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -27,6 +28,8 @@ import kotlinx.coroutines.withContext
  * 编辑页三个系统选择器（SAF 附件 / TOTP 扫码 / 相册图标）与已解码图标池的聚合句柄。
  *
  * ISSUE-P3-31 批次 C：由 `EntryEditScreen.kt`（原 712 行）按**纯结构性拆分**搬出。
+ * ISSUE-P3-337 Q1：加第四个句柄 [EntryEditPickers.scanPasskeyQr]——它不是新的系统选择器，
+ * 而是同一扫码对话框的第二个触发入口（外加该入口的导入确认对话框）。
  */
 internal data class EntryEditPickers(
     /** 已解码的库内自定义图标池（PNG → ImageBitmap，解码在 Default 调度器完成）。 */
@@ -35,6 +38,12 @@ internal data class EntryEditPickers(
     val pickAttachment: () -> Unit,
     /** 断点5：打开受保护扫码对话框（ISSUE-P3-319），结果以 CharArray 上行回填 TOTP 种子。 */
     val scanTotpQr: () -> Unit,
+    /**
+     * ISSUE-P3-337 Q1：通行密钥区块的「扫码 / 相册导入」附加入口。
+     * 与 [scanTotpQr] 是同一个受保护取景对话框（只标题不同），解码文本同样经
+     * `EntryEditViewModel.onQrPayloadDecoded` 分流。
+     */
+    val scanPasskeyQr: () -> Unit,
     /** TASK-15：拉起系统相册 Photo Picker，选图降采样为 ≤128px PNG 后上传。 */
     val pickCustomIcon: () -> Unit
 )
@@ -81,17 +90,44 @@ internal fun rememberEntryEditPickers(
     val attachmentPicker = rememberAttachmentPicker(viewModel, scope)
 
     var showTotpScanDialog by remember { mutableStateOf(false) }
+    // ISSUE-P3-337 Q1：通行密钥区块的导入入口——与上面**同一个**对话框组件，只是标题不同
+    var showPasskeyScanDialog by remember { mutableStateOf(false) }
     // PD-47：扫码对话框 FLAG_SECURE 跟随设置页「禁止截屏与录屏」开关
     val flagSecureEnabled by viewModel.flagSecureEnabled.collectAsStateWithLifecycle()
 
     val decodedCustomIcons = rememberDecodedCustomIcons(viewModel)
     val photoPicker = rememberCustomIconPicker(viewModel, scope)
 
-    if (showTotpScanDialog) {
+    // 两个入口共用一份取景 / 相册实现（AC⑤：只允许参数化，禁复制第二份）。解码文本统一经
+    // viewModel.onQrPayloadDecoded 分流：otpauth 与非 JSON 形态沿用本页原有的「回填种子」通路，
+    // JSON 形态进通行密钥导入会话。
+    val scanDialogTitleRes = when {
+        showPasskeyScanDialog -> R.string.scan_dialog_title_passkey
+        showTotpScanDialog -> R.string.edit_scan_dialog_title
+        else -> null
+    }
+    scanDialogTitleRes?.let { titleRes ->
         TotpScanDialog(
+            titleRes = titleRes,
             flagSecureEnabled = flagSecureEnabled,
-            onDecoded = viewModel::onTotpSecretChangeSecure,
-            onDismiss = { showTotpScanDialog = false }
+            onDecoded = viewModel::onQrPayloadDecoded,
+            onDismiss = {
+                showTotpScanDialog = false
+                showPasskeyScanDialog = false
+            }
+        )
+    }
+
+    // Q1 确认对话框：与顶栏 Q2 同一个组件（不新增 FLAG_SECURE 账目），差别只在 replacesEntry
+    // ——本页改的是「当前条目」的凭据，正文与按钮都据实说「替换」
+    val pendingPasskeyImport by viewModel.pendingPasskeyImport.collectAsStateWithLifecycle()
+    pendingPasskeyImport?.let { draft ->
+        PasskeyImportConfirmDialog(
+            draft = draft,
+            flagSecureEnabled = flagSecureEnabled,
+            replacesEntry = true,
+            onConfirm = viewModel::confirmPasskeyImport,
+            onDismiss = viewModel::dismissPasskeyImport
         )
     }
 
@@ -99,6 +135,7 @@ internal fun rememberEntryEditPickers(
         decodedCustomIcons = decodedCustomIcons,
         pickAttachment = { attachmentPicker.launch("*/*") },
         scanTotpQr = { showTotpScanDialog = true },
+        scanPasskeyQr = { showPasskeyScanDialog = true },
         pickCustomIcon = {
             photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
         }

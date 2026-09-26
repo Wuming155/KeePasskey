@@ -477,6 +477,16 @@ class VaultListViewModel @Inject constructor(
 
     fun consumeOpenEntryEditId() = actions.consumeOpenEntryEditId()
 
+    /**
+     * 离开密码库页（ViewModel 销毁）时，尚未确认 / 尚未落库的导入草案**必须**擦除：
+     * 它是私钥明文的唯一持有者，只靠 GC 不算清零（§3 敏感数据铁律）。
+     * 正常路径（确认落库 / 点取消）各自已擦，这里只兜「直接退页」这条。
+     */
+    override fun onCleared() {
+        actions.wipePendingPasskeyImport()
+        super.onCleared()
+    }
+
     private companion object {
         /** 搜索输入停顿多久后才触发列表重算（毫秒） */
         const val SEARCH_DEBOUNCE_MS = 300L

@@ -495,16 +495,52 @@ class FakeVaultRepository(
      * 测试替身：按 **entryId** 整体替换既有条目的 Passkey schema 字段
      * （与生产 `PasskeyEntryCoordinator.replacePasskeyOnEntry` 同语义：非 passkey 字段全保留、
      * 全部 schema 键换新、未命中不写入并返回 null）。
+     *
+     * 两支存储都要认：编辑页用例里的条目是**早就在库里**的普通条目（经 [saveEntry] 落在
+     * [entriesFlow] 的 UI 投影侧），而顶栏新建落在 [extraKdbxEntries]。生产实现只在 KDBX 树上
+     * 按 id 定位，两侧走的是同一替换语义，故替身不得只认一支——否则 Q1 的「挂当前条目」
+     * 在单测里永远走 null 分支，替换语义就成了没测过的空话。
      */
     override suspend fun replacePasskeyOnEntry(entryId: String, data: PasskeyData): KdbxEntry? {
         val current = extraKdbxEntries.value
         val index = current.indexOfFirst { it.id.toHexString() == entryId }
-        if (index < 0) return null
-        val preserved = current[index].customFields.filterNot { PasskeyData.isPasskeyFieldKey(it.key) }
-        val updated = current[index].copy(customFields = preserved + data.toCustomFields())
-        lastSavedPasskeyByEntry = lastSavedPasskeyByEntry + (entryId to updated.customFields)
-        extraKdbxEntries.value = current.toMutableList().also { it[index] = updated }
-        return updated
+        if (index >= 0) {
+            val preserved = current[index].customFields.filterNot { PasskeyData.isPasskeyFieldKey(it.key) }
+            val updated = current[index].copy(customFields = preserved + data.toCustomFields())
+            lastSavedPasskeyByEntry = lastSavedPasskeyByEntry + (entryId to updated.customFields)
+            extraKdbxEntries.value = current.toMutableList().also { it[index] = updated }
+            return updated
+        }
+        val uiEntries = entriesFlow.value
+        val uiIndex = uiEntries.indexOfFirst { it.id == entryId }
+        if (uiIndex < 0) return null
+        val ui = uiEntries[uiIndex]
+        val preservedUi = ui.customFields.filterNot { PasskeyData.isPasskeyFieldKey(it.key) }
+        val incomingFields = data.toCustomFields()
+        val incoming = incomingFields.map { cf ->
+            UiCustomField(
+                id = "${entryId}_${cf.key}",
+                key = cf.key,
+                value = cf.value.readString(),
+                isProtected = cf.isProtected
+            )
+        }
+        val updatedUi = ui.copy(customFields = preservedUi + incoming, isPasskey = true)
+        lastSavedPasskeyByEntry = lastSavedPasskeyByEntry + (entryId to incomingFields)
+        entriesFlow.value = uiEntries.toMutableList().also { it[uiIndex] = updatedUi }
+        return KdbxEntry(
+            id = try {
+                KdbxUuid.fromHexString(entryId)
+            } catch (_: Exception) {
+                KdbxUuid.random()
+            },
+            fields = mapOf(
+                KdbxConstants.Fields.TITLE to ProtectedString(updatedUi.title, isProtected = false)
+            ),
+            customFields = preservedUi.map {
+                KdbxCustomField(it.key, ProtectedString(it.value, isProtected = it.isProtected))
+            } + incomingFields
+        )
     }
 
     /**
@@ -886,7 +922,13 @@ class FakeVaultRepository(
 
     override suspend fun getAttachmentData(entryId: String, refIndex: Int): ByteArray? = null
 
-    override fun isSessionReadOnly(): Boolean = false
+    /**
+     * ISSUE-P3-337 AC③：置 true 驱动「只读会话」分支（顶栏扫码与编辑页导入的硬拒绝路径）。
+     * 默认 false，不影响任何既有用例。
+     */
+    var sessionReadOnly: Boolean = false
+
+    override fun isSessionReadOnly(): Boolean = sessionReadOnly
 
     // TASK-13 新契约：Fake 仓储不支持导出（如实失败），模板安装幂等成功
     override suspend fun exportKdbxBytes(): com.keepasskey.core.result.KdbxResult<ByteArray> =

@@ -54,6 +54,11 @@ import com.keepasskey.app.ui.theme.CapsuleShape
  * 自定义字段编辑区（动态添加/修改/删除）：区块标题 + 字段卡片（TASK-21 拆分：
  * 自 [EntryEditContent] 整体搬移，在原 Column 位置发射标题与卡片两个兄弟节点，
  * 组合结构不变）
+ *
+ * `ISSUE-P3-337` AC⑪①：通行密钥的凭据材料字段（规范 CXF §3.3.12.1「MUST NOT be user
+ * editable」）**渲染成只读卡片**——没有键名框、没有值输入框、没有删除按钮、没有保护标记
+ * 开关，并如实标注不可编辑的原因；判据与执行点见 [isLockedPasskeyFieldKey] 与
+ * [EntryEditCustomFieldEditor]（UI 不给入口只是第一层，真挡下改写的是那两处）。
  */
 @Composable
 internal fun EntryEditCustomFieldsSection(
@@ -77,13 +82,17 @@ internal fun EntryEditCustomFieldsSection(
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             customFields.forEach { field ->
-                CustomFieldEditCard(
-                    field = field,
-                    loadedProtectedFields = loadedProtectedFields,
-                    onUpdateCustomField = onUpdateCustomField,
-                    onUpdateProtectedFieldValue = onUpdateProtectedFieldValue,
-                    onRemoveCustomField = onRemoveCustomField
-                )
+                if (isLockedPasskeyFieldKey(field.key)) {
+                    LockedPasskeyFieldCard(field)
+                } else {
+                    CustomFieldEditCard(
+                        field = field,
+                        loadedProtectedFields = loadedProtectedFields,
+                        onUpdateCustomField = onUpdateCustomField,
+                        onUpdateProtectedFieldValue = onUpdateProtectedFieldValue,
+                        onRemoveCustomField = onRemoveCustomField
+                    )
+                }
             }
 
             OutlinedButton(
@@ -186,6 +195,42 @@ private fun CustomFieldEditCard(
                 style = MaterialTheme.typography.bodySmall
             )
         }
+    }
+}
+
+/**
+ * 通行密钥字段的**只读卡片**（`ISSUE-P3-337` AC⑪①）。
+ *
+ * 呈现口径：键名照原样显示（用户需要知道库里存了什么）；未受保护的值（rpId / 算法 /
+ * 计数器）照实显示；**受保护字段不显示值**——投影侧本就恒为空串（F2 口径），这里给一句
+ * 如实说明，不留一片空白让人以为数据丢了。四类可编辑控件（键名框 / 值框 / 删除钮 /
+ * 保护开关）一个都不发射 ⇒ 页面上不存在改它的通路。
+ */
+@Composable
+private fun LockedPasskeyFieldCard(field: UiCustomField) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainerLow)
+            .padding(10.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Text(
+            text = field.key,
+            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+            color = MaterialTheme.colorScheme.onSurface
+        )
+        Text(
+            text = if (field.isProtected) stringResource(R.string.edit_passkey_field_value_hidden) else field.value,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            text = stringResource(R.string.edit_passkey_field_locked),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }
 

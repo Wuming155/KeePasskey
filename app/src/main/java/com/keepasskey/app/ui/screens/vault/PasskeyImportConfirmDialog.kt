@@ -40,6 +40,11 @@ import com.keepasskey.app.security.SecureDialogWindowEffect
 internal fun PasskeyImportConfirmDialog(
     draft: PasskeyImportDraft,
     flagSecureEnabled: Boolean,
+    /**
+     * 「替换当前条目」语义（`ISSUE-P3-337` Q1 的编辑页入口）：正文第三行改说替换、
+     * 确认按钮改说「替换」。顶栏新建分支为默认的 false。
+     */
+    replacesEntry: Boolean = false,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -48,9 +53,15 @@ internal fun PasskeyImportConfirmDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.passkey_import_confirm_title)) },
-        text = { Text(passkeyImportSummary(draft) { labels.getValue(it) }) },
+        text = { Text(passkeyImportSummary(draft, replacesEntry) { labels.getValue(it) }) },
         confirmButton = {
-            TextButton(onClick = onConfirm) { Text(stringResource(R.string.passkey_import_action)) }
+            TextButton(onClick = onConfirm) {
+                Text(
+                    stringResource(
+                        if (replacesEntry) R.string.passkey_import_action_replace else R.string.passkey_import_action
+                    )
+                )
+            }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text(stringResource(R.string.btn_cancel)) }
@@ -71,6 +82,7 @@ private fun passkeyImportLabels(): Map<Int, String> = mapOf(
     R.string.passkey_import_site to stringResource(R.string.passkey_import_site),
     R.string.passkey_import_kind to stringResource(R.string.passkey_import_kind),
     R.string.passkey_import_entry_title to stringResource(R.string.passkey_import_entry_title),
+    R.string.passkey_import_replace_target to stringResource(R.string.passkey_import_replace_target),
     R.string.passkey_import_dropped to stringResource(R.string.passkey_import_dropped),
     R.string.passkey_import_extra_credentials to stringResource(R.string.passkey_import_extra_credentials),
     R.string.passkey_import_source_missing to stringResource(R.string.passkey_import_source_missing),
@@ -123,14 +135,27 @@ internal fun PasskeyImportConfirmationHost(
  *   `payments(true)` / 算法值无法识别的 PRF 项）；
  * - `credWithoutUV` 是**全量存入** `Passkey.PrfNoUv` 的，**不得**出现在该行；
  *   「规范形缺一枚种子」属**来源缺陷**，与「用户名 / 显示名来源未提供」同归「来源」行。
+ *
+ * [replacesEntry] = 编辑页 Q1 的替换语义：第三行不说「拟用条目标题」（标题根本不会变，
+ * 说了就是撒谎），改说「在本条目上替换通行密钥，其余内容不动」——与
+ * [com.keepasskey.app.data.repository.PasskeyEntryCoordinator.replacePasskeyOnEntry]
+ * 的实际行为（非 passkey 字段按引用保留）逐字对齐。
  */
-internal fun passkeyImportSummary(draft: PasskeyImportDraft, text: (Int) -> String): String {
+internal fun passkeyImportSummary(
+    draft: PasskeyImportDraft,
+    replacesEntry: Boolean = false,
+    text: (Int) -> String
+): String {
     val credential = draft.credential
     val notes = draft.notes
     return buildString {
         line(text(R.string.passkey_import_site), credential.relyingPartyId)
         line(text(R.string.passkey_import_kind))
-        line(text(R.string.passkey_import_entry_title), "${credential.userName}@${credential.relyingPartyId}")
+        if (replacesEntry) {
+            line(text(R.string.passkey_import_replace_target))
+        } else {
+            line(text(R.string.passkey_import_entry_title), "${credential.userName}@${credential.relyingPartyId}")
+        }
         if (notes.shape == PasskeyCxfSourceShape.KeePassXCPasskeyFile) {
             // 兼容形的字段集从未按 CXF 对齐 ⇒ 标注来源，不让用户以为「规范给了空值」
             append(" · KeePassXC")

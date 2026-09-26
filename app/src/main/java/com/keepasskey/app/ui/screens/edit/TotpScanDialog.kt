@@ -118,6 +118,11 @@ import kotlin.coroutines.resumeWithException
  */
 @Composable
 internal fun TotpScanDialog(
+    /**
+     * 对话框标题文案（`ISSUE-P3-337` AC⑤ 允许的**参数化**，不是第二份实现）：
+     * 本页 TOTP 入口与顶栏扫码沿用默认值，编辑页通行密钥入口给「导入通行密钥」字样。
+     */
+    titleRes: Int = R.string.edit_scan_dialog_title,
     /** 是否施加 `FLAG_SECURE`：设置页「禁止截屏与录屏」开关值（`PD-47`，跟随开关）。 */
     flagSecureEnabled: Boolean,
     /** 解码成功回调：参数为二维码文本即刻转出的 CharArray，消费侧负责清零。 */
@@ -165,7 +170,7 @@ internal fun TotpScanDialog(
                 modifier = Modifier.padding(16.dp)
             ) {
                 Text(
-                    text = stringResource(R.string.edit_scan_dialog_title),
+                    text = stringResource(titleRes),
                     style = MaterialTheme.typography.titleLarge
                 )
                 Spacer(modifier = Modifier.height(12.dp))

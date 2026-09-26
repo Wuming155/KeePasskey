@@ -3,6 +3,7 @@ package com.keepasskey.app.ui.screens.edit
 import com.keepasskey.app.ui.model.UiAttachment
 import com.keepasskey.app.ui.model.UiCustomField
 import com.keepasskey.app.ui.model.UiVaultEntry
+import com.keepasskey.core.model.PasskeyData
 import java.security.SecureRandom
 
 /**
@@ -78,7 +79,37 @@ internal fun applyTemplateEntry(
     isDirty = false
 )
 
-/** 在自定义字段列表中就地替换指定 id 的键名 / 值 / 保护标记（未命中则原样返回）。 */
+/**
+ * 通行密钥字段在编辑页的**只读锁**判据（`ISSUE-P3-337` AC⑪①，规范 CXF §3.3.12.1 原文：
+ * `Passkey` 字典除 `username` / `userDisplayName` 外的成员「MUST NOT be user editable」）。
+ *
+ * 锁的是**凭据材料本身**：`rpId` / `credentialId` / `userHandle` / 私钥 PEM / 算法 / 两个
+ * PRF 种子 / 签名计数器 / 两个 BE·BS 标志 / 创建时间——手改任意一项都会让条目与真实凭据
+ * 脱钩（断言失败或更糟：把改过的值交给 RP）。v1 旧键同锁（库里仍可能有历史条目）。
+ *
+ * 两个展示字段按规范明文**豁免**：[PasskeyData.FIELD_USER_NAME]（含 v1 同义键）与
+ * [PasskeyData.FIELD_USER_DISPLAY_NAME] 不参与仪式，用户事后修正显示名是正当需求。
+ */
+internal fun isLockedPasskeyFieldKey(key: String): Boolean =
+    PasskeyData.isPasskeyFieldKey(key) && key !in EDITABLE_PASSKEY_DISPLAY_KEYS
+
+/** 规范 §3.3.12.1 明文豁免的两个展示字段键。 */
+private val EDITABLE_PASSKEY_DISPLAY_KEYS: Set<String> = setOf(
+    PasskeyData.FIELD_USER_NAME,
+    PasskeyData.LEGACY_FIELD_USER_NAME,
+    PasskeyData.FIELD_USER_DISPLAY_NAME
+)
+
+/** 按编辑态 id 判锁（[UiCustomField.id] = `条目id_字段键`，故 id 命中即该字段被锁）。 */
+internal fun isLockedCustomField(fields: List<UiCustomField>, id: String): Boolean =
+    fields.any { it.id == id && isLockedPasskeyFieldKey(it.key) }
+
+/**
+ * 在自定义字段列表中就地替换指定 id 的键名 / 值 / 保护标记（未命中则原样返回）。
+ *
+ * AC⑪①：被锁的通行密钥字段**就地拒绝替换**（返回原列表元素），编辑页因此不存在任何一条
+ * 「改得动凭据材料」的通路——UI 只是不提供入口，本函数才是那道锁。
+ */
 internal fun withUpdatedCustomField(
     fields: List<UiCustomField>,
     id: String,
@@ -86,12 +117,16 @@ internal fun withUpdatedCustomField(
     value: String,
     isProtected: Boolean
 ): List<UiCustomField> = fields.map { f ->
-    if (f.id == id) f.copy(key = key, value = value, isProtected = isProtected) else f
+    if (f.id == id && !isLockedPasskeyFieldKey(f.key)) f.copy(key = key, value = value, isProtected = isProtected) else f
 }
 
-/** 移除指定 id 的自定义字段（未命中则原样返回）。 */
+/**
+ * 移除指定 id 的自定义字段（未命中则原样返回）。
+ *
+ * AC⑪①：删除同样是「手改」——被锁字段删不掉（删掉即凭据材料缺失，条目直接不可断言）。
+ */
 internal fun withoutCustomField(fields: List<UiCustomField>, id: String): List<UiCustomField> =
-    fields.filter { it.id != id }
+    fields.filter { it.id != id || isLockedPasskeyFieldKey(it.key) }
 
 /** 移除指定 id 的附件（未命中则原样返回）。 */
 internal fun withoutAttachment(attachments: List<UiAttachment>, id: String): List<UiAttachment> =

@@ -122,6 +122,7 @@ fun EntryEditScreen(
         onShowMessage = viewModel::showMessage,
         onPickAttachmentFile = pickers.pickAttachment,
         onScanTotpQr = pickers.scanTotpQr,
+        onScanPasskeyQr = pickers.scanPasskeyQr,
         modifier = modifier
     )
 }
@@ -182,6 +183,8 @@ fun EntryEditContent(
     onShowMessage: (UiMessage) -> Unit,
     onPickAttachmentFile: () -> Unit,
     onScanTotpQr: () -> Unit,
+    /** ISSUE-P3-337 Q1：通行密钥区块的「扫码 / 相册导入」附加入口（同一受保护取景对话框） */
+    onScanPasskeyQr: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var showDiscardDialog by remember { mutableStateOf(false) }
@@ -258,7 +261,10 @@ fun EntryEditContent(
             // 通行密钥 Passkey 注册绑定
             EntryEditPasskeySection(
                 isPasskey = uiState.isPasskey,
-                onTogglePasskey = onTogglePasskey
+                onTogglePasskey = onTogglePasskey,
+                // ISSUE-P3-337 Q1：附加入口只给「已绑定且已落库」的条目（替换按 id 定位当前条目）
+                canImportPasskey = uiState.entryId != null,
+                onImportPasskey = onScanPasskeyQr
             )
 
             // 自定义字段编辑区 (动态添加/修改/删除)

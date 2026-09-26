@@ -198,6 +198,11 @@
     <string name="edit_passkey_has_bound">已绑定 Passkey 凭据</string>
     <string name="edit_passkey_create">为此网站创建 Passkey</string>
     <string name="edit_passkey_desc">基于 Android 14+ 凭据管理器，支持端到端公私钥验证</string>
+    <!-- ISSUE-P3-337 Q1 + AC⑪①：编辑页附加入口与凭据材料字段的只读标注 -->
+    <string name="edit_passkey_import_scan">扫码 / 相册导入通行密钥</string>
+    <string name="edit_passkey_import_requires_saved">请先保存此条目，再导入通行密钥</string>
+    <string name="edit_passkey_field_locked">通行密钥字段由本库托管：注册或导入时自动写入，不可在此编辑</string>
+    <string name="edit_passkey_field_value_hidden">受保护字段，编辑页不显示明文</string>
     <string name="edit_custom_fields">自定义字段 (键值对)</string>
     <string name="edit_add_field">添加自定义字段</string>
     <string name="edit_field_key">字段名称 (如 PIN码、安全问题)</string>
@@ -355,8 +360,11 @@
     <string name="unlock_downgrade_dialog_body">本机 Keystore 为软件级（无 TEE / StrongBox 硬件隔离），快速解锁封印的主密码与密钥文件将以软件密钥加密，攻击者可离线解出。是否仍要启用？</string>
     <string name="unlock_downgrade_confirm">仍要启用（软件密钥）</string>
     <string name="unlock_downgrade_decline">不启用</string>
-    <!-- ISSUE-P3-319：受保护扫码对话框（CameraX + zxing:core，替代 zxing-embedded CaptureActivity） -->
-    <string name="edit_scan_dialog_title">扫描 TOTP 二维码</string>
+    <!-- ISSUE-P3-319：受保护扫码对话框（CameraX + zxing:core，替代 zxing-embedded CaptureActivity）。
+         ISSUE-P3-337 口径 1：同一对话框现按载荷分流（验证码 / 通行密钥），标题随之改为中性表述——
+         写「扫描 TOTP 二维码」却可能导入通行密钥，属对用户的失实陈述 -->
+    <string name="edit_scan_dialog_title">扫描二维码（验证码 / 通行密钥）</string>
+    <string name="scan_dialog_title_passkey">导入通行密钥二维码</string>
     <string name="edit_scan_hint">将二维码对准取景框</string>
     <string name="edit_scan_camera_permission_denied">相机权限被拒绝，无法相机扫码。可点击下方按钮重新授权、到系统设置中开启相机权限，或从相册导入二维码</string>
     <string name="edit_scan_retry">重试授权</string>

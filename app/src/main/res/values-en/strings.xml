@@ -190,6 +190,11 @@
     <string name="edit_passkey_has_bound">Passkey credential bound</string>
     <string name="edit_passkey_create">Create Passkey for this website</string>
     <string name="edit_passkey_desc">Powered by Android 14+ Credential Manager with end-to-end asymmetric keys</string>
+    <!-- ISSUE-P3-337 Q1 + AC⑪①: extra import entry and the read-only note on credential material -->
+    <string name="edit_passkey_import_scan">Scan / import passkey from gallery</string>
+    <string name="edit_passkey_import_requires_saved">Save this entry before importing a passkey</string>
+    <string name="edit_passkey_field_locked">Managed by this app: written on registration or import, not editable here</string>
+    <string name="edit_passkey_field_value_hidden">Protected field, plaintext is not shown while editing</string>
     <string name="edit_custom_fields">Custom Fields (Key-Value)</string>
     <string name="edit_add_field">Add Custom Field</string>
     <string name="edit_field_key">Field Name (e.g. PIN, Recovery Code)</string>
@@ -348,7 +353,8 @@
     <string name="unlock_downgrade_confirm">Enable anyway (software key)</string>
     <string name="unlock_downgrade_decline">Don\'t enable</string>
     <!-- ISSUE-P3-319: protected scan dialog (CameraX + zxing:core, replaces zxing-embedded CaptureActivity) -->
-    <string name="edit_scan_dialog_title">Scan TOTP QR code</string>
+    <string name="edit_scan_dialog_title">Scan a QR code (verification code or passkey)</string>
+    <string name="scan_dialog_title_passkey">Import a passkey QR code</string>
     <string name="edit_scan_hint">Align the QR code within the frame</string>
     <string name="edit_scan_camera_permission_denied">Camera permission was denied, camera scanning is unavailable. Tap the button below to grant again, enable camera permission in system settings, or import a QR code from the gallery</string>
     <string name="edit_scan_retry">Retry permission</string>
@@ -1410,5 +1416,10 @@
     <string name="passkey_import_failed_invalid">This QR code is not an importable passkey</string>
     <string name="passkey_import_failed_no_credential">This QR code contains no importable passkey</string>
     <string name="passkey_import_failed_too_large">The payload does not fit a single QR code; export just one credential instead</string>
+    <!-- ISSUE-P3-337 Q1: edit-page entry replaces the credential on the current entry -->
+    <string name="passkey_import_replace_target">Replaces the passkey on this entry (title, notes and everything else stay as they are)</string>
+    <string name="passkey_import_action_replace">Replace</string>
+    <string name="passkey_import_replaced">Passkey on this entry was replaced</string>
+    <string name="passkey_import_entry_missing">That entry no longer exists; nothing was changed</string>
 
 </resources>

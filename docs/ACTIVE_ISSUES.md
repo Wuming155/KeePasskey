@@ -50,7 +50,8 @@
 
 ## P3 低危问题、特性接线与体验优化（1 项）
 
-> **开放项 1 条**（`ISSUE-P3-337` 扫码导入通行密钥，2026-09-26 立项；开工顺序①已完成、②起待续）。
+> **开放项 1 条**（`ISSUE-P3-337` 扫码导入通行密钥，2026-09-26 立项；开工顺序①~⑥已完成，
+> 仅剩⑦真机端到端 + 实拍取样 + 批次归档）。
 > 2026-09-26 注册响应 `transports` 撤回虚报 `hybrid`（`ISSUE-P3-338`）闭环见 §342；
 > 更早的 P3 闭环流水见 `RESOLVED_LOG.md` §326 ~ §341。
 
@@ -495,8 +496,8 @@
   + `Passkey.PrfNoUv` + 对拍重跑 161 条全绿）**
   —— 本片的计数写入与限界表登记已同批入库。
   **⑥ 第 4 片 两个入口接线 + 确认对话框（含 4′ 的不兼容清单与「另有 N 把」点名）+ 守卫重盘点
-  —— 顶栏主入口已完成（留痕「第 4 片（上）」），编辑页 Q1 附加入口与 AC⑪① 只读锁待做**
-  **⑦ 第 5 / 6 片 真机端到端 + 实拍取样 + 全量 test + 门禁 7/7 + 批次归档**
+  —— 已完成（顶栏见「第 4 片（上）」、编辑页 Q1 与 AC⑪① 只读锁见「第 4 片（下）」）**
+  **⑦ 第 5 / 6 片 真机端到端 + 实拍取样 + 全量 test + 门禁 7/7 + 批次归档 —— 待做**
 
 - **分片进度留痕（2026-09-26 起逐片追加；条目闭环时随正文一并剪切入批次）**：
   - **第 1 片 `ScanPayloadClassifier`（口径 1 / AC①）—— 已完成**。新增
@@ -718,6 +719,66 @@
       全站「单行 + 计数」文案风格割裂——登记而非掩盖）。
     ⚠️ **行数棘轮额度已接近用尽**：`tier2(400~500)=36 / budget=37`（本片 `VaultListActionController`
     进 492 行占 1 席）⇒ **第 4 片（下）与第 5/6 片不得再新增 tier2 文件**，须先压缩或拆分既有文件。
-  - **第 4 片（下）编辑页附加入口 + 字段只读锁（下一步）**：Q1 入口接 `replacePasskeyOnEntry` +
-    AC⑪① 只读用例（§3.3.12.1「MUST NOT be user editable」）。
+  - **第 4 片（下）编辑页附加入口 + 字段只读锁（Q1、口径 1 / 5 / 3b，AC①③⑤⑥⑩⑪）—— 已完成**
+    （2026-09-26）。**草案承载收拢为一份**：新增 `app/passkey/PasskeyImportDraftHost.kt`
+    （字符载荷 → UTF-8 字节（编码器内部 buffer 一并清零）→ 解析器 → 待确认草案 + 静态拒收文案），
+    顶栏 `VaultListActionController` 的原内联体改为委托它（492 → 452 行）——AC⑤
+    「取景 / 相册实现不允许复制第二份」在**草案层**同口径适用；顶栏 VM 同时补 `onCleared` 兜底擦除
+    （确认环节未走完就退页时，私钥明文不得只靠 GC）。
+    **Q1 接线**：`rememberEntryEditPickers` 新增第二个触发入口 `scanPasskeyQr`，**同一**
+    `TotpScanDialog`（含 `§340` 的相册通路）→ `EntryEditViewModel.onQrPayloadDecoded` 分流 →
+    `EntryEditPasskeyImport` 会话 → 确认后 `repository.replacePasskeyOnEntry(entryId, …)`
+    （口径 5 的偏离已在第 3 片登记：`saveOrReplacePasskeyEntry` 按 rpId+用户名检索，
+    库里同站点同用户名有**另一条**时会写到那条，不满足「挂当前条目」）。
+    ⚠️ **编辑页的分流口径与顶栏刻意不同，理由写明**：只有 `Passkey` 形态改道，
+    `Totp` **与 `Unknown`** 都原样走本页既有的「回填种子」通路（`onTotpSecretChangeSecure` 一字未改）。
+    顶栏那条「Unknown 即拒」在这里**不适用**——本页手填通道本就接受纯 Base32 等宽松形态，
+    且回填结果是用户看得见、可撤销的输入框，不是静默建条目；照搬即把「扫一张旧种子二维码」
+    这条既有通路做成回归（用例「一」把两侧都钉住：`otpauth:` 与裸 Base32 均仍回填、均不挂草案）。
+    ⚠️ **两个前置闸门（拒绝导入）**：`entryId == null`（新建表单没有「当前条目」可挂，
+    替换按 id 定位）与**表单有未保存改动**（替换写的是库内条目，随后重载会把用户刚打的字静默顶掉）
+    ⇒ 一律拒并提示 `edit_passkey_import_requires_saved`；入口按钮本身只在**已绑定且已落库**的条目上出现。
+    ⚠️ **替换成功后必须重载**（`loadEntry`）：表单里那些 passkey 字段此刻属**上一把凭据**，
+    不读回新状态，用户随后点保存就把旧凭据写了回去、导入白做。用例「三」以「表单 rpId 栏已是新值 +
+    库内旧凭据不残留 + `note_key` 一条不丢」三重读数锁住。
+    **对话框复用**：编辑页挂同一个 `PasskeyImportConfirmDialog`，新增 `replacesEntry` 参数
+    （正文第三行改说「将替换本条目的通行密钥（标题、备注等其余内容保持不变）」、按钮改说「替换」）——
+    沿用「将新建条目」就是当面撒谎，用例「四」以「正文出现 TITLE: 即红」锁住。
+    扫码对话框按 AC⑤ 只允许的做法**参数化**：新增 `titleRes`（默认值即原键，既有调用与用例不改一字）；
+    ⚠️ 同时把 `edit_scan_dialog_title` 的文案改为中性「扫描二维码（验证码 / 通行密钥）」：
+    顶栏与 TOTP 按钮共用同一对话框而现在它**真能**导入通行密钥，仍写「扫描 TOTP 二维码」即失实陈述。
+    **AC⑪① 只读锁（§3.3.12.1「除 username / userDisplayName 外 MUST NOT be user editable」）**：
+    判据 `isLockedPasskeyFieldKey` 锁**全部** passkey schema 键（含 `Passkey.*` v1 旧键：rpId /
+    credentialId / userHandle / 私钥 PEM / 算法 / 公钥 / 计数器 / 两枚 PRF 种子 / BE·BS / 创建时间），
+    仅按规范明文豁免 `KPEX_PASSKEY_USERNAME` / `Passkey.UserName` / `Passkey.UserDisplayName`
+    （取舍与可逆性已入 `PD-08` 第 5 项）。执行点三层：① 编辑页分节按判据渲染**只读卡片**
+    （无键名框 / 无值框 / 无删除钮 / 无保护开关，受保护字段不显值并如实标注原因）；
+    ② `EntryEditCustomFieldEditor` 的三条写通路——⚠️ 判锁放在 `updateField` **函数开头**而不是只靠
+    投影层挡列表：切换保护标记的分支会先把值物化成 `CharArray` 副本，「状态没变」不等于「没留下明文」；
+    投影层的 `withUpdatedCustomField` / `withoutCustomField` 是第二道锁（删除同属「手改」）；
+    ③ `loadEntry` **不再按需解密**被锁字段（改不动就没有把私钥物化进编辑态内存的理由）——
+    已核实保存侧 `VaultEntryWriteCoordinator.mergeCustomField` 的「受保护且未提交 ⇒ 回填库内原值」
+    分支承担写回，不依赖编辑态副本。
+    **闸门驱动的两次纯结构性搬移**：`EntryEditViewModel` 原 494 行，本片要加约 22 行 ⇒ 先按 §210 /
+    `ISSUE-P3-305` 先例拆出 `EntryEditEntropyRefresh`（强度评估调度）与 `EntryEditCustomFieldEditor`
+    （自定义字段四写入口），落 **496 行**、`tier1=0` 且 `tier2` 未增（36/37 不变）。
+    **测试替身扩展**（`FakeVaultRepository`）：`replacePasskeyOnEntry` 原只认 `extraKdbxEntries`，
+    编辑页用例里的条目是早就在库里的普通条目（落在 `entriesFlow`）⇒ 不补这一支，Q1 的替换语义
+    在单测里**永远只走 null 分支**、等于没测；新增 `sessionReadOnly` 开关驱动只读拒绝分支。
+    **AC⑥ 守卫账目已重盘点**：零新增对话框、零新增 Popup 调用点、零新增菜单项（只读卡片只渲染
+    非受保护值）⇒ 4 处 / 11 项不变，`PopupSecureFlagInventoryTest` KDoc 加 2026-09-26 一行，
+    `SecureDialogFlagPolicyTest` / `SensitiveWindowHardeningTest` 不改而绿。
+    验证读数：新增 `EntryEditPasskeyImportTest` 5 例 + `EntryEditPasskeyFieldLockTest` 5 例 +
+    `PasskeyImportConfirmDialogTest` 追加 1 例（原 4 例**断言**一字未改；其中原「四」因新例插队顺延为「五」，
+    共享的哨兵 `render` 加了 `replacesEntry` 参数与一行新键映射）；每条「拒绝」断言都配**正向对照**
+    （普通字段仍可改名 / 仍可删 / 仍被解密 / 仍可置 dirty），防「谁都改不动」的假绿；
+    全量 `test --rerun-tasks --max-workers=1` `BUILD SUCCESSFUL in 3m 41s`、`114/114 executed`、
+    `xml=412 tests=2744 failures=0 errors=0 skipped=13`（上片 2733 + 本片 11 例）；
+    `lint` **0 errors、202 warnings**（+1＝新增 `VaultListViewModel.onCleared` 的 `EmptySuperCall`，
+    与仓内其余 6 个 ViewModel 的 `super.onCleared()` 同形态，属规则与本仓约定冲突，登记不改）；
+    `gate_readings.py` **7/7 PASS**（`tier1(>500)=0` / `tier2=36 budget=37` / `long_functions=0` /
+    `check_tautological_assertions` 命中 0 处·扫描 **470** 文件 / `check_bounded_type_names`
+    `allowed=12` 不受新类型名影响——`*DraftHost`/`*Import`/`*Editor`/`*Refresh` 均不属 `PD-34` 受限后缀）。
+    ⚠️ **本片仍未做（第 5 / 6 片范围）**：AC⑧ 真机端到端与**实拍取样**（「相机能不能扫」至今未证，
+    声称范围仍按第 2.5 片定稿：相册可声称、相机待实拍）＋ 全条目批次归档。
 
