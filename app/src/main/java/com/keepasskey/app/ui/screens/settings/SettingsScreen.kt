@@ -8,8 +8,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -20,7 +18,6 @@ import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.HealthAndSafety
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Password
 import androidx.compose.material.icons.filled.Storage
@@ -33,7 +30,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -69,7 +65,6 @@ fun SettingsScreen(
     onNavigateToTotp: () -> Unit = {},
     onNavigateToDebug: () -> Unit = {},
     onNavigateToAbout: () -> Unit,
-    onLockClick: () -> Unit = {},
     onBackClick: () -> Unit = {},
     showBackButton: Boolean = false,
     modifier: Modifier = Modifier,
@@ -88,7 +83,6 @@ fun SettingsScreen(
         onNavigateToTotp = onNavigateToTotp,
         onNavigateToDebug = onNavigateToDebug,
         onNavigateToAbout = onNavigateToAbout,
-        onLockClick = onLockClick,
         onChangeMasterPassword = { viewModel.changeMasterPassword(it) },
         onWeakPasswordConfirmed = { viewModel.noteWeakMasterPasswordConfirmed() },
         onBackClick = onBackClick,
@@ -113,7 +107,6 @@ fun SettingsContent(
     onNavigateToTotp: () -> Unit = {},
     onNavigateToDebug: () -> Unit = {},
     onNavigateToAbout: () -> Unit,
-    onLockClick: () -> Unit = {},
     onChangeMasterPassword: suspend (CharArray) -> com.keepasskey.core.result.KdbxResult<Unit> = { com.keepasskey.core.result.KdbxResult.Success(Unit) },
     /** ISSUE-P2-288：弱主口令显式确认后的留痕回调（不落明文） */
     onWeakPasswordConfirmed: () -> Unit = {},
@@ -150,23 +143,6 @@ fun SettingsContent(
                                 contentDescription = stringResource(R.string.cd_back)
                             )
                         }
-                    }
-                },
-                actions = {
-                    // 文字 + 图标明确点击后果，避免仅悬挂红色锁图标却无语义说明
-                    TextButton(onClick = onLockClick) {
-                        Icon(
-                            imageVector = Icons.Default.Lock,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.error,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = stringResource(R.string.btn_lock),
-                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
-                            color = MaterialTheme.colorScheme.error
-                        )
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(

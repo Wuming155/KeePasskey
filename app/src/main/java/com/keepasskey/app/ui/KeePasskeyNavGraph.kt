@@ -42,7 +42,7 @@ internal fun NavGraphBuilder.keepasskeyNavGraph(host: NavGraphHostContext) {
     conflictResolverRoute(navController)
     entryDetailRoute(navController)
     entryEditRoute(navController)
-    settingsHomeRoute(navController, motion, autoLockManager)
+    settingsHomeRoute(navController, motion)
 
     // 7~15. 二级设置页路由（拆至 keepasskeySettingsNavGraph，ISSUE-P3-29）
     keepasskeySettingsNavGraph(navController)
