@@ -156,16 +156,23 @@ internal fun TotpGalleryImport(
  * 有界策略：先 `inJustDecodeBounds` 量尺寸，按 [MAX_GALLERY_IMAGE_DIMENSION] 取 `inSampleSize`
  * （2 的幂降采样，zxing 解码不需要原图像素密度，2400px 边长对屏幕 / 打印二维码足够）。
  * EXIF 朝向不在此处理——[decodeQrFromPixels] 的 4 朝向重试已覆盖旋转（见该函数 KDoc）。
+ *
+ * **`inJustDecodeBounds = true` 的 `decodeStream` 恒返回 `null`**（官方契约：只填
+ * `outWidth`/`outHeight`、不分配位图），**返回值不可判空**——只验 `outWidth / outHeight > 0`
+ * 作可解性判定（`ISSUE-P3-336`：曾以 `use { decodeStream(...) } != null` 判读尺寸成功，
+ * 恒 false ⇒ 每次选图都报「图片读取失败」，解码根本不会执行）。该缺陷由
+ * `TotpGalleryImportDecodeTest` 的源码静态守卫锁定回归。
  */
 private fun loadGalleryPixels(
     context: Context,
     uri: Uri
 ): Triple<IntArray, Int, Int>? {
     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-    val boundsReadable = context.contentResolver.openInputStream(uri)?.use { stream ->
+    // 官方两步加载口径第一步：调用只为填充 outWidth/outHeight，返回值恒 null、故意不接
+    context.contentResolver.openInputStream(uri)?.use { stream ->
         BitmapFactory.decodeStream(stream, null, bounds)
-    } != null
-    if (!boundsReadable || bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+    }
+    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
     val options = BitmapFactory.Options().apply {
         inSampleSize = gallerySampleSize(bounds.outWidth, bounds.outHeight)
     }
@@ -205,6 +212,10 @@ private fun pixelFrameOf(bitmap: Bitmap): Triple<IntArray, Int, Int> {
  * （只消费 Y 平面，灰度图即合法入参）→ [HybridBinarizer]；未命中则经 [rotateYPlane90]
  * 逐朝向重试，4 个方向均失败返回 null。
  *
+ * **非全不透明像素先合成到白底**（`ISSUE-P3-336` 同批加固）：相册常见透明底 QR PNG 经
+ * `Bitmap.getPixels` 还原时 a=0 像素的 RGB 为 0，直接灰度化会把整图读成全黑、必解不出；
+ * 按 `out = rgb·a/255 + 255·(255−a)/255` 合成到白底后与不透明图等价。
+ *
  * 4 朝向与相机帧通路同口径：相册图可能带 EXIF 旋转（相机实拍二维码），zxing 对旋转后的
  * 码字方向敏感，只有全朝向重试才与拍摄角度无关地可解；镜像朝向不覆盖（实拍 / 截图不镜像）。
  * 每次调用新建 [MultiFormatReader]（非线程安全，独立调用免共享状态）。
@@ -214,9 +225,16 @@ internal fun decodeQrFromPixels(pixels: IntArray, width: Int, height: Int): Stri
     val luma = ByteArray(width * height)
     for (i in 0 until width * height) {
         val color = pixels[i]
-        val r = (color shr 16) and 0xFF
-        val g = (color shr 8) and 0xFF
-        val b = color and 0xFF
+        val alpha = (color ushr 24) and 0xFF
+        var r = (color shr 16) and 0xFF
+        var g = (color shr 8) and 0xFF
+        var b = color and 0xFF
+        if (alpha != 255) {
+            // 合成到白底：rgb 按 alpha 缩放（a=0 ⇒ 全白），消除透明像素 RGB=0 的全黑陷阱
+            r = (r * alpha + 255 * (255 - alpha)) / 255
+            g = (g * alpha + 255 * (255 - alpha)) / 255
+            b = (b * alpha + 255 * (255 - alpha)) / 255
+        }
         luma[i] = ((r * 299 + g * 587 + b * 114) / 1000).toByte()
     }
     val reader = MultiFormatReader().apply {
