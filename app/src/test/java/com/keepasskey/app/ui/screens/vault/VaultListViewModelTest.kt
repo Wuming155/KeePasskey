@@ -411,4 +411,87 @@ class VaultListViewModelTest {
         assertNotNull(created)
         assertEquals("group_work", created!!.parentId)
     }
+
+    // ---------------------------------------------------------------------
+    // 顶栏扫码：otpauth 二维码 → 直接创建验证码条目
+    // ---------------------------------------------------------------------
+
+    @Test
+    fun `扫码 otpauth 在当前分组创建验证码条目并存原文`() = runTest {
+        val repository = FakeVaultRepository()
+        val viewModel = newViewModel(repository)
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            viewModel.uiState.collect {}
+        }
+        viewModel.enterGroup("group_work")
+        testScheduler.runCurrent()
+
+        val uri = "otpauth://totp/Example:alice@example.com?secret=JBSWY3DPEHPK3PXP&issuer=Example"
+        val decoded = uri.toCharArray()
+        val before = repository.getEntries().first().size
+
+        viewModel.onQrCodeDecoded(decoded)
+        testScheduler.runCurrent()
+
+        val entries = repository.getEntries().first()
+        assertEquals("有效 otpauth 扫码应新增且仅新增一个条目", before + 1, entries.size)
+        val created = entries.first { it.username == "alice@example.com" }
+        assertEquals("title 应取 issuer", "Example", created.title)
+        assertEquals("新建条目归属当前分组", "group_work", created.groupId)
+        // 落库存原始 otpauth URI（period / digits / algorithm 全参数保真），不存裁剪后的裸种子
+        assertEquals(uri, repository.lastSavedTotpByEntry[created.id])
+        // 解码原文按擦除契约清零（含种子语义的 CharArray 不残留）
+        assertTrue("扫码原文用毕必须清零", decoded.all { it == '0' })
+        assertEquals(
+            R.string.vault_scan_entry_created,
+            viewModel.uiState.value.userMessage?.resId
+        )
+        assertEquals(listOf("Example"), viewModel.uiState.value.userMessage?.args)
+    }
+
+    @Test
+    fun `扫码非 otpauth 文本拒绝落库并清零原文`() = runTest {
+        val repository = FakeVaultRepository()
+        val viewModel = newViewModel(repository)
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            viewModel.uiState.collect {}
+        }
+        testScheduler.runCurrent()
+        val before = repository.getEntries().first().size
+
+        // 纯字母单词全在 Base32 字母表内——若缺前缀强校验，宽容解析会把它当种子落库
+        val decoded = "HELLOWORLD".toCharArray()
+        viewModel.onQrCodeDecoded(decoded)
+        testScheduler.runCurrent()
+
+        assertEquals("非 otpauth 内容不得创建条目", before, repository.getEntries().first().size)
+        assertTrue("被拒原文同样必须清零", decoded.all { it == '0' })
+        assertEquals(
+            R.string.vault_scan_invalid_qr,
+            viewModel.uiState.value.userMessage?.resId
+        )
+    }
+
+    @Test
+    fun `扫码 otpauth 前缀但种子非法时拒绝落库并清零原文`() = runTest {
+        val repository = FakeVaultRepository()
+        val viewModel = newViewModel(repository)
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            viewModel.uiState.collect {}
+        }
+        testScheduler.runCurrent()
+        val before = repository.getEntries().first().size
+
+        // 前缀合法但 secret 含 Base32 字母表外字符——严格口径解析失败，不得落库
+        val decoded = "otpauth://totp/Example:alice@example.com?secret=!!!invalid".toCharArray()
+        viewModel.onQrCodeDecoded(decoded)
+        testScheduler.runCurrent()
+
+        assertEquals("解析失败不得创建条目", before, repository.getEntries().first().size)
+        assertTrue("解析失败后原文必须清零", decoded.all { it == '0' })
+        assertEquals(
+            R.string.vault_scan_invalid_qr,
+            viewModel.uiState.value.userMessage?.resId
+        )
+    }
 }

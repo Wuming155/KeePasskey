@@ -257,6 +257,11 @@
     <string name="sync_s3_path_style_title">Path 寻址风格 (Path-Style)</string>
     <string name="sync_s3_path_style_sub">Cloudflare R2、IP 直连端点等商业云场景请开启；AWS 等保持关闭</string>
     <string name="vault_group_created">已创建文件夹「%1$s」</string>
+    <!-- 密码库顶栏溢出菜单：扫码添加验证码条目 -->
+    <string name="vault_scan_menu">扫码</string>
+    <string name="vault_scan_invalid_qr">二维码不是有效的 otpauth 链接，无法添加验证码</string>
+    <string name="vault_scan_entry_created">已扫码添加验证码条目「%1$s」</string>
+    <string name="vault_scan_default_title">验证码条目</string>
     <string name="vault_group_renamed">已重命名为「%1$s」</string>
     <string name="vault_group_icon_updated">已更新文件夹图标</string>
     <string name="vault_group_deleted">已删除文件夹</string>

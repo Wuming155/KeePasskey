@@ -21,6 +21,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -103,6 +104,11 @@ class VaultListViewModel @Inject constructor(
     // H4-只读整改：会话只读标志（解锁时刻确定，只读时禁用新增/批量编辑入口）
     private val isReadOnlyFlow = MutableStateFlow(vaultRepository.isSessionReadOnly())
 
+    // PD-47：顶栏扫码对话框 FLAG_SECURE 跟随设置页「禁止截屏与录屏」开关；
+    // 无设置流（纯 JVM 单测注入假实现恒有流，此处初值 true = fail-closed，与编辑页同口径）
+    private val _flagSecureEnabled = MutableStateFlow(true)
+    val flagSecureEnabled: StateFlow<Boolean> = _flagSecureEnabled.asStateFlow()
+
     // ISSUE-P3-17：进阶显示偏好快照（构造期读取一次；页面每次进入组合时经 onScreenEntered 刷新）。
     // 无偏好通道（单测未注入）时回落到 ExtendedSettings 默认值，与生产未落库语义一致。
     private val initialExtendedSettings: ExtendedSettings =
@@ -174,6 +180,10 @@ class VaultListViewModel @Inject constructor(
             syncCoordinator.conflictFlow.collect { conflicts ->
                 hasPendingConflictFlow.value = conflicts.isNotEmpty()
             }
+        }
+        // PD-47：随设置流刷新防截屏开关快照（顶栏扫码对话框在组合时消费当前值）
+        viewModelScope.launch {
+            settingsRepository.getSettings().collect { _flagSecureEnabled.value = it.flagSecureEnabled }
         }
         // 断点11 整改：解锁进入列表页即自动重同步一次（配置了云同步才触发），
         // 避免解锁后停留在缓存旧数据直到手动下拉刷新。
@@ -433,6 +443,12 @@ class VaultListViewModel @Inject constructor(
     fun purgeEntry(entryId: String) = actions.purgeEntry(entryId)
 
     fun emptyRecycleBin() = actions.emptyRecycleBin()
+
+    /**
+     * 顶栏「扫码」解码上行（PD-47 同链路：框架边界 String 已由对话框转 CharArray，
+     * 擦除义务移交写编排 [VaultListActionController.addEntryFromScannedOtpauth]）。
+     */
+    fun onQrCodeDecoded(decoded: CharArray) = actions.addEntryFromScannedOtpauth(decoded)
 
     private companion object {
         /** 搜索输入停顿多久后才触发列表重算（毫秒） */

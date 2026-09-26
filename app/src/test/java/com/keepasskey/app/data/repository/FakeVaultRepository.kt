@@ -42,6 +42,14 @@ class FakeVaultRepository(
     private val passwordStore = MutableStateFlow<Map<String, String>>(emptyMap())
 
     /**
+     * 最近一次 `saveEntry` 收到的 TOTP 配置原文（条目 id → 原文；仅测试观测点）。
+     * 供「扫码落库存原始 otpauth URI」类断言使用——Fake 不走真实 KDBX 映射，
+     * 不留观测点则无法区分「存了原文」与「根本没传」。
+     */
+    var lastSavedTotpByEntry: Map<String, String> = emptyMap()
+        private set
+
+    /**
      * ISSUE-P3-04：最近一次解锁调用实际收到的密钥文件字节（克隆副本，null 表示未携带）。
      * 供「有 KeyFile / 无 KeyFile 走不同复合密钥通道」的透传断言使用。
      */
@@ -201,6 +209,10 @@ class FakeVaultRepository(
     ): com.keepasskey.core.result.KdbxResult<Unit> {
         passwordChars?.let { pwd ->
             passwordStore.value = passwordStore.value + (entry.id to String(pwd))
+        }
+        // TOTP 配置原文观测点（在擦除契约清零之前取样；测试专用明文，与 passwordStore 同口径）
+        totpSecretChars?.let { totp ->
+            lastSavedTotpByEntry = lastSavedTotpByEntry + (entry.id to String(totp))
         }
         val current = entriesFlow.value.toMutableList()
         val index = current.indexOfFirst { it.id == entry.id }

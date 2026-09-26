@@ -26,6 +26,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -34,6 +35,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.keepasskey.app.ui.model.UiVaultEntry
 import com.keepasskey.app.ui.model.VaultGroup
 import com.keepasskey.app.ui.model.resolveText
+import com.keepasskey.app.ui.screens.edit.TotpScanDialog
 import com.keepasskey.app.ui.theme.AppThemeMode
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -61,6 +63,11 @@ fun VaultListScreen(
     val totpNowSecondsState = viewModel.totpNowSeconds.collectAsStateWithLifecycle()
     val totpLiveCodesState = viewModel.totpLiveCodes.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
+
+    // 顶栏扫码对话框可见性（otpauth URI 解码后由 ViewModel 直接创建验证码条目）
+    var showScanDialog by remember { mutableStateOf(false) }
+    // PD-47：扫码对话框 FLAG_SECURE 跟随设置页「禁止截屏与录屏」开关
+    val flagSecureEnabled by viewModel.flagSecureEnabled.collectAsStateWithLifecycle()
 
     // ISSUE-P3-17：页面每次进入组合时刷新进阶显示偏好快照
     // （ExtendedSettingsStore 只有同步快照 API，设置页改动返回本页即生效）
@@ -137,12 +144,23 @@ fun VaultListScreen(
         onBatchDelete = viewModel::batchDeleteSelected,
         onBatchMove = viewModel::batchMoveSelected,
         onKillApp = onKillApp,
+        onScanClick = if (uiState.isReadOnly) null else ({ showScanDialog = true }),
         onAutoActivateSearchConsumed = viewModel::consumeAutoActivateSearch,
         // ISSUE-P2-89：只传状态对象（此处不读 .value），秒级读取面收敛到列表行徽标
         totpNowSeconds = totpNowSecondsState,
         totpLiveCodes = totpLiveCodesState,
         modifier = modifier
     )
+
+    // 顶栏扫码对话框（复用编辑页受保护取景组件；解码结果经 CharArray 上行直接落库，
+    // 对话框解码命中后自行回调 onDismiss 关闭）
+    if (showScanDialog) {
+        TotpScanDialog(
+            flagSecureEnabled = flagSecureEnabled,
+            onDecoded = viewModel::onQrCodeDecoded,
+            onDismiss = { showScanDialog = false }
+        )
+    }
 
     // ISSUE-P2-291 AC②：库身份绑定不符的显式二次确认（下拉刷新被拦截后置位；
     // 确认 = 整库覆盖并改绑，取消 = 保持本地与云端现状）
@@ -193,6 +211,8 @@ fun VaultListContent(
     onBatchMove: (String?) -> Unit,
     // ISSUE-P3-17：非空才呈现「彻底退出应用」入口（偏好开启且宿主可终止）
     onKillApp: (() -> Unit)? = null,
+    /** 非空才在溢出菜单呈现「扫码」入口（otpauth → 创建验证码条目）；只读会话传 null 隐藏 */
+    onScanClick: (() -> Unit)? = null,
     // ISSUE-P3-17：自动聚焦搜索栏意图已被消费的回执
     onAutoActivateSearchConsumed: () -> Unit = {},
     /**
@@ -253,7 +273,8 @@ fun VaultListContent(
                     // ISSUE-P3-17：进入列表页自动聚焦搜索栏（一次性意图，消费后回执清除）
                     autoActivateSearch = uiState.autoActivateSearch,
                     onAutoActivateSearchConsumed = onAutoActivateSearchConsumed,
-                    onKillApp = onKillApp
+                    onKillApp = onKillApp,
+                    onScanClick = onScanClick
                 )
             }
         },

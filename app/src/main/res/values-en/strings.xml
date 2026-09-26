@@ -250,6 +250,11 @@
     <string name="sync_s3_path_style_sub">Enable for commercial-cloud scenarios such as Cloudflare R2 or IP-direct endpoints; keep off for AWS</string>
     <string name="sync_error_https_required">Save rejected: the %1$s endpoint must use HTTPS (starts with https://). Cleartext HTTP is prohibited to protect credential and vault traffic</string>
     <string name="vault_group_created">Folder "%1$s" created</string>
+    <!-- Vault top-bar overflow menu: scan to add a verification-code entry -->
+    <string name="vault_scan_menu">Scan QR</string>
+    <string name="vault_scan_invalid_qr">The QR code is not a valid otpauth link; cannot add a verification code</string>
+    <string name="vault_scan_entry_created">Verification code entry "%1$s" added by scan</string>
+    <string name="vault_scan_default_title">Verification code</string>
     <string name="vault_group_renamed">Renamed to "%1$s"</string>
     <string name="vault_group_icon_updated">Folder icon updated</string>
     <string name="vault_group_deleted">Folder deleted</string>

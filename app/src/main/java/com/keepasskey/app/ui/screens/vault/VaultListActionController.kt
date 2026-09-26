@@ -7,11 +7,15 @@ import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.model.UiVaultEntry
 import com.keepasskey.app.ui.model.VaultGroup
+import com.keepasskey.core.otp.TotpKeyUriParser
 import com.keepasskey.core.result.KdbxResult
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import java.nio.CharBuffer
+import java.nio.charset.StandardCharsets
+import java.util.UUID
 
 /**
  * 密码库列表页的**写操作编排**（ISSUE-P3-29：自 `VaultListViewModel.kt` 拆出）。
@@ -266,5 +270,99 @@ internal class VaultListActionController(
                 onMessage(UiMessage(R.string.op_failed, listOf((result as KdbxResult.Failure).message)))
             }
         }
+    }
+
+    // ---------------------------------------------------------------------
+    // 顶栏扫码：otpauth 二维码 → 直接创建验证码条目
+    // ---------------------------------------------------------------------
+
+    /**
+     * 顶栏「扫码」入口：解码得到的 otpauth URI → 解析校验 → 在当前分组直接创建验证码条目。
+     *
+     * [decoded] 为 `TotpScanDialog` 上行的解码原文（框架边界 String 即刻转出的 CharArray，
+     * 含种子语义，本方法承担其擦除义务）：
+     * - 只读会话 / 非 otpauth 前缀 / 解析失败：本方法同步 `fill('0')` 后如实提示，不落库；
+     * - 保存路径：所有权移交 [repository.saveEntry] 的 `totpSecretChars` 擦除契约
+     *   （任何结果路径清零），协程体内再兜底一次（幂等，覆盖协程体异常路径）。
+     *
+     * **前缀强校验**：本入口只收 `otpauth://`（忽略大小写）。解析器的宽容口径还会接受
+     * 纯 Base32 文本（编辑页手填种子的兼容通道），但扫码面对的是任意二维码——
+     * 不加前缀校验时，扫到一个纯字母单词（全在 Base32 字母表内）也会被当成种子落库。
+     *
+     * 解析走字节语义（ISSUE-P2-12 口径）：CharArray → UTF-8 字节 → [TotpKeyUriParser]，
+     * 工作副本与解析产物 `ParsedTotpConfig.secret` 用毕即擦；
+     * 落库存**原始 otpauth URI**（period / digits / algorithm / counter 全参数保真）。
+     */
+    fun addEntryFromScannedOtpauth(decoded: CharArray) {
+        if (isReadOnly()) {
+            decoded.fill('0')
+            onMessage(UiMessage(R.string.readonly_save_rejected))
+            return
+        }
+        if (!hasOtpauthPrefix(decoded)) {
+            decoded.fill('0')
+            onMessage(UiMessage(R.string.vault_scan_invalid_qr))
+            return
+        }
+        val bytes = CharBuffer.wrap(decoded).let { buffer ->
+            val utf8 = StandardCharsets.UTF_8.encode(buffer)
+            ByteArray(utf8.remaining()).also { out ->
+                utf8.get(out)
+                // 编码器内部 ByteBuffer 承载过明文，一并清零（P0-7 同口径）
+                if (utf8.hasArray()) utf8.array().fill(0)
+            }
+        }
+        val config = try {
+            TotpKeyUriParser.parse(bytes)
+        } finally {
+            bytes.fill(0)
+        }
+        if (config == null) {
+            decoded.fill('0')
+            onMessage(UiMessage(R.string.vault_scan_invalid_qr))
+            return
+        }
+        // 非敏感元数据（issuer / account 标签）先取出；种子副本不参与后续链路，即刻擦除
+        val issuer = config.issuer
+        val account = config.account
+        config.secret.fill(0)
+        val title = issuer ?: account ?: strings.get(R.string.vault_scan_default_title)
+        val username = account?.takeIf { it != title } ?: ""
+        val entry = UiVaultEntry(
+            id = UUID.randomUUID().toString(),
+            title = title,
+            username = username,
+            url = "",
+            groupId = currentGroupId(),
+            updatedAt = strings.get(R.string.time_just_now),
+            createdAt = strings.get(R.string.time_just_now)
+        )
+        scope.launch {
+            try {
+                val result = repository.saveEntry(entry, totpSecretChars = decoded)
+                if (result is KdbxResult.Success) {
+                    onMessage(UiMessage(R.string.vault_scan_entry_created, listOf(title)))
+                } else {
+                    onMessage(UiMessage(R.string.op_failed, listOf((result as KdbxResult.Failure).message)))
+                }
+            } finally {
+                // 兜底擦除（仓库契约已清零；幂等双保险，覆盖协程体异常路径）
+                decoded.fill('0')
+            }
+        }
+    }
+
+    /** 前缀强校验：跳过前导空白后是否以 `otpauth://` 开头（忽略大小写）。 */
+    private fun hasOtpauthPrefix(chars: CharArray): Boolean {
+        val prefix = OTPAUTH_PREFIX
+        var start = 0
+        while (start < chars.size && chars[start].isWhitespace()) start++
+        if (chars.size - start < prefix.length) return false
+        return prefix.indices.all { chars[start + it].lowercaseChar() == prefix[it] }
+    }
+
+    private companion object {
+        /** 本扫码入口只接受的 URI 方案前缀（全小写，比较前逐字符 lowercase）。 */
+        const val OTPAUTH_PREFIX = "otpauth://"
     }
 }

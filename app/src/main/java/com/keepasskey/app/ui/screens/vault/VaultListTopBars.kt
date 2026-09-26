@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PowerSettingsNew
+import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material3.DropdownMenu
@@ -96,12 +97,15 @@ internal fun VaultListBatchModeTopBar(
 /**
  * 主顶栏：标题位为胶囊形搜索框；进入回收站后操作区替换为「清空回收站」入口。
  *
- * 常规态操作区收敛为一个竖排三点（MoreVert）溢出菜单，内含「排序」「锁定」两项。
+ * 常规态操作区收敛为一个竖排三点（MoreVert）溢出菜单，内含「排序」「锁定」「扫码」三项。
  *
  * ISSUE-P3-17：
  * - [autoActivateSearch] 为 true 时聚焦搜索框并弹出输入法（一次性意图，消费后经
  *   [onAutoActivateSearchConsumed] 回执，避免重组反复抢焦点）；
  * - [onKillApp] 非空时溢出菜单追加「彻底退出应用」入口（偏好开启且宿主可终止才会非空）。
+ *
+ * 扫码项（otpauth 二维码 → 直接创建验证码条目）：[onScanClick] 为 null 时不渲染该项
+ * （只读会话隐藏，与写入口同口径）。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -116,6 +120,8 @@ internal fun VaultListSearchTopBar(
     autoActivateSearch: Boolean = false,
     onAutoActivateSearchConsumed: () -> Unit = {},
     onKillApp: (() -> Unit)? = null,
+    /** 非空才呈现「扫码」入口；只读会话传 null 隐藏 */
+    onScanClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     var showOverflowMenu by remember { mutableStateOf(false) }
@@ -200,7 +206,7 @@ internal fun VaultListSearchTopBar(
                     )
                 }
             } else {
-                // 收敛后的竖排三点溢出菜单：排序 / 锁定 /（可选）彻底退出
+                // 收敛后的竖排三点溢出菜单：排序 / 锁定 / 扫码（只读隐藏）/（可选）彻底退出
                 Box {
                     IconButton(onClick = { showOverflowMenu = true }) {
                         Icon(
@@ -237,6 +243,23 @@ internal fun VaultListSearchTopBar(
                                 onLockClick()
                             }
                         )
+                        // 扫码添加验证码条目（二维码解析成功后在当前分组直接落库）；只读会话不渲染
+                        // （本项为静态动作文案，无凭据插值——由 PopupSecureFlagInventoryTest 复验）
+                        if (onScanClick != null) {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.vault_scan_menu)) },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = Icons.Default.QrCodeScanner,
+                                        contentDescription = null
+                                    )
+                                },
+                                onClick = {
+                                    showOverflowMenu = false
+                                    onScanClick()
+                                }
+                            )
+                        }
                         // ISSUE-P3-17：showKillAppOption 开启且宿主可终止时的「彻底退出应用」入口
                         if (onKillApp != null) {
                             DropdownMenuItem(
