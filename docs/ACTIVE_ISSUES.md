@@ -475,10 +475,11 @@
   **② 第 1 片 `ScanPayloadClassifier` —— 已完成（留痕见下「分片进度留痕」）**
   纯函数、零外部依赖，先把分流边界钉住
   （338 的文案影响已随 §342 消除：`Unknown` 分支复用现键 `vault_scan_invalid_qr`，无新增对外声明）。
-  **③ 第 2 片 `PasskeyCxfReader`**（含 AC② 的别名 / 未知 algorithm / 混合类型 / 版本门四组新用例，
-  夹具直取规范附录 A）—— 解析器是全条目最大单项，先于任何 UI 与落库改动完成。
-  **④ 真机分辨率探针（半日，不入库）** —— 在第 3 片之前做：因为 AC⑤′ 的例外虽已获准，
-  但「提分辨率能否真的解出 900 B 码」只有真机能证；结论决定 AC⑧ 的声称范围是
+  **③ 第 2 片 `PasskeyCxfReader` —— 已完成（留痕见下）**（含 AC② 的别名 / 未知 algorithm /
+  混合类型 / 版本门四组新用例，夹具直取规范附录 A）—— 解析器是全条目最大单项，先于任何 UI 与落库改动完成。
+  **④ 真机分辨率探针（半日，不入库；下一步）** —— 在第 3 片之前做：因为 AC⑤′ 的例外虽已获准，
+  但「提分辨率能否真的解出 **1697 B 完整文档信封 / 472 B 裸对象**码」（原记 900 B，实测校正见第 2 片留痕）
+  只有真机能证；结论决定 AC⑧ 的声称范围是
   「相机 + 相册」还是「相册为主」，越早拿到越少返工。
   **⑤ 第 3 片 落库接线（含 `PD-49` 裁决一的随机高位起点 + 限界表登记 + `Passkey.PrfNoUv` + 对拍重跑）**
   —— 本片的计数写入必须与限界表登记同批，未登记不得声称闭环。
@@ -509,3 +510,55 @@
     `gate_readings.py` **7/7 PASS**（`tier1=0` / `tier2=34 budget=37` 持平、
     `check_tautological_assertions` 命中 0 处 / 扫描 **460** 个测试文件（+1 新文件）、
     `check_bounded_type_names` `allowed=12` 不受新类型名影响——`*Classifier` 不属 `PD-34` 受限后缀）。
+  - **第 2 片 `PasskeyCxfReader`（口径 2 / 2′ / 2″ / 3，AC②③）—— 已完成**（2026-09-26）。
+    新增三个生产文件：`app/src/main/java/com/keepasskey/app/passkey/ByteJsonScanner.kt`（359 行，
+    字节通道 JSON 扫描器 + `ByteJson` 节点树：值一律 `ByteArray`，仅键名转 `String`；转义含
+    `\uXXXX` 与代理对；深度硬界 `MAX_DEPTH=32`；一切畸形输入**返回 null 不抛异常**）、
+    `PasskeyCxfReader.kt`（415 行，四形态定位 + 白名单取值 + 扩展账目）、
+    `PasskeyCxfOutcome.kt`（167 行，`Parsed/Rejected` + 九个静态错误码 + 形态 / 丢弃项 / 补齐项枚举 +
+    `ImportedPasskey` + `Base64Codec`）。
+    ⚠️ **行数分档闸门在开发中真实拦下一次**：初版把读取器与结果类型写在同一文件＝**555 行 ⇒ `tier1(>500)=1` 硬红**；
+    按「定位与提取」/「结果与判据」拆开后转绿。当前读数 `tier1=0`、`tier2=35`（原 34，本片 +1：
+    `PasskeyCxfReader.kt` 415 行），`budget=37` 未越——**如实登记占用的棘轮额度**，后续片不得再新增 tier2 文件。
+    用例：`PasskeyCxfReaderTest` **20 例** + `ByteJsonScannerTest` **9 例**（合计 29 例）。AC② 逐项对应：
+    三级形态各正例（裸对象 / `$Credential` 数组 / **`accounts[].items[].credentials[]`** 文档）、
+    「凭据挂在 `collections[].items[]` 的 `LinkedItem` 引用里 ⇒ 取不到」**负例**（锁死不照抄 `PD-08` 原错路径）、
+    KeePassXC `.passkey` 正例、`hmacCredentials` 双值正例、
+    **别名正例**（附录 A 的 `hmacSecret{algorithm:"HS256",secret}` 原样作输入 ⇒ PRF 被取出）、
+    **未知 algorithm 降级例**（`hmac-sm3` ⇒ 凭据仍入库、扩展项被丢且进丢弃清单）、
+    **混合类型文档跳过例**（7 类混装、passkey 居第 5 位 ⇒ 取到它、`skippedCredentialCount=6`）、
+    **版本门**（`major=2` 拒、`minor=9` 放行）、拒绝路径 **11 条**（缺 `credentialId`/`userHandle`/`key`/`rpId`、
+    `rpId` 全空白、非法 Base64、`len%4==1` 形态、解出零字节、DER 无已知 OID、裸单对象 `type` 非 passkey、
+    无词表命中）＋ 7 条层级 / 非法 JSON（截断、裸词、串内裸控制字符、超深、`accounts` 非数组、`version` 非对象、标量根）、
+    上限边界（**4096 放行 / 4097 即拒**）、附录 A 全示例整块直读 ⇒ `PayloadTooLarge`、
+    展示字段缺失补齐且**不回填 `userHandle`**、多把 passkey ⇒ 导第一把并计数、
+    `credBlob`/`largeBlob`/`payments(true)` 逐项点名（`payments(false)` 不点名）、
+    PRF 长度不判不裁不拒收、`read` 不改动调用方载荷数组。
+    **夹具按条目纪律直取规范原文**：`app/src/test/resources/passkey-import/cxf-appendix-a-example.json`
+    （附录 A 整块原样收录，**28 854 B**、LF、SHA-256 与全部读数见同目录 `FIXTURE.md`）；
+    用例对它只做「整块直读 / 抽出 passkey 作内核 / 改名搬层」三种变形，**未**按臆想字段自造示例。
+    ⚠️ **本轮实测校正条目读数三处**（判据均不变，只如实改数）：① 附录 A 混装 **15 条凭据 / 15 种 `type`**
+    （核实 10③ 原记「14 种」）；② 裸 passkey 对象紧凑 JSON 实测 **472 B**（核实 11 原记 471 B）；
+    ③ 按 §3.1/§3.2 **完整必填成员**构造的文档信封（仍只 1 把凭据）实测 **1697 B**（核实 11 原记 900 B，
+    差因＝原文按最小骨架计数）——三者都远低于 `4096`，上限判据与「文档级多凭据装不进单张 QR」的结论不受影响。
+    ⚠️ **被新用例揭出的实现缺陷 1 处（当场修复）**：KeePassXC 形的 rpId 取值误用 CXF 的 `rpId` 键名
+    ⇒ 该形态恒判 `MissingCeremonyField`（`PD-08` 第 1 项的兼容目标整条落空）；补 `relyingParty` 常量后转绿。
+    这条正是「先写解析器再写落库」的收益：**若直接进第 3 片，缺陷会藏到端到端才现形**。
+    ⚠️ **AC② 待补项（不得推定已满足）**：KeePassXC `.passkey` 正例目前用的是**同形自造夹具**——
+    本机 `keepassxc-cli` 2.7.12 **无 passkey 导入 / 导出子命令**（该功能只在 GUI 侧
+    `gui/passkeys/PasskeyImporter` / `PasskeyExporter`），故无脚本化取物途径。该夹具证明的是
+    字段词表与 Base64 归一口径（取自 `PasskeyImporter.cpp:73` 的 6 必需字段读数），
+    **不构成** `AGENTS.md` 规则 8 要求的官方实现端到端对拍；补法已登记在 `FIXTURE.md`
+    （用户在 KeePassXC GUI 内导出 `*.passkey` 放入该目录 ⇒ 同批追加逐字节用例）。
+    AC③ 在本片这一层的可证形态＝**源码级静态守卫**（`stripCommentsOnly` 后扫「私钥节点紧邻 `asUtf8String()`」，
+    含口径反校：坏样本必须命中、`rpId` 的正常文本转换不得误报）；
+    「私钥字节在回调返回后已被清零」的**行为级**断言依赖确认对话框与落库回调，随第 4 片落地。
+    **本片同样不接线**（与第 1 片同因：无消费方时接线只会引入不实文案）。
+    验证读数：定向三类 `BUILD SUCCESSFUL`（20 / 9 / 4 例逐类 failures=0）；
+    全量 `test --rerun-tasks --max-workers=1` `BUILD SUCCESSFUL in 3m 35s`、`114 actionable tasks: 114 executed`、
+    聚合 `xml=405 tests=2706 failures=0 errors=0 skipped=13`（上一片 2677 + 本片新例 29，逐例可对）；
+    `gate_readings.py` **7/7 PASS**（`long_functions=0`、`check_md_links=0 断链`、
+    `check_tautological_assertions` 命中 0 处 / 扫描 **462** 个测试文件（+2 新文件，
+    全部断言实参取自被测 `read()` / `scan()` 返回值）、`check_bounded_type_names` `allowed=12` 不受影响
+    （`*Scanner` / `*Reader` 不属 `PD-34` 受限后缀））。
+
