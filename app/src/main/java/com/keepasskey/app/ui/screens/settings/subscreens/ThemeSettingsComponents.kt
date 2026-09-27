@@ -305,11 +305,22 @@ internal fun ThemeRadioOptionRow(
 @Composable
 internal fun ThemePaletteItemCardPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
-        ThemePaletteItemCard(
-            palette = com.keepasskey.app.ui.theme.AppThemePalette.SAPPHIRE,
-            isSelected = true,
-            isDarkTheme = false,
-            onClick = {}
-        )
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            ThemePaletteItemCard(
+                palette = com.keepasskey.app.ui.theme.AppThemePalette.SAPPHIRE,
+                isSelected = true,
+                isDarkTheme = false,
+                onClick = {}
+            )
+            // `ISSUE-P3-340`：`enabled = false`（主题锁定态）此前从未被预览画出来 —— 灰底与选中描边
+            // 是否还分得开，只有画出来才看得见。
+            ThemePaletteItemCard(
+                palette = com.keepasskey.app.ui.theme.AppThemePalette.EMERALD,
+                isSelected = false,
+                isDarkTheme = false,
+                enabled = false,
+                onClick = {}
+            )
+        }
     }
 }

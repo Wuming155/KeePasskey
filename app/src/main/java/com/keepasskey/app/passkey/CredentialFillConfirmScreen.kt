@@ -172,3 +172,24 @@ internal fun CredentialFillConfirmScreenPreview() {
         )
     }
 }
+
+/**
+ * `ISSUE-P3-340`：补 `confirmEnabled = false` 那一态（签名 / 归属校验未通过时确认钮禁用）。
+ * 这是**安全相关的可见性态**：禁用态若与启用态在低亮度下分不开，用户就可能把「填不进」当成「填好了」。
+ */
+@androidx.compose.ui.tooling.preview.Preview(name = "凭据填充确认页-禁用 - 浅色", showBackground = true)
+@androidx.compose.ui.tooling.preview.Preview(name = "凭据填充确认页-禁用 - 深色", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Composable
+internal fun CredentialFillConfirmScreenDisabledPreview() {
+    com.keepasskey.app.ui.theme.KeePasskeyTheme {
+        CredentialFillConfirmScreen(
+            title = "预览确认标题",
+            hint = "预览提示文案：归属校验未通过，确认按钮当前不可用",
+            confirmText = "确认填充",
+            cancelText = "取消",
+            onConfirm = {},
+            onCancel = {},
+            confirmEnabled = false
+        )
+    }
+}

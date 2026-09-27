@@ -201,3 +201,34 @@ internal fun SecurePasswordFieldPreview() {
         )
     }
 }
+
+/**
+ * 退化态预览（`ISSUE-P3-340`）：`isError` / `isPasswordVisible` / `enabled` 三个开关的**非默认态**
+ * 一次性给全 —— 三者各自都是生产里会出现的形态（校验失败、切到明文、只读会话），
+ * 而组合起来正是「错误 + 明文 + 禁用」这一最恶劣可读性场景：错误描边色与禁用灰是否还分得开、
+ * 明文长串会不会把尾部图标挤掉，只有画出来才看得见。
+ */
+@androidx.compose.ui.tooling.preview.Preview(name = "安全密码输入框-退化态 - 浅色", showBackground = true)
+@androidx.compose.ui.tooling.preview.Preview(name = "安全密码输入框-退化态 - 深色", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Composable
+internal fun SecurePasswordFieldDegradedPreview() {
+    com.keepasskey.app.ui.theme.KeePasskeyTheme {
+        SecurePasswordField(
+            label = "预览主密码（错误 + 明文 + 禁用）",
+            onPasswordChanged = {},
+            modifier = Modifier,
+            placeholder = "预览输入占位提示",
+            isError = true,
+            supportingText = { androidx.compose.material3.Text(text = "预览错误提示文案") },
+            isPasswordVisible = true,
+            onToggleVisibility = {},
+            enabled = false,
+            leadingIcon = Icons.Default.Lock,
+            trailingIcon = null,
+            initialPassword = "预览假密码超长串abcdefghijklmn".toCharArray(),
+            initialKey = null,
+            wipeToken = null,
+            onDone = {}
+        )
+    }
+}

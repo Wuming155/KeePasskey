@@ -38,7 +38,8 @@ Coroutines + Flow；**文档与代码注释使用简体中文**。
 5. **无需中间计划文件**：严禁创建 plan 文档；背景与验收标准直接自包含在 `ACTIVE_ISSUES.md`。
 6. **极简闭环工作流（认领 → 整改+验证 → 流转归档 → 提交推送）**：
    1. **认领**：从 `ACTIVE_ISSUES.md` 顶部按优先级认领；发现新问题即时补登（**严禁只记聊天或脑中**），新条目附「核实时间点 + 核实方式」。
-   2. **整改 + 验证**：`.\gradlew.bat test` 全绿（含相关回归）**且** `python tools/doc/gate_readings.py` **7/7 PASS** 方准入库；
+   2. **整改 + 验证**：`.\gradlew.bat test` 全绿（含相关回归）**且** `python tools/doc/gate_readings.py` **全 PASS**
+      （条数随 `hygiene-gate` 段落自动解析，当前 **8/8**）方准入库；
       批次文档须**原样粘贴该脚本输出的读数块**（逐条 EXIT + 读数行），**禁止**只写「机检全绿 / EXIT 0」——
       「闸门存在 ≠ 闸门被执行」正是 `ISSUE-P3-305` 的根因，§308 立规。
    3. **流转归档**：整条**剪切**出 `ACTIVE_ISSUES.md` → `RESOLVED_LOG.md` 加一行 → `docs/resolved/batches/` 新增
@@ -115,15 +116,23 @@ Coroutines + Flow；**文档与代码注释使用简体中文**。
   **改任一批次 / 分册 / 全量索引 / `resolved/README.md` 后跑**，漏登、陈旧行、**重登**即退出码 1）
   / **类型名有界性**机检（`PD-34`；**新增 `*Manager`/`*Util`/`*Helper`/`*Common` 类型后必跑**——
   未登记即退出码 1，扩 `ALLOWED` 须同批回写 `PD-34`；`--selftest` 为口径反校）
+  / **Box 内容槽同层兄弟叠放**机检（`ISSUE-P3-337`；`BentoCard` 的内容槽是 `Box`，往里加第二个顶层子节点
+  会**互相叠放**而非上下流动，**编译期与 `@Preview` 都可能看不出来** ⇒ **改过 `*/ui/**` 卡片内容后必跑**；
+  `--selftest` 用内嵌坏样本反校；读数须把「命中数」与「检查过的调用点数」**一起看**——站点数为 0 的绿没有鉴别力，
+  脚本自身对此判红）
+  / **`@Preview` 状态覆盖普查**（`ISSUE-P3-340`；`python tools/doc/check_preview_state_coverage.py`，
+  **只出读数、不进 CI**）：数「带字面量默认值的 `Boolean` 开关参数有没有被预览画过反向那一态」，
+  漏态 ⇒ 该态此前只有真机能看见；`--selftest` 三向反校
   这些计数**一律现跑、不得凭记忆或抄上一批文档**，且**度量工具一律用已知值反校**
   （判据与踩坑史写在各脚本文档串里）；逐字搬移复核用
   `python tools/doc/check_verbatim_move.py <原文件> <本体> [段落文件…]`；「多处重复代码是否真逐字相同」
   的前提成立性用 `python tools/doc/scaffold_block_fingerprint.py <git rev> <目录> <页名>…`
   （**目测登记前提曾造成一次真实回归**，见 `ISSUE-P3-195`）
-- CI **`hygiene-gate`**（`.github/workflows/build.yml`）——上述规模 / 链接 / 索引 / 重言断言 / 复核 / 类型名机检的
-  **fail-closed 硬门禁**（§281，§285 扩至七条）：`count_line_tiers` + `long_functions` + `check_md_links` +
+- CI **`hygiene-gate`**（`.github/workflows/build.yml`）——上述规模 / 链接 / 索引 / 重言断言 / 复核 / 类型名 /
+  Box 内容槽机检的 **fail-closed 硬门禁**（§281，§285 扩至七条，`ISSUE-P3-337` 扩至八条）：`count_line_tiers` +
+  `long_functions` + `check_md_links` +
   `check_resolved_index_sync` + `check_tautological_assertions` + `check_recheck_consistency` +
-  `check_bounded_type_names`，非 0 即红；**严禁** `|| true` 吞掉
+  `check_bounded_type_names` + `check_box_slot_children`，非 0 即红；**严禁** `|| true` 吞掉
 - `python tools/audit/check_recheck_consistency.py` — 复核报告一致性扫描（**改审计 / 复核报告后必跑**；
   PowerShell 直接可跑。历史命令 `bash …/check_recheck_consistency.sh` 仍可用，薄封装调本文件）
 - `python tools/audit/check_tautological_assertions.py` — **「永远为真的断言」机检**（§275 立规；**改 `*/src/test/**`

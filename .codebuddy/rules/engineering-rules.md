@@ -37,6 +37,15 @@
 
 - Screen Composable 不写业务逻辑：状态来自 ViewModel（`StateFlow`），事件回调上行；Screen 可预览、可用假数据独立渲染。
 - 状态对象用不可变 `data class`，更新经 ViewModel 产出新实例，不在 Composable 内直接修改。
+- **往卡片里加第二个顶层子节点前，先确认它的内容槽是什么布局**：`BentoCard` 的内容槽是 **`Box`**
+  （`content: @Composable BoxScope.() -> Unit`），Box 的兄弟节点**互相叠放**而非上下流动 ⇒ 多子节点必须
+  自己包进 `Column` / `Row`。该形态编译期不报错、预览也可能看不见（见下条），已挂 `hygiene-gate` 机检
+  `python tools/doc/check_box_slot_children.py`（读数须连「检查过的调用点数」一起看，站点数为 0 的绿无鉴别力）。
+- **给组件新增「可见性开关」参数（带字面量默认值的 `Boolean`）时，同一批必须补该态的 `@Preview`**
+  （`ISSUE-P3-340` 立规）。理由不是洁癖：预览只画默认态 ⇒ 布局重叠 / 截断 / 对比度不足这类缺陷
+  **在编译期和预览导出图里都隐形**，只有真机肉眼能看见，等于把回归测试外包给用户。
+  普查：`python tools/doc/check_preview_state_coverage.py`（首版**只出读数、不挂闸门**；
+  整屏组件补态请另开 `@Preview` 函数，别在同一张图里叠两个整屏）。
 
 ## 文件 IO 与原子写入（数据完整性）
 

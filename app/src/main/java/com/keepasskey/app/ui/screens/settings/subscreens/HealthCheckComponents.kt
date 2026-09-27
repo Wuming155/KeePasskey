@@ -210,10 +210,19 @@ internal fun HealthAuditRowItem(
 @Composable
 internal fun HealthCheckComponentsPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
-        BreachCheckToggleRow(
-            enabled = true,
-            onToggle = {}
-        )
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            BreachCheckToggleRow(
+                enabled = true,
+                onToggle = {}
+            )
+            // `ISSUE-P3-340`：补 `isScanning = true`（检测进行中）那一态——该态下开关会被禁用并
+            // 换成进度指示，此前只有真机能看见，预览从未画过。
+            BreachCheckToggleRow(
+                enabled = true,
+                isScanning = true,
+                onToggle = {}
+            )
+        }
     }
 }
 

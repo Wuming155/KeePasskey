@@ -297,3 +297,29 @@ internal fun SettingsContentPreview() {
         )
     }
 }
+
+/**
+ * `ISSUE-P3-340`：`showBackButton = true` 那一态此前从未被预览画过（默认 `false` 态才是）。
+ * 单独开一个预览函数而不是在同一张图里叠两个整屏：整屏组件叠在一起会把各自的高度都压没，
+ * 导出的 PNG 也就无从比对。
+ */
+@Preview(name = "浅色模式-带返回键", showBackground = true)
+@Preview(name = "深色模式-带返回键", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Composable
+internal fun SettingsContentWithBackPreview() {
+    KeePasskeyTheme {
+        SettingsContent(
+            uiState = SettingsUiState(),
+            onNavigateToDatabase = {},
+            onNavigateToSync = {},
+            onNavigateToAutofill = {},
+            onNavigateToSecurity = {},
+            onNavigateToTheme = {},
+            onNavigateToHealth = {},
+            onNavigateToTotp = {},
+            onNavigateToDebug = {},
+            onNavigateToAbout = {},
+            showBackButton = true
+        )
+    }
+}

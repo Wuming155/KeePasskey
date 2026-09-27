@@ -301,3 +301,28 @@ internal fun VaultListSearchTopBarPreview() {
         )
     }
 }
+
+/**
+ * `ISSUE-P3-340`：补 `autoActivateSearch = true` 那一态（从搜索入口进来了、搜索框须自动聚焦并弹键盘）。
+ * 该态与默认态的差别在**焦点与光标**，只在真机点过一次才看得见；预览虽不模拟键盘，
+ * 但至少把「该态有没有把标题挤掉」这一层暴露给导出图。
+ */
+@androidx.compose.ui.tooling.preview.Preview(name = "列表搜索顶栏-自动聚焦 - 浅色", showBackground = true)
+@androidx.compose.ui.tooling.preview.Preview(name = "列表搜索顶栏-自动聚焦 - 深色", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Composable
+internal fun VaultListSearchTopBarAutoFocusPreview() {
+    com.keepasskey.app.ui.theme.KeePasskeyTheme {
+        VaultListSearchTopBar(
+            searchQuery = "",
+            onSearchQueryChange = {},
+            isInsideRecycleBin = false,
+            sortOption = VaultSortOption.NAME_ASC,
+            onSortClick = {},
+            onLockClick = {},
+            onEmptyRecycleBinClick = {},
+            autoActivateSearch = true,
+            onAutoActivateSearchConsumed = {},
+            onKillApp = {}
+        )
+    }
+}
