@@ -161,9 +161,13 @@
      ① 重启模拟器时加 `-writable-system`（通常同时放行 verity 关闭）后再 `adb root && adb remount`；
      ② 走**用户级 CA** 安装（Settings → 安全 → 凭据 → 安装 CA）——但 Chrome for Android
      对用户级 anchor 的态度需实测，若拒绝则本路线作废；
-     ③ 放弃浏览器半环，改测**provider 判定半环**：`adb shell cmd -l | grep -i cred` 若存在
-     credential 相关 shell 入口，可直接下发 `GetCredentialRequest` 观察本应用出不出候选
-     ——⚠️ 采用此路线时**声称范围必须收窄**为「本应用对 rpId 的接受/拒绝判定」，
+     ③ 放弃浏览器半环，改测**provider 判定半环**：`adb shell cmd -l | grep -i cred` 确实列出了
+     `credential` 服务，**但** `cmd credential help` 回 `No shell command implementation`
+     ⇒ **本路线在 AVD 上不通**（2026-09-27 实测），无 shell 入口可直接下发 `GetCredentialRequest`；
+     若日后要走这条，只剩「自写一个调用 `androidx.credentials` 的测试 APK」，而 CM 对 caller
+     的 origin 归因要吃 Digital Asset Links（`PD-32` / `PD-33`），未配 DAL 的测试 APK 会被
+     `CallingOriginResolver` 一侧拒掉 ⇒ 成本高于路线①，除非①②都破不通；
+     ⚠️ 采用此路线时**声称范围必须收窄**为「本应用对 rpId 的接受/拒绝判定」，
      不得写成「Chrome 不唤醒仿冒站」（那是上游 Chrome 的 origin 校验，非本仓代码）；
      ④ 兜底：`http://127.0.0.1:<port>` + `adb reverse` 天然算安全上下文、无需任何证书，
      但**所有用例塌成同一个 host**，只能证「本应用对非域 origin（IP）拒绝参与」，
