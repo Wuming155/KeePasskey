@@ -91,20 +91,24 @@
      （注册 + 断言两个端点 + 一个 challenge 会话），落 `tools/passkey-phish-lab/`；
      端口与既有 9443 / 9000 错开，**只绑回环与模拟器网段**。
   2. **名字解析**：模拟器启动加 `-dns-server <宿主IP>`，宿主侧起一个最小 DNS 应答
-     `rp.test` / `sub.rp.test` / `rp.test.phish.test` / `rpñ.test`（punycode `xn--…`）/
-     `rp.test.`（尾点）全部指向宿主 ⇒ 一套服务多域名，**不动 hosts、不需要公网 DNS**。
+     `rp.testlab.xyz` / `sub.rp.testlab.xyz` / `rp.testlab.xyz.phish.testlab.xyz` /
+     `rр.testlab.xyz`（punycode `xn--…`）/ `rp.testlab.xyz.`（尾点）全部指向宿主
+     ⇒ 一套服务多域名，**不动 hosts、不需要公网 DNS**。
+     ⚠️ 域名的 TLD **必须选在随仓 PSL 里存在的**（`xyz` / `dev` / `com` 已核实在册），
+     不能用 `rp.test` 这类特殊用途域——理由与 fail-closed 后果见下「开工前置读数」第 1 条。
   3. **证书信任**：`adb root` + `-writable-system` 把实验室根 CA 注入系统信任锚
      （`/system/etc/security/cacerts/<hash>.0`）；不可行则退到「Chrome 逐次点 Advanced→Proceed」
      并**如实登记**该退化对结论的影响（安全提示页被点掉本身是一条读数）。
   4. **凭据来源**：一律用 `ISSUE-P3-337` 已跑通的**相册导入**通路把已知凭据放进**测试库**
      （模拟器上新建的 `probeui.kdbx` 一类），不触碰真实库；导入 rpId 与实验室域名逐一对应。
   5. **取样矩阵（正向 2 + 负向 6，缺一项不得声称「双向都验过」）**：
-     - ✅ 应唤醒：`rp.test`（精确同 eTLD+1）、`sub.rp.test`（同 eTLD+1 的子域，规范允许）；
-     - ❌ 不应唤醒：`rp.test.phish.test`（把真域**堆在后缀**里）、`phish.test`、
-       `rn.test` / `rp.test` 的同形异码（punycode 形态）、`rpTEST.test` 大小写与尾点变体、
-       `10.0.2.2`（IP origin）、以及**URL 兜底**分支专用的一条：库里条目 URL 写
-       `https://rp.test` 但 `KPEX_PASSKEY_RELYING_PARTY` 是**别的域** ⇒ 在 `rp.test` 上发断言时
-       该条目**是否**被 `findEntriesForRpId` 的 URL 兜底捞出（捞到即为兜底越界，须改代码）。
+     - ✅ 应唤醒：`rp.testlab.xyz`（精确同 eTLD+1）、`sub.rp.testlab.xyz`（同 eTLD+1 的子域，规范允许）；
+     - ❌ 不应唤醒：`rp.testlab.xyz.phish.testlab.xyz`（把真域**堆在后缀**里）、`phish.testlab.xyz`、
+       `rр.testlab.xyz` 的同形异码（punycode 形态）、大小写与尾点变体、
+       `127.0.0.1`（IP origin）、以及**URL 兜底**分支专用的一条：库里条目 URL 写
+       `https://rp.testlab.xyz` 但 `KPEX_PASSKEY_RELYING_PARTY` 是**别的域** ⇒ 在
+       `rp.testlab.xyz` 上发断言时该条目**是否**被 `findEntriesForRpId` 的 URL 兜底捞出
+       （捞到即为兜底越界，须改代码）。
      - 每条都要留**两侧读数**：Chrome 侧（是否弹账号选择器 / `get()` 成功或 `NotAllowedError`）
        与本应用侧（`dumpsys` / logcat 里 provider 是否被调、`GetCredentialRequest` 的
        `filteringCriteria` 原文、有没有走到签名分支）。
@@ -135,6 +139,37 @@
      注册面若同批做须另计工作量（`PD-32` / `PD-33` 的 origin 归因链在假站上也要证一条「不填口令」）；
   3. 是否把这套 lab 长期留在仓里（CI 无模拟器网络，只能本机复跑）——登记为
      「本机可复跑、CI 不覆盖」，避免被误当作门禁。
+
+- **开工前置读数（2026-09-27 同日续探，两条会直接决定实验室可行性的硬事实）**：
+  1. ⚠️ **实验室域名不能用 `.test` / `.invalid` / `.local`**：随仓 PSL
+     `app/src/main/resources/publicsuffix/public_suffix_list.dat` 里这三条**一条都不存在**
+     （`grep -cE "^(test|invalid|local)$"` = 0），而 `PublicSuffixList` 的口径是
+     「未知 TLD ⇒ 不可注册，fail-closed」（见该类 KDoc 第 21 行与 `isRegistrableDomain`）
+     ⇒ 用 `rp.test` 做实验会让**正向也失败**，于是「仿冒域不出候选」这条负向读数**毫无意义**
+     （假绿的典型形态：两种输入给出同一个结果，看起来像通过）。
+     已确认在 PSL 内的可用 TLD：`com` / `dev` / `xyz` ⇒ 实验室改用
+     **`rp.testlab.xyz`**（正向，eTLD+1 即该域）、`sub.rp.testlab.xyz`（正向，子域允许）、
+     `rp.testlab.xyz.phish.testlab.xyz`（负向，eTLD+1 = `phish.testlab.xyz`）、
+     `rр.testlab.xyz`（西里尔 р 同形异码，验 punycode 归一）、`127.0.0.1`（IP origin）。
+     **顺带这条本身就是本条要证的口径**：本仓对 PSL 缺席的域一律拒绝参与匹配，与浏览器实际
+     eTLD+1 计算存在**潜在分歧**（浏览器内置 PSL 与我们的资源版本可能不同步）——
+     取样时须比对「Chrome 认为的 rpId」与「本应用认为的 eTLD+1」是否同值。
+  2. **信任锚注入这条路比预想的硬**：AVD 上 `adb root` 可用（`uid=0` / `context=u:r:su:s0`、
+     `ro.debuggable=1`、`userdebug`），但 `adb remount` 与 `adb disable-verity` 都报
+     **`Device must be bootloader unlocked`** ⇒ 现镜像下 `/system/etc/security/cacerts`（143 条）**写不进去**。
+     候选路线（下一步逐条试，试不通就换）：
+     ① 重启模拟器时加 `-writable-system`（通常同时放行 verity 关闭）后再 `adb root && adb remount`；
+     ② 走**用户级 CA** 安装（Settings → 安全 → 凭据 → 安装 CA）——但 Chrome for Android
+     对用户级 anchor 的态度需实测，若拒绝则本路线作废；
+     ③ 放弃浏览器半环，改测**provider 判定半环**：`adb shell cmd -l | grep -i cred` 若存在
+     credential 相关 shell 入口，可直接下发 `GetCredentialRequest` 观察本应用出不出候选
+     ——⚠️ 采用此路线时**声称范围必须收窄**为「本应用对 rpId 的接受/拒绝判定」，
+     不得写成「Chrome 不唤醒仿冒站」（那是上游 Chrome 的 origin 校验，非本仓代码）；
+     ④ 兜底：`http://127.0.0.1:<port>` + `adb reverse` 天然算安全上下文、无需任何证书，
+     但**所有用例塌成同一个 host**，只能证「本应用对非域 origin（IP）拒绝参与」，
+     仿冒矩阵做不出来 ⇒ 它只是③之外的补充负例，不能替代实验室。
+  ⇒ 结论：**下一步先破信任锚（①→②），破不通就走③并如实收窄声称**；
+  未破之前不得在本条目下写任何「仿冒域不会唤醒」的结论。
 
 ### ISSUE-P3-337：PD-08 扫码导入通行密钥落地——顶栏扫码按载荷分流（TOTP / 通行密钥），确认在先、字节通道解析、落 `KPEX_PASSKEY_*`
 
