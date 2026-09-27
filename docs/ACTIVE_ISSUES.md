@@ -50,13 +50,87 @@
 
 
 
-## P3 低危问题、特性接线与体验优化（2 项）
+## P3 低危问题、特性接线与体验优化（3 项）
 
-> **开放项 2 条**（这里只列**各条还欠什么**；已完成的实施细节留在条目正文与 commit 里，不重复登记）：
-> ① `ISSUE-P3-340` —— 仅剩一条未决：普查是否升级为 `hygiene-gate` 第九条闸门（前置：先给脚本加带理由的
+> **开放项 3 条**（这里只列**各条还欠什么**；已完成的实施细节留在条目正文与 commit 里，不重复登记）：
+> ① `ISSUE-P3-345` —— 全条未开工（2026-09-27 由用户命题「匹配不到时不能像 KeePassDX 那样新建一条」
+>    调研立项；前提已按参考项目源码纠偏，写库原语与受保护窗口范式均已具备，缺的是入口与预填管线）。
+> ② `ISSUE-P3-340` —— 仅剩一条未决：普查是否升级为 `hygiene-gate` 第九条闸门（前置：先给脚本加带理由的
 >    显式豁免清单，否则主题包装器一类合理豁免会被长期判红）。
-> ② `ISSUE-P3-339` —— **用户指示暂时搁置**（浏览器半环需外部域名与信任链资源）。
-> 更早的 P3 闭环流水见 `RESOLVED_LOG.md` §326 ~ §343（`ISSUE-P3-337` / `ISSUE-P3-342` 收口于 §343）。
+> ③ `ISSUE-P3-339` —— **用户指示暂时搁置**（浏览器半环需外部域名与信任链资源）。
+> 更早的 P3 闭环流水见 `RESOLVED_LOG.md` §326 ~ §344（`ISSUE-P3-337` / `ISSUE-P3-342` 收口于 §343，
+> `ISSUE-P2-343` 收口于 §344）。
+
+
+### ISSUE-P3-345：凭据请求匹配不到条目时两条通道都是**死路**——无「就地新建并用于本次填充」入口（对齐同类项目）
+
+- **优先级理由**：P3（功能缺口，不涉安全边界）；但它是同类应用的**常规能力**，且本仓写库原语、
+  受保护窗口落地页、`PendingIntent` 契约**三者齐备** ⇒ 增量只剩「入口 + 预填管线」，代价可控。
+- **用户命题的纠偏（登记以免按错误前提开工）**：命题「KeePassDX 匹配不到就能新建一条」**部分成立**——
+  入口**不在系统下拉**：
+  - KeePassDX 无匹配分支只挂认证/选择条目，**没有任何 Create 型数据集**
+    （`参考项目/KeePassDX-master/.../autofill/KeeAutofillService.kt:191-197`；
+    provider 侧 `passkey/PasskeyProviderService.kt:268-291` 无候选只给一条 SELECTION 性质条目，
+    `CreateEntry` 仅出现在 create 流 `:320-405`）；
+  - 真通路在其**应用内选择页**：`GroupActivity.kt:758-800` 的「新增条目」在 SELECTION 模式下调
+    `EntryEditActivity.launchForSelection(…, searchInfo)` → `EntryEditActivity.kt:200-203` 把
+    `SearchInfo.toRegisterInfo()` 当注册信息 → `ContextualDatabase.kt:101-135`（`:127`）预填新条目 →
+    保存后 `:541-550` 回传 id、`AutofillLauncherViewModel.kt:183-190` 用同一 `AutofillHelper` 下发**真实数据集**。
+    ⇒ 「当场新建并用于本次填充」确实做得到；
+  - **最贴近用户表述的是 keepass2android**：无匹配也恒挂占位数据集
+    （`AutofillServiceBase.cs:228-235`、`:354-373`），并在结果页底栏放**「Create entry for URL」**
+    （`ShareUrlResults.cs:157-203`，文案 `Resources/values/strings.xml:29`，仅库可写时可见）→
+    `GroupActivity.Launch(new CreateEntryThenCloseTask { Url = searchUrl })` 整表预填。
+- **本项目现状（核实 2026-09-27，方式：逐文件读代码，非推定）**：
+  1. **CM 通道**：已解锁但零候选 ⇒ `CredentialResponseAssembler.buildUnlockedGetResponse` 返回**空响应**，
+     系统选择器上本应用什么都不呈现；唯一的 `AuthenticationAction` 只在**锁库**分支产出
+     （`KeePasskeyCredentialProviderService.kt:150-166`）。create 流的 `CreateEntry` 已具备
+     （`CredentialCreateEntries.kt:41-85`），但那要求站点/应用**主动发起注册**——登录页只发 get，
+     用户撞上的仍是死路。
+  2. **Autofill 通道**：手动选择器已能「查全部条目」（`AutofillPickerViewModel.kt:84` 取整库、
+     `AutofillEntrySearch.filter` 空查询返回全量），但空结果**只有一行文案**
+     `autofill_picker_empty`「没有匹配的条目」（`AutofillPickerScreen.kt:172-179`），**零动作**；
+     提交后捕获（`applySaveInfoIfNeeded` `AutofillDatasetBuilders.kt:444-474` + `onSaveRequest`）是
+     「事后保存」，不是「当场新建」。
+  3. **可复用资产**：`saveAutofillCredential` 已按「域名/包名 + 用户名」命中则**原地更新**、未命中则新建
+     （`VaultEntryWriteCoordinator.kt:315-332`）；`PasswordSaveActivity` / `CredentialUnlockActivity` 是
+     受保护窗口内落地页的现成范式；选择器 Intent 已带 `EXTRA_WEB_DOMAIN` / `EXTRA_CALLING_PACKAGE`
+     （`AutofillPickerActivity.kt:365-377`）⇒ 预填数据源现成；应用内新建页 `Screen.EntryEdit`
+     （`entryId` 为空即新建，`EntryEditViewModel.kt:161-168`）**尚无 url / 用户名预填入参**。
+- **官方契约（已取 API 原文，改动前须以原文为准，勿凭记忆）**：
+  `androidx.credentials.provider.Action`（Added in 1.2.0；本仓 credentials=1.6.0 ⇒ 可用）**正是**为此场景设计——
+  官方举例标题即 `Add a new Password`。经 `BeginGetCredentialResponse.Builder.addAction` / `setActions`
+  呈现于选择器**独立的「Actions」类目**；落地 Activity 用 `PendingIntentHandler.retrieveBeginGetCredentialRequest`
+  取回原请求，完成后 `setResult(RESULT_OK, …)` 并以 `PendingIntentHandler.setGetCredentialResponse` 回**凭据本身**
+  （**不同于**解锁链回 `BeginGetCredentialResponse`）；**放弃时 `RESULT_CANCELED` 会重新弹出选择器**
+  （挂这个入口不会把用户推出登录流程）；`PendingIntent` 必须 `FLAG_MUTABLE`、**不得** `FLAG_ONE_SHOT`、
+  requestCode 逐条目唯一（本仓集中于 `CredentialPendingIntents`，ISSUE-P1-01 / P2-199 已满足）。
+  `CreateEntry` 按定义只属于 create 流，**不得**塞进 get 响应。
+- **整改口径**：
+  - **A. CM 通道（只做客观能做的：口令维度）**：零候选且请求含 `BeginGetPasswordOption` 时追加**一条** `Action`
+    → 新建落地页在受保护窗口内从系统背书请求取 origin / 包名 / 用户名做预填 → 用户设密码并显式确认 →
+    `saveAutofillCredential` 落库 → `setGetCredentialResponse` 完成本次登录；放弃 ⇒ `RESULT_CANCELED`。
+    文案**不得插值域名 / 包名**（ISSUE-P1-10 纪律沿用）。
+  - **B. Autofill 通道**：把选择器空态文案升级为动作（照 KP2A 的「为该 URL 新建条目」形态），复用同一预填落地页，
+    保存成功后经既有 `EXTRA_AUTHENTICATION_RESULT` 通路（`AutofillPickerActivity.kt:323`）把新条目作为**本次数据集**交付。
+    只读会话（`isSessionReadOnly()`）/ 库不可写 ⇒ **不呈现该动作**（`PD-50`「控件不许骗人」口径）。
+  - **C. 通行密钥维度明确不做**：本应用不能凭空造出一把对某 rpId 有效的凭据 ⇒ **禁止**出现「新建通行密钥」按钮；
+    公钥请求零候选时只能给纯引导文案（或不挂条目）。该取舍须登记为 `PD-51`（属取舍而非缺陷，不入待办面）。
+- **不得双向声称的边界**：`Action` 类目在 Android 16 系统选择器上的**实际呈现与点击回传**属系统 UI 行为，
+  宿主单测无法证伪 ⇒ AC 必须含真机读数。且 `AuthenticationAction` 在仓内**零测试覆盖**
+  （2026-09-27 `grep AuthenticationAction app/src/test app/src/androidTest` = 0 命中）
+  ⇒ **不得**以「解锁 Action 一直能用」推定 Action 类目可用（§143 / §147 两次「宿主全绿、真机失败」的教训形态）。
+- **AC**：
+  ① CM 零候选（含口令请求）产出**且仅产出 1 条** Action；锁库分支不得同时产出；通道总开关 / 黑名单 /
+     只读会话三条 fail-closed 路径**不得**产出（与 §232 同口径，用**计数**断言防「只接一处」）；
+  ② 新建保存后本次登录直接拿到凭据（真机读数：`RESULT_OK` + 调用方收到 `PasswordCredential`）；
+  ③ 放弃新建 ⇒ 选择器重新出现（真机读数）；
+  ④ 预填字段只来自系统背书请求，**不得**读调用方可控的 `candidateQueryData`（H1 同源纪律）；
+  ⑤ Autofill 侧空态不再是纯文本死路，且新条目能作为本次数据集回填；
+  ⑥ 成对断言（打开→出 Action ／ 关闭·只读→不出）+ `check_tautological_assertions` +
+     `check_box_slot_children` + 全量 `test` 绿 + `gate_readings.py` 8/8 + `check_md_links.py` 0 断链；
+  ⑦ 新增可见性开关的 `@Preview` 两态齐（`ISSUE-P3-340` 规则条文第二次生效）。
+- **关联**：`PD-05`（锁库填充改链确认页）/ `PD-12`（拒绝页**就地补救动作**先例）/ `PD-50` / `ISSUE-P3-337`。
 
 
 ### ISSUE-P3-340：`@Preview` 状态覆盖无机检——新增可见性开关未同步补预览，布局缺陷在编译期与预览里双双隐形
