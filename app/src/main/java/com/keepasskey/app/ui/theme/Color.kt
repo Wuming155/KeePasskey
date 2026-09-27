@@ -16,12 +16,15 @@ val BluePrimaryContainerDark = Color(0xFF004977)
 val BlueOnPrimaryContainerDark = Color(0xFFCFE5FF)
 
 // 表面与背景 (2026 Material 3 Expressive 质感)
+// ISSUE-P3-347：相邻档相对亮度差由 2~3% 拉开至 4~6%（实测 ×1.4~1.6），
+// 列表卡片（surfaceContainerLow）贴背景不可辨的"层次靠猜"问题由此消除；
+// onSurfaceVariant #43474E 对最深档仍保 6.51:1（≥ AC 的 6.0 富余线）。
 val BackgroundLight = Color(0xFFF8F9FC)
 val SurfaceLight = Color(0xFFF8F9FC)
-val SurfaceContainerLowLight = Color(0xFFF1F4F9)
-val SurfaceContainerLight = Color(0xFFEBEFF5)
-val SurfaceContainerHighLight = Color(0xFFE5E9EF)
-val SurfaceContainerHighestLight = Color(0xFFE0E4EB)
+val SurfaceContainerLowLight = Color(0xFFEEF1F7)
+val SurfaceContainerLight = Color(0xFFE4E9F2)
+val SurfaceContainerHighLight = Color(0xFFDAE0EC)
+val SurfaceContainerHighestLight = Color(0xFFD0D8E7)
 // Outline 语义色（ISSUE-P3-132 ①）：原值 `0x3374777F` 为 **20% alpha**，不是 MD3 的
 // outline 角色——OutlinedTextField 未聚焦边框 / OutlinedButton 描边 / 次要图标全部取该令牌，
 // 浅色下实测栅格化为 `#D8DBE1`，对 `surfaceContainerLow` 仅 **1.26:1**（等于「看不出边界」）。
@@ -31,12 +34,13 @@ val SurfaceContainerHighestLight = Color(0xFFE0E4EB)
 val OutlineLight = Color(0xFF74777F)
 val OutlineVariantLight = Color(0xFFDCE2EC)
 
+// ISSUE-P3-347：深色侧同步拉开（相邻档相对亮度差 ×1.1~2.0），卡片与背景可辨。
 val BackgroundDark = Color(0xFF101418)
 val SurfaceDark = Color(0xFF101418)
-val SurfaceContainerLowDark = Color(0xFF181C20)
-val SurfaceContainerDark = Color(0xFF1D2024)
-val SurfaceContainerHighDark = Color(0xFF272A2E)
-val SurfaceContainerHighestDark = Color(0xFF32353A)
+val SurfaceContainerLowDark = Color(0xFF1A1F26)
+val SurfaceContainerDark = Color(0xFF21262E)
+val SurfaceContainerHighDark = Color(0xFF2A303A)
+val SurfaceContainerHighestDark = Color(0xFF343B47)
 val OutlineDark = Color(0xFF8E9199)
 val OutlineVariantDark = Color(0xFF33373B)
 
@@ -108,11 +112,12 @@ val DarkColorScheme = darkColorScheme(
 
 // OLED 极黑优化配色：在标准深色配色基础上，将背景与最底层容器压至纯黑，
 // 仅保留必要的容器层次以维持组件可辨识度（OLED 屏幕发光功耗最低）
+// ISSUE-P3-347：各档同步等比拉开（纯黑起跳的相邻档差 ×1.9~1.4）。
 val OledDarkColorScheme = DarkColorScheme.copy(
     background = Color.Black,
     surface = Color.Black,
     surfaceContainerLowest = Color.Black,
-    surfaceContainerLow = Color(0xFF0A0C0F),
-    surfaceContainer = Color(0xFF12151A),
-    surfaceContainerHigh = Color(0xFF1C2026)
+    surfaceContainerLow = Color(0xFF10141A),
+    surfaceContainer = Color(0xFF181D24),
+    surfaceContainerHigh = Color(0xFF20262F)
 )

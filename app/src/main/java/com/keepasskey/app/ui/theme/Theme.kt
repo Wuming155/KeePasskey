@@ -149,7 +149,8 @@ private fun resolveAppColorScheme(
         secondaryContainer = themePalette.secondaryContainerDark,
         onSecondaryContainer = themePalette.onSecondaryContainerDark,
         tertiary = themePalette.tertiaryColorDark,
-        tertiaryContainer = themePalette.tertiaryColorDark
+        // ISSUE-P3-351：原误写为 tertiaryColorDark（本体色重复赋值），palette 容器字段从未生效
+        tertiaryContainer = themePalette.tertiaryContainerDark
     )
     else -> baseColorScheme.copy(
         primary = themePalette.primaryColorLight,
@@ -161,7 +162,8 @@ private fun resolveAppColorScheme(
         secondaryContainer = themePalette.secondaryContainerLight,
         onSecondaryContainer = themePalette.onSecondaryContainerLight,
         tertiary = themePalette.tertiaryColorLight,
-        tertiaryContainer = themePalette.tertiaryColorLight
+        // ISSUE-P3-351：原误写为 tertiaryColorLight（本体色重复赋值），palette 容器字段从未生效
+        tertiaryContainer = themePalette.tertiaryContainerLight
     )
 }
 

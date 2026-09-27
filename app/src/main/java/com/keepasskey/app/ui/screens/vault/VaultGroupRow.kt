@@ -31,6 +31,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -43,6 +44,23 @@ import com.keepasskey.app.ui.model.BitmapEntryIcon
 import com.keepasskey.app.ui.model.EntryIcon
 import com.keepasskey.app.ui.model.VaultGroup
 import com.keepasskey.app.ui.screens.settings.ListDensity
+
+/**
+ * ISSUE-P3-348：分组图标 tile 语义分色——回收站用 error 容器系，其余按 iconName
+ * 稳定哈希轮换 primary / secondary / tertiary 三组容器色（排序/重排不换色；
+ * 禁止按列表下标取色，颜色只取现有语义令牌）。
+ */
+@Composable
+private fun groupTileColors(group: VaultGroup): Pair<Color, Color> =
+    if (group.isRecycleBin) {
+        MaterialTheme.colorScheme.errorContainer to MaterialTheme.colorScheme.onErrorContainer
+    } else {
+        when (Math.floorMod(group.iconName.hashCode(), 3)) {
+            0 -> MaterialTheme.colorScheme.primaryContainer to MaterialTheme.colorScheme.onPrimaryContainer
+            1 -> MaterialTheme.colorScheme.secondaryContainer to MaterialTheme.colorScheme.onSecondaryContainer
+            else -> MaterialTheme.colorScheme.tertiaryContainer to MaterialTheme.colorScheme.onTertiaryContainer
+        }
+    }
 
 /**
  * 文件夹行组件（ISSUE-P3-29：自 `VaultEntryRows.kt` 拆出，同包同可见性，纯结构性拆分）。
@@ -81,16 +99,18 @@ fun KeePassGroupRow(
             ),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            // ISSUE-P3-348：分组图标 tile 语义分色（配色规则见 groupTileColors）
+            val (tileContainer, tileTint) = groupTileColors(group)
             Box(
                 modifier = Modifier
                     .size(densitySpec.iconContainerSizeDp.dp)
                     .clip(RoundedCornerShape(10.dp))
-                    .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)),
+                    .background(tileContainer),
                 contentAlignment = Alignment.Center
             ) {
                 EntryIconContent(
                     icon = icon ?: EntryIcon.Default(group.iconName),
-                    tint = MaterialTheme.colorScheme.primary,
+                    tint = tileTint,
                     placeholderIcon = if (group.isRecycleBin) Icons.Default.Delete else getVaultIcon(group.iconName),
                     contentSize = densitySpec.iconContentSizeDp.dp
                 )
@@ -158,5 +178,37 @@ internal fun KeePassGroupRowPreview() {
             icon = com.keepasskey.app.ui.preview.PreviewDefaultIcon,
             densitySpec = ListDensityPresenter.specOf(ListDensity.NORMAL)
         )
+    }
+}
+
+// ISSUE-P3-348 AC③：分色双态并排预览——回收站（error 容器系）+ 普通分组（轮换容器色）
+// 同屏对照，分色回归在预览图里一眼可辨（遵守 ISSUE-P3-340 补态规则）。
+@androidx.compose.ui.tooling.preview.Preview(name = "分组行语义分色 - 浅色", showBackground = true)
+@androidx.compose.ui.tooling.preview.Preview(name = "分组行语义分色 - 深色", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Composable
+internal fun KeePassGroupRowSemanticColorPreview() {
+    com.keepasskey.app.ui.theme.KeePasskeyTheme {
+        androidx.compose.foundation.layout.Column {
+            KeePassGroupRow(
+                group = com.keepasskey.app.ui.preview.PreviewGroupLogins.copy(id = "g-a", name = "网站登录", iconName = "folder"),
+                onClick = {}, onRename = {}, onChangeIcon = {}, onDelete = {},
+                densitySpec = ListDensityPresenter.specOf(ListDensity.NORMAL)
+            )
+            KeePassGroupRow(
+                group = com.keepasskey.app.ui.preview.PreviewGroupLogins.copy(id = "g-b", name = "银行卡", iconName = "bank"),
+                onClick = {}, onRename = {}, onChangeIcon = {}, onDelete = {},
+                densitySpec = ListDensityPresenter.specOf(ListDensity.NORMAL)
+            )
+            KeePassGroupRow(
+                group = com.keepasskey.app.ui.preview.PreviewGroupLogins.copy(id = "g-c", name = "安全便签", iconName = "note"),
+                onClick = {}, onRename = {}, onChangeIcon = {}, onDelete = {},
+                densitySpec = ListDensityPresenter.specOf(ListDensity.NORMAL)
+            )
+            KeePassGroupRow(
+                group = com.keepasskey.app.ui.preview.PreviewGroupLogins.copy(id = "g-rb", name = "回收站", iconName = "trash", isRecycleBin = true),
+                onClick = {}, onRename = {}, onChangeIcon = {}, onDelete = {},
+                densitySpec = ListDensityPresenter.specOf(ListDensity.NORMAL)
+            )
+        }
     }
 }

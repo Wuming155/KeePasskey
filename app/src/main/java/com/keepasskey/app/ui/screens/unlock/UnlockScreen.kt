@@ -169,6 +169,23 @@ fun UnlockContent(
             .statusBarsPadding()
             .background(MaterialTheme.colorScheme.background)
     ) {
+        // ISSUE-P3-349：顶部品牌渐变锚点——primaryContainer → 透明的静态幕布，
+        // 为锁圆 / 标题提供视觉锚，消除顶部约 1/3 的无层次空白。
+        // 取色仅用语义令牌（动态取色 / OLED 盘自动跟随），非常驻动画、零 GPU 常耗。
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(340.dp)
+                .background(
+                    brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                        colors = listOf(
+                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.9f),
+                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0f)
+                        )
+                    )
+                )
+        )
+
         // 右上角快速主题切换
         Row(
             modifier = Modifier
