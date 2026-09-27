@@ -1102,6 +1102,17 @@
     已由用户真机确认修复；T7 passkey 唤醒与 T8 autofill 用户判定「扫码导入之前已测过、
     不重复测试」⇒ 不再挂为待办；T6 只读会话**报出新缺陷**，另立 `ISSUE-P2-343`；
     仍待回报：T5 的 Q1 替换读数与 B（回收站 passkey 不进系统候选）。
+    ★ **同批从真机 logcat 取得的 CM 链路读数（2026-09-27 19:25–19:26，第三方浏览器 mark.via）**：
+    `19:25:46 CredentialManager: starting executeGetCredential with callingPackage: mark.via`
+    → 浏览器侧回 `GetCredentialException.TYPE_NO_CREDENTIAL`（库里当时无该站凭据，**如实报无**）
+    → `19:25:50` 起 `PasskeyCreateActivity`（当场注册一枚）
+    → `19:26:28` 再次 `executeGetCredential`，系统 CM 的 `providerEnabledList` 明确列出
+    `com.keepasskey/…KeePasskeyCredentialProviderService`，`19:26:29` 进入 `PasskeyAssertionActivity`。
+    ⇒ 这条链在真机上完整跑通：**浏览器 → 系统 CM → 本应用 provider → 断言 Activity**。
+    ⚠️ **但它不构成本条 AC⑧(b) 的收口**：被断言的凭据是**当场注册**的，不是**相册导入**的那枚
+    ——「导入件能否对真实 RP 完成断言」仍未证，读数不得互相顶替。
+    （另记一条生态观察：同一次请求里 `providerDisabledList` 含 `com.kunzisoft.keepass.libre`，
+    即参考实现 KeePassDX 的 provider 在本机被禁用，不影响本条判据。）
     **本批验证读数（原样粘贴 `python tools/doc/gate_readings.py` 输出）**：
     `[1/7] count_line_tiers.py EXIT 0 | tier1(>500)=0 tier2(400~500)=36 budget=37` /
     `[2/7] long_functions.py EXIT 0 | functions_ge_100=0` /
