@@ -396,6 +396,10 @@ function encodeCredential(cred) {
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", type=int, default=8443)
+    parser.add_argument("--bind", default="127.0.0.1",
+                        help="默认只绑回环：QEMU 用户网络把模拟器对 10.0.2.2 的连接转发到宿主"
+                             " 127.0.0.1，故回环已够客户机访问，无需把实验室暴露到局域网"
+                             "（登记口径见 ACTIVE_ISSUES `ISSUE-P3-339` 整改口径 1）")
     parser.add_argument("--expected-keys", type=Path,
                         help="导入件公钥清单 JSON（由 make_import_qr.py 产出）")
     parser.add_argument("--dump-readings", type=Path, help="退出前把读数写到该文件")
@@ -403,11 +407,11 @@ def main() -> None:
 
     if args.expected_keys and args.expected_keys.exists():
         print(f"预置导入件公钥 {load_expected_keys(args.expected_keys)} 条")
-    httpd = ThreadingHTTPServer(("0.0.0.0", args.port), Handler)
+    httpd = ThreadingHTTPServer((args.bind, args.port), Handler)
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     ctx.load_cert_chain(CERT_DIR / "server.pem", CERT_DIR / "server.key")
     httpd.socket = ctx.wrap_socket(httpd.socket, server_side=True)
-    print(f"HTTPS RP 监听 0.0.0.0:{args.port}（模拟器侧地址 https://10.0.2.2:{args.port}/）")
+    print(f"HTTPS RP 监听 {args.bind}:{args.port}（模拟器侧仍用 https://10.0.2.2:{args.port}/，因 SLIRP 把 10.0.2.2 转发到宿主回环）")
     try:
         httpd.serve_forever()
     finally:

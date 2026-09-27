@@ -89,7 +89,10 @@
 - **整改口径（实验室设计，全部本地、不接公网、不碰真实密码库）**：
   1. **RP 服务端**：复用 `tools/local-sync/` 的自签 CA 形态，新增一个极简 WebAuthn RP
      （注册 + 断言两个端点 + 一个 challenge 会话），落 `tools/passkey-phish-lab/`；
-     端口与既有 9443 / 9000 错开，**只绑回环与模拟器网段**。
+     端口与既有 9443 / 9000 错开，**只绑回环**——实测成立而非洁癖：QEMU/SLIRP 把模拟器对
+     `10.0.2.2:<port>` 的连接转发到宿主 `127.0.0.1`，故 RP 仅监听回环时客户机仍可达
+     （`toybox nc -w 3 -z 10.0.2.2 8443` 在宿主只绑 127.0.0.1 的前提下 `rc=0`），
+     不必把实验室暴露到局域网。
   2. **名字解析**：模拟器启动加 `-dns-server <宿主IP>`，宿主侧起一个最小 DNS 应答
      `rp.testlab.xyz` / `sub.rp.testlab.xyz` / `rp.testlab.xyz.phish.testlab.xyz` /
      `rр.testlab.xyz`（punycode `xn--…`）/ `rp.testlab.xyz.`（尾点）全部指向宿主
