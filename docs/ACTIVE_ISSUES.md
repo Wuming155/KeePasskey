@@ -116,7 +116,48 @@
     保存成功后经既有 `EXTRA_AUTHENTICATION_RESULT` 通路（`AutofillPickerActivity.kt:323`）把新条目作为**本次数据集**交付。
     只读会话（`isSessionReadOnly()`）/ 库不可写 ⇒ **不呈现该动作**（`PD-50`「控件不许骗人」口径）。
   - **C. 通行密钥维度明确不做**：本应用不能凭空造出一把对某 rpId 有效的凭据 ⇒ **禁止**出现「新建通行密钥」按钮；
-    公钥请求零候选时只能给纯引导文案（或不挂条目）。该取舍须登记为 `PD-51`（属取舍而非缺陷，不入待办面）。
+    公钥请求零候选时只能给纯引导文案（或不挂条目）。该取舍**已裁决为 `PD-51`**（2026-09-27 代理裁决）。
+  - **D. 实施口径（2026-09-27 定稿，用户明示授权「方案可行，完成任务」）**：顺序＝先 Autofill（B，纯本仓机制、
+    宿主可闭环）后 CM（A，含真机不确定性）；预填**不进主导航图**（`Screen.EntryEdit` 不扩预填参数——外部数据走
+    nav route 有编码/泄露面，且主任务栈保证不了受保护窗口），改走独立落地 Activity（输入只收系统背书来源，
+    锁库复用 `CredentialUnlockPresenter` 同窗解锁）；新建 = **强制新建**（`PD-51` 裁决 2，不走
+    `saveAutofillCredential` 的静默更新语义）；Autofill 侧建完经既有 `EXTRA_AUTHENTICATION_RESULT` 通路把
+    新条目当本次数据集交付，CM 侧 `setGetCredentialResponse` 直接完成登录。
+  - **KP2A 深挖补充（2026-09-27 第二轮逐行复核，全部亲核行号）**：① 它在**数据集层**恒挂「fill with KP2A」
+    占位数据集（`AddQueryDataset`，`AutofillServiceBase.cs:230` 调用 / `:360-380` 定义，值全 `PLACEHOLDER`），
+    零匹配也永有可点行；②「Create entry for URL」在搜索结果页底栏（`ShareUrlResults.cs:156-206`），仅库可写可见
+    （`OpenDatabases.Any(db => db.CanWrite)`）；③ 预填是**任务对象 + 两个编辑器钩子**：
+    `CreateEntryThenCloseTask`（`app/AppTask.cs:743-798`）带 `Url` 或**整表 JSON `AllFields` + 受保护字段清单**，
+    `EntryEditActivity.cs:732` `PrepareNewEntry` 预填 / `:1087` `AfterAddNewEntry` 建完即回填充流；④ 保存侧同走
+    「整表预填 + 人工确认」而非静默落库（`Kp2aAutofillService.cs:78-107`，全 hint 字段打包进
+    `SelectCurrentDbActivity`）；⑤ 它**没有** CredentialProviderService（grep 0 命中），无 CM 侧对照。
+  - **实施留痕（2026-09-27，第 0+1+2 步代码落地；AC②③ 真机读数仍欠，用户配合）**：
+    ① `PD-51` 已登记（裁决 1–4 + 不采路径 + 重开条件，产品裁决登记.md）；
+    ② 新增 `PasswordDraftActivity`（受保护窗口；create-only＝预生成 uuid 走 `saveEntry` 新建分支；
+       CM 路径取 `retrieveBeginGetCredentialRequest` 并与系统认证包名交叉核对，不一致 fail-closed；
+       锁库经 `CredentialUnlockPresenter` 同窗解锁；只读会话拒绝）与 `PasswordDraftScreen`
+       （必填布尔不带默认值，三态预览齐：可编辑 / 保存中 / 保存失败）；
+    ③ Autofill 侧：选择器空态新增「新建条目并填充」按钮（`canCreateNew = !isSessionReadOnly()`），
+       建完经 ActivityResultLauncher **复用 `confirmAndFill` 整条既有交付链**（锁定复核 → 按需解密 →
+       宽限 / 二次确认 → 数据集回传），不另开交付路径；补「空结果可新建」双向预览（浅 / 深）；
+    ④ CM 侧：装配器**逐 option 计数**口令候选，经纯函数 `shouldOfferPasswordCreateAction` 裁决后
+       `addAction`（标题 `cred_action_create_password_title` 零插值）；挂出点在唯一候选出口，
+       直查与链式解锁两路共用；Action 的 PendingIntent 构造与同族 `passkeyEntry` / `passwordEntry`
+       同落点（`CredentialCreateEntries.createPasswordAction`，分档合规下沉）；`CreateEntry` 语义不变（仍只属 create 流）；
+    ⑤ 测试：`CredentialCreateActionPolicyTest` 4 例（行为层场景表穷举四条门控 + 文案零插值资源断言 +
+       接线源码守卫：逐 option 计数 / 纯函数裁决 / `CredentialPendingIntents` 契约）+
+       `AutofillPickerCreateNewWiringTest` 3 例（只读门控 / 回程必须走 `confirmAndFill` / 按钮必须条件呈现）；
+       `CredentialRequestCodeWiringTest` 分配器调用点计数守卫 **2 → 3**（合法新增：官方契约要求 Action 逐条目唯一 requestCode）；
+    ⑥ **顺带照出并修复 `check_preview_state_coverage.py` 自身缺陷**：参数表内行注释会把锚定
+       `BOOL_PARAM` 匹配打断、参数对普查**完全隐形**（选择器三个布尔开关全数不可见 ⇒ 普查低估计数）；
+       修复第一版又犯「先并行后剥注释」错（`//` 吞到串尾），被新加的**第四向自检样本**当场照出——
+       现自检 4/4 OK。读数变化：开关参数 **19 → 23**、漏态 **2 → 3**（新暴露
+       `EntryEditExtraSection.expiresEnabled` 缺 true 态）、无预览 **7 → 8**（新暴露 `SecuritySwitchRow.enabled`）。
+       ⚠️ 新暴露两条**属普查读数、不属本条整改面**（按 `ISSUE-P3-340` 裁决普查不升级闸门），留给普查条目消化；
+    ⑦ 门禁：全量 `test` 绿、`check_tautological_assertions` 0/475、`check_box_slot_children` 0 命中 / 59 站点、
+       `check_bounded_type_names` 0、`check_md_links` 0 断链、`gate_readings` 8/8（读数块见 commit）；
+    ⑧ **未做并如实声明**：AC②③ 真机读数（系统选择器是否渲染 Actions 类目 / `RESULT_OK` 回凭据 /
+       放弃是否重弹选择器）待用户配合；`AuthenticationAction` 零测试覆盖的既有缺口不变。
 - **不得双向声称的边界**：`Action` 类目在 Android 16 系统选择器上的**实际呈现与点击回传**属系统 UI 行为，
   宿主单测无法证伪 ⇒ AC 必须含真机读数。且 `AuthenticationAction` 在仓内**零测试覆盖**
   （2026-09-27 `grep AuthenticationAction app/src/test app/src/androidTest` = 0 命中）

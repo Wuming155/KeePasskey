@@ -19,6 +19,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -113,6 +114,10 @@ fun AutofillPickerScreen(
     canBlockUsername: Boolean = false,
     canBlockPassword: Boolean = false,
     onBlockField: (AutofillFieldRole) -> Unit = {},
+    // ISSUE-P3-345 / PD-51：空结果态的「就地新建」入口。仅库可写（非只读会话）时呈现，
+    // 否则不呈现（PD-50：控件不许骗人）
+    canCreateNew: Boolean = false,
+    onCreateNew: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var pendingBlockRole by remember { mutableStateOf<AutofillFieldRole?>(null) }
@@ -170,12 +175,26 @@ fun AutofillPickerScreen(
             }
 
             if (results.isEmpty()) {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Column(
+                    modifier = Modifier.fillMaxSize(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
                     Text(
                         text = stringResource(R.string.autofill_picker_empty),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    // ISSUE-P3-345 / PD-51：空结果不再是死路——可写库时提供「就地新建」，
+                    // 新建完成后由 Activity 经既有数据集链路把新条目作为本次填充交付
+                    if (canCreateNew) {
+                        Button(
+                            onClick = onCreateNew,
+                            modifier = Modifier.padding(top = 12.dp)
+                        ) {
+                            Text(stringResource(R.string.autofill_picker_create_new))
+                        }
+                    }
                 }
             } else {
                 LazyColumn(modifier = Modifier.fillMaxSize()) {
@@ -386,6 +405,29 @@ internal fun AutofillPickerScreenPreview() {
             canBlockUsername = true,
             canBlockPassword = true,
             onBlockField = {}
+        )
+    }
+}
+
+// ISSUE-P3-345 AC⑦：新增带默认值的可见性开关（canCreateNew）必须补反向态预览——
+// 空结果 + 新建按钮这一态此前只有真机能看见（P3-340 规则条文）
+@androidx.compose.ui.tooling.preview.Preview(name = "自动填充手动选择器 - 空结果可新建 - 浅色", showBackground = true)
+@androidx.compose.ui.tooling.preview.Preview(name = "自动填充手动选择器 - 空结果可新建 - 深色", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Composable
+internal fun AutofillPickerScreenEmptyCreatablePreview() {
+    com.keepasskey.app.ui.theme.KeePasskeyTheme {
+        AutofillPickerScreen(
+            query = "",
+            onQueryChange = {},
+            results = emptyList(),
+            onPick = {},
+            onCancel = {},
+            requester = null,
+            canBlockUsername = false,
+            canBlockPassword = false,
+            onBlockField = {},
+            canCreateNew = true,
+            onCreateNew = {}
         )
     }
 }

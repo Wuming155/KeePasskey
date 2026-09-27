@@ -82,6 +82,17 @@ class AutofillPickerActivity : FragmentActivity() {
 
     private var completed = false
 
+    /**
+     * ISSUE-P3-345 / PD-51：空结果态「就地新建」的落地回程——保存成功后拿新条目 id
+     * 复用 [confirmAndFill] 的**整条既有交付链**，不为新建另开交付路径（防两处漂移）。
+     */
+    private val draftLauncher = registerForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        com.keepasskey.app.passkey.PasswordDraftActivity.draftEntryIdFrom(result)
+            ?.let(::confirmAndFill)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.setFlags(
@@ -114,37 +125,28 @@ class AutofillPickerActivity : FragmentActivity() {
                 // 仅在本次请求确实识别到对应框时提供屏蔽入口（否则是无对象的假按钮）
                 canBlockUsername = readAutofillId(EXTRA_USERNAME_ID) != null,
                 canBlockPassword = readAutofillId(EXTRA_PASSWORD_ID) != null,
-                onBlockField = ::blockFieldAndFinish
+                onBlockField = ::blockFieldAndFinish,
+                // ISSUE-P3-345 / PD-51：只读会话不呈现新建入口（控件不许骗人）；
+                // 入口 Intent 构造集中在 PasswordDraftActivity.createIntent
+                canCreateNew = !vaultRepository.isSessionReadOnly(),
+                onCreateNew = {
+                    if (!completed) {
+                        draftLauncher.launch(
+                            com.keepasskey.app.passkey.PasswordDraftActivity.createIntent(
+                                this@AutofillPickerActivity,
+                                callingPackage = intent.getStringExtra(EXTRA_CALLING_PACKAGE).orEmpty(),
+                                webDomain = intent.getStringExtra(EXTRA_WEB_DOMAIN).orEmpty()
+                            )
+                        )
+                    }
+                }
             )
         }
     }
 
-    /**
-     * ISSUE-P2-70：解析本次填充的请求方身份。
-     *
-     * - 包名取自 extra（系统结构树下发，**不可伪造锚点**）；缺失 → 返回 null（不展示归属块）；
-     * - 应用名经 PackageManager 读取，**可被应用自声明**，仅作辅助识别，读取失败按无名称处理；
-     * - 签名证书 SHA-256 经 [AutofillOriginResolver] 读取（与确认页同一通道），不可读时如实标注；
-     * - 域为**表单自报且未经归属校验**（本页不据其放行，仅如实展示给用户）。
-     */
-    private fun resolveRequester(): AutofillPickerRequester? {
-        val callingPackage = intent.getStringExtra(EXTRA_CALLING_PACKAGE)
-        if (callingPackage.isNullOrBlank()) return null
-        val label = try {
-            val appInfo = packageManager.getApplicationInfo(callingPackage, 0)
-            packageManager.getApplicationLabel(appInfo).toString()
-        } catch (t: Throwable) {
-            // 包可见性受限 / 应用已卸载：按「无名称」处理，绝不伪造名称
-            AppLog.w(TAG, "读取请求方应用名称失败，按无名称处理: ${t.javaClass.simpleName}")
-            null
-        }
-        return buildAutofillPickerRequester(
-            packageName = callingPackage,
-            appLabel = label,
-            certSha256Hex = autofillOriginResolver.callingAppCertSha256Hex(callingPackage),
-            reportedDomain = intent.getStringExtra(EXTRA_WEB_DOMAIN)
-        )
-    }
+    /** ISSUE-P2-70：解析本次填充的请求方身份（解析体下沉 [resolveAutofillPickerRequester] 以控分档） */
+    private fun resolveRequester(): AutofillPickerRequester? =
+        resolveAutofillPickerRequester(intent, packageManager, autofillOriginResolver)
 
     /**
      * ISSUE-P3-43 ②：把「本表单该角色」写入字段级屏蔽，随后结束本次填充。

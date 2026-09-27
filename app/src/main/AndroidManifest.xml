@@ -164,6 +164,12 @@
             android:exported="false"
             android:theme="@style/Theme.KeePasskey" />
 
+        <!-- ISSUE-P3-345 / PD-51：「无匹配 → 就地新建」口令草稿落地页（CM Action 与 Autofill 选择器共用；exported=false，extras 仅本应用下发） -->
+        <activity
+            android:name=".passkey.PasswordDraftActivity"
+            android:exported="false"
+            android:theme="@style/Theme.KeePasskey" />
+
         <!-- Credential Manager 链式解锁落地 Activity（锁库 Action 点选后由系统拉起，解锁成功回传凭据候选） -->
         <activity
             android:name=".passkey.CredentialUnlockActivity"

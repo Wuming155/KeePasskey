@@ -116,13 +116,15 @@ class AutofillPickerRequesterDisplayTest {
         val activity = readSource(PICKER_ACTIVITY_PATH)
         assertTrue("Activity 必须解析请求方身份", activity.contains("resolveRequester()"))
         assertTrue("Activity 必须把请求方身份传入界面", activity.contains("requester = requester"))
+        // 2026-09-27 解析体下沉 AutofillPickerRequesterResolver.kt（控分档），守卫随迁该文件
+        val resolver = readSource(PICKER_RESOLVER_PATH)
         assertTrue(
             "签名摘要必须复用确认页同一读取通道（AutofillOriginResolver）",
-            activity.contains("autofillOriginResolver.callingAppCertSha256Hex(")
+            resolver.contains("autofillOriginResolver.callingAppCertSha256Hex(")
         )
         assertTrue(
             "应用名读取失败必须如实降级（不得伪造名称）",
-            activity.contains("按无名称处理")
+            resolver.contains("按无名称处理")
         )
     }
 
@@ -142,6 +144,8 @@ class AutofillPickerRequesterDisplayTest {
     private companion object {
         const val PICKER_SCREEN_PATH =
             "app/src/main/java/com/keepasskey/app/autofill/AutofillPickerScreen.kt"
+        const val PICKER_RESOLVER_PATH =
+            "app/src/main/java/com/keepasskey/app/autofill/AutofillPickerRequesterResolver.kt"
         const val PICKER_ACTIVITY_PATH =
             "app/src/main/java/com/keepasskey/app/autofill/AutofillPickerActivity.kt"
         const val ROOT_SEARCH_DEPTH = 6

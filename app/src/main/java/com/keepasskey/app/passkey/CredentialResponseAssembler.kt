@@ -41,6 +41,22 @@ import javax.inject.Inject
  *   [PasskeyCreateActivity]（注册）联合 [CredentialFillVerifier] 强制执行，并由
  *   [PasskeyAuthFlags] 将验证结果如实投影为 WebAuthn UV 位，未验证绝不产出断言 / 注册材料。
  */
+/**
+ * 「无匹配 → 新建密码条目」Action 的挂出判定（`ISSUE-P3-345` / `PD-51` 裁决 4，纯函数，JVM 可穷举）。
+ *
+ * 抽为纯函数的动因与本仓 `ClipboardClearPolicy` 一族相同：装配路径触碰
+ * `PendingIntent` / `Icon` / 资源解析（宿主 JVM 的 android.jar 桩即抛 `Stub!`），
+ * 端到端只能靠真机；判定逻辑本身必须可被宿主单测穷举——否则四条门控
+ * （有无口令请求 / 有无候选 / 只读会话）的排列只能外包给真机回归。
+ * 生产调用点在 [CredentialResponseAssembler.buildUnlockedGetResponse]（唯一候选出口，
+ * 直查与链式解锁两路共用），另有源码守卫锁定该接线（`CredentialCreateActionPolicyTest`）。
+ */
+internal fun shouldOfferPasswordCreateAction(
+    sawPasswordOption: Boolean,
+    passwordCandidateCount: Int,
+    sessionReadOnly: Boolean
+): Boolean = sawPasswordOption && passwordCandidateCount == 0 && !sessionReadOnly
+
 class CredentialResponseAssembler @Inject constructor(
     @ApplicationContext private val context: Context,
     private val vaultRepository: VaultRepository,
@@ -94,6 +110,11 @@ class CredentialResponseAssembler @Inject constructor(
 
         // ISSUE-P2-199：requestCode 一律取自 [CredentialPendingIntents.nextRequestCode]（进程级单调），
         // 不再在本响应内新建分配器——「每响应复位」会与后续响应碰撞同一 PendingIntent 记录。
+        // ISSUE-P3-345 / PD-51：无匹配「就地新建」Action——只服务口令维度（公钥零候选不产出，
+        // 本应用造不出对某 rpId 有效的凭据）；只读会话不产出（PD-51 裁决 4）。
+        // 锁库 / 总开关 / 黑名单路径在上游已先行返回，不会走到这里。
+        var sawPasswordOption = false
+        var passwordCandidateCount = 0
         for (option in request.beginGetCredentialOptions) {
             when (option) {
                 is BeginGetPublicKeyCredentialOption -> {
@@ -108,7 +129,8 @@ class CredentialResponseAssembler @Inject constructor(
                 }
 
                 is BeginGetPasswordOption -> {
-                    buildPasswordEntries(
+                    sawPasswordOption = true
+                    passwordCandidateCount += buildPasswordEntries(
                         option,
                         callingPackage,
                         callingOrigin,
@@ -118,6 +140,15 @@ class CredentialResponseAssembler @Inject constructor(
                     )
                 }
             }
+        }
+
+        if (shouldOfferPasswordCreateAction(
+                sawPasswordOption = sawPasswordOption,
+                passwordCandidateCount = passwordCandidateCount,
+                sessionReadOnly = vaultRepository.isSessionReadOnly()
+            )
+        ) {
+            responseBuilder.addAction(CredentialCreateEntries.createPasswordAction(context, callingPackage, callingOrigin))
         }
 
         return responseBuilder.build()
@@ -292,7 +323,7 @@ class CredentialResponseAssembler @Inject constructor(
         packageDimensionAllowed: Boolean,
         allEntries: List<KdbxEntry>,
         responseBuilder: BeginGetCredentialResponse.Builder
-    ) {
+    ): Int {
         // H1/L1 整改：仅浏览器委派信任 web origin 域匹配；普通应用仅按严格包名边界匹配，
         // 且条目 url 必须显式为 `android://<包名>`（P2-40：`https://<host>` 条目不得再被同形包名命中，
         // 否则域名形态包名可冒领 Web 绑定条目），移除 title/notes.contains 启发式。
@@ -336,7 +367,9 @@ class CredentialResponseAssembler @Inject constructor(
 
             responseBuilder.addCredentialEntry(entryBuilder.build())
         }
+        return matchedPasswords.size
     }
+
 
     private fun extractOrigin(callingAppInfo: CallingAppInfo?): String {
         if (callingAppInfo == null) return ""

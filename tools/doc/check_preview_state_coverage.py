@@ -127,7 +127,16 @@ def switch_params(src: str, fun_open: int) -> list[tuple[str, str]]:
         return []
     out = []
     for p in split_top_level(src[fun_open + 1: close]):
-        m = BOOL_PARAM.match(p.replace("\n", " ").strip())
+        # ⚠️ 参数表**内**允许行注释（Kotlin 合法写法）：注释文本会粘到下一参数的开头，
+        # 使锚定的 BOOL_PARAM 匹配失败 ⇒ 该参数对普查**完全隐形**（低估计数、漏态漏报）。
+        # 实证缺陷：AutofillPickerScreen 的 canBlockUsername / canBlockPassword / canCreateNew
+        # 三个开关曾因注释夹在参数之间全数不可见（2026-09-27 现场复现，见 ISSUE-P3-345 批次留痕）。
+        # 默认值字符串里含 `//` 的参数本就不匹配 BOOL_PARAM，剥注释不影响其余判据。
+        # ⚠️ 剥注释必须**逐行**先剥、再并成单行——顺序反了的话，`//[^\n]*` 会在并行后的
+        # 单行文本里一路吞到串尾，把注释**之后的所有实参**一并吃掉（第一版修复即犯此错，
+        # 被本文件自检的第四向样本当场照出）。
+        cleaned = " ".join(re.sub(r"//[^\n]*", " ", line).strip() for line in p.splitlines()).strip()
+        m = BOOL_PARAM.match(cleaned)
         if m:
             out.append((m.group(1), m.group(2)))
     return out
@@ -228,6 +237,25 @@ fun OtherPreview() {
 }
 """
 
+# 第四向：参数表内夹行注释——注释粘在参数开头曾使锚定匹配失败、参数对普查隐形，
+# 修复后必须照样被数出并报漏态（不修就会静默漏掉真参数，读数偏乐观）。
+COMMENT_GLUE_BAD_SAMPLE = """
+@Composable
+fun GluedCard(
+    onDone: () -> Unit = {},
+    // 注释夹在参数表内：下一参数不得因此隐形
+    canImport: Boolean = false
+) {
+    if (canImport) { Text("导入") }
+}
+
+@Preview
+@Composable
+fun GluedCardPreview() {
+    GluedCard()
+}
+"""
+
 
 def selftest() -> int:
     """坏样本必须报漏态、好样本必须不报、无预览样本必须落进「无预览」桶（三向反校）。"""
@@ -237,6 +265,7 @@ def selftest() -> int:
         ("坏样本(只画默认态)", BAD_SAMPLE, "missing"),
         ("好样本(补了反向态)", GOOD_SAMPLE, "none"),
         ("无预览样本", NO_PREVIEW_SAMPLE, "no_preview"),
+        ("坏样本(注释夹在参数表内)", COMMENT_GLUE_BAD_SAMPLE, "missing"),
     )
     for label, text, expect in cases:
         p = tmp / f"{abs(hash(text))}.kt"

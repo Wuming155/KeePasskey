@@ -88,15 +88,16 @@ class CredentialRequestCodeWiringTest {
 
     @Test
     fun `四条落地入口一律取共享分配器`() {
-        // 候选组装器有两条 PendingIntent 创建点（Passkey 断言 / 密码填充）
+        // 候选组装器有两条 PendingIntent 创建点（Passkey 断言 / 密码填充）；
+        // ISSUE-P3-345 的「新建密码条目」Action 创建点在 CredentialCreateEntries（见下条）
         assertEquals(
             "候选组装器的两条创建点都必须取共享分配器",
             2,
             Regex("CredentialPendingIntents\\.nextRequestCode\\(\\)").findAll(readSource(ASSEMBLER)).count()
         )
         assertEquals(
-            "创建入口装配（Passkey / 密码）必须取共享分配器",
-            1,
+            "创建入口装配（Passkey / 密码 / ISSUE-P3-345 新建 Action）必须取共享分配器",
+            2,
             Regex("CredentialPendingIntents\\.nextRequestCode\\(\\)").findAll(readSource(CREATE_ENTRIES)).count()
         )
         assertTrue(

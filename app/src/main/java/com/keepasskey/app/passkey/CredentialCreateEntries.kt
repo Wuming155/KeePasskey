@@ -4,6 +4,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.graphics.drawable.Icon
+import androidx.credentials.provider.Action
 import androidx.credentials.provider.BeginCreatePublicKeyCredentialRequest
 import androidx.credentials.provider.CreateEntry
 import com.keepasskey.app.R
@@ -67,6 +68,35 @@ internal object CredentialCreateEntries {
             .setDescription(context.getString(R.string.cred_create_entry_subtitle))
             .setIcon(Icon.createWithResource(context, R.drawable.ic_launcher))
             .build()
+    }
+
+    /**
+     * ISSUE-P3-345 / PD-51：无匹配时的「新建密码条目」[Action]。
+     *
+     * 官方契约（androidx.credentials.provider.Action，Added in 1.2.0）：呈现于选择器独立的
+     * 「Actions」类目；官方举例标题即 `Add a new Password`。落地页
+     * [PasswordDraftActivity] 保存成功后 `setGetCredentialResponse` 直接完成本次登录，
+     * 放弃时 `RESULT_CANCELED`（系统重新弹出选择器，不把用户推出流程）。
+     * PendingIntent 契约与既有候选条目一致（[CredentialPendingIntents]：
+     * FLAG_MUTABLE + 非 ONE_SHOT + 进程级唯一 requestCode）。
+     * **文案零插值**（PD-51 裁决 3）：标题不得携带域名 / 包名。
+     */
+    fun createPasswordAction(context: Context, callingPackage: String, callingOrigin: String): Action {
+        val intent = Intent(context, PasswordDraftActivity::class.java).apply {
+            // 归属数据由本应用下发（组件 exported=false）；落地页再与系统认证值交叉核对
+            putExtra(PasswordDraftActivity.EXTRA_PACKAGE_NAME, callingPackage)
+            putExtra(PasswordDraftActivity.EXTRA_WEB_DOMAIN, callingOrigin)
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            context,
+            CredentialPendingIntents.nextRequestCode(),
+            intent,
+            CredentialPendingIntents.ENTRY_FLAGS
+        )
+        return Action.Builder(
+            context.getString(R.string.cred_action_create_password_title),
+            pendingIntent
+        ).build()
     }
 
     /** 传统密码保存入口 */
