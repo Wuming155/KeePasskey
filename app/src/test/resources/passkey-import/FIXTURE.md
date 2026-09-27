@@ -28,6 +28,14 @@
 与 `PasskeyExporter.cpp:98-104` 的写出字段，私钥 PEM 由附录 A 那把 DER 经本仓 `derToPemChars` 生成）。
 它**证明的是字段词表与归一口径，不是与 KeePassXC 的互操作**——规则 8 只认官方实现端到端对拍。
 
+> **2026-09-27 词表复核（AVD 相册导入取样时顺手做）**：逐字读 `PasskeyImporter.cpp:70-89`，必需键为
+> `relyingParty` / `url` / `username` / `credentialId` / `userHandle` / `privateKey` ——
+> **只有 `relyingParty`、`privateKey`（与 `url`）是 KeePassXC 专有名**，`username` / `credentialId` /
+> `userHandle` 与 CXF 同名。故本仓读取器只别名前两键的口径**正确**；取样时首版夹具误写成
+> `userName` / `credential` / `userKey` 是**夹具拼错**（当时读数表现为「来源未提供：用户名」，改正后消失），
+> 不是读取器缺别名。`url` 本库不落条目 URL，故不参与必填判据。该复核**不改变**上面的待补结论：
+> 缺的仍是官方 GUI 产物的逐字节对拍。
+
 - 阻塞点：本机 `keepassxc-cli` 2.7.12 **无 passkey 导入/导出子命令**（该功能只在 GUI 侧，
   `gui/passkeys/PasskeyImporter` / `PasskeyExporter`），故无脚本化取物途径。
 - 补法：由用户在 KeePassXC GUI 内对含通行密钥的条目执行「导出 passkey」，
