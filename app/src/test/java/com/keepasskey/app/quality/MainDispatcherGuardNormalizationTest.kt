@@ -61,6 +61,11 @@ class MainDispatcherGuardNormalizationTest {
                     )
                 )
             )
+
+            // ISSUE-P2-341：选择器改走「可用条目」读口。委托型桩若不转发，本用例会以
+            // 「缓存命中路径返回空用户名」的形态红——看着像调度器守卫回归，实为读口换线，
+            // 故在此显式留一行，避免下一次误判根因。
+            override suspend fun getUsableKdbxEntries(): List<KdbxEntry> = getKdbxEntries()
         }
         val viewModel = MainDispatcherGuard.track(AutofillPickerViewModel(repository))
         viewModel.loadEntries()

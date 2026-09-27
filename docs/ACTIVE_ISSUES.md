@@ -42,15 +42,142 @@
 
 ---
 
-## P2 中危缺陷与协议/测试缺口（0 项）
+## P2 中危缺陷与协议/测试缺口（1 项）
 
-> **暂无开放项**。2026-09-24 同步/加密/passkey 安全审计批五条（`ISSUE-P2-308` ~ `ISSUE-P2-312`）
+> **开放项 1 条**：`ISSUE-P2-341`（2026-09-27 用户真机报出，**同日已实施修复**）回收站子树条目仍被全部
+> 凭据供给面捞出 ⇒ 唯一真相源 + `isRecycled` 标记 + `getUsableKdbxEntries()` 已落，6 处供给面切换、
+> 新增 5 个宿主用例、全量 2754 绿；**仅剩 AC⑥ 设备侧半环**（系统选择器实际看不到已删凭据，需 AVD / 实验机）。
+> 留痕里另记着本批最有价值的一条教训：**给仓库接口加读口会让所有委托型测试桩静默失配**（首轮跑红 4 例，
+> 根因都不是产品逻辑），故此类改动**必须全量跑**。
+> 2026-09-24 同步/加密/passkey 安全审计批五条（`ISSUE-P2-308` ~ `ISSUE-P2-312`）
 > 已全部闭环：§315（309 / 312）、§317（308）、§318（310）、§319（311）、§320（313）；
 > 2026-09-25 CI 设备门禁与供应链扫描两条（`ISSUE-P2-314` / `ISSUE-P2-315`）闭环见 §325。
 
-## P3 低危问题、特性接线与体验优化（3 项）
+### ISSUE-P2-341：回收站里的凭据仍被当"可用凭据"供给——验证器列表 / CM 候选 / autofill 候选 / 断言与填充执行侧全线未过滤回收站子树
 
-> **开放项 3 条**：
+- **用户可见现象（2026-09-27 真机 M332BF 原话）**：「回收站里的 TOTP 放进去了，但在验证器里还是全部能看到。」
+- **核实时间点与方式（2026-09-27，逐文件逐行读过，非推定）**：现象**成立且比用户描述的严重一档**。
+  用户看到的是"验证器里还看得见"，实际主张应是**"用户删掉的凭据仍然可用"**——它能被列进候选、能被填出去。
+  1. **模型面**：本项目的回收站是**组子树**，不是条目删除位——`KdbxEntry`（`core/src/main/java/com/keepasskey/core/model/KdbxEntry.kt:9-27`）
+     与 `KdbxGroup` **均无** `isDeleted` / `deleteTime` / `deletedAt`；移入回收站只是把 `parentGroupId` 改成 bin 组
+     （`app/.../data/repository/RecycleBinCoordinator.kt:47-70`，并记 `previousParentGroup` 供还原）。
+     bin 的 id 来自 `KdbxDatabase.recycleBinUuid` / `recycleBinEnabled`（`database/.../file/KdbxDatabase.kt:20-22`）。
+     ⇒ **任何按"条目自身删除位"写的过滤都会全部漏掉**，判据必须是**组子树**。
+  2. **过滤面**：全仓**只有一处**过滤，而且只在搜索分支——`ui/screens/vault/VaultListProjection.kt:167,256-270`
+     构 `recycleBinGroupIds`（bin + 全部后代），`:287` 的 `filter` **仅**在 `!isInsideRecycleBin` 时生效；
+     非搜索分支靠 `groupId == effectiveGroupId` 天然不跨组，**不是**主动过滤。
+  3. **未过滤的供给面（逐个核实）**：
+     | 面 | 位置 | 后果 |
+     | --- | --- | --- |
+     | 应用内验证器列表 | `ui/screens/authenticator/AuthenticatorViewModel.kt:55`（`entries.filter { it.totpCode != null }`，源 `getEntries()`） | 用户报的那条 |
+     | TOTP 计数/计算 | `RealVaultRepository.kt:300 calculateEntryTotps`；`ui/model/TotpCountdownTracker.kt:147,156` | 随列表同源（其 id 取自已过滤列表，修列表即覆盖） |
+     | CM 通行密钥候选 | `passkey/CredentialResponseAssembler.kt:91`（过滤仅 `:201-210` rpId/域/包名）；`passkey/KeePasskeyCredentialProviderService.kt:290-317 findMatchingEntries` | **删掉的 passkey 仍可被选中并签名** |
+     | 口令填充候选 | `autofill/AutofillDatasetBuilders.kt:256` → `AutofillCandidateRanker.rank:71`；`AutofillEntrySearch.kt:16-33`；`autofill/AutofillPickerViewModel.kt:78-89` | 删掉的口令仍被填出去 |
+     | 断言 / 填充执行侧 | `passkey/PasskeyAssertionActivity.kt:100`、`passkey/PasswordFillActivity.kt:146`、`autofill/AutofillUnlockActivity.kt:197` | 同上，执行链也不看 bin |
+     | 按 rpId / credentialId 查库 | `data/repository/PasskeyEntryCoordinator.kt:28-31`（`allEntries()`）→ `findEntriesForRpId:93` / `findPasskeyByCredentialId:103` / `findReusablePasskeyEntry` | 还额外造成**"删掉后重新注册会把旧凭据复活"** |
+  4. **同源风险（不修就会分叉）**：bin 的判定目前**有四套不同实现**——`RecycleBinCoordinator.kt:318-323`（uuid 再名）、
+     `:171-174`（`emptyRecycleBin`，单 `firstOrNull` **顺序依赖**，可能挑错组）、`:269-280`（`getOrCreateRecycleBinGroup`）、
+     `ui/.../VaultGroupCoordinator.kt:36-38`（列表页 `isRecycleBin` 旗标）。
+     ⇒ 若新增第五套"供给面专用"过滤，两面迟早会对"什么算 bin"给出不同答案（用户所见即再次不一致）。
+- **严重性定级理由**：P2 而非 P1/P0——认证层未被绕过、密钥未泄露，是**用户对凭据的处置意图被静默违背**
+  （删除后仍可被用），且需要用户主动在候选里选中才生效；但它是**安全语义缺陷**而非体验缺陷，故不入 P3。
+- **整改口径**：
+  1. **单一真相源**：`internal fun recycleBinGroupIdsOf(db: KdbxDatabase): Set<KdbxUuid>` 落在
+     `RecycleBinCoordinator.kt` 文件级（**不新建类型**，`check_bounded_type_names` 不受影响；**不能落 `core`**——
+     它要读 `KdbxDatabase.recycleBinUuid`，而 `core` 看不见 `database`，模块依赖单向是硬约束）。
+     成员＝`id == recycleBinUuid || name ∈ {回收站, Recycle Bin}` 的组 **+ 其全部后代**。
+     **刻意不理 `recycleBinEnabled` 开关**：今天的列表页就不理它，一旦按开关门控，"只有同名 bin"的库会让两面再次分叉。
+  2. **四套判定收拢**到同一个 `recycleBinGroupsOf(db)`（含 `VaultGroupCoordinator` 的旗标），顺带修掉
+     `emptyRecycleBin` 的顺序依赖。
+  3. **UI 侧只标记不过滤**：`UiVaultEntry` 追加 `val isRecycled: Boolean = false`（放最后一个参数），
+     由 `VaultEntryQueryCoordinator.entriesFlow()` 每快照算一次。⇒ bin 浏览 / 还原 / 彻底删除 /
+     `totalEntriesCount` 全部不受影响；`VaultListProjection.kt:287` 改消费 `isRecycled` 并**删掉**自带的
+     `buildRecycleBinGroupIds:256-270`（消除重复实现，不是再加一份）。
+  4. **原始条目侧开新读口**：`VaultRepository.getUsableKdbxEntries()`（KDoc 写死契约＝排除回收站子树），
+     **`getKdbxEntries()` 保持全树语义不变**（`{REF:}` 引用展开与 bin 内详情都靠它，改它会连带破功能）；
+     上表 6 个供给面调用点改指新读口。
+  5. **明确不改**（改了会错）：`sync` 合并（`KdbxMerger.kt:107-113` 直读全树——**回收站条目必须参与合并**，
+     否则同步会把别人的删除/还原丢掉）、还原 / 彻底删除 / 清空、按 id 单读（`getKdbxEntry` / `entryFlow` /
+     `resolveFieldReferences`）、`EntryReferenceDisplayResolver`（`{REF:}` 显示）、历史版本、**bin 内搜索**、
+     健康扫描 `SettingsHealthController.kt:90`（有意扫全库，登记为已知取舍而非缺陷）。
+- **AC**：
+  ① 新增宿主用例 `app/src/test/.../data/repository/RecycleBinSubtreeExclusionTest.kt`：真 `KdbxDatabase`
+     （模板 `RealVaultRepositoryTest.kt:260-300`），树为 root → bin → **子组** → 条目（含 passkey 字段 + TOTP）；
+     断言 `getUsableKdbxEntries()` 在**两层深度都排除**，**同时**断言 `getKdbxEntries()` **仍含**它们
+     （正向对照——否则"什么都不返回"也能让全表通过）；
+  ② 一例 `recycleBinEnabled = false` 但组名叫「回收站」的库仍须被排除（锁住口径 1 的"不理开关"）；
+  ③ CM 候选面：同 rpId 的"回收站孪生条目"不出候选、正常条目出候选（沿用 `CredentialProviderLookalikeMatchTest` 表驱动形态）；
+  ④ 两面并存才算过：`AuthenticatorViewModel` 排除该条目的**同时**，`VaultListViewModel` 进 bin 仍须看得见、能还原；
+  ⑤ 改断言后跑 `check_tautological_assertions.py`；
+  ⑥ 全量 `test` + `gate_readings.py` 全 PASS（当前 **8/8**）；若动到设备侧供给链，按 §5② 在 AVD / 实验机补跑
+     对应 `connectedDebugAndroidTest`（⚠️ **M332BF 是真实库，禁跑 connected、禁导入实验室凭据**）。
+- **关联**：`ISSUE-P3-342`（同日用户报出的编辑页「解除绑定」静默失效——**同一批文件**
+  `VaultEntryMapper` / `VaultRepository` / `RealVaultRepository`，须先做本条再做那条）/
+  `PD-08`、`ISSUE-P3-337`（导入通路）/ 限界表（健康扫描全库那条若维持现状，须登记为有意为之）。
+
+- **留痕（2026-09-27 实施；AC①②③⑤ 已落，AC⑥ 的设备侧半环未做）**：
+  - **唯一真相源已落**：`recycleBinGroupsOf(db)` / `recycleBinGroupIdsOf(db)` / `primaryRecycleBinRoot(db)` /
+    `isRecycleBinName(name)` 四个文件级函数落在 `RecycleBinCoordinator.kt`（**未新建类型** ⇒
+    `check_bounded_type_names` 读数不变）；原先**四套**分叉判定（`resolveRecycleBinGroup` /
+    `emptyRecycleBin` / `getOrCreateRecycleBinGroup` / `VaultGroupCoordinator.groupsFlow`）全部改为消费它。
+    顺带修掉 `emptyRecycleBin` 的 `firstOrNull { uuid || name }` **顺序依赖**（Meta 指向 A、库里另有同名 B 时曾挑错组）。
+    两条刻意口径写进 KDoc：**不理 `recycleBinEnabled`**（列表页今天就不理，按开关门控会让两面分叉）、
+    **根组永不视为回收站**（否则命名撞上就是把整库判成已删 —— fail-closed 反成 fail-whole-vault）。
+  - **UI 侧只标记不过滤**：`UiVaultEntry.isRecycled`（末位参数）由 `VaultEntryQueryCoordinator.entriesFlow()`
+    每快照算一次，`entryFlow` 同口径；`VaultListProjection` 改消费该标记，并**删除**自带的
+    `buildRecycleBinGroupIds` BFS（连同其 `childrenByParent` 索引）——判据只留一处。
+  - **原始条目侧新读口** `VaultRepository.getUsableKdbxEntries()`（接口 KDoc 写死调用点契约）；
+    `getKdbxEntries()` 整树语义**保持不变**。切到新读口的供给面共 **6 处**：
+    `CredentialResponseAssembler`、`AutofillDatasetBuilders`、`AutofillPickerViewModel`、
+    `PasskeyAssertionActivity`、`PasswordFillActivity`、`AutofillUnlockActivity`；
+    另在 `KeePasskeyCredentialProviderService.findMatchingEntries` **函数体内**加 `!entry.isRecycled`
+    （写在函数内而非调用方：放调用方等于每加一个入口就可能漏一次，本条缺陷正是这么来的）；
+    `PasskeyEntryCoordinator` 的私有检索面改名 `usableEntries()` 并排除子树，
+    一并堵住「删掉 passkey 后在同站重新注册会**原地复活**旧凭据」这条 `findReusablePasskeyEntry` 路径。
+  - **一条有意的行为变化**：`groupsFlow` 现在把**回收站的子组也标 `isRecycleBin`**（旧实现只标 bin 自身）。
+    连带：进 bin 子组能看到回收站横幅与还原 / 彻底删除动作，且分组选择器（移动 / 新建目标）
+    不再允许把活条目移进回收站子树。
+  - **★ 本批最有方法论价值的一条：新读口把「委托型测试桩」静默旁路了。** 首轮全量跑红 **4 个用例**，
+    根因都不是产品逻辑：`object : VaultRepository by FakeVaultRepository() { override getKdbxEntries … }`
+    这类桩只覆写了旧读口，`getUsableKdbxEntries()` 经委托落到 Fake 的空数据上 ⇒ 表现成
+    「缓存永不命中、单条查询计数凭空 +1」「缓存命中路径返回空用户名」——**看着像调度器守卫回归**。
+    其中一条尤其危险：`AutofillPickerViewModelCredentialLookupTest` 用
+    `getKdbxEntries() = error("确认路径不得装载整库")` 做**性能守卫**，若只补数据转发而不给新读口同样
+    `error()`，这条守卫会在没人察觉的情况下变成空守卫。⇒ 四处桩各自补上 `getUsableKdbxEntries()`
+    （两处转发、一处同封 `error()`）。**教训**：给仓库接口加读口 = 所有委托型桩同时失配，
+    必须**全量跑**而非只跑定向用例。
+  - **`AlgoHotPathGuardsTest` 判据随之反向改写**：原断言「面包屑与回收站集合必须复用同一份分组索引」
+    （要求源码含 `childrenByParent`）在删除本地 BFS 后必然红；现改为「面包屑仍走 `groupsById` 索引」
+    ＋**反向禁止**投影再自建回收站集合（含 `childrenByParent` / `buildRecycleBinGroupIds` 即红）
+    ＋必须消费 `isRecycled`。守卫原意（热路径不重复扫表）保留，同时把本条「判据只留一处」也锁住。
+  - **新增用例** `app/src/test/.../data/repository/RecycleBinSubtreeExclusionTest.kt` **5 例**：
+    ① 两个深度（bin 直接 ＋ bin 子组）都排除，**同时**断言整树读口仍含这三条（正向对照，
+    防实现退化成"什么都不返回"也算过）；② `recycleBinUuid = null` 且 `recycleBinEnabled = false`
+    但组名叫「回收站」的库同样排除；③ UI 投影**只标记不过滤**（5 条全下发、3 条带 `isRecycled`）；
+    ④ CM 候选：同 rpId 的回收站孪生条目不出候选、活动侧那条必须出（正向对照）；
+    ⑤ `findEntriesForRpId` / `findPasskeyByCredentialId` 不命中已删条目。
+  - **未做（不得据本留痕推定已闭环）**：AC⑥ 的**设备侧半环**——本批改的是被 Credential Manager /
+    autofill 消费的读路径，宿主用例锁住了判据，但「系统选择器里实际看不到已删凭据」这一面需在
+    AVD / 实验机上跑一次真实候选装配（⚠️ M332BF 是真实库，禁跑 connected、禁导入实验室凭据）。
+    另：`{REF:}` 引用指向一条**已删**条目时的取值面未取样（现仍按整树解析，属有意保留，但无读数）。
+  - **验证读数（原样粘贴 `python tools/doc/gate_readings.py`）**：
+    `[1/8] count_line_tiers.py EXIT 0 | tier1(>500)=0 tier2(400~500)=36 budget=37` /
+    `[2/8] long_functions.py EXIT 0 | functions_ge_100=0` /
+    `[3/8] check_md_links.py EXIT 0 | BROKEN_MD_LINKS=0` /
+    `[4/8] check_resolved_index_sync.py EXIT 0 | RESOLVED_INDEX_SYNC=OK（批次正文 340 份；分册登记 342 条；全量索引 342 条；最大 §342）` /
+    `[5/8] check_tautological_assertions.py EXIT 0 | 汇总：命中 0 处 / 扫描 472 个测试文件` /
+    `[6/8] check_recheck_consistency.py EXIT 0 | PASS: 无残留禁用短语（已扫描 1331 行，11 条禁用短语）` /
+    `[7/8] check_bounded_type_names.py EXIT 0 | allowed=12 unregistered_manager_util_helper_common=0` /
+    `[8/8] check_box_slot_children.py EXIT 0 | BoxScope 内容槽组件：['BentoCard'] 检查过的调用点：59 box_slot_stacked_sites=0`
+    ⇒ **8/8 PASS**；`test --rerun-tasks --max-workers=1` **BUILD SUCCESSFUL in 3m21s、114/114 executed**，
+    `count_test_results.py` = `xml=414 tests=2754 failures=0 errors=0 skipped=13`（上批 2749 ＋ 本表 5 例）。
+
+## P3 低危问题、特性接线与体验优化（4 项）
+
+> **开放项 4 条**：
+> ⓪ `ISSUE-P3-342` 编辑页「绑定 / 解除」静默失效（2026-09-27 用户真机报出，同日核实）——
+> `isPasskey` 从不落盘 ⇒ 点「解除」再保存，通行密钥仍被 CM 捞出；连带 `saveEntry()` 不清 `isDirty` 的潜在隐患。
+> ⚠️ 与 `ISSUE-P2-341` 同批文件，**先做 341 再做本条**。
 > ① `ISSUE-P3-340` `@Preview` 状态覆盖无机检（2026-09-27 立项，**同日①②③已做完**，仅剩「是否升级为
 > 第九条闸门」一条未决）——普查读数：全仓 19 个带默认值的 `Boolean` 开关，缺反向态 10 → 2（剩两条为
 > 主题包装器，判为应豁免），两态齐比率 10.5% → 52.6%；补态当场照出「禁用态下校验失败视觉不可辨」这一
@@ -66,6 +193,63 @@
 > ⇒ 339 建好后 337 的 (b) 顺势收口。
 > 2026-09-26 注册响应 `transports` 撤回虚报 `hybrid`（`ISSUE-P3-338`）闭环见 §342；
 > 更早的 P3 闭环流水见 `RESOLVED_LOG.md` §326 ~ §341。
+
+### ISSUE-P3-342：编辑页「绑定 / 解除」是静默失效的控件（`isPasskey` 从不落盘）；导入即写库与草稿语义不一致的用户可见面
+
+- **用户可见现象（2026-09-27 真机 M332BF 原话）**：「点击导入之后，哪怕不点保存，它也会自动保存。
+  所以右上角的保存好像没什么意义了，这两个是不是重叠的功能？或者说保存白费呀。」
+- **对用户前提的更正（必须先说清，否则会把修复做错方向）**：**「保存」没有白费，也不是重复功能**。
+  `saveEntry()`（`EntryEditViewModel.kt:411-450` → `EntryEditSaveProjection.kt:39-65` + 口令 / TOTP /
+  受保护字段三条 CharArray 通道 → `VaultEntryWriteCoordinator.kt:50,66,89`）落的是标题、用户名、URL、备注、
+  自定义字段、附件、标签、autoType、overrideUrl、过期两态、图标（标准 + 自定义引用），
+  且 `entryId == null` 时**由它铸造 UUID 建条目**。导入之所以立刻写库，是因为
+  **通行密钥凭据根本不在草稿里**：`EntryEditUiState.kt:39` 只有 `isPasskey: Boolean`、**没有** `PasskeyData`，
+  凭据以「锁定的自定义字段」形态存在、由保存按原值回写（`VaultEntryWriteCoordinator.kt:196-203`）。
+  ⇒ 两者是**两条不同的写路径**，不是重复；把导入改成草稿态反而会把私钥明文的驻留面从"确认后一次性"
+  扩大成"整个编辑会话"（与 §3 铁律和 `PD-49` 裁决三拒绝多把选择列表的同一条理由相悖）。
+- **核实到的真缺陷 ①：「绑定 / 解除」按钮骗人（P3 定级偏轻，实际是控件与磁盘不符）**
+  （2026-09-27 逐行核实，非推定）：
+  1. `onTogglePasskey`（`EntryEditViewModel.kt:271-276`）只做 `copy(isPasskey = !it.isPasskey, isDirty = true)`；
+  2. `isPasskey` **既不在** `saveMergedEntry` 的 `existing.copy(...)` 字段清单里
+     （`VaultEntryWriteCoordinator.kt:98-113`），**也不在** `mapUiEntryToKdbx` 的 `KdbxEntry(...)` 里
+     （`VaultEntryMapper.kt:304-319`）⇒ **磁盘上没有任何东西被这个开关改变**；
+  3. 读路径反过来**重算**它：`VaultEntryMapper.kt:80,91` `isPasskey = passkeyData != null`；
+  4. 全仓 `grep clearPasskey|removePasskey|deletePasskey` **零命中** ⇒ 不存在"解绑"的写通路。
+  ⇒ 后果：**用户对一条通行密钥点「解除」再保存，凭据原封不动、仍会被 CM 列进候选并签名**
+  （`KeePasskeyCredentialProviderService.kt:304` 正是按 `entry.isPasskey` 判候选）；
+  新建态点「绑定」再保存只得到一个普通条目。这是**会骗人的安全控件**——用户以为"我已经把它从系统里撤下来了"。
+  5. 草稿 `isPasskey` 的活消费者只有本页自己的按钮可见性（`isPasskey && canImportPasskey`）与详情页分区
+     （`EntryDetailComponents.kt:109` / `EntryDetailScreen.kt:256` 读的是**重算后**的值），
+     ⇒ 删除该开关**不会**牵动任何落盘逻辑。
+- **核实到的真缺陷 ②：`saveEntry()` 从不清 `isDirty`（当前被掩盖的潜在隐患）**
+  `hasUnsavedEdits()` ＝ `_uiState.value.isDirty`（`EntryEditViewModel.kt:115`），只由
+  `applyLoadedEntry` / `applyTemplateEntry` 清除（`EntryEditFormProjection.kt:47,79`）；
+  `saveEntry()` 只发 `SaveSuccess`（`EntryEditViewModel.kt:442` → `EntryEditScreen.kt:70` 随即出页）。
+  ⇒ 今天不出事**仅因"保存即离开页面"**；任何改成"保存后留在本页"，`ISSUE-P3-337` 的导入闸门
+  （`EntryEditPasskeyImport.kt:93` 以 `hasUnsavedEdits()` 拒绝）就会**永久拒绝导入**。
+- **整改口径（代理裁决，附可逆性）**：
+  1. **缺陷 ① 采「让控件反映现实」而非「让控件悄悄不管用」**：
+     「解除」改为**真删该条目的 passkey 字段**——须确认对话框 + 明示**不可逆**（历史快照仍在，
+     与 `KeePassXC` 的"删凭据留条目"同形）；新建态的「绑定」按钮**移除**（它本就不产生任何磁盘效果，
+     留着就是假象；通行密钥的产生只有两条真通路：注册仪式与导入）。
+     **可逆性**：若后续 `PD` 层面更希望"绑定态"成为可持久化的用户意图（例如用于新建时的分组归类），
+     只需把 `isPasskey` 纳入 `saveMergedEntry` / `mapUiEntryToKdbx` 的字段清单并加 `KPEX` 标记位，
+     本条的读数不会作废。
+  2. **缺陷 ② 就地补一行**：`saveEntry()` 成功后清 `isDirty`（或改为"保存后重新装载条目"），
+     并把这条不变量写进 KDoc：**「导入闸门依赖 `isDirty`，故保存必须清脏位」**，防止下一次改动把它踩回来。
+  3. **导入即写的语义**保留，但**必须可见**：确认对话框正文已写「将替换本条目…」，
+     再补一条落库后的 snackbar 文案（明示"已写入本条目，不经『保存』"），
+     避免用户以为还要再点一次右上角保存才生效。
+- **AC**：
+  ① 「解除」+ 保存后**重开该条目**，`isPasskey` 须为 false 且 CM 候选不再含该凭据（宿主侧断言字段已删；
+     设备侧按 §5② 在 AVD / 实验机复验候选）；
+  ② 「解除」须有确认对话框，取消路径不得写库（沿用 `ISSUE-P3-337` AC③ 的取消不写库判据形态）；
+  ③ 新建态不再出现「绑定」按钮，`@Preview` 同步补/删对应态（`ISSUE-P3-340` 的规则条文生效点）；
+  ④ 保存后 `isDirty == false` 的回归用例（锁住口径 2 的不变量）；
+  ⑤ 全量 `test` + `gate_readings.py` 全 PASS + `check_tautological_assertions.py`（改断言后必跑）。
+- **关联**：`ISSUE-P2-341`（**同批文件** `VaultEntryMapper` / `VaultRepository` / `RealVaultRepository`，
+  顺序上先做 341）/ `ISSUE-P3-337`（导入通路与确认对话框、`PD-08` 第 5 项只读口径）/
+  `PD-49` 裁决三（拒绝把多枚私钥同时驻留，本条口径 1 的取舍依据同源）/ `ISSUE-P3-340`（补态规则）。
 
 ### ISSUE-P3-340：`@Preview` 状态覆盖无机检——新增可见性开关未同步补预览，布局缺陷在编译期与预览里双双隐形
 

@@ -313,7 +313,9 @@ class KeePasskeyCredentialProviderService : CredentialProviderService() {
                     DomainMatcher.isDomainMatch(entry.url, cleanOrigin)
             val packageMatch = packageDimensionAuthorized && packageName.isNotEmpty() && entry.url.isNotBlank() &&
                     DomainMatcher.isAndroidPackageMatch(entry.url, packageName)
-            rpMatch || urlMatch || packageMatch
+            // ISSUE-P2-341：回收站内的条目一律不出候选。判据**写在本函数内**而非调用方——
+            // 放调用方等于每加一个入口就可能漏一次（本条缺陷正是这么来的），写在这里宿主用例可直接证伪。
+            !entry.isRecycled && (rpMatch || urlMatch || packageMatch)
         }
     }
 

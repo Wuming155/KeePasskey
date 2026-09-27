@@ -88,7 +88,9 @@ class CredentialResponseAssembler @Inject constructor(
             return responseBuilder.build()
         }
 
-        val allEntries = vaultRepository.getKdbxEntries()
+        // ISSUE-P2-341：候选装配必须走「可用条目」读口——回收站子树内的凭据是用户已删除的凭据，
+        // 整树读口会让它继续被列进 CM 候选并被选中签名。
+        val allEntries = vaultRepository.getUsableKdbxEntries()
 
         // ISSUE-P2-199：requestCode 一律取自 [CredentialPendingIntents.nextRequestCode]（进程级单调），
         // 不再在本响应内新建分配器——「每响应复位」会与后续响应碰撞同一 PendingIntent 记录。

@@ -40,8 +40,13 @@ internal class VaultEntryQueryCoordinator(
             if (db == null) {
                 emptyList()
             } else {
+                // ISSUE-P2-341：每快照算一次回收站子树（O(组数)），逐条标注 isRecycled。
+                // **只标记不过滤** —— 列表页进回收站仍要看得见、能还原；过滤由各凭据供给面负责。
+                val binGroupIds = recycleBinGroupIdsOf(db)
                 db.rootGroup.allEntries().map { kdbxEntry ->
-                    entryMapper.mapKdbxEntryToUi(kdbxEntry)
+                    entryMapper.mapKdbxEntryToUi(kdbxEntry).copy(
+                        isRecycled = kdbxEntry.parentGroupId in binGroupIds
+                    )
                 }
             }
         }.flowOn(projectionDispatcher)
@@ -62,14 +67,31 @@ internal class VaultEntryQueryCoordinator(
         val targetUuid = parseKdbxUuidOrNull(id)
         return databaseSession.databaseFlow.map { db ->
             val entry = if (targetUuid == null) null else db?.rootGroup?.findEntry(targetUuid)
-            entry?.let { entryMapper.mapKdbxEntryToUi(it) }
+            entry?.let { entryMapper.mapKdbxEntryToUi(it) }?.copy(
+                // ISSUE-P2-341：与 entriesFlow 同口径（详情页据此可如实呈现"该条目已在回收站内"）
+                isRecycled = db?.let { entry.parentGroupId in recycleBinGroupIdsOf(it) } == true
+            )
         }
     }
 
-    /** 一次性快照直出全部条目（不再订阅会话流）。 */
+    /** 一次性快照直出全部条目（不再订阅会话流）。**含回收站子树**（`{REF:}` 展开与回收站内详情要靠它）。 */
     suspend fun allEntries(): List<KdbxEntry> {
         val db = databaseSession.databaseFlow.first() ?: return emptyList()
         return db.rootGroup.allEntries()
+    }
+
+    /**
+     * 一次性快照直出**可用**条目（排除回收站子树，含其任意深度子组）。
+     *
+     * `ISSUE-P2-341` 立规的调用点契约：**凡"把凭据交给用户或交给系统"的路径一律走本方法**——
+     * 验证器列表、CM 通行密钥候选、autofill 候选、断言与填充执行侧。
+     * 与之相对，[allEntries] 保留整树语义：同步合并、`{REF:...}` 引用展开、回收站内的详情与还原
+     * 都必须能看见已删条目，走错读口会**直接弄坏这些功能**。
+     */
+    suspend fun usableEntries(): List<KdbxEntry> {
+        val db = databaseSession.databaseFlow.first() ?: return emptyList()
+        val binGroupIds = recycleBinGroupIdsOf(db)
+        return db.rootGroup.allEntries().filterNot { it.parentGroupId in binGroupIds }
     }
 
     /**

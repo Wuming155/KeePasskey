@@ -80,7 +80,8 @@ class AutofillPickerViewModel @Inject constructor(
         entriesLoadStarted = true
         viewModelScope.launch {
             _entries.value = try {
-                vaultRepository.getKdbxEntries()
+                // ISSUE-P2-341：选择器列的是"可交给调用方的凭据"，回收站内的须排除
+                vaultRepository.getUsableKdbxEntries()
             } catch (t: Throwable) {
                 AppLog.e(TAG, "读取库内条目失败，选择器按空列表处理", t)
                 emptyList()

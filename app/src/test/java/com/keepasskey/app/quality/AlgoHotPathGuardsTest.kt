@@ -42,8 +42,19 @@ class AlgoHotPathGuardsTest {
     fun `列表页投影必须一次建索引且排序不得逐次小写化`() {
         val source = stripped(PROJECTION)
         assertTrue(
-            "面包屑与回收站集合必须复用同一份分组索引",
-            source.contains("groupsById") && source.contains("childrenByParent")
+            "面包屑必须走一份预建的分组索引（ISSUE-P3-162）",
+            source.contains("groupsById")
+        )
+        // ISSUE-P2-341：回收站集合的本地 BFS 已删除——判定改由仓库侧唯一真相源以
+        // `UiVaultEntry.isRecycled` 下发。这里反过来**禁止**投影再自建一份，
+        // 否则「列表页认为已删」与「供给面认为可用」会再次分叉（本条缺陷的成因）。
+        assertFalse(
+            "投影不得再自建回收站 id 集合（必须消费仓库下发的 isRecycled）",
+            source.contains("buildRecycleBinGroupIds") || source.contains("childrenByParent")
+        )
+        assertTrue(
+            "回收站过滤必须消费 isRecycled 标记",
+            source.contains("it.isRecycled")
         )
         assertTrue("面包屑必须走索引查表 + 前插队列", source.contains("addFirst("))
         assertEquals(

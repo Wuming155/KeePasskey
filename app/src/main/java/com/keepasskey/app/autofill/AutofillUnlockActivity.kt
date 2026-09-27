@@ -194,7 +194,8 @@ class AutofillUnlockActivity : FragmentActivity() {
             isTrusted = { pkg, digests -> callerTrustStore.isTrusted(pkg, digests) }
         )
         val ranked = AutofillCandidateRanker.rank(
-            entries = vaultRepository.getKdbxEntries(),
+            // ISSUE-P2-341：解锁后即时装配的候选同样排除回收站子树
+            entries = vaultRepository.getUsableKdbxEntries(),
             callingPackage = callingPackage,
             webDomain = verifiedWebDomain,
             packageDimensionAuthorized = packageDimensionAuthorized,

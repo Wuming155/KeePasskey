@@ -25,9 +25,19 @@ internal class PasskeyEntryCoordinator(
     private val persistSession: suspend () -> KdbxResult<Unit>
 ) {
 
-    private suspend fun allEntries(): List<KdbxEntry> {
+    /**
+     * 本协调器唯一的条目检索面：**排除回收站子树**（`ISSUE-P2-341`）。
+     *
+     * 四个消费点（`findExistingCredentialIds` 查重、`findPasskeyByCredentialId` 定位、
+     * `findEntriesForRpId` 候选、`findReusablePasskeyEntry` 注册复用）都是「把凭据交给系统或用户」
+     * 的路径，因此一律不含已删条目。特别地，若不排除会出一条更隐蔽的后果：
+     * **把某条 passkey 丢进回收站、再在同一站点重新注册，会原地复活那条已删凭据**
+     * （`findReusablePasskeyEntry` 命中它并只换 Passkey 字段，条目连同其历史一起被拉回可用区）。
+     */
+    private suspend fun usableEntries(): List<KdbxEntry> {
         val db = databaseSession.databaseFlow.first() ?: return emptyList()
-        return db.rootGroup.allEntries()
+        val binGroupIds = recycleBinGroupIdsOf(db)
+        return db.rootGroup.allEntries().filterNot { it.parentGroupId in binGroupIds }
     }
 
     /**
@@ -72,7 +82,7 @@ internal class PasskeyEntryCoordinator(
     suspend fun findExistingCredentialIds(candidates: Set<String>): Set<String> {
         if (candidates.isEmpty()) return emptySet()
         val found = LinkedHashSet<String>()
-        for (entry in allEntries()) {
+        for (entry in usableEntries()) {
             val passkey = PasskeyData.fromCustomFields(entry.customFields) ?: continue
             if (passkey.credentialId in candidates) found += passkey.credentialId
         }
@@ -82,7 +92,7 @@ internal class PasskeyEntryCoordinator(
     /** 可复用的既有 Passkey 条目（同 rpId + 同用户名） */
     private suspend fun findReusablePasskeyEntry(data: PasskeyData): KdbxEntry? {
         val cleanTarget = DomainMatcher.extractDomain(data.relyingPartyId)
-        return allEntries().firstOrNull { entry ->
+        return usableEntries().firstOrNull { entry ->
             val passkey = PasskeyData.fromCustomFields(entry.customFields) ?: return@firstOrNull false
             passkey.userName == data.userName &&
                 DomainMatcher.isDomainMatch(passkey.relyingPartyId, cleanTarget)
@@ -92,7 +102,7 @@ internal class PasskeyEntryCoordinator(
     /** 按 RP-ID 匹配候选条目：Passkey rpId 域匹配优先，条目 URL 域匹配兜底 */
     suspend fun findEntriesForRpId(rpId: String): List<KdbxEntry> {
         val cleanTarget = DomainMatcher.extractDomain(rpId)
-        return allEntries().filter { entry ->
+        return usableEntries().filter { entry ->
             val passkey = PasskeyData.fromCustomFields(entry.customFields)
             val passkeyMatch = passkey != null && DomainMatcher.isDomainMatch(passkey.relyingPartyId, cleanTarget)
             val urlMatch = entry.url.isNotBlank() && DomainMatcher.isDomainMatch(entry.url, cleanTarget)
@@ -101,7 +111,7 @@ internal class PasskeyEntryCoordinator(
     }
 
     suspend fun findPasskeyByCredentialId(credentialId: String): KdbxEntry? {
-        return allEntries().firstOrNull { entry ->
+        return usableEntries().firstOrNull { entry ->
             val passkey = PasskeyData.fromCustomFields(entry.customFields)
             passkey?.credentialId == credentialId
         }

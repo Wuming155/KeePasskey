@@ -30,12 +30,15 @@ internal class VaultGroupCoordinator(
             if (db == null) {
                 listOf(RealVaultRepository.RECYCLE_BIN_GROUP)
             } else {
-                val binUuid = db.recycleBinUuid
+                // ISSUE-P2-341：判定口径收拢到 recycleBinGroupIdsOf（唯一真相源）。
+                // ⚠️ 行为变化（有意）：**bin 的子组现在也标 isRecycleBin** —— 旧实现只标 bin 自身，
+                // 于是「进 bin 的子组」既看不到回收站横幅、其内容也不被任何面当作已删。
+                // 连带修正：分组选择器（移动 / 新建目标）会一并排除 bin 子树，
+                // 不再允许把活条目移进回收站的子组里。
+                val binGroupIds = recycleBinGroupIdsOf(db)
                 val allKdbxGroups = db.rootGroup.allGroups()
                 allKdbxGroups.map { kdbxGroup ->
-                    val isRecycle = (binUuid != null && kdbxGroup.id == binUuid) ||
-                            kdbxGroup.name == RealVaultRepository.RECYCLE_BIN_NAME ||
-                            kdbxGroup.name.equals("Recycle Bin", ignoreCase = true)
+                    val isRecycle = kdbxGroup.id in binGroupIds
                     VaultGroup(
                         id = kdbxGroup.id.toHexString(),
                         name = kdbxGroup.name,

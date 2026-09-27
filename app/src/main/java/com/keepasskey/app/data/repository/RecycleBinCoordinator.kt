@@ -168,10 +168,7 @@ internal class RecycleBinCoordinator(
                 IllegalStateException(strings.get(R.string.repo_db_locked)),
                 strings.get(R.string.repo_db_locked)
             )
-        val binUuid = db.recycleBinUuid
-        val binGroup = db.rootGroup.allGroups().firstOrNull {
-            (binUuid != null && it.id == binUuid) || it.name == RealVaultRepository.RECYCLE_BIN_NAME || it.name.equals("Recycle Bin", ignoreCase = true)
-        } ?: return KdbxResult.Success(Unit)
+        val binGroup = primaryRecycleBinRoot(db) ?: return KdbxResult.Success(Unit)
 
         val entriesToDelete = binGroup.allEntries()
         val subgroupsToDelete = binGroup.allGroups().filter { it.id != binGroup.id }
@@ -266,28 +263,21 @@ internal class RecycleBinCoordinator(
         val db = databaseSession.databaseFlow.first()
             ?: throw IllegalStateException(strings.get(R.string.repo_not_unlocked_state))
 
-        if (db.recycleBinUuid != null) {
-            val existingBin = db.rootGroup.allGroups().firstOrNull { it.id == db.recycleBinUuid }
-            if (existingBin != null) {
-                return existingBin
+        // ISSUE-P2-341：定位口径收拢到 [primaryRecycleBinRoot]（UUID 优先、其次按名首命中），
+        // 不再在此重复第三份 uuid/name 匹配。原「按名命中则回填 Meta」的行为**逐条保留**：
+        // UUID 命中时 `binUuid == existing.id` ⇒ 不写 Meta；按名命中时才回填。
+        val binUuid = db.recycleBinUuid
+        primaryRecycleBinRoot(db)?.let { existing ->
+            if (binUuid == null || binUuid != existing.id) {
+                databaseSession.updateDatabaseMeta {
+                    it.copy(
+                        recycleBinUuid = existing.id,
+                        recycleBinEnabled = true,
+                        recycleBinChanged = Instant.now()
+                    )
+                }
             }
-        }
-
-        val candidate = db.rootGroup.subgroups.firstOrNull {
-            it.name == RealVaultRepository.RECYCLE_BIN_NAME || it.name.equals("Recycle Bin", ignoreCase = true)
-        } ?: db.rootGroup.allGroups().firstOrNull {
-            it.name == RealVaultRepository.RECYCLE_BIN_NAME || it.name.equals("Recycle Bin", ignoreCase = true)
-        }
-
-        if (candidate != null) {
-            databaseSession.updateDatabaseMeta {
-                it.copy(
-                    recycleBinUuid = candidate.id,
-                    recycleBinEnabled = true,
-                    recycleBinChanged = Instant.now()
-                )
-            }
-            return candidate
+            return existing
         }
 
         val newBinGroup = KdbxGroup(
@@ -311,14 +301,71 @@ internal class RecycleBinCoordinator(
     }
 
     /**
-     * 只读定位当前回收站组（不创建、不改 Meta）：优先按 [KdbxDatabase.recycleBinUuid] 命中，
-     * 回退按官方 "Recycle Bin" 名称匹配（兼容外部 KeePass 生成、UUID 未回填的库）。
-     * 找不到返回 null——对应官方 `pgRecycleBin == null`（此时删除走「软删并懒创建回收站」分支）。
+     * 只读定位当前回收站组（不创建、不改 Meta）。
+     *
+     * `ISSUE-P2-341`：口径收拢到 [primaryRecycleBinRoot]（UUID 优先、其次按名首命中），
+     * 不再在此重复一份 `firstOrNull { uuid || name }` —— 旧写法在**遍历顺序**上会先撞上同名组，
+     * 使「Meta 指向 A、但库里另有一个叫回收站的 B」时挑错组。
      */
-    private fun resolveRecycleBinGroup(db: KdbxDatabase): KdbxGroup? {
-        db.recycleBinUuid?.let { uuid -> db.rootGroup.findGroup(uuid)?.let { return it } }
-        return db.rootGroup.allGroups().firstOrNull {
-            it.name == RealVaultRepository.RECYCLE_BIN_NAME || it.name.equals("Recycle Bin", ignoreCase = true)
+    private fun resolveRecycleBinGroup(db: KdbxDatabase): KdbxGroup? = primaryRecycleBinRoot(db)
+}
+
+/**
+ * 回收站组判定的**唯一真相源**（`ISSUE-P2-341`，2026-09-27）。
+ *
+ * ## 为何存在
+ *
+ * 本项目里"已删除"不是条目上的位，而是**组子树**：`KdbxEntry` 无 `isDeleted` / `deleteTime`
+ * （`core/.../KdbxEntry.kt:9-27`），移入回收站只是把 `parentGroupId` 改到 bin 组
+ * （[RecycleBinCoordinator.deleteEntry]）。而此前全仓**只有列表页的搜索分支**过滤了它，
+ * 验证器列表、CM 通行密钥候选、autofill 候选、断言与填充执行侧**一律捞出整树**
+ * ⇒ 用户删掉的凭据仍然可用。更糟的是"什么算 bin"曾有**四套各不相同**的实现
+ * （`resolveRecycleBinGroup` / `emptyRecycleBin` / `getOrCreateRecycleBinGroup` /
+ * `VaultGroupCoordinator.groupsFlow`），再多写一份"供给面专用过滤"只会让两面迟早分叉
+ * （用户所见再次不一致）。本函数是收敛后的**唯一**口径。
+ *
+ * ## 口径
+ *
+ * * 命中条件：`id == KdbxDatabase.recycleBinUuid` **或** 组名 ∈ {`回收站`, `Recycle Bin`}；
+ *   **刻意不理 `recycleBinEnabled`** —— 列表页今天就不理它，若按开关门控，
+ *   「Meta 未回填但存在同名 bin」的库会让「列表页认为已删」与「供给面认为可用」再次分叉。
+ * * **含全部后代**：bin 的子组里的条目同样是已删条目（子组名一般不叫回收站，故必须展开子树）。
+ * * **根组永不视为回收站**：否则一旦根组命名撞上，整库条目都会被判为"已删"、
+ *   从所有供给面消失 —— 那会把 fail-closed 变成 fail-whole-vault。
+ *
+ * @return 回收站组及其全部后代（按 id 去重；多个同名 bin 时全部纳入）
+ */
+internal fun recycleBinGroupsOf(db: KdbxDatabase): List<KdbxGroup> {
+    val root = db.rootGroup
+    val binUuid = db.recycleBinUuid
+    val roots = root.allGroups().filter { group ->
+        group.id != root.id && (group.id == binUuid || isRecycleBinName(group.name))
+    }
+    val seen = mutableSetOf<KdbxUuid>()
+    val out = mutableListOf<KdbxGroup>()
+    for (candidate in roots) {
+        // KdbxGroup.allGroups() 含自身（emptyRecycleBin 即以 `filter { it.id != binGroup.id }` 取后代）
+        for (descendant in candidate.allGroups()) {
+            if (seen.add(descendant.id)) out.add(descendant)
         }
     }
+    return out
 }
+
+/** 回收站子树的全部组 id（判定条目是否"已在回收站内"用；条目 `parentGroupId` 落在此集合内即为已删）。 */
+internal fun recycleBinGroupIdsOf(db: KdbxDatabase): Set<KdbxUuid> =
+    recycleBinGroupsOf(db).mapTo(mutableSetOf()) { it.id }
+
+/** 主回收站**根**组：Meta UUID 命中优先，其次按名首命中；无则 null（不含后代）。 */
+internal fun primaryRecycleBinRoot(db: KdbxDatabase): KdbxGroup? {
+    val root = db.rootGroup
+    val binUuid = db.recycleBinUuid
+    val roots = root.allGroups().filter { group ->
+        group.id != root.id && (group.id == binUuid || isRecycleBinName(group.name))
+    }
+    return roots.firstOrNull { binUuid != null && it.id == binUuid } ?: roots.firstOrNull()
+}
+
+/** 回收站组的官方命名集合（本地化前 `回收站`，外部 KeePass 库多为 `Recycle Bin`）。 */
+internal fun isRecycleBinName(name: String): Boolean =
+    name == RealVaultRepository.RECYCLE_BIN_NAME || name.equals("Recycle Bin", ignoreCase = true)

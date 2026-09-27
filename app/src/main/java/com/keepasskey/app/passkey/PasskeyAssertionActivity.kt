@@ -97,7 +97,9 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
             return
         }
 
-        val allEntries = vaultRepository.getKdbxEntries()
+        // ISSUE-P2-341：断言执行侧同样只认「可用条目」——候选列出了却不给签是困惑，
+        // 但反过来"删掉了还能签"是越出用户意图；本行保证两侧口径一致。
+        val allEntries = vaultRepository.getUsableKdbxEntries()
         val entry = allEntries.firstOrNull { it.id.toHexString() == context.entryId }
         if (entry == null) {
             // ISSUE-P1-10：日志不得携带 entryId 等敏感标识

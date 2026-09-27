@@ -279,6 +279,21 @@ interface VaultRepository : VaultSecretAccess, VaultPasskeyRepository {
     suspend fun getKdbxEntries(): List<com.keepasskey.core.model.KdbxEntry>
 
     /**
+     * 一次性快照直出**可用**条目：在 [getKdbxEntries] 的整树语义之上**排除回收站子树**
+     * （含其任意深度子组内的条目）。`ISSUE-P2-341`。
+     *
+     * **调用点契约（与本方法同批立规，违反即缺陷）**：
+     * 凡「把凭据交给用户或交给系统」的路径一律走本方法——验证器列表、Credential Manager
+     * 通行密钥候选、autofill 候选、断言与填充执行侧。理由：本项目的"已删除"是**组归属**而非条目位，
+     * 走整树读口会让用户删掉的凭据**仍然可被选中并签名/填出**。
+     *
+     * 反之，**必须**继续用 [getKdbxEntries] 的路径：同步合并、`{REF:...}` 字段引用展开、
+     * 回收站内的浏览 / 还原 / 清空与详情——那些场景**就是要看见已删条目**，
+     * 改走本方法会直接弄坏功能。
+     */
+    suspend fun getUsableKdbxEntries(): List<com.keepasskey.core.model.KdbxEntry>
+
+    /**
      * 按 id 取**单条**条目快照（ISSUE-P3-148：优先单条查询入口）。
      *
      * 与 [getKdbxEntries] 的语义差异在**成本面**而非内容面：实现方必须走「按 id 定位单条」的

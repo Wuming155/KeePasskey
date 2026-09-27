@@ -156,7 +156,17 @@ data class UiVaultEntry(
     val autoTypeSequence: String = "",
     val overrideUrl: String? = null,
     // ISSUE-P3-310：条目过期时间（KDBX Times.expires / expiryTime 的 UI 投影）；null = 永不过期
-    val expiresAt: java.time.Instant? = null
+    val expiresAt: java.time.Instant? = null,
+    /**
+     * `ISSUE-P2-341`：该条目是否位于**回收站子树**内（＝用户已删除、尚可还原）。
+     *
+     * 本项目的"已删除"不是条目上的位，而是组归属（`KdbxEntry` 无 `isDeleted`），
+     * 故由投影层按 `recycleBinGroupIdsOf(db)` 一次性标注。
+     * **只标记不过滤**：列表页进回收站仍须看得见、能还原；
+     * 而一切**凭据供给面**（验证器列表 / CM 候选 / autofill 候选）必须排除它——
+     * 排除的语义由 `VaultRepository.getUsableKdbxEntries()` 在原始条目侧承担。
+     */
+    val isRecycled: Boolean = false
 ) {
     /**
      * ISSUE-P2-68（审计 M6）：**覆写默认 `toString()`**。

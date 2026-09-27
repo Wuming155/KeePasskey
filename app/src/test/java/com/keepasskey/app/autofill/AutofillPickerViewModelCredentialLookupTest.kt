@@ -68,6 +68,11 @@ class AutofillPickerViewModelCredentialLookupTest {
                 return listOf(entry(entryUuid))
             }
 
+            // ISSUE-P2-341：选择器改走「可用条目」读口。`by FakeVaultRepository()` 的委托型桩
+            // **不会**自动把新读口转发到被覆写的旧读口 ⇒ 不补这一行，桩里的数据根本到不了 VM
+            // （表现是"缓存永远不命中、单条查询计数凭空 +1"，看着像产品回归）。
+            override suspend fun getUsableKdbxEntries(): List<KdbxEntry> = getKdbxEntries()
+
             override suspend fun getKdbxEntry(entryId: String): KdbxEntry? {
                 singleLookups++
                 return entry(entryUuid)
@@ -95,6 +100,9 @@ class AutofillPickerViewModelCredentialLookupTest {
         val repository = object : VaultRepository by FakeVaultRepository() {
             override suspend fun getKdbxEntries(): List<KdbxEntry> = listOf(entry(entryUuid))
 
+            // ISSUE-P2-341：见上一用例的同名注释——委托型桩必须自己把新读口接上旧读口。
+            override suspend fun getUsableKdbxEntries(): List<KdbxEntry> = getKdbxEntries()
+
             override suspend fun getKdbxEntry(entryId: String): KdbxEntry? {
                 singleLookups++
                 return entry(entryUuid)
@@ -121,6 +129,12 @@ class AutofillPickerViewModelCredentialLookupTest {
         val repository = object : VaultRepository by FakeVaultRepository() {
             override suspend fun getKdbxEntries(): List<KdbxEntry> =
                 error("确认路径不得装载整库")
+
+            // ISSUE-P2-341：**这条守卫必须同时罩住新读口**——只封 `getKdbxEntries()` 的话，
+            // 确认页改走 `getUsableKdbxEntries()` 就绕开了 error()，"不得装载整库"这条断言
+            // 会在没人察觉的情况下变成空守卫。
+            override suspend fun getUsableKdbxEntries(): List<KdbxEntry> =
+                error("确认路径不得装载整库（可用条目读口同样禁止）")
 
             override suspend fun getKdbxEntry(entryId: String): KdbxEntry? = null
 

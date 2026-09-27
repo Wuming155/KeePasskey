@@ -52,7 +52,9 @@ class AuthenticatorViewModel @Inject constructor(
      */
     private val totpEntriesFlow: StateFlow<List<UiVaultEntry>> =
         combine(vaultRepository.getEntries(), searchQueryFlow) { entries, query ->
-            val totpEntries = entries.filter { it.totpCode != null }
+            // ISSUE-P2-341：回收站内的条目不得出现在验证器列表——用户已删除的令牌仍能被看到/取用，
+            // 与「删了就停用」的用户意图直接冲突（本条正是用户在真机上报出的现象）。
+            val totpEntries = entries.filter { it.totpCode != null && !it.isRecycled }
             if (query.isBlank()) {
                 totpEntries
             } else {

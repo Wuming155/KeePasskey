@@ -258,6 +258,12 @@ class RealVaultRepository @Inject constructor(
     /** ISSUE-P3-305：整份条目快照下沉 [VaultEntryQueryCoordinator]。 */
     override suspend fun getKdbxEntries(): List<KdbxEntry> = queries.allEntries()
 
+    /**
+     * ISSUE-P2-341：可用条目（排除回收站子树）下沉 [VaultEntryQueryCoordinator]。
+     * 调用点契约见接口 KDoc——**凭据供给面必须走这里**。
+     */
+    override suspend fun getUsableKdbxEntries(): List<KdbxEntry> = queries.usableEntries()
+
     /** ISSUE-P3-148 / ISSUE-P3-305：单条查询下沉 [VaultEntryQueryCoordinator]（深度优先短路）。 */
     override suspend fun getKdbxEntry(entryId: String): KdbxEntry? = queries.entryById(entryId)
 

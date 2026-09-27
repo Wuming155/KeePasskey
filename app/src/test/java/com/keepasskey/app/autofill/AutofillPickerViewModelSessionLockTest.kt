@@ -85,6 +85,9 @@ class AutofillPickerViewModelSessionLockTest {
         )
         val repo = object : VaultRepository by FakeVaultRepository() {
             override suspend fun getKdbxEntries(): List<KdbxEntry> = listOf(clearedEntry)
+
+            // ISSUE-P2-341：选择器改走「可用条目」读口；委托型桩不转发就永远拿不到这份数据
+            override suspend fun getUsableKdbxEntries(): List<KdbxEntry> = getKdbxEntries()
         }
         val vm = MainDispatcherGuard.track(AutofillPickerViewModel(repo, null))
         // ISSUE-P3-148：显式触发整库装载（选择器页路径）

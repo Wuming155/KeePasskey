@@ -206,9 +206,14 @@ class FakeVaultRepository(
     override fun getEntries(): Flow<List<UiVaultEntry>> = entriesFlow.map { list ->
         // F2 整改：与真实仓库投影语义一致——受保护自定义字段明文不进投影
         list.map { entry ->
-            entry.copy(customFields = entry.customFields.map { cf ->
-                if (cf.isProtected) cf.copy(value = "") else cf
-            })
+            entry.copy(
+                // ISSUE-P2-341：与生产同口径——本项目的"已删除"是**组归属**而非条目位，
+                // 故按所在组是否为回收站推导 isRecycled（移入 / 还原四处写点无需逐个改，自动一致）。
+                isRecycled = entry.groupId == RECYCLE_BIN_GROUP_ID,
+                customFields = entry.customFields.map { cf ->
+                    if (cf.isProtected) cf.copy(value = "") else cf
+                }
+            )
         }
     }
 
@@ -400,6 +405,15 @@ class FakeVaultRepository(
     /** ISSUE-P3-148：单条查询（Fake 无树结构，按同 id 语义在既有快照上取首条） */
     override suspend fun getKdbxEntry(entryId: String): KdbxEntry? =
         getKdbxEntries().firstOrNull { it.id.toHexString() == entryId }
+
+    /**
+     * ISSUE-P2-341：可用条目＝排除回收站子树。Fake 的 `KdbxEntry` 转换不带组归属，
+     * 故按 UI 侧 `isRecycled`（由 `groupId` 推导）过滤同一批 id，语义与生产一致。
+     */
+    override suspend fun getUsableKdbxEntries(): List<KdbxEntry> {
+        val recycledIds = entriesFlow.value.filter { it.isRecycled }.map { it.id }.toSet()
+        return getKdbxEntries().filterNot { it.id.toHexString() in recycledIds }
+    }
 
     override suspend fun findEntriesForRpId(rpId: String): List<KdbxEntry> {
         val cleanTarget = DomainMatcher.extractDomain(rpId)
@@ -670,6 +684,9 @@ class FakeVaultRepository(
     }
 
     companion object {
+        /** ISSUE-P2-341：Fake 侧回收站组的唯一字面量（`isRecycled` 推导与可用条目过滤共用）。 */
+        const val RECYCLE_BIN_GROUP_ID = "group_recycle_bin"
+
         val initialMockDatabases = listOf(
             VaultDatabaseInfo(
                 id = "db_personal",

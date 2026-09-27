@@ -158,13 +158,14 @@ private fun projectVaultListContent(
 ): VaultListContent {
     val query = session.filterParams.query
     val isSearching = query.isNotBlank()
-    // ISSUE-P3-162：分组索引只建一次——面包屑与回收站集合原本各自做全表线性扫描
-    // （面包屑 O(深度 × 分组数)、回收站 O(子树 × 分组数)），而本函数在每次状态投影重跑。
+    // ISSUE-P3-162：分组索引只建一次——面包屑原本每次状态投影都做全表线性扫描（O(深度 × 分组数)）。
+    // （同批的「回收站集合」索引已随 ISSUE-P2-341 删除：判定改由仓库侧唯一真相源下发。）
     val groupsById = allGroups.associateBy { it.id }
-    val childrenByParent = allGroups.groupBy { it.parentId }
     val breadcrumbs = buildBreadcrumbs(groupsById, session.currentGroupId)
     val isInsideRecycleBin = breadcrumbs.any { it.isRecycleBin }
-    val recycleBinGroupIds = buildRecycleBinGroupIds(allGroups, childrenByParent)
+    // ISSUE-P2-341：回收站 id 集合的本地 BFS 已删除——判定改由仓库侧唯一真相源
+    // （recycleBinGroupIdsOf）算好并随条目投影以 `UiVaultEntry.isRecycled` 下发。
+    // 留两份实现正是本条缺陷的成因：供给面与列表页对「什么算 bin」迟早分叉。
     // 根目录内容直显：currentGroupId == null 表示密码库顶层，
     // 应展示根分组内部内容（子分组 + 根级条目），而非把根分组自身渲染成一个节点
     val effectiveGroupId = session.currentGroupId ?: allGroups.firstOrNull { it.parentId == null }?.id
@@ -174,7 +175,6 @@ private fun projectVaultListContent(
         query = query,
         isSearching = isSearching,
         isInsideRecycleBin = isInsideRecycleBin,
-        recycleBinGroupIds = recycleBinGroupIds,
         effectiveGroupId = effectiveGroupId,
         sortOption = session.filterParams.sortOption,
         selectedTag = session.filterParams.selectedTag,
@@ -250,24 +250,10 @@ private fun buildBreadcrumbs(
 }
 
 /**
- * H5 整改：回收站判定不再依赖 mock 常量字符串——以分组投影的 isRecycleBin 标记
- * 连同其全部后代分组构建回收站 id 集合（ISSUE-P3-162：按 childrenByParent 单趟 BFS）
+ * H5 整改：回收站判定不再依赖 mock 常量字符串。
+ * `ISSUE-P2-341`：本处的 BFS 已删除，判定收敛到仓库侧唯一真相源，条目以
+ * [UiVaultEntry.isRecycled] 随投影下发（避免同一判据两份实现漂移）。
  */
-private fun buildRecycleBinGroupIds(
-    allGroups: List<VaultGroup>,
-    childrenByParent: Map<String?, List<VaultGroup>>
-): Set<String> = buildSet {
-    val pending = ArrayDeque<String>()
-    allGroups.filter { it.isRecycleBin }.forEach { bin ->
-        add(bin.id)
-        pending.addLast(bin.id)
-    }
-    while (pending.isNotEmpty()) {
-        childrenByParent[pending.removeFirst()].orEmpty().forEach { sub ->
-            if (add(sub.id)) pending.addLast(sub.id)
-        }
-    }
-}
 
 /** 1. 过滤条目：搜索时全局匹配（排除回收站内容），正常时只展示当前文件夹下的条目；
  * 再叠加 ISSUE-P3-297 处置③的标签 / 收藏筛选档（与搜索独立、可叠加） */
@@ -276,7 +262,6 @@ private fun selectSortedEntries(
     query: String,
     isSearching: Boolean,
     isInsideRecycleBin: Boolean,
-    recycleBinGroupIds: Set<String>,
     effectiveGroupId: String?,
     sortOption: VaultSortOption,
     selectedTag: String?,
@@ -284,7 +269,8 @@ private fun selectSortedEntries(
     searchMatchMode: SearchMatchMode
 ): List<UiVaultEntry> {
     val targetEntries = if (isSearching) {
-        allEntries.filter { if (!isInsideRecycleBin) it.groupId !in recycleBinGroupIds else true }
+        // 用户已在回收站内搜索时**不得**再把结果过滤空（还原前总得找得到）
+        allEntries.filter { if (!isInsideRecycleBin) !it.isRecycled else true }
     } else {
         allEntries.filter { it.groupId == effectiveGroupId }
     }

@@ -253,7 +253,8 @@ private suspend fun KeePasskeyAutofillService.resolveUnlockedCandidates(
     return UnlockedCandidates(
         webDomain = webDomain,
         ranked = AutofillCandidateRanker.rank(
-            entries = vaultRepository.getKdbxEntries(),
+            // ISSUE-P2-341：候选装配走「可用条目」读口，回收站内的凭据不得被填出去
+            entries = vaultRepository.getUsableKdbxEntries(),
             callingPackage = callingPkg,
             webDomain = webDomain,
             packageDimensionAuthorized = packageDimensionAuthorized,

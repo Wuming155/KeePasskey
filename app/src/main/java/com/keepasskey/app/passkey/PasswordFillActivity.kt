@@ -143,7 +143,8 @@ class PasswordFillActivity : BaseCredentialActivity() {
             return
         }
 
-        val allEntries = vaultRepository.getKdbxEntries()
+        // ISSUE-P2-341：口令填充执行侧同样只认「可用条目」（与候选装配同口径）
+        val allEntries = vaultRepository.getUsableKdbxEntries()
         val entry = allEntries.firstOrNull { it.id.toHexString() == request.entryId }
         if (entry == null) {
             AppLog.e(TAG, "未找到目标密码条目")
