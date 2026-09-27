@@ -42,10 +42,11 @@
 
 ---
 
-## P2 中危缺陷与协议/测试缺口（1 项）
+## P2 中危缺陷与协议/测试缺口（2 项）
 
-> **开放项 1 条**：`ISSUE-P2-341`（2026-09-27 用户真机报出，同日已修）——
-> **仅剩 AC⑥ 设备侧半环**：「系统选择器实际看不到已删凭据」需在 AVD / 实验机跑一次真实候选装配。
+> **开放项 2 条**：
+> ① `ISSUE-P2-341`（同日已修）——仅剩 AC⑥ 设备侧半环。
+> ② `ISSUE-P2-343`（2026-09-27 用户真机报出，**待修**）——只读开关在指纹解锁路径被静默忽略。
 > 更早的 P2 闭环流水见 `RESOLVED_LOG.md` §315 ~ §325。
 
 ### ISSUE-P2-341：回收站子树内的凭据仍被当"可用凭据"供给（验证器 / CM 候选 / autofill / 断言与填充执行侧）
@@ -69,6 +70,41 @@
   另：`{REF:}` 引用指向**已删**条目时的取值面未取样（现按整树解析，属有意保留，但无读数）。
 - **关联**：`ISSUE-P3-342`（同批文件，同日已修）/ `PD-08`、`ISSUE-P3-337`（导入通路）/
   commit `7f481594`（完整留痕）。
+### ISSUE-P2-343：「只读解锁」开关在指纹解锁路径被静默忽略（打开着也按可写模式解开）
+
+- **用户报出（2026-09-27 真机 M332BF）**：「通过指纹解锁之后，没办法在这个过程中选择只读解锁。」
+- **核实（2026-09-27，逐文件读过，非推定）**：现象成立，且比表述更尖锐——**不是"没入口"，而是"有开关但被忽略"**。
+  1. 只读态的唯一来源是 `UnlockUiState.openReadOnly`（`ui/screens/unlock/UnlockUiState.kt:34`），
+     唯一写入者是 `UnlockViewModel.onToggleReadOnly()`（`UnlockViewModel.kt:275-277`），
+     唯一控件是 `UnlockReadOnlyRow` 的 Switch（`UnlockStandardUnlockSections.kt:103-130`），
+     而它**只渲染在标准（口令）解锁页**（`UnlockContentSections.kt:217-221`）；
+  2. 指纹路径成功后调的是**同一个** `unlockActiveDatabase(...)`，但**没有传 `readOnly` 实参**
+     （`BiometricUnlockCoordinator.kt:276-279`）⇒ 落到接口默认值 `false`（`VaultRepository.kt:41`），
+     `openReadOnly` 在这条路上**从未被读**；
+  3. 快速解锁卡片上没有任何只读入口（只有指纹按钮与「切换为完整主密码解锁」两项，
+     `UnlockContentSections.kt:121-156`）⇒ 用户完全可以「在口令页打开只读 → 切到指纹 → 被以可写模式解开」，
+     **界面给了承诺、实现默默吞掉**；
+  4. 另一条同源后果：口令只读解锁成功后**仍会无条件封存生物识别凭据**
+     （`MasterPasswordUnlockSession.kt:144` 未带只读条件）⇒ 下一次指纹解锁必然是可写的，
+     即"只读"无法经由指纹延续，只能每次退回口令页重开。
+- **定级理由**：P2 —— 只读模式是**防误写的保护态**（借出设备 / 只看不改），保护态被静默失效
+  等于用户以为有护栏而没有；但写操作仍需用户主动触发，不涉及认证绕过，故不到 P1。
+- **整改口径（两条都要做，缺一条就是半修）**：
+  ① 指纹路径**如实消费** `openReadOnly`（把该标志透传给 `unlockActiveDatabase` 的 `readOnly` 形参）；
+  ② 若产品上判定「指纹解锁不应支持只读」（例如封存凭据的语义与只读冲突），则**必须让开关的作用域可见**——
+  口令页的只读开关旁须写明「仅对本次口令解锁生效」，并在快速解锁卡片上给出只读入口或明确禁用态；
+  **禁止**保留一个"打开后被另一条路径无声忽略"的控件（同形缺陷刚在 `ISSUE-P3-342` 修过一次，
+  判据见 `PD-50`：**控件不许骗人**）。
+- **AC**：① 打开只读 → 用指纹解锁 → 回列表页须出现只读横幅、FAB 与扫码入口按既有守卫隐藏、
+  编辑页保存被拒（守卫清单见 `VaultListActionController.kt:188` 等）；
+  ② 关闭只读 → 指纹解锁仍为可写（不得反向回归）；
+  ③ 宿主用例锁住「`completeBiometricUnlock` 必须把 `openReadOnly` 透传到 `readOnly` 实参」
+  ——本仓已有 `UnlockViewModelBiometricAutoPromptTest` 可作落点，且**当前无任何测试覆盖该实参**
+  （已核实：这正是它能静默漂移的原因）；④ 全量 `test` + `gate_readings.py` 8/8 PASS。
+- **关联**：`ISSUE-P3-342` 与 `PD-50`（同一判据：静默失效的控件即缺陷）/
+  `ISSUE-P3-337` T6「只读会话」手测项（本条正是该手测项报出的读数）/
+  commit `0d9d1d3d`（T6 复验所依据的装机版本）。
+
 
 ## P3 低危问题、特性接线与体验优化（4 项）
 
@@ -76,10 +112,9 @@
 > ⓪ `ISSUE-P3-342` —— 仅剩设备侧复验：真机点「解除」后重开条目应真的不再是通行密钥、CM 候选不再含它。
 > ① `ISSUE-P3-340` —— 仅剩一条未决：普查是否升级为 `hygiene-gate` 第九条闸门（前置：先给脚本加带理由的
 >    显式豁免清单，否则主题包装器一类合理豁免会被长期判红）。
-> ② `ISSUE-P3-339` —— 仅剩浏览器半环：受「两个互不为后缀的可注册域 + Chrome 认的信任链」阻塞
->    （代码层半环已闭环）。
-> ③ `ISSUE-P3-337` —— 仅剩相机实拍（**依赖真机 + 用户授权量图**）与对真实 RP 的断言
->    （与 ② 同一载体 ⇒ 339 建好后 337 的 (b) 顺势收口）。
+> ② `ISSUE-P3-339` —— **用户指示暂时搁置**（浏览器半环需外部域名与信任链资源）。
+> ③ `ISSUE-P3-337` —— 相机面已按用户裁决收口于[限界表 §35](architecture/已知工程限界.md)；
+>    仅剩对真实 RP 的断言，与 ② 同一载体 ⇒ 随 ② 一并搁置。
 > 更早的 P3 闭环流水见 `RESOLVED_LOG.md` §326 ~ §342。
 
 ### ISSUE-P3-342：编辑页「绑定 / 解除」是静默失效的控件（`isPasskey` 从不落盘）
@@ -186,216 +221,40 @@
   `AGENTS.md` §5（截图测试包装编译门禁那条已注明「编译绿 ≠ 布局对」）/
   `.codebuddy/rules/engineering-rules.md`（Compose 规范一节，本条 ② 的落笔处）。
 
-### ISSUE-P3-339：仿冒域能否唤醒通行密钥——本地 RP 实验室 + 四类仿冒 origin 的「该醒 / 不该醒」双向验证
+### ISSUE-P3-339：仿冒域能否唤醒通行密钥（本地 RP 实验室 + 四类仿冒 origin 的「该醒 / 不该醒」）——**代码层已闭环，浏览器半环搁置**
 
-- **核实时间点与方式（2026-09-27，AVD `Pixel_10` 直读，非推定）**：
-  1. **载体已具备**：`settings list secure` 读到
-     `credential_service_primary = com.keepasskey.app/…KeePasskeyCredentialProviderService`
-     ⇒ 本 AVD 的通行密钥提供方**已指向本应用**；`pm list packages` 有
-     `com.android.credentialmanager` / `com.google.android.gms` / `com.android.chrome`
-     ⇒ 「浏览器 → 系统 CM → 本应用 provider」这条链在模拟器上是**完整可跑**的（不需要真机）；
-     `ro.debuggable=1` + `userdebug` ⇒ `adb root` 可用，系统 CA 注入这条路**不被 ROM 挡**。
-  2. **本仓已证到哪**：`ISSUE-P3-337` 第 5 片（前半）只证到「导入件在**库内**可被消费」
-     （PEM/曲线/PRF/保护位 + `pykeepass` / `keepassxc-cli` 双实现读数），
-     **从未**跑过一次真实的 `GetAssertion` 唤醒；AC⑧ 的 (b) 项至今空着（见该条留痕）。
-  3. **域匹配的既有实现位置**（下一步要逐条对照的代码）：`app/passkey/DomainMatcher.kt`
-     （eTLD+1 判定，接 Mozilla PSL）+ `PublicSuffixList.kt` + `CallingOriginResolver.kt`
-     （调用方来源归因）+ `PasskeyAssertionRequest` / `findEntriesForRpId`（候选检索：
-     ⚠️ 该方法除 `passkey.rpId` 域匹配外**还有「条目 URL 域匹配」兜底分支**，
-     仿冒域能否经这条兜底被捞出来，是本条要证的第一号问题）；
-     注册侧另有 `CredentialManagerPackageBindingGate` / `BrowserRemedyBuilder`（特权浏览器白名单）
-     ⇒ 唤醒面与授权面是**两道不同的门**，验收要分开写。
-
-- **为什么要做（这是 WebAuthn 的核心卖点，不是锦上添花）**：
-  通行密钥相对口令的唯一实质优势是「**私钥绑定 origin，仿冒站拿不到断言**」。本仓此前只做过
-  域匹配算法的**宿主单测**（`DomainMatcherTest` 一类），从未在「Chrome 真发 `get()` → CM 真问
-  provider → 本应用真出候选」这条链上证伪过；一旦某类仿冒形态（同后缀堆叠、同形异码、尾点、
-  `android://` 与 web 域混用）在这条链上被放行，用户会在假站按下指纹并把断言交出去 ⇒
-  **属可直接被利用的认证层缺陷**。
-
-- **整改口径（实验室设计，全部本地、不接公网、不碰真实密码库）**：
-  1. **RP 服务端**：复用 `tools/local-sync/` 的自签 CA 形态，新增一个极简 WebAuthn RP
-     （注册 + 断言两个端点 + 一个 challenge 会话），落 `tools/passkey-phish-lab/`；
-     端口与既有 9443 / 9000 错开，**只绑回环**——实测成立而非洁癖：QEMU/SLIRP 把模拟器对
-     `10.0.2.2:<port>` 的连接转发到宿主 `127.0.0.1`，故 RP 仅监听回环时客户机仍可达
-     （`toybox nc -w 3 -z 10.0.2.2 8443` 在宿主只绑 127.0.0.1 的前提下 `rc=0`），
-     不必把实验室暴露到局域网。
-  2. **名字解析**：模拟器启动加 `-dns-server <宿主IP>`，宿主侧起一个最小 DNS 应答
-     `rp.testlab.xyz` / `sub.rp.testlab.xyz` / `rp.testlab.xyz.phish.testlab.xyz` /
-     `rр.testlab.xyz`（punycode `xn--…`）/ `rp.testlab.xyz.`（尾点）全部指向宿主
-     ⇒ 一套服务多域名，**不动 hosts、不需要公网 DNS**。
-     ⚠️ 域名的 TLD **必须选在随仓 PSL 里存在的**（`xyz` / `dev` / `com` 已核实在册），
-     不能用 `rp.test` 这类特殊用途域——理由与 fail-closed 后果见下「开工前置读数」第 1 条。
-  3. **证书信任**：`adb root` + `-writable-system` 把实验室根 CA 注入系统信任锚
-     （`/system/etc/security/cacerts/<hash>.0`）；不可行则退到「Chrome 逐次点 Advanced→Proceed」
-     并**如实登记**该退化对结论的影响（安全提示页被点掉本身是一条读数）。
-  4. **凭据来源**：一律用 `ISSUE-P3-337` 已跑通的**相册导入**通路把已知凭据放进**测试库**
-     （模拟器上新建的 `probeui.kdbx` 一类），不触碰真实库；导入 rpId 与实验室域名逐一对应。
-  5. **取样矩阵（正向 2 + 负向 6，缺一项不得声称「双向都验过」）**：
-     - ✅ 应唤醒：`rp.testlab.xyz`（精确同 eTLD+1）、`sub.rp.testlab.xyz`（同 eTLD+1 的子域，规范允许）；
-     - ❌ 不应唤醒：`rp.testlab.xyz.phish.testlab.xyz`（把真域**堆在后缀**里）、`phish.testlab.xyz`、
-       `rр.testlab.xyz` 的同形异码（punycode 形态）、大小写与尾点变体、
-       `127.0.0.1`（IP origin）、以及**URL 兜底**分支专用的一条：库里条目 URL 写
-       `https://rp.testlab.xyz` 但 `KPEX_PASSKEY_RELYING_PARTY` 是**别的域** ⇒ 在
-       `rp.testlab.xyz` 上发断言时该条目**是否**被 `findEntriesForRpId` 的 URL 兜底捞出
-       （捞到即为兜底越界，须改代码）。
-     - 每条都要留**两侧读数**：Chrome 侧（是否弹账号选择器 / `get()` 成功或 `NotAllowedError`）
-       与本应用侧（`dumpsys` / logcat 里 provider 是否被调、`GetCredentialRequest` 的
-       `filteringCriteria` 原文、有没有走到签名分支）。
-  6. **顺带收口 `ISSUE-P3-337` 未决 6 的实测出口**：在同一条链路上做「先注册、再导入同一把、
-     再断言」，回读 RP 侧对**计数器大幅跳变**的实际判定（接受 / 判克隆）；读数须写明
-     「实验室自搭 RP 不代表全网 RP 的严判行为」。
-
-- **验收标准**：
-  - **AC①** 正向两条均在 Chrome 出候选并完成 `GetAssertion`（含公钥/签名可被 RP 验签通过）；
-  - **AC②** 负向五条**一律不出候选**，且**不泄露账号存在性**（不得出现「该域下有 N 个账号」
-    之类的可区分响应——假站只应看到「无凭据」，与真站无该凭据时**完全同形**）；
-  - **AC③** URL 兜底分支的越界读数单独成条：若仿冒域经条目 URL 被捞出 ⇒ 本条**当场升级**，
-    修 `findEntriesForRpId` 的兜底条件（passkey 条目不得按 URL 参与 passkey 检索），
-    并补宿主用例锁「passkey 检索只认 `passkey.rpId`」；
-  - **AC④** 实验室脚本与夹具**可复跑**（`tools/passkey-phish-lab/` 内含 README 与一条总入口，
-    读数原样进批次文档；不得只留手工点击的口头结论）；
-  - **AC⑤** 全量 `test --rerun-tasks --max-workers=1` 与 `gate_readings.py` 7/7 PASS；
-    改动若涉设备面，按 `AGENTS.md` §5 设备纪律执行——
-    ⚠️ **§263 前置闸门适用**：实验一律在 AVD `Pixel_10` 上做；在连的小米 M332BF 装的是
-    **真实密码库**，禁跑 `connectedDebugAndroidTest`、也**禁止**往里导入实验室凭据。
-  - **AC⑥ 分级规则（写死，防止把缺陷当体验问题拖着）**：AC② / AC③ 任一不成立 ⇒ 本条**立即**
-    按 P0/P1 重评并另立缺陷条目（认证层可被绕过不属「低危」），本条只留实验室与读数作证据。
-
-- **初版实验室设计的两处概念错误（2026-09-27 由用户质疑照出，先更正再动手）**：
-  1. ⚠️ **威胁模型不真实**：初版靠「`adb root` 注系统 CA + 改 `/system/etc/hosts`」把仿冒域名
-     弄进模拟器，可**真实攻击者没有设备篡改能力**——他只有公开 DNS 与一张有效证书
-     （免费 ACME 恰恰是钓鱼站的常态）。⇒ 该路线即使跑通也**不构成证据**（它测的是"我改了设备"
-     而不是"应用挡得住钓鱼"）。设备侧篡改已全部撤销：注入的 `cfff3353.0` 已删
-     （`/system/etc/security/cacerts` 回到 143 条）、`/system/etc/hosts` 的 `testlab.xyz` 条目已清空。
-  2. ⚠️ **命名口径把「公共后缀」当成「可注册域」**：`xyz` 才是公共后缀，所以
-     `rp.testlab.xyz` 与 `rp.testlab.xyz.phish.testlab.xyz` 的 eTLD+1 **同为 `testlab.xyz`**
-     ⇒ 对 WebAuthn 它们是**同站**，拿这套名字去跑浏览器矩阵等于什么都没测
-     （正负向会给出同样的结果，又是一次假绿）。
-     **代码层不受此影响**：`isDomainMatch` 走的是标签后缀判定（`d2.endsWith("."+d1)`），
-     前缀堆叠形态实测三条均正确拒绝；已在 `CredentialProviderLookalikeMatchTest`
-     里显式锁住 `rp.testlab.xyz.evil.xyz` 与 `rp.testlab.xyz.phish.testlab.xyz` 两种堆叠。
-- **真实场景的取证载体（取代上面两条）**：需要**两个互不为后缀的可注册域 + 公开可信证书**，
-  零设备篡改。已核实的低成本途径（依据即随仓 PSL 的私有段：`github.io` / `gitlab.io`
-  / `pages.dev` / `vercel.app` / `ngrok.io` 均**在册** ⇒ 这些共享后缀下的每个项目**各自**
-  是一个可注册域）：
-  - 受害方：`<victim>.github.io`（GitHub Pages 自带公网可信证书）；
-  - 仿冒方：另一个独立可注册域，且把受害方域名**整串做成它的前缀**（需要一方我给得起
-    通配记录 + ACME DNS-01 的 DNS 区，例如便宜域或支持通配的子域服务商）；
-  - ⚠️ 该路线会把实验室页面**发布到公网**（外部服务），须用户明确批准后方可执行；
-    不批准则按下面的收窄口径归档。
-- **若不做浏览器半环，允许归档的声称范围**（不得写得比这更多）：
-  「仿冒 origin 不出候选」这一判据**只在代码层被证**（`CredentialProviderLookalikeMatchTest`）；
-  Chrome → 系统 CM → provider 的真链路未证，其风险由上游 Chrome 的 rpId 校验兜住
-  ——**这是假设，不是实测**，须在限界表登记为残余风险。
-
-- **真机与公网证书实测（2026-09-27 续，按用户「连上真实手机了，继续测试」）**：
-  载体已换成**公网真证书**、零信任篡改——cloudflared 临时隧道给出 `*.trycloudflare.com`
-  （该后缀在随仓 PSL 私有段在册 ⇒ 每条隧道**各自**是一个可注册域，两条隧道即矩阵需要的形状），
-  宿主 `curl` 不带 `--cacert` 即校验通过（`ssl_verify_result=0`）。之前的 CA 注入与 hosts 篡改
-  **已全部撤销**（hosts 里 `trycloudflare` 条目 `grep -c` = 0，`/system` 重新只读）。
-  新增 `tools/passkey-phish-lab/static_rp.py` + `web/index.html`（自跑页：免点击、
-  结果既渲染进 DOM 又 POST 回 `/report` 落 JSONL）。读数：
-  1. **基线**（库内无该域凭据）：页面回报 `outcome=threw`
-     `NotAllowedError: The operation either timed out or was not allowed…`（`ms=35379`）。
-     这一条是后面所有负向读数的**同形参照**（AC② 要的正是「假站所见与它完全一致」）。
-  2. ⚠️ **正向对照取不到，且原因不在本应用**：AVD 先报
-     「设置屏锁后，才能使用通行密钥」（平台自身闸门，`locksettings set-pin` 后可继续）；
-     再跑即弹「未发现任何通行密钥」——而库内那一刻**确实有**一把 rpId 等于该隧道域的凭据
-     （相册导入成功、编辑页 rpId 已回显）。logcat 给出根因：
-     `Auth.Api.Credentials(1666): [GetRemotePasskeyOperation] Operation started.` /
-     `Remote Entry should be available. Allowlist is null.`（pid 1666 = `com.google.android.gms`），
-     而本应用 provider 的日志标签在这份缓冲里**命中 0 次**
-     ⇒ `google_apis`（无 Play）镜像上通行密钥请求被 **GMS 自己的 FIDO 栈**接走，
-     **第三方 Credential Provider 从未被绑定调用**。也就是说：这台机器连"真域该醒"都递不到我们面前，
-     因而**无法**用它判"仿冒域不该醒"。
-  3. **真手机（Redmi 4X，LineageOS / Android 17，无 GMS）**：`credential_service_primary` 指向本应用、
-     AOSP `com.android.credentialmanager` 在场、公网 DNS 正常（能解析隧道域名并 `ping` 通），
-     但唯一的浏览器 Firefox 里 `navigator.credentials.get()` **永不返回**（页面无结局、
-     `/report` 零读数、provider 侧零 logcat）⇒ 该 ROM 上没有「会把 WebAuthn 交给平台 CM」的浏览器。
-     顺带取到一条 Q1 的真机读数：无障碍转储里出现
-     `packageName: com.keepasskey; text: 扫码 / 相册导入通行密钥` ⇒ 编辑页附加入口在真机渲染成立。
-  4. 本机网络另实测到：模拟器**出去的 UDP/53 全不可达**（`-dns-server` 给 8.8.8.8、
-     给路由器 192.168.1.1、再起宿主转发器三种配法都收不到查询，而宿主自身解析正常）
-     ⇒ 名字解析只剩 hosts 一条路，而 hosts 属设备篡改，遂撤；写过的 `dns_forwarder.py`
-     因**从未收到一个查询**而删除（不留没跑起来的死代码）。
-- **按本条写死的红线收口**：正向对照未成立 ⇒ 本条目下**不出现**任何「仿冒域不会唤醒」的结论；
-  浏览器半环判为**未做**（上面三条原因各自带证据）。已证的只有代码层半环（含两处修复）。
-  要跑通浏览器半环，需要下列之一：① 换 `google_apis_playstore` 镜像并登录 Google 账号
-  （GMS 的 CM 才会去绑第三方 provider）；② 真机上装一个走平台 CM 的 Chromium 系浏览器；
-  ③ 自写调用 `androidx.credentials` 的测试 APK（成本最高，且 origin 归因仍要配 DAL）。
-
-- **未决**：
-  1. ~~系统 CA 注入后 Chrome 是否采信~~ **已答（2026-09-27 实测）**：不采信——文件确实落进
-     `/system/etc/security/cacerts` 仍报 `NET::ERR_CERT_AUTHORITY_INVALID`；而
-     `thisisunsafe` 绕过后 Chrome 直接拒绝 WebAuthn（`NotAllowedError: WebAuthn is not
-     supported on sites with TLS certificate errors`）⇒ 退化路线对本条判据**无效**，不是偏差；
-  2. 实验室是否需要覆盖**注册**面（本应用作为 provider 生成凭据）：本条先做**断言/唤醒**面，
-     注册面若同批做须另计工作量（`PD-32` / `PD-33` 的 origin 归因链在假站上也要证一条「不填口令」）；
-  3. 是否把这套 lab 长期留在仓里（CI 无模拟器网络，只能本机复跑）——登记为
-     「本机可复跑、CI 不覆盖」，避免被误当作门禁。
-
-- **开工前置读数（2026-09-27 同日续探，两条会直接决定实验室可行性的硬事实）**：
-  1. ⚠️ **实验室域名不能用 `.test` / `.invalid` / `.local`**：随仓 PSL
-     `app/src/main/resources/publicsuffix/public_suffix_list.dat` 里这三条**一条都不存在**
-     （`grep -cE "^(test|invalid|local)$"` = 0），而 `PublicSuffixList` 的口径是
-     「未知 TLD ⇒ 不可注册，fail-closed」（见该类 KDoc 第 21 行与 `isRegistrableDomain`）
-     ⇒ 用 `rp.test` 做实验会让**正向也失败**，于是「仿冒域不出候选」这条负向读数**毫无意义**
-     （假绿的典型形态：两种输入给出同一个结果，看起来像通过）。
-     已确认在 PSL 内的可用 TLD：`com` / `dev` / `xyz` ⇒ 实验室改用
-     **`rp.testlab.xyz`**（正向，eTLD+1 即该域）、`sub.rp.testlab.xyz`（正向，子域允许）、
-     `rp.testlab.xyz.phish.testlab.xyz`（负向，eTLD+1 = `phish.testlab.xyz`）、
-     `rр.testlab.xyz`（西里尔 р 同形异码，验 punycode 归一）、`127.0.0.1`（IP origin）。
-     **顺带这条本身就是本条要证的口径**：本仓对 PSL 缺席的域一律拒绝参与匹配，与浏览器实际
-     eTLD+1 计算存在**潜在分歧**（浏览器内置 PSL 与我们的资源版本可能不同步）——
-     取样时须比对「Chrome 认为的 rpId」与「本应用认为的 eTLD+1」是否同值。
-  2. **信任锚注入这条路比预想的硬**：AVD 上 `adb root` 可用（`uid=0` / `context=u:r:su:s0`、
-     `ro.debuggable=1`、`userdebug`），但 `adb remount` 与 `adb disable-verity` 都报
-     **`Device must be bootloader unlocked`** ⇒ 现镜像下 `/system/etc/security/cacerts`（143 条）**写不进去**。
-     候选路线（下一步逐条试，试不通就换）：
-     ① 重启模拟器时加 `-writable-system`（通常同时放行 verity 关闭）后再 `adb root && adb remount`；
-     ② 走**用户级 CA** 安装（Settings → 安全 → 凭据 → 安装 CA）——但 Chrome for Android
-     对用户级 anchor 的态度需实测，若拒绝则本路线作废；
-     ③ 放弃浏览器半环，改测**provider 判定半环**：`adb shell cmd -l | grep -i cred` 确实列出了
-     `credential` 服务，**但** `cmd credential help` 回 `No shell command implementation`
-     ⇒ **本路线在 AVD 上不通**（2026-09-27 实测），无 shell 入口可直接下发 `GetCredentialRequest`；
-     若日后要走这条，只剩「自写一个调用 `androidx.credentials` 的测试 APK」，而 CM 对 caller
-     的 origin 归因要吃 Digital Asset Links（`PD-32` / `PD-33`），未配 DAL 的测试 APK 会被
-     `CallingOriginResolver` 一侧拒掉 ⇒ 成本高于路线①，除非①②都破不通；
-     ⚠️ 采用此路线时**声称范围必须收窄**为「本应用对 rpId 的接受/拒绝判定」，
-     不得写成「Chrome 不唤醒仿冒站」（那是上游 Chrome 的 origin 校验，非本仓代码）；
-     ④ 兜底：`http://127.0.0.1:<port>` + `adb reverse` 天然算安全上下文、无需任何证书，
-     但**所有用例塌成同一个 host**，只能证「本应用对非域 origin（IP）拒绝参与」，
-     仿冒矩阵做不出来 ⇒ 它只是③之外的补充负例，不能替代实验室。
-  ⇒ 结论：**下一步先破信任锚（①→②），破不通就走③并如实收窄声称**；
-  未破之前不得在本条目下写任何「仿冒域不会唤醒」的结论。
-
-- **代码层半环（2026-09-27 已完成，不依赖浏览器）**：新增表驱动用例
-  `app/src/test/java/com/keepasskey/app/passkey/CredentialProviderLookalikeMatchTest.kt`
-  （5 例：真域 / 子域正向、四类仿冒负向、IP origin、passkey 的 URL 兜底越界、尾点与大小写），
-  **首跑即红两条 ⇒ 都是实测缺陷，已随本条修掉**：
-  ① `KeePasskeyCredentialProviderService.findMatchingEntries` 的 `urlMatch` 分支不区分条目类型
-  ⇒ 「`KPEX_PASSKEY_RELYING_PARTY` 属 A 域、条目 URL 写了 B 域」的 passkey 条目会在 B 域被列进候选：
-  签名侧另有 rpId 复核（`PasskeyAssertionActivity:139-141`）⇒ **断言交不出去**，但
-  **凭据存在性跨域泄露**，且用户一点就在签名处撞上拒绝。现收紧为「URL 兜底只服务口令 / 密码条目，
-  passkey 在域维度只认 `passkeyRpId` 一个真相源」（畸形 / 半迁移而无 rpId 的 passkey 条目本就无法
-  完成仪式，不出候选才是对的；同表保留「普通口令条目仍按 URL 命中」的正向对照防收紧过头）。
-  ② 根点归一不一致：`PublicSuffixList.normalizeHost` 去 DNS 根点而 `DomainMatcher.extractDomain` 不去
-  ⇒ 同一主机名在两个归一器手里答案不同（尾点 origin 的合法凭据不出候选）。现由 `extractDomain`
-  统一剔除末点，与 WHATWG URL（浏览器也吃掉末点）同形。
-  验证：定向 4 类先红后绿；全量 `test --rerun-tasks --max-workers=1` `BUILD SUCCESSFUL in 3m54s`、
-  `114/114 executed`、`xml=413 tests=2749 failures=0 errors=0 skipped=13`（上批 2744 + 本表 5 例）；
-  `gate_readings.py` **7/7 PASS**（`tier1=0` / `tier2=36 budget=37` / `long_functions=0` /
-  重言断言 0 命中·扫描 **471** 文件 / `allowed=12` 不受新类型名影响）。
-- **实验室已落地（`tools/passkey-phish-lab/`，含 README）**：`make_certs.py`（自建 CA + 多 SAN 服务端证书，
-  `--install` 注入设备）、`rp_server.py`（`/case/<action>/<rp>` 自跑页 + 验 `rpIdHash`/`origin`/签名 +
-  计数器跳变读数）、`minicbor.py`（无 `cbor2` 依赖的只读子集）、`run_matrix.py`（6 用例矩阵驱动 + 汇总）。
-  **浏览器半环当前判为「无效」而非通过**：首轮实跑六例全无页面读数（Chrome 不认注入的系统锚），
-  而 `run_matrix.py` 原版把它们误判为 PASS——已由本条实测触发改成
-  「无浏览器读数 ⇒ 无效，不得计为通过」（这条改动本身就是本条的价值所在：
-  P1/P2 FAIL 而 N1~N4 PASS 六个用例同一个原因，就是环境假绿）。
-  **剩余阻塞**：需要「两个互不为后缀的可注册域 + Chrome 认的信任链」——自有域名 + ACME(DNS-01)
-  最省，或企业策略放行自建 CA，或换自带信任库的浏览器（换浏览器须重述判据）。
+- **状态（2026-09-27 用户指示）**：**暂时搁置**。剩余部分需要外部资源（自有域名 + ACME DNS-01，
+  或企业策略放行自建 CA，或换自带信任库的浏览器并相应重述判据），用户裁「先精简描述、暂不做」。
+- **威胁模型（本条的立规前提，勿在后续复用时被悄悄替换）**：**真实攻击者只有公开 DNS 与公网可信证书，
+  没有任何设备篡改能力**。⇒ 早期"靠 `adb root` 注系统 CA + 改 hosts"的做法**已判为不成立并撤销**
+  （用户质疑「真实场景中你怎么可能安装别的 CA 证书，还弄到系统目录去？」）；
+  一切结论必须出自**攻击者可达的**配置。
+- **已闭环的半环（代码层，2026-09-27）**：表驱动用例首跑即红两条，都是实测越界、随批修掉——
+  ① `KeePasskeyCredentialProviderService.findMatchingEntries` 的 URL 兜底不区分条目类型
+  ⇒ 「rpId 属 A 域、条目 URL 写了 B 域」的 passkey 会被列进 B 域候选（**凭据存在性跨域泄露**，
+  签名侧另有 rpId 复核故断言交不出去，但用户一点就在签名处撞上拒绝）；收紧为
+  「URL 兜底只服务口令/密码条目，passkey 在域维度只认 `passkeyRpId` 一个真相源」；
+  ② `PublicSuffixList.normalizeHost` 去 DNS 根点而 `DomainMatcher.extractDomain` 不去
+  ⇒ 同一主机名在两个归一器手里答案不同（尾点 origin 的合法凭据不出候选，公共后缀查找却判同域）；
+  现由 `extractDomain` 统一剔除末点。新增 `CredentialProviderLookalikeMatchTest` 5 例
+  （真域/子域正向 ＋ 后缀堆叠/异域/punycode 同形/前缀粘连负向 ＋ IP origin  尾点大小写），
+  **每条负向都配同源正向对照**。⇒ 细节见 commit `0199bc69`。
+- **一条设计更正（登记以免复发）**：`rp.testlab.xyz` 与 `rp.testlab.xyz.phish.testlab.xyz` 的 eTLD+1
+  同为 `testlab.xyz` ⇒ 对 WebAuthn 是**同站**，原设计的仿冒矩阵在该形态下无效
+  （代码层不受影响，因 `isDomainMatch` 是标签后缀判定，三条堆叠负向实测均正确拒绝）。
+- **未闭环的半环（浏览器 → 系统 CM → 本应用 provider）**：**未做**，且已判死三条候选路线——
+  AVD 上 GMS 自带的 FIDO 栈会截走请求（provider 日志命中 0 次）、实验机上 Firefox 的 `get()` 永不返回、
+  `adb shell cmd credential` 无 shell 实现 ⇒ 无入口直接下发 `GetCredentialRequest`。
+  实验室载体已落地可复用：`tools/passkey-phish-lab/`（自建 CA + 多 SAN 证书、HTTPS RP 自跑页、
+  只读 CBOR 子集、6 用例矩阵驱动；`rp_server` 默认只绑 127.0.0.1，局域网零暴露）。
+  ⚠️ 该矩阵的判据本身被实测纠过一次：原版把「六例全无浏览器读数」判成 PASS——**环境假绿**，
+  已改为「无浏览器读数 ⇒ 无效，不得计为通过」。
+- **红线（不变，优先级高于任何进度）**：**在破不通真实信任锚之前，本条目下不得出现任何
+  「仿冒域不会唤醒」的结论**。今天能声称的只有「本应用对给定 rpId 的接受/拒绝判定」，
+  **不是**「Chrome 不唤醒仿冒站」（那是上游 origin 校验，未证）。
+- **载体顺带承接**：`ISSUE-P3-337` 的 AC⑧(b)（对真实 RP 完成 GetAssertion）与未决 6 计数器跳变实测出口。
+- **关联**：`ISSUE-P3-337` / `PD-32`、`PD-33`（DAL 与 caller origin 归因）/ commits
+  `db332b78`、`8e2a7700`、`fa283ea2`、`0199bc69`、`dc741803`（完整核实与读数）。
 
 ### ISSUE-P3-337：PD-08 扫码导入通行密钥落地——顶栏扫码按载荷分流（TOTP / 通行密钥），确认在先、字节通道解析、落 `KPEX_PASSKEY_*`
 
@@ -763,34 +622,13 @@
      故不入 `PD` 表）**：新增可空路由参数 `focusSection`（取值 `"passkey"`，为空即不定位），
      仅驱动编辑页滚动 / 焦点落位，**不得**承载任何凭据类值（核实 5d 的红线不变）。
      导航能力本身已核实为现成（见 5d），此项零风险。
-  4. **高密度 QR 的实际解码成功率**（2026-09-26 依核实 11 收敛为**实测项**；**第 2.5 片已实测，结论见下**）：
-     合成图曾给出**乐观 floor 2–3 px/模块**，据此判定「默认 640×480 分析流 + 文档信封载荷」
-     **余量为零**（⇒ 口径 10 提分辨率，已落地并经真机回读确认交付 1280×960）。
-     ⚠️ **本轮实测把结论收窄**：两种合成退化模型（整数最近邻+3×3均值±20噪声 / 亚像素覆盖±20噪声）
-     **互相矛盾且各自非单调**，后者在 1.98 px/模块 仍解得出 ⇒ **合成模型对相机面没有鉴别力**，
-     「相机也能扫」**不得**据任何合成表声称，必须由 AC⑧③ 实拍判定。
-     相册面：**解码层面已证**（生产解码器 `decodeQrFromPixels` 在 2400 短边、9.92~24.94 px/模块
-     的 12 个档位全部可解）；框架通路（`ContentResolver` + `BitmapFactory`）已由 §341 用户真机复验，
-     但那是普通 otpauth 码 ⇒ 当时**「同一张高密度 CXF 码经相册导入」仍待 AC⑧② 的实拍取样**。
-     ★ **2026-09-27 该待证项已收口（真机 M332BF，用户手动）**：把 `build/qr-probe-ui/` 的高密度 CXF 夹具码
-     （101 / 133 模块）**原样传进手机**再走相册导入 ⇒ **导入成功**。于是「同一张高密度 CXF 码经相册导入」
-     由待证转**已证**（通路 = `PickVisualMedia` + `BitmapFactory` 有界解码 + `decodeQrFromPixels`）。
-     ★ **同时新增一条负向读数，本项就此拆成两支**：**同一张码用相机拍下来、再从相册导入 ⇒ 解不出**。
-     两支只差在**成像链路**（1:1 像素文件 vs 真实光学采样：摩尔纹 / 反光 / 透视梯形 / 抖动，外加
-     `MAX_GALLERY_IMAGE_DIMENSION = 2400` 的降采样）⇒ 解码器与框架通路都没问题，问题在照片。
-     ⚠️ **但本条目前只有结论、没有 AC⑧② 写死的「短边像素 × 填充率 → px/模块」算式**：填充率必须量照片本身，
-     而照片在用户真机上、**未获授权搬出**（问过一轮未获答复 ⇒ 沉默不等于许可）⇒ 算式登记为**待补**。
-     在补上之前**不得**归因成「2400 上界过狠」或「相机面固有限界」——这两种归因对应**相反**的处置
-     （前者要立项改解码器，后者只需登记限界），拿没有算式的读数去选边正是本仓「真假绿」忌讳。
-     复跑入口（日后授权量到照片时照此落笔，**不新增恒跳过的空壳用例**）：宿主用例落在
-     `app/src/test/.../QrDecodeDensityTest.kt`（该文件已是 `decodeQrFromPixels` 密度扫描的正主，但其模块断言
-     带为 77–97，101/133 在带外 ⇒ 须新增独立用例）；外部磁盘资产取径照 `sync/src/test/.../LiveSyncServersTest.kt`
-     的「`System.getProperty` ?: `System.getenv` ?: 默认」+ `assumeTrue` 门控；缩放档须自造
-     （`loadGalleryPixels` / `gallerySampleSize` 均为 `private`，宿主够不着）；**不得引 zxing javase**
-     （`app/build.gradle.kts:239` 只声明 `libs.zxing.core`，读图用 JDK `ImageIO` 手摆 IntArray）。
-     取景通路（CameraX 直采，AC⑧③ 的正主）在真机上**至今零读数**：§340 那条「相机启动失败」是
-     `-camera-back none` 的 AVD 读数，**不可外推**真机相机。
-     实拍夹具已生成并登记于第 2.5 片留痕（`build/qr-probe/`，4 张码含模块数与 sha256）。
+  4. **高密度 QR 的实际解码成功率**（2026-09-27 收口为**已裁决**）：
+     相册面**已证**——真机 M332BF 上把 101 / 133 模块的 CXF 夹具码原样传进手机再走相册导入成功
+     （⇒ 本条 2026-09-26 遗留的「同一张高密度码经相册导入」待证项就此关闭）。
+     相机面**用户裁决不解决**（判为摄像机问题、与软件无关）⇒ 连同「算式未登记、
+     故既不得声称『相机能扫』、也不得声称『已证实与软件无关』」的措辞纪律，
+     一并登记于 [`已知工程限界.md` §35](architecture/已知工程限界.md)。
+     取景通路（CameraX 直采）在真机仍零读数，见同节末条。
   5. ~~`key` 成员"PKCS#8 DER 的 Base64URL"未逐字取到~~ —— **已关闭**（2026-09-26 取到 §3.3.12 原文：
      「The private key associated to this passkey instance. The value MUST be **PKCS#8 ASN.1 DER** formatted
      byte string which is then Base64url encoded.」，与 `PD-08` 第 1 项一致，已同步写入 PD-08 第 4 项补记）。
@@ -1252,7 +1090,10 @@
     对 `HEAD~1` 的 `EntryEditComponents.kt` 准确报出 `:143` 的 `Row` + `if` 两兄弟。
     当前全仓读数：组件 `['BentoCard']` / **检查过的调用点 59** / `box_slot_stacked_sites=0`
     ⇒ 「全仓已无同形态叠放」这句现在有鉴别力了（且脚本对「有组件却零站点」的假绿形态自身判红）。
-    仍待用户回报：T5 的 Q1 替换读数、T6 只读会话、T7 passkey 唤醒、T8 autofill。
+    **2026-09-27 复验结果**：A（回收站 TOTP 从验证器消失）与 C（解除后真的不再是通行密钥）
+    已由用户真机确认修复；T7 passkey 唤醒与 T8 autofill 用户判定「扫码导入之前已测过、
+    不重复测试」⇒ 不再挂为待办；T6 只读会话**报出新缺陷**，另立 `ISSUE-P2-343`；
+    仍待回报：T5 的 Q1 替换读数与 B（回收站 passkey 不进系统候选）。
     **本批验证读数（原样粘贴 `python tools/doc/gate_readings.py` 输出）**：
     `[1/7] count_line_tiers.py EXIT 0 | tier1(>500)=0 tier2(400~500)=36 budget=37` /
     `[2/7] long_functions.py EXIT 0 | functions_ge_100=0` /
