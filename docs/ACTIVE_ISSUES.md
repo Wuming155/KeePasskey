@@ -1198,10 +1198,23 @@
     读数：`:app:exportSecondaryPreviewScreenshots` 渲染图（`preview-exports/secondary/light/EntryEditTotpSectionPreview*`）
     里按钮已落在状态行**下方**、间距清晰。⚠️ **这是 JVM 预览渲染器的读数，不是设备读数**——AVD 上批次的
     测试库随会话重置丢失，本批未重建，故**没有** uiautomator `bounds` 可比对；设备侧复验由用户在 M332BF 目测。
-    **另记一条度量工具的失败（不得引用其读数）**：为查「全仓还有没有同形态的 Box 叠兄弟」写过一次性脚本
-    （`build/bento_sibling_scan.py`，已删），它**连这个已知坏样本都没扫出来** ⇒ 读数作废；本批只敢声称
-    「改动面内 5 处 `BentoCard` 调用点逐个读过、仅此一处越界」（`EntryEditComponents.kt:86/:143/:219`、
-    `EntryEditListSections.kt:79/:254`），**不声称全仓已无**。
+    ★ **2026-09-27 17:05 设备侧复验到手（真机读数）**：含本修复的 release 包（HEAD `c1784297`）经
+    `adb install -r` **原地升级**装上——装前再核 `apksigner` 证书 `f3a6f092…` 与机上
+    `signatures:[aab5104c]` 同源；装后 `lastUpdateTime` 14:48:10 → **17:05:47**，而
+    **`firstInstallTime` 仍为 2026-09-22 22:30:04**（卸载重装必重置 ⇒ 这是「未卸载、真实库未被触碰」的直接
+    证据；全程只用 `-r`，**没有** `-c` / `-d` / `--force`）。用户真机回报两条：
+    **「能正常解锁」**（库完好）与**「不再重叠在一起了」**（本缺陷的设备侧确认）。
+    ⇒ 判据等级由「仅预览渲染图」升为**预览渲染图 + 真机目测**；如实标注取证方式＝**目测，
+    非 `uiautomator bounds` 量取**（AVD 测试库未重建，bounds 对照仍缺）。
+    **另记一条度量工具的失败（其读数已作废，但教训留档）**：为查「全仓还有没有同形态的 Box 叠兄弟」写过的
+    一次性脚本（`build/bento_sibling_scan.py`，已删）**连这个已知坏样本都没扫出来** ⇒ 当时的读数不成立，
+    所以那一批只敢声称「改动面内 5 处 `BentoCard` 调用点逐个读过、仅此一处越界」，**不声称全仓已无**。
+    ★ **该限制现已解除**：同批把判据做成了正式机检 `tools/doc/check_box_slot_children.py` 并挂进
+    `hygiene-gate`（七条 → **八条**）。它自己先被内嵌坏样本反校出三处 bug（只认 `Name(` 不认裸 `Name {`、
+    没先跳过标识符本身、把 `build/` 排除口径套到自检临时目录上），修好后**用真实历史文件**反校通过：
+    对 `HEAD~1` 的 `EntryEditComponents.kt` 准确报出 `:143` 的 `Row` + `if` 两兄弟。
+    当前全仓读数：组件 `['BentoCard']` / **检查过的调用点 59** / `box_slot_stacked_sites=0`
+    ⇒ 「全仓已无同形态叠放」这句现在有鉴别力了（且脚本对「有组件却零站点」的假绿形态自身判红）。
     仍待用户回报：T5 的 Q1 替换读数、T6 只读会话、T7 passkey 唤醒、T8 autofill。
     **本批验证读数（原样粘贴 `python tools/doc/gate_readings.py` 输出）**：
     `[1/7] count_line_tiers.py EXIT 0 | tier1(>500)=0 tier2(400~500)=36 budget=37` /
