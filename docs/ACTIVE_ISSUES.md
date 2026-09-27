@@ -122,7 +122,8 @@
 >    显式豁免清单，否则主题包装器一类合理豁免会被长期判红）。
 > ② `ISSUE-P3-339` —— **用户指示暂时搁置**（浏览器半环需外部域名与信任链资源）。
 > ③ `ISSUE-P3-337` —— 相机面已按用户裁决收口于[限界表 §35](architecture/已知工程限界.md)；
->    仅剩对真实 RP 的断言，与 ② 同一载体 ⇒ 随 ② 一并搁置。
+>    对真实 RP 的断言**已部分收口**（19:55 自造凭据 + PRF 双端一致），剩余「导入同一把」的对拍
+>    与 ② 同一载体 ⇒ 随 ② 一并搁置。
 > 更早的 P3 闭环流水见 `RESOLVED_LOG.md` §326 ~ §342。
 
 ### ISSUE-P3-342：编辑页「绑定 / 解除」是静默失效的控件（`isPasskey` 从不落盘）
@@ -250,7 +251,10 @@
 - **一条设计更正（登记以免复发）**：`rp.testlab.xyz` 与 `rp.testlab.xyz.phish.testlab.xyz` 的 eTLD+1
   同为 `testlab.xyz` ⇒ 对 WebAuthn 是**同站**，原设计的仿冒矩阵在该形态下无效
   （代码层不受影响，因 `isDomainMatch` 是标签后缀判定，三条堆叠负向实测均正确拒绝）。
-- **未闭环的半环（浏览器 → 系统 CM → 本应用 provider）**：**未做**，且已判死三条候选路线——
+- **未闭环的半环（浏览器 → 系统 CM → 本应用 provider）**：**未做仿冒域矩阵**，且已判死三条候选路线——
+  ⚠️ **但「能不能到达 provider」这一项已由真机读数排除**（2026-09-27 19:55，`mark.via` →
+  系统 CM → 本应用 provider → 断言，RP 侧 AAGUID 等于本应用 `DEFAULT_AAGUID`；
+  见 `ISSUE-P3-337` 的「19:55 真实 RP 的 PRF 端到端读数」）⇒ 剩余阻塞**只剩**域名与信任链。
   AVD 上 GMS 自带的 FIDO 栈会截走请求（provider 日志命中 0 次）、实验机上 Firefox 的 `get()` 永不返回、
   `adb shell cmd credential` 无 shell 实现 ⇒ 无入口直接下发 `GetCredentialRequest`。
   实验室载体已落地可复用：`tools/passkey-phish-lab/`（自建 CA + 多 SAN 证书、HTTPS RP 自跑页、
@@ -1046,11 +1050,14 @@
     同时**相册入口仍可见可点**（§340 的降级口径在设备面得证）。「相机能扫」仍**无任何证据**，
     该读数也不能外推到真机相机；（**2026-09-27 后续**：真机 M332BF 上「权限被拒 ⇒ 相册仍可导入」已另取得
     一条独立读数，见下方「真机手测读数」块 ③；但**取景通路本身在真机仍零读数**，本条判据不变）
-    (b) **「导入的通行密钥能经 CM 通道对真实 RP 完成 GetAssertion」未做**——本轮只证到
-    「导入件在本库内可被消费」（PEM / 曲线 / PRF / 保护位 / 官方实现读数），
-    未证到端到断言。真实 RP 侧还需要一个「能导出 CXF 的注册方」（自搭 RP，或按本条既有口径
-    取「同库自造凭据先注册一次、再导入同一把」的对拍），且须写明该对拍不代表全网 RP 的严判行为；
-    未决 6 的实测出口同样挂在 (b)。**取哪种口径需用户决定**（自搭 RP 是独立工作量）。
+    (b) **「导入的通行密钥能经 CM 通道对真实 RP 完成 GetAssertion」——部分收口（2026-09-27）**：
+    当日 19:55 用户截图给出真实 RP（WebAuthn PRF Extension Demo，`mark.via`）上的端到端读数——
+    注册与认证两侧 AAGUID 逐字节等于本应用 `DEFAULT_AAGUID`、PRF 三项全绿且
+    「PRF value obtained and identical to registration」⇒ **断言链与 PRF 派生已被真实 RP 验证**
+    （详见下方「19:55 真实 RP 的 PRF 端到端读数」）。
+    **未收口的部分**：被断言的是本库**自造**那枚，而本条要求的是**导入**那枚；
+    预授权的「先注册、再从相册导入同一把」对拍仍需一个能导出 CXF 的注册方。
+    未决 6（计数器跳变）的实测出口同样挂在 (b) 的剩余部分——该 demo 不查计数器，故未获得读数。
     ⇒ **2026-09-27 已立项 `ISSUE-P3-339`**：本地 RP 实验室 + 四类仿冒 origin 的「该醒 / 不该醒」
     双向验证，(b) 项与未决 6 的实测出口都并入该条载体，本条不再单独排期。
     本条为**取样记录，代码零改动**：复跑 `gate_readings.py` **7/7 PASS**
@@ -1109,10 +1116,36 @@
     → `19:26:28` 再次 `executeGetCredential`，系统 CM 的 `providerEnabledList` 明确列出
     `com.keepasskey/…KeePasskeyCredentialProviderService`，`19:26:29` 进入 `PasskeyAssertionActivity`。
     ⇒ 这条链在真机上完整跑通：**浏览器 → 系统 CM → 本应用 provider → 断言 Activity**。
-    ⚠️ **但它不构成本条 AC⑧(b) 的收口**：被断言的凭据是**当场注册**的，不是**相册导入**的那枚
-    ——「导入件能否对真实 RP 完成断言」仍未证，读数不得互相顶替。
+    ⚠️ **它只证到「自造凭据」那一半**：被断言的凭据是**当场注册**的，不是**相册导入**的那枚
+    （导入件的收口状态见下一条 19:55 读数）。读数不得互相顶替。
     （另记一条生态观察：同一次请求里 `providerDisabledList` 含 `com.kunzisoft.keepass.libre`，
     即参考实现 KeePassDX 的 provider 在本机被禁用，不影响本条判据。）
+
+  - **★ 2026-09-27 19:55 真实 RP 的 PRF 端到端读数（用户截图，`mark.via` 浏览器）**：
+    页面「WebAuthn PRF Extension Demo」自报环境 `Browser: Mobile Chrome 148.0.0.0 / OS: Android`，
+    三项全绿：**PRF Support on Creation** / **PRF Value on Creation (CTAP 2.2+)** /
+    **PRF Support during Authentication**；结论行
+    「**Authentication successful! PRF value obtained and identical to registration**」。
+    认证器栏注册与认证两侧 AAGUID **同为** `d8a7de40-8975-5786-bd94-605287e4357f`，
+    标 `Platform (local)` 与 `Synced Passkey (BE=1, BS=1)`。
+    - **归属核实过，不是推定**：该 AAGUID 逐字节等于
+      `crypto/src/main/java/com/keepasskey/crypto/passkey/PasskeyCryptoEngine.kt:74 DEFAULT_AAGUID`
+      ⇒ **RP 看到的是本应用自建认证器**，不是 GMS / 平台凭据
+      （AVD 上「被 GMS 自己的 FIDO 栈截走」那类干扰在此排除）。
+    - **证到了什么**：`PasskeyPrf` 的客户端 salt 构造
+      （`clientSideProcess` = `SHA-256("WebAuthn PRF" ‖ 0x00 ‖ input)`、种子原样作 HMAC 密钥、无额外派生）
+      在**注册与认证两次仪式上都与真实 RP 算得一致**——「identical to registration」即此。
+      这是 `PD-48` 裁决二 / `PD-49` 裁决二所依赖的「prf 只消费 withUV 那一枚」在真实 RP 面上的
+      **首次正面读数**；`BE=1 / BS=1` 也是本应用写入的备份标志第一次被 RP 如实读出并展示。
+    - ⚠️ **仍不构成 AC⑧(b) 的完全收口**（边界写住）：被断言的凭据是本库**自造**（当场注册）那枚，
+      而 AC⑧(b) 原文要求「**导入的**通行密钥」。本条预授权的「先注册、再从相册导入**同一把**」对拍
+      **仍未做**（该页面不提供 CXF 导出）。⇒ 状态改判**部分收口**：断言链与 PRF 双端一致已由真实 RP
+      验证；「导入件与自造件在断言路径上同构」仍属代码层推定（两者同为 `KPEX_PASSKEY_*` 承载的
+      `PasskeyData`），**不得**据此声称「导入的凭据已对真实 RP 验证通过」。
+      本读数同样**不代表全网 RP 的严判行为**（该 demo 不校验 attestation 格式、不查计数器跳变）。
+    - **对 `ISSUE-P3-339` 的连带影响（记在这里以免丢失）**：浏览器 → 系统 CM → 本应用 provider
+      这一跳在真机上**已确认可用** ⇒ 339 浏览器半环的剩余阻塞**只剩**「两个互不为后缀的可注册域 +
+      浏览器认的信任链」，不再包含「能不能到达 provider」这一项。
     **本批验证读数（原样粘贴 `python tools/doc/gate_readings.py` 输出）**：
     `[1/7] count_line_tiers.py EXIT 0 | tier1(>500)=0 tier2(400~500)=36 budget=37` /
     `[2/7] long_functions.py EXIT 0 | functions_ge_100=0` /
