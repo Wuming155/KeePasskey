@@ -135,6 +135,33 @@
   - **AC⑥ 分级规则（写死，防止把缺陷当体验问题拖着）**：AC② / AC③ 任一不成立 ⇒ 本条**立即**
     按 P0/P1 重评并另立缺陷条目（认证层可被绕过不属「低危」），本条只留实验室与读数作证据。
 
+- **初版实验室设计的两处概念错误（2026-09-27 由用户质疑照出，先更正再动手）**：
+  1. ⚠️ **威胁模型不真实**：初版靠「`adb root` 注系统 CA + 改 `/system/etc/hosts`」把仿冒域名
+     弄进模拟器，可**真实攻击者没有设备篡改能力**——他只有公开 DNS 与一张有效证书
+     （免费 ACME 恰恰是钓鱼站的常态）。⇒ 该路线即使跑通也**不构成证据**（它测的是"我改了设备"
+     而不是"应用挡得住钓鱼"）。设备侧篡改已全部撤销：注入的 `cfff3353.0` 已删
+     （`/system/etc/security/cacerts` 回到 143 条）、`/system/etc/hosts` 的 `testlab.xyz` 条目已清空。
+  2. ⚠️ **命名口径把「公共后缀」当成「可注册域」**：`xyz` 才是公共后缀，所以
+     `rp.testlab.xyz` 与 `rp.testlab.xyz.phish.testlab.xyz` 的 eTLD+1 **同为 `testlab.xyz`**
+     ⇒ 对 WebAuthn 它们是**同站**，拿这套名字去跑浏览器矩阵等于什么都没测
+     （正负向会给出同样的结果，又是一次假绿）。
+     **代码层不受此影响**：`isDomainMatch` 走的是标签后缀判定（`d2.endsWith("."+d1)`），
+     前缀堆叠形态实测三条均正确拒绝；已在 `CredentialProviderLookalikeMatchTest`
+     里显式锁住 `rp.testlab.xyz.evil.xyz` 与 `rp.testlab.xyz.phish.testlab.xyz` 两种堆叠。
+- **真实场景的取证载体（取代上面两条）**：需要**两个互不为后缀的可注册域 + 公开可信证书**，
+  零设备篡改。已核实的低成本途径（依据即随仓 PSL 的私有段：`github.io` / `gitlab.io`
+  / `pages.dev` / `vercel.app` / `ngrok.io` 均**在册** ⇒ 这些共享后缀下的每个项目**各自**
+  是一个可注册域）：
+  - 受害方：`<victim>.github.io`（GitHub Pages 自带公网可信证书）；
+  - 仿冒方：另一个独立可注册域，且把受害方域名**整串做成它的前缀**（需要一方我给得起
+    通配记录 + ACME DNS-01 的 DNS 区，例如便宜域或支持通配的子域服务商）；
+  - ⚠️ 该路线会把实验室页面**发布到公网**（外部服务），须用户明确批准后方可执行；
+    不批准则按下面的收窄口径归档。
+- **若不做浏览器半环，允许归档的声称范围**（不得写得比这更多）：
+  「仿冒 origin 不出候选」这一判据**只在代码层被证**（`CredentialProviderLookalikeMatchTest`）；
+  Chrome → 系统 CM → provider 的真链路未证，其风险由上游 Chrome 的 rpId 校验兜住
+  ——**这是假设，不是实测**，须在限界表登记为残余风险。
+
 - **未决**：
   1. ~~系统 CA 注入后 Chrome 是否采信~~ **已答（2026-09-27 实测）**：不采信——文件确实落进
      `/system/etc/security/cacerts` 仍报 `NET::ERR_CERT_AUTHORITY_INVALID`；而
