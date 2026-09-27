@@ -48,12 +48,93 @@
 > 已全部闭环：§315（309 / 312）、§317（308）、§318（310）、§319（311）、§320（313）；
 > 2026-09-25 CI 设备门禁与供应链扫描两条（`ISSUE-P2-314` / `ISSUE-P2-315`）闭环见 §325。
 
-## P3 低危问题、特性接线与体验优化（1 项）
+## P3 低危问题、特性接线与体验优化（2 项）
 
-> **开放项 1 条**（`ISSUE-P3-337` 扫码导入通行密钥，2026-09-26 立项；开工顺序①~⑥已完成，
-> ⑦ 的相册通路端到端取样已完成（见留痕「第 5 片（前半）」），仅剩相机实拍与对真实 RP 的断言）。
+> **开放项 2 条**：
+> ① `ISSUE-P3-339` 仿冒域唤醒验证（2026-09-27 立项，**下一步即做它**）——本地 RP 实验室 +
+> 四类仿冒origin，验「真域能唤醒并完成断言、仿冒域不唤醒且不泄露账号存在」；
+> ② `ISSUE-P3-337` 扫码导入通行密钥（2026-09-26 立项；开工顺序①~⑥已完成，
+> ⑦ 的相册通路端到端取样已完成（见留痕「第 5 片（前半）」），仅剩相机实拍与对真实 RP 的断言，
+> 后者与本条 ① 的实验室是同一套载体 ⇒ 339 建好后 337 的 (b) 顺势收口）。
 > 2026-09-26 注册响应 `transports` 撤回虚报 `hybrid`（`ISSUE-P3-338`）闭环见 §342；
 > 更早的 P3 闭环流水见 `RESOLVED_LOG.md` §326 ~ §341。
+
+### ISSUE-P3-339：仿冒域能否唤醒通行密钥——本地 RP 实验室 + 四类仿冒 origin 的「该醒 / 不该醒」双向验证
+
+- **核实时间点与方式（2026-09-27，AVD `Pixel_10` 直读，非推定）**：
+  1. **载体已具备**：`settings list secure` 读到
+     `credential_service_primary = com.keepasskey.app/…KeePasskeyCredentialProviderService`
+     ⇒ 本 AVD 的通行密钥提供方**已指向本应用**；`pm list packages` 有
+     `com.android.credentialmanager` / `com.google.android.gms` / `com.android.chrome`
+     ⇒ 「浏览器 → 系统 CM → 本应用 provider」这条链在模拟器上是**完整可跑**的（不需要真机）；
+     `ro.debuggable=1` + `userdebug` ⇒ `adb root` 可用，系统 CA 注入这条路**不被 ROM 挡**。
+  2. **本仓已证到哪**：`ISSUE-P3-337` 第 5 片（前半）只证到「导入件在**库内**可被消费」
+     （PEM/曲线/PRF/保护位 + `pykeepass` / `keepassxc-cli` 双实现读数），
+     **从未**跑过一次真实的 `GetAssertion` 唤醒；AC⑧ 的 (b) 项至今空着（见该条留痕）。
+  3. **域匹配的既有实现位置**（下一步要逐条对照的代码）：`app/passkey/DomainMatcher.kt`
+     （eTLD+1 判定，接 Mozilla PSL）+ `PublicSuffixList.kt` + `CallingOriginResolver.kt`
+     （调用方来源归因）+ `PasskeyAssertionRequest` / `findEntriesForRpId`（候选检索：
+     ⚠️ 该方法除 `passkey.rpId` 域匹配外**还有「条目 URL 域匹配」兜底分支**，
+     仿冒域能否经这条兜底被捞出来，是本条要证的第一号问题）；
+     注册侧另有 `CredentialManagerPackageBindingGate` / `BrowserRemedyBuilder`（特权浏览器白名单）
+     ⇒ 唤醒面与授权面是**两道不同的门**，验收要分开写。
+
+- **为什么要做（这是 WebAuthn 的核心卖点，不是锦上添花）**：
+  通行密钥相对口令的唯一实质优势是「**私钥绑定 origin，仿冒站拿不到断言**」。本仓此前只做过
+  域匹配算法的**宿主单测**（`DomainMatcherTest` 一类），从未在「Chrome 真发 `get()` → CM 真问
+  provider → 本应用真出候选」这条链上证伪过；一旦某类仿冒形态（同后缀堆叠、同形异码、尾点、
+  `android://` 与 web 域混用）在这条链上被放行，用户会在假站按下指纹并把断言交出去 ⇒
+  **属可直接被利用的认证层缺陷**。
+
+- **整改口径（实验室设计，全部本地、不接公网、不碰真实密码库）**：
+  1. **RP 服务端**：复用 `tools/local-sync/` 的自签 CA 形态，新增一个极简 WebAuthn RP
+     （注册 + 断言两个端点 + 一个 challenge 会话），落 `tools/passkey-phish-lab/`；
+     端口与既有 9443 / 9000 错开，**只绑回环与模拟器网段**。
+  2. **名字解析**：模拟器启动加 `-dns-server <宿主IP>`，宿主侧起一个最小 DNS 应答
+     `rp.test` / `sub.rp.test` / `rp.test.phish.test` / `rpñ.test`（punycode `xn--…`）/
+     `rp.test.`（尾点）全部指向宿主 ⇒ 一套服务多域名，**不动 hosts、不需要公网 DNS**。
+  3. **证书信任**：`adb root` + `-writable-system` 把实验室根 CA 注入系统信任锚
+     （`/system/etc/security/cacerts/<hash>.0`）；不可行则退到「Chrome 逐次点 Advanced→Proceed」
+     并**如实登记**该退化对结论的影响（安全提示页被点掉本身是一条读数）。
+  4. **凭据来源**：一律用 `ISSUE-P3-337` 已跑通的**相册导入**通路把已知凭据放进**测试库**
+     （模拟器上新建的 `probeui.kdbx` 一类），不触碰真实库；导入 rpId 与实验室域名逐一对应。
+  5. **取样矩阵（正向 2 + 负向 6，缺一项不得声称「双向都验过」）**：
+     - ✅ 应唤醒：`rp.test`（精确同 eTLD+1）、`sub.rp.test`（同 eTLD+1 的子域，规范允许）；
+     - ❌ 不应唤醒：`rp.test.phish.test`（把真域**堆在后缀**里）、`phish.test`、
+       `rn.test` / `rp.test` 的同形异码（punycode 形态）、`rpTEST.test` 大小写与尾点变体、
+       `10.0.2.2`（IP origin）、以及**URL 兜底**分支专用的一条：库里条目 URL 写
+       `https://rp.test` 但 `KPEX_PASSKEY_RELYING_PARTY` 是**别的域** ⇒ 在 `rp.test` 上发断言时
+       该条目**是否**被 `findEntriesForRpId` 的 URL 兜底捞出（捞到即为兜底越界，须改代码）。
+     - 每条都要留**两侧读数**：Chrome 侧（是否弹账号选择器 / `get()` 成功或 `NotAllowedError`）
+       与本应用侧（`dumpsys` / logcat 里 provider 是否被调、`GetCredentialRequest` 的
+       `filteringCriteria` 原文、有没有走到签名分支）。
+  6. **顺带收口 `ISSUE-P3-337` 未决 6 的实测出口**：在同一条链路上做「先注册、再导入同一把、
+     再断言」，回读 RP 侧对**计数器大幅跳变**的实际判定（接受 / 判克隆）；读数须写明
+     「实验室自搭 RP 不代表全网 RP 的严判行为」。
+
+- **验收标准**：
+  - **AC①** 正向两条均在 Chrome 出候选并完成 `GetAssertion`（含公钥/签名可被 RP 验签通过）；
+  - **AC②** 负向五条**一律不出候选**，且**不泄露账号存在性**（不得出现「该域下有 N 个账号」
+    之类的可区分响应——假站只应看到「无凭据」，与真站无该凭据时**完全同形**）；
+  - **AC③** URL 兜底分支的越界读数单独成条：若仿冒域经条目 URL 被捞出 ⇒ 本条**当场升级**，
+    修 `findEntriesForRpId` 的兜底条件（passkey 条目不得按 URL 参与 passkey 检索），
+    并补宿主用例锁「passkey 检索只认 `passkey.rpId`」；
+  - **AC④** 实验室脚本与夹具**可复跑**（`tools/passkey-phish-lab/` 内含 README 与一条总入口，
+    读数原样进批次文档；不得只留手工点击的口头结论）；
+  - **AC⑤** 全量 `test --rerun-tasks --max-workers=1` 与 `gate_readings.py` 7/7 PASS；
+    改动若涉设备面，按 `AGENTS.md` §5 设备纪律执行——
+    ⚠️ **§263 前置闸门适用**：实验一律在 AVD `Pixel_10` 上做；在连的小米 M332BF 装的是
+    **真实密码库**，禁跑 `connectedDebugAndroidTest`、也**禁止**往里导入实验室凭据。
+  - **AC⑥ 分级规则（写死，防止把缺陷当体验问题拖着）**：AC② / AC③ 任一不成立 ⇒ 本条**立即**
+    按 P0/P1 重评并另立缺陷条目（认证层可被绕过不属「低危」），本条只留实验室与读数作证据。
+
+- **未决**：
+  1. 系统 CA 注入后 Chrome 是否采信（`userdebug` 镜像行为待实测）；不可行则改用
+     「点掉安全提示」的退化取样并声明其对 `NotAllowedError` 判据的影响；
+  2. 实验室是否需要覆盖**注册**面（本应用作为 provider 生成凭据）：本条先做**断言/唤醒**面，
+     注册面若同批做须另计工作量（`PD-32` / `PD-33` 的 origin 归因链在假站上也要证一条「不填口令」）；
+  3. 是否把这套 lab 长期留在仓里（CI 无模拟器网络，只能本机复跑）——登记为
+     「本机可复跑、CI 不覆盖」，避免被误当作门禁。
 
 ### ISSUE-P3-337：PD-08 扫码导入通行密钥落地——顶栏扫码按载荷分流（TOTP / 通行密钥），确认在先、字节通道解析、落 `KPEX_PASSKEY_*`
 
@@ -844,6 +925,8 @@
     未证到端到断言。真实 RP 侧还需要一个「能导出 CXF 的注册方」（自搭 RP，或按本条既有口径
     取「同库自造凭据先注册一次、再导入同一把」的对拍），且须写明该对拍不代表全网 RP 的严判行为；
     未决 6 的实测出口同样挂在 (b)。**取哪种口径需用户决定**（自搭 RP 是独立工作量）。
+    ⇒ **2026-09-27 已立项 `ISSUE-P3-339`**：本地 RP 实验室 + 四类仿冒 origin 的「该醒 / 不该醒」
+    双向验证，(b) 项与未决 6 的实测出口都并入该条载体，本条不再单独排期。
     本条为**取样记录，代码零改动**：复跑 `gate_readings.py` **7/7 PASS**
     （`tier1(>500)=0` / `tier2=36 budget=37` / `long_functions=0` / `BROKEN_MD_LINKS=0` /
     `RESOLVED_INDEX_SYNC=OK` / 重言断言 0 命中·470 文件 / `allowed=12`）。
