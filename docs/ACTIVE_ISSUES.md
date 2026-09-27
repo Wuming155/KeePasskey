@@ -54,8 +54,9 @@
 > ① `ISSUE-P3-339` 仿冒域唤醒验证（2026-09-27 立项，**下一步即做它**）——本地 RP 实验室 +
 > 四类仿冒origin，验「真域能唤醒并完成断言、仿冒域不唤醒且不泄露账号存在」；
 > ② `ISSUE-P3-337` 扫码导入通行密钥（2026-09-26 立项；开工顺序①~⑥已完成，
-> ⑦ 的相册通路端到端取样已完成（见留痕「第 5 片（前半）」），仅剩相机实拍与对真实 RP 的断言，
-> 后者与本条 ① 的实验室是同一套载体 ⇒ 339 建好后 337 的 (b) 顺势收口）。
+> ⑦ 的相册通路端到端取样已完成（见留痕「第 5 片（前半）」），且 **2026-09-27 真机 M332BF 手测已把
+> 「高密度 CXF 码经相册导入」由待证转为已证**（留痕「真机手测读数」块）；同批修掉编辑页 Q1 按钮叠字缺陷）
+> ⇒ 仅剩相机实拍与对真实 RP 的断言，后者与本条 ① 的实验室是同一套载体 ⇒ 339 建好后 337 的 (b) 顺势收口。
 > 2026-09-26 注册响应 `transports` 撤回虚报 `hybrid`（`ISSUE-P3-338`）闭环见 §342；
 > 更早的 P3 闭环流水见 `RESOLVED_LOG.md` §326 ~ §341。
 
@@ -644,7 +645,25 @@
      「相机也能扫」**不得**据任何合成表声称，必须由 AC⑧③ 实拍判定。
      相册面：**解码层面已证**（生产解码器 `decodeQrFromPixels` 在 2400 短边、9.92~24.94 px/模块
      的 12 个档位全部可解）；框架通路（`ContentResolver` + `BitmapFactory`）已由 §341 用户真机复验，
-     但那是普通 otpauth 码 ⇒ **「同一张高密度 CXF 码经相册导入」仍待 AC⑧② 的实拍取样**。
+     但那是普通 otpauth 码 ⇒ 当时**「同一张高密度 CXF 码经相册导入」仍待 AC⑧② 的实拍取样**。
+     ★ **2026-09-27 该待证项已收口（真机 M332BF，用户手动）**：把 `build/qr-probe-ui/` 的高密度 CXF 夹具码
+     （101 / 133 模块）**原样传进手机**再走相册导入 ⇒ **导入成功**。于是「同一张高密度 CXF 码经相册导入」
+     由待证转**已证**（通路 = `PickVisualMedia` + `BitmapFactory` 有界解码 + `decodeQrFromPixels`）。
+     ★ **同时新增一条负向读数，本项就此拆成两支**：**同一张码用相机拍下来、再从相册导入 ⇒ 解不出**。
+     两支只差在**成像链路**（1:1 像素文件 vs 真实光学采样：摩尔纹 / 反光 / 透视梯形 / 抖动，外加
+     `MAX_GALLERY_IMAGE_DIMENSION = 2400` 的降采样）⇒ 解码器与框架通路都没问题，问题在照片。
+     ⚠️ **但本条目前只有结论、没有 AC⑧② 写死的「短边像素 × 填充率 → px/模块」算式**：填充率必须量照片本身，
+     而照片在用户真机上、**未获授权搬出**（问过一轮未获答复 ⇒ 沉默不等于许可）⇒ 算式登记为**待补**。
+     在补上之前**不得**归因成「2400 上界过狠」或「相机面固有限界」——这两种归因对应**相反**的处置
+     （前者要立项改解码器，后者只需登记限界），拿没有算式的读数去选边正是本仓「真假绿」忌讳。
+     复跑入口（日后授权量到照片时照此落笔，**不新增恒跳过的空壳用例**）：宿主用例落在
+     `app/src/test/.../QrDecodeDensityTest.kt`（该文件已是 `decodeQrFromPixels` 密度扫描的正主，但其模块断言
+     带为 77–97，101/133 在带外 ⇒ 须新增独立用例）；外部磁盘资产取径照 `sync/src/test/.../LiveSyncServersTest.kt`
+     的「`System.getProperty` ?: `System.getenv` ?: 默认」+ `assumeTrue` 门控；缩放档须自造
+     （`loadGalleryPixels` / `gallerySampleSize` 均为 `private`，宿主够不着）；**不得引 zxing javase**
+     （`app/build.gradle.kts:239` 只声明 `libs.zxing.core`，读图用 JDK `ImageIO` 手摆 IntArray）。
+     取景通路（CameraX 直采，AC⑧③ 的正主）在真机上**至今零读数**：§340 那条「相机启动失败」是
+     `-camera-back none` 的 AVD 读数，**不可外推**真机相机。
      实拍夹具已生成并登记于第 2.5 片留痕（`build/qr-probe/`，4 张码含模块数与 sha256）。
   5. ~~`key` 成员"PKCS#8 DER 的 Base64URL"未逐字取到~~ —— **已关闭**（2026-09-26 取到 §3.3.12 原文：
      「The private key associated to this passkey instance. The value MUST be **PKCS#8 ASN.1 DER** formatted
@@ -1053,7 +1072,8 @@
     (a) **相机实拍（AC⑧③ / 未决 4 的相机面）未做**——本轮按用户指示不扫码，且 AVD 以
     `-camera-back none` 启动，取景框如实报「相机启动失败（可能被其它应用占用），请关闭后重试」，
     同时**相册入口仍可见可点**（§340 的降级口径在设备面得证）。「相机能扫」仍**无任何证据**，
-    该读数也不能外推到真机相机；
+    该读数也不能外推到真机相机；（**2026-09-27 后续**：真机 M332BF 上「权限被拒 ⇒ 相册仍可导入」已另取得
+    一条独立读数，见下方「真机手测读数」块 ③；但**取景通路本身在真机仍零读数**，本条判据不变）
     (b) **「导入的通行密钥能经 CM 通道对真实 RP 完成 GetAssertion」未做**——本轮只证到
     「导入件在本库内可被消费」（PEM / 曲线 / PRF / 保护位 / 官方实现读数），
     未证到端到断言。真实 RP 侧还需要一个「能导出 CXF 的注册方」（自搭 RP，或按本条既有口径
@@ -1064,4 +1084,46 @@
     本条为**取样记录，代码零改动**：复跑 `gate_readings.py` **7/7 PASS**
     （`tier1(>500)=0` / `tier2=36 budget=37` / `long_functions=0` / `BROKEN_MD_LINKS=0` /
     `RESOLVED_INDEX_SYNC=OK` / 重言断言 0 命中·470 文件 / `allowed=12`）。
+
+  - **2026-09-27 真机手测读数（设备：小米 M332BF / Android 17；驱动方式：用户手动操作，代理只做登记）**：
+    最新 `assembleRelease` 包经 `adb install -r` **原地升级**装上——先 `pull base.apk` 比对签名，与本地构建
+    同为 `f3a6f0924d121e273be022589fa68724703cb7d906caa33fe4cded192cca842e` ⇒ 签名一致、**未卸载、
+    真实库未被触碰**（§263 纪律：本设备禁 `connectedDebugAndroidTest`、禁导入实验室凭据）。五条读数：
+    ① **高密度 CXF 夹具码经相册导入成功** ⇒ 收口 `未决 4` 的相册面（详见该条 ★ 支）；
+    ② **同一张码用相机拍下来再走相册导入失败** ⇒ 新增负向读数，**算式待补**（见 `未决 4` 的归因禁令）；
+    ③ **相机权限被拒后相册入口仍可见、可点、导入成功** ⇒ §340 的降级口径**首次在真机得证**
+      （先前只有 `-camera-back none` 的 AVD 读数，不可外推真机）；
+    ④ **确认对话框取消后库内未多出条目**（AC③ 取消路径的真机读数；上一批在 AVD 上是「误点成取消」的
+      意外对照，这次是有意复验）；
+    ⑤ **13 个 `KPEX_PASSKEY_*` 键全部只读**：无输入框、无删除钮、无「受密码保护」开关、值不回显明文，
+      而下方普通自定义字段仍有「字段名称」输入框 ⇒ `PD-08` 第 5 项 / AC⑪① 的**锁与豁免分界在真机成立**
+      （截图另含 `KPEX_PASSKEY_RELYING_PARTY = w3c.org`，即上一批 Q1 替换后的值仍在位）。
+    **同批撞出一个真缺陷（本批已修）**：编辑页 Passkey 区块里 Q1 的「扫码 / 相册导入通行密钥」按钮
+    **压在**「已绑定 Passkey 凭据 / 基于 Android 14+ 凭据管理器…」文字上（用户原话「被折叠在一起了」）。
+    根因**不是间距**：`BentoCard` 的内容槽是 **`Box`**（`app/src/main/java/com/keepasskey/app/ui/components/BentoCard.kt:35`，
+    签名 `content: @Composable BoxScope.() -> Unit`），Box 里**同层兄弟互相叠放**而非上下流动——该卡片在 Q1
+    之前只有一个子节点（状态行 `Row`）所以从未暴露，我把导入按钮作为**第二个同层子节点**直接发射就叠上了。
+    修法：两个子节点包进 `Column(verticalArrangement = Arrangement.spacedBy(12.dp))`
+    （`EntryEditComponents.kt:143` 起），并给 `@Preview` 补 `canImportPasskey = true` 那一态——
+    **先前预览只画了 `false` 态，于是这个重叠在预览里根本看不见**（预览漏一态＝门禁漏一面）。
+    读数：`:app:exportSecondaryPreviewScreenshots` 渲染图（`preview-exports/secondary/light/EntryEditTotpSectionPreview*`）
+    里按钮已落在状态行**下方**、间距清晰。⚠️ **这是 JVM 预览渲染器的读数，不是设备读数**——AVD 上批次的
+    测试库随会话重置丢失，本批未重建，故**没有** uiautomator `bounds` 可比对；设备侧复验由用户在 M332BF 目测。
+    **另记一条度量工具的失败（不得引用其读数）**：为查「全仓还有没有同形态的 Box 叠兄弟」写过一次性脚本
+    （`build/bento_sibling_scan.py`，已删），它**连这个已知坏样本都没扫出来** ⇒ 读数作废；本批只敢声称
+    「改动面内 5 处 `BentoCard` 调用点逐个读过、仅此一处越界」（`EntryEditComponents.kt:86/:143/:219`、
+    `EntryEditListSections.kt:79/:254`），**不声称全仓已无**。
+    仍待用户回报：T5 的 Q1 替换读数、T6 只读会话、T7 passkey 唤醒、T8 autofill。
+    **本批验证读数（原样粘贴 `python tools/doc/gate_readings.py` 输出）**：
+    `[1/7] count_line_tiers.py EXIT 0 | tier1(>500)=0 tier2(400~500)=36 budget=37` /
+    `[2/7] long_functions.py EXIT 0 | functions_ge_100=0` /
+    `[3/7] check_md_links.py EXIT 0 | BROKEN_MD_LINKS=0` /
+    `[4/7] check_resolved_index_sync.py EXIT 0 | RESOLVED_INDEX_SYNC=OK（批次正文 340 份；分册登记 342 条；全量索引 342 条；最大 §342）` /
+    `[5/7] check_tautological_assertions.py EXIT 0 | 汇总：命中 0 处 / 扫描 471 个测试文件` /
+    `[6/7] check_recheck_consistency.py EXIT 0 | PASS: 无残留禁用短语（已扫描 1331 行，11 条禁用短语）` /
+    `[7/7] check_bounded_type_names.py EXIT 0 | allowed=12 unregistered_manager_util_helper_common=0`
+    ⇒ **7/7 PASS**；`.\gradlew.bat test --rerun-tasks --max-workers=1` **BUILD SUCCESSFUL in 3m34s、
+    114/114 executed**，`count_test_results.py` = `xml=413 tests=2749 failures=0 errors=0 skipped=13`
+    （与上批同数：本批**零新增用例**——布局缺陷由 `@Preview` 渲染图与真机目测取证，宿主侧无可断言的判据，
+    硬凑一条恒真断言反而是本仓忌讳）。
 

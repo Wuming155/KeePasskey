@@ -145,46 +145,50 @@ internal fun EntryEditPasskeySection(
         backgroundColor = if (isPasskey) securityColors.passkeyContainer.copy(alpha = 0.35f) else MaterialTheme.colorScheme.surfaceContainerLow,
         borderColor = if (isPasskey) securityColors.passkey.copy(alpha = 0.5f) else null
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = if (isPasskey) stringResource(R.string.edit_passkey_has_bound) else stringResource(R.string.edit_passkey_create),
-                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                Text(
-                    text = stringResource(R.string.edit_passkey_desc),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            Button(
-                onClick = onTogglePasskey,
-                shape = CapsuleShape,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = if (isPasskey) securityColors.passkey else MaterialTheme.colorScheme.primary
-                )
+        // [BentoCard] 的内容槽是 Box：同层兄弟会**互相叠放**而非上下流动。状态行与导入按钮
+        // 两个子节点必须包进 Column，否则按钮压在说明文字上（真机 2026-09-27 实测重叠）。
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text(if (isPasskey) stringResource(R.string.edit_passkey_unbind) else stringResource(R.string.edit_passkey_bind))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = if (isPasskey) stringResource(R.string.edit_passkey_has_bound) else stringResource(R.string.edit_passkey_create),
+                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = stringResource(R.string.edit_passkey_desc),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Button(
+                    onClick = onTogglePasskey,
+                    shape = CapsuleShape,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (isPasskey) securityColors.passkey else MaterialTheme.colorScheme.primary
+                    )
+                ) {
+                    Text(if (isPasskey) stringResource(R.string.edit_passkey_unbind) else stringResource(R.string.edit_passkey_bind))
+                }
             }
-        }
-        if (isPasskey && canImportPasskey) {
-            OutlinedButton(
-                onClick = onImportPasskey,
-                shape = CapsuleShape,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Icon(
-                    imageVector = Icons.Default.QrCodeScanner,
-                    contentDescription = null,
-                    modifier = Modifier.size(16.dp)
-                )
-                Spacer(modifier = Modifier.width(6.dp))
-                Text(stringResource(R.string.edit_passkey_import_scan))
+            if (isPasskey && canImportPasskey) {
+                OutlinedButton(
+                    onClick = onImportPasskey,
+                    shape = CapsuleShape,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.QrCodeScanner,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(stringResource(R.string.edit_passkey_import_scan))
+                }
             }
         }
     }
@@ -398,6 +402,14 @@ internal fun EntryEditTotpSectionPreview() {
             EntryEditPasskeySection(
                 isPasskey = true,
                 onTogglePasskey = {}
+            )
+            // Q1 附加入口在场的那一态：先前只预览了 `canImportPasskey=false`，
+            // 于是「导入按钮压在说明文字上」的真机重叠缺陷在预览里无从显现。
+            EntryEditPasskeySection(
+                isPasskey = true,
+                onTogglePasskey = {},
+                canImportPasskey = true,
+                onImportPasskey = {}
             )
             EntryEditPasskeySection(
                 isPasskey = false,
