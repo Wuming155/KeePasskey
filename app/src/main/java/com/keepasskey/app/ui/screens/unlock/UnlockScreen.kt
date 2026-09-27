@@ -283,7 +283,8 @@ fun UnlockContent(
                     UnlockQuickUnlockCard(
                         uiState = uiState,
                         onBiometricUnlock = onBiometricUnlock,
-                        onSwitchMode = onSwitchMode
+                        onSwitchMode = onSwitchMode,
+                        onToggleReadOnly = onToggleReadOnly
                     )
                 } else {
                     // ISSUE-P3-215 曾在此承载无障碍提示、后迁设置页；ISSUE-P3-324 该提示与

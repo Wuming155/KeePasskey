@@ -85,7 +85,8 @@ internal fun UnlockVaultLogo(uiState: UnlockUiState) {
 internal fun UnlockQuickUnlockCard(
     uiState: UnlockUiState,
     onBiometricUnlock: () -> Unit,
-    onSwitchMode: (UnlockMode) -> Unit
+    onSwitchMode: (UnlockMode) -> Unit,
+    onToggleReadOnly: () -> Unit
 ) {
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainerLowest,
@@ -115,6 +116,16 @@ internal fun UnlockQuickUnlockCard(
             }
 
             Spacer(modifier = Modifier.height(16.dp))
+
+            // ISSUE-P2-343：只读开关此前**只画在口令解锁页**，而指纹路径又不消费它
+            // ⇒ 用户看不到"这次会怎样"，还会以为先前打开的选择被记住了。现在两条路径共用同一个
+            // 开关与同一个真相源（`completeBiometricUnlock` 已改为透传 `openReadOnly`）。
+            UnlockReadOnlyRow(
+                openReadOnly = uiState.openReadOnly,
+                onToggleReadOnly = onToggleReadOnly
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
 
             // ISSUE-P1-08 统一快速解锁：仅 Class 3 强生物识别经硬件密钥解封（锁屏凭据不再可解封）——
             // 认证入口由系统 BiometricPrompt 承载，不再提供自研 PIN 输入
@@ -240,13 +251,28 @@ internal fun UnlockStandardUnlockContent(
 @Composable
 internal fun UnlockQuickUnlockCardPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
-        UnlockQuickUnlockCard(
-            uiState = UnlockUiState().copy(
-                hasDatabase = true,
-                unlockMode = UnlockMode.QUICK_UNLOCK
-            ),
-            onBiometricUnlock = {},
-            onSwitchMode = {}
-        )
+        Column {
+            UnlockQuickUnlockCard(
+                uiState = UnlockUiState().copy(
+                    hasDatabase = true,
+                    unlockMode = UnlockMode.QUICK_UNLOCK
+                ),
+                onBiometricUnlock = {},
+                onSwitchMode = {},
+                onToggleReadOnly = {}
+            )
+            // ISSUE-P3-340 规则条文：只读开关新增到本卡片后，两态都要画
+            // ——只读态下指纹按钮的语义不同（解开后写操作一律被拒），不能只呈现默认态。
+            UnlockQuickUnlockCard(
+                uiState = UnlockUiState().copy(
+                    hasDatabase = true,
+                    unlockMode = UnlockMode.QUICK_UNLOCK,
+                    openReadOnly = true
+                ),
+                onBiometricUnlock = {},
+                onSwitchMode = {},
+                onToggleReadOnly = {}
+            )
+        }
     }
 }

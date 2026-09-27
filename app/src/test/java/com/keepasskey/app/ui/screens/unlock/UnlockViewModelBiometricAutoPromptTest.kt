@@ -144,6 +144,14 @@ class UnlockViewModelBiometricAutoPromptTest {
         var lastUnlockKeyFileData: ByteArray? = null
             private set
 
+        /**
+         * `ISSUE-P2-343`：`readOnly` 实参也必须记录。
+         * 本类此前**转发但不记账** ⇒ 指纹路径漏传该实参（落接口默认 false）在测试里完全不可见，
+         * 这正是只读开关能被静默忽略这么久的原因之一。
+         */
+        var lastUnlockReadOnly: Boolean? = null
+            private set
+
         override suspend fun unlockActiveDatabase(
             passwordChars: CharArray,
             keyFileData: ByteArray?,
@@ -151,6 +159,7 @@ class UnlockViewModelBiometricAutoPromptTest {
         ): KdbxResult<Unit> {
             lastUnlockPassword = String(passwordChars)
             lastUnlockKeyFileData = keyFileData?.copyOf()
+            lastUnlockReadOnly = readOnly
             return delegate.unlockActiveDatabase(passwordChars, keyFileData, readOnly)
         }
     }
@@ -350,6 +359,52 @@ class UnlockViewModelBiometricAutoPromptTest {
         assertTrue("生物识别成功后必须发出解锁成功事件", unlocked)
         assertEquals("解封出的主密码必须送达既有解锁管线", secret, repository.lastUnlockPassword)
         assertFalse(viewModel.uiState.value.isLoading)
+        // ISSUE-P2-343 对照：未打开只读时**不得**以只读模式解开（防修过头走成反向缺陷）
+        assertEquals("默认须按可写模式解锁", false, repository.lastUnlockReadOnly)
+    }
+
+    /**
+     * `ISSUE-P2-343`：只读开关打开后，**指纹路径也必须以只读模式解开**。
+     *
+     * 缺陷形态：`completeBiometricUnlock` 原先调 `unlockActiveDatabase` 时根本不传 `readOnly`
+     * ⇒ 落到接口默认 `false`，而该开关唯一控件只画在口令解锁页 ⇒
+     * 用户「在口令页打开只读 → 切到指纹解锁」会被以可写模式解开，界面毫无提示。
+     */
+    @Test
+    fun `只读开关打开时指纹解锁须以只读模式解开`() = runTest {
+        val secret = "ReadOnlyPass#123"
+        val key = KeyGenerator.getInstance("AES").apply { init(256) }.generateKey()
+        val encryptCipher = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.ENCRYPT_MODE, key) }
+        val iv = encryptCipher.iv
+        val sealedCiphertext = encryptCipher.doFinal(secret.toByteArray(Charsets.UTF_8))
+
+        val storage = InMemorySealedCredentialStore().also {
+            it.storage.saveEncryptedCredential(activeDbId, iv, sealedCiphertext)
+        }
+        val repository = RecordingVaultRepository(FakeVaultRepository())
+        val viewModel = createViewModel(enabledSettings(), storage.storage, repository)
+        testScheduler.runCurrent()
+
+        viewModel.onToggleReadOnly()
+        assertTrue("开关须真的改变状态", viewModel.uiState.value.openReadOnly)
+
+        assertTrue(viewModel.onBiometricAutoPromptRequested(null))
+        val decryptCipher = Cipher.getInstance("AES/GCM/NoPadding").apply {
+            init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(128, iv))
+        }
+        viewModel.handleBiometricResult(
+            BiometricResult.Success(decryptCipher),
+            storage.storage,
+            activeDbId,
+            sealedCiphertext
+        )
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(
+            "指纹路径必须把 openReadOnly 透传给 unlockActiveDatabase 的 readOnly 实参",
+            true,
+            repository.lastUnlockReadOnly
+        )
     }
 
     /**

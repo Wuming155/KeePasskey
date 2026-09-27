@@ -275,7 +275,12 @@ internal class BiometricUnlockCoordinator(
         try {
             when (val unlockResult = vaultRepository.unlockActiveDatabase(
                 payload.passwordChars,
-                keyFileData = payload.keyFileData
+                keyFileData = payload.keyFileData,
+                // ISSUE-P2-343：只读开关此前**只被口令路径消费**，指纹路径连实参都不传
+                // ⇒ 落到接口默认 `false`，用户在口令页打开「只读」再切到指纹解锁，
+                // 会以可写模式解开而界面毫无提示（保护态被静默吞掉）。
+                // 两条路径共用同一个 `openReadOnly` 真相源，开关的作用域才与它的呈现一致。
+                readOnly = uiState.value.openReadOnly
             )) {
                 is KdbxResult.Success -> {
                     uiState.update {
