@@ -13,7 +13,8 @@ object DomainMatcher {
      * 2. 认证凭据剔除（user:pass@）；
      * 3. 路径、查询参数、片段标识符截断（/, ?, #）；
      * 4. 端口号剔除（包括标准端口及 IPv6 方括号端口形式）；
-     * 5. 非 URL 纯域名输入原样小写返回。
+     * 5. 非 URL 纯域名输入原样小写返回；
+     * 6. DNS 根点剔除（`rp.example.com.` → `rp.example.com`，与 `PublicSuffixList` 同一口径）。
      */
     fun extractDomain(url: String): String {
         var s = url.trim().lowercase()
@@ -60,7 +61,22 @@ object DomainMatcher {
             }
         }
 
-        return s.trim()
+        return s.trim().removeTrailingRootDots()
+    }
+
+    /**
+     * 去除 DNS 根点（`rp.example.com.` ≡ `rp.example.com`）。
+     *
+     * 为什么必须在**这里**做：`PublicSuffixList.normalizeHost` 早已声明「小写、去尾部根点、
+     * 转 punycode」，而本方法过去不去 ⇒ 同一个主机名在两个归一器手里得到不同结果——
+     * `ISSUE-P3-339` 的表驱动用例实测到的是「尾点 origin 的合法凭据不出候选，
+     * 而公共后缀查找却把它当同域」。浏览器侧（WHATWG URL）本就吃掉末点，
+     * 故两侧同时归一才是与浏览器同形的口径。
+     */
+    private fun String.removeTrailingRootDots(): String {
+        var end = length
+        while (end > 0 && this[end - 1] == '.') end--
+        return substring(0, end)
     }
 
     /**

@@ -303,7 +303,13 @@ class KeePasskeyCredentialProviderService : CredentialProviderService() {
         return entries.filter { entry ->
             val rpMatch = entry.isPasskey && entry.passkeyRpId != null &&
                     DomainMatcher.isDomainMatch(entry.passkeyRpId, cleanOrigin)
-            val urlMatch = cleanOrigin.isNotEmpty() && entry.url.isNotBlank() &&
+            // ⚠️ URL 兜底**只服务口令 / 密码条目**（`ISSUE-P3-339` 实测越界后收紧）：
+            // passkey 条目曾走这条分支被列出——只要它的 URL 恰好写了本站，而 `KPEX_PASSKEY_RELYING_PARTY`
+            // 是别的域，本站就会把「别域的通行密钥」摆进候选。签名侧另有 rpId 复核（见
+            // `PasskeyAssertionActivity`），所以断言交不出去，但**凭据存在性已跨域泄露**，
+            // 且用户一点就在签名处撞上拒绝（纯困惑）。域维度对 passkey 只有 `passkeyRpId` 一个真相源；
+            // 若某 passkey 条目连 rpId 都没有（畸形 / 半迁移），它本就无法完成仪式，不出候选才是对的。
+            val urlMatch = cleanOrigin.isNotEmpty() && entry.url.isNotBlank() && !entry.isPasskey &&
                     DomainMatcher.isDomainMatch(entry.url, cleanOrigin)
             val packageMatch = packageDimensionAuthorized && packageName.isNotEmpty() && entry.url.isNotBlank() &&
                     DomainMatcher.isAndroidPackageMatch(entry.url, packageName)

@@ -133,8 +133,10 @@
     按 P0/P1 重评并另立缺陷条目（认证层可被绕过不属「低危」），本条只留实验室与读数作证据。
 
 - **未决**：
-  1. 系统 CA 注入后 Chrome 是否采信（`userdebug` 镜像行为待实测）；不可行则改用
-     「点掉安全提示」的退化取样并声明其对 `NotAllowedError` 判据的影响；
+  1. ~~系统 CA 注入后 Chrome 是否采信~~ **已答（2026-09-27 实测）**：不采信——文件确实落进
+     `/system/etc/security/cacerts` 仍报 `NET::ERR_CERT_AUTHORITY_INVALID`；而
+     `thisisunsafe` 绕过后 Chrome 直接拒绝 WebAuthn（`NotAllowedError: WebAuthn is not
+     supported on sites with TLS certificate errors`）⇒ 退化路线对本条判据**无效**，不是偏差；
   2. 实验室是否需要覆盖**注册**面（本应用作为 provider 生成凭据）：本条先做**断言/唤醒**面，
      注册面若同批做须另计工作量（`PD-32` / `PD-33` 的 origin 归因链在假站上也要证一条「不填口令」）；
   3. 是否把这套 lab 长期留在仓里（CI 无模拟器网络，只能本机复跑）——登记为
@@ -174,6 +176,33 @@
      仿冒矩阵做不出来 ⇒ 它只是③之外的补充负例，不能替代实验室。
   ⇒ 结论：**下一步先破信任锚（①→②），破不通就走③并如实收窄声称**；
   未破之前不得在本条目下写任何「仿冒域不会唤醒」的结论。
+
+- **代码层半环（2026-09-27 已完成，不依赖浏览器）**：新增表驱动用例
+  `app/src/test/java/com/keepasskey/app/passkey/CredentialProviderLookalikeMatchTest.kt`
+  （5 例：真域 / 子域正向、四类仿冒负向、IP origin、passkey 的 URL 兜底越界、尾点与大小写），
+  **首跑即红两条 ⇒ 都是实测缺陷，已随本条修掉**：
+  ① `KeePasskeyCredentialProviderService.findMatchingEntries` 的 `urlMatch` 分支不区分条目类型
+  ⇒ 「`KPEX_PASSKEY_RELYING_PARTY` 属 A 域、条目 URL 写了 B 域」的 passkey 条目会在 B 域被列进候选：
+  签名侧另有 rpId 复核（`PasskeyAssertionActivity:139-141`）⇒ **断言交不出去**，但
+  **凭据存在性跨域泄露**，且用户一点就在签名处撞上拒绝。现收紧为「URL 兜底只服务口令 / 密码条目，
+  passkey 在域维度只认 `passkeyRpId` 一个真相源」（畸形 / 半迁移而无 rpId 的 passkey 条目本就无法
+  完成仪式，不出候选才是对的；同表保留「普通口令条目仍按 URL 命中」的正向对照防收紧过头）。
+  ② 根点归一不一致：`PublicSuffixList.normalizeHost` 去 DNS 根点而 `DomainMatcher.extractDomain` 不去
+  ⇒ 同一主机名在两个归一器手里答案不同（尾点 origin 的合法凭据不出候选）。现由 `extractDomain`
+  统一剔除末点，与 WHATWG URL（浏览器也吃掉末点）同形。
+  验证：定向 4 类先红后绿；全量 `test --rerun-tasks --max-workers=1` `BUILD SUCCESSFUL in 3m54s`、
+  `114/114 executed`、`xml=413 tests=2749 failures=0 errors=0 skipped=13`（上批 2744 + 本表 5 例）；
+  `gate_readings.py` **7/7 PASS**（`tier1=0` / `tier2=36 budget=37` / `long_functions=0` /
+  重言断言 0 命中·扫描 **471** 文件 / `allowed=12` 不受新类型名影响）。
+- **实验室已落地（`tools/passkey-phish-lab/`，含 README）**：`make_certs.py`（自建 CA + 多 SAN 服务端证书，
+  `--install` 注入设备）、`rp_server.py`（`/case/<action>/<rp>` 自跑页 + 验 `rpIdHash`/`origin`/签名 +
+  计数器跳变读数）、`minicbor.py`（无 `cbor2` 依赖的只读子集）、`run_matrix.py`（6 用例矩阵驱动 + 汇总）。
+  **浏览器半环当前判为「无效」而非通过**：首轮实跑六例全无页面读数（Chrome 不认注入的系统锚），
+  而 `run_matrix.py` 原版把它们误判为 PASS——已由本条实测触发改成
+  「无浏览器读数 ⇒ 无效，不得计为通过」（这条改动本身就是本条的价值所在：
+  P1/P2 FAIL 而 N1~N4 PASS 六个用例同一个原因，就是环境假绿）。
+  **剩余阻塞**：需要「两个互不为后缀的可注册域 + Chrome 认的信任链」——自有域名 + ACME(DNS-01)
+  最省，或企业策略放行自建 CA，或换自带信任库的浏览器（换浏览器须重述判据）。
 
 ### ISSUE-P3-337：PD-08 扫码导入通行密钥落地——顶栏扫码按载荷分流（TOTP / 通行密钥），确认在先、字节通道解析、落 `KPEX_PASSKEY_*`
 
