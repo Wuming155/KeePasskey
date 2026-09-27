@@ -7,12 +7,21 @@
 | **代码层**（本应用对 `(origin, 凭据 rpId)` 的接受/拒绝） | `app/src/test/.../CredentialProviderLookalikeMatchTest.kt`（表驱动，宿主可跑） | ✅ **已做，并当场揪出两处越界/不一致并修掉**（见下） |
 | **浏览器层**（Chrome → 系统 CM → 本应用 provider 真链路 + 不泄露存在性） | 本目录 `rp_server.py` + `run_matrix.py` | ⛔ **被证书信任卡住**（三条实测阻塞见「已证伪的路线」），需要「两个不同可注册域 + 公开可信证书」才能跑 |
 
-## 为什么域名必须是 `.xyz` 而不是 `.test`
+## 域名口径：要的是**两个不同可注册域**，不是同域下的两个名字
 
-随仓 PSL（`app/src/main/resources/publicsuffix/public_suffix_list.dat`）**不含** `test` /
-`invalid` / `local`，而 `PublicSuffixList` 的口径是「未知 TLD ⇒ 不可注册（fail-closed）」。
-用 `rp.test` 做实验会让**正向用例也拿不到候选** ⇒ 「仿冒域不出候选」这条负向读数
-与「什么都不出」不可区分，整张表变成重言断言。`com` / `dev` / `xyz` 经核实在册，本实验室取 `xyz`。
+两条易踩的坑（都是实测踩到的）：
+
+1. **不能用 `.test` / `.invalid` / `.local`**：随仓 PSL
+   `app/src/main/resources/publicsuffix/public_suffix_list.dat` 里这三条**不存在**
+   （`grep -cE "^(test|invalid|local)$"` = 0），而 `PublicSuffixList` 的口径是
+   「未知 TLD ⇒ 不可注册（fail-closed）」⇒ 正向用例也拿不到候选，
+   于是「仿冒域不出候选」与「什么都不出」不可区分，整张表退化成重言断言。
+2. **同一注册域下的子域互相当"仿冒域"没有意义**：`xyz` 才是公共后缀，所以
+   `rp.testlab.xyz` 与 `rp.testlab.xyz.phish.testlab.xyz` 的 eTLD+1 **同为 `testlab.xyz`**
+   ⇒ 对 WebAuthn 它们是**同站**，拿它们跑仿冒矩阵等于什么都没测
+   （浏览器层如此；代码层的堆叠拒绝另有真表驱动用例，见文末）。
+   正确做法是让每一行落在**不同的可注册域**上——例如两条 `*.trycloudflare.com` 隧道
+   （该后缀在 PSL 私有段在册 ⇒ 每条隧道自成一个可注册域）。
 
 ## 组成
 
@@ -46,13 +55,25 @@
 
 ## 跑浏览器半环还缺什么
 
-需要**两个互不为后缀的可注册域**且各自有 Chrome 认的信任链，现实选项：
+**已解决**：证书不必自建。`cloudflared tunnel --url http://127.0.0.1:8788` 给的
+`*.trycloudflare.com` 是**公网可信**证书；且 `trycloudflare.com` 在随仓 PSL 私有段在册
+⇒ 每条隧道**各自**就是一个可注册域（两条隧道即矩阵要的「互不为后缀的两个域」），零设备篡改。
 
-- 用户自有域名 + ACME（DNS-01 最省事，不必开公网端口）：给 `rp.<dom>` 与
-  `rp.<dom>.phish.<dom2>` 签真证书；
-- 或企业设备策略让 Chrome 接受自建 CA（`adb shell dpm`/work profile，成本高）；
-- 或改用**自带信任库**的浏览器（侧载 Firefox 系），但它对 CM 的接线方式与 Chrome 不同，
-  换它就得重述判据。
+**未解决（2026-09-27 实测；两台设备各有各的阻塞，且都不是本应用的判据）**：
+
+| 设备 | 现象 | 根因（证据） |
+| --- | --- | --- |
+| AVD `Pixel_10`（`google_apis` 无 Play） | 库内已有该域凭据，仍报「未发现任何通行密钥」 | logcat：`Auth.Api.Credentials(1666): [GetRemotePasskeyOperation] Operation started.`（1666 = GMS），而本应用 provider 的日志标签**命中 0 次** ⇒ 请求被 GMS 自己的 FIDO 栈接走，**第三方 provider 从未被绑定调用** |
+| Redmi 4X（LineageOS，无 GMS；AOSP `com.android.credentialmanager` 在场且 `credential_service_primary` 已指向本应用） | `navigator.credentials.get()` 永不返回 | Firefox 不把 WebAuthn 委托给平台 CM；该 ROM 无其它浏览器 |
+
+另两条前置闸门值得记住：平台要求**已设屏锁**才放行通行密钥（`设置屏锁后，才能使用通行密钥`）；
+本机所在网络的模拟器**出去的 UDP/53 全不可达**（`-dns-server` 换三种配法 + 宿主转发器都收不到查询）
+⇒ 名字解析只剩 hosts 一条路，而 hosts 属设备篡改，已撤（写过的转发器因从未收到查询而删除）。
+
+⇒ 要跑通需要：① 换 `google_apis_playstore` 镜像并登录 Google 账号（GMS 才会去绑第三方 provider）；
+② 或真机装一个走平台 CM 的 Chromium 系浏览器；③ 或自写调用 `androidx.credentials` 的测试 APK
+（origin 归因还要配 DAL）。**在此之前本实验室只支持代码层结论**，
+判据红线见 `docs/ACTIVE_ISSUES.md` `ISSUE-P3-339`。
 
 ## 代码层已修掉的两处（本轮实测所得）
 

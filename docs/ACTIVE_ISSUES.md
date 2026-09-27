@@ -162,6 +162,42 @@
   Chrome → 系统 CM → provider 的真链路未证，其风险由上游 Chrome 的 rpId 校验兜住
   ——**这是假设，不是实测**，须在限界表登记为残余风险。
 
+- **真机与公网证书实测（2026-09-27 续，按用户「连上真实手机了，继续测试」）**：
+  载体已换成**公网真证书**、零信任篡改——cloudflared 临时隧道给出 `*.trycloudflare.com`
+  （该后缀在随仓 PSL 私有段在册 ⇒ 每条隧道**各自**是一个可注册域，两条隧道即矩阵需要的形状），
+  宿主 `curl` 不带 `--cacert` 即校验通过（`ssl_verify_result=0`）。之前的 CA 注入与 hosts 篡改
+  **已全部撤销**（hosts 里 `trycloudflare` 条目 `grep -c` = 0，`/system` 重新只读）。
+  新增 `tools/passkey-phish-lab/static_rp.py` + `web/index.html`（自跑页：免点击、
+  结果既渲染进 DOM 又 POST 回 `/report` 落 JSONL）。读数：
+  1. **基线**（库内无该域凭据）：页面回报 `outcome=threw`
+     `NotAllowedError: The operation either timed out or was not allowed…`（`ms=35379`）。
+     这一条是后面所有负向读数的**同形参照**（AC② 要的正是「假站所见与它完全一致」）。
+  2. ⚠️ **正向对照取不到，且原因不在本应用**：AVD 先报
+     「设置屏锁后，才能使用通行密钥」（平台自身闸门，`locksettings set-pin` 后可继续）；
+     再跑即弹「未发现任何通行密钥」——而库内那一刻**确实有**一把 rpId 等于该隧道域的凭据
+     （相册导入成功、编辑页 rpId 已回显）。logcat 给出根因：
+     `Auth.Api.Credentials(1666): [GetRemotePasskeyOperation] Operation started.` /
+     `Remote Entry should be available. Allowlist is null.`（pid 1666 = `com.google.android.gms`），
+     而本应用 provider 的日志标签在这份缓冲里**命中 0 次**
+     ⇒ `google_apis`（无 Play）镜像上通行密钥请求被 **GMS 自己的 FIDO 栈**接走，
+     **第三方 Credential Provider 从未被绑定调用**。也就是说：这台机器连"真域该醒"都递不到我们面前，
+     因而**无法**用它判"仿冒域不该醒"。
+  3. **真手机（Redmi 4X，LineageOS / Android 17，无 GMS）**：`credential_service_primary` 指向本应用、
+     AOSP `com.android.credentialmanager` 在场、公网 DNS 正常（能解析隧道域名并 `ping` 通），
+     但唯一的浏览器 Firefox 里 `navigator.credentials.get()` **永不返回**（页面无结局、
+     `/report` 零读数、provider 侧零 logcat）⇒ 该 ROM 上没有「会把 WebAuthn 交给平台 CM」的浏览器。
+     顺带取到一条 Q1 的真机读数：无障碍转储里出现
+     `packageName: com.keepasskey; text: 扫码 / 相册导入通行密钥` ⇒ 编辑页附加入口在真机渲染成立。
+  4. 本机网络另实测到：模拟器**出去的 UDP/53 全不可达**（`-dns-server` 给 8.8.8.8、
+     给路由器 192.168.1.1、再起宿主转发器三种配法都收不到查询，而宿主自身解析正常）
+     ⇒ 名字解析只剩 hosts 一条路，而 hosts 属设备篡改，遂撤；写过的 `dns_forwarder.py`
+     因**从未收到一个查询**而删除（不留没跑起来的死代码）。
+- **按本条写死的红线收口**：正向对照未成立 ⇒ 本条目下**不出现**任何「仿冒域不会唤醒」的结论；
+  浏览器半环判为**未做**（上面三条原因各自带证据）。已证的只有代码层半环（含两处修复）。
+  要跑通浏览器半环，需要下列之一：① 换 `google_apis_playstore` 镜像并登录 Google 账号
+  （GMS 的 CM 才会去绑第三方 provider）；② 真机上装一个走平台 CM 的 Chromium 系浏览器；
+  ③ 自写调用 `androidx.credentials` 的测试 APK（成本最高，且 origin 归因仍要配 DAL）。
+
 - **未决**：
   1. ~~系统 CA 注入后 Chrome 是否采信~~ **已答（2026-09-27 实测）**：不采信——文件确实落进
      `/system/etc/security/cacerts` 仍报 `NET::ERR_CERT_AUTHORITY_INVALID`；而

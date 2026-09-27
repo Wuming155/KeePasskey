@@ -1,0 +1,78 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>PhishLab</title>
+<pre id="out">…</pre>
+<script>
+/*
+ * 自跑页（免点击 ⇒ 读数可复跑）：?mode=create|get 与可选 ?rp=<申报的 rpId>
+ *  - 默认 rpId = location.hostname（真实站点就是这么申报的）；
+ *  - 显式给 ?rp= 时是在测「页面谎报 rpId」——那一半由 Chrome 的 rpId 校验挡，
+ *    本实验室把它的错误名原样记下来，不拿它当本应用的结论。
+ * 结果既渲染进 <pre>（供 uiautomator 读数）也 POST 回 /report（供 JSONL 归档）。
+ */
+const q = new URLSearchParams(location.search);
+const mode = q.get('mode') || 'get';
+const rp = q.get('rp') || location.hostname;
+const out = document.getElementById('out');
+const t0 = performance.now();
+
+function b64(v) {
+  const u8 = v instanceof ArrayBuffer ? new Uint8Array(v) : v;
+  return btoa(String.fromCharCode.apply(null, u8)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+function un(text) {
+  return Uint8Array.from(atob(text.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0));
+}
+function rand() { return crypto.getRandomValues(new Uint8Array(32)); }
+
+function report(row) {
+  const line = JSON.stringify(row);
+  out.textContent = Object.entries(row).map(([k, v]) => k + '=' + v).join('\n');
+  fetch('/report', { method: 'POST', body: line }).catch(() => { /* 上报失败不影响页面读数 */ });
+}
+
+(async () => {
+  const base = { origin: location.origin, mode, rp, secure: String(window.isSecureContext) };
+  if (!navigator.credentials || !navigator.credentials.create) {
+    report({ ...base, outcome: 'unsupported', detail: 'navigator.credentials 不可用' });
+    return;
+  }
+  try {
+    if (mode === 'create') {
+      const cred = await navigator.credentials.create({
+        publicKey: {
+          challenge: rand(),
+          rp: { id: rp, name: 'PhishLab ' + rp },
+          user: { id: rand(), name: 'labuser@' + rp, displayName: 'Lab User' },
+          pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -8 },
+                             { type: 'public-key', alg: -257 }],
+          timeout: 180000,
+          authenticatorSelection: { residentKey: 'required', userVerification: 'preferred' },
+        },
+      });
+      report({ ...base, outcome: 'created', credentialId: b64(cred.rawId),
+               aaguid: b64(new Uint8Array(cred.response.getAuthenticatorData()).slice(37, 53)),
+               ms: Math.round(performance.now() - t0) });
+    } else if (mode === 'get') {
+      const assertion = await navigator.credentials.get({
+        publicKey: { challenge: rand(), rpId: rp, timeout: 180000,
+                     userVerification: 'preferred' },
+      });
+      if (!assertion) {
+        report({ ...base, outcome: 'null', detail: 'get() 返回 null（无候选）',
+                 ms: Math.round(performance.now() - t0) });
+        return;
+      }
+      const auth = new Uint8Array(assertion.response.getAuthenticatorData());
+      report({ ...base, outcome: 'asserted', credentialId: b64(assertion.rawId),
+               signCount: new DataView(auth.slice(33, 37).buffer).getUint32(0),
+               uv: String(!!(auth[32] & 4)), ms: Math.round(performance.now() - t0) });
+    } else {
+      report({ ...base, outcome: 'badmode', detail: mode });
+    }
+  } catch (e) {
+    report({ ...base, outcome: 'threw', errorName: e && e.name, detail: e && e.message,
+             ms: Math.round(performance.now() - t0) });
+  }
+})();
+</script>
