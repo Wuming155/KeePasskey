@@ -122,6 +122,30 @@ class EntryEditViewModel @Inject constructor(
     val pendingPasskeyImport: StateFlow<PasskeyImportDraft?> = passkeyImport.pendingPasskeyImport
 
     /**
+     * `ISSUE-P3-342`：解除绑定会话（真实写通路 + 确认对话框；口径与理由见
+     * [EntryEditPasskeyUnbind] 与 `PD-50`）。确认态只存活于本会话内存（P2-105 红线）。
+     */
+    private val passkeyUnbind = EntryEditPasskeyUnbind(
+        scope = viewModelScope,
+        repository = vaultRepository,
+        uiState = _uiState,
+        onNotice = { res -> showMessage(UiMessage(res)) },
+        onReload = { _uiState.value.entryId?.let { loadEntry(it) } }
+    )
+
+    /** 非空即「解除绑定」确认对话框可见。 */
+    val showUnbindPasskeyConfirm: StateFlow<Boolean> = passkeyUnbind.confirm
+
+    /** ISSUE-P3-342 期间按行数分档闸门拆出的两个纯 UI 状态协作者（行为逐字不变，见各自 KDoc）。 */
+    private val generator = EntryEditPasswordGenerator(
+        state = { _uiState.value },
+        update = _uiState::update,
+        emitPassword = this::onPasswordChangeSecure
+    )
+
+    private val attachments = EntryEditAttachmentDraft(strings = strings, update = _uiState::update)
+
+    /**
      * ISSUE-P3-337 搬移：自定义字段四写入口的执行者（AC⑪① 只读锁在 [protectedFieldChars] 一侧
      * 由它执行，见该类 KDoc）。
      */
@@ -268,12 +292,20 @@ class EntryEditViewModel @Inject constructor(
     fun onUrlChange(url: String) = _uiState.update { it.copy(url = url, isDirty = true) }
     fun onNotesChange(notes: String) = _uiState.update { it.copy(notes = notes, isDirty = true) }
 
-    fun onTogglePasskey() = _uiState.update {
-        it.copy(
-            isPasskey = !it.isPasskey,
-            isDirty = true
-        )
-    }
+    // `ISSUE-P3-342`：原 `onTogglePasskey` 已删除——它只翻一个草稿布尔，而 `isPasskey` 从不落盘
+    // （不在 saveMergedEntry / mapUiEntryToKdbx 的字段清单里，读路径反而按凭据字段存在与否重算）
+    // ⇒ 「绑定」点了保存后什么也不会发生，「解除」点了保存后凭据**仍然可被 CM 捞出并签名**。
+    // 替代者是下面三个方法（真实写通路 + 确认对话框，见 EntryEditPasskeyUnbind 与 PD-50）；
+    // 未绑定态不再渲染「绑定」按钮。
+
+    /** 请求解除绑定：只做前置校验并挂确认对话框，**不写库**。 */
+    fun requestUnbindPasskey() = passkeyUnbind.request()
+
+    /** 取消解除：只关对话框，不写库（AC② 的取消路径）。 */
+    fun dismissUnbindPasskey() = passkeyUnbind.dismiss()
+
+    /** 确认解除：摘掉本条目的凭据字段，成功后由仓库重算并回显绑定态。 */
+    fun confirmUnbindPasskey() = passkeyUnbind.confirmUnbind()
 
     /**
      * TASK-10：TOTP 种子输入的 CharArray 桥接上行（语义同 [onPasswordChangeSecure]）。
@@ -330,40 +362,14 @@ class EntryEditViewModel @Inject constructor(
         it.copy(expiresEnabled = true, expiryDate = date, isDirty = true)
     }
 
-    fun onTogglePasswordVisibility() = _uiState.update { it.copy(isPasswordVisible = !it.isPasswordVisible) }
-    fun onToggleGenerator() = _uiState.update { it.copy(showGenerator = !it.showGenerator) }
-
-    fun onPassLengthChange(length: Float) {
-        _uiState.update { it.copy(passLength = length) }
-        generatePassword()
-    }
-
-    fun onToggleUpper() {
-        _uiState.update { it.copy(useUpper = !it.useUpper) }
-        generatePassword()
-    }
-
-    fun onToggleLower() {
-        _uiState.update { it.copy(useLower = !it.useLower) }
-        generatePassword()
-    }
-
-    fun onToggleDigits() {
-        _uiState.update { it.copy(useDigits = !it.useDigits) }
-        generatePassword()
-    }
-
-    fun onToggleSymbols() {
-        _uiState.update { it.copy(useSymbols = !it.useSymbols) }
-        generatePassword()
-    }
-
-    fun generatePassword() {
-        // M1 整改：生成结果直达 CharArray，不经 String 中转；清零点保留于本方法
-        val newPassword = generatePasswordChars(_uiState.value, SecureRandom())
-        onPasswordChangeSecure(newPassword)
-        newPassword.fill('0')
-    }
+    fun onTogglePasswordVisibility() = generator.togglePasswordVisibility()
+    fun onToggleGenerator() = generator.togglePanel()
+    fun onPassLengthChange(length: Float) = generator.onPassLengthChange(length)
+    fun onToggleUpper() = generator.toggleUpper()
+    fun onToggleLower() = generator.toggleLower()
+    fun onToggleDigits() = generator.toggleDigits()
+    fun onToggleSymbols() = generator.toggleSymbols()
+    fun generatePassword() = generator.generate()
 
     fun onGroupChange(groupId: String?) = _uiState.update { it.copy(groupId = groupId, isDirty = true) }
 
@@ -387,26 +393,10 @@ class EntryEditViewModel @Inject constructor(
      * 断点1 整改：真实附件添加——读取用户经 SAF 选择文件的字节并随编辑会话驻留内存，
      * 保存时随条目提交入库（保存时经去重器入池）。同名附件视为替换。
      */
-    fun addAttachment(fileName: String, fileSizeFormatted: String, data: ByteArray) {
-        if (data.isEmpty()) {
-            _uiState.update { it.copy(userMessage = UiMessage(R.string.edit_attachment_empty)) }
-            return
-        }
-        val newAtt = buildNewAttachment(
-            id = "att_${System.currentTimeMillis()}",
-            fileName = fileName,
-            fileSizeFormatted = fileSizeFormatted,
-            addedAt = strings.get(R.string.time_just_now),
-            data = data
-        )
-        _uiState.update { state ->
-            state.copy(attachments = state.attachments.filterNot { it.fileName == fileName } + newAtt, isDirty = true)
-        }
-    }
+    fun addAttachment(fileName: String, fileSizeFormatted: String, data: ByteArray) =
+        attachments.add(fileName, fileSizeFormatted, data)
 
-    fun removeAttachment(id: String) {
-        _uiState.update { state -> state.copy(attachments = withoutAttachment(state.attachments, id), isDirty = true) }
-    }
+    fun removeAttachment(id: String) = attachments.remove(id)
 
     fun saveEntry() {
         val state = _uiState.value
@@ -439,6 +429,11 @@ class EntryEditViewModel @Inject constructor(
                 protectedCopy.values.forEach { it.fill('0') }
             }
             if (result is KdbxResult.Success) {
+                // ISSUE-P3-342 不变量：**保存成功必须清脏位并记下条目 id**。
+                // 理由不是体验：通行密钥导入闸门以 `hasUnsavedEdits()`（＝ isDirty）作前置拒绝
+                // （见 EntryEditPasskeyImport）。今天不出事**仅因** SaveSuccess 随即出页；
+                // 一旦改成"保存后留在本页"，用户刚保存完就会被提示「请先保存」而永久导不进去。
+                _uiState.update { it.copy(isDirty = false, entryId = entryId) }
                 _events.emit(EntryEditEvent.SaveSuccess)
             } else {
                 val failure = result as KdbxResult.Failure
@@ -492,5 +487,8 @@ class EntryEditViewModel @Inject constructor(
         _loadedProtectedFields.value = emptyMap()
         // ISSUE-P3-337 AC③：会话锁定 / 销毁时，尚未确认的导入草案（私钥明文唯一持有者）一并擦除
         passkeyImport.wipeAll()
+        // ISSUE-P3-342：会话锁定 / 页面销毁时不留悬空的「解除」确认态
+        // （不这么做会出现"重新解锁后对话框还在，点了就删凭据"的路径）
+        passkeyUnbind.reset()
     }
 }

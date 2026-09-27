@@ -201,6 +201,15 @@
     <!-- ISSUE-P3-337 Q1 + AC⑪①：编辑页附加入口与凭据材料字段的只读标注 -->
     <string name="edit_passkey_import_scan">扫码 / 相册导入通行密钥</string>
     <string name="edit_passkey_import_requires_saved">请先保存此条目，再导入通行密钥</string>
+    <!-- ISSUE-P3-342：「解除」改为真实写操作（不可逆）故须确认对话框；「绑定」按钮移除（它从不落盘）；
+         并如实标注导入是**即时落库**、不经右上角「保存」 -->
+    <string name="edit_passkey_unbound_hint">通行密钥由站点注册仪式或扫码导入产生；保存本条目后即可导入</string>
+    <string name="edit_passkey_unbind_dialog_title">解除本条目的通行密钥？</string>
+    <string name="edit_passkey_unbind_dialog_body">将删除本条目的通行密钥凭据（私钥与 PRF 种子一并移除），此操作不可撤销。标题、用户名、密码、备注、附件与自定义字段保持不变。</string>
+    <string name="edit_passkey_unbind_confirm">解除并删除凭据</string>
+    <string name="edit_passkey_unbind_done">已解除本条目的通行密钥绑定</string>
+    <string name="edit_passkey_unbind_failed">未找到该条目，绑定未改变</string>
+    <string name="edit_passkey_import_saved_now">通行密钥已立即写入本条目（不经「保存」）</string>
     <string name="edit_passkey_field_locked">通行密钥字段由本库托管：注册或导入时自动写入，不可在此编辑</string>
     <string name="edit_passkey_field_value_hidden">受保护字段，编辑页不显示明文</string>
     <string name="edit_custom_fields">自定义字段 (键值对)</string>

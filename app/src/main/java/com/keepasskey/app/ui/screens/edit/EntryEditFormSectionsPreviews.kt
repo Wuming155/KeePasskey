@@ -197,7 +197,7 @@ internal fun EntryEditContentPreview() {
             onPasswordChangeSecure = { _ -> },
             onUrlChange = { _ -> },
             onNotesChange = { _ -> },
-            onTogglePasskey = {},
+            onUnbindPasskey = {},
             onTotpSecretChangeSecure = { _ -> },
             onUpdateProtectedFieldValue = { _, _ -> },
             onTagsInputChange = { _ -> },

@@ -125,11 +125,25 @@ internal fun EntryEditTotpSection(
  *   故此处不给一个点了只会失败的按钮，未保存改动的拦截同理放在确认之后那一步
  *   （见 [EntryEditPasskeyImport.confirm]）。
  */
+/**
+ * 通行密钥 Passkey 区块：绑定状态 + 两条真实动作（导入 / 解除）。
+ *
+ * `ISSUE-P3-342` 改动口径：
+ * - **「绑定」按钮已移除**。它此前只翻一个草稿布尔，而 `isPasskey` 从不落盘（读路径按
+ *   「凭据字段是否存在」重算），点了保存后磁盘上什么都没发生 ⇒ 留着就是假象。
+ *   未绑定态改为一行说明：通行密钥只能由站点注册仪式或扫码 / 导入产生。
+ * - **「解除」是真实写操作**（摘掉该条目的凭据字段，不可逆），故其回调只负责**请求确认**，
+ *   落库在 ViewModel 的确认路径里做（见 `EntryEditViewModel.confirmUnbindPasskey`）。
+ * - 导入入口的条件从「已绑定且已落库」放宽为「已落库」：未绑定的既有条目正是导入的目标，
+ *   否则「解除」之后本页就再没有把凭据放回来的入口。
+ *
+ * `ISSUE-P3-337` Q1 的边界不变：新建表单（`entryId == null`）没有「当前条目」可挂，故不给按钮。
+ */
 @Composable
 internal fun EntryEditPasskeySection(
     isPasskey: Boolean,
-    onTogglePasskey: () -> Unit,
     canImportPasskey: Boolean = false,
+    onUnbindPasskey: () -> Unit = {},
     onImportPasskey: () -> Unit = {}
 ) {
     val securityColors = LocalSecurityColors.current
@@ -145,7 +159,7 @@ internal fun EntryEditPasskeySection(
         backgroundColor = if (isPasskey) securityColors.passkeyContainer.copy(alpha = 0.35f) else MaterialTheme.colorScheme.surfaceContainerLow,
         borderColor = if (isPasskey) securityColors.passkey.copy(alpha = 0.5f) else null
     ) {
-        // [BentoCard] 的内容槽是 Box：同层兄弟会**互相叠放**而非上下流动。状态行与导入按钮
+        // [BentoCard] 的内容槽是 Box：同层兄弟会**互相叠放**而非上下流动。状态行与下面的按钮
         // 两个子节点必须包进 Column，否则按钮压在说明文字上（真机 2026-09-27 实测重叠）。
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(
@@ -160,22 +174,27 @@ internal fun EntryEditPasskeySection(
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
-                        text = stringResource(R.string.edit_passkey_desc),
+                        text = if (isPasskey) {
+                            stringResource(R.string.edit_passkey_desc)
+                        } else {
+                            stringResource(R.string.edit_passkey_unbound_hint)
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-                Button(
-                    onClick = onTogglePasskey,
-                    shape = CapsuleShape,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (isPasskey) securityColors.passkey else MaterialTheme.colorScheme.primary
-                    )
-                ) {
-                    Text(if (isPasskey) stringResource(R.string.edit_passkey_unbind) else stringResource(R.string.edit_passkey_bind))
+                // 只有已绑定才有「可解除的凭据」；未绑定态没有可执行的动作，故不渲染按钮
+                if (isPasskey) {
+                    Button(
+                        onClick = onUnbindPasskey,
+                        shape = CapsuleShape,
+                        colors = ButtonDefaults.buttonColors(containerColor = securityColors.passkey)
+                    ) {
+                        Text(stringResource(R.string.edit_passkey_unbind))
+                    }
                 }
             }
-            if (isPasskey && canImportPasskey) {
+            if (canImportPasskey) {
                 OutlinedButton(
                     onClick = onImportPasskey,
                     shape = CapsuleShape,
@@ -399,21 +418,22 @@ internal fun EntryEditTotpSectionPreview() {
                 onTotpSecretChangeSecure = { _ -> },
                 onScanTotpQr = {}
             )
+            // `ISSUE-P3-340` 规则条文在这里的落地：三种可见性态各画一次，
+            // 少一态就等于把「只有真机能看见的缺陷」留给用户。
+            // ① 已绑定 + 已落库：解除按钮 + 导入按钮（Q1 的替换入口）
             EntryEditPasskeySection(
                 isPasskey = true,
-                onTogglePasskey = {}
+                canImportPasskey = true
             )
-            // Q1 附加入口在场的那一态：先前只预览了 `canImportPasskey=false`，
-            // 于是「导入按钮压在说明文字上」的真机重叠缺陷在预览里无从显现。
-            EntryEditPasskeySection(
-                isPasskey = true,
-                onTogglePasskey = {},
-                canImportPasskey = true,
-                onImportPasskey = {}
-            )
+            // ② 未绑定 + 已落库：只有导入按钮（解除后必须还有把凭据放回来的入口）
             EntryEditPasskeySection(
                 isPasskey = false,
-                onTogglePasskey = {}
+                canImportPasskey = true
+            )
+            // ③ 未绑定 + 新建表单：两个按钮都不给（没有可挂的当前条目）
+            EntryEditPasskeySection(
+                isPasskey = false,
+                canImportPasskey = false
             )
             EntryEditExtraSection(
                 tagsInput = previewTags.value,

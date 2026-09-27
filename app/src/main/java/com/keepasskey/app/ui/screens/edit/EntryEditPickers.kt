@@ -119,15 +119,27 @@ internal fun rememberEntryEditPickers(
     }
 
     // Q1 确认对话框：与顶栏 Q2 同一个组件（不新增 FLAG_SECURE 账目），差别只在 replacesEntry
-    // ——本页改的是「当前条目」的凭据，正文与按钮都据实说「替换」
+    // ——本页改的是「当前条目」的凭据。ISSUE-P3-342 起本条目可能**尚未绑定**（解除后重新导入），
+    // 此时说「替换」就是假话，故 replacesEntry 必须跟随真实绑定态。
     val pendingPasskeyImport by viewModel.pendingPasskeyImport.collectAsStateWithLifecycle()
+    val editUiState by viewModel.uiState.collectAsStateWithLifecycle()
     pendingPasskeyImport?.let { draft ->
         PasskeyImportConfirmDialog(
             draft = draft,
             flagSecureEnabled = flagSecureEnabled,
-            replacesEntry = true,
+            replacesEntry = editUiState.isPasskey,
             onConfirm = viewModel::confirmPasskeyImport,
             onDismiss = viewModel::dismissPasskeyImport
+        )
+    }
+
+    // ISSUE-P3-342：解除绑定确认框（不可逆写操作，必须先经确认）
+    val showUnbindPasskey by viewModel.showUnbindPasskeyConfirm.collectAsStateWithLifecycle()
+    if (showUnbindPasskey) {
+        EntryEditUnbindPasskeyDialog(
+            flagSecureEnabled = flagSecureEnabled,
+            onConfirm = viewModel::confirmUnbindPasskey,
+            onDismiss = viewModel::dismissUnbindPasskey
         )
     }
 

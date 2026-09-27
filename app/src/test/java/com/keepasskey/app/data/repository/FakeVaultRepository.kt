@@ -558,6 +558,57 @@ class FakeVaultRepository(
     }
 
     /**
+     * 测试替身：**解除绑定**——摘掉既有条目的全部 Passkey schema 字段（`ISSUE-P3-342`，
+     * 与生产 `PasskeyEntryCoordinator.clearPasskeyOnEntry` 同语义：非凭据字段全保留、
+     * 未命中返回 null 且无写入、本就没有凭据字段时幂等）。
+     *
+     * 与 [replacePasskeyOnEntry] 同样**两支存储都要认**（`extraKdbxEntries` 与 `entriesFlow`），
+     * 否则编辑页用例里的解除永远走 null 分支。
+     */
+    override suspend fun clearPasskeyOnEntry(entryId: String): KdbxEntry? {
+        val current = extraKdbxEntries.value
+        val index = current.indexOfFirst { it.id.toHexString() == entryId }
+        if (index >= 0) {
+            val target = current[index]
+            val preserved = target.customFields.filterNot { PasskeyData.isPasskeyFieldKey(it.key) }
+            if (preserved.size == target.customFields.size) {
+                return target
+            }
+            val updated = target.copy(customFields = preserved)
+            lastSavedPasskeyByEntry = lastSavedPasskeyByEntry - entryId
+            extraKdbxEntries.value = current.toMutableList().also { it[index] = updated }
+            return updated
+        }
+        val uiEntries = entriesFlow.value
+        val uiIndex = uiEntries.indexOfFirst { it.id == entryId }
+        if (uiIndex < 0) return null
+        val ui = uiEntries[uiIndex]
+        val preservedUi = ui.customFields.filterNot { PasskeyData.isPasskeyFieldKey(it.key) }
+        if (preservedUi.size == ui.customFields.size) {
+            return null
+        }
+        entriesFlow.value = uiEntries.toMutableList().also {
+            it[uiIndex] = ui.copy(customFields = preservedUi, isPasskey = false, passkeyRpId = null)
+        }
+        lastSavedPasskeyByEntry = lastSavedPasskeyByEntry - entryId
+        // 与 replacePasskeyOnEntry 同形：UI 侧命中也要回传一条落树后的 KdbxEntry，
+        // 否则调用方按 null 判"未命中"，解除成功的分支在单测里永远走不到。
+        return KdbxEntry(
+            id = try {
+                KdbxUuid.fromHexString(entryId)
+            } catch (_: Exception) {
+                KdbxUuid.random()
+            },
+            fields = mapOf(
+                KdbxConstants.Fields.TITLE to ProtectedString(ui.title, isProtected = false)
+            ),
+            customFields = preservedUi.map {
+                KdbxCustomField(it.key, ProtectedString(it.value, isProtected = it.isProtected))
+            }
+        )
+    }
+
+    /**
      * 测试替身：同 rpId + 用户名命中既有条目时**原地替换**其 Passkey schema 字段，
      * 否则与 [saveNewPasskeyEntry] 同语义新建（与生产 [RealVaultRepository] 契约一致）。
      */

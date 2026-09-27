@@ -175,9 +175,11 @@
 ## P3 低危问题、特性接线与体验优化（4 项）
 
 > **开放项 4 条**：
-> ⓪ `ISSUE-P3-342` 编辑页「绑定 / 解除」静默失效（2026-09-27 用户真机报出，同日核实）——
-> `isPasskey` 从不落盘 ⇒ 点「解除」再保存，通行密钥仍被 CM 捞出；连带 `saveEntry()` 不清 `isDirty` 的潜在隐患。
-> ⚠️ 与 `ISSUE-P2-341` 同批文件，**先做 341 再做本条**。
+> ⓪ `ISSUE-P3-342` 编辑页「绑定 / 解除」静默失效（2026-09-27 用户真机报出，**同日已修**）——
+> `isPasskey` 从不落盘 ⇒ 点「解除」再保存，通行密钥仍被 CM 捞出。现「解除」＝真删凭据（不可逆、须确认，
+> 裁决入 `PD-50`），「绑定」按钮移除，导入入口放宽到「已落库」并如实标注即时落库，
+> `saveEntry()` 补上「成功即清脏位」不变量；**仅剩设备侧复验**（真机解除后重开条目 + 候选对照）。
+> ⚠️ 与 `ISSUE-P2-341` 同批文件，按序先做 341。
 > ① `ISSUE-P3-340` `@Preview` 状态覆盖无机检（2026-09-27 立项，**同日①②③已做完**，仅剩「是否升级为
 > 第九条闸门」一条未决）——普查读数：全仓 19 个带默认值的 `Boolean` 开关，缺反向态 10 → 2（剩两条为
 > 主题包装器，判为应豁免），两态齐比率 10.5% → 52.6%；补态当场照出「禁用态下校验失败视觉不可辨」这一
@@ -247,6 +249,56 @@
   ③ 新建态不再出现「绑定」按钮，`@Preview` 同步补/删对应态（`ISSUE-P3-340` 的规则条文生效点）；
   ④ 保存后 `isDirty == false` 的回归用例（锁住口径 2 的不变量）；
   ⑤ 全量 `test` + `gate_readings.py` 全 PASS + `check_tautological_assertions.py`（改断言后必跑）。
+- **留痕（2026-09-27 实施，口径 1/2/3 全落）**：
+  - **写通路已建**：`PasskeyEntryCoordinator.clearPasskeyOnEntry(entryId)`（保留集与
+    `replacePasskeyOnEntry` 用**同一把尺子** `PasskeyData.isPasskeyFieldKey`，避免两处对"什么算凭据"
+    给出不同答案）→ `VaultPasskeyRepository` 接口 + `RealVaultRepository` 委托 + `FakeVaultRepository`
+    替身（**两支存储都要认**，理由同 337 留痕里那条「否则替换语义在单测里永远走 null」）。
+    未命中 / id 非法 ⇒ 返回 null 且**无任何写入**；条目本就没有凭据字段 ⇒ **幂等无写**（不刷时间戳、不产历史快照）。
+  - **控件改向**：`onTogglePasskey` 删除（原处留一行注释说明它为什么被删，防止有人再加回来）；
+    新增 `requestUnbindPasskey` / `confirmUnbindPasskey` / `dismissUnbindPasskey` +
+    `showUnbindPasskeyConfirm`（**只存活于会话内存**，不经路由参数 / `SavedStateHandle`，P2-105 红线不变）。
+    未绑定态不再渲染「绑定」按钮；说明行改说「通行密钥由站点注册仪式或扫码导入产生」。
+  - **导入入口条件放宽**为「已落库」（不再要求已绑定），否则「解除」之后本页就没有把凭据放回来的入口；
+    确认对话框的 `replacesEntry` 由硬编码 `true` 改为**跟随真实绑定态**（未绑定态说「替换」就是假话）。
+  - **口径 2 的不变量已补**：`saveEntry()` 成功后 `copy(isDirty = false, entryId = entryId)`，
+    KDoc 写明理由（导入闸门以 `hasUnsavedEdits()` 作前置拒绝，今天不出事仅因"保存即出页"）。
+  - **裁决入表 `PD-50`**（代理裁决，含两条被否路线的不对称代价：草稿化＝私钥明文驻留整个编辑会话，
+    持久化 `isPasskey`＝制造第二个真相源）与**重开条件**。
+  - **提示语自己说清边界**：新增 `edit_passkey_import_saved_now`（「通行密钥已立即写入本条目（不经『保存』）」），
+    编辑页导入成功后的提示由 `passkey_import_replaced` 改指它——用户正是因这句缺失才问"两个是不是重复功能"。
+  - **新增用例** `EntryEditUnbindPasskeyTest` **5 例**：① 请求只挂确认态、取消后凭据一条不少；
+    ② 确认后凭据 schema 键全摘而**非凭据字段必须仍在**（正向对照：实现退化成"删整条条目"时这里就红）、
+    表单重载为未绑定；③ 只读会话与新建表单都拒绝且**不弹空对话框**、无写入；④ 未绑定态请求解除为 no-op；
+    ⑤ 保存成功后脏位必须清（锁住口径 2 的不变量）。
+  - **`PopupSecureFlagInventoryTest` 已重新盘点**（337 AC⑥ 同体例）：新增的
+    `EntryEditUnbindPasskeyDialog` 与导入确认框同族——按 `PD-48` 裁决三**跟随防截屏开关**，
+    不列入"无条件强制遮罩"4 类；正文不回显任何凭据材料 ⇒ 调用点仍 4 处、菜单项仍 11 个。
+  - **`@Preview` 三态齐**（`ISSUE-P3-340` 规则条文在本批的第一次生效）：已绑定＋已落库 /
+    未绑定＋已落库 / 未绑定＋新建表单，各画一次。
+  - **一处被迫的连带重构（如实登记）**：本批新增使 `EntryEditViewModel.kt` 越过行数闸门
+    （`tier1(>500)` 恒 0 是硬门禁），实测 531 逻辑行 ⇒ 报红。按本仓既有"协作者类"体例
+    （`entropyRefresh` / `passkeyImport` / `customFields`）把**口令生成器**与**附件草稿**两块
+    纯 UI 状态逻辑逐字搬出为 `EntryEditPasswordGenerator` / `EntryEditAttachmentDraft`
+    （`EntryEditPasswordGenerator.kt` 一文件两类），VM 侧只留一行委托，
+    **行为与清零契约不变**（生成数组仍在交出后由生成器就地填零，口令仍经既有
+    `onPasswordChangeSecure` 复制私有副本）。改后 `tier1=0 / tier2=36 budget=37`。
+    ⚠️ 登记这条是因为：**它是重构而非新功能**，若将来有人只看功能面会漏掉这块改动；
+    且它说明本条的"最小改动"实际成本比口径里估的高。
+  - **未做**：设备侧复验（真机上点「解除」→ 重开条目应真的不再是通行密钥、且 CM 候选不再含它）
+    与 `connectedDebugAndroidTest` 层面的候选装配对照 ⇒ 待用户重连真机后按 §263 在 AVD / 实验机做。
+  - **验证读数（原样粘贴 `python tools/doc/gate_readings.py`）**：
+    `[1/8] count_line_tiers.py EXIT 0 | tier1(>500)=0 tier2(400~500)=36 budget=37` /
+    `[2/8] long_functions.py EXIT 0 | functions_ge_100=0` /
+    `[3/8] check_md_links.py EXIT 0 | BROKEN_MD_LINKS=0` /
+    `[4/8] check_resolved_index_sync.py EXIT 0 | RESOLVED_INDEX_SYNC=OK（批次正文 340 份；分册登记 342 条；全量索引 342 条；最大 §342）` /
+    `[5/8] check_tautological_assertions.py EXIT 0 | 汇总：命中 0 处 / 扫描 473 个测试文件` /
+    `[6/8] check_recheck_consistency.py EXIT 0 | PASS: 无残留禁用短语（已扫描 1331 行，11 条禁用短语）` /
+    `[7/8] check_bounded_type_names.py EXIT 0 | allowed=12 unregistered_manager_util_helper_common=0` /
+    `[8/8] check_box_slot_children.py EXIT 0 | BoxScope 内容槽组件：['BentoCard'] 检查过的调用点：59 box_slot_stacked_sites=0`
+    ⇒ **8/8 PASS**；`:app:compileDebugScreenshotTestKotlin --rerun` 通过（包装仍 83，本批未新增 `@Preview` 函数，
+    只把既有预览改为三态齐）；`test --rerun-tasks --max-workers=1` **BUILD SUCCESSFUL in 3m28s、114/114 executed**，
+    `count_test_results.py` = `xml=415 tests=2759 failures=0 errors=0 skipped=13`（341 批 2754 ＋ 本批 5 例）。
 - **关联**：`ISSUE-P2-341`（**同批文件** `VaultEntryMapper` / `VaultRepository` / `RealVaultRepository`，
   顺序上先做 341）/ `ISSUE-P3-337`（导入通路与确认对话框、`PD-08` 第 5 项只读口径）/
   `PD-49` 裁决三（拒绝把多枚私钥同时驻留，本条口径 1 的取舍依据同源）/ `ISSUE-P3-340`（补态规则）。

@@ -189,6 +189,48 @@ internal class PasskeyEntryCoordinator(
     }
 
     /**
+     * `ISSUE-P3-342`：**解除绑定**——按条目 id 摘掉其全部 `KPEX_PASSKEY_*` / 旧 schema 凭据字段，
+     * 非凭据字段（标题 / 用户名 / URL / 备注 / 口令 / 标签 / 附件 / 历史…）**按引用原样保留**。
+     *
+     * ## 为何需要它
+     *
+     * 编辑页的「绑定 / 解除」按钮此前只翻一个草稿布尔：`isPasskey` 既不在 `saveMergedEntry` 的字段清单里、
+     * 也不在 `mapUiEntryToKdbx` 里，而读路径反过来按 `passkeyData != null` **重算**它
+     * ⇒ 用户点「解除」再保存，**通行密钥原封不动、仍会被 Credential Manager 列进候选并签名**
+     * （`KeePasskeyCredentialProviderService.findMatchingEntries` 正按 `entry.isPasskey` 判）。
+     * 那是一个会骗人的安全控件。本方法给「解除」一条真实的写通路。
+     *
+     * ## 口径
+     *
+     * * **不可逆**：私钥随字段一并消失（历史快照仍含旧值，故"撤销"只在历史层面可能，不在本入口承诺）。
+     *   因此调用方**必须**先经确认对话框，且不得在只读会话调用。
+     * * 判定"哪些字段属于凭据"复用 [PasskeyData.isPasskeyFieldKey] —— 与 `replacePasskeyOnEntry`
+     *   的保留集**同一把尺子**，避免两处对"什么算凭据"给出不同答案。
+     * * 未命中条目 / id 非法 ⇒ 返回 null 且**无任何写入**（与 `replacePasskeyOnEntry` 同形）。
+     */
+    suspend fun clearPasskeyOnEntry(entryId: String): KdbxEntry? {
+        val targetUuid = parseKdbxUuidOrNull(entryId) ?: return null
+        val cleared = databaseSession.updateEntryById(targetUuid) { entry ->
+            val preserved = entry.customFields.filterNot { PasskeyData.isPasskeyFieldKey(it.key) }
+            if (preserved.size == entry.customFields.size) {
+                // 本就没有凭据字段：不写、不刷时间戳、不产历史快照（幂等，避免空转落盘）
+                entry
+            } else {
+                entry.copy(customFields = preserved, times = entry.times.withModified())
+            }
+        }
+        if (cleared == null) {
+            debugLog.warn(TAG, "解除通行密钥绑定未命中条目，未做任何写入")
+            return null
+        }
+        val saved = persistSession()
+        if (saved is KdbxResult.Failure) {
+            debugLog.warn(TAG, "通行密钥字段已摘除但落盘失败: ${saved.error.javaClass.simpleName}")
+        }
+        return cleared
+    }
+
+    /**
      * 就地修补签名计数器（CTAP2 signCount 防克隆校验依赖其单调递增）。
      *
      * ISSUE-P3-10 子项 2（受控事务/原子语义）：「读取库内现值 → 计算目标值 → 替换条目」

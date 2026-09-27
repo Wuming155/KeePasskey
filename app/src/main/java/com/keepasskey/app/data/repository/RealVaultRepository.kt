@@ -332,6 +332,10 @@ class RealVaultRepository @Inject constructor(
     override suspend fun replacePasskeyOnEntry(entryId: String, data: PasskeyData): KdbxEntry? =
         passkeyEntries.replacePasskeyOnEntry(entryId, data)
 
+    /** ISSUE-P3-342：解除绑定下沉 [PasskeyEntryCoordinator]（与替换同一保留集尺子）。 */
+    override suspend fun clearPasskeyOnEntry(entryId: String): KdbxEntry? =
+        passkeyEntries.clearPasskeyOnEntry(entryId)
+
     override suspend fun saveOrReplacePasskeyEntry(data: PasskeyData, boundPackage: String?): KdbxEntry =
         passkeyEntries.saveOrReplacePasskeyEntry(data, boundPackage)
 

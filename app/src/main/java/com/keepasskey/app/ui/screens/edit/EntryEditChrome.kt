@@ -20,6 +20,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.keepasskey.app.R
+import com.keepasskey.app.security.SecureDialogWindowEffect
 import com.keepasskey.app.ui.components.CustomIconItem
 import com.keepasskey.app.ui.components.IconPickerDialog
 import com.keepasskey.app.ui.theme.CapsuleShape
@@ -111,6 +112,38 @@ internal fun EntryEditIconPickerDialog(
         selectedCustomIconId = customIconId,
         onSelectCustomIcon = onSelectCustomIcon,
         onUploadClick = onUploadClick
+    )
+}
+
+/**
+ * 解除通行密钥绑定确认弹窗（`ISSUE-P3-342`）。
+ *
+ * 存在的理由：旧「解除」按钮只翻草稿布尔、从不落盘，用户以为撤下了凭据而它仍可被
+ * Credential Manager 捞出并签名。现在它是一条**不可逆的真实写操作**，故必须先经确认，
+ * 且正文要写清"删的是什么、留的是什么"。
+ *
+ * `FLAG_SECURE` 跟随设置开关（`PD-48` 裁决三，与通行密钥导入确认框同口径）；
+ * 反 overlay 与点击劫持两层由 [SecureDialogWindowEffect] 始终施加。
+ */
+@Composable
+internal fun EntryEditUnbindPasskeyDialog(
+    flagSecureEnabled: Boolean,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    SecureDialogWindowEffect(flagSecure = flagSecureEnabled)
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.edit_passkey_unbind_dialog_title)) },
+        text = { Text(stringResource(R.string.edit_passkey_unbind_dialog_body)) },
+        confirmButton = {
+            TextButton(onClick = onConfirm) {
+                Text(stringResource(R.string.edit_passkey_unbind_confirm))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.btn_cancel)) }
+        }
     )
 }
 

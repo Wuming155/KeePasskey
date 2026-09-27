@@ -99,7 +99,7 @@ fun EntryEditScreen(
         onPasswordChangeSecure = viewModel::onPasswordChangeSecure,
         onUrlChange = viewModel::onUrlChange,
         onNotesChange = viewModel::onNotesChange,
-        onTogglePasskey = viewModel::onTogglePasskey,
+        onUnbindPasskey = viewModel::requestUnbindPasskey,
         onTotpSecretChangeSecure = viewModel::onTotpSecretChangeSecure,
         onUpdateProtectedFieldValue = viewModel::updateProtectedFieldValue,
         onTagsInputChange = viewModel::onTagsInputChange,
@@ -159,7 +159,7 @@ fun EntryEditContent(
     onPasswordChangeSecure: (CharArray) -> Unit,
     onUrlChange: (String) -> Unit,
     onNotesChange: (String) -> Unit,
-    onTogglePasskey: () -> Unit,
+    onUnbindPasskey: () -> Unit,
     onTotpSecretChangeSecure: (CharArray) -> Unit,
     onUpdateProtectedFieldValue: (String, CharArray) -> Unit,
     onTagsInputChange: (String) -> Unit,
@@ -258,12 +258,13 @@ fun EntryEditContent(
                 onScanTotpQr = onScanTotpQr
             )
 
-            // 通行密钥 Passkey 注册绑定
+            // 通行密钥区块（ISSUE-P3-342：「绑定」按钮已移除，「解除」改为真实写操作 + 确认框）
             EntryEditPasskeySection(
                 isPasskey = uiState.isPasskey,
-                onTogglePasskey = onTogglePasskey,
-                // ISSUE-P3-337 Q1：附加入口只给「已绑定且已落库」的条目（替换按 id 定位当前条目）
+                // ISSUE-P3-337 Q1 + 342：入口给「已落库」的条目——未绑定的既有条目正是导入的目标，
+                // 否则解除之后本页就没有把凭据放回来的入口了（替换 / 新增的措辞由确认对话框区分）
                 canImportPasskey = uiState.entryId != null,
+                onUnbindPasskey = onUnbindPasskey,
                 onImportPasskey = onScanPasskeyQr
             )
 

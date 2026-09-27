@@ -105,7 +105,9 @@ internal class EntryEditPasskeyImport(
                 host.onNotice(R.string.passkey_import_entry_missing)
                 return@launch
             }
-            host.onNotice(R.string.passkey_import_replaced)
+            // ISSUE-P3-342：文案须**如实说明这条通路不经「保存」**——用户此前据此认为
+            // 右上角保存与导入按钮功能重叠（实际两者写的是完全不同的字段集）。
+            host.onNotice(R.string.edit_passkey_import_saved_now)
             host.onReplaced()
         }
     }

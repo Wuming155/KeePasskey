@@ -54,6 +54,20 @@ interface VaultPasskeyRepository {
     suspend fun replacePasskeyOnEntry(entryId: String, data: PasskeyData): KdbxEntry?
 
     /**
+     * **解除绑定**：摘掉指定条目的全部通行密钥字段（`ISSUE-P3-342`）。
+     *
+     * 存在的原因：编辑页的「绑定 / 解除」此前只翻草稿布尔，而 `isPasskey` 从不落盘、
+     * 读路径又按「凭据字段是否存在」重算 ⇒ 用户点了「解除」并保存，凭据**仍然可被 CM 捞出并签名**。
+     * 本入口给那个按钮一条真实写通路。
+     *
+     * **不可逆**（私钥随字段消失，仅历史快照里还有旧值）⇒ 调用方必须先经确认对话框，
+     * 且只读会话不得调用。非凭据字段按引用原样保留；条目本就没有凭据字段时为幂等无写。
+     *
+     * @return 落树上线的条目；[entryId] 非法 / 条目不存在 / 只读态时返回 null 且无任何写入。
+     */
+    suspend fun clearPasskeyOnEntry(entryId: String): KdbxEntry?
+
+    /**
      * 新建或**原地替换** Passkey 凭据条目。
      *
      * 复用条件：同 rpId（域匹配）+ 同用户名的既有 Passkey 条目 —— 命中时保留条目其它内容

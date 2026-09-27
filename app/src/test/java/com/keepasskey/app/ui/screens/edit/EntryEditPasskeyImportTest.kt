@@ -184,7 +184,9 @@ class EntryEditPasskeyImportTest {
             "webauthn.io",
             viewModel.uiState.value.customFields.first { it.key == PasskeyData.FIELD_RP_ID }.value
         )
-        assertEquals(R.string.passkey_import_replaced, noticeRes(viewModel))
+        // ISSUE-P3-342：文案改为如实说明「即时落库、不经『保存』」——用户据此曾以为
+        // 右上角保存与导入是重复功能，提示语必须自己把这条界线说清楚。
+        assertEquals(R.string.edit_passkey_import_saved_now, noticeRes(viewModel))
     }
 
     @Test
