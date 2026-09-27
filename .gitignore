@@ -42,6 +42,7 @@ captures/
 .trae/
 .vscode/
 .workbuddy/
+.qoder-credits/
 
 # 图形界面（Compose）预览导航索引：根目录 GUI导航.md 属**本地开发期检索工具**，
 # 只服务 Android Studio 预览面板的快速跳转，非项目正式文档（正式文档一律落 docs/ 并登记文档地图），
