@@ -1076,6 +1076,8 @@
     <string name="autofill_manual_picker_sub">Keep a persistent “Search all entries…” fallback in the system fill panel; off keeps only auto-match and the unlock guide</string>
     <string name="autofill_offer_create_title">Create entry when nothing matches</string>
     <string name="autofill_offer_create_sub">Offer “Create entry and fill” on the empty picker and “Create password entry” in Credential Manager; turning this off hides both</string>
+    <string name="structured_dataset_subtitle">Card / address information</string>
+    <string name="structured_entry_badge">Card/Address</string>
     <string name="cred_create_entry_subtitle">Save passkey or password to active vault</string>
     <string name="cred_autofill_unlock_prompt">Unlock KeePasskey to view credentials</string>
     <string name="cred_autofill_locked_subtitle">Tap to unlock vault and autofill</string>

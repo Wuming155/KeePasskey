@@ -17,6 +17,7 @@ import com.keepasskey.app.autofill.KeePasskeyAutofillService.Companion.MAX_DATAS
 import java.util.concurrent.atomic.AtomicInteger
 import com.keepasskey.app.autofill.KeePasskeyAutofillService.Companion.TAG
 import com.keepasskey.core.log.AppLog
+import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.database.fieldref.FieldReferenceEngine.RefField
 
 /**
@@ -154,7 +155,7 @@ internal fun KeePasskeyAutofillService.buildLockedUnlockDataset(
 }
 
 /**
- * 库已解锁时按候选打分追加候选数据集。
+ * 库已解锁时按候选打分追加候选数据集；结构化目标存在时同批追加结构化数据集（ISSUE-P3-375）。
  */
 internal suspend fun KeePasskeyAutofillService.appendUnlockedDatasets(
     responseBuilder: FillResponse.Builder,
@@ -163,7 +164,8 @@ internal suspend fun KeePasskeyAutofillService.appendUnlockedDatasets(
     usernameId: AutofillId?,
     passwordId: AutofillId?,
     inlineRequest: InlineSuggestionsRequest?,
-    otpId: AutofillId? = null
+    otpId: AutofillId? = null,
+    structuredTargetIds: Map<StructuredFieldRole, AutofillId> = emptyMap()
 ) {
     val candidates = resolveUnlockedCandidates(callingPkg, scanResult)
     val context = UnlockedDatasetContext(
@@ -180,11 +182,20 @@ internal suspend fun KeePasskeyAutofillService.appendUnlockedDatasets(
         // 本路径原先两条都违反（IMMUTABLE + 确认页只回传成功而不回传数据集）⇒ 真机恒不写入。
         // 现与选择器入口（[buildPickerDataset]，真机实测可用）**同构造**：无 activity flag +
         // 随认证 Intent 下发目标字段 id，供确认页确认后按条目取回凭据并构造真实 Dataset 回传。
+        // ISSUE-P3-375：结构化目标角色与框 id 同批下发（确认页据此把卡 / 地址字段写入回传数据集）
         confirmIntent = Intent(this, AutofillConfirmActivity::class.java).apply {
             putExtra(AutofillConfirmActivity.EXTRA_TARGET_USERNAME_ID, usernameId)
             putExtra(AutofillConfirmActivity.EXTRA_TARGET_PASSWORD_ID, passwordId)
             // ISSUE-P3-298 ⑤：OTP 框 id 随认证 Intent 下发，确认页回传时把当前 TOTP 值填入
             putExtra(AutofillConfirmActivity.EXTRA_TARGET_OTP_ID, otpId)
+            putExtra(
+                EXTRA_TARGET_STRUCTURED_ROLES,
+                ArrayList(structuredTargetIds.keys.map { it.name })
+            )
+            putExtra(
+                EXTRA_TARGET_STRUCTURED_IDS,
+                ArrayList(structuredTargetIds.values)
+            )
         },
         skipRepeatConfirmation = unlockedConfirmationPolicy(callingPkg, candidates, passwordId)
     )
@@ -196,10 +207,13 @@ internal suspend fun KeePasskeyAutofillService.appendUnlockedDatasets(
     for (ranked in candidates.ranked) {
         responseBuilder.addDataset(buildCandidateDataset(context, ranked))
     }
+
+    // ISSUE-P3-375 AC②：结构化数据集（卡 / 地址）——与登录候选正交追加
+    appendStructuredDatasets(responseBuilder, context, structuredTargetIds)
 }
 
 /** 本轮请求内对所有候选恒定的建集入参（域 / 字段 id / 内联请求 / 认证 Intent / 确认策略） */
-private data class UnlockedDatasetContext(
+internal data class UnlockedDatasetContext(
     val callingPkg: String,
     val webDomain: String?,
     val usernameId: AutofillId?,
@@ -358,7 +372,7 @@ private suspend fun KeePasskeyAutofillService.buildCandidateDataset(
 }
 
 /** 每个数据集独立 requestCode，避免 PendingIntent 因 extras 相互覆盖 */
-private fun KeePasskeyAutofillService.attachConfirmationAuth(
+internal fun KeePasskeyAutofillService.attachConfirmationAuth(
     dsBuilder: Dataset.Builder,
     entryIdHex: String,
     displayName: String,

@@ -53,7 +53,9 @@ internal fun buildAuthenticationResultDataset(
     passwordId: AutofillId?,
     // ISSUE-P3-298 ⑤：表单显式声明的 OTP 框 + 该条目当前 TOTP 值（仅 TOTP；由调用方判定）
     otpId: AutofillId? = null,
-    otpCode: String = ""
+    otpCode: String = "",
+    // ISSUE-P3-375 AC③：结构化字段（框 id → 字段值；由确认页在用户确认后取回）
+    structuredFields: Map<AutofillId, String> = emptyMap()
 ): Dataset? {
     val views = RemoteViews(packageName, R.layout.autofill_dataset_item).apply {
         setTextViewText(R.id.tv_username, menuTitle)
@@ -86,6 +88,16 @@ internal fun buildAuthenticationResultDataset(
             Field.Builder().setValue(AutofillValue.forText(otpCode)).build()
         )
         fieldCount++
+    }
+    // ISSUE-P3-375：结构化字段逐框写入（只写非空值；Map 迭代序为调用方构造序，确定性）
+    for ((autofillId, value) in structuredFields) {
+        if (value.isNotEmpty()) {
+            builder.setField(
+                autofillId,
+                Field.Builder().setValue(AutofillValue.forText(value)).build()
+            )
+            fieldCount++
+        }
     }
     return if (fieldCount == 0) null else builder.build()
 }

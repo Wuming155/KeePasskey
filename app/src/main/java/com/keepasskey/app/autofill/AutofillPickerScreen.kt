@@ -235,13 +235,27 @@ fun AutofillPickerScreen(
                                 containerColor = MaterialTheme.colorScheme.surface
                             )
                         ) {
-                            Text(
-                                text = title,
-                                style = MaterialTheme.typography.bodyLarge.copy(
-                                    fontWeight = FontWeight.SemiBold
-                                ),
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Text(
+                                    text = title,
+                                    style = MaterialTheme.typography.bodyLarge.copy(
+                                        fontWeight = FontWeight.SemiBold
+                                    ),
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                // ISSUE-P3-375 AC④：携带结构化字段（卡 / 地址）的条目明确标注，
+                                // 与口令条目区分（组内标注形态，替代整组分栏）
+                                if (StructuredFieldPolicy.hasAnyStructuredData(entry)) {
+                                    Text(
+                                        text = stringResource(R.string.structured_entry_badge),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.tertiary
+                                    )
+                                }
+                            }
                         }
                         HorizontalDivider(
                             modifier = Modifier.padding(horizontal = 16.dp),

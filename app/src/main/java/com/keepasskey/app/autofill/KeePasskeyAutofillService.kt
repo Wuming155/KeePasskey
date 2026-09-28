@@ -148,6 +148,8 @@ class KeePasskeyAutofillService : AutofillService() {
         val passwordId = targets.passwordId
         val otpId = targets.otpId
         val scanResult = targets.scanResult
+        // ISSUE-P3-375：结构化数据目标（卡 / 地址）——与登录目标正交下发
+        val structuredTargetIds = targets.structuredTargetIds
 
         val responseBuilder = FillResponse.Builder()
         // 内联建议通道（IME）：请求侧携带 InlineSuggestionsRequest 且声明 supportsInlineSuggestions
@@ -157,20 +159,31 @@ class KeePasskeyAutofillService : AutofillService() {
         // 库已锁定：提供解锁 Action Dataset
         // ISSUE-P2-86：解锁引导数据集需携带链入选择器所需的上下文（目标框 id + 调用方包名 +
         // 表单自报域），故按选择器同一口径传入 callingPkg / scanResult.webDomain
-        buildLockedUnlockDataset(
-            usernameId = usernameId,
-            passwordId = passwordId,
-            otpId = otpId,
-            callingPkg = callingPkg,
-            webDomain = scanResult.webDomain,
-            inlineRequest = inlineRequest
-        )?.let { lockedResponse ->
-            // ISSUE-P2-73 AC③：设备侧核对「库锁定 ⇒ 下发认证引导数据集」的调试留痕。
-            // 用 `AppLog.d`（仅 debug 构建输出，release 静默且被 R8 剥离）——不改变任何语义，
-            // 只为真机链路提供可核对的时序锚点；日志不含包名/条目等敏感标识。
-            AppLog.d(TAG, "onFillRequest 下发解锁引导数据集（密码库锁定，认证由解锁 Activity 承接）")
-            callback.onSuccess(lockedResponse)
-            return
+        // ISSUE-P3-375：纯结构化表单（无账号 / 密码框）锁库时不下发解锁引导——解锁链的
+        // 交付面是 U/P 通道，引导过去也无处回填；解锁后框架重发 onFillRequest 自然带出结构化目标
+        // （P2-73 实证的「认证完成后框架重发」语义），本分支如实返回空响应。
+        if (usernameId == null && passwordId == null && structuredTargetIds.isNotEmpty()) {
+            if (vaultRepository.isLocked()) {
+                AppLog.d(TAG, "纯结构化表单在库锁定态暂不下发（解锁后框架重发请求）")
+                callback.onSuccess(null)
+                return
+            }
+        } else {
+            buildLockedUnlockDataset(
+                usernameId = usernameId,
+                passwordId = passwordId,
+                otpId = otpId,
+                callingPkg = callingPkg,
+                webDomain = scanResult.webDomain,
+                inlineRequest = inlineRequest
+            )?.let { lockedResponse ->
+                // ISSUE-P2-73 AC③：设备侧核对「库锁定 ⇒ 下发认证引导数据集」的调试留痕。
+                // 用 `AppLog.d`（仅 debug 构建输出，release 静默且被 R8 剥离）——不改变任何语义，
+                // 只为真机链路提供可核对的时序锚点；日志不含包名/条目等敏感标识。
+                AppLog.d(TAG, "onFillRequest 下发解锁引导数据集（密码库锁定，认证由解锁 Activity 承接）")
+                callback.onSuccess(lockedResponse)
+                return
+            }
         }
 
         deliverUnlockedResponse(
@@ -181,6 +194,7 @@ class KeePasskeyAutofillService : AutofillService() {
             usernameId = usernameId,
             passwordId = passwordId,
             otpId = otpId,
+            structuredTargetIds = structuredTargetIds,
             inlineRequest = inlineRequest
         )
     }
@@ -211,7 +225,7 @@ class KeePasskeyAutofillService : AutofillService() {
             null -> false
         }
 
-    /** 库已解锁：候选数据集 + 手动搜索兜底入口 + SaveInfo，一次装配合并后回给框架 */
+    /** 库已解锁：候选数据集 + 结构化数据集 + 手动搜索兜底入口 + SaveInfo，一次装配合并后回给框架 */
     private suspend fun deliverUnlockedResponse(
         responseBuilder: FillResponse.Builder,
         callback: FillCallback,
@@ -220,6 +234,7 @@ class KeePasskeyAutofillService : AutofillService() {
         usernameId: AutofillId?,
         passwordId: AutofillId?,
         otpId: AutofillId?,
+        structuredTargetIds: Map<StructuredFieldRole, AutofillId>,
         inlineRequest: InlineSuggestionsRequest?
     ) {
         appendUnlockedDatasets(
@@ -229,17 +244,22 @@ class KeePasskeyAutofillService : AutofillService() {
             usernameId = usernameId,
             passwordId = passwordId,
             otpId = otpId,
+            structuredTargetIds = structuredTargetIds,
             inlineRequest = inlineRequest
         )
-        // ISSUE-P3-40：手动搜索兜底入口
-        buildPickerDataset(
-            responseBuilder = responseBuilder,
-            callingPkg = callingPkg,
-            scanResult = scanResult,
-            usernameId = usernameId,
-            passwordId = passwordId,
-            otpId = otpId
-        )
+        // ISSUE-P3-40：手动搜索兜底入口（ISSUE-P3-375：纯结构化表单不挂——选择器交付
+        // 链为 U/P 通道，手动挑选无法映射结构化字段；结构化候选在上一步已按
+        // 「全部字段齐备」自筛，零候选即如实无兜底，见批次 §355.4 边界声明）
+        if (usernameId != null || passwordId != null) {
+            buildPickerDataset(
+                responseBuilder = responseBuilder,
+                callingPkg = callingPkg,
+                scanResult = scanResult,
+                usernameId = usernameId,
+                passwordId = passwordId,
+                otpId = otpId
+            )
+        }
         // 注册 SaveInfo 以便在用户提交时捕获新账密
         applySaveInfoIfNeeded(
             responseBuilder = responseBuilder,

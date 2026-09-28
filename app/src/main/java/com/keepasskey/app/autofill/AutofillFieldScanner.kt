@@ -49,7 +49,12 @@ data class ScanNode(
      * 仅当扫描方要求「尊重页面标记」（[scan] 的 `respectImportantForAutofill = true`）时，
      * false 才会导致该字段被跳过；对应设置项 `overrideNoAutofill`（默认 false=尊重）。
      */
-    val importantForAutofill: Boolean = true
+    val importantForAutofill: Boolean = true,
+    /**
+     * ISSUE-P3-375 AC①：HTML `autocomplete` 属性（WebView 表单的结构化字段源之二，
+     * 如 `cc-number` / `postal-code`）。原生控件该值为 null。
+     */
+    val autocomplete: String? = null
 )
 
 /**
@@ -75,7 +80,12 @@ data class ScanResult(
      * ISSUE-P3-372 AC①：本结果是否由「弱目标二次解析」产出（首轮严格扫描零登录目标后的
      * 第二轮干草堆术语扫描）。仅作诊断与单测断言，不参与任何放行判定。
      */
-    val usedWeakReparse: Boolean = false
+    val usedWeakReparse: Boolean = false,
+    /**
+     * ISSUE-P3-375 AC①：结构化数据目标（角色 → 节点索引 id；仅 hint / autocomplete
+     * 两源可填充项，由 `StructuredFieldPolicy.detectFillableTargets` 产出并在解析编排中合入）。
+     */
+    val structuredTargets: Map<StructuredFieldRole, String> = emptyMap()
 )
 
 /**

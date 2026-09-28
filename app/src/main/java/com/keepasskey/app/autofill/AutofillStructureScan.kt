@@ -21,6 +21,8 @@ internal data class ParsedAutofillNode(
     val isVisible: Boolean,
     /** ISSUE-P3-43：页面是否允许对该节点自动填充（`importantForAutofill`） */
     val importantForAutofill: Boolean,
+    /** ISSUE-P3-375 AC①：HTML `autocomplete` 属性（WebView 结构化字段源；原生控件为 null） */
+    val autocomplete: String?,
     val text: String
 ) {
     /**
@@ -34,7 +36,8 @@ internal data class ParsedAutofillNode(
         "ParsedAutofillNode(autofillId=$autofillId, autofillHints=${autofillHints.size}, " +
             "inputType=$inputType, isFocused=$isFocused, hasHtmlName=${htmlName != null}, " +
             "hasLabel=${label != null}, webDomain=$webDomain, isVisible=$isVisible, " +
-            "importantForAutofill=$importantForAutofill, textLength=${text.length})"
+            "importantForAutofill=$importantForAutofill, hasAutocomplete=${autocomplete != null}, " +
+            "textLength=${text.length})"
 }
 
 /**
@@ -76,7 +79,8 @@ internal object AutofillStructureScanner {
                     webDomain = node.webDomain,
                     packageName = callingPackage,
                     isVisible = node.isVisible,
-                    importantForAutofill = node.importantForAutofill
+                    importantForAutofill = node.importantForAutofill,
+                    autocomplete = node.autocomplete
                 )
             )
         }
@@ -115,6 +119,7 @@ internal object AutofillStructureScanner {
                     webDomain = node.webDomain,
                     isVisible = node.visibility == android.view.View.VISIBLE,
                     importantForAutofill = isImportantForAutofill(node),
+                    autocomplete = htmlAutocomplete(node),
                     text = textVal
                 )
             )
@@ -124,6 +129,20 @@ internal object AutofillStructureScanner {
             val child = node.getChildAt(i) ?: continue
             traverseViewNode(child, onNode)
         }
+    }
+
+    /**
+     * ISSUE-P3-375 AC①：读取 HTML `autocomplete` 属性（WebView 表单结构化字段源之二）。
+     * 原生控件无 htmlInfo ⇒ null；属性值取首个 `autocomplete` 键（大小写不敏感）。
+     */
+    private fun htmlAutocomplete(node: AssistStructure.ViewNode): String? {
+        val attributes = node.htmlInfo?.attributes ?: return null
+        for (attr in attributes) {
+            if (attr.first.equals("autocomplete", ignoreCase = true)) {
+                return attr.second?.takeIf { it.isNotBlank() }
+            }
+        }
+        return null
     }
 
     /**

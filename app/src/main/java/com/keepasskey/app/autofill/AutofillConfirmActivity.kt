@@ -310,7 +310,9 @@ class AutofillConfirmActivity : FragmentActivity() {
         val usernameId = readAutofillId(EXTRA_TARGET_USERNAME_ID)
         val passwordId = readAutofillId(EXTRA_TARGET_PASSWORD_ID)
         val otpId = readAutofillId(EXTRA_TARGET_OTP_ID)
-        if (usernameId == null && passwordId == null) return null
+        // ISSUE-P3-375：结构化目标（读取实现拆至 AutofillConfirmStructuredTargets）
+        val structured = readStructuredTargetsFrom(intent)
+        if (usernameId == null && passwordId == null && structured.isEmpty()) return null
 
         val credentials = pickerViewModel.resolveCredentials(entryId) ?: return null
         val credentialTitle = intent.getStringExtra(EXTRA_CREDENTIAL_TITLE).orEmpty()
@@ -322,6 +324,11 @@ class AutofillConfirmActivity : FragmentActivity() {
         } else {
             ""
         }
+        // ISSUE-P3-375 AC③：结构化字段值只在确认成功后按条目取回（实现拆至 AutofillConfirmStructuredTargets）
+        val structuredValues: Map<AutofillId, String> = if (structured.isEmpty()) emptyMap() else {
+            val entry = vaultRepository.getKdbxEntry(entryId) ?: return null
+            buildStructuredFieldValues(structured, entry)
+        }
         val dataset = buildAuthenticationResultDataset(
             packageName = packageName,
             // ISSUE-P3-330：用户名为空时标题行即条目标题，副行留空——避免两行同文
@@ -332,7 +339,8 @@ class AutofillConfirmActivity : FragmentActivity() {
             usernameId = usernameId,
             passwordId = passwordId,
             otpId = otpId,
-            otpCode = otpCode
+            otpCode = otpCode,
+            structuredFields = structuredValues
         ) ?: return null
         // 只记录「哪些字段真的有值」，不含任何凭据内容 / 用户名 / 条目名 / 包名
         AppLog.d(
@@ -340,6 +348,7 @@ class AutofillConfirmActivity : FragmentActivity() {
             "确认后回传数据集：用户名有值=${credentials.username.isNotEmpty()}" +
                 " 口令有值=${credentials.password.isNotEmpty()}" +
                 " 验证码有值=${otpCode.isNotEmpty()}" +
+                " 结构化字段数=${structuredValues.size}" +
                 " 用户名框=${usernameId != null} 密码框=${passwordId != null} 验证码框=${otpId != null}"
         )
         return authenticationResultIntent(dataset)

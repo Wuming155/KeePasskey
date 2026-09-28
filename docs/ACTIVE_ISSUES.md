@@ -50,14 +50,14 @@
 > 2026-09-27 两条真机手测缺陷（`ISSUE-P2-341` / `ISSUE-P2-343`）分别收口于 §343 与 §344；
 > 更早的 P2 闭环流水见 `RESOLVED_LOG.md` §315 ~ §325。
 
-## P3 低危问题、特性接线与体验优化（2 项）
+## P3 低危问题、特性接线与体验优化（1 项）
 
-> **开放项 2 条**（这里只列**各条还欠什么**；历史闭环流水一律见 [`RESOLVED_LOG.md`](RESOLVED_LOG.md)）：
+> **开放项 1 条**（这里只列**各条还欠什么**；历史闭环流水一律见 [`RESOLVED_LOG.md`](RESOLVED_LOG.md)）：
 > ① `ISSUE-P3-339` —— **用户指示暂时搁置**（浏览器半环需外部域名与信任链资源）。
-> ② `ISSUE-P3-375` —— Monica 吸收大项「结构化数据填充（信用卡 / 证件 / 账单地址）」，待第 4 批实施。
-> `ISSUE-P3-371` / `ISSUE-P3-372` 已于 §352 闭环；`ISSUE-P3-373` / `ISSUE-P3-376` 已于 §353 闭环；
-> `ISSUE-P3-374` 已于 §354 闭环；原 `ISSUE-P3-366` ~ `ISSUE-P3-370` 五条已于 §351 整批闭环归档
-> （366~368 实施、369/370 复核否决）；`ISSUE-P3-361` ~ `ISSUE-P3-365`（假开关清点五条）已于 §350 整批闭环归档。
+> Monica 自动填充吸收四批已全部闭环：`ISSUE-P3-371` / `ISSUE-P3-372`（§352）、
+> `ISSUE-P3-373` / `ISSUE-P3-376`（§353）、`ISSUE-P3-374`（§354）、`ISSUE-P3-375`（§355）；
+> 原 `ISSUE-P3-366` ~ `ISSUE-P3-370` 五条已于 §351 整批闭环归档（366~368 实施、369/370 复核否决）；
+> `ISSUE-P3-361` ~ `ISSUE-P3-365`（假开关清点五条）已于 §350 整批闭环归档。
 
 ### ISSUE-P3-339：仿冒域能否唤醒通行密钥（本地 RP 实验室 + 四类仿冒 origin 的「该醒 / 不该醒」）——**代码层已闭环，浏览器半环搁置**
 
@@ -96,28 +96,3 @@
 - **载体顺带承接**：`ISSUE-P3-337` 的 AC⑧(b)（对真实 RP 完成 GetAssertion）与未决 6 计数器跳变实测出口。
 - **关联**：`ISSUE-P3-337` / `PD-32`、`PD-33`（DAL 与 caller origin 归因）/ commits
   `db332b78`、`8e2a7700`、`fa283ea2`、`0199bc69`、`dc741803`（完整核实与读数）。
-
-### ISSUE-P3-375：结构化数据填充吸收（信用卡 / 证件 / 账单地址）
-
-- **核实时间点与核实方式（2026-09-28）**：Monica 侧定向取证——`AutofillStructuredDataSupport.kt:12-46`
-  （卡/证件/地址 hint 画像与低置信跳过）、`EnhancedAutofillStructureParserV2.kt:40-73`（FieldHint 含
-  `creditCard*`/地址类）、`AutofillPickerActivityV2.kt:1157,1229,1310`（选择器填卡/证件/账单地址）。
-  本仓侧直读——`AutofillFieldScanner` 只识别用户名/密码/OTP；P3-45 评估结论为「暂不实现」
-  （`docs/resolved/batches/09-自动填充能力对标批次归档.md:14`，**非**产品裁决登记项，可重开）。
-- **背景**：2026-09-28 用户明示把该大项纳入吸收范围（AskUserQuestion「全部纳入」当场裁决，取代
-  P3-45 的暂缓结论）。**存储口径**：不新增条目类型——结构化数据落在 KDBX 条目**自定义字符串字段**，
-  字段名采用 Android autofill hint 惯例（`creditCardNumber` / `creditCardSecurityCode` /
-  `creditCardExpirationMonth|Year` / `billingAddress*` 等，常量收敛单点），与 KeePassDX 生态的
-  「字符串字段承载结构化数据」形态一致；**不碰** passkey schema（`KPEX_PASSKEY_*`）。
-- **涉及文件**：`AutofillFieldScanner.kt` / `AutofillTargetFieldResolver.kt`（识别）、
-  `AutofillEntrySearch.kt` + `AutofillCandidateRanker.kt`（候选供给）、`AutofillDatasetBuilders.kt`
-  （多字段 Dataset）、选择器 UI（结构化数据分组展示与点选）、编辑页（可选录入入口，若工作量超界
-  允许只做「填充+已有字段识别」并在批次文档如实声明录入面范围）。
-- **验收标准**：AC① 解析层识别卡/地址类目标字段（autofill hint / html autocomplete / label 术语
-  三源，置信不足不填——Monica 低置信跳过同款）；AC② 候选供给＝含对应自定义字段的条目，按域/包名
-  既有排序合并；AC③ Dataset 把条目字段值填入匹配的 `AutofillId`（逐字段匹配，缺字段的卡不入选）；
-  AC④ 选择器呈现结构化数据条目（与口令条目分组或明确标注）；AC⑤ 敏感字段值全程按既有纪律
-  （`AutofillValue` 出口即边界，日志零明文）；AC⑥ 识别/匹配/填充三段各有正反例宿主用例；
-  AC⑦ `test` 全绿 + `gate_readings.py` 全 PASS；AC⑧ 录入面（编辑页表单）若未做，批次文档写明
-  「已有字段识别可填、录入走自定义字段手工/导入」的边界。
-

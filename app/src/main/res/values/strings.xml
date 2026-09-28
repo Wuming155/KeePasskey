@@ -1125,6 +1125,8 @@
     <string name="autofill_manual_picker_sub">在系统填充面板常驻「搜索全部条目…」兜底入口；关闭后仅保留自动匹配与解锁引导</string>
     <string name="autofill_offer_create_title">无匹配时就地新建</string>
     <string name="autofill_offer_create_sub">无匹配条目时在选择器空态提供「新建条目并填充」、在凭据管理器提供「新建密码条目」；关闭后两处入口均不呈现</string>
+    <string name="structured_dataset_subtitle">卡片 / 地址信息</string>
+    <string name="structured_entry_badge">卡片/地址</string>
     <string name="cred_create_entry_subtitle">将通行密钥或密码保存至活动密码库</string>
     <string name="cred_autofill_unlock_prompt">解锁 KeePasskey 查看凭据</string>
     <string name="cred_autofill_locked_subtitle">点击解锁密码库后自动填充</string>

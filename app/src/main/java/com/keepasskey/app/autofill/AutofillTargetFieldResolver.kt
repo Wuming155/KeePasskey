@@ -19,6 +19,8 @@ internal data class TargetFields(
     val passwordId: AutofillId?,
     // ISSUE-P3-298 ⑤：显式声明的 OTP 框（直填当前 TOTP 值；不参与字段级屏蔽角色判定）
     val otpId: AutofillId?,
+    // ISSUE-P3-375 AC①：结构化数据目标（角色 → 框 id；不经字段级屏蔽——见下方口径说明）
+    val structuredTargetIds: Map<StructuredFieldRole, AutofillId>,
     val scanResult: ScanResult
 )
 
@@ -50,27 +52,43 @@ internal fun KeePasskeyAutofillService.resolveTargetFields(
     )
     // ISSUE-P3-372 AC③：跨请求记忆回补（缺密码目标且同上下文记忆的全部键仍在结构中）
     scanResult = recoverLoginFieldsFromMemory(scanResult, parsedNodes, callingPkg)
+    // ISSUE-P3-375 AC①：结构化数据目标识别（hint / autocomplete 两源；label 源按
+    // 置信不足不采信——StructuredFieldPolicy 类 KDoc 三源口径）。与登录目标正交合入。
+    scanResult = scanResult.copy(
+        structuredTargets = StructuredFieldPolicy.detectFillableTargets(
+            nodes = scanned.scanNodes,
+            respectImportantForAutofill = respectImportantForAutofill
+        )
+    )
 
     val usernameParsed = scanResult.usernameId?.toIntOrNull()?.let { parsedNodes.getOrNull(it) }
     val passwordParsed = scanResult.passwordId?.toIntOrNull()?.let { parsedNodes.getOrNull(it) }
     val otpParsed = scanResult.otpId?.toIntOrNull()?.let { parsedNodes.getOrNull(it) }
+    // ISSUE-P3-375：结构化目标索引 → AutofillId（保持角色 → id 映射，缺席节点丢弃）
+    val structuredParsed = scanResult.structuredTargets.mapNotNull { (role, indexStr) ->
+        indexStr.toIntOrNull()?.let { parsedNodes.getOrNull(it) }?.autofillId?.let { role to it }
+    }.toMap()
 
     val scannedUsernameId: AutofillId? = usernameParsed?.autofillId
     val scannedPasswordId: AutofillId? = passwordParsed?.autofillId
     val scannedOtpId: AutofillId? = otpParsed?.autofillId
-    if (scannedUsernameId == null && scannedPasswordId == null) return null
+    // ISSUE-P3-375：三类目标全空才判定「无可填充目标」（结构化表单可独立成立）
+    if (scannedUsernameId == null && scannedPasswordId == null && structuredParsed.isEmpty()) return null
 
     // ISSUE-P3-43 ②：字段签名级屏蔽——判定先于「库锁定引导」与任何数据集构建，
     // 因此被屏蔽的框连解锁引导都不会收到（更保守）。签名的域取表单**自报**的
     // scanResult.webDomain（用户屏蔽的是他当时看到的那个表单），
     // 与后续用于凭据匹配的「归属校验后 webDomain」是两个独立用途，不可互替。
+    // ISSUE-P3-375：字段级屏蔽的签名维度只覆盖账号 / 密码角色（既有口径）；
+    // 结构化目标**不经**该判定——其安全面为「确认页二次认证 + 调用方归属展示」（批次 §355.2），
+    // 且纯结构化表单不得因 U/P 双空被 blocksEntireForm 误杀。
     val fieldDecision = AutofillFieldBlockPolicy.decide(
         hasUsernameField = scannedUsernameId != null,
         hasPasswordField = scannedPasswordId != null
     ) { role ->
         autofillFieldBlocklistStore.isBlocked(callingPkg, scanResult.webDomain, role)
     }
-    if (fieldDecision.blocksEntireForm) {
+    if (fieldDecision.blocksEntireForm && structuredParsed.isEmpty()) {
         AppLog.i(KeePasskeyAutofillService.TAG, "本表单字段已被用户逐字段屏蔽，拒绝下发数据集")
         return null
     }
@@ -80,6 +98,7 @@ internal fun KeePasskeyAutofillService.resolveTargetFields(
         usernameId = scannedUsernameId.takeIf { fieldDecision.allowUsername },
         passwordId = scannedPasswordId.takeIf { fieldDecision.allowPassword },
         otpId = scannedOtpId,
+        structuredTargetIds = structuredParsed,
         scanResult = scanResult
     )
 }
