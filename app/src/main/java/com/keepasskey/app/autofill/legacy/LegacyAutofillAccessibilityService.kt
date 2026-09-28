@@ -25,7 +25,6 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.util.concurrent.atomic.AtomicLong
 import javax.inject.Inject
 
 /**
@@ -65,8 +64,11 @@ class LegacyAutofillAccessibilityService : AccessibilityService() {
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
-    /** 同一目标窗口的提示去抖（上次通知时刻；0 = 从未通知） */
-    private val lastNotifyAtMillis = AtomicLong(0L)
+    /**
+     * ISSUE-P3-374 AC②：按包名冷却的主动提示节流（取代原全局 2 秒去抖——内容变化事件
+     * 高频触发，2 秒窗挡不住「停留页面反复提示」；现同包 60 秒内至多一次、跨包独立）。
+     */
+    private val promptThrottle = AutofillActivePromptThrottle()
 
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -130,12 +132,9 @@ class LegacyAutofillAccessibilityService : AccessibilityService() {
         postOfferNotification(targetPkg)
     }
 
-    /** 发「检测到口令框」通知（同 id 复用去重 + 同窗口去抖） */
+    /** 发「检测到口令框」通知（同 id 复用去重 + 按包冷却节流，ISSUE-P3-374 AC②） */
     private fun postOfferNotification(targetPkg: String) {
-        val now = System.currentTimeMillis()
-        val last = lastNotifyAtMillis.get()
-        if (now - last < NOTIFY_DEBOUNCE_MS) return
-        if (!lastNotifyAtMillis.compareAndSet(last, now)) return
+        if (!promptThrottle.shouldPrompt(targetPkg)) return
 
         val intent = Intent(this, LegacyFillPickerActivity::class.java).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
@@ -220,9 +219,6 @@ class LegacyAutofillAccessibilityService : AccessibilityService() {
 
     companion object {
         internal const val TAG = "LegacyAutofill"
-
-        /** 同一目标的提示去抖窗口：内容变化事件高频触发，窗口内只提示一次 */
-        internal const val NOTIFY_DEBOUNCE_MS = 2_000L
 
         /** 通知 PendingIntent 的 requestCode（与本服务无其它 PendingIntent 共存，具名防撞） */
         private const val REQUEST_CODE_FILL = 2401
