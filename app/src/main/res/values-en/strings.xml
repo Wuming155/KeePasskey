@@ -112,7 +112,8 @@
     <string name="vault_reset_sort">Reset</string>
     <string name="vault_filter_favorites">Favorites</string>
     <string name="vault_root_dir">Root</string>
-    <string name="vault_empty_title">Empty Directory</string>
+    <string name="vault_empty_title">No search results</string>
+    <string name="vault_search_clear">Clear search</string>
     <string name="vault_empty_desc">No entries or folders found here. Tap the plus button below to add one</string>
     <string name="vault_new_entry">New Entry</string>
     <string name="vault_new_folder">New Folder</string>
@@ -322,6 +323,7 @@
     <string name="detail_password_copied_timeout_seconds">Password copied, clipboard clears in %1$d seconds</string>
     <string name="detail_password_copied_timeout_minutes">Password copied, clipboard clears in %1$d minutes</string>
     <string name="detail_password_copied_no_clear">Password copied (clipboard auto-clear is disabled)</string>
+    <string name="clipboard_auto_cleared">Clipboard cleared automatically</string>
     <string name="detail_attachment_tap_preview">%1$s • Tap to preview securely</string>
     <string name="detail_revision_meta">Historical revision · %1$s</string>
     <string name="detail_updated_meta">Updated: %1$s • Encrypted in KDBX</string>

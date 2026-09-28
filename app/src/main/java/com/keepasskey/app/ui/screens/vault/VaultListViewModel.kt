@@ -85,7 +85,8 @@ class VaultListViewModel @Inject constructor(
     private val extendedSettingsSource: ExtendedSettingsSource? = null,
     // ISSUE-P3-30：子库只读投影通道（生产 DI 注入 @Singleton 单例）。
     // null 仅用于不涉子库的纯 JVM 单测；无该通道时子库分区恒为空表，不影响根库列表任何行为。
-    private val childDatabaseSessionManager: ChildDatabaseSessionManager? = null
+    private val childDatabaseSessionManager: ChildDatabaseSessionManager? = null,
+    private val createEntryPrefill: com.keepasskey.app.ui.screens.edit.CreateEntryPrefillHost? = null
 ) : ViewModel() {
 
     // P3-23：null 时回退空串实现（生产 Hilt 恒注入 StringsProviderModule 真实现）
@@ -371,6 +372,11 @@ class VaultListViewModel @Inject constructor(
 
     fun onSearchQueryChange(query: String) {
         searchQueryFlow.value = query
+    }
+
+    /** ISSUE-P3-352 AC①：发布当前搜索词为下次新建的一次性预填（空白不发布；宿主缺席为空操作） */
+    fun beginCreateEntryFromSearch() {
+        createEntryPrefill?.publish(searchQueryFlow.value)
     }
 
     fun setSearchActive(active: Boolean) {

@@ -133,6 +133,10 @@ fun VaultListScreen(
         // ISSUE-P3-184：行内验证码徽标一次点击复制当前 TOTP 码
         onCopyTotp = viewModel::copyTotpCode,
         onAddEntryClick = { onAddEntryClick(uiState.currentGroupId) },
+        onCreateEntryFromSearch = if (uiState.isReadOnly || uiState.isInsideRecycleBin) null else { {
+            viewModel.beginCreateEntryFromSearch(); onAddEntryClick(uiState.currentGroupId)
+        } },
+        onClearSearch = { viewModel.onSearchQueryChange("") },
         onCreateFromTemplate = { templateId -> onAddFromTemplateClick(uiState.currentGroupId, templateId) },
         onCreateGroup = viewModel::createGroup,
         onRenameGroup = viewModel::renameGroup,
@@ -208,6 +212,9 @@ fun VaultListContent(
     onAddEntryClick: () -> Unit,
     // ISSUE-P3-51：从模板新建（入参为选中模板 id）
     onCreateFromTemplate: (String) -> Unit = {},
+    /** ISSUE-P3-352 AC①：搜索空态双出口（新建导航前发布搜索词预填；null = 只读/回收站不呈现新建） */
+    onCreateEntryFromSearch: (() -> Unit)? = null,
+    onClearSearch: () -> Unit = {},
     onCreateGroup: (name: String, icon: String) -> Unit,
     onRenameGroup: (VaultGroup, String) -> Unit,
     onChangeGroupIcon: (VaultGroup, String) -> Unit,
@@ -461,7 +468,7 @@ fun VaultListContent(
 
                 // 7. 空状态（子库分区有内容时不算空）
                 if (uiState.currentGroups.isEmpty() && uiState.entries.isEmpty() && !uiState.childEntrySectionVisible) {
-                    item { VaultEmptyState(isSearching = uiState.searchQuery.isNotBlank()) }
+                    item { VaultEmptyState(uiState.searchQuery.isNotBlank(), onCreateEntryFromSearch, onClearSearch) }
                 }
 
                 item { Spacer(modifier = Modifier.height(72.dp)) }

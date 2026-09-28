@@ -137,7 +137,8 @@ class ClipboardSecurityManagerScheduledClearTest {
 
     @Test
     fun `策略函数先查用户开关后取自定义秒数`() {
-        val body = functionBody(stripComments(readManagerSource()), RESOLVER_SIGNATURE)
+        // ISSUE-P3-352 拆分：策略对象迁入独立文件，守卫随之改读 POLICY_SOURCE（断言字面量零变更）
+        val body = functionBody(stripComments(readSource(POLICY_SOURCE)), RESOLVER_SIGNATURE)
         // 只锁定**可执行语句**的先后（去掉缩进便于字面匹配），不锁定形参声明顺序——
         // 形参重排不改变语义，不应让守卫误报。
         val code = body.lines().joinToString("\n") { it.trim() }
@@ -145,21 +146,21 @@ class ClipboardSecurityManagerScheduledClearTest {
         // 逐条给出命中下标，失败消息直接附带提取体原文：needle 与实际代码字面不一致
         // （下标 -1）与「提取范围过大（含文件尾）」两种成因可一次区分，无需反复试改常量。
         assertTrue(
-            "[$MANAGER_SOURCE] ClipboardClearPolicy.resolveScheduledTimeoutSeconds 未读取 autoClearClipboard——" +
+            "[$POLICY_SOURCE] ClipboardClearPolicy.resolveScheduledTimeoutSeconds 未读取 autoClearClipboard——" +
                 "用户「关闭自动擦除」的设置被绕过，属产品行为变更（须先另行裁决）。\n" +
                 "needle（下标 ${code.indexOf(AUTO_CLEAR_VETO_STATEMENT)}）：$AUTO_CLEAR_VETO_STATEMENT\n" +
                 "提取到的函数体：\n$code",
             code.contains(AUTO_CLEAR_VETO_STATEMENT)
         )
         assertTrue(
-            "[$MANAGER_SOURCE] ClipboardClearPolicy.resolveScheduledTimeoutSeconds 未消费 customTimeoutSeconds——" +
+            "[$POLICY_SOURCE] ClipboardClearPolicy.resolveScheduledTimeoutSeconds 未消费 customTimeoutSeconds——" +
                 "ISSUE-P2-43 AC①「强制短擦除」备选会因此变成假加固，须同步更新 KDoc 与本用例。\n" +
                 "needle（下标 ${code.indexOf(CUSTOM_TIMEOUT_CONSUME_STATEMENT)}）：$CUSTOM_TIMEOUT_CONSUME_STATEMENT\n" +
                 "提取到的函数体：\n$code",
             code.contains(CUSTOM_TIMEOUT_CONSUME_STATEMENT)
         )
         assertTrue(
-            "[$MANAGER_SOURCE] 判断顺序被调换：`$AUTO_CLEAR_VETO_STATEMENT` 必须出现在 " +
+            "[$POLICY_SOURCE] 判断顺序被调换：`$AUTO_CLEAR_VETO_STATEMENT` 必须出现在 " +
                 "`$CUSTOM_TIMEOUT_CONSUME_STATEMENT` **之前**。ISSUE-P3-144 的「否决语义」即由该顺序产生——" +
                 "调换后用户关闭自动擦除时，显式非空自定义秒数仍会照常调度清除。\n" +
                 "实际下标：veto=${code.indexOf(AUTO_CLEAR_VETO_STATEMENT)}, " +
@@ -187,9 +188,11 @@ class ClipboardSecurityManagerScheduledClearTest {
     }
 
     /** 源码全文；路径相对仓库根（app 模块测试工作目录为 app/，向上回溯定位仓库根） */
-    private fun readManagerSource(): String {
-        val file = File(repositoryRoot, MANAGER_SOURCE)
-        assertTrue("文件不存在（是否被重命名/移动）：$MANAGER_SOURCE", file.isFile)
+    private fun readManagerSource(): String = readSource(MANAGER_SOURCE)
+
+    private fun readSource(path: String): String {
+        val file = File(repositoryRoot, path)
+        assertTrue("文件不存在（是否被重命名/移动）：$path", file.isFile)
         return file.readText()
     }
 
@@ -221,6 +224,10 @@ class ClipboardSecurityManagerScheduledClearTest {
     private companion object {
         const val MANAGER_SOURCE =
             "app/src/main/java/com/keepasskey/app/security/ClipboardSecurityManager.kt"
+
+        /** ISSUE-P3-352：策略对象迁入的独立文件（顺序契约守卫的读取处） */
+        const val POLICY_SOURCE =
+            "app/src/main/java/com/keepasskey/app/security/ClipboardClearPolicy.kt"
 
         /** `armScheduledClear` 的签名片段（源码守卫用；剔除注释后仍唯一） */
         const val ARM_SIGNATURE = "private fun armScheduledClear("

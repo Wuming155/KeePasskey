@@ -103,7 +103,7 @@ fun PasswordDraftScreen(
 
 @Preview(name = "草稿表单 · 可编辑态")
 @Composable
-private fun PasswordDraftScreenPreviewEditable() {
+internal fun PasswordDraftScreenPreviewEditable() {
     PasswordDraftScreen(
         bindingLabel = "example.com",
         userName = "user@example.com",
@@ -118,7 +118,7 @@ private fun PasswordDraftScreenPreviewEditable() {
 
 @Preview(name = "草稿表单 · 保存中态")
 @Composable
-private fun PasswordDraftScreenPreviewSaving() {
+internal fun PasswordDraftScreenPreviewSaving() {
     PasswordDraftScreen(
         bindingLabel = "example.com",
         userName = "",
@@ -133,7 +133,7 @@ private fun PasswordDraftScreenPreviewSaving() {
 
 @Preview(name = "草稿表单 · 保存失败态")
 @Composable
-private fun PasswordDraftScreenPreviewFailed() {
+internal fun PasswordDraftScreenPreviewFailed() {
     PasswordDraftScreen(
         bindingLabel = "example.com",
         userName = "user@example.com",

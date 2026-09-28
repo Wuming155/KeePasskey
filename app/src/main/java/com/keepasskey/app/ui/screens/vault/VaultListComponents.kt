@@ -31,12 +31,14 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.SearchOff
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -347,11 +349,18 @@ internal fun SortStatusHint(
 }
 
 /**
- * 空状态：搜索无结果与空目录分别展示不同图标与文案
+ * 空状态：搜索无结果与空目录分别展示不同图标与文案。
+ *
+ * ISSUE-P3-352 AC①：搜索态给**双出口**——「新建凭据条目」（列表页负责以当前搜索词
+ * 一次性预填，见 `CreateEntryPrefillHost`）与「清除搜索」；[onCreateEntryFromSearch]
+ * 为 null（只读会话 / 回收站内）时不呈现新建出口，仅保留清除搜索。
+ * 非搜索态行为与文案零变化。
  */
 @Composable
 internal fun VaultEmptyState(
     isSearching: Boolean,
+    onCreateEntryFromSearch: (() -> Unit)? = null,
+    onClearSearch: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     Box(
@@ -374,6 +383,19 @@ internal fun VaultEmptyState(
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            if (isSearching) {
+                Spacer(modifier = Modifier.height(16.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    onCreateEntryFromSearch?.let { create ->
+                        Button(onClick = create) {
+                            Text(stringResource(R.string.vault_new_entry))
+                        }
+                    }
+                    OutlinedButton(onClick = onClearSearch) {
+                        Text(stringResource(R.string.vault_search_clear))
+                    }
+                }
+            }
         }
     }
 }

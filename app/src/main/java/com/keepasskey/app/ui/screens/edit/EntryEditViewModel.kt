@@ -53,7 +53,9 @@ class EntryEditViewModel @Inject constructor(
     // ISSUE-P2-65：会话锁定观察者注册点（null 仅用于纯 JVM 单测）
     private val databaseSession: com.keepasskey.database.session.DatabaseSession? = null,
     // PD-47：防截屏开关读取（生产 DI 注入真实现；单测注入 null 时恒 true = fail-closed）
-    private val settingsRepository: SettingsRepository? = null
+    private val settingsRepository: SettingsRepository? = null,
+    // ISSUE-P3-352 AC①：搜索词预填宿主（生产 DI 注入 @Singleton；null 仅纯 JVM 单测）
+    private val createEntryPrefill: CreateEntryPrefillHost? = null
 ) : ViewModel() {
 
     // P3-23：null 时回退空串实现（生产 Hilt 恒注入 StringsProviderModule 真实现）
@@ -170,6 +172,10 @@ class EntryEditViewModel @Inject constructor(
             _uiState.update { it.copy(groupId = groupId) }
         }
 
+        val searchPrefill = createEntryPrefill?.takeTitle()
+        if (searchPrefill != null && entryId == null && templateId == null) {
+            _uiState.update { it.copy(title = searchPrefill, url = if (searchPrefill.contains("://")) searchPrefill else it.url) }
+        }
         viewModelScope.launch {
             vaultRepository.getGroups().collect { groups ->
                 _uiState.update { it.copy(availableGroups = groups) }

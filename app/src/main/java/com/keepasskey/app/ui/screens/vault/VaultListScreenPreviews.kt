@@ -60,3 +60,87 @@ internal fun VaultListContentPreview() {
         )
     }
 }
+
+/**
+ * ISSUE-P3-352 AC①：搜索无结果空态（专用文案 + 「新建凭据条目 / 清除搜索」双出口）。
+ * 只读形态（onCreateEntryFromSearch = null，仅剩清除搜索）由第二个预览覆盖。
+ */
+@Preview(name = "搜索无结果 - 浅色", showBackground = true)
+@Preview(name = "搜索无结果 - 深色", showBackground = true, uiMode = android.content.res.Configuration.UI_MODE_NIGHT_YES)
+@Composable
+internal fun VaultListSearchEmptyPreview() {
+    KeePasskeyTheme {
+        VaultListContent(
+            uiState = VaultListUiState().copy(
+                databaseName = "Preview Vault.kdbx",
+                searchQuery = "login.example.com"
+            ),
+            snackbarHostState = remember { SnackbarHostState() },
+            onSearchQueryChange = {},
+            onSortOptionSelect = {},
+            onGroupClick = {},
+            onNavigateUp = {},
+            onNavigateToBreadcrumb = {},
+            onEntryClick = {},
+            onEntryLongClick = {},
+            onCopyPassword = {},
+            onCopyUsername = {},
+            onAddEntryClick = {},
+            onCreateEntryFromSearch = {},
+            onClearSearch = {},
+            onCreateGroup = { _, _ -> },
+            onRenameGroup = { _, _ -> },
+            onChangeGroupIcon = { _, _ -> },
+            onDeleteGroup = {},
+            onRestoreEntry = {},
+            onPurgeEntry = {},
+            onEmptyRecycleBin = {},
+            onTriggerSync = {},
+            onSelectAllBatch = {},
+            onClearBatch = {},
+            onBatchDelete = {},
+            onBatchMove = {}
+        )
+    }
+}
+
+/** ISSUE-P3-352 AC①：只读会话的搜索空态——不呈现新建出口，仅保留「清除搜索」。 */
+@Preview(name = "搜索无结果（只读）- 浅色", showBackground = true)
+@Preview(name = "搜索无结果（只读）- 深色", showBackground = true, uiMode = android.content.res.Configuration.UI_MODE_NIGHT_YES)
+@Composable
+internal fun VaultListSearchEmptyReadOnlyPreview() {
+    KeePasskeyTheme {
+        VaultListContent(
+            uiState = VaultListUiState().copy(
+                databaseName = "Preview Vault.kdbx",
+                searchQuery = "login.example.com",
+                isReadOnly = true
+            ),
+            snackbarHostState = remember { SnackbarHostState() },
+            onSearchQueryChange = {},
+            onSortOptionSelect = {},
+            onGroupClick = {},
+            onNavigateUp = {},
+            onNavigateToBreadcrumb = {},
+            onEntryClick = {},
+            onEntryLongClick = {},
+            onCopyPassword = {},
+            onCopyUsername = {},
+            onAddEntryClick = {},
+            onCreateEntryFromSearch = null,
+            onClearSearch = {},
+            onCreateGroup = { _, _ -> },
+            onRenameGroup = { _, _ -> },
+            onChangeGroupIcon = { _, _ -> },
+            onDeleteGroup = {},
+            onRestoreEntry = {},
+            onPurgeEntry = {},
+            onEmptyRecycleBin = {},
+            onTriggerSync = {},
+            onSelectAllBatch = {},
+            onClearBatch = {},
+            onBatchDelete = {},
+            onBatchMove = {}
+        )
+    }
+}

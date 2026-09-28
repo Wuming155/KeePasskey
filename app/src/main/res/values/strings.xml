@@ -120,8 +120,11 @@
     <string name="vault_reset_sort">恢复默认</string>
     <string name="vault_filter_favorites">收藏</string>
     <string name="vault_root_dir">根目录</string>
-    <string name="vault_empty_title">暂无内容</string>
+    <!-- ISSUE-P3-352 AC①：搜索空态标题（原「暂无内容」文案错位，改为直述搜索结果为空） -->
+    <string name="vault_empty_title">无搜索结果</string>
     <string name="vault_empty_desc">当前目录下没有凭据或文件夹，点击下方新建</string>
+    <!-- ISSUE-P3-352 AC①：搜索空态双出口之一（另一出口复用 vault_new_entry） -->
+    <string name="vault_search_clear">清除搜索</string>
     <string name="vault_new_entry">新建凭据条目</string>
     <string name="vault_new_folder">新建文件夹</string>
     <string name="vault_folder_name">文件夹名称</string>
@@ -328,6 +331,8 @@
     <string name="detail_password_copied_timeout_seconds">密码已复制，%1$d 秒后自动清空</string>
     <string name="detail_password_copied_timeout_minutes">密码已复制，%1$d 分钟后自动清空</string>
     <string name="detail_password_copied_no_clear">密码已复制（剪贴板自动清空已关闭）</string>
+    <!-- ISSUE-P3-352 AC③：定时擦除实际发生后的可见反馈（口径参照 Kp2a "Clipboard cleared."） -->
+    <string name="clipboard_auto_cleared">剪贴板已自动清空</string>
     <string name="detail_attachment_tap_preview">%1$s • 点击安全预览</string>
     <string name="detail_revision_meta">历史修订 · %1$s</string>
     <string name="detail_updated_meta">更新时间: %1$s • 加密存储于 KDBX</string>
