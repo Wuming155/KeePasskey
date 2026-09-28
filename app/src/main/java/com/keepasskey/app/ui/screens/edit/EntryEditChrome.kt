@@ -1,5 +1,6 @@
 package com.keepasskey.app.ui.screens.edit
 
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
@@ -11,6 +12,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -45,44 +47,63 @@ internal fun EntryEditTopBar(
     isReadOnly: Boolean,
     /** ISSUE-P2-354 AC①：保存进行中——按钮禁用并内嵌进度（无字面量默认值，调用方必须显式传） */
     isSaving: Boolean,
+    /** ISSUE-P3-368 AC②：保存链进度（0..1；null = 分段不确定段），仅保存中渲染顶栏下沿进度条 */
+    saveProgress: Float?,
     requestBack: () -> Unit,
     onSaveClick: () -> Unit
 ) {
-    TopAppBar(
-        title = {
-            Text(
-                text = if (entryId != null) stringResource(R.string.edit_title_edit) else stringResource(R.string.edit_title_new),
-                style = MaterialTheme.typography.titleLarge
-            )
-        },
-        navigationIcon = {
-            IconButton(onClick = requestBack) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = stringResource(R.string.cd_back)
+    Column {
+        TopAppBar(
+            title = {
+                Text(
+                    text = if (entryId != null) stringResource(R.string.edit_title_edit) else stringResource(R.string.edit_title_new),
+                    style = MaterialTheme.typography.titleLarge
                 )
-            }
-        },
-        actions = {
-            TextButton(onClick = onSaveClick, enabled = !isReadOnly && !isSaving) {
-                if (isSaving) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(SAVE_INNER_PROGRESS_SIZE.dp),
-                        strokeWidth = 2.dp
-                    )
-                } else {
-                    Text(
-                        text = stringResource(R.string.cd_save),
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold)
+            },
+            navigationIcon = {
+                IconButton(onClick = requestBack) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = stringResource(R.string.cd_back)
                     )
                 }
-            }
-        },
-        colors = TopAppBarDefaults.topAppBarColors(
-            containerColor = MaterialTheme.colorScheme.surface,
-            titleContentColor = MaterialTheme.colorScheme.onSurface
+            },
+            actions = {
+                TextButton(onClick = onSaveClick, enabled = !isReadOnly && !isSaving) {
+                    if (isSaving) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(SAVE_INNER_PROGRESS_SIZE.dp),
+                            strokeWidth = 2.dp
+                        )
+                    } else {
+                        Text(
+                            text = stringResource(R.string.cd_save),
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold)
+                        )
+                    }
+                }
+            },
+            colors = TopAppBarDefaults.topAppBarColors(
+                containerColor = MaterialTheme.colorScheme.surface,
+                titleContentColor = MaterialTheme.colorScheme.onSurface
+            )
         )
-    )
+        // ISSUE-P3-368 AC②：保存进度条（顶栏下沿）——确定段按 0..1，KDF 等不确定段跑马灯；
+        // 仅 isSaving 期间呈现，按钮内嵌圈与 isSaving 语义保持原样
+        if (isSaving) {
+            val barModifier = Modifier
+                .fillMaxWidth()
+                .height(3.dp)
+            if (saveProgress == null) {
+                LinearProgressIndicator(modifier = barModifier)
+            } else {
+                LinearProgressIndicator(
+                    progress = { saveProgress.coerceIn(0f, 1f) },
+                    modifier = barModifier
+                )
+            }
+        }
+    }
 }
 
 /** 底部保存大按钮（H4-只读整改：只读会话禁用保存；ISSUE-P2-354 AC①：保存中禁用并内嵌进度）。 */

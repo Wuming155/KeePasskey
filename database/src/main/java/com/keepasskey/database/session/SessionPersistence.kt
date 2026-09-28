@@ -3,6 +3,7 @@ package com.keepasskey.database.session
 import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.database.file.KdbxDatabase
 import com.keepasskey.database.file.KdbxFile
+import com.keepasskey.database.file.KdbxProgress
 import com.keepasskey.database.history.HistoryManager
 import com.keepasskey.database.io.WipableByteArrayOutputStream
 import kotlinx.coroutines.Dispatchers
@@ -27,7 +28,12 @@ internal class SessionPersistence(
     private val mutex: Mutex,
     private val core: SessionCore,
     private val credentials: SessionCredentialCache,
-    private val fileWriter: SessionFileWriter
+    private val fileWriter: SessionFileWriter,
+    /**
+     * ISSUE-P3-368：保存链进度上报（0..1 确定进度 / null 分段不确定段）。
+     * 由 `DatabaseSession` 注入 StateFlow 写入口；只承载数值，不捕获任何敏感引用（AC③）。
+     */
+    private val progress: (Float?) -> Unit = {}
 ) {
 
     /**
@@ -59,6 +65,8 @@ internal class SessionPersistence(
                 )
             }
 
+            // ISSUE-P3-368：进入保存链先清陈旧进度（null = 不确定段），修剪/准备段一并覆盖
+            progress(null)
             try {
                 // ISSUE-P1-03 Retention 维护：按 Meta.maintenanceHistoryDays 自动修剪超期历史快照
                 // （官方 KeePass DatabaseOperationsForm「删除 N 天前的历史条目」语义），
@@ -74,13 +82,17 @@ internal class SessionPersistence(
 
                 // TASK-42 整改（P2-2）：Argon2 派生与流加密为 CPU 密集，序列化走 Default；
                 // 仅字节落盘（writeAtomic + fsync）走 IO——对齐 exportToBytes 的既有调度先例
-                val serialized = serializeToBytes(dbToSave, pwd, credentials.currentKeyFile())
+                val serialized = serializeToBytes(dbToSave, pwd, credentials.currentKeyFile(), progress)
                 writer(serialized)
                 // 序列化缓冲即整库密文（头部外全加密），写毕即擦，避免缓冲滞留
                 serialized.fill(0)
+                // ISSUE-P3-368：落盘完成即终态 1.0（序列化侧进度已在 KdbxFile.save 内发到 0.9）
+                progress(KdbxProgress.DONE)
                 core.state.value = DatabaseSession.SessionState.OPENED
                 KdbxResult.Success(Unit)
             } catch (t: Throwable) {
+                // ISSUE-P3-368：失败清进度（不留半程残值）
+                progress(null)
                 KdbxResult.Failure(t, "保存数据库失败: ${t.message}")
             }
         }
@@ -190,16 +202,20 @@ internal class SessionPersistence(
      * ISSUE-P3-118：序列化缓冲必须**具名**并在用毕后清零——`toByteArray()` 只返回副本，
      * 内部缓冲是第二份整库密文，等待 GC 不构成擦除（`reset()` 也不清内容）。
      * 返回数组由调用方负责清零。
+     *
+     * ISSUE-P3-368：[onProgress] 透传至 `KdbxFile.save`（序列化侧进度）；
+     * 仅 [save] 主链路接线，导出 / 换密路径维持无进度的既有行为。
      */
     private suspend fun serializeToBytes(
         db: KdbxDatabase,
         pwd: CharArray?,
-        keyFile: ByteArray?
+        keyFile: ByteArray?,
+        onProgress: ((Float?) -> Unit)? = null
     ): ByteArray {
         val buffer = WipableByteArrayOutputStream()
         return try {
             withContext(Dispatchers.Default) {
-                KdbxFile.save(buffer, db, pwd, keyFile)
+                KdbxFile.save(buffer, db, pwd, keyFile, onProgress)
                 buffer.toByteArray()
             }
         } finally {

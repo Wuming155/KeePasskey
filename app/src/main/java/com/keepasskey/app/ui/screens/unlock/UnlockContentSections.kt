@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.Security
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -77,6 +78,39 @@ internal fun UnlockVaultLogo(uiState: UnlockUiState) {
             )
         }
     }
+}
+
+/**
+ * ISSUE-P3-368 AC②：打开链进度条。
+ *
+ * [progress] 非空按 0..1 确定进度渲染；null（KDF 派生等分段不确定段 / 尚无进度）渲染跑马灯。
+ * 仅由调用方在 `isLoading` 期间挂出——按钮内嵌进度圈与 isLoading 语义保持原样不回归。
+ */
+@Composable
+internal fun UnlockLoadProgressIndicator(progress: Float?) {
+    val barModifier = Modifier
+        .fillMaxWidth()
+        .height(4.dp)
+    if (progress == null) {
+        LinearProgressIndicator(modifier = barModifier)
+    } else {
+        LinearProgressIndicator(
+            progress = { progress.coerceIn(0f, 1f) },
+            modifier = barModifier
+        )
+    }
+}
+
+/**
+ * ISSUE-P3-368 AC②：加载中的打开进度段（未加载时零渲染，不改动默认态布局）。
+ * 解锁页两条路径（快速解锁卡 / 主密码区）共用，收敛调用点行数（long_functions 闸门）。
+ */
+@Composable
+internal fun UnlockLoadProgressSection(uiState: UnlockUiState) {
+    if (!uiState.isLoading) return
+    Spacer(modifier = Modifier.height(6.dp))
+    UnlockLoadProgressIndicator(uiState.loadProgress)
+    Spacer(modifier = Modifier.height(6.dp))
 }
 
 /**
@@ -170,6 +204,8 @@ internal fun UnlockQuickUnlockCard(
             }
 
             Spacer(modifier = Modifier.height(6.dp))
+
+            UnlockLoadProgressSection(uiState)
 
             TextButton(
                 onClick = { onSwitchMode(UnlockMode.STANDARD) },
@@ -276,6 +312,9 @@ internal fun UnlockStandardUnlockContent(
         onUnlock = onUnlock
     )
 
+    // ISSUE-P3-368 AC②：主密码路径的打开进度（确定段 0..1 / 不确定段跑马灯）
+    UnlockLoadProgressSection(uiState)
+
     if (uiState.isQuickUnlockAvailable) {
         UnlockSwitchToQuickEntry(onSwitchToQuickUnlock = { onSwitchMode(UnlockMode.QUICK_UNLOCK) })
     }
@@ -316,6 +355,40 @@ internal fun UnlockQuickUnlockCardPreview() {
                     hasDatabase = true,
                     unlockMode = UnlockMode.QUICK_UNLOCK,
                     errorMessage = UiMessage(R.string.sec_biometric_auth_failed)
+                ),
+                onBiometricUnlock = {},
+                onSwitchMode = {},
+                onToggleReadOnly = {}
+            )
+        }
+    }
+}
+
+// ISSUE-P3-368：新增「加载中 + 打开进度」可见态后补两态预览——
+// 不确定段（null 跑马灯）与确定段（0..45% 实进度条）的间距/高度在默认态预览中不可见
+@androidx.compose.ui.tooling.preview.Preview(name = "解锁加载进度（不确定段）- 浅色", showBackground = true)
+@androidx.compose.ui.tooling.preview.Preview(name = "解锁加载进度（确定段）- 浅色", showBackground = true)
+@Composable
+internal fun UnlockLoadingProgressPreview() {
+    com.keepasskey.app.ui.theme.KeePasskeyTheme {
+        Column {
+            UnlockQuickUnlockCard(
+                uiState = UnlockUiState().copy(
+                    hasDatabase = true,
+                    unlockMode = UnlockMode.QUICK_UNLOCK,
+                    isLoading = true,
+                    loadProgress = null
+                ),
+                onBiometricUnlock = {},
+                onSwitchMode = {},
+                onToggleReadOnly = {}
+            )
+            UnlockQuickUnlockCard(
+                uiState = UnlockUiState().copy(
+                    hasDatabase = true,
+                    unlockMode = UnlockMode.QUICK_UNLOCK,
+                    isLoading = true,
+                    loadProgress = 0.45f
                 ),
                 onBiometricUnlock = {},
                 onSwitchMode = {},

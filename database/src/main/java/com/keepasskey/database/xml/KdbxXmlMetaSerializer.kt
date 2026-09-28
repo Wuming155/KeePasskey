@@ -26,9 +26,9 @@ object KdbxXmlMetaSerializer {
         serializeCustomIcons(writer, meta)
         serializeBinAndTemplateSettings(writer, meta)
         serializeCustomData(writer, meta)
-        // KDBX 4.1 官方追加字段：位于 Meta 文档末位
-        if (meta.settingsChanged != null) {
-            KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.SETTINGS_CHANGED, KdbxXmlTimeHelper.formatDate(meta.settingsChanged))
+        // KDBX 4.1 官方追加字段：位于 Meta 文档末位（写出条件与版本判定同源，见 KdbxVersion41Features）
+        KdbxVersion41Features.settingsChangedToWrite(meta.settingsChanged)?.let { settingsChanged ->
+            KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.SETTINGS_CHANGED, KdbxXmlTimeHelper.formatDate(settingsChanged))
         }
         writer.endElement()
     }
@@ -59,8 +59,8 @@ object KdbxXmlMetaSerializer {
         }
         KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.MASTER_KEY_CHANGE_REC, meta.masterKeyChangeRec.toString())
         KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.MASTER_KEY_CHANGE_FORCE, meta.masterKeyChangeForce.toString())
-        // 官方仅在为 true 时写出（Write.cs:461-462）
-        if (meta.masterKeyChangeForceOnce) {
+        // 官方仅在为 true 时写出（Write.cs:461-462；条件与版本判定同源，见 KdbxVersion41Features）
+        if (KdbxVersion41Features.writesMasterKeyChangeForceOnce(meta.masterKeyChangeForceOnce)) {
             KdbxXmlWriteUtil.textElement(writer, XML_MASTER_KEY_CHANGE_FORCE_ONCE, KdbxXmlWriteUtil.XML_TRUE)
         }
     }
@@ -74,13 +74,11 @@ object KdbxXmlMetaSerializer {
             KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.UUID, KdbxXmlValueUtil.encodeUuid(icon.uuid))
             KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.DATA, Base64.getEncoder().encodeToString(icon.data))
             // KDBX 4.1 追加字段（官方 WriteCustomIconList，Write.cs:697-703）：空名/无时间不写出
-            if (icon.name.isNotEmpty()) {
+            //（写出条件与版本判定同源，见 KdbxVersion41Features）
+            if (KdbxVersion41Features.writesCustomIconName(icon)) {
                 KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.NAME, icon.name)
             }
-            // 跨模块 public 属性不可 smart cast（Kotlin 契约：其它模块的属性可能被覆写），
-            // 故先取局部不可变副本再判空
-            val iconLastModificationTime = icon.lastModificationTime
-            if (iconLastModificationTime != null) {
+            KdbxVersion41Features.customIconTimeToWrite(icon)?.let { iconLastModificationTime ->
                 KdbxXmlWriteUtil.textElement(
                     writer,
                     KdbxConstants.Xml.LAST_MODIFICATION_TIME,
@@ -125,8 +123,7 @@ object KdbxXmlMetaSerializer {
             writer.startElement(KdbxConstants.Xml.ITEM)
             KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.KEY, key)
             KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.VALUE, value)
-            val lastModificationTime = meta.customDataTimes[key]
-            if (lastModificationTime != null) {
+            KdbxVersion41Features.customDataTimeToWrite(meta, key)?.let { lastModificationTime ->
                 KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.LAST_MODIFICATION_TIME, KdbxXmlTimeHelper.formatDate(lastModificationTime))
             }
             writer.endElement()

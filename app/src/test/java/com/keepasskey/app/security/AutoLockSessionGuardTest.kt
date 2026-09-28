@@ -252,6 +252,66 @@ class AutoLockSessionGuardTest {
         assertFalse(guard.isLocked.value)
     }
 
+    // ===== ISSUE-P3-366 AC②：长任务挂锁（延迟补执行，不静默丢锁） =====
+
+    @Test
+    fun `长任务挂起期间熄屏不锁定，挂起结束后补执行锁定`() = runBlocking {
+        val (session, _) = unlockViaUnlockEntry()
+        val guard = newGuard(session)
+
+        guard.beginLongTask()
+        guard.lockOnScreenOff()
+        assertEquals("挂起期间不得锁定", DatabaseSession.SessionState.OPENED, session.state.value)
+
+        guard.endLongTask()
+        assertEquals(DatabaseSession.SessionState.LOCKED, session.state.value)
+        assertTrue(guard.isLocked.value)
+    }
+
+    @Test
+    fun `嵌套长任务仅最外层结束后才补执行锁定`() = runBlocking {
+        val (session, _) = unlockViaUnlockEntry()
+        val guard = newGuard(session)
+
+        guard.beginLongTask()
+        guard.beginLongTask()
+        guard.lockOnScreenOff()
+        guard.endLongTask()
+        assertEquals("内层结束不得锁定", DatabaseSession.SessionState.OPENED, session.state.value)
+
+        guard.endLongTask()
+        assertEquals(DatabaseSession.SessionState.LOCKED, session.state.value)
+    }
+
+    @Test
+    fun `挂起期间回前台超时补偿延迟至挂起结束补执行`() = runBlocking {
+        val (session, _) = unlockViaUnlockEntry()
+        val settings = FakeSettingsRepository()
+        settings.setAutoLockBackground(true)
+        settings.setAutoLockTimeoutSeconds(30)
+        val guard = AutoLockSessionGuard(session, settings, DebugLogBuffer())
+
+        val now = System.currentTimeMillis()
+        guard.beginLongTask()
+        guard.lockOnBackgroundResume(backgroundTimestamp = now - 31_000L, now = now)
+        assertEquals("挂起期间不得锁定", DatabaseSession.SessionState.OPENED, session.state.value)
+
+        guard.endLongTask()
+        assertEquals(DatabaseSession.SessionState.LOCKED, session.state.value)
+    }
+
+    @Test
+    fun `多余的结束不触发锁定也不抛异常`() = runBlocking {
+        val (session, _) = unlockViaUnlockEntry()
+        val guard = newGuard(session)
+
+        guard.endLongTask()
+        guard.endLongTask()
+
+        assertEquals(DatabaseSession.SessionState.OPENED, session.state.value)
+        assertFalse(guard.isLocked.value)
+    }
+
     companion object {
         private val ENTRY_PASSWORD = "EntryPass!42".toCharArray()
         private const val ONE_DAY_MILLIS = 24L * 60L * 60L * 1000L

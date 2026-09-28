@@ -190,6 +190,14 @@ class EntryEditViewModel @Inject constructor(
         }
 
         unsavedEditRegistry?.register(this) { _uiState.value.isDirty } // ISSUE-P2-355 AC③：注册脏态提供者（onCleared 注销配对，杜绝陈旧脏态）
+
+        // ISSUE-P3-368 AC②：保存链进度桥接——0..1 确定段、null 分段不确定段，
+        // 即发即弃只更新 UI 状态（顶栏进度条在 isSaving 期间渲染）
+        viewModelScope.launch {
+            vaultRepository.ioProgress().collect { value ->
+                _uiState.update { it.copy(saveProgress = value) }
+            }
+        }
     }
 
     fun loadEntry(id: String) {

@@ -222,6 +222,7 @@ fun EntryEditContent(
                 entryId = uiState.entryId,
                 isReadOnly = uiState.isReadOnly,
                 isSaving = uiState.isSaving,
+                saveProgress = uiState.saveProgress,
                 requestBack = requestBack,
                 onSaveClick = onSaveClick
             )

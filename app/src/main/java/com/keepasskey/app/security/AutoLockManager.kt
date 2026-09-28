@@ -57,7 +57,12 @@ class AutoLockManager @Inject constructor(
     /** 当前自动锁定的目标截止时间戳（毫秒）；null 表示当前未处于自动锁定倒计时（如在前台或从不锁定） */
     val lockDeadline: StateFlow<Long?> get() = _lockDeadline
 
-    private var backgroundTimestamp: Long = 0L
+    /**
+     * 后台化时间戳单源（ISSUE-P3-366 AC①）：独立 SharedPreferences 持久化——
+     * 进程被杀重建后回前台补偿判定读回旧时间戳，「已离开多久」不再随进程消亡。
+     */
+    private val backgroundStamp = AutoLockBackgroundStamp(AutoLockStampPreferences(context))
+
     private var isInBackground: Boolean = false
     private var isInitialized = false
 
@@ -113,19 +118,25 @@ class AutoLockManager @Inject constructor(
     }
 
     override fun onStop(owner: LifecycleOwner) {
-        // 应用整体退至后台：记录起始时刻并按当前超时值启动延迟锁定任务
+        // 应用整体退至后台：持久化起始时刻（进程重建后可恢复）并按当前超时值启动延迟锁定任务
         isInBackground = true
-        backgroundTimestamp = System.currentTimeMillis()
+        backgroundStamp.markBackground(System.currentTimeMillis())
         scheduleBackgroundLock()
     }
 
     override fun onStart(owner: LifecycleOwner) {
         // 应用由后台重新切回前台：先撤销后台定时器，再做「已离开时长」补偿判定
-        // （backgroundTimestamp == 0 表示从未退至后台，内核内直接放行）
+        // （读回 0 表示从未退至后台，内核内直接放行；ISSUE-P3-366：进程重建后读回的是
+        // 上一进程持久化的旧时间戳，超时事实不随进程消亡）
         isInBackground = false
         cancelBackgroundLock()
+        // 先取本段后台时间戳再进协程：判定可让出线程，若在协程内才读取，
+        // 窗口内再次退后台写入的新时间戳会被误当作本段判掉并清账
+        val backgroundTimestamp = backgroundStamp.resolveForResume()
         scope.launch {
             sessionGuard.lockOnBackgroundResume(backgroundTimestamp)
+            // 判定完成只清本段——窗口内再次退后台写入的新时间戳不得被抹掉
+            backgroundStamp.clearIfCurrent(backgroundTimestamp)
         }
     }
 
@@ -146,16 +157,16 @@ class AutoLockManager @Inject constructor(
             if (delayMillis == null || delayMillis <= 0L) {
                 _lockDeadline.value = null
                 if (delayMillis == 0L) {
-                    backgroundTimestamp = 0L
+                    backgroundStamp.clear()
                     sessionGuard.triggerLock("后台立即自动锁定")
                 }
                 return@launch
             }
-            val targetDeadline = backgroundTimestamp + delayMillis
+            val targetDeadline = backgroundStamp.resolveForResume() + delayMillis
             _lockDeadline.value = targetDeadline
             delay(delayMillis)
             // 到点即锁：无需等待用户切回前台
-            backgroundTimestamp = 0L
+            backgroundStamp.clear()
             _lockDeadline.value = null
             sessionGuard.triggerLock("后台超时自动锁定 (${settings.autoLockTimeoutSeconds} 秒)")
         }
@@ -181,7 +192,7 @@ class AutoLockManager @Inject constructor(
      * 用户重新成功解锁后调用，重置锁定标记与后台定时器
      */
     fun onUnlockSuccess() {
-        backgroundTimestamp = 0L
+        backgroundStamp.clear()
         cancelBackgroundLock()
         sessionGuard.onUnlockSuccess()
     }

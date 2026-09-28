@@ -10,6 +10,7 @@ import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.core.model.PasskeyData
 import com.keepasskey.core.result.KdbxResult
+import com.keepasskey.app.security.AutoLockSessionGuard
 import com.keepasskey.database.file.KdbxKdfStrengthAssessment
 import com.keepasskey.database.session.DatabaseSession
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -54,7 +55,10 @@ class RealVaultRepository @Inject constructor(
     @VaultProjectionDispatcher private val projectionDispatcher: CoroutineDispatcher,
     // ISSUE-P3-273：TOTP 解析参数通道（种子 / 设置字段名 + 默认步长 / 位数）。
     // 解析、编辑页回填、修订快照三处同源消费，使「设置值真实参与解析」成立
-    private val totpPreferencesSource: TotpPreferencesSource
+    private val totpPreferencesSource: TotpPreferencesSource,
+    // ISSUE-P3-366 AC②：保存（KDF 派生 + 整库重序列化）期间挂锁（保存是本仓库
+    // 会话落盘的唯一出口），Hilt 注入守护单例——与同步挂点共享同一挂锁闸
+    private val autoLockGuard: AutoLockSessionGuard
 ) : VaultRepository {
 
     private val repositoryScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -131,6 +135,9 @@ class RealVaultRepository @Inject constructor(
         keyFileData = keyFileData,
         readOnly = readOnly
     )
+
+    /** ISSUE-P3-368：读写链路进度直通会话单例（0..1 确定进度 / null 分段不确定段）。 */
+    override fun ioProgress(): Flow<Float?> = databaseSession.ioProgress
 
     /** ISSUE-P3-305：凭据轮换下沉 [VaultLifecycleCoordinator]（仅成功时刷新库列表）。 */
     override suspend fun changeMasterPassword(newPassword: CharArray): KdbxResult<Unit> =
@@ -380,16 +387,24 @@ class RealVaultRepository @Inject constructor(
     /**
      * H3 整改：会话落盘的唯一出口——save() 失败必须原样向上传播，
      * 禁止磁盘写失败被静默吞掉导致 UI 谎报保存成功、锁库后修改永久丢失。
+     *
+     * ISSUE-P3-366 AC②：整库保存（KDF + 重序列化）期间挂锁，try/finally 保证
+     * begin/end 成对（漏配对会令挂锁永不恢复）；挂起期间的锁定触发延迟至保存结束补执行。
      */
     private suspend fun persistSession(): KdbxResult<Unit> {
-        val result = databaseSession.save()
-        // ISSUE-P2-90：落库即作废 TOTP 缓存——会话流的失效通知是异步的，
-        // 此处同步作废可消除「刚改完 TOTP 种子 / 周期、同一周期内仍读到旧码」的竞态窗口
-        secretReader.invalidateTotpCache()
-        if (result is KdbxResult.Failure) {
-            debugLog.error(TAG, "数据库保存失败: ${result.error.javaClass.simpleName}")
+        autoLockGuard.beginLongTask()
+        try {
+            val result = databaseSession.save()
+            // ISSUE-P2-90：落库即作废 TOTP 缓存——会话流的失效通知是异步的，
+            // 此处同步作废可消除「刚改完 TOTP 种子 / 周期、同一周期内仍读到旧码」的竞态窗口
+            secretReader.invalidateTotpCache()
+            if (result is KdbxResult.Failure) {
+                debugLog.error(TAG, "数据库保存失败: ${result.error.javaClass.simpleName}")
+            }
+            return result
+        } finally {
+            autoLockGuard.endLongTask()
         }
-        return result
     }
 
     companion object {

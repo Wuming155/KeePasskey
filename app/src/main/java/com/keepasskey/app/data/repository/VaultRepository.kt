@@ -5,6 +5,7 @@ import com.keepasskey.app.ui.model.VaultDatabaseInfo
 import com.keepasskey.app.ui.model.VaultGroup
 import com.keepasskey.app.ui.model.VaultRemovalKind
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emptyFlow
 
 /**
  * 密码库数据仓库接口，遵循谷歌官方 Recommended app architecture 数据层规范。
@@ -40,6 +41,14 @@ interface VaultRepository : VaultSecretAccess, VaultPasskeyRepository {
         keyFileData: ByteArray? = null,
         readOnly: Boolean = false
     ): com.keepasskey.core.result.KdbxResult<Unit>
+
+    /**
+     * ISSUE-P3-368 AC①：打开 / 保存链路进度（Flow 形态）。
+     * 0..1 为确定进度；null = 无进行中操作或分段不确定段（KDF 派生等不可细分段）。
+     * 事件只承载数值，不携带流 / 字节 / 密钥引用。
+     * 默认空流**仅供测试替身沿用**（生产实现 `RealVaultRepository` 桥接会话单例）。
+     */
+    fun ioProgress(): Flow<Float?> = emptyFlow()
 
     /**
      * 更改当前数据库的主密钥。

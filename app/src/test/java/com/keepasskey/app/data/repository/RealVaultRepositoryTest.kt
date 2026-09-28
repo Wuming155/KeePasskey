@@ -115,7 +115,13 @@ class RealVaultRepositoryTest {
         createTestStrings(),
         projectionDispatcher,
         // ISSUE-P3-273：TOTP 解析参数通道（本测试不涉解析参数语义，注入内置缺省快照）
-        TotpPreferencesSource { TotpPreferences.DEFAULT }
+        TotpPreferencesSource { TotpPreferences.DEFAULT },
+        // ISSUE-P3-366 AC②：保存挂锁闸（本测试不涉自动锁语义，注入独立实例即可）
+        com.keepasskey.app.security.AutoLockSessionGuard(
+            session,
+            FakeSettingsRepository(),
+            com.keepasskey.app.data.logger.DebugLogBuffer()
+        )
     )
 
     /**

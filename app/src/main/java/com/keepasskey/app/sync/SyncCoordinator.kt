@@ -4,6 +4,7 @@ import android.content.Context
 import com.keepasskey.app.R
 import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.app.data.repository.ExtendedSettingsStore
+import com.keepasskey.app.security.AutoLockSessionGuard
 import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.core.session.SessionLockObserver
 import com.keepasskey.database.session.DatabaseSession
@@ -67,7 +68,11 @@ open class SyncCoordinator @Inject constructor(
     syncCycle: SyncCycleRunner? = null,
     // ISSUE-P2-291：库身份绑定登记（生产 Hilt 注入；既有单测 4/5 参构造点为 null，
     // 就地装配时同步关闭绑定闸，行为与整改前一致）
-    syncVaultBindingStore: SyncVaultBindingStore? = null
+    syncVaultBindingStore: SyncVaultBindingStore? = null,
+    // ISSUE-P3-366 AC②：同步（含三方合并与落盘）期间挂锁。可空 + 默认 null 仅为保持
+    // 既有单测构造点兼容（同 strings / extendedSettingsStore 先例），生产路径由 Hilt 注入
+    // @Singleton 守护——与保存挂点（RealVaultRepository）共享同一挂锁闸
+    private val autoLockGuard: AutoLockSessionGuard? = null
 ) : SessionLockObserver {
     private val effectiveStrings: StringsProvider =
         strings ?: StringsProvider { id, args -> context.getString(id, *args) }
@@ -196,10 +201,20 @@ open class SyncCoordinator @Inject constructor(
 
     /**
      * 执行全量即时同步
+     *
+     * ISSUE-P3-366 AC②：同步周期（KDF 序列化 + 三方合并 + 落盘）期间挂锁——
+     * try/finally 保证 begin/end 成对，挂起期间的锁定触发延迟至周期结束补执行；
+     * 补执行发生在 [SyncSessionState.mutex] 之外（周期在 runner 内自行取锁、返回前已释放），
+     * 不会在互斥锁内触发会话锁回调。
      */
     suspend fun syncNow(): SyncOutcome {
         debugLog.info(SYNC_LOG_TAG, "手动/自动同步开始")
-        val outcome = cycle.runSyncCycle()
+        autoLockGuard?.beginLongTask()
+        val outcome = try {
+            cycle.runSyncCycle()
+        } finally {
+            autoLockGuard?.endLongTask()
+        }
         publishSyncEvents()
         _lastOutcome.value = outcome
         debugLog.info(SYNC_LOG_TAG, "同步结束: ${describeOutcome(outcome)}")
@@ -213,7 +228,13 @@ open class SyncCoordinator @Inject constructor(
      */
     suspend fun confirmVaultBindingTakeover(): SyncOutcome {
         debugLog.info(SYNC_LOG_TAG, "库身份改绑确认：整库覆盖上传开始")
-        val outcome = cycle.takeoverVaultBinding()
+        // ISSUE-P3-366 AC②：整库覆盖上传同属长任务，挂锁口径与 syncNow 一致
+        autoLockGuard?.beginLongTask()
+        val outcome = try {
+            cycle.takeoverVaultBinding()
+        } finally {
+            autoLockGuard?.endLongTask()
+        }
         publishSyncEvents()
         _lastOutcome.value = outcome
         debugLog.info(SYNC_LOG_TAG, "库身份改绑确认结束: ${describeOutcome(outcome)}")
@@ -244,8 +265,17 @@ open class SyncCoordinator @Inject constructor(
     open suspend fun resolveConflicts(
         resolutions: Map<String, ConflictResolutionChoice>,
         fieldResolutions: Map<String, Map<String, ConflictResolutionChoice>> = emptyMap()
-    ): SyncOutcome = session.mutex.withLock {
-        conflicts.resolveConflicts(resolutions, fieldResolutions)
+    ): SyncOutcome {
+        // ISSUE-P3-366 AC②：用户裁决（序列化 + 上传 + 落盘）期间挂锁。try/finally 收在
+        // session.mutex 之外——补执行锁定若在互斥锁内触发会话锁回调，会与锁内 clear 自死锁
+        autoLockGuard?.beginLongTask()
+        return try {
+            session.mutex.withLock {
+                conflicts.resolveConflicts(resolutions, fieldResolutions)
+            }
+        } finally {
+            autoLockGuard?.endLongTask()
+        }
     }
 
     /**

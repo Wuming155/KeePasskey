@@ -25,6 +25,9 @@ data class UnlockUiState(
     // 修复虚假开关整改：仅在选择真实密钥文件后由 ViewModel 填充真实文件名，不再写死假名
     val keyFileName: String = "",
     val isLoading: Boolean = false,
+    // ISSUE-P3-368 AC②：打开链进度（0..1 确定段；null = KDF 等分段不确定段）。
+    // 仅在 isLoading 期间由解锁页渲染进度条；isLoading 语义与按钮内嵌圈不回归。
+    val loadProgress: Float? = null,
     val errorMessage: UiMessage? = null,
     val infoMessage: UiMessage? = null,
     // H1 整改：默认值不再写死演示库名/假状态文案，由真实活动数据库填充

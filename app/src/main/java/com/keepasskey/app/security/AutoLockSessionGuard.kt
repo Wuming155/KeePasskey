@@ -4,6 +4,7 @@ import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.app.data.repository.SettingsRepository
 import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.database.session.DatabaseSession
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -11,6 +12,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -29,7 +31,9 @@ class AutoLockSessionGuard @Inject constructor(
     private val settingsRepository: SettingsRepository,
     private val debugLog: DebugLogBuffer,
     // ISSUE-P2-355 AC③：全局脏表单注册表（Hilt 注入进程级单例；缺省新实例供 JVM 单测隔离）
-    private val unsavedEditRegistry: UnsavedEditRegistry = UnsavedEditRegistry()
+    private val unsavedEditRegistry: UnsavedEditRegistry = UnsavedEditRegistry(),
+    // ISSUE-P3-366 AC②：长任务挂锁闸（Hilt 注入进程级单例，与各挂点共享；缺省新实例供 JVM 单测隔离）
+    private val holdoff: AutoLockHoldoff = AutoLockHoldoff()
 ) {
 
     private val _isLocked = MutableStateFlow(false)
@@ -82,11 +86,39 @@ class AutoLockSessionGuard @Inject constructor(
     }
 
     /**
+     * ISSUE-P3-366 AC②：长任务开始——挂起后续锁定触发（延迟而非丢弃）。
+     * 与 [endLongTask] 必须 try/finally 成对（漏配对会使挂锁永不恢复），支持嵌套。
+     * 挂点：保存（[com.keepasskey.app.data.repository.RealVaultRepository] 落盘）、
+     * 同步（[com.keepasskey.app.sync.SyncCoordinator] 周期 / 用户裁决）。
+     */
+    fun beginLongTask() {
+        holdoff.begin()
+    }
+
+    /**
+     * ISSUE-P3-366 AC②：长任务结束——depth 归零时补执行挂起期间暂存的锁定（不静默丢锁）。
+     * 补执行包在 NonCancellable 内：挂点的 finally 在协程取消路径同样会到达，
+     * 取消后的首个挂起点即抛出会让暂存锁定永远无法补执行。
+     */
+    suspend fun endLongTask() {
+        val pending = holdoff.end() ?: return
+        debugLog.info(TAG, "长任务挂锁恢复，补执行锁定: $pending")
+        withContext(NonCancellable) {
+            triggerLock(pending)
+        }
+    }
+
+    /**
      * 触发锁定：擦除内存数据库敏感状态，发出锁定事件。
      * H3 整改：锁库前若存在未落盘修改（DIRTY），先做一次 best-effort 补存——
      * 锁库会销毁内存树与主密码缓存，跳过补存将使未落盘修改永久丢失（对齐 KP2A 锁库守卫语义）。
      */
     suspend fun triggerLock(reason: String = "安全锁定") {
+        // ISSUE-P3-366 AC②：长任务挂锁期——锁定请求暂存延迟，depth 归零后经 endLongTask 补执行
+        if (holdoff.defer(reason)) {
+            debugLog.info(TAG, "长任务挂锁中，锁定请求暂存: $reason")
+            return
+        }
         // ISSUE-P2-355 AC③：锁定将经导航 popUpTo(0) 销毁编辑页——存在未保存编辑时先登记
         // 「已丢弃」事实，解锁页消费后一次性告知，杜绝静默丢编辑（登记幂等，无脏态即空操作）
         unsavedEditRegistry.markDirtyEditsDiscarded()

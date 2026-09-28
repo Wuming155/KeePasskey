@@ -191,6 +191,14 @@ class UnlockViewModel @Inject constructor(
         }
 
         viewModelScope.launch {
+            // ISSUE-P3-368 AC①/AC②：打开/保存链路进度桥接——0..1 确定段、null 分段不确定段，
+            // 即发即弃只更新 UI 状态（解锁页在 isLoading 期间渲染进度条）
+            vaultRepository.ioProgress().collect { value ->
+                _uiState.update { it.copy(loadProgress = value) }
+            }
+        }
+
+        viewModelScope.launch {
             // ISSUE-P3-04：恢复上次成功解锁记忆的密钥文件（受偏好开关与持久化授权双重裁决）
             keyFileSession.restoreRememberedKeyFile()
         }

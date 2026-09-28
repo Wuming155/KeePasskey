@@ -13,6 +13,7 @@ import com.keepasskey.database.io.LittleEndianUtil
 import com.keepasskey.database.io.NonClosingInputStream
 import com.keepasskey.database.io.NonClosingOutputStream
 import com.keepasskey.database.xml.KdbxMetaData
+import com.keepasskey.database.xml.KdbxVersion41Features
 import com.keepasskey.database.xml.KdbxXmlParser
 import com.keepasskey.database.xml.KdbxXmlSerializer
 import java.io.ByteArrayInputStream
@@ -114,19 +115,31 @@ object KdbxFile {
      *
      * [passwordChars] 允许为 null 或空数组（表示无主密码、仅密钥文件解锁，
      * 对齐官方 KeyUtil.CreateKey 对空密码不添加密码分量的语义，详见 [deriveKeys]）。
+     *
+     * ISSUE-P3-368：[totalBytes] 为文件总字节数（未知长度如 SAF Uri 流传 null，
+     * 载荷段退分段不确定态）；[onProgress] 为 0..1 进度回调（null = 分段不确定段），
+     * 回调异常被吞、不改变本方法的异常与清零语义（AC③，见 [KdbxProgressReporter]）。
      */
     fun load(
         inputStream: InputStream,
         passwordChars: CharArray?,
         keyFileData: ByteArray? = null,
-        binaryStore: BinaryStore? = null
+        binaryStore: BinaryStore? = null,
+        totalBytes: Long? = null,
+        onProgress: ((Float?) -> Unit)? = null
     ): KdbxDatabase {
+        val progress = KdbxProgressReporter(onProgress)
+        val counting = totalBytes?.takeIf { it > 0 }?.let {
+            ProgressCountingInputStream(inputStream, it, progress)
+        }
+        val source = counting ?: inputStream
+        progress.emit(KdbxProgress.START)
         // 1. 读取并解析外层 Header
-        val (header, headerBytes) = KdbxHeader.deserialize(inputStream)
+        val (header, headerBytes) = KdbxHeader.deserialize(source)
 
         // 2. 读取并校验 Header SHA-256
         val storedHeaderSha = try {
-            LittleEndianUtil.readBytes(inputStream, 32)
+            LittleEndianUtil.readBytes(source, 32)
         } catch (e: Exception) {
             throw KdbxCorruptFileException("读取头部 SHA-256 意外中断", e)
         }
@@ -136,10 +149,12 @@ object KdbxFile {
         }
 
         val storedHeaderHmac = try {
-            LittleEndianUtil.readBytes(inputStream, 32)
+            LittleEndianUtil.readBytes(source, 32)
         } catch (e: Exception) {
             throw KdbxCorruptFileException("读取头部 HMAC 意外中断", e)
         }
+        progress.emit(KdbxProgress.HEADER_PARSED)
+        progress.emit(null)
 
         // 3. 官方标准派生
         val (cipherKey, hmacKey64) = deriveKeys(header, passwordChars, keyFileData, isLegacy = false)
@@ -160,7 +175,16 @@ object KdbxFile {
                 throw KdbxInvalidCredentialsException("主密码错误或文件头部认证失败（HMAC 校验未通过）")
             }
 
-            return loadPayload(inputStream, header, passwordChars, keyFileData, cipherKey, hmacKey64, binaryStore)
+            // ISSUE-P3-368：已知总长 ⇒ 字节进度接管载荷段（解密→解压→SAX 单一度量）；
+            // 未知总长 ⇒ 载荷段整体分段不确定（null），结束仍到 DONE
+            if (counting != null) {
+                counting.startReporting()
+            } else {
+                progress.emit(null)
+            }
+            val database = loadPayload(source, header, passwordChars, keyFileData, cipherKey, hmacKey64, binaryStore)
+            progress.emit(KdbxProgress.DONE)
+            return database
         } finally {
             Arrays.fill(cipherKey, 0.toByte())
             Arrays.fill(hmacKey64, 0.toByte())
@@ -317,19 +341,27 @@ object KdbxFile {
      * 恒用官方标准派生进行加密落盘，自动迁移旧派生库。
      *
      * [passwordChars] 允许为 null 或空数组（仅密钥文件库，对齐官方 KeePass 语义，详见 [deriveKeys]）。
+     *
+     * ISSUE-P3-368：[onProgress] 为 0..1 进度回调（null = 分段不确定段，KDF 派生段）；
+     * 回调异常被吞、不改变本方法的异常与清零语义（AC③，见 [KdbxProgressReporter]）。
+     * 落盘段由调用方（会话层）在写出完成后补发 DONE——本方法只负责序列化侧进度。
      */
     fun save(
         outputStream: OutputStream,
         database: KdbxDatabase,
         passwordChars: CharArray?,
-        keyFileData: ByteArray? = null
+        keyFileData: ByteArray? = null,
+        onProgress: ((Float?) -> Unit)? = null
     ) {
+        val progress = KdbxProgressReporter(onProgress)
+        progress.emit(KdbxProgress.START)
         // 1. 附件去重并组装二进制池 (ProtectedBinarySet 语义)
         val (dedupRootGroup, dedupBinaries) = KdbxBinaryDeduplicator.deduplicate(database.rootGroup, database.binaries)
         val updatedDatabase = database.copy(
             rootGroup = dedupRootGroup,
             binaries = dedupBinaries
         )
+        progress.emit(KdbxProgress.SAVE_PREPARED)
 
         // 2. 初始化全新内层 Header 与内层流密码
         val freshInnerKey = ByteArray(INNER_RANDOM_STREAM_KEY_SIZE)
@@ -373,10 +405,14 @@ object KdbxFile {
         val updatedHeader = database.header.copy(
             masterSeed = freshMasterSeed,
             encryptionIv = freshEncryptionIv,
-            kdfParameters = freshKdfParams
+            kdfParameters = freshKdfParams,
+            // ISSUE-P3-367：按待写内容动态计算最小版本（新建与保存的唯一决策点，
+            // 对齐官方 GetMinKdbxVersion——任一 4.1 特征升 4.1，否则保持/回退 4.0）
+            version = KdbxVersion41Features.resolveMinVersion(updatedDatabase)
         )
 
-        // 4. 恒用官方派生标准计算主加密与 HMAC 密钥
+        // 4. 恒用官方派生标准计算主加密与 HMAC 密钥（KDF 单次同步 JNI 不可细分 ⇒ 分段不确定）
+        progress.emit(null)
         val (cipherKey, hmacKey64) = deriveKeys(updatedHeader, passwordChars, keyFileData, isLegacy = false)
 
         try {
@@ -396,8 +432,10 @@ object KdbxFile {
             Arrays.fill(headerHmacKey, 0.toByte())
 
             // 6. 流式加密写出负载：内层 Header ‖ XML 一同经 GZip 压缩后写入加密流，再由 HMAC 块流封装
+            progress.emit(KdbxProgress.SAVE_PAYLOAD_START)
             savePayload(outputStream, updatedHeader, innerHeader, innerCipher, updatedDatabase, cipherKey, hmacKey64)
             outputStream.flush()
+            progress.emit(KdbxProgress.SAVE_SERIALIZED)
         } finally {
             Arrays.fill(cipherKey, 0.toByte())
             Arrays.fill(hmacKey64, 0.toByte())

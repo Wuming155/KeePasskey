@@ -50,25 +50,14 @@
 > 2026-09-27 两条真机手测缺陷（`ISSUE-P2-341` / `ISSUE-P2-343`）分别收口于 §343 与 §344；
 > 更早的 P2 闭环流水见 `RESOLVED_LOG.md` §315 ~ §325。
 
-## P3 低危问题、特性接线与体验优化（6 项）
+## P3 低危问题、特性接线与体验优化（2 项）
 
-> **开放项 6 条**（这里只列**各条还欠什么**；已完成的实施细节留在条目正文与 commit 里，不重复登记）：
+> **开放项 2 条**（这里只列**各条还欠什么**；历史闭环流水一律见 [`RESOLVED_LOG.md`](RESOLVED_LOG.md)）：
 > ① `ISSUE-P3-339` —— **用户指示暂时搁置**（浏览器半环需外部域名与信任链资源）。
-> ②~⑥ `ISSUE-P3-366` ~ `ISSUE-P3-370` —— 2026-09-28 参考项目对照评估补登的五条 P3 小项
-> （自动锁后台时间戳持久化 / 写侧恒写 4.1 / 解析进度回调 / 通用占位符引擎 / getCheckKey 同型通道）；
-> 同次评估发现的三项能力差距已按用户裁决归位产品裁决表 `PD-53` ~ `PD-55`，属取舍不属缺陷。
-> 原 ②~⑥ `ISSUE-P3-361` ~ `ISSUE-P3-365`（假开关清点五条）已于 §350 整批闭环归档。
-> 2026-09-28 深度交互审查新增的 `ISSUE-P3-358` ~ `ISSUE-P3-360` 三条已同批闭环于
-> [`RESOLVED_LOG.md`](RESOLVED_LOG.md) §349。
-> `ISSUE-P3-345`（无匹配「就地新建并用于本次填充」）收口于 `RESOLVED_LOG.md` §347：主体整改落
-> commit `37fdf145`，Autofill 通道真机日志坐实（§347.1），CM 浏览器面按用户裁决（`PD-52`：目标生态
-> **非 Chrome / 非 GMS**）收口——呈现面登记入限界表 §36。
-> `ISSUE-P3-340`（`@Preview` 状态覆盖普查 / 规则条文）按用户裁决收口于 `RESOLVED_LOG.md` §346：
-> 普查**未**升级为 `hygiene-gate` 第九条，维持「只出读数、不进 CI」（闸门化前置——带理由的显式豁免清单
-> ——指针留在该批正文 §346.2）；2026-09-28 UI 现代化批次（`ISSUE-P3-346` ~ `ISSUE-P3-351` 六条，含两条
-> 登记即复核否决的 350 / 351 中 350 归档注明）收口于 `RESOLVED_LOG.md` §345；
-> 更早的 P3 闭环流水见 `RESOLVED_LOG.md` §326 ~ §344（`ISSUE-P3-337` / `ISSUE-P3-342` 收口于 §343，
-> `ISSUE-P2-343` 收口于 §344）。
+> ② `ISSUE-P3-371` —— 2026-09-28 §351 批次评估 `ISSUE-P3-369` 时的附带发现（`{REF:}` 三处消费点未展开），
+> 按「发现新问题即时补登」立条。
+> 原 `ISSUE-P3-366` ~ `ISSUE-P3-370` 五条已于 §351 整批闭环归档（366~368 实施、369/370 复核否决）；
+> `ISSUE-P3-361` ~ `ISSUE-P3-365`（假开关清点五条）已于 §350 整批闭环归档。
 
 ### ISSUE-P3-339：仿冒域能否唤醒通行密钥（本地 RP 实验室 + 四类仿冒 origin 的「该醒 / 不该醒」）——**代码层已闭环，浏览器半环搁置**
 
@@ -108,64 +97,24 @@
 - **关联**：`ISSUE-P3-337` / `PD-32`、`PD-33`（DAL 与 caller origin 归因）/ commits
   `db332b78`、`8e2a7700`、`fa283ea2`、`0199bc69`、`dc741803`（完整核实与读数）。
 
-### ISSUE-P3-366：自动锁后台时间戳不持久化（进程重建后超时判定丢失）；且无长任务挂锁机制
+### ISSUE-P3-371：`{REF:}` 三处消费点未展开（与其余消费点纪律不一致）
 
-- **核实时间点与方式（2026-09-28）**：直读 `app/src/main/java/com/keepasskey/app/security/AutoLockManager.kt:60,118`——
-  `backgroundTimestamp` 为内存变量，无 DataStore / Preferences 持久化键（全仓检索零命中）；
-  「长任务挂锁」经检索 `temporarilyDisable` 类符号零命中，现仅 `UnsavedEditRegistry` 脏表单拦截部分覆盖
-  （§349 闭环面）。
-- **背景**：KeePassDX 两个细节（`docs/references/KeePassDX-架构分析.md` §8.2-7）：① 超时时间戳持久化到
-  Preferences，进程被杀后 Alarm 恢复仍能判定超时；② 长任务期间 `temporarilyDisableTimeout` 挂起锁。
-  本仓会话驻进程内存、进程死亡即会话消失、冷启动必回锁屏，故**实害面有限，属健壮性差距而非安全洞**
-  （如实声明，避免拔高）；非表单类长任务（如同步合并）中途弹锁面由 `AutoLockSessionGuard` 会话熔断兜底。
-- **验收标准**：AC① 后台化时间戳持久化（DataStore / Preferences 任一，单源），会话恢复路径据此判定
-  是否已超自动锁时限；AC② 评估「长任务挂锁」并实施，至少覆盖保存（KDF 派生 + 整库重序列化）与
-  同步合并两类长任务；AC③ 单测覆盖持久化恢复判定与挂锁 / 恢复对称性；AC④ 与 `ISSUE-P3-362`
-  （超时回显漂移）互不越界——本条不动 `securityTimeoutStateFlow` 显示链。
-
-### ISSUE-P3-367：KDBX 写侧恒写 4.1 版本号，而非按特性动态计算最小版本
-
-- **核实时间点与方式（2026-09-28）**：直读 `database/src/main/java/com/keepasskey/database/file/KdbxHeader.kt:48-54`——
-  新建库 XML 恒含 4.1 元素、头部恒写 `VERSION_4_1`（`core/model/KdbxConstants.kt`，`ISSUE-P2-266`），
-  读取仅校验 major。
-- **背景**：KeePassDX 按「是否用到 4.1 专有特性」动态计算最小版本（`docs/references/KeePassDX-架构分析.md`
-  §8.2-8）。恒写 4.1 把互操作下限抬到「必须支持 4.1 的客户端」；现实影响小（主流客户端均已支持 4.1），故 P3。
-- **验收标准**：AC① 二选一——(a) 实施动态最小版本（按实际写出的 4.1 专有特性回退 4.0），
-  或 (b) 复核确认全库恒用 4.1 特性面 / 代价不值，登记入限界表并归档本条；AC② 若 (a)，
-  版本判定单测 + 官方客户端互操作对拍不回归（`AGENTS.md` 规则 8）。
-
-### ISSUE-P3-368：流式解析已就位，但读写全程无进度回调
-
-- **核实时间点与方式（2026-09-28）**：database / crypto / sync 三模块 `progress`（-i）检索零命中；
-  直读 `database/src/main/java/com/keepasskey/database/xml/KdbxXmlParser.kt` 确认为流式 SAX
-  （官方 `ReadXmlStreamed` 同族，非 DOM）。
-- **背景**：大库打开 / 保存 / KDF 派生期间无可感知进度；§349 仅给部分屏加了 loading 骨架（不确定态）。
-  KeePassDX `ProgressTaskUpdater` 贯穿读写（`docs/references/KeePassDX-架构分析.md` §8.2-10）。
-- **验收标准**：AC① 读写链路挂 0..1 进度回调（Flow 形态），至少覆盖打开（解密→解压→XML）与保存两段；
-  AC② 大库场景 UI 呈现进度（确定或分段不确定均可）；AC③ 不回退流式解析与内存擦除纪律
-  （敏感缓冲不因进度层新增驻留点）。
-
-### ISSUE-P3-369：通用占位符引擎缺失（仅 `{REF:}` 字段引用引擎）
-
-- **核实时间点与方式（2026-09-28）**：检索 `resolvePlaceholder|expandPlaceholder|\{TITLE|\{URL|\{USERNAME`——
-  仅命中 AutoType 序列字面量（`app/src/main/java/com/keepasskey/app/ui/screens/edit/EntryEditComponents.kt:415`）
-  与 UI 输入框 placeholder 文案；`{REF:}` 引擎在
-  `database/src/main/java/com/keepasskey/database/fieldref/FieldReferenceEngine.kt`（消费点展开）。
-- **背景**：kp2a 有 SPR 占位符引擎（`docs/references/keepass2android-架构分析.md` §6.6）。
-  **红线**：`PD-42`——AutoType 只保存不执行，占位符只服务**复制 / 填充消费点**，不得成为 AutoType 执行面；
-  展开纪律与 `{REF}` 一致：仅在取值消费点解析，投影层不物化。
-- **验收标准**：AC① 先评估真实受益面（URL 模板 / 备注模板类条目在复制与填充时的展开需求）；
-  AC② 有则实施常用占位符子集 + 转义规则，消费点纪律同 `{REF}`；无则复核否决归档并注明。
-
-### ISSUE-P3-370：「不解库校验已记住凭据」通道（getCheckKey 同型）缺失
-
-- **核实时间点与方式（2026-09-28）**：检索 `getCheckKey|checkKey|prefixHash|knownKey` 全仓零命中；
-  最近似机制为生物识别封印凭据（`app/src/main/java/com/keepasskey/app/security/BiometricCredentialStorage.kt`）
-  与 KDBX4 头部 HMAC 快速凭据校验（解锁链路直读确认已存在）。
-- **背景**：KeePassDX `MasterCredential.getCheckKey` 以密码前缀哈希在**不解锁全库**前提下校验
-  「已记住凭据」（`docs/references/KeePassDX-架构分析.md` §8.2-1）。本仓解锁路径已有头部 HMAC 快速判错、
-  「记住凭据」主场景已由生物封印覆盖，实益面可能很小——如实登记，防后续对照评估再误报为缺口。
-- **验收标准**：AC① 列出真实受益场景；AC② 有则实施（派生 `getCheckKey` 形态：凭据全程 `CharArray`
-  即用即清、不解锁全库、不落地 `String`）；无则复核否决归档并注明。
+- **核实时间点与方式（2026-09-28）**：§351 批次评估 `ISSUE-P3-369` 时逐行反校，三处均直读亲证——
+  ① `app/src/main/java/com/keepasskey/app/passkey/PasswordFillActivity.kt:210-211`——CM 密码回传
+  `deliverPassword` 直取 `entry.userName` / `entry.password?.readString()`，无 `{REF:}` 展开；
+  ② `app/src/main/java/com/keepasskey/app/autofill/AutofillPickerViewModel.kt:123-126`——选择器
+  `resolveCredentials` 的 username 侧直取 `cachedUsername ?: …userName`（同函数 password 侧 `:137`
+  已经 `resolveFieldReferences` 展开，**同函数内两条通道口径分裂**）；
+  ③ `app/src/main/java/com/keepasskey/app/ui/screens/detail/EntryDetailCopyCoordinator.kt:135`——
+  `copyCustomField` 经 `getEntryProtectedFieldChars` 直取（同文件 password `:83` / username `:100`
+  已经 `resolveFieldReferences` 展开）。
+- **背景**：`{REF:}` 引擎（`database/src/main/java/com/keepasskey/database/fieldref/FieldReferenceEngine.kt`）
+  既有 4 个消费点已展开（复制密码 / 复制用户名 / Autofill 下发 / URL 展示解析），上述三处为漏网——
+  用户条目若写 `{REF:…}`，经 CM 回传 / 选择器 / 自定义字段复制会拿到**引用原文**而非被引用字段值。
+  展开纪律与既有面一致：仅在取值消费点解析，投影层不物化；P 面（受保护）展开须沿用引擎掩码语义。
+- **验收标准**：AC① 三处补展开，口径对齐既有 4 消费点（走 `VaultEntryQueryCoordinator` 单点收口的
+  `resolveFieldReferences`，不得绕开引擎自写正则）；AC② 回归既有消费点测试不回归 + 三处各补
+  `{REF:}` 用例（正向展开 + 引用不存在时的兜底口径与既有消费点一致）；AC③ CM 回传通道全程
+  `CharArray`/即用即清纪律不因展开层被破坏（展开产物不经多余 `String` 驻留，若引擎签名限制须如实说明）。
 
 

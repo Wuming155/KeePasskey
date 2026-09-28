@@ -9,8 +9,11 @@ import java.io.OutputStream
 
 /**
  * 从扁平化内存库实体组装 <Meta> 解析产物模型（序列化写侧唯一映射点）。
+ *
+ * ISSUE-P3-367：`internal` 供 [KdbxVersion41Features] 的最小版本判定复用同一映射，
+ * 保证判定所见的 Meta 与序列化写出的 Meta 同源。
  */
-private fun KdbxDatabase.toMetaData(): KdbxMetaData {
+internal fun KdbxDatabase.toMetaData(): KdbxMetaData {
     return KdbxMetaData(
         generator = generator,
         databaseName = databaseName,

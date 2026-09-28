@@ -8,6 +8,7 @@ import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.core.security.BinaryStore
 import com.keepasskey.core.session.SessionLockObserver
 import com.keepasskey.database.file.KdbxDatabase
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
@@ -73,10 +74,24 @@ class DatabaseSession(
 
     private val fileWriter = SessionFileWriter { createBackupBeforeSave }
 
-    /** ISSUE-P3-305：整库序列化写盘协作类（保存 / 导出字节流 / 换密重加密） */
-    private val persistence = SessionPersistence(mutex, core, credentials, fileWriter)
+    /**
+     * ISSUE-P3-368 AC①：打开 / 保存链路进度（Flow 形态）。
+     * 0..1 为确定进度；null = 无进行中操作或分段不确定段（KDF 派生等不可细分段）。
+     * 事件只承载数值（Float?），即发即弃——不持有流 / 字节 / 密钥引用（AC③）。
+     */
+    private val _ioProgress = MutableStateFlow<Float?>(null)
 
-    private val opener = SessionOpener(core, credentials, fileWriter, mutex, binaryStore) {
+    val ioProgress: StateFlow<Float?> = _ioProgress.asStateFlow()
+
+    /** ISSUE-P3-368：进度写入唯一入口（打开 / 保存两链共用） */
+    private fun publishProgress(value: Float?) {
+        _ioProgress.value = value
+    }
+
+    /** ISSUE-P3-305：整库序列化写盘协作类（保存 / 导出字节流 / 换密重加密） */
+    private val persistence = SessionPersistence(mutex, core, credentials, fileWriter, ::publishProgress)
+
+    private val opener = SessionOpener(core, credentials, fileWriter, mutex, binaryStore, ::publishProgress) {
         // ISSUE-P2-77：换库前置释放（由本次调用持有互斥锁，故不能走 lock()——会重入死锁）
         releaseSessionStateForReplacement()
     }

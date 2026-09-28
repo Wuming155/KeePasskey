@@ -80,6 +80,11 @@ data class EntryEditUiState(
      */
     val isSaving: Boolean = false,
     /**
+     * ISSUE-P3-368 AC②：保存链进度（0..1 确定段；null = KDF 派生等分段不确定段）。
+     * 仅在 isSaving 期间由顶栏进度条渲染；isSaving 与按钮内嵌圈语义不回归。
+     */
+    val saveProgress: Float? = null,
+    /**
      * ISSUE-P3-359 AC②：标题必填校验的**字段级**错误位（保存被拒时置位、用户重新输入即清除）。
      * 标题框据此渲染 `isError + supportingText`，与一次性 Snackbar 并存——
      * 后者随时间消失，inline 错误常驻到问题被修复为止。

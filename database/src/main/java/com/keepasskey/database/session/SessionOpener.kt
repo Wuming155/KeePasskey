@@ -31,6 +31,11 @@ internal class SessionOpener(
     /** ISSUE-P2-24：大附件落盘存储（可选）；为空时解析行为与既往逐字一致。 */
     private val binaryStore: BinaryStore? = null,
     /**
+     * ISSUE-P3-368：打开链进度上报（0..1 确定进度 / null 分段不确定段）。
+     * 由 `DatabaseSession` 注入 StateFlow 写入口；只承载数值，不捕获任何敏感引用（AC③）。
+     */
+    private val progress: (Float?) -> Unit = {},
+    /**
      * ISSUE-P2-77：换库前置释放（由 `DatabaseSession` 注入，语义与 `lock()` 的清理部分对齐）。
      *
      * **顺序硬约束**：必须在 `KdbxFile.load` / 落盘新库**之前**调用——否则
@@ -162,10 +167,14 @@ internal class SessionOpener(
             // ISSUE-P2-77：换库前置释放（顺序硬约束见 [releaseCurrentSession] KDoc）——
             // 必须在 `KdbxFile.load` 之前执行，否则新库附件会被 `FileBinaryStore.onSessionLocked()` 删除。
             releaseCurrentSession()
+            // ISSUE-P3-368：进入打开链先清陈旧进度（null = 不确定段），避免上一次进度残留首帧
+            progress(null)
             try {
+                // 文件总长已知（本地 File）⇒ 载荷段确定进度；SAF 等未知长度流传 null 退分段不确定
+                val totalBytes = associatedFile?.length()?.takeIf { it > 0 }
                 val db = inputStreamProvider().use { fis ->
                     // ISSUE-P2-24：大附件在解析期流式落盘（binaryStore 为空则行为与既往一致）
-                    KdbxFile.load(fis, passwordChars, keyFileData, binaryStore)
+                    KdbxFile.load(fis, passwordChars, keyFileData, binaryStore, totalBytes, progress)
                 }
 
                 core.activeFile = associatedFile
@@ -179,6 +188,8 @@ internal class SessionOpener(
                 core.state.value = DatabaseSession.SessionState.OPENED
                 KdbxResult.Success(Unit)
             } catch (t: Throwable) {
+                // ISSUE-P3-368：失败清进度（UI 随 isLoading 回落隐藏，不留半程残值）
+                progress(null)
                 KdbxResult.Failure(t, "解锁密码库失败: ${t.message}")
             }
         }

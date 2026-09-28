@@ -71,13 +71,15 @@ object KdbxXmlEntrySerializer {
         KdbxXmlWriteUtil.optionalTextElement(writer, KdbxConstants.Xml.FOREGROUND_COLOR, entry.foregroundColor)
         KdbxXmlWriteUtil.optionalTextElement(writer, KdbxConstants.Xml.BACKGROUND_COLOR, entry.backgroundColor)
         KdbxXmlWriteUtil.optionalTextElement(writer, KdbxConstants.Xml.OVERRIDE_URL, entry.overrideUrl)
-        if (!entry.qualityCheck) {
+        // 以下三个条件写出分支与最小版本判定同源（见 KdbxVersion41Features）：
+        // QualityCheck / PreviousParentGroup / Tags 均为 KDBX 4.1 专有元素
+        if (KdbxVersion41Features.writesQualityCheck(entry)) {
             KdbxXmlWriteUtil.boolElement(writer, KdbxConstants.Xml.QUALITY_CHECK, false)
         }
-        entry.previousParentGroup?.let {
-            KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.PREVIOUS_PARENT_GROUP, KdbxXmlValueUtil.encodeUuid(it))
+        KdbxVersion41Features.previousParentGroupToWrite(entry.previousParentGroup)?.let { previousParentGroup ->
+            KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.PREVIOUS_PARENT_GROUP, KdbxXmlValueUtil.encodeUuid(previousParentGroup))
         }
-        if (entry.tags.isNotEmpty()) {
+        if (KdbxVersion41Features.writesTags(entry.tags)) {
             // ISSUE-P2-282：写侧分隔符与官方一致（裸 `;`），分隔符词汇与归一化单一来源
             KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.TAGS, KdbxTags.serialize(entry.tags))
         }

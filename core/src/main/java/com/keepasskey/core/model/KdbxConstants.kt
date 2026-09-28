@@ -22,10 +22,12 @@ object KdbxConstants {
      * ISSUE-P3-126③：读取侧**版本策略＝仅校验 major**（见 `KdbxHeader` 的解析处）——4.x 的
      * minor 只引入本仓不依赖的可选特性，故读取侧对任意 4.x minor 走同一路径，不因 minor 拒绝文件。
      *
-     * ISSUE-P2-266：[VERSION_4_1] 为**写侧**常量——新建库写出的 XML 恒含 KDBX 4.1 专有元素
-     * （SettingsChanged / MasterKeyChangeForceOnce / CustomIcon Name·LastModificationTime /
-     * CustomData Item LastModificationTime / Entry QualityCheck），故声明版本必须同步为
-     * `0x00040001`，不得出现「声明 4.0、夹带 4.1」的文件。读取侧不受影响（仍仅校验 major）。
+     * ISSUE-P3-367（取代 P2-266 的「恒写 4.1」口径）：[VERSION_4_1] 为**写侧**常量——
+     * `KdbxFile.save` 按待写内容动态计算最小版本（`KdbxVersion41Features.resolveMinVersion`）：
+     * 写出的 4.1 专有元素（SettingsChanged / MasterKeyChangeForceOnce / CustomIcon
+     * Name·LastModificationTime / CustomData Item LastModificationTime / Entry QualityCheck /
+     * Tags / PreviousParentGroup）任一存在即声明 `0x00040001`，否则 4.0，
+     * 杜绝「声明 4.0、夹带 4.1」，也无谓抬高互操作下限。读取侧不受影响（仍仅校验 major）。
      */
     object Version {
         const val VERSION_MAJOR_MASK: Int = 0xFFFF0000.toInt()

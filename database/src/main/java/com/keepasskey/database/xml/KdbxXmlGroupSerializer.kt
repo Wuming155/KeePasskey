@@ -50,13 +50,14 @@ object KdbxXmlGroupSerializer {
         group.lastTopVisibleEntry?.let {
             KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.LAST_TOP_VISIBLE_ENTRY, KdbxXmlValueUtil.encodeUuid(it))
         }
-        group.previousParentGroup?.let {
-            KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.PREVIOUS_PARENT_GROUP, KdbxXmlValueUtil.encodeUuid(it))
+        KdbxVersion41Features.previousParentGroupToWrite(group.previousParentGroup)?.let { previousParentGroup ->
+            KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.PREVIOUS_PARENT_GROUP, KdbxXmlValueUtil.encodeUuid(previousParentGroup))
         }
 
         // 官方 Group 级 <Tags>（KeePass 2.51+，分号分隔，语义与条目 Tags 一致）
         // ISSUE-P2-282：写侧分隔符与官方一致（裸 `;`），分隔符词汇与归一化单一来源
-        if (group.tags.isNotEmpty()) {
+        //（Tags / PreviousParentGroup 写出条件与版本判定同源，见 KdbxVersion41Features）
+        if (KdbxVersion41Features.writesTags(group.tags)) {
             KdbxXmlWriteUtil.textElement(writer, KdbxConstants.Xml.TAGS, KdbxTags.serialize(group.tags))
         }
 
