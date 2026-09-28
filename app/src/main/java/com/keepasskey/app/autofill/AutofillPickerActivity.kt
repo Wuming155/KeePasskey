@@ -128,7 +128,9 @@ class AutofillPickerActivity : FragmentActivity() {
                 onBlockField = ::blockFieldAndFinish,
                 // ISSUE-P3-345 / PD-51：只读会话不呈现新建入口（控件不许骗人）；
                 // 入口 Intent 构造集中在 PasswordDraftActivity.createIntent
-                canCreateNew = !vaultRepository.isSessionReadOnly(),
+                // ISSUE-P3-376：无匹配就地新建入口开关（默认开启）——关闭即空态不呈现新建按钮
+                canCreateNew = !vaultRepository.isSessionReadOnly() &&
+                    settingsStore.isAutofillOfferCreateEntryEnabled(),
                 onCreateNew = {
                     if (!completed) {
                         draftLauncher.launch(

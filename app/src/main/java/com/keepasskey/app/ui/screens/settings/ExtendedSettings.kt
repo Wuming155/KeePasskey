@@ -59,6 +59,14 @@ data class ExtendedSettings(
     // ISSUE-P3-42：会话授权宽限（默认关闭）——开启后在库已解锁且短时间内已确认过的
     // 同一「包名 + 域」上跳过重复二次确认；关闭时保持「每次下发前强制二次确认」不变。
     val autofillSessionGrantEnabled: Boolean = false,
+    // ISSUE-P3-376（吸收 Monica `manual_selection_enabled`）：「搜索全部条目…」手动选择器
+    // 兜底数据集开关（默认 true = 与既有可观察行为一致）。关闭即 Autofill 响应不再挂
+    // 手动选择器数据集（自动匹配与解锁引导不受影响）；消费方见 buildPickerDataset。
+    val autofillManualPickerEnabled: Boolean = true,
+    // ISSUE-P3-376（吸收 Monica `password_suggestion_enabled`）：无匹配「就地新建」入口开关
+    // （默认 true = 与 P3-345 落地时的可观察行为一致）。关闭即选择器空态新建按钮与 CM
+    // 「新建密码条目」Action 均不呈现；消费方见 AutofillPickerActivity 与 CredentialResponseAssembler。
+    val autofillOfferCreateEntry: Boolean = true,
     // ISSUE-P2-228：三条**通道总开关**自 `SettingsPreferencesController` 的纯内存态迁入持久化。
     // 迁移前它们是「无写入方持久化、无生产消费方」的假开关（关掉不影响任何行为、重启即回 true），
     // 且其中「旧版自动填充服务」的副标题声称走无障碍通道——本应用**没有任何 AccessibilityService**。

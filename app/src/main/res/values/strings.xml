@@ -1120,6 +1120,11 @@
     <string name="cred_draft_title">为本次登录新建密码条目</string>
     <string name="cred_draft_binding_label">归属站点 / 应用：%1$s</string>
     <string name="cred_draft_save">保存并填充</string>
+    <string name="cred_draft_generate">生成密码</string>
+    <string name="autofill_manual_picker_title">手动搜索入口</string>
+    <string name="autofill_manual_picker_sub">在系统填充面板常驻「搜索全部条目…」兜底入口；关闭后仅保留自动匹配与解锁引导</string>
+    <string name="autofill_offer_create_title">无匹配时就地新建</string>
+    <string name="autofill_offer_create_sub">无匹配条目时在选择器空态提供「新建条目并填充」、在凭据管理器提供「新建密码条目」；关闭后两处入口均不呈现</string>
     <string name="cred_create_entry_subtitle">将通行密钥或密码保存至活动密码库</string>
     <string name="cred_autofill_unlock_prompt">解锁 KeePasskey 查看凭据</string>
     <string name="cred_autofill_locked_subtitle">点击解锁密码库后自动填充</string>

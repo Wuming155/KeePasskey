@@ -53,7 +53,10 @@ object AutofillCandidateRanker {
         PACKAGE_DOMAIN_COMBO,
 
         /** 条目标题与调用方应用名相似（仅排序加成；ISSUE-P3-372 AC④） */
-        APP_TITLE_MATCH
+        APP_TITLE_MATCH,
+
+        /** Wi-Fi 设置上下文加成（条目携带 Wi-Fi 信号词；仅排序加成；ISSUE-P3-373 AC①） */
+        WIFI_CONTEXT_MATCH
     }
 
     data class Ranked(
@@ -72,6 +75,9 @@ object AutofillCandidateRanker {
     /** 应用名相似加成（低于全部 EXACT_* 档，对齐 Monica 应用名 95 的相对位次） */
     private const val SCORE_APP_TITLE_MATCH = 95
 
+    /** Wi-Fi 设置上下文加成（ISSUE-P3-373 AC①：仅排序、低于应用名档，绝不出现在准入判定里） */
+    private const val SCORE_WIFI_CONTEXT_BOOST = 70
+
     /**
      * 对候选条目执行「匹配判定 + 打分 + 排序 + 截断」。
      *
@@ -88,6 +94,9 @@ object AutofillCandidateRanker {
      * @param limit 返回上限（≥1）
      * @param callingAppLabel ISSUE-P3-372 AC④：调用方 launcher 应用名（取不到传 null）；
      *   仅作排序加成，不影响入选
+     * @param wifiContext ISSUE-P3-373 AC①：调用方是否为 Wi-Fi 设置类应用
+     *   （[WifiFillBoostPolicy.isWifiSettingsPackage]）；true 时对携带 Wi-Fi 信号词的条目
+     *   给排序加成，同样**只改排序不改准入**
      * @return 按优先级降序排列的候选，长度 ≤ [limit]
      */
     fun rank(
@@ -97,7 +106,8 @@ object AutofillCandidateRanker {
         packageDimensionAuthorized: Boolean,
         lastFilledEntryId: String? = null,
         limit: Int = DEFAULT_LIMIT,
-        callingAppLabel: String? = null
+        callingAppLabel: String? = null,
+        wifiContext: Boolean = false
     ): List<Ranked> {
         if (entries.isEmpty()) return emptyList()
 
@@ -106,7 +116,7 @@ object AutofillCandidateRanker {
             ?.takeIf { it.isNotEmpty() }
 
         val scored = entries.mapNotNull {
-            scoreEntry(it, callingPackage, normalizedDomain, packageDimensionAuthorized, callingAppLabel)
+            scoreEntry(it, callingPackage, normalizedDomain, packageDimensionAuthorized, callingAppLabel, wifiContext)
         }
         if (scored.isEmpty()) return emptyList()
 
@@ -147,7 +157,8 @@ object AutofillCandidateRanker {
         callingPackage: String,
         webDomain: String?,
         packageDimensionAuthorized: Boolean,
-        callingAppLabel: String?
+        callingAppLabel: String?,
+        wifiContext: Boolean
     ): Ranked? {
         val reasons = linkedSetOf<MatchReason>()
         var score = 0
@@ -194,6 +205,9 @@ object AutofillCandidateRanker {
 
         if (score <= 0) return null
 
+        // 标题只读一次，供两个排序加成维度共用（ISSUE-P3-171 同口径：属性 getter 少次化）
+        val entryTitle = entry.title
+
         if (MatchReason.EXACT_PACKAGE in reasons &&
             (MatchReason.EXACT_DOMAIN in reasons || MatchReason.PARENT_DOMAIN in reasons)
         ) {
@@ -202,9 +216,15 @@ object AutofillCandidateRanker {
         }
 
         // ISSUE-P3-372 AC④：应用名相似加成——只对已入选（score > 0）条目生效的排序维度
-        if (callingAppLabel != null && titleMatchesAppLabel(entry.title, callingAppLabel)) {
+        if (callingAppLabel != null && titleMatchesAppLabel(entryTitle, callingAppLabel)) {
             score += SCORE_APP_TITLE_MATCH
             reasons += MatchReason.APP_TITLE_MATCH
+        }
+
+        // ISSUE-P3-373 AC①：Wi-Fi 设置上下文加成——同样只对已入选条目生效的排序维度
+        if (wifiContext && WifiFillBoostPolicy.hasWifiSignal(entryTitle, entryUrl)) {
+            score += SCORE_WIFI_CONTEXT_BOOST
+            reasons += MatchReason.WIFI_CONTEXT_MATCH
         }
 
         if (entry.customData[RealVaultRepository.FAVORITE_CUSTOM_DATA_KEY] == "true") {

@@ -261,7 +261,9 @@ private suspend fun KeePasskeyAutofillService.resolveUnlockedCandidates(
             lastFilledEntryId = autofillLastFilledStore.lastFilledEntryId(),
             limit = MAX_DATASET_COUNT,
             // ISSUE-P3-372 AC④：调用方应用名作排序加成（取不到即 null，仅损失一个维度）
-            callingAppLabel = callerAppLabelOrNull(callingPkg)
+            callingAppLabel = callerAppLabelOrNull(callingPkg),
+            // ISSUE-P3-373 AC①：Wi-Fi 设置上下文加成（清单外恒 false）
+            wifiContext = WifiFillBoostPolicy.isWifiSettingsPackage(callingPkg)
         )
     )
 }
@@ -392,6 +394,9 @@ internal fun KeePasskeyAutofillService.buildPickerDataset(
     passwordId: AutofillId?,
     otpId: AutofillId? = null
 ) {
+    // ISSUE-P3-376：手动选择器兜底数据集开关（默认开启）——关闭即本次响应不挂
+    // 「搜索全部条目…」入口；自动匹配数据集与解锁引导不受影响（在本函数之前已装配）
+    if (!settingsStore.isAutofillManualPickerEnabled()) return
     // ISSUE-P3-40：手动搜索兜底入口（自动匹配零候选/候选不含目标条目时使用）。
     // 以「认证数据集」形式挂入：值在用户于选择器中选中并确认后才经
     // AutofillManager.EXTRA_AUTHENTICATION_RESULT 回传——未确认前不携带任何明文。

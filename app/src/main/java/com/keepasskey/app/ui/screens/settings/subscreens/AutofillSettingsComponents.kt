@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.automirrored.filled.Undo
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Accessibility
 import androidx.compose.material.icons.filled.ContentPasteGo
@@ -23,6 +24,7 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Password
 import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.VpnKey
 import androidx.compose.material3.Icon
@@ -70,7 +72,9 @@ internal fun AutofillProviderCard(
     onAutofillServiceToggle: (Boolean) -> Unit,
     onAutofillSessionGrantToggle: (Boolean) -> Unit,
     // ISSUE-P3-324：旧版无障碍自动填充通道（默认关闭；需系统侧启用本应用无障碍服务）
-    onAutofillLegacyAccessibilityToggle: (Boolean) -> Unit = {}
+    onAutofillLegacyAccessibilityToggle: (Boolean) -> Unit = {},
+    // ISSUE-P3-376：「搜索全部条目…」手动选择器兜底数据集开关（默认开启）
+    onAutofillManualPickerToggle: (Boolean) -> Unit
 ) {
     BentoCard(
         modifier = Modifier.fillMaxWidth(),
@@ -129,6 +133,17 @@ internal fun AutofillProviderCard(
                 subtitle = stringResource(R.string.autofill_session_grant_sub),
                 checked = uiState.autofillSessionGrantEnabled,
                 onCheckedChange = onAutofillSessionGrantToggle
+            )
+
+            // ISSUE-P3-376：「搜索全部条目…」手动选择器兜底数据集（吸收 Monica
+            // manual_selection_enabled）。关闭后自动匹配与解锁引导不受影响，
+            // 仅系统面板不再出现手动搜索入口。
+            AutofillSwitchRow(
+                icon = Icons.Default.Search,
+                title = stringResource(R.string.autofill_manual_picker_title),
+                subtitle = stringResource(R.string.autofill_manual_picker_sub),
+                checked = uiState.autofillManualPickerEnabled,
+                onCheckedChange = onAutofillManualPickerToggle
             )
         }
     }
@@ -220,6 +235,8 @@ internal fun AutofillCaptureCard(
     onOfferSaveCredentialsToggle: (Boolean) -> Unit,
     onOverrideNoAutofillToggle: (Boolean) -> Unit,
     onSkipDalVerificationToggle: (Boolean) -> Unit,
+    // ISSUE-P3-376：无匹配「就地新建」入口开关（选择器空态按钮 + CM 新建 Action）
+    onAutofillOfferCreateToggle: (Boolean) -> Unit,
     blockedPackages: List<String>,
     saveBlockedPackages: List<String>,
     blockedFieldCount: Int,
@@ -261,6 +278,8 @@ internal fun AutofillCaptureCard(
                 checked = uiState.skipDalVerification,
                 onCheckedChange = onSkipDalVerificationToggle
             )
+
+            AutofillOfferCreateRow(uiState = uiState, onToggle = onAutofillOfferCreateToggle)
 
             // CM 通道特权浏览器白名单：内置仅收录已取证浏览器（Chrome / Firefox），
             // 其余浏览器须在此显式启用，否则其上的通行密钥不会出现在候选里
@@ -308,6 +327,25 @@ internal fun AutofillCaptureCard(
             )
         }
     }
+}
+
+/**
+ * ISSUE-P3-376：无匹配「就地新建」入口开关行（吸收 Monica `password_suggestion_enabled`）。
+ * 关闭即选择器空态「新建条目并填充」按钮与 CM「新建密码条目」Action 均不呈现。
+ * 自 `AutofillCaptureCard` 抽出仅为函数行数闸门（长函数 ≥100 fail-closed），行为零变更。
+ */
+@Composable
+internal fun AutofillOfferCreateRow(
+    uiState: SettingsUiState,
+    onToggle: (Boolean) -> Unit
+) {
+    AutofillSwitchRow(
+        icon = Icons.Default.Add,
+        title = stringResource(R.string.autofill_offer_create_title),
+        subtitle = stringResource(R.string.autofill_offer_create_sub),
+        checked = uiState.autofillOfferCreateEntry,
+        onCheckedChange = onToggle
+    )
 }
 
 /**
@@ -434,7 +472,8 @@ internal fun AutofillProviderCardPreview() {
             onPasskeySupportToggle = {},
             onAutofillServiceToggle = {},
             onAutofillSessionGrantToggle = {},
-            onAutofillLegacyAccessibilityToggle = {}
+            onAutofillLegacyAccessibilityToggle = {},
+            onAutofillManualPickerToggle = {}
         )
     }
 }

@@ -131,6 +131,9 @@ data class SettingsUiState(
     val skipDalVerification: Boolean = false, // 设置页「跳过通行密钥站点归属校验」：KP2A 跳过 DAL 校验（ISSUE-P2-02 接线注册门控；ISSUE-P2-240 更正原「浏览器兼容层」文案）
     val overrideNoAutofill: Boolean = false, // KP2A: 强制忽略应用的禁止自动填充标记
     val autofillSessionGrantEnabled: Boolean = false, // ISSUE-P3-42: 会话授权宽限（短时免重复二次确认，默认关闭）
+    // ISSUE-P3-376: 候选呈现面两开关（默认 true；投影取自持久化 extState）
+    val autofillManualPickerEnabled: Boolean = true, // 「搜索全部条目…」手动选择器兜底数据集
+    val autofillOfferCreateEntry: Boolean = true, // 无匹配「就地新建」入口（选择器空态按钮 + CM Action）
     // 自动填充黑名单（TASK-44）：改为真实包名条目，由 AutofillBlocklistStore 经独立
     // StateFlow 下发（SettingsViewModel.autofillBlockedPackages）；原无写入方的
     // disabledAutofillQueriesCount 计数已下架

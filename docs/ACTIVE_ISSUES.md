@@ -50,13 +50,13 @@
 > 2026-09-27 两条真机手测缺陷（`ISSUE-P2-341` / `ISSUE-P2-343`）分别收口于 §343 与 §344；
 > 更早的 P2 闭环流水见 `RESOLVED_LOG.md` §315 ~ §325。
 
-## P3 低危问题、特性接线与体验优化（5 项）
+## P3 低危问题、特性接线与体验优化（3 项）
 
-> **开放项 5 条**（这里只列**各条还欠什么**；历史闭环流水一律见 [`RESOLVED_LOG.md`](RESOLVED_LOG.md)）：
+> **开放项 3 条**（这里只列**各条还欠什么**；历史闭环流水一律见 [`RESOLVED_LOG.md`](RESOLVED_LOG.md)）：
 > ① `ISSUE-P3-339` —— **用户指示暂时搁置**（浏览器半环需外部域名与信任链资源）。
-> ② `ISSUE-P3-373` ~ `ISSUE-P3-376` —— 2026-09-28 用户指示「将本项目可以吸收的 Monica 自动填充
-> 配置全部吸收过来」（功能差距 + 偏好开关两者都要、含结构化数据与主动提示两个大项），按差距调研补登。
-> `ISSUE-P3-371`（`{REF:}` 三处消费点）与 `ISSUE-P3-372`（解析层与打分吸收）已于 §352 整批闭环归档；
+> ② `ISSUE-P3-374` ~ `ISSUE-P3-375` —— Monica 吸收大项（主动填充提示通知 / 结构化数据填充），
+> 待第 3、4 批实施。
+> `ISSUE-P3-371` / `ISSUE-P3-372` 已于 §352 闭环；`ISSUE-P3-373` / `ISSUE-P3-376` 已于 §353 闭环；
 > 原 `ISSUE-P3-366` ~ `ISSUE-P3-370` 五条已于 §351 整批闭环归档（366~368 实施、369/370 复核否决）；
 > `ISSUE-P3-361` ~ `ISSUE-P3-365`（假开关清点五条）已于 §350 整批闭环归档。
 
@@ -97,26 +97,6 @@
 - **载体顺带承接**：`ISSUE-P3-337` 的 AC⑧(b)（对真实 RP 完成 GetAssertion）与未决 6 计数器跳变实测出口。
 - **关联**：`ISSUE-P3-337` / `PD-32`、`PD-33`（DAL 与 caller origin 归因）/ commits
   `db332b78`、`8e2a7700`、`fa283ea2`、`0199bc69`、`dc741803`（完整核实与读数）。
-
-### ISSUE-P3-373：Monica 轻中型特性吸收（Wi-Fi 填充启发 + 选择器/新建流程密码生成直达）
-
-- **核实时间点与核实方式（2026-09-28）**：Monica 侧定向取证——`WifiAutofillAssist.kt:16-72`（不抓 SSID，
-  设置页包名命中即置顶全部 WIFI 条目；调用于 `MonicaAutofillServiceNg.kt:607`）、
-  `AutofillPickerActivityV2.kt:901`（选择器内生成密码填充）。本仓侧直读——全仓无 Wi-Fi 启发逻辑
-  （`autofill/` 目录 grep 零命中）；生成器存在于 `ui/screens/generator/` 与编辑页
-  `EntryEditPasswordGenerator.kt`，但 `passkey/PasswordDraftScreen.kt`（就地新建页）无生成入口、
-  选择器亦无生成入口。
-- **背景**：2026-09-28 Monica 对比调研列为「轻量可吸收」项；用户明示全部吸收。本仓无 WIFI 条目类型，
-  以**标签/标题信号启发**等价落地；不引入 SSID 采集（Monica 同样刻意不做，权限取舍一致）。
-- **涉及文件**：`app/.../autofill/`（新增 Wi-Fi 启发策略 + 排序挂点）、`passkey/PasswordDraftScreen.kt`、
-  `ui/screens/generator/`（复用）、`autofill/AutofillPickerScreen.kt`（如选型含选择器入口）。
-- **验收标准**：AC① 新增 `WifiFillBoostPolicy`（纯函数）：目标包名命中 Wi-Fi 设置类应用清单
-  （清单收敛命名常量，含 AOSP/主流 ROM 设置包名）时，对标题/URL/标签含 wifi 信号（`wifi`/`wi-fi`/
-  `无线`/`ssid`，大小写不敏感、词边界）的候选给排序加成；不在清单内恒零加成（反例覆盖）；
-  AC② 加成只改排序不改准入（无信号条目照常可见）；AC③ `PasswordDraftScreen` 增「生成密码」入口，
-  复用既有生成器实现（不自写第二套生成逻辑），生成值经既有敏感通道写入、不落日志；
-  AC④ 新增开关/清单若有可见 UI 须补 `@Preview` 态（`ISSUE-P3-340` 立规）；AC⑤ `test` 全绿 +
-  `gate_readings.py` 全 PASS。
 
 ### ISSUE-P3-374：主动填充提示通知吸收（Monica ActiveFillNotification）
 
@@ -160,20 +140,4 @@
   （`AutofillValue` 出口即边界，日志零明文）；AC⑥ 识别/匹配/填充三段各有正反例宿主用例；
   AC⑦ `test` 全绿 + `gate_readings.py` 全 PASS；AC⑧ 录入面（编辑页表单）若未做，批次文档写明
   「已有字段识别可填、录入走自定义字段手工/导入」的边界。
-
-### ISSUE-P3-376：Monica AutofillPreferences 偏好开关盘点与缺项吸收
-
-- **核实时间点与核实方式（2026-09-28）**：Monica 侧定向取证——`autofill_ng/AutofillPreferences.kt`
-  （约 30+ 偏好项，`:118-477` 等）；本仓侧既有开关盘点——`ExtendedSettings` 读写键（`autofillServiceEnabled` /
-  `offerSaveCredentials` / `sessionGrant` / `inlineSuggestions` / `totpCopy` / `overrideNoAutofill` /
-  `autofillLegacyAccessibilityEnabled` 等，§232 / §51 / §332 批次）+ 三级黑名单持久化。
-- **背景**：2026-09-28 用户裁「两者都要」——功能差距之外，偏好开关缺项一并吸收。**历史教训先约束**：
-  假开关（`ISSUE-P2-228` / `ISSUE-P3-65` / `ISSUE-P3-361~365`）明令禁止——**凡新增开关必须
-  读写键成对 + 服务侧真实消费点 + 接线计数守卫**，做不出消费点的偏好一律登记「裁决不做」而非摆设。
-- **涉及文件**：`ExtendedSettings` / `SettingsUiState` / 设置页自动填充子页 / `KeePasskeyAutofillService`。
-- **验收标准**：AC① 盘点表落批次文档：Monica 每个偏好 → 本仓「已有等价 / 本批新增 / 裁决不做（写明
-  理由）」三分类，逐项无遗漏（以 `AutofillPreferences.kt` 成员清单为分母）；AC② 本仓缺且判「可吸收」
-  的开关逐个真实接线（读写键 + 消费点 + 中英文案）；AC③ 每新增开关配接线守卫测试（计数断言防
-  只接一处，仿 `AutofillChannelSwitchWiringTest` 口径）；AC④ `test` 全绿 + `gate_readings.py` 全 PASS。
-
 

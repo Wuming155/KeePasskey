@@ -348,6 +348,13 @@ class SettingsViewModel @Inject constructor(
 
     // ===== KP2A 扩展：表单自动填充与体验 =====
     fun setOfferSaveCredentials(enabled: Boolean) = extendedPreferences.setOfferSaveCredentials(enabled)
+
+    // ISSUE-P3-376：候选呈现面两开关
+    fun setAutofillManualPickerEnabled(enabled: Boolean) =
+        extendedPreferences.setAutofillManualPickerEnabled(enabled)
+
+    fun setAutofillOfferCreateEntry(enabled: Boolean) =
+        extendedPreferences.setAutofillOfferCreateEntry(enabled)
     fun setInlineSuggestionsEnabled(enabled: Boolean) = extendedPreferences.setInlineSuggestionsEnabled(enabled)
     fun setAutoReturnFromQuery(enabled: Boolean) = extendedPreferences.setAutoReturnFromQuery(enabled)
     fun setAutofillCopyTotp(enabled: Boolean) = extendedPreferences.setAutofillCopyTotp(enabled)

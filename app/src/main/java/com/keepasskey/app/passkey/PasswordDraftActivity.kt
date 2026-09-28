@@ -18,10 +18,13 @@ import com.keepasskey.app.data.repository.VaultEntryWriteCoordinator
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.security.ApplyObscuredTouchFilter
 import com.keepasskey.app.ui.model.UiVaultEntry
+import com.keepasskey.app.ui.screens.edit.EntryEditUiState
+import com.keepasskey.app.ui.screens.edit.generatePasswordChars
 import com.keepasskey.core.log.AppLog
 import com.keepasskey.core.model.KdbxUuid
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.launch
+import java.security.SecureRandom
 import javax.inject.Inject
 
 /**
@@ -157,7 +160,16 @@ class PasswordDraftActivity : BaseCredentialActivity() {
                 isSaving = isSaving,
                 isSaveFailed = isSaveFailed,
                 onSave = ::saveDraft,
-                onCancel = ::failAndFinish
+                onCancel = ::failAndFinish,
+                // ISSUE-P3-373 AC③：生成密码——复用编辑页生成器（generatePasswordChars），
+                // 默认选项（20 位 / 大小写数符）。CharArray 所有权整体转移给 draftPassword
+                // （与 SecurePasswordField 的 onPasswordChange 同契约），生成副本不再二次清零
+                onGeneratePassword = {
+                    val generated = generatePasswordChars(EntryEditUiState(), SecureRandom())
+                    draftPassword.fill('0')
+                    draftPassword = generated
+                    isSaveFailed = false
+                }
             )
         }
     }

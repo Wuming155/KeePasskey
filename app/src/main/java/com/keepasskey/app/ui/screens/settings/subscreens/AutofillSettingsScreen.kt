@@ -54,6 +54,9 @@ fun AutofillSettingsScreen(
     onOverrideNoAutofillToggle: (Boolean) -> Unit = {},
     // ISSUE-P3-42：会话授权宽限（默认关闭）
     onAutofillSessionGrantToggle: (Boolean) -> Unit = {},
+    // ISSUE-P3-376：候选呈现面两开关（手动选择器兜底数据集 / 无匹配就地新建入口）
+    onAutofillManualPickerToggle: (Boolean) -> Unit = {},
+    onAutofillOfferCreateToggle: (Boolean) -> Unit = {},
     // CM 通道特权浏览器白名单入口（让 Chrome / Firefox 之外的浏览器也能用通行密钥）
     onOpenPrivilegedBrowsers: () -> Unit = {},
     // TASK-44：自动填充黑名单真实条目与增删通道（替代原无写入方的禁用计数）
@@ -110,7 +113,8 @@ fun AutofillSettingsScreen(
                     onPasskeySupportToggle = onPasskeySupportToggle,
                     onAutofillServiceToggle = onAutofillServiceToggle,
                     onAutofillSessionGrantToggle = onAutofillSessionGrantToggle,
-                    onAutofillLegacyAccessibilityToggle = onAutofillLegacyAccessibilityToggle
+                    onAutofillLegacyAccessibilityToggle = onAutofillLegacyAccessibilityToggle,
+                    onAutofillManualPickerToggle = onAutofillManualPickerToggle
                 )
             }
 
@@ -152,6 +156,7 @@ fun AutofillSettingsScreen(
                     onOfferSaveCredentialsToggle = onOfferSaveCredentialsToggle,
                     onOverrideNoAutofillToggle = onOverrideNoAutofillToggle,
                     onSkipDalVerificationToggle = onSkipDalVerificationToggle,
+                    onAutofillOfferCreateToggle = onAutofillOfferCreateToggle,
                     blockedPackages = blockedPackages,
                     saveBlockedPackages = saveBlockedPackages,
                     blockedFieldCount = blockedFieldCount,

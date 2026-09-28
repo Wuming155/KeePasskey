@@ -35,29 +35,33 @@ class CredentialCreateActionPolicyTest {
         val sawPasswordOption: Boolean,
         val passwordCandidateCount: Int,
         val sessionReadOnly: Boolean,
+        val offerCreateEntryEnabled: Boolean,
         val expected: Boolean
     )
 
     private val scenarios = listOf(
-        // 命中：口令请求 + 零候选 + 会话可写 ⇒ 挂 Action
-        Scenario("口令请求·零候选·可写", true, 0, false, true),
+        // 命中：口令请求 + 零候选 + 会话可写 + 新建入口开 ⇒ 挂 Action
+        Scenario("口令请求·零候选·可写·入口开", true, 0, false, true, true),
         // 有候选 ⇒ 不挂（用户已有可用凭据，Action 是噪声）
-        Scenario("口令请求·有候选", true, 1, false, false),
-        Scenario("口令请求·多候选", true, 3, false, false),
+        Scenario("口令请求·有候选", true, 1, false, true, false),
+        Scenario("口令请求·多候选", true, 3, false, true, false),
         // 只读会话 ⇒ 不挂（PD-51 裁决 4：新建不了就不呈现，控件不许骗人）
-        Scenario("口令请求·零候选·只读", true, 0, true, false),
+        Scenario("口令请求·零候选·只读", true, 0, true, true, false),
         // 无口令请求（仅公钥 / 自定义选项）⇒ 永不挂（PD-51 裁决 1：本应用造不出有效通行密钥）
-        Scenario("仅公钥请求·零候选", false, 0, false, false),
-        Scenario("仅公钥请求·只读", false, 0, true, false)
+        Scenario("仅公钥请求·零候选", false, 0, false, true, false),
+        Scenario("仅公钥请求·只读", false, 0, true, true, false),
+        // ISSUE-P3-376 第五门控：设置页关闭「无匹配时就地新建」⇒ 即便其余全满足也不挂
+        Scenario("口令请求·零候选·可写·入口关", true, 0, false, false, false)
     )
 
     @Test
-    fun `挂出判定穷举——只有口令请求零候选且会话可写才挂`() {
+    fun `挂出判定穷举——口令请求零候选且会话可写且入口开关开启才挂`() {
         val failures = scenarios.filter { scenario ->
             shouldOfferPasswordCreateAction(
                 sawPasswordOption = scenario.sawPasswordOption,
                 passwordCandidateCount = scenario.passwordCandidateCount,
-                sessionReadOnly = scenario.sessionReadOnly
+                sessionReadOnly = scenario.sessionReadOnly,
+                offerCreateEntryEnabled = scenario.offerCreateEntryEnabled
             ) != scenario.expected
         }
         assertEquals(
@@ -126,6 +130,10 @@ class CredentialCreateActionPolicyTest {
         assertTrue(
             "挂出处必须传入只读会话门控",
             source.contains("sessionReadOnly = vaultRepository.isSessionReadOnly()")
+        )
+        assertTrue(
+            "挂出处必须传入新建入口开关门控（ISSUE-P3-376 第五门控）",
+            source.contains("offerCreateEntryEnabled = settingsStore.isAutofillOfferCreateEntryEnabled()")
         )
         assertTrue(
             "必须以 addAction 挂出（不得改走 addCredentialEntry 伪装候选）",

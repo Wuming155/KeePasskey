@@ -46,16 +46,21 @@ import javax.inject.Inject
  *
  * 抽为纯函数的动因与本仓 `ClipboardClearPolicy` 一族相同：装配路径触碰
  * `PendingIntent` / `Icon` / 资源解析（宿主 JVM 的 android.jar 桩即抛 `Stub!`），
- * 端到端只能靠真机；判定逻辑本身必须可被宿主单测穷举——否则四条门控
- * （有无口令请求 / 有无候选 / 只读会话）的排列只能外包给真机回归。
+ * 端到端只能靠真机；判定逻辑本身必须可被宿主单测穷举——否则五条门控
+ * （有无口令请求 / 有无候选 / 只读会话 / 新建入口开关）的排列只能外包给真机回归。
  * 生产调用点在 [CredentialResponseAssembler.buildUnlockedGetResponse]（唯一候选出口，
  * 直查与链式解锁两路共用），另有源码守卫锁定该接线（`CredentialCreateActionPolicyTest`）。
+ *
+ * ISSUE-P3-376：第五门控 `offerCreateEntryEnabled`（吸收 Monica `password_suggestion_enabled`）
+ * ——设置页「无匹配时就地新建」开关，关闭即不挂 Action。
  */
 internal fun shouldOfferPasswordCreateAction(
     sawPasswordOption: Boolean,
     passwordCandidateCount: Int,
-    sessionReadOnly: Boolean
-): Boolean = sawPasswordOption && passwordCandidateCount == 0 && !sessionReadOnly
+    sessionReadOnly: Boolean,
+    offerCreateEntryEnabled: Boolean
+): Boolean = sawPasswordOption && passwordCandidateCount == 0 && !sessionReadOnly &&
+    offerCreateEntryEnabled
 
 class CredentialResponseAssembler @Inject constructor(
     @ApplicationContext private val context: Context,
@@ -145,7 +150,9 @@ class CredentialResponseAssembler @Inject constructor(
         if (shouldOfferPasswordCreateAction(
                 sawPasswordOption = sawPasswordOption,
                 passwordCandidateCount = passwordCandidateCount,
-                sessionReadOnly = vaultRepository.isSessionReadOnly()
+                sessionReadOnly = vaultRepository.isSessionReadOnly(),
+                // ISSUE-P3-376：第五门控——设置页「无匹配时就地新建」开关（默认开启）
+                offerCreateEntryEnabled = settingsStore.isAutofillOfferCreateEntryEnabled()
             )
         ) {
             responseBuilder.addAction(CredentialCreateEntries.createPasswordAction(context, callingPackage, callingOrigin))

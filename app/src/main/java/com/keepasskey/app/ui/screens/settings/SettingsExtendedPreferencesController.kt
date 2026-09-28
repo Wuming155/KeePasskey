@@ -72,6 +72,13 @@ internal class SettingsExtendedPreferencesController(
     // ========== KP2A 扩展：表单自动填充与体验 ==========
     fun setOfferSaveCredentials(enabled: Boolean) = updateExtended { it.copy(offerSaveCredentials = enabled) }
 
+    // ISSUE-P3-376：候选呈现面两开关（读写键成对，见 ExtendedSettingsStore）
+    fun setAutofillManualPickerEnabled(enabled: Boolean) =
+        updateExtended { it.copy(autofillManualPickerEnabled = enabled) }
+
+    fun setAutofillOfferCreateEntry(enabled: Boolean) =
+        updateExtended { it.copy(autofillOfferCreateEntry = enabled) }
+
     fun setInlineSuggestionsEnabled(enabled: Boolean) = updateExtended { it.copy(inlineSuggestionsEnabled = enabled) }
 
     fun setAutoReturnFromQuery(enabled: Boolean) = updateExtended { it.copy(autoReturnFromQuery = enabled) }

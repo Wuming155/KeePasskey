@@ -222,7 +222,9 @@ class AutofillUnlockActivity : FragmentActivity() {
             packageDimensionAuthorized = packageDimensionAuthorized,
             lastFilledEntryId = autofillLastFilledStore.lastFilledEntryId(),
             // ISSUE-P3-372 AC④：调用方应用名作排序加成（与服务端装配同口径）
-            callingAppLabel = callerAppLabelOrNull(callingPackage)
+            callingAppLabel = callerAppLabelOrNull(callingPackage),
+            // ISSUE-P3-373 AC①：Wi-Fi 设置上下文加成（与服务端装配同口径）
+            wifiContext = WifiFillBoostPolicy.isWifiSettingsPackage(callingPackage)
         )
         Routing(
             route = AutofillUnlockRouter.route(

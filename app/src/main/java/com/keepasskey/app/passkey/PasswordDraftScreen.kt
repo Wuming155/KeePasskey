@@ -43,7 +43,9 @@ fun PasswordDraftScreen(
     isSaving: Boolean,
     isSaveFailed: Boolean,
     onSave: () -> Unit,
-    onCancel: () -> Unit
+    onCancel: () -> Unit,
+    /** ISSUE-P3-373 AC③：生成密码（复用编辑页生成器实现；宿主负责产出与清零） */
+    onGeneratePassword: () -> Unit
 ) {
     Surface(modifier = Modifier.fillMaxWidth()) {
         Column(
@@ -90,6 +92,11 @@ fun PasswordDraftScreen(
                 horizontalArrangement = Arrangement.End,
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                // ISSUE-P3-373 AC③：就地新建页的生成密码入口（对齐 Monica 选择器「生成密码填充」）；
+                // 位于左侧与「取消」拉开距离，防误触
+                TextButton(onClick = onGeneratePassword, enabled = !isSaving) {
+                    Text(stringResource(R.string.cred_draft_generate))
+                }
                 TextButton(onClick = onCancel, enabled = !isSaving) {
                     Text(stringResource(R.string.autofill_confirm_cancel))
                 }
@@ -112,7 +119,8 @@ internal fun PasswordDraftScreenPreviewEditable() {
         isSaving = false,
         isSaveFailed = false,
         onSave = {},
-        onCancel = {}
+        onCancel = {},
+        onGeneratePassword = {}
     )
 }
 
@@ -127,7 +135,8 @@ internal fun PasswordDraftScreenPreviewSaving() {
         isSaving = true,
         isSaveFailed = false,
         onSave = {},
-        onCancel = {}
+        onCancel = {},
+        onGeneratePassword = {}
     )
 }
 
@@ -142,6 +151,7 @@ internal fun PasswordDraftScreenPreviewFailed() {
         isSaving = false,
         isSaveFailed = true,
         onSave = {},
-        onCancel = {}
+        onCancel = {},
+        onGeneratePassword = {}
     )
 }

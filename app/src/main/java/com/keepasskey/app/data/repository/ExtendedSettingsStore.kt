@@ -92,9 +92,7 @@ class ExtendedSettingsStore @Inject constructor(
 
             // 自动填充进阶
             offerSaveCredentials = p.getBoolean(K_OFFER_SAVE_CREDENTIALS, defaults.offerSaveCredentials),
-            inlineSuggestionsEnabled = p.getBoolean(
-                K_INLINE_SUGGESTIONS_ENABLED, defaults.inlineSuggestionsEnabled
-            ),
+            inlineSuggestionsEnabled = p.getBoolean(K_INLINE_SUGGESTIONS_ENABLED, defaults.inlineSuggestionsEnabled),
             autoReturnFromQuery = p.getBoolean(K_AUTO_RETURN_FROM_QUERY, defaults.autoReturnFromQuery),
             autofillCopyTotp = p.getBoolean(K_AUTOFILL_COPY_TOTP, defaults.autofillCopyTotp),
             autofillShowTotpNotification = p.getBoolean(
@@ -102,19 +100,13 @@ class ExtendedSettingsStore @Inject constructor(
             ),
             skipDalVerification = p.getBoolean(K_SKIP_DAL_VERIFICATION, defaults.skipDalVerification),
             overrideNoAutofill = p.getBoolean(K_OVERRIDE_NO_AUTOFILL, defaults.overrideNoAutofill),
-            autofillSessionGrantEnabled = p.getBoolean(
-                K_AUTOFILL_SESSION_GRANT, defaults.autofillSessionGrantEnabled
-            ),
+            autofillSessionGrantEnabled = p.getBoolean(K_AUTOFILL_SESSION_GRANT, defaults.autofillSessionGrantEnabled),
+            autofillManualPickerEnabled = p.getBoolean(K_AUTOFILL_MANUAL_PICKER, defaults.autofillManualPickerEnabled),
+            autofillOfferCreateEntry = p.getBoolean(K_AUTOFILL_OFFER_CREATE_ENTRY, defaults.autofillOfferCreateEntry),
             // ISSUE-P2-228：三条通道总开关自内存态迁入持久化（迁移前无任何持久化键）
-            credentialProviderEnabled = p.getBoolean(
-                K_CREDENTIAL_PROVIDER_ENABLED, defaults.credentialProviderEnabled
-            ),
-            passkeySupportEnabled = p.getBoolean(
-                K_PASSKEY_SUPPORT_ENABLED, defaults.passkeySupportEnabled
-            ),
-            autofillServiceEnabled = p.getBoolean(
-                K_AUTOFILL_SERVICE_ENABLED, defaults.autofillServiceEnabled
-            ),
+            credentialProviderEnabled = p.getBoolean(K_CREDENTIAL_PROVIDER_ENABLED, defaults.credentialProviderEnabled),
+            passkeySupportEnabled = p.getBoolean(K_PASSKEY_SUPPORT_ENABLED, defaults.passkeySupportEnabled),
+            autofillServiceEnabled = p.getBoolean(K_AUTOFILL_SERVICE_ENABLED, defaults.autofillServiceEnabled),
             autofillLegacyAccessibilityEnabled =
                 p.getBoolean(K_AUTOFILL_LEGACY_ACCESSIBILITY_ENABLED, defaults.autofillLegacyAccessibilityEnabled),
             // TASK-44：自动填充黑名单改由 AutofillBlocklistStore 持久化真实包名条目，
@@ -181,6 +173,8 @@ class ExtendedSettingsStore @Inject constructor(
             .putBoolean(K_SKIP_DAL_VERIFICATION, settings.skipDalVerification)
             .putBoolean(K_OVERRIDE_NO_AUTOFILL, settings.overrideNoAutofill)
             .putBoolean(K_AUTOFILL_SESSION_GRANT, settings.autofillSessionGrantEnabled)
+            .putBoolean(K_AUTOFILL_MANUAL_PICKER, settings.autofillManualPickerEnabled)
+            .putBoolean(K_AUTOFILL_OFFER_CREATE_ENTRY, settings.autofillOfferCreateEntry)
             .putBoolean(K_CREDENTIAL_PROVIDER_ENABLED, settings.credentialProviderEnabled)
             .putBoolean(K_PASSKEY_SUPPORT_ENABLED, settings.passkeySupportEnabled)
             .putBoolean(K_AUTOFILL_SERVICE_ENABLED, settings.autofillServiceEnabled)
@@ -309,6 +303,20 @@ class ExtendedSettingsStore @Inject constructor(
     fun isOfferSaveCredentialsEnabled(): Boolean =
         prefs?.getBoolean(K_OFFER_SAVE_CREDENTIALS, true) ?: true
 
+    /**
+     * ISSUE-P3-376：手动选择器兜底数据集开关（默认 true）。
+     * 消费方 `AutofillDatasetBuilders.buildPickerDataset`；键与缺省须与数据类同值。
+     */
+    fun isAutofillManualPickerEnabled(): Boolean =
+        prefs?.getBoolean(K_AUTOFILL_MANUAL_PICKER, true) ?: true
+
+    /**
+     * ISSUE-P3-376：无匹配「就地新建」入口开关（默认 true）。
+     * 消费方：选择器 `canCreateNew` 与 CM `shouldOfferPasswordCreateAction` 第五门控。
+     */
+    fun isAutofillOfferCreateEntryEnabled(): Boolean =
+        prefs?.getBoolean(K_AUTOFILL_OFFER_CREATE_ENTRY, true) ?: true
+
     /** wifiOnlySync 属 SyncUiState 域（周期同步的网络约束消费方），以独立键持久化 */
     fun loadWifiOnlySync(): Boolean = prefs?.getBoolean(K_WIFI_ONLY_SYNC, true) ?: true
 
@@ -345,6 +353,10 @@ class ExtendedSettingsStore @Inject constructor(
         const val K_OVERRIDE_NO_AUTOFILL = "override_no_autofill"
         /** ISSUE-P3-42：会话授权宽限开关（默认 false，未持久化时按关闭处理） */
         const val K_AUTOFILL_SESSION_GRANT = "autofill_session_grant_enabled"
+
+        // ISSUE-P3-376：候选呈现面两开关（缺省 true = 与既有可观察行为一致）
+        const val K_AUTOFILL_MANUAL_PICKER = "autofill_manual_picker_enabled"
+        const val K_AUTOFILL_OFFER_CREATE_ENTRY = "autofill_offer_create_entry"
 
         // ISSUE-P2-228：三条通道总开关（默认开启 = 与假开关时期的实际可观察行为一致）
         const val K_CREDENTIAL_PROVIDER_ENABLED = "credential_provider_enabled"

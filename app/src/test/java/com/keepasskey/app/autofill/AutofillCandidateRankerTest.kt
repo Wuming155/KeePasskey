@@ -272,7 +272,7 @@ class AutofillCandidateRankerTest {
     @Test
     fun `应用名加成不得让未通过严格匹配的条目入选`() {
         // 标题与应用名高度相似，但 url 与目标域无关 ⇒ 仍必须落选
-        val unrelated = entry(hexIdOf(1), "https://other-host.invalid", title = "Example App")
+        val unrelated = entry(hexIdOf(1), "https://other.example.org", title = "Example App")
 
         val ranked = AutofillCandidateRanker.rank(
             listOf(unrelated),
@@ -295,5 +295,71 @@ class AutofillCandidateRankerTest {
         assertFalse(AutofillCandidateRanker.titleMatchesAppLabel("", "ab"))
         assertFalse(AutofillCandidateRanker.titleMatchesAppLabel("GitHub", "gitlab"))
         assertTrue(AutofillCandidateRanker.titleMatchesAppLabel("  My  App ", "myapp"))
+    }
+
+    // ===== ISSUE-P3-373 AC①：Wi-Fi 设置上下文加成（只改排序不改准入） =====
+
+    @Test
+    fun `Wi-Fi 设置上下文对带信号的已入选条目给加成`() {
+        val wifi = entry(hexIdOf(1), "https://router.example.com", title = "家中 WiFi")
+        val plain = entry(hexIdOf(2), "https://router.example.com", title = "Router Admin")
+
+        val ranked = AutofillCandidateRanker.rank(
+            listOf(plain, wifi),
+            "com.android.settings",
+            "router.example.com",
+            packageDimensionAuthorized = false,
+            wifiContext = true
+        )
+
+        assertEquals(2, ranked.size)
+        assertTrue(
+            "带信号条目应计 WIFI_CONTEXT_MATCH",
+            AutofillCandidateRanker.MatchReason.WIFI_CONTEXT_MATCH in ranked.first().reasons
+        )
+        assertEquals(wifi.id.toHexString(), ranked.first().entry.id.toHexString())
+        assertEquals(140 + 70, ranked.first().score)
+    }
+
+    @Test
+    fun `非 Wi-Fi 上下文或无信号时零加成`() {
+        val wifi = entry(hexIdOf(1), "https://router.example.com", title = "家中 WiFi")
+        val plain = entry(hexIdOf(2), "https://router.example.com", title = "Router Admin")
+
+        // 清单外包名：即便条目带信号也不加成
+        val offContext = AutofillCandidateRanker.rank(
+            listOf(wifi), "com.example.browser", "router.example.com",
+            packageDimensionAuthorized = false, wifiContext = false
+        )
+        assertEquals(140, offContext.first().score)
+        assertFalse(
+            AutofillCandidateRanker.MatchReason.WIFI_CONTEXT_MATCH in offContext.first().reasons
+        )
+
+        // 上下文命中但条目无信号：同样不加成
+        val noSignal = AutofillCandidateRanker.rank(
+            listOf(plain), "com.android.settings", "router.example.com",
+            packageDimensionAuthorized = false, wifiContext = true
+        )
+        assertEquals(140, noSignal.first().score)
+        assertFalse(
+            AutofillCandidateRanker.MatchReason.WIFI_CONTEXT_MATCH in noSignal.first().reasons
+        )
+    }
+
+    @Test
+    fun `Wi-Fi 加成不得让未通过严格匹配的条目入选`() {
+        // 标题带强信号但 url 与目标域无关 ⇒ 仍必须落选（加成只排序不改准入）
+        val unrelated = entry(hexIdOf(1), "https://other.example.org", title = "家中 WiFi")
+
+        val ranked = AutofillCandidateRanker.rank(
+            listOf(unrelated),
+            "com.android.settings",
+            "router.example.com",
+            packageDimensionAuthorized = false,
+            wifiContext = true
+        )
+
+        assertTrue("纯信号词不构成入选条件", ranked.isEmpty())
     }
 }

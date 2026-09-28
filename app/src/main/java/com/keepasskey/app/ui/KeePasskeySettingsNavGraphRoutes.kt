@@ -139,6 +139,9 @@ internal fun NavGraphBuilder.settingsAutofillRoute(navController: NavHostControl
             onSkipDalVerificationToggle = settingsViewModel::setSkipDalVerification,
             onOverrideNoAutofillToggle = settingsViewModel::setOverrideNoAutofill,
             onAutofillSessionGrantToggle = settingsViewModel::setAutofillSessionGrantEnabled,
+            // ISSUE-P3-376：候选呈现面两开关
+            onAutofillManualPickerToggle = settingsViewModel::setAutofillManualPickerEnabled,
+            onAutofillOfferCreateToggle = settingsViewModel::setAutofillOfferCreateEntry,
             // ISSUE-P3-359 AC③：三级设置页下钻同样补 launchSingleTop
             onOpenPrivilegedBrowsers = {
                 navController.navigate(Screen.SettingsPrivilegedBrowsers.route) { launchSingleTop = true }
