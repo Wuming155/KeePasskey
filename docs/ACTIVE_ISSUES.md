@@ -50,10 +50,12 @@
 
 
 
-## P3 低危问题、特性接线与体验优化（1 项）
+## P3 低危问题、特性接线与体验优化（2 项）
 
-> **开放项 1 条**（这里只列**各条还欠什么**；已完成的实施细节留在条目正文与 commit 里，不重复登记）：
+> **开放项 2 条**（这里只列**各条还欠什么**；已完成的实施细节留在条目正文与 commit 里，不重复登记）：
 > ① `ISSUE-P3-339` —— **用户指示暂时搁置**（浏览器半环需外部域名与信任链资源）。
+> ② `ISSUE-P3-352` —— 交互体验对照差距（搜索空态无出口 / 域名感知匹配缺失 / 剪贴板清空静默），
+> 2026-09-28 登记，依据 [`references/交互体验的参考项目对照.md`](references/交互体验的参考项目对照.md)。
 > `ISSUE-P3-345`（无匹配「就地新建并用于本次填充」）收口于 `RESOLVED_LOG.md` §347：主体整改落
 > commit `37fdf145`，Autofill 通道真机日志坐实（§347.1），CM 浏览器面按用户裁决（`PD-52`：目标生态
 > **非 Chrome / 非 GMS**）收口——呈现面登记入限界表 §36。
@@ -101,5 +103,40 @@
 - **载体顺带承接**：`ISSUE-P3-337` 的 AC⑧(b)（对真实 RP 完成 GetAssertion）与未决 6 计数器跳变实测出口。
 - **关联**：`ISSUE-P3-337` / `PD-32`、`PD-33`（DAL 与 caller origin 归因）/ commits
   `db332b78`、`8e2a7700`、`fa283ea2`、`0199bc69`、`dc741803`（完整核实与读数）。
+
+### ISSUE-P3-352：交互体验对照差距——应用内搜索空态无出口 / 域名感知匹配缺失 / 剪贴板清空静默
+
+- **来源**：2026-09-28 用户命题「交互体验比 keepass2android 差很多（例：匹配不到密码不存在之后）」。
+  完整调研与证据见 [`references/交互体验的参考项目对照.md`](references/交互体验的参考项目对照.md)
+  （Kp2a 源码定向取证 + 本仓逐处对照，采纳 / 不采纳 / 待裁决三档）。
+- **核实时间点 / 方式**：2026-09-28；定向阅读本仓 `VaultListComponents.kt:352-379`（搜索空态仅
+  `SearchOff` + 复用 `vault_empty_title`「暂无内容」、无按钮）、`VaultSearchMatching.kt:26-54`
+  （纯子串匹配，URL 字段无域名感知）、`rg "已清空|Toast" app/src/main`（剪贴板清空零可见提示），
+  并抽查 Kp2a `strings.xml:1291/29/228` 与 `AutofillServiceBase.cs:354-357` 原文坐实对照面。
+- **判定为差距、不属取舍的理由**：系统填充通道（查询 Dataset / 解锁引导 / 就地新建）已对齐
+  Kp2a 且经 §347 真机坐实，**不在本条范围**；本条三项均是「用户已表达意图（搜索/复制）却得不到
+  反馈或出口」的体验缺口，非产品口径取舍（取舍项已入对照文档 §4C，不进本清单）。
+- **涉及文件**：
+  - 搜索空态：`app/src/main/java/com/keepasskey/app/ui/screens/vault/VaultListComponents.kt`
+    （`VaultEmptyState`）、`VaultListScreen.kt`、`app/src/main/res/values/strings.xml`；
+  - 域名感知匹配：`app/src/main/java/com/keepasskey/app/ui/screens/vault/VaultSearchMatching.kt`
+    （或其上游匹配源）；
+  - 剪贴板反馈：`app/src/main/java/com/keepasskey/app/security/ClipboardSecurityManager.kt`
+    及其消费方（Snackbar / 通知通道）。
+- **验收标准**：
+  1. **搜索空态**：搜索态显示**专用文案**（「无搜索结果」义，不再复用「暂无内容」）+ 双出口：
+     「新建条目」（以当前搜索词为起点预填，走既有新建/草稿预填通道）与「清除搜索」；
+     `@Preview` 覆盖搜索空态，且 `python tools/doc/check_preview_state_coverage.py` 不新增漏态。
+  2. **域名感知匹配（加性）**：查询串形如域名时，在既有子串档之外叠加 Kp2a 式 host 降级
+     （exact host → 子域后缀命中 → 去 `www.` 前缀）；**红线**：`passkey/DomainMatcher.kt` 与
+     凭据供给 / 签名侧域判定**零改动**（既有 `CredentialProviderLookalikeMatchTest` 等域判定
+     测试全绿为证）；新增单测至少覆盖：父域条目命中子域查询、`www.` 前缀互命中、
+     不同 eTLD+1 **不**命中的负向对照（负向须配同源正向）。
+  3. **剪贴板清空反馈**：自动清空发生时给出可见提示（文案口径参照 Kp2a "Clipboard cleared."），
+     复制时既有倒计时文案（`EntryDetailStateAssembler` 三态）不回退；用户关闭自动擦除时不误报。
+  4. 验证：`.\gradlew.bat test` 全绿（含新增单测）且 `python tools/doc/gate_readings.py` 全 PASS，
+     读数块原样贴入批次文档（§308 纪律）。
+- **关联**：`ISSUE-P3-345`（无匹配就地新建，已闭环 §347）/ `PD-51`（新建入口边界，不得越过）/
+  `PD-52`（目标生态非 Chrome / 非 GMS）。
 
 
