@@ -226,7 +226,8 @@ class AutofillCandidateRankerTest {
             "条目在目标域之下应计 SUBDOMAIN_OF_ORIGIN",
             AutofillCandidateRanker.MatchReason.SUBDOMAIN_OF_ORIGIN in ranked.first().reasons
         )
-        assertEquals(110, ranked.first().score)
+        // ISSUE-P3-377 AC③：子域档分值与 Monica「子域 115」同值对齐（原 110）
+        assertEquals(115, ranked.first().score)
     }
 
     @Test
@@ -242,6 +243,47 @@ class AutofillCandidateRankerTest {
         assertTrue(
             AutofillCandidateRanker.rank(listOf(stacked), "", "github.com", packageDimensionAuthorized = false)
                 .isEmpty()
+        )
+    }
+
+    // ===== ISSUE-P3-377 AC②：基域档（同 eTLD+1 兄弟子域，Monica `基域 100` 同值） =====
+
+    @Test
+    fun `兄弟子域同可注册域按基域档入选`() {
+        val sibling = entry(hexIdOf(1), "https://accounts.example.com")
+
+        val ranked = AutofillCandidateRanker.rank(
+            listOf(sibling), "", "shop.example.com", packageDimensionAuthorized = false
+        )
+
+        assertEquals(1, ranked.size)
+        assertTrue(
+            "同 eTLD+1 兄弟子域应计 SAME_BASE_DOMAIN",
+            AutofillCandidateRanker.MatchReason.SAME_BASE_DOMAIN in ranked.first().reasons
+        )
+        assertEquals(
+            "基域档与 Monica `基域 100` 同值",
+            100,
+            ranked.first().score
+        )
+    }
+
+    @Test
+    fun `基域档经 PSL 计算——私有段兄弟与异域不得命中`() {
+        // 私有段：foo.github.io 与 bar.github.io 的可注册域不同（github.io 是公共后缀）
+        val privateSibling = entry(hexIdOf(1), "https://foo.github.io")
+        assertTrue(
+            "私有段兄弟域不得按基域档命中",
+            AutofillCandidateRanker.rank(
+                listOf(privateSibling), "", "bar.github.io", packageDimensionAuthorized = false
+            ).isEmpty()
+        )
+        // 异域：基域不同恒不命中（与既有 evilgithub 负例互补——这条专打 eTLD+1 维度）
+        val otherBase = entry(hexIdOf(2), "https://accounts.example.org")
+        assertTrue(
+            AutofillCandidateRanker.rank(
+                listOf(otherBase), "", "shop.example.com", packageDimensionAuthorized = false
+            ).isEmpty()
         )
     }
 

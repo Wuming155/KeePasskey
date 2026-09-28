@@ -80,6 +80,43 @@ class PublicSuffixListTest {
         assertTrue(PublicSuffixList.isRegistrableDomain("  example.com  "))
     }
 
+    // ===== 1b. 可注册域取值（ISSUE-P3-377 AC①） =====
+
+    @Test
+    fun `可注册域取值_常规与多层子域`() {
+        assertEquals("example.com", PublicSuffixList.registrableDomain("example.com"))
+        assertEquals("example.com", PublicSuffixList.registrableDomain("a.b.example.com"))
+        assertEquals("bbc.co.uk", PublicSuffixList.registrableDomain("news.bbc.co.uk"))
+        assertEquals("example.com.cn", PublicSuffixList.registrableDomain("www.example.com.cn"))
+    }
+
+    @Test
+    fun `可注册域取值_私有段兄弟互不相同`() {
+        // github.io 是私有段公共后缀：两侧兄弟的可注册域是各自子域，绝不坍缩成 github.io
+        assertEquals("foo.github.io", PublicSuffixList.registrableDomain("a.foo.github.io"))
+        assertEquals("bar.github.io", PublicSuffixList.registrableDomain("bar.github.io"))
+        assertTrue(
+            "私有段兄弟域必须不同（基域档负例的判据来源）",
+            PublicSuffixList.registrableDomain("foo.github.io") !=
+                PublicSuffixList.registrableDomain("bar.github.io")
+        )
+    }
+
+    @Test
+    fun `可注册域取值_不可注册与异常输入返回空`() {
+        // 公共后缀本身 / 单标签 / 空白 ⇒ null（fail-closed，与 isRegistrableDomain 同口径）
+        assertEquals(null, PublicSuffixList.registrableDomain("com"))
+        assertEquals(null, PublicSuffixList.registrableDomain("co.uk"))
+        assertEquals(null, PublicSuffixList.registrableDomain("localhost"))
+        assertEquals(null, PublicSuffixList.registrableDomain(""))
+        assertEquals(null, PublicSuffixList.registrableDomain("   "))
+        // IP 字面量 ⇒ null（与 isRegistrableDomain 的历史放行口径**刻意不同**——
+        // 同站比较下 192.168.1.1 与 192.168.1.2 的「末段剥离相等」绝不构成同站）
+        assertEquals(null, PublicSuffixList.registrableDomain("192.168.1.1"))
+        assertEquals(null, PublicSuffixList.registrableDomain("127.0.0.1"))
+        assertEquals(null, PublicSuffixList.registrableDomain("::1"))
+    }
+
     // ===== 2. 按末标签懒加载的等价性（全量穷举） =====
 
     /**

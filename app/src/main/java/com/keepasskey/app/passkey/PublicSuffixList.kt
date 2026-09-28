@@ -99,6 +99,35 @@ object PublicSuffixList {
     }
 
     /**
+     * 取 host 的**可注册域**（eTLD+1；ISSUE-P3-377 AC①）。
+     *
+     * 例：`a.b.example.com` → `example.com`；`foo.github.io` → `foo.github.io`
+     * （私有段规则下 `github.io` 是公共后缀，两侧兄弟域**不同**可注册域——这正是
+     * 「按 eTLD+1 而非末两标签」计算的意义）。
+     *
+     * 与 [isRegistrableDomain] 的两处口径差异（本函数服务「同站比较」消费方）：
+     * - **IP 字面量返回 null**（IPv4 四段纯数字 / IPv6 含冒号）——既有判定对多标签 IP
+     *   「一律放行」是历史行为，但 IP 不是域名，`192.168.1.1` 与 `192.168.1.2` 的
+     *   「末段剥离」相等**绝不**构成同站（基域档负例的判据来源）；
+     * - 不可注册域（公共后缀本身 / 单标签）与资源不可用同样返回 null（fail-closed）。
+     *
+     * @return 可注册域主机名；不可判定时 null
+     */
+    fun registrableDomain(host: String): String? {
+        val normalized = normalizeHost(host) ?: return null
+        if (normalized.contains(':')) return null // IPv6 字面量
+        val labels = normalized.split('.')
+        if (labels.isEmpty() || labels.any { it.isEmpty() }) return null
+        if (labels.all { label -> label.all { it.isDigit() } }) return null // IPv4 字面量
+        val rules = rulesFor(labels[labels.size - 1]) ?: return null
+        val publicSuffix = findPublicSuffix(rules, labels) ?: labels[labels.size - 1] // 默认规则 "*"
+        val suffixSize = publicSuffix.split('.').size
+        if (labels.size <= suffixSize) return null
+        // 可注册域 = 公共后缀**之上一个标签** + 后缀本身 ⇒ 取末尾 suffixSize+1 段
+        return labels.takeLast(suffixSize + 1).joinToString(".")
+    }
+
+    /**
      * 取某末标签对应的规则桶（必要时构建；按末标签缓存）。
      *
      * 返回 `null` 仅表示**资源不可用**（fail-closed），不表示「无规则」——无规则时返回空桶，

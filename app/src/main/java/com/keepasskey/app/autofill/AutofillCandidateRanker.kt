@@ -2,6 +2,7 @@ package com.keepasskey.app.autofill
 
 import com.keepasskey.app.data.repository.RealVaultRepository
 import com.keepasskey.app.passkey.DomainMatcher
+import com.keepasskey.app.passkey.PublicSuffixList
 import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.model.PasskeyData
 
@@ -17,13 +18,15 @@ import com.keepasskey.core.model.PasskeyData
  *   才参与放行（判定由调用方经 `packageDimensionAuthorized` 显式传入，见 [rank]）；
  * - 打分仅用于「同一批已匹配候选」的排序，分数高低不改变「是否可填充」这一事实。
  *
- * ISSUE-P3-372 AC④⑤ 新增两条**同站归一 / 同站后缀**的加性命中档（Monica
+ * ISSUE-P3-372 AC④⑤ + ISSUE-P3-377 新增三条**同站归一 / 同站后缀**的加性命中档（Monica
  * `BitwardenLikeAutofillMatcherNg` 子域/基域/应用名维度的吸收）：
  * - **去 www 归一**：条目主机名 `www.` 前缀剥离后与目标域相等 ⇒ 按 EXACT_DOMAIN 计
  *   （`www` 只是普通标签，剥离不可能造出跨域命中——与 `ISSUE-P3-339` 剔除 DNS 根点
  *   同属「两个归一器必须同口径」的归一化，而非模糊匹配）；
  * - **子域后缀**：条目主机名以 `.<目标域>` 结尾（条目在目标域之下）⇒ `SUBDOMAIN_OF_ORIGIN`
  *   ——子域受目标域所有者控制，标签边界严格（`evilgithub.com` 不命中 `github.com`）；
+ * - **基域**（ISSUE-P3-377）：同可注册域（eTLD+1 相等，兄弟子域）⇒ `SAME_BASE_DOMAIN`——
+ *   经 PSL 计算，私有段兄弟与 IP 字面量恒不命中；
  * - **应用名加成**：调用方 launcher label 与条目标题相似 ⇒ `APP_TITLE_MATCH` 加分。
  *   仅对**已通过严格匹配**（score > 0）的条目生效，绝不让纯标题相似的条目入选。
  *
@@ -49,6 +52,9 @@ object AutofillCandidateRanker {
         /** 条目域名是目标域的子域（条目在目标域之下，标签边界严格；ISSUE-P3-372 AC⑤） */
         SUBDOMAIN_OF_ORIGIN,
 
+        /** 条目与目标域同可注册域（eTLD+1 相等，如兄弟子域；ISSUE-P3-377 AC②） */
+        SAME_BASE_DOMAIN,
+
         /** 包名与域名同时命中 */
         PACKAGE_DOMAIN_COMBO,
 
@@ -68,7 +74,12 @@ object AutofillCandidateRanker {
     private const val SCORE_EXACT_PACKAGE = 130
     private const val SCORE_EXACT_DOMAIN = 140
     private const val SCORE_PARENT_DOMAIN = 120
-    private const val SCORE_SUBDOMAIN_OF_ORIGIN = 110
+
+    /** 子域档（ISSUE-P3-377 AC③：110 → 115，与 Monica `子域 115` 同值对齐） */
+    private const val SCORE_SUBDOMAIN_OF_ORIGIN = 115
+
+    /** 基域档（ISSUE-P3-377 AC②：与 Monica `基域 100` 同值——同 eTLD+1 兄弟子域） */
+    private const val SCORE_BASE_DOMAIN = 100
     private const val SCORE_PACKAGE_DOMAIN_COMBO = 30
     private const val SCORE_FAVORITE_BONUS = 5
 
@@ -238,9 +249,13 @@ object AutofillCandidateRanker {
     private data class SameSiteTier(val score: Int, val reason: MatchReason)
 
     /**
-     * ISSUE-P3-372 AC⑤：条目主机名的两档同站归一（调用前提：既有严格匹配已判未命中）。
-     * - 去 www 归一相等 ⇒ EXACT_DOMAIN；
-     * - 条目主机名以 `.<目标域>` 结尾（严格点号标签边界）⇒ SUBDOMAIN_OF_ORIGIN。
+     * ISSUE-P3-372 AC⑤ + ISSUE-P3-377 AC②：条目主机名的三档同站归一
+     * （调用前提：既有严格匹配已判未命中）。档位与 Monica 层级对齐：
+     * - 去 www 归一相等 ⇒ EXACT_DOMAIN（140）；
+     * - 条目主机名以 `.<目标域>` 结尾（严格点号标签边界）⇒ SUBDOMAIN_OF_ORIGIN（115）；
+     * - 同可注册域（eTLD+1 相等，兄弟子域）⇒ SAME_BASE_DOMAIN（100）——
+     *   经 PSL 计算，私有段兄弟（`foo.github.io` vs `bar.github.io`）自然不命中；
+     *   IP / 资源不可用 ⇒ registrableDomain 返回 null 恒不命中（fail-closed）。
      */
     private fun applySameSiteTiers(entryUrl: String, webDomain: String): SameSiteTier? {
         val entryHost = DomainMatcher.extractDomain(entryUrl)
@@ -253,6 +268,11 @@ object AutofillCandidateRanker {
         }
         if (entryHost.endsWith(".$webDomain")) {
             return SameSiteTier(SCORE_SUBDOMAIN_OF_ORIGIN, MatchReason.SUBDOMAIN_OF_ORIGIN)
+        }
+        val entryBase = PublicSuffixList.registrableDomain(entryHost)
+        val originBase = PublicSuffixList.registrableDomain(webDomain)
+        if (entryBase != null && entryBase == originBase) {
+            return SameSiteTier(SCORE_BASE_DOMAIN, MatchReason.SAME_BASE_DOMAIN)
         }
         return null
     }
