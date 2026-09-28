@@ -47,10 +47,12 @@ internal class SettingsExtendedPreferencesController(
     }
 
     // ========== 安全锁定规则 ==========
-    fun setLockWhenScreenOff(enabled: Boolean) {
-        updateExtended { it.copy(lockWhenScreenOff = enabled) }
-        persistLockWhenScreenOff(enabled)
-    }
+    /**
+     * ISSUE-P3-363：熄屏锁定单一真相源 = `UserSettings`（行为消费方 `AutoLockSessionGuard`
+     * 与 UI 回显同读 DataStore 侧）；原 `updateExtended` 双写已移除——ExtendedSettings 同名
+     * 字段与偏好键无对账机制，迁移用户曾出现「显示值 ≠ 熄屏行为」分叉。
+     */
+    fun setLockWhenScreenOff(enabled: Boolean) = persistLockWhenScreenOff(enabled)
 
     /** TASK-12 / TASK-08：wifiOnly 偏好持久化并令周期同步网络约束即时生效 */
     fun setWifiOnlySync(enabled: Boolean) {

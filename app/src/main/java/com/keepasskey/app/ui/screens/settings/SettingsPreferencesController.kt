@@ -66,11 +66,8 @@ internal class SettingsPreferencesController(
         )
     )
 
-    private val securityTimeoutStateFlow = MutableStateFlow(
-        SecurityTimeoutUiState(
-            autoLockTimeoutSeconds = 0
-        )
-    )
+    // ISSUE-P3-362：原 securityTimeoutStateFlow（初值 0、无仓库播种）已移除——
+    // 自动锁定超时的回显改由投影直读 userSettings 单一真相源（本类只保留仓库写通道）。
 
     /** 调试日志真实缓冲快照（随刷新/清除动作更新） */
     private val debugLogLinesFlow = MutableStateFlow(debugLogBuffer.snapshot())
@@ -78,7 +75,6 @@ internal class SettingsPreferencesController(
     // ISSUE-P2-228：原 `autofillState`（三条通道开关的纯内存回显）已删除——
     // 那三个开关改由 ExtendedSettingsStore 持久化，UI 状态在 SettingsUiStateProjection 直接取自 extState。
     val databaseConfigState: StateFlow<DatabaseConfigUiState> = databaseConfigStateFlow
-    val securityTimeoutState: StateFlow<SecurityTimeoutUiState> = securityTimeoutStateFlow
     val debugLogLines: StateFlow<List<String>> = debugLogLinesFlow
 
     // ========== TASK-44：自动填充黑名单（真实条目生命周期） ==========
@@ -323,10 +319,8 @@ internal class SettingsPreferencesController(
     // 三个开关现由 SettingsExtendedPreferencesController 持久化，并由两条凭据通道服务真实消费。
 
     // ========== 设备解锁与安全 ==========
+    /** ISSUE-P3-362：仓库直写（同 setUnlockThrottleEnabled 口径），回显经投影读 userSettings */
     fun setAutoLockTimeout(seconds: Int) {
-        securityTimeoutStateFlow.update {
-            it.copy(autoLockTimeoutSeconds = seconds)
-        }
         scope.launch {
             settingsRepository.setAutoLockTimeoutSeconds(seconds)
         }

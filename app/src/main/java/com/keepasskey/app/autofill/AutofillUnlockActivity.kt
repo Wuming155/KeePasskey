@@ -5,12 +5,19 @@ import android.os.Bundle
 import android.view.autofill.AutofillId
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
 import com.keepasskey.app.data.repository.SettingsRepository
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.security.ApplyObscuredTouchFilter
 import com.keepasskey.app.security.FlagSecureGuard
+import com.keepasskey.app.ui.localeFor
+import com.keepasskey.app.ui.localizedConfigurationOf
+import com.keepasskey.app.ui.localizedContextOf
 import com.keepasskey.app.ui.screens.unlock.UnlockScreen
 import com.keepasskey.core.log.AppLog
 import com.keepasskey.core.model.KdbxEntry
@@ -114,12 +121,26 @@ class AutofillUnlockActivity : FragmentActivity() {
             setContent {
                 // ISSUE-P2-09：Compose 侧遮挡触摸过滤（点击劫持防护）
                 ApplyObscuredTouchFilter()
-                UnlockScreen(
-                    currentTheme = settings.themeMode,
-                    onThemeToggle = { /* 自动填充解锁场景不提供主题切换 */ },
-                    onUnlockSuccess = { chainToPicker() },
-                    onNavigateToDatabasePicker = { /* 自动填充解锁场景不提供库切换导航 */ }
-                )
+                // ISSUE-P3-365 AC①：与主外壳同源的强制语言覆盖（复用 AppShellLocalization）——
+                // 本页不经 MainActivity，不覆盖则回落系统语言，与主界面语言分叉。
+                val targetLocale = remember(settings.appLanguage) { localeFor(settings.appLanguage) }
+                val localizedConfiguration = remember(targetLocale) {
+                    localizedConfigurationOf(resources.configuration, targetLocale)
+                }
+                val localizedContext = remember(targetLocale) {
+                    localizedContextOf(this@AutofillUnlockActivity, resources.configuration, targetLocale)
+                }
+                CompositionLocalProvider(
+                    LocalContext provides localizedContext,
+                    LocalConfiguration provides localizedConfiguration
+                ) {
+                    UnlockScreen(
+                        currentTheme = settings.themeMode,
+                        onThemeToggle = { /* 自动填充解锁场景不提供主题切换 */ },
+                        onUnlockSuccess = { chainToPicker() },
+                        onNavigateToDatabasePicker = { /* 自动填充解锁场景不提供库切换导航 */ }
+                    )
+                }
             }
         }
     }

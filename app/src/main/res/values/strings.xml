@@ -793,8 +793,11 @@
     <string name="sync_check_remote_sub">上传前先比对云端版本，避免覆盖他人修改</string>
     <!-- ISSUE-P3-272（PD-39）：「事务化写入」与「预加载远程数据库」假开关已移除。
          前者是不可关闭的数据安全不变量，后者无任何生产实现；其字符串键随开关一并删除。 -->
-    <string name="sync_wifi_only_title">仅 Wi-Fi 同步</string>
-    <string name="sync_wifi_only_sub">移动网络下暂停大文件同步以节省流量</string>
+    <!-- ISSUE-P3-361：wifiOnlySync 唯一行为消费点是 PeriodicSyncScheduler 的周期任务网络约束，
+         故文案如实限定为「定时后台同步」——手动 / 冷启动 / 解锁后自动同步不受此开关约束，
+         约束粒度是整周期任务而非「大文件」，不得作超范围承诺。 -->
+    <string name="sync_wifi_only_title">仅 Wi-Fi 定时同步</string>
+    <string name="sync_wifi_only_sub">定时后台同步仅在 Wi-Fi 下运行；手动同步、冷启动与解锁后自动同步不受此开关限制</string>
     <string name="sync_conflict_title">冲突解决策略</string>
     <string name="sync_conflict_current">当前策略：%1$s</string>
     <string name="sync_conflict_dialog_title">选择冲突解决策略</string>

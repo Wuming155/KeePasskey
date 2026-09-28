@@ -50,17 +50,14 @@
 > 2026-09-27 两条真机手测缺陷（`ISSUE-P2-341` / `ISSUE-P2-343`）分别收口于 §343 与 §344；
 > 更早的 P2 闭环流水见 `RESOLVED_LOG.md` §315 ~ §325。
 
-## P3 低危问题、特性接线与体验优化（11 项）
+## P3 低危问题、特性接线与体验优化（6 项）
 
-> **开放项 11 条**（这里只列**各条还欠什么**；已完成的实施细节留在条目正文与 commit 里，不重复登记）：
+> **开放项 6 条**（这里只列**各条还欠什么**；已完成的实施细节留在条目正文与 commit 里，不重复登记）：
 > ① `ISSUE-P3-339` —— **用户指示暂时搁置**（浏览器半环需外部域名与信任链资源）。
-> ②~⑥ `ISSUE-P3-361` ~ `ISSUE-P3-365` —— 2026-09-28 用户命题「全面排查存量假开关」的清点产物：
-> 严格假开关在两个设置模型（`UserSettings` 26 字段 / `ExtendedSettings` 41 字段）与其余 UI 开关中**仅 1 处**
-> （`autoReturnFromQuery`，已按批次 37 D3 禁用+标注，不再可拨动，不另立条）；以下五条均为排查中**新证实**的
-> 「消费面小于宣称面 / 回显分叉 / 覆盖面不足」类近似缺陷，逐条独立核实时间点与方式见各条目。
-> ⑦~⑪ `ISSUE-P3-366` ~ `ISSUE-P3-370` —— 2026-09-28 参考项目对照评估补登的五条 P3 小项
+> ②~⑥ `ISSUE-P3-366` ~ `ISSUE-P3-370` —— 2026-09-28 参考项目对照评估补登的五条 P3 小项
 > （自动锁后台时间戳持久化 / 写侧恒写 4.1 / 解析进度回调 / 通用占位符引擎 / getCheckKey 同型通道）；
 > 同次评估发现的三项能力差距已按用户裁决归位产品裁决表 `PD-53` ~ `PD-55`，属取舍不属缺陷。
+> 原 ②~⑥ `ISSUE-P3-361` ~ `ISSUE-P3-365`（假开关清点五条）已于 §350 整批闭环归档。
 > 2026-09-28 深度交互审查新增的 `ISSUE-P3-358` ~ `ISSUE-P3-360` 三条已同批闭环于
 > [`RESOLVED_LOG.md`](RESOLVED_LOG.md) §349。
 > `ISSUE-P3-345`（无匹配「就地新建并用于本次填充」）收口于 `RESOLVED_LOG.md` §347：主体整改落
@@ -110,100 +107,6 @@
 - **载体顺带承接**：`ISSUE-P3-337` 的 AC⑧(b)（对真实 RP 完成 GetAssertion）与未决 6 计数器跳变实测出口。
 - **关联**：`ISSUE-P3-337` / `PD-32`、`PD-33`（DAL 与 caller origin 归因）/ commits
   `db332b78`、`8e2a7700`、`fa283ea2`、`0199bc69`、`dc741803`（完整核实与读数）。
-
----
-
-### ISSUE-P3-361：「仅 Wi-Fi 同步」开关消费面小于其文案承诺（只约束周期后台同步）
-
-- **核实时间点与方式（2026-09-28）**：全仓 `wifiOnly|UNMETERED|wifi_only` grep 亲证——唯一行为消费点为
-  `app/src/main/java/com/keepasskey/app/sync/PeriodicSyncScheduler.kt:52`（WorkManager 周期任务网络约束
-  UNMETERED / CONNECTED）；手动「立即同步」`SettingsSyncController.triggerSync`、冷启动
-  `SettingsColdStartSyncGate`、解锁后自动同步 `VaultListViewModel.kt:198-201` **均不读该值**。
-  文案 `values/strings.xml:796-797`（`sync_wifi_only_title` / `sync_wifi_only_sub`
-  「移动网络下暂停大文件同步以节省流量」）。守卫 `CloudSyncSwitchWiringTest.kt:151-158` 只断言存在性，
-  未断言覆盖面。三路并行清点（`UserSettings` / `ExtendedSettings` / 其余 UI 开关）交叉得出。
-- **背景与根因**：开关持久化齐备（`ExtendedSettingsStore.kt:316/383` 独立键）且真实接线（`PD-39` 明确
-  「`wifiOnlySync` 真实接线不动」），但**消费面只有周期后台一路**——移动数据下用户手动同步 / 冷启动 /
-  解锁自动同步照常执行，文案承诺的「移动网络下暂停」不成立；且约束粒度是「整周期任务」而非「大文件」。
-  属 `ISSUE-P3-65` 口径的「消费面小于宣称面」，非严格假开关。
-- **验收标准**：AC① 二选一并留痕——(a) **接线**：手动 / 冷启动 / 解锁自动同步入口合流同一 Wi-Fi 判据，
-  或 (b) **改文案**：如实限定为「仅约束定时后台同步」，中英两侧成对；AC② 若接线，必须与 `wifiOnlySync`
-  单一判据合流，**不得**新增第二开关或复活 SSID 名单（`PD-39` 边界）；AC③ 守卫从「存在性」升级为
-  「覆盖面」断言（消费点计数或入口合取断言，参考 `AutofillChannelSwitchWiringTest` 口径）。
-
-### ISSUE-P3-362：安全设置「自动锁定超时」冷启动回显恒为「立即」，与真实生效值分叉
-
-- **核实时间点与方式（2026-09-28）**：亲证 `SettingsPreferencesController.kt:69-73`
-  `securityTimeoutStateFlow` 初值硬编码 `autoLockTimeoutSeconds = 0`（= 立即）；全仓
-  `securityTimeoutStateFlow|SecurityTimeoutUiState(|setAutoLockTimeout` grep 确认**唯一写入者**是
-  `setAutoLockTimeout`（`:326-333`，用户点选才写），**无任何从 `settingsRepository` 播种的代码**；
-  投影 `SettingsUiStateProjection.kt:177` 只读 `secState`；行为侧 `AutoLockManager.kt:145` /
-  `AutoLockSessionGuard.kt:70-76` 读仓库真值（持久化默认 60 秒）。显示点
-  `SecuritySettingsScreen.kt:210` `selectedValue = uiState.autoLockTimeoutSeconds`。
-  两路独立代理交叉证实 + 本人逐行复核。
-- **背景与根因**：回显流与行为流不同源——冷启动后进安全设置页，选中 chip 恒显示「立即」（0），
-  而实际生效的是持久化的 60 秒（或用户上次选择），直到用户再次点选才对齐。用户会误判已设「立即锁定」。
-  写侧 / 持久化 / 行为消费全部真实，属**回显漂移**而非假开关。
-- **验收标准**：AC① 回显单一真相源——init 时从 `settingsRepository` 播种 `securityTimeoutStateFlow`，
-  或投影改读 `userSettings.autoLockTimeoutSeconds`（二选一，禁双源并行）；AC② 拨动即写仓库且回显同步，
-  冷启动回显 == 仓库值；AC③ 新增用例锁定「冷启动回显 == 持久化值」（含默认 60 与自定义档、-1 永不档）；
-  AC④ **不得**改动行为侧默认 60 与 `AutoLockTimeoutPolicy` 语义。
-
-### ISSUE-P3-363：`lockWhenScreenOff` 双存储（DataStore 镜像 + ExtendedSettings 键）无对账，迁移用户回显可能≠行为
-
-- **核实时间点与方式（2026-09-28）**：亲证 `SettingsExtendedPreferencesController.kt:50-53`
-  `setLockWhenScreenOff` 双写（`updateExtended` → SharedPreferences `keepasskey_extended_settings` +
-  `persistLockWhenScreenOff` → DataStore）；行为消费只读 DataStore 侧（`AutoLockSessionGuard.kt:47`
-  读 `UserSettings.lockWhenScreenOff`，键 `RealSettingsRepository.kt:240`）；UI 回显只读 ExtendedSettings 侧
-  （`SettingsUiStateProjection.kt:179` `extState.lockWhenScreenOff`）。DataStore 侧有 legacy
-  `keepasskey_settings` 一次性迁移（`RealSettingsRepository.kt:63-85`），ExtendedSettings 是独立文件
-  （`ExtendedSettingsStore.kt:324`）——两键**无任何对账机制**。两路独立代理交叉证实。
-- **背景与根因**：正常拨动路径双写一致；但迁移用户的 DataStore 可能是旧值（如 false），而 ExtendedSettings
-  键缺失回落默认 true ⇒ **设置页显示值 ≠ 实际熄屏行为**，且在用户首次拨动前持续分叉。属同名偏好双持久化的
-  工程债（`lockWhenScreenOff` 镜像双写形态，`ExtendedSettings` 副本本身无行为消费方）。
-- **验收标准**：AC① 选定单一真相源并对账——冷启动/迁移时以一方播种另一方，或删除冗余键改单源
-  （回显与行为读同一处）；AC② 新增用例锁定「两键同值」（含 legacy 迁移路径与键缺失缺省路径，
-  参考 `CHANNEL_SWITCH_DEFAULT` 数据类默认 ⇄ 单键缺省同值用例口径）；AC③ **不得**放松熄屏锁定语义
-  （`AutoLockSessionGuard` 判定条件一行不改）。
-
-### ISSUE-P3-364：触觉反馈开关真实但覆盖面仅 11 触点，高频动作永无触感（用户报「开了没用」）
-
-- **核实时间点与方式（2026-09-28，用户命题本体）**：接线链亲证**完整非假开关**——
-  `KeePasskeyApp.kt:93` `HapticsEnabled provides appSettings.hapticFeedbackEnabled` 注入 →
-  `ui/components/Haptics.kt:17,27-32` `rememberMaybeHaptic` 门控 → 全仓 `.performHapticFeedback(` 仅
-  `Haptics.kt:32` 一处、`LocalHapticFeedback.current` 仅 `:28` 一处（**无裸调**，§349 `ISSUE-P3-358` 收口
-  无回归）；开关行 `ThemeSettingsListSections.kt:101-106` → `SettingsUiStateProjection.kt:201` 真实回读。
-  **覆盖面**：现有 11 处触点（复制密码 ×3、复制用户名 ×2、密码明文切换、重新生成、滑杆、删除确认 ×4）；
-  零命中包亲证——`ui/screens/settings/`、`unlock/`、`edit/`、`authenticator/` 整包 grep
-  `rememberMaybeHaptic|performHapticFeedback` = 0；高频复制动作**无触感**：TOTP 徽标复制
-  `VaultEntryRowLayouts.kt:343`、详情页复制 TOTP `EntryDetailCards.kt:175`、认证器复制
-  `AuthenticatorScreen.kt:198`、生成器**复制**按钮 `GeneratorDisplayCard.kt:113`（同组件「重新生成」有）。
-  另证：`EntryDetailCards.kt:35-36` 残留两个未使用 haptic import（死导入非裸调）。
-  权限口径：2026-09-28 经 Google 开发者文档核实 `performHapticFeedback` **不需要** `VIBRATE` 权限
-  （Manifest 无该权限不构成失效根因）；系统侧触感强度 / 触感反馈设置需真机复核。
-- **背景与根因**：用户开「触觉反馈」后期望复制等操作有震动，但覆盖面只到 7 个文件 11 个触点；
-  TOTP / 验证码复制是最高频动作却无触感 ⇒ 「开了没用」的体感来源。开关本体不是假开关，属
-  **部分生效 / 覆盖面不足**。
-- **验收标准**：AC① 至少补齐用户可感知的高频动作：TOTP / 验证码复制（列表徽标 + 详情页 + 认证器页）、
-  生成器复制、详情页「打开网址」chip 与 TotpCard 三按钮（与同排已有点对齐）；AC② 所有新增触点一律经
-  `rememberMaybeHaptic` 收口，**禁止**裸调 `LocalHapticFeedback`；AC③ 清除 `EntryDetailCards.kt:35-36`
-  死 import；AC④ 不得给纯导航 / 装饰性点击滥加触感（沿用 §349 的克制原则：确认类 Reject、复制类 Confirm、
-  轻揭示 SegmentTick）；AC⑤ 若真机复测开关开合仍无任何震动，另立条排查系统触感设置 / 设备能力，
-  不得在本条内以「接线完成」冒充「用户可感知」。
-
-### ISSUE-P3-365：`appLanguage` 强制语言不覆盖 AutofillUnlockActivity / CredentialUnlockActivity 两条独立入口
-
-- **核实时间点与方式（2026-09-28）**：对照主外壳应用链 `KeePasskeyApp.kt:76-93` +
-  `AppShellLocalization.kt:15-36`（`localeFor` → `createConfigurationContext`）；对两文件全文 grep
-  `Locale|appLanguage|createConfigurationContext|configurationWithLocale` **0 命中**（`rg -c` 无输出 =
-  零匹配）。行为消费本身真实（`themeMode` 等其余设置在两 Activity 均读），仅语言作用域缺口。
-- **背景与根因**：用户强制选择「简体中文 / English」后，从自动填充解锁或 Passkey 独立解锁 Activity
-  进入时仍走系统语言，与主界面语言不一致。属作用域缺口，是否算缺陷可由产品口径确认
-  （若裁定「这两屏跟随系统可接受」则转如实标注并登记 `PD-*`）。
-- **验收标准**：AC① 二选一——(a) 两 Activity 应用与主外壳**同源** Locale 覆盖（复用
-  `AppShellLocalization` 不得复制粘贴第二份实现），或 (b) 裁定维持系统语言并如实标注 + 登记 `PD-*`；
-  AC② 若 (a)，新增用例锁定「两 Activity 的配置上下文 == 主外壳同语言配置」；AC③ 不得顺带改动
-  两 Activity 的其余设置读取链。
 
 ### ISSUE-P3-366：自动锁后台时间戳不持久化（进程重建后超时判定丢失）；且无长任务挂锁机制
 

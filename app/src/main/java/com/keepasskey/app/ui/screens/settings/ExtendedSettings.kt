@@ -24,7 +24,9 @@ data class ExtendedSettings(
     val webdavChunkSizeMb: Int = 10,
 
     // 安全锁定规则与环境
-    val lockWhenScreenOff: Boolean = true,
+    // ISSUE-P3-363：lockWhenScreenOff 已从本模型移除——行为消费方（AutoLockSessionGuard）与
+    // UI 回显现同读 UserSettings/DataStore 单一真相源；原先的同名偏好键因双存储无对账曾出现
+    // 迁移用户「显示值 ≠ 熄屏行为」的分叉，按「删除冗余键改单源」处置。
     val lockWhenNavigateBack: Boolean = false,
     val clearPasswordOnLeave: Boolean = false,
     val rememberKeyFileLocation: Boolean = true,

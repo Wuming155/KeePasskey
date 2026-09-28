@@ -33,9 +33,13 @@ class OneTapInteractionWiringTest {
         val copyCoordinator = stripComments(readSource(DETAIL_COPY_COORDINATOR))
         val coordinatorBody = functionBody(copyCoordinator, "fun copyTotpCode()")
 
+        // ISSUE-P3-364：复制按钮的 onClick 现经 rememberMaybeHaptic 触感包装后再调复制回调——
+        // 接线判据由「字面直连」放宽为「直连 或 恰好一处 onCopyTotp() 调用」，意图不变：
+        // 点击必须真的调到复制回调（0 = 断线，>1 = 出现未评估的第二调用点需重评）
+        val copyInvocations = cards.split("onCopyTotp()").size - 1
         assertTrue(
-            "TOTP 复制按钮必须直接调用复制回调（onClick = onCopyTotp），实际未接线",
-            cards.contains("IconButton(onClick = onCopyTotp)")
+            "TOTP 复制按钮必须调用复制回调（直连 onClick = onCopyTotp 或触感包装后调用），实际未接线",
+            cards.contains("IconButton(onClick = onCopyTotp)") || copyInvocations == 1
         )
         assertFalse(
             "历史缺陷形态不得回归：复制按钮只弹「已复制」提示而不写剪贴板",

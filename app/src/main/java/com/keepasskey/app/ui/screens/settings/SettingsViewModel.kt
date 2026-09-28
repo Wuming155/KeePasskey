@@ -226,7 +226,6 @@ class SettingsViewModel @Inject constructor(
             databaseConfigState = preferences.databaseConfigState,
             // ISSUE-P2-212：生物识别开关的验证中/一次性反馈状态
             biometricToggleState = biometricToggleState,
-            securityTimeoutState = preferences.securityTimeoutState,
             extendedSettings = extendedPreferences.settings,
             debugLogLines = preferences.debugLogLines,
             // ISSUE-P3-20：子库已挂载计数（替代原先硬编码的 0）

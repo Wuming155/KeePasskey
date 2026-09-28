@@ -781,8 +781,12 @@
     <!-- ISSUE-P3-272 (PD-39): the "Transactional writes" and "Preload remote database"
          fake switches were removed. The former is a non-disableable data-safety invariant,
          the latter had no production implementation. Their string keys went with them. -->
-    <string name="sync_wifi_only_title">Sync on Wi-Fi only</string>
-    <string name="sync_wifi_only_sub">Pause large transfers on mobile data</string>
+    <!-- ISSUE-P3-361: wifiOnlySync's only behavioral consumer is PeriodicSyncScheduler's
+         periodic task network constraint, so the copy is scoped to scheduled background
+         sync only — manual / cold-start / post-unlock auto sync are not gated by this
+         switch, and the granularity is the whole periodic task, not "large files". -->
+    <string name="sync_wifi_only_title">Wi-Fi-only scheduled sync</string>
+    <string name="sync_wifi_only_sub">Scheduled background sync runs on Wi-Fi only; manual sync, cold-start sync, and post-unlock auto sync are not limited by this switch</string>
     <string name="sync_conflict_title">Conflict resolution</string>
     <string name="sync_conflict_current">Current policy: %1$s</string>
     <string name="sync_conflict_dialog_title">Choose conflict resolution policy</string>

@@ -82,7 +82,7 @@ class ExtendedSettingsStore @Inject constructor(
             webdavChunkSizeMb = p.getInt(K_WEBDAV_CHUNK_SIZE_MB, defaults.webdavChunkSizeMb),
 
             // 安全锁定规则与环境
-            lockWhenScreenOff = p.getBoolean(K_LOCK_WHEN_SCREEN_OFF, defaults.lockWhenScreenOff),
+            // ISSUE-P3-363：lockWhenScreenOff 键已随字段移除（单源 UserSettings/DataStore）
             lockWhenNavigateBack = p.getBoolean(K_LOCK_WHEN_NAVIGATE_BACK, defaults.lockWhenNavigateBack),
             clearPasswordOnLeave = p.getBoolean(K_CLEAR_PASSWORD_ON_LEAVE, defaults.clearPasswordOnLeave),
             rememberKeyFileLocation = p.getBoolean(
@@ -169,7 +169,6 @@ class ExtendedSettingsStore @Inject constructor(
             .putString(K_CONFLICT_RESOLUTION, settings.conflictResolution.name)
             .putBoolean(K_WEBDAV_CHUNKED_UPLOAD, settings.webdavChunkedUpload)
             .putInt(K_WEBDAV_CHUNK_SIZE_MB, settings.webdavChunkSizeMb)
-            .putBoolean(K_LOCK_WHEN_SCREEN_OFF, settings.lockWhenScreenOff)
             .putBoolean(K_LOCK_WHEN_NAVIGATE_BACK, settings.lockWhenNavigateBack)
             .putBoolean(K_CLEAR_PASSWORD_ON_LEAVE, settings.clearPasswordOnLeave)
             .putBoolean(K_REMEMBER_KEY_FILE_LOCATION, settings.rememberKeyFileLocation)
@@ -333,7 +332,6 @@ class ExtendedSettingsStore @Inject constructor(
         const val K_CONFLICT_RESOLUTION = "conflict_resolution"
         const val K_WEBDAV_CHUNKED_UPLOAD = "webdav_chunked_upload"
         const val K_WEBDAV_CHUNK_SIZE_MB = "webdav_chunk_size_mb"
-        const val K_LOCK_WHEN_SCREEN_OFF = "lock_when_screen_off"
         const val K_LOCK_WHEN_NAVIGATE_BACK = "lock_when_navigate_back"
         const val K_CLEAR_PASSWORD_ON_LEAVE = "clear_password_on_leave"
         const val K_REMEMBER_KEY_FILE_LOCATION = "remember_key_file_location"

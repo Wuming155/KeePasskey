@@ -181,7 +181,11 @@ internal fun QuickActionRow(
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         AssistChip(
-            onClick = { openUrl(entry.url) },
+            // ISSUE-P3-364 AC①：打开网址属上下文动作，与同排两个复制 chip 对齐补触感
+            onClick = {
+                maybeHaptic(HapticFeedbackType.ContextClick)
+                openUrl(entry.url)
+            },
             label = { Text(stringResource(R.string.detail_btn_open_url)) },
             leadingIcon = {
                 Icon(

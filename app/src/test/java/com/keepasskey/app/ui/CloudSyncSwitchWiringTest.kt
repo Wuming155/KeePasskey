@@ -222,6 +222,79 @@ class CloudSyncSwitchWiringTest {
         )
     }
 
+    // ========== ISSUE-P3-361 AC①③：仅 Wi-Fi 开关文案覆盖面与消费面 ==========
+
+    @Test
+    fun `仅 Wi-Fi 开关文案两侧限定定时后台同步作用域且旧过度承诺零残留`() {
+        val zh = readSource(ZH_STRINGS)
+        val en = readSource(EN_STRINGS)
+        // 逐条按 <string> 键取值（键改名即 stringValue 断言红），防空转：两侧必须真取到值
+        val zhTitle = stringValue(zh, "sync_wifi_only_title")
+        val zhSub = stringValue(zh, "sync_wifi_only_sub")
+        val enTitle = stringValue(en, "sync_wifi_only_title")
+        val enSub = stringValue(en, "sync_wifi_only_sub")
+        listOf(
+            "中文标题" to zhTitle, "中文副标题" to zhSub,
+            "英文标题" to enTitle, "英文副标题" to enSub
+        ).forEach { (label, value) ->
+            assertTrue("$label 未取到值（解析失败）", value.isNotBlank())
+        }
+
+        // ① 作用域限定：中英两侧新文案必须点名「定时后台同步」，且保留不受约束入口的排除声明
+        assertTrue("中文标题须限定为定时同步", zhTitle.contains("定时"))
+        assertTrue("中文副标题须限定「定时后台同步」作用域", zhSub.contains("定时后台同步"))
+        assertTrue("中文副标题须声明不受约束的入口（排除声明）", zhSub.contains("不受此开关限制"))
+        assertTrue(
+            "英文标题须限定为 scheduled sync",
+            enTitle.contains("scheduled", ignoreCase = true)
+        )
+        assertTrue(
+            "英文副标题须限定 scheduled background sync 作用域",
+            enSub.contains("scheduled background sync", ignoreCase = true)
+        )
+        assertTrue(
+            "英文副标题须声明不受约束的入口（排除声明）",
+            enSub.contains("not limited by this switch", ignoreCase = true)
+        )
+
+        // ② 旧的过度承诺短语整文件零残留（含注释——超范围承诺不得以任何形式留在串资源里）
+        listOf("中文" to zh, "英文" to en).forEach { (label, xml) ->
+            assertFalse(
+                "$label strings.xml 仍残留旧过度承诺「暂停大文件同步」",
+                xml.contains("暂停大文件同步")
+            )
+            assertFalse(
+                "$label strings.xml 仍残留旧过度承诺「移动网络下暂停」",
+                xml.contains("移动网络下暂停")
+            )
+            assertFalse(
+                "$label strings.xml 仍残留旧过度承诺英文对应短语",
+                xml.contains("Pause large transfers", ignoreCase = true)
+            )
+        }
+    }
+
+    @Test
+    fun `wifiOnly 行为消费点在周期调度器且计数为一`() {
+        // 静态消费点计数（沿用 AutofillChannelSwitchWiringTest 口径）：剥注释后的行为判定，
+        // 0 = 开关重新悬空（文案承诺再度无处兑现），>1 = 出现第二消费点、文案覆盖面声明需重评
+        val scheduler = stripCommentsOnly(readSource(PERIODIC_SCHEDULER))
+        assertEquals(
+            "PeriodicSyncScheduler 对 wifiOnly 的行为消费点必须恰好 1 处",
+            1,
+            scheduler.countInvocationsOf("if (wifiOnly)")
+        )
+        // 消费必须读持久化开关真值而非硬编码，且映射为 UNMETERED 网络约束（否则计数命中但语义不符文案）
+        assertTrue(
+            "消费点必须读取持久化开关 loadWifiOnlySync()（否则文案承诺的开关不受用户控制）",
+            scheduler.contains("loadWifiOnlySync()")
+        )
+        assertTrue(
+            "wifiOnly 必须映射为 UNMETERED 网络约束（否则「仅 Wi-Fi」文案不成立）",
+            scheduler.contains("NetworkType.UNMETERED")
+        )
+    }
+
     // ========== helpers ==========
 
     /** app/src/main 下全部 `.kt` / `.xml`（唯一生产可运行面） */
@@ -302,6 +375,9 @@ class CloudSyncSwitchWiringTest {
             "app/src/main/java/com/keepasskey/app/ui/screens/vault/VaultListViewModel.kt"
         const val ZH_STRINGS = "app/src/main/res/values/strings.xml"
         const val EN_STRINGS = "app/src/main/res/values-en/strings.xml"
+        /** ISSUE-P3-361：wifiOnlySync 全仓唯一行为消费点（周期任务网络约束） */
+        const val PERIODIC_SCHEDULER =
+            "app/src/main/java/com/keepasskey/app/sync/PeriodicSyncScheduler.kt"
 
         /**
          * `ISSUE-P3-272` 移除的三项假开关的全部可辨识符号（字段名 / 偏好键 / 字符串键 /

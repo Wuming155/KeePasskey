@@ -49,6 +49,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
@@ -64,6 +65,7 @@ import com.keepasskey.app.ui.AppSnackbarEvent
 import com.keepasskey.app.R
 import com.keepasskey.app.security.ApplyObscuredTouchFilter
 import com.keepasskey.app.ui.components.getVaultIcon
+import com.keepasskey.app.ui.components.rememberMaybeHaptic
 import com.keepasskey.app.ui.theme.CapsuleShape
 import com.keepasskey.app.ui.theme.MonospaceTotpStyle
 import com.keepasskey.core.otp.OtpEngine
@@ -97,6 +99,8 @@ fun AuthenticatorScreen(
     // P0 整改：不再在 Composable 内直连 ClipboardManager（该路径缺失定时擦除，
     // TOTP 验证码会永久滞留剪贴板）；统一交给 ViewModel → ClipboardSecurityManager。
     val copyCode: (String) -> Unit = viewModel::copyTotpCode
+    // ISSUE-P3-364 AC①：验证码复制是本页最高频动作，此前零触感（「开了没用」主诉点之一）
+    val maybeHaptic = rememberMaybeHaptic()
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -194,8 +198,14 @@ fun AuthenticatorScreen(
                     ),
                     code = code,
                     onClick = { onEntryClick(item.entryId) },
-                    // 复制「当前所见之码」：窄通道已出新周期之码时，必须复制新码而非投影兜底码
-                    onCopy = { code?.let(copyCode) },
+                    // 复制「当前所见之码」：窄通道已出新周期之码时，必须复制新码而非投影兜底码；
+                    // 触感只随真实复制触发（码为 null 时不震动）
+                    onCopy = {
+                        code?.let {
+                            maybeHaptic(HapticFeedbackType.Confirm)
+                            copyCode(it)
+                        }
+                    },
                     // ISSUE-P3-49：HOTP 取码需推进计数器（复制当前码会重复使用同一计数器）
                     onAdvanceHotp = { viewModel.advanceHotpAndCopy(item.entryId) },
                     // ISSUE-P3-261 AC⑧：TOTP 卡片的增删 / 筛选后重排走同族动效

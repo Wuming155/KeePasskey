@@ -33,7 +33,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -42,6 +41,7 @@ import com.keepasskey.app.R
 import com.keepasskey.app.ui.components.BentoCard
 import com.keepasskey.app.ui.components.PasswordStrengthBar
 import com.keepasskey.app.ui.components.TotpMiniGauge
+import com.keepasskey.app.ui.components.rememberMaybeHaptic
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.model.UiVaultEntry
 import com.keepasskey.app.ui.theme.LocalSecurityColors
@@ -110,6 +110,8 @@ internal fun TotpCard(
     // ISSUE-P3-184：TOTP 取码（复制当前有效码；不推进任何状态，也不经本组件弹提示）
     onCopyTotp: () -> Unit = {}
 ) {
+    // ISSUE-P3-364 AC①②：TotpCard 三按钮此前全无触感；复制/推进为确认类、可见性为轻揭示类
+    val maybeHaptic = rememberMaybeHaptic()
     BentoCard(
         modifier = Modifier.fillMaxWidth(),
         backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow
@@ -154,7 +156,10 @@ internal fun TotpCard(
                     // ISSUE-P3-49：HOTP 由持久化计数器决定，无时间倒计时——以「取下一个码」
                     // 显式推进计数器（对齐 KeePassXC）；不提供「复制当前码」入口，
                     // 因为复制而不推进会让同一计数器被重复使用
-                    IconButton(onClick = onAdvanceHotp) {
+                    IconButton(onClick = {
+                        maybeHaptic(HapticFeedbackType.Confirm)
+                        onAdvanceHotp()
+                    }) {
                         Icon(
                             imageVector = Icons.Default.Autorenew,
                             contentDescription = stringResource(R.string.cd_hotp_advance),
@@ -172,7 +177,10 @@ internal fun TotpCard(
                     Spacer(modifier = Modifier.width(12.dp))
                     // ISSUE-P3-184：此前只弹「已复制」提示而不写剪贴板（谎报成功）——
                     // 现改为调用真实复制通道，成功/失败的文案一律由 ViewModel 经 userMessage 上浮
-                    IconButton(onClick = onCopyTotp) {
+                    IconButton(onClick = {
+                        maybeHaptic(HapticFeedbackType.Confirm)
+                        onCopyTotp()
+                    }) {
                         Icon(
                             imageVector = Icons.Default.ContentCopy,
                             contentDescription = stringResource(R.string.cd_copy_totp),
@@ -181,7 +189,11 @@ internal fun TotpCard(
                         )
                     }
                 }
-                IconButton(onClick = onToggleVisibility) {
+                // 与密码明文揭示同为轻揭示触感（SegmentTick），见 EntryDetailCardSections 的既有口径
+                IconButton(onClick = {
+                    maybeHaptic(HapticFeedbackType.SegmentTick)
+                    onToggleVisibility()
+                }) {
                     Icon(
                         imageVector = if (uiState.isTotpVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
                         contentDescription = stringResource(R.string.cd_toggle_password_visibility),

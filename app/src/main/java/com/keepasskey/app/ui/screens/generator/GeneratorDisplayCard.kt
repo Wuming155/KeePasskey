@@ -110,7 +110,11 @@ internal fun GeneratorDisplayCard(
                 Text(stringResource(R.string.cd_regenerate), fontWeight = FontWeight.SemiBold)
             }
             OutlinedButton(
-                onClick = onCopy,
+                // ISSUE-P3-364 AC①：同组件「重新生成」有触感而「复制」没有——补齐对齐
+                onClick = {
+                    maybeHaptic(HapticFeedbackType.Confirm)
+                    onCopy()
+                },
                 modifier = Modifier.fillMaxWidth().height(48.dp),
                 shape = CapsuleShape
             ) {

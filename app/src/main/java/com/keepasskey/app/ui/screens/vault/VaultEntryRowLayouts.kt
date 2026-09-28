@@ -334,13 +334,20 @@ private fun EntryTotpBadge(
         periodSeconds = period
     )
     val copyLabel = stringResource(R.string.cd_copy_totp)
+    val maybeHaptic = rememberMaybeHaptic()
     Row(
         verticalAlignment = Alignment.CenterVertically,
+        // ISSUE-P3-364 AC①：复制验证码是列表最高频动作，此前无触感（「开了没用」体感来源）；
+        // 触感只挂非空分支——HOTP 无点击入口，自然不会震动
         modifier = if (onCopyCode != null) {
+            val copyCode = onCopyCode
             Modifier
                 .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
                 .clip(RoundedCornerShape(6.dp))
-                .clickable(onClickLabel = copyLabel, role = Role.Button, onClick = onCopyCode)
+                .clickable(onClickLabel = copyLabel, role = Role.Button) {
+                    maybeHaptic(HapticFeedbackType.Confirm)
+                    copyCode()
+                }
         } else {
             Modifier
         }

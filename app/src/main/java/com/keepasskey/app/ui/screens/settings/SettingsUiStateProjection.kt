@@ -23,11 +23,11 @@ import kotlinx.coroutines.flow.stateIn
 /**
  * 组装设置页 [SettingsUiState] 状态流（原 `SettingsViewModel.uiState` 的 combine 编排逐字迁移）。
  *
- * 十路输入流收拢为 [SettingsUiStateFlows]（§284 摘除 `LongParameterList` 压制；
- * ISSUE-P2-354 AC③ 增第十路）；
- * combine 仍以 `Map`/`Triple` 元组嵌套避开重载上限，行为零变化。
+ * 九路输入流收拢为 [SettingsUiStateFlows]（§284 摘除 `LongParameterList` 压制；
+ * ISSUE-P3-362 移除原第十路 `securityTimeoutState`——超时回显改读 `userSettings` 单一真相源）；
+ * combine 仍以 `Pair` 元组嵌套避开重载上限。
  */
-/** 十路输入流快照（§284 参数对象化；仅承载引用，不产生新订阅；P2-354 增第十路） */
+/** 九路输入流快照（§284 参数对象化；仅承载引用，不产生新订阅；P3-362 收敛为九路） */
 internal data class SettingsUiStateFlows(
     val userSettings: Flow<UserSettings>,
     val syncState: Flow<SettingsSyncController.SyncUiState>,
@@ -35,7 +35,6 @@ internal data class SettingsUiStateFlows(
     val databaseConfigState: Flow<DatabaseConfigUiState>,
     // ISSUE-P2-212：生物识别开关的「验证中 / 一次性反馈」局部状态（与持久化偏好正交）
     val biometricToggleState: Flow<BiometricToggleUiState>,
-    val securityTimeoutState: Flow<SecurityTimeoutUiState>,
     val extendedSettings: Flow<ExtendedSettings>,
     val debugLogLines: Flow<List<String>>,
     val childDatabaseCount: Flow<Int>,
@@ -56,17 +55,17 @@ internal fun settingsUiStateFlow(
         Pair(db, toggle)
     },
     combine(
-        combine(flows.securityTimeoutState, flows.extendedSettings, flows.debugLogLines) { sec, ext, logs ->
-            Triple(sec, ext, logs)
+        combine(flows.extendedSettings, flows.debugLogLines) { ext, logs ->
+            Pair(ext, logs)
         },
         combine(flows.childDatabaseCount, flows.masterKeyChangeState) { mounted, masterKey ->
             Pair(mounted, masterKey)
         }
-    ) { securityState, taskExtra ->
-        Pair(securityState, taskExtra)
+    ) { settingsExtra, taskExtra ->
+        Pair(settingsExtra, taskExtra)
     }
-) { settings, sync, health, (db, biometricToggle), (securityState, taskExtra) ->
-    val (secState, extState, logs) = securityState
+) { settings, sync, health, (db, biometricToggle), (settingsExtra, taskExtra) ->
+    val (extState, logs) = settingsExtra
     val (mounted, masterKeyTask) = taskExtra
     buildSettingsUiState(
         userSettings = settings,
@@ -74,7 +73,6 @@ internal fun settingsUiStateFlow(
         healthState = health,
         dbState = db,
         biometricToggle = biometricToggle,
-        secState = secState,
         extState = extState,
         debugLogLines = logs,
         mountedChildDatabases = mounted,
@@ -94,7 +92,6 @@ internal fun buildSettingsUiState(
     dbState: DatabaseConfigUiState,
     // ISSUE-P2-212：生物识别开关的验证中/一次性反馈（默认值便于既有调用点不受影响）
     biometricToggle: BiometricToggleUiState = BiometricToggleUiState(),
-    secState: SecurityTimeoutUiState,
     extState: ExtendedSettings,
     debugLogLines: List<String>,
     mountedChildDatabases: Int,
@@ -174,9 +171,13 @@ internal fun buildSettingsUiState(
     autoLockBackground = userSettings.autoLockBackground,
     flagSecureEnabled = userSettings.flagSecureEnabled,
     autoClearClipboard = userSettings.autoClearClipboard,
-    autoLockTimeoutSeconds = secState.autoLockTimeoutSeconds,
+    // ISSUE-P3-362：回显与行为同源——原读 secState 内存流（初值 0 且无播种，冷启动显示「立即」
+    // 而行为侧生效仓库持久化值），现直读 userSettings 单一真相源
+    autoLockTimeoutSeconds = userSettings.autoLockTimeoutSeconds,
     clipboardTimeoutSeconds = userSettings.clipboardTimeoutSeconds,
-    lockWhenScreenOff = extState.lockWhenScreenOff,
+    // ISSUE-P3-363：熄屏锁定回显改读 userSettings（与行为消费方 AutoLockSessionGuard 同源；
+    // ExtendedSettings 同名字段与偏好键已随本条移除，消除双存储分叉）
+    lockWhenScreenOff = userSettings.lockWhenScreenOff,
     lockWhenNavigateBack = extState.lockWhenNavigateBack,
     clearPasswordOnLeave = extState.clearPasswordOnLeave,
     rememberKeyFileLocation = extState.rememberKeyFileLocation,
@@ -292,9 +293,4 @@ internal data class DatabaseConfigUiState(
     /** 压缩算法显示值（ISSUE-P2-19：真实值来自文件头 compressionFlags） */
     val compressionAlgorithm: String = "",
     val recycleBinEnabled: Boolean
-)
-
-/** 安全超时配置的局部投影（原 `SettingsViewModel` 私有嵌套类型，ISSUE-P3-29 上移为同包 internal） */
-internal data class SecurityTimeoutUiState(
-    val autoLockTimeoutSeconds: Int
 )

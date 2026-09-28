@@ -3,6 +3,10 @@ package com.keepasskey.app.passkey
 import android.content.Intent
 import android.os.Bundle
 import androidx.activity.compose.setContent
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.credentials.provider.BeginGetCredentialRequest
 import androidx.credentials.provider.BeginGetCredentialResponse
 import androidx.credentials.provider.PendingIntentHandler
@@ -12,6 +16,9 @@ import com.keepasskey.app.data.repository.SettingsRepository
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.security.ApplyObscuredTouchFilter
 import com.keepasskey.app.security.FlagSecureGuard
+import com.keepasskey.app.ui.localeFor
+import com.keepasskey.app.ui.localizedConfigurationOf
+import com.keepasskey.app.ui.localizedContextOf
 import com.keepasskey.app.ui.screens.unlock.UnlockScreen
 import com.keepasskey.core.log.AppLog
 import dagger.hilt.android.AndroidEntryPoint
@@ -89,12 +96,26 @@ class CredentialUnlockActivity : FragmentActivity() {
             setContent {
                 // 遮挡触摸过滤（ISSUE-P2-09 / P3-12）
                 ApplyObscuredTouchFilter()
-                UnlockScreen(
-                    currentTheme = settings.themeMode,
-                    onThemeToggle = { /* 链式解锁场景不提供主题切换 */ },
-                    onUnlockSuccess = { completeChainedResponse(originalRequest) },
-                    onNavigateToDatabasePicker = { /* 链式解锁场景不提供库切换导航 */ }
-                )
+                // ISSUE-P3-365 AC①：与主外壳同源的强制语言覆盖（复用 AppShellLocalization）——
+                // 本页不经 MainActivity，不覆盖则回落系统语言，与主界面语言分叉。
+                val targetLocale = remember(settings.appLanguage) { localeFor(settings.appLanguage) }
+                val localizedConfiguration = remember(targetLocale) {
+                    localizedConfigurationOf(resources.configuration, targetLocale)
+                }
+                val localizedContext = remember(targetLocale) {
+                    localizedContextOf(this@CredentialUnlockActivity, resources.configuration, targetLocale)
+                }
+                CompositionLocalProvider(
+                    LocalContext provides localizedContext,
+                    LocalConfiguration provides localizedConfiguration
+                ) {
+                    UnlockScreen(
+                        currentTheme = settings.themeMode,
+                        onThemeToggle = { /* 链式解锁场景不提供主题切换 */ },
+                        onUnlockSuccess = { completeChainedResponse(originalRequest) },
+                        onNavigateToDatabasePicker = { /* 链式解锁场景不提供库切换导航 */ }
+                    )
+                }
             }
         }
     }
