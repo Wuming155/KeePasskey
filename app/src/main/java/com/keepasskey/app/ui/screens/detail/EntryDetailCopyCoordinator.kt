@@ -130,15 +130,24 @@ internal class EntryDetailCopyCoordinator(
     fun copyCustomField(fieldId: String, fieldKey: String) {
         val entryId = currentEntryId() ?: return
         scope.launch {
-            // TASK-10 + ISSUE-P2-15：仓库读取走 CharArray 独占副本，并直通受保护剪贴板的
-            // CharArray 通道（不经中间 String），副本用毕清零
+            // TASK-10 + ISSUE-P2-15：仓库读取走 CharArray 独占副本，副本用毕清零
             val chars = vaultRepository.getEntryProtectedFieldChars(entryId, fieldKey)
             if (chars == null) {
                 showMessage(UiMessage(R.string.clipboard_copy_failed))
                 return@launch
             }
             val copied = try {
-                writeToClipboard { copySensitiveChars(fieldKey, chars) }
+                // ISSUE-P3-371 ③：自定义字段补 {REF:} 展开——与既有消费点同走
+                // VaultEntryQueryCoordinator 单点收口的 resolveFieldReferences。
+                // 非口令消费点声明 USER_NAME 面：{REF:P@…} 经引擎掩码输出，绝不物化口令明文。
+                // 引擎签名为 String 文本语义（既有 4 消费点同款），此处的 String 物化属
+                // 引用解析边界，副本随 [chars] 一并在 finally 清零、不落任何状态。
+                val raw = chars.toDisplayString().orEmpty()
+                val expanded = vaultRepository.resolveFieldReferences(
+                    entryId, raw,
+                    FieldReferenceEngine.RefField.USER_NAME
+                ) ?: raw
+                writeToClipboard { copySensitiveText(fieldKey, expanded) }
             } finally {
                 chars.fill('0')
             }

@@ -4,6 +4,7 @@ import android.content.Context
 import com.keepasskey.app.data.binary.FileBinaryStore
 import com.keepasskey.app.data.repository.ExtendedSettingsStore
 import com.keepasskey.app.autofill.AutofillLastFilledStore
+import com.keepasskey.app.autofill.AutofillLoginFieldMemory
 import com.keepasskey.app.security.ClipboardSecurityManager
 import com.keepasskey.app.sync.SyncCacheEvictor
 import com.keepasskey.database.session.DatabaseSession
@@ -53,7 +54,8 @@ object DatabaseModule {
         extendedSettingsStore: ExtendedSettingsStore,
         binaryStore: FileBinaryStore,
         clipboardSecurityManager: ClipboardSecurityManager,
-        autofillLastFilledStore: AutofillLastFilledStore
+        autofillLastFilledStore: AutofillLastFilledStore,
+        loginFieldMemory: AutofillLoginFieldMemory
     ): DatabaseSession {
         return DatabaseSession(binaryStore).apply {
             addLockObserver(cacheEvictor)
@@ -63,6 +65,8 @@ object DatabaseModule {
             addLockObserver(clipboardSecurityManager)
             // ISSUE-P3-109：「上次填充条目」记忆不得跨会话/换库残留（KDoc 早已如此声明，此前零调用方）
             addLockObserver(autofillLastFilledStore)
+            // ISSUE-P3-372 AC③：跨请求登录字段记忆锁定即清（生命周期=服务进程内）
+            addLockObserver(loginFieldMemory)
             createBackupBeforeSave = extendedSettingsStore.load().createBackupBeforeSave
         }
     }

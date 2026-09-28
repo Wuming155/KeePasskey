@@ -70,7 +70,12 @@ data class ScanResult(
      * `smsOtpCode` / `2faAppOtpCode` hint，或 htmlName/idEntry 含 `otp`）。
      * 仅供数据集直填当前 TOTP 值，不参与账号 / 密码的任何匹配与放行判定。
      */
-    val otpId: String? = null
+    val otpId: String? = null,
+    /**
+     * ISSUE-P3-372 AC①：本结果是否由「弱目标二次解析」产出（首轮严格扫描零登录目标后的
+     * 第二轮干草堆术语扫描）。仅作诊断与单测断言，不参与任何放行判定。
+     */
+    val usedWeakReparse: Boolean = false
 )
 
 /**
@@ -224,8 +229,8 @@ object AutofillFieldScanner {
         )
     }
 
-    /** OTP 验证码信号强度（ISSUE-P3-298 ⑤）：hint > htmlName；**不用 label**——「验证码」一词同时用于短信验证码与图形验证码，误填风险高 */
-    private fun otpSignal(node: ScanNode): FieldConfidence = when {
+    /** OTP 验证码信号强度（ISSUE-P3-298 ⑤）：hint > htmlName；**不用 label**——「验证码」一词同时用于短信验证码与图形验证码，误填风险高（ISSUE-P3-372 起 internal：兜底解析须跳过 OTP 框） */
+    internal fun otpSignal(node: ScanNode): FieldConfidence = when {
         node.autofillHints.any { isOtpHint(it) } -> FieldConfidence.HIGH
         isOtpHtmlName(node.htmlName) -> FieldConfidence.MEDIUM
         else -> FieldConfidence.NONE
@@ -243,8 +248,8 @@ object AutofillFieldScanner {
         return name.lowercase().trim().contains("otp")
     }
 
-    /** 密码信号强度：hint > inputType/htmlName > label */
-    private fun passwordSignal(node: ScanNode): FieldConfidence = when {
+    /** 密码信号强度：hint > inputType/htmlName > label（ISSUE-P3-372 起 internal：兜底二次解析复用） */
+    internal fun passwordSignal(node: ScanNode): FieldConfidence = when {
         node.autofillHints.any { isPasswordHint(it) } -> FieldConfidence.HIGH
         isPasswordInputType(node.inputType) -> FieldConfidence.MEDIUM
         isPasswordHtmlName(node.htmlName) -> FieldConfidence.MEDIUM
@@ -344,8 +349,8 @@ object AutofillFieldScanner {
         return tokensOf(haystack).any { it in SEARCH_TOKEN_TERMS }
     }
 
-    /** 非凭据字段判定（ISSUE-P3-39 新增）：验证码 / 评论 / 反馈等 */
-    private fun isNonCredentialField(node: ScanNode): Boolean {
+    /** 非凭据字段判定（ISSUE-P3-39 新增）：验证码 / 评论 / 反馈等（ISSUE-P3-372 起 internal：二次解析沿用同一排除口径） */
+    internal fun isNonCredentialField(node: ScanNode): Boolean {
         val haystack = listOfNotNull(node.htmlName, node.label)
             .joinToString(" ")
             .lowercase()

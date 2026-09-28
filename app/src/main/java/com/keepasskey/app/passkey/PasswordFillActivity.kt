@@ -14,6 +14,7 @@ import com.keepasskey.app.security.BiometricAuthManager
 import com.keepasskey.app.security.CallerCertDigests
 import com.keepasskey.core.log.AppLog
 import com.keepasskey.core.model.KdbxEntry
+import com.keepasskey.database.fieldref.FieldReferenceEngine.RefField
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -202,22 +203,47 @@ class PasswordFillActivity : BaseCredentialActivity() {
         return domainOk || packageOk
     }
 
-    /** 验证通过后回传明文密码（唯一允许 `RESULT_OK` 的路径） */
+    /**
+     * 验证通过后回传明文密码（唯一允许 `RESULT_OK` 的路径）。
+     *
+     * ISSUE-P3-371 ①：用户名 / 密码的 {REF:} 展开是 suspend 调用（经单点收口的
+     * `resolveFieldReferences`），而本回调位于验证回调的非挂起上下文 ⇒ 展开段在
+     * [lifecycleScope] 内完成；**先验证、后取密**次序不变（展开仍在 onVerified 之后）。
+     * 展开 / 组装任一异常按 fail-closed 收尾（绝不回传半截凭据）。
+     */
     private fun deliverPassword(entry: KdbxEntry) {
         if (settled) return
         settled = true
 
-        val username = entry.userName
-        val password = entry.password?.readString().orEmpty()
+        lifecycleScope.launch {
+            try {
+                // ISSUE-P3-371 ①：CM 回传两通道补 {REF:} 展开（与 Autofill DatasetBuilders
+                // 消费点同口径）。用户名走 USER_NAME 面（非口令通道，{REF:P@…} 掩码输出）；
+                // 密码走 PASSWORD 面（口令消费点按 KDBX 语义展开）。条目 / 会话不可用时
+                // resolveFieldReferences 返回 null ⇒ 回退原文，与既有消费点兜底一致。
+                val entryIdHex = entry.id.toHexString()
+                val rawUsername = entry.userName
+                val username = vaultRepository.resolveFieldReferences(
+                    entryIdHex, rawUsername, RefField.USER_NAME
+                ) ?: rawUsername
+                val rawPassword = entry.password?.readString().orEmpty()
+                val password = vaultRepository.resolveFieldReferences(
+                    entryIdHex, rawPassword, RefField.PASSWORD
+                ) ?: rawPassword
 
-        // ISSUE-P3-298 ⑥：回传成功 = 用户真实选用了本条目，记录上次使用时刻供候选置顶
-        credentialLastUsedStore.record(entry.id.toHexString())
+                // ISSUE-P3-298 ⑥：回传成功 = 用户真实选用了本条目，记录上次使用时刻供候选置顶
+                credentialLastUsedStore.record(entryIdHex)
 
-        val response = GetCredentialResponse(PasswordCredential(username, password))
-        val resultIntent = Intent()
-        PendingIntentHandler.setGetCredentialResponse(resultIntent, response)
-        setResult(RESULT_OK, resultIntent)
-        finish()
+                val response = GetCredentialResponse(PasswordCredential(username, password))
+                val resultIntent = Intent()
+                PendingIntentHandler.setGetCredentialResponse(resultIntent, response)
+                setResult(RESULT_OK, resultIntent)
+                finish()
+            } catch (t: Throwable) {
+                AppLog.e(TAG, "密码回传组装失败", t)
+                failAndFinish()
+            }
+        }
     }
 
     companion object {

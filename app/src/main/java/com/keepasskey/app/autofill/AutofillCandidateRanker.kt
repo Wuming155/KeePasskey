@@ -6,7 +6,7 @@ import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.model.PasskeyData
 
 /**
- * 自动填充候选条目打分与排序器（ISSUE-P3-39）。
+ * 自动填充候选条目打分与排序器（ISSUE-P3-39；ISSUE-P3-372 AC④⑤ 扩档）。
  *
  * 设计前提（**安全不可退让**）：
  * - 本排序器**只决定候选之间的先后与截断**，**绝不放宽**任何匹配条件——
@@ -16,6 +16,16 @@ import com.keepasskey.core.model.PasskeyData
  * - **包名维度另受 ISSUE-P2-46 门控**：`android://` 绑定只有在调用方完成「包名 + 签名摘要」首次绑定后
  *   才参与放行（判定由调用方经 `packageDimensionAuthorized` 显式传入，见 [rank]）；
  * - 打分仅用于「同一批已匹配候选」的排序，分数高低不改变「是否可填充」这一事实。
+ *
+ * ISSUE-P3-372 AC④⑤ 新增两条**同站归一 / 同站后缀**的加性命中档（Monica
+ * `BitwardenLikeAutofillMatcherNg` 子域/基域/应用名维度的吸收）：
+ * - **去 www 归一**：条目主机名 `www.` 前缀剥离后与目标域相等 ⇒ 按 EXACT_DOMAIN 计
+ *   （`www` 只是普通标签，剥离不可能造出跨域命中——与 `ISSUE-P3-339` 剔除 DNS 根点
+ *   同属「两个归一器必须同口径」的归一化，而非模糊匹配）；
+ * - **子域后缀**：条目主机名以 `.<目标域>` 结尾（条目在目标域之下）⇒ `SUBDOMAIN_OF_ORIGIN`
+ *   ——子域受目标域所有者控制，标签边界严格（`evilgithub.com` 不命中 `github.com`）；
+ * - **应用名加成**：调用方 launcher label 与条目标题相似 ⇒ `APP_TITLE_MATCH` 加分。
+ *   仅对**已通过严格匹配**（score > 0）的条目生效，绝不让纯标题相似的条目入选。
  *
  * 排序键（降序）：匹配强度分 → 收藏 → 最后修改时间；
  * 另有「上次填充优先」置顶（仅重排，不改变入选集合），确定性排序（同分同时间保持入参顺序）。
@@ -30,14 +40,20 @@ object AutofillCandidateRanker {
         /** 条目 url 以 android:// 绑定调用包名（严格精确，无父子关系；https:// 等 Web 绑定条目不产生本原因） */
         EXACT_PACKAGE,
 
-        /** 条目域名与目标域完全相等 */
+        /** 条目域名与目标域完全相等（含去 www 归一后相等，ISSUE-P3-372 AC⑤） */
         EXACT_DOMAIN,
 
         /** 条目域名是目标域的父域（目标域为条目域的子域） */
         PARENT_DOMAIN,
 
+        /** 条目域名是目标域的子域（条目在目标域之下，标签边界严格；ISSUE-P3-372 AC⑤） */
+        SUBDOMAIN_OF_ORIGIN,
+
         /** 包名与域名同时命中 */
-        PACKAGE_DOMAIN_COMBO
+        PACKAGE_DOMAIN_COMBO,
+
+        /** 条目标题与调用方应用名相似（仅排序加成；ISSUE-P3-372 AC④） */
+        APP_TITLE_MATCH
     }
 
     data class Ranked(
@@ -49,8 +65,12 @@ object AutofillCandidateRanker {
     private const val SCORE_EXACT_PACKAGE = 130
     private const val SCORE_EXACT_DOMAIN = 140
     private const val SCORE_PARENT_DOMAIN = 120
+    private const val SCORE_SUBDOMAIN_OF_ORIGIN = 110
     private const val SCORE_PACKAGE_DOMAIN_COMBO = 30
     private const val SCORE_FAVORITE_BONUS = 5
+
+    /** 应用名相似加成（低于全部 EXACT_* 档，对齐 Monica 应用名 95 的相对位次） */
+    private const val SCORE_APP_TITLE_MATCH = 95
 
     /**
      * 对候选条目执行「匹配判定 + 打分 + 排序 + 截断」。
@@ -66,6 +86,8 @@ object AutofillCandidateRanker {
      *   **不得**在这里传常量 true：那等于取消本条整改。
      * @param lastFilledEntryId 上次填充条目 id（hex），命中则置顶
      * @param limit 返回上限（≥1）
+     * @param callingAppLabel ISSUE-P3-372 AC④：调用方 launcher 应用名（取不到传 null）；
+     *   仅作排序加成，不影响入选
      * @return 按优先级降序排列的候选，长度 ≤ [limit]
      */
     fun rank(
@@ -74,7 +96,8 @@ object AutofillCandidateRanker {
         webDomain: String?,
         packageDimensionAuthorized: Boolean,
         lastFilledEntryId: String? = null,
-        limit: Int = DEFAULT_LIMIT
+        limit: Int = DEFAULT_LIMIT,
+        callingAppLabel: String? = null
     ): List<Ranked> {
         if (entries.isEmpty()) return emptyList()
 
@@ -83,7 +106,7 @@ object AutofillCandidateRanker {
             ?.takeIf { it.isNotEmpty() }
 
         val scored = entries.mapNotNull {
-            scoreEntry(it, callingPackage, normalizedDomain, packageDimensionAuthorized)
+            scoreEntry(it, callingPackage, normalizedDomain, packageDimensionAuthorized, callingAppLabel)
         }
         if (scored.isEmpty()) return emptyList()
 
@@ -123,7 +146,8 @@ object AutofillCandidateRanker {
         entry: KdbxEntry,
         callingPackage: String,
         webDomain: String?,
-        packageDimensionAuthorized: Boolean
+        packageDimensionAuthorized: Boolean,
+        callingAppLabel: String?
     ): Ranked? {
         val reasons = linkedSetOf<MatchReason>()
         var score = 0
@@ -146,16 +170,24 @@ object AutofillCandidateRanker {
 
         if (webDomain != null) {
             val passkey = PasskeyData.fromCustomFields(entry.customFields)
-            val domainMatched = (passkey != null &&
-                    DomainMatcher.isDomainMatch(passkey.relyingPartyId, webDomain)) ||
-                    (entryUrl.isNotBlank() && DomainMatcher.isDomainMatch(entryUrl, webDomain))
-            if (domainMatched) {
+            val passkeyMatched = passkey != null &&
+                    DomainMatcher.isDomainMatch(passkey.relyingPartyId, webDomain)
+            val rawDomainMatched = entryUrl.isNotBlank() &&
+                    DomainMatcher.isDomainMatch(entryUrl, webDomain)
+            if (passkeyMatched || rawDomainMatched) {
                 if (isExactDomain(entryUrl, passkey, webDomain)) {
                     score += SCORE_EXACT_DOMAIN
                     reasons += MatchReason.EXACT_DOMAIN
                 } else {
                     score += SCORE_PARENT_DOMAIN
                     reasons += MatchReason.PARENT_DOMAIN
+                }
+            } else if (entryUrl.isNotBlank()) {
+                // ISSUE-P3-372 AC⑤：严格匹配未命中时的两条同站加性档（只作用于条目 url 主机名，
+                // 不触碰 passkey rpId 判定——rpId 仍只走 DomainMatcher 严格路径）
+                applySameSiteTiers(entryUrl, webDomain)?.let { tier ->
+                    score += tier.score
+                    reasons += tier.reason
                 }
             }
         }
@@ -169,12 +201,64 @@ object AutofillCandidateRanker {
             reasons += MatchReason.PACKAGE_DOMAIN_COMBO
         }
 
+        // ISSUE-P3-372 AC④：应用名相似加成——只对已入选（score > 0）条目生效的排序维度
+        if (callingAppLabel != null && titleMatchesAppLabel(entry.title, callingAppLabel)) {
+            score += SCORE_APP_TITLE_MATCH
+            reasons += MatchReason.APP_TITLE_MATCH
+        }
+
         if (entry.customData[RealVaultRepository.FAVORITE_CUSTOM_DATA_KEY] == "true") {
             score += SCORE_FAVORITE_BONUS
         }
 
         return Ranked(entry = entry, score = score, reasons = reasons)
     }
+
+    /** 同站加性档命中结果（分数 + 原因） */
+    private data class SameSiteTier(val score: Int, val reason: MatchReason)
+
+    /**
+     * ISSUE-P3-372 AC⑤：条目主机名的两档同站归一（调用前提：既有严格匹配已判未命中）。
+     * - 去 www 归一相等 ⇒ EXACT_DOMAIN；
+     * - 条目主机名以 `.<目标域>` 结尾（严格点号标签边界）⇒ SUBDOMAIN_OF_ORIGIN。
+     */
+    private fun applySameSiteTiers(entryUrl: String, webDomain: String): SameSiteTier? {
+        val entryHost = DomainMatcher.extractDomain(entryUrl)
+        if (entryHost.isEmpty()) return null
+        if (entryHost.startsWith(WWW_PREFIX)) {
+            val stripped = entryHost.removePrefix(WWW_PREFIX)
+            if (stripped.isNotEmpty() && stripped == webDomain) {
+                return SameSiteTier(SCORE_EXACT_DOMAIN, MatchReason.EXACT_DOMAIN)
+            }
+        }
+        if (entryHost.endsWith(".$webDomain")) {
+            return SameSiteTier(SCORE_SUBDOMAIN_OF_ORIGIN, MatchReason.SUBDOMAIN_OF_ORIGIN)
+        }
+        return null
+    }
+
+    /**
+     * ISSUE-P3-372 AC④：条目标题与调用方应用名是否相似（纯排序维度）。
+     * 归一化 = 小写 + 去首尾空白 + 折叠内部空白；两侧归一后等值或互含即算相似。
+     * 双侧归一长度须 ≥ [MIN_APP_LABEL_LENGTH]（单字符标签互含无鉴别力，恒不加成）。
+     */
+    internal fun titleMatchesAppLabel(title: String, appLabel: String): Boolean {
+        val t = normalizeForLabel(title)
+        val l = normalizeForLabel(appLabel)
+        if (t.length < MIN_APP_LABEL_LENGTH || l.length < MIN_APP_LABEL_LENGTH) return false
+        return t == l || t.contains(l) || l.contains(t)
+    }
+
+    private fun normalizeForLabel(value: String): String =
+        value.trim().lowercase().replace(WHITESPACE_REGEX, "")
+
+    /** `www.` 主机前缀（归一化剥离用，见 [applySameSiteTiers]） */
+    private const val WWW_PREFIX = "www."
+
+    /** 应用名相似判定的最小归一长度（单字符 / 空白标签无鉴别力） */
+    private const val MIN_APP_LABEL_LENGTH = 2
+
+    private val WHITESPACE_REGEX = Regex("\\s+")
 
     /**
      * 判定是否为「精确域名」匹配：取实际命中的域名来源（passkey RP ID 优先）与目标域比较。

@@ -120,9 +120,15 @@ class AutofillPickerViewModel @Inject constructor(
         if (entryId.isBlank()) return null
         // ISSUE-P2-52：用户名读取 fail-safe——锁定竞态窗口内条目可能已清零
         // （readString 抛 IllegalStateException），按空用户名降级而非崩溃
+        // ISSUE-P3-371 ②：用户名侧补 {REF:} 展开（与同函数 password 侧口径统一）——
+        // 非口令消费点声明 USER_NAME 面，{REF:P@…} 经引擎掩码输出，口令明文不走用户名通道
         val username = runCatching {
-            cachedUsername(entryId)
+            val raw = cachedUsername(entryId)
                 ?: vaultRepository.getKdbxEntry(entryId)?.userName.orEmpty()
+            vaultRepository.resolveFieldReferences(
+                entryId, raw,
+                com.keepasskey.database.fieldref.FieldReferenceEngine.RefField.USER_NAME
+            ) ?: raw
         }.getOrDefault("")
 
         val chars = try {

@@ -220,7 +220,9 @@ class AutofillUnlockActivity : FragmentActivity() {
             callingPackage = callingPackage,
             webDomain = verifiedWebDomain,
             packageDimensionAuthorized = packageDimensionAuthorized,
-            lastFilledEntryId = autofillLastFilledStore.lastFilledEntryId()
+            lastFilledEntryId = autofillLastFilledStore.lastFilledEntryId(),
+            // ISSUE-P3-372 AC④：调用方应用名作排序加成（与服务端装配同口径）
+            callingAppLabel = callerAppLabelOrNull(callingPackage)
         )
         Routing(
             route = AutofillUnlockRouter.route(

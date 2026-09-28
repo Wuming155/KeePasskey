@@ -27,10 +27,14 @@ class AutofillCandidateRankerTest {
         hexId: String,
         url: String,
         favorite: Boolean = false,
-        modifiedAt: Instant = baseTime
+        modifiedAt: Instant = baseTime,
+        title: String = ""
     ): KdbxEntry = KdbxEntry(
         id = KdbxUuid.fromHexString(hexId),
-        fields = mapOf(KdbxConstants.Fields.URL to ProtectedString(url, isProtected = false)),
+        fields = mapOf(
+            KdbxConstants.Fields.URL to ProtectedString(url, isProtected = false),
+            KdbxConstants.Fields.TITLE to ProtectedString(title, isProtected = false)
+        ),
         times = KdbxTimes(lastModificationTime = modifiedAt),
         customData = if (favorite) {
             mapOf(RealVaultRepository.FAVORITE_CUSTOM_DATA_KEY to "true")
@@ -189,5 +193,107 @@ class AutofillCandidateRankerTest {
 
         assertEquals(2, ranked.size)
         assertEquals(exact.id.toHexString(), ranked.first().entry.id.toHexString())
+    }
+
+    // ===== ISSUE-P3-372 AC⑤：去 www 归一 + 子域后缀（同站加性档） =====
+
+    @Test
+    fun `条目带 www 前缀归一后按精确域名入选`() {
+        val wwwEntry = entry(hexIdOf(1), "https://www.example.com")
+
+        val ranked = AutofillCandidateRanker.rank(
+            listOf(wwwEntry), "", "example.com", packageDimensionAuthorized = false
+        )
+
+        assertEquals(1, ranked.size)
+        assertTrue(
+            "去 www 归一相等应计 EXACT_DOMAIN",
+            AutofillCandidateRanker.MatchReason.EXACT_DOMAIN in ranked.first().reasons
+        )
+        assertEquals(140, ranked.first().score)
+    }
+
+    @Test
+    fun `条目为目标域子域时按子域后缀档入选`() {
+        val sub = entry(hexIdOf(1), "https://accounts.example.com")
+
+        val ranked = AutofillCandidateRanker.rank(
+            listOf(sub), "", "example.com", packageDimensionAuthorized = false
+        )
+
+        assertEquals(1, ranked.size)
+        assertTrue(
+            "条目在目标域之下应计 SUBDOMAIN_OF_ORIGIN",
+            AutofillCandidateRanker.MatchReason.SUBDOMAIN_OF_ORIGIN in ranked.first().reasons
+        )
+        assertEquals(110, ranked.first().score)
+    }
+
+    @Test
+    fun `子域后缀档保持严格点号边界`() {
+        // 无点号边界的相似域名不得经子域档入选
+        val glued = entry(hexIdOf(1), "https://evilgithub.com")
+        assertTrue(
+            AutofillCandidateRanker.rank(listOf(glued), "", "github.com", packageDimensionAuthorized = false)
+                .isEmpty()
+        )
+        // 后缀堆叠（条目主机名尾部不是 .github.com 而是 .github.com.evil.com）同样不入选
+        val stacked = entry(hexIdOf(2), "https://github.com.evil.com")
+        assertTrue(
+            AutofillCandidateRanker.rank(listOf(stacked), "", "github.com", packageDimensionAuthorized = false)
+                .isEmpty()
+        )
+    }
+
+    // ===== ISSUE-P3-372 AC④：应用名相似加成（仅排序、不改入选） =====
+
+    @Test
+    fun `条目标题与调用方应用名相似时获得加成`() {
+        val plain = entry(hexIdOf(1), "https://example.com", title = "Other")
+        val similar = entry(hexIdOf(2), "https://example.com", title = "Example App")
+
+        val ranked = AutofillCandidateRanker.rank(
+            listOf(plain, similar),
+            "com.example.app",
+            "example.com",
+            packageDimensionAuthorized = false,
+            callingAppLabel = "example app"
+        )
+
+        assertEquals(2, ranked.size)
+        assertTrue(
+            "相似标题应计 APP_TITLE_MATCH",
+            AutofillCandidateRanker.MatchReason.APP_TITLE_MATCH in ranked.first().reasons
+        )
+        assertEquals(similar.id.toHexString(), ranked.first().entry.id.toHexString())
+        assertEquals(140 + 95, ranked.first().score)
+    }
+
+    @Test
+    fun `应用名加成不得让未通过严格匹配的条目入选`() {
+        // 标题与应用名高度相似，但 url 与目标域无关 ⇒ 仍必须落选
+        val unrelated = entry(hexIdOf(1), "https://other-host.invalid", title = "Example App")
+
+        val ranked = AutofillCandidateRanker.rank(
+            listOf(unrelated),
+            "com.example.app",
+            "example.com",
+            packageDimensionAuthorized = false,
+            callingAppLabel = "Example App"
+        )
+
+        assertTrue(
+            "纯标题相似绝不构成入选条件（打分只排序、不放宽匹配）",
+            ranked.isEmpty()
+        )
+    }
+
+    @Test
+    fun `过短应用名与空白标签不加成`() {
+        assertFalse(AutofillCandidateRanker.titleMatchesAppLabel("AB", "a"))
+        assertFalse(AutofillCandidateRanker.titleMatchesAppLabel("AB", ""))
+        assertFalse(AutofillCandidateRanker.titleMatchesAppLabel("", "ab"))
+        assertFalse(AutofillCandidateRanker.titleMatchesAppLabel("GitHub", "gitlab"))
+        assertTrue(AutofillCandidateRanker.titleMatchesAppLabel("  My  App ", "myapp"))
     }
 }

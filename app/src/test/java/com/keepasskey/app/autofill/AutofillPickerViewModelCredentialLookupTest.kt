@@ -148,6 +148,60 @@ class AutofillPickerViewModelCredentialLookupTest {
         assertEquals("无口令 ⇒ 空口令降级", "", credentials?.password)
     }
 
+    // ===== ISSUE-P3-371 ②：用户名侧 {REF:} 展开（同函数口径统一） =====
+
+    @Test
+    fun `用户名侧经 USER_NAME 面展开字段引用后回传`() = runBlocking {
+        val entryUuid = KdbxUuid.random()
+        val resolvedFaces =
+            mutableListOf<com.keepasskey.database.fieldref.FieldReferenceEngine.RefField>()
+        val repository = object : VaultRepository by FakeVaultRepository() {
+            override suspend fun getKdbxEntries(): List<KdbxEntry> = listOf(refEntry(entryUuid))
+
+            override suspend fun getUsableKdbxEntries(): List<KdbxEntry> = getKdbxEntries()
+
+            override suspend fun getKdbxEntry(entryId: String): KdbxEntry? = refEntry(entryUuid)
+
+            override suspend fun getEntryPasswordChars(entryId: String): CharArray? =
+                TEST_PASSWORD.toCharArray()
+
+            override suspend fun resolveFieldReferences(
+                entryId: String,
+                rawText: String,
+                consumerField: com.keepasskey.database.fieldref.FieldReferenceEngine.RefField
+            ): String? {
+                resolvedFaces += consumerField
+                return if (rawText == REF_USERNAME) EXPANDED_USERNAME else rawText
+            }
+        }
+
+        val viewModel = MainDispatcherGuard.track(AutofillPickerViewModel(repository))
+        val credentials = viewModel.resolveCredentials(entryUuid.toHexString())
+
+        assertEquals(
+            "用户名必须是引用展开后的值（而非 {REF:} 原文）",
+            EXPANDED_USERNAME,
+            credentials?.username
+        )
+        assertTrue(
+            "用户名通道必须以 USER_NAME 非口令面送解析（{REF:P@…} 掩码语义的前提）",
+            com.keepasskey.database.fieldref.FieldReferenceEngine.RefField.USER_NAME in resolvedFaces
+        )
+        assertTrue(
+            "密码侧既有 PASSWORD 面解析不得因本整改消失",
+            com.keepasskey.database.fieldref.FieldReferenceEngine.RefField.PASSWORD in resolvedFaces
+        )
+        assertEquals("口令通道仍走既有按需解密", TEST_PASSWORD, credentials?.password)
+    }
+
+    private fun refEntry(id: KdbxUuid) = KdbxEntry(
+        id = id,
+        fields = mapOf(
+            KdbxConstants.Fields.USER_NAME to ProtectedString(REF_USERNAME, isProtected = false),
+            KdbxConstants.Fields.PASSWORD to ProtectedString(TEST_PASSWORD, isProtected = true)
+        )
+    )
+
     private fun entry(id: KdbxUuid) = KdbxEntry(
         id = id,
         fields = mapOf(
@@ -170,5 +224,7 @@ class AutofillPickerViewModelCredentialLookupTest {
         // 虚构测试值（敏感纪律：不得使用真实凭据）
         const val TEST_USERNAME = "issue-p2-88-user"
         const val TEST_PASSWORD = "IssueP288#2026"
+        const val REF_USERNAME = "{REF:U@T:target-entry}"
+        const val EXPANDED_USERNAME = "expanded-by-reference"
     }
 }

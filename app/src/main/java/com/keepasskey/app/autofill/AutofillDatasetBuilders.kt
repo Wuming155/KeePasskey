@@ -259,7 +259,9 @@ private suspend fun KeePasskeyAutofillService.resolveUnlockedCandidates(
             webDomain = webDomain,
             packageDimensionAuthorized = packageDimensionAuthorized,
             lastFilledEntryId = autofillLastFilledStore.lastFilledEntryId(),
-            limit = MAX_DATASET_COUNT
+            limit = MAX_DATASET_COUNT,
+            // ISSUE-P3-372 AC④：调用方应用名作排序加成（取不到即 null，仅损失一个维度）
+            callingAppLabel = callerAppLabelOrNull(callingPkg)
         )
     )
 }

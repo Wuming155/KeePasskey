@@ -31,7 +31,7 @@ class EntryDetailCopyFeedbackTest {
     private val messages = mutableListOf<UiMessage>()
 
     private fun TestScope.coordinator(
-        repository: FakeVaultRepository,
+        repository: com.keepasskey.app.data.repository.VaultRepository,
         clipboard: ClipboardSecurityChannel?,
         entryId: String? = "1"
     ) = EntryDetailCopyCoordinator(
@@ -149,6 +149,72 @@ class EntryDetailCopyFeedbackTest {
     private suspend fun seedPassword(repository: FakeVaultRepository) {
         val entry = repository.getEntries().first().find { it.id == "1" }!!
         repository.saveEntry(entry, passwordChars = "detail-copy-password".toCharArray())
+    }
+
+    // ===== ISSUE-P3-371 ③：自定义字段 {REF:} 展开（USER_NAME 非口令面） =====
+
+    /** 正向：字段值含引用 ⇒ 经 resolveFieldReferences 以 USER_NAME 面展开后才落剪贴板。 */
+    @Test
+    fun `自定义字段含引用时经 USER_NAME 面展开后落剪贴板`() = runTest {
+        val channel = RecordingClipboardChannel()
+        val resolvedFaces =
+            mutableListOf<com.keepasskey.database.fieldref.FieldReferenceEngine.RefField>()
+        val repository = object :
+            com.keepasskey.app.data.repository.VaultRepository by FakeVaultRepository() {
+            override suspend fun getEntryProtectedFieldChars(entryId: String, fieldKey: String): CharArray? =
+                if (fieldKey == "引用字段") REF_RAW.toCharArray() else null
+
+            override suspend fun resolveFieldReferences(
+                entryId: String,
+                rawText: String,
+                consumerField: com.keepasskey.database.fieldref.FieldReferenceEngine.RefField
+            ): String? {
+                resolvedFaces += consumerField
+                return if (rawText == REF_RAW) EXPANDED_VALUE else rawText
+            }
+        }
+        val coordinator = coordinator(repository, channel)
+
+        coordinator.copyCustomField("f9", "引用字段")
+        testScheduler.runCurrent()
+
+        assertEquals("展开后的值必须真实写入剪贴板", 1, channel.writeCount)
+        assertEquals(EXPANDED_VALUE, channel.lastText)
+        assertEquals(R.string.detail_field_copied, messages.last().resId)
+        org.junit.Assert.assertTrue(
+            "自定义字段为非口令消费点：必须以 USER_NAME 面送解析（{REF:P@…} 掩码语义前提）",
+            com.keepasskey.database.fieldref.FieldReferenceEngine.RefField.USER_NAME in resolvedFaces
+        )
+    }
+
+    /** 兜底：解析层不可用（返回 null）时回退原文，口径与既有消费点一致（不吞字段值）。 */
+    @Test
+    fun `引用解析不可用时回退字段原文而非空值`() = runTest {
+        val channel = RecordingClipboardChannel()
+        val repository = object :
+            com.keepasskey.app.data.repository.VaultRepository by FakeVaultRepository() {
+            override suspend fun getEntryProtectedFieldChars(entryId: String, fieldKey: String): CharArray? =
+                if (fieldKey == "引用字段") REF_RAW.toCharArray() else null
+
+            override suspend fun resolveFieldReferences(
+                entryId: String,
+                rawText: String,
+                consumerField: com.keepasskey.database.fieldref.FieldReferenceEngine.RefField
+            ): String? = null
+        }
+        val coordinator = coordinator(repository, channel)
+
+        coordinator.copyCustomField("f9", "引用字段")
+        testScheduler.runCurrent()
+
+        assertEquals(1, channel.writeCount)
+        assertEquals("解析不可用 ⇒ 回退原文", REF_RAW, channel.lastText)
+    }
+
+    private companion object {
+        // 虚构引用值（敏感纪律：不得使用真实凭据）
+        const val REF_RAW = "{REF:U@T:target-entry}"
+        const val EXPANDED_VALUE = "expanded-by-reference"
     }
 
     /** 记录型剪贴板通道：只记录调用与内容，不触碰 Android 剪贴板（纯 JVM）。 */
